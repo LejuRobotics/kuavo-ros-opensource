@@ -91,7 +91,7 @@ class RobotSubscriber:
         if self.ee_type == "lejuclaw":
             self.ee_sub = rospy.Subscriber("/leju_claw_state", lejuClawState, self._lejuclaw_callback)
             print(f"robot_state_server: Subscribed to /leju_claw_state (leju claw) for ee_type: {self.ee_type}")
-        elif self.ee_type in ["qiangnao", "qiangnao_touch", "revo2"]:
+        elif self.ee_type in ["qiangnao", "qiangnao_touch", "revo2", "linker_hand"]:
             self.ee_sub = rospy.Subscriber("/dexhand/state", JointState, self._dexhand_callback)
             print(f"robot_state_server: Subscribed to /dexhand/state (dexhand) for ee_type: {self.ee_type}")
         else:

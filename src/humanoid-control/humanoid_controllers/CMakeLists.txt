@@ -132,6 +132,7 @@ catkin_package(
                 
                 # ocs2_biped_robot_ros
                 angles
+                kuavo_msgs
                 kuavo_common
                 kuavo_solver
 )

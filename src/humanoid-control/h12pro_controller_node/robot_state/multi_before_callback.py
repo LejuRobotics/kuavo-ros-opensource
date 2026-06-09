@@ -6,6 +6,18 @@ from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planA
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
 from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString, SetStringRequest
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
+from utils.h12_vr_launch_config import build_vr_launch_args, H12VrLaunchConfigError
+
+# 导入RobotVersion，兼容不同环境
+try:
+    from robot_version import RobotVersion
+except ImportError:
+    import rospkg
+    rospack = rospkg.RosPack()
+    import sys
+    sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
+    from robot_version import RobotVersion
+
 import time
 import signal
 import datetime
@@ -297,7 +309,7 @@ LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoc
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
-LAUNCH_VR_REMOTE_CONTROL_CMD = "roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
+LAUNCH_VR_REMOTE_CONTROL_CMD = os.getenv("LAUNCH_VR_REMOTE_CONTROL_CMD")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
 ROS_HOSTNAME = os.getenv("ROS_HOSTNAME")
@@ -569,22 +581,42 @@ def call_real_initialize_srv():
 
 def is_real_launch_in_ready_stance(event):
     """
-    状态机条件判断函数：查询real_launch_status服务，确认是否是ready_stance状态
+    状态机条件判断函数：查询real_launch_status服务，确认是否是ready_stance或launched状态
     返回True允许状态切换，返回False阻止切换
-    """
+    """ 
     client = rospy.ServiceProxy('/humanoid_controller/real_launch_status', Trigger)
     req = TriggerRequest()
     try:
         resp = client.call(req)
-        if resp.success and resp.message == "ready_stance":
-            rospy.loginfo("[Condition] real_launch_status is ready_stance, allow switch to stance")
+        if resp.success and resp.message in ["ready_stance", "launched"]:
+            rospy.loginfo(f"[Condition] real_launch_status is {resp.message}, allow switch to stance")
             return True
         else:
-            rospy.logwarn(f"[Condition] real_launch_status is {resp.message}, not ready_stance, block switch to stance")
+            rospy.logwarn(f"[Condition] real_launch_status is {resp.message}, not ready_stance or launched, block switch to stance")
             return False
     except rospy.ServiceException as e:
         rospy.logerr(f"[Condition] Failed to call real_launch_status service: {e}, block switch")
         return False
+
+def is_not_wheel_robot(event):
+    """
+    状态机条件判断函数：判断是否不是轮臂机器人
+    轮臂机器人版本号以6开头（60-69），禁止切换walk/trot步态
+    返回True允许状态切换，返回False阻止切换
+    """
+    # 判断是否为轮臂机器人(6代: major=6)
+    robot_version = os.environ.get('ROBOT_VERSION', '0')
+    is_wheel = False
+    try:
+        is_wheel = RobotVersion.create(int(robot_version)).start_with(major=6)
+    except (ValueError, TypeError):
+        rospy.logerr(f"ROBOT_VERSION环境变量格式错误: {robot_version}，默认不为轮臂")
+
+    if is_wheel:
+        rospy.logerr(f"[Condition] 当前为轮臂机器人（version={robot_version}），禁止切换walk/trot步态。")
+        return False
+    rospy.loginfo(f"[Condition] 当前为非轮臂机器人（version={robot_version}），允许切换walk/trot步态。")
+    return True
 
 def print_state_transition(trigger, source, target) -> None:
     console.print(
@@ -687,17 +719,28 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
 def start_vr_remote_control_callback(event):
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
-    print(f"`launch_cmd`: {LAUNCH_VR_REMOTE_CONTROL_CMD}")
+    # 读取 h12_vr_launch.yaml，将 IP/遥操形式/控腰/急停开关拼成 launch 参数追加到拉起命令。
+    # 仅作用于标准 launch_quest3_ik.launch；videostream 等变体未声明这些 arg，跳过以避免
+    # roslaunch unused args。配置非法时输出异常日志并终止启动，不回退默认。
+    launch_cmd = LAUNCH_VR_REMOTE_CONTROL_CMD
+    if LAUNCH_VR_REMOTE_CONTROL_CMD and "launch_quest3_ik.launch" in LAUNCH_VR_REMOTE_CONTROL_CMD:
+        try:
+            vr_launch_args = build_vr_launch_args()
+        except H12VrLaunchConfigError as e:
+            print(f"[h12_vr_launch] yaml 配置校验失败，已终止 VR 启动: {e}")
+            raise
+        launch_cmd = f"{LAUNCH_VR_REMOTE_CONTROL_CMD} {vr_launch_args}"
+    print(f"`launch_cmd`: {launch_cmd}")
     tmux_cmd = [
         "tmux", "new-session",
-        "-s", VR_REMOTE_CONTROL_SESSION_NAME, 
-        "-d",  
+        "-s", VR_REMOTE_CONTROL_SESSION_NAME,
+        "-d",
         f"bash -c -i 'source ~/.bashrc && \
           source {kuavo_ros_control_ws_path}/devel/setup.bash && \
           export ROS_MASTER_URI={ROS_MASTER_URI} && \
           export ROS_IP={ROS_IP} && \
           export ROS_HOSTNAME={ROS_HOSTNAME} &&\
-          {LAUNCH_VR_REMOTE_CONTROL_CMD}; exec bash'"
+          {launch_cmd}; exec bash'"
     ]
     subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME], 
                   stderr=subprocess.DEVNULL) 

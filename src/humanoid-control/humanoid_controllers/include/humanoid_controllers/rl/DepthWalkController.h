@@ -10,6 +10,7 @@
 #include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
+#include <std_msgs/Float64MultiArray.h>
 #include <openvino/openvino.hpp>
 #include <memory>
 #include <map>
@@ -111,6 +112,8 @@ namespace humanoid_controller
     double stance_ratio = 0.5;
     double currentCycleTime_{0.6};
     Eigen::Vector3d net_linvel;
+    Eigen::VectorXd current_depth_latent;
+    ros::Publisher depth_latent_pub_;
     int episodeLength_{0};
     Eigen::VectorXd commandPhase_;     // sin(phase), cos(phase)
     Eigen::VectorXd frePhase_;

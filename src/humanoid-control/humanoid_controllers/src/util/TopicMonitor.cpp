@@ -53,6 +53,7 @@ namespace humanoid_controller
     s.hz = cached_hz_;
     s.samples = timestamps_sec_.size();
     s.last_msg_walltime = last_msg_walltime_;
+    s.last_interval_sec = last_interval_sec_;
     return s;
   }
 
@@ -104,6 +105,11 @@ namespace humanoid_controller
     }
 
     if (max_age_sec > 0.0 && age_sec > max_age_sec)
+    {
+      return CheckResult::TooOld;
+    }
+
+    if (max_age_sec > 0.0 && s.last_interval_sec > max_age_sec)
     {
       return CheckResult::TooOld;
     }
@@ -175,7 +181,8 @@ namespace humanoid_controller
         oss << "Topic '" << t << "' has no cached samples yet.";
         break;
       case CheckResult::TooOld:
-        oss << "Topic '" << t << "' has no recent messages (age=" << age_sec << "s).";
+        oss << "Topic '" << t << "' has no recent messages (age=" << age_sec
+            << "s, last_interval=" << snapshot.last_interval_sec << "s).";
         break;
       case CheckResult::NotEnoughSamples:
         oss << "Topic '" << t << "' does not have enough cached samples to estimate frequency.";
@@ -219,6 +226,11 @@ namespace humanoid_controller
     return isTopicPublished(topic_);
   }
 
+  int TopicMonitor::statusCode(CheckResult result)
+  {
+    return static_cast<int>(result);
+  }
+
   void TopicMonitor::ensurePositiveParam(const char* log_tag, const char* param_name, double& value, double fallback)
   {
     if (value <= 0.0)
@@ -238,4 +250,3 @@ namespace humanoid_controller
   }
 
 }  // namespace humanoid_controller
-

@@ -17,6 +17,9 @@ def execute_leg_tests():
 
     # 等待连接建立
     rospy.sleep(0.01)
+    
+    # 设置下肢控制模式为外部控制
+    ct.set_arm_control_mode(2)
 
     # 测试用例列表： (名称, 时间, 下肢角度, 手臂角度)
     # 注意：角度单位为度，后续会转换为弧度

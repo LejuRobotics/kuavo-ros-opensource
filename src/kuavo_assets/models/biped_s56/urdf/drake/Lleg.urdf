@@ -37,7 +37,7 @@
     </visual>
   </link>
   <joint name="l_foot_pitch_joint" type="continuous">
-    <origin rpy="0 0 0" xyz="0 0.0 -0.346"/>
+    <origin rpy="0 0 0" xyz="0 0 -0.416"/>
     <parent link="base_link"/>
     <child link="l_foot_pitch"/>
     <axis xyz="0 1 0"/>
@@ -109,7 +109,7 @@
     </collision>
   </link>
   <joint name="l_foot_roll_joint" type="continuous">
-    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <origin rpy="0 0 0" xyz="0 0 -0.023"/>
     <parent link="l_foot_pitch"/>
     <child link="l_foot_roll"/>
     <axis xyz="1 0 0"/>
@@ -139,7 +139,7 @@
     </collision> -->
   </link>
   <joint name="l_l_bar_y" type="continuous">
-    <origin rpy="0 0 0" xyz="0 0.0318 -0.09"/>
+    <origin rpy="0 0 0" xyz="0.0535 0 -0.1883"/>
     <parent link="base_link"/>
     <child link="l_l_bar_y"/>
     <axis xyz="0 1 0"/>
@@ -175,11 +175,11 @@
     </collision> -->
   </link>
   <drake:joint name="l_l_tendon_y" type="universal">
-    <origin rpy="0 0 0" xyz="-0.056027 -0.0085 0.015"/>
+    <origin rpy="0 0 0" xyz="-0.0173 0.026 -0.2207"/>
     <parent link="l_l_bar_y"/>
     <child link="l_l_tendon_y"/>
   </drake:joint>
-  <frame link="l_l_tendon_y" name="l_l_tendon_socket" xyz="0 0 -0.256"/>
+  <frame link="l_l_tendon_y" name="l_l_tendon_socket" xyz="0.0173 0.007649 0.2114382"/>
   <link name="l_r_bar_y">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.017639 0.0012332 0.0047224"/>
@@ -203,7 +203,7 @@
     </collision> -->
   </link>
   <joint name="l_r_bar_y" type="continuous">
-    <origin rpy="0 0 0" xyz="0 -0.0362 -0.153"/>
+    <origin rpy="0 0 0" xyz="0.0535 0 -0.0983"/>
     <parent link="base_link"/>
     <child link="l_r_bar_y"/>
     <axis xyz="0 1 0"/>
@@ -231,11 +231,11 @@
     </collision> -->
   </link>
   <drake:joint name="l_r_tendon_y" type="universal">
-    <origin rpy="0 0 0" xyz="-0.056027 0.0085 0.015"/>
+    <origin rpy="0 0 0" xyz="-0.0173 -0.026 -0.3107"/>
     <parent link="l_r_bar_y"/>
     <child link="l_r_tendon_y"/>
   </drake:joint>
-  <frame link="l_r_tendon_y" name="l_r_tendon_socket" xyz="0 0 -0.193"/>
+  <frame link="l_r_tendon_y" name="l_r_tendon_socket" xyz="0.0173 -0.007392 0.300554"/>
   <transmission type="SimpleTransmission">
     <joint name="l_r_bar_y"/>
     <actuator name="l_r_bar_y_motor">
@@ -243,10 +243,10 @@
       <drake:rotor_inertia value="0.0001002"/>
     </actuator>
   </transmission>
-  <frame link="l_foot_roll" name="l_l_foot_socket" xyz="-0.056027 0.0255 0.015"/>
-  <frame link="l_foot_roll" name="l_r_foot_socket" xyz="-0.056027 -0.0255 0.015"/>
+  <frame link="l_foot_roll" name="l_l_foot_socket" xyz="0.0362 0.026 0.007"/>
+  <frame link="l_foot_roll" name="l_r_foot_socket" xyz="0.0362 -0.026 0.007"/>
   <!-- 曲柄 -->
-  <frame link="l_l_bar_y" name="l_l_foot_bar_frame" xyz="0 -0.0085 0"/>
-  <frame link="l_r_bar_y" name="l_r_foot_bar_frame" xyz="0 0.0085 0"/>
+  <frame link="l_l_bar_y" name="l_l_foot_bar_frame" xyz="0 0.033649 -0.0092618"/>
+  <frame link="l_r_bar_y" name="l_r_foot_bar_frame" xyz="0 -0.033392 -0.010146"/>
 </robot>
 

@@ -41,15 +41,20 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
     auto left_hand_callback = [this](const kuavo_msgs::dexhandCommand::ConstPtr& msg) {
         this->controlSingleHand(HandSide::LEFT, msg);
     };
-    if (hand_type_ == HandType::LINKER_L6 || hand_type_ == HandType::LINKER_O6) {
-        // Linker系列灵巧手：订阅新的标准控制话题，发布手部状态话题
-        std::string hand_name = (hand_type_ == HandType::LINKER_L6) ? "LinkerL6" : "LinkerO6";
+    if (hand_type_ == HandType::LINKER_L6) {
+        // Linker L6手：订阅新的标准控制话题，发布手部状态话题
         linker_l_hand_command_sub_ = nh_.subscribe<sensor_msgs::JointState>("/cb_left_hand_control_cmd", 10, &DexHandMujocoRosNode::linkerLeftHandCommandCallback, this);
         linker_r_hand_command_sub_ = nh_.subscribe<sensor_msgs::JointState>("/cb_right_hand_control_cmd", 10, &DexHandMujocoRosNode::linkerRightHandCommandCallback, this);
         l_hand_state_pub_ = nh_.advertise<sensor_msgs::JointState>("/cb_left_hand_state", 10);
         r_hand_state_pub_ = nh_.advertise<sensor_msgs::JointState>("/cb_right_hand_state", 10);
-        ROS_INFO("[DexHandMujoco] ✅ %s hand control topics subscribed! Listening to /cb_left_hand_control_cmd and /cb_right_hand_control_cmd", hand_name.c_str());
-        ROS_INFO("[DexHandMujoco] ✅ %s hand state topics advertised! Publishing to /cb_left_hand_state and /cb_right_hand_state", hand_name.c_str());
+        ROS_INFO("[DexHandMujoco] ✅ LinkerL6 hand control topics subscribed! Listening to /cb_left_hand_control_cmd and /cb_right_hand_control_cmd");
+        ROS_INFO("[DexHandMujoco] ✅ LinkerL6 hand state topics advertised! Publishing to /cb_left_hand_state and /cb_right_hand_state");
+    } else if (hand_type_ == HandType::LINKER_O6) {
+        // Linker O6手：仅订阅旧接口control_robot_hand_position，发布旧状态话题dexhand/state
+        status_pub_ = nh_.advertise<sensor_msgs::JointState>("dexhand/state", 10);
+        hand_sub_ = nh_.subscribe("control_robot_hand_position", 10, &DexHandMujocoRosNode::linkerO6ControlHandCallback, this);
+        ROS_INFO("[DexHandMujoco] ✅ LinkerO6 hand compatible topics subscribed! Listening to control_robot_hand_position");
+        ROS_INFO("[DexHandMujoco] ✅ LinkerO6 hand compatible state topic advertised! Publishing to dexhand/state");
     } else {
         // 强脑手：兼容旧的所有控制话题和状态发布
         status_pub_ = nh_.advertise<sensor_msgs::JointState>("dexhand/state", 10);
@@ -114,7 +119,7 @@ void DexHandMujocoRosNode::publish_loop()
     while (running_)  {
         auto finger_status = controller_->get_finger_status();
 
-        // 强脑手发布旧状态话题
+        // 强脑手发布旧状态话题dexhand/state
         if (hand_type_ == HandType::QIANGNAO) {
             // Publish finger status
             sensor_msgs::JointState joint_state;
@@ -133,8 +138,27 @@ void DexHandMujocoRosNode::publish_loop()
 
             status_pub_.publish(joint_state);
         }
-        // Linker系列灵巧手发布左右手独立状态话题
-        else if (hand_type_ == HandType::LINKER_L6 || hand_type_ == HandType::LINKER_O6) {
+        // Linker O6手发布旧状态话题dexhand/state
+        else if (hand_type_ == HandType::LINKER_O6) {
+            // Publish finger status
+            sensor_msgs::JointState joint_state;
+            joint_state.header.stamp = ros::Time::now();
+            joint_state.name = {"l_thumb_flex", "l_thumb_roll", "l_index_flex", "l_middle_flex", "l_ring_flex", "l_pinky_flex",
+                               "r_thumb_flex", "r_thumb_roll", "r_index_flex", "r_middle_flex", "r_ring_flex", "r_pinky_flex"};
+
+            // Add joint names and positions for both hands
+            for (int hand = 0; hand < 2; hand++) {
+                for (int finger = 0; finger < 6; finger++) {
+                    joint_state.position.push_back(finger_status[hand]->positions[finger]);
+                    joint_state.velocity.push_back(finger_status[hand]->speeds[finger]);
+                    joint_state.effort.push_back(finger_status[hand]->currents[finger]);
+                }
+            }
+
+            status_pub_.publish(joint_state);
+        }
+        // Linker L6手发布左右手独立状态话题
+        else if (hand_type_ == HandType::LINKER_L6) {
             // 发布左手状态
             sensor_msgs::JointState l_hand_state;
             l_hand_state.header.stamp = ros::Time::now();
@@ -402,4 +426,28 @@ void DexHandMujocoRosNode::linkerRightHandCommandCallback(const sensor_msgs::Joi
     controller_->send_right_position(positions);
 }
 
-} // namespace 
+// LinkerO6灵巧手control_robot_hand_position接口回调
+void DexHandMujocoRosNode::linkerO6ControlHandCallback(const kuavo_msgs::robotHandPosition::ConstPtr& msg) {
+    if (!running_ || hand_type_ != HandType::LINKER_O6) {
+        return;
+    }
+
+    constexpr int finger_count = std::tuple_size<UnsignedFingerArray>::value;
+
+    if (msg->left_hand_position.size() != finger_count || msg->right_hand_position.size() != finger_count)
+    {
+        ROS_WARN("Received desired positions vector of incorrect size for LinkerO6 hand");
+        return;
+    }
+
+    UnsignedDualHandsArray positions;
+    // O6手使用0-100范围
+    for(int i = 0; i < finger_count; i++) {
+        positions[0][i] = std::min<uint16_t>(100, std::max<uint16_t>(0, msg->left_hand_position[i]));
+        positions[1][i] = std::min<uint16_t>(100, std::max<uint16_t>(0, msg->right_hand_position[i]));
+    }
+
+    controller_->send_position(positions);
+}
+
+} // namespace

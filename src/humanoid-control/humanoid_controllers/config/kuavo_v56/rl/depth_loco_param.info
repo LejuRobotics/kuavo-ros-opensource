@@ -47,14 +47,20 @@ commandData
     }
 };预留完整的接口，当前只用到 cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdWalkEnable，最大长度是 4
 
+
 velocityLimits
 {
-    ; 定义速度命令的限制（简化为单一上限，X 负向通过单独的缩放系数实现不对称限制）
-    ; 格式：[linear_x, linear_y, linear_z, angular_z] （正向和负向使用相同的上限）
-    (0,0)  0.55      ; cmdVelLineX limit (positive)
-    (1,0)  1       ; cmdVelLineY limit (positive and negative)
-    (2,0)  1       ; cmdVelLineZ limit (positive and negative)
-    (3,0)  1       ; cmdVelAngularZ limit (positive and negative)
+    ; 定义速度命令的限制（正负方向独立设置）
+    ; 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
+    ;        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
+    (0,0)  0.6      ; cmdVelLineX positive
+    (1,0)  -0.5     ; cmdVelLineX negative
+    (2,0)  0.3      ; cmdVelLineY positive
+    (3,0)  -0.3     ; cmdVelLineY negative
+    (4,0)  0.5      ; cmdVelLineZ positive
+    (5,0)  -0.5     ; cmdVelLineZ negative
+    (6,0)  1.     ; cmdVelAngularZ positive
+    (7,0)  -1.    ; cmdVelAngularZ negative
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller

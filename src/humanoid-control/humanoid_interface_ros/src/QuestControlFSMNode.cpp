@@ -20,12 +20,12 @@
 #include <ocs2_core/misc/LoadData.h>
 #include <ocs2_msgs/mpc_observation.h>
 
-#include <ocs2_ros_interfaces/command/TargetTrajectoriesRosPublisher.h>
 #include <humanoid_interface/gait/ModeSequenceTemplate.h>
 #include "humanoid_interface_ros/gait/ModeSequenceTemplateRos.h"
 #include "std_srvs/Trigger.h"
 #include <std_srvs/SetBool.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Empty.h>
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
@@ -40,19 +40,9 @@
 #include <std_srvs/Trigger.h>
 #include "utils/singleStepControl.hpp"
 #include <kuavo_msgs/switchToNextController.h>
-#include <kuavo_msgs/headBodyPose.h>
 #include <geometry_msgs/PoseStamped.h>
-
 namespace ocs2
 {
-    enum ArmTarget
-    {
-    TARGET_NONE = 0,
-    TARGET_SQUAT = 1,
-    TARGET_STAND = 2,
-    TARGET_DEFAULT = 3,
-    };
-
     // 创建足部轨迹消息的辅助函数（使用HumanoidControl单步控制工具）
     // body_pose： [x(m), y(m), z(m), yaw(deg)]
     kuavo_msgs::footPoseTargetTrajectories CreateFootPoseTrajectory(const std::vector<Eigen::Vector4d>& body_poses) {
@@ -76,17 +66,9 @@ namespace ocs2
     {
     public:
         QuestControlFSM(ros::NodeHandle &nodeHandle, const std::string &robotName, bool verbose = false) :
-            state_("STAND"),
-            arm_control_enabled_(false),
-            arm_control_previous_(false),
-            mode_changed_(false),
             vr_torso_arm_locked_(false),
-            last_execution_time_(ros::Time(0)),
-            last_height_change_time_(ros::Time(0)),
-            update_interval_(0.1),
-            last_update_time_(ros::Time::now()),
-            targetPoseCommand_(nodeHandle, robotName),
             torso_control_enabled_(false),
+            single_hand_torso_active_(false),
             torso_yaw_zero_(0.0),
             body_height_zero_(0.0),
             torso_control_start_time_(ros::Time(0)),
@@ -106,7 +88,6 @@ namespace ocs2
             nodeHandle.getParam("/referenceFile", referenceFile);
             std::cout << "get referenceFile: " << referenceFile << std::endl;
 
-            // loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
             RobotVersion rb_version(3, 4);
             if (nodeHandle.hasParam("/robot_version"))
             {
@@ -121,11 +102,6 @@ namespace ocs2
             {
                 nodeHandle.getParam("/robot_type", robot_type_);
                 std::cout << "Robot type: " << robot_type_ << " (1 for wheel robot, 0 for biped)" << std::endl;
-                
-                if(1 == robot_type_)
-                {
-                    get_observation_ = true;
-                }
             }
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
@@ -135,17 +111,6 @@ namespace ocs2
             auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
             auto kuavo_settings = drake_interface_->getKuavoSettings();
             waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
-            default_joint_state_ = drake_interface_->getDefaultJointState();
-            if (useLegacyWheelVr()) {
-                // 兼容旧版轮臂逻辑：避免无腿关节模型调用 getIntialHeight() 引发异常
-                try {
-                    loadData::loadCppDataType(referenceFile, "comHeight", com_height_);
-                } catch (...) {
-                    com_height_ = 0.0;
-                }
-            } else {
-                com_height_ = drake_interface_->getIntialHeight();
-            }
             only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
             std::cout << "only_half_up_body: " << only_half_up_body_ << std::endl;
             if(nodeHandle.hasParam("/only_half_up_body"))
@@ -153,8 +118,6 @@ namespace ocs2
                 nodeHandle.getParam("/only_half_up_body", only_half_up_body_);
             }
 
-            loadData::loadCppDataType(referenceFile, "targetRotationVelocity", target_rotation_velocity_);
-            loadData::loadCppDataType(referenceFile, "targetDisplacementVelocity", target_displacement_velocity_);
             loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
             loadData::loadCppDataType(referenceFile, "cmdvelLinearYLimit", c_relative_base_limit_[1]);
             loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
@@ -172,13 +135,6 @@ namespace ocs2
                 ROS_WARN_STREAM("waist_yaw_max not found, using default: " << waist_yaw_max_angle_deg_);
             }
             
-            loadData::loadEigenMatrix(referenceFile, "standBaseState", stand_base_state_);
-            loadData::loadEigenMatrix(referenceFile, "standJointState", stand_arm_state_);
-
-            loadData::loadEigenMatrix(referenceFile, "squatBaseState", squat_base_state_);
-            loadData::loadEigenMatrix(referenceFile, "squatJointState", squat_arm_state_);
-            loadData::loadCppDataType(referenceFile, "armMode", armMode_);
-
             // 加载转向区间配置
             loadTurnZones(nodeHandle);
 
@@ -195,7 +151,6 @@ namespace ocs2
             }
             
             mode_sequence_template_publisher_ = nodeHandle_.advertise<ocs2_msgs::mode_schedule>(robotName + "_mpc_mode_schedule", 10, true);
-            mode_scale_publisher_ = nodeHandle_.advertise<std_msgs::Float32>(robotName + "_mpc_mode_scale", 10, true);
             gait_name_publisher_ = nodeHandle_.advertise<std_msgs::String>("/humanoid_mpc_gait_name_request", 10, true);
 
             // 从主控制器实时订阅当前手臂控制模式
@@ -204,11 +159,18 @@ namespace ocs2
 
             // 订阅获取VR头部控制模式
             head_ctrl_mode_vr_sub_ = nodeHandle_.subscribe<kuavo_msgs::headCtrlMode>("quest3/head_control_mode", 1, &QuestControlFSM::headCtrlModeCallback, this);
+            quest3_head_fixed_intent_sub_ = nodeHandle_.subscribe<std_msgs::Empty>(
+                "/quest3/head_fixed_forward_user_intent", 10, &QuestControlFSM::quest3HeadFixedIntentCallback, this);
 
             joystick_sub_ = nodeHandle_.subscribe("/quest_joystick_data", 1, &QuestControlFSM::joystickCallback, this);
-            observation_sub_ = nodeHandle_.subscribe(robotName + "_mpc_observation", 10, &QuestControlFSM::observationCallback, this);
+            // 单手摇杆控躯干模式激活时，抑制本节点的 /cmd_vel 转发，避免与 /cmd_lb_torso_pose 抢摇杆
+            single_hand_torso_active_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
+                "/single_hand_torso_active", 1,
+                [this](const std_msgs::Bool::ConstPtr& msg) { single_hand_torso_active_ = msg->data; });
+            // 根据机器人类型订阅不同的mpc_observation话题
+            std::string observation_topic = robot_type_ == 1 ? "/mobile_manipulator_mpc_observation" : robotName + "_mpc_observation";
+            observation_sub_ = nodeHandle_.subscribe(observation_topic, 10, &QuestControlFSM::observationCallback, this);
             stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
-            step_num_stop_pub_ = nodeHandle_.advertise<std_msgs::Int32>(robotName + "_mpc_stop_step_num", 10, true);
             vel_control_pub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel", 1);
 
             std::string change_arm_mode_service_name = robot_type_ == 1 ? "/wheel_arm_change_arm_ctrl_mode" : "/humanoid_change_arm_ctrl_mode";
@@ -243,10 +205,8 @@ namespace ocs2
             hand_wrench_config_sub_ = nodeHandle_.subscribe("/quest3/hand_wrench_config", 1, &QuestControlFSM::handWrenchConfigCallback, this);
             hand_wrench_cmd_pub_ = nodeHandle_.advertise<std_msgs::Float64MultiArray>("/hand_wrench_cmd", 1);
             
-            command_height_ = 0.0;
-            command_add_height_pre_ = 0.0;
-
-            arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1);
+            // latched：后启动的 IK/碰撞检测等节点仍能收到最近一次手臂模式，避免 TCP 建链晚于首次 publish 而丢消息
+            arm_mode_pub_ = nodeHandle_.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 1, true);
 
             // 添加足部轨迹发布者
             foot_pose_target_pub_ = nodeHandle_.advertise<kuavo_msgs::footPoseTargetTrajectories>("/humanoid_mpc_foot_pose_target_trajectories", 10);
@@ -257,6 +217,8 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
+            bootstrap_wheel_arm_mode_service_ = nodeHandle_.advertiseService(
+                "/quest3/bootstrap_wheel_arm_mode", &QuestControlFSM::bootstrapWheelArmModeCallback, this);
             
             // 添加切换控制器服务客户端
             switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
@@ -275,14 +237,14 @@ namespace ocs2
                 if (!get_observation_)
                 {
                 // ROS_INFO_STREAM("Waiting for observation message...");
-                continue;
+                    continue;
                 }
                 // checkAndPublishCommandLine(joystick_origin_axis_);
             }
             return;
         }
 
-        void callRealInitializeSrv()
+        bool callRealInitializeSrv()
         {
             ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_initial_start");
             std_srvs::Trigger srv;
@@ -291,11 +253,10 @@ namespace ocs2
             if (client.call(srv))
             {
                 ROS_INFO("RealInitializeSrv call successful");
+                return true;
             }
-            else
-            {
-                ROS_ERROR("Failed to call RealInitializeSrv");
-            }
+            ROS_ERROR("Failed to call RealInitializeSrv");
+            return false;
         }
         int callGetArmModeSrv()
         {
@@ -500,6 +461,14 @@ namespace ocs2
 
         void callSwitchToNextControllerSrv()
         {
+            // X+Y 触摸 + A 触发；VR 躯干转腰模式下禁止 MPC/RL 切换（kuavodevlab#3097）
+            if (torso_control_enabled_)
+            {
+                ROS_WARN_THROTTLE(1.0,
+                    "[QuestControlFSM] Refuse MPC/RL controller switch while VR torso control is active");
+                return;
+            }
+
             kuavo_msgs::switchToNextController srv;
             
             // 等待服务可用
@@ -578,6 +547,29 @@ namespace ocs2
             }
             res.message = "Arm collision control set to " + std::string(req.data ? "true" : "false");
             ROS_INFO("Arm collision control set to %s", req.data ? "true" : "false");
+            return true;
+        }
+
+        bool bootstrapWheelArmModeCallback(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res)
+        {
+            if (!useLegacyWheelVr())
+            {
+                res.success = false;
+                res.message = "Not legacy wheel VR (robot_type=1 && wheel_ik)";
+                return true;
+            }
+            if (!get_observation_)
+            {
+                res.success = false;
+                res.message = "MPC observation not ready";
+                return true;
+            }
+            callSetArmModeSrv(1);
+            callWheelMpcControlMode(3);
+            arm_ctrl_mode_ = 1;
+            res.success = true;
+            res.message = "wheel arm mode initialized to 1";
+            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode 1");
             return true;
         }
 
@@ -749,11 +741,13 @@ namespace ocs2
         {
             if(mode_msg->data.size() >= 2)
             {
-                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]); // 兼容MPC发布 [current, desired]
+                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]); // 兼容MPC发布 [current, desired]
+                arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]);
                 return;
             }
             if(mode_msg->data.size() == 1)
             {
+                arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]);
                 arm_ctrl_mode_ = static_cast<int>(mode_msg->data[0]); // 兼容轮臂发布 [current]
                 return;
             }
@@ -778,6 +772,21 @@ namespace ocs2
             head_ctrl_mode_ = mode_msg->mode;  // 更新头部控制模式
         }
 
+        void quest3HeadFixedIntentCallback(const std_msgs::Empty::ConstPtr & /*msg*/)
+        {
+            if (suppress_next_quest3_head_fixed_intent_)
+            {
+                suppress_next_quest3_head_fixed_intent_ = false;
+                return;
+            }
+            if (!quest3_arm_reset_head_snapshot_active_)
+            {
+                return;
+            }
+            last_head_ctrl_mode_ = "fixed";
+            ROS_INFO("[QuestControlFSM] Quest3: user head fixed-forward intent during arm reset lock; unlock will restore fixed.");
+        }
+
         void joystickCallback(const kuavo_msgs::JoySticks::ConstPtr& msg) 
         {
             joystick_data_ = *msg;
@@ -786,10 +795,10 @@ namespace ocs2
 
         }
 
-        void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr &observation_msg)
+        void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr & /*observation_msg*/)
         {
-            observation_ = ros_msg_conversions::readObservationMsg(*observation_msg);
             get_observation_ = true;
+            vr_a_button_held_since_not_observing_ = ros::Time(0);
         }
 
         void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
@@ -895,6 +904,12 @@ namespace ocs2
                 nodeHandle_.getParam("/control_torso", control_torso_);
             }
 
+            // 动态读取 enable_vr_stop_robot 参数，控制 X+Y 是否触发 stop_robot
+            if(nodeHandle_.hasParam("/enable_vr_stop_robot"))
+            {
+                nodeHandle_.getParam("/enable_vr_stop_robot", enable_vr_stop_robot_);
+            }
+
             if (!rec_joystick_data_)
             {
                 joystick_data_prev_ = joystick_data_;
@@ -911,7 +926,7 @@ namespace ocs2
             if (controller_switching_)
             {
                 // 只允许安全相关的操作（如关闭机器人），其他操作都被禁用
-                if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
+                if (enable_vr_stop_robot_ && joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
                 {
                     callTerminateSrv();
                     return;
@@ -936,13 +951,28 @@ namespace ocs2
                 }
             }
 
-            if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
-            {
-                callRealInitializeSrv();
-                return;
+            // 尚无 MPC observation 时，用「长按 A」触发 real_initial_start（替代终端按 o）。
+            // VR 刚连接时 A 键短脉冲/抖动易被误判为启动（见 kuavodevlab#2995）；按住期间不处理其它手柄逻辑。
+            if (!get_observation_) {
+                if (joystick_data_.right_first_button_pressed) {
+                    if (vr_a_button_held_since_not_observing_.isZero()) {
+                        vr_a_button_held_since_not_observing_ = ros::Time::now();
+                    } else if (!vr_real_initial_start_fired_ &&
+                               (ros::Time::now() - vr_a_button_held_since_not_observing_).toSec() >=
+                                   kVrRealInitialStartHoldSeconds) {
+                        if (callRealInitializeSrv()) {
+                            vr_real_initial_start_fired_ = true;
+                        } else {
+                            vr_a_button_held_since_not_observing_ = ros::Time(0);
+                        }
+                    }
+                    joystick_data_prev_ = joystick_data_;
+                    return;
+                }
+                vr_a_button_held_since_not_observing_ = ros::Time(0);
             }
             
-            if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
+            if (enable_vr_stop_robot_ && joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
             {
                   callTerminateSrv();
                   return;
@@ -955,11 +985,6 @@ namespace ocs2
                     callEnableWbcArmTrajectorySrv(1);
                     return;
                 }
-                // if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
-                // {
-                //     callSwitchToNextControllerSrv();
-                //     return;
-                // }
             }
             if (joystick_data_.left_grip > 0.5)
             {
@@ -975,7 +1000,6 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // X+B：保持姿态 or 自动摆手
                 {
-                    
                     auto new_arm_mode = (arm_ctrl_mode_!=0) ? 0 : 1;
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
                     callSetArmModeSrv(new_arm_mode);
@@ -985,6 +1009,11 @@ namespace ocs2
                     // 如果手臂碰撞控制中，手臂正在回归，回归完成会切换到手臂 KEEP 模式，此时再按 XA 继续手臂跟踪 
                     if (arm_collision_control_) {
                         arm_collision_control_ = false;
+                        return;
+                    }
+                    ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
+                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
                     auto new_arm_mode = (arm_ctrl_mode_!=2) ? 2 : 1;
@@ -997,9 +1026,13 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                            quest3_arm_reset_head_snapshot_active_ = true;
+                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
+                            quest3_arm_reset_head_snapshot_active_ = false;
+                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -1017,8 +1050,7 @@ namespace ocs2
             }
             
             
-            // 腰部控制逻辑
-            // if (joystick_data_.left_trigger > 0.5) // 左边扳机按下，进入腰部控制模式
+            // 腰部控制逻辑：X+Y 触摸 + B 切换躯干模式
             if ((joystick_data_.left_first_button_touched && joystick_data_.left_second_button_touched))
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // 右边第二个按钮按下，切换腰部控制模式
@@ -1107,7 +1139,7 @@ namespace ocs2
                 }
             }
             
-            if (!only_half_up_body_) {
+            if (!only_half_up_body_ && !wheel_ik_) {
                 // 全身控制时才支持步态控制
                 checkGaitSwitchCommand(joystick_data_);
 
@@ -1127,70 +1159,37 @@ namespace ocs2
                 }
             }
             return;
-            std::string new_state = state_;
-            if (state_ == "STAND") {
-                if (joystick_data_.right_second_button_pressed) new_state = "WALK";
-                else if (joystick_data_.left_second_button_pressed) new_state = "WALK_STEP_MODE";
-            } else if (state_ == "WALK") {
-                if (joystick_data_.right_first_button_pressed) new_state = "STAND";
-                else if (joystick_data_.left_second_button_pressed) new_state = "WALK_SPEED_MODE";
-            } else if (state_ == "WALK_SPEED_MODE") {
-                if (joystick_data_.right_first_button_pressed) new_state = "STAND";
-                else if (joystick_data_.left_first_button_pressed) new_state = "WALK_POSITION_MODE";
-            } else if (state_ == "WALK_POSITION_MODE") {
-                if (joystick_data_.right_first_button_pressed) new_state = "STAND";
-                else if (joystick_data_.left_second_button_pressed) new_state = "WALK_SPEED_MODE";
-            } else if (state_ == "WALK_STEP_MODE") {
-                if (joystick_data_.right_first_button_pressed || joystick_data_.left_first_button_pressed) new_state = "STAND";
-            }
-
-            if (new_state != state_) {
-                state_ = new_state;
-                mode_changed_ = false; // 重置模式切换标志
-                last_execution_time_ = ros::Time(0); // 重置最后执行时间
-                last_height_change_time_ = ros::Time(0);
-            }
-
-            executeStateActions();
-            joystick_data_prev_ = joystick_data_;
         }
 
         void updateStateLegacyWheelVr()  // 轮臂vr遥操
         {
-            if (!get_observation_ && !joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)
+            if (!get_observation_) {
+                // 左手扳机按住时右 X 用于 X+A 切手臂模式，勿进入长按 A 初始化分支
+                if (joystick_data_.right_first_button_pressed && !joystick_data_.left_first_button_pressed) {
+                    if (vr_a_button_held_since_not_observing_.isZero()) {
+                        vr_a_button_held_since_not_observing_ = ros::Time::now();
+                    } else if (!vr_real_initial_start_fired_ &&
+                               (ros::Time::now() - vr_a_button_held_since_not_observing_).toSec() >=
+                                   kVrRealInitialStartHoldSeconds) {
+                        if (callRealInitializeSrv()) {
+                            vr_real_initial_start_fired_ = true;
+                        } else {
+                            vr_a_button_held_since_not_observing_ = ros::Time(0);
+                        }
+                    }
+                    joystick_data_prev_ = joystick_data_;
+                    return;
+                }
+                vr_a_button_held_since_not_observing_ = ros::Time(0);
+            }
+
+            if (enable_vr_stop_robot_ && joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
             {
-                callRealInitializeSrv();
+                callTerminateSrv();
                 return;
             }
 
-            if (joystick_data_.left_first_button_pressed && joystick_data_.left_second_button_pressed) // 左边第一二个按钮同时按下，关闭机器人
-            {
-                callTerminateSrv(); 
-                return;
-            }
-
-            if (joystick_data_.left_trigger > 0.5)
-            {
-                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 使能 WBC 手臂轨迹控制
-                {
-                    callEnableWbcArmTrajectorySrv(1);
-                    return;
-                }
-                if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)  // 切换到下一个控制器
-                {
-                    callSwitchToNextControllerSrv();
-                    return;
-                }
-            }
-
-            if (joystick_data_.left_grip > 0.5)
-            {
-                if (!joystick_data_prev_.left_first_button_pressed && joystick_data_.left_first_button_pressed)  // 不使能 WBC 手臂轨迹控制
-                {
-                    callEnableWbcArmTrajectorySrv(0);
-                    return;
-                }
-            }
+            // 轮臂 VR：左手扳机相关快捷键（低延迟、切换下一控制器）已按 QA 关闭。
 
             if (joystick_data_.left_first_button_pressed)
             {
@@ -1216,9 +1215,13 @@ namespace ocs2
                         {
                             new_head_mode = "fixed";
                             last_head_ctrl_mode_ = head_ctrl_mode_;  // 记录上一个头部控制模式
+                            quest3_arm_reset_head_snapshot_active_ = true;
+                            suppress_next_quest3_head_fixed_intent_ = true;
                         }
                         else
                         {
+                            quest3_arm_reset_head_snapshot_active_ = false;
+                            suppress_next_quest3_head_fixed_intent_ = false;
                             new_head_mode = last_head_ctrl_mode_;  // 恢复头部控制模式
                         }
                         callVRSetHeadModeSrv(new_head_mode);
@@ -1689,6 +1692,10 @@ namespace ocs2
             cmdVel_.linear.y = commad_line_target_(1);
             cmdVel_.linear.z = commad_line_target_(2);
             cmdVel_.angular.z = commad_line_target_(3);
+            // 单手摇杆控躯干模式激活时（grip 按住），完全不发 cmd_vel，让 torso_joystick_node 独占摇杆
+            if (single_hand_torso_active_) {
+                return;
+            }
             if(!torso_control_enabled_ || robot_type_ == 1)  // 轮臂支持动腰和行走同时下发
                 vel_control_pub_.publish(cmdVel_);
         }
@@ -1717,254 +1724,11 @@ namespace ocs2
             std::cout << "turn " << (current_desired_gait_ == "stance" ? "on " : "off ") << " auto stance mode" << std::endl;
         }
 
-        void executeStateActions() 
-        {
-            ros::Time current_time = ros::Time::now();
-            if (current_time - last_update_time_ >= update_interval_) {
-                if (state_ == "WALK") {
-                    walk();
-                } else if (state_ == "STAND") {
-                    stand();
-                } else if (state_ == "WALK_SPEED_MODE") {
-                    walkSpeedMode();
-                } else if (state_ == "WALK_POSITION_MODE") {
-                    walkPositionMode();
-                } else if (state_ == "WALK_STEP_MODE") {
-                    walkStepMode();
-                } else {
-                    ROS_WARN("Unknown state: %s", state_.c_str());
-                    return;
-                }
-                last_update_time_ = current_time;
-            }
-            if (state_ != "STAND")
-            {
-                heightCommand();
-            }
-        }
-
-        void walk() {
-            if (!mode_changed_) {
-                mode_changed_ = true;
-                arm_target_nums_ = 2; // 站立
-                publish_mode_sequence_temlate("trot2");   // "walk"
-                sendWalkCommand(1, {0.0, 0.0, 0.0});
-                ROS_INFO("Mode changed to: %s", state_.c_str());
-            }
-        }
-
-        void stand() {
-            if (!mode_changed_) {
-                mode_changed_ = true;
-                arm_target_nums_ = 2; // 站立
-                publish_mode_sequence_temlate("stance");    // 
-                ROS_INFO("Mode changed to: %s", state_.c_str());
-            }
-        }
-
-        void walkSpeedMode() 
-        {
-            if (!mode_changed_) 
-            {
-                mode_changed_ = true;
-                publish_mode_sequence_temlate("walk");   // "walk"
-
-                ROS_INFO("Mode changed to: %s", state_.c_str());
-            }
-            auto values_n = joystickNorm();
-            auto values = getWalkValue(values_n, {0.2f, 0.1f, 8.0f});
-            // 如果是轮式机器人(s60)，使用专门的移动命令
-            if (1 == robot_type_) 
-            {  // 假设robot_type=1表示轮式机器人
-
-                sendWheelMoveCommand(values);
-                previous_value_m_ = values_n;
-            } 
-            else 
-            {
-                sendWalkCommand(1, values);
-                previous_value_m_ = values_n;
-            }
-        }
-
-        void walkPositionMode() {
-            if (!mode_changed_) {
-                mode_changed_ = true;
-                publish_mode_sequence_temlate("walk");   // "walk"
-
-                ROS_INFO("Mode changed to: %s", state_.c_str());
-            }
-            auto values_n = joystickNorm();
-            if (isValueChanged(values_n) || canExecuteCommand()) {
-                auto values = getWalkValue(values_n, {0.2f, 0.1f, 8.0f});
-                if (std::all_of(values.begin(), values.end(), [](float v) { return v == 0.0f; })) return;
-                sendWalkCommand(0, values);
-                last_execution_time_ = ros::Time::now();
-                previous_value_m_ = values_n;
-            }
-        }
-
-        void walkStepMode() {
-            if (!mode_changed_) {
-                mode_changed_ = true;
-                publish_mode_sequence_temlate("stance");   // "step walk command"
-
-                ROS_INFO("Mode changed to: %s", state_.c_str());
-            }
-            auto values_n = joystickNorm();
-            if (isValueChanged(values_n) || canExecuteCommand()) {
-                auto values = getWalkValue(values_n, {0.2f, 0.1f, 8.0f});
-                if (std::all_of(values.begin(), values.end(), [](float v) { return v == 0.0f; })) return;
-                sendWalkCommand(2, {values[0], values[1], values[2]});
-                last_execution_time_ = ros::Time::now();
-                previous_value_m_ = values_n;
-            }
-        }
-
-        void heightCommand(){
-            double command_add_height_ = 0.0;
-            if(joystick_data_.left_y >= 0.8) 
-            {
-                command_add_height_ = 0.05;
-            } 
-            else if (joystick_data_.left_y <= -0.8)
-            {
-                command_add_height_ = -0.05;
-            }
-            // 判断是否变化，动作执行时间是否足够
-
-            if (canHeightChangeCommand() || command_add_height_!= command_add_height_pre_) 
-            {
-                command_add_height_pre_ = command_add_height_;
-                command_height_ += command_add_height_;
-                ROS_INFO("Height Change!  Comand_height : %.2f", command_height_);
-                last_height_change_time_ = ros::Time::now();
-            }
-
-            return;
-        }
-
-        bool canHeightChangeCommand(double interval = 1.5) {
-            if (last_height_change_time_.isZero()) return false;
-            ros::Time current_time = ros::Time::now();
-            if ((current_time - last_height_change_time_).toSec() >= interval) {
-                last_height_change_time_ = current_time;
-                ROS_INFO("Execution interval reached, applying command.");
-                return true;
-            }
-            return false;
-        }
-
-
-        void sendWheelMoveCommand(const std::vector<float>& values) 
-        {
-            // 直接发布速度指令
-            geometry_msgs::Twist vel;
-            vel.linear.x = values[0];
-            vel.linear.y = values[1];
-            vel.linear.z = command_height_;
-            vel.angular.z = 3.14 * values[2] / 180.0;
-            vel_control_pub_.publish(vel);
-            ROS_INFO("Wheel move command sent: values=%.2f, %.2f, %.2f", values[0], values[1], values[2]);
-        }
-
-        void sendWalkCommand(int control_mode, const std::vector<float>& values) {
-            ROS_INFO("Walk command sent: mode=%d, values=%.2f, %.2f, %.2f", control_mode, values[0], values[1], values[2]);
-
-            const vector_t currentPose = observation_.state.segment<6>(6);
-            const vector_t currentArmPose = observation_.state.segment<14>(12+12);
-            TargetTrajectories target_traj;
-            double dx = values[0] * cos(currentPose(3)) - values[1] * sin(currentPose(3));
-            double dy = values[0] * sin(currentPose(3)) + values[1] * cos(currentPose(3));
-            current_target_(0) = currentPose(0) + dx;
-            current_target_(1) = currentPose(1) + dy;
-            current_target_(2) = com_height_ + command_height_;
-            current_target_(3) = currentPose(3) + values[2] * M_PI / 180.0;
-            current_target_(4) = 6 * M_PI / 180.0; // fixed value，因为存在静差
-            current_target_(5) = 0.0;
-            const vector_t targetPose = current_target_;
-            const vector_t targetPoseForArm = [&]()
-            {
-                vector_t target = targetPose;
-                if(armMode_){
-                    switch(arm_target_nums_){
-                        case TARGET_SQUAT: 
-                            target(0) += squat_base_state_(0);
-                            target(1) += squat_base_state_(1);
-                            target(2) = squat_base_state_(2);
-                            break;
-                        case TARGET_STAND:
-                            target(0) += stand_base_state_(0);
-                            target(1) += stand_base_state_(1);
-                            target(2) = stand_base_state_(2);
-                        case TARGET_NONE:
-                            target(2) = com_height_;
-                            break;
-                    }
-                }
-                return target;
-            }();
-            // target reaching duration
-            const scalar_t targetReachingTime = observation_.time + estimateTimeToTarget(targetPose - currentPose);
-
-            // desired time trajectory
-            const scalar_array_t timeTrajectory{observation_.time, targetReachingTime, targetReachingTime + 1.0};
-
-            // desired state trajectory
-            vector_array_t stateTrajectory(3, vector_t::Zero(observation_.state.size() + 1));
-            stateTrajectory[0] << vector_t::Zero(6), currentPose, default_joint_state_, currentArmPose, armMode_;
-            stateTrajectory[1] << vector_t::Zero(6), targetPose, default_joint_state_, currentArmPose, armMode_;
-            stateTrajectory[2] << vector_t::Zero(6), targetPoseForArm, default_joint_state_, currentArmPose, armMode_;
-
-            switch (arm_target_nums_){
-                case TARGET_SQUAT: stateTrajectory[2] << vector_t::Zero(6), targetPoseForArm, default_joint_state_, squat_arm_state_, armMode_; break;
-                case TARGET_STAND: stateTrajectory[2] << vector_t::Zero(6), targetPoseForArm, default_joint_state_, stand_arm_state_, armMode_; break;
-                case TARGET_DEFAULT: stateTrajectory[2] << vector_t::Zero(6), targetPoseForArm, default_joint_state_, vector_t::Zero(14), armMode_; break;
-            }
-            // desired input trajectory (just right dimensions, they are not used)
-            const vector_array_t inputTrajectory(3, vector_t::Zero(observation_.input.size()));
-            target_traj = {timeTrajectory, stateTrajectory, inputTrajectory};
-
-            // 0 位置  1 速度  2  单步
-            // This function will later be implemented with the proper service call
-            if (control_mode == 0)
-            {
-                targetPoseCommand_.publishTargetTrajectories(target_traj);
-            }
-            else if (control_mode == 1)
-            {
-                geometry_msgs::Twist vel;
-                vel.linear.x = values[0];
-                vel.linear.y = values[1];
-                vel.linear.z = command_height_;
-                vel.angular.z = 3.14 * values[2] / 180.0;
-                vel_control_pub_.publish(vel);
-            }
-            else if (control_mode == 2)
-            {
-                std_msgs::Int32 stop_step_num;
-                stop_step_num.data = 3;
-                step_num_stop_pub_.publish(stop_step_num);
-                // targetPoseCommand_.publishTargetTrajectories(target_traj);
-                geometry_msgs::Twist vel;
-                vel.linear.x = values[0];
-                vel.linear.y = values[1];
-                vel.linear.z = command_height_;
-                vel.angular.z = 3.14 * values[2] / 180.0;
-                vel_control_pub_.publish(vel);
-                publish_mode_sequence_temlate("walk");   // "walk"
-
-            }
-            else 
-            {
-                ROS_INFO("Control mode %d  is a wrong Number mode!", control_mode);
-            }
-        }
         vector_t getJoystickVector(const std::vector<float> &deadzone = {0.02f, 0.2f, 0.2f, 0.02f})
         {
             vector_t values_norm = vector_t::Zero(4);
             std::vector<float> values_raw{joystick_data_.left_y, -joystick_data_.left_x, joystick_data_.right_y, -joystick_data_.right_x};
-            
+
             for (int i = 0; i < 4; ++i)
             {
                 float value = values_raw[i];
@@ -1975,44 +1739,6 @@ namespace ocs2
             }
 
             return values_norm;
-        }
-        std::vector<int> joystickNorm()
-        {
-            std::vector<int> values_norm(3, 0);
-            if (joystick_data_.right_y >= 0.8) values_norm[0] = 1;
-            else if (joystick_data_.right_y <= -0.8) values_norm[0] = -1;
-            if (joystick_data_.right_x >= 0.8) values_norm[1] = -1;
-            else if (joystick_data_.right_x <= -0.8) values_norm[1] = 1;
-            if (joystick_data_.left_x >= 0.8) values_norm[2] = -1;
-            else if (joystick_data_.left_x <= -0.8) values_norm[2] = 1;
-            return values_norm;
-        }
-
-        std::vector<float> getWalkValue(const std::vector<int>& values_norm, const std::vector<float>& w) {
-            std::vector<float> value(values_norm.size());
-            for (size_t i = 0; i < values_norm.size(); ++i) {
-                value[i] = w[i] * values_norm[i];
-            }
-            return value;
-        }
-
-        bool isValueChanged(const std::vector<int>& values_norm) {
-            if (previous_value_m_.empty()) return true;
-            for (size_t i = 0; i < values_norm.size(); ++i) {
-                if (previous_value_m_[i] != values_norm[i]) return true;
-            }
-            return false;
-        }
-
-        bool canExecuteCommand(double interval = 1.5) {
-            if (last_execution_time_.isZero()) return false;
-            ros::Time current_time = ros::Time::now();
-            if ((current_time - last_execution_time_).toSec() >= interval) {
-                last_execution_time_ = current_time;
-                ROS_INFO("Execution interval reached, applying command.");
-                return true;
-            }
-            return false;
         }
 
         void publish_mode_sequence_temlate(const std::string &gaitName)
@@ -2026,46 +1752,21 @@ namespace ocs2
             gait_name_publisher_.publish(gait_name_msg);
         }
 
-        scalar_t estimateTimeToTarget(const vector_t &desiredBaseDisplacement)
-        {
-        const scalar_t &dx = desiredBaseDisplacement(0);
-        const scalar_t &dy = desiredBaseDisplacement(1);
-        const scalar_t &dz = desiredBaseDisplacement(2);
-        const scalar_t &dyaw = desiredBaseDisplacement(3);
-        const scalar_t rotationTime = std::abs(dyaw) / target_rotation_velocity_;
-        const scalar_t displacement = std::sqrt(dx * dx + dy * dy + dz * dz);
-        const scalar_t displacementTime = displacement / target_displacement_velocity_;
-        return std::max(rotationTime, displacementTime);
-        }
 
         ros::NodeHandle nodeHandle_;
-        TargetTrajectoriesRosPublisher targetPoseCommand_;
         ros::Subscriber observation_sub_;
         bool get_observation_ = false;
-        vector_t current_target_ = vector_t::Zero(6);
-        scalar_t target_displacement_velocity_;
-        scalar_t target_rotation_velocity_;
-        scalar_t com_height_;
-        vector_t default_joint_state_ = vector_t::Zero(12);
+        /// 在尚未收到 MPC observation 时，用于「长按 A 再触发 real_initial_start」的去抖（VR 连接抖动误触 #2995）
+        ros::Time vr_a_button_held_since_not_observing_{0};
+        bool vr_real_initial_start_fired_{false};
+        static constexpr double kVrRealInitialStartHoldSeconds = 0.35;
         vector_t commad_line_target_ = vector_t::Zero(6);
-        vector_t stand_base_state_ = vector_t::Zero(6);
-        vector_t stand_arm_state_ = vector_t::Zero(14);
-
-        vector_t squat_base_state_ = vector_t::Zero(6);
-        vector_t squat_arm_state_ = vector_t::Zero(14);
-
-        int arm_target_nums_ = 0;
-        bool arm_target_flag_ = false;
-        bool armMode_ = true;
 
         std::string current_desired_gait_;
         ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.2, 0.3, 0.4};
-        ocs2::SystemObservation observation_;
         ros::Publisher mode_sequence_template_publisher_;
-        ros::Publisher mode_scale_publisher_;
         ros::Publisher gait_name_publisher_;
         ros::Publisher stop_pub_;
-        ros::Publisher step_num_stop_pub_;
         ros::Publisher vel_control_pub_;
         ros::Publisher whole_torso_ctrl_pub_;
         geometry_msgs::Twist cmdVel_;
@@ -2081,6 +1782,7 @@ namespace ocs2
         ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端
         ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
+        ros::ServiceServer bootstrap_wheel_arm_mode_service_;
 
         // 腰部控制相关的订阅者和发布者
         ros::Subscriber head_body_pose_sub_;
@@ -2095,31 +1797,22 @@ namespace ocs2
 
         ros::Subscriber arm_ctrl_mode_vr_sub_; // 从主控制器获取手臂控制模式
         ros::Subscriber head_ctrl_mode_vr_sub_; // 从主控制器获取头部控制模式
-        int arm_ctrl_mode_{2};
+
+        ros::Subscriber quest3_head_fixed_intent_sub_;
+        bool suppress_next_quest3_head_fixed_intent_{false};
+        bool quest3_arm_reset_head_snapshot_active_{false};
+        int arm_ctrl_mode_current_{2};
+        int arm_ctrl_mode_{1};
+        
         std::string head_ctrl_mode_{"vr_follow"};
         std::string last_head_ctrl_mode_;
         std::string fixed_hand_{"right"};
         bool use_auto_track_{false};
 
         ros::Subscriber joystick_sub_;
-        std::string state_;
         kuavo_msgs::JoySticks joystick_data_;
         kuavo_msgs::JoySticks joystick_data_prev_;
-        bool mode_changed_;
-        ros::Duration update_interval_;
-        ros::Time last_update_time_;
-        std::vector<int> previous_value_m_;
-        bool arm_control_enabled_;
-        bool arm_control_previous_;
-        ros::Time trigger_start_time_;
-        ros::Time grip_start_time_;
-        ros::Time last_execution_time_;
-        ros::Time last_height_change_time_;
-        bool is_velControl;
         bool rec_joystick_data_{false};
-
-        double command_height_; // 高度单独控制
-        double command_add_height_pre_;
 
         bool last_cmd_close_to_zero_{true};
         bool only_half_up_body_{false};
@@ -2137,6 +1830,9 @@ namespace ocs2
         // 腰部控制相关变量
         bool torso_control_enabled_;
         bool control_torso_{false};  // 是否允许启动腰部控制
+        bool enable_vr_stop_robot_{true};  // 是否允许 VR 手柄 X+Y 触发 stop_robot
+        bool single_hand_torso_active_;  // 单手摇杆控躯干模式激活标志（来自 /single_hand_torso_active）
+        ros::Subscriber single_hand_torso_active_sub_;
         
         // 末端力控制相关变量
         bool hand_wrench_enabled_;  // 末端力施加状态

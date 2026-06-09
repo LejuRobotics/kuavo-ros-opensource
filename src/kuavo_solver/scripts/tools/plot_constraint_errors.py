@@ -3,7 +3,7 @@
 """
 绘制 constraint position verify 的误差分布。
 
-输入：`mujoco_unified_cli.py ... position-verify --json` 的输出 JSON。
+输入：`kuavo_solver_validator.py ... position-verify --json` 的输出 JSON。
 输出：matplotlib 图窗（或保存到 --out）。
 """
 

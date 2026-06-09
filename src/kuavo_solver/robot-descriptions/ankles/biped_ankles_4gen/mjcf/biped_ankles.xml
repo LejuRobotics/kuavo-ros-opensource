@@ -51,13 +51,13 @@
       <!-- l_l_bar: y=+0.0255, z=-0.09 -->
       <body name="l_l_bar" pos="0 0.0255 -0.09">
         <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
-        <joint name="l_l_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.387637626867941 0.983667566424004"/>
+        <joint name="l_l_bar" pos="0 0 0" axis="0 1 0" limited="true" range="-0.387637626867941 0.983667566424004"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="l_l_bar"/>
         <!-- tendon anchor: x=-0.056027, z=0.015 in bar's local frame; l_lltd=0.256 -->
         <body name="l_l_tendon" pos="-0.056027 0 0.015">
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
           <joint name="l_l_tendon" pos="0 0 0" type="ball"/>
-          <site name="l_l_tendon" group="0" pos="0 0 -0.256" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="l_l_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_l_tendon"/>
         </body>
       </body>
@@ -65,13 +65,13 @@
       <!-- l_r_bar: y=-0.0255, z=-0.153 -->
       <body name="l_r_bar" pos="0 -0.0255 -0.153">
         <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
-        <joint name="l_r_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.991347015132779 0.383448836663154"/>
+        <joint name="l_r_bar" pos="0 0 0" axis="0 1 0" limited="true" range="-0.991347015132779 0.383448836663154"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="l_r_bar"/>
         <!-- tendon anchor: x=-0.056027, z=0.015 in bar's local frame; l_lrtd=0.193 -->
         <body name="l_r_tendon" pos="-0.056027 0 0.015">
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
           <joint name="l_r_tendon" pos="0 0 0" type="ball"/>
-          <site name="l_r_tendon" group="0" pos="0 0 -0.193" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="l_r_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_r_tendon"/>
         </body>
       </body>
@@ -92,21 +92,21 @@
           <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
           <joint name="r_foot_roll" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" armature="0.01" damping="0.0" />
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_foot_roll"/>
-          <site name="r_l_eq" group="0" pos="-0.056027 -0.0255 0.015" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
-          <site name="r_r_eq" group="0" pos="-0.056027 0.0255 0.015" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+          <site name="r_l_eq" group="0" pos="-0.056027 0.0255 0.015" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+          <site name="r_r_eq" group="0" pos="-0.056027 -0.0255 0.015" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
         </body>
       </body>
 
       <!-- r_l_bar: y=+0.0255, z=-0.153 -->
       <body name="r_l_bar" pos="0 0.0255 -0.153">
         <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
-        <joint name="r_l_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.383448836663154 0.991347015132779"/>
+        <joint name="r_l_bar" pos="0 0 0" axis="0 1 0" limited="true" range="-0.383448836663154 0.991347015132779"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_l_bar"/>
         <!-- tendon anchor: x=-0.056027, z=0.015 in bar's local frame; l_rltd=0.193 -->
         <body name="r_l_tendon" pos="-0.056027 0 0.015">
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
           <joint name="r_l_tendon" pos="0 0 0" type="ball"/>
-          <site name="r_l_tendon" group="0" pos="0 0 -0.193" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="r_l_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_l_tendon"/>
         </body>
       </body>
@@ -114,13 +114,13 @@
       <!-- r_r_bar: y=-0.0255, z=-0.09 -->
       <body name="r_r_bar" pos="0 -0.0255 -0.09">
         <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
-        <joint name="r_r_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.983667566424004 0.387637626867941"/>
+        <joint name="r_r_bar" pos="0 0 0" axis="0 1 0" limited="true" range="-0.983667566424004 0.387637626867941"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_r_bar"/>
         <!-- tendon anchor: x=-0.056027, z=0.015 in bar's local frame; l_rrtd=0.256 -->
         <body name="r_r_tendon" pos="-0.056027 0 0.015">
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
           <joint name="r_r_tendon" pos="0 0 0" type="ball"/>
-          <site name="r_r_tendon" group="0" pos="0 0 -0.256" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="r_r_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_r_tendon"/>
         </body>
       </body>
@@ -130,8 +130,8 @@
   <equality>
     <connect name="l_l_eq" body1="l_foot_roll" body2="l_l_tendon" anchor="-0.056027 0.0255 0.015" solref="0.001 1" />
     <connect name="l_r_eq" body1="l_foot_roll" body2="l_r_tendon" anchor="-0.056027 -0.0255 0.015" solref="0.001 1" />
-    <connect name="r_l_eq" body1="r_foot_roll" body2="r_l_tendon" anchor="-0.056027 -0.0255 0.015" solref="0.001 1" />
-    <connect name="r_r_eq" body1="r_foot_roll" body2="r_r_tendon" anchor="-0.056027 0.0255 0.015" solref="0.001 1" />
+    <connect name="r_l_eq" body1="r_foot_roll" body2="r_l_tendon" anchor="-0.056027 0.0255 0.015" solref="0.001 1" />
+    <connect name="r_r_eq" body1="r_foot_roll" body2="r_r_tendon" anchor="-0.056027 -0.0255 0.015" solref="0.001 1" />
   </equality>
 
   <actuator>

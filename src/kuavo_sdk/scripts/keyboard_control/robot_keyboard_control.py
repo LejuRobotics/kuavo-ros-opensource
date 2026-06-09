@@ -51,12 +51,15 @@ class KeyBoardRobotController(KeyBoardArmController):
         time_gap=0.5,
         robot_version=45,
         arm_control_enabled=True,
+        arm_init_timeout=3.0,
         which_hand=ArmType.Right,
     ):
 
         self.robot_mode_flag = 1  # 1为键盘控制手臂移动  2为键盘控制机器人运动
         self.change_robot_mode_flag = 1  # 切换模式时进行特殊处理
         self.arm_control_enabled = arm_control_enabled
+        self.arm_init_timeout = arm_init_timeout
+        self._arm_init_aborted = False
 
         if self.arm_control_enabled:
             # 手臂相关能力全部继承自基类
@@ -97,6 +100,15 @@ class KeyBoardRobotController(KeyBoardArmController):
             key = ''
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
         return key
+
+    def _print_robot_control_help(self):
+        print("Use keys to control:")
+        print("WASD: Left stick, control forward/backward, left/right")
+        print("IKJL/QE: Right stick, up/down, turn left/right")
+        print("R: walk, C: stance")
+        print("<space>: Reset all axes to zero")
+        print("Press V to Switch arm control (disabled)")
+        print("Press Ctrl-C to exit")
 
     # 移动模式用机器人按键逻辑；手臂模式复用基类按键处理
     def getKey(self):
@@ -153,24 +165,35 @@ class KeyBoardRobotController(KeyBoardArmController):
         # self.joy_pub.publish(self.joy_msg)
 
     # 机器人程序入口：
+    def _wait_for_arm_init(self):
+        print("waiting for arm init (/sensors_data_raw + /ik/fk_srv)...")
+        start_time = time.time()
+        while not self._flag_pose_inited and not rospy.is_shutdown():
+            if self.arm_init_timeout > 0 and (time.time() - start_time) >= self.arm_init_timeout:
+                rospy.logwarn(
+                    "arm init timeout after %.1f s: no valid arm init from /sensors_data_raw or /ik/fk_srv, fallback to robot motion only",
+                    self.arm_init_timeout,
+                )
+                print("arm init timeout: no valid arm init from /sensors_data_raw or /ik/fk_srv, fallback to robot motion only")
+                self.arm_control_enabled = False
+                self._arm_init_aborted = True
+                self.robot_mode_flag = 2
+                self.change_robot_mode_flag = 0
+                self._print_robot_control_help()
+                return False
+            time.sleep(0.2)
+        return self._flag_pose_inited
+
     def robot_run(self):
         if self.arm_control_enabled:
-            print("waiting for ik server...")
-            # 等待初始化结束
-            while not self._flag_pose_inited and not rospy.is_shutdown():
-                time.sleep(0.2)
+            # 等待首帧 FK 初始化；超时后自动降级为仅机器人运动控制
+            self._wait_for_arm_init()
             # 初始化为运动模式，下一循环通过切换流程进入手臂模式并打印提示
             self.robot_mode_flag = 2
         else:
             self.robot_mode_flag = 2
             self.change_robot_mode_flag = 0
-            print("Use keys to control:")
-            print("WASD: Left stick, control forward/backward, left/right")
-            print("IKJL/QE: Right stick, up/down, turn left/right")
-            print("R: walk, C: stance")
-            print("<space>: Reset all axes to zero")
-            print("Press V to Switch arm control (disabled)")
-            print("Press Ctrl-C to exit")
+            self._print_robot_control_help()
 
         try:
 
@@ -251,6 +274,7 @@ if __name__ == "__main__":
                                                         time_gap = 1.5,
                                                         robot_version = my_robot_version,
                                                         arm_control_enabled = arm_control_enabled,
+                                                        arm_init_timeout = rospy.get_param("~arm_init_timeout", 3.0),
                                                         which_hand=ArmType.Right)
         keyboard_robot_controller.robot_run()
     except rospy.ROSInterruptException:

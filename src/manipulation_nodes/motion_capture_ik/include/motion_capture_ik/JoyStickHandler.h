@@ -69,6 +69,9 @@ class JoyStickHandler {
   void forceSetLeftArmCtrlMode(bool active);
   void forceSetRightArmCtrlMode(bool active);
 
+  // 对应 Python ik_ros_uni.py 的 __robot_walking_status
+  void setRobotWalkingStatus(bool status);
+
  private:
   void processRobotEndHandWithFingerData();
 
@@ -117,6 +120,9 @@ class JoyStickHandler {
 
   std::atomic<EndEffectorType> endEffectorType_;
   int controlFingerType_;
+
+  // 走路时 LINKER_HAND 大拇指内扣相关状态（对应 Python ik_ros_uni.py 的条件）
+  std::atomic<bool> robotWalkingStatus_{false};
 
   std::vector<double> leftJoystick_;     // [left_trigger, left_grip]
   std::vector<double> rightJoystick_;    // [right_trigger, right_grip]

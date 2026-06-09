@@ -41,6 +41,7 @@ namespace humanoid_controller
       double hz = 0.0;
       size_t samples = 0;
       ros::WallTime last_msg_walltime{0.0};
+      double last_interval_sec = 0.0;
     };
 
     struct Requirements
@@ -134,6 +135,8 @@ namespace humanoid_controller
 
     bool isTopicPublished() const;
 
+    static int statusCode(CheckResult result);
+
     static void ensurePositiveParam(const char* log_tag, const char* param_name, double& value, double fallback);
     static void ensureMinIntParam(const char* log_tag, const char* param_name, int& value, int min_value, int fallback);
 
@@ -151,6 +154,10 @@ namespace humanoid_controller
       const ros::WallTime now_wall = ros::WallTime::now();
 
       std::lock_guard<std::mutex> lock(mutex_);
+      if (!timestamps_sec_.empty())
+      {
+        last_interval_sec_ = (now_wall - last_msg_walltime_).toSec();
+      }
       last_msg_walltime_ = now_wall;
       timestamps_sec_.push_back(now_sec);
 
@@ -179,8 +186,8 @@ namespace humanoid_controller
     int max_samples_ = 10;
     std::deque<double> timestamps_sec_;
     ros::WallTime last_msg_walltime_{0.0};
+    double last_interval_sec_ = 0.0;
     double cached_hz_ = 0.0;
   };
 
 }  // namespace humanoid_controller
-

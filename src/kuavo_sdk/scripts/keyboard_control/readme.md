@@ -13,6 +13,8 @@
     - 这里默认参数为`bt2`，如果启动该launch文件时`joystick_type`参数选择了`h12`或`bt2`，可以新开一个终端，依次执行`cd kuavo-ros-control`，`sudo su`,`source devel/setup.bash`,`python3 src/kuavo_sdk/scripts/keyboard_control/robot_keyboard_control.py`，在此终端中也可以用键盘输入运动控制指令，此时遥控器和键盘均奏效。
     - 如果启动launch文件时`joystick_type`参数选择了`sim`，会弹出新终端用来从键盘输入运动控制指令，非可视化界面不会弹出。
     - 如果启动该launch文件时`joystick_type`参数选择了`bt2pro`，就不能使用键盘控制，因为json配置文件中按键映射不一致会导致键盘控制实失效，只能用遥控器控制。
+    - `robot_keyboard_control.py` 的手臂控制依赖 `/sensors_data_raw` 和 `/ik/fk_srv`。如果这两条链路没有起来，脚本会在 `~arm_init_timeout` 超时后自动降级为仅机器人运动控制，而不会一直卡住。
+    - 也就是说，只要 `/sensors_data_raw` 或 `/ik/fk_srv` 其中任一链路不完整，脚本就会放弃手臂初始化，继续保留机器人运动控制。
   - **特别**：
     - 当`joystick_type`参数不是`sim`时，不论使用上述哪种方式启动键盘控制，都不要在机器人身上插着北通手柄的接收器。
     - 当`joystick_type`参数是`sim`时，需要确保没有接入北通手柄且 H12 的服务处于关闭状态，关闭 H12 服务的方式为 `systemctl stop ocs2_h12pro_monitor.service`。

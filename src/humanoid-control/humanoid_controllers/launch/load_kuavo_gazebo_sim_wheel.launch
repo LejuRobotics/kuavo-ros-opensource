@@ -80,7 +80,6 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
 
     <!-- 日志管理参数 -->
-    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
     <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
     <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
@@ -129,6 +128,8 @@
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
         <param name="joystick_type" value="h12"/>
+        <!-- 仿真专用：启动直接进入stance状态，跳过初始上站流程，不影响实机 -->
+        <param unless="$(arg real)" name="/joy_node/last_state" value="stance" />
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>

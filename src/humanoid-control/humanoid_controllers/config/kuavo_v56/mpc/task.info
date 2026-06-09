@@ -572,7 +572,7 @@ torqueLimitsTask
    (0,0)  120.0     ; motor 1
    (1,0)  71.0     ; motor 2
    (2,0)  80.0     ; motor 3
-   (3,0)  130.0     ; motor 4
+   (3,0)  160.0     ; motor 4
    (4,0)  80.0     ; joint 5
    (5,0)  80.0     ; joint 6
 

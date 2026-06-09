@@ -34,7 +34,8 @@ struct ParallelRotateWaistParams {
   // Limits (optional)
   LimitRange joint_pitch;
   LimitRange joint_roll;
-  LimitRange motor_bar;  // shared for left/right
+  LimitRange motor_l_bar;
+  LimitRange motor_r_bar;
 };
 
 /**

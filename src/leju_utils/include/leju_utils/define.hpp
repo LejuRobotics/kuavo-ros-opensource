@@ -28,11 +28,12 @@ struct PoseData {
 
 enum class ArmIdx { LEFT = 0, RIGHT = 1, BOTH = 2 };
 
-enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCLAW = 3 };
+enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCLAW = 3, LINKER_HAND = 4 };
 
 // 判断是否为手部末端执行器类型
 inline bool isHandEndEffectorType(EndEffectorType type) {
-  bool isHandEndEffectorType = (type == EndEffectorType::QIANGNAO || type == EndEffectorType::QIANGNAO_TOUCH || type == EndEffectorType::REVO2);
+  bool isHandEndEffectorType = (type == EndEffectorType::QIANGNAO || type == EndEffectorType::QIANGNAO_TOUCH ||
+                                type == EndEffectorType::REVO2 || type == EndEffectorType::LINKER_HAND);
   // if (isHandEndEffectorType) {
   //   std::cout << "isHandEndEffectorType: " << static_cast<int>(type) << std::endl;
   //   std::cout << "QIANGNAO: " << static_cast<int>(EndEffectorType::QIANGNAO) << std::endl;
@@ -64,6 +65,8 @@ inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
     return EndEffectorType::REVO2;
   } else if (typeStr == "lejuclaw") {
     return EndEffectorType::LEJUCLAW;
+  } else if (typeStr == "linker_hand") {
+    return EndEffectorType::LINKER_HAND;
   } else {
     return EndEffectorType::QIANGNAO;  // 默认返回QIANGNAO
   }

@@ -98,7 +98,8 @@ public:
 
   void setEnabled(bool enable);
   bool isEnabled() const;
-  
+  void setReuseWalkCommandInStance(bool enable);
+
   // Get current command data
   CommandDataRL getCurrentCommand() const;
   
@@ -135,6 +136,7 @@ private:
   // Current command data
   CommandDataRL currentCommand_;
   bool enabled_;
+  bool reuse_walk_command_in_stance_;
   
   // Smart stop detection parameters
   bool smart_stop_enabled_;

@@ -1,7 +1,9 @@
 <launch>
   <!-- Kuavo 右手腕相机 demo：一个 launch 覆盖 capture / optimize -->
 
-  <arg name="csv_dir" default="/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_right_wrist"/>
+  <!-- 不依赖 ROS 包查找；由roslaunch 显式传入 camera_calib_root:= -->
+  <arg name="camera_calib_root" default="$(env CAMERA_CALIB_ROOT)" />
+  <arg name="csv_dir" default="$(arg camera_calib_root)/output_csv/kuavo_right_wrist"/>
   <arg name="do_capture_to_csv" default="true" />
   <arg name="do_optimize_from_csv" default="false" />
   <arg name="keyframe_flag_topic" default="/right_wrist_keyframe_flag" />
@@ -13,7 +15,7 @@
 
   <!-- 公共 URDF（所有 demo 共用） -->
   <param name="robot_description"
-         textfile="/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/biped_v3_arm.urdf" />
+         textfile="$(arg camera_calib_root)/biped_v3_arm.urdf" />
 
   <node pkg="robot_state_publisher"
         type="robot_state_publisher"
@@ -52,7 +54,7 @@
           args="--manual">
       <!-- capture_to_csv 使用私有 NodeHandle("~") 读取 features/chains，所以必须加载到该节点的私有命名空间 -->
       <rosparam
-          file="/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/demos/kuavo_right_wrist/kuavo_right_wrist_capture.yaml"
+          file="$(arg camera_calib_root)/demos/kuavo_right_wrist/kuavo_right_wrist_capture.yaml"
           command="load" />
       <param name="out_dir" value="$(arg csv_dir)" />
       <param name="print_fk" value="true" />
@@ -73,7 +75,7 @@
           required="true">
       <!-- optimize_from_csv 使用私有 NodeHandle("~") 读取 models/error_blocks/free_*（以及可选 cal_steps） -->
       <rosparam
-          file="/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/demos/kuavo_right_wrist/kuavo_right_wrist_chessboard_calibration.yaml"
+          file="$(arg camera_calib_root)/demos/kuavo_right_wrist/kuavo_right_wrist_chessboard_calibration.yaml"
           command="load" />
       <!-- 额外调试：打印 base<-board(obs) 与 delta(urdf^-1*obs) -->
       <param name="print_board_obs_pose" value="true" />
@@ -81,10 +83,10 @@
       <param name="outlier_reject_enable" value="true" />
       <param name="outlier_reject_pos_m" value="0.1" />
       <param name="outlier_reject_rot_deg" value="10.0" />
-      <param name="output_dir" value="/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_right_wrist" />
+      <param name="output_dir" value="$(arg camera_calib_root)/output/kuavo_right_wrist" />
       <!-- 固定输出文件名 + 输出共享 calibrated URDF 到 src/Camera_Calibration -->
       <param name="fixed_output_names" value="true" />
-      <param name="urdf_output_path" value="/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/biped_v3_arm_calibrated.urdf" />
+      <param name="urdf_output_path" value="$(arg camera_calib_root)/biped_v3_arm_calibrated.urdf" />
       <param name="csv_dir" value="$(arg csv_dir)" />
       <param name="verbose" value="false" />
       <param name="print_fk" value="true" />

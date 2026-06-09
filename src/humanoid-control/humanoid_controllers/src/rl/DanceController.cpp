@@ -518,6 +518,10 @@ namespace humanoid_controller
 
   void DanceController::initializeDanceServices()
   {
+    dance_trajectory_state_pub_ = nh_.advertise<kuavo_msgs::DanceTrajectoryState>(
+        "/humanoid_controller/dance_trajectory_state", 1, true);
+    ROS_INFO("[%s] Latched topic registered: /humanoid_controller/dance_trajectory_state", name_.c_str());
+
     // 重新开始舞蹈服务
     std::string service_name = "/humanoid_controller/" + name_ + "/restart_dance";
     restart_dance_srv_ = nh_.advertiseService(service_name, 
@@ -529,9 +533,12 @@ namespace humanoid_controller
                                              std_srvs::Trigger::Response& res)
   {
     dance_trajectory_.resetTimeStep();
+    trajectory_time_accumulator_ = 0.0;
+    ++dance_run_id_;
+    resetDanceTrajectoryStatePublishCache();
     res.success = true;
     res.message = "Dance trajectory reset to beginning";
-    ROS_INFO("[%s] Dance trajectory restarted", name_.c_str());
+    ROS_INFO("[%s] Dance trajectory restarted (run_id=%u)", name_.c_str(), dance_run_id_);
     return true;
   }
 
@@ -539,6 +546,7 @@ namespace humanoid_controller
   {
     dance_trajectory_.resetTimeStep();
     trajectory_time_accumulator_ = 0.0;
+    resetDanceTrajectoryStatePublishCache();
     // 注意：reset() 仅在控制器暂停时被调用，不应改变状态
     // state_ 由 resume() 控制
     ROS_INFO("[%s] Controller reset", name_.c_str());
@@ -557,8 +565,45 @@ namespace humanoid_controller
     trajectory_time_accumulator_ = 0.0;
     actions_.setZero();
     first_run_ = true;
+    ++dance_run_id_;
+    resetDanceTrajectoryStatePublishCache();
 
-    ROS_INFO("[%s] Controller resumed, waiting for first update to set yaw offset", name_.c_str());
+    ROS_INFO("[%s] Controller resumed (run_id=%u), waiting for first update to set yaw offset", name_.c_str(), dance_run_id_);
+  }
+
+  void DanceController::resetDanceTrajectoryStatePublishCache()
+  {
+    dance_started_published_ = false;
+    last_published_dance_state_.clear();
+    last_published_dance_step_ = -1;
+  }
+
+  void DanceController::publishDanceTrajectoryState(const ros::Time& stamp,
+                                                    const std::string& state)
+  {
+    if (!dance_trajectory_state_pub_)
+    {
+      return;
+    }
+
+    const int current_step = dance_trajectory_.getTimeStep();
+    const int total_steps = dance_trajectory_.getTimeStepTotal();
+    if (state == last_published_dance_state_ && current_step == last_published_dance_step_)
+    {
+      return;
+    }
+
+    kuavo_msgs::DanceTrajectoryState msg;
+    msg.header.stamp = stamp;
+    msg.dance_name = name_;
+    msg.state = state;
+    msg.run_id = dance_run_id_;
+    msg.current_step = current_step;
+    msg.total_steps = total_steps;
+    dance_trajectory_state_pub_.publish(msg);
+
+    last_published_dance_state_ = state;
+    last_published_dance_step_ = current_step;
   }
 
   bool DanceController::requestToExit() const
@@ -620,6 +665,23 @@ namespace humanoid_controller
     // 将动作映射到关节命令（与FallStandController一致）
     actionToJointCmd(actuation, measuredRbdState, joint_cmd);
     joint_cmd.header.stamp = time;
+
+    if (dance_trajectory_.time_step_total > 0)
+    {
+      if (!dance_started_published_)
+      {
+        publishDanceTrajectoryState(time, "started");
+        dance_started_published_ = true;
+      }
+      else if (dance_trajectory_.isFinish())
+      {
+        publishDanceTrajectoryState(time, "finished");
+      }
+      else
+      {
+        publishDanceTrajectoryState(time, "running");
+      }
+    }
 
     //在time时候下发的关节命令
     // std::cout << "[" << name_ << "] Joint command prepared at time: " << joint_cmd.header.stamp.toSec() << " s\n";

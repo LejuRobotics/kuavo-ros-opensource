@@ -25,7 +25,7 @@ from trajectory_msgs.msg import JointTrajectory
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import numpy as np
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Empty
 
 rospack = rospkg.RosPack()
 pkg_path = rospack.get_path('h12pro_controller_node')
@@ -512,11 +512,13 @@ class H12PROControllerNode:
             tcp_nodelay=True
         )
         self.control_head_pub = rospy.Publisher(
-            '/robot_head_motion_data', 
-            robotHeadMotionData, 
-            queue_size=1, 
+            '/robot_head_motion_data',
+            robotHeadMotionData,
+            queue_size=1,
             tcp_nodelay=True
         )
+        # 初始化全局停止话题发布者（项目统一用Bool协议，True表示停止）
+        self.stop_robot_pub = rospy.Publisher('/stop_robot', Bool, queue_size=1)
         self.update_h12_customize_config_sub = rospy.Subscriber(
             "/update_h12_customize_config",
             UpdateH12CustomizeConfig,
@@ -665,7 +667,10 @@ class H12PROControllerNode:
             return
 
         # Always update channels for joy publishing (wheel mode needs all 12 channels)
-        self.h12_to_joy_node.update_channels_msg(msg)
+        # 双足模式由 _handle_joystick_input 处理（只传摇杆 axes，按钮走状态机），
+        # 不需要在此透传 raw H12 按钮，避免与状态机长短按语义冲突。
+        if self.h12_to_joy_node.is_wheel:
+            self.h12_to_joy_node.update_channels_msg(msg)
 
         try:
             key_combination = self._process_channels(msg.channels)
@@ -848,13 +853,19 @@ class H12PROControllerNode:
                 rospy.loginfo("[EmergencyStop] Cleared switch_controller cooldown to allow immediate stop.")
 
             # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
-            current_controller = self._get_current_controller_name()
+            current_controller = None
+            skip_controller_list = self.only_half_up_body or rospy.get_param("robot_type", 2) == 1
+            if not skip_controller_list:
+                current_controller = self._get_current_controller_name()
             if current_controller and current_controller.lower() == "mpc":
                 if current_state in ["stance", "walk", "trot", "vr_remote_control"]:
                     self.h12_to_joy_node.is_stopping = True
                     self._gradually_move_right_stick_down()
                     self.h12_to_joy_node.is_stopping = False
-                
+            
+            # 发布全局停止指令到/stop_robot话题（True表示停止，项目统一协议）
+            self.stop_robot_pub.publish(Bool(data=True))  
+
             getattr(self.robot_state_machine, "stop")(source=current_state)
 
             # ===== 紧急停止状态持久化 =====
@@ -983,7 +994,10 @@ class H12PROControllerNode:
                     
                     # 如果是有效状态,更新消息
                     current_controller_support = True
-                    current_controller = self._get_current_controller_name()
+                    current_controller = None
+                    skip_controller_list = self.only_half_up_body or rospy.get_param("robot_type", 2) == 1
+                    if not skip_controller_list:
+                        current_controller = self._get_current_controller_name()
                     if current_controller and current_controller.lower() == "mpc" and trigger in ["trot"]:
                         current_controller_support = False
                         print("mpc not support this trigger")

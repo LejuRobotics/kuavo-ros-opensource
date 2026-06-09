@@ -2,5 +2,5 @@
 <launch>
     <node pkg="h12pro_controller_node" type="h12pro_channel_publisher" name="h12pro_channel_publisher" output="screen"/>
 
-    <node pkg="h12pro_controller_node" type="h12ChannelToJoymsg.py" name="joy_node" output="screen"/>
+    <node pkg="h12pro_controller_node" type="ocs2_h12pro_node.py" name="joy_node" output="screen"/>
 </launch>

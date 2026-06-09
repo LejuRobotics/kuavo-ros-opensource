@@ -83,6 +83,10 @@ void ArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   joystickSubscriber_ = nodeHandle_.subscribe(
       "/quest_joystick_data", 10, &ArmControlBaseROS::joystickCallback, this, ros::TransportHints().tcpNoDelay());
 
+  robotWalkingStatusSubscriber_ = nodeHandle_.subscribe(
+      "/robot_walking_status", 1, &ArmControlBaseROS::robotWalkingStatusCallback, this,
+      ros::TransportHints().tcpNoDelay());
+
   sensorDataRaw_ = std::make_shared<kuavo_msgs::sensorsData>();
   latestBonePosesPtr_ = std::make_shared<noitom_hi5_hand_udp_python::PoseInfoList>();
 
@@ -188,6 +192,12 @@ void ArmControlBaseROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
   } else {
     ROS_WARN("\033[91m[ArmControlBaseROS] Arm mode changing\033[0m");
     armModeChanging_.store(true);
+  }
+}
+
+void ArmControlBaseROS::robotWalkingStatusCallback(const std_msgs::Bool::ConstPtr& msg) {
+  if (joyStickHandlerPtr_) {
+    joyStickHandlerPtr_->setRobotWalkingStatus(msg->data);
   }
 }
 

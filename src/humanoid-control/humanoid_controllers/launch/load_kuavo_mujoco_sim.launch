@@ -54,6 +54,7 @@
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
     <arg name="run_mujoco_camera" default="false"/>   <!-- 是否运行mujoco的相机 -->
+    <arg name="depth_frequency" default="60.0"/>       <!-- mujoco深度相机发布频率，单位Hz -->
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -102,7 +103,7 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB因为运行时候要预留30G内存因此设置成日志大小大于 34GB 时删除日志 -->
+    <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
     <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
     <!-- 删除日志到大小为 34GB 时停止删除日志 -->
     <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
@@ -137,11 +138,15 @@
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
     </node>
     <group unless="$(arg play_back)">
-      <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch"/>
+      <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch">
+        <arg name="depth_frequency" value="$(arg depth_frequency)"/>
+      </include>
     </group>
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
+        <!-- 仿真专用：启动直接进入stance状态，跳过初始上站流程，不影响实机 -->
+        <param unless="$(arg real)" name="/joy_node/last_state" value="stance" />
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>

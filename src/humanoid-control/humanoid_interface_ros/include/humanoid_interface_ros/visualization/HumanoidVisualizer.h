@@ -45,6 +45,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <urdf/model.h>
 #include <kuavo_msgs/lejuClawCommand.h>
 #include <sensor_msgs/JointState.h>
+#include <mutex>
 
 
 namespace ocs2
@@ -55,6 +56,14 @@ namespace ocs2
     class HumanoidVisualizer : public DummyObserver
     {
     public:
+      /** Hand type definition */
+      enum HandType {
+        HAND_NONE = 0,      // 无灵巧手
+        HAND_QIANGNAO = 1,  // 强脑灵巧手
+        HAND_LINKER_L6 = 2, // Linker L6灵巧手
+        HAND_LINKER_O6 = 3  // Linker O6灵巧手
+      };
+
       /** Visualization settings (publicly available) */
       std::string frameId_ = "odom";             // Frame name all messages are published in
       scalar_t footMarkerDiameter_ = 0.03;       // Size of the spheres at the feet
@@ -103,8 +112,10 @@ namespace ocs2
       // qiangnao手专用关节更新接口，输入12维控制量（范围0~100，左右手各6个）
       void updateHandJointPositions(const vector_t &positions);
 
-      // Linker L6/O6手专用关节更新接口，输入12维控制量（范围0~255，左右手各6个）
-      void updateLinkerHandJointPositions(const vector_t &positions);
+      // Linker L6手专用关节更新接口，输入12维控制量（范围0~255，左右手各6个）
+      void updateLinkerL6HandJointPositions(const vector_t &positions);
+      // Linker O6手专用关节更新接口，输入12维控制量（范围0~100，左右手各6个）
+      void updateLinkerO6HandJointPositions(const vector_t &positions);
 
       void updateClawJointPositions(const vector_t &positions);
 
@@ -119,6 +130,7 @@ namespace ocs2
       }
     private:
       HumanoidVisualizer(const HumanoidVisualizer &) = delete;
+      void updateDexhandJointPositions();
       void publishJointTransforms(ros::Time timeStamp, const vector_t &jointAngles) const;
       void publishBaseTransform(ros::Time timeStamp, const vector_t &basePose);
       void publishCartesianMarkers(ros::Time timeStamp, const contact_flag_t &contactFlags, const std::vector<vector3_t> &feetPositions,
@@ -131,7 +143,6 @@ namespace ocs2
 
       tf::TransformBroadcaster tfBroadcaster_;
       std::unique_ptr<robot_state_publisher::RobotStatePublisher> robotStatePublisherPtr_;
-      ros::Timer fixed_tf_publish_timer_; // 周期性发布静态TF，防止录bag漏录
 
       ros::Publisher costDesiredBasePositionPublisher_;
       std::vector<ros::Publisher> costDesiredFeetPositionPublishers_;
@@ -145,12 +156,12 @@ namespace ocs2
       bool updateHeadJointPositions_ = false;
       std::vector<double> head_joint_positions_;
       std::vector<double> simplifiedJointPositions_;
+
+      // 灵巧手相关成员
+      HandType handType_ = HAND_NONE;
       std::vector<std::string> dexhand_joint_names_;
       bool updateDexhandJointPositions_ = false;
       std::vector<double> dexhand_joint_positions_;
-
-      // Linker L6/O6灵巧手相关成员
-      bool isLinkerHand_ = false;
       std::vector<std::string> linker_hand_joint_names_;
       std::vector<double> linker_hand_joint_positions_;
 
@@ -159,6 +170,23 @@ namespace ocs2
       std::vector<double> claw_joint_positions_ = {0.0, 0.0};
       ros::Subscriber clawCmdSubscriber_;
       void lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg);
+
+      // 灵巧手状态订阅者
+      ros::Subscriber dexhandStateSub_;
+      ros::Subscriber linkerLeftHandStateSub_;
+      ros::Subscriber linkerRightHandStateSub_;
+
+      // 灵巧手回调函数
+      void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+      void linkerLeftHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+      void linkerRightHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+      void linkerO6HandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+
+      // 灵巧手关节位置存储
+      vector_t dexhandJointPositions_ = vector_t::Zero(12);      // qiangnao手
+      vector_t linkerL6HandJointPositions_ = vector_t::Zero(12); // Linker L6手
+      vector_t linkerO6HandJointPositions_ = vector_t::Zero(12); // Linker O6手
+      std::mutex dexhand_mutex_; // 保护上述灵巧手关节位置变量的互斥锁
 
 
       scalar_t lastTime_;

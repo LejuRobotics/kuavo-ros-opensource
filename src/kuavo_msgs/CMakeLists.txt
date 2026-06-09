@@ -145,6 +145,7 @@ add_message_files(
   robotWaistControl.msg
   # VMP Controller
   VMPTrajectoryState.msg
+  DanceTrajectoryState.msg
 
   # Battery info
   BatteryInfo.msg

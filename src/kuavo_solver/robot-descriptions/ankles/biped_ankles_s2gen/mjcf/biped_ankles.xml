@@ -65,7 +65,7 @@
             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
             <joint name="l_l_tendon" pos="0 0 0" type="ball"/>
             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_l_tendon"/>
-            <site name="l_l_tendon" group="0" pos="0 0 -0.097" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+            <site name="l_l_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           </body>
         </body>
       </body>
@@ -86,7 +86,7 @@
             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
             <joint name="l_r_tendon" pos="0 0 0" type="ball"/>
             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_r_tendon"/>
-            <site name="l_r_tendon" group="0" pos="0 0 -0.152" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+            <site name="l_r_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           </body>
         </body>
       </body>
@@ -128,7 +128,7 @@
             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
             <joint name="r_l_tendon" pos="0 0 0" type="ball"/>
             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_l_tendon"/>
-            <site name="r_l_tendon" group="0" pos="0 0 -0.152" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+            <site name="r_l_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           </body>
         </body>
       </body>
@@ -149,7 +149,7 @@
             <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
             <joint name="r_r_tendon" pos="0 0 0" type="ball"/>
             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_r_tendon"/>
-            <site name="r_r_tendon" group="0" pos="0 0 -0.097" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+            <site name="r_r_tendon" group="0" pos="0 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
           </body>
         </body>
       </body>

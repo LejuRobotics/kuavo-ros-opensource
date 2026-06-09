@@ -175,8 +175,8 @@
         <!-- waist_yaw碰撞体 -->
         <geom type="capsule" size="0.13 0.06" pos="0.008 0 0.2486" quat="0.707388 0.706825 0 0" class="collision"/>
         <geom type="capsule" size="0.13 0.03" pos="0.008 0 0.0886" class="collision"/>
-        <!-- <body name="waist_camera_link" pos="0.09538 0 -0.01091" quat="0.868 0 0.497 0"> -->
-        <body name="waist_camera_link" pos="0.09538 0 -0.01491" quat="0.868 0 0.497 0">  <!-- 由于 waist_yaw 的 mesh 遮挡，略微向下移动相机位置 4mm -->
+        <!-- <body name="waist_camera_link" pos="0.09462 0 -0.01095" quat="0.868 0 0.497 0"> -->
+        <body name="waist_camera_link" pos="0.09462 0 -0.01495" quat="0.868 0 0.497 0">  <!-- 由于 waist_yaw 的 mesh 遮挡，略微向下移动相机位置 4mm -->
           <inertial pos="0.0048485 0.00025646 0.013977" mass=".0483" diaginertia="5.9781e-05 5.8328e-06 5.9293e-05"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_camera"/>
           <camera name="waist_camera" pos="0.01229 0.02375 0.01452" xyaxes="0 -1 0 0 0 1" fovy="80" />

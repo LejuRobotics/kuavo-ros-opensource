@@ -123,7 +123,8 @@ namespace
   std::thread depth_thread;
   std::atomic<bool> depth_thread_running{true};
   std::mutex mujoco_data_mutex;  // Protects access to m and d
-  double depth_frequency = 60.0;  // Hz
+  constexpr double kDefaultDepthFrequency = 60.0;
+  double depth_frequency = kDefaultDepthFrequency;  // Hz
   bool isRunCamera_{false};
 
   // Depth image history buffer (6*6+7=43 frames)
@@ -2163,6 +2164,15 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
     nh.getParam("/wbc_frequency", frequency);
   }
   ROS_INFO("Mujoco Frequency: %f Hz", frequency);
+
+  nh.param("/depth_frequency", depth_frequency, kDefaultDepthFrequency);
+  if (depth_frequency <= 0.0)
+  {
+    ROS_WARN("Invalid depth_frequency: %f Hz, fallback to %f Hz",
+             depth_frequency, kDefaultDepthFrequency);
+    depth_frequency = kDefaultDepthFrequency;
+  }
+  ROS_INFO("Mujoco depth camera frequency: %f Hz", depth_frequency);
   
   // 获取相机是否启动的判断
   if (!nh.hasParam("/run_mujoco_camera"))

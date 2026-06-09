@@ -44,14 +44,14 @@ if _SCRIPTS_ROOT not in sys.path:
     sys.path.insert(0, _SCRIPTS_ROOT)
 
 
-# 与 mujoco_unified_cli.py 一致：`scripts/tools` → scripts → kuavo_solver → …/kuavo-ros-control
+# 与 kuavo_solver_validator.py 一致：`scripts/tools` → scripts → kuavo_solver → …/kuavo-ros-control
 KUAVO_SOLVER_ROOT_FOR_PY = os.path.abspath(os.path.join(_SCRIPTS_ROOT, ".."))
 _REPO_ROOT_FOR_PY = os.path.abspath(os.path.join(KUAVO_SOLVER_ROOT_FOR_PY, "..", ".."))
 
 
 def _setup_solver_path() -> None:
     """
-    与 ``mujoco_unified_cli._setup_solver_path`` 等价：在无 ROS/source 时也尽量挂载
+    与 ``kuavo_solver_validator._setup_solver_path`` 等价：在无 ROS/source 时也尽量挂载
     ``build/kuavo_solver/python``、devel/install、以及在 build 下浅搜 kuavo_solver_py.so。
     """
     try:

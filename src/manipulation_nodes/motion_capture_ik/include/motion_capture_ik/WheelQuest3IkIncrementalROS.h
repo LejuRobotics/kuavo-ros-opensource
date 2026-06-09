@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -481,6 +482,26 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // VR手部位姿缓存（避免频繁调用 getLeftHandPose() 和 getRightHandPose()）
   ::ArmPose latestLeftHandPose_vr_;
   ::ArmPose latestRightHandPose_vr_;
+
+  // 【三点跳变检测】验证VR数据并过滤异常跳变
+  bool validateVrPose(const ::ArmPose& currentPose, ::ArmPose& validatedPose, const std::string& side, bool isArmActive);
+
+  // 【三点跳变检测】相关常量和变量
+  static constexpr double SPIKE_THRESHOLD = 0.50;  // 跳变阈值（50cm）
+  static constexpr int SPIKE_RECOVERY_COUNT = 2;  // 连续跳变恢复阈值：连续N帧跳变后恢复（可能是快速正常运动）
+  static constexpr double SPIKE_TIMEOUT_DURATION = 0.2;  // 超时恢复时间（秒）：如果跳变持续超过0.2秒，强制恢复
+
+  // 左右手分别存储前两个点的位置
+  Eigen::Vector3d leftHandPrev2_;      // 左手前两个点
+  Eigen::Vector3d leftHandPrev1_;      // 左手前一个点
+  Eigen::Vector3d rightHandPrev2_;     // 右手前两个点
+  Eigen::Vector3d rightHandPrev1_;     // 右手前一个点
+  int leftHandCount_ = 0;              // 左手数据计数
+  int rightHandCount_ = 0;             // 右手数据计数
+  int leftHandSpikeCount_ = 0;         // 左手连续跳变计数
+  int rightHandSpikeCount_ = 0;        // 右手连续跳变计数
+  ros::Time leftHandSpikeStartTime_;   // 左手跳变开始时间
+  ros::Time rightHandSpikeStartTime_;  // 右手跳变开始时间
 };
 
 }  // namespace HighlyDynamic

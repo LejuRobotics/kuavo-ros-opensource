@@ -50,6 +50,8 @@ done
 WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CC_DIR="${WS_DIR}/src/Camera_Calibration"
 TEACH_DIR="${CC_DIR}/teach_capture_output"
+# launch 内 camera_calib_root 默认读此环境变量（不注册 ROS 包）
+export CAMERA_CALIB_ROOT="${CC_DIR}"
 
 banner() {
   echo ""

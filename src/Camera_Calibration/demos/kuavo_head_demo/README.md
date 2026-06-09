@@ -10,20 +10,22 @@
 
 ### 常用用法
 
+在仓库根目录执行：
+
 - **采集（capture_to_csv，手动触发）**：
 
 ```bash
-roslaunch /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/demos/kuavo_head_demo/kuavo_head_demo.launch \
+roslaunch src/Camera_Calibration/demos/kuavo_head_demo/kuavo_head_demo.launch \
   do_capture_to_csv:=true do_optimize_from_csv:=false do_calibrate_manual:=false \
-  csv_dir:=/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_head
+  csv_dir:=src/Camera_Calibration/output_csv/kuavo_head
 ```
 
 - **优化（optimize_from_csv）**：
 
 ```bash
-roslaunch /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/demos/kuavo_head_demo/kuavo_head_demo.launch \
+roslaunch src/Camera_Calibration/demos/kuavo_head_demo/kuavo_head_demo.launch \
   do_capture_to_csv:=false do_optimize_from_csv:=true do_calibrate_manual:=false \
-  csv_dir:=/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_head
+  csv_dir:=src/Camera_Calibration/output_csv/kuavo_head
 ```
 
 ### 关键约定

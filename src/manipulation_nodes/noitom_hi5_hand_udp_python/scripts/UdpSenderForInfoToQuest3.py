@@ -7,7 +7,7 @@ import threading
 import netifaces
 
 class UdpSenderForInfoToQuest3:
-    def __init__(self, ports, message, width=0, height=0):
+    def __init__(self, ports, message, width=0, height=0, target_ips=None):
         self.ports = ports
         event = kuavo_vr_events_pb2.KuavoVrEvents()
         event.webrtc_signaling_url = message
@@ -15,30 +15,36 @@ class UdpSenderForInfoToQuest3:
         event.camera_info.height = height
         self.message = event.SerializeToString()
         self.stop_event = threading.Event()
+        self.target_ips = sorted(list(set(ip for ip in (target_ips or []) if ip)))
         self.broadcast_ips = self.get_local_broadcast_ips()
         print("--------------------------------")    
         print(f"Local broadcast IPs:")
         for ip in self.broadcast_ips:
             print(f"  {ip}")
+        print(f"Target Quest3 IPs:")
+        for ip in self.target_ips:
+            print(f"  {ip}")
         print("--------------------------------")    
 
     def _send_udp_message(self, port):
-        if len(self.broadcast_ips) == 0:
-            print(f"No broadcast IPs found....")
+        destination_ips = self.target_ips if self.target_ips else self.broadcast_ips
+        if len(destination_ips) == 0:
+            print(f"No target or broadcast IPs found....")
             return
-        for broadcast_ip in self.broadcast_ips:
+        for destination_ip in destination_ips:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                    if destination_ip in self.broadcast_ips:
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                     sock.settimeout(1)  # Set a timeout of 1 second
-                    sock.sendto(self.message, (broadcast_ip, port))
+                    sock.sendto(self.message, (destination_ip, port))
                     # data, addr = sock.recvfrom(1024)
-                    # print(f"Response from {broadcast_ip}:{port}: {data.decode()}")
+                    # print(f"Response from {destination_ip}:{port}: {data.decode()}")
             except socket.timeout:
-                # print(f"No response from {broadcast_ip}:{port}")
+                # print(f"No response from {destination_ip}:{port}")
                 pass
             except Exception as e:
-                print(f"Error sending to {broadcast_ip}:{port}: {str(e)}")
+                print(f"Error sending to {destination_ip}:{port}: {str(e)}")
 
     def _send_udp_message_periodically(self):
         while not self.stop_event.is_set():

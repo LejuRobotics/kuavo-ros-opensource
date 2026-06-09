@@ -554,7 +554,9 @@ namespace ocs2
           gaitSchedulePtr_->modifyWalkModeSequenceTemplate(new_gait, initTime, timeHorizon, "walk");
           // pub msg
           pusblishGaittime();
-          auto_gait_start_time_ = initTime;
+          // 使用 walk 在 gait schedule 中实际开始的时间（而非触发时的 initTime），
+          // 确保冷却时间从 walk 真正开始执行时算起，避免因调度延迟导致冷却提前失效
+          auto_gait_start_time_ = gaitSchedulePtr_->getGgaitTimeName().first;
           std::cout << "[GaitReceiver]: auto gait: start" << std::endl;
         }
         velCmdUpdated_ = false;

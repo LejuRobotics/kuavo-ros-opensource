@@ -75,7 +75,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/ExecuteArmAction.h>
 #include <kuavo_msgs/SetString.h>
+#include <kuavo_msgs/DanceTrajectoryState.h>
+#include <kuavo_msgs/playmusic.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
+#include "kuavo_msgs/ControllerSwitchEvent.h"
 
 // 命令执行相关头文件
 #include <cstdlib>
@@ -446,12 +449,32 @@ namespace ocs2
           }
         }
       });
+
+      // 订阅控制器切换事件，更新AMP控制器状态
+      controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr &msg)
+      {
+        // 检查是否切换到AMP控制器
+        bool old_is_amp = is_amp_controller_;
+        is_amp_controller_ = (msg->to_controller == "amp_controller");
+
+        // 只在状态切换时打印一次提示
+        if (!old_is_amp && is_amp_controller_)
+        {
+          ROS_INFO("[JoyControl] Entered AMP mode: right stick vertical control will be ignored");
+        }
+        else if (old_is_amp && !is_amp_controller_)
+        {
+          ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
+        }
+      });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
       // 从主控制器实时订阅当前手臂控制模式
       arm_ctrl_mode_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
       "/humanoid/mpc/arm_control_mode", 1, &JoyControl::armCtrlModeCallback, this); 
+      dance_trajectory_state_sub_ = nodeHandle_.subscribe<kuavo_msgs::DanceTrajectoryState>(
+      "/humanoid_controller/dance_trajectory_state", 1, &JoyControl::danceTrajectoryStateCallback, this);
 
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       re_start_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/re_start_robot", 10);
@@ -616,6 +639,7 @@ namespace ocs2
     void run()
     {
       ros::Rate rate(100);
+      size_t update_count = 0;
       while (ros::ok())
       {
         ros::spinOnce();
@@ -642,6 +666,11 @@ namespace ocs2
         }
         
         rate.sleep();
+        if(++update_count > 10)
+        {
+          update_count=0;
+          updateVelocityLimitsFromParam();
+        }
         if (robot_type_ == 1)
         {
           checkAndPublishCommandLine(joystick_origin_axis_);
@@ -1187,7 +1216,15 @@ namespace ocs2
     
       // 非辅助模式下才可控行走
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] > -0.5 && joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] > -0.5 && axes_input_enabled_)
+      {
         joystickOriginAxisTemp_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+
+        // AMP模式下忽略右摇杆上下控制（高度控制）
+        if (is_amp_controller_)
+        {
+          joystickOriginAxisTemp_(2) = 0.0;  // 索引2对应AXIS_RIGHT_STICK_Z
+        }
+      }
     
       joystickOriginAxisFilter_ = joystickOriginAxisTemp_;
       // for(int i=0;i<4;i++)
@@ -1204,6 +1241,34 @@ namespace ocs2
       
       if (joy_msg->buttons[joyButtonMap["BUTTON_LB"]])// 按下左侧侧键，切换模式
       {
+        // LB+A (Roban): 进入/退出站立姿态控制模式；进入需在 amp_hand_controller 控制器下才有效
+        if (IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] &&
+            joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
+        {
+          if (posture_control_mode_)
+          {
+            setPostureControlMode(false);
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          std::string current_controller;
+          if (!getCurrentControllerName(current_controller))
+          {
+            ROS_WARN("[JoyControl] LB+A: failed to get current controller");
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          if (current_controller != "amp_hand_controller")
+          {
+            ROS_WARN("[JoyControl] LB+A: enter posture control only on amp_hand_controller (current=%s)",
+                     current_controller.c_str());
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+          setPostureControlMode(true);
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
         if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
           pubModeGaitScale(0.9);
         else if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
@@ -1242,10 +1307,10 @@ namespace ocs2
           // RB+A roban2 芭啦芭啦樱之舞
           if (IS_ROBAN(rb_version_))
           {
-            ROS_INFO("[JoyControl] RB+A: dance_parapara");
-            callSwitchToDanceSrvByName("dance_parapara");
-            old_joy_msg_ = *joy_msg;
-            return;
+          //   ROS_INFO("[JoyControl] RB+A: dance_parapara");
+          //   callSwitchToDanceSrvByName("dance_parapara");
+          //   old_joy_msg_ = *joy_msg;
+          //   return;
           }
           else
           {
@@ -1336,6 +1401,11 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
+        if (IS_ROBAN(rb_version_) && posture_control_mode_)
+        {
+          ROS_WARN("[JoyControl] B: ignored in posture control mode (exit with LB+A)");
+          return;
+        }
         // Roban: B switch to MPC
         if (IS_ROBAN(rb_version_))
         {
@@ -1375,11 +1445,45 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
-        // Roban: X switch to AMP
+        if (IS_ROBAN(rb_version_) && posture_control_mode_)
+        {
+          ROS_WARN("[JoyControl] X: ignored in posture control mode (exit with LB+A)");
+          return;
+        }
+        // Roban: X 在行走控制器环中切换（mpc -> amp_controller -> amp_hand_controller -> ...）
         if (IS_ROBAN(rb_version_))
         {
-          ROS_INFO("[JoyControl] X: switch to amp_controller");
-          callSwitchControllerService("amp_controller");
+          std::string current_controller;
+          if (!getCurrentControllerName(current_controller))
+          {
+            ROS_WARN("[JoyControl] X (Roban): failed to get current controller");
+            return;
+          }
+          if (current_controller == "mpc")
+          {
+            std::vector<std::string> controller_list;
+            if (getControllerList(controller_list) && controller_list.size() > 1)
+            {
+              ROS_INFO("[JoyControl] X (Roban): MPC -> %s", controller_list[1].c_str());
+              callSwitchControllerService(controller_list[1]);
+            }
+            else
+            {
+              ROS_INFO("[JoyControl] X (Roban): MPC -> amp_controller");
+              callSwitchControllerService("amp_controller");
+            }
+          }
+          else if (current_controller.find("dance") != std::string::npos)
+          {
+            // 舞蹈控制器不在 walk_controllers_ 环中；switchToNextController 会误切到 MPC（#3123）
+            ROS_INFO("[JoyControl] X (Roban): dance -> amp_controller");
+            callSwitchControllerService("amp_controller");
+          }
+          else
+          {
+            ROS_INFO("[JoyControl] X (Roban): switch to next walk controller");
+            switchToNextController();
+          }
           return;
         }
         ROS_INFO("[JoyControl] switch to next controller");
@@ -1502,6 +1606,49 @@ namespace ocs2
       }
 
       const vector_t currentPose = observation.state.segment<6>(6);
+
+      if (posture_control_mode_)
+      {
+        // 姿态控制模式:
+        // linear.x -> 弯腰
+        // linear.y -> 预留/侧向姿态通道
+        // linear.z -> base高度偏移(下蹲)
+        // angular.z -> 禁止旋转，避免与下蹲语义冲突
+        if (std::abs(joystick_origin_axis(0)) > DEAD_ZONE)
+        {
+          cmdVel.linear.x = commad_line_target_(0);
+          updated[0] = true;
+        }
+        if (std::abs(joystick_origin_axis(1)) > DEAD_ZONE)
+        {
+          cmdVel.linear.y = commad_line_target_(1);
+          updated[1] = true;
+        }
+        if (std::abs(joystick_origin_axis(2)) > DEAD_ZONE)
+        {
+          cmdVel.linear.z = commad_line_target_(2);
+          updated[2] = true;
+        }
+
+        static bool last_auto_gait_state = true;
+        const double height_diff_max = 0.1;
+        if (std::fabs(cmdVel.linear.z) > height_diff_max && cur_gait_name_ == "stance")
+        {
+          if (last_auto_gait_state)
+          {
+            changeAutoGaitStatus(false);
+            last_auto_gait_state = false;
+          }
+        }
+        else if (!last_auto_gait_state)
+        {
+          changeAutoGaitStatus(true);
+          last_auto_gait_state = true;
+        }
+
+        return updated;
+      }
+
       // vector_t target(6);
       if (joystick_origin_axis.head(2).cwiseAbs().maxCoeff() > DEAD_ZONE)
       { // base p_x, p_y are relative to current state
@@ -1560,6 +1707,57 @@ namespace ocs2
       }
 
       return updated;
+    }
+
+    bool callAmpModeService(int mode)
+    {
+      std::string current_controller;
+      if (!getCurrentControllerName(current_controller) || current_controller == "mpc")
+      {
+        ROS_WARN("[JoyControl] change_amp_mode(%d) skipped: current controller is not AMP (current=%s)",
+                 mode, current_controller.c_str());
+        return false;
+      }
+
+      const std::string service_name =
+          "/humanoid_controller/" + current_controller + "/change_amp_mode";
+      ros::ServiceClient amp_mode_client =
+          nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(service_name);
+
+      kuavo_msgs::changeArmCtrlMode srv;
+      srv.request.control_mode = mode;
+      if (amp_mode_client.call(srv))
+      {
+        ROS_INFO("[JoyControl] %s(%d) -> %s, mode=%d, msg=%s",
+                 service_name.c_str(),
+                 mode,
+                 srv.response.result ? "success" : "failure",
+                 srv.response.mode,
+                 srv.response.message.c_str());
+        return srv.response.result;
+      }
+      ROS_ERROR("[JoyControl] Failed to call %s with mode=%d", service_name.c_str(), mode);
+      return false;
+    }
+
+    void setPostureControlMode(bool enable)
+    {
+      posture_control_mode_ = enable;
+      joystick_origin_axis_.setZero();
+      vector_t zero_axis = vector_t::Zero(6);
+      checkAndPublishCommandLine(zero_axis);
+
+      if (enable)
+      {
+        publishGaitTemplate("stance");
+        callAmpModeService(1);
+        ROS_WARN("[JoyControl] Posture control mode enabled: stick -> bend/squat");
+      }
+      else
+      {
+        callAmpModeService(0);
+        ROS_WARN("[JoyControl] Posture control mode disabled: restored walking mode");
+      }
     }
 
     inline void pubModeGaitScale(float scale)
@@ -1664,6 +1862,94 @@ namespace ocs2
       }
     }
 
+    void prepareDanceMusicPending(const std::string& dance_name)
+    {
+      pending_dance_music_.active = true;
+      pending_dance_music_.dance_name = dance_name;
+      pending_dance_music_.request_time = ros::Time::now();
+      pending_dance_music_.previous_run_id = last_dance_run_id_[dance_name];
+      pending_dance_music_.played = false;
+      ROS_INFO("[JoyControl] Pending dance music: %s (previous_run_id=%u)",
+               dance_name.c_str(), pending_dance_music_.previous_run_id);
+    }
+
+    void clearDanceMusicPending()
+    {
+      pending_dance_music_.active = false;
+      pending_dance_music_.dance_name.clear();
+      pending_dance_music_.request_time = ros::Time(0);
+      pending_dance_music_.previous_run_id = 0;
+      pending_dance_music_.played = false;
+    }
+
+    bool playDanceMusic(const std::string& dance_name)
+    {
+      kuavo_msgs::playmusic srv;
+      srv.request.music_number = dance_name + ".wav";
+      srv.request.volume = 100;
+      ros::ServiceClient play_music_client = nodeHandle_.serviceClient<kuavo_msgs::playmusic>("/play_music");
+      if (play_music_client.call(srv))
+      {
+        ROS_INFO("[JoyControl] /play_music '%s' -> %s",
+                 srv.request.music_number.c_str(), srv.response.success_flag ? "success" : "failed");
+        return srv.response.success_flag;
+      }
+      ROS_ERROR("[JoyControl] Failed to call /play_music for %s", srv.request.music_number.c_str());
+      return false;
+    }
+
+    bool restartDanceController(const std::string& dance_name)
+    {
+      const std::string service_name = "/humanoid_controller/" + dance_name + "/restart_dance";
+      ros::ServiceClient restart_client = nodeHandle_.serviceClient<std_srvs::Trigger>(service_name);
+      std_srvs::Trigger srv;
+      if (restart_client.call(srv) && srv.response.success)
+      {
+        ROS_INFO("[JoyControl] Restarted dance '%s': %s", dance_name.c_str(), srv.response.message.c_str());
+        return true;
+      }
+      ROS_WARN("[JoyControl] Failed to restart dance '%s'", dance_name.c_str());
+      return false;
+    }
+
+    void danceTrajectoryStateCallback(const kuavo_msgs::DanceTrajectoryState::ConstPtr& msg)
+    {
+      last_dance_run_id_[msg->dance_name] = msg->run_id;
+
+      if (!pending_dance_music_.active || pending_dance_music_.played)
+      {
+        return;
+      }
+      if ((ros::Time::now() - pending_dance_music_.request_time).toSec() > dance_music_pending_timeout_)
+      {
+        ROS_WARN("[JoyControl] Dance music pending timeout: %s", pending_dance_music_.dance_name.c_str());
+        clearDanceMusicPending();
+        return;
+      }
+      if (msg->dance_name != pending_dance_music_.dance_name)
+      {
+        return;
+      }
+      if (msg->state != "started" && msg->state != "running")
+      {
+        return;
+      }
+
+      const bool new_run = msg->run_id > pending_dance_music_.previous_run_id;
+      const bool state_after_request = msg->header.stamp >= pending_dance_music_.request_time;
+      if (!new_run || !state_after_request)
+      {
+        return;
+      }
+
+      pending_dance_music_.played = true;
+      const std::string dance_name = msg->dance_name;
+      std::thread([this, dance_name]() {
+        playDanceMusic(dance_name);
+      }).detach();
+      clearDanceMusicPending();
+    }
+
     void callTriggerDanceSrv()
     {
       std::cout << "trigger callTriggerDanceSrv" << std::endl;
@@ -1712,6 +1998,18 @@ namespace ocs2
     void callSwitchToDanceSrvByName(const std::string& dance_data)
     {
       ROS_INFO("[JoyControl] Switching to dance: %s", dance_data.c_str());
+      std::string current_controller;
+      const bool got_current_controller = getCurrentControllerName(current_controller);
+      prepareDanceMusicPending(dance_data);
+      if (got_current_controller && current_controller == dance_data)
+      {
+        if (!restartDanceController(dance_data))
+        {
+          clearDanceMusicPending();
+        }
+        return;
+      }
+
       kuavo_msgs::SetString srv;
       srv.request.data = dance_data;
       if (switch_dance_client_.call(srv) && srv.response.success)
@@ -1721,6 +2019,7 @@ namespace ocs2
       else
       {
         ROS_ERROR("[JoyControl] Dance switch failed (data=%s)", dance_data.c_str());
+        clearDanceMusicPending();
       }
     }
 
@@ -1901,6 +2200,18 @@ namespace ocs2
       }
     }
 
+    bool getCurrentControllerName(std::string& current_controller)
+    {
+      kuavo_msgs::getControllerList srv;
+      if (get_controller_list_client_.call(srv) && srv.response.success)
+      {
+        current_controller = srv.response.current_controller;
+        return true;
+      }
+      ROS_WARN("[JoyControl] Failed to get current controller name");
+      return false;
+    }
+
     bool getControllerList(std::vector<std::string>& controller_list)
     {
       kuavo_msgs::getControllerList srv;
@@ -1995,9 +2306,12 @@ namespace ocs2
     ros::Subscriber policy_sub_;
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
+    ros::Subscriber controller_switch_event_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
+    ros::Subscriber dance_trajectory_state_sub_;
     int arm_ctrl_mode_;
     bool is_rl_controller_{false};  // 当前是否为RL控制器
+    bool is_amp_controller_{false};  // 当前是否为AMP控制器
     ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
@@ -2052,6 +2366,7 @@ namespace ocs2
     
     // 遥感/方向键轴输入开关（默认允许）
     bool axes_input_enabled_{true};
+    bool posture_control_mode_{false};
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
     
@@ -2070,6 +2385,17 @@ namespace ocs2
     ros::ServiceClient set_fall_down_state_client_;
     // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
     ros::ServiceClient switch_dance_client_;
+    struct DanceMusicPending
+    {
+      bool active{false};
+      std::string dance_name;
+      ros::Time request_time;
+      uint32_t previous_run_id{0};
+      bool played{false};
+    };
+    DanceMusicPending pending_dance_music_;
+    std::map<std::string, uint32_t> last_dance_run_id_;
+    const double dance_music_pending_timeout_{10.0};
     bool robot_launched_{false};
     ros::Time last_status_check_time_;
     bool real_{false};

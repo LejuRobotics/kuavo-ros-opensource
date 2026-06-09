@@ -104,14 +104,17 @@ namespace humanoid_controller
     initArmControl(urdf_path);
     initWaistControl();
 
-    // AMP 模式切换服务：允许外部设置 0/1/2 三种模式
-    change_amp_mode_srv_ = nh_.advertiseService("/humanoid_controller/change_amp_mode",
+    // AMP 模式切换服务：每个 AMP 控制器独立命名，避免多实例抢占同一服务
+    const std::string change_amp_mode_srv_name =
+        "/humanoid_controller/" + name_ + "/change_amp_mode";
+    change_amp_mode_srv_ = nh_.advertiseService(change_amp_mode_srv_name,
                                                 &AmpWalkController::changeAmpModeCallback,
                                                 this);
 
     initialized_ = true;
 
-    ROS_INFO("[%s] AmpWalkController initialized", name_.c_str());
+    ROS_INFO("[%s] AmpWalkController initialized (change_amp_mode: %s)",
+             name_.c_str(), change_amp_mode_srv_name.c_str());
     return true;
   }
 
@@ -1087,7 +1090,56 @@ namespace humanoid_controller
                                      const Eigen::VectorXd& measuredRbdState,
                                      kuavo_msgs::jointCmd& joint_cmd)
   {
+    if (gait_receiver_)
+    {
+      if (is_roban_)
+      {
+        // amp_mode=1 时，将站立命令切到“复用行走指令”语义（x/y/yaw 三通道）。
+        gait_receiver_->setReuseWalkCommandInStance(amp_mode_ == 1);
+      }
+    }
+
     gait_receiver_->update(time, baseStateRL_, feetPositionsRL_);
+    
+    if (ros_logger_ && feetPositionsRL_.size() >= 24)
+    {
+      ros_logger_->publishVector("/rl_controller/feet_positions", feetPositionsRL_);
+
+      Eigen::Vector2d foot_heights = Eigen::Vector2d::Zero();
+      Eigen::Vector3d left_foot_center = Eigen::Vector3d::Zero();
+      Eigen::Vector3d right_foot_center = Eigen::Vector3d::Zero();
+      for (int i = 0; i < 4; ++i)
+      {
+        left_foot_center += feetPositionsRL_.segment<3>(3 * i);
+        right_foot_center += feetPositionsRL_.segment<3>(12 + 3 * i);
+        foot_heights(0) += feetPositionsRL_(3 * i + 2);
+        foot_heights(1) += feetPositionsRL_(12 + 3 * i + 2);
+      }
+      left_foot_center /= 4.0;
+      right_foot_center /= 4.0;
+      foot_heights /= 4.0;
+      ros_logger_->publishVector("/rl_controller/feet_heights", foot_heights);
+
+      const Eigen::Vector3d foot_center_diff_world = left_foot_center - right_foot_center;
+      ros_logger_->publishValue("/rl_controller/feet_x_diff_world", foot_center_diff_world.x());
+      if (baseStateRL_.size() >= 4)
+      {
+        const double yaw = baseStateRL_(3);
+        const double foot_x_diff_body = foot_center_diff_world.x() * std::cos(yaw) +
+                                        foot_center_diff_world.y() * std::sin(yaw);
+        ros_logger_->publishValue("/rl_controller/feet_x_diff_body", foot_x_diff_body);
+      }
+
+      double min_height = feetPositionsRL_(2);
+      for (int i = 1; i < 8; ++i)
+      {
+        min_height = std::min(min_height, feetPositionsRL_(3 * i + 2));
+      }
+      Eigen::Vector2d foot_lift_heights;
+      foot_lift_heights << foot_heights(0) - min_height,
+                            foot_heights(1) - min_height;
+      ros_logger_->publishVector("/rl_controller/feet_lift_heights", foot_lift_heights);
+    }
     // 这里只做「用当前 actions_ 计算 actuation，再映射到 joint_cmd」
     Eigen::VectorXd actuation = updateRLcmd(measuredRbdState);
     actionToJointCmd(actuation, measuredRbdState, joint_cmd);

@@ -15,7 +15,7 @@
 
 namespace mujoco_node {
 
-// LinkerO6灵巧手实现，控制范围0-255（0=完全张开，255=完全握紧）
+// LinkerO6灵巧手实现，控制范围0-100（0=完全张开，100=完全握紧）
 // 控制通道定义：[拇指横摆, 拇指弯曲, 食指弯曲, 中指弯曲, 无名指弯曲, 小指弯曲]
 class LinkerO6Hand : public MujocoHandBase {
 public:
@@ -102,7 +102,7 @@ public:
         // 拇指横摆：ctrl_cmd_[1]，单独控制无耦合
         double yaw_curl = ctrl_cmd_[1];
         auto yaw_range = ctrllimited_map_[*iter];
-        double yaw_command = yaw_range[0] + (yaw_curl / 255.0) * (yaw_range[1] - yaw_range[0]);
+        double yaw_command = yaw_range[0] + (yaw_curl / 100.0) * (yaw_range[1] - yaw_range[0]);
         yaw_command = std::clamp(yaw_command, yaw_range[0], yaw_range[1]);
         ctrl_cmd.push_back(yaw_command);
         iter++;
@@ -136,14 +136,14 @@ public:
 
     /**
      * @brief 设置手指位置
-     * @param positions 数组范围0~255，索引0-5分别对应：
+     * @param positions 数组范围0~100，索引0-5分别对应：
      * 0: 拇指弯曲, 1: 拇指横摆, 2: 食指, 3: 中指, 4: 无名指, 5: 小指
      */
     void setFingerPositions(const UnsignedFingerArray& positions) override {
         constexpr int finger_count = std::tuple_size<UnsignedFingerArray>::value;
         for (int i = 0; i < finger_count; i++) {
-            // 指令反转：输入position=255→张开（控制值0），position=0→闭合（控制值255）
-            ctrl_cmd_[i] = static_cast<FingerArray::value_type>(255 - positions[i]);
+            // 直接使用输入值，0=张开，100=闭合
+            ctrl_cmd_[i] = static_cast<FingerArray::value_type>(positions[i]);
         }
         ctrl_updated_ = true;
     }
@@ -173,17 +173,17 @@ private:
     FingerStatus finger_status_;
     // 控制指令更新标志
     std::atomic<bool> ctrl_updated_{false};
-    // 控制指令缓存，0-255范围
-    // 初始值对应：大拇指弯曲输入155（半弯），其余输入255（完全张开）
-    FingerArray ctrl_cmd_{100, 100, 0, 0, 0, 0};
+    // 控制指令缓存，0-100范围
+    // 初始值对应：所有手指输入0（完全张开）
+    FingerArray ctrl_cmd_{0, 0, 0, 0, 0, 0};
 
     /**
-     * @brief 将关节弧度转换为0-255的弯曲值
+     * @brief 将关节弧度转换为0-100的弯曲值
      * @param j1_val 近指关节角度
      * @param j1_range 近指关节范围 [min, max]
      * @param j2_val 远指关节角度
      * @param j2_range 远指关节范围 [min, max]
-     * @return 归一化后的弯曲值 0-255
+     * @return 归一化后的弯曲值 0-100
      */
     double Joints2Curl(double j1_val, const std::array<double, 2>& j1_range,
                       double j2_val, const std::array<double, 2>& j2_range) {
@@ -195,13 +195,13 @@ private:
         double norm2 = (j2_val - j2_range[0]) / (j2_range[1] - j2_range[0]);
         norm2 = std::clamp(norm2, 0.0, 1.0);
 
-        // 平均后转换为0-255范围
-        return (norm1 + norm2) / 2.0 * 255.0;
+        // 平均后转换为0-100范围
+        return (norm1 + norm2) / 2.0 * 100.0;
     }
 
     /**
-     * @brief 将0-255的弯曲值转换为关节控制弧度
-     * @param curl 0-255的弯曲值
+     * @brief 将0-100的弯曲值转换为关节控制弧度
+     * @param curl 0-100的弯曲值
      * @param j1_range 近指关节范围 [min, max]
      * @param j2_range 远指关节范围 [min, max]
      * @param is_thumb 是否是拇指关节，使用不同的耦合比例
@@ -209,11 +209,11 @@ private:
      */
     std::array<double, 2> Curl2Joints(double curl, const std::array<double, 2>& j1_range,
                                     const std::array<double, 2>& j2_range, bool is_thumb = false) {
-        // 限制输入范围0-255
-        curl = std::clamp(curl, 0.0, 255.0);
+        // 限制输入范围0-100
+        curl = std::clamp(curl, 0.0, 100.0);
 
         // 转换为归一化值 0-1
-        double norm = curl / 255.0;
+        double norm = curl / 100.0;
 
         // 近指关节直接映射到范围
         double j1_command = j1_range[0] + norm * (j1_range[1] - j1_range[0]);

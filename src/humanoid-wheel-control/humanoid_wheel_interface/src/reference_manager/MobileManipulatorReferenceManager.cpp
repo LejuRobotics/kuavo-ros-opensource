@@ -670,26 +670,38 @@ namespace mobile_manipulator {
 
     auto targetVelocityCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
-      cmdvel_mtx_.lock();
-      isCmdVelUpdated_ = true;
-      isCmdVelTimeUpdate_ = true;
-      cmdVel_[0] = msg->linear.x;
-      cmdVel_[1] = msg->linear.y;
-      cmdVel_[2] = msg->angular.z;
-      cmdvel_mtx_.unlock();
+      // 直接判断 msg 中的速度是否非零
+      if(fabs(msg->linear.x) > 1e-6 || 
+         fabs(msg->linear.y) > 1e-6 || 
+         fabs(msg->angular.z) > 1e-6)
+      {
+        cmdvel_mtx_.lock();
+        isCmdVelUpdated_ = true;
+        isCmdVelTimeUpdate_ = true;
+        cmdVel_[0] = msg->linear.x;
+        cmdVel_[1] = msg->linear.y;
+        cmdVel_[2] = msg->angular.z;
+        cmdvel_mtx_.unlock();
+      }
     };
     targetVelocitySubscriber_ =
         nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_vel", 1, targetVelocityCallback);
     
     auto targetVelocityWorldCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
-      cmdvelWorld_mtx_.lock();
-      isCmdVelWorldUpdated_ = true;
-      isCmdVelTimeUpdate_ = true;
-      cmdVelWorld_[0] = msg->linear.x;
-      cmdVelWorld_[1] = msg->linear.y;
-      cmdVelWorld_[2] = msg->angular.z;
-      cmdvelWorld_mtx_.unlock();
+      // 直接判断 msg 中的速度是否非零
+      if(fabs(msg->linear.x) > 1e-6 || 
+         fabs(msg->linear.y) > 1e-6 || 
+         fabs(msg->angular.z) > 1e-6)
+      {
+        cmdvelWorld_mtx_.lock();
+        isCmdVelWorldUpdated_ = true;
+        isCmdVelTimeUpdate_ = true;
+        cmdVelWorld_[0] = msg->linear.x;
+        cmdVelWorld_[1] = msg->linear.y;
+        cmdVelWorld_[2] = msg->angular.z;
+        cmdvelWorld_mtx_.unlock();
+      }
     };
     targetVelocityWorldSubscriber_ =
         nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_vel_world", 1, targetVelocityWorldCallback);
@@ -2608,8 +2620,8 @@ namespace mobile_manipulator {
     double desiredTime = 0.0;
     LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(req.planner_index);
     
-    if(cmdType != LEFT_ARM_WORLD_CMD || cmdType != RIGHT_ARM_WORLD_CMD ||
-       cmdType != LEFT_ARM_LOCAL_CMD || cmdType != RIGHT_ARM_LOCAL_CMD)
+    if(cmdType != LEFT_ARM_WORLD_CMD && cmdType != RIGHT_ARM_WORLD_CMD &&
+       cmdType != LEFT_ARM_LOCAL_CMD && cmdType != RIGHT_ARM_LOCAL_CMD)
     {
       desiredTime = timedPlannerScheduler_.calcTimedTrajectory(req.planner_index, eigenCmdVec, req.desireTime);
     }
@@ -2745,8 +2757,8 @@ namespace mobile_manipulator {
         double desiredTime = 0.0;
         LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(timedCmd.planner_index);
 
-        if(cmdType != LEFT_ARM_WORLD_CMD || cmdType != RIGHT_ARM_WORLD_CMD ||
-           cmdType != LEFT_ARM_LOCAL_CMD || cmdType != RIGHT_ARM_LOCAL_CMD)
+        if(cmdType != LEFT_ARM_WORLD_CMD && cmdType != RIGHT_ARM_WORLD_CMD &&
+           cmdType != LEFT_ARM_LOCAL_CMD && cmdType != RIGHT_ARM_LOCAL_CMD)
         {
           desiredTime = timedPlannerScheduler_.calcTimedTrajectory(timedCmd.planner_index, eigenCmdVec, timedCmd.desireTime);
         }
@@ -3596,7 +3608,7 @@ namespace mobile_manipulator {
     // 更新速度指令，通过互斥锁维护数据一致性
     if(cmdVel_.isZero(1e-6) && cmdVel_prevTargetVel_.isZero(1e-6))
     {
-      isCmdVelUpdated_ = false;
+      // isCmdVelUpdated_ = false;
     }
     else
     {
@@ -3607,7 +3619,7 @@ namespace mobile_manipulator {
 
     if(cmdVelWorld_.isZero(1e-6) && cmdVel_prevTargetVel_.isZero(1e-6))
     {
-      isCmdVelWorldUpdated_ = false;
+      // isCmdVelWorldUpdated_ = false;
     }
     else
     {
@@ -3632,7 +3644,7 @@ namespace mobile_manipulator {
 
       // 判断速度为0，跳出速度控制
       static int zero_vel_cnt;
-      if(zero_vel_cnt < 5)
+      if(zero_vel_cnt < int(0.5 / ruckigDt_))
       {
         if(cmdVel_prevTargetVel_.isZero(1e-6)) zero_vel_cnt++;
         else zero_vel_cnt = 0;
@@ -3664,7 +3676,7 @@ namespace mobile_manipulator {
 
       // 判断速度为0，跳出速度控制
       static int zero_vel_cnt;
-      if(zero_vel_cnt < 5)
+      if(zero_vel_cnt < int(0.5 / ruckigDt_))
       {
         if(cmdVel_prevTargetVel_.isZero(1e-6)) zero_vel_cnt++;
         else zero_vel_cnt = 0;

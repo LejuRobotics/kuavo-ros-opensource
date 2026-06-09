@@ -10,26 +10,28 @@
 
 ### 常用用法
 
+在仓库根目录执行：
+
 - 采集（capture_to_csv，手动触发）：
 
 ```bash
-roslaunch /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/demos/kuavo_left_wrist/kuavo_left_wrist_demo.launch \
+roslaunch src/Camera_Calibration/demos/kuavo_left_wrist/kuavo_left_wrist_demo.launch \
   do_capture_to_csv:=true do_optimize_from_csv:=false \
-  csv_dir:=/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_left_wrist
+  csv_dir:=src/Camera_Calibration/output_csv/kuavo_left_wrist
 ```
 
 - 采集（推荐：一键脚本自动下发 + 自动触发采样）：
 
 ```bash
-bash /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/run_chessboard_calibration.sh capture
+bash src/Camera_Calibration/run_chessboard_calibration.sh capture
 ```
 
 - 优化（optimize_from_csv）：
 
 ```bash
-roslaunch /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/demos/kuavo_left_wrist/kuavo_left_wrist_demo.launch \
+roslaunch src/Camera_Calibration/demos/kuavo_left_wrist/kuavo_left_wrist_demo.launch \
   do_capture_to_csv:=false do_optimize_from_csv:=true \
-  csv_dir:=/home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_left_wrist
+  csv_dir:=src/Camera_Calibration/output_csv/kuavo_left_wrist
 ```
 
 > 优化产物默认写到：`src/Camera_Calibration/output/kuavo_left_wrist/`（包括 `calibration.yaml`、误差图、`optimization_metrics.md` 等）。

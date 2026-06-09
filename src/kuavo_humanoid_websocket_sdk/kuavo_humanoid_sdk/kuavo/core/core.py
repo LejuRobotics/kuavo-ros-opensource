@@ -748,7 +748,38 @@ class KuavoRobotCore:
 
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         return self._control.arm_fk(q)
-    
+
+    def arm_ik_free(self,
+                    l_eef_pose: KuavoPose,
+                    r_eef_pose: KuavoPose,
+                    l_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    r_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None,
+                    params: KuavoIKParams = None) -> list:
+        return self._control.arm_ik_free(l_eef_pose, r_eef_pose, l_elbow_pos_xyz, r_elbow_pos_xyz, arm_q0, params)
+
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        return self._control.control_hand_wrench(left_wrench, right_wrench)
+
+    """ Wheel-Arm """
+    def control_torso_pose(self, x: float, y: float, z: float,
+                           roll: float, pitch: float, yaw: float) -> bool:
+        return self._control.control_torso_pose(x, y, z, roll, pitch, yaw)
+
+    def control_wheel_lower_joint(self, joint_traj: list) -> bool:
+        return self._control.control_wheel_lower_joint(joint_traj)
+
+    """ Motor Parameter """
+    def change_motor_param(self, motor_param: list) -> Tuple[bool, str]:
+        return self._control.change_motor_param(motor_param)
+
+    def get_motor_param(self) -> Tuple[bool, list]:
+        return self._control.get_motor_param()
+
+    """ Base Pitch Limit """
+    def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
+        return self._control.enable_base_pitch_limit(enable)
+
     """ Callbacks """
     def _humanoid_gait_changed(self, current_time: float, gait_name: str):
         # command_pose/command_pose_world are SDK sub-states of 'stance' gait,

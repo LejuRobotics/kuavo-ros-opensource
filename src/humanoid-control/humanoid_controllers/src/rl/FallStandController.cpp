@@ -417,6 +417,14 @@ namespace humanoid_controller
       updateFallStandInterpolation(time, sensor_data, measuredRbdState, joint_cmd);
       if (request_for_stand_up_ && is_fall_stand_interpolating_complete_)
       {
+        // 进入STAND_UP状态前，恢复之前override的use_default_motor_csp_kpkd_，使其不再使用默认kpkd
+        if (fallstand_override_use_default_kpkd_active_)
+        {
+          use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
+          fallstand_override_use_default_kpkd_active_ = false;
+          ROS_INFO("[%s] FallStand: entering STAND_UP state, restored use_default_motor_csp_kpkd_=%d", name_.c_str(), static_cast<int>(use_default_motor_csp_kpkd_));
+        }
+
         // 根据当前机体姿态自动判断并切换模型
         autoSelectAndSwitchModel();
         
@@ -1070,8 +1078,8 @@ namespace humanoid_controller
           double q_des  = joint_cmd.joint_q[i];
           double v_des  = joint_cmd.joint_v[i]; // 目前为0
 
-          double kp = 10;
-          double kd = 1;
+          double kp = 50;
+          double kd = 2;
 
           joint_cmd.tau[i] = kp * (q_des - q_meas) + kd * (v_des - v_meas);
         }
@@ -1102,6 +1110,12 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] sensor_data.jointPos_ size(%ld) < total_body_joints(%d), skip interpolation.",
                name_.c_str(), sensor_data.jointPos_.size(), total_body_joints);
+      // 恢复之前可能被覆盖的 use_default_motor_csp_kpkd_ 标志
+      if (fallstand_override_use_default_kpkd_active_)
+      {
+        use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
+        fallstand_override_use_default_kpkd_active_ = false;
+      }
       is_fall_stand_interpolating_ = false;
       is_fall_stand_interpolating_complete_ = false;
       return;
@@ -1129,6 +1143,16 @@ namespace humanoid_controller
     fall_stand_interp_start_time_ = time.toSec();
     is_fall_stand_interpolating_ = true;
     is_fall_stand_interpolating_complete_ = false;
+    // 在开始插值时，如果是实物，则临时设置 use_default_motor_csp_kpkd_ = true
+    if (is_real_ && !fallstand_override_use_default_kpkd_active_)
+    {
+      // 保存之前的值
+      fallstand_prev_use_default_motor_csp_kpkd_ = use_default_motor_csp_kpkd_;
+      // 强制使用默认 kuavo.json 中的 kp/kd，这样 replaceDefaultEcMotorPdoGait 在后续流程中会将 kp/kd 恢复为默认值
+      use_default_motor_csp_kpkd_ = true;
+      fallstand_override_use_default_kpkd_active_ = true;
+      ROS_INFO("[%s] FallStand: temporarily set use_default_motor_csp_kpkd_ = true for interpolation", name_.c_str());
+    }
     
     std::cout << "[FallStandInterpolation] start, required_time: " << fall_stand_required_time_
               << " s, joints: " << total_body_joints << " fall_stand_start_pos_: " << fall_stand_start_pos_.transpose() 
@@ -1448,10 +1472,3 @@ namespace humanoid_controller
 
 
 } // namespace humanoid_controller
-
-
-
-
-
-
-

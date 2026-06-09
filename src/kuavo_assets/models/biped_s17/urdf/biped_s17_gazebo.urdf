@@ -7,7 +7,7 @@
   <link name="base_link">
     <inertial>
       <origin xyz="0.00202324 -0.00003822 -0.12282710" rpy="0 0 0"/>
-      <mass value="5.27737344"/>
+      <mass value="6.61137344"/>
       <inertia ixx="0.02656560" ixy="0.00001678" ixz="-0.00000028"
                iyy="0.01821248" iyz="-0.00000269"
                izz="0.02080739"/>
@@ -34,10 +34,10 @@
       </geometry>
     </collision>
   </link>
-  <joint name="dummy_to_base_link" type="fixed">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
   </joint>
   <link name="torso">
     <inertial>

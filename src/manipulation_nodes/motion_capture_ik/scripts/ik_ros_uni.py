@@ -5,7 +5,7 @@ import signal
 import rospy
 import argparse
 import argparse
-from std_msgs.msg import Float32, Float32MultiArray, Float64MultiArray, Int32, Bool
+from std_msgs.msg import Float32, Float32MultiArray, Float64MultiArray, Int32, Bool, Float64
 from sensor_msgs.msg import JointState
 from handcontrollerdemorosnode.msg import armPoseWithTimeStamp
 from kuavo_msgs.msg import robotHandPosition
@@ -66,6 +66,7 @@ from kuavo_msgs.msg import (
     twoArmHandPose,
     twoArmHandPoseCmd,
 )
+from ocs2_msgs.msg import mpc_observation
 
 from tools.utils import get_package_path, ArmIdx, IkTypeIdx, rotation_matrix_diff_in_angle_axis, limit_value
 from tools.drake_trans import rpy_to_matrix
@@ -117,6 +118,7 @@ JODELL = "jodell"
 LEJUCLAW = "lejuclaw"
 QIANGNAO_TOUCH = "qiangnao_touch"
 REVO2 = "revo2"
+LINKER_HAND = "linker_hand"
 
 control_finger_type = 0
 control_torso = 0
@@ -152,6 +154,8 @@ class IkRos:
         self.__button_y_last = False
         self.__frozen_left_hand_position = [0 for i in range(6)]
         self.__frozen_right_hand_position = [0 for i in range(6)]
+        self.__robot_walking_status = False
+        self.__arm_control_mode = 0
         self.__frozen_claw_pos = [0.0, 0.0]
         self.__arm_dof = num_arm_joints_var
         self.__single_arm_dof = self.__arm_dof//2
@@ -184,6 +188,15 @@ class IkRos:
                 print("[IkRos] 机器人类型为双足")
                 if self.only_half_up_body:
                      print("✅采用用半身模式")
+        else:
+            self.robot_type = 0
+
+        # 轮臂：用 /mobile_manipulator_mpc_observation 的 time（MPC 内部时间）判断是否已运行足够久（#3009）
+        self._wheel_mpc_obs_time = None
+        self._wheel_mm_mpc_min_internal_time = rospy.get_param("~wheel_mm_mpc_min_internal_time", 3.0)
+        self._wheel_mm_mpc_observation_topic = rospy.get_param(
+            "~wheel_mm_mpc_observation_topic", "/mobile_manipulator_mpc_observation"
+        )
 
         self.use_arm_collision = rospy.get_param('~use_arm_collision', False)
         # 添加服务
@@ -242,10 +255,24 @@ class IkRos:
         self.optimized_state_sub = rospy.Subscriber(
             "/humanoid_controller/optimizedState_wbc_mrt_origin", Float64MultiArray, self.optimized_state_callback, queue_size=10
         )
+
+        # 轮臂：订阅 MPC observation，用 msg.time（MPC 内部时间）判断是否可发 mm / 切手臂模式（#3009）
+        self._wheel_mpc_obs_sub = None
+        if self.robot_type == 1:
+            self._wheel_mpc_obs_sub = rospy.Subscriber(
+                self._wheel_mm_mpc_observation_topic,
+                mpc_observation,
+                self.wheel_mpc_observation_callback,
+                queue_size=10,
+            )
         
         # 订阅停止机器人信号
         self.stop_robot_sub = rospy.Subscriber(
             "/stop_robot", Bool, self.stop_robot_callback, queue_size=1
+        )
+
+        self.robot_walking_status_sub = rospy.Subscriber(
+            "/robot_walking_status", Bool, self.robot_walking_status_callback, queue_size=1
         )
         
         self.arm_mode_changing = False
@@ -309,7 +336,8 @@ class IkRos:
                 JODELL: JODELL,
                 LEJUCLAW: LEJUCLAW,
                 QIANGNAO_TOUCH:QIANGNAO_TOUCH,
-                REVO2: REVO2
+                REVO2: REVO2,
+                LINKER_HAND: LINKER_HAND
             }
             if end_effector_type in end_effector_mapping:
                 self.end_effector_type = end_effector_mapping[end_effector_type]
@@ -342,6 +370,7 @@ class IkRos:
             self.arm_control_mode_callback
         )
         self.__need_reset_ik_guess = False  # 标志是否需要重置IK初始猜测
+        self.__first_change_arm_mode = True  # 标志是否为第一次切换手臂模式
 
         self.run()
         self.ik_thread.join()
@@ -512,6 +541,20 @@ class IkRos:
             print("[ik]: OK-guesture recieved!!!")
 
         if self.__send_srv:
+            if self.robot_type == 1:
+                rospy.loginfo(
+                    "[IkRos] 轮臂: 等待 %s 中 MPC time > %.1fs 后再切换手臂模式（#3009）...",
+                    self._wheel_mm_mpc_observation_topic,
+                    self._wheel_mm_mpc_min_internal_time,
+                )
+                while not self.stop_event.is_set() and not rospy.is_shutdown():
+                    if self._wheel_mpc_stable_for_mm_cmd():
+                        rospy.loginfo("[IkRos] 轮臂: MPC 内部时间已满足，发送手臂控制模式")
+                        break
+                    rate.sleep()
+                if self.stop_event.is_set() or rospy.is_shutdown():
+                    print("[ik]: Stop or shutdown before MPC ready, exit.")
+                    return
             print("[ik]: Send start service signal to robot, wait for response.")
             self.change_arm_ctrl_mode(2)
             if self.robot_type == 1:
@@ -837,8 +880,10 @@ class IkRos:
         right_finger_joints = self.quest3_arm_info_transformer.get_finger_joints("Right")
         self.hand_finger_data = [left_finger_joints, right_finger_joints]
         
-        # 发布/mm/two_arm_hand_pose_cmd话题 - 直接使用获取到的pose数据
-        if self.robot_type == 1 and self.quest3_arm_info_transformer.is_runing and self.__target_pose is not None and self.__target_pose_right is not None:
+        # 发布/mm/two_arm_hand_pose_cmd话题 - 直接使用获取到的pose数据（轮臂需 mpc_observation.time > 阈值，避免 #3009）
+        if (self.robot_type == 1 and self.quest3_arm_info_transformer.is_runing
+                and self._wheel_mpc_stable_for_mm_cmd()
+                and self.__target_pose is not None and self.__target_pose_right is not None):
             eef_pose_msg = twoArmHandPoseCmd()
             eef_pose_msg.frame = 3
             # self.__target_pose 是 (hand_pos, hand_quat) 元组
@@ -1095,7 +1140,7 @@ class IkRos:
         right_hand_position = [0 for i in range(6)]
         robot_hand_position = robotHandPosition()
         robot_hand_position.header.stamp = rospy.Time.now()
-        if self.end_effector_type == QIANGNAO or self.end_effector_type == QIANGNAO_TOUCH or self.end_effector_type == REVO2:
+        if self.end_effector_type == QIANGNAO or self.end_effector_type == QIANGNAO_TOUCH or self.end_effector_type == REVO2 or self.end_effector_type == LINKER_HAND:
             if joyStick_data is not None:
                 if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
                     print(f"\033[91mButton Y is pressed.\033[0m")
@@ -1129,6 +1174,11 @@ class IkRos:
                         for i in range(0, 6):
                             right_hand_position[i] = 100 
                         right_hand_position[2] = 0
+                    
+                    if self.end_effector_type == LINKER_HAND and self.__robot_walking_status:
+                        left_hand_position[0] = left_hand_position[0] if joyStick_data.left_first_button_touched else 100
+                        right_hand_position[0] = right_hand_position[0] if joyStick_data.right_first_button_touched else 100
+
                     # Store current values for freezing
                     self.__frozen_left_hand_position = left_hand_position.copy()
                     self.__frozen_right_hand_position = right_hand_position.copy()
@@ -1245,20 +1295,35 @@ class IkRos:
         if len(msg.data) >= 2:
             current_mode = int(msg.data[0])  # 当前模式
             new_mode = int(msg.data[1])      # 新模式
+            self.__arm_control_mode = current_mode
             
-            # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测
-            if current_mode != new_mode:
+
+            # 检测模式切换：当data[0] != data[1]时表示正在切换，重置IK初始猜测。且只在模式切换刚开始时重置IK初始猜测。
+            if current_mode != new_mode and self.__first_change_arm_mode:
+                self.__first_change_arm_mode = False
                 self.__need_reset_ik_guess = True
                 self.arm_mode_changing = True
-            else:
+            elif current_mode == new_mode and not self.__first_change_arm_mode:
                 # 模式切换完成，关闭arm_mode_changing标志
                 if not self.only_half_up_body:
                     self.arm_mode_changing = False
-                
-            
+                    self.__first_change_arm_mode = True
+
     def sensor_data_raw_callback(self, msg):
         self.sensor_data_raw = msg
     
+    def wheel_mpc_observation_callback(self, msg):
+        """轮臂 MPC 观测：time 为 MPC 模块内部时间，从 0 递增"""
+        self._wheel_mpc_obs_time = float(msg.time)
+
+    def _wheel_mpc_stable_for_mm_cmd(self):
+        """轮臂：仅当 mobile_manipulator_mpc_observation.time 大于阈值时才允许发 mm / 切手臂模式（kuavodevlab#3009）。"""
+        if self.robot_type != 1:
+            return True
+        if self._wheel_mpc_obs_time is None:
+            return False
+        return self._wheel_mpc_obs_time > self._wheel_mm_mpc_min_internal_time
+
     def optimized_state_callback(self, msg):
         """接收MPC优化后的状态数据"""
         self.optimized_state = np.array(msg.data)
@@ -1296,6 +1361,9 @@ class IkRos:
             rospy.loginfo("[IkRos] 收到停止机器人信号，正在退出程序...")
             self.stop_event.set()  # 设置停止事件
             rospy.signal_shutdown("Received stop signal")  # 触发ROS节点关闭
+
+    def robot_walking_status_callback(self, msg):
+        self.__robot_walking_status = msg.data
 
     def set_arm_mode_changing_callback(self, req):
         """服务回调函数，设置arm_mode_changing为True"""

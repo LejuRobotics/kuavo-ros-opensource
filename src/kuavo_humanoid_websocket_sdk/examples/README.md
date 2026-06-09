@@ -84,6 +84,43 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
+### arm_ik_free_example.py (P1)
+
+**演示如何使用自由空间逆运动学（arm_ik_free）进行 IK 求解。**
+
+与 `arm_ik` 不同，`arm_ik_free` 支持指定肘部参考位置和自定义 IK 优化参数，适用于更复杂的规划场景。示例代码展示了：
+1. 基本用法 (默认参数)：
+   - 仅指定左右手末端位姿进行 IK 求解
+   - 使用 `KuavoPose` 构造目标位姿
+2. 指定肘部参考位置：
+   - 传递 `left_elbow_pos_xyz` 和 `right_elbow_pos_xyz` 引导肘部方向
+   - 帮助 IK 收敛到期望的手臂姿态
+3. 自定义优化参数：
+   - 使用 `KuavoIKParams` 调整最优性/可行性容差和迭代次数
+   - 设置 `pos_cost_weight=0.0` 以追求更高精度的末端位置
+
+**注意：** 初始化必须使用 `KuavoSDK.Options.WithIK`，否则 IK 服务不可用。
+
+---
+
+### hand_wrench_example.py (P1)
+
+**演示如何通过 `control_hand_wrench` 对机器人末端执行器进行力/力矩控制。**
+
+通过 6 维力控指令 `[Fx, Fy, Fz, Tx, Ty, Tz]` 分别控制左右手末端的力和力矩。示例代码展示了：
+1. 零力控制：
+   - 发送零向量清除力控指令，使末端松劲
+2. Z 轴力控制（抬升）：
+   - 双手各施加 5N 的正 Z 轴力，模拟抬升动作
+3. X 轴力控制（前推）：
+   - 双手各施加 5N 的正 X 轴力，模拟前推动作
+4. Z 轴力矩控制（拧转）：
+   - 左手 Tz=1N·m，右手 Tz=-1N·m，模拟拧转动作
+
+**注意：** 力控指令中 Fx/Fy/Fz 单位为牛顿 (N)，Tx/Ty/Tz 单位为牛顿·米 (N·m)。
+
+---
+
 ### ctrl_head_example.py
 
 **演示如何通过SDK控制机器人头部的俯仰（pitch）和偏航（yaw）角度，实现头部的上下和左右运动。**
@@ -364,6 +401,83 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
    - 标记大小
    - 位置和姿态信息
 3. 通过ID查询特定标记的数据
+
+---
+
+### motor_param_example.py (P2)
+
+**演示如何获取和修改电机 PID 参数，以及控制 base pitch 限位保护。**
+
+通过 `get_motor_param`、`change_motor_param` 和 `enable_base_pitch_limit` 实现电机参数读写和限位保护开关。示例代码展示了：
+1. 获取电机 PID 参数：
+   - 调用 `get_motor_param()` 获取所有电机的 Kp/Kd 参数
+   - 打印每个电机的当前 PID 配置
+2. 修改电机参数：
+   - 修改指定电机的 Kp 和 Kd 值
+   - 改完后恢复原值，确保不影响正常运行
+3. Base Pitch 限位保护：
+   - 调用 `enable_base_pitch_limit(True)` 开启限位
+   - 调用 `enable_base_pitch_limit(False)` 关闭限位
+
+---
+
+### cmd_pose_world_stamped_example.py (P2)
+
+**演示如何通过 `control_command_pose_world_stamped` 使用 TwistStamped 消息在 odom 坐标系下控制机器人位姿。**
+
+支持 dict 和 ROS TwistStamped 两种输入格式，控制机器人在世界坐标系下的平移和旋转。示例代码展示了：
+1. 使用 dict 格式：
+   - 构造 `{"twist": {"linear": {...}, "angular": {...}}}` 格式的 dict 消息
+   - 控制机器人前进和转向
+2. 使用 ROS TwistStamped 格式（需安装 `geometry_msgs`）：
+   - 直接传入 ROS TwistStamped 对象
+
+---
+
+### wheel_arm_example.py (P2)
+
+**演示轮臂机器人的控制接口，包括手臂模式切换、躯干位姿控制和下部关节控制。**
+
+通过 `wheel_control` 属性访问轮臂控制类，结合 `control_torso_pose` 和 `control_wheel_lower_joint` 实现完整的轮臂控制。示例代码展示了：
+1. 手臂模式切换：
+   - ArmFixed: 保持当前位置
+   - AutoSwing: 回零操作
+   - ExternalControl: 外部轨迹控制
+2. `reset_and_set_external()`：自动完成回零并切换到外部模式
+3. 躯干位姿控制 (`control_torso_pose`)：
+   - 六自由度位姿控制（x, y, z, roll, pitch, yaw）
+4. 下部关节控制 (`control_wheel_lower_joint`)：
+   - 控制 4 个下部关节的轨迹
+
+---
+
+### waist_pos_example.py (P0)
+
+**演示如何使用 `control_waist_pos` 通过列表接口控制机器人腰部旋转。**
+
+该接口与 ROS SDK 的 list 格式兼容，可直接传递列表参数控制腰部角度。示例代码展示了：
+1. 单角度控制：
+   - 传递 `[0.0]` 将腰部转到正前方
+   - 传递 `[30.0]` 将腰部左转 30 度
+   - 传递 `[-30.0]` 将腰部右转 30 度
+2. 循环摆动：
+   - 以 5 度为步长，从左到右、从右到左循环摆动
+   - 演示了角度序列控制的基本用法
+
+---
+
+### link_pose_example.py (P0)
+
+**演示如何获取机械臂关节链接的位置和完整位姿。**
+
+通过 `KuavoRobotTools` 的 `get_link_position` 和 `get_link_pose` 获取指定关节链接的三维位置和完整位姿（position + orientation）。示例代码展示了：
+1. 获取关节链接位置：
+   - 查询多个常见关节链接（如 `zarm_l1_link`、`zarm_l2_link` 等）的位置
+   - 在默认参考系 `base_link` 下查询
+2. 获取完整位姿：
+   - 使用 `get_link_pose` 同时获取位置和四元数姿态
+3. 切换参考坐标系：
+   - 演示在 `odom` 等不同参考系下查询
 
 ---
 

@@ -167,7 +167,19 @@ namespace ocs2
       a.setZero();
       // A = [M, -J^T, -S]
       // 决策变量顺序：x = [ddq_stateDim, f_contact, tau_armDim]
-      a.block(0, 0, info_.stateDim, info_.stateDim) = data.M;  // ddq的系数
+      matrix_t M = data.M;
+      // 保持底盘、下肢、上肢各自的对角块，但清零它们之间的耦合项
+      size_t base_dim = info_.stateDim - info_.armDim;
+      
+      // 清零底盘与下肢/上肢的耦合项
+      M.block(0, base_dim, base_dim, info_.armDim).setZero();
+      M.block(base_dim, 0, info_.armDim, base_dim).setZero();
+      
+      // 清零下肢与上肢的耦合项
+      M.block(base_dim, base_dim + lowJoint_nums_, lowJoint_nums_, arm_nums_).setZero();
+      M.block(base_dim + lowJoint_nums_, base_dim, arm_nums_, lowJoint_nums_).setZero();
+      
+      a.block(0, 0, info_.stateDim, info_.stateDim) = M;  // ddq的系数
       a.block(0, info_.stateDim, info_.stateDim, contact_force_size_) = -j_contact; // f_contact的系数
       a.block(0, info_.stateDim + contact_force_size_, info_.stateDim, info_.armDim) = -s; // tau的系数
 
@@ -201,8 +213,15 @@ namespace ocs2
       a.setZero();
       b.setZero();
       a.block(0, info_.stateDim-info_.armDim, lowJoint_nums_, lowJoint_nums_) = matrix_t::Identity(lowJoint_nums_, lowJoint_nums_);
-      b = lowJointKp_.cwiseProduct(qDesired_.tail(info_.armDim).head(lowJoint_nums_) - qMeasured_.tail(info_.armDim).head(lowJoint_nums_)) + 
-          lowJointKd_.cwiseProduct(vDesired_.tail(info_.armDim).head(lowJoint_nums_) - vMeasured_.tail(info_.armDim).head(lowJoint_nums_));
+      
+      // 计算位置和速度误差并进行故障检测和限幅处理
+      vector_t pos_error = qDesired_.tail(info_.armDim).head(lowJoint_nums_) - qMeasured_.tail(info_.armDim).head(lowJoint_nums_);
+      vector_t vel_error = vDesired_.tail(info_.armDim).head(lowJoint_nums_) - vMeasured_.tail(info_.armDim).head(lowJoint_nums_);
+      processLowJointErrorsWithSafe(pos_error, vel_error);
+      
+      // 计算 PD 控制量并限幅
+      b = lowJointKp_.cwiseProduct(pos_error) + lowJointKd_.cwiseProduct(vel_error);
+      b = b.cwiseMax(-20.0).cwiseMin(20.0);  // 加速度限幅 [-20, 20]
 
       return {a, b, matrix_t(), vector_t()};
     }
@@ -218,11 +237,106 @@ namespace ocs2
       a.setZero();
       b.setZero();
       a.block(0, info_.stateDim-arm_nums_, arm_nums_, arm_nums_) = matrix_t::Identity(arm_nums_, arm_nums_);
-      b = armKp.cwiseProduct(qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_)) +
-          armKd.cwiseProduct(vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_));
+      
+      // 计算位置和速度误差并进行故障检测和限幅处理
+      vector_t pos_error = qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_);
+      vector_t vel_error = vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_);
+      processArmJointErrorsWithSafe(pos_error, vel_error);
+      
+      // 计算 PD 控制量并限幅
+      b = armKp.cwiseProduct(pos_error) + armKd.cwiseProduct(vel_error);
+      b = b.cwiseMax(-300.0).cwiseMin(300.0);  // 加速度限幅 [-300, 300]
 
-      // qMeasured_; vMeasured_; info_.generalizedCoordinatesNum; 
       return {a, b, matrix_t(), vector_t()};
+    }
+    
+    void WbcBase::processArmJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error)
+    {
+      const double max_pos_jump = 0.5;   // 最大允许位置跳变 [rad]
+      const double max_pos_error = 0.017453293;  // 最大位置误差 [rad], 1度, 减少位置的主要作用
+      const double max_vel_error = 3.0; // 最大速度误差 [rad/s]
+      
+      static vector_t qMeasured_prev;
+      static vector_t vMeasured_prev;
+      static std::vector<bool> sensor_fault_flags(arm_nums_, false);
+      
+      // 初始化历史数据
+      if (qMeasured_prev.size() != arm_nums_) {
+        qMeasured_prev.resize(arm_nums_);
+        qMeasured_prev = qMeasured_.tail(arm_nums_);
+        vMeasured_prev.resize(arm_nums_);
+        vMeasured_prev = vMeasured_.tail(arm_nums_);
+        sensor_fault_flags.resize(arm_nums_, false);
+      }
+      
+      // 每个关节独立检测和处理
+      for (int i = 0; i < arm_nums_; ++i) {
+        // 位置跳变检测
+        double pos_jump_i = std::abs(qMeasured_.tail(arm_nums_)[i] - qMeasured_prev[i]);
+        sensor_fault_flags[i] = (pos_jump_i > max_pos_jump);
+        
+        if (sensor_fault_flags[i]) {
+          // 故障关节使用历史数据
+          pos_error[i] = qDesired_.tail(arm_nums_)[i] - qMeasured_prev[i];
+          vel_error[i] = vDesired_.tail(arm_nums_)[i] - vMeasured_prev[i];
+          qMeasured_.tail(arm_nums_)[i] = qMeasured_prev[i];
+          vMeasured_.tail(arm_nums_)[i] = 0.0;
+          std::cout << "[WbcBase] 手臂关节 " << i << " 位置跳变故障！跳变值：" << pos_jump_i << std::endl;
+          std::cout << "[WbcBase] 手臂关节 " << i << " 速度跳变故障！跳变值：" << vel_error[i] << std::endl;
+        }
+        
+        // 误差限幅
+        pos_error[i] = std::max(-max_pos_error, std::min(max_pos_error, pos_error[i]));
+        vel_error[i] = std::max(-max_vel_error, std::min(max_vel_error, vel_error[i]));
+      }
+      
+      // 更新历史数据
+      qMeasured_prev = qMeasured_.tail(arm_nums_);
+      vMeasured_prev = vMeasured_.tail(arm_nums_);
+    }
+
+    void WbcBase::processLowJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error)
+    {
+      const double max_pos_jump = 0.5;   // 最大允许位置跳变 [rad]
+      const double max_pos_error = 0.017453293;  // 最大位置误差 [rad], 1度, 减少位置的主要作用
+      const double max_vel_error = 0.1; // 最大速度误差 [rad/s]
+      
+      static vector_t qMeasured_prev_low;
+      static vector_t vMeasured_prev_low;
+      static std::vector<bool> sensor_fault_flags_low(lowJoint_nums_, false);
+      
+      // 初始化历史数据
+      if (qMeasured_prev_low.size() != lowJoint_nums_) {
+        qMeasured_prev_low.resize(lowJoint_nums_);
+        qMeasured_prev_low = qMeasured_.tail(info_.armDim).head(lowJoint_nums_);
+        vMeasured_prev_low.resize(lowJoint_nums_);
+        vMeasured_prev_low = vMeasured_.tail(info_.armDim).head(lowJoint_nums_);
+        sensor_fault_flags_low.resize(lowJoint_nums_, false);
+      }
+      
+      // 每个关节独立检测和处理
+      for (int i = 0; i < lowJoint_nums_; ++i) {
+        // 位置跳变检测
+        double pos_jump_i = std::abs(qMeasured_.tail(info_.armDim).head(lowJoint_nums_)[i] - qMeasured_prev_low[i]);
+        sensor_fault_flags_low[i] = (pos_jump_i > max_pos_jump);
+        
+        if (sensor_fault_flags_low[i]) {
+          // 故障关节使用历史数据
+          pos_error[i] = qDesired_.tail(info_.armDim).head(lowJoint_nums_)[i] - qMeasured_prev_low[i];
+          vel_error[i] = vDesired_.tail(info_.armDim).head(lowJoint_nums_)[i] - vMeasured_prev_low[i];
+          qMeasured_.tail(info_.armDim).head(lowJoint_nums_)[i] = qMeasured_prev_low[i];
+          vMeasured_.tail(info_.armDim).head(lowJoint_nums_)[i] = 0.0;
+          std::cout << "[WbcBase] 下肢关节 " << i << " 位置跳变故障！跳变值：" << pos_jump_i << std::endl;
+        }
+        
+        // 误差限幅
+        pos_error[i] = std::max(-max_pos_error, std::min(max_pos_error, pos_error[i]));
+        vel_error[i] = std::max(-max_vel_error, std::min(max_vel_error, vel_error[i]));
+      }
+      
+      // 更新历史数据
+      qMeasured_prev_low = qMeasured_.tail(info_.armDim).head(lowJoint_nums_);
+      vMeasured_prev_low = vMeasured_.tail(info_.armDim).head(lowJoint_nums_);
     }
 
     Task WbcBase::formulateBaseAccTask()

@@ -361,7 +361,7 @@ class VRHandCommandNode {
       }
       if (num_arm_joints_ != msg->name.size())
       {
-        ROS_ERROR("[VRHandCommandNode]:Received joint state target size: %d, number of arm joints: %d", msg->name.size(), num_arm_joints_);
+        ROS_ERROR("[VRHandCommandNode]:Received joint state target size: %zu, number of arm joints: %d", msg->name.size(), num_arm_joints_);
         return;
       }
       vector_t armJointState(num_arm_joints_);
@@ -380,19 +380,20 @@ class VRHandCommandNode {
     {
       observation_ = ros_msg_conversions::readObservationMsg(*observation_msg);
       if(!get_observation_){
-        
+        get_observation_ = true;
+
         if (only_half_up_body_){
           // Control mode:
           // 0: Keep current arm pose
           // 1: Auto swing arms during walking
           // 2: External control through VR/teleoperation
-          callSetArmModeSrv(ArmControlMode::EXTERN_CONTROL);
-          backArmPoseToZero();
-          ros::Duration(ArmToZeroTime).sleep();
-          callSetArmModeSrv(ArmControlMode::KEEP);
+          if (callSetArmTrajModeSrv(ArmControlMode::EXTERN_CONTROL)) {
+            backArmPoseToZero();
+            ros::Duration(ArmToZeroTime).sleep();
+            callSetArmTrajModeSrv(ArmControlMode::KEEP);
+          }
         }
       }
-      get_observation_ = true;
     }
     void headBodyPoseCallback(const kuavo_msgs::headBodyPose::ConstPtr& msg)
     {
@@ -421,8 +422,9 @@ class VRHandCommandNode {
 
     void backArmPoseToZero(){
 
-      if (init_arm_pos_.size() != num_arm_joints_){
-        ROS_ERROR("[VRHandCommandNode]: init_arm_pos_ size: %d, num_arm_joints_: %d", init_arm_pos_.size(), num_arm_joints_);
+      std::vector<double> stand_joint_state;
+      if (!nh_.getParam("/standJointState", stand_joint_state) || stand_joint_state.size() != num_arm_joints_){
+        ROS_ERROR("[VRHandCommandNode]: /standJointState size: %zu, num_arm_joints_: %d", stand_joint_state.size(), num_arm_joints_);
         return;
       }
       kuavo_msgs::armTargetPoses arm_target_poses;
@@ -432,17 +434,15 @@ class VRHandCommandNode {
       // 3 seconds has tested in real robot
       arm_target_poses.times.push_back(ArmToZeroTime);
       
-      arm_target_poses.values.resize(init_arm_pos_.size());
-      for(int i = 0; i < init_arm_pos_.size(); i++) {
-        arm_target_poses.values[i] = init_arm_pos_(i);
+      arm_target_poses.values.resize(stand_joint_state.size());
+      for(size_t i = 0; i < stand_joint_state.size(); i++) {
+        arm_target_poses.values[i] = stand_joint_state[i] / deg2rad;
       }
       while(armTargetPosePublisher_.getNumSubscribers() == 0 && ros::ok()){
         ROS_INFO_THROTTLE(1, "[VRHandCommandNode]: Waiting for /kuavo_arm_target_pose subscribers");
         ros::Duration(0.1).sleep();
         ros::spinOnce();
       }
-      armTargetPosePublisher_.publish(arm_target_poses);
-      // 半身模式下 /kuavo_arm_target_pose 会替换掉初始数据，所以初始发两次确保发送成功
       armTargetPosePublisher_.publish(arm_target_poses);
     }
 
@@ -469,6 +469,7 @@ class VRHandCommandNode {
         callSetArmModeSrv(control_mode);
         return true;
     }
+
     void callSetArmModeSrv(ArmControlMode mode)
     {
       kuavo_msgs::changeArmCtrlMode srv;
@@ -505,6 +506,32 @@ class VRHandCommandNode {
       {
         ROS_ERROR("Failed to call SetArmModeSrv");
       }
+    }
+
+    bool callSetArmTrajModeSrv(ArmControlMode mode)
+    {
+      kuavo_msgs::changeArmCtrlMode srv;
+      srv.request.control_mode = static_cast<int>(mode);
+      auto change_arm_traj_mode_service_client_ = nh_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/arm_traj_change_mode");
+
+      if (!change_arm_traj_mode_service_client_.waitForExistence(ros::Duration(2.0))) {
+        ROS_ERROR("[VRHandCommandNode]: /arm_traj_change_mode service is not available.");
+        return false;
+      }
+
+      ros::Time start_time = ros::Time::now();
+      while (ros::ok()) {
+        if (change_arm_traj_mode_service_client_.call(srv) && srv.response.result) {
+          ROS_INFO("[VRHandCommandNode]: SetArmTrajModeSrv call successful");
+          return true;
+        }
+        if ((ros::Time::now() - start_time).toSec() > 2.0) {
+          ROS_ERROR("[VRHandCommandNode]: Failed to call SetArmTrajModeSrv");
+          return false;
+        }
+        ros::Duration(0.01).sleep();
+      }
+      return false;
     }
 
     bool callSetTorsoModeSrv(int32_t mode)

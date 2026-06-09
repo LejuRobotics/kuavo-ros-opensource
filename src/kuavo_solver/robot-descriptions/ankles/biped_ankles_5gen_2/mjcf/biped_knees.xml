@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <mujoco model="5gen_2_knees">
-  <!-- 最小膝模型：拓扑参考 ankle-conversion 的 biped_s504_Rknee.xml（仅膝并联） -->
+  <!-- 膝 4-bar 局部几何对齐 ankle-conversion/biped_s504/mjcf/biped_s504_Rknee.xml；
+       膝铰 pos 保留 biped_s56.urdf leg_l4_joint (-0.0011639,0,-0.284)。 -->
   <compiler angle="radian" meshdir="../../../../../kuavo_assets/models/biped_s56/meshes/"/>
   <option>
     <flag gravity="disable" />
@@ -35,7 +36,7 @@
         <inertial pos="0.00569729 -5.18e-05 -0.161592" quat="0.999987 -0.000524235 0.00510477 4.51483e-06" mass="3.55159" diaginertia="0.0430538 0.0426274 0.00324531"/>
         <joint name="l_knee" pos="0 0 0" axis="0 1 0" range="0 2.53073" damping="0.0"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 0.05" mesh="l_knee"/>
-        <site name="l_knee_eq" pos="0.00906 -0.0075 0.03381" type="sphere" group="1" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+        <site name="l_knee_eq" pos="0.00906 0 0.03381" type="sphere" group="1" rgba="0.8 0.2 0.4 1" size="0.0065"/>
       </body>
 
       <body name="l_knee_bar" pos="0 0 -0.115">
@@ -47,8 +48,8 @@
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
           <joint name="l_knee_tendon" pos="0 0 0" type="hinge" axis="0 -1 0" limited="false"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.776471 0.756863 0.737255 1" mesh="l_knee_tendon"/>
-          <geom name="l_knee_tendon_marker" pos="0.0206792 -0.0075 -0.1677721" type="sphere" contype="0" conaffinity="0" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
-          <site name="l_knee_tendon_site" pos="0.0206792 -0.0075 -0.1677721" type="sphere" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <geom name="l_knee_tendon_marker" pos="0.0206792 0 -0.1677721" type="sphere" contype="0" conaffinity="0" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="l_knee_tendon_site" pos="0.0206792 0 -0.1677721" type="sphere" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
         </body>
       </body>
     </body>
@@ -62,7 +63,7 @@
         <inertial pos="0.00569729 5.18e-05 -0.161592" quat="0.999987 0.000524235 0.00510477 -4.51483e-06" mass="3.55159" diaginertia="0.0430538 0.0426274 0.00324531"/>
         <joint name="r_knee" pos="0 0 0" axis="0 1 0" range="0 2.53073" damping="0.0"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 0.05" mesh="r_knee"/>
-        <site name="r_knee_eq" pos="0.00906 0.0075 0.03381" type="sphere" group="1" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+        <site name="r_knee_eq" pos="0.00906 0 0.03381" type="sphere" group="1" rgba="0.8 0.2 0.4 1" size="0.0065"/>
       </body>
 
       <body name="r_knee_bar" pos="0 0 -0.115">
@@ -73,16 +74,16 @@
           <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
           <joint name="r_knee_tendon" pos="0 0 0" type="hinge" axis="0 -1 0" limited="false"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.776471 0.756863 0.737255 1" mesh="r_knee_tendon"/>
-          <geom name="r_knee_tendon_marker" pos="0.0206792 0.0075 -0.1677721" type="sphere" contype="0" conaffinity="0" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
-          <site name="r_knee_tendon_site" pos="0.0206792 0.0075 -0.1677721" type="sphere" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <geom name="r_knee_tendon_marker" pos="0.0206792 0 -0.1677721" type="sphere" contype="0" conaffinity="0" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+          <site name="r_knee_tendon_site" pos="0.0206792 0 -0.1677721" type="sphere" group="1" rgba="0.2 0.6 0.8 1" size="0.0065"/>
         </body>
       </body>
     </body>
   </worldbody>
 
   <equality>
-    <connect name="l_knee_eq" body1="l_knee" body2="l_knee_tendon" anchor="0.00906 -0.0075 0.03381" solref="0.001 1" />
-    <connect name="r_knee_eq" body1="r_knee" body2="r_knee_tendon" anchor="0.00906 0.0075 0.03381" solref="0.001 1" />
+    <connect name="l_knee_eq" body1="l_knee" body2="l_knee_tendon" anchor="0.00906 0 0.03381" solref="0.001 1" />
+    <connect name="r_knee_eq" body1="r_knee" body2="r_knee_tendon" anchor="0.00906 0 0.03381" solref="0.001 1" />
   </equality>
 
   <actuator>

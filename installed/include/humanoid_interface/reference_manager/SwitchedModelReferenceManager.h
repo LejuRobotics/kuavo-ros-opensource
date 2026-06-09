@@ -356,9 +356,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::Publisher footDesiredPointPublisher_;
   ros::Publisher gaitTimeNamePublisher_;
   ros::Publisher armTargetCommandedPublisher_;
-  // Publisher for arm err used in mode-switch checks
-  ros::Publisher armErrPublisher_;
-  ros::Publisher newArmStateFullPublisher_;  // 发布new_arm_state_full数据
   ros::Publisher isCustomGaitPublisher_;
   ros::Publisher singleStepModePublisher_;
   ros::Publisher currentFootPosesPublisher_;
@@ -430,10 +427,6 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   scalar_t min_arm_mode_change_time_ = 0.5;  // 最小模式切换时间（秒）
   bool update_stop_single_step_ = false;
   bool skip_interpolate = false; // 是否跳过插值
-  // 上一帧的 arm err，用于检测 err 的突变以决定是否跳过本次插值
-  double lastArmErr_ = -1.0;
-  // err 突变阈值，abs(curr - last) > armErrJumpThreshold_ 时认为是突变并跳过插值（单位：rad或m，视 err 含义）
-  double armErrJumpThreshold_ = 0.1;
 
   bool begin_step_gait = false;
   scalar_t customGait_start_time = 0;

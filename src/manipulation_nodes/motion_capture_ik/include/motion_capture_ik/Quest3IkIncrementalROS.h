@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -63,6 +64,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   std::atomic<int> armControlMode_ = 0;
   std::atomic<int> lastArmControlMode_ = 0;
   int arm_ctrl_mode_;
+  int currentArmCtrlMode_{0};   // 对应 Python __arm_control_mode = data[0]（current_mode）
 
   // 超时机制相关
   ros::Time mode2EnterTime_;                              // 记录进入 mode 2 的时间戳

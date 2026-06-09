@@ -28,9 +28,9 @@
   </link>
   <link name="leg_l1_link">
     <inertial>
-      <origin xyz="-0.00430148 -2.708e-05 -0.00851195" rpy="0 0 0" />
-      <mass value="1.71093115" />
-      <inertia ixx="0.00206092" ixy="1.97e-06" ixz="6.944e-05" iyy="0.00277274" iyz="-5.1e-06" izz="0.00370826" />
+      <origin xyz="-0.00560896 0.00032862 -0.00212773" rpy="0 0 0" />
+      <mass value="1.55641" />
+      <inertia ixx="0.00191127" ixy="-0.00001633" ixz="-0.00000320" iyy="0.00254335" iyz="0.00000055" izz="0.00260594" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -43,11 +43,11 @@
     </visual>
   </link>
   <joint name="leg_l1_joint" type="revolute">
-    <origin xyz="-0.0024999 0.087 -0.066" rpy="0 0 0" />
+    <origin xyz="0.0 0.095075 -0.066" rpy="0 0 0" />
     <parent link="torso" />
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="23.55" />
+    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="127.0" velocity="10.4" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l1_joint" />
@@ -55,9 +55,9 @@
   </transmission>
   <link name="leg_l2_link">
     <inertial>
-      <origin xyz="0.0 -0.00231118 -0.09062539" rpy="0 0 0" />
-      <mass value="0.58029165" />
-      <inertia ixx="0.00223984" ixy="0.0" ixz="3e-08" iyy="0.00123175" iyz="-6.98e-06" izz="0.00146391" />
+      <origin xyz="0.00006341 -0.00960017 -0.09308949" rpy="0 0 0" />
+      <mass value="0.75873" />
+      <inertia ixx="0.00348980" ixy="0.00000617" ixz="-0.00000543" iyy="0.00201021" iyz="-0.00030265" izz="0.00236363" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -74,7 +74,7 @@
     <parent link="leg_l1_link" />
     <child link="leg_l2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.872664625997165" upper="0.785398163397448" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-0.785398163397448" upper="1.91986217719376" effort="71.0" velocity="8.7" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l2_joint" />
@@ -82,9 +82,9 @@
   </transmission>
   <link name="leg_l3_link">
     <inertial>
-      <origin xyz="0.00150537 0.01199614 -0.08411619" rpy="0 0 0" />
-      <mass value="4.50393141" />
-      <inertia ixx="0.0389365" ixy="7.866e-05" ixz="0.00102086" iyy="0.03942609" iyz="0.00219138" izz="0.00999961" />
+      <origin xyz="0.00273544 0.01478421 -0.09011501" rpy="0 0 0" />
+      <mass value="6.68074" />
+      <inertia ixx="0.06155086" ixy="0.00016595" ixz="-0.00169943" iyy="0.05999156" iyz="0.00073898" izz="0.01575336" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -97,11 +97,11 @@
     </visual>
   </link>
   <joint name="leg_l3_joint" type="revolute">
-    <origin xyz="0.000500354536093913 -0.00100000000000011 -0.1287" rpy="0 0 0" />
+    <origin xyz="0 0 -0.1437" rpy="0 0 0" />
     <parent link="leg_l2_link" />
     <child link="leg_l3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132" velocity="12.7" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l3_joint" />
@@ -109,9 +109,9 @@
   </transmission>
   <link name="leg_l4_link">
     <inertial>
-      <origin xyz="0.00696242 5.314e-05 -0.11549851" rpy="0 0 0" />
-      <mass value="1.62776815" />
-      <inertia ixx="0.01243912" ixy="-2.29e-06" ixz="5.881e-05" iyy="0.01229563" iyz="-2.895e-05" izz="0.00097937" />
+      <origin xyz="0.00684787 0.00006281 -0.16262733" rpy="0 0 0" />
+      <mass value="3.64666" />
+      <inertia ixx="0.04372691" ixy="0.00000494" ixz="0.00053020" iyy="0.04357016" iyz="-0.00006946" izz="0.00246985" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -124,11 +124,11 @@
     </visual>
   </link>
   <joint name="leg_l4_joint" type="revolute">
-    <origin xyz="-6.87185435835039E-05 0 -0.284" rpy="0 0 0" />
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
     <parent link="leg_l3_link" />
     <child link="leg_l4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
+    <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l4_joint" />
@@ -151,11 +151,11 @@
     </visual>
   </link>
   <joint name="leg_l5_joint" type="revolute">
-    <origin xyz="-0.000431635992531742 0 -0.346000000000001" rpy="0 0 0" />
+    <origin xyz="0.00 0 -0.416" rpy="0 0 0" />
     <parent link="leg_l4_link" />
     <child link="leg_l5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="91.6" velocity="17.8" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l5_joint" />
@@ -182,7 +182,7 @@
     <parent link="leg_l5_link" />
     <child link="leg_l6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_l6_joint" />
@@ -212,7 +212,7 @@
     </collision> -->
   </link>
   <joint name="l_l_bar_y" type="continuous">
-    <origin rpy="0 0 0" xyz="0 0.0318 -0.09"/>
+    <origin rpy="0 0 0" xyz="0.0535 0 -0.1883"/>
     <parent link="leg_l4_link"/>
     <child link="l_l_bar_y"/>
     <axis xyz="0 1 0"/>
@@ -248,11 +248,11 @@
     </collision> -->
   </link>
   <drake:joint name="l_l_tendon_y" type="universal">
-    <origin rpy="0 0 0" xyz="-0.056027 -0.0085 0.015"/>
+    <origin rpy="0 0 0" xyz="-0.0173 0.026 -0.2207"/>
     <parent link="l_l_bar_y"/>
     <child link="l_l_tendon_y"/>
   </drake:joint>
-  <frame link="l_l_tendon_y" name="l_l_tendon_socket" xyz="0 0 -0.256"/>
+  <frame link="l_l_tendon_y" name="l_l_tendon_socket" xyz="0.0173 0.007649 0.2114382"/>
   <link name="l_r_bar_y">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.017639 0.0012332 0.0047224"/>
@@ -276,7 +276,7 @@
     </collision> -->
   </link>
   <joint name="l_r_bar_y" type="continuous">
-    <origin rpy="0 0 0" xyz="0 -0.0362 -0.153"/>
+    <origin rpy="0 0 0" xyz="0.0535 0 -0.0983"/>
     <parent link="leg_l4_link"/>
     <child link="l_r_bar_y"/>
     <axis xyz="0 1 0"/>
@@ -304,11 +304,11 @@
     </collision> -->
   </link>
   <drake:joint name="l_r_tendon_y" type="universal">
-    <origin rpy="0 0 0" xyz="-0.056027 0.0085 0.015"/>
+    <origin rpy="0 0 0" xyz="-0.0173 -0.026 -0.3107"/>
     <parent link="l_r_bar_y"/>
     <child link="l_r_tendon_y"/>
   </drake:joint>
-  <frame link="l_r_tendon_y" name="l_r_tendon_socket" xyz="0 0 -0.193"/>
+  <frame link="l_r_tendon_y" name="l_r_tendon_socket" xyz="0.0173 -0.007392 0.300554"/>
   <transmission type="SimpleTransmission">
     <joint name="l_r_bar_y"/>
     <actuator name="l_r_bar_y_motor">
@@ -316,16 +316,16 @@
       <drake:rotor_inertia value="0.0001002"/>
     </actuator>
   </transmission>
-  <frame link="leg_l6_link" name="l_l_foot_socket" xyz="-0.056027 0.0255 0.015"/>
-  <frame link="leg_l6_link" name="l_r_foot_socket" xyz="-0.056027 -0.0255 0.015"/>
+  <frame link="leg_l6_link" name="l_l_foot_socket" xyz="0.0362 0.026 0.007"/>
+  <frame link="leg_l6_link" name="l_r_foot_socket" xyz="0.0362 -0.026 0.007"/>
   <!-- 曲柄 -->
-  <frame link="l_l_bar_y" name="l_l_foot_bar_frame" xyz="0 -0.0085 0"/>
-  <frame link="l_r_bar_y" name="l_r_foot_bar_frame" xyz="0 0.0085 0"/>
+  <frame link="l_l_bar_y" name="l_l_foot_bar_frame" xyz="0 0.033649 -0.0092618"/>
+  <frame link="l_r_bar_y" name="l_r_foot_bar_frame" xyz="0 -0.033392 -0.010146"/>
   <link name="leg_r1_link">
     <inertial>
-      <origin xyz="-0.00430146 2.709e-05 -0.00851195" rpy="0 0 0" />
-      <mass value="1.71093008" />
-      <inertia ixx="0.00206092" ixy="-1.97e-06" ixz="6.944e-05" iyy="0.00277274" iyz="5.1e-06" izz="0.00370826" />
+      <origin xyz="-0.00560896 -0.00032862 -0.00212773" rpy="0 0 0" />
+      <mass value="1.55641" />
+      <inertia ixx="0.00191127" ixy="0.00001633" ixz="0.00000320" iyy="0.00254335" iyz="-0.00000055" izz="0.00260594" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -338,11 +338,11 @@
     </visual>
   </link>
   <joint name="leg_r1_joint" type="revolute">
-    <origin xyz="-0.0024999 -0.087 -0.066" rpy="0 0 0" />
+    <origin xyz="0.0 -0.095075 -0.066" rpy="0 0 0" />
     <parent link="torso" />
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="180.0" velocity="23.55" />
+    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="127.0" velocity="10.4" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r1_joint" />
@@ -350,9 +350,9 @@
   </transmission>
   <link name="leg_r2_link">
     <inertial>
-      <origin xyz="0.0 0.00231118 -0.09062539" rpy="0 0 0" />
-      <mass value="0.58029165" />
-      <inertia ixx="0.00223984" ixy="0.0" ixz="-3e-08" iyy="0.00123175" iyz="6.98e-06" izz="0.00146391" />
+      <origin xyz="0.00006341 0.00960017 -0.09308949" rpy="0 0 0" />
+      <mass value="0.75873" />
+      <inertia ixx="0.00348980" ixy="-0.00000617" ixz="0.00000543" iyy="0.00201021" iyz="0.00030265" izz="0.00236363" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -369,7 +369,7 @@
     <parent link="leg_r1_link" />
     <child link="leg_r2_link" />
     <axis xyz="0 0 1" />
-    <limit lower="-0.785398163397448" upper="0.872664625997165" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-1.91986217719376" upper="0.785398163397448" effort="71.0" velocity="8.7" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r2_joint" />
@@ -377,9 +377,9 @@
   </transmission>
   <link name="leg_r3_link">
     <inertial>
-      <origin xyz="0.00208315 -0.01199644 -0.08411379" rpy="0 0 0" />
-      <mass value="4.50385993" />
-      <inertia ixx="0.03893478" ixy="-7.792e-05" ixz="0.00103064" iyy="0.03942522" iyz="-0.00219154" izz="0.01000016" />
+      <origin xyz="0.00273544 -0.01478421 -0.09011501" rpy="0 0 0" />
+      <mass value="6.68074" />
+      <inertia ixx="0.06155086" ixy="-0.00016595" ixz="0.00169943" iyy="0.05999156" iyz="-0.00073898" izz="0.01575336" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -392,11 +392,11 @@
     </visual>
   </link>
   <joint name="leg_r3_joint" type="revolute">
-    <origin xyz="-4.88006581312577E-05 0 -0.1287" rpy="0 0 0" />
+    <origin xyz="0 0 -0.1437" rpy="0 0 0" />
     <parent link="leg_r2_link" />
     <child link="leg_r3_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-2.00712863979348" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
+    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132.0" velocity="12.7" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r3_joint" />
@@ -404,9 +404,9 @@
   </transmission>
   <link name="leg_r4_link">
     <inertial>
-      <origin xyz="0.00743231 -5.343e-05 -0.11558701" rpy="0 0 0" />
-      <mass value="1.62655699" />
-      <inertia ixx="0.01241258" ixy="2.28e-06" ixz="6.289e-05" iyy="0.0122692" iyz="2.902e-05" izz="0.00097927" />
+      <origin xyz="0.00684787 -0.00006281 -0.16262733" rpy="0 0 0" />
+      <mass value="3.64666" />
+      <inertia ixx="0.04372691" ixy="-0.00000494" ixz="-0.00053020" iyy="0.04357016" iyz="0.00006946" izz="0.00246985" />
     </inertial>
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -419,11 +419,11 @@
     </visual>
   </link>
   <joint name="leg_r4_joint" type="revolute">
-    <origin xyz="0.000147138572785148 0 -0.283999982974744" rpy="0 0 0" />
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
     <parent link="leg_r3_link" />
     <child link="leg_r4_link" />
     <axis xyz="0 1 0" />
-    <limit lower="0.0" upper="2.53072741539178" effort="180.0" velocity="23.55" />
+    <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r4_joint" />
@@ -446,11 +446,11 @@
     </visual>
   </link>
   <joint name="leg_r5_joint" type="revolute">
-    <origin xyz="0.000119806050928577 0 -0.345999979257963" rpy="0 0 0" />
+    <origin xyz="0.000 0 -0.416" rpy="0 0 0" />
     <parent link="leg_r4_link" />
     <child link="leg_r5_link" />
     <axis xyz="0 1 0" />
-    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="91.6" velocity="17.8" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r5_joint" />
@@ -473,11 +473,11 @@
     </visual>
   </link>
   <joint name="leg_r6_joint" type="revolute">
-    <origin xyz="0 0 0" rpy="0 0 0" />
+    <origin xyz="0 0 -0.023" rpy="0 0 0" />
     <parent link="leg_r5_link" />
     <child link="leg_r6_link" />
     <axis xyz="1 0 0" />
-    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="36.0" velocity="23.0266666666667" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
   </joint>
   <transmission type="SimpleTransmission">
     <joint name="leg_r6_joint" />
@@ -508,7 +508,7 @@
     </collision> -->
   </link>
   <joint name="r_r_bar_y" type="continuous">
-    <origin rpy="0 0 0" xyz="0 -0.0318 -0.09"/>
+    <origin rpy="0 0 0" xyz="0.0535 0 -0.1883"/>
     <parent link="leg_r4_link"/>
     <child link="r_r_bar_y"/>
     <axis xyz="0 1 0"/>
@@ -536,11 +536,11 @@
     </collision> -->
   </link>
   <drake:joint name="r_r_tendon_y" type="universal">
-    <origin rpy="0 0 0" xyz="-0.056027 0.0085 0.015"/>
+    <origin rpy="0 0 0" xyz="-0.0173 -0.026 -0.2207"/>
     <parent link="r_r_bar_y"/>
     <child link="r_r_tendon_y"/>
   </drake:joint>
-  <frame link="r_r_tendon_y" name="r_r_tendon_socket" xyz="0 0 -0.256"/>
+  <frame link="r_r_tendon_y" name="r_r_tendon_socket" xyz="0.0173 -0.007649 0.2114382"/>
   <transmission type="SimpleTransmission">
     <joint name="r_r_bar_y"/>
     <actuator name="r_r_bar_y_motor">
@@ -571,7 +571,7 @@
     </collision> -->
   </link>
   <joint name="r_l_bar_y" type="continuous">
-    <origin rpy="0 0 0" xyz="0 0.0362 -0.153"/>
+    <origin rpy="0 0 0" xyz="0.0535 0 -0.0983"/>
     <parent link="leg_r4_link"/>
     <child link="r_l_bar_y"/>
     <axis xyz="0 1 0"/>
@@ -606,16 +606,16 @@
     </collision> -->
   </link>
   <drake:joint name="r_l_tendon_y" type="universal">
-    <origin rpy="0 0 0" xyz="-0.056027 -0.0085 0.015"/>
+    <origin rpy="0 0 0" xyz="-0.0173 0.026 -0.3107"/>
     <parent link="r_l_bar_y"/>
     <child link="r_l_tendon_y"/>
   </drake:joint>
-  <frame link="r_l_tendon_y" name="r_l_tendon_socket" xyz="0 0 -0.193"/>
-  <frame link="leg_r6_link" name="r_l_foot_socket" xyz="-0.056027 0.0255 0.015"/>
-  <frame link="leg_r6_link" name="r_r_foot_socket" xyz="-0.056027 -0.0255 0.015"/>
+  <frame link="r_l_tendon_y" name="r_l_tendon_socket" xyz="0.0173 0.007392 0.300554"/>
+  <frame link="leg_r6_link" name="r_l_foot_socket" xyz="0.0362 0.026 0.007"/>
+  <frame link="leg_r6_link" name="r_r_foot_socket" xyz="0.0362 -0.026 0.007"/>
   <!-- 曲柄 -->
-  <frame link="r_l_bar_y" name="r_l_foot_bar_frame" xyz="0 -0.0085 0"/>
-  <frame link="r_r_bar_y" name="r_r_foot_bar_frame" xyz="0 0.0085 0"/>
+  <frame link="r_l_bar_y" name="r_l_foot_bar_frame" xyz="0 0.033392 -0.010146"/>
+  <frame link="r_r_bar_y" name="r_r_foot_bar_frame" xyz="0 -0.033649 -0.0092618"/>
   <!-- =========================================================== Arms ================================================================= -->
   <link name="zarm_l1_link">
     <inertial>

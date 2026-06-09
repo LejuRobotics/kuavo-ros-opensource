@@ -45,7 +45,7 @@
 
         <!-- Left parallel bar (mounted on waist_yaw) -->
         <body name="waist_l_bar" pos="0 0.026 0.11123">
-          <joint name="waist_l_bar_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-3.14159 3.14159" />
+          <joint name="waist_l_bar_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.499052 0.912707" />
           <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.78 0.76 0.74 1" mesh="waist_l_bar"/>
           <body name="waist_l_bar_tendon" pos="-0.04884 0 -0.017852">
             <!-- Parallel rod end: allow free orientation like ankle tendon -->
@@ -57,7 +57,7 @@
 
         <!-- Right parallel bar (mounted on waist_yaw) -->
         <body name="waist_r_bar" pos="0 -0.026 0.11123">
-          <joint name="waist_r_bar_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-3.14159 3.14159" />
+          <joint name="waist_r_bar_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.499052 0.912707" />
           <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.78 0.76 0.74 1" mesh="waist_r_bar"/>
           <body name="waist_r_bar_tendon" pos="-0.04884 0 -0.017852">
             <!-- Parallel rod end: allow free orientation like ankle tendon -->
@@ -68,12 +68,12 @@
 
         <!-- waist_pitch_joint: URDF origin (0.03677 0 0.148), axis y -->
         <body name="waist_pitch" pos="0.03677 0 0.148">
-          <joint name="waist_pitch_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-1.5708 1.5708" />
+          <joint name="waist_pitch_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.261666667 0.523333333" />
           <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="waist_pitch"/>
 
           <!-- waist_roll_joint: URDF origin (0 0 -0.023), axis x -->
           <body name="waist_roll" pos="0 0 -0.023">
-            <joint name="waist_roll_joint" pos="0 0 0" axis="1 0 0" limited="true" range="-0.785398 0.785398" />
+            <joint name="waist_roll_joint" pos="0 0 0" axis="1 0 0" limited="true" range="-0.261666667 0.261666667" />
             <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="waist_roll"/>
 
             <!-- Visualize roll-side connect points (given in waist_roll local frame) -->
@@ -122,8 +122,8 @@
   <actuator>
     <!-- Control: yaw + two bars; pitch/roll are passive (follower) -->
     <motor name="waist_yaw_motor" joint="waist_yaw_joint" ctrllimited="true" ctrlrange="-1 1" gear="1" />
-    <position name="waist_l_bar_motor" joint="waist_l_bar_joint" kp="50" kv="5" ctrlrange="-0.39 0.39" />
-    <position name="waist_r_bar_motor" joint="waist_r_bar_joint" kp="50" kv="5" ctrlrange="-0.39 0.39" />
+    <position name="waist_l_bar_motor" joint="waist_l_bar_joint" kp="50" kv="5" ctrlrange="-0.499052 0.912707" />
+    <position name="waist_r_bar_motor" joint="waist_r_bar_joint" kp="50" kv="5" ctrlrange="-0.499052 0.912707" />
   </actuator>
 </mujoco>
 
