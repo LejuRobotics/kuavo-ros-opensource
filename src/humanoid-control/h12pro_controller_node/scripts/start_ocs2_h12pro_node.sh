@@ -11,12 +11,21 @@ echo "current robot version: $ROBOT_VERSION"
 echo "ROS_MASTER_URI: $ROS_MASTER_URI"
 echo "ROS_IP: $ROS_IP"
 
-LAUNCH_PATTERN="roslaunch .*h12pro_controller_node .*h12pro_autostart.launch"
+# Check if safe to start launch
+# Condition: rosmaster not running OR both key nodes are absent
+can_start=true
 
-# Avoid touching ros master before roslaunch brings it up.
-if ! pgrep -f "$LAUNCH_PATTERN" >/dev/null 2>&1; then
+if pgrep rosmaster > /dev/null; then
+    # rosmaster exists, check if either key node is already running
+    if rosnode list 2>/dev/null | grep -q "/h12pro_channel_publisher" || \
+       rosnode list 2>/dev/null | grep -q "/joy_node"; then
+        can_start=false
+    fi
+fi
+
+if $can_start; then
     roslaunch h12pro_controller_node h12pro_autostart.launch
 else
-    echo "Launch tree h12pro_autostart.launch is already running"
-    echo "Please check running processes with 'pgrep -af \"$LAUNCH_PATTERN\"'"
+    echo "Node /h12pro_channel_publisher or /joy_node is already running"
+    echo "Please check running nodes with 'rosnode list'"
 fi
