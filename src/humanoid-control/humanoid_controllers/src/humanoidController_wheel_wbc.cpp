@@ -817,9 +817,9 @@ namespace humanoidController_wheel_wbc
         optimizedState_mrt_ = optimizedState_mrt;
         optimizedInput_mrt_ = optimizedInput_mrt;
       }
-      // 仅对线速度做小死区，[2] 为角速度 wz，不应与线速度共用 0.05 阈值
       if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
       if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
+      if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
     }
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
