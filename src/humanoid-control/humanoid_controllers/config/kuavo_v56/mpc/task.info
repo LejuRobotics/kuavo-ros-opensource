@@ -143,6 +143,7 @@ swing_trajectory_config
   heelToeMaxHeightVelocity     0.3
 
   swing_shoulder_center         0.15
+  swing_shoulder_roll_center    0.075
   swing_shoulder_scale          0.3
   swing_elbow_center            0.0
   swing_elbow_scale             0.8

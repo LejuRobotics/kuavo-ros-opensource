@@ -413,7 +413,6 @@ namespace humanoid_controller
     // 检测is_rl_start参数，如果为true则绕过MPC控制器，直接使用RL控制器
     controllerNh_.param<bool>("/is_rl_start", is_rl_start_, false);
 
-    
     // trajectory_publisher_ = new TrajectoryPublisher(controller_nh, 0.001);
 
     wheel_arm_robot_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
@@ -919,6 +918,34 @@ namespace humanoid_controller
         else
         {
           ROS_WARN("[HumanoidController] RL not available, RL controllers will not be initialized");
+        }
+
+        if (current_controller_ == "mpc")
+        {
+          // 默认启动链路进入MPC时，必须用当前/referenceFile动态重置共享限速参数。
+          // roslaunch退出不会清空已有roscore的全局参数；若上一次AMP/RL写入了/velocity_limits，
+          // JoyControl会读取残留限速并导致MPC cmd_vel被放大。
+          Eigen::VectorXd mpc_limits = Eigen::VectorXd::Zero(6);
+          auto loadVelocityLimit = [&](const std::string& key, double& value) {
+            try
+            {
+              loadData::loadCppDataType(referenceFile, key, value);
+            }
+            catch (const std::exception& e)
+            {
+              // 部分版本的reference.info可能缺少某些cmdvel*Limit字段，缺失项保持0
+            }
+          };
+          loadVelocityLimit("cmdvelLinearXLimit", mpc_limits(0));
+          loadVelocityLimit("cmdvelLinearYLimit", mpc_limits(1));
+          loadVelocityLimit("cmdvelLinearZLimit", mpc_limits(2));
+          loadVelocityLimit("cmdvelAngularYAWLimit", mpc_limits(5));
+
+          std::vector<double> limits_vec(mpc_limits.data(), mpc_limits.data() + mpc_limits.size());
+          controllerNh_.setParam("/velocity_limits", limits_vec);
+          ROS_INFO("[HumanoidController] Updated /velocity_limits with MPC default on startup: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+                   mpc_limits(0), mpc_limits(1), mpc_limits(2),
+                   mpc_limits(3), mpc_limits(4), mpc_limits(5));
         }
 
           // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器

@@ -26,7 +26,7 @@
 
 ## 下载和安装
 工具是Windows平台下的应用程序，下载exe文件即可使用。
-- 下载地址为： [Kuavo机器人桌面软件](https://kuavo.lejurobot.com/kuavo-desktop-beta/Kuavo-0.0.3-683-g0b1ef48-win.exe )
+- 下载地址为： [Kuavo机器人桌面软件](https://kuavo.lejurobot.com/kuavo-desktop-beta/master/Kuavo-1.2.0-1162-gc29d0eb-win.exe )
 - 下载完成后，双击exe文件，即可运行，运行打开后如下图所示：
 
 ![开始界面](images/开始界面.png)
@@ -127,7 +127,9 @@
 
 - 生成文件如下图所示：
 
-![挥手握拳抬头](images/挥手握拳抬头.jpg)
+![挥手握拳抬头](images/挥手握拳抬头.jpg)   
+**注意！！** 五代机tact默认生成的版本为52，如果robot_version（终端echo $ROBOT_VERSION查看）为53或者54，那么需要修改tact文件最后的robot_version，如下图  
+![](images/tact版本.png)  
 ## 连接机器人 
 > 如希望实现此功能，先在机器人下位机运行下面命令
 ```bash
