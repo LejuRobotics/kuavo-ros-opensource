@@ -717,7 +717,7 @@ namespace mobile_manipulator {
       cmdTorsoPose_[3] = msg->angular.z;
       cmdTorsoPose_[4] = msg->angular.y;
       cmdTorsoPose_[5] = msg->angular.x;
-      std::cout << "Received cmdTorsoPose: "<< cmdTorsoPose_.transpose() << std::endl;
+      // std::cout << "Received cmdTorsoPose: "<< cmdTorsoPose_.transpose() << std::endl;
       cmdTorsoPose_mtx_.unlock();
     };
     targetTorsoPoseSubscriber_ =
@@ -3957,7 +3957,7 @@ namespace mobile_manipulator {
     {
       // resetTorsoPoseRuckig(initTime, initState, false);
 
-      std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
+      // std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
 
       cmdTorsoPose_mtx_.lock();
       torsoTargetPose = cmdTorsoPose_;
