@@ -535,6 +535,20 @@ namespace mobile_manipulator
       return std::max(min_value, std::min(value, max_value));
     }
 
+    // 根据 z 高度计算 x 方向的最大允许值，根据构型的经验数值
+    double getTorsoMaxX(double z_increment)
+    {
+      if (z_increment <= 0.0) {
+        return 0.05;
+      } else if (z_increment <= 0.3) {
+        return 0.05 + (z_increment / 0.3) * 0.1;  // 从 0.05 线性插值到 0.15
+      } else if (z_increment <= 0.5) {
+        return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1;  // 从 0.15 线性插值到 0.25
+      } else {
+        return 0.25;
+      }
+    }
+
     // 调用终止服务（发布停止信号）
     void callTerminateSrv()
     {
@@ -848,8 +862,9 @@ namespace mobile_manipulator
           };
 
           geometry_msgs::Twist torso;
-          torso.linear.x = clamp(calcOut(integrated_linear_x_, torsoMax_x_, torsoMin_x_), -torsoMin_x_, torsoMax_x_) + initialTorsoPose_x_;
           torso.linear.z = clamp(calcOut(integrated_linear_z_, torsoMax_z_, torsoMin_z_), -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
+          double current_torso_max_x = getTorsoMaxX(integrated_linear_z_);
+          torso.linear.x = clamp(calcOut(integrated_linear_x_, current_torso_max_x, torsoMin_x_), -torsoMin_x_, current_torso_max_x) + initialTorsoPose_x_;
           torso.angular.y = clamp(calcOut(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), -torsoMin_pitch_, torsoMax_pitch_);
           torso.angular.z = clamp(calcOut(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), -torsoMin_yaw_, torsoMax_yaw_);
 
@@ -1084,10 +1099,11 @@ namespace mobile_manipulator
 
         // 创建躯干控制消息（使用积分值）
         geometry_msgs::Twist torso_cmd;
-        torso_cmd.linear.x = clamp(calculateOutput(integrated_linear_x_, torsoMax_x_, torsoMin_x_), 
-                                   -torsoMin_x_, torsoMax_x_) + initialTorsoPose_x_;
         torso_cmd.linear.z = clamp(calculateOutput(integrated_linear_z_, torsoMax_z_, torsoMin_z_), 
                                    -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
+        double current_torso_max_x = getTorsoMaxX(integrated_linear_z_);
+        torso_cmd.linear.x = clamp(calculateOutput(integrated_linear_x_, current_torso_max_x, torsoMin_x_), 
+                                   -torsoMin_x_, current_torso_max_x) + initialTorsoPose_x_;
         torso_cmd.angular.y = clamp(calculateOutput(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), 
                                     -torsoMin_pitch_, torsoMax_pitch_);
         torso_cmd.angular.z = clamp(calculateOutput(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), 
