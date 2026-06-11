@@ -78,46 +78,46 @@ variants:
     z_pitch: -0.294
     z_roll: -0.018
     x_pitch: 0.03
-    x_lleq: 0.02400533
+    x_lleq: 0.02780675
     y_lleq: 0.0207
-    z_lleq: 0.00300002
-    x_lreq: 0.02400533
+    z_lleq: 0.00367032
+    x_lreq: 0.02780675
     y_lreq: -0.0186
-    z_lreq: 0.00300002
-    x_llbar: 0.061013
-    z_llbar: -0.16157
-    x_lrbar: 0.065058
-    z_lrbar: -0.10371
-    x_lltd: -0.00019865
+    z_lreq: 0.00367032
+    x_llbar: 0.047123
+    z_llbar: -0.1595
+    x_lrbar: 0.05117
+    z_lrbar: -0.10163
+    x_lltd: 0.014
     y_lltd: 0.023428
-    z_lltd: -0.0028409
-    x_lrtd: -0.0003367
-    y_lrtd: -0.023101
-    z_lrtd: -0.0048151
-    l0_ll_eqtd: 0.126801419206
-    l0_lr_eqtd: 0.182844668626
-    l_llbar: 0.023600452509
-    l_lrbar: 0.023599888896
-    x_rleq: 0.02400533
+    z_lltd: -0.0039472
+    x_lrtd: 0.014
+    y_lrtd: -0.023357
+    z_lrtd: -0.0044851
+    l0_ll_eqtd: 0.12695512289393013
+    l0_lr_eqtd: 0.18442304081686461
+    l_llbar: 0.0237581895741237
+    l_lrbar: 0.02378372491873382
+    x_rleq: 0.02780675
     y_rleq: 0.0186
-    z_rleq: 0.00300002
-    x_rreq: 0.02400533
+    z_rleq: 0.00367032
+    x_rreq: 0.02780675
     y_rreq: -0.0207
-    z_rreq: 0.00300002
-    x_rlbar: 0.065058
-    z_rlbar: -0.10371
-    x_rrbar: 0.061013
-    z_rrbar: -0.16157
-    x_rltd: -0.0003367
-    y_rltd: 0.023101
-    z_rltd: -0.0048151
-    x_rrtd: -0.00019865
+    z_rreq: 0.00367032
+    x_rlbar: 0.05117
+    z_rlbar: -0.10163
+    x_rrbar: 0.047123
+    z_rrbar: -0.1595
+    x_rltd: 0.014
+    y_rltd: 0.023357
+    z_rltd: -0.0044851
+    x_rrtd: 0.014
     y_rrtd: -0.023428
-    z_rrtd: -0.0028409
-    l0_rl_eqtd: 0.182844668626
-    l0_rr_eqtd: 0.126801419206
-    l_rlbar: 0.023599888896
-    l_rrbar: 0.023600452509
+    z_rrtd: -0.0039472
+    l0_rl_eqtd: 0.18442304081686461
+    l0_rr_eqtd: 0.12695512289393013
+    l_rlbar: 0.02378372491873382
+    l_rrbar: 0.0237581895741237
     default_tolerance: 1.0e-08
     max_iterations: 10
   7gen:
