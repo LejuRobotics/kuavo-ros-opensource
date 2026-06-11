@@ -16,7 +16,7 @@
     "NUM_HEAD_JOINT" : 2,
     "NUM_WAIST_JOINT" : 0,
     "NUM_JOINT" : 20,
-    "ROBOT_MODULE": "LUNBI_V300062",
+    "ROBOT_MODULE": "LUNBI_V62",
     "ankle_solver_type": "none",
 
     "torsoP": 3.0,
