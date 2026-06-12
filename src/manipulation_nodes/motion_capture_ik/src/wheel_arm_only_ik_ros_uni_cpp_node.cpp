@@ -30,9 +30,9 @@ class ChassisCmdVelForwarder {
  public:
   explicit ChassisCmdVelForwarder(ros::NodeHandle& nh) {
     nh.param("/single_hand_mode", singleHandTorsoMode_, false);
-    nh.param("/mobile_manipulator_joy/linear_scale_x",  linearXLimit_,  0.8);
-    nh.param("/mobile_manipulator_joy/linear_scale_y",  linearYLimit_,  0.8);
-    nh.param("/mobile_manipulator_joy/angular_scale_z", angularZLimit_, 0.5);
+    nh.param("/mobile_manipulator_joy/linear_scale_x",  linearXLimit_,  0.4);
+    nh.param("/mobile_manipulator_joy/linear_scale_y",  linearYLimit_,  0.4);
+    nh.param("/mobile_manipulator_joy/angular_scale_z", angularZLimit_, 0.25);
     cmdVelPub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
     joySub_ = nh.subscribe("/quest_joystick_data", 10, &ChassisCmdVelForwarder::joystickCallback, this);
     ROS_INFO("[ChassisCmdVelForwarder] singleHandTorsoMode_=%s, limits lin_x=%.2f lin_y=%.2f ang_z=%.2f",
@@ -51,12 +51,12 @@ class ChassisCmdVelForwarder {
     const double nw = std::max(-1.0, std::min(1.0, -static_cast<double>(msg->right_x)));
 
     geometry_msgs::Twist twist;
-    twist.linear.x = nx * linearXLimit_ * kJoyScale;
-    twist.linear.y = ny * linearYLimit_ * kJoyScale;
+    twist.linear.x = nx * linearXLimit_;
+    twist.linear.y = ny * linearYLimit_;
     twist.linear.z = 0.0;
     twist.angular.x = 0.0;
     twist.angular.y = 0.0;
-    twist.angular.z = nw * angularZLimit_ * kJoyScale;
+    twist.angular.z = nw * angularZLimit_;
 
     if (std::abs(twist.linear.x) > 1e-2 || std::abs(twist.linear.y) > 1e-2 ||
         std::abs(twist.angular.z) > 1e-2) {
@@ -67,10 +67,9 @@ class ChassisCmdVelForwarder {
   ros::Publisher cmdVelPub_;
   ros::Subscriber joySub_;
   bool singleHandTorsoMode_ = false;
-  double linearXLimit_ = 0.8;
-  double linearYLimit_ = 0.8;
-  double angularZLimit_ = 0.5;
-  static constexpr double kJoyScale = 0.5;  // 跟 wheel_ik_ros_uni_cpp_node 的 chassisJoyCmdTravelScale 默认值一致
+  double linearXLimit_ = 0.4;
+  double linearYLimit_ = 0.4;
+  double angularZLimit_ = 0.25;
 };
 
 int getRobotVersion(ros::NodeHandle& nodeHandle) {
