@@ -35,9 +35,9 @@ void WheelJoyStickHandler::initialize() {
   rightJoyStickX_ = 0.0;
   rightJoyStickY_ = 0.0;
 
-  RightJoyStickYHold_ = true;
+  RightJoyStickYHold_ = initControlWaistEnable_;
   rightJoyStickYHoldCount_ = 0;
-  rightJoyStickYHoldWithX_ = true;
+  rightJoyStickYHoldWithX_ = initControlWaistEnable_;
   rightJoyStickYHoldWithXCount_ = 0;
 
   leftGrip_ = false;
@@ -95,9 +95,9 @@ void WheelJoyStickHandler::reset() {
   rightJoyStickX_ = 0.0;
   rightJoyStickY_ = 0.0;
 
-  RightJoyStickYHold_ = true;
+  RightJoyStickYHold_ = initControlWaistEnable_;
   rightJoyStickYHoldCount_ = 0;
-  rightJoyStickYHoldWithX_ = true;
+  rightJoyStickYHoldWithX_ = initControlWaistEnable_;
   rightJoyStickYHoldWithXCount_ = 0;
 
   leftGrip_ = false;
@@ -448,6 +448,9 @@ void WheelJoyStickHandler::loadHandControlParameters() {
       std::cout << "\033[93m[WheelJoyStickHandler] Waiting for required parameters...\033[0m" << std::endl;
       ros::Duration(0.1).sleep();
     }
+    nh.getParam("/init_control_waist_enable", initControlWaistEnable_);
+    std::cout << "\033[92m[WheelJoyStickHandler] Init control waist enable: " << (initControlWaistEnable_ ? "true" : "false") << "\033[0m"
+              << std::endl;
 
     nh.getParam("/control_finger_type", controlFingerType_);
 

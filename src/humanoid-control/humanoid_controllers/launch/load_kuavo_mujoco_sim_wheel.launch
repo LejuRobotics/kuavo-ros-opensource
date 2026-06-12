@@ -24,13 +24,6 @@
       <arg name="rvizconfig"  default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz"/>
     </include>
 
-    <!-- 轮臂 v61/v62/v63 底盘限速：绝对式 VR、增量式 VR、北通手柄共用（原 0.8*0.5） -->
-    <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62 or arg('robot_version') == 63)">
-      <param name="/mobile_manipulator_joy/linear_scale_x" value="0.4"/>
-      <param name="/mobile_manipulator_joy/linear_scale_y" value="0.4"/>
-      <param name="/mobile_manipulator_joy/angular_scale_z" value="0.25"/>
-    </group>
-
      <!-- The URDF model of the robot -->
     <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
     <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info"/>

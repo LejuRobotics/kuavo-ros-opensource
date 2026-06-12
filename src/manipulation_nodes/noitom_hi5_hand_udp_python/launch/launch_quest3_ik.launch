@@ -20,6 +20,12 @@
     <arg name="enable_vr_stop_robot" default="true"/> <!-- false: 禁用 VR 手柄 X+Y 触发 stop_robot，仅遥控器可关机 -->
     <param name="/enable_vr_stop_robot" value="$(arg enable_vr_stop_robot)" type="bool"/>
     <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/> <!-- tens digit is 6: true, else false -->
+    <!-- 轮臂 v61/v62/v63 VR 底盘限速（G12/北通遥控仍走 /mobile_manipulator_joy/* 默认 0.8/0.5） -->
+    <group if="$(eval int(arg('robot_version')) == 61 or int(arg('robot_version')) == 62 or int(arg('robot_version')) == 63)">
+      <param name="/vr_cmd_vel/linear_scale_x" value="0.4"/>
+      <param name="/vr_cmd_vel/linear_scale_y" value="0.4"/>
+      <param name="/vr_cmd_vel/angular_scale_z" value="0.25"/>
+    </group>
     <arg name="single_hand_mode" default="false" /> <!-- 5W: true 启动单手摇杆控躯干独立节点 -->
     <!-- v62 (5W) 平台半身 IK 入口（pure arm 14 DOF）：仅在 wheel_ik=true 时生效，
          true 时启动 wheel_arm_only_ik_ros_uni_cpp_node 替代 wheel_ik_ros_uni_cpp_node。
@@ -28,6 +34,7 @@
     <!-- 全局 single_hand_mode：让 wheel_ik_ros_uni_cpp_node 在 wheel_ik=true 时跳过 chest 增量，
          让位 torso_joystick_node 独占躯干控制（避免 chest 关节命令覆盖 /cmd_lb_torso_pose 链路） -->
     <param name="/single_hand_mode" value="$(arg single_hand_mode)" type="bool"/>
+    <arg name="init_control_waist_enable" default="true"/> <!-- 是否启动时开启腰部控制，默认开启 -->
     <arg name="enable_timestamp_log" default="false"/> <!-- 是否启用 IK 时间戳日志，开启后保存至 $HOME/logs/ -->
     <param name="/enable_timestamp_log" value="$(arg enable_timestamp_log)" type="bool"/>
     <arg name="use_pico" default="false"/> <!-- false: use ik_ros_uni_cpp_node, true: use wheel_ik_ros_uni_cpp_node -->
@@ -85,8 +92,9 @@
     <param name="/quest3/use_step_turning" value="$(arg use_step_turning)" />
     <!-- 设置全局control_torso参数 -->
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
-    <!-- 设置 wheel_ik 全局参数，供其他节点统一读取 -->
+    <!-- 设置全局参数，供其他节点统一读取 -->
     <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
+    <param name="/init_control_waist_enable" value="$(arg init_control_waist_enable)" type="bool"/>
     
     <param name="/use_pico" value="$(arg use_pico)" type="bool"/>
 

@@ -1312,7 +1312,7 @@ void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
     const double ny = std::clamp(-joyStickHandlerPtr_->getLeftJoyStickX(), -1.0, 1.0);
     const double nw = std::clamp(-joyStickHandlerPtr_->getRightJoyStickX(), -1.0, 1.0);
 
-    // 与 QuestControlFSM、北通手柄共用 launch 中的 /mobile_manipulator_joy/* 限速
+    // 与 QuestControlFSM 共用 launch 中的 /vr_cmd_vel/* 限速
     cmdVelMsg.linear.x = nx * chassisCmdVelLinearXLimit_;
     cmdVelMsg.linear.y = ny * chassisCmdVelLinearYLimit_;
     cmdVelMsg.linear.z = 0.0;
@@ -1940,9 +1940,9 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
 
   {
-    nodeHandle_.param("/mobile_manipulator_joy/linear_scale_x", chassisCmdVelLinearXLimit_, chassisCmdVelLinearXLimit_);
-    nodeHandle_.param("/mobile_manipulator_joy/linear_scale_y", chassisCmdVelLinearYLimit_, chassisCmdVelLinearYLimit_);
-    nodeHandle_.param("/mobile_manipulator_joy/angular_scale_z", chassisCmdVelAngularYawLimit_, chassisCmdVelAngularYawLimit_);
+    nodeHandle_.param("/vr_cmd_vel/linear_scale_x", chassisCmdVelLinearXLimit_, chassisCmdVelLinearXLimit_);
+    nodeHandle_.param("/vr_cmd_vel/linear_scale_y", chassisCmdVelLinearYLimit_, chassisCmdVelLinearYLimit_);
+    nodeHandle_.param("/vr_cmd_vel/angular_scale_z", chassisCmdVelAngularYawLimit_, chassisCmdVelAngularYawLimit_);
     if (!std::isfinite(chassisCmdVelLinearXLimit_) || chassisCmdVelLinearXLimit_ <= 0.0) {
       chassisCmdVelLinearXLimit_ = 0.8;
     }
@@ -1953,7 +1953,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       chassisCmdVelAngularYawLimit_ = 0.5;
     }
     ROS_INFO(
-        "[WheelQuest3IkIncrementalROS] VR cmd_vel max: lin_x=%.4f lin_y=%.4f ang_z=%.4f (from /mobile_manipulator_joy/*)",
+        "[WheelQuest3IkIncrementalROS] VR cmd_vel max: lin_x=%.4f lin_y=%.4f ang_z=%.4f (from /vr_cmd_vel/*)",
         chassisCmdVelLinearXLimit_,
         chassisCmdVelLinearYLimit_,
         chassisCmdVelAngularYawLimit_);

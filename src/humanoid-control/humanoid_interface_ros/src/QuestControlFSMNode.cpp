@@ -133,14 +133,14 @@ namespace ocs2
             loadData::loadCppDataType(referenceFile, "cmdvelLinearYLimit", c_relative_base_limit_[1]);
             loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
 
-            // 轮臂 v61/v62/v63：与增量 VR、北通手柄共用 launch 中的 /mobile_manipulator_joy/* 限速
+            // 轮臂 v61/v62/v63：VR 专用限速，与 G12/北通遥控的 /mobile_manipulator_joy/* 分离
             if (robot_type_ == 1 &&
                 (robot_version_int_ == 61 || robot_version_int_ == 62 || robot_version_int_ == 63))
             {
-                nodeHandle.param("/mobile_manipulator_joy/linear_scale_x", c_relative_base_limit_[0], 0.4);
-                nodeHandle.param("/mobile_manipulator_joy/linear_scale_y", c_relative_base_limit_[1], 0.4);
-                nodeHandle.param("/mobile_manipulator_joy/angular_scale_z", c_relative_base_limit_[3], 0.25);
-                ROS_INFO_STREAM("[QuestControlFSM] Wheel v61/62/63 cmd_vel limits from /mobile_manipulator_joy: lin_x="
+                nodeHandle.param("/vr_cmd_vel/linear_scale_x", c_relative_base_limit_[0], 0.4);
+                nodeHandle.param("/vr_cmd_vel/linear_scale_y", c_relative_base_limit_[1], 0.4);
+                nodeHandle.param("/vr_cmd_vel/angular_scale_z", c_relative_base_limit_[3], 0.25);
+                ROS_INFO_STREAM("[QuestControlFSM] Wheel v61/62/63 VR cmd_vel limits from /vr_cmd_vel: lin_x="
                                 << c_relative_base_limit_[0] << " lin_y=" << c_relative_base_limit_[1]
                                 << " ang_z=" << c_relative_base_limit_[3]);
             }

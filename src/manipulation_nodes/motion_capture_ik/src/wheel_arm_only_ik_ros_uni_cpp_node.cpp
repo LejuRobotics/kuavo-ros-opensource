@@ -30,9 +30,9 @@ class ChassisCmdVelForwarder {
  public:
   explicit ChassisCmdVelForwarder(ros::NodeHandle& nh) {
     nh.param("/single_hand_mode", singleHandTorsoMode_, false);
-    nh.param("/mobile_manipulator_joy/linear_scale_x",  linearXLimit_,  0.4);
-    nh.param("/mobile_manipulator_joy/linear_scale_y",  linearYLimit_,  0.4);
-    nh.param("/mobile_manipulator_joy/angular_scale_z", angularZLimit_, 0.25);
+    nh.param("/vr_cmd_vel/linear_scale_x",  linearXLimit_,  0.4);
+    nh.param("/vr_cmd_vel/linear_scale_y",  linearYLimit_,  0.4);
+    nh.param("/vr_cmd_vel/angular_scale_z", angularZLimit_, 0.25);
     cmdVelPub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
     joySub_ = nh.subscribe("/quest_joystick_data", 10, &ChassisCmdVelForwarder::joystickCallback, this);
     ROS_INFO("[ChassisCmdVelForwarder] singleHandTorsoMode_=%s, limits lin_x=%.2f lin_y=%.2f ang_z=%.2f",
