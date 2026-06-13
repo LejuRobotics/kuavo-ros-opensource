@@ -6,6 +6,7 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/RlGaitReceiver.h"
 #include "humanoid_controllers/LowPassFilter.h"
+#include "humanoid_controllers/rl/ArmTakeoverBlender.h"
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle_solver.h"
@@ -150,6 +151,11 @@ namespace humanoid_controller
     double arm_max_tracking_velocity_{0.5}; ///< 手臂最大跟踪速度 (rad/s)，从配置文件加载
     double arm_tracking_error_threshold_{0.05}; ///< 手臂跟踪误差阈值 (rad)，从配置文件加载
     double arm_mode_interpolation_velocity_{1.0}; ///< 模式2的插值速度 (rad/s)，从配置文件加载
+    bool arm_rl_takeover_blend_enabled_{false}; ///< 是否启用站立外部手臂到行走RL手臂的平滑接管
+    double arm_rl_takeover_blend_duration_{0.3}; ///< 手臂平滑接管时长（秒）
+    bool arm_zero_action_in_standing_{false}; ///< 是否在站立状态下将RL手臂action输出置0
+    bool last_stance_state_for_blend_{true}; ///< 用于手臂接管混合的站立状态跟踪
+    ArmTakeoverBlender arm_takeover_blender_; ///< 站立到行走时的手臂RL接管混合器
 
     // 腰部控制相关（可选功能）
     double waist_mode_interpolation_velocity_{1.0}; ///< 腰部模式切换时的插值速度 (rad/s)，从配置文件加载，用于三次多项式插值
@@ -211,6 +217,10 @@ namespace humanoid_controller
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
+    void applyArmTakeoverBlend(Eigen::VectorXd& action, const ros::Time& time, bool is_standing);
+    Eigen::VectorXd getDefaultArmJointPos() const;
+    Eigen::VectorXd getArmActionScaleTest() const;
+    Eigen::VectorXd getCurrentArmJointPos(const SensorData& sensor_data) const;
     
     // 手臂控制辅助函数
     void initArmControl(const std::string& urdf_path);

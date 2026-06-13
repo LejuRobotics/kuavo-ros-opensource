@@ -78,6 +78,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kuavo_msgs/DanceTrajectoryState.h>
 #include <kuavo_msgs/playmusic.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
+#include <kuavo_msgs/ControllerSwitchEvent.h>
 
 // 命令执行相关头文件
 #include <cstdlib>
@@ -448,6 +449,14 @@ namespace ocs2
           }
         }
       });
+      // 订阅控制器切换事件，在任意控制器切换（包括RL->RL）时更新速度限制
+      controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>(
+          "/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
+        ROS_INFO("[JoyControl] Controller switch event: %s -> %s, updating velocity limits",
+                 msg->from_controller.c_str(), msg->to_controller.c_str());
+        updateVelocityLimitsFromParam(true);
+      });
+
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
@@ -2112,6 +2121,7 @@ namespace ocs2
     ros::Subscriber policy_sub_;
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
+    ros::Subscriber controller_switch_event_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
     ros::Subscriber dance_trajectory_state_sub_;
     int arm_ctrl_mode_;
