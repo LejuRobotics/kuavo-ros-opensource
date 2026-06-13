@@ -8,7 +8,19 @@ controllers:
     class: "BASE_CONTROLLER"  # 基础行走控制器
     type: "AMP_CONTROLLER"    # 具体控制器类型
     config_file: "rl/skw_rl_param.info" 
-    enabled: true  
+    enabled: true
+
+  # - name: "amp_wild_controller"
+  #   class: "BASE_CONTROLLER"  # 基础行走控制器
+  #   type: "AMP_CONTROLLER"    # 具体控制器类型
+  #   config_file: "rl/skw_rl_param_wild.info" 
+  #   enabled: true
+
+  # - name: "amp_run_controller"
+  #   class: "BASE_CONTROLLER"  # 基础行走控制器
+  #   type: "AMP_CONTROLLER"    # 具体控制器类型
+  #   config_file: "rl/skw_rl_param_run.info" 
+  #   enabled: true
   
   - name: "dance_controller"
     class: "DANCE_CONTROLLER"  # 舞蹈控制器
