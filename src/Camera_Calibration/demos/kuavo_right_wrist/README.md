@@ -10,14 +10,13 @@
 
 ### 常用用法
 
-在仓库根目录执行：
+launch 会自动解析 `camera_calib_root`；**机型**按 `ROBOT_VERSION` 自动选择 URDF（52→biped52，62/63→wheel62）。需要时可显式 `robot_layout:=...` 覆盖。
 
 - **采集（capture_to_csv，手动触发）**：
 
 ```bash
 roslaunch src/Camera_Calibration/demos/kuavo_right_wrist/kuavo_right_wrist_demo.launch \
-  do_capture_to_csv:=true do_optimize_from_csv:=false \
-  csv_dir:=src/Camera_Calibration/output_csv/kuavo_right_wrist
+  do_capture_to_csv:=true do_optimize_from_csv:=false
 ```
 
 - **采集（推荐：一键脚本自动下发 + 自动触发采样）**：
@@ -30,15 +29,14 @@ bash src/Camera_Calibration/run_chessboard_calibration.sh capture
 
 ```bash
 roslaunch src/Camera_Calibration/demos/kuavo_right_wrist/kuavo_right_wrist_demo.launch \
-  do_capture_to_csv:=false do_optimize_from_csv:=true \
-  csv_dir:=src/Camera_Calibration/output_csv/kuavo_right_wrist
+  do_capture_to_csv:=false do_optimize_from_csv:=true
 ```
 
 > 优化产物默认写到：`src/Camera_Calibration/output/kuavo_right_wrist/`（包括 `calibration.yaml`、误差图、`optimization_metrics.md` 等）。
 
 ### 关键约定
 
-- 公共 URDF：`src/Camera_Calibration/biped_v3_arm.urdf`（已包含 `right_wrist_camera_base` + `right_wrist_camera_color_optical_frame`）
+- 公共 URDF：`biped_v3_arm.urdf`（biped52）或 `biped_v3_arm_s62.urdf`（wheel62）；需包含 `right_wrist_camera_base` + `right_wrist_camera_color_optical_frame`
 - 右手自动下发脚本：`src/Camera_Calibration/demos/kuavo_right_wrist/right_wrist_table_publisher.py`
   - 会读取 `src/Camera_Calibration/teach_capture_output/teach_right_joint.json`
   - 会在发布 `/kuavo_arm_traj` 前尝试切到 **external_control(2)** 并调用 **/enable_wbc_arm_trajectory_control**

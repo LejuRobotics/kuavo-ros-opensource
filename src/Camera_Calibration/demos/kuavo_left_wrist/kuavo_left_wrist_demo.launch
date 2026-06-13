@@ -1,8 +1,13 @@
 <launch>
   <!-- Kuavo 左手腕相机 demo：一个 launch 覆盖 capture / optimize -->
 
-  <!-- 不依赖 ROS 包查找；由roslaunch 显式传入 camera_calib_root:= -->
-  <arg name="camera_calib_root" default="$(env CAMERA_CALIB_ROOT)" />
+  <!-- 不依赖 ROS 包查找；优先 CAMERA_CALIB_ROOT，否则相对 launch 文件定位到 Camera_Calibration 根目录 -->
+  <arg name="camera_calib_root" default="$(eval optenv('CAMERA_CALIB_ROOT', dirname() + '/../..'))" />
+  <!-- robot_layout：默认读 ROBOT_VERSION（52→biped52，62/63→wheel62）；可 roslaunch 显式 robot_layout:= 覆盖 -->
+  <arg name="robot_layout" default="$(eval 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped52')" />
+  <arg name="use_wheel62" default="$(eval arg('robot_layout') == 'wheel62')" />
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm.urdf')" />
+  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_calibrated.urdf')" />
   <arg name="csv_dir" default="$(arg camera_calib_root)/output_csv/kuavo_left_wrist"/>
   <arg name="do_capture_to_csv" default="true" />
   <arg name="do_optimize_from_csv" default="false" />
@@ -15,34 +20,57 @@
 
   <!-- 公共 URDF（所有 demo 共用） -->
   <param name="robot_description"
-         textfile="$(arg camera_calib_root)/biped_v3_arm.urdf" />
+         textfile="$(arg camera_calib_root)/$(arg urdf_file)" />
 
   <node pkg="robot_state_publisher"
        type="robot_state_publisher"
        name="$(arg rsp_name)"
        output="screen" />
 
-  <!-- /sensors_data_raw -> /joint_states（左臂 7 关节 + 腰） -->
-  <node pkg="robot_calibration"
-       type="sensors_joint_state_bridge.py"
-       name="left_wrist_joint_state_bridge"
-       output="screen">
-    <param name="input" value="/sensors_data_raw" />
-    <param name="output" value="/joint_states" />
-    <param name="publish_waist_joint" value="true" />
-    <param name="waist_joint" value="waist_yaw_joint" />
-    <param name="waist_joint_index" value="12" />
-    <rosparam param="joint_map">
-      <!-- 与仓库 sensorsData 切片约定保持一致：左臂 7 关节 joint_q[13:20] -->
-      - {name: zarm_l1_joint, index: 13}
-      - {name: zarm_l2_joint, index: 14}
-      - {name: zarm_l3_joint, index: 15}
-      - {name: zarm_l4_joint, index: 16}
-      - {name: zarm_l5_joint, index: 17}
-      - {name: zarm_l6_joint, index: 18}
-      - {name: zarm_l7_joint, index: 19}
-    </rosparam>
-  </node>
+  <!-- /sensors_data_raw -> /joint_states（按 robot_layout 切换 joint_q 索引映射） -->
+  <group unless="$(arg use_wheel62)">
+    <node pkg="robot_calibration"
+         type="sensors_joint_state_bridge.py"
+         name="left_wrist_joint_state_bridge"
+         output="screen">
+      <param name="input" value="/sensors_data_raw" />
+      <param name="output" value="/joint_states" />
+      <param name="publish_waist_joint" value="true" />
+      <param name="waist_joint" value="waist_yaw_joint" />
+      <param name="waist_joint_index" value="12" />
+      <rosparam param="joint_map">
+        <!-- biped52：左臂 7 关节 joint_q[13:20] -->
+        - {name: zarm_l1_joint, index: 13}
+        - {name: zarm_l2_joint, index: 14}
+        - {name: zarm_l3_joint, index: 15}
+        - {name: zarm_l4_joint, index: 16}
+        - {name: zarm_l5_joint, index: 17}
+        - {name: zarm_l6_joint, index: 18}
+        - {name: zarm_l7_joint, index: 19}
+      </rosparam>
+    </node>
+  </group>
+
+  <group if="$(arg use_wheel62)">
+    <node pkg="robot_calibration"
+         type="sensors_joint_state_bridge.py"
+         name="left_wrist_joint_state_bridge"
+         output="screen">
+      <param name="input" value="/sensors_data_raw" />
+      <param name="output" value="/joint_states" />
+      <param name="publish_waist_joint" value="false" />
+      <rosparam param="joint_map">
+        <!-- wheel62：左臂 7 关节 joint_q[4:11] -->
+        - {name: zarm_l1_joint, index: 4}
+        - {name: zarm_l2_joint, index: 5}
+        - {name: zarm_l3_joint, index: 6}
+        - {name: zarm_l4_joint, index: 7}
+        - {name: zarm_l5_joint, index: 8}
+        - {name: zarm_l6_joint, index: 9}
+        - {name: zarm_l7_joint, index: 10}
+      </rosparam>
+    </node>
+  </group>
 
   <group if="$(arg do_capture_to_csv)">
     <node pkg="robot_calibration"
@@ -78,12 +106,13 @@
           file="$(arg camera_calib_root)/demos/kuavo_left_wrist/kuavo_left_wrist_chessboard_calibration.yaml"
           command="load" />
       <param name="print_board_obs_pose" value="true" />
+      <!-- 离群点剔除：阈值 pos=0.12m, rot=12deg -->
       <param name="outlier_reject_enable" value="true" />
-      <param name="outlier_reject_pos_m" value="0.1" />
-      <param name="outlier_reject_rot_deg" value="10.0" />
+      <param name="outlier_reject_pos_m" value="0.12" />
+      <param name="outlier_reject_rot_deg" value="12.0" />
       <param name="output_dir" value="$(arg camera_calib_root)/output/kuavo_left_wrist" />
       <param name="fixed_output_names" value="true" />
-      <param name="urdf_output_path" value="$(arg camera_calib_root)/biped_v3_arm_calibrated.urdf" />
+      <param name="urdf_output_path" value="$(arg camera_calib_root)/$(arg calibrated_urdf_file)" />
       <param name="csv_dir" value="$(arg csv_dir)" />
       <param name="verbose" value="false" />
       <param name="print_fk" value="true" />

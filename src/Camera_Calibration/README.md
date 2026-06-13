@@ -8,6 +8,17 @@
 
 典型目标是：采集多姿态下的棋盘格观测 → 优化得到每个关节的 `bias`（以及必要时的相机/外参/URDF 修正）→ 将 `bias` 写回零点文件，使得下一轮标定时误差显著变小。
 
+### 机型与 URDF（52 / 62）
+
+当前支持两种实机布局，**命令不变**，由环境变量 `ROBOT_VERSION` 自动分流（`run_chessboard_calibration.sh`、`auto_camera_calib_and_apply_zero.py` 及各 demo launch 行为一致）：
+
+| `ROBOT_VERSION` | 布局 | 标定用 URDF | 标定后 URDF | 零点回写脚本 |
+|-----------------|------|-------------|-------------|--------------|
+| `52`（默认） | 人形 biped52 | `biped_v3_arm.urdf` | `biped_v3_arm_calibrated.urdf` | `apply_zero_deltas_to_arms_zero.py`（14 维 Ruiwo + EC） |
+| `62` / `63` | 轮臂 wheel62 | `biped_v3_arm_s62.urdf` | `biped_v3_arm_s62_calibrated.urdf` | `apply_zero_deltas_to_arms_zero_wheel62.py`（16 维 Motorevo） |
+
+未设置 `ROBOT_VERSION` 时按人形（52）处理。需要时可显式覆盖：`--robot_layout biped52` 或 `--robot_layout wheel62`。
+
 ---
 
 ## 目录结构（你真正需要看的部分）
@@ -27,10 +38,11 @@
   - 一键流程（采集 → 优化 → 打印修正量 → 交互确认写入零点）。
   - 适合“限位标零后，插入一次相机标定”那种工作流。
 
-- **`apply_zero_deltas_to_arms_zero.py`**
-  - 把 `output/**/calibration.yaml` 里的 joint bias 合并后，写入：
-    - Ruiwo：`~/.config/lejuconfig/arms_zero.yaml`（弧度，`arms_zero_position` 14 维）
-    - EC：`~/.config/lejuconfig/offset.csv`（角度，固定更新 `zarm_l1_joint`/`zarm_r1_joint`）
+- **`apply_zero_deltas_to_arms_zero.py`** / **`apply_zero_deltas_to_arms_zero_wheel62.py`**
+  - 按机型把 `output/**/calibration.yaml` 的 joint bias 写入 `~/.config/lejuconfig/arms_zero.yaml`：
+    - 52：`apply_zero_deltas_to_arms_zero.py`（14 维 Ruiwo + EC `offset.csv`）
+    - 62/63：`apply_zero_deltas_to_arms_zero_wheel62.py`（16 维 Motorevo，不写 EC）
+  - 一键脚本 `auto_camera_calib_and_apply_zero.py` 会按 `ROBOT_VERSION` 自动选用对应脚本。
 
 - **`plot_board_error_from_csv.py`**
   - 离线验证脚本：基于 `output_csv/**` 的采集 CSV，把 **标定前 URDF** 与 **优化后 URDF/YAML** 的棋盘位姿误差画出来。
@@ -53,6 +65,7 @@
 
 ### 前置条件
 
+- **`ROBOT_VERSION` 与实机一致**：人形设 `52`，轮臂设 `62` 或 `63`（见上文机型表）。
 - **机器人控制已启动**：确保 Kuavo 实机相关 launch 已运行，能够下发手臂轨迹并且相机话题在发布。
 - **棋盘格可见**：相机画面能稳定看到棋盘格，且光照/反光不过曝。
 - **三路 demo 的话题/`frame_id` 对齐**：各 demo README 里有对应话题约定。
@@ -80,22 +93,26 @@ bash src/Camera_Calibration/run_chessboard_calibration.sh optimize
 - `optimization_metrics.md`：优化指标与摘要（保留）
 - `board_pose_error_pre_post_vs_urdf.png`：优化前后误差对比图（用于快速判断效果）
 
-### 将优化结果写入零点（让下次误差变小）
+### 一键标定 + 写零点（推荐）
+
+采集、优化、打印修正量、确认后写零点，**52/62 共用同一条命令**：
 
 ```bash
-python3 src/Camera_Calibration/apply_zero_deltas_to_arms_zero.py
+python3 src/Camera_Calibration/auto_camera_calib_and_apply_zero.py
 ```
 
-建议第一次先 dry-run 核对映射/方向：
+### 仅将优化结果写入零点
+
+也可单独执行（脚本随 `ROBOT_VERSION` 自动选择；人形示例）：
 
 ```bash
-python3 src/Camera_Calibration/apply_zero_deltas_to_arms_zero.py --dry-run
+python3 src/Camera_Calibration/apply_zero_deltas_to_arms_zero.py --dry-run   # 先核对
+python3 src/Camera_Calibration/apply_zero_deltas_to_arms_zero.py             # 确认后写入
 ```
 
-脚本会自动备份：
+轮臂（62/63）对应 `apply_zero_deltas_to_arms_zero_wheel62.py`，参数相同。
 
-- `~/.config/lejuconfig/arms_zero.yaml.bak.<timestamp>`
-- `~/.config/lejuconfig/offset.csv.bak.<timestamp>`（如果有 EC 改动）
+脚本会自动备份 `~/.config/lejuconfig/arms_zero.yaml`；人形若有 EC 改动还会备份 `offset.csv`。
 
 ---
 
@@ -111,14 +128,13 @@ python3 src/Camera_Calibration/apply_zero_deltas_to_arms_zero.py --dry-run
 
 ### 零点写入规则（脚本已固化）
 
-- **Ruiwo（`arms_zero.yaml`）**
-  - 驱动发布角度（见 `ruiwo_actuator.cpp::set_joint_state`）：`q_reported = signed_raw_pos - zero_offset`
-  - 因此要让上报角增加 `bias`：统一写入 `zero_offset += (-bias)`（不再按 negtive 分支）
-  - `negtive_address` 仅影响 raw 取符号，不影响“减零点”的方向
+- **人形 52（Ruiwo + EC）**
+  - `arms_zero.yaml`：`q_reported = signed_raw_pos - zero_offset` → 写入 `zero_offset += (-bias)`
+  - `offset.csv`（deg）：`q_deg = raw_deg - offset_deg` → 仅更新 `zarm_l1_joint` / `zarm_r1_joint`
 
-- **EC（`offset.csv`，单位 deg）**
-  - 驱动发布角度：`q_deg = raw_deg - offset_deg`
-  - 因此要让上报角增加 `bias_deg`：`offset_deg += (-bias_deg)`
+- **轮臂 62/63（Motorevo）**
+  - `arms_zero.yaml` 16 维槽位：`[zarm_l1..l7, zarm_r1..r7, zhead_1, zhead_2]`，同样 `new_zero = old_zero - bias`
+  - 不写 `offset.csv`
 
 ---
 
@@ -145,6 +161,6 @@ python3 src/Camera_Calibration/apply_zero_deltas_to_arms_zero.py --dry-run
 
 - `run_chessboard_calibration.sh`：你日常最常用的一键入口
 - `auto_camera_calib_and_apply_zero.py`：一键“采集+优化+写零点”的闭环入口
-- `apply_zero_deltas_to_arms_zero.py`：零点写入规则与映射打印（排查方向问题就看它）
+- `apply_zero_deltas_to_arms_zero.py` / `apply_zero_deltas_to_arms_zero_wheel62.py`：零点写入与映射打印（排查方向问题就看它）
 - `plot_board_error_from_csv.py`：离线验证“优化前/后误差”
 

@@ -5,7 +5,7 @@ chmod +x "$0" 2>/dev/null || true
 
 usage() {
   cat <<'EOF'
-用法: run_chessboard_calibration.sh [capture|optimize|test|move] [--build] [--loops N] [--out_dir DIR]
+用法: run_chessboard_calibration.sh [capture|optimize|test|move] [--build] [--loops N] [--out_dir DIR] [--robot_layout biped52|wheel62]
 
 说明:
   - 运行后可选择：头部标定 / 右手标定 / 左手标定 / 全部串行
@@ -13,11 +13,13 @@ usage() {
   - optimize: 启动对应 demo 的 optimize_from_csv（从 CSV 读取）
   - test: 读取 teach_*_joint_test.json 下发测试姿态并采数到带 _test 后缀目录，采数完自动画图输出测试图片
   - move: 仅下发 teach JSON 中的多姿态关节轨迹（不采数、不写 CSV），适用于“内参标定只需运动覆盖”的场景
+  - 机型：默认读 ROBOT_VERSION（52→biped52，62/63→wheel62）；可用 --robot_layout 覆盖
 
 选项:
   --build       先编译 robot_calibration、robot_calibration_msgs 和 kuavo_msgs
   --loops N     仅头部有效：关键帧轨迹循环次数（默认 1）
   --out_dir DIR 覆盖 CSV 输出目录（不填则使用默认输出目录）
+  --robot_layout biped52|wheel62  覆盖 ROBOT_VERSION 自动识别
 EOF
 }
 
@@ -25,6 +27,7 @@ MODE=""
 BUILD=false
 LOOPS=1
 OUT_DIR=""
+ROBOT_LAYOUT_ARG=""
 CONTROL_TOPIC="/rgb_calib/control"
 
 if [[ $# -gt 0 ]]; then
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --build) BUILD=true; shift ;;
     --loops) LOOPS="${2:-}"; shift 2 ;;
     --out_dir) OUT_DIR="${2:-}"; shift 2 ;;
+    --robot_layout) ROBOT_LAYOUT_ARG="${2:-}"; shift 2 ;;
     --control_topic) CONTROL_TOPIC="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "未知参数: $1" >&2; usage; exit 1 ;;
@@ -53,16 +57,47 @@ TEACH_DIR="${CC_DIR}/teach_capture_output"
 # launch 内 camera_calib_root 默认读此环境变量（不注册 ROS 包）
 export CAMERA_CALIB_ROOT="${CC_DIR}"
 
+die() {
+  echo "[ERROR] $1" >&2
+  exit 1
+}
+
+# 机型布局：ROBOT_VERSION 自动识别，或 --robot_layout 覆盖
+resolve_robot_layout() {
+  if [[ -n "${ROBOT_LAYOUT_ARG}" ]]; then
+    case "${ROBOT_LAYOUT_ARG}" in
+      biped52|wheel62) echo "${ROBOT_LAYOUT_ARG}"; return 0 ;;
+      *) die "无效的 --robot_layout: ${ROBOT_LAYOUT_ARG}（仅 biped52|wheel62）" ;;
+    esac
+  fi
+  local rv="${ROBOT_VERSION:-}"
+  case "${rv}" in
+    52) echo "biped52" ;;
+    62|63) echo "wheel62" ;;
+    "")
+      echo "biped52"
+      ;;
+    *)
+      echo "[WARN] 未知 ROBOT_VERSION=${rv}，回退 biped52" >&2
+      echo "biped52"
+      ;;
+  esac
+}
+
+ROBOT_LAYOUT="$(resolve_robot_layout)"
+if [[ "${ROBOT_LAYOUT}" == "wheel62" ]]; then
+  NOMINAL_URDF="${CC_DIR}/biped_v3_arm_s62.urdf"
+  CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_s62_calibrated.urdf"
+else
+  NOMINAL_URDF="${CC_DIR}/biped_v3_arm.urdf"
+  CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_calibrated.urdf"
+fi
+
 banner() {
   echo ""
   echo "============================================================"
   echo "$1"
   echo "============================================================"
-}
-
-die() {
-  echo "[ERROR] $1" >&2
-  exit 1
 }
 
 pub_control() {
@@ -319,6 +354,9 @@ if [[ -z "${OUT_DIR}" ]]; then
 fi
 
 echo "[INFO] 工作空间: ${WS_DIR}"
+echo "[INFO] robot_layout: ${ROBOT_LAYOUT} (ROBOT_VERSION=${ROBOT_VERSION:-未设置})"
+echo "[INFO] nominal URDF: ${NOMINAL_URDF}"
+echo "[INFO] calibrated URDF: ${CALIBRATED_URDF}"
 echo "[INFO] demo: ${DEMO_NAME}"
 if [[ -n "${OUT_DIR}" ]]; then
   echo "[INFO] CSV 输出目录: ${OUT_DIR}"
@@ -403,12 +441,14 @@ if [[ "${CHOICE}" == "4" ]]; then
     echo "[INFO] (all) 顺序执行：先头部，再左右手（合并下发）"
     python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${head_json}"
 
     python3 "${CC_DIR}/demos/kuavo_both_arms/both_arms_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _hold_sec:=5.0 \
       _teach_left_json:="${left_json}" \
       _teach_right_json:="${right_json}"
@@ -426,12 +466,15 @@ if [[ "${CHOICE}" == "4" ]]; then
 
     # 三路同时 launch 须区分 rsp_name / capture_name，否则 ROS 报「同名节点注册」并互相踢掉
     roslaunch "${HEAD_LAUNCH}" "csv_dir:=${out_head}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+      "robot_layout:=${ROBOT_LAYOUT}" \
       "rsp_name:=rsp_head" "capture_name:=cap_capture_head" &
     PIDS+=( "$!" )
     roslaunch "${RIGHT_LAUNCH}" "csv_dir:=${out_right}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+      "robot_layout:=${ROBOT_LAYOUT}" \
       "rsp_name:=rsp_right" "capture_name:=cap_capture_right" &
     PIDS+=( "$!" )
     roslaunch "${LEFT_LAUNCH}" "csv_dir:=${out_left}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+      "robot_layout:=${ROBOT_LAYOUT}" \
       "rsp_name:=rsp_left" "capture_name:=cap_capture_left" &
     PIDS+=( "$!" )
   }
@@ -551,12 +594,12 @@ if [[ "${CHOICE}" == "4" ]]; then
           echo "  时间: $(date -Iseconds)"
           echo "  测试 CSV 目录: ${csv_d}"
           echo "  测试结果目录: ${plot_dir}"
-          echo "  FK 使用 URDF: ${CC_DIR}/biped_v3_arm.urdf（nominal only）"
+          echo "  FK 使用 URDF: ${NOMINAL_URDF}（nominal only）"
           echo "============================================================"
           echo ""
           python3 "${CC_DIR}/plot_board_error_from_csv.py" \
             --csv_dir "${csv_d}" \
-            --nominal_urdf "${CC_DIR}/biped_v3_arm.urdf" \
+            --nominal_urdf "${NOMINAL_URDF}" \
             --output_dir "${plot_dir}" \
             --use_nominal_only \
             --camera_tip_link "${cam_tip}" \
@@ -614,6 +657,7 @@ if [[ "${CHOICE}" == "4" ]]; then
           "do_capture_to_csv:=false" \
           "do_optimize_from_csv:=true" \
           "do_calibrate_manual:=false" \
+          "robot_layout:=${ROBOT_LAYOUT}" \
           "rsp_name:=${rsp}" \
           "optimize_name:=${optn}"
         local rc=$?
@@ -625,7 +669,7 @@ if [[ "${CHOICE}" == "4" ]]; then
         echo "[INFO] <<< ${tag} optimize 完成"
       }
 
-      # 必须在「该路 optimize 刚写完共享 URDF」后立即画图：下一路会覆盖 biped_v3_arm_calibrated.urdf。
+      # 必须在「该路 optimize 刚写完共享 URDF」后立即画图：下一路会覆盖 ${CALIBRATED_URDF}。
       # 行为与单路 MODE=optimize 中 plot_board_error_from_csv 一致；指标追加写入各 demo 的 optimization_metrics.md。
       plot_after_sequential_optimize() {
         local tag="$1"
@@ -665,9 +709,9 @@ if [[ "${CHOICE}" == "4" ]]; then
           echo "离群点阈值（与 launch 一致）: pos=${pos_m} m, rot=${rot_deg} deg"
           python3 "${CC_DIR}/plot_board_error_from_csv.py" \
             --csv_dir "${csv_d}" \
-            --nominal_urdf "${CC_DIR}/biped_v3_arm.urdf" \
+            --nominal_urdf "${NOMINAL_URDF}" \
             --output_dir "${plot_dir}" \
-            --calibrated_urdf "${CC_DIR}/biped_v3_arm_calibrated.urdf" \
+            --calibrated_urdf "${CALIBRATED_URDF}" \
             --calibration_yaml "${plot_dir}/calibration.yaml" \
             --camera_tip_link "${cam_tip}" \
             --sensor_name "${sensor}" \
@@ -722,6 +766,7 @@ if [[ "${MODE}" == "move" ]]; then
     echo "[INFO] 头部：启动 head_table_publisher.py，循环次数: ${LOOPS}"
     python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_head_joint.json"
     motion_done_cam "head_camera"
   elif [[ "${CHOICE}" == "2" ]]; then
@@ -730,7 +775,8 @@ if [[ "${MODE}" == "move" ]]; then
     python3 "${CC_DIR}/demos/kuavo_right_wrist/right_wrist_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_right_joint.json"
     motion_done_cam "right_wrist_camera"
   elif [[ "${CHOICE}" == "3" ]]; then
@@ -739,7 +785,8 @@ if [[ "${MODE}" == "move" ]]; then
     python3 "${CC_DIR}/demos/kuavo_left_wrist/left_wrist_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_left_joint.json"
     motion_done_cam "left_wrist_camera"
   else
@@ -750,12 +797,14 @@ if [[ "${MODE}" == "move" ]]; then
     echo "[INFO] 全部同时：顺序执行，先头部..."
     python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_head_joint.json"
     echo "[INFO] 全部同时：再左右手（合并下发）..."
     python3 "${CC_DIR}/demos/kuavo_both_arms/both_arms_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _hold_sec:=5.0 \
       _teach_left_json:="${TEACH_DIR}/teach_left_joint.json" \
       _teach_right_json:="${TEACH_DIR}/teach_right_joint.json"
@@ -772,7 +821,8 @@ fi
 if [[ "${MODE}" == "capture" ]]; then
   banner "阶段 1/2：采数（capture_to_csv -> 写入 CSV）"
   precheck_ros_and_topics "${CHOICE}" "${MODE}" || exit 1
-  roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" &
+  roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+    "robot_layout:=${ROBOT_LAYOUT}" &
   LAUNCH_PID=$!
   echo "[INFO] roslaunch PID = ${LAUNCH_PID}"
   sleep 5
@@ -786,6 +836,7 @@ if [[ "${MODE}" == "capture" ]]; then
     echo "[INFO] 头部：启动 head_table_publisher.py，循环次数: ${LOOPS}"
     python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_head_joint.json"
     sleep 2
   elif [[ "${CHOICE}" == "2" ]]; then
@@ -793,14 +844,16 @@ if [[ "${MODE}" == "capture" ]]; then
     python3 "${CC_DIR}/demos/kuavo_right_wrist/right_wrist_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_right_joint.json"
   else
     echo "[INFO] 左手：启动 left_wrist_table_publisher.py（按 teach_left_joint.json 下发并触发采样）"
     python3 "${CC_DIR}/demos/kuavo_left_wrist/left_wrist_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_left_joint.json"
   fi
 
@@ -838,7 +891,8 @@ if [[ "${MODE}" == "test" ]]; then
     die "找不到测试关节角 JSON：${TEST_TEACH_JSON}。请先运行 teach_joint_capture.py 选择“用于测试”生成 *_test.json"
   fi
 
-  roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" &
+  roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=true" "do_optimize_from_csv:=false" "do_calibrate_manual:=false" \
+    "robot_layout:=${ROBOT_LAYOUT}" &
   LAUNCH_PID=$!
   echo "[INFO] roslaunch PID = ${LAUNCH_PID}"
   sleep 5
@@ -851,6 +905,7 @@ if [[ "${MODE}" == "test" ]]; then
     echo "[INFO] 头部测试：启动 head_table_publisher.py（读取 teach_head_joint_test.json），循环次数: ${LOOPS}"
     python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_head_joint_test.json"
     sleep 2
   elif [[ "${CHOICE}" == "2" ]]; then
@@ -858,14 +913,16 @@ if [[ "${MODE}" == "test" ]]; then
     python3 "${CC_DIR}/demos/kuavo_right_wrist/right_wrist_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_right_joint_test.json"
   else
     echo "[INFO] 左手测试：启动 left_wrist_table_publisher.py（读取 teach_left_joint_test.json 下发并触发采样）"
     python3 "${CC_DIR}/demos/kuavo_left_wrist/left_wrist_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
-      _enable_wbc_arm_trajectory_control:=true \
+      _enable_arm_quick_mode:=true \
+      _robot_layout:="${ROBOT_LAYOUT}" \
       _teach_json_path:="${TEACH_DIR}/teach_left_joint_test.json"
   fi
 
@@ -905,12 +962,12 @@ if [[ "${MODE}" == "test" ]]; then
     echo "  时间: $(date -Iseconds)"
     echo "  测试 CSV 目录: ${OUT_DIR}"
     echo "  测试结果目录: ${TEST_PLOT_OUT_DIR}"
-    echo "  FK 使用 URDF: ${CC_DIR}/biped_v3_arm.urdf（nominal only）"
+    echo "  FK 使用 URDF: ${NOMINAL_URDF}（nominal only）"
     echo "============================================================"
     echo ""
     python3 "${CC_DIR}/plot_board_error_from_csv.py" \
       --csv_dir "${OUT_DIR}" \
-      --nominal_urdf "${CC_DIR}/biped_v3_arm.urdf" \
+      --nominal_urdf "${NOMINAL_URDF}" \
       --output_dir "${TEST_PLOT_OUT_DIR}" \
       --use_nominal_only \
       --camera_tip_link "${CAMERA_TIP_LINK}" \
@@ -954,14 +1011,15 @@ if [[ "${MODE}" == "optimize" ]]; then
     echo "============================================================"
     echo ""
     echo "---------- optimize_from_csv / roslaunch ----------"
-    roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=false" "do_optimize_from_csv:=true" "do_calibrate_manual:=false"
+    roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=false" "do_optimize_from_csv:=true" "do_calibrate_manual:=false" \
+      "robot_layout:=${ROBOT_LAYOUT}"
     echo ""
     echo "---------- plot_board_error_from_csv（标定前后 FK 误差表与 summary）----------"
     python3 "${CC_DIR}/plot_board_error_from_csv.py" \
       --csv_dir "${OUT_DIR}" \
-      --nominal_urdf "${CC_DIR}/biped_v3_arm.urdf" \
+      --nominal_urdf "${NOMINAL_URDF}" \
       --output_dir "${PLOT_OUT_DIR}" \
-      --calibrated_urdf "${CC_DIR}/biped_v3_arm_calibrated.urdf" \
+      --calibrated_urdf "${CALIBRATED_URDF}" \
       --calibration_yaml "${PLOT_OUT_DIR}/calibration.yaml" \
       --camera_tip_link "${CAMERA_TIP_LINK}" \
       --sensor_name "${SENSOR_NAME}" \

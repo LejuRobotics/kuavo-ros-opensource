@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import rospy
 from kuavo_msgs.msg import robotHeadMotionData, sensorsData
 from std_msgs.msg import Bool, Float64
+from std_srvs.srv import SetBool, SetBoolRequest
 
 
 def _deg(rad: float) -> float:
@@ -209,6 +210,27 @@ def hold_pose(
         rate.sleep()
 
 
+def _try_enable_arm_traj_interpolator(enabled: bool = True) -> bool:
+    service_name = "/enable_arm_traj_interpolator"
+    try:
+        rospy.wait_for_service(service_name, timeout=2.0)
+        proxy = rospy.ServiceProxy(service_name, SetBool)
+        req = SetBoolRequest()
+        req.data = bool(enabled)
+        resp = proxy(req)
+        if resp.success:
+            rospy.loginfo("Service %s ok: enabled=%s msg=%s", service_name, enabled, resp.message)
+            return True
+        rospy.logwarn("Service %s failed: enabled=%s msg=%s", service_name, enabled, resp.message)
+        return False
+    except rospy.ROSException:
+        rospy.logwarn("Service not available: %s", service_name)
+        return False
+    except rospy.ServiceException as e:
+        rospy.logwarn("Service call error %s: %s", service_name, e)
+        return False
+
+
 def validate_points(points: List[Dict]) -> None:
     if not points:
         raise ValueError("points 不能为空")
@@ -238,6 +260,9 @@ def main() -> None:
     return_to_zero_sec = float(rospy.get_param("~return_to_zero_sec", startup_align_sec))
     wait_sensors_timeout = float(rospy.get_param("~wait_sensors_timeout", 30.0))
     require_valid_sensors = bool(rospy.get_param("~require_valid_sensors", True))
+    robot_layout = str(rospy.get_param("~robot_layout", "biped52")).strip()
+    is_wheel62 = robot_layout == "wheel62"
+    use_arm_traj_interpolator = bool(rospy.get_param("~enable_arm_traj_interpolator", is_wheel62))
 
     # 从 teach_capture_output 的 JSON 读取头部角度表（拖动示教采集的结果）
     # - 优先使用 ~teach_json_path（测试阶段由脚本传入 *_test.json）
@@ -278,6 +303,10 @@ def main() -> None:
     kf_flag_pub = rospy.Publisher(keyframe_flag_topic, Float64, queue_size=10)
     done_pub = rospy.Publisher(done_flag_topic, Bool, queue_size=1)
     rospy.sleep(float(rospy.get_param("~post_mode_pub_connect_sec", 0.2)))
+
+    if is_wheel62 and use_arm_traj_interpolator:
+        if not _try_enable_arm_traj_interpolator(True):
+            rospy.logwarn("未能开启 /enable_arm_traj_interpolator，手臂可能仍出现阶梯指令抖动")
 
     # 启动预热保持，减少起步瞬间回默认位/零位的风险
     warmup_hold_sec = float(rospy.get_param("~warmup_hold_sec", 0.8))
