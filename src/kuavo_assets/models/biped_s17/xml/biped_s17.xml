@@ -38,7 +38,7 @@
   </asset>
 
   <worldbody>
-    <body name="base_link">
+    <body name="base_link" pos="0.0 0.0 0.77">
       <inertial pos="0.00202324 -3.822e-05 -0.122827" quat="0.70674 0.707473 0.000728125 0.000692342" mass="5.27737" diaginertia="0.0265656 0.0208074 0.0182124"/>
       <joint name="dummy_to_base_link" type="free" limited="false" actuatorfrclimited="false"/>
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist"/>

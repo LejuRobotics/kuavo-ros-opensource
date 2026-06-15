@@ -123,6 +123,8 @@ namespace humanoid_controller
     // 格式：[linear_x, linear_y, linear_z, angular_z]
     Eigen::Matrix<double, 4, 1> velocityLimits_{Eigen::Matrix<double, 4, 1>::Zero()};
     double cmdVelLineXNegScale_{1.0};  ///< X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
+    double velocityMediumGearLineX_{0.6};  ///< craic 中速档 cmdVelLineX（默认档为 velocityLimits_(0)）
+    bool craic_mode_{false};  ///< craic 比赛模式（LT+A/Y 切速等）
 
     // yaw 对齐
     double my_yaw_offset_{0.0};
@@ -206,6 +208,22 @@ namespace humanoid_controller
     double yaw_compensation_x_bias_clockwise_{0.0};     ///< 顺时针旋转时X轴偏置
     double yaw_compensation_x_bias_counterclockwise_{0.0}; ///< 逆时针旋转时X轴偏置
 
+    // amp_hand_controller 专用：外部手臂接管时 RL 使用虚拟手臂观测（仅 use_virtual_arm_obs 来自配置）
+    bool is_amp_hand_controller_{false};
+    bool use_virtual_arm_obs_{false};
+    static constexpr double kVirtualArmObsPitchBaseDeg_{0.2};
+    static constexpr double kVirtualArmObsPitchCompensationDeg_{1.5};
+    static constexpr double kVirtualArmObsPitchBaseDegNeg_{0.5};
+    static constexpr double kVirtualArmObsPitchCompensationDegNeg_{0.0};
+    bool lateral_elbow_fix_{false};
+    static constexpr double kLateralElbowFixScale_{0.25};
+    bool enable_roll_compensation_{false};
+    bool enable_off_cmdy_by_cmdx_{false};
+    static constexpr double kRollCompensationCmdXThreshold_{0.3};
+    static constexpr double kWalkingRollCompensationQuadA_{0.832520};
+    static constexpr double kWalkingRollCompensationQuadB_{-1.332474};
+    static constexpr double kWalkingRollCompensationQuadC_{0.627412};
+    static constexpr double kTurnRollCompensationDeg_{-0.75};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};

@@ -1,0 +1,37 @@
+{
+  "customize_action_RT_B": {
+    "type": "action",
+    "arm_pose_name": [
+      "抱药箱craic2026"
+    ],
+    "music_name": [
+    ]
+  },
+  "customize_action_RT_Y": {
+    "type": "action",
+    "arm_pose_name": [
+      "放药箱craic2026"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_LT_B": {
+    "type": "action",
+    "arm_pose_name": [
+      "飞吻"
+    ],
+    "music_name": [
+      ""
+    ]
+  },
+  "customize_action_LT_X": {
+    "type": "action",
+    "arm_pose_name": [
+      "欢呼"
+    ],
+    "music_name": [
+      ""
+    ]
+  }
+}

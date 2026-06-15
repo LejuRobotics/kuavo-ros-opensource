@@ -21,6 +21,7 @@ namespace humanoid_controller
                                        TopicLogger* ros_logger)
     : RLControllerBase(name, RLControllerType::AMP_CONTROLLER, config_file, nh, ros_logger)
   {
+    is_amp_hand_controller_ = (name == "amp_hand_controller");
     // 构造函数里 RLControllerBase 已经调用 initializeServices() 和 initializeRLVariables()
   }
 
@@ -53,6 +54,7 @@ namespace humanoid_controller
     // gait 指令来源：使用 RL gait receiver，等价于原来的 CommandData + joystick/cmd_vel
     initial_cmd_.cmdStance_ = 1;
     gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
+    gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
     
     // 加载原地踏步速度配置
     gait_receiver_->loadInPlaceStepConfig(config_file_, false);
@@ -213,6 +215,16 @@ namespace humanoid_controller
     loadData::loadPtreeValue(pt, arm_command_replacement_enabled, "use_external_arm_controller", false);
     use_external_arm_controller(arm_command_replacement_enabled);
     ROS_INFO("[%s] Arm command replacement enabled: %s", name_.c_str(), arm_command_replacement_enabled ? "true" : "false");
+
+    if (is_amp_hand_controller_)
+    {
+      loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
+      loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
+      loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
+      loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
+      loadData::loadPtreeValue(pt, craic_mode_, "craic", false);
+      loadData::loadPtreeValue(pt, velocityMediumGearLineX_, "velocityMediumGearLineX", false);
+    }
 
     // 加载手臂控制参数（用于 ArmController）
     if (arm_command_replacement_enabled && jointArmNum_ > 0)
@@ -547,12 +559,26 @@ namespace humanoid_controller
     command_state << cmd.cmdStance_;
     // 速度命令 [vx, vy, omega_z]
     cmd.scale();
-    
-    // 应用 X 负向单独缩放系数（实现不对称速度限制）
-    if (cmd.cmdVelLineX_ < 0.0) {
-      cmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
+    const bool external_arm_control_active = is_amp_hand_controller_ &&
+                                             arm_command_replacement_enabled_ &&
+                                             jointArmNum_ > 0 && arm_controller_ &&
+                                             arm_controller_->getMode() != 1;
+
+    // amp_hand: 外部手臂接管时才应用 X 负向缩放；其余控制器保持原行为。
+    if (cmd.cmdVelLineX_ < 0.0)
+    {
+      if (!is_amp_hand_controller_ || external_arm_control_active)
+      {
+        cmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
+      }
     }
-    
+
+    if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdx_ &&
+        cmd.cmdVelLineX_ > kRollCompensationCmdXThreshold_)
+    {
+      cmd.cmdVelLineY_ = 0.0;
+    }
+
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
@@ -605,6 +631,17 @@ namespace humanoid_controller
 
     Eigen::VectorXd jointPos = sensor_data.jointPos_ - defalutJointPosRL_;
     Eigen::VectorXd jointVel = sensor_data.jointVel_;
+
+    const bool virtual_arm_obs_active = is_amp_hand_controller_ &&
+                                        use_virtual_arm_obs_ &&
+                                        external_arm_control_active;
+    if (virtual_arm_obs_active)
+    {
+      const int arm_start_idx = jointNum_ + waistNum_;
+      jointPos.segment(arm_start_idx, jointArmNum_).setZero();
+      jointVel.segment(arm_start_idx, jointArmNum_).setZero();
+    }
+
     Eigen::VectorXd jointTorque = sensor_data.jointCurrent_;
     Eigen::Vector3d bodyAngVel = sensor_data.angularVel_;
     const Eigen::Vector3d &bodyLineAcc = sensor_data.linearAccel_;
@@ -620,7 +657,38 @@ namespace humanoid_controller
     const Eigen::Vector3d bodyLineVel = R.transpose() * baseLineVel;
 
     const Eigen::Vector3d gravity_world(0, 0, -1);
-    const Eigen::Vector3d projected_gravity = R.transpose() * gravity_world;
+    Eigen::Vector3d projected_gravity = R.transpose() * gravity_world;
+    if (virtual_arm_obs_active)
+    {
+      const double virtual_arm_obs_pitch_scale =
+          cmd.cmdVelLineX_ >= -0.12 ? cmd.cmdVelLineX_ : -0.1;
+      const double compensation_pitch_deg =
+          virtual_arm_obs_pitch_scale >= -0.005
+              ? kVirtualArmObsPitchBaseDeg_ +
+                    kVirtualArmObsPitchCompensationDeg_ * virtual_arm_obs_pitch_scale
+              : kVirtualArmObsPitchBaseDegNeg_ +
+                    kVirtualArmObsPitchCompensationDegNeg_ * virtual_arm_obs_pitch_scale;
+      const double compensation_pitch_rad = compensation_pitch_deg * M_PI / 180.0;
+      projected_gravity = Eigen::AngleAxisd(-compensation_pitch_rad, Eigen::Vector3d::UnitY()) * projected_gravity;
+    }
+
+    const bool is_walking_mode = cmd.cmdStance_ < 0.5;
+    if (is_amp_hand_controller_ && enable_roll_compensation_ && is_walking_mode &&
+        cmd.cmdVelLineX_ > kRollCompensationCmdXThreshold_)
+    {
+      const double cmd_x = cmd.cmdVelLineX_;
+      const double walking_roll_compensation_deg =
+          kWalkingRollCompensationQuadA_ * cmd_x * cmd_x +
+          kWalkingRollCompensationQuadB_ * cmd_x +
+          kWalkingRollCompensationQuadC_;
+      const double total_roll_compensation_deg =
+          walking_roll_compensation_deg + kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
+      if (std::abs(total_roll_compensation_deg) > 1e-6)
+      {
+        const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;
+        projected_gravity = Eigen::AngleAxisd(compensation_roll_rad, Eigen::Vector3d::UnitX()) * projected_gravity;
+      }
+    }
 
     Eigen::VectorXd local_action = getCurrentAction();
 
@@ -742,6 +810,38 @@ namespace humanoid_controller
         action[i] = output_buf[i];
 
       clip(action, clipActions_);
+
+      if (is_amp_hand_controller_ && lateral_elbow_fix_ && action.size() == 21)
+      {
+        CommandDataRL elbowCmd = gait_receiver_->getCurrentCommand();
+        elbowCmd.scale();
+
+        const bool external_arm_control_active = arm_command_replacement_enabled_ &&
+                                                 jointArmNum_ > 0 && arm_controller_ &&
+                                                 arm_controller_->getMode() != 1;
+        if (external_arm_control_active && elbowCmd.cmdVelLineX_ < 0.0)
+        {
+          elbowCmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
+        }
+
+        const bool is_lateral_move_command =
+            std::abs(elbowCmd.cmdVelLineX_) < 0.2 &&
+            std::abs(elbowCmd.cmdVelAngularZ_) < 0.2 &&
+            std::abs(elbowCmd.cmdVelLineY_) > 0.1;
+        if (is_lateral_move_command)
+        {
+          // kuavo_v17 action order: zarm_l4_joint=16, zarm_r4_joint=20.
+          // Positive cmd_y is left lateral, negative cmd_y is right lateral.
+          if (elbowCmd.cmdVelLineY_ > 0.0)
+          {
+            action[16] *= kLateralElbowFixScale_;
+          }
+          else
+          {
+            action[20] *= kLateralElbowFixScale_;
+          }
+        }
+      }
 
       // ==================== 站立切换到行走时的支撑腿髋关节roll偏置 ====================
       // 计算并应用支撑腿髋关节roll偏置
@@ -1574,9 +1674,24 @@ namespace humanoid_controller
     limits_vec[3] = 0.0;                 // angular_x (通常为 0)
     limits_vec[4] = 0.0;                 // angular_y (通常为 0)
     limits_vec[5] = velocityLimits_(3);  // angular_z
-    
+
     nh.setParam("/velocity_limits", limits_vec);
-    
+
+    if (is_amp_hand_controller_ && craic_mode_)
+    {
+      std::vector<double> medium_limits = limits_vec;
+      medium_limits[0] = velocityMediumGearLineX_;
+      nh.setParam("/velocity_limits_default", limits_vec);
+      nh.setParam("/velocity_limits_medium", medium_limits);
+      nh.setParam("/amp_hand_craic", true);
+      ROS_INFO("[%s] craic velocity gears: default cmdVelLineX=%.2f, medium=%.2f",
+               name_.c_str(), limits_vec[0], medium_limits[0]);
+    }
+    else
+    {
+      nh.setParam("/amp_hand_craic", false);
+    }
+
     ROS_INFO("[%s] Updated /velocity_limits from controller config: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
              name_.c_str(),
              limits_vec[0], limits_vec[1], limits_vec[2],

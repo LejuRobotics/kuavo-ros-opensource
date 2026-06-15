@@ -14,14 +14,19 @@ clipActions        5000.0    ; 用于对actions进行clip
 ankleSolverType    1       ; 用于仿真中关节换算版本指定 0:旧版本 1:新版本
 use_jointcmd_filter true       ; 是否对输出使用关节指令滤波器 0:不使用 1:使用
 use_external_arm_controller  true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
+use_virtual_arm_obs         true ; 是否在外部手臂控制器生效时使用手臂静默优化
+lateral_elbow_fix           true ; 纯侧移时缩放对应侧肘关节 action
+enable_roll_compensation    true ; 是否启用行走/转弯时 projected_gravity 的 roll 观测补偿
+enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时关闭cmdy
+craic                       false ; craic比赛特殊下蹲放箱(RT+X)，仅 amp_hand_controller 生效
 use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd   false      ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 is_fall_down_controller     false ; 是否为倒地起身控制器
 
-networkModelFile    /roban/roban_wbc_new_pos/policy_roban09_2026-04-27_11-35-35_348000.onnx;
-;networkModelFile    /0515/05-15_13-38-03_amp_agent_79200.onnx
+;networkModelFile    /roban/roban_wbc_new_pos/policy_roban09_2026-04-27_11-35-35_348000.onnx;
+networkModelFile    /roban/roban_wbc_new_pos/06-09_15-39-29_amp_agent_72000.onnx
 
 
 commandData
@@ -52,11 +57,22 @@ commandData
 velocityLimits
 {
     ; 定义速度命令的限制
-    (0,0)  0.70      ; cmdVelLineX
-    (1,0)  0.35      ; cmdVelLineY
+    (0,0)  0.85      ; cmdVelLineX，默认速度限制
+    (1,0)  0.37      ; cmdVelLineY
     (2,0)  0.0      ; cmdVelLineZ
-    (3,0)  0.85     ; cmdVelAngularZ
+    (3,0)  1.0     ; cmdVelAngularZ
 }
+velocityMediumGearLineX  0.65    ; cmdVelLineX中速档(用于craic比赛，当craic为true时生效， LT+A)；默认档为 velocityLimits(0,0) 0.85
+
+joyAutoPutBox
+{
+    squatAxis       -0.8   ; 自动放箱下蹲摇杆等效值，负值对应右摇杆下蹲
+    squatDuration    1.2    ; 进入姿态控制后持续下蹲时间(s)
+    actionTimeout   7.0    ; 等待放箱 tact 完成的最长时间(s)
+    standDuration    2.0    ; tact 完成后回正站起等待时间(s)
+    actionName      放药箱craic2026 ; 放箱 tact 动作名(craic true 时由 RT+X 触发)
+}
+
 defaultBaseHeightControl    0.77 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
 
