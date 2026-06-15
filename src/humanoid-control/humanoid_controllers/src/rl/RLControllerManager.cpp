@@ -699,7 +699,11 @@ namespace humanoid_controller
         else if (type == RLControllerType::DANCE_CONTROLLER)
         {
           // Dance 控制器
-          controller = std::make_unique<DanceController>(name, config_file_abs, nh, ros_logger);
+          auto dance_controller = std::make_unique<DanceController>(name, config_file_abs, nh, ros_logger);
+          // [根因修复] 注入 manager 持有的共享 dance_trajectory_state publisher,
+          // 避免每个 DanceController 自行 advertise 制造启动期 race
+          dance_controller->setDanceTrajectoryStatePublisher(dance_trajectory_state_pub_);
+          controller = std::move(dance_controller);
         }
         else
         {
@@ -775,6 +779,17 @@ namespace humanoid_controller
         "/humanoid_controller/controller_switch_event", 1, true);
     depth_history_status_pub_ = nh.advertise<std_msgs::Int32>(
         "/humanoid_controller/depth_history_status", 1, true);
+
+    // [根因修复] 所有 DanceController 共用一份 dance_trajectory_state publisher
+    // 历史问题: 5 个 DanceController 各自 advertise(latch=true) 同一 topic, 启动期
+    //   会让订阅者握手偶发触发 "received a connection for a nonexistent topic", rospy
+    //   重试 1 次后 give up, 跳舞时无音乐播放. 现统一在此 advertise 一次, 通过 setter
+    //   注入到每个 DanceController. 同时把 latch=true 改为 false: 该场景下 latched 反
+    //   而会让"上一次 finished"被新 subscriber 当成"刚 started"误命中 Python 侧逻辑.
+    dance_trajectory_state_pub_ = nh.advertise<kuavo_msgs::DanceTrajectoryState>(
+        "/humanoid_controller/dance_trajectory_state", 10, /*latch=*/false);
+    ROS_INFO("[RLControllerManager] Topic registered: /humanoid_controller/dance_trajectory_state");
+
     can_switch_to_depth_walk_controller_ = isDepthHistoryTopicAvailable(/*log=*/false);
     const double depth_history_check_period_sec = std::min(0.1, depth_history_wait_timeout_sec_ * 0.5);
     depth_history_check_timer_ = nh.createTimer(ros::Duration(depth_history_check_period_sec),

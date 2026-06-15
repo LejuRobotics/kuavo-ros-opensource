@@ -163,6 +163,7 @@ class HardwarePlant
     std::map<int, MotorStatus> getAllJointsStatus() const;
 
     bool checkLejuClawInitialized();
+    void setLejuClawDebugCallback(eef_controller::LejuClawDebugCallback callback);
     bool controlLejuClaw(eef_controller::ControlClawRequest& req, eef_controller::ControlClawResponse& res);
     bool controlLejuClaw(eef_controller::lejuClawCommand& command);
     eef_controller::ClawState getLejuClawState();
@@ -194,6 +195,7 @@ class HardwarePlant
     std::unique_ptr<eef_controller::DexhandController> dexhand_actuator;
     std::unique_ptr<eef_controller::Revo2HandController> revo2_actuator;
     std::string gesture_filepath_;
+    eef_controller::LejuClawDebugCallback leju_claw_debug_callback_;
     
     // 电机状态管理器
     std::unique_ptr<MotorStatusManager> motor_status_manager_;

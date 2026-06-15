@@ -157,6 +157,23 @@ namespace humanoid_controller
     virtual ~DanceController();
 
     /**
+     * @brief 注入由 RLControllerManager 持有的共享 publisher
+     *
+     * 历史问题：原本每个 DanceController 实例自己 advertise 同一个 topic，
+     * 5 个实例同进程重复 advertise(latch=true) 在启动期会让订阅者握手
+     * 偶发触发 "received a connection for a nonexistent topic" 错误，
+     * rospy 重试 1 次后 give up，导致跳舞时无音乐播放。
+     *
+     * 修复：由 RLControllerManager 在初始化阶段 advertise 一次，把该
+     * publisher 句柄注入给每个 DanceController（ros::Publisher 内部是
+     * 引用计数实现，拷贝即共享同一份底层 publication）。
+     */
+    void setDanceTrajectoryStatePublisher(const ros::Publisher& pub)
+    {
+      dance_trajectory_state_pub_ = pub;
+    }
+
+    /**
      * @brief 初始化控制器
      * @return 是否初始化成功
      */

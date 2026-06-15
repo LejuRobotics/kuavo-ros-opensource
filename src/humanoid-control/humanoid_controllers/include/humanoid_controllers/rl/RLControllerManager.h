@@ -9,6 +9,7 @@
 #include "kuavo_msgs/ControllerSwitchEvent.h"
 #include "kuavo_msgs/GetStringList.h"
 #include "kuavo_msgs/SetString.h"
+#include "kuavo_msgs/DanceTrajectoryState.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
 #include "std_msgs/Int32.h"
@@ -245,6 +246,18 @@ namespace humanoid_controller
     int getCurrentDanceControllerIndex() const;
 
     /**
+     * @brief 获取共享的 dance_trajectory_state publisher 句柄
+     *
+     * 所有 DanceController 共用此 publisher，避免每个实例自行 advertise 制造启动期
+     * 多 publisher race。
+     * 返回值 ros::Publisher 内部为引用计数共享，拷贝安全。
+     */
+    const ros::Publisher& getDanceTrajectoryStatePublisher() const
+    {
+      return dance_trajectory_state_pub_;
+    }
+
+    /**
      * @brief 注册倒地状态回调函数
      * @param callback 回调函数，参数为FallStandState枚举值（0=STANDING, 1=FALL_DOWN）
      */
@@ -416,6 +429,8 @@ namespace humanoid_controller
     ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
     ros::Publisher depth_history_status_pub_;        ///< 深度历史话题检查状态发布器
+    /// 舞蹈轨迹状态发布器（所有 DanceController 共用一份，避免启动期 race）
+    ros::Publisher dance_trajectory_state_pub_;
     ros::Timer depth_history_check_timer_;           ///< 深度历史话题检查定时器
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 

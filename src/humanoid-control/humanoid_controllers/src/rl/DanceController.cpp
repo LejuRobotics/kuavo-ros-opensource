@@ -518,13 +518,16 @@ namespace humanoid_controller
 
   void DanceController::initializeDanceServices()
   {
-    dance_trajectory_state_pub_ = nh_.advertise<kuavo_msgs::DanceTrajectoryState>(
-        "/humanoid_controller/dance_trajectory_state", 1, true);
-    ROS_INFO("[%s] Latched topic registered: /humanoid_controller/dance_trajectory_state", name_.c_str());
+    // [根因修复] 不再在此处 advertise dance_trajectory_state topic
+    // 改为由 RLControllerManager 在 init 时统一 advertise 一次，
+    // 通过 setDanceTrajectoryStatePublisher() 注入到每个 DanceController。
+    // 历史问题: 5 个 DanceController 重复 advertise(latch=true) 制造启动期
+    //   窄窗口, 触发 "received a connection for a nonexistent topic" 错误,
+    //   rospy 不重连, 跳舞时无音乐播放.
 
     // 重新开始舞蹈服务
     std::string service_name = "/humanoid_controller/" + name_ + "/restart_dance";
-    restart_dance_srv_ = nh_.advertiseService(service_name, 
+    restart_dance_srv_ = nh_.advertiseService(service_name,
                                                &DanceController::restartDanceCallback, this);
     ROS_INFO("[%s] Service registered: %s", name_.c_str(), service_name.c_str());
   }
@@ -583,6 +586,12 @@ namespace humanoid_controller
   {
     if (!dance_trajectory_state_pub_)
     {
+      // 保留 warn: 若未由 RLControllerManager 注入共享 publisher, 跳舞期间会持续报警,
+      // 可第一时间发现 setter 调用链断了
+      ROS_WARN_THROTTLE(2.0,
+          "[%s] dance_trajectory_state publisher not initialized; "
+          "did RLControllerManager call setDanceTrajectoryStatePublisher()?",
+          name_.c_str());
       return;
     }
 
