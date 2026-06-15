@@ -8,16 +8,25 @@
     <arg name="core_prefix" value="/bin/bash -c 'ulimit -c unlimited; exec &quot;$0&quot; &quot;$@&quot;'" if="$(arg coredump)"/>
     <arg name="core_prefix" value="" unless="$(arg coredump)"/>
     <param name="h12_log_channel" value="$(arg h12_log_channel)"/>
-    <node pkg="h12pro_controller_node" type="h12pro_channel_publisher" name="h12pro_channel_publisher" output="screen"/>
+    <!-- guard_prefix：本套 h12 节点的可选门卫前缀，默认空。
+         服务自启动路径不传此参数 => 为空 => 各节点照常启动，原有行为不变。
+         手动 launch 路径（load_kuavo_real.launch）传入 h12_node_guard.sh：
+         若服务已正常运行（active 且 /joy_node 在线），手动这套与服务同名的节点
+         （joy_node / h12pro_channel_publisher / websocket_sdk_start_node）启动瞬间自退、
+         复用服务那套，避免同名争抢（joy_node 手柄失灵、websocket 远程控制错乱等）。 -->
+    <arg name="guard_prefix" default=""/>
+    <node pkg="h12pro_controller_node" type="h12pro_channel_publisher" name="h12pro_channel_publisher" output="screen" launch-prefix="$(arg guard_prefix)"/>
 
     <!-- joy_node 的生命周期由 monitor_ocs2_h12pro.sh 管理：
          不设 respawn，避免和 bt2 等手动路径下的同名 /joy_node 争抢。
          进程异常退出 / hang / 被 bt2 抢占名字，均由 monitor 做统一恢复和让位。 -->
-    <node pkg="h12pro_controller_node" type="ocs2_h12pro_node.py" name="joy_node" output="screen" launch-prefix="$(arg core_prefix)">
+    <node pkg="h12pro_controller_node" type="ocs2_h12pro_node.py" name="joy_node" output="screen" launch-prefix="$(arg guard_prefix) $(arg core_prefix)">
         <env name="PYTHONFAULTHANDLER" value="1"/>
         <env name="PYTHONUNBUFFERED" value="1"/>
     </node>
-    
+
     <!-- for Kuavo Humanoid Websocket SDK: host_srv -->
-    <include file="$(find h12pro_controller_node)/launch/kuavo_humanoid_sdk_ws_srv.launch"/>
+    <include file="$(find h12pro_controller_node)/launch/kuavo_humanoid_sdk_ws_srv.launch">
+        <arg name="guard_prefix" value="$(arg guard_prefix)"/>
+    </include>
 </launch>
