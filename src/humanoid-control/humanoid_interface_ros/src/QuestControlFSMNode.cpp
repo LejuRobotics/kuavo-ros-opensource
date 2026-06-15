@@ -1805,9 +1805,10 @@ namespace ocs2
             }
             const std::vector<float> deadzone = {0.02f, 0.02f, 0.02f, 0.02f};
             auto joystick_vector = getJoystickVector(deadzone);
-            if (joystick_vector[0] < 0.0)
+            // 人型后退灵敏度减弱 50%；轮臂前后速度对称
+            if (robot_type_ != 1 && joystick_vector[0] < 0.0)
             {
-                joystick_vector[0] *= 0.5;// 后退灵敏度减弱50%
+                joystick_vector[0] *= 0.5;
             }
             bool cmd_close_to_zero = (joystick_vector.norm() <= 1e-3);
             if (cmd_close_to_zero)

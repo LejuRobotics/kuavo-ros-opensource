@@ -173,9 +173,9 @@ namespace mobile_manipulator
       integrated_angular_z_ = 0.0;
       
       // 初始化积分增益参数（可根据需要调整）
-      integral_gain_linear_x_ = 0.01;   // 每次回调的积分增益
+      integral_gain_linear_x_ = 0.003;   // 每次回调的积分增益
       integral_gain_linear_z_ = 0.01;
-      integral_gain_angular_y_ = 0.01;
+      integral_gain_angular_y_ = 0.003;
       integral_gain_angular_z_ = 0.01;
 
       // G12 publishes /joy continuously at a higher fixed rate. Keep its
@@ -864,7 +864,7 @@ namespace mobile_manipulator
           geometry_msgs::Twist torso;
           torso.linear.z = clamp(calcOut(integrated_linear_z_, torsoMax_z_, torsoMin_z_), -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
           double current_torso_max_x = getTorsoMaxX(integrated_linear_z_);
-          torso.linear.x = clamp(calcOut(integrated_linear_x_, current_torso_max_x, torsoMin_x_), -torsoMin_x_, current_torso_max_x) + initialTorsoPose_x_;
+          torso.linear.x = clamp(calcOut(integrated_linear_x_, torsoMax_x_, torsoMin_x_), -torsoMin_x_, current_torso_max_x) + initialTorsoPose_x_;
           torso.angular.y = clamp(calcOut(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), -torsoMin_pitch_, torsoMax_pitch_);
           torso.angular.z = clamp(calcOut(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), -torsoMin_yaw_, torsoMax_yaw_);
 
@@ -1102,7 +1102,7 @@ namespace mobile_manipulator
         torso_cmd.linear.z = clamp(calculateOutput(integrated_linear_z_, torsoMax_z_, torsoMin_z_), 
                                    -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
         double current_torso_max_x = getTorsoMaxX(integrated_linear_z_);
-        torso_cmd.linear.x = clamp(calculateOutput(integrated_linear_x_, current_torso_max_x, torsoMin_x_), 
+        torso_cmd.linear.x = clamp(calculateOutput(integrated_linear_x_, torsoMax_x_, torsoMin_x_), 
                                    -torsoMin_x_, current_torso_max_x) + initialTorsoPose_x_;
         torso_cmd.angular.y = clamp(calculateOutput(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), 
                                     -torsoMin_pitch_, torsoMax_pitch_);
