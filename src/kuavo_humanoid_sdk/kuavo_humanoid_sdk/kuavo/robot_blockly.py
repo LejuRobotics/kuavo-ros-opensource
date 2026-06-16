@@ -702,6 +702,9 @@ class RobotControlBlockly:
         time.sleep(0.5)
         while self.plan_arm_state_status is False:
             time.sleep(0.01)
+        if g_robot_type == "ocs2":
+            print("action file finished, restore arm control mode to AutoSwing")
+            self.set_arm_control_mode(1)
         print("action file executed")
 
     def execute_action_file(self, action_file: str, proj_name: str = None, music_file: str = None):
@@ -746,6 +749,9 @@ class RobotControlBlockly:
         time.sleep(0.5)
         while self.plan_arm_state_status is False:
             time.sleep(0.01)
+        if g_robot_type == "ocs2":
+            print("action file finished, restore arm control mode to AutoSwing")
+            self.set_arm_control_mode(1)
         print("action file executed")
 
 

@@ -31,6 +31,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <robot_state_publisher/robot_state_publisher.h>
 #include <tf/transform_broadcaster.h>
+#include <urdf/model.h>
 
 #include <ocs2_ros_interfaces/mrt/DummyObserver.h>
 
@@ -75,6 +76,10 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   std::unique_ptr<robot_state_publisher::RobotStatePublisher> robotStatePublisherPtr_;
   tf::TransformBroadcaster tfBroadcaster_;
 
+  // 缓存 URDF 模型,用于运行期判断关节是否存在,避免向 robot_state_publisher 发布
+  // URDF 中不存在的关节(否则会刷出 "Joint state with name: ... was received but not found in URDF")
+  urdf::Model urdfModel_;
+
   ros::Publisher stateOptimizedPublisher_;
   ros::Publisher stateOptimizedPosePublisher_;
 
@@ -86,7 +91,7 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   bool updateHeadJointPositions_ = false;
 
   // 夹爪相关
-  bool updateClawJointPositions_ = true;
+  bool updateClawJointPositions_ = false;
   std::vector<double> claw_joint_positions_ = {0.0, 0.0};
   ros::Subscriber clawCmdSubscriber_;
   ros::Publisher lejuClawStatePub_;

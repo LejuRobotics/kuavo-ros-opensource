@@ -84,6 +84,9 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   if (!model.initParam(urdfName)) {
     ROS_ERROR("URDF model load was NOT successful");
   }
+  // 缓存 URDF 模型,后续在向 robot_state_publisher 写入夹爪/灵巧手关节前用作存在性守卫,
+  // 避免在 URDF 不含相应关节的机型(如 62/200062)上刷出 "not found in URDF" 警告。
+  urdfModel_ = model;
   KDL::Tree tree;
   if (!kdl_parser::treeFromUrdfModel(model, tree)) {
     ROS_ERROR("Failed to extract kdl tree from xml robot description");
@@ -217,14 +220,20 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
   }
 
   // 添加夹爪关节 (200053/200062)
+  // 仅向 jointPositions 写入 URDF 中实际存在的关节,避免 robot_state_publisher 输出
+  // "Joint state with name: ... was received but not found in URDF" 警告。
   if (updateClawJointPositions_) {
     static const char* kLeftClaw[] = {"l_f_bar_1_joint", "l_b_bar_1_joint", "l_f_bar_3_joint", "l_b_bar_3_joint"};
     static const double kLeftFactor[] = {+1.0, -1.0, +1.0, -1.0};
     static const char* kRightClaw[] = {"r_f_bar_1_joint", "r_b_bar_1_joint", "r_f_bar_3_joint", "r_b_bar_3_joint"};
     static const double kRightFactor[] = {+1.0, -1.0, +1.0, -1.0};
     for (int i = 0; i < 4; i++) {
-      jointPositions[kLeftClaw[i]] = kLeftFactor[i] * claw_joint_positions_[0];
-      jointPositions[kRightClaw[i]] = kRightFactor[i] * claw_joint_positions_[1];
+      if (urdfModel_.getJoint(kLeftClaw[i])) {
+        jointPositions[kLeftClaw[i]] = kLeftFactor[i] * claw_joint_positions_[0];
+      }
+      if (urdfModel_.getJoint(kRightClaw[i])) {
+        jointPositions[kRightClaw[i]] = kRightFactor[i] * claw_joint_positions_[1];
+      }
     }
 
     // publish /leju_claw_state
@@ -240,9 +249,14 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
   }
 
   // 添加灵巧手关节 (300062)
+  // 仅向 jointPositions 写入 URDF 中实际存在的关节,避免在 62/200062 等无灵巧手机型上
+  // 收到 /dexhand/state 后向 robot_state_publisher 注入不存在的关节名而触发警告。
   if (updateDexhandJointPositions_) {
     for (size_t i = 0; i < dexhand_joint_names_.size(); i++) {
-      jointPositions[dexhand_joint_names_[i]] = dexhand_joint_positions_[i];
+      const auto& name = dexhand_joint_names_[i];
+      if (urdfModel_.getJoint(name)) {
+        jointPositions[name] = dexhand_joint_positions_[i];
+      }
     }
   }
 
