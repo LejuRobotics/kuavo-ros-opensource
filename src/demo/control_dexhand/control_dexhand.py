@@ -41,18 +41,22 @@ if __name__ == '__main__':
     # Wait for connections
     time.sleep(1)
     
-    # Loop opening and closing hands
-    option_open = False
+    # Loop through three test actions.
+    # The second DOF corresponds to index 1 in the 6-value position array.
+    # 0 == fully open, 100 == fully closed.
+    actions = [
+        ("Closing all except the 2nd DOF", [100, 0, 100, 100, 100, 100]),
+        ("Opening all DOFs",               [0, 0, 0, 0, 0, 0]),
+        ("Closing only the 2nd DOF",       [0, 100, 0, 0, 0, 0]),
+        ("Opening all DOFs",               [0, 0, 0, 0, 0, 0]),
+    ]
+    action_idx = 0
     try:
         while not rospy.is_shutdown():
-            if option_open:
-                print("Opening hands")
-                control_robot_hand_position([0]*6, [0]*6)
-                option_open = False
-            else:
-                print("Closing hands") 
-                control_robot_hand_position([100]*6, [100]*6)
-                option_open = True
+            name, pos = actions[action_idx]
+            print(name)
+            control_robot_hand_position(pos, pos)
+            action_idx = (action_idx + 1) % len(actions)
             time.sleep(1.5)
     except KeyboardInterrupt:
         print("\nShutting down dexhand control node...")

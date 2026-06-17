@@ -217,9 +217,18 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, arm_max_tracking_velocity_, "armVelocityLimit.maxTrackingVelocity", false);
       loadData::loadPtreeValue(pt, arm_tracking_error_threshold_, "armVelocityLimit.trackingErrorThreshold", false);
       loadData::loadPtreeValue(pt, arm_mode_interpolation_velocity_, "armVelocityLimit.modeInterpolationVelocity", false);
+      loadData::loadPtreeValue(pt, arm_rl_takeover_blend_enabled_, "armRlTakeoverBlend.enabled", false);
+      loadData::loadPtreeValue(pt, arm_rl_takeover_blend_duration_, "armRlTakeoverBlend.duration", false);
+      loadData::loadPtreeValue(pt, arm_zero_action_in_standing_, "armRlTakeoverBlend.zeroActionInStanding", false);
+      arm_takeover_blender_.configure(arm_rl_takeover_blend_enabled_, arm_rl_takeover_blend_duration_);
       
       ROS_INFO("[%s] Arm control parameters loaded: max_velocity=%.3f rad/s, error_threshold=%.3f rad, mode_interpolation_velocity=%.3f rad/s",
                name_.c_str(), arm_max_tracking_velocity_, arm_tracking_error_threshold_, arm_mode_interpolation_velocity_);
+      ROS_INFO("[%s] Arm RL takeover blend: enabled=%s, duration=%.3f s, zero_action_in_standing=%s",
+               name_.c_str(),
+               arm_rl_takeover_blend_enabled_ ? "true" : "false",
+               arm_rl_takeover_blend_duration_,
+               arm_zero_action_in_standing_ ? "true" : "false");
     }
 
     // 是否启用腰部控制覆盖功能（对应 skw_rl_param.info 中 use_external_waist_controller）
@@ -395,6 +404,8 @@ namespace humanoid_controller
     {
       arm_controller_->reset();
     }
+    arm_takeover_blender_.reset();
+    last_stance_state_for_blend_ = true;  // 初始化为站立状态
     
     ROS_INFO("[%s] reset", name_.c_str());
     sensor_data_updated_ = false;
@@ -578,7 +589,8 @@ namespace humanoid_controller
     }
     
     Eigen::VectorXd tempCommand_ = cmd.getCommandRL();
-
+    Eigen::VectorXd tempCommand_scalar_state = tempCommand_;
+    tempCommand_scalar_state[3] = 1.0 - tempCommand_scalar_state[3];  // 前3维不变，第4维做 1- 操作    
 
     // === 2. 状态、IMU、关节等数据，与 humanoidController_rl.cpp 一致 ===
     const Eigen::Vector3d baseEuler(state_est(2), state_est(1), state_est(0));
@@ -635,6 +647,7 @@ namespace humanoid_controller
         {"bodyLineVel", bodyLineVel},
         {"commandPhase", commandPhase_},
         {"command", tempCommand_},
+        {"command_scalar_state", tempCommand_scalar_state},
         {"action", local_action}
     };
 
@@ -758,6 +771,12 @@ namespace humanoid_controller
       CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
       bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
       
+      // 更新站立状态（用于下次检测切换）
+      lastStanceState_ = is_standing;
+      
+      // 注意：不在这里修改 action，保持 action 为 RL 原始输出用于观测
+      // 手臂置零和平滑处理将在 updateRLcmd 中单独进行
+      
       // 当从站立切换到行走时（站立->行走），记录初始髋关节pitch角速度并开始数据收集
       if (lastStanceState_ && !is_standing)
       {
@@ -820,9 +839,6 @@ namespace humanoid_controller
           isHipPitchDataCollected_ = true;
         }
       }
-      
-      // 更新上一帧状态
-      lastStanceState_ = is_standing;
 
       return true;
     }
@@ -850,6 +866,11 @@ namespace humanoid_controller
     {
       local_action.tail(jointArmNum_ + waistNum_).setZero();
     }
+
+    // 应用手臂接管平滑处理（站立时置零，行走时平滑过渡）
+    CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
+    bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
+    applyArmTakeoverBlend(local_action, ros::Time::now(), is_standing);
 
     Eigen::VectorXd jointTor(jointNum_ + jointArmNum_ + waistNum_);
 
@@ -965,6 +986,67 @@ namespace humanoid_controller
 
 
     return actuation;
+  }
+
+  void AmpWalkController::applyArmTakeoverBlend(Eigen::VectorXd& action, const ros::Time& time, bool is_standing)
+  {
+    if (!arm_rl_takeover_blend_enabled_ || jointArmNum_ <= 0 || !arm_command_replacement_enabled_)
+    {
+      return;
+    }
+
+    if (action.size() < jointNum_ + waistNum_ + jointArmNum_)
+    {
+      return;
+    }
+
+    const int arm_start = jointNum_ + waistNum_;
+
+    // 站立状态：根据配置置零手臂 action，并重置 blender
+    if (is_standing)
+    {
+      if (arm_zero_action_in_standing_)
+      {
+        action.segment(arm_start, jointArmNum_).setZero();
+      }
+      arm_takeover_blender_.reset();
+      last_stance_state_for_blend_ = true;
+      return;
+    }
+
+    // 行走状态
+    // 检测站立→行走切换，启动平滑过渡
+    if (last_stance_state_for_blend_)
+    {
+      arm_takeover_blender_.start(time.toSec(), jointArmNum_);
+    }
+    last_stance_state_for_blend_ = false;
+
+    // 应用平滑混合
+    if (arm_takeover_blender_.isActive())
+    {
+      action.segment(arm_start, jointArmNum_) =
+          arm_takeover_blender_.blendArmAction(time.toSec(), action.segment(arm_start, jointArmNum_));
+    }
+  }
+
+  Eigen::VectorXd AmpWalkController::getDefaultArmJointPos() const
+  {
+    return defalutJointPosRL_.segment(jointNum_ + waistNum_, jointArmNum_);
+  }
+
+  Eigen::VectorXd AmpWalkController::getArmActionScaleTest() const
+  {
+    return actionScaleTestRL_.segment(jointNum_ + waistNum_, jointArmNum_);
+  }
+
+  Eigen::VectorXd AmpWalkController::getCurrentArmJointPos(const SensorData& sensor_data) const
+  {
+    if (is_roban_)
+    {
+      return sensor_data.jointPos_.segment(waistNum_ + jointNum_, jointArmNum_);
+    }
+    return sensor_data.jointPos_.segment(jointNum_ + waistNum_, jointArmNum_);
   }
 
   void AmpWalkController::actionToJointCmd(const Eigen::VectorXd& actuation,
