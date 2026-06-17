@@ -122,9 +122,9 @@ namespace humanoid_controller
     // 速度命令限制（简化版：4 维统一上限 + X 负向单独缩放系数）
     // 格式：[linear_x, linear_y, linear_z, angular_z]
     Eigen::Matrix<double, 4, 1> velocityLimits_{Eigen::Matrix<double, 4, 1>::Zero()};
+    double cmdVelLineXLow_{0.0};  ///< amp_hand_controller 手柄十字键下档 X 速度限制
+    double cmdVelLineXUp_{0.0};   ///< amp_hand_controller 手柄十字键高档 X 速度限制
     double cmdVelLineXNegScale_{1.0};  ///< X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
-    double velocityMediumGearLineX_{0.6};  ///< craic 中速档 cmdVelLineX（默认档为 velocityLimits_(0)）
-    bool craic_mode_{false};  ///< craic 比赛模式（LT+A/Y 切速等）
 
     // yaw 对齐
     double my_yaw_offset_{0.0};
@@ -223,7 +223,7 @@ namespace humanoid_controller
     static constexpr double kWalkingRollCompensationQuadA_{0.832520};
     static constexpr double kWalkingRollCompensationQuadB_{-1.332474};
     static constexpr double kWalkingRollCompensationQuadC_{0.627412};
-    static constexpr double kTurnRollCompensationDeg_{-0.75};
+    static constexpr double kTurnRollCompensationDeg_{-0.7};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};

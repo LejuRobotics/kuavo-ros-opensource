@@ -218,12 +218,14 @@ namespace humanoid_controller
 
     if (is_amp_hand_controller_)
     {
+      cmdVelLineXLow_ = velocityLimits_(0);
+      cmdVelLineXUp_ = velocityLimits_(0);
+      loadData::loadPtreeValue(pt, cmdVelLineXLow_, "cmdVelLineXlow", false);
+      loadData::loadPtreeValue(pt, cmdVelLineXUp_, "cmdVelLineXup", false);
       loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
-      loadData::loadPtreeValue(pt, craic_mode_, "craic", false);
-      loadData::loadPtreeValue(pt, velocityMediumGearLineX_, "velocityMediumGearLineX", false);
     }
 
     // 加载手臂控制参数（用于 ArmController）
@@ -1676,20 +1678,10 @@ namespace humanoid_controller
     limits_vec[5] = velocityLimits_(3);  // angular_z
 
     nh.setParam("/velocity_limits", limits_vec);
-
-    if (is_amp_hand_controller_ && craic_mode_)
+    if (is_amp_hand_controller_)
     {
-      std::vector<double> medium_limits = limits_vec;
-      medium_limits[0] = velocityMediumGearLineX_;
-      nh.setParam("/velocity_limits_default", limits_vec);
-      nh.setParam("/velocity_limits_medium", medium_limits);
-      nh.setParam("/amp_hand_craic", true);
-      ROS_INFO("[%s] craic velocity gears: default cmdVelLineX=%.2f, medium=%.2f",
-               name_.c_str(), limits_vec[0], medium_limits[0]);
-    }
-    else
-    {
-      nh.setParam("/amp_hand_craic", false);
+      nh.setParam("/amp_hand_controller/cmdVelLineXlow", cmdVelLineXLow_);
+      nh.setParam("/amp_hand_controller/cmdVelLineXup", cmdVelLineXUp_);
     }
 
     ROS_INFO("[%s] Updated /velocity_limits from controller config: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",

@@ -957,14 +957,6 @@ class JoyCustomizeConfigNode:
                         if action_key is None:
                             continue
 
-                        # RT+X 由 HumanoidAutoGaitJoyCommandNodeWithVel 按下沿触发craic比赛:自动放箱;
-                        # 此处是 X 松开沿, 若仍走 customize_action_RT_X 会打断放箱(如旧配置绑了「欢呼」)。
-                        if action_key == "customize_action_RT_X" and rospy.get_param("/amp_hand_craic", False):
-                            rospy.loginfo_throttle(
-                                1.0,
-                                f"Skipping {action_key}: craic auto put box owns RT+X")
-                            continue
-
                         is_m1m2 = (action_key.startswith("customize_action_M1") or
                                    action_key.startswith("customize_action_M2"))
 

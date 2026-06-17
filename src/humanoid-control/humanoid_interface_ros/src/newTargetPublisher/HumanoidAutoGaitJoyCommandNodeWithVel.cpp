@@ -174,17 +174,6 @@ namespace ocs2
   class JoyControl
   {
   public:
-    enum class AutoPutBoxPhase
-    {
-      Idle,
-      EnterPosture,
-      Squat,
-      ExecuteAction,
-      WaitActionDone,
-      StandUp,
-      ExitPosture,
-    };
-
     JoyControl(ros::NodeHandle &nodeHandle, const std::string &robotName, bool verbose = false)
         : nodeHandle_(nodeHandle),
           targetPoseCommand_(nodeHandle, robotName)
@@ -301,8 +290,6 @@ namespace ocs2
       {
         ROS_WARN_STREAM("No joy_execute_action parameter found, using default joy_execute_action.");
       }
-
-      loadAutoPutBoxParamsFromAmpHandConfig();
 
       Eigen::Vector4d joystickFilterCutoffFreq_(joystickSensitivity, joystickSensitivity, 
                                                   joystickSensitivity, joystickSensitivity);
@@ -462,10 +449,24 @@ namespace ocs2
           }
         }
       });
+      // 订阅控制器切换事件，在任意控制器切换（包括RL->RL）时更新速度限制
+      controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>(
+        "/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
+      ROS_INFO("[JoyControl] Controller switch event: %s -> %s, updating velocity limits",
+               msg->from_controller.c_str(), msg->to_controller.c_str());
+      updateVelocityLimitsFromParam(true);
+      });
+      
 
       // 订阅控制器切换事件，更新AMP控制器状态
       controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr &msg)
       {
+        ROS_INFO("[JoyControl] Controller switch event: %s -> %s, updating velocity limits",
+                 msg->from_controller.c_str(), msg->to_controller.c_str());
+        cached_controller_name_ = msg->to_controller;
+        cached_controller_time_ = ros::Time::now().toSec();
+        updateVelocityLimitsFromParam(true);
+
         // 检查是否切换到AMP控制器
         bool old_is_amp = is_amp_controller_;
         is_amp_controller_ = (msg->to_controller == "amp_controller");
@@ -699,7 +700,6 @@ namespace ocs2
             // ROS_INFO_STREAM("Waiting for observation message...");
             continue;
           }
-          processAutoPutBoxSequence();
           checkAndPublishCommandLine(joystick_origin_axis_);
         }
       }
@@ -745,30 +745,25 @@ namespace ocs2
      */
     void updateVelocityLimitsFromParam(bool log_changes = true)
     {
-      if (craic_auto_put_box_enabled_ && is_rl_controller_)
-      {
-        std::vector<double> default_limits;
-        if (nodeHandle_.getParam("/velocity_limits_default", default_limits) && default_limits.size() == 6)
-          craic_default_velocity_limits_ = default_limits;
-        std::vector<double> medium_limits;
-        if (nodeHandle_.getParam("/velocity_limits_medium", medium_limits) && medium_limits.size() == 6)
-          craic_medium_velocity_limits_ = medium_limits;
-      }
-
       std::vector<double> velocity_limits;
       if (nodeHandle_.getParam("/velocity_limits", velocity_limits) && velocity_limits.size() == 6)
       {
-        // 检查值是否有变化，避免重复设置和打印日志
-        bool changed = (std::abs(c_relative_base_limit_[0] - velocity_limits[0]) > 1e-6) ||
-                       (std::abs(c_relative_base_limit_[1] - velocity_limits[1]) > 1e-6) ||
-                       (std::abs(c_relative_base_limit_[2] - velocity_limits[2]) > 1e-6) ||
-                       (std::abs(c_relative_base_limit_[3] - velocity_limits[5]) > 1e-6);
-        
+        const auto old_limits = c_relative_base_limit_;
+
         // 将6维速度限制转换为4维格式
         c_relative_base_limit_[0] = velocity_limits[0];  // linear_x
         c_relative_base_limit_[1] = velocity_limits[1];  // linear_y
         c_relative_base_limit_[2] = velocity_limits[2];  // linear_z
         c_relative_base_limit_[3] = velocity_limits[5];  // angular_z
+        amp_hand_cmd_vel_line_x_default_ = velocity_limits[0];
+        loadAmpHandCmdVelLineXLimitParams();
+        applyAmpHandCmdVelLineXLimit();
+
+        // 检查最终生效值是否有变化，避免十字键档位被周期刷新覆盖后重复打印
+        bool changed = (std::abs(old_limits[0] - c_relative_base_limit_[0]) > 1e-6) ||
+                       (std::abs(old_limits[1] - c_relative_base_limit_[1]) > 1e-6) ||
+                       (std::abs(old_limits[2] - c_relative_base_limit_[2]) > 1e-6) ||
+                       (std::abs(old_limits[3] - c_relative_base_limit_[3]) > 1e-6);
         
         if (changed && log_changes)
         {
@@ -777,6 +772,93 @@ namespace ocs2
                    c_relative_base_limit_[2], c_relative_base_limit_[3]);
         }
       }
+    }
+
+    bool isRoban17AmpHandControllerActive()
+    {
+      return rb_version_.version_number() == 17 && isAmpHandControllerActive();
+    }
+
+    void loadAmpHandCmdVelLineXLimitParams()
+    {
+      double low_limit = amp_hand_cmd_vel_line_x_low_;
+      double up_limit = amp_hand_cmd_vel_line_x_up_;
+      if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXlow", low_limit) && low_limit > 0.0)
+      {
+        amp_hand_cmd_vel_line_x_low_ = low_limit;
+      }
+      if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXup", up_limit) && up_limit > 0.0)
+      {
+        amp_hand_cmd_vel_line_x_up_ = up_limit;
+      }
+    }
+
+    void applyAmpHandCmdVelLineXLimit()
+    {
+      if (!isRoban17AmpHandControllerActive())
+      {
+        return;
+      }
+
+      if (amp_hand_cmd_vel_line_x_low_ <= 0.0)
+      {
+        amp_hand_cmd_vel_line_x_low_ = amp_hand_cmd_vel_line_x_default_;
+      }
+      if (amp_hand_cmd_vel_line_x_up_ <= 0.0)
+      {
+        amp_hand_cmd_vel_line_x_up_ = amp_hand_cmd_vel_line_x_default_;
+      }
+
+      if (amp_hand_cmd_vel_line_x_limit_level_ <= 0)
+      {
+        c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_low_;
+      }
+      else if (amp_hand_cmd_vel_line_x_limit_level_ >= 2)
+      {
+        c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_up_;
+      }
+      else
+      {
+        c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_default_;
+      }
+    }
+
+    void handleAmpHandCmdVelLineXLimitDpad(const sensor_msgs::Joy::ConstPtr &joy_msg)
+    {
+      if (!isRoban17AmpHandControllerActive())
+      {
+        return;
+      }
+
+      const int axis_idx = joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"];
+      if (axis_idx < 0 || static_cast<size_t>(axis_idx) >= joy_msg->axes.size())
+      {
+        return;
+      }
+
+      const double current = joy_msg->axes[axis_idx];
+      const double previous = static_cast<size_t>(axis_idx) < old_joy_msg_.axes.size() ? old_joy_msg_.axes[axis_idx] : 0.0;
+      const bool up_pressed = current > DEAD_ZONE && previous <= DEAD_ZONE;
+      const bool down_pressed = current < -DEAD_ZONE && previous >= -DEAD_ZONE;
+      if (!up_pressed && !down_pressed)
+      {
+        return;
+      }
+
+      if (down_pressed)
+      {
+        amp_hand_cmd_vel_line_x_limit_level_ = 0;
+      }
+      else if (amp_hand_cmd_vel_line_x_limit_level_ < 2)
+      {
+        ++amp_hand_cmd_vel_line_x_limit_level_;
+      }
+
+      applyAmpHandCmdVelLineXLimit();
+      const char* level_name = amp_hand_cmd_vel_line_x_limit_level_ <= 0 ? "low" :
+                               (amp_hand_cmd_vel_line_x_limit_level_ >= 2 ? "up" : "default");
+      ROS_INFO("[JoyControl] v17 amp_hand cmdVelLineX limit level=%s, limit=%.2f",
+               level_name, c_relative_base_limit_[0]);
     }
     
 
@@ -811,13 +893,13 @@ namespace ocs2
       const bool has_command =
           std::any_of(updated.begin(), updated.end(), [](bool x) { return x; });
 
-      // v17: 死区内持续发布零速，供 RlGaitReceiver 多步衰减（原先只发一次会导致 smoothed 卡住）
-      if (rb_version_.version_number() == 17)
+      // v17 + amp_hand_controller: 死区内持续发布零速，供 RlGaitReceiver 多步衰减（原先只发一次会导致 smoothed 卡住）
+      if (rb_version_.version_number() == 17 && isAmpHandControllerActive())
       {
         static bool was_sending_command = false;
         if (!has_command && was_sending_command)
         {
-          ROS_DEBUG("[JoyControl] joystick released, continuously publishing zero cmd_vel");
+          ROS_DEBUG("[JoyControl] joystick released, continuously publishing zero cmd_vel (amp_hand)");
         }
         was_sending_command = has_command;
         cmd_vel_publisher_.publish(cmdVel_);
@@ -1424,22 +1506,6 @@ namespace ocs2
         return;
       }
 
-      if (autoPutBoxActive())
-      {
-        old_joy_msg_ = *joy_msg;
-        return;
-      }
-
-      // craic: RT+X 启动自动放箱(运行中不可按 RT+X 取消)
-      if (craic_auto_put_box_enabled_ && IS_ROBAN(rb_version_) &&
-          joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5 &&
-          risingEdge(joy_msg, "BUTTON_RL"))
-      {
-        startAutoPutBoxSequence();
-        old_joy_msg_ = *joy_msg;
-        return;
-      }
-
       // MPC/RL 切换后短时间锁：只认 BUTTON_RL 的上升沿（行走列表中「下一个」），摇杆及其余按键不响应
       if (isControllerSwitching())
       {
@@ -1565,13 +1631,7 @@ namespace ocs2
       }
       
       if(joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] < -0.5)
-      {
-        if (handleCraicLtVelocityGearButtons(joy_msg))
-        {
-          old_joy_msg_ = *joy_msg;
-          return;
-        }
-
+      {        
         if(!joy_execute_action_)
         {
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
@@ -1652,6 +1712,7 @@ namespace ocs2
       }
       joystick_origin_axis_ = joystickOriginAxisFilter_;
       // joystick_origin_axis_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+      handleAmpHandCmdVelLineXLimitDpad(joy_msg);
       
       const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
       const bool rb_held = buttonPressed(joy_msg, "BUTTON_RB");
@@ -2052,255 +2113,6 @@ namespace ocs2
       {
         callAmpModeService(0);
         ROS_WARN("[JoyControl] Posture control mode disabled: restored walking mode");
-      }
-    }
-
-    bool loadOptionalDoubleParamFromInfo(const std::string &file, const std::string &key, double &value)
-    {
-      try
-      {
-        loadData::loadCppDataType(file, key, value);
-        return true;
-      }
-      catch (const std::exception &)
-      {
-        return false;
-      }
-    }
-
-    bool loadOptionalStringParamFromInfo(const std::string &file, const std::string &key, std::string &value)
-    {
-      try
-      {
-        loadData::loadCppDataType(file, key, value);
-        return true;
-      }
-      catch (const std::exception &)
-      {
-        return false;
-      }
-    }
-
-    void loadAutoPutBoxParamsFromAmpHandConfig()
-    {
-      craic_auto_put_box_enabled_ = false;
-      if (rb_version_.version_number() != 17)
-        return;
-
-      const std::string config_file =
-          ros::package::getPath("humanoid_controllers") + "/config/kuavo_v17/rl/amp_hand_param.info";
-      try
-      {
-        loadData::loadCppDataType(config_file, "craic", craic_auto_put_box_enabled_);
-      }
-      catch (const std::exception &)
-      {
-        craic_auto_put_box_enabled_ = false;
-      }
-      if (!craic_auto_put_box_enabled_)
-      {
-        ROS_INFO("[JoyControl] craic features disabled (amp_hand_param.info craic=false)");
-        nodeHandle_.setParam("/amp_hand_craic", false);
-        return;
-      }
-
-      loadOptionalDoubleParamFromInfo(config_file, "joyAutoPutBox.squatAxis", auto_put_box_squat_axis_);
-      loadOptionalDoubleParamFromInfo(config_file, "joyAutoPutBox.squatDuration", auto_put_box_squat_duration_);
-      loadOptionalDoubleParamFromInfo(config_file, "joyAutoPutBox.actionTimeout", auto_put_box_action_timeout_);
-      loadOptionalDoubleParamFromInfo(config_file, "joyAutoPutBox.standDuration", auto_put_box_stand_duration_);
-      loadOptionalStringParamFromInfo(config_file, "joyAutoPutBox.actionName", auto_put_box_action_name_);
-      loadOptionalDoubleParamFromInfo(config_file, "velocityMediumGearLineX", craic_medium_speed_linear_x_limit_);
-
-      nodeHandle_.setParam("/amp_hand_craic", true);
-
-      ROS_INFO("[JoyControl] craic enabled: auto put box RT+X; velocity LT+A=medium(%.2f) LT+Y=default(from velocityLimits); "
-               "putBox actionName='%s'",
-               craic_medium_speed_linear_x_limit_, auto_put_box_action_name_.c_str());
-      ROS_INFO("[JoyControl] craic auto put box: squatAxis=%.2f, squatDuration=%.2f, actionTimeout=%.2f, standDuration=%.2f",
-               auto_put_box_squat_axis_, auto_put_box_squat_duration_,
-               auto_put_box_action_timeout_, auto_put_box_stand_duration_);
-    }
-
-    void applyCraicVelocityGear(bool medium_gear)
-    {
-      if (!craic_auto_put_box_enabled_ || !is_rl_controller_)
-        return;
-
-      std::string current_controller;
-      if (!getCurrentControllerName(current_controller) || current_controller != "amp_hand_controller")
-      {
-        ROS_WARN("[JoyControl] craic velocity gear only on amp_hand_controller (current=%s)",
-                 current_controller.c_str());
-        return;
-      }
-
-      const std::vector<double> &gear_limits =
-          medium_gear ? craic_medium_velocity_limits_ : craic_default_velocity_limits_;
-      if (gear_limits.size() != 6)
-      {
-        ROS_WARN_THROTTLE(1.0,
-                          "[JoyControl] craic velocity gear limits not ready (switch to amp_hand first)");
-        return;
-      }
-
-      c_relative_base_limit_[0] = gear_limits[0];
-      c_relative_base_limit_[1] = gear_limits[1];
-      c_relative_base_limit_[2] = gear_limits[2];
-      c_relative_base_limit_[3] = gear_limits[5];
-      nodeHandle_.setParam("/velocity_limits", gear_limits);
-
-      ROS_INFO("[JoyControl] craic velocity gear -> %s: cmdVelLineX=%.2f",
-               medium_gear ? "medium (LT+A)" : "default (LT+Y)", c_relative_base_limit_[0]);
-    }
-
-    bool handleCraicLtVelocityGearButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
-    {
-      if (!craic_auto_put_box_enabled_ || !IS_ROBAN(rb_version_))
-        return false;
-      if (joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] >= -0.5)
-        return false;
-
-      std::string current_controller;
-      if (!getCurrentControllerName(current_controller) || current_controller != "amp_hand_controller" ||
-          !is_rl_controller_)
-        return false;
-
-      if (risingEdge(joy_msg, "BUTTON_STANCE"))
-      {
-        applyCraicVelocityGear(true);
-        return true;
-      }
-      if (risingEdge(joy_msg, "BUTTON_WALK"))
-      {
-        applyCraicVelocityGear(false);
-        return true;
-      }
-      return false;
-    }
-
-    bool autoPutBoxActive() const
-    {
-      return auto_put_box_phase_ != AutoPutBoxPhase::Idle;
-    }
-
-    void setAutoPutBoxPhase(AutoPutBoxPhase phase)
-    {
-      auto_put_box_phase_ = phase;
-      auto_put_box_phase_start_time_ = ros::Time::now();
-    }
-
-    void startAutoPutBoxSequence()
-    {
-      if (!craic_auto_put_box_enabled_)
-        return;
-      if (autoPutBoxActive())
-      {
-        ROS_WARN_THROTTLE(1.0, "[JoyControl] Auto put box already running, RT+X cancel disabled");
-        return;
-      }
-      if (rb_version_.version_number() != 17)
-      {
-        ROS_WARN("[JoyControl] Auto put box is only enabled for robot version 17");
-        return;
-      }
-      if (auto_put_box_action_name_.empty())
-      {
-        ROS_WARN("[JoyControl] Auto put box skipped: joyAutoPutBox.actionName is empty");
-        return;
-      }
-      if (robot_action_executing_)
-      {
-        ROS_WARN("[JoyControl] Auto put box skipped: another tact action is executing");
-        return;
-      }
-
-      std::string current_controller;
-      if (!getCurrentControllerName(current_controller) || current_controller != "amp_hand_controller")
-      {
-        ROS_WARN("[JoyControl] Auto put box requires amp_hand_controller (current=%s)",
-                 current_controller.c_str());
-        return;
-      }
-
-      ROS_WARN("[JoyControl] Auto put box started (RT+X): posture -> squat -> %s -> stand -> exit posture",
-               auto_put_box_action_name_.c_str());
-      auto_put_box_action_seen_executing_ = false;
-      joystick_origin_axis_.setZero();
-      setAutoPutBoxPhase(AutoPutBoxPhase::EnterPosture);
-    }
-
-    vector_t autoPutBoxSquatAxis() const
-    {
-      vector_t axis = vector_t::Zero(6);
-      axis(2) = std::max(-1.0, std::min(1.0, auto_put_box_squat_axis_));
-      return axis;
-    }
-
-    void processAutoPutBoxSequence()
-    {
-      if (!autoPutBoxActive())
-        return;
-
-      const ros::Time now = ros::Time::now();
-      const double elapsed = (now - auto_put_box_phase_start_time_).toSec();
-      switch (auto_put_box_phase_)
-      {
-        case AutoPutBoxPhase::EnterPosture:
-          if (!posture_control_mode_)
-            setPostureControlMode(true);
-          setAutoPutBoxPhase(AutoPutBoxPhase::Squat);
-          break;
-
-        case AutoPutBoxPhase::Squat:
-          joystick_origin_axis_ = autoPutBoxSquatAxis();
-          if (elapsed >= auto_put_box_squat_duration_)
-            setAutoPutBoxPhase(AutoPutBoxPhase::ExecuteAction);
-          break;
-
-        case AutoPutBoxPhase::ExecuteAction:
-          joystick_origin_axis_ = autoPutBoxSquatAxis();
-          if (callExecuteArmAction(auto_put_box_action_name_))
-          {
-            auto_put_box_action_seen_executing_ = robot_action_executing_;
-            setAutoPutBoxPhase(AutoPutBoxPhase::WaitActionDone);
-          }
-          else
-          {
-            ROS_WARN("[JoyControl] Auto put box: failed to execute arm action, standing up");
-            setAutoPutBoxPhase(AutoPutBoxPhase::StandUp);
-          }
-          break;
-
-        case AutoPutBoxPhase::WaitActionDone:
-          joystick_origin_axis_ = autoPutBoxSquatAxis();
-          if (robot_action_executing_)
-            auto_put_box_action_seen_executing_ = true;
-          if ((auto_put_box_action_seen_executing_ && !robot_action_executing_) ||
-              elapsed >= auto_put_box_action_timeout_)
-          {
-            if (elapsed >= auto_put_box_action_timeout_ && robot_action_executing_)
-              ROS_WARN("[JoyControl] Auto put box: action wait timeout, standing up");
-            setAutoPutBoxPhase(AutoPutBoxPhase::StandUp);
-          }
-          break;
-
-        case AutoPutBoxPhase::StandUp:
-          joystick_origin_axis_.setZero();
-          if (elapsed >= auto_put_box_stand_duration_)
-            setAutoPutBoxPhase(AutoPutBoxPhase::ExitPosture);
-          break;
-
-        case AutoPutBoxPhase::ExitPosture:
-          joystick_origin_axis_.setZero();
-          if (posture_control_mode_)
-            setPostureControlMode(false);
-          setAutoPutBoxPhase(AutoPutBoxPhase::Idle);
-          ROS_WARN("[JoyControl] Auto put box finished");
-          break;
-
-        case AutoPutBoxPhase::Idle:
-        default:
-          break;
       }
     }
 
@@ -2758,9 +2570,9 @@ namespace ocs2
       return false;
     }
 
-    // AMP 控制器活动判定, 带 TTL 缓存避免 100Hz 控制循环里高频调 service。
+    // 控制器名 TTL 缓存, 避免 100Hz 控制循环里高频调 service。
     // 缓存失败时保持上次结果, 启动初期未取到时按 false 处理(不误拦)。
-    bool isAmpControllerActive()
+    void refreshControllerCacheIfStale()
     {
       const double now = ros::Time::now().toSec();
       if (now - cached_controller_time_ >= kControllerCacheTtl_)
@@ -2772,7 +2584,18 @@ namespace ocs2
         }
         cached_controller_time_ = now;
       }
+    }
+
+    bool isAmpControllerActive()
+    {
+      refreshControllerCacheIfStale();
       return cached_controller_name_ == "amp_controller";
+    }
+
+    bool isAmpHandControllerActive()
+    {
+      refreshControllerCacheIfStale();
+      return cached_controller_name_ == "amp_hand_controller";
     }
 
     bool getControllerList(std::vector<std::string>& controller_list)
@@ -2874,13 +2697,17 @@ namespace ocs2
     ros::Subscriber dance_trajectory_state_sub_;
     int arm_ctrl_mode_{1};  // 启动默认 auto_swing (1); 收到 /humanoid/mpc/arm_control_mode 后由 controller 实际状态覆盖
 
-    // isAmpControllerActive() 的 TTL 缓存, 避免每帧 service call
+    // refreshControllerCacheIfStale() 的 TTL 缓存, 避免每帧 service call
     std::string cached_controller_name_;
     double cached_controller_time_{0.0};
     static constexpr double kControllerCacheTtl_{0.3};
     bool is_rl_controller_{false};  // 当前是否为RL控制器
     bool is_amp_controller_{false};  // 当前是否为AMP控制器
     ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
+    int amp_hand_cmd_vel_line_x_limit_level_{1};  // 0=low, 1=default, 2=up
+    double amp_hand_cmd_vel_line_x_default_{0.4};
+    double amp_hand_cmd_vel_line_x_low_{0.4};
+    double amp_hand_cmd_vel_line_x_up_{0.4};
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";
@@ -2937,19 +2764,6 @@ namespace ocs2
     bool posture_control_mode_{false};
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
-
-    bool craic_auto_put_box_enabled_{false};
-    double craic_medium_speed_linear_x_limit_{0.6};
-    std::vector<double> craic_default_velocity_limits_;
-    std::vector<double> craic_medium_velocity_limits_;
-    AutoPutBoxPhase auto_put_box_phase_{AutoPutBoxPhase::Idle};
-    ros::Time auto_put_box_phase_start_time_{0};
-    bool auto_put_box_action_seen_executing_{false};
-    double auto_put_box_squat_axis_{-0.8};
-    double auto_put_box_squat_duration_{1.2};
-    double auto_put_box_action_timeout_{8.0};
-    double auto_put_box_stand_duration_{2.0};
-    std::string auto_put_box_action_name_;
 
     // ===== roban 组合键功能相关 =====
     // 搬运模式状态（仅接口，实际锁电机算法待实现）
