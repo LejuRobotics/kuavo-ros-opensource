@@ -1012,7 +1012,7 @@ namespace humanoid_controller
     }
 
     Eigen::VectorXd cmd(jointNum_ + jointArmNum_ + waistNum_);
-    Eigen::VectorXd torque(jointNum_ + jointArmNum_ + waistNum_);
+    Eigen::VectorXd torque(jointNum_ + jointArmNum_ + waistNum_);// 策略理论计算扭矩
     for (int i = 0; i < jointNum_ + jointArmNum_ + waistNum_; i++)
     {
       jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]);
@@ -1059,6 +1059,7 @@ namespace humanoid_controller
           cmd[i] = jointTor[i];
         }
         cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
+        torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
       }
 
     }
@@ -1085,7 +1086,7 @@ namespace humanoid_controller
     episodeLength_++;
     if (ros_logger_)
     {
-      // ros_logger_->publishVector("/rl_controller/torque", torque);
+      ros_logger_->publishVector("/rl_controller/torque", torque);
       ros_logger_->publishVector("/rl_controller/actuation", actuation);
     }
 
