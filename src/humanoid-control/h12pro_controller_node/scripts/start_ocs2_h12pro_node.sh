@@ -21,6 +21,15 @@ if pgrep rosmaster > /dev/null; then
        rosnode list 2>/dev/null | grep -q "/joy_node"; then
         can_start=false
     fi
+
+    # 修正残留的 start_way 参数
+    # 场景：终端 roslaunch 启动机器人后 Ctrl+C 退出，参数服务器上残留 start_way=manual，
+    # 导致 monitor 读到 manual 后执行 yielding，杀掉刚启动的 h12pro 节点树
+    current_start_way=$(rosparam get /start_way 2>/dev/null)
+    if [ "$current_start_way" = "manual" ]; then
+        echo "[Fix] Correcting residual start_way: manual -> auto"
+        rosparam set /start_way auto 2>/dev/null
+    fi
 fi
 
 if $can_start; then

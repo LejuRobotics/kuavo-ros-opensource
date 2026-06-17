@@ -29,6 +29,7 @@ JOY_PROC_PATTERN="ocs2_h12pro_node.py"
 NODE_PID=""
 TICK=0
 MANUAL_IDLE_TICKS=0
+JOY_PROC_SEEN=false  # 标记 joy_node 进程是否曾出现过，用于区分启动延迟和运行中崩溃
 
 log() { echo "[$(date +%F\ %T)] $*"; }
 
@@ -38,6 +39,7 @@ start_tree() {
     # stop 阶段才不会连带把 master 一起杀掉（外部 joy_node 如 bt2 会被殃及）。
     "$NODE_SCRIPT" &
     NODE_PID=$!
+    JOY_PROC_SEEN=false
     log "started pid=$NODE_PID"
 }
 
@@ -92,12 +94,18 @@ while true; do
         log "start_way=manual, yielding"
         stop_tree
     elif ! pgrep -f "$JOY_PROC_PATTERN" >/dev/null 2>&1; then
-        # launch 树活着但 joy_node 进程没了（SIGSEGV 等）
-        MANUAL_IDLE_TICKS=0
-        log "joy_node process gone, restarting"
-        stop_tree
+        # joy_node 进程不存在
+        if $JOY_PROC_SEEN; then
+            # 运行中 joy_node 进程消失（SIGSEGV 等），需要重启
+            MANUAL_IDLE_TICKS=0
+            log "joy_node process gone, restarting"
+            stop_tree
+        fi
+        # 否则：启动期间 joy_node 进程还没创建，属于正常现象，不做处理
     elif [ $((TICK % HANG_CHECK_EVERY)) -eq 0 ]; then
         # 周期性兜底：进程在但关键节点不响应 XMLRPC（hang/stale）
+        # 同时标记 joy_node 进程已出现（pgrep 通过），后续消失才算异常
+        pgrep -f "$JOY_PROC_PATTERN" >/dev/null 2>&1 && JOY_PROC_SEEN=true
         for ROS_NODE in /joy_node /h12pro_channel_publisher; do
             if ! timeout "$ROS_PING_TIMEOUT" rosnode ping -c 1 "$ROS_NODE" >/dev/null 2>&1; then
                 log "$ROS_NODE unresponsive (possible hang/stale), restarting"
