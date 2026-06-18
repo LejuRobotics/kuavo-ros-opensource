@@ -16,6 +16,8 @@
     <param name="robot_description" command="$(find xacro)/xacro --inorder $(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version)_gazebo.xacro"/>
     <!-- static tf transform -->
     <node pkg="tf2_ros" type="static_transform_publisher" name="camera_to_robot_frame" args="0 0 0 0 0 0 camera_base camera_base_link" />
+    <!-- 连接机器人头部的 camera_base 到相机树 -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="head_camera_to_camera_base" args="0 0 0 0 0 0 head_camera_base camera_base" />
     <!-- camera meta data And Gobal tf transform -->
     <include file="$(find realsense_sim_metadata)/launch/metadata_start.launch">
       <arg name="camera_name" value="camera"/>
