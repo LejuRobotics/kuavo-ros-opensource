@@ -103,7 +103,7 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
-### hand_wrench_example.py (P1)
+### ctrl_hand_wrench_example.py (P1)
 
 **演示如何通过 `control_hand_wrench` 对机器人末端执行器进行力/力矩控制。**
 
@@ -266,7 +266,7 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
-### audio_play.py
+### audio_example.py
 
 **演示如何通过SDK控制机器人播放音频文件和语音合成。**
 
@@ -355,6 +355,8 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 2. 修改指定电机的PID参数（Kp和Kd）
 3. 再次获取参数以验证修改是否成功
 
+**注意：** 该服务依赖硬件，仿真环境不可用，会返回"获取失败"。
+
 ---
 
 ### step_control_example.py
@@ -404,23 +406,6 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
-### motor_param_example.py (P2)
-
-**演示如何获取和修改电机 PID 参数，以及控制 base pitch 限位保护。**
-
-通过 `get_motor_param`、`change_motor_param` 和 `enable_base_pitch_limit` 实现电机参数读写和限位保护开关。示例代码展示了：
-1. 获取电机 PID 参数：
-   - 调用 `get_motor_param()` 获取所有电机的 Kp/Kd 参数
-   - 打印每个电机的当前 PID 配置
-2. 修改电机参数：
-   - 修改指定电机的 Kp 和 Kd 值
-   - 改完后恢复原值，确保不影响正常运行
-3. Base Pitch 限位保护：
-   - 调用 `enable_base_pitch_limit(True)` 开启限位
-   - 调用 `enable_base_pitch_limit(False)` 关闭限位
-
----
-
 ### cmd_pose_world_stamped_example.py (P2)
 
 **演示如何通过 `control_command_pose_world_stamped` 使用 TwistStamped 消息在 odom 坐标系下控制机器人位姿。**
@@ -436,18 +421,76 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ### wheel_arm_example.py (P2)
 
-**演示轮臂机器人的控制接口，包括手臂模式切换、躯干位姿控制和下部关节控制。**
+**演示轮臂机器人的手臂轨迹控制模式切换。**
 
-通过 `wheel_control` 属性访问轮臂控制类，结合 `control_torso_pose` 和 `control_wheel_lower_joint` 实现完整的轮臂控制。示例代码展示了：
+通过 `wheel_control` 属性控制手臂轨迹模式，对齐 ROS demo `wheel_control_mode_swither.py`。示例代码展示了：
 1. 手臂模式切换：
-   - ArmFixed: 保持当前位置
-   - AutoSwing: 回零操作
-   - ExternalControl: 外部轨迹控制
-2. `reset_and_set_external()`：自动完成回零并切换到外部模式
-3. 躯干位姿控制 (`control_torso_pose`)：
-   - 六自由度位姿控制（x, y, z, roll, pitch, yaw）
-4. 下部关节控制 (`control_wheel_lower_joint`)：
-   - 控制 4 个下部关节的轨迹
+   - ArmFixed: 保持当前位置（回零时使用）
+   - AutoSwing: 回零，手臂回到初始目标位置
+   - ExternalControl: 外部轨迹控制模式
+2. `reset_and_set_external()`：快捷方法，自动完成回零并切换到外部控制模式
+
+注意：本示例控制的是*手臂轨迹控制模式*（`/change_arm_ctrl_mode` 服务），与 ROS demo 的 MPC 控制模式（`/mobile_manipulator_mpc_control`，NoControl/ArmOnly/BaseOnly/BaseArm/ArmEeOnly）是不同概念。
+
+**前置条件：** 需在轮臂版仿真或实物环境下运行。仿真使用 `ROBOT_VERSION=60~63` + `load_kuavo_mujoco_sim_wheel.launch`（`robot_type=1`）。
+
+---
+
+### wheel_arm_control_example.py (P2)
+
+**演示如何使用 `KuavoWheelArm` 通过服务接口直接控制轮臂 4 个下部关节的目标角度。**
+
+通过 `control_wheel_arm_joint_positions` 调用底层 `/lb_leg_control_srv` 服务，对齐 ROS SDK demo `wheel_arm_control_example.py`。示例代码展示了：
+
+1. KuavoWheelArm 初始化：
+   - 创建 `KuavoWheelArm()` 实例
+2. 获取当前关节位置：
+   - 通过 `get_wheel_arm_joint_positions()` 从传感器数据读取 4 个关节当前位置
+   - 同时显示弧度和度两种单位
+3. 关节位置控制：
+   - 通过 `control_wheel_arm_joint_positions([knee, leg, waist_pitch, waist_yaw])` 设置目标角度
+   - 参数单位：**弧度**（非度）
+   - 底层调用 `kuavo_msgs/lbLegControlSrv` 服务（`target_joints` + `duration`）
+4. 循环测试序列：
+   - 7 组目标位置（回零 → 偏转 → 回零，循环 3 次）
+   - 每次发送后等待运动到位（`wait_action_down`，误差 < 0.5 度时判定到位）
+
+**与 `wheel_lower_joint_example.py` 的区别：**
+
+- `wheel_arm_control_example.py`：通过 **服务** (`/lb_leg_control_srv`) 控制，一次性发送目标 + 时长
+- `wheel_lower_joint_example.py`：通过 **话题** (`/lb_leg_traj`) 控制，持续发布关节轨迹
+
+**前置条件：** 需轮臂版仿真或实物环境，且 `/lb_leg_control_srv` 服务可用。
+
+---
+
+### wheel_torso_pose_example.py (P2)
+
+**演示轮臂机器人躯干的六自由度位姿控制。**
+
+通过 `control_torso_pose` 控制躯干在空间中的位姿，对齐 ROS demo `cmd_torso_pose_test.py`。示例代码展示了：
+1. 累积叠加控制序列（与 demo 一致）：
+   - 抬高 (z=0.4m) → 前移 (x=0.2m) → 左转 (yaw≈60°) → 右转 (yaw≈-60°) → 前倾 (pitch≈-30°) → 后仰 (pitch≈30°) → 归位
+2. 参数说明：
+   - x, y, z (米), roll, pitch, yaw (弧度)
+   - 注意：轮臂躯干不支持 roll 旋转 (angular.x 保持 0)
+
+**前置条件：** 同上，需轮臂版仿真或实物环境。
+
+---
+
+### wheel_lower_joint_example.py (P2)
+
+**演示轮臂机器人 4 个下部关节的轨迹控制。**
+
+通过 `control_wheel_lower_joint` 控制下部关节，对齐 ROS demo `cmd_leg_joint_test.py`。示例代码展示了：
+1. 三组关节目标序列（与 demo 一致）：
+   - [14.9, -32.01, 18.03, 0.0] → [14.9, -32.01, 18.03, 90.0] → [0, 0, 0, 0]
+2. 参数说明：
+   - 话题 `/lb_leg_traj`，消息类型 `sensor_msgs/JointState`
+   - 关节名称: `['joint1', 'joint2', 'joint3', 'joint4']`，参数单位：度
+
+**前置条件：** 同上，需轮臂版仿真或实物环境。
 
 ---
 

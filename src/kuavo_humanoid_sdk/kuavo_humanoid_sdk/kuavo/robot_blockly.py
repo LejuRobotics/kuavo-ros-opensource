@@ -860,17 +860,13 @@ class RobotControlBlockly:
             while not self.robot_state.is_stance():
                 self.robot.stance()
                 time.sleep(0.01)
-            now_height = self.robot_state.com_height
-            mass_height = now_height - com_height
             if is_up == "up":
-                height = mass_height + height
+                height = abs(height)
             elif is_up == "down":
-                height = mass_height - height
+                height = -abs(height)
             else:
                 raise ValueError("is_up must be 'up' or 'down'")
 
-            if height >= 0.0:
-                height = -0.0000000001
             self.robot.squat(height, pitch)
             while True:
                 # print(self.robot_state.com_height - com_height - height)
