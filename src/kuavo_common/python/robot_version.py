@@ -218,6 +218,52 @@ class RobotVersion:
         return f"RobotVersion(major={self._major}, minor={self._minor}, patch={self._patch})"
 
 
+def _coerce_robot_version(version):
+    """将 int/字符串/RobotVersion 转换为 RobotVersion，非法值返回 None。"""
+    if isinstance(version, RobotVersion):
+        return version
+    try:
+        version_number = int(version)
+    except (TypeError, ValueError):
+        return None
+    if not RobotVersion.is_valid(version_number):
+        return None
+    return RobotVersion.create(version_number)
+
+
+def is_tact_robot_type_compatible(tact_robot_type, current_robot_version) -> bool:
+    """判断 .tact 文件 robotType 是否兼容当前机器人版本。"""
+    tact_version = _coerce_robot_version(tact_robot_type)
+    robot_version = _coerce_robot_version(current_robot_version)
+    if tact_version is None or robot_version is None:
+        return False
+
+    tact_major = tact_version.major()
+    tact_minor = tact_version.minor()
+    robot_major = robot_version.major()
+    robot_minor = robot_version.minor()
+
+    # 4.1/4.2 结构差异较大，只允许同小版本动作互通。
+    if tact_major == 4 and tact_minor == 1:
+        return robot_major == 4 and robot_minor == 1
+    if tact_major == 4 and tact_minor == 2:
+        return robot_major == 4 and robot_minor == 2
+
+    # 4.3 及以上的 4 代动作互通，但不兼容 4.1/4.2。
+    if tact_major == 4:
+        return robot_major == 4 and robot_minor >= 3
+
+    # 五代、六代、roban 一代动作按主版本互通，避免新增小版本反复补白名单。
+    if tact_major == 5 and tact_minor == 2:
+        return robot_major == 5
+    if tact_major == 6 and tact_minor == 2:
+        return robot_major == 6
+    if tact_major == 1 :
+        return robot_major == 1
+
+    return tact_major == robot_major
+
+
 # ============================================================================
 # 版本注册表 —— 全项目 Python 端唯一源头
 # 新增版本只需在此处加一行，其余逻辑（setup 脚本、工具链）自动生效。

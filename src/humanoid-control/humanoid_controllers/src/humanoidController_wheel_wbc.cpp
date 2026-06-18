@@ -318,8 +318,8 @@ namespace humanoidController_wheel_wbc
     /******************************** 双臂初始动作 ****************************************/
     vector_t startAction = mujoco_q.tail(manipulatorModelInfo_.armDim + headNum_).head(manipulatorModelInfo_.armDim);
     vector_t targetAction = startAction;
-    targetAction.tail(armNum_)[3] = startAction.tail(armNum_)[3] - 0.5236;
-    targetAction.tail(armNum_/2)[3] = startAction.tail(armNum_/2)[3] - 0.5236;
+    targetAction.tail(armNum_)[4] = startAction.tail(armNum_)[4] - 0.5236;
+    targetAction.tail(armNum_/2)[4] = startAction.tail(armNum_/2)[4] + 0.5236;
     double preActionDesiredTime = 1.5;
     initialPreTargetActions(startAction, targetAction, preActionDesiredTime); // 设置机器人启动初始动作
     /************************************************************************************/

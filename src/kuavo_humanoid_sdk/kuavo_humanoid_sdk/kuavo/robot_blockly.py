@@ -13,6 +13,7 @@ import asyncio
 import math
 import json
 import os
+import sys
 import rospkg
 import rospy
 import threading
@@ -32,9 +33,24 @@ from kuavo_humanoid_sdk.kuavo.core.model_utils.model_utils import *
 from kuavo_humanoid_sdk.kuavo.core.model_utils import model_utils as model_utils
 
 from enum import IntEnum
+
+try:
+    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
+    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
+except (rospkg.ResourceNotFound, ImportError):
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../../kuavo_common/python"))
+    if kuavo_common_python_path not in sys.path:
+        sys.path.insert(0, kuavo_common_python_path)
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
+
 # Global flag for handling Ctrl+C
 running = False
 robot_version = int(os.environ.get("ROBOT_VERSION", "45"))
+robot_version_obj = RobotVersion.create(robot_version) if RobotVersion.is_valid(robot_version) else RobotVersion(4, 5, 0)
 ocs2_joint_state = JointState()
 ocs2_hand_state = robotHandPosition()
 ocs2_head_state = robotHeadMotionData()
@@ -114,17 +130,7 @@ def verify_robot_version(file_path: str):
         rospy.logerr(msg)
         return False, msg
 
-    # 版本兼容关系映射
-    version_compat_map = {
-        41: [41],
-        42: [42],
-        45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
-        11: [11, 13, 14],
-        13: [11, 13, 14],
-        14: [11, 13, 14]
-    }
-    allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
-    if robot_version not in allowed_robot_versions:
+    if not is_tact_robot_type_compatible(tact_robot_version, robot_version_obj):
         msg = (
             f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version}"
         )

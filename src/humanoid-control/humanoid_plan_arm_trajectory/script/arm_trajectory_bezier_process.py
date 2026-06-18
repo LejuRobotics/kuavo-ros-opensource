@@ -19,14 +19,14 @@ try:
     kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
     if kuavo_common_python_path not in sys.path:
         sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
 except (rospkg.ResourceNotFound, ImportError) as e:
     # 如果 rospkg 不可用或包未找到，回退到相对路径方式
     current_file_dir = os.path.dirname(os.path.abspath(__file__))
     kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
     if kuavo_common_python_path not in sys.path:
         sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl, gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getControllerList
@@ -1504,25 +1504,8 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
-        # 版本兼容关系映射
-        version_compat_map = {
-            41: [41],
-            42: [42],
-            45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
-            52: [52, 53, 54, 55],
-            62: [60,61,62, 63, 200062, 300062],
-            11: [11, 13, 14, 15, 16, 17],
-            13: [11, 13, 14, 15, 16, 17],
-            14: [11, 13, 14, 15, 16, 17],
-            15: [11, 13, 14, 15, 16, 17],
-            16: [11, 13, 14, 15, 16, 17],
-            17: [11, 13, 14, 15, 16, 17],
-
-        }
-        allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
-        # 使用 version_number() 获取版本号数字进行比较
         robot_version_number = self.robot_version.version_number()
-        if robot_version_number not in allowed_robot_versions:
+        if not is_tact_robot_type_compatible(tact_robot_version, self.robot_version):
             msg = (
                 f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number} ({self.robot_version.version_name()})"
             )

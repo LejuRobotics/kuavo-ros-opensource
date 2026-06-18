@@ -897,12 +897,31 @@ namespace ocs2
       if (rb_version_.version_number() == 17 && isAmpHandControllerActive())
       {
         static bool was_sending_command = false;
-        if (!has_command && was_sending_command)
+        static ros::Time zero_decay_start;
+        constexpr double kZeroDecayDurationSec = 0.5;
+        if (has_command)
         {
-          ROS_DEBUG("[JoyControl] joystick released, continuously publishing zero cmd_vel (amp_hand)");
+          was_sending_command = true;
+          zero_decay_start = ros::Time(0);
+          cmd_vel_publisher_.publish(cmdVel_);
+          return;
         }
-        was_sending_command = has_command;
-        cmd_vel_publisher_.publish(cmdVel_);
+
+        if (was_sending_command)
+        {
+          if (zero_decay_start.isZero())
+          {
+            zero_decay_start = ros::Time::now();
+            ROS_DEBUG("[JoyControl] joystick released, publishing zero cmd_vel for amp_hand decay");
+          }
+          // 摇杆长期空闲时不发，避免 100Hz 零速抢占外部 /cmd_vel 源。
+          cmd_vel_publisher_.publish(cmdVel_);
+          if ((ros::Time::now() - zero_decay_start).toSec() >= kZeroDecayDurationSec)
+          {
+            was_sending_command = false;
+            zero_decay_start = ros::Time(0);
+          }
+        }
         return;
       }
 
@@ -1855,6 +1874,12 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
       {
+        // RL控制器下，ROBAN2禁用按Y进入踏步
+        if (is_rl_controller_ && rb_version_.major() == 1)
+        {
+          ROS_WARN("[JoyControl] Walk gait is disabled for ROBAN2 under RL controller");
+          return;
+        }
         publishGaitTemplate("walk");
       }
       else
