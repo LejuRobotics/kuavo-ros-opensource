@@ -10,10 +10,30 @@ import serial.tools.list_ports
 import autogen
 import sys
 from colorama import Fore, Style, init
+from setup_kuavo_ros_control_remote import (
+    FACTORY_URL,
+    GITCODE_URL,
+    GITEE_URL,
+    KUAVO_ROS_ALLOWED_URLS,
+    SOURCE_MODE_AUTO,
+    SOURCE_MODE_FACTORY,
+    SOURCE_MODE_GITCODE,
+    SOURCE_MODE_GITEE,
+    VERSION_REGISTRY,
+    branch_exists,
+    clone_sources,
+    commit_exists_in_origin_factory,
+    expected_urls_text,
+    get_valid_display_versions,
+    get_version_internal,
+    is_allowed_remote,
+    is_valid_version,
+)
 
 init(autoreset=True)
 
 robot_version, repo_commit, weight, board_type, effector_choice, need_setup = None, None, None, None, None, None
+source_mode = SOURCE_MODE_AUTO
 
 
 def print_info(text):
@@ -25,12 +45,43 @@ def print_error(text):
 def print_success(text):
   print(Fore.GREEN + Style.BRIGHT + "[SUCCESS] " + text + Style.RESET_ALL)
 
+def prompt_code_source_mode():
+    global source_mode
+    while True:
+        print_info("请选择代码源:")
+        print("1) 自动选择（推荐，优先工厂镜像 → GitCode → Gitee）")
+        print("2) 仅工厂镜像")
+        print("3) 仅 GitCode")
+        print("4) 仅 Gitee")
+        choice = input().strip()
+        if choice in ("", "1"):
+            source_mode = SOURCE_MODE_AUTO
+            mode_text = "自动选择（优先工厂镜像 → GitCode → Gitee）"
+            break
+        if choice == "2":
+            source_mode = SOURCE_MODE_FACTORY
+            mode_text = "仅工厂镜像"
+            break
+        if choice == "3":
+            source_mode = SOURCE_MODE_GITCODE
+            mode_text = "仅 GitCode"
+            break
+        if choice == "4":
+            source_mode = SOURCE_MODE_GITEE
+            mode_text = "仅 Gitee"
+            break
+        print_error("无效的代码源选项，请输入 1、2、3 或 4")
+    print_info(f"当前代码源策略: {mode_text}")
+
+
 def ask_user_for_kinds_of_settings():
     global robot_version, repo_commit, weight, board_type, effector_choice, need_setup, branch
 
+    valid_versions = get_valid_display_versions()
     while True:
-        robot_version = input("请输入机器人版本 (40/41/42/43/44/45): ")
-        if robot_version in ["40", "41", "42", "43", "44", "45"]:
+        robot_version = input(f"请输入机器人版本 ({'/'.join(valid_versions)}): ")
+        if is_valid_version(robot_version):
+            robot_version = str(get_version_internal(robot_version))
             break
         else:
             print_error("无效的机器人版本，请重新输入。")
@@ -58,6 +109,8 @@ def ask_user_for_kinds_of_settings():
             repo_commit = "latest"
             break
 
+    prompt_code_source_mode()
+
     while True:
         board_type = input("请输入驱动板类型 (elmo/youda): ").lower()
         if board_type in ["elmo", "youda"]:
@@ -74,10 +127,10 @@ def ask_user_for_kinds_of_settings():
             print_error("无效的末端执行器类型，请重新输入。")
 
     need_setup = input("请输入是否需要配置H12PRO遥控器(y/N): ").lower() == "y"
-  
+
 ask_user_for_kinds_of_settings()
 
-KUAVO_ROS_OPENSOURCE_REPO_URL = "https://gitee.com/leju-robot/kuavo-ros-opensource.git"
+KUAVO_ROS_OPENSOURCE_REPO_URL = GITEE_URL
 KUAVO_OPENSOURCE_REPO_URL = "https://gitee.com/leju-robot/kuavo_opensource.git"
 
 system_message = """
@@ -227,44 +280,104 @@ def clone_repos() -> bool:
     os.chdir(home_dir)
     need_clone = True
 
-    # 新增分支验证函数
-    def validate_branch(repo_url, branch_name):
-        try:
-            # 获取远程分支列表
-            branches = subprocess.check_output(
-                ["git", "ls-remote", "--heads", repo_url]
-            ).decode()
-            return f"refs/heads/{branch_name}" in branches
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"无法验证分支: {e.stderr}")
+    def validate_branch(branch_name):
+        last_error = None
+        for repo_url in clone_sources(source_mode):
+            try:
+                branches = subprocess.check_output(
+                    ["git", "ls-remote", "--heads", repo_url],
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as e:
+                last_error = e
+                print_info(f"无法从 {repo_url} 验证分支，继续尝试其他远端")
+                continue
+            if branch_exists(branches, branch_name):
+                return True
+
+        if last_error is not None:
+            output = (last_error.output or "").strip()
+            raise Exception(f"无法验证分支: {output}")
+        return False
 
     # 验证kuavo-ros-opensource分支
-    if not validate_branch(KUAVO_ROS_OPENSOURCE_REPO_URL, branch):
-        print_error(f"分支 {branch} 在仓库 {KUAVO_ROS_OPENSOURCE_REPO_URL} 中不存在")
+    if not validate_branch(branch):
+        print_error(f"分支 {branch} 在所有代码源中都不存在")
         raise ValueError("无效的分支名称")
 
     # kuavo-ros-opensource仓库操作
     if os.path.isdir("kuavo-ros-opensource") and os.path.isdir("kuavo-ros-opensource/.git"):
         os.chdir("kuavo-ros-opensource")
-        remote_url = run_command(["git", "remote", "get-url", "origin"])
-        if KUAVO_ROS_OPENSOURCE_REPO_URL in remote_url:
+        remote_url, _, _ = run_command(["git", "remote", "get-url", "origin"])
+        if is_allowed_remote(remote_url, KUAVO_ROS_ALLOWED_URLS):
             print_info("代码仓已存在，更新代码仓...")
             run_command(["git", "reset", "--hard", "HEAD"])
             run_command(["git", "clean", "-fd"])
             need_clone = False
         else:
-            print_info("目录存在但远程仓库不匹配，重新克隆...")
-            os.chdir(home_dir)
-            shutil.rmtree("kuavo-ros-opensource")
-            need_clone = True
+            print("")
+            print("==========================================")
+            print("  WARNING: kuavo-ros-opensource 远程 URL 不匹配")
+            print("==========================================")
+            print(f"  合法 URL: {expected_urls_text(KUAVO_ROS_ALLOWED_URLS)}")
+            print(f"  实际 URL: {remote_url}")
+            print("")
+            print("  选择 yes 将删除当前目录并优先从工厂镜像重新克隆。")
+            print("  选择 no 将中止部署。")
+            print("")
+            user_choice = input("是否继续？(yes/no): ").strip().lower()
+            if user_choice == "yes":
+                print_info("用户确认，删除并重新克隆...")
+                os.chdir(home_dir)
+                shutil.rmtree("kuavo-ros-opensource")
+                need_clone = True
+            else:
+                print_error("用户取消，中止部署。")
+                sys.exit(1)
 
     if need_clone:
-        run_command(["git", "clone", KUAVO_ROS_OPENSOURCE_REPO_URL, "--branch", branch])
+        clone_error = None
+        for source_url in clone_sources(source_mode):
+            try:
+                print_info(f"尝试从 {source_url} 克隆 kuavo-ros-opensource...")
+                run_command(["git", "clone", source_url, "--branch", branch])
+                clone_error = None
+                break
+            except subprocess.CalledProcessError as e:
+                clone_error = e
+                print_info(f"从 {source_url} 克隆失败，尝试下一个远端")
+        if clone_error is not None:
+            raise clone_error
         os.chdir("kuavo-ros-opensource")
+
+    track_origin_factory = source_mode != SOURCE_MODE_GITEE
+    if track_origin_factory:
+        origin_factory_url, _, origin_factory_code = run_command(
+            ["git", "remote", "get-url", "origin_factory"],
+            check=False,
+        )
+        if origin_factory_code != 0:
+            run_command(["git", "remote", "add", "origin_factory", FACTORY_URL])
+        fetch_output, _, fetch_code = run_command(["git", "fetch", "origin_factory"], check=False)
+        if fetch_code != 0:
+            print_info(f"origin_factory fetch 失败，使用已有数据继续: {fetch_output}")
 
     run_command(["git", "checkout", branch])
     if repo_commit != "latest":
         run_command(["git", "checkout", repo_commit])
+        if track_origin_factory:
+            contains_output, _, _ = run_command(
+                ["git", "branch", "-r", "--contains", repo_commit],
+                check=False,
+            )
+            if not commit_exists_in_origin_factory(contains_output):
+                print("")
+                print("==========================================")
+                print(f"  WARNING: commit {repo_commit} 在 origin_factory 远端不存在")
+                print("==========================================")
+                print("  请联系 IT 将最新代码同步到工厂服务器 (10.11.99.175)")
+                print("")
     else:
         run_command(["git", "pull"])
 
@@ -279,10 +392,25 @@ def clone_repos() -> bool:
             run_command(["git", "clean", "-fd"])
             run_command(["git", "pull", "origin", "master"])
         else:
-            print_info("kuavo_opensource目录存在但远程仓库不匹配，重新克隆...")
-            os.chdir(home_dir)
-            shutil.rmtree("kuavo_opensource")
-            run_command(["git", "clone", KUAVO_OPENSOURCE_REPO_URL, "--branch", "master", "--depth", "1"])
+            print("")
+            print("==========================================")
+            print("  WARNING: kuavo_opensource 远程 URL 不匹配")
+            print("==========================================")
+            print(f"  期望 URL: {KUAVO_OPENSOURCE_REPO_URL}")
+            print(f"  实际 URL: {remote_url}")
+            print("")
+            print("  选择 yes 将删除当前目录并从期望 URL 重新克隆。")
+            print("  选择 no 将中止部署。")
+            print("")
+            user_choice = input("是否继续？(yes/no): ").strip().lower()
+            if user_choice == "yes":
+                print_info("用户确认，删除并重新克隆...")
+                os.chdir(home_dir)
+                shutil.rmtree("kuavo_opensource")
+                run_command(["git", "clone", KUAVO_OPENSOURCE_REPO_URL, "--branch", "master", "--depth", "1"])
+            else:
+                print_error("用户取消，中止部署。")
+                sys.exit(1)
     else:
         run_command(["git", "clone", KUAVO_OPENSOURCE_REPO_URL, "--branch", "master", "--depth", "1"])
 
@@ -513,7 +641,7 @@ def setup_end_effector() -> bool:
 
         kuavo_json_path = os.path.join(home_dir, "kuavo-ros-opensource", "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
         try:
-            run_command(["sed", "-i", 's/"EndEffectorType": \[.*\]/"EndEffectorType": ["lejuclaw", "lejuclaw"]/', kuavo_json_path])
+            run_command(["sed", "-i", r's/"EndEffectorType": \[.*\]/"EndEffectorType": ["lejuclaw", "lejuclaw"]/', kuavo_json_path])
             print_success("二指夹爪配置完成")
         except subprocess.CalledProcessError as e:
             print_error(f"Error modifying kuavo.json: {e}")

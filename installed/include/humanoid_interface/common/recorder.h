@@ -123,6 +123,7 @@ class ROSBAG_DECL Recorder
 {
 public:
     Recorder(RecorderOptions const& options);
+    ~Recorder();
 
     void doTrigger();
 
@@ -152,7 +153,7 @@ private:
 
     void snapshotTrigger(std_msgs::Empty::ConstPtr trigger);
     //    void doQueue(topic_tools::ShapeShifter::ConstPtr msg, std::string const& topic, boost::shared_ptr<ros::Subscriber> subscriber, boost::shared_ptr<int> count);
-    void doQueue(const ros::MessageEvent<topic_tools::ShapeShifter const>& msg_event, std::string const& topic, boost::shared_ptr<ros::Subscriber> subscriber, boost::shared_ptr<int> count);
+    void doQueue(const ros::MessageEvent<topic_tools::ShapeShifter const>& msg_event, std::string const& topic, boost::weak_ptr<ros::Subscriber> subscriber, boost::shared_ptr<int> count);
     void doRecord();
     void checkNumSplits();
     bool checkSize();
@@ -177,11 +178,13 @@ private:
     std::list<std::string>        current_files_;
 
     std::set<std::string>         currently_recording_;  //!< set of currently recording topics
+    std::vector<boost::shared_ptr<ros::Subscriber>> subscribers_;  //!< Hold all subscribers to break reference cycle on destruction
     int                           num_subscribers_;      //!< used for book-keeping of our number of subscribers
 
     int                           exit_code_;            //!< eventual exit code
 
     std::map<std::pair<std::string, std::string>, OutgoingMessage> latched_msgs_;
+    boost::mutex                  latched_msgs_mutex_;   //!< mutex for latched messages
 
     boost::condition_variable_any queue_condition_;      //!< conditional variable for queue
     boost::mutex                  queue_mutex_;          //!< mutex for queue

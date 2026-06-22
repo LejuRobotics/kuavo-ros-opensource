@@ -229,7 +229,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLatestLbTargetAngles_ = false;
   bool lbLegTrajPublishEnabled_ = false;
   ros::Publisher cmdVelPublisher_;  // 发布底盘速度控制命令
-  /// 与 /mobile_manipulator_joy/linear_scale_x|y、angular_scale_z 一致（再乘 chassisJoyCmdTravelScale）
+  /// 与 /vr_cmd_vel/linear_scale_x|y、angular_scale_z 一致（轮臂 v61/v62/v63 由 launch_quest3_ik 设置）
   double chassisCmdVelLinearXLimit_ = 0.8;
   double chassisCmdVelLinearYLimit_ = 0.8;
   double chassisCmdVelAngularYawLimit_ = 0.5;

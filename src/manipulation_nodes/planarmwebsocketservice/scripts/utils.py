@@ -15,14 +15,14 @@ try:
     kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
     if kuavo_common_python_path not in sys.path:
         sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
 except (rospkg.ResourceNotFound, ImportError) as e:
     # 如果 rospkg 不可用或包未找到，回退到相对路径方式
     current_file_dir = os.path.dirname(os.path.abspath(__file__))
     kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
     if kuavo_common_python_path not in sys.path:
         sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
 
 def get_wifi_ip():
 
@@ -253,19 +253,8 @@ def verify_robot_version(file_path: str):
         rospy.logerr(msg)
         return False, msg
 
-    # 版本兼容关系映射
-    version_compat_map = {
-        41: [41],
-        42: [42],
-        45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
-        52: [52, 53, 54, 55],
-        11: [11, 13, 14],
-        13: [11, 13, 14],
-        14: [11, 13, 14]
-    }
-    allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
     robot_version_number = robot_version.version_number()
-    if robot_version_number not in allowed_robot_versions:
+    if not is_tact_robot_type_compatible(tact_robot_version, robot_version):
         msg = (
             f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number}"
         )

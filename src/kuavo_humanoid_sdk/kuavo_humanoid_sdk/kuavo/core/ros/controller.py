@@ -21,6 +21,7 @@ from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (
     switchToNextController, switchToNextControllerRequest,
 )
 from kuavo_humanoid_sdk.common.logger import SDKLogger
+from kuavo_humanoid_sdk.kuavo.core.ros.param import kuavo_ros_param
 from typing import Optional
 
 
@@ -72,6 +73,16 @@ class Controller:
                 - message (str): 返回消息
             None: 如果服务调用失败则返回 None
         """
+        # 返回与双足 MPC 等价的占位信息，避免 SDK 误判为非 MPC并刷屏超时错误。
+        if kuavo_ros_param.is_wheel_arm_robot():
+            return ControllerListInfo(
+                controller_names=["mpc"],
+                count=1,
+                current_controller="mpc",
+                success=True,
+                message="wheel-arm: stub controller list (stack has no /humanoid_controller/get_controller_list)",
+            )
+
         service_name = '/humanoid_controller/get_controller_list'
         try:
             rospy.wait_for_service(service_name, timeout=2.0)

@@ -70,7 +70,7 @@
 #include <openvino/openvino.hpp>
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
 
 namespace humanoid_controller
@@ -380,7 +380,6 @@ namespace humanoid_controller
     static ocs2_msgs::mpc_flattened_controller createMpcPolicyMsg(const PrimalSolution &primalSolution, const CommandData &commandData,
                                                                   const PerformanceIndex &performanceIndices);
 
-    void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
 
     void setJoyCmdState(const vector_t &joyCmdState)
     {
@@ -559,7 +558,6 @@ namespace humanoid_controller
     ros::Publisher mpcPolicyPublisher_;
     ros::Publisher cmdPoseWorldPublisher_; // 发布躯干位置控制命令 (geometry_msgs::Twist)
 
-    ros::Subscriber dexhand_state_sub_;
 
     ros::ServiceServer armJointSynchronizationSrv_;
     ros::Subscriber enable_mpc_sub_;
@@ -583,7 +581,7 @@ namespace humanoid_controller
     // Node Handle
     ros::NodeHandle controllerNh_;
     HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
-    AnkleSolver ankleSolver;
+    kuavo_solver::AnkleSolver ankleSolver;
 #ifdef KUAVO_CONTROL_LIB_FOUND
     HighlyDynamic::JointFilter *joint_filter_ptr_{nullptr};
 #endif
@@ -644,7 +642,6 @@ namespace humanoid_controller
     vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
     vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
     vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
-    vector_t dexhand_joint_pos_ = vector_t::Zero(12);
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;

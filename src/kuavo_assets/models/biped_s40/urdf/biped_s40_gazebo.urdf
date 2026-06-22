@@ -20,10 +20,10 @@
       </material>
     </visual>
   </link>
-  <joint name="dummy_to_base_link" type="fixed">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
     <dynamics damping="0.2" friction="0.0"/>
   </joint>
   <link name="leg_l1_link">
@@ -1119,7 +1119,7 @@
     <plugin name="gazebo_shm_interface" filename="libgazebo_sim_shm_interface.so">
       <!-- IMU配置 gazebo中fixed连接的link都只能获取第一个-->
       <imu>
-        <frame_id>dummy_link</frame_id>
+        <frame_id>base_link</frame_id>
       </imu>
       
       <!-- 关节配置 -->

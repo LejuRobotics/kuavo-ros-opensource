@@ -10,5 +10,8 @@
   <!-- 依赖 catkin 和 Eigen3 -->
   <buildtool_depend>catkin</buildtool_depend>
   <depend>eigen</depend>
+  <depend>roscpp</depend>
+  <depend>std_msgs</depend>
+  <depend>kuavo_msgs</depend>
 
 </package>

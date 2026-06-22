@@ -413,7 +413,6 @@ namespace humanoid_controller
     // 检测is_rl_start参数，如果为true则绕过MPC控制器，直接使用RL控制器
     controllerNh_.param<bool>("/is_rl_start", is_rl_start_, false);
 
-    
     // trajectory_publisher_ = new TrajectoryPublisher(controller_nh, 0.001);
 
     wheel_arm_robot_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
@@ -550,10 +549,10 @@ namespace humanoid_controller
     }
     
     auto robot_config = drake_interface_->getRobotConfig();
-    AnkleSolverType ankleSolverType = static_cast<AnkleSolverType>(robot_config->getValue<int>("ankle_solver_type"));
-    ankleSolver.getconfig(ankleSolverType);
+    const std::string ankleSolverTypeToken = robot_config->getValue<std::string>("ankle_solver_type");
+    ankleSolver.getconfig(ankleSolverTypeToken);
     // 同步脚踝解算类型到 ROS 参数，供倒地起身等 RL 控制器使用
-    ros::param::set("/ankle_solver_type", static_cast<int>(ankleSolverType));
+    ros::param::set("/ankle_solver_type", ankleSolverTypeToken);
     if (!init_fall_down_state_) // 初始倒地时不在这里设置初始状态
     {
       ros::param::set("robot_init_state_param", robot_init_state_param);
@@ -921,6 +920,34 @@ namespace humanoid_controller
           ROS_WARN("[HumanoidController] RL not available, RL controllers will not be initialized");
         }
 
+        if (current_controller_ == "mpc")
+        {
+          // 默认启动链路进入MPC时，必须用当前/referenceFile动态重置共享限速参数。
+          // roslaunch退出不会清空已有roscore的全局参数；若上一次AMP/RL写入了/velocity_limits，
+          // JoyControl会读取残留限速并导致MPC cmd_vel被放大。
+          Eigen::VectorXd mpc_limits = Eigen::VectorXd::Zero(6);
+          auto loadVelocityLimit = [&](const std::string& key, double& value) {
+            try
+            {
+              loadData::loadCppDataType(referenceFile, key, value);
+            }
+            catch (const std::exception& e)
+            {
+              // 部分版本的reference.info可能缺少某些cmdvel*Limit字段，缺失项保持0
+            }
+          };
+          loadVelocityLimit("cmdvelLinearXLimit", mpc_limits(0));
+          loadVelocityLimit("cmdvelLinearYLimit", mpc_limits(1));
+          loadVelocityLimit("cmdvelLinearZLimit", mpc_limits(2));
+          loadVelocityLimit("cmdvelAngularYAWLimit", mpc_limits(5));
+
+          std::vector<double> limits_vec(mpc_limits.data(), mpc_limits.data() + mpc_limits.size());
+          controllerNh_.setParam("/velocity_limits", limits_vec);
+          ROS_INFO("[HumanoidController] Updated /velocity_limits with MPC default on startup: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+                   mpc_limits(0), mpc_limits(1), mpc_limits(2),
+                   mpc_limits(3), mpc_limits(4), mpc_limits(5));
+        }
+
           // 如果 init_fall_down_state_=true，初始切换到倒地起身控制器
         if (init_fall_down_state_)
         {
@@ -1009,8 +1036,6 @@ namespace humanoid_controller
       });
       
       armEefWbcPosePublisher_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/humanoid_controller/wbc_arm_eef_pose", 10, true);
-      // dexhand state
-      dexhand_state_sub_ = controllerNh_.subscribe("/dexhand/state", 10, &humanoidController::dexhandStateCallback, this);
 
       standUpCompletePub_ = controllerNh_.advertise<std_msgs::Int8>("/bot_stand_up_complete", 10);
       
@@ -1652,7 +1677,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
                                 sensor_data_new.quat_.coeffs().y(), 
                                 sensor_data_new.quat_.coeffs().z());
     imu_msg.header.stamp = current_sensor_data_time;
-    imu_msg.header.frame_id = "dummy_link";
+    imu_msg.header.frame_id = "base_link";
     imu_msg.header.seq = seq_;
     imu_msg.orientation.w = sensor_data_new.quat_.coeffs().w();
     imu_msg.orientation.x = sensor_data_new.quat_.coeffs().x();
@@ -3282,8 +3307,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         robotVisualizer_->update(currentObservation_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
       }
       robotVisualizer_->updateHeadJointPositions(sensor_data_head_.jointPos_);
-      // 更新灵巧手可视化
-      robotVisualizer_->updateHandJointPositions(dexhand_joint_pos_);
     }
 
     // publish time cost
@@ -4254,13 +4277,6 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     return;
   }
 
-  void humanoidController::dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg)
-  {
-    if(msg->name.size() != dexhand_joint_pos_.size())
-      return;
-    for(size_t i = 0; i < dexhand_joint_pos_.size(); ++i)  
-      dexhand_joint_pos_(i) = msg->position[i];
-  }
 
   void humanoidController::getEnableMpcFlagCallback(const std_msgs::Bool::ConstPtr &msg)
   {

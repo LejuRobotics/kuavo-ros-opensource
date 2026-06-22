@@ -124,10 +124,13 @@ public:
     
     // 头部外部控制状态 [yaw, pitch]
     vector_t getHeadExternalControlState() const;
-    
+
+    // 带 disable 保护的关节轨迹读取 helper
+    ArmJointTrajectory getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage) const;
+
     // 计算头部控制扭矩（内部获取传感器数据）
     vector_t computeHeadControl(const vector_t& target_pos) const;
-    
+
     // VR控制模式
     bool getWholeTorsoCtrl() const;
     void resetVrTorsoPose();  // 重置VR躯干姿态为单位姿态
@@ -207,7 +210,12 @@ private:
     int arm_num_{-1};
     int low_joint_num_{-1};
     int head_num_{-1};
-    
+
+    // enable 控制（订阅 /enable_control_state，同进程同步触发 callback）
+    std::atomic<bool> prev_enable_control_{true};
+    ros::Subscriber enable_control_state_sub_;
+    void enableControlStateCallback(const std_msgs::Bool::ConstPtr& msg);
+
     // 头部控制参数
     vector_t head_kp_;  // 头部 PD 控制 Kp 增益
     vector_t head_kd_;  // 头部 PD 控制 Kd 增益
@@ -276,6 +284,7 @@ private:
     
     // ========== 辅助函数 ==========
     double rosQuaternionToYaw(const geometry_msgs::Quaternion& ros_quat) const;
+    static vector_t makeIdentityPose7D();  // 7维单位位姿 [0,0,0,1,0,0,0]
 };
 
 } // namespace humanoidController_wheel_wbc

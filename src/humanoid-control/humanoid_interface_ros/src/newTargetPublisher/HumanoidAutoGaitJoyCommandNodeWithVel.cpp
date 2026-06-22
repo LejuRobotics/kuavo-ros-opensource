@@ -78,7 +78,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kuavo_msgs/DanceTrajectoryState.h>
 #include <kuavo_msgs/playmusic.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
-#include <kuavo_msgs/ControllerSwitchEvent.h>
+#include "kuavo_msgs/ControllerSwitchEvent.h"
 
 // 命令执行相关头文件
 #include <cstdlib>
@@ -451,15 +451,43 @@ namespace ocs2
       });
       // 订阅控制器切换事件，在任意控制器切换（包括RL->RL）时更新速度限制
       controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>(
-          "/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
+        "/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
+      ROS_INFO("[JoyControl] Controller switch event: %s -> %s, updating velocity limits",
+               msg->from_controller.c_str(), msg->to_controller.c_str());
+      updateVelocityLimitsFromParam(true);
+      });
+      
+
+      // 订阅控制器切换事件，更新AMP控制器状态
+      controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr &msg)
+      {
         ROS_INFO("[JoyControl] Controller switch event: %s -> %s, updating velocity limits",
                  msg->from_controller.c_str(), msg->to_controller.c_str());
+        cached_controller_name_ = msg->to_controller;
+        cached_controller_time_ = ros::Time::now().toSec();
         updateVelocityLimitsFromParam(true);
-      });
 
+        // 检查是否切换到AMP控制器
+        bool old_is_amp = is_amp_controller_;
+        is_amp_controller_ = (msg->to_controller == "amp_controller");
+
+        // 只在状态切换时打印一次提示
+        if (!old_is_amp && is_amp_controller_)
+        {
+          ROS_INFO("[JoyControl] Entered AMP mode: right stick vertical control will be ignored");
+        }
+        else if (old_is_amp && !is_amp_controller_)
+        {
+          ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
+        }
+      });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
+      // 订阅 py 节点发布的 M1/M2 动作执行信号，用于屏蔽推杆走路（避免大幅度自定义动作中走路摔倒）
+      m1m2_action_active_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
+          "/joy_node/m1m2_action_active", 1,
+          [this](const std_msgs::Bool::ConstPtr &msg) { m1m2_action_active_ = msg->data; });
       // 从主控制器实时订阅当前手臂控制模式
       arm_ctrl_mode_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
       "/humanoid/mpc/arm_control_mode", 1, &JoyControl::armCtrlModeCallback, this); 
@@ -629,6 +657,7 @@ namespace ocs2
     void run()
     {
       ros::Rate rate(100);
+      size_t update_count = 0;
       while (ros::ok())
       {
         ros::spinOnce();
@@ -655,6 +684,11 @@ namespace ocs2
         }
         
         rate.sleep();
+        if(++update_count > 10)
+        {
+          update_count=0;
+          updateVelocityLimitsFromParam();
+        }
         if (robot_type_ == 1)
         {
           checkAndPublishCommandLine(joystick_origin_axis_);
@@ -714,17 +748,22 @@ namespace ocs2
       std::vector<double> velocity_limits;
       if (nodeHandle_.getParam("/velocity_limits", velocity_limits) && velocity_limits.size() == 6)
       {
-        // 检查值是否有变化，避免重复设置和打印日志
-        bool changed = (std::abs(c_relative_base_limit_[0] - velocity_limits[0]) > 1e-6) ||
-                       (std::abs(c_relative_base_limit_[1] - velocity_limits[1]) > 1e-6) ||
-                       (std::abs(c_relative_base_limit_[2] - velocity_limits[2]) > 1e-6) ||
-                       (std::abs(c_relative_base_limit_[3] - velocity_limits[5]) > 1e-6);
-        
+        const auto old_limits = c_relative_base_limit_;
+
         // 将6维速度限制转换为4维格式
         c_relative_base_limit_[0] = velocity_limits[0];  // linear_x
         c_relative_base_limit_[1] = velocity_limits[1];  // linear_y
         c_relative_base_limit_[2] = velocity_limits[2];  // linear_z
         c_relative_base_limit_[3] = velocity_limits[5];  // angular_z
+        amp_hand_cmd_vel_line_x_default_ = velocity_limits[0];
+        loadAmpHandCmdVelLineXLimitParams();
+        applyAmpHandCmdVelLineXLimit();
+
+        // 检查最终生效值是否有变化，避免十字键档位被周期刷新覆盖后重复打印
+        bool changed = (std::abs(old_limits[0] - c_relative_base_limit_[0]) > 1e-6) ||
+                       (std::abs(old_limits[1] - c_relative_base_limit_[1]) > 1e-6) ||
+                       (std::abs(old_limits[2] - c_relative_base_limit_[2]) > 1e-6) ||
+                       (std::abs(old_limits[3] - c_relative_base_limit_[3]) > 1e-6);
         
         if (changed && log_changes)
         {
@@ -733,6 +772,93 @@ namespace ocs2
                    c_relative_base_limit_[2], c_relative_base_limit_[3]);
         }
       }
+    }
+
+    bool isRoban17AmpHandControllerActive()
+    {
+      return rb_version_.version_number() == 17 && isAmpHandControllerActive();
+    }
+
+    void loadAmpHandCmdVelLineXLimitParams()
+    {
+      double low_limit = amp_hand_cmd_vel_line_x_low_;
+      double up_limit = amp_hand_cmd_vel_line_x_up_;
+      if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXlow", low_limit) && low_limit > 0.0)
+      {
+        amp_hand_cmd_vel_line_x_low_ = low_limit;
+      }
+      if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXup", up_limit) && up_limit > 0.0)
+      {
+        amp_hand_cmd_vel_line_x_up_ = up_limit;
+      }
+    }
+
+    void applyAmpHandCmdVelLineXLimit()
+    {
+      if (!isRoban17AmpHandControllerActive())
+      {
+        return;
+      }
+
+      if (amp_hand_cmd_vel_line_x_low_ <= 0.0)
+      {
+        amp_hand_cmd_vel_line_x_low_ = amp_hand_cmd_vel_line_x_default_;
+      }
+      if (amp_hand_cmd_vel_line_x_up_ <= 0.0)
+      {
+        amp_hand_cmd_vel_line_x_up_ = amp_hand_cmd_vel_line_x_default_;
+      }
+
+      if (amp_hand_cmd_vel_line_x_limit_level_ <= 0)
+      {
+        c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_low_;
+      }
+      else if (amp_hand_cmd_vel_line_x_limit_level_ >= 2)
+      {
+        c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_up_;
+      }
+      else
+      {
+        c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_default_;
+      }
+    }
+
+    void handleAmpHandCmdVelLineXLimitDpad(const sensor_msgs::Joy::ConstPtr &joy_msg)
+    {
+      if (!isRoban17AmpHandControllerActive())
+      {
+        return;
+      }
+
+      const int axis_idx = joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"];
+      if (axis_idx < 0 || static_cast<size_t>(axis_idx) >= joy_msg->axes.size())
+      {
+        return;
+      }
+
+      const double current = joy_msg->axes[axis_idx];
+      const double previous = static_cast<size_t>(axis_idx) < old_joy_msg_.axes.size() ? old_joy_msg_.axes[axis_idx] : 0.0;
+      const bool up_pressed = current > DEAD_ZONE && previous <= DEAD_ZONE;
+      const bool down_pressed = current < -DEAD_ZONE && previous >= -DEAD_ZONE;
+      if (!up_pressed && !down_pressed)
+      {
+        return;
+      }
+
+      if (down_pressed)
+      {
+        amp_hand_cmd_vel_line_x_limit_level_ = 0;
+      }
+      else if (amp_hand_cmd_vel_line_x_limit_level_ < 2)
+      {
+        ++amp_hand_cmd_vel_line_x_limit_level_;
+      }
+
+      applyAmpHandCmdVelLineXLimit();
+      const char* level_name = amp_hand_cmd_vel_line_x_limit_level_ <= 0 ? "low" :
+                               (amp_hand_cmd_vel_line_x_limit_level_ >= 2 ? "up" : "default");
+      ROS_INFO("[JoyControl] v17 amp_hand cmdVelLineX limit level=%s, limit=%.2f",
+               level_name, c_relative_base_limit_[0]);
     }
     
 
@@ -748,9 +874,58 @@ namespace ocs2
       cmdVel_.angular.z = 0;
       static bool send_zero_twist = false;
 
-      auto updated = commandLineToTargetTrajectories(joystick_origin_axis, observation_, cmdVel_);
-      if (!std::any_of(updated.begin(), updated.end(), [](bool x)
-                       { return x; })) // no command line detected
+      // AMP 控制器下, 只要手臂不在 AUTO_SWING(1) 就禁止走路 (推摇杆/方向键被强制零速):
+      //   - mode 2 (EXTERN_CONTROL): 正在执行 tact 动作期间, AMP 不支持边走边做;
+      //   - mode 0 (KEEP):           LB+B 定格期间;
+      // 解除方式: 等动作结束自动回 mode=1, 或按 LB+Y 手动 recoverArmToAutoMode 切回 mode=1。
+      // MPC 不受此守卫影响 (MPC 自身支持边走边做, 且定格时 MPC 控制器会自维持手臂当前帧)。
+      vector_t axis = joystick_origin_axis;
+      if (arm_ctrl_mode_ != 1 && isAmpControllerActive())
+      {
+        ROS_WARN_THROTTLE(2.0,
+                          "[JoyControl] AMP 手臂非 auto_swing (mode=%d, 动作/定格中), 走路被禁; "
+                          "等动作结束或按 RB+B 恢复摆臂",
+                          arm_ctrl_mode_);
+        axis.setZero();
+      }
+
+      auto updated = commandLineToTargetTrajectories(axis, observation_, cmdVel_);
+      const bool has_command =
+          std::any_of(updated.begin(), updated.end(), [](bool x) { return x; });
+
+      // v17 + amp_hand_controller: 死区内持续发布零速，供 RlGaitReceiver 多步衰减（原先只发一次会导致 smoothed 卡住）
+      if (rb_version_.version_number() == 17 && isAmpHandControllerActive())
+      {
+        static bool was_sending_command = false;
+        static ros::Time zero_decay_start;
+        constexpr double kZeroDecayDurationSec = 0.5;
+        if (has_command)
+        {
+          was_sending_command = true;
+          zero_decay_start = ros::Time(0);
+          cmd_vel_publisher_.publish(cmdVel_);
+          return;
+        }
+
+        if (was_sending_command)
+        {
+          if (zero_decay_start.isZero())
+          {
+            zero_decay_start = ros::Time::now();
+            ROS_DEBUG("[JoyControl] joystick released, publishing zero cmd_vel for amp_hand decay");
+          }
+          // 摇杆长期空闲时不发，避免 100Hz 零速抢占外部 /cmd_vel 源。
+          cmd_vel_publisher_.publish(cmdVel_);
+          if ((ros::Time::now() - zero_decay_start).toSec() >= kZeroDecayDurationSec)
+          {
+            was_sending_command = false;
+            zero_decay_start = ros::Time(0);
+          }
+        }
+        return;
+      }
+
+      if (!has_command) // no command line detected
       {
         if (!send_zero_twist)
         {
@@ -916,6 +1091,339 @@ namespace ocs2
       }
       return switching;
     }
+
+    /************************ 按键状态机辅助函数 ************************/
+    // 按键当前是否按下（带越界保护）
+    inline bool buttonPressed(const sensor_msgs::Joy::ConstPtr &joy_msg, const std::string &name)
+    {
+      auto it = joyButtonMap.find(name);
+      if (it == joyButtonMap.end()) return false;
+      int idx = it->second;
+      return idx >= 0 && idx < static_cast<int>(joy_msg->buttons.size()) && joy_msg->buttons[idx];
+    }
+    // 按键上升沿（上一帧未按下、本帧按下），带越界保护
+    inline bool risingEdge(const sensor_msgs::Joy::ConstPtr &joy_msg, const std::string &name)
+    {
+      auto it = joyButtonMap.find(name);
+      if (it == joyButtonMap.end()) return false;
+      int idx = it->second;
+      if (idx < 0 || idx >= static_cast<int>(joy_msg->buttons.size()) ||
+          idx >= static_cast<int>(old_joy_msg_.buttons.size()))
+        return false;
+      return !old_joy_msg_.buttons[idx] && joy_msg->buttons[idx];
+    }
+
+    /************************ 组合键功能（动作）函数 ************************/
+    // LB+A（roban）：屏蔽/恢复 遥杆和方向键，防止做动作/跳舞时误触摇杆导致摔倒
+    void toggleAxesShield()
+    {
+      axes_input_enabled_ = !axes_input_enabled_;
+      ROS_WARN_STREAM("[JoyControl] LB+A 遥杆/方向键输入: " << (axes_input_enabled_ ? "ENABLED" : "DISABLED(已屏蔽)"));
+      if (!axes_input_enabled_)
+      {
+        // 屏蔽时立即发布零速度，确保立刻停止
+        vector_t zero_axis = vector_t::Zero(6);
+        joystick_origin_axis_.setZero();
+        checkAndPublishCommandLine(zero_axis);
+      }
+    }
+
+    // amp_hand_controller 下的下蹲(弯腰)开关：进入需当前控制器为 amp_hand_controller，
+    // 再按一次退出。由 LB+A 在 amp_hand 下调用(其它控制器下 LB+A 走 toggleAxesShield 屏蔽摇杆)。
+    void toggleRobanPostureMode()
+    {
+      if (posture_control_mode_)
+      {
+        setPostureControlMode(false);
+        return;
+      }
+      std::string current_controller;
+      if (!getCurrentControllerName(current_controller))
+      {
+        ROS_WARN("[JoyControl] LB+A: failed to get current controller");
+        return;
+      }
+      if (current_controller != "amp_hand_controller")
+      {
+        ROS_WARN("[JoyControl] LB+A: enter posture control only on amp_hand_controller (current=%s)",
+                 current_controller.c_str());
+        return;
+      }
+      setPostureControlMode(true);
+    }
+
+    // LB+B（非 roban）：切换手臂控制模式（走路时摆臂 / 固定在当前位置）
+    void toggleArmCtrlMode()
+    {
+      arm_ctrl_mode_ = (arm_ctrl_mode_ > 0) ? 0 : 1;
+      callArmControlService(arm_ctrl_mode_);
+    }
+
+    // 调用 tact 执行节点的冻结服务：立即停止发布 /kuavo_arm_traj 且不复位
+    void callFreezeArmTrajSrv()
+    {
+      std_srvs::Trigger srv;
+      ros::ServiceClient client = nodeHandle_.serviceClient<std_srvs::Trigger>(
+          "/humanoid_plan_arm_trajectory/freeze_arm_traj");
+      if (!client.call(srv))
+        ROS_WARN("[JoyControl] call freeze_arm_traj failed");
+    }
+
+    // LB+B（roban）：把正在执行的 tact 定住在当前帧（不是 A/B 来回切换的开关），不对舞蹈生效。
+    // 机制：先让 tact 节点停止发布 /kuavo_arm_traj 且不复位，再把手臂控制模式置 keep pose(0)，
+    //       MPC 保持当前手臂姿态。
+    void freezeTactArm()
+    {
+      // 仅在 tact 动作执行过程中生效：没有 tact 在执行时按下不固定手臂，
+      // 避免误把走路时的摆臂也固定住。
+      if (!robot_action_executing_)
+      {
+        ROS_INFO("[JoyControl] LB+B: 当前无 tact 动作执行，忽略（不固定手臂、不影响走路摆臂）");
+        return;
+      }
+      // 不对舞蹈生效：dance 控制器下忽略
+      std::string cur_controller;
+      if (getCurrentControllerName(cur_controller) && cur_controller.find("dance") != std::string::npos)
+      {
+        ROS_INFO("[JoyControl] LB+B: dance 控制器下不冻结手臂，忽略");
+        return;
+      }
+      ROS_INFO("[JoyControl] LB+B: 定住当前 tact 手臂姿态，停止发布手臂轨迹并 keep pose");
+      callFreezeArmTrajSrv();       // 切断 tact 控制数据（停止发布，不复位，并取消复位 timer）
+      arm_ctrl_mode_ = 0;           // keep pose：保持当前手臂姿态，直到 RB+B 切回 auto 才放下
+      callArmControlService(0);
+    }
+
+    // LB+X：灵巧手张开 / 握拳
+    void toggleDexterousHand()
+    {
+      kuavo_msgs::robotHandPosition msg;
+      const int fingers = 6;
+      msg.left_hand_position.resize(fingers);
+      msg.right_hand_position.resize(fingers);
+      const int value = hand_closed_ ? 0 : 100;  // 当前张开则握拳(100)，否则张开(0)
+      std::fill(msg.left_hand_position.begin(), msg.left_hand_position.end(), value);
+      std::fill(msg.right_hand_position.begin(), msg.right_hand_position.end(), value);
+      ROS_INFO("publish hand position: %s", hand_closed_ ? "open" : "close");
+      hand_closed_ = !hand_closed_;
+      hand_position_pub_.publish(msg);
+    }
+
+    // RB+A（roban）：固定舞蹈1 —— 芭蕾。音乐由 callSwitchToDanceSrvByName 内部的
+    void triggerFixedDance1()
+    {
+      ROS_INFO("[JoyControl] RB+A: 固定舞蹈1 芭蕾 (%s)", kFixedDance1Name.c_str());
+      callSwitchToDanceSrvByName(kFixedDance1Name);
+    }
+
+    // RB+Y（roban）：固定舞蹈2 —— 新疆舞。音乐同上自动播放。
+    void triggerFixedDance2()
+    {
+      ROS_INFO("[JoyControl] RB+Y: 固定舞蹈2 新疆舞 (%s)", kFixedDance2Name.c_str());
+      callSwitchToDanceSrvByName(kFixedDance2Name);
+    }
+
+    // RB+B（roban）：呼应 LB+B。把被 LB+B 定住（停在某帧）的手臂切回 auto 模式以回归默认姿态。
+    // 动作只在 MPC 控制器下执行，做 tact 时手臂为外部控制(2)，此处只需把手臂控制模式置 auto(1)。
+    void recoverArmToAutoMode()
+    {
+      ROS_INFO("[JoyControl] RB+B: 手臂切回 auto 模式，回归默认姿态");
+      arm_ctrl_mode_ = 1;          // 1: auto_swing_arm
+      callArmControlService(1);
+    }
+
+    /***** LB+RB 三键组合（仅保留功能接口，实际功能待实现）*****/
+    // 真实实现依赖：
+    //   1) 两步起身状态机（StandUpPhase{kIdle,kPrepared}）；
+    //   2) controller 端把 humanoidController.cpp 的 enable_pull_up_protect_ 从启动期 once-read
+    //      改为运行期可切换，并注册 std_srvs::SetBool 服务 /set_pull_up_protect；
+    //   3) 锁定全身电机的算法侧接口。
+    // 当前仅保留按键分发与函数接口，不接入真实服务调用。
+
+    // LB+RB+B：只能在搬运模式下使用，机器人所有电机全身断电进入倒地状态
+    void lbrbFullBodyPowerOffStub()
+    {
+      ROS_WARN("[JoyControl] (接口预留) LB+RB+B 全身断电倒地：功能待实现");
+      // TODO: callSetFallDownStateSrv()（从原 RB+B 迁入），需在搬运模式下才允许
+    }
+
+    // LB+RB+X：按第1下回到起身初始姿态；按第2下执行起身动作
+    void lbrbTwoStepStandUpStub()
+    {
+      ROS_WARN("[JoyControl] (接口预留) LB+RB+X 两步起身：功能待实现");
+      // TODO: 新增 enum StandUpPhase{kIdle,kPrepared}；第1下进入 kPrepared 并恢复初始姿态，
+      //       第2下在 kPrepared 下 callTriggerFallStandUpSrv() 并复位；超时或松开 LB/RB 自动复位
+    }
+
+    // LB+RB+Y：进入搬运模式 —— 关闭上拉保护并锁定全身电机
+    void lbrbEnterTransportStub()
+    {
+      ROS_WARN("[JoyControl] (接口预留) LB+RB+Y 进入搬运模式（关闭上拉保护+锁电机）：功能待实现");
+      transport_mode_active_ = true;
+      const std::string wav = "进入搬运模式可安全移动.wav";
+      std::thread([this, wav]() { playMusic(wav); }).detach();
+      // TODO: 调用 /set_pull_up_protect(false) 并锁定全身电机
+    }
+
+    // LB+RB+A：退出搬运模式 —— 开启上拉保护并恢复正常
+    void lbrbExitTransportStub()
+    {
+      ROS_WARN("[JoyControl] (接口预留) LB+RB+A 退出搬运模式（开启上拉保护+恢复）：功能待实现");
+      transport_mode_active_ = false;
+      const std::string wav = "退出搬运模式恢复正常.wav";
+      std::thread([this, wav]() { playMusic(wav); }).detach();
+      // TODO: 调用 /set_pull_up_protect(true)，平滑站立+状态检测+恢复 MPC/AMP 接管
+    }
+
+    /************************ 组合键调度函数 ************************/
+    // LB（左肩键）单组合：A/B/X/Y。沿用原逻辑：不提前 return，落到后续轴处理。
+    bool handleLBComboButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
+    {
+      // LB + A
+      if (risingEdge(joy_msg, "BUTTON_STANCE"))
+      {
+        if (IS_ROBAN(rb_version_))
+        {
+          // amp_hand_controller 下(或 posture 已开需退出): LB+A 切下蹲(posture)开关;
+          // 其它控制器下: LB+A 屏蔽/恢复 摇杆和方向键。
+          std::string cur;
+          const bool on_amp_hand = getCurrentControllerName(cur) && cur == "amp_hand_controller";
+          if (posture_control_mode_ || on_amp_hand)
+            toggleRobanPostureMode();   // amp_hand: 进入/退出下蹲(弯腰)控制
+          else
+            toggleAxesShield();         // 其它: 屏蔽/恢复 摇杆和方向键
+        }
+        else
+          pubModeGaitScale(0.9);
+      }
+      // LB + Y
+      else if (risingEdge(joy_msg, "BUTTON_WALK"))
+      {
+        if (IS_ROBAN(rb_version_))
+          recoverArmToAutoMode();   // roban: 手臂切回 auto，回归默认姿态
+        else
+          pubModeGaitScale(1.1);
+      }
+      // LB + B
+      else if (risingEdge(joy_msg, "BUTTON_TROT"))
+      {
+        if (IS_ROBAN(rb_version_))
+          freezeTactArm();      // roban: 定住正在执行的 tact 当前帧（不对舞蹈生效）
+        else
+          toggleArmCtrlMode();  // 非 roban: 原有切换手臂控制模式
+      }
+      // LB + X：灵巧手张开/握拳
+      else if (risingEdge(joy_msg, "BUTTON_RL"))
+      {
+        toggleDexterousHand();
+      }
+      return true;
+    }
+
+    // RB（右肩键）单组合：A/B/X/Y。返回 true 表示已消费、调用方应更新旧帧并 return。
+    bool handleRBComboButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
+    {
+      // RB + A
+      if (risingEdge(joy_msg, "BUTTON_STANCE"))
+      {
+        if (IS_ROBAN(rb_version_))
+        {
+          // 动作执行期间禁止切换舞蹈控制器（与 RB+Y 同口径）
+          if (robot_action_executing_)
+          {
+            ROS_WARN("[JoyControl] RB+A: 动作执行中，禁止切换舞蹈控制器");
+            return true;
+          }
+          triggerFixedDance1();      // 固定舞蹈1: 芭蕾
+          return true;
+        }
+        // 非 roban：减小速度限制（保持原逻辑，不拦截后续轴处理）
+        c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
+        c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
+        std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
+                  << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
+        return false;
+      }
+      // RB + Y
+      if (risingEdge(joy_msg, "BUTTON_WALK"))
+      {
+        // 动作执行期间禁止切换舞蹈控制器（进/出都不切），避免与正在播放的 tact/手臂动作冲突
+        if (robot_action_executing_)
+        {
+          ROS_WARN("[JoyControl] RB+Y: 动作执行中，禁止切换舞蹈控制器");
+          return true;
+        }
+        if (IS_ROBAN(rb_version_))
+        {
+          triggerFixedDance2();      // 固定舞蹈2
+        }
+        else
+        {
+          ROS_INFO("Switching to DanceController via RB+Y");
+          callTriggerDanceSrv();
+        }
+        return true;
+      }
+      // RB + X
+      if (risingEdge(joy_msg, "BUTTON_RL"))
+      {
+        if (IS_ROBAN(rb_version_))
+        {
+          // roban: 显式切到 amp_hand_controller(下蹲/弯腰控制器; 进入后用 LB+A 切下蹲)
+          ROS_INFO("[JoyControl] RB+X (Roban): switch to amp_hand_controller");
+          callSwitchControllerService("amp_hand_controller");
+          return true;
+        }
+        callTriggerFallStandUpSrv(); // 非 roban: 起身
+        return true;
+      }
+      // RB + B
+      if (risingEdge(joy_msg, "BUTTON_TROT"))
+      {
+        if (IS_ROBAN(rb_version_))
+        {
+          // roban: 预留给太极(舞蹈)。太极舞蹈尚未就绪，暂不触发真实控制器，
+          // 待舞蹈文件注册后接入(参照 RB+A 芭蕾 / RB+Y 新疆舞 的 triggerFixedDance*)。
+          ROS_WARN("[JoyControl] RB+B 太极: 预留, 舞蹈未就绪, 暂不响应");
+          return true;
+        }
+        callSetFallDownStateSrv(); // 非 roban: 触发倒地
+        return true;
+      }
+      return false;
+    }
+
+    // LB+RB 同时按下（仅 roban）：A/B/X/Y。返回 true 表示已消费。
+    // 仅保留接口分发，调用桩函数（实际功能待实现）。
+    bool handleLBRBComboButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
+    {
+      // LB+RB + B：全身断电倒地
+      if (risingEdge(joy_msg, "BUTTON_TROT"))
+      {
+        lbrbFullBodyPowerOffStub();
+        return true;
+      }
+      // LB+RB + X：两步起身
+      if (risingEdge(joy_msg, "BUTTON_RL"))
+      {
+        lbrbTwoStepStandUpStub();
+        return true;
+      }
+      // LB+RB + Y：进入搬运模式
+      if (risingEdge(joy_msg, "BUTTON_WALK"))
+      {
+        lbrbEnterTransportStub();
+        return true;
+      }
+      // LB+RB + A：退出搬运模式
+      if (risingEdge(joy_msg, "BUTTON_STANCE"))
+      {
+        lbrbExitTransportStub();
+        return true;
+      }
+      return false;
+    }
+
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
       vector_t joystickOriginAxisFilter_ = vector_t::Zero(6);
@@ -1132,11 +1640,12 @@ namespace ocs2
         // 发布 false，禁用腰部控制（只有腰部dof>0时才发布）
         if (waist_dof_ > 0)
         {
+          controlWaist(0.0);
           std_msgs::Bool enable_msg;
           enable_msg.data = false;
           // enable_waist_control_pub_.publish(enable_msg);
           waist_control_active_ = false;
-          ROS_INFO("[JoyControl] Exited waist control mode, disabled waist control");
+          ROS_INFO("[JoyControl] Exited waist control mode, reset waist yaw to zero");
         }
       }
       
@@ -1198,9 +1707,17 @@ namespace ocs2
         return;
       }
     
-      // 非辅助模式下才可控行走
-      if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] > -0.5 && joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] > -0.5 && axes_input_enabled_)
+      // 非辅助模式下才可控行走；M1/M2 动作执行期间临时屏蔽推杆走路
+      if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] > -0.5 && joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] > -0.5 && axes_input_enabled_ && !m1m2_action_active_)
+      {
         joystickOriginAxisTemp_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+
+        // AMP模式下忽略右摇杆上下控制（高度控制）
+        if (is_amp_controller_)
+        {
+          joystickOriginAxisTemp_(2) = 0.0;  // 索引2对应AXIS_RIGHT_STICK_Z
+        }
+      }
     
       joystickOriginAxisFilter_ = joystickOriginAxisTemp_;
       // for(int i=0;i<4;i++)
@@ -1214,90 +1731,31 @@ namespace ocs2
       }
       joystick_origin_axis_ = joystickOriginAxisFilter_;
       // joystick_origin_axis_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+      handleAmpHandCmdVelLineXLimitDpad(joy_msg);
       
-      if (joy_msg->buttons[joyButtonMap["BUTTON_LB"]])// 按下左侧侧键，切换模式
+      const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
+      const bool rb_held = buttonPressed(joy_msg, "BUTTON_RB");
+      // LB+RB 同时按下（仅 roban）：搬运模式 / 断电倒地 / 起身
+      if (IS_ROBAN(rb_version_) && lb_held && rb_held)
       {
-        if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
-          pubModeGaitScale(0.9);
-        else if (!IS_ROBAN(rb_version_) && !old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
-          pubModeGaitScale(1.1);
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
+        if (handleLBRBComboButtons(joy_msg))
         {
-          arm_ctrl_mode_ = (arm_ctrl_mode_ > 0)? 0 : 1;
-          callArmControlService(arm_ctrl_mode_);
-        }
-        else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
-        {
-          kuavo_msgs::robotHandPosition msg;
-          const int fingers = 6;
-          msg.left_hand_position.resize(fingers);
-          msg.right_hand_position.resize(fingers);
-          if (!hand_closed_)
-          {
-            std::fill(msg.left_hand_position.begin(), msg.left_hand_position.end(), 100);
-            std::fill(msg.right_hand_position.begin(), msg.right_hand_position.end(), 100);
-          }
-          else
-          {
-            std::fill(msg.left_hand_position.begin(), msg.left_hand_position.end(), 0);
-            std::fill(msg.right_hand_position.begin(), msg.right_hand_position.end(), 0);
-          }
-          ROS_INFO("publish hand position: %s", hand_closed_ ? "close" : "open");
-          hand_closed_ = !hand_closed_;
-          hand_position_pub_.publish(msg);
-        }
-      }
-      else if (joy_msg->buttons[joyButtonMap["BUTTON_RB"]])// 按下右侧侧键，切换模式
-      {
-        // RB + BUTTON_STANCE(A)
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
-        {
-          // RB+A roban2 芭啦芭啦樱之舞
-          if (IS_ROBAN(rb_version_))
-          {
-          //   ROS_INFO("[JoyControl] RB+A: dance_parapara");
-          //   callSwitchToDanceSrvByName("dance_parapara");
-          //   old_joy_msg_ = *joy_msg;
-          //   return;
-          }
-          else
-          {
-            c_relative_base_limit_[0] -= (c_relative_base_limit_[0] > 0.1) ? 0.05 : 0.0;
-            c_relative_base_limit_[3] -= (c_relative_base_limit_[3] > 0.1) ? 0.05 : 0.0;
-            std::cout << "cmdvelLinearXLimit: " << c_relative_base_limit_[0] << "\n"
-                      << "cmdvelAngularYAWLimit: " << c_relative_base_limit_[3] << std::endl;
-          }
-        }
-        // RB + BUTTON_WALK(Y)
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_WALK"]] && joy_msg->buttons[joyButtonMap["BUTTON_WALK"]])
-        {
-          // RB+Y roban2 lonelydance舞蹈
-          if (IS_ROBAN(rb_version_))
-          {
-            ROS_INFO("[JoyControl] RB+Y: dance_lonelydance");
-            callSwitchToDanceSrvByName("dance_lonelydance");
-            old_joy_msg_ = *joy_msg;
-            return;
-          }
-          else
-          {
-            ROS_INFO("Switching to DanceController via RB+Y");
-            callTriggerDanceSrv();
-            old_joy_msg_ = *joy_msg;
-            return;
-          }
-        }
-        // RB + BUTTON_RL(X): 起身
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
-        {
-          callTriggerFallStandUpSrv();
           old_joy_msg_ = *joy_msg;
           return;
         }
-        // RB + BUTTON_TROT(B): 触发倒地逻辑
-        if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
+      }
+      else if (lb_held)// 按下左侧侧键，切换模式
+      {
+        if (handleLBComboButtons(joy_msg))
         {
-          callSetFallDownStateSrv();
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
+      }
+      else if (rb_held)// 按下右侧侧键，切换模式
+      {
+        if (handleRBComboButtons(joy_msg))
+        {
           old_joy_msg_ = *joy_msg;
           return;
         }
@@ -1307,11 +1765,13 @@ namespace ocs2
         if (robot_type_ == 2)
         {
           checkGaitSwitchCommand(joy_msg);
+          old_joy_msg_ = *joy_msg;
+          return;
         }
       }
 
       vector_t button_trigger_axis = vector_t::Zero(6);
-      if (axes_input_enabled_)
+      if (axes_input_enabled_ && !m1m2_action_active_)
       {
         if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
         {
@@ -1346,9 +1806,15 @@ namespace ocs2
       if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
       {
         publishGaitTemplate("stance");
+        return;
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_TROT"]] && joy_msg->buttons[joyButtonMap["BUTTON_TROT"]])
       {
+        if (IS_ROBAN(rb_version_) && posture_control_mode_)
+        {
+          ROS_WARN("[JoyControl] B: ignored in posture control mode (exit with LB+A)");
+          return;
+        }
         // Roban: B switch to MPC
         if (IS_ROBAN(rb_version_))
         {
@@ -1388,10 +1854,16 @@ namespace ocs2
       }
       else if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] && joy_msg->buttons[joyButtonMap["BUTTON_RL"]])
       {
-        // Roban: X switch to AMP
+        if (IS_ROBAN(rb_version_) && posture_control_mode_)
+        {
+          ROS_WARN("[JoyControl] X: ignored in posture control mode (exit with LB+A)");
+          return;
+        }
+        // Roban: X 显式切到 amp_controller(amp_hand 改由 RB+X 进入, B 回 MPC)。
+        // 任意控制器(含 mpc/dance)按 X 都直达 amp_controller。
         if (IS_ROBAN(rb_version_))
         {
-          ROS_INFO("[JoyControl] X: switch to amp_controller");
+          ROS_INFO("[JoyControl] X (Roban): switch to amp_controller");
           callSwitchControllerService("amp_controller");
           return;
         }
@@ -1515,6 +1987,49 @@ namespace ocs2
       }
 
       const vector_t currentPose = observation.state.segment<6>(6);
+
+      if (posture_control_mode_)
+      {
+        // 姿态控制模式:
+        // linear.x -> 弯腰
+        // linear.y -> 预留/侧向姿态通道
+        // linear.z -> base高度偏移(下蹲)
+        // angular.z -> 禁止旋转，避免与下蹲语义冲突
+        if (std::abs(joystick_origin_axis(0)) > DEAD_ZONE)
+        {
+          cmdVel.linear.x = commad_line_target_(0);
+          updated[0] = true;
+        }
+        if (std::abs(joystick_origin_axis(1)) > DEAD_ZONE)
+        {
+          cmdVel.linear.y = commad_line_target_(1);
+          updated[1] = true;
+        }
+        if (std::abs(joystick_origin_axis(2)) > DEAD_ZONE)
+        {
+          cmdVel.linear.z = commad_line_target_(2);
+          updated[2] = true;
+        }
+
+        static bool last_auto_gait_state = true;
+        const double height_diff_max = 0.1;
+        if (std::fabs(cmdVel.linear.z) > height_diff_max && cur_gait_name_ == "stance")
+        {
+          if (last_auto_gait_state)
+          {
+            changeAutoGaitStatus(false);
+            last_auto_gait_state = false;
+          }
+        }
+        else if (!last_auto_gait_state)
+        {
+          changeAutoGaitStatus(true);
+          last_auto_gait_state = true;
+        }
+
+        return updated;
+      }
+
       // vector_t target(6);
       if (joystick_origin_axis.head(2).cwiseAbs().maxCoeff() > DEAD_ZONE)
       { // base p_x, p_y are relative to current state
@@ -1573,6 +2088,57 @@ namespace ocs2
       }
 
       return updated;
+    }
+
+    bool callAmpModeService(int mode)
+    {
+      std::string current_controller;
+      if (!getCurrentControllerName(current_controller) || current_controller == "mpc")
+      {
+        ROS_WARN("[JoyControl] change_amp_mode(%d) skipped: current controller is not AMP (current=%s)",
+                 mode, current_controller.c_str());
+        return false;
+      }
+
+      const std::string service_name =
+          "/humanoid_controller/" + current_controller + "/change_amp_mode";
+      ros::ServiceClient amp_mode_client =
+          nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(service_name);
+
+      kuavo_msgs::changeArmCtrlMode srv;
+      srv.request.control_mode = mode;
+      if (amp_mode_client.call(srv))
+      {
+        ROS_INFO("[JoyControl] %s(%d) -> %s, mode=%d, msg=%s",
+                 service_name.c_str(),
+                 mode,
+                 srv.response.result ? "success" : "failure",
+                 srv.response.mode,
+                 srv.response.message.c_str());
+        return srv.response.result;
+      }
+      ROS_ERROR("[JoyControl] Failed to call %s with mode=%d", service_name.c_str(), mode);
+      return false;
+    }
+
+    void setPostureControlMode(bool enable)
+    {
+      posture_control_mode_ = enable;
+      joystick_origin_axis_.setZero();
+      vector_t zero_axis = vector_t::Zero(6);
+      checkAndPublishCommandLine(zero_axis);
+
+      if (enable)
+      {
+        publishGaitTemplate("stance");
+        callAmpModeService(1);
+        ROS_WARN("[JoyControl] Posture control mode enabled: stick -> bend/squat");
+      }
+      else
+      {
+        callAmpModeService(0);
+        ROS_WARN("[JoyControl] Posture control mode disabled: restored walking mode");
+      }
     }
 
     inline void pubModeGaitScale(float scale)
@@ -1697,19 +2263,21 @@ namespace ocs2
       pending_dance_music_.played = false;
     }
 
-    bool playDanceMusic(const std::string& dance_name)
+    // 通用 /play_music 调用。music_number 透传给服务，支持纯文件名(从默认 music 目录解析)
+    // 或绝对路径(loundspeaker 用 os.path.join 处理，绝对路径会原样使用)。
+    bool playMusic(const std::string& music_number)
     {
       kuavo_msgs::playmusic srv;
-      srv.request.music_number = dance_name + ".wav";
+      srv.request.music_number = music_number;
       srv.request.volume = 100;
-      ros::ServiceClient play_music_client = nodeHandle_.serviceClient<kuavo_msgs::playmusic>("/play_music");
-      if (play_music_client.call(srv))
+      ros::ServiceClient client = nodeHandle_.serviceClient<kuavo_msgs::playmusic>("/play_music");
+      if (client.call(srv))
       {
         ROS_INFO("[JoyControl] /play_music '%s' -> %s",
-                 srv.request.music_number.c_str(), srv.response.success_flag ? "success" : "failed");
+                 music_number.c_str(), srv.response.success_flag ? "success" : "failed");
         return srv.response.success_flag;
       }
-      ROS_ERROR("[JoyControl] Failed to call /play_music for %s", srv.request.music_number.c_str());
+      ROS_ERROR("[JoyControl] Failed to call /play_music for %s", music_number.c_str());
       return false;
     }
 
@@ -1758,9 +2326,9 @@ namespace ocs2
       }
 
       pending_dance_music_.played = true;
-      const std::string dance_name = msg->dance_name;
-      std::thread([this, dance_name]() {
-        playDanceMusic(dance_name);
+      const std::string music_number = msg->dance_name + ".wav";
+      std::thread([this, music_number]() {
+        playMusic(music_number);
       }).detach();
       clearDanceMusicPending();
     }
@@ -2027,6 +2595,34 @@ namespace ocs2
       return false;
     }
 
+    // 控制器名 TTL 缓存, 避免 100Hz 控制循环里高频调 service。
+    // 缓存失败时保持上次结果, 启动初期未取到时按 false 处理(不误拦)。
+    void refreshControllerCacheIfStale()
+    {
+      const double now = ros::Time::now().toSec();
+      if (now - cached_controller_time_ >= kControllerCacheTtl_)
+      {
+        std::string name;
+        if (getCurrentControllerName(name))
+        {
+          cached_controller_name_ = name;
+        }
+        cached_controller_time_ = now;
+      }
+    }
+
+    bool isAmpControllerActive()
+    {
+      refreshControllerCacheIfStale();
+      return cached_controller_name_ == "amp_controller";
+    }
+
+    bool isAmpHandControllerActive()
+    {
+      refreshControllerCacheIfStale();
+      return cached_controller_name_ == "amp_hand_controller";
+    }
+
     bool getControllerList(std::vector<std::string>& controller_list)
     {
       kuavo_msgs::getControllerList srv;
@@ -2124,9 +2720,19 @@ namespace ocs2
     ros::Subscriber controller_switch_event_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
     ros::Subscriber dance_trajectory_state_sub_;
-    int arm_ctrl_mode_;
+    int arm_ctrl_mode_{1};  // 启动默认 auto_swing (1); 收到 /humanoid/mpc/arm_control_mode 后由 controller 实际状态覆盖
+
+    // refreshControllerCacheIfStale() 的 TTL 缓存, 避免每帧 service call
+    std::string cached_controller_name_;
+    double cached_controller_time_{0.0};
+    static constexpr double kControllerCacheTtl_{0.3};
     bool is_rl_controller_{false};  // 当前是否为RL控制器
+    bool is_amp_controller_{false};  // 当前是否为AMP控制器
     ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
+    int amp_hand_cmd_vel_line_x_limit_level_{1};  // 0=low, 1=default, 2=up
+    double amp_hand_cmd_vel_line_x_default_{0.4};
+    double amp_hand_cmd_vel_line_x_low_{0.4};
+    double amp_hand_cmd_vel_line_x_up_{0.4};
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";
@@ -2180,8 +2786,19 @@ namespace ocs2
     
     // 遥感/方向键轴输入开关（默认允许）
     bool axes_input_enabled_{true};
+    bool posture_control_mode_{false};
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
+
+    // ===== roban 组合键功能相关 =====
+    // 搬运模式状态（仅接口，实际锁电机算法待实现）
+    bool transport_mode_active_{false};
+    // RB+A 出厂固定舞蹈1：芭蕾。要求 rl_controllers.yaml 已注册同名 controller，
+    // 且 /home/lab/.config/lejuconfig/music/dance_balei.wav 存在。
+    const std::string kFixedDance1Name{"dance_balei"};
+    // RB+Y 出厂固定舞蹈2：新疆舞。要求 rl_controllers.yaml 已注册同名 controller，
+    // 且 /home/lab/.config/lejuconfig/music/dance_xinjiang.wav 存在。
+    const std::string kFixedDance2Name{"dance_xinjiang"};
     
     // 命令执行相关
     std::map<std::string, Command_t> commands_map_;
@@ -2224,6 +2841,9 @@ namespace ocs2
     // 动作执行状态相关
     ros::Subscriber robot_action_state_sub_;
     bool robot_action_executing_{false};  // 标记是否有动作正在执行
+    // py 节点发布的 M1/M2 动作执行信号：true 时屏蔽推杆走路（从触发到 reset 完成）
+    ros::Subscriber m1m2_action_active_sub_;
+    bool m1m2_action_active_{false};
     
     // 腰部控制状态跟踪
     bool waist_control_active_{false};  // 标记是否正在控制腰部（模式2）

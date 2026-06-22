@@ -35,7 +35,7 @@ class RosParamWebsocket:
             param_service = roslibpy.Param(self.websocket.client, 'com_height')
             param = param_service.get()
             if param is None:
-                SDKLogger.error("com_height parameter not found")
+                SDKLogger.warning("com_height parameter not found, using default value")
                 # KUAVO-4PRO
                 return 0.8328437523948975
             return param
@@ -93,6 +93,23 @@ class RosParamWebsocket:
             SDKLogger.debug(f"Failed to get waistRealDof: {e}, defaulting to 0")
             return 0
     
+    def robot_type(self) -> int:
+        """获取全局 /robot_type 参数（1=轮臂 2=双足，默认 2）"""
+        try:
+            param_service = roslibpy.Param(self.websocket.client, '/robot_type')
+            param = param_service.get()
+            if param is None:
+                SDKLogger.warning("/robot_type parameter not found, defaulting to 2 (bipedal)")
+                return 2
+            return param
+        except Exception as e:
+            SDKLogger.warning(f"Failed to get /robot_type: {e}, defaulting to 2 (bipedal)")
+            return 2
+
+    def is_wheel_arm_robot(self) -> bool:
+        """判断是否为轮臂机器人 (robot_type==1)"""
+        return self.robot_type() == 1
+
     def end_effector_type(self)->str:
         try:
             param_service = roslibpy.Param(self.websocket.client, 'end_effector_type')
@@ -152,6 +169,20 @@ class RosParamWebsocket:
         except Exception as e:
             SDKLogger.error(f"Failed to get initial_state: {e}")
             return None
+
+
+def is_wheel_arm_robot_from_client(client) -> bool:
+    """通过 roslibpy 客户端判断是否为轮臂机器人 (robot_type==1)
+
+    使用全局参数 /robot_type，默认 2（双足）。
+    可在已有 websocket client 的场景下直接调用，无需创建 RosParamWebsocket 实例。
+    """
+    try:
+        param = roslibpy.Param(client, '/robot_type')
+        robot_type = param.get()
+        return robot_type == 1
+    except Exception:
+        return False
 
 
 def joint_names()->dict:

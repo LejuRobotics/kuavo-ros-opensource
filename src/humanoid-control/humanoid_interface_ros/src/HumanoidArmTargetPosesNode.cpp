@@ -297,9 +297,6 @@ private:
 
         if (control_mode == 2) {
             vector_t zeroState = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
-            scalar_array_t zeroTimeTrajectory{observation_.time};
-            vector_array_t zeroStateTrajectory{zeroState};
-            auto zeroTrajectories = generateTargetTrajectories(zeroTimeTrajectory, zeroStateTrajectory, observation_);
 
             bool is_mode_change_success = false;
             const ros::Time change_mode_start_time = ros::Time::now();
@@ -315,6 +312,10 @@ private:
                 if (isRlController()) {
                     sampleAndPublishRlArmTraj(observation_.time);
                 } else {
+                    // 每次迭代用最新 observation_.time 重新生成零轨迹，避免时间戳过期导致 MPC 拒绝
+                    scalar_array_t zeroTimeTrajectory{observation_.time};
+                    vector_array_t zeroStateTrajectory{observation_.state.segment(armJointStartIndex_, num_arm_joints_)};
+                    auto zeroTrajectories = generateTargetTrajectories(zeroTimeTrajectory, zeroStateTrajectory, observation_);
                     trajectoryPublisher_.publish(
                         ros_msg_conversions::createTargetTrajectoriesMsg(zeroTrajectories));
                 }
