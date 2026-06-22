@@ -72,6 +72,7 @@
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
 #include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
+#include "humanoid_controllers/SitControlManager.h"
 
 namespace humanoid_controller
 {
@@ -329,6 +330,13 @@ namespace humanoid_controller
 
     virtual void setupHumanoidInterface(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile, const std::string &gaitFile,
                                         bool verbose, RobotVersion rb_version);
+    /** P3 终点：末端关节 + 脚底贴地（调 base_z）后由 RBD 转 centroidal */
+    vector_t computeSeatOffsetCentroidalEnd(
+        const humanoid_controller::SitControlManager::SeatJointTargets& end_targets,
+        const vector_t& start_centroidal);
+    /** P3：在预计算的 start/end centroidal 间按 α 插值，与关节偏置同 α */
+    void recomputeOptimizedState2WbcWithSeatTargets(
+        const humanoid_controller::SitControlManager::SeatJointTargets& targets);
     virtual void setupMpc();
     virtual void setupMrt();
     virtual void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile);
@@ -450,11 +458,14 @@ namespace humanoid_controller
     vector_t simplifiedJointPos_;
     std::shared_ptr<StateEstimateBase> stateEstimate_;
     std::shared_ptr<CentroidalModelRbdConversions> rbdConversions_;
+    std::shared_ptr<CentroidalModelRbdConversions> rbdConversionsWBC_;
     SensorData robotSensorsData_;
     SystemObservationRL currentObservationRL_, lastObservationRL_;
     vector_t robotState_;
     bool is_initialized_ = false;
     bool is_abnor_StandUp_{false};
+    bool use_sit_init_{false};
+    bool use_sit_init_boot_{false};
     bool wbc_only_{false};
     bool is_rl_controller_ = false;
     BufferedValue<bool> is_rl_controller_buffer_{false};
@@ -499,12 +510,16 @@ namespace humanoid_controller
     bool is_robot_standup_complete_{false};
     bool isPreUpdateComplete{false};
     bool isInitStandUpStartTime_{false};
+    /** preUpdate 起立首帧实测基座 [6..11]（CoM 位姿），避免与硬件 prep 后的真实姿态不一致 */
+    vector_t bootStandStartCentroidal_;
+    bool bootStandStartCaptured_{false};
     bool isPullUp_{false};
     bool setPullUpState_{false};
     double standupTime_{0.0};
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
     std::shared_ptr<WbcBase> standUpWbc_;
+    std::shared_ptr<WbcBase> sitDownWbc_;
     std::string taskFile_switchParams_;
     vector_t curRobotLegState_;
 
@@ -748,12 +763,18 @@ namespace humanoid_controller
     bool is_standing_ = false;  // 添加站立状态标志位
     bool last_standing_state_ = false;  // 添加上一次站立状态标志
 
+    // Seat/Sit control manager
+    std::unique_ptr<humanoid_controller::SitControlManager> sitControlManager_;
+    vector_t seat_offset_centroidal_start_wbc_;
+    vector_t seat_offset_centroidal_end_wbc_;
+    bool seat_offset_centroidal_plan_ready_{false};
+
     // 共享内存通讯
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;
     bool use_shm_communication_{false};  // 是否使用共享内存通讯
     bool updateSensorDataFromShm();      // 从共享内存更新传感器数据
     void publishJointCmdToShm(const kuavo_msgs::jointCmd& jointCmdMsg);         // 发布关节命令到共享内存
-    void publishControlCommands(const kuavo_msgs::jointCmd& jointCmdMsg);       // 发布控制命令的统一接口
+    void publishControlCommands(kuavo_msgs::jointCmd& jointCmdMsg);             // 发布控制命令的统一接口
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
     bool changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res);  // 修改ruiwo电机kp/kd，更新running_settings后由replaceDefaultEcMotorPdoGait生效
     

@@ -30,6 +30,7 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
     <arg name="stand_up_protect" default="true"/>
+    <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -175,6 +176,8 @@
     <group if="$(arg cali_set_zero)">
         <param name="cali" value="true" />
     </group>
+    
+    <param name="/use_sit_init" value="$(arg use_sit_init)" />
     
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
        output="screen" required="true" clear_params="true"

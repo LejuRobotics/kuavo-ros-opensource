@@ -280,6 +280,7 @@ add_library(${PROJECT_NAME}
         # src/MinicController.cpp
         src/rl/VMPController.cpp
         src/rl/DanceController.cpp
+        src/SitControlManager.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}

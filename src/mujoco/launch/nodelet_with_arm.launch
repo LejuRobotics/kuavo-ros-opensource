@@ -9,9 +9,11 @@
   <param name="robot_type" value="$(arg robot_type)"/>
   <arg name="depth_frequency" default="60.0"/>
   <param name="depth_frequency" value="$(arg depth_frequency)"/>
+  <arg name="seat_scene" default="false" doc="Use scene_seat_adjust.xml (chair + under-seat foot slots)"/>
   <!-- Handle version 15 special case: use version 14 scene -->
   <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s14/xml/scene.xml" if="$(eval arg('robot_version') == 15)"/>
-  <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene.xml" unless="$(eval arg('robot_version') == 15)"/>
+  <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene_seat_adjust.xml" if="$(arg seat_scene)"/>
+  <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene.xml" unless="$(eval arg('robot_version') == 15 or arg('seat_scene'))"/>
   <param name="legged_robot_scene_param" value="$(arg legged_robot_scene)" />
   <node pkg="nodelet" type="nodelet" name="nodelet_mujoco" args="load MujocoNodelet nodelet_manager" respawn="false" output="screen" />
 </launch>

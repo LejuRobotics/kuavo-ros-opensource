@@ -1319,9 +1319,13 @@ class JoyCustomizeConfigNode:
         判断机器人是否已放倒。第一次启动可能是吊着的, 第二下按之前才放倒, 故只在此刻即时读一帧。
         读不到数据/未放倒一律视为误操作, 返回 False。
 
-        ★ 目前仅支持「面朝地的前倒」起身: 前倒时 pitch 为正且接近 +π/2(实测 ~1.489),
-          因此只认正 pitch(pitch >= 阈值), 不能用 abs(pitch)。背朝地的后倒(pitch 为负)
-          暂不支持, 待后续实机测试再补充对应逻辑。"""
+        前倒(面朝地)与后倒(背朝地)均支持, 用 abs(pitch) >= 阈值 做放倒闸门:
+          - 前倒: pitch 为正且接近 +π/2(实测 ~1.489) -> 趴着;
+          - 后倒: pitch 为负且接近 -π/2(对称, 实机待确认) -> 躺着;
+          - 侧倒是绕 X 的 roll, pitch≈0, 过不了阈值 -> 自动按"未放倒"拒掉, 不处理侧身。
+        前/后由 pitch 符号区分, 但本函数只判"是否放倒"; 真正选 趴着/躺着 模型与轨迹
+        由 C++ FallStandController::autoSelectAndSwitchModel() 在 trigger 时读实时 IMU 自动完成,
+        此处无需、也不向服务端传递姿态(trigger_fall_stand_up 为无参 std_srvs/Trigger)。"""
         threshold = float(rospy.get_param("/fall_recovery_fallen_pitch_threshold", 1.35))
         try:
             msg = rospy.wait_for_message("/sensors_data_raw", sensorsData, timeout=1.0)
@@ -1332,9 +1336,10 @@ class JoyCustomizeConfigNode:
         # pitch(绕 Y): asin(2(wy - zx)), 取值 [-π/2, π/2]
         sinp = max(-1.0, min(1.0, 2.0 * (q.w * q.y - q.z * q.x)))
         pitch = math.asin(sinp)
-        # 仅前倒(面朝地, pitch 为正): 用正向比较, 不用 abs; 后倒(负 pitch)暂不支持
-        laid = pitch >= threshold
-        rospy.loginfo(f"[JoyCustomize] 起身前姿态检测: pitch={pitch:.3f} rad, 阈值={threshold:.2f}(仅前倒/正pitch), 放倒={laid}")
+        # 前倒(+pitch)/后倒(-pitch)均放行, 用幅值过闸; 侧倒 pitch≈0 自动被拒
+        laid = abs(pitch) >= threshold
+        posture = ("前倒/趴着" if pitch > 0 else "后倒/躺着") if laid else "未放倒"
+        rospy.loginfo(f"[JoyCustomize] 起身前姿态检测: pitch={pitch:.3f} rad, 阈值=±{threshold:.2f}, 姿态={posture}, 放倒={laid}")
         return laid
 
     def _initiate_stand_up(self) -> bool:

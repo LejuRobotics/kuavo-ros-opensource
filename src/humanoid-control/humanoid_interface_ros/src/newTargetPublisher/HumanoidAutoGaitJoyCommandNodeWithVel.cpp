@@ -512,6 +512,8 @@ namespace ocs2
       set_fall_down_state_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_controller/set_fall_down_state");
       // Dance controller: kuavo_msgs/SetString（空 data=列表首项，或 #下标/名称）
       switch_dance_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetString>("/humanoid_controller/switch_to_dance_controller");
+      seat_sit_down_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid/sit_down");
+      seat_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid/stand_up");
       last_status_check_time_ = ros::Time(0);
 
       // 加载命令配置
@@ -1558,6 +1560,33 @@ namespace ocs2
         // 发布头部控制命令
         controlHead(current_head_yaw_, current_head_pitch_);
         // return;
+
+        // Kuavo5 北通：RT+B 坐下，RT+A 起立
+        if (rb_version_.start_with(5) && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
+        {
+          const int b_trot = joyButtonMap["BUTTON_TROT"];
+          const int b_stance = joyButtonMap["BUTTON_STANCE"];
+          std_srvs::Trigger seat_srv;
+          if (!old_joy_msg_.buttons[b_trot] && joy_msg->buttons[b_trot])
+          {
+            seat_sit_down_client_.call(seat_srv);
+            seat_b_button_held_ = true;
+          }
+          else if (!old_joy_msg_.buttons[b_stance] && joy_msg->buttons[b_stance])
+          {
+            seat_stand_up_client_.call(seat_srv);
+            seat_a_button_held_ = true;
+          }
+          // 记录 B/A 抬起，允许下一轮 rising edge
+          if (seat_b_button_held_ && !joy_msg->buttons[b_trot])
+            seat_b_button_held_ = false;
+          if (seat_a_button_held_ && !joy_msg->buttons[b_stance])
+            seat_a_button_held_ = false;
+          old_joy_msg_ = *joy_msg;
+          // 有按钮按下时立即返回，避免落入后续 walk/stance 逻辑
+          if (joy_msg->buttons[b_trot] || joy_msg->buttons[b_stance])
+            return;
+        }
 
         // RT + X: 切换到上一个控制器
         // roban 保留 RT+X 作为动作组合键，避免与控制器切换冲突；kuavo 等其他版本允许切换控制器
@@ -2813,6 +2842,10 @@ namespace ocs2
     ros::ServiceClient trigger_fall_stand_up_client_;
     // Fall down state service (SetBool)
     ros::ServiceClient set_fall_down_state_client_;
+    ros::ServiceClient seat_sit_down_client_;
+    ros::ServiceClient seat_stand_up_client_;
+    bool seat_b_button_held_{false};   // 防重复：B 抬起后才允许下一轮 rising edge
+    bool seat_a_button_held_{false};   // 防重复：A 抬起后才允许下一轮 rising edge
     // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
     ros::ServiceClient switch_dance_client_;
     struct DanceMusicPending

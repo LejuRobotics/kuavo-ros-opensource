@@ -102,6 +102,11 @@ class HardwarePlant
       return motor_info;
     };
     int8_t HWPlantInit();
+    /** 在 HWPlantInit() 之前由 hardware_node 根据 /use_sit_init 设置 */
+    void setSkipBootMoveToZero(bool skip) { skip_boot_move_to_zero_ = skip; }
+    /** 坐姿 prep jointMoveTo：仅前 12 个 EC 腿关节使用 seat_boot 刚度（由 hardware_node 从 ROS param 注入） */
+    void setPrepEcLegGains(const std::vector<double>& kp, const std::vector<double>& kd);
+    void clearPrepEcLegGains();
     SensorData_t sensorsInitHW();
     bool sensorsCheck();
     void HWPlantDeInit();
@@ -254,6 +259,9 @@ private:
     std::mutex motor_joint_data_mtx_;
     SensorData_t sensor_data_joint;
 
+    bool skip_boot_move_to_zero_{false};
+    std::vector<double> prep_ec_leg_kp_;
+    std::vector<double> prep_ec_leg_kd_;
     double dt_ = 1e-3;
     uint8_t control_mode_ = MOTOR_CONTROL_MODE_TORQUE;
     uint16_t num_actuated_ = 0;

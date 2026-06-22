@@ -794,6 +794,36 @@ standUpWeight
     contactForce    0.1 
 }
 
+sitDownJointAccelTask
+{
+  waist
+  {
+    kp    200
+    kd    4.2
+  }
+  leg
+  {
+    kp    200
+    kd    4.2
+    kp_sim    500
+    kd_sim    10.2
+  }
+  arm
+  {
+    kp    20
+    kd    1.2
+  }
+}
+
+sitDownWeight
+{
+    Linear          0.02
+    Angular         0.02
+    JointAcc        20
+    stanceLeg       2
+    contactForce    0.1
+}
+
 switchJointAccelTask
 {
   waist
