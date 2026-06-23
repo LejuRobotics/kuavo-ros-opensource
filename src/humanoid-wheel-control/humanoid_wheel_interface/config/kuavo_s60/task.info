@@ -125,6 +125,25 @@ mpc
   mrtDesiredFrequency             500   ; [Hz]
 }
 
+; /move_base/base_cmd_vel 发布前速度限幅，单位: vx/vy [m/s], wz [rad/s]
+baseCmdVelLimit
+{
+  activate  true  ; 是否启用 /move_base/base_cmd_vel 速度限幅，true 开启，false 关闭
+
+  lowerBound  ; 速度下限
+  {
+    (0,0)  -0.5  ; 线速度 x [m/s]
+    (1,0)  -0.5  ; 线速度 y [m/s]
+    (2,0)  -0.5  ; 角速度 z [rad/s]
+  }
+
+  upperBound  ; 速度上限
+  {
+    (0,0)  0.5   ; 线速度 x [m/s]
+    (1,0)  0.5   ; 线速度 y [m/s]
+    (2,0)  0.5   ; 角速度 z [rad/s]
+  }
+}
 
 ; MPC 的 ReferenceManager 的运动学限制, 平移单位: m, 旋转单位: rad
 referencekinematicLimit  
