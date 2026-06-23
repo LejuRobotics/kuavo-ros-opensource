@@ -15,9 +15,27 @@ import time
 import numpy as np
 import copy
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common import ros_env
-from std_msgs.msg import Bool
-from kuavo_msgs.srv import lbTimedPosCmd, lbTimedPosCmdRequest
-from kuavo_msgs.srv import setRuckigPlannerParams, setRuckigPlannerParamsRequest
+
+# --- ROS msg/srv imports (conditional: WS mode uses stubs) ---
+try:
+    from std_msgs.msg import Bool
+except ImportError:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.ros_env import make_ros_stub
+    Bool = make_ros_stub('std_msgs.msg._Bool.Bool')
+
+try:
+    from kuavo_msgs.srv import lbTimedPosCmd, lbTimedPosCmdRequest
+except ImportError:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.ros_env import make_ros_stub
+    lbTimedPosCmd = make_ros_stub('kuavo_msgs.srv._lbTimedPosCmd.lbTimedPosCmd')
+    lbTimedPosCmdRequest = make_ros_stub('kuavo_msgs.srv._lbTimedPosCmdRequest.lbTimedPosCmdRequest')
+
+try:
+    from kuavo_msgs.srv import setRuckigPlannerParams, setRuckigPlannerParamsRequest
+except ImportError:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.ros_env import make_ros_stub
+    setRuckigPlannerParams = make_ros_stub('kuavo_msgs.srv._setRuckigPlannerParams.setRuckigPlannerParams')
+    setRuckigPlannerParamsRequest = make_ros_stub('kuavo_msgs.srv._setRuckigPlannerParamsRequest.setRuckigPlannerParamsRequest')
 
 
 def resample_and_execute_traj(traj, total_time, publish_fn, publish_rate=100.0):

@@ -133,9 +133,18 @@ def _msg_to_dict(msg):
     """Convert a typed ROS message object to a plain dict (for WS mode publishing)."""
     if msg is None:
         return None
-    # Handle genpy Time/Duration (secs + nsecs)
+    # WS-mode stubs (__dict__-based, no __slots__) — check first to avoid
+    # _AutoStub.__getattr__ auto-creation side-effects on hasattr() below.
+    if hasattr(msg, '__dict__') and msg.__dict__ is not None:
+        result = {}
+        for k, v in msg.__dict__.items():
+            if not k.startswith('_'):
+                result[k] = _msg_to_dict(v)
+        return result
+    # Handle genpy Time/Duration / WS _Time (secs + nsecs)
     if hasattr(msg, 'secs') and hasattr(msg, 'nsecs'):
         return {'secs': int(msg.secs), 'nsecs': int(msg.nsecs)}
+    # ROS native messages (have __slots__)
     if hasattr(msg, '__slots__'):
         result = {}
         for slot in msg.__slots__:
@@ -260,3 +269,56 @@ else:
 
     def ServiceProxy(service_name, srv_class):
         return _rospy.ServiceProxy(service_name, srv_class)
+
+
+# ========== ROS Message/Srv Stub Factory ==========
+
+class _AutoStub:
+    """Auto-vivifying stub for ROS message classes in WS mode.
+
+    Supports nested attribute assignment: obj.a.b.c = val
+    auto-creates intermediate _AutoStub nodes.
+
+    Has correct __module__ / __name__ so _infer_ros_type() works.
+    Uses plain __dict__ (no __slots__) so _msg_to_dict takes the __dict__ branch.
+    """
+
+    # Set per-instance or overridden by make_ros_stub via class attrs
+    __module__ = 'std_msgs.msg._AutoStub'
+    __name__ = '_AutoStub'
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            object.__setattr__(self, k, v)
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        # Auto-create nested stub for chained assignment: obj.a.b.c = val
+        val = _AutoStub()
+        object.__setattr__(self, name, val)
+        return val
+
+    def __repr__(self):
+        return f"_AutoStub({self.__dict__})"
+
+
+def make_ros_stub(type_path):
+    """Create a lightweight stub class for a ROS msg/srv type.
+
+    type_path: full dotted path, e.g. 'kuavo_msgs.msg._Bool.Bool'.
+
+    The returned class has correct __module__/__name__ for type inference,
+    supports constructor kwargs, and auto-vivifies nested attribute access.
+    """
+    parts = type_path.rsplit('.', 1)
+    class_name = parts[-1]
+    module = parts[0] if len(parts) > 1 else ''
+
+    class Stub(_AutoStub):
+        __module__ = module
+        __name__ = class_name
+
+    Stub.__name__ = class_name
+    Stub.__qualname__ = class_name
+    return Stub

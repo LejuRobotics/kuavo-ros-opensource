@@ -38,6 +38,9 @@
     <arg name="enable_timestamp_log" default="false"/> <!-- 是否启用 IK 时间戳日志，开启后保存至 $HOME/logs/ -->
     <param name="/enable_timestamp_log" value="$(arg enable_timestamp_log)" type="bool"/>
     <arg name="use_pico" default="false"/> <!-- false: use ik_ros_uni_cpp_node, true: use wheel_ik_ros_uni_cpp_node -->
+    <!-- WebRTC 推流相关参数 -->
+    <arg name="enable_videostream" default="false"/> <!-- false: 不启动 WebRTC 推流, true: 启动推流节点 -->
+    <arg name="camera_publisher_name" default="/camera/color"/> <!-- 推流使用的相机话题前缀，仅在 enable_videostream=true 时生效 -->
     <arg name="task_space_acc_limit" default="500.0" />
     <arg name="task_space_jerk_limit" default="3000.0" />
     <arg name="joint_space_acc_limit" default="500.0" />
@@ -294,4 +297,10 @@
     <node pkg="motion_capture_ik" type="torso_joystick_node.py"
           name="torso_joystick_node" output="screen"
           if="$(arg single_hand_mode)" />
+
+    <!-- WebRTC 推流节点（仅在 enable_videostream=true 时启动） -->
+    <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py"
+          name="webrtc_videostream" output="screen"
+          args="$(arg camera_publisher_name) $(arg ip_address)"
+          if="$(arg enable_videostream)" />
 </launch>

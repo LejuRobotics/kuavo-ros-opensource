@@ -21,10 +21,35 @@ import time
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common import ros_env
-from kuavo_msgs.msg import AprilTagDetectionArray, AprilTagDetection
-from kuavo_msgs.srv import setContactForceInterpParams, setContactForceInterpParamsRequest
-from geometry_msgs.msg import PoseWithCovarianceStamped, Wrench, WrenchStamped
-from std_msgs.msg import Header
+
+# --- ROS msg/srv imports (conditional: WS mode uses stubs) ---
+try:
+    from kuavo_msgs.msg import AprilTagDetectionArray, AprilTagDetection
+except ImportError:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.ros_env import make_ros_stub
+    AprilTagDetectionArray = make_ros_stub('kuavo_msgs.msg._AprilTagDetectionArray.AprilTagDetectionArray')
+    AprilTagDetection = make_ros_stub('kuavo_msgs.msg._AprilTagDetection.AprilTagDetection')
+
+try:
+    from kuavo_msgs.srv import setContactForceInterpParams, setContactForceInterpParamsRequest
+except ImportError:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.ros_env import make_ros_stub
+    setContactForceInterpParams = make_ros_stub('kuavo_msgs.srv._setContactForceInterpParams.setContactForceInterpParams')
+    setContactForceInterpParamsRequest = make_ros_stub('kuavo_msgs.srv._setContactForceInterpParamsRequest.setContactForceInterpParamsRequest')
+
+try:
+    from geometry_msgs.msg import PoseWithCovarianceStamped, Wrench, WrenchStamped
+except ImportError:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.ros_env import make_ros_stub
+    PoseWithCovarianceStamped = make_ros_stub('geometry_msgs.msg._PoseWithCovarianceStamped.PoseWithCovarianceStamped')
+    Wrench = make_ros_stub('geometry_msgs.msg._Wrench.Wrench')
+    WrenchStamped = make_ros_stub('geometry_msgs.msg._WrenchStamped.WrenchStamped')
+
+try:
+    from std_msgs.msg import Header
+except ImportError:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.ros_env import make_ros_stub
+    Header = make_ros_stub('std_msgs.msg._Header.Header')
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcFrame
 import numpy as np
 import sys
