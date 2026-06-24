@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
+import yaml
+
 _SCRIPTS_ROOT = os.path.dirname(os.path.abspath(__file__))
 for _sub in ("lib", "validation", "tools"):
     _p = os.path.join(_SCRIPTS_ROOT, _sub)
@@ -352,6 +354,204 @@ def cmd_convert_position(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── 踝关节 YAML 参数误差检查 ────────────────────────────────────────────────────
+
+def _load_ankle_yaml_config() -> dict:
+    """加载 axisoffsetanklesolver.yaml + fixaxisanklesolver.yaml，返回 variant→cfg 映射。"""
+    configs = {}
+    for fname in ["config/ankle/axisoffsetanklesolver.yaml", "config/ankle/fixaxisanklesolver.yaml"]:
+        path = os.path.join(KUAVO_SOLVER_ROOT, fname)
+        if not os.path.isfile(path):
+            continue
+        cfg = yaml.safe_load(open(path, "r", encoding="utf-8"))
+        for name, v in cfg.get("variants", {}).items():
+            configs[name] = v
+    return configs
+
+
+def _ankle_solver_tendon_len(cfg: dict, side: str,
+                              pitch: float = 0.0, roll: float = 0.0, bar: float = 0.0) -> float:
+    """复现 AxisOffsetAnkleSolver compute_tendon_vector (bar_rpy=0)。"""
+    keys = {
+        "ll": ("x_lleq","y_lleq","z_lleq","x_llbar","z_llbar","x_lltd","y_lltd","z_lltd"),
+        "lr": ("x_lreq","y_lreq","z_lreq","x_lrbar","z_lrbar","x_lrtd","y_lrtd","z_lrtd"),
+        "rl": ("x_rleq","y_rleq","z_rleq","x_rlbar","z_rlbar","x_rltd","y_rltd","z_rltd"),
+        "rr": ("x_rreq","y_rreq","z_rreq","x_rrbar","z_rrbar","x_rrtd","y_rrtd","z_rrtd"),
+    }[side]
+    x_eq, y_eq, z_eq = (cfg[keys[0]], cfg[keys[1]], cfg[keys[2]])
+    x_bar, z_bar = cfg[keys[3]], cfg[keys[4]]
+    x_td, y_td, z_td = cfg[keys[5]], cfg[keys[6]], cfg[keys[7]]
+
+    zpr = cfg["z_pitch"] - cfg["z_roll"]
+    c1, s1 = math.cos(pitch), math.sin(pitch)
+    c2, s2 = math.cos(roll), math.sin(roll)
+    ca, sa = math.cos(bar), math.sin(bar)
+
+    p_eq_x = cfg["x_pitch"] + cfg["z_roll"]*s1 + c1*x_eq + s1*s2*y_eq + s1*c2*z_eq
+    p_eq_y = c2*y_eq - s2*z_eq
+    p_eq_z = zpr + cfg["z_roll"]*c1 - s1*x_eq + c1*s2*y_eq + c1*c2*z_eq
+
+    p_td_x = x_bar + x_td
+    p_td_y = ca*y_td - sa*z_td
+    p_td_z = z_bar + sa*y_td + ca*z_td
+
+    return math.sqrt((p_td_x-p_eq_x)**2 + (p_td_y-p_eq_y)**2 + (p_td_z-p_eq_z)**2)
+
+
+def _ankle_check_mjcf(cfg: dict, token: str) -> bool:
+    """MJCF 运动学链一致性检查。"""
+    import xml.etree.ElementTree as ET
+    mjcf_path = os.path.join(KUAVO_SOLVER_ROOT, "robot-descriptions/ankles",
+                              f"biped_ankles_{token}", "mjcf/biped_ankles.xml")
+    if not os.path.isfile(mjcf_path):
+        print(f"    MJCF 不存在: {mjcf_path}")
+        return False
+    tree = ET.parse(mjcf_path)
+    wb = tree.getroot().find("worldbody")
+
+    def find_chain(bar_n, tdn_n):
+        for b in wb.iter("body"):
+            if b.get("name") == bar_n:
+                bp = np.array([float(v) for v in b.get("pos","0 0 0").split()])
+                for sub in b:
+                    if sub.tag == "body" and sub.get("name") == tdn_n:
+                        body = np.array([float(v) for v in sub.get("pos","0 0 0").split()])
+                        jt = sub.find("joint")
+                        ball = np.array([float(v) for v in jt.get("pos","0 0 0").split()]) if jt is not None else np.zeros(3)
+                        return bp, body, ball
+        return None
+
+    ok = True
+    for name, bn, tn in [("ll","l_l_bar","l_l_tendon"),("lr","l_r_bar","l_r_tendon"),
+                          ("rl","r_l_bar","r_l_tendon"),("rr","r_r_bar","r_r_tendon")]:
+        r = find_chain(bn, tn)
+        if r is None:
+            print(f"    {name}: MJCF parse failed")
+            ok = False; continue
+        bp, body, ball = r
+        mj_total = bp + body + ball
+        yb = np.array([cfg[f"x_{name}bar"], 0.0, cfg[f"z_{name}bar"]])
+        yt = np.array([cfg[f"x_{name}td"], cfg[f"y_{name}td"], cfg[f"z_{name}td"]])
+        y_pin = yb + yt
+        err = float(np.linalg.norm(mj_total - y_pin) * 1000)
+        st = "✓" if err < 0.01 else "✗"
+        if err >= 0.01: ok = False
+        print(f"    {name}: MJCF chain vs YAML pin  err={err:.3f}mm {st}")
+    return ok
+
+
+def cmd_ankle_check(args: argparse.Namespace) -> int:
+    """CLI: python3 kuavo_solver_validator.py -t <variant> ankle-check [--mjcf] [--all] [--table]"""
+    configs = _load_ankle_yaml_config()
+
+    if args.all:
+        targets = sorted(configs.keys())
+    elif args.token:
+        targets = [args.token]
+    else:
+        targets = sorted(configs.keys())
+
+    if args.table:
+        # 表格模式：扫所有 AxisOffset variant
+        print(f"\n{'variant':>14s} | {'零位 err(mm)':>14s} | {'扫参 max(mm)':>14s} | "
+              f"{'扫参 p95(mm)':>14s} | {'扫参 p99(mm)':>14s} | {'状态':>6s}")
+        print("-" * 90)
+        for name in targets:
+            cfg = configs.get(name)
+            if cfg is None or "z_roll" not in cfg:
+                print(f"{name:>14s} | {'N/A':>14s} | {'N/A':>14s} | {'N/A':>14s} | {'N/A':>14s} | {'skip':>6s}")
+                continue
+            p_lim = cfg["ankle_pitch_limits"]; r_lim = cfg["ankle_roll_limits"]
+            g = 7
+            ps = np.linspace(p_lim[0], p_lim[1], g); rs = np.linspace(r_lim[0], r_lim[1], g)
+            zero_errs, sweep_errs = [], []
+            for s in ["ll","lr","rl","rr"]:
+                l0 = cfg[f"l0_{s}_eqtd"]
+                zero_errs.append(abs(_ankle_solver_tendon_len(cfg, s) - l0) * 1000)
+                for pt in range(g):
+                    for rl in range(g):
+                        sweep_errs.append(abs(_ankle_solver_tendon_len(cfg, s, float(ps[pt]), float(rs[rl])) - l0) * 1000)
+            z = np.array(zero_errs); sw = np.array(sweep_errs)
+            zero_ok = z.max() < 0.001
+            print(f"{name:>14s} | {z.max():>13.4f} | {sw.max():>13.1f} | "
+                  f"{np.percentile(sw,95):>13.1f} | {np.percentile(sw,99):>13.1f} | "
+                  f"{'✓' if zero_ok else '✗':>6s}")
+        print("\n  注: 扫参列显示 bar=0 时腱长距离 l0 的几何范围，非精度误差")
+        return 0
+
+    # 单 / 多 variant 详细模式
+    all_ok = True
+    for name in targets:
+        cfg = configs.get(name)
+        if cfg is None:
+            print(f"[ERROR] variant '{name}' 未找到"); all_ok = False; continue
+        if "z_roll" not in cfg:
+            print(f"\n{'='*60}\n  {name}  (FixedAxis, 跳过腱长检查)\n{'='*60}")
+            continue
+
+        print(f"\n{'='*60}\n  {name}\n{'='*60}")
+
+        # 1 零位自洽
+        print("\n[1] 零位自洽 (pitch=roll=bar=0)")
+        for s in ["ll","lr","rl","rr"]:
+            L = _ankle_solver_tendon_len(cfg, s)
+            l0 = cfg[f"l0_{s}_eqtd"]
+            err = abs(L - l0) * 1000
+            st = "✓" if err < 0.001 else "✗"
+            if err >= 0.001: all_ok = False
+            print(f"    {s}: len={L:.12f}  l0={l0:.12f}  err={err:.4f}mm {st}")
+
+        # 2 工作空间扫参（bar=0 几何范围，仅供参考）
+        print("\n[2] 扫参几何范围 (bar=0, {}×{} grid, 非精度误差)".format(
+            int(args.grid_size), int(args.grid_size)))
+        p_lim = cfg["ankle_pitch_limits"]; r_lim = cfg["ankle_roll_limits"]
+        g = int(args.grid_size)
+        ps = np.linspace(p_lim[0], p_lim[1], g)
+        rs = np.linspace(r_lim[0], r_lim[1], g)
+        for s in ["ll","lr","rl","rr"]:
+            errs = []
+            l0 = cfg[f"l0_{s}_eqtd"]
+            for pt in range(g):
+                for rl in range(g):
+                    L = _ankle_solver_tendon_len(cfg, s, float(ps[pt]), float(rs[rl]))
+                    errs.append(abs(L - l0) * 1000)
+            e = np.array(errs)
+            print(f"    {s}: max={e.max():.1f}mm  mean={e.mean():.1f}mm  "
+                  f"p95={np.percentile(e,95):.1f}mm  p99={np.percentile(e,99):.1f}mm")
+
+        # 3 C++ 往返精度（调用 position-verify）
+        if args.roundtrip:
+            print("\n[3] C++ solver 往返精度 (MuJoCo vs solver)")
+            try:
+                import subprocess
+                validator = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        "kuavo_solver_validator.py")
+                result = subprocess.run(
+                    [sys.executable, validator, "-t", name, "position-verify",
+                     "--module", "ankle", "--num-steps", str(int(args.grid_size))],
+                    capture_output=True, text=True, timeout=120)
+                for line in result.stdout.strip().split("\n"):
+                    if "PASS" in line or "FAIL" in line:
+                        print(f"    {line.strip()}")
+                if result.returncode != 0:
+                    all_ok = False
+            except Exception as exc:
+                print(f"    [SKIP] 无法运行 C++ roundtrip: {exc}")
+
+        # 4 MJCF 链路 (可选)
+        if args.mjcf:
+            print("\n[4] MJCF 运动学链")
+            if not _ankle_check_mjcf(cfg, name):
+                all_ok = False
+
+        print(f"\n  → {'全部通过 ✓' if all_ok else '存在问题 ✗'}")
+
+    print(f"\n{'='*60}")
+    print(f"  总计: {len(targets)} variant, {'全部通过 ✓' if all_ok else '存在问题 ✗'}")
+    print(f"{'='*60}")
+    return 0 if all_ok else 1
+
+
 # ── 交互菜单 ─────────────────────────────────────────────────────────────────
 
 MENU_BANNER = r"""
@@ -585,6 +785,15 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--side", default=None); pc.add_argument("--direction", required=True, choices=("j2m", "m2j"))
     pc.add_argument("--values", required=True); pc.add_argument("--json", action="store_true")
     pc.set_defaults(func=cmd_convert_position)
+
+    # ankle-check: 踝关节 YAML 参数腱长误差
+    pa = sub.add_parser("ankle-check", help="踝关节 YAML 腱长误差扫参")
+    pa.add_argument("--mjcf", action="store_true", help="同时检查 MJCF 运动学链一致性")
+    pa.add_argument("--roundtrip", action="store_true", help="运行 C++ solver MuJoCo 往返精度验证 (需要编译)")
+    pa.add_argument("--all", action="store_true", help="检查所有 ankle variant")
+    pa.add_argument("--table", action="store_true", help="表格模式（快速对比多版本）")
+    pa.add_argument("--grid-size", type=int, default=9, help="扫参网格点数 (default: 9)")
+    pa.set_defaults(func=cmd_ankle_check)
 
     return p
 

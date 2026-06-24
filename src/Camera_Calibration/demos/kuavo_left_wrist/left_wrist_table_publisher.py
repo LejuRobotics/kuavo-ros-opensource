@@ -10,9 +10,10 @@ from typing import Dict, List, Optional
 
 import rospy
 from kuavo_msgs.msg import sensorsData
-from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
+from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, changeLbQuickModeSrv, changeLbQuickModeSrvRequest
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64
+from std_srvs.srv import SetBool, SetBoolRequest
 
 
 RIGHT_ARM_JOINT_NAMES = [
@@ -80,7 +81,15 @@ class SensorsArmMonitor:
     与 humanoidController 中 msg->position[i] * M_PI/180.0 一致。
     """
 
-    def __init__(self, topic: str = "/sensors_data_raw"):
+    def __init__(
+        self,
+        topic: str = "/sensors_data_raw",
+        left_start_index: int = 13,
+        right_start_index: int = 20,
+    ):
+        self._left_start_index = int(left_start_index)
+        self._right_start_index = int(right_start_index)
+        self._required_len = max(self._left_start_index + 7, self._right_start_index + 7)
         self._last_msg = None
         self._sub = rospy.Subscriber(topic, sensorsData, self._cb, queue_size=10)
 
@@ -104,20 +113,24 @@ class SensorsArmMonitor:
         while not rospy.is_shutdown():
             if self._last_msg is not None:
                 q = list(self._last_msg.joint_data.joint_q)
-                if len(q) >= 27:
+                if len(q) >= self._required_len:
                     return
             if timeout > 0 and (time.time() - start) > timeout:
-                raise TimeoutError("等待有效 sensorsData（joint_q 长度>=27）超时")
+                raise TimeoutError(
+                    f"等待有效 sensorsData（joint_q 长度>={self._required_len}）超时"
+                )
             rate.sleep()
 
     def get_current_left_right_deg(self) -> Dict[str, List[float]]:
         if self._last_msg is None:
             raise RuntimeError("尚未收到 sensorsData 消息")
         q = list(self._last_msg.joint_data.joint_q)
-        if len(q) < 27:
+        if len(q) < self._required_len:
             raise RuntimeError("joint_q 长度不足，无法获取左右臂 7 关节")
-        left = [_deg(float(x)) for x in q[13:20]]
-        right = [_deg(float(x)) for x in q[20:27]]
+        li = self._left_start_index
+        ri = self._right_start_index
+        left = [_deg(float(x)) for x in q[li : li + 7]]
+        right = [_deg(float(x)) for x in q[ri : ri + 7]]
         return {"left_deg": left, "right_deg": right}
 
 
@@ -250,7 +263,8 @@ def main() -> None:
     keyframe_flag_topic = rospy.get_param("~keyframe_flag_topic", "/left_wrist_keyframe_flag")
     done_flag_topic = rospy.get_param("~done_flag_topic", "/left_wrist_keyframe_done")
 
-    dt = float(rospy.get_param("~dt", 0.04))
+    # 默认 100Hz，与 both_arms_table_publisher 一致
+    dt = float(rospy.get_param("~dt", 0.01))
     play_loop_count = int(rospy.get_param("~play_loop_count", 1))
     move_duration = float(rospy.get_param("~move_duration", 2.0))
     hold_sec = float(rospy.get_param("~hold_sec", 5.0))
@@ -260,7 +274,15 @@ def main() -> None:
     wait_sensors_timeout = float(rospy.get_param("~wait_sensors_timeout", 30.0))
     require_valid_sensors = bool(rospy.get_param("~require_valid_sensors", True))
     set_external_control = bool(rospy.get_param("~set_external_control_mode", True))
-    enable_wbc = bool(rospy.get_param("~enable_wbc_arm_trajectory_control", True))
+    enable_arm_quick_mode = bool(rospy.get_param("~enable_arm_quick_mode", True))
+    # 兼容旧参数名
+    if rospy.has_param("~enable_wbc_arm_trajectory_control"):
+        enable_arm_quick_mode = bool(rospy.get_param("~enable_wbc_arm_trajectory_control"))
+    robot_layout = str(rospy.get_param("~robot_layout", "biped52")).strip()
+    is_wheel62 = robot_layout == "wheel62"
+    use_arm_traj_interpolator = bool(rospy.get_param("~enable_arm_traj_interpolator", is_wheel62))
+    left_start_index = int(rospy.get_param("~left_start_index", 4 if is_wheel62 else 13))
+    right_start_index = int(rospy.get_param("~right_start_index", 11 if is_wheel62 else 20))
 
     def _try_call(service_name: str, mode: int) -> bool:
         try:
@@ -286,6 +308,50 @@ def main() -> None:
             rospy.logwarn("Service call error %s: %s", service_name, e)
             return False
 
+    def _try_lb_quick_mode(service_name: str, quick_mode: int) -> bool:
+        try:
+            rospy.wait_for_service(service_name, timeout=2.0)
+            proxy = rospy.ServiceProxy(service_name, changeLbQuickModeSrv)
+            req = changeLbQuickModeSrvRequest()
+            req.quickMode = int(quick_mode)
+            resp = proxy(req)
+            if hasattr(resp, "success") and resp.success:
+                rospy.loginfo("Service %s ok: quickMode=%s msg=%s", service_name, quick_mode, resp.message)
+                return True
+            rospy.logwarn(
+                "Service %s failed: quickMode=%s msg=%s",
+                service_name,
+                quick_mode,
+                getattr(resp, "message", ""),
+            )
+            return False
+        except rospy.ROSException:
+            rospy.logwarn("Service not available: %s", service_name)
+            return False
+        except rospy.ServiceException as e:
+            rospy.logwarn("Service call error %s: %s", service_name, e)
+            return False
+
+    def _try_enable_arm_traj_interpolator(enabled: bool = True) -> bool:
+        service_name = "/enable_arm_traj_interpolator"
+        try:
+            rospy.wait_for_service(service_name, timeout=2.0)
+            proxy = rospy.ServiceProxy(service_name, SetBool)
+            req = SetBoolRequest()
+            req.data = bool(enabled)
+            resp = proxy(req)
+            if resp.success:
+                rospy.loginfo("Service %s ok: enabled=%s msg=%s", service_name, enabled, resp.message)
+                return True
+            rospy.logwarn("Service %s failed: enabled=%s msg=%s", service_name, enabled, resp.message)
+            return False
+        except rospy.ROSException:
+            rospy.logwarn("Service not available: %s", service_name)
+            return False
+        except rospy.ServiceException as e:
+            rospy.logwarn("Service call error %s: %s", service_name, e)
+            return False
+
     script_dir = Path(__file__).resolve().parents[2]  # .../src/Camera_Calibration
     teach_dir_default = script_dir / "teach_capture_output"
     teach_output_dir = Path(rospy.get_param("~teach_output_dir", str(teach_dir_default)))
@@ -302,7 +368,11 @@ def main() -> None:
     rospy.loginfo("Loaded left arm points from teach json: %s (n=%d)", str(teach_json_path), len(points))
 
     # 必须先等到 /sensors_data_raw 有效再切控制模式：否则 WBC/外控切换时参考易阶跃到 0，再读到的已是错误姿态。
-    monitor = SensorsArmMonitor(topic=sensor_topic)
+    monitor = SensorsArmMonitor(
+        topic=sensor_topic,
+        left_start_index=left_start_index,
+        right_start_index=right_start_index,
+    )
     try:
         monitor.wait_until_valid_arms(timeout=wait_sensors_timeout)
         cur = monitor.get_current_left_right_deg()
@@ -318,15 +388,35 @@ def main() -> None:
 
     if set_external_control:
         ok = False
-        for srv in ("/arm_traj_change_mode", "/humanoid_change_arm_ctrl_mode", "/change_arm_ctrl_mode"):
+        if is_wheel62:
+            service_candidates = (
+                "/wheel_arm_change_arm_ctrl_mode",
+                "/change_arm_ctrl_mode",
+                "/arm_traj_change_mode",
+                "/humanoid_change_arm_ctrl_mode",
+            )
+        else:
+            service_candidates = (
+                "/arm_traj_change_mode",
+                "/humanoid_change_arm_ctrl_mode",
+                "/change_arm_ctrl_mode",
+            )
+        for srv in service_candidates:
             ok = _try_call(srv, 2) or ok
         if not ok:
             rospy.logwarn("未能切换到 external_control(2)，继续执行但可能无法响应 /kuavo_arm_traj")
 
-    if enable_wbc:
-        # 与 cmd_arm_joint.py 保持一致：control_mode=1 表示使能 WBC 轨迹接管
-        if not _try_call("/enable_wbc_arm_trajectory_control", 1):
-            rospy.logwarn("未能使能 /enable_wbc_arm_trajectory_control，继续执行但可能无法响应 /kuavo_arm_traj")
+    if enable_arm_quick_mode:
+        if is_wheel62:
+            if not _try_lb_quick_mode("/enable_lb_arm_quick_mode", 2):
+                rospy.logwarn("未能使能 /enable_lb_arm_quick_mode(quickMode=2)，继续执行但可能无法响应 /kuavo_arm_traj")
+        else:
+            if not _try_call("/enable_wbc_arm_trajectory_control", 1):
+                rospy.logwarn("未能使能 /enable_wbc_arm_trajectory_control，继续执行但可能无法响应 /kuavo_arm_traj")
+
+    if is_wheel62 and use_arm_traj_interpolator:
+        if not _try_enable_arm_traj_interpolator(True):
+            rospy.logwarn("未能开启 /enable_arm_traj_interpolator，手臂可能仍出现阶梯指令抖动")
 
     arm_pub = rospy.Publisher(arm_traj_topic, JointState, queue_size=10, tcp_nodelay=True)
     kf_flag_pub = rospy.Publisher(keyframe_flag_topic, Float64, queue_size=10)

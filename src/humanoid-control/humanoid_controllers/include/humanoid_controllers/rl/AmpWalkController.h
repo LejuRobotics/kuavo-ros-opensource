@@ -6,6 +6,7 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/RlGaitReceiver.h"
 #include "humanoid_controllers/LowPassFilter.h"
+#include "humanoid_controllers/rl/ArmTakeoverBlender.h"
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
 #include "kuavo_solver/ankle/ankle_solver.h"
@@ -121,6 +122,8 @@ namespace humanoid_controller
     // 速度命令限制（简化版：4 维统一上限 + X 负向单独缩放系数）
     // 格式：[linear_x, linear_y, linear_z, angular_z]
     Eigen::Matrix<double, 4, 1> velocityLimits_{Eigen::Matrix<double, 4, 1>::Zero()};
+    double cmdVelLineXLow_{0.0};  ///< amp_hand_controller 手柄十字键下档 X 速度限制
+    double cmdVelLineXUp_{0.0};   ///< amp_hand_controller 手柄十字键高档 X 速度限制
     double cmdVelLineXNegScale_{1.0};  ///< X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
 
     // yaw 对齐
@@ -150,6 +153,11 @@ namespace humanoid_controller
     double arm_max_tracking_velocity_{0.5}; ///< 手臂最大跟踪速度 (rad/s)，从配置文件加载
     double arm_tracking_error_threshold_{0.05}; ///< 手臂跟踪误差阈值 (rad)，从配置文件加载
     double arm_mode_interpolation_velocity_{1.0}; ///< 模式2的插值速度 (rad/s)，从配置文件加载
+    bool arm_rl_takeover_blend_enabled_{false}; ///< 是否启用站立外部手臂到行走RL手臂的平滑接管
+    double arm_rl_takeover_blend_duration_{0.3}; ///< 手臂平滑接管时长（秒）
+    bool arm_zero_action_in_standing_{false}; ///< 是否在站立状态下将RL手臂action输出置0
+    bool last_stance_state_for_blend_{true}; ///< 用于手臂接管混合的站立状态跟踪
+    ArmTakeoverBlender arm_takeover_blender_; ///< 站立到行走时的手臂RL接管混合器
 
     // 腰部控制相关（可选功能）
     double waist_mode_interpolation_velocity_{1.0}; ///< 腰部模式切换时的插值速度 (rad/s)，从配置文件加载，用于三次多项式插值
@@ -200,6 +208,22 @@ namespace humanoid_controller
     double yaw_compensation_x_bias_clockwise_{0.0};     ///< 顺时针旋转时X轴偏置
     double yaw_compensation_x_bias_counterclockwise_{0.0}; ///< 逆时针旋转时X轴偏置
 
+    // amp_hand_controller 专用：外部手臂接管时 RL 使用虚拟手臂观测（仅 use_virtual_arm_obs 来自配置）
+    bool is_amp_hand_controller_{false};
+    bool use_virtual_arm_obs_{false};
+    static constexpr double kVirtualArmObsPitchBaseDeg_{0.2};
+    static constexpr double kVirtualArmObsPitchCompensationDeg_{1.5};
+    static constexpr double kVirtualArmObsPitchBaseDegNeg_{0.5};
+    static constexpr double kVirtualArmObsPitchCompensationDegNeg_{0.0};
+    bool lateral_elbow_fix_{false};
+    static constexpr double kLateralElbowFixScale_{0.25};
+    bool enable_roll_compensation_{false};
+    bool enable_off_cmdy_by_cmdx_{false};
+    static constexpr double kRollCompensationCmdXThreshold_{0.3};
+    static constexpr double kWalkingRollCompensationQuadA_{0.832520};
+    static constexpr double kWalkingRollCompensationQuadB_{-1.332474};
+    static constexpr double kWalkingRollCompensationQuadC_{0.627412};
+    static constexpr double kTurnRollCompensationDeg_{-0.7};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};
@@ -211,6 +235,10 @@ namespace humanoid_controller
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
+    void applyArmTakeoverBlend(Eigen::VectorXd& action, const ros::Time& time, bool is_standing);
+    Eigen::VectorXd getDefaultArmJointPos() const;
+    Eigen::VectorXd getArmActionScaleTest() const;
+    Eigen::VectorXd getCurrentArmJointPos(const SensorData& sensor_data) const;
     
     // 手臂控制辅助函数
     void initArmControl(const std::string& urdf_path);

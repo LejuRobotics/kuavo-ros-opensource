@@ -99,6 +99,7 @@ public:
   void setEnabled(bool enable);
   bool isEnabled() const;
   void setReuseWalkCommandInStance(bool enable);
+  void setAmpHandController(bool enable);
 
   // Get current command data
   CommandDataRL getCurrentCommand() const;
@@ -137,7 +138,8 @@ private:
   CommandDataRL currentCommand_;
   bool enabled_;
   bool reuse_walk_command_in_stance_;
-  
+  bool is_amp_hand_controller_{false};
+
   // Smart stop detection parameters
   bool smart_stop_enabled_;
   double torso_velocity_threshold_;

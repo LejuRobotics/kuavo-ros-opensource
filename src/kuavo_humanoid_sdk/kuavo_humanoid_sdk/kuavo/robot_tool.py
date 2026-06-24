@@ -47,15 +47,15 @@ class KuavoRobotTools:
         return self.get_tf_transform("odom", "base_link", return_type)
 
     def get_camera_to_base(self, return_type: str = "homogeneous") -> Union[PoseQuaternion, HomogeneousMatrix, None]:
-        """获取从camera_link到base_link坐标系的变换。
-        
+        """获取从head_camera_link到base_link坐标系的变换。
+
         Args:
             return_type (str, optional): 返回格式类型。与get_tf_transform相同，默认为"homogeneous"。
-        
+
         Returns:
             Union[PoseQuaternion, HomogeneousMatrix, None]: 变换数据或None
         """
-        return self.get_tf_transform("base_link", "camera_link", return_type)
+        return self.get_tf_transform("base_link", "head_camera_link", return_type)
 
     def get_link_position(self, link_name: str, reference_frame: str = "base_link") -> Union[Tuple[float, float, float], None]:
         """获取指定机械臂关节链接的位置

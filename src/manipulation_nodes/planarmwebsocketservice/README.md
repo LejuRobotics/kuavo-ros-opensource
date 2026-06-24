@@ -260,15 +260,29 @@ response:
     "cmd": "get_robot_info",
     "data": {
         "code": 0,
-        "robot_type": "40"
+        "robot_type": "40",
+        "music_folder_path": "/home/lab/.config/lejuconfig/music",
+        "maps_folder_path": "/home/lab/.config/lejuconfig/maps",
+        "h12_config_path": "/home/lab/kuavo-ros-control/src/.../config/customize_config.json",
+        "repo_path": "/home/lab/kuavo-ros-control",
+        "vr_recording_path": "/home/lab/.config/lejuconfig/vr_recording",
+        "creator_dance_upload_path": "/home/lab/.config/lejuconfig/creator_dance_upload",
+        "workspace_setup_path": "/home/lab/kuavo-ros-control/devel/setup.bash"
     }
 }
 ```
 
-| 名称       | 类型   | 描述           |
-| ---------- | ------ | -------------- |
-| code       | int    | 错误码 0: 成功 |
-| robot_type | string | 机器人的类型   |
+| 名称                       | 类型   | 描述                                                            |
+| -------------------------- | ------ | --------------------------------------------------------------- |
+| code                       | int    | 错误码 0: 成功                                                  |
+| robot_type                 | string | 机器人的类型                                                    |
+| music_folder_path          | string | 音乐文件存放目录(桌面端 scp wav 的目标)                       |
+| maps_folder_path           | string | 地图文件目录                                                    |
+| h12_config_path            | string | H12 遥控器 / joy 按键自定义配置 `customize_config.json` 的绝对路径 |
+| repo_path                  | string | 仓库根目录                                                      |
+| vr_recording_path          | string | VR 录制文件保存目录                                             |
+| creator_dance_upload_path  | string | Creator 舞蹈 zip 暂存目录,见下"Creator 舞蹈 zip 导入"          |
+| workspace_setup_path       | string | catkin 工作区 `setup.bash` 绝对路径                             |
 
 ### 获取机器人状态
 
@@ -1604,6 +1618,103 @@ rosbag to tact:
 
 - 确保所有依赖都已正确安装
 - 检查 rosbag 文件是否完整且未损坏
+
+## Creator 舞蹈 zip 导入
+
+把 Leju Creator 导出的舞蹈 zip 注册为一个 `DANCE_CONTROLLER`。**本接口职责单一**,只做:
+
+- 解压 zip,落盘 `dance_param_<controller>.info` / `<controller>.onnx` / `<controller>.csv`
+- 在 `rl_controllers.yaml` 追加一条 `DANCE_CONTROLLER` 条目
+- 把 `展示名 → 英文控制器名` 写进 `creator_dance_upload/dance_name_map.json`
+
+**不动 `customize_config.json`,不动任何 wav 文件**(即便 zip 里携带 wav 也一律忽略)。按键绑定和音乐都由桌面端自己管。
+
+**展示名 vs 控制器名**:控制器名要当 ROS 服务名段和文件前缀,必须纯 ASCII;所以接口里 **zip 去后缀名 = 展示名(`dance_name`,可中文)**,服务端据它**自动派生**纯英文控制器名(形如 `dance_<hash>`),并写映射表。前端 json 的 `dance_name` 填**展示名**即可,joy 运行时查表换成英文名(查不到则原值直达)。完整字段含义、`force` 建议、NFC 一致性、时序见 [`docs/桌面端 Creator 舞蹈 zip 导入约定.md`](docs/桌面端%20Creator%20舞蹈%20zip%20导入约定.md)。
+
+### 上传 zip 的暂存目录
+
+桌面端先 scp zip 到机器人暂存目录,路径**不要硬编码**,从 `get_robot_info` 的 `creator_dance_upload_path` 字段拿(ws 服务启动时自动 `mkdir -p` 这个目录)。当前默认是 `~/.config/lejuconfig/creator_dance_upload/`。
+
+### import_creator_dance
+
+接口只接 `zip_filename` + `force`。**zip 去掉 `.zip` 后缀 = 展示名(`dance_name`,可中文)**;控制器名由服务端自动派生为纯英文(不接收、也不需要前端传)。
+
+request:
+
+```json
+{
+    "cmd": "import_creator_dance",
+    "data": {
+        "zip_filename": "爱情鸟.zip",
+        "force": true
+    }
+}
+```
+
+| 名称          | 类型   | 必填 | 描述                                                                                       |
+| ------------- | ------ | ---- | ------------------------------------------------------------------------------------------ |
+| zip_filename  | string | 是   | 相对 `creator_dance_upload_path` 的文件名(不带路径);去掉 `.zip` 后即为**展示名**(可中文) |
+| force         | bool   | 否   | 默认 `false`,**强烈建议传 `true`**;同名 controller / 文件已存在时是否覆盖                 |
+
+response(成功):
+
+```json
+{
+    "cmd": "import_creator_dance",
+    "data": {
+        "code": 0,
+        "dry_run": false,
+        "robot_version": "17",
+        "dance_name": "爱情鸟",
+        "controller": "dance_e36aef9d91",
+        "info_path": ".../rl/dance_param_dance_e36aef9d91.info",
+        "onnx_path": ".../model/networks/dance_e36aef9d91.onnx",
+        "csv_path": ".../rl/dance_e36aef9d91.csv",
+        "controller_existed": false
+    }
+}
+```
+
+| 名称                | 类型      | 描述                                                                                |
+| ------------------- | --------- | ----------------------------------------------------------------------------------- |
+| code                | int       | 0: 成功;2: 失败,看 `error_kind`                                                    |
+| robot_version       | string    | 实际使用的 `ROBOT_VERSION`                                                          |
+| dance_name          | string    | 展示名(= zip 去 `.zip` 后缀, NFC 归一化后)。**前端 json 的 `dance_name` 用它**        |
+| controller          | string    | 服务端派生并注册到 `rl_controllers.yaml` 的英文控制器名,已写入映射表(前端无需写 json) |
+| info_path           | string    | 生成的 `.info` 文件绝对路径                                                         |
+| onnx_path           | string    | 生成的 `.onnx` 文件绝对路径                                                         |
+| csv_path            | string    | 生成的 `.csv` 文件绝对路径                                                          |
+| controller_existed  | bool      | 之前 `rl_controllers.yaml` 是否已有同名 controller(`true` 表示覆盖更新)            |
+
+response(失败):
+
+```json
+{
+    "cmd": "import_creator_dance",
+    "data": {
+        "code": 2,
+        "error": "controller already exists in .../rl_controllers.yaml: dance_balei; pass --force to update it",
+        "error_kind": "E_BINDING_EXISTS"
+    }
+}
+```
+
+错误码 `error_kind`:
+
+| 值                  | 含义                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| E_BAD_ZIP           | zip 不在暂存目录 / 损坏 / 内缺少或多个 yaml·onnx·csv(各须恰好一个) / trajectory 列数不对 |
+| E_JOINT_MISMATCH    | zip 导出关节数与当前机器人 `ROBOT_VERSION` 模板不匹配                                       |
+| E_BINDING_EXISTS    | 同名 controller 或落盘文件已存在,且未传 `force`                                            |
+| E_GENERIC           | 其他(`ROBOT_VERSION` 未设置、控制器名哈希冲突等)                                          |
+
+### 注意事项
+
+- **时序**:先调本接口(写映射表)→ 再替换仓库 json → 再触发 joy 重载;joy 在 `/update_joy_customize_config` 时**同时重载 json 与映射表**,顺序颠倒会查不到映射。
+- 调用成功后,**按键真正可用需要等下一次重启 humanoid controller / 重载 `rl_controllers.yaml`**(joy 节点会在 reload 后才看到新 controller)。
+- 按键绑定:本接口**不写** `customize_config.json`,桌面端用自己的 json 写入通路把目标 key 的 `type` 改成 `dance`、`dance_name` 写成**展示名**(= 返回的 `dance_name`,可中文)、`music_name` 自己填。**注意 `dance_name` 是 string,`music_name` 是 string[],别把 `dance_name` 写成数组**,详见 [`docs/桌面端 Creator 舞蹈 zip 导入约定.md`](docs/桌面端%20Creator%20舞蹈%20zip%20导入约定.md#customize_configjson-字段类型写入时务必匹配)。
+- 音乐:本接口**不动 wav**(zip 里有 wav 也忽略),桌面端要自行 scp wav 到 `music_folder_path`。
+- 本接口同步阻塞,典型耗时 1~3 秒。
 
 ## 贡献
 

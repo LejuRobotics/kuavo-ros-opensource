@@ -19,14 +19,14 @@ try:
     kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
     if kuavo_common_python_path not in sys.path:
         sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
 except (rospkg.ResourceNotFound, ImportError) as e:
     # 如果 rospkg 不可用或包未找到，回退到相对路径方式
     current_file_dir = os.path.dirname(os.path.abspath(__file__))
     kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../kuavo_common/python"))
     if kuavo_common_python_path not in sys.path:
         sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion
+    from robot_version import RobotVersion, is_tact_robot_type_compatible
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl, gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getControllerList
@@ -202,6 +202,10 @@ class ArmTrajectoryBezierDemo:
         # Add service to execute arm actions
         self.execute_service = rospy.Service('/execute_arm_action', ExecuteArmAction, self.handle_execute_action)
         self._interrupt_service = rospy.Service('/interrupt_arm_traj', Trigger, self.handle_interrupt  )
+        # 冻结：立即停止发布 /kuavo_arm_traj 且不复位（用于手柄 LB+B 将 tact 定住在当前帧）
+        self._freeze_service = rospy.Service(
+            '/humanoid_plan_arm_trajectory/freeze_arm_traj', Trigger, self.handle_freeze_arm_traj
+        )
         self._keep_arm_pose_service = rospy.Service(
             '/humanoid_plan_arm_trajectory/keep_arm_pose', SetBool, self.handle_keep_arm_pose
         )
@@ -1409,6 +1413,30 @@ class ArmTrajectoryBezierDemo:
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}成功中断"
         )
 
+    def handle_freeze_arm_traj(self, req):
+        """冻结：立即停止发布 /kuavo_arm_traj 且不复位，使手臂停在当前帧。
+        与 handle_interrupt 的区别：不调用 reset_robot_state()（不切回 auto、不复位手/头/腰），
+        以便配合上层将手臂控制模式置为 keep pose，把 tact 定在当前位置。"""
+        rospy.loginfo("[%s]  接收到机械臂冻结指令(停止发布且不复位)", rospy.get_time())
+
+        # 设置中断标志位，停止发布线程
+        self.interrupt_flag = True
+        self.arm_flag = False
+        self.running_action = False
+
+        # 发布动作完成状态
+        self.publish_action_state(2)
+
+        # 停止等待动作的 timer，避免到点后触发复位
+        self.stop_action()
+
+        # 注意：不调用 reset_robot_state()，保持当前帧
+
+        return TriggerResponse(
+            success=True,
+            message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}冻结于当前帧"
+        )
+
     def handle_keep_arm_pose(self, req):
         self.keep_arm_pose = req.data
         if self.keep_arm_pose:
@@ -1476,25 +1504,8 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
-        # 版本兼容关系映射
-        version_compat_map = {
-            41: [41],
-            42: [42],
-            45: [43, 45, 46, 48, 49, 100045, 100049, 200049, 300049, 400049],
-            52: [52, 53, 54, 55],
-            62: [60,61,62, 63, 200062, 300062],
-            11: [11, 13, 14, 15, 16, 17],
-            13: [11, 13, 14, 15, 16, 17],
-            14: [11, 13, 14, 15, 16, 17],
-            15: [11, 13, 14, 15, 16, 17],
-            16: [11, 13, 14, 15, 16, 17],
-            17: [11, 13, 14, 15, 16, 17],
-
-        }
-        allowed_robot_versions = version_compat_map.get(tact_robot_version, [tact_robot_version])
-        # 使用 version_number() 获取版本号数字进行比较
         robot_version_number = self.robot_version.version_number()
-        if robot_version_number not in allowed_robot_versions:
+        if not is_tact_robot_type_compatible(tact_robot_version, self.robot_version):
             msg = (
                 f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number} ({self.robot_version.version_name()})"
             )

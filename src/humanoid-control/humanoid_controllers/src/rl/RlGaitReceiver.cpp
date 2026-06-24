@@ -105,6 +105,12 @@ void RlGaitReceiver::setReuseWalkCommandInStance(bool enable)
   reuse_walk_command_in_stance_ = enable;
 }
 
+void RlGaitReceiver::setAmpHandController(bool enable)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  is_amp_hand_controller_ = enable;
+}
+
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
   if (!enabled_) {
@@ -143,11 +149,15 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   {
     // Velocity is very small, check for smart stop
     if (smart_stop_enabled_ && shouldSmartStop(torsostate, feetPositions)) {
-      // Smart stop conditions met, switch to stance mode
+      // Smart stop conditions met.
+      // amp_hand_controller 保持 walking 模式 (模型内部有自然停下)，其余控制器切 stance。
       currentCommand_.setzero();
-      currentCommand_.cmdStance_ = 1;
+      currentCommand_.cmdStance_ = is_amp_hand_controller_ ? 0 : 1;
       stopInPlaceStepping();
-      std::cout << "[RlGaitReceiver] Smart stop conditions met, switching to stance mode" << std::endl;
+      if (!is_amp_hand_controller_)
+      {
+        std::cout << "[RlGaitReceiver] Smart stop conditions met, switching to stance mode" << std::endl;
+      }
     } else {
       // Smart stop conditions not met, maintain in-place stepping
       // Use configured in-place stepping velocity

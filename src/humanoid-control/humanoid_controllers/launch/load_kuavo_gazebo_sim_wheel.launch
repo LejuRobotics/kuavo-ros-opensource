@@ -18,8 +18,8 @@
     <arg name="urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
     <arg name="taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
     <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
-    <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
-    <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
+    <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info"/>
+    <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info"/>
 
     <!-- MPC相关参数 -->
     <arg name="use_external_mpc" default="true"/>

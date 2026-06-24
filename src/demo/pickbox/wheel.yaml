@@ -1,0 +1,71 @@
+# 轮臂夹箱搬运任务配置
+# 单位：
+# - 距离：米 m
+# - 速度：米/秒 m/s
+
+qr:
+  # 抓取区二维码 ID
+  pick_qr_id: 1
+
+  # 放置区二维码 ID
+  place_qr_id: 2
+
+box:
+  # 箱子长度：前后方向尺寸。二维码贴在正面时，抓取中心 x 会自动加 length_x / 2。
+  length_x: 0.29
+
+  # 抓取中心 x 方向微调：正数让双手更往前伸，负数让双手更靠近机器人。
+  grasp_offset_x: 0.05
+
+  # 抓取中心 z 方向微调：正数让双手抓得更高，负数让双手抓得更低。
+  grasp_height_offset_z: 0.02
+
+  # 抓取夹紧量：数值越大，clamp/lift 阶段双手夹得越紧。
+  # 双手间距 = 箱子宽度 - 2 * grasp_clamp_inset_y。
+  grasp_clamp_inset_y: 0
+
+  # 箱子宽度：左右方向尺寸。用于计算左右手夹取位置。
+  width_y: 0.39
+
+  # 箱子高度：上下方向尺寸。用于校验二维码上下边距。
+  height_z: 0.22
+
+  # 正面二维码位置：二维码中心到箱子正面四条边的距离。
+  # 如果二维码贴在正面中心：left=right=箱子宽度/2，top=bottom=箱子高度/2。
+  front_qr_margins:
+    # 二维码中心到箱子左边缘的距离
+    left: 0.19
+
+    # 二维码中心到箱子右边缘的距离
+    right: 0.20
+
+    # 二维码中心到箱子上边缘的距离
+    top: 0.065
+
+    # 二维码中心到箱子下边缘的距离
+    bottom: 0.145
+
+walk:
+  # 接近二维码时 /cmd_vel 闭环行走的最大前进速度
+  linear_speed: 0.15
+
+  # 抓取阶段：机器人接近抓取二维码后，与二维码保持的前向距离
+  pick_approach_distance: 0.35
+
+  # 放置阶段：机器人接近放置二维码后，与二维码保持的前向距离
+  place_approach_distance: 0.40
+
+grasp:
+  # 是否在抓取流程中使用掌心关节偏置；偏置角度固定在代码中，不在 YAML 配置。
+  use_palm_joint_bias: false
+
+wheel:
+  ik:
+    # IK target frame:
+    # 0 keep current frame
+    # 1 world frame (based on odom)
+    # 2 local frame
+    # 3 VRFrame
+    # 4 manipulation world frame
+    # 5 joint space
+    frame: 0

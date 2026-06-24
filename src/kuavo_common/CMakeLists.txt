@@ -59,6 +59,7 @@ set(SRC_OBJECTS
     src/kuavo_common.cpp
     src/common/kuavo_settings.cpp
     src/common/utils.cpp
+    src/common/seat_config.cpp
     include/${PROJECT_NAME}/common/json.hpp
     include/${PROJECT_NAME}/common/json_config_reader.hpp
 )

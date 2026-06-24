@@ -1,8 +1,13 @@
 <launch>
   <!-- Kuavo 头部相机 demo：一个 launch 覆盖 capture / calibrate / optimize -->
 
-  <!-- 不依赖 ROS 包查找；由 roslaunch 显式传入 camera_calib_root:= -->
-  <arg name="camera_calib_root" default="$(env CAMERA_CALIB_ROOT)" />
+  <!-- 不依赖 ROS 包查找；优先 CAMERA_CALIB_ROOT，否则相对 launch 文件定位到 Camera_Calibration 根目录 -->
+  <arg name="camera_calib_root" default="$(eval optenv('CAMERA_CALIB_ROOT', dirname() + '/../..'))" />
+  <!-- robot_layout：默认读 ROBOT_VERSION（52→biped52，62/63→wheel62）；可 roslaunch 显式 robot_layout:= 覆盖 -->
+  <arg name="robot_layout" default="$(eval 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped52')" />
+  <arg name="use_wheel62" default="$(eval arg('robot_layout') == 'wheel62')" />
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm.urdf')" />
+  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_calibrated.urdf')" />
   <arg name="csv_dir" default="$(arg camera_calib_root)/output_csv/kuavo_head"/>
 
   <!-- 选择流程（默认只开 capture_to_csv 手动采样） -->
@@ -17,23 +22,41 @@
 
   <!-- 公共 URDF（所有 demo 共用） -->
   <param name="robot_description"
-         textfile="$(arg camera_calib_root)/biped_v3_arm.urdf" />
+         textfile="$(arg camera_calib_root)/$(arg urdf_file)" />
 
   <node pkg="robot_state_publisher"
         type="robot_state_publisher"
         name="$(arg rsp_name)"
         output="screen" />
 
-  <!-- /sensors_data_raw -> /joint_states（头部 yaw/pitch） -->
-  <node pkg="robot_calibration"
-        type="head_joint_state_bridge.py"
-        name="head_joint_state_bridge"
-        output="screen">
-    <param name="input" value="/sensors_data_raw" />
-    <param name="output" value="/joint_states" />
-    <param name="yaw_joint" value="zhead_1_joint" />
-    <param name="pitch_joint" value="zhead_2_joint" />
-  </node>
+  <!-- /sensors_data_raw -> /joint_states（头部 yaw/pitch；按布局切换是否发布腰关节） -->
+  <group unless="$(arg use_wheel62)">
+    <node pkg="robot_calibration"
+         type="head_joint_state_bridge.py"
+         name="head_joint_state_bridge"
+         output="screen">
+      <param name="input" value="/sensors_data_raw" />
+      <param name="output" value="/joint_states" />
+      <param name="yaw_joint" value="zhead_1_joint" />
+      <param name="pitch_joint" value="zhead_2_joint" />
+      <param name="publish_waist_joint" value="true" />
+      <param name="waist_joint" value="waist_yaw_joint" />
+      <param name="waist_joint_index" value="12" />
+    </node>
+  </group>
+
+  <group if="$(arg use_wheel62)">
+    <node pkg="robot_calibration"
+         type="head_joint_state_bridge.py"
+         name="head_joint_state_bridge"
+         output="screen">
+      <param name="input" value="/sensors_data_raw" />
+      <param name="output" value="/joint_states" />
+      <param name="yaw_joint" value="zhead_1_joint" />
+      <param name="pitch_joint" value="zhead_2_joint" />
+      <param name="publish_waist_joint" value="false" />
+    </node>
+  </group>
 
   <!-- Capture -> CSV（手动触发 keyframe flag） -->
   <group if="$(arg do_capture_to_csv)">
@@ -88,7 +111,7 @@
       <param name="output_dir" value="$(arg camera_calib_root)/output/kuavo_head" />
       <!-- 固定输出文件名 + 输出共享 calibrated URDF 到 src/Camera_Calibration -->
       <param name="fixed_output_names" value="true" />
-      <param name="urdf_output_path" value="$(arg camera_calib_root)/biped_v3_arm_calibrated.urdf" />
+      <param name="urdf_output_path" value="$(arg camera_calib_root)/$(arg calibrated_urdf_file)" />
       <param name="csv_dir" value="$(arg csv_dir)" />
       <param name="verbose" value="false" />
       <param name="print_fk" value="true" />

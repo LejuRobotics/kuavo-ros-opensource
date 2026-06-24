@@ -1255,7 +1255,7 @@
     name="zhead_1_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.43485" 
+      xyz="0 0 0.43935" 
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />

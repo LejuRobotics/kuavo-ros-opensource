@@ -78,6 +78,7 @@ variants:
     z_pitch: -0.294
     z_roll: -0.018
     x_pitch: 0.03
+    # === 更新自 biped_s224_rleg.urdf (s224 重测硬件，bar轴置于腱铰点) ===
     x_lleq: 0.02400533
     y_lleq: 0.0207
     z_lleq: 0.00300002
@@ -91,13 +92,13 @@ variants:
     x_lltd: -0.00019865
     y_lltd: 0.023428
     z_lltd: -0.0028409
-    x_lrtd: -0.0003367
-    y_lrtd: -0.023101
-    z_lrtd: -0.0048151
-    l0_ll_eqtd: 0.126801419206
-    l0_lr_eqtd: 0.182844668626
-    l_llbar: 0.023600452509
-    l_lrbar: 0.023599888896
+    x_lrtd: -0.00023541
+    y_lrtd: -0.023357
+    z_lrtd: -0.0033666
+    l0_ll_eqtd: 0.126801419205807
+    l0_lr_eqtd: 0.184302609513626
+    l_llbar: 0.023599616454722
+    l_lrbar: 0.023598378006973
     x_rleq: 0.02400533
     y_rleq: 0.0186
     z_rleq: 0.00300002
@@ -108,16 +109,16 @@ variants:
     z_rlbar: -0.10371
     x_rrbar: 0.061013
     z_rrbar: -0.16157
-    x_rltd: -0.0003367
-    y_rltd: 0.023101
-    z_rltd: -0.0048151
+    x_rltd: -0.00023541
+    y_rltd: 0.023357
+    z_rltd: -0.0033666
     x_rrtd: -0.00019865
     y_rrtd: -0.023428
     z_rrtd: -0.0028409
-    l0_rl_eqtd: 0.182844668626
-    l0_rr_eqtd: 0.126801419206
-    l_rlbar: 0.023599888896
-    l_rrbar: 0.023600452509
+    l0_rl_eqtd: 0.184302609513626
+    l0_rr_eqtd: 0.126801419205807
+    l_rlbar: 0.023598378006973
+    l_rrbar: 0.023599616454722
     default_tolerance: 1.0e-08
     max_iterations: 10
   7gen:
@@ -165,8 +166,8 @@ variants:
     x_lrtd: 0.0
     y_lrtd: -0.033392
     z_lrtd: -0.010146
-    l0_ll_eqtd: 0.23431048329086776
-    l0_lr_eqtd: 0.3249891426190112
+    l0_ll_eqtd: 0.235200057000000
+    l0_lr_eqtd: 0.324100482000000
     x_rleq: 0.0362
     y_rleq: 0.026
     z_rleq: 0.007

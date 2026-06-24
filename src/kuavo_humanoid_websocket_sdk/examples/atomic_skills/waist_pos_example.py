@@ -25,31 +25,27 @@ def main():
     robot = KuavoRobot()
 
     # 单角度控制：列表第一个元素作为 yaw 角度（单位：度）
-    print("控制腰部转到 0 度（正前）...")
-    robot.control_waist_pos([0.0])
-    time.sleep(1.0)
-
-    print("控制腰部转到 30 度...")
-    robot.control_waist_pos([30.0])
+    print("控制腰部转到 90 度...")
+    robot.control_waist_pos([90.0])
     time.sleep(1.5)
 
-    print("控制腰部转到 -30 度...")
-    robot.control_waist_pos([-30.0])
+    print("控制腰部转到 -90 度...")
+    robot.control_waist_pos([-90.0])
     time.sleep(1.5)
 
     # 循环摆动
     print("开始腰部循环摆动...")
-    cycles = 2
+    cycles = 1
     step = 5
     interval = 0.2
 
     for cycle in range(cycles):
         # 从左到右
-        for yaw in range(-30, 31, step):
+        for yaw in range(-90, 91, step):
             robot.control_waist_pos([float(yaw)])
             time.sleep(interval)
         # 从右到左
-        for yaw in range(30, -31, -step):
+        for yaw in range(90, -91, -step):
             robot.control_waist_pos([float(yaw)])
             time.sleep(interval)
 

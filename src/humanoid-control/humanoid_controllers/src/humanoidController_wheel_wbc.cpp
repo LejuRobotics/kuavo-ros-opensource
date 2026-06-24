@@ -140,6 +140,29 @@ namespace humanoidController_wheel_wbc
     loadData::loadCppDataType(taskFile, "model_settings.mpcArmsDof", armNum_);
     lowJointNum_ = manipulatorModelInfo_.armDim - armNum_;
     baseDim_ = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
+    // 从 task.info 加载 /move_base/base_cmd_vel 专用速度上下界
+    {
+      base_cmd_vel_limit_enable_ = false;
+      loadOptionalTaskParam(taskFile, "baseCmdVelLimit.activate", base_cmd_vel_limit_enable_);
+      vector_t lowerBound = vector_t::Zero(3);
+      vector_t upperBound = vector_t::Zero(3);
+      try
+      {
+        loadData::loadEigenMatrix(taskFile, "baseCmdVelLimit.lowerBound", lowerBound);
+        loadData::loadEigenMatrix(taskFile, "baseCmdVelLimit.upperBound", upperBound);
+        base_cmd_vel_min_ << lowerBound[0], lowerBound[1], lowerBound[2];
+        base_cmd_vel_max_ << upperBound[0], upperBound[1], upperBound[2];
+      }
+      catch (const std::exception& e)
+      {
+        ROS_WARN("[humanoidControllerWheelWbc] baseCmdVelLimit bounds not found in task.info, using default +/-1.2: %s",
+                 e.what());
+      }
+      ROS_INFO("[humanoidControllerWheelWbc] base_cmd_vel limit enable=%s, min=(%.3f, %.3f, %.3f), max=(%.3f, %.3f, %.3f)",
+               base_cmd_vel_limit_enable_ ? "true" : "false",
+               base_cmd_vel_min_[0], base_cmd_vel_min_[1], base_cmd_vel_min_[2],
+               base_cmd_vel_max_[0], base_cmd_vel_max_[1], base_cmd_vel_max_[2]);
+    }
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
     loadData::loadCppDataType(taskFile, "mpc.mpcDesiredFrequency", mpcFreq_);
@@ -318,8 +341,8 @@ namespace humanoidController_wheel_wbc
     /******************************** 双臂初始动作 ****************************************/
     vector_t startAction = mujoco_q.tail(manipulatorModelInfo_.armDim + headNum_).head(manipulatorModelInfo_.armDim);
     vector_t targetAction = startAction;
-    targetAction.tail(armNum_)[3] = startAction.tail(armNum_)[3] - 0.5236;
-    targetAction.tail(armNum_/2)[3] = startAction.tail(armNum_/2)[3] - 0.5236;
+    targetAction.tail(armNum_)[4] = startAction.tail(armNum_)[4] - 0.5236;
+    targetAction.tail(armNum_/2)[4] = startAction.tail(armNum_/2)[4] + 0.5236;
     double preActionDesiredTime = 1.5;
     initialPreTargetActions(startAction, targetAction, preActionDesiredTime); // 设置机器人启动初始动作
     /************************************************************************************/
@@ -351,6 +374,7 @@ namespace humanoidController_wheel_wbc
     // 初始化发布者
     cmdVelPub_ = controllerNh_.advertise<geometry_msgs::Twist>("/move_base/base_cmd_vel", 10, true);
     velControlStatePub_ = controllerNh_.advertise<std_msgs::Bool>("/enable_vel_control_state", 1, true);
+    enableControlStatePub_ = controllerNh_.advertise<std_msgs::Bool>("/enable_control_state", 1, true);
     jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
@@ -361,6 +385,17 @@ namespace humanoidController_wheel_wbc
       msg.data = use_vel_control_;
       velControlStatePub_.publish(msg);
     }
+
+    // 发布初始 enable_control 状态 (latched)
+    {
+      std_msgs::Bool msg;
+      msg.data = enable_control_.load();
+      enableControlStatePub_.publish(msg);
+    }
+
+    // 注册 /enable_control service（直接注册，回调需要访问 WBC 成员做 transition 覆写）
+    enableControlServiceServer_ = controllerNh_.advertiseService(
+        "/enable_control", &humanoidControllerWheelWbc::enableControlCallback, this);
 
     // 创建控制数据管理器（替代所有订阅者和服务）
     vector_t leg_initial_state = optimizedState_mrt_.tail(manipulatorModelInfo_.armDim).head(lowJointNum_);
@@ -548,6 +583,32 @@ namespace humanoidController_wheel_wbc
 
     res.success = true;
     res.message = "success change vel control to " + std::to_string(req.data);
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableControlCallback(std_srvs::SetBool::Request &req,
+                                                         std_srvs::SetBool::Response &res)
+  {
+    ROS_INFO("[enable_control] 控制使能切换: %s", req.data ? "启用" : "禁用");
+
+    if (req.data == enable_control_.load())
+    {
+      res.success = true;
+      res.message = "enable_control already " + std::to_string(req.data);
+      return true;
+    }
+
+    enable_control_.store(req.data);
+
+    // 发布新状态 (latched) — CDM 同进程订阅同步，RM 通过 topic 收到
+    {
+      std_msgs::Bool msg;
+      msg.data = req.data;
+      enableControlStatePub_.publish(msg);
+    }
+
+    res.success = true;
+    res.message = "enable_control set to " + std::to_string(req.data);
     return true;
   }
 
@@ -779,7 +840,28 @@ namespace humanoidController_wheel_wbc
         kinemicLimitObs.input.tail(armNum_) = optimizedInput_mrt_.tail(armNum_);
       }
       /**************************************************************************************/
-      
+
+      // 检测 enable 下降沿，记录 disable 瞬间的 WBC 冻结姿态
+      if (prev_enable_control_ && !enable_control_.load())
+      {
+        std::lock_guard<std::mutex> lock(frozen_state_mutex_);
+        // kinemicLimitObs.state 已经是：底盘观测 + 身体规划值
+        frozen_state_ = kinemicLimitObs.state;
+        frozen_state_valid_ = true;
+        ROS_INFO("[enable_control] frozen state recorded at disable transition");
+
+        // 把规划值反向写回 CDM，替代原来的传感器快照
+        control_data_manager_->setLbWaistExternalControlState(
+            frozen_state_.segment(baseDim_, lowJointNum_));
+        control_data_manager_->updateLegExternalControlState(
+            frozen_state_.segment(baseDim_, lowJointNum_),
+            vector_t::Zero(lowJointNum_), vector_t::Zero(lowJointNum_));
+        control_data_manager_->updateArmExternalControlState(
+            frozen_state_.tail(armNum_),
+            vector_t::Zero(armNum_), vector_t::Zero(armNum_));
+      }
+      prev_enable_control_ = enable_control_.load();
+
       kinemicLimitObs.time = curTime;
       mrtRosInterface_->setCurrentObservation_directPub(kinemicLimitObs, mpcDt_);
 
@@ -903,6 +985,19 @@ namespace humanoidController_wheel_wbc
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
 
+    // disable 期间：WBC 不接收 MPC rollout，直接跟踪冻结姿态（零速度）
+    if (!enable_control_.load() && frozen_state_valid_)
+    {
+      std::lock_guard<std::mutex> lock(frozen_state_mutex_);
+      optimizedState_mrt_limit_ = frozen_state_;
+      optimizedInput_mrt_limit_.setZero();
+      if (enable_mpc_)
+      {
+        optimizedState_mrt_ = frozen_state_;
+        optimizedInput_mrt_.setZero();
+      }
+    }
+
     if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
     {
       optimizedState_mrt_ = optimizedState_mrt_limit_;
@@ -1004,12 +1099,12 @@ namespace humanoidController_wheel_wbc
       jointCmdMsg.control_modes.push_back(2);
     }
    
-    // 从控制数据管理器计算头部控制（内部自动获取传感器数据）
+    // 从控制数据管理器计算头部控制
     if (headNum_ > 0)
     {
       vector_t target_pos = control_data_manager_->getHeadExternalControlState();
       vector_t feedback_tau = control_data_manager_->computeHeadControl(target_pos);
-      
+
       for (int i3 = 0; i3 < headNum_; ++i3)
       {
         jointCmdMsg.joint_q.push_back(target_pos[i3]);
@@ -1022,8 +1117,7 @@ namespace humanoidController_wheel_wbc
         jointCmdMsg.joint_kd.push_back(0);
       }
 
-      vector_t head_pos = sensors_data_new.jointPos_.tail(headNum_);
-      robotVisualizer_->updateHeadJointPositions(head_pos);
+      robotVisualizer_->updateHeadJointPositions(sensors_data_new.jointPos_.tail(headNum_));
     }
     replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
     jointCmdPub_.publish(jointCmdMsg);
@@ -1036,20 +1130,20 @@ namespace humanoidController_wheel_wbc
     control_data_manager_->getRealtimeCmdVel(cmdVelData);  // 失败时cmdVelData保持默认零值
     // 发布速度命令（根据MPC状态选择来源）
     geometry_msgs::Twist velCmdMsg;  // 默认全0
-    if (!enable_mpc_) 
+    if (!enable_mpc_)
     {
       // 使用外部速度命令（经过加减速限制）
       Eigen::Vector3d desired_vel(cmdVelData.linear.x, cmdVelData.linear.y, cmdVelData.angular.z);
       Eigen::Vector3d limited_vel = velLimiter_->limitAcceleration(desired_vel);
-      
+
       velCmdMsg.linear.x = limited_vel[0];
       velCmdMsg.linear.y = limited_vel[1];
       velCmdMsg.angular.z = limited_vel[2];
-    } 
-    else 
+    }
+    else
     {
       Eigen::Vector3d desiredVel = optimizedInput_mrt_limit_.head(3);
-      Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(desiredVel, 
+      Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(desiredVel,
                                                          observation_wheel_.state[2]);
       // 使用MPC优化的速度
       velCmdMsg.linear.x = desiredVelBody[0];
@@ -1058,6 +1152,10 @@ namespace humanoidController_wheel_wbc
     }
     if(use_vel_control_)
     {
+      if (base_cmd_vel_limit_enable_)
+      {
+        clampBaseCmdVel(velCmdMsg);
+      }
       cmdVelPub_.publish(velCmdMsg);
     }else{
         ros::Time current_time = ros::Time::now();
@@ -1870,6 +1968,13 @@ namespace humanoidController_wheel_wbc
              req.with_chassis, res.success, res.time_cost);
     
     return true;
+  }
+
+  void humanoidControllerWheelWbc::clampBaseCmdVel(geometry_msgs::Twist& cmd) const
+  {
+    cmd.linear.x = std::max(base_cmd_vel_min_[0], std::min(base_cmd_vel_max_[0], cmd.linear.x));
+    cmd.linear.y = std::max(base_cmd_vel_min_[1], std::min(base_cmd_vel_max_[1], cmd.linear.y));
+    cmd.angular.z = std::max(base_cmd_vel_min_[2], std::min(base_cmd_vel_max_[2], cmd.angular.z));
   }
 
   Eigen::Vector3d humanoidControllerWheelWbc::cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw)

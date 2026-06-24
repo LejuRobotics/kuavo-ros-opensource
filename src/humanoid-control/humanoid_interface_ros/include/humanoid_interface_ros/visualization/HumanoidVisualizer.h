@@ -166,7 +166,7 @@ namespace ocs2
       std::vector<double> linker_hand_joint_positions_;
 
 
-      bool updateClawJointPositions_ = true;
+      bool updateClawJointPositions_ = false;
       std::vector<double> claw_joint_positions_ = {0.0, 0.0};
       ros::Subscriber clawCmdSubscriber_;
       void lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg);

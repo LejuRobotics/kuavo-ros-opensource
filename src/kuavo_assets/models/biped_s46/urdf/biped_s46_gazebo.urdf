@@ -1079,7 +1079,7 @@
     <plugin name="gazebo_shm_interface" filename="libgazebo_sim_shm_interface.so">
       
       <imu>
-        <frame_id>dummy_link</frame_id>
+        <frame_id>base_link</frame_id>
       </imu>
       
       

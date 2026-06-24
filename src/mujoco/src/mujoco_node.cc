@@ -65,6 +65,7 @@
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/CameraInfo.h"
 #include <opencv2/opencv.hpp>
+#include <cmath>
 
 //  ************************* lcm ****************************
 
@@ -119,6 +120,8 @@ namespace
   const mjtNum VERTICAL_APERTURE = 2.4480;  // 2.4480
   const mjtNum DEPTH_CAMERA_MIN_RANGE = 0.17;
   const mjtNum DEPTH_CAMERA_MAX_RANGE = 2.5;
+  const mjtNum DEPTH_CAMERA_H_PIXEL_SIZE = HORIZONTAL_APERTURE / DEPTH_CAMERA_WIDTH;
+  const mjtNum DEPTH_CAMERA_V_PIXEL_SIZE = VERTICAL_APERTURE / DEPTH_CAMERA_HEIGHT;
   // raycaster camera thread
   std::thread depth_thread;
   std::atomic<bool> depth_thread_running{true};
@@ -199,6 +202,16 @@ namespace
   std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
   std::unique_ptr<mujoco_sim::ActuatorDynamicsCompensator> actuatorDynamicsCompensator;
   constexpr int kArmCompensationDof = 14;
+  
+  double RayDistanceToZDepth(double ray_distance, double pixel_x, double pixel_y,
+                                    double focal_length) {
+    const double ray_norm = std::sqrt(pixel_x * pixel_x + pixel_y * pixel_y +
+                                      focal_length * focal_length);
+    if (ray_norm <= 0.0) {
+      return 0.0;
+    }
+    return ray_distance * focal_length / ray_norm;
+  }
 
   void ResetDepthBufferState()
   {
@@ -1843,7 +1856,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 depth_msg.step = DEPTH_CAMERA_WIDTH * sizeof(float);
                 depth_msg.is_bigendian = 0;
                 depth_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH * sizeof(float));
-                float* depth_data = reinterpret_cast<float*>(depth_msg.data.data());
+                float* z_depth_data = reinterpret_cast<float*>(depth_msg.data.data());
 
                 if (g_depth_camera->dist != nullptr) {
                     // const mjtNum range_inv = 1.0 / (DEPTH_CAMERA_MAX_RANGE - DEPTH_CAMERA_MIN_RANGE);
@@ -1851,22 +1864,28 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                         for (int h = 0; h < DEPTH_CAMERA_WIDTH; ++h) {
                             int pixel_idx = v * DEPTH_CAMERA_WIDTH + h;
                             mjtNum dist = g_depth_camera->dist[pixel_idx];
+                            mjtNum pixel_x =
+                                (h + 0.5 - DEPTH_CAMERA_WIDTH / 2.0) * DEPTH_CAMERA_H_PIXEL_SIZE;
+                            mjtNum pixel_y =
+                                (DEPTH_CAMERA_HEIGHT / 2.0 - v - 0.5) * DEPTH_CAMERA_V_PIXEL_SIZE;
+                            mjtNum z_depth =
+                                RayDistanceToZDepth(dist, pixel_x, pixel_y, FOCAL_LENGTH);
                             // float norm = (dist - DEPTH_CAMERA_MIN_RANGE) * range_inv;
                             // norm = std::clamp(norm, 0.0f, 1.0f);
                             // depth_data[pixel_idx] = norm;
-                            dist = std::clamp(dist, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
-                            depth_data[pixel_idx] = dist / DEPTH_CAMERA_MAX_RANGE;
+                            z_depth = std::clamp(z_depth, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
+                            z_depth_data[pixel_idx] = z_depth / DEPTH_CAMERA_MAX_RANGE;
                         }
                     }
                 }
   
                 // Apply Gaussian blur
-                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, depth_data);
+                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, z_depth_data);
                 cv::GaussianBlur(depth_mat, depth_mat, cv::Size(3, 3), 1, 1);
 
                 // Update circular buffer with current frame
                 std::unique_lock<std::mutex> buffer_lock(depth_buffer_mutex);
-                depth_buffer[current_buffer_index].data.assign(depth_data, depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
+                depth_buffer[current_buffer_index].data.assign(z_depth_data, z_depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
                 depth_buffer[current_buffer_index].timestamp = depth_msg.header.stamp;
                 current_buffer_index = (current_buffer_index + 1) % DEPTH_BUFFER_SIZE;
                 
@@ -1879,7 +1898,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 std_msgs::Float64MultiArray depth_array_msg;
                 depth_array_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);
                 for (int i = 0; i < DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH; ++i) {
-                    depth_array_msg.data[i] = depth_data[i];
+                    depth_array_msg.data[i] = z_depth_data[i];
                 }
                 depthImagePub.publish(depth_msg);
                 depthImageArrayPub.publish(depth_array_msg);

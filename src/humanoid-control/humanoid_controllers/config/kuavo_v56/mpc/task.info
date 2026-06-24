@@ -143,6 +143,7 @@ swing_trajectory_config
   heelToeMaxHeightVelocity     0.3
 
   swing_shoulder_center         0.15
+  swing_shoulder_roll_center    0.075
   swing_shoulder_scale          0.3
   swing_elbow_center            0.0
   swing_elbow_scale             0.8
@@ -791,6 +792,36 @@ standUpWeight
     Angular         6
     JointAcc        30
     contactForce    0.1 
+}
+
+sitDownJointAccelTask
+{
+  waist
+  {
+    kp    200
+    kd    4.2
+  }
+  leg
+  {
+    kp    200
+    kd    4.2
+    kp_sim    500
+    kd_sim    10.2
+  }
+  arm
+  {
+    kp    20
+    kd    1.2
+  }
+}
+
+sitDownWeight
+{
+    Linear          0.02
+    Angular         0.02
+    JointAcc        20
+    stanceLeg       2
+    contactForce    0.1
 }
 
 switchJointAccelTask

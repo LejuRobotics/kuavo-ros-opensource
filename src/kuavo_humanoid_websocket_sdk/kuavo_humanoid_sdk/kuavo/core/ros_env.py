@@ -6,6 +6,7 @@ import subprocess
 import atexit
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
+from kuavo_humanoid_sdk.kuavo.core.ros.param import is_wheel_arm_robot_from_client
 import roslibpy
 
 
@@ -82,7 +83,11 @@ class KuavoROSEnvWebsocket:
         # Only check nodes exist when Init SDK, if not, tips user manually launch nodes.
         #
         # NOTE: 轮臂(robot_type==1)不依赖双足步态切换节点 humanoid_gait_switch_by_name
-        robot_type = int(os.environ.get('ROBOT_TYPE', '0'))
+        robot_type_env = os.environ.get('ROBOT_TYPE', '')
+        if robot_type_env.isdigit() and int(robot_type_env) > 0:
+            robot_type = int(robot_type_env)
+        else:
+            robot_type = 1 if is_wheel_arm_robot_from_client(self.websocket.client) else 2
         deps_nodes = [] if robot_type == 1 else ['/humanoid_gait_switch_by_name']
         for node in deps_nodes:
             if not self.check_rosnode_exists(node):

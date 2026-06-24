@@ -38,6 +38,8 @@
     <arg name="waist_move_spd"     default="2.3"/>
     <arg name="deformation_flag"   default="false"/>
     <arg name="init_fall_down_state" default="false"/>
+    <arg name="use_sit_init" default="false" doc="Sit pose boot (Kuavo5 seat workflow)"/>
+    <arg name="seat_scene" default="false" doc="MuJoCo scene_seat_adjust.xml with chair and foot slots"/>
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
@@ -92,6 +94,7 @@
     <param name="torso_interpolation_max_velocity" value="0.06"/>
     <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
+    <param name="/use_sit_init" value="$(arg use_sit_init)"/>
     <param name="run_mujoco_camera" value="$(arg run_mujoco_camera)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -140,6 +143,7 @@
     <group unless="$(arg play_back)">
       <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch">
         <arg name="depth_frequency" value="$(arg depth_frequency)"/>
+        <arg name="seat_scene" value="$(arg seat_scene)"/>
       </include>
     </group>
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>

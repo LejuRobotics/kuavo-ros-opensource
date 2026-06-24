@@ -1,6 +1,16 @@
 import time
 import signal
+import rospy
 from kuavo_humanoid_sdk import KuavoSDK, KuavoRobot, KuavoRobotState
+
+
+def _is_wheel_arm_robot():
+    """通过 ROS param 判断是否为轮臂机器人 (robot_type==1)"""
+    try:
+        return rospy.get_param('/robot_type', 0) == 1
+    except Exception:
+        return False
+
 
 # Global flag for handling Ctrl+C
 running = True
@@ -14,6 +24,10 @@ def main():
     if not KuavoSDK().Init():# Init!
         print("Init KuavoSDK failed, exit!")
         exit(1)
+
+    if _is_wheel_arm_robot():
+        print("轮臂平台不支持 walk/trot/stance 双足步态，退出")
+        exit(0)
 
     # Set up Ctrl+C handler
     signal.signal(signal.SIGINT, signal_handler)

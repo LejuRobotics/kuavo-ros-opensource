@@ -162,13 +162,21 @@ class KuavoRobotStateCore:
                         SDKLogger.debug(f"[State] Adding initial gait state: {self._prev_gait_name} at time {self._mpc_observation_data.time}")
                         self._gait_manager.add(self._mpc_observation_data.time, self._prev_gait_name)
 
-            # 获取当前手臂控制模式
-            self._arm_ctrl_mode = self._srv_get_arm_ctrl_mode()
-            self._initialized = True
+            # 初始化默认值（轮臂机器人使用默认值，双足机器人通过服务调用更新）
+            self._manipulation_mpc_frame = KuavoManipulationMpcFrame.KeepCurrentFrame
+            self._manipulation_mpc_ctrl_mode = KuavoManipulationMpcCtrlMode.NoControl
+            self._manipulation_mpc_control_flow = KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
 
-            self._manipulation_mpc_frame = self._srv_get_manipulation_mpc_frame()
-            self._manipulation_mpc_ctrl_mode = self._srv_get_manipulation_mpc_ctrl_mode()
-            self._manipulation_mpc_control_flow = self._srv_get_manipulation_mpc_control_flow()
+            # 获取当前手臂控制模式（轮臂/双足均有此服务）
+            self._arm_ctrl_mode = self._srv_get_arm_ctrl_mode()
+
+            # 轮臂机器人无需调用 manipulation MPC 相关服务（对应节点未运行），双足机器人才需要
+            if not kuavo_ros_param.is_wheel_arm_robot():
+                self._manipulation_mpc_frame = self._srv_get_manipulation_mpc_frame()
+                self._manipulation_mpc_ctrl_mode = self._srv_get_manipulation_mpc_ctrl_mode()
+                self._manipulation_mpc_control_flow = self._srv_get_manipulation_mpc_control_flow()
+
+            self._initialized = True
 
     @property
     def com_height(self)->float:
@@ -259,6 +267,8 @@ class KuavoRobotStateCore:
         return self._mpc_observation_data.mode
 
     def gait_name(self)->str:
+        if kuavo_ros_param.is_wheel_arm_robot():
+            return 'stance'
         return self._srv_get_current_gait_name()
     
     def is_gait(self, gait_name: str) -> bool:
@@ -434,6 +444,9 @@ class KuavoRobotStateCore:
         return None
     
     def _srv_get_current_gait_name(self)->str:
+        # 轮臂模式直接返回（无步态名服务）
+        if kuavo_ros_param.is_wheel_arm_robot():
+            return 'stance'
         try:
             rospy.wait_for_service('/humanoid_get_current_gait_name', timeout=1.0)
             srv = rospy.ServiceProxy('/humanoid_get_current_gait_name', getCurrentGaitName)
@@ -466,6 +479,9 @@ class KuavoRobotStateCore:
         return None
 
     def _srv_get_manipulation_mpc_ctrl_mode(self, )->KuavoManipulationMpcCtrlMode:
+        # 轮臂模式直接返回
+        if kuavo_ros_param.is_wheel_arm_robot():
+            return KuavoManipulationMpcCtrlMode.ERROR
         # 检查参数，如果未启用 manipulation mpc 则直接返回
         try:
             enable_manipulation_mpc = rospy.get_param('/enable_manipulation_mpc', False)

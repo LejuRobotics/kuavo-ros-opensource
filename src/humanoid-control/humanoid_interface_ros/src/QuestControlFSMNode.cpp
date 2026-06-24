@@ -40,6 +40,7 @@
 #include <std_srvs/Trigger.h>
 #include "utils/singleStepControl.hpp"
 #include <kuavo_msgs/switchToNextController.h>
+#include <kuavo_msgs/sensorsData.h>
 #include <geometry_msgs/PoseStamped.h>
 namespace ocs2
 {
@@ -110,7 +111,17 @@ namespace ocs2
 
             auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
             auto kuavo_settings = drake_interface_->getKuavoSettings();
-            waist_dof_ = kuavo_settings.hardware_settings.num_waist_joints;
+            const auto& hw = kuavo_settings.hardware_settings;
+            int leg_dof = static_cast<int>(
+                hw.num_joints - hw.num_arm_joints - hw.num_head_joints - hw.num_waist_joints);
+            waist_dof_ = static_cast<int>(hw.num_waist_joints);
+            nodeHandle_.param("/legRealDof", leg_dof, leg_dof);
+            nodeHandle_.param("/waistRealDof", waist_dof_, waist_dof_);
+            if (waist_dof_ > 0)
+            {
+                waist_sensor_start_index_ = leg_dof;
+                waist_joint_pos_rad_.assign(waist_dof_, 0.0);
+            }
             only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
             std::cout << "only_half_up_body: " << only_half_up_body_ << std::endl;
             if(nodeHandle.hasParam("/only_half_up_body"))
@@ -121,6 +132,18 @@ namespace ocs2
             loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
             loadData::loadCppDataType(referenceFile, "cmdvelLinearYLimit", c_relative_base_limit_[1]);
             loadData::loadCppDataType(referenceFile, "cmdvelAngularYAWLimit", c_relative_base_limit_[3]);
+
+            // 轮臂 v61/v62/v63：VR 专用限速，与 G12/北通遥控的 /mobile_manipulator_joy/* 分离
+            if (robot_type_ == 1 &&
+                (robot_version_int_ == 61 || robot_version_int_ == 62 || robot_version_int_ == 63))
+            {
+                nodeHandle.param("/vr_cmd_vel/linear_scale_x", c_relative_base_limit_[0], 0.4);
+                nodeHandle.param("/vr_cmd_vel/linear_scale_y", c_relative_base_limit_[1], 0.4);
+                nodeHandle.param("/vr_cmd_vel/angular_scale_z", c_relative_base_limit_[3], 0.25);
+                ROS_INFO_STREAM("[QuestControlFSM] Wheel v61/62/63 VR cmd_vel limits from /vr_cmd_vel: lin_x="
+                                << c_relative_base_limit_[0] << " lin_y=" << c_relative_base_limit_[1]
+                                << " ang_z=" << c_relative_base_limit_[3]);
+            }
 
             // Load VR control limits
             loadData::loadCppDataType(referenceFile, "vrSquatMinPitchDeg", vr_squat_min_pitch_deg_);
@@ -225,6 +248,12 @@ namespace ocs2
             
             // 订阅RL控制器状态话题
             is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, &QuestControlFSM::isRlControllerCallback, this);
+
+            if (waist_dof_ > 0)
+            {
+                sensors_data_sub_ = nodeHandle_.subscribe<kuavo_msgs::sensorsData>(
+                    "/sensors_data_raw", 1, &QuestControlFSM::sensorsDataCallback, this);
+            }
         }
 
         void run()
@@ -459,13 +488,123 @@ namespace ocs2
             }
         }
 
-        void callSwitchToNextControllerSrv()
+        bool isWaistTurnCommandActive() const
         {
-            // X+Y 触摸 + A 触发；VR 躯干转腰模式下禁止 MPC/RL 切换（kuavodevlab#3097）
+            if (waist_dof_ == 0)
+            {
+                return false;
+            }
             if (torso_control_enabled_)
             {
+                return true;
+            }
+            return joystick_data_.left_second_button_touched &&
+                   !joystick_data_.left_first_button_touched;
+        }
+
+        bool isWaistNearZero() const
+        {
+            if (!has_waist_sensor_feedback_)
+            {
+                return false;
+            }
+            for (int i = 0; i < waist_dof_; ++i)
+            {
+                if (std::abs(waist_joint_pos_rad_[i]) > kWaistNearZeroRad_)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        void refreshWaistAmpSwitchGuard()
+        {
+            if (waist_dof_ == 0)
+            {
+                return;
+            }
+
+            if (isWaistTurnCommandActive())
+            {
+                waist_amp_switch_guard_active_ = true;
+                waist_near_zero_since_ = ros::Time(0);
+                return;
+            }
+
+            if (!has_waist_sensor_feedback_ || !isWaistNearZero())
+            {
+                waist_near_zero_since_ = ros::Time(0);
+                if (has_waist_sensor_feedback_ && !isWaistNearZero())
+                {
+                    waist_amp_switch_guard_active_ = true;
+                }
+                return;
+            }
+
+            if (!waist_amp_switch_guard_active_)
+            {
+                return;
+            }
+
+            if (waist_near_zero_since_.isZero())
+            {
+                waist_near_zero_since_ = ros::Time::now();
+                return;
+            }
+
+            if ((ros::Time::now() - waist_near_zero_since_).toSec() >= kWaistAmpSwitchHoldSeconds_)
+            {
+                waist_amp_switch_guard_active_ = false;
+                waist_near_zero_since_ = ros::Time(0);
+            }
+        }
+
+        bool canSwitchToAmpController(std::string* reason = nullptr) const
+        {
+            if (isWaistTurnCommandActive())
+            {
+                if (reason)
+                {
+                    *reason = "waist turn command active";
+                }
+                return false;
+            }
+            if (waist_dof_ == 0 || !waist_amp_switch_guard_active_)
+            {
+                return true;
+            }
+            if (!has_waist_sensor_feedback_)
+            {
+                if (reason)
+                {
+                    *reason = "waiting for waist joint feedback";
+                }
+                return false;
+            }
+            if (!isWaistNearZero())
+            {
+                if (reason)
+                {
+                    *reason = "waist not returned to near zero";
+                }
+                return false;
+            }
+            if (reason)
+            {
+                *reason = "waist at zero, waiting 1s before AMP switch";
+            }
+            return false;
+        }
+
+        void callSwitchToNextControllerSrv()
+        {
+            // X+Y 触摸 + A 触发；转腰期间/回中未满 1s 时禁止切换 AMP 步态（kuavodevlab#3097/#3128）
+            std::string block_reason;
+            if (!canSwitchToAmpController(&block_reason))
+            {
                 ROS_WARN_THROTTLE(1.0,
-                    "[QuestControlFSM] Refuse MPC/RL controller switch while VR torso control is active");
+                    "[QuestControlFSM] Refuse MPC/RL controller switch: %s", block_reason.c_str());
                 return;
             }
 
@@ -885,6 +1024,24 @@ namespace ocs2
             }
         }
 
+        void sensorsDataCallback(const kuavo_msgs::sensorsData::ConstPtr& msg)
+        {
+            if (waist_dof_ <= 0 || waist_sensor_start_index_ < 0)
+            {
+                return;
+            }
+            const auto& joint_q = msg->joint_data.joint_q;
+            if (static_cast<int>(joint_q.size()) < waist_sensor_start_index_ + waist_dof_)
+            {
+                return;
+            }
+            for (int i = 0; i < waist_dof_; ++i)
+            {
+                waist_joint_pos_rad_[i] = joint_q[waist_sensor_start_index_ + i];
+            }
+            has_waist_sensor_feedback_ = true;
+        }
+
         void updateState()
         {
             // 检查并清除控制器切换保护标志
@@ -897,6 +1054,8 @@ namespace ocs2
                     ROS_INFO("[QuestControlFSM] Controller switching protection ended. VR joystick and button inputs are now enabled.");
                 }
             }
+
+            refreshWaistAmpSwitchGuard();
             
             // 动态读取control_torso参数，支持后续启动的launch文件设置参数
             if(nodeHandle_.hasParam("/control_torso"))
@@ -1646,9 +1805,10 @@ namespace ocs2
             }
             const std::vector<float> deadzone = {0.02f, 0.02f, 0.02f, 0.02f};
             auto joystick_vector = getJoystickVector(deadzone);
-            if (joystick_vector[0] < 0.0)
+            // 人型后退灵敏度减弱 50%；轮臂前后速度对称
+            if (robot_type_ != 1 && joystick_vector[0] < 0.0)
             {
-                joystick_vector[0] *= 0.5;// 后退灵敏度减弱50%
+                joystick_vector[0] *= 0.5;
             }
             bool cmd_close_to_zero = (joystick_vector.norm() <= 1e-3);
             if (cmd_close_to_zero)
@@ -1842,6 +2002,14 @@ namespace ocs2
         
         int waist_dof_{0};
         double waist_yaw_max_angle_deg_{0.0};  // 腰部最大旋转角度（度），从配置文件加载
+        int waist_sensor_start_index_{-1};
+        std::vector<double> waist_joint_pos_rad_;
+        bool has_waist_sensor_feedback_{false};
+        bool waist_amp_switch_guard_active_{false};
+        ros::Time waist_near_zero_since_;
+        static constexpr double kWaistNearZeroRad_ = 3.0 * M_PI / 180.0;
+        static constexpr double kWaistAmpSwitchHoldSeconds_ = 1.0;
+        ros::Subscriber sensors_data_sub_;
         double torso_pitch_zero_;
         double torso_yaw_zero_;
         double body_height_zero_;  // 记录进入控制模式时的高度零点

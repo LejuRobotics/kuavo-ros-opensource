@@ -38,7 +38,7 @@
   </asset>
 
   <worldbody>
-    <body name="base_link">
+    <body name="base_link" pos="0.0 0.0 0.77">
       <inertial pos="0.00202324 -3.822e-05 -0.122827" quat="0.70674 0.707473 0.000728125 0.000692342" mass="5.27737" diaginertia="0.0265656 0.0208074 0.0182124"/>
       <joint name="dummy_to_base_link" type="free" limited="false" actuatorfrclimited="false"/>
       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist"/>
@@ -138,7 +138,7 @@
         </body>
       <body name="torso">
         <site name="imu" pos="0 0 0" />
-        <inertial pos="-0.0100514 -0.00110498 0.140586" quat="0.999642 -0.0162049 -0.0199132 0.00748437" mass="8.37747" diaginertia="0.104453 0.0832724 0.0491503"/>
+        <inertial pos="-0.0100514 -0.00110498 0.140586" quat="0.999642 -0.0162049 -0.0199132 0.00748437" mass="5.27107" diaginertia="0.104453 0.0832724 0.0491503"/>
         <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-2.61799 2.61799" actuatorfrcrange="-50 50" armature="0.003" damping="0.2" frictionloss="0.0"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso"/>
         <geom size="0.07 0.1 0.13" pos="0.01 0 0.14" type="box" class="collision"/>
@@ -205,7 +205,7 @@
             </body>
           </body>
         </body>
-        <body name="zhead_1_link" pos="0.0042 0 0.35369">
+        <body name="zhead_1_link" pos="0.0042 0 0.35469">
           <inertial pos="-0.0006027 0.00784135 0.0120802" quat="0.993684 -0.112148 0.00355464 0.00165384" mass="1.07556" diaginertia="0.00274017 0.00240047 0.00101587"/>
           <joint name="zhead_1_joint" pos="0 0 0" axis="0 0 1" range="-1.5708 1.5708" actuatorfrcrange="-1.5 1.5" armature="0.003" damping="0.2" frictionloss="0.0"/>
           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_yaw"/>

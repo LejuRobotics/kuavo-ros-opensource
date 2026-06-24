@@ -14,6 +14,15 @@ def find_msg_subpackages(base_dir1):
             subpackages.append(pkg_name)
     return subpackages
 
+strategy_pytree_packages = [
+    'kuavo_humanoid_sdk.kuavo_strategy_pytree',
+    'kuavo_humanoid_sdk.kuavo_strategy_pytree.common',
+    'kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes',
+    'kuavo_humanoid_sdk.kuavo_strategy_pytree.pick_place_box',
+    'kuavo_humanoid_sdk.kuavo_strategy_pytree.configs',
+    'kuavo_humanoid_sdk.kuavo_strategy_pytree.utils',
+]
+
 # Check if a version argument is provided
 sdk_version = os.environ.get('KUAVO_HUMANOID_SDK_VERSION')
 # If no version is provided, raise an error
@@ -42,10 +51,13 @@ setup(
     'kuavo_humanoid_sdk.interfaces',
     'kuavo_humanoid_sdk.kuavo',
     'kuavo_humanoid_sdk.kuavo.core',
+    'kuavo_humanoid_sdk.kuavo.core.llm_doubao_lib',
+    'kuavo_humanoid_sdk.kuavo.core.llm_rtasr_lib',
+    'kuavo_humanoid_sdk.kuavo.core.model_utils',
     'kuavo_humanoid_sdk.kuavo.core.ros',
     'kuavo_humanoid_sdk.kuavo_strategy',
     'kuavo_humanoid_sdk.kuavo_strategy.grasp_box',
-    ]+find_msg_subpackages("kuavo_humanoid_sdk/msg"),
+    ] + strategy_pytree_packages + find_msg_subpackages("kuavo_humanoid_sdk/msg"),
     install_requires=[
         "numpy", 
         "transitions",

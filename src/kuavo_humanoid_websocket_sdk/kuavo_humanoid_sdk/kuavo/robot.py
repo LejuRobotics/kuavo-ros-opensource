@@ -183,6 +183,7 @@ class KuavoRobot(RobotBase):
         self._robot_waist = KuavoRobotWaist()
         self._robot_wheel_control = KuavoRobotWheelControl()
         self._kuavo_core = KuavoRobotCore()
+        self._kuavo_core.initialize()
     def stance(self)->bool:
         """Put the robot into 'stance' mode.
         
@@ -635,14 +636,14 @@ class KuavoRobot(RobotBase):
     """ Wheel-Arm """
     def control_torso_pose(self, x: float, y: float, z: float,
                            roll: float, pitch: float, yaw: float) -> bool:
-        """Control wheel-robot torso pose.
+        """直接控制轮臂机器人躯干的位姿
 
         Args:
-            x, y, z (float): Target position in meters.
-            roll, pitch, yaw (float): Target Euler angles in radians.
+            x, y, z (float): 目标位置（米）
+            roll, pitch, yaw (float): 目标欧拉角（弧度）
 
         Returns:
-            bool: True if command sent successfully, False otherwise.
+            bool: 控制命令是否发送成功
         """
         return self._kuavo_core.control_torso_pose(x, y, z, roll, pitch, yaw)
 

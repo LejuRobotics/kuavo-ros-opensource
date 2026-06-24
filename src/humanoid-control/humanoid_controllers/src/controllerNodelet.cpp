@@ -21,8 +21,6 @@ public:
         ros::param::set("/nodelet_manager/controller_state", 0);
         robot_hw = new humanoid_controller::HybridJointInterface(); // TODO:useless
         pause_sub = nh.subscribe<std_msgs::Bool>("pauseFlag", 1, &HumanoidControllerNodelet::pauseCallback, this);
-        // Crash 测试订阅者 - 发布 true 触发段错误
-        crash_sub = nh.subscribe<std_msgs::Bool>("crash_test_trigger", 1, &HumanoidControllerNodelet::crashTestCallback, this);
         stop_pub_ = nh.advertise<std_msgs::Bool>("/stop_robot", 10);
         stop_sub_ = nh.subscribe<std_msgs::Bool>("/stop_robot", 1, &HumanoidControllerNodelet::stopCallback, this);
         control_thread = std::thread(&HumanoidControllerNodelet::controlLoop, this);
@@ -103,11 +101,6 @@ public:
     ~HumanoidControllerNodelet()
     {
        std::cerr << "[HumanoidControllerNodelet] destructor called" << std::endl;
-       // 确保控制线程被正确 join，避免 std::terminate
-       is_running = false;
-       if (control_thread.joinable()) {
-           control_thread.join();
-       }
     }
 
 private:
@@ -116,7 +109,6 @@ private:
     bool is_running{true};
     humanoid_controller::HybridJointInterface *robot_hw;
     ros::Subscriber pause_sub;
-    ros::Subscriber crash_sub;
 
     humanoid_controller::humanoidController *controller_ptr_;
     humanoid_wheel_controller::humanoidWheelController *controller_wheel_ptr_;
@@ -128,18 +120,6 @@ private:
     {
         pause_flag = msg->data;
         std::cerr << "pause_flag: " << pause_flag << std::endl;
-    }
-
-    // Crash 测试回调 - 故意制造段错误，用于验证 stripped .so 库的 GDB 调试能力
-    // 仓库: kuavo-ros-control (ssh://git@www.lejuhub.com:10026/highlydynamic/kuavo-ros-control.git)
-    // 分支: carlos/ci/expand_strip_to_tools_and_src
-    // Commit: b576acf114137607e0cc4e26130252421c337b5a
-    void crashTestCallback(const std_msgs::Bool::ConstPtr &msg)
-    {
-        NODELET_INFO("[CrashTest] Received trigger, about to crash...");
-        int *p = nullptr;
-        asm volatile("" : "+r"(p));  // 阻断 cppcheck 静态空值推断;运行期 p 仍为 nullptr
-        *p = 42;  // 故意解引用空指针，触发 SIGSEGV
     }
     void stopCallback(const std_msgs::Bool::ConstPtr &msg)
     {
