@@ -1,0 +1,7 @@
+uint8 TRANSPORT_ENTER=1
+uint8 TRANSPORT_EXIT=2
+uint8 TRANSPORT_FALL_DOWN=3
+uint8 command
+---
+bool success
+string message

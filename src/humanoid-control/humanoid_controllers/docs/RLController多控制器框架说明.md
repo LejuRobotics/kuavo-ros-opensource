@@ -121,10 +121,10 @@ RLControllerBase (基类)
       - `InputData/<key>`：按配置分块的观测子向量（例如 `joint_pos`、`base_ang_vel` 等），用于可视化和调试 RL 观测。
   - `/humanoid_controller/resetting_mpc_state_` (`std_msgs/Float64` / 通过 `TopicLogger` 发布)  
     - 实时发布 MPC 重置状态，用于监控从 RL 切换到 MPC 时的重置过程：  
-      - `0` (`NOMAL`)：正常状态，MPC 正常运行；  
+      - `0` (`NORMAL`)：正常状态，MPC 正常运行；  
       - `1` (`RESET_INITIAL_POLICY`)：重置 MPC 状态1，等待初始策略；  
       - `2` (`RESET_BASE`)：重置 MPC 状态2，更新躯干位置（插值阶段）。  
-    - 当从 RL 切回 MPC 时，状态会依次经历 `RESET_INITIAL_POLICY` → `RESET_BASE` → `NOMAL`，便于监控 MPC 重置进度。
+    - 当从 RL 切回 MPC 时，状态会依次经历 `RESET_INITIAL_POLICY` → `RESET_BASE` → `NORMAL`，便于监控 MPC 重置进度。
 
 - **遥控器集成**  
   - 北通等遥控流程中，进入舞蹈一般调用 `/humanoid_controller/switch_to_dance_controller`（`SetString`，空 `data` 表示首支舞）；退出舞蹈仍通过 `switch_controller` 切回 `amp_controller` 等行走控制器（须满足 stance 等条件）。
@@ -321,7 +321,7 @@ int getCurrentDanceControllerIndex() const;
     - 设置 `reset_mpc_ = true` 并记录当前状态、手臂位置，随后在 MPC 分支中重置 MPC：  
       - 暂停/恢复 MPC 节点、清空旧策略、以当前状态作为新的初始状态重建策略。  
       - 重置手臂滤波器，使 MPC 输出从当前实际姿态平滑延续，避免 RL → MPC 时出现大的关节跳变。  
-  - MPC 重置完毕后，`resetting_mpc_state_` 从 `RESET_INITIAL_POLICY` / `RESET_BASE` 进入 `NOMAL`，系统回到纯 MPC+WBC 控制。
+  - MPC 重置完毕后，`resetting_mpc_state_` 从 `RESET_INITIAL_POLICY` / `RESET_BASE` 进入 `NORMAL`，系统回到纯 MPC+WBC 控制。
 
 - **与倒地起身控制（FallStandController）的协同**  
   - 在以下场景会切换到 `FALL_STAND_CONTROLLER`：  

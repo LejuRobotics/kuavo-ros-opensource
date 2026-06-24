@@ -406,7 +406,7 @@ namespace humanoid_controller
       controllerNh_.getParam("/init_fall_down_state", init_fall_down_state_);
       if (init_fall_down_state_)
       {
-        fall_down_state_==FallStandState::FALL_DOWN;
+        fall_down_state_ = FallStandState::FALL_DOWN;
       }
     }
 
@@ -538,6 +538,7 @@ namespace humanoid_controller
     defalutJointPos_.setZero();
     defalutJointPos_.head(jointNum_) = drake_interface_->getDefaultJointState();
     defalutJointPos_.tail(armNum_) = vector_t::Zero(armNum_);
+    computeTransportTargetPose();
     currentArmTargetTrajectories_ = {{0.0}, {vector_t::Zero(armNumReal_)}, {vector_t::Zero(info.inputDim)}};
 
     vector_t drake_q;
@@ -855,6 +856,8 @@ namespace humanoid_controller
         &humanoidController::getCurrentGaitNameCallback, this);
       changeRuiwoMotorParamSrv_ = controllerNh_.advertiseService("humanoid_controller/change_ruiwo_motor_param",
         &humanoidController::changeRuiwoMotorParamCallback, this);
+      transport_mode_service_ = controllerNh_.advertiseService("/humanoid_controller/transport_mode_command",
+        &humanoidController::transportModeCommandCallback, this);
       // 初始化 RL 控制器管理系统
       controller_manager_ = std::make_unique<RLControllerManager>();
       
@@ -2625,11 +2628,29 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     
     mrtRosInterface_->setCurrentObservation(currentObservation_);
 
-    // 非RL或躯干插值中，均走MPC流程
-    bool mpc_flow = !is_rl_controller_;
+    // MPC+WBC / RL / 搬运 三种控制流门控
+    // FALL_DOWN 也纳入搬运流：触发当周期立即跳过 MPC/WBC/RL，避免交接期间输出正常力矩
+    const bool transport_flow = (transport_mode_state_ == TRANSPORT_INTERPOLATING ||
+                                 transport_mode_state_ == TRANSPORT_ACTIVE ||
+                                 transport_mode_state_ == TRANSPORT_FALL_DOWN);
+    const bool transport_active_or_interpolating = (transport_mode_state_ == TRANSPORT_INTERPOLATING ||
+                                                     transport_mode_state_ == TRANSPORT_ACTIVE);
+    const bool transport_interpolating = (transport_mode_state_ == TRANSPORT_INTERPOLATING);
+    double transport_t = 1.0;
+    if (transport_interpolating)
+    {
+      double elapsed = currentObservation_.time - transport_enter_time_;
+      transport_t = std::clamp(elapsed / 1.0, 0.0, 1.0);
+      if (transport_t >= 1.0)
+      {
+        transport_mode_state_ = TRANSPORT_ACTIVE;
+        ROS_INFO("[HumanoidController] Transport mode ACTIVE");
+      }
+    }
+    bool mpc_flow = !is_rl_controller_ && !transport_flow;
     if (!derect_switch_to_rl)
     {
-      mpc_flow = (!is_rl_controller_) || is_torso_interpolation_active_;
+      mpc_flow = ((!is_rl_controller_) || is_torso_interpolation_active_) && !transport_flow;
     }
     if (mpc_flow && !is_fall_stand_controller_active)
     {
@@ -2741,13 +2762,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
                 if (is_rl_controller_)// 切换到RL
                 {
                   std::cout << "[MPC->RL] Torso interpolation completed, switching to NORMAL" << std::endl;
-                  resetting_mpc_state_ = ResettingMpcState::NOMAL;
+                  resetting_mpc_state_ = ResettingMpcState::NORMAL;
                 }else if (mpc_ready)
                 {
                   std::cout << "MPC-RL interpolation completed, policy receive count: " << mrtRosInterface_->getPolicyReceiveCount() << std::endl;
                   standupTime_ = currentObservation_.time;
                   std::cout << "[RL->MPC] Torso interpolation completed, switching to NORMAL" << std::endl;
-                  resetting_mpc_state_ = ResettingMpcState::NOMAL;
+                  resetting_mpc_state_ = ResettingMpcState::NORMAL;
                 }
 
               }
@@ -2780,7 +2801,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             }
             
             
-            if (resetting_mpc_state_ != ResettingMpcState::NOMAL)
+            if (resetting_mpc_state_ != ResettingMpcState::NORMAL)
             {
               optimizedState_mrt.segment<6>(6) = torso_interpolation_result_;
               optimizedState_mrt.segment(12, jointNumReal_+ waistNum_) = leg_interpolation_result_.head(jointNumReal_+ waistNum_);
@@ -2915,7 +2936,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         low_latency_first_enter = true;
       }
-      if (use_ros_arm_joint_trajectory_ && resetting_mpc_state_ == ResettingMpcState::NOMAL)
+      if (use_ros_arm_joint_trajectory_ && resetting_mpc_state_ == ResettingMpcState::NORMAL)
       {
         if (mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL && mpcArmControlMode_ == ArmControlMode::EXTERN_CONTROL)
         {
@@ -2962,7 +2983,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       }
       else
       {
-        if (resetting_mpc_state_ != ResettingMpcState::NOMAL)
+        if (resetting_mpc_state_ != ResettingMpcState::NORMAL)
         {
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_interpolation_result_;
           optimizedInput2WBC_mrt_.tail(armNumReal_).setZero();
@@ -3111,7 +3132,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         {
           static vector_t x;
 
-          if (resetting_mpc_state_ != ResettingMpcState::NOMAL || is_torso_interpolation_active_)
+          if (resetting_mpc_state_ != ResettingMpcState::NORMAL || is_torso_interpolation_active_)
           {
             x = standUpWbc_->update(optimizedState2WBC_mrt_, optimizedInput2WBC_mrt_, measuredRbdStateReal_,
                                     ModeNumber::SS, period.toSec(), false);
@@ -3213,7 +3234,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.joint_kp.push_back(joint_kp_[i1]);
         jointCmdMsg.joint_kd.push_back(joint_kd_[i1]);
         jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
-        if(!is_roban_ && resetting_mpc_state_ != ResettingMpcState::NOMAL && i1 < jointNumReal_||is_rl_controller_)
+        if(!is_roban_ && resetting_mpc_state_ != ResettingMpcState::NORMAL && i1 < jointNumReal_||is_rl_controller_)
         {
           jointCmdMsg.control_modes.push_back(2); // 躯干插值阶段，腿部全部位置控制
           continue;
@@ -3221,7 +3242,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         jointCmdMsg.control_modes.push_back(joint_control_modes_[i1]);
       }
       ModeSchedule current_mode_schedule;
-      const bool use_mpc_mode_schedule = resetting_mpc_state_ == ResettingMpcState::NOMAL &&
+      const bool use_mpc_mode_schedule = resetting_mpc_state_ == ResettingMpcState::NORMAL &&
                                          !seat.policy_frozen &&
                                          mrtRosInterface_->isPolicyUpdated();
       if (use_mpc_mode_schedule)
@@ -3427,71 +3448,76 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         mrtRosInterface_->pauseResumeMpcNode(true);
       }
       is_mpc_controller_ = false;
-      if (!current_controller_ptr_) { is_rl_controller_ = last_is_rl_controller_ = false; return; }
 
       jointCmdMsg.header.stamp = time;
-      vector_t feetPositions = stateEstimate_->getEndEffectorPositions();
-      vector_t baseState = stateEstimate_->getTorsoState();
-      // 传入额外的估计量
-      current_controller_ptr_->applyFeetPositions(feetPositions);
-      current_controller_ptr_->applyBaseState(baseState);
-      // 更新控制器
-      current_controller_ptr_->update(time, getRobotSensorData(), getRobotState(), jointCmdMsg);
 
-
-
-      // 补充头部维度
-      // 计算头部反馈力
-      if (headNum_ > 0)
+      if (!transport_flow)
       {
-        vector_t get_head_pos = vector_t::Zero(headNum_);
-        head_mtx.lock();
-        get_head_pos = desire_head_pos_;
-        head_mtx.unlock();
-        auto &hardware_settings = kuavo_settings_.hardware_settings;
-        const auto &running_settings = kuavo_settings_.running_settings;
-        vector_t head_feedback_tau = vector_t::Zero(headNum_);
-        vector_t head_feedback_vel = vector_t::Zero(headNum_);
-        if (!is_real_) // 实物不需要头部反馈力，来自kuavo仓库的移植
-          head_feedback_tau = head_kp_.cwiseProduct(get_head_pos - sensor_data_head_.jointPos_) + head_kd_.cwiseProduct(-sensor_data_head_.jointVel_);
-        for (int i3 = 0; i3 < headNum_; ++i3)
-        {
-          auto cur_head_pos = sensor_data_head_.jointPos_ * TO_DEGREE;
-          auto vel = (get_head_pos[i3] - sensor_data_head_.jointPos_[i3]) * TO_DEGREE / dt_ * ruiwo_motor_velocities_factor_;
-          double head_limit_vel = hardware_settings.joint_velocity_limits[jointNumReal_ + waistNum_ + armNumReal_ + i3];
+        if (!current_controller_ptr_) { is_rl_controller_ = last_is_rl_controller_ = false; return; }
 
-          vel = std::clamp(vel, -head_limit_vel, head_limit_vel) * TO_RADIAN;
-          auto head_start_index = jointNumReal_ + waistNum_ + armNumReal_;
-          double head_kp_cmd = 0.0, head_kd_cmd = 0.0;
+        vector_t feetPositions = stateEstimate_->getEndEffectorPositions();
+        vector_t baseState = stateEstimate_->getTorsoState();
+        // 传入额外的估计量
+        current_controller_ptr_->applyFeetPositions(feetPositions);
+        current_controller_ptr_->applyBaseState(baseState);
+        // 更新控制器
+        current_controller_ptr_->update(time, getRobotSensorData(), getRobotState(), jointCmdMsg);
+
+
+
+        // 补充头部维度
+        // 计算头部反馈力
+        if (headNum_ > 0)
+        {
+          vector_t get_head_pos = vector_t::Zero(headNum_);
+          head_mtx.lock();
+          get_head_pos = desire_head_pos_;
+          head_mtx.unlock();
+          auto &hardware_settings = kuavo_settings_.hardware_settings;
+          const auto &running_settings = kuavo_settings_.running_settings;
+          vector_t head_feedback_tau = vector_t::Zero(headNum_);
+          vector_t head_feedback_vel = vector_t::Zero(headNum_);
+          if (!is_real_) // 实物不需要头部反馈力，来自kuavo仓库的移植
+            head_feedback_tau = head_kp_.cwiseProduct(get_head_pos - sensor_data_head_.jointPos_) + head_kd_.cwiseProduct(-sensor_data_head_.jointVel_);
+          for (int i3 = 0; i3 < headNum_; ++i3)
           {
-            const int n_ruiwo = static_cast<int>(running_settings.ruiwo_kp.size());
-            if (!running_settings.ruiwo_kp.empty() &&
-                !running_settings.ruiwo_kd.empty() &&
-                running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size() &&
-                n_ruiwo >= headNum_)
+            auto cur_head_pos = sensor_data_head_.jointPos_ * TO_DEGREE;
+            auto vel = (get_head_pos[i3] - sensor_data_head_.jointPos_[i3]) * TO_DEGREE / dt_ * ruiwo_motor_velocities_factor_;
+            double head_limit_vel = hardware_settings.joint_velocity_limits[jointNumReal_ + waistNum_ + armNumReal_ + i3];
+
+            vel = std::clamp(vel, -head_limit_vel, head_limit_vel) * TO_RADIAN;
+            auto head_start_index = jointNumReal_ + waistNum_ + armNumReal_;
+            double head_kp_cmd = 0.0, head_kd_cmd = 0.0;
             {
-              const int base = n_ruiwo - headNum_;
-              head_kp_cmd = running_settings.ruiwo_kp[base + i3];
-              head_kd_cmd = running_settings.ruiwo_kd[base + i3];
+              const int n_ruiwo = static_cast<int>(running_settings.ruiwo_kp.size());
+              if (!running_settings.ruiwo_kp.empty() &&
+                  !running_settings.ruiwo_kd.empty() &&
+                  running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size() &&
+                  n_ruiwo >= headNum_)
+              {
+                const int base = n_ruiwo - headNum_;
+                head_kp_cmd = running_settings.ruiwo_kp[base + i3];
+                head_kd_cmd = running_settings.ruiwo_kd[base + i3];
+              }
             }
+            jointCmdMsg.joint_q[head_start_index + i3] = get_head_pos(i3);
+            jointCmdMsg.joint_v[head_start_index + i3] = 0;
+            jointCmdMsg.joint_kp[head_start_index + i3] = head_kp_cmd;
+            jointCmdMsg.joint_kd[head_start_index + i3] = head_kd_cmd;
+            jointCmdMsg.tau[head_start_index + i3] = head_feedback_tau(i3);
+            jointCmdMsg.tau_ratio[head_start_index + i3] = 1;
+            jointCmdMsg.tau_max[head_start_index + i3] = 10;
+            jointCmdMsg.control_modes[head_start_index + i3] = 2;
           }
-          jointCmdMsg.joint_q[head_start_index + i3] = get_head_pos(i3);
-          jointCmdMsg.joint_v[head_start_index + i3] = 0;
-          jointCmdMsg.joint_kp[head_start_index + i3] = head_kp_cmd;
-          jointCmdMsg.joint_kd[head_start_index + i3] = head_kd_cmd;
-          jointCmdMsg.tau[head_start_index + i3] = head_feedback_tau(i3);
-          jointCmdMsg.tau_ratio[head_start_index + i3] = 1;
-          jointCmdMsg.tau_max[head_start_index + i3] = 10;
-          jointCmdMsg.control_modes[head_start_index + i3] = 2;
+        }
+        // 如果 use_default_motor_csp_kpkd 为 true，使用 running_settings 中的 kp/kd 替换 EC_MASTER 电机的值
+        if (current_controller_ptr_->getUseDefaultMotorCspKpkd())
+        {
+          replaceDefaultEcMotorPdoGait(jointCmdMsg);
         }
       }
-      // 如果 use_default_motor_csp_kpkd 为 true，使用 running_settings 中的 kp/kd 替换 EC_MASTER 电机的值
-      if (current_controller_ptr_->getUseDefaultMotorCspKpkd())
-      {
-        replaceDefaultEcMotorPdoGait(jointCmdMsg);
-      } 
 
-      // 规范化jointCmd尺寸，确保与硬件/仿真期望一致
+      // 规范化jointCmd尺寸，确保与硬件/仿真期望一致（RL 和 搬运 都需要）
       {
         auto adjust_double = [&](std::vector<double>& v, size_t n, double fill){
           if (v.size() < n) v.resize(n, fill);
@@ -3511,8 +3537,112 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         adjust_double(jointCmdMsg.joint_kd, expected_size, 0.0);
         adjust_int(jointCmdMsg.control_modes, expected_size, 2);
       }
+
+      // 搬运模式（INTERPOLATING/ACTIVE）下头部也保持默认位置并参与 1s 插值，避免从当前位置阶跃到 0
+      // 注意：必须放在 size adjustment 之后，否则 jointCmdMsg 向量未初始化会越界闪退
+      if (transport_active_or_interpolating && headNum_ > 0)
+      {
+        const auto &running_settings = kuavo_settings_.running_settings;
+        const int head_start_index = jointNumReal_ + waistNum_ + armNumReal_;
+
+        // 仿真必须计算头部反馈力矩，否则头部会下电；真机 CSP 模式由 kp/kd 闭环，tau 填 0 即可
+        vector_t head_feedback_tau = vector_t::Zero(headNum_);
+        for (int i = 0; i < headNum_; ++i)
+        {
+          double q_des = transport_interpolating
+              ? transport_head_start_pos_(i) + (0.0 - transport_head_start_pos_(i)) * transport_t
+              : 0.0;
+
+          if (!is_real_)
+          {
+            head_feedback_tau(i) = head_kp_(i) * (q_des - sensor_data_head_.jointPos_(i))
+                                   + head_kd_(i) * (-sensor_data_head_.jointVel_(i));
+          }
+
+          double head_kp_cmd = 0.0, head_kd_cmd = 0.0;
+          const int n_ruiwo = static_cast<int>(running_settings.ruiwo_kp.size());
+          if (!running_settings.ruiwo_kp.empty() &&
+              !running_settings.ruiwo_kd.empty() &&
+              running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size() &&
+              n_ruiwo >= headNum_)
+          {
+            const int base = n_ruiwo - headNum_;
+            head_kp_cmd = running_settings.ruiwo_kp[base + i];
+            head_kd_cmd = running_settings.ruiwo_kd[base + i];
+          }
+          jointCmdMsg.joint_q[head_start_index + i] = q_des;
+          jointCmdMsg.joint_v[head_start_index + i] = 0.0;
+          jointCmdMsg.joint_kp[head_start_index + i] = head_kp_cmd;
+          jointCmdMsg.joint_kd[head_start_index + i] = head_kd_cmd;
+          jointCmdMsg.tau[head_start_index + i] = head_feedback_tau(i);
+          jointCmdMsg.tau_ratio[head_start_index + i] = 1;
+          jointCmdMsg.tau_max[head_start_index + i] = 10;
+          jointCmdMsg.control_modes[head_start_index + i] = 2;
+        }
+      }
     }
-    
+
+    // 搬运分支：生成 leg+waist+arm 位控锁死命令；head 单独处理（见上）
+    if (transport_active_or_interpolating)
+    {
+      const int n_over = jointNumReal_ + static_cast<int>(waistNum_) + armNumReal_;
+
+      for (size_t i = 0; i < static_cast<size_t>(n_over); i++)
+      {
+        double q_des = transport_interpolating
+          ? transport_start_pos_(i) + (transport_target_pos_(i) - transport_start_pos_(i)) * transport_t
+          : transport_target_pos_(i);
+        if (is_real_) {
+          // RUIWO手臂不支持CST，真机必须走CSP位控；EC_MASTER腿也支持CSP
+          jointCmdMsg.joint_q[i] = q_des;
+          jointCmdMsg.joint_v[i] = 0.0;
+          jointCmdMsg.tau[i] = 0.0;
+          jointCmdMsg.tau_max[i] = kuavo_settings_.hardware_settings.max_current[i];
+          jointCmdMsg.control_modes[i] = 2;
+        } else {
+          // 仿真：MuJoCo只消费tau，PD力矩即可
+          // 全身统一用 300/3.0：头、腰、腿都需要足够刚性保持默认站姿
+          constexpr double kp = 300.0;
+          constexpr double kd = 3.0;
+          jointCmdMsg.tau[i] = kp * (q_des - jointPosWBC_(static_cast<int>(i))) - kd * jointVelWBC_(static_cast<int>(i));
+          jointCmdMsg.tau_max[i] = kuavo_settings_.hardware_settings.max_current[i];
+          jointCmdMsg.control_modes[i] = 0;
+        }
+      }
+    }
+
+    // Transport覆盖将mode切为CSP(2)后，必须补kp/kd，否则RUIWO手臂位置环无效
+    if (is_real_ && transport_active_or_interpolating) {
+      replaceDefaultEcMotorPdoGait(jointCmdMsg);
+    }
+
+    // Transport FALL_DOWN: hand off to fall-stand controller, which outputs zero torque (limp).
+    // Placed after all computation, before publish — takes effect next cycle.
+    if (transport_mode_state_ == TRANSPORT_FALL_DOWN)
+    {
+      bool handoff_ok = false;
+      if (has_fall_stand_controller_)
+      {
+        ROS_INFO("[HumanoidController] Transport: handing off to FallStandController");
+        bool switched = controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER);
+        current_controller_ptr_ = controller_manager_->getCurrentController();
+        if (switched && current_controller_ptr_)
+        {
+          current_controller_ptr_->reset();
+          mrtRosInterface_->pauseResumeMpcNode(true);
+          handoff_ok = true;
+        }
+      }
+      if (!handoff_ok)
+      {
+        ROS_ERROR("[HumanoidController] Transport FALL_DOWN: handoff failed, fallback to stop_robot");
+        std_msgs::Bool stop_msg;
+        stop_msg.data = true;
+        stop_pub_.publish(stop_msg);
+      }
+      transport_mode_state_ = TRANSPORT_INACTIVE;
+    }
+
     // 发布控制命令
     publishControlCommands(jointCmdMsg);
 
@@ -3520,7 +3650,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     if (visualizeHumanoid_)
     {
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
-      if (is_rl_controller_ || resetting_mpc_state_ != ResettingMpcState::NOMAL)
+      if (is_rl_controller_ || resetting_mpc_state_ != ResettingMpcState::NORMAL)
       {
         // RL 模式下，直接使用 publishObservation 发布 tf 树（不需要 MPC 的 policy 和 command）
         robotVisualizer_->publishObservation(ros::Time::now(), currentObservation_);
@@ -3735,9 +3865,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       bool enable_pull_up = !sitControlManager_->isPolicyFrozen() && enable_pull_up_protect_ && !is_rl_controller_ &&
         isPreUpdateComplete && is_stance_mode_ &&
         !only_half_up_body_ && currentObservation_.time - standupTime_ > 4
-        && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NOMAL
+        && mpcArmControlMode_ != ArmControlMode::EXTERN_CONTROL && resetting_mpc_state_ == ResettingMpcState::NORMAL
         && mode_sync_ready  // 确保当前模式已切换到期望模式，且已等待1.5秒
-        && (!is_roban_ || condition_pull_up_mpc_height_);  // roban 时要求 MPC 规划高度接近站立高度时才进行触发
+        && (!is_roban_ || condition_pull_up_mpc_height_)  // roban 时要求 MPC 规划高度接近站立高度时才进行触发
+        && transport_mode_state_ == TRANSPORT_INACTIVE;   // 搬运期间关闭拉保护
 
       // 发布拉起保护启用状态
       ros_logger_->publishValue("/state_estimate/enable_pull_up", enable_pull_up);
@@ -3746,6 +3877,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       if (enable_pull_up)
       {
         new_pull_up_state = stateEstimate_->checkPullUp(pull_up_force_threshold_);
+      }
+      // Transport mode standing filter
+      if (transport_mode_state_ == TRANSPORT_INTERPOLATING || transport_mode_state_ == TRANSPORT_ACTIVE)
+      {
+        stateEstimate_->checkStanding(pull_up_force_threshold_, 0.10, 0.10);
       }
       ros_logger_->publishValue("/state_estimate/pull_up_state", isPullUp_);
       if (enable_pull_up &&  new_pull_up_state && !isPullUp_)
@@ -4589,6 +4725,118 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
 
 
 
+  void humanoidController::computeTransportTargetPose()
+  {
+    // 搬运目标 = MPC 默认站姿：腿来自 Drake IK（保证关节方向正确），腰/臂/头全部为 0
+    // 手臂自然下垂伸直，不额外前弯，便于退出时直接交还 MPC stance。
+    transport_target_pos_ = vector_t::Zero(actuatedDofNumReal_);
+
+    if (defalutJointPos_.size() >= static_cast<int>(jointNum_))
+      transport_target_pos_.head(jointNum_) = defalutJointPos_.head(jointNum_);
+
+    // 腰/头/手臂保持 0（已由 Zero 初始化）
+  }
+
+  bool humanoidController::transportModeCommandCallback(
+      kuavo_msgs::TransportModeCommand::Request &req,
+      kuavo_msgs::TransportModeCommand::Response &res)
+  {
+    if (req.command == req.TRANSPORT_ENTER)
+    {
+      if (transport_mode_state_ != TRANSPORT_INACTIVE)
+      {
+        res.success = false;
+        res.message = "Already in transport mode";
+        return true;
+      }
+
+      if (isPullUp_)
+      {
+        res.success = false;
+        res.message = "Cannot enter transport: pull-up protection active";
+        return true;
+      }
+
+      bool controller_ok = false;
+      if (!is_rl_controller_)
+      {
+        controller_ok = (resetting_mpc_state_ == ResettingMpcState::NORMAL);
+      }
+      else
+      {
+        RLControllerType ctype = controller_manager_->getCurrentControllerType();
+        controller_ok = (ctype == RLControllerType::AMP_CONTROLLER);
+      }
+
+      if (!controller_ok)
+      {
+        res.success = false;
+        res.message = "Cannot enter transport: controller not in valid state";
+        return true;
+      }
+
+      // Target pose = MPC 默认站姿（腿 Drake IK，腰/臂/头为 0，手臂伸直）
+      mrtRosInterface_->pauseResumeMpcNode(true);
+      transport_start_pos_ = jointPosWBC_;
+      transport_head_start_pos_ = sensor_data_head_.jointPos_;
+      transport_enter_time_ = currentObservation_.time;
+      transport_mode_state_ = TRANSPORT_INTERPOLATING;
+      stateEstimate_->resetStandingFilter();
+
+      ROS_INFO("[HumanoidController] Transport mode ENTERING");
+      res.success = true;
+      res.message = "Transport mode entering";
+    }
+    else if (req.command == req.TRANSPORT_EXIT)
+    {
+      if (transport_mode_state_ != TRANSPORT_ACTIVE)
+      {
+        res.success = false;
+        if (transport_mode_state_ == TRANSPORT_INACTIVE)
+          res.message = "Not in transport mode";
+        else if (transport_mode_state_ == TRANSPORT_FALL_DOWN)
+          res.message = "Cannot exit from fall-down; use two-step stand-up";
+        else
+          res.message = "Cannot exit until transport is ACTIVE";
+        return true;
+      }
+
+      if (!stateEstimate_->isStanding())
+      {
+        res.success = false;
+        res.message = "Not standing: wait for feet on ground and torso upright";
+        return true;
+      }
+
+      transport_mode_state_ = TRANSPORT_INACTIVE;
+      reset_mpc_ = true;
+      ROS_INFO("[HumanoidController] Transport mode EXITED");
+      res.success = true;
+      res.message = "Transport mode exited";
+    }
+    else if (req.command == req.TRANSPORT_FALL_DOWN)
+    {
+      if (transport_mode_state_ != TRANSPORT_ACTIVE)
+      {
+        res.success = false;
+        res.message = "Fall-down only allowed during transport ACTIVE state";
+        return true;
+      }
+
+      transport_mode_state_ = TRANSPORT_FALL_DOWN;
+      ROS_INFO("[HumanoidController] Transport mode FALL_DOWN");
+      res.success = true;
+      res.message = "Fall-down triggered";
+    }
+    else
+    {
+      res.success = false;
+      res.message = "Unknown command";
+    }
+    return true;
+  }
+
+
   void humanoidController::waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg)
   {
     return;
@@ -4827,21 +5075,23 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
   }
 
   
-  // ==================== MPC-RL插值系统实现 ====================
-  // target_torso_pose顺序：xyz+rpy
+  // ==================== MPC-RL 插值系统实现 ====================
+  // 注意：target_torso_pose 输入约定为 [x,y,z, roll,pitch,yaw]，
+  // 但 torso_interpolation_result_ 输出到 WBC 时约定为 [x,y,z, yaw,pitch,roll]，
+  // 因此代码中会出现 (3)=yaw, (5)=0(roll) 的转换。
   void humanoidController::startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos)
   {
-    // 获取当前躯干姿态（xyz+rpy）
+    // 获取当前躯干位姿，输入顺序 [x,y,z, roll,pitch,yaw]
     vector6_t current_torso_pose = vector6_t::Zero();
     current_torso_pose.segment<3>(0) = currentObservation_.state.segment<3>(6); // 位置 xyz
-    // 假定 currentObservation_ 中姿态的 rpy 来源：roll=default_state_(10), yaw=stanceState_mrt_(9)，pitch 先保持 0 或从状态中获取
-    // 为保持行为一致，沿用原 update 发布中的来源：
     current_torso_pose(3) = 0.0;                 // roll
     current_torso_pose(4) = currentObservation_.state(10);  // pitch
     current_torso_pose(5) = currentObservation_.state(9); // yaw
-    torso_interpolation_result_ = current_torso_pose;// rpy->ypr
-    torso_interpolation_result_(3) = currentObservation_.state(9);
-    torso_interpolation_result_(5) = 0.0;
+
+    // WBC 输出 torso_interpolation_result_ 使用 [x,y,z, yaw,pitch,roll]
+    torso_interpolation_result_ = current_torso_pose;
+    torso_interpolation_result_(3) = currentObservation_.state(9);  // yaw
+    torso_interpolation_result_(5) = 0.0;                           // roll
 
     // 获取当前手臂位置
     vector_t current_arm_pos = vector_t::Zero(armNumReal_);
@@ -4959,18 +5209,18 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     last_interpolated_pose_ = interpolated_pose;
     last_interpolation_time_ = current_time;
     torso_interpolation_result_ = interpolated_pose;
-    torso_interpolation_result_(3) = stanceState_mrt_(9);
-    torso_interpolation_result_(5) = 0.0;
-    
-    // 发布/cmd_pose_world话题 (geometry_msgs::Twist)
+    torso_interpolation_result_(3) = stanceState_mrt_(9);  // yaw 保持 stance yaw
+    torso_interpolation_result_(5) = 0.0;                  // roll 置 0
+
+    // 发布 /cmd_pose_world 话题 (geometry_msgs::Twist)
+    // 注意：Twist 消息中 angular 字段按 [roll, pitch, yaw] 发布
     geometry_msgs::Twist twist_msg;
     twist_msg.linear.x = interpolated_pose(0);  // x位置
     twist_msg.linear.y = interpolated_pose(1);  // y位置
     twist_msg.linear.z = torso_interpolation_target_pose_(2) - default_state_[8];  // z位置与基准高度的差值
-    // 使用插值后的rpy
     twist_msg.angular.x = torso_interpolation_target_pose_(3); // roll
     twist_msg.angular.y = torso_interpolation_target_pose_(4); // pitch
-    twist_msg.angular.z = torso_interpolation_target_pose_(5); // yaw、、
+    twist_msg.angular.z = torso_interpolation_target_pose_(5); // yaw
     
     cmdPoseWorldPublisher_.publish(twist_msg);
     

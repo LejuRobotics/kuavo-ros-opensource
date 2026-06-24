@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <map>
 #include <humanoid_interface/HumanoidInterface.h>
@@ -31,6 +32,7 @@
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
 #include "kuavo_msgs/robotWaistControl.h"
+#include "kuavo_msgs/TransportModeCommand.h"
 
 #include "std_srvs/Trigger.h"
 #include "std_srvs/SetBool.h"
@@ -90,15 +92,23 @@ namespace humanoid_controller
 
   enum ResettingMpcState
   {
-    NOMAL = 0,
+    NORMAL = 0,
     RESET_INITIAL_POLICY,
     RESET_BASE,
   };
 
   enum FallStandState
   {
-    STANDING = 0,  // 正常状态
+    STANDING = 0,  // 站立状态
     FALL_DOWN      // 倒地状态
+  };
+
+  enum TransportModeState
+  {
+    TRANSPORT_INACTIVE = 0,
+    TRANSPORT_INTERPOLATING,
+    TRANSPORT_ACTIVE,
+    TRANSPORT_FALL_DOWN
   };
   
   // struct SensorDataRL
@@ -478,7 +488,7 @@ namespace humanoid_controller
     bool cmdTrotgait_ = false;
     bool cmdRLMode_ = false;                                         // RL模式命令标志
     bool reset_mpc_{false};
-    ResettingMpcState resetting_mpc_state_{ResettingMpcState::NOMAL};
+    ResettingMpcState resetting_mpc_state_{ResettingMpcState::NORMAL};
     bool disable_mpc_{false};
     bool disable_wbc_{false};
     int hardware_status_ = 0;
@@ -515,6 +525,11 @@ namespace humanoid_controller
     bool bootStandStartCaptured_{false};
     bool isPullUp_{false};
     bool setPullUpState_{false};
+    std::atomic<TransportModeState> transport_mode_state_{TRANSPORT_INACTIVE};
+    vector_t transport_target_pos_;
+    vector_t transport_start_pos_;
+    vector_t transport_head_start_pos_;
+    double transport_enter_time_{0.0};
     double standupTime_{0.0};
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
@@ -584,6 +599,7 @@ namespace humanoid_controller
     ros::ServiceServer currentGaitNameSrv_;
     ros::ServiceServer triggerFallStandUpSrv_;
     ros::ServiceServer changeRuiwoMotorParamSrv_;
+    ros::ServiceServer transport_mode_service_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -609,6 +625,10 @@ namespace humanoid_controller
     int current_controller_index_;
 
     void publishFeetTrajectory(const TargetTrajectories &targetTrajectories);
+
+    bool transportModeCommandCallback(kuavo_msgs::TransportModeCommand::Request &req,
+                                      kuavo_msgs::TransportModeCommand::Response &res);
+    void computeTransportTargetPose();
 
     ros::ServiceServer real_initial_start_service_;
     KuavoDataBuffer<SensorData> *sensors_data_buffer_ptr_;

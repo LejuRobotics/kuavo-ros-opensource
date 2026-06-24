@@ -173,6 +173,48 @@ namespace ocs2
         return first_value;
       }
 
+      // 站立检测：fail-open 设计 —— 任一帧不合格立即拒，需连续 N 帧合格才接受，
+      // 避免接触力/姿态噪声导致频繁翻转。
+      bool checkStanding(double mass_threshold = 0.70, double tilt_threshold_rad = 0.10, double alpha = 0.10)
+      {
+        double new_contact = std::max(estContactforce_[2], 0.0) + std::max(estContactforce_[8], 0.0);
+
+        double body_z_z = 1.0 - 2.0 * (quat_.x() * quat_.x() + quat_.y() * quat_.y());
+        double tilt_rad = std::acos(std::max(-1.0, std::min(1.0, body_z_z)));
+
+        standing_contact_ema_ = standing_contact_ema_ * (1.0 - alpha) + new_contact * alpha;
+        standing_tilt_ema_    = standing_tilt_ema_    * (1.0 - alpha) + tilt_rad    * alpha;
+
+        bool ok = (standing_contact_ema_ >= mass_threshold * robotMass_ * 9.81)
+               && (standing_tilt_ema_    <  tilt_threshold_rad);
+
+        bool prev_state = last_standing_state_;
+        if (ok) {
+          if (++standing_good_count_ >= 20)
+            last_standing_state_ = true;
+        } else {
+          standing_good_count_ = 0;
+          last_standing_state_ = false;
+        }
+
+        if (last_standing_state_ != prev_state) {
+          ROS_INFO_STREAM("[checkStanding] ema_c=" << standing_contact_ema_
+            << " ema_t=" << standing_tilt_ema_
+            << " -> " << (last_standing_state_ ? "STANDING" : "not"));
+        }
+
+        return last_standing_state_;
+      }
+
+      bool isStanding() const { return last_standing_state_; }
+
+      void resetStandingFilter() {
+        standing_contact_ema_ = robotMass_ * 9.81;
+        standing_tilt_ema_    = 0.0;
+        standing_good_count_  = 0;
+        last_standing_state_  = false;
+      }
+
       void resetPullUpFilter()
       {
         total_est_contact_force_ = robotMass_ * 9.81;
@@ -403,11 +445,16 @@ namespace ocs2
       int leftCount_ = 0;
       int rightCount_ = 0;
       double robotMass_= 56.0; // kg
+      double standing_contact_ema_  = 500;
+      double standing_tilt_ema_    = 0.0;
+      int    standing_good_count_  = 0;
+      bool   last_standing_state_  = false;
       double total_est_contact_force_ = 500;
       std::deque<bool> pullup_window_;  // 滑动窗口用于存储历史判断结果
       const size_t pullup_window_size_ = 20;  // 滑动窗口大小
       bool last_pullup_state_ = false;  // 保存上一次的pullup状态
       ros::Time last_pullup_check_time_;
+
       int waistNum_ = 0;
       
       // 躯干速度稳定性检测

@@ -367,6 +367,46 @@ rosservice call /humanoid_controller/trigger_fall_stand_up
 
 ---
 
+## 4. 主控制器服务（humanoidController）
+
+这些服务由 `humanoidController` 直接提供，用于控制搬运模式等全局状态。
+
+### 4.1 `/humanoid_controller/transport_mode_command`
+
+**服务类型**: `kuavo_msgs/TransportModeCommand`
+
+**功能**: 搬运模式控制 —— 进入后全身僵直（电机锁死），可安全抬起移动；退出后恢复原有控制。
+
+**请求参数**:
+- `command` (uint8): 
+  - `1 = TRANSPORT_ENTER`: 进入搬运（僵直）
+  - `2 = TRANSPORT_EXIT`: 退出搬运
+  - `3 = TRANSPORT_FALL_DOWN`: 瘫软倒地
+
+**响应参数**:
+- `success` (bool): 是否成功
+- `message` (string): 说明信息或失败原因
+
+**使用说明**:
+- ENTER：需控制器处于 MPC 或 AMP 模式、非拉保护状态。进入后 1s 插值到搬运姿势，全身僵直锁死（腿+腰+臂+头关节覆盖）；同时暂停 MPC 优化节点、跳过 WBC/MPC/RL 计算，由搬运分支直接生成位控命令。语音播报「进入搬运模式」
+- EXIT：先解算站立姿态，再检测（EMA 接触力 + 倾角 ≤0.10rad，20 帧确认）。通过后解除僵直：若进入前为 MPC，则触发 `reset_mpc_` 走 stance 恢复流程；若为 AMP/RL，则直接恢复 AMP/RL 运行。语音播报「退出搬运模式」
+- FALL_DOWN：仅搬运中可用，瘫软倒地，电机掉使能，由**倒地起身控制器接管**，输出零力矩 limp。**正常模式下 LB+RB+B 彻底屏蔽防误触**
+- 起身：倒地后 LB+RB+X 触发 `trigger_fall_stand_up`（见 [3.1 节](#31-humanoid_controllertrigger_fall_stand_up)），第 1 下回起身初始姿态，第 2 下完整起身，完成后自动回到 **MPC stance**。语音播报「退出搬运模式」
+- 搬运期间拉保护检测关闭
+
+**状态机流程**:
+- `INACTIVE` → `INTERPOLATING`(1s) → `ACTIVE`(僵直) → EXIT(站立检测) → `INACTIVE` → 恢复 AMP/MPC
+- `ACTIVE`(僵直) → `FALL_DOWN`(瘫软) → FallStandController 接管 → 两步起身 → **MPC stance**
+
+**示例**:
+```bash
+rosservice call /humanoid_controller/transport_mode_command "command: 1"  # 僵直
+rosservice call /humanoid_controller/transport_mode_command "command: 2"  # 退出
+rosservice call /humanoid_controller/transport_mode_command "command: 3"  # 瘫软
+```
+
+---
+
 ## 5. 腰部控制器接口（WaistController）
 
 `WaistController` 是集成在RL控制器中的腰部控制模块，提供外部控制腰部关节的功能。支持两种控制模式：模式1（RL控制）和模式2（外部控制）。
