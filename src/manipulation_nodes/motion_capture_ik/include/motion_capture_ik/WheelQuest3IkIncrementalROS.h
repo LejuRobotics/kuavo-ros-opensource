@@ -86,6 +86,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void computeRightShoulderFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);
   // FK 辅助函数：计算腰部 yaw 参考点位置（用于胸部增量 anchor）
   void computeWaistYawFK(Eigen::Vector3d& pOut);
+  // 当前机器人胸部(waist_yaw_link) yaw/pitch 朝向，用于未开启躯干控制时保持当前姿态
+  Eigen::Quaterniond getRobotChestQuatRef() const;
   // 启发式计算肘部参考位置
   Eigen::Vector3d computeElbow(const Eigen::Vector3d& link6Pos,
                                const Eigen::Vector3d& endEffectorPos,
@@ -295,6 +297,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d robotLeftFixedShoulderPos_;                      // 左肩绝对位置
   Eigen::Vector3d robotFixedWaistYawPos_;                          // 胸部IK目标frame(waist_yaw_link)在零位时的位置
   Eigen::Vector3d latestWaistYawFkPos_ = Eigen::Vector3d::Zero();  // 当前关节 FK 计算的胸部IK目标frame(waist_yaw_link)位置
+  Eigen::Quaterniond latestWaistYawFkQuat_ = Eigen::Quaterniond::Identity();
   bool hasLatestWaistYawFk_ = false;
   Eigen::Vector3d chestDefaultOffset_;                             // 兼容旧配置保留，不再作为胸部IK目标的主来源
   Eigen::Vector3d latestLeftShoulderFkPos_ = Eigen::Vector3d::Zero();   // 当前关节 FK 计算的左肩位置
