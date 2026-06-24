@@ -112,7 +112,8 @@ void WheelQuest3IkIncrementalROS::updateLeftConstraintList(const Eigen::Vector3d
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position = leftEndEffectorPosition_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_LINK6].position = leftLink6Position_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position = leftVirtualThumbPosition_;
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestRotationQuaternion_.toRotationMatrix();
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix =
+      (chestIncrementalUpdateEnabled_ ? chestRotationQuaternion_ : getRobotChestQuatRef()).toRotationMatrix();
 }
 
 void WheelQuest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3d& rightHandPos,
@@ -127,7 +128,14 @@ void WheelQuest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position = rightLink6Position_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position = rightVirtualThumbPosition_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix =
-      chestRotationQuaternion_.toRotationMatrix();  // 确保总是更新chest参考
+      (chestIncrementalUpdateEnabled_ ? chestRotationQuaternion_ : getRobotChestQuatRef()).toRotationMatrix();
+}
+
+Eigen::Quaterniond WheelQuest3IkIncrementalROS::getRobotChestQuatRef() const {
+  if (hasLatestWaistYawFk_) {
+    return computeYawPitchOnlyQuatFromRotationMatrix(latestWaistYawFkQuat_.toRotationMatrix());
+  }
+  return Eigen::Quaterniond::Identity();
 }
 
 Eigen::Quaterniond WheelQuest3IkIncrementalROS::computeYawPitchOnlyQuatFromRotationMatrix(
@@ -165,6 +173,7 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
   Eigen::Quaterniond chestQuatRef = input.chestQuatRef;
   if (isInMode2Warmup) {
     chestPosRef = latestWaistYawFkPos_;
+    chestQuatRef = getRobotChestQuatRef();
     chestIncrementalUpdateEnabled = false;
   }
 
@@ -923,8 +932,8 @@ void WheelQuest3IkIncrementalROS::computeWaistYawFK(Eigen::Vector3d& pOut) {
     std::lock_guard<std::mutex> lock(oneStageIkMutex_);
     auto [waistYawPosition, waistYawQuaternion] =
         oneStageIkEndEffectorPtr_->FK(filterJointDataForDrakeFK_, "waist_yaw_link");
-    (void)waistYawQuaternion;
     pOut = waistYawPosition;
+    latestWaistYawFkQuat_ = waistYawQuaternion.normalized();
     hasLatestWaistYawFk_ = true;
   }
 }
