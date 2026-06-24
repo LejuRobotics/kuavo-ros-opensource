@@ -116,7 +116,6 @@ const sidebars = {
             'basic_usage/kuavo-ros-control/docs/4开发接口/仿真环境使用',
             'basic_usage/kuavo-ros-control/docs/4开发接口/SDK介绍',
             'basic_usage/kuavo-ros-control/docs/4开发接口/接口使用文档',
-            'basic_usage/kuavo-ros-control/docs/4开发接口/ROS2接口使用文档',
             'basic_usage/kuavo-ros-control/docs/4开发接口/手臂防碰撞功能使用文档',
             {
               type: 'category',
