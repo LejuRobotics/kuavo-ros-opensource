@@ -7,6 +7,7 @@ import py_trees
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.nodes import NodePercep, NodeWaitForBlackboard, NodeFuntion, NodeDelay
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config
@@ -61,6 +62,11 @@ def make_tree(robot_sdk):
 
 
 if __name__ == '__main__':
+    # WSSDK 必须：初始化 WebSocket 连接
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
     # 初始化头部位置（保存为初始位置，用于后续回位）
     INITIAL_HEAD_YAW = 0
     INITIAL_HEAD_PITCH = np.deg2rad(-10)

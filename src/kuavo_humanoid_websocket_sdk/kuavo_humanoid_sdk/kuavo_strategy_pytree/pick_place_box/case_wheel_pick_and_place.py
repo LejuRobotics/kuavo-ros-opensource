@@ -18,6 +18,7 @@ from functools import partial
 import numpy as np
 import py_trees
 
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcCtrlMode
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Tag, Frame
@@ -409,6 +410,11 @@ def run_tree(root: py_trees.behaviour.Behaviour):
 
 
 def main():
+    # WSSDK 必须：初始化 WebSocket 连接
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
     parser = argparse.ArgumentParser(description="PyTree 案例：搬箱子+放箱子")
     parser.add_argument(
         "--walk-mode",

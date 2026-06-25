@@ -59,11 +59,13 @@ setup(
     'kuavo_humanoid_sdk.kuavo_strategy.grasp_box',
     ] + strategy_pytree_packages + find_msg_subpackages("kuavo_humanoid_sdk/msg"),
     install_requires=[
-        "numpy", 
+        "numpy",
         "transitions",
         "roslibpy",
         "argparse",
-        "transforms3d"
+        "transforms3d",
+        "py_trees",
+        "scipy"
     ],
     python_requires=">=3.8",
     classifiers=[

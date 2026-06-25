@@ -142,7 +142,9 @@ def main():
     print(f"🚀 控制模式：{args.control_mode}")
 
     # 初始化 SDK（确保 KuavoRobotCore.initialize 已完成，否则 cmd_vel/walk 会因缺少 _robot_version_major 崩溃）
-    KuavoSDK.Init(log_level="INFO")
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
 
     # 直接使用你提供的tag数据
     root = build_tree_with_node_walk(args.control_mode)
