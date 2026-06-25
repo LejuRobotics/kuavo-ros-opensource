@@ -7,6 +7,7 @@ import py_trees
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.nodes import NodeTorsoJoint
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import TorsoAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
@@ -36,6 +37,11 @@ def make_tree():
 
 
 if __name__ == '__main__':
+    # WSSDK 必须：初始化 WebSocket 连接
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
     print("=== 躯干关节控制示例 ===")
     print(f"目标关节角度: {TARGET_JOINT_ANGLES}")
     print(f"关节名称: ['joint1', 'joint2', 'joint3', 'joint4']")

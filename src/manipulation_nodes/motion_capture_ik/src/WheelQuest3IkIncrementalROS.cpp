@@ -142,9 +142,7 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     }
     if (chestPoseUpdateEnabled != chestIncrementalUpdateEnabled_) {
       if (!chestPoseUpdateEnabled) {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        frozenChestQuat_ =
-            computeYawPitchOnlyQuatFromRotationMatrix(chestRotationQuaternion_.toRotationMatrix());
+        frozenChestQuat_ = getRobotChestQuatRef();
         if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
           frozenRobotChestPos_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
         } else {
@@ -204,14 +202,15 @@ void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
 
 void WheelQuest3IkIncrementalROS::fsmEnter() {
   auto updateChestConstraintFromFk = [&]() {
-    // 如果 FK 可用，直接使用胸部IK目标frame的 FK 结果；否则使用零位胸部目标frame位置
-    Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    Eigen::Matrix3d chestR = Eigen::Matrix3d::Identity();
-    chestR = chestRotationQuaternion_.toRotationMatrix();
+    // 进入准备动作时保持机器人当前胸部 FK 位姿，不跟随 VR 人体躯干
+    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
-      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestR;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
     }
+    frozenRobotChestPos_ = chestPos;
+    frozenChestQuat_ = chestQuat;
   };
   // 正常工作模式 Case 2: (0→2 或 1→2)
   if ((armControlMode_ == 2 && lastArmControlMode_ == 1) || (armControlMode_ == 2 && lastArmControlMode_ == 0)) {
@@ -293,7 +292,9 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
         }
       }
       updateChestConstraintFromFk();
-      incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      if (chestIncrementalUpdateEnabled_) {
+        incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      }
 
       // 处理左臂：计算FK -> 更新约束列表 -> 进入增量模式
       if (shouldEnterLeft) {
@@ -385,7 +386,9 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
         }
       }
       updateChestConstraintFromFk();
-      incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      if (chestIncrementalUpdateEnabled_) {
+        incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      }
 
       incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
                                                           latestPoseConstraintList_,
@@ -412,8 +415,8 @@ void WheelQuest3IkIncrementalROS::fsmChange() {
 void WheelQuest3IkIncrementalROS::fsmProcess() {
   if (armControlMode_ != 2) return;
   activateController();
-  // mode2 下确保 chest 增量模式已激活，避免胸部更新刷屏警告
-  if (!incrementalController_->isIncrementalModeChest()) {
+  // mode2 下仅在开启躯干控制时激活 chest 增量；进入准备动作时保持机器人当前胸部 FK 姿态
+  if (chestIncrementalUpdateEnabled_ && !incrementalController_->isIncrementalModeChest()) {
     Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
     {
       std::lock_guard<std::mutex> lock(chestPoseMutex_);
@@ -421,13 +424,14 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
         humanChestPos = latestChestPositionInRobot_;
       }
     }
-    // 使用当前 FK 更新胸部约束，避免胸部增量初始跳变
-    Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
+    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
-      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestR;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
     }
+    frozenRobotChestPos_ = chestPos;
+    frozenChestQuat_ = chestQuat;
     incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
   }
   // 0) 在 fsmProcess 统一更新 smoother 状态，确保后续 getModeChangingState() 是最新的
@@ -501,7 +505,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
       input.chestQuatRef = computeYawPitchOnlyQuatFromRotationMatrix(chestR);
       if (!chestIncrementalUpdateEnabled_) {
-        input.chestQuatRef = frozenChestQuat_;
+        input.chestQuatRef = getRobotChestQuatRef();
       }
     }
     return input;
@@ -991,11 +995,11 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
         humanChestPos = latestChestPositionInRobot_;
       }
     }
-      Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
+    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
-      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestR;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
       frozenRobotChestPos_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
       if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
         frozenLeftHandHeightOffset_ =

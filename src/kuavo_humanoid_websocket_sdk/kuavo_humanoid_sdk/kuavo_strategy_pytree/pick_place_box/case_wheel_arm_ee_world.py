@@ -14,6 +14,7 @@ import py_trees
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.nodes import NodeWheelMoveTimedCmd, NodeFuntion
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import TimedCmdAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
@@ -73,6 +74,11 @@ def make_tree(timed_cmd_api, arm_poses: Optional[List[dict]] = None, frame: Opti
 
 
 if __name__ == '__main__':
+    # WSSDK 必须：初始化 WebSocket 连接
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
     # 手臂关键点：time, pos_left(x,y,z), euler_left(roll,pitch,yaw度), pos_right, euler_right
     ARM_POSES = [
         {'time': 2.0, 'pos_left': (0.1, 0.4, 0.7), 'euler_left': (0, 0, 0),

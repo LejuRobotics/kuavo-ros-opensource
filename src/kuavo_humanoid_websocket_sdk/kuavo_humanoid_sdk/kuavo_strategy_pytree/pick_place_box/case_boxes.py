@@ -366,7 +366,9 @@ def pause_for_next_step(step_name, enable_pause=None):
 
 if __name__ == '__main__':
     # 初始化底层 SDK，确保 Core 被正确 initialize
-    KuavoSDK.Init(log_level="INFO")
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
     # robot_sdk.control.control_head(0, np.deg2rad(-10))
     # 用 Repeat 包裹，让它无限循环
     num_repeats = config.common.grab_box_num

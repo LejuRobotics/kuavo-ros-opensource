@@ -985,17 +985,13 @@ namespace humanoidController_wheel_wbc
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
 
-    // disable 期间：WBC 不接收 MPC rollout，直接跟踪冻结姿态（零速度）
+    // disable 期间：WBC 只冻结关节姿态，底盘不冻结（跟 odom 实时走）
     if (!enable_control_.load() && frozen_state_valid_)
     {
       std::lock_guard<std::mutex> lock(frozen_state_mutex_);
-      optimizedState_mrt_limit_ = frozen_state_;
+      // 只覆盖关节部分 (tail)，底盘 base 部分 (head) 保持 MPC rollout 输出
+      optimizedState_mrt_limit_.tail(info.armDim) = frozen_state_.tail(info.armDim);
       optimizedInput_mrt_limit_.setZero();
-      if (enable_mpc_)
-      {
-        optimizedState_mrt_ = frozen_state_;
-        optimizedInput_mrt_.setZero();
-      }
     }
 
     if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性

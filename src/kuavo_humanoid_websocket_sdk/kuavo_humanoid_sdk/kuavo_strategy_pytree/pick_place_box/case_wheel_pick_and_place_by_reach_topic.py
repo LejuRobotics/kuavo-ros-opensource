@@ -512,7 +512,9 @@ def run_tree(root: py_trees.behaviour.Behaviour):
 
 def main():
     # 初始化 SDK（确保 KuavoRobotCore.initialize 已完成，否则 cmd_vel/walk 会因缺少 _robot_version_major 崩溃）
-    KuavoSDK.Init(log_level="INFO")
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
 
     parser = argparse.ArgumentParser(description="PyTree 案例：搬箱子+放箱子")
     parser.add_argument(

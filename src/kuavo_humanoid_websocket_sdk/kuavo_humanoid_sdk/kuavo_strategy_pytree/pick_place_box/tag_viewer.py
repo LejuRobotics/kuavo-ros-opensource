@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """AprilTag Position Viewer - Compressed"""
 import sys
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common import ros_env
 import numpy as np
 from kuavo_msgs.msg import AprilTagDetectionArray
@@ -289,6 +290,11 @@ class TagViewer(QMainWindow):
         event.accept()
 
 def main():
+    # WSSDK 必须：初始化 WebSocket 连接
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
     try:
         app = QApplication(sys.argv)
         viewer = TagViewer()

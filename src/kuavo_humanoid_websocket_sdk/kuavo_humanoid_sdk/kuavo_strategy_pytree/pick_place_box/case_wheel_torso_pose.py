@@ -9,6 +9,7 @@ import sys
 import time
 from typing import List, Optional, Tuple
 
+from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common import ros_env
 import py_trees
 
@@ -125,6 +126,11 @@ def make_tree(timed_cmd_api, torso_poses: Optional[List[dict]] = None, initial_p
 
 
 if __name__ == '__main__':
+    # WSSDK 必须：初始化 WebSocket 连接
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
     # 初始化ROS节点
     ros_env.init_node('torso_pose_pytree', anonymous=True)
     

@@ -403,7 +403,9 @@ def run_tree(root: py_trees.behaviour.Behaviour):
 
 def main():
 
-    KuavoSDK.Init(log_level="INFO")
+    if not KuavoSDK.Init(log_level="INFO", websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
 
     if not ros_env.is_initialized():
         ros_env.init_node("pick_place_time_case_node", anonymous=True, disable_signals=True)

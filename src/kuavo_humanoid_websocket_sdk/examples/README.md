@@ -528,6 +528,7 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 
 ### 搬箱子案例 （grasp_box_example.py）
+
 **编译**：
 ```
 catkin build humanoid_controllers kuavo_msgs gazebo_sim ar_control
@@ -535,17 +536,41 @@ catkin build humanoid_controllers kuavo_msgs gazebo_sim ar_control
 
 **运行**：
 
-⚠️ 在运行之前, 需要确认机器人版本`ROBOT_VERSION=45`，否则会机器人末端控制会有问题
+⚠️ 在运行之前, 需要确认机器人版本`ROBOT_VERSION=52`，否则会机器人末端控制会有问题
+
+⚠️ WebSocket SDK 示例必须在代码中调用 `KuavoSDK().Init(websocket_mode=True)` 初始化连接。`grasp_box_example.py` 已在 `main()` 中完成初始化。
+
+**下位机：**
 ```
 # 启动gazebo场景
-roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch joystick_type:=bt2pro
+roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch
 
-# 启动ar_tag转换码操作和virtual操作
-roslaunch ar_control robot_strategies.launch  
+# 启动 WebSocket 服务节点
+roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch
+
+# 启动ar_tag转换码操作
+roslaunch ar_control robot_strategies.launch
 
 # 运行搬箱子案例
-python3 grasp_box_example.py 
+python3 grasp_box_example.py
 ```
+
+### PyTree 行为树搬箱案例 （kuavo_strategy_pytree/pick_place_box/）
+
+WSSDK 现已集成 `kuavo_strategy_pytree` 行为树策略，提供更高级的并行感知+闭环控制能力。详情参见 [WSSDK搬箱说明文档](../docs/WSSDK搬箱说明文档.md) 第三部分。
+
+**快速运行（仿真）：**
+```
+cd ~/kuavo-ros-control
+source devel/setup.bash
+python3 ./src/kuavo_humanoid_websocket_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py
+```
+
+主要 PyTree 案例脚本：
+- `case_new.py` — 扭腰搬箱子（推荐）
+- `case.py` — 基础搬箱案例
+- `case_boxes.py` — 多箱搬箱案例
+- `case_wheel_pick_and_place.py` — 轮臂机器人 pick & place
 
 🚨 第一次启动gazebo场景前需要修改tag尺寸：
 

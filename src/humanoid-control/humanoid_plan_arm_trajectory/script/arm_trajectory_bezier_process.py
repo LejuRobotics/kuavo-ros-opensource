@@ -491,11 +491,11 @@ class ArmTrajectoryBezierDemo:
 
     def call_change_arm_ctrl_mode_service(self, arm_ctrl_mode):
         result = True
-        service_name = "arm_traj_change_mode"
+        service_name = "/wheel_arm_change_arm_ctrl_mode" if self.is_wheeled else "arm_traj_change_mode"
         try:
             rospy.wait_for_service(service_name, timeout=0.5)
             change_arm_ctrl_mode = rospy.ServiceProxy(
-                "arm_traj_change_mode", changeArmCtrlMode
+                service_name, changeArmCtrlMode
             )
             change_arm_ctrl_mode(control_mode=arm_ctrl_mode)
             rospy.loginfo("Service call successful")
@@ -788,6 +788,28 @@ class ArmTrajectoryBezierDemo:
 
         return init_frame
 
+    def _max_arm_pose_diff_deg(self, current_arm_joint_state_rad, target_servos_deg):
+        """
+        计算"当前手臂姿态(弧度)"与"目标 servos(度)"在前 14 个手臂关节上的最大角度差(度)。
+        用于判断是否需要在 tact 首帧之前插入"当前姿态过渡帧"。
+
+        :param current_arm_joint_state_rad: 当前手臂关节状态数组(弧度)
+        :param target_servos_deg: 目标 servos 数组(度)
+        :return: 最大角度差(度);任一数组为空时返回 0.0
+        """
+        if not current_arm_joint_state_rad or not target_servos_deg:
+            return 0.0
+        # 兼容 ROBAN(8 关节)/ KUAVO(14 关节)/ KUAVO+腰(15 关节)的不同长度,
+        # 仅比较手臂部分(前 14 个),腰部不参与首帧过渡判断
+        compare_len = min(len(current_arm_joint_state_rad), len(target_servos_deg), 14)
+        max_diff = 0.0
+        for idx in range(compare_len):
+            cur_deg = math.degrees(current_arm_joint_state_rad[idx])
+            diff = abs(cur_deg - target_servos_deg[idx])
+            if diff > max_diff:
+                max_diff = diff
+        return max_diff
+
     def calculate_transition_time(self, source_angles, target_angles, min_keyframe=50, max_keyframe=400, default_keyframe=200):
         """
         根据两个角度数组的差值动态计算过渡时间（优化版本）
@@ -872,6 +894,9 @@ class ArmTrajectoryBezierDemo:
 
     def add_init_frame(self, frames, is_rl=False, is_first_stage=True):
         action_data = {}
+        # 记录本次是否在 0f 处插入了"当前姿态→tact 首帧"的过渡帧。
+        # 外层 handle_execute_action 据此决定是否重算 END_FRAME_TIME 与延时上报时机。
+        self._last_inserted_init_kf = 0
 
         # rl 要在刚开始插入当前状态为初始值来平滑过渡，ocs2 不需要
         if is_rl:
@@ -914,6 +939,62 @@ class ArmTrajectoryBezierDemo:
             frame0["keyframe"] = 0
             frames.insert(0, frame0)
         
+        # 通用入场过渡(非 RL,非 KUAVO 半身):
+        # 当机器人当前姿态与 tact 首帧差异显著时,在 0f 处插入"当前姿态"作为过渡起点,
+        # 整体后移原 frames,避免播放瞬间顺移。
+        # 覆盖此前漏掉的:ROBAN+ocs2、KUAVO 全身+ocs2(tact 首帧 keyframe=0 且非站立姿态)等场景。
+        # 阈值 3°:姿态本就接近时不引入额外延时。
+        # 过渡时间 0.5s~4.0s(默认 2.0s),与 KUAVO 半身入场参数一致。
+        if (not is_rl
+                and not (self.robot_class == KUAVO and self.only_half_up_body)
+                and len(frames) > 0
+                and frames[0].get("keyframe", 0) == 0
+                and is_first_stage
+                and not self.interrupt_flag
+                and hasattr(self, 'current_arm_joint_state')
+                and len(self.current_arm_joint_state) > 0):
+            import copy
+
+            first_frame = frames[0]
+            max_diff = self._max_arm_pose_diff_deg(
+                self.current_arm_joint_state, first_frame["servos"]
+            )
+            if max_diff > 3.0:
+                # 仅取前 N 个关节(对齐 first_frame.servos 长度)转度作为过渡时间计算源
+                source_len = min(len(self.current_arm_joint_state), len(first_frame["servos"]))
+                current_angles_deg = [math.degrees(p) for p in self.current_arm_joint_state[:source_len]]
+                transition_keyframe = self.calculate_transition_time(
+                    current_angles_deg,
+                    first_frame["servos"],
+                    min_keyframe=50,    # 0.5 秒
+                    max_keyframe=400,   # 4.0 秒
+                    default_keyframe=200  # 2.0 秒
+                )
+
+                # 整体后移原 frames
+                for frame in frames:
+                    frame["keyframe"] += transition_keyframe
+
+                # 构造"当前姿态帧"作为新的 0f 帧:沿用 first_frame 的 attribute 结构,
+                # servos 替换为当前姿态(度);超长截断,不足补 0
+                current_frame = copy.deepcopy(first_frame)
+                current_frame["keyframe"] = 0
+                if len(self.current_arm_joint_state) > len(current_frame["servos"]):
+                    current_frame["servos"] = [
+                        math.degrees(p) for p in self.current_arm_joint_state[:len(current_frame["servos"])]
+                    ]
+                else:
+                    current_frame["servos"] = (
+                        [math.degrees(p) for p in self.current_arm_joint_state]
+                        + [0] * (len(current_frame["servos"]) - len(self.current_arm_joint_state))
+                    )
+                frames.insert(0, current_frame)
+                self._last_inserted_init_kf = transition_keyframe
+                rospy.loginfo(
+                    "[首帧过渡] 当前姿态→tact首帧 max_diff=%.2f°, 过渡时间=%.2f秒",
+                    max_diff, transition_keyframe * 0.01,
+                )
+
         # ocs2 模式和半身模式：在第一帧之前插入当前手臂姿态作为第一帧
         if not is_rl and self.robot_class == KUAVO and self.only_half_up_body and len(frames) > 0:
             import copy
@@ -1579,8 +1660,10 @@ class ArmTrajectoryBezierDemo:
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
 
         # 根据实际计算的过渡时间更新结束时间
-        # RL模式和OCS2半身模式都需要更新，因为add_init_frame可能插入了过渡帧
-        if current_control_mode == "rl" or (current_control_mode == "ocs2" and self.only_half_up_body):
+        # RL模式、OCS2半身模式、以及通用入场过渡插入了过渡帧时,都需要更新
+        if (current_control_mode == "rl"
+                or (current_control_mode == "ocs2" and self.only_half_up_body)
+                or getattr(self, "_last_inserted_init_kf", 0) > 0):
             # 找到最后一帧的 keyframe（包括新添加的过渡帧）
             if frames:
                 last_keyframe = max(f.get("keyframe", 0) for f in frames)
@@ -1603,8 +1686,10 @@ class ArmTrajectoryBezierDemo:
             rospy.loginfo("Arm trajectory planned successfully")
             threading.Thread(target=self.run).start()
             # 使用更新后的 END_FRAME_TIME（包含过渡帧时间）
-            # RL模式和OCS2半身模式都会在add_init_frame中添加过渡帧并更新END_FRAME_TIME
-            if current_control_mode == "rl" or (current_control_mode == "ocs2" and self.only_half_up_body):
+            # RL/OCS2半身/通用入场过渡都会在 add_init_frame 中添加过渡帧并更新 END_FRAME_TIME
+            if (current_control_mode == "rl"
+                    or (current_control_mode == "ocs2" and self.only_half_up_body)
+                    or getattr(self, "_last_inserted_init_kf", 0) > 0):
                 self.delayed_publish_action_state(self.END_FRAME_TIME)
             else:
                 self.delayed_publish_action_state(finish_time)

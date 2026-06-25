@@ -172,17 +172,9 @@ class ControlEndEffectorWebsocket:
 class ControlRobotArmWebsocket:
     def __init__(self):
         websocket = WebSocketKuavoSDK()
-
-        # Detect robot type to select correct topic prefix
-        # wheel-arm robot → /mm/ (mobile manipulator)
-        # bipedal robot    → /ik/ (inverse kinematics)
-        is_wheel_arm = is_wheel_arm_robot_from_client(websocket.client)
-        topic_prefix = 'mm' if is_wheel_arm else 'ik'
-        SDKLogger.info(f"[ControlRobotArmWebsocket] is_wheel_arm={is_wheel_arm}, using /{topic_prefix}/two_arm_hand_pose_cmd")
-
         self._pub_ctrl_arm_traj_arm_collision =  roslibpy.Topic(websocket.client,'/arm_collision/kuavo_arm_traj', 'sensor_msgs/JointState')
         self._pub_ctrl_arm_target_poses_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
-        self._pub_ctrl_hand_pose_cmd_arm_collision = roslibpy.Topic(websocket.client, f'/arm_collision/{topic_prefix}/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
+        self._pub_ctrl_hand_pose_cmd_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
         self._sub_arm_collision_info = roslibpy.Topic(websocket.client, '/arm_collision/info', 'kuavo_msgs/armCollisionCheckInfo')
         self._sub_arm_collision_info.subscribe(self.callback_arm_collision_info)
         self._is_collision = False
@@ -190,7 +182,7 @@ class ControlRobotArmWebsocket:
         #正常轨迹发布
         self._pub_ctrl_arm_traj = roslibpy.Topic(websocket.client, '/kuavo_arm_traj', 'sensor_msgs/JointState')
         self._pub_ctrl_arm_target_poses = roslibpy.Topic(websocket.client, '/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
-        self._pub_ctrl_hand_pose_cmd = roslibpy.Topic(websocket.client, f'/{topic_prefix}/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
+        self._pub_ctrl_hand_pose_cmd = roslibpy.Topic(websocket.client, '/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
         self._pub_ctrl_arm_traj.advertise()
         self._pub_ctrl_arm_target_poses.advertise()
         self._pub_ctrl_hand_pose_cmd.advertise()
@@ -278,15 +270,11 @@ class ControlRobotArmWebsocket:
                 "hand_poses": {
                     "left_pose": {
                         "pos_xyz": left_pose.position,
-                        "quat_xyzw": left_pose.orientation,
-                        "elbow_pos_xyz": (0.0, 0.0, 0.0),
-                        "joint_angles": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                        "quat_xyzw": left_pose.orientation
                     },
                     "right_pose": {
                         "pos_xyz": right_pose.position,
-                        "quat_xyzw": right_pose.orientation,
-                        "elbow_pos_xyz": (0.0, 0.0, 0.0),
-                        "joint_angles": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                        "quat_xyzw": right_pose.orientation
                     }
                 },
                 "frame": frame.value
