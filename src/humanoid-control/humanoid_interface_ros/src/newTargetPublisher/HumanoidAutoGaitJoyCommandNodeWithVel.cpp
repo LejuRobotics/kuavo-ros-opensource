@@ -1500,10 +1500,10 @@ namespace ocs2
       {
         if(joy_msg->buttons[joyButtonMap["BUTTON_M1"]] || joy_msg->buttons[joyButtonMap["BUTTON_M2"]])
         {
+          old_joy_msg_ = *joy_msg;  // 更新旧状态，避免重复触发
           return;
         }
       }
-
       // Rate-limited check: only allow operations after robot is launched       
       if (!robot_launched_ && real_)
       {

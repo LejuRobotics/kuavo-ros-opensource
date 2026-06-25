@@ -163,6 +163,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void publishWholeBodyRefMarkers();  // 发布全身优化参考点（base_link下可视化）
 
   void reset();                          // 重置所有运行时状态，确保进入系统时正常
+  bool loadStandArmAnglesFromRosParam();  // 从 /standJointState 加载站立手臂关节角（rad）
   void forceDeactivateAllArmCtrlMode();  // 强制停用所有手臂控制模式
   void forceActivateAllArmCtrlMode();    // 强制激活所有手臂控制模式
   // 设置轮臂快速模式服务调用函数
@@ -351,6 +352,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d defaultRightHandPosOnExit_;                   // 退出时右手默认目标位置
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值
   bool useIncrementalHandOrientation_ = true;                   // 是否使用增量式手部姿态
+
+  // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
+  Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};
+  bool standArmAnglesLoaded_{false};
 
   // 保存 ArmJoint 为全零时的双手位姿（在 init 函数中计算，避免运行时频繁调用 FK）
   // Link6 位姿（用于 IK 约束）

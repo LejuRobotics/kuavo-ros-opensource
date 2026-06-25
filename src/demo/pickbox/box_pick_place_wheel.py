@@ -94,6 +94,13 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
         rospy.loginfo("轮臂跳过手臂模式切换")
         return True
 
+    def set_arm_default_control(self):
+        rospy.loginfo("轮臂无 /arm_traj_change_mode，跳过恢复默认手臂模式")
+        return True
+
+    def set_arm_control_mode(self, mode, label):
+        rospy.loginfo("轮臂无 /arm_traj_change_mode，跳过手臂模式切换: %s", label)
+        return True
     def enable_base_pitch_limit(self, enable=True):
         rospy.loginfo("轮臂，跳过设置 enable=%s", bool(enable))
         return True, "wheel no-op"
@@ -144,15 +151,20 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
 
     def walk_to(self, qr, approach_distance, use_qr_y_offset=True):
         walk_qr = self._qr_for_base_link_walk(qr)
-        move_x = max(float(walk_qr["x"]) - float(approach_distance), 0.0)
-        move_y = float(walk_qr["y"]) if use_qr_y_offset else 0.0
+        move_x, move_y, relative_yaw = self._approach_target_from_qr_pose(
+            walk_qr,
+            approach_distance,
+        )
+        if not use_qr_y_offset:
+            move_y = 0.0
         rospy.loginfo(
-            "轮臂接近二维码: dx=%.3f dy=%.3f approach=%.3f",
+            "轮臂接近二维码: dx=%.3f dy=%.3f dyaw=%.3f approach=%.3f",
             move_x,
             move_y,
+            relative_yaw,
             float(approach_distance),
         )
-        if move_x <= 0.0 and abs(move_y) < 1e-3:
+        if move_x <= 0.0 and abs(move_y) < 1e-3 and abs(relative_yaw) < 1e-3:
             rospy.loginfo("当前位置已满足接近距离要求，跳过行走")
             return
 
@@ -164,20 +176,20 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
         sin_yaw = math.sin(current_yaw)
         target_x = current_x + move_x * cos_yaw - move_y * sin_yaw
         target_y = current_y + move_x * sin_yaw + move_y * cos_yaw
-        target_yaw = current_yaw
+        target_yaw = self._normalize_angle(current_yaw + relative_yaw)
         rospy.loginfo(
             "轮臂接近目标(odom): 当前=(x=%.3f, y=%.3f, yaw=%.1f°) "
-            "base目标=(dx=%.3f, dy=%.3f) odom目标=(x=%.3f, y=%.3f, yaw=%.1f°)",
+            "base目标=(dx=%.3f, dy=%.3f, dyaw=%.1f°) odom目标=(x=%.3f, y=%.3f, yaw=%.1f°)",
             current_x,
             current_y,
             math.degrees(current_yaw),
             move_x,
             move_y,
+            math.degrees(relative_yaw),
             target_x,
             target_y,
             math.degrees(target_yaw),
         )
-
         if not self._wheel_xy_velocity_walk_to_target(target_x, target_y, target_yaw):
             raise BoxPickPlaceError("轮臂接近二维码失败")
 
@@ -282,14 +294,24 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
                 )
                 return qr
 
+            adjust_speed = min(float(self.params.get("walk", {}).get("linear_speed", 0.15)), 0.12)
+            adjust_timeout = max(1.0, min(4.0, abs(y_error) / max(adjust_speed, 1e-3) + 1.0))
             rospy.logwarn(
-                "轮臂二维码y偏差过大: ID=%s y=%.3f tolerance=%.3f，执行第%d次底盘微调",
+                "轮臂二维码y偏差过大: ID=%s y=%.3f tolerance=%.3f，执行第%d次底盘y向微调",
                 target_id,
                 y_error,
                 QR_ALIGNMENT_Y_TOLERANCE,
                 pass_idx,
             )
-            self.walk_to(qr, self._approach_distance_for_qr(target_id))
+            if not self._cmd_vel_lateral_adjust(
+                y_error,
+                adjust_speed,
+                adjust_timeout,
+                pos_tolerance=min(QR_ALIGNMENT_Y_TOLERANCE * 0.5, 0.02),
+                min_lateral_speed=0.035,
+                log_label="轮臂二维码y",
+            ):
+                raise BoxPickPlaceError("轮臂二维码y向微调失败: ID=%s y=%.3f" % (target_id, y_error))
             qr = super(BoxPickPlaceWheel, self).scan_qr_after_walk(target_id, pitch_deg)
 
         if abs(float(qr["y"])) > QR_ALIGNMENT_Y_TOLERANCE:
@@ -326,9 +348,10 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
 
         trans = transform.transform.translation
         rot = transform.transform.rotation
+        tf_quat = [float(rot.x), float(rot.y), float(rot.z), float(rot.w)]
         pos_base = self._transform_point(
             [float(qr["x"]), float(qr["y"]), float(qr["z"])],
-            [float(rot.x), float(rot.y), float(rot.z), float(rot.w)],
+            tf_quat,
             [float(trans.x), float(trans.y), float(trans.z)],
         )
 
@@ -339,6 +362,8 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
         walk_qr["yaw"] = self._normalize_angle(
             float(qr.get("yaw", 0.0)) + self._yaw_from_quat(rot)
         )
+        if "quat" in qr:
+            walk_qr["quat"] = self._quaternion_multiply(tf_quat, qr["quat"])
         rospy.loginfo(
             "轮臂底盘接近坐标转换: %s QR=(%.3f, %.3f, %.3f, yaw=%.3f) -> "
             "%s QR=(%.3f, %.3f, %.3f, yaw=%.3f)",
@@ -375,6 +400,17 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
             vx + qw * tx + (qy * tz - qz * ty),
             vy + qw * ty + (qz * tx - qx * tz),
             vz + qw * tz + (qx * ty - qy * tx),
+        ]
+
+    @staticmethod
+    def _quaternion_multiply(q1, q2):
+        x1, y1, z1, w1 = [float(value) for value in q1]
+        x2, y2, z2, w2 = [float(value) for value in q2]
+        return [
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
         ]
 
     def check_safe_space(self, label, center):

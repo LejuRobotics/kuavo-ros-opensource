@@ -19,6 +19,7 @@
 #include <std_msgs/Int32.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <iomanip>
+#include <sstream>
 #include <cmath>
 #include <algorithm>
 
@@ -35,6 +36,31 @@
 
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
+
+bool WheelQuest3IkIncrementalROS::loadStandArmAnglesFromRosParam() {
+  std::vector<double> stand_joint_state;
+  if (nodeHandle_.getParam("/standJointState", stand_joint_state) &&
+      stand_joint_state.size() == static_cast<size_t>(numArmJoints_)) {
+    standArmAngles_.resize(numArmJoints_);
+    for (int i = 0; i < numArmJoints_; ++i) {
+      standArmAngles_(i) = stand_joint_state[static_cast<size_t>(i)];
+    }
+    if (!standArmAnglesLoaded_) {
+      std::ostringstream oss;
+      oss << standArmAngles_.transpose().format(Eigen::IOFormat(4, 0, ", ", "", "", "", "", ""));
+      ROS_INFO("[WheelQuest3IkIncrementalROS] Loaded /standJointState (rad): [%s]", oss.str().c_str());
+    }
+    standArmAnglesLoaded_ = true;
+    return true;
+  }
+
+  if (!standArmAnglesLoaded_) {
+    standArmAngles_.resize(numArmJoints_);
+    standArmAngles_.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+    standArmAngles_.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  }
+  return false;
+}
 
 void WheelQuest3IkIncrementalROS::activateController() {
   if (controllerActivated_.load()) return;
@@ -1740,18 +1766,15 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
 }
 
 void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
-  // 定义默认目标角度（度转弧度）
-  // 左臂和右臂的默认角度：[45, 0, 0, -90, 0, 0, 0] 度
-  Eigen::VectorXd defaultArmAngles = Eigen::VectorXd::Zero(14);
-  defaultArmAngles.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
-  defaultArmAngles.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  loadStandArmAnglesFromRosParam();
+  const Eigen::VectorXd defaultArmAngles = standArmAngles_;
 
   // 发布手臂关节状态
   sensor_msgs::JointState armJintStateMsg;
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
 
-    // 直接设置 q_ 为默认角度
+    // 直接设置 q_ 为默认角度（来自 /standJointState）
     q_ = defaultArmAngles;
 
     // dq_ 设置为零
@@ -2101,12 +2124,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   // 初始化 sensorData 双臂关节角（维度从 JSON 加载，rad）指数均值滤波状态
   filterJointDataForDrakeFK_ = Eigen::VectorXd::Zero(drakeJointStateSize_);
   jointDataForDrakeFK_ = Eigen::VectorXd::Zero(drakeJointStateSize_);
+  loadStandArmAnglesFromRosParam();
+
   // 初始化关节角度滤波状态
   q_ = Eigen::VectorXd::Zero(14);
   dq_ = Eigen::VectorXd::Zero(14);
-  latest_q_ = Eigen::VectorXd::Zero(14);
-  latest_q_.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
-  latest_q_.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  latest_q_ = standArmAngles_;
   latest_dq_ = Eigen::VectorXd::Zero(14);
   lowpass_dq_ = Eigen::VectorXd::Zero(14);
 

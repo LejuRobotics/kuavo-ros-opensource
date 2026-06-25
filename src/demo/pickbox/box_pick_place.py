@@ -206,12 +206,19 @@ class BoxPickPlace(object):
                 continue
             pose = detection.pose.pose.pose
             yaw = self._yaw_from_quat(pose.orientation)
+            quat = [
+                pose.orientation.x,
+                pose.orientation.y,
+                pose.orientation.z,
+                pose.orientation.w,
+            ]
             for tag_id in tag_ids:
                 self.latest_tags[int(tag_id)] = {
                     "x": pose.position.x,
                     "y": pose.position.y,
                     "z": pose.position.z,
                     "yaw": yaw,
+                    "quat": quat,
                     "stamp": stamp,
                 }
 
@@ -386,13 +393,7 @@ class BoxPickPlace(object):
         rospy.loginfo("  stance 切换完成")
 
     def walk_to(self, qr, approach_distance):
-        # base_link 流程只用二维码的 y 偏移做横向修正，不用二维码自身 yaw 修正机身朝向。
-        use_qr_y_offset = True
-        use_qr_yaw_for_walk = False
-        y_sign = 1.0
-        move_x = max(float(qr["x"]) - float(approach_distance), 0.0)
-        move_y = y_sign * float(qr["y"]) if use_qr_y_offset else 0.0
-        yaw = float(qr["yaw"]) if use_qr_yaw_for_walk else 0.0
+        move_x, move_y, yaw = self._approach_target_from_qr_pose(qr, approach_distance)
         rospy.loginfo(
             "基于 /cmd_vel 闭环接近二维码: dx=%.3f dy=%.3f dyaw=%.3f approach=%.3f",
             move_x,
@@ -408,6 +409,29 @@ class BoxPickPlace(object):
             return
 
         raise BoxPickPlaceError("闭环接近失败")
+
+    def _approach_target_from_qr_pose(self, qr, approach_distance):
+        quat = qr["quat"]
+        normal = self._rotate_vector_by_quat([0.0, 0.0, 1.0], quat)
+        normal_xy_norm = math.sqrt(normal[0] * normal[0] + normal[1] * normal[1])
+        if normal_xy_norm < 1e-6:
+            rospy.logwarn("二维码法线水平投影过小，回退到旧接近逻辑")
+            return max(float(qr["x"]) - float(approach_distance), 0.0), float(qr["y"]), 0.0
+
+        move_x = float(qr["x"]) + float(approach_distance) * normal[0]
+        move_y = float(qr["y"]) + float(approach_distance) * normal[1]
+        yaw = self._normalize_angle(math.atan2(normal[1], normal[0]) + math.pi)
+        rospy.loginfo(
+            "按二维码法线计算接近目标: normal=(%.3f, %.3f, %.3f) "
+            "base目标=(dx=%.3f, dy=%.3f, dyaw=%.1f°)",
+            normal[0],
+            normal[1],
+            normal[2],
+            move_x,
+            move_y,
+            math.degrees(yaw),
+        )
+        return move_x, move_y, yaw
 
     def turn_180(self):
         # 转身闭环内部参数：角速度和容差固定，避免客户误调导致转身不稳。
@@ -435,13 +459,23 @@ class BoxPickPlace(object):
 
 
     def set_arm_external_control(self):
-        rospy.loginfo("切换手臂到外部控制模式")
+        return self.set_arm_control_mode(2, "外部控制模式")
+
+    def set_arm_default_control(self):
+        return self.set_arm_control_mode(1, "默认自动摆臂模式")
+
+    def set_arm_control_mode(self, mode, label):
+        rospy.loginfo("切换手臂到%s", label)
         req = changeArmCtrlModeRequest()
-        req.control_mode = 2
+        req.control_mode = int(mode)
         resp = self.arm_mode_srv(req)
         if not getattr(resp, "result", False):
-            raise BoxPickPlaceError("手臂控制模式切换失败: %s" % getattr(resp, "message", ""))
-        rospy.loginfo("手臂控制模式切换成功: %s", getattr(resp, "message", ""))
+            raise BoxPickPlaceError(
+                "手臂控制模式切换失败(mode=%d): %s"
+                % (int(mode), getattr(resp, "message", ""))
+            )
+        rospy.loginfo("手臂控制模式切换成功(mode=%d): %s", int(mode), getattr(resp, "message", ""))
+        return True
 
     def ik_solve(self, left_xyz, right_xyz, label, q0_joints=None):
         # 末端姿态固定为手心向内、手掌竖直。
@@ -662,10 +696,11 @@ class BoxPickPlace(object):
         }
 
     def finish_after_place(self):
-        self.back_away_after_place(distance=1.0)
+        self.back_away_after_place(distance=0.5)
         time.sleep(0.5) 
         self.reset_arms()
         time.sleep(0.5)
+        self.set_arm_default_control()
         self.turn_180()
 
     def place_without_rescan_and_finish(self, carried_hand_pose, ik_seed, duration):
@@ -822,6 +857,11 @@ class BoxPickPlace(object):
             rospy.logwarn("终止程序: 手臂复位失败: %s", exc)
 
         try:
+            self.set_arm_default_control()
+        except Exception as exc:
+            rospy.logwarn("终止程序: 恢复手臂默认模式失败: %s", exc)
+
+        try:
             ok, message = self.enable_base_pitch_limit(True)
             if ok:
                 rospy.loginfo("终止程序: 已恢复 basePitch 限制")
@@ -846,7 +886,7 @@ class BoxPickPlace(object):
         safe_space_limits = {
             "x": (0.20, 0.70),
             "y": (-0.25, 0.25),
-            "z": (0.10, 0.60),
+            "z": (0.00, 0.60),
         }
         x, y, z = [float(value) for value in center]
         limits = {
@@ -1032,7 +1072,6 @@ class BoxPickPlace(object):
             rospy.loginfo("掌心关节偏置 use_palm_joint_bias=%s", use_palm_joint_bias)
 
             self.disable_base_pitch_limit()
-            self.set_arm_external_control()
             pick_qr = self.scan_qr(qr_cfg["pick_qr_id"])
             self.walk_to(pick_qr, pick_qr_approach_distance)
             rospy.loginfo("接近抓取二维码后重新扫描，刷新 base_link 坐标")
@@ -1044,6 +1083,7 @@ class BoxPickPlace(object):
             rospy.loginfo("切换到 stance 站立模式，准备抓取箱子")
             self.stance()
 
+            self.set_arm_external_control()
             rospy.loginfo("先通过 /kuavo_arm_traj 到达安全预设姿态")
             safe_current = self.move_to_safe_arm_waypoints()
             rospy.loginfo("准备已完成，使用该姿态作为抓取IK初始种子")
@@ -1066,8 +1106,8 @@ class BoxPickPlace(object):
                 # open 后先施加掌心偏置，后续 contact/lift 都保持 5、12 号关节偏置值。
                 ik_seed = self.apply_joint_bias_after_clamp(
                     ik_seed,
-                    joint6_bias_deg=-5.0,
-                    joint13_bias_deg=5.0,
+                    joint6_bias_deg=-20.0,
+                    joint13_bias_deg=20.0,
                     duration=2.0,
                 )
                 palm_bias_joints = list(ik_seed)
@@ -1211,7 +1251,7 @@ class BoxPickPlace(object):
         # 行走闭环参数固定在函数内，客户只调 linear_speed。
         linear_speed = float(self.params.get("walk", {}).get("linear_speed", 0.15))
         angular_speed = 0.25
-        pos_tolerance = 0.05
+        pos_tolerance = 0.07
         yaw_tolerance = math.radians(5.0)
         turn_timeout = 180.0
         walk_timeout = 30.0
@@ -1260,7 +1300,15 @@ class BoxPickPlace(object):
             rospy.logwarn("  最终朝向调整超时")
         return ok_final
 
-    def _cmd_vel_lateral_adjust(self, target_y, lateral_speed, timeout):
+    def _cmd_vel_lateral_adjust(
+        self,
+        target_y,
+        lateral_speed,
+        timeout,
+        pos_tolerance=0.01,
+        min_lateral_speed=None,
+        log_label="二维码y",
+    ):
         start_x, start_y, start_yaw = self._get_robot_pose()
         if start_x is None:
             rospy.logwarn("无法获取 odom->base_link，不能执行/cmd_vel横向闭环微调")
@@ -1270,15 +1318,17 @@ class BoxPickPlace(object):
         lateral_speed = abs(float(lateral_speed))
         timeout = max(float(timeout) + 1.0, 2.0)
         control_dt = 0.1
-        pos_tolerance = 0.01
-        yaw_tolerance = math.radians(3.0)
-        angular_speed = 0.12
-        min_lateral_speed = min(0.04, max(lateral_speed * 0.5, 0.02))
+        pos_tolerance = abs(float(pos_tolerance))
+        if min_lateral_speed is None:
+            min_lateral_speed = min(0.04, max(lateral_speed * 0.5, 0.02))
+        else:
+            min_lateral_speed = abs(float(min_lateral_speed))
         start_time = time.time()
         last_print_time = 0.0
 
         rospy.loginfo(
-            "二维码y /cmd_vel闭环微调开始: target_y=%.3fm speed=%.3fm/s timeout=%.2fs",
+            "%s /cmd_vel闭环微调开始: target_y=%.3fm speed=%.3fm/s timeout=%.2fs",
+            log_label,
             target_y,
             lateral_speed,
             timeout,
@@ -1294,22 +1344,21 @@ class BoxPickPlace(object):
             dy = current_y - start_y
             moved_y = -dx * math.sin(start_yaw) + dy * math.cos(start_yaw)
             remaining_y = target_y - moved_y
-            yaw_error = self._normalize_angle(start_yaw - current_yaw)
 
             elapsed = time.time() - start_time
             if elapsed - last_print_time > 0.5:
                 rospy.loginfo(
-                    "    [y微调] moved=%.3fm target=%.3fm remaining=%.3fm yaw_err=%.1f°",
+                    "    [%s微调] moved=%.3fm target=%.3fm remaining=%.3fm",
+                    log_label,
                     moved_y,
                     target_y,
                     remaining_y,
-                    math.degrees(yaw_error),
                 )
                 last_print_time = elapsed
 
             if abs(remaining_y) <= pos_tolerance:
                 self._stop_cmd_vel()
-                rospy.loginfo("二维码y /cmd_vel闭环微调完成: moved_y=%.3fm", moved_y)
+                rospy.loginfo("%s /cmd_vel闭环微调完成: moved_y=%.3fm", log_label, moved_y)
                 return True
 
             vy = self._planned_axis_speed(
@@ -1318,14 +1367,11 @@ class BoxPickPlace(object):
                 min_lateral_speed,
                 pos_tolerance,
             )
-            vz = 0.0
-            if abs(yaw_error) > yaw_tolerance:
-                vz = self._planned_turn_speed(yaw_error, angular_speed)
-            self._publish_cmd_vel(0.0, vy, vz)
+            self._publish_cmd_vel(0.0, vy, 0.0)
             rospy.sleep(control_dt)
 
         self._stop_cmd_vel()
-        rospy.logwarn("二维码y /cmd_vel闭环微调超时: target_y=%.3fm", target_y)
+        rospy.logwarn("%s /cmd_vel闭环微调超时: target_y=%.3fm", log_label, target_y)
         return False
 
     def _turn_to_target_direction(self, target_x, target_y, yaw_tolerance, angular_speed, timeout, control_dt):
@@ -1453,7 +1499,7 @@ class BoxPickPlace(object):
         walk_cfg = self.params.get("walk", {})
         back_speed = min(0.12, abs(float(walk_cfg.get("linear_speed", 0.15))))
         angular_speed = 0.18
-        pos_tolerance = 0.05
+        pos_tolerance = 0.07
         control_dt = 0.1
         timeout = max(12.0, distance / max(back_speed, 0.05) + 5.0)
         target_x = start_x - distance * math.cos(start_yaw)
@@ -1537,9 +1583,12 @@ class BoxPickPlace(object):
             rospy.sleep(control_dt)
 
 
-    def _stop_cmd_vel(self):
-        self._publish_cmd_vel(0.0, 0.0, 0.0)
-        rospy.sleep(0.3)
+    def _stop_cmd_vel(self, duration=0.6, control_dt=0.05):
+        start_time = time.time()
+        duration = max(float(duration), float(control_dt))
+        while not rospy.is_shutdown() and time.time() - start_time < duration:
+            self._publish_cmd_vel(0.0, 0.0, 0.0)
+            rospy.sleep(control_dt)
 
     def _publish_cmd_vel(self, vx, vy, vz):
         msg = Twist()
@@ -1573,13 +1622,16 @@ class BoxPickPlace(object):
     @staticmethod
     def _planned_turn_speed(angle_diff, angular_speed):
         abs_diff = abs(angle_diff)
+        max_speed = abs(float(angular_speed))
+        min_speed = min(0.06, max_speed * 0.3)
         if abs_diff > 0.35:
-            turn_speed = angular_speed
-        elif abs_diff > 0.2:
-            turn_speed = angular_speed * 0.5 + (abs_diff - 0.2) / (0.35 - 0.2) * angular_speed * 0.5
+            turn_speed = max_speed
+        elif abs_diff > 0.12:
+            turn_speed = min_speed + (abs_diff - 0.12) / (0.35 - 0.12) * (max_speed - min_speed)
         else:
-            turn_speed = angular_speed * 0.5
+            turn_speed = max(min_speed, abs_diff * 0.5)
         return turn_speed if angle_diff > 0.0 else -turn_speed
+
 
     @classmethod
     def _planned_axis_speed(cls, error, max_abs, min_abs, tolerance):
@@ -1621,6 +1673,19 @@ class BoxPickPlace(object):
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         return math.atan2(siny_cosp, cosy_cosp)
+
+    @staticmethod
+    def _rotate_vector_by_quat(vector, quat_xyzw):
+        qx, qy, qz, qw = [float(value) for value in quat_xyzw]
+        vx, vy, vz = [float(value) for value in vector]
+        tx = 2.0 * (qy * vz - qz * vy)
+        ty = 2.0 * (qz * vx - qx * vz)
+        tz = 2.0 * (qx * vy - qy * vx)
+        return [
+            vx + qw * tx + (qy * tz - qz * ty),
+            vy + qw * ty + (qz * tx - qx * tz),
+            vz + qw * tz + (qx * ty - qy * tx),
+        ]
 
     @staticmethod
     def _normalize_angle(angle):
