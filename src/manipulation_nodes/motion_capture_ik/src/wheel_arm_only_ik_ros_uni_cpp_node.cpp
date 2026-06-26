@@ -17,6 +17,7 @@
 
 #include <geometry_msgs/Twist.h>
 #include <noitom_hi5_hand_udp_python/JoySticks.h>
+#include <std_msgs/Bool.h>
 #include <std_srvs/SetBool.h>
 
 #include "motion_capture_ik/Quest3IkIncrementalROS.h"
@@ -25,7 +26,7 @@
 
 // 5W 轮式底盘 cmd_vel 转发器：v52 IK 类不发 cmd_vel（v52 平台无底盘），
 // 但 v62 5W 平台需要把摇杆映射到底盘速度。这里独立做这件事，跟 IK 解耦。
-// 若 single_hand_mode=true 且任一 grip 按下，让位 torso_joystick_node 独占摇杆。
+// 若 single_hand_mode=true 且任一 grip 按下，或 /single_hand_torso_active=true（含 reset busy），让位 torso_joystick_node 独占摇杆。
 class ChassisCmdVelForwarder {
  public:
   explicit ChassisCmdVelForwarder(ros::NodeHandle& nh) {
@@ -35,16 +36,22 @@ class ChassisCmdVelForwarder {
     nh.param("/vr_cmd_vel/angular_scale_z", angularZLimit_, 0.25);
     cmdVelPub_ = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
     joySub_ = nh.subscribe("/quest_joystick_data", 10, &ChassisCmdVelForwarder::joystickCallback, this);
+    singleHandTorsoActiveSub_ = nh.subscribe("/single_hand_torso_active", 1,
+                                             &ChassisCmdVelForwarder::singleHandTorsoActiveCallback, this);
     ROS_INFO("[ChassisCmdVelForwarder] singleHandTorsoMode_=%s, limits lin_x=%.2f lin_y=%.2f ang_z=%.2f",
              singleHandTorsoMode_ ? "true" : "false", linearXLimit_, linearYLimit_, angularZLimit_);
   }
 
  private:
+  void singleHandTorsoActiveCallback(const std_msgs::Bool::ConstPtr& msg) {
+    singleHandTorsoActive_ = msg->data;
+  }
+
   void joystickCallback(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
-    // single_hand_mode + grip 按住 → torso_joystick_node 独占摇杆，不发 cmd_vel
+    // single_hand_mode 下，grip 按住或 /single_hand_torso_active=true（包含 reset busy）时，torso_joystick_node 独占摇杆，不发 cmd_vel
     const bool leftGrip = msg->left_grip > 0.7;
     const bool rightGrip = msg->right_grip > 0.7;
-    if (singleHandTorsoMode_ && (leftGrip || rightGrip)) return;
+    if (singleHandTorsoMode_ && (leftGrip || rightGrip || singleHandTorsoActive_)) return;
 
     const double nx = std::max(-1.0, std::min(1.0, static_cast<double>(msg->left_y)));
     const double ny = std::max(-1.0, std::min(1.0, -static_cast<double>(msg->left_x)));
@@ -66,7 +73,9 @@ class ChassisCmdVelForwarder {
 
   ros::Publisher cmdVelPub_;
   ros::Subscriber joySub_;
+  ros::Subscriber singleHandTorsoActiveSub_;
   bool singleHandTorsoMode_ = false;
+  bool singleHandTorsoActive_ = false;
   double linearXLimit_ = 0.4;
   double linearYLimit_ = 0.4;
   double angularZLimit_ = 0.25;

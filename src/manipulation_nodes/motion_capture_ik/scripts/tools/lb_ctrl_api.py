@@ -442,14 +442,16 @@ def send_timed_multi_commands(timed_cmd_vec: list, is_sync: bool = False) -> tup
         rospy.logerr(f"❌ {error_msg}")
         return False, 0.0, error_msg
     
-def reset_torso_to_initial():
+def reset_torso_to_initial(wait_timeout_sec=None):
     """
     重置躯干到初始位姿
+    Args:
+        wait_timeout_sec: 等待 /mobile_manipulator_reset_torso 服务的超时时间；None 表示沿用 rospy.wait_for_service 默认阻塞行为。
     Returns:
         float: 估计的复位时间（秒），如果失败返回0.0
     """
-    rospy.wait_for_service('/mobile_manipulator_reset_torso')
     try:
+        rospy.wait_for_service('/mobile_manipulator_reset_torso', timeout=wait_timeout_sec) if wait_timeout_sec is not None else rospy.wait_for_service('/mobile_manipulator_reset_torso')
         reset_service = rospy.ServiceProxy('/mobile_manipulator_reset_torso', SetBool)
         resp = reset_service(True)
         if resp.success:
@@ -463,6 +465,9 @@ def reset_torso_to_initial():
         else:
             rospy.logwarn("Torso reset request denied")
             return 0.0
+    except rospy.ROSException as e:
+        rospy.logerr(f"Wait for reset torso service timeout: {e}")
+        return 0.0
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")
         return 0.0
