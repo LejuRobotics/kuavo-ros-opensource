@@ -47,7 +47,7 @@ class LEDStripServiceNode:
         rospy.loginfo("可用服务:")
         rospy.loginfo("  - /led_strip_set_mode_and_color (SetLEDMode_free)")
         rospy.loginfo("  - /led_strip_close (Trigger)")
-    
+
     def handle_set_mode_and_color(self, req):
         """
         处理设置模式和颜色的服务请求

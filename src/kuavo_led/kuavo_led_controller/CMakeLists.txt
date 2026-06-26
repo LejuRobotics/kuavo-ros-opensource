@@ -226,5 +226,6 @@ catkin_install_python(PROGRAMS
   scripts/kuavo_led_controller_node.py
   scripts/battery_info_node.py
   scripts/led_strip_service.py
+  scripts/startup_led_monitor.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

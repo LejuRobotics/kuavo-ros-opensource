@@ -338,15 +338,6 @@ namespace humanoidController_wheel_wbc
       stand_arm_joint_state_vector.push_back(mujoco_q(armStartIndex + i));
     }
 
-    /******************************** 双臂初始动作 ****************************************/
-    vector_t startAction = mujoco_q.tail(manipulatorModelInfo_.armDim + headNum_).head(manipulatorModelInfo_.armDim);
-    vector_t targetAction = startAction;
-    targetAction.tail(armNum_)[4] = startAction.tail(armNum_)[4] - 0.5236;
-    targetAction.tail(armNum_/2)[4] = startAction.tail(armNum_/2)[4] + 0.5236;
-    double preActionDesiredTime = 1.5;
-    initialPreTargetActions(startAction, targetAction, preActionDesiredTime); // 设置机器人启动初始动作
-    /************************************************************************************/
-
     controllerNh_.setParam("/robot_init_state_param", robot_init_state_param);
     controllerNh_.setParam("/standJointState", stand_arm_joint_state_vector);
 
@@ -707,33 +698,25 @@ namespace humanoidController_wheel_wbc
 
   bool humanoidControllerWheelWbc::preUpdate(const ros::Time &time)
   {
-    /*********************定时和精确周期调用****************************/
-    static double lastTime = time.toSec() - dt_;
-    double curTime = time.toSec();
-    double dt = curTime - lastTime;
-    if(dt < dt_) return true;
-    /****************************************************************/
-
+    static int cnt;
     ROS_INFO_THROTTLE(1.0, "[preUpdate] preUpdate is running !");
+    cnt++;
     // 获取关节数据，并更新 Observation
     SensorData sensors_data_new;
     if (!control_data_manager_->getRealtimeSensorData(sensors_data_new)) {
         ROS_WARN_THROTTLE(1.0, "[preUpdate] Waiting for get sensor data");
         return false;
     }
-    
+
     // 从控制数据管理器获取里程计数据
     vector6_t odomData_new = vector6_t::Zero();
     computeObservationFromSensorData(sensors_data_new, odomData_new);
-
-    static double endTime = time.toSec() + robotPreActionDesiredTime_ + 0.5;
-    performSimpleActions(time);   // 执行预设动作
-    
-    if(time.toSec() > endTime || !is_real_)
+    if(cnt == 5)
     {
       setupMrt();
       initMPC();
       isPreUpdateComplete = true;
+      cnt = 0;
       ROS_INFO_THROTTLE(1.0, "[preUpdate] preUpdate is done.");
     }
 
@@ -2088,107 +2071,6 @@ namespace humanoidController_wheel_wbc
     }
 
     return desired_force;
-  }
-
-  void humanoidControllerWheelWbc::initialPreTargetActions(const vector_t& startActions, const vector_t& preTargetActions, double desiredTime)
-  {
-    // Check if startActions has the correct dimension
-    if (startActions.size() != manipulatorModelInfo_.armDim)
-    {
-      throw std::invalid_argument("startActions dimension mismatch: expected " + 
-                                   std::to_string(manipulatorModelInfo_.armDim) + 
-                                   ", got " + std::to_string(startActions.size()));
-    }
-    // Check if preTargetActions has the correct dimension
-    if (preTargetActions.size() != manipulatorModelInfo_.armDim)
-    {
-      throw std::invalid_argument("preTargetActions dimension mismatch: expected " + 
-                                   std::to_string(manipulatorModelInfo_.armDim) + 
-                                   ", got " + std::to_string(preTargetActions.size()));
-    }
-
-    startActions_ = vector_t::Zero(manipulatorModelInfo_.stateDim);
-    startActions_.tail(manipulatorModelInfo_.armDim) = startActions;
-    preTargetActions_ = vector_t::Zero(manipulatorModelInfo_.stateDim);
-    preTargetActions_.tail(manipulatorModelInfo_.armDim) = preTargetActions;
-    robotPreActionDesiredTime_ = desiredTime;
-  }
-
-  void humanoidControllerWheelWbc::performSimpleActions(const ros::Time &time)
-  {
-    static vector_t startState = startActions_;
-    static vector_t startInput = vector_t::Zero(manipulatorModelInfo_.stateDim);
-    static vector_t targetState = preTargetActions_;
-    static double startTime = time.toSec();
-    static double midTargetTime = startTime + robotPreActionDesiredTime_/2;
-    static double endTime = startTime + robotPreActionDesiredTime_;
-
-    scalar_array_t timeTrajectory;
-    timeTrajectory.push_back(startTime);
-    timeTrajectory.push_back(midTargetTime);
-    timeTrajectory.push_back(endTime);
-    vector_array_t stateTrajectory;
-    stateTrajectory.push_back(startState);
-    stateTrajectory.push_back(targetState);
-    stateTrajectory.push_back(startState);
-
-    vector_t curTargetState_wbc = LinearInterpolation::interpolate(time.toSec(), timeTrajectory, stateTrajectory);
-    static vector_t lastTargetState_wbc = curTargetState_wbc;
-    ros_logger_->publishVector("/humanoid_wheel/curTargetState_wbc", curTargetState_wbc);
-
-    vector_t inputVelocity = (curTargetState_wbc - lastTargetState_wbc) / dt_;
-
-    vector_t x = wheel_wbc_->update(curTargetState_wbc, inputVelocity, observation_wheel_);
-    vector_t torque = x.tail(manipulatorModelInfo_.armDim); // 力矩在决策变量的最后部分
-
-    lastTargetState_wbc = curTargetState_wbc;
-
-    kuavo_msgs::jointCmd jointCmdMsg;
-    jointCmdMsg.header.stamp = time;
-    for (int i1 = 0; i1 < lowJointNum_; ++i1)
-    {
-      jointCmdMsg.joint_q.push_back(curTargetState_wbc.tail(manipulatorModelInfo_.armDim)[i1]);
-      jointCmdMsg.joint_v.push_back(0.0);
-      jointCmdMsg.tau.push_back(torque.head(lowJointNum_)[i1]);
-      jointCmdMsg.tau_ratio.push_back(1);
-      jointCmdMsg.joint_kp.push_back(0);
-      jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
-      jointCmdMsg.control_modes.push_back(2);
-    }
-    for (int i2 = 0; i2 < armNum_; ++i2)
-    {
-      jointCmdMsg.joint_q.push_back(curTargetState_wbc.tail(armNum_)[i2]);
-      jointCmdMsg.joint_v.push_back(0.0);
-      jointCmdMsg.tau.push_back(torque.tail(armNum_)[i2]);
-      jointCmdMsg.tau_ratio.push_back(1);
-      jointCmdMsg.joint_kp.push_back(0);
-      jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + i2]);
-      jointCmdMsg.control_modes.push_back(2);
-    }
-
-    // 从控制数据管理器计算头部控制（内部自动获取传感器数据）
-    if (headNum_ > 0)
-    {
-      vector_t target_pos = control_data_manager_->getHeadExternalControlState();
-      vector_t feedback_tau = control_data_manager_->computeHeadControl(target_pos);
-      
-      for (int i3 = 0; i3 < headNum_; ++i3)
-      {
-        jointCmdMsg.joint_q.push_back(target_pos[i3]);
-        jointCmdMsg.joint_v.push_back(0);
-        jointCmdMsg.tau.push_back(feedback_tau[i3]);
-        jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + armNum_ + i3]);
-        jointCmdMsg.control_modes.push_back(2);
-        jointCmdMsg.joint_kp.push_back(0);
-        jointCmdMsg.joint_kd.push_back(0);
-      }
-    }
-
-    replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
-    jointCmdPub_.publish(jointCmdMsg);
   }
 
   // 用于更新指令和反馈的关键笛卡尔位姿的误差
