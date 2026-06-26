@@ -202,7 +202,8 @@
       <group if="$(eval arg('joystick_type') == 'h12')">
 
         <group if="$(eval arg('start_way') == 'manual')">
-          <!-- 此if分支为命令行启动机器人: joystick_type=h12，h12遥控器使用和服务启动(start_way=auto)相同的逻辑。-->
+          <!-- 此if分支为命令行启动机器人: joystick_type=h12。h12 节点启动前由 guard 请求服务让位，
+               终端启动自己的 /joy_node，不再复用服务侧 FSM。-->
           
           <param name="start_way" value="auto"/>
 
@@ -215,9 +216,10 @@
           <!-- 补充环境变量，和服务启动的变量一致 -->
           <env name="KUAVO_ROS_CONTROL_WS_PATH" value="$(find humanoid_controllers)/../../../" />
           <!-- 启动 h12pro 控制节点。
-               传入 joy_node 门卫前缀：服务 ocs2_h12pro_monitor 已正常运行时，本手动路径起的
-               joy_node 在启动瞬间自退、复用服务那套，避免两套同名 /joy_node 争抢导致手柄失灵；
-               服务未运行时则正常自起，保持原有行为。判断在节点启动期完成（roslaunch 解析期无法跑 shell）。 -->
+               传入 h12_node_guard.sh 门卫前缀：终端节点启动前自动请求 /start_way=manual，
+               等待 ocs2_h12pro_monitor 停掉服务侧同名 h12 节点（并置 /h12_yield_done=1）后，
+               再启动终端自己的 /joy_node，使终端控制栈和 H12 FSM 生命周期一致。
+               服务未运行时门卫直接放行，保持原有行为。判断在节点启动期完成（roslaunch 解析期无法跑 shell）。 -->
           <include file="$(find h12pro_controller_node)/launch/h12pro_autostart.launch">
             <arg name="guard_prefix" value="$(find h12pro_controller_node)/scripts/h12_node_guard.sh"/>
           </include>

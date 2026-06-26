@@ -1427,9 +1427,8 @@ namespace ocs2
       {
         if (IS_ROBAN(rb_version_))
         {
-          // roban: 显式切到 amp_hand_controller(下蹲/弯腰控制器; 进入后用 LB+A 切下蹲)
-          ROS_INFO("[JoyControl] RB+X (Roban): switch to amp_hand_controller");
-          callSwitchControllerService("amp_hand_controller");
+          // roban: RB+X is reserved as a no-op, but still consumes the button to avoid falling through to plain X logic.
+          ROS_INFO("[JoyControl] RB+X (Roban): reserved, no action");
           return true;
         }
         callTriggerFallStandUpSrv(); // 非 roban: 起身
@@ -1558,10 +1557,10 @@ namespace ocs2
       {
         if(joy_msg->buttons[joyButtonMap["BUTTON_M1"]] || joy_msg->buttons[joyButtonMap["BUTTON_M2"]])
         {
+          old_joy_msg_ = *joy_msg;  // 更新旧状态，避免重复触发
           return;
         }
       }
-
       // Rate-limited check: only allow operations after robot is launched       
       if (!robot_launched_ && real_)
       {
@@ -1943,12 +1942,12 @@ namespace ocs2
           ROS_WARN("[JoyControl] X: ignored in posture control mode (exit with LB+A)");
           return;
         }
-        // Roban: X 显式切到 amp_controller(amp_hand 改由 RB+X 进入, B 回 MPC)。
-        // 任意控制器(含 mpc/dance)按 X 都直达 amp_controller。
+        // Roban: X explicitly switches to amp_hand_controller; B switches back to MPC.
+        // Pressing X from any controller (including mpc/dance) goes directly to amp_hand_controller.
         if (IS_ROBAN(rb_version_))
         {
-          ROS_INFO("[JoyControl] X (Roban): switch to amp_controller");
-          callSwitchControllerService("amp_controller");
+          ROS_INFO("[JoyControl] X (Roban): switch to amp_hand_controller");
+          callSwitchControllerService("amp_hand_controller");
           return;
         }
         ROS_INFO("[JoyControl] switch to next controller");

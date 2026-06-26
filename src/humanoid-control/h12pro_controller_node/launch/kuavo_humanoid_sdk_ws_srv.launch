@@ -4,7 +4,7 @@
     <arg name="debug_mode" default="false" />
     <arg name="debug_arg" value="" unless="$(arg debug_mode)" />
     <arg name="debug_arg" value="--debug" if="$(arg debug_mode)" />
-    <!-- guard_prefix：手动路径传入门卫前缀，服务正常时本节点自退、复用服务那套；默认空不影响服务。 -->
+    <!-- guard_prefix：手动路径传入门卫前缀，节点启动前请求服务让位、再启动终端侧节点；默认空不影响服务。 -->
     <arg name="guard_prefix" default="" />
     <node pkg="h12pro_controller_node" type="websocket_sdk_start_node.py" name="websocket_sdk_start_node" output="screen" args="$(arg debug_arg)" launch-prefix="$(arg guard_prefix)">
     </node>

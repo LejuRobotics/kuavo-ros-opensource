@@ -40,6 +40,8 @@ start_tree() {
     "$NODE_SCRIPT" &
     NODE_PID=$!
     JOY_PROC_SEEN=false
+    # 服务重新持有 owner，尚未让位：清掉让位完成标志，下一次终端接管需等一次新的让位。
+    rosparam set /h12_yield_done 0 2>/dev/null || true
     log "started pid=$NODE_PID"
 }
 
@@ -54,6 +56,9 @@ stop_tree() {
     rosnode kill /websocket_sdk_start_node 2>/dev/null || true
     yes | timeout 3 rosnode cleanup >/dev/null 2>&1 || true
     NODE_PID=""
+    # 让位整体完成（同名节点已 kill+cleanup）：置位让位完成标志，
+    # h12_node_guard.sh 等到这个明确信号才 exec 终端节点，避免末尾 kill/cleanup 误伤终端新节点。
+    rosparam set /h12_yield_done 1 2>/dev/null || true
     log "stopped"
 }
 

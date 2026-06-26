@@ -15,14 +15,14 @@ box:
   length_x: 0.29
 
   # 抓取中心 x 方向微调：正数让双手更往前伸，负数让双手更靠近机器人。
-  grasp_offset_x: 0.10
+  grasp_offset_x: 0.05
 
   # 抓取中心 z 方向微调：正数让双手抓得更高，负数让双手抓得更低。
-  grasp_height_offset_z: 0.02
+  grasp_height_offset_z: 0.00
 
   # 抓取夹紧量：数值越大，clamp/lift 阶段双手夹得越紧。
   # 双手间距 = 箱子宽度 - 2 * grasp_clamp_inset_y。
-  grasp_clamp_inset_y: 0.02
+  grasp_clamp_inset_y: 0.00
 
   # 箱子宽度：左右方向尺寸。用于计算左右手夹取位置。
   width_y: 0.39
@@ -50,10 +50,10 @@ walk:
   linear_speed: 0.15
 
   # 抓取阶段：机器人接近抓取二维码后，与二维码保持的前向距离
-  pick_approach_distance: 0.30
+  pick_approach_distance: 0.35
 
   # 放置阶段：机器人接近放置二维码后，与二维码保持的前向距离
-  place_approach_distance: 0.38
+  place_approach_distance: 0.45
 
 grasp:
   # 是否在抓取流程中使用掌心关节偏置
