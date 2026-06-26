@@ -3,6 +3,7 @@ from typing import Optional, Dict, Set, List, Tuple, Any
 import enum
 import time
 import rospy
+import rosnode
 from sensor_msgs.msg import Joy
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
@@ -357,7 +358,28 @@ class H12ToJoyControllerNode:
 
 class H12PROControllerNode:
     """Main controller node for H12PRO remote controller."""
-    
+
+    def _control_stack_online(self, retries: int = 3, interval: float = 0.3) -> bool:
+        """探测控制栈是否在线（= 机器人是否还站着）。
+
+        用于 __init__ 状态恢复门：控制栈在线 -> 续 last_state（joy_node 崩溃重启，续运行态）；
+        控制栈不在线 -> 回 initial（终端退出后服务 reclaim，回待命态，避免按 C 失效）。
+
+        查询失败（rosnode 抛异常）的兜底方向是 True（保状态）：宁可退化成
+        “待命态按 C 不灵”的老问题（机器人静止、无危险），也不要在查询抽风时把一个
+        可能仍在运动的机器人 FSM 打回 initial。
+        """
+        for attempt in range(retries):
+            try:
+                nodes = rosnode.get_node_names()
+                return "/nodelet_controller" in nodes or "/humanoid_sqp_mpc" in nodes
+            except Exception as e:
+                rospy.logwarn(f"[StateRecovery] rosnode query failed ({attempt + 1}/{retries}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(interval)
+        rospy.logwarn("[StateRecovery] rosnode unavailable; assume stack ONLINE to preserve state")
+        return True
+
     def __init__(self):
         """Initialize H12PRO controller node."""
 
@@ -383,6 +405,8 @@ class H12PROControllerNode:
                 )
             
         print(f"[H12PROControllerNode]: robot_state_machine init state is {self.robot_state_machine.state}")
+        # 将初始状态写入 param，避免上次运行的残留值错误反映当前 FSM 状态
+        rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
 
         self.h12_to_joy_node = H12ToJoyControllerNode()
 
@@ -395,11 +419,24 @@ class H12PROControllerNode:
                 if last_saved_state != "none" and last_saved_state in LEGAL_STATES \
                         and last_saved_state not in ["initial", "calibrate"]:
 
-                    # 1. 恢复软件状态
-                    self.robot_state_machine.machine.set_state(
-                        last_saved_state, self.robot_state_machine
-                    )
-                    rospy.loginfo(f"[StateRecovery] Software state recovered to: {last_saved_state}")
+                    if self._control_stack_online():
+                        # 控制栈仍在线：joy_node 崩溃后被 monitor 重启，续上运行态。
+                        self.robot_state_machine.machine.set_state(
+                            last_saved_state, self.robot_state_machine
+                        )
+                        rospy.loginfo(f"[StateRecovery] stack online, recovered to: {last_saved_state}")
+                    else:
+                        # 控制栈不在线（终端退出后服务 reclaim 起新 joy_node）：
+                        # 丢弃跨 rosmaster 存活的遗留 last_state，回 initial 待命，
+                        # 否则会被钉在 stance，按 E左+F右+C 不命中 initial_pre 无法重新拉栈。
+                        self.robot_state_machine.machine.set_state(
+                            "initial", self.robot_state_machine
+                        )
+                        rospy.set_param(LAST_STATE_PARAM, "initial")
+                        rospy.logwarn(
+                            "[StateRecovery] control stack offline; reset FSM to initial "
+                            f"(discarded stale last_state={last_saved_state}) so H12 can relaunch."
+                        )
 
             except Exception as e:
                 rospy.logerr(f"[StateRecovery] Failed to recover: {e}")
