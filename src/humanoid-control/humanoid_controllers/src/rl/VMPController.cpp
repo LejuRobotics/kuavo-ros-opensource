@@ -379,6 +379,18 @@ void VMPController::resume()
   reset();
 }
 
+//waao：计算关节参考
+Eigen::VectorXd VMPController::getCurrentJointReference() const
+{
+  const int total_joints = jointNum_ + jointArmNum_ + waistNum_;
+  Eigen::VectorXd q_ref = defalutJointPosRL_.head(total_joints);
+  const Eigen::VectorXd action = getCurrentAction();
+  if (action.size() >= total_joints && actionScaleTestRL_.size() >= total_joints)
+  {
+    q_ref.array() += action.head(total_joints).array() * actionScale_ * actionScaleTestRL_.head(total_joints).array();
+  }
+  return q_ref;
+}
 
 bool VMPController::requestToExit() const
 {

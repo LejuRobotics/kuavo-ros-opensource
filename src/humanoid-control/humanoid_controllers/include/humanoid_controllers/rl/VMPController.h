@@ -67,6 +67,11 @@ namespace humanoid_controller
      */
     bool requestToExit() const override;
 
+    /**
+     * @waao 计算当前的关节参考
+     */
+    Eigen::VectorXd getCurrentJointReference() const override;
+
   protected:
     /**
      * @brief 更新控制器实现

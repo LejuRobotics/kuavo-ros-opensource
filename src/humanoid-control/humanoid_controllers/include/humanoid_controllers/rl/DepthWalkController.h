@@ -33,6 +33,7 @@ namespace humanoid_controller
     void reset() override;
     void pause() override;
     void resume() override;
+    void resumeWarm() override;
 
     /**
      * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
@@ -53,6 +54,28 @@ namespace humanoid_controller
      * 使用从配置文件加载的velocityLimits_设置速度限制
      */
     void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
+
+    /**
+     * @waao 计算当前的关节参考
+     */
+    Eigen::VectorXd getCurrentJointReference() const override;
+
+    //waao：相位对齐
+    bool supportsWalkingPhaseSyncSwitch() const override { return true; }
+    bool hasValidWalkingPhase() const override { return has_valid_phase_; }
+    double getWalkingPhaseRad() const override;
+    double getWalkingFrequencyHz() const override;
+    void setExternalPhaseOverride(bool enabled,
+                                  double sin_phase,
+                                  double cos_phase,
+                                  double gait_frequency_hz) override;
+    void resetGaitCommandState(bool stance_mode = true) override;
+    bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const override;
+    void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) override;
+    void setSwitchVelocityScale(double scale) override;
+    bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const override;
+    bool isInPlaceSteppingActive() const override;
+    bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const override;
 
   protected:
 
@@ -118,6 +141,11 @@ namespace humanoid_controller
     Eigen::VectorXd commandPhase_;     // sin(phase), cos(phase)
     Eigen::VectorXd frePhase_;
     ModeNumber rl_plannedMode_{ModeNumber::SS};
+    bool has_valid_phase_{false};
+    bool external_phase_override_enabled_{false};
+    double external_phase_sin_{0.0};
+    double external_phase_cos_{1.0};
+    double external_phase_frequency_hz_{1.0};
 
     // 观测相关
     int frameStack_{1};

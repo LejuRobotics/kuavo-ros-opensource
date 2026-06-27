@@ -75,6 +75,36 @@ namespace humanoid_controller
   using Clock = std::chrono::high_resolution_clock;
   std::mutex head_mtx;
 
+  namespace
+  {
+    double quinticBlend(double alpha)
+    {
+      alpha = std::clamp(alpha, 0.0, 1.0);
+      return alpha * alpha * alpha * (10.0 + alpha * (-15.0 + 6.0 * alpha));
+    }
+
+    double blendScalar(double start, double target, double alpha)
+    {
+      return start + (target - start) * alpha;
+    }
+
+    double computeRlToRlVelocityDipScale(double alpha, double min_scale, double midpoint)
+    {
+      alpha = std::clamp(alpha, 0.0, 1.0);
+      min_scale = std::clamp(min_scale, 0.0, 1.0);
+      midpoint = std::clamp(midpoint, 1e-3, 1.0 - 1e-3);
+
+      if (alpha <= midpoint)
+      {
+        const double local_alpha = std::clamp(alpha / midpoint, 0.0, 1.0);
+        return blendScalar(1.0, min_scale, quinticBlend(local_alpha));
+      }
+
+      const double local_alpha = std::clamp((alpha - midpoint) / (1.0 - midpoint), 0.0, 1.0);
+      return blendScalar(min_scale, 1.0, quinticBlend(local_alpha));
+    }
+  }
+
   // 辅助函数：获取完整节点名
   static std::string fullyQualifiedNodeName(const std::string &name)
   {
@@ -176,6 +206,8 @@ namespace humanoid_controller
           for (int i = 0; i < 5; i++)
           {
             std::cout << "publish stop message" << std::endl;
+            //waao
+            ROS_ERROR_STREAM("[stop_robot_debug] keyboard_thread_func publishing /stop_robot because keyboard command x was pressed, attempt=" << (i + 1));
             std_msgs::Bool stop_msg;
             stop_msg.data = true;
             stop_pub_.publish(stop_msg);
@@ -413,6 +445,11 @@ namespace humanoid_controller
     // 检测is_rl_start参数，如果为true则绕过MPC控制器，直接使用RL控制器
     controllerNh_.param<bool>("/is_rl_start", is_rl_start_, false);
 
+    //waao：控制RL->RL策略的切换时间 只有双策略推理模式可以调较大的时间，单插值模式下只能在1.5s以内
+    controllerNh_.param("/rl_to_rl_switch_duration",
+                        rl_to_rl_switch_duration_,
+                        static_cast<double>(RL_TO_RL_SWITCH_DURATION_DEFAULT));
+    
     if (controllerNh_.hasParam("/use_sit_init"))
     {
       controllerNh_.getParam("/use_sit_init", use_sit_init_);
@@ -512,6 +549,12 @@ namespace humanoid_controller
     default_state_.resize(12+actuatedDofNumReal_);
     default_state_.setZero();
     arm_mode_sync_time_ = ros::Time::now().toSec();
+    //waao：小机器人把头低下
+    // if (headNum_ > 0 && !is_real_ && rb_version.to_string() == "17")
+    // {
+    //   desire_head_pos_.setZero();
+    //   desire_head_pos_[1] = 0.785398;
+    // }
     
     // 检查RL参数文件是否存在，只有文件存在时才启用RL功能
     // std::ifstream rlParamFileCheck(rlParamFile);
@@ -879,6 +922,91 @@ namespace humanoid_controller
           return true;
         }
       });
+
+      controller_manager_->registerStationaryPhysicalStateCallback([this]() -> bool {
+        if (!stateEstimate_ || contactForce_.size() <= 8)
+        {
+          return false;
+        }
+
+        const vector_t torso_state = stateEstimate_->getTorsoState();
+        if (torso_state.size() < 9)
+        {
+          return false;
+        }
+
+        const bool torso_linear_velocity_is_near_zero =
+            torso_state.segment<3>(6).norm() <=
+            RL_SWITCH_STATIONARY_TORSO_LINEAR_VELOCITY_THRESHOLD_DEFAULT;
+        const double minimum_foot_force =
+            centroidalModelInfo_.robotMass * 9.8 *
+            RL_SWITCH_STATIONARY_FOOT_FORCE_WEIGHT_RATIO_DEFAULT;
+        const bool both_feet_in_contact =
+            contactForce_(2) >= minimum_foot_force && contactForce_(8) >= minimum_foot_force;
+        return torso_linear_velocity_is_near_zero && both_feet_in_contact;
+      });
+
+      controller_manager_->registerWalkingPhaseSyncSwitchGuardCallback(
+          [this](const std::string& current_name, const std::string& target_name, std::string& message) -> bool {
+            const bool guard_enabled = RL_SWITCH_WALKING_KNEE_DIFF_GUARD_ENABLED_DEFAULT != 0;
+            if (!guard_enabled)
+            {
+              return true;
+            }
+
+            const int left_knee_index = RL_SWITCH_LEFT_KNEE_INDEX_DEFAULT;
+            const int right_knee_index = RL_SWITCH_RIGHT_KNEE_INDEX_DEFAULT;
+            double min_knee_diff_rad = RL_SWITCH_WALKING_KNEE_DIFF_MIN_RAD_DEFAULT;
+            double max_knee_diff_rad = RL_SWITCH_WALKING_KNEE_DIFF_MAX_RAD_DEFAULT;
+            const char* guard_mode = "walking";
+
+            if (controller_manager_)
+            {
+              auto* current_controller = controller_manager_->getControllerByName(current_name);
+              ocs2::humanoid::CommandDataRL current_command;
+              if (current_controller &&
+                  current_controller->getGaitCommandState(current_command) &&
+                  current_command.cmdStance_ < 0.5 &&
+                  current_controller->isInPlaceWalkingCommand(
+                      RL_SWITCH_STATIONARY_COMMAND_LINEAR_THRESHOLD_DEFAULT,
+                      RL_SWITCH_STATIONARY_COMMAND_ANGULAR_THRESHOLD_DEFAULT))
+              {
+                min_knee_diff_rad = RL_SWITCH_IN_PLACE_KNEE_DIFF_MIN_RAD_DEFAULT;
+                max_knee_diff_rad = RL_SWITCH_IN_PLACE_KNEE_DIFF_MAX_RAD_DEFAULT;
+                guard_mode = "in-place";
+              }
+            }
+
+            if (left_knee_index < 0 || right_knee_index < 0)
+            {
+              message = "invalid knee joint index configuration";
+              return false;
+            }
+
+            const int max_knee_index = std::max(left_knee_index, right_knee_index);
+            if (jointPosWBC_.size() <= max_knee_index)
+            {
+              message = "current joint state is not ready for knee-diff switch guard";
+              return false;
+            }
+
+            const double left_knee_angle = jointPosWBC_(left_knee_index);
+            const double right_knee_angle = jointPosWBC_(right_knee_index);
+            const double knee_diff_rad = std::abs(left_knee_angle - right_knee_angle);
+            if (knee_diff_rad < min_knee_diff_rad || knee_diff_rad > max_knee_diff_rad)
+            {
+              std::ostringstream oss;
+              oss << "blocked " << current_name << " -> " << target_name
+                  << " because " << guard_mode
+                  << " knee angle diff is too small or too big: |q_l - q_r|="
+                  << knee_diff_rad << " rad, threshold=" << min_knee_diff_rad
+                  << "," << max_knee_diff_rad << " rad";
+              message = oss.str();
+              return false;
+            }
+
+            return true;
+          });
       
       // 初始化 ROS 服务（由 RLControllerManager 管理）
       controller_manager_->initializeRosServices(controllerNh_);
@@ -1014,6 +1142,7 @@ namespace humanoid_controller
         }
         if (msg->data[0] != mpcArmControlMode_)
         {
+          const int previous_arm_control_mode = static_cast<int>(mpcArmControlMode_);
           mpcArmControlMode_ = static_cast<ArmControlMode>(msg->data[0]);
           std::cout << "[controller] mpc arm control mode changed to: " << mpcArmControlMode_ << std::endl;
           
@@ -1022,6 +1151,7 @@ namespace humanoid_controller
           {
             stateEstimate_->resetPullUpFilter();
             ROS_INFO("[HumanoidController] Reset pullup filter due to mode switch (from %d to %d)", 
+                     previous_arm_control_mode,
                      static_cast<int>(mpcArmControlMode_));
           }
           
@@ -2466,12 +2596,14 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     ros_logger_->publishValue("/humanoid_controller/resetting_mpc_state_", resetting_mpc_state_);
     ros_logger_->publishValue("/humanoid_controller/fall_down_state_", fall_down_state_);
 
-    // is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
-    is_rl_controller_ = !controller_manager_->isBaseControllerActive();
-    current_controller_ptr_ = controller_manager_->getCurrentController();
-
     // 同步MPC stance状态到RLControllerManager
     controller_manager_->setMpcStanceState(is_stance_mode_, current_gait_.name);
+    controller_manager_->updateSwitchMotionState();
+    controller_manager_->processPendingWalkingSwitchRequest();
+
+    // is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
+    is_rl_controller_ = !controller_manager_->isBaseControllerActive();  //waao：判断当前是否为rl
+    current_controller_ptr_ = controller_manager_->getCurrentController();
 
     RLControllerType current_controller_type = controller_manager_->getCurrentControllerType();
     bool is_fall_stand_controller_active = current_controller_type == RLControllerType::FALL_STAND_CONTROLLER;
@@ -2522,7 +2654,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       bool use_interpolate = current_controller_ptr_->getUseInterpolateFromMPC();
       derect_switch_to_rl = !use_interpolate;
     }
-    if (!derect_switch_to_rl && !last_is_rl_controller_ && is_rl_controller_)
+    if (!derect_switch_to_rl && !last_is_rl_controller_ && is_rl_controller_)  
     {
       // 进入 RL 前，先用 MPC 将躯干高度插值到 RL 默认高度
       inference_running_ = true;
@@ -2532,7 +2664,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       current_arm_pos = jointPosWBC_.segment(jointNumReal_+ waistNum_, armNumReal_);
       current_arm_vel = jointVelWBC_.segment(jointNumReal_+ waistNum_, armNumReal_);
 
-      currentDefalutJointPosRL_ = current_controller_ptr_->getDefaultJointPos();
+      currentDefalutJointPosRL_ = current_controller_ptr_->getDefaultJointPos();  //waao：读取RL的defaultpos
       defaultBaseHeightControl_ = current_controller_ptr_->getDefaultBaseHeightControl();
       std::cout << "last_controller_ptr->getName(): " << current_controller_ptr_->getName() << std::endl;
       std::cout << "New currentDefalutJointPosRL_: " << currentDefalutJointPosRL_.transpose() << std::endl;
@@ -2577,7 +2709,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
 
     }
-    else if (last_is_rl_controller_ && !is_rl_controller_)
+    else if (last_is_rl_controller_ && !is_rl_controller_)  //waao:上一次RL
     {
       reset_mpc_ = true;
       inference_running_ = false;
@@ -2622,7 +2754,16 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       // 从RL切换到MPC时，重置运动学估计（包括状态估计器、时间戳、yaw连续性等）
       resetKinematicsEstimation();
     }
-    last_is_rl_controller_ = is_rl_controller_;
+    // last_is_rl_controller_ = is_rl_controller_;
+
+    //waao
+    const std::string active_rl_controller_name = controller_manager_->getCurrentControllerName();
+    const bool is_rl_to_rl_switch = last_is_rl_controller_ && is_rl_controller_ &&
+                                    !last_rl_controller_name_.empty() &&
+                                    !active_rl_controller_name.empty() &&
+                                    last_rl_controller_name_ != active_rl_controller_name;  //waao：rl切换策略标志
+    RLControllerBase* last_rl_controller = controller_manager_->getLastController();
+
     kuavo_msgs::jointCmd jointCmdMsg;
     jointCmdMsg.header.stamp = time;
     
@@ -2652,7 +2793,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     {
       mpc_flow = ((!is_rl_controller_) || is_torso_interpolation_active_) && !transport_flow;
     }
-    if (mpc_flow && !is_fall_stand_controller_active)
+    if (mpc_flow && !is_fall_stand_controller_active)  //MPC控制器
     {
       is_mpc_controller_ = true;
       if (reset_mpc_) // 重置mpc
@@ -2674,6 +2815,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
             return;
           }
           ROS_ERROR_STREAM("[humanoid Controller] No Fall Stand Controller, stopping all controllers.");
+          ROS_ERROR_STREAM("[stop_robot_debug] publishing /stop_robot from humanoidController::update fall-down branch (stance/posDes section)"); //waao
           std_msgs::Bool stop_msg;
           stop_msg.data = true;
           stop_pub_.publish(stop_msg);
@@ -3440,7 +3582,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       replaceDefaultEcMotorPdoGait(jointCmdMsg);
 
     }
-    else
+    else   //RL控制器
     {
       if (is_mpc_controller_) // 处理一次从MPC切换的逻辑
       {
@@ -3454,67 +3596,24 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       if (!transport_flow)
       {
         if (!current_controller_ptr_) { is_rl_controller_ = last_is_rl_controller_ = false; return; }
-
-        vector_t feetPositions = stateEstimate_->getEndEffectorPositions();
-        vector_t baseState = stateEstimate_->getTorsoState();
-        // 传入额外的估计量
-        current_controller_ptr_->applyFeetPositions(feetPositions);
-        current_controller_ptr_->applyBaseState(baseState);
-        // 更新控制器
-        current_controller_ptr_->update(time, getRobotSensorData(), getRobotState(), jointCmdMsg);
-
-
-
-        // 补充头部维度
-        // 计算头部反馈力
-        if (headNum_ > 0)
+        if (is_rl_to_rl_switch)
         {
-          vector_t get_head_pos = vector_t::Zero(headNum_);
-          head_mtx.lock();
-          get_head_pos = desire_head_pos_;
-          head_mtx.unlock();
-          auto &hardware_settings = kuavo_settings_.hardware_settings;
-          const auto &running_settings = kuavo_settings_.running_settings;
-          vector_t head_feedback_tau = vector_t::Zero(headNum_);
-          vector_t head_feedback_vel = vector_t::Zero(headNum_);
-          if (!is_real_) // 实物不需要头部反馈力，来自kuavo仓库的移植
-            head_feedback_tau = head_kp_.cwiseProduct(get_head_pos - sensor_data_head_.jointPos_) + head_kd_.cwiseProduct(-sensor_data_head_.jointVel_);
-          for (int i3 = 0; i3 < headNum_; ++i3)
+          refreshRLToRLSwitchParams();
+          if (controller_manager_->getLastSwitchMotionState() ==
+              RLControllerManager::SwitchMotionState::WALKING)
           {
-            auto cur_head_pos = sensor_data_head_.jointPos_ * TO_DEGREE;
-            auto vel = (get_head_pos[i3] - sensor_data_head_.jointPos_[i3]) * TO_DEGREE / dt_ * ruiwo_motor_velocities_factor_;
-            double head_limit_vel = hardware_settings.joint_velocity_limits[jointNumReal_ + waistNum_ + armNumReal_ + i3];
-
-            vel = std::clamp(vel, -head_limit_vel, head_limit_vel) * TO_RADIAN;
-            auto head_start_index = jointNumReal_ + waistNum_ + armNumReal_;
-            double head_kp_cmd = 0.0, head_kd_cmd = 0.0;
-            {
-              const int n_ruiwo = static_cast<int>(running_settings.ruiwo_kp.size());
-              if (!running_settings.ruiwo_kp.empty() &&
-                  !running_settings.ruiwo_kd.empty() &&
-                  running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size() &&
-                  n_ruiwo >= headNum_)
-              {
-                const int base = n_ruiwo - headNum_;
-                head_kp_cmd = running_settings.ruiwo_kp[base + i3];
-                head_kd_cmd = running_settings.ruiwo_kd[base + i3];
-              }
-            }
-            jointCmdMsg.joint_q[head_start_index + i3] = get_head_pos(i3);
-            jointCmdMsg.joint_v[head_start_index + i3] = 0;
-            jointCmdMsg.joint_kp[head_start_index + i3] = head_kp_cmd;
-            jointCmdMsg.joint_kd[head_start_index + i3] = head_kd_cmd;
-            jointCmdMsg.tau[head_start_index + i3] = head_feedback_tau(i3);
-            jointCmdMsg.tau_ratio[head_start_index + i3] = 1;
-            jointCmdMsg.tau_max[head_start_index + i3] = 10;
-            jointCmdMsg.control_modes[head_start_index + i3] = 2;
+            tryActivateRLToRLWalkingPhaseSync(last_rl_controller, current_controller_ptr_, currentObservation_.time);
+          }
+          else
+          {
+            clearRLToRLWalkingPhaseSync();
           }
         }
-        // 如果 use_default_motor_csp_kpkd 为 true，使用 running_settings 中的 kp/kd 替换 EC_MASTER 电机的值
-        if (current_controller_ptr_->getUseDefaultMotorCspKpkd())
+        if (rl_to_rl_walking_phase_sync_active_)
         {
-          replaceDefaultEcMotorPdoGait(jointCmdMsg);
+          updateRLToRLWalkingPhaseSync(currentObservation_.time);
         }
+        buildRLControllerJointCmd(current_controller_ptr_, time, jointCmdMsg);
       }
 
       // 规范化jointCmd尺寸，确保与硬件/仿真期望一致（RL 和 搬运 都需要）
@@ -3581,6 +3680,110 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         }
       }
     }
+
+    //waao
+    /********************************************************************RL->RL插值********************************************************************/
+    if (is_rl_controller_ && !transport_flow)
+    {
+#if ENABLE_RL_TO_RL_INTERPOLATION
+      if (is_rl_to_rl_switch)  //waao：如果切换rl策略
+      {
+#if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
+        if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+        {
+          //waao：双策略推理模式
+          activateRLToRLLiveSourceController(last_rl_controller,
+                                             last_rl_controller_name_,
+                                             active_rl_controller_name,
+                                             currentObservation_.time,
+                                             jointCmdMsg);
+        }
+        else
+        {
+          ROS_WARN("[RL->RL] Skip live interpolation because source/target controller is missing.");
+          stopRLToRLInterpolation();
+        }
+#else
+        if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+        {
+          startRLToRLInterpolation(currentObservation_.time,
+                                   last_rl_controller_name_,
+                                   active_rl_controller_name,
+                                   last_rl_joint_reference_,
+                                   current_controller_ptr_->getCurrentJointReference(),
+                                   last_rl_controller->getJointKpVector(),
+                                   last_rl_controller->getJointKdVector(),
+                                   last_rl_controller->getJointTorqueLimits(),
+                                   last_rl_controller->getJointControlModes(),
+                                   last_rl_controller->getJointPdModes(),
+                                   current_controller_ptr_->getJointKpVector(),
+                                   current_controller_ptr_->getJointKdVector(),
+                                   current_controller_ptr_->getJointTorqueLimits(),
+                                   current_controller_ptr_->getJointControlModes(),
+                                   current_controller_ptr_->getJointPdModes(),
+                                   jointCmdMsg);
+        }
+        else
+        {
+          ROS_WARN("[RL->RL] Skip interpolation because RL joint reference/joint_cmd cache is incomplete.");
+          stopRLToRLInterpolation();
+        }
+#endif
+      }
+
+#if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
+      if (is_rl_to_rl_interpolation_active_)
+      {
+        applyRLToRLSwitchVelocityProfile(currentObservation_.time);
+        kuavo_msgs::jointCmd source_joint_cmd;
+        if (buildRLControllerJointCmd(rl_to_rl_live_source_controller_ptr_, time, source_joint_cmd))
+        {
+          applyRLToRLLiveInterpolation(currentObservation_.time, source_joint_cmd, jointCmdMsg);
+        }
+        else
+        {
+          ROS_WARN("[RL->RL] Live interpolation stopped because source controller joint_cmd is unavailable.");
+          stopRLToRLInterpolation();
+        }
+      }
+#else
+      applyRLToRLInterpolation(currentObservation_.time, jointCmdMsg);
+#endif
+#else
+      if (is_rl_to_rl_switch)
+      {
+        ROS_INFO("[RL->RL] Hard switch enabled by macro: %s -> %s",
+                 last_rl_controller_name_.c_str(),
+                 active_rl_controller_name.c_str());
+      }
+      stopRLToRLInterpolation();
+#endif
+      if (current_controller_ptr_ != nullptr)
+      {
+        last_rl_joint_reference_ = current_controller_ptr_->getCurrentJointReference();
+        has_last_rl_joint_reference_ = (last_rl_joint_reference_.size() > 0);
+      }
+      else
+      {
+        last_rl_joint_reference_.resize(0);
+        has_last_rl_joint_reference_ = false;
+      }
+      last_rl_joint_cmd_ = jointCmdMsg;
+      has_last_rl_joint_cmd_ = !jointCmdMsg.control_modes.empty();
+      last_rl_controller_name_ = active_rl_controller_name;
+    }
+    else
+    {
+      stopRLToRLInterpolation();
+      has_last_rl_joint_reference_ = false;
+      has_last_rl_joint_cmd_ = false;
+      last_rl_joint_reference_.resize(0);
+      last_rl_joint_cmd_ = kuavo_msgs::jointCmd();
+      last_rl_controller_name_.clear();
+    }
+
+    last_is_rl_controller_ = is_rl_controller_;
+    /************************************************************************************************************************************************/
 
     // 搬运分支：生成 leg+waist+arm 位控锁死命令；head 单独处理（见上）
     if (transport_active_or_interpolating)
@@ -3804,7 +4007,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
       last_time_ = current_time_;
       ros::Duration period = ros::Duration(diff_time);
-
+      
 
       vector_t activeTorque = joint_torque_;
       vector_t activeTorqueWBC =  jointCurrentWBC_;
@@ -3899,6 +4102,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         {
           ROS_WARN_STREAM("Pull up protection triggered - publishing stop_robot message");
           // 发布stop_robot话题
+          ROS_ERROR_STREAM("[stop_robot_debug] publishing /stop_robot from pull-up protection branch, observation_time=" << currentObservation_.time); //waao
           std_msgs::Bool stop_msg;
           stop_msg.data = true;
           stop_pub_.publish(stop_msg);
@@ -5240,6 +5444,693 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     }
   }
 
+  //waao:RL发送关节控制信号
+  bool humanoidController::buildRLControllerJointCmd(RLControllerBase* controller,
+                                                     const ros::Time& time,
+                                                     kuavo_msgs::jointCmd& joint_cmd)
+  {
+    if (controller == nullptr)
+    {
+      return false;
+    }
+
+    joint_cmd = kuavo_msgs::jointCmd();
+    joint_cmd.header.stamp = time;
+
+    if (controller->supportsWalkingPhaseSyncSwitch())
+    {
+      const bool use_phase_sync = rl_to_rl_walking_phase_sync_active_ &&
+                                  (controller == rl_to_rl_phase_sync_source_controller_ptr_ ||
+                                   controller == rl_to_rl_phase_sync_target_controller_ptr_);
+      controller->setExternalPhaseOverride(use_phase_sync,
+                                           std::sin(rl_to_rl_phase_sync_phi_rad_),
+                                           std::cos(rl_to_rl_phase_sync_phi_rad_),
+                                           rl_to_rl_phase_sync_frequency_hz_);
+    }
+
+    vector_t feetPositions = stateEstimate_->getEndEffectorPositions();
+    vector_t baseState = stateEstimate_->getTorsoState();
+    controller->applyFeetPositions(feetPositions);
+    controller->applyBaseState(baseState);
+    controller->update(time, getRobotSensorData(), getRobotState(), joint_cmd);
+
+    const size_t expected_size = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_ + headNum_);
+
+    auto resize_double = [expected_size](std::vector<double>& values, double fill) {
+      values.resize(expected_size, fill);
+    };
+
+    auto resize_int = [expected_size](std::vector<int>& values, int fill) {
+      values.resize(expected_size, fill);
+    };
+
+    resize_double(joint_cmd.joint_q, 0.0);
+    resize_double(joint_cmd.joint_v, 0.0);
+    resize_double(joint_cmd.tau, 0.0);
+    resize_double(joint_cmd.tau_ratio, 1.0);
+    resize_double(joint_cmd.tau_max, 0.0);
+    resize_double(joint_cmd.joint_kp, 0.0);
+    resize_double(joint_cmd.joint_kd, 0.0);
+    resize_int(joint_cmd.control_modes, 2);
+
+    if (headNum_ > 0)
+    {
+      vector_t get_head_pos = vector_t::Zero(headNum_);
+      head_mtx.lock();
+      get_head_pos = desire_head_pos_;
+      head_mtx.unlock();
+      auto& hardware_settings = kuavo_settings_.hardware_settings;
+      const auto& running_settings = kuavo_settings_.running_settings;
+      vector_t head_feedback_tau = vector_t::Zero(headNum_);
+      if (!is_real_)
+      {
+        head_feedback_tau =
+            head_kp_.cwiseProduct(get_head_pos - sensor_data_head_.jointPos_) +
+            head_kd_.cwiseProduct(-sensor_data_head_.jointVel_);
+      }
+
+      for (int i3 = 0; i3 < headNum_; ++i3)
+      {
+        auto vel = (get_head_pos[i3] - sensor_data_head_.jointPos_[i3]) * TO_DEGREE / dt_ * ruiwo_motor_velocities_factor_;
+        const double head_limit_vel = hardware_settings.joint_velocity_limits[jointNumReal_ + waistNum_ + armNumReal_ + i3];
+        vel = std::clamp(vel, -head_limit_vel, head_limit_vel) * TO_RADIAN;
+        (void)vel;
+
+        const auto head_start_index = jointNumReal_ + waistNum_ + armNumReal_;
+        double head_kp_cmd = 0.0;
+        double head_kd_cmd = 0.0;
+        const int n_ruiwo = static_cast<int>(running_settings.ruiwo_kp.size());
+        if (!running_settings.ruiwo_kp.empty() &&
+            !running_settings.ruiwo_kd.empty() &&
+            running_settings.ruiwo_kp.size() == running_settings.ruiwo_kd.size() &&
+            n_ruiwo >= headNum_)
+        {
+          const int base = n_ruiwo - headNum_;
+          head_kp_cmd = static_cast<double>(running_settings.ruiwo_kp[base + i3]);
+          head_kd_cmd = static_cast<double>(running_settings.ruiwo_kd[base + i3]);
+        }
+        joint_cmd.joint_q[head_start_index + i3] = get_head_pos(i3);
+        joint_cmd.joint_v[head_start_index + i3] = 0.0;
+        joint_cmd.joint_kp[head_start_index + i3] = head_kp_cmd;
+        joint_cmd.joint_kd[head_start_index + i3] = head_kd_cmd;
+        joint_cmd.tau[head_start_index + i3] = head_feedback_tau(i3);
+        joint_cmd.tau_ratio[head_start_index + i3] = 1.0;
+        joint_cmd.tau_max[head_start_index + i3] = 10.0;
+        joint_cmd.control_modes[head_start_index + i3] = 2;
+      }
+    }
+
+    if (controller->getUseDefaultMotorCspKpkd())
+    {
+      replaceDefaultEcMotorPdoGait(joint_cmd);
+    }
+
+    return true;
+  }
+
+  bool humanoidController::tryActivateRLToRLWalkingPhaseSync(RLControllerBase* source_controller,
+                                                             RLControllerBase* target_controller,
+                                                             double current_time)
+  {
+    if (source_controller == nullptr || target_controller == nullptr)
+    {
+      return false;
+    }
+
+    const bool is_amp_depth_pair =
+        (source_controller->getType() == RLControllerType::AMP_CONTROLLER &&
+         target_controller->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER) ||
+        (source_controller->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER &&
+         target_controller->getType() == RLControllerType::AMP_CONTROLLER);
+    if (!is_amp_depth_pair ||
+        !source_controller->supportsWalkingPhaseSyncSwitch() ||
+        !target_controller->supportsWalkingPhaseSyncSwitch() ||
+        !source_controller->hasValidWalkingPhase())
+    {
+      clearRLToRLWalkingPhaseSync();
+      return false;
+    }
+
+    const double source_phi = source_controller->getWalkingPhaseRad();
+    const bool target_has_phase = target_controller->hasValidWalkingPhase();
+    const double target_phi = target_has_phase ? target_controller->getWalkingPhaseRad() : source_phi;
+    const double source_sin = std::sin(source_phi);
+    const double target_sin = std::sin(target_phi);
+    //waao：两个策略的步态相位必须都在同样的相位
+    const bool same_sign = (source_sin * target_sin) >= 0.0;
+    //waao：避免在0附近切换
+    const bool away_from_boundary = std::abs(source_sin) > rl_to_rl_phase_sync_sin_guard_ &&
+                                    std::abs(target_sin) > rl_to_rl_phase_sync_sin_guard_;
+    //waao：计算相位差                                
+    const double delta_phi = std::atan2(std::sin(source_phi - target_phi),
+                                        std::cos(source_phi - target_phi));
+    //waao：相位差要足够小才能切换                                    
+    const bool delta_small = std::abs(delta_phi) <= rl_to_rl_phase_sync_phi_thresh_rad_;
+    if (!same_sign || !away_from_boundary || !delta_small)
+    {
+      clearRLToRLWalkingPhaseSync();
+      ROS_WARN_THROTTLE(0.5,
+                        "[RL->RL] Walking phase sync gate rejected: same_sign=%d away_from_boundary=%d delta=%.3f thresh=%.3f",
+                        static_cast<int>(same_sign),
+                        static_cast<int>(away_from_boundary),
+                        delta_phi,
+                        rl_to_rl_phase_sync_phi_thresh_rad_);
+      return false;
+    }
+
+    rl_to_rl_walking_phase_sync_active_ = true;
+    rl_to_rl_phase_sync_source_controller_ptr_ = source_controller;
+    rl_to_rl_phase_sync_target_controller_ptr_ = target_controller;
+    rl_to_rl_phase_sync_phi_rad_ = source_phi;
+    rl_to_rl_phase_sync_source_frequency_hz_ = std::max(source_controller->getWalkingFrequencyHz(), 1e-3);
+    rl_to_rl_phase_sync_target_frequency_hz_ =
+        std::max(target_has_phase ? target_controller->getWalkingFrequencyHz()
+                                  : rl_to_rl_phase_sync_source_frequency_hz_,
+                 1e-3);
+    rl_to_rl_phase_sync_frequency_hz_ = rl_to_rl_phase_sync_source_frequency_hz_;
+    rl_to_rl_phase_sync_delta_phi_rad_ = delta_phi;
+    rl_to_rl_phase_sync_last_update_time_ = current_time;
+
+    const double sync_sin = std::sin(rl_to_rl_phase_sync_phi_rad_);
+    const double sync_cos = std::cos(rl_to_rl_phase_sync_phi_rad_);
+    source_controller->setExternalPhaseOverride(true, sync_sin, sync_cos, rl_to_rl_phase_sync_frequency_hz_);
+    target_controller->setExternalPhaseOverride(true, sync_sin, sync_cos, rl_to_rl_phase_sync_frequency_hz_);
+    ROS_INFO("[RL->RL] Activate walking phase sync: phi=%.3f delta=%.3f freqA=%.3f freqB=%.3f",
+             rl_to_rl_phase_sync_phi_rad_,
+             rl_to_rl_phase_sync_delta_phi_rad_,
+             rl_to_rl_phase_sync_source_frequency_hz_,
+             rl_to_rl_phase_sync_target_frequency_hz_);
+    return true;
+  }
+
+  void humanoidController::refreshRLToRLSwitchParams()
+  {
+    controllerNh_.param("/rl_to_rl_switch_duration", rl_to_rl_switch_duration_, rl_to_rl_switch_duration_);
+    controllerNh_.param("/rl_to_rl_phase_sync_phi_thresh_rad", rl_to_rl_phase_sync_phi_thresh_rad_, rl_to_rl_phase_sync_phi_thresh_rad_);
+    controllerNh_.param("/rl_to_rl_phase_sync_sin_guard", rl_to_rl_phase_sync_sin_guard_, rl_to_rl_phase_sync_sin_guard_);
+    controllerNh_.param("/rl_to_rl_phase_sync_k0", rl_to_rl_phase_sync_k0_, rl_to_rl_phase_sync_k0_);
+    controllerNh_.param("/rl_to_rl_phase_sync_decay_power", rl_to_rl_phase_sync_decay_power_, rl_to_rl_phase_sync_decay_power_);
+    controllerNh_.param("/rl_to_rl_phase_sync_frequency_min_hz", rl_to_rl_phase_sync_frequency_min_hz_, rl_to_rl_phase_sync_frequency_min_hz_);
+    controllerNh_.param("/rl_to_rl_phase_sync_frequency_max_hz", rl_to_rl_phase_sync_frequency_max_hz_, rl_to_rl_phase_sync_frequency_max_hz_);
+    controllerNh_.param("/rl_to_rl_velocity_dip_enabled", rl_to_rl_velocity_dip_enabled_, rl_to_rl_velocity_dip_enabled_);
+    controllerNh_.param("/rl_to_rl_velocity_dip_min_scale", rl_to_rl_velocity_dip_min_scale_, rl_to_rl_velocity_dip_min_scale_);
+    controllerNh_.param("/rl_to_rl_velocity_dip_midpoint", rl_to_rl_velocity_dip_midpoint_, rl_to_rl_velocity_dip_midpoint_);
+    rl_to_rl_velocity_dip_min_scale_ = std::clamp(rl_to_rl_velocity_dip_min_scale_, 0.0, 1.0);
+    rl_to_rl_velocity_dip_midpoint_ = std::clamp(rl_to_rl_velocity_dip_midpoint_, 0.05, 0.95);
+  }
+
+  void humanoidController::applyRLToRLSwitchVelocityProfile(double current_time)
+  {
+    const auto apply_scale = [](RLControllerBase* controller, double scale) {
+      if (controller != nullptr)
+      {
+        controller->setSwitchVelocityScale(scale);
+      }
+    };
+
+    if (!rl_to_rl_velocity_dip_enabled_ || !is_rl_to_rl_interpolation_active_)
+    {
+      apply_scale(rl_to_rl_live_source_controller_ptr_, 1.0);
+      apply_scale(current_controller_ptr_, 1.0);
+      return;
+    }
+
+    const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);
+    const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
+    const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
+    const double velocity_scale =
+        computeRlToRlVelocityDipScale(alpha, rl_to_rl_velocity_dip_min_scale_, rl_to_rl_velocity_dip_midpoint_);
+
+    apply_scale(rl_to_rl_live_source_controller_ptr_, velocity_scale);
+    apply_scale(current_controller_ptr_, velocity_scale);
+  }
+
+  void humanoidController::updateRLToRLWalkingPhaseSync(double current_time)
+  {
+    if (!rl_to_rl_walking_phase_sync_active_ ||
+        rl_to_rl_phase_sync_source_controller_ptr_ == nullptr ||
+        rl_to_rl_phase_sync_target_controller_ptr_ == nullptr)
+    {
+      return;
+    }
+
+    const double dt_sync = std::max(0.0, current_time - rl_to_rl_phase_sync_last_update_time_);
+    rl_to_rl_phase_sync_last_update_time_ = current_time;
+    if (dt_sync <= 0.0)
+    {
+      return;
+    }
+
+    const double source_phi = rl_to_rl_phase_sync_source_controller_ptr_->getWalkingPhaseRad();
+    const double target_phi = rl_to_rl_phase_sync_target_controller_ptr_->hasValidWalkingPhase()
+                                  ? rl_to_rl_phase_sync_target_controller_ptr_->getWalkingPhaseRad()
+                                  : source_phi;
+    rl_to_rl_phase_sync_source_frequency_hz_ =
+        std::max(rl_to_rl_phase_sync_source_controller_ptr_->getWalkingFrequencyHz(), 1e-3);
+    rl_to_rl_phase_sync_target_frequency_hz_ =
+        std::max(rl_to_rl_phase_sync_target_controller_ptr_->hasValidWalkingPhase()
+                     ? rl_to_rl_phase_sync_target_controller_ptr_->getWalkingFrequencyHz()
+                     : rl_to_rl_phase_sync_target_frequency_hz_,
+                 1e-3);
+    rl_to_rl_phase_sync_delta_phi_rad_ = std::atan2(std::sin(source_phi - target_phi),
+                                                    std::cos(source_phi - target_phi));
+
+    const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);
+    const double alpha_linear =
+        std::clamp((current_time - rl_to_rl_switch_start_time_) / duration, 0.0, 1.0);
+    //waao：五次多项式插值    
+    const double alpha = quinticBlend(alpha_linear);
+    const double f_interp = (1.0 - alpha) * rl_to_rl_phase_sync_source_frequency_hz_ +
+                            alpha * rl_to_rl_phase_sync_target_frequency_hz_;
+    //waao：衰减系数                        
+    const double k = rl_to_rl_phase_sync_k0_ *
+                     std::pow(std::max(0.0, 1.0 - alpha), rl_to_rl_phase_sync_decay_power_);
+    rl_to_rl_phase_sync_frequency_hz_ = rl_to_rl_phase_sync_source_frequency_hz_;
+    // rl_to_rl_phase_sync_frequency_hz_ = std::clamp(f_interp + k * rl_to_rl_phase_sync_delta_phi_rad_,
+    //                                                rl_to_rl_phase_sync_frequency_min_hz_,
+    //                                                rl_to_rl_phase_sync_frequency_max_hz_);
+    rl_to_rl_phase_sync_phi_rad_ += 2.0 * M_PI * rl_to_rl_phase_sync_frequency_hz_ * dt_sync;
+    rl_to_rl_phase_sync_phi_rad_ = std::fmod(rl_to_rl_phase_sync_phi_rad_, 2.0 * M_PI);
+    if (rl_to_rl_phase_sync_phi_rad_ < 0.0)
+    {
+      rl_to_rl_phase_sync_phi_rad_ += 2.0 * M_PI;
+    }
+  }
+
+  void humanoidController::clearRLToRLWalkingPhaseSync()
+  {
+    if (rl_to_rl_phase_sync_source_controller_ptr_ != nullptr)
+    {
+      rl_to_rl_phase_sync_source_controller_ptr_->setExternalPhaseOverride(false, 0.0, 1.0, 0.0);
+    }
+    if (rl_to_rl_phase_sync_target_controller_ptr_ != nullptr)
+    {
+      rl_to_rl_phase_sync_target_controller_ptr_->setExternalPhaseOverride(false, 0.0, 1.0, 0.0);
+    }
+    rl_to_rl_walking_phase_sync_active_ = false;
+    rl_to_rl_phase_sync_source_controller_ptr_ = nullptr;
+    rl_to_rl_phase_sync_target_controller_ptr_ = nullptr;
+    rl_to_rl_phase_sync_phi_rad_ = 0.0;
+    rl_to_rl_phase_sync_frequency_hz_ = 0.0;
+    rl_to_rl_phase_sync_source_frequency_hz_ = 0.0;
+    rl_to_rl_phase_sync_target_frequency_hz_ = 0.0;
+    rl_to_rl_phase_sync_delta_phi_rad_ = 0.0;
+    rl_to_rl_phase_sync_last_update_time_ = 0.0;
+  }
+
+  void humanoidController::activateRLToRLLiveSourceController(RLControllerBase* source_controller,
+                                                              const std::string& source_controller_name,
+                                                              const std::string& target_controller_name,
+                                                              double current_time,
+                                                              const kuavo_msgs::jointCmd& target_joint_cmd)
+  {
+    if (source_controller == nullptr)
+    {
+      stopRLToRLInterpolation();
+      return;
+    }
+
+    rl_to_rl_live_source_controller_ptr_ = source_controller;
+    rl_to_rl_switch_start_time_ = current_time;
+    rl_to_rl_source_controller_name_ = source_controller_name;
+    rl_to_rl_target_controller_name_ = target_controller_name;
+    is_rl_to_rl_interpolation_active_ = true;
+#if RL_TO_RL_USE_WARM_RESUME
+    rl_to_rl_live_source_controller_ptr_->resumeWarm();
+#else
+    rl_to_rl_live_source_controller_ptr_->resume();
+#endif
+
+    size_t mode_change_count = 0;
+    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+    const size_t valid_joint_count = std::min({body_joint_count,
+                                               last_rl_joint_cmd_.control_modes.size(),
+                                               target_joint_cmd.control_modes.size()});
+    for (size_t i = 0; i < valid_joint_count; ++i)
+    {
+      if (last_rl_joint_cmd_.control_modes[i] != target_joint_cmd.control_modes[i])
+      {
+        ++mode_change_count;
+      }
+    }
+
+    ROS_INFO("[RL->RL] Start quintic live joint_cmd interpolation: %s -> %s, duration=%.3fs, mode_changes=%zu",
+             source_controller_name.c_str(),
+             target_controller_name.c_str(),
+             rl_to_rl_switch_duration_,
+             mode_change_count);
+    publishRLToRLSwitchDebugState(0.0, "started_live", current_time);
+  }
+
+  void humanoidController::applyRLToRLLiveInterpolation(double current_time,
+                                                        const kuavo_msgs::jointCmd& source_joint_cmd,
+                                                        kuavo_msgs::jointCmd& target_joint_cmd)
+  {
+    if (!is_rl_to_rl_interpolation_active_ || rl_to_rl_live_source_controller_ptr_ == nullptr)
+    {
+      return;
+    }
+
+    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+    const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);
+    const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
+    const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
+    const double blend = quinticBlend(alpha);
+    publishRLToRLSwitchDebugState(alpha, "in_progress_live", current_time);
+    ROS_INFO_THROTTLE(0.2,
+                      "[RL->RL] Live interpolating %s -> %s: progress=%.1f%% elapsed=%.3fs/%.3fs",
+                      rl_to_rl_source_controller_name_.c_str(),
+                      rl_to_rl_target_controller_name_.c_str(),
+                      alpha * 100.0,
+                      elapsed,
+                      duration);
+
+    const size_t valid_joint_count = std::min({body_joint_count,
+                                               source_joint_cmd.joint_q.size(),
+                                               source_joint_cmd.joint_v.size(),
+                                               source_joint_cmd.tau.size(),
+                                               source_joint_cmd.tau_max.size(),
+                                               source_joint_cmd.tau_ratio.size(),
+                                               source_joint_cmd.joint_kp.size(),
+                                               source_joint_cmd.joint_kd.size(),
+                                               source_joint_cmd.control_modes.size(),
+                                               target_joint_cmd.joint_q.size(),
+                                               target_joint_cmd.joint_v.size(),
+                                               target_joint_cmd.tau.size(),
+                                               target_joint_cmd.tau_max.size(),
+                                               target_joint_cmd.tau_ratio.size(),
+                                               target_joint_cmd.joint_kp.size(),
+                                               target_joint_cmd.joint_kd.size(),
+                                               target_joint_cmd.control_modes.size()});
+
+    for (size_t i = 0; i < valid_joint_count; ++i)
+    {
+      const double source_joint_q_msg = source_joint_cmd.joint_q[i];
+      const double source_joint_v_msg = source_joint_cmd.joint_v[i];
+      const double source_tau_msg = source_joint_cmd.tau[i];
+      const double source_tau_ratio_msg = source_joint_cmd.tau_ratio[i];
+      const double source_tau_max_msg = source_joint_cmd.tau_max[i];
+      const double source_joint_kp_msg = source_joint_cmd.joint_kp[i];
+      const double source_joint_kd_msg = source_joint_cmd.joint_kd[i];
+      const int source_control_mode = source_joint_cmd.control_modes[i];
+      const double target_joint_q_msg = target_joint_cmd.joint_q[i];
+      const double target_joint_v_msg = target_joint_cmd.joint_v[i];
+      const double target_tau_msg = target_joint_cmd.tau[i];
+      const double target_tau_ratio_msg = target_joint_cmd.tau_ratio[i];
+      const double target_tau_max_msg = target_joint_cmd.tau_max[i];
+      const double target_joint_kp_msg = target_joint_cmd.joint_kp[i];
+      const double target_joint_kd_msg = target_joint_cmd.joint_kd[i];
+      const int target_control_mode = target_joint_cmd.control_modes[i];
+      const double interpolated_kp_msg = blendScalar(source_joint_kp_msg, target_joint_kp_msg, blend);
+      double interpolated_kd_msg = blendScalar(source_joint_kd_msg, target_joint_kd_msg, blend);
+#if RL_TO_RL_USE_KD_LOCK
+      if (source_joint_kp_msg > 1e-6 && interpolated_kp_msg >= 0.0)
+      {
+        interpolated_kd_msg = source_joint_kd_msg * std::sqrt(interpolated_kp_msg / source_joint_kp_msg);
+      }
+      else if (std::abs(source_joint_kp_msg) <= 1e-6)
+      {
+        interpolated_kd_msg = target_joint_kd_msg;
+      }
+#endif
+
+      target_joint_cmd.joint_q[i] = blendScalar(source_joint_q_msg, target_joint_q_msg, blend);
+      target_joint_cmd.joint_v[i] = blendScalar(source_joint_v_msg, target_joint_v_msg, blend);
+      target_joint_cmd.tau[i] = blendScalar(source_tau_msg, target_tau_msg, blend);
+      target_joint_cmd.tau_ratio[i] = blendScalar(source_tau_ratio_msg, target_tau_ratio_msg, blend);
+      target_joint_cmd.tau_max[i] = blendScalar(source_tau_max_msg, target_tau_max_msg, blend);
+      target_joint_cmd.joint_kp[i] = interpolated_kp_msg;
+      target_joint_cmd.joint_kd[i] = interpolated_kd_msg;
+      target_joint_cmd.control_modes[i] = (alpha < 1.0) ? source_control_mode : target_control_mode;
+    }
+
+    if (alpha >= 1.0)
+    {
+      is_rl_to_rl_interpolation_active_ = false;
+      applyRLToRLSwitchVelocityProfile(current_time);
+      clearRLToRLWalkingPhaseSync();
+      if (rl_to_rl_live_source_controller_ptr_ != nullptr)
+      {
+        rl_to_rl_live_source_controller_ptr_->pause();
+        rl_to_rl_live_source_controller_ptr_ = nullptr;
+      }
+      ROS_INFO("[RL->RL] Live q/Kp/Kd interpolation finished: %s -> %s",
+               rl_to_rl_source_controller_name_.c_str(),
+               rl_to_rl_target_controller_name_.c_str());
+      publishRLToRLSwitchDebugState(1.0, "finished_live", current_time);
+    }
+  }
+
+  //waao
+  /********************************************************************************RL->RL插值实现********************************************************************************/
+  void humanoidController::startRLToRLInterpolation(double current_time,
+                                                   const std::string& source_controller,
+                                                   const std::string& target_controller,
+                                                   const Eigen::VectorXd& start_joint_reference,
+                                                   const Eigen::VectorXd& target_joint_reference,
+                                                   const Eigen::VectorXd& start_joint_kp,
+                                                   const Eigen::VectorXd& start_joint_kd,
+                                                   const Eigen::VectorXd& start_joint_tau_max,
+                                                   const Eigen::VectorXd& start_joint_control_modes,
+                                                   const Eigen::VectorXd& start_joint_pd_modes,
+                                                   const Eigen::VectorXd& target_joint_kp,
+                                                   const Eigen::VectorXd& target_joint_kd,
+                                                   const Eigen::VectorXd& target_joint_tau_max,
+                                                   const Eigen::VectorXd& target_joint_control_modes,
+                                                   const Eigen::VectorXd& target_joint_pd_modes,
+                                                   const kuavo_msgs::jointCmd& target_joint_cmd)
+  {
+    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+    const bool size_ok = start_joint_reference.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         target_joint_reference.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         start_joint_kp.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         start_joint_kd.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         start_joint_tau_max.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         start_joint_control_modes.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         start_joint_pd_modes.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         target_joint_kp.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         target_joint_kd.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         target_joint_tau_max.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         target_joint_control_modes.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         target_joint_pd_modes.size() >= static_cast<Eigen::Index>(body_joint_count) &&
+                         last_rl_joint_cmd_.joint_q.size() >= body_joint_count &&
+                         last_rl_joint_cmd_.joint_v.size() >= body_joint_count &&
+                         last_rl_joint_cmd_.tau.size() >= body_joint_count &&
+                         last_rl_joint_cmd_.tau_ratio.size() >= body_joint_count &&
+                         last_rl_joint_cmd_.tau_max.size() >= body_joint_count &&
+                         last_rl_joint_cmd_.joint_kp.size() >= body_joint_count &&
+                         last_rl_joint_cmd_.joint_kd.size() >= body_joint_count &&
+                         last_rl_joint_cmd_.control_modes.size() >= body_joint_count &&
+                         target_joint_cmd.joint_q.size() >= body_joint_count &&
+                         target_joint_cmd.joint_v.size() >= body_joint_count &&
+                         target_joint_cmd.tau.size() >= body_joint_count &&
+                         target_joint_cmd.tau_ratio.size() >= body_joint_count &&
+                         target_joint_cmd.tau_max.size() >= body_joint_count &&
+                         target_joint_cmd.joint_kp.size() >= body_joint_count &&
+                         target_joint_cmd.joint_kd.size() >= body_joint_count &&
+                         target_joint_cmd.control_modes.size() >= body_joint_count;
+    if (!size_ok)
+    {
+      ROS_WARN("[RL->RL] Interpolation skipped because cached RL command dimensions are incomplete.");
+      stopRLToRLInterpolation();
+      return;
+    }
+
+    rl_to_rl_switch_start_time_ = current_time;
+    rl_to_rl_source_controller_name_ = source_controller;
+    rl_to_rl_target_controller_name_ = target_controller;
+    rl_to_rl_start_joint_reference_ = start_joint_reference.head(body_joint_count);
+    rl_to_rl_target_joint_reference_ = target_joint_reference.head(body_joint_count);
+    rl_to_rl_start_joint_q_msg_.resize(body_joint_count);
+    rl_to_rl_start_joint_v_msg_.resize(body_joint_count);
+    rl_to_rl_start_joint_tau_msg_.resize(body_joint_count);
+    rl_to_rl_start_joint_tau_ratio_msg_.resize(body_joint_count);
+    rl_to_rl_start_joint_kp_.resize(body_joint_count);
+    rl_to_rl_start_joint_kd_.resize(body_joint_count);
+    rl_to_rl_start_joint_tau_max_.resize(body_joint_count);
+    rl_to_rl_start_joint_control_modes_.resize(body_joint_count);
+    for (size_t i = 0; i < body_joint_count; ++i)
+    {
+      rl_to_rl_start_joint_q_msg_[i] = last_rl_joint_cmd_.joint_q[i];
+      rl_to_rl_start_joint_v_msg_[i] = last_rl_joint_cmd_.joint_v[i];
+      rl_to_rl_start_joint_tau_msg_[i] = last_rl_joint_cmd_.tau[i];
+      rl_to_rl_start_joint_tau_ratio_msg_[i] = last_rl_joint_cmd_.tau_ratio[i];
+      rl_to_rl_start_joint_kp_[i] = last_rl_joint_cmd_.joint_kp[i];
+      rl_to_rl_start_joint_kd_[i] = last_rl_joint_cmd_.joint_kd[i];
+      rl_to_rl_start_joint_tau_max_[i] = last_rl_joint_cmd_.tau_max[i];
+      rl_to_rl_start_joint_control_modes_[i] = static_cast<double>(last_rl_joint_cmd_.control_modes[i]);
+    }
+    rl_to_rl_start_joint_pd_modes_ = start_joint_pd_modes.head(body_joint_count);
+    rl_to_rl_target_joint_kp_ = target_joint_kp.head(body_joint_count);
+    rl_to_rl_target_joint_kd_ = target_joint_kd.head(body_joint_count);
+    rl_to_rl_target_joint_tau_max_ = target_joint_tau_max.head(body_joint_count);
+    rl_to_rl_target_joint_control_modes_ = target_joint_control_modes.head(body_joint_count);
+    rl_to_rl_target_joint_pd_modes_ = target_joint_pd_modes.head(body_joint_count);
+    is_rl_to_rl_interpolation_active_ = true;
+
+    size_t mode_change_count = 0;
+    for (size_t i = 0; i < body_joint_count; ++i)
+    {
+      const int start_control_mode = static_cast<int>(std::lround(rl_to_rl_start_joint_control_modes_[i]));
+      const int target_control_mode = target_joint_cmd.control_modes[i];
+      if (start_control_mode != target_control_mode)
+      {
+        ++mode_change_count;
+      }
+    }
+
+    ROS_INFO("[RL->RL] Start quintic joint_cmd interpolation: %s -> %s, duration=%.3fs, mode_changes=%zu",
+             source_controller.c_str(), target_controller.c_str(), rl_to_rl_switch_duration_, mode_change_count);
+    publishRLToRLSwitchDebugState(0.0, "started", current_time);
+  }
+
+  void humanoidController::applyRLToRLInterpolation(double current_time, kuavo_msgs::jointCmd& joint_cmd)
+  {
+    if (!is_rl_to_rl_interpolation_active_ || current_controller_ptr_ == nullptr)
+    {
+      applyRLToRLSwitchVelocityProfile(current_time);
+      return;
+    }
+
+    applyRLToRLSwitchVelocityProfile(current_time);
+
+    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+    const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);
+    const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
+    const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
+    const double blend = quinticBlend(alpha);
+    publishRLToRLSwitchDebugState(alpha, "in_progress", current_time);
+    ROS_INFO_THROTTLE(0.2,
+                      "[RL->RL] Interpolating %s -> %s: progress=%.1f%% elapsed=%.3fs/%.3fs",
+                      rl_to_rl_source_controller_name_.c_str(),
+                      rl_to_rl_target_controller_name_.c_str(),
+                      alpha * 100.0,
+                      elapsed,
+                      duration);
+
+    const size_t valid_joint_count = std::min({body_joint_count,
+                                               joint_cmd.joint_q.size(),
+                                               joint_cmd.joint_v.size(),
+                                               joint_cmd.tau.size(),
+                                               joint_cmd.tau_max.size(),
+                                               joint_cmd.tau_ratio.size(),
+                                               joint_cmd.joint_kp.size(),
+                                               joint_cmd.joint_kd.size(),
+                                               joint_cmd.control_modes.size(),
+                                               static_cast<size_t>(rl_to_rl_start_joint_q_msg_.size()),
+                                               static_cast<size_t>(rl_to_rl_start_joint_v_msg_.size()),
+                                               static_cast<size_t>(rl_to_rl_start_joint_tau_msg_.size()),
+                                               static_cast<size_t>(rl_to_rl_start_joint_tau_ratio_msg_.size()),
+                                               static_cast<size_t>(rl_to_rl_start_joint_kp_.size()),
+                                               static_cast<size_t>(rl_to_rl_start_joint_kd_.size()),
+                                               static_cast<size_t>(rl_to_rl_start_joint_tau_max_.size()),
+                                               static_cast<size_t>(rl_to_rl_start_joint_control_modes_.size()),
+                                               static_cast<size_t>(rl_to_rl_target_joint_reference_.size())});
+
+    for (size_t i = 0; i < valid_joint_count; ++i)
+    {
+      const double start_joint_q_msg = rl_to_rl_start_joint_q_msg_[i];
+      const double start_joint_v_msg = rl_to_rl_start_joint_v_msg_[i];
+      const double start_tau_msg = rl_to_rl_start_joint_tau_msg_[i];
+      const double start_tau_ratio_msg = rl_to_rl_start_joint_tau_ratio_msg_[i];
+      const double start_tau_max_msg = rl_to_rl_start_joint_tau_max_[i];
+      const double start_joint_kp_msg = rl_to_rl_start_joint_kp_[i];
+      const double start_joint_kd_msg = rl_to_rl_start_joint_kd_[i];
+      const int start_control_mode = static_cast<int>(std::lround(rl_to_rl_start_joint_control_modes_[i]));
+      const double target_joint_q_msg = joint_cmd.joint_q[i];
+      const double target_joint_v_msg = joint_cmd.joint_v[i];
+      const double target_tau_msg = joint_cmd.tau[i];
+      const double target_tau_ratio_msg = joint_cmd.tau_ratio[i];
+      const double target_tau_max_msg = joint_cmd.tau_max[i];
+      const double target_joint_kp_msg = joint_cmd.joint_kp[i];
+      const double target_joint_kd_msg = joint_cmd.joint_kd[i];
+      const int target_control_mode_msg = joint_cmd.control_modes[i];
+      const double interpolated_kp_msg = blendScalar(start_joint_kp_msg, target_joint_kp_msg, blend);
+      double interpolated_kd_msg = blendScalar(start_joint_kd_msg, target_joint_kd_msg, blend);
+#if RL_TO_RL_USE_KD_LOCK
+      if (start_joint_kp_msg > 1e-6 && interpolated_kp_msg >= 0.0)
+      {
+        interpolated_kd_msg = start_joint_kd_msg * std::sqrt(interpolated_kp_msg / start_joint_kp_msg);
+      }
+      else if (std::abs(start_joint_kp_msg) <= 1e-6)
+      {
+        interpolated_kd_msg = target_joint_kd_msg;
+      }
+#endif
+
+      joint_cmd.joint_q[i] = blendScalar(start_joint_q_msg, target_joint_q_msg, blend);
+      joint_cmd.joint_v[i] = blendScalar(start_joint_v_msg, target_joint_v_msg, blend);
+      joint_cmd.tau[i] = blendScalar(start_tau_msg, target_tau_msg, blend);
+      joint_cmd.tau_ratio[i] = blendScalar(start_tau_ratio_msg, target_tau_ratio_msg, blend);
+      joint_cmd.tau_max[i] = blendScalar(start_tau_max_msg, target_tau_max_msg, blend);
+      joint_cmd.joint_kp[i] = interpolated_kp_msg;
+      joint_cmd.joint_kd[i] = interpolated_kd_msg;
+      joint_cmd.control_modes[i] = (alpha < 1.0) ? start_control_mode : target_control_mode_msg;
+    }
+
+    if (alpha >= 1.0)
+    {
+      is_rl_to_rl_interpolation_active_ = false;
+      applyRLToRLSwitchVelocityProfile(current_time);
+      clearRLToRLWalkingPhaseSync();
+      ROS_INFO("[RL->RL] q/Kp/Kd interpolation finished: %s -> %s",
+               rl_to_rl_source_controller_name_.c_str(), rl_to_rl_target_controller_name_.c_str());
+      publishRLToRLSwitchDebugState(1.0, "finished", current_time);
+    }
+  }
+
+  void humanoidController::stopRLToRLInterpolation()
+  {
+    if (is_rl_to_rl_interpolation_active_)
+    {
+      const double current_time = currentObservation_.time;
+      const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);
+      const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
+      const double progress = std::clamp(elapsed / duration, 0.0, 1.0);
+      ROS_WARN("[RL->RL] Interpolation stopped: %s -> %s at progress=%.1f%%",
+               rl_to_rl_source_controller_name_.c_str(),
+               rl_to_rl_target_controller_name_.c_str(),
+               progress * 100.0);
+      publishRLToRLSwitchDebugState(progress, "stopped", current_time);
+    }
+    else
+    {
+      publishRLToRLSwitchDebugState(0.0, "idle", currentObservation_.time);
+    }
+    is_rl_to_rl_interpolation_active_ = false;
+    applyRLToRLSwitchVelocityProfile(currentObservation_.time);
+    clearRLToRLWalkingPhaseSync();
+    //waao：状态机切换结束后暂停原策略推理
+    if (rl_to_rl_live_source_controller_ptr_ != nullptr)
+    {
+      rl_to_rl_live_source_controller_ptr_->pause();
+      rl_to_rl_live_source_controller_ptr_ = nullptr;
+    }
+    rl_to_rl_source_controller_name_.clear();
+    rl_to_rl_target_controller_name_.clear();
+  }
+
+  void humanoidController::publishRLToRLSwitchDebugState(double progress,
+                                                         const std::string& phase,
+                                                         double current_time)
+  {
+    if (ros_logger_ == nullptr)
+      return;
+
+    const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);  //waao：切换时间不能太短
+    const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
+
+    ros_logger_->publishValue("/humanoid_controller/rl_to_rl_switch/active",
+                              is_rl_to_rl_interpolation_active_ ? 1.0 : 0.0);
+    ros_logger_->publishValue("/humanoid_controller/rl_to_rl_switch/progress", progress);
+    ros_logger_->publishValue("/humanoid_controller/rl_to_rl_switch/elapsed_time", elapsed);
+    ros_logger_->publishValue("/humanoid_controller/rl_to_rl_switch/duration", duration);
+    ros_logger_->publishText("/humanoid_controller/rl_to_rl_switch/phase", phase);
+    ros_logger_->publishText("/humanoid_controller/rl_to_rl_switch/source_name", rl_to_rl_source_controller_name_);
+    ros_logger_->publishText("/humanoid_controller/rl_to_rl_switch/target_name", rl_to_rl_target_controller_name_);
+  }
+  /****************************************************************************************************************************************************************/
+
   void humanoidController::waitForNextCycle()
   {
     // 根据当前控制模式选择对应的频率控制
@@ -5273,4 +6164,3 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
  } // namespace humanoid_controller
 // PLUGINLIB_EXPORT_CLASS(humanoid_controller::humanoidController)
 // PLUGINLIB_EXPORT_CLASS(humanoid_controller::humanoidCheaterController)
-

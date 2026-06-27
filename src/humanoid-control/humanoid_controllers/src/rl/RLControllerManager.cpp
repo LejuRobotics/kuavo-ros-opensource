@@ -24,6 +24,26 @@ namespace humanoid_controller
 {
   namespace
   {
+    bool isStanceInterpolatedControllerClass(ControllerClass controller_class)
+    {
+      return controller_class == ControllerClass::BASE_CONTROLLER ||
+             controller_class == ControllerClass::DANCE_CONTROLLER;
+    }
+
+    const char* switchMotionStateName(RLControllerManager::SwitchMotionState state)
+    {
+      switch (state)
+      {
+        case RLControllerManager::SwitchMotionState::STANCE:
+          return "STANCE";
+        case RLControllerManager::SwitchMotionState::STATIONARY:
+          return "STATIONARY";
+        case RLControllerManager::SwitchMotionState::WALKING:
+          return "WALKING";
+      }
+      return "UNKNOWN";
+    }
+
     constexpr char kDepthHistoryTopic[] = "/camera/depth/depth_history_array";
   }  // namespace
 
@@ -32,6 +52,45 @@ namespace humanoid_controller
   {
     // 初始化BASE_CONTROLLER列表，MPC控制器在索引0
     walk_controllers_.push_back("mpc");
+  }
+
+  //waao: RL切换请求等待处理
+  void RLControllerManager::queuePendingWalkingSwitchRequest(const std::string& target_name, const std::string& reason)
+  {
+    has_pending_walking_switch_request_ = true;
+    pending_walking_switch_source_name_ = current_controller_name_;
+    pending_walking_switch_target_name_ = target_name;
+    pending_walking_switch_reason_ = reason;
+
+    ROS_WARN("[RLControllerManager] Queue pending walking RL->RL switch request: %s -> %s. reason: %s",
+             pending_walking_switch_source_name_.c_str(),
+             pending_walking_switch_target_name_.c_str(),
+             pending_walking_switch_reason_.c_str());
+  }
+
+  void RLControllerManager::clearPendingWalkingSwitchRequest(const std::string& reason)
+  {
+    if (has_pending_walking_switch_request_)
+    {
+      if (!reason.empty())
+      {
+        ROS_INFO("[RLControllerManager] Clear pending walking RL->RL switch request: %s -> %s. reason: %s",
+                 pending_walking_switch_source_name_.c_str(),
+                 pending_walking_switch_target_name_.c_str(),
+                 reason.c_str());
+      }
+      else
+      {
+        ROS_INFO("[RLControllerManager] Clear pending walking RL->RL switch request: %s -> %s",
+                 pending_walking_switch_source_name_.c_str(),
+                 pending_walking_switch_target_name_.c_str());
+      }
+    }
+
+    has_pending_walking_switch_request_ = false;
+    pending_walking_switch_source_name_.clear();
+    pending_walking_switch_target_name_.clear();
+    pending_walking_switch_reason_.clear();
   }
 
   RLControllerManager::~RLControllerManager()
@@ -148,10 +207,108 @@ namespace humanoid_controller
     return getControllerTypeByName(name);
   }
 
+  void RLControllerManager::updateSwitchMotionStateLocked()
+  {
+    if (current_controller_name_.empty())
+    {
+      switch_motion_state_ = SwitchMotionState::STANCE;
+      stationary_candidate_active_ = false;
+      return;
+    }
+
+    const auto current_it = controllers_.find(current_controller_name_);
+    if (current_it == controllers_.end() || current_it->second == nullptr)
+    {
+      switch_motion_state_ = SwitchMotionState::WALKING;
+      stationary_candidate_active_ = false;
+      return;
+    }
+
+    auto* current_controller = current_it->second.get();
+    if (current_controller->isAllowToExit())
+    {
+      switch_motion_state_ = SwitchMotionState::STANCE;
+      stationary_candidate_active_ = false;
+      return;
+    }
+
+    const bool command_is_near_zero = current_controller->hasNearZeroGaitCommand(
+        RL_SWITCH_STATIONARY_COMMAND_LINEAR_THRESHOLD_DEFAULT,
+        RL_SWITCH_STATIONARY_COMMAND_ANGULAR_THRESHOLD_DEFAULT);
+    const bool physical_state_is_stationary =
+        stationary_physical_state_callback_ && stationary_physical_state_callback_();
+    if (!command_is_near_zero || !physical_state_is_stationary)
+    {
+      switch_motion_state_ = SwitchMotionState::WALKING;
+      stationary_candidate_active_ = false;
+      return;
+    }
+
+    const double hold_time = std::max(0.0, static_cast<double>(RL_SWITCH_STATIONARY_HOLD_TIME_DEFAULT));
+    if (hold_time <= 0.0)
+    {
+      switch_motion_state_ = SwitchMotionState::STATIONARY;
+      stationary_candidate_active_ = true;
+      return;
+    }
+
+    const ros::Time now = ros::Time::now();
+    if (!stationary_candidate_active_ || now < stationary_candidate_start_time_)
+    {
+      stationary_candidate_start_time_ = now;
+      stationary_candidate_active_ = true;
+      switch_motion_state_ = SwitchMotionState::WALKING;
+      return;
+    }
+
+    switch_motion_state_ =
+        (now - stationary_candidate_start_time_).toSec() >= hold_time
+            ? SwitchMotionState::STATIONARY
+            : SwitchMotionState::WALKING;
+  }
+
+  void RLControllerManager::updateSwitchMotionState()
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    updateSwitchMotionStateLocked();
+  }
+
+  RLControllerManager::SwitchMotionState RLControllerManager::getLastSwitchMotionState() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return last_switch_motion_state_;
+  }
+
+  bool RLControllerManager::checkWalkingPhaseSyncSwitchGuard(const std::string& target_name, std::string& message)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (!allowWalkingPhaseSyncSwitchRequest(target_name))
+    {
+      return true;
+    }
+
+    if (!walking_phase_sync_switch_guard_callback_)
+    {
+      return true;
+    }
+
+    const std::string current_name = current_controller_name_.empty() ? "mpc" : current_controller_name_;
+    return walking_phase_sync_switch_guard_callback_(current_name, target_name, message);
+  }
+
+  //waao：控制器切换逻辑
   bool RLControllerManager::switchController(const std::string& name)
   {
     std::unique_lock<std::recursive_mutex> lock(mutex_);
     const std::string current_before = current_controller_name_.empty() ? "mpc" : current_controller_name_;
+
+    ocs2::humanoid::CommandDataRL source_gait_command;
+    bool has_source_gait_command = false;
+    SwitchMotionState source_motion_state = SwitchMotionState::STANCE;
+    bool source_is_stance_or_stationary = false;
+    bool allow_walking_phase_sync_switch = false;
+    
     // mimic 类控制器（倒地起身/舞蹈）：仅在未完成（isAllowToExit==false）时禁止切出
     if (!current_controller_name_.empty())
     {
@@ -164,6 +321,12 @@ namespace humanoid_controller
         ROS_WARN("[RLControllerManager] Current mimic controller is not ready to exit, switch blocked!");
         return false;
       }
+      
+
+      has_source_gait_command = current_controller->getGaitCommandState(source_gait_command);
+      updateSwitchMotionStateLocked();
+      source_motion_state = switch_motion_state_;
+      source_is_stance_or_stationary = source_motion_state != SwitchMotionState::WALKING;
     }
 
     // 切换到MPC控制器
@@ -173,25 +336,32 @@ namespace humanoid_controller
       if (!current_controller_name_.empty())
       {
         auto* current_controller = controllers_[current_controller_name_].get();
-        if (current_controller && !current_controller->isAllowToExit())
+        if (current_controller && source_motion_state == SwitchMotionState::WALKING)
         {
-          ROS_WARN("[RLControllerManager] RL not in isAllowToExit , switch to MPC blocked! Switch to stance first.");
+          ROS_WARN("[RLControllerManager] RL is still WALKING, switch to MPC blocked. Stop walking first.");
           return false;
         }
-
-        if (current_controller)
+        if (current_controller && source_motion_state == SwitchMotionState::STATIONARY)
         {
+          ROS_INFO("[RLControllerManager] Allow RL->MPC switch in STATIONARY state: %s",
+                   current_controller_name_.c_str());
+        }
+
+        if (current_controller){
           current_controller->pause();
-          if (nh_ptr_)
-          {
-            // Restore the shared velocity limit param to MPC defaults when leaving RL.
+
+          if (nh_ptr_){
             current_controller->RLControllerBase::updateVelocityLimitsParam(*nh_ptr_);
           }
-          // 仅记录上一个控制器的裸指针，所有权仍由 controllers_ 管理
+
           last_controller_ptr_ = current_controller;
         }
       }
+      
       current_controller_name_ = "";
+      last_switch_motion_state_ = source_motion_state;
+      clearPendingWalkingSwitchRequest("switched to MPC");
+
       const std::string to_controller = "mpc";
       ROS_INFO("[RLControllerManager] Switched to BASE controller");
       // 切换到 MPC 控制器时也异步切换手臂模式到 1
@@ -213,6 +383,7 @@ namespace humanoid_controller
     // 如果切换的是同一个控制器，直接返回成功
     if (current_controller_name_ == name)
     {
+      clearPendingWalkingSwitchRequest("target controller already active");
       return true;
     }
 
@@ -220,14 +391,49 @@ namespace humanoid_controller
     if (current_controller_name_.empty())
     {
       auto* next_controller = controllers_[name].get();
-      bool desired_switch_to_falldown = next_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+      const bool desired_switch_to_falldown = next_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
       
-      bool is_current_stance = (mpc_current_gait_name_ == "stance") || mpc_is_stance_mode_;
+      const bool is_current_stance = (mpc_current_gait_name_ == "stance") || mpc_is_stance_mode_;
       if (!desired_switch_to_falldown && !is_current_stance)
       {
         ROS_WARN("[RLControllerManager] MPC not in stance (gait=%s), switch to RL blocked! Stop walking first.", 
                  mpc_current_gait_name_.c_str());
         return false;
+      }
+    }
+    else   //waao
+    {
+      auto* current_controller = controllers_[current_controller_name_].get();
+      allow_walking_phase_sync_switch = allowWalkingPhaseSyncSwitchRequest(name);
+
+      if (current_controller && source_motion_state == SwitchMotionState::WALKING &&
+          !allow_walking_phase_sync_switch)
+      {
+        ROS_WARN("[RLControllerManager] RL->RL switch blocked because controller %s is not in stance.",
+                 current_controller_name_.c_str());
+        return false;
+      }
+      //waao：当前为行走状态
+      if (current_controller && source_motion_state == SwitchMotionState::WALKING &&
+          allow_walking_phase_sync_switch)
+      {
+        std::string switch_guard_message;
+        if (!checkWalkingPhaseSyncSwitchGuard(name, switch_guard_message))
+        {
+          if (switch_guard_message.empty())
+          {
+            switch_guard_message = "walking phase sync switch guard rejected the request";
+          }
+          queuePendingWalkingSwitchRequest(name, switch_guard_message);
+          return false;
+        }
+        clearPendingWalkingSwitchRequest("walking switch guard passed");
+        ROS_INFO("[RLControllerManager] Allow walking RL->RL switch without stance: %s -> %s",
+                 current_controller_name_.c_str(), name.c_str());
+      }
+      else
+      {
+        clearPendingWalkingSwitchRequest();
       }
     }
 
@@ -258,13 +464,69 @@ namespace humanoid_controller
     auto* new_controller = controllers_[name].get();
     if (new_controller)
     {
-      new_controller->resume();
+      if (current_controller_name_.empty())
+      {
+        new_controller->resetGaitCommandState(true);
+      }
+#if RL_TO_RL_USE_WARM_RESUME
+      bool use_warm_resume = false;
+      if (!current_controller_name_.empty())
+      {
+        const auto current_class_it = controller_classes_.find(current_controller_name_);
+        const auto target_class_it = controller_classes_.find(name);
+        const bool current_supports_stance_interpolation =
+            current_class_it != controller_classes_.end() &&
+            isStanceInterpolatedControllerClass(current_class_it->second);
+        const bool target_supports_stance_interpolation =
+            target_class_it != controller_classes_.end() &&
+            isStanceInterpolatedControllerClass(target_class_it->second);
+        const bool use_stance_interpolated_resume =
+            source_is_stance_or_stationary &&
+            current_supports_stance_interpolation &&
+            target_supports_stance_interpolation;
+        use_warm_resume =
+            (source_motion_state == SwitchMotionState::WALKING && allow_walking_phase_sync_switch) ||
+            use_stance_interpolated_resume;
+      }
+#else
+      const bool use_warm_resume = false;
+#endif
+      if (!current_controller_name_.empty())
+      {
+        if (source_is_stance_or_stationary)
+        {
+          new_controller->resetGaitCommandState(true);
+          ROS_INFO("[RLControllerManager] Reset target gait command to stance during RL->RL switch: %s -> %s",
+                   current_controller_name_.c_str(), name.c_str());
+        }
+        else if (has_source_gait_command)
+        {
+          new_controller->setGaitCommandState(source_gait_command);
+          ROS_INFO("[RLControllerManager] Sync gait command state during RL->RL switch: %s -> %s",
+                   current_controller_name_.c_str(), name.c_str());
+        }
+      }
+      if (use_warm_resume)
+      {
+        new_controller->resumeWarm();
+      }
+      else
+      {
+        new_controller->resume();
+      }
     }
 
     current_controller_name_ = name;
+    last_switch_motion_state_ = source_motion_state;
+    stationary_candidate_active_ = false;
+    clearPendingWalkingSwitchRequest("switch completed");
     const std::string to_controller = current_controller_name_;
-    ROS_INFO("[RLControllerManager] Switched to controller '%s' (type: %d)", 
-             name.c_str(), static_cast<int>(new_controller->getType()));
+
+    ROS_INFO("[RLControllerManager] Switched to controller '%s' (type: %d, source motion state: %s)",
+             name.c_str(),
+             static_cast<int>(new_controller->getType()),
+             switchMotionStateName(source_motion_state));
+
     // 调用控制器的更新速度限制接口
     if (nh_ptr_) {
       new_controller->updateVelocityLimitsParam(*nh_ptr_);
@@ -718,6 +980,9 @@ namespace humanoid_controller
           continue;
         }
 
+        // 在刷新可切换列表之前先记录控制器大类
+        controller_classes_[name] = controller_class;
+
         // 添加到管理器（会自动设置为暂停状态）
         if (addController(name, std::move(controller)))
         {
@@ -727,6 +992,7 @@ namespace humanoid_controller
         }
         else
         {
+          controller_classes_.erase(name);
           ROS_ERROR("[RLControllerManager] Failed to add controller '%s'", name.c_str());
         }
 
@@ -772,13 +1038,13 @@ namespace humanoid_controller
     switch_to_vmp_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_vmp_controller",
                                                         &RLControllerManager::switchToVMPControllerCallback, this);
     switch_to_dance_controller_srv_ = nh.advertiseService("/humanoid_controller/switch_to_dance_controller",
-                                                        &RLControllerManager::switchDanceControllerByStringCallback, this);
+                                                           &RLControllerManager::switchDanceControllerByStringCallback, this);
     get_dance_controller_list_srv_ = nh.advertiseService("/humanoid_controller/get_dance_controller_list",
                                                        &RLControllerManager::getDanceControllerListCallback, this);
-    controller_switch_event_pub_ = nh.advertise<kuavo_msgs::ControllerSwitchEvent>(
-        "/humanoid_controller/controller_switch_event", 1, true);
-    depth_history_status_pub_ = nh.advertise<std_msgs::Int32>(
-        "/humanoid_controller/depth_history_status", 1, true);
+    nav_switch_controller_sub_ = nh.subscribe<std_msgs::String>("/humanoid_controller/nav_switch_rl_controller_by_name", 1,
+                                                              &RLControllerManager::navSwitchControllerByNameCallback,this);                                            
+    controller_switch_event_pub_ = nh.advertise<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, true);
+    depth_history_status_pub_ = nh.advertise<std_msgs::Int32>("/humanoid_controller/depth_history_status", 1, true);
 
     // [根因修复] 所有 DanceController 共用一份 dance_trajectory_state publisher
     // 历史问题: 5 个 DanceController 各自 advertise(latch=true) 同一 topic, 启动期
@@ -788,6 +1054,7 @@ namespace humanoid_controller
     //   而会让"上一次 finished"被新 subscriber 当成"刚 started"误命中 Python 侧逻辑.
     dance_trajectory_state_pub_ = nh.advertise<kuavo_msgs::DanceTrajectoryState>(
         "/humanoid_controller/dance_trajectory_state", 10, /*latch=*/false);
+        
     ROS_INFO("[RLControllerManager] Topic registered: /humanoid_controller/dance_trajectory_state");
 
     can_switch_to_depth_walk_controller_ = isDepthHistoryTopicAvailable(/*log=*/false);
@@ -914,8 +1181,12 @@ namespace humanoid_controller
         controllers_by_type_[type].push_back(name);
       }
       
-      // 如果是AMP_CONTROLLER类型，添加到walk_controllers_列表
-      if (type == RLControllerType::AMP_CONTROLLER || type == RLControllerType::DEPTH_LOCO_CONTROLLER)
+      auto class_it = controller_classes_.find(name);
+      const bool is_base_controller =
+          class_it != controller_classes_.end() && class_it->second == ControllerClass::BASE_CONTROLLER;
+
+      // 只有 BASE_CONTROLLER 参与 walking controller 列表
+      if (is_base_controller)
       {
         walk_controllers_.push_back(name);
       }
@@ -927,86 +1198,160 @@ namespace humanoid_controller
     }
   }
 
+  bool RLControllerManager::handleSwitchControllerByNameRequest(const std::string& target_name,
+                                                                bool only_rl_to_rl,
+                                                                std::string& message)
+  {
+    const std::string switch_name = (target_name == "mpc") ? "" : target_name;
+    std::string current_name;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      current_name = current_controller_name_;
+    }
+
+    if (target_name.empty())
+    {
+      message = only_rl_to_rl ? "RL->RL switch only request does not allow empty controller name." :
+                                "Controller name cannot be empty.";
+      ROS_WARN("[RLControllerManager] %s", message.c_str());
+      return false;
+    }
+
+    if (only_rl_to_rl)
+    {
+      if (current_name.empty())
+      {
+        message = "Navigation RL switch request only supports RL->RL switching. Current controller is MPC.";
+        ROS_WARN("[RLControllerManager] %s", message.c_str());
+        return false;
+      }
+
+      if (!hasController(switch_name))
+      {
+        message = "Target RL controller not found: " + target_name;
+        ROS_WARN("[RLControllerManager] %s", message.c_str());
+        return false;
+      }
+
+      auto* target_controller = getControllerByName(switch_name);
+      if (target_controller == nullptr || target_controller->getType() == RLControllerType::MPC)
+      {
+        message = "Navigation RL switch request only supports switching to an RL controller: " + target_name;
+        ROS_WARN("[RLControllerManager] %s", message.c_str());
+        return false;
+      }
+    }
+
+    const bool allow_walking_phase_sync_switch = allowWalkingPhaseSyncSwitchRequest(switch_name);
+    if (!isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
+    {
+      message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
+      ROS_WARN("[RLControllerManager] Controller switch blocked: %s", message.c_str());
+      return false;
+    }
+    if (allow_walking_phase_sync_switch)
+    {
+      ROS_INFO("[RLControllerManager] Bypass torso stability check for walking RL->RL switch: %s -> %s",
+               current_name.c_str(), target_name.c_str());
+    }
+
+    if (!only_rl_to_rl)
+    {
+      std::vector<std::string> walk_list;
+      {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        walk_list = walk_controllers_;
+      }
+
+      bool found = false;
+      for (const auto& controller_name : walk_list)
+      {
+        if (controller_name == target_name)
+        {
+          found = true;
+          break;
+        }
+      }
+
+      if (!found)
+      {
+        message = "Unsupported controller type: " + target_name + ". Available controllers: ";
+        for (size_t i = 0; i < walk_list.size(); ++i)
+        {
+          message += walk_list[i];
+          if (i + 1 < walk_list.size())
+          {
+            message += ", ";
+          }
+        }
+        ROS_WARN("[RLControllerManager] %s", message.c_str());
+        return false;
+      }
+    }
+
+    const bool switch_ok = switchController(switch_name);
+    if (!switch_ok)
+    {
+      message = "Failed to switch to controller: " + target_name;
+      ROS_WARN("[RLControllerManager] %s", message.c_str());
+      return false;
+    }
+
+    message = "Successfully switched to controller: " + target_name;
+    ROS_INFO("[RLControllerManager] %s", message.c_str());
+    return true;
+  }
+
   bool RLControllerManager::switchControllerCallback(kuavo_msgs::switchController::Request &req, 
                                                       kuavo_msgs::switchController::Response &res)
   {
     ROS_INFO("[RLControllerManager] Received controller switch request: %s", req.controller_name.c_str());
-    
-    // 检查请求的控制器是否在BASE_CONTROLLER列表中
+
     std::vector<std::string> walk_list;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
       walk_list = walk_controllers_;
     }
-    
-    bool found = false;
+
     int new_index = -1;
     for (size_t i = 0; i < walk_list.size(); ++i)
     {
       if (walk_list[i] == req.controller_name)
       {
-        found = true;
         new_index = static_cast<int>(i);
         break;
       }
     }
-    
-    if (!found)
+
+    res.success = handleSwitchControllerByNameRequest(req.controller_name, false, res.message);
+    if (res.success)
     {
-      res.success = false;
-      res.message = "Unsupported controller type: " + req.controller_name + ". Available controllers: ";
-      for (size_t i = 0; i < walk_list.size(); ++i)
-      {
-        res.message += walk_list[i];
-        if (i < walk_list.size() - 1) res.message += ", ";
-      }
-      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
-      return true;
+      res.message += " (index: " + std::to_string(new_index) + ")";
     }
-    
-    // 检查躯干速度是否稳定
-    if (!isTorsoVelocityStable())
+    return true;
+  }
+
+  void RLControllerManager::navSwitchControllerByNameCallback(const std_msgs::String::ConstPtr& msg)
+  {
+    if (msg == nullptr)
     {
-      res.success = false;
-      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
-      ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
-      return true;
+      ROS_WARN("[RLControllerManager] Received null navigation RL switch request");
+      return;
     }
-    
-    // 执行实际控制器切换
-    bool switch_ok = true;
-    if (new_index == 0)
+
+    const std::string target_name = msg->data;
+    ROS_INFO("[RLControllerManager] Received navigation RL switch request: %s", target_name.c_str());
+
+    std::string message;
+    const bool success = handleSwitchControllerByNameRequest(target_name, true, message);
+    if (success)
     {
-      // 切回 MPC 控制器
-      switchToBaseController();
+      ROS_INFO("[RLControllerManager] Navigation RL switch request succeeded: %s", target_name.c_str());
     }
     else
     {
-      // 切换到指定 RL 控制器
-      if (!hasController(req.controller_name))
-      {
-        ROS_WARN("[RLControllerManager] RL controller '%s' not found", req.controller_name.c_str());
-        switch_ok = false;
-      }
-      else
-      {
-        switch_ok = switchController(req.controller_name);
-      }
+      ROS_WARN("[RLControllerManager] Navigation RL switch request failed: %s", message.c_str());
     }
-    
-    if (!switch_ok)
-    {
-      res.success = false;
-      res.message = "Failed to switch to controller: " + req.controller_name;
-      ROS_WARN("[RLControllerManager] %s", res.message.c_str());
-      return true;
-    }
-    
-    res.success = true;
-    res.message = "Successfully switched to controller: " + req.controller_name + " (index: " + std::to_string(new_index) + ")";
-    ROS_INFO("[RLControllerManager] %s", res.message.c_str());
-    
-    return true;
   }
 
   bool RLControllerManager::getControllerListCallback(kuavo_msgs::getControllerList::Request &req, 
@@ -1063,6 +1408,126 @@ namespace humanoid_controller
     return true;
   }
 
+  //waao：允许控制器切换标志
+  bool RLControllerManager::allowWalkingPhaseSyncSwitchRequest(const std::string& target_name)
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (current_controller_name_.empty())
+    {
+      return false;
+    }
+
+    auto current_it = controllers_.find(current_controller_name_);
+    auto target_it = controllers_.find(target_name);
+    if (current_it == controllers_.end() || target_it == controllers_.end())
+    {
+      return false;
+    }
+
+    auto* current_controller = current_it->second.get();
+    auto* target_controller = target_it->second.get();
+    if (current_controller == nullptr || target_controller == nullptr)
+    {
+      return false;
+    }
+
+    auto current_class_it = controller_classes_.find(current_controller_name_);
+    auto target_class_it = controller_classes_.find(target_name);
+    if (current_class_it == controller_classes_.end() || target_class_it == controller_classes_.end())
+    {
+      return false;
+    }
+
+    return current_class_it->second == ControllerClass::BASE_CONTROLLER &&
+           target_class_it->second == ControllerClass::BASE_CONTROLLER &&
+           current_controller->supportsWalkingPhaseSyncSwitch() &&
+           target_controller->supportsWalkingPhaseSyncSwitch();
+  }
+
+  void RLControllerManager::processPendingWalkingSwitchRequest()
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (!has_pending_walking_switch_request_)
+    {
+      return;
+    }
+
+    if (pending_walking_switch_target_name_.empty())
+    {
+      clearPendingWalkingSwitchRequest("empty target");
+      return;
+    }
+
+    if (current_controller_name_.empty())
+    {
+      clearPendingWalkingSwitchRequest("current controller is MPC");
+      return;
+    }
+
+    if (current_controller_name_ != pending_walking_switch_source_name_)
+    {
+      clearPendingWalkingSwitchRequest("current walking controller changed");
+      return;
+    }
+
+    auto current_it = controllers_.find(current_controller_name_);
+    auto target_it = controllers_.find(pending_walking_switch_target_name_);
+    if (current_it == controllers_.end() || target_it == controllers_.end())
+    {
+      clearPendingWalkingSwitchRequest("controller no longer exists");
+      return;
+    }
+
+    auto* current_controller = current_it->second.get();
+    auto* target_controller = target_it->second.get();
+    if (current_controller == nullptr || target_controller == nullptr)
+    {
+      clearPendingWalkingSwitchRequest("controller pointer is null");
+      return;
+    }
+
+    if (!allowWalkingPhaseSyncSwitchRequest(pending_walking_switch_target_name_))
+    {
+      clearPendingWalkingSwitchRequest("request is no longer a walking RL->RL switch");
+      return;
+    }
+
+    if (current_controller->isAllowToExit())
+    {
+      clearPendingWalkingSwitchRequest("source controller entered stance before guard passed");
+      return;
+    }
+
+    std::string guard_message;
+    if (!checkWalkingPhaseSyncSwitchGuard(pending_walking_switch_target_name_, guard_message))
+    {
+      pending_walking_switch_reason_ = guard_message;
+      return;
+    }
+
+    ROS_INFO("[RLControllerManager] Pending walking RL->RL switch guard passed, auto switching: %s -> %s",
+             current_controller_name_.c_str(),
+             pending_walking_switch_target_name_.c_str());
+
+    const std::string target_name = pending_walking_switch_target_name_;
+    clearPendingWalkingSwitchRequest("auto switch start");
+    switchController(target_name);
+  }
+
+  bool RLControllerManager::hasPendingWalkingSwitchRequest() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return has_pending_walking_switch_request_;
+  }
+
+  std::string RLControllerManager::getPendingWalkingSwitchTargetName() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return pending_walking_switch_target_name_;
+  }
+
   bool RLControllerManager::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req, 
                                                            kuavo_msgs::switchToNextController::Response &res)
   {
@@ -1108,34 +1573,6 @@ namespace humanoid_controller
     res.current_controller = current_name.empty() ? "mpc" : current_name;
     res.current_index = current_index;
 
-    // 一次性硬前置：当前控制器若不允许退出（如 AMP 还在行走）或是倒地起身控制器，直接拒绝，
-    // 避免下面"沿环找可切候选"时绕一圈空试。
-    {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      auto it = controllers_.find(current_controller_name_);
-      if (!current_controller_name_.empty() && it != controllers_.end() && it->second &&
-          (!it->second->isAllowToExit() || it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER))
-      {
-        res.success = false;
-        res.message = "Current controller is not allowed to exit.";
-        res.next_controller = "";
-        res.next_index = -1;
-        ROS_WARN("[RLControllerManager] %s", res.message.c_str());
-        return true;
-      }
-    }
-
-    // 检查躯干速度是否稳定（在切换前检查）
-    if (!isTorsoVelocityStable())
-    {
-      res.success = false;
-      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
-      res.next_controller = "";
-      res.next_index = -1;
-      ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
-      return true;
-    }
-
     // 沿环找下一个"此刻可切换"的控制器（跳过不可用的，如深度话题未就绪的 depth_loco_controller）
     int target_index = findNextSwitchableIndex(current_index, +1);
     if (target_index < 0)
@@ -1150,6 +1587,45 @@ namespace humanoid_controller
 
     // 索引 0 固定为 MPC；直接用 switchController("")（而非 switchToBaseController()），以便检查切回 MPC 是否成功
     const std::string target_name = (target_index == 0) ? std::string() : walk_list[target_index];
+
+    // 检查躯干速度是否稳定（在切换前检查）
+    const bool allow_walking_phase_sync_switch = !target_name.empty() && allowWalkingPhaseSyncSwitchRequest(target_name);
+
+    // 一次性硬前置：当前控制器若不允许退出（如 AMP 还在行走）或是倒地起身控制器，直接拒绝，
+    // 避免下面"沿环找可切候选"时绕一圈空试。
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      auto it = controllers_.find(current_controller_name_);
+      if (!current_controller_name_.empty() && it != controllers_.end() && it->second){
+        const bool current_is_fall_stand = it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+        if (current_is_fall_stand || (!it->second->isAllowToExit() && !allow_walking_phase_sync_switch)){
+          res.success = false;
+          res.message = "Current controller is not allowed to exit.";
+          res.next_controller = "";
+          res.next_index = -1;
+          ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+          return true;
+        }
+      } 
+    }
+
+    if (!isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
+    {
+      res.success = false;
+      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
+      res.next_controller = "";
+      res.next_index = -1;
+      ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
+      return true;
+    }
+    
+    if (allow_walking_phase_sync_switch)
+    {
+      ROS_INFO("[RLControllerManager] Bypass torso stability check for walking RL->RL switch: %s -> %s",
+              res.current_controller.c_str(),
+              target_name.c_str());
+    }
+    
     if (!switchController(target_name))
     {
       res.success = false;
@@ -1217,22 +1693,6 @@ namespace humanoid_controller
     res.current_controller = current_name.empty() ? "mpc" : current_name;
     res.current_index = current_index;
 
-    // 一次性硬前置：当前控制器若不允许退出（如 AMP 还在行走）或是倒地起身控制器，直接拒绝。
-    {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      auto it = controllers_.find(current_controller_name_);
-      if (!current_controller_name_.empty() && it != controllers_.end() && it->second &&
-          (!it->second->isAllowToExit() || it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER))
-      {
-        res.success = false;
-        res.message = "Current controller is not allowed to exit.";
-        res.next_controller = "";
-        res.next_index = -1;
-        ROS_WARN("[RLControllerManager] %s", res.message.c_str());
-        return true;
-      }
-    }
-
     // 沿环（反方向）找上一个"此刻可切换"的控制器（跳过不可用的）。
     int target_index = findNextSwitchableIndex(current_index, -1);
     if (target_index < 0)
@@ -1247,6 +1707,47 @@ namespace humanoid_controller
 
     // 索引 0 固定为 MPC；直接用 switchController("")（而非 switchToBaseController()），以便检查切回 MPC 是否成功
     const std::string target_name = (target_index == 0) ? std::string() : walk_list[target_index];
+    const bool allow_walking_phase_sync_switch =
+        !target_name.empty() && allowWalkingPhaseSyncSwitchRequest(target_name);
+
+    // Walking RL->RL switches are handled by phase synchronization in switchController().
+    // Other switches still require the current controller to be ready to exit.
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      auto it = controllers_.find(current_controller_name_);
+      if (!current_controller_name_.empty() && it != controllers_.end() && it->second)
+      {
+        const bool current_is_fall_stand =
+            it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+        if (current_is_fall_stand ||
+            (!it->second->isAllowToExit() && !allow_walking_phase_sync_switch))
+        {
+          res.success = false;
+          res.message = "Current controller is not allowed to exit.";
+          res.next_controller = "";
+          res.next_index = -1;
+          ROS_WARN("[RLControllerManager] %s", res.message.c_str());
+          return true;
+        }
+      }
+    }
+
+    if (!isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
+    {
+      res.success = false;
+      res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
+      res.next_controller = "";
+      res.next_index = -1;
+      ROS_WARN("[RLControllerManager] Controller switch blocked: %s", res.message.c_str());
+      return true;
+    }
+
+    if (allow_walking_phase_sync_switch)
+    {
+      ROS_INFO("[RLControllerManager] Bypass torso stability check for walking RL->RL switch: %s -> %s",
+               res.current_controller.c_str(), target_name.c_str());
+    }
+
     if (!switchController(target_name))
     {
       res.success = false;

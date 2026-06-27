@@ -65,7 +65,10 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   smoothed_cmd_vel_.angular.x = 0.0;
   smoothed_cmd_vel_.angular.y = 0.0;
   smoothed_cmd_vel_.angular.z = 0.0;
+  latest_cmd_vel_ = smoothed_cmd_vel_;
   previous_cmd_vel_ = smoothed_cmd_vel_;
+  latest_gait_name_ = "stance";
+  trot_latched_ = false;
   last_velocity_update_time_ = ros::Time::now();
   
   // Initialize in-place stepping velocities
@@ -97,6 +100,49 @@ bool RlGaitReceiver::isEnabled() const
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
   return enabled_;
+}
+
+void RlGaitReceiver::resetCommandState(bool stance_mode)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  currentCommand_.setzero();
+  currentCommand_.cmdStance_ = stance_mode ? 1.0 : 0.0;
+  smoothed_cmd_vel_.linear.x = 0.0;
+  smoothed_cmd_vel_.linear.y = 0.0;
+  smoothed_cmd_vel_.linear.z = 0.0;
+  smoothed_cmd_vel_.angular.x = 0.0;
+  smoothed_cmd_vel_.angular.y = 0.0;
+  smoothed_cmd_vel_.angular.z = 0.0;
+  latest_cmd_vel_ = smoothed_cmd_vel_;
+  previous_cmd_vel_ = smoothed_cmd_vel_;
+  latest_gait_name_ = stance_mode ? "stance" : "walk";
+  trot_latched_ = false;
+  last_velocity_update_time_ = ros::Time::now();
+  stopInPlaceStepping();
+}
+
+void RlGaitReceiver::overrideCommandState(const CommandDataRL& command)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  currentCommand_.cmdVelLineX_ = command.cmdVelLineX_;
+  currentCommand_.cmdVelLineY_ = command.cmdVelLineY_;
+  currentCommand_.cmdVelLineZ_ = command.cmdVelLineZ_;
+  currentCommand_.cmdVelAngularX_ = command.cmdVelAngularX_;
+  currentCommand_.cmdVelAngularY_ = command.cmdVelAngularY_;
+  currentCommand_.cmdVelAngularZ_ = command.cmdVelAngularZ_;
+  currentCommand_.cmdStance_ = command.cmdStance_;
+
+  if (currentCommand_.cmdStance_ >= 0.5)
+  {
+    smart_stop_enabled_ = true;
+    stopInPlaceStepping();
+  }
+}
+
+void RlGaitReceiver::setSwitchVelocityScale(double scale)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  switch_velocity_scale_ = std::clamp(scale, 0.0, 1.0);
 }
 
 void RlGaitReceiver::setReuseWalkCommandInStance(bool enable)
@@ -135,7 +181,9 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   }
 
   if (velocity_magnitude < 0.01 && currentCommand_.cmdStance_ == 1) // Low velocity and already in stance mode
+  {
     return;
+  }
   
   // Update in-place stepping states
   if (isInPlaceSteppingActive())
@@ -198,12 +246,12 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     // Stop in-place stepping when there's significant velocity command
     stopInPlaceStepping();
     
-    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x;
-    currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y;
-    currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z;
-    currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x;
-    currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y;
-    currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.angular.z;
+    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x * switch_velocity_scale_;
+    currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y * switch_velocity_scale_;
+    currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.angular.z * switch_velocity_scale_;
     currentCommand_.cmdStance_ = 0; // Walking mode
     
     // Reset smart stop checking when there's significant velocity command
@@ -221,15 +269,12 @@ CommandDataRL RlGaitReceiver::getCurrentCommand() const
 
 void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
 {
-  if (!enabled_) {
-    return;
-  }
-  
   // Apply velocity smoothing
   ros::Time current_time = ros::Time::now();
   geometry_msgs::Twist smoothed_vel = smoothVelocityCommand(*msg, current_time);
   
   std::lock_guard<std::mutex> lock(command_mutex_);
+  latest_cmd_vel_ = *msg;
   smoothed_cmd_vel_ = smoothed_vel;
   
   ROS_DEBUG("[RlGaitReceiver] Received velocity command: lin(%.3f, %.3f, %.3f) ang(%.3f, %.3f, %.3f)",
@@ -239,23 +284,29 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
 
 void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
 {
-  if (!enabled_) {
-    return;
-  }
-  
   const std::string& gait_name = msg->data;
   ROS_INFO_STREAM("[RlGaitReceiver] Received gait name request: " << gait_name);
   
   std::lock_guard<std::mutex> lock(command_mutex_);
+  latest_gait_name_ = gait_name;
   
   // Manually switch cmdStance_ state based on gait name
   if (gait_name == "stance") {
     currentCommand_.setzero();
     currentCommand_.cmdStance_ = 1.0;
+    trot_latched_ = false;
+    latest_cmd_vel_ = geometry_msgs::Twist();
+    smoothed_cmd_vel_ = geometry_msgs::Twist();
+    previous_cmd_vel_ = geometry_msgs::Twist();
+    stopInPlaceStepping();
     smart_stop_enabled_ = true;
     ROS_INFO("[RlGaitReceiver] Manually switched to stance mode");
   } else if (gait_name == "walk" || gait_name == "trot") {
     currentCommand_.cmdStance_ = 0.0;
+    if (gait_name == "trot")
+    {
+      trot_latched_ = true;
+    }
     smart_stop_enabled_ = false;
     ROS_INFO_STREAM("[RlGaitReceiver] Manually switched to walking mode for gait: " << gait_name);
   } else {
@@ -544,6 +595,20 @@ void RlGaitReceiver::updateInPlaceStepping(const ros::Time& current_time)
 bool RlGaitReceiver::isInPlaceSteppingActive() const
 {
   return is_in_place_stepping_;
+}
+
+bool RlGaitReceiver::isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  const double linear_norm = std::hypot(latest_cmd_vel_.linear.x, latest_cmd_vel_.linear.y);
+  const bool has_no_velocity_input =
+      linear_norm < linear_thresh &&
+      std::abs(latest_cmd_vel_.linear.z) < linear_thresh &&
+      std::abs(latest_cmd_vel_.angular.z) < angular_thresh;
+
+  return currentCommand_.cmdStance_ < 0.5 &&
+         trot_latched_ &&
+         has_no_velocity_input;
 }
 
 } // namespace humanoid

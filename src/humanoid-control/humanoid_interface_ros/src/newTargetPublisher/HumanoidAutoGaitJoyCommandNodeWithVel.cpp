@@ -1636,10 +1636,11 @@ namespace ocs2
             seat_b_button_held_ = false;
           if (seat_a_button_held_ && !joy_msg->buttons[b_stance])
             seat_a_button_held_ = false;
-          old_joy_msg_ = *joy_msg;
           // 有按钮按下时立即返回，避免落入后续 walk/stance 逻辑
-          if (joy_msg->buttons[b_trot] || joy_msg->buttons[b_stance])
+          if (joy_msg->buttons[b_trot] || joy_msg->buttons[b_stance]){
+            old_joy_msg_ = *joy_msg;
             return;
+          }
         }
 
         // RT + X: 切换到上一个控制器
@@ -1874,6 +1875,17 @@ namespace ocs2
 
     void checkGaitSwitchCommand(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
+      const bool rl_button_pressed =
+          !old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] &&
+          joy_msg->buttons[joyButtonMap["BUTTON_RL"]];
+
+      // RL 控制器切换允许在 walking 中触发，不能被摇杆轴量提前吞掉。
+      if (rl_button_pressed && !IS_ROBAN(rb_version_))
+      {
+        ROS_INFO("[JoyControl] switch to next controller");
+        switchToNextController();
+        return;
+      }
       // 有摇杆数据不可以步态切换
       if (
         std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]]) > DEAD_ZONE ||

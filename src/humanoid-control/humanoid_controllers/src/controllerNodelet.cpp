@@ -39,7 +39,8 @@ public:
     }
     void controllerExit()
     {
-        std::cerr << "[controllerNodelet] controllerExit called" << std::endl;
+        //waao：退出控制器
+        std::cerr << "[controllerNodelet] controllerExit called, ros::ok=" << ros::ok() << ", is_running=" << is_running << std::endl;
         ros::param::set("/nodelet_manager/controller_state", 1);
         is_running = false;// 先停止控制器
 
@@ -81,18 +82,22 @@ public:
             ROS_WARN("[HumanoidControllerNodelet] Timeout after %.1f seconds waiting for nodelets", max_wait_seconds);
         }
         
+        //waao
+        std::cerr << "[controllerNodelet] controllerExit invoking ros::shutdown()" << std::endl;
         ros::shutdown();
 
     }
     static void signalHandler(int sig)
     {
-        std::cerr << "[HumanoidControllerNodelet] signal handler called with SIGINT"<< std::endl;
+        //waao
+        std::cerr << "[HumanoidControllerNodelet] signal handler called with signal=" << sig << std::endl;
         // 发布停止信号
         std_msgs::Bool stop_msg;
         stop_msg.data = true;
         
         // 发布几次确保消息被接收
         for(int i = 0; i < 3; i++) {
+            std::cerr << "[HumanoidControllerNodelet] signal handler publishing /stop_robot, attempt=" << (i + 1) << std::endl;
             stop_pub_.publish(stop_msg);
             usleep(10000); // 等待10ms
         }
@@ -123,10 +128,14 @@ private:
     }
     void stopCallback(const std_msgs::Bool::ConstPtr &msg)
     {
+        //waao
+        std::cerr << "[controllerNodelet] stopCallback received /stop_robot=" << msg->data
+                  << ", ros::ok=" << ros::ok() << ", is_running(before)=" << is_running << std::endl;
+
         if (msg->data)
         {
             is_running = false;
-            std::cerr << "[controllerNodelet] stopCallback: " << is_running << std::endl;
+            std::cerr << "[controllerNodelet] stopCallback setting is_running=false and entering controllerExit()" << std::endl;
             controllerExit();
         }
     }

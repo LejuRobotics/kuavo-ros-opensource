@@ -426,6 +426,8 @@ namespace humanoid_controller
     episodeLength_ = 0;
     currentCycleTime_ = cycleTime_;
     actions_.setZero();
+    has_valid_phase_ = false;
+    external_phase_override_enabled_ = false;
     // networkInputDataRL_ 和 singleInputData_ 清零
     networkInputDataRL_.setZero();
     singleInputData_.setZero();
@@ -469,6 +471,24 @@ namespace humanoid_controller
 
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
     reset();
+  }
+
+  //waao：热启动策略，防止策略输出时腿软
+  void DepthWalkController::resumeWarm()
+  {
+    RLControllerBase::resume();
+    if (gait_receiver_)
+    {
+      gait_receiver_->setEnabled(true);
+    }
+
+    if (is_real_ && use_amp_ruiwo_kpkd_)
+    {
+      changeRuiwoMotorParamAsync("amp_kpkd");
+    }
+
+    sensor_data_updated_ = false;
+    ROS_INFO("[%s] Controller warm-resumed without reset", name_.c_str());
   }
 
   bool DepthWalkController::requestToExit() const
@@ -522,6 +542,103 @@ namespace humanoid_controller
     return cmd.cmdStance_ >= 0.5;  // 使用 0.5 作为阈值，兼容浮点数比较
   }
 
+  //waao：计算相位
+  double DepthWalkController::getWalkingPhaseRad() const
+  {
+    double phase_rad = std::fmod(gait_phase, 1.0) * 2.0 * M_PI;
+    if (phase_rad < 0.0)
+    {
+      phase_rad += 2.0 * M_PI;
+    }
+    return phase_rad;
+  }
+
+  double DepthWalkController::getWalkingFrequencyHz() const
+  {
+    return gait_fre;
+  }
+
+  void DepthWalkController::setExternalPhaseOverride(bool enabled,
+                                                     double sin_phase,
+                                                     double cos_phase,
+                                                     double gait_frequency_hz)
+  {
+    external_phase_override_enabled_ = enabled;
+    external_phase_sin_ = sin_phase;
+    external_phase_cos_ = cos_phase;
+    external_phase_frequency_hz_ = gait_frequency_hz;
+  }
+
+  void DepthWalkController::resetGaitCommandState(bool stance_mode)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->resetCommandState(stance_mode);
+    }
+  }
+
+  bool DepthWalkController::getGaitCommandState(CommandDataRL& command) const
+  {
+    if (!gait_receiver_)
+    {
+      return false;
+    }
+    command = gait_receiver_->getCurrentCommand();
+    return true;
+  }
+
+  void DepthWalkController::setGaitCommandState(const CommandDataRL& command)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->overrideCommandState(command);
+    }
+  }
+
+  void DepthWalkController::setSwitchVelocityScale(double scale)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->setSwitchVelocityScale(scale);
+    }
+  }
+
+  bool DepthWalkController::hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const
+  {
+    if (!gait_receiver_)
+    {
+      return true;
+    }
+    const auto cmd = gait_receiver_->getCurrentCommand();
+    const double linear_norm = std::hypot(cmd.cmdVelLineX_, cmd.cmdVelLineY_);
+    return linear_norm < linear_thresh &&
+           std::abs(cmd.cmdVelLineZ_) < linear_thresh &&
+           std::abs(cmd.cmdVelAngularZ_) < angular_thresh;
+  }
+
+  bool DepthWalkController::isInPlaceSteppingActive() const
+  {
+    return gait_receiver_ && gait_receiver_->isInPlaceSteppingActive();
+  }
+
+  bool DepthWalkController::isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const
+  {
+    return gait_receiver_ && gait_receiver_->isInPlaceWalkingCommand(linear_thresh, angular_thresh);
+  }
+
+  //waao：计算关节参考
+  Eigen::VectorXd DepthWalkController::getCurrentJointReference() const
+  {
+    const int total_joints = jointNum_ + jointArmNum_ + waistNum_;
+    Eigen::VectorXd q_ref = defalutJointPosRL_.head(total_joints);
+    const Eigen::VectorXd action = getCurrentAction();
+    if (action.size() >= total_joints && actionScaleTestRL_.size() >= total_joints)
+    {
+      q_ref.array() += action.head(total_joints).array() * actionScale_ * actionScaleTestRL_.head(total_joints).array();
+    }
+    return q_ref;
+  }
+
   bool DepthWalkController::shouldRunInference() const
   {
     if (state_ != ControllerState::RUNNING)
@@ -535,18 +652,29 @@ namespace humanoid_controller
   void DepthWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
+    // if (external_phase_override_enabled_)
+    // {
+    //       gait_fre = 1.2;
+    // }
     auto delta_time=dt_*gait_fre*(episodeLength_);
     episodeLength_ = 0;
     gait_phase+=delta_time;
 
 
-    if (std::abs(cmd.cmdVelLineX_) < 0.01 &&
-        std::abs(cmd.cmdVelLineY_) < 0.01 &&
-        std::abs(cmd.cmdVelAngularZ_) < 0.01 )
-    {
-        gait_phase = 0;
+    // if (std::abs(cmd.cmdVelLineX_) < 0.01 &&
+    //     std::abs(cmd.cmdVelLineY_) < 0.01 &&
+    //     std::abs(cmd.cmdVelAngularZ_) < 0.01 )
+    // {
+    //     gait_phase = 0;
+    // }
+
+    if (cmd.cmdStance_ >= 0.5){
+      gait_phase = 0;
     }
+
+
     gait_phase = std::fmod(gait_phase, 1.0);
+    
     commandPhase_(0) = sin(2 * M_PI * gait_phase);
     commandPhase_(1) = cos(2 * M_PI * gait_phase);
     commandPhase_(2) = leg_bias;
@@ -556,6 +684,7 @@ namespace humanoid_controller
     rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
                     : (commandPhase_(0) < 0) ? ModeNumber::FS
                                              : ModeNumber::SS;
+    has_valid_phase_ = true;
   }
 
   void DepthWalkController::depthCallback(const std_msgs::Float64MultiArray::ConstPtr &msg)
@@ -571,6 +700,17 @@ namespace humanoid_controller
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
     
     updatePhase(cmd);
+
+    // waao：在切换过程中用耦合相位作为输入
+    // if (external_phase_override_enabled_)
+    // {
+    //   commandPhase_(0) = external_phase_sin_;
+    //   commandPhase_(1) = external_phase_cos_;
+    //   commandPhase_(4) = external_phase_frequency_hz_;
+    //   rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
+    //                   : (commandPhase_(0) < 0) ? ModeNumber::FS
+    //                                            : ModeNumber::SS;
+    // }
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
     static bool yaw_offset_initialized = false;
     if (!yaw_offset_initialized)
@@ -611,6 +751,8 @@ namespace humanoid_controller
     cmd.cmdVelAngularY_ = cmd.cmdVelAngularY_ * cmd.cmdVelScaleAngularY_;
     cmd.cmdVelAngularZ_ = targetAngZ;
     cmd.cmdStance_ *= cmd.cmdScaleStance_;
+
+    // std::cout << "depth vx = " << targetVelX << std::endl;
     
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,

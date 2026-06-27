@@ -12,6 +12,7 @@
   <arg name="seat_scene" default="false" doc="Use scene_seat_adjust.xml (chair + under-seat foot slots)"/>
   <!-- Handle version 15 special case: use version 14 scene -->
   <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s14/xml/scene.xml" if="$(eval arg('robot_version') == 15)"/>
+  <!-- <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene_stair.xml" unless="$(eval arg('robot_version') == 15)"/> -->
   <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene_seat_adjust.xml" if="$(arg seat_scene)"/>
   <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene.xml" unless="$(eval arg('robot_version') == 15 or arg('seat_scene'))"/>
   <param name="legged_robot_scene_param" value="$(arg legged_robot_scene)" />

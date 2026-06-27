@@ -98,6 +98,12 @@ public:
 
   void setEnabled(bool enable);
   bool isEnabled() const;
+
+  //waao
+  void resetCommandState(bool stance_mode = true);
+  void overrideCommandState(const CommandDataRL& command);
+  void setSwitchVelocityScale(double scale);
+  
   void setReuseWalkCommandInStance(bool enable);
   void setAmpHandController(bool enable);
 
@@ -106,6 +112,8 @@ public:
   
   // Load in-place stepping configuration from config file
   void loadInPlaceStepConfig(const std::string& config_file, bool verbose = false);
+  bool isInPlaceSteppingActive() const;
+  bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const;
 
 private:
   // ROS callbacks
@@ -125,7 +133,6 @@ private:
   void startInPlaceStepping(const ros::Time& current_time);
   void stopInPlaceStepping();
   void updateInPlaceStepping(const ros::Time& current_time);
-  bool isInPlaceSteppingActive() const;
 
 private:
   ros::NodeHandle& nh_;
@@ -136,6 +143,7 @@ private:
   
   // Current command data
   CommandDataRL currentCommand_;
+  double switch_velocity_scale_ = 1.0;
   bool enabled_;
   bool reuse_walk_command_in_stance_;
   bool is_amp_hand_controller_{false};
@@ -146,8 +154,11 @@ private:
   double feet_alignment_threshold_;
   
   // Velocity smoothing parameters
+  geometry_msgs::Twist latest_cmd_vel_;
   geometry_msgs::Twist smoothed_cmd_vel_;
   geometry_msgs::Twist previous_cmd_vel_;
+  std::string latest_gait_name_;
+  bool trot_latched_;
   double velocity_smooth_factor_;
   double max_velocity_change_;
   double velocity_smooth_time_;

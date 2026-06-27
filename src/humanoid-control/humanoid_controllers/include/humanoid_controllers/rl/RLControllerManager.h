@@ -1,6 +1,7 @@
 #pragma once
 
 #include "humanoid_controllers/rl/RLControllerBase.h"
+#include "humanoid_controllers/rl/rl_switch_config.h"
 #include "humanoid_controllers/rl/rl_controller_types.h"
 #include "humanoid_interface/common/TopicLogger.h"
 #include "kuavo_msgs/switchController.h"
@@ -12,6 +13,7 @@
 #include "kuavo_msgs/DanceTrajectoryState.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
+#include <std_msgs/String.h>
 #include "std_msgs/Int32.h"
 #include <map>
 #include <vector>
@@ -32,6 +34,13 @@ namespace humanoid_controller
   class RLControllerManager
   {
   public:
+    enum class SwitchMotionState
+    {
+      STANCE,
+      STATIONARY,
+      WALKING
+    };
+
     /**
      * @brief 构造函数
      */
@@ -278,10 +287,75 @@ namespace humanoid_controller
     }
 
     /**
+     * @brief 注册静止物理条件回调（躯干线速度接近零且双脚可靠接触）
+     */
+    void registerStationaryPhysicalStateCallback(std::function<bool()> callback)
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      stationary_physical_state_callback_ = callback;
+    }
+
+    /**
+     * @brief 注册 walking 相位同步切换保护回调
+     * @param callback 回调函数。返回 true 表示允许切换，false 表示阻止切换，并通过 message 给出原因
+     */
+    void registerWalkingPhaseSyncSwitchGuardCallback(
+        std::function<bool(const std::string&, const std::string&, std::string&)> callback)
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      walking_phase_sync_switch_guard_callback_ = callback;
+    }
+
+    /**
      * @brief 检查躯干速度是否稳定（从状态估计器获取）
      * @return 如果速度稳定返回true，否则返回false
      */
     bool isTorsoVelocityStable();
+
+    /**
+     * @brief walking 状态下 AMP/DEPTH 直切的额外保护检查
+     * @param target_name 目标控制器名称
+     * @param message 检查失败时返回原因
+     * @return true 表示允许切换
+     */
+    bool checkWalkingPhaseSyncSwitchGuard(const std::string& target_name, std::string& message);
+
+    /**
+     * @brief 当前切换请求是否允许在walking状态下绕过torso稳定性检查
+     */
+    bool allowWalkingPhaseSyncSwitchRequest(const std::string& target_name);
+
+    /**
+     * @brief 处理挂起的行走态 RL->RL 切换请求
+     */
+    void processPendingWalkingSwitchRequest();
+
+    /**
+     * @brief 在控制周期中更新当前 RL 控制器的站立/静止/行走状态
+     */
+    void updateSwitchMotionState();
+
+    /**
+     * @brief 获取最近一次成功切换采用的运动状态
+     */
+    SwitchMotionState getLastSwitchMotionState() const;
+
+    /**
+     * @brief 当前是否存在挂起的行走态 RL->RL 切换请求
+     */
+    bool hasPendingWalkingSwitchRequest() const;
+
+    /**
+     * @brief 获取挂起的行走态 RL->RL 切换目标控制器名称
+     */
+    std::string getPendingWalkingSwitchTargetName() const;
+
+    /**
+     * @brief 处理按名称切换控制器的公共逻辑
+     */
+    bool handleSwitchControllerByNameRequest(const std::string& target_name,
+                                             bool only_rl_to_rl,
+                                             std::string& message);
 
   private:
     /**
@@ -343,6 +417,11 @@ namespace humanoid_controller
                                    kuavo_msgs::switchController::Response &res);
 
     /**
+     * @brief ROS话题回调：外部导航按名字请求RL->RL切换
+     */
+    void navSwitchControllerByNameCallback(const std_msgs::String::ConstPtr& msg);
+
+    /**
      * @brief ROS服务回调：获取控制器列表
      */
     bool getControllerListCallback(kuavo_msgs::getControllerList::Request &req, 
@@ -397,6 +476,16 @@ namespace humanoid_controller
     void updateControllerListsByType();
 
     /**
+     * @brief 挂起一个行走态 RL->RL 切换请求，等待 guard 条件满足后自动执行
+     */
+    void queuePendingWalkingSwitchRequest(const std::string& target_name, const std::string& reason);
+
+    /**
+     * @brief 清除挂起的行走态 RL->RL 切换请求
+     */
+    void clearPendingWalkingSwitchRequest(const std::string& reason = "");
+
+    /**
      * @brief 发布控制器切换事件
      */
     void publishControllerSwitchEvent(const std::string& from_controller,
@@ -404,9 +493,12 @@ namespace humanoid_controller
 
     void publishDepthHistoryStatus(TopicMonitor::CheckResult result);
 
+    void updateSwitchMotionStateLocked();
+
 
   private:
     std::map<std::string, std::unique_ptr<RLControllerBase>> controllers_;  ///< 控制器映射表
+    std::map<std::string, ControllerClass> controller_classes_;              ///< 控制器大类映射表
     RLControllerBase* last_controller_ptr_ = nullptr;                       ///< 上一个控制器指针（不拥有所有权，仅做记录）
     std::vector<std::string> controller_names_;                             ///< 控制器名称列表（保持顺序）
     std::string current_controller_name_;                                    ///< 当前控制器名称（空字符串表示BASE）
@@ -425,6 +517,7 @@ namespace humanoid_controller
     ros::ServiceServer set_rl_switch_mode_srv_;       ///< 设置RL切换模式服务
     ros::ServiceServer set_fall_down_state_srv_;     ///< 设置倒地状态服务
     ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
+    ros::Subscriber nav_switch_controller_sub_;      ///< 外部导航按名字切换RL控制器话题
     ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
     ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
@@ -440,9 +533,20 @@ namespace humanoid_controller
     std::function<void(int)> fall_down_state_callback_;  ///< 设置倒地状态的回调函数
     // 躯干速度检查相关
     std::function<bool()> torso_stability_callback_;          ///< 获取躯干稳定性状态的回调函数
+    std::function<bool()> stationary_physical_state_callback_; ///< 躯干线速度和双脚接触条件
+    std::function<bool(const std::string&, const std::string&, std::string&)> walking_phase_sync_switch_guard_callback_;
+        ///< walking 状态下 AMP/DEPTH 直切的额外保护回调
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
+    bool has_pending_walking_switch_request_ = false;
+    std::string pending_walking_switch_source_name_;
+    std::string pending_walking_switch_target_name_;
+    std::string pending_walking_switch_reason_;
+    SwitchMotionState switch_motion_state_ = SwitchMotionState::STANCE;
+    SwitchMotionState last_switch_motion_state_ = SwitchMotionState::STANCE;
+    ros::Time stationary_candidate_start_time_;
+    bool stationary_candidate_active_ = false;
     double depth_history_min_frequency_hz_ = 55.0;  ///< depth 历史话题最低频率要求
     double depth_history_wait_timeout_sec_ = 0.2;   ///< depth 历史话题最大消息过期时间
     int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数

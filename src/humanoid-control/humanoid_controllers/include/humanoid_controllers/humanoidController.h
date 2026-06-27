@@ -69,8 +69,10 @@
 #include <sensor_msgs/Joy.h>
 #include <thread>
 #include <functional>
+#include <cmath>
 #include <openvino/openvino.hpp>
 #include <sensor_msgs/JointState.h>
+#include "humanoid_controllers/rl/rl_switch_config.h"
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
 #include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
@@ -265,6 +267,47 @@ namespace humanoid_controller
     // ==================== MPC-RL插值系统函数声明 ====================
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
     void updateMPCRLInterpolation(double current_time);
+
+    //waao： RL-RL插值
+    // ==================== RL-RL插值系统函数声明 ====================
+    void startRLToRLInterpolation(double current_time,
+                                  const std::string& source_controller,
+                                  const std::string& target_controller,
+                                  const Eigen::VectorXd& start_joint_reference,
+                                  const Eigen::VectorXd& target_joint_reference,
+                                  const Eigen::VectorXd& start_joint_kp,
+                                  const Eigen::VectorXd& start_joint_kd,
+                                  const Eigen::VectorXd& start_joint_tau_max,
+                                  const Eigen::VectorXd& start_joint_control_modes,
+                                  const Eigen::VectorXd& start_joint_pd_modes,
+                                  const Eigen::VectorXd& target_joint_kp,
+                                  const Eigen::VectorXd& target_joint_kd,
+                                  const Eigen::VectorXd& target_joint_tau_max,
+                                  const Eigen::VectorXd& target_joint_control_modes,
+                                  const Eigen::VectorXd& target_joint_pd_modes,
+                                  const kuavo_msgs::jointCmd& target_joint_cmd);
+    bool buildRLControllerJointCmd(RLControllerBase* controller,
+                                   const ros::Time& time,
+                                   kuavo_msgs::jointCmd& joint_cmd);
+    //waao：相位对齐                               
+    bool tryActivateRLToRLWalkingPhaseSync(RLControllerBase* source_controller,
+                                           RLControllerBase* target_controller,
+                                           double current_time);
+    void refreshRLToRLSwitchParams();
+    void updateRLToRLWalkingPhaseSync(double current_time);
+    void clearRLToRLWalkingPhaseSync();
+    void activateRLToRLLiveSourceController(RLControllerBase* source_controller,
+                                            const std::string& source_controller_name,
+                                            const std::string& target_controller_name,
+                                            double current_time,
+                                            const kuavo_msgs::jointCmd& target_joint_cmd);
+    void applyRLToRLSwitchVelocityProfile(double current_time);
+    void applyRLToRLLiveInterpolation(double current_time,
+                                      const kuavo_msgs::jointCmd& source_joint_cmd,
+                                      kuavo_msgs::jointCmd& target_joint_cmd);
+    void applyRLToRLInterpolation(double current_time, kuavo_msgs::jointCmd& joint_cmd);
+    void stopRLToRLInterpolation();
+    void publishRLToRLSwitchDebugState(double progress, const std::string& phase, double current_time);
 
     sensor_msgs::Joy oldJoyMsg_;
     vector_t joystickOriginAxis_ = vector_t::Zero(6);
@@ -855,6 +898,54 @@ namespace humanoid_controller
     double fall_stand_max_joint_velocity_ = 1.0;  // 倒地起身关节插值的最大关节速度(rad/s)
     bool has_fall_stand_controller_{false};
     
+    //waao： RL-RL插值
+    // ==================== RL-RL插值系统成员变量 ====================
+    bool is_rl_to_rl_interpolation_active_ = false;
+    bool has_last_rl_joint_reference_ = false;
+    bool has_last_rl_joint_cmd_ = false;
+    double rl_to_rl_switch_start_time_ = 0.0;
+    double rl_to_rl_switch_duration_ = RL_TO_RL_SWITCH_DURATION_DEFAULT;
+    std::string last_rl_controller_name_;
+    std::string rl_to_rl_source_controller_name_;
+    std::string rl_to_rl_target_controller_name_;
+    RLControllerBase* rl_to_rl_live_source_controller_ptr_ = nullptr;
+    Eigen::VectorXd last_rl_joint_reference_;
+    kuavo_msgs::jointCmd last_rl_joint_cmd_;
+    Eigen::VectorXd rl_to_rl_start_joint_reference_;
+    Eigen::VectorXd rl_to_rl_target_joint_reference_;
+    Eigen::VectorXd rl_to_rl_start_joint_q_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_v_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_tau_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_tau_ratio_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_kp_;
+    Eigen::VectorXd rl_to_rl_start_joint_kd_;
+    Eigen::VectorXd rl_to_rl_start_joint_tau_max_;
+    Eigen::VectorXd rl_to_rl_start_joint_control_modes_;
+    Eigen::VectorXd rl_to_rl_start_joint_pd_modes_;
+    Eigen::VectorXd rl_to_rl_target_joint_kp_;
+    Eigen::VectorXd rl_to_rl_target_joint_kd_;
+    Eigen::VectorXd rl_to_rl_target_joint_tau_max_;
+    Eigen::VectorXd rl_to_rl_target_joint_control_modes_;
+    Eigen::VectorXd rl_to_rl_target_joint_pd_modes_;
+    bool rl_to_rl_walking_phase_sync_active_ = false;
+    RLControllerBase* rl_to_rl_phase_sync_source_controller_ptr_ = nullptr;
+    RLControllerBase* rl_to_rl_phase_sync_target_controller_ptr_ = nullptr;
+    double rl_to_rl_phase_sync_phi_rad_ = 0.0;
+    double rl_to_rl_phase_sync_frequency_hz_ = 0.0;
+    double rl_to_rl_phase_sync_source_frequency_hz_ = 0.0;
+    double rl_to_rl_phase_sync_target_frequency_hz_ = 0.0;
+    double rl_to_rl_phase_sync_delta_phi_rad_ = 0.0;
+    double rl_to_rl_phase_sync_last_update_time_ = 0.0;
+    double rl_to_rl_phase_sync_phi_thresh_rad_ = RL_TO_RL_PHASE_SYNC_PHI_THRESH_RAD_DEFAULT;
+    double rl_to_rl_phase_sync_sin_guard_ = RL_TO_RL_PHASE_SYNC_SIN_GUARD_DEFAULT;
+    double rl_to_rl_phase_sync_k0_ = RL_TO_RL_PHASE_SYNC_K0_DEFAULT;
+    double rl_to_rl_phase_sync_decay_power_ = RL_TO_RL_PHASE_SYNC_DECAY_POWER_DEFAULT;
+    double rl_to_rl_phase_sync_frequency_min_hz_ = RL_TO_RL_PHASE_SYNC_FREQUENCY_MIN_HZ_DEFAULT;
+    double rl_to_rl_phase_sync_frequency_max_hz_ = RL_TO_RL_PHASE_SYNC_FREQUENCY_MAX_HZ_DEFAULT;
+    bool rl_to_rl_velocity_dip_enabled_ = RL_TO_RL_VELOCITY_DIP_ENABLED_DEFAULT != 0;
+    double rl_to_rl_velocity_dip_min_scale_ = RL_TO_RL_VELOCITY_DIP_MIN_SCALE_DEFAULT;
+    double rl_to_rl_velocity_dip_midpoint_ = RL_TO_RL_VELOCITY_DIP_MIDPOINT_DEFAULT;
+
     // ==================== 通用插值系统成员变量 ====================
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁
     int interpolation_counter_;                                           // 插值任务计数器，用于生成唯一ID
