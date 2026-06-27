@@ -33,18 +33,29 @@ def main():
     active_pub.publish(Bool(data=False))  # 初始 false
     last_active = {"value": False}
 
+    def _publish_inactive_on_shutdown():
+        active_pub.publish(Bool(data=False))
+        last_active["value"] = False
+
+    rospy.on_shutdown(_publish_inactive_on_shutdown)
+
+    def _publish_active_if_changed(_event=None):
+        # 主指手锁定或躯干复位轨迹未完成时，通知底盘侧暂不消费摇杆。
+        # 用 Timer 定时刷新，避免 VR/joystick 断流时 active 卡在 true。
+        now_active = torso.main_hand is not None or torso.is_reset_busy()
+        if now_active != last_active["value"]:
+            active_pub.publish(Bool(data=now_active))
+            last_active["value"] = now_active
+
     def _on_joy(msg):
         try:
             torso.handle_joystick(msg)
         except Exception as e:
             rospy.logerr_throttle(2.0, f"[torso_joystick_node] handle_joystick error: {e}")
             return
-        # 主指手锁定/释放边沿触发，发布激活状态
-        now_active = torso.main_hand is not None
-        if now_active != last_active["value"]:
-            active_pub.publish(Bool(data=now_active))
-            last_active["value"] = now_active
+        _publish_active_if_changed()
 
+    rospy.Timer(rospy.Duration(0.02), _publish_active_if_changed)
     rospy.Subscriber("/quest_joystick_data", JoySticks, _on_joy, queue_size=10)
     rospy.spin()
 

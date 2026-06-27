@@ -222,7 +222,8 @@ class JoyCustomizeConfigNode:
         # 动作执行状态标志
         self.robot_action_executing = False
 
-        # 当前 MPC 步态名(仅 MPC 有效, 仅作日志用; 不再作为是否走路的判据)
+        # 当前 MPC 步态名(仅 MPC 有效)。用于识别踏步(trot)/行走(walk)等"在走"状态——
+        # 踏步时 cmd_vel≈0, 单靠速度死区判不出, 需叠加步态判据(见 _has_motion_intent)。
         self._current_gait_name = "stance"
 
         # RL控制器状态标志（用于判断是否处于RL控制器模式）
@@ -635,18 +636,35 @@ class JoyCustomizeConfigNode:
     # 避免摇杆漂移在临界态把 tact 当走路拒掉。
     _MOTION_DEAD_ZONE = 0.05
 
+    # MPC 下视为"在走"的步态名。stance=站立静止; walk=行走; trot=原地踏步。
+    # 踏步时 cmd_vel≈0, 仅靠速度死区判不出, 需用步态名补判(见 _has_motion_intent)。
+    # AMP 无 walk/stance 状态机, 该话题不下发, _current_gait_name 恒为 "stance", 不影响 AMP。
+    _WALKING_GAIT_NAMES = ("walk", "trot")
+
     def _cmd_vel_callback(self, msg: Twist) -> None:
         self._last_cmd_vel = msg
 
     def _has_motion_intent(self) -> bool:
-        """看 cpp 端最终下发的 /cmd_vel: linear.x/y 或 angular.z 任一超过死区即视为"在走"。
-        蹲起 (linear.z) 不算; AMP 也适用 (它没有 walk/stance 步态)。"""
+        """判断机器人是否处于"在走"状态, 用于走路时禁触发 M1/M2(及 AMP 下禁 LT/RT)。
+
+        判据 = 速度死区 OR 步态名:
+          - /cmd_vel 的 linear.x/y 或 angular.z 任一超死区(AMP/MPC 通用, 蹲起 linear.z 不算);
+          - 或 MPC 步态名为 walk/trot(覆盖原地踏步: cmd_vel≈0 但机器人在踏步, 见 #3305)。
+        """
+        v = self._last_cmd_vel
+        if v is not None and (abs(v.linear.x) > self._MOTION_DEAD_ZONE
+                              or abs(v.linear.y) > self._MOTION_DEAD_ZONE
+                              or abs(v.angular.z) > self._MOTION_DEAD_ZONE):
+            return True
+        return self._current_gait_name in self._WALKING_GAIT_NAMES
+
+    def _motion_cmd_vel_str(self) -> str:
+        """用于日志: 简明打印当前 /cmd_vel 的平面分量。"""
         v = self._last_cmd_vel
         if v is None:
-            return False
-        return (abs(v.linear.x) > self._MOTION_DEAD_ZONE
-                or abs(v.linear.y) > self._MOTION_DEAD_ZONE
-                or abs(v.angular.z) > self._MOTION_DEAD_ZONE)
+            return "n/a"
+        return (f"lx={v.linear.x:.3f},ly={v.linear.y:.3f},"
+                f"wz={v.angular.z:.3f}")
 
     def _prepare_dance_music_pending(self, dance_name: str, music_names) -> None:
         normalized_music_names = self._normalize_name_list(music_names)
@@ -970,22 +988,26 @@ class JoyCustomizeConfigNode:
                                 f"(only mpc / amp_controller)")
                             continue
 
-                        # 走路时(/cmd_vel 平面速度或转向超过死区) 的精细化拒绝:
+                        # 走路时的精细化拒绝(判据见 _has_motion_intent):
                         #   - M1/M2: 任何控制器都拒(用户可自定义动作幅度过大易摔);
+                        #     覆盖原地踏步(trot): cmd_vel≈0 但步态在走, 一样拒(见 #3305)。
                         #   - LT/RT: 仅 AMP 走路时拒; MPC 走路时允许(PDF §4 边走边做)。
-                        # 判据用 /cmd_vel 而非 gait_name, 因为 AMP 没有 walk/stance 步态状态机。
+                        # 速度死区对 AMP/MPC 通用; 步态名仅 MPC 有效(AMP 无状态机, 恒 stance)。
                         if self._has_motion_intent():
                             if is_m1m2:
                                 rospy.loginfo_throttle(
                                     1.0,
-                                    f"Skipping {action_key}: cmd_vel 平面速度/转向超死区, "
-                                    f"M1/M2 走路时禁触发")
+                                    f"Skipping {action_key}: robot in motion "
+                                    f"(cmd_vel={self._motion_cmd_vel_str()}, "
+                                    f"gait={self._current_gait_name}), "
+                                    f"M1/M2 disabled while walking/stepping")
                                 continue
                             if self._cached_controller_name == "amp_controller":
                                 rospy.loginfo_throttle(
                                     1.0,
                                     f"Skipping {action_key}: AMP 走路时禁触发 LT/RT "
-                                    f"(cmd_vel 超死区); 切到 MPC 才可边走边做")
+                                    f"(cmd_vel={self._motion_cmd_vel_str()} over deadzone); "
+                                    f"switch to MPC to walk while acting")
                                 continue
 
                         # 已有动作在执行 → 这次必然被服务端拒绝，提前在 joy 层拒掉，

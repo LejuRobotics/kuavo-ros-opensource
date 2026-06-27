@@ -2,6 +2,7 @@
 from __future__ import annotations
 import math
 import time
+from enum import Enum
 from typing import Callable, Optional
 
 
@@ -23,6 +24,19 @@ YAW_TARGET = math.pi                 # rad（180°）
 MIN_DT = 0.001
 MAX_DT = 0.1
 
+# ===== grip 双击复位防误触参数 =====
+GRIP_DOUBLE_CLICK_WINDOW = 0.40  # s，两次短按之间的最大间隔
+GRIP_SHORT_PRESS_MAX = 0.30      # s，超过该时长视为正常长按控制
+RESET_COOLDOWN = 1.00            # s，复位后的冷却时间
+RESET_STICK_DEAD_ZONE = 0.10     # 复位触发时要求摇杆接近零位
+
+
+class GripClickState(Enum):
+    IDLE = 0
+    CLICK1_DOWN = 1
+    WAIT_CLICK2 = 2
+    CLICK2_DOWN = 3
+
 
 class TorsoController:
     """单手摇杆控躯干的状态机 + 命令发布器。
@@ -35,6 +49,7 @@ class TorsoController:
         initial_pose_xyz,
         publisher: Optional[Callable] = None,
         clock: Optional[Callable[[], float]] = None,
+        resetter: Optional[Callable[[], object]] = None,
     ):
         self.initial_xyz = tuple(initial_pose_xyz)
         # 索引 [0:3] = x/y/z（取自 initial_pose_xyz）
@@ -42,6 +57,7 @@ class TorsoController:
         self.current_pose = list(initial_pose_xyz) + [0.0, 0.0, 0.0]
         self._publish_fn = publisher
         self._clock = clock if clock is not None else time.monotonic
+        self._resetter = resetter
         self.main_hand: Optional[str] = None  # None / 'left' / 'right'
         self._l_was_pressed = False
         self._r_was_pressed = False
@@ -49,15 +65,54 @@ class TorsoController:
         # A/B 按键边沿检测的"上一帧按下"状态
         self._first_btn_was_pressed = False
         self._second_btn_was_pressed = False
+        # grip 短按双击复位状态
+        self._grip_click_state = GripClickState.IDLE
+        self._grip_click_hand: Optional[str] = None
+        self._grip_press_t: Optional[float] = None
+        self._first_click_release_t: Optional[float] = None
+        self._reset_cooldown_until = 0.0
+        self._reset_busy_until = 0.0
 
     def handle_joystick(self, msg) -> None:
-        self._arbitrate_main_hand(msg)
-        if self.main_hand is None:
+        l_pressed, r_pressed, l_released, r_released = self._get_grip_states(msg)
+        now = self._clock()
+
+        # 复位轨迹未完成前不接受新的摇杆/按键控制，避免覆盖复位目标。
+        if now < self._reset_busy_until:
+            self._l_was_pressed = l_pressed
+            self._r_was_pressed = r_pressed
             return
+
+        # 先基于 press edge 锁定主控手，release 清理放在双击检测之后，
+        # 这样第一下短按释放时仍可被双击状态机看到。
+        self._arbitrate_main_hand_press(l_pressed, r_pressed)
+
+        reset_triggered = False
+        if self.main_hand is not None:
+            reset_triggered = self._detect_grip_reset(msg, l_pressed, r_pressed, l_released, r_released)
+
+        self._arbitrate_main_hand_release(l_released, r_released)
+
+        if self.main_hand is None and not reset_triggered:
+            self._l_was_pressed = l_pressed
+            self._r_was_pressed = r_pressed
+            return
+
+        if reset_triggered:
+            self._publish_torso_pose()
+            self._l_was_pressed = l_pressed
+            self._r_was_pressed = r_pressed
+            return
+
         dt = self._compute_dt()
         self._handle_yaw_buttons(msg)
         self._apply_stick_increment(msg, dt)
         self._publish_torso_pose()
+        self._l_was_pressed = l_pressed
+        self._r_was_pressed = r_pressed
+
+    def is_reset_busy(self) -> bool:
+        return self._clock() < self._reset_busy_until
 
     def _compute_dt(self) -> float:
         now = self._clock()
@@ -72,6 +127,121 @@ class TorsoController:
         if self.main_hand == "left":
             return msg.left_x, msg.left_y
         return msg.right_x, msg.right_y
+
+    def _is_main_stick_zero(self, msg) -> bool:
+        sx, sy = self._select_stick(msg)
+        return abs(sx) < RESET_STICK_DEAD_ZONE and abs(sy) < RESET_STICK_DEAD_ZONE
+
+    def _reset_grip_click_state(self) -> None:
+        self._grip_click_state = GripClickState.IDLE
+        self._grip_click_hand = None
+        self._grip_press_t = None
+        self._first_click_release_t = None
+
+    def _reset_runtime_state(self) -> None:
+        """复位成功后回到干净 IDLE，要求用户重新松开/按下 grip 才能控制。"""
+        self.main_hand = None
+        self._last_t = None
+        self._first_btn_was_pressed = False
+        self._second_btn_was_pressed = False
+        self._reset_grip_click_state()
+
+    def _execute_reset(self) -> Optional[float]:
+        if self._resetter is None:
+            return None
+        try:
+            result = self._resetter()
+        except Exception:
+            return None
+
+        # lb_ctrl_api.reset_torso_to_initial() 成功时返回估计时间；0.0 表示失败。
+        # 也接受 True 这类 truthy 返回值，便于测试和未来封装。
+        if not result:
+            return None
+
+        self.current_pose = list(self.initial_xyz) + [0.0, 0.0, 0.0]
+        self._reset_runtime_state()
+        if isinstance(result, bool):
+            return 0.0
+        try:
+            return float(result)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _detect_grip_reset(self, msg, l_pressed: bool, r_pressed: bool, l_released: bool, r_released: bool) -> bool:
+        now = self._clock()
+        if now < self._reset_cooldown_until:
+            return False
+
+        if self.main_hand == "left":
+            hand = "left"
+            pressed = l_pressed
+            released = l_released
+            press_edge = l_pressed and not self._l_was_pressed
+        elif self.main_hand == "right":
+            hand = "right"
+            pressed = r_pressed
+            released = r_released
+            press_edge = r_pressed and not self._r_was_pressed
+        else:
+            self._reset_grip_click_state()
+            return False
+
+        if not self._is_main_stick_zero(msg):
+            self._reset_grip_click_state()
+            return False
+
+        if self._grip_click_state == GripClickState.IDLE:
+            if press_edge:
+                self._grip_click_state = GripClickState.CLICK1_DOWN
+                self._grip_click_hand = hand
+                self._grip_press_t = now
+            return False
+
+        if hand != self._grip_click_hand:
+            self._reset_grip_click_state()
+            return False
+
+        if self._grip_click_state == GripClickState.CLICK1_DOWN:
+            if pressed and self._grip_press_t is not None and (now - self._grip_press_t) > GRIP_SHORT_PRESS_MAX:
+                self._reset_grip_click_state()
+                return False
+            if released:
+                if self._grip_press_t is not None and (now - self._grip_press_t) <= GRIP_SHORT_PRESS_MAX:
+                    self._grip_click_state = GripClickState.WAIT_CLICK2
+                    self._first_click_release_t = now
+                else:
+                    self._reset_grip_click_state()
+            return False
+
+        if self._grip_click_state == GripClickState.WAIT_CLICK2:
+            if self._first_click_release_t is None or (now - self._first_click_release_t) > GRIP_DOUBLE_CLICK_WINDOW:
+                self._reset_grip_click_state()
+                return False
+            if press_edge:
+                self._grip_click_state = GripClickState.CLICK2_DOWN
+                self._grip_press_t = now
+            return False
+
+        if self._grip_click_state == GripClickState.CLICK2_DOWN:
+            if pressed and self._grip_press_t is not None and (now - self._grip_press_t) > GRIP_SHORT_PRESS_MAX:
+                self._reset_grip_click_state()
+                return False
+            if released:
+                if self._grip_press_t is None or (now - self._grip_press_t) > GRIP_SHORT_PRESS_MAX:
+                    self._reset_grip_click_state()
+                    return False
+                reset_duration = self._execute_reset()
+                success = reset_duration is not None
+                if success:
+                    reset_done_t = self._clock()
+                    self._reset_cooldown_until = reset_done_t + RESET_COOLDOWN
+                    self._reset_busy_until = reset_done_t + max(0.0, reset_duration)
+                else:
+                    self._reset_grip_click_state()
+                return success
+
+        return False
 
     def _apply_stick_increment(self, msg, dt: float) -> None:
         sx, sy = self._select_stick(msg)
@@ -122,30 +292,30 @@ class TorsoController:
         twist.angular.z = self.current_pose[5]
         self._publish_fn(twist)
 
-    def _arbitrate_main_hand(self, msg) -> None:
+    def _get_grip_states(self, msg):
         l_pressed = msg.left_grip > GRIP_PRESS_TH
         r_pressed = msg.right_grip > GRIP_PRESS_TH
         l_released = msg.left_grip < GRIP_RELEASE_TH
         r_released = msg.right_grip < GRIP_RELEASE_TH
+        return l_pressed, r_pressed, l_released, r_released
 
-        if self.main_hand is None:
-            # 边沿检测：上一帧没按下、这一帧按下 → 锁定
-            if l_pressed and not self._l_was_pressed:
-                self.main_hand = "left"
-            elif r_pressed and not self._r_was_pressed:
-                self.main_hand = "right"
-        else:
-            # 已锁定，仅主指手 grip 松开（< release_th）才释放
-            if self.main_hand == "left" and l_released:
-                self.main_hand = None
-                self._last_t = None  # 重置时钟基准，下次重新激活首帧返回 MIN_DT
-            elif self.main_hand == "right" and r_released:
-                self.main_hand = None
-                self._last_t = None
+    def _arbitrate_main_hand_press(self, l_pressed: bool, r_pressed: bool) -> None:
+        if self.main_hand is not None:
+            return
+        # 边沿检测：上一帧没按下、这一帧按下 → 锁定
+        if l_pressed and not self._l_was_pressed:
+            self.main_hand = "left"
+        elif r_pressed and not self._r_was_pressed:
+            self.main_hand = "right"
 
-        # 维护"上一帧按下状态"用于边沿检测
-        self._l_was_pressed = l_pressed
-        self._r_was_pressed = r_pressed
+    def _arbitrate_main_hand_release(self, l_released: bool, r_released: bool) -> None:
+        # 已锁定，仅主指手 grip 松开（< release_th）才释放
+        if self.main_hand == "left" and l_released:
+            self.main_hand = None
+            self._last_t = None  # 重置时钟基准，下次重新激活首帧返回 MIN_DT
+        elif self.main_hand == "right" and r_released:
+            self.main_hand = None
+            self._last_t = None
 
 
 def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
@@ -202,4 +372,5 @@ def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
         initial_pose_xyz=initial_xyz,
         publisher=_publish,
         clock=lambda: rospy.Time.now().to_sec(),
+        resetter=lambda: ct.reset_torso_to_initial(wait_timeout_sec=1.0),
     )
