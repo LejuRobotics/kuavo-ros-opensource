@@ -177,6 +177,7 @@ add_service_files(
   gestureList.srv
   gestureExecuteState.srv
   controlLejuClaw.srv
+  lejuClawRecovery.srv
   setTagId.srv
   footPoseTargetTrajectoriesSrv.srv
   footPose6DTargetTrajectoriesSrv.srv

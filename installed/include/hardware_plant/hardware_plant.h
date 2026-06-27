@@ -171,6 +171,7 @@ class HardwarePlant
     void setLejuClawDebugCallback(eef_controller::LejuClawDebugCallback callback);
     bool controlLejuClaw(eef_controller::ControlClawRequest& req, eef_controller::ControlClawResponse& res);
     bool controlLejuClaw(eef_controller::lejuClawCommand& command);
+    bool recoverLejuClaw(const std::string& direction, float current, int duration_ms, int repeat, std::string& message);
     eef_controller::ClawState getLejuClawState();
 
     void setHardwareParam(const HardwareParam& param) { hardware_param_ = param; }
