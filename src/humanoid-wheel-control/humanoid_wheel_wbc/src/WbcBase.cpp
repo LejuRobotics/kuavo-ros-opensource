@@ -217,7 +217,7 @@ namespace ocs2
       // 计算位置和速度误差并进行故障检测和限幅处理
       vector_t pos_error = qDesired_.tail(info_.armDim).head(lowJoint_nums_) - qMeasured_.tail(info_.armDim).head(lowJoint_nums_);
       vector_t vel_error = vDesired_.tail(info_.armDim).head(lowJoint_nums_) - vMeasured_.tail(info_.armDim).head(lowJoint_nums_);
-      processLowJointErrorsWithSafe(pos_error, vel_error);
+      if(is_real_) processLowJointErrorsWithSafe(pos_error, vel_error);   // 真实环境下进行故障检测和限幅处理
       
       // 计算 PD 控制量并限幅
       b = lowJointKp_.cwiseProduct(pos_error) + lowJointKd_.cwiseProduct(vel_error);
@@ -241,7 +241,7 @@ namespace ocs2
       // 计算位置和速度误差并进行故障检测和限幅处理
       vector_t pos_error = qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_);
       vector_t vel_error = vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_);
-      processArmJointErrorsWithSafe(pos_error, vel_error);
+      if(is_real_) processArmJointErrorsWithSafe(pos_error, vel_error);   // 真实环境下进行故障检测和限幅处理
       
       // 计算 PD 控制量并限幅
       b = armKp.cwiseProduct(pos_error) + armKd.cwiseProduct(vel_error);
@@ -372,6 +372,7 @@ namespace ocs2
     {
       // Load task file
       torqueLimits_ = vector_t(arm_nums_ / 2 + lowJoint_nums_);
+      is_real_ = is_real;
       loadData::loadEigenMatrix(taskFile, "torqueLimitsTask", torqueLimits_);
       if (verbose)
       {
@@ -389,8 +390,17 @@ namespace ocs2
       }
       lowJointKp_.resize(lowJoint_nums_);
       lowJointKd_.resize(lowJoint_nums_);
-      loadData::loadEigenMatrix(taskFile, prefix + "kp", lowJointKp_);
-      loadData::loadEigenMatrix(taskFile, prefix + "kd", lowJointKd_);
+
+      if(!is_real)
+      {
+        loadData::loadEigenMatrix(taskFile, prefix + "kp_sim", lowJointKp_);
+        loadData::loadEigenMatrix(taskFile, prefix + "kd_sim", lowJointKd_);
+      }
+      else
+      {
+        loadData::loadEigenMatrix(taskFile, prefix + "kp", lowJointKp_);
+        loadData::loadEigenMatrix(taskFile, prefix + "kd", lowJointKd_);
+      }
 
       if(arm_nums_ != 0){
         prefix = "armAccelTask.";
@@ -401,8 +411,16 @@ namespace ocs2
         }
         armJointKp_.resize(arm_nums_);
         armJointKd_.resize(arm_nums_);
-        loadData::loadEigenMatrix(taskFile, prefix + "kp", armJointKp_);
-        loadData::loadEigenMatrix(taskFile, prefix + "kd", armJointKd_);
+        if(!is_real)
+        {
+          loadData::loadEigenMatrix(taskFile, prefix + "kp_sim", armJointKp_);
+          loadData::loadEigenMatrix(taskFile, prefix + "kd_sim", armJointKd_);
+        }
+        else
+        {
+          loadData::loadEigenMatrix(taskFile, prefix + "kp", armJointKp_);
+          loadData::loadEigenMatrix(taskFile, prefix + "kd", armJointKd_);
+        }
 
         vrArmJointKp_ = armJointKp_;
         vrArmJointKd_ = armJointKd_;

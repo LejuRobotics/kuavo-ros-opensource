@@ -128,6 +128,12 @@ namespace humanoidController_wheel_wbc
     controllerNh_.getParam("/libFolder", libFolder);
     controllerNh_.getParam("/urdfFile", urdfFile);
 
+    if (controllerNh_.hasParam("/real"))
+    {
+      controllerNh_.getParam("/real", is_real_);
+    }
+    std::cout << "is_real: " << is_real_ << std::endl;
+
     setupHumanoidWheelInterface(taskFile, libFolder, urdfFile);
 
     observation_wheel_.state.setZero(manipulatorModelInfo_.stateDim);
@@ -204,11 +210,6 @@ namespace humanoidController_wheel_wbc
       robotVersion_ = RobotVersion::create(raw_version).version_number();
     }
     std::cout << "robotVersion_: " << robotVersion_ << std::endl;
-    if(controllerNh_.hasParam("/real"))
-    {
-      controllerNh_.getParam("/real", is_real_);
-    }
-    std::cout << "is_real: " << is_real_ << std::endl;
     if(controllerNh_.hasParam("/use_vr_control"))
     {
       controllerNh_.getParam("/use_vr_control", use_vr_control_);

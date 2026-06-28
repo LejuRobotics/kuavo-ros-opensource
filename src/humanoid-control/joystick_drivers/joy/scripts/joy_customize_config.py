@@ -577,6 +577,18 @@ class JoyCustomizeConfigNode:
         msg.data = value
         self.m1m2_action_active_pub.publish(msg)
 
+    def _release_m1m2_action_active(self) -> None:
+        """兜底解除推杆屏蔽信号。
+
+        m1m2_action_active_pub 是 latch 话题: 抢发 True 后, 若空动作/服务失败/超时导致
+        /robot_action_state 不发消息, _robot_action_state_callback(唯一翻回 False 入口)不触发,
+        True 会被永久 latch -> cpp 侧摇杆被永久禁用(issue #3303)。
+        本方法在动作流程的各结束/失败路径主动回发 False, 保证屏蔽最终必解除。
+        """
+        # 仅当本次触发源确实是 m1m2 时才需要回发(否则属于 LT/RT 或无操作, 不应误改 m1m2 信号)。
+        if self._last_action_source == "m1m2":
+            self._publish_m1m2_action_active(False)
+
     # 允许做自定义动作(tact)的控制器白名单：MPC / AMP 均允许 tact，
     # 但 AMP 走路时(步态非 stance) LT/RT 也会被单独拒(MPC 走路时 LT/RT 不受限,符合 PDF §4)；
     # M1/M2 任何走路状态下一律拒(不分控制器)；
@@ -1036,11 +1048,20 @@ class JoyCustomizeConfigNode:
 
     def execute_action_type(self, action_config):
         """处理action类型的自定义动作"""
-        arm_pose_names = action_config.get("arm_pose_name", [])
-        music_names = action_config.get("music_name", [])
+        # 过滤空串: 配置里 [""] 会被误判为"有动作", 进而抢发 m1m2 屏蔽信号却又不调用
+        # /execute_arm_action -> /robot_action_state 不发消息 -> 屏蔽信号 latch 卡 True -> 摇杆永久失灵(见 issue #3303)。
+        # 这里把 [""] / [None] / 纯空白项视为无动作, 避免空动作触发屏蔽。
+        arm_pose_names = [n for n in action_config.get("arm_pose_name", []) if n and str(n).strip()]
+        music_names = [n for n in action_config.get("music_name", []) if n and str(n).strip()]
         rospy.loginfo(f"Executing regular action")
         rospy.loginfo(f"Arm poses: {arm_pose_names}")
         rospy.loginfo(f"Music: {music_names}")
+
+        # 无动作也无音乐: 直接返回, 不发屏蔽信号, 避免空动作锁死摇杆。
+        # (屏蔽信号已在调用前的 _publish_m1m2_action_active(is_m1m2) 抢发, 此处需主动回 False 兜底解除。)
+        if not arm_pose_names and not music_names:
+            self._release_m1m2_action_active()
+            return
 
         # 如果同时有动作和音乐，创建事件用于同步（等待模式切换完成后再播放音乐）
         mode_switch_event = None

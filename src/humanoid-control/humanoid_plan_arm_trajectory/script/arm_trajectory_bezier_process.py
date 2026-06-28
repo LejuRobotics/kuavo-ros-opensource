@@ -1669,10 +1669,13 @@ class ArmTrajectoryBezierDemo:
                 last_keyframe = max(f.get("keyframe", 0) for f in frames)
                 # 将 keyframe 转换为秒并更新 END_FRAME_TIME
                 self.END_FRAME_TIME = last_keyframe * 0.01
-        if current_control_mode == "rl":
-            filtered_data = action_data
-        else:
-            filtered_data = self.filter_data(action_data)
+        # 注意：RL/AMP 模式同样需要走 filter_data。
+        # 297038619 曾为修复 plan#1499（RL tact 首帧错位）在 RL 模式跳过 filter_data，
+        # 但跳过后保持段贝塞尔控制点未经平滑（tact 原始 CP 非零），导致手指指令 ±1 跳变，
+        # 在 AMP 步态抱拳等动作上表现为大拇指抖动（issue #3231）。
+        # 由于 RL 分支已前置 self.START_FRAME_TIME = 0; self.x_shift = 0，
+        # filter_data 内的时间平移不会破坏 RL 首帧对齐，故恢复无条件滤波。
+        filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
         rospy.loginfo(f"Planning arm trajectory for action: {action_name}...")
