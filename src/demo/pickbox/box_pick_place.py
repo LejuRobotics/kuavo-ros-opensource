@@ -742,8 +742,8 @@ class BoxPickPlace(object):
              ]
         }
         waypoint_names = ["side", "safe"]
-        waypoint_duration = 3.0
-        waypoint_steps = 30
+        waypoint_duration = 1.5
+        waypoint_steps = 20
         current = self.get_current_arm_joints_deg()
         if current is None:
             current = self.default_reset_arm_deg()

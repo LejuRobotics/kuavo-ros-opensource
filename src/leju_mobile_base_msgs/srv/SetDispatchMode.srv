@@ -1,0 +1,13 @@
+# SetDispatchMode.srv
+# 请求部分
+uint8 control_mode
+# SET_SOFT_STOP = 0        #软急停，调度下发停车       
+# CANCEL_SOFT_STOP = 1     #取消软急停（继续执行任务）
+# CANCEL_CURRENT_TASK = 2  #取消当前调度任务  
+# STATUS_WORKING = 3       #上报当前机器人的任务状态为工作中，控制权归上身所有
+# STATUS_IDLE = 4          #上报当前机器人的任务状态为空闲，控制权归调度系统所有
+
+---
+# 响应部分
+bool success        # 调用是否成功
+string message      # 状态信息
