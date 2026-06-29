@@ -472,15 +472,26 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
   
   // Apply smoothing factor
   double smooth_factor = std::min(velocity_smooth_factor_ / dt, 1.0);
+
+  const auto isDecelerating = [](double current, double target) {
+    return std::abs(target) < std::abs(current) - 1e-9;
+  };
+  const auto applyAxisSmooth = [&](double& smoothed, double target, double diff) {
+    if (velocity_change_decel_only_ && !isDecelerating(smoothed, target)) {
+      smoothed = target;
+    } else {
+      smoothed += diff * smooth_factor;
+    }
+  };
   
   // Smooth linear velocities
-  smoothed_vel.linear.x += vel_diff_x * smooth_factor;
-  smoothed_vel.linear.y += vel_diff_y * smooth_factor;
-  smoothed_vel.linear.z += vel_diff_z * smooth_factor;
+  applyAxisSmooth(smoothed_vel.linear.x, cmd_vel.linear.x, vel_diff_x);
+  applyAxisSmooth(smoothed_vel.linear.y, cmd_vel.linear.y, vel_diff_y);
+  applyAxisSmooth(smoothed_vel.linear.z, cmd_vel.linear.z, vel_diff_z);
   
   // Smooth angular velocities (x and y use normal smoothing)
-  smoothed_vel.angular.x += ang_diff_x * smooth_factor;
-  smoothed_vel.angular.y += ang_diff_y * smooth_factor;
+  applyAxisSmooth(smoothed_vel.angular.x, cmd_vel.angular.x, ang_diff_x);
+  applyAxisSmooth(smoothed_vel.angular.y, cmd_vel.angular.y, ang_diff_y);
   
   // Special handling for angular.z during turning (when there's linear velocity)
   double angular_z_change = std::abs(ang_diff_z);
@@ -488,25 +499,39 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
   
   if (has_linear_velocity && angular_z_change > angular_velocity_change_threshold_)
   {
-    // Use special angular velocity smoothing and rate limiting for turning
-    double angular_smooth_factor = angular_velocity_smooth_factor_;
-    
-    // Apply maximum angular velocity change rate limit
-    double max_angular_change = angular_velocity_max_rate_ * dt;
-    double limited_ang_diff_z = std::max(-max_angular_change, std::min(max_angular_change, ang_diff_z));
-    
-    smoothed_vel.angular.z += limited_ang_diff_z * angular_smooth_factor;
+    if (velocity_change_decel_only_ && !isDecelerating(smoothed_vel.angular.z, cmd_vel.angular.z)) {
+      smoothed_vel.angular.z = cmd_vel.angular.z;
+    } else {
+      // Use special angular velocity smoothing and rate limiting for turning
+      double angular_smooth_factor = angular_velocity_smooth_factor_;
+      
+      // Apply maximum angular velocity change rate limit
+      double max_angular_change = angular_velocity_max_rate_ * dt;
+      double limited_ang_diff_z = std::max(-max_angular_change, std::min(max_angular_change, ang_diff_z));
+      
+      smoothed_vel.angular.z += limited_ang_diff_z * angular_smooth_factor;
+    }
   }
   else
   {
     // Normal smoothing for angular.z when not turning
-    smoothed_vel.angular.z += ang_diff_z * smooth_factor;
+    applyAxisSmooth(smoothed_vel.angular.z, cmd_vel.angular.z, ang_diff_z);
   }
   
-  // Limit maximum linear velocity change
+  // Limit maximum linear velocity change (optionally deceleration only)
   double linear_change = std::sqrt(vel_diff_x * vel_diff_x + vel_diff_y * vel_diff_y + vel_diff_z * vel_diff_z);
+  const double smoothed_linear_mag = std::sqrt(
+      smoothed_cmd_vel_.linear.x * smoothed_cmd_vel_.linear.x +
+      smoothed_cmd_vel_.linear.y * smoothed_cmd_vel_.linear.y +
+      smoothed_cmd_vel_.linear.z * smoothed_cmd_vel_.linear.z);
+  const double cmd_linear_mag = std::sqrt(
+      cmd_vel.linear.x * cmd_vel.linear.x +
+      cmd_vel.linear.y * cmd_vel.linear.y +
+      cmd_vel.linear.z * cmd_vel.linear.z);
+  const bool linear_decel = cmd_linear_mag < smoothed_linear_mag - 1e-9;
   
-  if (linear_change > max_velocity_change_) {
+  if (linear_change > max_velocity_change_ &&
+      (!velocity_change_decel_only_ || linear_decel)) {
     double scale = max_velocity_change_ / linear_change;
     smoothed_vel.linear.x = smoothed_cmd_vel_.linear.x + scale * vel_diff_x;
     smoothed_vel.linear.y = smoothed_cmd_vel_.linear.y + scale * vel_diff_y;
@@ -560,6 +585,15 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
              enable_mixed_mode_ ? "true" : "false", max_linear_vel_with_angular_, max_angular_vel_with_linear_);
   } else {
     ROS_WARN("[RlGaitReceiver] No mixedMotionLimits section found in config file, using default values");
+  }
+
+  // Load velocity smoothing overrides (e.g. amp_hand_param.info for v17 amp_hand_controller)
+  if (pt.find("velocitySmoothing") != pt.not_found()) {
+    loadData::loadPtreeValue(pt, max_velocity_change_, "velocitySmoothing.maxVelocityChange", verbose);
+    loadData::loadPtreeValue(pt, velocity_change_decel_only_, "velocitySmoothing.decelOnly", verbose);
+    std::cout << "[RlGaitReceiver] velocitySmoothing loaded: maxVelocityChange="
+              << max_velocity_change_ << ", decelOnly="
+              << (velocity_change_decel_only_ ? "true" : "false") << std::endl;
   }
 }
 

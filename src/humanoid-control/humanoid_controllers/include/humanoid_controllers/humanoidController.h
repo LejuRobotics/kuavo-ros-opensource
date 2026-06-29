@@ -1017,7 +1017,6 @@ namespace humanoid_controller
     
     // 保留 fall_down_state_ 用于向后兼容，但实际逻辑改为控制器切换
     FallStandState fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃，改为控制器切换）
-    FallStandState last_fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃）
 
 
     bool has_fall_down_controller_{false};

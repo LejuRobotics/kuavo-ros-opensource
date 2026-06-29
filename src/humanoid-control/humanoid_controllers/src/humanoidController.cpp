@@ -907,7 +907,6 @@ namespace humanoid_controller
       // 注册倒地状态回调函数
       controller_manager_->registerFallDownStateCallback([this](int state) {
         fall_down_state_ = static_cast<FallStandState>(state);
-        ROS_INFO("[HumanoidController] fall_down_state_ set to %d via callback", fall_down_state_);
       });
       
       // 注册躯干稳定性状态回调函数（从状态估计器获取）
@@ -1836,13 +1835,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
    
     SensorData sensor_data_new = sensor_data;
     ros::Time current_sensor_data_time = ros::Time::now();
-    if (!is_initialized_ || last_fall_down_state_ != fall_down_state_)
-    {
-      last_sensor_data_time_ = current_sensor_data_time - ros::Duration(0.002);
-    }
 
-    last_fall_down_state_ = fall_down_state_;
-    
     // 使用现有的last_is_rl_controller_变量来判断上一次是否是MPC模式
     bool last_was_mpc = !last_is_rl_controller_;
     bool current_is_mpc = !is_rl_controller_;

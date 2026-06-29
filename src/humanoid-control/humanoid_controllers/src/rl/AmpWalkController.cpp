@@ -226,6 +226,33 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
+      try
+      {
+        Eigen::Matrix<double, 6, 1> tiny_cmd_clip;
+        loadEigenMatrix("TinyCmdClip", tiny_cmd_clip);
+        tiny_cmdx_clip_pos_min_ = tiny_cmd_clip(0);
+        tiny_cmdx_clip_pos_max_ = tiny_cmd_clip(1);
+        tiny_cmdx_clip_neg_max_ = tiny_cmd_clip(2);
+        tiny_cmdx_clip_neg_min_ = tiny_cmd_clip(3);
+        tiny_cmd_angz_clip_min_ = tiny_cmd_clip(4);
+        tiny_cmd_angz_clip_max_ = tiny_cmd_clip(5);
+        tiny_cmdx_clip_enabled_ = (tiny_cmdx_clip_pos_max_ > tiny_cmdx_clip_pos_min_) &&
+                                  (tiny_cmdx_clip_neg_max_ > tiny_cmdx_clip_neg_min_);
+        tiny_cmd_angz_clip_enabled_ = tiny_cmd_angz_clip_max_ > tiny_cmd_angz_clip_min_;
+        ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, neg[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, enabled=%s/%s",
+                 name_.c_str(),
+                 tiny_cmdx_clip_pos_min_, tiny_cmdx_clip_pos_max_, tiny_cmdx_clip_pos_max_,
+                 tiny_cmdx_clip_neg_min_, tiny_cmdx_clip_neg_max_, tiny_cmdx_clip_neg_min_,
+                 tiny_cmd_angz_clip_min_, tiny_cmd_angz_clip_max_, tiny_cmd_angz_clip_max_,
+                 tiny_cmdx_clip_enabled_ ? "true" : "false",
+                 tiny_cmd_angz_clip_enabled_ ? "true" : "false");
+      }
+      catch (const std::exception& e)
+      {
+        tiny_cmdx_clip_enabled_ = false;
+        tiny_cmd_angz_clip_enabled_ = false;
+        ROS_WARN("[%s] TinyCmdClip not loaded: %s", name_.c_str(), e.what());
+      }
     }
 
     // 加载手臂控制参数（用于 ArmController）
@@ -623,6 +650,37 @@ namespace humanoid_controller
     return RLControllerBase::shouldRunInference();
   }
 
+  double AmpWalkController::applyTinyCmdxClip(double cmdx) const
+  {
+    if (!tiny_cmdx_clip_enabled_)
+    {
+      return cmdx;
+    }
+    if (cmdx >= tiny_cmdx_clip_pos_min_ && cmdx < tiny_cmdx_clip_pos_max_)
+    {
+      return tiny_cmdx_clip_pos_max_;
+    }
+    if (cmdx >= tiny_cmdx_clip_neg_min_ && cmdx < tiny_cmdx_clip_neg_max_)
+    {
+      return tiny_cmdx_clip_neg_min_;
+    }
+    return cmdx;
+  }
+
+  double AmpWalkController::applyTinyCmdAngzClip(double angz) const
+  {
+    if (!tiny_cmd_angz_clip_enabled_)
+    {
+      return angz;
+    }
+    const double abs_angz = std::abs(angz);
+    if (abs_angz >= tiny_cmd_angz_clip_min_ && abs_angz < tiny_cmd_angz_clip_max_)
+    {
+      return angz >= 0.0 ? tiny_cmd_angz_clip_max_ : -tiny_cmd_angz_clip_max_;
+    }
+    return angz;
+  }
+
   void AmpWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
@@ -701,6 +759,20 @@ namespace humanoid_controller
         cmd.cmdVelLineX_ > kRollCompensationCmdXThreshold_)
     {
       cmd.cmdVelLineY_ = 0.0;
+    }
+
+    if (is_amp_hand_controller_ && (tiny_cmdx_clip_enabled_ || tiny_cmd_angz_clip_enabled_))
+    {
+      if (tiny_cmdx_clip_enabled_)
+      {
+        cmd.cmdVelLineX_ = applyTinyCmdxClip(cmd.cmdVelLineX_);
+      }
+      if (tiny_cmd_angz_clip_enabled_ &&
+          std::abs(cmd.cmdVelLineX_) < 0.3 && std::abs(cmd.cmdVelLineY_) < 0.2 &&
+          std::abs(cmd.cmdVelAngularZ_) > 0.1)
+      {
+        cmd.cmdVelAngularZ_ = applyTinyCmdAngzClip(cmd.cmdVelAngularZ_);
+      }
     }
 
     Eigen::Vector3d velocity_commands;
@@ -806,8 +878,12 @@ namespace humanoid_controller
           kWalkingRollCompensationQuadA_ * cmd_x * cmd_x +
           kWalkingRollCompensationQuadB_ * cmd_x +
           kWalkingRollCompensationQuadC_;
-      const double total_roll_compensation_deg =
-          walking_roll_compensation_deg + kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
+      double total_roll_compensation_deg = walking_roll_compensation_deg;
+      if (std::abs(cmd.cmdVelAngularZ_) > 0.55)
+      {
+        total_roll_compensation_deg +=
+            kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
+      }
       if (std::abs(total_roll_compensation_deg) > 1e-6)
       {
         const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;

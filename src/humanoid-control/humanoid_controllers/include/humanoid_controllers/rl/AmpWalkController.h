@@ -248,10 +248,18 @@ namespace humanoid_controller
     static constexpr double kLateralElbowFixScale_{0.25};
     bool enable_roll_compensation_{false};
     bool enable_off_cmdy_by_cmdx_{false};
-    static constexpr double kRollCompensationCmdXThreshold_{0.3};
-    static constexpr double kWalkingRollCompensationQuadA_{0.832520};
-    static constexpr double kWalkingRollCompensationQuadB_{-1.332474};
-    static constexpr double kWalkingRollCompensationQuadC_{0.627412};
+    bool tiny_cmdx_clip_enabled_{false};
+    double tiny_cmdx_clip_pos_min_{0.0};  ///< 正向截断区间最小值
+    double tiny_cmdx_clip_pos_max_{0.0};  ///< 正向截断区间最大值，区间内值截断为该值
+    double tiny_cmdx_clip_neg_max_{0.0};  ///< 负向截断区间最大值
+    double tiny_cmdx_clip_neg_min_{0.0};  ///< 负向截断区间最小值，区间内值截断为该值
+    bool tiny_cmd_angz_clip_enabled_{false};
+    double tiny_cmd_angz_clip_min_{0.0};  ///< abs(cmd_angz) 截断区间最小值
+    double tiny_cmd_angz_clip_max_{0.0};  ///< abs(cmd_angz) 截断区间最大值，区间内值截断为该值
+    static constexpr double kRollCompensationCmdXThreshold_{0.2};
+    static constexpr double kWalkingRollCompensationQuadA_{-0.2};
+    static constexpr double kWalkingRollCompensationQuadB_{0.3};
+    static constexpr double kWalkingRollCompensationQuadC_{-0.015};
     static constexpr double kTurnRollCompensationDeg_{-0.7};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
@@ -262,6 +270,8 @@ namespace humanoid_controller
                                kuavo_msgs::changeArmCtrlMode::Response &res);
 
   private:
+    double applyTinyCmdxClip(double cmdx) const;
+    double applyTinyCmdAngzClip(double angz) const;
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
     void applyArmTakeoverBlend(Eigen::VectorXd& action, const ros::Time& time, bool is_standing);

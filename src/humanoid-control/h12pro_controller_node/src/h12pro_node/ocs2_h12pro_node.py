@@ -703,12 +703,6 @@ class H12PROControllerNode:
             rospy.logwarn_throttle(5.0, "No receive h12pro channel message. Please check device `/dev/usb_remote` exist or not and re-plug the h12pro signal receiver.")
             return
 
-        # Always update channels for joy publishing (wheel mode needs all 12 channels)
-        # 双足模式由 _handle_joystick_input 处理（只传摇杆 axes，按钮走状态机），
-        # 不需要在此透传 raw H12 按钮，避免与状态机长短按语义冲突。
-        if self.h12_to_joy_node.is_wheel:
-            self.h12_to_joy_node.update_channels_msg(msg)
-
         try:
             key_combination = self._process_channels(msg.channels)
             self._handle_state_transitions(key_combination, msg)

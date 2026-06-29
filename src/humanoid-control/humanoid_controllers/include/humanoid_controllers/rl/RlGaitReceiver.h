@@ -162,6 +162,7 @@ private:
   double velocity_smooth_factor_;
   double max_velocity_change_;
   double velocity_smooth_time_;
+  bool velocity_change_decel_only_{false};   // true: 仅减速时平滑/限速，加速即时响应
   ros::Time last_velocity_update_time_;
   
   // Angular velocity smoothing parameters for turning
