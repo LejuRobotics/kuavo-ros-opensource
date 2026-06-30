@@ -26,6 +26,7 @@
     <depend>kuavo_estimation</depend>
     <depend>kuavo_monitor</depend>
     <depend>kuavo_msgs</depend>
+    <depend>leju_mobile_base_msgs</depend>
     <!-- <depend>mujoco_sim</depend> -->
     <depend>mujoco_cpp</depend>
     <depend>robot_localization</depend>

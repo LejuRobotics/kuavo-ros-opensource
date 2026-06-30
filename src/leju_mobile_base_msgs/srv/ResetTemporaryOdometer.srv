@@ -1,0 +1,14 @@
+# Service to reset the temporary (local task) odometer counter.
+# Allows upper-layer systems to align mileage statistics per task.
+
+# Request
+string task_id                     # Optional identifier of the task that is being reset
+string requester                   # Optional identifier of the subsystem/user requesting the reset
+
+---
+
+# Response
+bool success                       # Whether the reset succeeded
+string message                     # Additional context or error information
+float64 distance_before_reset_m    # Distance accumulated before reset (meters)
+time reset_time                    # ROS time when the counter was cleared

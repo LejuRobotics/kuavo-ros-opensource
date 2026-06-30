@@ -1,0 +1,10 @@
+# DispatchMove.srv
+# 请求部分
+string target                # 目标点名称
+MoveToTargetOptions options  # 导航选项
+
+---
+# 响应部分
+bool success        # 导航是否成功
+string message      # 状态信息
+string task_id      # 分配的任务ID

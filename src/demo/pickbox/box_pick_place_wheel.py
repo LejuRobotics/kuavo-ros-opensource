@@ -35,7 +35,7 @@ SCRIPT_ROLE = "wheel_pick_place_flow"
 safe_space_limits = {
     "x": (0.20, 0.70),
     "y": (-0.25, 0.25),
-    "z": (0.08, 0.60),
+    "z": (0.02, 0.60),
 }
 QR_ALIGNMENT_Y_TOLERANCE = 0.05
 QR_ALIGNMENT_MAX_PASSES = 3
@@ -200,7 +200,7 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
         angular_speed = 0.25
         pos_tolerance = 0.05
         axis_tolerance = 0.02
-        yaw_tolerance = math.radians(5.0)
+        yaw_tolerance = math.radians(2.0)
         timeout = 30.0
         control_dt = 0.1
         start_time = rospy.Time.now()
@@ -308,7 +308,7 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
                 adjust_speed,
                 adjust_timeout,
                 pos_tolerance=min(QR_ALIGNMENT_Y_TOLERANCE * 0.5, 0.02),
-                min_lateral_speed=0.035,
+                min_lateral_speed=0.05,
                 log_label="轮臂二维码y",
             ):
                 raise BoxPickPlaceError("轮臂二维码y向微调失败: ID=%s y=%.3f" % (target_id, y_error))
@@ -495,8 +495,10 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
 
     def ik_solve(self, left_xyz, right_xyz, label, q0_joints=None):
         ik_frame = int(self.params.get("wheel", {}).get("ik", {}).get("frame", 0))
-        left_quat = [0.06163, -0.70442, -0.06163, 0.70442]
-        right_quat = [-0.06163, -0.70442, 0.06163, 0.70442]
+        # left_quat = [0.06163, -0.70442, -0.06163, 0.70442]
+        # right_quat = [-0.06163, -0.70442, 0.06163, 0.70442]
+        left_quat = [0, -0.70442, 0, 0.70442]
+        right_quat = [0, -0.70442, 0, 0.70442]
         left_elbow, right_elbow = self._ik_elbow_points()
 
 
@@ -634,14 +636,14 @@ class BoxPickPlaceWheel(BaseBoxPickPlace):
     @staticmethod
     def _build_wheel_ik_param():
         param = ikSolveParam()
-        param.major_optimality_tol = 4e-3
-        param.major_feasibility_tol = 4e-3
-        param.minor_feasibility_tol = 4e-3
+        param.major_optimality_tol = 1e-3
+        param.major_feasibility_tol = 1e-3
+        param.minor_feasibility_tol = 1e-3
         param.major_iterations_limit = 100
-        param.oritation_constraint_tol = 4e-3
-        param.pos_constraint_tol = 4e-3
+        param.oritation_constraint_tol = 1e-3
+        param.pos_constraint_tol = 1e-3
         param.pos_cost_weight = 1.0
-        param.constraint_mode = 1
+        param.constraint_mode = 6
         return param
 
     @staticmethod
