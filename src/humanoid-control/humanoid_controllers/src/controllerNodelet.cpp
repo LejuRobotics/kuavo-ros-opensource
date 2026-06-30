@@ -6,6 +6,13 @@
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
+#include <pthread.h>
+#include <sched.h>
+#include <sys/resource.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <cstring>
+#include "ocs2_core/thread_support/SetThreadPriority.h"
 
 using Duration = std::chrono::duration<double>;
 using Clock = std::chrono::high_resolution_clock;
@@ -24,6 +31,9 @@ public:
         stop_pub_ = nh.advertise<std_msgs::Bool>("/stop_robot", 10);
         stop_sub_ = nh.subscribe<std_msgs::Bool>("/stop_robot", 1, &HumanoidControllerNodelet::stopCallback, this);
         control_thread = std::thread(&HumanoidControllerNodelet::controlLoop, this);
+        
+        // 设置控制循环线程的实时调度策略和CPU亲和性，减少系统调度延迟
+        setControlThreadScheduling();
         // signal(SIGINT, signalHandler);
         // signal(SIGTERM, signalHandler);
 
@@ -137,6 +147,55 @@ private:
             is_running = false;
             std::cerr << "[controllerNodelet] stopCallback setting is_running=false and entering controllerExit()" << std::endl;
             controllerExit();
+        }
+    }
+
+    void setControlThreadScheduling()
+    {
+        // 等待线程启动
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        
+        pthread_t thread_handle = control_thread.native_handle();
+        
+        // 1. 设置实时调度策略 (SCHED_FIFO) 和优先级
+        struct sched_param param;
+        param.sched_priority = 90;  // 高优先级 (1-99, 99最高)
+        
+        int ret = pthread_setschedparam(thread_handle, SCHED_FIFO, &param);
+        if (ret != 0) {
+            ROS_WARN_STREAM("[controllerNodelet] Failed to set SCHED_FIFO for control thread: " 
+                          << strerror(ret) << ". You may need to run with sudo or set capabilities.");
+        } else {
+            ROS_INFO_STREAM("[controllerNodelet] Control thread set to SCHED_FIFO with priority " << param.sched_priority);
+        }
+        
+        // // 2. 设置CPU亲和性到隔离核心（如果可用）
+        // auto isolate_core = ocs2::getIsolatedCpus();
+        // if (isolate_core.size() >= 2) {
+        //     cpu_set_t cpuset;
+        //     CPU_ZERO(&cpuset);
+        //     // 使用隔离核心的前两个核心
+        //     CPU_SET(isolate_core[0], &cpuset);
+        //     CPU_SET(isolate_core[1], &cpuset);
+            
+        //     ret = pthread_setaffinity_np(thread_handle, sizeof(cpu_set_t), &cpuset);
+        //     if (ret != 0) {
+        //         ROS_WARN_STREAM("[controllerNodelet] Failed to set CPU affinity for control thread: " << strerror(ret));
+        //     } else {
+        //         ROS_INFO_STREAM("[controllerNodelet] Control thread bound to CPU cores: " 
+        //                       << isolate_core[0] << ", " << isolate_core[1]);
+        //     }
+        // } else {
+        //     ROS_WARN_STREAM("[controllerNodelet] No isolated CPUs found. Control thread may experience scheduling delays.");
+        // }
+        
+        // 3. 设置内存锁定（可选，防止内存被交换到磁盘）
+        // 注意：这需要CAP_IPC_LOCK权限或root权限
+        if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+            ROS_WARN_STREAM("[controllerNodelet] Failed to lock memory: " << strerror(errno) 
+                          << ". This is optional but recommended for real-time performance.");
+        } else {
+            ROS_INFO("[controllerNodelet] Memory locked successfully");
         }
     }
 

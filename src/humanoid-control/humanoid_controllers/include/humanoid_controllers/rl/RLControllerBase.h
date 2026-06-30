@@ -272,6 +272,13 @@ public:
   virtual void resume();
 
   /**
+   * @brief MPC→RL 插值完成后的回调
+   * 当 use_interpolate_from_mpc_ 为 true 时，humanoidController 在插值结束后调用此方法。
+   * 派生类可重写此方法以延迟启动需要在插值完成后才执行的逻辑（如在线采样）。
+   */
+  virtual void onInterpolationComplete() {}
+
+  /**
    * @brief 温启动恢复控制器（恢复推理但尽量保留内部状态）
    */
   virtual void resumeWarm();

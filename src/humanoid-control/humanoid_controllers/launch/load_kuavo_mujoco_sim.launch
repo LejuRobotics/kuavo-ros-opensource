@@ -198,4 +198,88 @@
         </include>
       </group>
     </group>
+
+    <!-- ==================== kuavo_mocap_gmr (Motion Capture GMR) ==================== -->
+    <arg name="with_mocap_gmr" default="false" doc="Enable motion capture GMR"/>
+    <arg name="gmr_use_sim" default="true" doc="Use simulated motion (true) or OptiTrack streaming (false)"/>
+    <!-- Common GMR configuration -->
+    <arg name="gmr_robot" default="kuavo_s52" doc="Target robot type for GMR"/>
+    <arg name="gmr_format" default="motive_streaming" doc="Motion format (lafan1, motive_bj, motive_sz)"/>
+    <arg name="gmr_cali_arm_pose_deg" default="80.0" doc="Calibration arm pose angle"/>
+    <arg name="gmr_fps" default="100.0" doc="GMR publishing rate (Hz)"/>
+    <arg name="gmr_enable_viewer" default="false" doc="Enable MuJoCo viewer for GMR"/>
+    <!-- CPU affinity: bind GMR process to specific cores (empty=no binding in sim) -->
+    <arg name="gmr_cpu_cores" default="[]" doc="CPU cores to bind GMR process"/>
+    <!-- Simulation parameters (when gmr_use_sim=true) -->
+    <arg name="gmr_data_file" default="" doc="Path to recorded motion file (.pkl or .bvh), empty for synthetic"/>
+    <arg name="gmr_loop" default="true" doc="Loop motion data"/>
+    <arg name="gmr_human_height" default="1.75" doc="Simulated human height (meters)"/>
+    <!-- OptiTrack streaming parameters (when gmr_use_sim=false) -->
+    <arg name="gmr_server_ip" default="192.168.200.160" doc="OptiTrack server IP"/>
+    <arg name="gmr_client_ip" default="192.168.200.117" doc="Client (robot) IP"/>
+    <arg name="gmr_use_multicast" default="false" doc="Use multicast for OptiTrack"/>
+
+    <group if="$(arg with_mocap_gmr)">
+      <!-- Use gmr_sim.launch for simulated motion (default in sim) -->
+      <group if="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_sim.launch">
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="data_file" value="$(arg gmr_data_file)"/>
+          <arg name="loop" value="$(arg gmr_loop)"/>
+          <arg name="human_height" value="$(arg gmr_human_height)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+        </include>
+      </group>
+      <!-- Use gmr_streaming.launch for real OptiTrack -->
+      <group unless="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_streaming.launch">
+          <arg name="server_ip" value="$(arg gmr_server_ip)"/>
+          <arg name="client_ip" value="$(arg gmr_client_ip)"/>
+          <arg name="use_multicast" value="$(arg gmr_use_multicast)"/>
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+          <arg name="cpu_cores" value="$(arg gmr_cpu_cores)"/>
+        </include>
+      </group>
+    </group>
+
+    <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
+    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
+    <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR"/>
+    <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>
+    <arg name="pico_enable_viewer" default="false" doc="Enable MuJoCo viewer for PICO GMR"/>
+    <arg name="pico_enable_gmr_smoothing" default="false" doc="Enable Gaussian filter smoothing"/>
+    <arg name="pico_gmr_gaussian_sigma" default="1.0" doc="Gaussian kernel sigma"/>
+    <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
+    <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
+    <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
+    <!-- 头控参数（GMR 和 Teleop 路径共享） -->
+    <arg name="pico_enable_head_control" default="true" doc="Enable independent head control node"/>
+    <arg name="pico_head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+    <!-- CPU affinity: bind PICO retarget process to specific cores (empty=no binding for sim) -->
+    <arg name="pico_cpu_cores" default="[]" doc="CPU cores to bind PICO retarget process (empty=no binding)"/>
+
+    <group if="$(arg with_pico_gmr)">
+      <include file="$(find kuavo_pico_gmr)/launch/pico_streaming.launch">
+        <arg name="robot" value="$(arg pico_robot)"/>
+        <arg name="human_height" value="$(arg pico_human_height)"/>
+        <arg name="enable_viewer" value="$(arg pico_enable_viewer)"/>
+        <arg name="enable_gmr_smoothing" value="$(arg pico_enable_gmr_smoothing)"/>
+        <arg name="gmr_gaussian_sigma" value="$(arg pico_gmr_gaussian_sigma)"/>
+        <arg name="gmr_velocity_clip" value="$(arg pico_gmr_velocity_clip)"/>
+        <arg name="gmr_velocity_deadzone" value="$(arg pico_gmr_velocity_deadzone)"/>
+        <arg name="enable_dexhand_control" value="$(arg pico_enable_dexhand_control)"/>
+        <arg name="enable_head_control" value="$(arg pico_enable_head_control)"/>
+        <arg name="head_control_mode" value="$(arg pico_head_control_mode)"/>
+        <arg name="cpu_cores" value="$(arg pico_cpu_cores)"/>
+      </include>
+    </group>
+
+
 </launch>

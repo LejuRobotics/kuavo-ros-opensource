@@ -45,6 +45,7 @@ find_package(catkin REQUIRED
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
+        std_srvs
         )
 find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -273,6 +274,7 @@ add_library(${PROJECT_NAME}
         src/rl/FallStandController.cpp
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
+        src/rl/VMPController.cpp
         src/rl/armController.cpp
         src/rl/DepthWalkController.cpp
         src/rl/waistController.cpp

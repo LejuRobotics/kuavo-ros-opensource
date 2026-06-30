@@ -2898,6 +2898,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
                 {
                   std::cout << "[MPC->RL] Torso interpolation completed, switching to NORMAL" << std::endl;
                   resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                  // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
+                  if (current_controller_ptr_) {
+                    current_controller_ptr_->onInterpolationComplete();
+                  }
                 }else if (mpc_ready)
                 {
                   std::cout << "MPC-RL interpolation completed, policy receive count: " << mrtRosInterface_->getPolicyReceiveCount() << std::endl;

@@ -1,0 +1,641 @@
+; VMP特定配置
+; ========== VMP工作模式选择 ==========                    
+vmpPlaybackMode            online_teleoperation          ; VMP播放模式选择 
+                                                         ; offline_trajectory: 传统（使用vmpTaskDataFile完整轨迹）
+                                                         ; online_teleoperation: 在线VR全身遥操作（使用固定长度缓存区）
+
+use_interploate_from_mpc     true       ; 从MPC切换到VMP时使用插值过渡（避免切换瞬间跳动）
+
+----------------------------------------------------------------------------------------------------------------------------------------------
+; —— 离线轨迹播放（offline_trajectory模式使用）
+
+; 静止帧配置 (用于VMP轨迹前后添加静止帧) (仅用于offline_trajectory模式，online_teleoperation模式不使用)
+preStandingFrames       10      ; 轨迹前添加的静止帧数量
+postStandingFrames      100      ; 轨迹后添加的静止帧数量
+standingHeight          0.95     ; 静止帧高度值
+
+; 插值配置 (用于静止帧与运动轨迹之间的平滑过渡) (仅用于offline_trajectory模式，online_teleoperation模式不使用)
+preInterpolationFrames   10      ; 前置插值帧数 (从静止帧过渡到运动轨迹)
+postInterpolationFrames  10      ; 后置插值帧数 (从运动轨迹过渡到静止帧)
+
+
+； —— 单轨迹播放配置
+vmpModelDir                vmp_models/                  ; VMP模型文件目录
+vmpPolicyModelFile         policy_0622bigdof.onnx           ; VMP策略模型文件
+vmpEncoderModelFile        gen_v_vae.onnx            ; VAE编码器模型文件
+vmpEstimatorModelFile      estimator_0622bigdof.onnx   ; Estimator模型文件（根据enableEstimator是否启用用estimator，需要同步修改onlinePolicyModelFile）
+vmpRefDataDir              vmp_ref_data/               ; 参考数据目录
+vmpTaskDataFile            senweinb.bin        ; 任务数据文件(默认轨迹yc_126_spec_data，帧数将从文件大小自动计算)
+enableLoop                 true                ; 是否启用轨迹循环播放（false时按下VMP启动按钮会继续播放 （目前不稳定!!），true会自动循环播放）
+
+
+; —— 多轨迹播放配置 （仅测试使用！）
+multiTrajectoryMode        false                         ; 是否启用多轨迹模式（false:单轨迹循环, true:多轨迹播放）
+trajectorySequence         task_data_yc_01.bin,task_data_yc_02.bin,task_data_yc_06.bin ; 轨迹序列（逗号分隔，帧数将从文件大小自动计算）
+autoSwitchTrajectory       true                         ; 是否自动切换轨迹（完成一个后自动切换到下一个）
+trajectoryLoopMode         true                         ;多轨迹序列是否循环播放（false时按下VMP启动按钮会继续播放（目前不稳定！！），true会自动循环播放）
+enablePreloading           true                         ; 是否启用轨迹预加载（true:预加载所有轨迹, false:动态加载）
+
+
+----------------------------------------------------------------------------------------------------------------------------------------------
+; —— 在线VR全身遥操作配置（online_teleoperation模式使用）
+; 当vmpPlaybackMode=online_teleoperation时，以下配置生效
+onlineVRDataSource         pico                     ; 在线VR数据源选项：
+                                                         ; - bin_file: 离线bin文件模拟（用于测试）
+                                                         ; - pico: PICO VR设备数据源（订阅 /pico/retargeted_pose）
+                                                         ; - mocap: 动捕系统数据源（订阅 /mocap/retargeted_pose）
+
+onlineVRControlMode        full_body                    ; 在线VR控制模式：
+                                                         ; - full_body: 全身模式（更新所有数据：机身、腿部、手臂）
+                                                         ; - upper_body: 上半身模式（仅更新手臂关节和手部末端位置，其他保持静止帧）
+
+
+; 在线VR专用模型配置（可选，如果不配置则使用离线模式的模型）
+onlinePolicyModelFile      policy_0622bigdof.onnx    ; 在线VR专用策略模型文件
+onlineEncoderModelFile     gen_v_vae.onnx                      ; 在线VR专用VAE编码器模型文件
+onlineEstimatorModelFile   estimator_0622bigdof.onnx   ; 在线VR专用Estimator模型文件（根据enableEstimator是否启用用estimator，需要同步修改onlinePolicyModelFile）
+
+onlineVRBinFile            001_a3_aligned_smooth_with_contactmask_(3rd_copy)_data.bin   ; 用于模拟在线VR的bin文件（仅当onlineVRDataSource=bin_file时使用，帧数将从文件大小自动计算）
+onlineBufferSize           64                          ; 在线缓存区大小（帧数，默认200帧=1秒@100Hz）
+onlineUpdateRate           100.0                        ; 在线缓存区更新频率（Hz，默认100Hz）
+
+; Qpos平滑配置（重复帧回溯插值，消除阶梯状重复数据）
+enableQposSmoothing        true                          ; 是否启用Qpos平滑（true:启用重复帧插值, false:直接使用原始数据）
+qposSmoothBufferSize       5                             ; 平滑缓冲区大小（帧数，即输出延迟tick数，推荐3-8）
+qposNewJointEps            0.001                         ; 关节位置"新数据"判定阈值（rad，max(|q_new - q_old|) > eps 视为新数据）
+
+; GMR数据平滑配置（高斯滤波，用于处理GMR重定向后的噪声数据）
+enableGMRSmoothing         true                         ; 是否启用GMR数据平滑（true:启用高斯滤波, false:使用原始数据）
+gmrGaussianSigma           1.0                           ; 高斯滤波sigma参数（越大越平滑，推荐1.0-3.0，与scipy.ndimage.gaussian_filter1d参数一致）
+gmrVelocityClip            20.0                          ; 速度裁剪阈值（rad/s，超过此值的速度会被裁剪，防止异常值）
+gmrVelocityDeadzone        0.05                          ; 速度死区阈值（rad/s，低于此值的速度会被置为0，防止静止时抖动）
+
+; GMR关节位置平滑配置（对q维度施加高斯滤波，减少关节位置跳变）
+enableGMRQposSmoothing     false                         ; 是否启用关节位置平滑（true:启用, false:仅平滑速度维度）
+gmrQposSigma               1.0                           ; 关节位置高斯滤波sigma（越大越平滑但延迟越大，推荐0.5-2.0）
+
+
+---------------------------------------------------------------------------------------------------------------------------------------------
+; 基础控制参数
+; 关节顺序说明：
+;   - 无腰部机型(v46): 腿(0-11) + 手臂(12-25) = 26个关节
+;   - 有腰部机型(v52): 腿(0-11) + 腰部（12） +  手臂(13-26) = 27个关节
+;   注意：配置文件中的参数顺序应与上述硬件顺序一致
+
+jointNum           12          ; 腿部关节数量
+jointArmNum        14          ; 手臂关节数量
+waistNum           1           ; 腰部关节数量 (kuavo_v46=0, kuavo_v52=1)
+inferenceFrequency 100         ; 推理频率
+use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
+use_vmp_ruiwo_kpkd               true   ; 是否在 VMP 控制器中使用并切换 VMP 专用 Ruiwo 增益(true/false)，对应 kuavo.json 中的 vmp_kpkd
+
+
+; ========== Estimator模块配置（可配置） ==========
+enableEstimator         true                           ; 是否启用Estimator模块（false:关闭, true:启用）
+estimatorHistoryFrames  8                              ; Estimator历史缓存区大小（帧数）
+estimatorInputDim       86                             ; Estimator每帧输入维度（单帧观测维度）
+estimatorOutputDim      64                             ; Estimator输出维度（状态估计编码）
+                                                       ; 注意：ONNX输入为flatten后的 (historyFrames*inputDim) 维
+                                                       ; 模型文件配置：
+                                                       ; - 离线模式使用 vmpEstimatorModelFile
+                                                       ; - 在线模式使用 onlineEstimatorModelFile（可选，不配置则使用离线模型）
+
+enableThetaNormalization true  ; 是否启用theta yaw角归一化功能
+actionScale        1    ; 动作缩放系数（恢复到0.25）
+numSingleObs       88     ; 单一时刻的obs的维度 (3*N+7: jp+jv+last_action+ang_vel(3)+ori_xy(2)+anchor_ori_b(2))
+numRefMotionObs    79      ; 参考运动观测维度
+numEncoderObs      64      ; 编码器观测维度
+numActions         27      ; 动作维度(VMP策略输出27维)
+clipObservations   18.0    ; 观测裁剪值
+clipActions        18.0    ; 动作裁剪值（恢复到18.0）
+
+; 观测缩放参数 (对齐 VMPKuavoCfg.normalization.obs_scales)
+obsScale_dof_pos               1.0     ; 关节位置缩放
+obsScale_dof_vel               0.05    ; 关节速度缩放
+obsScale_base_lin_vel          2.0     ; 基座线速度缩放
+obsScale_base_ang_vel          1.0     ; 基座角速度缩放
+obsScale_quat                  1.0     ; 四元数缩放
+
+
+----------------------------------------------------------------------------------------------------------------------------------------------
+; VAE模型配置
+vaeModel
+{
+    in_c            79      ; 输入通道数 (v52: 1+6+6+27+27+12=79)
+    window_r        15      ; 右窗口长度
+    window_l        32      ; 窗口长度(2*window_r)
+    latent_d        64      ; 潜在维度
+    use_global_coef true    ; 是否使用全局均值/标准差归一化(与Python训练一致)
+}
+
+; 参考运动配置 (v52: 79维参考运动格式)
+; 格式: h(1) + theta(6) + v(6) + q(27) + q_dot(27) + p(12) = 79
+; p(12)末端位置顺序: L_foot(3) + R_foot(3) + L_hand(3) + R_hand(3) (先腿后手，先左后右)
+refTask
+{
+    h_start_id      0       ; 高度开始ID
+    h_end_id        1       ; 高度结束ID
+    theta_start_id  1       ; 方向开始ID
+    theta_end_id    7       ; 方向结束ID
+    v_start_id      7       ; 速度开始ID
+    v_end_id        13      ; 速度结束ID
+    q_start_id      13      ; 关节位置开始ID (v52: 27关节)
+    q_end_id        40      ; 关节位置结束ID (13+27=40)
+    q_dot_start_id  40      ; 关节速度开始ID
+    q_dot_end_id    67      ; 关节速度结束ID (40+27=67)
+    p_start_id      67      ; 位置开始ID (末端位置12维: L_foot+R_foot+L_hand+R_hand)
+    p_end_id        79      ; 位置结束ID (67+12=79)
+}
+
+defaultJointState
+{
+    ; 定义关节的默认状态
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节(12个)
+    (0,0)  -0.       ; leg_l1_joint
+    (1,0)  -0.       ; leg_l2_joint
+    (2,0)  -0.24     ; leg_l3_joint
+    (3,0)   0.50     ; leg_l4_joint
+    (4,0)  -0.26      ; leg_l5_joint
+    (5,0)   0.       ; leg_l6_joint
+    (6,0)   0.       ; leg_r1_joint
+    (7,0)   0.       ; leg_r2_joint
+    (8,0)  -0.24     ; leg_r3_joint
+    (9,0)   0.50     ; leg_r4_joint
+    (10,0) -0.26      ; leg_r5_joint
+    (11,0) -0.       ; leg_r6_joint
+    ; 腰部关节(1个)
+    (12,0)  0.0      ; waist_joint
+    ; 手臂关节(14个)
+    (13,0)  0.0     ; zarm_l1_joint
+    (14,0)  0.0     ; zarm_l2_joint
+    (15,0)  0.0     ; zarm_l3_joint
+    (16,0)  0.0     ; zarm_l4_joint
+    (17,0)  0.0     ; zarm_l5_joint
+    (18,0)  0.0     ; zarm_l6_joint
+    (19,0)  0.0     ; zarm_l7_joint
+    (20,0)  0.0     ; zarm_r1_joint
+    (21,0)  0.0     ; zarm_r2_joint
+    (22,0)  0.0     ; zarm_r3_joint
+    (23,0)  0.0     ; zarm_r4_joint
+    (24,0)  0.0     ; zarm_r5_joint
+    (25,0)  0.0     ; zarm_r6_joint
+    (26,0)  0.0     ; zarm_r7_joint
+}
+
+; KP/KD 与训练 env.yaml (logs/rsl_rl/onestage/2026-05-08_00-55-33_test) 对齐
+jointKp
+{
+    ; 腿部关节
+    (0,0)   100     ; leg_l1_joint
+    (1,0)   100     ; leg_l2_joint
+    (2,0)   80      ; leg_l3_joint
+    (3,0)   80      ; leg_l4_joint
+    (4,0)   30      ; leg_l5_joint
+    (5,0)   30      ; leg_l6_joint
+    (6,0)   100     ; leg_r1_joint
+    (7,0)   100     ; leg_r2_joint
+    (8,0)   80      ; leg_r3_joint
+    (9,0)   80      ; leg_r4_joint
+    (10,0)  30      ; leg_r5_joint
+    (11,0)  30      ; leg_r6_joint
+    ; 腰部关节
+    (12,0)  30      ; waist_joint        (env.yaml: 30)
+    ; 手臂关节
+    (13,0)  30      ; zarm_l1_joint      (env.yaml: 30)
+    (14,0)  30      ; zarm_l2_joint      (env.yaml: 30)
+    (15,0)  15      ; zarm_l3_joint      (env.yaml: 15)
+    (16,0)  30      ; zarm_l4_joint      (env.yaml: 30)
+    (17,0)  15      ; zarm_l5_joint      (env.yaml: 15)
+    (18,0)  15      ; zarm_l6_joint      (env.yaml: 15)
+    (19,0)  15      ; zarm_l7_joint      (env.yaml: 15)
+    (20,0)  30      ; zarm_r1_joint      (env.yaml: 30)
+    (21,0)  30      ; zarm_r2_joint      (env.yaml: 30)
+    (22,0)  15      ; zarm_r3_joint      (env.yaml: 15)
+    (23,0)  30      ; zarm_r4_joint      (env.yaml: 30)
+    (24,0)  15      ; zarm_r5_joint      (env.yaml: 15)
+    (25,0)  15      ; zarm_r6_joint      (env.yaml: 15)
+    (26,0)  15      ; zarm_r7_joint      (env.yaml: 15)
+}
+
+jointKd
+{
+    ; 腿部关节
+    (0,0)   5.0     ; leg_l1_joint       (env.yaml: 5.0)
+    (1,0)   5.0     ; leg_l2_joint       (env.yaml: 5.0)
+    (2,0)   5.0     ; leg_l3_joint
+    (3,0)   6.0     ; leg_l4_joint
+    (4,0)   7.5     ; leg_l5_joint 踝    (env.yaml: 7.5)
+    (5,0)   7.5     ; leg_l6_joint 踝    (env.yaml: 7.5)
+    (6,0)   5.0     ; leg_r1_joint       (env.yaml: 5.0)
+    (7,0)   5.0     ; leg_r2_joint       (env.yaml: 5.0)
+    (8,0)   5.0     ; leg_r3_joint
+    (9,0)   6.0     ; leg_r4_joint
+    (10,0)  7.5     ; leg_r5_joint 踝    (env.yaml: 7.5)
+    (11,0)  7.5     ; leg_r6_joint 踝    (env.yaml: 7.5)
+    ; 腰部关节
+    (12,0)  3.0     ; waist_joint        (env.yaml: 3.0)
+    ; 手臂关节
+    (13,0)  3.0     ; zarm_l1_joint
+    (14,0)  3.0     ; zarm_l2_joint
+    (15,0)  3.0     ; zarm_l3_joint
+    (16,0)  3.0     ; zarm_l4_joint
+    (17,0)  3.0     ; zarm_l5_joint
+    (18,0)  3.0     ; zarm_l6_joint
+    (19,0)  3.0     ; zarm_l7_joint
+    (20,0)  3.0     ; zarm_r1_joint
+    (21,0)  3.0     ; zarm_r2_joint
+    (22,0)  3.0     ; zarm_r3_joint
+    (23,0)  3.0     ; zarm_r4_joint
+    (24,0)  3.0     ; zarm_r5_joint
+    (25,0)  3.0     ; zarm_r6_joint
+    (26,0)  3.0     ; zarm_r7_joint
+}
+
+jointControlMode
+{
+    ; 定义各关节的控制模式，0:CST, 1:CSV, 2:CSP
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节
+    (0,0)   2       ; leg_l1_joint
+    (1,0)   2       ; leg_l2_joint
+    (2,0)   2       ; leg_l3_joint
+    (3,0)   2       ; leg_l4_joint
+    (4,0)   2       ; leg_l5_joint
+    (5,0)   2       ; leg_l6_joint
+    (6,0)   2       ; leg_r1_joint
+    (7,0)   2       ; leg_r2_joint
+    (8,0)   2       ; leg_r3_joint
+    (9,0)   2       ; leg_r4_joint
+    (10,0)  2       ; leg_r5_joint
+    (11,0)  2       ; leg_r6_joint
+    ; 腰部关节
+    (12,0)  2      ; waist_joint
+    ; 手臂关节
+    (13,0)  0       ; zarm_l1_joint
+    (14,0)  2       ; zarm_l2_joint
+    (15,0)  2       ; zarm_l3_joint
+    (16,0)  2       ; zarm_l4_joint
+    (17,0)  2       ; zarm_l5_joint
+    (18,0)  2       ; zarm_l6_joint
+    (19,0)  2       ; zarm_l7_joint
+    (20,0)  0       ; zarm_r1_joint
+    (21,0)  2       ; zarm_r2_joint
+    (22,0)  2       ; zarm_r3_joint
+    (23,0)  2       ; zarm_r4_joint
+    (24,0)  2       ; zarm_r5_joint
+    (25,0)  2       ; zarm_r6_joint
+    (26,0)  2       ; zarm_r7_joint
+}
+
+jointPDMode
+{
+    ; 定义各关节的pd的计算模式，0:用户层, 1:通信层
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节
+    (0,0)   0       ; leg_l1_joint
+    (1,0)   0       ; leg_l2_joint
+    (2,0)   0       ; leg_l3_joint
+    (3,0)   0       ; leg_l4_joint
+    (4,0)   0       ; leg_l5_joint
+    (5,0)   0       ; leg_l6_joint
+    (6,0)   0       ; leg_r1_joint
+    (7,0)   0       ; leg_r2_joint
+    (8,0)   0       ; leg_r3_joint
+    (9,0)   0       ; leg_r4_joint
+    (10,0)  0       ; leg_r5_joint
+    (11,0)  0       ; leg_r6_joint
+    ; 腰部关节
+    (12,0)  0       ; waist_joint
+    ; 手臂关节
+    (13,0)  0       ; zarm_l1_joint
+    (14,0)  0       ; zarm_l2_joint
+    (15,0)  0       ; zarm_l3_joint
+    (16,0)  0       ; zarm_l4_joint
+    (17,0)  0       ; zarm_l5_joint
+    (18,0)  0       ; zarm_l6_joint
+    (19,0)  0       ; zarm_l7_joint
+    (20,0)  0       ; zarm_r1_joint
+    (21,0)  0       ; zarm_r2_joint
+    (22,0)  0       ; zarm_r3_joint
+    (23,0)  0       ; zarm_r4_joint
+    (24,0)  0       ; zarm_r5_joint
+    (25,0)  0       ; zarm_r6_joint
+    (26,0)  0       ; zarm_r7_joint
+}
+
+motor_pdo_kp
+{
+    ; 定义各关节的PDO Kp参数（从kuavo.json的joint_kp读取，主要用于EC_MASTER电机）
+    (0,0)   0     ; leg_l1_joint
+    (1,0)   0     ; leg_l2_joint
+    (2,0)   0      ; leg_l3_joint
+    (3,0)   0      ; leg_l4_joint
+    (4,0)   0      ; leg_l5_joint
+    (5,0)   0      ; leg_l6_joint
+    (6,0)   0     ; leg_r1_joint
+    (7,0)   0     ; leg_r2_joint
+    (8,0)   0      ; leg_r3_joint
+    (9,0)   0      ; leg_r4_joint
+    (10,0)  0      ; leg_r5_joint
+    (11,0)  0      ; leg_r6_joint
+    (12,0)  0     ; waist_joint
+    (13,0)  0     ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
+    (14,0)  0       ; zarm_l2_joint
+    (15,0)  0       ; zarm_l3_joint
+    (16,0)  0       ; zarm_l4_joint
+    (17,0)  0       ; zarm_l5_joint
+    (18,0)  0       ; zarm_l6_joint
+    (19,0)  0       ; zarm_l7_joint
+    (20,0)  0     ; zarm_r1_joint
+    (21,0)  0       ; zarm_r2_joint
+    (22,0)  0       ; zarm_r3_joint
+    (23,0)  0       ; zarm_r4_joint
+    (24,0)  0       ; zarm_r5_joint
+    (25,0)  0       ; zarm_r6_joint
+    (26,0)  0       ; zarm_r7_joint
+}
+
+motor_pdo_kd
+{
+    ; 定义各关节的PDO Kd参数（从kuavo.json的joint_kd读取，主要用于EC_MASTER电机）
+    (0,0)   1491    ; leg_l1_joint
+    (1,0)   511     ; leg_l2_joint
+    (2,0)   932    ; leg_l3_joint
+    (3,0)   545     ; leg_l4_joint
+    (4,0)   2237    ; leg_l5_joint
+    (5,0)   2237    ; leg_l6_joint
+    (6,0)   1491    ; leg_r1_joint
+    (7,0)   511     ; leg_r2_joint
+    (8,0)   932    ; leg_r3_joint
+    (9,0)   545     ; leg_r4_joint
+    (10,0)  2237    ; leg_r5_joint
+    (11,0)  2237    ; leg_r6_joint
+    (12,0)  2500     ; waist_joint
+    (13,0)  2684    ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
+    (14,0)  3    ; zarm_l2_joint
+    (15,0)  3    ; zarm_l3_joint
+    (16,0)  3    ; zarm_l4_joint
+    (17,0)  3    ; zarm_l5_joint
+    (18,0)  3    ; zarm_l6_joint
+    (19,0)  3    ; zarm_l7_joint
+    (20,0)  2684    ; zarm_r1_joint
+    (21,0)  3    ; zarm_r2_joint
+    (22,0)  3    ; zarm_r3_joint
+    (23,0)  3    ; zarm_r4_joint
+    (24,0)  3    ; zarm_r5_joint
+    (25,0)  3    ; zarm_r6_joint
+    (26,0)  3    ; zarm_r7_joint
+}
+
+torqueLimits
+{
+    ; 定义各关节的力矩限制
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节
+    (0,0)   127     ; leg_l1_joint
+    (1,0)   71     ; leg_l2_joint
+    (2,0)   132     ; leg_l3_joint
+    (3,0)   280     ; leg_l4_joint
+    (4,0)   91.6      ; leg_l5_joint
+    (5,0)   30      ; leg_l6_joint
+    (6,0)   127     ; leg_r1_joint
+    (7,0)   71     ; leg_r2_joint
+    (8,0)   132     ; leg_r3_joint
+    (9,0)   280     ; leg_r4_joint
+    (10,0)  91.6      ; leg_r5_joint
+    (11,0)  30      ; leg_r6_joint
+    ; 腰部关节
+    (12,0)  102     ; waist_joint
+    ; 手臂关节
+    (13,0)  66     ; zarm_l1_joint
+    (14,0)  75      ; zarm_l2_joint
+    (15,0)  57      ; zarm_l3_joint
+    (16,0)  75      ; zarm_l4_joint
+    (17,0)  14.1      ; zarm_l5_joint
+    (18,0)  14.1      ; zarm_l6_joint
+    (19,0)  14.1      ; zarm_l7_joint
+    (20,0)  66     ; zarm_r1_joint
+    (21,0)  75      ; zarm_r2_joint
+    (22,0)  57      ; zarm_r3_joint
+    (23,0)  75      ; zarm_r4_joint
+    (24,0)  14.1      ; zarm_r5_joint
+    (25,0)  14.1      ; zarm_r6_joint
+    (26,0)  14.1      ; zarm_r7_joint
+}
+
+actionScaleTest
+{
+    ; 定义各关节的控制增益
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节
+    (0,0)   1       ; leg_l1_joint
+    (1,0)   1       ; leg_l2_joint
+    (2,0)   1       ; leg_l3_joint
+    (3,0)   1       ; leg_l4_joint
+    (4,0)   1       ; leg_l5_joint
+    (5,0)   1       ; leg_l6_joint
+    (6,0)   1       ; leg_r1_joint
+    (7,0)   1       ; leg_r2_joint
+    (8,0)   1       ; leg_r3_joint
+    (9,0)   1       ; leg_r4_joint
+    (10,0)  1       ; leg_r5_joint
+    (11,0)  1       ; leg_r6_joint
+    ; 腰部关节
+    (12,0)  1       ; waist_joint
+    ; 手臂关节
+    (13,0)  1       ; zarm_l1_joint
+    (14,0)  1       ; zarm_l2_joint
+    (15,0)  1       ; zarm_l3_joint
+    (16,0)  1       ; zarm_l4_joint
+    (17,0)  1       ; zarm_l5_joint
+    (18,0)  1       ; zarm_l6_joint
+    (19,0)  1       ; zarm_l7_joint
+    (20,0)  1       ; zarm_r1_joint
+    (21,0)  1       ; zarm_r2_joint
+    (22,0)  1       ; zarm_r3_joint
+    (23,0)  1       ; zarm_r4_joint
+    (24,0)  1       ; zarm_r5_joint
+    (25,0)  1       ; zarm_r6_joint
+    (26,0)  1       ; zarm_r7_joint
+}
+
+accFilterCutoffFreq
+{
+    ; 定义加速度滤波器的截止频率
+   (0,0)   20.0   ; x
+   (1,0)   20.0   ; y
+   (2,0)   20.0   ; z
+};
+
+accFilterState
+{
+    ; 定义加速度滤波器的使用情况，0:close, 1:open
+   (0,0)   1   ; x
+   (1,0)   1   ; y
+   (2,0)   1   ; z
+}
+
+freeAccFilterCutoffFreq
+{
+    ; 定义加速度滤波器的截止频率
+   (0,0)   100.0   ; x
+   (1,0)   100.0   ; y
+   (2,0)   100.0   ; z
+}
+
+freeAccFilterState
+{
+    ; 定义加速度滤波器的使用情况，0:close, 1:open
+   (0,0)   0   ; x
+   (1,0)   0   ; y
+   (2,0)   0   ; z
+}
+
+gyroFilterCutoffFreq
+{
+    ; 定义陀螺仪滤波器的截止频率
+   (0,0)   100.0   ; x
+   (1,0)   100.0   ; y
+   (2,0)   100.0   ; z
+}
+
+gyroFilterState
+{
+    ; 定义陀螺仪滤波器的使用情况，0:close, 1:open
+   (0,0)   0   ; x
+   (1,0)   0   ; y
+   (2,0)   0   ; z
+}
+
+; 静止帧关节位置
+standingJointPos
+{
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节(12个) 
+    (0,0)   -0.      ; leg_l1_joint
+    (1,0)   -0.      ; leg_l2_joint
+    (2,0)   -0.24    ; leg_l3_joint
+    (3,0)    0.50    ; leg_l4_joint
+    (4,0)   -0.26    ; leg_l5_joint 
+    (5,0)    0.      ; leg_l6_joint
+    (6,0)    0.      ; leg_r1_joint
+    (7,0)    0.      ; leg_r2_joint
+    (8,0)   -0.24    ; leg_r3_joint
+    (9,0)    0.50    ; leg_r4_joint
+    (10,0)  -0.26    ; leg_r5_joint 
+    (11,0)  -0.      ; leg_r6_joint
+    ; 腰部关节(1个)
+    (12,0)  0.0     ; waist_joint
+    ; 手臂关节(14个) 
+    (13,0)  0.0     ; zarm_l1_joint
+    (14,0)  0.0     ; zarm_l2_joint
+    (15,0)  0.0     ; zarm_l3_joint
+    (16,0)  0.0     ; zarm_l4_joint
+    (17,0)  0.0     ; zarm_l5_joint
+    (18,0)  0.0     ; zarm_l6_joint
+    (19,0)  0.0     ; zarm_l7_joint
+    (20,0)  0.0     ; zarm_r1_joint
+    (21,0)  0.0     ; zarm_r2_joint
+    (22,0)  0.0     ; zarm_r3_joint
+    (23,0)  0.0     ; zarm_r4_joint
+    (24,0)  0.0     ; zarm_r5_joint
+    (25,0)  0.0     ; zarm_r6_joint
+    (26,0)  0.0     ; zarm_r7_joint
+}
+
+; 静止帧末端执行器位置 (用于VMP参考运动)
+; 格式: L_foot(3) + R_foot(3) + L_hand(3) + R_hand(3) = 12维
+; 顺序规则: 先腿后手，先左后右
+standingEndEffectorPos
+{
+    ; 左脚末端位置
+    (0,0)   -0.03750518     ; L_foot_x
+    (1,0)    0.095375     ; L_foot_y
+    (2,0)   -0.94309238     ; L_foot_z
+    ; 右脚末端位置
+    (3,0)   -0.03750518     ; R_foot_x
+    (4,0)   -0.095375      ; R_foot_y
+    (5,0)   -0.94309238     ; R_foot_z
+    ; 左手末端位置
+    (6,0)   -0.0032     ; L_hand_x
+    (7,0)    0.2547     ; L_hand_y
+    (8,0)   -0.1481     ; L_hand_z
+    ; 右手末端位置
+    (9,0)   -0.003     ; R_hand_x
+    (10,0)  -0.2547     ; R_hand_y
+    (11,0)  -0.149384     ; R_hand_z
+}
+
+; VMP控制滤波器配置（与RL模式保持一致）
+jointCmdFilterCutoffFreq
+{
+    ; 定义各关节的控制滤波器截止频率（VMP专用）
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节
+    (0,0)   50   ; leg_l1_joint
+    (1,0)   50   ; leg_l2_joint
+    (2,0)   50   ; leg_l3_joint
+    (3,0)   50   ; leg_l4_joint
+    (4,0)   50   ; leg_l5_joint
+    (5,0)   50   ; leg_l6_joint
+    (6,0)   50   ; leg_r1_joint
+    (7,0)   50   ; leg_r2_joint
+    (8,0)   50   ; leg_r3_joint
+    (9,0)   50   ; leg_r4_joint
+    (10,0)  50   ; leg_r5_joint
+    (11,0)  50   ; leg_r6_joint
+    ; 腰部关节
+    (12,0)  50   ; waist_joint
+    ; 手臂关节
+    (13,0)  50   ; zarm_l1_joint
+    (14,0)  50   ; zarm_l2_joint
+    (15,0)  50   ; zarm_l3_joint
+    (16,0)  50   ; zarm_l4_joint
+    (17,0)  50   ; zarm_l5_joint
+    (18,0)  50   ; zarm_l6_joint
+    (19,0)  50   ; zarm_l7_joint
+    (20,0)  50   ; zarm_r1_joint
+    (21,0)  50   ; zarm_r2_joint
+    (22,0)  50   ; zarm_r3_joint
+    (23,0)  50   ; zarm_r4_joint
+    (24,0)  50   ; zarm_r5_joint
+    (25,0)  50   ; zarm_r6_joint
+    (26,0)  50   ; zarm_r7_joint
+}
+
+jointCmdFilterState
+{
+    ; 定义各关节的控制滤波器的使用情况（VMP专用），0:close, 1:open
+    ; v52关节顺序: 腿部(0-11) + 腰部(12) + 手臂(13-26) = 27个关节
+    ; 腿部关节
+    (0,0)   0   ; leg_l1_joint
+    (1,0)   0   ; leg_l2_joint
+    (2,0)   0   ; leg_l3_joint
+    (3,0)   0   ; leg_l4_joint
+    (4,0)   0   ; leg_l5_joint
+    (5,0)   0   ; leg_l6_joint
+    (6,0)   0   ; leg_r1_joint
+    (7,0)   0   ; leg_r2_joint
+    (8,0)   0   ; leg_r3_joint
+    (9,0)   0   ; leg_r4_joint
+    (10,0)  0   ; leg_r5_joint
+    (11,0)  0   ; leg_r6_joint
+    ; 腰部关节
+    (12,0)  0   ; waist_joint
+    ; 手臂关节
+    (13,0)  0   ; zarm_l1_joint
+    (14,0)  0   ; zarm_l2_joint
+    (15,0)  0   ; zarm_l3_joint
+    (16,0)  0   ; zarm_l4_joint
+    (17,0)  0   ; zarm_l5_joint
+    (18,0)  0   ; zarm_l6_joint
+    (19,0)  0   ; zarm_l7_joint
+    (20,0)  0   ; zarm_r1_joint
+    (21,0)  0   ; zarm_r2_joint
+    (22,0)  0   ; zarm_r3_joint
+    (23,0)  0   ; zarm_r4_joint
+    (24,0)  0   ; zarm_r5_joint
+    (25,0)  0   ; zarm_r6_joint
+    (26,0)  0   ; zarm_r7_joint
+}

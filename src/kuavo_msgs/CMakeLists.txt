@@ -138,6 +138,7 @@ add_message_files(
   FaceBoundingBox.msg
   AudioPlaybackStatus.msg
 
+  picoPoseRetarget.msg
   mpc_target_trajectories.msg
   mpc_state.msg
   mpc_input.msg
@@ -147,6 +148,11 @@ add_message_files(
   VMPTrajectoryState.msg
   DanceTrajectoryState.msg
 
+  # kuavo_mocap_gmr messages
+  RigidBodyFrame.msg
+  SkeletonFrame.msg
+  RigidBodyDescription.msg
+  MocapPoseRetarget.msg
   # Battery info
   BatteryInfo.msg
   ControllerSwitchEvent.msg
