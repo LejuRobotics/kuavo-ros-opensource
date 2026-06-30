@@ -48,6 +48,12 @@ class LEDStripServiceNode:
         rospy.loginfo("  - /led_strip_set_mode_and_color (SetLEDMode_free)")
         rospy.loginfo("  - /led_strip_close (Trigger)")
 
+        # 节点关闭时亮红灯常亮（失能指示）：
+        # Ctrl+C/kill 整个 launch 时本节点收到 SIGINT/SIGTERM，rospy 触发
+        # on_shutdown 回调，在此发一包红灯。LED 硬件锁存最后状态，机器人
+        # 将持续亮红灯，直到下次 launch 启动由 startup_led_monitor 切回正常色。
+        rospy.on_shutdown(self._on_shutdown)
+
     def handle_set_mode_and_color(self, req):
         """
         处理设置模式和颜色的服务请求
@@ -119,21 +125,23 @@ class LEDStripServiceNode:
             rospy.logerr(f"关闭 LED 时发生错误: {e}")
             return TriggerResponse(success=False, message=f"Error: {str(e)}")
     
-    def run(self):
-        """运行节点"""
+    def _on_shutdown(self):
+        """节点关闭时亮红灯常亮，指示机器人已失能/被打断。
+
+        Ctrl+C/kill 整个 launch 时 rospy 触发本回调。LED 硬件锁存最后
+        收到的状态，故红灯会持续亮到下次 launch 启动、由
+        startup_led_monitor 切回正常颜色为止。
+        """
         try:
-            rospy.spin()
-        except rospy.ROSInterruptException:
-            rospy.loginfo("正在关闭 LED Strip 服务节点...")
-            self.cleanup()
-    
-    def cleanup(self):
-        """清理资源"""
-        try:
-            self.led_strip.close()
-            rospy.loginfo("LED Strip 已关闭")
+            red = [(255, 0, 0)] * LEDStrip.LED_COUNT
+            self.led_strip.set_mode_and_color(LEDMode.CONSTANT, red)
+            rospy.loginfo("[LED Strip] 节点关闭，已设置红灯常亮（失能指示）")
         except Exception as e:
-            rospy.logerr(f"清理时发生错误: {e}")
+            rospy.logerr(f"[LED Strip] 关闭时设置红灯失败: {e}")
+
+    def run(self):
+        """运行节点。关闭时的灯状态由 rospy.on_shutdown(_on_shutdown) 负责。"""
+        rospy.spin()
 
 
 if __name__ == '__main__':

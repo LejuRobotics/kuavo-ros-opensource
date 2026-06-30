@@ -62,6 +62,7 @@
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
     <arg name="with_led" default="true"/>
+    <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
     <!-- 使用外部 odom->base_link TF 时设为 true，由外部系统（如 SLAM）发布 -->
     <!-- 实物模式下不发布 odom->base_link tf，由底盘 EKF 发布，避免 tf 冲突 -->
     <arg name="use_external_odom_tf" default="$(arg real)"/>
@@ -240,6 +241,7 @@
     <group if="$(arg with_led)">
         <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
             <arg name="LED" value="enable"/>
+            <arg name="led_for_state" value="$(arg led_for_state)"/>
         </include>
     </group>
 
