@@ -309,6 +309,8 @@
     <group if="$(arg with_battery)">
       <include file="$(find kuavo_led_controller)/launch/battery_info.launch">
         <arg name="BATTERY" value="enable"/>
+        <!-- 当 LED 同时启用时, 电池信息通过 LED 节点的 _query_battery_hw 服务获取, 避免串口冲突 -->
+        <arg name="backend" value="$(eval 'ros_service' if arg('with_led') else 'serial')" />
       </include>
     </group>
 

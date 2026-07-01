@@ -1,10 +1,12 @@
 <launch>
     <arg name="BATTERY" default="enable" />
+    <arg name="backend" default="serial" doc="serial=直接打开串口; ros_service=通过 LED 节点的 _query_battery_hw 服务获取数据"/>
 
     <!-- 当 BATTERY 不为 disable 时启动电池信息节点 -->
     <group unless="$(eval arg('BATTERY') == 'disable')">
         <!-- 启动电池信息节点 -->
         <node pkg="kuavo_led_controller" type="battery_info_node.py" name="battery_info_node" output="screen">
+            <param name="backend" value="$(arg backend)" />
             <!-- 串口设备路径 (与LED共用) -->
             <param name="port" value="/dev/ttyLED0" />
             <!-- 波特率 -->

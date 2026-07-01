@@ -5,17 +5,21 @@ import rospy
 from kuavo_msgs.msg import BatteryInfo
 from kuavo_msgs.srv import GetBatteryInfo, GetBatteryInfoResponse
 import os
+import sys
 try:
     import serial
 except ImportError:
     import subprocess
-    import sys
     print("正在安装pyserial库...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
     import serial
 import struct
 import time
 import threading
+
+# 导入电池应答包校验函数（与 battery_query.py 共用）
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'controller'))
+from hardware.battery_query import _validate_battery_response
 
 class BatteryInfoReader:
     def __init__(self, port='/dev/ttyLED0', baudrate=115200):
@@ -101,6 +105,20 @@ class BatteryInfoReader:
 
         time.sleep(0.2)
 
+        # 排空命令回显：RS485 半双工总线上 TX 后立即有 RX 回显
+        # 短暂等待后读取并丢弃回显字节
+        time.sleep(0.01)
+        try:
+            self.ser.timeout = 0.005
+            while self.ser.in_waiting > 0:
+                self.ser.read(self.ser.in_waiting)
+        except Exception:
+            pass
+        self.ser.timeout = 0.05  # 恢复等待应答的超时
+
+        expected_instruction = 0x03 if battery_id == 0 else 0x04
+        expected_header = bytes([0xFF, 0xFF, expected_instruction])
+        header_len = len(expected_header)
         response = bytearray()
         start_time = time.time()
         timeout = 0.5  # 500ms 超时
@@ -111,45 +129,43 @@ class BatteryInfoReader:
                 response.extend(chunk)
                 rospy.logdebug(f"已读取 {len(chunk)} 字节，累计 {len(response)} 字节")
 
-                # 检查是否收到完整响应（至少35字节）
+                # 在累积数据中搜索匹配的响应头（与 battery_query.py 一致）
                 if len(response) >= 35:
-                    # 验证包头
-                    if response[0] == 0xFF and response[1] == 0xFF:
-                        # 检查指令字节是否匹配
-                        expected_instruction = 0x03 if battery_id == 0 else 0x04
-                        actual_instruction = response[2]
-                        if actual_instruction == expected_instruction:
-                            # 找到匹配的响应，退出循环
-                            break
-                        else:
-                            rospy.logwarn(f"收到不匹配的响应: 期望指令{expected_instruction:02X}, 实际{actual_instruction:02X}, 丢弃并继续等待")
-                            # 丢弃这个不匹配的响应，继续等待
-                            response = bytearray()
+                    for i in range(len(response) - header_len + 1):
+                        if response[i:i + header_len] == expected_header:
+                            if len(response) - i >= 35:
+                                matched = bytes(response[i:i + 35])
+                                if _validate_battery_response(matched):
+                                    rospy.logdebug(f"在位置 {i} 找到匹配的响应头")
+                                    return self._parse_battery_data_from_response(matched, battery_id)
+                                # 假阳性匹配：跳过这个 header，继续向后搜索
+                                response = response[i + header_len:]
+                                break
+                # 防止累积数据无限增长
+                if len(response) > 255:
+                    response = response[-128:]
             time.sleep(0.01)
 
         rospy.logdebug(f"接收到的数据长度: {len(response)}")
         rospy.logdebug(f"接收数据: {[hex(x) for x in response]}")
 
-        # 如果没有找到匹配的响应，检查是否有残留数据
-        if len(response) > 0 and len(response) < 35:
-            rospy.logwarn(f"接收到不完整数据: {len(response)} 字节，可能有残留数据")
-            # 清理缓冲区
-            self.ser.reset_input_buffer()
+        # 超时后最后一次搜索
+        if len(response) >= 35:
+            for i in range(len(response) - header_len + 1):
+                if response[i:i + header_len] == expected_header:
+                    if len(response) - i >= 35:
+                        matched = bytes(response[i:i + 35])
+                        if _validate_battery_response(matched):
+                            rospy.logdebug(f"超时后在位置 {i} 找到匹配的响应头")
+                            return self._parse_battery_data_from_response(matched, battery_id)
 
-        # 验证包头
-        if len(response) == 0:
+        # 超时未找到完整响应
+        if len(response) > 0:
+            rospy.logwarn(f"接收到不完整数据: {len(response)} 字节，未找到匹配的响应头")
+        else:
             rospy.logwarn("未收到任何响应数据")
-            return None
 
-        if response[0] != 0xFF or response[1] != 0xFF:
-            rospy.logwarn(f"无效的包头: {response[0]:02X} {response[1]:02X}")
-            return None
-
-        # 获取数据长度字段
-        data_length = response[3]
-        rospy.logdebug(f"应答包数据长度字段: {data_length}")
-
-        return self._parse_battery_data_from_response(response, battery_id)
+        return None
 
     def _parse_battery_data_from_response(self, response, battery_id):
         """
@@ -304,6 +320,56 @@ class BatteryInfoReader:
         """关闭串口连接"""
         self.ser.close()
 
+class BatteryInfoReaderProxy:
+    """
+    电池信息读取器（ROS Service 代理模式）
+
+    不直接打开串口，而是通过调用 LED 服务节点的 _query_battery_hw service
+    来获取电池数据。适用于 LED 和电池同时启用、串口已由 LED 节点持有的场景。
+
+    Interface 与 BatteryInfoReader 一致：提供 read_battery_info(battery_id) 方法。
+    """
+
+    def __init__(self, service_name='_query_battery_hw'):
+        """初始化 ROS Service 代理"""
+        rospy.loginfo(f"等待电池查询服务: {service_name} ...")
+        try:
+            rospy.wait_for_service(service_name, timeout=10.0)
+            self._proxy = rospy.ServiceProxy(service_name, GetBatteryInfo)
+            rospy.loginfo(f"已连接到电池查询服务: {service_name}")
+        except rospy.ROSException as e:
+            rospy.logerr(f"等待电池查询服务超时: {service_name} ({e})")
+            raise
+
+    def read_battery_info(self, battery_id):
+        """
+        通过 ROS service 读取电池信息（与 BatteryInfoReader 接口一致）
+        """
+        try:
+            resp = self._proxy(battery_id=battery_id)
+            if resp.success:
+                return {
+                    'battery_id': battery_id,
+                    'voltage': resp.voltage,
+                    'current': resp.current,
+                    'remaining_capacity': resp.remaining_capacity,
+                    'full_capacity': resp.full_capacity,
+                    'percentage': resp.percentage,
+                    'cycle_count': resp.cycle_count,
+                    'protection_flags': resp.protection_flags,
+                    'temperatures': list(resp.temperatures)
+                }
+            else:
+                rospy.logwarn(f"电池 {battery_id} 查询失败: {resp.message}")
+                return None
+        except rospy.ServiceException as e:
+            rospy.logerr(f"调用电池查询服务失败: {e}")
+            return None
+
+    def close(self):
+        """清理代理资源"""
+        self._proxy = None
+
 class BatteryInfoNode:
     def __init__(self):
         # 初始化ROS节点
@@ -313,10 +379,17 @@ class BatteryInfoNode:
         self.port = rospy.get_param('~port', '/dev/ttyLED0')
         self.baudrate = rospy.get_param('~baudrate', 115200)
         self.publish_rate = rospy.get_param('~publish_rate', 1.0)  # 发布频率 Hz
+        # backend: "serial" = 直接打开串口; "ros_service" = 通过 LED 节点的 _query_battery_hw 服务
+        self.backend = rospy.get_param('~backend', 'serial')
 
         # 创建电池信息读取器实例
         try:
-            self.battery_reader = BatteryInfoReader(port=self.port, baudrate=self.baudrate)
+            if self.backend == 'ros_service':
+                self.battery_reader = BatteryInfoReaderProxy()
+                rospy.loginfo("电池信息读取模式: ROS Service 代理（与 LED 共用串口）")
+            else:
+                self.battery_reader = BatteryInfoReader(port=self.port, baudrate=self.baudrate)
+                rospy.loginfo("电池信息读取模式: 直接串口")
         except Exception as e:
             rospy.logerr(f"初始化电池读取器失败: {e}")
             rospy.signal_shutdown("初始化失败")

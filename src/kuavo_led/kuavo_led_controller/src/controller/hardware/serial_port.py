@@ -226,6 +226,11 @@ class SerialPort:
                 'overflow_count': self._overflow_count
             }
 
+    def clear_buffer(self) -> None:
+        """清空读取缓冲区（在发送新指令前调用，避免读到旧数据）"""
+        with self._buffer_lock:
+            self._read_buffer.clear()
+
     def __del__(self):
         """析构函数，关闭串口"""
         self._close()
