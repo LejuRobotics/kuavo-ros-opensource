@@ -169,7 +169,8 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   // 这与训练侧 vel_command_b 的复用语义一致：x->弯腰，y->保留，yaw(z)->下蹲高度。
   if (currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_)
   {
-    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x;
+    // x->弯腰：仅允许正向（向前弯），屏蔽负向 cmd_x（向后弯）
+    currentCommand_.cmdVelLineX_ = std::max(0.0, smoothed_cmd_vel_.linear.x);
     currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y;
     currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z;
     currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x;
@@ -530,12 +531,42 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
       cmd_vel.linear.z * cmd_vel.linear.z);
   const bool linear_decel = cmd_linear_mag < smoothed_linear_mag - 1e-9;
   
-  if (linear_change > max_velocity_change_ &&
+  const bool in_neg_cmd_x =
+      cmd_vel.linear.x < -1e-9 || smoothed_cmd_vel_.linear.x < -1e-9;
+  const double effective_max_velocity_change =
+      (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x)
+          ? max_velocity_change_neg_cmd_x_
+          : max_velocity_change_;
+
+  if (linear_change > effective_max_velocity_change &&
       (!velocity_change_decel_only_ || linear_decel)) {
-    double scale = max_velocity_change_ / linear_change;
+    double scale = effective_max_velocity_change / linear_change;
     smoothed_vel.linear.x = smoothed_cmd_vel_.linear.x + scale * vel_diff_x;
     smoothed_vel.linear.y = smoothed_cmd_vel_.linear.y + scale * vel_diff_y;
     smoothed_vel.linear.z = smoothed_cmd_vel_.linear.z + scale * vel_diff_z;
+  }
+
+  // 负向 cmd_x 单独限速（含从后退减速到零）
+  if (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x) {
+    const double x_diff = smoothed_vel.linear.x - smoothed_cmd_vel_.linear.x;
+    const double x_change = std::abs(x_diff);
+    const bool x_decel = std::abs(cmd_vel.linear.x) < std::abs(smoothed_cmd_vel_.linear.x) - 1e-9;
+    if (x_change > max_velocity_change_neg_cmd_x_ &&
+        (!velocity_change_decel_only_ || x_decel)) {
+      smoothed_vel.linear.x =
+          smoothed_cmd_vel_.linear.x + (x_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_neg_cmd_x_;
+    }
+  }
+
+  // cmd_y 单步限速
+  if (max_velocity_change_cmd_y_ > 0.0) {
+    const double prev_y = smoothed_cmd_vel_.linear.y;
+    const double y_diff = smoothed_vel.linear.y - prev_y;
+    const double y_change = std::abs(y_diff);
+    if (y_change > max_velocity_change_cmd_y_) {
+      smoothed_vel.linear.y =
+          prev_y + (y_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_cmd_y_;
+    }
   }
   
   // Apply mixed motion limits to velocity commands
@@ -590,10 +621,14 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
   // Load velocity smoothing overrides (e.g. amp_hand_param.info for v17 amp_hand_controller)
   if (pt.find("velocitySmoothing") != pt.not_found()) {
     loadData::loadPtreeValue(pt, max_velocity_change_, "velocitySmoothing.maxVelocityChange", verbose);
+    loadData::loadPtreeValue(pt, max_velocity_change_neg_cmd_x_, "velocitySmoothing.maxVelocityChangeNegCmdX", verbose);
     loadData::loadPtreeValue(pt, velocity_change_decel_only_, "velocitySmoothing.decelOnly", verbose);
+    loadData::loadPtreeValue(pt, max_velocity_change_cmd_y_, "velocitySmoothing.maxVelocityChangeCmdY", verbose);
     std::cout << "[RlGaitReceiver] velocitySmoothing loaded: maxVelocityChange="
-              << max_velocity_change_ << ", decelOnly="
-              << (velocity_change_decel_only_ ? "true" : "false") << std::endl;
+              << max_velocity_change_ << ", maxVelocityChangeNegCmdX="
+              << max_velocity_change_neg_cmd_x_ << ", decelOnly="
+              << (velocity_change_decel_only_ ? "true" : "false")
+              << ", maxVelocityChangeCmdY=" << max_velocity_change_cmd_y_ << std::endl;
   }
 }
 

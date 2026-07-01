@@ -224,32 +224,40 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, cmdVelLineXUp_, "cmdVelLineXup", false);
       loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
+      loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
       try
       {
-        Eigen::Matrix<double, 6, 1> tiny_cmd_clip;
+        Eigen::Matrix<double, 8, 1> tiny_cmd_clip;
         loadEigenMatrix("TinyCmdClip", tiny_cmd_clip);
         tiny_cmdx_clip_pos_min_ = tiny_cmd_clip(0);
         tiny_cmdx_clip_pos_max_ = tiny_cmd_clip(1);
         tiny_cmdx_clip_neg_max_ = tiny_cmd_clip(2);
         tiny_cmdx_clip_neg_min_ = tiny_cmd_clip(3);
-        tiny_cmd_angz_clip_min_ = tiny_cmd_clip(4);
-        tiny_cmd_angz_clip_max_ = tiny_cmd_clip(5);
+        tiny_cmdy_clip_min_ = tiny_cmd_clip(4);
+        tiny_cmdy_clip_max_ = tiny_cmd_clip(5);
+        tiny_cmd_angz_clip_min_ = tiny_cmd_clip(6);
+        tiny_cmd_angz_clip_max_ = tiny_cmd_clip(7);
         tiny_cmdx_clip_enabled_ = (tiny_cmdx_clip_pos_max_ > tiny_cmdx_clip_pos_min_) &&
                                   (tiny_cmdx_clip_neg_max_ > tiny_cmdx_clip_neg_min_);
+        tiny_cmdy_clip_enabled_ = tiny_cmdy_clip_max_ > tiny_cmdy_clip_min_;
         tiny_cmd_angz_clip_enabled_ = tiny_cmd_angz_clip_max_ > tiny_cmd_angz_clip_min_;
-        ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, neg[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, enabled=%s/%s",
+        ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, neg[%.3f, %.3f)->%.3f, "
+                 "cmd_y[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, enabled=%s/%s/%s",
                  name_.c_str(),
                  tiny_cmdx_clip_pos_min_, tiny_cmdx_clip_pos_max_, tiny_cmdx_clip_pos_max_,
                  tiny_cmdx_clip_neg_min_, tiny_cmdx_clip_neg_max_, tiny_cmdx_clip_neg_min_,
+                 tiny_cmdy_clip_min_, tiny_cmdy_clip_max_, tiny_cmdy_clip_max_,
                  tiny_cmd_angz_clip_min_, tiny_cmd_angz_clip_max_, tiny_cmd_angz_clip_max_,
                  tiny_cmdx_clip_enabled_ ? "true" : "false",
+                 tiny_cmdy_clip_enabled_ ? "true" : "false",
                  tiny_cmd_angz_clip_enabled_ ? "true" : "false");
       }
       catch (const std::exception& e)
       {
         tiny_cmdx_clip_enabled_ = false;
+        tiny_cmdy_clip_enabled_ = false;
         tiny_cmd_angz_clip_enabled_ = false;
         ROS_WARN("[%s] TinyCmdClip not loaded: %s", name_.c_str(), e.what());
       }
@@ -427,6 +435,7 @@ namespace humanoid_controller
 
     // 加载 X 负向单独缩放系数（用于不对称速度限制）
     loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
+    loadData::loadPtreeValue(pt, cmdVelLineXNegScaleExternalArm_, "commandData.scale.cmdVelLineXNegScaleExternalArm", false);
 
     ROS_INFO("[%s] loadConfig done. num_actions_=%d, numSingleObs_=%d, frameStack_=%d",
              name_.c_str(), num_actions_, numSingleObs_, frameStack_);
@@ -635,6 +644,11 @@ namespace humanoid_controller
     if (action.size() >= total_joints && actionScaleTestRL_.size() >= total_joints)
     {
       q_ref.array() += action.head(total_joints).array() * actionScale_ * actionScaleTestRL_.head(total_joints).array();
+      if (enable_elbow_scale_)
+      {
+        q_ref[16] += action[16] * actionScaleTestRL_[16] * (0.2 - actionScale_);
+        q_ref[20] += action[20] * actionScaleTestRL_[20] * (0.2 - actionScale_);
+      }
     }
     return q_ref;
   }
@@ -665,6 +679,20 @@ namespace humanoid_controller
       return tiny_cmdx_clip_neg_min_;
     }
     return cmdx;
+  }
+
+  double AmpWalkController::applyTinyCmdYClip(double cmdy) const
+  {
+    if (!tiny_cmdy_clip_enabled_)
+    {
+      return cmdy;
+    }
+    const double abs_cmdy = std::abs(cmdy);
+    if (abs_cmdy >= tiny_cmdy_clip_min_ && abs_cmdy < tiny_cmdy_clip_max_)
+    {
+      return cmdy >= 0.0 ? tiny_cmdy_clip_max_ : -tiny_cmdy_clip_max_;
+    }
+    return cmdy;
   }
 
   double AmpWalkController::applyTinyCmdAngzClip(double angz) const
@@ -746,13 +774,12 @@ namespace humanoid_controller
                                              jointArmNum_ > 0 && arm_controller_ &&
                                              arm_controller_->getMode() != 1;
 
-    // amp_hand: 外部手臂接管时才应用 X 负向缩放；其余控制器保持原行为。
     if (cmd.cmdVelLineX_ < 0.0)
     {
-      if (!is_amp_hand_controller_ || external_arm_control_active)
-      {
-        cmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
-      }
+      const double neg_scale = (is_amp_hand_controller_ && external_arm_control_active)
+                                   ? cmdVelLineXNegScaleExternalArm_
+                                   : cmdVelLineXNegScale_;
+      cmd.cmdVelLineX_ *= neg_scale;
     }
 
     if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdx_ &&
@@ -761,13 +788,18 @@ namespace humanoid_controller
       cmd.cmdVelLineY_ = 0.0;
     }
 
-    if (is_amp_hand_controller_ && (tiny_cmdx_clip_enabled_ || tiny_cmd_angz_clip_enabled_))
+    if (is_amp_hand_controller_ &&
+        (tiny_cmdx_clip_enabled_ || tiny_cmdy_clip_enabled_ || tiny_cmd_angz_clip_enabled_))
     {
       if (tiny_cmdx_clip_enabled_)
       {
         cmd.cmdVelLineX_ = applyTinyCmdxClip(cmd.cmdVelLineX_);
       }
-      if (tiny_cmd_angz_clip_enabled_ &&
+      if (tiny_cmdy_clip_enabled_)
+      {
+        cmd.cmdVelLineY_ = applyTinyCmdYClip(cmd.cmdVelLineY_);
+      }
+      if (tiny_cmd_angz_clip_enabled_ && cmd.cmdStance_ != 1.0 &&
           std::abs(cmd.cmdVelLineX_) < 0.3 && std::abs(cmd.cmdVelLineY_) < 0.2 &&
           std::abs(cmd.cmdVelAngularZ_) > 0.1)
       {
@@ -1027,9 +1059,11 @@ namespace humanoid_controller
         const bool external_arm_control_active = arm_command_replacement_enabled_ &&
                                                  jointArmNum_ > 0 && arm_controller_ &&
                                                  arm_controller_->getMode() != 1;
-        if (external_arm_control_active && elbowCmd.cmdVelLineX_ < 0.0)
+        if (elbowCmd.cmdVelLineX_ < 0.0)
         {
-          elbowCmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
+          const double neg_scale = external_arm_control_active ? cmdVelLineXNegScaleExternalArm_
+                                                               : cmdVelLineXNegScale_;
+          elbowCmd.cmdVelLineX_ *= neg_scale;
         }
 
         const bool is_lateral_move_command =
@@ -1042,10 +1076,14 @@ namespace humanoid_controller
           // Positive cmd_y is left lateral, negative cmd_y is right lateral.
           if (elbowCmd.cmdVelLineY_ > 0.0)
           {
+            action[1] *= 0.8;
+            action[2] *= 1.2;
             action[16] *= kLateralElbowFixScale_;
           }
           else
           {
+            action[7] *= 0.8;
+            action[8] *= 1.2;
             action[20] *= kLateralElbowFixScale_;
           }
         }
@@ -1219,9 +1257,12 @@ namespace humanoid_controller
 
     Eigen::VectorXd cmd(jointNum_ + jointArmNum_ + waistNum_);
     Eigen::VectorXd torque(jointNum_ + jointArmNum_ + waistNum_);// 策略理论计算扭矩
+    auto joint_action_scale = [this](int i) {
+      return (enable_elbow_scale_ && (i == 16 || i == 20)) ? 0.18 : actionScale_;
+    };
     for (int i = 0; i < jointNum_ + jointArmNum_ + waistNum_; i++)
     {
-      jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]);
+      jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]);
     }
     if (is_real_)
     {
@@ -1231,19 +1272,19 @@ namespace humanoid_controller
         {
           if (JointPDModeRL_(i) == 0)
           {
-            cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
             cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
             torque[i] = cmd[i];
           }
           else
           {
-            cmd[i] = (local_action[i] * actionScale_ * actionScaleTestRL_[i] + defalutJointPosRL_[i]);
-            torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] + defalutJointPosRL_[i]);
+            torque[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
           }
         }
         else if (JointControlModeRL_(i) == 2)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]);
+          cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]);
           // cmd[i] = local_action[i] + defalutJointPosRL_[i];
           // std::cout << "cmd[" << i << "] = " << cmd[i] << "jointKpRL_:" << jointKpRL_[i] << std::endl;
           // cmd[i] = defalutJointPosRL_[i];
@@ -1258,14 +1299,14 @@ namespace humanoid_controller
       {
         if (JointControlModeRL_(i) == 0)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+          cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
         }
         else if (JointControlModeRL_(i) == 2)
         {
           cmd[i] = jointTor[i];
         }
         cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
-        torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+        torque[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
       }
 
     }

@@ -2090,7 +2090,7 @@ namespace ocs2
         // linear.y -> 预留/侧向姿态通道
         // linear.z -> base高度偏移(下蹲)
         // angular.z -> 禁止旋转，避免与下蹲语义冲突
-        if (std::abs(joystick_origin_axis(0)) > DEAD_ZONE)
+        if (std::abs(joystick_origin_axis(0)) > DEAD_ZONE && commad_line_target_(0) >= 0.0)
         {
           cmdVel.linear.x = commad_line_target_(0);
           updated[0] = true;
