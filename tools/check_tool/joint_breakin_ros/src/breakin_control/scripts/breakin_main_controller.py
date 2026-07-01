@@ -770,8 +770,10 @@ class BreakinMainController:
                         completed_rounds_calc = 1 + published_rounds
                         # 如果已达到目标轮数，但当前还在运行中，仍然允许当前轮完成
                         if completed_rounds_calc >= target_rounds:
-                            # 只有在不运行时，才停止（允许当前轮完成）
-                            can_start_new_round_value = arm_running
+                            # arm_running: 当前正在运行
+                            # last_start_new_round_arm_state: 刚触发了新一轮但手臂尚未开始运行
+                            # 两种情况都允许：正在运行（等本轮完成），或新轮已触发待启动
+                            can_start_new_round_value = arm_running or last_start_new_round_arm_state
                         else:
                             # 未达到目标轮数，允许开始新一轮
                             can_start_new_round_value = True
@@ -779,7 +781,7 @@ class BreakinMainController:
                     can_start_msg = Bool()
                     can_start_msg.data = can_start_new_round_value
                     self.ros_publishers['pub_can_start_new_round'].publish(can_start_msg)
-                    
+
                     # 检测一轮是否刚刚完成（arm_running 从 True 变为 False）
                     should_start_new_round = False
                     if start_time is not None:
@@ -790,30 +792,42 @@ class BreakinMainController:
                         if just_finished and can_start_new_round_value and not last_start_new_round_arm_state:
                             # 满足条件时，准备发布下一轮的触发信号
                             should_start_new_round = True
-                    
+
                     if should_start_new_round:
-                        # 发送一次脉冲，允许开始新一轮
+                        # 持续发布 True，直到 arm_running 变为 True（手臂开始新一轮）
                         start_new_round_arm_msg = Bool()
                         start_new_round_arm_msg.data = True
-                        # 这里直接使用一个新的publisher，避免和run_both混淆
                         pub_start_new_round_arm = rospy.Publisher('/breakin/start_new_round_arm', Bool, queue_size=10)
                         pub_start_new_round_arm.publish(start_new_round_arm_msg)
                         last_start_new_round_arm_state = True
                         published_rounds += 1
                         completed_rounds = 1 + published_rounds  # 包括第一轮和刚触发的这一轮
-                        
+
                         self.print_colored(
                             f"✓ [手臂单独] 发布 start_new_round_arm = True（开始第 {completed_rounds} 轮，共 {target_rounds} 轮）",
                             Colors.GREEN
                         )
+                    elif last_start_new_round_arm_state:
+                        # 之前发布了 True，检查 arm_running 是否变为 True（已开始新一轮）
+                        if arm_running:
+                            # 已经开始新一轮，停止发布 True，改为发布 False
+                            start_new_round_arm_msg = Bool()
+                            start_new_round_arm_msg.data = False
+                            pub_start_new_round_arm = rospy.Publisher('/breakin/start_new_round_arm', Bool, queue_size=10)
+                            pub_start_new_round_arm.publish(start_new_round_arm_msg)
+                            last_start_new_round_arm_state = False
+                        else:
+                            # 还在等待中，持续发布 True
+                            start_new_round_arm_msg = Bool()
+                            start_new_round_arm_msg.data = True
+                            pub_start_new_round_arm = rospy.Publisher('/breakin/start_new_round_arm', Bool, queue_size=10)
+                            pub_start_new_round_arm.publish(start_new_round_arm_msg)
                     else:
                         # 确保信号为False，不残留
                         start_new_round_arm_msg = Bool()
                         start_new_round_arm_msg.data = False
                         pub_start_new_round_arm = rospy.Publisher('/breakin/start_new_round_arm', Bool, queue_size=10)
                         pub_start_new_round_arm.publish(start_new_round_arm_msg)
-                        if arm_running and last_start_new_round_arm_state:
-                            last_start_new_round_arm_state = False
                     
                     last_arm_running_state = arm_running
                     rate.sleep()
@@ -1020,8 +1034,9 @@ class BreakinMainController:
                         completed_rounds_calc = 1 + published_rounds
                         # 如果已达到目标轮数，但当前还在运行中，仍然允许当前轮完成
                         if completed_rounds_calc >= target_rounds:
-                            # 只有在不运行时，才停止（允许当前轮完成）
-                            can_start_new_round_value = leg_running
+                            # leg_running: 当前正在运行
+                            # last_start_new_round_leg_state: 刚触发了新一轮但腿部尚未开始运行
+                            can_start_new_round_value = leg_running or last_start_new_round_leg_state
                         else:
                             # 未达到目标轮数，允许开始新一轮
                             can_start_new_round_value = True
@@ -1467,8 +1482,10 @@ class BreakinMainController:
                             completed_rounds_calc = 1 + published_rounds
                             # 如果已达到目标轮数，但当前还在运行中，仍然允许当前轮完成
                             if completed_rounds_calc >= target_rounds:
-                                # 只有在都不运行时，才停止（允许当前轮完成）
-                                can_start_new_round_value = (arm_running or leg_running)
+                                # arm_running/leg_running: 当前正在运行
+                                # last_start_new_round_*_state: 刚触发了新一轮但尚未开始运行
+                                can_start_new_round_value = (arm_running or leg_running
+                                    or last_start_new_round_arm_state or last_start_new_round_leg_state)
                             else:
                                 # 未达到目标轮数，允许开始新一轮
                                 can_start_new_round_value = True
