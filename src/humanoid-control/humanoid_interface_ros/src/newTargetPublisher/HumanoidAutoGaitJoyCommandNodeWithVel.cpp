@@ -89,6 +89,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <array>
 #include <thread>
 #include <future>
+#include <chrono>
 
 namespace ocs2
 {
@@ -1114,11 +1115,16 @@ namespace ocs2
     }
 
     /************************ 组合键功能（动作）函数 ************************/
-    // LB+A（roban）：屏蔽/恢复 遥杆和方向键，防止做动作/跳舞时误触摇杆导致摔倒
+    // LB+A（roban, all controllers incl. amp_hand_controller）：屏蔽/恢复 遥杆和方向键，
+    // 防止做动作/跳舞时误触摇杆导致摔倒。屏蔽前若处于 posture(下蹲/弯腰)模式，先退出，
+    // 避免遗留姿态命令被摇杆映射继续触发。
     void toggleAxesShield()
     {
+      // 若正处于 posture(下蹲/弯腰)模式，先退出 posture，避免遗留姿态命令
+      if (posture_control_mode_)
+        setPostureControlMode(false);
       axes_input_enabled_ = !axes_input_enabled_;
-      ROS_WARN_STREAM("[JoyControl] LB+A 遥杆/方向键输入: " << (axes_input_enabled_ ? "ENABLED" : "DISABLED(已屏蔽)"));
+      ROS_WARN_STREAM("[JoyControl] LB+A axes input: " << (axes_input_enabled_ ? "ENABLED" : "DISABLED(shielded)"));
       if (!axes_input_enabled_)
       {
         // 屏蔽时立即发布零速度，确保立刻停止
@@ -1128,8 +1134,42 @@ namespace ocs2
       }
     }
 
+    // amp_hand_controller 下：axes[3] 超过阈值时进入 posture 模式并线性重映射替代 axes[2]（正方向站起、负方向下蹲；LB+A 屏蔽时不响应）
+    void handleAmpHandPostureAxis(const sensor_msgs::Joy::ConstPtr &joy_msg)
+    {
+      // 仅 amp_hand_controller 下生效；屏蔽时直接返回
+      if (!isAmpHandControllerActive() || !axes_input_enabled_)
+        return;
+      if (joy_msg->axes.size() <= 3)
+        return;
+
+      const double a3 = joy_msg->axes[3];
+      if (std::abs(a3) <= kPostureAxisThreshold)
+      {
+        // 死区内：退出 posture 模式
+        if (posture_control_mode_)
+          setPostureControlMode(false);
+        return;
+      }
+
+      // 死区外：进入 posture 模式（幂等守卫）
+      if (!posture_control_mode_)
+        setPostureControlMode(true);
+
+      // 线性重映射：[threshold, 1.0] -> [0, 1]，[-1.0, -threshold] -> [-1, 0]
+      const double mapped = (a3 + (a3 > 0 ? -kPostureAxisThreshold : kPostureAxisThreshold))
+                          / (1.0 - kPostureAxisThreshold);
+
+      // 替代原 axes[2] (右摇杆Z) 在 posture 模式下的下蹲控制量
+      joystick_origin_axis_(2) = mapped;
+      ROS_INFO_THROTTLE(0.5,
+                        "[JoyControl] amp_hand posture axis: axes[3]=%.2f -> cmd.linear.z=%.2f",
+                        a3, mapped);
+    }
+
     // amp_hand_controller 下的下蹲(弯腰)开关：进入需当前控制器为 amp_hand_controller，
-    // 再按一次退出。由 LB+A 在 amp_hand 下调用(其它控制器下 LB+A 走 toggleAxesShield 屏蔽摇杆)。
+    // 再按一次退出。LB+A 在所有控制器下统一走 toggleAxesShield，
+    // 本函数暂时无调用方；后续如需保留"amp_hand 下蹲开关"功能，建议接入独立按键入口。
     void toggleRobanPostureMode()
     {
       if (posture_control_mode_)
@@ -1284,14 +1324,8 @@ namespace ocs2
       {
         if (IS_ROBAN(rb_version_))
         {
-          // amp_hand_controller 下(或 posture 已开需退出): LB+A 切下蹲(posture)开关;
-          // 其它控制器下: LB+A 屏蔽/恢复 摇杆和方向键。
-          std::string cur;
-          const bool on_amp_hand = getCurrentControllerName(cur) && cur == "amp_hand_controller";
-          if (posture_control_mode_ || on_amp_hand)
-            toggleRobanPostureMode();   // amp_hand: 进入/退出下蹲(弯腰)控制
-          else
-            toggleAxesShield();         // 其它: 屏蔽/恢复 摇杆和方向键
+          // 统一屏蔽/恢复 摇杆和方向键（含 amp_hand_controller）
+          toggleAxesShield();
         }
         else
           pubModeGaitScale(0.9);
@@ -1730,6 +1764,8 @@ namespace ocs2
       }
       joystick_origin_axis_ = joystickOriginAxisFilter_;
       // joystick_origin_axis_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
+      // amp_hand 下 axes[3] 控制 posture 模式开关与下蹲/站立控制量
+      handleAmpHandPostureAxis(joy_msg);
       handleAmpHandCmdVelLineXLimitDpad(joy_msg);
       
       const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
@@ -1770,7 +1806,7 @@ namespace ocs2
       }
 
       vector_t button_trigger_axis = vector_t::Zero(6);
-      if (axes_input_enabled_ && !m1m2_action_active_)
+      if (!m1m2_action_active_)
       {
         if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
         {
@@ -1818,16 +1854,30 @@ namespace ocs2
         if (IS_ROBAN(rb_version_))
         {
           // Dance控制器下不允许切MPC（MPC无法接管直腿/倾斜姿态）
+          std::string cur_controller;
           kuavo_msgs::getControllerList get_list_srv;
           if (get_controller_list_client_.call(get_list_srv) && get_list_srv.response.success)
           {
-            const std::string& cur = get_list_srv.response.current_controller;
-            if (cur.find("dance") != std::string::npos)
+            cur_controller = get_list_srv.response.current_controller;
+            if (cur_controller.find("dance") != std::string::npos)
             {
               ROS_WARN("[JoyControl] B: dance controller active, MPC switch ignored. Press X for AMP.");
               return;
             }
           } // end of get current controller
+
+          // amp_hand_controller 停走后不允许直接切 MPC：先发 stance，若仍被拒则由用户再按一次 B。
+          if (cur_controller == "amp_hand_controller")
+          {
+            ROS_INFO("[JoyControl] B: amp_hand_controller active, request stance then switch to MPC");
+            publishGaitTemplate("stance");
+            if (!callSwitchControllerService("mpc"))
+            {
+              ROS_WARN_THROTTLE(1.0, "[JoyControl] B: amp_hand->MPC switch rejected; press B again once the robot has stopped.");
+            }
+            return;
+          }
+
           ROS_INFO("[JoyControl] B: switch to MPC");
           callSwitchControllerService("mpc");
           return;
@@ -1968,20 +2018,25 @@ namespace ocs2
     std::vector<bool> commandLineToTargetTrajectories(const vector_t &joystick_origin_axis, const SystemObservation &observation, geometry_msgs::Twist &cmdVel)
     {
       std::vector<bool> updated(6, false);
+      // posture 模式下从源头禁止 yaw：拷贝参数并清 axis(3)，
+      // 下游所有分支（posture 与 non-posture）都拿不到 yaw 输入
+      vector_t axis_local = joystick_origin_axis;
+      if (posture_control_mode_)
+        axis_local(3) = 0.0;
       Eigen::VectorXd limit_vector_negative(4);
-      limit_vector_negative << c_relative_base_limit_[0], c_relative_base_limit_[1], 
+      limit_vector_negative << c_relative_base_limit_[0], c_relative_base_limit_[1],
                                std::fabs(squatHeightMin_), c_relative_base_limit_[3];
       Eigen::VectorXd limit_vector_positive(4);
-      limit_vector_positive << c_relative_base_limit_[0], c_relative_base_limit_[1], 
+      limit_vector_positive << c_relative_base_limit_[0], c_relative_base_limit_[1],
                                std::fabs(squatHeightMax_), c_relative_base_limit_[3];
-      if (joystick_origin_axis.cwiseAbs().maxCoeff() < DEAD_ZONE)
+      if (axis_local.cwiseAbs().maxCoeff() < DEAD_ZONE)
         return updated; // command line is zero, do nothing
 
       for (int i = 0; i < 4; i++) {
-        if (joystick_origin_axis[i] >= 0) {
-            commad_line_target_[i] = joystick_origin_axis[i] * limit_vector_positive[i];
+        if (axis_local[i] >= 0) {
+            commad_line_target_[i] = axis_local[i] * limit_vector_positive[i];
         } else {
-            commad_line_target_[i] = joystick_origin_axis[i] * limit_vector_negative[i];
+            commad_line_target_[i] = axis_local[i] * limit_vector_negative[i];
         }
       }
 
@@ -1993,18 +2048,18 @@ namespace ocs2
         // linear.x -> 弯腰
         // linear.y -> 预留/侧向姿态通道
         // linear.z -> base高度偏移(下蹲)
-        // angular.z -> 禁止旋转，避免与下蹲语义冲突
-        if (std::abs(joystick_origin_axis(0)) > DEAD_ZONE)
+        // angular.z -> 入口处 axis_local(3)=0 已禁止旋转
+        if (std::abs(axis_local(0)) > DEAD_ZONE)
         {
           cmdVel.linear.x = commad_line_target_(0);
           updated[0] = true;
         }
-        if (std::abs(joystick_origin_axis(1)) > DEAD_ZONE)
+        if (std::abs(axis_local(1)) > DEAD_ZONE)
         {
           cmdVel.linear.y = commad_line_target_(1);
           updated[1] = true;
         }
-        if (std::abs(joystick_origin_axis(2)) > DEAD_ZONE)
+        if (std::abs(axis_local(2)) > DEAD_ZONE)
         {
           cmdVel.linear.z = commad_line_target_(2);
           updated[2] = true;
@@ -2030,7 +2085,7 @@ namespace ocs2
       }
 
       // vector_t target(6);
-      if (joystick_origin_axis.head(2).cwiseAbs().maxCoeff() > DEAD_ZONE)
+      if (axis_local.head(2).cwiseAbs().maxCoeff() > DEAD_ZONE)
       { // base p_x, p_y are relative to current state
         // double dx = commad_line_target_(0) * cos(currentPose(3)) - commad_line_target_(1) * sin(currentPose(3));
         // double dy = commad_line_target_(0) * sin(currentPose(3)) + commad_line_target_(1) * cos(currentPose(3));
@@ -2043,7 +2098,7 @@ namespace ocs2
         // std::cout << "base displacement: " << dx << ", " << dy << std::endl;
       }
       // base z relative to the default height
-      if (std::abs(joystick_origin_axis(2)) > DEAD_ZONE)
+      if (std::abs(axis_local(2)) > DEAD_ZONE)
       {
         updated[2] = true;
         // current_target_(2) = com_height_ + commad_line_target_(2);
@@ -2079,7 +2134,7 @@ namespace ocs2
       /**************************************************************/
 
       // theta_z relative to current
-      if (std::abs(joystick_origin_axis(3)) > DEAD_ZONE)
+      if (std::abs(axis_local(3)) > DEAD_ZONE)
       {
         updated[3] = true;
         // current_target_(3) = currentPose(3) + commad_line_target_(3) * M_PI / 180.0;
@@ -2786,6 +2841,9 @@ namespace ocs2
     // 遥感/方向键轴输入开关（默认允许）
     bool axes_input_enabled_{true};
     bool posture_control_mode_{false};
+    // amp_hand 下 axes[3] 控制 posture 开关的阈值：
+    //   [threshold, 1.0] / [-1.0, -threshold] 线性重映射到 [0, 1] / [-1, 0]
+    static constexpr double kPostureAxisThreshold = 0.3;
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
 
