@@ -18,7 +18,7 @@ use_virtual_arm_obs         true ; 是否在外部手臂控制器生效时使用
 lateral_elbow_fix           true ; 纯侧移时缩放对应侧肘关节 action
 enable_roll_compensation    true ; 是否启用行走/转弯时 projected_gravity 的 roll 观测补偿
 enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时关闭cmdy
-use_external_waist_controller true ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
+use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd   false      ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
