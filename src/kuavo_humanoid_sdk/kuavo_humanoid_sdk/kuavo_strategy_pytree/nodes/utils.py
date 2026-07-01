@@ -328,10 +328,14 @@ def generate_full_bezier_trajectory(
         current_right_pose,
         left_keypoints_list,
         right_keypoints_list,
-        traj_point_num: int = 50,
+        traj_point_num: int = 10,
 ):
     """
     生成完整的贝塞尔轨迹（包含所有关键点）
+
+    Args:
+        traj_point_num: 每个关键点段的插值点数。默认 10，总点数 ≈ (段数×10)，
+                        由 C++ Ruckig 在点之间插值，无需 Python 发密点。
     """
 
     # left_target_list, right_target_list = self.target
@@ -360,8 +364,8 @@ def generate_full_bezier_trajectory(
         ))
 
     # 生成完整的贝塞尔轨迹
-    total_points = len(left_keypoints_list) * traj_point_num  # 每个关键点段分配50个插值点
-    total_points = max(total_points, 100)  # 至少100个点
+    total_points = len(left_keypoints_list) * traj_point_num
+    total_points = max(total_points, 10)  # 至少 10 点，由 C++ Ruckig 负责点间平滑
 
     left_full_trajectory = bezier_interpolate_poses_full_trajectory(
         left_key_poses, num_points=total_points

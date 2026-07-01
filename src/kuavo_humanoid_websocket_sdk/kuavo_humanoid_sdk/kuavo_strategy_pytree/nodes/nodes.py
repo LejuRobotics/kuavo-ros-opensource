@@ -12,6 +12,7 @@ from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose, KuavoManipulatio
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.utils import generate_full_bezier_trajectory, \
     interpolate_joint_positions_bezier, calculate_elbow_y, get_elbow_position
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoIKParams
+from kuavo_humanoid_sdk.common.logger import is_diag_enabled
 
 import py_trees
 from py_trees.behaviour import Behaviour
@@ -752,10 +753,7 @@ class NodePercep(Behaviour):
     def _is_tag_pos_stable(self, buf: list) -> bool:
         """连续多帧位置误差较小：x/y/z 标准差均小于阈值则视为稳定。"""
         if len(buf) < self.tag_stable_count:
-            print(f"需{self.tag_stable_count}帧数据: {len(buf)}")
             return False
-        else:
-            print(f"第{len(buf)}帧数据稳定")
         arr = np.array(buf[-self.tag_stable_count:])
         std_x = float(np.std(arr[:, 0]))
         std_y = float(np.std(arr[:, 1]))
@@ -766,7 +764,9 @@ class NodePercep(Behaviour):
 
     def update(self):
         self.logger.debug(f"NodePercep::update {self.name}")
-        
+        # DIAG: 测量 PERCEP 每次 tick 耗时
+        _t0 = time.time()
+
         # 创建AprilTagDetectionArray消息
         tag_array_msg = AprilTagDetectionArray()
         tag_array_msg.header = Header()
@@ -795,13 +795,10 @@ class NodePercep(Behaviour):
                 if self._is_tag_pos_stable(self._tag_pos_buffers[tag_id]):
                     # 使用缓冲区内稳定帧的平均位置和平均姿态作为写入黑板的位姿
                     pos_arr = np.array(self._tag_pos_buffers[tag_id][-self.tag_stable_count:])
-                    print(f"tag_id: {tag_id} ,pos_arr: \n{np.round(pos_arr, 2)}")
                     mean_pos = np.mean(pos_arr, axis=0)
                     avg_pos = (float(mean_pos[0]), float(mean_pos[1]), float(mean_pos[2]))
 
                     quat_arr = np.array(self._tag_quat_buffers[tag_id][-self.tag_stable_count:])
-                    euler_deg = np.rad2deg(np.array([R.from_quat(q).as_euler('xyz') for q in quat_arr]))
-                    print(f"tag_id: {tag_id} ,euler_arr(度) roll,pitch,yaw: \n{np.round(euler_deg, 1)}")
                     mean_quat = np.mean(quat_arr, axis=0)
                     norm = float(np.linalg.norm(mean_quat))
                     if norm > 1e-6:
@@ -856,7 +853,16 @@ class NodePercep(Behaviour):
         # 发布tag数据（即使为空也发布，表示当前没有检测到）
         if len(tag_array_msg.detections) > 0:
             self.tag_publisher.publish(tag_array_msg)
-        
+
+        # DIAG: 每 20 tick 报告 PERCEP 耗时
+        if is_diag_enabled():
+            _dt = (time.time() - _t0) * 1000
+            if not hasattr(self, '_percep_tick_cnt'): self._percep_tick_cnt = 0; self._percep_times = []
+            self._percep_tick_cnt += 1; self._percep_times.append(_dt)
+            if self._percep_tick_cnt % 20 == 0:
+                arr = self._percep_times[-20:]
+                print(f"[DIAG-PERCEP] tick#{self._percep_tick_cnt} now={_dt:.1f}ms avg20={np.mean(arr):.1f}ms max20={np.max(arr):.1f}ms n_det={len(tag_array_msg.detections)}")
+
         return Status.RUNNING
 
     def terminate(self, new_status):
@@ -957,7 +963,9 @@ class NodeWalk(Behaviour):
                  torso_api: TorsoAPI,
                  control_mode: str = "cmd_vel",
                  pos_threshold: float = 0.1,
-                 backward_mode: bool = False
+                 backward_mode: bool = False,
+                 max_vel_x: float = 0.4,
+                 ramp_duration: float = 0.0,
                  ):
         super(NodeWalk, self).__init__(name)
         self.bb = py_trees.blackboard.Client(name=self.name)
@@ -970,6 +978,8 @@ class NodeWalk(Behaviour):
         self.control_mode = control_mode
         self.pos_threshold = pos_threshold
         self.backward_mode = backward_mode
+        self.max_vel_x = max_vel_x
+        self.ramp_duration = ramp_duration
         self.target_executed = False
 
     def initialise(self):
@@ -991,9 +1001,10 @@ class NodeWalk(Behaviour):
                 pos_threshold=self.pos_threshold,
                 kp_pos=1.0,
                 kp_yaw=0.6,
-                max_vel_x=0.4,
+                max_vel_x=self.max_vel_x,
                 max_vel_yaw=0.5,
                 backward_mode=self.backward_mode,
+                ramp_duration=self.ramp_duration,
                 asynchronous=True
             )
         elif self.control_mode == "cmd_pose_world":
@@ -1073,6 +1084,13 @@ class NodeArm(Behaviour):
             self.logger.error(f"NodeArm::update {self.name} - No arm trajectory found on blackboard")
             return Status.FAILURE
 
+        # DIAG: 节点生命周期日志
+        if is_diag_enabled():
+            import threading
+            self._diag_tid = threading.get_ident()
+            print(f"[DIAG-ARM] INIT  name={self.name:<30} frame={self.frame} total_time={self.total_time}s traj_len={len(left_traj)} TID={self._diag_tid%10000:04d}")
+        # DIAG END
+
         self.fut = self.arm_api.move_eef_traj_kmpc(
             left_traj=left_traj,
             right_traj=right_traj,
@@ -1097,6 +1115,12 @@ class NodeArm(Behaviour):
 
     def terminate(self, new_status):
         self.logger.debug(f"NodeArm::terminate {self.name} to {new_status}")
+        if is_diag_enabled():
+            # DIAG
+            import threading
+            fut_running = hasattr(self, 'fut') and self.fut is not None and not self.fut.done()
+            print(f"[DIAG-ARM] TERM  name={self.name:<30} new_status={new_status} fut_running={fut_running} TID={threading.get_ident()%10000:04d}")
+            # DIAG END
 
 class NodeWheelArm(Behaviour):
     """

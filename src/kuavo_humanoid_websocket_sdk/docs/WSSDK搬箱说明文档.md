@@ -830,14 +830,20 @@ if __name__ == '__main__':
 
 ### 配置切换
 
-PyTree 案例通过修改 import 语句切换仿真/实机配置。以 `case_new.py` 为例：
+案例会根据环境变量 `KUAVO_REAL` 自动选择仿真/实机配置，**无需手动修改代码**：
+
+- **仿真运行**（默认）：不设置环境变量，或 `export KUAVO_REAL=false`
+- **实机运行**：`export KUAVO_REAL=true`
+
+以 `case_new.py` 为例，自动切换逻辑如下：
 
 ```python
-# 仿真：使用 config_sim
-from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config
-
-# 实机：使用 config_boxes_real
-# from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_real import config
+import os
+_is_real = os.environ.get('KUAVO_REAL', 'false').lower() == 'true'
+if _is_real:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_real import config
+else:
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config
 ```
 
 ### 关键参数调整

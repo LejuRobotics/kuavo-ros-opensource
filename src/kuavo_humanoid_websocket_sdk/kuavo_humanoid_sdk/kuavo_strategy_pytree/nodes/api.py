@@ -7,6 +7,7 @@ from kuavo_humanoid_sdk.interfaces.data_types import (
     KuavoManipulationMpcFrame)
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Tag, Frame, Transform3D, WheelArmFrame
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcControlFlow
+from kuavo_humanoid_sdk.common.logger import is_diag_enabled
 
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
@@ -238,6 +239,11 @@ class ArmAPI:
                             arm_error_detect: bool = True  # 是否开启手臂误差检测
                             ):
 
+        # 轨迹执行期间禁用 GC，避免多轮累积对象触发全量 GC 暂停轨迹线程
+        import gc
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+
         # 切成外部控制模式
         self.robot_sdk.control.set_external_control_arm_mode()
         if control_base:
@@ -249,6 +255,11 @@ class ArmAPI:
         time.sleep(0.15)
         num_points = min(len(left_traj), len(right_traj))
         time_per_point = total_time / (num_points - 1) if num_points > 1 else total_time
+        # DIAG: 轨迹循环入口日志
+        if is_diag_enabled():
+            import threading
+            print(f"[DIAG-TRAJ] START frame={frame} points={num_points} total_time={total_time}s dt={time_per_point*1000:.0f}ms TID={threading.get_ident()%10000:04d}")
+        # DIAG END
         for i in range(num_points):
             self.robot_sdk.control.control_robot_end_effector_pose(
                 left_pose=left_traj[i],
@@ -328,6 +339,15 @@ class ArmAPI:
         # 运动结束后，切回默认模式
         self.robot_sdk.control.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.NoControl)
         self.robot_sdk.control.set_manipulation_mpc_control_flow(KuavoManipulationMpcControlFlow.ThroughFullBodyMpc)
+        if is_diag_enabled():
+            # DIAG
+            import threading
+            print(f"[DIAG-TRAJ] DONE  frame={frame} TID={threading.get_ident()%10000:04d}")
+            # DIAG END
+
+        # 恢复 GC
+        if gc_was_enabled:
+            gc.enable()
 
     def _move_eef_traj_wheel_mpc(self,
                             left_traj: List[List[float]],  # 末端6d位姿的轨迹，不带时间戳
@@ -1158,11 +1178,14 @@ class TorsoAPI:
                              max_vel_x=0.4,
                              max_vel_yaw=0.6,
                              timeout=60,
-                             backward_mode=False
+                             backward_mode=False,
+                             ramp_duration=0.0,
                              ):
         """
         躯干行走到某个点，通过速度控制
         """
+        # 重置倒退速度斜坡计时器
+        self._backward_ramp_start_time = None
         robot_pose_when_start = Pose(
             pos=self.robot_sdk.state.robot_position(),
             quat=self.robot_sdk.state.robot_orientation(),
@@ -1263,11 +1286,20 @@ class TorsoAPI:
 
             # 倒退模式：跳过转向，直接根据base坐标系下的位置给速度
             if backward_mode:
+                # 速度斜坡：在 ramp_duration 秒内从 0 线性增加到目标速度
+                if ramp_duration > 0:
+                    if self._backward_ramp_start_time is None:
+                        self._backward_ramp_start_time = time.time()
+                    elapsed = time.time() - self._backward_ramp_start_time
+                    ramp_factor = min(1.0, elapsed / ramp_duration)
+                else:
+                    ramp_factor = 1.0
+
                 x_diff = target_in_base.pos[0]
                 y_diff = target_in_base.pos[1]
-                vel_x = kp_pos * x_diff
+                vel_x = kp_pos * x_diff * ramp_factor
                 vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
-                vel_y = kp_pos * y_diff
+                vel_y = kp_pos * y_diff * ramp_factor
                 vel_y = np.clip(vel_y, -max_vel_x, max_vel_x)
                 self.robot_sdk.control.walk(
                     linear_x=vel_x,
@@ -1279,6 +1311,7 @@ class TorsoAPI:
                 # 检查是否到达
                 if dis_diff < pos_threshold:
                     self.stop_walk()
+                    self._backward_ramp_start_time = None
                     break
 
             # 1. if dis too small， then use holonomic fine tune
@@ -1354,16 +1387,17 @@ class TorsoAPI:
                             max_vel_x=0.5,
                             max_vel_yaw=0.4,
                             backward_mode=False,
+                            ramp_duration=0.0,
                             asynchronous: bool = True):
         if asynchronous:
             # 多线程，异步
 
-            fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode)
+            fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode, ramp_duration=ramp_duration)
 
             return fut
 
         else:
-            self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode)
+            self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode, ramp_duration=ramp_duration)
 
             return None
 
