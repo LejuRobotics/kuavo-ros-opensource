@@ -14,7 +14,7 @@ clipActions        5000.0    ; 用于对actions进行clip
 ankleSolverType    1       ; 用于仿真中关节换算版本指定 0:旧版本 1:新版本
 use_jointcmd_filter true       ; 是否对输出使用关节指令滤波器 0:不使用 1:使用
 use_external_arm_controller  true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
-use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
+use_external_waist_controller true ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd   false      ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
