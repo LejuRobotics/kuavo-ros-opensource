@@ -162,6 +162,31 @@ namespace humanoid_controller
     Eigen::VectorXd jointCmdFilterCutoffFreq_(jointNum_ + jointArmNum_ + waistNum_);
 
     loadEigenMatrix("defaultJointState", defalutJointPosRL_);
+
+    standDefaultJointPosRL_.resize(defalutJointPosRL_.size());
+    standDefaultJointPosRL_ = defalutJointPosRL_;
+    use_stand_default_joint_state_ = false;
+    has_stand_default_joint_state_ = false;
+    stand_velocity_threshold_ = 0.1;
+    stand_angular_velocity_threshold_ = 0.1;
+    loadData::loadPtreeValue(pt, use_stand_default_joint_state_, "use_stand_default_joint_state", false);
+
+    if (use_stand_default_joint_state_ && pt.get_child_optional("standdefaultJointState"))
+    {
+      loadEigenMatrix("standdefaultJointState", standDefaultJointPosRL_);
+      if (standDefaultJointPosRL_.size() == defalutJointPosRL_.size())
+      {
+        has_stand_default_joint_state_ = true;
+        loadData::loadPtreeValue(pt, stand_velocity_threshold_, "standVelocityThreshold", false);
+        loadData::loadPtreeValue(pt, stand_angular_velocity_threshold_,
+                                 "standAngularVelocityThreshold", false);
+      }
+      else
+      {
+        standDefaultJointPosRL_ = defalutJointPosRL_;
+      }
+    }
+
     loadEigenMatrix("defaultBaseState", defaultBaseStateRL_);
     loadEigenMatrix("JointControlMode", JointControlModeRL_);
     loadEigenMatrix("JointPDMode", JointPDModeRL_);
@@ -406,6 +431,16 @@ namespace humanoid_controller
     return true;
   }
 
+  const Eigen::VectorXd& AmpWalkController::getActiveDefaultJointPos(const CommandDataRL& cmd) const
+  {
+    const bool is_truly_standing =
+        has_stand_default_joint_state_ &&
+        cmd.cmdStance_ >= 0.5 &&
+        std::abs(cmd.cmdVelLineX_) < stand_velocity_threshold_ &&
+        std::abs(cmd.cmdVelAngularZ_) < stand_angular_velocity_threshold_;
+    return is_truly_standing ? standDefaultJointPosRL_ : defalutJointPosRL_;
+  }
+
   void AmpWalkController::reset()
   {
     phase_ = 0.0;
@@ -423,7 +458,7 @@ namespace humanoid_controller
     }
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = true;  // 初始化为站立状态
-    
+
     ROS_INFO("[%s] reset", name_.c_str());
     sensor_data_updated_ = false;
   }
@@ -631,7 +666,8 @@ namespace humanoid_controller
     const Eigen::Vector3d baseLineVel = state_est.segment(9 + waistNum_ + jointNum_ + jointArmNum_, 3);
     const Eigen::Vector3d basePos = state_est.segment(3, 3);
 
-    Eigen::VectorXd jointPos = sensor_data.jointPos_ - defalutJointPosRL_;
+    const Eigen::VectorXd& active_default = getActiveDefaultJointPos(cmd);
+    Eigen::VectorXd jointPos = sensor_data.jointPos_ - active_default;
     Eigen::VectorXd jointVel = sensor_data.jointVel_;
 
     const bool virtual_arm_obs_active = is_amp_hand_controller_ &&
@@ -974,6 +1010,17 @@ namespace humanoid_controller
 
     // 应用手臂接管平滑处理（站立时置零，行走时平滑过渡）
     CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
+    currentCmdData.scale();
+    if (currentCmdData.cmdVelLineX_ < 0.0)
+    {
+      if (!is_amp_hand_controller_ ||
+          (arm_command_replacement_enabled_ && jointArmNum_ > 0 && arm_controller_ &&
+           arm_controller_->getMode() != 1))
+      {
+        currentCmdData.cmdVelLineX_ *= cmdVelLineXNegScale_;
+      }
+    }
+    const Eigen::VectorXd& active_default = getActiveDefaultJointPos(currentCmdData);
     bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
     applyArmTakeoverBlend(local_action, ros::Time::now(), is_standing);
 
@@ -1015,7 +1062,7 @@ namespace humanoid_controller
     Eigen::VectorXd torque(jointNum_ + jointArmNum_ + waistNum_);// 策略理论计算扭矩
     for (int i = 0; i < jointNum_ + jointArmNum_ + waistNum_; i++)
     {
-      jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]);
+      jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
     }
     if (is_real_)
     {
@@ -1025,22 +1072,19 @@ namespace humanoid_controller
         {
           if (JointPDModeRL_(i) == 0)
           {
-            cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
             cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
             torque[i] = cmd[i];
           }
           else
           {
-            cmd[i] = (local_action[i] * actionScale_ * actionScaleTestRL_[i] + defalutJointPosRL_[i]);
-            torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = (local_action[i] * actionScale_ * actionScaleTestRL_[i] + active_default[i]);
+            torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
           }
         }
         else if (JointControlModeRL_(i) == 2)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]);
-          // cmd[i] = local_action[i] + defalutJointPosRL_[i];
-          // std::cout << "cmd[" << i << "] = " << cmd[i] << "jointKpRL_:" << jointKpRL_[i] << std::endl;
-          // cmd[i] = defalutJointPosRL_[i];
+          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
           torque[i] = jointTor[i];
         }
       }
@@ -1052,14 +1096,14 @@ namespace humanoid_controller
       {
         if (JointControlModeRL_(i) == 0)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
         }
         else if (JointControlModeRL_(i) == 2)
         {
           cmd[i] = jointTor[i];
         }
         cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
-        torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + defalutJointPosRL_[i]) - jointKdRL_[i] * jointVel[i];
+        torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
       }
 
     }
