@@ -228,6 +228,7 @@ namespace humanoidController_wheel_wbc
     bool prev_whole_torso_ctrl_{false};  // 上一次的全身控制模式状态
     ros::ServiceClient mpc_control_client_;  // MPC模式切换服务客户端
     ros::ServiceClient reset_cmd_vel_ruckig_client_;  // 重置cmdVel Ruckig规划器服务客户端
+    ros::ServiceClient dispatch_mode_client_;  // 底盘调度模式服务客户端 (/move_base/set_dispatch_mode)
     std_srvs::SetBool reset_cmd_vel_ruckig_srv_;  // 重置cmdVel Ruckig规划器服务请求
 
     // ========== enable control ==========

@@ -90,9 +90,8 @@ class BatteryInfoReader:
         checksum = self.calculate_checksum(packet[2:])
         packet.append(checksum)
 
-        # 清空接收缓冲区 - 使用循环彻底清空
+        # 清空接收缓冲区（发送前清除旧数据）
         self.ser.reset_input_buffer()
-        # 额外读取所有可能残留的数据
         timeout_orig = self.ser.timeout
         self.ser.timeout = 0.05
         while self.ser.in_waiting > 0:
@@ -103,18 +102,10 @@ class BatteryInfoReader:
         self.ser.write(bytes(packet))
         rospy.logdebug(f"发送指令: {[hex(x) for x in packet]}")
 
-        time.sleep(0.2)
-
-        # 排空命令回显：RS485 半双工总线上 TX 后立即有 RX 回显
-        # 短暂等待后读取并丢弃回显字节
-        time.sleep(0.01)
-        try:
-            self.ser.timeout = 0.005
-            while self.ser.in_waiting > 0:
-                self.ser.read(self.ser.in_waiting)
-        except Exception:
-            pass
-        self.ser.timeout = 0.05  # 恢复等待应答的超时
+        # 等待 RS485 半双工总线上命令回显和硬件应答到达
+        # 硬件在 ~5ms 内返回 35 字节应答，等待 50ms 确保数据就绪
+        # 修复：不再在等待后排空数据，避免丢弃真实电池应答
+        time.sleep(0.05)
 
         expected_instruction = 0x03 if battery_id == 0 else 0x04
         expected_header = bytes([0xFF, 0xFF, expected_instruction])
@@ -129,7 +120,7 @@ class BatteryInfoReader:
                 response.extend(chunk)
                 rospy.logdebug(f"已读取 {len(chunk)} 字节，累计 {len(response)} 字节")
 
-                # 在累积数据中搜索匹配的响应头（与 battery_query.py 一致）
+                # 在累积数据中搜索匹配的响应头
                 if len(response) >= 35:
                     for i in range(len(response) - header_len + 1):
                         if response[i:i + header_len] == expected_header:
@@ -161,9 +152,9 @@ class BatteryInfoReader:
 
         # 超时未找到完整响应
         if len(response) > 0:
-            rospy.logwarn(f"接收到不完整数据: {len(response)} 字节，未找到匹配的响应头")
+            rospy.logdebug(f"接收到不完整数据: {len(response)} 字节，未找到匹配的响应头")
         else:
-            rospy.logwarn("未收到任何响应数据")
+            rospy.logdebug("未收到任何响应数据")
 
         return None
 
@@ -206,19 +197,19 @@ class BatteryInfoReader:
             # Param5-6: 剩余容量（无符号，10mAh）
             remaining_capacity = struct.unpack('>H', bytes(data[4:6]))[0] * 10
 
-            # Param7-8: 充满容量（无符号，10mAh）注意：也需要乘以10
+            # Param7-8: 充满容量（无符号，10mAh）
             full_capacity = struct.unpack('>H', bytes(data[6:8]))[0] * 10
 
             # Param9-10: 放电循环次数（无符号）
             cycle_count = struct.unpack('>H', bytes(data[8:10]))[0]
 
-            # Param11-12: 剩余容量百分比（无符号，注意是2字节！）
+            # Param11-12: 剩余容量百分比（无符号，2字节）
             percentage = struct.unpack('>H', bytes(data[10:12]))[0]
 
-            # Param13-14: cell1~16均衡状态（bit0=cell1, bit15=cell16）
+            # Param13-14: cell1~16均衡状态
             balance1 = struct.unpack('>H', bytes(data[12:14]))[0]
 
-            # Param15-16: cell17~33均衡状态（bit0=cell17, bit16=cell33）
+            # Param15-16: cell17~33均衡状态
             balance2 = struct.unpack('>H', bytes(data[14:16]))[0]
 
             # Param17-18: 保护标志（独立字段）
@@ -360,7 +351,7 @@ class BatteryInfoReaderProxy:
                     'temperatures': list(resp.temperatures)
                 }
             else:
-                rospy.logwarn(f"电池 {battery_id} 查询失败: {resp.message}")
+                rospy.logdebug(f"电池 {battery_id} 查询失败: {resp.message}")
                 return None
         except rospy.ServiceException as e:
             rospy.logerr(f"调用电池查询服务失败: {e}")
@@ -463,7 +454,7 @@ class BatteryInfoNode:
                 response.message = f"Failed to read battery {req.battery_id} info"
                 return response
 
-            # 构建响应 - 直接使用请求中的 battery_id，确保返回正确的电池ID
+            # 构建响应 - 直接使用请求中的 battery_id
             response = GetBatteryInfoResponse()
             response.battery_id = req.battery_id
             response.voltage = battery_info['voltage']

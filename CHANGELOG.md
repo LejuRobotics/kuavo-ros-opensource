@@ -9,6 +9,9 @@
 - 新增 VR 启动 YAML 配置与按键开关说明文档
 - 更新相机/动捕标定说明文档，支持人形与轮臂整机标定及单个部位标定，[相机标定文档](./src/Camera_Calibration/README.md)
 - 修订轮臂单手增量遥操躯干说明文档，[文档链接](./docs/轮臂V1.4开发文档/轮臂单手增量摇操躯干说明.md)
+- 精简文档站点案例目录，下线百度 EdgeBoard 接入等过时案例，优化机器人关节标定与快速开始教程，[文档链接](./docs/3调试教程/机器人关节标定.md)
+- 新增 Websocket SDK PyTree 策略开发指南文档，补充搬箱策略架构图与仿真运行说明，[文档链接](./src/kuavo_humanoid_websocket_sdk/docs/WSSDK搬箱说明文档.md)
+- 更新 kuavo_led Readme，补充 LED Strip 服务列表、backend 参数说明、启动方式及串口共享架构说明，[文档链接](./src/kuavo_led/Readme.md)
 
 ## 新增功能
 - 5W 增量单手遥操新增坐姿单手控制躯干能力，单手即可控制折叠臂升降与前后倾、腰部左右旋转，另一只手可自由控制底盘或手臂，[使用文档](./docs/轮臂V1.4开发文档/轮臂单手增量摇操躯干说明.md)
@@ -35,6 +38,15 @@
 - Websocket SDK 适配无 ROS 运行环境，新增 ros_env 适配层并将 ROS 消息/服务改为按需导入，同时新增双臂 IK 手部位姿命令处理
 - 相机启动新增推流相关参数配置
 - 新增搬运模式（transport mode）：提供 transport_mode_command 服务与状态机，支持手柄按键触发、进入握拳/退出张开、掉使能倒地与两步起身及音频播报，[文档链接](./docs/运动控制API.md)
+- 新增 VMP-online 模块与 PICO 手柄 GMR 遥操作支持（适配 kuavo_v46/v52），支持任务动作插值切换、初始标定按键（RT+B/LT+B）及灵巧手、头部联动控制
+- LED 灯状态显示重构：细分启动-准备站立-站立-摔倒保护等状态灯效，适配轮臂机型，电源保护/硬件失能时红灯常亮
+- 新增巡检（RL）多策略状态机切换能力：支持站立/行走/跳舞/导航等策略间插值切换、双策略推理模式与热启动
+- 新增嘉腾底盘 leju_mobile_base_msgs 消息与服务定义
+- 轮臂 WBC 新增仿真专用 kpkd 参数，与实物参数区分以提升仿真跟踪效果
+- amp_hand_controller 新增下蹲/站立姿态开关（axes[3] 控制），并优化侧移、原地旋转平滑度与小角速度截断
+- Roban2.2 手柄新增 M1/M2 上一次状态记忆能力
+- leju 夹爪新增故障恢复（recovery）与更安全的初始化流程
+- 单手遥操新增双击握把复位躯干至初始姿态功能
 
 ## 修复问题
 - 修复手臂零点话题发布值与配置文件不一致的问题
@@ -66,6 +78,24 @@
 - 修复 rosbag 日志清理（cleanRosLogDirectory）误删 stdout 日志的问题
 - 修复各代机器人 Gazebo 仿真 IMU 配置 frame_id 错误，并补充头部相机到相机树的 TF 变换
 - 修复 Websocket SDK 多项控制问题：control_robot_height 抬升失效、导航接口死循环、轮臂 waist 控制误将躯干位置归零、leju 夹爪仿真回退丢首帧，并以 S 曲线优化关节运动插值
+- 修复 LED 与电池查询串口冲突问题：电池查询改为后台缓存模式，增加应答包校验与服务注册异常保护
+- 修复 Roban tact 动作首帧顺移问题
+- 修复轮臂 AMP 步态抱拳动作大拇指抖动问题（issue #3231）
+- 修复轮臂使能控制（/enable_control）IDE 误操作导致的冻结逻辑异常
+- 修复 Websocket SDK PyTree 策略示例缺少 Init/websocket_mode 配置及 py_trees、scipy 依赖缺失的问题
+- 修复走路中动作结束后手臂不摆臂（EXTERN->AUTO_SWING 切换卡死）的问题
+- 修复 amp_hand_controller 切换到 MPC 前未等待躯干稳定导致的切换异常
+- 修复 amp_hand_controller 下 LB+A 屏蔽摇杆失效的问题（issue #3359）
+- 修复 H12 owner 模式下终端启动重复拉栈及按 C 键重启异常的问题
+- 修复轮臂 s60/61/62/63 默认开启速度限幅导致的运动异常，改为默认关闭
+- 修复轮臂 VR 默认手臂姿态问题，改用 /standJointState，并调整初始化关节角度
+- 修复 Roban bt2pro 按 X 错误切换到 amp_hand_controller 的逻辑，RB+X 键位改为预留
+- 修复 joy 踏步（trot）期间 M1/M2 组合键误触发的问题
+- 修复 joy M2+X 等空动作触发后摇杆永久失灵的问题（issue #3303）
+- 修复 v63 ankle_solver_type 配置迁移问题（issue #3294）
+- 修复轮臂搬运过程中面对二维码朝向异常及手臂控制模式切换默认参数问题
+- 修复搬箱子案例轮臂最低速度导致底盘死区的问题，并调整默认 ik 参数与安全空间
+- 修复轮臂模式下 H12 手柄按钮透传与状态机长短按语义冲突的问题
 
 ## 其他改进
 - rosbag 日志清理功能调整为默认开启

@@ -9,16 +9,17 @@
   - 启动完成（白灯常亮）：
       双足(robot_type==2): /bot_stand_up_complete topic data==1 时触发
       轮臂(robot_type==1): /hardware/is_ready==1 时触发（按'o'后直接切白灯）
-  - 跌倒（红灯闪烁）：/humanoid_controller/fall_down_state_ topic data==1 时触发
+  - 硬件失能（红灯常亮）：/robot_disabled_flag topic data==True 时触发
+  - 电源板/BMS保护（红灯常亮）：/battery_info_1 或 /battery_info_2 protection_flags!=0 时触发
 
 使用 led_state 统一管理状态，避免重复发送 LED 命令。
 仅兼容新系统(24 灯,led_strip_service)。
 """
 
 import rospy
-from std_msgs.msg import Int8, Float64
+from std_msgs.msg import Int8, Bool
 from kuavo_msgs.srv import SetLEDMode_free, SetLEDMode_freeRequest
-from kuavo_msgs.msg import Color
+from kuavo_msgs.msg import BatteryInfo, Color
 
 
 LED_SERVICE = '/led_strip_set_mode_and_color'
@@ -96,7 +97,7 @@ class StartupLEDMonitor:
     def __init__(self):
         rospy.init_node('startup_led_monitor', anonymous=True)
 
-        # 当前 LED 状态: None(初始) / 'booting' / 'ready' / 'standing' / 'fall'
+        # 当前 LED 状态: None(初始) / 'booting' / 'ready' / 'standing' / 'stop'
         self.led_state = None
 
         # 机器人类型：1=轮臂, 2=双足（由 launch 文件设置）
@@ -106,12 +107,16 @@ class StartupLEDMonitor:
         # 订阅站立完成 topic（仅双足会发布）
         rospy.Subscriber('/bot_stand_up_complete', Int8, self._stand_complete_cb)
 
-        # 订阅跌倒状态 topic（Float64: 0=STANDING, 1=FALL_DOWN）
+        # 订阅硬件失能标志 topic（Bool: True=硬件已失能，收到即红灯常亮）
         rospy.Subscriber(
-            '/humanoid_controller/fall_down_state_',
-            Float64,
-            self._fall_state_cb
+            '/robot_disabled_flag',
+            Bool,
+            self._robot_disabled_cb
         )
+
+        # 订阅电源板/BMS保护状态（protection_flags!=0 表示保护触发，红灯常亮）
+        rospy.Subscriber('/battery_info_1', BatteryInfo, self._battery_info_cb)
+        rospy.Subscriber('/battery_info_2', BatteryInfo, self._battery_info_cb)
 
         # 定时器（2Hz）：检测启动中/准备站立/启动完成
         self._poll_timer = rospy.Timer(rospy.Duration(0.5), self._poll_state)
@@ -127,8 +132,8 @@ class StartupLEDMonitor:
 
     def _poll_state(self, event):
         """定时轮询：检测启动中/准备站立/启动完成"""
-        # 跌倒或站立完成后，定时器不再干预（由跌倒回调管理异常状态）
-        if self.led_state in ('fall', 'standing'):
+        # 失能或站立完成后，定时器不再干预（由失能回调管理异常状态）
+        if self.led_state in ('stop', 'standing'):
             return
 
         ready = rospy.get_param('/hardware/ready_to_start', 0)
@@ -153,10 +158,16 @@ class StartupLEDMonitor:
         if msg.data == 1:
             self._set_state('standing', MODE_CONSTANT, COLOR_STANDING)
 
-    def _fall_state_cb(self, msg):
-        """跌倒状态回调（0=站立, 1=跌倒）"""
-        if int(msg.data) == 1:
-            self._set_state('fall', MODE_FLASH, COLOR_FALL)
+    def _robot_disabled_cb(self, msg):
+        """硬件失能标志回调（收到 /robot_disabled_flag data==True 即红灯常亮）"""
+        if msg.data:
+            self._set_state('stop', MODE_CONSTANT, COLOR_FALL)
+
+    def _battery_info_cb(self, msg):
+        """电源板/BMS保护回调（protection_flags!=0 即红灯常亮）"""
+        if msg.protection_flags != 0:
+            rospy.logwarn("[StartupLED] 电源板/BMS保护触发: protection_flags=%d", msg.protection_flags)
+            self._set_state('stop', MODE_CONSTANT, COLOR_ERROR)
 
     def spin(self):
         rospy.spin()

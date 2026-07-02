@@ -39,14 +39,29 @@ def query_battery(serial_port, battery_id, timeout=0.2):
         print(f"[BatteryQuery] 发送电池 {battery_id} 查询指令失败")
         return None
 
-    # 等待命令回显到达后立即排空 _read_buffer
-    # 避免回显字节和硬件 UART FIFO 中可能残留的旧数据混入收包窗口
-    time.sleep(0.01)
-    serial_port.read_all()
+    # 等待 RS485 半双工总线上的命令回显和硬件应答到达
+    # 硬件在 ~5ms 内返回 35 字节应答，这里等待 50ms 确保数据就绪
+    time.sleep(0.05)
+
+    # 读取缓冲区所有数据（包含命令回显 + 电池响应），不再丢弃
+    initial_data = serial_port.read_all()
 
     expected_header = bytes([0xFF, 0xFF, instruction])
     header_len = len(expected_header)
     accumulated = bytearray()
+    if initial_data:
+        accumulated.extend(initial_data)
+
+    # 先在已读取的数据中搜索响应（大多数情况在这里就能找到）
+    if len(accumulated) >= 35:
+        for i in range(len(accumulated) - header_len + 1):
+            if accumulated[i:i + header_len] == expected_header:
+                if len(accumulated) - i >= 35:
+                    response = bytes(accumulated[i:i + 35])
+                    if _validate_battery_response(response):
+                        return _parse_response(response, battery_id)
+
+    # 如果首轮未找到，继续等待更多数据
     start_time = time.time()
 
     while time.time() - start_time < timeout:
@@ -60,15 +75,13 @@ def query_battery(serial_port, battery_id, timeout=0.2):
                             response = bytes(accumulated[i:i + 35])
                             if _validate_battery_response(response):
                                 return _parse_response(response, battery_id)
-                            # 假阳性匹配：残留数据中恰好出现了 FF FF 03/04 序列
-                            # 但长度字段或校验和不通过，说明不是真正的电池应答包
-                            # 跳过这个假匹配的头部，继续向后搜索
+                            # 假阳性匹配：跳过这个 header，继续向后搜索
                             accumulated = accumulated[i + header_len:]
                             break  # 跳出 for，回到 while 继续收包
         else:
             time.sleep(0.005)
 
-    # 超时前最后一次扫描，不再等待新数据
+    # 超时前最后一次扫描
     if len(accumulated) >= 35:
         for i in range(len(accumulated) - header_len + 1):
             if accumulated[i:i + header_len] == expected_header:
@@ -77,7 +90,7 @@ def query_battery(serial_port, battery_id, timeout=0.2):
                     if _validate_battery_response(response):
                         return _parse_response(response, battery_id)
 
-    print(f"[BatteryQuery] 电池 {battery_id} 查询超时")
+    # 超时不打印，避免后台轮询刷屏（调用方通过返回 None 判断即可）
     return None
 
 
@@ -169,7 +182,7 @@ class BatteryQueryCache:
         self._query_interval = query_interval
 
         self._cache = {0: None, 1: None}
-        self._cache_timestamps = {0: 0.0, 1: 0.0}  # 最后成功查询的时间戳
+        self._cache_timestamps = {0: 0.0, 1: 0.0}
         self._cache_lock = threading.Lock()
 
         self._stop_event = threading.Event()
@@ -192,8 +205,7 @@ class BatteryQueryCache:
                     pass
                 finally:
                     self._op_lock.release()
-                current_batt = 1 - current_batt  # 交替查询 BAT1/BAT2
-            # 无论是否获得锁，都等相同间隔
+                current_batt = 1 - current_batt
             self._stop_event.wait(self._query_interval)
 
     def get(self, battery_id):
@@ -206,7 +218,6 @@ class BatteryQueryCache:
                 age = time.time() - self._cache_timestamps.get(battery_id, 0)
                 return info, age
             if self._cache_timestamps.get(battery_id, 0) > 0:
-                # 曾成功但当前缓存为空（try_lock 未拿到锁导致未更新）
                 age = time.time() - self._cache_timestamps[battery_id]
                 return None, age
             return None, -1.0

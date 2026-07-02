@@ -42,6 +42,7 @@ find_package(catkin REQUIRED
         # ocs2_biped_robot_ros
         angles
         kuavo_msgs
+        leju_mobile_base_msgs
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
@@ -134,6 +135,7 @@ catkin_package(
                 # ocs2_biped_robot_ros
                 angles
                 kuavo_msgs
+                leju_mobile_base_msgs
                 kuavo_common
                 kuavo_solver
 )
