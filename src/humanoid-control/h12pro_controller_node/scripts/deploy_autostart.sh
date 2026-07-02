@@ -217,14 +217,6 @@ sed -i "s|^ExecStart=.*|ExecStart=$MONITOR_OCS2_H12PRO|" $OCS2_H12PRO_MONITOR_SE
 sudo cp $OCS2_H12PRO_MONITOR_SERVICE /etc/systemd/system/
 sudo systemctl daemon-reload
 
-# 同步写入 bashrc，确保终端 roslaunch 也能读取 KUAVO_CONTROL_SCHEME
-if grep -q "^export KUAVO_CONTROL_SCHEME=" ~/.bashrc; then
-    sed -i "s|^export KUAVO_CONTROL_SCHEME=.*|export KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME|" ~/.bashrc
-else
-    echo "export KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME" >> ~/.bashrc
-fi
-echo "已将 KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME 写入 ~/.bashrc"
-
 sudo apt-get install tmux
 
 if [ ! -f ~/.tmux.conf ]; then
