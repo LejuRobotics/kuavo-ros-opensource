@@ -1,0 +1,4 @@
+<launch>
+    <!-- OptiTrack Python数据接收节点启动文件 -->
+    <node pkg="optitrack_data_receive" type="OptiTrack_Data_Receive.py" name="OptiTrack_Data_Receive" output="screen" />
+</launch>

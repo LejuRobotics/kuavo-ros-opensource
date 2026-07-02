@@ -21,7 +21,8 @@ new-docs
 src/manipulation_nodes/planarmwebsocketservice/models/*.pt
 .claude/
 src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_v2/pick_place_box/logs/**
-src/manipulation_nodes/motion_capture_ik/lib/*.so
+src/manipulation_nodes/motion_capture_ik/lib/libplantIK.so
+src/humanoid-control/humanoid_arm_control/scripts/motion_capture_ik_packaged/lib/libplantIK.so
 src/legged_control
 src/legged_perceptive
 src/Livox-SDK2
@@ -71,3 +72,5 @@ src/legged_perceptive
 *.log
 EC_log/
 .catkin_tools/
+.agent_history.txt
+ci_scripts/is_git_fatal_error.sh

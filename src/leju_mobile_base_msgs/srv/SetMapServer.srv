@@ -1,0 +1,22 @@
+# Map server switching service
+
+# Request
+string map_name                   # Name of the map to load
+string map_path                   # Full path to map file (.yaml)
+bool load_immediately             # Whether to load map immediately
+bool save_current_pose            # Whether to save current pose before switching
+
+# Map switching mode
+uint8 MODE_REPLACE = 0           # Replace current map
+uint8 MODE_MERGE = 1             # Merge with current map
+uint8 MODE_OVERLAY = 2           # Overlay on current map
+uint8 switching_mode
+
+---
+
+# Response
+bool success                      # Whether map was loaded successfully
+string message                    # Status message
+uint32 error_code                 # Error code (0 if success)
+string active_map_name            # Currently active map name
+geometry_msgs/PoseStamped initial_pose  # Initial pose in new map

@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace eef_controller {
 
@@ -33,6 +34,8 @@ struct ControlClawResponse {
     bool success;
     std::string message;
 };
+
+using LejuClawDebugCallback = std::function<void(const std::string&)>;
 
 } // namespace eef_controller
 

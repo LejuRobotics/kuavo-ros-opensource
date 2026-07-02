@@ -14,18 +14,22 @@
 
       <arg name="use_joystick"       default="true"/>
       <arg name="joystick_type"      default="sim"/>
+      <!-- Optional: run dummy MRT in a separate gnome-terminal (requires working D-Bus session) -->
+      <arg name="use_separate_terminal" default="false"/>
 
       <!-- make the files into global parameters -->
       <param name="taskFile"   value="$(arg taskFile)" />
       <param name="urdfFile"   value="$(arg urdfFile)" />
       <param name="libFolder"  value="$(arg libFolder)" />
       <param name="robot_description" textfile="$(arg urdfFile)"/>
-
-      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_sqp_mpc_node" name="mobile_manipulator_sqp_mpc_node" 
-            output="screen" launch-prefix="" />
+      <param name="/use_external_odom_tf" value="false" />
       
-      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_dummy_mrt_node" name="mobile_manipulator_dummy_mrt_node" 
-            output="screen" launch-prefix="gnome-terminal --" />
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_dummy_mrt_node" name="mobile_manipulator_dummy_mrt_node"
+            output="screen" required="true"
+            launch-prefix="$(eval 'gnome-terminal --disable-factory --' if arg('use_separate_terminal') else '')" />
+
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_sqp_mpc_node" name="mobile_manipulator_sqp_mpc_node"
+            output="screen" launch-prefix="" />
       
       <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" 
             output="screen" launch-prefix="" />

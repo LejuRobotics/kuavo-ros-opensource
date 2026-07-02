@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <pwd.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
@@ -70,13 +71,15 @@ public:
     State   state;
     MotorStateData():id(0x0), state(State::None) {}
     MotorStateData(uint8_t id_, State state_):id(id_), state(state_) {}
-    };    
+    };
     using MotorStateDataVec = std::vector<MotorStateData>;
+    using DebugCallback = std::function<void(const std::string&)>;
 
     LeJuClawCan();
     ~LeJuClawCan();
     int initialize();
     void close();
+    void set_debug_callback(DebugCallback callback);
 
     bool enableMotor(MotorId id, int timeout_ms = 100);
     bool enableAll();
@@ -99,6 +102,7 @@ public:
 private:
     bool init_lejuclaw_can_customed();
     bool Connect(const canbus_sdk::DeviceConfig& config);
+    void emit_debug(const std::string& json) const;
 
     static void internalMessageCallback(canbus_sdk::CanMessageFrame* frame, const canbus_sdk::CallbackContext* context);
     static void internalTefEventCallback(canbus_sdk::CanMessageFrame* frame, const canbus_sdk::CallbackContext* context);
@@ -300,6 +304,7 @@ private:
     // 设备ID -> CAN总线名称 映射（用于反注册等操作）
     std::unordered_map<MotorId, std::string> device_canbus_map_;
     std::unordered_map<MotorId, MotorCtrlData> motor_ctrl_datas_;
+    DebugCallback debug_callback_;
 
     // 控制线程
     std::atomic<bool> thread_running{false};

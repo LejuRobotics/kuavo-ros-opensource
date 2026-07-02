@@ -1,0 +1,23 @@
+# Service to control which laser scan topics should publish data
+# Allows enabling/disabling individual scan topics
+
+# Request
+string[] topic_names              # List of laser scan topic names to control
+bool[] enable_publishing          # Enable/disable publishing for each topic
+                                  # true = enable publishing, false = disable publishing
+                                  # Arrays must have same length
+
+# Control mode
+uint8 MODE_SET = 0                # Set exact state for specified topics
+uint8 MODE_ENABLE_ALL = 1         # Enable all scan topics (ignores topic_names)
+uint8 MODE_DISABLE_ALL = 2        # Disable all scan topics (ignores topic_names)
+uint8 control_mode
+
+---
+
+# Response
+bool success                      # Whether control operation was successful
+string message                    # Status message
+string[] updated_topics           # List of topics that were successfully updated
+bool[] current_status             # Current publishing status for updated topics
+uint32 error_code                 # Error code (0 if success)

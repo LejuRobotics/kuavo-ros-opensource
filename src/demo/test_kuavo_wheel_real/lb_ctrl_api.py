@@ -601,7 +601,29 @@ def set_offline_trajectory_enable(enable: bool) -> bool:
         rospy.logerr(f"Unexpected error: {e}")
         return False
 
-def check_target_pose_reachable(is_left: bool, is_local: bool, is_whole_body: bool, 
+def set_wheel_control_enable(enable: bool) -> bool:
+    """启用或禁用轮臂机器人控制。仅轮式模式可用，双足模式无此 service。
+    True=正常受控，False=原地不动（fail-safe）
+    """
+    try:
+        rospy.wait_for_service('/enable_control', timeout=5.0)
+        client = rospy.ServiceProxy('/enable_control', SetBool)
+        resp = client(enable)
+        if resp.success:
+            status = "enabled" if enable else "disabled"
+            rospy.loginfo(f"Enable control {status}: {resp.message}")
+            return True
+        else:
+            rospy.logwarn(f"Failed: {resp.message}")
+            return False
+    except rospy.ServiceException as e:
+        rospy.logerr(f"Service call failed: {e}")
+        return False
+    except Exception as e:
+        rospy.logerr(f"Unexpected error: {e}")
+        return False
+
+def check_target_pose_reachable(is_left: bool, is_local: bool, is_whole_body: bool,
                                  pose_desired: list, total_time_desired: float = 1.0,
                                  max_attempts: int = 5, linear_error_max: float = 0.005,
                                  angular_error_max: float = 0.05) -> tuple:

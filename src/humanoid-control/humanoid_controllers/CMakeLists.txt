@@ -267,6 +267,7 @@ add_library(${PROJECT_NAME}
         src/ControlDataManager.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
+        src/util/TopicMonitor.cpp
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp
         src/rl/FallStandController.cpp

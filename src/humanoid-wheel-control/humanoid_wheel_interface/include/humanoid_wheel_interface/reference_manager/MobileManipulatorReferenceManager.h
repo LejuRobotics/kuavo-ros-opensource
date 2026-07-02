@@ -178,7 +178,18 @@ public:
 protected:
   virtual void modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule) override;
-  
+
+  // enable 控制辅助函数：disable 瞬间冻结所有存储和规划器到快照状态
+  void overwriteCommandStorageWithFrozenState();
+  void resetAllRuckigToFrozenState(scalar_t initTime);
+  void setFlatTargetTrajectoriesFromFrozenState(scalar_t initTime, scalar_t finalTime);
+
+  // 通用 helper：将 pose 型 Ruckig 规划器重置到指定状态（current=target=state，vel/acc=0）
+  template<typename PlannerPtr>
+  void resetPoseRuckigToState(PlannerPtr& planner, scalar_t initTime, const vector_t& state,
+                              scalar_t& plannerInitialTime,
+                              vector_t& prevPose, vector_t& prevVel, vector_t& prevAcc);
+
   // ruckig 轨迹生成相关
   // cmdPose
   void calcRuckigTrajWithCmdPose(double initTime, const vector_t &targetBasePose, double desiredTime = 0.0);
@@ -439,6 +450,17 @@ private:
   // 速度下发开关状态
   std::atomic<bool> use_vel_control_{true};
   ros::Subscriber vel_control_state_sub_;
+
+  // enable 状态（fail-safe：默认 false，未收到信号时不可控）
+  std::atomic<bool> enable_control_{false};
+  std::atomic<bool> prev_enable_control_{false};
+  vector_t frozen_state_;
+  bool frozen_state_valid_{false};
+  vector_t frozen_torso_pose6D_;        // frozen_state_ 对应的躯干位姿缓存
+  vector_t frozen_ee_state_;            // frozen_state_ 对应的双臂末端位姿缓存
+  ros::Subscriber enable_control_state_sub_;
+  bool isEnableControl() const { return enable_control_.load(std::memory_order_acquire); }
+  bool isPrevEnableControl() const { return prev_enable_control_.load(std::memory_order_acquire); }
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 

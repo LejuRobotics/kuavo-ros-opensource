@@ -1,0 +1,34 @@
+version: 1
+
+variants:
+  # s601 waist parallel core (pitch/roll driven by left/right bar joints)
+  7gen:
+    # geometry (meters), consistent with biped_s601_torso.urdf
+    bar_pivot_left: [0.0, 0.026, 0.11123]
+    bar_pivot_right: [0.0, -0.026, 0.11123]
+    # Ball-joint center between bar and tendon (URDF/MJCF body pos under waist_*_bar)
+    tendon_joint_in_bar: [-0.04884, 0.0, -0.017852]
+
+    pitch_origin_in_yaw: [0.03677, 0.0, 0.148]
+    roll_origin_in_pitch: [0.0, 0.0, -0.023]
+
+    # ball centers in waist_roll local frame (given)
+    ball_center_left_in_roll: [-0.091, 0.026, 0.0204]
+    ball_center_right_in_roll: [-0.091, -0.026, 0.0204]
+
+    # Derived from MuJoCo connect eq_data pt2 norm in waist_*_bar_tendon local frame
+    rod_length_m: 0.05230048
+
+    ik:
+      default_tolerance: 1.0e-8
+      max_iterations: 30
+
+    # 串联关节（deg）：pitch -15..+30，roll ±15
+    joint_limits:
+      pitch: [-0.261666667, 0.523333333]
+      roll: [-0.261666667, 0.261666667]
+    # 电机 bar（rad）：pitch±15°/30° 且 roll=0 时 j2m 包络（约 -28.58°..52.29°）
+    motor_limits:
+      l_bar: [-0.499052, 0.912707]
+      r_bar: [-0.499052, 0.912707]
+

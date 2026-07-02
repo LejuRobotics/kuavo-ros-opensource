@@ -11,6 +11,7 @@ from kuavo_humanoid_sdk.kuavo.robot_info import KuavoRobotInfo
 from kuavo_humanoid_sdk.kuavo.robot_arm import KuavoRobotArm 
 from kuavo_humanoid_sdk.kuavo.robot_head import KuavoRobotHead
 from kuavo_humanoid_sdk.kuavo.robot_waist import KuavoRobotWaist
+from kuavo_humanoid_sdk.kuavo.robot_wheel_control import KuavoRobotWheelControl
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
 from kuavo_humanoid_sdk.common.launch_robot_tool import LaunchRobotTool
 
@@ -180,7 +181,9 @@ class KuavoRobot(RobotBase):
         self._robot_arm  = KuavoRobotArm()
         self._robot_head = KuavoRobotHead()
         self._robot_waist = KuavoRobotWaist()
+        self._robot_wheel_control = KuavoRobotWheelControl()
         self._kuavo_core = KuavoRobotCore()
+        self._kuavo_core.initialize()
     def stance(self)->bool:
         """Put the robot into 'stance' mode.
         
@@ -306,7 +309,39 @@ class KuavoRobot(RobotBase):
             This command changes the robot state to 'command_pose_world'.
         """
         return self._kuavo_core.control_command_pose_world(target_pose_x, target_pose_y, target_pose_z, target_pose_yaw)
-    
+
+    def control_command_pose_world_stamped(self, pos_world) -> bool:
+        """Control robot pose in odom (world) frame using a TwistStamped message.
+
+        Args:
+            pos_world (dict): TwistStamped message dict or ROS TwistStamped object.
+                Expected format (dict): {"twist": {"linear": {"x", "y", "z"}, "angular": {"x", "y", "z"}}}
+                or ROS TwistStamped object with twist.linear.x/y/z and twist.angular.z.
+
+        Returns:
+            bool: True if the command was sent successfully, False otherwise.
+
+        Raises:
+            RuntimeError: If the robot is not in stance state when trying to control pose.
+
+        Note:
+            This command changes the robot state to 'command_pose_world'.
+        """
+        # Support both dict and ROS TwistStamped
+        try:
+            twist = pos_world.get("twist", pos_world) if isinstance(pos_world, dict) else pos_world.twist
+            linear = twist.get("linear", {}) if isinstance(twist, dict) else twist.linear
+            angular = twist.get("angular", {}) if isinstance(twist, dict) else twist.angular
+
+            x = linear.get("x", 0.0) if isinstance(linear, dict) else linear.x
+            y = linear.get("y", 0.0) if isinstance(linear, dict) else linear.y
+            z = linear.get("z", 0.0) if isinstance(linear, dict) else linear.z
+            yaw = angular.get("z", 0.0) if isinstance(angular, dict) else angular.z
+        except Exception:
+            raise ValueError("pos_world must be a dict or ROS TwistStamped with twist.linear and twist.angular")
+
+        return self._kuavo_core.control_command_pose_world(x, y, z, yaw)
+
     def control_head(self, yaw: float, pitch: float)->bool:
         """Control the head of the robot.
         
@@ -341,7 +376,24 @@ class KuavoRobot(RobotBase):
             bool: True if the waist is controlled successfully, False otherwise.
         """
         return self._robot_waist.control_waist(yaw=yaw)
-    
+
+    def control_waist_pos(self, joint_positions: list) -> bool:
+        """Control the waist of the robot (list interface, compatible with ROS SDK).
+
+        Args:
+            joint_positions (list): A list of joint angles in **degrees**.
+                                    Only the first element is used as yaw.
+
+        Returns:
+            bool: True if the waist is controlled successfully, False otherwise.
+        """
+        return self._robot_waist.control_waist_pos(joint_positions=joint_positions)
+
+    @property
+    def wheel_control(self) -> "KuavoRobotWheelControl":
+        """轮臂机器人控制接口，用于手臂模式切换等。"""
+        return self._robot_wheel_control
+
     """ Robot Arm Control """
     def arm_reset(self)->bool:
         """Reset the robot arm.
@@ -498,6 +550,45 @@ class KuavoRobot(RobotBase):
         """
         return self._robot_arm.arm_fk(q)
 
+    def arm_ik_free(self,
+                    left_pose: KuavoPose,
+                    right_pose: KuavoPose,
+                    left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None,
+                    params: KuavoIKParams = None) -> list:
+        """Free-space inverse kinematics for the robot arm.
+
+        Args:
+            left_pose (KuavoPose): Pose of the robot left arm, xyz and quat.
+            right_pose (KuavoPose): Pose of the robot right arm, xyz and quat.
+            left_elbow_pos_xyz (list): Position of the robot left elbow. If [0.0, 0.0, 0.0], will be ignored.
+            right_elbow_pos_xyz (list): Position of the robot right elbow. If [0.0, 0.0, 0.0], will be ignored.
+            arm_q0 (list, optional): Initial joint positions in radians. If None, will be ignored.
+            params (KuavoIKParams, optional): Parameters for the inverse kinematics. If None, will be ignored.
+
+        Returns:
+            list: List of joint positions in radians, or None if inverse kinematics failed.
+
+        Warning:
+            This function requires initializing the SDK with the :attr:`KuavoSDK.Options.WithIK`.
+        """
+        return self._robot_arm.arm_ik_free(left_pose, right_pose, left_elbow_pos_xyz, right_elbow_pos_xyz, arm_q0, params)
+
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        """Control robot end-effector force/torque.
+
+        Args:
+            left_wrench (list): Left arm 6-DOF wrench command [Fx, Fy, Fz, Tx, Ty, Tz].
+                Fx,Fy,Fz in Newtons (N), Tx,Ty,Tz in Newton-meters (N·m).
+            right_wrench (list): Right arm 6-DOF wrench command [Fx, Fy, Fz, Tx, Ty, Tz].
+                Fx,Fy,Fz in Newtons (N), Tx,Ty,Tz in Newton-meters (N·m).
+
+        Returns:
+            bool: True if control was successful, False otherwise.
+        """
+        return self._robot_arm.control_hand_wrench(left_wrench, right_wrench)
+
     def control_robot_end_effector_pose(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:
         """Control the end effector pose of the robot arm.
         
@@ -541,6 +632,63 @@ class KuavoRobot(RobotBase):
         """Set the arm collision mode.
         """
         self._robot_arm.set_arm_collision_mode(enable)
+
+    """ Wheel-Arm """
+    def control_torso_pose(self, x: float, y: float, z: float,
+                           roll: float, pitch: float, yaw: float) -> bool:
+        """直接控制轮臂机器人躯干的位姿
+
+        Args:
+            x, y, z (float): 目标位置（米）
+            roll, pitch, yaw (float): 目标欧拉角（弧度）
+
+        Returns:
+            bool: 控制命令是否发送成功
+        """
+        return self._kuavo_core.control_torso_pose(x, y, z, roll, pitch, yaw)
+
+    def control_wheel_lower_joint(self, joint_traj: list) -> bool:
+        """Control wheel-robot lower joint.
+
+        Args:
+            joint_traj (list): Target joint positions (degrees).
+
+        Returns:
+            bool: True if command sent successfully, False otherwise.
+        """
+        return self._kuavo_core.control_wheel_lower_joint(joint_traj)
+
+    """ Motor Parameter """
+    def change_motor_param(self, motor_param: list) -> Tuple[bool, str]:
+        """Change motor parameters.
+
+        Args:
+            motor_param (list): List of KuavoMotorParam objects.
+
+        Returns:
+            Tuple[bool, str]: (success, message).
+        """
+        return self._kuavo_core.change_motor_param(motor_param)
+
+    def get_motor_param(self) -> Tuple[bool, list]:
+        """Get motor parameters.
+
+        Returns:
+            Tuple[bool, list]: (success, list of KuavoMotorParam objects).
+        """
+        return self._kuavo_core.get_motor_param()
+
+    """ Base Pitch Limit """
+    def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
+        """Enable or disable base pitch limit protection.
+
+        Args:
+            enable (bool): True to enable, False to disable.
+
+        Returns:
+            Tuple[bool, str]: (success, message).
+        """
+        return self._kuavo_core.enable_base_pitch_limit(enable)
 
 if __name__ == "__main__":
     robot = KuavoRobot()

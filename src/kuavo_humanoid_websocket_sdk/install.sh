@@ -14,7 +14,7 @@ VERSION=$(git -C "$PROJECT_DIR" describe --tags --always 2>/dev/null)
 
 # Define the ROS message packages to be copied
 # These packages contain message definitions needed by the SDK
-MSG_PACKAGES="kuavo_msgs ocs2_msgs motion_capture_ik"
+MSG_PACKAGES="kuavo_msgs ocs2_msgs"
 
 copy_ros_msg() {
     local src_dir=$1

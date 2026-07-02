@@ -389,6 +389,7 @@ from std_msgs.msg import String
 # 导航功能需要的消息类型
 from sensor_msgs.msg import PointCloud2
 import re
+import unicodedata
 
 # Replace multiprocessing values with simple variables
 plan_arm_state_progress = 0
@@ -804,9 +805,13 @@ else:
 
 MUSIC_FILE_FOLDER = os.path.join(home_path, '.config', 'lejuconfig', 'music')
 ACTION_FILE_FOLDER = os.path.join(home_path, '.config', 'lejuconfig', 'action_files')
+CREATOR_DANCE_UPLOAD_DIR = os.path.join(home_path, '.config', 'lejuconfig', 'creator_dance_upload')
+# 中文展示名(= zip 去后缀名)-> 英文控制器名 的映射, 供 joy 运行时查表。
+DANCE_NAME_MAP_PATH = os.path.join(CREATOR_DANCE_UPLOAD_DIR, 'dance_name_map.json')
 try:
     Path(MUSIC_FILE_FOLDER).mkdir(parents=True, exist_ok=True)
     Path(ACTION_FILE_FOLDER).mkdir(parents=True, exist_ok=True)
+    Path(CREATOR_DANCE_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 except Exception as e:
     print(f"创建目录时出错: {e}")
 
@@ -1587,6 +1592,7 @@ async def get_robot_info_handler(
             "h12_config_path": H12_CONFIG_PATH,
             "repo_path": REPO_PATH,
             "vr_recording_path": vr_recording_path,
+            "creator_dance_upload_path": CREATOR_DANCE_UPLOAD_DIR,
             "workspace_setup_path": os.path.join(KUAVO_ROS_CONTROL_WS_PATH, "devel", "setup.bash")
         }
     )
@@ -5364,3 +5370,138 @@ async def cancel_vr_record_handler(websocket: websockets.WebSocketServerProtocol
 
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)
+
+
+# ==================== Creator 舞蹈 zip 导入 ====================
+# 桌面端把 zip + 可选 wav scp 到 CREATOR_DANCE_UPLOAD_DIR,再调
+# `import_creator_dance` cmd 触发 tools/import_creator_dance/import_creator_dance.py。
+# 业务逻辑全在脚本里,本节只是 ws 适配层。
+
+IMPORT_CREATOR_DANCE_SCRIPT = os.path.join(
+    REPO_PATH, "tools", "import_creator_dance", "import_creator_dance.py"
+)
+
+
+def _normalize_stem(stem):
+    """与导入脚本 / joy 保持一致的展示名归一化(NFC + strip)。"""
+    return unicodedata.normalize("NFC", stem or "").strip()
+
+
+def _load_dance_name_map():
+    """读 dance_name_map.json, 缺失/损坏一律当空表(不阻断导入)。"""
+    try:
+        with open(DANCE_NAME_MAP_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"[creator_dance] 读取映射表失败, 当空表处理: {e}")
+        return {}
+
+
+def _update_dance_name_map(stem, controller, zip_filename):
+    """把 展示名 -> 控制器名 写入映射表(读-改-原子写)。
+
+    返回 (ok, error)。hash 碰撞守卫: 若该 controller 已被另一个不同展示名占用,
+    拒绝写入, 避免一支舞悄悄覆盖另一支(概率极低, 纯防御)。
+    """
+    key = _normalize_stem(stem)
+    mapping = _load_dance_name_map()
+    for other_key, entry in mapping.items():
+        if other_key == key:
+            continue
+        if isinstance(entry, dict) and entry.get("controller") == controller:
+            return False, (
+                f"命名冲突: 控制器名 {controller} 已被 '{other_key}' 占用, "
+                f"请改 zip 名后重试"
+            )
+    mapping[key] = {"controller": controller, "zip_filename": zip_filename}
+    try:
+        Path(DANCE_NAME_MAP_PATH).parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = f"{DANCE_NAME_MAP_PATH}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(mapping, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, DANCE_NAME_MAP_PATH)
+        return True, None
+    except Exception as e:
+        return False, f"写映射表失败: {e}"
+
+
+def _run_import_script_sync(argv):
+    proc = subprocess.run(
+        ["python3", IMPORT_CREATOR_DANCE_SCRIPT] + argv,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _parse_script_json(stdout):
+    lines = (stdout or "").strip().splitlines()
+    last = lines[-1] if lines else ""
+    try:
+        return json.loads(last)
+    except Exception:
+        return {"code": 2, "error": stdout or "no output", "error_kind": "E_GENERIC"}
+
+
+async def import_creator_dance_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """注册一支 Creator 舞蹈到 rl_controllers.yaml 并落盘控制器文件。
+
+    入参(req.data):
+      - zip_filename: 必填; 已 scp 到 CREATOR_DANCE_UPLOAD_DIR 的 zip 文件名(不带路径),
+                      去掉 .zip 后的部分即为 dance_name / 控制器名 / info|onnx|csv 文件名前缀
+      - force: 可选 bool, 默认 false; 同名 controller / 文件已存在时是否覆盖
+
+    本接口不动 customize_config.json, 也不动 music wav, 由桌面端自行管理。
+    """
+    payload = Payload(cmd="import_creator_dance", data={"code": 0})
+    try:
+        req = data.get("data", data) if isinstance(data, dict) else {}
+        zip_filename = (req.get("zip_filename") or "").strip()
+        force = bool(req.get("force"))
+
+        if not zip_filename:
+            payload.data.update({"code": 2, "error": "zip_filename 不能为空", "error_kind": "E_GENERIC"})
+        else:
+            zip_path = os.path.join(CREATOR_DANCE_UPLOAD_DIR, zip_filename)
+            if not os.path.isfile(zip_path):
+                payload.data.update({
+                    "code": 2,
+                    "error": f"zip 不在暂存目录: {zip_path}",
+                    "error_kind": "E_BAD_ZIP",
+                })
+            else:
+                argv = [zip_path]
+                if force:
+                    argv.append("--force")
+                argv.append("--json")
+
+                loop = asyncio.get_event_loop()
+                rc, out, err = await loop.run_in_executor(None, _run_import_script_sync, argv)
+                script_result = _parse_script_json(out)
+                payload.data.update(script_result)
+                if rc == 0 and script_result.get("code") == 0:
+                    # 脚本已落盘控制器文件 + yaml, 这里登记 展示名 -> 控制器名 映射,
+                    # 供 joy 运行时把 json 里的中文 dance_name 换成英文控制器名。
+                    stem = script_result.get("dance_name") or os.path.splitext(zip_filename)[0]
+                    controller = script_result.get("controller", "")
+                    ok, map_err = _update_dance_name_map(stem, controller, zip_filename)
+                    if not ok:
+                        payload.data.update({
+                            "code": 2,
+                            "error": map_err,
+                            "error_kind": "E_GENERIC",
+                        })
+                    # 不删除暂存 zip: 保留原包便于前端复用 / 排查 / 重导。
+                elif err.strip():
+                    payload.data.setdefault("stderr", err)
+    except Exception as e:
+        payload.data["code"] = 2
+        payload.data["error"] = str(e)
+        payload.data["error_kind"] = "E_GENERIC"
+    response_queue.put(Response(payload=payload, target=websocket))

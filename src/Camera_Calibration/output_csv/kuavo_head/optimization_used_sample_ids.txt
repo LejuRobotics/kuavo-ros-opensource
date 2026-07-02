@@ -1,0 +1,10 @@
+# CSV sample_id values actually used by optimize_from_csv (order matches internal batch after outlier rejection)
+0
+1
+2
+3
+4
+5
+6
+7
+8

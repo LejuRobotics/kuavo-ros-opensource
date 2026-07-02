@@ -60,6 +60,9 @@ namespace ocs2
       Task formulateTorsoZeroAccTask();
       Task formulateBaseAccTask();
 
+      void processArmJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error);
+      void processLowJointErrorsWithSafe(vector_t& pos_error, vector_t& vel_error);
+
       Eigen::Vector3d bodyToWorldVelocity(double v_body, double vyaw_body, double yaw);
 
       void updateMeasured(const vector_t &stateMeasured, const vector_t &inputMeasured);
@@ -92,6 +95,9 @@ namespace ocs2
       // 末端执行器雅可比矩阵（6维，世界坐标系）
       std::vector<matrix_t> j_ee_;
       std::vector<matrix_t> dj_ee_;
+
+      // 是否是真实环境
+      bool is_real_{false};
     };
 
   } // namespace mobile_manipulator

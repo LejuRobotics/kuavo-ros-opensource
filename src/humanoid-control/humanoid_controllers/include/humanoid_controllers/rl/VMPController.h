@@ -2,7 +2,7 @@
 
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/vmp/vmp_types.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 
 #include "kuavo_msgs/GetStringList.h"
 #include "kuavo_msgs/SetString.h"
@@ -251,7 +251,7 @@ namespace humanoid_controller
     //==========================================================================
     bool is_real_{false};                           ///< 是否为真实机器人
     bool withArm_{true};                            ///< 是否包含手臂控制
-    AnkleSolver ankleSolver_;                       ///< 脚踝解算器
+    kuavo_solver::AnkleSolver ankleSolver_;         ///< 脚踝解算器
 
     //==========================================================================
     // 观测相关参数

@@ -18,8 +18,8 @@
     <arg name="urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf"/>
     <arg name="taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
     <arg name="libFolder"   value="/var/ocs2/kuavo_s$(arg robot_version)" />
-    <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
-    <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
+    <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info"/>
+    <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info"/>
 
     <!-- MPC相关参数 -->
     <arg name="use_external_mpc" default="true"/>
@@ -80,8 +80,8 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
 
     <!-- 日志管理参数 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- 启动信息收集脚本 -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -128,6 +128,8 @@
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
         <param name="joystick_type" value="h12"/>
+        <!-- 仿真专用：启动直接进入stance状态，跳过初始上站流程，不影响实机 -->
+        <param unless="$(arg real)" name="/joy_node/last_state" value="stance" />
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>

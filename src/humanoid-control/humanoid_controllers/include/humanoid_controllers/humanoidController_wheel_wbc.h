@@ -1,7 +1,9 @@
 #pragma once
 
 // C++ Standard Library
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -108,7 +110,8 @@ namespace humanoidController_wheel_wbc
     bool enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
                                       kuavo_msgs::changeLbQuickModeSrv::Response &res);
     bool enableVelControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
-    bool changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req, 
+    bool enableControlCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);  // /enable_control service 回调
+    bool changeLbObsUpdateModeCallback(kuavo_msgs::changeLbMpcObsUpdateModeSrv::Request &req,
                                       kuavo_msgs::changeLbMpcObsUpdateModeSrv::Response &res);
     // VR 增量遥操作相关服务回调
     bool enableVrArmAccelTaskCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
@@ -117,10 +120,6 @@ namespace humanoidController_wheel_wbc
 
     // ======= 硬件相关处理函数 =========
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);    // 替换EC_MASTER电机的kp/kd（从running_settings）
-
-    // ======= 机器人初始动作相关函数 ========
-    void performSimpleActions(const ros::Time &time);
-    void initialPreTargetActions(const vector_t& startActions, const vector_t& preTargetActions, double desiredTime);
 
     // ======= 更新期望位姿的误差分析 ========
     void computeErrorMultiEeFromTargetAndData(const vector_t& targetState, 
@@ -156,14 +155,12 @@ namespace humanoidController_wheel_wbc
         }
         return filtered_data;
     }
-    // ========== 机器人启动初始动作 ==========
-    vector_t preTargetActions_;
-    vector_t startActions_;
-    double robotPreActionDesiredTime_ = 0.0;
 
     // ========== 坐标变换相关 ==========
     Eigen::Vector3d cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw);
     Eigen::Vector3d cmdVelBodyToWorld(const Eigen::Vector3d& cmd_vel_body, double yaw);
+    // 发布 /move_base/base_cmd_vel 前的速度上下界限幅
+    void clampBaseCmdVel(geometry_msgs::Twist& cmd) const;
 
     // ========== 期望力控制相关函数 ==========
     vector_t getDesiredContactForce();
@@ -182,6 +179,7 @@ namespace humanoidController_wheel_wbc
     // 发布者
     ros::Publisher cmdVelPub_;
     ros::Publisher velControlStatePub_;
+    ros::Publisher enableControlStatePub_;  // latched topic，同步 CDM 和 RM 的 enable 状态
     ros::Publisher jointCmdPub_;
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
@@ -218,6 +216,9 @@ namespace humanoidController_wheel_wbc
     std::shared_ptr<mobile_manipulator::WeightedWbc> wheel_wbc_;  // 基础WBC（WeightedWbc）
     std::shared_ptr<mobile_manipulator::ContactForceWbc> contact_force_wbc_;  // 接触力控制WBC
     std::shared_ptr<mobile_manipulator::VelocityLimiter> velLimiter_;  // 梯形插补加减速
+    Eigen::Vector3d base_cmd_vel_max_{1.2, 1.2, 1.2};   // vx, vy, wz 上限 [m/s, m/s, rad/s]
+    Eigen::Vector3d base_cmd_vel_min_{-1.2, -1.2, -1.2};  // vx, vy, wz 下限
+    bool base_cmd_vel_limit_enable_{false};  // 是否启用 base_cmd_vel 速度限幅
 
     // ========== 期望力管理器 ==========
     std::unique_ptr<DesiredForceManager> desired_force_manager_;
@@ -228,6 +229,16 @@ namespace humanoidController_wheel_wbc
     ros::ServiceClient mpc_control_client_;  // MPC模式切换服务客户端
     ros::ServiceClient reset_cmd_vel_ruckig_client_;  // 重置cmdVel Ruckig规划器服务客户端
     std_srvs::SetBool reset_cmd_vel_ruckig_srv_;  // 重置cmdVel Ruckig规划器服务请求
+
+    // ========== enable control ==========
+    std::atomic<bool> enable_control_{true};  // 默认 true：启动时可控
+    bool prev_enable_control_{true};  // 用于 update 中检测下降沿
+    ros::ServiceServer enableControlServiceServer_;
+
+    // disable 瞬间记录 WBC 维度的状态，disable 期间直接让 WBC 跟踪该冻结姿态
+    vector_t frozen_state_;
+    std::atomic<bool> frozen_state_valid_{false};
+    std::mutex frozen_state_mutex_;
 
     // ========== 平滑过渡相关 ==========
     bool is_transitioning_{false};  // 是否正在过渡

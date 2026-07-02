@@ -1,0 +1,11 @@
+# Service to query the chassis lifetime odometer mileage.
+# Returns the distance traveled since the robot was first deployed.
+
+# Request (empty)
+
+---
+
+# Response
+float64 total_distance_m           # Lifetime odometer distance in meters
+float64 total_distance_km          # Same value presented in kilometers for convenience
+time measured_at                   # ROS time stamp when the reading was captured

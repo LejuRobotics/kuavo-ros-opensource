@@ -84,6 +84,9 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   if (!model.initParam(urdfName)) {
     ROS_ERROR("URDF model load was NOT successful");
   }
+  // 缓存 URDF 模型,后续在向 robot_state_publisher 写入夹爪/灵巧手关节前用作存在性守卫,
+  // 避免在 URDF 不含相应关节的机型(如 62/200062)上刷出 "not found in URDF" 警告。
+  urdfModel_ = model;
   KDL::Tree tree;
   if (!kdl_parser::treeFromUrdfModel(model, tree)) {
     ROS_ERROR("Failed to extract kdl tree from xml robot description");
@@ -95,6 +98,20 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   // 初始化头部关节
   head_joint_names_ = {"zhead_1_joint", "zhead_2_joint"};
   head_joint_positions_ = {0.0, 0.0};
+
+  // 夹爪订阅和发布
+  clawCmdSubscriber_ = nodeHandle.subscribe<kuavo_msgs::lejuClawCommand>(
+      "/leju_claw_command", 1, &MobileManipulatorDummyVisualization::lejuClawCmdCallback, this);
+  lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
+
+  // 灵巧手订阅
+  dexhand_joint_names_ = {"l_thumbCMC", "l_thumbMCP", "l_indexMCP", "l_indexPIP", "l_middleMCP",
+                           "l_middlePIP", "l_ringMCP", "l_ringPIP", "l_littleMCP", "l_littlePIP",
+                           "r_thumbCMC", "r_thumbMCP", "r_indexMCP", "r_indexPIP", "r_middleMCP",
+                           "r_middlePIP", "r_ringMCP", "r_ringPIP", "r_littleMCP", "r_littlePIP"};
+  dexhand_joint_positions_ = std::vector<double>(dexhand_joint_names_.size(), 0.0);
+  dexhandStateSubscriber_ = nodeHandle.subscribe<sensor_msgs::JointState>(
+      "/dexhand/state", 10, &MobileManipulatorDummyVisualization::dexhandStateCallback, this);
 
   stateOptimizedPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/mobile_manipulator/optimizedStateTrajectory", 1);
   stateOptimizedPosePublisher_ = nodeHandle.advertise<geometry_msgs::PoseArray>("/mobile_manipulator/optimizedPoseTrajectory", 1);
@@ -201,7 +218,48 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
       jointPositions[head_joint_names_[i]] = head_joint_positions_[i];
     }
   }
-  
+
+  // 添加夹爪关节 (200053/200062)
+  // 仅向 jointPositions 写入 URDF 中实际存在的关节,避免 robot_state_publisher 输出
+  // "Joint state with name: ... was received but not found in URDF" 警告。
+  if (updateClawJointPositions_) {
+    static const char* kLeftClaw[] = {"l_f_bar_1_joint", "l_b_bar_1_joint", "l_f_bar_3_joint", "l_b_bar_3_joint"};
+    static const double kLeftFactor[] = {+1.0, -1.0, +1.0, -1.0};
+    static const char* kRightClaw[] = {"r_f_bar_1_joint", "r_b_bar_1_joint", "r_f_bar_3_joint", "r_b_bar_3_joint"};
+    static const double kRightFactor[] = {+1.0, -1.0, +1.0, -1.0};
+    for (int i = 0; i < 4; i++) {
+      if (urdfModel_.getJoint(kLeftClaw[i])) {
+        jointPositions[kLeftClaw[i]] = kLeftFactor[i] * claw_joint_positions_[0];
+      }
+      if (urdfModel_.getJoint(kRightClaw[i])) {
+        jointPositions[kRightClaw[i]] = kRightFactor[i] * claw_joint_positions_[1];
+      }
+    }
+
+    // publish /leju_claw_state
+    kuavo_msgs::lejuClawState claw_state_msg;
+    claw_state_msg.header.stamp = timeStamp;
+    claw_state_msg.header.frame_id = "leju_claw";
+    claw_state_msg.data.name = {"left_claw", "right_claw"};
+    claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
+    claw_state_msg.data.velocity.resize(2, 0.0);
+    claw_state_msg.data.effort.resize(2, 0.0);
+    claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
+    lejuClawStatePub_.publish(claw_state_msg);
+  }
+
+  // 添加灵巧手关节 (300062)
+  // 仅向 jointPositions 写入 URDF 中实际存在的关节,避免在 62/200062 等无灵巧手机型上
+  // 收到 /dexhand/state 后向 robot_state_publisher 注入不存在的关节名而触发警告。
+  if (updateDexhandJointPositions_) {
+    for (size_t i = 0; i < dexhand_joint_names_.size(); i++) {
+      const auto& name = dexhand_joint_names_[i];
+      if (urdfModel_.getJoint(name)) {
+        jointPositions[name] = dexhand_joint_positions_[i];
+      }
+    }
+  }
+
   robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
 }
 
@@ -310,6 +368,80 @@ void MobileManipulatorDummyVisualization::updateHeadJointPositions(const Eigen::
     }
     updateHeadJointPositions_ = true;
   }
+}
+
+void MobileManipulatorDummyVisualization::updateClawJointPositions(const Eigen::VectorXd& positions) {
+  if (positions.size() != 2) return;
+  claw_joint_positions_[0] = positions[0];
+  claw_joint_positions_[1] = positions[1];
+  updateClawJointPositions_ = true;
+}
+
+void MobileManipulatorDummyVisualization::lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg) {
+  if (!msg) return;
+  if (msg->data.position.size() < 2) return;
+
+  auto clamp01 = [](double v){ return std::max(0.0, std::min(100.0, v)); };
+  const double l_pct = clamp01(msg->data.position[0]);
+  const double r_pct = clamp01(msg->data.position[1]);
+
+  static const double MIN_OPEN = -0.6981317008; // -40°
+  static const double MAX_CLOSED = 0.0;         // 0°
+
+  auto pct_to_angle = [&](double pct){
+    const double s = pct / 100.0;
+    return MIN_OPEN + (MAX_CLOSED - MIN_OPEN) * s;
+  };
+
+  Eigen::VectorXd v(2);
+  v[0] = pct_to_angle(l_pct);
+  v[1] = pct_to_angle(r_pct);
+  updateClawJointPositions(v);
+}
+
+void MobileManipulatorDummyVisualization::dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg) {
+  if (!msg || msg->position.size() != 12) return;
+  Eigen::VectorXd positions(12);
+  for (int i = 0; i < 12; i++) {
+    positions(i) = msg->position[i];
+  }
+  updateHandJointPositions(positions);
+}
+
+void MobileManipulatorDummyVisualization::updateHandJointPositions(const Eigen::VectorXd& positions) {
+  if (positions.size() != 12) return;
+
+  auto Curl2Joints = [](double curl, double lower, double upper) {
+    curl = std::max(0.0, std::min(100.0, curl));
+    double norm = curl / 100.0;
+    return lower + norm * (upper - lower);
+  };
+
+  // left thumb
+  dexhand_joint_positions_[0] = Curl2Joints(positions[1], 0.23, 1.36);  // l_thumbCMC from l_thumb_aux
+  dexhand_joint_positions_[1] = Curl2Joints(positions[0], 0.16, 0.75);  // l_thumbMCP from l_thumb
+
+  // left non-thumb (index, middle, ring, pinky)
+  static const int left_joints[][2] = {{2,3}, {4,5}, {6,7}, {8,9}};
+  for (int i = 0; i < 4; i++) {
+    int j0 = left_joints[i][0], j1 = left_joints[i][1];
+    dexhand_joint_positions_[j0] = Curl2Joints(positions[i+2], -0.262, 0.698);
+    dexhand_joint_positions_[j1] = Curl2Joints(positions[i+2], -0.262, 0.698);
+  }
+
+  // right thumb
+  dexhand_joint_positions_[10] = Curl2Joints(positions[7], 0.23, 1.36);  // r_thumbCMC from r_thumb_aux
+  dexhand_joint_positions_[11] = Curl2Joints(positions[6], 0.16, 0.75);  // r_thumbMCP from r_thumb
+
+  // right non-thumb
+  static const int right_joints[][2] = {{12,13}, {14,15}, {16,17}, {18,19}};
+  for (int i = 0; i < 4; i++) {
+    int j0 = right_joints[i][0], j1 = right_joints[i][1];
+    dexhand_joint_positions_[j0] = Curl2Joints(positions[i+8], -0.262, 0.698);
+    dexhand_joint_positions_[j1] = Curl2Joints(positions[i+8], -0.262, 0.698);
+  }
+
+  updateDexhandJointPositions_ = true;
 }
 
 }  // namespace mobile_manipulator

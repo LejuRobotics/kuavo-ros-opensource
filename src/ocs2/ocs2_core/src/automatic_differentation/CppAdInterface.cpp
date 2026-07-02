@@ -30,8 +30,36 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ocs2_core/automatic_differentiation/CppAdInterface.h>
 
 #include <boost/filesystem.hpp>
+#include <dlfcn.h>
+
+#include <string>
 
 namespace ocs2 {
+
+namespace {
+
+bool canDlopenSharedLibrary(const std::string& libraryPath, std::string* errorMessage = nullptr) {
+  dlerror();
+  void* handle = dlopen(libraryPath.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (handle == nullptr) {
+    if (errorMessage != nullptr) {
+      const char* error = dlerror();
+      *errorMessage = error != nullptr ? error : "unknown dlopen error";
+    }
+    return false;
+  }
+
+  dlclose(handle);
+  return true;
+}
+
+bool isLikelyCorruptedSharedLibraryLoadError(const std::string& loadError) {
+  return loadError.find("file too short") != std::string::npos || loadError.find("invalid ELF header") != std::string::npos ||
+         loadError.find("cannot read file data") != std::string::npos || loadError.find("truncated") != std::string::npos;
+}
+
+}  // namespace
+
 
 /******************************************************************************************************/
 /******************************************************************************************************/
@@ -141,9 +169,22 @@ void CppAdInterface::loadModels(bool verbose) {
 /******************************************************************************************************/
 /******************************************************************************************************/
 void CppAdInterface::loadModelsIfAvailable(ApproximationOrder approximationOrder, bool verbose) {
-  if (isLibraryAvailable()) {
+  const std::string libraryPath = libraryName_ + CppAD::cg::system::SystemInfo<>::DYNAMIC_LIB_EXTENSION;
+  std::string loadError;
+
+  if (isLibraryAvailable() && canDlopenSharedLibrary(libraryPath, &loadError)) {
     loadModels(verbose);
   } else {
+    if (isLibraryAvailable() && !loadError.empty() && isLikelyCorruptedSharedLibraryLoadError(loadError)) {
+      boost::filesystem::remove(libraryPath);
+      if (verbose) {
+        std::cerr << "[CppAdInterface] Detected corrupted cached library, recompiling: " << libraryPath << " (" << loadError << ")"
+                  << std::endl;
+      }
+    } else if (isLibraryAvailable() && verbose && !loadError.empty()) {
+      std::cerr << "[CppAdInterface] Cached library failed to load, keeping cache and retrying: " << libraryPath << " (" << loadError
+                << ")" << std::endl;
+    }
     createModels(approximationOrder, verbose);
   }
 }

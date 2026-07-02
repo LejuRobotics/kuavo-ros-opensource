@@ -1,6 +1,18 @@
 import time
 import signal
+import roslibpy
 from kuavo_humanoid_sdk import KuavoSDK, KuavoRobot, KuavoRobotState
+from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
+
+
+def _is_wheel_arm_robot():
+    """通过 ROS param 判断是否为轮臂机器人 (robot_type==1)"""
+    try:
+        client = WebSocketKuavoSDK().client
+        return roslibpy.Param(client, 'robot_type').get() == 1
+    except Exception:
+        return False
+
 
 # Global flag for handling Ctrl+C
 running = True
@@ -11,7 +23,7 @@ def signal_handler(sig, frame):
     running = False
 
 def main():
-    import argparse 
+    import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', type=str, default='127.0.0.1', help='Websocket host address')
@@ -21,6 +33,10 @@ def main():
     if not KuavoSDK().Init(log_level='INFO', websocket_mode=True, websocket_host=args.host, websocket_port=args.port):# Init!
         print("Init KuavoSDK failed, exit!")
         exit(1)
+
+    if _is_wheel_arm_robot():
+        print("轮臂平台不支持 walk/trot/stance 双足步态，退出")
+        exit(0)
 
     # Set up Ctrl+C handler
     signal.signal(signal.SIGINT, signal_handler)

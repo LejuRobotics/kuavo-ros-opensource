@@ -107,6 +107,9 @@ namespace HighlyDynamic
     bool solve(const FramePoseVec &pose, const Eigen::VectorXd &q0, Eigen::VectorXd &q_sol, IKParams params = IKParams());
 
     std::pair<Eigen::Vector3d, Eigen::Quaterniond> FK(const Eigen::VectorXd& q, HandSide side);
+    
+    std::pair<Eigen::Vector3d, Eigen::Quaterniond> 
+        FKWithBaseAndEndFrame(const Eigen::VectorXd& q, HandSide side, const std::string& base_frame, const std::string& end_effector_frame = "");
 
   private:
     drake::solvers::Binding<drake::solvers::Constraint> AddCoMPositionConstraint(drake::multibody::InverseKinematics &ik, const Eigen::Vector3d &r_des);

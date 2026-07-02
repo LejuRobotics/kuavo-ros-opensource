@@ -73,20 +73,27 @@ namespace humanoid_controller
 
     int depth_size = 8 * 36 * 64;
     depth_.resize(depth_size);
+    for(int i=0; i<depth_size; ++i)
+    {
+      depth_[i] = 0.5;
+    }
     depthSub_ = nh_.subscribe<std_msgs::Float64MultiArray>("/camera/depth/depth_history_array", 10, &DepthWalkController::depthCallback, this);
 
-    // 初始化ankleSolver（从ROS参数获取，如果不存在则使用默认值）
-    int ankle_solver_type = 0; // 默认值
+    // 初始化 ankleSolver（从 ROS 参数获取类型 token；与 AmpWalk/FallStand/VMP 保持一致）
+    std::string ankle_solver_type = "4gen_pro"; // 默认值（token）
     if (!nh_.getParam("/ankle_solver_type", ankle_solver_type))
     {
-      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %d", name_.c_str(), ankle_solver_type);
+      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     else
     {
-      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %d", name_.c_str(), ankle_solver_type);
+      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     ankleSolver_.getconfig(ankle_solver_type);
-    ROS_INFO("[%s] AnkleSolver initialized with type: %d", name_.c_str(), ankle_solver_type);
+    ROS_INFO("[%s] AnkleSolver initialized with type: %s",
+             name_.c_str(), ankle_solver_type.c_str());
 
     // 初始化手臂控制（可选功能）
     // 获取URDF路径
@@ -110,6 +117,10 @@ namespace humanoid_controller
     
     initArmControl(urdf_path);
     initWaistControl();
+
+    current_depth_latent.resize(128);
+    current_depth_latent.setZero();
+    depth_latent_pub_ = nh_.advertise<std_msgs::Float64MultiArray>("depth_latent", 10);
 
     initialized_ = true;
 
@@ -531,8 +542,7 @@ namespace humanoid_controller
 
     if (std::abs(cmd.cmdVelLineX_) < 0.01 &&
         std::abs(cmd.cmdVelLineY_) < 0.01 &&
-        std::abs(cmd.cmdVelAngularZ_) < 0.01 &&
-        net_linvel.norm() < 0.2)
+        std::abs(cmd.cmdVelAngularZ_) < 0.01 )
     {
         gait_phase = 0;
     }
@@ -786,22 +796,59 @@ namespace humanoid_controller
       const auto output_tensor = infer_request_.get_output_tensor();
       const size_t output_buf_length = 27;
       const auto output_buf = output_tensor.data<float>();
+      const size_t output_element_count = output_tensor.get_size();
+
       const size_t expected_output_length =
           withArm_ ? jointNum_ + jointArmNum_ + waistNum_ : jointNum_ + waistNum_;
+      const size_t aux_output_length = 4;  // gait frequency + 3D linear velocity
+      if (output_element_count < output_buf_length + aux_output_length)
+      {
+        ROS_ERROR_THROTTLE(1.0,
+                           "[%s] Output size too small for depth walk auxiliary values: actual=%ld vs required=%ld",
+                           name_.c_str(), output_element_count, output_buf_length + aux_output_length);
+        action = Eigen::VectorXd::Zero(num_actions_);
+        return false;
+      }
+
       frePhase_(0) = output_buf[output_buf_length];
       gait_fre = std::tanh(output_buf[output_buf_length]/4.0)*0.2+1.0;
       for (int i = 0; i < 3; ++i) {
         net_linvel(i) = output_buf[output_buf_length+ i+1];
       }
 
-      // if (output_buf_length != expected_output_length)
-      // {
-      //   ROS_ERROR_THROTTLE(1.0,
-      //                      "[%s] Output size mismatch: actual=%ld vs expected=%ld (withArm_=%d)",
-      //                      name_.c_str(), output_buf_length, expected_output_length, withArm_);
-      //   action = Eigen::VectorXd::Zero(num_actions_);
-      //   return false;
-      // }
+      const size_t depth_latent_offset = output_buf_length +aux_output_length;
+      const size_t depth_latent_dim = static_cast<size_t>(current_depth_latent.size());
+      if (output_element_count >= depth_latent_offset + depth_latent_dim)
+      {
+        for (int i = 0; i < static_cast<int>(depth_latent_dim); ++i)
+        {
+          current_depth_latent(i) = output_buf[depth_latent_offset + i];
+        }
+
+        if (depth_latent_pub_)
+        {
+          std_msgs::Float64MultiArray depth_latent_msg;
+          depth_latent_msg.data.assign(current_depth_latent.data(),
+                                       current_depth_latent.data() + current_depth_latent.size());
+          depth_latent_pub_.publish(depth_latent_msg);
+        }
+      }
+      else
+      {
+        ROS_WARN_THROTTLE(1.0,
+                          "[%s] Output size too small for depth latent: actual=%ld vs required=%ld",
+                          name_.c_str(), output_element_count, depth_latent_offset + depth_latent_dim);
+      }
+
+      if (output_element_count < expected_output_length)
+      {
+        ROS_ERROR_THROTTLE(1.0,
+                           "[%s] Output size mismatch: actual=%ld vs expected action length=%ld (withArm_=%d)",
+                           name_.c_str(), output_element_count, expected_output_length, withArm_);
+        action = Eigen::VectorXd::Zero(num_actions_);
+        return false;
+      }
+
       action.resize(expected_output_length);
       for (int i = 0; i < static_cast<int>(expected_output_length); ++i)
         action[i] = output_buf[i];

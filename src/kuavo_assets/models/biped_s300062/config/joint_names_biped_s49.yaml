@@ -1,0 +1,1 @@
+controller_joint_names: ['', 'l_leg_roll', 'l_leg_yaw', 'l_leg_pitch', 'l_knee', 'l_foot_pitch', 'l_foot_roll', 'l_r_bar', 'l_r_tendon', 'l_l_bar', 'l_l_tendon', 'l_knee_bar', 'l_knee_tendon', 'r_leg_roll', 'r_leg_yaw', 'r_leg_pitch', 'r_knee', 'r_foot_pitch', 'r_foot_roll', 'r_l_bar', 'r_l_tendon', 'r_r_bar', 'r_r_tendon', 'r_knee_bar', 'r_knee_tendon', ]

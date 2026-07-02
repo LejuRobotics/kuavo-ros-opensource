@@ -197,12 +197,12 @@ rosservice call /close_led
 ### 话题列表
 | 话题名 | 消息类型 | 说明 |
 |--------|----------|------|
-| `/battery_info_1` | `kuavo_led_controller/BatteryInfo` | BAT1（左电池）信息 |
-| `/battery_info_2` | `kuavo_led_controller/BatteryInfo` | BAT2（右电池）信息 |
+| `/battery_info_1` | `kuavo_led_controller/BatteryInfo` | BAT1（右电池）信息 |
+| `/battery_info_2` | `kuavo_led_controller/BatteryInfo` | BAT2（左电池）信息 |
 
 ### BatteryInfo 消息定义
 ```msg
-uint8 battery_id            # 电池ID (0:左电池, 1:右电池)
+uint8 battery_id            # 电池ID (0:右电池, 1:左电池)
 uint32 voltage              # 电压 (mV)
 int32 current               # 电流 (mA，正数充电，负数放电)
 uint32 remaining_capacity   # 剩余容量 (mAh)
@@ -228,7 +228,7 @@ rostopic echo /battery_info_1 | grep temperatures
 # 查询电池信息（服务调用）
 rosservice call /get_battery_info "battery_id: 0"
 
-# 查询BAT2（右电池）
+# 查询BAT2（左电池）
 rosservice call /get_battery_info "battery_id: 1"
 ```
 
@@ -238,7 +238,7 @@ rosservice call /get_battery_info "battery_id: 1"
 
 **请求**:
 ```msg
-# 电池ID (0:左电池/BAT1, 1:右电池/BAT2)
+# 电池ID (0:右电池/BAT1, 1:左电池/BAT2)
 uint8 battery_id
 ```
 
@@ -278,7 +278,7 @@ rosservice call /get_battery_info "battery_id: 0"
 # current: -510
 # percentage: 59
 # success: True
-# message: "电池0信息读取成功"
+# message: "电池0(BAT1/右电池)信息读取成功"
 
 # 查询BAT2信息
 rosservice call /get_battery_info "battery_id: 1"
@@ -315,8 +315,8 @@ roslaunch humanoid_controllers load_kuavo_real.launch with_battery:=true（默�
 | 指令 | 功能 | 说明 |
 |------|------|------|
 | 0x02 | LED灯条设置 | 控制10个LED灯的颜色和模式 |
-| 0x03 | BAT1电池信息读取 | 读取左电池电压、电流、容量等 |
-| 0x04 | BAT2电池信息读取 | 读取右电池电压、电流、容量等 |
+| 0x03 | BAT1电池信息读取 | 读取右电池电压、电流、容量等 |
+| 0x04 | BAT2电池信息读取 | 读取左电池电压、电流、容量等 |
 
 ### 注意事项
 1. **硬件兼容性**：

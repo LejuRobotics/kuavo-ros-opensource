@@ -1,0 +1,51 @@
+# Kuavo 右手腕：固定棋盘与相机 URDF，仅标定右臂 7 关节零位（不标定相机外参）
+
+base_link: zarm_l1_ref_link
+verbose: true
+
+models:
+  - name: right_wrist_camera_to_base
+    type: chain
+    frame: right_wrist_camera_color_optical_frame
+  - name: tag_to_base
+    type: chain
+    frame: checkerboard_link
+
+free_params:
+  - zarm_r1_joint
+  - zarm_r2_joint
+  - zarm_r3_joint
+  - zarm_r4_joint
+  - zarm_r5_joint
+  - zarm_r6_joint
+  - zarm_r7_joint
+
+# 不标定腕部相机安装；若将来要估 r_hand_camera_joint 6DOF，改为 true
+free_frames:
+  - name: r_hand_camera_joint
+    x: false
+    y: false
+    z: false
+    roll: false
+    pitch: false
+    yaw: false
+
+error_blocks:
+  - name: board_align
+    type: chain3d_to_chain3d
+    model_a: right_wrist_camera_to_base
+    model_b: tag_to_base
+    center_weight: 1.0
+    corner_pose_weight: 0.35
+    enable_corner_filter: true
+    grid_edge_length_m: 0.03
+    min_edge_ratio: 0.6
+    max_edge_ratio: 1.4
+
+  - name: restrict_r_hand_camera_joint
+    type: outrageous
+    param: r_hand_camera_joint
+    joint_scale: 0.0
+    position_scale: 0.1
+    rotation_scale: 0.1
+

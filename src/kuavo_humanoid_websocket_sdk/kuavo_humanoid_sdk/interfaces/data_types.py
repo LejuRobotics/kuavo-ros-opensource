@@ -273,6 +273,17 @@ class KuavoTwist:
 
 
 @dataclass
+class KuavoMotorParam:
+    """表示机器人电机参数的数据类"""
+    Kp: float
+    """位置控制比例增益"""
+    Kd: float
+    """速度控制微分增益"""
+    id: int
+    """电机ID"""
+
+
+@dataclass
 class AprilTagDetection:
     """表示AprilTag检测结果的数据类"""
     

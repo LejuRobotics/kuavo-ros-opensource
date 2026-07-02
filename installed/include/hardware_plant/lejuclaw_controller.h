@@ -83,6 +83,7 @@ public:
      * @return false if initialize failed.
      */
     bool initialize(bool init_bmapilib);
+    void setDebugCallback(LejuClawDebugCallback callback);
 
     /**
      * @brief close the claws and stop control thread.
@@ -168,6 +169,7 @@ private:
     std::atomic_bool claw_is_executing_{false};
 
     std::array<State, 2> gripper_state_ = {State::kUnknown, State::kUnknown};
+    LejuClawDebugCallback debug_callback_;
 };
 } // namespace eef_controller
 
