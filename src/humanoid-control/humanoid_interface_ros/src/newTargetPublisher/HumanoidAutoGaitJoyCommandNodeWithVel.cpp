@@ -1836,7 +1836,7 @@ namespace ocs2
       }
       else
       {
-        if (robot_type_ == 2)
+        if (robot_type_ == 2 && !m1m2_action_active_)
         {
           checkGaitSwitchCommand(joy_msg);
           old_joy_msg_ = *joy_msg;
