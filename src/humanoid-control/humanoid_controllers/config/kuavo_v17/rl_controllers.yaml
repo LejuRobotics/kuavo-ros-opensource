@@ -16,12 +16,6 @@ controllers:
     config_file: "rl/fall_stand_param.info"  # 相对于版本配置目录的路径
     enabled: true  # 是否启用该控制器
 
-  - name: "amp_controller"
-    class: "BASE_CONTROLLER"  # 基础行走控制器
-    type: "AMP_CONTROLLER"    # 具体控制器类型
-    config_file: "rl/amp_param.info" 
-    enabled: true  
-
   - name: "amp_hand_controller" # 行走动手控制器
     class: "BASE_CONTROLLER"  
     type: "AMP_CONTROLLER"    

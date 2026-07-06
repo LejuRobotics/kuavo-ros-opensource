@@ -249,8 +249,56 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, cmdVelLineXUp_, "cmdVelLineXup", false);
       loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
+      loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
+      loadData::loadPtreeValue(pt, enable_back_arm_enhance_, "enable_back_arm_enhance", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
+      try
+      {
+        Eigen::Matrix<double, 8, 1> tiny_cmd_clip;
+        loadEigenMatrix("TinyCmdClip", tiny_cmd_clip);
+        tiny_cmdx_clip_pos_min_ = tiny_cmd_clip(0);
+        tiny_cmdx_clip_pos_max_ = tiny_cmd_clip(1);
+        tiny_cmdx_clip_neg_max_ = tiny_cmd_clip(2);
+        tiny_cmdx_clip_neg_min_ = tiny_cmd_clip(3);
+        tiny_cmdy_clip_min_ = tiny_cmd_clip(4);
+        tiny_cmdy_clip_max_ = tiny_cmd_clip(5);
+        tiny_cmd_angz_clip_min_ = tiny_cmd_clip(6);
+        tiny_cmd_angz_clip_max_ = tiny_cmd_clip(7);
+        tiny_cmdx_clip_enabled_ = (tiny_cmdx_clip_pos_max_ > tiny_cmdx_clip_pos_min_) &&
+                                  (tiny_cmdx_clip_neg_max_ > tiny_cmdx_clip_neg_min_);
+        tiny_cmdy_clip_enabled_ = tiny_cmdy_clip_max_ > tiny_cmdy_clip_min_;
+        tiny_cmd_angz_clip_enabled_ = tiny_cmd_angz_clip_max_ > tiny_cmd_angz_clip_min_;
+        ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, neg[%.3f, %.3f)->%.3f, "
+                 "cmd_y[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, enabled=%s/%s/%s",
+                 name_.c_str(),
+                 tiny_cmdx_clip_pos_min_, tiny_cmdx_clip_pos_max_, tiny_cmdx_clip_pos_max_,
+                 tiny_cmdx_clip_neg_min_, tiny_cmdx_clip_neg_max_, tiny_cmdx_clip_neg_min_,
+                 tiny_cmdy_clip_min_, tiny_cmdy_clip_max_, tiny_cmdy_clip_max_,
+                 tiny_cmd_angz_clip_min_, tiny_cmd_angz_clip_max_, tiny_cmd_angz_clip_max_,
+                 tiny_cmdx_clip_enabled_ ? "true" : "false",
+                 tiny_cmdy_clip_enabled_ ? "true" : "false",
+                 tiny_cmd_angz_clip_enabled_ ? "true" : "false");
+      }
+      catch (const std::exception& e)
+      {
+        tiny_cmdx_clip_enabled_ = false;
+        tiny_cmdy_clip_enabled_ = false;
+        tiny_cmd_angz_clip_enabled_ = false;
+        ROS_WARN("[%s] TinyCmdClip not loaded: %s", name_.c_str(), e.what());
+      }
+
+      if (pt.find("velocitySmoothing") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, stance_height_stand_up_smoothing_enabled_,
+                                 "velocitySmoothing.standUpHeightSmoothingEnabled", false);
+        loadData::loadPtreeValue(pt, max_stance_height_stand_up_change_,
+                                 "velocitySmoothing.maxStandUpHeightChange", false);
+        ROS_INFO("[%s] Stance height stand-up smoothing: enabled=%s, maxChange=%.4f m/step",
+                 name_.c_str(),
+                 stance_height_stand_up_smoothing_enabled_ ? "true" : "false",
+                 max_stance_height_stand_up_change_);
+      }
     }
 
     // 加载手臂控制参数（用于 ArmController）
@@ -425,6 +473,7 @@ namespace humanoid_controller
 
     // 加载 X 负向单独缩放系数（用于不对称速度限制）
     loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
+    loadData::loadPtreeValue(pt, cmdVelLineXNegScaleExternalArm_, "commandData.scale.cmdVelLineXNegScaleExternalArm", false);
 
     ROS_INFO("[%s] loadConfig done. num_actions_=%d, numSingleObs_=%d, frameStack_=%d",
              name_.c_str(), num_actions_, numSingleObs_, frameStack_);
@@ -458,7 +507,8 @@ namespace humanoid_controller
     }
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = true;  // 初始化为站立状态
-
+    smoothed_stance_height_cmd_ = 0.0;
+    
     ROS_INFO("[%s] reset", name_.c_str());
     sensor_data_updated_ = false;
   }
@@ -547,6 +597,84 @@ namespace humanoid_controller
     return RLControllerBase::shouldRunInference();
   }
 
+  double AmpWalkController::applyTinyCmdxClip(double cmdx) const
+  {
+    if (!tiny_cmdx_clip_enabled_)
+    {
+      return cmdx;
+    }
+    if (cmdx >= tiny_cmdx_clip_pos_min_ && cmdx < tiny_cmdx_clip_pos_max_)
+    {
+      return tiny_cmdx_clip_pos_max_;
+    }
+    if (cmdx >= tiny_cmdx_clip_neg_min_ && cmdx < tiny_cmdx_clip_neg_max_)
+    {
+      return tiny_cmdx_clip_neg_min_;
+    }
+    return cmdx;
+  }
+
+  double AmpWalkController::applyTinyCmdYClip(double cmdy) const
+  {
+    if (!tiny_cmdy_clip_enabled_)
+    {
+      return cmdy;
+    }
+    const double abs_cmdy = std::abs(cmdy);
+    if (abs_cmdy >= tiny_cmdy_clip_min_ && abs_cmdy < tiny_cmdy_clip_max_)
+    {
+      return cmdy >= 0.0 ? tiny_cmdy_clip_max_ : -tiny_cmdy_clip_max_;
+    }
+    return cmdy;
+  }
+
+  double AmpWalkController::applyTinyCmdAngzClip(double angz) const
+  {
+    if (!tiny_cmd_angz_clip_enabled_)
+    {
+      return angz;
+    }
+    const double abs_angz = std::abs(angz);
+    if (abs_angz >= tiny_cmd_angz_clip_min_ && abs_angz < tiny_cmd_angz_clip_max_)
+    {
+      return angz >= 0.0 ? tiny_cmd_angz_clip_max_ : -tiny_cmd_angz_clip_max_;
+    }
+    return angz;
+  }
+
+  void AmpWalkController::applyStanceHeightStandUpSmoothing(CommandDataRL& cmd)
+  {
+    if (!is_amp_hand_controller_ || !stance_height_stand_up_smoothing_enabled_)
+    {
+      return;
+    }
+
+    if (cmd.cmdStance_ < 1.0)
+    {
+      smoothed_stance_height_cmd_ = 0.0;
+      return;
+    }
+
+    const bool in_posture_stance = (amp_mode_ == 1);
+    const double raw_height = in_posture_stance ? cmd.cmdVelAngularZ_ : 0.0;
+    const double diff = raw_height - smoothed_stance_height_cmd_;
+
+    if (diff > 1e-9)
+    {
+      smoothed_stance_height_cmd_ += std::min(diff, max_stance_height_stand_up_change_);
+    }
+    else
+    {
+      smoothed_stance_height_cmd_ = raw_height;
+    }
+
+    if (in_posture_stance || std::abs(smoothed_stance_height_cmd_) > 1e-6)
+    {
+      cmd.cmdVelAngularZ_ = smoothed_stance_height_cmd_;
+      cmd.cmdVelLineZ_ = smoothed_stance_height_cmd_;
+    }
+  }
+
   void AmpWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
@@ -576,6 +704,8 @@ namespace humanoid_controller
   {
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
+
+    applyStanceHeightStandUpSmoothing(cmd);
     
     updatePhase(cmd);
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
@@ -601,19 +731,38 @@ namespace humanoid_controller
                                              jointArmNum_ > 0 && arm_controller_ &&
                                              arm_controller_->getMode() != 1;
 
-    // amp_hand: 外部手臂接管时才应用 X 负向缩放；其余控制器保持原行为。
+    // amp_hand: 负向 cmd_x 缩放（外部手臂接管时使用独立系数）
     if (cmd.cmdVelLineX_ < 0.0)
     {
-      if (!is_amp_hand_controller_ || external_arm_control_active)
-      {
-        cmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
-      }
+      const double neg_scale = (is_amp_hand_controller_ && external_arm_control_active)
+                                   ? cmdVelLineXNegScaleExternalArm_
+                                   : cmdVelLineXNegScale_;
+      cmd.cmdVelLineX_ *= neg_scale;
     }
 
     if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdx_ &&
         cmd.cmdVelLineX_ > kRollCompensationCmdXThreshold_)
     {
       cmd.cmdVelLineY_ = 0.0;
+    }
+
+    if (is_amp_hand_controller_ &&
+        (tiny_cmdx_clip_enabled_ || tiny_cmdy_clip_enabled_ || tiny_cmd_angz_clip_enabled_))
+    {
+      if (tiny_cmdx_clip_enabled_)
+      {
+        cmd.cmdVelLineX_ = applyTinyCmdxClip(cmd.cmdVelLineX_);
+      }
+      if (tiny_cmdy_clip_enabled_)
+      {
+        cmd.cmdVelLineY_ = applyTinyCmdYClip(cmd.cmdVelLineY_);
+      }
+      if (tiny_cmd_angz_clip_enabled_ && cmd.cmdStance_ != 1.0 &&
+          std::abs(cmd.cmdVelLineX_) < 0.3 && std::abs(cmd.cmdVelLineY_) < 0.2 &&
+          std::abs(cmd.cmdVelAngularZ_) > 0.1)
+      {
+        cmd.cmdVelAngularZ_ = applyTinyCmdAngzClip(cmd.cmdVelAngularZ_);
+      }
     }
 
     Eigen::Vector3d velocity_commands;
@@ -719,13 +868,24 @@ namespace humanoid_controller
           kWalkingRollCompensationQuadA_ * cmd_x * cmd_x +
           kWalkingRollCompensationQuadB_ * cmd_x +
           kWalkingRollCompensationQuadC_;
-      const double total_roll_compensation_deg =
-          walking_roll_compensation_deg + kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
+      double total_roll_compensation_deg = walking_roll_compensation_deg;
+      if (std::abs(cmd.cmdVelAngularZ_) > 0.55)
+      {
+        total_roll_compensation_deg +=
+            kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
+      }
       if (std::abs(total_roll_compensation_deg) > 1e-6)
       {
         const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;
         projected_gravity = Eigen::AngleAxisd(compensation_roll_rad, Eigen::Vector3d::UnitX()) * projected_gravity;
       }
+    }
+
+    if (enable_back_arm_enhance_ && is_walking_mode &&
+        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.02)
+    {
+      projected_gravity =
+          Eigen::AngleAxisd(5.0 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
     }
 
     Eigen::VectorXd local_action = getCurrentAction();
@@ -857,9 +1017,11 @@ namespace humanoid_controller
         const bool external_arm_control_active = arm_command_replacement_enabled_ &&
                                                  jointArmNum_ > 0 && arm_controller_ &&
                                                  arm_controller_->getMode() != 1;
-        if (external_arm_control_active && elbowCmd.cmdVelLineX_ < 0.0)
+        if (elbowCmd.cmdVelLineX_ < 0.0)
         {
-          elbowCmd.cmdVelLineX_ *= cmdVelLineXNegScale_;
+          const double neg_scale = external_arm_control_active ? cmdVelLineXNegScaleExternalArm_
+                                                               : cmdVelLineXNegScale_;
+          elbowCmd.cmdVelLineX_ *= neg_scale;
         }
 
         const bool is_lateral_move_command =
@@ -872,10 +1034,14 @@ namespace humanoid_controller
           // Positive cmd_y is left lateral, negative cmd_y is right lateral.
           if (elbowCmd.cmdVelLineY_ > 0.0)
           {
+            action[1] *= 0.8;
+            action[2] *= 1.2;
             action[16] *= kLateralElbowFixScale_;
           }
           else
           {
+            action[7] *= 0.8;
+            action[8] *= 1.2;
             action[20] *= kLateralElbowFixScale_;
           }
         }
@@ -1023,6 +1189,47 @@ namespace humanoid_controller
     const Eigen::VectorXd& active_default = getActiveDefaultJointPos(currentCmdData);
     bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
     applyArmTakeoverBlend(local_action, ros::Time::now(), is_standing);
+
+    if (enable_back_arm_enhance_)
+    {
+      CommandDataRL backArmCmd = currentCmdData;
+      backArmCmd.scale();
+      if (backArmCmd.cmdVelLineX_ < kBackArmEnhanceCmdXThreshold_)
+      {
+        const double arm1_scale_ratio = kBackArmEnhanceScale_ / actionScale_;
+        local_action[13] = -0.75+1.0*local_action[10];
+        local_action[13] *= arm1_scale_ratio;
+        local_action[14] *= 0.5;
+        local_action[16] += 1.5-0.8*local_action[4];
+        local_action[17] = -0.75+1.0*local_action[4];
+        local_action[17] *= arm1_scale_ratio;
+        local_action[18] *= 0.5;
+        local_action[20] += 1.5-0.8*local_action[10];
+      }
+    }
+
+    if (enable_elbow_scale_)
+    {
+      const double elbow_scale_ratio = 0.18 / actionScale_;
+      local_action[16] *= elbow_scale_ratio;
+      local_action[20] *= elbow_scale_ratio;
+    }
+
+    if (enable_elbow_scale_)
+    {
+      // zarm_l4_joint=16, zarm_r4_joint=20: final target (action*scale+default) must stay < -0.05
+      static constexpr int kElbowActionIndices[] = {16, 20};
+      static constexpr double kElbowTargetUpperBound = -0.15;
+      for (const int idx : kElbowActionIndices)
+      {
+        const double scale = actionScale_ * actionScaleTestRL_[idx];
+        if (scale <= 0.0)
+          continue;
+        const double max_action = (kElbowTargetUpperBound - active_default[idx]) / scale;
+        if (local_action[idx] > max_action)
+          local_action[idx] = max_action;
+      }
+    }
 
     Eigen::VectorXd jointTor(jointNum_ + jointArmNum_ + waistNum_);
 
@@ -1324,7 +1531,11 @@ namespace humanoid_controller
       if (is_roban_)
       {
         // amp_mode=1 时，将站立命令切到“复用行走指令”语义（x/y/yaw 三通道）。
-        gait_receiver_->setReuseWalkCommandInStance(amp_mode_ == 1);
+        // 起身平滑未完成时继续复用，避免摇杆回正后高度命令瞬间归零。
+        const bool stand_up_smoothing_active =
+            is_amp_hand_controller_ && stance_height_stand_up_smoothing_enabled_ &&
+            std::abs(smoothed_stance_height_cmd_) > 1e-6;
+        gait_receiver_->setReuseWalkCommandInStance(amp_mode_ == 1 || stand_up_smoothing_active);
       }
     }
 

@@ -125,6 +125,7 @@ namespace humanoid_controller
     double cmdVelLineXLow_{0.0};  ///< amp_hand_controller 手柄十字键下档 X 速度限制
     double cmdVelLineXUp_{0.0};   ///< amp_hand_controller 手柄十字键高档 X 速度限制
     double cmdVelLineXNegScale_{1.0};  ///< X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
+    double cmdVelLineXNegScaleExternalArm_{1.0};  ///< amp_hand 外部手臂控制时 X 负向缩放系数
 
     // yaw 对齐
     double my_yaw_offset_{0.0};
@@ -216,18 +217,38 @@ namespace humanoid_controller
     static constexpr double kVirtualArmObsPitchBaseDegNeg_{0.5};
     static constexpr double kVirtualArmObsPitchCompensationDegNeg_{0.0};
     bool lateral_elbow_fix_{false};
-    static constexpr double kLateralElbowFixScale_{0.25};
+    static constexpr double kLateralElbowFixScale_{0.5};
+    bool enable_elbow_scale_{false};
+    bool enable_back_arm_enhance_{false};
+    static constexpr double kBackArmEnhanceScale_{0.3};
+    static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};
     bool enable_roll_compensation_{false};
     bool enable_off_cmdy_by_cmdx_{false};
-    static constexpr double kRollCompensationCmdXThreshold_{0.3};
-    static constexpr double kWalkingRollCompensationQuadA_{0.832520};
-    static constexpr double kWalkingRollCompensationQuadB_{-1.332474};
-    static constexpr double kWalkingRollCompensationQuadC_{0.627412};
+    bool tiny_cmdx_clip_enabled_{false};
+    double tiny_cmdx_clip_pos_min_{0.0};  ///< 正向截断区间最小值
+    double tiny_cmdx_clip_pos_max_{0.0};  ///< 正向截断区间最大值，区间内值截断为该值
+    double tiny_cmdx_clip_neg_max_{0.0};  ///< 负向截断区间最大值
+    double tiny_cmdx_clip_neg_min_{0.0};  ///< 负向截断区间最小值，区间内值截断为该值
+    bool tiny_cmdy_clip_enabled_{false};
+    double tiny_cmdy_clip_min_{0.0};  ///< abs(cmd_y) 截断区间最小值
+    double tiny_cmdy_clip_max_{0.0};  ///< abs(cmd_y) 截断区间最大值，区间内值截断为该值
+    bool tiny_cmd_angz_clip_enabled_{false};
+    double tiny_cmd_angz_clip_min_{0.0};  ///< abs(cmd_angz) 截断区间最小值
+    double tiny_cmd_angz_clip_max_{0.0};  ///< abs(cmd_angz) 截断区间最大值，区间内值截断为该值
+    static constexpr double kRollCompensationCmdXThreshold_{0.2};
+    static constexpr double kWalkingRollCompensationQuadA_{-0.2};
+    static constexpr double kWalkingRollCompensationQuadB_{0.3};
+    static constexpr double kWalkingRollCompensationQuadC_{-0.013};
     static constexpr double kTurnRollCompensationDeg_{-0.7};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};
     ros::ServiceServer change_amp_mode_srv_;
+
+    // 站立模式下下蹲后起身的高度命令平滑（仅 amp_hand_controller）
+    bool stance_height_stand_up_smoothing_enabled_{true};
+    double max_stance_height_stand_up_change_{0.004}; ///< 起身单步最大高度命令变化量 (m)
+    double smoothed_stance_height_cmd_{0.0};          ///< 平滑后的下蹲高度命令
 
     bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
                                kuavo_msgs::changeArmCtrlMode::Response &res);
@@ -253,6 +274,11 @@ namespace humanoid_controller
     
     // 腰部控制辅助函数
     void initWaistControl();
+
+    double applyTinyCmdxClip(double cmdx) const;
+    double applyTinyCmdYClip(double cmdy) const;
+    double applyTinyCmdAngzClip(double angz) const;
+    void applyStanceHeightStandUpSmoothing(CommandDataRL& cmd);
 
   };
 }

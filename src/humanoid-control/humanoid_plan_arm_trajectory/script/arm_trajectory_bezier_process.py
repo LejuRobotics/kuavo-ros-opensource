@@ -939,12 +939,8 @@ class ArmTrajectoryBezierDemo:
             frame0["keyframe"] = 0
             frames.insert(0, frame0)
         
-        # 通用入场过渡(非 RL,非 KUAVO 半身):
-        # 当机器人当前姿态与 tact 首帧差异显著时,在 0f 处插入"当前姿态"作为过渡起点,
-        # 整体后移原 frames,避免播放瞬间顺移。
-        # 覆盖此前漏掉的:ROBAN+ocs2、KUAVO 全身+ocs2(tact 首帧 keyframe=0 且非站立姿态)等场景。
-        # 阈值 3°:姿态本就接近时不引入额外延时。
-        # 过渡时间 0.5s~4.0s(默认 2.0s),与 KUAVO 半身入场参数一致。
+        # 通用入场过渡(非 RL, 非 KUAVO 半身): 当前姿态与首帧差异显著时,
+        # 在 0f 插入"当前姿态"作过渡起点并后移原 frames, 避免播放瞬间顺移。
         if (not is_rl
                 and not (self.robot_class == KUAVO and self.only_half_up_body)
                 and len(frames) > 0
@@ -959,7 +955,7 @@ class ArmTrajectoryBezierDemo:
             max_diff = self._max_arm_pose_diff_deg(
                 self.current_arm_joint_state, first_frame["servos"]
             )
-            if max_diff > 3.0:
+            if max_diff > 3.0:  # 阈值 3°: 姿态接近时不引入额外延时
                 # 仅取前 N 个关节(对齐 first_frame.servos 长度)转度作为过渡时间计算源
                 source_len = min(len(self.current_arm_joint_state), len(first_frame["servos"]))
                 current_angles_deg = [math.degrees(p) for p in self.current_arm_joint_state[:source_len]]
@@ -1669,12 +1665,8 @@ class ArmTrajectoryBezierDemo:
                 last_keyframe = max(f.get("keyframe", 0) for f in frames)
                 # 将 keyframe 转换为秒并更新 END_FRAME_TIME
                 self.END_FRAME_TIME = last_keyframe * 0.01
-        # 注意：RL/AMP 模式同样需要走 filter_data。
-        # 297038619 曾为修复 plan#1499（RL tact 首帧错位）在 RL 模式跳过 filter_data，
-        # 但跳过后保持段贝塞尔控制点未经平滑（tact 原始 CP 非零），导致手指指令 ±1 跳变，
-        # 在 AMP 步态抱拳等动作上表现为大拇指抖动（issue #3231）。
-        # 由于 RL 分支已前置 self.START_FRAME_TIME = 0; self.x_shift = 0，
-        # filter_data 内的时间平移不会破坏 RL 首帧对齐，故恢复无条件滤波。
+        # RL/AMP 模式同样需要走 filter_data: 跳过会令控制点未平滑, 手指指令跳变抖动。
+        # RL 已前置清零时间平移参数, 滤波不破坏首帧对齐, 故无条件滤波。
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 

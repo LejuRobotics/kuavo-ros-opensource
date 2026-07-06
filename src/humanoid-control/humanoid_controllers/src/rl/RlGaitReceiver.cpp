@@ -123,7 +123,8 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   // 这与训练侧 vel_command_b 的复用语义一致：x->弯腰，y->保留，yaw(z)->下蹲高度。
   if (currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_)
   {
-    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x;
+    // x->弯腰：仅允许正向（向前弯），屏蔽负向 cmd_x（向后弯）
+    currentCommand_.cmdVelLineX_ = std::max(0.0, smoothed_cmd_vel_.linear.x);
     currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y;
     currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z;
     currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x;
@@ -421,15 +422,37 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
   
   // Apply smoothing factor
   double smooth_factor = std::min(velocity_smooth_factor_ / dt, 1.0);
+
+  const auto isDecelerating = [](double current, double target) {
+    return std::abs(target) < std::abs(current) - 1e-9;
+  };
+  const auto applyAxisSmooth = [&](double& smoothed, double target, double diff) {
+    if (velocity_change_decel_only_ && !isDecelerating(smoothed, target)) {
+      smoothed = target;
+    } else {
+      smoothed += diff * smooth_factor;
+    }
+  };
+
+  const bool in_neg_cmd_x =
+      cmd_vel.linear.x < -1e-9 || smoothed_cmd_vel_.linear.x < -1e-9;
+  const auto applyCmdXSmooth = [&](double& smoothed, double target, double diff) {
+    // decelOnly 仅作用于正向 cmd_x；负向后退加减速均平滑
+    if (velocity_change_decel_only_ && !in_neg_cmd_x && !isDecelerating(smoothed, target)) {
+      smoothed = target;
+    } else {
+      smoothed += diff * smooth_factor;
+    }
+  };
   
   // Smooth linear velocities
-  smoothed_vel.linear.x += vel_diff_x * smooth_factor;
-  smoothed_vel.linear.y += vel_diff_y * smooth_factor;
-  smoothed_vel.linear.z += vel_diff_z * smooth_factor;
+  applyCmdXSmooth(smoothed_vel.linear.x, cmd_vel.linear.x, vel_diff_x);
+  applyAxisSmooth(smoothed_vel.linear.y, cmd_vel.linear.y, vel_diff_y);
+  applyAxisSmooth(smoothed_vel.linear.z, cmd_vel.linear.z, vel_diff_z);
   
   // Smooth angular velocities (x and y use normal smoothing)
-  smoothed_vel.angular.x += ang_diff_x * smooth_factor;
-  smoothed_vel.angular.y += ang_diff_y * smooth_factor;
+  applyAxisSmooth(smoothed_vel.angular.x, cmd_vel.angular.x, ang_diff_x);
+  applyAxisSmooth(smoothed_vel.angular.y, cmd_vel.angular.y, ang_diff_y);
   
   // Special handling for angular.z during turning (when there's linear velocity)
   double angular_z_change = std::abs(ang_diff_z);
@@ -437,29 +460,69 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
   
   if (has_linear_velocity && angular_z_change > angular_velocity_change_threshold_)
   {
-    // Use special angular velocity smoothing and rate limiting for turning
-    double angular_smooth_factor = angular_velocity_smooth_factor_;
-    
-    // Apply maximum angular velocity change rate limit
-    double max_angular_change = angular_velocity_max_rate_ * dt;
-    double limited_ang_diff_z = std::max(-max_angular_change, std::min(max_angular_change, ang_diff_z));
-    
-    smoothed_vel.angular.z += limited_ang_diff_z * angular_smooth_factor;
+    if (velocity_change_decel_only_ && !isDecelerating(smoothed_vel.angular.z, cmd_vel.angular.z)) {
+      smoothed_vel.angular.z = cmd_vel.angular.z;
+    } else {
+      // Use special angular velocity smoothing and rate limiting for turning
+      double angular_smooth_factor = angular_velocity_smooth_factor_;
+      
+      // Apply maximum angular velocity change rate limit
+      double max_angular_change = angular_velocity_max_rate_ * dt;
+      double limited_ang_diff_z = std::max(-max_angular_change, std::min(max_angular_change, ang_diff_z));
+      
+      smoothed_vel.angular.z += limited_ang_diff_z * angular_smooth_factor;
+    }
   }
   else
   {
     // Normal smoothing for angular.z when not turning
-    smoothed_vel.angular.z += ang_diff_z * smooth_factor;
+    applyAxisSmooth(smoothed_vel.angular.z, cmd_vel.angular.z, ang_diff_z);
   }
   
-  // Limit maximum linear velocity change
+  // Limit maximum linear velocity change (optionally deceleration only)
   double linear_change = std::sqrt(vel_diff_x * vel_diff_x + vel_diff_y * vel_diff_y + vel_diff_z * vel_diff_z);
-  
-  if (linear_change > max_velocity_change_) {
-    double scale = max_velocity_change_ / linear_change;
+  const double smoothed_linear_mag = std::sqrt(
+      smoothed_cmd_vel_.linear.x * smoothed_cmd_vel_.linear.x +
+      smoothed_cmd_vel_.linear.y * smoothed_cmd_vel_.linear.y +
+      smoothed_cmd_vel_.linear.z * smoothed_cmd_vel_.linear.z);
+  const double cmd_linear_mag = std::sqrt(
+      cmd_vel.linear.x * cmd_vel.linear.x +
+      cmd_vel.linear.y * cmd_vel.linear.y +
+      cmd_vel.linear.z * cmd_vel.linear.z);
+  const bool linear_decel = cmd_linear_mag < smoothed_linear_mag - 1e-9;
+  const double effective_max_velocity_change =
+      (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x)
+          ? max_velocity_change_neg_cmd_x_
+          : max_velocity_change_;
+  const bool apply_linear_change_limit =
+      !velocity_change_decel_only_ || linear_decel || in_neg_cmd_x;
+
+  if (linear_change > effective_max_velocity_change && apply_linear_change_limit) {
+    double scale = effective_max_velocity_change / linear_change;
     smoothed_vel.linear.x = smoothed_cmd_vel_.linear.x + scale * vel_diff_x;
     smoothed_vel.linear.y = smoothed_cmd_vel_.linear.y + scale * vel_diff_y;
     smoothed_vel.linear.z = smoothed_cmd_vel_.linear.z + scale * vel_diff_z;
+  }
+
+  // 负向 cmd_x 单独限速（后退加减速均限速）
+  if (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x) {
+    const double x_diff = smoothed_vel.linear.x - smoothed_cmd_vel_.linear.x;
+    const double x_change = std::abs(x_diff);
+    if (x_change > max_velocity_change_neg_cmd_x_) {
+      smoothed_vel.linear.x =
+          smoothed_cmd_vel_.linear.x + (x_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_neg_cmd_x_;
+    }
+  }
+
+  // cmd_y 单步限速
+  if (max_velocity_change_cmd_y_ > 0.0) {
+    const double prev_y = smoothed_cmd_vel_.linear.y;
+    const double y_diff = smoothed_vel.linear.y - prev_y;
+    const double y_change = std::abs(y_diff);
+    if (y_change > max_velocity_change_cmd_y_) {
+      smoothed_vel.linear.y =
+          prev_y + (y_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_cmd_y_;
+    }
   }
   
   // Apply mixed motion limits to velocity commands
@@ -509,6 +572,19 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
              enable_mixed_mode_ ? "true" : "false", max_linear_vel_with_angular_, max_angular_vel_with_linear_);
   } else {
     ROS_WARN("[RlGaitReceiver] No mixedMotionLimits section found in config file, using default values");
+  }
+
+  // Load velocity smoothing overrides (e.g. amp_hand_param.info for v17 amp_hand_controller)
+  if (pt.find("velocitySmoothing") != pt.not_found()) {
+    loadData::loadPtreeValue(pt, max_velocity_change_, "velocitySmoothing.maxVelocityChange", verbose);
+    loadData::loadPtreeValue(pt, max_velocity_change_neg_cmd_x_, "velocitySmoothing.maxVelocityChangeNegCmdX", verbose);
+    loadData::loadPtreeValue(pt, velocity_change_decel_only_, "velocitySmoothing.decelOnly", verbose);
+    loadData::loadPtreeValue(pt, max_velocity_change_cmd_y_, "velocitySmoothing.maxVelocityChangeCmdY", verbose);
+    std::cout << "[RlGaitReceiver] velocitySmoothing loaded: maxVelocityChange="
+              << max_velocity_change_ << ", maxVelocityChangeNegCmdX="
+              << max_velocity_change_neg_cmd_x_ << ", decelOnly="
+              << (velocity_change_decel_only_ ? "true" : "false")
+              << ", maxVelocityChangeCmdY=" << max_velocity_change_cmd_y_ << std::endl;
   }
 }
 

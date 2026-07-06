@@ -150,7 +150,10 @@ private:
   geometry_msgs::Twist previous_cmd_vel_;
   double velocity_smooth_factor_;
   double max_velocity_change_;
+  double max_velocity_change_neg_cmd_x_{-0.5};  // 负向 cmd_x 单步最大变化量，<0 表示未配置
+  double max_velocity_change_cmd_y_{-0.1};      // cmd_y 单步最大变化量，<0 表示未配置
   double velocity_smooth_time_;
+  bool velocity_change_decel_only_{false};   // true: 正向 cmd_x 仅减速时平滑/限速，负向后退加减速均平滑
   ros::Time last_velocity_update_time_;
   
   // Angular velocity smoothing parameters for turning
