@@ -282,7 +282,7 @@
     name="base_to_joint"
     type="fixed">
     <origin
-      xyz="0.098 0 0.27064321"
+      xyz="0.098 0 0.31"
       rpy="0 0 0" />
     <parent
       link="base_link" />

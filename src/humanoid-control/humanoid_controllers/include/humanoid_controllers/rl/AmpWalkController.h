@@ -274,10 +274,18 @@ namespace humanoid_controller
     bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
                                kuavo_msgs::changeArmCtrlMode::Response &res);
 
+    Eigen::VectorXd standDefaultJointPosRL_;
+    bool use_stand_default_joint_state_{false};
+    bool has_stand_default_joint_state_{false};
+    double stand_velocity_threshold_{0.1};
+    double stand_angular_velocity_threshold_{0.1};
+
   private:
     double applyTinyCmdxClip(double cmdx) const;
     double applyTinyCmdYClip(double cmdy) const;
     double applyTinyCmdAngzClip(double angz) const;
+    const Eigen::VectorXd& getActiveDefaultJointPos(const ocs2::humanoid::CommandDataRL& cmd) const;
+
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
     void applyArmTakeoverBlend(Eigen::VectorXd& action, const ros::Time& time, bool is_standing);

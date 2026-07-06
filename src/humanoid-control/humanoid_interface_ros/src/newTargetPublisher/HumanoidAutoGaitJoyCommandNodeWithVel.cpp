@@ -1514,6 +1514,39 @@ namespace ocs2
       return false;
     }
 
+    // 按住 LT/RT 期间仍用左摇杆与方向键控制行走（推走松停）。
+    // 右摇杆已用于头部/腰部控制，仅更新左摇杆 X/Y，右摇杆分量保持原值；
+    // 方向键(axes[6]/[7])按下时覆盖对应分量并发布，与左摇杆叠加。
+    void updateWalkAxisDuringLtRtHold(const sensor_msgs::Joy::ConstPtr &joy_msg)
+    {
+      if (!(axes_input_enabled_ && !m1m2_action_active_))
+      {
+        return;
+      }
+      // 左摇杆 X/Y 经滤波更新，右摇杆分量保持原值
+      vector_t walk_axis_temp = vector_t::Zero(6);
+      walk_axis_temp.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joystick_origin_axis_[2], joystick_origin_axis_[3];
+      vector_t walk_axis_filtered = vector_t::Zero(6);
+      walk_axis_filtered.head(4) = joystickFilter_.update(walk_axis_temp.head(4));
+      for (size_t i = 0; i < 4; i++)
+      {
+        walk_axis_filtered(i) = std::max(-1.0, std::min(1.0, walk_axis_filtered(i)));
+      }
+      joystick_origin_axis_ = walk_axis_filtered;
+
+      // 方向键按下时覆盖对应分量并发布，与左摇杆叠加
+      if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
+      {
+        joystick_origin_axis_[0] = joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]];
+        checkAndPublishCommandLine(joystick_origin_axis_);
+      }
+      else if (joy_msg->axes[joyAxisMap["AXIS_LEFT_RIGHT_TRIGGER"]])
+      {
+        joystick_origin_axis_[1] = joy_msg->axes[joyAxisMap["AXIS_LEFT_RIGHT_TRIGGER"]];
+        checkAndPublishCommandLine(joystick_origin_axis_);
+      }
+    }
+
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
       vector_t joystickOriginAxisFilter_ = vector_t::Zero(6);
@@ -1677,6 +1710,9 @@ namespace ocs2
           }
         }
 
+        // 按住 RT 时仍用左摇杆/方向键控制行走（推走松停），避免主循环发布冻结速度导致松杆继续行走
+        updateWalkAxisDuringLtRtHold(joy_msg);
+
         // RT + X: 切换到上一个控制器
         // roban 保留 RT+X 作为动作组合键，避免与控制器切换冲突；kuavo 等其他版本允许切换控制器
         if (!IS_ROBAN_LEGGED(rb_version_) &&
@@ -1768,7 +1804,7 @@ namespace ocs2
       }
       
       if(joy_msg->axes[joyAxisMap["AXIS_LEFT_LT"]] < -0.5)
-      {        
+      {
         if(!joy_execute_action_)
         {
         if (!old_joy_msg_.buttons[joyButtonMap["BUTTON_STANCE"]] && joy_msg->buttons[joyButtonMap["BUTTON_STANCE"]])
@@ -1820,7 +1856,10 @@ namespace ocs2
           // std::cout << "waist_yaw: " << waist_yaw << std::endl;
           controlWaist(waist_yaw);
         }
-        
+
+        // 按住 LT 时仍用左摇杆/方向键控制行走（推走松停），避免主循环发布冻结速度导致松杆继续行走
+        updateWalkAxisDuringLtRtHold(joy_msg);
+
         old_joy_msg_ = *joy_msg;
         return;
       }
@@ -1882,7 +1921,7 @@ namespace ocs2
       }
       else
       {
-        if (robot_type_ == 2)
+        if (robot_type_ == 2 && !m1m2_action_active_)
         {
           checkGaitSwitchCommand(joy_msg);
           old_joy_msg_ = *joy_msg;

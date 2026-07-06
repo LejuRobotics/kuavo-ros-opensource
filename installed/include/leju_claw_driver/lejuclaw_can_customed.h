@@ -128,7 +128,7 @@ private:
     static constexpr float CONTROL_LOOP_HZ = 200.0f;               // 全局控制频率 Hz
     static constexpr float CONTROL_LOOP_DT = 1.0f / CONTROL_LOOP_HZ; // 全局控制周期 s
     static constexpr float DEFAULT_KP = 10.00f;                    // 比例增益系数
-    static constexpr float DEFAULT_KD = 2.20f;                     // 微分增益系数
+    static constexpr float DEFAULT_KD = 2.00f;                     // 微分增益系数
     static constexpr float DEFAULT_ALPHA = 0.20f;                  // 低通滤波器系数
     static constexpr float DEFAULT_MAX_CURRENT = 2.50f;            // 最大电流限制 A
     static constexpr float DEFAULT_MIN_ERROR_PERCENT = 1.5f;       // 到位误差阈值，基于行程百分比，单位 %
@@ -175,7 +175,7 @@ private:
     static constexpr float ZERO_CONTROL_DT = CONTROL_LOOP_DT;       // 零点控制周期，单位 s（与全局频率一致）
     static constexpr int ZERO_FIND_TIMEOUT_MS = 20000;              // 零点寻找超时时间，单位 ms
     static constexpr int ZERO_WAIT_MS = 500;                        // 零点等待时间，单位 ms
-    static constexpr float OPEN_LIMIT_ADJUSTMENT = -10.0f;          // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
+    static constexpr float OPEN_LIMIT_ADJUSTMENT = 0.0f;            // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float CLOSE_LIMIT_ADJUSTMENT = 0.0f;           // 关限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float TARGET_VELOCITY = 3.0f;                  // 限位寻找目标速度，单位 rad/s
     static constexpr float ZERO_TARGET_VELOCITY_MAX = 3.0f;         // 寻零/限位搜索目标速度上限，避免配置过大导致猛冲
