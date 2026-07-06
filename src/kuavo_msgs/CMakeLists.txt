@@ -174,6 +174,7 @@ add_service_files(
   changeArmCtrlMode.srv
   changeWaistCtrlMode.srv
   switchController.srv
+  FallStandCommand.srv
   getControllerList.srv
   switchToNextController.srv
   singleStepControl.srv

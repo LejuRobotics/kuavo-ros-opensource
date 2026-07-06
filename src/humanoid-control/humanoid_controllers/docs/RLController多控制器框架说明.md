@@ -106,10 +106,12 @@ RLControllerBase (基类)
   - 在 `kuavo_v54` 中，可通过 [`rl_controllers.yaml`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl_controllers.yaml) 启用 `depth_loco_controller`，其模型配置位于 [`depth_loco_param.info`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl/depth_loco_param.info)。
 
 - **倒地 / 起身相关服务**
-  - `/humanoid_controller/set_fall_down_state` (`std_srvs/SetBool`，在 `humanoidController` 中实现)  
-    - 将内部的 `fall_down_state_` 设为 FALL_DOWN 或 STANDING；当设置为 **倒地** 时，若存在 `FALL_STAND_CONTROLLER`，会自动通过 `RLControllerManager` 切换过去。
-  - `/humanoid_controller/trigger_fall_stand_up` (`std_srvs/Trigger`，在 `FallStandController` 中实现)  
-    - 触发倒地起身流程：关闭自动步态服务、重置轨迹时间步、计算当前与轨迹参考 yaw 差，并进入起身状态机的 READY/STAND_UP 阶段。
+  - `/humanoid_controller/set_fall_down_state` (`std_srvs/SetBool`)
+    - 设置机器人倒地/站立状态。设为 `true` 时自动切换到倒地起身控制器。
+  - `/humanoid_controller/fall_stand_command` (`kuavo_msgs/FallStandCommand`)
+    - 起身分两阶段调用：`PREPARE(1)` 插值到初始姿态；`STAND_UP(2)` 执行起身轨迹；`RESET(3)` 复位。
+    - 状态通过 `/humanoid_controller/FallStandController/fall_stand_state_` 话题观察：
+      `0`=倒地 `1`=插值中 `2`=就绪 `3`=起身中 `4`=完成。
 
 - **监控与调试相关话题**
   - `/humanoid_controller/is_rl_controller_` (`std_msgs/Float64` / 通过 `TopicLogger` 发布)  

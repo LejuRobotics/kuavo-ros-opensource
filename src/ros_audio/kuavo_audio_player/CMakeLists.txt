@@ -11,9 +11,9 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  std_srvs
+  kuavo_msgs
   message_generation
-  rospy
-  geometry_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -59,7 +59,6 @@ find_package(catkin REQUIRED COMPONENTS
 ## Generate services in the 'srv' folder
 add_service_files(
   FILES
-  playmusic.srv
   audio_status.srv
 )
 
@@ -73,8 +72,7 @@ add_service_files(
 ## Generate added messages and services with any dependencies listed here
 generate_messages(
   DEPENDENCIES
-  std_msgs  # Or other packages containing msgs
-  geometry_msgs
+  std_msgs
 )
 
 ################################################
@@ -107,15 +105,11 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES kuavo_robot_ros
-#  CATKIN_DEPENDS roscpp rospy
-#  DEPENDS system_lib
-  CATKIN_DEPENDS 
-  geometry_msgs 
-  rospy 
-  std_msgs 
-  turtlesim 
+  CATKIN_DEPENDS
+  rospy
+  std_msgs
+  std_srvs
+  kuavo_msgs
   message_runtime
 )
 
@@ -221,8 +215,7 @@ install(DIRECTORY launch
 )
 
 catkin_install_python(PROGRAMS
-  scripts/loundspeaker.py
-  scripts/audio_stream_player.py
+  scripts/audio_player.py
   tests/audio_stream_test.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

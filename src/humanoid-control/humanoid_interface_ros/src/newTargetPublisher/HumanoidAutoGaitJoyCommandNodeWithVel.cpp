@@ -45,7 +45,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/switchController.h"
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
-#include "kuavo_msgs/TransportModeCommand.h"
 #include <kuavo_msgs/robotWaistControl.h>
 #include <std_srvs/SetBool.h>
 
@@ -391,7 +390,6 @@ namespace ocs2
       switch_to_next_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_next_controller");
       switch_to_previous_controller_client_ = nodeHandle_.serviceClient<kuavo_msgs::switchToNextController>("/humanoid_controller/switch_to_previous_controller");
       auto_gait_change_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_auto_gait");
-      transport_mode_client_ = nodeHandle_.serviceClient<kuavo_msgs::TransportModeCommand>("/humanoid_controller/transport_mode_command");
       joy_sub_ = nodeHandle_.subscribe(current_joy_topic_, 10, &JoyControl::joyCallback, this);
       
       // 轮臂模式下初始化observation_（避免访问observation.state时发生段错误）
@@ -483,13 +481,6 @@ namespace ocs2
         {
           ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
         }
-
-        // Stand-up complete: fall_stand → base/MPC（仅搬运模式 FALL_DOWN 起身时播音频）
-        if (msg->from_controller == "fall_stand_controller" && fall_down_from_transport_)
-        {
-          fall_down_from_transport_ = false;
-          playMusic("退出搬运模式恢复正常.wav");
-        }
       });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
@@ -498,6 +489,12 @@ namespace ocs2
       m1m2_action_active_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
           "/joy_node/m1m2_action_active", 1,
           [this](const std_msgs::Bool::ConstPtr &msg) { m1m2_action_active_ = msg->data; });
+      // 订阅搬运模式状态，搬运期间（!= INACTIVE）C++ joy 早返，不处理任何操作
+      transport_mode_state_sub_ = nodeHandle_.subscribe<std_msgs::Float64>(
+          "/humanoid_controller/transport_mode_state_", 1,
+          [this](const std_msgs::Float64::ConstPtr &msg) {
+            transport_mode_state_ = static_cast<int>(msg->data);
+          });
       // 从主控制器实时订阅当前手臂控制模式
       arm_ctrl_mode_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
       "/humanoid/mpc/arm_control_mode", 1, &JoyControl::armCtrlModeCallback, this); 
@@ -516,10 +513,6 @@ namespace ocs2
       execute_arm_action_client_ = nodeHandle_.serviceClient<kuavo_msgs::ExecuteArmAction>("/execute_arm_action");
       // Launch status client (rate-limited checks in joy callback)
       real_launch_status_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_launch_status");
-      // Fall stand up trigger client
-      trigger_fall_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/trigger_fall_stand_up");
-      // Fall down state client
-      set_fall_down_state_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_controller/set_fall_down_state");
       // Dance controller: kuavo_msgs/SetString（空 data=列表首项，或 #下标/名称）
       switch_dance_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetString>("/humanoid_controller/switch_to_dance_controller");
       seat_sit_down_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid/sit_down");
@@ -1283,96 +1276,6 @@ namespace ocs2
       callArmControlService(1);
     }
 
-    /***** LB+RB 三键组合：搬运模式控制 *****/
-
-    // LB+RB+Y：进入搬运模式
-    void enterTransportMode()
-    {
-      kuavo_msgs::TransportModeCommand srv;
-      srv.request.command = kuavo_msgs::TransportModeCommand::Request::TRANSPORT_ENTER;
-      if (transport_mode_client_.call(srv))
-      {
-        if (srv.response.success)
-        {
-          ROS_INFO("[JoyControl] Transport mode ENTER: %s", srv.response.message.c_str());
-          // 待搬运动作：灵巧手握拳
-          kuavo_msgs::robotHandPosition hand_msg;
-          constexpr int fingers = 6;
-          hand_msg.left_hand_position.resize(fingers, 100);
-          hand_msg.right_hand_position.resize(fingers, 100);
-          hand_position_pub_.publish(hand_msg);
-          playMusic("进入搬运模式可安全移动.wav");
-        }
-        else
-        {
-          ROS_WARN("[JoyControl] Transport mode ENTER rejected: %s", srv.response.message.c_str());
-        }
-      }
-      else
-      {
-        ROS_ERROR("[JoyControl] Failed to call transport_mode_command service");
-      }
-    }
-
-    // LB+RB+A：退出搬运模式
-    void exitTransportMode()
-    {
-      kuavo_msgs::TransportModeCommand srv;
-      srv.request.command = kuavo_msgs::TransportModeCommand::Request::TRANSPORT_EXIT;
-      if (transport_mode_client_.call(srv))
-      {
-        if (srv.response.success)
-        {
-          ROS_INFO("[JoyControl] Transport mode EXIT: %s", srv.response.message.c_str());
-          // 退出搬运：灵巧手张开
-          kuavo_msgs::robotHandPosition hand_msg;
-          constexpr int fingers = 6;
-          hand_msg.left_hand_position.resize(fingers, 0);
-          hand_msg.right_hand_position.resize(fingers, 0);
-          hand_position_pub_.publish(hand_msg);
-          playMusic("退出搬运模式恢复正常.wav");
-        }
-        else
-        {
-          ROS_WARN("[JoyControl] Transport mode EXIT rejected: %s", srv.response.message.c_str());
-        }
-      }
-      else
-      {
-        ROS_ERROR("[JoyControl] Failed to call transport_mode_command service");
-      }
-    }
-
-    // LB+RB+B：搬运模式下机器人掉使能倒地
-    void triggerTransportFallDown()
-    {
-      kuavo_msgs::TransportModeCommand srv;
-      srv.request.command = srv.request.TRANSPORT_FALL_DOWN;
-      if (transport_mode_client_.call(srv))
-      {
-        if (srv.response.success)
-        {
-          fall_down_from_transport_ = true;
-          ROS_INFO("[JoyControl] Transport mode FALL_DOWN: %s", srv.response.message.c_str());
-        }
-        else
-        {
-          ROS_WARN("[JoyControl] Transport mode FALL_DOWN rejected: %s", srv.response.message.c_str());
-        }
-      }
-      else
-      {
-        ROS_ERROR("[JoyControl] Transport mode FALL_DOWN service call failed");
-      }
-    }
-
-    // LB+RB+X：触发 fall-stand-up 起身（两步由 FallStandController 内部管理）
-    void triggerFallStandUp()
-    {
-      ROS_INFO("[JoyControl] LB+RB+X triggering fall-stand-up");
-      callTriggerFallStandUpSrv();
-    }
-
     /************************ 组合键调度函数 ************************/
     // LB（左肩键）单组合：A/B/X/Y。沿用原逻辑：不提前 return，落到后续轴处理。
     bool handleLBComboButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
@@ -1456,59 +1359,14 @@ namespace ocs2
         }
         return true;
       }
-      // RB + X
+      // RB + X（倒地起身由 Python joy 节点处理，此处仅消费按键防止穿透）
       if (risingEdge(joy_msg, "BUTTON_RL"))
       {
-        if (IS_ROBAN(rb_version_))
-        {
-          // roban: RB+X is reserved as a no-op, but still consumes the button to avoid falling through to plain X logic.
-          ROS_INFO("[JoyControl] RB+X (Roban): reserved, no action");
-          return true;
-        }
-        callTriggerFallStandUpSrv(); // 非 roban: 起身
         return true;
       }
       // RB + B
       if (risingEdge(joy_msg, "BUTTON_TROT"))
       {
-        if (IS_ROBAN(rb_version_))
-        {
-          // roban: 预留给太极(舞蹈)。太极舞蹈尚未就绪，暂不触发真实控制器，
-          // 待舞蹈文件注册后接入(参照 RB+A 芭蕾 / RB+Y 新疆舞 的 triggerFixedDance*)。
-          ROS_WARN("[JoyControl] RB+B 太极: 预留, 舞蹈未就绪, 暂不响应");
-          return true;
-        }
-        callSetFallDownStateSrv(); // 非 roban: 触发倒地
-        return true;
-      }
-      return false;
-    }
-
-    // LB+RB 同时按下（仅 roban）：A/B/X/Y。返回 true 表示已消费。
-    bool handleLBRBComboButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
-    {
-      // LB+RB + B：全身断电倒地
-      if (risingEdge(joy_msg, "BUTTON_TROT"))
-      {
-        triggerTransportFallDown();
-        return true;
-      }
-      // LB+RB + X：两步起身
-      if (risingEdge(joy_msg, "BUTTON_RL"))
-      {
-        triggerFallStandUp();
-        return true;
-      }
-      // LB+RB + Y：进入搬运模式
-      if (risingEdge(joy_msg, "BUTTON_WALK"))
-      {
-        enterTransportMode();
-        return true;
-      }
-      // LB+RB + A：退出搬运模式
-      if (risingEdge(joy_msg, "BUTTON_STANCE"))
-      {
-        exitTransportMode();
         return true;
       }
       return false;
@@ -1583,6 +1441,13 @@ namespace ocs2
         ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
         loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
+
+      // 搬运模式期间（!= INACTIVE），C++ joy 早返，不处理任何操作
+      if (transport_mode_state_ != 0)
+      {
         old_joy_msg_ = *joy_msg;
         return;
       }
@@ -1894,14 +1759,11 @@ namespace ocs2
       
       const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
       const bool rb_held = buttonPressed(joy_msg, "BUTTON_RB");
-      // LB+RB 同时按下（仅 roban）：搬运模式 / 断电倒地 / 起身
+      // LB+RB 同时按下（仅 roban）：搬运/起身已全部前移至 Python，C++ 吞帧
       if (IS_ROBAN(rb_version_) && lb_held && rb_held)
       {
-        if (handleLBRBComboButtons(joy_msg))
-        {
-          old_joy_msg_ = *joy_msg;
-          return;
-        }
+        old_joy_msg_ = *joy_msg;
+        return;
       }
       else if (lb_held)// 按下左侧侧键，切换模式
       {
@@ -2399,39 +2261,6 @@ namespace ocs2
         ::ros::Duration(0.1).sleep();
       }
     }
-    void callTriggerFallStandUpSrv()
-    {
-      std::cout << "trigger callTriggerFallStandUpSrv" << std::endl;
-      std_srvs::Trigger srv;
-
-      // 调用服务
-      if (trigger_fall_stand_up_client_.call(srv))
-      {
-        ROS_INFO("[JoyControl] Trigger fall stand up service call successful: %s", srv.response.message.c_str());
-      }
-      else
-      {
-        ROS_ERROR("[JoyControl] Failed to call trigger_fall_stand_up service");
-      }
-    }
-    
-    void callSetFallDownStateSrv()
-    {
-      std::cout << "trigger callSetFallDownStateSrv" << std::endl;
-      std_srvs::SetBool srv;
-      srv.request.data = true;  // true = FALL_DOWN, false = STANDING
-
-      // 调用服务
-      if (set_fall_down_state_client_.call(srv))
-      {
-        ROS_INFO("[JoyControl] Set fall down state service call successful: %s", srv.response.message.c_str());
-      }
-      else
-      {
-        ROS_ERROR("[JoyControl] Failed to call set_fall_down_state service");
-      }
-    }
-
     void prepareDanceMusicPending(const std::string& dance_name)
     {
       pending_dance_music_.active = true;
@@ -2999,19 +2828,15 @@ namespace ocs2
     ros::ServiceClient execute_arm_action_client_;
     // Launch status
     ros::ServiceClient real_launch_status_client_;
-    // Fall stand up trigger service
-    ros::ServiceClient trigger_fall_stand_up_client_;
-    // Fall down state service (SetBool)
-    ros::ServiceClient set_fall_down_state_client_;
     ros::ServiceClient seat_sit_down_client_;
     ros::ServiceClient seat_stand_up_client_;
     bool seat_b_button_held_{false};   // 防重复：B 抬起后才允许下一轮 rising edge
     bool seat_a_button_held_{false};   // 防重复：A 抬起后才允许下一轮 rising edge
     // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
     ros::ServiceClient switch_dance_client_;
-    // Transport mode service
-    ros::ServiceClient transport_mode_client_;
-    bool fall_down_from_transport_{false};  // 门控：只有从搬运模式 FALL_DOWN 起身才播音频
+    // 搬运模式状态订阅（由 Python joy 驱动，C++ 仅读取用于早返）
+    ros::Subscriber transport_mode_state_sub_;
+    int transport_mode_state_{0};  // 0=INACTIVE, >0 搬运中，C++ joy 早返
     struct DanceMusicPending
     {
       bool active{false};

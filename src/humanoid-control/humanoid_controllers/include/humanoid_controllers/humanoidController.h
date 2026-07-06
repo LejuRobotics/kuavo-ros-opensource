@@ -101,17 +101,18 @@ namespace humanoid_controller
 
   enum FallStandState
   {
-    STANDING = 0,  // 站立状态
-    FALL_DOWN      // 倒地状态
+    STANDING = 0,
+    FALL_DOWN
   };
 
   enum TransportModeState
   {
     TRANSPORT_INACTIVE = 0,
     TRANSPORT_INTERPOLATING,
-    TRANSPORT_ACTIVE,
-    TRANSPORT_FALL_DOWN
-  };
+    TRANSPORT_READY,       // 姿态到位，MPC 维持，关节未锁
+    TRANSPORT_ACTIVE,      // CSP 锁死，可搬运
+    TRANSPORT_HANDING_OVER // 移交管理权中（Joy 协调完成后 EXIT）
+  }; // FALL_DOWN 不再作为状态，改用 transport_handoff_to_fallstand_ 标志位
   
   // struct SensorDataRL
   // {
@@ -264,9 +265,10 @@ namespace humanoid_controller
     void updatakinematics(const SensorData &sensor_data, bool is_initialized_);
     void resetKinematicsEstimation();
 
-    // ==================== MPC-RL插值系统函数声明 ====================
+    // MPC-RL 插值系统函数
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
     void updateMPCRLInterpolation(double current_time);
+    void startTransportMPCInterpolation();
 
     //waao： RL-RL插值
     // ==================== RL-RL插值系统函数声明 ====================
@@ -414,6 +416,7 @@ namespace humanoid_controller
 
     void swingArmPlanner(double st, double current_time, double stepDuration, Eigen::VectorXd &desire_arm_q, Eigen::VectorXd &desire_arm_v);
     void headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_start_index, bool push_back_mode);
     void waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg);
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg);
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr &msg);
@@ -569,10 +572,11 @@ namespace humanoid_controller
     bool isPullUp_{false};
     bool setPullUpState_{false};
     std::atomic<TransportModeState> transport_mode_state_{TRANSPORT_INACTIVE};
-    vector_t transport_target_pos_;
-    vector_t transport_start_pos_;
-    vector_t transport_head_start_pos_;
-    double transport_enter_time_{0.0};
+    std::atomic<bool> transport_handoff_to_fallstand_{false}; // FALL_DOWN 命令标志(主循环一帧消费)
+    std::atomic<bool> transport_lock_pending_{false};       // LOCK 命令标志(主循环处理)
+    std::atomic<bool> transport_handover_resume_mpc_{false}; // HAND_OVER 需 resume MPC(主循环处理)
+    vector_t transport_target_pos_;  // ACTIVE 状态下的 CSP 目标关节位置(LOCK 时从当前位姿捕获)
+    double transport_base_height_{0.7};  // 搬运躯干高度(m)，低于正常 MPC 站高以降低重心
     double standupTime_{0.0};
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
@@ -671,7 +675,6 @@ namespace humanoid_controller
 
     bool transportModeCommandCallback(kuavo_msgs::TransportModeCommand::Request &req,
                                       kuavo_msgs::TransportModeCommand::Response &res);
-    void computeTransportTargetPose();
 
     ros::ServiceServer real_initial_start_service_;
     KuavoDataBuffer<SensorData> *sensors_data_buffer_ptr_;
@@ -688,6 +691,7 @@ namespace humanoid_controller
     std::unique_ptr<ros::Rate> wbc_rate_;            // WBC 控制频率 Rate 对象
     benchmark::RepeatedTimer mpcTimer_;
     benchmark::RepeatedTimer wbcTimer_;
+    bool wbc_ran_this_frame_{false};                // 本帧 WBC 是否执行过（门控 time_cost 发布，防 DataAnalyzer 方差退化）
     size_t jointNum_ = 12;
     size_t armNum_ = 0;
     size_t headNum_ = 2;
@@ -824,7 +828,6 @@ namespace humanoid_controller
     Eigen::VectorXd desire_arm_v_;
     ros::Subscriber joint_sub_; // 添加订阅者成员变量
     bool is_standing_ = false;  // 添加站立状态标志位
-    bool last_standing_state_ = false;  // 添加上一次站立状态标志
 
     // Seat/Sit control manager
     std::unique_ptr<humanoid_controller::SitControlManager> sitControlManager_;
@@ -888,14 +891,6 @@ namespace humanoid_controller
     Eigen::VectorXd arm_interpolation_target_vel_; // 插值目标速度
     bool last_is_rl_controller_ = false;
 
-    // 倒地起身关节层插值相关成员变量
-    Eigen::VectorXd fall_stand_init_joints_;      // RL 轨迹中倒地起身的初始关节目标（腿+腰+臂）
-    Eigen::VectorXd fall_stand_start_pos_;        // 插值起始时的当前关节位置
-    bool is_fall_stand_interpolating_ = false;    // 是否正在进行倒地起身关节插值
-    bool is_fall_stand_interpolating_complete_ = false;    // 是否已完成倒地起身关节插值
-    double fall_stand_interp_start_time_ = 0.0;   // 插值开始时间
-    double fall_stand_required_time_ = 0.0;       // 根据最大关节速度计算得到的所需时长
-    double fall_stand_max_joint_velocity_ = 1.0;  // 倒地起身关节插值的最大关节速度(rad/s)
     bool has_fall_stand_controller_{false};
     
     //waao： RL-RL插值
