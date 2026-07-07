@@ -1142,6 +1142,17 @@ namespace ocs2
       if (joy_msg->axes.size() <= 3)
         return;
 
+      // AMP 停止判据:走/转指令速度均低于 0.1(不含下蹲通道 cmd_z),否则禁止下蹲
+      const double cmd_x = joystick_origin_axis_(0) * c_relative_base_limit_[0];
+      const double cmd_y = joystick_origin_axis_(1) * c_relative_base_limit_[1];
+      const double cmd_ang_z = joystick_origin_axis_(3) * c_relative_base_limit_[3];
+      if (std::fabs(cmd_x) >= 0.1 || std::fabs(cmd_y) >= 0.1 || std::fabs(cmd_ang_z) >= 0.1)
+      {
+        if (posture_control_mode_)
+          setPostureControlMode(false);
+        return;
+      }
+
       const double a3 = joy_msg->axes[3];
       if (std::abs(a3) <= kPostureAxisThreshold)
       {
