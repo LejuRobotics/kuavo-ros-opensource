@@ -151,6 +151,9 @@ add_message_files(
   BatteryInfo.msg
   ControllerSwitchEvent.msg
 
+# Power board status (0x01 系统状态读取)
+  PowerBoardStatus.msg
+
   # Lb single timed cmd
   timedSingleCmd.msg
 
