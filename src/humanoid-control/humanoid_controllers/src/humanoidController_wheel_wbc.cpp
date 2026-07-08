@@ -321,10 +321,10 @@ namespace humanoidController_wheel_wbc
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    mujoco_q[11] = 0.2618;
-    mujoco_q[14] = -0.5236;
-    mujoco_q[18] = 0.2618;
-    mujoco_q[21] = -0.5236;
+    mujoco_q[11] = 0.2918;
+    mujoco_q[14] = -0.8236;
+    mujoco_q[18] = 0.2918;
+    mujoco_q[21] = -0.8236;
 
     std::vector<double> robot_init_state_param;
     for (int i = 0; i < mujoco_q.size(); i++)

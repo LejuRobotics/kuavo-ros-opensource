@@ -5,8 +5,9 @@
 //
 // 关键约束：
 //   - 该节点不参与 chest 跟踪（无 chest 4 关节）、不发 cmd_vel；
-//   - 加载 kuavo_v62/kuavo.json 时，Quest3IkIncrementalROS 会优先读 arm_only_urdf
-//     字段（v62 提供，14 DOF 纯双臂 URDF），fallback 才走 arm_urdf；
+//   - major=6 时本节点在加载 kuavo.json 后注入 arm_only_urdf（写死 s63 的
+//     14 DOF 纯双臂 URDF，上半身各版本硬件一致），Quest3IkIncrementalROS
+//     优先读该字段，fallback 才走 arm_urdf；
 //   - chest / 底盘控制由 5W 平台原生方案（lb_ctrl_api → MPC）负责。
 #include <ros/package.h>
 #include <ros/ros.h>
@@ -151,6 +152,12 @@ int main(int argc, char** argv) {
 
   nlohmann::json jsonData;
   loadJsonConfig(jsonData, modelConfigFile);
+
+  // 轮臂 (major=6) 上半身硬件一致，半身 IK 统一使用 models/wheel_arm_upper_body/urdf/drake/wheel_v3_arm_only.urdf，
+  // 不依赖各版本 kuavo.json 的 arm_only_urdf 字段（该字段仅本节点消费，已移除）。
+  if (robotVersionInt / 10 == 6) {
+    jsonData["arm_only_urdf"] = "wheel_arm_upper_body/urdf/drake/wheel_v3_arm_only.urdf";
+  }
 
   // ChassisCmdVelForwarder 的 subscriber 用默认 callback queue，
   // 会被 Quest3IkIncrementalROS::run() 里的 ros::spin 自动处理；不要再额外加 AsyncSpinner。
