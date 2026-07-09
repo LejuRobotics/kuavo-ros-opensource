@@ -1119,9 +1119,8 @@ namespace ocs2
     }
 
     /************************ 组合键功能（动作）函数 ************************/
-    // LB+A（roban, all controllers incl. amp_hand_controller）：屏蔽/恢复 遥杆和方向键，
-    // 防止做动作/跳舞时误触摇杆导致摔倒。屏蔽前若处于 posture(下蹲/弯腰)模式，先退出，
-    // 避免遗留姿态命令被摇杆映射继续触发。
+    // LB+A(roban, 全控制器): 屏蔽/恢复 摇杆和方向键, 防止做动作时误触摔倒。
+    // 屏蔽前若处于 posture(下蹲/弯腰)模式先退出, 避免遗留姿态命令被摇杆触发。
     void toggleAxesShield()
     {
       // 若正处于 posture(下蹲/弯腰)模式，先退出 posture，避免遗留姿态命令
@@ -1147,6 +1146,17 @@ namespace ocs2
       if (joy_msg->axes.size() <= 3)
         return;
 
+      // AMP 停止判据:走/转指令速度均低于 0.1(不含下蹲通道 cmd_z),否则禁止下蹲
+      const double cmd_x = joystick_origin_axis_(0) * c_relative_base_limit_[0];
+      const double cmd_y = joystick_origin_axis_(1) * c_relative_base_limit_[1];
+      const double cmd_ang_z = joystick_origin_axis_(3) * c_relative_base_limit_[3];
+      if (std::fabs(cmd_x) >= 0.1 || std::fabs(cmd_y) >= 0.1 || std::fabs(cmd_ang_z) >= 0.1)
+      {
+        if (posture_control_mode_)
+          setPostureControlMode(false);
+        return;
+      }
+
       const double a3 = joy_msg->axes[3];
       if (std::abs(a3) <= kPostureAxisThreshold)
       {
@@ -1171,9 +1181,8 @@ namespace ocs2
                         a3, mapped);
     }
 
-    // amp_hand_controller 下的下蹲(弯腰)开关：进入需当前控制器为 amp_hand_controller，
-    // 再按一次退出。LB+A 在所有控制器下统一走 toggleAxesShield，
-    // 本函数暂时无调用方；后续如需保留"amp_hand 下蹲开关"功能，建议接入独立按键入口。
+    // amp_hand 下蹲(弯腰)开关: 进入需当前控制器为 amp_hand, 再按一次退出。
+    // 注: 本函数当前无调用方, 如需启用应接入独立按键入口。
     void toggleRobanPostureMode()
     {
       if (posture_control_mode_)
@@ -1372,9 +1381,8 @@ namespace ocs2
       return false;
     }
 
-    // 按住 LT/RT 期间仍用左摇杆与方向键控制行走（推走松停）。
-    // 右摇杆已用于头部/腰部控制，仅更新左摇杆 X/Y，右摇杆分量保持原值；
-    // 方向键(axes[6]/[7])按下时覆盖对应分量并发布，与左摇杆叠加。
+    // 按住 LT/RT 期间仍用左摇杆/方向键控制行走(推走松停): 仅更新左摇杆 X/Y,
+    // 右摇杆分量保持原值(已用于头/腰); 方向键按下时覆盖对应分量并与左摇杆叠加。
     void updateWalkAxisDuringLtRtHold(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
       if (!(axes_input_enabled_ && !m1m2_action_active_))

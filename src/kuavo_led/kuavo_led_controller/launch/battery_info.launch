@@ -11,8 +11,10 @@
             <param name="port" value="/dev/ttyLED0" />
             <!-- 波特率 -->
             <param name="baudrate" value="115200" />
-            <!-- 发布频率 (Hz) -->
-            <param name="publish_rate" value="1.0" />
+            <!-- 发布频率 (Hz)。单轮含3次串口收发(0x01+0x03+0x04)，
+                 每次约0.05s应答等待+读取，单轮约0.2s，上限约5Hz。
+                 设3Hz响应较快且留余量，避免与LED串口锁冲突。 -->
+            <param name="publish_rate" value="3.0" />
         </node>
     </group>
 

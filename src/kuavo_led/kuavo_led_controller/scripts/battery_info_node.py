@@ -3,6 +3,7 @@
 
 import rospy
 from kuavo_msgs.msg import BatteryInfo
+from kuavo_msgs.msg import PowerBoardStatus
 from kuavo_msgs.srv import GetBatteryInfo, GetBatteryInfoResponse
 import os
 import sys
@@ -10,16 +11,35 @@ try:
     import serial
 except ImportError:
     import subprocess
+    import sys
     print("正在安装pyserial库...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
     import serial
 import struct
 import time
 import threading
+import contextlib
+import fcntl
 
 # 导入电池应答包校验函数（与 battery_query.py 共用）
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'controller'))
 from hardware.battery_query import _validate_battery_response
+
+
+@contextlib.contextmanager
+def _serial_flock(ser):
+    """跨进程串口文件锁。
+
+    led_strip_service 的 SerialPort 后台线程会不停读 /dev/ttyLED0，
+    抢走本节点发给电源板的应答字节。flock(LOCK_EX) 让本节点独占串口
+    直至读完应答；LED 后台线程用 LOCK_NB 非阻塞抢锁，抢不到就跳过。
+    """
+    fcntl.flock(ser.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(ser.fileno(), fcntl.LOCK_UN)
+
 
 class BatteryInfoReader:
     def __init__(self, port='/dev/ttyLED0', baudrate=115200):
@@ -54,6 +74,127 @@ class BatteryInfoReader:
         """
         return (~sum(data)) & 0xFF
 
+
+    def read_system_status(self):
+        """
+        读取电源板系统状态（协议 0x01 系统状态读取）
+        发送: FF FF 00 02 01 FC
+        应答: FF FF 01 08 <7字节数据> <checksum>
+        :return: PowerBoardStatus 字典或None
+        """
+        with self.lock:
+            return self._read_system_status_unlocked()
+
+    def _read_system_status_unlocked(self):
+        """读取电源板系统状态（无锁版本）"""
+        # 构建数据包: FF FF 00 02 01 + checksum
+        packet = [0xFF, 0xFF, 0x00, 0x02, 0x01]
+        checksum = self.calculate_checksum(packet[2:])
+        packet.append(checksum)
+
+        # 跨进程串口锁：发指令+读应答期间独占 /dev/ttyLED0，避免被
+        # led_strip_service 的后台读取线程抢走应答字节。
+        with _serial_flock(self.ser):
+            # 清空接收缓冲区
+            self.ser.reset_input_buffer()
+            timeout_orig = self.ser.timeout
+            self.ser.timeout = 0.05
+            while self.ser.in_waiting > 0:
+                self.ser.read(self.ser.in_waiting)
+            self.ser.timeout = timeout_orig
+
+            # 发送数据
+            self.ser.write(bytes(packet))
+            rospy.logdebug(f"[系统状态] 发送指令: {[hex(x) for x in packet]}")
+
+            # 等待电源板应答（flock 锁保证串口独占，50ms 足够）
+            time.sleep(0.05)
+
+            # 读取应答: FF FF 01 08 <7字节> <checksum> = 12 字节
+            response = bytearray()
+            start_time = time.time()
+            timeout = 1.0  # 加大到 1s
+            while time.time() - start_time < timeout:
+                if self.ser.in_waiting > 0:
+                    chunk = self.ser.read(self.ser.in_waiting)
+                    response.extend(chunk)
+                    # 完整应答 12 字节
+                    if len(response) >= 12:
+                        if response[0] == 0xFF and response[1] == 0xFF and response[2] == 0x01:
+                            break
+                        else:
+                            response = bytearray()
+                time.sleep(0.01)
+
+            rospy.logdebug(f"[系统状态] 最终应答 ({len(response)} 字节): {[hex(x) for x in response]}")
+
+        # 验证（锁已释放）
+        if len(response) < 12:
+            rospy.logwarn(f"系统状态应答数据不足: {len(response)} < 12")
+            return None
+        if response[0] != 0xFF or response[1] != 0xFF:
+            rospy.logwarn(f"系统状态无效包头: {response[0]:02X} {response[1]:02X}")
+            return None
+        if response[2] != 0x01:
+            rospy.logwarn(f"系统状态指令字节不匹配: 期望01, 实际{response[2]:02X}")
+            return None
+
+        # 校验和: Instruction + Length + Param1~7
+        data_for_checksum = response[2:2 + 2 + 7]  # 01 08 + 7字节 = 9字节
+        expected_checksum = self.calculate_checksum(data_for_checksum)
+        actual_checksum = response[11]
+        if expected_checksum != actual_checksum:
+            rospy.logwarn(f"系统状态校验和错误: 期望{expected_checksum:02X}, 实际{actual_checksum:02X}")
+            # 不返回None，仍解析数据（部分电源板校验和可能不一致）
+
+        # 提取7字节数据
+        param1 = response[4]  # 中断保护状态和电池通信状态
+        param2 = response[5]  # 电池和电源状态
+        param3 = response[6]  # 输出控制状态
+        param4 = response[7]  # NTC温度
+        param5 = response[8]  # 充电电压
+        param6 = response[9]  # BAT1电压
+        param7 = response[10] # BAT2电压
+
+        status = {
+            # 原始字节
+            'status_byte1': param1,
+            'status_byte2': param2,
+            'status_byte3': param3,
+            'ntc_temperature': param4,
+            'charge_voltage': param5,
+            'bat1_voltage': param6,
+            'bat2_voltage': param7,
+            # Param1 拆解
+            'stop_int':          bool((param1 >> 0) & 0x01),
+            'rf_int':            bool((param1 >> 1) & 0x01),
+            'board_is_wheel':    bool((param1 >> 2) & 0x01),
+            'ideal_diode_fail':  bool((param1 >> 4) & 0x01),
+            'cur_ov_protection': bool((param1 >> 5) & 0x01),
+            'bat1_comm_ok':      bool((param1 >> 6) & 0x01),
+            'bat2_comm_ok':      bool((param1 >> 7) & 0x01),
+            # Param2 拆解
+            'bat1_exists':       bool((param2 >> 0) & 0x01),
+            'bat2_exists':       bool((param2 >> 1) & 0x01),
+            'bat1_low_power':    bool((param2 >> 2) & 0x01),
+            'bat2_low_power':    bool((param2 >> 3) & 0x01),
+            'charging':          bool((param2 >> 4) & 0x01),
+            'fail_12v':          bool((param2 >> 5) & 0x01),
+            'fail_19v':          bool((param2 >> 6) & 0x01),
+            'fail_24v':          bool((param2 >> 7) & 0x01),
+            # Param3 拆解
+            'arm_en':            bool((param3 >> 1) & 0x01),
+            'leg_en':            bool((param3 >> 2) & 0x01),
+            'out_19v_en':        bool((param3 >> 3) & 0x01),
+            'out1_12v_en':       bool((param3 >> 4) & 0x01),
+            'out2_12v_en':       bool((param3 >> 5) & 0x01),
+            'out3_12v_en':       bool((param3 >> 6) & 0x01),
+            'out_24v_en':        bool((param3 >> 7) & 0x01),
+        }
+
+        rospy.logdebug(f"系统状态: P1={param1:#04x} P2={param2:#04x} P3={param3:#04x} "
+                       f"NTC={param4}℃ 充电V={param5}V BAT1V={param6}V BAT2V={param7}V")
+        return status
 
     def read_battery_info(self, battery_id):
         """
@@ -90,73 +231,79 @@ class BatteryInfoReader:
         checksum = self.calculate_checksum(packet[2:])
         packet.append(checksum)
 
-        # 清空接收缓冲区（发送前清除旧数据）
-        self.ser.reset_input_buffer()
-        timeout_orig = self.ser.timeout
-        self.ser.timeout = 0.05
-        while self.ser.in_waiting > 0:
-            self.ser.read(self.ser.in_waiting)
-        self.ser.timeout = timeout_orig
+        # 跨进程串口锁：发指令+读应答期间独占 /dev/ttyLED0，避免被
+        # led_strip_service 的后台读取线程抢走应答字节。
+        with _serial_flock(self.ser):
+            # 清空接收缓冲区 - 使用循环彻底清空
+            self.ser.reset_input_buffer()
+            # 额外读取所有可能残留的数据
+            timeout_orig = self.ser.timeout
+            self.ser.timeout = 0.05
+            while self.ser.in_waiting > 0:
+                self.ser.read(self.ser.in_waiting)
+            self.ser.timeout = timeout_orig
 
-        # 发送数据
-        self.ser.write(bytes(packet))
-        rospy.logdebug(f"发送指令: {[hex(x) for x in packet]}")
+            # 发送数据
+            self.ser.write(bytes(packet))
+            rospy.logdebug(f"发送指令: {[hex(x) for x in packet]}")
 
-        # 等待 RS485 半双工总线上命令回显和硬件应答到达
-        # 硬件在 ~5ms 内返回 35 字节应答，等待 50ms 确保数据就绪
-        # 修复：不再在等待后排空数据，避免丢弃真实电池应答
-        time.sleep(0.05)
+            # 等待 RS485 半双工总线上命令回显和硬件应答到达
+            # 硬件在 ~5ms 内返回 35 字节应答，等待 50ms 确保数据就绪
+            # 修复：不再在等待后排空数据，避免丢弃真实电池应答
+            time.sleep(0.05)
 
-        expected_instruction = 0x03 if battery_id == 0 else 0x04
-        expected_header = bytes([0xFF, 0xFF, expected_instruction])
-        header_len = len(expected_header)
-        response = bytearray()
-        start_time = time.time()
-        timeout = 0.5  # 500ms 超时
+            expected_instruction = 0x03 if battery_id == 0 else 0x04
+            expected_header = bytes([0xFF, 0xFF, expected_instruction])
+            header_len = len(expected_header)
+            response = bytearray()
+            matched = None
+            start_time = time.time()
+            timeout = 0.5  # 500ms 超时
 
-        while time.time() - start_time < timeout:
-            if self.ser.in_waiting > 0:
-                chunk = self.ser.read(self.ser.in_waiting)
-                response.extend(chunk)
-                rospy.logdebug(f"已读取 {len(chunk)} 字节，累计 {len(response)} 字节")
+            while time.time() - start_time < timeout:
+                if self.ser.in_waiting > 0:
+                    chunk = self.ser.read(self.ser.in_waiting)
+                    response.extend(chunk)
+                    rospy.logdebug(f"已读取 {len(chunk)} 字节，累计 {len(response)} 字节")
 
-                # 在累积数据中搜索匹配的响应头
-                if len(response) >= 35:
-                    for i in range(len(response) - header_len + 1):
-                        if response[i:i + header_len] == expected_header:
-                            if len(response) - i >= 35:
-                                matched = bytes(response[i:i + 35])
-                                if _validate_battery_response(matched):
-                                    rospy.logdebug(f"在位置 {i} 找到匹配的响应头")
-                                    return self._parse_battery_data_from_response(matched, battery_id)
-                                # 假阳性匹配：跳过这个 header，继续向后搜索
+                    if len(response) >= 35:
+                        for i in range(len(response) - header_len + 1):
+                            if response[i:i + header_len] == expected_header:
+                                if len(response) - i >= 35:
+                                    candidate = bytes(response[i:i + 35])
+                                    if _validate_battery_response(candidate):
+                                        rospy.logdebug(f"在位置 {i} 找到匹配的响应头")
+                                        matched = candidate
+                                        break
                                 response = response[i + header_len:]
                                 break
-                # 防止累积数据无限增长
-                if len(response) > 255:
-                    response = response[-128:]
-            time.sleep(0.01)
+                        if matched is not None:
+                            break
+                    if len(response) > 255:
+                        response = response[-128:]
+                time.sleep(0.01)
 
-        rospy.logdebug(f"接收到的数据长度: {len(response)}")
-        rospy.logdebug(f"接收数据: {[hex(x) for x in response]}")
+            if matched is None and len(response) >= 35:
+                for i in range(len(response) - header_len + 1):
+                    if response[i:i + header_len] == expected_header:
+                        if len(response) - i >= 35:
+                            candidate = bytes(response[i:i + 35])
+                            if _validate_battery_response(candidate):
+                                rospy.logdebug(f"超时后在位置 {i} 找到匹配的响应头")
+                                matched = candidate
+                                break
 
-        # 超时后最后一次搜索
-        if len(response) >= 35:
-            for i in range(len(response) - header_len + 1):
-                if response[i:i + header_len] == expected_header:
-                    if len(response) - i >= 35:
-                        matched = bytes(response[i:i + 35])
-                        if _validate_battery_response(matched):
-                            rospy.logdebug(f"超时后在位置 {i} 找到匹配的响应头")
-                            return self._parse_battery_data_from_response(matched, battery_id)
+            rospy.logdebug(f"接收到的数据长度: {len(response)}")
+            rospy.logdebug(f"接收数据: {[hex(x) for x in response]}")
 
-        # 超时未找到完整响应
-        if len(response) > 0:
-            rospy.logdebug(f"接收到不完整数据: {len(response)} 字节，未找到匹配的响应头")
-        else:
-            rospy.logdebug("未收到任何响应数据")
+        if matched is None:
+            if len(response) > 0:
+                rospy.logdebug(f"接收到不完整数据: {len(response)} 字节，未找到匹配的响应头")
+            else:
+                rospy.logdebug("未收到任何响应数据")
+            return None
 
-        return None
+        return self._parse_battery_data_from_response(matched, battery_id)
 
     def _parse_battery_data_from_response(self, response, battery_id):
         """
@@ -197,19 +344,19 @@ class BatteryInfoReader:
             # Param5-6: 剩余容量（无符号，10mAh）
             remaining_capacity = struct.unpack('>H', bytes(data[4:6]))[0] * 10
 
-            # Param7-8: 充满容量（无符号，10mAh）
+            # Param7-8: 充满容量（无符号，10mAh）注意：也需要乘以10
             full_capacity = struct.unpack('>H', bytes(data[6:8]))[0] * 10
 
             # Param9-10: 放电循环次数（无符号）
             cycle_count = struct.unpack('>H', bytes(data[8:10]))[0]
 
-            # Param11-12: 剩余容量百分比（无符号，2字节）
+            # Param11-12: 剩余容量百分比（无符号，注意是2字节！）
             percentage = struct.unpack('>H', bytes(data[10:12]))[0]
 
-            # Param13-14: cell1~16均衡状态
+            # Param13-14: cell1~16均衡状态（bit0=cell1, bit15=cell16）
             balance1 = struct.unpack('>H', bytes(data[12:14]))[0]
 
-            # Param15-16: cell17~33均衡状态
+            # Param15-16: cell17~33均衡状态（bit0=cell17, bit16=cell33）
             balance2 = struct.unpack('>H', bytes(data[14:16]))[0]
 
             # Param17-18: 保护标志（独立字段）
@@ -311,56 +458,6 @@ class BatteryInfoReader:
         """关闭串口连接"""
         self.ser.close()
 
-class BatteryInfoReaderProxy:
-    """
-    电池信息读取器（ROS Service 代理模式）
-
-    不直接打开串口，而是通过调用 LED 服务节点的 _query_battery_hw service
-    来获取电池数据。适用于 LED 和电池同时启用、串口已由 LED 节点持有的场景。
-
-    Interface 与 BatteryInfoReader 一致：提供 read_battery_info(battery_id) 方法。
-    """
-
-    def __init__(self, service_name='_query_battery_hw'):
-        """初始化 ROS Service 代理"""
-        rospy.loginfo(f"等待电池查询服务: {service_name} ...")
-        try:
-            rospy.wait_for_service(service_name, timeout=10.0)
-            self._proxy = rospy.ServiceProxy(service_name, GetBatteryInfo)
-            rospy.loginfo(f"已连接到电池查询服务: {service_name}")
-        except rospy.ROSException as e:
-            rospy.logerr(f"等待电池查询服务超时: {service_name} ({e})")
-            raise
-
-    def read_battery_info(self, battery_id):
-        """
-        通过 ROS service 读取电池信息（与 BatteryInfoReader 接口一致）
-        """
-        try:
-            resp = self._proxy(battery_id=battery_id)
-            if resp.success:
-                return {
-                    'battery_id': battery_id,
-                    'voltage': resp.voltage,
-                    'current': resp.current,
-                    'remaining_capacity': resp.remaining_capacity,
-                    'full_capacity': resp.full_capacity,
-                    'percentage': resp.percentage,
-                    'cycle_count': resp.cycle_count,
-                    'protection_flags': resp.protection_flags,
-                    'temperatures': list(resp.temperatures)
-                }
-            else:
-                rospy.logdebug(f"电池 {battery_id} 查询失败: {resp.message}")
-                return None
-        except rospy.ServiceException as e:
-            rospy.logerr(f"调用电池查询服务失败: {e}")
-            return None
-
-    def close(self):
-        """清理代理资源"""
-        self._proxy = None
-
 class BatteryInfoNode:
     def __init__(self):
         # 初始化ROS节点
@@ -370,17 +467,10 @@ class BatteryInfoNode:
         self.port = rospy.get_param('~port', '/dev/ttyLED0')
         self.baudrate = rospy.get_param('~baudrate', 115200)
         self.publish_rate = rospy.get_param('~publish_rate', 1.0)  # 发布频率 Hz
-        # backend: "serial" = 直接打开串口; "ros_service" = 通过 LED 节点的 _query_battery_hw 服务
-        self.backend = rospy.get_param('~backend', 'serial')
 
         # 创建电池信息读取器实例
         try:
-            if self.backend == 'ros_service':
-                self.battery_reader = BatteryInfoReaderProxy()
-                rospy.loginfo("电池信息读取模式: ROS Service 代理（与 LED 共用串口）")
-            else:
-                self.battery_reader = BatteryInfoReader(port=self.port, baudrate=self.baudrate)
-                rospy.loginfo("电池信息读取模式: 直接串口")
+            self.battery_reader = BatteryInfoReader(port=self.port, baudrate=self.baudrate)
         except Exception as e:
             rospy.logerr(f"初始化电池读取器失败: {e}")
             rospy.signal_shutdown("初始化失败")
@@ -389,6 +479,8 @@ class BatteryInfoNode:
         # 创建ROS发布者
         self.battery1_pub = rospy.Publisher('battery_info_1', BatteryInfo, queue_size=10)
         self.battery2_pub = rospy.Publisher('battery_info_2', BatteryInfo, queue_size=10)
+        # 电源板系统状态发布者（0x01 系统状态读取）
+        self.power_board_status_pub = rospy.Publisher('power_board_status', PowerBoardStatus, queue_size=10)
 
         # 创建电池信息查询服务
         self.get_battery_service = rospy.Service('get_battery_info', GetBatteryInfo, self.handle_get_battery_info)
@@ -398,10 +490,20 @@ class BatteryInfoNode:
 
         rospy.loginfo("电池信息节点已启动")
         rospy.loginfo(f"发布频率: {self.publish_rate} Hz")
+        rospy.loginfo("话题: /battery_info_1, /battery_info_2, /power_board_status")
         rospy.loginfo("服务: /get_battery_info")
 
     def timer_callback(self, event):
-        """定时器回调函数，读取并发布电池信息"""
+        """定时器回调函数，读取并发布电池信息与电源板状态"""
+        # 读取电源板系统状态（0x01）
+        try:
+            status = self.battery_reader.read_system_status()
+            if status:
+                msg = self._create_power_board_status_message(status)
+                self.power_board_status_pub.publish(msg)
+        except Exception as e:
+            rospy.logerr(f"读取电源板系统状态失败: {e}")
+
         # 读取BAT1 (左电池)
         try:
             bat1_info = self.battery_reader.read_battery_info(0)
@@ -419,6 +521,45 @@ class BatteryInfoNode:
                 self.battery2_pub.publish(msg)
         except Exception as e:
             rospy.logerr(f"读取BAT2信息失败: {e}")
+
+    def _create_power_board_status_message(self, status):
+        """从状态字典创建 PowerBoardStatus 消息"""
+        msg = PowerBoardStatus()
+        msg.timestamp = rospy.Time.now()
+        # 原始字节
+        msg.status_byte1 = status['status_byte1']
+        msg.status_byte2 = status['status_byte2']
+        msg.status_byte3 = status['status_byte3']
+        msg.ntc_temperature = status['ntc_temperature']
+        msg.charge_voltage = status['charge_voltage']
+        msg.bat1_voltage = status['bat1_voltage']
+        msg.bat2_voltage = status['bat2_voltage']
+        # Param1 拆解
+        msg.stop_int = status['stop_int']
+        msg.rf_int = status['rf_int']
+        msg.board_is_wheel = status['board_is_wheel']
+        msg.ideal_diode_fail = status['ideal_diode_fail']
+        msg.cur_ov_protection = status['cur_ov_protection']
+        msg.bat1_comm_ok = status['bat1_comm_ok']
+        msg.bat2_comm_ok = status['bat2_comm_ok']
+        # Param2 拆解
+        msg.bat1_exists = status['bat1_exists']
+        msg.bat2_exists = status['bat2_exists']
+        msg.bat1_low_power = status['bat1_low_power']
+        msg.bat2_low_power = status['bat2_low_power']
+        msg.charging = status['charging']
+        msg.fail_12v = status['fail_12v']
+        msg.fail_19v = status['fail_19v']
+        msg.fail_24v = status['fail_24v']
+        # Param3 拆解
+        msg.arm_en = status['arm_en']
+        msg.leg_en = status['leg_en']
+        msg.out_19v_en = status['out_19v_en']
+        msg.out1_12v_en = status['out1_12v_en']
+        msg.out2_12v_en = status['out2_12v_en']
+        msg.out3_12v_en = status['out3_12v_en']
+        msg.out_24v_en = status['out_24v_en']
+        return msg
 
     def _create_battery_message(self, battery_info):
         """创建ROS消息"""
@@ -454,7 +595,7 @@ class BatteryInfoNode:
                 response.message = f"Failed to read battery {req.battery_id} info"
                 return response
 
-            # 构建响应 - 直接使用请求中的 battery_id
+            # 构建响应 - 直接使用请求中的 battery_id，确保返回正确的电池ID
             response = GetBatteryInfoResponse()
             response.battery_id = req.battery_id
             response.voltage = battery_info['voltage']

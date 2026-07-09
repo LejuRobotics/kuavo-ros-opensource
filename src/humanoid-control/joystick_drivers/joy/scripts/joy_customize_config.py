@@ -663,7 +663,7 @@ class JoyCustomizeConfigNode:
 
         m1m2_action_active_pub 是 latch 话题: 抢发 True 后, 若空动作/服务失败/超时导致
         /robot_action_state 不发消息, _robot_action_state_callback(唯一翻回 False 入口)不触发,
-        True 会被永久 latch -> cpp 侧摇杆被永久禁用(issue #3303)。
+        True 会被永久 latch -> cpp 侧摇杆被永久禁用。
         本方法在动作流程的各结束/失败路径主动回发 False, 保证屏蔽最终必解除。
         """
         # 仅当本次触发源确实是 m1m2 时才需要回发(否则属于 LT/RT 或无操作, 不应误改 m1m2 信号)。
@@ -729,9 +729,8 @@ class JoyCustomizeConfigNode:
     # 避免摇杆漂移在临界态把 tact 当走路拒掉。
     _MOTION_DEAD_ZONE = 0.05
 
-    # MPC 下视为"在走"的步态名。stance=站立静止; walk=行走; trot=原地踏步。
-    # 踏步时 cmd_vel≈0, 仅靠速度死区判不出, 需用步态名补判(见 _has_motion_intent)。
-    # AMP 无 walk/stance 状态机, 该话题不下发, _current_gait_name 恒为 "stance", 不影响 AMP。
+    # MPC 下视为"在走"的步态名: stance=静止, walk=行走, trot=原地踏步。
+    # 踏步 cmd_vel≈0 需用步态名补判; AMP 无状态机, 该话题不下发, _current_gait_name 恒 "stance"。
     _WALKING_GAIT_NAMES = ("walk", "trot")
 
     def _cmd_vel_callback(self, msg: Twist) -> None:
@@ -817,7 +816,7 @@ class JoyCustomizeConfigNode:
 
         判据 = 速度死区 OR 步态名:
           - /cmd_vel 的 linear.x/y 或 angular.z 任一超死区(AMP/MPC 通用, 蹲起 linear.z 不算);
-          - 或 MPC 步态名为 walk/trot(覆盖原地踏步: cmd_vel≈0 但机器人在踏步, 见 #3305)。
+          - 或 MPC 步态名为 walk/trot(覆盖原地踏步: cmd_vel≈0 但机器人在踏步)。
         """
         v = self._last_cmd_vel
         if v is not None and (abs(v.linear.x) > self._MOTION_DEAD_ZONE
@@ -1178,7 +1177,7 @@ class JoyCustomizeConfigNode:
 
                         # 走路时的精细化拒绝(判据见 _has_motion_intent):
                         #   - M1/M2: 任何控制器都拒(用户可自定义动作幅度过大易摔);
-                        #     覆盖原地踏步(trot): cmd_vel≈0 但步态在走, 一样拒(见 #3305)。
+                        #     覆盖原地踏步(trot): cmd_vel≈0 但步态在走, 一样拒。
                         #   - LT/RT: 仅 AMP 走路时拒; MPC 走路时允许(PDF §4 边走边做)。
                         # 速度死区对 AMP/MPC 通用; 步态名仅 MPC 有效(AMP 无状态机, 恒 stance)。
                         if self._has_motion_intent():
@@ -1224,9 +1223,8 @@ class JoyCustomizeConfigNode:
 
     def execute_action_type(self, action_config):
         """处理action类型的自定义动作"""
-        # 过滤空串: 配置里 [""] 会被误判为"有动作", 进而抢发 m1m2 屏蔽信号却又不调用
-        # /execute_arm_action -> /robot_action_state 不发消息 -> 屏蔽信号 latch 卡 True -> 摇杆永久失灵(见 issue #3303)。
-        # 这里把 [""] / [None] / 纯空白项视为无动作, 避免空动作触发屏蔽。
+        # 过滤空串: [""] 会被误判为"有动作", 抢发 m1m2 屏蔽信号却不调用 /execute_arm_action,
+        # 致屏蔽信号 latch 卡 True 摇杆永久失灵; 故把 [""]/[None]/空白项视为无动作。
         arm_pose_names = [n for n in action_config.get("arm_pose_name", []) if n and str(n).strip()]
         music_names = [n for n in action_config.get("music_name", []) if n and str(n).strip()]
         rospy.loginfo(f"Executing regular action")

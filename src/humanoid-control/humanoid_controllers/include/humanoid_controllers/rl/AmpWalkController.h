@@ -248,6 +248,9 @@ namespace humanoid_controller
     bool lateral_elbow_fix_{false};
     static constexpr double kLateralElbowFixScale_{0.5};
     bool enable_elbow_scale_{false};
+    bool enable_back_arm_enhance_{false};
+    static constexpr double kBackArmEnhanceScale_{0.3};
+    static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};
     bool enable_roll_compensation_{false};
     bool enable_off_cmdy_by_cmdx_{false};
     bool tiny_cmdx_clip_enabled_{false};
@@ -270,6 +273,11 @@ namespace humanoid_controller
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};
     ros::ServiceServer change_amp_mode_srv_;
+
+    // 站立模式下下蹲后起身的高度命令平滑（仅 amp_hand_controller）
+    bool stance_height_stand_up_smoothing_enabled_{true};
+    double max_stance_height_stand_up_change_{0.004}; ///< 起身单步最大高度命令变化量 (m)
+    double smoothed_stance_height_cmd_{0.0};          ///< 平滑后的下蹲高度命令
 
     bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
                                kuavo_msgs::changeArmCtrlMode::Response &res);
@@ -298,6 +306,8 @@ namespace humanoid_controller
     
     // 腰部控制辅助函数
     void initWaistControl();
+
+    void applyStanceHeightStandUpSmoothing(CommandDataRL& cmd);
 
   };
 }

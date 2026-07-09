@@ -510,21 +510,9 @@ class H12PROControllerNode:
         #     self._mpc_obs_callback,
         #     queue_size=1
         # )
-        self.traj_sub = rospy.Subscriber(
-            '/bezier/arm_traj', 
-            JointTrajectory, 
-            self._traj_callback, 
-            queue_size=1, 
-            tcp_nodelay=True
-        )
-
-        self.kuavo_arm_traj_pub = rospy.Publisher(
-            '/kuavo_arm_traj', 
-            JointState, 
-            queue_size=1, 
-            tcp_nodelay=True
-        )
-
+        # /bezier/arm_traj 订阅和 /kuavo_arm_traj 发布已移除：
+        # tact 执行时轨迹转发由 autostart (arm_trajectory_bezier_process.py) 统一处理，
+        # joy_node 不再参与手臂轨迹数据流，避免多发布者冲突
         self.plan_arm_state_sub = rospy.Subscriber(
             "/bezier/arm_traj_state",
             planArmState,
@@ -584,42 +572,11 @@ class H12PROControllerNode:
             rospy.logerr(f"[NavigationState] Error processing navigation state: {e}")
         
     def publish_arm_joint_state(self):
-        if self.plan_arm_is_finished is False and len(self.should_pub_arm_joint_state.position) > 0:
-            self.kuavo_arm_traj_pub.publish(self.should_pub_arm_joint_state)
-            self.control_hand_pub.publish(self.should_pub_hand_position)
-            self.control_head_pub.publish(self.should_pub_head_motion_data)
+        # /kuavo_arm_traj 由 autostart 统一发布，joy_node 不再转发手臂轨迹
+        pass
 
     def _plan_arm_state_callback(self, msg):
         self.plan_arm_is_finished = msg.is_finished
-
-    def _traj_callback(self, msg):
-        if len(msg.points) == 0:
-            return
-        point = msg.points[0]
-        self.should_pub_arm_joint_state.name = [
-            "l_arm_pitch",
-            "l_arm_roll",
-            "l_arm_yaw",
-            "l_forearm_pitch",
-            "l_hand_yaw",
-            "l_hand_pitch",
-            "l_hand_roll",
-            "r_arm_pitch",
-            "r_arm_roll",
-            "r_arm_yaw",
-            "r_forearm_pitch",
-            "r_hand_yaw",
-            "r_hand_pitch",
-            "r_hand_roll",
-        ]
-        self.should_pub_arm_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
-        self.should_pub_arm_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
-        self.should_pub_arm_joint_state.effort = [0] * 14
-
-        self.should_pub_hand_position.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
-        self.should_pub_hand_position.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
-
-        self.should_pub_head_motion_data.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
 
 
     # def _mpc_obs_callback(self, msg):

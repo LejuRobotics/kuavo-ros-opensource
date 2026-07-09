@@ -250,6 +250,7 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
       loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
+      loadData::loadPtreeValue(pt, enable_back_arm_enhance_, "enable_back_arm_enhance", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
       try
@@ -285,6 +286,18 @@ namespace humanoid_controller
         tiny_cmdy_clip_enabled_ = false;
         tiny_cmd_angz_clip_enabled_ = false;
         ROS_WARN("[%s] TinyCmdClip not loaded: %s", name_.c_str(), e.what());
+      }
+
+      if (pt.find("velocitySmoothing") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, stance_height_stand_up_smoothing_enabled_,
+                                 "velocitySmoothing.standUpHeightSmoothingEnabled", false);
+        loadData::loadPtreeValue(pt, max_stance_height_stand_up_change_,
+                                 "velocitySmoothing.maxStandUpHeightChange", false);
+        ROS_INFO("[%s] Stance height stand-up smoothing: enabled=%s, maxChange=%.4f m/step",
+                 name_.c_str(),
+                 stance_height_stand_up_smoothing_enabled_ ? "true" : "false",
+                 max_stance_height_stand_up_change_);
       }
     }
 
@@ -496,7 +509,8 @@ namespace humanoid_controller
     }
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = true;  // 初始化为站立状态
-
+    smoothed_stance_height_cmd_ = 0.0;
+    
     ROS_INFO("[%s] reset", name_.c_str());
     sensor_data_updated_ = false;
   }
@@ -744,6 +758,39 @@ namespace humanoid_controller
     return angz;
   }
 
+  void AmpWalkController::applyStanceHeightStandUpSmoothing(CommandDataRL& cmd)
+  {
+    if (!is_amp_hand_controller_ || !stance_height_stand_up_smoothing_enabled_)
+    {
+      return;
+    }
+
+    if (cmd.cmdStance_ < 1.0)
+    {
+      smoothed_stance_height_cmd_ = 0.0;
+      return;
+    }
+
+    const bool in_posture_stance = (amp_mode_ == 1);
+    const double raw_height = in_posture_stance ? cmd.cmdVelAngularZ_ : 0.0;
+    const double diff = raw_height - smoothed_stance_height_cmd_;
+
+    if (diff > 1e-9)
+    {
+      smoothed_stance_height_cmd_ += std::min(diff, max_stance_height_stand_up_change_);
+    }
+    else
+    {
+      smoothed_stance_height_cmd_ = raw_height;
+    }
+
+    if (in_posture_stance || std::abs(smoothed_stance_height_cmd_) > 1e-6)
+    {
+      cmd.cmdVelAngularZ_ = smoothed_stance_height_cmd_;
+      cmd.cmdVelLineZ_ = smoothed_stance_height_cmd_;
+    }
+  }
+
   void AmpWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
@@ -774,6 +821,8 @@ namespace humanoid_controller
   {
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
+
+    applyStanceHeightStandUpSmoothing(cmd);
     
     updatePhase(cmd);
 
@@ -809,6 +858,7 @@ namespace humanoid_controller
                                              jointArmNum_ > 0 && arm_controller_ &&
                                              arm_controller_->getMode() != 1;
 
+    // amp_hand: 负向 cmd_x 缩放（外部手臂接管时使用独立系数）
     if (cmd.cmdVelLineX_ < 0.0)
     {
       const double neg_scale = (is_amp_hand_controller_ && external_arm_control_active)
@@ -957,6 +1007,13 @@ namespace humanoid_controller
         const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;
         projected_gravity = Eigen::AngleAxisd(compensation_roll_rad, Eigen::Vector3d::UnitX()) * projected_gravity;
       }
+    }
+
+    if (enable_back_arm_enhance_ && is_walking_mode &&
+        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.02)
+    {
+      projected_gravity =
+          Eigen::AngleAxisd(5.0 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
     }
 
     Eigen::VectorXd local_action = getCurrentAction();
@@ -1268,6 +1325,47 @@ namespace humanoid_controller
     bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
     applyArmTakeoverBlend(local_action, ros::Time::now(), is_standing);
 
+    if (enable_back_arm_enhance_)
+    {
+      CommandDataRL backArmCmd = currentCmdData;
+      backArmCmd.scale();
+      if (backArmCmd.cmdVelLineX_ < kBackArmEnhanceCmdXThreshold_)
+      {
+        const double arm1_scale_ratio = kBackArmEnhanceScale_ / actionScale_;
+        local_action[13] = -0.75+1.0*local_action[10];
+        local_action[13] *= arm1_scale_ratio;
+        local_action[14] *= 0.5;
+        local_action[16] += 1.5-0.8*local_action[4];
+        local_action[17] = -0.75+1.0*local_action[4];
+        local_action[17] *= arm1_scale_ratio;
+        local_action[18] *= 0.5;
+        local_action[20] += 1.5-0.8*local_action[10];
+      }
+    }
+
+    if (enable_elbow_scale_)
+    {
+      const double elbow_scale_ratio = 0.18 / actionScale_;
+      local_action[16] *= elbow_scale_ratio;
+      local_action[20] *= elbow_scale_ratio;
+    }
+
+    if (enable_elbow_scale_)
+    {
+      // zarm_l4_joint=16, zarm_r4_joint=20: final target (action*scale+default) must stay < -0.05
+      static constexpr int kElbowActionIndices[] = {16, 20};
+      static constexpr double kElbowTargetUpperBound = -0.15;
+      for (const int idx : kElbowActionIndices)
+      {
+        const double scale = actionScale_ * actionScaleTestRL_[idx];
+        if (scale <= 0.0)
+          continue;
+        const double max_action = (kElbowTargetUpperBound - active_default[idx]) / scale;
+        if (local_action[idx] > max_action)
+          local_action[idx] = max_action;
+      }
+    }
+
     Eigen::VectorXd jointTor(jointNum_ + jointArmNum_ + waistNum_);
 
     // 使用 is_roban_ 判断机型（与 FallStandController 一致）
@@ -1574,7 +1672,11 @@ namespace humanoid_controller
       if (is_roban_)
       {
         // amp_mode=1 时，将站立命令切到“复用行走指令”语义（x/y/yaw 三通道）。
-        gait_receiver_->setReuseWalkCommandInStance(amp_mode_ == 1);
+        // 起身平滑未完成时继续复用，避免摇杆回正后高度命令瞬间归零。
+        const bool stand_up_smoothing_active =
+            is_amp_hand_controller_ && stance_height_stand_up_smoothing_enabled_ &&
+            std::abs(smoothed_stance_height_cmd_) > 1e-6;
+        gait_receiver_->setReuseWalkCommandInStance(amp_mode_ == 1 || stand_up_smoothing_active);
       }
     }
 

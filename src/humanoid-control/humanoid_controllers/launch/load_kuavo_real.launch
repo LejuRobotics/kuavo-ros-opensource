@@ -55,7 +55,7 @@
     <arg name="with_mm_ik" default="true"/>
     <arg name="with_led" default="true"/>
     <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
-    <arg name="with_battery" default="false"/>
+    <arg name="with_battery" default="true"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>

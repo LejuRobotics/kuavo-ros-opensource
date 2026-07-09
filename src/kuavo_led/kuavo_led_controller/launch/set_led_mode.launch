@@ -7,7 +7,9 @@
     <group unless="$(eval arg('LED') == 'disable')">
         <!-- ROBOT_VERSION % 100 在 52-59 或 60-69 之间时启动新的 LED Strip 服务 -->
         <group if="$(eval (52 &lt;= (arg('ROBOT_VERSION') % 100) &lt;= 59) or (60 &lt;= (arg('ROBOT_VERSION') % 100) &lt;= 69))">
-            <node pkg="kuavo_led_controller" type="led_strip_service.py" name="led_strip_service_node" output="screen"/>
+            <node pkg="kuavo_led_controller" type="led_strip_service.py" name="led_strip_service_node" output="screen">
+                <param name="led_for_state" value="$(arg led_for_state)" />
+            </node>
             <!-- 启动 LED 状态监控：启动中绿灯闪烁 → 准备站立绿灯常亮 → 站立完成白灯常亮 → 跌倒红灯闪烁 -->
             <node if="$(arg led_for_state)" pkg="kuavo_led_controller" type="led_for_state.py" name="led_for_state" output="screen"/>
         </group>

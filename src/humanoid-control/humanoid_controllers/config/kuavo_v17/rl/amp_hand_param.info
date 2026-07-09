@@ -17,8 +17,9 @@ use_external_arm_controller  true ; 是否使用外部手臂控制器指令替�
 use_virtual_arm_obs         true ; 是否在外部手臂控制器生效时使用手臂静默优化
 lateral_elbow_fix           true ; 纯侧移时缩放对应侧肘关节 action
 enable_roll_compensation    true ; 是否启用行走/转弯时 projected_gravity 的 roll 观测补偿
-enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时关闭cmdy
-enable_elbow_scale          true ; 肘关节单独使用 0.2 actionscale
+enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时或小于-0.2时关闭cmdy
+enable_elbow_scale          true ; 肘关节单独使用 0.18 actionscale，并限制最终关节角(加default后)<-0.2
+enable_back_arm_enhance     true ; cmd_x<-0.2 时 arm 摆动增强
 use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd   false      ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
@@ -51,8 +52,8 @@ commandData
         cmdVelAngularY      1   ;
         cmdVelAngularZ      1   ;
         cmdStance           1   ;
-        cmdVelLineXNegScale             0.7   ; cmd_x 普通负向系数
-        cmdVelLineXNegScaleExternalArm  0.85    ; cmd_x 外部手臂控制时候的负向系数
+        cmdVelLineXNegScale             0.85   ; cmd_x 普通负向系数
+        cmdVelLineXNegScaleExternalArm  0.95    ; cmd_x 外部手臂控制时候的负向系数
     }
 };预留完整的接口，当前只用到cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdStance，最大长度是4
 
@@ -73,7 +74,7 @@ TinyCmdClip
 {
     (0,0)  0.1   ; cmd_x正向截断区间最小值
     (1,0)  0.45   ; cmd_x正向截断区间最大值，位于正向区间内的值都会被截断为该值
-    (2,0)  -0.25  ; cmd_x负向截断区间最大值
+    (2,0)  -0.3  ; cmd_x负向截断区间最大值
     (3,0)  -0.45  ; cmd_x负向截断区间最小值，位于负向区间内的值都会被截断为该值
     (4,0)  0.2    ; abs(cmd_y) 截断最小值
     (5,0)  0.4   ; abs(cmd_y) 截断最大值，abs(cmd_y) 位于区间内的值都会被截断为该值
@@ -111,11 +112,13 @@ continuousInPlaceStepVelocity
 ; ==================== 速度命令平滑配置 (amp_hand_controller) ====================
 velocitySmoothing
 {
-    ; 覆盖 RlGaitReceiver 默认 max_velocity_change_；decelOnly=true 时加速即时响应，仅减速平滑/限速
-    maxVelocityChange     0.05   ; 单步正向 cmd_x 单步最大变化量 (m/s )
-    maxVelocityChangeNegCmdX  0.5   ; 负向 cmd_x 单步最大变化量 (m/s)，后退/减速
-    decelOnly             true    ; true: 仅 cmd_x 减速时平滑，加速不限制
+    ; 覆盖 RlGaitReceiver 默认 max_velocity_change_；
+    maxVelocityChange     0.035   ; 单步正向 cmd_x 单步最大变化量 (m/s )
+    decelOnly             true    ; true: 正向 cmd_x 仅减速时平滑，加速不限制
+    maxVelocityChangeNegCmdX  0.02  ; 负向 cmd_x 单步最大变化量 (m/s)，后退，加减速
     maxVelocityChangeCmdY  0.025   ; 单步 cmd_y 最大变化量 (m/s)
+    standUpHeightSmoothingEnabled  true   ; 站立模式下起身高度命令平滑
+    maxStandUpHeightChange  0.01  ; 起身单步最大高度命令变化量 (m)，下蹲仍即时跟随
 }
 
 ; ==================== YAW方向补偿配置 ====================

@@ -70,10 +70,13 @@ class LEDStripServiceNode:
         rospy.loginfo("  - /led_strip_close (Trigger)")
         rospy.on_shutdown(self.cleanup)
 
-        # 节点关闭时亮红灯常亮（失能指示）：
-        # Ctrl+C/kill 整个 launch 时本节点收到 SIGINT/SIGTERM，rospy 触发
-        # on_shutdown 回调，在此发一包红灯。LED 硬件锁存最后状态，机器人
-        # 将持续亮红灯，直到下次 launch 启动由 startup_led_monitor 切回正常色。
+        # 读取 led_for_state 开关（由 set_led_mode.launch 的 <param> 传入）：
+        # 控制 Ctrl+C 打断 launch 时是否亮红灯做失能指示。
+        #   true（默认）= 亮红灯常亮（利用硬件锁存）
+        #   false        = 恢复默认关灯行为，不做失能指示
+        self.led_for_state_enabled = rospy.get_param('~led_for_state', True)
+
+        # 节点关闭时的灯状态由 _on_shutdown 负责，受 led_for_state 开关控制。
         rospy.on_shutdown(self._on_shutdown)
 
     def handle_set_mode_and_color(self, req):
@@ -152,18 +155,22 @@ class LEDStripServiceNode:
             return TriggerResponse(success=False, message=f"Error: {str(e)}")
     
     def _on_shutdown(self):
-        """节点关闭时亮红灯常亮，指示机器人已失能/被打断。
+        """节点关闭时的灯状态，受 led_for_state 开关控制。
 
-        Ctrl+C/kill 整个 launch 时 rospy 触发本回调。LED 硬件锁存最后
-        收到的状态，故红灯会持续亮到下次 launch 启动、由
-        startup_led_monitor 切回正常颜色为止。
+        - led_for_state=True（默认）：亮红灯常亮做失能/打断指示。LED 硬件
+          锁存最后状态，红灯持续亮到下次 launch 启动切回正常颜色。
+        - led_for_state=False：恢复默认关灯行为（熄灭），不做失能指示。
         """
         try:
-            red = [(255, 0, 0)] * LEDStrip.LED_COUNT
-            self.led_strip.set_mode_and_color(LEDMode.CONSTANT, red)
-            rospy.loginfo("[LED Strip] 节点关闭，已设置红灯常亮（失能指示）")
+            if self.led_for_state_enabled:
+                red = [(255, 0, 0)] * LEDStrip.LED_COUNT
+                self.led_strip.set_mode_and_color(LEDMode.CONSTANT, red)
+                rospy.loginfo("[LED Strip] 节点关闭，已设置红灯常亮（失能指示）")
+            else:
+                self.led_strip.close()
+                rospy.loginfo("[LED Strip] led_for_state=False，节点关闭，已熄灭 LED")
         except Exception as e:
-            rospy.logerr(f"[LED Strip] 关闭时设置红灯失败: {e}")
+            rospy.logerr(f"[LED Strip] 关闭时设置 LED 失败: {e}")
 
 
     def handle_query_battery_hw(self, req):

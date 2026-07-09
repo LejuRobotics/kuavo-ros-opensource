@@ -110,9 +110,9 @@ mixedMotionLimits
 {
     enableMixedMode             true    ; 是否启用混合运动模式(true/false)
     angularVelThreshold         0.25    ; 角速度阈值 (rad/s)
-    maxLinearVelWithAngular     0.2     ; 有角速度时最大线速度 (m/s)
+    maxLinearVelWithAngular     0.1     ; 有角速度时最大线速度 (m/s)
     linearVelThreshold          0.4     ; 线速度阈值 (m/s)
-    maxAngularVelWithLinear     0.4     ; 有线速度时最大角速度 (rad/s)
+    maxAngularVelWithLinear     0.2     ; 有线速度时最大角速度 (rad/s)
     smoothTransition            true    ; 是否启用平滑过渡(true/false)
     transitionFactor            0.9     ; 过渡因子
 }

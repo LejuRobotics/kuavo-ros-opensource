@@ -484,9 +484,19 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
       smoothed += diff * smooth_factor;
     }
   };
+  const bool in_neg_cmd_x =
+      cmd_vel.linear.x < -1e-9 || smoothed_cmd_vel_.linear.x < -1e-9;
+  const auto applyCmdXSmooth = [&](double& smoothed, double target, double diff) {
+    // decelOnly 仅作用于正向 cmd_x；负向后退加减速均平滑
+    if (velocity_change_decel_only_ && !in_neg_cmd_x && !isDecelerating(smoothed, target)) {
+      smoothed = target;
+    } else {
+      smoothed += diff * smooth_factor;
+    }
+  };
   
   // Smooth linear velocities
-  applyAxisSmooth(smoothed_vel.linear.x, cmd_vel.linear.x, vel_diff_x);
+  applyCmdXSmooth(smoothed_vel.linear.x, cmd_vel.linear.x, vel_diff_x);
   applyAxisSmooth(smoothed_vel.linear.y, cmd_vel.linear.y, vel_diff_y);
   applyAxisSmooth(smoothed_vel.linear.z, cmd_vel.linear.z, vel_diff_z);
   
@@ -530,29 +540,25 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
       cmd_vel.linear.y * cmd_vel.linear.y +
       cmd_vel.linear.z * cmd_vel.linear.z);
   const bool linear_decel = cmd_linear_mag < smoothed_linear_mag - 1e-9;
-  
-  const bool in_neg_cmd_x =
-      cmd_vel.linear.x < -1e-9 || smoothed_cmd_vel_.linear.x < -1e-9;
   const double effective_max_velocity_change =
       (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x)
           ? max_velocity_change_neg_cmd_x_
           : max_velocity_change_;
+  const bool apply_linear_change_limit =
+      !velocity_change_decel_only_ || linear_decel || in_neg_cmd_x;
 
-  if (linear_change > effective_max_velocity_change &&
-      (!velocity_change_decel_only_ || linear_decel)) {
+  if (linear_change > effective_max_velocity_change && apply_linear_change_limit) {
     double scale = effective_max_velocity_change / linear_change;
     smoothed_vel.linear.x = smoothed_cmd_vel_.linear.x + scale * vel_diff_x;
     smoothed_vel.linear.y = smoothed_cmd_vel_.linear.y + scale * vel_diff_y;
     smoothed_vel.linear.z = smoothed_cmd_vel_.linear.z + scale * vel_diff_z;
   }
 
-  // 负向 cmd_x 单独限速（含从后退减速到零）
+  // 负向 cmd_x 单独限速（后退加减速均限速）
   if (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x) {
     const double x_diff = smoothed_vel.linear.x - smoothed_cmd_vel_.linear.x;
     const double x_change = std::abs(x_diff);
-    const bool x_decel = std::abs(cmd_vel.linear.x) < std::abs(smoothed_cmd_vel_.linear.x) - 1e-9;
-    if (x_change > max_velocity_change_neg_cmd_x_ &&
-        (!velocity_change_decel_only_ || x_decel)) {
+    if (x_change > max_velocity_change_neg_cmd_x_) {
       smoothed_vel.linear.x =
           smoothed_cmd_vel_.linear.x + (x_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_neg_cmd_x_;
     }
