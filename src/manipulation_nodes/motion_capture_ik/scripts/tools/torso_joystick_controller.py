@@ -411,7 +411,8 @@ class TorsoController:
         twist.linear.y = self.current_pose[1]
         twist.linear.z = self.current_pose[2]
         twist.angular.x = self.current_pose[3]
-        twist.angular.y = self.current_pose[4]
+        # VR 内部前倾为负 pitch，发布给 MPC 时取反（MPC 约定：0 直立，正值前倾）
+        twist.angular.y = -self.current_pose[4]
         twist.angular.z = self.current_pose[5]
         self._publish_fn(twist)
         self._last_published_pose = list(self.current_pose)

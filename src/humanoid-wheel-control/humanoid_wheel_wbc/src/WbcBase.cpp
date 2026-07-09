@@ -28,7 +28,7 @@ namespace ocs2
 {
   namespace mobile_manipulator
   {
-    // 先完善，输入 (x, y, yaw, q_des), 前面不管，只处理后面的关节跟踪
+    // stateDesired/inputDesired 与 MPC 向量同布局：head(3)=base(x,y,yaw)，[3:7]=下肢4关节，tail(14)=双臂
     WbcBase::WbcBase(const PinocchioInterface &pinocchioInterface, const ManipulatorModelInfo& info)
         : pinocchioInterfaceMeasured_(pinocchioInterface), pinocchioInterfaceDesired_(pinocchioInterface),
           info_(info)
@@ -136,6 +136,7 @@ namespace ocs2
       // std::cout << "stateDesired: " << stateDesired.size() << std::endl;
       // std::cout << "inputDesired: " << inputDesired.size() << std::endl;
 
+      // qDesired_/vDesired_ 与 optimizedState_wbc/optimizedInput_wbc 同索引：input[i]=d(state[i])/dt
       qDesired_ = stateDesired;
       vDesired_ = inputDesired;
       // vDesired_.head(3) = bodyToWorldVelocity(inputDesired(0), inputDesired(1), qDesired_(2));

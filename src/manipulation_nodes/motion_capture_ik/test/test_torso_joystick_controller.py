@@ -403,7 +403,19 @@ def test_publish_reflects_stick_increment():
     ctrl.handle_joystick(make_msg(left_grip=0.8, left_y=1.0, left_x=1.0))
     twist = pub.call_args[0][0]
     assert abs(twist.linear.z - SCALE_HEIGHT * 0.1) < 1e-9
-    assert abs(twist.angular.y - (-SCALE_PITCH * 0.1)) < 1e-9
+    assert abs(twist.angular.y - (SCALE_PITCH * 0.1)) < 1e-9
+
+
+def test_publish_negates_pitch_for_mpc():
+    """发布到 MPC 时 pitch 取反：内部负值前倾 → angular.y 正值 [0, 0.524]。"""
+    ctrl, pub, clock = make_controller(t0=0.0)
+    ctrl.handle_joystick(make_msg(left_grip=0.8))
+    pub.reset_mock()
+    clock.return_value = 0.1
+    ctrl.handle_joystick(make_msg(left_grip=0.8, left_x=1.0))
+    twist = pub.call_args[0][0]
+    assert ctrl.current_pose[4] < 0.0
+    assert abs(twist.angular.y - (SCALE_PITCH * 0.1)) < 1e-9
 
 
 def test_left_grip_short_double_click_triggers_reset():

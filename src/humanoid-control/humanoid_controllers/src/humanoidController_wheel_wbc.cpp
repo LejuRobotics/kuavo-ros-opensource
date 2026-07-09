@@ -970,6 +970,7 @@ namespace humanoidController_wheel_wbc
     // }
 
     {
+      // 关节段 [baseDim_:stateDim) = 下肢 lowJointNum_ + 手臂 armNum_，见 humanoidController_wheel_wbc.h 维度注释
       static vector_t qposLimit, qvelLimit;
 
       qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
@@ -977,11 +978,16 @@ namespace humanoidController_wheel_wbc
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
       optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
       static vector_t jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
+      const vector_t jointPosDelta =
+          (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
       if (enable_arm_traj_interpolator_) {
-        optimizedInput_mrt_limit_.tail(info.armDim) = qvelLimit;
+        // 手臂轨迹插补仅应覆盖手臂段速度；下肢仍用位置差分，与 state 同向。
+        // 若对全 armDim 使用 MPC optimizedInput（躯干笛卡尔模式下常为 0 或与 state 不同步），
+        // WBC 下肢 PD 的 vel_error 会被 kd 放大，例如 data[3](knee_pitch) 出现大幅负值。
+        optimizedInput_mrt_limit_.segment(baseDim_, lowJointNum_) = jointPosDelta.head(lowJointNum_);
+        optimizedInput_mrt_limit_.tail(armNum_) = qvelLimit.tail(armNum_);
       } else {
-        optimizedInput_mrt_limit_.tail(info.armDim) =
-            (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
+        optimizedInput_mrt_limit_.tail(info.armDim) = jointPosDelta;
       }
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
@@ -1044,15 +1050,17 @@ namespace humanoidController_wheel_wbc
       }
     }
 
+    // WBC 目标：optimizedState_wbc=期望位姿/关节角，optimizedInput_wbc=对应速度，维度见头文件注释
     vector_t optimizedState_wbc = optimizedState_mrt_limit_;
     vector_t optimizedInput_wbc = optimizedInput_mrt_limit_;
-    if (enable_arm_traj_interpolator_ && armNum_ > 0)
-    {
-      ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qpos_smooth", optimizedState_wbc.tail(armNum_));
-      ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qvel_smooth", optimizedInput_wbc.tail(armNum_));
-      // ROS_INFO_THROTTLE(1.0, "[humanoidControllerWheelWbc] WBC arm task uses interpolated arm target.");
-    }
-
+    // if (enable_arm_traj_interpolator_ && armNum_ > 0)
+    // {
+    //   ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qpos_smooth", optimizedState_wbc.tail(armNum_));
+    //   ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qvel_smooth", optimizedInput_wbc.tail(armNum_));
+    //   // ROS_INFO_THROTTLE(1.0, "[humanoidControllerWheelWbc] WBC arm task uses interpolated arm target.");
+    // }
+    ros_logger_->publishVector("/humanoid_wheel/optimizedState_wbc_in", optimizedState_wbc);
+    ros_logger_->publishVector("/humanoid_wheel/optimizedInput_wbc_in", optimizedInput_wbc);
     vector_t x = wheel_wbc_->update(optimizedState_wbc, optimizedInput_wbc, observation_wheel_);
 
     // 决策变量顺序：x = [ddq_stateDim, f_contact, tau_armDim]
