@@ -1,0 +1,10 @@
+# 请求部分
+string task_id		#要查询的任务ID
+bool blocking		#是否阻塞等待到位
+float32 timeout           # 超时时间（秒，0表示无限等待）
+---
+# 响应部分
+bool arrived             # 是否到达目标
+bool success		# 服务调用是否成功
+string message           # 结果信息
+int32 status		#当前状态枚举

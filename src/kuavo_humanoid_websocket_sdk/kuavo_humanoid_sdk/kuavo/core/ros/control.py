@@ -3,13 +3,13 @@ import time
 import roslibpy
 import numpy as np
 from typing import Tuple
-from kuavo_humanoid_sdk.common.logger import SDKLogger
+from kuavo_humanoid_sdk.common.logger import SDKLogger, is_diag_enabled
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
-from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKParams, KuavoPose, 
+from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKParams, KuavoPose,
                                                       KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode
-                                                      ,KuavoManipulationMpcFrame)
+                                                      ,KuavoManipulationMpcFrame, KuavoMotorParam)
 from kuavo_humanoid_sdk.kuavo.core.ros.sat_utils import RotatingRectangle
-from kuavo_humanoid_sdk.kuavo.core.ros.param import EndEffectorType
+from kuavo_humanoid_sdk.kuavo.core.ros.param import EndEffectorType, is_wheel_arm_robot_from_client
 
 
 class ControlEndEffectorWebsocket:
@@ -21,6 +21,10 @@ class ControlEndEffectorWebsocket:
             self._pub_ctrl_robot_hand = roslibpy.Topic(websocket.client, '/control_robot_hand_position', 'kuavo_msgs/robotHandPosition')
             # publisher, name, require
             self._pubs.append((self._pub_ctrl_robot_hand, False))
+        elif self._eef_type == 'lejuclaw':
+            self._pub_leju_claw_command = roslibpy.Topic(websocket.client, '/leju_claw_command', 'kuavo_msgs/lejuClawCommand')
+            # publisher, name, require
+            self._pubs.append((self._pub_leju_claw_command, False))
         elif self._eef_type == EndEffectorType.QIANGNAO_TOUCH:
             self._pub_ctrl_robot_hand = roslibpy.Topic(websocket.client, '/control_robot_hand_position', 'kuavo_msgs/robotHandPosition')                
             self._pub_dexhand_command = roslibpy.Topic(websocket.client, '/dexhand/command', 'kuavo_msgs/dexhandCommand')
@@ -145,6 +149,23 @@ class ControlEndEffectorWebsocket:
                 SDKLogger.error(f"Failed to control leju claw: {response.get('message', '')}")
             return response.get('result', False)
         except Exception as e:
+            if "does not exist" in str(e):
+                # 仿真环境(mujoco)没有 /control_robot_leju_claw 服务，回退到直接发布 topic
+                try:
+                    msg = {
+                        "data": {
+                            "name": ["left_claw", "right_claw"],
+                            "position": postions,
+                            "velocity": velocities,
+                            "effort": torques
+                        }
+                    }
+                    self._pub_leju_claw_command.publish(roslibpy.Message(msg))
+                    SDKLogger.info("Published leju claw command via topic (simulation fallback)")
+                    return True
+                except Exception as e2:
+                    SDKLogger.error(f"Failed to publish leju claw command via topic: {e2}")
+                    return False
             SDKLogger.error(f"Service `control_robot_leju_claw` call failed: {e}")
             return False
 
@@ -245,6 +266,18 @@ class ControlRobotArmWebsocket:
 
     def pub_end_effector_pose_cmd(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:
         try:
+            if is_diag_enabled():
+                # DIAG: 定位 frame=1/2 交替的发布源(TID+调用栈)
+                import threading, traceback
+                if not hasattr(self, '_diag_seq'): self._diag_seq = {}
+                tid = threading.get_ident(); self._diag_seq[tid] = self._diag_seq.get(tid, 0) + 1
+                stack = traceback.extract_stack()
+                caller = ""
+                for s in reversed(stack[:-1]):
+                    if 'control.py' not in s.filename and 'threading.py' not in s.filename:
+                        caller = f"{s.filename.split('/')[-1]}:{s.lineno} {s.name}"; break
+                print(f"[DIAG-PUB] TID={tid%10000:04d} #{self._diag_seq[tid]:<3d} frame={frame.value} caller={caller} L=({left_pose.position[0]:.2f},{left_pose.position[1]:.2f},{left_pose.position[2]:.2f})")
+
             msg = {
                 "hand_poses": {
                     "left_pose": {
@@ -360,10 +393,10 @@ class ControlRobotArmWebsocket:
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:
             websocket = WebSocketKuavoSDK()
-            service = roslibpy.Service(websocket.client, '/arm_traj_change_mode', 'kuavo_msgs/changeArmCtrlMode')
-            request = {
-                "control_mode": mode.value
-            }
+            # 根据 robot_type 选择正确的服务名（1=轮臂 2=双足）
+            svc_name = '/wheel_arm_change_arm_ctrl_mode' if is_wheel_arm_robot_from_client(websocket.client) else '/arm_traj_change_mode'
+            service = roslibpy.Service(websocket.client, svc_name, 'kuavo_msgs/changeArmCtrlMode')
+            request = {"control_mode": mode.value}
             response = service.call(request)
             return response.get('result', False)
         except Exception as e:
@@ -380,6 +413,60 @@ class ControlRobotArmWebsocket:
         except Exception as e:
             SDKLogger.error(f"Service call failed: {e}")
         return None
+
+    def pub_hand_wrench_cmd(self, left_wrench: list, right_wrench: list) -> bool:
+        """发布末端力控制命令
+
+        Args:
+            left_wrench: 左手6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+            right_wrench: 右手6维力控指令 [Fx, Fy, Fz, Tx, Ty, Tz]
+        """
+        if len(left_wrench) != 6 or len(right_wrench) != 6:
+            SDKLogger.error("Wrench data must be 6-dimensional")
+            return False
+        try:
+            websocket = WebSocketKuavoSDK()
+            topic = roslibpy.Topic(websocket.client, '/hand_wrench_cmd', 'std_msgs/Float64MultiArray')
+            msg = {"data": list(left_wrench) + list(right_wrench)}
+            topic.publish(msg)
+            return True
+        except Exception as e:
+            SDKLogger.error(f"Publish hand wrench failed: {e}")
+            return False
+
+    def pub_torso_pose_cmd(self, x: float, y: float, z: float, roll: float, pitch: float, yaw: float) -> bool:
+        try:
+            websocket = WebSocketKuavoSDK()
+            topic = roslibpy.Topic(websocket.client, '/cmd_lb_torso_pose', 'geometry_msgs/Twist')
+            msg = {
+                "linear": {"x": x, "y": y, "z": z},
+                "angular": {"x": roll, "y": pitch, "z": yaw},
+            }
+            topic.publish(roslibpy.Message(msg))
+            return True
+        except Exception as e:
+            SDKLogger.error(f"publish torso pose failed: {e}")
+            return False
+
+    def pub_wheel_lower_joint_cmd(self, joint_traj: list) -> bool:
+        try:
+            if len(joint_traj) != 4:
+                SDKLogger.error(f"Invalid joint trajectory length: {len(joint_traj)}, expected 4")
+                return False
+            websocket = WebSocketKuavoSDK()
+            topic = roslibpy.Topic(websocket.client, '/lb_leg_traj', 'sensor_msgs/JointState')
+            msg = {
+                "header": {"stamp": {"secs": 0, "nsecs": 0}, "frame_id": ""},
+                "name": ["joint1", "joint2", "joint3", "joint4"],
+                "position": [float(q) for q in joint_traj],
+                "velocity": [],
+                "effort": [],
+            }
+            topic.publish(roslibpy.Message(msg))
+            return True
+        except Exception as e:
+            SDKLogger.error(f"publish wheel lower joint failed: {e}")
+            return False
 
 """ Control Robot Waist """
 
@@ -761,8 +848,9 @@ class KuavoRobotArmIKFKWebsocket:
                params: KuavoIKParams=None) -> list:
         try:
             websocket = WebSocketKuavoSDK()
-            service = roslibpy.Service(websocket.client, '/ik/two_arm_hand_pose_cmd_srv', 'kuavo_msgs/twoArmHandPoseCmdSrv')
-            
+            topic_prefix = 'mm' if is_wheel_arm_robot_from_client(websocket.client) else 'ik'
+            service = roslibpy.Service(websocket.client, f'/{topic_prefix}/two_arm_hand_pose_cmd_srv', 'kuavo_msgs/twoArmHandPoseCmdSrv')
+
             request = {
                 "twoArmHandPoseCmdRequest": {
                     "hand_poses": {
@@ -810,7 +898,8 @@ class KuavoRobotArmIKFKWebsocket:
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         try:
             websocket = WebSocketKuavoSDK()
-            service = roslibpy.Service(websocket.client, '/ik/fk_srv', 'kuavo_msgs/fkSrv')
+            topic_prefix = 'mm' if is_wheel_arm_robot_from_client(websocket.client) else 'ik'
+            service = roslibpy.Service(websocket.client, f'/{topic_prefix}/fk_srv', 'kuavo_msgs/fkSrv')
             request = {"q": q}
             response = service.call(request)
             
@@ -827,6 +916,61 @@ class KuavoRobotArmIKFKWebsocket:
             return None
         except Exception as e:
             SDKLogger.error(f"Service call failed: {e}")
+            return None
+
+    def arm_ik_free(self,
+                    left_pose: KuavoPose,
+                    right_pose: KuavoPose,
+                    left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None,
+                    params: KuavoIKParams = None) -> list:
+        try:
+            websocket = WebSocketKuavoSDK()
+            topic_prefix = 'mm' if is_wheel_arm_robot_from_client(websocket.client) else 'ik'
+            service = roslibpy.Service(websocket.client, f'/{topic_prefix}/two_arm_hand_pose_cmd_free_srv', 'kuavo_msgs/twoArmHandPoseCmdFreeSrv')
+
+            request = {
+                "twoArmHandPoseCmdFreeRequest": {
+                    "hand_poses": {
+                        "header": {
+                            "seq": 0,
+                            "stamp": {"secs": 0, "nsecs": 0},
+                            "frame_id": ""
+                        },
+                        "left_pose": {
+                            "pos_xyz": left_pose.position,
+                            "quat_xyzw": left_pose.orientation,
+                            "elbow_pos_xyz": left_elbow_pos_xyz,
+                        },
+                        "right_pose": {
+                            "pos_xyz": right_pose.position,
+                            "quat_xyzw": right_pose.orientation,
+                            "elbow_pos_xyz": right_elbow_pos_xyz,
+                        }
+                    },
+                    "use_custom_ik_param": params is not None,
+                    "joint_angles_as_q0": arm_q0 is not None,
+                    "ik_param": {
+                        "major_optimality_tol": params.major_optimality_tol if params else 0.0,
+                        "major_feasibility_tol": params.major_feasibility_tol if params else 0.0,
+                        "minor_feasibility_tol": params.minor_feasibility_tol if params else 0.0,
+                        "major_iterations_limit": params.major_iterations_limit if params else 0,
+                        "oritation_constraint_tol": params.oritation_constraint_tol if params else 0.0,
+                        "pos_constraint_tol": params.pos_constraint_tol if params else 0.0,
+                        "pos_cost_weight": params.pos_cost_weight if params else 0.0,
+                        "constraint_mode": 0,
+                        "elbow_cost_scale": 0.0,
+                    }
+                }
+            }
+
+            response = service.call(request)
+            if response.get('success', False):
+                return response['hand_poses']['left_pose']['joint_angles'] + response['hand_poses']['right_pose']['joint_angles']
+            return None
+        except Exception as e:
+            SDKLogger.error(f"arm_ik_free service call failed: {e}")
             return None
 
 """
@@ -850,6 +994,7 @@ class KuavoRobotControlWebsocket:
                 self.kuavo_motion_control = ControlRobotMotionWebsocket()
                 self.kuavo_arm_ik_fk = KuavoRobotArmIKFKWebsocket()
                 self.kuavo_waist_control = ControlRobotWaistWebsocket()
+                self.kuavo_wheel_arm_control = WheelArmWebsocketControl()
             except Exception as e:
                 SDKLogger.error(f"Failed to initialize KuavoRobotControlWebsocket: {e}")
                 raise
@@ -984,6 +1129,9 @@ class KuavoRobotControlWebsocket:
         """
         return self.kuavo_arm_control.pub_control_robot_arm_traj(joint_data)
 
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        return self.kuavo_arm_control.pub_hand_wrench_cmd(left_wrench, right_wrench)
+
     def is_arm_collision(self)->bool:
         return self.kuavo_arm_control.is_arm_collision()
     
@@ -1084,6 +1232,33 @@ class KuavoRobotControlWebsocket:
         """
         SDKLogger.debug(f"[WebSocket] Change robot arm control mode: {mode}")
         return self.kuavo_arm_control.srv_change_arm_ctrl_mode(mode)
+
+    def control_wheel_arm_joint_positions(self, positions: list) -> bool:
+        """控制轮臂关节位置
+
+        Args:
+            positions: 关节位置列表，4个关节的角度值（弧度）
+
+        Returns:
+            bool: 是否成功发送命令
+        """
+        if not hasattr(self, 'kuavo_wheel_arm_control') \
+                or self.kuavo_wheel_arm_control is None:
+            SDKLogger.error("[KuavoRobotControlWebsocket] 轮臂控制模块未初始化")
+            return False
+
+        return self.kuavo_wheel_arm_control.control_wheel_arm_joint_positions(positions)
+
+    def is_wheel_arm_initialized(self) -> bool:
+        """检查轮臂控制模块是否已初始化
+
+        Returns:
+            bool: 是否已初始化
+        """
+        if not hasattr(self, 'kuavo_wheel_arm_control') \
+                or self.kuavo_wheel_arm_control is None:
+            return False
+        return self.kuavo_wheel_arm_control.is_initialized()
     
     def get_robot_arm_ctrl_mode(self)->int:
         """
@@ -1099,7 +1274,13 @@ class KuavoRobotControlWebsocket:
 
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         return self.kuavo_arm_ik_fk.arm_fk(q)
-    
+
+    def arm_ik_free(self, left_pose: KuavoPose, right_pose: KuavoPose,
+                    left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None, params: KuavoIKParams = None) -> list:
+        return self.kuavo_arm_ik_fk.arm_ik_free(left_pose, right_pose, left_elbow_pos_xyz, right_elbow_pos_xyz, arm_q0, params)
+
     """ Motion """
     def robot_stance(self)->bool:
         return self.kuavo_motion_control.pub_stance_command()
@@ -1193,6 +1374,62 @@ class KuavoRobotControlWebsocket:
         
         msg = get_multiple_steps_msg(body_poses, dt, is_left_first_default, collision_check)
         return self.kuavo_motion_control.pub_step_ctrl(msg)
+
+    """ Wheel-Arm """
+    def control_torso_pose(self, x: float, y: float, z: float,
+                           roll: float, pitch: float, yaw: float) -> bool:
+        return self.kuavo_arm_control.pub_torso_pose_cmd(x, y, z, roll, pitch, yaw)
+
+    def control_wheel_lower_joint(self, joint_traj: list) -> bool:
+        return self.kuavo_arm_control.pub_wheel_lower_joint_cmd(joint_traj)
+
+    """ Motor Parameter """
+    def change_motor_param(self, motor_param: list) -> Tuple[bool, str]:
+        try:
+            websocket = WebSocketKuavoSDK()
+            service = roslibpy.Service(websocket.client, '/hardware/change_motor_param', 'kuavo_msgs/changeMotorParam')
+            request = {"data": []}
+            for param in motor_param:
+                request["data"].append({
+                    "Kp": float(param.Kp),
+                    "Kd": float(param.Kd),
+                    "id": int(param.id),
+                })
+            response = service.call(request)
+            if not response.get('success', False):
+                return False, response.get('message', 'failed')
+            return True, 'success'
+        except Exception as e:
+            SDKLogger.error(f"change_motor_param failed: {e}")
+            return False, 'failed'
+
+    def get_motor_param(self) -> Tuple[bool, list, str]:
+        try:
+            websocket = WebSocketKuavoSDK()
+            service = roslibpy.Service(websocket.client, '/hardware/get_motor_param', 'kuavo_msgs/getMotorParam')
+            response = service.call({})
+            if not response.get('success', False):
+                return False, [], response.get('message', 'failed')
+            params = []
+            for p in response.get('data', []):
+                params.append(KuavoMotorParam(Kp=p.get('Kp', 0.0), Kd=p.get('Kd', 0.0), id=p.get('id', 0)))
+            return True, params, 'success'
+        except Exception as e:
+            SDKLogger.error(f"get_motor_param failed: {e}")
+            return False, [], str(e)
+
+    """ Base Pitch Limit """
+    def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
+        try:
+            websocket = WebSocketKuavoSDK()
+            service = roslibpy.Service(websocket.client, '/humanoid/mpc/enable_base_pitch_limit', 'std_srvs/SetBool')
+            response = service.call({"data": enable})
+            if not response.get('success', False):
+                return False, response.get('message', 'failed')
+            return True, 'success'
+        except Exception as e:
+            SDKLogger.error(f"enable_base_pitch_limit failed: {e}")
+            return False, 'failed'
 
 
 def euler_to_rotation_matrix(yaw, pitch, roll):
@@ -1311,6 +1548,74 @@ def get_multiple_steps_msg(body_poses:list, dt:float, is_left_first:bool=True, c
     # print("torso_traj:", torso_traj)
     return get_foot_pose_traj_msg(time_traj, foot_idx_traj, foot_traj, torso_traj)
 """ ------------------------------------------------------------------------------"""
+
+
+class WheelArmWebsocketControl:
+    """轮臂Websocket控制类。
+
+    提供轮臂控制的Websocket接口，基于实际的lbLegControlSrv服务。
+    轮臂控制只有一种方法：通过target_joints设置4个关节的目标角度。
+    """
+
+    def __init__(self):
+        """初始化轮臂Websocket控制"""
+        self._wheel_arm_joint_dof = 4
+        self._is_initialized = True
+        SDKLogger.info("[WheelArmWebsocketControl] 轮臂Websocket控制模块初始化完成")
+
+    def is_initialized(self) -> bool:
+        """检查是否已初始化"""
+        return self._is_initialized
+
+    def control_wheel_arm_joint_positions(self, joint_positions: list,
+                                           duration: float = 5.0) -> bool:
+        """通过Websocket服务控制轮臂关节位置
+
+        Args:
+            joint_positions: 轮臂关节位置列表，长度为4，单位为弧度
+            duration: 运动持续时间（秒），默认5.0
+
+        Returns:
+            bool: 控制成功返回True,否则返回False
+        """
+        if not self._is_initialized:
+            SDKLogger.error("[WheelArmWebsocketControl] 模块未初始化")
+            return False
+
+        try:
+            # 验证输入参数
+            if len(joint_positions) != self._wheel_arm_joint_dof:
+                SDKLogger.error(
+                    f"[WheelArmWebsocketControl] 关节位置数量错误: "
+                    f"期望{self._wheel_arm_joint_dof}, 实际{len(joint_positions)}"
+                )
+                return False
+
+            websocket = WebSocketKuavoSDK()
+            service = roslibpy.Service(
+                websocket.client, '/lb_leg_control_srv',
+                'kuavo_msgs/lbLegControlSrv'
+            )
+            request = {
+                "target_joints": [float(p) for p in joint_positions],
+                "duration": float(duration),
+            }
+            response = service.call(request)
+
+            if response.get('success', False):
+                SDKLogger.debug(
+                    f"[WheelArmWebsocketControl] 关节位置控制成功: {joint_positions}"
+                )
+            else:
+                SDKLogger.error("[WheelArmWebsocketControl] 关节位置控制失败")
+
+            return response.get('success', False)
+
+        except Exception as e:
+            SDKLogger.error(
+                f"[WheelArmWebsocketControl] 控制关节位置失败: {e}"
+            )
+            return False
 
 
 # if __name__ == "__main__":

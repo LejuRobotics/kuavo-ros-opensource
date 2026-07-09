@@ -8,8 +8,9 @@
 #include "humanoid_controllers/LowPassFilter.h"
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
+#include <std_msgs/Float64MultiArray.h>
 #include <openvino/openvino.hpp>
 #include <memory>
 #include <map>
@@ -32,6 +33,7 @@ namespace humanoid_controller
     void reset() override;
     void pause() override;
     void resume() override;
+    void resumeWarm() override;
 
     /**
      * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
@@ -52,6 +54,30 @@ namespace humanoid_controller
      * 使用从配置文件加载的velocityLimits_设置速度限制
      */
     void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
+
+    /**
+     * @waao 计算当前的关节参考
+     */
+    Eigen::VectorXd getCurrentJointReference() const override;
+
+    //waao：相位对齐
+    bool supportsWalkingPhaseSyncSwitch() const override { return true; }
+    bool hasValidWalkingPhase() const override { return has_valid_phase_; }
+    double getWalkingPhaseRad() const override;
+    double getWalkingFrequencyHz() const override;
+    void setExternalPhaseOverride(bool enabled,
+                                  double sin_phase,
+                                  double cos_phase,
+                                  double gait_frequency_hz) override;
+    void resetGaitCommandState(bool stance_mode = true) override;
+    bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const override;
+    void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) override;
+    void setSwitchVelocityScale(double scale) override;
+    void setCommandBufferCallback(std::function<bool()> callback) override;
+    void setExternalCommandBufferCallback(std::function<bool()> callback) override;
+    bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const override;
+    bool isInPlaceSteppingActive() const override;
+    bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const override;
 
   protected:
 
@@ -111,10 +137,17 @@ namespace humanoid_controller
     double stance_ratio = 0.5;
     double currentCycleTime_{0.6};
     Eigen::Vector3d net_linvel;
+    Eigen::VectorXd current_depth_latent;
+    ros::Publisher depth_latent_pub_;
     int episodeLength_{0};
     Eigen::VectorXd commandPhase_;     // sin(phase), cos(phase)
     Eigen::VectorXd frePhase_;
     ModeNumber rl_plannedMode_{ModeNumber::SS};
+    bool has_valid_phase_{false};
+    bool external_phase_override_enabled_{false};
+    double external_phase_sin_{0.0};
+    double external_phase_cos_{1.0};
+    double external_phase_frequency_hz_{1.0};
 
     // 观测相关
     int frameStack_{1};
@@ -146,7 +179,7 @@ namespace humanoid_controller
     // 真实/机型配置
     bool is_real_{false};
     bool is_roban_{false};
-    AnkleSolver ankleSolver_;
+    kuavo_solver::AnkleSolver ankleSolver_;
 
     // 是否使用 AMP 专用 Ruiwo 手臂增益（由 skw_rl_param.info 中 use_amp_ruiwo_kpkd 配置）
     bool use_amp_ruiwo_kpkd_{false};
@@ -167,6 +200,7 @@ namespace humanoid_controller
     Eigen::VectorXd waist_kp_from_config_; ///< 从配置文件读取的腰部 kp 参数
     Eigen::VectorXd waist_kd_from_config_; ///< 从配置文件读取的腰部 kd 参数
     std::unique_ptr<WaistController> waist_controller_; ///< 腰部控制器
+    std::function<bool()> external_command_buffer_callback_;
     bool waist_zero_tracking_enabled_{false}; ///< 行走时是否启用腰部0位跟踪（忽略RL输出，强制跟踪默认位置）
 
     // 站立切换到行走时的支撑腿髋关节roll偏置参数

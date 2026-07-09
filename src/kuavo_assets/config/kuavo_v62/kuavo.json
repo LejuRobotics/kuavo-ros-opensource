@@ -8,6 +8,13 @@
     "Larm_urdf": "biped_s49/urdf/drake/Larm.urdf",
     "Rarm_urdf": "biped_s49/urdf/drake/Rarm.urdf",
     "arm_urdf": "biped_s62/urdf/drake/biped_v3_arm.urdf",
+    "_comment_drake_velocity_ik_geometry": "v62 (5W) 半身 IK 几何：base_link 在地面坐标系，shoulder 在 base 下大约 z=1.17。l1/l2 跟 v52 几乎一致（wheel C++ FK 算 l1=0.2844, l2=0.2344）。",
+    "drake_velocity_ik_geometry": {
+        "l1": 0.2844,
+        "l2": 0.2344,
+        "left_p0":  [0.1157,  0.2527, 1.1658],
+        "right_p0": [0.1157, -0.2527, 1.1658]
+    },
     "end_frames_name": ["torso", "l_foot_sole", "r_foot_sole"],
     "end_frames_name_full_body": ["torso", "l_foot_sole", "r_foot_sole", "l_hand_sole", "r_hand_sole"],
     "ankle_motor_offset_degree":[-15,-15,-15,-15],
@@ -17,7 +24,7 @@
     "NUM_WAIST_JOINT" : 0,
     "NUM_JOINT" : 20,
     "ROBOT_MODULE": "LUNBI_V62",
-    "ankle_solver_type": -1,
+    "ankle_solver_type": "none",
 
     "torsoP": 3.0,
     "torsoP_squat": 3.0,
@@ -355,6 +362,5 @@
     "alway_update_chest": false,
     "lb_leg_publish_rate_multiplier": 0.1,
     "pos_cutoff_hz": 12.0,
-    "orientation_cutoff_hz": 20.0,
-    "chassis_joy_cmd_travel_scale": 0.5
+    "orientation_cutoff_hz": 20.0
 }

@@ -227,6 +227,45 @@ class KuavoRobotArm:
             return None, None
         return result
 
+    def arm_ik_free(self,
+                    left_pose: KuavoPose,
+                    right_pose: KuavoPose,
+                    left_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    right_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None,
+                    params: KuavoIKParams = None) -> list:
+        """Free-space inverse kinematics for the robot arm.
+
+        Args:
+            left_pose (KuavoPose): Pose of the robot left arm, xyz and quat.
+            right_pose (KuavoPose): Pose of the robot right arm, xyz and quat.
+            left_elbow_pos_xyz (list): Position of the robot left elbow. If [0.0, 0.0, 0.0], will be ignored.
+            right_elbow_pos_xyz (list): Position of the robot right elbow. If [0.0, 0.0, 0.0], will be ignored.
+            arm_q0 (list, optional): Initial joint positions in radians. If None, will be ignored.
+            params (KuavoIKParams, optional): Parameters for the inverse kinematics. If None, will be ignored.
+
+        Returns:
+            list: List of joint positions in radians, or None if inverse kinematics failed.
+
+        Warning:
+            This function requires initializing the SDK with the :attr:`KuavoSDK.Options.WithIK`.
+        """
+        return self._kuavo_core.arm_ik_free(left_pose, right_pose, left_elbow_pos_xyz, right_elbow_pos_xyz, arm_q0, params)
+
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        """Control robot end-effector force/torque.
+
+        Args:
+            left_wrench (list): Left arm 6-DOF wrench [Fx, Fy, Fz, Tx, Ty, Tz]
+                Fx,Fy,Fz in Newtons (N), Tx,Ty,Tz in Newton-meters (N·m)
+            right_wrench (list): Right arm 6-DOF wrench [Fx, Fy, Fz, Tx, Ty, Tz]
+                Fx,Fy,Fz in Newtons (N), Tx,Ty,Tz in Newton-meters (N·m)
+
+        Returns:
+            bool: True if control was successful, False otherwise.
+        """
+        return self._kuavo_core.control_hand_wrench(left_wrench, right_wrench)
+
 # if __name__ == "__main__":
 #     arm = KuavoRobotArm()
 #     arm.set_manipulation_mpc_mode(KuavoManipulationMpcCtrlMode.ArmOnly)

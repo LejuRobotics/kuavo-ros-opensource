@@ -20,6 +20,7 @@ namespace humanoid
 RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialCommand)
   : nh_(nh)
   , enabled_(true)
+  , reuse_walk_command_in_stance_(false)
   , smart_stop_enabled_(true)
   , torso_velocity_threshold_(0.05)
   , feet_alignment_threshold_(0.05)
@@ -47,6 +48,9 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
     ROS_WARN("[RlGaitReceiver] /is_real not found in ROS params, using default: false (simulation mode)");
     is_real_ = false;
   }
+  nh_.param<double>("/rl_gait_receiver/robot_action_active_timeout",
+                    robot_action_active_timeout_, robot_action_active_timeout_);
+  robot_action_active_timeout_ = std::max(0.1, robot_action_active_timeout_);
   
   // Initialize command data
   if (initialCommand) {
@@ -64,7 +68,10 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   smoothed_cmd_vel_.angular.x = 0.0;
   smoothed_cmd_vel_.angular.y = 0.0;
   smoothed_cmd_vel_.angular.z = 0.0;
+  latest_cmd_vel_ = smoothed_cmd_vel_;
   previous_cmd_vel_ = smoothed_cmd_vel_;
+  latest_gait_name_ = "stance";
+  trot_latched_ = false;
   last_velocity_update_time_ = ros::Time::now();
   
   // Initialize in-place stepping velocities
@@ -82,6 +89,9 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   // Subscribe to gait name request topic
   gait_name_sub_ = nh_.subscribe<std_msgs::String>("/humanoid_mpc_gait_name_request", 10,
     &RlGaitReceiver::gaitNameCallback, this);
+
+  robot_action_state_sub_ = nh_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
+    "/robot_action_state", 10, &RlGaitReceiver::robotActionStateCallback, this);
   
   ROS_INFO("[RlGaitReceiver] Initialized with smart stop detection enabled");
 }
@@ -98,16 +108,116 @@ bool RlGaitReceiver::isEnabled() const
   return enabled_;
 }
 
+void RlGaitReceiver::resetCommandState(bool stance_mode)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  currentCommand_.setzero();
+  currentCommand_.cmdStance_ = stance_mode ? 1.0 : 0.0;
+  smoothed_cmd_vel_.linear.x = 0.0;
+  smoothed_cmd_vel_.linear.y = 0.0;
+  smoothed_cmd_vel_.linear.z = 0.0;
+  smoothed_cmd_vel_.angular.x = 0.0;
+  smoothed_cmd_vel_.angular.y = 0.0;
+  smoothed_cmd_vel_.angular.z = 0.0;
+  latest_cmd_vel_ = smoothed_cmd_vel_;
+  previous_cmd_vel_ = smoothed_cmd_vel_;
+  latest_gait_name_ = stance_mode ? "stance" : "walk";
+  pending_gait_name_.clear();
+  trot_latched_ = false;
+  last_velocity_update_time_ = ros::Time::now();
+  stopInPlaceStepping();
+}
+
+void RlGaitReceiver::overrideCommandState(const CommandDataRL& command)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  currentCommand_.cmdVelLineX_ = command.cmdVelLineX_;
+  currentCommand_.cmdVelLineY_ = command.cmdVelLineY_;
+  currentCommand_.cmdVelLineZ_ = command.cmdVelLineZ_;
+  currentCommand_.cmdVelAngularX_ = command.cmdVelAngularX_;
+  currentCommand_.cmdVelAngularY_ = command.cmdVelAngularY_;
+  currentCommand_.cmdVelAngularZ_ = command.cmdVelAngularZ_;
+  currentCommand_.cmdStance_ = command.cmdStance_;
+
+  if (currentCommand_.cmdStance_ >= 0.5)
+  {
+    smart_stop_enabled_ = true;
+    stopInPlaceStepping();
+  }
+}
+
+void RlGaitReceiver::setSwitchVelocityScale(double scale)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  switch_velocity_scale_ = std::clamp(scale, 0.0, 1.0);
+}
+
+void RlGaitReceiver::setReuseWalkCommandInStance(bool enable)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  reuse_walk_command_in_stance_ = enable;
+}
+
+void RlGaitReceiver::setAmpHandController(bool enable)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  is_amp_hand_controller_ = enable;
+}
+
+void RlGaitReceiver::setCommandBufferCallback(std::function<bool()> callback)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  command_buffer_callback_ = std::move(callback);
+}
+
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
   if (!enabled_) {
     return;
   }
   double velocity_magnitude = calculateVelocityMagnitude(smoothed_cmd_vel_);
+  std::function<bool()> command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+  }
+  const bool command_blocked = command_buffer_callback && command_buffer_callback();
+
   std::lock_guard<std::mutex> lock(command_mutex_);
 
-  if (velocity_magnitude < 0.01 && currentCommand_.cmdStance_ == 1) // Low velocity and already in stance mode
+  if (!pending_gait_name_.empty() && !command_blocked)
+  {
+    const std::string gait_name = pending_gait_name_;
+    pending_gait_name_.clear();
+    currentCommand_.cmdStance_ = 0.0;
+    if (gait_name == "trot")
+    {
+      trot_latched_ = true;
+    }
+    smart_stop_enabled_ = false;
+    ROS_INFO_STREAM("[RlGaitReceiver] Applied pending walking gait after controller switch: " << gait_name);
+  }
+
+  // sim-to-sim: 站立模式下复用行走三维指令（x/y/yaw）作为姿态命令通道。
+  // 这与训练侧 vel_command_b 的复用语义一致：x->弯腰，y->保留，yaw(z)->下蹲高度。
+  if (currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_)
+  {
+    // x->弯腰：仅允许正向（向前弯），屏蔽负向 cmd_x（向后弯）
+    currentCommand_.cmdVelLineX_ = std::max(0.0, smoothed_cmd_vel_.linear.x);
+    currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y;
+    currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z;
+    currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x;
+    currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y;
+    // 站立姿态模式下，将 base 高度偏移通道复用为策略的第 3 个速度命令输入。
+    currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.linear.z;
+    currentCommand_.cmdStance_ = 1;
     return;
+  }
+
+  if (velocity_magnitude < 0.01 && currentCommand_.cmdStance_ == 1) // Low velocity and already in stance mode
+  {
+    return;
+  }
   
   // Update in-place stepping states
   if (isInPlaceSteppingActive())
@@ -121,11 +231,15 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   {
     // Velocity is very small, check for smart stop
     if (smart_stop_enabled_ && shouldSmartStop(torsostate, feetPositions)) {
-      // Smart stop conditions met, switch to stance mode
+      // Smart stop conditions met.
+      // amp_hand_controller 保持 walking 模式 (模型内部有自然停下)，其余控制器切 stance。
       currentCommand_.setzero();
-      currentCommand_.cmdStance_ = 1;
+      currentCommand_.cmdStance_ = is_amp_hand_controller_ ? 0 : 1;
       stopInPlaceStepping();
-      std::cout << "[RlGaitReceiver] Smart stop conditions met, switching to stance mode" << std::endl;
+      if (!is_amp_hand_controller_)
+      {
+        std::cout << "[RlGaitReceiver] Smart stop conditions met, switching to stance mode" << std::endl;
+      }
     } else {
       // Smart stop conditions not met, maintain in-place stepping
       // Use configured in-place stepping velocity
@@ -166,12 +280,12 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     // Stop in-place stepping when there's significant velocity command
     stopInPlaceStepping();
     
-    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x;
-    currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y;
-    currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z;
-    currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x;
-    currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y;
-    currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.angular.z;
+    currentCommand_.cmdVelLineX_ = smoothed_cmd_vel_.linear.x * switch_velocity_scale_;
+    currentCommand_.cmdVelLineY_ = smoothed_cmd_vel_.linear.y * switch_velocity_scale_;
+    currentCommand_.cmdVelLineZ_ = smoothed_cmd_vel_.linear.z * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularX_ = smoothed_cmd_vel_.angular.x * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y * switch_velocity_scale_;
+    currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.angular.z * switch_velocity_scale_;
     currentCommand_.cmdStance_ = 0; // Walking mode
     
     // Reset smart stop checking when there's significant velocity command
@@ -185,19 +299,79 @@ CommandDataRL RlGaitReceiver::getCurrentCommand() const
   return currentCommand_;
 }
 
+CommandDataRL RlGaitReceiver::getPolicyCommand() const
+{
+  CommandDataRL command;
+  std::function<bool()> command_buffer_callback;
+  bool robot_action_active = false;
+  const ros::Time now = ros::Time::now();
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command = currentCommand_;
+    command_buffer_callback = command_buffer_callback_;
+    robot_action_active = isRobotActionActiveLocked(now);
+  }
+
+  if (robot_action_active || (command_buffer_callback && command_buffer_callback()))
+  {
+    command.setzero();
+  }
+  return command;
+}
+
+bool RlGaitReceiver::shouldBlockCommandExecution() const
+{
+  std::function<bool()> command_buffer_callback;
+  bool robot_action_active = false;
+  const ros::Time now = ros::Time::now();
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+    robot_action_active = isRobotActionActiveLocked(now);
+  }
+  return robot_action_active || (command_buffer_callback && command_buffer_callback());
+}
+
 
 
 void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
 {
-  if (!enabled_) {
+  std::function<bool()> command_buffer_callback;
+  bool robot_action_active = false;
+  const ros::Time now = ros::Time::now();
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+    robot_action_active = isRobotActionActiveLocked(now);
+  }
+
+  if (robot_action_active)
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    latest_cmd_vel_ = geometry_msgs::Twist();
+    smoothed_cmd_vel_ = geometry_msgs::Twist();
+    previous_cmd_vel_ = geometry_msgs::Twist();
+    currentCommand_.setzero();
+    pending_gait_name_.clear();
+    stopInPlaceStepping();
+    ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Suppress cmd_vel while robot action is active");
     return;
   }
-  
+
+  if (command_buffer_callback && command_buffer_callback())
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    latest_cmd_vel_ = *msg;
+    ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Block cmd_vel until walking controller is active");
+    return;
+  }
+
   // Apply velocity smoothing
   ros::Time current_time = ros::Time::now();
   geometry_msgs::Twist smoothed_vel = smoothVelocityCommand(*msg, current_time);
   
   std::lock_guard<std::mutex> lock(command_mutex_);
+  latest_cmd_vel_ = *msg;
   smoothed_cmd_vel_ = smoothed_vel;
   
   ROS_DEBUG("[RlGaitReceiver] Received velocity command: lin(%.3f, %.3f, %.3f) ang(%.3f, %.3f, %.3f)",
@@ -205,25 +379,89 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
             smoothed_vel.angular.x, smoothed_vel.angular.y, smoothed_vel.angular.z);
 }
 
-void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
+void RlGaitReceiver::robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg)
 {
-  if (!enabled_) {
+  const bool active = msg->state == 1;
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  if (active)
+  {
+    last_robot_action_active_time_ = ros::Time::now();
+  }
+  if (robot_action_active_ == active)
+  {
     return;
   }
-  
+
+  robot_action_active_ = active;
+  if (robot_action_active_)
+  {
+    currentCommand_.setzero();
+    latest_cmd_vel_ = geometry_msgs::Twist();
+    smoothed_cmd_vel_ = geometry_msgs::Twist();
+    previous_cmd_vel_ = geometry_msgs::Twist();
+    pending_gait_name_.clear();
+    trot_latched_ = false;
+    stopInPlaceStepping();
+    ROS_INFO("[RlGaitReceiver] Robot action active: suppress cmd_vel and hold stance");
+  }
+  else
+  {
+    ROS_INFO("[RlGaitReceiver] Robot action inactive: cmd_vel accepted");
+  }
+}
+
+bool RlGaitReceiver::isRobotActionActiveLocked(const ros::Time& now) const
+{
+  if (!robot_action_active_)
+  {
+    return false;
+  }
+  if (!last_robot_action_active_time_.isValid())
+  {
+    return true;
+  }
+  return (now - last_robot_action_active_time_).toSec() <= robot_action_active_timeout_;
+}
+
+void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
+{
   const std::string& gait_name = msg->data;
   ROS_INFO_STREAM("[RlGaitReceiver] Received gait name request: " << gait_name);
-  
+
+  std::function<bool()> command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+  }
+  const bool command_blocked = command_buffer_callback && command_buffer_callback();
+
   std::lock_guard<std::mutex> lock(command_mutex_);
+  latest_gait_name_ = gait_name;
   
   // Manually switch cmdStance_ state based on gait name
   if (gait_name == "stance") {
+    pending_gait_name_.clear();
     currentCommand_.setzero();
     currentCommand_.cmdStance_ = 1.0;
+    trot_latched_ = false;
+    latest_cmd_vel_ = geometry_msgs::Twist();
+    smoothed_cmd_vel_ = geometry_msgs::Twist();
+    previous_cmd_vel_ = geometry_msgs::Twist();
+    stopInPlaceStepping();
     smart_stop_enabled_ = true;
     ROS_INFO("[RlGaitReceiver] Manually switched to stance mode");
   } else if (gait_name == "walk" || gait_name == "trot") {
+    if (command_blocked)
+    {
+      pending_gait_name_ = gait_name;
+      ROS_INFO_STREAM("[RlGaitReceiver] Delay walking gait until walking controller is active: " << gait_name);
+      return;
+    }
     currentCommand_.cmdStance_ = 0.0;
+    if (gait_name == "trot")
+    {
+      trot_latched_ = true;
+    }
     smart_stop_enabled_ = false;
     ROS_INFO_STREAM("[RlGaitReceiver] Manually switched to walking mode for gait: " << gait_name);
   } else {
@@ -389,15 +627,36 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
   
   // Apply smoothing factor
   double smooth_factor = std::min(velocity_smooth_factor_ / dt, 1.0);
+
+  const auto isDecelerating = [](double current, double target) {
+    return std::abs(target) < std::abs(current) - 1e-9;
+  };
+  const auto applyAxisSmooth = [&](double& smoothed, double target, double diff) {
+    if (velocity_change_decel_only_ && !isDecelerating(smoothed, target)) {
+      smoothed = target;
+    } else {
+      smoothed += diff * smooth_factor;
+    }
+  };
+  const bool in_neg_cmd_x =
+      cmd_vel.linear.x < -1e-9 || smoothed_cmd_vel_.linear.x < -1e-9;
+  const auto applyCmdXSmooth = [&](double& smoothed, double target, double diff) {
+    // decelOnly 仅作用于正向 cmd_x；负向后退加减速均平滑
+    if (velocity_change_decel_only_ && !in_neg_cmd_x && !isDecelerating(smoothed, target)) {
+      smoothed = target;
+    } else {
+      smoothed += diff * smooth_factor;
+    }
+  };
   
   // Smooth linear velocities
-  smoothed_vel.linear.x += vel_diff_x * smooth_factor;
-  smoothed_vel.linear.y += vel_diff_y * smooth_factor;
-  smoothed_vel.linear.z += vel_diff_z * smooth_factor;
+  applyCmdXSmooth(smoothed_vel.linear.x, cmd_vel.linear.x, vel_diff_x);
+  applyAxisSmooth(smoothed_vel.linear.y, cmd_vel.linear.y, vel_diff_y);
+  applyAxisSmooth(smoothed_vel.linear.z, cmd_vel.linear.z, vel_diff_z);
   
   // Smooth angular velocities (x and y use normal smoothing)
-  smoothed_vel.angular.x += ang_diff_x * smooth_factor;
-  smoothed_vel.angular.y += ang_diff_y * smooth_factor;
+  applyAxisSmooth(smoothed_vel.angular.x, cmd_vel.angular.x, ang_diff_x);
+  applyAxisSmooth(smoothed_vel.angular.y, cmd_vel.angular.y, ang_diff_y);
   
   // Special handling for angular.z during turning (when there's linear velocity)
   double angular_z_change = std::abs(ang_diff_z);
@@ -405,29 +664,69 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
   
   if (has_linear_velocity && angular_z_change > angular_velocity_change_threshold_)
   {
-    // Use special angular velocity smoothing and rate limiting for turning
-    double angular_smooth_factor = angular_velocity_smooth_factor_;
-    
-    // Apply maximum angular velocity change rate limit
-    double max_angular_change = angular_velocity_max_rate_ * dt;
-    double limited_ang_diff_z = std::max(-max_angular_change, std::min(max_angular_change, ang_diff_z));
-    
-    smoothed_vel.angular.z += limited_ang_diff_z * angular_smooth_factor;
+    if (velocity_change_decel_only_ && !isDecelerating(smoothed_vel.angular.z, cmd_vel.angular.z)) {
+      smoothed_vel.angular.z = cmd_vel.angular.z;
+    } else {
+      // Use special angular velocity smoothing and rate limiting for turning
+      double angular_smooth_factor = angular_velocity_smooth_factor_;
+      
+      // Apply maximum angular velocity change rate limit
+      double max_angular_change = angular_velocity_max_rate_ * dt;
+      double limited_ang_diff_z = std::max(-max_angular_change, std::min(max_angular_change, ang_diff_z));
+      
+      smoothed_vel.angular.z += limited_ang_diff_z * angular_smooth_factor;
+    }
   }
   else
   {
     // Normal smoothing for angular.z when not turning
-    smoothed_vel.angular.z += ang_diff_z * smooth_factor;
+    applyAxisSmooth(smoothed_vel.angular.z, cmd_vel.angular.z, ang_diff_z);
   }
   
-  // Limit maximum linear velocity change
+  // Limit maximum linear velocity change (optionally deceleration only)
   double linear_change = std::sqrt(vel_diff_x * vel_diff_x + vel_diff_y * vel_diff_y + vel_diff_z * vel_diff_z);
-  
-  if (linear_change > max_velocity_change_) {
-    double scale = max_velocity_change_ / linear_change;
+  const double smoothed_linear_mag = std::sqrt(
+      smoothed_cmd_vel_.linear.x * smoothed_cmd_vel_.linear.x +
+      smoothed_cmd_vel_.linear.y * smoothed_cmd_vel_.linear.y +
+      smoothed_cmd_vel_.linear.z * smoothed_cmd_vel_.linear.z);
+  const double cmd_linear_mag = std::sqrt(
+      cmd_vel.linear.x * cmd_vel.linear.x +
+      cmd_vel.linear.y * cmd_vel.linear.y +
+      cmd_vel.linear.z * cmd_vel.linear.z);
+  const bool linear_decel = cmd_linear_mag < smoothed_linear_mag - 1e-9;
+  const double effective_max_velocity_change =
+      (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x)
+          ? max_velocity_change_neg_cmd_x_
+          : max_velocity_change_;
+  const bool apply_linear_change_limit =
+      !velocity_change_decel_only_ || linear_decel || in_neg_cmd_x;
+
+  if (linear_change > effective_max_velocity_change && apply_linear_change_limit) {
+    double scale = effective_max_velocity_change / linear_change;
     smoothed_vel.linear.x = smoothed_cmd_vel_.linear.x + scale * vel_diff_x;
     smoothed_vel.linear.y = smoothed_cmd_vel_.linear.y + scale * vel_diff_y;
     smoothed_vel.linear.z = smoothed_cmd_vel_.linear.z + scale * vel_diff_z;
+  }
+
+  // 负向 cmd_x 单独限速（后退加减速均限速）
+  if (max_velocity_change_neg_cmd_x_ > 0.0 && in_neg_cmd_x) {
+    const double x_diff = smoothed_vel.linear.x - smoothed_cmd_vel_.linear.x;
+    const double x_change = std::abs(x_diff);
+    if (x_change > max_velocity_change_neg_cmd_x_) {
+      smoothed_vel.linear.x =
+          smoothed_cmd_vel_.linear.x + (x_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_neg_cmd_x_;
+    }
+  }
+
+  // cmd_y 单步限速
+  if (max_velocity_change_cmd_y_ > 0.0) {
+    const double prev_y = smoothed_cmd_vel_.linear.y;
+    const double y_diff = smoothed_vel.linear.y - prev_y;
+    const double y_change = std::abs(y_diff);
+    if (y_change > max_velocity_change_cmd_y_) {
+      smoothed_vel.linear.y =
+          prev_y + (y_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_cmd_y_;
+    }
   }
   
   // Apply mixed motion limits to velocity commands
@@ -478,6 +777,19 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
   } else {
     ROS_WARN("[RlGaitReceiver] No mixedMotionLimits section found in config file, using default values");
   }
+
+  // Load velocity smoothing overrides (e.g. amp_hand_param.info for v17 amp_hand_controller)
+  if (pt.find("velocitySmoothing") != pt.not_found()) {
+    loadData::loadPtreeValue(pt, max_velocity_change_, "velocitySmoothing.maxVelocityChange", verbose);
+    loadData::loadPtreeValue(pt, max_velocity_change_neg_cmd_x_, "velocitySmoothing.maxVelocityChangeNegCmdX", verbose);
+    loadData::loadPtreeValue(pt, velocity_change_decel_only_, "velocitySmoothing.decelOnly", verbose);
+    loadData::loadPtreeValue(pt, max_velocity_change_cmd_y_, "velocitySmoothing.maxVelocityChangeCmdY", verbose);
+    std::cout << "[RlGaitReceiver] velocitySmoothing loaded: maxVelocityChange="
+              << max_velocity_change_ << ", maxVelocityChangeNegCmdX="
+              << max_velocity_change_neg_cmd_x_ << ", decelOnly="
+              << (velocity_change_decel_only_ ? "true" : "false")
+              << ", maxVelocityChangeCmdY=" << max_velocity_change_cmd_y_ << std::endl;
+  }
 }
 
 void RlGaitReceiver::startInPlaceStepping(const ros::Time& current_time)
@@ -512,6 +824,20 @@ void RlGaitReceiver::updateInPlaceStepping(const ros::Time& current_time)
 bool RlGaitReceiver::isInPlaceSteppingActive() const
 {
   return is_in_place_stepping_;
+}
+
+bool RlGaitReceiver::isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  const double linear_norm = std::hypot(latest_cmd_vel_.linear.x, latest_cmd_vel_.linear.y);
+  const bool has_no_velocity_input =
+      linear_norm < linear_thresh &&
+      std::abs(latest_cmd_vel_.linear.z) < linear_thresh &&
+      std::abs(latest_cmd_vel_.angular.z) < angular_thresh;
+
+  return currentCommand_.cmdStance_ < 0.5 &&
+         trot_latched_ &&
+         has_no_velocity_input;
 }
 
 } // namespace humanoid

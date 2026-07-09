@@ -3,6 +3,7 @@ from typing import Optional, Dict, Set, List, Tuple, Any
 import enum
 import time
 import rospy
+import rosnode
 from sensor_msgs.msg import Joy
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
@@ -25,7 +26,7 @@ from trajectory_msgs.msg import JointTrajectory
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import numpy as np
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Empty
 
 rospack = rospkg.RosPack()
 pkg_path = rospack.get_path('h12pro_controller_node')
@@ -197,6 +198,7 @@ class H12ToJoyControllerNode:
         self.cd_press_start_time = None
         # G+H同时极值2秒复位
         self.gh_press_start_time = None
+        self.gh_triggered = False
 
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
@@ -279,7 +281,7 @@ class H12ToJoyControllerNode:
         """Wheel-arm mode (G12) special channel processing."""
         channels = list(self.channels_msg)
 
-        # E/F safety switch: both must be at middle position
+        # E/F safety switch: both must be at middle position for mode switching
         e_mid = abs(channels[4] - Config.H12_AXIS_MID_VALUE) < 100
         f_mid = abs(channels[5] - Config.H12_AXIS_MID_VALUE) < 100
         safe_enabled = e_mid and f_mid
@@ -298,14 +300,12 @@ class H12ToJoyControllerNode:
             if mapping and mapping.axis_index is not None:
                 self.joy_msg.axes[mapping.axis_index] = mapping.get_current_state(channels[index])
 
-        if not safe_enabled:
-            return
+        # Safety switch: only controls LB/RB for mode switching
+        if safe_enabled:
+            self.joy_msg.buttons[G12_BUTTON_LB] = 1
+            self.joy_msg.buttons[G12_BUTTON_RB] = 1
 
-        # Safety switch enabled
-        self.joy_msg.buttons[G12_BUTTON_LB] = 1
-        self.joy_msg.buttons[G12_BUTTON_RB] = 1
-
-        # C+D long press emergency stop (channel 9->index 8, channel 10->index 9)
+        # C+D long press emergency stop - always active
         c_pressed = channels[8] == Config.H12_AXIS_RANGE_MAX
         d_pressed = channels[9] == Config.H12_AXIS_RANGE_MAX
         if c_pressed and d_pressed:
@@ -322,7 +322,7 @@ class H12ToJoyControllerNode:
             self.cd_press_start_time = None
             self.cd_emergency_triggered = False
 
-        # Button mapping (C->9, A->7, B->8, D->10)
+        # Button mapping (A/B/C/D) - always active
         wheel_button_map = {
             6: G12_BUTTON_Y,    # channel 7(A) -> buttons[3](Y)
             7: G12_BUTTON_B,    # channel 8(B) -> buttons[1](B)
@@ -334,29 +334,52 @@ class H12ToJoyControllerNode:
             if mapping and mapping.is_button:
                 self.joy_msg.buttons[btn_idx] = mapping.get_current_state(channels[ch_idx])
 
-        # G/H dial buttons
+        # G/H dial buttons - always active
         if g_at_extreme:
             self.joy_msg.buttons[G12_BUTTON_GUIDE] = 1
         if h_at_extreme:
             self.joy_msg.buttons[G12_BUTTON_M1] = 1
 
-        # G+H both at extreme for 2s -> torso reset
-        if g_at_extreme and h_at_extreme:
+        # G+H both at extreme for 2s -> torso reset - requires E/F at middle
+        if safe_enabled and g_at_extreme and h_at_extreme:
             if self.gh_press_start_time is None:
                 self.gh_press_start_time = time.time()
-                rospy.loginfo("[G12] G+H torso reset: holding, waiting 2.0s...")
-            elif time.time() - self.gh_press_start_time >= 2.0:
+                self.gh_triggered = False
+            elif time.time() - self.gh_press_start_time >= 2.0 and not self.gh_triggered:
                 self.joy_msg.buttons[G12_BUTTON_M2] = 1
+                self.gh_triggered = True
                 rospy.logwarn("[G12] G+H torso reset TRIGGERED!")
         else:
             if self.gh_press_start_time is not None:
                 rospy.loginfo("[G12] G+H torso reset: released, %.1fs elapsed (not triggered)",
                               time.time() - self.gh_press_start_time)
             self.gh_press_start_time = None
+            self.gh_triggered = False
 
 class H12PROControllerNode:
     """Main controller node for H12PRO remote controller."""
-    
+
+    def _control_stack_online(self, retries: int = 3, interval: float = 0.3) -> bool:
+        """探测控制栈是否在线（= 机器人是否还站着）。
+
+        用于 __init__ 状态恢复门：控制栈在线 -> 续 last_state（joy_node 崩溃重启，续运行态）；
+        控制栈不在线 -> 回 initial（终端退出后服务 reclaim，回待命态，避免按 C 失效）。
+
+        查询失败（rosnode 抛异常）的兜底方向是 True（保状态）：宁可退化成
+        “待命态按 C 不灵”的老问题（机器人静止、无危险），也不要在查询抽风时把一个
+        可能仍在运动的机器人 FSM 打回 initial。
+        """
+        for attempt in range(retries):
+            try:
+                nodes = rosnode.get_node_names()
+                return "/nodelet_controller" in nodes or "/humanoid_sqp_mpc" in nodes
+            except Exception as e:
+                rospy.logwarn(f"[StateRecovery] rosnode query failed ({attempt + 1}/{retries}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(interval)
+        rospy.logwarn("[StateRecovery] rosnode unavailable; assume stack ONLINE to preserve state")
+        return True
+
     def __init__(self):
         """Initialize H12PRO controller node."""
 
@@ -382,6 +405,8 @@ class H12PROControllerNode:
                 )
             
         print(f"[H12PROControllerNode]: robot_state_machine init state is {self.robot_state_machine.state}")
+        # 将初始状态写入 param，避免上次运行的残留值错误反映当前 FSM 状态
+        rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
 
         self.h12_to_joy_node = H12ToJoyControllerNode()
 
@@ -394,11 +419,24 @@ class H12PROControllerNode:
                 if last_saved_state != "none" and last_saved_state in LEGAL_STATES \
                         and last_saved_state not in ["initial", "calibrate"]:
 
-                    # 1. 恢复软件状态
-                    self.robot_state_machine.machine.set_state(
-                        last_saved_state, self.robot_state_machine
-                    )
-                    rospy.loginfo(f"[StateRecovery] Software state recovered to: {last_saved_state}")
+                    if self._control_stack_online():
+                        # 控制栈仍在线：joy_node 崩溃后被 monitor 重启，续上运行态。
+                        self.robot_state_machine.machine.set_state(
+                            last_saved_state, self.robot_state_machine
+                        )
+                        rospy.loginfo(f"[StateRecovery] stack online, recovered to: {last_saved_state}")
+                    else:
+                        # 控制栈不在线（终端退出后服务 reclaim 起新 joy_node）：
+                        # 丢弃跨 rosmaster 存活的遗留 last_state，回 initial 待命，
+                        # 否则会被钉在 stance，按 E左+F右+C 不命中 initial_pre 无法重新拉栈。
+                        self.robot_state_machine.machine.set_state(
+                            "initial", self.robot_state_machine
+                        )
+                        rospy.set_param(LAST_STATE_PARAM, "initial")
+                        rospy.logwarn(
+                            "[StateRecovery] control stack offline; reset FSM to initial "
+                            f"(discarded stale last_state={last_saved_state}) so H12 can relaunch."
+                        )
 
             except Exception as e:
                 rospy.logerr(f"[StateRecovery] Failed to recover: {e}")
@@ -472,21 +510,9 @@ class H12PROControllerNode:
         #     self._mpc_obs_callback,
         #     queue_size=1
         # )
-        self.traj_sub = rospy.Subscriber(
-            '/bezier/arm_traj', 
-            JointTrajectory, 
-            self._traj_callback, 
-            queue_size=1, 
-            tcp_nodelay=True
-        )
-
-        self.kuavo_arm_traj_pub = rospy.Publisher(
-            '/kuavo_arm_traj', 
-            JointState, 
-            queue_size=1, 
-            tcp_nodelay=True
-        )
-
+        # /bezier/arm_traj 订阅和 /kuavo_arm_traj 发布已移除：
+        # tact 执行时轨迹转发由 autostart (arm_trajectory_bezier_process.py) 统一处理，
+        # joy_node 不再参与手臂轨迹数据流，避免多发布者冲突
         self.plan_arm_state_sub = rospy.Subscriber(
             "/bezier/arm_traj_state",
             planArmState,
@@ -511,11 +537,13 @@ class H12PROControllerNode:
             tcp_nodelay=True
         )
         self.control_head_pub = rospy.Publisher(
-            '/robot_head_motion_data', 
-            robotHeadMotionData, 
-            queue_size=1, 
+            '/robot_head_motion_data',
+            robotHeadMotionData,
+            queue_size=1,
             tcp_nodelay=True
         )
+        # 初始化全局停止话题发布者（项目统一用Bool协议，True表示停止）
+        self.stop_robot_pub = rospy.Publisher('/stop_robot', Bool, queue_size=1)
         self.update_h12_customize_config_sub = rospy.Subscriber(
             "/update_h12_customize_config",
             UpdateH12CustomizeConfig,
@@ -544,42 +572,11 @@ class H12PROControllerNode:
             rospy.logerr(f"[NavigationState] Error processing navigation state: {e}")
         
     def publish_arm_joint_state(self):
-        if self.plan_arm_is_finished is False and len(self.should_pub_arm_joint_state.position) > 0:
-            self.kuavo_arm_traj_pub.publish(self.should_pub_arm_joint_state)
-            self.control_hand_pub.publish(self.should_pub_hand_position)
-            self.control_head_pub.publish(self.should_pub_head_motion_data)
+        # /kuavo_arm_traj 由 autostart 统一发布，joy_node 不再转发手臂轨迹
+        pass
 
     def _plan_arm_state_callback(self, msg):
         self.plan_arm_is_finished = msg.is_finished
-
-    def _traj_callback(self, msg):
-        if len(msg.points) == 0:
-            return
-        point = msg.points[0]
-        self.should_pub_arm_joint_state.name = [
-            "l_arm_pitch",
-            "l_arm_roll",
-            "l_arm_yaw",
-            "l_forearm_pitch",
-            "l_hand_yaw",
-            "l_hand_pitch",
-            "l_hand_roll",
-            "r_arm_pitch",
-            "r_arm_roll",
-            "r_arm_yaw",
-            "r_forearm_pitch",
-            "r_hand_yaw",
-            "r_hand_pitch",
-            "r_hand_roll",
-        ]
-        self.should_pub_arm_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
-        self.should_pub_arm_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
-        self.should_pub_arm_joint_state.effort = [0] * 14
-
-        self.should_pub_hand_position.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
-        self.should_pub_hand_position.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
-
-        self.should_pub_head_motion_data.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
 
 
     # def _mpc_obs_callback(self, msg):
@@ -655,17 +652,14 @@ class H12PROControllerNode:
 
     def _channel_callback(self, msg: h12proRemoteControllerChannel) -> None:
         """Process incoming channel messages.
-        
+
         Args:
             msg: Channel message containing control data.
         """
-        if self.start_way == "manual":
-            return
-        
         if msg.sbus_state == 0:
-            rospy.logwarn("No receive h12pro channel message. Please check device `/dev/usb_remote` exist or not and re-plug the h12pro signal receiver.")
+            rospy.logwarn_throttle(5.0, "No receive h12pro channel message. Please check device `/dev/usb_remote` exist or not and re-plug the h12pro signal receiver.")
             return
-        
+
         try:
             key_combination = self._process_channels(msg.channels)
             self._handle_state_transitions(key_combination, msg)
@@ -847,13 +841,19 @@ class H12PROControllerNode:
                 rospy.loginfo("[EmergencyStop] Cleared switch_controller cooldown to allow immediate stop.")
 
             # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
-            current_controller = self._get_current_controller_name()
+            current_controller = None
+            skip_controller_list = self.only_half_up_body or rospy.get_param("robot_type", 2) == 1
+            if not skip_controller_list:
+                current_controller = self._get_current_controller_name()
             if current_controller and current_controller.lower() == "mpc":
                 if current_state in ["stance", "walk", "trot", "vr_remote_control"]:
                     self.h12_to_joy_node.is_stopping = True
                     self._gradually_move_right_stick_down()
                     self.h12_to_joy_node.is_stopping = False
-                
+            
+            # 发布全局停止指令到/stop_robot话题（True表示停止，项目统一协议）
+            self.stop_robot_pub.publish(Bool(data=True))  
+
             getattr(self.robot_state_machine, "stop")(source=current_state)
 
             # ===== 紧急停止状态持久化 =====
@@ -982,7 +982,10 @@ class H12PROControllerNode:
                     
                     # 如果是有效状态,更新消息
                     current_controller_support = True
-                    current_controller = self._get_current_controller_name()
+                    current_controller = None
+                    skip_controller_list = self.only_half_up_body or rospy.get_param("robot_type", 2) == 1
+                    if not skip_controller_list:
+                        current_controller = self._get_current_controller_name()
                     if current_controller and current_controller.lower() == "mpc" and trigger in ["trot"]:
                         current_controller_support = False
                         print("mpc not support this trigger")

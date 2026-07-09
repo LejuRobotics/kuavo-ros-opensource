@@ -1,0 +1,129 @@
+<?xml version="1.0"?>
+<mujoco model="biped_waist">
+  <!-- Use biped_s70 centralized mesh folder -->
+  <compiler angle="radian" meshdir="../../../../../kuavo_assets/models/biped_s70/meshes/"/>
+
+  <option>
+    <!-- This MJCF is for kinematics/constraint verification -->
+    <flag gravity="disable" contact="disable" />
+  </option>
+
+  <statistic meansize="0.05" />
+
+  <default>
+    <joint armature="0.01" damping="0.0" frictionloss="0.0" />
+    <equality solref="0.001 1" />
+  </default>
+
+  <asset>
+    <mesh name="base_link" file="base_link.STL"/>
+    <mesh name="waist_yaw" file="waist_yaw.STL"/>
+    <mesh name="waist_pitch" file="waist_pitch.STL"/>
+    <mesh name="waist_roll" file="waist_roll.STL"/>
+    <mesh name="waist_l_bar" file="waist_l_bar.STL"/>
+    <mesh name="waist_l_bar_tendon" file="waist_l_bar_tendon.STL"/>
+    <mesh name="waist_r_bar" file="waist_r_bar.STL"/>
+    <mesh name="waist_r_bar_tendon" file="waist_r_bar_tendon.STL"/>
+    <mesh name="l_arm_connect" file="l_arm_connect.STL"/>
+    <mesh name="r_arm_connect" file="r_arm_connect.STL"/>
+    <mesh name="head_connect" file="head_connect.STL"/>
+    <mesh name="l_leg_connect" file="l_leg_connect.STL"/>
+    <mesh name="r_leg_connect" file="r_leg_connect.STL"/>
+  </asset>
+
+  <worldbody>
+    <camera name="front" fovy="15" pos="-1.0 0 0.6" quat="0.707 0 -0.707 0"/>
+
+    <!-- Fixed base for waist-only model (URDF base_joint is floating; for verification we keep it fixed) -->
+    <body name="base_link" pos="0 0 0">
+      <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="base_link"/>
+
+      <!-- waist_yaw_joint: URDF origin (0 0 0.0225), axis z -->
+      <body name="waist_yaw" pos="0 0 0.0225">
+        <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" limited="true" range="-3.14159 3.14159" />
+        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="waist_yaw"/>
+
+        <!-- Left parallel bar (mounted on waist_yaw) -->
+        <body name="waist_l_bar" pos="0 0.026 0.11123">
+          <joint name="waist_l_bar_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.499052 0.912707" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.78 0.76 0.74 1" mesh="waist_l_bar"/>
+          <body name="waist_l_bar_tendon" pos="-0.04884 0 -0.017852">
+            <!-- Parallel rod end: allow free orientation like ankle tendon -->
+            <joint name="waist_l_bar_tendon_joint" type="ball" />
+            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="waist_l_bar_tendon"/>
+            <!-- Visualize tendon-side connect point (tendon end) -->
+          </body>
+        </body>
+
+        <!-- Right parallel bar (mounted on waist_yaw) -->
+        <body name="waist_r_bar" pos="0 -0.026 0.11123">
+          <joint name="waist_r_bar_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.499052 0.912707" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.78 0.76 0.74 1" mesh="waist_r_bar"/>
+          <body name="waist_r_bar_tendon" pos="-0.04884 0 -0.017852">
+            <!-- Parallel rod end: allow free orientation like ankle tendon -->
+            <joint name="waist_r_bar_tendon_joint" type="ball" />
+            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="waist_r_bar_tendon"/>
+          </body>
+        </body>
+
+        <!-- waist_pitch_joint: URDF origin (0.03677 0 0.148), axis y -->
+        <body name="waist_pitch" pos="0.03677 0 0.148">
+          <joint name="waist_pitch_joint" pos="0 0 0" axis="0 1 0" limited="true" range="-0.261666667 0.523333333" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="waist_pitch"/>
+
+          <!-- waist_roll_joint: URDF origin (0 0 -0.023), axis x -->
+          <body name="waist_roll" pos="0 0 -0.023">
+            <joint name="waist_roll_joint" pos="0 0 0" axis="1 0 0" limited="true" range="-0.261666667 0.261666667" />
+            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.85 0.88 0.92 1" mesh="waist_roll"/>
+
+            <!-- Visualize roll-side connect points (given in waist_roll local frame) -->
+            <geom name="waist_roll_connect_L" type="sphere" size="0.01" pos="-0.091 0.026 0.0204" rgba="0.9 0.2 0.2 0.8" contype="0" conaffinity="0"/>
+            <geom name="waist_roll_connect_R" type="sphere" size="0.01" pos="-0.091 -0.026 0.0204" rgba="0.9 0.2 0.2 0.8" contype="0" conaffinity="0"/>
+
+            <!-- Connect markers -->
+            <body name="l_arm_connect" pos="-0.03677 0.108 0.2285">
+              <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.98 1 0.78 1" mesh="l_arm_connect"/>
+              <geom name="l_arm_connect_sphere" type="sphere" size="0.008" pos="0 0 0" rgba="1 0.2 0.8 0.8" contype="0" conaffinity="0"/>
+            </body>
+            <body name="r_arm_connect" pos="-0.03677 -0.108 0.2285">
+              <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.98 1 0.78 1" mesh="r_arm_connect"/>
+              <geom name="r_arm_connect_sphere" type="sphere" size="0.008" pos="0 0 0" rgba="1 0.2 0.8 0.8" contype="0" conaffinity="0"/>
+            </body>
+            <body name="head_connect" pos="-0.03677 0 0.4364">
+              <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.98 1 0.78 1" mesh="head_connect"/>
+              <geom name="head_connect_sphere" type="sphere" size="0.008" pos="0 0 0" rgba="1 0.2 0.8 0.8" contype="0" conaffinity="0"/>
+            </body>
+          </body>
+        </body>
+
+        <!-- Keep leg connect points in base frame (as in URDF) -->
+        <body name="l_leg_connect" pos="0 0.0244 -0.055694">
+          <!-- URDF: l_leg_connect_joint is continuous -->
+          <joint name="l_leg_connect_joint" pos="0 0 0" axis="0 -0.96593 0.25882" limited="false" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.98 1 0.78 1" mesh="l_leg_connect"/>
+          <geom name="l_leg_connect_sphere" type="sphere" size="0.008" pos="0 0 0" rgba="1 0.2 0.8 0.8" contype="0" conaffinity="0"/>
+        </body>
+        <body name="r_leg_connect" pos="0 -0.0244 -0.055694">
+          <!-- URDF: r_leg_connect_joint is continuous -->
+          <joint name="r_leg_connect_joint" pos="0 0 0" axis="0 0.96593 0.25882" limited="false" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.98 1 0.78 1" mesh="r_leg_connect"/>
+          <geom name="r_leg_connect_sphere" type="sphere" size="0.008" pos="0 0 0" rgba="1 0.2 0.8 0.8" contype="0" conaffinity="0"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <!-- Connect anchor is expressed in body1 (waist_roll) local frame -->
+    <connect name="waist_l_eq" body1="waist_roll" body2="waist_l_bar_tendon" anchor="-0.091 0.026 0.0204" solref="0.001 1" />
+    <connect name="waist_r_eq" body1="waist_roll" body2="waist_r_bar_tendon" anchor="-0.091 -0.026 0.0204" solref="0.001 1" />
+  </equality>
+
+  <actuator>
+    <!-- Control: yaw + two bars; pitch/roll are passive (follower) -->
+    <motor name="waist_yaw_motor" joint="waist_yaw_joint" ctrllimited="true" ctrlrange="-1 1" gear="1" />
+    <position name="waist_l_bar_motor" joint="waist_l_bar_joint" kp="50" kv="5" ctrlrange="-0.499052 0.912707" />
+    <position name="waist_r_bar_motor" joint="waist_r_bar_joint" kp="50" kv="5" ctrlrange="-0.499052 0.912707" />
+  </actuator>
+</mujoco>
+

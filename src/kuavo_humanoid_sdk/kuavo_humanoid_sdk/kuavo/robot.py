@@ -103,6 +103,7 @@ class KuavoRobot(RobotBase):
         self._robot_waist = KuavoRobotWaist()
         self._robot_wheel_control = KuavoRobotWheelControl()
         self._kuavo_core = KuavoRobotCore()
+        self._kuavo_core.initialize()
     def stance(self)->bool:
         """使机器人进入'stance'站立模式。
         

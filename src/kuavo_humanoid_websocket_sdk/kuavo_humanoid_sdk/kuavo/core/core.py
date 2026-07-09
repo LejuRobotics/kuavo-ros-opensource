@@ -88,6 +88,7 @@ class KuavoRobotCore:
             self._manipulation_mpc_control_flow = KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
 
             self._arm_ctrl_mode = KuavoArmCtrlMode.AutoSwing
+            self._robot_version_major = 0    # 默认值，initialize() 中会覆盖
             
             # register gait changed callback
             self._rb_state.register_gait_changed_callback(self._humanoid_gait_changed)
@@ -166,15 +167,15 @@ class KuavoRobotCore:
             start_time = time.time()
             # slow down walk
             try:
-                while time.time() - start_time < 1.5:
+                while time.time() - start_time < 0.5:
                     self._control.robot_walk(0.0, 0.0, 0.0)
                     # linear_x, linear_y, angular_z
-                    if (abs(self._rb_state.odom_data.linear[0]) < 0.05 and abs(self._rb_state.odom_data.linear[1]) < 0.08 
+                    if (abs(self._rb_state.odom_data.linear[0]) < 0.05 and abs(self._rb_state.odom_data.linear[1]) < 0.08
                         and abs(self._rb_state.odom_data.angular[2]) < 0.05):
                         SDKLogger.debug(f"walk stop, time_cost:{time.time() - start_time}, odom_data:{self._rb_state.odom_data.linear}")
                         break
                     # SDKLogger.debug(f"kuavo robot linear: {self._rb_state.odom_data.linear}")
-                    time.sleep(0.1)
+                    time.sleep(0.05)
             except KeyboardInterrupt:
                 pass
             self._control.robot_stance()
@@ -185,7 +186,7 @@ class KuavoRobotCore:
         #  may already be True; the minimum settle time ensures the robot has actually
         #  processed the stance command before we proceed)
         _WAIT_TIMEOUT = 2.0
-        _MIN_SETTLE_TIME = 1.0
+        _MIN_SETTLE_TIME = 0.3
         start_time = time.time()
         while time.time() - start_time < _WAIT_TIMEOUT:
             if self._rb_state.is_gait('stance') and (time.time() - start_time) >= _MIN_SETTLE_TIME:
@@ -524,6 +525,25 @@ class KuavoRobotCore:
         return self._control.control_robot_head(yaw_deg, pitch_deg)
     
     def control_robot_waist(self, target_pos:list):
+        # 轮臂机器人: /robot_waist_motion_data 无人订阅，改走 /cmd_lb_torso_pose
+        if (hasattr(self._rb_state, '_is_wheel_arm') and
+                self._rb_state._is_wheel_arm):
+            import math
+            yaw_rad = math.radians(float(target_pos[0]))
+
+            # 尝试从 MPC observation 获取当前躯干位姿，保持 x/y/z/roll/pitch 不变仅改 yaw
+            cur_x, cur_y, cur_z = 0.196, 0.001, 0.790  # fallback: _INIT 基准
+            try:
+                obs = getattr(self._rb_state, '_mpc_observation_data', None)
+                if obs is not None and 'state' in obs and 'value' in obs['state'] and len(obs['state']['value']) >= 12:
+                    cur_x = obs['state']['value'][6]
+                    cur_y = obs['state']['value'][7]
+                    cur_z = obs['state']['value'][8]
+            except Exception:
+                pass  # 读取失败时使用 fallback 值
+
+            return self._control.control_torso_pose(cur_x, cur_y, cur_z, 0.0, 0.0, yaw_rad)
+
         return self._control.control_robot_waist(target_pos)
     
     def enable_head_tracking(self, target_id: int)->bool:
@@ -748,7 +768,39 @@ class KuavoRobotCore:
 
     def arm_fk(self, q: list) -> Tuple[KuavoPose, KuavoPose]:
         return self._control.arm_fk(q)
-    
+
+    def arm_ik_free(self,
+                    l_eef_pose: KuavoPose,
+                    r_eef_pose: KuavoPose,
+                    l_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    r_elbow_pos_xyz: list = [0.0, 0.0, 0.0],
+                    arm_q0: list = None,
+                    params: KuavoIKParams = None) -> list:
+        return self._control.arm_ik_free(l_eef_pose, r_eef_pose, l_elbow_pos_xyz, r_elbow_pos_xyz, arm_q0, params)
+
+    def control_hand_wrench(self, left_wrench: list, right_wrench: list) -> bool:
+        return self._control.control_hand_wrench(left_wrench, right_wrench)
+
+    """ Wheel-Arm """
+    def control_torso_pose(self, x: float, y: float, z: float,
+                           roll: float, pitch: float, yaw: float) -> bool:
+        return self._control.control_torso_pose(x, y, z, roll, pitch, yaw)
+
+    def control_wheel_lower_joint(self, joint_traj: list) -> bool:
+        return self._control.control_wheel_lower_joint(joint_traj)
+
+    """ Motor Parameter """
+    def change_motor_param(self, motor_param: list) -> Tuple[bool, str]:
+        return self._control.change_motor_param(motor_param)
+
+    def get_motor_param(self) -> Tuple[bool, list]:
+        success, param, _ = self._control.get_motor_param()
+        return success, param
+
+    """ Base Pitch Limit """
+    def enable_base_pitch_limit(self, enable: bool) -> Tuple[bool, str]:
+        return self._control.enable_base_pitch_limit(enable)
+
     """ Callbacks """
     def _humanoid_gait_changed(self, current_time: float, gait_name: str):
         # command_pose/command_pose_world are SDK sub-states of 'stance' gait,
@@ -804,6 +856,74 @@ class KuavoRobotCore:
     
     def set_arm_collision_mode(self, enable: bool):
         self._control.set_arm_collision_mode(enable)
+
+    """--------------------------------------------------------------------------------------------"""
+    """ 轮臂控制方法 """
+
+    def is_wheel_arm_initialized(self) -> bool:
+        """检查轮臂控制是否初始化
+
+        Returns:
+            bool: 是否已初始化
+        """
+        return self._control.is_wheel_arm_initialized()
+
+    def control_wheel_arm_joint_positions(self, positions: list) -> bool:
+        """控制轮臂关节位置
+
+        Args:
+            positions: 关节位置列表，4个关节的角度值（弧度）
+
+        Returns:
+            bool: 是否成功控制
+        """
+        # 参数验证
+        if not self._validate_wheel_arm_positions(positions):
+            return False
+
+        try:
+            return self._control.control_wheel_arm_joint_positions(positions)
+        except Exception as e:
+            SDKLogger.error(f"[KuavoRobotCore] 轮臂关节位置控制异常: {e}")
+            return False
+
+    def _validate_wheel_arm_positions(self, positions: list) -> bool:
+        """验证轮臂关节位置参数
+
+        Args:
+            positions: 关节位置列表
+
+        Returns:
+            bool: 参数是否有效
+        """
+        if not isinstance(positions, list):
+            SDKLogger.error("[KuavoRobotCore] 轮臂关节位置必须是列表类型")
+            return False
+
+        if len(positions) != 4:
+            SDKLogger.error(f"[KuavoRobotCore] 轮臂关节数量不匹配，期望4，实际{len(positions)}")
+            return False
+
+        for i, pos in enumerate(positions):
+            if not isinstance(pos, (int, float)):
+                SDKLogger.error(f"[KuavoRobotCore] 轮臂关节{i}位置必须是数值类型")
+                return False
+
+        return True
+
+    def get_wheel_arm_joint_positions(self) -> list:
+        """获取轮臂当前关节位置
+
+        Returns:
+            list: 4个关节的当前位置（弧度）
+        """
+        try:
+            # 从KuavoRobotStateCore获取关节状态，前4个关节是轮臂关节
+            joint_positions = self._rb_state.joint_data.position[:4]
+            return list(joint_positions)
+        except Exception as e:
+            SDKLogger.error(f"[KuavoRobotCore] 获取轮臂关节位置异常: {e}")
+            return [0.0] * 4
 
 
 if __name__ == "__main__":

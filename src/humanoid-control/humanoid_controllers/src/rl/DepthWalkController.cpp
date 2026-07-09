@@ -73,20 +73,27 @@ namespace humanoid_controller
 
     int depth_size = 8 * 36 * 64;
     depth_.resize(depth_size);
+    for(int i=0; i<depth_size; ++i)
+    {
+      depth_[i] = 0.5;
+    }
     depthSub_ = nh_.subscribe<std_msgs::Float64MultiArray>("/camera/depth/depth_history_array", 10, &DepthWalkController::depthCallback, this);
 
-    // 初始化ankleSolver（从ROS参数获取，如果不存在则使用默认值）
-    int ankle_solver_type = 0; // 默认值
+    // 初始化 ankleSolver（从 ROS 参数获取类型 token；与 AmpWalk/FallStand/VMP 保持一致）
+    std::string ankle_solver_type = "4gen_pro"; // 默认值（token）
     if (!nh_.getParam("/ankle_solver_type", ankle_solver_type))
     {
-      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %d", name_.c_str(), ankle_solver_type);
+      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     else
     {
-      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %d", name_.c_str(), ankle_solver_type);
+      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     ankleSolver_.getconfig(ankle_solver_type);
-    ROS_INFO("[%s] AnkleSolver initialized with type: %d", name_.c_str(), ankle_solver_type);
+    ROS_INFO("[%s] AnkleSolver initialized with type: %s",
+             name_.c_str(), ankle_solver_type.c_str());
 
     // 初始化手臂控制（可选功能）
     // 获取URDF路径
@@ -110,6 +117,10 @@ namespace humanoid_controller
     
     initArmControl(urdf_path);
     initWaistControl();
+
+    current_depth_latent.resize(128);
+    current_depth_latent.setZero();
+    depth_latent_pub_ = nh_.advertise<std_msgs::Float64MultiArray>("depth_latent", 10);
 
     initialized_ = true;
 
@@ -415,6 +426,8 @@ namespace humanoid_controller
     episodeLength_ = 0;
     currentCycleTime_ = cycleTime_;
     actions_.setZero();
+    has_valid_phase_ = false;
+    external_phase_override_enabled_ = false;
     // networkInputDataRL_ 和 singleInputData_ 清零
     networkInputDataRL_.setZero();
     singleInputData_.setZero();
@@ -458,6 +471,24 @@ namespace humanoid_controller
 
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
     reset();
+  }
+
+  //waao：热启动策略，防止策略输出时腿软
+  void DepthWalkController::resumeWarm()
+  {
+    RLControllerBase::resume();
+    if (gait_receiver_)
+    {
+      gait_receiver_->setEnabled(true);
+    }
+
+    if (is_real_ && use_amp_ruiwo_kpkd_)
+    {
+      changeRuiwoMotorParamAsync("amp_kpkd");
+    }
+
+    sensor_data_updated_ = false;
+    ROS_INFO("[%s] Controller warm-resumed without reset", name_.c_str());
   }
 
   bool DepthWalkController::requestToExit() const
@@ -511,6 +542,124 @@ namespace humanoid_controller
     return cmd.cmdStance_ >= 0.5;  // 使用 0.5 作为阈值，兼容浮点数比较
   }
 
+  //waao：计算相位
+  double DepthWalkController::getWalkingPhaseRad() const
+  {
+    double phase_rad = std::fmod(gait_phase, 1.0) * 2.0 * M_PI;
+    if (phase_rad < 0.0)
+    {
+      phase_rad += 2.0 * M_PI;
+    }
+    return phase_rad;
+  }
+
+  double DepthWalkController::getWalkingFrequencyHz() const
+  {
+    return gait_fre;
+  }
+
+  void DepthWalkController::setExternalPhaseOverride(bool enabled,
+                                                     double sin_phase,
+                                                     double cos_phase,
+                                                     double gait_frequency_hz)
+  {
+    external_phase_override_enabled_ = enabled;
+    external_phase_sin_ = sin_phase;
+    external_phase_cos_ = cos_phase;
+    external_phase_frequency_hz_ = gait_frequency_hz;
+  }
+
+  void DepthWalkController::resetGaitCommandState(bool stance_mode)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->resetCommandState(stance_mode);
+    }
+  }
+
+  bool DepthWalkController::getGaitCommandState(CommandDataRL& command) const
+  {
+    if (!gait_receiver_)
+    {
+      return false;
+    }
+    command = gait_receiver_->getCurrentCommand();
+    return true;
+  }
+
+  void DepthWalkController::setGaitCommandState(const CommandDataRL& command)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->overrideCommandState(command);
+    }
+  }
+
+  void DepthWalkController::setSwitchVelocityScale(double scale)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->setSwitchVelocityScale(scale);
+    }
+  }
+
+  void DepthWalkController::setCommandBufferCallback(std::function<bool()> callback)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->setCommandBufferCallback(std::move(callback));
+    }
+  }
+
+  void DepthWalkController::setExternalCommandBufferCallback(std::function<bool()> callback)
+  {
+    external_command_buffer_callback_ = std::move(callback);
+    if (arm_controller_)
+    {
+      arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+    }
+    if (waist_controller_)
+    {
+      waist_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+    }
+  }
+
+  bool DepthWalkController::hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const
+  {
+    if (!gait_receiver_)
+    {
+      return true;
+    }
+    const auto cmd = gait_receiver_->getCurrentCommand();
+    const double linear_norm = std::hypot(cmd.cmdVelLineX_, cmd.cmdVelLineY_);
+    return linear_norm < linear_thresh &&
+           std::abs(cmd.cmdVelLineZ_) < linear_thresh &&
+           std::abs(cmd.cmdVelAngularZ_) < angular_thresh;
+  }
+
+  bool DepthWalkController::isInPlaceSteppingActive() const
+  {
+    return gait_receiver_ && gait_receiver_->isInPlaceSteppingActive();
+  }
+
+  bool DepthWalkController::isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const
+  {
+    return gait_receiver_ && gait_receiver_->isInPlaceWalkingCommand(linear_thresh, angular_thresh);
+  }
+
+  //waao：计算关节参考
+  Eigen::VectorXd DepthWalkController::getCurrentJointReference() const
+  {
+    const int total_joints = jointNum_ + jointArmNum_ + waistNum_;
+    Eigen::VectorXd q_ref = defalutJointPosRL_.head(total_joints);
+    const Eigen::VectorXd action = getCurrentAction();
+    if (action.size() >= total_joints && actionScaleTestRL_.size() >= total_joints)
+    {
+      q_ref.array() += action.head(total_joints).array() * actionScale_ * actionScaleTestRL_.head(total_joints).array();
+    }
+    return q_ref;
+  }
+
   bool DepthWalkController::shouldRunInference() const
   {
     if (state_ != ControllerState::RUNNING)
@@ -524,19 +673,29 @@ namespace humanoid_controller
   void DepthWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
+    // if (external_phase_override_enabled_)
+    // {
+    //       gait_fre = 1.2;
+    // }
     auto delta_time=dt_*gait_fre*(episodeLength_);
     episodeLength_ = 0;
     gait_phase+=delta_time;
 
 
-    if (std::abs(cmd.cmdVelLineX_) < 0.01 &&
-        std::abs(cmd.cmdVelLineY_) < 0.01 &&
-        std::abs(cmd.cmdVelAngularZ_) < 0.01 &&
-        net_linvel.norm() < 0.2)
-    {
-        gait_phase = 0;
+    // if (std::abs(cmd.cmdVelLineX_) < 0.01 &&
+    //     std::abs(cmd.cmdVelLineY_) < 0.01 &&
+    //     std::abs(cmd.cmdVelAngularZ_) < 0.01 )
+    // {
+    //     gait_phase = 0;
+    // }
+
+    if (cmd.cmdStance_ >= 0.5){
+      gait_phase = 0;
     }
+
+
     gait_phase = std::fmod(gait_phase, 1.0);
+    
     commandPhase_(0) = sin(2 * M_PI * gait_phase);
     commandPhase_(1) = cos(2 * M_PI * gait_phase);
     commandPhase_(2) = leg_bias;
@@ -546,6 +705,7 @@ namespace humanoid_controller
     rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
                     : (commandPhase_(0) < 0) ? ModeNumber::FS
                                              : ModeNumber::SS;
+    has_valid_phase_ = true;
   }
 
   void DepthWalkController::depthCallback(const std_msgs::Float64MultiArray::ConstPtr &msg)
@@ -558,9 +718,20 @@ namespace humanoid_controller
                                             const SensorData& sensor_data)
   {
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
-    CommandDataRL cmd = gait_receiver_->getCurrentCommand();
+    CommandDataRL cmd = gait_receiver_->getPolicyCommand();
     
     updatePhase(cmd);
+
+    // waao：在切换过程中用耦合相位作为输入
+    // if (external_phase_override_enabled_)
+    // {
+    //   commandPhase_(0) = external_phase_sin_;
+    //   commandPhase_(1) = external_phase_cos_;
+    //   commandPhase_(4) = external_phase_frequency_hz_;
+    //   rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
+    //                   : (commandPhase_(0) < 0) ? ModeNumber::FS
+    //                                            : ModeNumber::SS;
+    // }
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
     static bool yaw_offset_initialized = false;
     if (!yaw_offset_initialized)
@@ -601,6 +772,8 @@ namespace humanoid_controller
     cmd.cmdVelAngularY_ = cmd.cmdVelAngularY_ * cmd.cmdVelScaleAngularY_;
     cmd.cmdVelAngularZ_ = targetAngZ;
     cmd.cmdStance_ *= cmd.cmdScaleStance_;
+
+    // std::cout << "depth vx = " << targetVelX << std::endl;
     
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
@@ -786,22 +959,59 @@ namespace humanoid_controller
       const auto output_tensor = infer_request_.get_output_tensor();
       const size_t output_buf_length = 27;
       const auto output_buf = output_tensor.data<float>();
+      const size_t output_element_count = output_tensor.get_size();
+
       const size_t expected_output_length =
           withArm_ ? jointNum_ + jointArmNum_ + waistNum_ : jointNum_ + waistNum_;
+      const size_t aux_output_length = 4;  // gait frequency + 3D linear velocity
+      if (output_element_count < output_buf_length + aux_output_length)
+      {
+        ROS_ERROR_THROTTLE(1.0,
+                           "[%s] Output size too small for depth walk auxiliary values: actual=%ld vs required=%ld",
+                           name_.c_str(), output_element_count, output_buf_length + aux_output_length);
+        action = Eigen::VectorXd::Zero(num_actions_);
+        return false;
+      }
+
       frePhase_(0) = output_buf[output_buf_length];
       gait_fre = std::tanh(output_buf[output_buf_length]/4.0)*0.2+1.0;
       for (int i = 0; i < 3; ++i) {
         net_linvel(i) = output_buf[output_buf_length+ i+1];
       }
 
-      // if (output_buf_length != expected_output_length)
-      // {
-      //   ROS_ERROR_THROTTLE(1.0,
-      //                      "[%s] Output size mismatch: actual=%ld vs expected=%ld (withArm_=%d)",
-      //                      name_.c_str(), output_buf_length, expected_output_length, withArm_);
-      //   action = Eigen::VectorXd::Zero(num_actions_);
-      //   return false;
-      // }
+      const size_t depth_latent_offset = output_buf_length +aux_output_length;
+      const size_t depth_latent_dim = static_cast<size_t>(current_depth_latent.size());
+      if (output_element_count >= depth_latent_offset + depth_latent_dim)
+      {
+        for (int i = 0; i < static_cast<int>(depth_latent_dim); ++i)
+        {
+          current_depth_latent(i) = output_buf[depth_latent_offset + i];
+        }
+
+        if (depth_latent_pub_)
+        {
+          std_msgs::Float64MultiArray depth_latent_msg;
+          depth_latent_msg.data.assign(current_depth_latent.data(),
+                                       current_depth_latent.data() + current_depth_latent.size());
+          depth_latent_pub_.publish(depth_latent_msg);
+        }
+      }
+      else
+      {
+        ROS_WARN_THROTTLE(1.0,
+                          "[%s] Output size too small for depth latent: actual=%ld vs required=%ld",
+                          name_.c_str(), output_element_count, depth_latent_offset + depth_latent_dim);
+      }
+
+      if (output_element_count < expected_output_length)
+      {
+        ROS_ERROR_THROTTLE(1.0,
+                           "[%s] Output size mismatch: actual=%ld vs expected action length=%ld (withArm_=%d)",
+                           name_.c_str(), output_element_count, expected_output_length, withArm_);
+        action = Eigen::VectorXd::Zero(num_actions_);
+        return false;
+      }
+
       action.resize(expected_output_length);
       for (int i = 0; i < static_cast<int>(expected_output_length); ++i)
         action[i] = output_buf[i];
@@ -836,7 +1046,7 @@ namespace humanoid_controller
       }
       
       // 获取当前命令数据判断是否从站立切换到行走
-      CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
+      CommandDataRL currentCmdData = gait_receiver_->getPolicyCommand();
       bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
       
       // 当从站立切换到行走时（站立->行走），记录初始髋关节pitch角速度并开始数据收集
@@ -1214,6 +1424,7 @@ namespace humanoid_controller
           jointArmNum_,   // 手臂关节数量
           ros_logger_     // ROS日志发布器
         );
+        arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
         
         // 初始化 ArmController
         // 提取手臂部分的 kp 和 kd 参数
@@ -1289,7 +1500,7 @@ namespace humanoid_controller
     CommandDataRL cmdData;
     if (gait_receiver_)
     {
-      cmdData = gait_receiver_->getCurrentCommand();
+      cmdData = gait_receiver_->getPolicyCommand();
     }
 
     // 构建完整的关节位置和速度向量（腿 + 腰 + 手）
@@ -1361,6 +1572,7 @@ namespace humanoid_controller
           ros_logger_,
           is_real_
         );
+        waist_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
         
         // 使用从配置文件读取的 kp 和 kd 参数（如果已加载），否则使用默认值
         Eigen::VectorXd waist_kp, waist_kd;
@@ -1496,7 +1708,7 @@ namespace humanoid_controller
     CommandDataRL cmdData;
     if (gait_receiver_)
     {
-      cmdData = gait_receiver_->getCurrentCommand();
+      cmdData = gait_receiver_->getPolicyCommand();
     }
 
     // 构建完整的关节位置和速度向量（腿 + 腰 + 手）

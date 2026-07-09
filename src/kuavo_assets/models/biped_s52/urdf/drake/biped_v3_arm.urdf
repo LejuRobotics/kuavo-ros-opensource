@@ -61,10 +61,26 @@
     <limit lower="-3.14159" upper="3.14159" effort="102.0" velocity="8.7" />
     <dynamics damping="0.02" friction="0.0" />
   </joint>
-  <!-- ============ l_arm_pitch ============ -->
-  <!-- 坐标系：l_arm_pitch_roll_yaw -->
-  <link
-    name="zarm_l1_link">
+  <!-- 固定参考坐标系：与 zarm_l1_joint 在同一位置，但不随关节转动 -->
+  <link name="zarm_l1_ref_link">
+    <visual>
+      <!-- 不需要几何，只作为一个纯参考坐标系使用 -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="zarm_l1_ref_material">
+        <color rgba="0 1 0 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l1_ref_joint" type="fixed">
+    <!-- 位置与 zarm_l1_joint 的 origin 完全一致 -->
+    <origin xyz="-0.003 0.1737 0.2831" rpy="0 0 0" />
+    <parent link="waist_yaw_link" />
+    <child link="zarm_l1_ref_link" />
+  </joint>
+  <link name="zarm_l1_link">
     <inertial>
       <!-- 质心：( 0.00080154, -0.00930333, 0.00031203 ) -->
       <origin xyz="0.00080154 -0.00930333 0.00031203" rpy="0 0 0" />
@@ -764,18 +780,5 @@
     <origin xyz="0 0.0 -0.17" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
     <child link="zarm_r7_end_effector" />
-  </joint>
-  <link name="zarm_r7_virtual_thumb_link">
-    <collision>
-      <origin rpy="0 0 0" xyz="0 0 0" />
-      <geometry>
-        <sphere radius="0.005" />
-      </geometry>
-    </collision>
-  </link>
-  <joint name="zarm_r7_virtual_thumb_joint_ee" type="fixed">
-    <origin xyz="0.15 0 0" rpy="0 0 0" />
-    <parent link="zarm_r7_end_effector" />
-    <child link="zarm_r7_virtual_thumb_link" />
   </joint>
   </robot>

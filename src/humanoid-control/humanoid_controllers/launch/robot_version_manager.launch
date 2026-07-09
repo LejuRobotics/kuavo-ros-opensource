@@ -30,6 +30,9 @@
     <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json" unless="$(eval arg('robot_version') == 15)"/>
     <param name="kuavo_configuration" textfile="$(arg kuavoConfigFile)"/>
 
+    <!-- 座椅配置：Kuavo5 代际共享默认，各版本 kuavo.json 中 seat_/sit_ 字段覆盖 -->
+    <param name="seat_config" textfile="$(find kuavo_assets)/config/seat_config_v5.json" if="$(eval str(arg('robot_version'))[0] == '5')"/>
+
     <param name="modelPath"        value="$(find kuavo_assets)/models" />
     <!-- rviz -->
     <!-- <group if="$(arg rviz)"> -->

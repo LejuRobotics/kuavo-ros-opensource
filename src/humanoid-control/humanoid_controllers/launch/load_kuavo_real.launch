@@ -16,7 +16,7 @@
     </include>
 
     <arg name="use_external_mpc"   default="true"/>
-    <arg name="wbc_frequency"      default="500"/>
+    <arg name="wbc_frequency"      default="1000"/>
     <arg name="sensor_frequency"   default="1000"/>
     <arg name="use_joystick"       default="true"/>
     <arg name="with_estimation"    default="true"/>
@@ -30,6 +30,7 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
     <arg name="stand_up_protect" default="true"/>
+    <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -53,7 +54,8 @@
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
     <arg name="with_led" default="true"/>
-    <arg name="with_battery" default="false"/>
+    <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
+    <arg name="with_battery" default="true"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
@@ -99,7 +101,7 @@
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
     <param name="pull_up_force_threshold_roban" value="0.50"/>
-    <param name="torso_interpolation_max_velocity" value="0.06"/>
+    <param name="torso_interpolation_max_velocity" value="0.1"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -118,10 +120,10 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <group if="$(eval arg('teach_pendant') == 1)">
       <param name="stand_up_protect" value="false"/>
@@ -176,6 +178,8 @@
         <param name="cali" value="true" />
     </group>
     
+    <param name="/use_sit_init" value="$(arg use_sit_init)" />
+    
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
        output="screen" required="true" clear_params="true"
        launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
@@ -183,6 +187,7 @@
     </node>
 
     <param name="hardware/is_ready" value="0"/>
+    <param name="hardware/ready_to_start" value="0"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
     <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
@@ -199,7 +204,8 @@
       <group if="$(eval arg('joystick_type') == 'h12')">
 
         <group if="$(eval arg('start_way') == 'manual')">
-          <!-- 此if分支为命令行启动机器人: joystick_type=h12，h12遥控器使用和服务启动(start_way=auto)相同的逻辑。-->
+          <!-- 此if分支为命令行启动机器人: joystick_type=h12。h12 节点启动前由 guard 请求服务让位，
+               终端启动自己的 /joy_node，不再复用服务侧 FSM。-->
           
           <param name="start_way" value="auto"/>
 
@@ -211,8 +217,13 @@
 
           <!-- 补充环境变量，和服务启动的变量一致 -->
           <env name="KUAVO_ROS_CONTROL_WS_PATH" value="$(find humanoid_controllers)/../../../" />
-          <!-- 启动 h12pro 控制节点 -->
+          <!-- 启动 h12pro 控制节点。
+               传入 h12_node_guard.sh 门卫前缀：终端节点启动前自动请求 /start_way=manual，
+               等待 ocs2_h12pro_monitor 停掉服务侧同名 h12 节点（并置 /h12_yield_done=1）后，
+               再启动终端自己的 /joy_node，使终端控制栈和 H12 FSM 生命周期一致。
+               服务未运行时门卫直接放行，保持原有行为。判断在节点启动期完成（roslaunch 解析期无法跑 shell）。 -->
           <include file="$(find h12pro_controller_node)/launch/h12pro_autostart.launch">
+            <arg name="guard_prefix" value="$(find h12pro_controller_node)/scripts/h12_node_guard.sh"/>
           </include>
 
           <param name="joystick_sensitivity" value="20"/>
@@ -293,12 +304,15 @@
     <group if="$(arg with_led)">
       <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
         <arg name="LED" value="enable"/>
+        <arg name="led_for_state" value="$(arg led_for_state)"/>
       </include>
     </group>
 
     <group if="$(arg with_battery)">
       <include file="$(find kuavo_led_controller)/launch/battery_info.launch">
         <arg name="BATTERY" value="enable"/>
+        <!-- 当 LED 同时启用时, 电池信息通过 LED 节点的 _query_battery_hw 服务获取, 避免串口冲突 -->
+        <arg name="backend" value="$(eval 'ros_service' if arg('with_led') else 'serial')" />
       </include>
     </group>
 
@@ -310,7 +324,91 @@
 
     </group>
 
-    <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
-    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+    <!-- ==================== kuavo_mocap_gmr (Motion Capture GMR) ==================== -->
+    <arg name="with_mocap_gmr" default="false" doc="Enable motion capture GMR"/>
+    <arg name="gmr_use_sim" default="false" doc="Use simulated motion instead of OptiTrack"/>
+    <!-- Common GMR configuration -->
+    <arg name="gmr_robot" default="kuavo_s52" doc="Target robot type for GMR"/>
+    <arg name="gmr_format" default="motive_streaming" doc="Motion format (lafan1, motive_bj, motive_sz)"/>
+    <arg name="gmr_cali_arm_pose_deg" default="75.0" doc="Calibration arm pose angle"/>
+    <arg name="gmr_fps" default="100.0" doc="GMR publishing rate (Hz)"/>
+    <arg name="gmr_enable_viewer" default="false" doc="Enable MuJoCo viewer for GMR"/>
+    <!-- CPU affinity: bind GMR process to specific P-cores (Ultra 7 255H: P-cores 0-5) -->
+    <arg name="gmr_cpu_cores" default="[]" doc="CPU cores to bind GMR process"/>
+    <!-- OptiTrack streaming parameters (when gmr_use_sim=false) -->
+    <arg name="gmr_server_ip" default="192.168.200.160" doc="OptiTrack server IP"/>
+    <arg name="gmr_client_ip" default="192.168.200.117" doc="Client (robot) IP"/>
+    <arg name="gmr_use_multicast" default="false" doc="Use multicast for OptiTrack"/>
+    <!-- Simulation parameters (when gmr_use_sim=true) -->
+    <arg name="gmr_data_file" default="" doc="Path to recorded motion file (.pkl or .bvh), empty for synthetic"/>
+    <arg name="gmr_loop" default="true" doc="Loop motion data"/>
+    <arg name="gmr_human_height" default="1.75" doc="Simulated human height (meters)"/>
+
+    <group if="$(arg with_mocap_gmr)">
+      <!-- Use gmr_streaming.launch for real OptiTrack -->
+      <group unless="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_streaming.launch">
+          <arg name="server_ip" value="$(arg gmr_server_ip)"/>
+          <arg name="client_ip" value="$(arg gmr_client_ip)"/>
+          <arg name="use_multicast" value="$(arg gmr_use_multicast)"/>
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+          <arg name="cpu_cores" value="$(arg gmr_cpu_cores)"/>
+        </include>
+      </group>
+      <!-- Use gmr_sim.launch for simulated motion -->
+      <group if="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_sim.launch">
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="data_file" value="$(arg gmr_data_file)"/>
+          <arg name="loop" value="$(arg gmr_loop)"/>
+          <arg name="human_height" value="$(arg gmr_human_height)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+        </include>
+      </group>
+    </group>
+
+    <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
+    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
+    <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR (GMR IK only supports kuavo_s52)"/>
+    <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>
+    <arg name="pico_enable_viewer" default="false" doc="Enable MuJoCo viewer for PICO GMR"/>
+    <arg name="pico_enable_gmr_smoothing" default="true" doc="Enable Gaussian filter smoothing"/>
+    <arg name="pico_gmr_gaussian_sigma" default="1.0" doc="Gaussian kernel sigma"/>
+    <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
+    <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
+    <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
+    <!-- 末端执行器类型: none / qiangnao / qiangnao_touch / jodell / lejuclaw / revo2 -->
+    <arg name="pico_end_effector_type" default="qiangnao" doc="End effector type for PICO GMR dexhand control"/>
+    <!-- 头控参数（GMR 和 Teleop 路径共享） -->
+    <arg name="pico_enable_head_control" default="true" doc="Enable independent head control node"/>
+    <arg name="pico_head_control_mode" default="fixed" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+    <!-- CPU affinity: bind PICO retarget process to specific P-cores (Ultra 7 255H: P-cores 0-5) -->
+    <arg name="pico_cpu_cores" default="[]" doc="CPU cores to bind PICO retarget process (empty=no binding)"/>
+
+    <group if="$(arg with_pico_gmr)">
+      <!-- 设置末端执行器类型，供 pico_dexhand_control_node.py 读取 -->
+      <param name="/end_effector_type" value="$(arg pico_end_effector_type)"/>
+      <include file="$(find kuavo_pico_gmr)/launch/pico_streaming.launch">
+        <arg name="robot" value="$(arg pico_robot)"/>
+        <arg name="human_height" value="$(arg pico_human_height)"/>
+        <arg name="enable_viewer" value="$(arg pico_enable_viewer)"/>
+        <arg name="enable_gmr_smoothing" value="$(arg pico_enable_gmr_smoothing)"/>
+        <arg name="gmr_gaussian_sigma" value="$(arg pico_gmr_gaussian_sigma)"/>
+        <arg name="gmr_velocity_clip" value="$(arg pico_gmr_velocity_clip)"/>
+        <arg name="gmr_velocity_deadzone" value="$(arg pico_gmr_velocity_deadzone)"/>
+        <arg name="enable_dexhand_control" value="$(arg pico_enable_dexhand_control)"/>
+        <arg name="enable_head_control" value="$(arg pico_enable_head_control)"/>
+        <arg name="head_control_mode" value="$(arg pico_head_control_mode)"/>
+        <arg name="cpu_cores" value="$(arg pico_cpu_cores)"/>
+      </include>
+    </group>
+
 
 </launch>

@@ -10,6 +10,7 @@
 #include "kuavo_common/common/kuavo_settings.h"
 #include "kuavo_common/common/common.h"
 #include "kuavo_common/common/utils.h"
+#include "kuavo_common/common/seat_config.h"
 #include "humanoid_interface_drake/planner/plantIK.h"
 
 #include "drake/systems/framework/diagram_builder.h"
@@ -44,6 +45,11 @@ namespace HighlyDynamic
         HumanoidInterfaceDrake &operator=(const HumanoidInterfaceDrake &) = delete;
         inline const vector_t &getInitialState() const { return initial_state_; }
         inline const vector_t &getSquatInitialState() const { return squat_initial_state_; }
+        inline const vector_t &getSitInitialState() const { return sit_initial_state_; }
+        /** MPC sit_down 轨迹时长（秒），来自 kuavo.json sit_down_duration_seconds，缺省 2.0 */
+        inline double getSitDownDurationSeconds() const { return sit_down_duration_seconds_; }
+        /** 座椅共享配置（seat_config_v5.json），v5 专有。返回 nullptr 表示非 v5。 */
+        const kuavo_common::SeatConfig* getSeatConfig() const;
         inline const vector_t &getDefaultJointState() const { return default_joint_state_; }
         inline const vector_t &getDrakeState() const { return q_initial_; }
         inline const vector_t &getDrakeSquatState() const { return q_squat_initial_; }
@@ -97,7 +103,8 @@ namespace HighlyDynamic
 
         Eigen::VectorXd calInitialState(multibody::MultibodyPlant<double> *plant, systems::Context<double> *plant_context);
         void calcSquatState(multibody::MultibodyPlant<double> *plant, systems::Context<double> *plant_context);
-        
+        void calcSitState(multibody::MultibodyPlant<double> *plant, systems::Context<double> *plant_context);
+
         RobotVersion getRobotVersion() const { return rb_version_; }
     private:
         // 单例模式，私有构造函数
@@ -122,9 +129,10 @@ namespace HighlyDynamic
         std::unique_ptr<drake::geometry::SceneGraph<double>> scene_graph_ptr_;
         drake::systems::DiagramBuilder<double> builder_;
 
-        vector_t initial_state_, default_joint_state_, q_initial_, squat_initial_state_, q_squat_initial_;
+        vector_t initial_state_, default_joint_state_, q_initial_, squat_initial_state_, q_squat_initial_, sit_initial_state_;
         KuavoSettings kuavo_settings_;
         JSONConfigReader *robot_config_;
+        double sit_down_duration_seconds_{2.0};
 
         // ankle solvers
         //  foot

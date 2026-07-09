@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <map>
 #include <humanoid_interface/HumanoidInterface.h>
@@ -31,6 +32,7 @@
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
 #include "kuavo_msgs/robotWaistControl.h"
+#include "kuavo_msgs/TransportModeCommand.h"
 
 #include "std_srvs/Trigger.h"
 #include "std_srvs/SetBool.h"
@@ -67,11 +69,14 @@
 #include <sensor_msgs/Joy.h>
 #include <thread>
 #include <functional>
+#include <cmath>
 #include <openvino/openvino.hpp>
 #include <sensor_msgs/JointState.h>
+#include "humanoid_controllers/rl/rl_switch_config.h"
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
+#include "humanoid_controllers/SitControlManager.h"
 
 namespace humanoid_controller
 {
@@ -89,16 +94,25 @@ namespace humanoid_controller
 
   enum ResettingMpcState
   {
-    NOMAL = 0,
+    NORMAL = 0,
     RESET_INITIAL_POLICY,
     RESET_BASE,
   };
 
   enum FallStandState
   {
-    STANDING = 0,  // 正常状态
-    FALL_DOWN      // 倒地状态
+    STANDING = 0,
+    FALL_DOWN
   };
+
+  enum TransportModeState
+  {
+    TRANSPORT_INACTIVE = 0,
+    TRANSPORT_INTERPOLATING,
+    TRANSPORT_READY,       // 姿态到位，MPC 维持，关节未锁
+    TRANSPORT_ACTIVE,      // CSP 锁死，可搬运
+    TRANSPORT_HANDING_OVER // 移交管理权中（Joy 协调完成后 EXIT）
+  }; // FALL_DOWN 不再作为状态，改用 transport_handoff_to_fallstand_ 标志位
   
   // struct SensorDataRL
   // {
@@ -251,9 +265,51 @@ namespace humanoid_controller
     void updatakinematics(const SensorData &sensor_data, bool is_initialized_);
     void resetKinematicsEstimation();
 
-    // ==================== MPC-RL插值系统函数声明 ====================
+    // MPC-RL 插值系统函数
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
     void updateMPCRLInterpolation(double current_time);
+    void startTransportMPCInterpolation();
+
+    //waao： RL-RL插值
+    // ==================== RL-RL插值系统函数声明 ====================
+    void startRLToRLInterpolation(double current_time,
+                                  const std::string& source_controller,
+                                  const std::string& target_controller,
+                                  const Eigen::VectorXd& start_joint_reference,
+                                  const Eigen::VectorXd& target_joint_reference,
+                                  const Eigen::VectorXd& start_joint_kp,
+                                  const Eigen::VectorXd& start_joint_kd,
+                                  const Eigen::VectorXd& start_joint_tau_max,
+                                  const Eigen::VectorXd& start_joint_control_modes,
+                                  const Eigen::VectorXd& start_joint_pd_modes,
+                                  const Eigen::VectorXd& target_joint_kp,
+                                  const Eigen::VectorXd& target_joint_kd,
+                                  const Eigen::VectorXd& target_joint_tau_max,
+                                  const Eigen::VectorXd& target_joint_control_modes,
+                                  const Eigen::VectorXd& target_joint_pd_modes,
+                                  const kuavo_msgs::jointCmd& target_joint_cmd);
+    bool buildRLControllerJointCmd(RLControllerBase* controller,
+                                   const ros::Time& time,
+                                   kuavo_msgs::jointCmd& joint_cmd);
+    //waao：相位对齐                               
+    bool tryActivateRLToRLWalkingPhaseSync(RLControllerBase* source_controller,
+                                           RLControllerBase* target_controller,
+                                           double current_time);
+    void refreshRLToRLSwitchParams();
+    void updateRLToRLWalkingPhaseSync(double current_time);
+    void clearRLToRLWalkingPhaseSync();
+    void activateRLToRLLiveSourceController(RLControllerBase* source_controller,
+                                            const std::string& source_controller_name,
+                                            const std::string& target_controller_name,
+                                            double current_time,
+                                            const kuavo_msgs::jointCmd& target_joint_cmd);
+    void applyRLToRLSwitchVelocityProfile(double current_time);
+    void applyRLToRLLiveInterpolation(double current_time,
+                                      const kuavo_msgs::jointCmd& source_joint_cmd,
+                                      kuavo_msgs::jointCmd& target_joint_cmd);
+    void applyRLToRLInterpolation(double current_time, kuavo_msgs::jointCmd& joint_cmd);
+    void stopRLToRLInterpolation();
+    void publishRLToRLSwitchDebugState(double progress, const std::string& phase, double current_time);
 
     sensor_msgs::Joy oldJoyMsg_;
     vector_t joystickOriginAxis_ = vector_t::Zero(6);
@@ -329,6 +385,13 @@ namespace humanoid_controller
 
     virtual void setupHumanoidInterface(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile, const std::string &gaitFile,
                                         bool verbose, RobotVersion rb_version);
+    /** P3 终点：末端关节 + 脚底贴地（调 base_z）后由 RBD 转 centroidal */
+    vector_t computeSeatOffsetCentroidalEnd(
+        const humanoid_controller::SitControlManager::SeatJointTargets& end_targets,
+        const vector_t& start_centroidal);
+    /** P3：在预计算的 start/end centroidal 间按 α 插值，与关节偏置同 α */
+    void recomputeOptimizedState2WbcWithSeatTargets(
+        const humanoid_controller::SitControlManager::SeatJointTargets& targets);
     virtual void setupMpc();
     virtual void setupMrt();
     virtual void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile);
@@ -338,6 +401,8 @@ namespace humanoid_controller
     bool armJointSynchronizationCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     
     void robotlocalizationCallback(const nav_msgs::Odometry::ConstPtr &msg);
+    bool tryApplyPendingExternalArmControllerMode();
+    bool shouldBlockWalkingCommandForExternalArmTarget() const;
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool enableMmArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool getMmArmCtrlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
@@ -353,6 +418,7 @@ namespace humanoid_controller
 
     void swingArmPlanner(double st, double current_time, double stepDuration, Eigen::VectorXd &desire_arm_q, Eigen::VectorXd &desire_arm_v);
     void headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_start_index, bool push_back_mode);
     void waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg);
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg);
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr &msg);
@@ -380,7 +446,6 @@ namespace humanoid_controller
     static ocs2_msgs::mpc_flattened_controller createMpcPolicyMsg(const PrimalSolution &primalSolution, const CommandData &commandData,
                                                                   const PerformanceIndex &performanceIndices);
 
-    void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
 
     void setJoyCmdState(const vector_t &joyCmdState)
     {
@@ -451,11 +516,14 @@ namespace humanoid_controller
     vector_t simplifiedJointPos_;
     std::shared_ptr<StateEstimateBase> stateEstimate_;
     std::shared_ptr<CentroidalModelRbdConversions> rbdConversions_;
+    std::shared_ptr<CentroidalModelRbdConversions> rbdConversionsWBC_;
     SensorData robotSensorsData_;
     SystemObservationRL currentObservationRL_, lastObservationRL_;
     vector_t robotState_;
     bool is_initialized_ = false;
     bool is_abnor_StandUp_{false};
+    bool use_sit_init_{false};
+    bool use_sit_init_boot_{false};
     bool wbc_only_{false};
     bool is_rl_controller_ = false;
     BufferedValue<bool> is_rl_controller_buffer_{false};
@@ -468,7 +536,7 @@ namespace humanoid_controller
     bool cmdTrotgait_ = false;
     bool cmdRLMode_ = false;                                         // RL模式命令标志
     bool reset_mpc_{false};
-    ResettingMpcState resetting_mpc_state_{ResettingMpcState::NOMAL};
+    ResettingMpcState resetting_mpc_state_{ResettingMpcState::NORMAL};
     bool disable_mpc_{false};
     bool disable_wbc_{false};
     int hardware_status_ = 0;
@@ -500,12 +568,22 @@ namespace humanoid_controller
     bool is_robot_standup_complete_{false};
     bool isPreUpdateComplete{false};
     bool isInitStandUpStartTime_{false};
+    /** preUpdate 起立首帧实测基座 [6..11]（CoM 位姿），避免与硬件 prep 后的真实姿态不一致 */
+    vector_t bootStandStartCentroidal_;
+    bool bootStandStartCaptured_{false};
     bool isPullUp_{false};
     bool setPullUpState_{false};
+    std::atomic<TransportModeState> transport_mode_state_{TRANSPORT_INACTIVE};
+    std::atomic<bool> transport_handoff_to_fallstand_{false}; // FALL_DOWN 命令标志(主循环一帧消费)
+    std::atomic<bool> transport_lock_pending_{false};       // LOCK 命令标志(主循环处理)
+    std::atomic<bool> transport_handover_resume_mpc_{false}; // HAND_OVER 需 resume MPC(主循环处理)
+    vector_t transport_target_pos_;  // ACTIVE 状态下的 CSP 目标关节位置(LOCK 时从当前位姿捕获)
+    double transport_base_height_{0.7};  // 搬运躯干高度(m)，低于正常 MPC 站高以降低重心
     double standupTime_{0.0};
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
     std::shared_ptr<WbcBase> standUpWbc_;
+    std::shared_ptr<WbcBase> sitDownWbc_;
     std::string taskFile_switchParams_;
     vector_t curRobotLegState_;
 
@@ -559,7 +637,6 @@ namespace humanoid_controller
     ros::Publisher mpcPolicyPublisher_;
     ros::Publisher cmdPoseWorldPublisher_; // 发布躯干位置控制命令 (geometry_msgs::Twist)
 
-    ros::Subscriber dexhand_state_sub_;
 
     ros::ServiceServer armJointSynchronizationSrv_;
     ros::Subscriber enable_mpc_sub_;
@@ -571,6 +648,7 @@ namespace humanoid_controller
     ros::ServiceServer currentGaitNameSrv_;
     ros::ServiceServer triggerFallStandUpSrv_;
     ros::ServiceServer changeRuiwoMotorParamSrv_;
+    ros::ServiceServer transport_mode_service_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -583,7 +661,7 @@ namespace humanoid_controller
     // Node Handle
     ros::NodeHandle controllerNh_;
     HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
-    AnkleSolver ankleSolver;
+    kuavo_solver::AnkleSolver ankleSolver;
 #ifdef KUAVO_CONTROL_LIB_FOUND
     HighlyDynamic::JointFilter *joint_filter_ptr_{nullptr};
 #endif
@@ -596,6 +674,9 @@ namespace humanoid_controller
     int current_controller_index_;
 
     void publishFeetTrajectory(const TargetTrajectories &targetTrajectories);
+
+    bool transportModeCommandCallback(kuavo_msgs::TransportModeCommand::Request &req,
+                                      kuavo_msgs::TransportModeCommand::Response &res);
 
     ros::ServiceServer real_initial_start_service_;
     KuavoDataBuffer<SensorData> *sensors_data_buffer_ptr_;
@@ -612,6 +693,7 @@ namespace humanoid_controller
     std::unique_ptr<ros::Rate> wbc_rate_;            // WBC 控制频率 Rate 对象
     benchmark::RepeatedTimer mpcTimer_;
     benchmark::RepeatedTimer wbcTimer_;
+    bool wbc_ran_this_frame_{false};                // 本帧 WBC 是否执行过（门控 time_cost 发布，防 DataAnalyzer 方差退化）
     size_t jointNum_ = 12;
     size_t armNum_ = 0;
     size_t headNum_ = 2;
@@ -627,6 +709,13 @@ namespace humanoid_controller
     vector_t humanoidState_;
     ArmControlMode mpcArmControlMode_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
     ArmControlMode mpcArmControlMode_desired_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
+    std::atomic_bool pending_external_arm_controller_mode_{false};
+    double external_arm_default_position_tolerance_{0.05};
+    double external_arm_target_hold_time_{0.5};
+    Eigen::VectorXd external_arm_target_pos_;
+    ros::Time last_external_arm_target_time_;
+    bool has_external_arm_target_{false};
+    mutable std::mutex external_arm_target_mutex_;
     int armDofMPC_ = 7; // 单手臂的自由度，会从配置文件中重新计算
     int armDofReal_ = 7; // 实际单手臂的自由度
     int armDofDiff_ = 0; // 单手臂的自由度差
@@ -644,7 +733,6 @@ namespace humanoid_controller
     vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
     vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
     vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
-    vector_t dexhand_joint_pos_ = vector_t::Zero(12);
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;
@@ -749,14 +837,19 @@ namespace humanoid_controller
     Eigen::VectorXd desire_arm_v_;
     ros::Subscriber joint_sub_; // 添加订阅者成员变量
     bool is_standing_ = false;  // 添加站立状态标志位
-    bool last_standing_state_ = false;  // 添加上一次站立状态标志
+
+    // Seat/Sit control manager
+    std::unique_ptr<humanoid_controller::SitControlManager> sitControlManager_;
+    vector_t seat_offset_centroidal_start_wbc_;
+    vector_t seat_offset_centroidal_end_wbc_;
+    bool seat_offset_centroidal_plan_ready_{false};
 
     // 共享内存通讯
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;
     bool use_shm_communication_{false};  // 是否使用共享内存通讯
     bool updateSensorDataFromShm();      // 从共享内存更新传感器数据
     void publishJointCmdToShm(const kuavo_msgs::jointCmd& jointCmdMsg);         // 发布关节命令到共享内存
-    void publishControlCommands(const kuavo_msgs::jointCmd& jointCmdMsg);       // 发布控制命令的统一接口
+    void publishControlCommands(kuavo_msgs::jointCmd& jointCmdMsg);             // 发布控制命令的统一接口
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
     bool changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res);  // 修改ruiwo电机kp/kd，更新running_settings后由replaceDefaultEcMotorPdoGait生效
     
@@ -807,16 +900,56 @@ namespace humanoid_controller
     Eigen::VectorXd arm_interpolation_target_vel_; // 插值目标速度
     bool last_is_rl_controller_ = false;
 
-    // 倒地起身关节层插值相关成员变量
-    Eigen::VectorXd fall_stand_init_joints_;      // RL 轨迹中倒地起身的初始关节目标（腿+腰+臂）
-    Eigen::VectorXd fall_stand_start_pos_;        // 插值起始时的当前关节位置
-    bool is_fall_stand_interpolating_ = false;    // 是否正在进行倒地起身关节插值
-    bool is_fall_stand_interpolating_complete_ = false;    // 是否已完成倒地起身关节插值
-    double fall_stand_interp_start_time_ = 0.0;   // 插值开始时间
-    double fall_stand_required_time_ = 0.0;       // 根据最大关节速度计算得到的所需时长
-    double fall_stand_max_joint_velocity_ = 1.0;  // 倒地起身关节插值的最大关节速度(rad/s)
     bool has_fall_stand_controller_{false};
     
+    //waao： RL-RL插值
+    // ==================== RL-RL插值系统成员变量 ====================
+    bool is_rl_to_rl_interpolation_active_ = false;
+    bool has_last_rl_joint_reference_ = false;
+    bool has_last_rl_joint_cmd_ = false;
+    double rl_to_rl_switch_start_time_ = 0.0;
+    double rl_to_rl_switch_duration_ = RL_TO_RL_SWITCH_DURATION_DEFAULT;
+    std::string last_rl_controller_name_;
+    std::string rl_to_rl_source_controller_name_;
+    std::string rl_to_rl_target_controller_name_;
+    RLControllerBase* rl_to_rl_live_source_controller_ptr_ = nullptr;
+    Eigen::VectorXd last_rl_joint_reference_;
+    kuavo_msgs::jointCmd last_rl_joint_cmd_;
+    Eigen::VectorXd rl_to_rl_start_joint_reference_;
+    Eigen::VectorXd rl_to_rl_target_joint_reference_;
+    Eigen::VectorXd rl_to_rl_start_joint_q_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_v_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_tau_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_tau_ratio_msg_;
+    Eigen::VectorXd rl_to_rl_start_joint_kp_;
+    Eigen::VectorXd rl_to_rl_start_joint_kd_;
+    Eigen::VectorXd rl_to_rl_start_joint_tau_max_;
+    Eigen::VectorXd rl_to_rl_start_joint_control_modes_;
+    Eigen::VectorXd rl_to_rl_start_joint_pd_modes_;
+    Eigen::VectorXd rl_to_rl_target_joint_kp_;
+    Eigen::VectorXd rl_to_rl_target_joint_kd_;
+    Eigen::VectorXd rl_to_rl_target_joint_tau_max_;
+    Eigen::VectorXd rl_to_rl_target_joint_control_modes_;
+    Eigen::VectorXd rl_to_rl_target_joint_pd_modes_;
+    bool rl_to_rl_walking_phase_sync_active_ = false;
+    RLControllerBase* rl_to_rl_phase_sync_source_controller_ptr_ = nullptr;
+    RLControllerBase* rl_to_rl_phase_sync_target_controller_ptr_ = nullptr;
+    double rl_to_rl_phase_sync_phi_rad_ = 0.0;
+    double rl_to_rl_phase_sync_frequency_hz_ = 0.0;
+    double rl_to_rl_phase_sync_source_frequency_hz_ = 0.0;
+    double rl_to_rl_phase_sync_target_frequency_hz_ = 0.0;
+    double rl_to_rl_phase_sync_delta_phi_rad_ = 0.0;
+    double rl_to_rl_phase_sync_last_update_time_ = 0.0;
+    double rl_to_rl_phase_sync_phi_thresh_rad_ = RL_TO_RL_PHASE_SYNC_PHI_THRESH_RAD_DEFAULT;
+    double rl_to_rl_phase_sync_sin_guard_ = RL_TO_RL_PHASE_SYNC_SIN_GUARD_DEFAULT;
+    double rl_to_rl_phase_sync_k0_ = RL_TO_RL_PHASE_SYNC_K0_DEFAULT;
+    double rl_to_rl_phase_sync_decay_power_ = RL_TO_RL_PHASE_SYNC_DECAY_POWER_DEFAULT;
+    double rl_to_rl_phase_sync_frequency_min_hz_ = RL_TO_RL_PHASE_SYNC_FREQUENCY_MIN_HZ_DEFAULT;
+    double rl_to_rl_phase_sync_frequency_max_hz_ = RL_TO_RL_PHASE_SYNC_FREQUENCY_MAX_HZ_DEFAULT;
+    bool rl_to_rl_velocity_dip_enabled_ = RL_TO_RL_VELOCITY_DIP_ENABLED_DEFAULT != 0;
+    double rl_to_rl_velocity_dip_min_scale_ = RL_TO_RL_VELOCITY_DIP_MIN_SCALE_DEFAULT;
+    double rl_to_rl_velocity_dip_midpoint_ = RL_TO_RL_VELOCITY_DIP_MIDPOINT_DEFAULT;
+
     // ==================== 通用插值系统成员变量 ====================
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁
     int interpolation_counter_;                                           // 插值任务计数器，用于生成唯一ID
@@ -888,7 +1021,6 @@ namespace humanoid_controller
     
     // 保留 fall_down_state_ 用于向后兼容，但实际逻辑改为控制器切换
     FallStandState fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃，改为控制器切换）
-    FallStandState last_fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃）
 
 
     bool has_fall_down_controller_{false};

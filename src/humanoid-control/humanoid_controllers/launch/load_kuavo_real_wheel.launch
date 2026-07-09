@@ -61,6 +61,8 @@
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
+    <arg name="with_led" default="true"/>
+    <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
     <!-- 使用外部 odom->base_link TF 时设为 true，由外部系统（如 SLAM）发布 -->
     <!-- 实物模式下不发布 odom->base_link tf，由底盘 EKF 发布，避免 tf 冲突 -->
     <arg name="use_external_odom_tf" default="$(arg real)"/>
@@ -111,8 +113,8 @@
     <param name="urdfFile"   value="$(arg urdfFile)" />
     <param name="use_external_odom_tf" value="$(arg use_external_odom_tf)"/>
     <param name="libFolder"  value="$(arg libFolder)" />
-    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v45/command/gait.info"/>
-    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v45/command/reference.info"/>
+    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info"/>
+    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info"/>
     <param name="robot_description" textfile="$(arg urdfFile)"/>
 
     <!-- Launch script to collect kuavo-launch information -->
@@ -125,10 +127,10 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- rviz -->
     <!-- <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)"/> -->
@@ -156,6 +158,7 @@
       </node>
 
     <param name="hardware/is_ready" value="0"/>
+    <param name="hardware/ready_to_start" value="0"/>
    
     <!-- <group unless="$(arg ruiwo_cxx_sdk)">
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodelet nodelet_manager" respawn="false" output="screen" required="true"  />
@@ -234,8 +237,18 @@
     <!-- 启动手臂贝塞尔节点（轮臂机器人也支持手臂控制） -->
     <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
 
+    <!-- LED 控制：启动中绿灯闪烁 → 可以按'o'绿灯常亮 → 站立完成白灯常亮 → 跌倒红灯闪烁 -->
+    <group if="$(arg with_led)">
+        <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
+            <arg name="LED" value="enable"/>
+            <arg name="led_for_state" value="$(arg led_for_state)"/>
+        </include>
+    </group>
+
     <!-- restart urobot.service (depends on sshpass) -->
-    <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
-          output="screen" required="false"/>
+    <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62)">
+        <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
+              output="screen" required="false"/>
+    </group>
 
 </launch>

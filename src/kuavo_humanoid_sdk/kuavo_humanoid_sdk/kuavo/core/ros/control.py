@@ -2,7 +2,7 @@ import os
 import numpy as np
 import threading
 from typing import Tuple
-from kuavo_humanoid_sdk.common.logger import SDKLogger
+from kuavo_humanoid_sdk.common.logger import SDKLogger, is_diag_enabled
 from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKParams, KuavoPose, 
                                                       KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode
                                                       ,KuavoManipulationMpcFrame, KuavoMotorParam)
@@ -21,11 +21,12 @@ from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (gestureExecute, gestureExecut
                         changeTorsoCtrlMode, changeTorsoCtrlModeRequest, setMmCtrlFrame, setMmCtrlFrameRequest,
                         setTagId, setTagIdRequest, getMotorParam, getMotorParamRequest,
                         changeMotorParam, changeMotorParamRequest)
+from kuavo_msgs.msg import lejuClawCommand as LejuClawCmdMsg
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam, armHandPose, armCollisionCheckInfo
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import twoArmHandPoseCmdSrv, fkSrv, twoArmHandPoseCmdFreeSrv
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Float64MultiArray
-from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import lbLegControlSrv
+from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import lbLegControlSrv, lbLegControlSrvRequest
 
 
 
@@ -38,6 +39,10 @@ class ControlEndEffector:
             self._pub_ctrl_robot_hand = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=10)
             # publisher, name, require
             self._pubs.append((self._pub_ctrl_robot_hand, False))
+        elif self._eef_type == 'lejuclaw':
+            self._pub_leju_claw_command = rospy.Publisher('/leju_claw_command', LejuClawCmdMsg, queue_size=10)
+            # publisher, name, require
+            self._pubs.append((self._pub_leju_claw_command, False))
         elif self._eef_type == EndEffectorType.QIANGNAO_TOUCH:
             self._pub_ctrl_robot_hand = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=10)                
             self._pub_dexhand_command = rospy.Publisher('/dexhand/command', dexhandCommand, queue_size=10)
@@ -171,20 +176,34 @@ class ControlEndEffector:
             service_name = 'control_robot_leju_claw'
             rospy.wait_for_service(service_name, timeout=2.0)
             control_lejucalw_srv = rospy.ServiceProxy(service_name, controlLejuClaw)
-            
+
             # request
             request = controlLejuClawRequest()
             request.data.position = postions
             request.data.velocity = velocities
             request.data.effort = torques
-            
+
             response = control_lejucalw_srv(request)
             if not response.success:
                 SDKLogger.error(f"Failed to control leju claw: {response.message}")
             return response.success
+        except (rospy.ROSException, rospy.ROSInterruptException):
+            # 仿真环境(mujoco)没有 /control_robot_leju_claw 服务，回退到直接发布 topic
+            try:
+                if self._pub_leju_claw_command.get_num_connections() == 0:
+                    SDKLogger.warning("No subscriber for /leju_claw_command, leju claw command may not be received")
+                msg = LejuClawCmdMsg()
+                msg.data.name = ["left_claw", "right_claw"]
+                msg.data.position = postions
+                msg.data.velocity = velocities
+                msg.data.effort = torques
+                self._pub_leju_claw_command.publish(msg)
+                SDKLogger.info("Published leju claw command via topic (simulation fallback)")
+                return True
+            except Exception as e2:
+                SDKLogger.error(f"Failed to publish leju claw command via topic: {e2}")
+                return False
         except rospy.ServiceException as e:
-            SDKLogger.error(f"Service `control_robot_leju_claw` call failed: {e}")
-        except rospy.ROSException as e:
             SDKLogger.error(f"Service `control_robot_leju_claw` call failed: {e}")
         except Exception as e:
             SDKLogger.error(f"Service `control_robot_leju_claw` call failed: {e}")
@@ -298,6 +317,18 @@ class ControlRobotArm:
         return False
     def pub_end_effector_pose_cmd(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:
         try:
+            if is_diag_enabled():
+                # DIAG: 定位 frame=1/2 交替的发布源(TID+调用栈)
+                import threading, traceback
+                if not hasattr(self, '_diag_seq'): self._diag_seq = {}
+                tid = threading.get_ident(); self._diag_seq[tid] = self._diag_seq.get(tid, 0) + 1
+                stack = traceback.extract_stack()
+                caller = ""
+                for s in reversed(stack[:-1]):
+                    if 'control.py' not in s.filename and 'threading.py' not in s.filename:
+                        caller = f"{s.filename.split('/')[-1]}:{s.lineno} {s.name}"; break
+                print(f"[DIAG-PUB] TID={tid%10000:04d} #{self._diag_seq[tid]:<3d} frame={frame.value} caller={caller} L=({left_pose.position[0]:.2f},{left_pose.position[1]:.2f},{left_pose.position[2]:.2f})")
+
             msg = twoArmHandPoseCmd()
             left_pose_msg = armHandPose()
             left_pose_msg.pos_xyz = left_pose.position
@@ -491,7 +522,7 @@ class ControlRobotArm:
     def srv_change_arm_ctrl_mode(self, mode: KuavoArmCtrlMode)->bool:
         try:
             # robot_type: 2=双足, 1=轮臂
-            service_name = '/wheel_arm_change_arm_ctrl_mode' if kuavo_ros_param.is_wheel_arm_robot() else '/change_arm_ctrl_mode'
+            service_name = '/wheel_arm_change_arm_ctrl_mode' if kuavo_ros_param.is_wheel_arm_robot() else '/arm_traj_change_mode'
             rospy.wait_for_service(service_name, timeout=2.0)
             change_arm_ctrl_mode_srv = rospy.ServiceProxy(service_name, changeArmCtrlMode)
             req = changeArmCtrlModeRequest()
@@ -1841,9 +1872,9 @@ class WheelArmROSControl:
     def _init_ros_interfaces(self):
         """初始化ROS接口"""
         try:
-            # # 等待轮臂控制服务
-            # rospy.wait_for_service('/lb_leg_control_srv', timeout=5.0)
-            # self._leg_control_service = rospy.ServiceProxy('/lb_leg_control_srv', lbLegControlSrv)
+            # 等待轮臂控制服务
+            rospy.wait_for_service('/lb_leg_control_srv', timeout=5.0)
+            self._leg_control_service = rospy.ServiceProxy('/lb_leg_control_srv', lbLegControlSrv)
             
             self._is_initialized = True
             SDKLogger.info("[WheelArmROSControl] ROS接口初始化成功")
@@ -1856,35 +1887,41 @@ class WheelArmROSControl:
         """检查ROS接口是否已初始化"""
         return self._is_initialized
     
-    def control_wheel_arm_joint_positions(self, joint_positions: list) -> bool:
+    def control_wheel_arm_joint_positions(self, joint_positions: list, duration: float = 5.0) -> bool:
         """通过ROS服务控制轮臂关节位置
-        
+
         Args:
             joint_positions (list): 轮臂关节位置列表，长度为4，单位为弧度
-            
+            duration (float): 运动持续时间（秒），默认5.0
+
         Returns:
             bool: 控制成功返回True,否则返回False
         """
         if not self._is_initialized:
             SDKLogger.error("[WheelArmROSControl] ROS接口未初始化")
             return False
-        
+
         try:
             # 验证输入参数
             if len(joint_positions) != self._wheel_arm_joint_dof:
                 SDKLogger.error(f"[WheelArmROSControl] 关节位置数量错误: 期望{self._wheel_arm_joint_dof}, 实际{len(joint_positions)}")
                 return False
-            
+
+            # 构造控制服务请求
+            request = lbLegControlSrvRequest()
+            request.target_joints = [float(p) for p in joint_positions]
+            request.duration = float(duration)
+
             # 调用轮臂控制服务
-            response = self._leg_control_service(joint_positions)
-            
+            response = self._leg_control_service(request)
+
             if response.success:
                 SDKLogger.debug(f"[WheelArmROSControl] 关节位置控制成功: {joint_positions}")
             else:
                 SDKLogger.error("[WheelArmROSControl] 关节位置控制失败")
-            
+
             return response.success
-            
+
         except Exception as e:
             SDKLogger.error(f"[WheelArmROSControl] 控制关节位置失败: {e}")
             return False

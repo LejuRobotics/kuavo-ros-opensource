@@ -56,10 +56,10 @@
   "customize_action_M2_X": {
     "type": "action",
     "arm_pose_name": [
-      "飞吻"
+      ""
     ],
     "music_name": [
-      "飞吻.wav"
+      ""
     ]
   },
   "customize_action_M2_Y": {
@@ -108,24 +108,30 @@
     ]
   },
   "customize_action_LT_A": {
-    "type": "dance",
-    "dance_name": "dance_balei",
+    "type": "action",
+    "arm_pose_name": [
+      "抱拳"
+    ],
     "music_name": [
-      "dance_balei.wav"
+      "抱拳.wav"
     ]
   },
   "customize_action_LT_B": {
-    "type": "dance",
-    "dance_name": "dance_xinjiang",
+    "type": "action",
+    "arm_pose_name": [
+      "右手打招呼"
+    ],
     "music_name": [
-      "dance_xinjiang.wav"
+      "右手打招呼.wav"
     ]
   },
   "customize_action_LT_X": {
-    "type": "dance",
-    "dance_name": "dance_aiqingniao",
+    "type": "action",
+    "arm_pose_name": [
+      "左转腰打招呼"
+    ],
     "music_name": [
-      "dance_aiqingniao.wav"
+      "左转腰打招呼.wav"
     ]
   },
   "customize_action_LT_Y": {
@@ -147,8 +153,13 @@
     ]
   },
   "customize_action_RT_B": {
-    "type": "shell",
-    "command": "python3 /home/lab/kuavo-ros-opensource/src/demo/csv2body_demo/step_player_csv_ocs2.py"
+    "type": "action",
+    "arm_pose_name": [
+      "飞吻"
+    ],
+    "music_name": [
+      "飞吻.wav"
+    ]
   },
   "customize_action_RT_X": {
     "type": "action",

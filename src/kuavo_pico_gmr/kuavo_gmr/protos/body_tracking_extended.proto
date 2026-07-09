@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+import "delayed_diagnosis.proto";
+import "hand_wrench_srv.proto";
+
+message VRData {
+  Header header = 1;
+  optional FullBodyData full_body = 2;
+  optional UpperBodyData upper_body = 3;
+  optional ControllerData controller = 4;
+  optional RobotData robot_data = 5;
+  optional VrCommandData vr_command = 6;
+  optional DelayDiagnosticCommand delayed_diagnosis_command = 7; // 开启延迟诊断命令
+}
+
+message Header{
+  google.protobuf.Timestamp timestamp = 1;
+  int64 id = 2; 
+}
+
+message FullBodyData {
+  repeated Pose full_body = 1;
+}
+
+message UpperBodyData {
+  repeated Pose upper_body = 1;
+}
+
+message Pose {
+  double pos_x = 1;
+  double pos_y = 2;
+  double pos_z = 3;
+  double rot_qx = 4;
+  double rot_qy = 5;
+  double rot_qz = 6;
+  double rot_qw = 7;
+}
+
+message ControllerData {
+  ControllerStates controllers = 1;
+}
+
+message ControllerStates {
+  ControllerState left = 1;
+  ControllerState right = 2;
+}
+
+message ControllerState {
+  bool primary_button = 1;
+  bool secondary_button = 2;
+  bool grip_button = 3;
+  bool trigger_button = 4;
+  double grip_value = 5;
+  double trigger_value = 6;
+  repeated double thumbstick = 7;
+}
+
+message RobotData {
+  ItemMassForceResponse item_mass_force_response = 1;
+  repeated double motor_cur = 2;
+  repeated double eef_cur = 3;
+  ControlMode control_mode = 4;
+  optional DelayedDiagnosisResult delayed_diagnosis_result = 5; // 延迟诊断结果
+}
+
+message VrCommandData {
+  optional ItemMassForceRequest item_mass_force_request = 1; // 物品质量与力相关请求
+  ControlMode control_mode = 2;
+}
+
+message ControlMode {
+  string control_mode = 1;
+}
+
+message DelayDiagnosticCommand {
+  bool run = 1; // True  启动 // False 停止/取消
+}

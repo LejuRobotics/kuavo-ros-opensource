@@ -33,9 +33,7 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
     }
 
     // 初始化VR躯干位姿（7维：位置xyz + 四元数wxyz）
-    vector_t initial_pose = vector_t::Zero(7);
-    initial_pose[3] = 1.0;  // qw = 1，单位旋转
-    vr_torso_pose_.data = initial_pose;
+    vr_torso_pose_.data = makeIdentityPose7D();
     vr_torso_pose_.valid = true;  // 使用零位作为默认值
 
     // 初始化odom位置
@@ -74,7 +72,7 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
     ROS_INFO_STREAM("[ControlDataManager] Using " << 
         (use_shm_communication_ ? "shared memory" : "ROS topics") << " for communication");
     
-    ROS_INFO("ControlDataManager initialized: is_real=%d, arm_num=%d, low_joint_num=%d", 
+    ROS_INFO("ControlDataManager initialized: is_real=%d, arm_num=%d, low_joint_num=%d",
              is_real_, arm_num_, low_joint_num_);
 }
 
@@ -122,7 +120,11 @@ void ControlDataManager::initializeSubscribers() {
     lb_mpc_control_mode_sub_ = nh_.subscribe<std_msgs::Int8>(
         "/mobile_manipulator/lb_mpc_control_mode", 10,
         &ControlDataManager::lbMpcControlModeCallback, this);
-    
+
+    enable_control_state_sub_ = nh_.subscribe<std_msgs::Bool>(
+        "/enable_control_state", 1,
+        &ControlDataManager::enableControlStateCallback, this);
+
     ROS_INFO("ControlDataManager: All subscribers initialized");
 }
 
@@ -208,12 +210,39 @@ void ControlDataManager::odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
     }
 }
 
+void ControlDataManager::enableControlStateCallback(const std_msgs::Bool::ConstPtr& msg) {
+    bool requested = msg->data;
+    bool was_enabled = prev_enable_control_.load(std::memory_order_acquire);
+
+    // true→false：进入 disable。
+    // 新语义下，姿态类 storage 由 WBC 反向写入规划值，CDM 不再用传感器快照覆写。
+    // 速度/偏移类命令置零，避免底盘/VR 躯干继续运动。
+    if (was_enabled && !requested) {
+        {
+            std::lock_guard<std::mutex> lock(motion_mutex_);
+            cmd_vel_.update(geometry_msgs::Twist());
+        }
+        {
+            std::lock_guard<std::mutex> lock(external_state_mutex_);
+            vr_torso_pose_.update(makeIdentityPose7D());
+        }
+    }
+
+    prev_enable_control_.store(requested, std::memory_order_release);
+}
+
 void ControlDataManager::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg) {
+    // disable 期间丢弃新的速度命令
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+
     std::lock_guard<std::mutex> lock(motion_mutex_);
     cmd_vel_.update(*msg);
 }
 
 void ControlDataManager::lbWaistExternalControlCallback(const kuavo_msgs::jointCmd::ConstPtr& msg) {
+    // disable 期间丢弃新的轮臂指令
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+
     if (msg->joint_q.size() < 4 || msg->tau.size() < 4) {
         ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Insufficient lb_joint_cmd data, need at least 4 joints");
         return;
@@ -232,6 +261,9 @@ void ControlDataManager::lbWaistExternalControlCallback(const kuavo_msgs::jointC
 }
 
 void ControlDataManager::headExternalControlCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr& msg) {
+    // disable 期间丢弃新的头部运动指令
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+
     if (msg->joint_data.size() != 2) {
         ROS_WARN_THROTTLE(1.0, "Invalid head motion data size: %lu (expected 2)", msg->joint_data.size());
         return;
@@ -273,7 +305,10 @@ void ControlDataManager::waistYawLinkPoseCallback(const nav_msgs::Odometry::Cons
 
 void ControlDataManager::vrTorsoPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
     if (!msg) return;
-    
+
+    // disable 期间丢弃新的 VR 躯干位姿指令
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+
     // 在锁外处理数据
     vector_t pose = vector_t::Zero(7);
     pose[0] = msg->pose.position.x;
@@ -298,6 +333,9 @@ void ControlDataManager::wholeTorsoCtrlCallback(const std_msgs::Bool::ConstPtr& 
 }
 
 void ControlDataManager::armJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+    // disable 期间丢弃新的手臂轨迹指令
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+
     if(msg->name.size() != arm_num_) {
         ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Arm joint count mismatch: %lu vs %d", msg->name.size(), arm_num_);
         return;
@@ -322,6 +360,9 @@ void ControlDataManager::armJointTrajCallback(const sensor_msgs::JointState::Con
 }
 
 void ControlDataManager::legJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+    // disable 期间丢弃新的下肢轨迹指令
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+
     if(msg->name.size() != low_joint_num_) {
         ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Leg joint count mismatch: %lu vs %d", msg->name.size(), low_joint_num_);
         return;
@@ -483,6 +524,12 @@ bool ControlDataManager::getRealtimeBaseLinkPose(vector_t& out) const {
 }
 
 bool ControlDataManager::getRealtimeCmdVel(geometry_msgs::Twist& out) const {
+    // disable 期间返回零速度（冻结底盘）
+    if (!prev_enable_control_.load(std::memory_order_acquire)) {
+        out = geometry_msgs::Twist();
+        return true;
+    }
+
     std::lock_guard<std::mutex> lock(motion_mutex_);
     if (cmd_vel_.isValid(0.2)) {  // 速度命令使用500ms超时，确保安全性
         out = cmd_vel_.data;
@@ -501,6 +548,12 @@ bool ControlDataManager::getRealtimeWaistYawLinkPose(vector_t& out) const {
 }
 
 bool ControlDataManager::getRealtimeVrTorsoPose(vector_t& out) const {
+    // disable 期间 VR 躯干相对偏移保持为零（原地不动语义）
+    if (!prev_enable_control_.load(std::memory_order_acquire)) {
+        out = makeIdentityPose7D();
+        return true;
+    }
+
     std::lock_guard<std::mutex> lock(external_state_mutex_);
     if (vr_torso_pose_.isValid()) {  // 使用默认1秒超时
         out = vr_torso_pose_.data;
@@ -531,10 +584,10 @@ vector_t ControlDataManager::getHeadExternalControlState() const {
 }
 
 vector_t ControlDataManager::computeHeadControl(const vector_t& target_pos) const {
-    
+
     // 初始化反馈扭矩
     vector_t feedback_tau = vector_t::Zero(head_num_);
-    
+
     if(is_real_ || head_num_ == 0)
     {
         return feedback_tau;
@@ -550,15 +603,15 @@ vector_t ControlDataManager::computeHeadControl(const vector_t& target_pos) cons
 
     // 提取头部关节位置和速度（假设头部在关节数组最后）
     int total_joints = sensor_data.jointPos_.size();
-    if (total_joints >= head_num_) 
+    if (total_joints >= head_num_)
     {
         vector_t current_pos = sensor_data.jointPos_.tail(head_num_);
         vector_t current_vel = sensor_data.jointVel_.tail(head_num_);
-        
+
         // 计算PD反馈扭矩
         feedback_tau = head_kp_.cwiseProduct(target_pos - current_pos) + head_kd_.cwiseProduct(-current_vel);
     }
-    
+
     return feedback_tau;
 }
 
@@ -567,16 +620,26 @@ bool ControlDataManager::getWholeTorsoCtrl() const {
     return whole_torso_ctrl_;  // 直接返回VR全身控制模式状态
 }
 
-ArmJointTrajectory ControlDataManager::getArmExternalControlState() const 
+ArmJointTrajectory ControlDataManager::getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage) const
 {
     std::lock_guard<std::mutex> lock(external_state_mutex_);
-    return arm_external_control_state_.data;
+    ArmJointTrajectory traj = storage.data;
+    // disable 期间速度/力矩保持为零
+    if (!prev_enable_control_.load(std::memory_order_acquire)) {
+        traj.vel.setZero();
+        traj.tau.setZero();
+    }
+    return traj;
 }
 
-ArmJointTrajectory ControlDataManager::getLegExternalControlState() const 
+ArmJointTrajectory ControlDataManager::getArmExternalControlState() const
 {
-    std::lock_guard<std::mutex> lock(external_state_mutex_);
-    return leg_external_control_state_.data;
+    return getJointTrajectoryWithDisableGuard(arm_external_control_state_);
+}
+
+ArmJointTrajectory ControlDataManager::getLegExternalControlState() const
+{
+    return getJointTrajectoryWithDisableGuard(leg_external_control_state_);
 }
 
 int8_t ControlDataManager::getLbMpcControlMode() const 
@@ -697,6 +760,12 @@ double ControlDataManager::rosQuaternionToYaw(const geometry_msgs::Quaternion& r
     Eigen::Quaterniond eigen_quat(ros_quat.w, ros_quat.x, ros_quat.y, ros_quat.z);
     Eigen::Matrix3d R = eigen_quat.toRotationMatrix();
     return std::atan2(R(1, 0), R(0, 0));
+}
+
+vector_t ControlDataManager::makeIdentityPose7D() {
+    vector_t pose = vector_t::Zero(7);
+    pose[3] = 1.0;  // qw = 1，单位旋转
+    return pose;
 }
 
 } // namespace humanoidController_wheel_wbc

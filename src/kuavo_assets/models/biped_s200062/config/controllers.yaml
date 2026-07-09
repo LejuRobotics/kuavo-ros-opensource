@@ -1,0 +1,74 @@
+joint_state_controller:
+  type: joint_state_controller/JointStateController
+  publish_rate: 500
+  joint_names:
+    - knee_joint
+    - leg_joint
+    - waist_pitch_joint
+    - waist_yaw_joint
+    - zarm_l1_joint
+    - zarm_l2_joint
+    - zarm_l3_joint
+    - zarm_l4_joint
+    - zarm_l5_joint
+    - zarm_l6_joint
+    - zarm_l7_joint
+    - zarm_r1_joint
+    - zarm_r2_joint
+    - zarm_r3_joint
+    - zarm_r4_joint
+    - zarm_r5_joint
+    - zarm_r6_joint
+    - zarm_r7_joint
+    - zhead_1_joint
+    - zhead_2_joint
+    
+limbs_effort_controller:
+  type: effort_controllers/JointGroupEffortController
+  joints:
+    - knee_joint
+    - leg_joint
+    - waist_pitch_joint
+    - waist_yaw_joint
+    - zarm_l1_joint
+    - zarm_l2_joint
+    - zarm_l3_joint
+    - zarm_l4_joint
+    - zarm_l5_joint
+    - zarm_l6_joint
+    - zarm_l7_joint
+    - zarm_r1_joint
+    - zarm_r2_joint
+    - zarm_r3_joint
+    - zarm_r4_joint
+    - zarm_r5_joint
+    - zarm_r6_joint
+    - zarm_r7_joint
+    - zhead_1_joint
+    - zhead_2_joint
+
+  interface_name: "hardware_interface/EffortJointInterface"
+
+joint_position_controller:
+  type: "position_controllers/JointPositionController"
+  joint_names:
+    - knee_joint
+    - leg_joint
+    - waist_pitch_joint
+    - waist_yaw_joint
+    - zarm_l1_joint
+    - zarm_l2_joint
+    - zarm_l3_joint
+    - zarm_l4_joint
+    - zarm_l5_joint
+    - zarm_l6_joint
+    - zarm_l7_joint
+    - zarm_r1_joint
+    - zarm_r2_joint
+    - zarm_r3_joint
+    - zarm_r4_joint
+    - zarm_r5_joint
+    - zarm_r6_joint
+    - zarm_r7_joint
+    - zhead_1_joint
+    - zhead_2_joint

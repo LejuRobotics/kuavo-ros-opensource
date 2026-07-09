@@ -20,6 +20,7 @@ import enum
 import time
 import math
 import threading
+import threading
 from typing import List, Optional, Any
 from tf2_msgs.msg import TFMessage
 from std_msgs.msg import Float64MultiArray,Float64,String
@@ -601,6 +602,8 @@ class KuavoPicoNode:
         """Initialize joy controller"""
         self.joy_button_handler = JoySticksHandler()
         rospy.Subscriber("/pico/joy", JoySticks, self.sub_joy_callback)
+        # 初始化VMP推流控制服务客户端
+        self._vmp_stream_control_client = None
         # 按键回调配置字典
         self.joy_callbacks = {
             "teleop_unlock": ({"LT_PRESSED", "LG_PRESSED"}, self._teleop_unlock_callback),  # 基础模式/全身遥操模式 - 解锁
@@ -615,7 +618,10 @@ class KuavoPicoNode:
             # "switch_view": ({"Y_LONG_PRESSED"}, self._switch_view_callback),                # 基础模式/全身遥操模式 - 切换视角
             "enter_walk": ({"B_PRESSED"}, self._enter_walk_callback),                       # 基础模式 - 切换到行走模式
             "auto_swing_arm": ({"LT_PRESSED","Y_PRESSED"}, self._auto_swing_arm_callback),  # 基础模式 - 切换手臂模式
-            "switch_increase_arm": ({"LT_PRESSED", "X_PRESSED"}, self._switch_increase_arm_mode_callback)        # 基础模式/全身遥操模式 - 增量模式开启/关闭
+            "switch_increase_arm": ({"LT_PRESSED", "X_PRESSED"}, self._switch_increase_arm_mode_callback),       # 基础模式/全身遥操模式 - 增量模式开启/关闭
+            "vmp_stream_pause": ({"RG_PRESSED", "Y_PRESSED"}, self._vmp_stream_pause_callback),   # VMP模式 - 暂停推流（冻结当前姿态）
+            "vmp_stream_resume": ({"RG_PRESSED", "X_PRESSED"}, self._vmp_stream_resume_callback), # VMP模式 - 恢复推流
+            # gmr_calibrate 已迁移到 pico_comm_minimal.py（LG+B 触发）
         }
         for name, (key_combination, callback) in self.joy_callbacks.items():
             self.joy_button_handler.add_callback(name, key_combination, callback)

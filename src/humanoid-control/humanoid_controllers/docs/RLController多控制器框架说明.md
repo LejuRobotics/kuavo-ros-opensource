@@ -100,15 +100,18 @@ RLControllerBase (基类)
 - **Depth Loco 控制器补充说明**
   - `DepthWalkController` 属于 `DEPTH_LOCO_CONTROLLER`，适合走楼梯斜坡这类需要地形感知的行走场景。
   - 该控制器除了常规机器人状态与 `/cmd_vel` 外，还依赖深度历史输入话题 `/camera/depth/depth_history_array`。
-  - 切换到 `depth_loco_controller` 前会先检查该话题是否已发布且能收到消息；如果没有，系统会拒绝切换。
+  - 切换到 `depth_loco_controller` 前，底层 `RLControllerManager` 会统一检查该话题是否满足切换条件；如果没有，系统会拒绝切换。
+  - 相关检查阈值可通过 ROS 参数覆盖：`depth_history_min_frequency_hz`（默认 `50.0`）、`depth_history_wait_timeout_sec`（默认 `2.0`）、`depth_history_required_samples`（默认 `5`）、`depth_history_sample_timeout_sec`（默认 `0.2`）。
   - 从 `depth_loco_controller` 退出时，会优先恢复到进入前的控制器；如果没有历史记录，则回到 `amp_controller`。
   - 在 `kuavo_v54` 中，可通过 [`rl_controllers.yaml`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl_controllers.yaml) 启用 `depth_loco_controller`，其模型配置位于 [`depth_loco_param.info`](/home/lab/kuavo-ros-control/src/humanoid-control/humanoid_controllers/config/kuavo_v54/rl/depth_loco_param.info)。
 
 - **倒地 / 起身相关服务**
-  - `/humanoid_controller/set_fall_down_state` (`std_srvs/SetBool`，在 `humanoidController` 中实现)  
-    - 将内部的 `fall_down_state_` 设为 FALL_DOWN 或 STANDING；当设置为 **倒地** 时，若存在 `FALL_STAND_CONTROLLER`，会自动通过 `RLControllerManager` 切换过去。
-  - `/humanoid_controller/trigger_fall_stand_up` (`std_srvs/Trigger`，在 `FallStandController` 中实现)  
-    - 触发倒地起身流程：关闭自动步态服务、重置轨迹时间步、计算当前与轨迹参考 yaw 差，并进入起身状态机的 READY/STAND_UP 阶段。
+  - `/humanoid_controller/set_fall_down_state` (`std_srvs/SetBool`)
+    - 设置机器人倒地/站立状态。设为 `true` 时自动切换到倒地起身控制器。
+  - `/humanoid_controller/fall_stand_command` (`kuavo_msgs/FallStandCommand`)
+    - 起身分两阶段调用：`PREPARE(1)` 插值到初始姿态；`STAND_UP(2)` 执行起身轨迹；`RESET(3)` 复位。
+    - 状态通过 `/humanoid_controller/FallStandController/fall_stand_state_` 话题观察：
+      `0`=倒地 `1`=插值中 `2`=就绪 `3`=起身中 `4`=完成。
 
 - **监控与调试相关话题**
   - `/humanoid_controller/is_rl_controller_` (`std_msgs/Float64` / 通过 `TopicLogger` 发布)  
@@ -120,10 +123,10 @@ RLControllerBase (基类)
       - `InputData/<key>`：按配置分块的观测子向量（例如 `joint_pos`、`base_ang_vel` 等），用于可视化和调试 RL 观测。
   - `/humanoid_controller/resetting_mpc_state_` (`std_msgs/Float64` / 通过 `TopicLogger` 发布)  
     - 实时发布 MPC 重置状态，用于监控从 RL 切换到 MPC 时的重置过程：  
-      - `0` (`NOMAL`)：正常状态，MPC 正常运行；  
+      - `0` (`NORMAL`)：正常状态，MPC 正常运行；  
       - `1` (`RESET_INITIAL_POLICY`)：重置 MPC 状态1，等待初始策略；  
       - `2` (`RESET_BASE`)：重置 MPC 状态2，更新躯干位置（插值阶段）。  
-    - 当从 RL 切回 MPC 时，状态会依次经历 `RESET_INITIAL_POLICY` → `RESET_BASE` → `NOMAL`，便于监控 MPC 重置进度。
+    - 当从 RL 切回 MPC 时，状态会依次经历 `RESET_INITIAL_POLICY` → `RESET_BASE` → `NORMAL`，便于监控 MPC 重置进度。
 
 - **遥控器集成**  
   - 北通等遥控流程中，进入舞蹈一般调用 `/humanoid_controller/switch_to_dance_controller`（`SetString`，空 `data` 表示首支舞）；退出舞蹈仍通过 `switch_controller` 切回 `amp_controller` 等行走控制器（须满足 stance 等条件）。
@@ -320,7 +323,7 @@ int getCurrentDanceControllerIndex() const;
     - 设置 `reset_mpc_ = true` 并记录当前状态、手臂位置，随后在 MPC 分支中重置 MPC：  
       - 暂停/恢复 MPC 节点、清空旧策略、以当前状态作为新的初始状态重建策略。  
       - 重置手臂滤波器，使 MPC 输出从当前实际姿态平滑延续，避免 RL → MPC 时出现大的关节跳变。  
-  - MPC 重置完毕后，`resetting_mpc_state_` 从 `RESET_INITIAL_POLICY` / `RESET_BASE` 进入 `NOMAL`，系统回到纯 MPC+WBC 控制。
+  - MPC 重置完毕后，`resetting_mpc_state_` 从 `RESET_INITIAL_POLICY` / `RESET_BASE` 进入 `NORMAL`，系统回到纯 MPC+WBC 控制。
 
 - **与倒地起身控制（FallStandController）的协同**  
   - 在以下场景会切换到 `FALL_STAND_CONTROLLER`：  

@@ -28,10 +28,10 @@
       </geometry>
     </collision>
   </link>
-  <joint name="dummy_to_base_link" type="fixed">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
-    <parent link="dummy_link" />
-    <child link="base_link" />
+    <parent link="base_link" />
+    <child link="dummy_link" />
   </joint>
   <link name="torso">
     <inertial>
@@ -1133,7 +1133,7 @@
     </collision>
   </link>
   <joint name="zhead_1_joint" type="revolute">
-    <origin xyz="0.0042 0 0.35369" rpy="0 0 0" />
+    <origin xyz="0.0042 0 0.35469" rpy="0 0 0" />
     <parent link="torso" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />

@@ -31,12 +31,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <robot_state_publisher/robot_state_publisher.h>
 #include <tf/transform_broadcaster.h>
+#include <urdf/model.h>
 
 #include <ocs2_ros_interfaces/mrt/DummyObserver.h>
 
 #include <humanoid_wheel_interface/ManipulatorModelInfo.h>
 #include <humanoid_wheel_interface/HumanoidWheelInterface.h>
 #include <ocs2_self_collision_visualization/GeometryInterfaceVisualization.h>
+
+#include <kuavo_msgs/lejuClawCommand.h>
+#include <kuavo_msgs/lejuClawState.h>
+#include <sensor_msgs/JointState.h>
 
 namespace ocs2 {
 namespace mobile_manipulator {
@@ -71,6 +76,10 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   std::unique_ptr<robot_state_publisher::RobotStatePublisher> robotStatePublisherPtr_;
   tf::TransformBroadcaster tfBroadcaster_;
 
+  // 缓存 URDF 模型,用于运行期判断关节是否存在,避免向 robot_state_publisher 发布
+  // URDF 中不存在的关节(否则会刷出 "Joint state with name: ... was received but not found in URDF")
+  urdf::Model urdfModel_;
+
   ros::Publisher stateOptimizedPublisher_;
   ros::Publisher stateOptimizedPosePublisher_;
 
@@ -80,6 +89,22 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   std::vector<std::string> head_joint_names_;
   std::vector<double> head_joint_positions_;
   bool updateHeadJointPositions_ = false;
+
+  // 夹爪相关
+  bool updateClawJointPositions_ = false;
+  std::vector<double> claw_joint_positions_ = {0.0, 0.0};
+  ros::Subscriber clawCmdSubscriber_;
+  ros::Publisher lejuClawStatePub_;
+  void lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg);
+  void updateClawJointPositions(const Eigen::VectorXd& positions);
+
+  // 灵巧手相关
+  std::vector<std::string> dexhand_joint_names_;
+  std::vector<double> dexhand_joint_positions_;
+  bool updateDexhandJointPositions_ = false;
+  ros::Subscriber dexhandStateSubscriber_;
+  void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+  void updateHandJointPositions(const Eigen::VectorXd& positions);
 
   // 检测到外部 odom->base_link 时（/external_odom/active 为 true），不发布内部的 odom->base_link
   bool use_external_odom_tf_ = false;

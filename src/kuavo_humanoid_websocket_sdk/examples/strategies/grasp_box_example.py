@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 import time
 import numpy as np
-from kuavo_humanoid_sdk import KuavoRobot, KuavoRobotState, KuavoRobotTools, KuavoRobotVision
+from kuavo_humanoid_sdk import KuavoSDK, KuavoRobot, KuavoRobotState, KuavoRobotTools, KuavoRobotVision
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoPose, AprilTagData, PoseQuaternion
 from kuavo_humanoid_sdk.kuavo_strategy.grasp_box.grasp_box_strategy import KuavoGraspBox, BoxInfo
 
 def main():
+    # WSSDK 必须：初始化 WebSocket 连接
+    if not KuavoSDK().Init(log_level='INFO', websocket_mode=True):
+        print("Init KuavoSDK failed, exit!")
+        exit(1)
+
     print("初始化机器人...")
     # 初始化机器人及相关组件
     robot = KuavoRobot()

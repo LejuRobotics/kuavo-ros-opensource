@@ -84,6 +84,43 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
+### arm_ik_free_example.py (P1)
+
+**演示如何使用自由空间逆运动学（arm_ik_free）进行 IK 求解。**
+
+与 `arm_ik` 不同，`arm_ik_free` 支持指定肘部参考位置和自定义 IK 优化参数，适用于更复杂的规划场景。示例代码展示了：
+1. 基本用法 (默认参数)：
+   - 仅指定左右手末端位姿进行 IK 求解
+   - 使用 `KuavoPose` 构造目标位姿
+2. 指定肘部参考位置：
+   - 传递 `left_elbow_pos_xyz` 和 `right_elbow_pos_xyz` 引导肘部方向
+   - 帮助 IK 收敛到期望的手臂姿态
+3. 自定义优化参数：
+   - 使用 `KuavoIKParams` 调整最优性/可行性容差和迭代次数
+   - 设置 `pos_cost_weight=0.0` 以追求更高精度的末端位置
+
+**注意：** 初始化必须使用 `KuavoSDK.Options.WithIK`，否则 IK 服务不可用。
+
+---
+
+### ctrl_hand_wrench_example.py (P1)
+
+**演示如何通过 `control_hand_wrench` 对机器人末端执行器进行力/力矩控制。**
+
+通过 6 维力控指令 `[Fx, Fy, Fz, Tx, Ty, Tz]` 分别控制左右手末端的力和力矩。示例代码展示了：
+1. 零力控制：
+   - 发送零向量清除力控指令，使末端松劲
+2. Z 轴力控制（抬升）：
+   - 双手各施加 5N 的正 Z 轴力，模拟抬升动作
+3. X 轴力控制（前推）：
+   - 双手各施加 5N 的正 X 轴力，模拟前推动作
+4. Z 轴力矩控制（拧转）：
+   - 左手 Tz=1N·m，右手 Tz=-1N·m，模拟拧转动作
+
+**注意：** 力控指令中 Fx/Fy/Fz 单位为牛顿 (N)，Tx/Ty/Tz 单位为牛顿·米 (N·m)。
+
+---
+
 ### ctrl_head_example.py
 
 **演示如何通过SDK控制机器人头部的俯仰（pitch）和偏航（yaw）角度，实现头部的上下和左右运动。**
@@ -229,7 +266,7 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
-### audio_play.py
+### audio_example.py
 
 **演示如何通过SDK控制机器人播放音频文件和语音合成。**
 
@@ -318,6 +355,8 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 2. 修改指定电机的PID参数（Kp和Kd）
 3. 再次获取参数以验证修改是否成功
 
+**注意：** 该服务依赖硬件，仿真环境不可用，会返回"获取失败"。
+
 ---
 
 ### step_control_example.py
@@ -367,10 +406,129 @@ l_front_orientation = [0.38, -0.45, -0.56, 0.57]
 
 ---
 
+### cmd_pose_world_stamped_example.py (P2)
+
+**演示如何通过 `control_command_pose_world_stamped` 使用 TwistStamped 消息在 odom 坐标系下控制机器人位姿。**
+
+支持 dict 和 ROS TwistStamped 两种输入格式，控制机器人在世界坐标系下的平移和旋转。示例代码展示了：
+1. 使用 dict 格式：
+   - 构造 `{"twist": {"linear": {...}, "angular": {...}}}` 格式的 dict 消息
+   - 控制机器人前进和转向
+2. 使用 ROS TwistStamped 格式（需安装 `geometry_msgs`）：
+   - 直接传入 ROS TwistStamped 对象
+
+---
+
+### wheel_arm_example.py (P2)
+
+**演示轮臂机器人的手臂轨迹控制模式切换。**
+
+通过 `wheel_control` 属性控制手臂轨迹模式，对齐 ROS demo `wheel_control_mode_swither.py`。示例代码展示了：
+1. 手臂模式切换：
+   - ArmFixed: 保持当前位置（回零时使用）
+   - AutoSwing: 回零，手臂回到初始目标位置
+   - ExternalControl: 外部轨迹控制模式
+2. `reset_and_set_external()`：快捷方法，自动完成回零并切换到外部控制模式
+
+注意：本示例控制的是*手臂轨迹控制模式*（`/change_arm_ctrl_mode` 服务），与 ROS demo 的 MPC 控制模式（`/mobile_manipulator_mpc_control`，NoControl/ArmOnly/BaseOnly/BaseArm/ArmEeOnly）是不同概念。
+
+**前置条件：** 需在轮臂版仿真或实物环境下运行。仿真使用 `ROBOT_VERSION=60~63` + `load_kuavo_mujoco_sim_wheel.launch`（`robot_type=1`）。
+
+---
+
+### wheel_arm_control_example.py (P2)
+
+**演示如何使用 `KuavoWheelArm` 通过服务接口直接控制轮臂 4 个下部关节的目标角度。**
+
+通过 `control_wheel_arm_joint_positions` 调用底层 `/lb_leg_control_srv` 服务，对齐 ROS SDK demo `wheel_arm_control_example.py`。示例代码展示了：
+
+1. KuavoWheelArm 初始化：
+   - 创建 `KuavoWheelArm()` 实例
+2. 获取当前关节位置：
+   - 通过 `get_wheel_arm_joint_positions()` 从传感器数据读取 4 个关节当前位置
+   - 同时显示弧度和度两种单位
+3. 关节位置控制：
+   - 通过 `control_wheel_arm_joint_positions([knee, leg, waist_pitch, waist_yaw])` 设置目标角度
+   - 参数单位：**弧度**（非度）
+   - 底层调用 `kuavo_msgs/lbLegControlSrv` 服务（`target_joints` + `duration`）
+4. 循环测试序列：
+   - 7 组目标位置（回零 → 偏转 → 回零，循环 3 次）
+   - 每次发送后等待运动到位（`wait_action_down`，误差 < 0.5 度时判定到位）
+
+**与 `wheel_lower_joint_example.py` 的区别：**
+
+- `wheel_arm_control_example.py`：通过 **服务** (`/lb_leg_control_srv`) 控制，一次性发送目标 + 时长
+- `wheel_lower_joint_example.py`：通过 **话题** (`/lb_leg_traj`) 控制，持续发布关节轨迹
+
+**前置条件：** 需轮臂版仿真或实物环境，且 `/lb_leg_control_srv` 服务可用。
+
+---
+
+### wheel_torso_pose_example.py (P2)
+
+**演示轮臂机器人躯干的六自由度位姿控制。**
+
+通过 `control_torso_pose` 控制躯干在空间中的位姿，对齐 ROS demo `cmd_torso_pose_test.py`。示例代码展示了：
+1. 累积叠加控制序列（与 demo 一致）：
+   - 抬高 (z=0.4m) → 前移 (x=0.2m) → 左转 (yaw≈60°) → 右转 (yaw≈-60°) → 前倾 (pitch≈-30°) → 后仰 (pitch≈30°) → 归位
+2. 参数说明：
+   - x, y, z (米), roll, pitch, yaw (弧度)
+   - 注意：轮臂躯干不支持 roll 旋转 (angular.x 保持 0)
+
+**前置条件：** 同上，需轮臂版仿真或实物环境。
+
+---
+
+### wheel_lower_joint_example.py (P2)
+
+**演示轮臂机器人 4 个下部关节的轨迹控制。**
+
+通过 `control_wheel_lower_joint` 控制下部关节，对齐 ROS demo `cmd_leg_joint_test.py`。示例代码展示了：
+1. 三组关节目标序列（与 demo 一致）：
+   - [14.9, -32.01, 18.03, 0.0] → [14.9, -32.01, 18.03, 90.0] → [0, 0, 0, 0]
+2. 参数说明：
+   - 话题 `/lb_leg_traj`，消息类型 `sensor_msgs/JointState`
+   - 关节名称: `['joint1', 'joint2', 'joint3', 'joint4']`，参数单位：度
+
+**前置条件：** 同上，需轮臂版仿真或实物环境。
+
+---
+
+### waist_pos_example.py (P0)
+
+**演示如何使用 `control_waist_pos` 通过列表接口控制机器人腰部旋转。**
+
+该接口与 ROS SDK 的 list 格式兼容，可直接传递列表参数控制腰部角度。示例代码展示了：
+1. 单角度控制：
+   - 传递 `[0.0]` 将腰部转到正前方
+   - 传递 `[30.0]` 将腰部左转 30 度
+   - 传递 `[-30.0]` 将腰部右转 30 度
+2. 循环摆动：
+   - 以 5 度为步长，从左到右、从右到左循环摆动
+   - 演示了角度序列控制的基本用法
+
+---
+
+### link_pose_example.py (P0)
+
+**演示如何获取机械臂关节链接的位置和完整位姿。**
+
+通过 `KuavoRobotTools` 的 `get_link_position` 和 `get_link_pose` 获取指定关节链接的三维位置和完整位姿（position + orientation）。示例代码展示了：
+1. 获取关节链接位置：
+   - 查询多个常见关节链接（如 `zarm_l1_link`、`zarm_l2_link` 等）的位置
+   - 在默认参考系 `base_link` 下查询
+2. 获取完整位姿：
+   - 使用 `get_link_pose` 同时获取位置和四元数姿态
+3. 切换参考坐标系：
+   - 演示在 `odom` 等不同参考系下查询
+
+---
+
 ## 策略实例 （strategies）
 
 
 ### 搬箱子案例 （grasp_box_example.py）
+
 **编译**：
 ```
 catkin build humanoid_controllers kuavo_msgs gazebo_sim ar_control
@@ -378,17 +536,41 @@ catkin build humanoid_controllers kuavo_msgs gazebo_sim ar_control
 
 **运行**：
 
-⚠️ 在运行之前, 需要确认机器人版本`ROBOT_VERSION=45`，否则会机器人末端控制会有问题
+⚠️ 在运行之前, 需要确认机器人版本`ROBOT_VERSION=52`，否则会机器人末端控制会有问题
+
+⚠️ WebSocket SDK 示例必须在代码中调用 `KuavoSDK().Init(websocket_mode=True)` 初始化连接。`grasp_box_example.py` 已在 `main()` 中完成初始化。
+
+**下位机：**
 ```
 # 启动gazebo场景
-roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch joystick_type:=bt2pro
+roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch
 
-# 启动ar_tag转换码操作和virtual操作
-roslaunch ar_control robot_strategies.launch  
+# 启动 WebSocket 服务节点
+roslaunch h12pro_controller_node kuavo_humanoid_sdk_ws_srv.launch
+
+# 启动ar_tag转换码操作
+roslaunch ar_control robot_strategies.launch
 
 # 运行搬箱子案例
-python3 grasp_box_example.py 
+python3 grasp_box_example.py
 ```
+
+### PyTree 行为树搬箱案例 （kuavo_strategy_pytree/pick_place_box/）
+
+WSSDK 现已集成 `kuavo_strategy_pytree` 行为树策略，提供更高级的并行感知+闭环控制能力。详情参见 [WSSDK搬箱说明文档](../docs/WSSDK搬箱说明文档.md) 第三部分。
+
+**快速运行（仿真）：**
+```
+cd ~/kuavo-ros-control
+source devel/setup.bash
+python3 ./src/kuavo_humanoid_websocket_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py
+```
+
+主要 PyTree 案例脚本：
+- `case_new.py` — 扭腰搬箱子（推荐）
+- `case.py` — 基础搬箱案例
+- `case_boxes.py` — 多箱搬箱案例
+- `case_wheel_pick_and_place.py` — 轮臂机器人 pick & place
 
 🚨 第一次启动gazebo场景前需要修改tag尺寸：
 

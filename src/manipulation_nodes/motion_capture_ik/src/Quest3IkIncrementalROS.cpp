@@ -126,7 +126,7 @@ void Quest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
     return;
   }
 
-  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
   const size_t requiredSize = static_cast<size_t>(armJointStartIndex + SENSOR_ARM_JOINT_DIM);
   if (currentSensorData->joint_data.joint_q.size() < requiredSize) {
     return;
@@ -289,11 +289,20 @@ void Quest3IkIncrementalROS::fsmEnter() {
       // print entermode count
       std::cout << "[Quest3IkIncrementalROS] Enter mode 2 reset all states (including incrementalController): "
                 << enterMode2ResetCounter_ << "/" << ENTER_MODE_2_RESET_COUNT << std::endl;
-      // 使用初始化时保存的全零关节角度位姿（Link6），避免运行时频繁调用 FK
-      Eigen::Vector3d currentLeftHandPos = initZeroLeftLink6Position_;
-      Eigen::Vector3d currentRightHandPos = initZeroRightLink6Position_;
-      Eigen::Quaterniond currentLeftHandQuat = Eigen::Quaterniond::Identity();
-      Eigen::Quaterniond currentRightHandQuat = Eigen::Quaterniond::Identity();
+      // [v62 fix] 用机器人当前 sensor 关节角的 FK 作为 anchor（替代固定零位 FK），
+      // 避免 v62 等启动时手臂不在零位的平台，按下 grip 后手臂被强行拉到零位再跟随。
+      // computeLink6FK 内置 fallback：sensor 未就绪时返回 Zero/Identity → 退化到原 v52 行为。
+      Eigen::Vector3d currentLeftHandPos, currentRightHandPos;
+      Eigen::Quaterniond currentLeftHandQuat, currentRightHandQuat;
+      computeLeftLink6FK(currentLeftHandPos, currentLeftHandQuat);
+      computeRightLink6FK(currentRightHandPos, currentRightHandQuat);
+      if (currentLeftHandPos.isZero() && currentRightHandPos.isZero()) {
+        // sensor 未就绪 → 退化到零位 anchor（v52 原行为）
+        currentLeftHandPos = initZeroLeftLink6Position_;
+        currentRightHandPos = initZeroRightLink6Position_;
+        currentLeftHandQuat = Eigen::Quaterniond::Identity();
+        currentRightHandQuat = Eigen::Quaterniond::Identity();
+      }
 
       {
         std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
@@ -312,12 +321,15 @@ void Quest3IkIncrementalROS::fsmEnter() {
       }
 
       // 【核心修复】重置关节角度 fhan 滤波状态，避免从 t1 时刻的旧关节角度开始过渡
+      // [v62 fix] q_/latest_q_ 用 sensor 当前关节角作为初始（替代全零），
+      // 避免 IK 内部"当前 q"误认为是零位，导致输出关节命令把手臂往零位拉。
+      const bool sensorReady = (sensorArmJointQ_.size() == jointStateSize_);
       if (q_.size() == jointStateSize_ && dq_.size() == jointStateSize_) {
-        q_.setZero();
+        q_ = sensorReady ? sensorArmJointQ_ : Eigen::VectorXd::Zero(jointStateSize_);
         dq_.setZero();
       }
       if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
-        latest_q_.setZero();
+        latest_q_ = sensorReady ? sensorArmJointQ_ : Eigen::VectorXd::Zero(jointStateSize_);
         latest_dq_.setZero();
         lowpass_dq_.setZero();
       }
@@ -1335,7 +1347,7 @@ void Quest3IkIncrementalROS::processVisual() {
                            Eigen::Quaterniond& rightQuat) {
     // 可视化使用原始传感器数据
     std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-    const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+    const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
     if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= armJointStartIndex + jointStateSize_) {
       Eigen::VectorXd armJoints(jointStateSize_);
       for (int i = 0; i < jointStateSize_; ++i) {
@@ -1358,7 +1370,7 @@ void Quest3IkIncrementalROS::processVisual() {
   Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
   Eigen::Quaterniond qLeftElbow, qRightElbow;
   std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
   if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= armJointStartIndex + jointStateSize_) {
     Eigen::VectorXd armJoints(jointStateSize_);
     for (int i = 0; i < jointStateSize_; ++i) {
@@ -2046,9 +2058,10 @@ void Quest3IkIncrementalROS::publishSensorDataArmJoints() {
     return;
   }
 
-  if (currentSensorData->joint_data.joint_q.size() < 12 + jointStateSize_) {
+  const int requiredSize = sensorDataArmOffset_ + jointStateSize_;
+  if (static_cast<int>(currentSensorData->joint_data.joint_q.size()) < requiredSize) {
     ROS_WARN("[Quest3IkIncrementalROS] Sensor data does not contain enough joint data. Expected at least %d, got %zu",
-             12 + jointStateSize_,
+             requiredSize,
              currentSensorData->joint_data.joint_q.size());
     return;
   }
@@ -2064,7 +2077,7 @@ void Quest3IkIncrementalROS::publishSensorDataArmJoints() {
   }
 
   // 从传感器数据提取手臂关节角（从索引12+腰部自由度开始），并转换为角度单位
-  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
   for (int i = 0; i < jointStateSize_; ++i) {
     double jointAngleRad = currentSensorData->joint_data.joint_q[armJointStartIndex + i];
     jointStateMsg.position[i] = jointAngleRad * 180.0 / M_PI;  // 转换为角度
@@ -2120,8 +2133,19 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   // 初始化机器人固定位置参数（从 JSON 加载或使用默认值）
   loadDrakeVelocityIKGeometryFromJson(configJson);
 
-  leftElbowFixedPoint_ = Eigen::Vector3d(-0.3, 0.5, 0.32);
-  rightElbowFixedPoint_ = Eigen::Vector3d(-0.3, -0.5, 0.32);
+  // [v62 fix] elbow fixed point 基于 shoulder pos + 相对偏移自动算（替代硬编码 v52 绝对值）。
+  // v52 原 hardcoded (-0.3, ±0.5, 0.32) = v52 默认 shoulder (-0.0175, ±0.2927, 0.4245) + (-0.2825, ±0.2073, -0.1045)
+  // → v52 平台行为不变；v62 平台只要 config 里 drake_velocity_ik_geometry.left_p0/right_p0
+  // 设了正确 shoulder pos，elbow 就自动跟着对。
+  const Eigen::Vector3d kElbowRelOffsetLeft(-0.2825, 0.2073, -0.1045);
+  const Eigen::Vector3d kElbowRelOffsetRight(-0.2825, -0.2073, -0.1045);
+  leftElbowFixedPoint_ = robotLeftFixedShoulderPos_ + kElbowRelOffsetLeft;
+  rightElbowFixedPoint_ = robotRightFixedShoulderPos_ + kElbowRelOffsetRight;
+  ROS_INFO(
+      "[Quest3IkIncrementalROS] Elbow fixed points (shoulder + offset): "
+      "left=[%.4f, %.4f, %.4f], right=[%.4f, %.4f, %.4f]",
+      leftElbowFixedPoint_.x(), leftElbowFixedPoint_.y(), leftElbowFixedPoint_.z(),
+      rightElbowFixedPoint_.x(), rightElbowFixedPoint_.y(), rightElbowFixedPoint_.z());
 
   // 从主控制器实时订阅当前手臂控制模式
   arm_ctrl_mode_vr_sub_ = nodeHandle_.subscribe(
@@ -2204,15 +2228,21 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   jointMidValues_(13) = (-0.698131700797732 + 0.698131700797732) / 2.0;  // zarm_r7_joint
 
   // 从JSON配置构建URDF路径
+  // 优先使用 "arm_only_urdf"（v62 半身 IK 用，14 DOF 纯双臂，不含 chest 4 关节），
+  // 找不到则 fallback 到 "arm_urdf"（v52 默认行为不变）。
   std::string urdfFilePath;
-  if (configJson.contains("arm_urdf")) {
-    std::string kuavo_assets_path = ros::package::getPath("kuavo_assets");
+  std::string kuavo_assets_path = ros::package::getPath("kuavo_assets");
+  if (configJson.contains("arm_only_urdf")) {
+    std::string arm_urdf_relative = configJson["arm_only_urdf"].get<std::string>();
+    urdfFilePath = kuavo_assets_path + "/models/" + arm_urdf_relative;
+    ROS_INFO("✅ [Quest3IkIncrementalROS] Using arm_only_urdf from JSON: %s", urdfFilePath.c_str());
+  } else if (configJson.contains("arm_urdf")) {
     std::string arm_urdf_relative = configJson["arm_urdf"].get<std::string>();
     urdfFilePath = kuavo_assets_path + "/models/" + arm_urdf_relative;
-    ROS_INFO("✅ [Quest3IkIncrementalROS] Constructed URDF path from JSON: %s", urdfFilePath.c_str());
+    ROS_INFO("✅ [Quest3IkIncrementalROS] Using arm_urdf from JSON: %s", urdfFilePath.c_str());
   } else {
-    ROS_ERROR("❌ [Quest3IkIncrementalROS] 'arm_urdf' field not found in JSON configuration");
-    throw std::runtime_error("Missing 'arm_urdf' field in JSON configuration");
+    ROS_ERROR("❌ [Quest3IkIncrementalROS] neither 'arm_only_urdf' nor 'arm_urdf' found in JSON configuration");
+    throw std::runtime_error("Missing arm URDF field in JSON configuration");
   }
 
   // drake initialization

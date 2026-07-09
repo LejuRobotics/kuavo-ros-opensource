@@ -19,6 +19,7 @@
 #include <std_msgs/Int32.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <iomanip>
+#include <sstream>
 #include <cmath>
 #include <algorithm>
 
@@ -35,6 +36,31 @@
 
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
+
+bool WheelQuest3IkIncrementalROS::loadStandArmAnglesFromRosParam() {
+  std::vector<double> stand_joint_state;
+  if (nodeHandle_.getParam("/standJointState", stand_joint_state) &&
+      stand_joint_state.size() == static_cast<size_t>(numArmJoints_)) {
+    standArmAngles_.resize(numArmJoints_);
+    for (int i = 0; i < numArmJoints_; ++i) {
+      standArmAngles_(i) = stand_joint_state[static_cast<size_t>(i)];
+    }
+    if (!standArmAnglesLoaded_) {
+      std::ostringstream oss;
+      oss << standArmAngles_.transpose().format(Eigen::IOFormat(4, 0, ", ", "", "", "", "", ""));
+      ROS_INFO("[WheelQuest3IkIncrementalROS] Loaded /standJointState (rad): [%s]", oss.str().c_str());
+    }
+    standArmAnglesLoaded_ = true;
+    return true;
+  }
+
+  if (!standArmAnglesLoaded_) {
+    standArmAngles_.resize(numArmJoints_);
+    standArmAngles_.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+    standArmAngles_.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  }
+  return false;
+}
 
 void WheelQuest3IkIncrementalROS::activateController() {
   if (controllerActivated_.load()) return;
@@ -112,7 +138,8 @@ void WheelQuest3IkIncrementalROS::updateLeftConstraintList(const Eigen::Vector3d
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position = leftEndEffectorPosition_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_LINK6].position = leftLink6Position_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position = leftVirtualThumbPosition_;
-  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestRotationQuaternion_.toRotationMatrix();
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix =
+      (chestIncrementalUpdateEnabled_ ? chestRotationQuaternion_ : getRobotChestQuatRef()).toRotationMatrix();
 }
 
 void WheelQuest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3d& rightHandPos,
@@ -127,7 +154,14 @@ void WheelQuest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position = rightLink6Position_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position = rightVirtualThumbPosition_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix =
-      chestRotationQuaternion_.toRotationMatrix();  // 确保总是更新chest参考
+      (chestIncrementalUpdateEnabled_ ? chestRotationQuaternion_ : getRobotChestQuatRef()).toRotationMatrix();
+}
+
+Eigen::Quaterniond WheelQuest3IkIncrementalROS::getRobotChestQuatRef() const {
+  if (hasLatestWaistYawFk_) {
+    return computeYawPitchOnlyQuatFromRotationMatrix(latestWaistYawFkQuat_.toRotationMatrix());
+  }
+  return Eigen::Quaterniond::Identity();
 }
 
 Eigen::Quaterniond WheelQuest3IkIncrementalROS::computeYawPitchOnlyQuatFromRotationMatrix(
@@ -165,6 +199,7 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
   Eigen::Quaterniond chestQuatRef = input.chestQuatRef;
   if (isInMode2Warmup) {
     chestPosRef = latestWaistYawFkPos_;
+    chestQuatRef = getRobotChestQuatRef();
     chestIncrementalUpdateEnabled = false;
   }
 
@@ -923,8 +958,8 @@ void WheelQuest3IkIncrementalROS::computeWaistYawFK(Eigen::Vector3d& pOut) {
     std::lock_guard<std::mutex> lock(oneStageIkMutex_);
     auto [waistYawPosition, waistYawQuaternion] =
         oneStageIkEndEffectorPtr_->FK(filterJointDataForDrakeFK_, "waist_yaw_link");
-    (void)waistYawQuaternion;
     pOut = waistYawPosition;
+    latestWaistYawFkQuat_ = waistYawQuaternion.normalized();
     hasLatestWaistYawFk_ = true;
   }
 }
@@ -1307,22 +1342,20 @@ DrakeChestElbowHandBoundsConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
 void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
   // 发布底盘速度控制命令
   if (joyStickHandlerPtr_ != nullptr && armControlMode_ == 2) {
-    const double joyScale =
-        (incrementalController_ != nullptr) ? incrementalController_->getConfig().chassisJoyCmdTravelScale : 1.0;
     geometry_msgs::Twist cmdVelMsg;
     const double nx = std::clamp(joyStickHandlerPtr_->getLeftJoyStickY(), -1.0, 1.0);
     const double ny = std::clamp(-joyStickHandlerPtr_->getLeftJoyStickX(), -1.0, 1.0);
     const double nw = std::clamp(-joyStickHandlerPtr_->getRightJoyStickX(), -1.0, 1.0);
 
-    // 先按 reference.info 最大速度映射，再乘 joyScale（与 QuestControlFSM 限幅语义一致）
-    cmdVelMsg.linear.x = nx * chassisCmdVelLinearXLimit_ * joyScale;
-    cmdVelMsg.linear.y = ny * chassisCmdVelLinearYLimit_ * joyScale;
+    // 与 QuestControlFSM 共用 launch 中的 /vr_cmd_vel/* 限速
+    cmdVelMsg.linear.x = nx * chassisCmdVelLinearXLimit_;
+    cmdVelMsg.linear.y = ny * chassisCmdVelLinearYLimit_;
     cmdVelMsg.linear.z = 0.0;
 
     // 设置角速度：z轴为yaw（逆时针为正）
     cmdVelMsg.angular.x = 0.0;
     cmdVelMsg.angular.y = 0.0;
-    cmdVelMsg.angular.z = nw * chassisCmdVelAngularYawLimit_ * joyScale;
+    cmdVelMsg.angular.z = nw * chassisCmdVelAngularYawLimit_;
 
     if (std::abs(cmdVelMsg.linear.x) > 1e-2 || std::abs(cmdVelMsg.linear.y) > 1e-2 ||
         std::abs(cmdVelMsg.angular.z) > 1e-2) {
@@ -1733,18 +1766,15 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
 }
 
 void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
-  // 定义默认目标角度（度转弧度）
-  // 左臂和右臂的默认角度：[45, 0, 0, -90, 0, 0, 0] 度
-  Eigen::VectorXd defaultArmAngles = Eigen::VectorXd::Zero(14);
-  defaultArmAngles.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
-  defaultArmAngles.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  loadStandArmAnglesFromRosParam();
+  const Eigen::VectorXd defaultArmAngles = standArmAngles_;
 
   // 发布手臂关节状态
   sensor_msgs::JointState armJintStateMsg;
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
 
-    // 直接设置 q_ 为默认角度
+    // 直接设置 q_ 为默认角度（来自 /standJointState）
     q_ = defaultArmAngles;
 
     // dq_ 设置为零
@@ -1942,9 +1972,9 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
 
   {
-    nodeHandle_.param("/mobile_manipulator_joy/linear_scale_x", chassisCmdVelLinearXLimit_, chassisCmdVelLinearXLimit_);
-    nodeHandle_.param("/mobile_manipulator_joy/linear_scale_y", chassisCmdVelLinearYLimit_, chassisCmdVelLinearYLimit_);
-    nodeHandle_.param("/mobile_manipulator_joy/angular_scale_z", chassisCmdVelAngularYawLimit_, chassisCmdVelAngularYawLimit_);
+    nodeHandle_.param("/vr_cmd_vel/linear_scale_x", chassisCmdVelLinearXLimit_, chassisCmdVelLinearXLimit_);
+    nodeHandle_.param("/vr_cmd_vel/linear_scale_y", chassisCmdVelLinearYLimit_, chassisCmdVelLinearYLimit_);
+    nodeHandle_.param("/vr_cmd_vel/angular_scale_z", chassisCmdVelAngularYawLimit_, chassisCmdVelAngularYawLimit_);
     if (!std::isfinite(chassisCmdVelLinearXLimit_) || chassisCmdVelLinearXLimit_ <= 0.0) {
       chassisCmdVelLinearXLimit_ = 0.8;
     }
@@ -1955,7 +1985,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       chassisCmdVelAngularYawLimit_ = 0.5;
     }
     ROS_INFO(
-        "[WheelQuest3IkIncrementalROS] VR cmd_vel max: lin_x=%.4f lin_y=%.4f ang_z=%.4f (from /mobile_manipulator_joy/*)",
+        "[WheelQuest3IkIncrementalROS] VR cmd_vel max: lin_x=%.4f lin_y=%.4f ang_z=%.4f (from /vr_cmd_vel/*)",
         chassisCmdVelLinearXLimit_,
         chassisCmdVelLinearYLimit_,
         chassisCmdVelAngularYawLimit_);
@@ -2094,12 +2124,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   // 初始化 sensorData 双臂关节角（维度从 JSON 加载，rad）指数均值滤波状态
   filterJointDataForDrakeFK_ = Eigen::VectorXd::Zero(drakeJointStateSize_);
   jointDataForDrakeFK_ = Eigen::VectorXd::Zero(drakeJointStateSize_);
+  loadStandArmAnglesFromRosParam();
+
   // 初始化关节角度滤波状态
   q_ = Eigen::VectorXd::Zero(14);
   dq_ = Eigen::VectorXd::Zero(14);
-  latest_q_ = Eigen::VectorXd::Zero(14);
-  latest_q_.head(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
-  latest_q_.tail(7) << 30.0 * M_PI / 180.0, 0.0, 0.0, -90.0 * M_PI / 180.0, 0.0, 0.0, 0.0;
+  latest_q_ = standArmAngles_;
   latest_dq_ = Eigen::VectorXd::Zero(14);
   lowpass_dq_ = Eigen::VectorXd::Zero(14);
 
@@ -2401,19 +2431,6 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   }
   ROS_INFO("[WheelQuest3IkIncrementalROS] Incremental LPF orientation_cutoff_hz: %.3f Hz",
            incrementalConfig.orientationCutoffHz);
-
-  if (configJson.contains("chassis_joy_cmd_travel_scale")) {
-    const double v = configJson["chassis_joy_cmd_travel_scale"].get<double>();
-    if (std::isfinite(v) && v > 0.0) {
-      incrementalConfig.chassisJoyCmdTravelScale = v;
-    } else {
-      ROS_WARN(
-          "[WheelQuest3IkIncrementalROS] Invalid chassis_joy_cmd_travel_scale in JSON, fallback to 1.0 "
-          "(no joy scaling)");
-      incrementalConfig.chassisJoyCmdTravelScale = 1.0;
-    }
-  }
-  ROS_INFO("[WheelQuest3IkIncrementalROS] chassis_joy_cmd_travel_scale: %.4f", incrementalConfig.chassisJoyCmdTravelScale);
 
   while (!nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/delta_scale_x")) {
     ROS_WARN("[WheelQuest3IkIncrementalROS] Waiting for /quest3/delta_scale_x parameter");

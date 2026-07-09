@@ -41,5 +41,14 @@ def disable_sdk_logging():
     logging.disable()
 
 
+def is_diag_enabled() -> bool:
+    """Check if diagnostic prints are enabled via environment variable KUAVO_DIAG.
+
+    Set ``KUAVO_DIAG=1`` to enable detailed diagnostic output to stdout.
+    Default is off (no diagnostic output).
+    """
+    return os.environ.get('KUAVO_DIAG', '0') == '1'
+
+
 """ Logger """
 SDKLogger = setup_logger()

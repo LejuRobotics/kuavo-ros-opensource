@@ -35,7 +35,11 @@ WaistController::WaistController(ros::NodeHandle& nh, size_t joint_waist_num,
   // 模式2相关
   raw_mode2_waist_target_q_.resize(joint_waist_num_);
   raw_mode2_waist_target_q_.setZero();
+  buffered_mode2_waist_target_q_.resize(joint_waist_num_);
+  buffered_mode2_waist_target_q_.setZero();
   mode2_waist_target_received_ = false;
+  buffered_mode2_waist_target_received_ = false;
+  buffered_waist_enable_ = false;
   
   // 控制参数
   waist_kp_.resize(joint_waist_num_);
@@ -72,6 +76,8 @@ void WaistController::reset()
   
   // 重置模式2的目标
   mode2_waist_target_received_ = false;
+  buffered_mode2_waist_target_received_ = false;
+  buffered_waist_enable_ = false;
   
   // 重置滤波器状态到当前位置
   if (waist_filter_initialized_)
@@ -174,6 +180,8 @@ void WaistController::update(const ros::Time& time,
     waist_filter_initialized_ = true;
     ROS_INFO("[WaistController] First-order filter initialized: dt=%.4f s, cutoff=%.1f Hz", dt, mode2_cutoff_freq_);
   }
+
+  applyBufferedExternalCommandIfReady();
   
   // 根据当前模式更新期望状态
   if (waist_control_mode_ == 1)
@@ -252,6 +260,12 @@ bool WaistController::changeMode(int target_mode)
   // 执行模式切换
   applyModeChange(target_mode);
   return true;
+}
+
+void WaistController::setExternalCommandBufferCallback(std::function<bool()> callback)
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  external_command_buffer_callback_ = std::move(callback);
 }
 
 void WaistController::applyModeChange(int target_mode)
@@ -409,6 +423,21 @@ void WaistController::updateMode2(double dt)
 
 void WaistController::waistTrajectoryCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg)
 {
+  std::function<bool()> external_command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    external_command_buffer_callback = external_command_buffer_callback_;
+  }
+  if (external_command_buffer_callback && external_command_buffer_callback())
+  {
+    if (storeMode2WaistTarget(*msg, buffered_mode2_waist_target_q_))
+    {
+      buffered_mode2_waist_target_received_ = true;
+    }
+    ROS_DEBUG_THROTTLE(1.0, "[WaistController] Buffer waist trajectory until manipulation controller is active");
+    return;
+  }
+
   // 只在模式2（外部控制）时处理
   if (waist_control_mode_ != 2)
   {
@@ -423,42 +452,96 @@ void WaistController::waistTrajectoryCallback(const kuavo_msgs::robotWaistContro
     return;
   }
   
-  // 检查消息数据维度
-  if (msg->data.data.size() != joint_waist_num_)
+  if (!storeMode2WaistTarget(*msg, raw_mode2_waist_target_q_))
   {
-    ROS_WARN("[WaistController] Waist trajectory dimension mismatch: expected=%zu, got=%zu",
-             joint_waist_num_, msg->data.data.size());
     return;
   }
-  
-  // 腰部关节角度限制（与WaistKinematics和Python SDK保持一致）
-  // waist_yaw_joint: [-180°, 180°] = [-π, π]
+
+  // 标记已收到模式2输入（期望速度和位置将在 updateMode2 的三次多项式插值中计算）
+  mode2_waist_target_received_ = true;
+}
+
+void WaistController::applyBufferedExternalCommandIfReady()
+{
+  if (!buffered_waist_enable_ && !buffered_mode2_waist_target_received_)
+  {
+    return;
+  }
+
+  std::function<bool()> external_command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    external_command_buffer_callback = external_command_buffer_callback_;
+  }
+  if (external_command_buffer_callback && external_command_buffer_callback())
+  {
+    return;
+  }
+
+  if (buffered_waist_enable_)
+  {
+    waist_control_enabled_ = true;
+    if (waist_control_mode_ == 1)
+    {
+      changeMode(2);
+    }
+    buffered_waist_enable_ = false;
+    ROS_INFO("[WaistController] Applied buffered waist enable after manipulation controller became active");
+  }
+
+  if (buffered_mode2_waist_target_received_ && waist_control_mode_ == 2 && waist_control_enabled_)
+  {
+    raw_mode2_waist_target_q_ = buffered_mode2_waist_target_q_;
+    mode2_waist_target_received_ = true;
+    buffered_mode2_waist_target_received_ = false;
+    ROS_INFO("[WaistController] Applied buffered waist trajectory after manipulation controller became active");
+  }
+}
+
+bool WaistController::storeMode2WaistTarget(const kuavo_msgs::robotWaistControl& msg,
+                                            Eigen::VectorXd& target_q) const
+{
+  if (msg.data.data.size() != joint_waist_num_)
+  {
+    ROS_WARN("[WaistController] Waist trajectory dimension mismatch: expected=%zu, got=%zu",
+             joint_waist_num_, msg.data.data.size());
+    return false;
+  }
+  if (target_q.size() != static_cast<int>(joint_waist_num_))
+  {
+    target_q = Eigen::VectorXd::Zero(joint_waist_num_);
+  }
+
   static constexpr double WAIST_YAW_MIN_DEG = -30.0;
   static constexpr double WAIST_YAW_MAX_DEG = 30.0;
-  
-  // 提取目标位置（从度转换为弧度，添加角度限制）
   for (size_t i = 0; i < joint_waist_num_; ++i)
   {
-    double angle_deg = msg->data.data[i];
-    
-    // 限制角度范围（与Python SDK保持一致：-180°到180°）
+    double angle_deg = msg.data.data[i];
     if (angle_deg < WAIST_YAW_MIN_DEG || angle_deg > WAIST_YAW_MAX_DEG)
     {
       ROS_WARN("[WaistController] Waist joint %zu angle %.2f° exceeds limit [%.0f°, %.0f°], clamping",
                i, angle_deg, WAIST_YAW_MIN_DEG, WAIST_YAW_MAX_DEG);
       angle_deg = std::clamp(angle_deg, WAIST_YAW_MIN_DEG, WAIST_YAW_MAX_DEG);
     }
-    
-    raw_mode2_waist_target_q_(i) = angle_deg * M_PI / 180.0;  // 度转弧度
+    target_q(i) = angle_deg * M_PI / 180.0;
   }
-  
-  // 标记已收到模式2输入（期望速度和位置将在 updateMode2 的三次多项式插值中计算）
-  mode2_waist_target_received_ = true;
+  return true;
 }
 
 void WaistController::enableWaistControlCallback(const std_msgs::Bool::ConstPtr& msg)
 {
   bool enable = msg->data;
+  std::function<bool()> external_command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    external_command_buffer_callback = external_command_buffer_callback_;
+  }
+  if (enable && external_command_buffer_callback && external_command_buffer_callback())
+  {
+    buffered_waist_enable_ = true;
+    ROS_DEBUG_THROTTLE(1.0, "[WaistController] Buffer waist external control enable until manipulation controller is active");
+    return;
+  }
   
   if (enable != waist_control_enabled_)
   {

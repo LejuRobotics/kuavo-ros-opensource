@@ -42,7 +42,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="floating_base" type="fixed">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="dummy_link" />
@@ -282,7 +282,7 @@
     name="base_to_joint"
     type="fixed">
     <origin
-      xyz="0.098 0 0.27064321"
+      xyz="0.098 0 0.31"
       rpy="0 0 0" />
     <parent
       link="base_link" />

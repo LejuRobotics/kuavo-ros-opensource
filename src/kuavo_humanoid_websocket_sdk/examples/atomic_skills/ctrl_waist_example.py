@@ -18,22 +18,23 @@ def main():
 
     # Control head to move left and right
     cycles = 1  # Number of cycles to perform
-    interval = 0.4  # Time interval between movements in seconds
-    max_yaw = 180  # Maximum yaw angle in degrees
-    
+    interval = 0.2  # Time interval between movements in seconds
+    max_yaw = 90  # Maximum yaw angle in degrees
+    step = 5  # Step size in degrees
+
     for cycle in range(cycles):
         # Move from 0 to max_yaw degrees
-        for yaw in range(0, max_yaw + 1, 2):
-            robot.control_waist(yaw=yaw)  # Convert degrees to radians
-            time.sleep(interval)
-        
-        # Move from max_yaw to -max_yaw degrees
-        for yaw in range(max_yaw, -max_yaw - 1, -2):
+        for yaw in range(0, max_yaw + 1, step):
             robot.control_waist(yaw=yaw)
             time.sleep(interval)
-            
+
+        # Move from max_yaw to -max_yaw degrees
+        for yaw in range(max_yaw, -max_yaw - 1, -step):
+            robot.control_waist(yaw=yaw)
+            time.sleep(interval)
+
         # Move from -max_yaw back to 0 degrees
-        for yaw in range(-max_yaw, 1, 2):
+        for yaw in range(-max_yaw, 1, step):
             robot.control_waist(yaw=yaw)
             time.sleep(interval)
 if __name__ == "__main__":

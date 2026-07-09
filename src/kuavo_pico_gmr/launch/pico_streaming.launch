@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<!--
+  PICO GMR Streaming Launch File
+
+  This launch file starts the PICO motion retargeting system that:
+  - Receives PICO body tracking data via UDP (pico_comm_minimal node)
+  - Performs real-time motion retargeting to Kuavo robot (pico_realtime_retarget node)
+  - Publishes retargeted pose to /pico/retargeted_pose (picoPoseRetarget)
+  - Publishes VMP input data to /vmp/input_data (Float32MultiArray)
+
+  Prerequisites:
+  1. Python 3.10 virtual environment with GMR dependencies installed
+     - Run: cd $(rospack find kuavo_pico_gmr) && bash setup_venv.sh
+     - Or set PICO_GMR_VENV_PATH environment variable
+
+  2. PICO device on the same network as the robot
+
+  Usage:
+    # Default (with MuJoCo visualization disabled)
+    roslaunch kuavo_pico_gmr pico_streaming.launch
+
+    # With MuJoCo visualization
+    roslaunch kuavo_pico_gmr pico_streaming.launch enable_viewer:=true
+
+    # Custom robot type and human height
+    roslaunch kuavo_pico_gmr pico_streaming.launch robot:=kuavo_s52 human_height:=1.54
+-->
+<launch>
+  <!-- Robot configuration -->
+  <arg name="robot" default="kuavo_s52" doc="Target robot type (kuavo_s45, kuavo_s52)"/>
+
+  <!-- PICO parameters -->
+  <arg name="human_height" default="1.32" doc="Estimated human height in meters"/>
+
+  <!-- Visualization -->
+  <arg name="enable_viewer" default="false" doc="Enable MuJoCo viewer (may impact performance)"/>
+
+  <!-- GMR smoothing parameters -->
+  <arg name="enable_gmr_smoothing" default="true" doc="Enable Gaussian filter smoothing"/>
+  <arg name="gmr_gaussian_sigma" default="1.0" doc="Gaussian kernel sigma (larger = smoother)"/>
+  <arg name="gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
+  <arg name="gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone (values below this are set to 0)"/>
+
+  <!-- Dexterous hand control (subscribes /pico/joy, publishes /control_robot_hand_position) -->
+  <arg name="enable_dexhand_control" default="true" doc="Enable dexterous hand control via PICO grip"/>
+
+  <!-- Head control (subscribes /robot_body_matrices, publishes /robot_head_motion_data) -->
+  <arg name="enable_head_control" default="true" doc="Enable head control node"/>
+  <arg name="head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+
+  <!-- CPU affinity: bind retarget process to specific cores, e.g. [4] for P-core on Ultra 7 255H -->
+  <arg name="cpu_cores" default="[]" doc="CPU cores to bind retarget process (empty=no binding)"/>
+
+  <!-- Node 1: PICO data receiver (UDP communication, no venv needed) -->
+  <node pkg="kuavo_pico_gmr" type="pico_comm_minimal_wrapper.sh" name="pico_comm_minimal"
+        output="screen" respawn="true" respawn_delay="5"/>
+
+  <!-- Node 2: Motion retargeting (requires gmr_venv) -->
+  <node pkg="kuavo_pico_gmr" type="run_with_venv.sh" name="pico_realtime_retarget"
+        output="screen" respawn="true" respawn_delay="5"
+        args="$(find kuavo_pico_gmr)/scripts/pico_realtime_to_robot.py --robot $(arg robot) --human-height $(arg human_height)">
+    <!-- Visualization: controlled via ROS param, NOT CLI arg -->
+    <param name="enable_viewer" value="$(arg enable_viewer)"/>
+    <!-- GMR smoothing parameters -->
+    <param name="enable_gmr_smoothing" value="$(arg enable_gmr_smoothing)"/>
+    <param name="gmr_gaussian_sigma" value="$(arg gmr_gaussian_sigma)"/>
+    <param name="gmr_velocity_clip" value="$(arg gmr_velocity_clip)"/>
+    <param name="gmr_velocity_deadzone" value="$(arg gmr_velocity_deadzone)"/>
+    <!-- CPU affinity -->
+    <rosparam param="cpu_cores" subst_value="true">$(arg cpu_cores)</rosparam>
+  </node>
+
+  <!-- Node 3: Dexterous hand control (lightweight, no UDP port needed) -->
+  <node if="$(arg enable_dexhand_control)"
+        pkg="kuavo_pico_gmr" type="pico_dexhand_control_node.py" name="pico_dexhand_control"
+        output="screen" respawn="true" respawn_delay="3"/>
+
+  <!-- Node 4: Head control (subscribes /robot_body_matrices from pico_comm_minimal, publishes /robot_head_motion_data) -->
+  <node if="$(arg enable_head_control)"
+        pkg="humanoid_controllers" type="start_node.sh" name="pico_head_control_gmr"
+        output="screen" respawn="true" respawn_delay="3"
+        args="python3 $(find noitom_hi5_hand_udp_python)/../pico-body-tracking-server/scripts/pico_head_control_node.py _mode:=$(arg head_control_mode)"/>
+</launch>

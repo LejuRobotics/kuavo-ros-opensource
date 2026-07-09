@@ -1,0 +1,7 @@
+uint8 command
+uint8 PREPARE=1
+uint8 STAND_UP=2
+uint8 RESET=3
+---
+bool success
+string message

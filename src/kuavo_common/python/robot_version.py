@@ -217,3 +217,99 @@ class RobotVersion:
         """返回版本号的详细字符串表示"""
         return f"RobotVersion(major={self._major}, minor={self._minor}, patch={self._patch})"
 
+
+def _coerce_robot_version(version):
+    """将 int/字符串/RobotVersion 转换为 RobotVersion，非法值返回 None。"""
+    if isinstance(version, RobotVersion):
+        return version
+    try:
+        version_number = int(version)
+    except (TypeError, ValueError):
+        return None
+    if not RobotVersion.is_valid(version_number):
+        return None
+    return RobotVersion.create(version_number)
+
+
+def is_tact_robot_type_compatible(tact_robot_type, current_robot_version) -> bool:
+    """判断 .tact 文件 robotType 是否兼容当前机器人版本。"""
+    tact_version = _coerce_robot_version(tact_robot_type)
+    robot_version = _coerce_robot_version(current_robot_version)
+    if tact_version is None or robot_version is None:
+        return False
+
+    tact_major = tact_version.major()
+    tact_minor = tact_version.minor()
+    robot_major = robot_version.major()
+    robot_minor = robot_version.minor()
+
+    # 4.1/4.2 结构差异较大，只允许同小版本动作互通。
+    if tact_major == 4 and tact_minor == 1:
+        return robot_major == 4 and robot_minor == 1
+    if tact_major == 4 and tact_minor == 2:
+        return robot_major == 4 and robot_minor == 2
+
+    # 4.3 及以上的 4 代动作互通，但不兼容 4.1/4.2。
+    if tact_major == 4:
+        return robot_major == 4 and robot_minor >= 3
+
+    # 五代、六代、roban 一代动作按主版本互通，避免新增小版本反复补白名单。
+    if tact_major == 5 and tact_minor == 2:
+        return robot_major == 5
+    if tact_major == 6 and tact_minor == 2:
+        return robot_major == 6
+    if tact_major == 1 :
+        return robot_major == 1
+
+    return tact_major == robot_major
+
+
+# ============================================================================
+# 版本注册表 —— 全项目 Python 端唯一源头
+# 新增版本只需在此处加一行，其余逻辑（setup 脚本、工具链）自动生效。
+# 格式: "显示版本": {"internal": 内部版本号, "series": 资源系列, "desc": 描述}
+#   - 显示版本: 用户输入/展示用的版本号
+#   - internal: 写入 ROBOT_VERSION 的数值
+#   - series: 用于选择资源目录和机型判断 (kuavo4/kuavo5/kuavo5w/roban)
+#   - desc: 版本说明
+#
+# Shell 端对应注册表: src/kuavo_common/scripts/robot_version.sh (保持同步)
+# ============================================================================
+VERSION_REGISTRY = {
+    "42":   {"internal": 42,     "series": "kuavo4",  "desc": "短臂版本"},
+    "45":   {"internal": 45,     "series": "kuavo4",  "desc": "长臂版本"},
+    "49":   {"internal": 49,     "series": "kuavo4",  "desc": "pro max版本"},
+    "45.1": {"internal": 100045, "series": "kuavo4",  "desc": "假手版"},
+    "49.1": {"internal": 100049, "series": "kuavo4",  "desc": "展厅版"},
+    "52":   {"internal": 52,     "series": "kuavo5",  "desc": "普通kuavo5"},
+    "53":   {"internal": 53,     "series": "kuavo5",  "desc": "手臂pitch电机改ruiwo"},
+    "55":   {"internal": 55,     "series": "kuavo5",  "desc": "手臂部分电机改ruiwoPA4310"},
+    "60":   {"internal": 60,     "series": "kuavo5w", "desc": "悟时底盘轮臂"},
+    "61":   {"internal": 61,     "series": "kuavo5w", "desc": "玖物底盘轮臂"},
+    "13":   {"internal": 13,     "series": "roban",   "desc": "roban2.0版本"},
+    "14":   {"internal": 14,     "series": "roban",   "desc": "roban2.1版本"},
+    "15":   {"internal": 15,     "series": "roban",   "desc": "roban2.2版本"},
+}
+
+
+def get_valid_display_versions():
+    """获取所有合法的显示版本号列表"""
+    return list(VERSION_REGISTRY.keys())
+
+
+def is_valid_version(version_str):
+    """校验版本号是否合法"""
+    return str(version_str) in VERSION_REGISTRY
+
+
+def get_version_internal(version_str):
+    """获取版本对应的内部版本号 (处理 45.1 -> 100045 等转换)"""
+    info = VERSION_REGISTRY.get(str(version_str))
+    return info["internal"] if info else version_str
+
+
+def get_version_series(version_str):
+    """获取版本所属的资源系列 (kuavo4/kuavo5/kuavo5w/roban)"""
+    info = VERSION_REGISTRY.get(str(version_str))
+    return info["series"] if info else "kuavo4"
+
