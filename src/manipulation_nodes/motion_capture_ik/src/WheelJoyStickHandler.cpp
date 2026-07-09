@@ -296,10 +296,13 @@ void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::
   rightFirstButtonPressed_ = msg->right_first_button_pressed;
 
   // 检测Y按钮（left_second_button）的边沿触发，实现冻结功能切换
+  // 仅当侧扳机(grip)未按下时触发，避免 Y+侧扳机(腰部旋转)与单按Y(冻结灵巧手)功能冲突
   if (leftSecondButtonPressed_ && !buttonYLast_) {
-    freezeFinger_ = !freezeFinger_;
-    std::cout << "\033[91mButton Y is pressed. Freeze finger: " << (freezeFinger_ ? "ON" : "OFF") << "\033[0m"
-              << std::endl;
+    if (!leftGrip_ && !rightGrip_) {
+      freezeFinger_ = !freezeFinger_;
+      std::cout << "\033[91mButton Y is pressed. Freeze finger: " << (freezeFinger_ ? "ON" : "OFF") << "\033[0m"
+                << std::endl;
+    }
   }
   buttonYLast_ = leftSecondButtonPressed_;
 

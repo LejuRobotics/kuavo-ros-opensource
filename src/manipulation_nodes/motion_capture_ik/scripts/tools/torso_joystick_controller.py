@@ -1,23 +1,28 @@
 """5W 平台单手摇杆控制躯干（折叠臂升降 + 前后倾 + 腰部旋转）"""
 from __future__ import annotations
+import json
 import math
+import os
 import time
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 
 # ===== 阈值 =====
 GRIP_PRESS_TH = 0.7
 GRIP_RELEASE_TH = 0.3
 STICK_DEAD_ZONE = 0.1
+POSE_PUBLISH_EPS = 1e-5
 
 # ===== 缩放系数（增量速率） =====
 SCALE_HEIGHT = 0.10   # m/s
 SCALE_PITCH = 0.30    # rad/s
 
-# ===== 限幅 =====
-Z_MIN, Z_MAX = -0.05, 0.40           # m，相对初始位姿
-PITCH_MIN, PITCH_MAX = -0.524, 0.524 # rad（±30°）
+# ===== 限幅（与 MobileManipulatorJoyCommandNode 一致，相对初始位姿） =====
+Z_MIN, Z_MAX = 0.0, 0.32            # m，升降相对初始位姿
+X_MIN = 0.0                           # m，前后相对初始位姿
+PITCH_MIN, PITCH_MAX = -0.5235, 0.0   # rad；VR 约定：负值前倾，0 为直立
+YAW_MIN, YAW_MAX = -0.5235, 0.5235    # rad，仅用于摇杆积分（按钮转身仍走 ±π）
 YAW_TARGET = math.pi                 # rad（180°）
 
 # ===== 时序 =====
@@ -38,6 +43,69 @@ class GripClickState(Enum):
     CLICK2_DOWN = 3
 
 
+def get_torso_max_x(z_increment: float) -> float:
+    """根据 z 抬升量计算 x 方向最大允许偏移（与轮臂手柄节点经验曲线一致）。"""
+    if z_increment <= 0.0:
+        return 0.05
+    if z_increment <= 0.3:
+        return 0.05 + (z_increment / 0.3) * 0.1
+    if z_increment <= 0.5:
+        return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1
+    return 0.25
+
+
+def load_torso_limits_from_config() -> Tuple[float, float, float, float, float, float]:
+    """从 kuavo.json 的 kuavo_wheel_torso_limit 加载限位；失败时返回模块默认值。"""
+    robot_version = os.getenv("ROBOT_VERSION")
+    if not robot_version:
+        return Z_MIN, Z_MAX, X_MIN, PITCH_MIN, PITCH_MAX, YAW_MAX
+
+    try:
+        import rospkg
+        kuavo_assets_path = rospkg.RosPack().get_path("kuavo_assets")
+        config_path = os.path.join(
+            kuavo_assets_path, "config", f"kuavo_v{robot_version}", "kuavo.json"
+        )
+        if not os.path.exists(config_path):
+            return Z_MIN, Z_MAX, X_MIN, PITCH_MIN, PITCH_MAX, YAW_MAX
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            kuavo_config = json.load(f)
+        torso_cfg = kuavo_config.get("kuavo_wheel_torso_limit")
+        if not torso_cfg:
+            return Z_MIN, Z_MAX, X_MIN, PITCH_MIN, PITCH_MAX, YAW_MAX
+
+        z_range = torso_cfg.get("z_range")
+        x_range = torso_cfg.get("x_range")
+        pitch_range = torso_cfg.get("pitch_range")
+        base_position = torso_cfg.get("base_position", [0.0, 0.0, 0.0])
+
+        z_min, z_max = Z_MIN, Z_MAX
+        if z_range and len(z_range) == 2:
+            z_span = float(z_range[1]) - float(z_range[0])
+            if z_span > 0.0:
+                z_min, z_max = 0.0, min(Z_MAX, z_span)
+
+        x_min = X_MIN
+        if x_range and len(x_range) == 2:
+            x_span = float(x_range[1]) - float(x_range[0])
+            if x_span > 0.0:
+                x_min = 0.0
+
+        pitch_min, pitch_max = PITCH_MIN, PITCH_MAX
+        if pitch_range and len(pitch_range) == 2:
+            pitch_lo_deg = float(pitch_range[0])
+            pitch_hi_deg = float(pitch_range[1])
+            # VR 约定前倾为负 pitch：配置 [0, 20°] → [-20°, 0]
+            pitch_min = -math.radians(max(pitch_hi_deg, 0.0))
+            pitch_max = -math.radians(min(pitch_lo_deg, 0.0))
+
+        yaw_max = YAW_MAX
+        return z_min, z_max, x_min, pitch_min, pitch_max, yaw_max
+    except Exception:
+        return Z_MIN, Z_MAX, X_MIN, PITCH_MIN, PITCH_MAX, YAW_MAX
+
+
 class TorsoController:
     """单手摇杆控躯干的状态机 + 命令发布器。
 
@@ -50,15 +118,27 @@ class TorsoController:
         publisher: Optional[Callable] = None,
         clock: Optional[Callable[[], float]] = None,
         resetter: Optional[Callable[[], object]] = None,
+        limits: Optional[Tuple[float, float, float, float, float, float]] = None,
     ):
         self.initial_xyz = tuple(initial_pose_xyz)
         # 索引 [0:3] = x/y/z（取自 initial_pose_xyz）
         # 索引 [3:6] = roll/pitch/yaw（机械零位为基准）
         self.current_pose = list(initial_pose_xyz) + [0.0, 0.0, 0.0]
+        (
+            self._z_min,
+            self._z_max,
+            self._x_min,
+            self._pitch_min,
+            self._pitch_max,
+            self._yaw_max,
+        ) = limits if limits is not None else load_torso_limits_from_config()
+        self._yaw_min = -self._yaw_max
         self._publish_fn = publisher
         self._clock = clock if clock is not None else time.monotonic
         self._resetter = resetter
         self.main_hand: Optional[str] = None  # None / 'left' / 'right'
+        self._last_published_pose: Optional[list] = None
+        self._force_publish = False
         self._l_was_pressed = False
         self._r_was_pressed = False
         self._last_t: Optional[float] = None
@@ -107,7 +187,8 @@ class TorsoController:
         dt = self._compute_dt()
         self._handle_yaw_buttons(msg)
         self._apply_stick_increment(msg, dt)
-        self._publish_torso_pose()
+        if self._should_publish_pose():
+            self._publish_torso_pose()
         self._l_was_pressed = l_pressed
         self._r_was_pressed = r_pressed
 
@@ -160,6 +241,7 @@ class TorsoController:
             return None
 
         self.current_pose = list(self.initial_xyz) + [0.0, 0.0, 0.0]
+        self._last_published_pose = None
         self._reset_runtime_state()
         if isinstance(result, bool):
             return 0.0
@@ -243,21 +325,61 @@ class TorsoController:
 
         return False
 
+    def _z_limits(self) -> Tuple[float, float]:
+        return self.initial_xyz[2] + self._z_min, self.initial_xyz[2] + self._z_max
+
+    def _x_limits(self) -> Tuple[float, float]:
+        z_offset = self.current_pose[2] - self.initial_xyz[2]
+        x_hi = self.initial_xyz[0] + get_torso_max_x(z_offset)
+        return self.initial_xyz[0] + self._x_min, x_hi
+
     def _apply_stick_increment(self, msg, dt: float) -> None:
         sx, sy = self._select_stick(msg)
         sx = sx if abs(sx) > STICK_DEAD_ZONE else 0.0
         sy = sy if abs(sy) > STICK_DEAD_ZONE else 0.0
+
+        z_lo, z_hi = self._z_limits()
+        # 触限时不再积分，避免持续向 MPC 发送不可达目标导致下肢顶限振动
+        if sy > 0.0 and self.current_pose[2] >= z_hi - POSE_PUBLISH_EPS:
+            sy = 0.0
+        elif sy < 0.0 and self.current_pose[2] <= z_lo + POSE_PUBLISH_EPS:
+            sy = 0.0
+        if sx > 0.0 and self.current_pose[4] <= self._pitch_min + POSE_PUBLISH_EPS:
+            sx = 0.0
+        elif sx < 0.0 and self.current_pose[4] >= self._pitch_max - POSE_PUBLISH_EPS:
+            sx = 0.0
 
         # 升高：摇杆 Y > 0 → z 增
         self.current_pose[2] += sy * SCALE_HEIGHT * dt
         # 前倾：摇杆 X > 0 → pitch 减（spec 6.1）
         self.current_pose[4] -= sx * SCALE_PITCH * dt
 
-        # 限幅
-        z_lo = self.initial_xyz[2] + Z_MIN
-        z_hi = self.initial_xyz[2] + Z_MAX
+        self._clamp_pose()
+
+    def _clamp_pose(self) -> None:
+        z_lo, z_hi = self._z_limits()
         self.current_pose[2] = max(z_lo, min(self.current_pose[2], z_hi))
-        self.current_pose[4] = max(PITCH_MIN, min(self.current_pose[4], PITCH_MAX))
+
+        x_lo, x_hi = self._x_limits()
+        self.current_pose[0] = max(x_lo, min(self.current_pose[0], x_hi))
+
+        self.current_pose[4] = max(
+            self._pitch_min, min(self.current_pose[4], self._pitch_max)
+        )
+
+    def _pose_changed(self) -> bool:
+        if self._last_published_pose is None:
+            return True
+        return any(
+            abs(a - b) > POSE_PUBLISH_EPS
+            for a, b in zip(self.current_pose, self._last_published_pose)
+        )
+
+    def _should_publish_pose(self) -> bool:
+        if self._force_publish:
+            self._force_publish = False
+            return True
+        return self._pose_changed()
 
     def _select_buttons(self, msg):
         if self.main_hand == "left":
@@ -277,6 +399,7 @@ class TorsoController:
         self.current_pose[5] = math.atan2(
             math.sin(self.current_pose[5]), math.cos(self.current_pose[5])
         )
+        self._clamp_pose()
 
     def _publish_torso_pose(self) -> None:
         if self._publish_fn is None:
@@ -291,6 +414,7 @@ class TorsoController:
         twist.angular.y = self.current_pose[4]
         twist.angular.z = self.current_pose[5]
         self._publish_fn(twist)
+        self._last_published_pose = list(self.current_pose)
 
     def _get_grip_states(self, msg):
         l_pressed = msg.left_grip > GRIP_PRESS_TH
@@ -305,8 +429,10 @@ class TorsoController:
         # 边沿检测：上一帧没按下、这一帧按下 → 锁定
         if l_pressed and not self._l_was_pressed:
             self.main_hand = "left"
+            self._force_publish = True
         elif r_pressed and not self._r_was_pressed:
             self.main_hand = "right"
+            self._force_publish = True
 
     def _arbitrate_main_hand_release(self, l_released: bool, r_released: bool) -> None:
         # 已锁定，仅主指手 grip 松开（< release_th）才释放

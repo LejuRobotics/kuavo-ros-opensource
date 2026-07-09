@@ -668,6 +668,8 @@ namespace humanoid_controller
       smoothed_stance_height_cmd_ = raw_height;
     }
 
+    smoothed_stance_height_cmd_ = std::max(smoothed_stance_height_cmd_, -max_stance_squat_depth_);
+
     if (in_posture_stance || std::abs(smoothed_stance_height_cmd_) > 1e-6)
     {
       cmd.cmdVelAngularZ_ = smoothed_stance_height_cmd_;
@@ -740,10 +742,16 @@ namespace humanoid_controller
       cmd.cmdVelLineX_ *= neg_scale;
     }
 
-    if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdx_ &&
-        cmd.cmdVelLineX_ > kRollCompensationCmdXThreshold_)
+    if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdx_)
     {
-      cmd.cmdVelLineY_ = 0.0;
+      if (cmd.cmdVelLineX_ > kOffCmdyByCmdXThreshold_)
+      {
+        cmd.cmdVelLineY_ = 0.0;
+      }
+      if (std::abs(cmd.cmdVelLineY_) > kOffCmdxByCmdYThreshold_)
+      {
+        cmd.cmdVelLineX_ = 0.0;
+      }
     }
 
     if (is_amp_hand_controller_ &&
@@ -882,7 +890,7 @@ namespace humanoid_controller
     }
 
     if (enable_back_arm_enhance_ && is_walking_mode &&
-        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.02)
+        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.019)
     {
       projected_gravity =
           Eigen::AngleAxisd(5.0 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;

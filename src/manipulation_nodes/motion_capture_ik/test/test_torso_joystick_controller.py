@@ -61,11 +61,13 @@ def make_controller(t0=0.0, resetter=None):
     """构造一个 TorsoController，附带可控时钟、mock publisher 和可选 resetter。"""
     clock = MagicMock(return_value=t0)
     publisher = MagicMock()
+    limits = (Z_MIN, Z_MAX, 0.0, PITCH_MIN, PITCH_MAX, 0.5235)
     ctrl = TorsoController(
         initial_pose_xyz=(0.0, 0.0, 0.0),
         publisher=publisher,
         clock=clock,
         resetter=resetter,
+        limits=limits,
     )
     return ctrl, publisher, clock
 
@@ -250,7 +252,34 @@ def test_stick_clamp_z_max():
     for i in range(200):
         clock.return_value = 100.0 + (i + 1) * 0.1
         ctrl.handle_joystick(make_msg(left_grip=0.8, left_y=1.0))
-    assert ctrl.current_pose[2] == ctrl.initial_xyz[2] + Z_MAX
+    assert abs(ctrl.current_pose[2] - (ctrl.initial_xyz[2] + Z_MAX)) < 1e-6
+
+
+def test_no_republish_when_pose_saturated_at_limit():
+    """触限后持续推杆但位姿不变时，不再重复发布，避免 MPC 反复重规划。"""
+    ctrl, pub, clock = make_controller(t0=0.0)
+    ctrl.handle_joystick(make_msg(left_grip=0.8))
+    clock.return_value = 0.1
+    for i in range(300):
+        clock.return_value = 0.1 + (i + 1) * 0.1
+        ctrl.handle_joystick(make_msg(left_grip=0.8, left_y=1.0))
+    assert abs(ctrl.current_pose[2] - (ctrl.initial_xyz[2] + Z_MAX)) < 1e-6
+    pub.reset_mock()
+    for i in range(5):
+        clock.return_value = 40.0 + (i + 1) * 0.1
+        ctrl.handle_joystick(make_msg(left_grip=0.8, left_y=1.0))
+    pub.assert_not_called()
+
+
+def test_pitch_cannot_go_positive_past_upright():
+    """pitch 上限为 0（直立），后仰方向被限位。"""
+    ctrl, _, clock = make_controller(t0=0.0)
+    ctrl.handle_joystick(make_msg(left_grip=0.8))
+    clock.return_value = 100.0
+    for _ in range(50):
+        clock.return_value += 0.1
+        ctrl.handle_joystick(make_msg(left_grip=0.8, left_x=-1.0))
+    assert ctrl.current_pose[4] <= PITCH_MAX + 1e-9
 
 
 def test_dt_clamp():

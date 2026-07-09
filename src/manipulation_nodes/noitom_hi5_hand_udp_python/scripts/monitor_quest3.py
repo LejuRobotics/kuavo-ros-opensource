@@ -680,7 +680,9 @@ class Quest3BoneFramePublisher:
                 pose_info_list.timestamp_ms = event.timestamp
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
-                self.pose_pub.publish(pose_info_list)
+                # 空 poses(带载 GET/SET 等纯命令包)不下发，避免下游 IK 按固定骨骼下标越界
+                if len(pose_info_list.poses) > 0:
+                    self.pose_pub.publish(pose_info_list)
 
                 # 发布头部控制模式
                 self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, HeadControlMode.to_string(self.head_control_manager.mode), self.head_control_manager.fixed_main_hand)

@@ -224,6 +224,8 @@ namespace humanoid_controller
     static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};
     bool enable_roll_compensation_{false};
     bool enable_off_cmdy_by_cmdx_{false};
+    static constexpr double kOffCmdyByCmdXThreshold_{0.3};   ///< cmdx 超过该值时关闭 cmdy
+    static constexpr double kOffCmdxByCmdYThreshold_{0.41};  ///< abs(cmdy) 超过该值时关闭 cmdx
     bool tiny_cmdx_clip_enabled_{false};
     double tiny_cmdx_clip_pos_min_{0.0};  ///< 正向截断区间最小值
     double tiny_cmdx_clip_pos_max_{0.0};  ///< 正向截断区间最大值，区间内值截断为该值
@@ -248,6 +250,7 @@ namespace humanoid_controller
     // 站立模式下下蹲后起身的高度命令平滑（仅 amp_hand_controller）
     bool stance_height_stand_up_smoothing_enabled_{true};
     double max_stance_height_stand_up_change_{0.004}; ///< 起身单步最大高度命令变化量 (m)
+    double max_stance_squat_depth_{0.21};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
     double smoothed_stance_height_cmd_{0.0};          ///< 平滑后的下蹲高度命令
 
     bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,

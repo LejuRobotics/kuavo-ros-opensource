@@ -77,6 +77,9 @@
     <arg name="elbow_min_distance" default="0.16" /> <!-- 手到肘最小距离约束 -->
     <arg name="elbow_max_distance" default="0.24" /> <!-- 手到肘最大距离约束 -->
     <arg name="use_incremental_hand_orientation" default="false" /> <!-- 是否使用增量式手部姿态 -->
+    <!-- 绝对式 IK（ik_ros_uni.py）肩 pitch 上限软限制，不改 URDF；缓解肩关节过大上抬卡住（kuavodevlab#3448） -->
+    <arg name="limit_shoulder_pitch_upper" default="true" />
+    <arg name="shoulder_pitch_upper_limit" default="0.3" />
     <arg name="box_min_bound" default="[0.00, -0.6, -0.19]" /> <!-- 手部位置约束边界框最小值 [x, y, z] -->
     <arg name="box_max_bound" default="[0.4, 0.6, 0.4]" /> <!-- 手部位置约束边界框最大值 [x, y, z] -->
     <arg name="chest_offset_y_ax" default="0.05" /> <!-- 胸部中线偏移量，用于防止左右手过中线 -->
@@ -102,6 +105,8 @@
     <!-- Python IK Node (启动当 use_cpp_incremental_ik=false 时) -->
     <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)">
         <param name="use_arm_collision" value="$(arg use_arm_collision)"/>
+        <param name="/quest3/limit_shoulder_pitch_upper" value="$(arg limit_shoulder_pitch_upper)" type="bool"/>
+        <param name="/quest3/shoulder_pitch_upper_limit" value="$(arg shoulder_pitch_upper_limit)" type="double"/>
     </node>
 
     <!-- C++ IK Node (启动当 use_cpp_incremental_ik=true 且 wheel_ik=false 且 use_arm_only_ik=false 时) -->
