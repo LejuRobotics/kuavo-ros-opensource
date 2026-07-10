@@ -47,7 +47,7 @@ Software package and ROS wrappers of the [Aruco][1] Augmented Reality marker det
 * Changed the coordinate system to match the library's, the convention is shown
   in the image below, following rviz conventions, X is red, Y is green and Z is
   blue.
-<img align="bottom" src="/aruco_ros/etc/new_coordinates.png"/>
+<img align="bottom" src="./etc/new_coordinates.png"/>
 
 ### Test it with REEM
 

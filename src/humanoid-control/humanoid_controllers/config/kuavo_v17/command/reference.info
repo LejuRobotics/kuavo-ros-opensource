@@ -13,8 +13,8 @@ comHeight                           0.78
 ; VR control limits
 vrSquatMinPitchDeg                  3.0;     ; min pitch (deg)
 vrSquatMaxPitchDeg                  35.0;    ; max pitch (deg)
-vrSquatHeightMin                    -0.35;   ; min height (m)
-vrSquatHeightMax                    0.03;     ; max height (m)
+vrSquatHeightMin                    -0.3;   ; min height (m)
+vrSquatHeightMax                    0.01;     ; max height (m)
 waist_yaw_max                       150.0;
 
 targetTorsoDispalcementVelocity

@@ -1146,18 +1146,31 @@ namespace ocs2
       if (joy_msg->axes.size() <= 3)
         return;
 
+      const double a3 = joy_msg->axes[3];
+      double mapped = 0.0;
+      if (std::abs(a3) > kPostureAxisThreshold)
+      {
+        // 线性重映射：[threshold, 1.0] -> [0, 1]，[-1.0, -threshold] -> [-1, 0]
+        mapped = (a3 + (a3 > 0 ? -kPostureAxisThreshold : kPostureAxisThreshold))
+               / (1.0 - kPostureAxisThreshold);
+      }
+      const double cmd_z = (mapped < 0) ? mapped * std::fabs(squatHeightMin_) : 0.0;
+
       // AMP 停止判据:走/转指令速度均低于 0.1(不含下蹲通道 cmd_z),否则禁止下蹲
       const double cmd_x = joystick_origin_axis_(0) * c_relative_base_limit_[0];
       const double cmd_y = joystick_origin_axis_(1) * c_relative_base_limit_[1];
       const double cmd_ang_z = joystick_origin_axis_(3) * c_relative_base_limit_[3];
       if (std::fabs(cmd_x) >= 0.1 || std::fabs(cmd_y) >= 0.1 || std::fabs(cmd_ang_z) >= 0.1)
       {
-        if (posture_control_mode_)
-          setPostureControlMode(false);
-        return;
+        // 下蹲守备：深蹲中(cmd_z<-0.05)不因走/转指令退出 posture 模式
+        if (!(posture_control_mode_ && cmd_z < -0.05))
+        {
+          if (posture_control_mode_)
+            setPostureControlMode(false);
+          return;
+        }
       }
 
-      const double a3 = joy_msg->axes[3];
       if (std::abs(a3) <= kPostureAxisThreshold)
       {
         // 死区内：退出 posture 模式
@@ -1169,10 +1182,6 @@ namespace ocs2
       // 死区外：进入 posture 模式（幂等守卫）
       if (!posture_control_mode_)
         setPostureControlMode(true);
-
-      // 线性重映射：[threshold, 1.0] -> [0, 1]，[-1.0, -threshold] -> [-1, 0]
-      const double mapped = (a3 + (a3 > 0 ? -kPostureAxisThreshold : kPostureAxisThreshold))
-                          / (1.0 - kPostureAxisThreshold);
 
       // 替代原 axes[2] (右摇杆Z) 在 posture 模式下的下蹲控制量
       joystick_origin_axis_(2) = mapped;
@@ -2815,7 +2824,7 @@ namespace ocs2
     bool posture_control_mode_{false};
     // amp_hand 下 axes[3] 控制 posture 开关的阈值：
     //   [threshold, 1.0] / [-1.0, -threshold] 线性重映射到 [0, 1] / [-1, 0]
-    static constexpr double kPostureAxisThreshold = 0.3;
+    static constexpr double kPostureAxisThreshold = 0.4;
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
 

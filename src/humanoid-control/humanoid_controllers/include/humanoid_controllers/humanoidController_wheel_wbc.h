@@ -55,6 +55,16 @@ namespace humanoidController_wheel_wbc
 {
   using namespace ocs2;
   using namespace humanoid;
+
+  // optimizedState_wbc / optimizedInput_wbc 与 MPC state/input 同维 (stateDim, 轮臂 s62 为 21)。
+  // 二者一一对应：input[i] 为 state[i] 的时间导数（关节角速度 / 底盘速度）。
+  // 布局 (wheelWorldBasedMobileManipulator, kuavo_s62):
+  //   [0] base_x          [1] base_y          [2] base_yaw
+  //   [3] knee_pitch      [4] leg_pitch       [5] waist_pitch     [6] waist_yaw_link
+  //   [7:13]  z_arm_l1..l7  左臂 7DoF
+  //   [14:20] z_arm_r1..r7  右臂 7DoF
+  // 注：info.armDim=18 含下肢 4 关节 + 双臂 14 关节；baseDim_=stateDim-armDim=3。
+
   struct JointTrajectory {
     vector_t pos;
     vector_t vel;

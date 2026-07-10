@@ -210,9 +210,11 @@ class Quest3Node:
         # 注意：single_hand_mode 下 grip 让位给 trigger 仅适用于 5W 平台 + qiangnao 末端。
         # 其他末端类型（jodell/lejuclaw）若意外启用 single_hand_mode 需要单独适配。
         if joyStick_data is not None:
+            # 仅当侧扳机(grip)未按下时触发冻结，避免 Y+侧扳机(腰部旋转)与单按Y(冻结灵巧手)功能冲突
             if joyStick_data.left_second_button_pressed and not self.button_y_last:
-                print(f"\033[91mButton Y is pressed.\033[0m")
-                self.freeze_finger = not self.freeze_finger
+                if joyStick_data.left_grip <= 0.75 and joyStick_data.right_grip <= 0.75:
+                    print(f"\033[91mButton Y is pressed.\033[0m")
+                    self.freeze_finger = not self.freeze_finger
             self.button_y_last = joyStick_data.left_second_button_pressed
 
             # 手指映射：grip 在 single_hand_mode 下被作为模式键，所有手指都改由 trigger 控制
