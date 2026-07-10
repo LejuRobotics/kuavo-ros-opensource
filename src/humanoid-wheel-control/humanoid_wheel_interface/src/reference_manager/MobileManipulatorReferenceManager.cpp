@@ -4573,6 +4573,14 @@ namespace mobile_manipulator {
     std::cout << "quatVec: " << initialTorsoQuat_.transpose() << std::endl;
   }
 
+  /// 返回冻结状态：关节保持 frozen，底盘用当前实际位姿替换
+  vector_t MobileManipulatorReferenceManager::frozenJointsWithLiveBase() const
+  {
+    vector_t s = frozen_state_;
+    s.head(baseDim_) = initState_.head(baseDim_);
+    return s;
+  }
+
   void MobileManipulatorReferenceManager::overwriteCommandStorageWithFrozenState()
   {
     if (!frozen_state_valid_) return;
@@ -4672,9 +4680,12 @@ namespace mobile_manipulator {
     if (!frozen_state_valid_) return;
     const vector_t& s = frozen_state_;
 
-    // 底盘位姿/速度：复用已有 helper
-    resetCmdPoseRuckigFromActualState(initTime, s, true);
-    resetCmdVelRuckigFromActualState(initTime, s, true);
+    // 底盘位姿/速度：用当前实际位姿，不冻结底盘
+    {
+      vector_t s_with_current_base = frozenJointsWithLiveBase();
+      resetCmdPoseRuckigFromActualState(initTime, s_with_current_base, true);
+      resetCmdVelRuckigFromActualState(initTime, s_with_current_base, true);
+    }
 
     // 躯干：x, z, yaw, pitch
     vector_t torsoPose4D(4);
@@ -4711,13 +4722,15 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::setFlatTargetTrajectoriesFromFrozenState(scalar_t initTime, scalar_t finalTime)
   {
     if (!frozen_state_valid_) return;
-    const vector_t& s = frozen_state_;
+
+    // 构建 flat 轨迹：底盘跟随当前实际位姿，关节冻结
+    vector_t s_with_current_base = frozenJointsWithLiveBase();
 
     scalar_array_t timeTraj{initTime, finalTime};
-    vector_array_t stateTraj{s, s};
+    vector_array_t stateTraj{s_with_current_base, s_with_current_base};
     vector_array_t inputTraj{vector_t::Zero(info_.inputDim), vector_t::Zero(info_.inputDim)};
 
-    // MPC 完整状态-输入轨迹：frozen → frozen
+    // MPC 完整状态-输入轨迹
     stateInputTargetTrajectories_.timeTrajectory = timeTraj;
     stateInputTargetTrajectories_.stateTrajectory = stateTraj;
     stateInputTargetTrajectories_.inputTrajectory = inputTraj;

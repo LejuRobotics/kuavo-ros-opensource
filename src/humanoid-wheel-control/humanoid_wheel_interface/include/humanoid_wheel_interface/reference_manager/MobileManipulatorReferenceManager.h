@@ -184,6 +184,9 @@ protected:
   void resetAllRuckigToFrozenState(scalar_t initTime);
   void setFlatTargetTrajectoriesFromFrozenState(scalar_t initTime, scalar_t finalTime);
 
+  /// 冻结状态中关节保持 frozen，底盘跟随当前实际位姿
+  vector_t frozenJointsWithLiveBase() const;
+
   // 通用 helper：将 pose 型 Ruckig 规划器重置到指定状态（current=target=state，vel/acc=0）
   template<typename PlannerPtr>
   void resetPoseRuckigToState(PlannerPtr& planner, scalar_t initTime, const vector_t& state,
