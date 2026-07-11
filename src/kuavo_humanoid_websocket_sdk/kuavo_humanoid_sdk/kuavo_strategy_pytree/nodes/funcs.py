@@ -195,6 +195,56 @@ def arm_generate_place_keypoints_new(
 
     return place_left_arm_poses, place_right_arm_poses
 
+def set_arm_withdraw_trajectory(arm_api, distance: float = 0.1):
+    """放箱后手臂后退轨迹（运行时计算，避免坐标系不匹配导致机器人下蹲）
+
+    正确做法：获取当前手臂 WORLD 位姿 → 转到 BASE 坐标系后退 distance
+    → 转回 WORLD → 生成轨迹写入黑板，后续由 WorldFrame 的 NodeArm 执行
+    """
+    import copy
+    from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.utils import generate_full_bezier_trajectory
+
+    # 获取当前手臂 WORLD 位姿（ODOM 坐标系）
+    left_world, right_world = arm_api.get_eef_pose_world()
+
+    # 获取 BASE → ODOM 变换
+    transform_base_to_odom = arm_api.get_current_transform(
+        source_frame=Frame.BASE, target_frame=Frame.ODOM)
+
+    # 当前手臂位置从 ODOM 转换到 BASE
+    left_base = Pose(
+        pos=left_world.pos.copy(), quat=left_world.quat.copy(), frame=Frame.ODOM)
+    left_base = transform_base_to_odom.apply_to_pose_inverse(left_base)
+
+    right_base = Pose(
+        pos=right_world.pos.copy(), quat=right_world.quat.copy(), frame=Frame.ODOM)
+    right_base = transform_base_to_odom.apply_to_pose_inverse(right_base)
+
+    # 沿 BASE X 轴移动（负值 = 后退/身后方向）
+    left_base.pos[0] += distance
+    right_base.pos[0] += distance
+
+    # 转回 ODOM（WorldFrame 目标需要 ODOM 坐标）
+    left_target = transform_base_to_odom.apply_to_pose(
+        Pose(pos=left_base.pos, quat=left_base.quat, frame=Frame.BASE))
+    right_target = transform_base_to_odom.apply_to_pose(
+        Pose(pos=right_base.pos, quat=right_base.quat, frame=Frame.BASE))
+
+    # 生成轨迹并写入黑板
+    left_traj, right_traj = generate_full_bezier_trajectory(
+        current_left_pose=left_world,
+        current_right_pose=right_world,
+        left_keypoints_list=[left_target],
+        right_keypoints_list=[right_target],
+    )
+
+    bb = py_trees.blackboard.Client(name="arm_withdraw")
+    bb.register_key("left_arm_eef_traj", Access.WRITE)
+    bb.register_key("right_arm_eef_traj", Access.WRITE)
+    bb.left_arm_eef_traj = left_traj
+    bb.right_arm_eef_traj = right_traj
+    return True
+
 def arm_generate_pick_boxes_keypoints(
         box_width: float,
         box_behind_tag: float,  # 箱子在tag后面的距离，单位米
@@ -567,9 +617,11 @@ def get_current_pick_tag_id(config):
     return tag_id_list[round_index % len(tag_id_list)]
 
 
-def update_round_and_tag_id_fn(config, search_pick_tag_TAG2GOAL, search_pick_tag_HEAD, 
-                                      pick_box_TAG2GOAL, walk_to_pick_TAG2GOAL, PERCEP, 
-                                      search_pick_tag_HEAD_AND_WAIT):
+def update_round_and_tag_id_fn(config, search_pick_tag_TAG2GOAL, search_pick_tag_HEAD,
+                                      pick_box_TAG2GOAL, walk_to_pick_TAG2GOAL, PERCEP,
+                                      search_pick_tag_HEAD_AND_WAIT,
+                                      search_pick_tag_HEAD_2=None,
+                                      search_pick_tag_HEAD_AND_WAIT_2=None):
     """
     更新轮次和 tag_id 的函数
     
@@ -597,31 +649,40 @@ def update_round_and_tag_id_fn(config, search_pick_tag_TAG2GOAL, search_pick_tag
         search_pick_tag_TAG2GOAL.tag_id = current_tag_id
         search_pick_tag_HEAD.tag_id = current_tag_id
         pick_box_TAG2GOAL.tag_id = current_tag_id
-        
+
+        # 更新第二轮扫描节点的 tag_id（如果存在）
+        if search_pick_tag_HEAD_2 is not None:
+            search_pick_tag_HEAD_2.tag_id = current_tag_id
+
         # 更新 walk_to_pick_TAG2GOAL 内部节点的 tag_id
         # walk_to_pick_TAG2GOAL 是 SuccessIsRunning 装饰器，使用 decorated 属性访问子节点
         if hasattr(walk_to_pick_TAG2GOAL, 'decorated') and hasattr(walk_to_pick_TAG2GOAL.decorated, 'tag_id'):
             print(f"更新前 walk_to_pick_TAG2GOAL.decorated.tag_id = {walk_to_pick_TAG2GOAL.decorated.tag_id}")
             walk_to_pick_TAG2GOAL.decorated.tag_id = current_tag_id  # type: ignore
             print(f"更新后 walk_to_pick_TAG2GOAL.decorated.tag_id = {walk_to_pick_TAG2GOAL.decorated.tag_id}")
-        
+
         # 更新 PERCEP 的 tag_ids
         if hasattr(PERCEP, 'tag_ids') and len(PERCEP.tag_ids) > 0:
             PERCEP.tag_ids[0] = current_tag_id
-        
+
+        def _replace_condition_in_parallel(parallel_node):
+            """替换并行节点中的 NodeWaitForBlackboard 子节点"""
+            old_condition = None
+            for child in parallel_node.children:
+                if isinstance(child, NodeWaitForBlackboard):
+                    old_condition = child
+                    break
+            if old_condition is not None:
+                parallel_node.remove_child(old_condition)
+            parallel_node.add_child(NodeWaitForBlackboard(key=f"latest_tag_{current_tag_id}"))
+
         # NodeWaitForBlackboard 节点的 key 在初始化时确定，无法运行时修改，需要移除旧节点，创建新节点
-        old_condition = None
-        # 在 search_pick_tag_HEAD_AND_WAIT 的 children 中查找 NodeWaitForBlackboard 节点
-        for child in search_pick_tag_HEAD_AND_WAIT.children:
-            if isinstance(child, NodeWaitForBlackboard):
-                old_condition = child
-                break
-        # 如果找到了旧节点，先移除它
-        if old_condition is not None:
-            search_pick_tag_HEAD_AND_WAIT.remove_child(old_condition)
-        # 创建新的 NodeWaitForBlackboard 节点，使用新的 tag_id
-        search_pick_tag_HEAD_AND_WAIT.add_child(NodeWaitForBlackboard(key=f"latest_tag_{current_tag_id}"))
-        
+        _replace_condition_in_parallel(search_pick_tag_HEAD_AND_WAIT)
+
+        # 更新第二轮扫描的等待条件节点
+        if search_pick_tag_HEAD_AND_WAIT_2 is not None:
+            _replace_condition_in_parallel(search_pick_tag_HEAD_AND_WAIT_2)
+
         return True
     
     return update_round_and_tag_id

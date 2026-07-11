@@ -60,7 +60,7 @@ class config:
     class place:
         """放框配置"""
         tag_id = 0
-        step_back_distance = -0.4 # 后退距离，正数为向后平移，负数为向前平移
+        step_back_distance = -0.0 # 后退距离，正数为向后平移，负数为向前平移
         tag_pos_world = (0, 10, 0)  # 放置位置猜测，单位米
         tag_euler_world = (0, 0, 0)  # 放置位置姿态猜测，单位欧拉角（弧度）
         stand_in_tag_pos = (0.0, 0.0, 0.35)  # 放置位置站立位置在目标标签中的位置猜测，单位米
@@ -74,3 +74,5 @@ class config:
         lateral_force = 0.0  # 侧向夹持力，单位N
         waist_degree = 0.0  # 放箱子后转腰角度，单位度
         arm_total_time = 2.5  # 放箱子时手臂运动总时间，单位秒
+        arm_backward_distance = 0.3  # 放箱后手臂后退距离（防撞桌），单位米
+        body_step_back_distance = 0.3  # 放箱后身体后退距离，单位米

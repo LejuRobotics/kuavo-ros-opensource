@@ -24,32 +24,32 @@ class config:
 
         enable_percep_when_walking = True # 是否在走路时启用感知(边走边看)
 
-        box_width = 0.28  # 米
+        box_width = 0.45  # 米
         box_mass = 1.5 # kg，假设一个较重的箱子
 
         walk_use_cmd_vel = True  # 是否使用cmd_vel控制走路
         enable_step_pause = False  # 是否启用步骤间暂停功能
         
         # 搬箱次数
-        grab_box_num = 5
+        grab_box_num = 1
 
         # 搬箱完成一轮是否暂停，在终端键盘输入Enter继续下一轮
         enable_round_stop = True
     class pick:
         """搬框配置"""
-        tag_id = 5  # 搬箱的tag码的id，可以是单个数字，也可以是列表，，列表大小与grab_box_num相同。例如：tag_id=1，或者tag_id=[1, 2, 3, 4, 5]
+        tag_id = 1  # 搬箱的tag码的id，可以是单个数字，也可以是列表，，列表大小与grab_box_num相同。例如：tag_id=1，或者tag_id=[1, 2, 3, 4, 5]
         step_back_distance = 0.0
         tag_pos_world = (10, 0, 0)  # 初始位置猜测，单位米
         tag_euler_world = (0, 0, 0)  # 初始姿态猜测，单位欧拉角（弧度）
         box_in_tag_pos = (0.0, 0.0, 0.0)  # 箱子在目标标签中的位置猜测，单位米
         box_in_tag_euler = (0.0, 0.0, 0.0)  # 箱子在目标标签中的姿态猜测，单位欧拉角（弧度）
 
-        stand_in_tag_pos = (0.0, 0.0, 0.35)  # 站立位置在目标标签中的位置猜测，单位米
+        stand_in_tag_pos = (0.0, 0.0, 0.15)  # 站立位置在目标标签中的位置猜测，单位米
         stand_in_tag_euler = (-np.deg2rad(90), np.deg2rad(90), 0.0)  # 站立位置在目标标签中的姿态猜测，单位欧拉角（弧度）
 
         hand_pitch_degree = -0.0  # 手臂pitch角度（相比水平, 下倾是正），单位度
-        box_behind_tag = 0.17  # 箱子在tag后面的距离，单位米
-        box_beneath_tag = 0.1  # 箱子在tag下方的距离，单位米
+        box_behind_tag = 0.30  # 箱子在tag后面的距离，单位米
+        box_beneath_tag = -0.15  # 箱子在tag下方的距离，单位米
         box_left_tag = -0.0  # 箱子在tag左侧的距离，单位米
 
         force_ratio_z = 0.0
@@ -59,18 +59,20 @@ class config:
 
     class place:
         """放框配置"""
-        tag_id = 0
+        tag_id = 2
         step_back_distance = -0.4
         tag_pos_world = (-10, 0, 0)  # 放置位置猜测，单位米
         tag_euler_world = (0, 0, 0)  # 放置位置姿态猜测，单位欧拉角（弧度）
         stand_in_tag_pos = (0.0, 0.0, 0.45)  # 放置位置站立位置在目标标签中的位置猜测，单位米
         stand_in_tag_euler = (-np.deg2rad(90), np.deg2rad(90), 0.0)  # 放置位置站立位置在目标标签中的姿态猜测，单位欧拉角（弧度）
 
-        box_behind_tag = 0.25  # 箱子在tag后面的距离，单位米
-        box_beneath_tag = -0.2  # 箱子在tag下方的距离，单位米
+        box_behind_tag = 0.15  # 箱子在tag后面的距离，单位米
+        box_beneath_tag = 0.40  # 箱子在tag下方的距离，单位米
         box_left_tag = 0.05  # 箱子在tag左侧的距离，单位米
 
         force_ratio_z = 0.0
         lateral_force = 0.0  # 侧向夹持力，单位N
         waist_degree = 0.0  # 放箱子后转腰角度，单位度
         arm_total_time = 3.0  # 放箱子时手臂运动总时间，单位秒
+        arm_backward_distance = 0.3  # 放箱后手臂后退距离（防撞桌），单位米
+        body_step_back_distance = 0.3  # 放箱后身体后退距离，单位米

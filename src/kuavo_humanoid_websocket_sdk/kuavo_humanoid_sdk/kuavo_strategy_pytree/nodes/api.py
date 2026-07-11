@@ -1176,6 +1176,7 @@ class TorsoAPI:
                              kp_pos=0.5,
                              kp_yaw=0.5,
                              max_vel_x=0.4,
+                             max_vel_y=None,
                              max_vel_yaw=0.6,
                              timeout=60,
                              backward_mode=False,
@@ -1184,6 +1185,9 @@ class TorsoAPI:
         """
         躯干行走到某个点，通过速度控制
         """
+        # max_vel_y 未指定时默认等于 max_vel_x（向后兼容）
+        if max_vel_y is None:
+            max_vel_y = max_vel_x
         # 重置倒退速度斜坡计时器
         self._backward_ramp_start_time = None
         robot_pose_when_start = Pose(
@@ -1300,7 +1304,7 @@ class TorsoAPI:
                 vel_x = kp_pos * x_diff * ramp_factor
                 vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
                 vel_y = kp_pos * y_diff * ramp_factor
-                vel_y = np.clip(vel_y, -max_vel_x, max_vel_x)
+                vel_y = np.clip(vel_y, -max_vel_y, max_vel_y)
                 self.robot_sdk.control.walk(
                     linear_x=vel_x,
                     linear_y=vel_y,
@@ -1334,7 +1338,7 @@ class TorsoAPI:
                     vel_x = kp_pos * x_diff
                     vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
                     vel_y = kp_pos * y_diff
-                    vel_y = np.clip(vel_y, -max_vel_x, max_vel_x)
+                    vel_y = np.clip(vel_y, -max_vel_y, max_vel_y)
                     # print(f'holonomic控制，前进速度：{vel_x:.2f} m/s, 侧移速度：{vel_y:.2f} m/s')
                     self.robot_sdk.control.walk(
                         linear_x=vel_x,  # 前进
@@ -1385,6 +1389,7 @@ class TorsoAPI:
                             kp_pos=0.5,
                             kp_yaw=0.5,
                             max_vel_x=0.5,
+                            max_vel_y=None,
                             max_vel_yaw=0.4,
                             backward_mode=False,
                             ramp_duration=0.0,
@@ -1392,12 +1397,12 @@ class TorsoAPI:
         if asynchronous:
             # 多线程，异步
 
-            fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode, ramp_duration=ramp_duration)
+            fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_y, max_vel_yaw, backward_mode=backward_mode, ramp_duration=ramp_duration)
 
             return fut
 
         else:
-            self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, backward_mode=backward_mode, ramp_duration=ramp_duration)
+            self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_y, max_vel_yaw, backward_mode=backward_mode, ramp_duration=ramp_duration)
 
             return None
 
@@ -1414,6 +1419,7 @@ class TorsoAPI:
                             kp_pos=0.5,
                             kp_yaw=0.5,
                             max_vel_x=0.5,
+                            max_vel_y=None,
                             max_vel_yaw=0.4,
                             timeout=60,
                             walk_mode='cmd_vel',
@@ -1421,7 +1427,7 @@ class TorsoAPI:
         if asynchronous:
             # 多线程，异步
             if walk_mode == 'cmd_vel':
-                fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, timeout)
+                fut = self._pool.submit(self._walk_to_pose_by_vel, pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_y, max_vel_yaw, timeout)
             elif walk_mode == 'cmd_pos_world':
                 fut = self._pool.submit(self._walk_to_pose_by_pose_world, pos_threshold, timeout)
             elif walk_mode == 'cmd_pos':
@@ -1433,7 +1439,7 @@ class TorsoAPI:
 
         else:
             if walk_mode == 'cmd_vel':
-                self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_yaw, timeout)
+                self._walk_to_pose_by_vel(pos_threshold, kp_pos, kp_yaw, max_vel_x, max_vel_y, max_vel_yaw, timeout)
             elif walk_mode == 'cmd_pos_world':
                 self._walk_to_pose_by_pose_world(pos_threshold, timeout)
             elif walk_mode == 'cmd_pos':

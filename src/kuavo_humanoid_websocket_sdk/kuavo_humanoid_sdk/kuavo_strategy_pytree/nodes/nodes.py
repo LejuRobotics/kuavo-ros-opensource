@@ -162,6 +162,11 @@ class NodeHead(Behaviour):
 
     def terminate(self, new_status):
         self.logger.debug(f"NodeHead::terminate {self.name} to {new_status}")
+        # 头部回正
+        try:
+            self.head_api.robot_sdk.control.control_head(0.0, 0.0)
+        except Exception as e:
+            self.logger.warn(f"NodeHead::terminate failed to reset head: {e}")
 
 # --------------- 转换节点 -----------------
 class NodeTagToArmGoal(Behaviour):
@@ -769,6 +774,7 @@ class NodePercep(Behaviour):
 
         # 创建AprilTagDetectionArray消息
         tag_array_msg = AprilTagDetectionArray()
+        tag_array_msg.detections = []  # 显式初始化为list，防止_AutoStub代理导致len()失败
         tag_array_msg.header = Header()
         tag_array_msg.header.stamp = ros_env.now()
         tag_array_msg.header.frame_id = "odom"
@@ -965,6 +971,7 @@ class NodeWalk(Behaviour):
                  pos_threshold: float = 0.1,
                  backward_mode: bool = False,
                  max_vel_x: float = 0.4,
+                 max_vel_y: float = None,
                  ramp_duration: float = 0.0,
                  ):
         super(NodeWalk, self).__init__(name)
@@ -979,6 +986,7 @@ class NodeWalk(Behaviour):
         self.pos_threshold = pos_threshold
         self.backward_mode = backward_mode
         self.max_vel_x = max_vel_x
+        self.max_vel_y = max_vel_y
         self.ramp_duration = ramp_duration
         self.target_executed = False
 
@@ -1002,6 +1010,7 @@ class NodeWalk(Behaviour):
                 kp_pos=1.0,
                 kp_yaw=0.6,
                 max_vel_x=self.max_vel_x,
+                max_vel_y=self.max_vel_y,
                 max_vel_yaw=0.5,
                 backward_mode=self.backward_mode,
                 ramp_duration=self.ramp_duration,
@@ -1553,14 +1562,14 @@ class NodeWaist(Behaviour):
             current_angle = np.rad2deg(waist_state.position[0])
             angle_error = abs(self.waist_pos - current_angle)
             # print(f'===== Waist: target={self.waist_pos:.1f}°, current={current_angle:.1f}°, error={angle_error:.1f}°')
-            
+
             if angle_error < self.angle_threshold:
                 return Status.SUCCESS
             else:
                 # 继续发送控制指令
                 self.robot_sdk.control.control_waist_pos([self.waist_pos])
                 return Status.RUNNING
-        
+
         # 第一次调用，直接执行转腰
         return self._execute_waist_control()
 

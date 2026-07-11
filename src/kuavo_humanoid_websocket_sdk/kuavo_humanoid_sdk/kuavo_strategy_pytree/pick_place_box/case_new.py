@@ -45,7 +45,7 @@ if isinstance(config.pick.tag_id, list):
 else:
     pick_tag_id = config.pick.tag_id
 
-search_pick_tag_WALK = NodeWalk(name='search_pick_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3)
+search_pick_tag_WALK = NodeWalk(name='search_pick_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3, max_vel_y=0.075)
 search_pick_tag_TAG2GOAL = NodeTagToNavGoal(name='search_pick_tag_TAG2GOAL',
                                             tag_id=pick_tag_id,
                                             stand_in_tag_pos=config.pick.stand_in_tag_pos,
@@ -72,7 +72,7 @@ search_pick_tag_HEAD = NodeHead(
     check_interval=0.3  # 每次转头后等待0.5秒，给视觉识别时间
 )
 
-# 等待识别结果节点
+# 等待识别结果节点（第一轮扫描使用）
 search_pick_tag_CONDITION = NodeWaitForBlackboard(key=f"latest_tag_{pick_tag_id}")
 
 # 并行执行：头部搜索 || 等待识别
@@ -82,12 +82,40 @@ search_pick_tag_HEAD_AND_WAIT = py_trees.composites.Parallel(
 )
 search_pick_tag_HEAD_AND_WAIT.add_children([search_pick_tag_HEAD, search_pick_tag_CONDITION])
 
+# 第二轮扫描（猜测后使用，需要独立的节点实例）
+search_pick_tag_HEAD_2 = NodeHead(
+    name='search_pick_tag_HEAD_2',
+    head_api=head_api,
+    head_search_yaws=config.common.head_search_yaws,
+    head_search_pitchs=config.common.head_search_pitchs,
+    tag_id=pick_tag_id,
+    check_interval=0.3
+)
+search_pick_tag_CONDITION_2 = NodeWaitForBlackboard(key=f"latest_tag_{pick_tag_id}")
+search_pick_tag_HEAD_AND_WAIT_2 = py_trees.composites.Parallel(
+    name="search_pick_tag_HEAD_AND_WAIT_2",
+    policy=py_trees.common.ParallelPolicy.SuccessOnOne()
+)
+search_pick_tag_HEAD_AND_WAIT_2.add_children([search_pick_tag_HEAD_2, search_pick_tag_CONDITION_2])
+
+# scan_direct: 先尝试从当前位置直接扫描 tag，检测到则跳过猜测
+search_pick_tag_SCAN_DIRECT = py_trees.composites.Sequence(name="search_pick_tag_SCAN_DIRECT", memory=True)
+search_pick_tag_SCAN_DIRECT.add_children([search_pick_tag_HEAD_AND_WAIT])
+
+# guess_fallback: 扫描不到则猜测位置、走过去、再扫描
+search_pick_tag_GUESS_FALLBACK = py_trees.composites.Sequence(name="search_pick_tag_GUESS_FALLBACK", memory=True)
+search_pick_tag_GUESS_FALLBACK.add_children([search_pick_tag_GUESS, search_pick_tag_WALK, search_pick_tag_HEAD_AND_WAIT_2])
+
+# detect_tag: Selector 先尝试直接扫描，失败则回退到猜测
+search_pick_tag_DETECT = py_trees.composites.Selector(name="search_pick_tag_DETECT", memory=True)
+search_pick_tag_DETECT.add_children([search_pick_tag_SCAN_DIRECT, search_pick_tag_GUESS_FALLBACK])
+
+# search_pick_tag: 检测到 tag 后设定导航目标
 search_pick_tag = py_trees.composites.Sequence(name="search_pick_tag", memory=True)
-search_pick_tag.add_children(
-    [search_pick_tag_GUESS, search_pick_tag_WALK, search_pick_tag_HEAD_AND_WAIT, search_pick_tag_TAG2GOAL])
+search_pick_tag.add_children([search_pick_tag_DETECT, search_pick_tag_TAG2GOAL])
 
 # 2. 走到箱子位置，中途持续识别并执行手臂预动作
-walk_to_pick_WALk = NodeWalk(name='walk_to_pick_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3)
+walk_to_pick_WALk = NodeWalk(name='walk_to_pick_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3, max_vel_y=0.075)
 walk_to_pick_TAG2GOAL = py_trees.decorators.SuccessIsRunning(name="walk_to_pick_TAG2GOAL",
                                                              child=NodeTagToNavGoal(name='walk_to_pick_TAG2GOAL_',
                                                                                     tag_id=pick_tag_id,
@@ -157,7 +185,7 @@ pick_box_SETWALKGOAL = NodeFuntion(name="pick_box_SETWALKGOAL",
                                        quat=(0, 0, 0, 1),  # 保持姿态不变
                                        frame=Frame.BASE  # 使用基座坐标系
                                    )))
-pick_box_WALK = NodeWalk(name='pick_box_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3)
+pick_box_WALK = NodeWalk(name='pick_box_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3, max_vel_y=0.075)
 
 walk_and_turn_waist = py_trees.composites.Parallel(name="walk_and_turn_waist",
                                                     policy=py_trees.common.ParallelPolicy.SuccessOnSelected(
@@ -180,28 +208,57 @@ search_place_tag_HEAD = NodeHead(
     check_interval=0.5  # 每次转头后等待0.5秒，给视觉识别时间
 )
 
-# 等待识别结果节点
+# 导航和走路节点（需要在 search_place_tag_GUESS_FALLBACK 之前定义）
+search_place_tag_TAG2GOAL = NodeTagToNavGoal(name='search_place_tag_TAG2GOAL',
+                                             tag_id=config.place.tag_id,
+                                             stand_in_tag_pos=config.place.stand_in_tag_pos,
+                                             stand_in_tag_euler=config.place.stand_in_tag_euler)
+search_place_tag_WALK = NodeWalk(name='search_place_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, backward_mode=True, max_vel_x=0.3, max_vel_y=0.075, ramp_duration=10.0)
+
+# 等待识别结果节点（第一轮扫描使用）
 search_place_tag_CONDITION = NodeWaitForBlackboard(key=f"latest_tag_{config.place.tag_id}")
 
 # 并行执行：头部搜索 || 等待识别
 search_place_tag_HEAD_AND_WAIT = py_trees.composites.Parallel(
     name="search_place_tag_HEAD_AND_WAIT",
-    policy=py_trees.common.ParallelPolicy.SuccessOnOne()  # 任一成功就退出
+    policy=py_trees.common.ParallelPolicy.SuccessOnOne()
 )
 search_place_tag_HEAD_AND_WAIT.add_children([search_place_tag_HEAD, search_place_tag_CONDITION])
 
-search_place_tag_TAG2GOAL = NodeTagToNavGoal(name='search_place_tag_TAG2GOAL',
-                                             tag_id=config.place.tag_id,
-                                             stand_in_tag_pos=config.place.stand_in_tag_pos,
-                                             stand_in_tag_euler=config.place.stand_in_tag_euler)
-search_place_tag_WALK = NodeWalk(name='search_place_tag_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, backward_mode=True, max_vel_x=0.3, ramp_duration=10.0)
+# 第二轮扫描（猜测后使用，需要独立的节点实例）
+search_place_tag_HEAD_2 = NodeHead(
+    name='search_place_tag_HEAD_2',
+    head_api=head_api,
+    head_search_yaws=config.common.head_search_yaws,
+    head_search_pitchs=config.common.head_search_pitchs,
+    tag_id=config.place.tag_id,
+    check_interval=0.5
+)
+search_place_tag_CONDITION_2 = NodeWaitForBlackboard(key=f"latest_tag_{config.place.tag_id}")
+search_place_tag_HEAD_AND_WAIT_2 = py_trees.composites.Parallel(
+    name="search_place_tag_HEAD_AND_WAIT_2",
+    policy=py_trees.common.ParallelPolicy.SuccessOnOne()
+)
+search_place_tag_HEAD_AND_WAIT_2.add_children([search_place_tag_HEAD_2, search_place_tag_CONDITION_2])
 
+# scan_direct: 先尝试从当前位置直接扫描 tag，检测到则跳过猜测
+search_place_tag_SCAN_DIRECT = py_trees.composites.Sequence(name="search_place_tag_SCAN_DIRECT", memory=True)
+search_place_tag_SCAN_DIRECT.add_children([search_place_tag_HEAD_AND_WAIT])
+
+# guess_fallback: 扫描不到则猜测位置、走过去、再扫描
+search_place_tag_GUESS_FALLBACK = py_trees.composites.Sequence(name="search_place_tag_GUESS_FALLBACK", memory=True)
+search_place_tag_GUESS_FALLBACK.add_children([search_place_tag_GUESS, search_place_tag_WALK, search_place_tag_HEAD_AND_WAIT_2])
+
+# detect_tag: Selector 先尝试直接扫描，失败则回退到猜测
+search_place_tag_DETECT = py_trees.composites.Selector(name="search_place_tag_DETECT", memory=True)
+search_place_tag_DETECT.add_children([search_place_tag_SCAN_DIRECT, search_place_tag_GUESS_FALLBACK])
+
+# search_place_tag: 检测到 tag 后设定导航目标
 search_place_tag = py_trees.composites.Sequence(name="search_place_tag", memory=True)
-search_place_tag.add_children(
-    [search_place_tag_GUESS, search_place_tag_WALK, search_place_tag_HEAD_AND_WAIT, search_place_tag_TAG2GOAL])
+search_place_tag.add_children([search_place_tag_DETECT, search_place_tag_TAG2GOAL])
 
 # 6. 走去放置点，同时中途持续识别
-walk_to_place_WALk = NodeWalk(name='walk_to_place_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, backward_mode=True, max_vel_x=0.3, ramp_duration=10.0)
+walk_to_place_WALk = NodeWalk(name='walk_to_place_WALk', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, backward_mode=True, max_vel_x=0.3, max_vel_y=0.075, ramp_duration=10.0)
 walk_to_place_TAG2GOAL = py_trees.decorators.SuccessIsRunning(name="walk_to_place_TAG2GOAL",
                                                               child=NodeTagToNavGoal(name='walk_to_place_TAG2GOAL_',
                                                                                      tag_id=config.place.tag_id,
@@ -237,7 +294,18 @@ place_box_ARM = NodeArm(name='place_box_ARM', arm_api=arm_api, control_base=conf
 place_box = py_trees.composites.Sequence(name="place_box", memory=True)
 place_box.add_children([place_box_TAG2GOAL, place_box_ARM])
 
-#8. 手臂复位
+# 7.5 放箱后身体后退（远离桌子，给手臂复位留出空间）
+place_body_step_back_SETWALKGOAL = NodeFuntion(name="place_body_step_back_SETWALKGOAL",
+                                               fn=lambda: update_walk_goal(target_pose=Pose(
+                                                   pos=(config.place.body_step_back_distance, 0., 0.),
+                                                   quat=(0, 0, 0, 1),
+                                                   frame=Frame.BASE
+                                               )))
+place_body_step_back_WALK = NodeWalk(name='place_body_step_back_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3, max_vel_y=0.075)
+place_body_step_back = py_trees.composites.Sequence(name="place_body_step_back", memory=True)
+place_body_step_back.add_children([place_body_step_back_SETWALKGOAL, place_body_step_back_WALK])
+
+# 8. 手臂复位
 back_to_origin_ARM_RESET1 = NodeFuntion(name="back_to_origin_ARM_RESET",
                                        fn=lambda: arm_reset())
 
@@ -256,25 +324,21 @@ place_box_WALK = NodeWalkWithDistanceMonitor(
     torso_api=torso_api,
     control_mode=WALK_CONTROL_MODE,
     pos_threshold=config.common.walk_pos_threshold,
-    max_vel_x=0.3
+    max_vel_x=0.3, max_vel_y=0.075
 )
 
 turn_waist_0 = NodeWaist(name='turn_waist_0',
                          robot_sdk=robot_sdk,
                          waist_pos=config.place.waist_degree)
 
-# 等待后退达到0.1m触发条件
-wait_for_distance_trigger = NodeWaitForBlackboard(key='walk_distance_trigger_reached')
+# 先手臂复位，再后退和转腰并行执行
+walk_turn_parallel = py_trees.composites.Parallel(name="walk_turn_parallel",
+                                                  policy=py_trees.common.ParallelPolicy.SuccessOnSelected(
+                                                      children=[place_box_WALK, turn_waist_0]))
+walk_turn_parallel.add_children([place_box_SETWALKGOAL, place_box_WALK, turn_waist_0])
 
-# 创建Sequence：等待触发后开始转腰（memory=False确保每次都重新执行）
-turn_waist_after_trigger = py_trees.composites.Sequence(name="turn_waist_after_trigger", memory=False)
-turn_waist_after_trigger.add_children([wait_for_distance_trigger, turn_waist_0])
-
-# 后退、手臂重置和转腰并行执行，后退完成时整体完成
-walk_and_turn = py_trees.composites.Parallel(name="walk_and_turn",
-                                              policy=py_trees.common.ParallelPolicy.SuccessOnSelected(
-                                                  children=[place_box_WALK, turn_waist_after_trigger]))
-walk_and_turn.add_children([back_to_origin_ARM_RESET1, place_box_SETWALKGOAL, place_box_WALK, turn_waist_after_trigger])
+walk_and_turn = py_trees.composites.Sequence(name="walk_and_turn", memory=True)
+walk_and_turn.add_children([back_to_origin_ARM_RESET1, walk_turn_parallel])
 
 # 9. 回到初始位置
 back_to_origin_SETGOAL = NodeFuntion(name="back_to_origin_SETGOAL",
@@ -284,7 +348,7 @@ back_to_origin_SETGOAL = NodeFuntion(name="back_to_origin_SETGOAL",
                                          frame=Frame.ODOM,  # 使用里程计坐标系
                                          degrees=False
                                      )))
-back_to_origin_WALK = NodeWalk(name='walk_to_origin_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3)
+back_to_origin_WALK = NodeWalk(name='walk_to_origin_WALK', torso_api=torso_api, control_mode=WALK_CONTROL_MODE, pos_threshold=config.common.walk_pos_threshold, max_vel_x=0.3, max_vel_y=0.075)
 
 back_to_origin = py_trees.composites.Sequence(name="back_to_origin", memory=True)
 back_to_origin.add_children([back_to_origin_SETGOAL, back_to_origin_WALK])
@@ -292,7 +356,9 @@ back_to_origin.add_children([back_to_origin_SETGOAL, back_to_origin_WALK])
 # 创建更新轮次和 tag_id 的函数（在所有节点创建后）
 update_round_and_tag_id_fn = update_round_and_tag_id_fn(
     config, search_pick_tag_TAG2GOAL, search_pick_tag_HEAD, pick_box_TAG2GOAL,
-    walk_to_pick_TAG2GOAL, PERCEP, search_pick_tag_HEAD_AND_WAIT
+    walk_to_pick_TAG2GOAL, PERCEP, search_pick_tag_HEAD_AND_WAIT,
+    search_pick_tag_HEAD_2=search_pick_tag_HEAD_2,
+    search_pick_tag_HEAD_AND_WAIT_2=search_pick_tag_HEAD_AND_WAIT_2
 )
 update_round_node = NodeFuntion(name="update_round_node", fn=update_round_and_tag_id_fn)
 
@@ -309,16 +375,22 @@ pause9 = NodeFuntion(name="pause9", fn=lambda: pause_for_next_step("9.回到初�
 pause10 = NodeFuntion(name="pause9", fn=lambda: pause_for_next_step("10.完成一轮搬箱子", enable_pause=config.common.enable_round_stop))
 
 ACTION.add_children([update_round_node, search_pick_tag, pause1, walk_to_pick, pause2, pick_box, pause3, walk_and_turn_waist, pause4,
-                     search_place_tag, pause5, walk_to_place, pause6, place_box, pause7,walk_and_turn, pause8, pause10])
+                     search_place_tag, pause5, walk_to_place, pause6, place_box, place_body_step_back, pause7, walk_and_turn, pause8, pause10])
 # 行为树
 # /_/ root [*]
 #     {-} ACTION [*]
 #         {-} search_pick_tag [✓]
-#             --> search_pick_tag_GUESS [✓]
-#             --> search_pick_tag_WALK [✓]
-#             /_/ search_pick_tag_HEAD_AND_WAIT [✓]
-#                 --> search_pick_tag_HEAD [✓]
-#                 --> WaitFor(latest_tag_1) [✓]
+#             /~ search_pick_tag_DETECT [✓]  -- Selector: 先扫描, 扫不到则猜测
+#                 {-} search_pick_tag_SCAN_DIRECT [✓]
+#                     /_/ search_pick_tag_HEAD_AND_WAIT [✓]
+#                         --> search_pick_tag_HEAD [✓]
+#                         --> WaitFor(latest_tag_1) [✓]
+#                 /_/ search_pick_tag_GUESS_FALLBACK [✓]
+#                     --> search_pick_tag_GUESS [✓]
+#                     --> search_pick_tag_WALK [✓]
+#                     /_/ search_pick_tag_HEAD_AND_WAIT_2 [✓]
+#                         --> search_pick_tag_HEAD_2 [✓]
+#                         --> WaitFor(latest_tag_1) [✓]
 #             --> search_pick_tag_TAG2GOAL [✓]
 #         --> pause1 [✓]
 #         /_/ walk_to_pick [✓]
@@ -339,11 +411,17 @@ ACTION.add_children([update_round_node, search_pick_tag, pause1, walk_to_pick, p
 #             --> turn_waist_180 [✓]
 #         --> pause4 [✓]
 #         {-} search_place_tag [✓]
-#             --> search_place_tag_GUESS [✓]
-#             --> search_place_tag_WALK [✓]
-#             /_/ search_place_tag_HEAD_AND_WAIT [✓]
-#                 --> search_place_tag_HEAD [✓]
-#                 --> WaitFor(latest_tag_0) [✓]
+#             /~ search_place_tag_DETECT [✓]  -- Selector: 先扫描, 扫不到则猜测
+#                 {-} search_place_tag_SCAN_DIRECT [✓]
+#                     /_/ search_place_tag_HEAD_AND_WAIT [✓]
+#                         --> search_place_tag_HEAD [✓]
+#                         --> WaitFor(latest_tag_0) [✓]
+#                 /_/ search_place_tag_GUESS_FALLBACK [✓]
+#                     --> search_place_tag_GUESS [✓]
+#                     --> search_place_tag_WALK [✓]
+#                     /_/ search_place_tag_HEAD_AND_WAIT_2 [✓]
+#                         --> search_place_tag_HEAD_2 [✓]
+#                         --> WaitFor(latest_tag_0) [✓]
 #             --> search_place_tag_TAG2GOAL [✓]
 #         --> pause5 [✓]
 #         /_/ walk_to_place [✓]
@@ -354,13 +432,15 @@ ACTION.add_children([update_round_node, search_pick_tag, pause1, walk_to_pick, p
 #         {-} place_box [✓]
 #             --> place_box_TAG2GOAL [✓]
 #             --> place_box_ARM [✓]
+#         {-} place_body_step_back [✓]
+#             --> place_body_step_back_SETWALKGOAL [✓]
+#             --> place_body_step_back_WALK [✓]
 #         --> pause7 [✓]
-#         /_/ walk_and_turn [*]
+#         {-} walk_and_turn [*]
 #             --> back_to_origin_ARM_RESET [✓]
-#             --> place_box_SETWALKGOAL [✓]
-#             --> place_box_WALK [✓]
-#             [-] turn_waist_after_trigger [*]
-#                 --> WaitFor(walk_distance_trigger_reached) [✓]
+#             /_/ walk_turn_parallel [*]
+#                 --> place_box_SETWALKGOAL [✓]
+#                 --> place_box_WALK [✓]
 #                 --> turn_waist_0 [*]
 #         --> pause8 [-]
 #         --> pause9 [-]
@@ -383,6 +463,14 @@ if __name__ == '__main__':
         print("Init KuavoSDK failed, exit!")
         exit(1)
 
+    # 修复: robot_sdk 在模块导入时创建，rosbridge 未就绪时订阅 /sensors_data_raw 失败，
+    # SDK 回退订阅了 /sensors_data_raw_shm（无数据）。这里强制重订阅正确话题。
+    import roslibpy
+    _core = robot_sdk.state._rs_core
+    _new_topic = roslibpy.Topic(_core.websocket.client, '/sensors_data_raw', 'kuavo_msgs/sensorsData')
+    _new_topic.subscribe(_core._sensors_data_raw_callback)
+    print("[FIX] 重新订阅 /sensors_data_raw 完成")
+
     # robot_sdk.control.control_head(0, np.deg2rad(-10))
     # 用 Repeat 包裹，让它无限循环
     num_repeats = config.common.grab_box_num
@@ -392,9 +480,9 @@ if __name__ == '__main__':
 
     tick_count = 0
     while True:
-        tree.tick()  # 注意是 tree，不是 root
+        tree.tick()
         tick_count += 1
-        status = looping_root.status  # 查看根节点的状态
+        status = looping_root.status
         if status != py_trees.common.Status.RUNNING:
             print("Tree finished:", status)
             break
