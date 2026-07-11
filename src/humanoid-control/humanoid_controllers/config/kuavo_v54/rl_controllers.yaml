@@ -9,6 +9,12 @@ controllers:
     type: "AMP_CONTROLLER"    # 具体控制器类型
     config_file: "rl/skw_rl_param.info" 
     enabled: true
+
+  - name: "amp_wild_controller"
+    class: "BASE_CONTROLLER"  # 基础行走控制器
+    type: "AMP_CONTROLLER"    # 具体控制器类型
+    config_file: "rl/skw_rl_param_wild.info" 
+    enabled: true
     
   - name: "vmp_controller"
     class: "BASE_CONTROLLER"  # VMP控制器
@@ -20,13 +26,6 @@ controllers:
     class: "BASE_CONTROLLER"  # 基础行走控制器
     type: "DEPTH_LOCO_CONTROLLER"    # 具体控制器类型
     config_file: "rl/depth_loco_param.info" 
-    enabled: true    
-
-     
-  - name: "amp_wild_controller"
-    class: "BASE_CONTROLLER"  # 基础行走控制器
-    type: "AMP_CONTROLLER"    # 具体控制器类型
-    config_file: "rl/skw_rl_param_wild.info" 
     enabled: true
 
   # - name: "amp_run_controller"

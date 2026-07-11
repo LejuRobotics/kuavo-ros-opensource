@@ -75,6 +75,8 @@ namespace humanoid_controller
     bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const override;
     void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) override;
     void setSwitchVelocityScale(double scale) override;
+    void setCommandBufferCallback(std::function<bool()> callback) override;
+    void setExternalCommandBufferCallback(std::function<bool()> callback) override;
     bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const override;
     bool isInPlaceSteppingActive() const override;
     bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const override;
@@ -195,6 +197,7 @@ namespace humanoid_controller
     Eigen::VectorXd waist_kp_from_config_; ///< 从配置文件读取的腰部 kp 参数
     Eigen::VectorXd waist_kd_from_config_; ///< 从配置文件读取的腰部 kd 参数
     std::unique_ptr<WaistController> waist_controller_; ///< 腰部控制器
+    std::function<bool()> external_command_buffer_callback_;
     bool waist_zero_tracking_enabled_{false}; ///< 行走时是否启用腰部0位跟踪（忽略RL输出，强制跟踪默认位置）
 
     // 站立切换到行走时的支撑腿髋关节roll偏置参数

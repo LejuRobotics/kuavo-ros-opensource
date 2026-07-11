@@ -48,6 +48,9 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
     ROS_WARN("[RlGaitReceiver] /is_real not found in ROS params, using default: false (simulation mode)");
     is_real_ = false;
   }
+  nh_.param<double>("/rl_gait_receiver/robot_action_active_timeout",
+                    robot_action_active_timeout_, robot_action_active_timeout_);
+  robot_action_active_timeout_ = std::max(0.1, robot_action_active_timeout_);
   
   // Initialize command data
   if (initialCommand) {
@@ -86,6 +89,9 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   // Subscribe to gait name request topic
   gait_name_sub_ = nh_.subscribe<std_msgs::String>("/humanoid_mpc_gait_name_request", 10,
     &RlGaitReceiver::gaitNameCallback, this);
+
+  robot_action_state_sub_ = nh_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
+    "/robot_action_state", 10, &RlGaitReceiver::robotActionStateCallback, this);
   
   ROS_INFO("[RlGaitReceiver] Initialized with smart stop detection enabled");
 }
@@ -116,6 +122,7 @@ void RlGaitReceiver::resetCommandState(bool stance_mode)
   latest_cmd_vel_ = smoothed_cmd_vel_;
   previous_cmd_vel_ = smoothed_cmd_vel_;
   latest_gait_name_ = stance_mode ? "stance" : "walk";
+  pending_gait_name_.clear();
   trot_latched_ = false;
   last_velocity_update_time_ = ros::Time::now();
   stopInPlaceStepping();
@@ -157,13 +164,39 @@ void RlGaitReceiver::setAmpHandController(bool enable)
   is_amp_hand_controller_ = enable;
 }
 
+void RlGaitReceiver::setCommandBufferCallback(std::function<bool()> callback)
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  command_buffer_callback_ = std::move(callback);
+}
+
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
   if (!enabled_) {
     return;
   }
   double velocity_magnitude = calculateVelocityMagnitude(smoothed_cmd_vel_);
+  std::function<bool()> command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+  }
+  const bool command_blocked = command_buffer_callback && command_buffer_callback();
+
   std::lock_guard<std::mutex> lock(command_mutex_);
+
+  if (!pending_gait_name_.empty() && !command_blocked)
+  {
+    const std::string gait_name = pending_gait_name_;
+    pending_gait_name_.clear();
+    currentCommand_.cmdStance_ = 0.0;
+    if (gait_name == "trot")
+    {
+      trot_latched_ = true;
+    }
+    smart_stop_enabled_ = false;
+    ROS_INFO_STREAM("[RlGaitReceiver] Applied pending walking gait after controller switch: " << gait_name);
+  }
 
   // sim-to-sim: 站立模式下复用行走三维指令（x/y/yaw）作为姿态命令通道。
   // 这与训练侧 vel_command_b 的复用语义一致：x->弯腰，y->保留，yaw(z)->下蹲高度。
@@ -266,10 +299,73 @@ CommandDataRL RlGaitReceiver::getCurrentCommand() const
   return currentCommand_;
 }
 
+CommandDataRL RlGaitReceiver::getPolicyCommand() const
+{
+  CommandDataRL command;
+  std::function<bool()> command_buffer_callback;
+  bool robot_action_active = false;
+  const ros::Time now = ros::Time::now();
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command = currentCommand_;
+    command_buffer_callback = command_buffer_callback_;
+    robot_action_active = isRobotActionActiveLocked(now);
+  }
+
+  if (robot_action_active || (command_buffer_callback && command_buffer_callback()))
+  {
+    command.setzero();
+  }
+  return command;
+}
+
+bool RlGaitReceiver::shouldBlockCommandExecution() const
+{
+  std::function<bool()> command_buffer_callback;
+  bool robot_action_active = false;
+  const ros::Time now = ros::Time::now();
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+    robot_action_active = isRobotActionActiveLocked(now);
+  }
+  return robot_action_active || (command_buffer_callback && command_buffer_callback());
+}
+
 
 
 void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
 {
+  std::function<bool()> command_buffer_callback;
+  bool robot_action_active = false;
+  const ros::Time now = ros::Time::now();
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+    robot_action_active = isRobotActionActiveLocked(now);
+  }
+
+  if (robot_action_active)
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    latest_cmd_vel_ = geometry_msgs::Twist();
+    smoothed_cmd_vel_ = geometry_msgs::Twist();
+    previous_cmd_vel_ = geometry_msgs::Twist();
+    currentCommand_.setzero();
+    pending_gait_name_.clear();
+    stopInPlaceStepping();
+    ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Suppress cmd_vel while robot action is active");
+    return;
+  }
+
+  if (command_buffer_callback && command_buffer_callback())
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    latest_cmd_vel_ = *msg;
+    ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Block cmd_vel until walking controller is active");
+    return;
+  }
+
   // Apply velocity smoothing
   ros::Time current_time = ros::Time::now();
   geometry_msgs::Twist smoothed_vel = smoothVelocityCommand(*msg, current_time);
@@ -283,16 +379,68 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
             smoothed_vel.angular.x, smoothed_vel.angular.y, smoothed_vel.angular.z);
 }
 
+void RlGaitReceiver::robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg)
+{
+  const bool active = msg->state == 1;
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  if (active)
+  {
+    last_robot_action_active_time_ = ros::Time::now();
+  }
+  if (robot_action_active_ == active)
+  {
+    return;
+  }
+
+  robot_action_active_ = active;
+  if (robot_action_active_)
+  {
+    currentCommand_.setzero();
+    latest_cmd_vel_ = geometry_msgs::Twist();
+    smoothed_cmd_vel_ = geometry_msgs::Twist();
+    previous_cmd_vel_ = geometry_msgs::Twist();
+    pending_gait_name_.clear();
+    trot_latched_ = false;
+    stopInPlaceStepping();
+    ROS_INFO("[RlGaitReceiver] Robot action active: suppress cmd_vel and hold stance");
+  }
+  else
+  {
+    ROS_INFO("[RlGaitReceiver] Robot action inactive: cmd_vel accepted");
+  }
+}
+
+bool RlGaitReceiver::isRobotActionActiveLocked(const ros::Time& now) const
+{
+  if (!robot_action_active_)
+  {
+    return false;
+  }
+  if (!last_robot_action_active_time_.isValid())
+  {
+    return true;
+  }
+  return (now - last_robot_action_active_time_).toSec() <= robot_action_active_timeout_;
+}
+
 void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
 {
   const std::string& gait_name = msg->data;
   ROS_INFO_STREAM("[RlGaitReceiver] Received gait name request: " << gait_name);
-  
+
+  std::function<bool()> command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(command_mutex_);
+    command_buffer_callback = command_buffer_callback_;
+  }
+  const bool command_blocked = command_buffer_callback && command_buffer_callback();
+
   std::lock_guard<std::mutex> lock(command_mutex_);
   latest_gait_name_ = gait_name;
   
   // Manually switch cmdStance_ state based on gait name
   if (gait_name == "stance") {
+    pending_gait_name_.clear();
     currentCommand_.setzero();
     currentCommand_.cmdStance_ = 1.0;
     trot_latched_ = false;
@@ -303,6 +451,12 @@ void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
     smart_stop_enabled_ = true;
     ROS_INFO("[RlGaitReceiver] Manually switched to stance mode");
   } else if (gait_name == "walk" || gait_name == "trot") {
+    if (command_blocked)
+    {
+      pending_gait_name_ = gait_name;
+      ROS_INFO_STREAM("[RlGaitReceiver] Delay walking gait until walking controller is active: " << gait_name);
+      return;
+    }
     currentCommand_.cmdStance_ = 0.0;
     if (gait_name == "trot")
     {

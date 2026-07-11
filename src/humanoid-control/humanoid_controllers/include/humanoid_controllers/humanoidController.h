@@ -401,6 +401,8 @@ namespace humanoid_controller
     bool armJointSynchronizationCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     
     void robotlocalizationCallback(const nav_msgs::Odometry::ConstPtr &msg);
+    bool tryApplyPendingExternalArmControllerMode();
+    bool shouldBlockWalkingCommandForExternalArmTarget() const;
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool enableMmArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool getMmArmCtrlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
@@ -707,6 +709,13 @@ namespace humanoid_controller
     vector_t humanoidState_;
     ArmControlMode mpcArmControlMode_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
     ArmControlMode mpcArmControlMode_desired_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
+    std::atomic_bool pending_external_arm_controller_mode_{false};
+    double external_arm_default_position_tolerance_{0.05};
+    double external_arm_target_hold_time_{0.5};
+    Eigen::VectorXd external_arm_target_pos_;
+    ros::Time last_external_arm_target_time_;
+    bool has_external_arm_target_{false};
+    mutable std::mutex external_arm_target_mutex_;
     int armDofMPC_ = 7; // 单手臂的自由度，会从配置文件中重新计算
     int armDofReal_ = 7; // 实际单手臂的自由度
     int armDofDiff_ = 0; // 单手臂的自由度差

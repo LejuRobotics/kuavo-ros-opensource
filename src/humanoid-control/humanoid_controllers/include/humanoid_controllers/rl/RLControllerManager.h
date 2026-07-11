@@ -11,8 +11,13 @@
 #include "kuavo_msgs/GetStringList.h"
 #include "kuavo_msgs/SetString.h"
 #include "kuavo_msgs/DanceTrajectoryState.h"
+#include "kuavo_msgs/robotWaistControl.h"
+#include "humanoid_plan_arm_trajectory/RobotActionState.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
+#include <geometry_msgs/Twist.h>
+#include <std_msgs/Bool.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <std_msgs/String.h>
 #include "std_msgs/Int32.h"
 #include <map>
@@ -118,6 +123,12 @@ namespace humanoid_controller
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
       return last_controller_ptr_;
+    }
+
+    void registerWalkingCommandBlockCallback(std::function<bool()> callback)
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      walking_command_block_callback_ = std::move(callback);
     }
 
     /**
@@ -357,7 +368,75 @@ namespace humanoid_controller
                                              bool only_rl_to_rl,
                                              std::string& message);
 
+    /**
+     * @brief 记录外部手臂控制活动。由 humanoidController 在手臂控制模式切到 external control 后调用。
+     */
+    void notifyExternalArmControlActivity();
+
+    /**
+     * @brief 控制周期中处理自动控制器切换。
+     */
+    void processAutoControllerSwitch();
+
+    /**
+     * @brief 自动切换缓冲期间是否应暂缓行走速度命令执行。
+     */
+    bool shouldBufferWalkingCommand() const;
+
+    /**
+     * @brief 自动切换缓冲期间是否应暂缓手臂/腰外部控制命令执行。
+     */
+    bool shouldBufferExternalControlCommand() const;
+
+    /**
+     * @brief 当前控制器是否允许执行行走速度命令。
+     */
+    bool isWalkingCommandExecutionAllowed() const;
+
+    /**
+     * @brief 当前控制器是否允许执行手臂/腰外部控制命令。
+     */
+    bool isExternalControlCommandExecutionAllowed() const;
+
   private:
+    enum class AutoSwitchCommandBufferType
+    {
+      NONE,
+      WALKING,
+      EXTERNAL_CONTROL
+    };
+
+    struct AutoControllerSwitchConfig
+    {
+      bool enabled = false;
+      std::string manipulation_controller;
+      std::string walking_controller;
+      double cmd_vel_linear_threshold = 0.02;
+      double cmd_vel_angular_threshold = 0.02;
+      double cmd_vel_command_hold_time = 0.5;
+      double external_command_hold_time = 0.5;
+      double min_switch_interval = 1.0;
+      bool walking_switch_require_stance = true;
+      double switch_command_buffer_time = 0.0;
+    };
+
+    void loadAutoControllerSwitchConfig(const std::string& config_file);
+    void cmdVelAutoSwitchCallback(const geometry_msgs::Twist::ConstPtr& msg);
+    void gaitNameAutoSwitchCallback(const std_msgs::String::ConstPtr& msg);
+    void armControlModeAutoSwitchCallback(const std_msgs::Float64MultiArray::ConstPtr& msg);
+    void waistAutoSwitchCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg);
+    void waistEnableAutoSwitchCallback(const std_msgs::Bool::ConstPtr& msg);
+    void robotActionStateAutoSwitchCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg);
+    bool isRobotActionActiveForAutoSwitchLocked(const ros::Time& now) const;
+    void recordExternalArmControlActivityLocked(const ros::Time& now);
+    void recordExternalWaistControlActivityLocked(const ros::Time& now);
+    bool hasRecentExternalControlActivityLocked(const ros::Time& now) const;
+    bool latestCmdVelRequestsWalkingLocked() const;
+    bool latestGaitNameRequestsWalkingLocked() const;
+    bool shouldBufferCommandLocked(AutoSwitchCommandBufferType type, const ros::Time& now) const;
+    void armAutoSwitchCommandBufferLocked(AutoSwitchCommandBufferType type, const ros::Time& now);
+    void evaluateAutoControllerSwitch(const std::string& reason);
+
     /**
      * @brief 异步切换手臂控制模式
      * @param mode 目标手臂控制模式
@@ -518,6 +597,12 @@ namespace humanoid_controller
     ros::ServiceServer set_fall_down_state_srv_;     ///< 设置倒地状态服务
     ros::ServiceServer switch_to_vmp_controller_srv_; ///< 切换到VMP控制器服务
     ros::Subscriber nav_switch_controller_sub_;      ///< 外部导航按名字切换RL控制器话题
+    ros::Subscriber auto_switch_cmd_vel_sub_;
+    ros::Subscriber auto_switch_gait_name_sub_;
+    ros::Subscriber auto_switch_arm_control_mode_sub_;
+    ros::Subscriber auto_switch_waist_sub_;
+    ros::Subscriber auto_switch_waist_enable_sub_;
+    ros::Subscriber auto_switch_robot_action_state_sub_;
     ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
     ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
@@ -534,6 +619,7 @@ namespace humanoid_controller
     // 躯干速度检查相关
     std::function<bool()> torso_stability_callback_;          ///< 获取躯干稳定性状态的回调函数
     std::function<bool()> stationary_physical_state_callback_; ///< 躯干线速度和双脚接触条件
+    std::function<bool()> walking_command_block_callback_; ///< 额外的行走速度命令屏蔽条件
     std::function<bool(const std::string&, const std::string&, std::string&)> walking_phase_sync_switch_guard_callback_;
         ///< walking 状态下 AMP/DEPTH 直切的额外保护回调
 
@@ -547,6 +633,20 @@ namespace humanoid_controller
     SwitchMotionState last_switch_motion_state_ = SwitchMotionState::STANCE;
     ros::Time stationary_candidate_start_time_;
     bool stationary_candidate_active_ = false;
+    AutoControllerSwitchConfig auto_switch_config_;
+    bool auto_switch_config_loaded_ = false;
+    ros::Time last_external_arm_control_time_;
+    ros::Time last_external_waist_control_time_;
+    ros::Time last_cmd_vel_time_;
+    ros::Time last_gait_name_time_;
+    ros::Time last_robot_action_active_time_;
+    ros::Time last_auto_switch_attempt_time_;
+    geometry_msgs::Twist latest_cmd_vel_;
+    std::string latest_gait_name_;
+    bool robot_action_active_for_auto_switch_ = false;
+    double robot_action_active_timeout_ = 0.5;
+    AutoSwitchCommandBufferType auto_switch_command_buffer_type_ = AutoSwitchCommandBufferType::NONE;
+    ros::Time auto_switch_command_buffer_until_;
     double depth_history_min_frequency_hz_ = 55.0;  ///< depth 历史话题最低频率要求
     double depth_history_wait_timeout_sec_ = 0.2;   ///< depth 历史话题最大消息过期时间
     int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数

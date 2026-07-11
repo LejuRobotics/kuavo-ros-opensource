@@ -603,6 +603,27 @@ namespace humanoid_controller
     }
   }
 
+  void DepthWalkController::setCommandBufferCallback(std::function<bool()> callback)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->setCommandBufferCallback(std::move(callback));
+    }
+  }
+
+  void DepthWalkController::setExternalCommandBufferCallback(std::function<bool()> callback)
+  {
+    external_command_buffer_callback_ = std::move(callback);
+    if (arm_controller_)
+    {
+      arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+    }
+    if (waist_controller_)
+    {
+      waist_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+    }
+  }
+
   bool DepthWalkController::hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const
   {
     if (!gait_receiver_)
@@ -697,7 +718,7 @@ namespace humanoid_controller
                                             const SensorData& sensor_data)
   {
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
-    CommandDataRL cmd = gait_receiver_->getCurrentCommand();
+    CommandDataRL cmd = gait_receiver_->getPolicyCommand();
     
     updatePhase(cmd);
 
@@ -1025,7 +1046,7 @@ namespace humanoid_controller
       }
       
       // 获取当前命令数据判断是否从站立切换到行走
-      CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
+      CommandDataRL currentCmdData = gait_receiver_->getPolicyCommand();
       bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
       
       // 当从站立切换到行走时（站立->行走），记录初始髋关节pitch角速度并开始数据收集
@@ -1403,6 +1424,7 @@ namespace humanoid_controller
           jointArmNum_,   // 手臂关节数量
           ros_logger_     // ROS日志发布器
         );
+        arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
         
         // 初始化 ArmController
         // 提取手臂部分的 kp 和 kd 参数
@@ -1478,7 +1500,7 @@ namespace humanoid_controller
     CommandDataRL cmdData;
     if (gait_receiver_)
     {
-      cmdData = gait_receiver_->getCurrentCommand();
+      cmdData = gait_receiver_->getPolicyCommand();
     }
 
     // 构建完整的关节位置和速度向量（腿 + 腰 + 手）
@@ -1550,6 +1572,7 @@ namespace humanoid_controller
           ros_logger_,
           is_real_
         );
+        waist_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
         
         // 使用从配置文件读取的 kp 和 kd 参数（如果已加载），否则使用默认值
         Eigen::VectorXd waist_kp, waist_kd;
@@ -1685,7 +1708,7 @@ namespace humanoid_controller
     CommandDataRL cmdData;
     if (gait_receiver_)
     {
-      cmdData = gait_receiver_->getCurrentCommand();
+      cmdData = gait_receiver_->getPolicyCommand();
     }
 
     // 构建完整的关节位置和速度向量（腿 + 腰 + 手）

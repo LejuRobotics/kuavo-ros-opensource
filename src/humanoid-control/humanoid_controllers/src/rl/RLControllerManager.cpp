@@ -14,7 +14,10 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <yaml-cpp/yaml.h>
 #include <fstream>
+#include <cmath>
 #include <boost/filesystem.hpp>
+#include <boost/property_tree/info_parser.hpp>
+#include <boost/property_tree/ptree.hpp>
 #include <ocs2_core/misc/LoadData.h>
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include <thread>
@@ -126,6 +129,20 @@ namespace humanoid_controller
 
     // 启动控制器推理线程（创建线程并设置为 PAUSED 状态）
     controller->start();
+
+    controller->setCommandBufferCallback([this]() {
+      std::function<bool()> walking_command_block_callback;
+      {
+        std::lock_guard<std::recursive_mutex> lock(this->mutex_);
+        walking_command_block_callback = this->walking_command_block_callback_;
+      }
+      return !this->isWalkingCommandExecutionAllowed() ||
+             this->shouldBufferWalkingCommand() ||
+             (walking_command_block_callback && walking_command_block_callback());
+    });
+    controller->setExternalCommandBufferCallback([this]() {
+      return !this->isExternalControlCommandExecutionAllowed() || this->shouldBufferExternalControlCommand();
+    });
 
     controllers_[name] = std::move(controller);
     
@@ -499,6 +516,13 @@ namespace humanoid_controller
           ROS_INFO("[RLControllerManager] Reset target gait command to stance during RL->RL switch: %s -> %s",
                    current_controller_name_.c_str(), name.c_str());
         }
+        else if (auto_switch_config_.enabled &&
+                 name == auto_switch_config_.manipulation_controller)
+        {
+          new_controller->resetGaitCommandState(true);
+          ROS_INFO("[RLControllerManager] Reset manipulation controller gait command to stance during RL->RL switch: %s -> %s",
+                   current_controller_name_.c_str(), name.c_str());
+        }
         else if (has_source_gait_command)
         {
           new_controller->setGaitCommandState(source_gait_command);
@@ -636,6 +660,64 @@ namespace humanoid_controller
         return idx;
     }
     return -1;
+  }
+
+  void RLControllerManager::loadAutoControllerSwitchConfig(const std::string& config_file)
+  {
+    AutoControllerSwitchConfig config;
+    try
+    {
+      boost::property_tree::ptree pt;
+      boost::property_tree::read_info(config_file, pt);
+
+      const auto child = pt.get_child_optional("autoControllerSwitch");
+      if (!child)
+      {
+        return;
+      }
+
+      const auto& node = child.get();
+      config.enabled = node.get<bool>("enabled", false);
+      config.manipulation_controller = node.get<std::string>("manipulationController", "");
+      config.walking_controller = node.get<std::string>("walkingController", "");
+      config.cmd_vel_linear_threshold = std::max(0.0, node.get<double>("cmdVelLinearThreshold", 0.02));
+      config.cmd_vel_angular_threshold = std::max(0.0, node.get<double>("cmdVelAngularThreshold", 0.02));
+      config.cmd_vel_command_hold_time = std::max(0.0, node.get<double>("cmdVelCommandHoldTime", 0.5));
+      config.external_command_hold_time = std::max(0.0, node.get<double>("externalCommandHoldTime", 0.5));
+      config.min_switch_interval = std::max(0.0, node.get<double>("minSwitchInterval", 1.0));
+      config.walking_switch_require_stance = node.get<bool>("walkingSwitchRequireStance", true);
+      config.switch_command_buffer_time = std::max(0.0, node.get<double>("switchCommandBufferTime", 0.0));
+
+      if (config.enabled)
+      {
+        if (config.manipulation_controller.empty() || config.walking_controller.empty())
+        {
+          ROS_WARN("[RLControllerManager] autoControllerSwitch disabled because target controller name is empty in %s",
+                   config_file.c_str());
+          config.enabled = false;
+        }
+      }
+
+      {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        auto_switch_config_ = config;
+        auto_switch_config_loaded_ = true;
+      }
+
+      if (config.enabled)
+      {
+        ROS_INFO("[RLControllerManager] autoControllerSwitch enabled: manipulation=%s walking=%s walkingRequireStance=%s commandBuffer=%.3fs",
+                 config.manipulation_controller.c_str(),
+                 config.walking_controller.c_str(),
+                 config.walking_switch_require_stance ? "true" : "false",
+                 config.switch_command_buffer_time);
+      }
+    }
+    catch (const std::exception& e)
+    {
+      ROS_WARN("[RLControllerManager] Failed to load autoControllerSwitch from %s: %s",
+               config_file.c_str(), e.what());
+    }
   }
 
   void RLControllerManager::loadDepthHistoryCheckParams(ros::NodeHandle& nh)
@@ -858,6 +940,12 @@ namespace humanoid_controller
 
     try
     {
+      {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        auto_switch_config_ = AutoControllerSwitchConfig{};
+        auto_switch_config_loaded_ = false;
+      }
+
       // 加载YAML配置文件
       YAML::Node config = YAML::LoadFile(config_file);
       
@@ -937,6 +1025,8 @@ namespace humanoid_controller
                     name.c_str(), config_file_abs.c_str());
           continue;
         }
+
+        loadAutoControllerSwitchConfig(config_file_abs);
 
         // 根据类型创建控制器
         std::unique_ptr<RLControllerBase> controller;
@@ -1043,6 +1133,25 @@ namespace humanoid_controller
                                                        &RLControllerManager::getDanceControllerListCallback, this);
     nav_switch_controller_sub_ = nh.subscribe<std_msgs::String>("/humanoid_controller/nav_switch_rl_controller_by_name", 1,
                                                               &RLControllerManager::navSwitchControllerByNameCallback,this);                                            
+    auto_switch_cmd_vel_sub_ = nh.subscribe<geometry_msgs::Twist>(
+        "/cmd_vel", 10, &RLControllerManager::cmdVelAutoSwitchCallback, this);
+    auto_switch_gait_name_sub_ = nh.subscribe<std_msgs::String>(
+        "/humanoid_mpc_gait_name_request", 10,
+        &RLControllerManager::gaitNameAutoSwitchCallback, this);
+    auto_switch_arm_control_mode_sub_ = nh.subscribe<std_msgs::Float64MultiArray>(
+        "/humanoid/mpc/arm_control_mode", 10,
+        &RLControllerManager::armControlModeAutoSwitchCallback, this);
+    auto_switch_waist_sub_ = nh.subscribe<kuavo_msgs::robotWaistControl>(
+        "/robot_waist_motion_data", 10, &RLControllerManager::waistAutoSwitchCallback, this);
+    auto_switch_waist_enable_sub_ = nh.subscribe<std_msgs::Bool>(
+        "/humanoid_controller/enable_waist_control", 10,
+        &RLControllerManager::waistEnableAutoSwitchCallback, this);
+    auto_switch_robot_action_state_sub_ = nh.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
+        "/robot_action_state", 10,
+        &RLControllerManager::robotActionStateAutoSwitchCallback, this);
+    nh.param<double>("/rl_gait_receiver/robot_action_active_timeout",
+                     robot_action_active_timeout_, robot_action_active_timeout_);
+    robot_action_active_timeout_ = std::max(0.1, robot_action_active_timeout_);
     controller_switch_event_pub_ = nh.advertise<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, true);
     depth_history_status_pub_ = nh.advertise<std_msgs::Int32>("/humanoid_controller/depth_history_status", 1, true);
 
@@ -1351,6 +1460,463 @@ namespace humanoid_controller
     else
     {
       ROS_WARN("[RLControllerManager] Navigation RL switch request failed: %s", message.c_str());
+    }
+  }
+
+  void RLControllerManager::recordExternalArmControlActivityLocked(const ros::Time& now)
+  {
+    last_external_arm_control_time_ = now;
+  }
+
+  void RLControllerManager::recordExternalWaistControlActivityLocked(const ros::Time& now)
+  {
+    last_external_waist_control_time_ = now;
+  }
+
+  void RLControllerManager::notifyExternalArmControlActivity()
+  {
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!auto_switch_config_.enabled)
+      {
+        return;
+      }
+      recordExternalArmControlActivityLocked(ros::Time::now());
+    }
+    evaluateAutoControllerSwitch("external arm control");
+  }
+
+  void RLControllerManager::cmdVelAutoSwitchCallback(const geometry_msgs::Twist::ConstPtr& msg)
+  {
+    if (msg == nullptr)
+    {
+      return;
+    }
+    const double linear_magnitude = std::sqrt(
+        msg->linear.x * msg->linear.x +
+        msg->linear.y * msg->linear.y +
+        msg->linear.z * msg->linear.z);
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!auto_switch_config_.enabled)
+      {
+        return;
+      }
+      if (isRobotActionActiveForAutoSwitchLocked(ros::Time::now()))
+      {
+        latest_cmd_vel_ = geometry_msgs::Twist();
+        last_cmd_vel_time_ = ros::Time();
+        ROS_DEBUG_THROTTLE(1.0,
+                           "[RLControllerManager] Ignore autoSwitch cmd_vel while robot action is active");
+        return;
+      }
+      latest_cmd_vel_ = *msg;
+      last_cmd_vel_time_ = ros::Time::now();
+    }
+    if (linear_magnitude > 1e-4 || std::abs(msg->angular.z) > 1e-4)
+    {
+      ROS_DEBUG_THROTTLE(1.0,
+                         "[RLControllerManager] autoSwitch cmd_vel received: linear=(%.3f, %.3f, %.3f) |linear|=%.3f angular_z=%.3f",
+                         msg->linear.x, msg->linear.y, msg->linear.z, linear_magnitude, msg->angular.z);
+    }
+    evaluateAutoControllerSwitch("cmd_vel");
+  }
+
+  void RLControllerManager::robotActionStateAutoSwitchCallback(
+      const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg)
+  {
+    if (msg == nullptr)
+    {
+      return;
+    }
+
+    const bool active = msg->state == 1;
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (active)
+    {
+      last_robot_action_active_time_ = ros::Time::now();
+      latest_cmd_vel_ = geometry_msgs::Twist();
+      last_cmd_vel_time_ = ros::Time();
+      latest_gait_name_.clear();
+      last_gait_name_time_ = ros::Time();
+    }
+
+    if (robot_action_active_for_auto_switch_ == active)
+    {
+      return;
+    }
+
+    robot_action_active_for_auto_switch_ = active;
+    if (active)
+    {
+      ROS_INFO("[RLControllerManager] Robot action active: ignore walking auto-switch intent");
+    }
+    else
+    {
+      ROS_INFO("[RLControllerManager] Robot action inactive: walking auto-switch intent accepted");
+    }
+  }
+
+  bool RLControllerManager::isRobotActionActiveForAutoSwitchLocked(const ros::Time& now) const
+  {
+    if (!robot_action_active_for_auto_switch_)
+    {
+      return false;
+    }
+    if (!last_robot_action_active_time_.isValid())
+    {
+      return true;
+    }
+    return (now - last_robot_action_active_time_).toSec() <= robot_action_active_timeout_;
+  }
+
+  void RLControllerManager::gaitNameAutoSwitchCallback(const std_msgs::String::ConstPtr& msg)
+  {
+    if (msg == nullptr)
+    {
+      return;
+    }
+
+    const std::string gait_name = msg->data;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!auto_switch_config_.enabled)
+      {
+        return;
+      }
+      latest_gait_name_ = gait_name;
+      last_gait_name_time_ = ros::Time::now();
+    }
+
+    if (gait_name == "walk" || gait_name == "trot")
+    {
+      ROS_DEBUG_THROTTLE(1.0,
+                         "[RLControllerManager] autoSwitch gait name received: %s",
+                         gait_name.c_str());
+      evaluateAutoControllerSwitch("gait_name");
+    }
+  }
+
+  void RLControllerManager::armControlModeAutoSwitchCallback(const std_msgs::Float64MultiArray::ConstPtr& msg)
+  {
+    if (msg == nullptr || msg->data.empty())
+    {
+      return;
+    }
+
+    constexpr int kExternalArmControlMode = 2;
+    const int current_mode = static_cast<int>(std::lround(msg->data.front()));
+    const int desired_mode = msg->data.size() > 1
+                                 ? static_cast<int>(std::lround(msg->data[1]))
+                                 : current_mode;
+    if (current_mode != kExternalArmControlMode && desired_mode != kExternalArmControlMode)
+    {
+      return;
+    }
+
+    ROS_DEBUG_THROTTLE(1.0,
+                       "[RLControllerManager] autoSwitch arm control mode received: current=%d desired=%d",
+                       current_mode, desired_mode);
+
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!auto_switch_config_.enabled)
+      {
+        return;
+      }
+      recordExternalArmControlActivityLocked(ros::Time::now());
+    }
+    evaluateAutoControllerSwitch("arm control mode");
+  }
+
+  void RLControllerManager::waistAutoSwitchCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg)
+  {
+    if (msg == nullptr)
+    {
+      return;
+    }
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!auto_switch_config_.enabled)
+      {
+        return;
+      }
+      recordExternalWaistControlActivityLocked(ros::Time::now());
+    }
+    evaluateAutoControllerSwitch("waist command");
+  }
+
+  void RLControllerManager::waistEnableAutoSwitchCallback(const std_msgs::Bool::ConstPtr& msg)
+  {
+    if (msg == nullptr || !msg->data)
+    {
+      return;
+    }
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!auto_switch_config_.enabled)
+      {
+        return;
+      }
+      recordExternalWaistControlActivityLocked(ros::Time::now());
+    }
+    evaluateAutoControllerSwitch("waist enable");
+  }
+
+  void RLControllerManager::processAutoControllerSwitch()
+  {
+    evaluateAutoControllerSwitch("control loop");
+  }
+
+  bool RLControllerManager::hasRecentExternalControlActivityLocked(const ros::Time& now) const
+  {
+    const double hold_time = auto_switch_config_.external_command_hold_time;
+    if (last_external_arm_control_time_.isValid() &&
+        (now - last_external_arm_control_time_).toSec() <= hold_time)
+    {
+      return true;
+    }
+    if (last_external_waist_control_time_.isValid() &&
+        (now - last_external_waist_control_time_).toSec() <= hold_time)
+    {
+      return true;
+    }
+    return false;
+  }
+
+  bool RLControllerManager::latestCmdVelRequestsWalkingLocked() const
+  {
+    if (!last_cmd_vel_time_.isValid())
+    {
+      return false;
+    }
+    const ros::Time now = ros::Time::now();
+    if ((now - last_cmd_vel_time_).toSec() > auto_switch_config_.cmd_vel_command_hold_time)
+    {
+      return false;
+    }
+
+    const double linear_magnitude = std::sqrt(
+        latest_cmd_vel_.linear.x * latest_cmd_vel_.linear.x +
+        latest_cmd_vel_.linear.y * latest_cmd_vel_.linear.y +
+        latest_cmd_vel_.linear.z * latest_cmd_vel_.linear.z);
+
+    return linear_magnitude > auto_switch_config_.cmd_vel_linear_threshold ||
+           std::abs(latest_cmd_vel_.angular.z) > auto_switch_config_.cmd_vel_angular_threshold;
+  }
+
+  bool RLControllerManager::latestGaitNameRequestsWalkingLocked() const
+  {
+    if (!last_gait_name_time_.isValid())
+    {
+      return false;
+    }
+    const ros::Time now = ros::Time::now();
+    if ((now - last_gait_name_time_).toSec() > auto_switch_config_.cmd_vel_command_hold_time)
+    {
+      return false;
+    }
+    return latest_gait_name_ == "walk" || latest_gait_name_ == "trot";
+  }
+
+  bool RLControllerManager::shouldBufferCommandLocked(AutoSwitchCommandBufferType type, const ros::Time& now) const
+  {
+    if (!auto_switch_config_.enabled || type == AutoSwitchCommandBufferType::NONE)
+    {
+      return false;
+    }
+    if (auto_switch_command_buffer_type_ != type)
+    {
+      return false;
+    }
+    if (!auto_switch_command_buffer_until_.isValid())
+    {
+      return false;
+    }
+    return now < auto_switch_command_buffer_until_;
+  }
+
+  void RLControllerManager::armAutoSwitchCommandBufferLocked(AutoSwitchCommandBufferType type, const ros::Time& now)
+  {
+    if (type == AutoSwitchCommandBufferType::NONE || auto_switch_config_.switch_command_buffer_time <= 0.0)
+    {
+      auto_switch_command_buffer_type_ = AutoSwitchCommandBufferType::NONE;
+      auto_switch_command_buffer_until_ = ros::Time();
+      return;
+    }
+
+    auto_switch_command_buffer_type_ = type;
+    auto_switch_command_buffer_until_ = now + ros::Duration(auto_switch_config_.switch_command_buffer_time);
+  }
+
+  bool RLControllerManager::shouldBufferWalkingCommand() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return shouldBufferCommandLocked(AutoSwitchCommandBufferType::WALKING, ros::Time::now());
+  }
+
+  bool RLControllerManager::shouldBufferExternalControlCommand() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return shouldBufferCommandLocked(AutoSwitchCommandBufferType::EXTERNAL_CONTROL, ros::Time::now());
+  }
+
+  bool RLControllerManager::isWalkingCommandExecutionAllowed() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!auto_switch_config_.enabled || auto_switch_config_.walking_controller.empty())
+    {
+      return true;
+    }
+    return current_controller_name_ == auto_switch_config_.walking_controller;
+  }
+
+  bool RLControllerManager::isExternalControlCommandExecutionAllowed() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!auto_switch_config_.enabled || auto_switch_config_.manipulation_controller.empty())
+    {
+      return true;
+    }
+    return current_controller_name_ == auto_switch_config_.manipulation_controller;
+  }
+
+  void RLControllerManager::evaluateAutoControllerSwitch(const std::string& reason)
+  {
+    std::string target_name;
+    std::string current_name;
+    AutoSwitchCommandBufferType buffer_type = AutoSwitchCommandBufferType::NONE;
+    std::function<bool()> walking_command_block_callback;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      walking_command_block_callback = walking_command_block_callback_;
+    }
+    const bool walking_command_blocked =
+        walking_command_block_callback && walking_command_block_callback();
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (!auto_switch_config_.enabled)
+      {
+        return;
+      }
+
+      if (current_controller_name_.empty())
+      {
+        return;
+      }
+
+      updateSwitchMotionStateLocked();
+      const ros::Time now = ros::Time::now();
+
+      if (hasRecentExternalControlActivityLocked(now) || walking_command_blocked)
+      {
+        target_name = auto_switch_config_.manipulation_controller;
+        buffer_type = AutoSwitchCommandBufferType::EXTERNAL_CONTROL;
+        if (walking_command_blocked)
+        {
+          ROS_DEBUG_THROTTLE(2.0,
+                             "[RLControllerManager] autoControllerSwitch keeps manipulation controller because walking command is blocked by external arm target");
+        }
+      }
+      else if (latestCmdVelRequestsWalkingLocked() || latestGaitNameRequestsWalkingLocked())
+      {
+        target_name = auto_switch_config_.walking_controller;
+        buffer_type = AutoSwitchCommandBufferType::WALKING;
+        if (last_auto_switch_attempt_time_.isValid() &&
+            (now - last_auto_switch_attempt_time_).toSec() < auto_switch_config_.min_switch_interval)
+        {
+          return;
+        }
+      }
+      else
+      {
+        if (last_cmd_vel_time_.isValid())
+        {
+          const double cmd_age = (now - last_cmd_vel_time_).toSec();
+          const double linear_magnitude = std::sqrt(
+              latest_cmd_vel_.linear.x * latest_cmd_vel_.linear.x +
+              latest_cmd_vel_.linear.y * latest_cmd_vel_.linear.y +
+              latest_cmd_vel_.linear.z * latest_cmd_vel_.linear.z);
+          ROS_DEBUG_THROTTLE(2.0,
+                             "[RLControllerManager] autoControllerSwitch skipped: no active walking intent, cmd_age=%.3f, linear=(%.3f, %.3f, %.3f), |linear|=%.3f/%.3f, angular_z=%.3f/%.3f, reason=%s",
+                             cmd_age,
+                             latest_cmd_vel_.linear.x,
+                             latest_cmd_vel_.linear.y,
+                             latest_cmd_vel_.linear.z,
+                             linear_magnitude,
+                             auto_switch_config_.cmd_vel_linear_threshold,
+                             latest_cmd_vel_.angular.z,
+                             auto_switch_config_.cmd_vel_angular_threshold,
+                             reason.c_str());
+        }
+        return;
+      }
+
+      const bool target_is_walking_controller = target_name == auto_switch_config_.walking_controller;
+      const bool requires_stance =
+          !target_is_walking_controller || auto_switch_config_.walking_switch_require_stance;
+      if (requires_stance && switch_motion_state_ != SwitchMotionState::STANCE)
+      {
+        ROS_DEBUG_THROTTLE(2.0,
+                           "[RLControllerManager] autoControllerSwitch skipped: motion_state=%s, target=%s, reason=%s",
+                           switchMotionStateName(switch_motion_state_),
+                           target_name.c_str(),
+                           reason.c_str());
+        return;
+      }
+      if (!requires_stance && switch_motion_state_ != SwitchMotionState::STANCE)
+      {
+        ROS_DEBUG_THROTTLE(2.0,
+                           "[RLControllerManager] autoControllerSwitch allowing walking target without STANCE: motion_state=%s, target=%s, reason=%s",
+                           switchMotionStateName(switch_motion_state_),
+                           target_name.c_str(),
+                           reason.c_str());
+      }
+
+      if (target_name.empty() || target_name == current_controller_name_)
+      {
+        ROS_DEBUG_THROTTLE(2.0,
+                           "[RLControllerManager] autoControllerSwitch skipped: target=%s current=%s, reason=%s",
+                           target_name.c_str(), current_controller_name_.c_str(), reason.c_str());
+        return;
+      }
+
+      auto target_it = controllers_.find(target_name);
+      if (target_it == controllers_.end() || target_it->second == nullptr)
+      {
+        ROS_WARN_THROTTLE(1.0,
+                          "[RLControllerManager] autoControllerSwitch target controller not found: %s",
+                          target_name.c_str());
+        return;
+      }
+
+      if (target_it->second->getType() == RLControllerType::MPC)
+      {
+        ROS_WARN_THROTTLE(1.0,
+                          "[RLControllerManager] autoControllerSwitch target is not RL: %s",
+                          target_name.c_str());
+        return;
+      }
+
+      current_name = current_controller_name_;
+      last_auto_switch_attempt_time_ = now;
+    }
+
+    std::string message;
+    const bool success = handleSwitchControllerByNameRequest(target_name, true, message);
+    if (success)
+    {
+      {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        armAutoSwitchCommandBufferLocked(buffer_type, ros::Time::now());
+      }
+      ROS_INFO("[RLControllerManager] autoControllerSwitch succeeded: %s -> %s, reason: %s",
+               current_name.c_str(), target_name.c_str(), reason.c_str());
+    }
+    else
+    {
+      ROS_WARN("[RLControllerManager] autoControllerSwitch failed: %s -> %s, reason: %s, message: %s",
+               current_name.c_str(), target_name.c_str(), reason.c_str(), message.c_str());
     }
   }
 

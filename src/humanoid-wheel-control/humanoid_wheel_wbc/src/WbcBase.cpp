@@ -218,7 +218,9 @@ namespace ocs2
       // 计算位置和速度误差并进行故障检测和限幅处理
       vector_t pos_error = qDesired_.tail(info_.armDim).head(lowJoint_nums_) - qMeasured_.tail(info_.armDim).head(lowJoint_nums_);
       vector_t vel_error = vDesired_.tail(info_.armDim).head(lowJoint_nums_) - vMeasured_.tail(info_.armDim).head(lowJoint_nums_);
-      if(is_real_) processLowJointErrorsWithSafe(pos_error, vel_error);   // 真实环境下进行故障检测和限幅处理
+      // 增量式 VR 时跳过误差限幅，恢复为直接 PD（与 1.4.4 及更早一致）
+      const bool applyErrorClamp = is_real_ && !useVrArmAccelTask_;
+      if(applyErrorClamp) processLowJointErrorsWithSafe(pos_error, vel_error);   // 真实环境下进行故障检测和限幅处理
       
       // 计算 PD 控制量并限幅
       b = lowJointKp_.cwiseProduct(pos_error) + lowJointKd_.cwiseProduct(vel_error);
@@ -242,7 +244,9 @@ namespace ocs2
       // 计算位置和速度误差并进行故障检测和限幅处理
       vector_t pos_error = qDesired_.tail(arm_nums_) - qMeasured_.tail(arm_nums_);
       vector_t vel_error = vDesired_.tail(arm_nums_) - vMeasured_.tail(arm_nums_);
-      if(is_real_) processArmJointErrorsWithSafe(pos_error, vel_error);   // 真实环境下进行故障检测和限幅处理
+      // 增量式 VR 时跳过误差限幅，恢复为直接 PD（与 1.4.4 及更早一致）
+      const bool applyErrorClamp = is_real_ && !useVrArmAccelTask_;
+      if(applyErrorClamp) processArmJointErrorsWithSafe(pos_error, vel_error);   // 真实环境下进行故障检测和限幅处理
       
       // 计算 PD 控制量并限幅
       b = armKp.cwiseProduct(pos_error) + armKd.cwiseProduct(vel_error);

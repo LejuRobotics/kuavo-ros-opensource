@@ -10,12 +10,14 @@ at www.bridgedp.com.
 #include <ros/ros.h>
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <humanoid_plan_arm_trajectory/RobotActionState.h>
 #include <ocs2_core/Types.h>
 #include <humanoid_interface/common/Types.h>
 #include <humanoid_estimation/StateEstimateBase.h>
 #include <ocs2_core/misc/LoadData.h>
 #include <boost/property_tree/ptree.hpp>
 #include <mutex>
+#include <functional>
 
 namespace ocs2
 {
@@ -106,9 +108,12 @@ public:
   
   void setReuseWalkCommandInStance(bool enable);
   void setAmpHandController(bool enable);
+  void setCommandBufferCallback(std::function<bool()> callback);
 
   // Get current command data
   CommandDataRL getCurrentCommand() const;
+  CommandDataRL getPolicyCommand() const;
+  bool shouldBlockCommandExecution() const;
   
   // Load in-place stepping configuration from config file
   void loadInPlaceStepConfig(const std::string& config_file, bool verbose = false);
@@ -119,6 +124,8 @@ private:
   // ROS callbacks
   void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg);
   void gaitNameCallback(const std_msgs::String::ConstPtr& msg);
+  void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg);
+  bool isRobotActionActiveLocked(const ros::Time& now) const;
   
   // Smart stop detection functions
   bool checkSmartStopConditions(const vector_t& torsostate, const vector_t& feetPositions);
@@ -140,6 +147,7 @@ private:
   // ROS subscribers
   ros::Subscriber cmd_vel_sub_;
   ros::Subscriber gait_name_sub_;
+  ros::Subscriber robot_action_state_sub_;
   
   // Current command data
   CommandDataRL currentCommand_;
@@ -147,6 +155,10 @@ private:
   bool enabled_;
   bool reuse_walk_command_in_stance_;
   bool is_amp_hand_controller_{false};
+  bool robot_action_active_{false};
+  ros::Time last_robot_action_active_time_;
+  double robot_action_active_timeout_{0.5};
+  std::function<bool()> command_buffer_callback_;
 
   // Smart stop detection parameters
   bool smart_stop_enabled_;
@@ -158,6 +170,7 @@ private:
   geometry_msgs::Twist smoothed_cmd_vel_;
   geometry_msgs::Twist previous_cmd_vel_;
   std::string latest_gait_name_;
+  std::string pending_gait_name_;
   bool trot_latched_;
   double velocity_smooth_factor_;
   double max_velocity_change_;

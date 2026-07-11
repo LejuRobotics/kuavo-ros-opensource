@@ -767,23 +767,39 @@ namespace humanoid_controller
     mpcStartSub_ = controllerNh_.subscribe<std_msgs::Bool>("/start_mpc", 10, &humanoidController::startMpccallback, this);
     arm_joint_trajectory_.initialize(armNumReal_);
     mm_arm_joint_trajectory_.initialize(armNumReal_);
+    external_arm_target_pos_ = Eigen::VectorXd::Zero(armNumReal_);
     arm_joint_traj_sub_ = controllerNh_.subscribe<sensor_msgs::JointState>("/kuavo_arm_traj", 10, [this](const sensor_msgs::JointState::ConstPtr &msg)
       {
+        if(msg->name.size() != armNumReal_ || msg->position.size() != armNumReal_){
+          std::cerr << "The dimensin of arm joint pos is NOT equal to the armNumReal_!!" << msg->name.size() << " vs " << armNumReal_ << "\n";
+          return;
+        }
+        Eigen::VectorXd target_pos = Eigen::VectorXd::Zero(armNumReal_);
+        for(int i = 0; i < armNumReal_; i++)
+        {
+          target_pos[i] = msg->position[i] * M_PI / 180.0;
+        }
+        {
+          std::lock_guard<std::mutex> lock(external_arm_target_mutex_);
+          external_arm_target_pos_ = target_pos;
+          has_external_arm_target_ = true;
+          last_external_arm_target_time_ = ros::Time::now();
+        }
         if (is_rl_controller_ == false)
         {
-          if(msg->name.size() != armNumReal_){
-            std::cerr << "The dimensin of arm joint pos is NOT equal to the armNumReal_!!" << msg->name.size() << " vs " << armNumReal_ << "\n";
-            return;
-          }
           for(int i = 0; i < armNumReal_; i++)
           {
             // std::cout << "arm joint pos: " << msg->position[i] << std::endl;
-            arm_joint_trajectory_.pos[i] = msg->position[i] * M_PI / 180.0;
+            arm_joint_trajectory_.pos[i] = target_pos[i];
             if(msg->velocity.size() == armNumReal_)
               arm_joint_trajectory_.vel[i] = msg->velocity[i] * M_PI / 180.0;
             if(msg->effort.size() == armNumReal_)
               arm_joint_trajectory_.tau[i] = msg->effort[i];
           }
+        }
+        if (controller_manager_ && use_ros_arm_joint_trajectory_)
+        {
+          controller_manager_->notifyExternalArmControlActivity();
         }
         // std::cout << "arm joint pos: " << arm_joint_trajectory_.pos.size() << std::endl;
       });
@@ -902,6 +918,9 @@ namespace humanoid_controller
         &humanoidController::transportModeCommandCallback, this);
       // 初始化 RL 控制器管理系统
       controller_manager_ = std::make_unique<RLControllerManager>();
+      controller_manager_->registerWalkingCommandBlockCallback([this]() -> bool {
+        return shouldBlockWalkingCommandForExternalArmTarget();
+      });
       
       // 注册倒地状态回调函数
       controller_manager_->registerFallDownStateCallback([this](int state) {
@@ -1200,8 +1219,22 @@ namespace humanoid_controller
                 // ArmControlMode: KEEP=0, AUTO_SWING=1, EXTERN_CONTROL=2
                 // ArmController: 0=固定到当前动作, 1=自动摆手, 2=外部控制
                 int arm_controller_mode = static_cast<int>(mpcArmControlMode_desired_);
+                constexpr int kExternalArmControlMode = 2;
+                if (arm_controller_mode == kExternalArmControlMode)
+                {
+                  controller_manager_->notifyExternalArmControlActivity();
+                  if (!controller_manager_->isExternalControlCommandExecutionAllowed() ||
+                      controller_manager_->shouldBufferExternalControlCommand())
+                  {
+                    pending_external_arm_controller_mode_ = true;
+                    ROS_WARN_THROTTLE(2.0,
+                                      "[controller] Block arm_controller mode 2 until manipulation controller is active");
+                    return;
+                  }
+                }
+                pending_external_arm_controller_mode_ = false;
                 arm_controller->changeMode(arm_controller_mode);
-                ROS_INFO("[controller] Set arm_controller mode to %d (from mpcArmControlMode_desired_=%d)", 
+                ROS_INFO("[controller] Set arm_controller mode to %d (from mpcArmControlMode_desired_=%d)",
                          arm_controller_mode, static_cast<int>(mpcArmControlMode_desired_));
               }
             }
@@ -2043,8 +2076,129 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     
   }
   
+  bool humanoidController::tryApplyPendingExternalArmControllerMode()
+  {
+    constexpr int kExternalArmControlMode = 2;
+    if (!pending_external_arm_controller_mode_ || !controller_manager_)
+    {
+      return false;
+    }
+
+    controller_manager_->notifyExternalArmControlActivity();
+    if (!controller_manager_->isExternalControlCommandExecutionAllowed() ||
+        controller_manager_->shouldBufferExternalControlCommand())
+    {
+      ROS_DEBUG_THROTTLE(2.0,
+                         "[controller] Waiting to apply arm_controller mode 2 until manipulation controller is active");
+      return false;
+    }
+
+    auto* current_controller = controller_manager_->getCurrentController();
+    if (current_controller == nullptr)
+    {
+      return false;
+    }
+
+    auto* arm_controller = current_controller->getArmController();
+    if (arm_controller == nullptr)
+    {
+      return false;
+    }
+
+    arm_controller->changeMode(kExternalArmControlMode);
+    pending_external_arm_controller_mode_ = false;
+    ROS_INFO("[controller] Applied pending arm_controller mode 2 after auto controller switch");
+    return true;
+  }
+
+  bool humanoidController::shouldBlockWalkingCommandForExternalArmTarget() const
+  {
+    if (armNumReal_ <= 0)
+    {
+      return false;
+    }
+
+    Eigen::VectorXd external_arm_target_pos;
+    bool recent_external_arm_target = false;
+    {
+      std::lock_guard<std::mutex> lock(external_arm_target_mutex_);
+      if (external_arm_target_pos_.size() != armNumReal_)
+      {
+        return false;
+      }
+      external_arm_target_pos = external_arm_target_pos_;
+      recent_external_arm_target =
+          has_external_arm_target_ &&
+          last_external_arm_target_time_.isValid() &&
+          (ros::Time::now() - last_external_arm_target_time_).toSec() <= external_arm_target_hold_time_;
+    }
+
+    const bool external_arm_requested =
+        mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL ||
+        pending_external_arm_controller_mode_ ||
+        (use_ros_arm_joint_trajectory_ && recent_external_arm_target);
+    if (!external_arm_requested)
+    {
+      return false;
+    }
+
+    Eigen::VectorXd default_joint_pos;
+    if (controller_manager_)
+    {
+      auto* current_controller = controller_manager_->getCurrentController();
+      if (current_controller != nullptr)
+      {
+        default_joint_pos = current_controller->getDefaultJointPos();
+      }
+    }
+    if (default_joint_pos.size() != static_cast<int>(jointNumReal_ + waistNum_ + armNumReal_) &&
+        currentDefalutJointPosRL_.size() == static_cast<int>(jointNumReal_ + waistNum_ + armNumReal_))
+    {
+      default_joint_pos = currentDefalutJointPosRL_;
+    }
+
+    if (default_joint_pos.size() != static_cast<int>(jointNumReal_ + waistNum_ + armNumReal_))
+    {
+      return false;
+    }
+
+    const Eigen::VectorXd default_arm_pos =
+        default_joint_pos.segment(jointNumReal_ + waistNum_, armNumReal_);
+    const double max_error =
+        (external_arm_target_pos - default_arm_pos).lpNorm<Eigen::Infinity>();
+    if (max_error <= external_arm_default_position_tolerance_)
+    {
+      return false;
+    }
+
+    ROS_WARN_THROTTLE(2.0,
+                      "[ArmControl] Block walking cmd while external arm target is away from default pose: max_error=%.3f/%.3f, desired_mode=%d, ros_arm=%d, recent_target=%d",
+                      max_error,
+                      external_arm_default_position_tolerance_,
+                      static_cast<int>(mpcArmControlMode_desired_),
+                      static_cast<int>(use_ros_arm_joint_trajectory_),
+                      static_cast<int>(recent_external_arm_target));
+    return true;
+  }
+
   bool humanoidController::enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
+      constexpr int kExternalArmControlMode = 2;
+      if (controller_manager_ &&
+          req.control_mode == kExternalArmControlMode)
+      {
+        controller_manager_->notifyExternalArmControlActivity();
+        if (!controller_manager_->isExternalControlCommandExecutionAllowed() ||
+            controller_manager_->shouldBufferExternalControlCommand())
+        {
+          res.result = false;
+          res.mode = use_ros_arm_joint_trajectory_;
+          res.message = "External arm control is blocked until manipulation controller is active";
+          ROS_WARN_THROTTLE(2.0, "[ArmControl] Block external arm control until manipulation controller is active");
+          return true;
+        }
+      }
+
       bool old_mode = use_ros_arm_joint_trajectory_;
       use_ros_arm_joint_trajectory_ = req.control_mode;
 
@@ -2652,10 +2806,12 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     controller_manager_->setMpcStanceState(is_stance_mode_, current_gait_.name);
     controller_manager_->updateSwitchMotionState();
     controller_manager_->processPendingWalkingSwitchRequest();
+    controller_manager_->processAutoControllerSwitch();
 
     // is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
     is_rl_controller_ = !controller_manager_->isBaseControllerActive();  //waao：判断当前是否为rl
     current_controller_ptr_ = controller_manager_->getCurrentController();
+    tryApplyPendingExternalArmControllerMode();
 
     RLControllerType current_controller_type = controller_manager_->getCurrentControllerType();
     bool is_fall_stand_controller_active = current_controller_type == RLControllerType::FALL_STAND_CONTROLLER;

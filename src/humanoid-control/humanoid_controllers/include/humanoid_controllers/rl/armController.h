@@ -9,6 +9,7 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include <Eigen/Dense>
+#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -138,6 +139,7 @@ public:
      * @return 是否切换成功（false表示指令已缓存）
      */
     bool changeMode(int target_mode);
+    void setExternalCommandBufferCallback(std::function<bool()> callback);
     
     /**
      * @brief 获取当前控制模式
@@ -222,6 +224,11 @@ private:
      * @brief VR输入回调函数（处理/kuavo_arm_traj话题）
      */
     void jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg);
+
+    void applyBufferedMode2TargetIfReady();
+    void storeMode2Target(const sensor_msgs::JointState& msg,
+                          Eigen::VectorXd& target_q,
+                          Eigen::VectorXd& target_v) const;
     
     /**
      * @brief 更新模式0（固定到当前动作）的期望状态
@@ -324,6 +331,10 @@ private:
     Eigen::VectorXd mode2_target_q_;  // 模式2目标位置（滤波或插值后）
     Eigen::VectorXd mode2_target_v_;  // 模式2目标速度
     bool mode2_target_received_;      // 是否已收到模式2的目标
+    Eigen::VectorXd buffered_mode2_target_q_; // 自动切换缓冲期缓存的最新外部目标
+    Eigen::VectorXd buffered_mode2_target_v_;
+    bool buffered_mode2_target_received_{false};
+    std::function<bool()> external_command_buffer_callback_;
     ros::Time last_mode2_input_time_; // 上一次模式2输入的时间戳
     bool last_mode2_input_time_valid_; // 上一次时间戳是否有效
     

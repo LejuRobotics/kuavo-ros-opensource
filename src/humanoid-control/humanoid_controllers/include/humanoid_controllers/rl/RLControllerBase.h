@@ -17,6 +17,7 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <functional>
 #include <Eigen/Dense>
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
@@ -199,6 +200,8 @@ public:
   virtual bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const { return false; }
   virtual void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) {}
   virtual void setSwitchVelocityScale(double scale) {}
+  virtual void setCommandBufferCallback(std::function<bool()> callback) {}
+  virtual void setExternalCommandBufferCallback(std::function<bool()> callback) {}
   virtual bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const { return true; }
   virtual bool isInPlaceSteppingActive() const { return false; }
   virtual bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const { return false; }
