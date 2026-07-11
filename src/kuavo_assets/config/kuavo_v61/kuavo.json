@@ -253,9 +253,9 @@
     "dynamic_friction":1.0,
 
     "kuavo_wheel_torso_limit": {
-        "z_range": [0.74, 0.84],
+        "z_range": [0.74, 1.06],
         "x_range": [0.1, 0.2],
-        "pitch_range": [0.0, 20.0],
+        "pitch_range": [0.0, 30.0],
         "base_position": [0.0, 0.0, 0.74]
     },
 
