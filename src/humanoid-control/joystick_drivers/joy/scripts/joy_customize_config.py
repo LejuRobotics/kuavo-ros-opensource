@@ -1259,107 +1259,117 @@ class JoyCustomizeConfigNode:
 
     def execute_shell_type(self, action_config):
         """处理shell类型的自定义动作"""
-        rospy.loginfo(f"Executing shell command")
-        # 从配置中获取shell命令
-        shell_command = action_config.get("command", "")
+        # shell 不经过手臂动作执行器, 不发 robot_action_state(m1m2_action_active 唯一回 False 入口),
+        # 抢发的 True 不会被闭环清除, 故所有出口均需兜底解除避免永久 latch 屏蔽 cpp 切换。
+        try:
+            rospy.loginfo(f"Executing shell command")
+            # 从配置中获取shell命令
+            shell_command = action_config.get("command", "")
 
-        if shell_command:
-            try:
-                # 更安全地解析命令参数，避免索引错误
-                command_parts = shell_command.split(" ")
-                if len(command_parts) < 2:
-                    raise ValueError("Invalid command format")
+            if shell_command:
+                try:
+                    # 更安全地解析命令参数，避免索引错误
+                    command_parts = shell_command.split(" ")
+                    if len(command_parts) < 2:
+                        raise ValueError("Invalid command format")
 
-                ACTION_SESSION_NAME = command_parts[1].split("/")[-1].split(".")[0]
+                    ACTION_SESSION_NAME = command_parts[1].split("/")[-1].split(".")[0]
 
-                subprocess.run(["tmux", "kill-session", "-t", ACTION_SESSION_NAME],
-                               stderr=subprocess.DEVNULL)
+                    subprocess.run(["tmux", "kill-session", "-t", ACTION_SESSION_NAME],
+                                   stderr=subprocess.DEVNULL)
 
-                print(f"script_cmd: {shell_command}")
-                print(f"If you want to check the session, please run 'tmux attach -t {ACTION_SESSION_NAME}'")
-                # 仅导出存在的ROS相关环境变量，避免覆盖为空
-                export_lines = [
-                    f"export ROBOT_VERSION={ROBOT_VERSION}" if ROBOT_VERSION else "",
-                    f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
-                    f"export ROS_IP={ROS_IP}" if ROS_IP else "",
-                    f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
-                ]
-                export_lines = [line for line in export_lines if line]
+                    print(f"script_cmd: {shell_command}")
+                    print(f"If you want to check the session, please run 'tmux attach -t {ACTION_SESSION_NAME}'")
+                    # 仅导出存在的ROS相关环境变量，避免覆盖为空
+                    export_lines = [
+                        f"export ROBOT_VERSION={ROBOT_VERSION}" if ROBOT_VERSION else "",
+                        f"export ROS_MASTER_URI={ROS_MASTER_URI}" if ROS_MASTER_URI else "",
+                        f"export ROS_IP={ROS_IP}" if ROS_IP else "",
+                        f"export ROS_HOSTNAME={ROS_HOSTNAME}" if ROS_HOSTNAME else "",
+                    ]
+                    export_lines = [line for line in export_lines if line]
 
-                session_cmd = " && ".join([
-                    "source ~/.bashrc",
-                    f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash",
-                    *export_lines,
-                    shell_command,
-                ]) + "; exec bash"
+                    session_cmd = " && ".join([
+                        "source ~/.bashrc",
+                        f"source {KUAVO_ROS_CONTROL_WS_PATH}/devel/setup.bash",
+                        *export_lines,
+                        shell_command,
+                    ]) + "; exec bash"
 
-                tmux_cmd = [
-                    "tmux", "new-session",
-                    "-s", ACTION_SESSION_NAME,
-                    "-d",
-                    session_cmd
-                ]
+                    tmux_cmd = [
+                        "tmux", "new-session",
+                        "-s", ACTION_SESSION_NAME,
+                        "-d",
+                        session_cmd
+                    ]
 
-                subprocess.Popen(
-                    tmux_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
+                    subprocess.Popen(
+                        tmux_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
 
-                rospy.sleep(5.0)
+                    rospy.sleep(5.0)
 
-                result = subprocess.run(["tmux", "has-session", "-t", ACTION_SESSION_NAME],
-                                        capture_output=True)
-                if result.returncode == 0:
-                    print(f"Started {ACTION_SESSION_NAME} in tmux session")
-                else:
-                    print(f"Failed to start {ACTION_SESSION_NAME}")
-                    raise Exception(f"Failed to start {ACTION_SESSION_NAME}")
+                    result = subprocess.run(["tmux", "has-session", "-t", ACTION_SESSION_NAME],
+                                            capture_output=True)
+                    if result.returncode == 0:
+                        print(f"Started {ACTION_SESSION_NAME} in tmux session")
+                    else:
+                        print(f"Failed to start {ACTION_SESSION_NAME}")
+                        raise Exception(f"Failed to start {ACTION_SESSION_NAME}")
 
-            except Exception as e:
-                rospy.logerr(f"Error executing shell command '{shell_command}': {e}")
-                raise
-        else:
-            rospy.logwarn(f"No shell_command found for action")
+                except Exception as e:
+                    rospy.logerr(f"Error executing shell command '{shell_command}': {e}")
+                    raise
+            else:
+                rospy.logwarn(f"No shell_command found for action")
+        finally:
+            self._release_m1m2_action_active()
 
     def execute_dance_type(self, action_config):
         """处理dance类型的自定义动作，切换到指定舞蹈控制器"""
-        dance_name = action_config.get("dance_name", "")
-        if not dance_name:
-            rospy.logwarn("No dance_name specified for dance action")
-            return
-        # json 里的 dance_name 可能是中文展示名, 切换/重启/比较/run_id 都必须用映射后的
-        # 英文控制器名(控制器自身发布的 dance_trajectory_state.dance_name 也是英文名)。
-        controller_name = self._resolve_dance_controller_name(dance_name)
-        # 动作执行期间禁止切换舞蹈控制器，避免与正在播放的手臂/tact 动作冲突
-        if self.robot_action_executing:
-            rospy.logwarn(f"Skipping dance switch to '{dance_name}' ({controller_name}): another action is currently executing")
-            return
-        music_names = action_config.get("music_name", [])
-        service_name = "/humanoid_controller/switch_to_dance_controller"
-        current_controller = self._get_current_controller_name()
-        self._prepare_dance_music_pending(controller_name, music_names)
-        if current_controller == controller_name:
-            if not self._restart_dance_controller(controller_name):
-                self._clear_dance_music_pending()
-            return
+        # 舞蹈走 RL 控制器, 不发 robot_action_state(m1m2_action_active 唯一回 False 入口),
+        # 抢发的 True 不会被闭环清除, 故所有出口均需兜底解除避免永久 latch 屏蔽 cpp 切换。
         try:
-            rospy.wait_for_service(service_name, timeout=1.0)
-            switch_client = rospy.ServiceProxy(service_name, SetString)
-            req = SetStringRequest()
-            req.data = controller_name
-            response = switch_client(req)
-            if response.success:
-                rospy.loginfo(f"[JoyCustomize] Dance switch success: {response.message}")
-            else:
-                rospy.logwarn(f"[JoyCustomize] Dance switch failed: {response.message}")
+            dance_name = action_config.get("dance_name", "")
+            if not dance_name:
+                rospy.logwarn("No dance_name specified for dance action")
+                return
+            # json 里的 dance_name 可能是中文展示名, 切换/重启/比较/run_id 都必须用映射后的
+            # 英文控制器名(控制器自身发布的 dance_trajectory_state.dance_name 也是英文名)。
+            controller_name = self._resolve_dance_controller_name(dance_name)
+            # 动作执行期间禁止切换舞蹈控制器，避免与正在播放的手臂/tact 动作冲突
+            if self.robot_action_executing:
+                rospy.logwarn(f"Skipping dance switch to '{dance_name}' ({controller_name}): another action is currently executing")
+                return
+            music_names = action_config.get("music_name", [])
+            service_name = "/humanoid_controller/switch_to_dance_controller"
+            current_controller = self._get_current_controller_name()
+            self._prepare_dance_music_pending(controller_name, music_names)
+            if current_controller == controller_name:
+                if not self._restart_dance_controller(controller_name):
+                    self._clear_dance_music_pending()
+                return
+            try:
+                rospy.wait_for_service(service_name, timeout=1.0)
+                switch_client = rospy.ServiceProxy(service_name, SetString)
+                req = SetStringRequest()
+                req.data = controller_name
+                response = switch_client(req)
+                if response.success:
+                    rospy.loginfo(f"[JoyCustomize] Dance switch success: {response.message}")
+                else:
+                    rospy.logwarn(f"[JoyCustomize] Dance switch failed: {response.message}")
+                    self._clear_dance_music_pending()
+            except rospy.ServiceException as e:
+                rospy.logerr(f"[JoyCustomize] Service call to '{service_name}' failed: {e}")
                 self._clear_dance_music_pending()
-        except rospy.ServiceException as e:
-            rospy.logerr(f"[JoyCustomize] Service call to '{service_name}' failed: {e}")
-            self._clear_dance_music_pending()
-        except rospy.ROSException as e:
-            rospy.logerr(f"[JoyCustomize] Service '{service_name}' not available: {e}")
-            self._clear_dance_music_pending()
+            except rospy.ROSException as e:
+                rospy.logerr(f"[JoyCustomize] Service '{service_name}' not available: {e}")
+                self._clear_dance_music_pending()
+        finally:
+            self._release_m1m2_action_active()
 
     def _execute_customize_action(self, action_key: str) -> None:
         """执行自定义动作"""
