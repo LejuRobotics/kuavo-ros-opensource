@@ -103,6 +103,7 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="enable_base_emergency_stop" value="true"/>
     <param name="robot_type"      value="$(arg robot_type)"/>
     <param name="nodelet_robot_type"      value="$(arg nodelet_robot_type)"/>
     <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>

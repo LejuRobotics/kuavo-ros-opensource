@@ -17,6 +17,7 @@
 #include <std_srvs/SetBool.h>
 #include <geometry_msgs/Twist.h>
 #include <angles/angles.h>
+#include <leju_mobile_base_msgs/BaseCmdVelStatus.h>
 
 #include "humanoid_wheel_interface/estimators/ContinuousEulerAnglesFromMatrix.h"
 
@@ -186,6 +187,14 @@ namespace humanoidController_wheel_wbc
     drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
     robot_config_ = drake_interface_->getRobotConfig();
     kuavo_settings_ = drake_interface_->getKuavoSettings();
+
+    bool hasQibeng = false;
+    for (const auto& eef_type : kuavo_settings_.hardware_settings.end_effector_type) {
+      if (eef_type == EndEffectorType::qibeng) {
+        hasQibeng = true;
+        break;
+      }
+    }
     /************** Initialize WBC **********************/
     wheel_wbc_ = std::make_shared<mobile_manipulator::ContactForceWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
     wheel_wbc_->setArmNums(armNum_);
@@ -322,10 +331,20 @@ namespace humanoidController_wheel_wbc
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    mujoco_q[11] = 0.2918;
-    mujoco_q[14] = -0.8236;
-    mujoco_q[18] = 0.2918;
-    mujoco_q[21] = -0.8236;
+    if ((robotVersion_ == 62 || robotVersion_ == 63) && hasQibeng)
+    {
+      mujoco_q[11] = 0.5236;
+      mujoco_q[14] = -1.57;
+      mujoco_q[18] = 0.5236;
+      mujoco_q[21] = -1.57;
+    }
+    else
+    {
+      mujoco_q[11] = 0.2618;
+      mujoco_q[14] = -0.5236;
+      mujoco_q[18] = 0.2618;
+      mujoco_q[21] = -0.5236;
+    }
 
     std::vector<double> robot_init_state_param;
     for (int i = 0; i < mujoco_q.size(); i++)
@@ -380,6 +399,7 @@ namespace humanoidController_wheel_wbc
     jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
+    stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
 
     // 发布初始速度控制开关状态
     {
@@ -480,6 +500,21 @@ namespace humanoidController_wheel_wbc
 
     // 初始化底盘调度模式服务客户端
     dispatch_mode_client_ = controllerNh_.serviceClient<leju_mobile_base_msgs::SetDispatchMode>("/move_base/set_dispatch_mode");
+    // ========== 底盘急停保护初始化 ==========
+    if (controllerNh_.hasParam("/enable_base_emergency_stop"))
+    {
+      controllerNh_.getParam("/enable_base_emergency_stop", enable_base_emergency_stop_);
+    }
+    ROS_INFO("[humanoidControllerWheelWbc] enable_base_emergency_stop: %s", 
+              enable_base_emergency_stop_ ? "true" : "false");
+
+    if (enable_base_emergency_stop_)
+    {
+      baseCmdVelStatusSub_ = controllerNh_.subscribe<leju_mobile_base_msgs::BaseCmdVelStatus>(
+          "/move_base/base_cmd_vel_status", 10, 
+          &humanoidControllerWheelWbc::baseCmdVelStatusCallback, this);
+      ROS_INFO("[humanoidControllerWheelWbc] Subscribed to /move_base/base_cmd_vel_status for base emergency stop protection");
+    }
 
     return true;
   }
@@ -768,6 +803,14 @@ namespace humanoidController_wheel_wbc
 
   void humanoidControllerWheelWbc::update(const ros::Time &time, const ros::Duration &dfd)
   {
+    static bool base_emergency_handled_ = false;
+    if (enable_base_emergency_stop_ && base_emergency_triggered_.load() && !base_emergency_handled_)
+    {
+      base_emergency_handled_ = true;
+      publishStopRobot();
+      return;
+    }
+
     static const double firstTime = time.toSec();
     double curTime = time.toSec() - firstTime;
     static double lastTime = curTime - dt_;
@@ -2315,6 +2358,45 @@ namespace humanoidController_wheel_wbc
         ros_logger_->publishVector("/humanoid_wheel/" + eeFrame + "_error_6d", eeError6d);
       }
     }
+  }
+
+  void humanoidControllerWheelWbc::baseCmdVelStatusCallback(const leju_mobile_base_msgs::BaseCmdVelStatus::ConstPtr& msg)
+  {
+    if (!enable_base_emergency_stop_)
+    {
+      return;
+    }
+
+    if (msg->reason == leju_mobile_base_msgs::BaseCmdVelStatus::REASON_DISABLED ||
+        msg->reason == leju_mobile_base_msgs::BaseCmdVelStatus::REASON_OTHER)
+    {
+      if (!base_emergency_triggered_.load())
+      {
+        ROS_ERROR("[humanoidControllerWheelWbc] Base velocity command ineffective! reason=%d, description=%s",
+                  msg->reason, msg->description.c_str());
+        std::cerr << "[EMERGENCY STOP] Base velocity command ineffective! reason=" 
+                  << static_cast<int>(msg->reason) << ", description=" << msg->description << std::endl;
+
+        base_emergency_triggered_.store(true);
+      }
+    }
+    else
+    {
+      base_emergency_triggered_.store(false);
+    }
+  }
+
+  void humanoidControllerWheelWbc::publishStopRobot()
+  {
+    ROS_ERROR("[humanoidControllerWheelWbc] Publishing stop_robot messages (5 times)");
+    for (int i = 0; i < 5; ++i)
+    {
+      std_msgs::Bool msg;
+      msg.data = true;
+      stopRobotPub_.publish(msg);
+      ros::Duration(0.1).sleep();
+    }
+    ROS_ERROR("[humanoidControllerWheelWbc] stop_robot messages published");
   }
 
 } // namespace humanoidController_wheel_wbc

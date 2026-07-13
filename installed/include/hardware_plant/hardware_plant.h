@@ -306,6 +306,8 @@ private:
 
     std::string robot_module_;
 
+    int head_ruiwo_idx_start_ = -1;         // 头部电机在 ruiwo 数组中的起始索引
+
     // 实际EC电机数目
     uint32_t countECMasters = 0;
     

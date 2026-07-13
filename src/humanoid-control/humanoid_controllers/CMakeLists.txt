@@ -46,6 +46,7 @@ find_package(catkin REQUIRED
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
+        leju_mobile_base_msgs
         )
 find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -137,6 +138,7 @@ catkin_package(
                 leju_mobile_base_msgs
                 kuavo_common
                 kuavo_solver
+                leju_mobile_base_msgs
 )
 
 ###########
