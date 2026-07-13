@@ -1281,6 +1281,13 @@ namespace ocs2
       callSwitchToDanceSrvByName(kFixedDance2Name);
     }
 
+    // RB+B（roban）：固定舞蹈3 -- 爱情鸟。音乐同上自动播放。
+    void triggerFixedDance3()
+    {
+      ROS_INFO("[JoyControl] RB+B: fixed dance 3 aiqingniao (%s)", kFixedDance3Name.c_str());
+      callSwitchToDanceSrvByName(kFixedDance3Name);
+    }
+
     // RB+B（roban）：呼应 LB+B。把被 LB+B 定住（停在某帧）的手臂切回 auto 模式以回归默认姿态。
     // 动作只在 MPC 控制器下执行，做 tact 时手臂为外部控制(2)，此处只需把手臂控制模式置 auto(1)。
     void recoverArmToAutoMode()
@@ -1433,9 +1440,13 @@ namespace ocs2
       {
         if (IS_ROBAN(rb_version_))
         {
-          // roban: 预留给太极(舞蹈)。太极舞蹈尚未就绪，暂不触发真实控制器，
-          // 待舞蹈文件注册后接入(参照 RB+A 芭蕾 / RB+Y 新疆舞 的 triggerFixedDance*)。
-          ROS_WARN("[JoyControl] RB+B 太极: 预留, 舞蹈未就绪, 暂不响应");
+          // 动作执行期间禁止切换舞蹈控制器（与 RB+A / RB+Y 同口径）
+          if (robot_action_executing_)
+          {
+            ROS_WARN("[JoyControl] RB+B: action executing, dance switch rejected");
+            return true;
+          }
+          triggerFixedDance3();      // 固定舞蹈3: 爱情鸟
           return true;
         }
         callSetFallDownStateSrv(); // 非 roban: 触发倒地
@@ -2912,7 +2923,10 @@ namespace ocs2
     // RB+Y 出厂固定舞蹈2：新疆舞。要求 rl_controllers.yaml 已注册同名 controller，
     // 且 /home/lab/.config/lejuconfig/music/dance_xinjiang.wav 存在。
     const std::string kFixedDance2Name{"dance_xinjiang"};
-    
+    // RB+B 出厂固定舞蹈3：爱情鸟。要求 rl_controllers.yaml 已注册同名 controller，
+    // 且 /home/lab/.config/lejuconfig/music/dance_aiqingniao.wav 存在。
+    const std::string kFixedDance3Name{"dance_aiqingniao"};
+
     // 命令执行相关
     std::map<std::string, Command_t> commands_map_;
     std::string repo_root_path_;
