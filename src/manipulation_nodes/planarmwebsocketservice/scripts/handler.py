@@ -1112,11 +1112,13 @@ def plan_arm_state_callback(msg: planArmState):
 
 def update_preview_progress(response: Response, stop_event: threading.Event):
     payload = response.payload
-    update_interval = 0.001 
+    update_interval = 0.001
     global plan_arm_state_progress, plan_arm_state_status
     last_progress = None
     last_status = None
-    
+    _base_progress = None
+    _msg_seq = 0  # 递增序号，确保每条消息的 JSON 不同，绕过 process_responses 去重
+
     while not stop_event.is_set():
         current_progress = plan_arm_state_progress
         current_status = plan_arm_state_status
@@ -1124,14 +1126,25 @@ def update_preview_progress(response: Response, stop_event: threading.Event):
         if current_progress != last_progress or current_status != last_status:
             last_progress = current_progress
             last_status = current_status
-            
-            payload.data["progress"] = current_progress
+
+            if _base_progress is None and current_progress > 0:
+                _base_progress = current_progress
+
+            if _base_progress is not None:
+                payload.data["progress"] = max(0, current_progress - _base_progress)
+            else:
+                payload.data["progress"] = 0
+
             payload.data["status"] = 0 if current_status else 1
-            response_queue.put(response)
-            
+            payload.data["msg_seq"] = _msg_seq
+            _msg_seq += 1
+            response_queue.put(Response(
+                payload=Payload(cmd=payload.cmd, data=payload.data.copy()),
+                target=response.target
+            ))
             if current_status:
                 return
-        
+
         time.sleep(update_interval)
 
 async def websocket_message_handler(
@@ -1217,7 +1230,7 @@ async def preview_action_handler(
         action_name = action_name[:-5]
 
     # 通过 autostart 的统一入口执行 tact，不再直接调 bezier
-    # 这样 /kuavo_arm_traj 由 autostart 独占发布，消除双发冲突
+    # 通过 autostart 的统一入口执行 tact，这样 /kuavo_arm_traj 由 autostart 独占发布
     success, message = execute_arm_action_client(action_name)
     if not success:
         payload.data["code"] = 4
@@ -1226,7 +1239,12 @@ async def preview_action_handler(
         response_queue.put(response)
         return
 
-    time.sleep(0.5)
+    # 重置全局进度状态，避免残留上一个动作的 is_finished=True
+    # 导致 update_preview_progress 线程启动后立即退出
+    global plan_arm_state_progress, plan_arm_state_status
+    plan_arm_state_progress = 0
+    plan_arm_state_status = False
+
     # If valid, create initial response
     response = Response(
         payload=payload,

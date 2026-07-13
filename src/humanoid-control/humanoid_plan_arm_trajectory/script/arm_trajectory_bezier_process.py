@@ -1547,6 +1547,10 @@ class ArmTrajectoryBezierDemo:
             rospy.sleep(0.05)  # 给旧线程一点时间退出
             self.interrupt_flag = False
 
+        # 无论之前是什么状态，执行新动作前必须清掉 interrupt_flag
+        # 否则 run() 会因 while self.arm_flag and not self.interrupt_flag 立即退出
+        self.interrupt_flag = False
+
         file_path = f"{self.action_files_path}/{action_name}.tact"
         data = self.load_json_file(file_path)
         if not data:

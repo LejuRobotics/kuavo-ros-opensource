@@ -2089,7 +2089,11 @@ namespace ocs2
       // 下游所有分支（posture 与 non-posture）都拿不到 yaw 输入
       vector_t axis_local = joystick_origin_axis;
       if (posture_control_mode_)
+      {
+        axis_local(0) = 0.0;
+        axis_local(1) = 0.0;
         axis_local(3) = 0.0;
+      }
       Eigen::VectorXd limit_vector_negative(4);
       limit_vector_negative << c_relative_base_limit_[0], c_relative_base_limit_[1],
                                std::fabs(squatHeightMin_), c_relative_base_limit_[3];
