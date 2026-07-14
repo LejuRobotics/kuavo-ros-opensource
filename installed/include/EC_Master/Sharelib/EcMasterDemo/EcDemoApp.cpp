@@ -75,7 +75,7 @@
 #define JOINT_CSV_KP 0x3504   //速度环P增益
 #define JOINT_CSV_KI 0x3505   //速度环积分增益
 #define JOINT_CSP_OFFSET 0x3502  //位置环前馈
-#define JOINT_CSP_COMMAND_FILTER 0x3532  //位置指令滤波
+#define JOINT_CSP_COMMAND_FILTER 0x3520  //位置指令滤波
 #define ENCODER_FEEDBACK_MODE 0x381C  //编码器工作模式
 #define MOTOR_PARAMETER_CODE 0x3E01 //电机参数代码
 #define DRIVER_SAVE_SETTING_PARAMETER 0x313D  //驱动器保存参数
@@ -429,7 +429,7 @@ bool ReadSingleSdo(const uint8_t SlaveId, const uint16_t ObIndex, const uint16_t
   EC_T_DWORD dwRes = EC_E_NOERROR;
   uint8_t buf[4];
   uint32_t outdata_len;
-  dwRes = emCoeSdoUpload(0, SlaveId, ObIndex, 0, buf, 4, &outdata_len, 100, 0);
+  dwRes = emCoeSdoUpload(0, SlaveId, ObIndex, SubIndex, buf, 4, &outdata_len, 100, 0);
   if (dwRes != 0)
   {
     return false;
@@ -1832,6 +1832,15 @@ bool isMotorEnable(void)
 uint32_t getNumMotorSlave(void)
 {
   return num_motor_slave;
+}
+
+uint8_t getMotorSlaveId(uint32_t index)
+{
+  if (index >= num_motor_slave)
+  {
+    return 0;
+  }
+  return g_motor_id[index].slave_id;
 }
 
 void setEcEncoderRange(uint32_t *encoder_range_set, uint16_t num)

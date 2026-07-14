@@ -49,6 +49,9 @@ struct HardwareParam {
     bool only_half_up_body{false};
     int teach_pendant_{0};
     std::string kuavo_assets_path{""};
+    // 启动期 EC 驱动器固件与参数校验（load_kuavo_real.launch 启动硬件层后执行）
+    bool check_firmware_param_{true};  // 是否执行校验
+    bool allow_mismatch_{false};        // true=有 mismatch 仅告警不阻断启动
 };
 
 enum ImuType

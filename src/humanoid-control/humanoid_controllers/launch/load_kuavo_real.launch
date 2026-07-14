@@ -59,7 +59,11 @@
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
-    
+
+    <!-- 启动期 EC 驱动器固件与参数校验 -->
+    <arg name="check_firmware_param" default="false" doc="硬件层启动后对 youda EC 驱动器固件版本与全量参数进行校验，与标准定义 JSON 比对；默认关闭，需要时显式 check_firmware_param:=true"/>
+    <arg name="allow_mismatch" default="false" doc="true=校验不一致时仅告警继续启动；false=严格模式，不一致即中止启动"/>
+
     <!-- RL相关参数 -->
     <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
@@ -109,6 +113,8 @@
     
     <!-- teach_pendant=1, teach pendant mode -->
     <param name="teach_pendant"  value="$(arg teach_pendant)"/>
+    <param name="check_firmware_param" value="$(arg check_firmware_param)"/>
+    <param name="allow_mismatch"       value="$(arg allow_mismatch)"/>
 
     <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
     <param name="arm_move_spd_half_up_body" value="$(arg arm_move_spd_half_up_body)"/>
