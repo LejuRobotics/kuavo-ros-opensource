@@ -1,0 +1,14 @@
+# Service to query all available laser scan topics
+# Returns list of scan topics with their names and active publishing status
+
+# Request
+# Empty request - returns all laser scan topics
+
+---
+
+# Response
+bool success                      # Whether query was successful
+string message                    # Status message
+string[] topic_names              # List of laser scan topic names
+bool[] is_publishing              # Publishing status for each topic (true=actively publishing)
+uint32 error_code                 # Error code (0 if success)

@@ -365,6 +365,7 @@ except (rospkg.ResourceNotFound, ImportError) as e:
     from robot_version import RobotVersion
 from kuavo_ros_interfaces.srv import planArmTrajectoryBezierCurve, stopPlanArmTrajectory, planArmTrajectoryBezierCurveRequest, ocs2ChangeArmCtrlMode
 from kuavo_ros_interfaces.msg import planArmState, jointBezierTrajectory, bezierCurveCubicPoint, robotHeadMotionData
+from humanoid_plan_arm_trajectory.srv import ExecuteArmAction, ExecuteArmActionRequest
 from kuavo_msgs.msg import robotHandPosition, robotWaistControl
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import JointState
@@ -389,6 +390,7 @@ from std_msgs.msg import String
 # 导航功能需要的消息类型
 from sensor_msgs.msg import PointCloud2
 import re
+import unicodedata
 
 # Replace multiprocessing values with simple variables
 plan_arm_state_progress = 0
@@ -776,7 +778,11 @@ class KuavoRobotSim(KuavoRobot):
         return self.get_robot_launch_status()
     
     def get_robot_launch_status(self)->Tuple[bool, str]:
-        if check_rosnode_exists("/humanoid_sqp_mpc") and check_rosnode_exists("/nodelet_controller"):
+        try:
+            running_nodes = rosnode.get_node_names()
+        except Exception:
+            return True, "unlaunch"
+        if "/humanoid_sqp_mpc" in running_nodes and "/nodelet_controller" in running_nodes:
             return True, "launched"
         else:
             return True, "unlaunch"
@@ -804,9 +810,13 @@ else:
 
 MUSIC_FILE_FOLDER = os.path.join(home_path, '.config', 'lejuconfig', 'music')
 ACTION_FILE_FOLDER = os.path.join(home_path, '.config', 'lejuconfig', 'action_files')
+CREATOR_DANCE_UPLOAD_DIR = os.path.join(home_path, '.config', 'lejuconfig', 'creator_dance_upload')
+# 中文展示名(= zip 去后缀名)-> 英文控制器名 的映射, 供 joy 运行时查表。
+DANCE_NAME_MAP_PATH = os.path.join(CREATOR_DANCE_UPLOAD_DIR, 'dance_name_map.json')
 try:
     Path(MUSIC_FILE_FOLDER).mkdir(parents=True, exist_ok=True)
     Path(ACTION_FILE_FOLDER).mkdir(parents=True, exist_ok=True)
+    Path(CREATOR_DANCE_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 except Exception as e:
     print(f"创建目录时出错: {e}")
 
@@ -949,69 +959,11 @@ def _update_current_arm_joint_state(joint_msg, hand_msg):
 
     current_arm_joint_state = [round(v, 2) for v in current_arm_joint_state]
 
-def traj_callback(msg):
-    global ocs2_joint_state
-    if len(msg.points) == 0:
-        return
-    point = msg.points[0]
-    
-    if robot_version.major() == 5:
-        ocs2_joint_state.name = joint_names
-        ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
-        ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
-        ocs2_joint_state.effort = [0] * 14
-        ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
-        ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
-        ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:28]]
-        if len(point.positions) > 28:
-            ocs2_waist_state.header.stamp = rospy.Time.now()
-            ocs2_waist_state.data.data = [math.degrees(pos) for pos in point.positions[28:]]
-        else:
-            ocs2_waist_state.data.data = []
-    elif robot_version.major() == 4:
-        ocs2_joint_state.name = joint_names
-        ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:14]]
-        ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:14]]
-        ocs2_joint_state.effort = [0] * 14
-        ocs2_hand_state.left_hand_position = [int(math.degrees(pos)) for pos in point.positions[14:20]]
-        ocs2_hand_state.right_hand_position = [int(math.degrees(pos)) for pos in point.positions[20:26]]
-        ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[26:]]
-
-    elif robot_version.major() == 1:
-        ocs2_joint_state.name = joint_names
-        ocs2_joint_state.position = [math.degrees(pos) for pos in point.positions[:8]]
-        ocs2_joint_state.velocity = [math.degrees(vel) for vel in point.velocities[:8]]
-        ocs2_joint_state.effort = [0] * 8
-
-        if len(point.positions) == ROBAN_TACT_LENGTH:
-            ocs2_hand_state.left_hand_position = [max(0, int(math.degrees(pos))) for pos in point.positions[8:14]]  # 无符号整数
-            ocs2_hand_state.right_hand_position = [max(0, int(math.degrees(pos))) for pos in
-                                                point.positions[14:20]]  # 无符号整数
-            
-            ocs2_head_state.joint_data = [math.degrees(pos) for pos in point.positions[20:22]]
-
-            ocs2_waist_state.header.stamp = rospy.Time.now()
-            ocs2_waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
-
-
-kuavo_arm_traj_pub = None
 control_hand_pub = None
 control_head_pub = None
 control_waist_pub = None
 update_h12_config_pub = None
 update_joy_config_pub = None
-
-def timer_callback(event):
-    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub
-    if g_robot_type == "ocs2" and len(ocs2_joint_state.position) > 0 and plan_arm_state_status is False and vr_manager.recording_state != vr_manager.RecordingState.CONVERTING:
-        if len(ocs2_joint_state.position) != 0:
-            kuavo_arm_traj_pub.publish(ocs2_joint_state)
-        if len(ocs2_hand_state.left_hand_position) != 0 or len(ocs2_hand_state.right_hand_position) != 0:
-            control_hand_pub.publish(ocs2_hand_state)
-        if len(ocs2_head_state.joint_data) != 0:
-            control_head_pub.publish(ocs2_head_state)
-        if len(ocs2_waist_state.data.data) != 0:
-            control_waist_pub.publish(ocs2_waist_state)
 
 def robot_status_timer_callback(event):
     """
@@ -1020,8 +972,7 @@ def robot_status_timer_callback(event):
     update_robot_status_from_service()
 
 def init_publishers():
-    global kuavo_arm_traj_pub, control_hand_pub, control_head_pub, control_waist_pub, update_h12_config_pub, update_joy_config_pub, load_map_pub
-    kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
+    global control_hand_pub, control_head_pub, control_waist_pub, update_h12_config_pub, update_joy_config_pub, load_map_pub
     control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1, tcp_nodelay=True)
     control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1, tcp_nodelay=True)
     control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, tcp_nodelay=True)
@@ -1041,17 +992,13 @@ async def init_ros_node():
     rospy.init_node("arm_action_server", anonymous=True, disable_signals=True)
     robot_plan_arm_state_topic_name = robot_settings[g_robot_type]["arm_traj_state_topic_name"]
     rospy.Subscriber(robot_plan_arm_state_topic_name, planArmState, plan_arm_state_callback)
-    rospy.Subscriber('/bezier/arm_traj', JointTrajectory, traj_callback, queue_size=1, tcp_nodelay=True)
-    # rospy.Subscriber('/humanoid_mpc_observation', mpc_observation, mpc_obs_callback)
+    # /bezier/arm_traj 订阅已移除：websocket 不再负责轨迹转发，由 autostart 统一处理
     rospy.Subscriber('/sensors_data_raw', sensorsData, sensors_data_callback, queue_size=1, tcp_nodelay=True)
     rospy.Subscriber('/dexhand/state', JointState, robot_hand_callback, queue_size=1, tcp_nodelay=True)
 
     init_publishers()
 
-    # Create a timer that calls timer_callback every 10ms (100Hz)
-    rospy.Timer(rospy.Duration(0.01), timer_callback)
-
-    # Create a timer that calls robot_status_timer_callback every 1 second to update robot status
+    # tick 由 100Hz 降到 1Hz：不再需要转发手臂轨迹，只保留机器人状态更新
     rospy.Timer(rospy.Duration(1.0), robot_status_timer_callback)
 
     print("ROS node initialized")
@@ -1092,14 +1039,14 @@ def plan_arm_trajectory_bezier_curve_client(req):
 
 def stop_plan_arm_trajectory_client():
     service_name = robot_settings[g_robot_type]["stop_plan_arm_trajectory_service_name"]
-    
+
     # Check if service exists
     try:
         rospy.wait_for_service(service_name, timeout=1.0)
     except Exception as e:
         rospy.logerr(f"Service {service_name} not available")
         return False
-    
+
     try:
         if g_robot_type == "ocs2":
             stop_service = rospy.ServiceProxy(service_name, Trigger)
@@ -1110,6 +1057,42 @@ def stop_plan_arm_trajectory_client():
         return
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")
+        return False
+
+def execute_arm_action_client(action_name):
+    """调用 autostart 的 /execute_arm_action 服务执行 tact 动作"""
+    service_name = '/execute_arm_action'
+    try:
+        rospy.wait_for_service(service_name, timeout=1.0)
+    except rospy.ROSException:
+        rospy.logerr(f"Service {service_name} not available")
+        return False, "手臂执行服务不可用，请确认 autostart 节点已启动"
+
+    try:
+        req = ExecuteArmActionRequest()
+        req.action_name = action_name
+        client = rospy.ServiceProxy(service_name, ExecuteArmAction)
+        res = client(req)
+        return res.success, res.message
+    except rospy.ServiceException as e:
+        rospy.logerr(f"Service {service_name} call failed: {e}")
+        return False, f"手臂执行服务调用失败: {e}"
+
+def interrupt_arm_traj_client():
+    """调用 autostart 的 /interrupt_arm_traj 服务中断当前动作"""
+    service_name = '/interrupt_arm_traj'
+    try:
+        rospy.wait_for_service(service_name, timeout=1.0)
+    except rospy.ROSException:
+        rospy.logerr(f"Service {service_name} not available")
+        return False
+
+    try:
+        client = rospy.ServiceProxy(service_name, Trigger)
+        client()
+        return True
+    except rospy.ServiceException as e:
+        rospy.logerr(f"Service {service_name} call failed: {e}")
         return False
 @dataclass
 class Payload:
@@ -1227,22 +1210,22 @@ async def preview_action_handler(
         response = Response(payload=payload, target=websocket)
         response_queue.put(response)
         return
-    
-    start_frame_time, end_frame_time = get_start_end_frame_time(action_file_path)
 
-    if g_robot_type == "ocs2":
-        action_frames = frames_to_custom_action_data_ocs2(action_file_path, start_frame_time, current_arm_joint_state)
-        end_frame_time += 1
-        call_change_arm_ctrl_mode_service(2)
-    else:
-        action_frames = frames_to_custom_action_data(action_file_path)
+    # 去掉 .tact 后缀 — autostart 的 /execute_arm_action 内部会自己拼接
+    action_name = action_filename
+    if action_name.endswith('.tact'):
+        action_name = action_name[:-5]
 
-    req = create_bezier_request(action_frames, start_frame_time, end_frame_time)
-    if not plan_arm_trajectory_bezier_curve_client(req):
+    # 通过 autostart 的统一入口执行 tact，不再直接调 bezier
+    # 这样 /kuavo_arm_traj 由 autostart 独占发布，消除双发冲突
+    success, message = execute_arm_action_client(action_name)
+    if not success:
         payload.data["code"] = 4
+        payload.data["message"] = message
         response = Response(payload=payload, target=websocket)
         response_queue.put(response)
         return
+
     time.sleep(0.5)
     # If valid, create initial response
     response = Response(
@@ -1550,7 +1533,7 @@ async def stop_preview_action_handler(
     if websocket in active_threads:
         active_threads[websocket].set()
         del active_threads[websocket]
-    
+
     payload = Payload(
         cmd="stop_preview_action", data={"code":0}
     )
@@ -1558,7 +1541,8 @@ async def stop_preview_action_handler(
         payload=payload,
         target=websocket,
     )
-    stop_plan_arm_trajectory_client()
+    # 通过 autostart 的中断服务停止当前动作
+    interrupt_arm_traj_client()
     response_queue.put(response)
 
 
@@ -1587,6 +1571,7 @@ async def get_robot_info_handler(
             "h12_config_path": H12_CONFIG_PATH,
             "repo_path": REPO_PATH,
             "vr_recording_path": vr_recording_path,
+            "creator_dance_upload_path": CREATOR_DANCE_UPLOAD_DIR,
             "workspace_setup_path": os.path.join(KUAVO_ROS_CONTROL_WS_PATH, "devel", "setup.bash")
         }
     )
@@ -5364,3 +5349,138 @@ async def cancel_vr_record_handler(websocket: websockets.WebSocketServerProtocol
 
     response = Response(payload=payload, target=websocket)
     response_queue.put(response)
+
+
+# ==================== Creator 舞蹈 zip 导入 ====================
+# 桌面端把 zip + 可选 wav scp 到 CREATOR_DANCE_UPLOAD_DIR,再调
+# `import_creator_dance` cmd 触发 tools/import_creator_dance/import_creator_dance.py。
+# 业务逻辑全在脚本里,本节只是 ws 适配层。
+
+IMPORT_CREATOR_DANCE_SCRIPT = os.path.join(
+    REPO_PATH, "tools", "import_creator_dance", "import_creator_dance.py"
+)
+
+
+def _normalize_stem(stem):
+    """与导入脚本 / joy 保持一致的展示名归一化(NFC + strip)。"""
+    return unicodedata.normalize("NFC", stem or "").strip()
+
+
+def _load_dance_name_map():
+    """读 dance_name_map.json, 缺失/损坏一律当空表(不阻断导入)。"""
+    try:
+        with open(DANCE_NAME_MAP_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"[creator_dance] 读取映射表失败, 当空表处理: {e}")
+        return {}
+
+
+def _update_dance_name_map(stem, controller, zip_filename):
+    """把 展示名 -> 控制器名 写入映射表(读-改-原子写)。
+
+    返回 (ok, error)。hash 碰撞守卫: 若该 controller 已被另一个不同展示名占用,
+    拒绝写入, 避免一支舞悄悄覆盖另一支(概率极低, 纯防御)。
+    """
+    key = _normalize_stem(stem)
+    mapping = _load_dance_name_map()
+    for other_key, entry in mapping.items():
+        if other_key == key:
+            continue
+        if isinstance(entry, dict) and entry.get("controller") == controller:
+            return False, (
+                f"命名冲突: 控制器名 {controller} 已被 '{other_key}' 占用, "
+                f"请改 zip 名后重试"
+            )
+    mapping[key] = {"controller": controller, "zip_filename": zip_filename}
+    try:
+        Path(DANCE_NAME_MAP_PATH).parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = f"{DANCE_NAME_MAP_PATH}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(mapping, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, DANCE_NAME_MAP_PATH)
+        return True, None
+    except Exception as e:
+        return False, f"写映射表失败: {e}"
+
+
+def _run_import_script_sync(argv):
+    proc = subprocess.run(
+        ["python3", IMPORT_CREATOR_DANCE_SCRIPT] + argv,
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+    )
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _parse_script_json(stdout):
+    lines = (stdout or "").strip().splitlines()
+    last = lines[-1] if lines else ""
+    try:
+        return json.loads(last)
+    except Exception:
+        return {"code": 2, "error": stdout or "no output", "error_kind": "E_GENERIC"}
+
+
+async def import_creator_dance_handler(
+    websocket: websockets.WebSocketServerProtocol, data: dict
+):
+    """注册一支 Creator 舞蹈到 rl_controllers.yaml 并落盘控制器文件。
+
+    入参(req.data):
+      - zip_filename: 必填; 已 scp 到 CREATOR_DANCE_UPLOAD_DIR 的 zip 文件名(不带路径),
+                      去掉 .zip 后的部分即为 dance_name / 控制器名 / info|onnx|csv 文件名前缀
+      - force: 可选 bool, 默认 false; 同名 controller / 文件已存在时是否覆盖
+
+    本接口不动 customize_config.json, 也不动 music wav, 由桌面端自行管理。
+    """
+    payload = Payload(cmd="import_creator_dance", data={"code": 0})
+    try:
+        req = data.get("data", data) if isinstance(data, dict) else {}
+        zip_filename = (req.get("zip_filename") or "").strip()
+        force = bool(req.get("force"))
+
+        if not zip_filename:
+            payload.data.update({"code": 2, "error": "zip_filename 不能为空", "error_kind": "E_GENERIC"})
+        else:
+            zip_path = os.path.join(CREATOR_DANCE_UPLOAD_DIR, zip_filename)
+            if not os.path.isfile(zip_path):
+                payload.data.update({
+                    "code": 2,
+                    "error": f"zip 不在暂存目录: {zip_path}",
+                    "error_kind": "E_BAD_ZIP",
+                })
+            else:
+                argv = [zip_path]
+                if force:
+                    argv.append("--force")
+                argv.append("--json")
+
+                loop = asyncio.get_event_loop()
+                rc, out, err = await loop.run_in_executor(None, _run_import_script_sync, argv)
+                script_result = _parse_script_json(out)
+                payload.data.update(script_result)
+                if rc == 0 and script_result.get("code") == 0:
+                    # 脚本已落盘控制器文件 + yaml, 这里登记 展示名 -> 控制器名 映射,
+                    # 供 joy 运行时把 json 里的中文 dance_name 换成英文控制器名。
+                    stem = script_result.get("dance_name") or os.path.splitext(zip_filename)[0]
+                    controller = script_result.get("controller", "")
+                    ok, map_err = _update_dance_name_map(stem, controller, zip_filename)
+                    if not ok:
+                        payload.data.update({
+                            "code": 2,
+                            "error": map_err,
+                            "error_kind": "E_GENERIC",
+                        })
+                    # 不删除暂存 zip: 保留原包便于前端复用 / 排查 / 重导。
+                elif err.strip():
+                    payload.data.setdefault("stderr", err)
+    except Exception as e:
+        payload.data["code"] = 2
+        payload.data["error"] = str(e)
+        payload.data["error_kind"] = "E_GENERIC"
+    response_queue.put(Response(payload=payload, target=websocket))

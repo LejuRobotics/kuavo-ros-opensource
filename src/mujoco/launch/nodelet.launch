@@ -1,5 +1,7 @@
 <launch>
   <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+  <arg name="depth_frequency" default="60.0"/>
+  <param name="depth_frequency" value="$(arg depth_frequency)"/>
   <!-- Handle version 15 special case: use version 14 scene -->
   <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s14/xml/scene_with_arm.xml" if="$(eval arg('robot_version') == 15)"/>
   <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene_with_arm.xml" unless="$(eval arg('robot_version') == 15)"/>

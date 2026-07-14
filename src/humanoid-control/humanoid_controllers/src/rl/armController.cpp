@@ -63,6 +63,11 @@ ArmController::ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint
   raw_mode2_target_v_.resize(joint_arm_num);
   raw_mode2_target_q_.setZero();
   raw_mode2_target_v_.setZero();
+  buffered_mode2_target_q_.resize(joint_arm_num);
+  buffered_mode2_target_v_.resize(joint_arm_num);
+  buffered_mode2_target_q_.setZero();
+  buffered_mode2_target_v_.setZero();
+  buffered_mode2_target_received_ = false;
   mode2_target_q_.resize(joint_arm_num);
   mode2_target_v_.resize(joint_arm_num);
   mode2_target_q_.setZero();
@@ -104,6 +109,7 @@ void ArmController::reset()
   
   // 重置模式2的目标
   mode2_target_received_ = false;
+  buffered_mode2_target_received_ = false;
   last_mode2_input_time_valid_ = false;
   
   // 重置滤波器
@@ -205,6 +211,12 @@ void ArmController::loadSettings(double max_tracking_velocity,
            arm_max_tracking_velocity_, arm_tracking_error_threshold_, mode_interpolation_velocity_);
 }
 
+void ArmController::setExternalCommandBufferCallback(std::function<bool()> callback)
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  external_command_buffer_callback_ = std::move(callback);
+}
+
 void ArmController::update(const ros::Time& time,
                            double dt,
                            const Eigen::VectorXd& joint_pos,
@@ -227,6 +239,8 @@ void ArmController::update(const ros::Time& time,
     arm_filter_initialized_ = true;
     ROS_INFO("[ArmController] Filter initialized: dt=%.4f s, cutoff=%.1f Hz", dt, mode2_cutoff_freq_);
   }
+
+  applyBufferedMode2TargetIfReady();
 
   // 2. 根据当前模式更新期望状态
   if (arm_control_mode_ == 0)
@@ -610,25 +624,81 @@ void ArmController::applyRateLimitedInterpolation(double dt,
 
 void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
+  std::function<bool()> external_command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    external_command_buffer_callback = external_command_buffer_callback_;
+  }
+  if (external_command_buffer_callback && external_command_buffer_callback())
+  {
+    storeMode2Target(*msg, buffered_mode2_target_q_, buffered_mode2_target_v_);
+    buffered_mode2_target_received_ = true;
+    ROS_DEBUG_THROTTLE(1.0, "[ArmController] Buffer arm trajectory until manipulation controller is active");
+    return;
+  }
+
   // 只在模式2时更新目标位置
   if (arm_control_mode_ == 2 && arm_vr_enabled_)
   {
-    for (size_t i = 0; i < msg->name.size() && i < joint_arm_num_; ++i)
-    {
-      raw_mode2_target_q_(i) = msg->position[i] * M_PI / 180.0;
-      if (msg->velocity.size() == joint_arm_num_)
-      {
-        raw_mode2_target_v_(i) = msg->velocity[i] * M_PI / 180.0;
-      }
-      else
-      {
-        // 如果没有提供速度，设置为零（后续在updateMode2中通过位置差分计算）
-        raw_mode2_target_v_(i) = 0.0;
-      }
-    }
-    
+    storeMode2Target(*msg, raw_mode2_target_q_, raw_mode2_target_v_);
     // 标记已收到模式2输入
     mode2_target_received_ = true;
+  }
+}
+
+void ArmController::applyBufferedMode2TargetIfReady()
+{
+  if (!buffered_mode2_target_received_)
+  {
+    return;
+  }
+
+  std::function<bool()> external_command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    external_command_buffer_callback = external_command_buffer_callback_;
+  }
+  if (external_command_buffer_callback && external_command_buffer_callback())
+  {
+    return;
+  }
+  if (arm_control_mode_ != 2 || !arm_vr_enabled_)
+  {
+    return;
+  }
+
+  raw_mode2_target_q_ = buffered_mode2_target_q_;
+  raw_mode2_target_v_ = buffered_mode2_target_v_;
+  mode2_target_received_ = true;
+  buffered_mode2_target_received_ = false;
+  ROS_INFO("[ArmController] Applied buffered arm trajectory after manipulation controller became active");
+}
+
+void ArmController::storeMode2Target(const sensor_msgs::JointState& msg,
+                                     Eigen::VectorXd& target_q,
+                                     Eigen::VectorXd& target_v) const
+{
+  if (target_q.size() != static_cast<int>(joint_arm_num_))
+  {
+    target_q = Eigen::VectorXd::Zero(joint_arm_num_);
+  }
+  if (target_v.size() != static_cast<int>(joint_arm_num_))
+  {
+    target_v = Eigen::VectorXd::Zero(joint_arm_num_);
+  }
+
+  const size_t target_size = std::min({msg.name.size(), msg.position.size(), joint_arm_num_});
+  for (size_t i = 0; i < target_size; ++i)
+  {
+    target_q(i) = msg.position[i] * M_PI / 180.0;
+    if (msg.velocity.size() == joint_arm_num_)
+    {
+      target_v(i) = msg.velocity[i] * M_PI / 180.0;
+    }
+    else
+    {
+      target_v(i) = 0.0;
+    }
   }
 }
 

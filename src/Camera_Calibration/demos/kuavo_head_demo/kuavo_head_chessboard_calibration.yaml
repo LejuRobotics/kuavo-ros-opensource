@@ -1,0 +1,57 @@
+# Kuavo 头部：固定棋盘与相机 URDF 几何，仅标定头部关节零位（不标定相机外参）
+# =====================================================
+#
+# - 棋盘、相机相对连杆的固定关节：信任 URDF，free_frames 中 camera_base 全 false（不优化相机安装）
+# - 仅优化 free_params：zhead_1_joint / zhead_2_joint 零位偏置
+# - 不标定腰部时不要在 free_params 中加入 waist_yaw_joint
+
+base_link: zarm_l1_ref_link
+verbose: true
+
+models:
+  - name: camera_to_base
+    type: chain
+    frame: head_camera_color_optical_frame
+  - name: tag_to_base
+    type: chain
+    frame: checkerboard_link
+
+# 关节零位偏置（弧度，标量）
+free_params:
+  - zhead_1_joint
+  - zhead_2_joint
+
+# 不标定相机外参（全 false）；若将来要估 camera_base 6DOF，再把对应轴改为 true
+free_frames:
+  - name: camera_base
+    x: false
+    y: false
+    z: false
+    roll: false
+    pitch: false
+    yaw: false
+
+error_blocks:
+  - name: board_align
+    type: chain3d_to_chain3d
+    model_a: camera_to_base
+    model_b: tag_to_base
+    # Mixed residual weights
+    center_weight: 1.0
+    corner_pose_weight: 0.35
+    # Corner quality filter based on known checkerboard spacing
+    enable_corner_filter: true
+    grid_edge_length_m: 0.03
+    min_edge_ratio: 0.6
+    max_edge_ratio: 1.4
+
+  # 对 camera_base 施加小正则（外参未解锁时主要起数值稳定作用）
+  - name: restrict_camera_base
+    type: outrageous
+    param: camera_base
+    joint_scale: 0.0
+    position_scale: 0.1
+    rotation_scale: 0.1
+
+  
+

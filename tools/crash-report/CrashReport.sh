@@ -16,6 +16,7 @@ install_deps_packages() {
         "tree"
         "pv"
         "pigz"
+        "zstd"
         "curl"
         "jq"
     )
@@ -42,6 +43,25 @@ install_deps_packages() {
             exit 1
         fi
     fi
+}
+
+choose_compressor() {
+    case "${KUAVO_CRASH_COMPRESSOR:-auto}" in
+        zstd)
+            command -v zstd >/dev/null || exit_with_fail "KUAVO_CRASH_COMPRESSOR=zstd but zstd is not installed"
+            echo "zstd"
+            ;;
+        gzip)
+            echo "gzip"
+            ;;
+        auto|*)
+            if command -v zstd >/dev/null; then
+                echo "zstd"
+            else
+                echo "gzip"
+            fi
+            ;;
+    esac
 }
 
 extract_launch_info() {
@@ -76,7 +96,7 @@ archive_files() {
     if [ -f "$zip_file" ]; then
         echo -e "\033[32m📦 检测到已存在的压缩包: $zip_file\033[0m"
         # Verify the archive integrity
-        if pigz -t "$zip_file" 2>/dev/null; then
+        if $VERIFY_CMD "$zip_file" 2>/dev/null; then
             echo -e "\033[32m✅ 压缩包完好，跳过归档步骤\033[0m"
             return 0
         else
@@ -159,7 +179,7 @@ archive_files() {
     echo "coredumps:"
     tree --noreport "$archive_dir/coredumps"
     echo -e "\033[32m📦 正在压缩文件: $zip_file\033[0m"
-    if tar -c -C "$(dirname "$archive_dir")" "$(basename "$archive_dir")" | pv | pigz -9 > "$zip_file"; then
+    if tar -c -C "$(dirname "$archive_dir")" "$(basename "$archive_dir")" | pv | $COMPRESS_CMD > "$zip_file"; then
         echo "Successfully created archive: $zip_file ($(du -h "$zip_file" | cut -f1))"
         echo -e "\033[32m📦 压缩成功，压缩文件存放路径: $zip_file\033[0m" 
         echo -e "\033[32mTips: 如果文件上传失败，您可以考虑手动拷贝该文件给乐聚技术支持人员，谢谢!\033[0m"
@@ -279,8 +299,16 @@ echo -e "\033[32mGIT_SYNC_COMMIT: $GIT_SYNC_COMMIT\033[0m"
 echo "-------------------------"
 mkdir -p "$ARICHE_DIR/${TIMESTAMP}"
 install_deps_packages
+
+# Pick compressor: prefer zstd; honor KUAVO_CRASH_COMPRESSOR=gzip/zstd; fall back to gzip when zstd is unavailable.
+COMPRESSOR=$(choose_compressor)
+case "$COMPRESSOR" in
+    zstd) TAR_EXT="tar.zst"; COMPRESS_CMD="zstd -19 -T0 -q"; VERIFY_CMD="zstd -t" ;;
+    gzip) TAR_EXT="tar.gz";  COMPRESS_CMD="pigz -9";        VERIFY_CMD="pigz -t" ;;
+esac
+
 TAR_GZ_BASENAME="kuavo-crash_${TIMESTAMP}_${GIT_SYNC_COMMIT}"
-TAR_GZ_FILE="/tmp/kuavo-crash/${TAR_GZ_BASENAME}.tar.gz"
-archive_files "${LAUNCH_ID}" "${TIMESTAMP}" "$ARICHE_DIR/${TAR_GZ_BASENAME}" "$TAR_GZ_FILE"
-upload_file "$TAR_GZ_FILE"
-exit_with_success "$TAR_GZ_FILE"
+TAR_FILE="/tmp/kuavo-crash/${TAR_GZ_BASENAME}.${TAR_EXT}"
+archive_files "${LAUNCH_ID}" "${TIMESTAMP}" "$ARICHE_DIR/${TAR_GZ_BASENAME}" "$TAR_FILE"
+upload_file "$TAR_FILE"
+exit_with_success "$TAR_FILE"

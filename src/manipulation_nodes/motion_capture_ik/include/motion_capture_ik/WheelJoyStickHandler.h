@@ -115,6 +115,7 @@ class WheelJoyStickHandler {
 
   std::atomic<EndEffectorType> endEffectorType_;
   int controlFingerType_;
+  bool initControlWaistEnable_;
 
   std::vector<double> leftJoystick_;     // [left_trigger, left_grip]
   std::vector<double> rightJoystick_;    // [right_trigger, right_grip]

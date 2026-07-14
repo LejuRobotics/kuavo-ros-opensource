@@ -1,7 +1,9 @@
 # rosbag 录制参数
 # 最大分割文件数量
 max_splits: 8
-# 开机保留的 bag 文件数量，仅在 enable_bag_cleanup 为 true 时生效
-bags_to_keep: 8
-# 是否开启启动时限制 bag 个数的功能
-enable_bag_cleanup: false
+# 每次运行最多保留的 bag 文件数量
+max_num_bags_per_run: 8
+# 是否按每次运行批次保留max_num_bags_per_run数量的bag：
+# - true：每次运行独立保留最多max_num_bags_per_run个bag，多次运行的bag都会保留
+# - false：全局只保留最近8个bag，不区分运行批次
+enable_per_run_bag_retention: true

@@ -4,6 +4,7 @@
 #include <pinocchio/fwd.hpp>
 
 #include "humanoid_controllers/rl/rl_controller_types.h"
+#include "humanoid_controllers/rl/rl_switch_config.h"
 #include "humanoid_controllers/sensor_data_types.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include "kuavo_msgs/jointCmd.h"
@@ -16,9 +17,18 @@
 #include <mutex>
 #include <thread>
 #include <atomic>
+#include <functional>
 #include <Eigen/Dense>
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
+
+namespace ocs2
+{
+namespace humanoid
+{
+struct CommandDataRL;
+}
+}
 
 namespace humanoid_controller
 {
@@ -160,6 +170,43 @@ public:
   virtual bool isAllowToExit() const { return true; }
 
   /**
+   * @brief 当前控制器是否支持 walking 状态下的相位同步切换
+   */
+  virtual bool supportsWalkingPhaseSyncSwitch() const { return false; }
+
+  /**
+   * @brief 当前控制器是否已经产生过有效的步态相位估计
+   */
+  virtual bool hasValidWalkingPhase() const { return false; }
+
+  /**
+   * @brief 获取当前控制器内部原生步态相位，单位为弧度 [0, 2*pi)
+   */
+  virtual double getWalkingPhaseRad() const { return 0.0; }
+
+  /**
+   * @brief 获取当前控制器内部原生等效步频（Hz）
+   */
+  virtual double getWalkingFrequencyHz() const { return 0.0; }
+
+  /**
+   * @brief 设置外部相位覆盖。启用后控制器用外部的 sin/cos(/freq) 构造观测。
+   */
+  virtual void setExternalPhaseOverride(bool enabled,
+                                        double sin_phase,
+                                        double cos_phase,
+                                        double gait_frequency_hz) {}
+  virtual void resetGaitCommandState(bool stance_mode = true) {}
+  virtual bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const { return false; }
+  virtual void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) {}
+  virtual void setSwitchVelocityScale(double scale) {}
+  virtual void setCommandBufferCallback(std::function<bool()> callback) {}
+  virtual void setExternalCommandBufferCallback(std::function<bool()> callback) {}
+  virtual bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const { return true; }
+  virtual bool isInPlaceSteppingActive() const { return false; }
+  virtual bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const { return false; }
+
+  /**
    * @brief 获取控制器的初始状态（用于设置仿真/机器人初始状态）
    * @return 初始状态向量 initialStateRL_ 的引用
 
@@ -172,6 +219,14 @@ public:
   double getDefaultBaseHeightControl() const { return defaultBaseHeightControl_; }
   double getDefaultBaseXOffsetControl() const { return defaultBaseXOffsetControl_; }
   
+  //waao： RL-RL插值
+  virtual Eigen::VectorXd getCurrentJointReference() const { return Eigen::VectorXd(); }
+  const Eigen::VectorXd& getJointKpVector() const { return jointKpRL_; }
+  const Eigen::VectorXd& getJointKdVector() const { return jointKdRL_; }
+  const Eigen::VectorXd& getJointTorqueLimits() const { return torqueLimitsRL_; }
+  const Eigen::VectorXd& getJointControlModes() const { return JointControlModeRL_; }
+  const Eigen::VectorXd& getJointPdModes() const { return JointPDModeRL_; }
+
   /**
    * @brief 获取是否从MPC切换时使用插值过渡
    * @return true表示使用插值过渡，false表示直接切换
@@ -218,6 +273,18 @@ public:
    * @brief 恢复控制器（恢复推理过程）
    */
   virtual void resume();
+
+  /**
+   * @brief MPC→RL 插值完成后的回调
+   * 当 use_interpolate_from_mpc_ 为 true 时，humanoidController 在插值结束后调用此方法。
+   * 派生类可重写此方法以延迟启动需要在插值完成后才执行的逻辑（如在线采样）。
+   */
+  virtual void onInterpolationComplete() {}
+
+  /**
+   * @brief 温启动恢复控制器（恢复推理但尽量保留内部状态）
+   */
+  virtual void resumeWarm();
 
   /**
    * @brief 等待下一个控制周期（用于控制频率管理）
@@ -528,10 +595,3 @@ protected:
 };
 
 } // namespace humanoid_controller
-
-
-
-
-
-
-

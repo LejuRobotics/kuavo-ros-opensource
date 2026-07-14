@@ -40,7 +40,6 @@ def find_subpackages(base_dir):
 core_packages = find_subpackages("kuavo_humanoid_sdk/kuavo/core")
 strategy_packages = find_subpackages("kuavo_humanoid_sdk/kuavo_strategy")
 strategy_v2_packages = find_subpackages("kuavo_humanoid_sdk/kuavo_strategy_v2")
-interface_packages = find_subpackages("kuavo_humanoid_sdk/interfaces")
 
 # Check if a version argument is provided
 sdk_version = os.environ.get('KUAVO_HUMANOID_SDK_VERSION')
@@ -69,7 +68,7 @@ setup(
     'kuavo_humanoid_sdk.common',
     'kuavo_humanoid_sdk.interfaces',
     'kuavo_humanoid_sdk.kuavo',
-    ] + core_packages + strategy_packages + strategy_v2_packages + interface_packages + find_msg_subpackages("kuavo_humanoid_sdk/msg"),
+    ] + core_packages + strategy_packages + strategy_v2_packages + find_msg_subpackages("kuavo_humanoid_sdk/msg"),
     install_requires=[
         "numpy",
         "transitions",

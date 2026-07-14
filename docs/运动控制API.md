@@ -75,6 +75,61 @@
 
 ---
 
+#### `/humanoid_controller/transport_mode_command`
+
+**类型:** `kuavo_msgs::TransportModeCommand`
+
+**功能说明:**
+
+搬运模式控制（V1.1 二段式进入）—— 站立状态下安全抬起移动机器人，移动后恢复正常控制（AMP/MPC）。
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| command | uint8 | 1=ENTER 进入待搬运姿态, 2=LOCK 锁定关节, 3=EXIT 退出搬运, 4=FALL_DOWN 掉使能倒地, 5=HAND_OVER 移交管理权 |
+| success | bool | 返回数据, 是否调用成功 |
+| message | string | 返回数据, 消息 |
+
+**使用说明:**
+
+- ENTER（1）：平滑插值到待搬运动作（关节未锁，MPC 维持平衡不会摔），语音「电机未锁定，请扶住」。进入后启动 5 秒保护窗，期间仅 LOCK 与 HAND_OVER 可响应。
+- LOCK（2）：保护窗内且姿态到位后锁定全身关节（CSP 锁死，可安全抬起），语音「进入搬运模式，可安全移动」。保护窗内重按 LOCK 重置计时（累计上限 15 秒）。
+- EXIT（3）：站立检测通过后解除锁定，移交管理权回基础控制；MPC 走 stance 恢复，AMP/RL 直接恢复，语音「退出搬运模式」。
+- FALL_DOWN（4）：仅 ACTIVE 可用，电机掉使能，由倒地起身控制器接管。
+- HAND_OVER（5）：移交管理权（取消/退出/倒地后回基础控制时由 Joy 编排调用）。
+- 起身：倒地后 LB+RB+X 触发，两步（PREPARE 回起身初始姿态、STAND_UP 完整起身），完成后回到 MPC stance；搬运 ACTIVE 下硬起身由调度自动推进两步，一次按键完成。
+- 搬运期间拉保护检测关闭
+- 当前状态可通过 `/humanoid_controller/transport_mode_state_` 话题观测（0=INACTIVE, 1=INTERPOLATING, 2=READY, 3=ACTIVE, 4=HANDING_OVER）
+- 详细说明见 **[RL控制框架ROS接口文档](RL控制框架ROS接口文档.md#4-主控制器服务humanoidcontroller)**
+
+---
+
+#### `/humanoid_controller/fall_stand_command`
+
+**类型:** `kuavo_msgs::FallStandCommand`
+
+**功能说明:**
+
+倒地起身控制。替代旧的 `/humanoid_controller/trigger_fall_stand_up`（`std_srvs/Trigger`），拆分为显式的两阶段命令。
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| command | uint8 | 1=PREPARE 起身初始姿态, 2=STAND_UP 完整起身, 3=RESET 复位 |
+| success | bool | 返回数据, 是否调用成功 |
+| message | string | 返回数据, 消息 |
+
+**使用说明:**
+
+- PREPARE（1）：从瘫软状态插值到起身轨迹起点（FALL_DOWN → INTERPOLATING → READY_FOR_STAND_UP）。
+- STAND_UP（2）：RL 推理执行起身到站立（STAND_UP → STANDING），完成后可切回基础控制。
+- RESET（3）：复位倒地起身控制器状态。
+- 控制器状态机：FALL_DOWN(0) → INTERPOLATING(1) → READY_FOR_STAND_UP(2) → STAND_UP(3) → STANDING(4)。
+
+---
+
 ### 1.2 话题 (Topics)
 
 #### `/cmd_vel`
@@ -411,6 +466,59 @@
 - MIDDLE_SENSOR 0x04
 - RING_SENSOR 0x08
 - PINKY_SENSOR 0x10
+
+---
+
+#### `/dexhand/left/set_turbo_mode`、`/dexhand/right/set_turbo_mode`、`/dexhand/set_turbo_mode`
+
+**类型:** `std_srvs::SetBool`
+
+**设备支持:**
+- ✅ qiangnao (标准灵巧手 for Kuavo)
+- ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
+- ✅ revo2 (revo2 二代手 for Roban)
+
+> **注意:** revo1的protobuf协议灵巧手不支持turbo模式，只有modbus协议支持。
+
+**功能说明:**
+该服务用于设置灵巧手的turbo模式。turbo模式下，灵巧手会持续保持握紧状态，提供更大的抓握力，适用于需要牢固抓握物体的场景。开启之后会持续握紧，掉电后Turbo模式会自动恢复到默认关闭状态。
+
+- `/dexhand/left/set_turbo_mode`: 仅设置左手的turbo模式
+- `/dexhand/right/set_turbo_mode`: 仅设置右手的turbo模式
+- `/dexhand/set_turbo_mode`: 同时设置双手的turbo模式
+
+**消息字段:**
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | bool | 请求数据，true表示开启turbo模式，false表示关闭turbo模式 |
+| success | bool | 返回数据，是否调用成功 |
+| message | string | 返回数据，调用结果描述信息 |
+
+---
+
+#### `/dexhand/left/get_turbo_mode`、`/dexhand/right/get_turbo_mode`、`/dexhand/get_turbo_mode`
+
+**类型:** `std_srvs::Trigger`
+
+**设备支持:**
+- ✅ qiangnao (标准灵巧手 for Kuavo)
+- ✅ qiangnao_touch (触觉灵巧手 for Kuavo)
+- ✅ revo2 (revo2 二代手 for Roban)
+
+> **注意:** revo1的protobuf协议灵巧手不支持turbo模式，只有modbus协议支持。
+
+**功能说明:**
+该服务用于获取灵巧手当前的turbo模式状态。
+
+- `/dexhand/left/get_turbo_mode`: 仅获取左手的turbo模式状态
+- `/dexhand/right/get_turbo_mode`: 仅获取右手的turbo模式状态
+- `/dexhand/get_turbo_mode`: 获取双手的turbo模式状态
+
+**消息字段:**
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据，是否调用成功 |
+| message | string | 返回数据，调用结果描述信息，包含turbo模式状态。对于单手服务，返回"true"或"false"表示当前状态；对于双手服务，格式为"left: [状态], right: [状态]"，其中状态为"true"或"false"。 |
 
 ---
 

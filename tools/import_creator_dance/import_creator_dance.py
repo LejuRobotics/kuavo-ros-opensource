@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import sys
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -20,12 +22,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 HUMANOID_CONTROLLERS = REPO_ROOT / "src/humanoid-control/humanoid_controllers"
 CONTROLLERS_CONFIG_ROOT = HUMANOID_CONTROLLERS / "config"
 NETWORK_MODEL_DIR = HUMANOID_CONTROLLERS / "model/networks"
-CUSTOMIZE_CONFIG = REPO_ROOT / "src/humanoid-control/joystick_drivers/joy/config/customize_config.json"
-MUSIC_DIR = Path("/home/lab/.config/lejuconfig/music")
-
-VALID_DANCE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-VALID_CUSTOMIZE_KEY = re.compile(r"^customize_action_(M1|M2|M1M2|LT|RT)_[ABXY]$")
-FORBIDDEN_CUSTOMIZE_KEYS = {"customize_action_RT_B"}
 
 
 class CreatorYamlLoader(yaml.SafeLoader):
@@ -51,18 +47,63 @@ class ImportErrorWithHint(RuntimeError):
     pass
 
 
+def normalize_stem(stem: str) -> str:
+    """统一 zip 去后缀名(=展示名/映射表 key)的字节形态。
+
+    macOS 打的 zip 中文是 NFD 分解形, 前端 json 里通常是 NFC, 不归一化会让
+    handler 写的 map key 与 joy 查表的 dance_name 字节不同而静默 miss。
+    """
+    return unicodedata.normalize("NFC", stem).strip()
+
+
+def make_controller_name(stem: str) -> str:
+    """由(已 normalize 的)展示名派生纯 ASCII 控制器名。
+
+    控制器名同时是 ROS 服务名段和 info/onnx/csv 文件前缀, 必须是合法标识符。
+    `dance_` + ascii 净化片段(无则省略) + `_` + sha1 前 10 位:
+      - 对同一展示名确定 -> 可重入覆盖;
+      - 不同中文名净化后都塌成空, 靠 hash 区分, 不碰撞。
+    """
+    digest = hashlib.sha1(stem.encode("utf-8")).hexdigest()[:10]
+    slug = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")[:24]
+    return f"dance_{slug}_{digest}" if slug else f"dance_{digest}"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Import a Leju Creator dance zip into the current ROBOT_VERSION controller config.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("zip_path", type=Path, help="Path to the Leju Creator export zip.")
-    parser.add_argument("dance_name", help="Controller name to register, for example dance_creator_test.")
-    parser.add_argument("customize_action_key", help="Key in joystick customize_config.json to bind.")
-    parser.add_argument("music_wav_path", nargs="?", type=Path, help="Optional wav file to install.")
-    parser.add_argument("--force", action="store_true", help="Overwrite existing files and binding.")
-    parser.add_argument("--dry-run", action="store_true", help="Validate and print actions without writing files.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing controller files / yaml entry when dance already imported.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and print actions without writing files.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a single-line JSON result to stdout (for ws handler).",
+    )
     return parser.parse_args()
+
+
+def classify_error(message: str) -> str:
+    msg = message.lower()
+    if "joints" in msg and "creator export has" in msg:
+        return "E_JOINT_MISMATCH"
+    if "controller already exists" in msg or "already exists:" in msg:
+        return "E_BINDING_EXISTS"
+    if "zip" in msg and ("invalid" in msg or "missing required" in msg or "does not exist" in msg or "multiple" in msg):
+        return "E_BAD_ZIP"
+    if "trajectory" in msg and "csv" in msg:
+        return "E_BAD_ZIP"
+    return "E_GENERIC"
 
 
 def fail(message: str) -> None:
@@ -85,34 +126,29 @@ def normalized_zip_name(name: str) -> str:
     return "/".join(part for part in name.replace("\\", "/").split("/") if part)
 
 
-def find_unique_member(zip_file: zipfile.ZipFile, basename: str, required: bool = True) -> str | None:
+def find_unique_by_ext(
+    zip_file: zipfile.ZipFile, exts: tuple[str, ...], label: str, required: bool = True
+) -> str | None:
+    """按扩展名(而非固定文件名)定位唯一成员。
+
+    Creator 导出里 yaml / onnx / csv 的文件名是 md5 随机串, 不能写死名字;
+    约定 zip 内每类各只有一个, 所以按扩展名取唯一即可。
+    """
+    exts = tuple(e.lower() for e in exts)
     matches = [
         info.filename
         for info in zip_file.infolist()
         if not info.is_dir()
         and is_zip_member_usable(info.filename)
-        and zip_member_basename(info.filename).lower() == basename.lower()
+        and zip_member_basename(info.filename).lower().endswith(exts)
     ]
     if not matches:
         if required:
-            fail(f"zip is missing required file: {basename}")
+            fail(f"zip is missing required {label} file (expected one *{exts[0]})")
         return None
     if len(matches) > 1:
-        fail(f"zip contains multiple {basename} files: {matches}")
+        fail(f"zip contains multiple {label} files, expected exactly one: {matches}")
     return matches[0]
-
-
-def find_music_member(zip_file: zipfile.ZipFile) -> str | None:
-    matches = [
-        info.filename
-        for info in zip_file.infolist()
-        if not info.is_dir()
-        and is_zip_member_usable(info.filename)
-        and zip_member_basename(info.filename).lower().endswith(".wav")
-    ]
-    if not matches:
-        return None
-    return sorted(matches, key=normalized_zip_name)[0]
 
 
 def load_creator_env(zip_path: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -120,22 +156,21 @@ def load_creator_env(zip_path: Path) -> tuple[dict[str, Any], dict[str, str]]:
         fail(f"zip path does not exist: {zip_path}")
     try:
         with zipfile.ZipFile(zip_path) as zf:
+            # 文件名不固定(md5 随机), 按扩展名各取唯一一个。
+            # 注意: 即使 zip 里带 wav 也忽略, 音乐完全由前端独立通路管理。
             members = {
-                "env": find_unique_member(zf, "env.yaml"),
-                "model": find_unique_member(zf, "model.onnx"),
-                "trajectory": find_unique_member(zf, "trajectory.csv"),
-                "meta": find_unique_member(zf, "meta.json", required=False),
-                "controller_manager": find_unique_member(zf, "controller_manager.yaml", required=False),
-                "music": find_music_member(zf),
+                "env": find_unique_by_ext(zf, (".yaml", ".yml"), "env yaml"),
+                "model": find_unique_by_ext(zf, (".onnx",), "model onnx"),
+                "trajectory": find_unique_by_ext(zf, (".csv",), "trajectory csv"),
             }
             env = yaml.load(zf.read(members["env"]), Loader=CreatorYamlLoader)
             if not isinstance(env, dict):
-                fail("env.yaml did not parse as a YAML mapping")
+                fail("env yaml did not parse as a YAML mapping")
             return env, {key: value for key, value in members.items() if value}
     except zipfile.BadZipFile as exc:
         fail(f"invalid zip file: {exc}")
     except yaml.YAMLError as exc:
-        fail(f"failed to parse env.yaml: {exc}")
+        fail(f"failed to parse env yaml: {exc}")
 
 
 def get_robot_version() -> str:
@@ -359,39 +394,6 @@ def read_yaml_file(path: Path) -> dict[str, Any]:
     return data
 
 
-def read_customize_config(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        fail(f"failed to parse JSON {path}: {exc}")
-    if not isinstance(data, dict):
-        fail(f"customize config must contain a JSON object: {path}")
-    return data
-
-
-def allowed_customize_keys(data: dict[str, Any]) -> list[str]:
-    return [
-        key
-        for key in data.keys()
-        if VALID_CUSTOMIZE_KEY.fullmatch(key) and key not in FORBIDDEN_CUSTOMIZE_KEYS
-    ]
-
-
-def format_allowed_keys(keys: list[str]) -> str:
-    return ", ".join(keys)
-
-
-def validate_customize_key(data: dict[str, Any], key: str) -> None:
-    allowed = allowed_customize_keys(data)
-    if key in FORBIDDEN_CUSTOMIZE_KEYS:
-        fail(f"{key} is reserved and cannot be modified; allowed keys: {format_allowed_keys(allowed)}")
-    if key not in data or key not in allowed:
-        fail(
-            f"{key} is not an allowed customize key from {CUSTOMIZE_CONFIG}; "
-            f"allowed keys: {format_allowed_keys(allowed)}"
-        )
-
-
 def controller_exists(controllers_yaml: Path, dance_name: str) -> tuple[bool, dict[str, Any]]:
     data = read_yaml_file(controllers_yaml)
     controllers = data.setdefault("controllers", [])
@@ -436,40 +438,6 @@ def rewrite_controller(data: dict[str, Any], controllers_yaml: Path, dance_name:
     controllers_yaml.write_text(new_text, encoding="utf-8")
 
 
-def binding_is_empty(config: Any) -> bool:
-    if not isinstance(config, dict):
-        return True
-    action_type = config.get("type", "")
-    if action_type == "dance":
-        return not bool(str(config.get("dance_name", "")).strip())
-    if action_type == "shell":
-        return not bool(str(config.get("command", "")).strip())
-    if action_type == "action":
-        names = config.get("arm_pose_name", []) + config.get("music_name", [])
-        return not any(str(item).strip() for item in names)
-    return not any(str(value).strip() for value in config.values())
-
-
-def update_customize_config(
-    path: Path, key: str, dance_name: str, music_name: str | None, force: bool, dry_run: bool
-) -> None:
-    data = read_customize_config(path)
-    validate_customize_key(data, key)
-    current = data[key]
-    desired: dict[str, Any] = {
-        "type": "dance",
-        "dance_name": dance_name,
-        "music_name": [music_name or ""],
-    }
-    if current == desired:
-        return
-    if not force and not binding_is_empty(current):
-        fail(f"{key} already has a non-empty binding; pass --force to replace it")
-    data[key] = desired
-    if not dry_run:
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
 def check_file_conflict(path: Path, force: bool, label: str) -> None:
     if path.exists() and not force:
         fail(f"{label} already exists: {path}; pass --force to overwrite")
@@ -477,56 +445,6 @@ def check_file_conflict(path: Path, force: bool, label: str) -> None:
 
 def safe_copy_from_zip(zip_path: Path, member: str, destination: Path, dry_run: bool) -> None:
     if dry_run:
-        return
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(zip_path) as zf, zf.open(member) as src, destination.open("wb") as dst:
-        shutil.copyfileobj(src, dst)
-
-
-def copy_music(music_wav_path: Path | None, force: bool, dry_run: bool) -> Path | None:
-    if music_wav_path is None:
-        return None
-    if not music_wav_path.is_file():
-        fail(f"music wav path does not exist: {music_wav_path}")
-    if music_wav_path.suffix.lower() != ".wav":
-        fail(f"music file must be a .wav file: {music_wav_path}")
-    destination = MUSIC_DIR / music_wav_path.name
-    check_file_conflict(destination, force, "music file")
-    if not dry_run:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(music_wav_path, destination)
-    return destination
-
-
-def validate_music_destination(music_wav_path: Path | None, force: bool) -> Path | None:
-    if music_wav_path is None:
-        return None
-    if not music_wav_path.is_file():
-        fail(f"music wav path does not exist: {music_wav_path}")
-    if music_wav_path.suffix.lower() != ".wav":
-        fail(f"music file must be a .wav file: {music_wav_path}")
-    destination = MUSIC_DIR / music_wav_path.name
-    check_file_conflict(destination, force, "music file")
-    return destination
-
-
-def resolve_music_source(
-    zip_path: Path, members: dict[str, str], music_wav_path: Path | None, force: bool
-) -> tuple[str | None, Path | None, str | None]:
-    if music_wav_path is not None:
-        destination = validate_music_destination(music_wav_path, force)
-        return music_wav_path.name, destination, None
-    music_member = members.get("music")
-    if not music_member:
-        return None, None, None
-    music_name = zip_member_basename(music_member)
-    destination = MUSIC_DIR / music_name
-    check_file_conflict(destination, force, "music file")
-    return music_name, destination, music_member
-
-
-def copy_zip_music(zip_path: Path, member: str | None, destination: Path | None, dry_run: bool) -> None:
-    if member is None or destination is None or dry_run:
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path) as zf, zf.open(member) as src, destination.open("wb") as dst:
@@ -562,8 +480,13 @@ def validate_trajectory_shape(zip_path: Path, member: str, num_joints: int) -> b
 def main() -> int:
     args = parse_args()
     try:
-        if not VALID_DANCE_NAME.fullmatch(args.dance_name):
-            fail("dance_name must match ^[A-Za-z][A-Za-z0-9_]*$, for example dance_creator_test")
+        # display_name = zip 去后缀名(可中文, 作展示名 / 映射表 key);
+        # controller_name = 由它派生的纯 ASCII 控制器名(ROS 服务名段 + 文件前缀)。
+        # 中英文映射关系由 ws handler 写入 dance_name_map.json, 脚本只负责落盘控制器文件。
+        display_name = normalize_stem(args.zip_path.stem)
+        if not display_name:
+            fail("zip filename has no stem; cannot derive dance_name")
+        controller_name = make_controller_name(display_name)
 
         robot_version = get_robot_version()
         version_dir = CONTROLLERS_CONFIG_ROOT / f"kuavo_v{robot_version}"
@@ -573,19 +496,15 @@ def main() -> int:
         controllers_yaml = version_dir / "rl_controllers.yaml"
         if not controllers_yaml.is_file():
             fail(f"target rl_controllers.yaml does not exist: {controllers_yaml}")
-        if not CUSTOMIZE_CONFIG.is_file():
-            fail(f"customize_config.json does not exist: {CUSTOMIZE_CONFIG}")
-        customize_data = read_customize_config(CUSTOMIZE_CONFIG)
-        validate_customize_key(customize_data, args.customize_action_key)
 
         env, members = load_creator_env(args.zip_path)
         joint_count = len(collect_joint_config(env)["joint_names"])
         validate_target_joint_count(version_dir, joint_count)
         validate_trajectory_shape(args.zip_path, members["trajectory"], joint_count)
 
-        info_name = f"dance_param_{args.dance_name}.info"
-        onnx_name = f"{args.dance_name}.onnx"
-        csv_name = f"{args.dance_name}.csv"
+        info_name = f"dance_param_{controller_name}.info"
+        onnx_name = f"{controller_name}.onnx"
+        csv_name = f"{controller_name}.csv"
 
         info_path = version_dir / "rl" / info_name
         onnx_path = NETWORK_MODEL_DIR / onnx_name
@@ -595,51 +514,58 @@ def main() -> int:
         check_file_conflict(onnx_path, args.force, "onnx file")
         check_file_conflict(csv_path, args.force, "csv file")
 
-        exists, controllers_data = controller_exists(controllers_yaml, args.dance_name)
+        exists, controllers_data = controller_exists(controllers_yaml, controller_name)
         if exists and not args.force:
-            fail(f"controller already exists in {controllers_yaml}: {args.dance_name}; pass --force to update it")
+            fail(f"controller already exists in {controllers_yaml}: {controller_name}; pass --force to update it")
 
-        music_name, music_destination, zip_music_member = resolve_music_source(
-            args.zip_path, members, args.music_wav_path, args.force
-        )
-        update_customize_config(
-            CUSTOMIZE_CONFIG, args.customize_action_key, args.dance_name, music_name, args.force, dry_run=True
-        )
         template_info = version_dir / "rl/dance_param.info"
         if not template_info.is_file():
             fail(f"template dance info does not exist: {template_info}")
-        info_text = build_info(env, args.dance_name, onnx_name, csv_name, template_info)
+        info_text = build_info(env, controller_name, onnx_name, csv_name, template_info)
 
         if not args.dry_run:
             info_path.parent.mkdir(parents=True, exist_ok=True)
             info_path.write_text(info_text, encoding="utf-8")
             safe_copy_from_zip(args.zip_path, members["model"], onnx_path, args.dry_run)
             safe_copy_from_zip(args.zip_path, members["trajectory"], csv_path, args.dry_run)
-            copy_music(args.music_wav_path, args.force, args.dry_run)
-            copy_zip_music(args.zip_path, zip_music_member, music_destination, args.dry_run)
-            update_customize_config(
-                CUSTOMIZE_CONFIG, args.customize_action_key, args.dance_name, music_name, args.force, dry_run=False
-            )
 
         if exists:
-            rewrite_controller(controllers_data, controllers_yaml, args.dance_name, info_name, args.dry_run)
+            rewrite_controller(controllers_data, controllers_yaml, controller_name, info_name, args.dry_run)
         else:
-            append_controller(controllers_yaml, args.dance_name, info_name, args.dry_run)
+            append_controller(controllers_yaml, controller_name, info_name, args.dry_run)
 
+        if args.json:
+            result = {
+                "code": 0,
+                "dry_run": bool(args.dry_run),
+                "robot_version": robot_version,
+                "dance_name": display_name,
+                "controller": controller_name,
+                "info_path": str(info_path),
+                "onnx_path": str(onnx_path),
+                "csv_path": str(csv_path),
+                "controller_existed": bool(exists),
+            }
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
         print("Import validation passed." if args.dry_run else "Import complete.")
         print(f"  ROBOT_VERSION: {robot_version}")
-        print(f"  Controller: {args.dance_name}")
+        print(f"  Dance name:  {display_name}")
+        print(f"  Controller:  {controller_name}")
         print(f"  Info: {info_path}")
         print(f"  ONNX: {onnx_path}")
         print(f"  CSV: {csv_path}")
-        print(f"  Binding: {args.customize_action_key} -> {args.dance_name}")
-        if music_name:
-            print(f"  JSON music_name: {music_name}")
-        if music_destination:
-            print(f"  Music: {music_destination}")
         return 0
     except ImportErrorWithHint as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        if args.json:
+            print(
+                json.dumps(
+                    {"code": 2, "error": str(exc), "error_kind": classify_error(str(exc))},
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            print(f"error: {exc}", file=sys.stderr)
         return 2
 
 

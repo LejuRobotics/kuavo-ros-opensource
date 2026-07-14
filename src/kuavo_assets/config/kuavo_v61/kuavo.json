@@ -17,7 +17,7 @@
     "NUM_WAIST_JOINT" : 0,
     "NUM_JOINT" : 20,
     "ROBOT_MODULE": "LUNBI",
-    "ankle_solver_type": -1,
+    "ankle_solver_type": "none",
 
     "torsoP": 3.0,
     "torsoP_squat": 3.0,
@@ -253,9 +253,9 @@
     "dynamic_friction":1.0,
 
     "kuavo_wheel_torso_limit": {
-        "z_range": [0.74, 0.84],
+        "z_range": [0.74, 1.06],
         "x_range": [0.1, 0.2],
-        "pitch_range": [0.0, 20.0],
+        "pitch_range": [0.0, 30.0],
         "base_position": [0.0, 0.0, 0.74]
     },
 
@@ -349,6 +349,5 @@
     "alway_update_chest": false,
     "lb_leg_publish_rate_multiplier": 0.1,
     "pos_cutoff_hz": 12.0,
-    "orientation_cutoff_hz": 20.0,
-    "chassis_joy_cmd_travel_scale": 0.5
+    "orientation_cutoff_hz": 20.0
 }

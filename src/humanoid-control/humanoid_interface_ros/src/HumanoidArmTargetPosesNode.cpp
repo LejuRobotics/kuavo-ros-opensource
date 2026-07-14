@@ -3,8 +3,10 @@
 #include <ros/package.h>
 #include <cmath>
 #include <vector>
+#include <algorithm>
 
 #include <ocs2_core/Types.h>
+#include <ocs2_core/reference/TargetTrajectories.h>
 #include <ocs2_ros_interfaces/command/TargetTrajectoriesRosPublisher.h>
 #include <ocs2_msgs/mpc_observation.h>
 #include <ocs2_msgs/mpc_target_trajectories.h>
@@ -14,6 +16,7 @@
 #include "humanoid_interface/command/HumanoidHandTarget.h"
 #include <std_msgs/Float64.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <sensor_msgs/JointState.h>
 
 using namespace ocs2;
 
@@ -21,19 +24,17 @@ class ArmTrajectoryCommandNode {
 public:
     ArmTrajectoryCommandNode(ros::NodeHandle& nodeHandle, const std::string& robotName = "humanoid")
         : nh_(nodeHandle), robotName_(robotName) {
-        // Initialize parameters
         initializeParameters();
 
-        // Setup publishers and subscribers
         targetTrajectoriesPublisherPtr_.reset(new TargetTrajectoriesRosPublisher(nh_, robotName_));
         trajectoryPublisher_ = nh_.advertise<ocs2_msgs::mpc_target_trajectories>(robotName_ + "_mpc_target_arm", 1);
+        kuavo_arm_traj_pub_ = nh_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 1, true);
         commandSub_ = nh_.subscribe("/kuavo_arm_target_poses", 10, &ArmTrajectoryCommandNode::commandCallback, this);
         observationSub_ = nh_.subscribe(robotName_ + "_wbc_observation", 10, &ArmTrajectoryCommandNode::observationCallback, this);
         arm_traj_mode_service_server_ = nh_.advertiseService("/arm_traj_change_mode",  &ArmTrajectoryCommandNode::changeArmCtlModeCallback, this);
         get_arm_mode_service_client_ = nh_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_get_arm_ctrl_mode");
         is_rl_controller_sub_ = nh_.subscribe("/humanoid_controller/is_rl_controller_", 10, &ArmTrajectoryCommandNode::isRlControllerCallback, this);
         arm_control_mode_sub_ = nh_.subscribe("/humanoid/mpc/arm_control_mode", 10, &ArmTrajectoryCommandNode::armControlModeCallback, this);
-
     }
 
     void run() {
@@ -43,37 +44,138 @@ public:
             ros::Duration(0.1).sleep();
         }
         ROS_INFO("[ArmTrajNode]: First observation received.");
-
         ros::spin();
     }
 
 private:
+    static constexpr double kDegToRad = 3.141592653589793 / 180.0;
+    static constexpr double kRadToDeg = 180.0 / 3.141592653589793;
+
     void initializeParameters() {
-        // Load parameters from the ROS parameter server or set default values
-        
-        {
-          // wait for parameters
-          while (!nh_.hasParam("/mpc/mpcArmsDof") || !nh_.hasParam("/armRealDof"))
-          {
+        while (!nh_.hasParam("/mpc/mpcArmsDof") || !nh_.hasParam("/armRealDof")) {
             sleep(1);
-          }
-          ros::param::get("/mpc/mpcArmsDof", num_mpc_arm_joints_);
-          ros::param::get("/armRealDof", num_arm_joints_);
-          half_num_arm_joints_ = num_arm_joints_/2;
-          half_num_mpc_arm_joints_ = num_mpc_arm_joints_/2;
         }
+        ros::param::get("/mpc/mpcArmsDof", num_mpc_arm_joints_);
+        ros::param::get("/armRealDof", num_arm_joints_);
+        half_num_arm_joints_ = num_arm_joints_ / 2;
+        half_num_mpc_arm_joints_ = num_mpc_arm_joints_ / 2;
+
         nh_.param("/comHeight", comHeight_, 0.8);
         nh_.param("/targetArmDisplacementVelocity", targetVelocity_, 0.5);
         nh_.param("/defaultJointState", defaultJointState_, std::vector<double>(12, 0.0));
 
-        control_mode_ = 0;   // Set default control mode
-        is_rl_controller_ = 0.0;  // Initialize RL controller flag
+        control_mode_ = 0;
+        is_rl_controller_ = 0.0;
+    }
+
+    bool isRlController() const { return is_rl_controller_ > 0.5; }
+
+    vector_t getTrajectoryStartState() const {
+        vector_t targetState = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
+        if (isFistTrajAfterChangeMode) {
+            if (initstate_.size() == num_arm_joints_) {
+                return initstate_;
+            }
+            ROS_WARN("[ArmTrajNode]: initstate_ is not initialized, use current arm state as trajectory start.");
+            return targetState;
+        }
+        if (hasLastTargetState_) {
+            return lastTargetState_;
+        }
+        return targetState;
+    }
+
+    TargetTrajectories buildArmTargetTrajectoriesFromMsg(const kuavo_msgs::armTargetPoses::ConstPtr& msg,
+                                                         bool clear_first_traj_flag) {
+        scalar_array_t timeTrajectory;
+        vector_array_t stateTrajectory;
+        vector_t targetState = getTrajectoryStartState();
+        const scalar_t currentTime = observation_.time;
+
+        timeTrajectory.push_back(currentTime);
+        stateTrajectory.push_back(targetState);
+
+        for (size_t i = 0; i < msg->times.size(); ++i) {
+            for (size_t j = 0; j < static_cast<size_t>(num_arm_joints_); ++j) {
+                targetState(j) = msg->values[i * num_arm_joints_ + j] * kDegToRad;
+            }
+            timeTrajectory.push_back(currentTime + msg->times[i]);
+            stateTrajectory.push_back(targetState);
+        }
+
+        if (clear_first_traj_flag) {
+            isFistTrajAfterChangeMode = false;
+        }
+
+        return generateTargetTrajectories(timeTrajectory, stateTrajectory, observation_);
+    }
+
+    void publishKuavoArmTraj(const vector_t& q_rad, const vector_t& v_rad) {
+        if (q_rad.size() != num_arm_joints_) {
+            return;
+        }
+        sensor_msgs::JointState js_msg;
+        js_msg.header.stamp = ros::Time::now();
+        js_msg.name.resize(num_arm_joints_);
+        js_msg.position.resize(num_arm_joints_);
+        js_msg.velocity.resize(num_arm_joints_);
+        for (int i = 0; i < num_arm_joints_; ++i) {
+            js_msg.name[i] = "arm_joint_" + std::to_string(i);
+            js_msg.position[i] = q_rad(i) * kRadToDeg;
+            js_msg.velocity[i] = (v_rad.size() == num_arm_joints_) ? (v_rad(i) * kRadToDeg) : 0.0;
+        }
+        kuavo_arm_traj_pub_.publish(js_msg);
+    }
+
+    vector_t computeTrajectoryVelocity(scalar_t time, const vector_t& q) const {
+        const auto& times = rl_arm_target_trajectories_.timeTrajectory;
+        if (times.size() < 2) {
+            return vector_t::Zero(num_arm_joints_);
+        }
+        if (time <= times.front()) {
+            const vector_t v = (rl_arm_target_trajectories_.getDesiredState(times[1]) - q) /
+                               std::max(times[1] - times.front(), 1e-6);
+            return v;
+        }
+        if (time >= times.back()) {
+            const size_t n = times.size();
+            const vector_t v = (q - rl_arm_target_trajectories_.getDesiredState(times[n - 2])) /
+                               std::max(times.back() - times[n - 2], 1e-6);
+            return v;
+        }
+        const auto upper_it = std::upper_bound(times.begin(), times.end(), time);
+        const size_t idx1 = static_cast<size_t>(std::distance(times.begin(), upper_it));
+        const size_t idx0 = idx1 - 1;
+        return (rl_arm_target_trajectories_.stateTrajectory[idx1] -
+                rl_arm_target_trajectories_.stateTrajectory[idx0]) /
+               std::max(times[idx1] - times[idx0], 1e-6);
+    }
+
+    void sampleAndPublishRlArmTraj(scalar_t time) {
+        if (!rl_traj_active_ || rl_arm_target_trajectories_.timeTrajectory.empty()) {
+            return;
+        }
+        const vector_t q = rl_arm_target_trajectories_.getDesiredState(time);
+        const vector_t v = computeTrajectoryVelocity(time, q);
+        publishKuavoArmTraj(q, v);
+    }
+
+    void activateRlArmTrajectory(const TargetTrajectories& trajectories) {
+        rl_arm_target_trajectories_ = trajectories;
+        rl_traj_active_ = true;
+        sampleAndPublishRlArmTraj(observation_.time);
+    }
+
+    void stopRlTrajectory() {
+        rl_traj_active_ = false;
+        rl_arm_target_trajectories_ = TargetTrajectories();
     }
 
     void commandCallback(const kuavo_msgs::armTargetPoses::ConstPtr& msg) {
-        std::cout << "[ArmTrajNode]: Received arm target poses" << std::endl;
+        ROS_INFO("[ArmTrajNode]: Received arm target poses");
 
-        if (msg->values.empty() || msg->times.empty() || msg->values.size() != msg->times.size() * num_arm_joints_) {
+        if (msg->values.empty() || msg->times.empty() ||
+            msg->values.size() != msg->times.size() * static_cast<size_t>(num_arm_joints_)) {
             ROS_WARN("[ArmTrajNode]: Invalid armTargetPoses data. Empty values or mismatched sizes.");
             return;
         }
@@ -83,134 +185,94 @@ private:
             return;
         }
 
+        if (control_mode_ != 2) {
+            ROS_WARN_THROTTLE(1.0,
+                "[ArmTrajNode]: Arm control mode is %d (need 2: external_control). Ignoring command.", control_mode_);
+            return;
+        }
 
-        // Extract times and target poses
-        scalar_array_t timeTrajectory;
-        vector_array_t stateTrajectory;
-        vector_t targetState = observation_.state.segment(armJointStartIndex_,num_arm_joints_);
-
-        scalar_t currentTime = observation_.time;
-
-        if (isFistTrajAfterChangeMode) 
-        {
-            if (initstate_.size() == num_arm_joints_) {
-                stateTrajectory.push_back(initstate_);
-            } else {
-                ROS_WARN("[ArmTrajNode]: initstate_ is not initialized, use current arm state as trajectory start.");
-                stateTrajectory.push_back(targetState);
-            }
+        if (isRlController() && rl_traj_active_) {
+            hasLastTargetState_ = true;
+            lastTargetState_ = rl_arm_target_trajectories_.getDesiredState(observation_.time);
             isFistTrajAfterChangeMode = false;
         }
-        else
-        {
-            // Start from the last msgs's target state
-            if (hasLastTargetState_) {
-                targetState = lastTargetState_;
-            }
-            stateTrajectory.push_back(targetState);
+
+        const bool clear_first_flag = isFistTrajAfterChangeMode;
+        TargetTrajectories targetTrajectories = buildArmTargetTrajectoriesFromMsg(msg, clear_first_flag);
+
+        if (!targetTrajectories.stateTrajectory.empty()) {
+            lastTargetState_ = targetTrajectories.stateTrajectory.back();
+            hasLastTargetState_ = true;
         }
-        timeTrajectory.push_back(currentTime);
 
-
-        for (size_t i = 0; i < msg->times.size(); ++i) {
-            // Create a copy of the current state
-
-            // Extract the target arm joint positions
-            for (size_t j = 0; j < num_arm_joints_; ++j) {
-                scalar_t jointPosition = msg->values[i * num_arm_joints_ + j] * 3.1415926535 /180.0;
-                targetState(j) = jointPosition;
-            }
-
-            // Adjust the time relative to the current observation time
-            scalar_t adjustedTime = currentTime + msg->times[i];
-
-            timeTrajectory.push_back(adjustedTime);
-            stateTrajectory.push_back(targetState);
+        if (isRlController()) {
+            // 与 MPC 相同的时间轴（observation_.time），在 observation 回调里采样并发布 kuavo_arm_traj
+            activateRlArmTrajectory(targetTrajectories);
+            return;
         }
-        
-        // Generate target trajectories
-        auto targetTrajectories = generateTargetTrajectories(timeTrajectory, stateTrajectory, observation_);
 
-        // Publish the target trajectories to MPC
         auto mpcTargetTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(targetTrajectories);
         trajectoryPublisher_.publish(mpcTargetTrajectoriesMsg);
-
-        // 保存本次消息的最后一帧状态，供下次使用
-        lastTargetState_ = targetState;
-        hasLastTargetState_ = true;
     }
 
     void observationCallback(const ocs2_msgs::mpc_observation::ConstPtr& msg) {
         observation_ = ros_msg_conversions::readObservationMsg(*msg);
 
-        // Determine the starting index of the arm joints in the state vector
-        // This should be adjusted based on actual state vector structure
-        // 12 (base) + 12 (legs) + WaistNums (waist) = arm joint start index
         int waistNums = 1;
         if (!nh_.getParam("/mpc/mpcWaistDof", waistNums)) {
-            // Parameter not found, using default value
+            // use default
         }
-        armJointStartIndex_ = 12 + 12 + waistNums;  // Update this index according to state vector structure
+        armJointStartIndex_ = 12 + 12 + waistNums;
         if (!receivedObservation_) {
             initstate_ = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
         }
         receivedObservation_ = true;
+
+        if (isRlController() && rl_traj_active_) {
+            sampleAndPublishRlArmTraj(observation_.time);
+        }
     }
 
     TargetTrajectories generateTargetTrajectories(const scalar_array_t& timeTrajectory,
                                                   const vector_array_t& stateTrajectory,
                                                   const SystemObservation& observation) {
-        // Check if time and state trajectories are valid
-        if (timeTrajectory.empty() || stateTrajectory.empty() || timeTrajectory.size() != stateTrajectory.size()) {
+        if (timeTrajectory.empty() || stateTrajectory.empty() ||
+            timeTrajectory.size() != stateTrajectory.size()) {
             throw std::runtime_error("[ArmTrajNode]: Invalid time or state trajectory.");
         }
 
-        // Create input trajectory (dummy inputs)
         size_t inputDim = observation.input.size();
         vector_array_t inputTrajectory(timeTrajectory.size(), vector_t::Zero(inputDim));
-
         return {timeTrajectory, stateTrajectory, inputTrajectory};
     }
 
     void isRlControllerCallback(const std_msgs::Float64::ConstPtr& msg) {
+        const bool was_rl = isRlController();
         is_rl_controller_ = msg->data;
+        if (was_rl && !isRlController()) {
+            stopRlTrajectory();
+        }
     }
 
     void armControlModeCallback(const std_msgs::Float64MultiArray::ConstPtr& msg) {
-        if(msg->data.size() == 0)
-        {
+        if (msg->data.empty()) {
             ROS_ERROR("[ArmTrajNode]: The dimension of arm control mode is 0!!");
             return;
         }
-        
-        // 根据RL模式选择使用哪个值来更新control_mode_
-        if (is_rl_controller_) {
-            // RL模式下使用mpcArmControlMode_desired_ (msg->data[1])
-            if(msg->data.size() > 1) {
+
+        if (isRlController()) {
+            if (msg->data.size() > 1) {
                 control_mode_ = static_cast<int>(msg->data[1]);
             } else {
                 ROS_WARN("[ArmTrajNode]: RL mode but arm_control_mode data size < 2, using data[0]");
                 control_mode_ = static_cast<int>(msg->data[0]);
             }
         } else {
-            // 非RL模式下使用mpcArmControlMode_ (msg->data[0])
             control_mode_ = static_cast<int>(msg->data[0]);
         }
-    }
 
-    bool getArmCtlModeSrv(){
-        // 创建获取control_mode的服务请求
-        kuavo_msgs::changeArmCtrlMode get_mode_srv;
-        get_mode_srv.request.control_mode = 0;
-        if (get_arm_mode_service_client_.call(get_mode_srv))
-        {       
-            control_mode_ = get_mode_srv.response.mode;
-            return true;
-        }
-        else 
-        {   
-            std::cout << "[ArmTrajNode]: ArmCtlMode Get Fail !" << std::endl;
-            return false;
+        if (control_mode_ != 2 && rl_traj_active_) {
+            stopRlTrajectory();
         }
     }
 
@@ -222,89 +284,89 @@ private:
             return true;
         }
 
-        int control_mode = req.control_mode;
+        const int control_mode = req.control_mode;
         enable_ctrl_ = control_mode;
         res.result = true;
-        std::cout << "[ArmTrajNode]: Arm control mode changed to " << control_mode << "\n";
+        ROS_INFO("[ArmTrajNode]: Arm control mode change requested: %d", control_mode);
 
-        // 当前control mode与目标相同时
-        // if(getArmCtlModeSrv())
-        {
-            if (control_mode == control_mode_) return true;
+        if (control_mode == control_mode_) {
+            return true;
         }
-        // else return false;
 
-        callSetArmModeSrv(control_mode);
-        // 等待OCS2 轨迹初始点同步
-        if (control_mode == 2)
-        {
-        scalar_array_t zeroTimeTrajectory;
-        vector_array_t zeroStateTrajectory;
-        scalar_t zeroTime = observation_.time;
-        vector_t zeroState = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
-        zeroTimeTrajectory.push_back(zeroTime);
-        zeroStateTrajectory.push_back(zeroState);
-        auto zeroTrajectories = generateTargetTrajectories(zeroTimeTrajectory, zeroStateTrajectory, observation_);
-        auto mpczeroTrajectoriesMsg = ros_msg_conversions::createTargetTrajectoriesMsg(zeroTrajectories);
-        
-        bool is_mode_change_success = false;
+        if (!callSetArmModeSrv(control_mode)) {
+            res.result = false;
+            res.message = "Failed to request humanoid arm control mode";
+            return true;
+        }
 
-        // 记录mode改变后轨迹同步的开始时间
-        ros::Time change_mode_start_time = ros::Time::now();
+        if (control_mode == 2) {
+            vector_t zeroState = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
 
+            bool is_mode_change_success = false;
+            const ros::Time change_mode_start_time = ros::Time::now();
 
-        while (! is_mode_change_success)
-        {
-            // 检查同步是否超时
-            ros::Duration change_mode_elapsed_time = ros::Time::now() - change_mode_start_time;
-            if (change_mode_elapsed_time.toSec() > 2.0)
-            {
-                ROS_ERROR("[ArmTrajNode]: Change mode timeout exceeded 2 seconds");
-                break;
-            }
-            
-            // 处理其他ROS回调，让armControlModeCallback等能够更新
-            ros::spinOnce();
-            
-            trajectoryPublisher_.publish(mpczeroTrajectoriesMsg);
+            while (!is_mode_change_success) {
+                if ((ros::Time::now() - change_mode_start_time).toSec() > 2.0) {
+                    ROS_ERROR("[ArmTrajNode]: Change mode timeout exceeded 2 seconds");
+                    break;
+                }
 
-            // if (getArmCtlModeSrv())
-            {
-                std::cout << "mode_srv control mode : " << control_mode_ << std::endl;
-                if (control_mode_ == control_mode) is_mode_change_success = true;
+                ros::spinOnce();
+
+                if (isRlController()) {
+                    sampleAndPublishRlArmTraj(observation_.time);
+                } else {
+                    // 每次迭代用最新 observation_.time 重新生成零轨迹，避免时间戳过期导致 MPC 拒绝
+                    scalar_array_t zeroTimeTrajectory{observation_.time};
+                    vector_array_t zeroStateTrajectory{observation_.state.segment(armJointStartIndex_, num_arm_joints_)};
+                    auto zeroTrajectories = generateTargetTrajectories(zeroTimeTrajectory, zeroStateTrajectory, observation_);
+                    trajectoryPublisher_.publish(
+                        ros_msg_conversions::createTargetTrajectoriesMsg(zeroTrajectories));
+                }
+
+                if (control_mode_ == control_mode) {
+                    is_mode_change_success = true;
+                }
+                ros::Duration(0.01).sleep();
             }
 
-            ros::Duration(0.01).sleep();
-        }
-        
-        ros::Duration change_mode_total_time = ros::Time::now() - change_mode_start_time;
-        std::cout << "[ArmTrajNode]: Control mode change loop total time  " << change_mode_total_time.toSec() << " seconds\n";
-
-        isFistTrajAfterChangeMode = true;
-        initstate_ = zeroState;
-        hasLastTargetState_ = false;  // 模式切换后重置上一次状态标志
-
-        std::cout << "[ArmTrajNode]: External Control Mode Change Done  \n";
+            isFistTrajAfterChangeMode = true;
+            initstate_ = zeroState;
+            hasLastTargetState_ = false;
+            stopRlTrajectory();
+            if (!is_mode_change_success) {
+                ROS_ERROR("[ArmTrajNode]: External control mode change timeout (RL=%s)",
+                          isRlController() ? "true" : "false");
+                res.result = false;
+                res.message = "Arm control mode change timeout";
+            } else {
+                ROS_INFO("[ArmTrajNode]: External control mode change done (RL=%s)",
+                         isRlController() ? "true" : "false");
+            }
+        } else {
+            stopRlTrajectory();
         }
 
         return true;
     }
 
-    void callSetArmModeSrv(int32_t mode) {
-        // Modify arm control mode
-        // control_mode has three modes:
-        // 0: keep pose
-        // 1: auto_swing_arm
-        // 2: external_control
+    bool callSetArmModeSrv(int32_t mode) {
         kuavo_msgs::changeArmCtrlMode srv;
         srv.request.control_mode = mode;
-        auto change_arm_mode_service_client_ = nh_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
+        auto change_arm_mode_service_client_ =
+            nh_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
 
-        // Call the service
         if (change_arm_mode_service_client_.call(srv)) {
+            if (!srv.response.result) {
+                ROS_WARN("[ArmTrajNode]: SetArmModeSrv rejected mode %d: %s",
+                         mode, srv.response.message.c_str());
+                return false;
+            }
             ROS_INFO("[ArmTrajNode]: SetArmModeSrv call successful");
+            return true;
         } else {
             ROS_ERROR("[ArmTrajNode]: Failed to call SetArmModeSrv");
+            return false;
         }
     }
 
@@ -316,13 +378,11 @@ private:
     ros::Subscriber is_rl_controller_sub_;
     ros::Subscriber arm_control_mode_sub_;
     ros::Publisher trajectoryPublisher_;
-    ros::Publisher ArmTargetTrajectoriesPublisher_;
-
+    ros::Publisher kuavo_arm_traj_pub_;
 
     SystemObservation observation_;
     bool receivedObservation_ = false;
 
-    // Parameters
     double comHeight_;
     double targetVelocity_;
     std::vector<double> defaultJointState_;
@@ -332,28 +392,28 @@ private:
     int half_num_mpc_arm_joints_;
     int control_mode_;
     bool enable_ctrl_{false};
-    double is_rl_controller_;  // RL控制器标志
+    double is_rl_controller_;
 
     bool isFistTrajAfterChangeMode = true;
     vector_t initstate_;
-    vector_t lastTargetState_;  // 保存上一次消息的最后一帧状态
-    bool hasLastTargetState_ = false;  // 标记是否有上一次的状态
+    vector_t lastTargetState_;
+    bool hasLastTargetState_ = false;
 
-    // Index where the arm joints start in the state vector
     size_t armJointStartIndex_;
     ros::ServiceServer arm_traj_mode_service_server_;
     ros::ServiceClient get_arm_mode_service_client_;
 
+    // AMP/RL: 与 MPC 相同的 TargetTrajectories，按 observation_.time 采样
+    bool rl_traj_active_{false};
+    TargetTrajectories rl_arm_target_trajectories_;
 };
-    
+
 int main(int argc, char* argv[]) {
     const std::string robotName = "humanoid";
 
-    // Initialize ROS node
     ros::init(argc, argv, robotName + "_arm_trajectory_command_node");
     ros::NodeHandle nodeHandle;
 
-    // Create and run the ArmTrajectoryCommandNode
     ArmTrajectoryCommandNode node(nodeHandle, robotName);
     node.run();
 

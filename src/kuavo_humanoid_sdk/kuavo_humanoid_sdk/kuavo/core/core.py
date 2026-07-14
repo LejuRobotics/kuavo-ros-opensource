@@ -28,7 +28,7 @@ from geometry_msgs.msg import TwistStamped
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoArmCtrlMode, KuavoIKParams, KuavoPose, KuavoManipulationMpcFrame, KuavoManipulationMpcCtrlMode, KuavoManipulationMpcControlFlow
 from kuavo_humanoid_sdk.kuavo.core.ros.control import KuavoRobotControl
 from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
-from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param
+from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param, kuavo_ros_param
 from kuavo_humanoid_sdk.kuavo.core.ros.controller import Controller
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.kuavo.logger_client import get_logger
@@ -80,6 +80,7 @@ class KuavoRobotCore:
             self._manipulation_mpc_control_flow = KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
                 
             self._arm_ctrl_mode = KuavoArmCtrlMode.AutoSwing
+            self._robot_version_major = 0    # 默认值，initialize() 中会覆盖
             
             # register gait changed callback
             self._rb_state.register_gait_changed_callback(self._humanoid_gait_changed)
@@ -509,6 +510,26 @@ class KuavoRobotCore:
         return self._control.control_robot_head(yaw_deg, pitch_deg)
     
     def control_robot_waist(self, target_pos:list):
+        # 轮臂机器人: /robot_waist_motion_data 无人订阅，改走 /cmd_lb_torso_pose
+        if kuavo_ros_param.is_wheel_arm_robot():
+            import math
+            yaw_rad = math.radians(float(target_pos[0]))
+
+            # 尝试从 MPC observation 获取当前躯干位姿，保持 x/y/z 不变仅改 yaw
+            cur_x, cur_y, cur_z = 0.196, 0.001, 0.790  # fallback: _INIT 基准
+            try:
+                from kuavo_humanoid_sdk.kuavo.core.ros.state import KuavoRobotStateCore
+                state_core = KuavoRobotStateCore()
+                obs = getattr(state_core, '_mpc_observation_data', None)
+                if obs is not None and hasattr(obs, 'state') and hasattr(obs.state, 'value') and len(obs.state.value) >= 12:
+                    cur_x = obs.state.value[6]
+                    cur_y = obs.state.value[7]
+                    cur_z = obs.state.value[8]
+            except Exception:
+                pass  # 读取失败时使用 fallback 值
+
+            return self._control.control_torso_pose(cur_x, cur_y, cur_z, 0.0, 0.0, yaw_rad)
+
         return self._control.control_robot_waist(target_pos)
     
     def enable_head_tracking(self, target_id: int)->bool:

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <pwd.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
@@ -33,7 +34,6 @@ using motorevo::RevoMotorCmd_t;
 using motorevo::RevoMotorConfig_t;
 
 struct DeviceHandler; // 前置声明，避免额外包含
-
 
 class LeJuClawCan {
 public:
@@ -65,18 +65,32 @@ public:
     Disabled
     };
 
+    enum class InitFault {
+        NONE = 0,
+        BIDIRECTION_STUCK = 1,
+        CLOSE_NO_MOTION = 2
+    };
+
+    enum class RecoveryDirection {
+        TOWARD_OPEN = 0,
+        TOWARD_CLOSE = 1
+    };
+
     struct MotorStateData {
     uint8_t id;
     State   state;
     MotorStateData():id(0x0), state(State::None) {}
     MotorStateData(uint8_t id_, State state_):id(id_), state(state_) {}
-    };    
+    };
     using MotorStateDataVec = std::vector<MotorStateData>;
+    using DebugCallback = std::function<void(const std::string&)>;
 
     LeJuClawCan();
     ~LeJuClawCan();
     int initialize();
+    int initialize_recovery_mode();
     void close();
+    void set_debug_callback(DebugCallback callback);
 
     bool enableMotor(MotorId id, int timeout_ms = 100);
     bool enableAll();
@@ -95,10 +109,16 @@ public:
     std::vector<double> get_positions();
     std::vector<double> get_torque();
     std::vector<double> get_velocity();
+    InitFault get_init_fault() const;
+    std::string get_init_fault_message() const;
+    void cancel_motion();
+    void stop_all_current(int repeat_count = 5, int interval_ms = 10);
+    bool apply_recovery_current(RecoveryDirection direction, float current, int duration_ms);
 
 private:
     bool init_lejuclaw_can_customed();
     bool Connect(const canbus_sdk::DeviceConfig& config);
+    void emit_debug(const std::string& json) const;
 
     static void internalMessageCallback(canbus_sdk::CanMessageFrame* frame, const canbus_sdk::CallbackContext* context);
     static void internalTefEventCallback(canbus_sdk::CanMessageFrame* frame, const canbus_sdk::CallbackContext* context);
@@ -108,7 +128,7 @@ private:
     static constexpr float CONTROL_LOOP_HZ = 200.0f;               // 全局控制频率 Hz
     static constexpr float CONTROL_LOOP_DT = 1.0f / CONTROL_LOOP_HZ; // 全局控制周期 s
     static constexpr float DEFAULT_KP = 10.00f;                    // 比例增益系数
-    static constexpr float DEFAULT_KD = 2.20f;                     // 微分增益系数
+    static constexpr float DEFAULT_KD = 2.00f;                     // 微分增益系数
     static constexpr float DEFAULT_ALPHA = 0.20f;                  // 低通滤波器系数
     static constexpr float DEFAULT_MAX_CURRENT = 2.50f;            // 最大电流限制 A
     static constexpr float DEFAULT_MIN_ERROR_PERCENT = 1.5f;       // 到位误差阈值，基于行程百分比，单位 %
@@ -148,16 +168,18 @@ private:
     // 初始化寻找零点参数
     static constexpr float ZERO_CONTROL_KP = 0.0f;                  // 零点控制比例增益，零点寻找时使用
     static constexpr float ZERO_CONTROL_KD = 1.0f;                  // 零点控制微分增益，零点寻找时使用
-    static constexpr float ZERO_CONTROL_ALPHA = 1.50f;              // 零点控制低通滤波系数
+    static constexpr float ZERO_CONTROL_ALPHA = 1.00f;              // 零点控制低通滤波系数，合法范围 0~1
     static constexpr float ZERO_CONTROL_MAX_CURRENT = 1.80f;        // 零点控制最大电流限制，单位 A，仅作最大电流限制保护使用
     static constexpr float STALL_CURRENT_THRESHOLD = 1.50f;         // 堵转电流阈值，超过阈值后认为到达限位，单位 A
     static constexpr float STALL_VELOCITY_THRESHOLD = 0.10f;        // 堵转速度阈值，小于阈值后认为到达限位，单位 rad/s
     static constexpr float ZERO_CONTROL_DT = CONTROL_LOOP_DT;       // 零点控制周期，单位 s（与全局频率一致）
     static constexpr int ZERO_FIND_TIMEOUT_MS = 20000;              // 零点寻找超时时间，单位 ms
     static constexpr int ZERO_WAIT_MS = 500;                        // 零点等待时间，单位 ms
-    static constexpr float OPEN_LIMIT_ADJUSTMENT = -10.0f;          // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
+    static constexpr float OPEN_LIMIT_ADJUSTMENT = 0.0f;            // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float CLOSE_LIMIT_ADJUSTMENT = 0.0f;           // 关限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
-    static constexpr float TARGET_VELOCITY = 5.0f;                  // 限位寻找目标速度，单位 rad/s
+    static constexpr float TARGET_VELOCITY = 3.0f;                  // 限位寻找目标速度，单位 rad/s
+    static constexpr float ZERO_TARGET_VELOCITY_MAX = 3.0f;         // 寻零/限位搜索目标速度上限，避免配置过大导致猛冲
+    static constexpr float ZERO_STUCK_POSITION_THRESHOLD = 0.03f;   // 寻零/限位搜索卡死位置阈值，单位 rad
     // 关爪限位寻找参数
     static constexpr float OPEN_POSITION_CHANGE_THRESHOLD = 0.03f;  // 开爪位置变化阈值，开爪过程位置变化大于该值，明确有开爪动作，才可进行高电流冲关爪，避免错方向，单位 rad
     static constexpr float CLOSE_STUCK_CURRENT_THRESHOLD = 1.0f;    // 关爪卡死检测电流阈值，超过阈值后可判断为卡死状态，单位 A
@@ -210,6 +232,8 @@ private:
     float cfg_OPEN_LIMIT_ADJUSTMENT = OPEN_LIMIT_ADJUSTMENT;
     float cfg_CLOSE_LIMIT_ADJUSTMENT = CLOSE_LIMIT_ADJUSTMENT;
     float cfg_TARGET_VELOCITY = TARGET_VELOCITY;
+    float cfg_ZERO_TARGET_VELOCITY_MAX = ZERO_TARGET_VELOCITY_MAX;
+    float cfg_ZERO_STUCK_POSITION_THRESHOLD = ZERO_STUCK_POSITION_THRESHOLD;
     float cfg_OPEN_POSITION_CHANGE_THRESHOLD = OPEN_POSITION_CHANGE_THRESHOLD;
     float cfg_CLOSE_STUCK_CURRENT_THRESHOLD = CLOSE_STUCK_CURRENT_THRESHOLD;
     float cfg_CLOSE_STUCK_DETECTION_THRESHOLD = CLOSE_STUCK_DETECTION_THRESHOLD;
@@ -219,12 +243,12 @@ private:
     int   cfg_CLOSE_IMPACT_INTERVAL_MS = CLOSE_IMPACT_INTERVAL_MS;
     int   cfg_CLOSE_MAX_ATTEMPTS = CLOSE_MAX_ATTEMPTS;
 
-    void measure_range();
+    bool measure_range();
     bool find_claw_limit_velocity_control(bool is_open_direction, float kp, float kd, float alpha,
         float max_current, float stall_current_threshold, 
         float stall_velocity_threshold, float dt, 
         int timeout_ms,
-        const std::unordered_map<MotorId, bool>& can_perform_3a_impact);
+        const std::unordered_map<MotorId, bool>& allow_reverse_impact);
     void adjust_range(std::unordered_map<MotorId, float> open_limit_positions, std::unordered_map<MotorId, float> close_limit_positions);
 
     // YAML配置加载
@@ -244,6 +268,7 @@ private:
     bool waitForAllMotorsFeedback(int timeout_ms);
     void init_status_variables();
     bool waitForOperationStatus(MotorId id, Operation expected_op, OperationStatus expected_status, int timeout_ms, const char* operation_name);
+    void set_init_fault(InitFault fault, const std::string& message);
 
     // 获取按 MotorId 升序排列的电机 ID 列表（用于 vector<->map 的稳定映射）
     std::vector<MotorId> get_sorted_motor_ids() const;
@@ -290,6 +315,8 @@ private:
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> target_cmd; // 对应原来的8个并列的数组，舍弃 vel_kpid
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> old_target_cmd;
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> current_cmd;
+    InitFault last_init_fault_ = InitFault::NONE;
+    std::string last_init_fault_message_;
 
     // 量程测量与映射（按电机ID存储）
     std::unordered_map<MotorId, float> open_limit_positions_;   // 开爪限位（rad）
@@ -300,11 +327,13 @@ private:
     // 设备ID -> CAN总线名称 映射（用于反注册等操作）
     std::unordered_map<MotorId, std::string> device_canbus_map_;
     std::unordered_map<MotorId, MotorCtrlData> motor_ctrl_datas_;
+    DebugCallback debug_callback_;
 
     // 控制线程
     std::atomic<bool> thread_running{false};
     std::thread control_thread_;
     std::atomic<bool> target_updated_{false};
+    std::atomic<bool> motion_cancel_requested_{false};
 };
 
 }

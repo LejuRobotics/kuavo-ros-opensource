@@ -98,7 +98,7 @@ void impl__aruco_getRTfromMatrix44(const cv::Mat& M, cv::Mat& R, cv::Mat& T)
 }
 
 double reprj_error(const std::vector<cv::Point3f>& objPoints,
-                   const std::vector<cv::Point2f> points2d, const CameraParameters& imp,
+                   const std::vector<cv::Point2f>& points2d, const CameraParameters& imp,
                    const cv::Mat& rt44)
 {
   std::vector<cv::Point2f> prepj;

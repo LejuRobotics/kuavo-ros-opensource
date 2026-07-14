@@ -1,7 +1,9 @@
 #! /usr/bin/env python3
 import os
+import sys
 import time
 import rospy
+import rospkg
 import argparse
 import subprocess
 from typing import Tuple
@@ -9,6 +11,10 @@ from abc import ABC, abstractmethod
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger, TriggerRequest,TriggerResponse
 from geometry_msgs.msg import Twist
+
+rospack = rospkg.RosPack()
+sys.path.insert(0, os.path.join(rospack.get_path('kuavo_common'), 'python'))
+from robot_version import RobotVersion
 
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
@@ -215,15 +221,20 @@ class KuavoRobotSim(KuavoRobot):
         global ROS_MASTER_URI
         global ROS_IP
         global ROS_HOSTNAME
+        global ROBOT_VERSION
 
         if not KUAVO_ROS_CONTROL_WS_PATH:
             KUAVO_ROS_CONTROL_WS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../.."))
         if not ROS_MASTER_URI or not ROS_IP or not ROS_HOSTNAME:
             ROS_MASTER_URI = "http://localhost:11311"
-            ROS_IP = "localhost" 
+            ROS_IP = "localhost"
             ROS_HOSTNAME = "localhost"
 
-        launch_cmd = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch && export DISPLAY=:1"
+        # 根据 ROBOT_VERSION 选择 launch 文件（使用 RobotVersion 判断，与 ocs2_h12pro_node 一致）
+        robot_version_int = int(ROBOT_VERSION) if ROBOT_VERSION else 40
+        is_wheel_arm = RobotVersion.create(robot_version_int).start_with(major=6)
+        launch_file = "load_kuavo_mujoco_sim_wheel.launch" if is_wheel_arm else "load_kuavo_mujoco_sim.launch"
+        launch_cmd = f"roslaunch humanoid_controllers {launch_file} && export DISPLAY=:1"
         return tmux_run_cmd(WEBSOCKET_HUMANOID_ROBOT_SESSION_NAME, launch_cmd, sudo=False)
     
     def stop_robot(self)->Tuple[bool, str]:
@@ -254,7 +265,9 @@ class KuavoRobotSim(KuavoRobot):
     
     def get_robot_launch_status(self)->Tuple[bool, str]:
 
-        if check_rosnode_exists("/humanoid_sqp_mpc") and check_rosnode_exists("/nodelet_controller"):
+        mpc_ok = (check_rosnode_exists("/humanoid_sqp_mpc") or
+                  check_rosnode_exists("/mobile_manipulator_sqp_mpc_node"))
+        if mpc_ok and check_rosnode_exists("/nodelet_controller"):
             return True, "launched"
         else:
             return True, "unlaunch"
@@ -299,7 +312,9 @@ class WebSocketSdkStartNode:
                 status = "unknown"
             return TriggerResponse(success=result, message=status)
         else:
-            if check_rosnode_exists("/humanoid_sqp_mpc") and check_rosnode_exists("/nodelet_controller"):
+            mpc_ok = (check_rosnode_exists("/humanoid_sqp_mpc") or
+                      check_rosnode_exists("/mobile_manipulator_sqp_mpc_node"))
+            if mpc_ok and check_rosnode_exists("/nodelet_controller"):
                 result = True
                 status = "launched"
             else:

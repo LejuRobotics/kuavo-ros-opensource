@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!--
+  GMR Simulation Launch File
+
+  Simulates OptiTrack data stream for testing without actual hardware.
+  Generates synthetic skeleton motion or reads from recorded files.
+
+  Usage:
+    # Synthetic motion (default)
+    roslaunch kuavo_mocap_gmr gmr_sim.launch
+
+    # With recorded data file
+    roslaunch kuavo_mocap_gmr gmr_sim.launch data_file:=/path/to/recording.pkl
+
+    # With MuJoCo viewer
+    roslaunch kuavo_mocap_gmr gmr_sim.launch enable_viewer:=true
+-->
+<launch>
+  <!-- Robot configuration -->
+  <arg name="robot" default="kuavo_s52" doc="Target robot type"/>
+  <arg name="format" default="lafan1" doc="Motion format"/>
+
+  <!-- Simulation parameters -->
+  <arg name="fps" default="30.0" doc="Simulation FPS"/>
+  <arg name="data_file" default="" doc="Path to recorded motion file (.pkl or .bvh)"/>
+  <arg name="loop" default="true" doc="Loop motion data"/>
+  <arg name="human_height" default="1.75" doc="Simulated human height (meters)"/>
+
+  <!-- Calibration -->
+  <arg name="cali_arm_pose_deg" default="75.0" doc="Calibration arm pose angle"/>
+
+  <!-- Visualization -->
+  <arg name="enable_viewer" default="false" doc="Enable MuJoCo viewer"/>
+
+  <!-- GMR Simulation Node -->
+  <node pkg="kuavo_mocap_gmr" type="run_with_venv.sh" name="gmr_sim_node"
+        output="screen" respawn="false"
+        args="$(find kuavo_mocap_gmr)/scripts/gmr_sim_node.py">
+
+    <param name="robot" value="$(arg robot)"/>
+    <param name="format" value="$(arg format)"/>
+    <param name="fps" value="$(arg fps)"/>
+    <param name="data_file" value="$(arg data_file)"/>
+    <param name="loop" value="$(arg loop)"/>
+    <param name="human_height" value="$(arg human_height)"/>
+    <param name="cali_arm_pose_deg" value="$(arg cali_arm_pose_deg)"/>
+    <param name="enable_viewer" value="$(arg enable_viewer)"/>
+  </node>
+</launch>

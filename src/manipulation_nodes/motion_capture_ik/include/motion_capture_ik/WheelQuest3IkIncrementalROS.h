@@ -86,6 +86,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void computeRightShoulderFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);
   // FK 辅助函数：计算腰部 yaw 参考点位置（用于胸部增量 anchor）
   void computeWaistYawFK(Eigen::Vector3d& pOut);
+  // 当前机器人胸部(waist_yaw_link) yaw/pitch 朝向，用于未开启躯干控制时保持当前姿态
+  Eigen::Quaterniond getRobotChestQuatRef() const;
   // 启发式计算肘部参考位置
   Eigen::Vector3d computeElbow(const Eigen::Vector3d& link6Pos,
                                const Eigen::Vector3d& endEffectorPos,
@@ -161,6 +163,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void publishWholeBodyRefMarkers();  // 发布全身优化参考点（base_link下可视化）
 
   void reset();                          // 重置所有运行时状态，确保进入系统时正常
+  bool loadStandArmAnglesFromRosParam();  // 从 /standJointState 加载站立手臂关节角（rad）
   void forceDeactivateAllArmCtrlMode();  // 强制停用所有手臂控制模式
   void forceActivateAllArmCtrlMode();    // 强制激活所有手臂控制模式
   // 设置轮臂快速模式服务调用函数
@@ -229,7 +232,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLatestLbTargetAngles_ = false;
   bool lbLegTrajPublishEnabled_ = false;
   ros::Publisher cmdVelPublisher_;  // 发布底盘速度控制命令
-  /// 与 /mobile_manipulator_joy/linear_scale_x|y、angular_scale_z 一致（再乘 chassisJoyCmdTravelScale）
+  /// 与 /vr_cmd_vel/linear_scale_x|y、angular_scale_z 一致（轮臂 v61/v62/v63 由 launch_quest3_ik 设置）
   double chassisCmdVelLinearXLimit_ = 0.8;
   double chassisCmdVelLinearYLimit_ = 0.8;
   double chassisCmdVelAngularYawLimit_ = 0.5;
@@ -295,6 +298,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d robotLeftFixedShoulderPos_;                      // 左肩绝对位置
   Eigen::Vector3d robotFixedWaistYawPos_;                          // 胸部IK目标frame(waist_yaw_link)在零位时的位置
   Eigen::Vector3d latestWaistYawFkPos_ = Eigen::Vector3d::Zero();  // 当前关节 FK 计算的胸部IK目标frame(waist_yaw_link)位置
+  Eigen::Quaterniond latestWaistYawFkQuat_ = Eigen::Quaterniond::Identity();
   bool hasLatestWaistYawFk_ = false;
   Eigen::Vector3d chestDefaultOffset_;                             // 兼容旧配置保留，不再作为胸部IK目标的主来源
   Eigen::Vector3d latestLeftShoulderFkPos_ = Eigen::Vector3d::Zero();   // 当前关节 FK 计算的左肩位置
@@ -348,6 +352,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d defaultRightHandPosOnExit_;                   // 退出时右手默认目标位置
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值
   bool useIncrementalHandOrientation_ = true;                   // 是否使用增量式手部姿态
+
+  // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
+  Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};
+  bool standArmAnglesLoaded_{false};
 
   // 保存 ArmJoint 为全零时的双手位姿（在 init 函数中计算，避免运行时频繁调用 FK）
   // Link6 位姿（用于 IK 约束）

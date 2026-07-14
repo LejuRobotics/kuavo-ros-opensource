@@ -10,6 +10,7 @@
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Bool.h>
 #include <kuavo_common/common/json.hpp>
+#include <kuavo_common/common/common.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/SetJoyTopic.h>
 #include <kuavo_msgs/getLbTorsoInitialPose.h>
@@ -93,7 +94,9 @@ namespace mobile_manipulator
       int robotVersion_ = 60;
       if(nodeHandle_.hasParam("robot_version"))
       {
-        nodeHandle_.getParam("robot_version", robotVersion_);
+        int raw_version = 0;
+        nodeHandle_.getParam("robot_version", raw_version);
+        robotVersion_ = RobotVersion::create(raw_version).version_number();
       }
       // 躯干初始化位置xyz
       loadTorsoInitialPoseFromServer(nodeHandle_, robotVersion_);
@@ -104,10 +107,7 @@ namespace mobile_manipulator
       torsoMax_yaw_ = 0.5235; torsoMin_yaw_ = 0.5235;
       torsoMax_pitch_ = 0.5235; torsoMin_pitch_ = 0.0;
 
-      // 检测手柄类型并设置映射
-      detectJoystickType();
-
-      // 加载手柄映射配置
+      // 先加载 launch 指定的映射配置（sim.json / bt2.json 等）
       if (nodeHandle.hasParam("channel_map_path"))
       {
         std::string channel_map_path;
@@ -120,8 +120,15 @@ namespace mobile_manipulator
         ROS_WARN_STREAM("未找到 channel_map_path 参数，使用默认手柄映射");
       }
 
-      // 从 joyAxisMap 获取轴索引（支持JSON配置）
-      // 根据 joy_to_cmd_vel_xy.py: axes[1]->linear.x, axes[0]->linear.y, axes[2]->angular.z
+      // 仿真键盘模式不检测物理手柄，避免 bt2pro 映射(angular=axis2) 覆盖 sim.json(angular=axis3)
+      std::string joystick_type_early;
+      nodeHandle_.getParam("joystick_type", joystick_type_early);
+      if (joystick_type_early != "sim")
+      {
+        detectJoystickType();
+      }
+
+      // 从 joyAxisMap 获取轴索引（sim: axes[3]=右摇杆Yaw -> angular.z）
       linear_axis_index_x_ = joyAxisMap["AXIS_LEFT_STICK_X"];   // axes[1] -> 前进/后退
       linear_axis_index_y_ = joyAxisMap["AXIS_LEFT_STICK_Y"];   // axes[0] -> 左右移动
       angular_axis_index_ = joyAxisMap["AXIS_RIGHT_STICK_YAW"];  // 旋转
@@ -170,17 +177,17 @@ namespace mobile_manipulator
       integrated_angular_z_ = 0.0;
       
       // 初始化积分增益参数（可根据需要调整）
-      integral_gain_linear_x_ = 0.01;   // 每次回调的积分增益
-      integral_gain_linear_z_ = 0.01;
-      integral_gain_angular_y_ = 0.01;
-      integral_gain_angular_z_ = 0.01;
+      integral_gain_linear_x_ = 0.001;   // 每次回调的积分增益
+      integral_gain_linear_z_ = 0.004;
+      integral_gain_angular_y_ = 0.003;
+      integral_gain_angular_z_ = 0.005;
 
       // G12 publishes /joy continuously at a higher fixed rate. Keep its
       // left-stick torso channels slower so lower-body joints 1/3 do not jump.
-      g12_wheelarm_integral_gain_linear_x_ = 0.003;
-      g12_wheelarm_integral_gain_linear_z_ = 0.01;
+      g12_wheelarm_integral_gain_linear_x_ = 0.001;
+      g12_wheelarm_integral_gain_linear_z_ = 0.004;
       g12_wheelarm_integral_gain_angular_y_ = 0.003;
-      g12_wheelarm_integral_gain_angular_z_ = 0.01;
+      g12_wheelarm_integral_gain_angular_z_ = 0.005;
       nodeHandle_.param("g12_wheelarm_integral_gain_linear_x", g12_wheelarm_integral_gain_linear_x_, g12_wheelarm_integral_gain_linear_x_);
       nodeHandle_.param("g12_wheelarm_integral_gain_linear_z", g12_wheelarm_integral_gain_linear_z_, g12_wheelarm_integral_gain_linear_z_);
       nodeHandle_.param("g12_wheelarm_integral_gain_angular_y", g12_wheelarm_integral_gain_angular_y_, g12_wheelarm_integral_gain_angular_y_);
@@ -465,7 +472,7 @@ namespace mobile_manipulator
           initialTorsoPose_y_ = 0.0005;
           initialTorsoPose_z_ = 0.789919;
         }
-        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63)
+        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63 || robotVersion == 200062 || robotVersion == 300062)
         {
           initialTorsoPose_x_ = 0.11575;
           initialTorsoPose_y_ = 0.0;
@@ -530,6 +537,20 @@ namespace mobile_manipulator
     double clamp(double value, double min_value, double max_value)
     {
       return std::max(min_value, std::min(value, max_value));
+    }
+
+    // 根据 z 高度计算 x 方向的最大允许值，根据构型的经验数值
+    double getTorsoMaxX(double z_increment)
+    {
+      if (z_increment <= 0.0) {
+        return 0.05;
+      } else if (z_increment <= 0.3) {
+        return 0.05 + (z_increment / 0.3) * 0.1;  // 从 0.05 线性插值到 0.15
+      } else if (z_increment <= 0.5) {
+        return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1;  // 从 0.15 线性插值到 0.25
+      } else {
+        return 0.25;
+      }
     }
 
     // 调用终止服务（发布停止信号）
@@ -844,11 +865,18 @@ namespace mobile_manipulator
             return (v >= 0) ? v * sp : v * sn;
           };
 
+          // 限制在真实的上下限范围内
+          integrated_linear_z_ = clamp(integrated_linear_z_, -torsoMin_z_, torsoMax_z_);
+          double current_torso_max_x = getTorsoMaxX(integrated_linear_z_);
+          integrated_linear_x_ = clamp(integrated_linear_x_, -torsoMin_x_, current_torso_max_x);
+          integrated_angular_y_ = clamp(integrated_angular_y_, -torsoMin_pitch_, torsoMax_pitch_);
+          integrated_angular_z_ = clamp(integrated_angular_z_, -torsoMin_yaw_, torsoMax_yaw_);
+
           geometry_msgs::Twist torso;
-          torso.linear.x = clamp(calcOut(integrated_linear_x_, torsoMax_x_, torsoMin_x_), -torsoMin_x_, torsoMax_x_) + initialTorsoPose_x_;
-          torso.linear.z = clamp(calcOut(integrated_linear_z_, torsoMax_z_, torsoMin_z_), -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
-          torso.angular.y = clamp(calcOut(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), -torsoMin_pitch_, torsoMax_pitch_);
-          torso.angular.z = clamp(calcOut(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), -torsoMin_yaw_, torsoMax_yaw_);
+          torso.linear.z = integrated_linear_z_ + initialTorsoPose_z_;
+          torso.linear.x = integrated_linear_x_ + initialTorsoPose_x_;
+          torso.angular.y = integrated_angular_y_;
+          torso.angular.z = integrated_angular_z_;
 
           if (std::abs(integrated_linear_x_) >= 1e-6 || std::abs(integrated_linear_z_) >= 1e-6 ||
               std::abs(integrated_angular_y_) >= 1e-6 || std::abs(integrated_angular_z_) >= 1e-6 ||
@@ -1079,16 +1107,19 @@ namespace mobile_manipulator
             }
         };
 
+        // 限制在真实的上下限范围内
+        integrated_linear_z_ = clamp(integrated_linear_z_, -torsoMin_z_, torsoMax_z_);
+        double current_torso_max_x = getTorsoMaxX(integrated_linear_z_);
+        integrated_linear_x_ = clamp(integrated_linear_x_, -torsoMin_x_, current_torso_max_x);
+        integrated_angular_y_ = clamp(integrated_angular_y_, -torsoMin_pitch_, torsoMax_pitch_);
+        integrated_angular_z_ = clamp(integrated_angular_z_, -torsoMin_yaw_, torsoMax_yaw_);
+
         // 创建躯干控制消息（使用积分值）
         geometry_msgs::Twist torso_cmd;
-        torso_cmd.linear.x = clamp(calculateOutput(integrated_linear_x_, torsoMax_x_, torsoMin_x_), 
-                                   -torsoMin_x_, torsoMax_x_) + initialTorsoPose_x_;
-        torso_cmd.linear.z = clamp(calculateOutput(integrated_linear_z_, torsoMax_z_, torsoMin_z_), 
-                                   -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
-        torso_cmd.angular.y = clamp(calculateOutput(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), 
-                                    -torsoMin_pitch_, torsoMax_pitch_);
-        torso_cmd.angular.z = clamp(calculateOutput(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), 
-                                    -torsoMin_yaw_, torsoMax_yaw_);
+        torso_cmd.linear.z = integrated_linear_z_ + initialTorsoPose_z_;
+        torso_cmd.linear.x = integrated_linear_x_ + initialTorsoPose_x_;
+        torso_cmd.angular.y = integrated_angular_y_;
+        torso_cmd.angular.z = integrated_angular_z_;
         // 判断是否发布：如果积分值非零或命令值不在初始位置，则发布（允许回到初始位置）
         bool shouldPublish = (std::abs(integrated_linear_x_) >= 1e-6) || (std::abs(integrated_linear_z_) >= 1e-6) ||
                              (std::abs(integrated_angular_y_) >= 1e-6) || (std::abs(integrated_angular_z_) >= 1e-6) ||

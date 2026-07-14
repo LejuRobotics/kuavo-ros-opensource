@@ -10,6 +10,7 @@
 #include <Eigen/Dense>
 #include <memory>
 #include <mutex>
+#include <functional>
 
 namespace humanoid_controller
 {
@@ -97,6 +98,7 @@ public:
      * @return 是否切换成功
      */
     bool changeMode(int target_mode);
+    void setExternalCommandBufferCallback(std::function<bool()> callback);
     
     /**
      * @brief 获取当前控制模式
@@ -169,6 +171,9 @@ private:
      * @brief 腰部轨迹回调函数（处理/robot_waist_motion_data话题）
      */
     void waistTrajectoryCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg);
+    void applyBufferedExternalCommandIfReady();
+    bool storeMode2WaistTarget(const kuavo_msgs::robotWaistControl& msg,
+                               Eigen::VectorXd& target_q) const;
     
     /**
      * @brief 腰部控制使能回调函数（处理/humanoid_controller/enable_waist_control话题）
@@ -222,6 +227,10 @@ private:
     // 模式2相关（外部控制）
     Eigen::VectorXd raw_mode2_waist_target_q_;  // 模式2原始目标位置
     bool mode2_waist_target_received_;  // 是否已收到模式2的目标
+    Eigen::VectorXd buffered_mode2_waist_target_q_;
+    bool buffered_mode2_waist_target_received_{false};
+    bool buffered_waist_enable_{false};
+    std::function<bool()> external_command_buffer_callback_;
     
     // 控制参数（从外部传入）
     Eigen::VectorXd waist_kp_;  // 位置增益（腰部部分）

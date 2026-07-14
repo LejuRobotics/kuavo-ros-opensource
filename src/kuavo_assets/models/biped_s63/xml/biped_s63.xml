@@ -179,7 +179,7 @@
                   </body>
                 </body>
               </body>
-              <body name="zhead_1_link" pos="0 0 0.43485">
+              <body name="zhead_1_link" pos="0 0 0.43935">
                 <inertial pos="-0.00029696 -0.0027932 -0.0376999" quat="0.999679 0.0249396 0.00153832 0.00413552" mass="0.816954" diaginertia="0.00206265 0.00192336 0.000654121"/>
                 <joint name="zhead_1_joint" pos="0 0 0" axis="0 0 1" range="-1.57 1.57" actuatorfrcrange="-15.5 15.5" damping="0.0"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_yaw"/>

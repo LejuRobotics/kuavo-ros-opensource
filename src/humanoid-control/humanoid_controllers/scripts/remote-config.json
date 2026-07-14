@@ -2,7 +2,7 @@
     "ssh_config": {
         "hostname": "192.168.26.12",
         "port": 22,
-        "username": "kuavo",
+        "username": "leju_kuavo",
         "password": "leju_kuavo",
         "timeout": 30,
         "retry_count": 3,
@@ -16,10 +16,16 @@
         "xhost_off": [
             "export DISPLAY=:1.0 && xhost -"
         ],
-        
+        "launch_waist_orbbec_camera": [
+            "pkill -f orbbec_camera_n",
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_60hz_depth.launch usb_port:=2-3.1' > ~/camera.log"
+        ],
+        "launch_waist_orbbec_camera_dont_kill_ros": [
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_60hz_depth.launch usb_port:=2-3.1' > ~/camera.log"
+        ],
         "launch_orbbec_camera": [
             "pkill -f orbbec_camera_n",
-            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/kuavo/.bashrc && cd /home/kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series.launch' > ~/camera.log"
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series.launch' > ~/camera.log"
         ],
         "check_system_status": [
             "ps aux | grep ros",

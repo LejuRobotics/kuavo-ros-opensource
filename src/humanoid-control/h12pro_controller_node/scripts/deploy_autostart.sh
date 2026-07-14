@@ -173,6 +173,31 @@ esac
 
 echo "楼梯建图相机类型: $STAIR_DETECTION_CAMERA"
 
+# 询问用户选择 VR 拉起方式
+echo "请选择 VR 拉起方式："
+echo "1. 仅 VR 控制"
+echo "2. VR 控制 + Orbbec 视频回传"
+echo -n "请选择 (默认为仅 VR 控制，直接回车选择默认): "
+read -r vr_launch_choice
+
+case $vr_launch_choice in
+    2)
+        LAUNCH_VR_REMOTE_CONTROL_CMD="roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_orbbec.launch"
+        echo -n "请输入 Quest3 IP (可选，直接回车不指定): "
+        read -r quest3_ip_address
+        if [ -n "$quest3_ip_address" ]; then
+            LAUNCH_VR_REMOTE_CONTROL_CMD="$LAUNCH_VR_REMOTE_CONTROL_CMD ip_address:=$quest3_ip_address"
+        fi
+        echo "已选择: VR 控制 + Orbbec 视频回传"
+        ;;
+    1|""|*)
+        LAUNCH_VR_REMOTE_CONTROL_CMD="roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
+        echo "已选择: 仅 VR 控制"
+        ;;
+esac
+
+echo "VR 拉起命令: $LAUNCH_VR_REMOTE_CONTROL_CMD"
+
 sed -i "s|^Environment=ROS_MASTER_URI=.*|Environment=ROS_MASTER_URI=$ROS_MASTER_URI|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=ROS_IP=.*|Environment=ROS_IP=$ROS_IP|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=KUAVO_CONTROL_SCHEME=.*|Environment=KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME|" $OCS2_H12PRO_MONITOR_SERVICE
@@ -182,10 +207,23 @@ sed -i "s|^Environment=KUAVO_RL_WS_PATH=.*|Environment=KUAVO_RL_WS_PATH=$KUAVO_R
 sed -i "s|^Environment=ROBOT_VERSION=.*|Environment=ROBOT_VERSION=$ROBOT_VERSION|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=NODE_SCRIPT=.*|Environment=NODE_SCRIPT=$START_OCS2_H12PRO_NODE|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=STAIR_DETECTION_CAMERA=.*|Environment=STAIR_DETECTION_CAMERA=$STAIR_DETECTION_CAMERA|" $OCS2_H12PRO_MONITOR_SERVICE
+if grep -q '^Environment="*LAUNCH_VR_REMOTE_CONTROL_CMD=' $OCS2_H12PRO_MONITOR_SERVICE; then
+    sed -i "s|^Environment=\"*LAUNCH_VR_REMOTE_CONTROL_CMD=.*|Environment=\"LAUNCH_VR_REMOTE_CONTROL_CMD=$LAUNCH_VR_REMOTE_CONTROL_CMD\"|" $OCS2_H12PRO_MONITOR_SERVICE
+else
+    sed -i "/^Environment=STAIR_DETECTION_CAMERA=.*/a Environment=\"LAUNCH_VR_REMOTE_CONTROL_CMD=$LAUNCH_VR_REMOTE_CONTROL_CMD\"" $OCS2_H12PRO_MONITOR_SERVICE
+fi
 sed -i "s|^ExecStart=.*|ExecStart=$MONITOR_OCS2_H12PRO|" $OCS2_H12PRO_MONITOR_SERVICE
 
 sudo cp $OCS2_H12PRO_MONITOR_SERVICE /etc/systemd/system/
 sudo systemctl daemon-reload
+
+# 同步写入 bashrc，确保终端 roslaunch 也能读取 KUAVO_CONTROL_SCHEME
+if grep -q "^export KUAVO_CONTROL_SCHEME=" ~/.bashrc; then
+    sed -i "s|^export KUAVO_CONTROL_SCHEME=.*|export KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME|" ~/.bashrc
+else
+    echo "export KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME" >> ~/.bashrc
+fi
+echo "已将 KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME 写入 ~/.bashrc"
 
 sudo apt-get install tmux
 

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="3" project_name="Project">
+    <include path="grab_put_box_in_shelves_with_force.xml"/>
+    <include path="grab_put_box_in_shelves_with_force2.xml"/>
+    <!-- Description of Node Models (used by Groot) -->
+    <TreeNodesModel>
+        <Action ID="ArmMoveToHomePose" editable="true"/>
+        <Action ID="ArmMoveToReadyPose" editable="true">
+            <input_port name="action_name"/>
+            <input_port name="move_speed"/>
+        </Action>
+        <Condition ID="BoxTagOK" editable="true">
+            <input_port name="tag_id"/>
+            <output_port name="box_pos"/>
+            <output_port name="box_quat"/>
+            <input_port name="time_check" default="false"/>
+        </Condition>
+        <Condition ID="CheckStatusOK" editable="true"/>
+        <Condition ID="CloseToDestination" editable="true">
+            <input_port name="pos_error_threshold"/>
+            <input_port name="yaw_error_threshold"/>
+            <input_port name="destination"/>
+            <output_port name="pose_delta"/>
+        </Condition>
+        <Action ID="CmdPoseMoveToDestination" editable="true">
+            <input_port name="target_pose"/>
+            <input_port name="move_type"/>
+        </Action>
+        <Action ID="CmdPoseWorldMoveToDestination">
+            <input_port name="target_pose"/>
+        </Action>
+        <Action ID="ComputeBackTurnPoseFromBoxToTarget" editable="true">
+            <input_port name="box_pos"/>
+            <input_port name="box_quat"/>
+            <input_port name="target_box_offset"/>
+            <input_port name="destination"/>
+            <output_port name="target_pose"/>
+        </Action>
+        <Condition ID="ComputeTargetPose" editable="true">
+            <input_port name="box_pos"/>
+            <input_port name="box_quat"/>
+            <input_port name="target_box_offset"/>
+            <output_port name="target_pose"/>
+        </Condition>
+        <Condition ID="ForceCheck" editable="true">
+            <input_port name="force_threshold"/>
+        </Condition>
+        <Action ID="GraspBox" editable="true">
+            <input_port name="box_pos"/>
+            <input_port name="box_quat">xyzw</input_port>
+            <input_port name="box_size"/>
+            <input_port name="box_offset"/>
+            <input_port name="grasp_type">0:grasp, 1:put</input_port>
+        </Action>
+        <Action ID="MakePlan" editable="true">
+            <input_port name="target_pose"/>
+            <output_port name="planed_trajectory"/>
+        </Action>
+        <Action ID="MoveToDestination" editable="true">
+            <input_port name="planed_trajectory"/>
+            <input_port name="move_type" default="0">int</input_port>
+        </Action>
+        <Action ID="PlanAndMoveToDestination" editable="true">
+            <input_port name="box_pos"/>
+            <input_port name="box_quat"/>
+            <input_port name="target_box_offset"/>
+            <input_port name="move_type" default="0">int</input_port>
+        </Action>
+        <Action ID="SingleStepToDestination" editable="true">
+            <input_port name="destination">x,y,z,yaw</input_port>
+            <input_port name="step_type" default="0"/>
+        </Action>
+        <Decorator ID="TimingDecorator" editable="true"/>
+    </TreeNodesModel>
+</root>

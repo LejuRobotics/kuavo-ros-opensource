@@ -16,8 +16,8 @@ def main():
     # Control head to move back and forth slowly for multiple cycles
     import time
     
-    cycles = 2  # Number of cycles to perform
-    interval = 0.1  # Time interval between movements in seconds
+    cycles = 1  # Number of cycles to perform
+    interval = 0.05  # Time interval between movements in seconds
     max_pitch = 25  # Maximum pitch angle in degrees
     
     for cycle in range(cycles):
@@ -37,8 +37,8 @@ def main():
             time.sleep(interval)
 
     # Control head to move left and right
-    cycles = 2  # Number of cycles to perform
-    interval = 0.1  # Time interval between movements in seconds
+    cycles = 1  # Number of cycles to perform
+    interval = 0.05  # Time interval between movements in seconds
     max_yaw = 60  # Maximum yaw angle in degrees
     
     for cycle in range(cycles):

@@ -38,8 +38,9 @@
 #include "nav_msgs/Odometry.h"
 #include "std_srvs/SetBool.h"
 #include "std_msgs/Float64.h"
-#include "std_msgs/Float64.h"
 #include "std_msgs/Float64MultiArray.h"
+#include "std_msgs/Bool.h"
+#include "geometry_msgs/Vector3.h"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Core>
 #include <csignal>
@@ -47,6 +48,7 @@
 #include <queue>
 #include "kuavo_msgs/lejuClawCommand.h"
 #include "sensor_msgs/JointState.h"
+#include <kuavo_common/common/common.h>
 
 #include "mujoco_cpp/depth_camera_config.h"
 #include "joint_address.hpp"
@@ -64,6 +66,7 @@
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/CameraInfo.h"
 #include <opencv2/opencv.hpp>
+#include <cmath>
 
 //  ************************* lcm ****************************
 
@@ -118,11 +121,14 @@ namespace
   const mjtNum VERTICAL_APERTURE = 2.4480;  // 2.4480
   const mjtNum DEPTH_CAMERA_MIN_RANGE = 0.17;
   const mjtNum DEPTH_CAMERA_MAX_RANGE = 2.5;
+  const mjtNum DEPTH_CAMERA_H_PIXEL_SIZE = HORIZONTAL_APERTURE / DEPTH_CAMERA_WIDTH;
+  const mjtNum DEPTH_CAMERA_V_PIXEL_SIZE = VERTICAL_APERTURE / DEPTH_CAMERA_HEIGHT;
   // raycaster camera thread
   std::thread depth_thread;
   std::atomic<bool> depth_thread_running{true};
   std::mutex mujoco_data_mutex;  // Protects access to m and d
-  double depth_frequency = 60.0;  // Hz
+  constexpr double kDefaultDepthFrequency = 60.0;
+  double depth_frequency = kDefaultDepthFrequency;  // Hz
   bool isRunCamera_{false};
 
   // Depth image history buffer (6*6+7=43 frames)
@@ -162,6 +168,25 @@ namespace
   bool right_hand_active_ = false;
   int left_arm_link_id_ = -1;   // 缓存左手link ID
   int right_arm_link_id_ = -1;  // 缓存右手link ID
+  // 躯干吊绳：三模块独立叠加（绞盘回锚 + 姿态回正 + 六轴阻尼）
+  bool torso_rope_active_ = false;
+  bool torso_rope_got_anchor_ = false;
+  // 按直立 torso 高度估算：锚点 Z=1.8m， torso 质心约 0.65~0.7m，
+  // 距离约 1.1m；绳长设 1.1m，站着激活时松弛，倒了激活时吊起。
+  double torso_rope_length_ = 1.1;      // m，绳长；仅允许 ±5cm 步长调整
+  double torso_rope_speed_ = 0.3;       // m/s，绞盘恒定回拉速度
+  double torso_rope_kv_ = 5000.0;       // N/(m/s)，绞盘速度追踪增益
+  constexpr double torso_rope_max_force_ = 2500.0; // N，绞盘最大拉力
+  const double torso_rope_anchor_z_ = 1.8; // 锚点 Z，固定不可调
+  double torso_rope_anchor_[3] = {0, 0, 0};
+  // 模块 2：姿态回正（速度-位置控制），目标为世界坐标系直立
+  double torso_upright_kp_ = 100.0;     // Nm/(rad/s)，姿态角速度追踪增益
+  double torso_upright_speed_ = 0.35;   // rad/s，超出死区后三轴恒定回正速度（≈20°/s）
+  double torso_upright_deadzone_ = 0.043633; // rad，≈2.5°，死区内无力矩
+  // 模块 3：六轴阻尼（让躯干趋于静止）
+  double torso_rope_lin_damp_ = 100.0;  // N/(m/s)，线速度阻尼
+  double torso_rope_ang_damp_ = 15.0;   // Nm/(rad/s)，角速度阻尼
+  int torso_body_id_ = -1;
 
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
@@ -197,6 +222,16 @@ namespace
   std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
   std::unique_ptr<mujoco_sim::ActuatorDynamicsCompensator> actuatorDynamicsCompensator;
   constexpr int kArmCompensationDof = 14;
+  
+  double RayDistanceToZDepth(double ray_distance, double pixel_x, double pixel_y,
+                                    double focal_length) {
+    const double ray_norm = std::sqrt(pixel_x * pixel_x + pixel_y * pixel_y +
+                                      focal_length * focal_length);
+    if (ray_norm <= 0.0) {
+      return 0.0;
+    }
+    return ray_distance * focal_length / ray_norm;
+  }
 
   void ResetDepthBufferState()
   {
@@ -492,7 +527,7 @@ namespace
   }
 
   void init_joint_address(mjModel* model, JointGroupAddress &jga, const std::string& joint0, const std::string& joint1)
-  {     
+  {
     // 获取关节 ID
     auto id0 = mj_name2id(model, mjOBJ_JOINT, joint0.c_str());
     auto id1 = mj_name2id(model, mjOBJ_JOINT, joint1.c_str());
@@ -613,10 +648,27 @@ namespace
       init_joint_address(mnew, RArmJointsAddr, "zarm_r1_joint", right_arm_end_joint.c_str());
       init_joint_address(mnew, HeadJointsAddr, "zhead_1_joint", "zhead_2_joint");
 
-      /* dexhand joint address */
-      if(mj_name2id(mnew, mjOBJ_JOINT, "l_thumbCMC") != -1) {
-        init_joint_address(mnew, LHandJointsAddr, "l_thumbCMC", "l_littlePIP");
-        init_joint_address(mnew, RHandJointsAddr, "r_thumbCMC", "r_littlePIP");
+      /* dexhand joint address - 根据URDF自定义元数据hand_type区分手型号 */
+      int hand_type_id = mj_name2id(mnew, mjOBJ_NUMERIC, "hand_type");
+      if (hand_type_id != -1) {
+          int data_adr = mnew->numeric_adr[hand_type_id];
+          int hand_type_value = static_cast<int>(mnew->numeric_data[data_adr]);
+          if (hand_type_value == 1) {
+              // LinkerL6灵巧手关节命名
+              std::cout << "[mujoco_node]: Initialize LinkerL6 dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          } else if (hand_type_value == 2) {
+              // LinkerO6灵巧手关节命名
+              std::cout << "[mujoco_node]: Initialize LinkerO6 dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          }
+      } else {
+          // 旧版无hand_type元数据时，默认使用强脑手关节命名
+          std::cout << "[mujoco_node]: No hand_type metadata found, default to Qiangnao hand joint addresses" << std::endl;
+          init_joint_address(mnew, LHandJointsAddr, "l_thumbCMC", "l_littlePIP");
+          init_joint_address(mnew, RHandJointsAddr, "r_thumbCMC", "r_littlePIP");
       }
 
       // 遍历所有的物体
@@ -1198,7 +1250,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
+                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -1303,6 +1355,68 @@ namespace
                 }
               }
             }
+            // 躯干吊绳：三模块独立叠加（绞盘回锚 + 姿态回正 + 六轴阻尼）
+            if (torso_rope_active_ && torso_body_id_ >= 0)
+            {
+              int bid = torso_body_id_;
+              double *pos = d->xpos + 3 * bid;
+              double *quat = d->xquat + 4 * bid;
+
+              // 激活首帧记锚点 XY
+              if (!torso_rope_got_anchor_)
+              {
+                torso_rope_anchor_[0] = pos[0];
+                torso_rope_anchor_[1] = pos[1];
+                torso_rope_got_anchor_ = true;
+              }
+
+              double dx = torso_rope_anchor_[0] - pos[0];
+              double dy = torso_rope_anchor_[1] - pos[1];
+              double dz = torso_rope_anchor_z_ - pos[2];
+              double dist_sq = dx*dx + dy*dy + dz*dz;
+              double rope_len_sq = torso_rope_length_ * torso_rope_length_;
+
+              double *v_lin = d->cvel + 6 * bid + 3;
+              double *omega = d->cvel + 6 * bid;
+              Eigen::Map<Eigen::Vector3d> v_lin_eig(v_lin);
+              Eigen::Map<Eigen::Vector3d> omega_eig(omega);
+
+              // 模块 1：绞盘——绳长外按恒定速度拉回锚点
+              Eigen::Vector3d F_winch(0.0, 0.0, 0.0);
+              if (dist_sq > rope_len_sq)
+              {
+                double dist = sqrt(dist_sq);
+                double v_radial = (v_lin[0]*dx + v_lin[1]*dy + v_lin[2]*dz) / dist;
+                double F = std::clamp(torso_rope_kv_ * (torso_rope_speed_ - v_radial),
+                                      0.0, torso_rope_max_force_);
+                double scale = F / dist;
+                F_winch << scale * dx, scale * dy, scale * dz;
+              }
+
+              // 模块 2：姿态回正——目标为世界坐标系直立，三轴速度-位置控制，死区 ±2.5°
+              double err_vec[3];
+              mju_quat2Vel(err_vec, quat, 1.0);
+              Eigen::Vector3d err(err_vec);
+              Eigen::Vector3d mask = (err.array().abs() > torso_upright_deadzone_).cast<double>();
+              Eigen::Vector3d omega_des = -torso_upright_speed_ * err.cwiseSign();
+              Eigen::Vector3d tau_upright = torso_upright_kp_ * mask.cwiseProduct(omega_des - omega_eig);
+
+              // 模块 3：六轴阻尼——让躯干趋于静止
+              Eigen::Vector3d F_damp = -torso_rope_lin_damp_ * v_lin_eig;
+              Eigen::Vector3d tau_damp = -torso_rope_ang_damp_ * omega_eig;
+
+              // 合成外力/力矩
+              double *xfrc = &d->xfrc_applied[6 * bid];
+              Eigen::Map<Eigen::Vector3d> force_applied(xfrc);
+              Eigen::Map<Eigen::Vector3d> torque_applied(xfrc + 3);
+              force_applied  = F_winch + F_damp;
+              torque_applied = tau_upright + tau_damp;
+            }
+            else
+            {
+              torso_rope_got_anchor_ = false;
+            }
+
             // 每次step前应用手臂外力（因为xfrc_applied会在mj_step后自动清零）
             if (left_hand_active_ && left_arm_link_id_ != -1) {
               d->xfrc_applied[6 * left_arm_link_id_ + 0] = left_hand_wrench_.force.x;
@@ -1577,9 +1691,9 @@ void apply_wrench_to_link(mjModel* m, mjData* d, const char* link_name, const mj
   d->xfrc_applied[6 * link_index + 0] = force[0]; // 力 x
   d->xfrc_applied[6 * link_index + 1] = force[1]; // 力 y
   d->xfrc_applied[6 * link_index + 2] = force[2]; // 力 z
-  d->xfrc_applied[6 * link_index + 3] = torque[0]; // 劳动 x
-  d->xfrc_applied[6 * link_index + 4] = torque[1]; // 劳动 y
-  d->xfrc_applied[6 * link_index + 5] = torque[2]; // 劳动 z
+  d->xfrc_applied[6 * link_index + 3] = torque[0]; // 力矩 x
+  d->xfrc_applied[6 * link_index + 4] = torque[1]; // 力矩 y
+  d->xfrc_applied[6 * link_index + 5] = torque[2]; // 力矩 z
 }
 
 void chassicPoseCallback(const geometry_msgs::Pose::ConstPtr &msg)
@@ -1824,7 +1938,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 depth_msg.step = DEPTH_CAMERA_WIDTH * sizeof(float);
                 depth_msg.is_bigendian = 0;
                 depth_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH * sizeof(float));
-                float* depth_data = reinterpret_cast<float*>(depth_msg.data.data());
+                float* z_depth_data = reinterpret_cast<float*>(depth_msg.data.data());
 
                 if (g_depth_camera->dist != nullptr) {
                     // const mjtNum range_inv = 1.0 / (DEPTH_CAMERA_MAX_RANGE - DEPTH_CAMERA_MIN_RANGE);
@@ -1832,22 +1946,28 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                         for (int h = 0; h < DEPTH_CAMERA_WIDTH; ++h) {
                             int pixel_idx = v * DEPTH_CAMERA_WIDTH + h;
                             mjtNum dist = g_depth_camera->dist[pixel_idx];
+                            mjtNum pixel_x =
+                                (h + 0.5 - DEPTH_CAMERA_WIDTH / 2.0) * DEPTH_CAMERA_H_PIXEL_SIZE;
+                            mjtNum pixel_y =
+                                (DEPTH_CAMERA_HEIGHT / 2.0 - v - 0.5) * DEPTH_CAMERA_V_PIXEL_SIZE;
+                            mjtNum z_depth =
+                                RayDistanceToZDepth(dist, pixel_x, pixel_y, FOCAL_LENGTH);
                             // float norm = (dist - DEPTH_CAMERA_MIN_RANGE) * range_inv;
                             // norm = std::clamp(norm, 0.0f, 1.0f);
                             // depth_data[pixel_idx] = norm;
-                            dist = std::clamp(dist, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
-                            depth_data[pixel_idx] = dist / DEPTH_CAMERA_MAX_RANGE;
+                            z_depth = std::clamp(z_depth, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
+                            z_depth_data[pixel_idx] = z_depth / DEPTH_CAMERA_MAX_RANGE;
                         }
                     }
                 }
   
                 // Apply Gaussian blur
-                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, depth_data);
+                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, z_depth_data);
                 cv::GaussianBlur(depth_mat, depth_mat, cv::Size(3, 3), 1, 1);
 
                 // Update circular buffer with current frame
                 std::unique_lock<std::mutex> buffer_lock(depth_buffer_mutex);
-                depth_buffer[current_buffer_index].data.assign(depth_data, depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
+                depth_buffer[current_buffer_index].data.assign(z_depth_data, z_depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
                 depth_buffer[current_buffer_index].timestamp = depth_msg.header.stamp;
                 current_buffer_index = (current_buffer_index + 1) % DEPTH_BUFFER_SIZE;
                 
@@ -1860,7 +1980,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 std_msgs::Float64MultiArray depth_array_msg;
                 depth_array_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);
                 for (int i = 0; i < DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH; ++i) {
-                    depth_array_msg.data[i] = depth_data[i];
+                    depth_array_msg.data[i] = z_depth_data[i];
                 }
                 depthImagePub.publish(depth_msg);
                 depthImageArrayPub.publish(depth_array_msg);
@@ -1938,7 +2058,30 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   if(!RHandJointsAddr.ctrladr().invalid()) {
       std::cout << "[mujoco_node]: init dexhand node" << std::endl;
       g_dexhand_node = std::make_shared<DexHandMujocoRosNode>();
-      g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr);
+
+      // 优先从URDF自定义元数据中读取手类型
+      mujoco_node::HandType hand_type = mujoco_node::HandType::QIANGNAO;
+      int hand_type_id = mj_name2id(m, mjOBJ_NUMERIC, "hand_type");
+      
+      if (hand_type_id != -1) {
+          int hand_type_value = static_cast<int>(m->numeric_data[hand_type_id]);
+          if (hand_type_value == 1) {
+              hand_type = mujoco_node::HandType::LINKER_L6;
+              std::cout << "[mujoco_node]: Detected LinkerL6 dexhand from URDF custom metadata" << std::endl;
+          } else if (hand_type_value == 2) {
+              hand_type = mujoco_node::HandType::LINKER_O6;
+              std::cout << "[mujoco_node]: Detected LinkerO6 dexhand from URDF custom metadata" << std::endl;
+          } else {
+              hand_type = mujoco_node::HandType::QIANGNAO;
+              std::cout << "[mujoco_node]: Detected Qiangnao hand from URDF custom metadata" << std::endl;
+          }
+      } else {
+          // 没有找到自定义元数据，默认使用Qiangnao手
+          hand_type = mujoco_node::HandType::QIANGNAO;
+          std::cout << "[mujoco_node]: No hand_type metadata in URDF, default to use Qiangnao hand" << std::endl;
+      }
+
+      g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr, hand_type);
 
       int hand_joints_num = g_dexhand_node->get_hand_joints_num();
       g_nh_ptr->setParam("end_effector_joints_num", hand_joints_num);
@@ -1981,16 +2124,27 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
         }
         else if (robot_type == 1)
         {
+          // freejoint: qpos_init_temp[0..6] -> qpos[0..6]
           for (int i = 0; i < 7; i++)
           {
             qpos_init[i] = qpos_init_temp[i];
             std::cout << qpos_init[i] << ", ";
           }
-          for (int i = 7 ; i < qpos_init_temp.size(); i++)
-          {
-            qpos_init[i + 8] = qpos_init_temp[i];
-            std::cout << qpos_init[i + 8] << ", ";
-          }
+          // Use name-based qposadr lookup instead of hardcoded +8 offset
+          // qpos_init_temp[7..] = [leg, larm, rarm, head]
+          int src_idx = 7;
+          auto copyGroupQpos = [&](const JointGroupAddress& addr) {
+            for (auto iter = addr.qposadr().begin(); iter != addr.qposadr().end() && src_idx < (int)qpos_init_temp.size(); ++iter, ++src_idx) {
+              if (*iter < (int)qpos_init.size()) {
+                qpos_init[*iter] = qpos_init_temp[src_idx];
+                std::cout << qpos_init[*iter] << ", ";
+              }
+            }
+          };
+          copyGroupQpos(LegJointsAddr);
+          copyGroupQpos(LArmJointsAddr);
+          copyGroupQpos(RArmJointsAddr);
+          copyGroupQpos(HeadJointsAddr);
         }
         
         // // 根据机器人类型调整初始高度
@@ -2036,8 +2190,30 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r4_link");
     }
   }
-  
+
+  // 躯干吊绳 + 直立力矩：直接作用于 torso 质心
+  torso_body_id_ = mj_name2id(m, mjOBJ_BODY, "torso");
+  if (torso_body_id_ < 0) {
+    ROS_WARN("[TorsoRope] torso body not found, rope + upright disabled");
+  }
+
   ROS_INFO("Arm force application IDs: left=%d, right=%d", left_arm_link_id_, right_arm_link_id_);
+
+  // 躯干弹力绳订阅
+  ros::Subscriber torsoRopeActiveSub = g_nh_ptr->subscribe<std_msgs::Bool>(
+      "/mujoco/torso_rope/active", 10, [&](const std_msgs::Bool::ConstPtr &msg) {
+        torso_rope_active_ = msg->data;
+        ROS_INFO("[TorsoRope] active = %s", torso_rope_active_ ? "ON" : "OFF");
+      });
+  ros::Subscriber torsoRopeParamsSub = g_nh_ptr->subscribe<geometry_msgs::Vector3>(
+      "/mujoco/torso_rope/params", 10, [&](const geometry_msgs::Vector3::ConstPtr &msg) {
+        if (msg->x > 0.01) torso_rope_speed_ = msg->x;   // x: 绞盘拉速 m/s
+        if (msg->y > 0.01) torso_rope_kv_ = msg->y;       // y: 速度追踪增益
+        if (msg->z > 0.01) torso_rope_length_ = msg->z;   // z: 绳长 m
+        ROS_INFO_THROTTLE(1.0, "[TorsoRope] speed=%.2f m/s, kv=%.0f, rope_len=%.3f m, anchor_z=%.3f m (upright_kp=%.0f, lin_damp=%.0f, ang_damp=%.0f)",
+                 torso_rope_speed_, torso_rope_kv_, torso_rope_length_, torso_rope_anchor_z_,
+                 torso_upright_kp_, torso_rope_lin_damp_, torso_rope_ang_damp_);
+      });
 
   // 手臂外力订阅（存储外力值，在仿真循环中持续应用）
   ros::Subscriber lHandExtWrenchSub = g_nh_ptr->subscribe<geometry_msgs::Wrench>("/external_wrench/left_hand", 10, [&](const geometry_msgs::Wrench::ConstPtr &msg)
@@ -2111,6 +2287,15 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
     nh.getParam("/wbc_frequency", frequency);
   }
   ROS_INFO("Mujoco Frequency: %f Hz", frequency);
+
+  nh.param("/depth_frequency", depth_frequency, kDefaultDepthFrequency);
+  if (depth_frequency <= 0.0)
+  {
+    ROS_WARN("Invalid depth_frequency: %f Hz, fallback to %f Hz",
+             depth_frequency, kDefaultDepthFrequency);
+    depth_frequency = kDefaultDepthFrequency;
+  }
+  ROS_INFO("Mujoco depth camera frequency: %f Hz", depth_frequency);
   
   // 获取相机是否启动的判断
   if (!nh.hasParam("/run_mujoco_camera"))
@@ -2139,7 +2324,10 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
 
   if(nh.hasParam("robot_version"))
   {
-    nh.getParam("robot_version", robotVersion_);
+    int raw_version = 0;
+    nh.getParam("robot_version", raw_version);
+    robotVersion_ = RobotVersion::create(raw_version).version_number();
+    std::cout << "[mujoco_node] robot_version normalized: " << robotVersion_ << " (from raw: " << raw_version << ")" << std::endl;
   }
 
   if(nh.hasParam("pure_sim"))

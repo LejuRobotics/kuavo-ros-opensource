@@ -3,10 +3,12 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include <openvino/openvino.hpp>
 #include <memory>
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include <Eigen/Dense>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
+#include <std_msgs/Float64.h>
+#include <kuavo_msgs/FallStandCommand.h>
 
 namespace humanoid_controller
 {
@@ -140,6 +142,12 @@ namespace humanoid_controller
      */
     bool isAllowToExit() const override;
 
+    /**
+     * @brief 轨迹结束后是否允许切回基座/MPC（进入 STANDING，从而 isReadyToExit=true）
+     * @return true: 轨迹结束进入 STANDING，允许上层切换；false: 保持在倒地起身控制器并锁最后一帧继续推理
+     */
+    bool getAllowSwitchToStandingOnFinish() const { return allow_switch_to_standing_on_finish_; }
+
   protected:
     /**
      * @brief 更新控制器实现（重写基类方法）
@@ -169,7 +177,8 @@ namespace humanoid_controller
      * @param res 服务响应
      * @return 是否成功
      */
-    bool triggerFallStandUpCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);
+    bool fallStandCommandCallback(kuavo_msgs::FallStandCommand::Request &req,
+                                    kuavo_msgs::FallStandCommand::Response &res);
 
   
 
@@ -203,10 +212,11 @@ namespace humanoid_controller
     // 内部状态管理
     enum class FallStandState
     {
-      FALL_DOWN = 0,          ///< 倒地状态
-      READY_FOR_STAND_UP,     ///< 准备起身
-      STAND_UP,               ///< 执行起身
-      STANDING                ///< 站立状态
+      FALL_DOWN = 0,          ///< 瘫软：零力矩、关节自由
+      INTERPOLATING,          ///< 关节插值中（FALL_DOWN → 插值到轨迹起点）
+      READY_FOR_STAND_UP,     ///< 插值完成，等待触发起身
+      STAND_UP,               ///< RL 推理执行起身
+      STANDING                ///< 起身完成，可切出
     };
 
     /**
@@ -231,15 +241,16 @@ namespace humanoid_controller
      * @param time 当前时间
      * @param sensor_data 传感器数据
      */
-    void startFallStandInterpolation(const ros::Time& time, const SensorData& sensor_data);
+    bool startFallStandInterpolation(const ros::Time& time, const SensorData& sensor_data);
 
     /**
      * @brief 更新倒地起身插值
      * @param time 当前时间
      * @param sensor_data 传感器数据
      * @param joint_cmd 输出的关节命令
+     * @return true: 插值已完成(alpha>=1.0), false: 插值进行中
      */
-    void updateFallStandInterpolation(const ros::Time& time, 
+    bool updateFallStandInterpolation(const ros::Time& time,
                                       const SensorData& sensor_data,
                                       const Eigen::VectorXd& measuredRbdState,
                                       kuavo_msgs::jointCmd& joint_cmd);
@@ -323,7 +334,6 @@ namespace humanoid_controller
     bool autoSelectAndSwitchModel();
 
 
-
     /**
      * @brief 更新RL命令（类似humanoidController::updateRLcmd）
      * @param state 状态
@@ -349,6 +359,22 @@ namespace humanoid_controller
     MotionTrajectoryData motion_trajectory_;       ///< 当前使用的运动轨迹数据（指向prone或supine）
     MotionTrajectoryData motion_trajectory_prone_; ///< 趴着模型的运动轨迹数据
     MotionTrajectoryData motion_trajectory_supine_; ///< 躺着模型的运动轨迹数据
+
+    // 轨迹结束后的“保持最后一帧”模式：
+    // - 不切换到 STANDING（否则 shouldRunInference() 会停推理）
+    // - 不再推进轨迹 time_step
+    // - 输出保持在最后一帧（updateRLcmd 中会把 action 置零，锁在最后一帧默认姿态上）
+    bool hold_last_frame_ = false;
+    bool motion_trajectory_finished_logged_ = false;
+
+    // 轨迹结束后的行为开关（由 info 配置文件控制）
+    // - true: 轨迹结束后进入 STANDING，isReadyToExit() 返回 true（上层可切回 MPC/BASE）
+    // - false: 保持 STAND_UP 状态，锁最后一帧并持续推理（不触发上层自动切换）
+    bool allow_switch_to_standing_on_finish_ = false;
+
+    // 临时覆盖基类的 use_default_motor_csp_kpkd_ 标志（用于在插值阶段使用 kuavo.json 默认 kp/kd）
+    bool fallstand_override_use_default_kpkd_active_ = false;
+    bool fallstand_prev_use_default_motor_csp_kpkd_ = false;
     
     // 配置参数
     std::string network_model_file_;                ///< 当前使用的网络模型文件路径（向后兼容）
@@ -384,8 +410,6 @@ namespace humanoid_controller
     double fall_stand_max_joint_velocity_ = 1.0;   ///< 最大关节速度
     double fall_stand_required_time_ = 0.0;        ///< 插值所需时间
     double fall_stand_interp_start_time_ = 0.0;     ///< 插值开始时间
-    bool is_fall_stand_interpolating_ = false;     ///< 是否正在插值
-    bool is_fall_stand_interpolating_complete_ = false;  ///< 插值是否完成
     
     // RL控制相关参数（defalutJointPosRL_, JointControlModeRL_, JointPDModeRL_, 
     // jointKpRL_, jointKdRL_, torqueLimitsRL_, actionScaleTestRL_）使用基类的成员变量
@@ -401,12 +425,12 @@ namespace humanoid_controller
     double my_yaw_offset_ = 0.0;                   ///< Yaw角度偏移
     
     // AnkleSolver
-    AnkleSolver ankleSolver_;                      ///< 脚踝解算器
+    kuavo_solver::AnkleSolver ankleSolver_;        ///< 脚踝解算器
     
     // ROS服务
-    ros::ServiceServer trigger_fall_stand_up_srv_;  ///< 触发倒地起身服务
-    ros::ServiceServer set_fall_down_state_srv_;    ///< 设置倒地状态服务
-    
+    ros::ServiceServer fall_stand_command_srv_;        ///< 倒地起身命令服务（PREPARE/STAND_UP/RESET）
+    ros::ServiceServer set_fall_down_state_srv_;       ///< 设置倒地状态服务
+
   };
 
 } // namespace humanoid_controller

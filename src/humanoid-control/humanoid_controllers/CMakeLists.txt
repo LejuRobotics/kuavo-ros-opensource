@@ -42,9 +42,11 @@ find_package(catkin REQUIRED
         # ocs2_biped_robot_ros
         angles
         kuavo_msgs
+        leju_mobile_base_msgs
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
+        std_srvs
         )
 find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -133,6 +135,7 @@ catkin_package(
                 # ocs2_biped_robot_ros
                 angles
                 kuavo_msgs
+                leju_mobile_base_msgs
                 kuavo_common
                 kuavo_solver
 )
@@ -267,11 +270,13 @@ add_library(${PROJECT_NAME}
         src/ControlDataManager.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
+        src/util/TopicMonitor.cpp
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp
         src/rl/FallStandController.cpp
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
+        src/rl/VMPController.cpp
         src/rl/armController.cpp
         src/rl/DepthWalkController.cpp
         src/rl/waistController.cpp
@@ -279,6 +284,7 @@ add_library(${PROJECT_NAME}
         # src/MinicController.cpp
         src/rl/VMPController.cpp
         src/rl/DanceController.cpp
+        src/SitControlManager.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}

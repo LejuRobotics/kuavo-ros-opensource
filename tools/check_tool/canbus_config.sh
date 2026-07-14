@@ -532,7 +532,7 @@ configure_kuavo() {
         update_canbus_type_config "$temp_file" "$left_canbus_type" "$right_canbus_type"
 
         # 替换末端执行器配置
-        replace_end_effector_config "$temp_file" "$left_type" "$right_type"
+        replace_end_effector_config "$temp_file" "$left_type" "$right_type" "$robot_type"
         echo_success "✓ 配置文件已更新: $temp_file"
         config_file="$temp_file"
     else

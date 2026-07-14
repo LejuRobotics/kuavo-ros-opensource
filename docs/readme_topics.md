@@ -78,6 +78,10 @@
 `/humanoid_controller/wbc_planned_contact_force/right_foot`:wbc优化后的右脚所有接触点的接触力
 
 `/humanoid_controller/wbc_planned_joint_acc`:wbc优化后的关节加速度
+
+`/humanoid_controller/transport_mode_command`(**service**): 搬运模式控制服务，进入/退出/掉使能
+
+`/humanoid_controller/controller_switch_event`(latching): 控制器切换事件 (`kuavo_msgs/ControllerSwitchEvent`)，包含 from_controller / to_controller
 ## /humanoid_mpc_**
 ocs2源码中mpc交互的相关话题.
 

@@ -66,6 +66,7 @@ title: "Kuavo 5-W VR操作"
 -   **关闭方法**：
     - 轻触摸X和Y键+按下B 键(注意不是重按X和Y键)，此时下肢会复位到初始状态。
 > **注意**：开启腰部控制后请缓慢移动身体，以避免发生机器人快速运动导致异常损坏。
+> **控腰总开关**：可通过 `control_torso` 整体禁用控腰（H12/G12 启动见部署文档 `h12_vr_launch.yaml`；终端启动加 launch 参数 `control_torso:=false`）。禁用后无法开启腰部控制，可避免 VR 重连时因位姿差过大导致的腰部猛转。
 
 ### 2.3 手臂解锁/锁定与复位
 
@@ -85,7 +86,15 @@ title: "Kuavo 5-W VR操作"
   
 ### 2.5 程序关闭
 
--   同时按下 `X + Y` 键，此时机器人启动程序关闭
+-   同时按下 `X + Y` 键，此时机器人关闭全身使能（stop_robot）。
+-   **可关闭该按键**：通过 `enable_vr_stop_robot` 开关控制（H12/G12 启动见部署文档 `h12_vr_launch.yaml`；终端启动加 launch 参数 `enable_vr_stop_robot:=false`）。
+> ⚠️ 关闭后 **VR 手柄不再能关闭机器人，只能用 H12/G12 遥控器急停**。展会/验收等防误触场景可关闭，但需周知现场（含训练场）同事。
+
+### 2.6 遥操形式（绝对式 / 增量式）切换
+
+-   位置、姿态各自可选绝对式或增量式，由 `use_cpp_incremental_ik`（位置）与 `use_incremental_hand_orientation`（姿态）控制。
+-   按键操作不变，仅切换底层遥操形式；H12/G12 启动场景在 `h12_vr_launch.yaml` 配置，终端启动加对应 launch 参数。
+-   约束：`use_cpp_incremental_ik=false` 且 `use_incremental_hand_orientation=true` 为无效组合，启动会被拒绝。
 
 
 ## 3. 操控流程演示

@@ -3,7 +3,7 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include <openvino/openvino.hpp>
 #include <memory>
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/DanceTrajectoryState.h"
 #include <Eigen/Dense>
 #include <std_srvs/Trigger.h>
@@ -157,6 +157,23 @@ namespace humanoid_controller
     virtual ~DanceController();
 
     /**
+     * @brief 注入由 RLControllerManager 持有的共享 publisher
+     *
+     * 历史问题：原本每个 DanceController 实例自己 advertise 同一个 topic，
+     * 5 个实例同进程重复 advertise(latch=true) 在启动期会让订阅者握手
+     * 偶发触发 "received a connection for a nonexistent topic" 错误，
+     * rospy 重试 1 次后 give up，导致跳舞时无音乐播放。
+     *
+     * 修复：由 RLControllerManager 在初始化阶段 advertise 一次，把该
+     * publisher 句柄注入给每个 DanceController（ros::Publisher 内部是
+     * 引用计数实现，拷贝即共享同一份底层 publication）。
+     */
+    void setDanceTrajectoryStatePublisher(const ros::Publisher& pub)
+    {
+      dance_trajectory_state_pub_ = pub;
+    }
+
+    /**
      * @brief 初始化控制器
      * @return 是否初始化成功
      */
@@ -289,6 +306,11 @@ namespace humanoid_controller
                               std_srvs::Trigger::Response& res);
 
     /**
+     * @waao 计算当前的关节参考
+     */
+    Eigen::VectorXd getCurrentJointReference() const override;
+
+    /** 
      * @brief 发布舞蹈轨迹播放状态
      */
     void publishDanceTrajectoryState(const ros::Time& stamp,
@@ -326,9 +348,10 @@ namespace humanoid_controller
     std::map<std::string, Eigen::Vector3d> singleInputDataID_; // 观测数据索引映射
     std::vector<std::string> singleInputDataKeys_;              // 观测数据键列表
     bool residualAction_ = false;                  // 是否使用残差动作
+    Eigen::VectorXd danceDefaultJointPosRL_;       // 跳舞控制内部使用的默认关节位姿（defaultJointState_rl）
 
     // ===== 踝关节求解器 =====
-    AnkleSolver ankleSolver_;
+    kuavo_solver::AnkleSolver ankleSolver_;
     
     // ===== 机器人配置 =====
     bool is_real_{false};               // 默认false（与FallStandController一致）

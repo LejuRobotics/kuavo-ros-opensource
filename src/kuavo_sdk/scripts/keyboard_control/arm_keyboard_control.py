@@ -63,7 +63,11 @@ def get_version_parameter():
 # FK正解服务
 def fk_srv_client(joint_angles):
   # 确保要调用的服务可用
-  rospy.wait_for_service('/ik/fk_srv')
+  try:
+      rospy.wait_for_service('/ik/fk_srv', timeout=1.0)
+  except (rospy.ROSException, rospy.ROSInterruptException):
+      rospy.logwarn_once("等待 /ik/fk_srv 超时，跳过本次 FK 初始化")
+      return None
   try:
       # 初始化服务代理
       fk_srv = rospy.ServiceProxy('/ik/fk_srv', fkSrv)
@@ -75,6 +79,7 @@ def fk_srv_client(joint_angles):
       return fk_result.hand_poses
   except rospy.ServiceException as e:
       print("Service call failed: %s"%e)
+      return None
 
 # 通过四元数计算角度（弧度制）
 class Euler:
@@ -327,6 +332,9 @@ class IkArmService:
         self.eef_pose_msg.hand_poses.right_pose.quat_xyzw = r_hand_quat
 
         res = self.call_ik_srv()
+        if not res:
+            print("ik fail")
+            return False
         #print(hand_flag)
         if(res.success):
             print("ik success")
@@ -354,7 +362,11 @@ class IkArmService:
     # IK 逆解服务
     def call_ik_srv(self):
         # 确保要调用的服务可用
-        rospy.wait_for_service('/ik/two_arm_hand_pose_cmd_srv')
+        try:
+            rospy.wait_for_service('/ik/two_arm_hand_pose_cmd_srv', timeout=1.0)
+        except (rospy.ROSException, rospy.ROSInterruptException):
+            rospy.logwarn_throttle(5.0, "等待 /ik/two_arm_hand_pose_cmd_srv 超时，跳过本次 IK 求解")
+            return False
         try:
             # 初始化服务代理
             ik_srv = rospy.ServiceProxy('/ik/two_arm_hand_pose_cmd_srv', twoArmHandPoseCmdSrv)
@@ -364,7 +376,7 @@ class IkArmService:
             return res
         except rospy.ServiceException as e:
             print("Service call failed: %s"%e)
-            return False, []
+            return False
 
 class ArmType(Enum):
     Right = 0,
@@ -410,6 +422,7 @@ class KeyBoardArmController:
         self.which_hand = which_hand                   # 左/右手
         self.control_rpy_flag = False
         self._flag_pose_inited = False
+        self._arm_init_notice_printed = False
 
         self.ik_service=IkArmService()
 
@@ -466,6 +479,8 @@ class KeyBoardArmController:
     def update_joint_state_callback(self, data):
         arm_joint_data = data.joint_data.joint_q[self.joint_data_header:self.joint_data_footer]
         #self.current_joint_values = arm_joint_data
+        if getattr(self, "_arm_init_aborted", False):
+            return
         # 初始化
         if not self._flag_pose_inited:
             self.current_joint_values = arm_joint_data
@@ -492,7 +507,11 @@ class KeyBoardArmController:
                 
                 self._flag_pose_inited = True
             else:
-                print("No hand poses returned")
+                if getattr(self, "_arm_init_aborted", False):
+                    return
+                if not self._arm_init_notice_printed:
+                    print("No hand poses returned")
+                    self._arm_init_notice_printed = True
         else :
             if self.which_hand == ArmType.Left:
                 self.current_joint_values = tuple(arm_joint_data[:7]) + self.current_joint_values[7:]
@@ -667,7 +686,7 @@ class KeyBoardArmController:
             # print("update_joy over")
 
     def run(self): 
-        print("waiting for ik server...")
+        print("waiting for arm init (/sensors_data_raw + /ik/fk_srv)...")
         # 等待初始化结束
         while not self._flag_pose_inited and not rospy.is_shutdown():
             time.sleep(0.2)

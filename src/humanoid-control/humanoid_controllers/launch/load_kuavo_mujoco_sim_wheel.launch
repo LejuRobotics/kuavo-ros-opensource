@@ -41,7 +41,8 @@
     <arg name="use_joint_filter"   default="false"/>
     <arg name="estimator_type"     default="1"/>
     <arg name="wbc_only"           default="false"/>
-    <arg name="play_back"          default="false"/>  
+    <arg name="play_back"          default="false"/>
+    <arg name="real"               default="false"/>
     <arg name="joystick_type"      default="sim"/>
     <arg name="sim_input_mode"     default="keyboard"/>
     <arg name="arm_move_spd"      default="1.2"/>
@@ -78,6 +79,7 @@
     <param name="use_joint_filter"  value="$(arg use_joint_filter)"/>
     <param name="estimator_type"    value="$(arg estimator_type)"/>
     <param name="play_back"         value="$(arg play_back)"/>
+    <param name="real"              value="$(arg real)"/>
     <param name="joystick_type"  value="$(arg joystick_type)"/>
     <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
     <param name="start_way"  value="$(arg start_way)"/>
@@ -110,10 +112,10 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- mpc node -->
     <group unless="$(arg pure_sim)">
@@ -148,6 +150,8 @@
       <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
+        <!-- 仿真专用：启动直接进入stance状态，跳过初始上站流程，不影响实机 -->
+        <param unless="$(arg real)" name="/joy_node/last_state" value="stance" />
         <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
           <arg name="start_way" value="$(arg start_way)"/>
         </include>

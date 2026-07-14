@@ -93,6 +93,9 @@ class Quest3Node:
         self.ik_error_norm = [0.0, 0.0]
         self.arm_joint_angles = None
         self.control_mode  = Quest3Node.ControlMode.NONE_MODE
+        # 单手摇操躯干控制器（仅 single_hand_mode=true 时实例化）
+        self.single_hand_mode = False
+        self.torso = None
         # 发送给IK求解的目标位姿
         self._left_target_pose = (None, None)   # tuple(pos, quat), quat(x, y, z, w)
         self._right_target_pose = (None, None)  # tuple(pos, quat), quat(x, y, z, w) 
@@ -204,19 +207,26 @@ class Quest3Node:
             rospy.logerr(f"Error: {e}")  
             
     def handle_qiangnao(self, joyStick_data, hand_finger_data, left_hand_position, right_hand_position, robot_hand_position):
+        # 注意：single_hand_mode 下 grip 让位给 trigger 仅适用于 5W 平台 + qiangnao 末端。
+        # 其他末端类型（jodell/lejuclaw）若意外启用 single_hand_mode 需要单独适配。
         if joyStick_data is not None:
+            # 仅当侧扳机(grip)未按下时触发冻结，避免 Y+侧扳机(腰部旋转)与单按Y(冻结灵巧手)功能冲突
             if joyStick_data.left_second_button_pressed and not self.button_y_last:
-                print(f"\033[91mButton Y is pressed.\033[0m")
-                self.freeze_finger = not self.freeze_finger
+                if joyStick_data.left_grip <= 0.75 and joyStick_data.right_grip <= 0.75:
+                    print(f"\033[91mButton Y is pressed.\033[0m")
+                    self.freeze_finger = not self.freeze_finger
             self.button_y_last = joyStick_data.left_second_button_pressed
 
+            # 手指映射：grip 在 single_hand_mode 下被作为模式键，所有手指都改由 trigger 控制
+            grip_source_l = joyStick_data.left_trigger if self.single_hand_mode else joyStick_data.left_grip
+            grip_source_r = joyStick_data.right_trigger if self.single_hand_mode else joyStick_data.right_grip
             for i in range(6):
                 if i <= 2:
                     left_hand_position[i] = int(100.0 * joyStick_data.left_trigger)
                     right_hand_position[i] = int(100.0 * joyStick_data.right_trigger)
                 else:
-                    left_hand_position[i] = int(100.0 * joyStick_data.left_grip)
-                    right_hand_position[i] = int(100.0 * joyStick_data.right_grip)
+                    left_hand_position[i] = int(100.0 * grip_source_l)
+                    right_hand_position[i] = int(100.0 * grip_source_r)
 
                 # Clamp values to [0, 100]
                 left_hand_position[i] = max(0, min(left_hand_position[i], 100))
@@ -501,13 +511,24 @@ class Quest3Node:
 
         if self.incremental_control:
             def is_incremental_control(joySticks_data):
-                if joySticks_data is not None:
-                    if joySticks_data.left_first_button_touched and joySticks_data.right_first_button_touched:
-                        if joySticks_data.left_first_button_pressed and joySticks_data.right_first_button_pressed:
-                            # 触摸左右第一个按键，并且不是按下则认为是增量控制
-                            return False
-                        return True
-                return False
+                if joySticks_data is None:
+                    return False
+                # 原触发条件：双手 first_button touched 但不全 pressed
+                cond_classic = (
+                    joySticks_data.left_first_button_touched
+                    and joySticks_data.right_first_button_touched
+                    and not (
+                        joySticks_data.left_first_button_pressed
+                        and joySticks_data.right_first_button_pressed
+                    )
+                )
+                # 新触发条件：单手模式下 main_hand 已被锁定
+                cond_single = (
+                    self.single_hand_mode
+                    and self.torso is not None
+                    and self.torso.main_hand is not None
+                )
+                return cond_classic or cond_single
 
             if is_incremental_control(self.joySticks_data):
                 if self.control_mode != Quest3Node.ControlMode.INCREMENTAL_MODE:
@@ -674,6 +695,12 @@ class Quest3Node:
     def joySticks_data_callback(self, msg):
         self.quest3_arm_info_transformer.read_joySticks_msg(msg)
         self.joySticks_data = msg
+        if self.torso is not None:
+            try:
+                self.torso.handle_joystick(msg)
+            except Exception as e:
+                import rospy
+                rospy.logerr_throttle(2.0, f"TorsoController.handle_joystick error: {e}")
         self.pub_robot_end_hand(joyStick_data=self.joySticks_data)
 
     def safe_check_enter_incremental_mode(self, left_pose, right_pose):
@@ -742,6 +769,8 @@ if __name__ == '__main__':
     parser.add_argument("--ee_type", "--end_effector_type", dest="end_effector_type", type=str, default="", help="End effector type, jodell, qiangnao or lejuclaw.")
     parser.add_argument("--control_torso", type=int, default=0, help="0: do NOT control, 1: control torso.")
     parser.add_argument("--incremental_control", type=int, default=0, help="0: direct control, 1: incremental control.")
+    parser.add_argument("--single_hand_mode", type=int, default=0,
+                        help="0: disabled, 1: enable single-hand torso teleop (5W only).")
     args, unknown = parser.parse_known_args()
     
     quest3_node = Quest3Node()
@@ -753,5 +782,17 @@ if __name__ == '__main__':
     print(f"Control torso?: {args.control_torso}")
     quest3_node.incremental_control = bool(args.incremental_control)
     print(f"Incremental control?: {quest3_node.incremental_control}")
+    quest3_node.single_hand_mode = bool(args.single_hand_mode)
+    print(f"Single hand mode?: {quest3_node.single_hand_mode}")
+    if quest3_node.single_hand_mode:
+        from tools.torso_joystick_controller import create_torso_controller
+        try:
+            quest3_node.torso = create_torso_controller()
+            print("TorsoController initialized.")
+        except Exception as e:
+            print(f"\033[91mTorsoController init failed: {e}\033[0m")
+            # signal_shutdown 已被 create_torso_controller 调过，这里直接退出
+            import sys
+            sys.exit(1)
     print("Quest3 node started")
     rospy.spin()

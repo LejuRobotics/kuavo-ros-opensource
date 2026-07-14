@@ -8,10 +8,11 @@ controllers:
     class: "BASE_CONTROLLER"  # 基础行走控制器
     type: "AMP_CONTROLLER"    # 具体控制器类型
     config_file: "rl/skw_rl_param.info" 
-    enabled: true  
-
+    enabled: false
+    
   - name: "vmp_controller"
-    class: "BASE_CONTROLLER"  
+    class: "BASE_CONTROLLER"  # VMP控制器
     type: "VMP_CONTROLLER"    # VMP控制器类型
-    config_file: "rl/vmp_param.info"
-    enabled: true  
+    config_file: "vmp/vmp_param.info"  # VMP配置文件路径
+    enabled: true  # 默认不启用，需要时设为true
+

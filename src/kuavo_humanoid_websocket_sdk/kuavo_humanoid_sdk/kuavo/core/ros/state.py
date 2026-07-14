@@ -4,7 +4,7 @@ import copy
 from collections import deque
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
-from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param, EndEffectorType
+from kuavo_humanoid_sdk.kuavo.core.ros.param import make_robot_param, EndEffectorType, is_wheel_arm_robot_from_client
 from kuavo_humanoid_sdk.interfaces.data_types import (KuavoImuData, KuavoJointData, KuavoOdometry, KuavoManipulationMpcFrame, 
                                                       KuavoArmCtrlMode, EndEffectorState, KuavoDexHandTouchState,
                                                       KuavoManipulationMpcCtrlMode, KuavoManipulationMpcControlFlow)
@@ -57,16 +57,31 @@ class KuavoRobotStateCoreWebsocket:
                 if not self.websocket.client.is_connected:
                     SDKLogger.error("Failed to connect to WebSocket server")
                     raise ConnectionError("Failed to connect to WebSocket server")
-                
+
+                # 提前获取 robot 参数以判断轮臂/双足，选择正确的 topic
+                kuavo_info = make_robot_param()
+                if kuavo_info is None:
+                    SDKLogger.error("Failed to get robot parameters")
+                    raise RuntimeError("Failed to get robot parameters")
+
+                # 读取 ROS param /robot_type（由 launch 文件设置，1=轮臂 2=双足）
+                self._is_wheel_arm = is_wheel_arm_robot_from_client(self.websocket.client)
+
+                if self._is_wheel_arm:
+                    mpc_obs_topic = '/mobile_manipulator_mpc_observation'
+                else:
+                    mpc_obs_topic = '/humanoid_mpc_observation'
+
                 # Initialize subscribers
-                self._sub_sensors_data = roslibpy.Topic(self.websocket.client, '/sensors_data_raw', 'kuavo_msgs/sensorsData')
+                # 根据 /use_shm_communication 参数选择传感器数据话题（与 ROS SDK 保持一致）
+                use_shm = self._get_ros_param('/use_shm_communication', False)
+                sensor_topic = '/sensors_data_raw_shm' if use_shm else '/sensors_data_raw'
+                SDKLogger.info(f"Using {'shared memory' if use_shm else 'standard'} mode, sensor topic: {sensor_topic}")
+                self._sub_sensors_data = roslibpy.Topic(self.websocket.client, sensor_topic, 'kuavo_msgs/sensorsData')
                 self._sub_odom = roslibpy.Topic(self.websocket.client, '/odom', 'nav_msgs/Odometry')
                 self._sub_terrain_height = roslibpy.Topic(self.websocket.client, '/humanoid/mpc/terrainHeight', 'std_msgs/Float64')
                 self._sub_gait_time_name = roslibpy.Topic(self.websocket.client, '/humanoid_mpc_gait_time_name', 'kuavo_msgs/gaitTimeName')
-                self._sub_mpc_observation = roslibpy.Topic(self.websocket.client, '/humanoid_mpc_observation', 'ocs2_msgs/mpc_observation')
-                
-                # service calls are time-consuming after subscription, place them before subscription
-                kuavo_info = make_robot_param()
+                self._sub_mpc_observation = roslibpy.Topic(self.websocket.client, mpc_obs_topic, 'ocs2_msgs/mpc_observation')
 
                 # Subscribe to topics
                 self._sub_sensors_data.subscribe(self._sensors_data_raw_callback)
@@ -74,11 +89,7 @@ class KuavoRobotStateCoreWebsocket:
                 self._sub_terrain_height.subscribe(self._terrain_height_callback)
                 self._sub_gait_time_name.subscribe(self._humanoid_mpc_gait_changed_callback)
                 self._sub_mpc_observation.subscribe(self._humanoid_mpc_observation_callback)
-                
-                if kuavo_info is None:
-                    SDKLogger.error("Failed to get robot parameters")
-                    raise RuntimeError("Failed to get robot parameters")
-                
+
                 self._ee_type = kuavo_info['end_effector_type']
                 if self._ee_type == EndEffectorType.LEJUCLAW:
                     self._sub_lejuclaw_state = roslibpy.Topic(self.websocket.client, '/leju_claw_state', 'kuavo_msgs/lejuClawState')
@@ -141,34 +152,46 @@ class KuavoRobotStateCoreWebsocket:
                     state=EndEffectorState.GraspingState.UNKNOWN
                 ))
                                 
-                # gait manager
-                self._gait_manager = GaitManager()
-                self._prev_gait_name = self.gait_name()
+                # gait manager + MPC observation wait
+                # 轮臂仿真下 humanoidControllerWheelWbc 不发布 observation，直接跳过
+                if self._is_wheel_arm:
+                    SDKLogger.debug("[State] Wheel-arm model detected, skipping MPC observation data check")
+                else:
+                    self._gait_manager = GaitManager()
+                    self._prev_gait_name = self.gait_name()
 
-                # Wait for first MPC observation data
-                self._mpc_observation_data = None
-                start_time = time.time()
-                while self._mpc_observation_data is None:
-                    if time.time() - start_time > 1.0:  # 1.0s timeout
-                        start_time = time.time()
-                        SDKLogger.warn("Timeout waiting for MPC observation data")
-                        # break
-                    SDKLogger.debug("Waiting for first MPC observation data...")
-                    time.sleep(0.1)
+                    # Wait for first MPC observation data
+                    self._mpc_observation_data = None
+                    start_time = time.time()
+                    while self._mpc_observation_data is None:
+                        if time.time() - start_time > 1.0:
+                            SDKLogger.warn("Timeout waiting for MPC observation data")
+                            break
+                        SDKLogger.debug("Waiting for first MPC observation data...")
+                        time.sleep(0.1)
 
-                if self._mpc_observation_data is not None:
-                    if self._gait_manager.is_empty:
-                        self._prev_gait_name = self.gait_name()
-                        SDKLogger.debug(f"[State] Adding initial gait state: {self._prev_gait_name} at time {self._mpc_observation_data['time']}")
-                        self._gait_manager.add(self._mpc_observation_data['time'], self._prev_gait_name)
+                    if self._mpc_observation_data is not None:
+                        if self._gait_manager.is_empty:
+                            self._prev_gait_name = self.gait_name()
+                            SDKLogger.debug(f"[State] Adding initial gait state: {self._prev_gait_name} at time {self._mpc_observation_data['time']}")
+                            self._gait_manager.add(self._mpc_observation_data['time'], self._prev_gait_name)
 
-                # 获取当前手臂控制模式
+                # 初始化默认值（轮臂机器人使用默认值，双足机器人通过服务调用更新）
+                if not hasattr(self, '_manipulation_mpc_frame'):
+                    self._manipulation_mpc_frame = KuavoManipulationMpcFrame.KeepCurrentFrame
+                if not hasattr(self, '_manipulation_mpc_ctrl_mode'):
+                    self._manipulation_mpc_ctrl_mode = KuavoManipulationMpcCtrlMode.NoControl
+                if not hasattr(self, '_manipulation_mpc_control_flow'):
+                    self._manipulation_mpc_control_flow = KuavoManipulationMpcControlFlow.ThroughFullBodyMpc
+
+                # 获取当前手臂控制模式（轮臂/双足均有此服务）
                 self._arm_ctrl_mode = self._srv_get_arm_ctrl_mode()
-                
-                # 获取manipulation mpc 相关参数
-                self._manipulation_mpc_frame = self._srv_get_manipulation_mpc_frame()
-                self._manipulation_mpc_ctrl_mode = self._srv_get_manipulation_mpc_ctrl_mode()
-                self._manipulation_mpc_control_flow = self._srv_get_manipulation_mpc_control_flow()
+
+                # 轮臂机器人无需调用 manipulation MPC 相关服务（对应节点未运行），双足机器人才需要
+                if not self._is_wheel_arm:
+                    self._manipulation_mpc_frame = self._srv_get_manipulation_mpc_frame()
+                    self._manipulation_mpc_ctrl_mode = self._srv_get_manipulation_mpc_ctrl_mode()
+                    self._manipulation_mpc_control_flow = self._srv_get_manipulation_mpc_control_flow()
                 
                 self._initialized = True
             except Exception as e:
@@ -197,23 +220,29 @@ class KuavoRobotStateCoreWebsocket:
         if mode is not None:
             self._arm_ctrl_mode = mode
         return self._arm_ctrl_mode
-    
+
     @property
     def manipulation_mpc_ctrl_mode(self):
+        if self._is_wheel_arm:
+            return self._manipulation_mpc_ctrl_mode
         mode = self._srv_get_manipulation_mpc_ctrl_mode()
         if mode is not None:
             self._manipulation_mpc_ctrl_mode = mode
         return self._manipulation_mpc_ctrl_mode
-    
+
     @property
     def manipulation_mpc_frame(self):
+        if self._is_wheel_arm:
+            return self._manipulation_mpc_frame
         frame = self._srv_get_manipulation_mpc_frame()
         if frame is not None:
             self._manipulation_mpc_frame = frame
         return self._manipulation_mpc_frame
-    
+
     @property
     def manipulation_mpc_control_flow(self):
+        if self._is_wheel_arm:
+            return self._manipulation_mpc_control_flow
         flow = self._srv_get_manipulation_mpc_control_flow()
         if flow is not None:
             self._manipulation_mpc_control_flow = flow
@@ -231,20 +260,26 @@ class KuavoRobotStateCoreWebsocket:
 
     @property
     def current_observation_time(self) -> float:
-        if self._mpc_observation_data is None:
+        if not hasattr(self, '_mpc_observation_data') or self._mpc_observation_data is None:
             return None
         return self._mpc_observation_data['time']
-    
+
     @property
     def current_gait_mode(self) -> int:
-        if self._mpc_observation_data is None:
+        if not hasattr(self, '_mpc_observation_data') or self._mpc_observation_data is None:
             return None
         return self._mpc_observation_data['mode']
 
     def gait_name(self)->str:
+        if self._is_wheel_arm:
+            return 'stance'
         return self._srv_get_current_gait_name()
     
     def is_gait(self, gait_name: str) -> bool:
+        if self._is_wheel_arm:
+            return gait_name == 'stance'
+        if not hasattr(self, '_mpc_observation_data') or self._mpc_observation_data is None:
+            return False
         return self._gait_manager.get_gait(self._mpc_observation_data['time']) == gait_name
 
     def register_gait_changed_callback(self, callback):
@@ -335,10 +370,14 @@ class KuavoRobotStateCoreWebsocket:
         )
 
     def _humanoid_mpc_gait_changed_callback(self, msg):
+        if not hasattr(self, '_gait_manager'):
+            return
         SDKLogger.debug(f"[State] Received gait change message: {msg['gait_name']} at time {msg['start_time']}")
         self._gait_manager.add(msg['start_time'], msg['gait_name'])
-    
+
     def _humanoid_mpc_observation_callback(self, msg) -> None:
+        if not hasattr(self, '_gait_manager'):
+            return
         try:
             # SDKLogger.debug(f"[State] Received MPC observation message: {msg}")
             self._mpc_observation_data = msg
@@ -353,6 +392,32 @@ class KuavoRobotStateCoreWebsocket:
                             callback(curr_time, current_gait)
         except Exception as e:
             SDKLogger.error(f"Error processing MPC observation: {e}")
+
+    def _get_ros_param(self, param_name: str, default=None):
+        """通过 rosbridge 获取 ROS 参数"""
+        try:
+            service = roslibpy.Service(self.websocket.client, '/rosapi/get_param', 'rosapi/GetParam')
+            request = {'name': param_name, 'default': str(default) if default is not None else ''}
+            response = service.call(request)
+            value = response.get('value', None)
+            if value is not None:
+                # 根据类型做解析
+                if isinstance(value, str):
+                    if value.lower() == 'true':
+                        return True
+                    elif value.lower() == 'false':
+                        return False
+                    try:
+                        return int(value)
+                    except ValueError:
+                        try:
+                            return float(value)
+                        except ValueError:
+                            return value
+                return value
+        except Exception as e:
+            SDKLogger.debug(f"Failed to get param {param_name}: {e}")
+        return default
 
     def _srv_get_arm_ctrl_mode(self):
         try:

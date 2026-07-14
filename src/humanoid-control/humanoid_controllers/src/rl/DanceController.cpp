@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <algorithm>
 #include <ocs2_core/misc/LoadData.h>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/info_parser.hpp>
@@ -13,6 +14,11 @@
 
 namespace humanoid_controller
 {
+  namespace
+  {
+    constexpr double kDanceSwitchSafeStanceMaxJointVelRadPerSec = 0.15;
+  }  // namespace
+
   using namespace ocs2;
 
   DanceController::DanceController(const std::string& name, 
@@ -70,6 +76,21 @@ namespace humanoid_controller
       {
         ROS_INFO("[%s] Dance trajectory loaded successfully: %s", name_.c_str(), trajectoryFilePath.c_str());
         ROS_INFO("[%s] Trajectory has %d time steps", name_.c_str(), dance_trajectory_.time_step_total);
+
+        const Eigen::VectorXd first_frame_joint_pos = dance_trajectory_.joint_pos.row(0).transpose();
+        if (first_frame_joint_pos.size() == defalutJointPosRL_.size())
+        {
+          // defaultJointState 只用于 MPC -> Dance 插值；Dance 内部仍使用 defaultJointState_rl。
+          defalutJointPosRL_ = first_frame_joint_pos;
+          initialStateRL_.resize(12 + defalutJointPosRL_.size());
+          initialStateRL_ << defaultBaseStateRL_, defalutJointPosRL_;
+          ROS_INFO("[%s] defaultJointState updated from first CSV frame for MPC -> Dance interpolation", name_.c_str());
+        }
+        else
+        {
+          ROS_WARN("[%s] First CSV frame joint size mismatch: %ld vs defaultJointState size %ld, keeping config defaultJointState",
+                   name_.c_str(), first_frame_joint_pos.size(), defalutJointPosRL_.size());
+        }
       }
     }
     else
@@ -87,18 +108,21 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] /is_roban not found in ROS params, using default: %d", name_.c_str(), static_cast<int>(is_roban_));
     }
-    // 初始化踝关节求解器
-    int ankle_solver_type = 0;
+    // 初始化踝关节求解器（从 ROS 参数获取类型 token；与 AmpWalk/FallStand/VMP 保持一致）
+    std::string ankle_solver_type = "4gen_pro";
     if (!nh_.getParam("/ankle_solver_type", ankle_solver_type))
     {
-      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %d", name_.c_str(), ankle_solver_type);
+      ROS_WARN("[%s] ankle_solver_type not found in ROS params, using default: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     else
     {
-      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %d", name_.c_str(), ankle_solver_type);
+      ROS_INFO("[%s] AnkleSolver type loaded from ROS params: %s",
+               name_.c_str(), ankle_solver_type.c_str());
     }
     ankleSolver_.getconfig(ankle_solver_type);
-    ROS_INFO("[%s] AnkleSolver initialized with type: %d", name_.c_str(), ankle_solver_type);
+    ROS_INFO("[%s] AnkleSolver initialized with type: %s",
+             name_.c_str(), ankle_solver_type.c_str());
 
     // 加载神经网络模型
     try
@@ -164,7 +188,19 @@ namespace humanoid_controller
     };
 
     // 加载基础关节配置
+    // defaultJointState 保留给 MPC -> RL 插值使用。
     loadEigenMatrix("defaultJointState", defalutJointPosRL_);
+    danceDefaultJointPosRL_ = defalutJointPosRL_;
+    try
+    {
+      loadEigenMatrix("defaultJointState_rl", danceDefaultJointPosRL_);
+    }
+    catch (const std::exception& e)
+    {
+      ROS_WARN("[%s] Failed to load defaultJointState_rl from %s: %s, fallback to defaultJointState",
+               name_.c_str(), config_file.c_str(), e.what());
+      danceDefaultJointPosRL_ = defalutJointPosRL_;
+    }
     loadEigenMatrix("defaultBaseState", defaultBaseStateRL_);
     loadEigenMatrix("JointControlMode", JointControlModeRL_);
     loadEigenMatrix("JointPDMode", JointPDModeRL_);
@@ -488,13 +524,16 @@ namespace humanoid_controller
 
   void DanceController::initializeDanceServices()
   {
-    dance_trajectory_state_pub_ = nh_.advertise<kuavo_msgs::DanceTrajectoryState>(
-        "/humanoid_controller/dance_trajectory_state", 1, true);
-    ROS_INFO("[%s] Latched topic registered: /humanoid_controller/dance_trajectory_state", name_.c_str());
+    // [根因修复] 不再在此处 advertise dance_trajectory_state topic
+    // 改为由 RLControllerManager 在 init 时统一 advertise 一次，
+    // 通过 setDanceTrajectoryStatePublisher() 注入到每个 DanceController。
+    // 历史问题: 5 个 DanceController 重复 advertise(latch=true) 制造启动期
+    //   窄窗口, 触发 "received a connection for a nonexistent topic" 错误,
+    //   rospy 不重连, 跳舞时无音乐播放.
 
     // 重新开始舞蹈服务
     std::string service_name = "/humanoid_controller/" + name_ + "/restart_dance";
-    restart_dance_srv_ = nh_.advertiseService(service_name, 
+    restart_dance_srv_ = nh_.advertiseService(service_name,
                                                &DanceController::restartDanceCallback, this);
     ROS_INFO("[%s] Service registered: %s", name_.c_str(), service_name.c_str());
   }
@@ -553,6 +592,12 @@ namespace humanoid_controller
   {
     if (!dance_trajectory_state_pub_)
     {
+      // 保留 warn: 若未由 RLControllerManager 注入共享 publisher, 跳舞期间会持续报警,
+      // 可第一时间发现 setter 调用链断了
+      ROS_WARN_THROTTLE(2.0,
+          "[%s] dance_trajectory_state publisher not initialized; "
+          "did RLControllerManager call setDanceTrajectoryStatePublisher()?",
+          name_.c_str());
       return;
     }
 
@@ -576,6 +621,23 @@ namespace humanoid_controller
     last_published_dance_step_ = current_step;
   }
 
+  Eigen::VectorXd DanceController::getCurrentJointReference() const
+  {
+    const int total_joints = jointNum_ + jointArmNum_ + waistNum_;
+    Eigen::VectorXd q_ref = defalutJointPosRL_.head(total_joints);
+    if (residualAction_)
+    {
+      q_ref = dance_trajectory_.getCurrentCommand().head(total_joints);  //waao：mimic的defaultpose是参考轨迹
+    }
+
+    const Eigen::VectorXd action = getCurrentAction();
+    if (action.size() >= total_joints && actionScaleTestRL_.size() >= total_joints)
+    {
+      q_ref.array() += action.head(total_joints).array() * actionScale_ * actionScaleTestRL_.head(total_joints).array();
+    }
+    return q_ref;
+  }
+
   bool DanceController::requestToExit() const
   {
     // 与 RLControllerBase::requestToExit：仅当配置 holdFrameIndex == -2 且轨迹已结束，才向上层请求自动切到 AMP
@@ -596,12 +658,27 @@ namespace humanoid_controller
 
   bool DanceController::isAllowToExit() const
   {
-    // 与 RLControllerBase::isAllowToExit：轨迹未播完不允许切出（如切回 MPC）；播完后允许
-    if (!dance_trajectory_.isFinish())
+    if (dance_trajectory_.time_step_total <= 0 || dance_trajectory_.joint_vel.rows() <= 0)
     {
       return false;
     }
-    return true;
+
+    const int current_step =
+        std::clamp(dance_trajectory_.getTimeStep(), 0, dance_trajectory_.time_step_total - 1);
+    const bool is_boundary_stance_step = (current_step == 0) || dance_trajectory_.isFinish();
+    if (!is_boundary_stance_step)
+    {
+      return false;
+    }
+
+    const Eigen::VectorXd reference_joint_vel = dance_trajectory_.joint_vel.row(current_step).transpose();
+    if (reference_joint_vel.size() == 0)
+    {
+      return false;
+    }
+
+    const double max_abs_joint_vel = reference_joint_vel.cwiseAbs().maxCoeff();
+    return max_abs_joint_vel <= kDanceSwitchSafeStanceMaxJointVelRadPerSec;
   }
 
   bool DanceController::updateImpl(const ros::Time& time,
@@ -712,11 +789,11 @@ namespace humanoid_controller
     Eigen::VectorXd local_action = getCurrentAction();
     
     /*****************************************舞蹈轨迹跟踪*****************************************************************/ 
-    Eigen::VectorXd temp;
-    if (residualAction_ == true) {
-      temp = defalutJointPosRL_;
-      defalutJointPosRL_ = dance_trajectory_.getCurrentCommand().head(jointNum_ + jointArmNum_ + waistNum_);
-    }    
+    Eigen::VectorXd commandDefaultJointPos = danceDefaultJointPosRL_;
+    if (residualAction_)
+    {
+      commandDefaultJointPos = dance_trajectory_.getCurrentCommand().head(jointNum_ + jointArmNum_ + waistNum_);
+    }
     /*****************************************舞蹈轨迹跟踪*****************************************************************/
     
     // 安全检查：确保动作向量大小正确
@@ -744,7 +821,7 @@ namespace humanoid_controller
     
     for (int i = 0; i < jointNum_ + jointArmNum_ + waistNum_; i++)
     {
-      jointTor_(i) = jointTor_(i) + jointKpLocal(i) * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]);
+      jointTor_(i) = jointTor_(i) + jointKpLocal(i) * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + commandDefaultJointPos[i]);
     }
     
     if (is_real_)
@@ -755,19 +832,19 @@ namespace humanoid_controller
         {
           if (i < JointPDModeRL_.size() && JointPDModeRL_(i) == 0)
           {
-            cmd[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]) - jointKdLocal[i] * jointVel_[i];
+            cmd[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + commandDefaultJointPos[i]) - jointKdLocal[i] * jointVel_[i];
             cmd[i] = std::clamp(cmd[i], -torqueLimitsLocal[i], torqueLimitsLocal[i]);
             torque[i] = cmd[i];
           }
           else
           {
-            cmd[i] = (local_action[i] * actionScale_ * actionScaleTestRL_[i] + defalutJointPosRL_[i]);
-            torque[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]) - jointKdLocal[i] * jointVel_[i];
+            cmd[i] = (local_action[i] * actionScale_ * actionScaleTestRL_[i] + commandDefaultJointPos[i]);
+            torque[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + commandDefaultJointPos[i]) - jointKdLocal[i] * jointVel_[i];
           }
         }
         else if (i < JointControlModeRL_.size() && JointControlModeRL_(i) == 2)
         {
-          cmd[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]);
+          cmd[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + commandDefaultJointPos[i]);
           torque[i] = jointTor_[i];
         }
         else
@@ -783,7 +860,7 @@ namespace humanoid_controller
       {
         if (i < JointControlModeRL_.size() && JointControlModeRL_(i) == 0)
         {
-          cmd[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + defalutJointPosRL_[i]) - jointKdLocal[i] * jointVel_[i];
+          cmd[i] = jointKpLocal[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos_[i] + commandDefaultJointPos[i]) - jointKdLocal[i] * jointVel_[i];
         }
         else if (i < JointControlModeRL_.size() && JointControlModeRL_(i) == 2)
         {
@@ -798,13 +875,9 @@ namespace humanoid_controller
       }
     }
 
-    /*****************************************舞蹈轨迹跟踪*****************************************************************/ 
-    if (residualAction_ == true) {
-      defalutJointPosRL_ = temp;
-    }    
-    /*****************************************舞蹈轨迹跟踪*****************************************************************/
-
     actuation = cmd;
+
+    // std::cout << "JointControlModeRL_: " << JointControlModeRL_.transpose() << std::endl;
 
     return actuation;
   }
@@ -897,7 +970,7 @@ namespace humanoid_controller
     const Eigen::Vector3d baseLineVel = state_est.segment(9 + jointNum_ + waistNum_ + jointArmNum_, 3);
     
     // 提取和处理传感器数据
-    Eigen::VectorXd currentJointPos = sensor_data.jointPos_ - defalutJointPosRL_;
+    Eigen::VectorXd currentJointPos = sensor_data.jointPos_ - danceDefaultJointPosRL_;
     Eigen::VectorXd currentJointVel = sensor_data.jointVel_;
     const Eigen::Vector3d bodyAngVel = sensor_data.angularVel_;
     
