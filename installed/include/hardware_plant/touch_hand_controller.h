@@ -174,6 +174,11 @@ public:
     bool is_gesture_executing();
 
     /**
+     * @brief Abort the currently executing gesture
+     */
+    void abort_gesture();
+
+    /**
      * @brief 设置双手的turbo模式开关
      *
      * @param enabled true为开启turbo模式，false为关闭

@@ -1675,8 +1675,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       lowpass_dq_.tail(7) = (1.0 - lowpassDqAlpha_) * lowpass_dq_.tail(7) + lowpassDqAlpha_ * latest_dq_.tail(7);
     }
 
-    // arm are fixed at 14 joints
-    armJintStateMsg.header.stamp = ros::Time::now();
+    // arm are fixed at 14 joints（stamp 放到锁外、publish 前，避免锁内提前取 now）
     armJintStateMsg.position.resize(14);
     armJintStateMsg.velocity.resize(14);
     armJintStateMsg.effort.resize(14);
@@ -1744,6 +1743,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     }
   }
 
+  armJintStateMsg.header.stamp = ros::Time::now();
   kuavoArmTrajCppPublisher_.publish(armJintStateMsg);
   {
     sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;

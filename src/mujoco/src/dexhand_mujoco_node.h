@@ -14,6 +14,8 @@
 #include "kuavo_msgs/gestureExecute.h"
 #include "kuavo_msgs/gestureList.h"
 #include "kuavo_msgs/gestureExecuteState.h"
+#include "std_msgs/Bool.h"
+#include <atomic>
 
 namespace mujoco_node {
 using namespace eef_controller;
@@ -67,6 +69,9 @@ private:
     void linkerLeftHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
     void linkerRightHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
 
+    // enable control callback
+    void enableControlCallback(const std_msgs::Bool::ConstPtr& msg);
+
     /* gesture execute service. */
     bool gestureExecuteCallback(kuavo_msgs::gestureExecuteRequest &req,
                           kuavo_msgs::gestureExecuteResponse &res);
@@ -91,6 +96,10 @@ private:
     // Linker系列灵巧手的状态发布者
     ros::Publisher l_hand_state_pub_;
     ros::Publisher r_hand_state_pub_;
+
+    // enable control
+    ros::Subscriber enable_control_state_sub_;
+    std::atomic<bool> enable_control_{true};
     
     // 兼容原来的 control_robot_hand_position 接口
     ros::Subscriber hand_sub_;  

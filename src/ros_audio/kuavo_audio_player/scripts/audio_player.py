@@ -66,6 +66,10 @@ class AudioPlayerNode:
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()   # True → 回调返回 paAbort
 
+        # enable_control 冻结: 订阅 latched topic，disable 时掐断+拒绝新音频
+        self._enable_control = True
+        rospy.Subscriber('/enable_control_state', Bool, self._on_enable_control_state, queue_size=1)
+
         # ── 预分配 PortAudio 回调用缓冲区, 避免每次 np.zeros/.copy ──
         self._silence = np.zeros(FRAMES_PER_BUFFER, dtype=np.int16)
 
@@ -109,6 +113,24 @@ class AudioPlayerNode:
             rospy.loginfo("audio_player_node 初始化完成")
             if self._wait_sound_card_timer is not None:
                 self._wait_sound_card_timer.shutdown()
+
+    def _on_enable_control_state(self, msg):
+        """disable 边沿: 掐断当前播放 + 清空缓冲，对标手部 abort+lock 语义。
+        enable 边沿: 只恢复 flag，「人等机器」——不自动重播被掐断的音频。
+        """
+        prev = self._enable_control
+        if prev and not msg.data:
+            # true → false: 停止流（丢弃 ALSA DMA）+ 清缓冲 + 置 flag
+            rospy.loginfo("enable_control: disable → 停止音频播放")
+            self._enable_control = False
+            self._close_stream()
+            self._clear_buf()
+            self._cleanup_temp()
+            self._init_stream()
+        elif not prev and msg.data:
+            # false → true: 只恢复，不自动重播
+            rospy.loginfo("enable_control: enable → 恢复音频接收")
+            self._enable_control = True
 
     def _init_stream(self):
         for attempt in range(STREAM_RESTART_RETRIES):
@@ -224,6 +246,10 @@ class AudioPlayerNode:
     #   req.immediate=False → 追加到缓冲 (队列语义, 不打断, 默认)
 
     def _on_play_music(self, req):
+        if not self._enable_control:
+            rospy.logwarn_throttle(10, "/play_music: 音频已冻结，拒绝播放")
+            return playmusicResponse(success_flag=False)
+
         if req.immediate:
             self._stop_and_recreate()
 
@@ -312,6 +338,9 @@ class AudioPlayerNode:
     # 话题: /audio_data (TTS PCM 推流兼容, 自动重采样至声卡采样率)
 
     def _on_audio_data(self, msg):
+        if not self._enable_control:
+            return  # 冻结期间丢弃 TTS PCM 推流
+
         try:
             audio = np.array(msg.data, dtype=np.int16)
 

@@ -100,6 +100,7 @@ namespace humanoidController_wheel_wbc
     void setupMrt();
     void initMPC();
     void registerAllServices();
+    bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性
 
     // ========== 运动学计算相关函数 ==========
     void getEEPose(const vector_t& init_q, std::vector<Eigen::Vector3d>& ee_pos, std::vector<Eigen::Matrix3d>& ee_rot);

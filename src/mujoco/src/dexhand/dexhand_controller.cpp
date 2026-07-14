@@ -178,6 +178,11 @@ namespace eef_controller
         return gesture_executing_;
     }
 
+    void DexhandController::abort_gesture() {
+        abort_running_task_flag_ = true;
+        gesture_execute_cv_.notify_all();
+    }
+
     bool DexhandController::sleep_for_100ms(int ms_count)
     {
         int i = 0;

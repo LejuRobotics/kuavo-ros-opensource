@@ -1301,6 +1301,7 @@ class ArmTrajectoryBezierDemo:
             rospy.loginfo("After the action playback is complete, revert the robot initial state")
         elif self.keep_arm_pose:
             rospy.loginfo("After the action playback is complete, keep arm pose at the last tact frame")
+            self.keep_arm_pose = False  # 一次性语义，用完即清，避免污染后续其他入口的动作
         else:
             rospy.loginfo("After the action playback is complete, arm restore is disabled")
 
@@ -1580,6 +1581,9 @@ class ArmTrajectoryBezierDemo:
         # 否则 run() 会因 while self.arm_flag and not self.interrupt_flag 立即退出
         self.interrupt_flag = False
 
+        # 重置过渡帧状态，避免上一次播放的 _last_inserted_init_kf 残留影响 END_FRAME_TIME 重算
+        self._last_inserted_init_kf = 0
+
         file_path = f"{self.action_files_path}/{action_name}.tact"
         data = self.load_json_file(file_path)
         if not data:
@@ -1686,20 +1690,36 @@ class ArmTrajectoryBezierDemo:
             self.START_FRAME_TIME = 0
             self.x_shift = 0
 
+        min_kf_before = min((f.get("keyframe", 0) for f in frames), default=0)
+
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
 
-        # 根据实际计算的过渡时间更新结束时间
-        # RL模式、OCS2半身模式、以及通用入场过渡插入了过渡帧时,都需要更新
-        if (current_control_mode == "rl"
-                or (current_control_mode == "ocs2" and self.only_half_up_body)
-                or getattr(self, "_last_inserted_init_kf", 0) > 0):
-            # 找到最后一帧的 keyframe（包括新添加的过渡帧）
-            if frames:
-                last_keyframe = max(f.get("keyframe", 0) for f in frames)
-                # 将 keyframe 转换为秒并更新 END_FRAME_TIME
-                self.END_FRAME_TIME = last_keyframe * 0.01
-        # RL/AMP 模式同样需要走 filter_data: 跳过会令控制点未平滑, 手指指令跳变抖动。
-        # RL 已前置清零时间平移参数, 滤波不破坏首帧对齐, 故无条件滤波。
+        # 计算 add_init_frame 插入的过渡帧数，通过 ROS param 传给 handler，
+        # 用于动态校正桌面端 PROGRESS_OFFSET，确保模型与机器人同步。
+        min_kf_after = min((f.get("keyframe", 0) for f in frames), default=0)
+        transition_kf = min_kf_after - min_kf_before
+        transition_time_ms = transition_kf * 10  # 每 keyframe = 10ms
+        rospy.set_param('/arm_traj_transition_time_ms', transition_time_ms)
+
+        # 根据实际计算的过渡时间更新结束时间。
+        # add_init_frame 可能插入了过渡帧，必须始终从实际 frames 的最后一帧 keyframe
+        # 重新计算 END_FRAME_TIME，否则轨迹时长不足导致播放速度过快。
+        # OCS2 模式额外保证不低于 finish_time + 1.0，匹配旧 handler 的 end_frame_time += 1 行为；
+        # RL 模式已有自己的过渡帧逻辑，不需要此 padding。
+        if frames:
+            last_keyframe = max(f.get("keyframe", 0) for f in frames)
+            new_end = last_keyframe * 0.01
+            if current_control_mode == "ocs2":
+                new_end = max(new_end, finish_time + 1.0)
+            self.END_FRAME_TIME = new_end
+            rospy.loginfo("[END_FRAME_TIME] updated to %.2fs (last_keyframe=%d, finish_time=%.2f, mode=%s)" % (
+                self.END_FRAME_TIME, last_keyframe, finish_time, current_control_mode))
+        # 注意：RL/AMP 模式同样需要走 filter_data。
+        # 297038619 曾为修复 plan#1499（RL tact 首帧错位）在 RL 模式跳过 filter_data，
+        # 但跳过后保持段贝塞尔控制点未经平滑（tact 原始 CP 非零），导致手指指令 ±1 跳变，
+        # 在 AMP 步态抱拳等动作上表现为大拇指抖动（issue #3231）。
+        # 由于 RL 分支已前置 self.START_FRAME_TIME = 0; self.x_shift = 0，
+        # filter_data 内的时间平移不会破坏 RL 首帧对齐，故恢复无条件滤波。
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
@@ -1715,13 +1735,7 @@ class ArmTrajectoryBezierDemo:
             self.interrupt_flag = False  # 清 freeze/interrupt 残留，防 run() 立即退出
             threading.Thread(target=self.run).start()
             # 使用更新后的 END_FRAME_TIME（包含过渡帧时间）
-            # RL/OCS2半身/通用入场过渡都会在 add_init_frame 中添加过渡帧并更新 END_FRAME_TIME
-            if (current_control_mode == "rl"
-                    or (current_control_mode == "ocs2" and self.only_half_up_body)
-                    or getattr(self, "_last_inserted_init_kf", 0) > 0):
-                self.delayed_publish_action_state(self.END_FRAME_TIME)
-            else:
-                self.delayed_publish_action_state(finish_time)
+            self.delayed_publish_action_state(self.END_FRAME_TIME)
             return ExecuteArmActionResponse(success=True, message="Action executed successfully")
         else:
             rospy.logerr("Failed to plan arm trajectory")

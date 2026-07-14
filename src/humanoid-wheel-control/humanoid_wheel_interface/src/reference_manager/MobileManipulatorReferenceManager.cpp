@@ -1375,9 +1375,9 @@ namespace mobile_manipulator {
     auto endTime = std::chrono::system_clock::now();
 
     // state
-    ros_logger_->publishVector("/mobile_manipulator/initState_state", initState_);
-    ros_logger_->publishVector("/mobile_manipulator/initState_dState", dState);
-    ros_logger_->publishVector("/mobile_manipulator/initState_ddState", ddState);
+    // ros_logger_->publishVector("/mobile_manipulator/initState_state", initState_);
+    // ros_logger_->publishVector("/mobile_manipulator/initState_dState", dState);
+    // ros_logger_->publishVector("/mobile_manipulator/initState_ddState", ddState);
 
     publishMultiPointPose_World(initState_);
     publishMultiPointPose_Local(initState_);
@@ -3426,16 +3426,16 @@ namespace mobile_manipulator {
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD, 
                                                  eeState_world, d_eeState_world, dd_eeState_world);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/left", eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/left", d_eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/left", dd_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/left", eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/left", d_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/left", dd_eeState_world);
 
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD, 
                                                  eeState_world, d_eeState_world, dd_eeState_world);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/right", eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/right", d_eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/right", dd_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/right", eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/right", d_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/right", dd_eeState_world);
   }
 
   void MobileManipulatorReferenceManager::publishMultiPointPose_Local(const vector_t& initState)
@@ -3444,25 +3444,25 @@ namespace mobile_manipulator {
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD, 
                                                  eeState_local, d_eeState_local, dd_eeState_local);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/left", eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/left", d_eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/left", dd_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/left", eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/left", d_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/left", dd_eeState_local);
 
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD, 
                                                  eeState_local, d_eeState_local, dd_eeState_local);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/right", eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/right", d_eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/right", dd_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/right", eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/right", d_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/right", dd_eeState_local);
     /********************************************************************************************************************/
     
     vector_t torsoState_local, d_torsoState_local, dd_torsoState_local;
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::TORSO_POSE_CMD, 
                               torsoState_local, d_torsoState_local, dd_torsoState_local);
     
-    ros_logger_->publishVector("/mobile_manipulator/torsoStateLocal_initState", torsoState_local);
-    ros_logger_->publishVector("/mobile_manipulator/d_torsoStateLocal_initState", d_torsoState_local);
-    ros_logger_->publishVector("/mobile_manipulator/dd_torsoStateLocal_initState", dd_torsoState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/torsoStateLocal_initState", torsoState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/d_torsoStateLocal_initState", d_torsoState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_torsoStateLocal_initState", dd_torsoState_local);
   }
 
   void MobileManipulatorReferenceManager::getCurrentEeWorldPose(vector_t& EeState, const vector_t& initState)

@@ -160,6 +160,13 @@ public:
     bool is_gesture_executing();
 
     /**
+     * @brief 中止当前正在执行的手势动作序列
+     *
+     * 设置中止标志并唤醒手势线程，使正在播放的动作序列立即停止。
+     */
+    void abort_gesture();
+
+    /**
      * @brief 设置双手的turbo模式开关
      *
      * @param enabled true为开启turbo模式，false为关闭

@@ -9,7 +9,12 @@ using namespace ocs2;
 
 ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int arm_num, int low_joint_num, int head_num, 
                                        const vector_t& leg_initial_state, const vector_t& arm_initial_state)
-    : nh_(nh), is_real_(is_real), arm_num_(arm_num), low_joint_num_(low_joint_num),head_num_(head_num)
+    : nh_(nh),
+      is_real_(is_real),
+      arm_num_(arm_num),
+      low_joint_num_(low_joint_num),
+      head_num_(head_num),
+      cmd_traj_nh_(nh)
 {
     // 初始化轮臂关节状态（4个关节）
     vector_t initial_lb_joint = vector_t::Zero(low_joint_num);
@@ -80,6 +85,15 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
              is_real_, arm_num_, low_joint_num_);
 }
 
+ControlDataManager::~ControlDataManager() {
+    if (cmd_traj_spinner_) {
+        cmd_traj_spinner_->stop();
+        cmd_traj_spinner_.reset();
+    }
+    arm_joint_traj_sub_.shutdown();
+    leg_joint_traj_sub_.shutdown();
+}
+
 void ControlDataManager::initializeSubscribers() {
     sensors_data_sub_ = nh_.subscribe<kuavo_msgs::sensorsData>(
         "/sensors_data_raw", 10, 
@@ -121,13 +135,20 @@ void ControlDataManager::initializeSubscribers() {
         "/vr_whole_torso_ctrl", 10, 
         &ControlDataManager::wholeTorsoCtrlCallback, this);
     
-    arm_joint_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
-        "/kuavo_arm_traj", 10, 
-        &ControlDataManager::armJointTrajCallback, this);
+    // 指令类话题：独立 CallbackQueue + AsyncSpinner，避免与同进程高频录包/debug 回调互相饿死
+    cmd_traj_nh_.setCallbackQueue(&cmd_traj_callback_queue_);
+    arm_joint_traj_sub_ = cmd_traj_nh_.subscribe<sensor_msgs::JointState>(
+        "/kuavo_arm_traj", 1,
+        &ControlDataManager::armJointTrajCallback, this,
+        ros::TransportHints().tcpNoDelay());
     
-    leg_joint_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
-        "/lb_leg_traj", 10, 
-        &ControlDataManager::legJointTrajCallback, this);
+    leg_joint_traj_sub_ = cmd_traj_nh_.subscribe<sensor_msgs::JointState>(
+        "/lb_leg_traj", 1,
+        &ControlDataManager::legJointTrajCallback, this,
+        ros::TransportHints().tcpNoDelay());
+
+    cmd_traj_spinner_ = std::make_unique<ros::AsyncSpinner>(1, &cmd_traj_callback_queue_);
+    cmd_traj_spinner_->start();
     
     lb_mpc_control_mode_sub_ = nh_.subscribe<std_msgs::Int8>(
         "/mobile_manipulator/lb_mpc_control_mode", 10,
@@ -137,7 +158,7 @@ void ControlDataManager::initializeSubscribers() {
         "/enable_control_state", 1,
         &ControlDataManager::enableControlStateCallback, this);
 
-    ROS_INFO("ControlDataManager: All subscribers initialized");
+    ROS_INFO("ControlDataManager: All subscribers initialized (arm/leg traj on dedicated CallbackQueue)");
 }
 
 // ========== 回调函数实现 ==========

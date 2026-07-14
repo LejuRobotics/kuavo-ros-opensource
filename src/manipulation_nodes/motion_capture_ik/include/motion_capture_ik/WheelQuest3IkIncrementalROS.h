@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -12,6 +14,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <sensor_msgs/JointState.h>
+#include <std_msgs/Float64.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/twoArmHandPose.h>
 #include <kuavo_msgs/Float32MultiArrayStamped.h>

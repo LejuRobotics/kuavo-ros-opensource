@@ -2696,6 +2696,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       
       // 从RL切换到MPC时，重置运动学估计（包括状态估计器、时间戳、yaw连续性等）
       resetKinematicsEstimation();
+      stanceState_mrt_ = currentObservation_.state;
     }
     last_is_rl_controller_ = is_rl_controller_;
     kuavo_msgs::jointCmd jointCmdMsg;
@@ -2780,8 +2781,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         std::cout << "resetting_mpc_ and initialPolicyReceived, switching to RESET_BASE" << std::endl;
         resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
         
-        // 获取双脚中心位置
-        vector3_t targetTorsoPos = stateEstimate_->getFeetCenterPosition();
+        // RL->MPC：插值目标对齐 MPC 站立参考（当前 xy + 默认 z/pitch），
+        // 勿用双脚中心 xy，否则过渡期会前移到足端中心、进 NORMAL 后又被 MPC 拉回
+        vector3_t targetTorsoPos = currentObservation_.state.segment<3>(6);
         targetTorsoPos(2) = default_state_[8];
         vector6_t targetTorsoPose = vector6_t::Zero();
         targetTorsoPose.segment<3>(0) = targetTorsoPos;
@@ -4924,7 +4926,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
     arm_interpolation_result_ = current_arm_pos;
 
-    // 计算躯干位移距离（仅xyz用于限速）
+    // 计算躯干位移距离（仅 xyz 用于限速；xy 锁定为当前值算时长，MPC->RL 仍对完整 target 做 xy 插值）
     vector3_t target_position_torso = target_torso_pose.segment<3>(0);
     target_position_torso.head(2) = current_torso_pose.head(2);
 
@@ -4945,6 +4947,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
 
     // 设置插值参数
     is_torso_interpolation_active_ = true;
+    last_interpolation_time_ = current_time - 0.01;
     torso_interpolation_start_pose_ = current_torso_pose;
     torso_interpolation_target_pose_ = target_torso_pose;
 

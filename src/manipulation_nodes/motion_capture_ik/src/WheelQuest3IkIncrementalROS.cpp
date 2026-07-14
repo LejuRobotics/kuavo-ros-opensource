@@ -26,6 +26,7 @@
 #include <cmath>
 
 #include <leju_utils/define.hpp>
+#include <time.h>
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
 
@@ -189,14 +190,42 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
 }
 
 void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
-  ros::Rate rate(jointStatePublishRateHz_);
+  // 不用 ros::Rate：落后时会追赶连发，header.stamp≈同一时刻 → PlotJuggler/录包呈“堆在一起”
+  const double frequency = std::max(jointStatePublishRateHz_, 1.0);
+  const double periodSec = 1.0 / frequency;
+  struct timespec next_time {};
+  clock_gettime(CLOCK_MONOTONIC, &next_time);
+
+  auto advanceNextTime = [&](struct timespec& t) {
+    t.tv_nsec += static_cast<long>(periodSec * 1e9);
+    while (t.tv_nsec >= 1000000000L) {
+      t.tv_sec += 1;
+      t.tv_nsec -= 1000000000L;
+    }
+  };
+
   while (!shouldStop() && ros::ok()) {
     if (armControlMode_ == 2) {
       publishJointStates();
     } else {
       publishDefaultJointStates();
     }
-    rate.sleep();
+
+    advanceNextTime(next_time);
+    struct timespec now {};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    const double lagSec =
+        static_cast<double>(now.tv_sec - next_time.tv_sec) +
+        static_cast<double>(now.tv_nsec - next_time.tv_nsec) * 1e-9;
+    if (lagSec > periodSec) {
+      // 严重落后：对齐到 now+period，丢弃追赶补发，避免 stamp 成簇
+      next_time = now;
+      advanceNextTime(next_time);
+      ROS_WARN_THROTTLE(1.0,
+                        "[WheelQuest3IkIncrementalROS] arm_traj publish lag=%.1f ms, skip Rate catch-up",
+                        lagSec * 1e3);
+    }
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_time, nullptr);
   }
 }
 

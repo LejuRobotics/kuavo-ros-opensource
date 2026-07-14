@@ -2,9 +2,11 @@
 #define HUMANOID_CONTROLLERS_CONTROL_DATA_MANAGER_H
 
 #include <ros/ros.h>
+#include <ros/callback_queue.h>
 #include <mutex>
 #include <memory>
 #include <functional>
+#include <atomic>
 #include <Eigen/Dense>
 
 #include <kuavo_msgs/sensorsData.h>
@@ -88,7 +90,7 @@ class ControlDataManager {
 public:
     explicit ControlDataManager(ros::NodeHandle& nh, bool is_real, int arm_num, int low_joint_num, int head_num, 
                                 const vector_t& leg_initial_state, const vector_t& arm_initial_state);
-    ~ControlDataManager() = default;
+    ~ControlDataManager();
 
     // 初始化所有订阅者
     void initializeSubscribers();
@@ -268,6 +270,11 @@ private:
     ros::Subscriber arm_joint_traj_sub_;
     ros::Subscriber leg_joint_traj_sub_;
     ros::Subscriber lb_mpc_control_mode_sub_;
+
+    // 手臂/下肢指令独立回调队列，避免与默认队列里高频 debug/录包回调互相饿死
+    ros::CallbackQueue cmd_traj_callback_queue_;
+    ros::NodeHandle cmd_traj_nh_;
+    std::unique_ptr<ros::AsyncSpinner> cmd_traj_spinner_;
     
     // ========== 已注册的ROS服务列表 ==========
     std::vector<ros::ServiceServer> registered_services_;

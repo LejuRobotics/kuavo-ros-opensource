@@ -14,6 +14,14 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include <iostream>
 #include <cmath>
+#include <cstring>
+#include <fstream>
+#include <algorithm>
+#include <chrono>
+#include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
+#include <xmlrpcpp/XmlRpcValue.h>
 #include <std_srvs/SetBool.h>
 #include <geometry_msgs/Twist.h>
 #include <angles/angles.h>
@@ -498,6 +506,23 @@ namespace humanoidController_wheel_wbc
     reset_cmd_vel_ruckig_srv_.request.data = true;  // 重新规划
     last_reset_cmd_vel_ruckig_time_ = ros::Time::now();  // 初始化重置时间
 
+    // 设置CPU内核隔离（与双足 humanoidController 一致；init 在 controlLoop 线程调用）
+    if (is_real_)
+    {
+      if (!setupCpuIsolation())
+      {
+        std::cerr << "\033[1;31m"
+                  << "==============================\n"
+                  << "  错误：未检测到 CPU 内核隔离！\n"
+                  << "  请先配置 CPU 内核隔离且配置内核隔离参数 isolated_cpus\n"
+                  << "  建议使用脚本 isolate_cores.sh 进行设置。\n"
+                  << "  示例：sudo bash ./tools/check_tool/isolate_cores.sh\n"
+                  << "=============================="
+                  << "\033[0m" << std::endl;
+        exit(1);
+      }
+    }
+
     // 初始化底盘调度模式服务客户端
     dispatch_mode_client_ = controllerNh_.serviceClient<leju_mobile_base_msgs::SetDispatchMode>("/move_base/set_dispatch_mode");
     // ========== 底盘急停保护初始化 ==========
@@ -815,10 +840,36 @@ namespace humanoidController_wheel_wbc
     double curTime = time.toSec() - firstTime;
     static double lastTime = curTime - dt_;
     double dt = curTime - lastTime;
-    if(dt < dt_) return;
+    // 外环 controlLoop 若用 nanosleep 定频，ros::Time 抖动会使 dt 略小于 dt_。
+    // 旧逻辑 if(dt < dt_) return 会漏拍，下一拍 dt≈2*dt_ → 频率在 500/250Hz 跳变。
+    // 仅过滤明显的同拍重复（半周期内），并优先采用外环 wall elapsed。
+    const double wallElapsed = dfd.toSec();
+    if (wallElapsed > 0.5 * dt_ && wallElapsed < 1.8 * dt_) {
+      dt = wallElapsed;
+    }
+    if (dt < 0.5 * dt_) {
+      if (ros_logger_) {
+        ros_logger_->publishValue("/monitor/wheel/update_early_return", 1.0);
+      }
+      return;
+    }
     lastTime = curTime;
+    const auto updateWallStart = std::chrono::steady_clock::now();
+    auto stageStart = updateWallStart;
+    auto markStageMs = [&](const char* stage) {
+      const auto now = std::chrono::steady_clock::now();
+      const double ms = std::chrono::duration<double, std::milli>(now - stageStart).count();
+      if (ros_logger_) {
+        ros_logger_->publishValue(std::string("/monitor/time_cost/wheel/") + stage, ms);
+      }
+      stageStart = now;
+      return ms;
+    };
+
     ros_logger_->publishValue("/humanoid_wheel/freq", 1 / dt);
     ros_logger_->publishValue("/humanoid_wheel/dt_real", dt);
+    // 与双足一致的 monitor 话题，便于统一看 WBC 频率/耗时
+    ros_logger_->publishValue("/monitor/frequency/wbc", 1.0 / dt);
     static auto timeInit = time.toSec();
     auto& info = manipulatorModelInfo_;
     static int cnt = 0;
@@ -880,6 +931,7 @@ namespace humanoidController_wheel_wbc
     }
 
     computeObservationFromSensorData(sensors_data_new, odomData_new);
+    markStageMs("sensor_obs");
 
     /********************************  计算关键点笛卡尔跟踪分析(局部系) ********************************/
     vector_t targetStateTmp = optimizedState_mrt_limit_;
@@ -955,6 +1007,7 @@ namespace humanoidController_wheel_wbc
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
     robotVisualizer_->update(observation_wheel_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+    markStageMs("mpc_mrt");
 
     /******************  用户修改部分  ***********************/
     vector_t target_qpos, target_qvel;
@@ -1125,7 +1178,9 @@ namespace humanoidController_wheel_wbc
     // }
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_wbc_in", optimizedState_wbc);
     ros_logger_->publishVector("/humanoid_wheel/optimizedInput_wbc_in", optimizedInput_wbc);
+    markStageMs("cmd_prepare");
     vector_t x = wheel_wbc_->update(optimizedState_wbc, optimizedInput_wbc, observation_wheel_);
+    markStageMs("wbc");
 
     // 决策变量顺序：x = [ddq_stateDim, f_contact, tau_armDim]
     vector_t bodyAcc = x.head(info.stateDim-info.armDim);
@@ -1197,6 +1252,19 @@ namespace humanoidController_wheel_wbc
 
     //更新共享内存中的关节命令
     control_data_manager_->publishJointCmdToShm(jointCmdMsg);
+
+    {
+      const double updateCostMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - updateWallStart).count();
+      // update 本体墙钟耗时（不含 controlLoop 睡眠/调度）
+      ros_logger_->publishValue("/monitor/time_cost/wbc", updateCostMs);
+      markStageMs("publish");
+      // 注意：这里是「两次成功 update 的间隔」，含 sleep/被抢占，不是 WBC 计算耗时。
+      // WBC 本体耗时见 /monitor/time_cost/wbc；分段见 /monitor/time_cost/wheel/*。
+      static double last_ros_time = time.toSec();
+      ros_logger_->publishValue("/monitor/time_cost/controller_loop_time", (time.toSec() - last_ros_time) * 1000.0);
+      last_ros_time = time.toSec();
+    }
     
     // 更新底盘速度（超时自动清零，梯形加减速限制）
     geometry_msgs::Twist cmdVelData;
@@ -1273,6 +1341,170 @@ namespace humanoidController_wheel_wbc
 
   humanoidControllerWheelWbc::~humanoidControllerWheelWbc()
   {
+  }
+
+  bool humanoidControllerWheelWbc::setupCpuIsolation()
+  {
+    // 从ROS参数获取隔离的CPU核心索引
+    std::vector<int> isolated_cpus;
+    std::vector<int> actually_isolated_cpus;
+
+    // 从全局参数服务器获取隔离CPU列表
+    if (ros::param::has("/isolated_cpus")) {
+      XmlRpc::XmlRpcValue xml_cpus;
+      if (ros::param::get("/isolated_cpus", xml_cpus)) {
+        if (xml_cpus.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+          for (int i = 0; i < xml_cpus.size(); ++i) {
+            try {
+              if (xml_cpus[i].getType() == XmlRpc::XmlRpcValue::TypeInvalid) {
+                std::cerr << "Error: array element " << i << " is invalid" << std::endl;
+                continue;
+              }
+
+              double value;
+              if (xml_cpus[i].getType() == XmlRpc::XmlRpcValue::TypeInt) {
+                value = static_cast<int>(xml_cpus[i]);
+              } else if (xml_cpus[i].getType() == XmlRpc::XmlRpcValue::TypeDouble) {
+                value = static_cast<double>(xml_cpus[i]);
+              } else {
+                std::cerr << "Error: array element " << i << " is not a number, type: "
+                          << xml_cpus[i].getType() << std::endl;
+                continue;
+              }
+
+              isolated_cpus.push_back(static_cast<int>(value));
+            } catch (const std::exception& e) {
+              std::cerr << "Error: parameter conversion failed, index " << i << ": " << e.what()
+                        << std::endl;
+            }
+          }
+        } else {
+          std::cerr << "Error: isolated_cpus is not an array, type: " << xml_cpus.getType()
+                    << std::endl;
+        }
+      } else {
+        std::cerr << "Error: failed to get isolated_cpus parameter" << std::endl;
+      }
+    } else {
+      std::cout << "未设置 /isolated_cpus 参数，跳过CPU亲和性设置" << std::endl;
+      return false;
+    }
+
+    // 检查是否有隔离的核心
+    if (isolated_cpus.size() >= 1) {
+      bool ruiwo_isolated_core_ = false;
+      int max_cpu = sysconf(_SC_NPROCESSORS_ONLN);
+      std::cout << "系统CPU核心数: " << max_cpu << std::endl;
+
+      for (size_t i = 0; i < isolated_cpus.size(); ++i) {
+        if (isolated_cpus[i] < 0 || isolated_cpus[i] >= max_cpu) {
+          std::cerr << "警告: CPU核心 " << isolated_cpus[i] << " 超出有效范围 [0, " << max_cpu - 1
+                    << "]" << std::endl;
+          return false;
+        }
+      }
+
+      // 获取 /proc/cmdline 中的 isolcpus 参数列表
+      std::vector<int> isolcpus_list;
+      std::ifstream cmdline_file("/proc/cmdline");
+      if (cmdline_file.is_open()) {
+        std::string line;
+        std::getline(cmdline_file, line);
+        cmdline_file.close();
+
+        size_t isolcpus_pos = line.find("isolcpus=");
+        if (isolcpus_pos != std::string::npos) {
+          size_t start = isolcpus_pos + 9;  // "isolcpus=" 长度为9
+          size_t end = line.find(' ', start);
+          if (end == std::string::npos) end = line.length();
+
+          std::string isolcpus_value = line.substr(start, end - start);
+
+          // 解析 isolcpus 参数 (格式如: "1,3-5,7")
+          size_t pos = 0;
+          while (pos < isolcpus_value.length()) {
+            size_t comma_pos = isolcpus_value.find(',', pos);
+            std::string range = isolcpus_value.substr(pos, comma_pos - pos);
+
+            size_t dash_pos = range.find('-');
+            if (dash_pos != std::string::npos) {
+              int start_cpu = std::stoi(range.substr(0, dash_pos));
+              int end_cpu = std::stoi(range.substr(dash_pos + 1));
+              for (int j = start_cpu; j <= end_cpu; ++j) {
+                isolcpus_list.push_back(j);
+              }
+            } else {
+              isolcpus_list.push_back(std::stoi(range));
+            }
+
+            if (comma_pos == std::string::npos) break;
+            pos = comma_pos + 1;
+          }
+          std::cout << "已隔离CPU列表: ";
+          for (size_t i = 0; i < isolcpus_list.size(); ++i) {
+            if (isolcpus_list[i] == 7) {
+              ruiwo_isolated_core_ = true;
+            }
+            std::cout << isolcpus_list[i];
+            if (i < isolcpus_list.size() - 1) std::cout << ", ";
+          }
+          std::cout << std::endl;
+        } else {
+          std::cout << "未在 /proc/cmdline 中找到 isolcpus 参数" << std::endl;
+        }
+      } else {
+        std::cerr << "警告: 无法打开 /proc/cmdline 文件" << std::endl;
+      }
+
+      for (size_t i = 0; i < isolated_cpus.size(); ++i) {
+        int cpu_id = isolated_cpus[i];
+        if (std::find(isolcpus_list.begin(), isolcpus_list.end(), cpu_id) != isolcpus_list.end()) {
+          actually_isolated_cpus.push_back(cpu_id);
+          std::cout << "CPU " << cpu_id << " 已隔离" << std::endl;
+        } else {
+          std::cout << "CPU " << cpu_id << " 未隔离" << std::endl;
+        }
+      }
+      if (!ruiwo_isolated_core_) {  // 7 号核心未隔离，不允许启动
+        std::cout << "7 号核心未隔离，跳过CPU亲和性设置" << std::endl;
+        return false;
+      }
+    } else {
+      std::cout << "隔离的核心列表为空，跳过CPU亲和性设置" << std::endl;
+      return false;
+    }
+
+    // 只有在有真正隔离的CPU时才设置亲和性
+    if (actually_isolated_cpus.size() >= 2) {  // 至少需要两个核心绑定 WBC
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+
+      for (size_t i = 0; i < actually_isolated_cpus.size(); ++i) {
+        CPU_SET(actually_isolated_cpus[i], &cpuset);
+      }
+
+      std::cout << "设置WBC线程亲和性到隔离核心: ";
+      for (size_t i = 0; i < actually_isolated_cpus.size(); ++i) {
+        std::cout << actually_isolated_cpus[i];
+        if (i < actually_isolated_cpus.size() - 1) std::cout << ", ";
+      }
+      std::cout << std::endl;
+
+      int result = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+      if (result != 0) {
+        std::cerr << "警告: 设置线程CPU亲和性失败，错误码: " << result << " (" << strerror(result)
+                  << ")" << std::endl;
+        return false;
+      } else {
+        std::cout << "成功设置CPU亲和性到隔离核心" << std::endl;
+        return true;
+      }
+    } else {
+      std::cout << "没有真正隔离的CPU核心或隔离的CPU核心数不足（至少需要2个核心，2个核心绑定WBC控制线程），"
+                   "跳过CPU亲和性设置"
+                << std::endl;
+      return false;
+    }
   }
 
   void humanoidControllerWheelWbc::setupHumanoidWheelInterface(const std::string &taskFile, const std::string &libFolder, const std::string &urdfFile)
