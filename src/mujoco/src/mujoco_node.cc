@@ -38,8 +38,9 @@
 #include "nav_msgs/Odometry.h"
 #include "std_srvs/SetBool.h"
 #include "std_msgs/Float64.h"
-#include "std_msgs/Float64.h"
 #include "std_msgs/Float64MultiArray.h"
+#include "std_msgs/Bool.h"
+#include "geometry_msgs/Vector3.h"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Core>
 #include <csignal>
@@ -164,6 +165,25 @@ namespace
   bool right_hand_active_ = false;
   int left_arm_link_id_ = -1;   // 缓存左手link ID
   int right_arm_link_id_ = -1;  // 缓存右手link ID
+  // 躯干吊绳：三模块独立叠加（绞盘回锚 + 姿态回正 + 六轴阻尼）
+  bool torso_rope_active_ = false;
+  bool torso_rope_got_anchor_ = false;
+  // 按直立 torso 高度估算：锚点 Z=1.8m， torso 质心约 0.65~0.7m，
+  // 距离约 1.1m；绳长设 1.1m，站着激活时松弛，倒了激活时吊起。
+  double torso_rope_length_ = 1.1;      // m，绳长；仅允许 ±5cm 步长调整
+  double torso_rope_speed_ = 0.3;       // m/s，绞盘恒定回拉速度
+  double torso_rope_kv_ = 5000.0;       // N/(m/s)，绞盘速度追踪增益
+  constexpr double torso_rope_max_force_ = 2500.0; // N，绞盘最大拉力
+  const double torso_rope_anchor_z_ = 1.8; // 锚点 Z，固定不可调
+  double torso_rope_anchor_[3] = {0, 0, 0};
+  // 模块 2：姿态回正（速度-位置控制），目标为世界坐标系直立
+  double torso_upright_kp_ = 100.0;     // Nm/(rad/s)，姿态角速度追踪增益
+  double torso_upright_speed_ = 0.35;   // rad/s，超出死区后三轴恒定回正速度（≈20°/s）
+  double torso_upright_deadzone_ = 0.043633; // rad，≈2.5°，死区内无力矩
+  // 模块 3：六轴阻尼（让躯干趋于静止）
+  double torso_rope_lin_damp_ = 100.0;  // N/(m/s)，线速度阻尼
+  double torso_rope_ang_damp_ = 15.0;   // Nm/(rad/s)，角速度阻尼
+  int torso_body_id_ = -1;
 
   std::mutex queueMutex;
   ros::NodeHandle *g_nh_ptr;
@@ -1322,6 +1342,68 @@ namespace
                 }
               }
             }
+            // 躯干吊绳：三模块独立叠加（绞盘回锚 + 姿态回正 + 六轴阻尼）
+            if (torso_rope_active_ && torso_body_id_ >= 0)
+            {
+              int bid = torso_body_id_;
+              double *pos = d->xpos + 3 * bid;
+              double *quat = d->xquat + 4 * bid;
+
+              // 激活首帧记锚点 XY
+              if (!torso_rope_got_anchor_)
+              {
+                torso_rope_anchor_[0] = pos[0];
+                torso_rope_anchor_[1] = pos[1];
+                torso_rope_got_anchor_ = true;
+              }
+
+              double dx = torso_rope_anchor_[0] - pos[0];
+              double dy = torso_rope_anchor_[1] - pos[1];
+              double dz = torso_rope_anchor_z_ - pos[2];
+              double dist_sq = dx*dx + dy*dy + dz*dz;
+              double rope_len_sq = torso_rope_length_ * torso_rope_length_;
+
+              double *v_lin = d->cvel + 6 * bid + 3;
+              double *omega = d->cvel + 6 * bid;
+              Eigen::Map<Eigen::Vector3d> v_lin_eig(v_lin);
+              Eigen::Map<Eigen::Vector3d> omega_eig(omega);
+
+              // 模块 1：绞盘——绳长外按恒定速度拉回锚点
+              Eigen::Vector3d F_winch(0.0, 0.0, 0.0);
+              if (dist_sq > rope_len_sq)
+              {
+                double dist = sqrt(dist_sq);
+                double v_radial = (v_lin[0]*dx + v_lin[1]*dy + v_lin[2]*dz) / dist;
+                double F = std::clamp(torso_rope_kv_ * (torso_rope_speed_ - v_radial),
+                                      0.0, torso_rope_max_force_);
+                double scale = F / dist;
+                F_winch << scale * dx, scale * dy, scale * dz;
+              }
+
+              // 模块 2：姿态回正——目标为世界坐标系直立，三轴速度-位置控制，死区 ±2.5°
+              double err_vec[3];
+              mju_quat2Vel(err_vec, quat, 1.0);
+              Eigen::Vector3d err(err_vec);
+              Eigen::Vector3d mask = (err.array().abs() > torso_upright_deadzone_).cast<double>();
+              Eigen::Vector3d omega_des = -torso_upright_speed_ * err.cwiseSign();
+              Eigen::Vector3d tau_upright = torso_upright_kp_ * mask.cwiseProduct(omega_des - omega_eig);
+
+              // 模块 3：六轴阻尼——让躯干趋于静止
+              Eigen::Vector3d F_damp = -torso_rope_lin_damp_ * v_lin_eig;
+              Eigen::Vector3d tau_damp = -torso_rope_ang_damp_ * omega_eig;
+
+              // 合成外力/力矩
+              double *xfrc = &d->xfrc_applied[6 * bid];
+              Eigen::Map<Eigen::Vector3d> force_applied(xfrc);
+              Eigen::Map<Eigen::Vector3d> torque_applied(xfrc + 3);
+              force_applied  = F_winch + F_damp;
+              torque_applied = tau_upright + tau_damp;
+            }
+            else
+            {
+              torso_rope_got_anchor_ = false;
+            }
+
             // 每次step前应用手臂外力（因为xfrc_applied会在mj_step后自动清零）
             if (left_hand_active_ && left_arm_link_id_ != -1) {
               d->xfrc_applied[6 * left_arm_link_id_ + 0] = left_hand_wrench_.force.x;
@@ -2089,8 +2171,30 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       right_arm_link_id_ = mj_name2id(m, mjOBJ_BODY, "zarm_r4_link");
     }
   }
-  
+
+  // 躯干吊绳 + 直立力矩：直接作用于 torso 质心
+  torso_body_id_ = mj_name2id(m, mjOBJ_BODY, "torso");
+  if (torso_body_id_ < 0) {
+    ROS_WARN("[TorsoRope] torso body not found, rope + upright disabled");
+  }
+
   ROS_INFO("Arm force application IDs: left=%d, right=%d", left_arm_link_id_, right_arm_link_id_);
+
+  // 躯干弹力绳订阅
+  ros::Subscriber torsoRopeActiveSub = g_nh_ptr->subscribe<std_msgs::Bool>(
+      "/mujoco/torso_rope/active", 10, [&](const std_msgs::Bool::ConstPtr &msg) {
+        torso_rope_active_ = msg->data;
+        ROS_WARN("[TorsoRope] active = %s", torso_rope_active_ ? "ON" : "OFF");
+      });
+  ros::Subscriber torsoRopeParamsSub = g_nh_ptr->subscribe<geometry_msgs::Vector3>(
+      "/mujoco/torso_rope/params", 10, [&](const geometry_msgs::Vector3::ConstPtr &msg) {
+        if (msg->x > 0.01) torso_rope_speed_ = msg->x;   // x: 绞盘拉速 m/s
+        if (msg->y > 0.01) torso_rope_kv_ = msg->y;       // y: 速度追踪增益
+        if (msg->z > 0.01) torso_rope_length_ = msg->z;   // z: 绳长 m
+        ROS_INFO_THROTTLE(1.0, "[TorsoRope] speed=%.2f m/s, kv=%.0f, rope_len=%.3f m, anchor_z=%.3f m (upright_kp=%.0f, lin_damp=%.0f, ang_damp=%.0f)",
+                 torso_rope_speed_, torso_rope_kv_, torso_rope_length_, torso_rope_anchor_z_,
+                 torso_upright_kp_, torso_rope_lin_damp_, torso_rope_ang_damp_);
+      });
 
   // 手臂外力订阅（存储外力值，在仿真循环中持续应用）
   ros::Subscriber lHandExtWrenchSub = g_nh_ptr->subscribe<geometry_msgs::Wrench>("/external_wrench/left_hand", 10, [&](const geometry_msgs::Wrench::ConstPtr &msg)

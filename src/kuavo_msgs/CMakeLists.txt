@@ -171,6 +171,7 @@ add_service_files(
   changeArmCtrlMode.srv
   changeWaistCtrlMode.srv
   switchController.srv
+  FallStandCommand.srv
   getControllerList.srv
   switchToNextController.srv
   singleStepControl.srv
@@ -263,6 +264,9 @@ add_service_files(
 
   # Lb eePose reach error
   eePoseReachError.srv
+
+  # Transport mode
+  TransportModeCommand.srv
 )
 
 ## Generate actions in the 'action' folder

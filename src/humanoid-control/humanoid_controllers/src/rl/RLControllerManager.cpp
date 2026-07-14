@@ -169,14 +169,21 @@ namespace humanoid_controller
     // 切换到MPC控制器
     if (name.empty())
     {
-      // 保护逻辑：RL->MPC 切换时，如果 RL 控制器不在 stance 状态，不允许切换
+      // 保护逻辑：RL->MPC 切换时，如果 RL 控制器不在 stance 且躯干仍在运动，不允许切换
+      // （对应 V1.1 SwitchMotionState：STANCE/STATIONARY 放行，WALKING 拒绝。
+      //   HEAD 已移除 SwitchMotionState 基础设施，用 isTorsoVelocityStable 替代 STATIONARY 判断。）
       if (!current_controller_name_.empty())
       {
         auto* current_controller = controllers_[current_controller_name_].get();
         if (current_controller && !current_controller->isAllowToExit())
         {
-          ROS_WARN("[RLControllerManager] RL not in isAllowToExit , switch to MPC blocked! Switch to stance first.");
-          return false;
+          // 躯干已稳定（物理静止）→ 允许 RL→MPC，对应 V1.1 的 STATIONARY 状态
+          if (!isTorsoVelocityStable())
+          {
+            ROS_WARN("[RLControllerManager] RL not in stance and torso not stable, switch to MPC blocked! Stop walking first.");
+            return false;
+          }
+          ROS_INFO("[RLControllerManager] Allowing RL->MPC switch with stable torso (stationary)");
         }
 
         if (current_controller)
@@ -977,8 +984,8 @@ namespace humanoid_controller
     bool switch_ok = true;
     if (new_index == 0)
     {
-      // 切回 MPC 控制器
-      switchToBaseController();
+      // 切回 MPC 控制器；直接用 switchController("") 以检查返回值
+      switch_ok = switchController("");
     }
     else
     {

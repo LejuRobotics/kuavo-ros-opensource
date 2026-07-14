@@ -10,9 +10,9 @@
 1. [控制器管理服务（RLControllerManager）](#1-控制器管理服务rlcontrollermanager) — 行走列表/循环/倒地状态及**多舞蹈**接口
 2. [控制器基础服务（RLControllerBase）](#2-控制器基础服务rlcontrollerbase) - 5个服务
 3. [倒地起身控制器服务（FallStandController）](#3-倒地起身控制器服务fallstandcontroller) - 1个服务
-4. [主控制器服务（humanoidController）](#4-主控制器服务humanoidcontroller) - 5个服务
+4. [主控制器服务（humanoidController）](#4-主控制器服务humanoidcontroller) - 1个服务
 5. [腰部控制器接口（WaistController）](#5-腰部控制器接口waistcontroller) - 2个话题
-6. [监控与调试话题](#6-监控与调试话题) - 2个话题
+6. [监控与调试话题](#6-监控与调试话题) - 5个话题
 
 ---
 
@@ -335,34 +335,74 @@ rosservice call /humanoid_controllers/amp_controller/reset
 
 这些服务由 `FallStandController` 提供，专门用于倒地起身功能。
 
-### 3.1 `/humanoid_controller/trigger_fall_stand_up`
+### 3.1 `/humanoid_controller/fall_stand_command`
 
-**服务类型**: `std_srvs/Trigger`
+**服务类型**: `kuavo_msgs/FallStandCommand`
 
-**功能**: 触发倒地起身流程
+**功能**: 显式控制倒地起身状态机
 
-**请求参数**: 无
-
-**响应参数**:
-- `success` (bool): 触发是否成功
-- `message` (string): 返回消息，说明触发结果或失败原因
-
-**使用说明**:
-- 只有在控制器处于 `RUNNING` 状态时才能触发
-- 只有在机器人处于 `FALL_DOWN` 状态时才能触发
-- 触发后会：
-  1. 根据当前机体姿态自动选择趴着/躺着模型
-  2. 重置轨迹时间步
-  3. 计算当前与轨迹参考yaw差
-  4. 进入 `READY_FOR_STAND_UP` 状态，开始关节空间插值
-  5. 插值完成后自动进入 `STAND_UP` 状态，开始RL控制起身
+**请求参数**:
+- `command` (uint8):
+  - `1 = PREPARE`: 插值到起身初始姿态 (FALL_DOWN→INTERPOLATING→READY)
+  - `2 = STAND_UP`: 执行 RL 起身轨迹 (READY→STAND_UP)
+  - `3 = RESET`: 复位状态机
 
 **状态机流程**:
-- `FALL_DOWN` → `READY_FOR_STAND_UP` → `STAND_UP` → `STANDING`
+- `FALL_DOWN`(0) → `INTERPOLATING`(1) → `READY`(2) → `STAND_UP`(3) → `STANDING`(4)
+- 阶段状态通过 `/humanoid_controller/FallStandController/fall_stand_state_` 话题发布
+
+**使用说明**:
+- PREPARE 触发后控制器自动插值，完成后状态变为 READY
+- STAND_UP 仅在 READY 状态有效
+- 正常操作流程：先 PREPARE，等 fall_stand_state_ 变为 2(READY)，再 STAND_UP
 
 **示例**:
 ```bash
-rosservice call /humanoid_controller/trigger_fall_stand_up
+rosservice call /humanoid_controller/fall_stand_command "command: 1"  # PREPARE
+rosservice call /humanoid_controller/fall_stand_command "command: 2"  # STAND_UP
+
+---
+
+## 4. 主控制器服务（humanoidController）
+
+这些服务由 `humanoidController` 直接提供，用于控制搬运模式等全局状态。
+
+### 4.1 `/humanoid_controller/transport_mode_command`
+
+**服务类型**: `kuavo_msgs/TransportModeCommand`
+
+**功能**: 搬运模式控制
+
+**请求参数 - command (uint8)**:
+| 值 | 名称 | 说明 |
+|----|------|------|
+| 1 | TRANSPORT_ENTER | 进入搬运，躯干插值到搬运姿态 |
+| 2 | TRANSPORT_LOCK | 关节锁死进入可搬运状态 |
+| 3 | TRANSPORT_EXIT | 完全退出搬运（HANDING_OVER → INACTIVE） |
+| 4 | TRANSPORT_FALL_DOWN | 瘫软倒地，切倒地起身控制器 |
+| 5 | TRANSPORT_HAND_OVER | 移交管理权，开始退出搬运 |
+
+**状态机流程**:
+```
+INACTIVE →(ENTER)→ INTERPOLATING(~1s躯干插值) →(自动)→ READY(姿态就绪)
+  →(LOCK)→ ACTIVE(关节锁死) →(HAND_OVER)→ 恢复原控制器 →(EXIT)→ INACTIVE
+  ACTIVE →(FALL_DOWN)→ 倒地起身 → 恢复站立
+```
+
+**使用说明**:
+- ENTER：需 MPC stance 或 RL 模式，进入后躯干自动插值到搬运姿态
+- READY 阶段：姿态已到位，关节未锁，可 LOCK 或 HAND_OVER
+- ACTIVE 阶段：关节 CSP 锁死（腿+腰+臂+头全覆盖），暂停 MPC/WBC/RL 计算，可安全搬运
+- HAND_OVER：移交管理权，控制器恢复原模式
+- FALL_DOWN：仅 ACTIVE 可用，瘫软后走倒地起身流程恢复
+- 搬运期间拉起保护暂停
+
+**示例**:
+```bash
+rosservice call /humanoid_controller/transport_mode_command "command: 1"  # ENTER
+rosservice call /humanoid_controller/transport_mode_command "command: 2"  # LOCK→ACTIVE
+rosservice call /humanoid_controller/transport_mode_command "command: 5"  # HAND_OVER
+rosservice call /humanoid_controller/transport_mode_command "command: 4"  # FALL_DOWN
 ```
 
 ---
@@ -434,18 +474,18 @@ rqt_plot /humanoid_controller/is_rl_controller_/data
 
 **消息内容**:
 - `data` (float64): MPC重置状态码
-  - `0` (`NOMAL`): 正常状态，MPC正常运行
+  - `0` (`NORMAL`): 正常状态，MPC正常运行
   - `1` (`RESET_INITIAL_POLICY`): 重置MPC状态1，等待初始策略
   - `2` (`RESET_BASE`): 重置MPC状态2，更新躯干位置（插值阶段）
 
 **状态转换流程**:
 - 当从RL切回MPC时，状态会依次经历：
-  - `RESET_INITIAL_POLICY` (1) → `RESET_BASE` (2) → `NOMAL` (0)
+  - `RESET_INITIAL_POLICY` (1) → `RESET_BASE` (2) → `NORMAL` (0)
 - 便于监控MPC重置进度和调试切换过程
 
 **使用说明**:
 - 在RL→MPC切换过程中，可以通过此话题监控重置进度
-- 当状态为 `NOMAL` (0) 时，表示MPC已完全重置并正常运行
+- 当状态为 `NORMAL` (0) 时，表示MPC已完全重置并正常运行
 - 可用于外部系统判断MPC是否已完成重置，避免在重置过程中执行其他操作
 
 **订阅示例**:
@@ -456,6 +496,26 @@ rostopic echo /humanoid_controller/resetting_mpc_state_
 # 使用rqt_plot可视化
 rqt_plot /humanoid_controller/resetting_mpc_state_/data
 ```
+
+### 6.3 `/humanoid_controller/transport_mode_state_`
+
+**话题类型**: `std_msgs/Float64`
+
+**功能**: 实时发布搬运模式状态
+
+- `0` = INACTIVE, `1` = INTERPOLATING, `2` = READY, `3` = ACTIVE, `4` = HANDING_OVER
+
+### 6.4 `/humanoid_controller/is_stance_mode_`
+
+**话题类型**: `std_msgs/Float64`
+
+**功能**: 实时发布 MPC stance 状态 (`0.0`/`1.0`)
+
+### 6.5 `/humanoid_controller/FallStandController/fall_stand_state_`
+
+**话题类型**: `std_msgs/Float64`
+
+**功能**: 实时发布 FallStand 阶段 (`0`=FALL_DOWN `1`=INTERPOLATING `2`=READY `3`=STAND_UP `4`=STANDING)
 
 ---
 
@@ -494,16 +554,22 @@ rosservice call /humanoid_controller/switch_to_dance_controller "data: '#1'"
 rosservice call /humanoid_controller/switch_controller "controller_name: 'amp_controller'"
 ```
 
-### 倒地起身流程
+### 倒地起身流程（推荐使用 fall_stand_command 接口）
 
 ```bash
 # 1. 设置倒地状态（会自动切换到倒地起身控制器）
 rosservice call /humanoid_controller/set_fall_down_state "data: true"
 
-# 2. 触发起身流程
-rosservice call /humanoid_controller/trigger_fall_stand_up
+# 2. 第一次触发：PREPARE（插值到起身初始姿态）
+rosservice call /humanoid_controller/fall_stand_command "command: 1"
 
-# 3. 等待起身完成后，设置站立状态
+# 3. 等待插值完成（监控 fall_stand_state_ 从 1→2）
+rostopic echo /humanoid_controller/FallStandController/fall_stand_state_
+
+# 4. 第二次触发：STAND_UP（执行 RL 起身）
+rosservice call /humanoid_controller/fall_stand_command "command: 2"
+
+# 5. 等待起身完成后，设置站立状态
 rosservice call /humanoid_controller/set_fall_down_state "data: false"
 ```
 
@@ -526,7 +592,7 @@ rosservice call /humanoid_controller/set_fall_down_state "data: false"
 3. **服务命名空间**:
    - 控制器管理服务：`/humanoid_controller/*`（包括行走切换、行走列表、舞蹈切换/舞蹈列表、倒地状态设置等）
    - 控制器基础服务：`/humanoid_controllers/{controller_name}/*`（每个RL控制器的独立服务）
-   - 倒地起身服务：`/humanoid_controller/trigger_fall_stand_up`
+   - 倒地起身服务：`/humanoid_controller/fall_stand_command`
 
 ---
 

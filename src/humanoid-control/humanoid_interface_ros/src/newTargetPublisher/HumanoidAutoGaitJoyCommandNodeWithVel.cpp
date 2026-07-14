@@ -493,6 +493,12 @@ namespace ocs2
       m1m2_action_active_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
           "/joy_node/m1m2_action_active", 1,
           [this](const std_msgs::Bool::ConstPtr &msg) { m1m2_action_active_ = msg->data; });
+      // 订阅搬运模式状态，搬运期间（!= INACTIVE）C++ joy 早返，不处理任何操作
+      transport_mode_state_sub_ = nodeHandle_.subscribe<std_msgs::Float64>(
+          "/humanoid_controller/transport_mode_state_", 1,
+          [this](const std_msgs::Float64::ConstPtr &msg) {
+            transport_mode_state_ = static_cast<int>(msg->data);
+          });
       // 从主控制器实时订阅当前手臂控制模式
       arm_ctrl_mode_sub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
       "/humanoid/mpc/arm_control_mode", 1, &JoyControl::armCtrlModeCallback, this); 
@@ -511,10 +517,6 @@ namespace ocs2
       execute_arm_action_client_ = nodeHandle_.serviceClient<kuavo_msgs::ExecuteArmAction>("/execute_arm_action");
       // Launch status client (rate-limited checks in joy callback)
       real_launch_status_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_launch_status");
-      // Fall stand up trigger client
-      trigger_fall_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/trigger_fall_stand_up");
-      // Fall down state client
-      set_fall_down_state_client_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/humanoid_controller/set_fall_down_state");
       // Dance controller: kuavo_msgs/SetString（空 data=列表首项，或 #下标/名称）
       switch_dance_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetString>("/humanoid_controller/switch_to_dance_controller");
       last_status_check_time_ = ros::Time(0);
@@ -1343,49 +1345,6 @@ namespace ocs2
       callArmControlService(1);
     }
 
-    /***** LB+RB 三键组合（仅保留功能接口，实际功能待实现）*****/
-    // 真实实现依赖：
-    //   1) 两步起身状态机（StandUpPhase{kIdle,kPrepared}）；
-    //   2) controller 端把 humanoidController.cpp 的 enable_pull_up_protect_ 从启动期 once-read
-    //      改为运行期可切换，并注册 std_srvs::SetBool 服务 /set_pull_up_protect；
-    //   3) 锁定全身电机的算法侧接口。
-    // 当前仅保留按键分发与函数接口，不接入真实服务调用。
-
-    // LB+RB+B：只能在搬运模式下使用，机器人所有电机全身断电进入倒地状态
-    void lbrbFullBodyPowerOffStub()
-    {
-      ROS_WARN("[JoyControl] (接口预留) LB+RB+B 全身断电倒地：功能待实现");
-      // TODO: callSetFallDownStateSrv()（从原 RB+B 迁入），需在搬运模式下才允许
-    }
-
-    // LB+RB+X：按第1下回到起身初始姿态；按第2下执行起身动作
-    void lbrbTwoStepStandUpStub()
-    {
-      ROS_WARN("[JoyControl] (接口预留) LB+RB+X 两步起身：功能待实现");
-      // TODO: 新增 enum StandUpPhase{kIdle,kPrepared}；第1下进入 kPrepared 并恢复初始姿态，
-      //       第2下在 kPrepared 下 callTriggerFallStandUpSrv() 并复位；超时或松开 LB/RB 自动复位
-    }
-
-    // LB+RB+Y：进入搬运模式 —— 关闭上拉保护并锁定全身电机
-    void lbrbEnterTransportStub()
-    {
-      ROS_WARN("[JoyControl] (接口预留) LB+RB+Y 进入搬运模式（关闭上拉保护+锁电机）：功能待实现");
-      transport_mode_active_ = true;
-      const std::string wav = "进入搬运模式可安全移动.wav";
-      std::thread([this, wav]() { playMusic(wav); }).detach();
-      // TODO: 调用 /set_pull_up_protect(false) 并锁定全身电机
-    }
-
-    // LB+RB+A：退出搬运模式 —— 开启上拉保护并恢复正常
-    void lbrbExitTransportStub()
-    {
-      ROS_WARN("[JoyControl] (接口预留) LB+RB+A 退出搬运模式（开启上拉保护+恢复）：功能待实现");
-      transport_mode_active_ = false;
-      const std::string wav = "退出搬运模式恢复正常.wav";
-      std::thread([this, wav]() { playMusic(wav); }).detach();
-      // TODO: 调用 /set_pull_up_protect(true)，平滑站立+状态检测+恢复 MPC/AMP 接管
-    }
-
     /************************ 组合键调度函数 ************************/
     // LB（左肩键）单组合：A/B/X/Y。沿用原逻辑：不提前 return，落到后续轴处理。
     bool handleLBComboButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
@@ -1469,64 +1428,14 @@ namespace ocs2
         }
         return true;
       }
-      // RB + X
+      // RB + X（倒地起身由 Python joy 节点处理，此处仅消费按键防止穿透）
       if (risingEdge(joy_msg, "BUTTON_RL"))
       {
-        if (IS_ROBAN(rb_version_))
-        {
-          // roban: RB+X is reserved as a no-op, but still consumes the button to avoid falling through to plain X logic.
-          ROS_INFO("[JoyControl] RB+X (Roban): reserved, no action");
-          return true;
-        }
-        callTriggerFallStandUpSrv(); // 非 roban: 起身
         return true;
       }
       // RB + B
       if (risingEdge(joy_msg, "BUTTON_TROT"))
       {
-        if (IS_ROBAN(rb_version_))
-        {
-          // 动作执行期间禁止切换舞蹈控制器（与 RB+A / RB+Y 同口径）
-          if (robot_action_executing_)
-          {
-            ROS_WARN("[JoyControl] RB+B: action executing, dance switch rejected");
-            return true;
-          }
-          triggerFixedDance3();      // 固定舞蹈3: 爱情鸟
-          return true;
-        }
-        callSetFallDownStateSrv(); // 非 roban: 触发倒地
-        return true;
-      }
-      return false;
-    }
-
-    // LB+RB 同时按下（仅 roban）：A/B/X/Y。返回 true 表示已消费。
-    // 仅保留接口分发，调用桩函数（实际功能待实现）。
-    bool handleLBRBComboButtons(const sensor_msgs::Joy::ConstPtr &joy_msg)
-    {
-      // LB+RB + B：全身断电倒地
-      if (risingEdge(joy_msg, "BUTTON_TROT"))
-      {
-        lbrbFullBodyPowerOffStub();
-        return true;
-      }
-      // LB+RB + X：两步起身
-      if (risingEdge(joy_msg, "BUTTON_RL"))
-      {
-        lbrbTwoStepStandUpStub();
-        return true;
-      }
-      // LB+RB + Y：进入搬运模式
-      if (risingEdge(joy_msg, "BUTTON_WALK"))
-      {
-        lbrbEnterTransportStub();
-        return true;
-      }
-      // LB+RB + A：退出搬运模式
-      if (risingEdge(joy_msg, "BUTTON_STANCE"))
-      {
-        lbrbExitTransportStub();
         return true;
       }
       return false;
@@ -1604,6 +1513,13 @@ namespace ocs2
         ROS_WARN("[JoyController]: Joystick data mapping has changed from X-Box to BEITONG");
         reloadJoystickMapping(JOYSTICK_AXIS_NUM, JOYSTICK_BEITONG_BUTTON_NUM);
         loadJoyJsonConfig(channel_map_path, joyButtonMap, joyAxisMap);
+        old_joy_msg_ = *joy_msg;
+        return;
+      }
+
+      // 搬运模式期间（!= INACTIVE），C++ joy 早返，不处理任何操作
+      if (transport_mode_state_ != 0)
+      {
         old_joy_msg_ = *joy_msg;
         return;
       }
@@ -1892,14 +1808,11 @@ namespace ocs2
       
       const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
       const bool rb_held = buttonPressed(joy_msg, "BUTTON_RB");
-      // LB+RB 同时按下（仅 roban）：搬运模式 / 断电倒地 / 起身
+      // LB+RB 同时按下（仅 roban）：搬运/起身已全部前移至 Python，C++ 吞帧
       if (IS_ROBAN(rb_version_) && lb_held && rb_held)
       {
-        if (handleLBRBComboButtons(joy_msg))
-        {
-          old_joy_msg_ = *joy_msg;
-          return;
-        }
+        old_joy_msg_ = *joy_msg;
+        return;
       }
       else if (lb_held)// 按下左侧侧键，切换模式
       {
@@ -2402,39 +2315,6 @@ namespace ocs2
         ::ros::Duration(0.1).sleep();
       }
     }
-    void callTriggerFallStandUpSrv()
-    {
-      std::cout << "trigger callTriggerFallStandUpSrv" << std::endl;
-      std_srvs::Trigger srv;
-
-      // 调用服务
-      if (trigger_fall_stand_up_client_.call(srv))
-      {
-        ROS_INFO("[JoyControl] Trigger fall stand up service call successful: %s", srv.response.message.c_str());
-      }
-      else
-      {
-        ROS_ERROR("[JoyControl] Failed to call trigger_fall_stand_up service");
-      }
-    }
-    
-    void callSetFallDownStateSrv()
-    {
-      std::cout << "trigger callSetFallDownStateSrv" << std::endl;
-      std_srvs::SetBool srv;
-      srv.request.data = true;  // true = FALL_DOWN, false = STANDING
-
-      // 调用服务
-      if (set_fall_down_state_client_.call(srv))
-      {
-        ROS_INFO("[JoyControl] Set fall down state service call successful: %s", srv.response.message.c_str());
-      }
-      else
-      {
-        ROS_ERROR("[JoyControl] Failed to call set_fall_down_state service");
-      }
-    }
-
     void prepareDanceMusicPending(const std::string& dance_name)
     {
       pending_dance_music_.active = true;
@@ -2992,8 +2872,6 @@ namespace ocs2
     bool hand_closed_{false};
 
     // ===== roban 组合键功能相关 =====
-    // 搬运模式状态（仅接口，实际锁电机算法待实现）
-    bool transport_mode_active_{false};
     // RB+A 出厂固定舞蹈1：芭蕾。要求 rl_controllers.yaml 已注册同名 controller，
     // 且 /home/lab/.config/lejuconfig/music/dance_balei.wav 存在。
     const std::string kFixedDance1Name{"dance_balei"};
@@ -3013,12 +2891,11 @@ namespace ocs2
     ros::ServiceClient execute_arm_action_client_;
     // Launch status
     ros::ServiceClient real_launch_status_client_;
-    // Fall stand up trigger service
-    ros::ServiceClient trigger_fall_stand_up_client_;
-    // Fall down state service (SetBool)
-    ros::ServiceClient set_fall_down_state_client_;
     // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
     ros::ServiceClient switch_dance_client_;
+    // 搬运模式状态订阅（由 Python joy 驱动，C++ 仅读取用于早返）
+    ros::Subscriber transport_mode_state_sub_;
+    int transport_mode_state_{0};  // 0=INACTIVE, >0 搬运中，C++ joy 早返
     struct DanceMusicPending
     {
       bool active{false};

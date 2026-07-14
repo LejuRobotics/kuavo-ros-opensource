@@ -31,10 +31,10 @@ namespace humanoid_controller
   bool FallStandController::initialize()
   {
     // 设置ROS服务（使用基类的nh_引用）
-    trigger_fall_stand_up_srv_ = nh_.advertiseService("/humanoid_controller/trigger_fall_stand_up", 
-                                                      &FallStandController::triggerFallStandUpCallback, this);
+    fall_stand_command_srv_ = nh_.advertiseService("/humanoid_controller/fall_stand_command",
+                                                     &FallStandController::fallStandCommandCallback, this);
 
-    
+
     if (!loadConfig(config_file_))
     {
       ROS_ERROR("[%s] Failed to load config file: %s", name_.c_str(), config_file_.c_str());
@@ -411,13 +411,22 @@ namespace humanoid_controller
       joint_cmd.joint_kd.assign(total_joints, 0.0);
       joint_cmd.control_modes.assign(total_joints, 0);
     }
+    else if (fall_stand_state_ == FallStandState::INTERPOLATING)
+    {
+      // 关节空间插值中，完成时自动跳到 READY
+      if (updateFallStandInterpolation(time, sensor_data, measuredRbdState, joint_cmd))
+      {
+        fall_stand_state_ = FallStandState::READY_FOR_STAND_UP;
+        ROS_INFO("[%s] Interpolation complete → READY_FOR_STAND_UP", name_.c_str());
+      }
+    }
     else if (fall_stand_state_ == FallStandState::READY_FOR_STAND_UP)
     {
-      // READY阶段：执行关节空间插值
+      // 插值已完成，保持在终态位置等待触发
       updateFallStandInterpolation(time, sensor_data, measuredRbdState, joint_cmd);
-      if (request_for_stand_up_ && is_fall_stand_interpolating_complete_)
+      if (request_for_stand_up_)
       {
-        // 进入STAND_UP状态前，恢复之前override的use_default_motor_csp_kpkd_，使其不再使用默认kpkd
+        // 进入STAND_UP状态前，恢复之前override的use_default_motor_csp_kpkd_
         if (fallstand_override_use_default_kpkd_active_)
         {
           use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
@@ -427,22 +436,22 @@ namespace humanoid_controller
 
         // 根据当前机体姿态自动判断并切换模型
         autoSelectAndSwitchModel();
-        
+
         // 触发倒地启动过程
         motion_trajectory_.resetTimeStep();
         SensorData sensor_data = getRobotSensorData();
         auto mat = sensor_data.quat_.toRotationMatrix();
         // 计算yaw偏移
-        double current_yaw = std::atan2(mat(1, 2), mat(0, 2)); 
+        double current_yaw = std::atan2(mat(1, 2), mat(0, 2));
         my_yaw_offset_ = current_yaw - motion_trajectory_.reference_yaw;
-        std::cout << "getRobotSensorData().quat_: [" << sensor_data.quat_.w() << ", " 
+        std::cout << "getRobotSensorData().quat_: [" << sensor_data.quat_.w() << ", "
                   << sensor_data.quat_.x() << ", " << sensor_data.quat_.y() << ", " << sensor_data.quat_.z() << "]" << std::endl;
         std::cout << "Current yaw: " << current_yaw << std::endl;
         std::cout << "Reference yaw: " << motion_trajectory_.reference_yaw << std::endl;
         // 归一化到[-π, π]范围
         while (my_yaw_offset_ > M_PI) my_yaw_offset_ -= 2 * M_PI;
         while (my_yaw_offset_ < -M_PI) my_yaw_offset_ += 2 * M_PI;
-        
+
         actions_.setZero();
         fall_stand_state_ = FallStandState::STAND_UP;
         request_for_stand_up_ = false;
@@ -483,8 +492,6 @@ namespace humanoid_controller
   {
     motion_trajectory_.resetTimeStep();
     fall_stand_state_ = FallStandState::FALL_DOWN;
-    is_fall_stand_interpolating_ = false;
-    is_fall_stand_interpolating_complete_ = false;
     actions_.setZero();
     ROS_INFO("[%s] Controller reset", name_.c_str());
   }
@@ -978,34 +985,13 @@ namespace humanoid_controller
     }
   }
 
-  void FallStandController::updateFallStandInterpolation(const ros::Time& time, 
+  bool FallStandController::updateFallStandInterpolation(const ros::Time& time, 
                                                           const SensorData& sensor_data,
                                                           const Eigen::VectorXd& measuredRbdState,
                                                           kuavo_msgs::jointCmd& joint_cmd)
   {
     int total_body_joints = jointNum_ + jointArmNum_ + waistNum_;
     int total_joints = total_body_joints + headNum_;
-
-    // 如果还没有开始插值，启动插值
-    if (!is_fall_stand_interpolating_)
-    {
-      startFallStandInterpolation(time, sensor_data);
-      if (!is_fall_stand_interpolating_)
-      {
-        // 无法启动插值，返回零指令
-        joint_cmd.header.stamp = time;
-        joint_cmd.joint_q.assign(total_joints, 0.0);
-        joint_cmd.joint_v.assign(total_joints, 0.0);
-        joint_cmd.tau.assign(total_joints, 0.0);
-        joint_cmd.tau_ratio.assign(total_joints, 1.0);
-        joint_cmd.tau_max.assign(total_joints, 0.0);
-        joint_cmd.joint_kp.assign(total_joints, 0.0);
-        joint_cmd.joint_kd.assign(total_joints, 0.0);
-        joint_cmd.control_modes.assign(total_joints, 0);
-        ROS_WARN("[%s] Failed to start fall stand interpolation", name_.c_str());
-        return;
-      }
-    }
 
     double elapsed = time.toSec() - fall_stand_interp_start_time_;
     if (elapsed < 0.0)
@@ -1087,13 +1073,10 @@ namespace humanoid_controller
     }
 
     ros_logger_->publishValue("/humanoid_controller/FallStandController/fall_stand_interpolation_alpha_", alpha);
-    if (alpha >= 1.0)
-    {
-      is_fall_stand_interpolating_complete_ = true;
-    }
+    return alpha >= 1.0;
   }
 
-  void FallStandController::startFallStandInterpolation(const ros::Time& time, const SensorData& sensor_data)
+  bool FallStandController::startFallStandInterpolation(const ros::Time& time, const SensorData& sensor_data)
   {
     int total_body_joints = jointNum_ + jointArmNum_ + waistNum_;
     
@@ -1101,9 +1084,7 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] fall_stand_init_joints_ size(%ld) < total_body_joints(%d), skip interpolation.",
                name_.c_str(), fall_stand_init_joints_.size(), total_body_joints);
-      is_fall_stand_interpolating_ = false;
-      is_fall_stand_interpolating_complete_ = false;
-      return;
+      return false;
     }
 
     if (sensor_data.jointPos_.size() < total_body_joints)
@@ -1116,9 +1097,7 @@ namespace humanoid_controller
         use_default_motor_csp_kpkd_ = fallstand_prev_use_default_motor_csp_kpkd_;
         fallstand_override_use_default_kpkd_active_ = false;
       }
-      is_fall_stand_interpolating_ = false;
-      is_fall_stand_interpolating_complete_ = false;
-      return;
+      return false;
     }
 
     fall_stand_start_pos_ = sensor_data.jointPos_.head(total_body_joints);
@@ -1141,8 +1120,6 @@ namespace humanoid_controller
     }
 
     fall_stand_interp_start_time_ = time.toSec();
-    is_fall_stand_interpolating_ = true;
-    is_fall_stand_interpolating_complete_ = false;
     // 在开始插值时，如果是实物，则临时设置 use_default_motor_csp_kpkd_ = true
     if (is_real_ && !fallstand_override_use_default_kpkd_active_)
     {
@@ -1157,6 +1134,7 @@ namespace humanoid_controller
     std::cout << "[FallStandInterpolation] start, required_time: " << fall_stand_required_time_
               << " s, joints: " << total_body_joints << " fall_stand_start_pos_: " << fall_stand_start_pos_.transpose() 
               << " fall_stand_init_joints_: " << fall_stand_init_joints_.transpose() << std::endl;
+    return true;
   }
 
   bool FallStandController::loadTrajectory(const std::string& trajectory_file)
@@ -1407,68 +1385,83 @@ namespace humanoid_controller
     }
   }
 
-  bool FallStandController::triggerFallStandUpCallback(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res)
+  bool FallStandController::fallStandCommandCallback(kuavo_msgs::FallStandCommand::Request &req,
+                                                       kuavo_msgs::FallStandCommand::Response &res)
   {
     if (state_ != ControllerState::RUNNING)
     {
       res.success = false;
-      res.message = "FallStandController is not running, start or resume before trigger fall stand up";
+      res.message = "FallStandController is not running";
       return true;
     }
-    // 检查当前是否处于倒地状态
-    if (fall_stand_state_ == FallStandState::FALL_DOWN)
-    {
-      // ------------------------------------------------------------------
-      // 1. 根据当前机体姿态自动选择趴着/躺着模型
-      // ------------------------------------------------------------------
-      autoSelectAndSwitchModel();
 
-
-
-      // 触发倒地启动过程
-      motion_trajectory_.resetTimeStep();
-      SensorData sensor_data = getRobotSensorData();
-      auto mat = sensor_data.quat_.toRotationMatrix();
-      // 计算yaw偏移
-      double current_yaw = std::atan2(mat(1, 2), mat(0, 2)); 
-      my_yaw_offset_ = current_yaw - motion_trajectory_.reference_yaw;
-      std::cout << "getRobotSensorData().quat_: [" << sensor_data.quat_.w() << ", " 
-                << sensor_data.quat_.x() << ", " << sensor_data.quat_.y() << ", " << sensor_data.quat_.z() << "]" << std::endl;
-      std::cout << "Current yaw: " << current_yaw << std::endl;
-      std::cout << "Reference yaw: " << motion_trajectory_.reference_yaw << std::endl;
-      // 归一化到[-π, π]范围
-      while (my_yaw_offset_ > M_PI) my_yaw_offset_ -= 2 * M_PI;
-      while (my_yaw_offset_ < -M_PI) my_yaw_offset_ += 2 * M_PI;
-
-      fall_stand_state_ = FallStandState::READY_FOR_STAND_UP;
-      res.success = true;
-      res.message = "Fall stand up process triggered successfully";
-      ROS_INFO("[%s] Fall stand up process triggered", name_.c_str());
-    }
-    else if (fall_stand_state_ == FallStandState::READY_FOR_STAND_UP)
+    switch (req.command)
     {
-      // 请求起身，当准备好时(插值完)在update中触发
-      request_for_stand_up_ = true;
-      
-      res.success = false;
-      res.message = "Stand up process is already in progress";
-      ROS_WARN("[%s] Ready for stand up process is already in progress", name_.c_str());
-    }
-    else if (fall_stand_state_ == FallStandState::STAND_UP)
-    {
-      reset();
-      res.success = false;
-      res.message = "Stand up process is already in progress, stop stand up process";
-      ROS_WARN("[%s] Stand up process is already in progress, stop stand up process", name_.c_str());
-    }
-    else
-    {
-      res.success = false;
-      res.message = "Robot is not in fall down state, current state: " + std::to_string(static_cast<int>(fall_stand_state_));
-      ROS_WARN("[%s] Robot is not in fall down state, current state: %d", name_.c_str(), static_cast<int>(fall_stand_state_));
+      case kuavo_msgs::FallStandCommand::Request::PREPARE:
+      {
+        if (fall_stand_state_ != FallStandState::FALL_DOWN)
+        {
+          res.success = false;
+          res.message = "PREPARE only valid in FALL_DOWN, current: " + std::to_string(static_cast<int>(fall_stand_state_));
+          return true;
+        }
+        // 根据当前机体姿态自动选择趴着/躺着模型
+        autoSelectAndSwitchModel();
+
+        // 触发倒地启动过程
+        motion_trajectory_.resetTimeStep();
+        SensorData sensor_data = getRobotSensorData();
+        auto mat = sensor_data.quat_.toRotationMatrix();
+        double current_yaw = std::atan2(mat(1, 2), mat(0, 2));
+        my_yaw_offset_ = current_yaw - motion_trajectory_.reference_yaw;
+        while (my_yaw_offset_ > M_PI) my_yaw_offset_ -= 2 * M_PI;
+        while (my_yaw_offset_ < -M_PI) my_yaw_offset_ += 2 * M_PI;
+
+        // 启动关节空间插值
+        if (!startFallStandInterpolation(ros::Time::now(), sensor_data))
+        {
+          res.success = false;
+          res.message = "PREPARE failed: cannot start interpolation";
+          ROS_ERROR("[%s] PREPARE: startFallStandInterpolation failed", name_.c_str());
+          return true;
+        }
+
+        fall_stand_state_ = FallStandState::INTERPOLATING;
+        res.success = true;
+        res.message = "PREPARE: FALL_DOWN → INTERPOLATING";
+        ROS_INFO("[%s] PREPARE: FALL_DOWN → INTERPOLATING", name_.c_str());
+        break;
+      }
+      case kuavo_msgs::FallStandCommand::Request::STAND_UP:
+      {
+        if (fall_stand_state_ != FallStandState::READY_FOR_STAND_UP)
+        {
+          res.success = false;
+          res.message = "STAND_UP only valid in READY_FOR_STAND_UP, current: " + std::to_string(static_cast<int>(fall_stand_state_));
+          return true;
+        }
+        request_for_stand_up_ = true;
+        res.success = true;
+        res.message = "STAND_UP: READY → STAND_UP";
+        ROS_INFO("[%s] STAND_UP: READY → STAND_UP", name_.c_str());
+        break;
+      }
+      case kuavo_msgs::FallStandCommand::Request::RESET:
+      {
+        reset();
+        res.success = true;
+        res.message = "RESET: → FALL_DOWN";
+        ROS_INFO("[%s] RESET: → FALL_DOWN", name_.c_str());
+        break;
+      }
+      default:
+      {
+        res.success = false;
+        res.message = "Unknown command: " + std::to_string(req.command);
+        break;
+      }
     }
     return true;
   }
-
 
 } // namespace humanoid_controller

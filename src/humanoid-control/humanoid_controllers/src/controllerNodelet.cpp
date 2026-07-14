@@ -2,6 +2,7 @@
 #include "humanoid_controllers/humanoidController.h"
 #include "humanoid_controllers/humanoidWheelController.h"
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
+#include <clocale>
 #include <thread>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
@@ -16,6 +17,7 @@ class HumanoidControllerNodelet : public nodelet::Nodelet
 public:
     virtual void onInit()
     {
+        std::setlocale(LC_ALL, "en_US.UTF-8");  // 修复 log4cxx ROS_INFO 中文乱码
         NODELET_INFO("Initializing HumanoidControllerNodelet nodelet...");
         nh = getNodeHandle();
         ros::param::set("/nodelet_manager/controller_state", 0);
