@@ -218,6 +218,12 @@ CommandDataRL RlGaitReceiver::getCurrentCommand() const
   return currentCommand_;
 }
 
+geometry_msgs::Twist RlGaitReceiver::getSmoothedCmdVel() const
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  return smoothed_cmd_vel_;
+}
+
 
 
 void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)

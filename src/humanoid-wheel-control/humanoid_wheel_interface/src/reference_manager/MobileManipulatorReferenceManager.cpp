@@ -298,6 +298,8 @@ namespace mobile_manipulator {
 
     // 躯干相对底盘位姿指令初始化
     cmdTorsoPose_.setZero(6);
+    cmdTorsoVel_.setZero(4);
+    cmdTorsoDelta_.setZero(4);
 
     // 注册日志记录器
     ros_logger_ = new humanoid::TopicLogger(nodeHandle_);
@@ -576,6 +578,17 @@ namespace mobile_manipulator {
       loadData::loadPtreeValue(pt, focusZDelta_, prefix + "focus_z_barrier.delta", false);
       loadData::loadPtreeValue(pt, useFocusZ_, prefix + "focus_z_barrier.use_focus_z", false);
     }
+
+    // torso vel/delta workspace: hardcoded in header for this version
+    // (same style as legacy H12 joy limits; not loaded from task.info)
+    // vel integrates onto cmdTorsoPose_ with real ΔinitTime (scheme A), nom=ruckigDt_
+    std::cout << "  torsoVel integrate: schemeA ΔinitTime, nom ruckigDt_=" << ruckigDt_
+              << " (1/mpcDesiredFrequency); scales≈baseline gain×100Hz" << std::endl;
+    std::cout << "  torsoWs x:[" << torsoWsMinX_ << ", " << torsoWsMaxXBase_
+              << "] z_rel:[" << torsoWsMinZRel_ << ", " << torsoWsMaxZRel_
+              << "] yaw:[" << torsoWsMinYaw_ << ", " << torsoWsMaxYaw_
+              << "] pitch:[" << torsoWsMinPitch_ << ", " << torsoWsMaxPitch_
+              << "] z_coupled_x=" << torsoWsUseZCoupledX_ << " (hardcoded)" << std::endl;
     /*******************************************************************************/
   }
 
@@ -738,8 +751,41 @@ namespace mobile_manipulator {
     };
     targetTorsoPoseSubscriber_ =
         nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_lb_torso_pose", 1, targetLbTorsoPoseCallback);
+
+    // Twist layout shared by vel/delta: [vx/dx, vz/dz, vyaw/dyaw, vpitch/dpitch]
+    auto mapTorsoTwist4D = [](const geometry_msgs::Twist& tw, Eigen::VectorXd& out4) {
+      out4[0] = tw.linear.x;
+      out4[1] = tw.linear.z;
+      out4[2] = tw.angular.z;  // yaw
+      out4[3] = tw.angular.y;  // pitch
+    };
+
+    // /cmd_torso_vel: continuous velocity. Soft-pause discards.
+    // Hold mirrors chassis /cmd_vel: sticky isCmdTorsoVelUpdated_ + 0.3s timeout zero.
+    auto targetTorsoVelCallback = [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr &msg)
+    {
+      if (!isEnableControl()) return;
+      std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      mapTorsoTwist4D(*msg, cmdTorsoVel_);
+      isCmdTorsoVelUpdated_ = true;
+      isCmdTorsoVelTimeUpdate_ = true;
+    };
+    targetTorsoVelSubscriber_ =
+        nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_torso_vel", 1, targetTorsoVelCallback);
+
+    // /cmd_torso_delta: oneshot relative displacement. Soft-pause discards.
+    auto targetTorsoDeltaCallback = [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr &msg)
+    {
+      if (!isEnableControl()) return;
+      std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+      mapTorsoTwist4D(*msg, cmdTorsoDelta_);
+      isCmdTorsoDeltaUpdated_ = true;
+    };
+    targetTorsoDeltaSubscriber_ =
+        nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_torso_delta", 1, targetTorsoDeltaCallback);
     
     targetTorsoPoseReachTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/lb_torso_pose_reach_time", 10, false);
+    torsoOpenLoopStatePub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/torso_open_loop_state", 10, false);
     
     auto targetPoseCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
@@ -1340,6 +1386,19 @@ namespace mobile_manipulator {
     std_msgs::Float32 cntTimeMsg;
     cntTimeMsg.data = std::chrono::duration<double, std::milli>(endTime - startTime).count();
     modifyReferenceTimePub_.publish(cntTimeMsg);
+
+    // 发布躯干开环状态供各输入源钳制参考
+    {
+      geometry_msgs::Twist stateMsg;
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+        stateMsg.linear.x = cmdTorsoPose_[0];   // x
+        stateMsg.linear.z = cmdTorsoPose_[2];   // z
+        stateMsg.angular.z = cmdTorsoPose_[3];  // yaw
+        stateMsg.angular.y = cmdTorsoPose_[4];  // pitch
+      }
+      torsoOpenLoopStatePub_.publish(stateMsg);
+    }
   }
 
   // 本体系的末端ruckig轨迹生成
@@ -4042,6 +4101,12 @@ namespace mobile_manipulator {
       rightArmJointTrigger_ = false;
     }
 
+    // vel/delta first: integrate onto cmdTorsoPose_ (final open-loop target).
+    // Absolute /cmd_lb_torso_pose in the same tick still wins (SDK/reset priority).
+    if (isTorsoOfflineTrajUpdate_ != true) {
+      applyTorsoVelDeltaCommands(initTime);
+    }
+
     if(isCmdTorsoPoseUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
       // resetTorsoPoseRuckig(initTime, initState, false);
@@ -4057,6 +4122,9 @@ namespace mobile_manipulator {
                        torsoTargetPose[2], 
                        torsoTargetPose[3], 
                        torsoTargetPose[4];
+
+      // absolute pose also goes through workspace clamp
+      torsoPose4Dof = clampTorsoWorkspace4D(torsoPose4Dof);
 
       calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, cmdTorsoPoseDesiredTime_);
 
@@ -4627,6 +4695,21 @@ namespace mobile_manipulator {
       isCmdTorsoPoseUpdated_ = false;
     }
 
+    // 躯干 vel/delta：冻结时清粘性速度与 oneshot，避免解除软暂停后残留积分
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      cmdTorsoVel_.setZero();
+      isCmdTorsoVelUpdated_ = false;
+      isCmdTorsoVelTimeUpdate_ = false;
+      lastCmdTorsoVelTime_ = 0.0;
+      hasTorsoVelIntegrateTime_ = false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+      cmdTorsoDelta_.setZero();
+      isCmdTorsoDeltaUpdated_ = false;
+    }
+
     // 双臂末端：保持为 frozen 世界系位姿
     {
       for (size_t armIdx = 0; armIdx < info_.eeFrames.size(); ++armIdx) {
@@ -4751,6 +4834,164 @@ namespace mobile_manipulator {
       eeTargetTrajectories_[armIdx].stateTrajectory = eeStateTraj;
       eeTargetTrajectories_[armIdx].inputTrajectory = eeInputTraj;
     }
+  }
+
+
+  double MobileManipulatorReferenceManager::getTorsoWorkspaceMaxX(double zAbs) const
+  {
+    if (!torsoWsUseZCoupledX_) {
+      return torsoWsMaxXBase_;
+    }
+    // z-coupled envelope migrated from G12 joy getTorsoMaxX (on z increment vs initial)
+    const double z_increment = zAbs - initialTorsoPos_[2];
+    if (z_increment <= 0.0) {
+      return 0.05;
+    } else if (z_increment <= 0.3) {
+      return 0.05 + (z_increment / 0.3) * 0.1;  // 0.05 -> 0.15
+    } else if (z_increment <= 0.5) {
+      return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1;  // 0.15 -> 0.25
+    }
+    return torsoWsMaxXBase_;
+  }
+
+  vector_t MobileManipulatorReferenceManager::clampTorsoWorkspace4D(const vector_t& pose4d) const
+  {
+    // pose4d: [x, z, yaw, pitch]
+    vector_t out = pose4d;
+    if (out.size() < 4) {
+      return out;
+    }
+
+    const double zMin = initialTorsoPos_[2] + torsoWsMinZRel_;
+    const double zMax = initialTorsoPos_[2] + torsoWsMaxZRel_;
+    out[1] = std::max(zMin, std::min(out[1], zMax));
+
+    const double xMax = getTorsoWorkspaceMaxX(out[1]);
+    out[0] = std::max(torsoWsMinX_, std::min(out[0], xMax));
+
+    out[2] = std::max(torsoWsMinYaw_, std::min(out[2], torsoWsMaxYaw_));
+    out[3] = std::max(torsoWsMinPitch_, std::min(out[3], torsoWsMaxPitch_));
+    return out;
+  }
+
+  void MobileManipulatorReferenceManager::applyTorsoVelDeltaCommands(scalar_t initTime)
+  {
+    // Velocity hold aligned with setChassisControl(/cmd_vel):
+    //   - isCmdTorsoVelUpdated_ sticky (not cleared while non-zero)
+    //   - isCmdTorsoVelTimeUpdate_ stamps lastCmdTorsoVelTime_
+    //   - >0.3s without new msg → cmdTorsoVel_ = 0
+    //   - explicit/timeout zero → clear sticky flag (stop integrating)
+    // Oneshot delta: consume once.
+    bool integrateVel = false;
+    bool hasDelta = false;
+    vector_t vel4 = vector_t::Zero(4);
+    vector_t delta4 = vector_t::Zero(4);
+
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      if (isCmdTorsoVelTimeUpdate_) {
+        lastCmdTorsoVelTime_ = initTime;
+        isCmdTorsoVelTimeUpdate_ = false;
+      }
+      if ((initTime - lastCmdTorsoVelTime_) > kTorsoVelTimeout_) {
+        cmdTorsoVel_.setZero();
+      }
+
+      if (isCmdTorsoVelUpdated_) {
+        vel4 = cmdTorsoVel_;
+        const double nrm = vel4.head(std::min(4, static_cast<int>(vel4.size()))).norm();
+        if (nrm < 1e-9) {
+          // zero (publisher zero or timeout): exit velocity hold
+          isCmdTorsoVelUpdated_ = false;
+          cmdTorsoVel_.setZero();
+        } else {
+          integrateVel = true;
+          // sticky: keep isCmdTorsoVelUpdated_
+        }
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+      if (isCmdTorsoDeltaUpdated_) {
+        delta4 = cmdTorsoDelta_;
+        isCmdTorsoDeltaUpdated_ = false;
+        hasDelta = true;
+      }
+    }
+
+    if (!integrateVel && !hasDelta) {
+      // Next non-zero burst starts a fresh Δt base (avoid huge first step after idle).
+      hasTorsoVelIntegrateTime_ = false;
+      return;
+    }
+
+    // Scheme A: integrate with real RM period on MPC time axis (sim + real).
+    // Nominal step ≈ ruckigDt_ (1/mpcDesiredFrequency); clamp outliers.
+    double dt_nom = ruckigDt_;
+    if (dt_nom <= 0.0 || dt_nom > 0.2) {
+      dt_nom = 0.01;
+    }
+    double dt = dt_nom;
+    if (hasTorsoVelIntegrateTime_) {
+      dt = initTime - lastTorsoVelIntegrateTime_;
+    }
+    const double dt_min = 0.5 * dt_nom;
+    const double dt_max = 3.0 * dt_nom;
+    if (dt < dt_min) {
+      dt = dt_min;
+    } else if (dt > dt_max) {
+      dt = dt_max;
+    }
+    lastTorsoVelIntegrateTime_ = initTime;
+    hasTorsoVelIntegrateTime_ = true;
+
+    // Read current open-loop final target (same store absolute teleop writes into)
+    vector_t cmd6 = vector_t::Zero(6);
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+      cmd6 = cmdTorsoPose_;
+    }
+    vector_t cmd4 = vector_t::Zero(4);
+    cmd4 << cmd6[0], cmd6[2], cmd6[3], cmd6[4];  // x, z, yaw, pitch
+
+    // velocity → Δp = sat(v) * dt  on final target (not on Ruckig step state)
+    if (integrateVel) {
+      const int n = std::min(4, static_cast<int>(vel4.size()));
+      for (int i = 0; i < n; ++i) {
+        double v = vel4[i];
+        if (i < torsoPose_move_spd_.size()) {
+          const double vmax = std::abs(torsoPose_move_spd_[i]);
+          if (vmax > 0.0) {
+            v = std::max(-vmax, std::min(v, vmax));
+          }
+        }
+        cmd4[i] += v * dt;
+      }
+    }
+    // oneshot relative displacement on the same final target
+    if (hasDelta) {
+      const int n = std::min(4, static_cast<int>(delta4.size()));
+      for (int i = 0; i < n; ++i) {
+        cmd4[i] += delta4[i];
+      }
+    }
+
+    cmd4 = clampTorsoWorkspace4D(cmd4);
+
+    // Write back sole open-loop final target; Ruckig tracks from prevTarget → cmd4
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+      cmdTorsoPose_[0] = cmd4[0];
+      cmdTorsoPose_[1] = initialTorsoPos_[1];
+      cmdTorsoPose_[2] = cmd4[1];
+      cmdTorsoPose_[3] = cmd4[2];
+      cmdTorsoPose_[4] = cmd4[3];
+      cmdTorsoPose_[5] = 0.0;
+      // Do not set isCmdTorsoPoseUpdated_: absolute path in same tick can still override.
+    }
+
+    calcRuckigTrajWithTorsoPose(initTime, cmd4, 0.0);
+    torsoModeFlag_ = true;
   }
 
 }  // namespace mobile_manipulator

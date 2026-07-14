@@ -103,6 +103,7 @@ public:
 
   // Get current command data
   CommandDataRL getCurrentCommand() const;
+  geometry_msgs::Twist getSmoothedCmdVel() const;
   
   // Load in-place stepping configuration from config file
   void loadInPlaceStepConfig(const std::string& config_file, bool verbose = false);

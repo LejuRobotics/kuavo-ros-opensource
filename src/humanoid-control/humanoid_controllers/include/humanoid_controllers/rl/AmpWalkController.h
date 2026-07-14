@@ -124,6 +124,13 @@ namespace humanoid_controller
     Eigen::Matrix<double, 4, 1> velocityLimits_{Eigen::Matrix<double, 4, 1>::Zero()};
     double cmdVelLineXLow_{0.0};  ///< amp_hand_controller 手柄十字键下档 X 速度限制
     double cmdVelLineXUp_{0.0};   ///< amp_hand_controller 手柄十字键高档 X 速度限制
+    double cmdVelLineXNeg_{0.45}; ///< amp_hand_controller cmd_x 负向速度限制 (m/s)
+    double squatHeightMin_{-0.3};  ///< amp_hand_controller 手柄 posture 模式最大下蹲深度 (m)
+    double squatHeightMax_{0.01};   ///< amp_hand_controller 手柄 posture 模式最大站起高度 (m)
+    double ampVRcmdvelLinearXLimit_{0.60};   ///< amp_hand VR 前进最大速度 (m/s)
+    double ampVRcmdvelLinearYLimit_{0.0};    ///< amp_hand VR 侧向最大速度 (m/s)
+    double ampVRcmdvelLinearZLimit_{0.0};    ///< amp_hand VR 高度通道最大速度 (m/s)
+    double ampVRcmdvelAngularYAWLimit_{0.9}; ///< amp_hand VR yaw 最大角速度 (rad/s)
     double cmdVelLineXNegScale_{1.0};  ///< X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
     double cmdVelLineXNegScaleExternalArm_{1.0};  ///< amp_hand 外部手臂控制时 X 负向缩放系数
 
@@ -220,17 +227,18 @@ namespace humanoid_controller
     static constexpr double kLateralElbowFixScale_{0.5};
     bool enable_elbow_scale_{false};
     bool enable_back_arm_enhance_{false};
-    static constexpr double kBackArmEnhanceScale_{0.3};
+    static constexpr double kBackArmEnhanceScale_{0.25};
     static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};
     bool enable_roll_compensation_{false};
     bool enable_off_cmdy_by_cmdx_{false};
     static constexpr double kOffCmdyByCmdXThreshold_{0.3};   ///< cmdx 超过该值时关闭 cmdy
     static constexpr double kOffCmdxByCmdYThreshold_{0.41};  ///< abs(cmdy) 超过该值时关闭 cmdx
+    bool enable_off_cmdy_by_cmdangz_{false};
+    static constexpr double kOffCmdyByCmdAngZThreshold_{0.3};   ///< abs(cmdangz) 超过该值时关闭 cmdy
+    static constexpr double kOffCmdAngZByCmdYThreshold_{0.3};   ///< abs(cmdy) 超过该值时关闭 cmdangz
     bool tiny_cmdx_clip_enabled_{false};
     double tiny_cmdx_clip_pos_min_{0.0};  ///< 正向截断区间最小值
     double tiny_cmdx_clip_pos_max_{0.0};  ///< 正向截断区间最大值，区间内值截断为该值
-    double tiny_cmdx_clip_neg_max_{0.0};  ///< 负向截断区间最大值
-    double tiny_cmdx_clip_neg_min_{0.0};  ///< 负向截断区间最小值，区间内值截断为该值
     bool tiny_cmdy_clip_enabled_{false};
     double tiny_cmdy_clip_min_{0.0};  ///< abs(cmd_y) 截断区间最小值
     double tiny_cmdy_clip_max_{0.0};  ///< abs(cmd_y) 截断区间最大值，区间内值截断为该值
@@ -250,8 +258,14 @@ namespace humanoid_controller
     // 站立模式下下蹲后起身的高度命令平滑（仅 amp_hand_controller）
     bool stance_height_stand_up_smoothing_enabled_{true};
     double max_stance_height_stand_up_change_{0.004}; ///< 起身单步最大高度命令变化量 (m)
-    double max_stance_squat_depth_{0.21};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
+    double stance_height_smooth_start_{-0.1};         ///< 起身达到该高度前平滑，达到后直接跟随 (m)
+    double max_stance_squat_depth_{0.18};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
     double smoothed_stance_height_cmd_{0.0};          ///< 平滑后的下蹲高度命令
+
+    // 下蹲守备（控制器端）：深蹲且转向较小时拦截姿态模式退出请求
+    bool squat_posture_defense_enabled_{false};
+    double squat_posture_defense_height_threshold_{-0.05};  ///< 平滑后高度命令低于该值视为深蹲 (m)
+    double squat_posture_defense_abs_cmdangz_limit_{0.8};   ///< abs(cmdangz) 低于该值时与深蹲条件共同触发守备
 
     bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
                                kuavo_msgs::changeArmCtrlMode::Response &res);
@@ -282,6 +296,7 @@ namespace humanoid_controller
     double applyTinyCmdYClip(double cmdy) const;
     double applyTinyCmdAngzClip(double angz) const;
     void applyStanceHeightStandUpSmoothing(CommandDataRL& cmd);
+    bool isSquatPostureDefenseActive() const;
 
   };
 }

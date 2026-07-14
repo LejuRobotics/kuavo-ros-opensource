@@ -25,7 +25,6 @@ from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierT
 from trajectory_msgs.msg import JointTrajectory
 from concurrent.futures import ThreadPoolExecutor
 import threading
-import numpy as np
 from std_msgs.msg import Bool, Empty
 
 rospack = rospkg.RosPack()
@@ -450,25 +449,22 @@ class H12PROControllerNode:
         self.plan_arm_is_finished = True
         self.should_pub_arm_joint_state = JointState()
         self.should_pub_hand_position = robotHandPosition()
-        self.should_pub_head_motion_data = robotHeadMotionData()
         self.start_way = rospy.get_param("start_way", "auto")
         self.real_robot = rospy.get_param("real_robot", False)
         self.only_half_up_body = rospy.get_param("only_half_up_body", False)
         #zsh
         # 头部控制模式
-       # 头部控制参数 (重新调整)
+        # 头部控制参数：摇杆 → 瞬时角速度（deg/s），不再在遥控器侧积分。
+        # 开环绝对位姿由接收侧（ControlDataManager / humanoidController）积分，
+        # 与躯干 vel/delta 重构（f97e109da0a）一致：速度语义不应存开环位姿。
         self.head_control_mode = False
-        self.current_head_yaw = 0.0     # 当前偏航角度(度)
-        self.current_head_pitch = 0.0   # 当前俯仰角度(度)
-        
-        # 控制参数 (大幅调整灵敏度)
-        self.yaw_sensitivity = 0.8      # 偏航灵敏度 (度/单位输入)
-        self.pitch_sensitivity = 0.2    # 俯仰灵敏度 (度/单位输入)
-        self.dead_zone = 100           # 死区阈值
-        
-        # 角度限制 (与消息定义一致)
-        self.max_yaw = 30.0            # ±30度
-        self.max_pitch = 23.0          # ±25度
+        # 满量程角速度（deg/s），rosparam 可调
+        self.head_vel_scale_yaw = rospy.get_param("~head_vel_scale_yaw", 60.0)
+        self.head_vel_scale_pitch = rospy.get_param("~head_vel_scale_pitch", 30.0)
+        # 摇杆死区
+        self.head_stick_deadzone = 0.1
+        # True 表示上一帧发过非零 vel；摇杆回中时发一次零清接收侧粘性
+        self._head_vel_latched = False
         #zsh
 
         self.is_navigation_mode = False # 导航状态变量
@@ -531,13 +527,16 @@ class H12PROControllerNode:
         )
         
         self.control_hand_pub = rospy.Publisher(
-            '/control_robot_hand_position', 
-            robotHandPosition, 
-            queue_size=1, 
+            '/control_robot_hand_position',
+            robotHandPosition,
+            queue_size=1,
             tcp_nodelay=True
         )
-        self.control_head_pub = rospy.Publisher(
-            '/robot_head_motion_data',
+        # 头部速度 / 相对位移接口（与躯干 /cmd_torso_vel、/cmd_torso_delta 对齐）
+        # joint_data = [yaw, pitch]，vel 单位 deg/s，delta 单位 deg（oneshot）
+        # 接收侧做开环积分 + 限位；本节点不再维护 current_head_yaw/pitch
+        self.cmd_head_vel_pub = rospy.Publisher(
+            '/cmd_head_vel',
             robotHeadMotionData,
             queue_size=1,
             tcp_nodelay=True
@@ -725,60 +724,36 @@ class H12PROControllerNode:
         return (clamped - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE / 2)
     #zsh
     def _handle_head_control(self, msg: h12proRemoteControllerChannel):
-        if not self.head_control_mode:
-            return
         try:
             yaw_input = self._normalize_channel(msg.channels[0])  # 左右
             pitch_input = self._normalize_channel(msg.channels[1]) # 上下
 
-            if abs(yaw_input) < 0.1:
+            if abs(yaw_input) < self.head_stick_deadzone:
                 yaw_input = 0.0
-            if abs(pitch_input) < 0.1:
+            if abs(pitch_input) < self.head_stick_deadzone:
                 pitch_input = 0.0
 
-            yaw_delta = yaw_input * self.yaw_sensitivity
-            pitch_delta = pitch_input * self.pitch_sensitivity
+            # 摇杆 → 瞬时角速度（deg/s）；开环积分在接收侧
+            yaw_vel = yaw_input * self.head_vel_scale_yaw
+            pitch_vel = pitch_input * self.head_vel_scale_pitch
 
-            # ========================
-            # ✅ Pitch 限位 + 恢复逻辑
-            # ========================
-            # ✅ Pitch 限位 + 恢复逻辑
-# 如果达到上限，允许向下恢复；达到下限，允许向上恢复
-            # 提前限位值（提前0.5度保护）
-            PITCH_LIMIT_MARGIN = 10.0
-
-            # 软件提前限位逻辑
-            
-            if pitch_delta > 0 and self.current_head_pitch >= self.max_pitch - PITCH_LIMIT_MARGIN:
-                pitch_delta = 0.0  # 禁止继续向下
-
-            # ✅ 允许反向恢复
-            self.current_head_pitch += pitch_delta
-            self.current_head_pitch = np.clip(self.current_head_pitch, -self.max_pitch, self.max_pitch)
-
-
-
-            # ✅ 允许反向恢复（注意 pitch_delta 不为 0 的情况）
-            self.current_head_pitch += pitch_delta
-            self.current_head_pitch = np.clip(self.current_head_pitch, -self.max_pitch, self.max_pitch)
-
-            # ✅ Yaw 使用你原来的逻辑
-            if not ((yaw_delta > 0 and self.current_head_yaw >= self.max_yaw - 0.5) or
-                    (yaw_delta < 0 and self.current_head_yaw <= -self.max_yaw + 0.5)):
-                self.current_head_yaw += yaw_delta
-
-            # ✅ 限位提示
-            if self.current_head_pitch >= self.max_pitch:
-                rospy.logwarn_throttle(1.0, f"[HeadControl] Pitch 达到上限: {self.current_head_pitch:.2f}°")
-            elif self.current_head_pitch <= -self.max_pitch:
-                rospy.logwarn_throttle(1.0, f"[HeadControl] Pitch 达到下限: {self.current_head_pitch:.2f}°")
-
-            head_msg = robotHeadMotionData()
-            head_msg.joint_data = [self.current_head_yaw, self.current_head_pitch]
-            self.control_head_pub.publish(head_msg)
+            if abs(yaw_vel) < 1e-6 and abs(pitch_vel) < 1e-6:
+                # 摇杆回中：发一次零清接收侧粘性速度（之后不再发）
+                if self._head_vel_latched:
+                    self._publish_head_vel(0.0, 0.0)
+                    self._head_vel_latched = False
+                return
+            self._head_vel_latched = True
+            self._publish_head_vel(yaw_vel, pitch_vel)
 
         except Exception as e:
             rospy.logerr(f"Head control error: {str(e)}")
+
+    def _publish_head_vel(self, yaw_vel: float, pitch_vel: float) -> None:
+        """发布瞬时头部角速度（deg/s）到 /cmd_head_vel。"""
+        vel_msg = robotHeadMotionData()
+        vel_msg.joint_data = [yaw_vel, pitch_vel]
+        self.cmd_head_vel_pub.publish(vel_msg)
 
 
 
@@ -896,22 +871,22 @@ class H12PROControllerNode:
             if trigger == "toggle_head_control":
                 if current_state == "stance":
                     self.head_control_mode = not self.head_control_mode
-                    # 重置记忆值
-                    self.last_yaw_raw = msg.channels[0]
-                    self.last_pitch_raw = msg.channels[1]
-                     # 切换时发布中立位置
-                     #zsh
-                    if self.head_control_mode:
-                        neutral_msg = robotHeadMotionData()
-                        neutral_msg.joint_data = self.head_neutral_position
-                
-                        self.control_head_pub.publish(neutral_msg)
+                    #zsh
+                    # 退出头部控制时发一次零速清接收侧粘性（进入时无需发零）
+                    if not self.head_control_mode:
+                        self._publish_head_vel(0.0, 0.0)
+                        self._head_vel_latched = False
                     #zsh
                     rospy.loginfo(f"[HeadControl] Head control mode {'enabled' if self.head_control_mode else 'disabled'}")
                 else:
                     if self.head_control_mode:
                         rospy.logwarn("[HeadControl] Exiting stance state. Head control mode disabled.")
                         self.head_control_mode = False
+                        #zsh
+                        # 离开 stance 时发零速清接收侧粘性
+                        self._publish_head_vel(0.0, 0.0)
+                        self._head_vel_latched = False
+                        #zsh
                 return
 
             
@@ -978,6 +953,10 @@ class H12PROControllerNode:
                     if self.robot_state_machine.state != "stance" and self.head_control_mode:
                         rospy.logwarn("[HeadControl] Current state is not 'stance'. Disabling head control mode.")
                         self.head_control_mode = False
+                        #zsh
+                        # 非 stance 自动关闭时发零速清接收侧粘性
+                        self._publish_head_vel(0.0, 0.0)
+                        self._head_vel_latched = False
                         #zsh
                     
                     # 如果是有效状态,更新消息
@@ -1050,27 +1029,6 @@ class H12PROControllerNode:
                 stick_msg.channels = tuple(stick_channels)
                 self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
             self.h12_to_joy_node.process_channels()
-    #zsh
-    def _map_channel_value(self, channel_value: int) -> float:
-        """将原始通道值映射到归一化范围[-1.0, 1.0]"""
-        # 确保值在有效范围内
-        clamped = max(min(channel_value, Config.H12_AXIS_RANGE_MAX), Config.H12_AXIS_RANGE_MIN)
-        
-        # 映射到[-1.0, 1.0]
-        normalized = (clamped - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE / 2)
-        return max(min(normalized, 1.0), -1.0)
-#zsh
-    def _process_head_motion(self, msg: h12proRemoteControllerChannel):
-        yaw_channel = msg.channels[0]  # 右摇杆左右，通道1
-        pitch_channel = msg.channels[1]  # 右摇杆上下，通道2
-        
-        yaw_offset = (yaw_channel - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE // 2) * 30  # 偏移角度范围±30度
-        pitch_offset = (pitch_channel - Config.H12_AXIS_MID_VALUE) / (Config.H12_AXIS_RANGE // 2) * 20  # 偏移角度范围±20度
-
-        # 构造并发布消息
-        msg = robotHeadMotionData()
-        msg.joint_data = [pitch_offset, yaw_offset]  # pitch在前，yaw在后（假设顺序是这样）
-        self.control_head_pub.publish(msg)
 #zsh
     def _handle_button(self, key: str, channel: int) -> Optional[str]:
         """Handle button press logic."""

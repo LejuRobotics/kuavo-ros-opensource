@@ -353,6 +353,14 @@ namespace humanoid_controller
 
     void swingArmPlanner(double st, double current_time, double stepDuration, Eigen::VectorXd &desire_arm_q, Eigen::VectorXd &desire_arm_v);
     void headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    // 头部速度 / 相对位移接口（与躯干 /cmd_torso_vel、/cmd_torso_delta 对齐）
+    // 开环绝对位姿只在 desire_head_pos_（rad），本类为唯一积分终点。
+    // biped 无 soft-pause，无 enable guard。
+    void headVelCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void headDeltaCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void applyHeadVelDeltaCommands();
+    static vector_t clampHead2D(const vector_t& pose2d,
+                                const std::vector<std::pair<double, double>>& limits_deg);
     void waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg);
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg);
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr &msg);
@@ -541,6 +549,8 @@ namespace humanoid_controller
     ros::Subscriber observation_sub_;
     ros::Subscriber gait_scheduler_sub_;
     ros::Subscriber head_sub_;
+    ros::Subscriber head_vel_sub_;
+    ros::Subscriber head_delta_sub_;
     ros::Subscriber waist_sub_;
     ros::Subscriber head_array_sub_;
     ros::Subscriber arm_joint_traj_sub_;
@@ -637,6 +647,17 @@ namespace humanoid_controller
     SensorData sensor_data_waist_;
     Eigen::Quaterniond robot_quat_state_update_;
     vector_t desire_head_pos_ = vector_t::Zero(2);
+    // 头部 vel/delta 缓冲（rad/s, rad）；desire_head_pos_ 为唯一开环终点
+    // vel: sticky + 0.3s 超时清零；delta: oneshot 用后即清
+    static constexpr double kHeadVelTimeout_{0.3};
+    vector_t cmd_head_vel_ = vector_t::Zero(2);    // [yaw, pitch] rad/s
+    vector_t cmd_head_delta_ = vector_t::Zero(2);  // [d_yaw, d_pitch] rad oneshot
+    bool is_cmd_head_vel_updated_{false};          // sticky
+    bool is_cmd_head_vel_time_update_{false};      // 刷新 last_cmd_head_vel_time_
+    bool is_cmd_head_delta_updated_{false};        // oneshot
+    double last_cmd_head_vel_time_{0.0};
+    double last_head_vel_integrate_time_{0.0};
+    bool has_head_vel_integrate_time_{false};
     vector_t desire_waist_pos_ = vector_t::Zero(1);  // 腰部目标位置
     vector_t desire_arm_q_prev_;
     vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;

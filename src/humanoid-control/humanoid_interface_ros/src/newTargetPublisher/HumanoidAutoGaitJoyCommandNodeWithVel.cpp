@@ -329,8 +329,10 @@ namespace ocs2
         } catch (const std::exception &e) {
           ROS_WARN_STREAM("cmdvelLinearYLimit not found, using default: " << c_relative_base_limit_[1]);
         }
-        loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", squatHeightMin_);
-        loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", squatHeightMax_);
+        loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", ref_squat_height_min_);
+        loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", ref_squat_height_max_);
+        squatHeightMin_ = ref_squat_height_min_;
+        squatHeightMax_ = ref_squat_height_max_;
         try {
           loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", c_relative_base_limit_[2]);
         } catch (const std::exception &e) {
@@ -444,6 +446,8 @@ namespace ocs2
           {
             // MPC控制器：恢复MPC默认速度限制
             c_relative_base_limit_ = mpc_default_velocity_limits_;
+            squatHeightMin_ = ref_squat_height_min_;
+            squatHeightMax_ = ref_squat_height_max_;
             ROS_INFO("[JoyControl] Restored MPC default velocity limits: [%.2f, %.2f, %.2f, %.2f]",
                      c_relative_base_limit_[0], c_relative_base_limit_[1], 
                      c_relative_base_limit_[2], c_relative_base_limit_[3]);
@@ -759,6 +763,8 @@ namespace ocs2
         amp_hand_cmd_vel_line_x_default_ = velocity_limits[0];
         loadAmpHandCmdVelLineXLimitParams();
         applyAmpHandCmdVelLineXLimit();
+        loadAmpHandSquatHeightParams();
+        applyAmpHandSquatHeightLimits();
 
         // 检查最终生效值是否有变化，避免十字键档位被周期刷新覆盖后重复打印
         bool changed = (std::abs(old_limits[0] - c_relative_base_limit_[0]) > 1e-6) ||
@@ -784,6 +790,7 @@ namespace ocs2
     {
       double low_limit = amp_hand_cmd_vel_line_x_low_;
       double up_limit = amp_hand_cmd_vel_line_x_up_;
+      double neg_limit = amp_hand_cmd_vel_line_x_neg_;
       if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXlow", low_limit) && low_limit > 0.0)
       {
         amp_hand_cmd_vel_line_x_low_ = low_limit;
@@ -791,6 +798,10 @@ namespace ocs2
       if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXup", up_limit) && up_limit > 0.0)
       {
         amp_hand_cmd_vel_line_x_up_ = up_limit;
+      }
+      if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXNeg", neg_limit) && neg_limit > 0.0)
+      {
+        amp_hand_cmd_vel_line_x_neg_ = neg_limit;
       }
     }
 
@@ -822,6 +833,32 @@ namespace ocs2
       {
         c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_default_;
       }
+    }
+
+    void loadAmpHandSquatHeightParams()
+    {
+      double squat_min = amp_hand_squat_height_min_;
+      double squat_max = amp_hand_squat_height_max_;
+      if (nodeHandle_.getParam("/amp_hand_controller/squatHeightMin", squat_min))
+      {
+        amp_hand_squat_height_min_ = squat_min;
+      }
+      if (nodeHandle_.getParam("/amp_hand_controller/squatHeightMax", squat_max))
+      {
+        amp_hand_squat_height_max_ = squat_max;
+      }
+    }
+
+    void applyAmpHandSquatHeightLimits()
+    {
+      if (isRoban17AmpHandControllerActive())
+      {
+        squatHeightMin_ = amp_hand_squat_height_min_;
+        squatHeightMax_ = amp_hand_squat_height_max_;
+        return;
+      }
+      squatHeightMin_ = ref_squat_height_min_;
+      squatHeightMax_ = ref_squat_height_max_;
     }
 
     void handleAmpHandCmdVelLineXLimitDpad(const sensor_msgs::Joy::ConstPtr &joy_msg)
@@ -1153,7 +1190,10 @@ namespace ocs2
       const double cmd_z = (mapped < 0) ? mapped * std::fabs(squatHeightMin_) : 0.0;
 
       // AMP 停止判据:走/转指令速度均低于 0.1(不含下蹲通道 cmd_z),否则禁止下蹲
-      const double cmd_x = joystick_origin_axis_(0) * c_relative_base_limit_[0];
+      // posture 模式下左摇杆 X 用于弯腰而非行走，不参与走/转判据
+      const double cmd_x = posture_control_mode_
+                               ? 0.0
+                               : joystick_origin_axis_(0) * c_relative_base_limit_[0];
       const double cmd_y = joystick_origin_axis_(1) * c_relative_base_limit_[1];
       const double cmd_ang_z = joystick_origin_axis_(3) * c_relative_base_limit_[3];
       if (std::fabs(cmd_x) >= 0.1 || std::fabs(cmd_y) >= 0.1 || std::fabs(cmd_ang_z) >= 0.1)
@@ -1169,11 +1209,17 @@ namespace ocs2
 
       if (std::abs(a3) <= kPostureAxisThreshold)
       {
-        // 死区内：退出 posture 模式
-        if (posture_control_mode_)
+        // 死区内只尝试退出一次。若控制器因下蹲守备拒绝，避免每帧重试后
+        // 随着高度命令平滑回升而自动退出；摇杆重新离开死区后才允许再次尝试。
+        if (posture_control_mode_ && !posture_deadzone_exit_attempted_)
+        {
+          posture_deadzone_exit_attempted_ = true;
           setPostureControlMode(false);
+        }
         return;
       }
+
+      posture_deadzone_exit_attempted_ = false;
 
       // 死区外：进入 posture 模式（幂等守卫）
       if (!posture_control_mode_)
@@ -1504,6 +1550,10 @@ namespace ocs2
         walk_axis_filtered(i) = std::max(-1.0, std::min(1.0, walk_axis_filtered(i)));
       }
       joystick_origin_axis_ = walk_axis_filtered;
+      if (posture_control_mode_)
+      {
+        joystick_origin_axis_(0) = 0.0;
+      }
 
       // 方向键按下时覆盖对应分量并发布，与左摇杆叠加
       if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
@@ -1833,6 +1883,11 @@ namespace ocs2
       // joystick_origin_axis_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
       // amp_hand 下 axes[3] 控制 posture 模式开关与下蹲/站立控制量
       handleAmpHandPostureAxis(joy_msg);
+      if (posture_control_mode_)
+      {
+        // 下蹲模式下禁止左摇杆前后控制弯腰
+        joystick_origin_axis_(0) = 0.0;
+      }
       handleAmpHandCmdVelLineXLimitDpad(joy_msg);
       
       const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
@@ -2085,8 +2140,8 @@ namespace ocs2
     std::vector<bool> commandLineToTargetTrajectories(const vector_t &joystick_origin_axis, const SystemObservation &observation, geometry_msgs::Twist &cmdVel)
     {
       std::vector<bool> updated(6, false);
-      // posture 模式下从源头禁止 yaw：拷贝参数并清 axis(3)，
-      // 下游所有分支（posture 与 non-posture）都拿不到 yaw 输入
+      // posture 模式下从源头禁止 yaw 与左摇杆弯腰：拷贝参数并清 axis(0)/axis(3)，
+      // 下游所有分支（posture 与 non-posture）都拿不到对应输入
       vector_t axis_local = joystick_origin_axis;
       if (posture_control_mode_)
       {
@@ -2095,7 +2150,10 @@ namespace ocs2
         axis_local(3) = 0.0;
       }
       Eigen::VectorXd limit_vector_negative(4);
-      limit_vector_negative << c_relative_base_limit_[0], c_relative_base_limit_[1],
+      const double neg_x_limit = isRoban17AmpHandControllerActive()
+                                     ? amp_hand_cmd_vel_line_x_neg_
+                                     : c_relative_base_limit_[0];
+      limit_vector_negative << neg_x_limit, c_relative_base_limit_[1],
                                std::fabs(squatHeightMin_), c_relative_base_limit_[3];
       Eigen::VectorXd limit_vector_positive(4);
       limit_vector_positive << c_relative_base_limit_[0], c_relative_base_limit_[1],
@@ -2116,15 +2174,9 @@ namespace ocs2
       if (posture_control_mode_)
       {
         // 姿态控制模式:
-        // linear.x -> 弯腰
         // linear.y -> 预留/侧向姿态通道
         // linear.z -> base高度偏移(下蹲)
         // angular.z -> 入口处 axis_local(3)=0 已禁止旋转
-        if (std::abs(axis_local(0)) > DEAD_ZONE)
-        {
-          cmdVel.linear.x = commad_line_target_(0);
-          updated[0] = true;
-        }
         if (std::abs(axis_local(1)) > DEAD_ZONE)
         {
           cmdVel.linear.y = commad_line_target_(1);
@@ -2248,20 +2300,35 @@ namespace ocs2
 
     void setPostureControlMode(bool enable)
     {
-      posture_control_mode_ = enable;
-      joystick_origin_axis_.setZero();
-      vector_t zero_axis = vector_t::Zero(6);
-      checkAndPublishCommandLine(zero_axis);
-
       if (enable)
       {
+        if (!callAmpModeService(1))
+        {
+          ROS_WARN("[JoyControl] Failed to enter posture control mode");
+          return;
+        }
+        posture_control_mode_ = true;
+        posture_deadzone_exit_attempted_ = false;
+        joystick_origin_axis_.setZero();
+        vector_t zero_axis = vector_t::Zero(6);
+        checkAndPublishCommandLine(zero_axis);
         publishGaitTemplate("stance");
-        callAmpModeService(1);
-        ROS_WARN("[JoyControl] Posture control mode enabled: stick -> bend/squat");
+        ROS_WARN("[JoyControl] Posture control mode enabled: right stick -> squat");
       }
       else
       {
-        callAmpModeService(0);
+        // 先请求控制器切换模式，成功后再清本地状态，避免与控制器 amp_mode 不同步
+        if (!callAmpModeService(0))
+        {
+          ROS_WARN("[JoyControl] Controller rejected exit from posture mode "
+                   "(squat posture defense active), stay in posture mode");
+          return;
+        }
+        posture_control_mode_ = false;
+        posture_deadzone_exit_attempted_ = false;
+        joystick_origin_axis_.setZero();
+        vector_t zero_axis = vector_t::Zero(6);
+        checkAndPublishCommandLine(zero_axis);
         ROS_WARN("[JoyControl] Posture control mode disabled: restored walking mode");
       }
     }
@@ -2858,6 +2925,11 @@ namespace ocs2
     double amp_hand_cmd_vel_line_x_default_{0.4};
     double amp_hand_cmd_vel_line_x_low_{0.4};
     double amp_hand_cmd_vel_line_x_up_{0.4};
+    double amp_hand_cmd_vel_line_x_neg_{0.45};
+    double ref_squat_height_min_{0.0};
+    double ref_squat_height_max_{0.0};
+    double amp_hand_squat_height_min_{-0.3};
+    double amp_hand_squat_height_max_{0.01};
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";
@@ -2912,6 +2984,7 @@ namespace ocs2
     // 遥感/方向键轴输入开关（默认允许）
     bool axes_input_enabled_{true};
     bool posture_control_mode_{false};
+    bool posture_deadzone_exit_attempted_{false};
     // amp_hand 下 axes[3] 控制 posture 开关的阈值：
     //   [threshold, 1.0] / [-1.0, -threshold] 线性重映射到 [0, 1] / [-1, 0]
     static constexpr double kPostureAxisThreshold = 0.4;

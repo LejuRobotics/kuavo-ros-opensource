@@ -30,6 +30,9 @@ namespace ocs2 {
       joint_state_pub_ = nh_->advertise<sensor_msgs::JointState>(joint_state_topic_, 10);
       timer_ = nh_->createTimer(ros::Duration(1.0 / rate_), &HumanoidPlanArmTrajectory::timerCallback, this);
       stop_arm_traj_srv_ = nh_->advertiseService(interpolate_type_ + "/stop_plan_arm_trajectory", &HumanoidPlanArmTrajectory::stopPlanArmTrajectoryCallback, this);
+      // 软暂停由上游 Python arm_trajectory_bezier_process 编排：
+      //   Python 订阅 /enable_control_state → 停 run() 线程 + change_arm_ctrl_mode(1)
+      //   next action 的 planCallback 调 C++ reset() 全量重置，不需要额外 freeze 交互
     }
 
     void HumanoidPlanArmTrajectory::timerCallback(const ros::TimerEvent& event) {

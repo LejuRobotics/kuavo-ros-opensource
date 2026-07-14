@@ -18,6 +18,7 @@ use_virtual_arm_obs         true ; 是否在外部手臂控制器生效时使用
 lateral_elbow_fix           true ; 纯侧移时缩放对应侧肘关节 action
 enable_roll_compensation    true ; 是否启用行走/转弯时 projected_gravity 的 roll 观测补偿
 enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时关闭cmdy,且 abs(cmdy)大于0.41时关闭cmdx
+enable_off_cmdy_by_cmdangz  true ; 当 abs(cmdangz)大于0.3时关闭cmdy，且abs(cmdy)大于0.3时关闭cmdangz
 enable_elbow_scale          true ; 肘关节单独使用 0.18 actionscale，并限制最终关节角(加default后)<-0.2
 enable_back_arm_enhance     true ; cmd_x<-0.2 时 arm 摆动增强
 use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
@@ -52,8 +53,6 @@ commandData
         cmdVelAngularY      1   ;
         cmdVelAngularZ      1   ;
         cmdStance           1   ;
-        cmdVelLineXNegScale             0.85   ; cmd_x 普通负向系数
-        cmdVelLineXNegScaleExternalArm  0.95    ; cmd_x 外部手臂控制时候的负向系数
     }
 };预留完整的接口，当前只用到cmdVelLineX, cmdVelLineY, cmdVelAngularZ, cmdStance，最大长度是4
 
@@ -63,23 +62,38 @@ velocityLimits
     (0,0)  0.75      ; cmdVelLineX，默认速度限制
     (1,0)  0.45      ; cmdVelLineY
     (2,0)  0.0      ; cmdVelLineZ
-    (3,0)  0.95     ; cmdVelAngularZ
+    (3,0)  1.0     ; cmdVelAngularZ
 }
 cmdVelLineXlow 0.4 ; 手柄十字键按“下”键直接cmdVelLineX降为0.4
 cmdVelLineXup 0.95 ; 手柄十字键按“上”键，速度限制升一档，档位从低到高为cmdVelLineXlow、cmdVelLineX默认速度限制、cmdVelLineXup
 
+cmdVelLineXNeg  0.43 ; cmdVelLineX负向默认速度限制
+squatHeightMin -0.3 ; amp_hand 手柄 posture 模式最大下蹲深度 (m)
+squatHeightMax 0.03 ; amp_hand 手柄 posture 模式最大站起高度 (m)
+
+; ==================== 下蹲守备（控制器端）====================
+squatPostureDefense
+{
+    enabled           true    ; 深蹲且转向较小时拦截姿态模式退出请求（与遥控器端下蹲守备互补）
+    heightThreshold  -0.05   ; 平滑后高度命令低于该值视为深蹲(m)
+    absCmdAngzLimit     0.85   ; 右摇杆左右(转向 cmdangz)截断且平滑后，abs 低于该值时禁止退出
+}
+
+ampVRcmdvelLinearXLimit 0.60 ; amp_hand VR 前进最大速度 (m/s)
+ampVRcmdvelLinearYLimit 0.0 ; amp_hand VR 侧向最大速度 (m/s)
+ampVRcmdvelLinearZLimit 0.0 ; amp_hand VR 高度通道最大速度 (m/s)
+ampVRcmdvelAngularYAWLimit 0.9 ; amp_hand VR yaw 最大角速度 (rad/s)
+
 ; ==================== cmd微小速度命令截断 ====================
-；cmd.scale() → X负向缩放 → enable_off_cmdy_by_cmdx → TinyCmdClip(cmd_x) → TinyCmdClip(cmd_y) → TinyCmdClip(cmd_angz, 仅原地旋转) → velocity_commands
+；cmd.scale() → cmdVelLineXNeg限速 → enable_off_cmdy_by_cmdx → enable_off_cmdy_by_cmdangz → TinyCmdClip(cmd_x) → TinyCmdClip(cmd_y) → TinyCmdClip(cmd_angz, 仅原地旋转) → velocity_commands
 TinyCmdClip
 {
     (0,0)  0.1   ; cmd_x正向截断区间最小值
     (1,0)  0.45   ; cmd_x正向截断区间最大值，位于正向区间内的值都会被截断为该值
-    (2,0)  -0.3  ; cmd_x负向截断区间最大值
-    (3,0)  -0.45  ; cmd_x负向截断区间最小值，位于负向区间内的值都会被截断为该值
-    (4,0)  0.2    ; abs(cmd_y) 截断最小值
-    (5,0)  0.4   ; abs(cmd_y) 截断最大值，abs(cmd_y) 位于区间内的值都会被截断为该值
-    (6,0)  0.3    ; abs(cmd_angz) 截断最小值，仅当原地旋转有效
-    (7,0)  0.75   ; abs(cmd_angz) 截断最大值，abs(cmd_angz) 位于区间内的值都会被截断为该值
+    (2,0)  0.2    ; abs(cmd_y) 截断最小值
+    (3,0)  0.4   ; abs(cmd_y) 截断最大值，abs(cmd_y) 位于区间内的值都会被截断为该值
+    (4,0)  0.3    ; abs(cmd_angz) 截断最小值，仅当原地旋转有效
+    (5,0)  0.75   ; abs(cmd_angz) 截断最大值，abs(cmd_angz) 位于区间内的值都会被截断为该值
     
 }
 
@@ -113,12 +127,13 @@ continuousInPlaceStepVelocity
 velocitySmoothing
 {
     ; 覆盖 RlGaitReceiver 默认 max_velocity_change_；
-    maxVelocityChange     0.035   ; 单步正向 cmd_x 单步最大变化量 (m/s )
+    maxVelocityChange     0.025   ; 单步正向 cmd_x 单步最大变化量 (m/s )
     decelOnly             true    ; true: 正向 cmd_x 仅减速时平滑，加速不限制
-    maxVelocityChangeNegCmdX  0.017  ; 负向 cmd_x 单步最大变化量 (m/s)，后退，加减速
+    maxVelocityChangeNegCmdX  0.0035  ; 负向 cmd_x 单步最大变化量 (m/s)，后退，加减速
     maxVelocityChangeCmdY  0.025   ; 单步 cmd_y 最大变化量 (m/s)
     standUpHeightSmoothingEnabled  true   ; 站立模式下起身高度命令平滑
-    maxStandUpHeightChange  0.012  ; 起身单步最大高度命令变化量 (m)，下蹲仍即时跟随
+    maxStandUpHeightChange  0.01  ; 起身单步最大高度命令变化量 (m)，下蹲仍即时跟随
+    StandUpHeightSmoothStart -0.17 ; 起身达到该高度前平滑，高于该高度后直接跟随
 }
 
 ; ==================== YAW方向补偿配置 ====================

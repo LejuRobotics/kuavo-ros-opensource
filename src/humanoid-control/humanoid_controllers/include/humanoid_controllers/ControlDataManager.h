@@ -122,8 +122,9 @@ public:
     vector_t getLbWaistExternalControlState() const;
     void setLbWaistExternalControlState(const vector_t& joint_state);  // 设置轮臂关节初始值
     
-    // 头部外部控制状态 [yaw, pitch]
-    vector_t getHeadExternalControlState() const;
+    // 头部外部控制状态 [yaw, pitch]（rad）
+    // 非 const：读前先 applyHeadVelDeltaCommands 做开环积分
+    vector_t getHeadExternalControlState();
 
     // 带 disable 保护的关节轨迹读取 helper
     ArmJointTrajectory getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage) const;
@@ -232,13 +233,35 @@ private:
          std::pair<double, double>{-88.0, 88.0},  // yaw: ±80度
          std::pair<double, double>{-25.0, 25.0}   // pitch: ±25度
      };
-    
+
+    // 头部速度 / 相对位移接口（与躯干 /cmd_torso_vel、/cmd_torso_delta 对齐）
+    // 开环绝对位姿只在 head_external_control_state_（rad），本类为唯一积分终点。
+    // vel: joint_data=[yaw_vel, pitch_vel] deg/s，粘住 + 0.3s 超时清零；
+    // delta: joint_data=[d_yaw, d_pitch] deg，oneshot 用后即清。
+    static constexpr double kHeadVelTimeout_{0.3};  // vel 超时清零秒数
+    vector_t cmd_head_vel_;          // 2D: [yaw, pitch] rad/s
+    vector_t cmd_head_delta_;        // 2D oneshot: [d_yaw, d_pitch] rad
+    mutable std::mutex cmd_head_vel_mtx_;
+    mutable std::mutex cmd_head_delta_mtx_;
+    bool is_cmd_head_vel_updated_{false};      // sticky，对齐 isCmdTorsoVelUpdated_
+    bool is_cmd_head_vel_time_update_{false}; // 刷新 last_cmd_head_vel_time_
+    bool is_cmd_head_delta_updated_{false};   // oneshot，用后即清
+    double last_cmd_head_vel_time_{0.0};      // RM 时间轴（ros::Time::now().toSec()）
+    double last_head_vel_integrate_time_{0.0};
+    bool has_head_vel_integrate_time_{false};
+    void applyHeadVelDeltaCommands();        // 在 update 取数前积分
+    void headVelCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr& msg);
+    void headDeltaCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr& msg);
+    static vector_t clampHead2D(const vector_t& pose2d);
+
     // ========== ROS订阅者 ==========
     ros::Subscriber sensors_data_sub_;
     ros::Subscriber odom_sub_;
     ros::Subscriber cmd_vel_sub_;
     ros::Subscriber lb_waist_external_control_sub_;
     ros::Subscriber head_external_control_sub_;
+    ros::Subscriber head_vel_sub_;
+    ros::Subscriber head_delta_sub_;
     ros::Subscriber waist_yaw_link_pose_sub_;
     ros::Subscriber torso_pose_sub_;
     ros::Subscriber whole_torso_ctrl_sub_;

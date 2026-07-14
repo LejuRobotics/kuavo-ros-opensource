@@ -755,6 +755,10 @@ namespace humanoid_controller
             std::cout << "[controller] receive current gait name: " << current_gait_.name << " start time: " << current_gait_.startTime << std::endl; });
       sensorsDataSub_ = controllerNh_.subscribe<kuavo_msgs::sensorsData>("/sensors_data_raw", 10, &humanoidController::sensorsDataCallback, this);
       head_sub_ = controllerNh_.subscribe("/robot_head_motion_data", 10, &humanoidController::headCmdCallback, this);
+      // 头部速度 / 相对位移（开环积分在本类；绝对话题仍保留给 SDK/VR）
+      // biped 无 soft-pause，无 enable guard
+      head_vel_sub_ = controllerNh_.subscribe("/cmd_head_vel", 1, &humanoidController::headVelCallback, this);
+      head_delta_sub_ = controllerNh_.subscribe("/cmd_head_delta", 1, &humanoidController::headDeltaCallback, this);
       joy_sub_ = controllerNh_.subscribe<sensor_msgs::Joy>("/joy", 10, &humanoidController::joyCallback, this);
       targetTorquePub_ = controllerNh_.advertise<std_msgs::Float32MultiArray>("/targetTorque", 10);
       stop_pub = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
@@ -1295,11 +1299,11 @@ namespace humanoid_controller
   {
       if (msg->joint_data.size() ==2)
       {
-          if (msg->joint_data[0] < head_joint_limits_[0].first || msg->joint_data[0] > head_joint_limits_[0].second 
+          if (msg->joint_data[0] < head_joint_limits_[0].first || msg->joint_data[0] > head_joint_limits_[0].second
             || msg->joint_data[1] < head_joint_limits_[1].first || msg->joint_data[1] > head_joint_limits_[1].second)
           {
-              // std::cout << "\033[1;31m[headCmdCallback] Invalid robot head motion data. Head joints must be in the range [" 
-              //   << head_joint_limits_[0].first << ", " << head_joint_limits_[0].second << "] and [" 
+              // std::cout << "\033[1;31m[headCmdCallback] Invalid robot head motion data. Head joints must be in the range ["
+              //   << head_joint_limits_[0].first << ", " << head_joint_limits_[0].second << "] and ["
               //   << head_joint_limits_[1].first << ", " << head_joint_limits_[1].second << "].\033[0m" << std::endl;
               return;
           }
@@ -1313,6 +1317,142 @@ namespace humanoid_controller
           ROS_WARN("Invalid robot head motion data. Expected 2 elements, but received %lu elements.", msg->joint_data.size());
       }
   }
+
+  void humanoidController::headVelCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg)
+  {
+      // biped 无 soft-pause。Hold mirrors torso /cmd_torso_vel: sticky + 0.3s timeout zero.
+      if (msg->joint_data.size() != 2) {
+          ROS_WARN_THROTTLE(1.0, "[humanoidController] Invalid /cmd_head_vel size: %lu (expected 2)",
+                            msg->joint_data.size());
+          return;
+      }
+      head_mtx.lock();
+      // joint_data = [yaw, pitch] deg/s → rad/s
+      cmd_head_vel_[0] = msg->joint_data[0] * M_PI / 180.0;
+      cmd_head_vel_[1] = msg->joint_data[1] * M_PI / 180.0;
+      is_cmd_head_vel_updated_ = true;
+      is_cmd_head_vel_time_update_ = true;
+      head_mtx.unlock();
+  }
+
+  void humanoidController::headDeltaCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg)
+  {
+      // biped 无 soft-pause。Oneshot relative displacement.
+      if (msg->joint_data.size() != 2) {
+          ROS_WARN_THROTTLE(1.0, "[humanoidController] Invalid /cmd_head_delta size: %lu (expected 2)",
+                            msg->joint_data.size());
+          return;
+      }
+      head_mtx.lock();
+      // joint_data = [d_yaw, d_pitch] deg → rad
+      cmd_head_delta_[0] = msg->joint_data[0] * M_PI / 180.0;
+      cmd_head_delta_[1] = msg->joint_data[1] * M_PI / 180.0;
+      is_cmd_head_delta_updated_ = true;
+      head_mtx.unlock();
+  }
+
+  vector_t humanoidController::clampHead2D(const vector_t& pose2d,
+                                           const std::vector<std::pair<double, double>>& limits_deg)
+  {
+      vector_t out = pose2d;
+      if (out.size() < 2) {
+          out = vector_t::Zero(2);
+      }
+      // limits_deg 是度，内部状态是 rad
+      const double yaw_min = limits_deg[0].first * M_PI / 180.0;
+      const double yaw_max = limits_deg[0].second * M_PI / 180.0;
+      const double pitch_min = limits_deg[1].first * M_PI / 180.0;
+      const double pitch_max = limits_deg[1].second * M_PI / 180.0;
+      out[0] = std::clamp(out[0], yaw_min, yaw_max);
+      out[1] = std::clamp(out[1], pitch_min, pitch_max);
+      return out;
+  }
+
+  void humanoidController::applyHeadVelDeltaCommands()
+  {
+      // Velocity hold aligned with torso applyTorsoVelDeltaCommands:
+      //   - is_cmd_head_vel_updated_ sticky (not cleared while non-zero)
+      //   - is_cmd_head_vel_time_update_ stamps last_cmd_head_vel_time_
+      //   - >0.3s without new msg → cmd_head_vel_ = 0
+      //   - explicit/timeout zero → clear sticky flag (stop integrating)
+      // Oneshot delta: consume once.
+      // Time axis: ros::Time::now()（读 desire 前懒积分）
+      // 调用方已持 head_mtx，本函数不另加锁。
+      const double now = ros::Time::now().toSec();
+
+      bool integrateVel = false;
+      bool hasDelta = false;
+      vector_t vel2 = vector_t::Zero(2);
+      vector_t delta2 = vector_t::Zero(2);
+
+      if (is_cmd_head_vel_time_update_) {
+          last_cmd_head_vel_time_ = now;
+          is_cmd_head_vel_time_update_ = false;
+      }
+      if ((now - last_cmd_head_vel_time_) > kHeadVelTimeout_) {
+          cmd_head_vel_.setZero();
+          is_cmd_head_vel_updated_ = false;
+      }
+
+      if (is_cmd_head_vel_updated_) {
+          vel2 = cmd_head_vel_;
+          if (vel2.squaredNorm() < 1e-18) {
+              // zero (publisher zero or timeout): exit velocity hold
+              is_cmd_head_vel_updated_ = false;
+              cmd_head_vel_.setZero();
+          } else {
+              integrateVel = true;
+              // sticky: keep is_cmd_head_vel_updated_
+          }
+      }
+
+      if (is_cmd_head_delta_updated_) {
+          delta2 = cmd_head_delta_;
+          is_cmd_head_delta_updated_ = false;
+          hasDelta = true;
+      }
+
+      if (!integrateVel && !hasDelta) {
+          // Next non-zero burst starts a fresh Δt base (avoid huge first step after idle).
+          has_head_vel_integrate_time_ = false;
+          return;
+      }
+
+      // Scheme A: integrate with real control period. Nominal ~WBC 500Hz → 0.002s; clamp outliers.
+      // biped dt_ 通常 ~0.002；用 dt_ 作 nominal 更贴实际。
+      double dt_nom = (dt_ > 0.0 && dt_ < 0.2) ? dt_ : 0.002;
+      double dt = dt_nom;
+      if (has_head_vel_integrate_time_) {
+          dt = now - last_head_vel_integrate_time_;
+      }
+      const double dt_min = 0.5 * dt_nom;
+      const double dt_max = 3.0 * dt_nom;
+      if (dt < dt_min) {
+          dt = dt_min;
+      } else if (dt > dt_max) {
+          dt = dt_max;
+      }
+      last_head_vel_integrate_time_ = now;
+      has_head_vel_integrate_time_ = true;
+
+      // Read current open-loop absolute target (same store absolute teleop writes into)
+      vector_t cmd2 = desire_head_pos_;
+      if (cmd2.size() < 2) {
+          cmd2 = vector_t::Zero(2);
+      }
+
+      if (integrateVel) {
+          cmd2[0] += vel2[0] * dt;
+          cmd2[1] += vel2[1] * dt;
+      }
+      if (hasDelta) {
+          cmd2[0] += delta2[0];
+          cmd2[1] += delta2[1];
+      }
+
+      desire_head_pos_ = clampHead2D(cmd2, head_joint_limits_);
+  }
+
   void humanoidController::startMpccallback(const std_msgs::Bool::ConstPtr &msg)
   {
     ROS_INFO_STREAM("start_mpc: " << msg->data);
@@ -3150,6 +3290,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         vector_t get_head_pos = vector_t::Zero(headNum_);
         head_mtx.lock();
+        // vel/delta first: 读前积分到 desire_head_pos_（唯一开环终点）
+        applyHeadVelDeltaCommands();
         get_head_pos = desire_head_pos_;
         head_mtx.unlock();
         auto &hardware_settings = kuavo_settings_.hardware_settings;
@@ -3222,6 +3364,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         vector_t get_head_pos = vector_t::Zero(headNum_);
         head_mtx.lock();
+        // vel/delta first: 读前积分到 desire_head_pos_（唯一开环终点）
+        applyHeadVelDeltaCommands();
         get_head_pos = desire_head_pos_;
         head_mtx.unlock();
         auto &hardware_settings = kuavo_settings_.hardware_settings;

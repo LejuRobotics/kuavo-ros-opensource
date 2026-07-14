@@ -135,6 +135,27 @@ namespace humanoid_controller
       return true;
     }
 
+    if (amp_mode_ == 1 && requested_mode == 0 && isSquatPostureDefenseActive())
+    {
+      const geometry_msgs::Twist smoothed_vel = gait_receiver_->getSmoothedCmdVel();
+      const double processed_cmdangz =
+          applyTinyCmdAngzClip(smoothed_vel.angular.z);
+      const double height_cmd = std::min(
+          smoothed_stance_height_cmd_,
+          std::max(smoothed_vel.linear.z, -max_stance_squat_depth_));
+      ROS_WARN_THROTTLE(0.5,
+                        "[%s] Squat posture defense: reject exit from posture mode "
+                        "(height=%.3f, processed_cmdangz=%.3f, heightThreshold=%.3f, "
+                        "absCmdAngzLimit=%.3f).",
+                        name_.c_str(), height_cmd, processed_cmdangz,
+                        squat_posture_defense_height_threshold_,
+                        squat_posture_defense_abs_cmdangz_limit_);
+      res.result = false;
+      res.mode = amp_mode_;
+      res.message = "Squat posture defense active, cannot exit posture control mode";
+      return true;
+    }
+
     amp_mode_ = requested_mode;
 
     ROS_INFO("[%s] AMP mode switched to %d (0: pure AMP walk, 1: stance/bend/squat with arms, 2: walk with arms).",
@@ -247,33 +268,51 @@ namespace humanoid_controller
       cmdVelLineXUp_ = velocityLimits_(0);
       loadData::loadPtreeValue(pt, cmdVelLineXLow_, "cmdVelLineXlow", false);
       loadData::loadPtreeValue(pt, cmdVelLineXUp_, "cmdVelLineXup", false);
+      loadData::loadPtreeValue(pt, cmdVelLineXNeg_, "cmdVelLineXNeg", false);
+      loadData::loadPtreeValue(pt, squatHeightMin_, "squatHeightMin", false);
+      loadData::loadPtreeValue(pt, squatHeightMax_, "squatHeightMax", false);
+      if (pt.find("squatPostureDefense") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, squat_posture_defense_enabled_,
+                                 "squatPostureDefense.enabled", false);
+        loadData::loadPtreeValue(pt, squat_posture_defense_height_threshold_,
+                                 "squatPostureDefense.heightThreshold", false);
+        loadData::loadPtreeValue(pt, squat_posture_defense_abs_cmdangz_limit_,
+                                 "squatPostureDefense.absCmdAngzLimit", false);
+        ROS_INFO("[%s] SquatPostureDefense: enabled=%s, heightThreshold=%.3f, absCmdAngzLimit=%.3f",
+                 name_.c_str(),
+                 squat_posture_defense_enabled_ ? "true" : "false",
+                 squat_posture_defense_height_threshold_,
+                 squat_posture_defense_abs_cmdangz_limit_);
+      }
+      loadData::loadPtreeValue(pt, ampVRcmdvelLinearXLimit_, "ampVRcmdvelLinearXLimit", false);
+      loadData::loadPtreeValue(pt, ampVRcmdvelLinearYLimit_, "ampVRcmdvelLinearYLimit", false);
+      loadData::loadPtreeValue(pt, ampVRcmdvelLinearZLimit_, "ampVRcmdvelLinearZLimit", false);
+      loadData::loadPtreeValue(pt, ampVRcmdvelAngularYAWLimit_, "ampVRcmdvelAngularYAWLimit", false);
       loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
       loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
       loadData::loadPtreeValue(pt, enable_back_arm_enhance_, "enable_back_arm_enhance", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
+      loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdangz_, "enable_off_cmdy_by_cmdangz", false);
       try
       {
-        Eigen::Matrix<double, 8, 1> tiny_cmd_clip;
+        Eigen::Matrix<double, 6, 1> tiny_cmd_clip;
         loadEigenMatrix("TinyCmdClip", tiny_cmd_clip);
         tiny_cmdx_clip_pos_min_ = tiny_cmd_clip(0);
         tiny_cmdx_clip_pos_max_ = tiny_cmd_clip(1);
-        tiny_cmdx_clip_neg_max_ = tiny_cmd_clip(2);
-        tiny_cmdx_clip_neg_min_ = tiny_cmd_clip(3);
-        tiny_cmdy_clip_min_ = tiny_cmd_clip(4);
-        tiny_cmdy_clip_max_ = tiny_cmd_clip(5);
-        tiny_cmd_angz_clip_min_ = tiny_cmd_clip(6);
-        tiny_cmd_angz_clip_max_ = tiny_cmd_clip(7);
-        tiny_cmdx_clip_enabled_ = (tiny_cmdx_clip_pos_max_ > tiny_cmdx_clip_pos_min_) &&
-                                  (tiny_cmdx_clip_neg_max_ > tiny_cmdx_clip_neg_min_);
+        tiny_cmdy_clip_min_ = tiny_cmd_clip(2);
+        tiny_cmdy_clip_max_ = tiny_cmd_clip(3);
+        tiny_cmd_angz_clip_min_ = tiny_cmd_clip(4);
+        tiny_cmd_angz_clip_max_ = tiny_cmd_clip(5);
+        tiny_cmdx_clip_enabled_ = tiny_cmdx_clip_pos_max_ > tiny_cmdx_clip_pos_min_;
         tiny_cmdy_clip_enabled_ = tiny_cmdy_clip_max_ > tiny_cmdy_clip_min_;
         tiny_cmd_angz_clip_enabled_ = tiny_cmd_angz_clip_max_ > tiny_cmd_angz_clip_min_;
-        ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, neg[%.3f, %.3f)->%.3f, "
+        ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, "
                  "cmd_y[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, enabled=%s/%s/%s",
                  name_.c_str(),
                  tiny_cmdx_clip_pos_min_, tiny_cmdx_clip_pos_max_, tiny_cmdx_clip_pos_max_,
-                 tiny_cmdx_clip_neg_min_, tiny_cmdx_clip_neg_max_, tiny_cmdx_clip_neg_min_,
                  tiny_cmdy_clip_min_, tiny_cmdy_clip_max_, tiny_cmdy_clip_max_,
                  tiny_cmd_angz_clip_min_, tiny_cmd_angz_clip_max_, tiny_cmd_angz_clip_max_,
                  tiny_cmdx_clip_enabled_ ? "true" : "false",
@@ -294,10 +333,14 @@ namespace humanoid_controller
                                  "velocitySmoothing.standUpHeightSmoothingEnabled", false);
         loadData::loadPtreeValue(pt, max_stance_height_stand_up_change_,
                                  "velocitySmoothing.maxStandUpHeightChange", false);
-        ROS_INFO("[%s] Stance height stand-up smoothing: enabled=%s, maxChange=%.4f m/step",
+        loadData::loadPtreeValue(pt, stance_height_smooth_start_,
+                                 "velocitySmoothing.StandUpHeightSmoothStart", false);
+        ROS_INFO("[%s] Stance height stand-up smoothing: enabled=%s, maxChange=%.4f m/step, "
+                 "smoothStart=%.4f m",
                  name_.c_str(),
                  stance_height_stand_up_smoothing_enabled_ ? "true" : "false",
-                 max_stance_height_stand_up_change_);
+                 max_stance_height_stand_up_change_,
+                 stance_height_smooth_start_);
       }
     }
 
@@ -471,9 +514,12 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, initial_cmd_.*cmdMember, prefixCommandData_ + ".scale." + cmdName, false);
     }
 
-    // 加载 X 负向单独缩放系数（用于不对称速度限制）
-    loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
-    loadData::loadPtreeValue(pt, cmdVelLineXNegScaleExternalArm_, "commandData.scale.cmdVelLineXNegScaleExternalArm", false);
+    // 加载 X 负向单独缩放系数（非 amp_hand_controller 使用）
+    if (!is_amp_hand_controller_)
+    {
+      loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
+      loadData::loadPtreeValue(pt, cmdVelLineXNegScaleExternalArm_, "commandData.scale.cmdVelLineXNegScaleExternalArm", false);
+    }
 
     ROS_INFO("[%s] loadConfig done. num_actions_=%d, numSingleObs_=%d, frameStack_=%d",
              name_.c_str(), num_actions_, numSingleObs_, frameStack_);
@@ -607,10 +653,6 @@ namespace humanoid_controller
     {
       return tiny_cmdx_clip_pos_max_;
     }
-    if (cmdx >= tiny_cmdx_clip_neg_min_ && cmdx < tiny_cmdx_clip_neg_max_)
-    {
-      return tiny_cmdx_clip_neg_min_;
-    }
     return cmdx;
   }
 
@@ -661,7 +703,18 @@ namespace humanoid_controller
 
     if (diff > 1e-9)
     {
-      smoothed_stance_height_cmd_ += std::min(diff, max_stance_height_stand_up_change_);
+      if (smoothed_stance_height_cmd_ < stance_height_smooth_start_)
+      {
+        // 到达阈值前按单步变化量平滑，且本周期不跨过阈值。
+        smoothed_stance_height_cmd_ += std::min(diff, max_stance_height_stand_up_change_);
+        smoothed_stance_height_cmd_ =
+            std::min(smoothed_stance_height_cmd_, stance_height_smooth_start_);
+      }
+      else
+      {
+        // 达到阈值后直接跟随剩余起身高度。
+        smoothed_stance_height_cmd_ = raw_height;
+      }
     }
     else
     {
@@ -675,13 +728,34 @@ namespace humanoid_controller
       cmd.cmdVelAngularZ_ = smoothed_stance_height_cmd_;
       cmd.cmdVelLineZ_ = smoothed_stance_height_cmd_;
     }
+
+  }
+
+  bool AmpWalkController::isSquatPostureDefenseActive() const
+  {
+    if (!is_amp_hand_controller_ || !squat_posture_defense_enabled_ || !gait_receiver_ ||
+        amp_mode_ != 1)
+    {
+      return false;
+    }
+
+    const geometry_msgs::Twist smoothed_vel = gait_receiver_->getSmoothedCmdVel();
+    const double processed_cmdangz = applyTinyCmdAngzClip(smoothed_vel.angular.z);
+    const double height_cmd = std::min(
+        smoothed_stance_height_cmd_,
+        std::max(smoothed_vel.linear.z, -max_stance_squat_depth_));
+
+    return height_cmd < squat_posture_defense_height_threshold_ &&
+           std::abs(processed_cmdangz) < squat_posture_defense_abs_cmdangz_limit_;
   }
 
   void AmpWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
     // 根据速度方向选择正负限制：速度>0 用正向限制，速度<0 用负向限制
-    double velLimitX = (cmd.cmdVelLineX_ >= 0) ? velocityLimits_(0) : velocityLimits_(1);
+    double velLimitX = (cmd.cmdVelLineX_ >= 0)
+                           ? velocityLimits_(0)
+                           : (is_amp_hand_controller_ ? cmdVelLineXNeg_ : velocityLimits_(1));
     double ratio = cmd.cmdVelLineX_ / velLimitX;
     double targetCycleTime = (ratio > switch_ratio_) ? cycleTime_short_ : cycleTime_;
     if (targetCycleTime != currentCycleTime_)
@@ -733,13 +807,22 @@ namespace humanoid_controller
                                              jointArmNum_ > 0 && arm_controller_ &&
                                              arm_controller_->getMode() != 1;
 
-    // amp_hand: 负向 cmd_x 缩放（外部手臂接管时使用独立系数）
+    // amp_hand: 负向 cmd_x 限速；其他控制器仍使用负向缩放系数
     if (cmd.cmdVelLineX_ < 0.0)
     {
-      const double neg_scale = (is_amp_hand_controller_ && external_arm_control_active)
-                                   ? cmdVelLineXNegScaleExternalArm_
-                                   : cmdVelLineXNegScale_;
-      cmd.cmdVelLineX_ *= neg_scale;
+      if (is_amp_hand_controller_)
+      {
+        cmd.cmdVelLineX_ = std::max(cmd.cmdVelLineX_, -cmdVelLineXNeg_);
+      }
+      else
+      {
+        const double neg_scale = (arm_command_replacement_enabled_ &&
+                                  jointArmNum_ > 0 && arm_controller_ &&
+                                  arm_controller_->getMode() != 1)
+                                     ? cmdVelLineXNegScaleExternalArm_
+                                     : cmdVelLineXNegScale_;
+        cmd.cmdVelLineX_ *= neg_scale;
+      }
     }
 
     if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdx_)
@@ -751,6 +834,18 @@ namespace humanoid_controller
       if (std::abs(cmd.cmdVelLineY_) > kOffCmdxByCmdYThreshold_)
       {
         cmd.cmdVelLineX_ = 0.0;
+      }
+    }
+
+    if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdangz_)
+    {
+      if (std::abs(cmd.cmdVelAngularZ_) > kOffCmdyByCmdAngZThreshold_)
+      {
+        cmd.cmdVelLineY_ = 0.0;
+      }
+      if (std::abs(cmd.cmdVelLineY_) > kOffCmdAngZByCmdYThreshold_)
+      {
+        cmd.cmdVelAngularZ_ = 0.0;
       }
     }
 
@@ -890,10 +985,10 @@ namespace humanoid_controller
     }
 
     if (enable_back_arm_enhance_ && is_walking_mode &&
-        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.019)
+        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.02)
     {
       projected_gravity =
-          Eigen::AngleAxisd(5.0 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
+          Eigen::AngleAxisd(2.5 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
     }
 
     Eigen::VectorXd local_action = getCurrentAction();
@@ -1027,9 +1122,16 @@ namespace humanoid_controller
                                                  arm_controller_->getMode() != 1;
         if (elbowCmd.cmdVelLineX_ < 0.0)
         {
-          const double neg_scale = external_arm_control_active ? cmdVelLineXNegScaleExternalArm_
-                                                               : cmdVelLineXNegScale_;
-          elbowCmd.cmdVelLineX_ *= neg_scale;
+          if (is_amp_hand_controller_)
+          {
+            elbowCmd.cmdVelLineX_ = std::max(elbowCmd.cmdVelLineX_, -cmdVelLineXNeg_);
+          }
+          else
+          {
+            const double neg_scale = external_arm_control_active ? cmdVelLineXNegScaleExternalArm_
+                                                                 : cmdVelLineXNegScale_;
+            elbowCmd.cmdVelLineX_ *= neg_scale;
+          }
         }
 
         const bool is_lateral_move_command =
@@ -1187,11 +1289,18 @@ namespace humanoid_controller
     currentCmdData.scale();
     if (currentCmdData.cmdVelLineX_ < 0.0)
     {
-      if (!is_amp_hand_controller_ ||
-          (arm_command_replacement_enabled_ && jointArmNum_ > 0 && arm_controller_ &&
-           arm_controller_->getMode() != 1))
+      if (is_amp_hand_controller_)
+      {
+        currentCmdData.cmdVelLineX_ = std::max(currentCmdData.cmdVelLineX_, -cmdVelLineXNeg_);
+      }
+      else if (!arm_command_replacement_enabled_ || !jointArmNum_ || !arm_controller_ ||
+               arm_controller_->getMode() == 1)
       {
         currentCmdData.cmdVelLineX_ *= cmdVelLineXNegScale_;
+      }
+      else
+      {
+        currentCmdData.cmdVelLineX_ *= cmdVelLineXNegScaleExternalArm_;
       }
     }
     const Eigen::VectorXd& active_default = getActiveDefaultJointPos(currentCmdData);
@@ -1946,6 +2055,13 @@ namespace humanoid_controller
     {
       nh.setParam("/amp_hand_controller/cmdVelLineXlow", cmdVelLineXLow_);
       nh.setParam("/amp_hand_controller/cmdVelLineXup", cmdVelLineXUp_);
+      nh.setParam("/amp_hand_controller/cmdVelLineXNeg", cmdVelLineXNeg_);
+      nh.setParam("/amp_hand_controller/squatHeightMin", squatHeightMin_);
+      nh.setParam("/amp_hand_controller/squatHeightMax", squatHeightMax_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelLinearXLimit", ampVRcmdvelLinearXLimit_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelLinearYLimit", ampVRcmdvelLinearYLimit_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelLinearZLimit", ampVRcmdvelLinearZLimit_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelAngularYAWLimit", ampVRcmdvelAngularYAWLimit_);
     }
 
     ROS_INFO("[%s] Updated /velocity_limits from controller config: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",

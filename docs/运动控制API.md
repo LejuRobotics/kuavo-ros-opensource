@@ -486,8 +486,70 @@
 **使用说明:**
 
 - joint_data: 机器人头部关节数据，长度为 2,
-- joint_data[0]：偏航角度（yaw），范围：[-30°, 30°],
+- joint_data[0]：偏航角度（yaw），范围：[-88°, 88°],
 - joint_data[1]：俯仰角度（pitch），范围：[-25°, 25°].
+
+> **注意**：此话题发送的是**绝对目标角度**。遥控器（H12/G12）已改用速度接口 `/cmd_head_vel`，不再通过此话题控制头部；此话题保留给 SDK/VR 等直接角度控制场景。
+
+---
+
+#### `/cmd_head_vel`
+
+**类型:** `kuavo_msgs::robotHeadMotionData`
+
+**功能说明:**
+
+用于控制机器人头部的运动，通过发布**瞬时角速度**（deg/s）来实现头部控制。接收侧（CDM/WBC）做 sticky 积分：持续收到非零速度时积分到 `head_external_control_state_`，收到零速度或 0.3s 超时后停止。
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| joint_data | float64[] | 关节角速度, 单位(deg/s) |
+
+**使用说明:**
+
+- joint_data: 机器人头部关节数据，长度为 2,
+- joint_data[0]：偏航角速度（yaw），deg/s,
+- joint_data[1]：俯仰角速度（pitch），deg/s.
+- **粘性（sticky）机制**：发非零值 → 持续积分；发零 → 停止积分并清粘性。建议回中后显式发一次零。
+- **限位**：CDM/WBC 内部 clamp：yaw ±88°，pitch ±25°。
+
+**使用示例:**
+
+```python
+import rospy
+from kuavo_msgs.msg import robotHeadMotionData
+
+pub = rospy.Publisher('/cmd_head_vel', robotHeadMotionData, queue_size=1)
+msg = robotHeadMotionData()
+msg.joint_data = [30.0, 0.0]  # yaw 30°/s 右转
+pub.publish(msg)
+# 停止：
+msg.joint_data = [0.0, 0.0]
+pub.publish(msg)
+```
+
+---
+
+#### `/cmd_head_delta`
+
+**类型:** `kuavo_msgs::robotHeadMotionData`
+
+**功能说明:**
+
+用于控制机器人头部的**一次性相对位移**（deg）。oneshot 语义：每条消息的增量被消耗一次后清零，不累积。
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| joint_data | float64[] | 关节增量, 单位(deg) |
+
+**使用说明:**
+
+- joint_data[0]：偏航增量（yaw），deg,
+- joint_data[1]：俯仰增量（pitch），deg.
 
 ---
 

@@ -317,5 +317,6 @@ sudo journalctl -u h12pro_node.service -f
 
 
 * 开启服务sudo systemctl start ocs2_h12pro_monitor.service
-* 然后机器人头部控制模式要早stance状态下进行，机器人进入站立状态后，使用组合键‘E_IDDLE,F_RIGHT,PRESS B’这时进入头部控制状态
+* 然后机器人头部控制模式要早stance状态下进行，机器人进入站立状态后，使用组合键’E_IDDLE,F_RIGHT,PRESS B’这时进入头部控制状态
 * 此时移动机器人的右遥感上下左右即可操作机器人头部上下左右移动
+* 底层接口：摇杆→角速度(°/s) → 发布 `/cmd_head_vel`（`kuavo_msgs::robotHeadMotionData`），由 CDM/WBC 做 sticky 积分，遥控节点不再维护头部绝对位姿。旧话题 `/robot_head_motion_data`（绝对值）仍保留给 SDK/VR 等其他调用方。

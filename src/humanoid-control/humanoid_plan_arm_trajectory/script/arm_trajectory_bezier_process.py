@@ -59,7 +59,8 @@ class ArmTrajectoryBezierDemo:
         self.arm_flag = False
         self._timer = None
         self.interrupt_flag  = False
-        self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印  
+        self.enable_control_state_ = True  # 软暂停状态，默认 enable=1
+        self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印
         # 使用 RobotVersion 类创建版本号对象
         robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
@@ -194,6 +195,11 @@ class ArmTrajectoryBezierDemo:
         self._rl_command_sub = rospy.Subscriber(
             '/rl_controller/InputData/command', Float64MultiArray,
             self._rl_command_callback, queue_size=10
+        )
+
+        # 软暂停：立即停止 /kuavo_arm_traj /control_robot_hand_position /robot_head_motion_data 发布
+        self._enable_control_sub = rospy.Subscriber(
+            '/enable_control_state', Bool, self._enable_control_callback, queue_size=1
         )
 
         # 添加发布者
@@ -1490,25 +1496,40 @@ class ArmTrajectoryBezierDemo:
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}成功中断"
         )
 
+    def _enable_control_callback(self, msg):
+        """软暂停：停 tact 播放管线 + 切手臂回自动摆臂；不解冻复位手/头/腰。
+        不跟 C++ /bezier/stop_plan_arm_trajectory 交互——C++ timer 照跑，
+        next action 的 planCallback 会调 C++ reset() 全量重置。"""
+        prev = self.enable_control_state_
+        self.enable_control_state_ = bool(msg.data)
+        if prev and not self.enable_control_state_:
+            # 与 handle_freeze_arm_traj 相同：停发布、不复位手/头/腰
+            self._freeze_tact_pipeline(reason="enable_control=false")
+            # freeze 额外：把手臂控制权交回自动摆臂（freeze 服务本身不切 mode）
+            try:
+                self.call_change_arm_ctrl_mode_service(1)
+                rospy.loginfo("[%s] arm mode switched to 1 (auto swing)", rospy.get_time())
+            except Exception as e:
+                rospy.logwarn("Failed to switch arm mode: %s", e)
+
+    def _freeze_tact_pipeline(self, reason="freeze"):
+        """停 tact 发布管线：interrupt + 清 arm_flag/running + 状态=2 + 停 timer。
+        不调用 reset_robot_state()，保持当前手/头/腰姿态。"""
+        rospy.loginfo("[%s] freeze tact pipeline (%s)", rospy.get_time(), reason)
+        # 仅在动作执行中才改标志；无动作时的 freeze/unfreeze 无副作用
+        if not (self.arm_flag or self.running_action):
+            return
+        self.interrupt_flag = True
+        self.arm_flag = False
+        self.running_action = False
+        self.publish_action_state(2)
+        self.stop_action()
+
     def handle_freeze_arm_traj(self, req):
         """冻结：立即停止发布 /kuavo_arm_traj 且不复位，使手臂停在当前帧。
         与 handle_interrupt 的区别：不调用 reset_robot_state()（不切回 auto、不复位手/头/腰），
         以便配合上层将手臂控制模式置为 keep pose，把 tact 定在当前位置。"""
-        rospy.loginfo("[%s]  接收到机械臂冻结指令(停止发布且不复位)", rospy.get_time())
-
-        # 设置中断标志位，停止发布线程
-        self.interrupt_flag = True
-        self.arm_flag = False
-        self.running_action = False
-
-        # 发布动作完成状态
-        self.publish_action_state(2)
-
-        # 停止等待动作的 timer，避免到点后触发复位
-        self.stop_action()
-
-        # 注意：不调用 reset_robot_state()，保持当前帧
-
+        self._freeze_tact_pipeline(reason="freeze_arm_traj service")
         return TriggerResponse(
             success=True,
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}冻结于当前帧"
@@ -1525,6 +1546,14 @@ class ArmTrajectoryBezierDemo:
 
     def handle_execute_action(self, req):
         action_name = req.action_name
+
+        # 软暂停期间拒绝新动作（无 tact 残留入口）
+        if not self.enable_control_state_:
+            rospy.logwarn("Action '%s' rejected: enable_control is false", action_name)
+            return ExecuteArmActionResponse(
+                success=False,
+                message="软暂停中，拒绝执行新动作",
+            )
 
         # 检查是否有动作正在执行
         if self.arm_flag or self.running_action:
@@ -1683,6 +1712,7 @@ class ArmTrajectoryBezierDemo:
         # self.call_change_arm_ctrl_mode_service(1)
         if success:
             rospy.loginfo("Arm trajectory planned successfully")
+            self.interrupt_flag = False  # 清 freeze/interrupt 残留，防 run() 立即退出
             threading.Thread(target=self.run).start()
             # 使用更新后的 END_FRAME_TIME（包含过渡帧时间）
             # RL/OCS2半身/通用入场过渡都会在 add_init_frame 中添加过渡帧并更新 END_FRAME_TIME
