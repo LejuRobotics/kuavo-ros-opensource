@@ -24,14 +24,14 @@ class config:
 
         enable_percep_when_walking = True # 是否在走路时启用感知(边走边看)
 
-        box_width = 0.45  # 米
+        box_width = 0.35  # 米
         box_mass = 1.5 # kg，假设一个较重的箱子
 
         walk_use_cmd_vel = True  # 是否使用cmd_vel控制走路
         enable_step_pause = False  # 是否启用步骤间暂停功能
         
         # 搬箱次数
-        grab_box_num = 1
+        grab_box_num = 10
 
         # 搬箱完成一轮是否暂停，在终端键盘输入Enter继续下一轮
         enable_round_stop = True
@@ -44,16 +44,16 @@ class config:
         box_in_tag_pos = (0.0, 0.0, 0.0)  # 箱子在目标标签中的位置猜测，单位米
         box_in_tag_euler = (0.0, 0.0, 0.0)  # 箱子在目标标签中的姿态猜测，单位欧拉角（弧度）
 
-        stand_in_tag_pos = (0.0, 0.0, 0.15)  # 站立位置在目标标签中的位置猜测，单位米
+        stand_in_tag_pos = (0.0, 0.0, 0.30)  # 站立位置在目标标签中的位置猜测，单位米
         stand_in_tag_euler = (-np.deg2rad(90), np.deg2rad(90), 0.0)  # 站立位置在目标标签中的姿态猜测，单位欧拉角（弧度）
 
         hand_pitch_degree = -0.0  # 手臂pitch角度（相比水平, 下倾是正），单位度
-        box_behind_tag = 0.30  # 箱子在tag后面的距离，单位米
-        box_beneath_tag = -0.15  # 箱子在tag下方的距离，单位米
+        box_behind_tag = 0.15  # 箱子在tag后面的距离，单位米
+        box_beneath_tag = 0.05  # 箱子在tag下方的距离，单位米
         box_left_tag = -0.0  # 箱子在tag左侧的距离，单位米
 
         force_ratio_z = 0.0
-        lateral_force = 0.0  # 侧向夹持力，单位N
+        lateral_force = 0.0  # 侧向夹持力，单位
         waist_degree = -180.0  # 拿箱子后转腰角度，单位度
         arm_total_time = 3.0  # 拿箱子时手臂运动总时间，单位秒
 
@@ -63,12 +63,12 @@ class config:
         step_back_distance = -0.4
         tag_pos_world = (-10, 0, 0)  # 放置位置猜测，单位米
         tag_euler_world = (0, 0, 0)  # 放置位置姿态猜测，单位欧拉角（弧度）
-        stand_in_tag_pos = (0.0, 0.0, 0.45)  # 放置位置站立位置在目标标签中的位置猜测，单位米
+        stand_in_tag_pos = (0.0, 0.0, 0.35)  # 放置位置站立位置在目标标签中的位置猜测，单位米
         stand_in_tag_euler = (-np.deg2rad(90), np.deg2rad(90), 0.0)  # 放置位置站立位置在目标标签中的姿态猜测，单位欧拉角（弧度）
 
-        box_behind_tag = 0.15  # 箱子在tag后面的距离，单位米
-        box_beneath_tag = 0.40  # 箱子在tag下方的距离，单位米
-        box_left_tag = 0.05  # 箱子在tag左侧的距离，单位米
+        box_behind_tag = 0.20  # 箱子在tag后面的距离，单位米
+        box_beneath_tag = 0.45  # 箱子在tag下方的距离，单位米
+        box_left_tag = 0.0  # 箱子在tag左侧的距离，单位米
 
         force_ratio_z = 0.0
         lateral_force = 0.0  # 侧向夹持力，单位N

@@ -13,6 +13,7 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.utils import generate_full_b
     interpolate_joint_positions_bezier, calculate_elbow_y, get_elbow_position
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoIKParams
 from kuavo_humanoid_sdk.common.logger import is_diag_enabled
+from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.throttle import throttle_print
 
 import py_trees
 from py_trees.behaviour import Behaviour
@@ -220,7 +221,7 @@ class NodeTagToArmGoal(Behaviour):
         self.logger.debug(f"NodeTagToArmGoal::update {self.name}")
         latest_tag = getattr(self.bb, f"latest_tag_{self.tag_id}", None)
         tag_version = getattr(self.bb, f"latest_tag_{self.tag_id}_version", None)
-        print(f'===== latest_tag version {tag_version} found, current version {self.tag_version}')
+        throttle_print(f"tag2arm_{self.tag_id}", f"===== latest_tag version {tag_version} found, current version {self.tag_version}", interval=0.5)
         if latest_tag is None or tag_version is None:
             return Status.RUNNING
 
@@ -514,7 +515,7 @@ class NodeTagToNavGoal(Behaviour):
         self.logger.debug(f"NodeTagToNavGoal::update {self.name}")
         latest_tag = getattr(self.bb, f"latest_tag_{self.tag_id}", None)
         tag_version = getattr(self.bb, f"latest_tag_{self.tag_id}_version", None)
-        print(f'===== latest_tag version {tag_version} found')
+        throttle_print(f"tag2nav_{self.tag_id}", f"===== latest_tag version {tag_version} found", interval=0.5)
         if latest_tag is None or tag_version is None:
             return Status.RUNNING
 
@@ -531,7 +532,7 @@ class NodeTagToNavGoal(Behaviour):
         stand_pose_in_world = transform_pose_from_tag_to_world(latest_tag, stand_pose_in_tag)
         self.bb.walk_goal = stand_pose_in_world
         self.bb.is_walk_goal_new = True
-        print(f'===== setting walk goal to tag {self.tag_id} at {stand_pose_in_world}')
+        throttle_print(f"set_walk_goal_{self.tag_id}", f'===== setting walk goal to tag {self.tag_id} at {stand_pose_in_world}', interval=0.5)
         self.tag_version = tag_version
         return Status.SUCCESS
 

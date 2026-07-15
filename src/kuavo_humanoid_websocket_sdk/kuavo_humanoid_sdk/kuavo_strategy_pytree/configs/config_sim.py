@@ -60,7 +60,7 @@ class config:
     class place:
         """放框配置"""
         tag_id = 0
-        step_back_distance = -0.0 # 后退距离，正数为向后平移，负数为向前平移
+        step_back_distance = -0.3 # 后退距离，正数为向后平移，负数为向前平移
         tag_pos_world = (0, 10, 0)  # 放置位置猜测，单位米
         tag_euler_world = (0, 0, 0)  # 放置位置姿态猜测，单位欧拉角（弧度）
         stand_in_tag_pos = (0.0, 0.0, 0.35)  # 放置位置站立位置在目标标签中的位置猜测，单位米

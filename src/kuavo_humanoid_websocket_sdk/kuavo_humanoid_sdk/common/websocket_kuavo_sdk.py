@@ -21,7 +21,35 @@ class WebSocketKuavoSDK:
             self._initialized = True
             self.client = roslibpy.Ros(host=WebSocketKuavoSDK.websocket_host, port=WebSocketKuavoSDK.websocket_port)
             self.client.run(timeout=WebSocketKuavoSDK.websocket_timeout)
+            self._optimize_transport()
             atexit.register(self._shutdown)
+
+    def _optimize_transport(self):
+        """降低 WebSocket 发送延迟：
+        1. TCP_NODELAY: 禁用 Nagle 算法，小包不再等待凑满 MSS
+        2. sync=True:   autobahn sendMessage 等待 TCP 写出完成再返回，
+           消除 autobahn 内部发送队列引入的时序不确定性
+        """
+        try:
+            proto = self.client.factory._proto
+            if proto is None:
+                return
+            # 禁用 Nagle 算法：每个 send 立即发送，不等待凑满 TCP 段
+            if proto.transport:
+                proto.transport.setTcpNoDelay(True)
+            # 替换 send_message，sync=True 保证每次发送顺序/时序确定
+            import twisted.internet.reactor
+
+            def _fast_send(payload):
+                return twisted.internet.reactor.callFromThread(
+                    proto.sendMessage, payload,
+                    isBinary=False, fragmentSize=None,
+                    sync=True, doNotCompress=False,
+                )
+
+            proto.send_message = _fast_send
+        except Exception:
+            pass  # 优化失败不影响功能，静默忽略
 
     def _shutdown(self):
         """Flush pending messages and close connection on process exit."""

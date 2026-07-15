@@ -557,7 +557,7 @@ python3 grasp_box_example.py
 
 ### PyTree 行为树搬箱案例 （kuavo_strategy_pytree/pick_place_box/）
 
-WSSDK 现已集成 `kuavo_strategy_pytree` 行为树策略，提供更高级的并行感知+闭环控制能力。详情参见 [WSSDK搬箱说明文档](../docs/WSSDK搬箱说明文档.md) 第三部分。
+WSSDK 现已集成 `kuavo_strategy_pytree` 行为树策略，提供更高级的并行感知+闭环控制能力。详情参见 [WSSDK搬箱说明文档](../docs/kuavo_strategy_pytree/WS_SDK搬箱说明文档.md) 第三部分。
 
 **快速运行（仿真）：**
 ```

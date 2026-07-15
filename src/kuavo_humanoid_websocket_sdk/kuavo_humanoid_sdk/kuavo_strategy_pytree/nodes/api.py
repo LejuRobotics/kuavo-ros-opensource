@@ -8,6 +8,7 @@ from kuavo_humanoid_sdk.interfaces.data_types import (
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.data_type import Pose, Tag, Frame, Transform3D, WheelArmFrame
 from kuavo_humanoid_sdk.interfaces.data_types import KuavoManipulationMpcControlFlow
 from kuavo_humanoid_sdk.common.logger import is_diag_enabled
+from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.throttle import throttle_print
 
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
@@ -320,7 +321,10 @@ class ArmAPI:
                 left_angle_error = left_current_pose.angle(left_target_pose_world)
                 right_angle_error = right_current_pose.angle(right_target_pose_world)
 
-                print(f"手臂动作执行中，位置误差={left_pos_error:.4f}m (阈值={arm_pos_threshold}m), 角度误差={left_angle_error:.4f}rad (阈值={arm_angle_threshold}rad)")
+                throttle_print("arm_error_detect",
+                    f"手臂动作执行中，位置误差={left_pos_error:.4f}m (阈值={arm_pos_threshold}m), "
+                    f"角度误差={left_angle_error:.4f}rad (阈值={arm_angle_threshold}rad)",
+                    interval=0.5)
                 # 检查是否满足阈值
                 if (left_pos_error <= arm_pos_threshold and right_pos_error <= arm_pos_threshold and
                     left_angle_error <= arm_angle_threshold and right_angle_error <= arm_angle_threshold):
@@ -1188,6 +1192,10 @@ class TorsoAPI:
         # max_vel_y 未指定时默认等于 max_vel_x（向后兼容）
         if max_vel_y is None:
             max_vel_y = max_vel_x
+        # 侧向速度平滑: 避免 vel_y 因 y_diff 实时变化而剧烈振荡或翻转符号,
+        # 同时保留对侧向漂移的纠正能力 (alpha 越小越平滑, 越大响应越快)
+        _smoothed_vel_y = 0.0
+        _vy_ema_alpha = 0.3  # 指数平滑系数, ~10次迭代(~0.5s)接近目标值
         # 重置倒退速度斜坡计时器
         self._backward_ramp_start_time = None
         robot_pose_when_start = Pose(
@@ -1303,15 +1311,16 @@ class TorsoAPI:
                 y_diff = target_in_base.pos[1]
                 vel_x = kp_pos * x_diff * ramp_factor
                 vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
-                vel_y = kp_pos * y_diff * ramp_factor
-                vel_y = np.clip(vel_y, -max_vel_y, max_vel_y)
+                raw_vel_y = kp_pos * y_diff * ramp_factor
+                raw_vel_y = np.clip(raw_vel_y, -max_vel_y, max_vel_y)
+                _smoothed_vel_y = _vy_ema_alpha * raw_vel_y + (1 - _vy_ema_alpha) * _smoothed_vel_y
+                vel_y = np.clip(_smoothed_vel_y, -max_vel_y, max_vel_y)
                 self.robot_sdk.control.walk(
                     linear_x=vel_x,
                     linear_y=vel_y,
                     angular_z=0.0
                 )
-                print("vel_x:",vel_x)
-                print("vel_y:",vel_y)
+                throttle_print("walk_vel", f"vel_x:{vel_x:.3f} vel_y:{vel_y:.3f}", interval=0.5)
                 # 检查是否到达
                 if dis_diff < pos_threshold:
                     self.stop_walk()
@@ -1337,8 +1346,10 @@ class TorsoAPI:
                     y_diff = target_in_base.pos[1]
                     vel_x = kp_pos * x_diff
                     vel_x = np.clip(vel_x, -max_vel_x, max_vel_x)
-                    vel_y = kp_pos * y_diff
-                    vel_y = np.clip(vel_y, -max_vel_y, max_vel_y)
+                    raw_vel_y = kp_pos * y_diff
+                    raw_vel_y = np.clip(raw_vel_y, -max_vel_y, max_vel_y)
+                    _smoothed_vel_y = _vy_ema_alpha * raw_vel_y + (1 - _vy_ema_alpha) * _smoothed_vel_y
+                    vel_y = np.clip(_smoothed_vel_y, -max_vel_y, max_vel_y)
                     # print(f'holonomic控制，前进速度：{vel_x:.2f} m/s, 侧移速度：{vel_y:.2f} m/s')
                     self.robot_sdk.control.walk(
                         linear_x=vel_x,  # 前进
@@ -1380,7 +1391,7 @@ class TorsoAPI:
                 self.stop_walk()
                 break
             else:
-                print("not_success")
+                throttle_print("walk_not_success", "行走中...", interval=1.0)
         return None
 
     def walk_to_pose_by_vel(self,
@@ -1408,7 +1419,7 @@ class TorsoAPI:
 
     def update_walk_goal(self, new_goal: Pose, backward_mode=False):
         """线程安全：更新当前目标并唤醒控制线程；返回新的版本号。"""
-        print(f'接收到新的行走目标：{new_goal}')
+        throttle_print("update_walk_goal", f'接收到新的行走目标：{new_goal}', interval=0.5)
         with self._target_lock:
             self._current_target = new_goal
             self._backward_mode = backward_mode
@@ -1542,6 +1553,13 @@ class TorsoAPI:
     def stop_walk(self):
         for _ in range(10):
             self.robot_sdk.control.walk(0.0, 0.0, 0.0)
-            print("stop_walk:停止行走")
             time.sleep(0.02)
-        self.robot_sdk.control.stance()
+        print("stop_walk:停止行走")
+        # 不调 stance()：MPC auto-gait 检测到 cmd_vel=0 后会自然从 walk 切到 stance，
+        # 避免显式 switch_gait_by_name("stance") 覆盖 MPC 内部的步态调度
+        time.sleep(0.5)
+        # 手动同步 SDK 内部状态机到 stance（绕开 _on_enter_stance 回调，
+        # 该回调会发 robot_stance() → switch_gait_by_name("stance") 覆盖 MPC）
+        core = self.robot_sdk.control._kuavo_core
+        if core.state != 'stance':
+            core.state = 'stance'

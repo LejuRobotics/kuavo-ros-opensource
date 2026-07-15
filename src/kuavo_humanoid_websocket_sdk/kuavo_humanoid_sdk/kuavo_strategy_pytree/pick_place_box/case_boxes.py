@@ -4,9 +4,9 @@ from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.nodes import NodeWalk, NodeP
 from kuavo_humanoid_sdk import KuavoSDK
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.nodes.api import ArmAPI, TorsoAPI, HeadAPI
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common.robot_sdk import RobotSDK
-# 根据环境变量 KUAVO_REAL 自动选择配置：仿真使用 config_boxes_sim，实机使用 config_boxes_real
+# 根据环境变量 KUAVO_REAL 自动选择配置：默认实机使用 config_boxes_real，传 KUAVO_REAL=false 使用 config_boxes_sim
 import os
-_is_real = os.environ.get('KUAVO_REAL', 'false').lower() == 'true'
+_is_real = os.environ.get('KUAVO_REAL', 'true').lower() == 'true'
 if _is_real:
     from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_real import config
 else:
