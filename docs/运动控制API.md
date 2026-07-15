@@ -1,6 +1,4 @@
-# 运动控制API
-
-节点的含义参考:[topics定义](./readme.topics.md)
+节点的含义参考:[topics定义](./readme_topics.md)
 
 - 控制流程图：
 
@@ -22,7 +20,7 @@
 
 ---
 
-## 1. 行走控制
+## 1. 行走控制 
 
 - 本节包含**MPC**控制机器人行走、步态切换和躯干运动的接口。
 - **RL以及多控制器相关的文档和接口说明查看另外一个`RL控制框架ROS接口文档.md`**
@@ -31,7 +29,7 @@
 
 #### `/humanoid_auto_gait`
 
-**类型:** 未指定
+**类型:** `std_srvs::SetBool`
 
 **功能说明:**
 
@@ -40,6 +38,14 @@
 **使用说明:**
 
 - 手动模式下，需要先发布 `/humanoid_mpc_mode_schedule` 才能切换gait模式
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | bool | 请求数据, true 表示开启自动切换步态, false 表示关闭自动切换步态 |
+| success | bool | 返回数据, 是否调用成功 |
+| message | string | 返回数据, 调用结果描述信息 |
 
 ---
 
@@ -56,11 +62,42 @@
 - 时间序列和躯干位姿序列长度必须一致，时间序列需要不断递增
 - 每次服务请求的躯干位姿都是基于局部坐标系，但是一次服务请求中的躯干位姿序列需要以第一个位姿为基准不断变化
 
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| foot_pose_target_trajectories | kuavo_msgs/footPoseTargetTrajectories | 请求数据, 足端位姿目标轨迹 |
+| success | bool | 返回数据, 是否调用成功 |
+| message | string | 返回数据, 调用结果描述信息 |
+
+关于 foot_pose_target_trajectories 字段, 其中 `kuavo_msgs/footPoseTargetTrajectories` 的消息定义如下:
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| timeTrajectory | float64[] | 必填项, 时间序列, 定义每个轨迹点的时间, 单位(s), 需不断递增 |
+| footIndexTrajectory | int32[] | 必填项, 足端索引序列, 长度需与 timeTrajectory 一致 |
+| footPoseTrajectory | kuavo_msgs/footPose[] | 必填项, 足端位姿序列, 长度需与 timeTrajectory 一致 |
+| additionalFootPoseTrajectory | kuavo_msgs/footPoses[] | 选填项, 额外的轨迹点规划值 |
+| swingHeightTrajectory | float64[] | 选填项, swing 高度轨迹 |
+
+其中, `kuavo_msgs/footPose` 的消息定义如下:
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| footPose | float64[4] | 足端位姿, 元素顺序为: x, y, z, yaw, 位置单位(m), 方向单位(radian) |
+| torsoPose | float64[4] | 躯干位姿, 元素顺序为: x, y, z, yaw, 位置单位(m), 方向单位(radian) |
+
+其中, `kuavo_msgs/footPoses` 的消息定义如下:
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | kuavo_msgs/footPose[] | 额外的足端位姿数组 |
+
 ---
 
 #### `/humanoid_get_current_gait_name`
 
-**类型:** `kuavo_msgs::changeArmCtrlMode`
+**类型:** `kuavo_msgs::getCurrentGaitName`
 
 **功能说明:**
 
@@ -81,52 +118,24 @@
 
 **功能说明:**
 
-搬运模式控制（V1.1 二段式进入）—— 站立状态下安全抬起移动机器人，移动后恢复正常控制（AMP/MPC）。
+搬运模式控制 —— 站立状态下安全抬起移动机器人，移动后恢复正常控制（AMP/MPC）。
 
 **消息字段:**
 
 | 字段 | 类型 | 描述 |
 | --- | --- | --- |
-| command | uint8 | 1=ENTER 进入待搬运姿态, 2=LOCK 锁定关节, 3=EXIT 退出搬运, 4=FALL_DOWN 掉使能倒地, 5=HAND_OVER 移交管理权 |
+| command | uint8 | 1=进入搬运（僵直）, 2=退出搬运, 3=瘫软倒地 |
 | success | bool | 返回数据, 是否调用成功 |
 | message | string | 返回数据, 消息 |
 
 **使用说明:**
 
-- ENTER（1）：平滑插值到待搬运动作（关节未锁，MPC 维持平衡不会摔），语音「电机未锁定，请扶住」。进入后启动 5 秒保护窗，期间仅 LOCK 与 HAND_OVER 可响应。
-- LOCK（2）：保护窗内且姿态到位后锁定全身关节（CSP 锁死，可安全抬起），语音「进入搬运模式，可安全移动」。保护窗内重按 LOCK 重置计时（累计上限 15 秒）。
-- EXIT（3）：站立检测通过后解除锁定，移交管理权回基础控制；MPC 走 stance 恢复，AMP/RL 直接恢复，语音「退出搬运模式」。
-- FALL_DOWN（4）：仅 ACTIVE 可用，电机掉使能，由倒地起身控制器接管。
-- HAND_OVER（5）：移交管理权（取消/退出/倒地后回基础控制时由 Joy 编排调用）。
-- 起身：倒地后 LB+RB+X 触发，两步（PREPARE 回起身初始姿态、STAND_UP 完整起身），完成后回到 MPC stance；搬运 ACTIVE 下硬起身由调度自动推进两步，一次按键完成。
+- 进入搬运：1s 插值后全身僵直锁死（腿+腰+臂+头覆盖）；同时暂停 MPC 优化节点、跳过 WBC/MPC/RL 计算，由搬运分支直接生成位控命令。语音「进入搬运模式」
+- 退出搬运：解算站立姿态 → 检测通过后解除僵直；MPC 进入 stance 恢复流程，AMP/RL 直接恢复运行。语音「退出搬运模式」
+- 瘫软倒地：仅搬运中可用，电机掉使能，由**倒地起身控制器接管**；正常模式下彻底屏蔽防误触
+- 起身：LB+RB+X 第 1 下回初始姿态，第 2 下完整起身，完成后回到 **MPC stance**，语音「退出搬运模式」
 - 搬运期间拉保护检测关闭
-- 当前状态可通过 `/humanoid_controller/transport_mode_state_` 话题观测（0=INACTIVE, 1=INTERPOLATING, 2=READY, 3=ACTIVE, 4=HANDING_OVER）
 - 详细说明见 **[RL控制框架ROS接口文档](RL控制框架ROS接口文档.md#4-主控制器服务humanoidcontroller)**
-
----
-
-#### `/humanoid_controller/fall_stand_command`
-
-**类型:** `kuavo_msgs::FallStandCommand`
-
-**功能说明:**
-
-倒地起身控制。替代旧的 `/humanoid_controller/trigger_fall_stand_up`（`std_srvs/Trigger`），拆分为显式的两阶段命令。
-
-**消息字段:**
-
-| 字段 | 类型 | 描述 |
-| --- | --- | --- |
-| command | uint8 | 1=PREPARE 起身初始姿态, 2=STAND_UP 完整起身, 3=RESET 复位 |
-| success | bool | 返回数据, 是否调用成功 |
-| message | string | 返回数据, 消息 |
-
-**使用说明:**
-
-- PREPARE（1）：从瘫软状态插值到起身轨迹起点（FALL_DOWN → INTERPOLATING → READY_FOR_STAND_UP）。
-- STAND_UP（2）：RL 推理执行起身到站立（STAND_UP → STANDING），完成后可切回基础控制。
-- RESET（3）：复位倒地起身控制器状态。
-- 控制器状态机：FALL_DOWN(0) → INTERPOLATING(1) → READY_FOR_STAND_UP(2) → STAND_UP(3) → STANDING(4)。
 
 ---
 
@@ -148,8 +157,8 @@
 | linear.y | float64 | y线性速度, 单位(m/s) |
 | linear.z | float64 | 增量高度, 单位(m) |
 | angular.z | float64 | yaw方向速度, 单位(radian/s) |
-| angular.x | float64 | 未使用 |
 | angular.y | float64 | 未使用 |
+| angular.x | float64 | 未使用 |
 
 **使用说明:**
 
@@ -221,6 +230,13 @@
 
 - 注意: 发布的模板要和gait.info中定义的gait严格一致
 
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| eventTimes | float[] | 步态对应的时间长度 |
+| modeSequence | int8[] | 步态模式的序列，数据长度需要与时间长度一致 |
+
 ---
 
 #### `/humanoid_mpc_gait_change`
@@ -275,7 +291,7 @@
 
 #### `/humanoid_get_arm_ctrl_mode`
 
-**类型:** `kuavo_msgs::changeGaitMode`
+**类型:** `kuavo_msgs::changeArmCtrlMode`
 
 **功能说明:**
 
@@ -289,13 +305,14 @@
 
 **功能说明:**
 
-修改手臂控制模式，control_mode 有三种模式
+修改手臂控制模式，control_mode 有四种模式
 
 **控制模式:**
 
 - 0: keep pose 保持姿势
 - 1: auto_swing_arm 行走时自动摆手，切换到该模式会自动运动到摆手姿态
 - 2: external_control 外部控制，手臂的运动由外部控制
+- 3: ik_ultra_fast_mode 快速逆解模式，直接绕过滤波处理
 
 ---
 
@@ -398,6 +415,23 @@
 
 该服务修改灵巧手的抓力程度
 
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| force_level |int8| 期望抓取力等级，0为小力度，1为普通力度，2为全力 |
+| hand_side | int8 | 手部代码，0为左手，1为右手，2为双手 |
+| success | bool | 设置成功标识符，成功返回true |
+| message | string | 指示请求结果的消息 |
+
+ - SMALL 0x00
+ - NORMAL 0x01
+ - FULL 0x02
+
+ - LEFT_HAND 0x00
+ - RIGHT_HAND 0x01
+ - BOTH_HANDS 0x02
+
 ---
 
 #### `/control_robot_leju_claw`
@@ -445,7 +479,7 @@
 
 #### `/dexhand/left/enable_touch_sensor` 和 `/dexhand/right/enable_touch_sensor`
 
-**类型:** `kuavo_msgs::controlLejuClaw`
+**类型:** `kuavo_msgs::enableHandTouchSensor`
 
 **设备支持:**
 
@@ -460,6 +494,8 @@
 | 字段 | 类型 | 描述 |
 | --- | --- | --- |
 | mask | uint8 | 用btis位来表示开启/关闭哪个传感器 |
+| success | bool | 返回成功标识符，成功返回true |
+| message | string | 返回补充或报错信息 |
 
 - THUMB_SENSOR 0x01
 - INDEX_SENSOR 0x02
@@ -493,6 +529,7 @@
 | data | bool | 请求数据，true表示开启turbo模式，false表示关闭turbo模式 |
 | success | bool | 返回数据，是否调用成功 |
 | message | string | 返回数据，调用结果描述信息 |
+
 
 ---
 
@@ -698,7 +735,7 @@
 
 #### `/leju_claw_command`
 
-**类型:** `kuavo_msgs::lejuCalwCommand`
+**类型:** `kuavo_msgs::lejuClawCommand`
 
 **设备支持:**
 
@@ -1149,8 +1186,8 @@ end_effector_data:
 | 字段 | 类型 | 描述 |
 | --- | --- | --- |
 | time | float64 | 时间 |
-| state | ocs2_msgs/mpc_state | 状态向量, 详情可见[文档](./docs/readme.topics.md) |
-| input | ocs2_msgs/mpc_input | 控制向量, 详情可见[文档](./docs/readme.topics.md) |
+| state | ocs2_msgs/mpc_state | 状态向量, 详情可见[文档](readme_topics.md) |
+| input | ocs2_msgs/mpc_input | 控制向量, 详情可见[文档](readme_topics.md) |
 | mode | int8 | 0 ~15, SS, FF, SF.... |
 
 **使用说明:**
@@ -1732,13 +1769,29 @@ ik输入的位置姿态, 顺序为l_hand_xyz,l_hand_quat,r_hand_xyz,r_hand_quat
 
 #### `/drake_ik/eef_pose`
 
+**类型:** `kuavo_msgs::twoArmHandPose`
+
 **功能说明:**
 
 ik的结果正解得到的末端位置姿态
 
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| header | Header | 消息头，包括ID、时间戳等 |
+| left_pose | armHandPose | 左手位姿 |
+| right_pose | armHandPose | 右手位姿 |
+| armHandPose.pos_xyz | float64[3] | 手位置 |
+| armHandPose.quat_xyzw | float64[4] | 手姿态(xyzw) |
+| armHandPose.elbow_pos_xyz | float64[3] | 手肘位置 |
+| armHandPose.joint_angles | float64[7] | 关节位置 |
+
 ---
 
 #### `/humanoid_controller/wbc_arm_eef_pose`
+
+**类型:** `std_msgs::Float64MultiArray`
 
 **功能说明:**
 
@@ -1748,6 +1801,8 @@ ik的结果正解得到的末端位置姿态
 
 #### `/leju_quest_bone_poses`
 
+**类型:** `noitom_hi5_hand_udp_python::PoseInfoList`
+
 **功能说明:**
 
 quest3节点发出的原始全身骨骼数据
@@ -1755,6 +1810,8 @@ quest3节点发出的原始全身骨骼数据
 ---
 
 #### `/quest_joystick_data`
+
+**类型:** `noitom_hi5_hand_udp_python::JoySticks`
 
 **功能说明:**
 

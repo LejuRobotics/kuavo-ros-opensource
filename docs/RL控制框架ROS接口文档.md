@@ -7,10 +7,10 @@
 
 ## 目录
 
-1. [控制器管理服务（RLControllerManager）](#1-控制器管理服务rlcontrollermanager) — 行走列表/循环/倒地状态及**多舞蹈**接口
+1. [控制器管理服务（RLControllerManager）](#1-控制器管理服务rlcontrollermanager) — 行走列表/循环/倒地状态、VMP及**多舞蹈**接口
 2. [控制器基础服务（RLControllerBase）](#2-控制器基础服务rlcontrollerbase) - 5个服务
 3. [倒地起身控制器服务（FallStandController）](#3-倒地起身控制器服务fallstandcontroller) - 1个服务
-4. [主控制器服务（humanoidController）](#4-主控制器服务humanoidcontroller) - 1个服务
+4. [主控制器服务（humanoidController）](#4-主控制器服务humanoidcontroller) - 5个服务
 5. [腰部控制器接口（WaistController）](#5-腰部控制器接口waistcontroller) - 2个话题
 6. [监控与调试话题](#6-监控与调试话题) - 5个话题
 
@@ -26,18 +26,17 @@
 
 **功能**: 切换到指定的控制器
 
-**请求参数**:
-- `controller_name` (string): 要切换到的控制器名称
-  - `"mpc"` 或空字符串：切回MPC基础控制器
-  - 其他名称（如 `"amp_controller"`、`"fall_stand_controller"` 等）：切换到对应的RL控制器
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 切换是否成功
-- `message` (string): 返回消息，包含成功或失败的原因
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| controller_name | string | 请求数据, 要切换到的控制器名称。`"mpc"`：切回MPC基础控制器；其他名称（如 `"amp_controller"`、`"depth_loco_controller"` 等）：切换到对应的RL控制器（须为行走控制器列表中的名称，可用 `get_controller_list` 查询） |
+| success | bool | 返回数据, 切换是否成功 |
+| message | string | 返回数据, 返回消息，包含成功或失败的原因 |
 
 **使用说明**:
 - 只能切换到已加载且启用的控制器
-- 控制器必须在 `walk_controllers_` 列表中（**不包含**舞蹈控制器；舞蹈请使用 **1.5 节** `switch_to_dance_controller`）
+- 控制器必须在 `walk_controllers_` 列表中（**不包含**舞蹈控制器；舞蹈请使用 **1.7 节** `switch_to_dance_controller`）
 - 从RL切换到MPC时，如果RL控制器不在stance状态，切换会被阻止
 - 从MPC切换到RL时，如果MPC不在stance状态，切换会被阻止（倒地起身控制器除外）
 
@@ -49,24 +48,42 @@ rosservice call /humanoid_controller/switch_controller "controller_name: 'mpc'"
 # 切换到AMP行走控制器
 rosservice call /humanoid_controller/switch_controller "controller_name: 'amp_controller'"
 ```
+---
+
+#### 1.2 `/humanoid_controller/set_rl_switch_mode`
+
+**类型:** `std_srvs::SetBool`
+
+**功能说明:**
+
+设置 RL 控制器切换模式。
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | bool | 请求数据, true 表示开启 RL 控制器切换模式, false 表示关闭 |
+| success | bool | 返回数据, 是否调用成功 |
+| message | string | 返回数据, 调用结果描述信息 |
 
 ---
 
-### 1.2 `/humanoid_controller/get_controller_list`
+### 1.3 `/humanoid_controller/get_controller_list`
 
 **服务类型**: `kuavo_msgs/getControllerList`
 
 **功能**: 获取当前可用的控制器列表和当前激活的控制器信息
 
-**请求参数**: 无
+**消息字段:**
 
-**响应参数**:
-- `controller_names` (string[]): 可用控制器名称列表（包含 `"mpc"`）
-- `count` (int32): 控制器数量
-- `current_index` (int32): 当前控制器索引（-1表示未找到）
-- `current_controller` (string): 当前控制器名称（"mpc"表示MPC控制器）
-- `success` (bool): 获取是否成功
-- `message` (string): 返回消息
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| controller_names | string[] | 返回数据, 可用控制器名称列表（包含 `"mpc"`） |
+| count | int32 | 返回数据, 控制器数量 |
+| current_index | int32 | 返回数据, 当前控制器索引（-1表示未找到） |
+| current_controller | string | 返回数据, 当前控制器名称（"mpc"表示MPC控制器） |
+| success | bool | 返回数据, 获取是否成功 |
+| message | string | 返回数据, 返回消息 |
 
 **使用说明**:
 - MPC控制器始终在索引0
@@ -79,21 +96,22 @@ rosservice call /humanoid_controller/get_controller_list
 
 ---
 
-### 1.3 `/humanoid_controller/switch_to_next_controller`
+### 1.4 `/humanoid_controller/switch_to_next_controller`
 
 **服务类型**: `kuavo_msgs/switchToNextController`
 
 **功能**: 在控制器列表中循环切换到下一个控制器
 
-**请求参数**: 无
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 切换是否成功
-- `message` (string): 返回消息
-- `current_controller` (string): 切换前的控制器名称
-- `next_controller` (string): 切换后的控制器名称
-- `current_index` (int32): 切换前的控制器索引
-- `next_index` (int32): 切换后的控制器索引
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 切换是否成功 |
+| message | string | 返回数据, 返回消息 |
+| current_controller | string | 返回数据, 切换前的控制器名称 |
+| next_controller | string | 返回数据, 切换后的控制器名称 |
+| current_index | int32 | 返回数据, 切换前的控制器索引 |
+| next_index | int32 | 返回数据, 切换后的控制器索引 |
 
 **使用说明**:
 - 按顺序循环切换：`mpc → 第一个RL → ... → 最后一个RL → mpc`
@@ -107,20 +125,74 @@ rosservice call /humanoid_controller/switch_to_next_controller
 
 ---
 
-### 1.4 `/humanoid_controller/set_fall_down_state`
+### 1.5 `/humanoid_controller/switch_to_previous_controller`
+
+**服务类型**: `kuavo_msgs/switchToNextController`
+
+**功能**: 在控制器列表中反向循环切换到上一个控制器
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 切换是否成功 |
+| message | string | 返回数据, 返回消息 |
+| current_controller | string | 返回数据, 切换前的控制器名称 |
+| next_controller | string | 返回数据, 切换后的控制器名称 |
+| current_index | int32 | 返回数据, 切换前的控制器索引 |
+| next_index | int32 | 返回数据, 切换后的控制器索引 |
+
+**使用说明**:
+- 按逆序循环切换：`mpc → 最后一个RL → ... → 第一个RL → mpc`
+- 适合作为手柄或键盘的"一键切换模式"接口（反向切换）
+- 与 `switch_to_next_controller`（1.3）共享相同的退出保护机制：当前控制器不允许退出（如 AMP 还在行走）或为倒地起身控制器时，拒绝切换
+- 使用 `findNextSwitchableIndex(current_index, -1)` 沿环形列表反向搜索下一个可切换的控制器（自动跳过深度话题未就绪的 `depth_loco_controller` 等）
+
+**示例**:
+```bash
+rosservice call /humanoid_controller/switch_to_previous_controller
+```
+
+---
+
+### 1.6 `/humanoid_controller/switch_to_vmp_controller`
+
+**服务类型**: `std_srvs/Trigger`
+
+**功能**: 一键切换到 VMP（Visual Motion Planning）控制器
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 切换是否成功 |
+| message | string | 返回数据, 返回消息，包含切换结果或失败原因 |
+
+**使用说明**:
+- VMP 控制器**不在**行走控制器列表（`walk_controllers_`）中，因此**无法**通过 `switch_controller`（1.1）或 `switch_to_next_controller`（1.4）切换到此控制器
+- 需要 `rl_controllers.yaml` 中启用至少一条 `type: VMP_CONTROLLER` 配置
+- 切换逻辑与 `switch_controller` 一致，受相同的 stance / exit 保护限制
+
+**示例**:
+```bash
+rosservice call /humanoid_controller/switch_to_vmp_controller
+```
+
+---
+
+### 1.7 `/humanoid_controller/set_fall_down_state`
 
 **服务类型**: `std_srvs/SetBool`
 
 **功能**: 设置机器人的倒地状态，并自动切换到倒地起身控制器
 
-**请求参数**:
-- `data` (bool):
-  - `true`: 设置为倒地状态（FALL_DOWN）
-  - `false`: 设置为站立状态（STANDING）
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 设置是否成功
-- `message` (string): 返回消息，包含状态设置和控制器切换的结果
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | bool | 请求数据, `true`: 设置为倒地状态（FALL_DOWN）；`false`: 设置为站立状态（STANDING） |
+| success | bool | 返回数据, 设置是否成功 |
+| message | string | 返回数据, 返回消息，包含状态设置和控制器切换的结果 |
 
 **使用说明**:
 - 当设置为倒地状态（`true`）时：
@@ -142,21 +214,19 @@ rosservice call /humanoid_controller/set_fall_down_state "data: false"
 
 ---
 
-### 1.5 `/humanoid_controller/switch_to_dance_controller`
+### 1.8 `/humanoid_controller/switch_to_dance_controller`
 
 **服务类型**: `kuavo_msgs/SetString`
 
 **功能**: 切换到指定舞蹈 RL 控制器实例。逻辑与 `RLControllerManager::switchDanceControllerByStringCallback` 一致（多支舞在 `rl_controllers.yaml` 中配置多条 `type: DANCE_CONTROLLER`）。
 
-**请求参数**:
-- `data` (string)，语义如下：
-  - **空字符串 `""`**：切换到舞蹈列表中的**第一项**（与旧版仅支持单舞时的默认行为一致）
-  - **`#` + 非负整数**（如 `#0`、`#1`）：按 `get_dance_controller_list` 返回的 `data[]` **下标**切换
-  - **其他字符串**：按已注册的**控制器名称**切换（须为 `get_dance_controller_list` 中的一项，例如 `dance_controller`）
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 是否切换成功
-- `message` (string): 说明信息或失败原因
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | string | 请求数据。空字符串 `""`：切换到舞蹈列表中的第一项；`#` + 非负整数（如 `#0`、`#1`）：按 `get_dance_controller_list` 返回的 `data[]` 下标切换；其他字符串：按已注册的控制器名称切换 |
+| success | bool | 返回数据, 是否切换成功 |
+| message | string | 返回数据, 说明信息或失败原因 |
 
 **使用说明**:
 - 需在对应版本 `rl_controllers.yaml` 中启用至少一条 `DANCE_CONTROLLER`
@@ -177,22 +247,23 @@ rosservice call /humanoid_controller/switch_to_dance_controller "data: 'dance_co
 
 ---
 
-### 1.6 `/humanoid_controller/get_dance_controller_list`
+### 1.9 `/humanoid_controller/get_dance_controller_list`
 
 **服务类型**: `kuavo_msgs/GetStringList`
 
 **功能**: 返回当前已加载、且类型为 `DANCE_CONTROLLER` 的控制器 **name** 列表，顺序与 `rl_controllers.yaml` 中声明顺序一致（内部为 `dance_controllers_`）。
 
-**请求参数**: 无（`GetStringList` 请求体为空）
+**消息字段:**
 
-**响应参数**:
-- `data` (string[]): 舞蹈控制器名称列表
-- `success` (bool): 查询是否成功
-- `message` (string): 简要说明（如舞蹈数量）
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | string[] | 返回数据, 舞蹈控制器名称列表 |
+| success | bool | 返回数据, 查询是否成功 |
+| message | string | 返回数据, 简要说明（如舞蹈数量） |
 
 **使用说明**:
 - 与 `get_controller_list` 互补：后者只返回**行走**列表（含 `mpc`），本服务只列舞蹈项
-- 可与 1.5 配合：先 `get_dance_controller_list` 再按名或 `#索引` 调用 `switch_to_dance_controller`
+- 可与 1.8 配合：先 `get_dance_controller_list` 再按名或 `#索引` 调用 `switch_to_dance_controller`
 
 **示例**:
 ```bash
@@ -211,11 +282,12 @@ rosservice call /humanoid_controller/get_dance_controller_list
 
 **功能**: 重新加载控制器的配置文件
 
-**请求参数**: 无
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 重新加载是否成功
-- `message` (string): 返回消息
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 重新加载是否成功 |
+| message | string | 返回数据, 返回消息 |
 
 **使用说明**:
 - 只有在控制器处于非运行状态（PAUSED或STOPPED）时才能重新加载
@@ -238,11 +310,12 @@ rosservice call /humanoid_controllers/fall_stand_controller/reload
 
 **功能**: 查询控制器是否处于激活状态
 
-**请求参数**: 无
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 控制器是否激活（true表示激活，false表示未激活）
-- `message` (string): 返回消息（"Controller is active" 或 "Controller is not active"）
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 控制器是否激活（true表示激活，false表示未激活） |
+| message | string | 返回数据, 返回消息（"Controller is active" 或 "Controller is not active"） |
 
 **使用说明**:
 - 控制器处于 `RUNNING` 状态时返回 `true`
@@ -261,15 +334,12 @@ rosservice call /humanoid_controllers/amp_controller/isActive
 
 **功能**: 获取控制器的当前状态
 
-**请求参数**: 无
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 查询是否成功（始终为true）
-- `message` (string): 状态码（整数字符串）
-  - `0`: INITIALIZING（初始化中）
-  - `1`: RUNNING（运行中）
-  - `2`: PAUSED（已暂停）
-  - `3`: STOPPED（已停止）
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 查询是否成功（始终为true） |
+| message | string | 返回数据, 状态码（整数字符串）。`0`: INITIALIZING（初始化中）；`1`: RUNNING（运行中）；`2`: PAUSED（已暂停）；`3`: ERROR（运行错误）；`4`: STOPPED（已停止） |
 
 **使用说明**:
 - 状态码以字符串形式返回，需要解析为整数
@@ -287,15 +357,12 @@ rosservice call /humanoid_controllers/amp_controller/getState
 
 **功能**: 获取控制器的类型
 
-**请求参数**: 无
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 查询是否成功（始终为true）
-- `message` (string): 控制器类型码（整数字符串）
-  - `0`: MPC（基础控制器）
-  - `1`: FALL_STAND_CONTROLLER（倒地起身控制器）
-  - `2`: AMP_CONTROLLER（AMP行走控制器）
-  - 其他: 未来可能扩展的类型
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 查询是否成功（始终为true） |
+| message | string | 返回数据, 控制器类型码（整数字符串）。`0`: MPC（基础控制器）；`1`: AMP_CONTROLLER（AMP行走控制器）；`2`: FALL_STAND_CONTROLLER（倒地起身控制器）；`3`: PERCEPTION_LOCO_CONTROLLER（感知行走控制器）；`4`: DEPTH_LOCO_CONTROLLER；`5`: VMP_CONTROLLER（VMP控制器）；`6`: DANCE_CONTROLLER（跳舞控制器） |
 
 **使用说明**:
 - 类型码以字符串形式返回，需要解析为整数
@@ -313,11 +380,12 @@ rosservice call /humanoid_controllers/amp_controller/getType
 
 **功能**: 重置控制器的内部状态
 
-**请求参数**: 无
+**消息字段:**
 
-**响应参数**:
-- `success` (bool): 重置是否成功
-- `message` (string): 返回消息
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 重置是否成功 |
+| message | string | 返回数据, 返回消息 |
 
 **使用说明**:
 - 只有在控制器处于非运行状态（PAUSED或STOPPED）时才能重置
@@ -335,31 +403,36 @@ rosservice call /humanoid_controllers/amp_controller/reset
 
 这些服务由 `FallStandController` 提供，专门用于倒地起身功能。
 
-### 3.1 `/humanoid_controller/fall_stand_command`
+### 3.1 `/humanoid_controller/trigger_fall_stand_up`
 
-**服务类型**: `kuavo_msgs/FallStandCommand`
+**服务类型**: `std_srvs/Trigger`
 
-**功能**: 显式控制倒地起身状态机
+**功能**: 触发倒地起身流程
 
-**请求参数**:
-- `command` (uint8):
-  - `1 = PREPARE`: 插值到起身初始姿态 (FALL_DOWN→INTERPOLATING→READY)
-  - `2 = STAND_UP`: 执行 RL 起身轨迹 (READY→STAND_UP)
-  - `3 = RESET`: 复位状态机
+**消息字段:**
 
-**状态机流程**:
-- `FALL_DOWN`(0) → `INTERPOLATING`(1) → `READY`(2) → `STAND_UP`(3) → `STANDING`(4)
-- 阶段状态通过 `/humanoid_controller/FallStandController/fall_stand_state_` 话题发布
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| success | bool | 返回数据, 触发是否成功 |
+| message | string | 返回数据, 返回消息，说明触发结果或失败原因 |
 
 **使用说明**:
-- PREPARE 触发后控制器自动插值，完成后状态变为 READY
-- STAND_UP 仅在 READY 状态有效
-- 正常操作流程：先 PREPARE，等 fall_stand_state_ 变为 2(READY)，再 STAND_UP
+- 只有在控制器处于 `RUNNING` 状态时才能触发
+- 只有在机器人处于 `FALL_DOWN` 状态时才能触发
+- 触发后会：
+  1. 根据当前机体姿态自动选择趴着/躺着模型
+  2. 重置轨迹时间步
+  3. 计算当前与轨迹参考yaw差
+  4. 进入 `READY_FOR_STAND_UP` 状态，开始关节空间插值
+  5. 插值完成后自动进入 `STAND_UP` 状态，开始RL控制起身
+
+**状态机流程**:
+- `FALL_DOWN` → `READY_FOR_STAND_UP` → `STAND_UP` → `STANDING`
 
 **示例**:
 ```bash
-rosservice call /humanoid_controller/fall_stand_command "command: 1"  # PREPARE
-rosservice call /humanoid_controller/fall_stand_command "command: 2"  # STAND_UP
+rosservice call /humanoid_controller/trigger_fall_stand_up
+```
 
 ---
 
@@ -371,43 +444,33 @@ rosservice call /humanoid_controller/fall_stand_command "command: 2"  # STAND_UP
 
 **服务类型**: `kuavo_msgs/TransportModeCommand`
 
-**功能**: 搬运模式控制
+**功能**: 搬运模式控制 —— 进入后全身僵直（电机锁死），可安全抬起移动；退出后恢复原有控制。
 
-**请求参数 - command (uint8)**:
-| 值 | 名称 | 说明 |
-|----|------|------|
-| 1 | TRANSPORT_ENTER | 进入搬运，躯干插值到搬运姿态 |
-| 2 | TRANSPORT_EXIT | 完全退出搬运 |
-| 3 | TRANSPORT_LOCK | 关节锁死进入可搬运状态 |
-| 4 | TRANSPORT_HAND_OVER | 移交管理权，开始退出搬运 |
-| 5 | TRANSPORT_FALL_DOWN | 瘫软倒地，切倒地起身控制器 |
+**消息字段:**
 
-**状态机流程**:
-```
-INACTIVE →(ENTER)→ INTERPOLATING(~1s躯干插值) →(自动)→ READY(姿态就绪)
-  →(LOCK)→ ACTIVE(关节锁死) →(HAND_OVER)→ 恢复原控制器 →(EXIT)→ INACTIVE
-  ACTIVE →(FALL_DOWN)→ 倒地起身 → 恢复站立
-```
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| command | uint8 | 请求数据, `1 = TRANSPORT_ENTER`: 进入搬运（僵直）；`2 = TRANSPORT_EXIT`: 退出搬运；`3 = TRANSPORT_FALL_DOWN`: 瘫软倒地 |
+| success | bool | 返回数据, 是否成功 |
+| message | string | 返回数据, 说明信息或失败原因 |
 
 **使用说明**:
-- ENTER：需 MPC stance 或 RL 模式，进入后躯干自动插值到搬运姿态
-- READY 阶段：姿态已到位，关节未锁，可 LOCK 或 HAND_OVER
-- ACTIVE 阶段：关节 CSP 锁死（腿+腰+臂+头全覆盖），暂停 MPC/WBC/RL 计算，可安全搬运
-- HAND_OVER：移交管理权，控制器恢复原模式
-- FALL_DOWN：仅 ACTIVE 可用，瘫软后走倒地起身流程恢复
-- 搬运期间拉起保护暂停
+- ENTER：需控制器处于 MPC 或 AMP 模式、非拉保护状态。进入后 1s 插值到搬运姿势，全身僵直锁死（腿+腰+臂+头关节覆盖）；同时暂停 MPC 优化节点、跳过 WBC/MPC/RL 计算，由搬运分支直接生成位控命令。语音播报「进入搬运模式」
+- EXIT：先解算站立姿态，再检测（EMA 接触力 + 倾角 ≤0.10rad，20 帧确认）。通过后解除僵直：若进入前为 MPC，则触发 `reset_mpc_` 走 stance 恢复流程；若为 AMP/RL，则直接恢复 AMP/RL 运行。语音播报「退出搬运模式」
+- FALL_DOWN：仅搬运中可用，瘫软倒地，电机掉使能，由**倒地起身控制器接管**，输出零力矩 limp。**正常模式下 LB+RB+B 彻底屏蔽防误触**
+- 起身：倒地后 LB+RB+X 触发 `trigger_fall_stand_up`（见 [3.1 节](#31-humanoid_controllertrigger_fall_stand_up)），第 1 下回起身初始姿态，第 2 下完整起身，完成后自动回到 **MPC stance**。语音播报「退出搬运模式」
+- 搬运期间拉保护检测关闭
+
+**状态机流程**:
+- `INACTIVE` → `INTERPOLATING`(1s) → `ACTIVE`(僵直) → EXIT(站立检测) → `INACTIVE` → 恢复 AMP/MPC
+- `ACTIVE`(僵直) → `FALL_DOWN`(瘫软) → FallStandController 接管 → 两步起身 → **MPC stance**
 
 **示例**:
 ```bash
-rosservice call /humanoid_controller/transport_mode_command "command: 1"  # ENTER
-rosservice call /humanoid_controller/transport_mode_command "command: 3"  # LOCK→ACTIVE
-rosservice call /humanoid_controller/transport_mode_command "command: 4"  # HAND_OVER
-rosservice call /humanoid_controller/transport_mode_command "command: 5"  # FALL_DOWN
+rosservice call /humanoid_controller/transport_mode_command "command: 1"  # 僵直
+rosservice call /humanoid_controller/transport_mode_command "command: 2"  # 退出
+rosservice call /humanoid_controller/transport_mode_command "command: 3"  # 瘫软
 ```
-
----
-
-## 5. 腰部控制器接口（WaistController）
 
 ---
 
@@ -437,7 +500,7 @@ rosservice call /humanoid_controller/transport_mode_command "command: 5"  # FALL
 
 ## 6. 监控与调试话题
 
-这些话题由 `humanoidController` 通过 `TopicLogger` 实时发布，用于监控控制器状态和调试MPC↔RL模式切换过程。
+这些话题由 `humanoidController` 和 `RLControllerManager` 实时发布，用于监控控制器状态、切换事件和调试MPC↔RL模式切换过程。
 
 ### 6.1 `/humanoid_controller/is_rl_controller_`
 
@@ -447,10 +510,11 @@ rosservice call /humanoid_controller/transport_mode_command "command: 5"  # FALL
 
 **功能**: 实时发布当前是否处于RL控制模式
 
-**消息内容**:
-- `data` (float64): 
-  - `1.0`: 当前处于RL控制模式
-  - `0.0`: 当前处于MPC控制模式
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | float64 | `1.0`: 当前处于RL控制模式；`0.0`: 当前处于MPC控制模式 |
 
 **使用说明**:
 - 状态由 `!controller_manager_->isBaseControllerActive()` 决定
@@ -476,11 +540,11 @@ rqt_plot /humanoid_controller/is_rl_controller_/data
 
 **功能**: 实时发布MPC重置状态，用于监控从RL切换到MPC时的重置过程
 
-**消息内容**:
-- `data` (float64): MPC重置状态码
-  - `0` (`NOMAL`): 正常状态，MPC正常运行
-  - `1` (`RESET_INITIAL_POLICY`): 重置MPC状态1，等待初始策略
-  - `2` (`RESET_BASE`): 重置MPC状态2，更新躯干位置（插值阶段）
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | float64 | MPC重置状态码。`0` (`NOMAL`): 正常状态，MPC正常运行；`1` (`RESET_INITIAL_POLICY`): 重置MPC状态1，等待初始策略；`2` (`RESET_BASE`): 重置MPC状态2，更新躯干位置（插值阶段） |
 
 **状态转换流程**:
 - 当从RL切回MPC时，状态会依次经历：
@@ -501,25 +565,88 @@ rostopic echo /humanoid_controller/resetting_mpc_state_
 rqt_plot /humanoid_controller/resetting_mpc_state_/data
 ```
 
-### 6.3 `/humanoid_controller/transport_mode_state_`
+---
 
-**话题类型**: `std_msgs/Float64`
+### 6.3 `/humanoid_controller/controller_switch_event`
 
-**功能**: 实时发布搬运模式状态
+**话题类型**: `kuavo_msgs/ControllerSwitchEvent`
 
-- `0` = INACTIVE, `1` = INTERPOLATING, `2` = READY, `3` = ACTIVE, `4` = HANDING_OVER
+**发布方**: `RLControllerManager`（latch=true）
 
-### 6.4 `/humanoid_controller/is_stance_mode_`
+**功能**: 发布控制器切换事件，记录每次切换的来源和目标控制器
 
-**话题类型**: `std_msgs/Float64`
+**消息字段:**
 
-**功能**: 实时发布 MPC stance 状态 (`0.0`/`1.0`)
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| header | std_msgs/Header | 时间戳 |
+| from_controller | string | 切换前的控制器名称（`"mpc"` 表示 MPC） |
+| to_controller | string | 切换后的控制器名称（`"mpc"` 表示 MPC） |
 
-### 6.5 `/humanoid_controller/FallStandController/fall_stand_state_`
+**使用说明**:
+- 每次控制器切换成功后发布一条消息（含 index/name 切换、循环切换、舞蹈切换等所有切换路径）
+- 可用于日志记录、切换事件追踪等
+- latch 模式确保新订阅者能获取最后一次切换事件
 
-**话题类型**: `std_msgs/Float64`
+**订阅示例**:
+```bash
+rostopic echo /humanoid_controller/controller_switch_event
+```
 
-**功能**: 实时发布 FallStand 阶段 (`0`=FALL_DOWN `1`=INTERPOLATING `2`=READY `3`=STAND_UP `4`=STANDING)
+---
+
+### 6.4 `/humanoid_controller/depth_history_status`
+
+**话题类型**: `std_msgs/Int32`
+
+**发布方**: `RLControllerManager`（latch=true）
+
+**功能**: 发布深度历史话题（`/camera/depth/depth_history_array`）的检测状态码，用于判断是否允许切换到 `DEPTH_LOCO_CONTROLLER`
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| data | int32 | 状态码。`0`：OK，话题正常（有发布、频率达标、消息未过期）；非 0：话题异常（原因各有对应状态码，详见 `TopicMonitor::statusCode`） |
+
+**使用说明**:
+- 状态码由 `TopicMonitor` 后台周期检测更新
+- 切换到 `DEPTH_LOCO_CONTROLLER` 需此状态为 0（OK），否则 `switch_controller` / `switch_to_next_controller` 会自动跳过
+
+**订阅示例**:
+```bash
+rostopic echo /humanoid_controller/depth_history_status
+```
+
+---
+
+### 6.5 `/humanoid_controller/dance_trajectory_state`
+
+**话题类型**: `kuavo_msgs/DanceTrajectoryState`
+
+**发布方**: 所有 `DanceController` 实例（通过 `RLControllerManager` 注册的共享 publisher）
+
+**功能**: 发布当前舞蹈轨迹的播放状态，供音乐播放等外部模块使用
+
+**消息字段:**
+
+| 字段 | 类型 | 描述 |
+| --- | --- | --- |
+| header | std_msgs/Header | 时间戳 |
+| dance_name | string | 当前舞蹈名称 |
+| state | string | 轨迹状态（如 `"started"`、`"running"`、`"finished"` 等） |
+| run_id | uint32 | 本次运行 ID |
+| current_step | int32 | 当前步数 |
+| total_steps | int32 | 总步数 |
+
+**使用说明**:
+- 所有舞蹈控制器共享同一个 publisher（由 `RLControllerManager` 统一管理，避免多 publisher 启动期 race）
+- 可用于外部系统（如音乐播放模块）根据轨迹状态同步音频
+
+**订阅示例**:
+```bash
+rostopic echo /humanoid_controller/dance_trajectory_state
+```
 
 ---
 
@@ -558,22 +685,36 @@ rosservice call /humanoid_controller/switch_to_dance_controller "data: '#1'"
 rosservice call /humanoid_controller/switch_controller "controller_name: 'amp_controller'"
 ```
 
-### 倒地起身流程（推荐使用 fall_stand_command 接口）
+### VMP 控制器切换流程
+
+```bash
+# 一键切换到 VMP 控制器（不经过行走列表循环）
+rosservice call /humanoid_controller/switch_to_vmp_controller
+
+# 切回 MPC
+rosservice call /humanoid_controller/switch_controller "controller_name: 'mpc'"
+```
+
+### 双向循环切换流程
+
+```bash
+# 正向循环（下一个）
+rosservice call /humanoid_controller/switch_to_next_controller
+
+# 反向循环（上一个）
+rosservice call /humanoid_controller/switch_to_previous_controller
+```
+
+### 倒地起身流程
 
 ```bash
 # 1. 设置倒地状态（会自动切换到倒地起身控制器）
 rosservice call /humanoid_controller/set_fall_down_state "data: true"
 
-# 2. 第一次触发：PREPARE（插值到起身初始姿态）
-rosservice call /humanoid_controller/fall_stand_command "command: 1"
+# 2. 触发起身流程
+rosservice call /humanoid_controller/trigger_fall_stand_up
 
-# 3. 等待插值完成（监控 fall_stand_state_ 从 1→2）
-rostopic echo /humanoid_controller/FallStandController/fall_stand_state_
-
-# 4. 第二次触发：STAND_UP（执行 RL 起身）
-rosservice call /humanoid_controller/fall_stand_command "command: 2"
-
-# 5. 等待起身完成后，设置站立状态
+# 3. 等待起身完成后，设置站立状态
 rosservice call /humanoid_controller/set_fall_down_state "data: false"
 ```
 
@@ -582,22 +723,29 @@ rosservice call /humanoid_controller/set_fall_down_state "data: false"
 ## 注意事项
 
 1. **控制器切换保护机制**:
-   - 从RL切换到MPC时，RL控制器必须在stance状态
+   - 从RL切换到MPC时，RL控制器必须在允许退出状态（`isAllowToExit()` 返回 true）
    - 从MPC切换到RL时，MPC必须在stance状态（倒地起身控制器除外）
+   - 切换前需躯干速度稳定（`isTorsoVelocityStable()`），否则 `switch_controller` 和 `switch_to_next_controller` 均会拒绝切换
+   - 切换到 `DEPTH_LOCO_CONTROLLER` 时，需深度历史话题（`/camera/depth/depth_history_array`）可用（最低频率 55Hz、最大过期 0.2s、最少 10 个采样）
    - 倒地起身控制器在未完成起身任务前，不允许切换到其他控制器
-   - **舞蹈控制器**：`switch_controller` 的行走列表**不包含**舞蹈；请使用 `switch_to_dance_controller`（SetString）。**舞蹈 A → 舞蹈 B** 允许直接切换；**舞蹈 → MPC/行走** 仍受上述 stance / `requestToExit` 等限制
+   - **舞蹈控制器**：`switch_controller` 的行走列表**不包含**舞蹈；请使用 `switch_to_dance_controller`（SetString，**1.7 节**）。**舞蹈 A → 舞蹈 B** 允许直接切换；**舞蹈 → MPC/行走** 仍受上述 stance / `requestToExit` 等限制
+   - **VMP 控制器**：不在行走列表中，须使用专用 `switch_to_vmp_controller`（**1.5 节**）切换
 
 2. **控制器状态**:
    - `INITIALIZING`: 控制器正在初始化，不能执行操作
    - `RUNNING`: 控制器正在运行，可以执行控制
    - `PAUSED`: 控制器已暂停，推理线程继续运行但不执行控制
+   - `ERROR`: 控制器运行错误
    - `STOPPED`: 控制器已停止，推理线程已退出
 
 3. **服务命名空间**:
-   - 控制器管理服务：`/humanoid_controller/*`（包括行走切换、行走列表、舞蹈切换/舞蹈列表、倒地状态设置等）
+   - 控制器管理服务：`/humanoid_controller/*`（包括行走切换/列表/循环、VMP切换、舞蹈切换/列表、倒地状态设置等）
    - 控制器基础服务：`/humanoid_controllers/{controller_name}/*`（每个RL控制器的独立服务）
-   - 倒地起身服务：`/humanoid_controller/fall_stand_command`
+   - 倒地起身服务：`/humanoid_controller/trigger_fall_stand_up`
+   - 监控话题：`/humanoid_controller/` 命名空间下（含 `is_rl_controller_`、`resetting_mpc_state_`、`controller_switch_event`、`depth_history_status`、`dance_trajectory_state`）
+
+4. **行走控制器列表（`walk_controllers_`）构成**:
+   - 仅包含 `mpc` + `AMP_CONTROLLER` + `DEPTH_LOCO_CONTROLLER` 类型的控制器
+   - `FALL_STAND_CONTROLLER`、`VMP_CONTROLLER`、`DANCE_CONTROLLER` **不在**行走列表中，需使用各自专用接口
 
 ---
-
-

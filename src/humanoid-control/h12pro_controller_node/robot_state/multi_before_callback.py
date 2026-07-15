@@ -22,6 +22,7 @@ import time
 import signal
 import datetime
 import json
+from std_msgs.msg import String
 from std_srvs.srv import Trigger, TriggerRequest
 
 import threading
@@ -36,6 +37,7 @@ except ImportError:
 from kuavo_msgs.srv import playmusic, playmusicRequest, playmusicResponse
 from h12pro_controller_node.srv import ExecuteArmAction, ExecuteArmActionRequest, ExecuteArmActionResponse
 from h12pro_controller_node.msg import RobotActionState
+from kuavo_msgs.msg import ControllerSwitchEvent
 import os
 # import netifaces
 import json
@@ -358,6 +360,7 @@ rospy.Subscriber('/robot_action_state', RobotActionState, robot_action_state_cal
 # 全局话题发布
 joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
 com_pose_pub = rospy.Publisher('/cmd_pose', Twist, queue_size=10)
+nav_switch_pub = rospy.Publisher('/humanoid_controller/nav_switch_rl_controller_by_name', String, queue_size=10)
 # 控制拨杆
 BUTTON_A = 0
 BUTTON_B = 1
@@ -1294,11 +1297,49 @@ def switch_controller_callback(event):
     except Exception as e:
         rospy.logerr(f"Error in switch_controller_callback: {e}")
 
+def _publish_and_wait_for_controller_switch(target_controller, timeout=3.0):
+    """发布切换请求并等待 /humanoid_controller/controller_switch_event 确认
+
+    先创建 subscriber 再 publish，避免 TOCTOU 竞态导致事件丢失。
+
+    :param target_controller: 目标控制器名称
+    :param timeout: 超时时间（秒）
+    :return: bool, True 表示确认切换成功，False 表示超时
+    """
+    switch_event = threading.Event()
+    request_time = time.time()
+
+    def callback(msg):
+        if (msg.to_controller.lower() == target_controller.lower() and
+                msg.header.stamp.to_sec() >= request_time):
+            switch_event.set()
+
+    sub = rospy.Subscriber('/humanoid_controller/controller_switch_event',
+                           ControllerSwitchEvent, callback)
+
+    # 先建 subscriber，再 publish — 消除竞态窗口
+    nav_switch_pub.publish(String(data=target_controller))
+    rospy.loginfo(f"[DepthLocoSwitch] Published switch request to "
+                  f"/humanoid_controller/nav_switch_rl_controller_by_name: {target_controller}")
+
+    confirmed = switch_event.wait(timeout=timeout)
+    sub.unregister()
+
+    if confirmed:
+        rospy.loginfo(f"[DepthLocoSwitch] Confirmed switch to '{target_controller}' via controller_switch_event")
+    else:
+        rospy.logwarn(f"[DepthLocoSwitch] Timeout ({timeout}s) waiting for switch to '{target_controller}'")
+
+    return confirmed
+
+
 def depth_loco_switch_callback(event):
     """切换走楼梯斜坡控制器回调函数
-    - 如果当前是 mpc 或 amp_controller，切换到 depth_loco_controller
-    - 如果当前是 depth_loco_controller，切换回进入前的控制器
-    - 执行后设置冷却期，期间不允许其他状态转换
+    - 如果当前是 amp_controller，切换到 depth_loco_controller
+    - 如果当前是 depth_loco_controller，切换回 amp_controller
+    - 通过话题 /humanoid_controller/nav_switch_rl_controller_by_name 发布切换请求
+    - 订阅 /humanoid_controller/controller_switch_event 等待确认切换完成
+    - 确认成功后设置冷却期；失败则清理 restore_record、不设冷却期允许重试
     """
     global _switch_controller_cooling_until
     source = event.kwargs.get("source")
@@ -1314,33 +1355,40 @@ def depth_loco_switch_callback(event):
 
         current_controller_lower = current_controller.lower()
 
-        success = False
-        if current_controller_lower in ["mpc", "amp_controller"]:
+        target_controller = None
+        is_entering_depth = False
+        if current_controller_lower == "amp_controller":
             _set_depth_loco_restore_controller_name(current_controller_lower)
-            rospy.loginfo("[DepthLocoSwitch] Switching to depth_loco_controller")
-            success = call_switch_controller_service("depth_loco_controller")
-            if not success:
-                _set_depth_loco_restore_controller_name(None)
-                rospy.logwarn("[DepthLocoSwitch] Failed to switch to depth_loco_controller.")
+            target_controller = "depth_loco_controller"
+            is_entering_depth = True
+            rospy.loginfo("[DepthLocoSwitch] Switching from amp_controller to depth_loco_controller")
         elif current_controller_lower == "depth_loco_controller":
             restore_controller_name = _get_depth_loco_restore_controller_name()
-            if restore_controller_name not in ["mpc", "amp_controller"]:
+            if restore_controller_name != "amp_controller":
                 restore_controller_name = "amp_controller"
-            rospy.loginfo(f"[DepthLocoSwitch] Switching back to {restore_controller_name}")
-            success = call_switch_controller_service(restore_controller_name)
-            if not success:
-                rospy.logwarn(f"[DepthLocoSwitch] Failed to switch back to {restore_controller_name}.")
-            else:
-                _clear_depth_loco_restore_controller_name()
+            target_controller = restore_controller_name
+            rospy.loginfo(f"[DepthLocoSwitch] Switching back to {target_controller}")
         else:
-            rospy.logwarn(f"[DepthLocoSwitch] Unsupported current controller: {current_controller}.")
+            rospy.logwarn(f"[DepthLocoSwitch] Current controller '{current_controller}' is not amp_controller or depth_loco_controller. Cannot switch via navigation topic.")
+            return
+
+        if target_controller:
+            confirmed = _publish_and_wait_for_controller_switch(target_controller, timeout=3.0)
+            if confirmed:
+                if not is_entering_depth:
+                    _clear_depth_loco_restore_controller_name()
+            else:
+                if is_entering_depth:
+                    _set_depth_loco_restore_controller_name(None)
+                    rospy.logerr("[DepthLocoSwitch] Switch to depth_loco_controller not confirmed, restore record cleared")
+                else:
+                    rospy.logerr("[DepthLocoSwitch] Switch back to amp_controller not confirmed, restore record kept")
+                # 切换未确认，不设冷却期，允许用户立即重试
+                return
 
         with _switch_controller_lock:
             _switch_controller_cooling_until = time.time() + SWITCH_CONTROLLER_COOLDOWN
-            if success:
-                rospy.loginfo(f"[DepthLocoSwitch] Controller switched successfully. Cooldown period started for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
-            else:
-                rospy.loginfo(f"[DepthLocoSwitch] Cooldown period started (service call failed). State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+            rospy.loginfo(f"[DepthLocoSwitch] Cooldown period started. State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
 
         cooldown_thread = threading.Thread(target=_release_switch_controller_cooldown, daemon=True)
         cooldown_thread.start()
