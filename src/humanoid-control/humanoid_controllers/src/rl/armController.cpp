@@ -244,8 +244,8 @@ void ArmController::update(const ros::Time& time,
 
   // 3. 填充命令消息（根据模式决定是否填充）
   // 注意：不再对全模式应用滤波，Mode 0 和 1 的平滑插值不需要滤波
-  if (arm_control_mode_ == 0 || arm_control_mode_ == 2 || 
-      (arm_control_mode_ == 1 && cmd_stance == 1 && is_interpolating_to_default_))
+  if (arm_control_mode_ == 0 || arm_control_mode_ == 2 ||
+      (arm_control_mode_ == 1 && is_interpolating_to_default_))
   {
     fillJointCmdMessage(joint_cmd_msg, desire_arm_q_, desire_arm_v_,
                        joint_pos, joint_vel);
@@ -653,7 +653,7 @@ void ArmController::updateMode1(const ros::Time& time, double dt, int cmd_stance
   // 如果cmd_stance是1（站立），从指令位置通过限速插值回到默认位置，并填充fillJointCmdMessage
   // 如果cmd_stance是0（行走），不替换RL指令，保持joint_cmd_msg中的值（期望状态不更新）
   
-  if (cmd_stance == 1)  // 站立
+  if (cmd_stance == 1 || is_interpolating_to_default_)  // 站立 或 解锁后正在执行回家插值（行走中也跑）
   {
     if (!is_interpolating_to_default_)
     {
@@ -664,6 +664,11 @@ void ArmController::updateMode1(const ros::Time& time, double dt, int cmd_stance
       is_interpolating_ = true;
     }
     applySmoothInterpolation(time, default_arm_pos_, Eigen::VectorXd::Zero(joint_arm_num_));
+    // 三次曲线跑完后自动清除标记，关闭 fillJointCmd 门禁，交还 RL
+    if (!is_interpolating_)
+    {
+      is_interpolating_to_default_ = false;
+    }
   }
   else
   {

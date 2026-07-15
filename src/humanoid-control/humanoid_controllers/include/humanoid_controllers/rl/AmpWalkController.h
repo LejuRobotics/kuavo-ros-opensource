@@ -227,8 +227,25 @@ namespace humanoid_controller
     static constexpr double kLateralElbowFixScale_{0.5};
     bool enable_elbow_scale_{false};
     bool enable_back_arm_enhance_{false};
-    static constexpr double kBackArmEnhanceScale_{0.25};
+    static constexpr double kBackArmEnhanceScale_{0.22};
     static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};
+    bool enable_standup_enhance_{false};
+    static constexpr double kStandUpGravityPitchBiasDeg_{-5.0};   ///< 起身时 projected_gravity 后仰偏置 (deg)
+    static constexpr double kStandUpPitchFadeHeightStart_{-0.05}; ///< 该高度以下按深度满偏置，趋近 0 时淡出 (m)
+    static constexpr double kSquatPitchMaxCmd_{0.10};             ///< 深蹲时 cmdVelLineX_ 最大自动弯腰量 (m/s)
+    static constexpr double kSquatPitchFadeHeightStart_{-0.02};   ///< 下蹲低于该高度才开始叠加弯腰 (m)
+    static constexpr double kStandUpHeightRisingEpsilon_{1e-6};   ///< 高度命令上升判据阈值 (m)
+    // defaultJointState 顺序：waist(0), leg_l1(1)..leg_l6(6), leg_r1(7)..leg_r6(12)
+    static constexpr int kStandUpLegL1ActionIdx_{1};              ///< leg_l1_joint
+    static constexpr int kStandUpLegL4ActionIdx_{4};              ///< leg_l4_joint（左膝）
+    static constexpr int kStandUpLegR1ActionIdx_{7};              ///< leg_r1_joint
+    static constexpr int kStandUpLegR4ActionIdx_{10};             ///< leg_r4_joint（右膝）
+    static constexpr double kStandUpLeg4ActionScale_{1.1};        ///< 起身时 leg_l4/leg_r4 action 缩放
+    static constexpr double kStandUpLeg1ActionBiasFadeMin_{-0.11}; ///< leg_l1/leg_r1 偏置 fade 区间下限
+    static constexpr double kStandUpLeg1ActionBiasFadeMax_{-0.01}; ///< leg_l1/leg_r1 偏置 fade 区间上限，越接近 0 偏置越大
+    static constexpr double kStandUpLeg1ActionBiasMinAbs_{0.05}; ///< leg_l1/leg_r1 最小偏置绝对值
+    static constexpr double kStandUpLeg1ActionBiasMaxAbs_{0.1};   ///< leg_l1/leg_r1 最大偏置绝对值
+    bool stand_up_rising_active_{false};                            ///< 本周期是否处于起身上升阶段
     bool enable_roll_compensation_{false};
     bool enable_off_cmdy_by_cmdx_{false};
     static constexpr double kOffCmdyByCmdXThreshold_{0.3};   ///< cmdx 超过该值时关闭 cmdy
@@ -259,7 +276,7 @@ namespace humanoid_controller
     bool stance_height_stand_up_smoothing_enabled_{true};
     double max_stance_height_stand_up_change_{0.004}; ///< 起身单步最大高度命令变化量 (m)
     double stance_height_smooth_start_{-0.1};         ///< 起身达到该高度前平滑，达到后直接跟随 (m)
-    double max_stance_squat_depth_{0.18};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
+    double max_stance_squat_depth_{0.16};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
     double smoothed_stance_height_cmd_{0.0};          ///< 平滑后的下蹲高度命令
 
     // 下蹲守备（控制器端）：深蹲且转向较小时拦截姿态模式退出请求

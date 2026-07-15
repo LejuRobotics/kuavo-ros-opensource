@@ -111,6 +111,21 @@ void RlGaitReceiver::setAmpHandController(bool enable)
   is_amp_hand_controller_ = enable;
 }
 
+void RlGaitReceiver::resetVelocityState()
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  currentCommand_.setzero();
+  smoothed_cmd_vel_.linear.x = 0.0;
+  smoothed_cmd_vel_.linear.y = 0.0;
+  smoothed_cmd_vel_.linear.z = 0.0;
+  smoothed_cmd_vel_.angular.x = 0.0;
+  smoothed_cmd_vel_.angular.y = 0.0;
+  smoothed_cmd_vel_.angular.z = 0.0;
+  previous_cmd_vel_ = smoothed_cmd_vel_;
+  last_velocity_update_time_ = ros::Time::now();
+  stopInPlaceStepping();
+}
+
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
   if (!enabled_) {
@@ -233,10 +248,10 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
   }
   
   // Apply velocity smoothing
+  std::lock_guard<std::mutex> lock(command_mutex_);
   ros::Time current_time = ros::Time::now();
   geometry_msgs::Twist smoothed_vel = smoothVelocityCommand(*msg, current_time);
   
-  std::lock_guard<std::mutex> lock(command_mutex_);
   smoothed_cmd_vel_ = smoothed_vel;
   
   ROS_DEBUG("[RlGaitReceiver] Received velocity command: lin(%.3f, %.3f, %.3f) ang(%.3f, %.3f, %.3f)",
@@ -411,6 +426,10 @@ geometry_msgs::Twist RlGaitReceiver::applyMixedMotionLimits(const geometry_msgs:
 geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::Twist& cmd_vel, const ros::Time& current_time)
 {
   geometry_msgs::Twist smoothed_vel = smoothed_cmd_vel_;  // 从当前平滑速度开始
+  // 姿态模式下 linear.z 是高度命令，交给 AmpWalkController 的专用起身平滑处理，
+  // 不参与这里面向行走速度的通用平滑和合成限幅。
+  const bool bypass_linear_z_smoothing =
+      currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_;
   
   // Calculate time delta
   double dt = (current_time - last_velocity_update_time_).toSec();
@@ -421,7 +440,8 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
   // Calculate velocity differences
   double vel_diff_x = cmd_vel.linear.x - smoothed_vel.linear.x;
   double vel_diff_y = cmd_vel.linear.y - smoothed_vel.linear.y;
-  double vel_diff_z = cmd_vel.linear.z - smoothed_vel.linear.z;
+  double vel_diff_z =
+      bypass_linear_z_smoothing ? 0.0 : cmd_vel.linear.z - smoothed_vel.linear.z;
   double ang_diff_x = cmd_vel.angular.x - smoothed_vel.angular.x;
   double ang_diff_y = cmd_vel.angular.y - smoothed_vel.angular.y;
   double ang_diff_z = cmd_vel.angular.z - smoothed_vel.angular.z;
@@ -529,6 +549,10 @@ geometry_msgs::Twist RlGaitReceiver::smoothVelocityCommand(const geometry_msgs::
       smoothed_vel.linear.y =
           prev_y + (y_diff > 0.0 ? 1.0 : -1.0) * max_velocity_change_cmd_y_;
     }
+  }
+
+  if (bypass_linear_z_smoothing) {
+    smoothed_vel.linear.z = cmd_vel.linear.z;
   }
   
   // Apply mixed motion limits to velocity commands

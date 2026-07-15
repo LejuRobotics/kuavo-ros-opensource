@@ -293,6 +293,7 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
       loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
       loadData::loadPtreeValue(pt, enable_back_arm_enhance_, "enable_back_arm_enhance", false);
+      loadData::loadPtreeValue(pt, enable_standup_enhance_, "enable_standup_enhance", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdangz_, "enable_off_cmdy_by_cmdangz", false);
@@ -573,6 +574,7 @@ namespace humanoid_controller
     RLControllerBase::resume();
     if (gait_receiver_)
     {
+      gait_receiver_->resetVelocityState();
       gait_receiver_->setEnabled(true);
     }
 
@@ -686,7 +688,9 @@ namespace humanoid_controller
 
   void AmpWalkController::applyStanceHeightStandUpSmoothing(CommandDataRL& cmd)
   {
-    if (!is_amp_hand_controller_ || !stance_height_stand_up_smoothing_enabled_)
+    stand_up_rising_active_ = false;
+
+    if (!is_amp_hand_controller_)
     {
       return;
     }
@@ -701,7 +705,16 @@ namespace humanoid_controller
     const double raw_height = in_posture_stance ? cmd.cmdVelAngularZ_ : 0.0;
     const double diff = raw_height - smoothed_stance_height_cmd_;
 
-    if (diff > 1e-9)
+    stand_up_rising_active_ =
+        (in_posture_stance || std::abs(smoothed_stance_height_cmd_) > 1e-6) &&
+        diff > kStandUpHeightRisingEpsilon_;
+
+    if (!stance_height_stand_up_smoothing_enabled_)
+    {
+      return;
+    }
+
+    if (diff > kStandUpHeightRisingEpsilon_)
     {
       if (smoothed_stance_height_cmd_ < stance_height_smooth_start_)
       {
@@ -868,6 +881,21 @@ namespace humanoid_controller
       }
     }
 
+    // enable_standup_enhance：下蹲时按深度自动叠加正向 cmdVelLineX_（弯腰通道）
+    if (enable_standup_enhance_ && is_amp_hand_controller_ && cmd.cmdStance_ >= 1.0 &&
+        !stand_up_rising_active_)
+    {
+      const double height_cmd = cmd.cmdVelAngularZ_;
+      if (height_cmd < kSquatPitchFadeHeightStart_)
+      {
+        const double pitch_weight = std::clamp(
+            -height_cmd / max_stance_squat_depth_,
+            0.0, 1.0);
+        const double auto_bend = kSquatPitchMaxCmd_ * pitch_weight;
+        cmd.cmdVelLineX_ = std::max(cmd.cmdVelLineX_, auto_bend);
+      }
+    }
+
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
@@ -985,10 +1013,32 @@ namespace humanoid_controller
     }
 
     if (enable_back_arm_enhance_ && is_walking_mode &&
-        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.02)
+        cmd.cmdVelLineX_ >= -0.3 && cmd.cmdVelLineX_ <= -0.02)
     {
       projected_gravity =
-          Eigen::AngleAxisd(2.5 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
+          Eigen::AngleAxisd(2.7 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
+    }
+
+    if (enable_standup_enhance_ && stand_up_rising_active_)
+    {
+      const double height_cmd = cmd.cmdVelAngularZ_;
+      double pitch_weight = 1.0;
+      if (height_cmd < 0.0)
+      {
+        pitch_weight = std::clamp(
+            -height_cmd / std::abs(kStandUpPitchFadeHeightStart_),
+            0.0, 1.0);
+      }
+      else
+      {
+        pitch_weight = 0.0;
+      }
+      const double pitch_deg = kStandUpGravityPitchBiasDeg_ * pitch_weight;
+      if (std::abs(pitch_deg) > 1e-6)
+      {
+        projected_gravity =
+            Eigen::AngleAxisd(pitch_deg * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
+      }
     }
 
     Eigen::VectorXd local_action = getCurrentAction();
@@ -1330,6 +1380,47 @@ namespace humanoid_controller
       const double elbow_scale_ratio = 0.18 / actionScale_;
       local_action[16] *= elbow_scale_ratio;
       local_action[20] *= elbow_scale_ratio;
+    }
+
+    const bool stand_up_rising_for_action =
+        is_amp_hand_controller_ && currentCmdData.cmdStance_ >= 1.0 &&
+        ((amp_mode_ == 1) || std::abs(smoothed_stance_height_cmd_) > 1e-6) &&
+        (((amp_mode_ == 1) ? currentCmdData.cmdVelAngularZ_ : 0.0) - smoothed_stance_height_cmd_) >
+            kStandUpHeightRisingEpsilon_;
+
+    if (enable_standup_enhance_ && stand_up_rising_for_action)
+    {
+      static constexpr int kStandUpLeg4ActionIndices[] = {
+          kStandUpLegL4ActionIdx_, kStandUpLegR4ActionIdx_};
+      for (const int idx : kStandUpLeg4ActionIndices)
+      {
+        if (idx >= 0 && idx < local_action.size())
+        {
+          local_action[idx] *= kStandUpLeg4ActionScale_;
+        }
+      }
+      if (kStandUpLegL1ActionIdx_ >= 0 && kStandUpLegL1ActionIdx_ < local_action.size())
+      {
+        const double action = local_action[kStandUpLegL1ActionIdx_];
+        const double bias_weight = std::clamp(
+            (action - kStandUpLeg1ActionBiasFadeMin_) /
+                (kStandUpLeg1ActionBiasFadeMax_ - kStandUpLeg1ActionBiasFadeMin_),
+            0.0, 1.0);
+        local_action[kStandUpLegL1ActionIdx_] +=
+            kStandUpLeg1ActionBiasMinAbs_ +
+            (kStandUpLeg1ActionBiasMaxAbs_ - kStandUpLeg1ActionBiasMinAbs_) * bias_weight;
+      }
+      if (kStandUpLegR1ActionIdx_ >= 0 && kStandUpLegR1ActionIdx_ < local_action.size())
+      {
+        const double action = local_action[kStandUpLegR1ActionIdx_];
+        const double bias_weight = std::clamp(
+            (action - kStandUpLeg1ActionBiasFadeMin_) /
+                (kStandUpLeg1ActionBiasFadeMax_ - kStandUpLeg1ActionBiasFadeMin_),
+            0.0, 1.0);
+        local_action[kStandUpLegR1ActionIdx_] -=
+            kStandUpLeg1ActionBiasMinAbs_ +
+            (kStandUpLeg1ActionBiasMaxAbs_ - kStandUpLeg1ActionBiasMinAbs_) * bias_weight;
+      }
     }
 
     if (enable_elbow_scale_)

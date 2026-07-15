@@ -100,6 +100,7 @@ public:
   bool isEnabled() const;
   void setReuseWalkCommandInStance(bool enable);
   void setAmpHandController(bool enable);
+  void resetVelocityState();
 
   // Get current command data
   CommandDataRL getCurrentCommand() const;

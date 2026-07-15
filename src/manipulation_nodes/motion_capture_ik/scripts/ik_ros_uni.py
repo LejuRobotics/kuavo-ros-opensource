@@ -928,6 +928,14 @@ class IkRos:
     def joySticks_data_callback(self, msg):
         self.quest3_arm_info_transformer.read_joySticks_msg(msg)
         self.joySticks_data = msg
+        # 准备姿态下 IK 线程可能卡在等待首帧姿态/OK 手势/MPC 就绪，
+        # 仅依赖 ik_controller_thread 发布夹爪会导致指令稀疏：首帧走非 VR
+        # 的 100% 维持夹持后，松开扳机也来不及下发开爪。手柄回调独立发布，
+        # 保证扳机开合连续可控。
+        # qa: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/3505
+        if (self.end_effector_type == LEJUCLAW
+                and not self.quest3_arm_info_transformer.is_hand_tracking):
+            self.pub_robot_end_hand(joyStick_data=msg)
 
     @staticmethod
     def vector3_to_milliseconds(x, y, z):
