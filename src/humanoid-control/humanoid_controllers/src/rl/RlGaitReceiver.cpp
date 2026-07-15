@@ -59,8 +59,7 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
     currentCommand_.setzero();
     currentCommand_.cmdStance_ = 1; // Start in stance mode
   }
-  currentCommand_.cmdStance_ = 1; // Start in stance mode
-  
+
   // Initialize velocity smoothing
   smoothed_cmd_vel_.linear.x = 0.0;
   smoothed_cmd_vel_.linear.y = 0.0;

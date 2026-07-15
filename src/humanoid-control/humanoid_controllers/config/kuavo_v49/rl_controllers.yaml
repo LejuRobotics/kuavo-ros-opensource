@@ -10,6 +10,12 @@ controllers:
     config_file: "rl/skw_rl_param.info" 
     enabled: true  
 
+  - name: "amp_craic_controller"
+    class: "BASE_CONTROLLER"  # 基础行走控制器
+    type: "AMP_CONTROLLER"    # 具体控制器类型
+    config_file: "rl/skw_rl_param_craic.info"
+    enabled: true
+
   - name: "vmp_controller"
     class: "BASE_CONTROLLER"  
     type: "VMP_CONTROLLER"    # VMP控制器类型

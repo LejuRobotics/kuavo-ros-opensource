@@ -53,6 +53,15 @@ namespace humanoid_controller
 
     // gait 指令来源：使用 RL gait receiver，等价于原来的 CommandData + joystick/cmd_vel
     initial_cmd_.cmdStance_ = 1;
+    try
+    {
+      loadData::loadCppDataType(config_file_, "initial_cmd_stance", initial_cmd_.cmdStance_);
+    }
+    catch (const std::exception&)
+    {
+      // 未配置时保持原默认值，避免影响其他版本/控制器。
+    }
+    ROS_INFO("[%s] Initial cmdStance: %.1f", name_.c_str(), initial_cmd_.cmdStance_);
     gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
     gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
     
