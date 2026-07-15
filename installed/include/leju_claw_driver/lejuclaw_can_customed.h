@@ -88,8 +88,6 @@ public:
 
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque);
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque, bool is_vr_mode);
-    // 请求中断正在执行的 move_paw（供 VR topic 覆盖新目标时使用）
-    void request_abort_move_paw() { abort_move_paw_.store(true); }
     // 基于 unordered_map 的控制接口（百分比位置 → 物理映射并下发），键为 MotorId
     PawMoveState move_paw(const std::unordered_map<MotorId, double>& positions_percent,
                           const std::unordered_map<MotorId, double>& velocity,
@@ -312,7 +310,6 @@ private:
     std::atomic<bool> thread_running{false};
     std::thread control_thread_;
     std::atomic<bool> target_updated_{false};
-    std::atomic<bool> abort_move_paw_{false};
 };
 
 }

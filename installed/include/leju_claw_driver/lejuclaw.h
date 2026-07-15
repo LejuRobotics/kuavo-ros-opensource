@@ -16,7 +16,6 @@
 #include <iterator>
 #include <time.h>
 #include <chrono>
-#include <atomic>
 #include "ruiwoSDK.h"
 #include <algorithm>
 
@@ -66,8 +65,6 @@ public:
     void set_joint_state(int index, const std::vector<float> &state);
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque);
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque, bool is_vr_mode);
-    // 请求中断正在执行的 move_paw（供 VR topic 覆盖新目标时使用）
-    void request_abort_move_paw() { abort_move_paw_.store(true); }
     std::vector<std::vector<float>> get_joint_state();
     std::vector<double> get_positions();
     std::vector<double> get_torque();
@@ -258,7 +255,6 @@ private:
     // RUIWOTools ruiwo;
     bool thread_running;
     bool thread_end;
-    std::atomic<bool> abort_move_paw_{false};
     std::thread control_thread_;
     std::mutex sendpos_lock;
     std::mutex recvpos_lock;
