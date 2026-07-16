@@ -16,7 +16,7 @@ use_jointcmd_filter true       ; 是否对输出使用关节指令滤波器 0:�
 use_external_arm_controller  true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
 use_virtual_arm_obs         true ; 是否在外部手臂控制器生效时使用手臂静默优化
 lateral_elbow_fix           true ; 纯侧移时缩放对应侧肘关节 action
-enable_roll_compensation    true ; 是否启用行走/转弯时 projected_gravity 的 roll 观测补偿
+enable_roll_compensation_closed_loop    true ; 是否启用直行时 projected_gravity 的 roll 观测闭环补偿
 enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时关闭cmdy,且 abs(cmdy)大于0.41时关闭cmdx
 enable_off_cmdy_by_cmdangz  true ; 当 abs(cmdangz)大于0.3时关闭cmdy，且abs(cmdy)大于0.3时关闭cmdangz
 enable_elbow_scale          true ; 肘关节单独使用 0.18 actionscale，并限制最终关节角(加default后)<-0.2
@@ -98,6 +98,18 @@ TinyCmdClip
     
 }
 
+rollCompensationClosedLoop
+{
+    cmdXMin                 0.30 ; 闭环生效 cmd_x 下限 (m/s)
+    cmdXMax                 1.0 ; 闭环生效 cmd_x 上限 (m/s)
+    absCmdYMax              0.10 ; abs(cmd_y) 超过该值不启用闭环 (m/s)
+    absCmdAngZMax           0.30 ; abs(cmd_ang_z) 超过该值不启用闭环 (rad/s)
+    filterTimeConstantSec   1.2 ; roll 低通时间常数，增大更平稳、响应更慢
+    targetTimeConstantSec   2.00 ; 站立中立 roll 学习时间常数
+    kp                      1.2 ; 比例增益，增大可加强即时补偿
+    ki                      0.06 ; 积分增益，设为 0 可关闭积分
+    maxCompensationDeg      0.70 ; 闭环观测补偿的绝对限幅 (deg)
+}
 
 defaultBaseHeightControl    0.77 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller

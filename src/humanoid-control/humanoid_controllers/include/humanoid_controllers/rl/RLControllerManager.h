@@ -283,6 +283,12 @@ namespace humanoid_controller
      */
     bool isTorsoVelocityStable();
 
+    /**
+     * @brief 待切换MPC：手臂归位后自动补触发
+     * @return 已触发返回 true；仍在等返回 false
+     */
+    bool tryPendingMpcSwitch();
+
   private:
     /**
      * @brief 异步切换手臂控制模式
@@ -442,6 +448,7 @@ namespace humanoid_controller
     std::function<bool()> torso_stability_callback_;          ///< 获取躯干稳定性状态的回调函数
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
+    bool pending_mpc_switch_ = false;               ///< 手臂归位后自动触发MPC切换
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
     double depth_history_min_frequency_hz_ = 55.0;  ///< depth 历史话题最低频率要求
     double depth_history_wait_timeout_sec_ = 0.2;   ///< depth 历史话题最大消息过期时间

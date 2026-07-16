@@ -317,6 +317,7 @@ private:
     // 模式1相关
     Eigen::VectorXd default_arm_pos_;  // 默认手臂位置（用于模式1站立时的插值目标）
     bool is_interpolating_to_default_; // 是否正在插值到默认位置
+    bool is_returning_from_external_{false}; // 外部→AUTO_SWING 归位中，mode 保持 2 直到插值完成
     
     // 模式2相关（外部控制）
     Eigen::VectorXd raw_mode2_target_q_; // 模式2原始目标位置（从/kuavo_arm_traj获取）

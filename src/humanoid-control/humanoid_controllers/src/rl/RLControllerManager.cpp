@@ -188,6 +188,16 @@ namespace humanoid_controller
 
         if (current_controller)
         {
+          // RL→MPC 手臂保护：外部控制时先切回 AUTO_SWING，保持 RL 运行直到归位
+          auto* arm_ctrl = current_controller->getArmController();
+          if (arm_ctrl && arm_ctrl->getMode() != 1)
+          {
+            changeArmCtrlModeAsync(1);
+            arm_ctrl->changeMode(1);
+            pending_mpc_switch_ = true;
+            ROS_INFO("[RLControllerManager] RL→MPC: arm in external mode, deferring switch until interpolation completes");
+            return true;  // RL 保持运行，不切
+          }
           current_controller->pause();
           if (nh_ptr_)
           {
@@ -1067,6 +1077,33 @@ namespace humanoid_controller
     
     // 如果没有注册稳定性回调，返回true（允许切换）
     ROS_INFO_THROTTLE(1.0, "[RLControllerManager] No torso stability callback registered, allowing switch");
+    return true;
+  }
+
+  bool RLControllerManager::tryPendingMpcSwitch()
+  {
+    if (!pending_mpc_switch_)
+      return false;
+
+    ArmController* arm_ctrl = nullptr;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (current_controller_name_.empty())
+      {
+        pending_mpc_switch_ = false;  // 已经切到 MPC 了，清标记
+        return false;
+      }
+      auto it = controllers_.find(current_controller_name_);
+      if (it != controllers_.end() && it->second)
+        arm_ctrl = it->second->getArmController();
+    }
+
+    if (arm_ctrl && arm_ctrl->getMode() != 1)
+      return false;  // 还在归位中
+
+    ROS_INFO("[RLControllerManager] Arm returned to AUTO_SWING, triggering deferred MPC switch");
+    pending_mpc_switch_ = false;
+    switchController("");
     return true;
   }
 

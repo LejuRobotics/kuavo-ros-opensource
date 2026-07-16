@@ -5,8 +5,7 @@
   - yaw 按键 → /cmd_torso_delta（oneshot 相对位移）
   - 复位 → /cmd_lb_torso_pose + reset service
 
-各输入源自行从 RM /torso_open_loop_state 做 workspace 钳制；
-RM clampTorsoWorkspace4D 保留为最宽托底。
+Each input source self-clamps against /torso_open_loop_state (open-loop pose from ReferenceManager).
 """
 from __future__ import annotations
 import json
@@ -62,7 +61,7 @@ def get_torso_max_x(z_increment: float) -> float:
 def load_torso_limits_from_config() -> Tuple[float, float, float, float, float, float]:
     """从 kuavo.json 的 kuavo_wheel_torso_limit 加载限位；失败时返回模块默认值。
 
-    返回值统一为 RM 空间（pitch 正值 = 前倾）：
+    Return values use open-loop frame (positive pitch = lean forward):
       (z_min, z_max, x_min, pitch_min, pitch_max, yaw_max)
     """
     robot_version = os.getenv("ROBOT_VERSION")
@@ -105,7 +104,7 @@ def load_torso_limits_from_config() -> Tuple[float, float, float, float, float, 
             pitch_lo_deg = float(pitch_range[0])
             pitch_hi_deg = float(pitch_range[1])
             # 配置约定 [0, 30°] 表示仅前倾；VR 内部负值前倾
-            # 返回值用 VR 内部约定，调用方负责转换到 RM 空间
+            # Return value uses VR-internal convention; caller converts to open-loop frame
             pitch_min = -math.radians(max(pitch_hi_deg, 0.0))
             pitch_max = -math.radians(min(pitch_lo_deg, 0.0))
 
@@ -122,7 +121,7 @@ class TorsoController:
     - publisher: 绝对位姿（复位路径）
     - vel_publisher: 连续速度 /cmd_torso_vel
     - delta_publisher: oneshot 相对位移 /cmd_torso_delta
-    - state_getter: 返回 RM 当前开环 4D 位姿 (x, z, yaw, pitch) 或 None
+    - state_getter: current open-loop 4D pose (x, z, yaw, pitch) or None
     - limits: (z_min, z_max, x_min, pitch_min, pitch_max, yaw_max), VR 内部约定
     """
 
@@ -154,9 +153,9 @@ class TorsoController:
             self._yaw_max,
         ) = limits if limits is not None else (Z_MIN, Z_MAX, X_MIN, PITCH_MIN, PITCH_MAX, YAW_MAX)
         self._yaw_min = -self._yaw_max
-        # RM 空间 pitch 限位（正值 = 前倾，VR 内部取反）
-        self._pitch_min_rm = -self._pitch_max
-        self._pitch_max_rm = -self._pitch_min
+        # open-loop pitch limits (positive = lean forward; VR internal is negated)
+        self._pitch_min_open_loop = -self._pitch_max
+        self._pitch_max_open_loop = -self._pitch_min
         self.main_hand: Optional[str] = None  # None / 'left' / 'right'
         self._l_was_pressed = False
         self._r_was_pressed = False
@@ -170,7 +169,7 @@ class TorsoController:
         self._first_click_release_t: Optional[float] = None
         self._reset_cooldown_until = 0.0
         self._reset_busy_until = 0.0
-        # True after a non-zero /cmd_torso_vel publish; used to emit a single zero to clear RM latch.
+        # True after a non-zero /cmd_torso_vel publish; used to emit a single zero to clear ReferenceManager velocity latch.
         self._latched_vel_active = False
 
     def handle_joystick(self, msg) -> None:
@@ -194,7 +193,7 @@ class TorsoController:
         prev_main_hand = self.main_hand
         self._arbitrate_main_hand_release(l_released, r_released)
 
-        # Grip release while velocity was latched → one zero to clear RM latch.
+        # Grip release while velocity was latched → one zero to clear ReferenceManager velocity latch.
         if prev_main_hand is not None and self.main_hand is None and self._latched_vel_active:
             self._publish_torso_vel(vx=0.0, vz=0.0, vpitch=0.0, vyaw=0.0)
             self._latched_vel_active = False
@@ -342,30 +341,30 @@ class TorsoController:
         return self.initial_xyz[2] + self._z_min, self.initial_xyz[2] + self._z_max
 
     def _apply_stick_velocity(self, msg) -> None:
-        """摇杆 → 瞬时速度，读 RM 开环状态做 workspace 钳制。"""
+        """Stick → velocity; clamp against /torso_open_loop_state workspace limits."""
         sx, sy = self._select_stick(msg)
         sx = sx if abs(sx) > STICK_DEAD_ZONE else 0.0
         sy = sy if abs(sy) > STICK_DEAD_ZONE else 0.0
 
         # 升高：摇杆 Y > 0 → +vz
         vz = sy * SCALE_HEIGHT
-        # 前倾：摇杆 X > 0 → pitch 减（spec 6.1）→ 负 vpitch（RM 空间发送）
+        # Lean forward: stick X > 0 → decrease VR pitch (spec 6.1) → negative vpitch (open-loop frame)
         vpitch = -sx * SCALE_PITCH
 
-        # 读 RM 开环状态，钳制超限方向的速度
-        rm_state = self._get_rm_state()
-        if rm_state is not None:
-            _rm_x, rm_z, _rm_yaw, rm_pitch = rm_state
+        # Read open-loop state; zero over-limit velocity components
+        open_loop_state = self._get_open_loop_state()
+        if open_loop_state is not None:
+            _ol_x, ol_z, _ol_yaw, ol_pitch = open_loop_state
             z_abs_lo, z_abs_hi = self._z_limits()
             # Z 限位：超上限不发正向速度，超下限不发负向速度
-            if vz > 0.0 and rm_z >= z_abs_hi - POSE_PUBLISH_EPS:
+            if vz > 0.0 and ol_z >= z_abs_hi - POSE_PUBLISH_EPS:
                 vz = 0.0
-            elif vz < 0.0 and rm_z <= z_abs_lo + POSE_PUBLISH_EPS:
+            elif vz < 0.0 and ol_z <= z_abs_lo + POSE_PUBLISH_EPS:
                 vz = 0.0
-            # Pitch 限位（RM 空间：正值 = 前倾）
-            if vpitch > 0.0 and rm_pitch >= self._pitch_max_rm - POSE_PUBLISH_EPS:
+            # Pitch limits (open-loop frame: positive = lean forward)
+            if vpitch > 0.0 and ol_pitch >= self._pitch_max_open_loop - POSE_PUBLISH_EPS:
                 vpitch = 0.0
-            elif vpitch < 0.0 and rm_pitch <= self._pitch_min_rm + POSE_PUBLISH_EPS:
+            elif vpitch < 0.0 and ol_pitch <= self._pitch_min_open_loop + POSE_PUBLISH_EPS:
                 vpitch = 0.0
 
         if abs(vz) < 1e-9 and abs(vpitch) < 1e-9:
@@ -382,15 +381,15 @@ class TorsoController:
         return msg.right_first_button_pressed, msg.right_second_button_pressed
 
     def _handle_yaw_buttons(self, msg) -> None:
-        """yaw 按键边沿 → oneshot 相对位移；读 RM 状态做 yaw 限位钳制。"""
+        """Yaw button edge → oneshot delta; clamp against open-loop yaw limits."""
         first, second = self._select_buttons(msg)
-        rm_state = self._get_rm_state()
-        rm_yaw = rm_state[2] if rm_state is not None else 0.0
+        open_loop_state = self._get_open_loop_state()
+        ol_yaw = open_loop_state[2] if open_loop_state is not None else 0.0
         if first and not self._first_btn_was_pressed:
-            if not self._yaw_would_exceed(rm_yaw, -YAW_TARGET):
+            if not self._yaw_would_exceed(ol_yaw, -YAW_TARGET):
                 self._publish_torso_delta(yaw=-YAW_TARGET)
         elif second and not self._second_btn_was_pressed:
-            if not self._yaw_would_exceed(rm_yaw, +YAW_TARGET):
+            if not self._yaw_would_exceed(ol_yaw, +YAW_TARGET):
                 self._publish_torso_delta(yaw=+YAW_TARGET)
         self._first_btn_was_pressed = first
         self._second_btn_was_pressed = second
@@ -402,7 +401,7 @@ class TorsoController:
             return False
         return target > self._yaw_max or target < self._yaw_min
 
-    def _get_rm_state(self) -> Optional[Tuple[float, float, float, float]]:
+    def _get_open_loop_state(self) -> Optional[Tuple[float, float, float, float]]:
         """返回 (x, z, yaw, pitch) 或 None。"""
         if self._state_getter is None:
             return None
@@ -517,13 +516,13 @@ def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
     pub_vel = rospy.Publisher("/cmd_torso_vel", Twist, queue_size=10)
     pub_delta = rospy.Publisher("/cmd_torso_delta", Twist, queue_size=10)
 
-    # 订阅 RM 开环状态
-    rm_state_lock = [None]  # mutable closure
+    # Subscribe open-loop torso state from ReferenceManager
+    open_loop_state_lock = [None]  # mutable closure
 
-    def _rm_state_callback(msg):
-        rm_state_lock[0] = (msg.linear.x, msg.linear.z, msg.angular.z, msg.angular.y)
+    def _open_loop_state_callback(msg):
+        open_loop_state_lock[0] = (msg.linear.x, msg.linear.z, msg.angular.z, msg.angular.y)
 
-    rospy.Subscriber("/torso_open_loop_state", Twist, _rm_state_callback, queue_size=1)
+    rospy.Subscriber("/torso_open_loop_state", Twist, _open_loop_state_callback, queue_size=1)
 
     # 订阅 reach_time 仅用于日志/观测，TorsoController 自身不阻塞依赖
     rospy.Subscriber(
@@ -547,6 +546,6 @@ def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
         delta_publisher=_safe_publish(pub_delta, "/cmd_torso_delta"),
         clock=lambda: rospy.Time.now().to_sec(),
         resetter=lambda: ct.reset_torso_to_initial(wait_timeout_sec=1.0),
-        state_getter=lambda: rm_state_lock[0],
+        state_getter=lambda: open_loop_state_lock[0],
         limits=limits,
     )

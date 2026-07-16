@@ -146,14 +146,14 @@ namespace mobile_manipulator
 
       // 订阅MPC observation话题，用于判断是否已经完成初始化
       observation_sub_ = nodeHandle_.subscribe("/mobile_manipulator_mpc_observation", 10, &MobileManipulatorJoyControl::observationCallback, this);
-      rm_torso_state_sub_ = nodeHandle_.subscribe<geometry_msgs::Twist>(
+      open_loop_torso_state_sub_ = nodeHandle_.subscribe<geometry_msgs::Twist>(
           "/torso_open_loop_state", 1,
           [this](const geometry_msgs::Twist::ConstPtr& msg) {
-            rm_torso_x_ = msg->linear.x;
-            rm_torso_z_ = msg->linear.z;
-            rm_torso_yaw_ = msg->angular.z;
-            rm_torso_pitch_ = msg->angular.y;
-            has_rm_torso_state_ = true;
+            open_loop_torso_x_ = msg->linear.x;
+            open_loop_torso_z_ = msg->linear.z;
+            open_loop_torso_yaw_ = msg->angular.z;
+            open_loop_torso_pitch_ = msg->angular.y;
+            has_open_loop_torso_state_ = true;
           });
       
       // 初始化MPC模式切换服务客户端
@@ -174,22 +174,36 @@ namespace mobile_manipulator
       old_joy_msg_.axes = std::vector<float>(8, 0.0);
       old_joy_msg_.buttons = std::vector<int32_t>(12, 0);
       
-      // Torso teleop: joystick → /cmd_torso_vel; each input source self-clamps
-      // against RM's /torso_open_loop_state using per-source limits (beta convention).
-      // RM clampTorsoWorkspace4D is the final safety net.
-      torso_vel_scale_x_ = 0.10;
-      torso_vel_scale_z_ = 0.40;
-      torso_vel_scale_pitch_ = 0.30;
-      torso_vel_scale_yaw_ = 0.50;
-      // Prefer shared params; keep g12_* aliases for existing launch files.
-      nodeHandle_.param("torso_vel_scale_x", torso_vel_scale_x_, torso_vel_scale_x_);
-      nodeHandle_.param("torso_vel_scale_z", torso_vel_scale_z_, torso_vel_scale_z_);
-      nodeHandle_.param("torso_vel_scale_pitch", torso_vel_scale_pitch_, torso_vel_scale_pitch_);
-      nodeHandle_.param("torso_vel_scale_yaw", torso_vel_scale_yaw_, torso_vel_scale_yaw_);
-      nodeHandle_.param("g12_torso_vel_scale_x", torso_vel_scale_x_, torso_vel_scale_x_);
-      nodeHandle_.param("g12_torso_vel_scale_z", torso_vel_scale_z_, torso_vel_scale_z_);
-      nodeHandle_.param("g12_torso_vel_scale_pitch", torso_vel_scale_pitch_, torso_vel_scale_pitch_);
-      nodeHandle_.param("g12_torso_vel_scale_yaw", torso_vel_scale_yaw_, torso_vel_scale_yaw_);
+      // 躯干积分增益（沿用旧参数名，内部 ×kTorsoVelCalibHz 转换为 vel_scale）
+      // BT2/BT2Pro 默认值（硬编码，无 ROS param 覆盖 — 与旧代码一致）
+      // 体感对齐：假定遥控约 500Hz（旧 per-msg 积分等效速度 = gain × f）
+      integral_gain_linear_x_ = 0.001;   // ×500 = 0.50 m/s
+      integral_gain_linear_z_ = 0.004;   // ×500 = 2.00 m/s
+      integral_gain_angular_y_ = 0.003;  // ×500 = 1.50 rad/s
+      integral_gain_angular_z_ = 0.005;  // ×500 = 2.50 rad/s
+
+      // G12 轮臂默认值（同 BT2，可 ROS param 覆盖，沿用旧名）
+      g12_wheelarm_integral_gain_linear_x_ = 0.001;
+      g12_wheelarm_integral_gain_linear_z_ = 0.004;
+      g12_wheelarm_integral_gain_angular_y_ = 0.003;
+      g12_wheelarm_integral_gain_angular_z_ = 0.005;
+      nodeHandle_.param("g12_wheelarm_integral_gain_linear_x", g12_wheelarm_integral_gain_linear_x_, g12_wheelarm_integral_gain_linear_x_);
+      nodeHandle_.param("g12_wheelarm_integral_gain_linear_z", g12_wheelarm_integral_gain_linear_z_, g12_wheelarm_integral_gain_linear_z_);
+      nodeHandle_.param("g12_wheelarm_integral_gain_angular_y", g12_wheelarm_integral_gain_angular_y_, g12_wheelarm_integral_gain_angular_y_);
+      nodeHandle_.param("g12_wheelarm_integral_gain_angular_z", g12_wheelarm_integral_gain_angular_z_, g12_wheelarm_integral_gain_angular_z_);
+
+      // 内部转换：gain → vel_scale = gain × kTorsoVelCalibHz
+      // 体感标定 500Hz（用户手感：旧实现更快；bag 中位 ~300 偏慢）
+      static constexpr double kTorsoVelCalibHz = 500.0;
+      torso_vel_scale_x_ = integral_gain_linear_x_ * kTorsoVelCalibHz;
+      torso_vel_scale_z_ = integral_gain_linear_z_ * kTorsoVelCalibHz;
+      torso_vel_scale_pitch_ = integral_gain_angular_y_ * kTorsoVelCalibHz;
+      torso_vel_scale_yaw_ = integral_gain_angular_z_ * kTorsoVelCalibHz;
+
+      g12_torso_vel_scale_x_ = g12_wheelarm_integral_gain_linear_x_ * kTorsoVelCalibHz;
+      g12_torso_vel_scale_z_ = g12_wheelarm_integral_gain_linear_z_ * kTorsoVelCalibHz;
+      g12_torso_vel_scale_pitch_ = g12_wheelarm_integral_gain_angular_y_ * kTorsoVelCalibHz;
+      g12_torso_vel_scale_yaw_ = g12_wheelarm_integral_gain_angular_z_ * kTorsoVelCalibHz;
       
       // 初始化控制量为零的时间跟踪
       zero_control_start_time_ = ros::Time::now();
@@ -267,10 +281,10 @@ namespace mobile_manipulator
     double torsoMax_yaw_, torsoMin_yaw_;
     static constexpr double kTorsoClampEps = 1e-5;
 
-    // RM 开环躯干状态 (x, z, yaw, pitch)
-    double rm_torso_x_{0.0}, rm_torso_z_{0.0}, rm_torso_yaw_{0.0}, rm_torso_pitch_{0.0};
-    bool has_rm_torso_state_{false};
-    ros::Subscriber rm_torso_state_sub_;
+    // open-loop torso state from /torso_open_loop_state (published by ReferenceManager)
+    double open_loop_torso_x_{0.0}, open_loop_torso_z_{0.0}, open_loop_torso_yaw_{0.0}, open_loop_torso_pitch_{0.0};
+    bool has_open_loop_torso_state_{false};
+    ros::Subscriber open_loop_torso_state_sub_;
 
 
     // 摇杆轴索引
@@ -287,11 +301,29 @@ namespace mobile_manipulator
     // 保存上一次的手柄消息（用于检测按钮按下事件）
     sensor_msgs::Joy old_joy_msg_;
 
-    // Torso velocity scales for all joysticks (m/s, rad/s). No open-loop pose state.
+    // Torso integral gains (BT2/BT2Pro, hardcoded defaults — no ROS param override, matching old code)
+    double integral_gain_linear_x_;
+    double integral_gain_linear_z_;
+    double integral_gain_angular_y_;
+    double integral_gain_angular_z_;
+
+    // G12 wheel-arm integral gains (defaults same as BT2, can be overridden via ROS param)
+    double g12_wheelarm_integral_gain_linear_x_;
+    double g12_wheelarm_integral_gain_linear_z_;
+    double g12_wheelarm_integral_gain_angular_y_;
+    double g12_wheelarm_integral_gain_angular_z_;
+
+    // Internal vel_scale = integral_gain × kTorsoVelCalibHz (BT2/BT2Pro)
     double torso_vel_scale_x_;
     double torso_vel_scale_z_;
     double torso_vel_scale_pitch_;
     double torso_vel_scale_yaw_;
+
+    // Internal vel_scale for G12 (= g12_wheelarm_integral_gain_* × kTorsoVelCalibHz)
+    double g12_torso_vel_scale_x_;
+    double g12_torso_vel_scale_z_;
+    double g12_torso_vel_scale_pitch_;
+    double g12_torso_vel_scale_yaw_;
 
     // 控制量为零的时间跟踪（用于模式切换检查）
     ros::Time zero_control_start_time_;
@@ -539,22 +571,48 @@ namespace mobile_manipulator
       return std::abs(v) < deadzone_ ? 0.0 : v;
     }
 
-    /// 读 RM 开环状态，钳制超限方向的速度分量（沿用 beta 限位值）。
-    void clampTorsoVelAgainstRMState(geometry_msgs::Twist& vel) const
+    /// z-coupled x-envelope: 根据当前 z 增量返回允许的 x 正向增量幅值（0.05..0.25）。
+    /// z_increment = 当前绝对 z - initialTorsoPos_.z
+    double getTorsoMaxX(double z_increment) const
     {
-      if (!has_rm_torso_state_) return;
+      if (z_increment <= 0.0) {
+        return 0.05;
+      } else if (z_increment <= 0.3) {
+        return 0.05 + (z_increment / 0.3) * 0.1;  // 0.05 → 0.15
+      } else if (z_increment <= 0.5) {
+        return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1;  // 0.15 → 0.25
+      } else {
+        return 0.25;
+      }
+    }
 
+    /// Read /torso_open_loop_state and zero velocity components that would exceed limits.
+    void clampTorsoVelAgainstOpenLoopState(geometry_msgs::Twist& vel) const
+    {
+      if (!has_open_loop_torso_state_) return;
+
+      // --- z ---
       const double z_abs_lo = initialTorsoPose_z_ + torsoMin_z_;
       const double z_abs_hi = initialTorsoPose_z_ + torsoMax_z_;
 
-      if      (vel.linear.z > 0.0 && rm_torso_z_ >= z_abs_hi - kTorsoClampEps)  vel.linear.z = 0.0;
-      else if (vel.linear.z < 0.0 && rm_torso_z_ <= z_abs_lo + kTorsoClampEps)  vel.linear.z = 0.0;
+      if      (vel.linear.z > 0.0 && open_loop_torso_z_ >= z_abs_hi - kTorsoClampEps)  vel.linear.z = 0.0;
+      else if (vel.linear.z < 0.0 && open_loop_torso_z_ <= z_abs_lo + kTorsoClampEps)  vel.linear.z = 0.0;
 
-      if      (vel.angular.y > 0.0 && rm_torso_pitch_ >= torsoMax_pitch_ - kTorsoClampEps) vel.angular.y = 0.0;
-      else if (vel.angular.y < 0.0 && rm_torso_pitch_ <= torsoMin_pitch_ + kTorsoClampEps) vel.angular.y = 0.0;
+      // --- x (z-coupled envelope, 同旧代码 getTorsoMaxX) ---
+      const double z_increment = open_loop_torso_z_ - initialTorsoPose_z_;
+      const double x_increment = open_loop_torso_x_ - initialTorsoPose_x_;
+      const double current_torso_max_x = getTorsoMaxX(z_increment);
 
-      if      (vel.angular.z > 0.0 && rm_torso_yaw_ >= torsoMax_yaw_ - kTorsoClampEps)  vel.angular.z = 0.0;
-      else if (vel.angular.z < 0.0 && rm_torso_yaw_ <= torsoMin_yaw_ + kTorsoClampEps)  vel.angular.z = 0.0;
+      if      (vel.linear.x > 0.0 && x_increment >= current_torso_max_x - kTorsoClampEps) vel.linear.x = 0.0;
+      else if (vel.linear.x < 0.0 && x_increment <= torsoMin_x_ + kTorsoClampEps)          vel.linear.x = 0.0;
+
+      // --- pitch ---
+      if      (vel.angular.y > 0.0 && open_loop_torso_pitch_ >= torsoMax_pitch_ - kTorsoClampEps) vel.angular.y = 0.0;
+      else if (vel.angular.y < 0.0 && open_loop_torso_pitch_ <= torsoMin_pitch_ + kTorsoClampEps) vel.angular.y = 0.0;
+
+      // --- yaw ---
+      if      (vel.angular.z > 0.0 && open_loop_torso_yaw_ >= torsoMax_yaw_ - kTorsoClampEps)  vel.angular.z = 0.0;
+      else if (vel.angular.z < 0.0 && open_loop_torso_yaw_ <= torsoMin_yaw_ + kTorsoClampEps)  vel.angular.z = 0.0;
     }
 
 
@@ -684,7 +742,7 @@ namespace mobile_manipulator
           {
             ROS_ERROR("切换到ArmOnly模式失败");
           }
-          // No open-loop pose to reset; RM holds final target.
+          // No local open-loop pose to reset; ReferenceManager holds the final target.
           // G12模式: 禁用humanoid_joy_control_auto_gait节点，防止底盘移动
           if (use_g12_)
           {
@@ -819,7 +877,7 @@ namespace mobile_manipulator
           // G12 躯干速度接口（无开环绝对位姿状态）
           // G极值: 左杆上下->vx, 右杆上下->vz
           // H极值: 右杆左右->vyaw, 左杆上下->vpitch
-          // 工作空间 clamp 在运控层 RM 完成；软暂停期间上层无状态可残留。
+          // Workspace limits enforced here via velocity gate; no residual state across soft-pause.
           double lx = 0.0, lz = 0.0, ay = 0.0, az = 0.0;
           if (guide_pressed) {  // G极值: 左杆上下->vx, 右杆上下->vz
             lx = axisWithDeadzone(joy_msg, linear_axis_index_x_);
@@ -831,11 +889,11 @@ namespace mobile_manipulator
           }
 
           geometry_msgs::Twist torso_vel;
-          torso_vel.linear.x = lx * torso_vel_scale_x_;
-          torso_vel.linear.z = lz * torso_vel_scale_z_;
-          torso_vel.angular.y = ay * torso_vel_scale_pitch_;
-          torso_vel.angular.z = az * torso_vel_scale_yaw_;
-          clampTorsoVelAgainstRMState(torso_vel);
+          torso_vel.linear.x = lx * g12_torso_vel_scale_x_;
+          torso_vel.linear.z = lz * g12_torso_vel_scale_z_;
+          torso_vel.angular.y = ay * g12_torso_vel_scale_pitch_;
+          torso_vel.angular.z = az * g12_torso_vel_scale_yaw_;
+          clampTorsoVelAgainstOpenLoopState(torso_vel);
           cmd_torso_vel_publisher_.publish(torso_vel);
         }
         else
@@ -935,7 +993,7 @@ namespace mobile_manipulator
       {
         // ========== 躯干控制模式（速度接口，无上层开环绝对位姿）==========
         // 与旧 BT2 相同的修饰键语义：LB 管 x/z，RB 管 pitch/yaw；RT 复位。
-        // 工作空间 clamp 与开环终点积分在 RM（cmdTorsoPose_）完成。
+        // Workspace limits enforced here via velocity gate; open-loop integration in ReferenceManager (cmdTorsoPose_).
 
         bool rb_pressed = (joy_msg->buttons[joyButtonMap["BUTTON_RB"]] == 1);
 
@@ -969,7 +1027,7 @@ namespace mobile_manipulator
         torso_vel.linear.z = lz * torso_vel_scale_z_;
         torso_vel.angular.y = ay * torso_vel_scale_pitch_;
         torso_vel.angular.z = az * torso_vel_scale_yaw_;
-        clampTorsoVelAgainstRMState(torso_vel);
+        clampTorsoVelAgainstOpenLoopState(torso_vel);
         cmd_torso_vel_publisher_.publish(torso_vel);
       }
       else

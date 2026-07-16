@@ -579,16 +579,8 @@ namespace mobile_manipulator {
       loadData::loadPtreeValue(pt, useFocusZ_, prefix + "focus_z_barrier.use_focus_z", false);
     }
 
-    // torso vel/delta workspace: hardcoded in header for this version
-    // (same style as legacy H12 joy limits; not loaded from task.info)
-    // vel integrates onto cmdTorsoPose_ with real ΔinitTime (scheme A), nom=ruckigDt_
     std::cout << "  torsoVel integrate: schemeA ΔinitTime, nom ruckigDt_=" << ruckigDt_
-              << " (1/mpcDesiredFrequency); scales≈baseline gain×100Hz" << std::endl;
-    std::cout << "  torsoWs x:[" << torsoWsMinX_ << ", " << torsoWsMaxXBase_
-              << "] z_rel:[" << torsoWsMinZRel_ << ", " << torsoWsMaxZRel_
-              << "] yaw:[" << torsoWsMinYaw_ << ", " << torsoWsMaxYaw_
-              << "] pitch:[" << torsoWsMinPitch_ << ", " << torsoWsMaxPitch_
-              << "] z_coupled_x=" << torsoWsUseZCoupledX_ << " (hardcoded)" << std::endl;
+              << " (1/mpcDesiredFrequency)" << std::endl;
     /*******************************************************************************/
   }
 
@@ -4123,9 +4115,6 @@ namespace mobile_manipulator {
                        torsoTargetPose[3], 
                        torsoTargetPose[4];
 
-      // absolute pose also goes through workspace clamp
-      torsoPose4Dof = clampTorsoWorkspace4D(torsoPose4Dof);
-
       calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, cmdTorsoPoseDesiredTime_);
 
       isCmdTorsoPoseUpdated_ = false;
@@ -4695,7 +4684,7 @@ namespace mobile_manipulator {
       isCmdTorsoPoseUpdated_ = false;
     }
 
-    // 躯干 vel/delta：冻结时清粘性速度与 oneshot，避免解除软暂停后残留积分
+    // Torso vel/delta: clear sticky velocity and oneshot on freeze to avoid residual integration after unpause
     {
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
       cmdTorsoVel_.setZero();
@@ -4836,44 +4825,6 @@ namespace mobile_manipulator {
     }
   }
 
-
-  double MobileManipulatorReferenceManager::getTorsoWorkspaceMaxX(double zAbs) const
-  {
-    if (!torsoWsUseZCoupledX_) {
-      return torsoWsMaxXBase_;
-    }
-    // z-coupled envelope migrated from G12 joy getTorsoMaxX (on z increment vs initial)
-    const double z_increment = zAbs - initialTorsoPos_[2];
-    if (z_increment <= 0.0) {
-      return 0.05;
-    } else if (z_increment <= 0.3) {
-      return 0.05 + (z_increment / 0.3) * 0.1;  // 0.05 -> 0.15
-    } else if (z_increment <= 0.5) {
-      return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1;  // 0.15 -> 0.25
-    }
-    return torsoWsMaxXBase_;
-  }
-
-  vector_t MobileManipulatorReferenceManager::clampTorsoWorkspace4D(const vector_t& pose4d) const
-  {
-    // pose4d: [x, z, yaw, pitch]
-    vector_t out = pose4d;
-    if (out.size() < 4) {
-      return out;
-    }
-
-    const double zMin = initialTorsoPos_[2] + torsoWsMinZRel_;
-    const double zMax = initialTorsoPos_[2] + torsoWsMaxZRel_;
-    out[1] = std::max(zMin, std::min(out[1], zMax));
-
-    const double xMax = getTorsoWorkspaceMaxX(out[1]);
-    out[0] = std::max(torsoWsMinX_, std::min(out[0], xMax));
-
-    out[2] = std::max(torsoWsMinYaw_, std::min(out[2], torsoWsMaxYaw_));
-    out[3] = std::max(torsoWsMinPitch_, std::min(out[3], torsoWsMaxPitch_));
-    return out;
-  }
-
   void MobileManipulatorReferenceManager::applyTorsoVelDeltaCommands(scalar_t initTime)
   {
     // Velocity hold aligned with setChassisControl(/cmd_vel):
@@ -4925,7 +4876,7 @@ namespace mobile_manipulator {
       return;
     }
 
-    // Scheme A: integrate with real RM period on MPC time axis (sim + real).
+    // Scheme A: integrate with real ReferenceManager period on MPC time axis (sim + real).
     // Nominal step ≈ ruckigDt_ (1/mpcDesiredFrequency); clamp outliers.
     double dt_nom = ruckigDt_;
     if (dt_nom <= 0.0 || dt_nom > 0.2) {
@@ -4975,8 +4926,6 @@ namespace mobile_manipulator {
         cmd4[i] += delta4[i];
       }
     }
-
-    cmd4 = clampTorsoWorkspace4D(cmd4);
 
     // Write back sole open-loop final target; Ruckig tracks from prevTarget → cmd4
     {

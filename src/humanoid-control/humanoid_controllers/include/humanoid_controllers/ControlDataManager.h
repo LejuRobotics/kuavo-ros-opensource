@@ -238,7 +238,7 @@ private:
 
     // 头部速度 / 相对位移接口（与躯干 /cmd_torso_vel、/cmd_torso_delta 对齐）
     // 开环绝对位姿只在 head_external_control_state_（rad），本类为唯一积分终点。
-    // vel: joint_data=[yaw_vel, pitch_vel] deg/s，粘住 + 0.3s 超时清零；
+    // vel: joint_data=[yaw_vel, pitch_vel] deg/s, sticky + 0.3s timeout zero;
     // delta: joint_data=[d_yaw, d_pitch] deg，oneshot 用后即清。
     static constexpr double kHeadVelTimeout_{0.3};  // vel 超时清零秒数
     vector_t cmd_head_vel_;          // 2D: [yaw, pitch] rad/s
@@ -248,7 +248,7 @@ private:
     bool is_cmd_head_vel_updated_{false};      // sticky，对齐 isCmdTorsoVelUpdated_
     bool is_cmd_head_vel_time_update_{false}; // 刷新 last_cmd_head_vel_time_
     bool is_cmd_head_delta_updated_{false};   // oneshot，用后即清
-    double last_cmd_head_vel_time_{0.0};      // RM 时间轴（ros::Time::now().toSec()）
+    double last_cmd_head_vel_time_{0.0};      // 时间轴（ros::Time::now().toSec()）
     double last_head_vel_integrate_time_{0.0};
     bool has_head_vel_integrate_time_{false};
     void applyHeadVelDeltaCommands();        // 在 update 取数前积分

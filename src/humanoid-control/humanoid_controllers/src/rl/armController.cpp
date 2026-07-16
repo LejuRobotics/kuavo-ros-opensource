@@ -239,7 +239,16 @@ void ArmController::update(const ros::Time& time,
   }
   else if (arm_control_mode_ == 2)
   {
-    updateMode2(dt);
+    if (is_returning_from_external_) {
+      updateMode1(time, dt, cmd_stance);
+      if (!is_interpolating_to_default_) {
+        arm_control_mode_ = 1;
+        is_returning_from_external_ = false;
+        ROS_INFO("[ArmController] Mode 2->1 interpolation complete, switched to AUTO_SWING");
+      }
+    } else {
+      updateMode2(dt);
+    }
   }
 
   // 3. 填充命令消息（根据模式决定是否填充）
@@ -472,11 +481,12 @@ void ArmController::applyModeChange(int target_mode)
     mode0_fixed_pos_set_ = true;
     
     is_interpolating_ = true;
-    
+
     ROS_INFO("[ArmController] Switching to Mode 0: will smoothly transition to fixed position");
     // Mode 0: 固定到当前动作
     arm_control_mode_ = 0;
     arm_vr_enabled_ = false;
+    is_returning_from_external_ = false;
   }
   else if (target_mode == 1)
   {
@@ -515,8 +525,12 @@ void ArmController::applyModeChange(int target_mode)
     }
     
     ROS_INFO("[ArmController] Switching to Mode 1: auto swing arm");
-     // Mode 1: 自动摆手
-     arm_control_mode_ = 1;
+    // Mode 1: 自动摆手。外部控制(2)→1: 保持 mode=2，插值到默认完成后再切
+    if (arm_control_mode_ == 2) {
+      is_returning_from_external_ = true;
+    } else {
+      arm_control_mode_ = 1;
+    }
      arm_vr_enabled_ = false;
   }
   else if (target_mode == 2)
@@ -547,6 +561,7 @@ void ArmController::applyModeChange(int target_mode)
     
     arm_control_mode_ = 2;
     arm_vr_enabled_ = true;
+    is_returning_from_external_ = false;
   }
 }
 

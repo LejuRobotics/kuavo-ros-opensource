@@ -217,8 +217,6 @@ protected:
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
   void applyTorsoVelDeltaCommands(scalar_t initTime);
-  vector_t clampTorsoWorkspace4D(const vector_t& pose4d) const;
-  double getTorsoWorkspaceMaxX(double zAbs) const;
   // cmdLegJoint
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
@@ -403,8 +401,8 @@ private:
   // 躯干速度 / 相对位移指令（开环最终目标只在 cmdTorsoPose_）
   // Twist 布局与 /cmd_lb_torso_pose 一致: linear.x/z, angular.z=yaw, angular.y=pitch
   // 保持语义对齐底盘 /cmd_vel：
-  //   isCmdTorsoVelUpdated_ 粘住；isCmdTorsoVelTimeUpdate_ 刷新 lastCmdTorsoVelTime_；
-  //   超时 0.3s 将 cmdTorsoVel_ 置 0；显式 0 后清粘性 flag。
+  //   isCmdTorsoVelUpdated_ sticky; isCmdTorsoVelTimeUpdate_ refreshes lastCmdTorsoVelTime_;
+  //   timeout 0.3s zeros cmdTorsoVel_; explicit zero clears sticky flag.
   Eigen::VectorXd cmdTorsoVel_;          // 4D: vx, vz, vyaw, vpitch
   Eigen::VectorXd cmdTorsoDelta_;        // 4D oneshot: dx, dz, dyaw, dpitch
   std::mutex cmdTorsoVel_mtx_;
@@ -418,17 +416,6 @@ private:
   static constexpr scalar_t kTorsoVelTimeout_{0.3};
   ros::Subscriber targetTorsoVelSubscriber_;
   ros::Subscriber targetTorsoDeltaSubscriber_;
-  // workspace: absolute x; z relative to initialTorsoPos; yaw/pitch absolute.
-  // Covers G12 + TorsoController envelopes; x uses z-coupled max when enabled.
-  double torsoWsMinX_{0.0};
-  double torsoWsMaxXBase_{0.25};         // max x at high z (getTorsoMaxX ceiling)
-  double torsoWsMinZRel_{-0.05};         // relative to initialTorsoPos_.z
-  double torsoWsMaxZRel_{0.40};
-  double torsoWsMinYaw_{-3.141592653589793};
-  double torsoWsMaxYaw_{3.141592653589793};
-  double torsoWsMinPitch_{-0.524};
-  double torsoWsMaxPitch_{0.524};
-  bool torsoWsUseZCoupledX_{true};
   ros::Publisher torsoOpenLoopStatePub_;    // /torso_open_loop_state: 4D pose [x,z,yaw,pitch]
 
   // 双臂末端执行器位姿指令 (x,y,z,qx,qy,qz,qw)

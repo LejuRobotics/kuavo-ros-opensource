@@ -237,16 +237,22 @@ namespace humanoid_controller
     static constexpr double kStandUpHeightRisingEpsilon_{1e-6};   ///< 高度命令上升判据阈值 (m)
     // defaultJointState 顺序：waist(0), leg_l1(1)..leg_l6(6), leg_r1(7)..leg_r6(12)
     static constexpr int kStandUpLegL1ActionIdx_{1};              ///< leg_l1_joint
+    static constexpr int kStandUpLegL3ActionIdx_{3};              ///< leg_l3_joint
     static constexpr int kStandUpLegL4ActionIdx_{4};              ///< leg_l4_joint（左膝）
     static constexpr int kStandUpLegR1ActionIdx_{7};              ///< leg_r1_joint
+    static constexpr int kStandUpLegR3ActionIdx_{9};              ///< leg_r3_joint
     static constexpr int kStandUpLegR4ActionIdx_{10};             ///< leg_r4_joint（右膝）
     static constexpr double kStandUpLeg4ActionScale_{1.1};        ///< 起身时 leg_l4/leg_r4 action 缩放
-    static constexpr double kStandUpLeg1ActionBiasFadeMin_{-0.11}; ///< leg_l1/leg_r1 偏置 fade 区间下限
+    static constexpr double kStandUpLeg1ActionBiasFadeMin_{-0.15}; ///< leg_l1/leg_r1 偏置 fade 区间下限
     static constexpr double kStandUpLeg1ActionBiasFadeMax_{-0.01}; ///< leg_l1/leg_r1 偏置 fade 区间上限，越接近 0 偏置越大
-    static constexpr double kStandUpLeg1ActionBiasMinAbs_{0.05}; ///< leg_l1/leg_r1 最小偏置绝对值
-    static constexpr double kStandUpLeg1ActionBiasMaxAbs_{0.1};   ///< leg_l1/leg_r1 最大偏置绝对值
+    static constexpr double kStandUpLeg1ActionBiasMinAbs_{0.07}; ///< leg_l1/leg_r1 最小偏置绝对值
+    static constexpr double kStandUpLeg1ActionBiasMaxAbs_{0.12};   ///< leg_l1/leg_r1 最大偏置绝对值
     bool stand_up_rising_active_{false};                            ///< 本周期是否处于起身上升阶段
-    bool enable_roll_compensation_{false};
+    bool enable_roll_compensation_closed_loop_{false};
+    bool roll_compensation_closed_loop_initialized_{false};
+    double roll_compensation_filtered_roll_rad_{0.0};
+    double roll_compensation_target_roll_rad_{0.0};
+    double roll_compensation_integral_rad_sec_{0.0};
     bool enable_off_cmdy_by_cmdx_{false};
     static constexpr double kOffCmdyByCmdXThreshold_{0.3};   ///< cmdx 超过该值时关闭 cmdy
     static constexpr double kOffCmdxByCmdYThreshold_{0.41};  ///< abs(cmdy) 超过该值时关闭 cmdx
@@ -262,11 +268,15 @@ namespace humanoid_controller
     bool tiny_cmd_angz_clip_enabled_{false};
     double tiny_cmd_angz_clip_min_{0.0};  ///< abs(cmd_angz) 截断区间最小值
     double tiny_cmd_angz_clip_max_{0.0};  ///< abs(cmd_angz) 截断区间最大值，区间内值截断为该值
-    static constexpr double kRollCompensationCmdXThreshold_{0.2};
-    static constexpr double kWalkingRollCompensationQuadA_{-0.2};
-    static constexpr double kWalkingRollCompensationQuadB_{0.3};
-    static constexpr double kWalkingRollCompensationQuadC_{-0.013};
-    static constexpr double kTurnRollCompensationDeg_{-0.7};
+    double roll_compensation_closed_loop_cmd_x_min_{0.3};
+    double roll_compensation_closed_loop_cmd_x_max_{0.65};
+    double roll_compensation_closed_loop_abs_cmd_y_max_{0.1};
+    double roll_compensation_closed_loop_abs_cmd_ang_z_max_{0.2};
+    double roll_compensation_closed_loop_filter_time_constant_sec_{0.8};
+    double roll_compensation_closed_loop_target_time_constant_sec_{2.0};
+    double roll_compensation_closed_loop_kp_{0.30};
+    double roll_compensation_closed_loop_ki_{0.06};
+    double roll_compensation_closed_loop_max_deg_{1.0};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};

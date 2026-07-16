@@ -294,7 +294,42 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
       loadData::loadPtreeValue(pt, enable_back_arm_enhance_, "enable_back_arm_enhance", false);
       loadData::loadPtreeValue(pt, enable_standup_enhance_, "enable_standup_enhance", false);
-      loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
+      loadData::loadPtreeValue(pt, enable_roll_compensation_closed_loop_,
+                               "enable_roll_compensation_closed_loop", false);
+      if (pt.find("rollCompensationClosedLoop") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_cmd_x_min_,
+                                 "rollCompensationClosedLoop.cmdXMin", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_cmd_x_max_,
+                                 "rollCompensationClosedLoop.cmdXMax", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_abs_cmd_y_max_,
+                                 "rollCompensationClosedLoop.absCmdYMax", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_abs_cmd_ang_z_max_,
+                                 "rollCompensationClosedLoop.absCmdAngZMax", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_filter_time_constant_sec_,
+                                 "rollCompensationClosedLoop.filterTimeConstantSec", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_target_time_constant_sec_,
+                                 "rollCompensationClosedLoop.targetTimeConstantSec", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_kp_,
+                                 "rollCompensationClosedLoop.kp", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_ki_,
+                                 "rollCompensationClosedLoop.ki", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_max_deg_,
+                                 "rollCompensationClosedLoop.maxCompensationDeg", false);
+      }
+      roll_compensation_closed_loop_cmd_x_min_ =
+          std::max(roll_compensation_closed_loop_cmd_x_min_, 0.0);
+      roll_compensation_closed_loop_cmd_x_max_ =
+          std::max(roll_compensation_closed_loop_cmd_x_max_,
+                   roll_compensation_closed_loop_cmd_x_min_ + 1e-3);
+      roll_compensation_closed_loop_filter_time_constant_sec_ =
+          std::max(roll_compensation_closed_loop_filter_time_constant_sec_, 1e-3);
+      roll_compensation_closed_loop_target_time_constant_sec_ =
+          std::max(roll_compensation_closed_loop_target_time_constant_sec_, 1e-3);
+      roll_compensation_closed_loop_ki_ =
+          std::max(roll_compensation_closed_loop_ki_, 0.0);
+      roll_compensation_closed_loop_max_deg_ =
+          std::max(roll_compensation_closed_loop_max_deg_, 0.0);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdangz_, "enable_off_cmdy_by_cmdangz", false);
       try
@@ -555,6 +590,10 @@ namespace humanoid_controller
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = true;  // 初始化为站立状态
     smoothed_stance_height_cmd_ = 0.0;
+    roll_compensation_closed_loop_initialized_ = false;
+    roll_compensation_filtered_roll_rad_ = 0.0;
+    roll_compensation_target_roll_rad_ = 0.0;
+    roll_compensation_integral_rad_sec_ = 0.0;
     
     ROS_INFO("[%s] reset", name_.c_str());
     sensor_data_updated_ = false;
@@ -991,25 +1030,78 @@ namespace humanoid_controller
     }
 
     const bool is_walking_mode = cmd.cmdStance_ < 0.5;
-    if (is_amp_hand_controller_ && enable_roll_compensation_ && is_walking_mode &&
-        cmd.cmdVelLineX_ > kRollCompensationCmdXThreshold_)
+    double total_roll_compensation_deg = 0.0;
+    if (is_amp_hand_controller_ && enable_roll_compensation_closed_loop_)
     {
-      const double cmd_x = cmd.cmdVelLineX_;
-      const double walking_roll_compensation_deg =
-          kWalkingRollCompensationQuadA_ * cmd_x * cmd_x +
-          kWalkingRollCompensationQuadB_ * cmd_x +
-          kWalkingRollCompensationQuadC_;
-      double total_roll_compensation_deg = walking_roll_compensation_deg;
-      if (std::abs(cmd.cmdVelAngularZ_) > 0.55)
+      const Eigen::Matrix3d sensor_rotation = sensor_data.quat_.toRotationMatrix();
+      const double measured_roll_rad = std::atan2(sensor_rotation(2, 1), sensor_rotation(2, 2));
+      const double observation_dt =
+          inference_frequency_ > 0.0 ? 1.0 / inference_frequency_ : 0.02;
+
+      if (!roll_compensation_closed_loop_initialized_)
       {
-        total_roll_compensation_deg +=
-            kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
+        roll_compensation_filtered_roll_rad_ = measured_roll_rad;
+        roll_compensation_target_roll_rad_ = measured_roll_rad;
+        roll_compensation_integral_rad_sec_ = 0.0;
+        roll_compensation_closed_loop_initialized_ = true;
       }
-      if (std::abs(total_roll_compensation_deg) > 1e-6)
+
+      const double filter_alpha =
+          std::exp(-observation_dt / roll_compensation_closed_loop_filter_time_constant_sec_);
+      roll_compensation_filtered_roll_rad_ =
+          filter_alpha * roll_compensation_filtered_roll_rad_ +
+          (1.0 - filter_alpha) * measured_roll_rad;
+
+      if (!is_walking_mode)
       {
-        const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;
-        projected_gravity = Eigen::AngleAxisd(compensation_roll_rad, Eigen::Vector3d::UnitX()) * projected_gravity;
+        // 站立时缓慢学习本机 IMU/装配的中立 roll，不把静态安装误差带入行走补偿。
+        const double target_alpha =
+            std::exp(-observation_dt / roll_compensation_closed_loop_target_time_constant_sec_);
+        roll_compensation_target_roll_rad_ =
+            target_alpha * roll_compensation_target_roll_rad_ +
+            (1.0 - target_alpha) * roll_compensation_filtered_roll_rad_;
+        roll_compensation_integral_rad_sec_ = 0.0;
       }
+
+      const bool closed_loop_active =
+          is_walking_mode &&
+          cmd.cmdVelLineX_ > roll_compensation_closed_loop_cmd_x_min_ &&
+          cmd.cmdVelLineX_ < roll_compensation_closed_loop_cmd_x_max_ &&
+          std::abs(cmd.cmdVelLineY_) < roll_compensation_closed_loop_abs_cmd_y_max_ &&
+          std::abs(cmd.cmdVelAngularZ_) < roll_compensation_closed_loop_abs_cmd_ang_z_max_;
+      if (closed_loop_active)
+      {
+        const double roll_error_rad =
+            roll_compensation_target_roll_rad_ - roll_compensation_filtered_roll_rad_;
+        const double max_compensation_rad =
+            roll_compensation_closed_loop_max_deg_ * M_PI / 180.0;
+        if (roll_compensation_closed_loop_ki_ > 1e-9)
+        {
+          const double integral_limit =
+              max_compensation_rad / roll_compensation_closed_loop_ki_;
+          roll_compensation_integral_rad_sec_ = std::clamp(
+              roll_compensation_integral_rad_sec_ + roll_error_rad * observation_dt,
+              -integral_limit, integral_limit);
+        }
+        else
+        {
+          roll_compensation_integral_rad_sec_ = 0.0;
+        }
+
+        const double closed_loop_compensation_rad = std::clamp(
+            roll_compensation_closed_loop_kp_ * roll_error_rad +
+                roll_compensation_closed_loop_ki_ * roll_compensation_integral_rad_sec_,
+            -max_compensation_rad, max_compensation_rad);
+        total_roll_compensation_deg += closed_loop_compensation_rad * 180.0 / M_PI;
+      }
+    }
+
+    if (std::abs(total_roll_compensation_deg) > 1e-6)
+    {
+      const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;
+      projected_gravity =
+          Eigen::AngleAxisd(compensation_roll_rad, Eigen::Vector3d::UnitX()) *
+          projected_gravity;
     }
 
     if (enable_back_arm_enhance_ && is_walking_mode &&

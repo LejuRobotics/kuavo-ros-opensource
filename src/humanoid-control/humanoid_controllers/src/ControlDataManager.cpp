@@ -248,7 +248,7 @@ void ControlDataManager::enableControlStateCallback(const std_msgs::Bool::ConstP
     bool was_enabled = prev_enable_control_.load(std::memory_order_acquire);
 
     // true→false：进入 disable。
-    // 新语义下，姿态类 storage 由 WBC 反向写入规划值，CDM 不再用传感器快照覆写。
+    // Pose storage is written back from WBC planned values; ControlDataManager no longer overwrites with sensor snapshots.
     // 速度/偏移类命令置零，避免底盘/VR 躯干/头部继续运动。
     if (was_enabled && !requested) {
         {
@@ -259,7 +259,7 @@ void ControlDataManager::enableControlStateCallback(const std_msgs::Bool::ConstP
             std::lock_guard<std::mutex> lock(external_state_mutex_);
             vr_torso_pose_.update(makeIdentityPose7D());
         }
-        // 头部 vel/delta：冻结时清粘性速度与 oneshot，避免解除软暂停后残留积分
+        // Head vel/delta: clear sticky velocity and oneshot on freeze to avoid residual integration after unpause
         {
             std::lock_guard<std::mutex> lock(cmd_head_vel_mtx_);
             cmd_head_vel_.setZero();
@@ -386,7 +386,7 @@ void ControlDataManager::applyHeadVelDeltaCommands() {
     //   - >0.3s without new msg → cmd_head_vel_ = 0
     //   - explicit/timeout zero → clear sticky flag (stop integrating)
     // Oneshot delta: consume once.
-    // Time axis: ros::Time::now()（CDM 无 RM loop，在 getHead 读数时懒积分）
+    // Time axis: ros::Time::now() (ControlDataManager has no ReferenceManager loop; lazy-integrate on getHead)
     const double now = ros::Time::now().toSec();
 
     bool integrateVel = false;

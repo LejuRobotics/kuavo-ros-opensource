@@ -2545,6 +2545,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     is_rl_controller_ = !controller_manager_->isBaseControllerActive();
     current_controller_ptr_ = controller_manager_->getCurrentController();
 
+    // 检查待触发的 MPC 切换（手臂归位后自动补触发）
+    controller_manager_->tryPendingMpcSwitch();
+
     // 同步MPC stance状态到RLControllerManager
     controller_manager_->setMpcStanceState(is_stance_mode_, current_gait_.name);
 

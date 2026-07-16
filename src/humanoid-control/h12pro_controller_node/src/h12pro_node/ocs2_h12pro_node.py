@@ -459,11 +459,12 @@ class H12PROControllerNode:
         # 与躯干 vel/delta 重构（f97e109da0a）一致：速度语义不应存开环位姿。
         self.head_control_mode = False
         # 满量程角速度（deg/s），rosparam 可调
-        self.head_vel_scale_yaw = rospy.get_param("~head_vel_scale_yaw", 60.0)
-        self.head_vel_scale_pitch = rospy.get_param("~head_vel_scale_pitch", 30.0)
+        # defaults = 旧 sensitivity × 500Hz 体感校准（与躯干 kTorsoVelCalibHz 一致）
+        self.head_vel_scale_yaw = rospy.get_param("~head_vel_scale_yaw", 400.0)    # 0.8 × 500
+        self.head_vel_scale_pitch = rospy.get_param("~head_vel_scale_pitch", 100.0)  # 0.2 × 500
         # 摇杆死区
         self.head_stick_deadzone = 0.1
-        # True 表示上一帧发过非零 vel；摇杆回中时发一次零清接收侧粘性
+        # True after a non-zero head vel publish; emit one zero on stick release to clear sticky latch
         self._head_vel_latched = False
         #zsh
 
@@ -738,7 +739,7 @@ class H12PROControllerNode:
             pitch_vel = pitch_input * self.head_vel_scale_pitch
 
             if abs(yaw_vel) < 1e-6 and abs(pitch_vel) < 1e-6:
-                # 摇杆回中：发一次零清接收侧粘性速度（之后不再发）
+                # Stick release: one zero to clear sticky velocity latch (then stop publishing)
                 if self._head_vel_latched:
                     self._publish_head_vel(0.0, 0.0)
                     self._head_vel_latched = False
@@ -872,7 +873,7 @@ class H12PROControllerNode:
                 if current_state == "stance":
                     self.head_control_mode = not self.head_control_mode
                     #zsh
-                    # 退出头部控制时发一次零速清接收侧粘性（进入时无需发零）
+                    # Exit head control: one zero to clear sticky latch (enter needs no zero)
                     if not self.head_control_mode:
                         self._publish_head_vel(0.0, 0.0)
                         self._head_vel_latched = False
@@ -883,7 +884,7 @@ class H12PROControllerNode:
                         rospy.logwarn("[HeadControl] Exiting stance state. Head control mode disabled.")
                         self.head_control_mode = False
                         #zsh
-                        # 离开 stance 时发零速清接收侧粘性
+                        # Leave stance: zero vel to clear sticky latch
                         self._publish_head_vel(0.0, 0.0)
                         self._head_vel_latched = False
                         #zsh
@@ -954,11 +955,11 @@ class H12PROControllerNode:
                         rospy.logwarn("[HeadControl] Current state is not 'stance'. Disabling head control mode.")
                         self.head_control_mode = False
                         #zsh
-                        # 非 stance 自动关闭时发零速清接收侧粘性
+                        # Auto-disable outside stance: zero vel to clear sticky latch
                         self._publish_head_vel(0.0, 0.0)
                         self._head_vel_latched = False
                         #zsh
-                    
+
                     # 如果是有效状态,更新消息
                     current_controller_support = True
                     current_controller = None
