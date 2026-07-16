@@ -13,6 +13,7 @@ from sensor_msgs.msg import Joy, JointState
 from std_msgs.msg import String, Bool, Float64
 from geometry_msgs.msg import Twist
 from kuavo_msgs.srv import playmusic, playmusicRequest
+from kuavo_msgs.srv import PlayMusicImmediate, PlayMusicImmediateRequest
 from kuavo_msgs.srv import ExecuteArmAction, ExecuteArmActionRequest
 from kuavo_msgs.srv import SetString, SetStringRequest
 from kuavo_msgs.srv import getControllerList
@@ -327,6 +328,10 @@ class JoyCustomizeConfigNode:
         self._head_pub = rospy.Publisher("/robot_head_motion_data", robotHeadMotionData, queue_size=1)
         # 打断当前音频播放（搬运语音播放前清空 audio_stream_player 缓冲区）
         self._stop_music_pub = rospy.Publisher("/stop_music", Bool, queue_size=1)
+        # /play_music_immediate 新接口可用性 (None=未探测, 首次用到时探测并缓存)
+        self._has_play_music_immediate = None
+        # /stop_music 同步服务可用性 (None=未探测)
+        self._has_stop_music_srv = None
         # 告知 cpp 节点 M1/M2 动作正在执行（latched），cpp 据此屏蔽推杆走路。
         # 语义 = robot_action_executing AND 最近一次触发是 M1/M2。
         self.m1m2_action_active_pub = rospy.Publisher(
@@ -628,20 +633,81 @@ class JoyCustomizeConfigNode:
         name = str(names).strip()
         return [name] if name else []
 
-    def _set_robot_play_music(self, music_file_name: str, music_volume: int, immediate: bool = False) -> bool:
-        """机器人播放指定文件的音乐。immediate=True 时服务端先停止当前再加载 (打断+播新)。"""
+    def _set_robot_play_music(self, music_file_name: str, music_volume: int) -> bool:
+        """机器人播放指定文件的音乐"""
         try:
             _robot_music_play_client = rospy.ServiceProxy("/play_music", playmusic)
             request = playmusicRequest()
             request.music_number = music_file_name
             request.volume = music_volume
-            request.immediate = immediate
             response = _robot_music_play_client(request)
             rospy.loginfo(f"Service call /play_music: {response.success_flag}")
             return response.success_flag
         except Exception as e:
             rospy.logerr(f"Service /play_music call failed: {e}")
             return False
+
+    def _play_music_immediate(self, music_file_name: str, music_volume: int) -> bool:
+        """打断当前播放，立即播放指定文件。"""
+        if self._has_play_music_immediate is None:
+            try:
+                rospy.wait_for_service("/play_music_immediate", timeout=0.2)
+                self._has_play_music_immediate = True
+            except rospy.ROSException:
+                self._has_play_music_immediate = False
+            rospy.loginfo(f"[JoyCustomize] /play_music_immediate 可用: {self._has_play_music_immediate}")
+
+        if self._has_play_music_immediate:
+            try:
+                client = rospy.ServiceProxy("/play_music_immediate", PlayMusicImmediate)
+                request = PlayMusicImmediateRequest()
+                request.music_number = music_file_name
+                request.volume = music_volume
+                response = client(request)
+                rospy.loginfo(f"Service call /play_music_immediate: {response.success_flag}")
+                return response.success_flag
+            except Exception as e:
+                rospy.logwarn(f"/play_music_immediate 调用失败, 降级旧序列: {e}")
+                self._has_play_music_immediate = False
+
+        # 降级: 旧接口场景
+        if self._has_stop_music_srv is None:
+            try:
+                rospy.wait_for_service("/stop_music", timeout=0.2)
+                self._has_stop_music_srv = True
+            except rospy.ROSException:
+                self._has_stop_music_srv = False
+            rospy.loginfo(f"[JoyCustomize] /stop_music service 可用: {self._has_stop_music_srv}")
+
+        if self._has_stop_music_srv:
+            try:
+                stop_client = rospy.ServiceProxy("/stop_music", Trigger)
+                stop_client()
+                rospy.loginfo("/stop_music service: 已停止当前播放")
+            except Exception as e:
+                rospy.logwarn(f"/stop_music service 调用失败, 转 topic: {e}")
+                self._has_stop_music_srv = False
+
+        if not self._has_stop_music_srv:
+            self._stop_music_pub.publish(Bool(data=True))
+            # 轮询音频缓冲区，确认 stop topic 已被处理后再发 /play_music
+            timeout = rospy.Time.now() + rospy.Duration(2.0)
+            cleared = False
+            try:
+                buf_client = rospy.ServiceProxy('/get_used_audio_buffer_size', Trigger)
+                buf_client.wait_for_service(timeout=0.5)
+                while rospy.Time.now() < timeout and not rospy.is_shutdown():
+                    resp = buf_client()
+                    if resp.success and int(resp.message) == 0:
+                        cleared = True
+                        break
+                    rospy.sleep(0.05)
+            except Exception as e:
+                rospy.logwarn(f"[JoyCustomize] 查询音频缓冲区失败: {e}")
+            if not cleared:
+                rospy.logwarn("[JoyCustomize] /stop_music topic 发送后缓冲区未在 2s 内清空，继续播放")
+
+        return self._set_robot_play_music(music_file_name, music_volume)
 
     def _robot_action_state_callback(self, msg):
         """动作执行状态回调函数"""
@@ -1591,11 +1657,11 @@ class JoyCustomizeConfigNode:
     }
 
     def _transport_voice(self, key: str) -> None:
-        """搬运语音: 打断当前 → 立即播新 (immediate=True, 服务端原子 stop+play, 无竞态)。"""
+        """搬运语音: 打断当前 → 立即播新。"""
         name = self._TRANSPORT_VOICE.get(key, "")
         rospy.loginfo(f"[JoyCustomize][搬运][语音] {key}: {name}")
         if name:
-            self._set_robot_play_music(name, 100, immediate=True)
+            self._play_music_immediate(name, 100)
 
     def _set_head_pos(self, pitch_deg: float = 0.0) -> None:
         """发布头部目标角度(yaw=0, pitch 可变)。

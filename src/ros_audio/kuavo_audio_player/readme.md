@@ -2,35 +2,41 @@
 
 ## 1. 系统架构说明
 
-kuavo_audio_player 由单个节点 `audio_player_node` 提供音频播放能力，统一处理文件播放与 TTS 流式播放：
+kuavo_audio_player 按机型提供两种部署形态（`play_music.launch` 按 `ROBOT_VERSION` 自动分流）：
 
-- **音频播放节点（audio_player_node）**：提供 `/play_music` 服务播放本地音频文件，订阅 `/audio_data` 接收外部 PCM 流，统一经单环形缓冲 + 单 PortAudio 回调输出到声卡。
+- **v17 — 单节点 `audio_player_node`**：提供 `/play_music` 服务播放本地音频文件，订阅 `/audio_data` 接收外部 PCM 流，统一经单环形缓冲 + 单 PortAudio 回调输出到声卡。
+- **非 v17 — 旧两节点**：`loundspeaker.py`（文件服务）+ `audio_stream_player.py`（流播放）。
 
-单节点独占音频设备，从架构上避免多进程同时访问声卡导致的占用冲突；停止通过关闭 PortAudio 流让 ALSA 丢弃 DMA 缓冲，从驱动层保证停止即时生效（详见 §3）。
+**接口原则**：旧接口定义冻结；新功能只通过新接口名提供，不修改旧定义。
 
 ## 2. 服务与话题接口
 
 ### 2.1 播放本地音频文件
 
 #### 服务接口：`/play_music`
-- **服务类型**：`kuavo_msgs/playmusic`
+- **服务类型**：`kuavo_msgs/playmusic`（旧接口）
 - **请求参数**：
   - `music_number` (str)：音频文件名（如 `test.wav`、`test.mp3`），需放在 `music_path` 指定的目录下
   - `volume` (int)：音量，范围 0–100。内部映射为 ffmpeg `volume` 滤镜的 dB 增益：`100` 为原声（0 dB），`0` 近静音（约 −60 dB），对数缩放避免线性乘法溢出破音
-  - `immediate` (bool)：是否原子化「打断当前 + 立即播新」。`True` 先同步停止当前播放（关流丢弃 ALSA DMA）再加载新文件，消除停与播之间的竞态窗口；`False`（默认）追加到缓冲，按队列顺序播放，不打断当前
 - **响应**：`success_flag` (bool)
+- **语义**：追加到缓冲，按队列顺序播放，不打断当前
+
+#### 服务接口：`/play_music_immediate`（新接口，仅单节点提供）
+- **服务类型**：`kuavo_msgs/PlayMusicImmediate`
+- **请求参数**：同 `/play_music`
+- **响应**：`success_flag` (bool)
+- **语义**：原子化「打断当前 + 立即播新」。先同步停止当前播放（关流丢弃 ALSA DMA）再加载新文件
+- **兼容性**：旧两节点不提供此服务。调用方应探测其存在（`wait_for_service` 短超时 + 缓存），不存在时降级为 `/stop_music` 同步服务 → `/stop_music` topic → `/play_music`。
 
 #### 示例调用：
 ```bash
 # 追加播放（默认，排队）
 rosservice call /play_music "music_number: '1_挥手.mp3'
-volume: 80
-immediate: false"
+volume: 80"
 
-# 立即打断当前并播放新文件（搬运语音切换用）
-rosservice call /play_music "music_number: '进入搬运模式可安全移动.wav'
-volume: 80
-immediate: true"
+# 立即打断当前并播放新文件（搬运语音切换用，仅单节点机型）
+rosservice call /play_music_immediate "music_number: '进入搬运模式可安全移动.wav'
+volume: 80"
 ```
 
 ### 2.2 音频流播放接口
@@ -100,9 +106,8 @@ rostopic pub /stop_music std_msgs/Bool "data: true" -1
 ## 3. 软件依赖
 
 - `pyaudio`：音频回调播放（`sudo apt-get install python3-pyaudio -y`）
-- `samplerate`：高质量音频重采样（`pip install samplerate`）
+- `scipy`：音频重采样与处理（`pip install scipy`）
 - `ffmpeg`：音频格式转换与音量缩放（`sudo apt-get install ffmpeg -y`）
-- `scipy`：音频处理
 - 依赖缺失时节点会尝试自动安装
 
 ## 4. 音频格式支持
@@ -122,8 +127,7 @@ roslaunch kuavo_audio_player play_music.launch
 ### 5.2 播放本地音频文件
 ```bash
 rosservice call /play_music "music_number: '1_挥手.mp3'
-volume: 80
-immediate: false"
+volume: 80"
 ```
 
 ### 5.3 发布音频流测试

@@ -1,4 +1,18 @@
 <launch>
+    <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+
+    <!-- 设置音频文件路径参数 -->
     <param name="music_path" value="/home/lab/.config/lejuconfig/music" />
-    <node pkg="kuavo_audio_player" type="audio_player.py" name="audio_player_node" output="screen" respawn="true" respawn_delay="5"/>
+
+    <!-- v17: 新统一节点 -->
+    <node if="$(eval int(arg('robot_version')) == 17)" pkg="kuavo_audio_player" type="audio_player.py" name="audio_player_node" output="screen" respawn="true" respawn_delay="5"/>
+
+    <!-- 非 v17: 旧两节点架构 -->
+    <group unless="$(eval int(arg('robot_version')) == 17)">
+        <!-- 先启动流式播放节点 -->
+        <node pkg="kuavo_audio_player" type="audio_stream_player.py" name="audio_stream_player_node" output="screen" respawn="true" respawn_delay="5"/>
+
+        <!-- 再启动音乐文件服务节点 -->
+        <node pkg="kuavo_audio_player" type="loundspeaker.py" name="play_music_node" output="screen"  />
+    </group>
 </launch>

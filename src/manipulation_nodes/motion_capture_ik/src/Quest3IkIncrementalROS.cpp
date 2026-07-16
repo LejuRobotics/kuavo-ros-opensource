@@ -21,10 +21,14 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <iomanip>
 #include <cmath>
+#include <sstream>
+#include <algorithm>
+#include <XmlRpcValue.h>
 
 #include <leju_utils/define.hpp>
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
+#include <ocs2_core/thread_support/SetThreadPriority.h>
 
 #include "motion_capture_ik/ArmControlBaseROS.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
@@ -36,6 +40,43 @@
 #include "DrakeElbowHandPointOpt.hpp"
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
+
+void Quest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName, int priority) const {
+  if (priority > 0) {
+    ocs2::setThisThreadPriority(priority);
+    ROS_INFO("[Quest3IkIncrementalROS] %s: SCHED_FIFO priority %d", threadName, priority);
+  } else {
+    ROS_INFO("[Quest3IkIncrementalROS] %s: priority=0, keep SCHED_OTHER", threadName);
+  }
+
+  if (vrIkThreadCpus_.empty()) {
+    return;
+  }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  std::ostringstream cpuList;
+  for (size_t i = 0; i < vrIkThreadCpus_.size(); ++i) {
+    const int cpu = vrIkThreadCpus_[i];
+    if (cpu < 0 || cpu >= CPU_SETSIZE) {
+      ROS_WARN("[Quest3IkIncrementalROS] %s: skip invalid CPU id %d", threadName, cpu);
+      continue;
+    }
+    CPU_SET(cpu, &cpuset);
+    if (!cpuList.str().empty()) {
+      cpuList << ", ";
+    }
+    cpuList << cpu;
+  }
+
+  if (CPU_COUNT(&cpuset) == 0) {
+    ROS_WARN("[Quest3IkIncrementalROS] %s: no valid CPU in affinity list, skip binding", threadName);
+    return;
+  }
+
+  ocs2::setThreadAffinity(cpuset);
+  ROS_INFO("[Quest3IkIncrementalROS] %s: CPU affinity -> [%s]", threadName, cpuList.str().c_str());
+}
 
 Quest3IkIncrementalROS::Quest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
                                                double publishRate,
@@ -70,6 +111,9 @@ void Quest3IkIncrementalROS::run() {
 }
 
 void Quest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
+  // 人形增量 IK 与 arm_traj 发布在同一线程，取两者优先级较大值
+  const int workerPriority = std::max(armTrajPublishThreadPriority_, ikSolveThreadPriority_);
+  applyWorkerThreadScheduling("ik_solve_thread", workerPriority);
   ros::Rate rate(publishRate_);
   while (!shouldStop() && ros::ok()) {
     updateSensorArmJointMeanFromSensorData();
@@ -2167,6 +2211,21 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   } else {
     ROS_WARN("⚠️  [Quest3IkIncrementalROS] 'NUM_WAIST_JOINT' field not found in JSON configuration, using default value: 0");
     waist_dof_ = 0;
+  }
+
+  nodeHandle_.param("vr_ik/arm_traj_publish_thread_priority",
+                    armTrajPublishThreadPriority_,
+                    DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY);
+  nodeHandle_.param("vr_ik/ik_solve_thread_priority",
+                    ikSolveThreadPriority_,
+                    DEFAULT_IK_SOLVE_THREAD_PRIORITY);
+  vrIkThreadCpus_.clear();
+  XmlRpc::XmlRpcValue threadCpusParam;
+  if (nodeHandle_.getParam("vr_ik/thread_cpus", threadCpusParam) &&
+      threadCpusParam.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+    for (int i = 0; i < threadCpusParam.size(); ++i) {
+      vrIkThreadCpus_.push_back(static_cast<int>(threadCpusParam[i]));
+    }
   }
 
   // 初始化 sensorData 双臂关节角（14维，rad）指数均值滤波状态

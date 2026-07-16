@@ -1,9 +1,10 @@
 '''
 Description: 统一音频播放节点 — loundspeaker (文件转换) + audio_stream_player (PyAudio 播放)
-  /play_music srv:     immediate=False → 追加 (队列语义); immediate=True → 先停下立即播放
+  /play_music srv:            追加播放 (旧接口, 队列语义)
+  /play_music_immediate srv:  打断当前立即播放 (新接口, 原子 stop+play)
   /stop_music srv:   同步停止，返回时已静音 (推荐)
-  /stop_music topic:  fire-and-forget 停止 (兼容, 推荐迁移到 service)
-  /audio_data sub:     接收外部 PCM 推流 (TTS / llm_doubao.py 兼容, 自动重采样至声卡采样率)
+  /stop_music topic:  fire-and-forget 停止 (兼容)
+  /audio_data sub:     接收外部 PCM 推流 (TTS 兼容, 自动重采样至声卡采样率)
   /audio_status srv:   查询当前播放状态
   /get_used_audio_buffer_size srv: 查询缓冲大小
   /audio_playback_status topic: STATUS_RATE Hz 状态发布
@@ -29,11 +30,11 @@ except ImportError:
     import pyaudio
 
 try:
-    import samplerate
+    from scipy import signal as scipy_signal
 except ImportError:
-    samplerate = None
+    scipy_signal = None
 
-from kuavo_msgs.srv import playmusic, playmusicResponse
+from kuavo_msgs.srv import playmusic, playmusicResponse, PlayMusicImmediate, PlayMusicImmediateResponse
 from kuavo_audio_player.srv import audio_status, audio_statusResponse
 from kuavo_msgs.msg import AudioPlaybackStatus
 
@@ -90,6 +91,7 @@ class AudioPlayerNode:
         rospy.Subscriber('stop_music', Bool, self._on_stop_music, queue_size=10)
         rospy.Service('stop_music', Trigger, self._on_stop_music_srv)
         rospy.Service('play_music', playmusic, self._on_play_music)
+        rospy.Service('play_music_immediate', PlayMusicImmediate, self._on_play_music_immediate)
         rospy.Service('audio_status', audio_status, self._on_audio_status)
         rospy.Service('get_used_audio_buffer_size', Trigger, self._on_get_buffer_size)
         self._status_pub = rospy.Publisher('audio_playback_status', AudioPlaybackStatus, queue_size=10)
@@ -241,16 +243,22 @@ class AudioPlayerNode:
         self._init_stream()
         self._cleanup_temp()
 
-    # 服务: /play_music
-    #   req.immediate=True  → 先停止当前, 再加载新文件 (打断+播新, 无竞态)
-    #   req.immediate=False → 追加到缓冲 (队列语义, 不打断, 默认)
+    # 服务: /play_music (旧接口, 冻结) — 追加到缓冲 (队列语义, 不打断)
+    # 服务: /play_music_immediate (新接口) — 先停止当前, 再加载新文件 (打断+播新, 无竞态)
 
     def _on_play_music(self, req):
+        return self._load_to_buffer(req, interrupt=False)
+
+    def _on_play_music_immediate(self, req):
+        result = self._load_to_buffer(req, interrupt=True)
+        return PlayMusicImmediateResponse(success_flag=result.success_flag)
+
+    def _load_to_buffer(self, req, interrupt):
         if not self._enable_control:
             rospy.logwarn_throttle(10, "/play_music: 音频已冻结，拒绝播放")
             return playmusicResponse(success_flag=False)
 
-        if req.immediate:
+        if interrupt:
             self._stop_and_recreate()
 
         music_file = os.path.join(self._music_dir, req.music_number)
@@ -259,7 +267,7 @@ class AudioPlayerNode:
             return playmusicResponse(success_flag=False)
 
         rospy.loginfo(f"播放: {music_file}  volume={req.volume}"
-                      f"{' (打断)' if req.immediate else ''}")
+                      f"{' (打断)' if interrupt else ''}")
 
         self._cleanup_temp()
 
@@ -351,10 +359,10 @@ class AudioPlayerNode:
                     src_rate = int(dim.size)
                     break
 
-            if src_rate != self._dev_rate and samplerate is not None:
-                ratio = self._dev_rate / src_rate
+            if src_rate != self._dev_rate and scipy_signal is not None:
+                target_num_samples = int(len(audio) * self._dev_rate / src_rate)
                 audio = audio.astype(np.float32) / 32768.0
-                audio = samplerate.resample(audio, ratio, converter_type='sinc_fastest')
+                audio = scipy_signal.resample(audio, target_num_samples)
                 audio = np.clip(audio * 32768.0, -32768, 32767).astype(np.int16)
 
             data = audio.tobytes()

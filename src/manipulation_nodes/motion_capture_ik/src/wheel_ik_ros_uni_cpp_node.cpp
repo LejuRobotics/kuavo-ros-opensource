@@ -57,32 +57,65 @@ ArmIdx wheelGetCtrlArmIdx(ros::NodeHandle& nodeHandle) {
 static ros::NodeHandle* g_nh = nullptr;
 static std::atomic<bool> g_teardown_done{false};
 
-static void callVrIncrementalService(ros::NodeHandle& nh, const std::string& service_name, bool enable)
+static bool callVrIncrementalService(ros::NodeHandle& nh,
+                                     const std::string& service_name,
+                                     bool enable,
+                                     bool block_until_success)
 {
-  constexpr double kWaitTimeout = 30.0;
-  if (enable && !ros::service::waitForService(service_name, ros::Duration(kWaitTimeout))) {
-    ROS_WARN("[wheel_ik] Timeout waiting for service: %s", service_name.c_str());
-    return;
+  constexpr double kPollIntervalSec = 0.5;
+
+  if (!enable) {
+    if (!ros::service::exists(service_name, false)) {
+      return true;  // 退出时服务不存在则跳过
+    }
+    block_until_success = false;
   }
-  if (!enable && !ros::service::exists(service_name, false)) {
-    return;  // 退出时服务不存在则跳过
-  }
+
   ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
   std_srvs::SetBool srv;
   srv.request.data = enable;
-  if (client.call(srv) && srv.response.success) {
-    ROS_INFO("[wheel_ik] %s set to %s -> OK", service_name.c_str(), enable ? "true" : "false");
-  } else {
-    ROS_WARN("[wheel_ik] %s -> FAILED: %s", service_name.c_str(), srv.response.message.c_str());
+
+  while (ros::ok()) {
+    if (!ros::service::exists(service_name, false)) {
+      if (!block_until_success) {
+        ROS_WARN("[wheel_ik] Service not available: %s", service_name.c_str());
+        return false;
+      }
+      ROS_WARN_THROTTLE(5.0, "[wheel_ik] Waiting for service: %s ...", service_name.c_str());
+      ros::Duration(kPollIntervalSec).sleep();
+      continue;
+    }
+
+    if (client.call(srv) && srv.response.success) {
+      ROS_INFO("[wheel_ik] %s set to %s -> OK", service_name.c_str(), enable ? "true" : "false");
+      return true;
+    }
+
+    const std::string fail_msg = srv.response.message.empty() ? "service call failed" : srv.response.message;
+    if (!block_until_success) {
+      ROS_WARN("[wheel_ik] %s -> FAILED: %s", service_name.c_str(), fail_msg.c_str());
+      return false;
+    }
+    ROS_WARN_THROTTLE(5.0, "[wheel_ik] %s -> retrying (%s)", service_name.c_str(), fail_msg.c_str());
+    ros::Duration(kPollIntervalSec).sleep();
   }
+
+  return false;
 }
 
 static void setupVrIncrementalMode(ros::NodeHandle& nh)
 {
-  ROS_INFO("[wheel_ik] Configuring VR incremental mode via controller services...");
-  callVrIncrementalService(nh, "/enable_vr_arm_kpkd",          true);
-  callVrIncrementalService(nh, "/enable_vr_arm_accel_task",    true);
-  callVrIncrementalService(nh, "/enable_arm_traj_interpolator", true);
+  ROS_INFO("[wheel_ik] Configuring VR incremental mode via controller services (blocking until success)...");
+  constexpr bool kBlockUntilSuccess = true;
+  if (!callVrIncrementalService(nh, "/enable_vr_arm_kpkd", true, kBlockUntilSuccess)) {
+    return;
+  }
+  if (!callVrIncrementalService(nh, "/enable_vr_arm_accel_task", true, kBlockUntilSuccess)) {
+    return;
+  }
+  if (!callVrIncrementalService(nh, "/enable_arm_traj_interpolator", true, kBlockUntilSuccess)) {
+    return;
+  }
   ROS_INFO("[wheel_ik] VR incremental mode configuration done.");
 }
 
@@ -90,9 +123,9 @@ static void teardownVrIncrementalMode()
 {
   if (g_teardown_done.exchange(true) || !g_nh) return;
   ROS_INFO("[wheel_ik] Restoring VR incremental mode parameters to default...");
-  callVrIncrementalService(*g_nh, "/enable_vr_arm_kpkd",          false);
-  callVrIncrementalService(*g_nh, "/enable_vr_arm_accel_task",    false);
-  callVrIncrementalService(*g_nh, "/enable_arm_traj_interpolator", false);
+  callVrIncrementalService(*g_nh, "/enable_vr_arm_kpkd", false, false);
+  callVrIncrementalService(*g_nh, "/enable_vr_arm_accel_task", false, false);
+  callVrIncrementalService(*g_nh, "/enable_arm_traj_interpolator", false, false);
   ROS_INFO("[wheel_ik] VR incremental mode parameters restored.");
 }
 

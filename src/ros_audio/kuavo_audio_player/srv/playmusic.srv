@@ -1,0 +1,4 @@
+string music_number
+int64 volume
+---
+bool success_flag
