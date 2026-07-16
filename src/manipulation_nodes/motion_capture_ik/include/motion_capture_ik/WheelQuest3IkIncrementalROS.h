@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 #include "motion_capture_ik/json.hpp"
 
 #include <ros/ros.h>
@@ -69,6 +70,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   void solveIkHandElbowThreadFunction();
   void publishJointStatesThreadFunction();
+  void applyWorkerThreadScheduling(const char* threadName, int priority) const;
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
@@ -186,6 +188,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   static constexpr double LB_QUICK_MODE_RETRY_INTERVAL_SEC = 0.5;
   static constexpr double DEFAULT_JOINT_STATE_PUBLISH_RATE_HZ = 500.0;
   static constexpr double DEFAULT_LB_LEG_PUBLISH_RATE_MULTIPLIER = 0.25;
+  static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
+  static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 30;
 
   std::mutex controlModeRequestMutex_;
   int lastControlModeRequested_ = -1;
@@ -254,6 +258,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::mutex oneStageIkMutex_;  // 保护 oneStageIkEndEffectorPtr_ 的线程访问
   double jointStatePublishRateHz_ = DEFAULT_JOINT_STATE_PUBLISH_RATE_HZ;
   double lbLegPublishRateMultiplier_ = DEFAULT_LB_LEG_PUBLISH_RATE_MULTIPLIER;
+  int armTrajPublishThreadPriority_ = DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY;
+  int ikSolveThreadPriority_ = DEFAULT_IK_SOLVE_THREAD_PRIORITY;
+  std::vector<int> vrIkThreadCpus_;
   Eigen::Quaterniond chestRotationQuaternion_ = Eigen::Quaterniond::Identity();
   std::mutex chestPoseMutex_;  // 保护最新 chest pose（position）
   Eigen::Vector3d latestChestPositionInRobot_ = Eigen::Vector3d::Zero();

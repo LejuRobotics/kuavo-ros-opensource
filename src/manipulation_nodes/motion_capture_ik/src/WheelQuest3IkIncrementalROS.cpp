@@ -24,11 +24,13 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <chrono>
 #include <cmath>
+#include <sstream>
 
 #include <leju_utils/define.hpp>
 #include <time.h>
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
+#include <ocs2_core/thread_support/SetThreadPriority.h>
 
 #include "motion_capture_ik/WheelArmControlBaseROS.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
@@ -57,6 +59,43 @@ void updateElbowConstraintUnlocked(std::vector<PoseData>& poseList, int elbowInd
   poseList[elbowIndex].position = elbowPos;
 }
 }  // namespace
+
+void WheelQuest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName, int priority) const {
+  if (priority > 0) {
+    ocs2::setThisThreadPriority(priority);
+    ROS_INFO("[WheelQuest3IkIncrementalROS] %s: SCHED_FIFO priority %d", threadName, priority);
+  } else {
+    ROS_INFO("[WheelQuest3IkIncrementalROS] %s: priority=0, keep SCHED_OTHER", threadName);
+  }
+
+  if (vrIkThreadCpus_.empty()) {
+    return;
+  }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  std::ostringstream cpuList;
+  for (size_t i = 0; i < vrIkThreadCpus_.size(); ++i) {
+    const int cpu = vrIkThreadCpus_[i];
+    if (cpu < 0 || cpu >= CPU_SETSIZE) {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] %s: skip invalid CPU id %d", threadName, cpu);
+      continue;
+    }
+    CPU_SET(cpu, &cpuset);
+    if (!cpuList.str().empty()) {
+      cpuList << ", ";
+    }
+    cpuList << cpu;
+  }
+
+  if (CPU_COUNT(&cpuset) == 0) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] %s: no valid CPU in affinity list, skip binding", threadName);
+    return;
+  }
+
+  ocs2::setThreadAffinity(cpuset);
+  ROS_INFO("[WheelQuest3IkIncrementalROS] %s: CPU affinity -> [%s]", threadName, cpuList.str().c_str());
+}
 
 WheelQuest3IkIncrementalROS::WheelQuest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
                                                double publishRate,
@@ -109,6 +148,7 @@ void WheelQuest3IkIncrementalROS::run() {
 }
 
 void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
+  applyWorkerThreadScheduling("ik_solve_thread", ikSolveThreadPriority_);
   ros::Rate rate(publishRate_);
   // 用于统计时间差的静态变量
   static int loopCount = 0;
@@ -190,6 +230,7 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
 }
 
 void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
+  applyWorkerThreadScheduling("arm_traj_publish_thread", armTrajPublishThreadPriority_);
   // 不用 ros::Rate：落后时会追赶连发，header.stamp≈同一时刻 → PlotJuggler/录包呈“堆在一起”
   const double frequency = std::max(jointStatePublishRateHz_, 1.0);
   const double periodSec = 1.0 / frequency;

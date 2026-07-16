@@ -1433,6 +1433,17 @@ namespace ocs2
       // RB + B
       if (risingEdge(joy_msg, "BUTTON_TROT"))
       {
+        if (IS_ROBAN(rb_version_))
+        {
+          // 动作执行期间禁止切换舞蹈控制器（与 RB+A / RB+Y 同口径）
+          if (robot_action_executing_)
+          {
+            ROS_WARN("[JoyControl] RB+B: 动作执行中，禁止切换舞蹈控制器");
+            return true;
+          }
+          triggerFixedDance3();      // 固定舞蹈3: 爱情鸟
+          return true;
+        }
         return true;
       }
       return false;

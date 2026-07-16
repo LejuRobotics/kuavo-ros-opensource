@@ -22,6 +22,7 @@
 #include <sstream>
 #include <cmath>
 #include <algorithm>
+#include <XmlRpcValue.h>
 
 #include <leju_utils/define.hpp>
 #include <leju_utils/math.hpp>
@@ -2047,6 +2048,21 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   } else {
     ROS_INFO("ℹ️  [WheelQuest3IkIncrementalROS] 'lb_leg_publish_rate_multiplier' not found, using default %.2f",
              lbLegPublishRateMultiplier_);
+  }
+
+  nodeHandle_.param("vr_ik/arm_traj_publish_thread_priority",
+                    armTrajPublishThreadPriority_,
+                    DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY);
+  nodeHandle_.param("vr_ik/ik_solve_thread_priority",
+                    ikSolveThreadPriority_,
+                    DEFAULT_IK_SOLVE_THREAD_PRIORITY);
+  vrIkThreadCpus_.clear();
+  XmlRpc::XmlRpcValue threadCpusParam;
+  if (nodeHandle_.getParam("vr_ik/thread_cpus", threadCpusParam) &&
+      threadCpusParam.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+    for (int i = 0; i < threadCpusParam.size(); ++i) {
+      vrIkThreadCpus_.push_back(static_cast<int>(threadCpusParam[i]));
+    }
   }
 
   // TEST: 初始化关节限制中间值（硬编码，从URDF中提取）
