@@ -11,6 +11,7 @@
 #include <Eigen/Dense>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 namespace humanoid_controller
 {
@@ -36,6 +37,21 @@ namespace humanoid_controller
 class ArmController
 {
 public:
+    // ==================== 手臂控制模式枚举 ====================
+
+    /**
+     * @brief 手臂控制模式
+     *
+     * getMode()/changeMode() 仍以 int 对外（ROS 协议），内部存储用此枚举。
+     */
+    enum class ControlMode : int
+    {
+        kLocked    = 0,  // 锁定：固定当前姿态
+        kAutoSwing = 1,  // 自动摆臂：RL 策略持臂（站立时回家）
+        kExternal  = 2   // 外部控制：VR / tact 轨迹操控
+    };
+
+    // === 构造/析构 ===
     /**
      * @brief 构造函数
      * @param nh ROS节点句柄
@@ -134,16 +150,16 @@ public:
     
     /**
      * @brief 切换手臂控制模式（简化接口，使用update中保存的当前位置和速度）
-     * @param target_mode 目标模式：0=固定到当前动作, 1=自动摆手, 2=外部控制
+     * @param target_mode 目标模式：0=锁定, 1=自动摆臂, 2=外部控制
      * @return 是否切换成功（false表示指令已缓存）
      */
     bool changeMode(int target_mode);
-    
+
     /**
      * @brief 获取当前控制模式
-     * @return 当前模式：0, 1, 或 2
+     * @return 当前模式：0=锁定, 1=自动摆臂, 2=外部控制
      */
-    int getMode() const { return arm_control_mode_; }
+    int getMode() const { return static_cast<int>(arm_control_mode_); }
     
     /**
      * @brief 检查VR控制是否启用
@@ -199,6 +215,25 @@ public:
                         kuavo_msgs::changeArmCtrlMode::Response &res);
 
 private:
+    // ==================== 自动摆臂内部子状态 ====================
+
+    /**
+     * @brief 自动摆臂（RL 持臂）模式的内部子状态
+     *
+     * 迁移关系（详见 updateMode1）：
+     *   kSwing  --站立指令-->    kHoming   发起回家：生成当前位置→默认位的平滑曲线
+     *   kHoming --跑完且站立-->  kHolding  到位后继续按住默认位
+     *   kHoming --跑完且行走-->  kSwing    到位后交还 RL 策略
+     *   kHolding --起步走-->     kSwing    交还 RL 策略摆臂
+     * 注：kHolding 在站立下没有回到 kHoming 的边 —— 到位后不会再次发起回家
+     */
+    enum class AutoSwingState
+    {
+        kSwing,    // 摆臂：手臂归 RL 策略，本控制器不填充指令
+        kHoming,   // 回家中：平滑曲线回默认位途中（站立或行走都跑完）
+        kHolding   // 按住：到位后持续按住默认位（仅站立）
+    };
+
     // ==================== 内部辅助函数 ====================
     
     /**
@@ -224,19 +259,19 @@ private:
     void jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg);
     
     /**
-     * @brief 更新模式0（固定到当前动作）的期望状态
+     * @brief 更新锁定状态的期望值
      */
-    void updateMode0(double dt);
-    
+    void updateLockedPose(double dt);
+
     /**
-     * @brief 更新模式1（自动摆手）的期望状态
+     * @brief 更新自动摆臂的期望值（含内部子状态机）
      */
-    void updateMode1(const ros::Time& time, double dt, int cmd_stance);
-    
+    void updateAutoSwing(const ros::Time& time, double dt, int cmd_stance);
+
     /**
-     * @brief 更新模式2（外部控制）的期望状态
+     * @brief 更新外部控制的期望值
      */
-    void updateMode2(double dt);
+    void updateExternalControl(double dt);
     
     /**
      * @brief 限速插值函数（用于模式1和模式2）
@@ -249,15 +284,15 @@ private:
                                       const Eigen::VectorXd& target_pos,
                                       const Eigen::VectorXd& target_vel,
                                       double max_velocity);
-    
+
     /**
-     * @brief 处理自动模式切换（根据cmd_stance）
+     * @brief 自动模式切换（备用：根据站立/行走指令自动切换手臂模式）
      * @param cmd_stance 命令姿态（0=行走, 1=站立）
      */
     void handleAutoModeSwitch(int cmd_stance);
-    
+
     /**
-     * @brief 填充关节命令消息（模式0和2使用）
+     * @brief 填充关节命令消息
      * 只更新joint_q、joint_v和tau，保留其他原有值
      */
     void fillJointCmdMessage(kuavo_msgs::jointCmd& joint_cmd_msg,
@@ -295,7 +330,7 @@ private:
     size_t arm_start_idx_;   // 手臂关节的起始索引（joint_num_ + joint_waist_num_）
     
     // 控制模式
-    int arm_control_mode_{1};    // 0=固定手臂, 1=RL控制自动摆手, 2=外部控制
+    ControlMode arm_control_mode_{ControlMode::kAutoSwing};
     bool arm_vr_enabled_{false};     // VR控制使能标志
     
     // 当前状态（从update中保存）
@@ -310,28 +345,28 @@ private:
     Eigen::VectorXd desire_arm_q_;  // 期望手臂位置
     Eigen::VectorXd desire_arm_v_;  // 期望手臂速度
     
-    // 模式0相关
-    Eigen::VectorXd mode0_fixed_pos_;  // 模式0固定位置（切换到模式0时的位置）
-    bool mode0_fixed_pos_set_;         // 模式0固定位置是否已设置
+    // 锁定相关
+    Eigen::VectorXd locked_fixed_pos_;  // 锁定时保持的目标位置
+    bool locked_pos_set_;               // 锁定目标位置是否已设置
     
-    // 模式1相关
-    Eigen::VectorXd default_arm_pos_;  // 默认手臂位置（用于模式1站立时的插值目标）
-    bool is_interpolating_to_default_; // 是否正在插值到默认位置
-    bool is_returning_from_external_{false}; // 外部→AUTO_SWING 归位中，mode 保持 2 直到插值完成
+    // 自动摆臂相关
+    Eigen::VectorXd default_arm_pos_;  // 默认手臂位置（自动摆臂时站立回家的目标）
+    AutoSwingState auto_swing_state_{AutoSwingState::kSwing}; // 自动摆臂内部子状态（门禁：!= kSwing 时本控制器填充手臂指令）
+    bool is_returning_from_external_{false}; // 外部控制→自动摆臂 归位中：外壳保持外部控制，回家完成后翻回
     
-    // 模式2相关（外部控制）
-    Eigen::VectorXd raw_mode2_target_q_; // 模式2原始目标位置（从/kuavo_arm_traj获取）
-    Eigen::VectorXd raw_mode2_target_v_; // 模式2原始目标速度
-    Eigen::VectorXd mode2_target_q_;  // 模式2目标位置（滤波或插值后）
-    Eigen::VectorXd mode2_target_v_;  // 模式2目标速度
-    bool mode2_target_received_;      // 是否已收到模式2的目标
-    ros::Time last_mode2_input_time_; // 上一次模式2输入的时间戳
-    bool last_mode2_input_time_valid_; // 上一次时间戳是否有效
+    // 外部控制相关
+    Eigen::VectorXd raw_external_target_q_; // 外部控制原始目标位置（从/kuavo_arm_traj获取）
+    Eigen::VectorXd raw_external_target_v_; // 外部控制原始目标速度
+    Eigen::VectorXd external_target_q_;  // 外部控制目标位置（滤波或插值后）
+    Eigen::VectorXd external_target_v_;  // 外部控制目标速度
+    bool external_target_received_;      // 是否已收到外部输入
+    ros::Time last_external_input_time_; // 上一次外部输入的时间戳
+    bool last_external_input_time_valid_; // 上一次时间戳是否有效
     
     // 手臂关节指令低通滤波相关
     LowPassFilter2ndOrder arm_joint_pos_filter_; // 手臂位置指令低通滤波器
     LowPassFilter2ndOrder arm_joint_vel_filter_; // 手臂速度指令低通滤波器
-    double mode2_cutoff_freq_{10.0};    // 滤波器截止频率
+    double external_cutoff_freq_{10.0};    // 外部输入低通截止频率
     bool arm_filter_initialized_{false}; // 滤波器是否已初始化
     
     // 限速跟踪参数
@@ -348,10 +383,12 @@ private:
     Eigen::VectorXd target_interpolation_target_pos_; // 专用插值目标位置
     
     // 指令缓存机制
-    int pending_arm_mode_;              // 缓存的待执行模式（-1表示无缓存）
-    bool has_pending_mode_change_;      // 是否有待执行的模式切换指令
-    bool is_interpolating_;             // 是否正在插值（用于判断是否可以切换模式）
-    
+    std::optional<ControlMode> pending_arm_mode_; // 缓存的待执行模式
+    bool is_interpolating_;             // 曲线引擎正在跑（锁定/回家/外部靠拢各插值机制共用的底层标志）
+
+    // 自动模式切换（备用）
+    int prev_cmd_stance_{-1};           // 上一帧的站立/行走指令（handleAutoModeSwitch 用）
+
     // 力矩控制器
     std::unique_ptr<ArmTorqueController> arm_torque_controller_;
     
@@ -359,10 +396,7 @@ private:
     Eigen::VectorXd joint_kp_;          // 位置增益（手臂部分）
     Eigen::VectorXd joint_kd_;          // 速度增益（手臂部分）
     Eigen::VectorXd torque_limits_;     // 力矩限制（手臂部分）
-    
-    // 自动模式切换状态
-    int last_cmd_stance_;               // 上一次的cmd_stance状态
-    
+
     // 线程安全
     mutable std::mutex state_mutex_;    // 状态访问互斥锁
 };

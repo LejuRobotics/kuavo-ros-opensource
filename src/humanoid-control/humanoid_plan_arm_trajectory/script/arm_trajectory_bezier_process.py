@@ -514,6 +514,24 @@ class ArmTrajectoryBezierDemo:
         finally:
             return result
 
+    def call_enable_wbc_arm_trajectory_control_service(self, enable):
+        """使能/禁用 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源）。"""
+        service_name = "/enable_wbc_arm_trajectory_control"
+        result = True
+        try:
+            rospy.wait_for_service(service_name, timeout=0.5)
+            client = rospy.ServiceProxy(service_name, changeArmCtrlMode)
+            client(control_mode=enable)
+            rospy.loginfo(f"{service_name} call successful, enable={enable}")
+        except rospy.ServiceException as e:
+            rospy.loginfo(f"{service_name} call failed: %s", e)
+            result = False
+        except rospy.ROSException:
+            rospy.logerr(f"{service_name} not available")
+            result = False
+        finally:
+            return result
+
     def get_arm_ctrl_mode(self):
         """获取当前手臂控制模式"""
         service_name = "humanoid_get_arm_ctrl_mode"
@@ -1200,6 +1218,8 @@ class ArmTrajectoryBezierDemo:
         else:
             # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
             self.call_change_arm_ctrl_mode_service(1)
+            # 禁用 WBC 手臂轨迹控制（tact 结束，切回自然摆臂/归位插值路径）
+            self.call_enable_wbc_arm_trajectory_control_service(0)
             if rospy.get_param('/end_effector_type', '') == 'linker_hand':
                 self.hand_state.left_hand_position  = [100, 0, 0, 0, 0, 0]
                 self.hand_state.right_hand_position = [100, 0, 0, 0, 0, 0]
@@ -1320,6 +1340,8 @@ class ArmTrajectoryBezierDemo:
         if current_control_mode == "rl":
             self.call_change_arm_ctrl_mode_service(1)
             # rospy.loginfo("RL reset done: arm mode switched back to 1 (auto swing) for walking.")
+        # 复位完成，禁用 WBC 手臂轨迹控制（恢复默认路径）
+        self.call_enable_wbc_arm_trajectory_control_service(0)
 
     def publish_running_action_state(self):
         """持续发布 state=1"""
@@ -1509,6 +1531,7 @@ class ArmTrajectoryBezierDemo:
             # freeze 额外：把手臂控制权交回自动摆臂（freeze 服务本身不切 mode）
             try:
                 self.call_change_arm_ctrl_mode_service(1)
+                self.call_enable_wbc_arm_trajectory_control_service(0)
                 rospy.loginfo("[%s] arm mode switched to 1 (auto swing)", rospy.get_time())
             except Exception as e:
                 rospy.logwarn("Failed to switch arm mode: %s", e)
@@ -1633,6 +1656,9 @@ class ArmTrajectoryBezierDemo:
         # 等待手臂控制模式切换完成
         if not self.wait_for_arm_mode_change_complete(2, timeout=2.0):
             rospy.logwarn("Arm control mode change may not be complete, but continuing...")
+
+        # 使能 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源，避免 tact 腕部抖动 #2992）
+        self.call_enable_wbc_arm_trajectory_control_service(1)
 
 
         # 获取初始帧时间

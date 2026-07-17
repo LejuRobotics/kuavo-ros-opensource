@@ -66,6 +66,8 @@
     <!-- 使用外部 odom->base_link TF 时设为 true，由外部系统（如 SLAM）发布 -->
     <!-- 实物模式下不发布 odom->base_link tf，由底盘 EKF 发布，避免 tf 冲突 -->
     <arg name="use_external_odom_tf" default="$(arg real)"/>
+    <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
+    <arg name="enable_base_emergency_stop" default="true"/>
     
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
@@ -103,7 +105,7 @@
     <rosparam param="isolated_cpus">[2, 3]</rosparam>
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
-    <param name="enable_base_emergency_stop" value="true"/>
+    <param name="enable_base_emergency_stop" value="$(arg enable_base_emergency_stop)"/>
     <param name="robot_type"      value="$(arg robot_type)"/>
     <param name="nodelet_robot_type"      value="$(arg nodelet_robot_type)"/>
     <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>
