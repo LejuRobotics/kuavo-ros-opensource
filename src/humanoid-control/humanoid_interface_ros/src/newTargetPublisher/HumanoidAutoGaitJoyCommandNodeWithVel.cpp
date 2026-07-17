@@ -39,6 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Float64.h>
+#include <std_msgs/Int32.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/Twist.h>
 #include "kuavo_msgs/SetJoyTopic.h"
@@ -486,6 +487,18 @@ namespace ocs2
           ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
         }
       });
+      amp_hand_mode_sub_ = nodeHandle_.subscribe<std_msgs::Int32>(
+          "/humanoid_controller/amp_hand_controller/amp_mode", 1,
+          [this](const std_msgs::Int32::ConstPtr &msg)
+          {
+            const bool posture_mode = (msg->data == 1);
+            if (posture_control_mode_ != posture_mode)
+            {
+              ROS_INFO("[JoyControl] Synced amp_hand posture mode from controller: %d", msg->data);
+            }
+            posture_control_mode_ = posture_mode;
+            posture_deadzone_exit_attempted_ = false;
+          });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
@@ -2798,6 +2811,7 @@ namespace ocs2
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
     ros::Subscriber controller_switch_event_sub_;
+    ros::Subscriber amp_hand_mode_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
     ros::Subscriber dance_trajectory_state_sub_;
     int arm_ctrl_mode_{1};  // 启动默认 auto_swing (1); 收到 /humanoid/mpc/arm_control_mode 后由 controller 实际状态覆盖

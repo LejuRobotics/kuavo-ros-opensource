@@ -61,7 +61,7 @@ velocityLimits
 {
     ; 定义速度命令的限制
     (0,0)  0.75      ; cmdVelLineX，默认速度限制
-    (1,0)  0.45      ; cmdVelLineY
+    (1,0)  0.4      ; cmdVelLineY
     (2,0)  0.0      ; cmdVelLineZ
     (3,0)  1.0     ; cmdVelAngularZ
 }
@@ -69,14 +69,14 @@ cmdVelLineXlow 0.4 ; 手柄十字键按“下”键直接cmdVelLineX降为0.4
 cmdVelLineXup 0.95 ; 手柄十字键按“上”键，速度限制升一档，档位从低到高为cmdVelLineXlow、cmdVelLineX默认速度限制、cmdVelLineXup
 
 cmdVelLineXNeg  0.43 ; cmdVelLineX负向默认速度限制
-squatHeightMin -0.16 ; amp_hand 手柄 posture 模式最大下蹲深度 (m)
+squatHeightMin -0.17 ; amp_hand 手柄 posture 模式最大下蹲深度 (m)
 squatHeightMax 0.03 ; amp_hand 手柄 posture 模式最大站起高度 (m)
 
 ; ==================== 下蹲守备（控制器端）====================
 squatPostureDefense
 {
     enabled           true    ; 深蹲且转向较小时拦截姿态模式退出请求（与遥控器端下蹲守备互补）
-    heightThreshold  -0.05   ; 平滑后高度命令低于该值视为深蹲(m)
+    heightThreshold   1.2    ; leg_l4/leg_r4 均大于该值视为深蹲(rad)
     absCmdAngzLimit     0.85   ; 右摇杆左右(转向 cmdangz)截断且平滑后，abs 低于该值时禁止退出
 }
 
@@ -86,7 +86,7 @@ ampVRcmdvelLinearZLimit 0.0 ; amp_hand VR 高度通道最大速度 (m/s)
 ampVRcmdvelAngularYAWLimit 0.9 ; amp_hand VR yaw 最大角速度 (rad/s)
 
 ; ==================== cmd微小速度命令截断 ====================
-；cmd.scale() → cmdVelLineXNeg限速 → enable_off_cmdy_by_cmdx → enable_off_cmdy_by_cmdangz → TinyCmdClip(cmd_x) → TinyCmdClip(cmd_y) → TinyCmdClip(cmd_angz, 仅原地旋转) → velocity_commands
+；cmd.scale() → cmdVelLineXNeg限速 → enable_off_cmdy_by_cmdx → enable_off_cmdy_by_cmdangz → TinyCmdClip(cmd_x) → TinyCmdClip(cmd_y) → TinyCmdClip(cmd_angz, 仅原地旋转) → lowSpeedKickStart → velocity_commands
 TinyCmdClip
 {
     (0,0)  0.15   ; cmd_x正向截断区间最小值
@@ -94,8 +94,22 @@ TinyCmdClip
     (2,0)  0.2    ; abs(cmd_y) 截断最小值
     (3,0)  0.4   ; abs(cmd_y) 截断最大值，abs(cmd_y) 位于区间内的值都会被截断为该值
     (4,0)  0.3    ; abs(cmd_angz) 截断最小值，仅当原地旋转有效
-    (5,0)  0.75   ; abs(cmd_angz) 截断最大值，abs(cmd_angz) 位于区间内的值都会被截断为该值
+    (5,0)  0.8   ; abs(cmd_angz) 截断最大值，abs(cmd_angz) 位于区间内的值都会被截断为该值
     
+}
+
+; ==================== 低速起步脉冲 ====================
+; TinyCmdClip 后 cmd_x 落在 triggerVelocity±triggerTolerance 且上一帧近零时，先给更高 cmd_x
+lowSpeedKickStart
+{
+    enabled             true
+    kickVelocity        0.60   ; 脉冲速度
+    durationSteps       20     ; 脉冲持续推理步数(50Hz 下约 0.5s)
+    restCmdThreshold    0.1    ; |上一帧 cmd_x| 低于该值则判定静止起步
+    triggerVelocity     0.45   ; 处理后 cmd_x 触发中心值(TinyCmdClip 正向截断值)
+    triggerTolerance    0.05   ; 触发区间 [0.40, 0.50]
+    lateralThreshold    0.2    ; abs(cmd_y) 超过则取消
+    yawThreshold        0.2    ; abs(cmd_angz) 超过则取消
 }
 
 rollCompensationClosedLoop
@@ -143,10 +157,10 @@ velocitySmoothing
     maxVelocityChange     0.03   ; 单步正向 cmd_x 单步最大变化量 (m/s )
     decelOnly             true    ; true: 正向 cmd_x 仅减速时平滑，加速不限制
     maxVelocityChangeNegCmdX  0.0051  ; 负向 cmd_x 单步最大变化量 (m/s)，后退，加减速
-    maxVelocityChangeCmdY  0.022   ; 单步 cmd_y 最大变化量 (m/s)
+    maxVelocityChangeCmdY  0.008   ; 单步 cmd_y 最大变化量 (m/s)
     standUpHeightSmoothingEnabled  true   ; 站立模式下起身高度命令平滑
-    maxStandUpHeightChange  0.1  ; 起身单步最大高度命令变化量 (m)，下蹲仍即时跟随
-    StandUpHeightSmoothStart -0.15 ; 起身达到该高度前平滑，高于该高度后直接跟随
+    maxStandUpHeightChange  0.02  ; 起身单步最大高度命令变化量 (m)，下蹲仍即时跟随
+    StandUpHeightSmoothStart -0.1 ; 起身达到该高度前平滑，高于该高度后直接跟随
 }
 
 ; ==================== YAW方向补偿配置 ====================

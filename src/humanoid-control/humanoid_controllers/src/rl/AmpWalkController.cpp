@@ -7,6 +7,7 @@
 #include <angles/angles.h>
 #include "kuavo_common/common/common.h"
 #include <ros/package.h>
+#include <std_msgs/Int32.h>
 #include <cmath>
 #include <thread>
 
@@ -109,14 +110,18 @@ namespace humanoid_controller
     // AMP 模式切换服务：每个 AMP 控制器独立命名，避免多实例抢占同一服务
     const std::string change_amp_mode_srv_name =
         "/humanoid_controller/" + name_ + "/change_amp_mode";
+    const std::string amp_mode_event_topic =
+        "/humanoid_controller/" + name_ + "/amp_mode";
+    amp_mode_event_pub_ = nh_.advertise<std_msgs::Int32>(amp_mode_event_topic, 1, true);
     change_amp_mode_srv_ = nh_.advertiseService(change_amp_mode_srv_name,
                                                 &AmpWalkController::changeAmpModeCallback,
                                                 this);
+    publishAmpModeEvent();
 
     initialized_ = true;
 
-    ROS_INFO("[%s] AmpWalkController initialized (change_amp_mode: %s)",
-             name_.c_str(), change_amp_mode_srv_name.c_str());
+    ROS_INFO("[%s] AmpWalkController initialized (change_amp_mode: %s, amp_mode_event: %s)",
+             name_.c_str(), change_amp_mode_srv_name.c_str(), amp_mode_event_topic.c_str());
     return true;
   }
 
@@ -137,18 +142,18 @@ namespace humanoid_controller
 
     if (amp_mode_ == 1 && requested_mode == 0 && isSquatPostureDefenseActive())
     {
+      const SensorData sensor_data = getRobotSensorData();
+      const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+      const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
       const geometry_msgs::Twist smoothed_vel = gait_receiver_->getSmoothedCmdVel();
       const double processed_cmdangz =
           applyTinyCmdAngzClip(smoothed_vel.angular.z);
-      const double height_cmd = std::min(
-          smoothed_stance_height_cmd_,
-          std::max(smoothed_vel.linear.z, -max_stance_squat_depth_));
       ROS_WARN_THROTTLE(0.5,
                         "[%s] Squat posture defense: reject exit from posture mode "
-                        "(height=%.3f, processed_cmdangz=%.3f, heightThreshold=%.3f, "
+                        "(knee_l=%.3f, knee_r=%.3f, kneeThreshold=%.3f, processed_cmdangz=%.3f, "
                         "absCmdAngzLimit=%.3f).",
-                        name_.c_str(), height_cmd, processed_cmdangz,
-                        squat_posture_defense_height_threshold_,
+                        name_.c_str(), knee_l, knee_r,
+                        squat_posture_defense_height_threshold_, processed_cmdangz,
                         squat_posture_defense_abs_cmdangz_limit_);
       res.result = false;
       res.mode = amp_mode_;
@@ -157,6 +162,10 @@ namespace humanoid_controller
     }
 
     amp_mode_ = requested_mode;
+    squat_posture_deep_seen_ = false;
+    squat_auto_stand_up_frames_remaining_ = 0;
+    squat_auto_exit_yaw_frames_remaining_ = 0;
+    publishAmpModeEvent();
 
     ROS_INFO("[%s] AMP mode switched to %d (0: pure AMP walk, 1: stance/bend/squat with arms, 2: walk with arms).",
              name_.c_str(), amp_mode_);
@@ -165,6 +174,17 @@ namespace humanoid_controller
     res.mode = amp_mode_;
     res.message = "AMP mode updated successfully";
     return true;
+  }
+
+  void AmpWalkController::publishAmpModeEvent()
+  {
+    if (!amp_mode_event_pub_)
+    {
+      return;
+    }
+    std_msgs::Int32 msg;
+    msg.data = amp_mode_;
+    amp_mode_event_pub_.publish(msg);
   }
 
   bool AmpWalkController::loadConfig(const std::string& rlParamFile)
@@ -361,6 +381,29 @@ namespace humanoid_controller
         tiny_cmdy_clip_enabled_ = false;
         tiny_cmd_angz_clip_enabled_ = false;
         ROS_WARN("[%s] TinyCmdClip not loaded: %s", name_.c_str(), e.what());
+      }
+
+      if (pt.find("lowSpeedKickStart") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, low_speed_kick_enabled_, "lowSpeedKickStart.enabled", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_velocity_, "lowSpeedKickStart.kickVelocity", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_duration_steps_, "lowSpeedKickStart.durationSteps", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_rest_threshold_, "lowSpeedKickStart.restCmdThreshold", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_trigger_velocity_, "lowSpeedKickStart.triggerVelocity", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_trigger_tolerance_, "lowSpeedKickStart.triggerTolerance", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_lateral_threshold_, "lowSpeedKickStart.lateralThreshold", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_yaw_threshold_, "lowSpeedKickStart.yawThreshold", false);
+        low_speed_kick_duration_steps_ = std::max(low_speed_kick_duration_steps_, 1);
+        low_speed_kick_trigger_tolerance_ = std::max(low_speed_kick_trigger_tolerance_, 0.0);
+        ROS_INFO("[%s] LowSpeedKickStart: enabled=%s, kickVel=%.2f, steps=%d, "
+                 "trigger=%.2f±%.2f, restTh=%.3f",
+                 name_.c_str(),
+                 low_speed_kick_enabled_ ? "true" : "false",
+                 low_speed_kick_velocity_,
+                 low_speed_kick_duration_steps_,
+                 low_speed_kick_trigger_velocity_,
+                 low_speed_kick_trigger_tolerance_,
+                 low_speed_kick_rest_threshold_);
       }
 
       if (pt.find("velocitySmoothing") != pt.not_found())
@@ -590,6 +633,9 @@ namespace humanoid_controller
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = true;  // 初始化为站立状态
     smoothed_stance_height_cmd_ = 0.0;
+    squat_posture_deep_seen_ = false;
+    squat_auto_stand_up_frames_remaining_ = 0;
+    squat_auto_exit_yaw_frames_remaining_ = 0;
     roll_compensation_closed_loop_initialized_ = false;
     roll_compensation_filtered_roll_rad_ = 0.0;
     roll_compensation_target_roll_rad_ = 0.0;
@@ -725,6 +771,49 @@ namespace humanoid_controller
     return angz;
   }
 
+  void AmpWalkController::applyLowSpeedKickStart(CommandDataRL& cmd)
+  {
+    if (!low_speed_kick_enabled_ || !is_amp_hand_controller_)
+    {
+      return;
+    }
+
+    const auto cancel_kick = [&]() { low_speed_kick_remaining_steps_ = 0; };
+
+    if (cmd.cmdStance_ >= 1.0)
+    {
+      cancel_kick();
+      return;
+    }
+
+    const bool in_kick_trigger_range =
+        std::abs(cmd.cmdVelLineX_ - low_speed_kick_trigger_velocity_) <=
+            low_speed_kick_trigger_tolerance_ &&
+        std::abs(cmd.cmdVelLineY_) < low_speed_kick_lateral_threshold_ &&
+        std::abs(cmd.cmdVelAngularZ_) < low_speed_kick_yaw_threshold_;
+
+    if (!in_kick_trigger_range)
+    {
+      cancel_kick();
+      return;
+    }
+
+    if (low_speed_kick_remaining_steps_ > 0)
+    {
+      cmd.cmdVelLineX_ = low_speed_kick_velocity_;
+      --low_speed_kick_remaining_steps_;
+      return;
+    }
+
+    if (std::abs(prev_processed_cmd_vel_line_x_) < low_speed_kick_rest_threshold_)
+    {
+      cmd.cmdVelLineX_ = low_speed_kick_velocity_;
+      low_speed_kick_remaining_steps_ = low_speed_kick_duration_steps_ - 1;
+      ROS_INFO_THROTTLE(1.0, "[%s] Low-speed kick start: cmd_x %.2f for %d steps",
+                        name_.c_str(), low_speed_kick_velocity_, low_speed_kick_duration_steps_);
+    }
+  }
+
   void AmpWalkController::applyStanceHeightStandUpSmoothing(CommandDataRL& cmd)
   {
     stand_up_rising_active_ = false;
@@ -783,6 +872,68 @@ namespace humanoid_controller
 
   }
 
+  void AmpWalkController::applySquatPostureAutoExit(CommandDataRL& cmd,
+                                                    const SensorData& sensor_data)
+  {
+    if (!is_amp_hand_controller_ || !squat_posture_defense_enabled_ ||
+        sensor_data.jointPos_.size() <= kStandUpLegR4ActionIdx_)
+    {
+      return;
+    }
+
+    const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+    const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
+
+    if (amp_mode_ == 1)
+    {
+      if (knee_l > squat_posture_defense_height_threshold_ &&
+          knee_r > squat_posture_defense_height_threshold_)
+      {
+        squat_posture_deep_seen_ = true;
+      }
+
+      // 高度命令通常先于实际关节到位；deep_seen_ 已锁存“曾处于深蹲”，
+      // 因此双膝随后回落到阈值以下即可可靠判定物理起身完成。
+      if (squat_posture_deep_seen_ &&
+          knee_l < squat_posture_defense_height_threshold_ &&
+          knee_r < squat_posture_defense_height_threshold_)
+      {
+        squat_posture_deep_seen_ = false;
+        squat_auto_stand_up_frames_remaining_ = kSquatAutoStandUpFrames_;
+        ROS_WARN("[%s] Squat posture auto stand-up: knee_l=%.3f, knee_r=%.3f, "
+                 "send height=%.3f for %d frames.",
+                 name_.c_str(), knee_l, knee_r, squatHeightMax_,
+                 kSquatAutoStandUpFrames_);
+      }
+    }
+
+    if (squat_auto_stand_up_frames_remaining_ > 0)
+    {
+      cmd.setzero();
+      cmd.cmdVelLineZ_ = squatHeightMax_;
+      cmd.cmdVelAngularZ_ = squatHeightMax_;
+      --squat_auto_stand_up_frames_remaining_;
+      if (squat_auto_stand_up_frames_remaining_ == 0)
+      {
+        amp_mode_ = 0;
+        smoothed_stance_height_cmd_ = 0.0;
+        squat_auto_exit_yaw_frames_remaining_ = kSquatAutoExitYawFrames_;
+        publishAmpModeEvent();
+        ROS_WARN("[%s] Squat posture auto stand-up complete, exit posture mode "
+                 "and send cmd_angz=%.2f for %d frames.",
+                 name_.c_str(), kSquatAutoExitYawCmd_,
+                 kSquatAutoExitYawFrames_);
+      }
+    }
+    else if (squat_auto_exit_yaw_frames_remaining_ > 0)
+    {
+      cmd.setzero();
+      cmd.cmdStance_ = 0.0;
+      cmd.cmdVelAngularZ_ = kSquatAutoExitYawCmd_;
+      --squat_auto_exit_yaw_frames_remaining_;
+    }
+  }
+
   bool AmpWalkController::isSquatPostureDefenseActive() const
   {
     if (!is_amp_hand_controller_ || !squat_posture_defense_enabled_ || !gait_receiver_ ||
@@ -791,13 +942,14 @@ namespace humanoid_controller
       return false;
     }
 
+    const SensorData sensor_data = getRobotSensorData();
+    const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+    const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
     const geometry_msgs::Twist smoothed_vel = gait_receiver_->getSmoothedCmdVel();
     const double processed_cmdangz = applyTinyCmdAngzClip(smoothed_vel.angular.z);
-    const double height_cmd = std::min(
-        smoothed_stance_height_cmd_,
-        std::max(smoothed_vel.linear.z, -max_stance_squat_depth_));
 
-    return height_cmd < squat_posture_defense_height_threshold_ &&
+    return knee_l > squat_posture_defense_height_threshold_ &&
+           knee_r > squat_posture_defense_height_threshold_ &&
            std::abs(processed_cmdangz) < squat_posture_defense_abs_cmdangz_limit_;
   }
 
@@ -834,6 +986,7 @@ namespace humanoid_controller
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
 
     applyStanceHeightStandUpSmoothing(cmd);
+    applySquatPostureAutoExit(cmd, sensor_data);
     
     updatePhase(cmd);
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
@@ -920,6 +1073,8 @@ namespace humanoid_controller
       }
     }
 
+    applyLowSpeedKickStart(cmd);
+
     // enable_standup_enhance：下蹲时按深度自动叠加正向 cmdVelLineX_（弯腰通道）
     if (enable_standup_enhance_ && is_amp_hand_controller_ && cmd.cmdStance_ >= 1.0 &&
         !stand_up_rising_active_)
@@ -972,6 +1127,8 @@ namespace humanoid_controller
         //           << " (bias=" << x_bias << ")" << std::endl;
       }
     }
+
+    prev_processed_cmd_vel_line_x_ = cmd.cmdVelLineX_;
     
     Eigen::VectorXd tempCommand_ = cmd.getCommandRL();
     Eigen::VectorXd tempCommand_scalar_state = tempCommand_;
@@ -1286,13 +1443,15 @@ namespace humanoid_controller
           // Positive cmd_y is left lateral, negative cmd_y is right lateral.
           if (elbowCmd.cmdVelLineY_ > 0.0)
           {
-            action[1] *= 0.8;
-            action[2] *= 1.2;
+            action[0] -= 0.08;
+            action[1] *= 0.6;
+            action[2] *= 1.5;
             action[16] *= kLateralElbowFixScale_;
           }
           else
           {
-            action[7] *= 0.8;
+            action[0] -= 0.03;
+            action[7] *= 0.7;
             action[8] *= 1.2;
             action[20] *= kLateralElbowFixScale_;
           }
