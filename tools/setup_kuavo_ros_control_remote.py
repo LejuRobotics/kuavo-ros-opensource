@@ -81,7 +81,7 @@ def clone_sources(mode=SOURCE_MODE_AUTO):
         return [GITCODE_URL]
     if mode == SOURCE_MODE_GITEE:
         return [GITEE_URL]
-    return [FACTORY_URL, GITCODE_URL, GITEE_URL]
+    return [GITCODE_URL, FACTORY_URL, GITEE_URL]
 
 
 def branch_exists(ls_remote_output, branch_name):

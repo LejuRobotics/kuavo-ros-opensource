@@ -137,7 +137,7 @@ cleanup_legacy_git_remotes() {
 prompt_code_source_mode() {
     while true; do
         print_info "请选择代码源:"
-        echo "1) 自动选择（推荐，优先工厂镜像 → GitCode → Gitee）"
+        echo "1) 自动选择（推荐，优先 GitCode → 工厂镜像 → Gitee）"
         echo "2) 仅工厂镜像"
         echo "3) 仅 GitCode"
         echo "4) 仅 Gitee"
@@ -146,7 +146,7 @@ prompt_code_source_mode() {
         case "$source_choice" in
             ""|"1")
                 SOURCE_MODE="auto"
-                SOURCE_MODE_TEXT="自动选择（优先工厂镜像 → GitCode → Gitee）"
+                SOURCE_MODE_TEXT="自动选择（优先 GitCode → 工厂镜像 → Gitee）"
                 break
                 ;;
             "2")
@@ -199,14 +199,14 @@ fetch_branch_by_source_mode() {
             fi
             ;;
         *)
-            if fetch_branch_from_origin "工厂镜像" "$FACTORY_URL" "$branch"; then
-                active_source="工厂镜像"
-                active_url="$FACTORY_URL"
-                return 0
-            fi
             if fetch_branch_from_origin "GitCode" "$GITCODE_URL" "$branch"; then
                 active_source="GitCode"
                 active_url="$GITCODE_URL"
+                return 0
+            fi
+            if fetch_branch_from_origin "工厂镜像" "$FACTORY_URL" "$branch"; then
+                active_source="工厂镜像"
+                active_url="$FACTORY_URL"
                 return 0
             fi
             if fetch_branch_from_origin "Gitee" "$GITEE_URL" "$branch"; then
@@ -246,14 +246,14 @@ fetch_commit_by_source_mode() {
             fi
             ;;
         *)
-            if fetch_commit_from_origin "工厂镜像" "$FACTORY_URL" "$commit"; then
-                active_source="工厂镜像"
-                active_url="$FACTORY_URL"
-                return 0
-            fi
             if fetch_commit_from_origin "GitCode" "$GITCODE_URL" "$commit"; then
                 active_source="GitCode"
                 active_url="$GITCODE_URL"
+                return 0
+            fi
+            if fetch_commit_from_origin "工厂镜像" "$FACTORY_URL" "$commit"; then
+                active_source="工厂镜像"
+                active_url="$FACTORY_URL"
                 return 0
             fi
             if fetch_commit_from_origin "Gitee" "$GITEE_URL" "$commit"; then

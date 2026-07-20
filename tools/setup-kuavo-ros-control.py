@@ -49,14 +49,14 @@ def prompt_code_source_mode():
     global source_mode
     while True:
         print_info("请选择代码源:")
-        print("1) 自动选择（推荐，优先工厂镜像 → GitCode → Gitee）")
+        print("1) 自动选择（推荐，优先 GitCode → 工厂镜像 → Gitee）")
         print("2) 仅工厂镜像")
         print("3) 仅 GitCode")
         print("4) 仅 Gitee")
         choice = input().strip()
         if choice in ("", "1"):
             source_mode = SOURCE_MODE_AUTO
-            mode_text = "自动选择（优先工厂镜像 → GitCode → Gitee）"
+            mode_text = "自动选择（优先 GitCode → 工厂镜像 → Gitee）"
             break
         if choice == "2":
             source_mode = SOURCE_MODE_FACTORY
@@ -130,7 +130,7 @@ def ask_user_for_kinds_of_settings():
 
 ask_user_for_kinds_of_settings()
 
-KUAVO_ROS_OPENSOURCE_REPO_URL = GITEE_URL
+KUAVO_ROS_OPENSOURCE_REPO_URL = GITCODE_URL
 KUAVO_OPENSOURCE_REPO_URL = "https://gitee.com/leju-robot/kuavo_opensource.git"
 
 system_message = """

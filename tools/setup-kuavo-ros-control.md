@@ -23,17 +23,19 @@
 输入参数与交互输入：
 - 分支名称：回车默认 `master`
 - 仓库 commit：回车表示使用当前分支最新提交
-- 代码源选择：1) 自动（推荐） 2) 仅工厂镜像 3) 仅 Gitee
+- 代码源选择：1) 自动（推荐） 2) 仅工厂镜像 3) 仅 GitCode 4) 仅 Gitee
 - 机器人版本、重量、驱动板类型、末端执行器类型、是否配置 H12PRO
 
 仓库处理行为：
-- `kuavo-ros-opensource` 支持两个合法远端：
+- `kuavo-ros-opensource` 支持三个合法远端：
   - 工厂镜像 `git://10.11.99.175:9418/kuavo-ros-opensource.git`
+  - GitCode `https://gitcode.com/OpenLET/kuavo-ros-opensource.git`
   - Gitee `https://gitee.com/leju-robot/kuavo-ros-opensource.git`
-- 代码源选择对应三种策略：
-  - 自动（默认，回车或 1）：优先工厂镜像，失败后自动回退到 Gitee
+- 代码源选择对应四种策略：
+  - 自动（默认，回车或 1）：优先 GitCode，失败后自动回退到工厂镜像，最后回退到 Gitee
   - 仅工厂镜像（2）：只使用工厂镜像，失败不回退（适合工厂网络环境）
-  - 仅 Gitee（3）：只使用 Gitee，跳过工厂镜像（适合开发/外网环境）
+  - 仅 GitCode（3）：只使用 GitCode，跳过其他源（推荐外网环境）
+  - 仅 Gitee（4）：只使用 Gitee，跳过其他源（适合开发/外网环境）
 - 如果本地 `origin` 是上述任一地址，都视为合法，不触发 URL 不匹配告警
 - 脚本会自动补充 `origin_factory` 远端并尝试 `git fetch origin_factory`
 - 当用户指定的 commit 不在 `origin_factory` 远端分支中时，脚本会打印提示，要求操作员联系 IT 同步工厂镜像
@@ -65,7 +67,7 @@ wget -qO /tmp/setup-kuavo-ros-control.sh https://kuavo.lejurobot.com/statics/set
 1. **分支选择**  
    - 输入分支名称（直接回车默认使用master分支）
    - 输入特定commit哈希（直接回车使用最新版本）
-   - 选择代码源：1) 自动（推荐，优先工厂镜像，失败回退 Gitee） 2) 仅工厂镜像 3) 仅 Gitee
+   - 选择代码源：1) 自动（推荐，优先 GitCode → 工厂镜像 → Gitee） 2) 仅工厂镜像 3) 仅 GitCode 4) 仅 Gitee
 
 2. **机器人参数配置**  
    - 输入机器人版本号：[40/41/42/43/44/45]
@@ -93,7 +95,7 @@ wget -qO /tmp/setup-kuavo-ros-control.sh https://kuavo.lejurobot.com/statics/set
 
 2. **网络依赖**  
    - 优先访问工厂镜像 `10.11.99.175:9418`
-   - 工厂镜像不可达时需要访问 Gitee 代码仓库
+   - 工厂镜像不可达时需要访问 GitCode 或 Gitee 代码仓库
 
 3. **错误处理**  
    - 脚本使用 `set -e` 遇到错误立即退出
@@ -108,11 +110,15 @@ Q: 如何重新配置机器人参数？
 A: 直接重新运行脚本，已有配置会被覆盖更新
 
 Q: 克隆代码仓库失败怎么办？  
-A: 检查网络连接，优先确认能访问工厂镜像；若工厂镜像不可达，再确认能访问 gitee.com，或手动克隆仓库：
+A: 检查网络连接，优先确认能访问工厂镜像；若工厂镜像不可达，再确认能访问 gitcode.com 或 gitee.com，或手动克隆仓库：
 
 ```bash
 cd ~
+# 工厂镜像（内网优先）
 git clone git://10.11.99.175:9418/kuavo-ros-opensource.git
+# GitCode（推荐外网）
+git clone https://gitcode.com/OpenLET/kuavo-ros-opensource.git
+# Gitee（备用）
 git clone https://gitee.com/leju-robot/kuavo-ros-opensource.git
 git clone https://gitee.com/leju-robot/kuavo_opensource.git
 ```

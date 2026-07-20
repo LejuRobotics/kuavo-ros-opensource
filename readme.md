@@ -17,10 +17,13 @@
 
 ## 开源仓库
 ```shell
-# https
+# GitCode（推荐）
+git clone https://gitcode.com/OpenLET/kuavo-ros-opensource.git
+
+# Gitee（备用）
 git clone https://gitee.com/leju-robot/kuavo-ros-opensource.git
 
-# ssh
+# SSH
 git clone git@gitee.com:leju-robot/kuavo-ros-opensource.git
 ```
 
