@@ -71,6 +71,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void solveIkHandElbowThreadFunction();
   void publishJointStatesThreadFunction();
   void applyWorkerThreadScheduling(const char* threadName, int priority) const;
+  void publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const;
+  void publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const;
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
@@ -248,6 +250,32 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Subscriber chestPoseSubscriber_;  // 订阅/robot_chest_pose
 
   ros::Publisher wholeBodyRefMarkerArrayPublisher_;  // 全身参考点可视化（MarkerArray）
+
+  // IK 解算循环分阶段耗时诊断（PlotJuggler: /ik_debug/solve_loop_ms/*）
+  bool enableSolveLoopTimingLog_ = false;
+  ros::Publisher solveLoopFsmEnterMsPublisher_;
+  ros::Publisher solveLoopFsmChangeMsPublisher_;
+  ros::Publisher solveLoopFsmProcessMsPublisher_;
+  ros::Publisher solveLoopFsmExitMsPublisher_;
+  ros::Publisher solveLoopPublishEeMsPublisher_;
+  ros::Publisher solveLoopPublishAuxMsPublisher_;
+  ros::Publisher solveLoopPublishMarkersMsPublisher_;
+  ros::Publisher solveLoopFsmBlockTotalMsPublisher_;
+  ros::Publisher solveLoopPeriodMsPublisher_;
+  std::chrono::steady_clock::time_point lastSolveLoopWallStart_{};
+  bool hasLastSolveLoopWallStart_ = false;
+
+  // 锁等待/持锁耗时诊断（PlotJuggler: /ik_debug/lock_wait_ms/*）
+  bool enableLockWaitTimingLog_ = false;
+  ros::Publisher lockWaitPubIkResultMsPublisher_;
+  ros::Publisher lockWaitPubJointStateMsPublisher_;
+  ros::Publisher lockHoldPubJointStateMsPublisher_;
+  ros::Publisher lockWaitSolveJointStateMsPublisher_;
+  ros::Publisher lockWaitSolveJointMeanMsPublisher_;
+  ros::Publisher pubArmTrajTotalMsPublisher_;
+  ros::Publisher pubArmTrajPeriodMsPublisher_;
+  std::chrono::steady_clock::time_point lastPubArmTrajWallStart_{};
+  bool hasLastPubArmTrajWallStart_ = false;
 
   std::thread ikSolveThread_;
   std::thread jointStatePublishThread_;

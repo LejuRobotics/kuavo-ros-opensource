@@ -90,7 +90,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void applyWorkerThreadScheduling(const char* threadName, int priority) const;
 
   static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
-  static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 30;
+  static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 50;
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
   void updateSensorArmJointMeanFromSensorData();

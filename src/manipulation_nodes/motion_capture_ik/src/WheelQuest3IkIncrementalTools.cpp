@@ -39,6 +39,10 @@ namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
 bool WheelQuest3IkIncrementalROS::loadStandArmAnglesFromRosParam() {
+  if (standArmAnglesLoaded_) {
+    return true;
+  }
+
   std::vector<double> stand_joint_state;
   if (nodeHandle_.getParam("/standJointState", stand_joint_state) &&
       stand_joint_state.size() == static_cast<size_t>(numArmJoints_)) {
@@ -789,7 +793,11 @@ void WheelQuest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
   static constexpr double kKeep = 0.92;
   static constexpr double kNew = 0.08;
   {
+    const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    publishLockWaitTimingMs(lockWaitSolveJointMeanMsPublisher_,
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
+                                .count());
     filterJointDataForDrakeFK_ = kKeep * filterJointDataForDrakeFK_ + kNew * qNew;
   }
 }
@@ -806,7 +814,11 @@ void WheelQuest3IkIncrementalROS::updateSensorArmJointFromSensorData() {
   }
 
   {
+    const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    publishLockWaitTimingMs(lockWaitSolveJointStateMsPublisher_,
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
+                                .count());
     if (jointDataForDrakeFK_.size() != drakeJointStateSize_) {
       jointDataForDrakeFK_ = Eigen::VectorXd::Zero(drakeJointStateSize_);
     }
@@ -1581,7 +1593,11 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
   const bool leftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
   const bool rightGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
   {
+    const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(ikResultMutex_);
+    publishLockWaitTimingMs(lockWaitPubIkResultMsPublisher_,
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
+                                .count());
     if (!hasValidIkSolution_ || (latestIkSolution_.size() != drakeJointStateSize_)) {
       latestIkSolution_ = Eigen::VectorXd::Zero(drakeJointStateSize_);
       ROS_WARN_THROTTLE(2.0,
@@ -1602,9 +1618,51 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     }
   }
 
-  sensor_msgs::JointState armJintStateMsg;
+  const ros::Time now = ros::Time::now();
+  ros::Time leftGripStartTime;
+  ros::Time rightGripStartTime;
+  if (leftGripPressed) {
+    std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
+    leftGripStartTime = leftGripStartTime_;
+  }
+  if (rightGripPressed) {
+    std::lock_guard<std::mutex> lock(rightGripTimeMutex_);
+    rightGripStartTime = rightGripStartTime_;
+  }
+
+  auto computeGripAlpha = [&](bool armMoved, const ros::Time& gripStartTime) -> double {
+    double alpha = 0.01;
+    if (armMoved && !gripStartTime.isZero()) {
+      const double elapsedTime = (now - gripStartTime).toSec();
+      if (elapsedTime > 0.0) {
+        const double progress = std::min(elapsedTime / GRIP_TIMEOUT_DURATION, 1.0);
+        alpha = 0.01 + (1.0 - 0.01) * std::sin(progress * M_PI / 2.0);
+      }
+    }
+    return alpha;
+  };
+  const double leftGripAlpha =
+      leftGripPressed ? computeGripAlpha(incrementalController_->hasLeftArmMoved(), leftGripStartTime) : 0.01;
+  const double rightGripAlpha =
+      rightGripPressed ? computeGripAlpha(incrementalController_->hasRightArmMoved(), rightGripStartTime) : 0.01;
+
+  ros::Time mode2EnterTime;
   {
+    std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+    mode2EnterTime = mode2EnterTime_;
+  }
+  const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
+  const double mode2Elapsed = inMode2 ? (now - mode2EnterTime).toSec() : 0.0;
+
+  Eigen::VectorXd armPositionForPublish;
+  Eigen::VectorXd armVelocityForPublish;
+  {
+    const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    publishLockWaitTimingMs(lockWaitPubJointStateMsPublisher_,
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
+                                .count());
+    const auto holdStart = std::chrono::steady_clock::now();
     if (armJointRuckigFilterPtr_) {
       const Eigen::VectorXd filteredArmQ = armJointRuckigFilterPtr_->update(finalArmAngles);
       if (filteredArmQ.size() == q_.size()) {
@@ -1625,84 +1683,31 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     }
 
     if (leftGripPressed) {
-      ros::Time currentTime = ros::Time::now();
-      ros::Time startTime;
-      bool leftArmMoved = incrementalController_->hasLeftArmMoved();
-
-      {
-        std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
-        startTime = leftGripStartTime_;
-      }
-
-      double alpha = 0.01;  // 默认 alpha 值（未超时时的平滑系数）
-      // 只有在检测到移动且已开始计时时才计算 alpha
-      if (leftArmMoved && !startTime.isZero()) {
-        double elapsedTime = (currentTime - startTime).toSec();
-        if (elapsedTime > 0.0) {
-          // 根据超时进度计算 alpha：从 0.01 逐步增大到 1.0
-          double progress = std::min(elapsedTime / GRIP_TIMEOUT_DURATION, 1.0);
-          alpha = 0.01 + (1.0 - 0.01) * std::sin(progress * M_PI / 2.0);  // sin插值：0.01 -> 1.0
-        }
-      }
-
-      latest_q_.head(7) = (1.0 - alpha) * latest_q_.head(7) + alpha * q_.head(7);
-      latest_dq_.head(7) = (1.0 - alpha) * latest_dq_.head(7) + alpha * dq_.head(7);
-      lowpass_dq_.head(7) = (1.0 - lowpassDqAlpha_) * lowpass_dq_.head(7) + lowpassDqAlpha_ * latest_dq_.head(7);
+      latest_q_.head(7) = (1.0 - leftGripAlpha) * latest_q_.head(7) + leftGripAlpha * q_.head(7);
+      latest_dq_.head(7) = (1.0 - leftGripAlpha) * latest_dq_.head(7) + leftGripAlpha * dq_.head(7);
+      lowpass_dq_.head(7) =
+          (1.0 - lowpassDqAlpha_) * lowpass_dq_.head(7) + lowpassDqAlpha_ * latest_dq_.head(7);
     }
 
     if (rightGripPressed) {
-      ros::Time currentTime = ros::Time::now();
-      ros::Time startTime;
-      bool rightArmMoved = incrementalController_->hasRightArmMoved();
-
-      {
-        std::lock_guard<std::mutex> lock(rightGripTimeMutex_);
-        startTime = rightGripStartTime_;
-      }
-
-      double alpha = 0.01;  // 默认 alpha 值（未超时时的平滑系数）
-      // 只有在检测到移动且已开始计时时才计算 alpha
-      if (rightArmMoved && !startTime.isZero()) {
-        double elapsedTime = (currentTime - startTime).toSec();
-        if (elapsedTime > 0.0) {
-          // 根据超时进度计算 alpha：从 0.01 逐步增大到 1.0
-          double progress = std::min(elapsedTime / GRIP_TIMEOUT_DURATION, 1.0);
-          alpha = 0.01 + (1.0 - 0.01) * std::sin(progress * M_PI / 2.0);  // sin插值：0.01 -> 1.0
-        }
-      }
-      // tail 无需特殊处理，一直对应着右手的7个关节
-      latest_q_.tail(7) = (1.0 - alpha) * latest_q_.tail(7) + alpha * q_.tail(7);
-      latest_dq_.tail(7) = (1.0 - alpha) * latest_dq_.tail(7) + alpha * dq_.tail(7);
-      lowpass_dq_.tail(7) = (1.0 - lowpassDqAlpha_) * lowpass_dq_.tail(7) + lowpassDqAlpha_ * latest_dq_.tail(7);
+      latest_q_.tail(7) = (1.0 - rightGripAlpha) * latest_q_.tail(7) + rightGripAlpha * q_.tail(7);
+      latest_dq_.tail(7) = (1.0 - rightGripAlpha) * latest_dq_.tail(7) + rightGripAlpha * dq_.tail(7);
+      lowpass_dq_.tail(7) =
+          (1.0 - lowpassDqAlpha_) * lowpass_dq_.tail(7) + lowpassDqAlpha_ * latest_dq_.tail(7);
     }
 
-    // arm are fixed at 14 joints（stamp 放到锁外、publish 前，避免锁内提前取 now）
-    armJintStateMsg.position.resize(14);
-    armJintStateMsg.velocity.resize(14);
-    armJintStateMsg.effort.resize(14);
-    armJintStateMsg.name.resize(14);
-
-    // 使用局部变量保存本帧要发送的关节位置/速度，避免填充消息时读到被其他线程改写的 latest_q_/lowpass_dq_
-    Eigen::VectorXd armPositionForPublish = latest_q_;
-    Eigen::VectorXd armVelocityForPublish = lowpass_dq_;
+    armPositionForPublish = latest_q_;
+    armVelocityForPublish = lowpass_dq_;
 
     // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
     // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
     // 区间 2: [0.3s, 5.0s)      — 从 q_init_cmd_ 线性平滑到 q_（若 q_init_cmd_ 有效），速度清零
     // 区间 3: [5.0s, +infty)    — 不在此处改写
-    ros::Time mode2EnterTime;
-    {
-      std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
-      mode2EnterTime = mode2EnterTime_;
-    }
-    const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
     if (inMode2) {
       constexpr double kMode2SensorSyncDurationSec = 0.3;
       constexpr double kMode2SmoothDurationSec = 2.0;
-      const double elapsed = (ros::Time::now() - mode2EnterTime).toSec();
 
-      if (elapsed < kMode2SensorSyncDurationSec) {
-        // 区间 1: [0, 0.3s)
+      if (mode2Elapsed < kMode2SensorSyncDurationSec) {
         Eigen::VectorXd sensorArmQ = q_;
         if (jointDataForDrakeFK_.size() >= sensorDataArmOffset_ + 14) {
           sensorArmQ = jointDataForDrakeFK_.segment(sensorDataArmOffset_, 14);
@@ -1715,11 +1720,10 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
         latest_q_ = sensorArmQ;
         latest_dq_.setZero();
         lowpass_dq_.setZero();
-      } else if (elapsed < kMode2SmoothDurationSec) {
-        // 区间 2: [0.3s, 5.0s)，严格按时间进入，平滑仅在 q_init_cmd_ 有效时生效
+      } else if (mode2Elapsed < kMode2SmoothDurationSec) {
         if (q_init_cmd_.size() == 14) {
           const double alpha = std::min(
-              std::max((elapsed - kMode2SensorSyncDurationSec) /
+              std::max((mode2Elapsed - kMode2SensorSyncDurationSec) /
                            (kMode2SmoothDurationSec - kMode2SensorSyncDurationSec),
                        0.0),
               1.0);
@@ -1730,18 +1734,23 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
         latest_dq_.setZero();
         lowpass_dq_.setZero();
       }
-      // 区间 3: elapsed >= 5.0s 时不做处理，armPositionForPublish/armVelocityForPublish 保持本帧初的拷贝
     }
 
-    for (int i = 0; i < 14; ++i) {
-      armJintStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
-    }
+    publishLockWaitTimingMs(lockHoldPubJointStateMsPublisher_,
+                            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - holdStart)
+                                .count());
+  }
 
-    for (int i = 0; i < 14; ++i) {
-      armJintStateMsg.position[i] = armPositionForPublish(i) * 180.0 / M_PI;
-      armJintStateMsg.velocity[i] = armVelocityForPublish(i) * 180.0 / M_PI;
-      armJintStateMsg.effort[i] = 0.0;
-    }
+  sensor_msgs::JointState armJintStateMsg;
+  armJintStateMsg.position.resize(14);
+  armJintStateMsg.velocity.resize(14);
+  armJintStateMsg.effort.resize(14);
+  armJintStateMsg.name.resize(14);
+  for (int i = 0; i < 14; ++i) {
+    armJintStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+    armJintStateMsg.position[i] = armPositionForPublish(i) * 180.0 / M_PI;
+    armJintStateMsg.velocity[i] = armVelocityForPublish(i) * 180.0 / M_PI;
+    armJintStateMsg.effort[i] = 0.0;
   }
 
   armJintStateMsg.header.stamp = ros::Time::now();
@@ -1770,42 +1779,34 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
   loadStandArmAnglesFromRosParam();
   const Eigen::VectorXd defaultArmAngles = standArmAngles_;
 
-  // 发布手臂关节状态
-  sensor_msgs::JointState armJintStateMsg;
+  Eigen::VectorXd armPositionForPublish;
+  Eigen::VectorXd armVelocityForPublish;
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
 
-    // 直接设置 q_ 为默认角度（来自 /standJointState）
     q_ = defaultArmAngles;
-
-    // dq_ 设置为零
     dq_.setZero();
 
-    // 手臂 alpha 平滑：将 q_ 平滑到 latest_q_
     const double alpha = 0.01;
     latest_q_ = (1.0 - alpha) * latest_q_ + alpha * q_;
-
-    // latest_dq_ 设置为零
     latest_dq_.setZero();
-
     lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
 
-    // 构建手臂消息
-    armJintStateMsg.header.stamp = ros::Time::now();
-    armJintStateMsg.position.resize(14);
-    armJintStateMsg.velocity.resize(14);
-    armJintStateMsg.effort.resize(14);
-    armJintStateMsg.name.resize(14);
+    armPositionForPublish = latest_q_;
+    armVelocityForPublish = lowpass_dq_;
+  }
 
-    for (int i = 0; i < 14; ++i) {
-      armJintStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
-    }
-
-    for (int i = 0; i < 14; ++i) {
-      armJintStateMsg.position[i] = latest_q_(i) * 180.0 / M_PI;
-      armJintStateMsg.velocity[i] = lowpass_dq_(i) * 180.0 / M_PI;
-      armJintStateMsg.effort[i] = 0.0;
-    }
+  sensor_msgs::JointState armJintStateMsg;
+  armJintStateMsg.header.stamp = ros::Time::now();
+  armJintStateMsg.position.resize(14);
+  armJintStateMsg.velocity.resize(14);
+  armJintStateMsg.effort.resize(14);
+  armJintStateMsg.name.resize(14);
+  for (int i = 0; i < 14; ++i) {
+    armJintStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+    armJintStateMsg.position[i] = armPositionForPublish(i) * 180.0 / M_PI;
+    armJintStateMsg.velocity[i] = armVelocityForPublish(i) * 180.0 / M_PI;
+    armJintStateMsg.effort[i] = 0.0;
   }
 
   // 发布手臂消息
@@ -2056,6 +2057,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   nodeHandle_.param("vr_ik/ik_solve_thread_priority",
                     ikSolveThreadPriority_,
                     DEFAULT_IK_SOLVE_THREAD_PRIORITY);
+  nodeHandle_.param("vr_ik/enable_solve_loop_timing_log", enableSolveLoopTimingLog_, false);
+  ROS_INFO("[WheelQuest3IkIncrementalROS] enable_solve_loop_timing_log: %s",
+           enableSolveLoopTimingLog_ ? "true" : "false");
+  nodeHandle_.param("vr_ik/enable_lock_wait_timing_log", enableLockWaitTimingLog_, false);
+  ROS_INFO("[WheelQuest3IkIncrementalROS] enable_lock_wait_timing_log: %s",
+           enableLockWaitTimingLog_ ? "true" : "false");
   vrIkThreadCpus_.clear();
   XmlRpc::XmlRpcValue threadCpusParam;
   if (nodeHandle_.getParam("vr_ik/thread_cpus", threadCpusParam) &&
@@ -2385,6 +2392,40 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   wholeBodyRefMarkerArrayPublisher_ =
       nodeHandle_.advertise<visualization_msgs::MarkerArray>("/ik_debug/whole_body_ref_markers", 2);
+
+  solveLoopFsmEnterMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/fsm_enter", 10);
+  solveLoopFsmChangeMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/fsm_change", 10);
+  solveLoopFsmProcessMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/fsm_process", 10);
+  solveLoopFsmExitMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/fsm_exit", 10);
+  solveLoopPublishEeMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/publish_ee", 10);
+  solveLoopPublishAuxMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/publish_aux", 10);
+  solveLoopPublishMarkersMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/publish_markers", 10);
+  solveLoopFsmBlockTotalMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/fsm_block_total", 10);
+  solveLoopPeriodMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/solve_loop_ms/loop_period", 10);
+
+  lockWaitPubIkResultMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/pub_wait_ik_result", 10);
+  lockWaitPubJointStateMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/pub_wait_joint_state", 10);
+  lockHoldPubJointStateMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/pub_hold_joint_state", 10);
+  lockWaitSolveJointStateMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/solve_wait_joint_state", 10);
+  lockWaitSolveJointMeanMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/solve_wait_joint_mean", 10);
+  pubArmTrajTotalMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/pub_arm_traj_total", 10);
+  pubArmTrajPeriodMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/pub_arm_traj_period", 10);
 
   lbLegTrajPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
   lbLegTrajPublishTimer_ =
