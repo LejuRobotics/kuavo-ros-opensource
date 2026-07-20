@@ -2889,7 +2889,7 @@ namespace ocs2
     bool posture_deadzone_exit_attempted_{false};
     // amp_hand 下 axes[3] 控制 posture 开关的阈值：
     //   [threshold, 1.0] / [-1.0, -threshold] 线性重映射到 [0, 1] / [-1, 0]
-    static constexpr double kPostureAxisThreshold = 0.4;
+    static constexpr double kPostureAxisThreshold = 0.3;
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
 

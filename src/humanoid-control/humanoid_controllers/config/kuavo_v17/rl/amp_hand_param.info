@@ -21,7 +21,7 @@ enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时关闭cmdy,且 abs(cmdy)�
 enable_off_cmdy_by_cmdangz  true ; 当 abs(cmdangz)大于0.3时关闭cmdy，且abs(cmdy)大于0.3时关闭cmdangz
 enable_elbow_scale          true ; 肘关节单独使用 0.18 actionscale，并限制最终关节角(加default后)<-0.2
 enable_back_arm_enhance     true ; cmd_x<-0.2 时 arm 摆动增强
-enable_standup_enhance        true ; 起身时添加后仰偏置避免前倾,增强leg1和leg4的输出；下蹲时自动弯腰
+enable_standup_enhance        true ; 起身时添加后仰偏置避免前倾，并增强leg1和leg4的输出
 use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd   false      ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
@@ -69,7 +69,7 @@ cmdVelLineXlow 0.4 ; 手柄十字键按“下”键直接cmdVelLineX降为0.4
 cmdVelLineXup 0.95 ; 手柄十字键按“上”键，速度限制升一档，档位从低到高为cmdVelLineXlow、cmdVelLineX默认速度限制、cmdVelLineXup
 
 cmdVelLineXNeg  0.43 ; cmdVelLineX负向默认速度限制
-squatHeightMin -0.17 ; amp_hand 手柄 posture 模式最大下蹲深度 (m)
+squatHeightMin -0.16 ; amp_hand 手柄 posture 模式最大下蹲深度 (m)
 squatHeightMax 0.03 ; amp_hand 手柄 posture 模式最大站起高度 (m)
 
 ; ==================== 下蹲守备（控制器端）====================
@@ -86,7 +86,7 @@ ampVRcmdvelLinearZLimit 0.0 ; amp_hand VR 高度通道最大速度 (m/s)
 ampVRcmdvelAngularYAWLimit 0.9 ; amp_hand VR yaw 最大角速度 (rad/s)
 
 ; ==================== cmd微小速度命令截断 ====================
-；cmd.scale() → cmdVelLineXNeg限速 → enable_off_cmdy_by_cmdx → enable_off_cmdy_by_cmdangz → TinyCmdClip(cmd_x) → TinyCmdClip(cmd_y) → TinyCmdClip(cmd_angz, 仅原地旋转) → lowSpeedKickStart → velocity_commands
+；cmd.scale() → cmdVelLineXNeg限速 → enable_off_cmdy_by_cmdx → enable_off_cmdy_by_cmdangz → TinyCmdClip(cmd_x/cmd_y/cmd_angz/下蹲高度) → lowSpeedKickStart → velocity_commands
 TinyCmdClip
 {
     (0,0)  0.15   ; cmd_x正向截断区间最小值
@@ -95,7 +95,9 @@ TinyCmdClip
     (3,0)  0.4   ; abs(cmd_y) 截断最大值，abs(cmd_y) 位于区间内的值都会被截断为该值
     (4,0)  0.3    ; abs(cmd_angz) 截断最小值，仅当原地旋转有效
     (5,0)  0.8   ; abs(cmd_angz) 截断最大值，abs(cmd_angz) 位于区间内的值都会被截断为该值
-    
+    (6,0)  0.14  ; abs(下蹲高度)截断区间最小值，仅 roban17 amp_hand posture 模式有效
+    (7,0)  0.20  ; abs(下蹲高度)截断区间最大值，[-0.20,-0.14]统一截断为-0.20
+
 }
 
 ; ==================== 低速起步脉冲 ====================
@@ -104,10 +106,10 @@ lowSpeedKickStart
 {
     enabled             true
     kickVelocity        0.60   ; 脉冲速度
-    durationSteps       20     ; 脉冲持续推理步数(50Hz 下约 0.5s)
-    restCmdThreshold    0.1    ; |上一帧 cmd_x| 低于该值则判定静止起步
+    durationSteps       25     ; 脉冲持续推理步数(50Hz 下约 0.5s)
+    restCmdThreshold    0.3    ; |上一帧 cmd_x| 低于该值则判定静止起步
     triggerVelocity     0.45   ; 处理后 cmd_x 触发中心值(TinyCmdClip 正向截断值)
-    triggerTolerance    0.05   ; 触发区间 [0.40, 0.50]
+    triggerTolerance    0.1   ; 触发区间 [0.35, 0.55]
     lateralThreshold    0.2    ; abs(cmd_y) 超过则取消
     yawThreshold        0.2    ; abs(cmd_angz) 超过则取消
 }
@@ -159,8 +161,10 @@ velocitySmoothing
     maxVelocityChangeNegCmdX  0.0051  ; 负向 cmd_x 单步最大变化量 (m/s)，后退，加减速
     maxVelocityChangeCmdY  0.008   ; 单步 cmd_y 最大变化量 (m/s)
     standUpHeightSmoothingEnabled  true   ; 站立模式下起身高度命令平滑
-    maxStandUpHeightChange  0.02  ; 起身单步最大高度命令变化量 (m)，下蹲仍即时跟随
+    maxStandUpHeightChange  0.02  ; 起身单步最大高度命令变化量 (m)，下蹲不做该限幅而由低通处理
     StandUpHeightSmoothStart -0.1 ; 起身达到该高度前平滑，高于该高度后直接跟随
+    squatHeightLowPassEnabled true ; roban17 amp_hand posture 下蹲高度命令启用一阶低通
+    squatHeightLowPassCutoffFreq 1.5 ; 截止频率(Hz)，越低越平滑但响应越慢
 }
 
 ; ==================== YAW方向补偿配置 ====================

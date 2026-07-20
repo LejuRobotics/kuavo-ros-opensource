@@ -164,6 +164,7 @@ namespace humanoid_controller
     bool arm_rl_takeover_blend_enabled_{false}; ///< 是否启用站立外部手臂到行走RL手臂的平滑接管
     double arm_rl_takeover_blend_duration_{0.3}; ///< 手臂平滑接管时长（秒）
     bool arm_zero_action_in_standing_{false}; ///< 是否在站立状态下将RL手臂action输出置0
+    int robot_version_int_{0};
     bool last_stance_state_for_blend_{true}; ///< 用于手臂接管混合的站立状态跟踪
     ArmTakeoverBlender arm_takeover_blender_; ///< 站立到行走时的手臂RL接管混合器
 
@@ -219,10 +220,13 @@ namespace humanoid_controller
     // amp_hand_controller 专用：外部手臂接管时 RL 使用虚拟手臂观测（仅 use_virtual_arm_obs 来自配置）
     bool is_amp_hand_controller_{false};
     bool use_virtual_arm_obs_{false};
-    static constexpr double kVirtualArmObsPitchBaseDeg_{0.05};
+    static constexpr double kVirtualArmObsPitchBaseDeg_{0.2};
     static constexpr double kVirtualArmObsPitchCompensationDeg_{1.5};
     static constexpr double kVirtualArmObsPitchBaseDegNeg_{0.5};
     static constexpr double kVirtualArmObsPitchCompensationDegNeg_{0.0};
+    static constexpr double kVirtualArmObsArm1BackSumMaxRad_{4.0};          ///< zarm_l1+zarm_r1 后伸合计上限 (rad)，单臂 [0,2]
+    static constexpr double kVirtualArmObsArm1BackSumPitchReductionFullRad_{1.0}; ///< 合计达到该值时削弱量封顶 (rad)
+    static constexpr double kVirtualArmObsArm1BackPitchReductionMaxDeg_{0.4}; ///< 满后伸时削弱后仰补偿量 (deg)
     bool lateral_elbow_fix_{false};
     static constexpr double kLateralElbowFixScale_{0.5};
     bool enable_elbow_scale_{false};
@@ -231,9 +235,8 @@ namespace humanoid_controller
     static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};
     bool enable_standup_enhance_{false};
     static constexpr double kStandUpGravityPitchBiasDeg_{-2.0};   ///< 起身时 projected_gravity 后仰偏置 (deg)
-    static constexpr double kStandUpPitchFadeHeightStart_{-0.08}; ///< 该高度以下按深度满偏置，趋近 0 时淡出 (m)
-    static constexpr double kSquatPitchMaxCmd_{0.15};             ///< 深蹲时 cmdVelLineX_ 最大自动弯腰量 (m/s)
-    static constexpr double kSquatPitchFadeHeightStart_{-0.02};   ///< 下蹲低于该高度才开始叠加弯腰 (m)
+    static constexpr double kStandUpPitchFullBiasHeightEnd_{-0.1};  ///< 满偏置区间深端 (m)，[-0.1,-0.05] 及更深均为满偏
+    static constexpr double kStandUpPitchFadeHeightStart_{-0.05}; ///< 满偏置浅端，(-0.05,0) 趋近 0 时线性淡出 (m)
     static constexpr double kStandUpHeightRisingEpsilon_{1e-6};   ///< 高度命令上升判据阈值 (m)
     // defaultJointState 顺序：waist(0), leg_l1(1)..leg_l6(6), leg_r1(7)..leg_r6(12)
     static constexpr int kStandUpLegL1ActionIdx_{1};              ///< leg_l1_joint
@@ -245,8 +248,8 @@ namespace humanoid_controller
     static constexpr double kStandUpLeg4ActionScale_{1.05};        ///< 起身时 leg_l4/leg_r4 action 缩放
     static constexpr double kStandUpLeg1ActionBiasFadeMin_{-0.1}; ///< leg_l1/leg_r1 偏置 fade 区间下限
     static constexpr double kStandUpLeg1ActionBiasFadeMax_{-0.01}; ///< leg_l1/leg_r1 偏置 fade 区间上限，越接近 0 偏置越大
-    static constexpr double kStandUpLeg1ActionBiasMinAbs_{0.03}; ///< leg_l1/leg_r1 最小偏置绝对值
-    static constexpr double kStandUpLeg1ActionBiasMaxAbs_{0.06};   ///< leg_l1/leg_r1 最大偏置绝对值
+    static constexpr double kStandUpLeg1ActionBiasMinAbs_{0.05}; ///< leg_l1/leg_r1 最小偏置绝对值
+    static constexpr double kStandUpLeg1ActionBiasMaxAbs_{0.1};   ///< leg_l1/leg_r1 最大偏置绝对值
     bool stand_up_rising_active_{false};                            ///< 本周期是否处于起身上升阶段
     bool enable_roll_compensation_closed_loop_{false};
     bool roll_compensation_closed_loop_initialized_{false};
@@ -268,6 +271,9 @@ namespace humanoid_controller
     bool tiny_cmd_angz_clip_enabled_{false};
     double tiny_cmd_angz_clip_min_{0.0};  ///< abs(cmd_angz) 截断区间最小值
     double tiny_cmd_angz_clip_max_{0.0};  ///< abs(cmd_angz) 截断区间最大值，区间内值截断为该值
+    bool squat_height_clip_enabled_{false};
+    double squat_height_clip_abs_min_{0.0};  ///< 下蹲高度绝对值截断区间最小值
+    double squat_height_clip_abs_max_{0.0};  ///< 下蹲高度绝对值截断区间最大值，区间内统一截断至其负值
     bool low_speed_kick_enabled_{false};
     double low_speed_kick_velocity_{0.60};
     int low_speed_kick_duration_steps_{10};
@@ -297,8 +303,11 @@ namespace humanoid_controller
     bool stance_height_stand_up_smoothing_enabled_{true};
     double max_stance_height_stand_up_change_{0.004}; ///< 起身单步最大高度命令变化量 (m)
     double stance_height_smooth_start_{-0.1};         ///< 起身达到该高度前平滑，达到后直接跟随 (m)
-    double max_stance_squat_depth_{0.17};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
+    double max_stance_squat_depth_{0.16};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
     double smoothed_stance_height_cmd_{0.0};          ///< 平滑后的下蹲高度命令
+    bool squat_height_low_pass_enabled_{false};       ///< roban17 amp_hand posture 高度命令低通滤波
+    double squat_height_low_pass_cutoff_freq_{2.0};   ///< 高度命令低通截止频率 (Hz)
+    double filtered_squat_height_cmd_{0.0};           ///< 低通后的高度目标
 
     // 下蹲守备（控制器端）：深蹲且转向较小时拦截姿态模式退出请求
     bool squat_posture_defense_enabled_{false};
@@ -308,7 +317,7 @@ namespace humanoid_controller
     int squat_auto_stand_up_frames_remaining_{0};
     int squat_auto_exit_yaw_frames_remaining_{0};
     static constexpr int kSquatAutoStandUpFrames_{25};
-    static constexpr int kSquatAutoExitYawFrames_{1};
+    static constexpr int kSquatAutoExitYawFrames_{2};
     static constexpr double kSquatAutoExitYawCmd_{0.9};
 
     bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
@@ -339,6 +348,7 @@ namespace humanoid_controller
     double applyTinyCmdxClip(double cmdx) const;
     double applyTinyCmdYClip(double cmdy) const;
     double applyTinyCmdAngzClip(double angz) const;
+    double applySquatHeightClip(double height) const;
     void applyLowSpeedKickStart(CommandDataRL& cmd);
     void applyStanceHeightStandUpSmoothing(CommandDataRL& cmd);
     void applySquatPostureAutoExit(CommandDataRL& cmd, const SensorData& sensor_data);

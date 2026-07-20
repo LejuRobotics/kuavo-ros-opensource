@@ -69,6 +69,8 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] /is_roban not found in ROS params, using default: %d", name_.c_str(), static_cast<int>(is_roban_));
     }
+    robot_version_int_ = 45;
+    nh_.param("/robot_version", robot_version_int_, 45);
 
 
     // 初始化ankleSolver（从ROS参数获取，如果不存在则使用默认值）
@@ -354,7 +356,7 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdangz_, "enable_off_cmdy_by_cmdangz", false);
       try
       {
-        Eigen::Matrix<double, 6, 1> tiny_cmd_clip;
+        Eigen::Matrix<double, 8, 1> tiny_cmd_clip;
         loadEigenMatrix("TinyCmdClip", tiny_cmd_clip);
         tiny_cmdx_clip_pos_min_ = tiny_cmd_clip(0);
         tiny_cmdx_clip_pos_max_ = tiny_cmd_clip(1);
@@ -362,24 +364,33 @@ namespace humanoid_controller
         tiny_cmdy_clip_max_ = tiny_cmd_clip(3);
         tiny_cmd_angz_clip_min_ = tiny_cmd_clip(4);
         tiny_cmd_angz_clip_max_ = tiny_cmd_clip(5);
+        squat_height_clip_abs_min_ = tiny_cmd_clip(6);
+        squat_height_clip_abs_max_ = tiny_cmd_clip(7);
         tiny_cmdx_clip_enabled_ = tiny_cmdx_clip_pos_max_ > tiny_cmdx_clip_pos_min_;
         tiny_cmdy_clip_enabled_ = tiny_cmdy_clip_max_ > tiny_cmdy_clip_min_;
         tiny_cmd_angz_clip_enabled_ = tiny_cmd_angz_clip_max_ > tiny_cmd_angz_clip_min_;
+        squat_height_clip_enabled_ =
+            squat_height_clip_abs_max_ > squat_height_clip_abs_min_;
         ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, "
-                 "cmd_y[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, enabled=%s/%s/%s",
+                 "cmd_y[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, "
+                 "squat[-%.3f, -%.3f]->-%.3f, enabled=%s/%s/%s/%s",
                  name_.c_str(),
                  tiny_cmdx_clip_pos_min_, tiny_cmdx_clip_pos_max_, tiny_cmdx_clip_pos_max_,
                  tiny_cmdy_clip_min_, tiny_cmdy_clip_max_, tiny_cmdy_clip_max_,
                  tiny_cmd_angz_clip_min_, tiny_cmd_angz_clip_max_, tiny_cmd_angz_clip_max_,
+                 squat_height_clip_abs_max_, squat_height_clip_abs_min_,
+                 squat_height_clip_abs_max_,
                  tiny_cmdx_clip_enabled_ ? "true" : "false",
                  tiny_cmdy_clip_enabled_ ? "true" : "false",
-                 tiny_cmd_angz_clip_enabled_ ? "true" : "false");
+                 tiny_cmd_angz_clip_enabled_ ? "true" : "false",
+                 squat_height_clip_enabled_ ? "true" : "false");
       }
       catch (const std::exception& e)
       {
         tiny_cmdx_clip_enabled_ = false;
         tiny_cmdy_clip_enabled_ = false;
         tiny_cmd_angz_clip_enabled_ = false;
+        squat_height_clip_enabled_ = false;
         ROS_WARN("[%s] TinyCmdClip not loaded: %s", name_.c_str(), e.what());
       }
 
@@ -414,12 +425,20 @@ namespace humanoid_controller
                                  "velocitySmoothing.maxStandUpHeightChange", false);
         loadData::loadPtreeValue(pt, stance_height_smooth_start_,
                                  "velocitySmoothing.StandUpHeightSmoothStart", false);
+        loadData::loadPtreeValue(pt, squat_height_low_pass_enabled_,
+                                 "velocitySmoothing.squatHeightLowPassEnabled", false);
+        loadData::loadPtreeValue(pt, squat_height_low_pass_cutoff_freq_,
+                                 "velocitySmoothing.squatHeightLowPassCutoffFreq", false);
+        squat_height_low_pass_cutoff_freq_ =
+            std::max(squat_height_low_pass_cutoff_freq_, 1e-3);
         ROS_INFO("[%s] Stance height stand-up smoothing: enabled=%s, maxChange=%.4f m/step, "
-                 "smoothStart=%.4f m",
+                 "smoothStart=%.4f m; squat low-pass: enabled=%s, cutoff=%.2f Hz",
                  name_.c_str(),
                  stance_height_stand_up_smoothing_enabled_ ? "true" : "false",
                  max_stance_height_stand_up_change_,
-                 stance_height_smooth_start_);
+                 stance_height_smooth_start_,
+                 squat_height_low_pass_enabled_ ? "true" : "false",
+                 squat_height_low_pass_cutoff_freq_);
       }
     }
 
@@ -633,6 +652,7 @@ namespace humanoid_controller
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = true;  // 初始化为站立状态
     smoothed_stance_height_cmd_ = 0.0;
+    filtered_squat_height_cmd_ = 0.0;
     squat_posture_deep_seen_ = false;
     squat_auto_stand_up_frames_remaining_ = 0;
     squat_auto_exit_yaw_frames_remaining_ = 0;
@@ -771,6 +791,23 @@ namespace humanoid_controller
     return angz;
   }
 
+  double AmpWalkController::applySquatHeightClip(double height) const
+  {
+    if (!squat_height_clip_enabled_ || !is_amp_hand_controller_ || !is_roban_ ||
+        robot_version_int_ != 17 || amp_mode_ != 1 || height >= 0.0)
+    {
+      return height;
+    }
+
+    const double abs_height = std::abs(height);
+    if (abs_height >= squat_height_clip_abs_min_ &&
+        abs_height <= squat_height_clip_abs_max_)
+    {
+      return -squat_height_clip_abs_max_;
+    }
+    return height;
+  }
+
   void AmpWalkController::applyLowSpeedKickStart(CommandDataRL& cmd)
   {
     if (!low_speed_kick_enabled_ || !is_amp_hand_controller_)
@@ -826,12 +863,32 @@ namespace humanoid_controller
     if (cmd.cmdStance_ < 1.0)
     {
       smoothed_stance_height_cmd_ = 0.0;
+      filtered_squat_height_cmd_ = 0.0;
       return;
     }
 
     const bool in_posture_stance = (amp_mode_ == 1);
-    const double raw_height = in_posture_stance ? cmd.cmdVelAngularZ_ : 0.0;
-    const double diff = raw_height - smoothed_stance_height_cmd_;
+    const double raw_height =
+        in_posture_stance ? applySquatHeightClip(cmd.cmdVelAngularZ_) : 0.0;
+    double target_height = raw_height;
+    const bool apply_squat_low_pass =
+        squat_height_low_pass_enabled_ && is_roban_ && robot_version_int_ == 17;
+    if (apply_squat_low_pass)
+    {
+      const double filter_dt =
+          inference_frequency_ > 0.0 ? 1.0 / inference_frequency_ : 0.02;
+      const double alpha =
+          1.0 - std::exp(-2.0 * M_PI * squat_height_low_pass_cutoff_freq_ * filter_dt);
+      filtered_squat_height_cmd_ +=
+          alpha * (raw_height - filtered_squat_height_cmd_);
+      target_height = filtered_squat_height_cmd_;
+    }
+    else
+    {
+      filtered_squat_height_cmd_ = raw_height;
+    }
+
+    const double diff = target_height - smoothed_stance_height_cmd_;
 
     stand_up_rising_active_ =
         (in_posture_stance || std::abs(smoothed_stance_height_cmd_) > 1e-6) &&
@@ -839,10 +896,9 @@ namespace humanoid_controller
 
     if (!stance_height_stand_up_smoothing_enabled_)
     {
-      return;
+      smoothed_stance_height_cmd_ = target_height;
     }
-
-    if (diff > kStandUpHeightRisingEpsilon_)
+    else if (diff > kStandUpHeightRisingEpsilon_)
     {
       if (smoothed_stance_height_cmd_ < stance_height_smooth_start_)
       {
@@ -854,12 +910,12 @@ namespace humanoid_controller
       else
       {
         // 达到阈值后直接跟随剩余起身高度。
-        smoothed_stance_height_cmd_ = raw_height;
+        smoothed_stance_height_cmd_ = target_height;
       }
     }
     else
     {
-      smoothed_stance_height_cmd_ = raw_height;
+      smoothed_stance_height_cmd_ = target_height;
     }
 
     smoothed_stance_height_cmd_ = std::max(smoothed_stance_height_cmd_, -max_stance_squat_depth_);
@@ -1075,21 +1131,6 @@ namespace humanoid_controller
 
     applyLowSpeedKickStart(cmd);
 
-    // enable_standup_enhance：下蹲时按深度自动叠加正向 cmdVelLineX_（弯腰通道）
-    if (enable_standup_enhance_ && is_amp_hand_controller_ && cmd.cmdStance_ >= 1.0 &&
-        !stand_up_rising_active_)
-    {
-      const double height_cmd = cmd.cmdVelAngularZ_;
-      if (height_cmd < kSquatPitchFadeHeightStart_)
-      {
-        const double pitch_weight = std::clamp(
-            -height_cmd / max_stance_squat_depth_,
-            0.0, 1.0);
-        const double auto_bend = kSquatPitchMaxCmd_ * pitch_weight;
-        cmd.cmdVelLineX_ = std::max(cmd.cmdVelLineX_, auto_bend);
-      }
-    }
-
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
@@ -1176,12 +1217,31 @@ namespace humanoid_controller
     {
       const double virtual_arm_obs_pitch_scale =
           cmd.cmdVelLineX_ >= -0.12 ? cmd.cmdVelLineX_ : -0.1;
-      const double compensation_pitch_deg =
+      double compensation_pitch_deg =
           virtual_arm_obs_pitch_scale >= -0.005
               ? kVirtualArmObsPitchBaseDeg_ +
                     kVirtualArmObsPitchCompensationDeg_ * virtual_arm_obs_pitch_scale
               : kVirtualArmObsPitchBaseDegNeg_ +
                     kVirtualArmObsPitchCompensationDegNeg_ * virtual_arm_obs_pitch_scale;
+
+      // 手臂后摆(zarm_l1+zarm_r1)越大，越削弱 projected_gravity 后仰补偿
+      if (jointArmNum_ > 4)
+      {
+        const int arm_start_idx = is_roban_ ? (waistNum_ + jointNum_) : (jointNum_ + waistNum_);
+        const int zarm_l1_idx = arm_start_idx;
+        const int zarm_r1_idx = arm_start_idx + 4;
+        const double zarm_l1_back =
+            std::max(0.0, sensor_data.jointPos_[zarm_l1_idx] - active_default[zarm_l1_idx]);
+        const double zarm_r1_back =
+            std::max(0.0, sensor_data.jointPos_[zarm_r1_idx] - active_default[zarm_r1_idx]);
+        const double arm1_back_sum = std::clamp(
+            zarm_l1_back + zarm_r1_back, 0.0, kVirtualArmObsArm1BackSumMaxRad_);
+        compensation_pitch_deg -=
+            kVirtualArmObsArm1BackPitchReductionMaxDeg_ *
+            std::min(arm1_back_sum, kVirtualArmObsArm1BackSumPitchReductionFullRad_) /
+            kVirtualArmObsArm1BackSumPitchReductionFullRad_;
+      }
+
       const double compensation_pitch_rad = compensation_pitch_deg * M_PI / 180.0;
       projected_gravity = Eigen::AngleAxisd(-compensation_pitch_rad, Eigen::Vector3d::UnitY()) * projected_gravity;
     }
@@ -1271,16 +1331,20 @@ namespace humanoid_controller
     if (enable_standup_enhance_ && stand_up_rising_active_)
     {
       const double height_cmd = cmd.cmdVelAngularZ_;
-      double pitch_weight = 1.0;
-      if (height_cmd < 0.0)
+      double pitch_weight = 0.0;
+      static_assert(kStandUpPitchFullBiasHeightEnd_ < kStandUpPitchFadeHeightStart_,
+                    "stand-up pitch full-bias band requires fullEnd < fadeStart");
+      if (height_cmd <= kStandUpPitchFadeHeightStart_)
       {
-        pitch_weight = std::clamp(
-            -height_cmd / std::abs(kStandUpPitchFadeHeightStart_),
-            0.0, 1.0);
+        // [-0.1, -0.05] 及更深 (<= -0.05) 均为满偏置
+        pitch_weight = 1.0;
       }
-      else
+      else if (height_cmd < 0.0)
       {
-        pitch_weight = 0.0;
+        // (-0.05, 0) 线性淡出
+        pitch_weight = std::clamp(
+            -height_cmd / (-kStandUpPitchFadeHeightStart_),
+            0.0, 1.0);
       }
       const double pitch_deg = kStandUpGravityPitchBiasDeg_ * pitch_weight;
       if (std::abs(pitch_deg) > 1e-6)

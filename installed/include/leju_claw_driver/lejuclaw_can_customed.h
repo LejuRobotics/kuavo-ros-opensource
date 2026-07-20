@@ -145,6 +145,10 @@ private:
     static constexpr float VR_STUCK_POSITION_THRESHOLD = 0.01f;    // VR 卡死位置阈值 rad
     static constexpr float VR_TARGET_POSITION_THRESHOLD = 0.5f;    // VR 目标差阈值 rad
 
+    // 非VR保持模式（目标位置等于触发值时持续输出保持电流）
+    static constexpr bool  ENABLE_NON_VR_HOLD = false;           // 非VR保持模式开关，默认关闭
+    static constexpr float NON_VR_HOLD_CURRENT = 0.4f;           // 非VR保持电流 A
+
     // 统计高电流冲击使用次数（调试/记录）
     int three_amp_current_usage_count = 0;
 
@@ -201,6 +205,10 @@ private:
     int   cfg_VR_STUCK_DETECTION_CYCLES = VR_STUCK_DETECTION_CYCLES;
     float cfg_VR_STUCK_POSITION_THRESHOLD = VR_STUCK_POSITION_THRESHOLD;
     float cfg_VR_TARGET_POSITION_THRESHOLD = VR_TARGET_POSITION_THRESHOLD;
+
+    bool  cfg_ENABLE_NON_VR_HOLD = ENABLE_NON_VR_HOLD;
+    float cfg_NON_VR_HOLD_CURRENT = NON_VR_HOLD_CURRENT;
+    std::string cfg_NON_VR_HOLD_TRIGGER_PERCENTS = "100.0";   // YAML中逗号分隔的触发值，如"70,80,100"
 
     float cfg_ZERO_CONTROL_KP = ZERO_CONTROL_KP;
     float cfg_ZERO_CONTROL_KD = ZERO_CONTROL_KD;
@@ -305,6 +313,13 @@ private:
     std::unordered_map<MotorId, std::string> device_canbus_map_;
     std::unordered_map<MotorId, MotorCtrlData> motor_ctrl_datas_;
     DebugCallback debug_callback_;
+
+    // 非VR保持模式
+    std::unordered_map<MotorId, bool>  non_vr_hold_mode_;        // 是否激活非VR保持
+    std::unordered_map<MotorId, float> non_vr_hold_target_rad_;  // 保持模式的目标位置 rad
+    std::unordered_map<MotorId, float> non_vr_hold_current_;     // 保持电流
+    std::vector<float> non_vr_hold_trigger_set_;                 // 解析后的触发值列表
+    std::unordered_map<MotorId, double> last_move_paw_target_percent_;  // 上次move_paw目标%，用于跳过检测
 
     // 控制线程
     std::atomic<bool> thread_running{false};
