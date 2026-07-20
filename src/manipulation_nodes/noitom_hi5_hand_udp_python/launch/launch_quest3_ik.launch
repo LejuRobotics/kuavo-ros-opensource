@@ -54,6 +54,7 @@
     <arg name="delta_scale_yaw" default="1.0" />
     <arg name="max_pos_diff" default="0.45" />
     <arg name="arm_move_threshold" default="0.002" />
+    <arg name="reset_joint_to_default" default="true" /> <!-- true: 进入增量控制时重置到默认位置, false: 保持当前FK位置 -->
     <arg name="pos_vel_limit" default="30.0" /> <!-- 位置速度限制 -->
     <!-- 增量控制核心参数（ik_ros_uni_cpp_node 需要，缺失会卡在 hasParam 等待） -->
     <arg name="fhan_r" default="3000.0" />
@@ -100,8 +101,9 @@
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
     <!-- 设置全局参数，供其他节点统一读取 -->
     <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
-    <param name="/init_control_waist_enable" value="$(arg init_control_waist_enable)" type="bool"/>
-    
+    <!-- 设置全局reset_joint_to_default参数 -->
+    <param name="/reset_joint_to_default" value="$(arg reset_joint_to_default)" type="bool"/>
+
     <param name="/use_pico" value="$(arg use_pico)" type="bool"/>
 
     <!-- motion_capture_ik -->

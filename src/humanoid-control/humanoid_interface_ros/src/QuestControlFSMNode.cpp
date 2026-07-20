@@ -703,12 +703,13 @@ namespace ocs2
                 res.message = "MPC observation not ready";
                 return true;
             }
-            callSetArmModeSrv(1);
+            int bootstrapArmMode = (resetJointToDefault_) ? 1 : 0;
+            callSetArmModeSrv(bootstrapArmMode);
             callWheelMpcControlMode(3);
-            arm_ctrl_mode_ = 1;
+            arm_ctrl_mode_ = bootstrapArmMode;
             res.success = true;
-            res.message = "wheel arm mode initialized to 1";
-            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode 1");
+            res.message = "wheel arm mode initialized to " + std::to_string(bootstrapArmMode);
+            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode %d", bootstrapArmMode);
             return true;
         }
 
@@ -1068,6 +1069,10 @@ namespace ocs2
             {
                 nodeHandle_.getParam("/enable_vr_stop_robot", enable_vr_stop_robot_);
             }
+            if(nodeHandle_.hasParam("reset_joint_to_default"))
+            {
+                nodeHandle_.getParam("reset_joint_to_default", resetJointToDefault_);
+            }
 
             if (!rec_joystick_data_)
             {
@@ -1354,7 +1359,7 @@ namespace ocs2
             {
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)  // 锁定或解锁手臂
                 {
-                    auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 0) ? 0 : 2;
+                    auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 0) ? 0 : 1;
                     callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
                 }
@@ -1364,7 +1369,9 @@ namespace ocs2
                         arm_collision_control_ = false;
                         return;
                     }
-                    auto new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 1) ? 1 : 2;
+                    auto new_arm_ctrl_mode_wheel_ = 1;
+                    new_arm_ctrl_mode_wheel_ = (arm_ctrl_mode_ != 2) ? 2 : 1;
+                    
                     std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
 
                     // 如果头部控制模式为主动手跟踪模式（auto_track_active），手臂复位时头部也自动回正
@@ -1990,10 +1997,11 @@ namespace ocs2
         // 腰部控制相关变量
         bool torso_control_enabled_;
         bool control_torso_{false};  // 是否允许启动腰部控制
+        bool resetJointToDefault_{true}; // 进入增量控制时是否重置关节到默认位置
         bool enable_vr_stop_robot_{true};  // 是否允许 VR 手柄 X+Y 触发 stop_robot
         bool single_hand_torso_active_;  // 单手摇杆控躯干模式激活标志（来自 /single_hand_torso_active）
         ros::Subscriber single_hand_torso_active_sub_;
-        
+
         // 末端力控制相关变量
         bool hand_wrench_enabled_;  // 末端力施加状态
         double current_hand_wrench_item_mass_;

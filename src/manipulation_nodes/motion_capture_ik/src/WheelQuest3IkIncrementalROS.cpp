@@ -190,11 +190,15 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
 
 void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
   ros::Rate rate(jointStatePublishRateHz_);
+  ros::param::getCached("/reset_joint_to_default", resetJointToDefaultWheel_);
   while (!shouldStop() && ros::ok()) {
     if (armControlMode_ == 2) {
       publishJointStates();
     } else {
-      publishDefaultJointStates();
+      if(resetJointToDefaultWheel_)
+      {
+        publishDefaultJointStates();
+      }
     }
     rate.sleep();
   }
@@ -216,12 +220,17 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
   if ((armControlMode_ == 2 && lastArmControlMode_ == 1) || (armControlMode_ == 2 && lastArmControlMode_ == 0)) {
     // S^0 → S^3 顶层状态切换
     exitMode2Counter_ = 0;
+    if (!mode2Initialized_) {
+      justEnteredMode2_ = true;  // 只在第一次进入mode 2时标记
+      mode2Initialized_ = true;  // 标记mode 2已初始化
+      mode2EnterTime_ = ros::Time::now();  // 记录进入mode 2的时间戳
+    }
     auto resetMode2State = [&](bool resetIkSolution) {
       {
         std::lock_guard<std::mutex> jointLock(jointStateMutex_);
-        q_ = Eigen::VectorXd::Zero(14);
+        // q_ = Eigen::VectorXd::Zero(14);
         dq_ = Eigen::VectorXd::Zero(14);
-        latest_q_ = Eigen::VectorXd::Zero(14);
+        // latest_q_ = Eigen::VectorXd::Zero(14);
         latest_dq_ = Eigen::VectorXd::Zero(14);
         lowpass_dq_ = Eigen::VectorXd::Zero(14);
         lb_q_ = Eigen::VectorXd::Zero(4);
@@ -517,8 +526,6 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                                     Eigen::Vector3d rightHandPos,
                                     Eigen::Quaterniond rightHandQuat,
                                     const FrozenRefs& frozen) -> bool {
-    const bool leftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
-    const bool rightGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
     const Eigen::Vector3d chestPosForFk = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : input.chestPosRef;
     auto updateHandPoseInChest = [&](bool isActive,
                                      const Eigen::Vector3d& handFkPos,
@@ -572,7 +579,9 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       }
     };
 
-    updateHandPoseInChest(leftGripPressed,
+    // 仅在手部增量控制激活时做胸部 FK 跟踪；grip 按下但未进入增量时不走此路径，避免
+    // chestPosRef 与 chestPosForFk 混用导致 handTarget = handFK + offset 的正反馈上漂。
+    updateHandPoseInChest(input.leftRefActive,
                           leftLink6Position_,
                           leftLink6Quat_,
                           frozen.leftHandPos,
@@ -580,7 +589,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                           leftHandPosInChest_,
                           leftHandQuatInChest_,
                           hasLeftHandPoseInChest_);
-    updateHandPoseInChest(rightGripPressed,
+    updateHandPoseInChest(input.rightRefActive,
                           rightLink6Position_,
                           rightLink6Quat_,
                           frozen.rightHandPos,
@@ -588,13 +597,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                           rightHandPosInChest_,
                           rightHandQuatInChest_,
                           hasRightHandPoseInChest_);
-    updateElbowPosInChest(leftGripPressed,
+    updateElbowPosInChest(input.leftRefActive,
                           leftLink6Position_,
                           leftEndEffectorPosition_,
                           frozen.leftElbowPos,
                           leftElbowPosInChest_,
                           hasLeftElbowPosInChest_);
-    updateElbowPosInChest(rightGripPressed,
+    updateElbowPosInChest(input.rightRefActive,
                           rightLink6Position_,
                           rightEndEffectorPosition_,
                           frozen.rightElbowPos,
@@ -750,6 +759,16 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
   bool currentLeftGripPressed = joyStickHandlerPtr_->isLeftGrip();
   bool currentRightGripPressed = joyStickHandlerPtr_->isRightGrip();
+  const bool isLeftActive = joyStickHandlerPtr_->isLeftArmCtrlModeActive();
+  const bool isRightActive = joyStickHandlerPtr_->isRightArmCtrlModeActive();
+
+  // 移动检测仅用于 alpha 渐变与 grip 超时，不再 gate IK 增量参考点。
+  if (currentLeftGripPressed) {
+    incrementalController_->detectLeftArmMove(latestLeftHandPose_vr_.position);
+  }
+  if (currentRightGripPressed) {
+    incrementalController_->detectRightArmMove(latestRightHandPose_vr_.position);
+  }
 
   auto updateGripTimeout = [&](bool currentGripPressed,
                                bool lastGripPressed,
@@ -853,32 +872,20 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     }
   }
 
-  bool leftCanProcess = !leftMaintainProcess && currentLeftGripPressed;
+  const bool leftGripReady = !leftMaintainProcess && currentLeftGripPressed && isLeftActive;
+  const bool rightGripReady = !rightMaintainProcess && currentRightGripPressed && isRightActive;
 
-  if (leftCanProcess) {
-    leftCanProcess = detectLeftArmMove() && currentLeftGripPressed;
-  }
-
-  bool rightCanProcess = !rightMaintainProcess && currentRightGripPressed;
-
-  if (rightCanProcess) {
-    rightCanProcess = detectRightArmMove() && currentRightGripPressed;
-  }
-
-  bool isLeftActive = joyStickHandlerPtr_->isLeftArmCtrlModeActive();
-  bool isRightActive = joyStickHandlerPtr_->isRightArmCtrlModeActive();
-
-  if (leftCanProcess && isLeftActive) {
+  if (leftGripReady) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseLeftArm(
-        latestLeftHandPose_vr_, leftCanProcess && isLeftActive, leftEndEffectorQuat_);
+        latestLeftHandPose_vr_, true, leftEndEffectorQuat_);
   }
-  if (rightCanProcess && isRightActive) {
+  if (rightGripReady) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseRightArm(
-        latestRightHandPose_vr_, rightCanProcess && isRightActive, rightEndEffectorQuat_);
+        latestRightHandPose_vr_, true, rightEndEffectorQuat_);
   }
 
-  // 任意手更新增量时，同步更新 chest 位置增量，并写入约束列表
-  if ((leftCanProcess && isLeftActive) || (rightCanProcess && isRightActive)) {
+  // 任意手 grip 就绪时，同步更新 chest 位置增量，并写入约束列表
+  if (leftGripReady || rightGripReady) {
     if (chestIncrementalUpdateEnabled_) {
       Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
       {
@@ -898,8 +905,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
   // Whole-body reference update (chest + L/R elbow/hand) and then solve IK once.
   FrozenRefs frozen;
-  WholeBodyRefInput input =
-      buildWholeBodyInput(leftCanProcess && isLeftActive, rightCanProcess && isRightActive, frozen);
+  WholeBodyRefInput input = buildWholeBodyInput(leftGripReady, rightGripReady, frozen);
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
       latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
@@ -908,6 +914,11 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   applyWholeBodyAndSolve(
       input, scaledLeftHandPos, incrementalLeftQuat, scaledRightHandPos, incrementalRightQuat, frozen);
   recordTimestamp("applyWholeBodyAndSolveFinish", loopSyncCount_);
+  
+  // 进入mode 2约2秒后重置标志位
+  if (justEnteredMode2_ && (ros::Time::now() - mode2EnterTime_).toSec() >= 2.0) {
+    justEnteredMode2_ = false;
+  }
 }
 
 void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
@@ -920,6 +931,9 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
     updateHandConstraintUnlocked(
         latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
     updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, leftLink4Position_);
+
+    hasLeftHandPoseInChest_ = false;
+    hasLeftElbowPosInChest_ = false;
 
     incrementalController_->updateLeftArmPoseAnchor(latestLeftHandPose_vr_,
                                                     latestPoseConstraintList_,
@@ -934,6 +948,9 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
         latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
     updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, rightLink4Position_);
 
+    hasRightHandPoseInChest_ = false;
+    hasRightElbowPosInChest_ = false;
+
     incrementalController_->updateRightArmPoseAnchor(latestRightHandPose_vr_,
                                                      latestPoseConstraintList_,
                                                      rightEndEffectorPosition_,
@@ -945,6 +962,8 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
 void WheelQuest3IkIncrementalROS::fsmExit() {
   if ((armControlMode_ == 1 && lastArmControlMode_ == 2) || (armControlMode_ == 0 && lastArmControlMode_ == 2)) {
     enterMode2ResetCounter_ = 0;
+    justEnteredMode2_ = false;  // 退出mode 2时重置标志位
+    mode2Initialized_ = false;  // 退出mode 2时重置初始化标志位
 
     if (exitMode2Counter_ < EXIT_MODE_2_EXECUTION_COUNT) {
       forceDeactivateAllArmCtrlMode();
