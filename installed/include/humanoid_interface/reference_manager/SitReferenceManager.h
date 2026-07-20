@@ -42,37 +42,27 @@ class SitReferenceManager {
 
   TargetTrajectories generateTargetForSitDown(scalar_t initTime, scalar_t finalTime,
                                               const vector_t& initState, const CentroidalModelInfo& info);
-  TargetTrajectories generateTargetForStandUpFromSit(scalar_t initTime, scalar_t finalTime,
-                                                     const vector_t& initState, const CentroidalModelInfo& info);
 
   bool checkSitDownComplete(scalar_t initTime, const vector_t& initState);
-  bool checkStandUpFromSitComplete(scalar_t initTime, const vector_t& initState);
-  void finishStandUpTransition(scalar_t reportHeight, double reportTarget);
-  void buildP1StandUpLerpEnd(const vector_t& initState, int stateDim);
+  bool isSeatLegActionEnabled() const;
+  void onSeatReturnPreUpdate(const std_msgs::Int8::ConstPtr& msg);
+  void resetSeatLifecycleToIdle();
 
   ros::NodeHandle& nh_;
   ros::ServiceServer sitDownService_;
   ros::Publisher sitDownCompletePub_;
-  ros::Publisher sitDownSecondPhaseWbcPub_;
-  ros::Publisher sitDownThirdPhaseLegPub_;
   ros::ServiceServer standUpFromSitService_;
-  ros::Publisher standUpFromSitCompletePub_;
-  ros::Publisher sitUnfreezePub_;
   ros::Publisher stopRobotPub_;
+  ros::Publisher seatReturnPreUpdatePub_;
+  ros::Subscriber sub_seat_return_preupdate_done_;
 
   SeatState seatState_ = SeatState::IDLE;
-  /** 1: P2→P1 (sitDownStart); 2: P3→P2 (sitDownTarget) */
-  int standUpLerpTarget_{1};
 
   vector_t defaultSitDownTargetState_;
   double sitDownDurationSeconds_{2.0};
   scalar_t sitDownStartTime_ = 0.0;
   vector_t sitDownStartState_;
   vector_t sitDownTargetState_;
-
-  scalar_t standUpFromSitStartTime_ = 0.0;
-  vector_t standUpFromSitLerpStart_;
-  vector_t standUpFromSitLerpEnd_;
 
   RobotVersion rbVersion_;
   bool isFirstUpdate_ = true;

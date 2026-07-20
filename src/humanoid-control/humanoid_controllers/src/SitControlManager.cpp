@@ -1,8 +1,7 @@
 #include "humanoid_controllers/SitControlManager.h"
 #include <ocs2_core/reference/TargetTrajectories.h>
 #include <ocs2_ros_interfaces/mrt/MRT_ROS_Interface.h>
-#include <kuavo_common/common/json.hpp>
-#include <kuavo_common/common/seat_config.h>
+#include <kuavo_common/common/seat_config.h>  // SeatConfig = nlohmann::json
 #include <kuavo_msgs/jointCmd.h>
 #include <ros/ros.h>
 #include <sstream>
@@ -50,18 +49,33 @@ void fillHwPrepJointPosDegFromSitMpc(std::vector<double>& joint_pos_deg, const E
 }
 
 void publishHardwarePrepPlan(const SeatBootConfig& boot, const std::vector<double>& prep_sit_deg,
-                             const std::vector<double>* prep_offset_deg) {
+                             const std::vector<double>* prep_offset_deg,
+                             const std::vector<double>* prep_reverse_leg_first_deg = nullptr) {
   ros::param::set("/hardware_prep_joint_pos_deg", prep_sit_deg);
   if (prep_offset_deg != nullptr) {
     ros::param::set("/hardware_prep_two_phase", true);
     ros::param::set("/hardware_prep_joint_pos_offset_deg", *prep_offset_deg);
+    if (prep_reverse_leg_first_deg != nullptr) {
+      ros::param::set("/hardware_prep_reverse_leg_first", true);
+      ros::param::set("/hardware_prep_joint_pos_leg_first_deg", *prep_reverse_leg_first_deg);
+    } else {
+      ros::param::del("/hardware_prep_reverse_leg_first");
+      ros::param::del("/hardware_prep_joint_pos_leg_first_deg");
+    }
     const std::vector<double> moves = {boot.prep_speed_deg, boot.prep_settle_speed_deg};
     ros::param::set("/hardware_prep_moves", moves);
-    ROS_INFO("[SitControlManager] hardware prep: two-phase sit+offset (%.1f deg/s) -> sit_joint_pos (%.1f deg/s).",
-             boot.prep_speed_deg, boot.prep_settle_speed_deg);
+    if (prep_reverse_leg_first_deg != nullptr) {
+      ROS_INFO("[SitControlManager] hardware prep: offset (%.1f deg/s) -> reverse legs (%.1f deg/s) -> reverse arms (%.1f deg/s).",
+               boot.prep_speed_deg, boot.prep_settle_speed_deg, boot.prep_settle_speed_deg);
+    } else {
+      ROS_INFO("[SitControlManager] hardware prep: two-phase sit+offset (%.1f deg/s) -> sit_joint_pos (%.1f deg/s).",
+               boot.prep_speed_deg, boot.prep_settle_speed_deg);
+    }
   } else {
     ros::param::del("/hardware_prep_two_phase");
     ros::param::del("/hardware_prep_joint_pos_offset_deg");
+    ros::param::del("/hardware_prep_reverse_leg_first");
+    ros::param::del("/hardware_prep_joint_pos_leg_first_deg");
     const std::vector<double> moves = {0.0, boot.prep_speed_deg};
     ros::param::set("/hardware_prep_moves", moves);
   }
@@ -78,29 +92,12 @@ void publishHardwarePrepPlan(const SeatBootConfig& boot, const std::vector<doubl
 void clearHardwarePrepParams() {
   ros::param::del("/hardware_prep_joint_pos_deg");
   ros::param::del("/hardware_prep_joint_pos_offset_deg");
+  ros::param::del("/hardware_prep_joint_pos_leg_first_deg");
   ros::param::del("/hardware_prep_two_phase");
+  ros::param::del("/hardware_prep_reverse_leg_first");
   ros::param::del("/hardware_prep_moves");
   ros::param::del("/hardware_prep_ec_joint_kp");
   ros::param::del("/hardware_prep_ec_joint_kd");
-}
-
-bool loadStandUpBlendFromJson(const nlohmann::json& node, SitControlManager::StandUpBlendOptions& opt,
-                              double& motion_vel, const SitControlManager::StandUpBlendOptions& defaults,
-                              double default_motion_vel) {
-  opt = defaults;
-  motion_vel = default_motion_vel;
-  if (!node.is_object())
-    return false;
-  if (node.contains("motion_vel"))
-    motion_vel = node["motion_vel"].get<double>();
-  if (node.contains("pitch_blend_start"))
-    opt.pitch_blend_start = node["pitch_blend_start"].get<double>();
-  opt.pitch_blend_start = std::max(0.0, std::min(1.0, opt.pitch_blend_start));
-  if (motion_vel <= 0.0) {
-    ROS_ERROR("[SitControlManager] stand_up motion_vel must be positive.");
-    return false;
-  }
-  return true;
 }
 
 }  // namespace
@@ -156,29 +153,29 @@ bool SitControlManager::configureLaunchBoot(bool use_sit_init, const RobotVersio
   }
 
   SeatBootConfig boot;
-  const nlohmann::json* boot_obj = seat.getObject("seat_boot");
-  if (!boot_obj || !boot_obj->contains("prep_speed_deg")) {
-    ROS_ERROR("[SitControlManager] seat_boot requires prep_speed_deg.");
+  const nlohmann::json* prep_obj =
+      seat.contains("hardware_sit_pose_prep") && seat["hardware_sit_pose_prep"].is_object()
+          ? &seat["hardware_sit_pose_prep"]
+          : nullptr;
+  if (!prep_obj || !prep_obj->contains("move_speed_deg_per_s")) {
+    ROS_ERROR("[SitControlManager] hardware_sit_pose_prep requires move_speed_deg_per_s.");
     return false;
   }
-  boot.prep_speed_deg = (*boot_obj)["prep_speed_deg"].get<double>();
+  boot.prep_speed_deg = (*prep_obj)["move_speed_deg_per_s"].get<double>();
   if (boot.prep_speed_deg <= 0.0) {
-    ROS_ERROR("[SitControlManager] seat_boot prep_speed_deg must be positive.");
+    ROS_ERROR("[SitControlManager] hardware_sit_pose_prep move_speed_deg_per_s must be positive.");
     return false;
   }
   boot.prep_settle_speed_deg = boot.prep_speed_deg;
-  if (boot_obj->contains("prep_settle_speed_deg"))
-    boot.prep_settle_speed_deg = (*boot_obj)["prep_settle_speed_deg"].get<double>();
+  if (prep_obj->contains("settle_speed_deg_per_s"))
+    boot.prep_settle_speed_deg = (*prep_obj)["settle_speed_deg_per_s"].get<double>();
   if (boot.prep_settle_speed_deg <= 0.0) {
-    ROS_ERROR("[SitControlManager] seat_boot prep_settle_speed_deg must be positive.");
+    ROS_ERROR("[SitControlManager] hardware_sit_pose_prep settle_speed_deg_per_s must be positive.");
     return false;
   }
-  // leg joint kp/kd (optional)
-  const auto kp_vec = seat.getDoubleVector("seat_boot.leg_joint_kp");  // not applicable for nested — use boot_obj directly
-  (void)kp_vec;
-  if (boot_obj->contains("leg_joint_kp") && boot_obj->contains("leg_joint_kd")) {
-    const auto& kp = (*boot_obj)["leg_joint_kp"];
-    const auto& kd = (*boot_obj)["leg_joint_kd"];
+  if (prep_obj->contains("leg_joint_kp") && prep_obj->contains("leg_joint_kd")) {
+    const auto& kp = (*prep_obj)["leg_joint_kp"];
+    const auto& kd = (*prep_obj)["leg_joint_kd"];
     if (kp.is_array() && kd.is_array() && kp.size() == kLegDof && kd.size() == kLegDof) {
       for (size_t i = 0; i < kLegDof; ++i) {
         boot.leg_joint_kp.push_back(kp[i].get<double>());
@@ -190,11 +187,18 @@ bool SitControlManager::configureLaunchBoot(bool use_sit_init, const RobotVersio
     boot.valid = true;
   }
 
-  const auto sit_arm_pose_deg = seat.getDoubleVector("sit_arm_pose");
   double leg_offset_rad[kLegDof]{};
   double arm_offset_rad[kArmDof]{};
-  seat.getDoubleArray("seat_offset_leg_joint_offset_rad", leg_offset_rad, kLegDof);
-  seat.getDoubleArray("seat_offset_arm_joint_offset_rad", arm_offset_rad, kArmDof);
+  if (seat.contains("seat_offset_leg_joint_offset_rad") && seat["seat_offset_leg_joint_offset_rad"].is_array()) {
+    const auto& arr = seat["seat_offset_leg_joint_offset_rad"];
+    for (size_t i = 0; i < kLegDof && i < arr.size(); ++i)
+      leg_offset_rad[i] = arr[i].get<double>();
+  }
+  if (seat.contains("seat_offset_arm_joint_offset_rad") && seat["seat_offset_arm_joint_offset_rad"].is_array()) {
+    const auto& arr = seat["seat_offset_arm_joint_offset_rad"];
+    for (size_t i = 0; i < kArmDof && i < arr.size(); ++i)
+      arm_offset_rad[i] = arr[i].get<double>();
+  }
 
   std::vector<double> prep_sit_deg(static_cast<size_t>(hw_joint_count), 0.0);
   fillHwPrepJointPosDegFromSitMpc(prep_sit_deg, sit_mpc_state, hw_waist_joints, hw_leg_joints, hw_arm_joints);
@@ -205,12 +209,29 @@ bool SitControlManager::configureLaunchBoot(bool use_sit_init, const RobotVersio
   const size_t arm_hw_base = static_cast<size_t>(hw_leg_joints + hw_waist_joints);
   for (int i = 0; i < hw_arm_joints && i < static_cast<int>(kArmDof); ++i)
     prep_offset_deg[arm_hw_base + static_cast<size_t>(i)] += arm_offset_rad[i] * 180.0 / M_PI;
-  // Phase 2: sit_joint_pos only（P3 起点，即 P3 反向的终点）
-  publishHardwarePrepPlan(boot, prep_sit_deg, &prep_offset_deg);
+
+  const bool reverse_leg_before_arm =
+      prep_obj->contains("reverse_leg_before_arm") && (*prep_obj)["reverse_leg_before_arm"].get<bool>();
+  std::vector<double> prep_leg_first_deg;
+  const std::vector<double>* prep_leg_first_ptr = nullptr;
+  if (reverse_leg_before_arm) {
+    // 反向 offset 中间态：腿/腰回到 sit，手臂保持 offset
+    prep_leg_first_deg = prep_offset_deg;
+    for (int i = 0; i < hw_leg_joints && i < static_cast<int>(kLegDof); ++i)
+      prep_leg_first_deg[static_cast<size_t>(i)] = prep_sit_deg[static_cast<size_t>(i)];
+    for (int i = 0; i < hw_waist_joints; ++i)
+      prep_leg_first_deg[static_cast<size_t>(hw_leg_joints + i)] =
+          prep_sit_deg[static_cast<size_t>(hw_leg_joints + i)];
+    prep_leg_first_ptr = &prep_leg_first_deg;
+  }
+
+  // Phase 2/3: sit_joint_pos（P3 起点；reverse_leg_first 时先腿后手）
+  publishHardwarePrepPlan(boot, prep_sit_deg, &prep_offset_deg, prep_leg_first_ptr);
   ROS_INFO(
-      "[SitControlManager] Boot: sit-init enabled (%s). phase1=sit+offset (P3 end), phase2=sit_joint_pos (P3 reverse); "
+      "[SitControlManager] use_sit_init hardware prep: phase1=sit+offset, reverse=%s; "
       "leg[0..%d) waist[%d] arm[%d..%d) (deg).",
-      robot_version.to_string().c_str(), hw_leg_joints, hw_leg_joints, hw_leg_joints + hw_waist_joints,
+      reverse_leg_before_arm ? "legs then arms" : "all joints",
+      hw_leg_joints, hw_leg_joints, hw_leg_joints + hw_waist_joints,
       hw_leg_joints + hw_waist_joints + hw_arm_joints);
   return true;
 }
@@ -237,112 +258,122 @@ Eigen::VectorXd SitControlManager::makeBootStartState(const Eigen::VectorXd& sit
 
 bool SitControlManager::loadConfig() {
   config_ok_ = false;
-  seat_boot_ok_ = false;
 
-  if (!seat_config_ || !seat_config_->valid()) {
+  if (!seat_config_) {
     ROS_ERROR("[SitControlManager] SeatConfig not available (non-Kuavo5?); cannot load seat config.");
     return false;
   }
   const auto& seat = *seat_config_;
 
   // ── seat_offset ──
-  if (seat.getDoubleArray("seat_offset_leg_joint_offset_rad", leg_offset_rad_.data(), kLegDof) != kLegDof) {
+  if (!seat.contains("seat_offset_leg_joint_offset_rad") || !seat["seat_offset_leg_joint_offset_rad"].is_array() || seat["seat_offset_leg_joint_offset_rad"].size() != kLegDof) {
     ROS_ERROR("[SitControlManager] missing or invalid seat_offset_leg_joint_offset_rad (size %zu).", kLegDof);
     return false;
   }
-  if (seat.getDoubleArray("seat_offset_arm_joint_offset_rad", arm_offset_rad_.data(), kArmDof) != kArmDof) {
+  for (size_t i = 0; i < kLegDof; ++i)
+    leg_offset_rad_[i] = seat["seat_offset_leg_joint_offset_rad"][i].get<double>();
+  if (!seat.contains("seat_offset_arm_joint_offset_rad") || !seat["seat_offset_arm_joint_offset_rad"].is_array() || seat["seat_offset_arm_joint_offset_rad"].size() != kArmDof) {
     ROS_ERROR("[SitControlManager] missing or invalid seat_offset_arm_joint_offset_rad (size %zu).", kArmDof);
     return false;
   }
-  offset_duration_sec_ = seat.getDouble("seat_offset_duration_seconds", 0.0);
+  for (size_t i = 0; i < kArmDof; ++i)
+    arm_offset_rad_[i] = seat["seat_offset_arm_joint_offset_rad"][i].get<double>();
+  offset_duration_sec_ = seat.value("seat_offset_duration_seconds", 0.0);
   if (offset_duration_sec_ <= 0.0) {
     ROS_ERROR("[SitControlManager] seat_offset_duration_seconds must be positive.");
     return false;
   }
-  offset_smoothstep_ = (seat.getString("seat_offset_alpha_profile", "linear") != "linear");
+  offset_smoothstep_ = (seat.value("seat_offset_alpha_profile", "linear") != "linear");
 
   // ── seat_leg_action (P4) ──
   leg_action_config_ok_ = false;
-  leg_action_smoothstep_ = (seat.getString("seat_leg_action_alpha_profile", "linear") != "linear");
+  leg_action_smoothstep_ = (seat.value("seat_leg_action_alpha_profile", "linear") != "linear");
   {
     bool steps_ok = true;
     for (size_t s = 0; s < kLegActionSteps; ++s) {
       const std::string dur_key = "seat_leg_action_step" + std::to_string(s + 1) + "_duration_seconds";
       const std::string joint_key = "seat_leg_action_step" + std::to_string(s + 1) + "_leg_joint_rad";
-      leg_action_durations_[s] = seat.getDouble(dur_key, -1.0);
+      leg_action_durations_[s] = seat.value(dur_key, -1.0);
       if (leg_action_durations_[s] <= 0.0 ||
-          seat.getDoubleArray(joint_key.c_str(), leg_action_step_rad_[s].data(), kLegDof) != kLegDof) {
+          !seat.contains(joint_key) || !seat[joint_key].is_array() || seat[joint_key].size() != kLegDof) {
         steps_ok = false;
         break;
       }
     }
     if (steps_ok) {
+      for (size_t s = 0; s < kLegActionSteps; ++s) {
+        const std::string joint_key = "seat_leg_action_step" + std::to_string(s + 1) + "_leg_joint_rad";
+        for (size_t di = 0; di < kLegDof; ++di)
+          leg_action_step_rad_[s][di] = seat[joint_key][di].get<double>();
+      }
       leg_action_config_ok_ = true;
+      // seat_leg_action_enabled=false 时跳过 P4 收脚（与旧 isSeatLegActionEnabled 判断一致）
+      const bool leg_action_enabled = seat.value("seat_leg_action_enabled", true);
+      if (!leg_action_enabled) {
+        leg_action_config_ok_ = false;
+        ROS_INFO("[SitControlManager] seat_leg_action_enabled=false; P4 leg sequence skipped (hold at P3 CSP).");
+      }
     } else {
       ROS_WARN("[SitControlManager] seat_leg_action config missing; P4 leg sequence disabled.");
     }
   }
 
-  // ── stand_up_boot_interpolation ──
-  const StandUpBlendOptions sit_blend_defaults{0.95};
-  const StandUpBlendOptions squat_blend_defaults{0.75};
-  const nlohmann::json* stand_up = seat.getObject("stand_up_boot_interpolation");
-  if (stand_up) {
-    if (stand_up->contains("sit"))
-      loadStandUpBlendFromJson((*stand_up)["sit"], sit_boot_stand_up_blend_, sit_boot_stand_up_motion_vel_,
-                               sit_blend_defaults, 0.08);
-    if (stand_up->contains("squat"))
-      loadStandUpBlendFromJson((*stand_up)["squat"], squat_boot_stand_up_blend_, squat_boot_stand_up_motion_vel_,
-                               squat_blend_defaults, 0.11);
-  } else {
-    sit_boot_stand_up_blend_ = sit_blend_defaults;
-    squat_boot_stand_up_blend_ = squat_blend_defaults;
+  // ── stand_up_from_seat（sit→stand 速度 + preUpdate timing）──
+  const nlohmann::json* stand_up_cfg =
+      seat.contains("stand_up_from_seat") && seat["stand_up_from_seat"].is_object() ? &seat["stand_up_from_seat"]
+                                                                                    : nullptr;
+  if (stand_up_cfg) {
+    sit_to_stand_com_velocity_mps_ =
+        stand_up_cfg->value("sit_to_stand_com_velocity_mps", sit_to_stand_com_velocity_mps_);
+    mpc_init_delay_after_stand_up_sec_ =
+        stand_up_cfg->value("mpc_init_delay_after_stand_up_seconds", mpc_init_delay_after_stand_up_sec_);
+    contact_protect_grace_after_stand_up_sec_ = stand_up_cfg->value(
+        "contact_protect_grace_after_stand_up_seconds", contact_protect_grace_after_stand_up_sec_);
+    hold_at_sit_pose_before_stand_up_sec_ = stand_up_cfg->value("hold_at_sit_pose_before_stand_up_seconds",
+                                                                hold_at_sit_pose_before_stand_up_sec_);
   }
+  if (mpc_init_delay_after_stand_up_sec_ < 0.0) mpc_init_delay_after_stand_up_sec_ = 0.0;
+  if (contact_protect_grace_after_stand_up_sec_ < 0.0) contact_protect_grace_after_stand_up_sec_ = 0.0;
+  if (hold_at_sit_pose_before_stand_up_sec_ < 0.0) hold_at_sit_pose_before_stand_up_sec_ = 0.0;
 
-  // ── seat_boot ──
-  const nlohmann::json* boot_obj = seat.getObject("seat_boot");
-  if (boot_obj) {
-    if (boot_obj->contains("prep_speed_deg")) {
-      boot_prep_speed_deg_ = (*boot_obj)["prep_speed_deg"].get<double>();
-      seat_boot_ok_ = boot_prep_speed_deg_ > 0.0;
-    }
-    if (boot_obj->contains("stand_up") && (*boot_obj)["stand_up"].is_object()) {
-      loadStandUpBlendFromJson((*boot_obj)["stand_up"], sit_boot_stand_up_blend_,
-                               sit_boot_stand_up_motion_vel_, sit_blend_defaults, 0.08);
-    }
-    // 坐姿启动腿关节 EC 增益（实物用高刚度，避免软腿）
-    if (boot_obj->contains("leg_joint_kp") && boot_obj->contains("leg_joint_kd") &&
-        (*boot_obj)["leg_joint_kp"].is_array() && (*boot_obj)["leg_joint_kd"].is_array() &&
-        (*boot_obj)["leg_joint_kp"].size() == kLegDof && (*boot_obj)["leg_joint_kd"].size() == kLegDof) {
+  // ── hardware_sit_pose_prep（use_sit_init 腿 EC 增益，P3/P4 CSP 锁定复用）──
+  const nlohmann::json* prep_obj =
+      seat.contains("hardware_sit_pose_prep") && seat["hardware_sit_pose_prep"].is_object()
+          ? &seat["hardware_sit_pose_prep"]
+          : nullptr;
+  if (prep_obj) {
+    if (prep_obj->contains("move_speed_deg_per_s"))
+      boot_prep_speed_deg_ = (*prep_obj)["move_speed_deg_per_s"].get<double>();
+    if (prep_obj->contains("leg_joint_kp") && prep_obj->contains("leg_joint_kd") &&
+        (*prep_obj)["leg_joint_kp"].is_array() && (*prep_obj)["leg_joint_kd"].is_array() &&
+        (*prep_obj)["leg_joint_kp"].size() == kLegDof && (*prep_obj)["leg_joint_kd"].size() == kLegDof) {
       sit_boot_leg_kp_.resize(kLegDof);
       sit_boot_leg_kd_.resize(kLegDof);
       for (size_t i = 0; i < kLegDof; ++i) {
-        sit_boot_leg_kp_[i] = (*boot_obj)["leg_joint_kp"][i].get<double>();
-        sit_boot_leg_kd_[i] = (*boot_obj)["leg_joint_kd"][i].get<double>();
+        sit_boot_leg_kp_[i] = (*prep_obj)["leg_joint_kp"][i].get<double>();
+        sit_boot_leg_kd_[i] = (*prep_obj)["leg_joint_kd"][i].get<double>();
       }
       has_sit_boot_leg_gains_ = true;
-      ROS_INFO("[SitControlManager] seat_boot leg EC kp/kd loaded for prep and P3/P4 CSP hold.");
+      ROS_INFO("[SitControlManager] hardware_sit_pose_prep leg EC kp/kd loaded for CSP hold.");
     }
   }
 
   // ── 踝关节堵转阈值 ──
-  stall_torque_threshold_ = seat.getDouble("seat_stall_ankle_torque_nm", 20.0);
-  stall_consecutive_limit_ = static_cast<int>(seat.getDouble("seat_stall_consecutive_frames", 10));
+  stall_torque_threshold_ = seat.value("seat_stall_ankle_torque_nm", 20.0);
+  stall_consecutive_limit_ = static_cast<int>(seat.value("seat_stall_consecutive_frames", 10));
   if (stall_consecutive_limit_ < 1) stall_consecutive_limit_ = 1;
 
   config_ok_ = true;
   ROS_INFO("[SitControlManager] seat_offset loaded (duration=%.2fs, profile=%s).", offset_duration_sec_,
            offset_smoothstep_ ? "smoothstep" : "linear");
-  if (seat_boot_ok_)
-    ROS_INFO("[SitControlManager] seat_boot loaded (prep_speed_deg=%.1f).", boot_prep_speed_deg_);
   if (leg_action_config_ok_)
     ROS_INFO("[SitControlManager] seat_leg_action loaded (%zu steps: %.2fs/%.2fs/%.2fs, profile=%s).",
              kLegActionSteps, leg_action_durations_[0], leg_action_durations_[1], leg_action_durations_[2],
              leg_action_smoothstep_ ? "smoothstep" : "linear");
-  ROS_INFO("[SitControlManager] stand_up sit boot: vel=%.3f pitch_start=%.2f",
-           sit_boot_stand_up_motion_vel_, sit_boot_stand_up_blend_.pitch_blend_start);
-  ROS_INFO("[SitControlManager] stand_up squat boot: vel=%.3f pitch_start=%.2f",
-           squat_boot_stand_up_motion_vel_, squat_boot_stand_up_blend_.pitch_blend_start);
+  ROS_INFO("[SitControlManager] stand_up_from_seat: sit_to_stand_vel=%.3f m/s, mpc_init_delay=%.2fs, "
+           "contact_grace=%.2fs, hold_at_sit=%.2fs.",
+           sit_to_stand_com_velocity_mps_, mpc_init_delay_after_stand_up_sec_,
+           contact_protect_grace_after_stand_up_sec_, hold_at_sit_pose_before_stand_up_sec_);
   return true;
 }
 
@@ -354,13 +385,7 @@ void SitControlManager::setupRos(ros::NodeHandle& nh) {
   publishPhaseParam();
 
   sub_sit_complete_ = nh.subscribe("/bot_sit_down_complete", 1, &SitControlManager::onSitDownComplete, this);
-  sub_second_sit_down_ =
-      nh.subscribe("/bot_sit_down_second_phase_wbc", 1, &SitControlManager::onSecondSitDown, this);
-  sub_third_sit_down_ =
-      nh.subscribe("/bot_sit_down_third_phase_leg", 1, &SitControlManager::onThirdSitDown, this);
   sub_unfreeze_ = nh.subscribe("/bot_sit_unfreeze", 1, &SitControlManager::onSitUnfreeze, this);
-  srv_trigger_offset_ =
-      nh.advertiseService("/trigger_seat_offset", &SitControlManager::onTriggerOffsetService, this);
 }
 
 bool SitControlManager::isSeatOffsetActive() const {
@@ -387,43 +412,124 @@ SitControlManager::Phase SitControlManager::getPhase() const {
 void SitControlManager::publishPhaseParam() const {
   ros::param::set("/seat_control_phase", static_cast<int>(getPhase()));
   ros::param::set("/seat_p3_csp_ready", state_ == State::OFFSET_DONE || isSeatLegActionActive());
+  ros::param::set("/seat_sit_sequence_complete", sit_sequence_complete_);
+}
+
+void SitControlManager::markSitSequenceComplete() {
+  if (sit_sequence_complete_)
+    return;
+  sit_sequence_complete_ = true;
+  sit_auto_advance_active_ = false;
+  publishPhaseParam();
+  ROS_INFO("[SitControlManager] Full sit sequence complete (final CSP hold). Next sit_down may power off.");
+}
+
+void SitControlManager::releaseSeatResources() {
+  resetOffset();
+  resetLegAction();
+  resetAnkleStallDetector();
+  frozen_hold_counter_ = 0;
+  frozen_mpc_state_.resize(0);
+  frozen_mpc_input_.resize(0);
+  frozen_mpc_mode_ = 0;
+  p3_end_targets_ = {};
+  leg_action_leg_start_.fill(0.0);
+  sit_auto_advance_active_ = false;
+  sit_sequence_complete_ = false;
+  state_ = State::IDLE;
+  publishPhaseParam();
+}
+
+bool SitControlManager::tickAutoAdvance() {
+  if (!sit_auto_advance_active_ || sit_sequence_complete_)
+    return false;
+
+  if (state_ == State::FROZEN) {
+    std::string err;
+    if (!config_ok_) {
+      ROS_ERROR("[SitControlManager] auto-advance P3 skipped: seat_offset config not loaded.");
+      sit_auto_advance_active_ = false;
+      return false;
+    }
+    if (!startOffset(err)) {
+      ROS_WARN("[SitControlManager] auto-advance P3 failed: %s", err.c_str());
+      return false;
+    }
+    ROS_INFO("[SitControlManager] auto-advance: P2 -> P3 seat_offset.");
+    return true;
+  }
+
+  if (state_ == State::OFFSET_DONE && !isSeatLegActionActive()) {
+    if (!leg_action_config_ok_) {
+      markSitSequenceComplete();
+      return true;
+    }
+    std::string err;
+    if (!startLegAction(err)) {
+      ROS_WARN("[SitControlManager] auto-advance P4 failed: %s", err.c_str());
+      return false;
+    }
+    ROS_INFO("[SitControlManager] auto-advance: P3 CSP -> P4 leg action.");
+    return true;
+  }
+  return false;
+}
+
+bool SitControlManager::captureStandUpFromSeatStartSnapshot(StandUpFromSeatStartSnapshot& out,
+                                                            std::string& err) const {
+  out = {};
+  if (isSeatOffsetRunning() || isSeatLegActionRunning()) {
+    err = "seat motion still running; wait for final CSP hold";
+    return false;
+  }
+  if (!sit_sequence_complete_) {
+    err = "sit sequence not at final hold; wait for P3/P4 auto sequence to finish";
+    return false;
+  }
+  if (state_ != State::OFFSET_DONE && state_ != State::LEG_ACTION_DONE) {
+    err = "must be at final CSP hold (P3 or P4 complete)";
+    return false;
+  }
+
+  if (state_ == State::LEG_ACTION_DONE)
+    out.csp_hold_joint_targets = buildLegActionTargets(1.0);
+  else
+    out.csp_hold_joint_targets = buildTargets(1.0);
+  if (!out.csp_hold_joint_targets.valid) {
+    err = "final CSP hold joint targets unavailable";
+    return false;
+  }
+
+  out.reverse_seat_offset_duration_sec = offset_duration_sec_;
+  out.use_smoothstep = offset_smoothstep_;
+  out.valid = true;
+  err.clear();
+  return true;
+}
+
+bool SitControlManager::releaseSeatHoldForStandUp(std::string& err) {
+  if (isSeatOffsetRunning() || isSeatLegActionRunning()) {
+    err = "seat motion still running; wait for final CSP hold";
+    return false;
+  }
+  if (!sit_sequence_complete_) {
+    err = "sit sequence not at final hold; wait for P3/P4 auto sequence to finish";
+    return false;
+  }
+  if (state_ != State::OFFSET_DONE && state_ != State::LEG_ACTION_DONE) {
+    err = "must be at final CSP hold (P3 or P4 complete)";
+    return false;
+  }
+
+  releaseSeatResources();
+  ROS_INFO("[SitControlManager] Released final seat hold for preUpdate re-entry (MPC remains paused until preUpdate completes).");
+  err.clear();
+  return true;
 }
 
 double SitControlManager::smoothstep01(double t) {
   t = std::max(0.0, std::min(1.0, t));
   return t * t * (3.0 - 2.0 * t);
-}
-
-SitControlManager::StandUpBlendOptions SitControlManager::squatBootStandUpBlendOptions() const {
-  return squat_boot_stand_up_blend_;
-}
-
-SitControlManager::StandUpBlendOptions SitControlManager::sitBootStandUpBlendOptions() const {
-  return sit_boot_stand_up_blend_;
-}
-
-Eigen::VectorXd SitControlManager::blendStandUpCentroidalState(const Eigen::VectorXd& start, const Eigen::VectorXd& end,
-                                                               double blend) {
-  return blendStandUpCentroidalState(start, end, blend, StandUpBlendOptions{});
-}
-
-Eigen::VectorXd SitControlManager::blendStandUpCentroidalState(const Eigen::VectorXd& start, const Eigen::VectorXd& end,
-                                                               double blend, const StandUpBlendOptions& opt) {
-  blend = std::max(0.0, std::min(1.0, blend));
-  Eigen::VectorXd state = (1.0 - blend) * start + blend * end;
-  if (state.size() <= 11)
-    return state;
-  if (blend < opt.pitch_blend_start) {
-    state[10] = start[10];
-    state[11] = start[11];
-  } else {
-    const double denom = 1.0 - opt.pitch_blend_start;
-    const double t = denom > 1e-6 ? (blend - opt.pitch_blend_start) / denom : 1.0;
-    const double pa = smoothstep01(t);
-    state[10] = (1.0 - pa) * start[10] + pa * end[10];
-    state[11] = (1.0 - pa) * start[11] + pa * end[11];
-  }
-  return state;
 }
 
 double SitControlManager::alphaFromElapsed(double elapsed_sec, double duration_sec, bool use_smoothstep) const {
@@ -454,6 +560,7 @@ void SitControlManager::tickFrame(double time, const Eigen::VectorXd& obs_state,
   cur_mpc_input_ = cur_input;
   cur_mpc_mode_ = mode;
   tickFrozenHoldCounter();
+  tickAutoAdvance();
 }
 
 SitControlManager::SeatJointTargets SitControlManager::buildTargets(double alpha) const {
@@ -576,6 +683,8 @@ void SitControlManager::advanceLegActionStep() {
     leg_action_alpha_ = 1.0;
     state_ = State::LEG_ACTION_DONE;
     publishPhaseParam();
+    if (sit_auto_advance_active_)
+      markSitSequenceComplete();
     ROS_INFO("[SitControlManager] P4 step%zu complete -> CSP hold at final leg pose.", kLegActionSteps);
     return;
   }
@@ -606,14 +715,6 @@ SitControlManager::SeatJointTargets SitControlManager::updateLegAction() {
     return buildLegActionTargets(0.0);
   }
   return buildLegActionTargets(leg_action_alpha_);
-}
-
-void SitControlManager::setCurrentMrtState(double time, const Eigen::VectorXd& state, const Eigen::VectorXd& input,
-                                           size_t mode) {
-  cur_mpc_time_ = time;
-  cur_mpc_state_ = state;
-  cur_mpc_input_ = input;
-  cur_mpc_mode_ = mode;
 }
 
 void SitControlManager::seedArmBaselineFromHardware(const Eigen::VectorXd& arm_hw_pos) {
@@ -693,7 +794,7 @@ SitControlManager::SeatOffsetStep SitControlManager::stepSeatOffset(double dt, E
     return step;
   step.active = true;
   step.running = isSeatOffsetRunning();
-  step.targets = update(dt);
+  step.targets = update();
   if (!step.targets.valid)
     return step;
   if (step.running)
@@ -705,8 +806,7 @@ SitControlManager::SeatOffsetStep SitControlManager::stepSeatOffset(double dt, E
   return step;
 }
 
-SitControlManager::SeatJointTargets SitControlManager::update(double dt) {
-  (void)dt;
+SitControlManager::SeatJointTargets SitControlManager::update() {
   if (!isSeatOffsetActive())
     return {};
   if (state_ == State::OFFSET_DONE)
@@ -720,6 +820,7 @@ SitControlManager::SeatJointTargets SitControlManager::update(double dt) {
     alpha_ = 1.0;
     publishPhaseParam();
     ROS_INFO("[SitControlManager] P3 offset complete -> CSP hold.");
+    tickAutoAdvance();
   }
   return buildTargets(alpha_);
 }
@@ -734,72 +835,39 @@ void SitControlManager::onSitDownComplete(const std_msgs::Int8::ConstPtr& msg) {
   frozen_mpc_input_ = cur_mpc_input_;
   frozen_mpc_mode_ = cur_mpc_mode_;
   state_ = State::FROZEN;
+  sit_auto_advance_active_ = true;
+  sit_sequence_complete_ = false;
   publishPhaseParam();
   if (mrt_) {
     mrt_->pauseResumeMpcNode(true);
     ROS_INFO("[SitControlManager] P2: MPC solver paused (policy frozen on controller).");
   }
-  ROS_INFO("[SitControlManager] P2: MPC frozen at sit endpoint.");
+  ROS_INFO("[SitControlManager] P2: MPC frozen at sit endpoint (auto P3/P4 armed).");
 }
 
-void SitControlManager::onSecondSitDown(const std_msgs::Int8::ConstPtr& msg) {
-  (void)msg;
-  std::string err;
-  if (state_ != State::FROZEN) {
-    ROS_WARN("[SitControlManager] second sit_down ignored: not in P2.");
-    return;
+void SitControlManager::onSitUnfreeze(const std_msgs::Int8::ConstPtr& msg) {
+  // 自动串联状态下，起立统一经 humanoidController preUpdate 重入，不再走 MPC 反向 lerp。
+  // 保留本回调仅供兼容/应急 unfreeze；正常 stand_up 不再发布 /bot_sit_unfreeze。
+  const bool from_p4 = isSeatLegActionActive();
+  const bool from_p3 = (state_ == State::OFFSET_RUNNING || state_ == State::OFFSET_DONE);
+  const bool p2_to_p1 = (msg->data == 1 && !from_p3 && !from_p4);
+  resetOffset();
+  resetLegAction();
+  if (from_p4) {
+    state_ = State::OFFSET_DONE;
+    alpha_ = 1.0;
+  } else {
+    state_ = from_p3 ? State::FROZEN : State::IDLE;
   }
-  if (!config_ok_) {
-    ROS_WARN("[SitControlManager] seat_offset config not loaded.");
-    return;
-  }
-  if (!startOffset(err)) {
-    ROS_WARN("[SitControlManager] start offset failed: %s", err.c_str());
-    return;
-  }
-  ROS_INFO("[SitControlManager] P3: seat WBC offset on frozen sit state (smoothstep).");
-}
-
-void SitControlManager::onThirdSitDown(const std_msgs::Int8::ConstPtr& msg) {
-  (void)msg;
-  std::string err;
-  if (state_ == State::OFFSET_RUNNING) {
-    ROS_WARN("[SitControlManager] third sit_down ignored: P3 offset still running.");
-    return;
-  }
-  if (state_ == State::LEG_ACTION_STEP0_RUNNING || state_ == State::LEG_ACTION_STEP1_RUNNING ||
-      state_ == State::LEG_ACTION_STEP2_RUNNING) {
-    ROS_WARN("[SitControlManager] third sit_down ignored: P4 leg action already running.");
-    return;
-  }
-  if (state_ == State::LEG_ACTION_DONE) {
-    ROS_WARN("[SitControlManager] third sit_down ignored: P4 already complete.");
-    return;
-  }
-  if (!startLegAction(err)) {
-    ROS_WARN("[SitControlManager] start leg action failed: %s", err.c_str());
-    return;
-  }
-  ROS_INFO("[SitControlManager] P4: two-step leg sequence on P3 CSP hold.");
-}
-
-bool SitControlManager::onTriggerOffsetService(std_srvs::Trigger::Request& req,
-                                               std_srvs::Trigger::Response& res) {
-  (void)req;
-  if (state_ != State::FROZEN || !config_ok_) {
-    res.success = false;
-    res.message = "must be P2 and config loaded";
-    return true;
-  }
-  std::string err;
-  if (!startOffset(err)) {
-    res.success = false;
-    res.message = err;
-    return true;
-  }
-  res.success = true;
-  res.message = "seat offset started";
-  return true;
+  sit_auto_advance_active_ = false;
+  publishPhaseParam();
+  if (p2_to_p1)
+    frozen_hold_counter_ = kFrozenHoldAwaitingPolicy;
+  resumeMpc();
+  if (from_p4)
+    ROS_INFO("[SitControlManager] stand_up (legacy unfreeze): P4 -> P3 CSP hold.");
+  else
+    ROS_INFO("[SitControlManager] stand_up (legacy unfreeze): %s -> %s", from_p3 ? "P3" : "P2", from_p3 ? "P2" : "P1");
 }
 
 void SitControlManager::resetMpcAfterSitPause(const char* reason) {
@@ -833,28 +901,6 @@ void SitControlManager::notifyMpcPolicyUpdated() {
 void SitControlManager::tickFrozenHoldCounter() {
   if (frozen_hold_counter_ > 0)
     --frozen_hold_counter_;
-}
-
-void SitControlManager::onSitUnfreeze(const std_msgs::Int8::ConstPtr& msg) {
-  const bool from_p4 = isSeatLegActionActive();
-  const bool from_p3 = (state_ == State::OFFSET_RUNNING || state_ == State::OFFSET_DONE);
-  const bool p2_to_p1 = (msg->data == 1 && !from_p3 && !from_p4);
-  resetOffset();
-  resetLegAction();
-  if (from_p4) {
-    state_ = State::OFFSET_DONE;
-    alpha_ = 1.0;
-  } else {
-    state_ = from_p3 ? State::FROZEN : State::IDLE;
-  }
-  publishPhaseParam();
-  if (p2_to_p1)
-    frozen_hold_counter_ = kFrozenHoldAwaitingPolicy;
-  resumeMpc();
-  if (from_p4)
-    ROS_INFO("[SitControlManager] stand_up: P4 -> P3 CSP hold.");
-  else
-    ROS_INFO("[SitControlManager] stand_up: %s -> %s", from_p3 ? "P3" : "P2", from_p3 ? "P2" : "P1");
 }
 
 // ── P3/P4 实机 CSP ──

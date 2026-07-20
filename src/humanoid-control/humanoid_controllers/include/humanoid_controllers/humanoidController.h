@@ -392,6 +392,15 @@ namespace humanoid_controller
     /** P3：在预计算的 start/end centroidal 间按 α 插值，与关节偏置同 α */
     void recomputeOptimizedState2WbcWithSeatTargets(
         const humanoid_controller::SitControlManager::SeatJointTargets& targets);
+    void clearSeatOffsetPlan();
+    void clearStandUpFromSeatPlan();
+    /** stand_up 反向 seat_offset：blend∈[0,1] 从 CSP 锁定姿插值到 sit_joint_pos */
+    vector_t computeReverseSeatOffsetStandUpTarget(double blend) const;
+    /** 落座 CSP 锁定姿释放后，进入 stand_up preUpdate（/bot_seat_return_preupdate 底层入口） */
+    bool beginStandUpFromSeat(std::string& err);
+    bool seatReturnToPreUpdateCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
+    void onSeatReturnPreUpdateTrigger(const std_msgs::Int8::ConstPtr& msg);
+    void publishSeatReturnDone(bool ok);
     virtual void setupMpc();
     virtual void setupMrt();
     virtual void setupStateEstimate(const std::string &taskFile, bool verbose, const std::string &referenceFile);
@@ -569,8 +578,6 @@ namespace humanoid_controller
     bool isPreUpdateComplete{false};
     bool isInitStandUpStartTime_{false};
     /** preUpdate 起立首帧实测基座 [6..11]（CoM 位姿），避免与硬件 prep 后的真实姿态不一致 */
-    vector_t bootStandStartCentroidal_;
-    bool bootStandStartCaptured_{false};
     bool isPullUp_{false};
     bool setPullUpState_{false};
     std::atomic<TransportModeState> transport_mode_state_{TRANSPORT_INACTIVE};
@@ -649,6 +656,9 @@ namespace humanoid_controller
     ros::ServiceServer triggerFallStandUpSrv_;
     ros::ServiceServer changeRuiwoMotorParamSrv_;
     ros::ServiceServer transport_mode_service_;
+    ros::ServiceServer seat_return_to_preupdate_srv_;
+    ros::Publisher seat_return_preupdate_done_pub_;
+    ros::Subscriber sub_seat_return_preupdate_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -843,6 +853,14 @@ namespace humanoid_controller
     vector_t seat_offset_centroidal_start_wbc_;
     vector_t seat_offset_centroidal_end_wbc_;
     bool seat_offset_centroidal_plan_ready_{false};
+    humanoid_controller::SitControlManager::StandUpFromSeatStartSnapshot stand_up_from_seat_start_snapshot_;
+    vector_t reverse_seat_offset_centroidal_start_wbc_;
+    vector_t reverse_seat_offset_centroidal_end_wbc_;
+    bool reverse_seat_offset_plan_ready_{false};
+    /** stand_up 指令激活：preUpdate 内执行 反向偏置 → (可选)sit 保持 → sit→stand */
+    bool stand_up_from_seat_active_{false};
+    bool reverse_seat_offset_done_{false};
+    double reverse_seat_offset_start_time_sec_{0.0};
 
     // 共享内存通讯
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;

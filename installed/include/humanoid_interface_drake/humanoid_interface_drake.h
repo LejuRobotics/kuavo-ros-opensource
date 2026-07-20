@@ -10,7 +10,7 @@
 #include "kuavo_common/common/kuavo_settings.h"
 #include "kuavo_common/common/common.h"
 #include "kuavo_common/common/utils.h"
-#include "kuavo_common/common/seat_config.h"
+#include "kuavo_common/common/seat_config.h"  // SeatConfig = nlohmann::json
 #include "humanoid_interface_drake/planner/plantIK.h"
 
 #include "drake/systems/framework/diagram_builder.h"

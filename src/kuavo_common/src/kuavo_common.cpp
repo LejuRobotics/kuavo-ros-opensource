@@ -67,11 +67,10 @@ namespace HighlyDynamic{
         // 座椅共享配置（v5 专有，kuavo.json 零变更）
         if (rb_version.start_with(5)) {
           auto seat_cfg_path = kuavo_assets_path + "/config/seat_config_v5.json";
-          std::ifstream seat_file(seat_cfg_path);
-          if (seat_file.is_open()) {
+          if (auto seat_file = std::ifstream(seat_cfg_path); seat_file.is_open()) {
             std::stringstream ss;
             ss << seat_file.rdbuf();
-            seat_config_.load(ss.str());
+            seat_config_ = kuavo_common::loadSeatConfig(ss.str());
             std::cout << "[KuavoCommon] loaded seat_config_v5.json" << std::endl;
           } else {
             std::cerr << "[KuavoCommon] seat_config_v5.json not found at " << seat_cfg_path << std::endl;

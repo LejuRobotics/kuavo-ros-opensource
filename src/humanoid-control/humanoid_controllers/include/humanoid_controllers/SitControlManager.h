@@ -17,7 +17,7 @@ class MRT_ROS_Interface;
 
 namespace humanoid_controller {
 
-/** P1 站姿 / P2 落座终点冻结 / P3 smoothstep 偏置 / P4 两步腿部 CSP 序列。 */
+/** P1 落座 / P2 落座终点冻结 / P3 关节偏置 / P4 收脚。仅 sit_down 序列使用。 */
 class SitControlManager {
  public:
   static constexpr size_t kLegDof = 12;
@@ -42,7 +42,7 @@ class SitControlManager {
   SitControlManager();
   void setMrtInterface(ocs2::MRT_ROS_Interface* mrt) { mrt_ = mrt; }
   /**
-   * 坐姿启动：判定代际、从 kuavo.json seat_boot 发布 /hardware_prep_*（在 setupRos 之前调用）。
+   * use_sit_init 实机启动：从 hardware_sit_pose_prep 发布 /hardware_prep_*（在 setupRos 之前调用）。
    * @return 是否实际启用坐姿启动（use_sit_init 且 Kuavo5）
    */
   static bool configureLaunchBoot(bool use_sit_init, const RobotVersion& robot_version,
@@ -57,8 +57,6 @@ class SitControlManager {
   bool useSitInitBoot() const { return use_sit_init_boot_; }
   bool hasSitBootLegGains() const { return has_sit_boot_leg_gains_; }
   bool sitBootLegGain(size_t leg_index, double& kp, double& kd) const;
-  bool skipStandUpContactProtectOnReal() const { return use_sit_init_boot_; }
-  bool waitStandUpCompleteInPreUpdate(bool is_real) const { return is_real || use_sit_init_boot_; }
 
   /** preUpdate 起立插值起点：坐姿启动用 sit，否则用 squat（仅填充前 12+jointNum 维） */
   Eigen::VectorXd makeBootStartState(const Eigen::VectorXd& sit_state, const Eigen::VectorXd& squat_state,
@@ -67,25 +65,21 @@ class SitControlManager {
   /** 将 t∈[0,1] 映射为 smoothstep：3t² - 2t³（与 P3 seat_offset 一致） */
   static double smoothstep01(double t);
 
-  /** 起立俯仰插值策略：座椅启动需更长保持前倾，过早收到站姿俯仰易后倒 */
-  struct StandUpBlendOptions {
-    double pitch_blend_start{0.75};
-  };
-  StandUpBlendOptions squatBootStandUpBlendOptions() const;
-  StandUpBlendOptions sitBootStandUpBlendOptions() const;
-  double squatBootStandUpMotionVel() const { return squat_boot_stand_up_motion_vel_; }
-  double sitBootStandUpMotionVel() const { return sit_boot_stand_up_motion_vel_; }
+  double sitToStandComVelocityMps() const { return sit_to_stand_com_velocity_mps_; }
 
-  static Eigen::VectorXd blendStandUpCentroidalState(const Eigen::VectorXd& start, const Eigen::VectorXd& end,
-                                                     double blend);
-  static Eigen::VectorXd blendStandUpCentroidalState(const Eigen::VectorXd& start, const Eigen::VectorXd& end,
-                                                     double blend, const StandUpBlendOptions& opt);
+  /** 起立轨迹结束后、init MPC 前的稳定等待（秒） */
+  double mpcInitDelayAfterStandUpSec() const { return mpc_init_delay_after_stand_up_sec_; }
 
-  void setCurrentMrtState(double time, const Eigen::VectorXd& state, const Eigen::VectorXd& input, size_t mode);
+  /** 起立接触保护：robotStandUpCompleteTime_ 后的额外容忍时间（秒） */
+  double contactProtectGraceAfterStandUpSec() const { return contact_protect_grace_after_stand_up_sec_; }
+
+  /** 反向 seat_offset 完成后、sit→stand 前的 sit 姿态保持时间（秒）；0=立即起立 */
+  double holdAtSitPoseBeforeStandUpSec() const { return hold_at_sit_pose_before_stand_up_sec_; }
+
   /** P3 首帧：用硬件/仿真实测 14 臂角覆盖基准（补全 MPC 冻结态可能不足的臂维） */
   void seedArmBaselineFromHardware(const Eigen::VectorXd& arm_hw_pos);
 
-  SeatJointTargets update(double dt);
+  SeatJointTargets update();
 
   /** 每帧控制策略（一次性查询，供 humanoidController 决策） */
   struct SeatPolicy {
@@ -108,6 +102,30 @@ class SitControlManager {
 
   /** 恢复 MPC（unfreeze 后调用） */
   void resumeMpc();
+
+  /** P1 落座完成后是否已到达最终 CSP hold（P3 无 P4，或 P4 完成） */
+  bool isSitSequenceComplete() const { return sit_sequence_complete_; }
+
+  /** stand_up 开始前：快照 CSP 锁定姿关节目标，供反向 seat_offset 插值 */
+  struct StandUpFromSeatStartSnapshot {
+    bool valid = false;
+    SeatJointTargets csp_hold_joint_targets{};
+    /** 反向 seat_offset 插值时长（秒），通常等于 seat_offset_duration_seconds */
+    double reverse_seat_offset_duration_sec = 1.0;
+    bool use_smoothstep = true;
+  };
+
+  /**
+   * 在 releaseSeatResources 之前调用：捕获最终 CSP 锁定姿关节目标。
+   * @return false 时 err 说明拒绝原因（与 releaseSeatHoldForStandUp 前置条件一致）
+   */
+  bool captureStandUpFromSeatStartSnapshot(StandUpFromSeatStartSnapshot& out, std::string& err) const;
+
+  /**
+   * 落座序列到达最终 CSP 锁定姿后，释放座椅资源，供 humanoidController 进入 stand_up preUpdate。
+   * @return false 时 err 说明拒绝原因（序列未完成或仍在运动中）
+   */
+  bool releaseSeatHoldForStandUp(std::string& err);
 
   /** 每帧存储当前观测 + 推进冻结 hold counter（替代 setCurrentMrtState + tickFrozenHoldCounter） */
   void tickFrame(double time, const Eigen::VectorXd& obs_state, const Eigen::VectorXd& cur_input, size_t mode);
@@ -158,6 +176,7 @@ class SitControlManager {
   Phase getPhase() const;
   double getOffsetAlpha() const { return alpha_; }
   double getLegActionAlpha() const { return leg_action_alpha_; }
+  bool isLegActionEnabled() const { return leg_action_config_ok_; }
 
   const Eigen::VectorXd& frozenMpcState() const { return frozen_mpc_state_; }
   const Eigen::VectorXd& frozenMpcInput() const { return frozen_mpc_input_; }
@@ -193,28 +212,30 @@ class SitControlManager {
   void resetLegAction();
   void publishPhaseParam() const;
   void resetMpcAfterSitPause(const char* reason);
+  void releaseSeatResources();
+  void markSitSequenceComplete();
+  bool tickAutoAdvance();
   SeatJointTargets updateLegAction();
   void advanceLegActionStep();
   int legActionStepIndex() const;
   int legActionTargetStepIndex() const;
 
   void onSitDownComplete(const std_msgs::Int8::ConstPtr& msg);
-  void onSecondSitDown(const std_msgs::Int8::ConstPtr& msg);
-  void onThirdSitDown(const std_msgs::Int8::ConstPtr& msg);
   void onSitUnfreeze(const std_msgs::Int8::ConstPtr& msg);
-  bool onTriggerOffsetService(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
 
   bool freeze_mrt_on_sit_complete_{true};
+  /** P1 落座冻结后自动串联 P3/P4（单次 sit_down） */
+  bool sit_auto_advance_active_{false};
+  bool sit_sequence_complete_{false};
   bool config_ok_{false};
   bool leg_action_config_ok_{false};
-  bool seat_boot_ok_{false};
   bool use_sit_init_boot_{false};
   bool has_sit_boot_leg_gains_{false};
   double boot_prep_speed_deg_{8.0};
-  StandUpBlendOptions sit_boot_stand_up_blend_{0.95};
-  StandUpBlendOptions squat_boot_stand_up_blend_{};
-  double sit_boot_stand_up_motion_vel_{0.08};
-  double squat_boot_stand_up_motion_vel_{0.11};
+  double sit_to_stand_com_velocity_mps_{0.08};
+  double mpc_init_delay_after_stand_up_sec_{0.8};
+  double contact_protect_grace_after_stand_up_sec_{0.5};
+  double hold_at_sit_pose_before_stand_up_sec_{0.0};
   std::vector<double> sit_boot_leg_kp_;
   std::vector<double> sit_boot_leg_kd_;
   State state_{State::IDLE};
@@ -251,10 +272,7 @@ class SitControlManager {
   std::array<double, kArmDof> arm_offset_rad_{};
 
   ros::Subscriber sub_sit_complete_;
-  ros::Subscriber sub_second_sit_down_;
-  ros::Subscriber sub_third_sit_down_;
   ros::Subscriber sub_unfreeze_;
-  ros::ServiceServer srv_trigger_offset_;
 
   ocs2::MRT_ROS_Interface* mrt_{nullptr};
   const kuavo_common::SeatConfig* seat_config_{nullptr};
