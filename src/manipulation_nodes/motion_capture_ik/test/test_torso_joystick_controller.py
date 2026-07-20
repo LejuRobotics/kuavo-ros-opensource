@@ -32,6 +32,7 @@ from tools.torso_joystick_controller import (  # noqa: E402
     SCALE_HEIGHT,
     SCALE_PITCH,
     TorsoController,
+    YAW_BUTTON_LIMIT,
     YAW_TARGET,
 )
 
@@ -61,6 +62,24 @@ def make_controller(t0=0.0, resetter=None):
         delta_publisher=delta,
         clock=clock,
         resetter=resetter,
+    )
+    return ctrl, pub, vel, delta, clock
+
+
+def make_controller_with_state(t0=0.0, resetter=None, state_getter=None):
+    """same as make_controller but with a state_getter for /torso_open_loop_state."""
+    clock = MagicMock(return_value=t0)
+    pub = MagicMock()
+    vel = MagicMock()
+    delta = MagicMock()
+    ctrl = TorsoController(
+        initial_pose_xyz=(0.0, 0.0, 0.0),
+        publisher=pub,
+        vel_publisher=vel,
+        delta_publisher=delta,
+        clock=clock,
+        resetter=resetter,
+        state_getter=state_getter,
     )
     return ctrl, pub, vel, delta, clock
 
@@ -154,7 +173,11 @@ def test_stick_deadzone_and_zero_clear_latch():
 
 
 def test_yaw_buttons_oneshot_delta_edge():
-    """A/B 边沿 oneshot ±π；按住不连发；错手忽略。"""
+    """按钮边沿 oneshot，delta 受 YAW_BUTTON_LIMIT 钳制；按住不连发；错手忽略。
+
+    无 state_getter 时 ol_yaw 回退为 0，首按 delta = ±YAW_BUTTON_LIMIT（≈±177°）。
+    YAW_TARGET 已与 YAW_BUTTON_LIMIT 对齐，保证往返对称可逆（0→+177°→0→−177°→0）。
+    """
     ctrl, _, _, delta, _ = make_controller()
     ctrl.handle_joystick(make_msg(left_grip=0.8))
     delta.reset_mock()
@@ -162,16 +185,52 @@ def test_yaw_buttons_oneshot_delta_edge():
     ctrl.handle_joystick(make_msg(left_grip=0.8, left_first_button_pressed=True))
     ctrl.handle_joystick(make_msg(left_grip=0.8, left_first_button_pressed=True))  # hold
     assert delta.call_count == 1
-    assert abs(delta.call_args[0][0].angular.z - (-YAW_TARGET)) < 1e-9
+    assert abs(delta.call_args[0][0].angular.z - (-YAW_BUTTON_LIMIT)) < 1e-9
 
     ctrl.handle_joystick(make_msg(left_grip=0.8))  # release
     ctrl.handle_joystick(make_msg(left_grip=0.8, left_second_button_pressed=True))
     assert delta.call_count == 2
-    assert abs(delta.call_args[0][0].angular.z - YAW_TARGET) < 1e-9
+    assert abs(delta.call_args[0][0].angular.z - YAW_BUTTON_LIMIT) < 1e-9
 
     delta.reset_mock()
     ctrl.handle_joystick(make_msg(left_grip=0.8, right_first_button_pressed=True))
     delta.assert_not_called()
+
+
+def test_yaw_button_clamp_at_limit():
+    """到限后连按同方向 → 无响应；反方向可拉回。"""
+    ol_yaw = YAW_BUTTON_LIMIT  # 已在上限
+
+    def state_getter():
+        return (0.0, 0.0, ol_yaw, 0.0)  # (x, z, yaw, pitch)
+
+    ctrl, _, _, delta, _ = make_controller_with_state(state_getter=state_getter)
+    ctrl.handle_joystick(make_msg(left_grip=0.8))
+    delta.reset_mock()
+
+    # 同方向（second button → +π）：已在限位 → delta=0 → 无发布
+    ctrl.handle_joystick(make_msg(left_grip=0.8, left_second_button_pressed=True))
+    delta.assert_not_called()
+
+    # 反方向（first button → -π）：可拉回
+    ctrl.handle_joystick(make_msg(left_grip=0.8))
+    ctrl.handle_joystick(make_msg(left_grip=0.8, left_first_button_pressed=True))
+    assert delta.call_count == 1
+    assert delta.call_args[0][0].angular.z < 0.0  # direction toward zero
+
+    # 下限同理
+    state_getter_dn = lambda: (0.0, 0.0, -YAW_BUTTON_LIMIT, 0.0)
+    ctrl2, _, _, delta2, _ = make_controller_with_state(state_getter=state_getter_dn)
+    ctrl2.handle_joystick(make_msg(left_grip=0.8))
+    delta2.reset_mock()
+
+    ctrl2.handle_joystick(make_msg(left_grip=0.8, left_first_button_pressed=True))
+    delta2.assert_not_called()  # 同方向 → 无响应
+
+    ctrl2.handle_joystick(make_msg(left_grip=0.8))
+    ctrl2.handle_joystick(make_msg(left_grip=0.8, left_second_button_pressed=True))
+    assert delta2.call_count == 1
+    assert delta2.call_args[0][0].angular.z > 0.0  # reverse direction
 
 
 # ---- 复位 ----

@@ -30,8 +30,11 @@ SCALE_PITCH = 0.30    # rad/s
 Z_MIN, Z_MAX = 0.0, 0.32            # m，升降相对初始位姿
 X_MIN = 0.0                           # m，前后相对初始位姿
 PITCH_MIN, PITCH_MAX = -0.5235, 0.0   # rad；VR 内部：负值前倾，0 为直立
-YAW_MAX = 0.5235                      # rad（±30°，仅摇杆积分；按钮转身仍走 ±π）
-YAW_TARGET = math.pi                 # rad（180°）
+YAW_MAX = 0.5235                      # rad（±30°，仅摇杆积分）
+# 按钮转身限幅：URDF waist_yaw_joint 限位 ±π，贴边界时四元数双覆盖 → IK 振荡。
+# 留 0.05 rad 约 3° margin，单次按键直达 ±YAW_BUTTON_LIMIT，反方向按键可原路返回。
+YAW_BUTTON_LIMIT = math.pi - 0.05   # rad（≈±177°）
+YAW_TARGET = YAW_BUTTON_LIMIT       # rad，按钮单次转身量（与限幅对齐，保证对称可逆）
 
 # ===== grip 双击复位防误触参数 =====
 GRIP_DOUBLE_CLICK_WINDOW = 0.40  # s，两次短按之间的最大间隔
@@ -381,25 +384,33 @@ class TorsoController:
         return msg.right_first_button_pressed, msg.right_second_button_pressed
 
     def _handle_yaw_buttons(self, msg) -> None:
-        """Yaw button edge → oneshot delta; clamp against open-loop yaw limits."""
+        """Yaw button edge → oneshot delta; clamp target against open-loop yaw limit.
+
+        从 /torso_open_loop_state 读取当前开环目标 yaw，计算 desired = ol_yaw ± YAW_TARGET，
+        clamp 到 ±YAW_BUTTON_LIMIT，再折算为 delta 发出。到限后再按同方向 → delta=0（无响应）。
+        反方向始终可用（可在越界状态下手动拉回）。
+        """
         first, second = self._select_buttons(msg)
-        open_loop_state = self._get_open_loop_state()
-        ol_yaw = open_loop_state[2] if open_loop_state is not None else 0.0
-        if first and not self._first_btn_was_pressed:
-            if not self._yaw_would_exceed(ol_yaw, -YAW_TARGET):
-                self._publish_torso_delta(yaw=-YAW_TARGET)
-        elif second and not self._second_btn_was_pressed:
-            if not self._yaw_would_exceed(ol_yaw, +YAW_TARGET):
-                self._publish_torso_delta(yaw=+YAW_TARGET)
+        first_edge = first and not self._first_btn_was_pressed
+        second_edge = second and not self._second_btn_was_pressed
         self._first_btn_was_pressed = first
         self._second_btn_was_pressed = second
 
-    def _yaw_would_exceed(self, current_yaw: float, delta: float) -> bool:
-        target = current_yaw + delta
-        # YAW_TARGET = π 时，按钮转身不限制（约定）
-        if YAW_TARGET >= math.pi - 0.01:
-            return False
-        return target > self._yaw_max or target < self._yaw_min
+        if not first_edge and not second_edge:
+            return
+
+        direction = -YAW_TARGET if first_edge else +YAW_TARGET
+        open_loop_state = self._get_open_loop_state()
+        ol_yaw = open_loop_state[2] if open_loop_state is not None else 0.0
+
+        desired = max(-YAW_BUTTON_LIMIT,
+                      min(ol_yaw + direction, YAW_BUTTON_LIMIT))
+        effective_delta = desired - ol_yaw
+
+        if abs(effective_delta) < POSE_PUBLISH_EPS:
+            return  # 已在限位，无响应（issue 3595 预期："连续按同一方向按键时躯干无响应"）
+
+        self._publish_torso_delta(yaw=effective_delta)
 
     def _get_open_loop_state(self) -> Optional[Tuple[float, float, float, float]]:
         """返回 (x, z, yaw, pitch) 或 None。"""
