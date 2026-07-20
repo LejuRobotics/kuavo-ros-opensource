@@ -4324,6 +4324,13 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
 
   bool humanoidController::setupCpuIsolation()
   {
+    // 先确认 ROS master 可达，避免把“master 偶发不通”误判为“/isolated_cpus 未设”
+    if (!ros::master::check()) {
+      std::cerr << "[setupCpuIsolation] ROS master " << ros::master::getURI()
+                << " unreachable, cannot read /isolated_cpus" << std::endl;
+      return false;
+    }
+
     // 从ROS参数获取隔离的CPU核心索引
     std::vector<int> isolated_cpus;
     std::vector<int> actually_isolated_cpus;
