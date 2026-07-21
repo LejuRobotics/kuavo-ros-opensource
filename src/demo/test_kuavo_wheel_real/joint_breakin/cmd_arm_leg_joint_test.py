@@ -8,6 +8,9 @@ import rospy
 import lb_ctrl_api as ct
 import math
 
+# 多指令发布频率，需低于 MPC mpcDesiredFrequency(50Hz) 对应的 busy 清除周期
+PUBLISH_RATE_HZ = 20
+
 def interpolate_poses(pose1, pose2, num_steps):
     """在两个姿态之间生成插值点"""
     interpolated = []
@@ -16,8 +19,10 @@ def interpolate_poses(pose1, pose2, num_steps):
         interpolated.append([p1 + (p2 - p1) * t for p1, p2 in zip(pose1, pose2)])
     return interpolated
 
-def send_interpolated_motion(leg_start, arm_start, leg_end, arm_end, total_time, num_steps=50):
+def send_interpolated_motion(leg_start, arm_start, leg_end, arm_end, total_time, publish_rate=PUBLISH_RATE_HZ):
     """发送插值过渡动作"""
+    step_interval = 1.0 / publish_rate
+    num_steps = max(1, int(round(total_time / step_interval)))
     step_time = total_time / num_steps
     
     leg_interp = interpolate_poses(leg_start, leg_end, num_steps)
@@ -134,7 +139,7 @@ def execute_leg_tests():
             send_interpolated_motion(
                 prev_leg, prev_arm,
                 leg_angles_deg, arm_angles_deg,
-                desire_time, num_steps=50
+                desire_time,
             )
             
             rospy.loginfo(f"  {name} 到达!")
