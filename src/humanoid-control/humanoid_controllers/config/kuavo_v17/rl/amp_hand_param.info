@@ -69,15 +69,14 @@ cmdVelLineXlow 0.4 ; 手柄十字键按“下”键直接cmdVelLineX降为0.4
 cmdVelLineXup 0.95 ; 手柄十字键按“上”键，速度限制升一档，档位从低到高为cmdVelLineXlow、cmdVelLineX默认速度限制、cmdVelLineXup
 
 cmdVelLineXNeg  0.43 ; cmdVelLineX负向默认速度限制
-squatHeightMin -0.16 ; amp_hand 手柄 posture 模式最大下蹲深度 (m)
+squatHeightMin -0.15 ; amp_hand 手柄 posture 模式最大下蹲深度 (m)
 squatHeightMax 0.03 ; amp_hand 手柄 posture 模式最大站起高度 (m)
 
 ; ==================== 下蹲守备（控制器端）====================
 squatPostureDefense
 {
-    enabled           true    ; 深蹲且转向较小时拦截姿态模式退出请求（与遥控器端下蹲守备互补）
-    heightThreshold   1.2    ; leg_l4/leg_r4 均大于该值视为深蹲(rad)
-    absCmdAngzLimit     0.85   ; 右摇杆左右(转向 cmdangz)截断且平滑后，abs 低于该值时禁止退出
+    enabled           true    ; 深蹲时拦截退出并屏蔽走/转；物理起身后自动退出 posture 并广播 amp_mode
+    heightThreshold   0.7    ; leg_l4/leg_r4 均大于该值视为深蹲(rad)
 }
 
 ampVRcmdvelLinearXLimit 0.60 ; amp_hand VR 前进最大速度 (m/s)
@@ -86,32 +85,41 @@ ampVRcmdvelLinearZLimit 0.0 ; amp_hand VR 高度通道最大速度 (m/s)
 ampVRcmdvelAngularYAWLimit 0.9 ; amp_hand VR yaw 最大角速度 (rad/s)
 
 ; ==================== cmd微小速度命令截断 ====================
-；cmd.scale() → cmdVelLineXNeg限速 → enable_off_cmdy_by_cmdx → enable_off_cmdy_by_cmdangz → TinyCmdClip(cmd_x/cmd_y/cmd_angz/下蹲高度) → lowSpeedKickStart → velocity_commands
+; cmd.scale() → cmdVelLineXNeg限速 → enable_off_cmdy_by_cmdx → enable_off_cmdy_by_cmdangz → TinyCmdClip(cmd_x/cmd_y) → lowSpeedKickStart → velocity_commands
 TinyCmdClip
 {
-    (0,0)  0.15   ; cmd_x正向截断区间最小值
-    (1,0)  0.45   ; cmd_x正向截断区间最大值，位于正向区间内的值都会被截断为该值
+    (0,0)  0.35    ; cmd_x 正向截断区间最小值
+    (1,0)  0.45   ; cmd_x 正向截断区间最大值，位于正向区间内的值都会被截断为该值
     (2,0)  0.2    ; abs(cmd_y) 截断最小值
-    (3,0)  0.4   ; abs(cmd_y) 截断最大值，abs(cmd_y) 位于区间内的值都会被截断为该值
-    (4,0)  0.3    ; abs(cmd_angz) 截断最小值，仅当原地旋转有效
-    (5,0)  0.8   ; abs(cmd_angz) 截断最大值，abs(cmd_angz) 位于区间内的值都会被截断为该值
-    (6,0)  0.14  ; abs(下蹲高度)截断区间最小值，仅 roban17 amp_hand posture 模式有效
-    (7,0)  0.20  ; abs(下蹲高度)截断区间最大值，[-0.20,-0.14]统一截断为-0.20
-
+    (3,0)  0.4    ; abs(cmd_y) 截断最大值，abs(cmd_y) 位于区间内的值都会被截断为该值
 }
 
 ; ==================== 低速起步脉冲 ====================
-; TinyCmdClip 后 cmd_x 落在 triggerVelocity±triggerTolerance 且上一帧近零时，先给更高 cmd_x
+; cmd_x 落在 triggerVelocity±triggerTolerance 且上一帧近零、且相对上一帧加速时，先给更高 cmd_x；减速时不触发并取消脉冲
 lowSpeedKickStart
 {
     enabled             true
-    kickVelocity        0.60   ; 脉冲速度
+    kickVelocity        0.6   ; 脉冲速度
     durationSteps       25     ; 脉冲持续推理步数(50Hz 下约 0.5s)
-    restCmdThreshold    0.3    ; |上一帧 cmd_x| 低于该值则判定静止起步
-    triggerVelocity     0.45   ; 处理后 cmd_x 触发中心值(TinyCmdClip 正向截断值)
-    triggerTolerance    0.1   ; 触发区间 [0.35, 0.55]
+    restCmdThreshold    0.2    ; |上一帧 cmd_x| 低于该值则判定静止起步
+    triggerVelocity     0.3   ; 处理后 cmd_x 触发中心值
+    triggerTolerance    0.15   ; 触发区间 [0.15, 0.45]
     lateralThreshold    0.2    ; abs(cmd_y) 超过则取消
     yawThreshold        0.2    ; abs(cmd_angz) 超过则取消
+}
+
+; ==================== 低速原地转向脉冲 ====================
+; abs(cmd_angz) 落在 triggerAngularVelocity±triggerTolerance 且上一帧近零、且相对上一帧加速时，先给更高 |cmd_angz|；减速时不触发并取消脉冲
+lowSpeedYawKickStart
+{
+    enabled                 true
+    kickAngularVelocity     1.0    ; 脉冲角速度绝对值 (rad/s)
+    durationSteps           10     ; 脉冲持续推理步数
+    restCmdThreshold        0.2    ; |上一帧 cmd_angz| 低于该值则判定静止转向
+    triggerAngularVelocity  0.5    ; 触发中心绝对值 (rad/s)
+    triggerTolerance        0.25   ; 触发区间 [0.25, 0.75]
+    forwardThreshold        0.2    ; abs(cmd_x) 超过则取消
+    lateralThreshold        0.2    ; abs(cmd_y) 超过则取消
 }
 
 rollCompensationClosedLoop
@@ -156,13 +164,14 @@ continuousInPlaceStepVelocity
 velocitySmoothing
 {
     ; 覆盖 RlGaitReceiver 默认 max_velocity_change_；
-    maxVelocityChange     0.03   ; 单步正向 cmd_x 单步最大变化量 (m/s )
-    decelOnly             true    ; true: 正向 cmd_x 仅减速时平滑，加速不限制
+    cmdxSmooth              true    ; true: 正向 cmd_x 加/减速 EMA 平滑 + 单步限速；false: 不平滑
+    maxVelocityChange       0.1     ; 正向 cmd_x 加速单步最大变化量 (m/s)，cmdxSmooth=true 时生效
+    maxVelocityChangeDecel  0.03    ; 正向 cmd_x 减速单步最大变化量 (m/s)，cmdxSmooth=true 时生效
+    cmdXDecelEmaTauThreshold  0.35   ; 分段 EMA 速度阈值 (m/s)，cmdxSmooth=true 时按平滑速度分段
+    cmdXDecelEmaTauHigh       0.15  ; max(smoothed,target) cmd_x > threshold 时的 tau (s)
+    cmdXDecelEmaTauLow        0.5   ; max(smoothed,target) cmd_x <= threshold 时的 tau (s)
     maxVelocityChangeNegCmdX  0.0051  ; 负向 cmd_x 单步最大变化量 (m/s)，后退，加减速
     maxVelocityChangeCmdY  0.008   ; 单步 cmd_y 最大变化量 (m/s)
-    standUpHeightSmoothingEnabled  true   ; 站立模式下起身高度命令平滑
-    maxStandUpHeightChange  0.02  ; 起身单步最大高度命令变化量 (m)，下蹲不做该限幅而由低通处理
-    StandUpHeightSmoothStart -0.1 ; 起身达到该高度前平滑，高于该高度后直接跟随
     squatHeightLowPassEnabled true ; roban17 amp_hand posture 下蹲高度命令启用一阶低通
     squatHeightLowPassCutoffFreq 1.5 ; 截止频率(Hz)，越低越平滑但响应越慢
 }

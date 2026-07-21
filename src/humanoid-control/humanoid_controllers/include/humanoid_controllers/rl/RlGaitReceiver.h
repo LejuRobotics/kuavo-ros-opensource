@@ -152,10 +152,14 @@ private:
   geometry_msgs::Twist previous_cmd_vel_;
   double velocity_smooth_factor_;
   double max_velocity_change_;
+  double max_velocity_change_decel_cmd_x_{-1.0};  // 正向 cmd_x 减速单步最大变化量，<0 表示未配置
+  double cmd_x_decel_ema_tau_threshold_{0.5};  // 分段 EMA 速度阈值 (m/s)
+  double cmd_x_decel_ema_tau_high_{0.15};      // speed > threshold 时的 tau (s)
+  double cmd_x_decel_ema_tau_low_{0.35};       // speed <= threshold 时的 tau (s)
   double max_velocity_change_neg_cmd_x_{-0.5};  // 负向 cmd_x 单步最大变化量，<0 表示未配置
   double max_velocity_change_cmd_y_{-0.1};      // cmd_y 单步最大变化量，<0 表示未配置
   double velocity_smooth_time_;
-  bool velocity_change_decel_only_{false};   // true: 正向 cmd_x 仅减速时平滑/限速，负向后退加减速均平滑
+  bool cmd_x_smooth_enabled_{false};  // true: 正向 cmd_x 加/减速 EMA 平滑 + 单步限速；false: 不平滑
   ros::Time last_velocity_update_time_;
   
   // Angular velocity smoothing parameters for turning
