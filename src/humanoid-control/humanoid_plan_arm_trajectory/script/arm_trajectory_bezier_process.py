@@ -515,22 +515,16 @@ class ArmTrajectoryBezierDemo:
             return result
 
     def call_enable_wbc_arm_trajectory_control_service(self, enable):
-        """使能/禁用 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源）。"""
+        """使能/禁用 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源）。
+        轮臂无此服务，静默跳过。"""
         service_name = "/enable_wbc_arm_trajectory_control"
-        result = True
         try:
             rospy.wait_for_service(service_name, timeout=0.5)
             client = rospy.ServiceProxy(service_name, changeArmCtrlMode)
             client(control_mode=enable)
             rospy.loginfo(f"{service_name} call successful, enable={enable}")
-        except rospy.ServiceException as e:
-            rospy.loginfo(f"{service_name} call failed: %s", e)
-            result = False
-        except rospy.ROSException:
-            rospy.logerr(f"{service_name} not available")
-            result = False
-        finally:
-            return result
+        except (rospy.ServiceException, rospy.ROSException):
+            rospy.loginfo(f"{service_name} not available, skipping")
 
     def get_arm_ctrl_mode(self):
         """获取当前手臂控制模式"""
