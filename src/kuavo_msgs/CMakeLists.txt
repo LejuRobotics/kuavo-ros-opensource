@@ -207,6 +207,7 @@ add_service_files(
   twoArmHandPoseCmdSrv.srv
   twoArmHandPoseCmdFreeSrv.srv
   changeArmCtrlModeKuavo.srv
+  SetIncrementalArmTrajLink.srv
   fkSrv.srv
   lbBaseLinkPoseCmdSrv.srv
   lbLegControlSrv.srv

@@ -1,0 +1,9 @@
+# 增量 VR IK -> WBC 手臂轨迹链路切换（与 tact/bezier 使用的 /kuavo_arm_traj 解耦）
+int8 TRANSPORT_NONE=0
+int8 TRANSPORT_SHM=1
+int8 TRANSPORT_KUAVO_ARM_TRAJ=2
+
+int8 transport
+---
+bool success
+string message

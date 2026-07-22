@@ -56,6 +56,7 @@ endif()
 # ==============================================================================
 set(SRC_OBJECTS
     src/common/common.cpp
+    src/common/arm_traj_shm.cpp
     src/kuavo_common.cpp
     src/common/kuavo_settings.cpp
     src/common/utils.cpp
@@ -73,6 +74,7 @@ add_library(${PROJECT_NAME} SHARED ${SRC_OBJECTS})
 target_link_libraries(${PROJECT_NAME} 
     ${EIGEN3_LIBRARIES}
     stdc++fs
+    rt
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC

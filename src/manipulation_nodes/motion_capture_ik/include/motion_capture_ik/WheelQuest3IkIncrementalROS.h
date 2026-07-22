@@ -27,7 +27,9 @@
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "DrakeChestElbowHandPointOpt.hpp"
+#include "kuavo_common/common/arm_traj_shm.h"
 
 namespace HighlyDynamic {
 
@@ -73,6 +75,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void applyWorkerThreadScheduling(const char* threadName, int priority) const;
   void publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const;
   void publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const;
+  void logArmTrajPublishStampPeriod(const ros::Time& stamp);
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
@@ -163,6 +166,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 发布函数
   void publishJointStates();
   void publishDefaultJointStates();
+  // 同线程发布 kuavo_arm_traj(_cpp/_rad) 及 shadow 探针（用于对比到达时间）
+  void publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg);
+  bool setIncrementalArmTrajLink(int8_t transport);
+  bool handleSetIncrementalArmTrajLink(kuavo_msgs::SetIncrementalArmTrajLink::Request& req,
+                                       kuavo_msgs::SetIncrementalArmTrajLink::Response& res);
   void publishZeroJointStates();
   void publishLegJointStates();         // 发布下肢关节状态（基于 IK 解）
   void publishDefaultLegJointStates();  // 发布下肢关节默认状态
@@ -203,8 +211,16 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Time lastLbQuickModeRequestTime_;
   bool lastLbQuickModeRequestSuccess_ = false;
 
-  ros::Publisher kuavoArmTrajCppPublisher_;  // 发布kuavo_arm_traj_cpp；launch中通过remap话题方式来接入当前系统
-  ros::Publisher kuavoArmTrajRadPublisher_;  // 与 kuavo_arm_traj_cpp 同步，关节位置/速度为弧度
+  ros::Publisher incrementalArmTrajRecordPublisher_;       // /vr_incremental/arm_traj，录包/观测（度）
+  ros::Publisher incrementalArmTrajRadRecordPublisher_;    // /vr_incremental/arm_traj_rad，录包/观测（弧度）
+  ros::Publisher kuavoArmTrajControlPublisher_;              // /kuavo_arm_traj，始终发布供 MPC 同步；WBC 增量时走 SHM
+  std::atomic<int8_t> incrementalArmTrajTransport_{
+      kuavo_msgs::SetIncrementalArmTrajLink::Request::TRANSPORT_NONE};
+  ros::ServiceClient setIncrementalArmTrajLinkClient_;
+  ros::ServiceServer setIncrementalArmTrajLinkServer_;
+  std::unique_ptr<kuavo_common::ArmTrajShmManager> armTrajShm_;
+  bool enableArmTrajShadowPublish_{false};
+  ros::Publisher kuavoArmTrajShadowPublisher_;  // /vr_incremental/arm_traj_shadow_rad
   ros::Publisher sensorDataArmJointsPublisher_;      // 发布传感器数据的手臂关节角
   ros::Publisher leftHandPosePublisher_;             // 发布左手pose
   ros::Publisher rightHandPosePublisher_;            // 发布右手pose
@@ -274,8 +290,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher lockWaitSolveJointMeanMsPublisher_;
   ros::Publisher pubArmTrajTotalMsPublisher_;
   ros::Publisher pubArmTrajPeriodMsPublisher_;
+  ros::Publisher pubArmTrajStampPeriodMsPublisher_;
   std::chrono::steady_clock::time_point lastPubArmTrajWallStart_{};
   bool hasLastPubArmTrajWallStart_ = false;
+  ros::Time lastArmTrajPublishStamp_;
+  bool hasLastArmTrajPublishStamp_ = false;
 
   std::thread ikSolveThread_;
   std::thread jointStatePublishThread_;

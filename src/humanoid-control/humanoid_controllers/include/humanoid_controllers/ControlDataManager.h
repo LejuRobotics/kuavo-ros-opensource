@@ -12,6 +12,7 @@
 #include <kuavo_msgs/sensorsData.h>
 #include <kuavo_msgs/jointCmd.h>
 #include <kuavo_msgs/changeArmCtrlMode.h>
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include <kuavo_msgs/lbBaseLinkPoseCmdSrv.h>
 #include <kuavo_msgs/robotHeadMotionData.h>
 #include <nav_msgs/Odometry.h>
@@ -19,13 +20,18 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Float64.h>
 #include <std_msgs/Int8.h>
+
+#include <chrono>
 
 #include "humanoid_interface/common/Types.h"
 #include "kuavo_common/common/sensor_data.h"
 #include "humanoid_interface_drake/kuavo_data_buffer.h"
 #include "humanoid_controllers/shm_manager.h"
 #include "humanoid_controllers/shm_data_structure.h"
+#include "kuavo_common/common/arm_traj_shm.h"
+#include <thread>
 
 namespace humanoidController_wheel_wbc {
 using namespace ocs2;
@@ -175,6 +181,10 @@ public:
      * @return 如果所有需要的数据都就绪，返回true
      */
     bool isDataReady(bool check_motion_data = true) const;
+
+    bool setIncrementalArmTrajLink(int8_t transport, std::string* message = nullptr);
+    bool handleSetIncrementalArmTrajLink(typename kuavo_msgs::SetIncrementalArmTrajLink::Request& req,
+                                         typename kuavo_msgs::SetIncrementalArmTrajLink::Response& res);
     
     // ========== 服务注册接口 ==========
     
@@ -210,6 +220,9 @@ private:
     bool whole_torso_ctrl_{false};  // VR全身控制模式默认关闭
     int8_t lb_mpc_control_mode_{2}; // 轮臂MPC控制模式，默认2（baseonly模式）
     bool use_shm_communication_{false};  // 是否使用共享内存通信
+    bool incremental_arm_traj_link_capable_{true};
+    std::atomic<int8_t> incremental_arm_traj_transport_{
+        kuavo_msgs::SetIncrementalArmTrajLink::Request::TRANSPORT_NONE};
     int arm_num_{-1};
     int low_joint_num_{-1};
     int head_num_{-1};
@@ -229,6 +242,27 @@ private:
 
     // 共享内存管理器
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;
+    std::unique_ptr<kuavo_common::ArmTrajShmManager> arm_traj_shm_;
+    std::thread arm_traj_shm_reader_thread_;
+    std::atomic<bool> arm_traj_shm_reader_running_{false};
+    std::mutex arm_traj_sub_mutex_;
+    std::chrono::steady_clock::time_point last_arm_traj_shm_receive_wall_{};
+    bool has_last_arm_traj_shm_receive_wall_{false};
+    double arm_traj_shm_stale_timeout_sec_{0.3};
+    void armTrajShmReaderThreadFunction();
+    void ensureArmTrajRosSubscription(bool enable);
+    void deactivateIncrementalArmTrajLink(const char* reason);
+
+    enum class ArmTrajSource { kRosTopic, kIncrementalShm };
+    bool shouldAcceptArmTrajFrom(ArmTrajSource source) const;
+    void ingestArmJointTrajectory(ArmTrajSource source,
+                                  const double* pos_rad,
+                                  const double* vel_rad,
+                                  const double* tau,
+                                  int count,
+                                  uint64_t stamp_nsec = 0);
+    void recordArmTrajReceiveTiming(uint64_t stamp_nsec);
+    void publishArmTrajReceiveStatus();
 
      // 头部关节限位 [yaw, pitch]（角度）
      static constexpr std::array<std::pair<double, double>, 2> HEAD_JOINT_LIMITS = {
@@ -311,6 +345,22 @@ private:
     void armJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
     void legJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
     void lbMpcControlModeCallback(const std_msgs::Int8::ConstPtr& msg);
+
+    // /kuavo_arm_traj 订阅端到达诊断（PlotJuggler: /ik_debug/arm_traj_receive/*）
+    bool enable_arm_traj_receive_timing_log_{false};
+    bool arm_traj_receive_timing_initialized_{false};
+    ros::Publisher arm_traj_receive_latency_ms_pub_;
+    ros::Publisher arm_traj_receive_period_ms_pub_;
+    ros::Publisher arm_traj_receive_stamp_period_ms_pub_;
+    ros::Publisher arm_traj_using_shm_pub_;
+    ros::Publisher arm_traj_transport_pub_;
+    bool arm_traj_receive_status_initialized_{false};
+    std::chrono::steady_clock::time_point last_arm_traj_receive_wall_{};
+    ros::Time last_arm_traj_header_stamp_;
+    bool has_last_arm_traj_receive_wall_{false};
+    bool has_last_arm_traj_header_stamp_{false};
+    void ensureArmTrajReceiveTimingPublishers();
+    void publishArmTrajReceiveTimingMs(const ros::Publisher& publisher, double ms) const;
     
     // ========== 辅助函数 ==========
     double rosQuaternionToYaw(const geometry_msgs::Quaternion& ros_quat) const;

@@ -32,6 +32,7 @@ find_package(catkin REQUIRED COMPONENTS
   noitom_hi5_hand_udp_python
   leju_utils
   humanoid_wheel_interface
+  kuavo_common
   ocs2_core
   ocs2_msgs
 )
@@ -72,7 +73,7 @@ find_package(Boost REQUIRED COMPONENTS
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES motion_capture_ik_lib
-  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core ocs2_msgs humanoid_wheel_interface
+  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core ocs2_msgs humanoid_wheel_interface kuavo_common
   DEPENDS drake Eigen3
 )
 
