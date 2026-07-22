@@ -175,12 +175,18 @@ namespace mobile_manipulator
       old_joy_msg_.buttons = std::vector<int32_t>(12, 0);
       
       // 躯干积分增益（沿用旧参数名，内部 ×kTorsoVelCalibHz 转换为 vel_scale）
-      // BT2/BT2Pro 默认值（硬编码，无 ROS param 覆盖 — 与旧代码一致）
+      // BT2/BT2Pro/Xbox 默认值（可 ROS param 覆盖，与 G12 同形式）
       // 体感对齐：假定遥控约 500Hz（旧 per-msg 积分等效速度 = gain × f）
-      integral_gain_linear_x_ = 0.001;   // ×500 = 0.50 m/s
-      integral_gain_linear_z_ = 0.004;   // ×500 = 2.00 m/s
-      integral_gain_angular_y_ = 0.003;  // ×500 = 1.50 rad/s
-      integral_gain_angular_z_ = 0.005;  // ×500 = 2.50 rad/s
+      // z 默认值 ×0.2 对齐 G12：G12 右摇杆在 Python 层被 SCALE_RIGHT_STICK_Z=0.2 预缩放，
+      // BT2 /joy 不预缩放，故等价于把 BT2 的 vel_scale_z 乘 0.2（0.004×0.2=0.0008 → 0.40 m/s）。
+      bt2_wheelarm_integral_gain_linear_x_ = 0.001;   // ×500 = 0.50 m/s
+      bt2_wheelarm_integral_gain_linear_z_ = 0.0008;  // ×500 = 0.40 m/s（对齐 G12 满杆 0.4）
+      bt2_wheelarm_integral_gain_angular_y_ = 0.003;  // ×500 = 1.50 rad/s
+      bt2_wheelarm_integral_gain_angular_z_ = 0.005;  // ×500 = 2.50 rad/s
+      nodeHandle_.param("bt2_wheelarm_integral_gain_linear_x", bt2_wheelarm_integral_gain_linear_x_, bt2_wheelarm_integral_gain_linear_x_);
+      nodeHandle_.param("bt2_wheelarm_integral_gain_linear_z", bt2_wheelarm_integral_gain_linear_z_, bt2_wheelarm_integral_gain_linear_z_);
+      nodeHandle_.param("bt2_wheelarm_integral_gain_angular_y", bt2_wheelarm_integral_gain_angular_y_, bt2_wheelarm_integral_gain_angular_y_);
+      nodeHandle_.param("bt2_wheelarm_integral_gain_angular_z", bt2_wheelarm_integral_gain_angular_z_, bt2_wheelarm_integral_gain_angular_z_);
 
       // G12 轮臂默认值（同 BT2，可 ROS param 覆盖，沿用旧名）
       g12_wheelarm_integral_gain_linear_x_ = 0.001;
@@ -195,10 +201,10 @@ namespace mobile_manipulator
       // 内部转换：gain → vel_scale = gain × kTorsoVelCalibHz
       // 体感标定 500Hz（用户手感：旧实现更快；bag 中位 ~300 偏慢）
       static constexpr double kTorsoVelCalibHz = 500.0;
-      torso_vel_scale_x_ = integral_gain_linear_x_ * kTorsoVelCalibHz;
-      torso_vel_scale_z_ = integral_gain_linear_z_ * kTorsoVelCalibHz;
-      torso_vel_scale_pitch_ = integral_gain_angular_y_ * kTorsoVelCalibHz;
-      torso_vel_scale_yaw_ = integral_gain_angular_z_ * kTorsoVelCalibHz;
+      torso_vel_scale_x_ = bt2_wheelarm_integral_gain_linear_x_ * kTorsoVelCalibHz;
+      torso_vel_scale_z_ = bt2_wheelarm_integral_gain_linear_z_ * kTorsoVelCalibHz;
+      torso_vel_scale_pitch_ = bt2_wheelarm_integral_gain_angular_y_ * kTorsoVelCalibHz;
+      torso_vel_scale_yaw_ = bt2_wheelarm_integral_gain_angular_z_ * kTorsoVelCalibHz;
 
       g12_torso_vel_scale_x_ = g12_wheelarm_integral_gain_linear_x_ * kTorsoVelCalibHz;
       g12_torso_vel_scale_z_ = g12_wheelarm_integral_gain_linear_z_ * kTorsoVelCalibHz;
@@ -301,11 +307,11 @@ namespace mobile_manipulator
     // 保存上一次的手柄消息（用于检测按钮按下事件）
     sensor_msgs::Joy old_joy_msg_;
 
-    // Torso integral gains (BT2/BT2Pro, hardcoded defaults — no ROS param override, matching old code)
-    double integral_gain_linear_x_;
-    double integral_gain_linear_z_;
-    double integral_gain_angular_y_;
-    double integral_gain_angular_z_;
+    // Torso integral gains (BT2/BT2Pro, ROS-param overridable, aligned with G12)
+    double bt2_wheelarm_integral_gain_linear_x_;
+    double bt2_wheelarm_integral_gain_linear_z_;
+    double bt2_wheelarm_integral_gain_angular_y_;
+    double bt2_wheelarm_integral_gain_angular_z_;
 
     // G12 wheel-arm integral gains (defaults same as BT2, can be overridden via ROS param)
     double g12_wheelarm_integral_gain_linear_x_;
@@ -313,7 +319,7 @@ namespace mobile_manipulator
     double g12_wheelarm_integral_gain_angular_y_;
     double g12_wheelarm_integral_gain_angular_z_;
 
-    // Internal vel_scale = integral_gain × kTorsoVelCalibHz (BT2/BT2Pro)
+    // Internal vel_scale = bt2_wheelarm_integral_gain_* × kTorsoVelCalibHz (BT2/BT2Pro)
     double torso_vel_scale_x_;
     double torso_vel_scale_z_;
     double torso_vel_scale_pitch_;
@@ -929,9 +935,24 @@ namespace mobile_manipulator
 
       // ========== BT2Pro / BT2 / Xbox：底盘逻辑同前；躯干改为 /cmd_torso_vel ==========
 
+      // 检测RT轴是否按下（用于复位功能，RT轴值通常小于-0.5表示按下）
+      // 此复位逻辑在BT2/Xbox分支顶层处理，与G12的M2复位一致，确保在任何模式下都能复位躯干。
+      bool rt_pressed = (joy_msg->axes[rt_axis_index_] < -0.5);
+      bool old_rt_pressed = (old_joy_msg_.axes.size() > static_cast<size_t>(rt_axis_index_) &&
+                             old_joy_msg_.axes[rt_axis_index_] < -0.5);
+      bool rt_just_pressed = rt_pressed && !old_rt_pressed;
+
+      if (rt_just_pressed)
+      {
+        zero_control_start_time_ = ros::Time::now();
+        is_control_zero_ = true;
+        resetTorsoToInitialAsync(nodeHandle_);
+        ROS_INFO("Torso reset command sent from BT2/Xbox");
+      }
+
       // 检测模式切换组合键
       bool lb_pressed = (joy_msg->buttons[joyButtonMap["BUTTON_LB"]] == 1);
-      
+
       // 尝试切换模式的辅助函数
       auto trySwitchMode = [this, &joy_msg](ControlMode new_mode) {
         if (canSwitchMode(joy_msg))
@@ -992,23 +1013,10 @@ namespace mobile_manipulator
       if (current_mode_ == ControlMode::TORSO_CONTROL)
       {
         // ========== 躯干控制模式（速度接口，无上层开环绝对位姿）==========
-        // 与旧 BT2 相同的修饰键语义：LB 管 x/z，RB 管 pitch/yaw；RT 复位。
+        // 与旧 BT2 相同的修饰键语义：LB 管 x/z，RB 管 pitch/yaw；RT 复位已在分支顶层处理。
         // Workspace limits enforced here via velocity gate; open-loop integration in ReferenceManager (cmdTorsoPose_).
 
         bool rb_pressed = (joy_msg->buttons[joyButtonMap["BUTTON_RB"]] == 1);
-
-        bool rt_pressed = (joy_msg->axes[rt_axis_index_] < -0.5);
-        bool old_rt_pressed = (old_joy_msg_.axes.size() > static_cast<size_t>(rt_axis_index_) &&
-                               old_joy_msg_.axes[rt_axis_index_] < -0.5);
-        bool rt_just_pressed = rt_pressed && !old_rt_pressed;
-
-        if (rt_just_pressed)
-        {
-          zero_control_start_time_ = ros::Time::now();
-          is_control_zero_ = true;
-          resetTorsoToInitialAsync(nodeHandle_);
-          ROS_INFO("Torso control reset completed");
-        }
 
         double lx = 0.0, lz = 0.0, ay = 0.0, az = 0.0;
         if (lb_pressed)
