@@ -5,7 +5,7 @@ chmod +x "$0" 2>/dev/null || true
 
 usage() {
   cat <<'EOF'
-用法: run_chessboard_calibration.sh [capture|optimize|test|move] [--build] [--loops N] [--out_dir DIR] [--robot_layout biped52|wheel62]
+用法: run_chessboard_calibration.sh [capture|optimize|test|move] [--build] [--loops N] [--out_dir DIR] [--robot_layout biped52|biped56|wheel62]
 
 说明:
   - 运行后可选择：头部标定 / 右手标定 / 左手标定 / 全部串行
@@ -13,13 +13,13 @@ usage() {
   - optimize: 启动对应 demo 的 optimize_from_csv（从 CSV 读取）
   - test: 读取 teach_*_joint_test.json 下发测试姿态并采数到带 _test 后缀目录，采数完自动画图输出测试图片
   - move: 仅下发 teach JSON 中的多姿态关节轨迹（不采数、不写 CSV），适用于“内参标定只需运动覆盖”的场景
-  - 机型：默认读 ROBOT_VERSION（52→biped52，62/63→wheel62）；可用 --robot_layout 覆盖
+  - 机型：默认读 ROBOT_VERSION（52→biped52，56→biped56，62/63→wheel62）；可用 --robot_layout 覆盖
 
 选项:
   --build       先编译 robot_calibration、robot_calibration_msgs 和 kuavo_msgs
   --loops N     仅头部有效：关键帧轨迹循环次数（默认 1）
   --out_dir DIR 覆盖 CSV 输出目录（不填则使用默认输出目录）
-  --robot_layout biped52|wheel62  覆盖 ROBOT_VERSION 自动识别
+  --robot_layout biped52|biped56|wheel62  覆盖 ROBOT_VERSION 自动识别
 EOF
 }
 
@@ -66,13 +66,14 @@ die() {
 resolve_robot_layout() {
   if [[ -n "${ROBOT_LAYOUT_ARG}" ]]; then
     case "${ROBOT_LAYOUT_ARG}" in
-      biped52|wheel62) echo "${ROBOT_LAYOUT_ARG}"; return 0 ;;
-      *) die "无效的 --robot_layout: ${ROBOT_LAYOUT_ARG}（仅 biped52|wheel62）" ;;
+      biped52|biped56|wheel62) echo "${ROBOT_LAYOUT_ARG}"; return 0 ;;
+      *) die "无效的 --robot_layout: ${ROBOT_LAYOUT_ARG}（仅 biped52|biped56|wheel62）" ;;
     esac
   fi
   local rv="${ROBOT_VERSION:-}"
   case "${rv}" in
     52) echo "biped52" ;;
+    56) echo "biped56" ;;
     62|63) echo "wheel62" ;;
     "")
       echo "biped52"
@@ -88,6 +89,9 @@ ROBOT_LAYOUT="$(resolve_robot_layout)"
 if [[ "${ROBOT_LAYOUT}" == "wheel62" ]]; then
   NOMINAL_URDF="${CC_DIR}/biped_v3_arm_s62.urdf"
   CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_s62_calibrated.urdf"
+elif [[ "${ROBOT_LAYOUT}" == "biped56" ]]; then
+  NOMINAL_URDF="${CC_DIR}/biped_v3_arm_s56.urdf"
+  CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_s56_calibrated.urdf"
 else
   NOMINAL_URDF="${CC_DIR}/biped_v3_arm.urdf"
   CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_calibrated.urdf"
@@ -1034,4 +1038,3 @@ if [[ "${MODE}" == "optimize" ]]; then
 
   echo "[INFO] 优化阶段结束；完整指标已保存: ${OPTIMIZE_METRICS_FILE}"
 fi
-

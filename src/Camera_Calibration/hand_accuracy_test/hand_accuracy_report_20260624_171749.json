@@ -1,0 +1,343 @@
+{
+  "meta": {
+    "timestamp": "2026-06-24T17:17:49.597514",
+    "config": {
+      "teach": {
+        "left_json": "/home/lab/cfl/kuavo-ros-control/src/Camera_Calibration/teach_capture_output/teach_left_joint_test.json",
+        "right_json": "/home/lab/cfl/kuavo-ros-control/src/Camera_Calibration/teach_capture_output/teach_right_joint_test.json",
+        "skip_first_last": false
+      },
+      "mocap_bodies": [
+        {
+          "name": "l_hand",
+          "topic": "/l_hand_pose",
+          "msg_type": "PoseStamped",
+          "link_offset_mm": [
+            0.0,
+            -0.5,
+            55.4
+          ]
+        },
+        {
+          "name": "r_hand",
+          "topic": "/r_hand_pose",
+          "msg_type": "PoseStamped",
+          "link_offset_mm": [
+            0.0,
+            0.5,
+            55.4
+          ]
+        },
+        {
+          "name": "torso",
+          "topic": "/torso_pose",
+          "msg_type": "PoseStamped",
+          "link_offset_mm": [
+            122.02,
+            -45.82,
+            2.5
+          ]
+        }
+      ],
+      "mocap_frame_align": {
+        "enabled": true,
+        "axis_flip": [
+          1,
+          -1,
+          1
+        ]
+      },
+      "tf": {
+        "parent_frame": "waist_yaw_link",
+        "left_child_frame": "zarm_l7_end_effector",
+        "right_child_frame": "zarm_r7_end_effector",
+        "lookup_timeout_sec": 2.0
+      },
+      "robot": {
+        "robot_layout": "wheel62",
+        "sensor_topic": "/sensors_data_raw",
+        "arm_traj_topic": "/kuavo_arm_traj",
+        "left_start_index": 4,
+        "right_start_index": 11,
+        "dt": 0.01,
+        "move_duration": 2.0,
+        "hold_sec": 5.0,
+        "mocap_collect_sec": 1.0,
+        "startup_align_sec": 2.0,
+        "return_to_zero_sec": 2.0,
+        "wait_sensors_timeout": 30.0,
+        "set_external_control_mode": true,
+        "enable_arm_quick_mode": true,
+        "enable_arm_traj_interpolator": true
+      },
+      "processing": {
+        "sigma": 3.0,
+        "warn_threshold_mm": 5.0
+      },
+      "output": {
+        "json_path": "",
+        "csv_path": ""
+      }
+    },
+    "teach_left": "/home/lab/cfl/kuavo-ros-control/src/Camera_Calibration/teach_capture_output/teach_left_joint_test.json",
+    "teach_right": "/home/lab/cfl/kuavo-ros-control/src/Camera_Calibration/teach_capture_output/teach_right_joint_test.json",
+    "waypoint_count": 6,
+    "measured_count": 6,
+    "tf_parent": "waist_yaw_link",
+    "tf_left_child": "zarm_l7_end_effector",
+    "tf_right_child": "zarm_r7_end_effector",
+    "warn_threshold_mm": 5.0
+  },
+  "waypoints": [
+    {
+      "name": "T0",
+      "index": 0,
+      "mocap_left_in_torso_m": [
+        0.42801932590458186,
+        0.24592470497531826,
+        -0.3369271014223261
+      ],
+      "mocap_right_in_torso_m": [
+        0.42413911647179214,
+        -0.2375334353069553,
+        -0.3401027297771476
+      ],
+      "tf_left_in_waist_m": [
+        0.42047387564607475,
+        0.25311236862361125,
+        -0.32796459796353006
+      ],
+      "tf_right_in_waist_m": [
+        0.41988067462686907,
+        -0.25348188477675115,
+        -0.32836485123862524
+      ],
+      "error_left": {
+        "dx_mm": 7.545450258507113,
+        "dy_mm": -7.187663648292986,
+        "dz_mm": -8.962503458796068,
+        "norm_mm": 13.744918936593587
+      },
+      "error_right": {
+        "dx_mm": 4.258441844923078,
+        "dy_mm": 15.948449469795845,
+        "dz_mm": -11.737878538522374,
+        "norm_mm": 20.255003333061374
+      },
+      "mocap_raw_frames": 100,
+      "mocap_valid_frames_left": 100,
+      "mocap_valid_frames_right": 100
+    },
+    {
+      "name": "T0",
+      "index": 1,
+      "mocap_left_in_torso_m": [
+        0.600456021398532,
+        0.11280667382332686,
+        0.23243076299327906
+      ],
+      "mocap_right_in_torso_m": [
+        0.5998930004083396,
+        -0.11645691504911344,
+        0.22121145058043093
+      ],
+      "tf_left_in_waist_m": [
+        0.5992537057580859,
+        0.11900964954344978,
+        0.23950299686694332
+      ],
+      "tf_right_in_waist_m": [
+        0.5996471191831081,
+        -0.1198537794323083,
+        0.24138958518576342
+      ],
+      "error_left": {
+        "dx_mm": 1.20231564044615,
+        "dy_mm": -6.202975720122919,
+        "dz_mm": -7.072233873664263,
+        "norm_mm": 9.483615483954425
+      },
+      "error_right": {
+        "dx_mm": 0.24588122523150346,
+        "dy_mm": 3.3968643831948504,
+        "dz_mm": -20.17813460533249,
+        "norm_mm": 20.46353491862185
+      },
+      "mocap_raw_frames": 100,
+      "mocap_valid_frames_left": 99,
+      "mocap_valid_frames_right": 98
+    },
+    {
+      "name": "T1",
+      "index": 2,
+      "mocap_left_in_torso_m": [
+        0.5987189726873248,
+        0.16299604838651177,
+        0.3967239616875442
+      ],
+      "mocap_right_in_torso_m": [
+        0.5988797061286087,
+        -0.1672238480156477,
+        0.38355509336554217
+      ],
+      "tf_left_in_waist_m": [
+        0.6009926213420547,
+        0.16912360534791068,
+        0.3912879632090692
+      ],
+      "tf_right_in_waist_m": [
+        0.6011876982395408,
+        -0.17064772094603,
+        0.3920158891375448
+      ],
+      "error_left": {
+        "dx_mm": -2.2736486547298984,
+        "dy_mm": -6.127556961398911,
+        "dz_mm": 5.435998478474979,
+        "norm_mm": 8.50097123735433
+      },
+      "error_right": {
+        "dx_mm": -2.3079921109320223,
+        "dy_mm": 3.4238729303822932,
+        "dz_mm": -8.46079577200265,
+        "norm_mm": 9.41460559572556
+      },
+      "mocap_raw_frames": 100,
+      "mocap_valid_frames_left": 99,
+      "mocap_valid_frames_right": 98
+    },
+    {
+      "name": "T2",
+      "index": 3,
+      "mocap_left_in_torso_m": [
+        0.6431289470071372,
+        0.20848937010101118,
+        0.31241279349798395
+      ],
+      "mocap_right_in_torso_m": [
+        0.644444481374962,
+        -0.21272852614698337,
+        0.3011513037927979
+      ],
+      "tf_left_in_waist_m": [
+        0.6445282711453976,
+        0.2149377561245649,
+        0.3142418306858344
+      ],
+      "tf_right_in_waist_m": [
+        0.6448584296197988,
+        -0.21467364446139697,
+        0.3120885908880984
+      ],
+      "error_left": {
+        "dx_mm": -1.3993241382603827,
+        "dy_mm": -6.448386023553715,
+        "dz_mm": -1.8290371878504352,
+        "norm_mm": 6.84727444953252
+      },
+      "error_right": {
+        "dx_mm": -0.4139482448367593,
+        "dy_mm": 1.945118314413602,
+        "dz_mm": -10.937287095300508,
+        "norm_mm": 11.116613126824989
+      },
+      "mocap_raw_frames": 100,
+      "mocap_valid_frames_left": 98,
+      "mocap_valid_frames_right": 99
+    },
+    {
+      "name": "T3",
+      "index": 4,
+      "mocap_left_in_torso_m": [
+        0.6647509315034635,
+        0.1500111565612523,
+        0.2256620205628547
+      ],
+      "mocap_right_in_torso_m": [
+        0.6643938581791705,
+        -0.1603836918824679,
+        0.2149509274624687
+      ],
+      "tf_left_in_waist_m": [
+        0.6682232122048551,
+        0.17013882069240194,
+        0.22773211675332944
+      ],
+      "tf_right_in_waist_m": [
+        0.6682544727962697,
+        -0.1700960330241483,
+        0.2265095926493732
+      ],
+      "error_left": {
+        "dx_mm": -3.4722807013916057,
+        "dy_mm": -20.127664131149636,
+        "dz_mm": -2.0700961904747404,
+        "norm_mm": 20.529610198039375
+      },
+      "error_right": {
+        "dx_mm": -3.8606146170991895,
+        "dy_mm": 9.712341141680403,
+        "dz_mm": -11.558665186904516,
+        "norm_mm": 15.583217144643019
+      },
+      "mocap_raw_frames": 100,
+      "mocap_valid_frames_left": 100,
+      "mocap_valid_frames_right": 100
+    },
+    {
+      "name": "T0",
+      "index": 5,
+      "mocap_left_in_torso_m": [
+        0.4232824377736566,
+        0.24797609997026995,
+        -0.34037597784978757
+      ],
+      "mocap_right_in_torso_m": [
+        0.419479197143008,
+        -0.23844534848750346,
+        -0.34383766309513814
+      ],
+      "tf_left_in_waist_m": [
+        0.41447985964579115,
+        0.2546457207427137,
+        -0.3323156473765655
+      ],
+      "tf_right_in_waist_m": [
+        0.4140720627514428,
+        -0.2553630108044733,
+        -0.3325422249317449
+      ],
+      "error_left": {
+        "dx_mm": 8.802578127865445,
+        "dy_mm": -6.669620772443735,
+        "dz_mm": -8.060330473222077,
+        "norm_mm": 13.672532694528124
+      },
+      "error_right": {
+        "dx_mm": 5.407134391565204,
+        "dy_mm": 16.917662316969867,
+        "dz_mm": -11.295438163393234,
+        "norm_mm": 21.048309288456156
+      },
+      "mocap_raw_frames": 100,
+      "mocap_valid_frames_left": 99,
+      "mocap_valid_frames_right": 99
+    }
+  ],
+  "summary": {
+    "left_norm_mm": {
+      "mean": 12.129820500000394,
+      "max": 20.529610198039375,
+      "std": 4.539111726237113
+    },
+    "right_norm_mm": {
+      "mean": 16.31354723455549,
+      "max": 21.048309288456156,
+      "std": 4.660335244695653
+    }
+  },
+  "output": {
+    "json": "/home/lab/cfl/kuavo-ros-control/src/Camera_Calibration/hand_accuracy_test/hand_accuracy_report_20260624_171749.json",
+    "csv": "/home/lab/cfl/kuavo-ros-control/src/Camera_Calibration/hand_accuracy_test/hand_accuracy_report_20260624_171749.csv"
+  }
+}

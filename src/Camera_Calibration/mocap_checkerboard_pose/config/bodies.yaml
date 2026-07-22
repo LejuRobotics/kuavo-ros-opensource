@@ -1,0 +1,31 @@
+# Motive 刚体配置：名称、ROS 话题、消息类型
+# link_offset_mm：工装原点在对应 link 坐标系下的位置 (mm)；处理时从动捕位姿反推 link 位姿
+bodies:
+  - name: checkerboard
+    topic: /checkerboard_pose
+    msg_type: PoseStamped
+    link_offset_mm: [-203.93, -153.93, 11.50]
+  - name: torso
+    topic: /torso_pose
+    msg_type: PoseStamped
+    link_offset_mm: [122.02, -45.82, 2.50]
+  - name: l_shoulder
+    topic: /l_shoulder_pose
+    msg_type: PoseStamped
+    link_offset_mm: [0.0, -53.50, 105.00]
+
+  # - name: l_hand
+  #   topic: /l_hand_pose
+  #   msg_type: PoseStamped
+  #   link_offset_mm: [0.0, -0.50, 55.4]  # z = 170 - 114.6=55.4
+  # - name: r_hand
+  #   topic: /r_hand_pose
+  #   msg_type: PoseStamped
+  #   link_offset_mm: [0.0, 0.50, 55.4]
+
+# 相对位姿计算：child 在 parent 坐标系下的位姿（基于 link 位姿，非工装刚体）
+relative_pairs:
+  - child: checkerboard
+    parent: l_shoulder
+  - child: checkerboard
+    parent: torso
