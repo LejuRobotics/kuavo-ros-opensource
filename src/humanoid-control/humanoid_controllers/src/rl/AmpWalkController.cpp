@@ -7,6 +7,7 @@
 #include <angles/angles.h>
 #include "kuavo_common/common/common.h"
 #include <ros/package.h>
+#include <std_msgs/Int32.h>
 #include <cmath>
 #include <thread>
 
@@ -68,6 +69,8 @@ namespace humanoid_controller
     {
       ROS_WARN("[%s] /is_roban not found in ROS params, using default: %d", name_.c_str(), static_cast<int>(is_roban_));
     }
+    robot_version_int_ = 45;
+    nh_.param("/robot_version", robot_version_int_, 45);
 
 
     // 初始化ankleSolver（从ROS参数获取，如果不存在则使用默认值）
@@ -109,14 +112,18 @@ namespace humanoid_controller
     // AMP 模式切换服务：每个 AMP 控制器独立命名，避免多实例抢占同一服务
     const std::string change_amp_mode_srv_name =
         "/humanoid_controller/" + name_ + "/change_amp_mode";
+    const std::string amp_mode_event_topic =
+        "/humanoid_controller/" + name_ + "/amp_mode";
+    amp_mode_event_pub_ = nh_.advertise<std_msgs::Int32>(amp_mode_event_topic, 1, true);
     change_amp_mode_srv_ = nh_.advertiseService(change_amp_mode_srv_name,
                                                 &AmpWalkController::changeAmpModeCallback,
                                                 this);
+    publishAmpModeEvent();
 
     initialized_ = true;
 
-    ROS_INFO("[%s] AmpWalkController initialized (change_amp_mode: %s)",
-             name_.c_str(), change_amp_mode_srv_name.c_str());
+    ROS_INFO("[%s] AmpWalkController initialized (change_amp_mode: %s, amp_mode_event: %s)",
+             name_.c_str(), change_amp_mode_srv_name.c_str(), amp_mode_event_topic.c_str());
     return true;
   }
 
@@ -135,7 +142,28 @@ namespace humanoid_controller
       return true;
     }
 
+    if (amp_mode_ == 1 && requested_mode == 0 && isSquatPostureDefenseActive())
+    {
+      const SensorData sensor_data = getRobotSensorData();
+      const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+      const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
+      ROS_WARN_THROTTLE(0.5,
+                        "[%s] Squat posture defense: reject exit from posture mode "
+                        "(knee_l=%.3f, knee_r=%.3f, kneeThreshold=%.3f).",
+                        name_.c_str(), knee_l, knee_r,
+                        squat_posture_defense_height_threshold_);
+      res.result = false;
+      res.mode = amp_mode_;
+      res.message = "Squat posture defense active, cannot exit posture control mode";
+      return true;
+    }
+
     amp_mode_ = requested_mode;
+    if (requested_mode != 1)
+    {
+      squat_posture_deep_seen_ = false;
+    }
+    publishAmpModeEvent();
 
     ROS_INFO("[%s] AMP mode switched to %d (0: pure AMP walk, 1: stance/bend/squat with arms, 2: walk with arms).",
              name_.c_str(), amp_mode_);
@@ -144,6 +172,17 @@ namespace humanoid_controller
     res.mode = amp_mode_;
     res.message = "AMP mode updated successfully";
     return true;
+  }
+
+  void AmpWalkController::publishAmpModeEvent()
+  {
+    if (!amp_mode_event_pub_)
+    {
+      return;
+    }
+    std_msgs::Int32 msg;
+    msg.data = amp_mode_;
+    amp_mode_event_pub_.publish(msg);
   }
 
   bool AmpWalkController::loadConfig(const std::string& rlParamFile)
@@ -247,57 +286,158 @@ namespace humanoid_controller
       cmdVelLineXUp_ = velocityLimits_(0);
       loadData::loadPtreeValue(pt, cmdVelLineXLow_, "cmdVelLineXlow", false);
       loadData::loadPtreeValue(pt, cmdVelLineXUp_, "cmdVelLineXup", false);
+      loadData::loadPtreeValue(pt, cmdVelLineXNeg_, "cmdVelLineXNeg", false);
+      loadData::loadPtreeValue(pt, squatHeightMin_, "squatHeightMin", false);
+      loadData::loadPtreeValue(pt, squatHeightMax_, "squatHeightMax", false);
+      if (pt.find("squatPostureDefense") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, squat_posture_defense_enabled_,
+                                 "squatPostureDefense.enabled", false);
+        loadData::loadPtreeValue(pt, squat_posture_defense_height_threshold_,
+                                 "squatPostureDefense.heightThreshold", false);
+        ROS_INFO("[%s] SquatPostureDefense: enabled=%s, heightThreshold=%.3f",
+                 name_.c_str(),
+                 squat_posture_defense_enabled_ ? "true" : "false",
+                 squat_posture_defense_height_threshold_);
+      }
+      loadData::loadPtreeValue(pt, ampVRcmdvelLinearXLimit_, "ampVRcmdvelLinearXLimit", false);
+      loadData::loadPtreeValue(pt, ampVRcmdvelLinearYLimit_, "ampVRcmdvelLinearYLimit", false);
+      loadData::loadPtreeValue(pt, ampVRcmdvelLinearZLimit_, "ampVRcmdvelLinearZLimit", false);
+      loadData::loadPtreeValue(pt, ampVRcmdvelAngularYAWLimit_, "ampVRcmdvelAngularYAWLimit", false);
       loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
       loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
       loadData::loadPtreeValue(pt, enable_back_arm_enhance_, "enable_back_arm_enhance", false);
-      loadData::loadPtreeValue(pt, enable_roll_compensation_, "enable_roll_compensation", false);
+      loadData::loadPtreeValue(pt, enable_standup_enhance_, "enable_standup_enhance", false);
+      loadData::loadPtreeValue(pt, enable_roll_compensation_closed_loop_,
+                               "enable_roll_compensation_closed_loop", false);
+      if (pt.find("rollCompensationClosedLoop") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_cmd_x_min_,
+                                 "rollCompensationClosedLoop.cmdXMin", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_cmd_x_max_,
+                                 "rollCompensationClosedLoop.cmdXMax", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_abs_cmd_y_max_,
+                                 "rollCompensationClosedLoop.absCmdYMax", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_abs_cmd_ang_z_max_,
+                                 "rollCompensationClosedLoop.absCmdAngZMax", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_filter_time_constant_sec_,
+                                 "rollCompensationClosedLoop.filterTimeConstantSec", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_target_time_constant_sec_,
+                                 "rollCompensationClosedLoop.targetTimeConstantSec", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_kp_,
+                                 "rollCompensationClosedLoop.kp", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_ki_,
+                                 "rollCompensationClosedLoop.ki", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_max_deg_,
+                                 "rollCompensationClosedLoop.maxCompensationDeg", false);
+      }
+      roll_compensation_closed_loop_cmd_x_min_ =
+          std::max(roll_compensation_closed_loop_cmd_x_min_, 0.0);
+      roll_compensation_closed_loop_cmd_x_max_ =
+          std::max(roll_compensation_closed_loop_cmd_x_max_,
+                   roll_compensation_closed_loop_cmd_x_min_ + 1e-3);
+      roll_compensation_closed_loop_filter_time_constant_sec_ =
+          std::max(roll_compensation_closed_loop_filter_time_constant_sec_, 1e-3);
+      roll_compensation_closed_loop_target_time_constant_sec_ =
+          std::max(roll_compensation_closed_loop_target_time_constant_sec_, 1e-3);
+      roll_compensation_closed_loop_ki_ =
+          std::max(roll_compensation_closed_loop_ki_, 0.0);
+      roll_compensation_closed_loop_max_deg_ =
+          std::max(roll_compensation_closed_loop_max_deg_, 0.0);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
+      loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdangz_, "enable_off_cmdy_by_cmdangz", false);
       try
       {
-        Eigen::Matrix<double, 8, 1> tiny_cmd_clip;
+        Eigen::Matrix<double, 4, 1> tiny_cmd_clip;
         loadEigenMatrix("TinyCmdClip", tiny_cmd_clip);
-        tiny_cmdx_clip_pos_min_ = tiny_cmd_clip(0);
-        tiny_cmdx_clip_pos_max_ = tiny_cmd_clip(1);
-        tiny_cmdx_clip_neg_max_ = tiny_cmd_clip(2);
-        tiny_cmdx_clip_neg_min_ = tiny_cmd_clip(3);
-        tiny_cmdy_clip_min_ = tiny_cmd_clip(4);
-        tiny_cmdy_clip_max_ = tiny_cmd_clip(5);
-        tiny_cmd_angz_clip_min_ = tiny_cmd_clip(6);
-        tiny_cmd_angz_clip_max_ = tiny_cmd_clip(7);
-        tiny_cmdx_clip_enabled_ = (tiny_cmdx_clip_pos_max_ > tiny_cmdx_clip_pos_min_) &&
-                                  (tiny_cmdx_clip_neg_max_ > tiny_cmdx_clip_neg_min_);
+        tiny_cmdx_clip_min_ = tiny_cmd_clip(0);
+        tiny_cmdx_clip_max_ = tiny_cmd_clip(1);
+        tiny_cmdy_clip_min_ = tiny_cmd_clip(2);
+        tiny_cmdy_clip_max_ = tiny_cmd_clip(3);
+        tiny_cmdx_clip_enabled_ = tiny_cmdx_clip_max_ > tiny_cmdx_clip_min_;
         tiny_cmdy_clip_enabled_ = tiny_cmdy_clip_max_ > tiny_cmdy_clip_min_;
-        tiny_cmd_angz_clip_enabled_ = tiny_cmd_angz_clip_max_ > tiny_cmd_angz_clip_min_;
-        ROS_INFO("[%s] TinyCmdClip: pos[%.3f, %.3f)->%.3f, neg[%.3f, %.3f)->%.3f, "
-                 "cmd_y[%.3f, %.3f)->%.3f, angz[%.3f, %.3f)->%.3f, enabled=%s/%s/%s",
+        ROS_INFO("[%s] TinyCmdClip: cmd_x[%.3f, %.3f)->%.3f (enabled=%s), cmd_y[%.3f, %.3f)->%.3f (enabled=%s)",
                  name_.c_str(),
-                 tiny_cmdx_clip_pos_min_, tiny_cmdx_clip_pos_max_, tiny_cmdx_clip_pos_max_,
-                 tiny_cmdx_clip_neg_min_, tiny_cmdx_clip_neg_max_, tiny_cmdx_clip_neg_min_,
-                 tiny_cmdy_clip_min_, tiny_cmdy_clip_max_, tiny_cmdy_clip_max_,
-                 tiny_cmd_angz_clip_min_, tiny_cmd_angz_clip_max_, tiny_cmd_angz_clip_max_,
+                 tiny_cmdx_clip_min_, tiny_cmdx_clip_max_, tiny_cmdx_clip_max_,
                  tiny_cmdx_clip_enabled_ ? "true" : "false",
-                 tiny_cmdy_clip_enabled_ ? "true" : "false",
-                 tiny_cmd_angz_clip_enabled_ ? "true" : "false");
+                 tiny_cmdy_clip_min_, tiny_cmdy_clip_max_, tiny_cmdy_clip_max_,
+                 tiny_cmdy_clip_enabled_ ? "true" : "false");
       }
       catch (const std::exception& e)
       {
-        tiny_cmdx_clip_enabled_ = false;
         tiny_cmdy_clip_enabled_ = false;
-        tiny_cmd_angz_clip_enabled_ = false;
         ROS_WARN("[%s] TinyCmdClip not loaded: %s", name_.c_str(), e.what());
+      }
+
+      if (pt.find("lowSpeedKickStart") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, low_speed_kick_enabled_, "lowSpeedKickStart.enabled", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_velocity_, "lowSpeedKickStart.kickVelocity", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_duration_steps_, "lowSpeedKickStart.durationSteps", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_rest_threshold_, "lowSpeedKickStart.restCmdThreshold", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_trigger_velocity_, "lowSpeedKickStart.triggerVelocity", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_trigger_tolerance_, "lowSpeedKickStart.triggerTolerance", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_lateral_threshold_, "lowSpeedKickStart.lateralThreshold", false);
+        loadData::loadPtreeValue(pt, low_speed_kick_yaw_threshold_, "lowSpeedKickStart.yawThreshold", false);
+        low_speed_kick_duration_steps_ = std::max(low_speed_kick_duration_steps_, 1);
+        low_speed_kick_trigger_tolerance_ = std::max(low_speed_kick_trigger_tolerance_, 0.0);
+        ROS_INFO("[%s] LowSpeedKickStart: enabled=%s, kickVel=%.2f, steps=%d, "
+                 "trigger=%.2f±%.2f, restTh=%.3f",
+                 name_.c_str(),
+                 low_speed_kick_enabled_ ? "true" : "false",
+                 low_speed_kick_velocity_,
+                 low_speed_kick_duration_steps_,
+                 low_speed_kick_trigger_velocity_,
+                 low_speed_kick_trigger_tolerance_,
+                 low_speed_kick_rest_threshold_);
+      }
+
+      if (pt.find("lowSpeedYawKickStart") != pt.not_found())
+      {
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_enabled_, "lowSpeedYawKickStart.enabled", false);
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_angular_velocity_,
+                                 "lowSpeedYawKickStart.kickAngularVelocity", false);
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_duration_steps_,
+                                 "lowSpeedYawKickStart.durationSteps", false);
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_rest_threshold_,
+                                 "lowSpeedYawKickStart.restCmdThreshold", false);
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_trigger_angular_velocity_,
+                                 "lowSpeedYawKickStart.triggerAngularVelocity", false);
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_trigger_tolerance_,
+                                 "lowSpeedYawKickStart.triggerTolerance", false);
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_forward_threshold_,
+                                 "lowSpeedYawKickStart.forwardThreshold", false);
+        loadData::loadPtreeValue(pt, low_speed_yaw_kick_lateral_threshold_,
+                                 "lowSpeedYawKickStart.lateralThreshold", false);
+        low_speed_yaw_kick_duration_steps_ = std::max(low_speed_yaw_kick_duration_steps_, 1);
+        low_speed_yaw_kick_trigger_tolerance_ =
+            std::max(low_speed_yaw_kick_trigger_tolerance_, 0.0);
+        low_speed_yaw_kick_angular_velocity_ =
+            std::max(low_speed_yaw_kick_angular_velocity_, 0.0);
+        ROS_INFO("[%s] LowSpeedYawKickStart: enabled=%s, kickAngVel=%.2f, steps=%d, "
+                 "trigger=|angz| %.2f±%.2f, restTh=%.3f",
+                 name_.c_str(),
+                 low_speed_yaw_kick_enabled_ ? "true" : "false",
+                 low_speed_yaw_kick_angular_velocity_,
+                 low_speed_yaw_kick_duration_steps_,
+                 low_speed_yaw_kick_trigger_angular_velocity_,
+                 low_speed_yaw_kick_trigger_tolerance_,
+                 low_speed_yaw_kick_rest_threshold_);
       }
 
       if (pt.find("velocitySmoothing") != pt.not_found())
       {
-        loadData::loadPtreeValue(pt, stance_height_stand_up_smoothing_enabled_,
-                                 "velocitySmoothing.standUpHeightSmoothingEnabled", false);
-        loadData::loadPtreeValue(pt, max_stance_height_stand_up_change_,
-                                 "velocitySmoothing.maxStandUpHeightChange", false);
-        ROS_INFO("[%s] Stance height stand-up smoothing: enabled=%s, maxChange=%.4f m/step",
+        loadData::loadPtreeValue(pt, squat_height_low_pass_enabled_,
+                                 "velocitySmoothing.squatHeightLowPassEnabled", false);
+        loadData::loadPtreeValue(pt, squat_height_low_pass_cutoff_freq_,
+                                 "velocitySmoothing.squatHeightLowPassCutoffFreq", false);
+        squat_height_low_pass_cutoff_freq_ =
+            std::max(squat_height_low_pass_cutoff_freq_, 1e-3);
+        ROS_INFO("[%s] Squat height low-pass: enabled=%s, cutoff=%.2f Hz",
                  name_.c_str(),
-                 stance_height_stand_up_smoothing_enabled_ ? "true" : "false",
-                 max_stance_height_stand_up_change_);
+                 squat_height_low_pass_enabled_ ? "true" : "false",
+                 squat_height_low_pass_cutoff_freq_);
       }
     }
 
@@ -471,9 +611,12 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, initial_cmd_.*cmdMember, prefixCommandData_ + ".scale." + cmdName, false);
     }
 
-    // 加载 X 负向单独缩放系数（用于不对称速度限制）
-    loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
-    loadData::loadPtreeValue(pt, cmdVelLineXNegScaleExternalArm_, "commandData.scale.cmdVelLineXNegScaleExternalArm", false);
+    // 加载 X 负向单独缩放系数（非 amp_hand_controller 使用）
+    if (!is_amp_hand_controller_)
+    {
+      loadData::loadPtreeValue(pt, cmdVelLineXNegScale_, "commandData.scale.cmdVelLineXNegScale", false);
+      loadData::loadPtreeValue(pt, cmdVelLineXNegScaleExternalArm_, "commandData.scale.cmdVelLineXNegScaleExternalArm", false);
+    }
 
     ROS_INFO("[%s] loadConfig done. num_actions_=%d, numSingleObs_=%d, frameStack_=%d",
              name_.c_str(), num_actions_, numSingleObs_, frameStack_);
@@ -510,6 +653,14 @@ namespace humanoid_controller
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = true;  // 初始化为站立状态
     smoothed_stance_height_cmd_ = 0.0;
+    filtered_squat_height_cmd_ = 0.0;
+    squat_posture_deep_seen_ = false;
+    prev_stand_up_knee_rad_ = 0.0;
+    stand_up_knee_prev_initialized_ = false;
+    roll_compensation_closed_loop_initialized_ = false;
+    roll_compensation_filtered_roll_rad_ = 0.0;
+    roll_compensation_target_roll_rad_ = 0.0;
+    roll_compensation_integral_rad_sec_ = 0.0;
     
     ROS_INFO("[%s] reset", name_.c_str());
     sensor_data_updated_ = false;
@@ -529,6 +680,7 @@ namespace humanoid_controller
     RLControllerBase::resume();
     if (gait_receiver_)
     {
+      gait_receiver_->resetVelocityState();
       gait_receiver_->setEnabled(true);
     }
 
@@ -734,19 +886,15 @@ namespace humanoid_controller
     return RLControllerBase::shouldRunInference();
   }
 
-  double AmpWalkController::applyTinyCmdxClip(double cmdx) const
+  double AmpWalkController::applyTinyCmdXClip(double cmdx) const
   {
     if (!tiny_cmdx_clip_enabled_)
     {
       return cmdx;
     }
-    if (cmdx >= tiny_cmdx_clip_pos_min_ && cmdx < tiny_cmdx_clip_pos_max_)
+    if (cmdx >= tiny_cmdx_clip_min_ && cmdx < tiny_cmdx_clip_max_)
     {
-      return tiny_cmdx_clip_pos_max_;
-    }
-    if (cmdx >= tiny_cmdx_clip_neg_min_ && cmdx < tiny_cmdx_clip_neg_max_)
-    {
-      return tiny_cmdx_clip_neg_min_;
+      return tiny_cmdx_clip_max_;
     }
     return cmdx;
   }
@@ -765,23 +913,123 @@ namespace humanoid_controller
     return cmdy;
   }
 
-  double AmpWalkController::applyTinyCmdAngzClip(double angz) const
+  void AmpWalkController::applyLowSpeedKickStart(CommandDataRL& cmd)
   {
-    if (!tiny_cmd_angz_clip_enabled_)
+    if (!low_speed_kick_enabled_ || !is_amp_hand_controller_)
     {
-      return angz;
+      return;
     }
-    const double abs_angz = std::abs(angz);
-    if (abs_angz >= tiny_cmd_angz_clip_min_ && abs_angz < tiny_cmd_angz_clip_max_)
+
+    const auto cancel_kick = [&]() { low_speed_kick_remaining_steps_ = 0; };
+
+    static constexpr double kKickAccelEpsilon = 1e-4;
+    const double abs_cmd_x = std::abs(cmd.cmdVelLineX_);
+    const double abs_prev_cmd_x = std::abs(prev_raw_cmd_vel_line_x_);
+    if (abs_cmd_x + kKickAccelEpsilon < abs_prev_cmd_x)
     {
-      return angz >= 0.0 ? tiny_cmd_angz_clip_max_ : -tiny_cmd_angz_clip_max_;
+      cancel_kick();
+      return;
     }
-    return angz;
+
+    if (cmd.cmdStance_ >= 1.0)
+    {
+      cancel_kick();
+      return;
+    }
+
+    const bool in_kick_trigger_range =
+        std::abs(cmd.cmdVelLineX_ - low_speed_kick_trigger_velocity_) <=
+            low_speed_kick_trigger_tolerance_ &&
+        std::abs(cmd.cmdVelLineY_) < low_speed_kick_lateral_threshold_ &&
+        std::abs(cmd.cmdVelAngularZ_) < low_speed_kick_yaw_threshold_;
+
+    if (!in_kick_trigger_range)
+    {
+      cancel_kick();
+      return;
+    }
+
+    if (low_speed_kick_remaining_steps_ > 0)
+    {
+      cmd.cmdVelLineX_ = low_speed_kick_velocity_;
+      --low_speed_kick_remaining_steps_;
+      return;
+    }
+
+    if (abs_prev_cmd_x < low_speed_kick_rest_threshold_ &&
+        abs_cmd_x > abs_prev_cmd_x + kKickAccelEpsilon)
+    {
+      cmd.cmdVelLineX_ = low_speed_kick_velocity_;
+      low_speed_kick_remaining_steps_ = low_speed_kick_duration_steps_ - 1;
+      ROS_INFO_THROTTLE(1.0, "[%s] Low-speed kick start: cmd_x %.2f for %d steps",
+                        name_.c_str(), low_speed_kick_velocity_, low_speed_kick_duration_steps_);
+    }
   }
 
-  void AmpWalkController::applyStanceHeightStandUpSmoothing(CommandDataRL& cmd)
+  void AmpWalkController::applyLowSpeedYawKickStart(CommandDataRL& cmd)
   {
-    if (!is_amp_hand_controller_ || !stance_height_stand_up_smoothing_enabled_)
+    if (!low_speed_yaw_kick_enabled_ || !is_amp_hand_controller_)
+    {
+      return;
+    }
+
+    const auto cancel_kick = [&]() { low_speed_yaw_kick_remaining_steps_ = 0; };
+
+    static constexpr double kKickAccelEpsilon = 1e-4;
+    const double abs_angz = std::abs(cmd.cmdVelAngularZ_);
+    const double abs_prev_angz = std::abs(prev_raw_cmd_vel_angular_z_);
+    if (abs_angz + kKickAccelEpsilon < abs_prev_angz)
+    {
+      cancel_kick();
+      return;
+    }
+
+    if (cmd.cmdStance_ >= 1.0)
+    {
+      cancel_kick();
+      return;
+    }
+
+    const bool in_kick_trigger_range =
+        std::abs(abs_angz - low_speed_yaw_kick_trigger_angular_velocity_) <=
+            low_speed_yaw_kick_trigger_tolerance_ &&
+        std::abs(cmd.cmdVelLineX_) < low_speed_yaw_kick_forward_threshold_ &&
+        std::abs(cmd.cmdVelLineY_) < low_speed_yaw_kick_lateral_threshold_;
+
+    if (!in_kick_trigger_range)
+    {
+      cancel_kick();
+      return;
+    }
+
+    if (low_speed_yaw_kick_remaining_steps_ > 0)
+    {
+      cmd.cmdVelAngularZ_ =
+          low_speed_yaw_kick_sign_ * low_speed_yaw_kick_angular_velocity_;
+      --low_speed_yaw_kick_remaining_steps_;
+      return;
+    }
+
+    if (abs_prev_angz < low_speed_yaw_kick_rest_threshold_ &&
+        abs_angz > abs_prev_angz + kKickAccelEpsilon)
+    {
+      low_speed_yaw_kick_sign_ = cmd.cmdVelAngularZ_ >= 0.0 ? 1.0 : -1.0;
+      cmd.cmdVelAngularZ_ =
+          low_speed_yaw_kick_sign_ * low_speed_yaw_kick_angular_velocity_;
+      low_speed_yaw_kick_remaining_steps_ = low_speed_yaw_kick_duration_steps_ - 1;
+      ROS_INFO_THROTTLE(1.0, "[%s] Low-speed yaw kick start: cmd_angz %.2f for %d steps",
+                        name_.c_str(),
+                        low_speed_yaw_kick_sign_ * low_speed_yaw_kick_angular_velocity_,
+                        low_speed_yaw_kick_duration_steps_);
+    }
+  }
+
+  void AmpWalkController::applyStanceHeightStandUpSmoothing(CommandDataRL& cmd,
+                                                            const SensorData& sensor_data)
+  {
+    stand_up_rising_active_ = false;
+
+    if (!is_amp_hand_controller_)
     {
       return;
     }
@@ -789,36 +1037,124 @@ namespace humanoid_controller
     if (cmd.cmdStance_ < 1.0)
     {
       smoothed_stance_height_cmd_ = 0.0;
+      filtered_squat_height_cmd_ = 0.0;
+      prev_stand_up_knee_rad_ = 0.0;
+      stand_up_knee_prev_initialized_ = false;
       return;
     }
 
     const bool in_posture_stance = (amp_mode_ == 1);
-    const double raw_height = in_posture_stance ? cmd.cmdVelAngularZ_ : 0.0;
-    const double diff = raw_height - smoothed_stance_height_cmd_;
-
-    if (diff > 1e-9)
+    const double raw_height =
+        in_posture_stance ? cmd.cmdVelAngularZ_ : 0.0;
+    double target_height = raw_height;
+    const bool apply_squat_low_pass =
+        squat_height_low_pass_enabled_ && is_roban_ && robot_version_int_ == 17;
+    if (apply_squat_low_pass)
     {
-      smoothed_stance_height_cmd_ += std::min(diff, max_stance_height_stand_up_change_);
+      const double filter_dt =
+          inference_frequency_ > 0.0 ? 1.0 / inference_frequency_ : 0.02;
+      const double alpha =
+          1.0 - std::exp(-2.0 * M_PI * squat_height_low_pass_cutoff_freq_ * filter_dt);
+      filtered_squat_height_cmd_ +=
+          alpha * (raw_height - filtered_squat_height_cmd_);
+      target_height = filtered_squat_height_cmd_;
     }
     else
     {
-      smoothed_stance_height_cmd_ = raw_height;
+      filtered_squat_height_cmd_ = raw_height;
     }
 
+    smoothed_stance_height_cmd_ = target_height;
     smoothed_stance_height_cmd_ = std::max(smoothed_stance_height_cmd_, -max_stance_squat_depth_);
+
+    if (sensor_data.jointPos_.size() > kStandUpLegR4ActionIdx_)
+    {
+      const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+      const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
+      const double knee = 0.5 * (knee_l + knee_r);
+
+      if (stand_up_knee_prev_initialized_)
+      {
+        const double knee_diff = prev_stand_up_knee_rad_ - knee;
+        stand_up_rising_active_ =
+            (in_posture_stance ||
+             prev_stand_up_knee_rad_ <= kStandUpPitchFullBiasKneeEnd_) &&
+            knee_diff > kStandUpKneeDecreasingEpsilon_;
+      }
+      prev_stand_up_knee_rad_ = knee;
+      stand_up_knee_prev_initialized_ = true;
+    }
 
     if (in_posture_stance || std::abs(smoothed_stance_height_cmd_) > 1e-6)
     {
       cmd.cmdVelAngularZ_ = smoothed_stance_height_cmd_;
       cmd.cmdVelLineZ_ = smoothed_stance_height_cmd_;
     }
+
+  }
+
+  void AmpWalkController::applySquatPostureDefense(CommandDataRL& cmd,
+                                                   const SensorData& sensor_data)
+  {
+    if (!is_amp_hand_controller_ || !squat_posture_defense_enabled_ ||
+        sensor_data.jointPos_.size() <= kStandUpLegR4ActionIdx_)
+    {
+      return;
+    }
+
+    const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+    const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
+    const bool knees_deep = knee_l > squat_posture_defense_height_threshold_ &&
+                            knee_r > squat_posture_defense_height_threshold_;
+    const bool knees_stood = knee_l < squat_posture_defense_height_threshold_ &&
+                             knee_r < squat_posture_defense_height_threshold_;
+
+    if (amp_mode_ == 1)
+    {
+      if (knees_deep)
+      {
+        squat_posture_deep_seen_ = true;
+        // 深蹲守备：屏蔽走/转/弯腰通道，保留下蹲高度命令（cmdVelLineZ_/cmdVelAngularZ_）
+        cmd.cmdVelLineX_ = 0.0;
+        cmd.cmdVelLineY_ = 0.0;
+      }
+      else if (squat_posture_deep_seen_ && knees_stood)
+      {
+        // 物理起身完成：退出 posture 并广播 amp_mode，遥控器/MPC 方可切模式
+        squat_posture_deep_seen_ = false;
+        amp_mode_ = 0;
+        smoothed_stance_height_cmd_ = 0.0;
+        filtered_squat_height_cmd_ = 0.0;
+        publishAmpModeEvent();
+        ROS_WARN("[%s] Squat posture defense: knees stood up (l=%.3f, r=%.3f), "
+                 "auto exit posture mode (amp_mode=0).",
+                 name_.c_str(), knee_l, knee_r);
+      }
+    }
+  }
+
+  bool AmpWalkController::isSquatPostureDefenseActive() const
+  {
+    if (!is_amp_hand_controller_ || !squat_posture_defense_enabled_ || amp_mode_ != 1)
+    {
+      return false;
+    }
+
+    const SensorData sensor_data = getRobotSensorData();
+    const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+    const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
+
+    return knee_l > squat_posture_defense_height_threshold_ &&
+           knee_r > squat_posture_defense_height_threshold_;
   }
 
   void AmpWalkController::updatePhase(const CommandDataRL& cmd)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
     // 根据速度方向选择正负限制：速度>0 用正向限制，速度<0 用负向限制
-    double velLimitX = (cmd.cmdVelLineX_ >= 0) ? velocityLimits_(0) : velocityLimits_(1);
+    double velLimitX = (cmd.cmdVelLineX_ >= 0)
+                           ? velocityLimits_(0)
+                           : (is_amp_hand_controller_ ? cmdVelLineXNeg_ : velocityLimits_(1));
     double ratio = cmd.cmdVelLineX_ / velLimitX;
     double targetCycleTime = (ratio > switch_ratio_) ? cycleTime_short_ : cycleTime_;
     if (targetCycleTime != currentCycleTime_)
@@ -845,7 +1181,8 @@ namespace humanoid_controller
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
 
-    applyStanceHeightStandUpSmoothing(cmd);
+    applyStanceHeightStandUpSmoothing(cmd, sensor_data);
+    applySquatPostureDefense(cmd, sensor_data);
     
     updatePhase(cmd);
 
@@ -881,13 +1218,22 @@ namespace humanoid_controller
                                              jointArmNum_ > 0 && arm_controller_ &&
                                              arm_controller_->getMode() != 1;
 
-    // amp_hand: 负向 cmd_x 缩放（外部手臂接管时使用独立系数）
+    // amp_hand: 负向 cmd_x 限速；其他控制器仍使用负向缩放系数
     if (cmd.cmdVelLineX_ < 0.0)
     {
-      const double neg_scale = (is_amp_hand_controller_ && external_arm_control_active)
-                                   ? cmdVelLineXNegScaleExternalArm_
-                                   : cmdVelLineXNegScale_;
-      cmd.cmdVelLineX_ *= neg_scale;
+      if (is_amp_hand_controller_)
+      {
+        cmd.cmdVelLineX_ = std::max(cmd.cmdVelLineX_, -cmdVelLineXNeg_);
+      }
+      else
+      {
+        const double neg_scale = (arm_command_replacement_enabled_ &&
+                                  jointArmNum_ > 0 && arm_controller_ &&
+                                  arm_controller_->getMode() != 1)
+                                     ? cmdVelLineXNegScaleExternalArm_
+                                     : cmdVelLineXNegScale_;
+        cmd.cmdVelLineX_ *= neg_scale;
+      }
     }
 
     if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdx_)
@@ -902,24 +1248,32 @@ namespace humanoid_controller
       }
     }
 
-    if (is_amp_hand_controller_ &&
-        (tiny_cmdx_clip_enabled_ || tiny_cmdy_clip_enabled_ || tiny_cmd_angz_clip_enabled_))
+    if (is_amp_hand_controller_ && enable_off_cmdy_by_cmdangz_)
     {
-      if (tiny_cmdx_clip_enabled_)
+      if (std::abs(cmd.cmdVelAngularZ_) > kOffCmdyByCmdAngZThreshold_)
       {
-        cmd.cmdVelLineX_ = applyTinyCmdxClip(cmd.cmdVelLineX_);
+        cmd.cmdVelLineY_ = 0.0;
       }
-      if (tiny_cmdy_clip_enabled_)
+      if (std::abs(cmd.cmdVelLineY_) > kOffCmdAngZByCmdYThreshold_)
       {
-        cmd.cmdVelLineY_ = applyTinyCmdYClip(cmd.cmdVelLineY_);
-      }
-      if (tiny_cmd_angz_clip_enabled_ && cmd.cmdStance_ != 1.0 &&
-          std::abs(cmd.cmdVelLineX_) < 0.3 && std::abs(cmd.cmdVelLineY_) < 0.2 &&
-          std::abs(cmd.cmdVelAngularZ_) > 0.1)
-      {
-        cmd.cmdVelAngularZ_ = applyTinyCmdAngzClip(cmd.cmdVelAngularZ_);
+        cmd.cmdVelAngularZ_ = 0.0;
       }
     }
+
+    if (is_amp_hand_controller_ && tiny_cmdx_clip_enabled_)
+    {
+      cmd.cmdVelLineX_ = applyTinyCmdXClip(cmd.cmdVelLineX_);
+    }
+
+    if (is_amp_hand_controller_ && tiny_cmdy_clip_enabled_)
+    {
+      cmd.cmdVelLineY_ = applyTinyCmdYClip(cmd.cmdVelLineY_);
+    }
+
+    const double raw_cmd_x_before_kick = cmd.cmdVelLineX_;
+    const double raw_cmd_angz_before_kick = cmd.cmdVelAngularZ_;
+    applyLowSpeedKickStart(cmd);
+    applyLowSpeedYawKickStart(cmd);
 
     Eigen::Vector3d velocity_commands;
     velocity_commands << cmd.cmdVelLineX_,
@@ -959,6 +1313,9 @@ namespace humanoid_controller
         //           << " (bias=" << x_bias << ")" << std::endl;
       }
     }
+
+    prev_raw_cmd_vel_line_x_ = raw_cmd_x_before_kick;
+    prev_raw_cmd_vel_angular_z_ = raw_cmd_angz_before_kick;
     
     Eigen::VectorXd tempCommand_ = cmd.getCommandRL();
     Eigen::VectorXd tempCommand_scalar_state = tempCommand_;
@@ -1006,43 +1363,158 @@ namespace humanoid_controller
     {
       const double virtual_arm_obs_pitch_scale =
           cmd.cmdVelLineX_ >= -0.12 ? cmd.cmdVelLineX_ : -0.1;
-      const double compensation_pitch_deg =
+      double compensation_pitch_deg =
           virtual_arm_obs_pitch_scale >= -0.005
               ? kVirtualArmObsPitchBaseDeg_ +
                     kVirtualArmObsPitchCompensationDeg_ * virtual_arm_obs_pitch_scale
               : kVirtualArmObsPitchBaseDegNeg_ +
                     kVirtualArmObsPitchCompensationDegNeg_ * virtual_arm_obs_pitch_scale;
+
+      // 手臂后摆(zarm_l1+zarm_r1)越大，越削弱 projected_gravity 后仰补偿
+      if (jointArmNum_ > 4)
+      {
+        const int arm_start_idx = is_roban_ ? (waistNum_ + jointNum_) : (jointNum_ + waistNum_);
+        const int zarm_l1_idx = arm_start_idx;
+        const int zarm_r1_idx = arm_start_idx + 4;
+        const double zarm_l1_back =
+            std::max(0.0, sensor_data.jointPos_[zarm_l1_idx] - active_default[zarm_l1_idx]);
+        const double zarm_r1_back =
+            std::max(0.0, sensor_data.jointPos_[zarm_r1_idx] - active_default[zarm_r1_idx]);
+        const double arm1_back_sum = std::clamp(
+            zarm_l1_back + zarm_r1_back, 0.0, kVirtualArmObsArm1BackSumMaxRad_);
+        compensation_pitch_deg -=
+            kVirtualArmObsArm1BackPitchReductionMaxDeg_ *
+            std::min(arm1_back_sum, kVirtualArmObsArm1BackSumPitchReductionFullRad_) /
+            kVirtualArmObsArm1BackSumPitchReductionFullRad_;
+
+        const double zarm_l1_back_vel = std::max(0.0, sensor_data.jointVel_[zarm_l1_idx]);
+        const double zarm_r1_back_vel = std::max(0.0, sensor_data.jointVel_[zarm_r1_idx]);
+        const double arm1_back_vel_sum = zarm_l1_back_vel + zarm_r1_back_vel;
+        compensation_pitch_deg -=
+            kVirtualArmObsArm1BackVelPitchReductionMaxDeg_ *
+            std::min(arm1_back_vel_sum, kVirtualArmObsArm1BackVelSumPitchReductionFullRadPerSec_) /
+            kVirtualArmObsArm1BackVelSumPitchReductionFullRadPerSec_;
+      }
+
       const double compensation_pitch_rad = compensation_pitch_deg * M_PI / 180.0;
       projected_gravity = Eigen::AngleAxisd(-compensation_pitch_rad, Eigen::Vector3d::UnitY()) * projected_gravity;
     }
 
     const bool is_walking_mode = cmd.cmdStance_ < 0.5;
-    if (is_amp_hand_controller_ && enable_roll_compensation_ && is_walking_mode &&
-        cmd.cmdVelLineX_ > kRollCompensationCmdXThreshold_)
+    double total_roll_compensation_deg = 0.0;
+    if (is_amp_hand_controller_ && enable_roll_compensation_closed_loop_)
     {
-      const double cmd_x = cmd.cmdVelLineX_;
-      const double walking_roll_compensation_deg =
-          kWalkingRollCompensationQuadA_ * cmd_x * cmd_x +
-          kWalkingRollCompensationQuadB_ * cmd_x +
-          kWalkingRollCompensationQuadC_;
-      double total_roll_compensation_deg = walking_roll_compensation_deg;
-      if (std::abs(cmd.cmdVelAngularZ_) > 0.55)
+      const Eigen::Matrix3d sensor_rotation = sensor_data.quat_.toRotationMatrix();
+      const double measured_roll_rad = std::atan2(sensor_rotation(2, 1), sensor_rotation(2, 2));
+      const double observation_dt =
+          inference_frequency_ > 0.0 ? 1.0 / inference_frequency_ : 0.02;
+
+      if (!roll_compensation_closed_loop_initialized_)
       {
-        total_roll_compensation_deg +=
-            kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
+        roll_compensation_filtered_roll_rad_ = measured_roll_rad;
+        roll_compensation_target_roll_rad_ = measured_roll_rad;
+        roll_compensation_integral_rad_sec_ = 0.0;
+        roll_compensation_closed_loop_initialized_ = true;
       }
-      if (std::abs(total_roll_compensation_deg) > 1e-6)
+
+      const double filter_alpha =
+          std::exp(-observation_dt / roll_compensation_closed_loop_filter_time_constant_sec_);
+      roll_compensation_filtered_roll_rad_ =
+          filter_alpha * roll_compensation_filtered_roll_rad_ +
+          (1.0 - filter_alpha) * measured_roll_rad;
+
+      if (!is_walking_mode)
       {
-        const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;
-        projected_gravity = Eigen::AngleAxisd(compensation_roll_rad, Eigen::Vector3d::UnitX()) * projected_gravity;
+        // 站立时缓慢学习本机 IMU/装配的中立 roll，不把静态安装误差带入行走补偿。
+        const double target_alpha =
+            std::exp(-observation_dt / roll_compensation_closed_loop_target_time_constant_sec_);
+        roll_compensation_target_roll_rad_ =
+            target_alpha * roll_compensation_target_roll_rad_ +
+            (1.0 - target_alpha) * roll_compensation_filtered_roll_rad_;
+        roll_compensation_integral_rad_sec_ = 0.0;
+      }
+
+      const bool closed_loop_active =
+          is_walking_mode &&
+          cmd.cmdVelLineX_ > roll_compensation_closed_loop_cmd_x_min_ &&
+          cmd.cmdVelLineX_ < roll_compensation_closed_loop_cmd_x_max_ &&
+          std::abs(cmd.cmdVelLineY_) < roll_compensation_closed_loop_abs_cmd_y_max_ &&
+          std::abs(cmd.cmdVelAngularZ_) < roll_compensation_closed_loop_abs_cmd_ang_z_max_;
+      if (closed_loop_active)
+      {
+        const double roll_error_rad =
+            roll_compensation_target_roll_rad_ - roll_compensation_filtered_roll_rad_;
+        const double max_compensation_rad =
+            roll_compensation_closed_loop_max_deg_ * M_PI / 180.0;
+        if (roll_compensation_closed_loop_ki_ > 1e-9)
+        {
+          const double integral_limit =
+              max_compensation_rad / roll_compensation_closed_loop_ki_;
+          roll_compensation_integral_rad_sec_ = std::clamp(
+              roll_compensation_integral_rad_sec_ + roll_error_rad * observation_dt,
+              -integral_limit, integral_limit);
+        }
+        else
+        {
+          roll_compensation_integral_rad_sec_ = 0.0;
+        }
+
+        const double closed_loop_compensation_rad = std::clamp(
+            roll_compensation_closed_loop_kp_ * roll_error_rad +
+                roll_compensation_closed_loop_ki_ * roll_compensation_integral_rad_sec_,
+            -max_compensation_rad, max_compensation_rad);
+        total_roll_compensation_deg += closed_loop_compensation_rad * 180.0 / M_PI;
       }
     }
 
+    if (std::abs(total_roll_compensation_deg) > 1e-6)
+    {
+      const double compensation_roll_rad = total_roll_compensation_deg * M_PI / 180.0;
+      projected_gravity =
+          Eigen::AngleAxisd(compensation_roll_rad, Eigen::Vector3d::UnitX()) *
+          projected_gravity;
+    }
+
     if (enable_back_arm_enhance_ && is_walking_mode &&
-        cmd.cmdVelLineX_ >= -0.25 && cmd.cmdVelLineX_ <= -0.019)
+        cmd.cmdVelLineX_ >= -0.3 && cmd.cmdVelLineX_ <= -0.02)
     {
       projected_gravity =
-          Eigen::AngleAxisd(5.0 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
+          Eigen::AngleAxisd(2.7 * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
+    }
+
+    if (enable_standup_enhance_ && stand_up_rising_active_ &&
+        sensor_data.jointPos_.size() > kStandUpLegR4ActionIdx_)
+    {
+      const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+      const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
+      const double knee = 0.5 * (knee_l + knee_r);
+      double pitch_weight = 0.0;
+      static_assert(kStandUpPitchFadeKneeStart_ < kStandUpPitchFullBiasKneeEnd_,
+                    "stand-up pitch full-bias band requires fadeStart < fullEnd");
+      if (knee <= kStandUpPitchFullBiasKneeEnd_ &&
+          knee >= kStandUpPitchFadeKneeStart_)
+      {
+        // [0.55, 1.2] 满偏置
+        pitch_weight = 1.0;
+      }
+      else if (knee > kStandUpPitchFullBiasKneeEnd_)
+      {
+        // > 1.2 不偏
+        pitch_weight = 0.0;
+      }
+      else if (knee > 0.0)
+      {
+        // (0, 0.55) 线性淡出
+        pitch_weight = std::clamp(
+            knee / kStandUpPitchFadeKneeStart_,
+            0.0, 1.0);
+      }
+      const double pitch_deg = kStandUpGravityPitchBiasDeg_ * pitch_weight;
+      if (std::abs(pitch_deg) > 1e-6)
+      {
+        projected_gravity =
+            Eigen::AngleAxisd(pitch_deg * M_PI / 180.0, Eigen::Vector3d::UnitY()) * projected_gravity;
+      }
     }
 
     Eigen::VectorXd local_action = getCurrentAction();
@@ -1183,9 +1655,16 @@ namespace humanoid_controller
                                                  arm_controller_->getMode() != 1;
         if (elbowCmd.cmdVelLineX_ < 0.0)
         {
-          const double neg_scale = external_arm_control_active ? cmdVelLineXNegScaleExternalArm_
-                                                               : cmdVelLineXNegScale_;
-          elbowCmd.cmdVelLineX_ *= neg_scale;
+          if (is_amp_hand_controller_)
+          {
+            elbowCmd.cmdVelLineX_ = std::max(elbowCmd.cmdVelLineX_, -cmdVelLineXNeg_);
+          }
+          else
+          {
+            const double neg_scale = external_arm_control_active ? cmdVelLineXNegScaleExternalArm_
+                                                                 : cmdVelLineXNegScale_;
+            elbowCmd.cmdVelLineX_ *= neg_scale;
+          }
         }
 
         const bool is_lateral_move_command =
@@ -1198,13 +1677,15 @@ namespace humanoid_controller
           // Positive cmd_y is left lateral, negative cmd_y is right lateral.
           if (elbowCmd.cmdVelLineY_ > 0.0)
           {
-            action[1] *= 0.8;
-            action[2] *= 1.2;
+            action[0] -= 0.08;
+            action[1] *= 0.6;
+            action[2] *= 1.5;
             action[16] *= kLateralElbowFixScale_;
           }
           else
           {
-            action[7] *= 0.8;
+            action[0] -= 0.03;
+            action[7] *= 0.7;
             action[8] *= 1.2;
             action[20] *= kLateralElbowFixScale_;
           }
@@ -1343,11 +1824,18 @@ namespace humanoid_controller
     currentCmdData.scale();
     if (currentCmdData.cmdVelLineX_ < 0.0)
     {
-      if (!is_amp_hand_controller_ ||
-          (arm_command_replacement_enabled_ && jointArmNum_ > 0 && arm_controller_ &&
-           arm_controller_->getMode() != 1))
+      if (is_amp_hand_controller_)
+      {
+        currentCmdData.cmdVelLineX_ = std::max(currentCmdData.cmdVelLineX_, -cmdVelLineXNeg_);
+      }
+      else if (!arm_command_replacement_enabled_ || !jointArmNum_ || !arm_controller_ ||
+               arm_controller_->getMode() == 1)
       {
         currentCmdData.cmdVelLineX_ *= cmdVelLineXNegScale_;
+      }
+      else
+      {
+        currentCmdData.cmdVelLineX_ *= cmdVelLineXNegScaleExternalArm_;
       }
     }
     const Eigen::VectorXd& active_default = getActiveDefaultJointPos(currentCmdData);
@@ -1377,6 +1865,36 @@ namespace humanoid_controller
       const double elbow_scale_ratio = 0.18 / actionScale_;
       local_action[16] *= elbow_scale_ratio;
       local_action[20] *= elbow_scale_ratio;
+    }
+
+    if (enable_standup_enhance_ && stand_up_rising_active_ && is_amp_hand_controller_ &&
+        currentCmdData.cmdStance_ >= 1.0 &&
+        sensor_data.jointPos_.size() > kStandUpLegR4ActionIdx_)
+    {
+      static_assert(kStandUpKneeNoEnhanceRad_ < kStandUpKneeFullEnhanceRad_,
+                    "stand-up knee enhance band requires noEnhance < fullEnhance");
+      const double knee_l = sensor_data.jointPos_[kStandUpLegL4ActionIdx_];
+      const double knee_r = sensor_data.jointPos_[kStandUpLegR4ActionIdx_];
+      const double knee = 0.5 * (knee_l + knee_r);
+      if (knee >= kStandUpKneeNoEnhanceRad_ && knee <= kStandUpKneeFullEnhanceRad_)
+      {
+        if (kStandUpLegL1ActionIdx_ >= 0 && kStandUpLegL1ActionIdx_ < local_action.size())
+        {
+          local_action[kStandUpLegL1ActionIdx_] += kStandUpLeg1ActionBias_;
+        }
+        if (kStandUpLegR1ActionIdx_ >= 0 && kStandUpLegR1ActionIdx_ < local_action.size())
+        {
+          local_action[kStandUpLegR1ActionIdx_] -= kStandUpLeg1ActionBias_;
+        }
+        if (kStandUpLegL4ActionIdx_ >= 0 && kStandUpLegL4ActionIdx_ < local_action.size())
+        {
+          local_action[kStandUpLegL4ActionIdx_] += kStandUpKneeActionBias_;
+        }
+        if (kStandUpLegR4ActionIdx_ >= 0 && kStandUpLegR4ActionIdx_ < local_action.size())
+        {
+          local_action[kStandUpLegR4ActionIdx_] += kStandUpKneeActionBias_;
+        }
+      }
     }
 
     if (enable_elbow_scale_)
@@ -1701,11 +2219,10 @@ namespace humanoid_controller
       if (is_roban_)
       {
         // amp_mode=1 时，将站立命令切到“复用行走指令”语义（x/y/yaw 三通道）。
-        // 起身平滑未完成时继续复用，避免摇杆回正后高度命令瞬间归零。
-        const bool stand_up_smoothing_active =
-            is_amp_hand_controller_ && stance_height_stand_up_smoothing_enabled_ &&
-            std::abs(smoothed_stance_height_cmd_) > 1e-6;
-        gait_receiver_->setReuseWalkCommandInStance(amp_mode_ == 1 || stand_up_smoothing_active);
+        // 退出 posture 后高度命令未归零时继续复用，避免摇杆回正后高度命令瞬间归零。
+        const bool stand_up_height_active =
+            is_amp_hand_controller_ && std::abs(smoothed_stance_height_cmd_) > 1e-6;
+        gait_receiver_->setReuseWalkCommandInStance(amp_mode_ == 1 || stand_up_height_active);
       }
     }
 
@@ -2110,6 +2627,13 @@ namespace humanoid_controller
     {
       nh.setParam("/amp_hand_controller/cmdVelLineXlow", cmdVelLineXLow_);
       nh.setParam("/amp_hand_controller/cmdVelLineXup", cmdVelLineXUp_);
+      nh.setParam("/amp_hand_controller/cmdVelLineXNeg", cmdVelLineXNeg_);
+      nh.setParam("/amp_hand_controller/squatHeightMin", squatHeightMin_);
+      nh.setParam("/amp_hand_controller/squatHeightMax", squatHeightMax_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelLinearXLimit", ampVRcmdvelLinearXLimit_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelLinearYLimit", ampVRcmdvelLinearYLimit_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelLinearZLimit", ampVRcmdvelLinearZLimit_);
+      nh.setParam("/amp_hand_controller/ampVRcmdvelAngularYAWLimit", ampVRcmdvelAngularYAWLimit_);
     }
 
     ROS_INFO("[%s] Updated /velocity_limits from controller config: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",

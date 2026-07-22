@@ -298,6 +298,8 @@ namespace mobile_manipulator {
 
     // 躯干相对底盘位姿指令初始化
     cmdTorsoPose_.setZero(6);
+    cmdTorsoVel_.setZero(4);
+    cmdTorsoDelta_.setZero(4);
 
     // 注册日志记录器
     ros_logger_ = new humanoid::TopicLogger(nodeHandle_);
@@ -576,6 +578,9 @@ namespace mobile_manipulator {
       loadData::loadPtreeValue(pt, focusZDelta_, prefix + "focus_z_barrier.delta", false);
       loadData::loadPtreeValue(pt, useFocusZ_, prefix + "focus_z_barrier.use_focus_z", false);
     }
+
+    std::cout << "  torsoVel integrate: schemeA ΔinitTime, nom ruckigDt_=" << ruckigDt_
+              << " (1/mpcDesiredFrequency)" << std::endl;
     /*******************************************************************************/
   }
 
@@ -738,8 +743,41 @@ namespace mobile_manipulator {
     };
     targetTorsoPoseSubscriber_ =
         nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_lb_torso_pose", 1, targetLbTorsoPoseCallback);
+
+    // Twist layout shared by vel/delta: [vx/dx, vz/dz, vyaw/dyaw, vpitch/dpitch]
+    auto mapTorsoTwist4D = [](const geometry_msgs::Twist& tw, Eigen::VectorXd& out4) {
+      out4[0] = tw.linear.x;
+      out4[1] = tw.linear.z;
+      out4[2] = tw.angular.z;  // yaw
+      out4[3] = tw.angular.y;  // pitch
+    };
+
+    // /cmd_torso_vel: continuous velocity. Soft-pause discards.
+    // Hold mirrors chassis /cmd_vel: sticky isCmdTorsoVelUpdated_ + 0.3s timeout zero.
+    auto targetTorsoVelCallback = [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr &msg)
+    {
+      if (!isEnableControl()) return;
+      std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      mapTorsoTwist4D(*msg, cmdTorsoVel_);
+      isCmdTorsoVelUpdated_ = true;
+      isCmdTorsoVelTimeUpdate_ = true;
+    };
+    targetTorsoVelSubscriber_ =
+        nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_torso_vel", 1, targetTorsoVelCallback);
+
+    // /cmd_torso_delta: oneshot relative displacement. Soft-pause discards.
+    auto targetTorsoDeltaCallback = [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr &msg)
+    {
+      if (!isEnableControl()) return;
+      std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+      mapTorsoTwist4D(*msg, cmdTorsoDelta_);
+      isCmdTorsoDeltaUpdated_ = true;
+    };
+    targetTorsoDeltaSubscriber_ =
+        nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_torso_delta", 1, targetTorsoDeltaCallback);
     
     targetTorsoPoseReachTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/lb_torso_pose_reach_time", 10, false);
+    torsoOpenLoopStatePub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/torso_open_loop_state", 10, false);
     
     auto targetPoseCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
@@ -1329,9 +1367,9 @@ namespace mobile_manipulator {
     auto endTime = std::chrono::system_clock::now();
 
     // state
-    ros_logger_->publishVector("/mobile_manipulator/initState_state", initState_);
-    ros_logger_->publishVector("/mobile_manipulator/initState_dState", dState);
-    ros_logger_->publishVector("/mobile_manipulator/initState_ddState", ddState);
+    // ros_logger_->publishVector("/mobile_manipulator/initState_state", initState_);
+    // ros_logger_->publishVector("/mobile_manipulator/initState_dState", dState);
+    // ros_logger_->publishVector("/mobile_manipulator/initState_ddState", ddState);
 
     publishMultiPointPose_World(initState_);
     publishMultiPointPose_Local(initState_);
@@ -1340,6 +1378,19 @@ namespace mobile_manipulator {
     std_msgs::Float32 cntTimeMsg;
     cntTimeMsg.data = std::chrono::duration<double, std::milli>(endTime - startTime).count();
     modifyReferenceTimePub_.publish(cntTimeMsg);
+
+    // 发布躯干开环状态供各输入源钳制参考
+    {
+      geometry_msgs::Twist stateMsg;
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+        stateMsg.linear.x = cmdTorsoPose_[0];   // x
+        stateMsg.linear.z = cmdTorsoPose_[2];   // z
+        stateMsg.angular.z = cmdTorsoPose_[3];  // yaw
+        stateMsg.angular.y = cmdTorsoPose_[4];  // pitch
+      }
+      torsoOpenLoopStatePub_.publish(stateMsg);
+    }
   }
 
   // 本体系的末端ruckig轨迹生成
@@ -3367,16 +3418,16 @@ namespace mobile_manipulator {
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::LEFT_ARM_WORLD_CMD, 
                                                  eeState_world, d_eeState_world, dd_eeState_world);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/left", eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/left", d_eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/left", dd_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/left", eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/left", d_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/left", dd_eeState_world);
 
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD, 
                                                  eeState_world, d_eeState_world, dd_eeState_world);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/right", eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/right", d_eeState_world);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/right", dd_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateWorld_initState/right", eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateWorld_initState/right", d_eeState_world);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateWorld_initState/right", dd_eeState_world);
   }
 
   void MobileManipulatorReferenceManager::publishMultiPointPose_Local(const vector_t& initState)
@@ -3385,25 +3436,25 @@ namespace mobile_manipulator {
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::LEFT_ARM_LOCAL_CMD, 
                                                  eeState_local, d_eeState_local, dd_eeState_local);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/left", eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/left", d_eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/left", dd_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/left", eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/left", d_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/left", dd_eeState_local);
 
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD, 
                                                  eeState_local, d_eeState_local, dd_eeState_local);
 
-    ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/right", eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/right", d_eeState_local);
-    ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/right", dd_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/eeStateLocal_initState/right", eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/d_eeStateLocal_initState/right", d_eeState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_eeStateLocal_initState/right", dd_eeState_local);
     /********************************************************************************************************************/
     
     vector_t torsoState_local, d_torsoState_local, dd_torsoState_local;
     timedPlannerScheduler_.getTimedPlannerStates(LbTimedPosCmdType::TORSO_POSE_CMD, 
                               torsoState_local, d_torsoState_local, dd_torsoState_local);
     
-    ros_logger_->publishVector("/mobile_manipulator/torsoStateLocal_initState", torsoState_local);
-    ros_logger_->publishVector("/mobile_manipulator/d_torsoStateLocal_initState", d_torsoState_local);
-    ros_logger_->publishVector("/mobile_manipulator/dd_torsoStateLocal_initState", dd_torsoState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/torsoStateLocal_initState", torsoState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/d_torsoStateLocal_initState", d_torsoState_local);
+    // ros_logger_->publishVector("/mobile_manipulator/dd_torsoStateLocal_initState", dd_torsoState_local);
   }
 
   void MobileManipulatorReferenceManager::getCurrentEeWorldPose(vector_t& EeState, const vector_t& initState)
@@ -4042,6 +4093,12 @@ namespace mobile_manipulator {
       rightArmJointTrigger_ = false;
     }
 
+    // vel/delta first: integrate onto cmdTorsoPose_ (final open-loop target).
+    // Absolute /cmd_lb_torso_pose in the same tick still wins (SDK/reset priority).
+    if (isTorsoOfflineTrajUpdate_ != true) {
+      applyTorsoVelDeltaCommands(initTime);
+    }
+
     if(isCmdTorsoPoseUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
       // resetTorsoPoseRuckig(initTime, initState, false);
@@ -4627,6 +4684,21 @@ namespace mobile_manipulator {
       isCmdTorsoPoseUpdated_ = false;
     }
 
+    // Torso vel/delta: clear sticky velocity and oneshot on freeze to avoid residual integration after unpause
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      cmdTorsoVel_.setZero();
+      isCmdTorsoVelUpdated_ = false;
+      isCmdTorsoVelTimeUpdate_ = false;
+      lastCmdTorsoVelTime_ = 0.0;
+      hasTorsoVelIntegrateTime_ = false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+      cmdTorsoDelta_.setZero();
+      isCmdTorsoDeltaUpdated_ = false;
+    }
+
     // 双臂末端：保持为 frozen 世界系位姿
     {
       for (size_t armIdx = 0; armIdx < info_.eeFrames.size(); ++armIdx) {
@@ -4751,6 +4823,124 @@ namespace mobile_manipulator {
       eeTargetTrajectories_[armIdx].stateTrajectory = eeStateTraj;
       eeTargetTrajectories_[armIdx].inputTrajectory = eeInputTraj;
     }
+  }
+
+  void MobileManipulatorReferenceManager::applyTorsoVelDeltaCommands(scalar_t initTime)
+  {
+    // Velocity hold aligned with setChassisControl(/cmd_vel):
+    //   - isCmdTorsoVelUpdated_ sticky (not cleared while non-zero)
+    //   - isCmdTorsoVelTimeUpdate_ stamps lastCmdTorsoVelTime_
+    //   - >0.3s without new msg → cmdTorsoVel_ = 0
+    //   - explicit/timeout zero → clear sticky flag (stop integrating)
+    // Oneshot delta: consume once.
+    bool integrateVel = false;
+    bool hasDelta = false;
+    vector_t vel4 = vector_t::Zero(4);
+    vector_t delta4 = vector_t::Zero(4);
+
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      if (isCmdTorsoVelTimeUpdate_) {
+        lastCmdTorsoVelTime_ = initTime;
+        isCmdTorsoVelTimeUpdate_ = false;
+      }
+      if ((initTime - lastCmdTorsoVelTime_) > kTorsoVelTimeout_) {
+        cmdTorsoVel_.setZero();
+      }
+
+      if (isCmdTorsoVelUpdated_) {
+        vel4 = cmdTorsoVel_;
+        const double nrm = vel4.head(std::min(4, static_cast<int>(vel4.size()))).norm();
+        if (nrm < 1e-9) {
+          // zero (publisher zero or timeout): exit velocity hold
+          isCmdTorsoVelUpdated_ = false;
+          cmdTorsoVel_.setZero();
+        } else {
+          integrateVel = true;
+          // sticky: keep isCmdTorsoVelUpdated_
+        }
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+      if (isCmdTorsoDeltaUpdated_) {
+        delta4 = cmdTorsoDelta_;
+        isCmdTorsoDeltaUpdated_ = false;
+        hasDelta = true;
+      }
+    }
+
+    if (!integrateVel && !hasDelta) {
+      // Next non-zero burst starts a fresh Δt base (avoid huge first step after idle).
+      hasTorsoVelIntegrateTime_ = false;
+      return;
+    }
+
+    // Scheme A: integrate with real ReferenceManager period on MPC time axis (sim + real).
+    // Nominal step ≈ ruckigDt_ (1/mpcDesiredFrequency); clamp outliers.
+    double dt_nom = ruckigDt_;
+    if (dt_nom <= 0.0 || dt_nom > 0.2) {
+      dt_nom = 0.01;
+    }
+    double dt = dt_nom;
+    if (hasTorsoVelIntegrateTime_) {
+      dt = initTime - lastTorsoVelIntegrateTime_;
+    }
+    const double dt_min = 0.5 * dt_nom;
+    const double dt_max = 3.0 * dt_nom;
+    if (dt < dt_min) {
+      dt = dt_min;
+    } else if (dt > dt_max) {
+      dt = dt_max;
+    }
+    lastTorsoVelIntegrateTime_ = initTime;
+    hasTorsoVelIntegrateTime_ = true;
+
+    // Read current open-loop final target (same store absolute teleop writes into)
+    vector_t cmd6 = vector_t::Zero(6);
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+      cmd6 = cmdTorsoPose_;
+    }
+    vector_t cmd4 = vector_t::Zero(4);
+    cmd4 << cmd6[0], cmd6[2], cmd6[3], cmd6[4];  // x, z, yaw, pitch
+
+    // velocity → Δp = sat(v) * dt  on final target (not on Ruckig step state)
+    if (integrateVel) {
+      const int n = std::min(4, static_cast<int>(vel4.size()));
+      for (int i = 0; i < n; ++i) {
+        double v = vel4[i];
+        if (i < torsoPose_move_spd_.size()) {
+          const double vmax = std::abs(torsoPose_move_spd_[i]);
+          if (vmax > 0.0) {
+            v = std::max(-vmax, std::min(v, vmax));
+          }
+        }
+        cmd4[i] += v * dt;
+      }
+    }
+    // oneshot relative displacement on the same final target
+    if (hasDelta) {
+      const int n = std::min(4, static_cast<int>(delta4.size()));
+      for (int i = 0; i < n; ++i) {
+        cmd4[i] += delta4[i];
+      }
+    }
+
+    // Write back sole open-loop final target; Ruckig tracks from prevTarget → cmd4
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+      cmdTorsoPose_[0] = cmd4[0];
+      cmdTorsoPose_[1] = initialTorsoPos_[1];
+      cmdTorsoPose_[2] = cmd4[1];
+      cmdTorsoPose_[3] = cmd4[2];
+      cmdTorsoPose_[4] = cmd4[3];
+      cmdTorsoPose_[5] = 0.0;
+      // Do not set isCmdTorsoPoseUpdated_: absolute path in same tick can still override.
+    }
+
+    calcRuckigTrajWithTorsoPose(initTime, cmd4, 0.0);
+    torsoModeFlag_ = true;
   }
 
 }  // namespace mobile_manipulator

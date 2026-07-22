@@ -78,6 +78,7 @@ add_library(${PROJECT_NAME}
   src/FactoryFunctions.cpp
   src/MobileManipulatorPreComputation.cpp
   src/MobileManipulatorPinocchioMapping.cpp
+  src/PinocchioEndEffectorKinematicsNoBase.cpp
   src/constraint/EndEffectorConstraint.cpp
   src/constraint/EndEffectorLocalConstraint.cpp
   src/constraint/EndEffectorTorsoConstraint.cpp

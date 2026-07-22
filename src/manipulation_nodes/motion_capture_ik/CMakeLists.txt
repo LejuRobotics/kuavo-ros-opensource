@@ -170,10 +170,10 @@ target_include_directories(ik_ros_uni_cpp_node PRIVATE
 target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
 
 # wheel_ik_ros_uni_cpp_node
-add_executable(wheel_ik_ros_uni_cpp_node
-  src/wheel_ik_ros_uni_cpp_node.cpp
+add_executable(wheel_ik_ros_uni_cpp_node 
+  src/wheel_ik_ros_uni_cpp_node.cpp 
   src/WheelArmControlBaseROS.cpp
-  src/WheelQuest3IkIncrementalROS.cpp
+  src/WheelQuest3IkIncrementalROS.cpp 
   src/WheelQuest3IkIncrementalTools.cpp
   src/WheelIncrementalControlModule.cpp
   src/WheelKeyFramesVisualizer.cpp

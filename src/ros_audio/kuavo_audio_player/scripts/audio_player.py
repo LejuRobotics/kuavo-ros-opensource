@@ -1,6 +1,7 @@
 '''
 Description: 统一音频播放节点 — loundspeaker (文件转换) + audio_stream_player (PyAudio 播放)
   /play_music srv:     immediate=False → 追加 (队列语义); immediate=True → 先停下立即播放
+  /play_music_immediate srv: 兼容 beta 调用方 (等同 immediate=True)
   /stop_music srv:   同步停止，返回时已静音 (推荐)
   /stop_music topic:  fire-and-forget 停止 (兼容, 推荐迁移到 service)
   /audio_data sub:     接收外部 PCM 推流 (TTS / llm_doubao.py 兼容, 自动重采样至声卡采样率)
@@ -33,7 +34,7 @@ try:
 except ImportError:
     samplerate = None
 
-from kuavo_msgs.srv import playmusic, playmusicResponse
+from kuavo_msgs.srv import playmusic, playmusicResponse, PlayMusicImmediate, PlayMusicImmediateResponse
 from kuavo_audio_player.srv import audio_status, audio_statusResponse
 from kuavo_msgs.msg import AudioPlaybackStatus
 
@@ -66,6 +67,10 @@ class AudioPlayerNode:
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()   # True → 回调返回 paAbort
 
+        # enable_control 冻结: 订阅 latched topic，disable 时掐断+拒绝新音频
+        self._enable_control = True
+        rospy.Subscriber('/enable_control_state', Bool, self._on_enable_control_state, queue_size=1)
+
         # ── 预分配 PortAudio 回调用缓冲区, 避免每次 np.zeros/.copy ──
         self._silence = np.zeros(FRAMES_PER_BUFFER, dtype=np.int16)
 
@@ -86,6 +91,7 @@ class AudioPlayerNode:
         rospy.Subscriber('stop_music', Bool, self._on_stop_music, queue_size=10)
         rospy.Service('stop_music', Trigger, self._on_stop_music_srv)
         rospy.Service('play_music', playmusic, self._on_play_music)
+        rospy.Service('play_music_immediate', PlayMusicImmediate, self._on_play_music_immediate)
         rospy.Service('audio_status', audio_status, self._on_audio_status)
         rospy.Service('get_used_audio_buffer_size', Trigger, self._on_get_buffer_size)
         self._status_pub = rospy.Publisher('audio_playback_status', AudioPlaybackStatus, queue_size=10)
@@ -109,6 +115,24 @@ class AudioPlayerNode:
             rospy.loginfo("audio_player_node 初始化完成")
             if self._wait_sound_card_timer is not None:
                 self._wait_sound_card_timer.shutdown()
+
+    def _on_enable_control_state(self, msg):
+        """disable 边沿: 掐断当前播放 + 清空缓冲，对标手部 abort+lock 语义。
+        enable 边沿: 只恢复 flag，「人等机器」——不自动重播被掐断的音频。
+        """
+        prev = self._enable_control
+        if prev and not msg.data:
+            # true → false: 停止流（丢弃 ALSA DMA）+ 清缓冲 + 置 flag
+            rospy.loginfo("enable_control: disable → 停止音频播放")
+            self._enable_control = False
+            self._close_stream()
+            self._clear_buf()
+            self._cleanup_temp()
+            self._init_stream()
+        elif not prev and msg.data:
+            # false → true: 只恢复，不自动重播
+            rospy.loginfo("enable_control: enable → 恢复音频接收")
+            self._enable_control = True
 
     def _init_stream(self):
         for attempt in range(STREAM_RESTART_RETRIES):
@@ -222,9 +246,21 @@ class AudioPlayerNode:
     # 服务: /play_music
     #   req.immediate=True  → 先停止当前, 再加载新文件 (打断+播新, 无竞态)
     #   req.immediate=False → 追加到缓冲 (队列语义, 不打断, 默认)
+    # 服务: /play_music_immediate — 兼容 beta 调用方
 
     def _on_play_music(self, req):
-        if req.immediate:
+        return self._load_to_buffer(req, interrupt=req.immediate)
+
+    def _on_play_music_immediate(self, req):
+        result = self._load_to_buffer(req, interrupt=True)
+        return PlayMusicImmediateResponse(success_flag=result.success_flag)
+
+    def _load_to_buffer(self, req, interrupt):
+        if not self._enable_control:
+            rospy.logwarn_throttle(10, "/play_music: 音频已冻结，拒绝播放")
+            return playmusicResponse(success_flag=False)
+
+        if interrupt:
             self._stop_and_recreate()
 
         music_file = os.path.join(self._music_dir, req.music_number)
@@ -233,7 +269,7 @@ class AudioPlayerNode:
             return playmusicResponse(success_flag=False)
 
         rospy.loginfo(f"播放: {music_file}  volume={req.volume}"
-                      f"{' (打断)' if req.immediate else ''}")
+                      f"{' (打断)' if interrupt else ''}")
 
         self._cleanup_temp()
 
@@ -312,6 +348,9 @@ class AudioPlayerNode:
     # 话题: /audio_data (TTS PCM 推流兼容, 自动重采样至声卡采样率)
 
     def _on_audio_data(self, msg):
+        if not self._enable_control:
+            return  # 冻结期间丢弃 TTS PCM 推流
+
         try:
             audio = np.array(msg.data, dtype=np.int16)
 

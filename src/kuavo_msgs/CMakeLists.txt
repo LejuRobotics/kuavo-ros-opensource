@@ -205,6 +205,7 @@ add_service_files(
   handForceLevel.srv
   enableHandTouchSensor.srv
   playmusic.srv
+  PlayMusicImmediate.srv
   changeMotorParam.srv
   getMotorParam.srv
 

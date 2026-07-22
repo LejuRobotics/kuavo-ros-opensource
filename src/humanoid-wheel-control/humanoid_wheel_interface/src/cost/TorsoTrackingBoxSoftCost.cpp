@@ -438,9 +438,9 @@ auto TorsoTrackingBoxSoftCost::targetBaseToWorld(const vector_t& state,
   vector_t position = vector_t::Zero(3);
   quaternion_t orientation;
 
-  // 提取当前基座状态 [x, y, yaw]
-  Eigen::Vector2d basePos = state.head(2);  // 世界系位置 [x, y]
-  scalar_t baseYaw = state(2);              // 世界系偏航角
+  // 浮动机座 x, y, yaw 对约束无影响：强制置 0
+  const Eigen::Vector2d basePos = Eigen::Vector2d::Zero();
+  const scalar_t baseYaw = 0.0;
 
   // 构建基座姿态的旋转矩阵 (2D)
   Eigen::Matrix2d R_base = Eigen::Rotation2D<scalar_t>(baseYaw).toRotationMatrix();

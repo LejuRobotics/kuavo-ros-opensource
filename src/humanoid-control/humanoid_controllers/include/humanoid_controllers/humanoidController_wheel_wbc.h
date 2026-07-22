@@ -24,6 +24,7 @@
 #include "kuavo_msgs/changeTorsoCtrlMode.h"
 #include "kuavo_msgs/changeLbQuickModeSrv.h"
 #include "kuavo_msgs/changeLbMpcObsUpdateModeSrv.h"
+#include <leju_mobile_base_msgs/BaseCmdVelStatus.h>
 
 // Third Party
 #include <ocs2_core/misc/LoadData.h>
@@ -99,6 +100,7 @@ namespace humanoidController_wheel_wbc
     void setupMrt();
     void initMPC();
     void registerAllServices();
+    bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性
 
     // ========== 运动学计算相关函数 ==========
     void getEEPose(const vector_t& init_q, std::vector<Eigen::Vector3d>& ee_pos, std::vector<Eigen::Matrix3d>& ee_rot);
@@ -127,6 +129,10 @@ namespace humanoidController_wheel_wbc
     bool enableVrArmAccelTaskCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     bool enableArmTrajInterpCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
     bool enableVrArmKpKdCallback(std_srvs::SetBool::Request &req, std_srvs::SetBool::Response &res);
+
+    // ======= 底盘急停保护相关函数 ========
+    void baseCmdVelStatusCallback(const leju_mobile_base_msgs::BaseCmdVelStatus::ConstPtr& msg);
+    void publishStopRobot();
 
     // ======= 硬件相关处理函数 =========
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);    // 替换EC_MASTER电机的kp/kd（从running_settings）
@@ -201,9 +207,15 @@ namespace humanoidController_wheel_wbc
     ros::Publisher jointCmdPub_;
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
+    ros::Publisher stopRobotPub_;  // /stop_robot 话题发布者，用于底盘急停保护
     
     // 日志
     humanoid::TopicLogger *ros_logger_{nullptr};
+
+    // ========== 底盘急停保护相关 ==========
+    ros::Subscriber baseCmdVelStatusSub_;  // 订阅 /move_base/base_cmd_vel_status 话题
+    bool enable_base_emergency_stop_{true};  // 底盘急停保护开关，默认打开
+    std::atomic<bool> base_emergency_triggered_{false};  // 底盘急停触发标志
 
     // ========== 机器人参数 ==========
     size_t baseDim_{0};

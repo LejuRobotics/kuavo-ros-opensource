@@ -3,6 +3,7 @@
 #include "dexhand/linkerl6_hand.hpp"
 #include "dexhand/linkero6_hand.hpp"
 #include "sensor_msgs/JointState.h"
+#include "std_msgs/Bool.h"
 #include <tuple>
 #include <string>
 #include <array>
@@ -90,7 +91,10 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
     /* create publish thread */
     running_ = true;
     publish_thread_ = std::thread(&DexHandMujocoRosNode::publish_loop, this);
-    
+
+    /* subscribe to enable control state (latched topic) */
+    enable_control_state_sub_ = nh_.subscribe<std_msgs::Bool>("/enable_control_state", 1, &DexHandMujocoRosNode::enableControlCallback, this);
+
     return true;
 }
 
@@ -99,6 +103,33 @@ void DexHandMujocoRosNode::stop() {
     running_ = false;
     if (publish_thread_.joinable()) {
         publish_thread_.join();
+    }
+}
+
+void DexHandMujocoRosNode::enableControlCallback(const std_msgs::Bool::ConstPtr& msg) {
+    bool prev = enable_control_.load(std::memory_order_acquire);
+    if (prev && !msg->data) {
+        // Disable: abort gesture + hold current position
+        enable_control_.store(false, std::memory_order_release);
+        controller_->abort_gesture();
+        auto status = controller_->get_finger_status();
+        UnsignedDualHandsArray cur;
+        for (int i = 0; i < 6; i++) {
+            cur[0][i] = status[0]->positions[i];
+            cur[1][i] = status[1]->positions[i];
+        }
+        // Linker L6: getFingerStatus returns internal convention (0=open, 255=closed),
+        // but setFingerPositions expects external convention (255=open, 0=closed).
+        // Reverse so the hold position doesn't invert the hand.
+        if (hand_type_ == HandType::LINKER_L6) {
+            for (int i = 0; i < 6; i++) {
+                cur[0][i] = 255 - cur[0][i];
+                cur[1][i] = 255 - cur[1][i];
+            }
+        }
+        controller_->send_position(cur);
+    } else if (!prev && msg->data) {
+        enable_control_.store(true, std::memory_order_release);
     }
 }
 
@@ -196,6 +227,7 @@ int DexHandMujocoRosNode::get_hand_joints_num() {
 }
 
 void DexHandMujocoRosNode::dualHandCommandCallback(const kuavo_msgs::dexhandCommand::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire)) return;
     if(!running_) {
         return ;
     }
@@ -234,6 +266,7 @@ void DexHandMujocoRosNode::dualHandCommandCallback(const kuavo_msgs::dexhandComm
 }
 
 void DexHandMujocoRosNode::controlSingleHand(HandSide side, const kuavo_msgs::dexhandCommand::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire)) return;
     if(!running_) {
         return ;
     }
@@ -278,6 +311,7 @@ void DexHandMujocoRosNode::controlSingleHand(HandSide side, const kuavo_msgs::de
 
 
 void DexHandMujocoRosNode::controlHandCallback(const kuavo_msgs::robotHandPosition::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire)) return;
     if(!running_) {
         return ;
     }
@@ -308,6 +342,12 @@ bool DexHandMujocoRosNode::gestureExecuteCallback(kuavo_msgs::gestureExecuteRequ
     if (!controller_) {
         res.success = false;
         res.message = "hand controller not initialized.";
+        return false;
+    }
+
+    if (!enable_control_.load(std::memory_order_acquire)) {
+        res.success = false;
+        res.message = "Control is disabled.";
         return false;
     }
 
@@ -381,6 +421,7 @@ bool DexHandMujocoRosNode::gestureExecuteStateCallback(kuavo_msgs::gestureExecut
 
 // Linker系列灵巧手左手控制指令回调
 void DexHandMujocoRosNode::linkerLeftHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire)) return;
     if (!running_ || (hand_type_ != HandType::LINKER_L6 && hand_type_ != HandType::LINKER_O6)) {
         return;
     }
@@ -405,6 +446,7 @@ void DexHandMujocoRosNode::linkerLeftHandCommandCallback(const sensor_msgs::Join
 
 // Linker系列灵巧手右手控制指令回调
 void DexHandMujocoRosNode::linkerRightHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire)) return;
     if (!running_ || (hand_type_ != HandType::LINKER_L6 && hand_type_ != HandType::LINKER_O6)) {
         return;
     }
@@ -428,6 +470,7 @@ void DexHandMujocoRosNode::linkerRightHandCommandCallback(const sensor_msgs::Joi
 
 // LinkerO6灵巧手control_robot_hand_position接口回调
 void DexHandMujocoRosNode::linkerO6ControlHandCallback(const kuavo_msgs::robotHandPosition::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire)) return;
     if (!running_ || hand_type_ != HandType::LINKER_O6) {
         return;
     }

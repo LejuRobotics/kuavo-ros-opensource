@@ -157,6 +157,8 @@ class IkRos:
         self.__robot_walking_status = False
         self.__arm_control_mode = 0
         self.__frozen_claw_pos = [0.0, 0.0]
+        # IK 主循环已接管夹爪发布时为 True；准备姿态等待阶段为 False
+        self.__ik_claw_publish_active = False
         self.__arm_dof = num_arm_joints_var
         self.__single_arm_dof = self.__arm_dof//2
         self.trigger_reset_mode = False
@@ -576,6 +578,7 @@ class IkRos:
         sum_time_cost = 0.0
         arm_q_filtered = [0.0] * self.__arm_dof
         is_runing = False
+        self.__ik_claw_publish_active = True
         while not rospy.is_shutdown():
             # 检测是否需要重置IK初始猜测（模式切换时）
             if self.__need_reset_ik_guess:
@@ -928,6 +931,13 @@ class IkRos:
     def joySticks_data_callback(self, msg):
         self.quest3_arm_info_transformer.read_joySticks_msg(msg)
         self.joySticks_data = msg
+        # 准备姿态下 IK 线程可能卡在等待首帧姿态/MPC 就绪，此时由回调补发夹爪指令。
+        # 遥操主循环启动后改由 hand_finger_data_process 单路发布，避免双路重复下发。
+        # qa: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/3505
+        if (self.end_effector_type == LEJUCLAW
+                and not self.quest3_arm_info_transformer.is_hand_tracking
+                and not self.__ik_claw_publish_active):
+            self.pub_robot_end_hand(joyStick_data=msg)
 
     @staticmethod
     def vector3_to_milliseconds(x, y, z):

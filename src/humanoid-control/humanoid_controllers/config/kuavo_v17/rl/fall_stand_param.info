@@ -18,8 +18,10 @@ fallStandMaxJointVelocity   1.5 ; 倒地起身插值到第一帧的速度rad/s
 ; - true : 轨迹结束进入 STANDING，使 isReadyToExit()=true（上层可自动切回 MPC/BASE）
 allowSwitchToStandingOnFinish   true
 
-networkModelFileSupine        /s17_supine_20000.onnx
-trajectoryFileSupine          Supine_s17_V17_stable_foot_hand_fric.csv
+networkModelFileSupine        /s17_supine_20000_0720.onnx
+;networkModelFileSupine        /s17_supine_20000.onnx
+trajectoryFileSupine           Supine_s17_V17_stable_foot_hand_fric_0720.csv
+;trajectoryFileSupine          Supine_s17_V17_stable_foot_hand_fric.csv
 residualAction           true
 
 use_default_motor_csp_kpkd  false  ; false: 使用本文件 motor_pdo_kp/kd 覆盖所有 CSP(control_mode==2) 的 kp/kd（避免被 kuavo.json 覆盖成 ruiwo_kd=4）

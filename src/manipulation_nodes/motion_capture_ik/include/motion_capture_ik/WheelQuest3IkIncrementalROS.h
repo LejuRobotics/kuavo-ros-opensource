@@ -1,10 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 #include "motion_capture_ik/json.hpp"
 
 #include <ros/ros.h>
@@ -12,6 +15,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <sensor_msgs/JointState.h>
+#include <std_msgs/Float64.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/twoArmHandPose.h>
 #include <kuavo_msgs/Float32MultiArrayStamped.h>
@@ -66,6 +70,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   void solveIkHandElbowThreadFunction();
   void publishJointStatesThreadFunction();
+  void applyWorkerThreadScheduling(const char* threadName, int priority) const;
+  void publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const;
+  void publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const;
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
@@ -183,6 +190,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   static constexpr double LB_QUICK_MODE_RETRY_INTERVAL_SEC = 0.5;
   static constexpr double DEFAULT_JOINT_STATE_PUBLISH_RATE_HZ = 500.0;
   static constexpr double DEFAULT_LB_LEG_PUBLISH_RATE_MULTIPLIER = 0.25;
+  static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
+  static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 30;
 
   std::mutex controlModeRequestMutex_;
   int lastControlModeRequested_ = -1;
@@ -242,6 +251,32 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   ros::Publisher wholeBodyRefMarkerArrayPublisher_;  // 全身参考点可视化（MarkerArray）
 
+  // IK 解算循环分阶段耗时诊断（PlotJuggler: /ik_debug/solve_loop_ms/*）
+  bool enableSolveLoopTimingLog_ = false;
+  ros::Publisher solveLoopFsmEnterMsPublisher_;
+  ros::Publisher solveLoopFsmChangeMsPublisher_;
+  ros::Publisher solveLoopFsmProcessMsPublisher_;
+  ros::Publisher solveLoopFsmExitMsPublisher_;
+  ros::Publisher solveLoopPublishEeMsPublisher_;
+  ros::Publisher solveLoopPublishAuxMsPublisher_;
+  ros::Publisher solveLoopPublishMarkersMsPublisher_;
+  ros::Publisher solveLoopFsmBlockTotalMsPublisher_;
+  ros::Publisher solveLoopPeriodMsPublisher_;
+  std::chrono::steady_clock::time_point lastSolveLoopWallStart_{};
+  bool hasLastSolveLoopWallStart_ = false;
+
+  // 锁等待/持锁耗时诊断（PlotJuggler: /ik_debug/lock_wait_ms/*）
+  bool enableLockWaitTimingLog_ = false;
+  ros::Publisher lockWaitPubIkResultMsPublisher_;
+  ros::Publisher lockWaitPubJointStateMsPublisher_;
+  ros::Publisher lockHoldPubJointStateMsPublisher_;
+  ros::Publisher lockWaitSolveJointStateMsPublisher_;
+  ros::Publisher lockWaitSolveJointMeanMsPublisher_;
+  ros::Publisher pubArmTrajTotalMsPublisher_;
+  ros::Publisher pubArmTrajPeriodMsPublisher_;
+  std::chrono::steady_clock::time_point lastPubArmTrajWallStart_{};
+  bool hasLastPubArmTrajWallStart_ = false;
+
   std::thread ikSolveThread_;
   std::thread jointStatePublishThread_;
   std::mutex bonePoseHandElbowMutex_;
@@ -251,6 +286,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::mutex oneStageIkMutex_;  // 保护 oneStageIkEndEffectorPtr_ 的线程访问
   double jointStatePublishRateHz_ = DEFAULT_JOINT_STATE_PUBLISH_RATE_HZ;
   double lbLegPublishRateMultiplier_ = DEFAULT_LB_LEG_PUBLISH_RATE_MULTIPLIER;
+  int armTrajPublishThreadPriority_ = DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY;
+  int ikSolveThreadPriority_ = DEFAULT_IK_SOLVE_THREAD_PRIORITY;
+  std::vector<int> vrIkThreadCpus_;
   Eigen::Quaterniond chestRotationQuaternion_ = Eigen::Quaterniond::Identity();
   std::mutex chestPoseMutex_;  // 保护最新 chest pose（position）
   Eigen::Vector3d latestChestPositionInRobot_ = Eigen::Vector3d::Zero();

@@ -237,11 +237,12 @@ if ! grep -q "set-option -g default-shell /bin/bash" ~/.tmux.conf; then
 fi
 
 
+echo "stop all ros node"
+sudo pkill ros -f || true
+sudo pkill -f h12pro_channel_publisher || true
+echo "stop all ros node successfully"
+
 sudo systemctl start ocs2_h12pro_monitor.service
 sudo systemctl enable ocs2_h12pro_monitor.service
 
 echo "h12pro monitor service deploy successfully"
-
-echo "stop all ros node"
-sudo pkill ros -f
-echo "stop all ros node successfully"

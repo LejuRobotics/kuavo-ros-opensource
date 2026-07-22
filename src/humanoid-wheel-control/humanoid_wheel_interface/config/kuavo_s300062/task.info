@@ -137,10 +137,30 @@ mpc
   
   debugPrint                      false
 
-  mpcDesiredFrequency             100   ; [Hz]
+  mpcDesiredFrequency             50    ; [Hz]
   mrtDesiredFrequency             500   ; [Hz]
 }
 
+
+; /move_base/base_cmd_vel 发布前速度限幅，单位: vx/vy [m/s], wz [rad/s]
+baseCmdVelLimit
+{
+  activate  false  ; 是否启用 /move_base/base_cmd_vel 速度限幅，true 开启，false 关闭
+
+  lowerBound  ; 速度下限
+  {
+    (0,0)  -0.5  ; 线速度 x [m/s]
+    (1,0)  -0.5  ; 线速度 y [m/s]
+    (2,0)  -0.5  ; 角速度 z [rad/s]
+  }
+
+  upperBound  ; 速度上限
+  {
+    (0,0)  0.5   ; 线速度 x [m/s]
+    (1,0)  0.5   ; 线速度 y [m/s]
+    (2,0)  0.5   ; 角速度 z [rad/s]
+  }
+}
 
 ; MPC 的 ReferenceManager 的运动学限制, 平移单位: m, 旋转单位: rad
 referencekinematicLimit  
@@ -452,7 +472,7 @@ optimizedTrajKinematicLimit
 ; 手臂轨迹插补限制（仅用于上层 armTrajInterpFilter），与 optimizedTrajKinematicLimit 解耦
 armTrajInterpKinematicLimit
 {
-  enable                         true  ; false: 保持旧版逻辑, true: 启用手臂轨迹插补增强路径
+  enable                         false  ; false: 保持旧版逻辑, true: 启用手臂轨迹插补增强路径
   reference_update_period        0.010  ; [s], should match arm trajectory source period
   kalman_r_q                     3e-7    ; PV模型: 全14DoF共享 position measurement noise
   kalman_r_dq                    5e-4    ; PV模型: 全14DoF共享 velocity measurement noise
@@ -1105,7 +1125,7 @@ jointVelocityLimits
 
 safeAccLimit
 {
-  enable true   ; 启动默认的加速度边界, 采用大负载计算获得
+  enable false   ; 启动默认的加速度边界, 采用大负载计算获得
 
   realTimeAccEnable  false  ; 实时计算加速度边界
 
@@ -1151,17 +1171,31 @@ lowJointAccelTask
 {
   kp
   {
-    (0,0)   350.00   ; knee_pitch
-    (1,0)   350.00   ; leg_pitch
-    (2,0)   350.00   ; waist_pitch
-    (3,0)   350.00   ; waist_yaw_link
+    (0,0)   30.00   ; knee_pitch
+    (1,0)   30.00   ; leg_pitch
+    (2,0)   30.00   ; waist_pitch
+    (3,0)   30.00   ; waist_yaw_link
   }
   kd
   {
-    (0,0)   30.2     ; knee_pitch
-    (1,0)   30.2     ; leg_pitch
-    (2,0)   30.2     ; waist_pitch
-    (3,0)   30.2     ; waist_yaw_link
+    (0,0)   6.2     ; knee_pitch
+    (1,0)   6.2     ; leg_pitch
+    (2,0)   6.2     ; waist_pitch
+    (3,0)   6.2     ; waist_yaw_link
+  }
+  kp_sim
+  {
+    (0,0)   200.00   ; knee_pitch
+    (1,0)   200.00   ; leg_pitch
+    (2,0)   200.00   ; waist_pitch
+    (3,0)   200.00   ; waist_yaw_link
+  }
+  kd_sim
+  {
+    (0,0)   40.2     ; knee_pitch
+    (1,0)   40.2     ; leg_pitch
+    (2,0)   40.2     ; waist_pitch
+    (3,0)   40.2     ; waist_yaw_link
   }
 }
 
@@ -1211,14 +1245,14 @@ armAccelTask
 {
   kp
   {
-    (0,0)   1200.0  ; zarm_l1_joint
+    (0,0)   300.0  ; zarm_l1_joint
     (1,0)   64.0   ; zarm_l2_joint
     (2,0)   64.0   ; zarm_l3_joint
     (3,0)   300.0  ; zarm_l4_joint
     (4,0)   70.0   ; zarm_l5_joint
     (5,0)   70.0   ; zarm_l6_joint
     (6,0)   70.0   ; zarm_l7_joint
-    (7,0)   1200.0  ; zarm_r1_joint
+    (7,0)   300.0  ; zarm_r1_joint
     (8,0)   64.0   ; zarm_r2_joint
     (9,0)   64.0   ; zarm_r3_joint
     (10,0)  300.0  ; zarm_r4_joint
@@ -1242,6 +1276,40 @@ armAccelTask
     (11,0)  30.0     ; zarm_r5_joint
     (12,0)  30.0     ; zarm_r6_joint
     (13,0)  30.0     ; zarm_r7_joint
+  }
+  kp_sim
+  {
+    (0,0)   600.0  ; zarm_l1_joint
+    (1,0)   600.0  ; zarm_l2_joint
+    (2,0)   300.0   ; zarm_l3_joint
+    (3,0)   300.0  ; zarm_l4_joint
+    (4,0)   70.0   ; zarm_l5_joint
+    (5,0)   70.0   ; zarm_l6_joint
+    (6,0)   70.0   ; zarm_l7_joint
+    (7,0)   600.0  ; zarm_r1_joint
+    (8,0)   600.0  ; zarm_r2_joint
+    (9,0)   300.0   ; zarm_r3_joint
+    (10,0)  300.0  ; zarm_r4_joint
+    (11,0)  70.0   ; zarm_r5_joint
+    (12,0)  70.0   ; zarm_r6_joint
+    (13,0)  70.0   ; zarm_r7_joint
+  }
+  kd_sim
+  {
+    (0,0)   48.0     ; zarm_l1_joint
+    (1,0)   42.0     ; zarm_l2_joint
+    (2,0)   42.0     ; zarm_l3_joint
+    (3,0)   40.0     ; zarm_l4_joint
+    (4,0)   20.0     ; zarm_l5_joint
+    (5,0)   20.0     ; zarm_l6_joint
+    (6,0)   20.0     ; zarm_l7_joint
+    (7,0)   48.0     ; zarm_r1_joint
+    (8,0)   42.0     ; zarm_r2_joint
+    (9,0)   42.0     ; zarm_r3_joint
+    (10,0)  40.0     ; zarm_r4_joint
+    (11,0)  20.0     ; zarm_r5_joint
+    (12,0)  20.0     ; zarm_r6_joint
+    (13,0)  20.0     ; zarm_r7_joint
   }
   kp_force_control
   {

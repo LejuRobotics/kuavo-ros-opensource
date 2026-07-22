@@ -9,6 +9,8 @@
     <arg name="enable_head_control" default="true"/>
     <arg name="use_vr_control" default="true"/>
     <arg name="ip_address" default=""/>
+    <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
+    <arg name="enable_base_emergency_stop" default="true"/>
     
     <!-- 增量VR遥操作控制相关参数 -->
     <arg name="use_cpp_incremental_ik" default="false"/>
@@ -26,6 +28,7 @@
         <arg name="vr_remote_control" value="true"/>  <!-- 启用VR远程控制 -->
         <arg name="use_joystick" value="false"/>      <!-- 禁用手柄控制 -->
         <arg name="use_external_mpc" value="true"/>
+        <arg name="enable_base_emergency_stop" value="$(arg enable_base_emergency_stop)"/>
     </include>
 
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">

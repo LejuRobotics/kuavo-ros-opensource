@@ -39,6 +39,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Float64.h>
+#include <std_msgs/Int32.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/Twist.h>
 #include "kuavo_msgs/SetJoyTopic.h"
@@ -329,8 +330,10 @@ namespace ocs2
         } catch (const std::exception &e) {
           ROS_WARN_STREAM("cmdvelLinearYLimit not found, using default: " << c_relative_base_limit_[1]);
         }
-        loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", squatHeightMin_);
-        loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", squatHeightMax_);
+        loadData::loadCppDataType(referenceFile, "vrSquatHeightMin", ref_squat_height_min_);
+        loadData::loadCppDataType(referenceFile, "vrSquatHeightMax", ref_squat_height_max_);
+        squatHeightMin_ = ref_squat_height_min_;
+        squatHeightMax_ = ref_squat_height_max_;
         try {
           loadData::loadCppDataType(referenceFile, "cmdvelLinearZLimit", c_relative_base_limit_[2]);
         } catch (const std::exception &e) {
@@ -444,6 +447,8 @@ namespace ocs2
           {
             // MPC控制器：恢复MPC默认速度限制
             c_relative_base_limit_ = mpc_default_velocity_limits_;
+            squatHeightMin_ = ref_squat_height_min_;
+            squatHeightMax_ = ref_squat_height_max_;
             ROS_INFO("[JoyControl] Restored MPC default velocity limits: [%.2f, %.2f, %.2f, %.2f]",
                      c_relative_base_limit_[0], c_relative_base_limit_[1], 
                      c_relative_base_limit_[2], c_relative_base_limit_[3]);
@@ -482,6 +487,18 @@ namespace ocs2
           ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
         }
       });
+      amp_hand_mode_sub_ = nodeHandle_.subscribe<std_msgs::Int32>(
+          "/humanoid_controller/amp_hand_controller/amp_mode", 1,
+          [this](const std_msgs::Int32::ConstPtr &msg)
+          {
+            const bool posture_mode = (msg->data == 1);
+            if (posture_control_mode_ != posture_mode)
+            {
+              ROS_INFO("[JoyControl] Synced amp_hand posture mode from controller: %d", msg->data);
+            }
+            posture_control_mode_ = posture_mode;
+            posture_deadzone_exit_attempted_ = false;
+          });
       // 订阅动作执行状态话题，用于检测是否有动作正在执行
       robot_action_state_sub_ = nodeHandle_.subscribe<humanoid_plan_arm_trajectory::RobotActionState>(
       "/robot_action_state", 1, &JoyControl::robotActionStateCallback, this);
@@ -763,6 +780,8 @@ namespace ocs2
         amp_hand_cmd_vel_line_x_default_ = velocity_limits[0];
         loadAmpHandCmdVelLineXLimitParams();
         applyAmpHandCmdVelLineXLimit();
+        loadAmpHandSquatHeightParams();
+        applyAmpHandSquatHeightLimits();
 
         // 检查最终生效值是否有变化，避免十字键档位被周期刷新覆盖后重复打印
         bool changed = (std::abs(old_limits[0] - c_relative_base_limit_[0]) > 1e-6) ||
@@ -788,6 +807,7 @@ namespace ocs2
     {
       double low_limit = amp_hand_cmd_vel_line_x_low_;
       double up_limit = amp_hand_cmd_vel_line_x_up_;
+      double neg_limit = amp_hand_cmd_vel_line_x_neg_;
       if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXlow", low_limit) && low_limit > 0.0)
       {
         amp_hand_cmd_vel_line_x_low_ = low_limit;
@@ -795,6 +815,10 @@ namespace ocs2
       if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXup", up_limit) && up_limit > 0.0)
       {
         amp_hand_cmd_vel_line_x_up_ = up_limit;
+      }
+      if (nodeHandle_.getParam("/amp_hand_controller/cmdVelLineXNeg", neg_limit) && neg_limit > 0.0)
+      {
+        amp_hand_cmd_vel_line_x_neg_ = neg_limit;
       }
     }
 
@@ -826,6 +850,32 @@ namespace ocs2
       {
         c_relative_base_limit_[0] = amp_hand_cmd_vel_line_x_default_;
       }
+    }
+
+    void loadAmpHandSquatHeightParams()
+    {
+      double squat_min = amp_hand_squat_height_min_;
+      double squat_max = amp_hand_squat_height_max_;
+      if (nodeHandle_.getParam("/amp_hand_controller/squatHeightMin", squat_min))
+      {
+        amp_hand_squat_height_min_ = squat_min;
+      }
+      if (nodeHandle_.getParam("/amp_hand_controller/squatHeightMax", squat_max))
+      {
+        amp_hand_squat_height_max_ = squat_max;
+      }
+    }
+
+    void applyAmpHandSquatHeightLimits()
+    {
+      if (isRoban17AmpHandControllerActive())
+      {
+        squatHeightMin_ = amp_hand_squat_height_min_;
+        squatHeightMax_ = amp_hand_squat_height_max_;
+        return;
+      }
+      squatHeightMin_ = ref_squat_height_min_;
+      squatHeightMax_ = ref_squat_height_max_;
     }
 
     void handleAmpHandCmdVelLineXLimitDpad(const sensor_msgs::Joy::ConstPtr &joy_msg)
@@ -1173,11 +1223,17 @@ namespace ocs2
 
       if (std::abs(a3) <= kPostureAxisThreshold)
       {
-        // 死区内：退出 posture 模式
-        if (posture_control_mode_)
+        // 死区内只尝试退出一次。若控制器因下蹲守备拒绝，避免每帧重试后
+        // 随着高度命令平滑回升而自动退出；摇杆重新离开死区后才允许再次尝试。
+        if (posture_control_mode_ && !posture_deadzone_exit_attempted_)
+        {
+          posture_deadzone_exit_attempted_ = true;
           setPostureControlMode(false);
+        }
         return;
       }
+
+      posture_deadzone_exit_attempted_ = false;
 
       // 死区外：进入 posture 模式（幂等守卫）
       if (!posture_control_mode_)
@@ -1285,6 +1341,13 @@ namespace ocs2
       callSwitchToDanceSrvByName(kFixedDance2Name);
     }
 
+    // RB+B（roban）：固定舞蹈3 -- 爱情鸟。音乐同上自动播放。
+    void triggerFixedDance3()
+    {
+      ROS_INFO("[JoyControl] RB+B: fixed dance 3 aiqingniao (%s)", kFixedDance3Name.c_str());
+      callSwitchToDanceSrvByName(kFixedDance3Name);
+    }
+
     // RB+B（roban）：呼应 LB+B。把被 LB+B 定住（停在某帧）的手臂切回 auto 模式以回归默认姿态。
     // 动作只在 MPC 控制器下执行，做 tact 时手臂为外部控制(2)，此处只需把手臂控制模式置 auto(1)。
     void recoverArmToAutoMode()
@@ -1385,6 +1448,17 @@ namespace ocs2
       // RB + B
       if (risingEdge(joy_msg, "BUTTON_TROT"))
       {
+        if (IS_ROBAN(rb_version_))
+        {
+          // 动作执行期间禁止切换舞蹈控制器（与 RB+A / RB+Y 同口径）
+          if (robot_action_executing_)
+          {
+            ROS_WARN("[JoyControl] RB+B: 动作执行中，禁止切换舞蹈控制器");
+            return true;
+          }
+          triggerFixedDance3();      // 固定舞蹈3: 爱情鸟
+          return true;
+        }
         return true;
       }
       return false;
@@ -1408,6 +1482,10 @@ namespace ocs2
         walk_axis_filtered(i) = std::max(-1.0, std::min(1.0, walk_axis_filtered(i)));
       }
       joystick_origin_axis_ = walk_axis_filtered;
+      if (posture_control_mode_)
+      {
+        joystick_origin_axis_(0) = 0.0;
+      }
 
       // 方向键按下时覆盖对应分量并发布，与左摇杆叠加
       if (joy_msg->axes[joyAxisMap["AXIS_FORWARD_BACK_TRIGGER"]])
@@ -1772,6 +1850,11 @@ namespace ocs2
       // joystick_origin_axis_.head(4) << joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_X"]], joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_Z"]], joy_msg->axes[joyAxisMap["AXIS_RIGHT_STICK_YAW"]];
       // amp_hand 下 axes[3] 控制 posture 模式开关与下蹲/站立控制量
       handleAmpHandPostureAxis(joy_msg);
+      if (posture_control_mode_)
+      {
+        // 下蹲模式下禁止左摇杆前后控制弯腰
+        joystick_origin_axis_(0) = 0.0;
+      }
       handleAmpHandCmdVelLineXLimitDpad(joy_msg);
       
       const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
@@ -2032,13 +2115,20 @@ namespace ocs2
     std::vector<bool> commandLineToTargetTrajectories(const vector_t &joystick_origin_axis, const SystemObservation &observation, geometry_msgs::Twist &cmdVel)
     {
       std::vector<bool> updated(6, false);
-      // posture 模式下从源头禁止 yaw：拷贝参数并清 axis(3)，
-      // 下游所有分支（posture 与 non-posture）都拿不到 yaw 输入
+      // posture 模式下从源头禁止 yaw 与左摇杆弯腰：拷贝参数并清 axis(0)/axis(3)，
+      // 下游所有分支（posture 与 non-posture）都拿不到对应输入
       vector_t axis_local = joystick_origin_axis;
       if (posture_control_mode_)
+      {
+        axis_local(0) = 0.0;
+        axis_local(1) = 0.0;
         axis_local(3) = 0.0;
+      }
       Eigen::VectorXd limit_vector_negative(4);
-      limit_vector_negative << c_relative_base_limit_[0], c_relative_base_limit_[1],
+      const double neg_x_limit = isRoban17AmpHandControllerActive()
+                                     ? amp_hand_cmd_vel_line_x_neg_
+                                     : c_relative_base_limit_[0];
+      limit_vector_negative << neg_x_limit, c_relative_base_limit_[1],
                                std::fabs(squatHeightMin_), c_relative_base_limit_[3];
       Eigen::VectorXd limit_vector_positive(4);
       limit_vector_positive << c_relative_base_limit_[0], c_relative_base_limit_[1],
@@ -2059,7 +2149,6 @@ namespace ocs2
       if (posture_control_mode_)
       {
         // 姿态控制模式:
-        // linear.x -> 弯腰
         // linear.y -> 预留/侧向姿态通道
         // linear.z -> base高度偏移(下蹲)
         // angular.z -> 禁止旋转，避免与下蹲语义冲突
@@ -2191,20 +2280,35 @@ namespace ocs2
 
     void setPostureControlMode(bool enable)
     {
-      posture_control_mode_ = enable;
-      joystick_origin_axis_.setZero();
-      vector_t zero_axis = vector_t::Zero(6);
-      checkAndPublishCommandLine(zero_axis);
-
       if (enable)
       {
+        if (!callAmpModeService(1))
+        {
+          ROS_WARN("[JoyControl] Failed to enter posture control mode");
+          return;
+        }
+        posture_control_mode_ = true;
+        posture_deadzone_exit_attempted_ = false;
+        joystick_origin_axis_.setZero();
+        vector_t zero_axis = vector_t::Zero(6);
+        checkAndPublishCommandLine(zero_axis);
         publishGaitTemplate("stance");
-        callAmpModeService(1);
-        ROS_WARN("[JoyControl] Posture control mode enabled: stick -> bend/squat");
+        ROS_WARN("[JoyControl] Posture control mode enabled: right stick -> squat");
       }
       else
       {
-        callAmpModeService(0);
+        // 先请求控制器切换模式，成功后再清本地状态，避免与控制器 amp_mode 不同步
+        if (!callAmpModeService(0))
+        {
+          ROS_WARN("[JoyControl] Controller rejected exit from posture mode "
+                   "(squat posture defense active), stay in posture mode");
+          return;
+        }
+        posture_control_mode_ = false;
+        posture_deadzone_exit_attempted_ = false;
+        joystick_origin_axis_.setZero();
+        vector_t zero_axis = vector_t::Zero(6);
+        checkAndPublishCommandLine(zero_axis);
         ROS_WARN("[JoyControl] Posture control mode disabled: restored walking mode");
       }
     }
@@ -2753,6 +2857,7 @@ namespace ocs2
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
     ros::Subscriber controller_switch_event_sub_;
+    ros::Subscriber amp_hand_mode_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
     ros::Subscriber dance_trajectory_state_sub_;
     int arm_ctrl_mode_{1};  // 启动默认 auto_swing (1); 收到 /humanoid/mpc/arm_control_mode 后由 controller 实际状态覆盖
@@ -2768,6 +2873,11 @@ namespace ocs2
     double amp_hand_cmd_vel_line_x_default_{0.4};
     double amp_hand_cmd_vel_line_x_low_{0.4};
     double amp_hand_cmd_vel_line_x_up_{0.4};
+    double amp_hand_cmd_vel_line_x_neg_{0.45};
+    double ref_squat_height_min_{0.0};
+    double ref_squat_height_max_{0.0};
+    double amp_hand_squat_height_min_{-0.3};
+    double amp_hand_squat_height_max_{0.01};
     bool get_observation_ = false;
     vector_t current_target_ = vector_t::Zero(6);
     std::string current_desired_gait_ = "stance";
@@ -2822,9 +2932,10 @@ namespace ocs2
     // 遥感/方向键轴输入开关（默认允许）
     bool axes_input_enabled_{true};
     bool posture_control_mode_{false};
+    bool posture_deadzone_exit_attempted_{false};
     // amp_hand 下 axes[3] 控制 posture 开关的阈值：
     //   [threshold, 1.0] / [-1.0, -threshold] 线性重映射到 [0, 1] / [-1, 0]
-    static constexpr double kPostureAxisThreshold = 0.4;
+    static constexpr double kPostureAxisThreshold = 0.3;
     // 手抓开合状态（默认张开 -> false）
     bool hand_closed_{false};
 
@@ -2835,7 +2946,10 @@ namespace ocs2
     // RB+Y 出厂固定舞蹈2：新疆舞。要求 rl_controllers.yaml 已注册同名 controller，
     // 且 /home/lab/.config/lejuconfig/music/dance_xinjiang.wav 存在。
     const std::string kFixedDance2Name{"dance_xinjiang"};
-    
+    // RB+B 出厂固定舞蹈3：爱情鸟。要求 rl_controllers.yaml 已注册同名 controller，
+    // 且 /home/lab/.config/lejuconfig/music/dance_aiqingniao.wav 存在。
+    const std::string kFixedDance3Name{"dance_aiqingniao"};
+
     // 命令执行相关
     std::map<std::string, Command_t> commands_map_;
     std::string repo_root_path_;

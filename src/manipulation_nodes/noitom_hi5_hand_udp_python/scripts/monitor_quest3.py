@@ -200,15 +200,15 @@ class Quest3BoneFramePublisher:
         
         self.head_control_manager.set_joint_limits(yaw_limit, pitch_limit)
         
-        # 设置控制模式
-        mode_str = head_control_config.get("mode", "vr_follow")
-        mode_map = {
-            "fixed": HeadControlMode.FIXED,
-            "auto_track": HeadControlMode.AUTO_TRACK_ACTIVE,
-            "fixed_main": HeadControlMode.FIXED_MAIN_HAND,
-            "vr_follow": HeadControlMode.VR_FOLLOW
-        }
-        mode = mode_map.get(mode_str, HeadControlMode.VR_FOLLOW)
+        # 初始化头部控制模式 （从config.json读取，默认vr_follow模式）
+        mode_str = str(head_control_config.get("mode", "vr_follow") or "vr_follow").strip().lower()
+        mode = HeadControlMode.from_string(mode_str)
+        if mode is None:
+            legacy_mode_map = {
+                "auto_track": HeadControlMode.AUTO_TRACK_ACTIVE,
+                "fixed_main": HeadControlMode.FIXED_MAIN_HAND,
+            }
+            mode = legacy_mode_map.get(mode_str, HeadControlMode.VR_FOLLOW)
         fixed_hand = head_control_config.get("fixed_main_hand", "right")
         self.head_control_manager.set_mode(mode, fixed_hand)
         

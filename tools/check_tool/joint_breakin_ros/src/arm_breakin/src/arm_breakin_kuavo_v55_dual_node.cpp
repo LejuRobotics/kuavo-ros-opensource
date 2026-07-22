@@ -10,7 +10,7 @@
  *   - 头部电机：2个（ID 15-16）
  * 
  * 动作序列配置：
- *   - 左臂动作：7关节，7帧动作序列（小动作±0.2弧度）
+ *   - 左臂动作：7关节，7帧动作序列（与 v53 / arm_breakin_kuavo_v55_dual_config.yaml 一致）
  *   - 右臂映射：通过左臂动作序列映射
  *     * ID 8 = ID 1（同方向，新增的第一个关节）
  *     * ID 9 = -ID 2（反方向，原ID 1）
@@ -132,8 +132,8 @@ public:
             config_file_path_ = canbus_sdk::ConfigParser::getDefaultConfigFilePath();
         }
         
-        // 从ROS参数服务器获取动作配置文件路径
-        nh_->param<std::string>("action_config_file", action_config_file_path_, "");
+        // 忽略全局 /action_config_file（多工控机共用 Master 时易串他机配置），始终按本机路径搜索
+        action_config_file_path_.clear();
         if (action_config_file_path_.empty()) {
             // 辅助函数：检查文件是否存在
             auto file_exists = [](const std::string& path) -> bool {
@@ -609,28 +609,28 @@ public:
         // ====================================================================
         std::vector<std::array<double,7>> left_arm_actions;
         std::vector<std::array<double,2>> head_actions;
-        int frame_duration_ms = 2000;  // 默认值
+        int frame_duration_ms = 3030;  // 与 arm_breakin_kuavo_v55_dual_config.yaml / v53 一致
         
         // 尝试从YAML文件读取配置
         if (!loadActionConfig(left_arm_actions, head_actions, frame_duration_ms)) {
-            // 如果读取失败，使用默认硬编码配置
+            // 如果读取失败，使用默认硬编码配置（与动作 yaml / v53 一致）
             std::cout << get_timestamp() << " [信息] 使用默认硬编码动作配置" << std::endl;
             left_arm_actions = {
                 {  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00 },
-                {  0.00,  0.40,  0.35, -0.50,  0.15, -0.20,  0.15 },
-                {  0.00,  0.40,  0.20,  0.00, -0.20,  0.20, -0.20 },
-                {  0.00,  0.35, -0.35,  0.00,  0.20, -0.15,  0.20 },
-                {  0.00,  0.35,  0.20, -0.50,  0.15,  0.20, -0.15 },
-                {  0.00,  0.40, -0.30,  0.00, -0.15,  0.15,  0.20 },
+                {  1.50,  1.60, -0.50, -0.30,  1.50,  0.80,  0.70 },
+                {  0.00,  2.00, -1.50, -2.20, -0.50,  0.00, -0.25 },
+                { -1.50,  1.00, -0.50, -1.30,  1.00, -0.80, -0.70 },
+                { -2.20,  1.50, -0.50, -1.50,  0.70,  0.25, -0.60 },
+                { -1.00,  0.80, -0.25, -1.00,  0.40,  0.15, -0.40 },
                 {  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00 }
             };
             head_actions = {
                 {  0.00,  0.00 },
-                {  0.10,  0.10 },
-                { -0.20,  0.20 },
-                {  0.15,  0.15 },
-                { -0.15,  0.20 },
-                {  0.20,  0.20 },
+                {  0.30,  0.10 },
+                { -0.30,  0.30 },
+                {  0.30,  0.15 },
+                { -0.30,  0.30 },
+                {  0.30,  0.30 },
                 {  0.00,  0.00 }
             };
         }

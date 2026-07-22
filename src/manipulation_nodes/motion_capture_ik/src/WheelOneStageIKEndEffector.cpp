@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <type_traits>
 
 #include <ros/ros.h>
 
@@ -12,6 +13,40 @@ namespace {
 inline bool isValidSolution(const Eigen::VectorXd& q, int nq) {
   return q.size() == nq && q.allFinite() && q.norm() > 1e-9;
 }
+struct ChestPitchBarrierCost {
+  static constexpr double kSoftLimit = 30.0 * M_PI / 180.0;
+  static constexpr double kSaturationError = (45.0-30.0) * M_PI / 180.0;
+  static constexpr double kWeight = 2e5;
+
+  size_t numInputs() const { return 3; }
+  size_t numOutputs() const { return 1; }
+
+  template <typename T>
+  void eval(const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& x,
+            Eigen::Matrix<T, Eigen::Dynamic, 1>* y) const {
+    const T sum_pitch = x(0) + x(1) + x(2);
+    const T abs_pitch = abs(sum_pitch);
+
+    const double abs_val = toDouble(abs_pitch);
+    if (abs_val <= kSoftLimit) {
+      (*y)(0) = T(0.0);
+      return;
+    }
+    T overshoot = abs_pitch - T(kSoftLimit);
+    T gainfactor = T(2.0)/(1.0 + exp(-overshoot/T(kSaturationError)))-T(1.0);
+    (*y)(0) = T(kWeight) * overshoot * overshoot * gainfactor;
+  }
+
+ private:
+  template <typename U>
+  static double toDouble(const U& v) {
+    if constexpr (std::is_same_v<U, double>) {
+      return v;
+    } else {
+      return v.value(); 
+    }
+  }
+};
 }  // namespace
 
 WheelOneStageIKEndEffector::LowpassBiquadCoeff WheelOneStageIKEndEffector::makeSecondOrderLowpassCoeff(
@@ -221,7 +256,6 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   double shoulderWeight = pointTrackConfig_ ? pointTrackConfig_->shoulderTrackingWeight : 4e3;
   double chestWeight = pointTrackConfig_ ? pointTrackConfig_->chestTrackingWeight : 4e3;
 
-  // add shoulder position constraint
   // add chest position constraint
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_CHEST) {
     ik.AddPositionCost(plant_->world_frame(),
@@ -229,6 +263,14 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
                        plant_->GetFrameByName("waist_yaw_link"),
                        Eigen::Vector3d::Zero(),
                        chestWeight * Eigen::Matrix3d::Identity());
+  }
+
+  // add chest pitch barrier cost
+  {
+    ChestPitchBarrierCost barrier;
+    Eigen::Matrix<drake::symbolic::Variable, 3, 1> vars;
+    vars << ik.q()[0], ik.q()[1], ik.q()[2];
+    ik.get_mutable_prog()->AddCost(barrier, vars);
   }
 
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_SHOULDER) {

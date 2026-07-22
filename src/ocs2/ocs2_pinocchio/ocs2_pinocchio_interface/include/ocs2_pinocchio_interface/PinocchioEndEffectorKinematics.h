@@ -51,7 +51,7 @@ namespace ocs2 {
  *   kinematics.setPinocchioInterface(pinocchioInterface);
  *   const auto pos = kinematics.getPosition(x);
  */
-class PinocchioEndEffectorKinematics final : public EndEffectorKinematics<scalar_t> {
+class PinocchioEndEffectorKinematics : public EndEffectorKinematics<scalar_t> {
  public:
   using EndEffectorKinematics<scalar_t>::vector3_t;
   using EndEffectorKinematics<scalar_t>::matrix3x_t;
@@ -125,7 +125,7 @@ class PinocchioEndEffectorKinematics final : public EndEffectorKinematics<scalar
   std::vector<VectorFunctionLinearApproximation> getOrientationErrorLinearApproximation(
       const vector_t& state, const std::vector<quaternion_t>& referenceOrientations) const override;
 
- private:
+ protected:
   PinocchioEndEffectorKinematics(const PinocchioEndEffectorKinematics& rhs);
 
   const PinocchioInterface* pinocchioInterfacePtr_;

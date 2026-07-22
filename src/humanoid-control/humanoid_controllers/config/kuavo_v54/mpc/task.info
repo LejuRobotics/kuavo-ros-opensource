@@ -833,10 +833,10 @@ switchJointAccelTask
   }
   leg
   {
-    kp    150
-    kd    2.2
-    kp_sim    500
-    kd_sim    10.2
+    kp    300
+    kd    5.2
+    kp_sim    300
+    kd_sim    5.2
   }
   arm
   {

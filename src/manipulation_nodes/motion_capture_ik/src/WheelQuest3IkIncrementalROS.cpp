@@ -20,14 +20,18 @@
 #include <std_msgs/Int32.h>
 #include <std_srvs/Trigger.h>
 #include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/Float64.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <chrono>
 #include <cmath>
+#include <sstream>
 
 #include <leju_utils/define.hpp>
+#include <time.h>
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
+#include <ocs2_core/thread_support/SetThreadPriority.h>
 
 #include "motion_capture_ik/WheelArmControlBaseROS.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
@@ -56,6 +60,61 @@ void updateElbowConstraintUnlocked(std::vector<PoseData>& poseList, int elbowInd
   poseList[elbowIndex].position = elbowPos;
 }
 }  // namespace
+
+void WheelQuest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName, int priority) const {
+  if (priority > 0) {
+    ocs2::setThisThreadPriority(priority);
+    ROS_INFO("[WheelQuest3IkIncrementalROS] %s: SCHED_FIFO priority %d", threadName, priority);
+  } else {
+    ROS_INFO("[WheelQuest3IkIncrementalROS] %s: priority=0, keep SCHED_OTHER", threadName);
+  }
+
+  if (vrIkThreadCpus_.empty()) {
+    return;
+  }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  std::ostringstream cpuList;
+  for (size_t i = 0; i < vrIkThreadCpus_.size(); ++i) {
+    const int cpu = vrIkThreadCpus_[i];
+    if (cpu < 0 || cpu >= CPU_SETSIZE) {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] %s: skip invalid CPU id %d", threadName, cpu);
+      continue;
+    }
+    CPU_SET(cpu, &cpuset);
+    if (!cpuList.str().empty()) {
+      cpuList << ", ";
+    }
+    cpuList << cpu;
+  }
+
+  if (CPU_COUNT(&cpuset) == 0) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] %s: no valid CPU in affinity list, skip binding", threadName);
+    return;
+  }
+
+  ocs2::setThreadAffinity(cpuset);
+  ROS_INFO("[WheelQuest3IkIncrementalROS] %s: CPU affinity -> [%s]", threadName, cpuList.str().c_str());
+}
+
+void WheelQuest3IkIncrementalROS::publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const {
+  if (!enableSolveLoopTimingLog_ || !publisher) {
+    return;
+  }
+  std_msgs::Float64 msg;
+  msg.data = ms;
+  publisher.publish(msg);
+}
+
+void WheelQuest3IkIncrementalROS::publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const {
+  if (!enableLockWaitTimingLog_ || !publisher) {
+    return;
+  }
+  std_msgs::Float64 msg;
+  msg.data = ms;
+  publisher.publish(msg);
+}
 
 WheelQuest3IkIncrementalROS::WheelQuest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
                                                double publishRate,
@@ -108,6 +167,7 @@ void WheelQuest3IkIncrementalROS::run() {
 }
 
 void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
+  // applyWorkerThreadScheduling("ik_solve_thread", ikSolveThreadPriority_);
   ros::Rate rate(publishRate_);
   // 用于统计时间差的静态变量
   static int loopCount = 0;
@@ -175,23 +235,72 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
       rate.sleep();
       continue;  // 机器人未激活，不进行后续流程
     }
-    fsmEnter();
-    fsmChange();
-    fsmProcess();
-    fsmExit();
 
-    publishEndEffectorControlData();
-    publishAuxiliaryStates();
-    publishWholeBodyRefMarkers();
+    const auto loopWallStart = std::chrono::steady_clock::now();
+    if (enableSolveLoopTimingLog_ && hasLastSolveLoopWallStart_) {
+      const double loopPeriodMs =
+          std::chrono::duration<double, std::milli>(loopWallStart - lastSolveLoopWallStart_).count();
+      publishSolveLoopTimingMs(solveLoopPeriodMsPublisher_, loopPeriodMs);
+    }
+
+    const auto fsmBlockStart = std::chrono::steady_clock::now();
+    auto measureStage = [&](const ros::Publisher& publisher, auto&& fn) {
+      if (!enableSolveLoopTimingLog_) {
+        fn();
+        return;
+      }
+      const auto stageStart = std::chrono::steady_clock::now();
+      fn();
+      const double stageMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - stageStart).count();
+      publishSolveLoopTimingMs(publisher, stageMs);
+    };
+
+    measureStage(solveLoopFsmEnterMsPublisher_, [&]() { fsmEnter(); });
+    measureStage(solveLoopFsmChangeMsPublisher_, [&]() { fsmChange(); });
+    measureStage(solveLoopFsmProcessMsPublisher_, [&]() { fsmProcess(); });
+    measureStage(solveLoopFsmExitMsPublisher_, [&]() { fsmExit(); });
+    measureStage(solveLoopPublishEeMsPublisher_, [&]() { publishEndEffectorControlData(); });
+    measureStage(solveLoopPublishAuxMsPublisher_, [&]() { publishAuxiliaryStates(); });
+    measureStage(solveLoopPublishMarkersMsPublisher_, [&]() { publishWholeBodyRefMarkers(); });
+
+    if (enableSolveLoopTimingLog_) {
+      const double fsmBlockTotalMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - fsmBlockStart).count();
+      publishSolveLoopTimingMs(solveLoopFsmBlockTotalMsPublisher_, fsmBlockTotalMs);
+    }
+
+    lastSolveLoopWallStart_ = loopWallStart;
+    hasLastSolveLoopWallStart_ = true;
 
     rate.sleep();
   }
 }
 
 void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
-  ros::Rate rate(jointStatePublishRateHz_);
+  applyWorkerThreadScheduling("arm_traj_publish_thread", armTrajPublishThreadPriority_);
   ros::param::getCached("/reset_joint_to_default", resetJointToDefaultWheel_);
+  // 不用 ros::Rate：落后时会追赶连发，header.stamp≈同一时刻 → PlotJuggler/录包呈“堆在一起”
+  const double frequency = std::max(jointStatePublishRateHz_, 1.0);
+  const double periodSec = 1.0 / frequency;
+  struct timespec next_time {};
+  clock_gettime(CLOCK_MONOTONIC, &next_time);
+
+  auto advanceNextTime = [&](struct timespec& t) {
+    t.tv_nsec += static_cast<long>(periodSec * 1e9);
+    while (t.tv_nsec >= 1000000000L) {
+      t.tv_sec += 1;
+      t.tv_nsec -= 1000000000L;
+    }
+  };
+
   while (!shouldStop() && ros::ok()) {
+    const auto pubLoopStart = std::chrono::steady_clock::now();
+    if (enableLockWaitTimingLog_ && hasLastPubArmTrajWallStart_) {
+      const double periodMs = std::chrono::duration<double, std::milli>(pubLoopStart - lastPubArmTrajWallStart_).count();
+      publishLockWaitTimingMs(pubArmTrajPeriodMsPublisher_, periodMs);
+    }
+
     if (armControlMode_ == 2) {
       publishJointStates();
     } else {
@@ -200,7 +309,30 @@ void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
         publishDefaultJointStates();
       }
     }
-    rate.sleep();
+
+    if (enableLockWaitTimingLog_) {
+      const double totalMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pubLoopStart).count();
+      publishLockWaitTimingMs(pubArmTrajTotalMsPublisher_, totalMs);
+      lastPubArmTrajWallStart_ = pubLoopStart;
+      hasLastPubArmTrajWallStart_ = true;
+    }
+
+    advanceNextTime(next_time);
+    struct timespec now {};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    const double lagSec =
+        static_cast<double>(now.tv_sec - next_time.tv_sec) +
+        static_cast<double>(now.tv_nsec - next_time.tv_nsec) * 1e-9;
+    if (lagSec > periodSec) {
+      // 严重落后：对齐到 now+period，丢弃追赶补发，避免 stamp 成簇
+      next_time = now;
+      advanceNextTime(next_time);
+      ROS_WARN_THROTTLE(1.0,
+                        "[WheelQuest3IkIncrementalROS] arm_traj publish lag=%.1f ms, skip Rate catch-up",
+                        lagSec * 1e3);
+    }
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_time, nullptr);
   }
 }
 

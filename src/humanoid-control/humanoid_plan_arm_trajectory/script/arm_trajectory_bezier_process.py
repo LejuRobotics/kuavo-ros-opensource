@@ -67,7 +67,8 @@ class ArmTrajectoryBezierDemo:
         self.arm_flag = False
         self._timer = None
         self.interrupt_flag  = False
-        self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印  
+        self.enable_control_state_ = True  # 软暂停状态，默认 enable=1
+        self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印
         # 使用 RobotVersion 类创建版本号对象
         robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
         self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
@@ -204,6 +205,11 @@ class ArmTrajectoryBezierDemo:
         self._rl_command_sub = rospy.Subscriber(
             '/rl_controller/InputData/command', Float64MultiArray,
             self._rl_command_callback, queue_size=10
+        )
+
+        # 软暂停：立即停止 /kuavo_arm_traj /control_robot_hand_position /robot_head_motion_data 发布
+        self._enable_control_sub = rospy.Subscriber(
+            '/enable_control_state', Bool, self._enable_control_callback, queue_size=1
         )
 
         # 添加发布者
@@ -543,6 +549,18 @@ class ArmTrajectoryBezierDemo:
             result = False
         finally:
             return result
+
+    def call_enable_wbc_arm_trajectory_control_service(self, enable):
+        """使能/禁用 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源）。
+        轮臂无此服务，静默跳过。"""
+        service_name = "/enable_wbc_arm_trajectory_control"
+        try:
+            rospy.wait_for_service(service_name, timeout=0.5)
+            client = rospy.ServiceProxy(service_name, changeArmCtrlMode)
+            client(control_mode=enable)
+            rospy.loginfo(f"{service_name} call successful, enable={enable}")
+        except (rospy.ServiceException, rospy.ROSException):
+            rospy.loginfo(f"{service_name} not available, skipping")
 
     def get_arm_ctrl_mode(self):
         """获取当前手臂控制模式"""
@@ -1303,7 +1321,8 @@ class ArmTrajectoryBezierDemo:
         if current_control_mode == "rl":
             self.rl_reset_robot_state()
         else:
-            # 做完动作之后恢复自然摆臂状态，并且手、头、腰部关节归位
+            # 先禁用 Phase 2 再切 mode，避免竞态窗口内 Phase 2 stale 输出导致全关节 spike
+            self.call_enable_wbc_arm_trajectory_control_service(0)
             self.call_change_arm_ctrl_mode_service(1)
             if rospy.get_param('/end_effector_type', '') == 'linker_hand':
                 self.hand_state.left_hand_position  = [100, 0, 0, 0, 0, 0]
@@ -1406,6 +1425,7 @@ class ArmTrajectoryBezierDemo:
             rospy.loginfo("After the action playback is complete, revert the robot initial state")
         elif self.keep_arm_pose:
             rospy.loginfo("After the action playback is complete, keep arm pose at the last tact frame")
+            self.keep_arm_pose = False  # 一次性语义，用完即清，避免污染后续其他入口的动作
         else:
             rospy.loginfo("After the action playback is complete, arm restore is disabled")
 
@@ -1419,11 +1439,11 @@ class ArmTrajectoryBezierDemo:
         rospy.loginfo(f"[RESET_COMPLETE] Reset trajectory finished at {time.time():.3f}. Stopping publishers. [DEBUG] arm_flag={self.arm_flag}, running_action={self.running_action}")
         # 复位完成，发布 state=2
         self.publish_action_state(2)
-        # AMP/RL 下做完动作会切到 mode 2，复位轨迹播完后需切回 mode 1，否则拨动摇杆行走时不摆手
+        # 先禁用 Phase 2 再切 mode，避免竞态窗口内全关节 spike
+        self.call_enable_wbc_arm_trajectory_control_service(0)
         current_control_mode = self.get_current_control_mode()
         if current_control_mode == "rl":
             self.call_change_arm_ctrl_mode_service(1)
-            # rospy.loginfo("RL reset done: arm mode switched back to 1 (auto swing) for walking.")
 
     def publish_running_action_state(self):
         """持续发布 state=1"""
@@ -1601,25 +1621,41 @@ class ArmTrajectoryBezierDemo:
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}成功中断"
         )
 
+    def _enable_control_callback(self, msg):
+        """软暂停：停 tact 播放管线 + 切手臂回自动摆臂；不解冻复位手/头/腰。
+        不跟 C++ /bezier/stop_plan_arm_trajectory 交互——C++ timer 照跑，
+        next action 的 planCallback 会调 C++ reset() 全量重置。"""
+        prev = self.enable_control_state_
+        self.enable_control_state_ = bool(msg.data)
+        if prev and not self.enable_control_state_:
+            # 与 handle_freeze_arm_traj 相同：停发布、不复位手/头/腰
+            self._freeze_tact_pipeline(reason="enable_control=false")
+            # freeze 额外：把手臂控制权交回自动摆臂（freeze 服务本身不切 mode）
+            try:
+                self.call_enable_wbc_arm_trajectory_control_service(0)
+                self.call_change_arm_ctrl_mode_service(1)
+                rospy.loginfo("[%s] arm mode switched to 1 (auto swing)", rospy.get_time())
+            except Exception as e:
+                rospy.logwarn("Failed to switch arm mode: %s", e)
+
+    def _freeze_tact_pipeline(self, reason="freeze"):
+        """停 tact 发布管线：interrupt + 清 arm_flag/running + 状态=2 + 停 timer。
+        不调用 reset_robot_state()，保持当前手/头/腰姿态。"""
+        rospy.loginfo("[%s] freeze tact pipeline (%s)", rospy.get_time(), reason)
+        # 仅在动作执行中才改标志；无动作时的 freeze/unfreeze 无副作用
+        if not (self.arm_flag or self.running_action):
+            return
+        self.interrupt_flag = True
+        self.arm_flag = False
+        self.running_action = False
+        self.publish_action_state(2)
+        self.stop_action()
+
     def handle_freeze_arm_traj(self, req):
         """冻结：立即停止发布 /kuavo_arm_traj 且不复位，使手臂停在当前帧。
         与 handle_interrupt 的区别：不调用 reset_robot_state()（不切回 auto、不复位手/头/腰），
         以便配合上层将手臂控制模式置为 keep pose，把 tact 定在当前位置。"""
-        rospy.loginfo("[%s]  接收到机械臂冻结指令(停止发布且不复位)", rospy.get_time())
-
-        # 设置中断标志位，停止发布线程
-        self.interrupt_flag = True
-        self.arm_flag = False
-        self.running_action = False
-
-        # 发布动作完成状态
-        self.publish_action_state(2)
-
-        # 停止等待动作的 timer，避免到点后触发复位
-        self.stop_action()
-
-        # 注意：不调用 reset_robot_state()，保持当前帧
-
+        self._freeze_tact_pipeline(reason="freeze_arm_traj service")
         return TriggerResponse(
             success=True,
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}冻结于当前帧"
@@ -1636,6 +1672,14 @@ class ArmTrajectoryBezierDemo:
 
     def handle_execute_action(self, req):
         action_name = req.action_name
+
+        # 软暂停期间拒绝新动作（无 tact 残留入口）
+        if not self.enable_control_state_:
+            rospy.logwarn("Action '%s' rejected: enable_control is false", action_name)
+            return ExecuteArmActionResponse(
+                success=False,
+                message="软暂停中，拒绝执行新动作",
+            )
 
         # 检查是否有动作正在执行
         if self.arm_flag or self.running_action:
@@ -1657,6 +1701,13 @@ class ArmTrajectoryBezierDemo:
             self.interrupt_flag = True
             rospy.sleep(0.05)  # 给旧线程一点时间退出
             self.interrupt_flag = False
+
+        # 无论之前是什么状态，执行新动作前必须清掉 interrupt_flag
+        # 否则 run() 会因 while self.arm_flag and not self.interrupt_flag 立即退出
+        self.interrupt_flag = False
+
+        # 重置过渡帧状态，避免上一次播放的 _last_inserted_init_kf 残留影响 END_FRAME_TIME 重算
+        self._last_inserted_init_kf = 0
 
         file_path = f"{self.action_files_path}/{action_name}.tact"
         data = self.load_json_file(file_path)
@@ -1784,20 +1835,36 @@ class ArmTrajectoryBezierDemo:
             self.START_FRAME_TIME = 0
             self.x_shift = 0
 
+        min_kf_before = min((f.get("keyframe", 0) for f in frames), default=0)
+
         action_data = self.add_init_frame(frames, is_rl=current_control_mode == "rl")
 
-        # 根据实际计算的过渡时间更新结束时间
-        # RL模式、OCS2半身模式、以及通用入场过渡插入了过渡帧时,都需要更新
-        if (current_control_mode == "rl"
-                or (current_control_mode == "ocs2" and self.only_half_up_body)
-                or getattr(self, "_last_inserted_init_kf", 0) > 0):
-            # 找到最后一帧的 keyframe（包括新添加的过渡帧）
-            if frames:
-                last_keyframe = max(f.get("keyframe", 0) for f in frames)
-                # 将 keyframe 转换为秒并更新 END_FRAME_TIME
-                self.END_FRAME_TIME = last_keyframe * 0.01
-        # RL/AMP 模式同样需要走 filter_data: 跳过会令控制点未平滑, 手指指令跳变抖动。
-        # RL 已前置清零时间平移参数, 滤波不破坏首帧对齐, 故无条件滤波。
+        # 计算 add_init_frame 插入的过渡帧数，通过 ROS param 传给 handler，
+        # 用于动态校正桌面端 PROGRESS_OFFSET，确保模型与机器人同步。
+        min_kf_after = min((f.get("keyframe", 0) for f in frames), default=0)
+        transition_kf = min_kf_after - min_kf_before
+        transition_time_ms = transition_kf * 10  # 每 keyframe = 10ms
+        rospy.set_param('/arm_traj_transition_time_ms', transition_time_ms)
+
+        # 根据实际计算的过渡时间更新结束时间。
+        # add_init_frame 可能插入了过渡帧，必须始终从实际 frames 的最后一帧 keyframe
+        # 重新计算 END_FRAME_TIME，否则轨迹时长不足导致播放速度过快。
+        # OCS2 模式额外保证不低于 finish_time + 1.0，匹配旧 handler 的 end_frame_time += 1 行为；
+        # RL 模式已有自己的过渡帧逻辑，不需要此 padding。
+        if frames:
+            last_keyframe = max(f.get("keyframe", 0) for f in frames)
+            new_end = last_keyframe * 0.01
+            if current_control_mode == "ocs2":
+                new_end = max(new_end, finish_time + 1.0)
+            self.END_FRAME_TIME = new_end
+            rospy.loginfo("[END_FRAME_TIME] updated to %.2fs (last_keyframe=%d, finish_time=%.2f, mode=%s)" % (
+                self.END_FRAME_TIME, last_keyframe, finish_time, current_control_mode))
+        # 注意：RL/AMP 模式同样需要走 filter_data。
+        # 297038619 曾为修复 plan#1499（RL tact 首帧错位）在 RL 模式跳过 filter_data，
+        # 但跳过后保持段贝塞尔控制点未经平滑（tact 原始 CP 非零），导致手指指令 ±1 跳变，
+        # 在 AMP 步态抱拳等动作上表现为大拇指抖动（issue #3231）。
+        # 由于 RL 分支已前置 self.START_FRAME_TIME = 0; self.x_shift = 0，
+        # filter_data 内的时间平移不会破坏 RL 首帧对齐，故恢复无条件滤波。
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
@@ -1806,15 +1873,10 @@ class ArmTrajectoryBezierDemo:
         # self.call_change_arm_ctrl_mode_service(1)
         if success:
             rospy.loginfo("Arm trajectory planned successfully")
+            self.interrupt_flag = False  # 清 freeze/interrupt 残留，防 run() 立即退出
             threading.Thread(target=self.run).start()
             # 使用更新后的 END_FRAME_TIME（包含过渡帧时间）
-            # RL/OCS2半身/通用入场过渡都会在 add_init_frame 中添加过渡帧并更新 END_FRAME_TIME
-            if (current_control_mode == "rl"
-                    or (current_control_mode == "ocs2" and self.only_half_up_body)
-                    or getattr(self, "_last_inserted_init_kf", 0) > 0):
-                self.delayed_publish_action_state(self.END_FRAME_TIME)
-            else:
-                self.delayed_publish_action_state(finish_time)
+            self.delayed_publish_action_state(self.END_FRAME_TIME)
             return ExecuteArmActionResponse(success=True, message="Action executed successfully")
         else:
             rospy.logerr("Failed to plan arm trajectory")
@@ -1824,7 +1886,9 @@ class ArmTrajectoryBezierDemo:
 
     def run(self):
         rate = rospy.Rate(100)
-        # while not rospy.is_shutdown():
+        # 使能 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源，避免 tact 腕部抖动 #2992）
+        # 放在这里确保 arm_joint_trajectory_.pos 已有数据，避免 Phase 2 入口竞态 spike
+        self.call_enable_wbc_arm_trajectory_control_service(1)
         while self.arm_flag and not self.interrupt_flag:
             try:
                 if len(self.joint_state.position) != 0:

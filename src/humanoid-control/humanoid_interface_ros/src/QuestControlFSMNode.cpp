@@ -40,6 +40,7 @@
 #include <std_srvs/Trigger.h>
 #include "utils/singleStepControl.hpp"
 #include <kuavo_msgs/switchToNextController.h>
+#include <kuavo_msgs/ControllerSwitchEvent.h>
 #include <kuavo_msgs/sensorsData.h>
 #include <geometry_msgs/PoseStamped.h>
 namespace ocs2
@@ -144,6 +145,7 @@ namespace ocs2
                                 << c_relative_base_limit_[0] << " lin_y=" << c_relative_base_limit_[1]
                                 << " ang_z=" << c_relative_base_limit_[3]);
             }
+            default_vr_cmdvel_limit_ = c_relative_base_limit_;
 
             // Load VR control limits
             loadData::loadCppDataType(referenceFile, "vrSquatMinPitchDeg", vr_squat_min_pitch_deg_);
@@ -248,6 +250,24 @@ namespace ocs2
             
             // 订阅RL控制器状态话题
             is_rl_controller_sub_ = nodeHandle_.subscribe<std_msgs::Float64>("/humanoid_controller/is_rl_controller_", 1, &QuestControlFSM::isRlControllerCallback, this);
+
+            controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>(
+                "/humanoid_controller/controller_switch_event", 1,
+                [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
+                    c_relative_base_limit_ = default_vr_cmdvel_limit_;
+                    if (msg->to_controller == "amp_hand_controller")
+                    {
+                        nodeHandle_.param("/amp_hand_controller/ampVRcmdvelLinearXLimit",
+                                          c_relative_base_limit_[0], default_vr_cmdvel_limit_[0]);
+                        nodeHandle_.param("/amp_hand_controller/ampVRcmdvelLinearYLimit",
+                                          c_relative_base_limit_[1], default_vr_cmdvel_limit_[1]);
+                        nodeHandle_.param("/amp_hand_controller/ampVRcmdvelAngularYAWLimit",
+                                          c_relative_base_limit_[3], default_vr_cmdvel_limit_[3]);
+                    }
+                    ROS_INFO("[QuestControlFSM] Controller switch %s -> %s, VR cmd_vel limits: [%.2f, %.2f, %.2f]",
+                             msg->from_controller.c_str(), msg->to_controller.c_str(),
+                             c_relative_base_limit_[0], c_relative_base_limit_[1], c_relative_base_limit_[3]);
+                });
 
             if (waist_dof_ > 0)
             {
@@ -1931,6 +1951,7 @@ namespace ocs2
 
         std::string current_desired_gait_;
         ocs2::scalar_array_t c_relative_base_limit_{0.4, 0.2, 0.3, 0.4};
+        ocs2::scalar_array_t default_vr_cmdvel_limit_{0.4, 0.2, 0.3, 0.4};
         ros::Publisher mode_sequence_template_publisher_;
         ros::Publisher gait_name_publisher_;
         ros::Publisher stop_pub_;
@@ -2062,6 +2083,7 @@ namespace ocs2
         
         // RL控制器状态相关变量
         ros::Subscriber is_rl_controller_sub_;          // RL控制器状态订阅者
+        ros::Subscriber controller_switch_event_sub_;
         bool is_rl_controller_{false};                 // 当前是否为RL控制器
         
         bool vr_torso_arm_locked_{false};              // 手臂是否被锁定（用于X+B奇偶判断）

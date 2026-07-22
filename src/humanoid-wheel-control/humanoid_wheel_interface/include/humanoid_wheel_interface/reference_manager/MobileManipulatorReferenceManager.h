@@ -214,6 +214,9 @@ protected:
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetTorsoPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
   void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState);
+  // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
+  // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
+  void applyTorsoVelDeltaCommands(scalar_t initTime);
   // cmdLegJoint
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
@@ -394,6 +397,26 @@ private:
   ros::Publisher targetTorsoPoseReachTimePub_;
   bool torsoModeFlag_{true}; // true: 笛卡尔控制模式, false: 关节控制模式
   ros::ServiceServer getLbTorsoInitialPoseServiceServer_;
+
+  // 躯干速度 / 相对位移指令（开环最终目标只在 cmdTorsoPose_）
+  // Twist 布局与 /cmd_lb_torso_pose 一致: linear.x/z, angular.z=yaw, angular.y=pitch
+  // 保持语义对齐底盘 /cmd_vel：
+  //   isCmdTorsoVelUpdated_ sticky; isCmdTorsoVelTimeUpdate_ refreshes lastCmdTorsoVelTime_;
+  //   timeout 0.3s zeros cmdTorsoVel_; explicit zero clears sticky flag.
+  Eigen::VectorXd cmdTorsoVel_;          // 4D: vx, vz, vyaw, vpitch
+  Eigen::VectorXd cmdTorsoDelta_;        // 4D oneshot: dx, dz, dyaw, dpitch
+  std::mutex cmdTorsoVel_mtx_;
+  std::mutex cmdTorsoDelta_mtx_;
+  bool isCmdTorsoVelUpdated_{false};     // sticky，对齐 isCmdVelUpdated_
+  bool isCmdTorsoVelTimeUpdate_{false};  // 对齐 isCmdVelTimeUpdate_
+  bool isCmdTorsoDeltaUpdated_{false};   // oneshot，用后即清
+  scalar_t lastCmdTorsoVelTime_{0.0};    // 对齐 lastCmdVelTime_
+  scalar_t lastTorsoVelIntegrateTime_{0.0};  // for Δt integrate (scheme A)
+  bool hasTorsoVelIntegrateTime_{false};
+  static constexpr scalar_t kTorsoVelTimeout_{0.3};
+  ros::Subscriber targetTorsoVelSubscriber_;
+  ros::Subscriber targetTorsoDeltaSubscriber_;
+  ros::Publisher torsoOpenLoopStatePub_;    // /torso_open_loop_state: 4D pose [x,z,yaw,pitch]
 
   // 双臂末端执行器位姿指令 (x,y,z,qx,qy,qz,qw)
   vector_t cmd_arm_zyx_[2]; // [0]: 左臂, [1]: 右臂, 包含位置和欧拉角

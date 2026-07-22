@@ -347,6 +347,7 @@ import shutil
 import rosnode
 import glob
 from std_srvs.srv import Trigger, TriggerResponse
+from std_srvs.srv import SetBool
 
 
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
@@ -1094,6 +1095,19 @@ def interrupt_arm_traj_client():
     except rospy.ServiceException as e:
         rospy.logerr(f"Service {service_name} call failed: {e}")
         return False
+def set_keep_arm_pose_client(enable: bool):
+    """通知 autostart 动作完成后保持最后一帧，不自动复位站立"""
+    service_name = '/humanoid_plan_arm_trajectory/keep_arm_pose'
+    try:
+        rospy.wait_for_service(service_name, timeout=1.0)
+    except rospy.ROSException:
+        rospy.logwarn(f"keep_arm_pose service not available, skipping")
+        return
+    try:
+        rospy.ServiceProxy(service_name, SetBool)(enable)
+    except rospy.ServiceException as e:
+        rospy.logwarn(f"keep_arm_pose call failed: {e}")
+
 @dataclass
 class Payload:
     cmd: str
@@ -1110,13 +1124,21 @@ def plan_arm_state_callback(msg: planArmState):
     plan_arm_state_status = msg.is_finished
 
 
-def update_preview_progress(response: Response, stop_event: threading.Event):
+# 桌面端: currentRobotFrame = floor(progress/10 - 100 + startFrame)
+# sent = max(0, raw - transition_ms) + PROGRESS_OFFSET
+# 其中 PROGRESS_OFFSET=1000 抵消桌面 START_FRAME_NOT_STAND_FRAME_INTERVAL=100。
+# transition_ms 是 bezier 进程 add_init_frame 插入的过渡帧时长，
+# 确保桌面模型跳过过渡阶段，只在真正的 tact 帧范围内播放。
+PROGRESS_OFFSET = 1000
+
+
+def update_preview_progress(response: Response, stop_event: threading.Event, transition_ms: int = 0):
     payload = response.payload
-    update_interval = 0.001 
+    update_interval = 0.001
     global plan_arm_state_progress, plan_arm_state_status
     last_progress = None
     last_status = None
-    
+
     while not stop_event.is_set():
         current_progress = plan_arm_state_progress
         current_status = plan_arm_state_status
@@ -1124,14 +1146,16 @@ def update_preview_progress(response: Response, stop_event: threading.Event):
         if current_progress != last_progress or current_status != last_status:
             last_progress = current_progress
             last_status = current_status
-            
-            payload.data["progress"] = current_progress
+
+            # 减去过渡帧时长，只暴露 tact 实际帧范围内的进度给桌面端
+            effective = max(0, current_progress - transition_ms)
+            payload.data["progress"] = effective + PROGRESS_OFFSET
             payload.data["status"] = 0 if current_status else 1
             response_queue.put(response)
-            
+
             if current_status:
                 return
-        
+
         time.sleep(update_interval)
 
 async def websocket_message_handler(
@@ -1216,34 +1240,47 @@ async def preview_action_handler(
     if action_name.endswith('.tact'):
         action_name = action_name[:-5]
 
-    # 通过 autostart 的统一入口执行 tact，不再直接调 bezier
-    # 这样 /kuavo_arm_traj 由 autostart 独占发布，消除双发冲突
-    success, message = execute_arm_action_client(action_name)
-    if not success:
-        payload.data["code"] = 4
-        payload.data["message"] = message
-        response = Response(payload=payload, target=websocket)
-        response_queue.put(response)
-        return
+    global plan_arm_state_progress, plan_arm_state_status
 
-    time.sleep(0.5)
-    # If valid, create initial response
-    response = Response(
-        payload=payload,
-        target=websocket,
-    )
+    # 先重置进度状态
+    plan_arm_state_progress = 0
+    plan_arm_state_status = False
 
-    # Create a new stop event for this thread
+    # 创建 stop_event 并注册到 active_threads
     stop_event = threading.Event()
     active_threads[websocket] = stop_event
-    print("---------------------add event-------------------------------")
-    print(f"active_threads: {active_threads}")
 
-    # Start a thread to update the progress
-    thread = threading.Thread(
-        target=update_preview_progress, args=(response, stop_event)
-    )
-    print("Starting thread to update progress")
+    # 告诉 autostart 动作完成后保持最后一帧
+    set_keep_arm_pose_client(True)
+
+    # 异步执行 ROS 服务调用，等待 C++ bezier 启动，然后开监控线程。
+    # PROGRESS_OFFSET 抵消桌面端 START_FRAME_NOT_STAND_FRAME_INTERVAL = 100，
+    # 确保第一条进度消息就能触发 3D 模型动画。
+    loop = asyncio.get_event_loop()
+    success, message = await loop.run_in_executor(None, execute_arm_action_client, action_name)
+    if not success:
+        set_keep_arm_pose_client(False)  # 动作未执行，重置全局开关
+        del active_threads[websocket]
+        payload.data["code"] = 4
+        payload.data["message"] = message
+        failure_resp = Response(payload=payload, target=websocket)
+        response_queue.put(failure_resp)
+        return
+
+    # 服务调用是同步阻塞的（run_in_executor），若 await 期间 stop_event 已被设置，
+    # 说明桌面端在 bezier 启动前就发了 stop，动作尚未正式开始，清理后直接返回。
+    if stop_event.is_set():
+        set_keep_arm_pose_client(False)
+        del active_threads[websocket]
+        return
+
+    # 读取 bezier 进程 add_init_frame 插入的过渡帧时长（ms），
+    # 用于 update_preview_progress 动态对齐桌面模型与机器人。
+    transition_ms = rospy.get_param('/arm_traj_transition_time_ms', 0)
+
+    # C++ bezier 已开始插值，启动监控线程。
+    response = Response(payload=payload, target=websocket)
+    thread = threading.Thread(target=update_preview_progress, args=(response, stop_event, transition_ms))
     thread.start()
 
 async def adjust_zero_point_handler(
@@ -1541,8 +1578,11 @@ async def stop_preview_action_handler(
         payload=payload,
         target=websocket,
     )
-    # 通过 autostart 的中断服务停止当前动作
-    interrupt_arm_traj_client()
+    # 动作自然完成时（is_finished=True）不调 interrupt，避免 reset_robot_state 覆盖 keepArmPose。
+    # progress==0 说明动作尚未开始（服务调用尚未返回），也不调 interrupt。
+    if not plan_arm_state_status and plan_arm_state_progress > 0:
+        set_keep_arm_pose_client(False)  # 用户手动 stop，重置全局开关
+        interrupt_arm_traj_client()
     response_queue.put(response)
 
 

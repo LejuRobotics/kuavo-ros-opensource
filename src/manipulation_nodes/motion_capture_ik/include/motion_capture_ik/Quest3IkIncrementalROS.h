@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 #include "motion_capture_ik/json.hpp"
 
 #include <ros/ros.h>
@@ -88,6 +89,10 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
  private:
   void solveIkHandElbowThreadFunction();
+  void applyWorkerThreadScheduling(const char* threadName, int priority) const;
+
+  static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
+  static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 50;
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
   void updateSensorArmJointMeanFromSensorData();
@@ -174,6 +179,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   ros::Publisher ikInputPosPublisher_;  // 发布IK输入的目标位姿（与Python版/drake_ik/input_pos一致）
 
   std::thread ikSolveThread_;
+  int armTrajPublishThreadPriority_ = DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY;
+  int ikSolveThreadPriority_ = DEFAULT_IK_SOLVE_THREAD_PRIORITY;
+  std::vector<int> vrIkThreadCpus_;
   std::mutex bonePoseHandElbowMutex_;
   std::mutex poseConstraintListMutex_;  // 保护 latestPoseConstraintList_ 的互斥锁
   std::mutex ikResultMutex_;

@@ -1,4 +1,12 @@
-"""5W 平台单手摇杆控制躯干（折叠臂升降 + 前后倾 + 腰部旋转）"""
+"""5W 平台单手摇杆控制躯干（折叠臂升降 + 前后倾 + 腰部旋转）
+
+速度/增量语义（不再内部积分开环位姿）：
+  - 摇杆 → /cmd_torso_vel（瞬时速度）
+  - yaw 按键 → /cmd_torso_delta（oneshot 相对位移）
+  - 复位 → /cmd_lb_torso_pose + reset service
+
+Each input source self-clamps against /torso_open_loop_state (open-loop pose from ReferenceManager).
+"""
 from __future__ import annotations
 import json
 import math
@@ -14,20 +22,19 @@ GRIP_RELEASE_TH = 0.3
 STICK_DEAD_ZONE = 0.1
 POSE_PUBLISH_EPS = 1e-5
 
-# ===== 缩放系数（增量速率） =====
+# ===== 速度缩放（摇杆满行程对应的速度） =====
 SCALE_HEIGHT = 0.10   # m/s
 SCALE_PITCH = 0.30    # rad/s
 
 # ===== 限幅（与 MobileManipulatorJoyCommandNode 一致，相对初始位姿） =====
 Z_MIN, Z_MAX = 0.0, 0.32            # m，升降相对初始位姿
 X_MIN = 0.0                           # m，前后相对初始位姿
-PITCH_MIN, PITCH_MAX = -0.5235, 0.0   # rad；VR 约定：负值前倾，0 为直立
-YAW_MIN, YAW_MAX = -0.5235, 0.5235    # rad，仅用于摇杆积分（按钮转身仍走 ±π）
-YAW_TARGET = math.pi                 # rad（180°）
-
-# ===== 时序 =====
-MIN_DT = 0.001
-MAX_DT = 0.1
+PITCH_MIN, PITCH_MAX = -0.5235, 0.0   # rad；VR 内部：负值前倾，0 为直立
+YAW_MAX = 0.5235                      # rad（±30°，仅摇杆积分）
+# 按钮转身限幅：URDF waist_yaw_joint 限位 ±π，贴边界时四元数双覆盖 → IK 振荡。
+# 留 0.05 rad 约 3° margin，单次按键直达 ±YAW_BUTTON_LIMIT，反方向按键可原路返回。
+YAW_BUTTON_LIMIT = math.pi - 0.05   # rad（≈±177°）
+YAW_TARGET = YAW_BUTTON_LIMIT       # rad，按钮单次转身量（与限幅对齐，保证对称可逆）
 
 # ===== grip 双击复位防误触参数 =====
 GRIP_DOUBLE_CLICK_WINDOW = 0.40  # s，两次短按之间的最大间隔
@@ -55,7 +62,11 @@ def get_torso_max_x(z_increment: float) -> float:
 
 
 def load_torso_limits_from_config() -> Tuple[float, float, float, float, float, float]:
-    """从 kuavo.json 的 kuavo_wheel_torso_limit 加载限位；失败时返回模块默认值。"""
+    """从 kuavo.json 的 kuavo_wheel_torso_limit 加载限位；失败时返回模块默认值。
+
+    Return values use open-loop frame (positive pitch = lean forward):
+      (z_min, z_max, x_min, pitch_min, pitch_max, yaw_max)
+    """
     robot_version = os.getenv("ROBOT_VERSION")
     if not robot_version:
         return Z_MIN, Z_MAX, X_MIN, PITCH_MIN, PITCH_MAX, YAW_MAX
@@ -78,7 +89,6 @@ def load_torso_limits_from_config() -> Tuple[float, float, float, float, float, 
         z_range = torso_cfg.get("z_range")
         x_range = torso_cfg.get("x_range")
         pitch_range = torso_cfg.get("pitch_range")
-        base_position = torso_cfg.get("base_position", [0.0, 0.0, 0.0])
 
         z_min, z_max = Z_MIN, Z_MAX
         if z_range and len(z_range) == 2:
@@ -96,7 +106,8 @@ def load_torso_limits_from_config() -> Tuple[float, float, float, float, float, 
         if pitch_range and len(pitch_range) == 2:
             pitch_lo_deg = float(pitch_range[0])
             pitch_hi_deg = float(pitch_range[1])
-            # VR 约定前倾为负 pitch：配置 [0, 20°] → [-20°, 0]
+            # 配置约定 [0, 30°] 表示仅前倾；VR 内部负值前倾
+            # Return value uses VR-internal convention; caller converts to open-loop frame
             pitch_min = -math.radians(max(pitch_hi_deg, 0.0))
             pitch_max = -math.radians(min(pitch_lo_deg, 0.0))
 
@@ -109,21 +120,33 @@ def load_torso_limits_from_config() -> Tuple[float, float, float, float, float, 
 class TorsoController:
     """单手摇杆控躯干的状态机 + 命令发布器。
 
-    依赖注入：publisher、clock 由调用方传入，便于单元测试。
+    依赖注入：publisher / vel_publisher / delta_publisher / clock / state_getter 由调用方传入。
+    - publisher: 绝对位姿（复位路径）
+    - vel_publisher: 连续速度 /cmd_torso_vel
+    - delta_publisher: oneshot 相对位移 /cmd_torso_delta
+    - state_getter: current open-loop 4D pose (x, z, yaw, pitch) or None
+    - limits: (z_min, z_max, x_min, pitch_min, pitch_max, yaw_max), VR 内部约定
     """
 
     def __init__(
         self,
         initial_pose_xyz,
         publisher: Optional[Callable] = None,
+        vel_publisher: Optional[Callable] = None,
+        delta_publisher: Optional[Callable] = None,
         clock: Optional[Callable[[], float]] = None,
         resetter: Optional[Callable[[], object]] = None,
+        state_getter: Optional[Callable[[], Optional[Tuple[float, float, float, float]]]] = None,
         limits: Optional[Tuple[float, float, float, float, float, float]] = None,
     ):
         self.initial_xyz = tuple(initial_pose_xyz)
-        # 索引 [0:3] = x/y/z（取自 initial_pose_xyz）
-        # 索引 [3:6] = roll/pitch/yaw（机械零位为基准）
-        self.current_pose = list(initial_pose_xyz) + [0.0, 0.0, 0.0]
+        self._publish_fn = publisher
+        self._vel_publish_fn = vel_publisher
+        self._delta_publish_fn = delta_publisher
+        self._clock = clock if clock is not None else time.monotonic
+        self._resetter = resetter
+        self._state_getter = state_getter
+        # 限位（VR 内部约定 pitch 负值 = 前倾）
         (
             self._z_min,
             self._z_max,
@@ -131,17 +154,14 @@ class TorsoController:
             self._pitch_min,
             self._pitch_max,
             self._yaw_max,
-        ) = limits if limits is not None else load_torso_limits_from_config()
+        ) = limits if limits is not None else (Z_MIN, Z_MAX, X_MIN, PITCH_MIN, PITCH_MAX, YAW_MAX)
         self._yaw_min = -self._yaw_max
-        self._publish_fn = publisher
-        self._clock = clock if clock is not None else time.monotonic
-        self._resetter = resetter
+        # open-loop pitch limits (positive = lean forward; VR internal is negated)
+        self._pitch_min_open_loop = -self._pitch_max
+        self._pitch_max_open_loop = -self._pitch_min
         self.main_hand: Optional[str] = None  # None / 'left' / 'right'
-        self._last_published_pose: Optional[list] = None
-        self._force_publish = False
         self._l_was_pressed = False
         self._r_was_pressed = False
-        self._last_t: Optional[float] = None
         # A/B 按键边沿检测的"上一帧按下"状态
         self._first_btn_was_pressed = False
         self._second_btn_was_pressed = False
@@ -152,6 +172,8 @@ class TorsoController:
         self._first_click_release_t: Optional[float] = None
         self._reset_cooldown_until = 0.0
         self._reset_busy_until = 0.0
+        # True after a non-zero /cmd_torso_vel publish; used to emit a single zero to clear ReferenceManager velocity latch.
+        self._latched_vel_active = False
 
     def handle_joystick(self, msg) -> None:
         l_pressed, r_pressed, l_released, r_released = self._get_grip_states(msg)
@@ -171,7 +193,13 @@ class TorsoController:
         if self.main_hand is not None:
             reset_triggered = self._detect_grip_reset(msg, l_pressed, r_pressed, l_released, r_released)
 
+        prev_main_hand = self.main_hand
         self._arbitrate_main_hand_release(l_released, r_released)
+
+        # Grip release while velocity was latched → one zero to clear ReferenceManager velocity latch.
+        if prev_main_hand is not None and self.main_hand is None and self._latched_vel_active:
+            self._publish_torso_vel(vx=0.0, vz=0.0, vpitch=0.0, vyaw=0.0)
+            self._latched_vel_active = False
 
         if self.main_hand is None and not reset_triggered:
             self._l_was_pressed = l_pressed
@@ -179,30 +207,19 @@ class TorsoController:
             return
 
         if reset_triggered:
+            # 复位成功后同步发一次绝对零位（SDK/观测兼容）；服务本身已复位
             self._publish_torso_pose()
             self._l_was_pressed = l_pressed
             self._r_was_pressed = r_pressed
             return
 
-        dt = self._compute_dt()
         self._handle_yaw_buttons(msg)
-        self._apply_stick_increment(msg, dt)
-        if self._should_publish_pose():
-            self._publish_torso_pose()
+        self._apply_stick_velocity(msg)
         self._l_was_pressed = l_pressed
         self._r_was_pressed = r_pressed
 
     def is_reset_busy(self) -> bool:
         return self._clock() < self._reset_busy_until
-
-    def _compute_dt(self) -> float:
-        now = self._clock()
-        if self._last_t is None:
-            self._last_t = now
-            return MIN_DT
-        dt = now - self._last_t
-        self._last_t = now
-        return max(MIN_DT, min(dt, MAX_DT))
 
     def _select_stick(self, msg):
         if self.main_hand == "left":
@@ -222,9 +239,9 @@ class TorsoController:
     def _reset_runtime_state(self) -> None:
         """复位成功后回到干净 IDLE，要求用户重新松开/按下 grip 才能控制。"""
         self.main_hand = None
-        self._last_t = None
         self._first_btn_was_pressed = False
         self._second_btn_was_pressed = False
+        self._latched_vel_active = False
         self._reset_grip_click_state()
 
     def _execute_reset(self) -> Optional[float]:
@@ -240,8 +257,6 @@ class TorsoController:
         if not result:
             return None
 
-        self.current_pose = list(self.initial_xyz) + [0.0, 0.0, 0.0]
-        self._last_published_pose = None
         self._reset_runtime_state()
         if isinstance(result, bool):
             return 0.0
@@ -328,58 +343,40 @@ class TorsoController:
     def _z_limits(self) -> Tuple[float, float]:
         return self.initial_xyz[2] + self._z_min, self.initial_xyz[2] + self._z_max
 
-    def _x_limits(self) -> Tuple[float, float]:
-        z_offset = self.current_pose[2] - self.initial_xyz[2]
-        x_hi = self.initial_xyz[0] + get_torso_max_x(z_offset)
-        return self.initial_xyz[0] + self._x_min, x_hi
-
-    def _apply_stick_increment(self, msg, dt: float) -> None:
+    def _apply_stick_velocity(self, msg) -> None:
+        """Stick → velocity; clamp against /torso_open_loop_state workspace limits."""
         sx, sy = self._select_stick(msg)
         sx = sx if abs(sx) > STICK_DEAD_ZONE else 0.0
         sy = sy if abs(sy) > STICK_DEAD_ZONE else 0.0
 
-        z_lo, z_hi = self._z_limits()
-        # 触限时不再积分，避免持续向 MPC 发送不可达目标导致下肢顶限振动
-        if sy > 0.0 and self.current_pose[2] >= z_hi - POSE_PUBLISH_EPS:
-            sy = 0.0
-        elif sy < 0.0 and self.current_pose[2] <= z_lo + POSE_PUBLISH_EPS:
-            sy = 0.0
-        if sx > 0.0 and self.current_pose[4] <= self._pitch_min + POSE_PUBLISH_EPS:
-            sx = 0.0
-        elif sx < 0.0 and self.current_pose[4] >= self._pitch_max - POSE_PUBLISH_EPS:
-            sx = 0.0
+        # 升高：摇杆 Y > 0 → +vz
+        vz = sy * SCALE_HEIGHT
+        # Lean forward: stick X > 0 → decrease VR pitch (spec 6.1) → negative vpitch (open-loop frame)
+        vpitch = -sx * SCALE_PITCH
 
-        # 升高：摇杆 Y > 0 → z 增
-        self.current_pose[2] += sy * SCALE_HEIGHT * dt
-        # 前倾：摇杆 X > 0 → pitch 减（spec 6.1）
-        self.current_pose[4] -= sx * SCALE_PITCH * dt
+        # Read open-loop state; zero over-limit velocity components
+        open_loop_state = self._get_open_loop_state()
+        if open_loop_state is not None:
+            _ol_x, ol_z, _ol_yaw, ol_pitch = open_loop_state
+            z_abs_lo, z_abs_hi = self._z_limits()
+            # Z 限位：超上限不发正向速度，超下限不发负向速度
+            if vz > 0.0 and ol_z >= z_abs_hi - POSE_PUBLISH_EPS:
+                vz = 0.0
+            elif vz < 0.0 and ol_z <= z_abs_lo + POSE_PUBLISH_EPS:
+                vz = 0.0
+            # Pitch limits (open-loop frame: positive = lean forward)
+            if vpitch > 0.0 and ol_pitch >= self._pitch_max_open_loop - POSE_PUBLISH_EPS:
+                vpitch = 0.0
+            elif vpitch < 0.0 and ol_pitch <= self._pitch_min_open_loop + POSE_PUBLISH_EPS:
+                vpitch = 0.0
 
-        self._clamp_pose()
-
-    def _clamp_pose(self) -> None:
-        z_lo, z_hi = self._z_limits()
-        self.current_pose[2] = max(z_lo, min(self.current_pose[2], z_hi))
-
-        x_lo, x_hi = self._x_limits()
-        self.current_pose[0] = max(x_lo, min(self.current_pose[0], x_hi))
-
-        self.current_pose[4] = max(
-            self._pitch_min, min(self.current_pose[4], self._pitch_max)
-        )
-
-    def _pose_changed(self) -> bool:
-        if self._last_published_pose is None:
-            return True
-        return any(
-            abs(a - b) > POSE_PUBLISH_EPS
-            for a, b in zip(self.current_pose, self._last_published_pose)
-        )
-
-    def _should_publish_pose(self) -> bool:
-        if self._force_publish:
-            self._force_publish = False
-            return True
-        return self._pose_changed()
+        if abs(vz) < 1e-9 and abs(vpitch) < 1e-9:
+            if self._latched_vel_active:
+                self._publish_torso_vel(vx=0.0, vz=0.0, vpitch=0.0, vyaw=0.0)
+                self._latched_vel_active = False
+            return
+        self._latched_vel_active = True
+        self._publish_torso_vel(vx=0.0, vz=vz, vpitch=vpitch, vyaw=0.0)
 
     def _select_buttons(self, msg):
         if self.main_hand == "left":
@@ -387,35 +384,75 @@ class TorsoController:
         return msg.right_first_button_pressed, msg.right_second_button_pressed
 
     def _handle_yaw_buttons(self, msg) -> None:
+        """Yaw button edge → oneshot delta; clamp target against open-loop yaw limit.
+
+        从 /torso_open_loop_state 读取当前开环目标 yaw，计算 desired = ol_yaw ± YAW_TARGET，
+        clamp 到 ±YAW_BUTTON_LIMIT，再折算为 delta 发出。到限后再按同方向 → delta=0（无响应）。
+        反方向始终可用（可在越界状态下手动拉回）。
+        """
         first, second = self._select_buttons(msg)
-        # 上升沿：基于当前 yaw 增量 ±YAW_TARGET（互逆，可复位）
-        if first and not self._first_btn_was_pressed:
-            self.current_pose[5] -= YAW_TARGET
-        elif second and not self._second_btn_was_pressed:
-            self.current_pose[5] += YAW_TARGET
+        first_edge = first and not self._first_btn_was_pressed
+        second_edge = second and not self._second_btn_was_pressed
         self._first_btn_was_pressed = first
         self._second_btn_was_pressed = second
-        # wrap yaw 到 [-π, π]，避免连续按按键累加超出 controller 限位
-        self.current_pose[5] = math.atan2(
-            math.sin(self.current_pose[5]), math.cos(self.current_pose[5])
-        )
-        self._clamp_pose()
 
-    def _publish_torso_pose(self) -> None:
-        if self._publish_fn is None:
+        if not first_edge and not second_edge:
             return
-        # 延迟导入，避免在测试环境强制依赖 ROS
+
+        direction = -YAW_TARGET if first_edge else +YAW_TARGET
+        open_loop_state = self._get_open_loop_state()
+        ol_yaw = open_loop_state[2] if open_loop_state is not None else 0.0
+
+        desired = max(-YAW_BUTTON_LIMIT,
+                      min(ol_yaw + direction, YAW_BUTTON_LIMIT))
+        effective_delta = desired - ol_yaw
+
+        if abs(effective_delta) < POSE_PUBLISH_EPS:
+            return  # 已在限位，无响应（issue 3595 预期："连续按同一方向按键时躯干无响应"）
+
+        self._publish_torso_delta(yaw=effective_delta)
+
+    def _get_open_loop_state(self) -> Optional[Tuple[float, float, float, float]]:
+        """返回 (x, z, yaw, pitch) 或 None。"""
+        if self._state_getter is None:
+            return None
+        try:
+            return self._state_getter()
+        except Exception:
+            return None
+
+    def _make_twist(self, lx=0.0, ly=0.0, lz=0.0, ax=0.0, ay=0.0, az=0.0):
         from geometry_msgs.msg import Twist
         twist = Twist()
-        twist.linear.x = self.current_pose[0]
-        twist.linear.y = self.current_pose[1]
-        twist.linear.z = self.current_pose[2]
-        twist.angular.x = self.current_pose[3]
-        # VR 内部前倾为负 pitch，发布给 MPC 时取反（MPC 约定：0 直立，正值前倾）
-        twist.angular.y = -self.current_pose[4]
-        twist.angular.z = self.current_pose[5]
-        self._publish_fn(twist)
-        self._last_published_pose = list(self.current_pose)
+        twist.linear.x = lx
+        twist.linear.y = ly
+        twist.linear.z = lz
+        twist.angular.x = ax
+        twist.angular.y = ay
+        twist.angular.z = az
+        return twist
+
+    def _publish_via(self, publish_fn, lx=0.0, ly=0.0, lz=0.0, ax=0.0, ay=0.0, az=0.0) -> None:
+        if publish_fn is None:
+            return
+        publish_fn(self._make_twist(lx=lx, ly=ly, lz=lz, ax=ax, ay=ay, az=az))
+
+    def _publish_torso_pose(self) -> None:
+        """复位路径：发布 initial_xyz 处的绝对零姿态。"""
+        self._publish_via(
+            self._publish_fn,
+            lx=self.initial_xyz[0],
+            ly=self.initial_xyz[1],
+            lz=self.initial_xyz[2],
+        )
+
+    def _publish_torso_vel(self, vx=0.0, vz=0.0, vpitch=0.0, vyaw=0.0) -> None:
+        # 4D: linear.x/z + angular.y/z (pitch/yaw)
+        self._publish_via(self._vel_publish_fn, lx=vx, lz=vz, ay=vpitch, az=vyaw)
+
+    def _publish_torso_delta(self, x=0.0, z=0.0, pitch=0.0, yaw=0.0) -> None:
+        # same 4D layout as vel
+        self._publish_via(self._delta_publish_fn, lx=x, lz=z, ay=pitch, az=yaw)
 
     def _get_grip_states(self, msg):
         l_pressed = msg.left_grip > GRIP_PRESS_TH
@@ -430,19 +467,15 @@ class TorsoController:
         # 边沿检测：上一帧没按下、这一帧按下 → 锁定
         if l_pressed and not self._l_was_pressed:
             self.main_hand = "left"
-            self._force_publish = True
         elif r_pressed and not self._r_was_pressed:
             self.main_hand = "right"
-            self._force_publish = True
 
     def _arbitrate_main_hand_release(self, l_released: bool, r_released: bool) -> None:
         # 已锁定，仅主指手 grip 松开（< release_th）才释放
         if self.main_hand == "left" and l_released:
             self.main_hand = None
-            self._last_t = None  # 重置时钟基准，下次重新激活首帧返回 MIN_DT
         elif self.main_hand == "right" and r_released:
             self.main_hand = None
-            self._last_t = None
 
 
 def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
@@ -481,7 +514,27 @@ def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
 
     initial_xyz = initial_pose["position"]
 
-    pub = rospy.Publisher("/cmd_lb_torso_pose", Twist, queue_size=10)
+    # 加载 workspace 限位（beta 逻辑）
+    limits = load_torso_limits_from_config()
+    rospy.loginfo(
+        f"TorsoController limits from config: "
+        f"z=[{limits[0]:.3f}, {limits[1]:.3f}], "
+        f"pitch=[{limits[3]:.3f}, {limits[4]:.3f}], "
+        f"yaw=±{limits[5]:.3f}"
+    )
+
+    pub_pose = rospy.Publisher("/cmd_lb_torso_pose", Twist, queue_size=10)
+    pub_vel = rospy.Publisher("/cmd_torso_vel", Twist, queue_size=10)
+    pub_delta = rospy.Publisher("/cmd_torso_delta", Twist, queue_size=10)
+
+    # Subscribe open-loop torso state from ReferenceManager
+    open_loop_state_lock = [None]  # mutable closure
+
+    def _open_loop_state_callback(msg):
+        open_loop_state_lock[0] = (msg.linear.x, msg.linear.z, msg.angular.z, msg.angular.y)
+
+    rospy.Subscriber("/torso_open_loop_state", Twist, _open_loop_state_callback, queue_size=1)
+
     # 订阅 reach_time 仅用于日志/观测，TorsoController 自身不阻塞依赖
     rospy.Subscriber(
         "/lb_torso_pose_reach_time",
@@ -489,15 +542,21 @@ def create_torso_controller(init_timeout_sec: float = 5.0) -> "TorsoController":
         lambda msg: rospy.logdebug(f"torso reach_time={msg.data:.3f}s"),
     )
 
-    def _publish(twist):
-        try:
-            pub.publish(twist)
-        except Exception as e:
-            rospy.logerr_throttle(5.0, f"/cmd_lb_torso_pose publish 异常: {e}")
+    def _safe_publish(pub, topic: str):
+        def _publish(twist):
+            try:
+                pub.publish(twist)
+            except Exception as e:
+                rospy.logerr_throttle(5.0, f"{topic} publish 异常: {e}")
+        return _publish
 
     return TorsoController(
         initial_pose_xyz=initial_xyz,
-        publisher=_publish,
+        publisher=_safe_publish(pub_pose, "/cmd_lb_torso_pose"),
+        vel_publisher=_safe_publish(pub_vel, "/cmd_torso_vel"),
+        delta_publisher=_safe_publish(pub_delta, "/cmd_torso_delta"),
         clock=lambda: rospy.Time.now().to_sec(),
         resetter=lambda: ct.reset_torso_to_initial(wait_timeout_sec=1.0),
+        state_getter=lambda: open_loop_state_lock[0],
+        limits=limits,
     )

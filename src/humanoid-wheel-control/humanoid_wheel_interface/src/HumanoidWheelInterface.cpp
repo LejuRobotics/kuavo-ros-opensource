@@ -52,6 +52,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
 #include "humanoid_wheel_interface/MobileManipulatorPreComputation.h"
+#include "humanoid_wheel_interface/PinocchioEndEffectorKinematicsNoBase.h"
 #include "humanoid_wheel_interface/constraint/TorsoTrackingConstraint.h"
 #include "humanoid_wheel_interface/constraint/EndEffectorConstraint.h"
 #include "humanoid_wheel_interface/constraint/EndEffectorLocalConstraint.h"
@@ -810,7 +811,7 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getTorsoTrackingSoftConstrain
   std::unique_ptr<StateConstraint> constraint;
 
   MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
-  PinocchioEndEffectorKinematics eeKinematicTorso(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.torsoFrame});
+  PinocchioEndEffectorKinematicsNoBase eeKinematicTorso(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.torsoFrame});
 
   constraint.reset(new TorsoTrackingConstraint(eeKinematicTorso, *referenceManagerPtr_, info));
 
@@ -888,9 +889,9 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getTorsoTrackingBoxSoftCost(c
   std::unique_ptr<StateCost> constraint;
 
   MobileManipulatorPinocchioMapping pinocchioMapping(manipulatorModelInfo_);
-  PinocchioEndEffectorKinematics eeKinematicTorso(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.torsoFrame});
+  PinocchioEndEffectorKinematicsNoBase eeKinematicTorso(pinocchioInterface, pinocchioMapping, {manipulatorModelInfo_.torsoFrame});
 
-  constraint.reset(new TorsoTrackingBoxSoftCost(eeKinematicTorso, *referenceManagerPtr_, 
+  constraint.reset(new TorsoTrackingBoxSoftCost(eeKinematicTorso, *referenceManagerPtr_,
                                                pose_lower, pose_upper, 
                                                focusBarrier, 
                                                unFocusBarrier));

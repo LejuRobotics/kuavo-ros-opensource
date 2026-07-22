@@ -4,6 +4,7 @@
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
 #include <clocale>
 #include <thread>
+#include <time.h>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
@@ -14,6 +15,7 @@
 #include <errno.h>
 #include <cstring>
 #include "ocs2_core/thread_support/SetThreadPriority.h"
+#include <std_msgs/Bool.h>
 
 using Duration = std::chrono::duration<double>;
 using Clock = std::chrono::high_resolution_clock;
@@ -407,8 +409,21 @@ private:
                 // Control
                 if(nodelet_robot_type == 1)
                 {
-                    static int cycle_counter = 0;
-                    const int YIELD_INTERVAL = 10;  // 每100个周期让出一次CPU
+                    // 轮臂定频：绝对时间轴 sleep。
+                    // 相对 sleep(period-work) 会把每次醒晚误差累加 → 频率稳定偏低于 500Hz。
+                    // 绝对网格：醒晚后下一拍少睡，平均仍贴近 500Hz；仅严重落后才丢拍重同步。
+                    const double periodSec = 1.0 / std::max(controlFrequency, 1.0);
+                    auto advanceNextTime = [&](struct timespec& t) {
+                        t.tv_nsec += static_cast<long>(periodSec * 1e9);
+                        while (t.tv_nsec >= 1000000000L) {
+                            t.tv_sec += 1;
+                            t.tv_nsec -= 1000000000L;
+                        }
+                    };
+                    auto timespecDiffSec = [](const struct timespec& a, const struct timespec& b) {
+                        return static_cast<double>(a.tv_sec - b.tv_sec) +
+                               static_cast<double>(a.tv_nsec - b.tv_nsec) * 1e-9;
+                    };
 
                     if(wheel_control_type == 0)
                     {
@@ -418,13 +433,32 @@ private:
                     {
                         controller_wheel_real_ptr_->update(ros::Time::now(), elapsedTime);
                     }
-                    // 偶尔让出CPU，避免时间片耗尽被强制抢占
-                    cycle_counter++;
-                    if (cycle_counter >= YIELD_INTERVAL) {
-                        std::this_thread::yield();  // 主动让出CPU，但不睡眠
-                        // 或者使用微小睡眠
-                        // std::this_thread::sleep_for(std::chrono::microseconds(50));
-                        cycle_counter = 0;
+
+                    advanceNextTime(next_time);
+                    struct timespec now {};
+                    clock_gettime(CLOCK_MONOTONIC, &now);
+                    const double lagSec = timespecDiffSec(now, next_time);  // >0 表示已经超过目标时刻
+
+                    if (lagSec <= 0.0) {
+                        // 早到：睡到绝对目标；醒晚由下一拍少睡补偿，不累积
+                        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_time, nullptr);
+                    } else if (lagSec < 2.0 * periodSec) {
+                        // 轻微超时：不睡、不改时间轴（避免相对 sleep 那样永久掉频）
+                    } else {
+                        // 严重落后：丢拍对齐，避免长时间追赶连打
+                        int skipped = 0;
+                        while (timespecDiffSec(now, next_time) > 0.0) {
+                            advanceNextTime(next_time);
+                            ++skipped;
+                            if (skipped > 1000) {  // 防护
+                                next_time = now;
+                                advanceNextTime(next_time);
+                                break;
+                            }
+                        }
+                        ROS_WARN_THROTTLE(1.0,
+                                          "[controlLoop] wheel schedule lag=%.2f ms, skip %d slots",
+                                          lagSec * 1e3, skipped);
                     }
                 }
                 else

@@ -398,6 +398,12 @@ namespace humanoid_controller
      */
     bool isExternalControlCommandExecutionAllowed() const;
 
+    /**
+     * @brief 待切换MPC：手臂归位后自动补触发
+     * @return 已触发返回 true；仍在等返回 false
+     */
+    bool tryPendingMpcSwitch();
+
   private:
     enum class AutoSwitchCommandBufferType
     {
@@ -470,14 +476,20 @@ namespace humanoid_controller
      *        需处于 stance、depth_loco_controller 需深度话题可用等），不检查"当前控制器是否
      *        允许退出"——后者由调用方在循环外做一次性硬前置判断。
      */
-    bool canSwitchTo(const std::string& name);
+    bool canSwitchTo(const std::string& name, std::string* reason = nullptr);
 
     /**
      * @brief 从 current_index 出发，沿 dir 方向（+1=下一个，-1=上一个）在 walk_controllers_
      *        环里找第一个"此刻可切换"的控制器索引（用 canSwitchTo 判定，跳过不可用的）。
      * @return 找到则返回该索引；环里没有任何可切换的控制器则返回 -1。
      */
-    int findNextSwitchableIndex(int current_index, int dir);
+    int findNextSwitchableIndex(int current_index, int dir,
+                                std::vector<std::string>* skipped_reasons = nullptr);
+
+    /**
+     * @brief 将主动切换失败原因写入 ROS log
+     */
+    void logSwitchBlocked(const std::string& reason) const;
 
     /**
      * @brief 启动深度历史话题后台监控（常驻订阅 + 频率缓存）
@@ -624,6 +636,7 @@ namespace humanoid_controller
         ///< walking 状态下 AMP/DEPTH 直切的额外保护回调
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
+    bool pending_mpc_switch_ = false;               ///< 手臂归位后自动触发MPC切换
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
     bool has_pending_walking_switch_request_ = false;
     std::string pending_walking_switch_source_name_;

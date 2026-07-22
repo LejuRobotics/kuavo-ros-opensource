@@ -105,6 +105,11 @@ public:
      */
     bool is_gesture_executing();
 
+    /**
+     * @brief Abort the currently executing gesture
+     */
+    void abort_gesture();
+
 private:
     DexhandController(const std::string &gesture_filepath);
     void gesture_thread_func();

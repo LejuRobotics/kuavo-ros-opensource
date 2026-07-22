@@ -9,7 +9,12 @@ using namespace ocs2;
 
 ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int arm_num, int low_joint_num, int head_num, 
                                        const vector_t& leg_initial_state, const vector_t& arm_initial_state)
-    : nh_(nh), is_real_(is_real), arm_num_(arm_num), low_joint_num_(low_joint_num),head_num_(head_num)
+    : nh_(nh),
+      is_real_(is_real),
+      arm_num_(arm_num),
+      low_joint_num_(low_joint_num),
+      head_num_(head_num),
+      cmd_traj_nh_(nh)
 {
     // 初始化轮臂关节状态（4个关节）
     vector_t initial_lb_joint = vector_t::Zero(low_joint_num);
@@ -20,11 +25,15 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
     vector_t initial_head = vector_t::Zero(head_num_);
     head_external_control_state_.data = initial_head;
     head_external_control_state_.valid = true;  // 使用零位作为默认值
-    
+
+    // 头部 vel/delta 缓冲（rad/s, rad）
+    cmd_head_vel_ = vector_t::Zero(2);
+    cmd_head_delta_ = vector_t::Zero(2);
+
     // 初始化头部PD控制增益（从referenceFile加载）
     head_kp_.resize(head_num_);
     head_kd_.resize(head_num_);
-    
+
     if (head_num_ > 0) {
         std::string referenceFile;
         nh_.getParam("/referenceFile", referenceFile);
@@ -76,6 +85,15 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
              is_real_, arm_num_, low_joint_num_);
 }
 
+ControlDataManager::~ControlDataManager() {
+    if (cmd_traj_spinner_) {
+        cmd_traj_spinner_->stop();
+        cmd_traj_spinner_.reset();
+    }
+    arm_joint_traj_sub_.shutdown();
+    leg_joint_traj_sub_.shutdown();
+}
+
 void ControlDataManager::initializeSubscribers() {
     sensors_data_sub_ = nh_.subscribe<kuavo_msgs::sensorsData>(
         "/sensors_data_raw", 10, 
@@ -94,9 +112,17 @@ void ControlDataManager::initializeSubscribers() {
         &ControlDataManager::lbWaistExternalControlCallback, this);
     
     head_external_control_sub_ = nh_.subscribe(
-        "/robot_head_motion_data", 10, 
+        "/robot_head_motion_data", 10,
         &ControlDataManager::headExternalControlCallback, this);
-    
+
+    // 头部速度 / 相对位移（开环积分在本类；绝对话题仍保留给 SDK/VR）
+    head_vel_sub_ = nh_.subscribe(
+        "/cmd_head_vel", 1,
+        &ControlDataManager::headVelCallback, this);
+    head_delta_sub_ = nh_.subscribe(
+        "/cmd_head_delta", 1,
+        &ControlDataManager::headDeltaCallback, this);
+
     waist_yaw_link_pose_sub_ = nh_.subscribe<nav_msgs::Odometry>(
         "/waist_yaw_link_pose", 10, 
         &ControlDataManager::waistYawLinkPoseCallback, this);
@@ -109,13 +135,20 @@ void ControlDataManager::initializeSubscribers() {
         "/vr_whole_torso_ctrl", 10, 
         &ControlDataManager::wholeTorsoCtrlCallback, this);
     
-    arm_joint_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
-        "/kuavo_arm_traj", 10, 
-        &ControlDataManager::armJointTrajCallback, this);
+    // 指令类话题：独立 CallbackQueue + AsyncSpinner，避免与同进程高频录包/debug 回调互相饿死
+    cmd_traj_nh_.setCallbackQueue(&cmd_traj_callback_queue_);
+    arm_joint_traj_sub_ = cmd_traj_nh_.subscribe<sensor_msgs::JointState>(
+        "/kuavo_arm_traj", 1,
+        &ControlDataManager::armJointTrajCallback, this,
+        ros::TransportHints().tcpNoDelay());
     
-    leg_joint_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
-        "/lb_leg_traj", 10, 
-        &ControlDataManager::legJointTrajCallback, this);
+    leg_joint_traj_sub_ = cmd_traj_nh_.subscribe<sensor_msgs::JointState>(
+        "/lb_leg_traj", 1,
+        &ControlDataManager::legJointTrajCallback, this,
+        ros::TransportHints().tcpNoDelay());
+
+    cmd_traj_spinner_ = std::make_unique<ros::AsyncSpinner>(1, &cmd_traj_callback_queue_);
+    cmd_traj_spinner_->start();
     
     lb_mpc_control_mode_sub_ = nh_.subscribe<std_msgs::Int8>(
         "/mobile_manipulator/lb_mpc_control_mode", 10,
@@ -125,7 +158,7 @@ void ControlDataManager::initializeSubscribers() {
         "/enable_control_state", 1,
         &ControlDataManager::enableControlStateCallback, this);
 
-    ROS_INFO("ControlDataManager: All subscribers initialized");
+    ROS_INFO("ControlDataManager: All subscribers initialized (arm/leg traj on dedicated CallbackQueue)");
 }
 
 // ========== 回调函数实现 ==========
@@ -215,8 +248,8 @@ void ControlDataManager::enableControlStateCallback(const std_msgs::Bool::ConstP
     bool was_enabled = prev_enable_control_.load(std::memory_order_acquire);
 
     // true→false：进入 disable。
-    // 新语义下，姿态类 storage 由 WBC 反向写入规划值，CDM 不再用传感器快照覆写。
-    // 速度/偏移类命令置零，避免底盘/VR 躯干继续运动。
+    // Pose storage is written back from WBC planned values; ControlDataManager no longer overwrites with sensor snapshots.
+    // 速度/偏移类命令置零，避免底盘/VR 躯干/头部继续运动。
     if (was_enabled && !requested) {
         {
             std::lock_guard<std::mutex> lock(motion_mutex_);
@@ -225,6 +258,20 @@ void ControlDataManager::enableControlStateCallback(const std_msgs::Bool::ConstP
         {
             std::lock_guard<std::mutex> lock(external_state_mutex_);
             vr_torso_pose_.update(makeIdentityPose7D());
+        }
+        // Head vel/delta: clear sticky velocity and oneshot on freeze to avoid residual integration after unpause
+        {
+            std::lock_guard<std::mutex> lock(cmd_head_vel_mtx_);
+            cmd_head_vel_.setZero();
+            is_cmd_head_vel_updated_ = false;
+            is_cmd_head_vel_time_update_ = false;
+            last_cmd_head_vel_time_ = 0.0;
+            has_head_vel_integrate_time_ = false;
+        }
+        {
+            std::lock_guard<std::mutex> lock(cmd_head_delta_mtx_);
+            cmd_head_delta_.setZero();
+            is_cmd_head_delta_updated_ = false;
         }
     }
 
@@ -273,14 +320,163 @@ void ControlDataManager::headExternalControlCallback(const kuavo_msgs::robotHead
     // 限位约束（角度单位为度）
     double yaw = std::clamp(msg->joint_data[0], HEAD_JOINT_LIMITS[0].first, HEAD_JOINT_LIMITS[0].second);
     double pitch = std::clamp(msg->joint_data[1], HEAD_JOINT_LIMITS[1].first, HEAD_JOINT_LIMITS[1].second);
-    
+
     vector_t head_cmd = vector_t::Zero(2);
     head_cmd[0] = yaw * M_PI / 180.0;  // yaw, 转换为弧度
     head_cmd[1] = pitch * M_PI / 180.0;  // pitch, 转换为弧度
-    
+
     {
         std::lock_guard<std::mutex> lock(external_state_mutex_);
         head_external_control_state_.update(head_cmd);
+    }
+}
+
+void ControlDataManager::headVelCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr& msg) {
+    // Soft-pause discards. Hold mirrors torso /cmd_torso_vel: sticky + 0.3s timeout zero.
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+    if (msg->joint_data.size() != 2) {
+        ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Invalid /cmd_head_vel size: %lu (expected 2)",
+                          msg->joint_data.size());
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(cmd_head_vel_mtx_);
+    // joint_data = [yaw, pitch] deg/s → rad/s
+    cmd_head_vel_[0] = msg->joint_data[0] * M_PI / 180.0;
+    cmd_head_vel_[1] = msg->joint_data[1] * M_PI / 180.0;
+    is_cmd_head_vel_updated_ = true;
+    is_cmd_head_vel_time_update_ = true;
+}
+
+void ControlDataManager::headDeltaCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr& msg) {
+    // Soft-pause discards. Oneshot relative displacement.
+    if (!prev_enable_control_.load(std::memory_order_acquire)) return;
+    if (msg->joint_data.size() != 2) {
+        ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Invalid /cmd_head_delta size: %lu (expected 2)",
+                          msg->joint_data.size());
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(cmd_head_delta_mtx_);
+    // joint_data = [d_yaw, d_pitch] deg → rad
+    cmd_head_delta_[0] = msg->joint_data[0] * M_PI / 180.0;
+    cmd_head_delta_[1] = msg->joint_data[1] * M_PI / 180.0;
+    is_cmd_head_delta_updated_ = true;
+}
+
+vector_t ControlDataManager::clampHead2D(const vector_t& pose2d) {
+    vector_t out = pose2d;
+    if (out.size() < 2) {
+        out = vector_t::Zero(2);
+    }
+    // HEAD_JOINT_LIMITS 是度，内部状态是 rad
+    const double yaw_min = HEAD_JOINT_LIMITS[0].first * M_PI / 180.0;
+    const double yaw_max = HEAD_JOINT_LIMITS[0].second * M_PI / 180.0;
+    const double pitch_min = HEAD_JOINT_LIMITS[1].first * M_PI / 180.0;
+    const double pitch_max = HEAD_JOINT_LIMITS[1].second * M_PI / 180.0;
+    out[0] = std::clamp(out[0], yaw_min, yaw_max);
+    out[1] = std::clamp(out[1], pitch_min, pitch_max);
+    return out;
+}
+
+void ControlDataManager::applyHeadVelDeltaCommands() {
+    // Velocity hold aligned with torso applyTorsoVelDeltaCommands:
+    //   - is_cmd_head_vel_updated_ sticky (not cleared while non-zero)
+    //   - is_cmd_head_vel_time_update_ stamps last_cmd_head_vel_time_
+    //   - >0.3s without new msg → cmd_head_vel_ = 0
+    //   - explicit/timeout zero → clear sticky flag (stop integrating)
+    // Oneshot delta: consume once.
+    // Time axis: ros::Time::now() (ControlDataManager has no ReferenceManager loop; lazy-integrate on getHead)
+    const double now = ros::Time::now().toSec();
+
+    bool integrateVel = false;
+    bool hasDelta = false;
+    vector_t vel2 = vector_t::Zero(2);
+    vector_t delta2 = vector_t::Zero(2);
+
+    {
+        std::lock_guard<std::mutex> lock(cmd_head_vel_mtx_);
+        if (is_cmd_head_vel_time_update_) {
+            last_cmd_head_vel_time_ = now;
+            is_cmd_head_vel_time_update_ = false;
+        }
+        if ((now - last_cmd_head_vel_time_) > kHeadVelTimeout_) {
+            cmd_head_vel_.setZero();
+            is_cmd_head_vel_updated_ = false;
+        }
+
+        if (is_cmd_head_vel_updated_) {
+            vel2 = cmd_head_vel_;
+            if (vel2.squaredNorm() < 1e-18) {
+                // zero (publisher zero or timeout): exit velocity hold
+                is_cmd_head_vel_updated_ = false;
+                cmd_head_vel_.setZero();
+            } else {
+                integrateVel = true;
+                // sticky: keep is_cmd_head_vel_updated_
+            }
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(cmd_head_delta_mtx_);
+        if (is_cmd_head_delta_updated_) {
+            delta2 = cmd_head_delta_;
+            is_cmd_head_delta_updated_ = false;
+            hasDelta = true;
+        }
+    }
+
+    if (!integrateVel && !hasDelta) {
+        // Next non-zero burst starts a fresh Δt base (avoid huge first step after idle).
+        {
+            std::lock_guard<std::mutex> lock(cmd_head_vel_mtx_);
+            has_head_vel_integrate_time_ = false;
+        }
+        return;
+    }
+
+    // Scheme A: integrate with real control period. Nominal ~WBC 100Hz → 0.01s; clamp outliers.
+    constexpr double dt_nom = 0.01;
+    double dt = dt_nom;
+    {
+        std::lock_guard<std::mutex> lock(cmd_head_vel_mtx_);
+        if (has_head_vel_integrate_time_) {
+            dt = now - last_head_vel_integrate_time_;
+        }
+        constexpr double dt_min = 0.5 * dt_nom;
+        constexpr double dt_max = 3.0 * dt_nom;
+        if (dt < dt_min) {
+            dt = dt_min;
+        } else if (dt > dt_max) {
+            dt = dt_max;
+        }
+        last_head_vel_integrate_time_ = now;
+        has_head_vel_integrate_time_ = true;
+    }
+
+    // Read current open-loop absolute target (same store absolute teleop writes into)
+    vector_t cmd2 = vector_t::Zero(2);
+    {
+        std::lock_guard<std::mutex> lock(external_state_mutex_);
+        if (head_external_control_state_.data.size() >= 2) {
+            cmd2 = head_external_control_state_.data.head(2);
+        }
+    }
+
+    if (integrateVel) {
+        cmd2[0] += vel2[0] * dt;
+        cmd2[1] += vel2[1] * dt;
+    }
+    if (hasDelta) {
+        cmd2[0] += delta2[0];
+        cmd2[1] += delta2[1];
+    }
+
+    cmd2 = clampHead2D(cmd2);
+
+    {
+        std::lock_guard<std::mutex> lock(external_state_mutex_);
+        head_external_control_state_.update(cmd2);
     }
 }
 
@@ -578,9 +774,12 @@ void ControlDataManager::setLbWaistExternalControlState(const vector_t& joint_st
     lb_waist_external_control_state_.update(joint_state);
 }
 
-vector_t ControlDataManager::getHeadExternalControlState() const {
+vector_t ControlDataManager::getHeadExternalControlState() {
+    // vel/delta first: 读前积分到 head_external_control_state_（唯一开环终点）。
+    // 绝对 /robot_head_motion_data 在回调里直接写同一 store，同周期仍可覆盖。
+    applyHeadVelDeltaCommands();
     std::lock_guard<std::mutex> lock(external_state_mutex_);
-    return head_external_control_state_.data;  // 直接返回最新的头部命令
+    return head_external_control_state_.data;
 }
 
 vector_t ControlDataManager::computeHeadControl(const vector_t& target_pos) const {
