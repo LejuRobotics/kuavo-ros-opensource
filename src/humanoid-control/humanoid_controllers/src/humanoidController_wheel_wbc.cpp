@@ -564,6 +564,12 @@ namespace humanoidController_wheel_wbc
             return changeArmCtrlModeCallback(req, res); 
         }
     );
+
+    control_data_manager_->registerService<kuavo_msgs::SetIncrementalArmTrajLink>(
+        "/humanoid_wheel/set_incremental_arm_traj_link",
+        [this](auto& req, auto& res) {
+            return control_data_manager_->handleSetIncrementalArmTrajLink(req, res);
+        });
     
     // 3. 腰部逆运动学服务
     control_data_manager_->registerService<kuavo_msgs::lbBaseLinkPoseCmdSrv>(

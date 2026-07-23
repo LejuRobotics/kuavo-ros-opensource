@@ -1,5 +1,12 @@
 <launch>
-    <!-- 定义命令行参数 -->
+    <!-- VR IK 调试 topic 默认关闭，排查 jitter 时: enable_vr_ik_debug:=true -->
+    <arg name="enable_vr_ik_debug" default="false"/>
+    <group if="$(arg enable_vr_ik_debug)">
+        <param name="/vr_ik/enable_solve_loop_timing_log" value="true"/>
+        <param name="/vr_ik/enable_lock_wait_timing_log" value="true"/>
+        <param name="/vr_ik/enable_arm_traj_receive_timing_log" value="true"/>
+        <param name="/vr_ik/enable_arm_traj_shadow_publish" value="true"/>
+    </group>
     <arg name="version" default="4" />
     <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="ctrl_arm_idx" default="2" />
@@ -184,7 +191,6 @@
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
         <param name="/end_effector_type" value="$(arg ee_type)"/>
-        <remap from="/kuavo_arm_traj_cpp" to="/kuavo_arm_traj" />
         <param name="/quest3/task_space_acc_limit" value="$(arg task_space_acc_limit)" />
         <param name="/quest3/task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
         <param name="/quest3/joint_space_acc_limit" value="$(arg joint_space_acc_limit)" />

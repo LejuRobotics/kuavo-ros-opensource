@@ -21,7 +21,6 @@
     <!-- 设置VR控制参数 -->
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
-    
     <!-- 包含基础的轮臂仿真launch文件 -->
     <include file="$(find humanoid_controllers)/launch/load_kuavo_real_wheel.launch">
         <!-- 覆盖基础launch文件中的参数 -->

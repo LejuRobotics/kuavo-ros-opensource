@@ -8,6 +8,7 @@
 #include <drake/systems/framework/context.h>
 #include <drake/systems/framework/diagram.h>
 #include <drake/systems/framework/diagram_builder.h>
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/changeLbQuickModeSrv.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
@@ -1588,6 +1589,126 @@ void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
   }
 }
 
+void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg) {
+  using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
+  armJintStateMsg.header.stamp = ros::Time::now();
+  logArmTrajPublishStampPeriod(armJintStateMsg.header.stamp);
+
+  sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;
+  for (size_t i = 0; i < armJintStateMsgRad.position.size(); ++i) {
+    armJintStateMsgRad.position[i] *= M_PI / 180.0;
+    armJintStateMsgRad.velocity[i] *= M_PI / 180.0;
+  }
+
+  incrementalArmTrajRecordPublisher_.publish(armJintStateMsg);
+  incrementalArmTrajRadRecordPublisher_.publish(armJintStateMsgRad);
+
+  // 始终发布：MPC 等节点需订阅 /kuavo_arm_traj 同步手臂位置；WBC 增量 VR 期间改走 SHM
+  kuavoArmTrajControlPublisher_.publish(armJintStateMsg);
+
+  const int8_t transport = incrementalArmTrajTransport_.load();
+  if (transport == Request::TRANSPORT_SHM && armTrajShm_) {
+    const uint64_t stamp_nsec = static_cast<uint64_t>(armJintStateMsg.header.stamp.sec) * 1000000000ULL +
+                                static_cast<uint64_t>(armJintStateMsg.header.stamp.nsec);
+    const uint32_t num_joints = static_cast<uint32_t>(armJintStateMsgRad.position.size());
+    armTrajShm_->writeTrajRad(num_joints,
+                              armJintStateMsgRad.position.data(),
+                              armJintStateMsgRad.velocity.data(),
+                              armJintStateMsgRad.effort.data(),
+                              stamp_nsec);
+  }
+
+  if (enableArmTrajShadowPublish_ && kuavoArmTrajShadowPublisher_) {
+    sensor_msgs::JointState shadowMsg = armJintStateMsgRad;
+    shadowMsg.header.frame_id = "vr_incremental_arm_traj_shadow_probe";
+    kuavoArmTrajShadowPublisher_.publish(shadowMsg);
+  }
+}
+
+bool WheelQuest3IkIncrementalROS::setIncrementalArmTrajLink(int8_t transport) {
+  using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
+  if (transport != Request::TRANSPORT_NONE && transport != Request::TRANSPORT_SHM &&
+      transport != Request::TRANSPORT_KUAVO_ARM_TRAJ) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] Invalid incremental arm traj transport: %d", static_cast<int>(transport));
+    return false;
+  }
+
+  if (!setIncrementalArmTrajLinkClient_.exists()) {
+    setIncrementalArmTrajLinkClient_ = nodeHandle_.serviceClient<kuavo_msgs::SetIncrementalArmTrajLink>(
+        "/humanoid_wheel/set_incremental_arm_traj_link");
+  }
+
+  const bool block_until_service_available = (transport == Request::TRANSPORT_SHM);
+  bool service_ready = false;
+  if (block_until_service_available) {
+    while (ros::ok()) {
+      if (setIncrementalArmTrajLinkClient_.waitForExistence(ros::Duration(1.0))) {
+        service_ready = true;
+        break;
+      }
+      ROS_WARN("[WheelQuest3IkIncrementalROS] Waiting for /humanoid_wheel/set_incremental_arm_traj_link ...");
+    }
+  } else {
+    service_ready = setIncrementalArmTrajLinkClient_.waitForExistence(ros::Duration(1.0));
+  }
+  if (!ros::ok() || !service_ready) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] Service /humanoid_wheel/set_incremental_arm_traj_link unavailable");
+    return false;
+  }
+
+  kuavo_msgs::SetIncrementalArmTrajLink srv;
+  srv.request.transport = transport;
+  if (!setIncrementalArmTrajLinkClient_.call(srv) || !srv.response.success) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to set WBC incremental arm traj link: %s",
+             srv.response.message.c_str());
+    return false;
+  }
+  ROS_INFO("[WheelQuest3IkIncrementalROS] WBC incremental arm traj link: %s", srv.response.message.c_str());
+
+  if (transport == Request::TRANSPORT_SHM) {
+    if (!armTrajShm_) {
+      armTrajShm_ = std::make_unique<kuavo_common::ArmTrajShmManager>();
+      if (!armTrajShm_->initialize(kuavo_common::ArmTrajShmManager::Role::Writer)) {
+        ROS_ERROR("[WheelQuest3IkIncrementalROS] Failed to initialize incremental arm traj SHM writer");
+        armTrajShm_.reset();
+        kuavo_msgs::SetIncrementalArmTrajLink rollback_srv;
+        rollback_srv.request.transport = Request::TRANSPORT_NONE;
+        setIncrementalArmTrajLinkClient_.call(rollback_srv);
+        return false;
+      }
+    }
+  } else if (armTrajShm_) {
+    armTrajShm_->cleanup();
+    armTrajShm_.reset();
+  }
+
+  incrementalArmTrajTransport_.store(transport);
+  return true;
+}
+
+bool WheelQuest3IkIncrementalROS::handleSetIncrementalArmTrajLink(
+    kuavo_msgs::SetIncrementalArmTrajLink::Request& req,
+    kuavo_msgs::SetIncrementalArmTrajLink::Response& res) {
+  res.success = setIncrementalArmTrajLink(req.transport);
+  if (res.success) {
+    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
+    switch (req.transport) {
+      case Request::TRANSPORT_SHM:
+        res.message = "incremental arm traj transport set to SHM";
+        break;
+      case Request::TRANSPORT_KUAVO_ARM_TRAJ:
+        res.message = "incremental arm traj transport set to /kuavo_arm_traj";
+        break;
+      default:
+        res.message = "incremental arm traj transport disabled";
+        break;
+    }
+  } else {
+    res.message = "failed to set incremental arm traj transport";
+  }
+  return true;
+}
+
 void WheelQuest3IkIncrementalROS::publishJointStates() {
   Eigen::VectorXd finalArmAngles;
   Eigen::VectorXd finalLbAngles;
@@ -1761,16 +1882,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     armJintStateMsg.effort[i] = 0.0;
   }
 
-  armJintStateMsg.header.stamp = ros::Time::now();
-  kuavoArmTrajCppPublisher_.publish(armJintStateMsg);
-  {
-    sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;
-    for (size_t i = 0; i < armJintStateMsgRad.position.size(); ++i) {
-      armJintStateMsgRad.position[i] *= M_PI / 180.0;
-      armJintStateMsgRad.velocity[i] *= M_PI / 180.0;
-    }
-    kuavoArmTrajRadPublisher_.publish(armJintStateMsgRad);
-  }
+  publishKuavoArmTrajJointStates(armJintStateMsg);
   {
     std::lock_guard<std::mutex> lock(lbLegTargetMutex_);
     hasLatestLbTargetAngles_ = (finalLbAngles.size() == 4);
@@ -1805,7 +1917,6 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
   }
 
   sensor_msgs::JointState armJintStateMsg;
-  armJintStateMsg.header.stamp = ros::Time::now();
   armJintStateMsg.position.resize(14);
   armJintStateMsg.velocity.resize(14);
   armJintStateMsg.effort.resize(14);
@@ -1817,16 +1928,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
     armJintStateMsg.effort[i] = 0.0;
   }
 
-  // 发布手臂消息
-  kuavoArmTrajCppPublisher_.publish(armJintStateMsg);
-  {
-    sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;
-    for (size_t i = 0; i < armJintStateMsgRad.position.size(); ++i) {
-      armJintStateMsgRad.position[i] *= M_PI / 180.0;
-      armJintStateMsgRad.velocity[i] *= M_PI / 180.0;
-    }
-    kuavoArmTrajRadPublisher_.publish(armJintStateMsgRad);
-  }
+  publishKuavoArmTrajJointStates(armJintStateMsg);
 
   // 注意：lb_leg 由 Timer 回调独立发布，这里不处理
 }
@@ -2358,8 +2460,22 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       initZeroRightEndEffectorPosition_.y(),
       initZeroRightEndEffectorPosition_.z());
 
-  kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
-  kuavoArmTrajRadPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_rad", 2);
+  incrementalArmTrajRecordPublisher_ =
+      nodeHandle_.advertise<sensor_msgs::JointState>("/vr_incremental/arm_traj", 2);
+  incrementalArmTrajRadRecordPublisher_ =
+      nodeHandle_.advertise<sensor_msgs::JointState>("/vr_incremental/arm_traj_rad", 2);
+  kuavoArmTrajControlPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 2);
+  setIncrementalArmTrajLinkClient_ = nodeHandle_.serviceClient<kuavo_msgs::SetIncrementalArmTrajLink>(
+      "/humanoid_wheel/set_incremental_arm_traj_link");
+  setIncrementalArmTrajLinkServer_ = nodeHandle_.advertiseService(
+      "/wheel_ik/set_incremental_arm_traj_link",
+      &WheelQuest3IkIncrementalROS::handleSetIncrementalArmTrajLink, this);
+  nodeHandle_.param("vr_ik/enable_arm_traj_shadow_publish", enableArmTrajShadowPublish_, false);
+  if (enableArmTrajShadowPublish_) {
+    kuavoArmTrajShadowPublisher_ =
+        nodeHandle_.advertise<sensor_msgs::JointState>("/vr_incremental/arm_traj_shadow_rad", 2);
+    ROS_INFO("[WheelQuest3IkIncrementalROS] incremental arm traj shadow probe: /vr_incremental/arm_traj_shadow_rad");
+  }
   sensorDataArmJointsPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_sensor_data", 2);
   leftHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/left_hand_pose", 2);
   rightHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/right_hand_pose", 2);
@@ -2434,6 +2550,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/pub_arm_traj_total", 10);
   pubArmTrajPeriodMsPublisher_ =
       nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/lock_wait_ms/pub_arm_traj_period", 10);
+  pubArmTrajStampPeriodMsPublisher_ =
+      nodeHandle_.advertise<std_msgs::Float64>("/ik_debug/arm_traj_publish/stamp_period_ms", 10);
 
   lbLegTrajPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
   lbLegTrajPublishTimer_ =
@@ -2771,6 +2889,24 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   }
 
   ROS_INFO("[WheelQuest3IkIncrementalROS] Interpolation system initialized successfully");
+
+  {
+    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
+    constexpr int kMaxRetry = 60;
+    bool linked = false;
+    for (int i = 0; i < kMaxRetry && ros::ok(); ++i) {
+      if (setIncrementalArmTrajLink(Request::TRANSPORT_SHM)) {
+        linked = true;
+        break;
+      }
+      ros::Duration(1.0).sleep();
+    }
+    if (!linked) {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] Failed to enable incremental arm traj SHM link on startup");
+    } else {
+      ROS_INFO("[WheelQuest3IkIncrementalROS] Incremental arm traj SHM link enabled on startup");
+    }
+  }
 }
 
 void WheelQuest3IkIncrementalROS::publishWholeBodyRefMarkers() {

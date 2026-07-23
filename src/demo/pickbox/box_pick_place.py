@@ -1251,7 +1251,7 @@ class BoxPickPlace(object):
         # 行走闭环参数固定在函数内，客户只调 linear_speed。
         linear_speed = float(self.params.get("walk", {}).get("linear_speed", 0.15))
         angular_speed = 0.25
-        pos_tolerance = 0.07
+        pos_tolerance = 0.10
         yaw_tolerance = math.radians(5.0)
         turn_timeout = 180.0
         walk_timeout = 30.0
@@ -1410,6 +1410,8 @@ class BoxPickPlace(object):
     def _walk_straight_to_target(self, target_x, target_y, pos_tolerance, linear_speed, timeout, control_dt):
         start_time = time.time()
         last_print_time = 0.0
+        max_linear_speed = abs(float(linear_speed))
+        min_linear_speed = min(0.05, max_linear_speed)
         while not rospy.is_shutdown() and time.time() - start_time < timeout:
             current_x, current_y, current_yaw = self._get_robot_pose()
             if current_x is None:
@@ -1433,16 +1435,17 @@ class BoxPickPlace(object):
                 )
                 last_print_time = elapsed
 
-            if distance < pos_tolerance:
+            if distance <= pos_tolerance:
+                self._publish_cmd_vel(0.0, 0.0, 0.0)
                 rospy.loginfo("    到达位置 (距离=%.2fm)", distance)
                 return True
 
+            # 使用“到容差边界的剩余距离”降速，避免以固定的 70% 速度穿过目标。
             if distance > 0.5:
-                vx = linear_speed
-            elif distance > 0.35:
-                vx = linear_speed * 0.7 + (distance - 0.35) / (0.5 - 0.35) * linear_speed * 0.3
+                vx = max_linear_speed
             else:
-                vx = linear_speed * 0.7
+                remaining = max(0.0, distance - pos_tolerance)
+                vx = min(max_linear_speed, max(min_linear_speed, 0.8 * remaining))
 
             if abs(angle_diff) < 0.05:
                 vz = 0.0

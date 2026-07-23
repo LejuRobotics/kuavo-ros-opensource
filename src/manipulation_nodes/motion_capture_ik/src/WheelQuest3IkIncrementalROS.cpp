@@ -116,6 +116,18 @@ void WheelQuest3IkIncrementalROS::publishLockWaitTimingMs(const ros::Publisher& 
   publisher.publish(msg);
 }
 
+void WheelQuest3IkIncrementalROS::logArmTrajPublishStampPeriod(const ros::Time& stamp) {
+  if (!enableLockWaitTimingLog_) {
+    return;
+  }
+  if (hasLastArmTrajPublishStamp_) {
+    publishLockWaitTimingMs(pubArmTrajStampPeriodMsPublisher_,
+                            (stamp - lastArmTrajPublishStamp_).toSec() * 1000.0);
+  }
+  lastArmTrajPublishStamp_ = stamp;
+  hasLastArmTrajPublishStamp_ = true;
+}
+
 WheelQuest3IkIncrementalROS::WheelQuest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
                                                double publishRate,
                                                bool debugPrint,
@@ -130,6 +142,11 @@ WheelQuest3IkIncrementalROS::~WheelQuest3IkIncrementalROS() {
   }
   if (jointStatePublishThread_.joinable()) {
     jointStatePublishThread_.join();
+  }
+  setIncrementalArmTrajLink(kuavo_msgs::SetIncrementalArmTrajLink::Request::TRANSPORT_NONE);
+  if (armTrajShm_) {
+    armTrajShm_->cleanup();
+    armTrajShm_.reset();
   }
 }
 
