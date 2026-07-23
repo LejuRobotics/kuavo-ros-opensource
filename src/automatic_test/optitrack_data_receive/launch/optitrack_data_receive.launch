@@ -1,4 +1,8 @@
 <launch>
-    <!-- OptiTrack Python数据接收节点启动文件 -->
-    <node pkg="optitrack_data_receive" type="OptiTrack_Data_Receive.py" name="OptiTrack_Data_Receive" output="screen" />
+    <!-- 使用前请修改 Motive 主机 IP（或通过 launch 参数覆盖） -->
+    <arg name="mocap_server_ip" default="10.10.31.29" doc="Motive/OptiTrack 主机 IP"/>
+
+    <node pkg="optitrack_data_receive" type="OptiTrack_Data_Receive.py"
+          name="OptiTrack_Data_Receive" output="screen"
+          args="$(arg mocap_server_ip)"/>
 </launch>

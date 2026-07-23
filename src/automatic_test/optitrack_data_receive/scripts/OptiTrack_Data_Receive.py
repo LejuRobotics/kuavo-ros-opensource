@@ -39,6 +39,12 @@ NOKOV_TOPIC_MAP = {
     "elbow": "elbow_pose",
     "belly": "belly_pose",
     "calimark": "calimark_pose",
+    "checkerboard": "checkerboard_pose",
+    "torso": "torso_pose",
+    "l_shoulder": "l_shoulder_pose",
+    "r_shoulder": "r_shoulder_pose",
+    "l_hand": "l_hand_pose",
+    "r_hand": "r_hand_pose",
     "joint_1": "joint_1",
     "joint_2": "joint_2",
     "joint_3": "joint_3",
@@ -191,6 +197,15 @@ def request_data_descriptions(s_client):
     # 请求模型定义
     s_client.send_request(s_client.command_socket, s_client.NAT_REQUEST_MODELDEF, "", (s_client.server_ip_address, s_client.command_port))
 
+
+def subscribe_unicast_rigid_bodies(s_client):
+    """Motive 3.0+ Unicast 模式下，客户端必须订阅后 Motive 才会向 1511 推送帧数据。"""
+    if s_client.use_multicast:
+        return
+    cmd = "SubscribeToData,RigidBody,all"
+    ret = s_client.send_command(cmd)
+    print(f"Unicast 订阅刚体数据: {cmd} -> return_code={ret}")
+
 def test_classes():
     totals = [0, 0, 0]
     print("Test Data Description Classes")
@@ -314,7 +329,9 @@ if __name__ == "__main__":
     print_commands(streaming_client.can_change_bitstream_version())
 
     request_data_descriptions(streaming_client)
-    
+    time.sleep(0.5)  # 等待 Data Descriptions 异步返回
+    subscribe_unicast_rigid_bodies(streaming_client)
+
     print("程序已启动，按 Ctrl+C 退出...")
 
     try:
