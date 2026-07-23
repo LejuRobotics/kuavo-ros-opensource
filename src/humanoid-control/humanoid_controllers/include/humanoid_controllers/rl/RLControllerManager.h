@@ -660,9 +660,9 @@ namespace humanoid_controller
     double robot_action_active_timeout_ = 0.5;
     AutoSwitchCommandBufferType auto_switch_command_buffer_type_ = AutoSwitchCommandBufferType::NONE;
     ros::Time auto_switch_command_buffer_until_;
-    double depth_history_min_frequency_hz_ = 55.0;  ///< depth 历史话题最低频率要求
+    double depth_history_min_frequency_hz_ = 9.0;  ///< depth 历史话题最低频率要求
     double depth_history_wait_timeout_sec_ = 0.2;   ///< depth 历史话题最大消息过期时间
-    int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数
+    int depth_history_required_samples_ = 1;       ///< depth 历史话题最少采样点数
     double depth_history_sample_timeout_sec_ = 0.2; ///< 单次等待消息的超时
 
     // 深度历史话题后台监控（避免切换路径上阻塞等待）

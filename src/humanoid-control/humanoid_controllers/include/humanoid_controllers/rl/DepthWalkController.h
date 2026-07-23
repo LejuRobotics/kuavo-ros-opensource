@@ -131,6 +131,7 @@ namespace humanoid_controller
     double cycleTime_short_{0.4};
     double switch_ratio_{0.5};
     double phase_{0.0};
+    double cmd_vxc=1.0;
     double gait_fre=1.0;              // 步频
     double gait_phase=0.0;            // 步相位
     double leg_bias = 0.5;          // 腿部偏置
@@ -250,7 +251,7 @@ namespace humanoid_controller
     ros::Subscriber depthSub_;
     std::vector<double> depth_;
   private:
-    void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
+    void updatePhase(const ocs2::humanoid::CommandDataRL& cmd,const SensorData &sensor_data);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
     
     // 手臂控制辅助函数

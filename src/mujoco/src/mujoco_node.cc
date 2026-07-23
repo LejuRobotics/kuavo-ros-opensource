@@ -127,16 +127,16 @@ namespace
   std::thread depth_thread;
   std::atomic<bool> depth_thread_running{true};
   std::mutex mujoco_data_mutex;  // Protects access to m and d
-  constexpr double kDefaultDepthFrequency = 60.0;
+  constexpr double kDefaultDepthFrequency = 30.0;
   double depth_frequency = kDefaultDepthFrequency;  // Hz
   bool isRunCamera_{false};
 
-  // Depth image history buffer (6*6+7=43 frames)
+  // Depth image history buffer (3*7+1=22 frames)
   struct DepthImageFrame {
       std::vector<float> data;
       ros::Time timestamp;
   };
-  static const int DEPTH_BUFFER_SIZE = 43;
+  static const int DEPTH_BUFFER_SIZE = 22;
   std::array<DepthImageFrame, DEPTH_BUFFER_SIZE> depth_buffer;
   size_t current_buffer_index = 0;
   bool depth_buffer_filled = false;  // Track if buffer has been filled once
@@ -300,10 +300,10 @@ namespace
   {
     std::unique_lock<std::mutex> lock(depth_buffer_mutex);
 
-    // From 6*7+1=43 frames, take frame indices: 0, 6, 12, 18, 24, 30, 36, 42 (8 frames total)
+    // From 6*7+1=43 frames, take frame indices: 0, 3, 6, 9, 12, 15, 18, 21 (8 frames total)
     std::vector<int> selected_indices;
     for (int i = 0; i < 7; ++i) {
-      selected_indices.push_back(i * 6); // 1st frame of each group
+      selected_indices.push_back(i * 3); // 1st frame of each group
     }
     selected_indices.push_back(DEPTH_BUFFER_SIZE - 1);  // Last remaining frame
     
@@ -1990,7 +1990,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 std::unique_lock<std::mutex> lock(depth_buffer_mutex);
                 std::vector<int> selected_indices;
                 // printf("buf filled:%d | ", depth_buffer_filled);
-                for (int i = 0; i < 6 * 8; i += 6) {
+                for (int i = 0; i < 3 * 8; i += 3) {
                   int idx = (current_buffer_index + i) % DEPTH_BUFFER_SIZE;
                   // printf("idx %d ", idx);
                   selected_indices.push_back(idx); // 1st frame of each group

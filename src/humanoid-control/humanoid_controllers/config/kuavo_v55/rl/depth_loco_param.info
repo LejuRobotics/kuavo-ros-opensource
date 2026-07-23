@@ -20,8 +20,8 @@ use_interploate_from_mpc     false       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /policy_167000_31_reduceFfor_randDfDof_dontMove.onnx       ; 
-commandData 
+networkModelFile          /smp_7_8_slope_noise_bigger_w_smp.onnx      ;
+commandData
 {
     inital
     {
@@ -52,7 +52,7 @@ velocityLimits
     ; 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
     ;        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
     (0,0)  0.55      ; cmdVelLineX positive
-    (1,0)  -0.     ; cmdVelLineX negative
+    (1,0)  -0.6     ; cmdVelLineX negative
     (2,0)  0.3      ; cmdVelLineY positive
     (3,0)  -0.3     ; cmdVelLineY negative
     (4,0)  0.5      ; cmdVelLineZ positive

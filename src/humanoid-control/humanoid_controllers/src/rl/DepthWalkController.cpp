@@ -670,27 +670,39 @@ namespace humanoid_controller
     return RLControllerBase::shouldRunInference();
   }
 
-  void DepthWalkController::updatePhase(const CommandDataRL& cmd)
+void DepthWalkController::updatePhase(const CommandDataRL &cmd,const SensorData &sensor_data)
   {
     // 基本照 humanoidController_rl.cpp::updatePhase
-    // if (external_phase_override_enabled_)
-    // {
-    //       gait_fre = 1.2;
-    // }
-    auto delta_time=dt_*gait_fre*(episodeLength_);
+    auto delta_time = dt_ * gait_fre * (episodeLength_);
+    static int stand_flag=2;
+    static int turns=5;
     episodeLength_ = 0;
-    gait_phase+=delta_time;
+    gait_phase += delta_time;
+    auto x = std::min(cmd.cmdVelLineX_, cmd_vxc);
+    if (std::abs(x) < 0.01 &&
+        std::abs(cmd.cmdVelLineY_ * cmd_vxc) < 0.01 &&
+        std::abs(cmd.cmdVelAngularZ_* cmd_vxc) < 0.01)
+    {  
+      auto par=sensor_data.jointPos_[2]-sensor_data.jointPos_[8];
+      if (net_linvel.norm() < 0.2 or cmd_vxc < 0.5){
+        stand_flag=1;
+      }
+      if(stand_flag>0 and(gait_phase>0.99999 or gait_phase<delta_time+1e-6)){
+        if((par<0.08 and par>-0.08)or turns>=2){
+          gait_phase=0;
+          gait_fre=0;
+          stand_flag=2;}
+          else{turns+=1;}
+        }
+      if (net_linvel.norm() > 0.3 and cmd_vxc > 0.5 and stand_flag==2){
+        stand_flag=0;
+        turns=0;
+      }
 
-
-    // if (std::abs(cmd.cmdVelLineX_) < 0.01 &&
-    //     std::abs(cmd.cmdVelLineY_) < 0.01 &&
-    //     std::abs(cmd.cmdVelAngularZ_) < 0.01 )
-    // {
-    //     gait_phase = 0;
-    // }
-
-    if (cmd.cmdStance_ >= 0.5){
-      gait_phase = 0;
+      
+    }else{
+      stand_flag=0;
+      turns=0;
     }
 
 
@@ -702,9 +714,9 @@ namespace humanoid_controller
     commandPhase_(3) = stance_ratio;
     commandPhase_(4) = gait_fre;
 
-    rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
-                    : (commandPhase_(0) < 0) ? ModeNumber::FS
-                                             : ModeNumber::SS;
+    rl_plannedMode_ = (commandPhase_(0) > 0)   ? ModeNumber::SF
+                      : (commandPhase_(0) < 0) ? ModeNumber::FS
+                                               : ModeNumber::SS;
     has_valid_phase_ = true;
   }
 
@@ -714,24 +726,13 @@ namespace humanoid_controller
       depth_[i] = msg->data[i];
   }
 
-  void DepthWalkController::updateObservation(const Eigen::VectorXd& state_est,
-                                            const SensorData& sensor_data)
+  void DepthWalkController::updateObservation(const Eigen::VectorXd &state_est,
+                                              const SensorData &sensor_data)
   {
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
-    CommandDataRL cmd = gait_receiver_->getPolicyCommand();
-    
-    updatePhase(cmd);
+    CommandDataRL cmd = gait_receiver_->getCurrentCommand();
 
-    // waao：在切换过程中用耦合相位作为输入
-    // if (external_phase_override_enabled_)
-    // {
-    //   commandPhase_(0) = external_phase_sin_;
-    //   commandPhase_(1) = external_phase_cos_;
-    //   commandPhase_(4) = external_phase_frequency_hz_;
-    //   rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
-    //                   : (commandPhase_(0) < 0) ? ModeNumber::FS
-    //                                            : ModeNumber::SS;
-    // }
+    updatePhase(cmd, sensor_data);
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
     static bool yaw_offset_initialized = false;
     if (!yaw_offset_initialized)
