@@ -1,0 +1,91 @@
+{
+  "description": "Teach capture (head) from /sensors_data_raw joint_q",
+  "sensor_topic": "/sensors_data_raw",
+  "indices_note": {
+    "waist_index": 12,
+    "left_arm_range": [
+      13,
+      20
+    ],
+    "right_arm_range": [
+      20,
+      27
+    ],
+    "head_mode": "tail_two"
+  },
+  "sample_count": 9,
+  "samples": [
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": 0.005338613297078513,
+      "head_pitch": -0.004576447128184653,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 0
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": 0.17776908866449462,
+      "head_pitch": -0.21362670721101068,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 1
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": -0.23422603721639326,
+      "head_pitch": -0.21400788390658412,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 2
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": -0.1899736526533745,
+      "head_pitch": -0.30365467658220147,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 3
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": 0.1766244864618193,
+      "head_pitch": -0.3036543976792258,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 4
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": 0.19188321443553977,
+      "head_pitch": -0.032425912414324805,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 5
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": -0.22697833123332492,
+      "head_pitch": -0.03280695866169266,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 6
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": -0.1766223760321624,
+      "head_pitch": -0.14190790847700563,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 7
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "head_yaw": 0.2803814553257301,
+      "head_pitch": -0.1419073730995035,
+      "_head_source": "from joint_q[-2], joint_q[-1]",
+      "index": 8
+    }
+  ]
+}

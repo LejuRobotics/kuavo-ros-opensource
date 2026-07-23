@@ -2,6 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <boost/filesystem.hpp>
+
+#include <fstream>
+
 #include "commonFixture.h"
 
 using namespace ocs2;
@@ -59,4 +63,35 @@ TEST_F(CppAdInterfaceParameterizedFixture, loadIfAvailable) {
   ASSERT_DOUBLE_EQ(gnApproximation.f, 0.5 * testFun(x, p).squaredNorm());
   ASSERT_TRUE(gnApproximation.dfdx.isApprox(testJacobian(x, p).transpose() * testFun(x, p)));
   ASSERT_TRUE(gnApproximation.dfdxx.isApprox(testJacobian(x, p).transpose() * testJacobian(x, p)));
+}
+
+TEST_F(CppAdInterfaceParameterizedFixture, loadIfAvailableRebuildsCorruptedLibrary) {
+  const std::string modelName = "testModelLoadIfAvailableCorrupted";
+  const boost::filesystem::path tempRoot =
+      boost::filesystem::temp_directory_path() / ("ocs2_cppad_" + std::to_string(::getpid()) + "_" + modelName);
+  const boost::filesystem::path libraryDir = tempRoot / modelName / "cppad_generated";
+  const boost::filesystem::path libraryPath = libraryDir / (modelName + "_lib.so");
+
+  boost::filesystem::remove_all(tempRoot);
+  boost::filesystem::create_directories(libraryDir);
+  {
+    std::ofstream corruptedLibrary(libraryPath.string(), std::ios::binary);
+    corruptedLibrary << "bad";
+  }
+
+  ocs2::CppAdInterface adInterface(funImpl, variableDim_, parameterDim_, modelName, tempRoot.string());
+  adInterface.loadModelsIfAvailable(ocs2::CppAdInterface::ApproximationOrder::Second, true);
+
+  vector_t x = vector_t::Random(variableDim_);
+  vector_t p = vector_t::Random(parameterDim_);
+
+  ASSERT_TRUE(adInterface.getFunctionValue(x, p).isApprox(testFun(x, p)));
+  ASSERT_TRUE(adInterface.getJacobian(x, p).isApprox(testJacobian(x, p)));
+  ASSERT_TRUE(adInterface.getHessian(0, x, p).isApprox(testHessian(0, x, p)));
+  ASSERT_TRUE(adInterface.getHessian(1, x, p).isApprox(testHessian(1, x, p)));
+
+  ASSERT_TRUE(boost::filesystem::exists(libraryPath));
+  ASSERT_GT(boost::filesystem::file_size(libraryPath), 3u);
+
+  boost::filesystem::remove_all(tempRoot);
 }

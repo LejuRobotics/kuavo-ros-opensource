@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.0.2)
 project(motion_capture_ik)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
+# 可重现构建：固定调试信息中的时间戳，使 .so 内容仅取决于源码内容而非文件 mtime
+set(ENV{SOURCE_DATE_EPOCH} "0")
 find_package(drake CONFIG REQUIRED)
 find_package(Eigen3 REQUIRED)
 
@@ -29,6 +32,7 @@ find_package(catkin REQUIRED COMPONENTS
   noitom_hi5_hand_udp_python
   leju_utils
   humanoid_wheel_interface
+  kuavo_common
   ocs2_core
   ocs2_msgs
 )
@@ -69,7 +73,7 @@ find_package(Boost REQUIRED COMPONENTS
 catkin_package(
   INCLUDE_DIRS include
   # LIBRARIES motion_capture_ik_lib
-  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core ocs2_msgs humanoid_wheel_interface
+  CATKIN_DEPENDS rospy roscpp std_msgs sensor_msgs geometry_msgs kuavo_msgs noitom_hi5_hand_udp_python message_runtime leju_utils ocs2_core ocs2_msgs humanoid_wheel_interface kuavo_common
   DEPENDS drake Eigen3
 )
 
@@ -111,6 +115,7 @@ include_directories(
 add_subdirectory(test)
 
 add_executable(arms_ik_node src/arms_ik_node.cpp)
+add_dependencies(arms_ik_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 if(EXISTS "${PLANT_IK_FILE}")
   target_link_libraries(arms_ik_node plantIK ${catkin_LIBRARIES} drake::drake)
 else()
@@ -149,6 +154,7 @@ add_executable(ik_ros_uni_cpp_node
   src/ik_ros_uni_cpp_node.cpp 
   src/ArmControlBaseROS.cpp
   src/Quest3IkIncrementalROS.cpp 
+  src/ArmTrajWriter.cpp
   src/IncrementalControlModule.cpp
   src/KeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp
@@ -171,6 +177,7 @@ add_executable(wheel_ik_ros_uni_cpp_node
   src/WheelArmControlBaseROS.cpp
   src/WheelQuest3IkIncrementalROS.cpp 
   src/WheelQuest3IkIncrementalTools.cpp
+  src/ArmTrajWriter.cpp
   src/WheelIncrementalControlModule.cpp
   src/WheelKeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp
@@ -187,3 +194,26 @@ target_include_directories(wheel_ik_ros_uni_cpp_node PRIVATE
 )
 target_link_libraries(wheel_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake)
 target_compile_features(wheel_ik_ros_uni_cpp_node PUBLIC cxx_std_17)
+
+# wheel_arm_only_ik_ros_uni_cpp_node — v62 (5W) 平台半身 IK 入口
+# 复用 v52 的 Quest3IkIncrementalROS 实现，加载 v62 config + arm_only_urdf (14 DOF 纯双臂)
+add_executable(wheel_arm_only_ik_ros_uni_cpp_node
+  src/wheel_arm_only_ik_ros_uni_cpp_node.cpp
+  src/ArmControlBaseROS.cpp
+  src/Quest3IkIncrementalROS.cpp
+  src/ArmTrajWriter.cpp
+  src/IncrementalControlModule.cpp
+  src/KeyFramesVisualizer.cpp
+  src/BaseIKSolver.cpp
+  src/TwoStageTorsoIKRec.cpp
+  src/OneStageIKEndEffector.cpp
+  src/Quest3ArmInfoTransformer.cpp
+  src/ArmLengthMeasurement.cpp
+  src/JoyStickHandler.cpp
+  src/Quest3Debugger.cpp
+  src/HandSmoother.cpp
+)
+target_include_directories(wheel_arm_only_ik_ros_uni_cpp_node PRIVATE
+  ${PROJECT_BINARY_DIR}/include
+)
+target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)

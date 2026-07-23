@@ -1,0 +1,16 @@
+verbose: true
+base_link: base_link
+models:
+ - name: arm
+   type: chain
+   frame: gripper_led_frame
+ - name: camera
+   type: camera3d
+   frame: head_camera_rgb_optical_frame
+free_params:
+ - arm_lift_joint
+error_blocks:
+ - name: hand_eye
+   type: chain3d_to_chain3d
+   model_a: camera
+   model_b: arm

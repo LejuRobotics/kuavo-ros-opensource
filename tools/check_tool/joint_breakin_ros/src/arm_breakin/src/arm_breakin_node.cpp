@@ -107,8 +107,8 @@ public:
             config_file_path_ = canbus_sdk::ConfigParser::getDefaultConfigFilePath();
         }
         
-        // 从ROS参数服务器获取动作配置文件路径
-        nh_->param<std::string>("action_config_file", action_config_file_path_, "");
+        // 忽略全局 /action_config_file（多工控机共用 Master 时易串他机配置），始终按本机路径搜索
+        action_config_file_path_.clear();
         if (action_config_file_path_.empty()) {
             // 辅助函数：检查文件是否存在
             auto file_exists = [](const std::string& path) -> bool {

@@ -36,11 +36,15 @@ src/demo/test_kuavo_wheel_real 包含实物测试案例，可供参考
 
 - [/lb_leg_traj - 腿部关节控制](#5-lb_leg_traj---腿部关节控制)
 - [/cmd_lb_torso_pose - 躯干相对基座的位姿控制](#6-cmd_lb_torso_pose---躯干相对基座的位姿控制)
+- [/cmd_torso_vel - 躯干速度控制](#7-cmd_torso_vel---躯干速度控制)
+- [/cmd_torso_delta - 躯干增量控制](#8-cmd_torso_delta---躯干增量控制)
 
 #### 上肢控制接口
 
-- [/kuavo_arm_traj - 手臂关节控制](#7-kuavo_arm_traj---手臂关节控制)
-- [/mm/two_arm_hand_pose_cmd - 双臂手部笛卡尔位姿控制](#8-mmtwo_arm_hand_pose_cmd---双臂手部笛卡尔位姿控制)
+- [/cmd_head_vel - 头部角速度控制](#9-cmd_head_vel---头部角速度控制)
+- [/cmd_head_delta - 头部增量控制](#10-cmd_head_delta---头部增量控制)
+- [/kuavo_arm_traj - 手臂关节控制](#11-kuavo_arm_traj---手臂关节控制)
+- [/mm/two_arm_hand_pose_cmd - 双臂手部笛卡尔位姿控制](#12-mmtwo_arm_hand_pose_cmd---双臂手部笛卡尔位姿控制)
 
 ### 接收话题 (Subscribed Topics)
 
@@ -402,6 +406,8 @@ print("cmd_leg_joint 消息已发布")
 1. 该机器人无 y，和 roll 自由度，设置不起作用；
 2. 优先级与 /lb_leg_traj 同级，混发则相互打断；
 3. 位置相对于基座坐标系，姿态相对于躯干坐标系；
+4. 与 `/cmd_torso_vel` / `/cmd_torso_delta` 同 tick 时，本话题（绝对位姿）优先级更高；
+5. 软件暂停（`/enable_control false`）期间新消息被丢弃；
 
 **字段说明：**
 
@@ -455,7 +461,140 @@ print("cmd_torso_pose 消息已发布")
 
 ------
 
-#### 7. `/kuavo_arm_traj` - 手臂关节控制
+#### 7. `/cmd_torso_vel` - 躯干速度控制
+
+**消息类型：** `geometry_msgs/Twist`
+
+**功能描述：** 发送躯干瞬时速度控制命令。接收侧 RM 做 sticky 积分：持续收到非零速度时累积位姿，收到零速度或 0.3s 超时后停止。
+
+**注意事项：**
+
+1. G12/BT2 遥控器躯干控制模式通过此话题下发摇杆速度指令（不发 `/cmd_torso_delta`）
+2. `/cmd_lb_torso_pose` 为绝对位姿控制，直接写入开环目标（与 vel/delta 作用于同一 `cmdTorsoPose_`，不互相打断）
+3. 手柄复位走服务 `/mobile_manipulator_reset_torso`，不是本话题
+4. 软件暂停（`/enable_control false`）时丢弃新指令，粘性速度被清零
+
+**字段说明：**
+
+```yaml
+geometry_msgs/Vector3 linear:
+  float64 x    # 躯干X前后速度，m/s
+  float64 z    # 躯干Z升降速度，m/s
+geometry_msgs/Vector3 angular:
+  float64 y    # 躯干Pitch前倾速度，rad/s
+  float64 z    # 躯干Yaw角速度，rad/s
+```
+
+使用示例
+
+```python
+import rospy
+from geometry_msgs.msg import Twist
+
+pub = rospy.Publisher('/cmd_torso_vel', Twist, queue_size=1)
+msg = Twist()
+msg.linear.z = 0.05  # 躯干以 0.05 m/s 升高
+pub.publish(msg)
+# 停止:
+msg.linear.z = 0.0
+pub.publish(msg)
+```
+
+---
+
+#### 8. `/cmd_torso_delta` - 躯干增量控制
+
+**消息类型：** `geometry_msgs/Twist`
+
+**功能描述：** 发送躯干一次性相对位移（oneshot）。每条消息的增量被消耗一次后清零。
+
+**典型来源：** 5W 单手摇操 A/B 按键边沿（偏航 ±π）。G12/BT2 手柄躯干模式当前只发 `/cmd_torso_vel`，不发本话题。
+
+**字段说明：**
+
+```yaml
+geometry_msgs/Vector3 linear:
+  float64 x    # 躯干X前后增量，m
+  float64 z    # 躯干Z升降增量，m
+geometry_msgs/Vector3 angular:
+  float64 z    # 躯干Yaw增量，rad
+  float64 y    # 躯干Pitch增量，rad
+```
+
+使用示例
+
+```python
+import rospy
+from geometry_msgs.msg import Twist
+
+pub = rospy.Publisher('/cmd_torso_delta', Twist, queue_size=1)
+msg = Twist()
+msg.angular.z = 1.57  # 躯干左转 90°
+pub.publish(msg)
+```
+
+---
+
+#### 9. `/cmd_head_vel` - 头部角速度控制
+
+**消息类型：** `kuavo_msgs::robotHeadMotionData`
+
+**功能描述：** 发送头部瞬时角速度控制命令（deg/s）。接收侧 CDM/WBC 做 sticky 积分，0.3s timeout 自动清零。
+
+**注意事项：**
+
+1. H12/G12 遥控器头部控制通过此话题下发
+2. 限位：yaw ±88°，pitch ±25°
+
+**字段说明：**
+
+```yaml
+float64[] joint_data  # 长度为2
+  joint_data[0]       # 头部偏航角速度（yaw），deg/s
+  joint_data[1]       # 头部俯仰角速度（pitch），deg/s
+```
+
+使用示例
+
+```python
+import rospy
+from kuavo_msgs.msg import robotHeadMotionData
+
+pub = rospy.Publisher('/cmd_head_vel', robotHeadMotionData, queue_size=1)
+msg = robotHeadMotionData()
+msg.joint_data = [30.0, 0.0]  # 头部以 30°/s 右转
+pub.publish(msg)
+```
+
+---
+
+#### 10. `/cmd_head_delta` - 头部增量控制
+
+**消息类型：** `kuavo_msgs::robotHeadMotionData`
+
+**功能描述：** 发送头部一次性相对位移（deg）。oneshot 语义。
+
+**字段说明：**
+
+```yaml
+float64[] joint_data  # 长度为2
+  joint_data[0]       # 头部偏航增量（yaw），deg
+  joint_data[1]       # 头部俯仰增量（pitch），deg
+```
+
+```python
+import rospy
+from kuavo_msgs.msg import robotHeadMotionData
+
+pub = rospy.Publisher('/cmd_head_delta', robotHeadMotionData, queue_size=1)
+msg = robotHeadMotionData()
+msg.joint_data = [-15.0, 0.0]  # 头部左转 15°
+pub.publish(msg)
+```
+
+---
+
+#### 11. `/kuavo_arm_traj` - 手臂关节控制
 
 **消息类型：** `sensor_msgs/JointState`
 
@@ -527,7 +666,7 @@ print("cmd_arm_joint 消息已发布")
 
 ------
 
-#### 8. `/mm/two_arm_hand_pose_cmd` - 双臂手部笛卡尔位姿控制
+#### 12. `/mm/two_arm_hand_pose_cmd` - 双臂手部笛卡尔位姿控制
 
 **消息类型：** `kuavo_msgs/twoArmHandPoseCmd`
 

@@ -56,6 +56,19 @@ Successfully created archive: /tmp/kuavo-crash/kuavo-crash_2025-04-11_15-03-00_f
 
 ## 其他
 
+### 压缩格式
+
+工具默认使用 `zstd -19` 压缩 (产出 `.tar.zst`，相比 `gzip -9` 体积约 -30%)。机器人未安装 `zstd` 时自动回退到 `pigz -9` 产出 `.tar.gz`。
+
+如需强制指定算法 (例如紧急回退 / 兼容性问题)，可通过环境变量 `KUAVO_CRASH_COMPRESSOR` 控制:
+
+```bash
+KUAVO_CRASH_COMPRESSOR=gzip ./tools/crash-report/CrashReport.sh ~/.ros/stdout/<TS>/
+KUAVO_CRASH_COMPRESSOR=zstd ./tools/crash-report/CrashReport.sh ~/.ros/stdout/<TS>/  # 强制 zstd，未装则报错
+```
+
+分析端 `docs_internal/kuavo-gdb/kuavo-gdb.sh` 通过 magic byte 自动识别两种格式，无需关注后缀差异。
+
 ### 已知问题须知
 
 - 如果您根据自己的的需求改动了代码，可能会导致乐聚人员在分析崩溃文件时无法对应到您的改动。

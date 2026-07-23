@@ -11,6 +11,7 @@
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/Float32MultiArrayStamped.h>
 #include <kuavo_msgs/twoArmHandPose.h>
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include <ros/package.h>
 #include <sensor_msgs/JointState.h>
 #include <geometry_msgs/Pose.h>
@@ -21,10 +22,16 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <iomanip>
 #include <cmath>
+#include <chrono>
+#include <sstream>
+#include <algorithm>
+#include <vector>
+#include <XmlRpcValue.h>
 
 #include <leju_utils/define.hpp>
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
+#include <ocs2_core/thread_support/SetThreadPriority.h>
 
 #include "motion_capture_ik/ArmControlBaseROS.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
@@ -36,6 +43,43 @@
 #include "DrakeElbowHandPointOpt.hpp"
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
+
+void Quest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName, int priority) const {
+  if (priority > 0) {
+    ocs2::setThisThreadPriority(priority);
+    ROS_INFO("[Quest3IkIncrementalROS] %s: SCHED_FIFO priority %d", threadName, priority);
+  } else {
+    ROS_INFO("[Quest3IkIncrementalROS] %s: priority=0, keep SCHED_OTHER", threadName);
+  }
+
+  if (vrIkThreadCpus_.empty()) {
+    return;
+  }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  std::ostringstream cpuList;
+  for (size_t i = 0; i < vrIkThreadCpus_.size(); ++i) {
+    const int cpu = vrIkThreadCpus_[i];
+    if (cpu < 0 || cpu >= CPU_SETSIZE) {
+      ROS_WARN("[Quest3IkIncrementalROS] %s: skip invalid CPU id %d", threadName, cpu);
+      continue;
+    }
+    CPU_SET(cpu, &cpuset);
+    if (!cpuList.str().empty()) {
+      cpuList << ", ";
+    }
+    cpuList << cpu;
+  }
+
+  if (CPU_COUNT(&cpuset) == 0) {
+    ROS_WARN("[Quest3IkIncrementalROS] %s: no valid CPU in affinity list, skip binding", threadName);
+    return;
+  }
+
+  ocs2::setThreadAffinity(cpuset);
+  ROS_INFO("[Quest3IkIncrementalROS] %s: CPU affinity -> [%s]", threadName, cpuList.str().c_str());
+}
 
 Quest3IkIncrementalROS::Quest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
                                                double publishRate,
@@ -49,6 +93,7 @@ Quest3IkIncrementalROS::~Quest3IkIncrementalROS() {
   if (ikSolveThread_.joinable()) {
     ikSolveThread_.join();
   }
+  arm_traj_writer_.shutdown();
 }
 
 void Quest3IkIncrementalROS::run() {
@@ -65,11 +110,15 @@ void Quest3IkIncrementalROS::run() {
     return;
   }
 
+  // SHM 生命周期跟 mode2 对齐（方案 A）：进 2 切 SHM，退 2 切 NONE；不在 startup 预链
   ikSolveThread_ = std::thread(&Quest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   ros::spin();
 }
 
 void Quest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
+  // 人形增量 IK 与 arm_traj 发布在同一线程，取两者优先级较大值
+  const int workerPriority = std::max(armTrajPublishThreadPriority_, ikSolveThreadPriority_);
+  applyWorkerThreadScheduling("ik_solve_thread", workerPriority);
   ros::Rate rate(publishRate_);
   while (!shouldStop() && ros::ok()) {
     updateSensorArmJointMeanFromSensorData();
@@ -126,7 +175,7 @@ void Quest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
     return;
   }
 
-  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
   const size_t requiredSize = static_cast<size_t>(armJointStartIndex + SENSOR_ARM_JOINT_DIM);
   if (currentSensorData->joint_data.joint_q.size() < requiredSize) {
     return;
@@ -289,11 +338,20 @@ void Quest3IkIncrementalROS::fsmEnter() {
       // print entermode count
       std::cout << "[Quest3IkIncrementalROS] Enter mode 2 reset all states (including incrementalController): "
                 << enterMode2ResetCounter_ << "/" << ENTER_MODE_2_RESET_COUNT << std::endl;
-      // 使用初始化时保存的全零关节角度位姿（Link6），避免运行时频繁调用 FK
-      Eigen::Vector3d currentLeftHandPos = initZeroLeftLink6Position_;
-      Eigen::Vector3d currentRightHandPos = initZeroRightLink6Position_;
-      Eigen::Quaterniond currentLeftHandQuat = Eigen::Quaterniond::Identity();
-      Eigen::Quaterniond currentRightHandQuat = Eigen::Quaterniond::Identity();
+      // [v62 fix] 用机器人当前 sensor 关节角的 FK 作为 anchor（替代固定零位 FK），
+      // 避免 v62 等启动时手臂不在零位的平台，按下 grip 后手臂被强行拉到零位再跟随。
+      // computeLink6FK 内置 fallback：sensor 未就绪时返回 Zero/Identity → 退化到原 v52 行为。
+      Eigen::Vector3d currentLeftHandPos, currentRightHandPos;
+      Eigen::Quaterniond currentLeftHandQuat, currentRightHandQuat;
+      computeLeftLink6FK(currentLeftHandPos, currentLeftHandQuat);
+      computeRightLink6FK(currentRightHandPos, currentRightHandQuat);
+      if (currentLeftHandPos.isZero() && currentRightHandPos.isZero()) {
+        // sensor 未就绪 → 退化到零位 anchor（v52 原行为）
+        currentLeftHandPos = initZeroLeftLink6Position_;
+        currentRightHandPos = initZeroRightLink6Position_;
+        currentLeftHandQuat = Eigen::Quaterniond::Identity();
+        currentRightHandQuat = Eigen::Quaterniond::Identity();
+      }
 
       {
         std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
@@ -312,12 +370,15 @@ void Quest3IkIncrementalROS::fsmEnter() {
       }
 
       // 【核心修复】重置关节角度 fhan 滤波状态，避免从 t1 时刻的旧关节角度开始过渡
+      // [v62 fix] q_/latest_q_ 用 sensor 当前关节角作为初始（替代全零），
+      // 避免 IK 内部"当前 q"误认为是零位，导致输出关节命令把手臂往零位拉。
+      const bool sensorReady = (sensorArmJointQ_.size() == jointStateSize_);
       if (q_.size() == jointStateSize_ && dq_.size() == jointStateSize_) {
-        q_.setZero();
+        q_ = sensorReady ? sensorArmJointQ_ : Eigen::VectorXd::Zero(jointStateSize_);
         dq_.setZero();
       }
       if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
-        latest_q_.setZero();
+        latest_q_ = sensorReady ? sensorArmJointQ_ : Eigen::VectorXd::Zero(jointStateSize_);
         latest_dq_.setZero();
         lowpass_dq_.setZero();
       }
@@ -488,10 +549,9 @@ void Quest3IkIncrementalROS::fsmChange() {
     // fsmChange 结束后，调用 forceActivateAllArmCtrlMode（执行指定次数，增强鲁棒性）
     if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
       forceActivateAllArmCtrlMode();
-      kuavo_msgs::changeArmCtrlMode srv3;
-      srv3.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
-      // srv3.request.control_mode = static_cast<int>(1);
-      enableWbcArmTrajectoryControlClient_.call(srv3);
+      kuavo_msgs::changeArmCtrlMode srv;
+      srv.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
+      enableWbcArmTrajectoryControlClient_.call(srv);
       activateAllArmCtrlModeCounter_++;
     }
     return;  // 没有模式切换，直接返回
@@ -514,14 +574,6 @@ void Quest3IkIncrementalROS::fsmChange() {
   if (rightChangingMaintainUpdated) {
     rightProcessed = processChangingDataRightArm(rightHandCtrlModeChanged);
   }
-  // 手臂复位，退出极速模式
-  if (!joyStickHandlerPtr_->isLeftArmCtrlModeActive() && !joyStickHandlerPtr_->isRightArmCtrlModeActive())
-  {
-    kuavo_msgs::changeArmCtrlMode srv3;
-    srv3.request.control_mode = static_cast<int>(0);
-    enableWbcArmTrajectoryControlClient_.call(srv3);
-  }
-
   // 只有当至少一个臂处理成功时才继续
   if (!leftProcessed && !rightProcessed) return;
 
@@ -850,6 +902,15 @@ void Quest3IkIncrementalROS::fsmExit() {
     lowpass_dq_.tail(7).setZero();
   }
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
+
+  // 【修复】仅在真正退出 VR (2→1) 时清零 use_ros_arm_joint_trajectory_。
+  bool isExitingVR = (armControlMode_ == 1 && lastArmControlMode_ == 2);
+  if (isExitingVR) {
+    kuavo_msgs::changeArmCtrlMode srv;
+    srv.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
+    enableWbcArmTrajectoryControlClient_.call(srv);
+  }
+
   deactivateController();
 }
 
@@ -1335,7 +1396,7 @@ void Quest3IkIncrementalROS::processVisual() {
                            Eigen::Quaterniond& rightQuat) {
     // 可视化使用原始传感器数据
     std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-    const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+    const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
     if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= armJointStartIndex + jointStateSize_) {
       Eigen::VectorXd armJoints(jointStateSize_);
       for (int i = 0; i < jointStateSize_; ++i) {
@@ -1358,7 +1419,7 @@ void Quest3IkIncrementalROS::processVisual() {
   Eigen::Vector3d currentLeftElbowPos, currentRightElbowPos;
   Eigen::Quaterniond qLeftElbow, qRightElbow;
   std::shared_ptr<kuavo_msgs::sensorsData> currentSensorData = getSensorData();
-  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
   if (currentSensorData && currentSensorData->joint_data.joint_q.size() >= armJointStartIndex + jointStateSize_) {
     Eigen::VectorXd armJoints(jointStateSize_);
     for (int i = 0; i < jointStateSize_; ++i) {
@@ -1462,13 +1523,20 @@ void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
     armControlMode_.store(newMode);
     ROS_INFO("[Quest3IkIncrementalROS] Arm control mode changed from %d to %d", oldMode, newMode);
 
-    // 记录进入 mode 2 的时间戳（0→2 和 1→2 都需要）
+    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
     if ((oldMode == 0 || oldMode == 1) && newMode == 2) {
       std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
       mode2EnterTime_ = ros::Time::now();
       ROS_INFO("[Quest3IkIncrementalROS] Mode 2 entered at time: %.3f, timeout duration: %.1f seconds",
                mode2EnterTime_.toSec(),
                MODE_2_TIMEOUT_DURATION);
+      if (!arm_traj_writer_.setTransport(Request::TRANSPORT_SHM)) {
+        ROS_ERROR("[Quest3IkIncrementalROS] Failed to enable SHM on mode 2 enter");
+      }
+    } else if (oldMode == 2 && newMode != 2) {
+      if (!arm_traj_writer_.setTransport(Request::TRANSPORT_NONE)) {
+        ROS_ERROR("[Quest3IkIncrementalROS] Failed to disable SHM on mode 2 exit");
+      }
     }
   } else {
     armControlMode_.store(newMode);
@@ -1847,6 +1915,22 @@ void Quest3IkIncrementalROS::publishJointStates() {
 
   kuavoArmTrajCppPublisher_.publish(jointStateMsg);
 
+  // WBC 增量期间写 SHM；topic 仍发供 MPC/其它节点
+  {
+    const uint64_t stamp_nsec =
+        static_cast<uint64_t>(jointStateMsg.header.stamp.sec) * 1000000000ULL +
+        static_cast<uint64_t>(jointStateMsg.header.stamp.nsec);
+    std::vector<double> pos_rad(static_cast<size_t>(jointStateSize_));
+    std::vector<double> vel_rad(static_cast<size_t>(jointStateSize_));
+    std::vector<double> effort(static_cast<size_t>(jointStateSize_), 0.0);
+    for (int i = 0; i < jointStateSize_; ++i) {
+      pos_rad[static_cast<size_t>(i)] = latest_q_(i);
+      vel_rad[static_cast<size_t>(i)] = lowpass_dq_(i);
+    }
+    arm_traj_writer_.writeIfActive(static_cast<uint32_t>(jointStateSize_), pos_rad.data(),
+                                   vel_rad.data(), effort.data(), stamp_nsec);
+  }
+
   // 发布 /drake_ik/eef_pose（与Python版 pub_solved_arm_eef_pose 一致）
   // 使用滤波后的 latest_q_（弧度）进行FK计算，保证与实际发送给机器人的关节角度一致
   {
@@ -2046,9 +2130,10 @@ void Quest3IkIncrementalROS::publishSensorDataArmJoints() {
     return;
   }
 
-  if (currentSensorData->joint_data.joint_q.size() < 12 + jointStateSize_) {
+  const int requiredSize = sensorDataArmOffset_ + jointStateSize_;
+  if (static_cast<int>(currentSensorData->joint_data.joint_q.size()) < requiredSize) {
     ROS_WARN("[Quest3IkIncrementalROS] Sensor data does not contain enough joint data. Expected at least %d, got %zu",
-             12 + jointStateSize_,
+             requiredSize,
              currentSensorData->joint_data.joint_q.size());
     return;
   }
@@ -2064,7 +2149,7 @@ void Quest3IkIncrementalROS::publishSensorDataArmJoints() {
   }
 
   // 从传感器数据提取手臂关节角（从索引12+腰部自由度开始），并转换为角度单位
-  const int armJointStartIndex = 12 + waist_dof_;  // 考虑腰部自由度
+  const int armJointStartIndex = sensorDataArmOffset_;  // 由基类按 NUM_JOINT-NUM_HEAD-NUM_ARM 算出 (v52=13, v62=4)
   for (int i = 0; i < jointStateSize_; ++i) {
     double jointAngleRad = currentSensorData->joint_data.joint_q[armJointStartIndex + i];
     jointStateMsg.position[i] = jointAngleRad * 180.0 / M_PI;  // 转换为角度
@@ -2120,8 +2205,19 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   // 初始化机器人固定位置参数（从 JSON 加载或使用默认值）
   loadDrakeVelocityIKGeometryFromJson(configJson);
 
-  leftElbowFixedPoint_ = Eigen::Vector3d(-0.3, 0.5, 0.32);
-  rightElbowFixedPoint_ = Eigen::Vector3d(-0.3, -0.5, 0.32);
+  // [v62 fix] elbow fixed point 基于 shoulder pos + 相对偏移自动算（替代硬编码 v52 绝对值）。
+  // v52 原 hardcoded (-0.3, ±0.5, 0.32) = v52 默认 shoulder (-0.0175, ±0.2927, 0.4245) + (-0.2825, ±0.2073, -0.1045)
+  // → v52 平台行为不变；v62 平台只要 config 里 drake_velocity_ik_geometry.left_p0/right_p0
+  // 设了正确 shoulder pos，elbow 就自动跟着对。
+  const Eigen::Vector3d kElbowRelOffsetLeft(-0.2825, 0.2073, -0.1045);
+  const Eigen::Vector3d kElbowRelOffsetRight(-0.2825, -0.2073, -0.1045);
+  leftElbowFixedPoint_ = robotLeftFixedShoulderPos_ + kElbowRelOffsetLeft;
+  rightElbowFixedPoint_ = robotRightFixedShoulderPos_ + kElbowRelOffsetRight;
+  ROS_INFO(
+      "[Quest3IkIncrementalROS] Elbow fixed points (shoulder + offset): "
+      "left=[%.4f, %.4f, %.4f], right=[%.4f, %.4f, %.4f]",
+      leftElbowFixedPoint_.x(), leftElbowFixedPoint_.y(), leftElbowFixedPoint_.z(),
+      rightElbowFixedPoint_.x(), rightElbowFixedPoint_.y(), rightElbowFixedPoint_.z());
 
   // 从主控制器实时订阅当前手臂控制模式
   arm_ctrl_mode_vr_sub_ = nodeHandle_.subscribe(
@@ -2143,6 +2239,21 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   } else {
     ROS_WARN("⚠️  [Quest3IkIncrementalROS] 'NUM_WAIST_JOINT' field not found in JSON configuration, using default value: 0");
     waist_dof_ = 0;
+  }
+
+  nodeHandle_.param("vr_ik/arm_traj_publish_thread_priority",
+                    armTrajPublishThreadPriority_,
+                    DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY);
+  nodeHandle_.param("vr_ik/ik_solve_thread_priority",
+                    ikSolveThreadPriority_,
+                    DEFAULT_IK_SOLVE_THREAD_PRIORITY);
+  vrIkThreadCpus_.clear();
+  XmlRpc::XmlRpcValue threadCpusParam;
+  if (nodeHandle_.getParam("vr_ik/thread_cpus", threadCpusParam) &&
+      threadCpusParam.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+    for (int i = 0; i < threadCpusParam.size(); ++i) {
+      vrIkThreadCpus_.push_back(static_cast<int>(threadCpusParam[i]));
+    }
   }
 
   // 初始化 sensorData 双臂关节角（14维，rad）指数均值滤波状态
@@ -2204,15 +2315,21 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   jointMidValues_(13) = (-0.698131700797732 + 0.698131700797732) / 2.0;  // zarm_r7_joint
 
   // 从JSON配置构建URDF路径
+  // 优先使用 "arm_only_urdf"（v62 半身 IK 用，14 DOF 纯双臂，不含 chest 4 关节），
+  // 找不到则 fallback 到 "arm_urdf"（v52 默认行为不变）。
   std::string urdfFilePath;
-  if (configJson.contains("arm_urdf")) {
-    std::string kuavo_assets_path = ros::package::getPath("kuavo_assets");
+  std::string kuavo_assets_path = ros::package::getPath("kuavo_assets");
+  if (configJson.contains("arm_only_urdf")) {
+    std::string arm_urdf_relative = configJson["arm_only_urdf"].get<std::string>();
+    urdfFilePath = kuavo_assets_path + "/models/" + arm_urdf_relative;
+    ROS_INFO("✅ [Quest3IkIncrementalROS] Using arm_only_urdf from JSON: %s", urdfFilePath.c_str());
+  } else if (configJson.contains("arm_urdf")) {
     std::string arm_urdf_relative = configJson["arm_urdf"].get<std::string>();
     urdfFilePath = kuavo_assets_path + "/models/" + arm_urdf_relative;
-    ROS_INFO("✅ [Quest3IkIncrementalROS] Constructed URDF path from JSON: %s", urdfFilePath.c_str());
+    ROS_INFO("✅ [Quest3IkIncrementalROS] Using arm_urdf from JSON: %s", urdfFilePath.c_str());
   } else {
-    ROS_ERROR("❌ [Quest3IkIncrementalROS] 'arm_urdf' field not found in JSON configuration");
-    throw std::runtime_error("Missing 'arm_urdf' field in JSON configuration");
+    ROS_ERROR("❌ [Quest3IkIncrementalROS] neither 'arm_only_urdf' nor 'arm_urdf' found in JSON configuration");
+    throw std::runtime_error("Missing arm URDF field in JSON configuration");
   }
 
   // drake initialization
@@ -2346,6 +2463,8 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       initZeroRightEndEffectorPosition_.z());
 
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
+  arm_traj_writer_.init(nodeHandle_, "/humanoid_controller/set_incremental_arm_traj_link",
+                        "/quest3_ik/set_incremental_arm_traj_link");
   sensorDataArmJointsPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_sensor_data", 2);
   leftHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/left_hand_pose", 2);
   rightHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/right_hand_pose", 2);

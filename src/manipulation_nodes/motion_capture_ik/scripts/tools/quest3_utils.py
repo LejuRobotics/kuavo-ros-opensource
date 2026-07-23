@@ -472,6 +472,18 @@ class Quest3ArmInfoTransformer:
         if self.left_joystick is None:
             print("No joystick message received yet")
             return
+        # poses 为空或不足时跳过该帧，避免带载等空 poses 命令包导致按固定骨骼索引越界 (IndexError)
+        # 注：len < len(bone_names) 已涵盖 empty（0 < 24），等价 C++ :313 empty() + :318 size()<24
+        if len(msg.poses) < len(bone_names):
+            return
+        # 镜像 C++ validateInput(:326-344)：关键 4 骨骼（左右手/肘）位姿须为有限值，挡 NaN/Inf
+        for _idx in (bone_name_to_index["LeftHandPalm"], bone_name_to_index["LeftArmLower"],
+                     bone_name_to_index["RightHandPalm"], bone_name_to_index["RightArmLower"]):
+            _p = msg.poses[_idx]
+            if not (math.isfinite(_p.position.x) and math.isfinite(_p.position.y) and math.isfinite(_p.position.z)
+                    and math.isfinite(_p.orientation.x) and math.isfinite(_p.orientation.y)
+                    and math.isfinite(_p.orientation.z) and math.isfinite(_p.orientation.w)):
+                return
         self.pose_info_list = msg.poses
         self.timestamp_ms = msg.timestamp_ms
         self.is_high_confidence = msg.is_high_confidence

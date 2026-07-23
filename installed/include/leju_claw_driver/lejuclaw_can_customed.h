@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <pwd.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
@@ -70,13 +71,15 @@ public:
     State   state;
     MotorStateData():id(0x0), state(State::None) {}
     MotorStateData(uint8_t id_, State state_):id(id_), state(state_) {}
-    };    
+    };
     using MotorStateDataVec = std::vector<MotorStateData>;
+    using DebugCallback = std::function<void(const std::string&)>;
 
     LeJuClawCan();
     ~LeJuClawCan();
     int initialize();
     void close();
+    void set_debug_callback(DebugCallback callback);
 
     bool enableMotor(MotorId id, int timeout_ms = 100);
     bool enableAll();
@@ -99,6 +102,7 @@ public:
 private:
     bool init_lejuclaw_can_customed();
     bool Connect(const canbus_sdk::DeviceConfig& config);
+    void emit_debug(const std::string& json) const;
 
     static void internalMessageCallback(canbus_sdk::CanMessageFrame* frame, const canbus_sdk::CallbackContext* context);
     static void internalTefEventCallback(canbus_sdk::CanMessageFrame* frame, const canbus_sdk::CallbackContext* context);
@@ -108,7 +112,7 @@ private:
     static constexpr float CONTROL_LOOP_HZ = 200.0f;               // 全局控制频率 Hz
     static constexpr float CONTROL_LOOP_DT = 1.0f / CONTROL_LOOP_HZ; // 全局控制周期 s
     static constexpr float DEFAULT_KP = 10.00f;                    // 比例增益系数
-    static constexpr float DEFAULT_KD = 2.20f;                     // 微分增益系数
+    static constexpr float DEFAULT_KD = 2.00f;                     // 微分增益系数
     static constexpr float DEFAULT_ALPHA = 0.20f;                  // 低通滤波器系数
     static constexpr float DEFAULT_MAX_CURRENT = 2.50f;            // 最大电流限制 A
     static constexpr float DEFAULT_MIN_ERROR_PERCENT = 1.5f;       // 到位误差阈值，基于行程百分比，单位 %
@@ -141,6 +145,10 @@ private:
     static constexpr float VR_STUCK_POSITION_THRESHOLD = 0.01f;    // VR 卡死位置阈值 rad
     static constexpr float VR_TARGET_POSITION_THRESHOLD = 0.5f;    // VR 目标差阈值 rad
 
+    // 非VR保持模式（目标位置等于触发值时持续输出保持电流）
+    static constexpr bool  ENABLE_NON_VR_HOLD = false;           // 非VR保持模式开关，默认关闭
+    static constexpr float NON_VR_HOLD_CURRENT = 0.4f;           // 非VR保持电流 A
+
     // 统计高电流冲击使用次数（调试/记录）
     int three_amp_current_usage_count = 0;
 
@@ -155,7 +163,7 @@ private:
     static constexpr float ZERO_CONTROL_DT = CONTROL_LOOP_DT;       // 零点控制周期，单位 s（与全局频率一致）
     static constexpr int ZERO_FIND_TIMEOUT_MS = 20000;              // 零点寻找超时时间，单位 ms
     static constexpr int ZERO_WAIT_MS = 500;                        // 零点等待时间，单位 ms
-    static constexpr float OPEN_LIMIT_ADJUSTMENT = -10.0f;          // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
+    static constexpr float OPEN_LIMIT_ADJUSTMENT = 0.0f;            // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float CLOSE_LIMIT_ADJUSTMENT = 0.0f;           // 关限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float TARGET_VELOCITY = 5.0f;                  // 限位寻找目标速度，单位 rad/s
     // 关爪限位寻找参数
@@ -197,6 +205,10 @@ private:
     int   cfg_VR_STUCK_DETECTION_CYCLES = VR_STUCK_DETECTION_CYCLES;
     float cfg_VR_STUCK_POSITION_THRESHOLD = VR_STUCK_POSITION_THRESHOLD;
     float cfg_VR_TARGET_POSITION_THRESHOLD = VR_TARGET_POSITION_THRESHOLD;
+
+    bool  cfg_ENABLE_NON_VR_HOLD = ENABLE_NON_VR_HOLD;
+    float cfg_NON_VR_HOLD_CURRENT = NON_VR_HOLD_CURRENT;
+    std::string cfg_NON_VR_HOLD_TRIGGER_PERCENTS = "100.0";   // YAML中逗号分隔的触发值，如"70,80,100"
 
     float cfg_ZERO_CONTROL_KP = ZERO_CONTROL_KP;
     float cfg_ZERO_CONTROL_KD = ZERO_CONTROL_KD;
@@ -300,6 +312,14 @@ private:
     // 设备ID -> CAN总线名称 映射（用于反注册等操作）
     std::unordered_map<MotorId, std::string> device_canbus_map_;
     std::unordered_map<MotorId, MotorCtrlData> motor_ctrl_datas_;
+    DebugCallback debug_callback_;
+
+    // 非VR保持模式
+    std::unordered_map<MotorId, bool>  non_vr_hold_mode_;        // 是否激活非VR保持
+    std::unordered_map<MotorId, float> non_vr_hold_target_rad_;  // 保持模式的目标位置 rad
+    std::unordered_map<MotorId, float> non_vr_hold_current_;     // 保持电流
+    std::vector<float> non_vr_hold_trigger_set_;                 // 解析后的触发值列表
+    std::unordered_map<MotorId, double> last_move_paw_target_percent_;  // 上次move_paw目标%，用于跳过检测
 
     // 控制线程
     std::atomic<bool> thread_running{false};

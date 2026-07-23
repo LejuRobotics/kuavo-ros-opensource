@@ -10,6 +10,8 @@
     <arg name="robot_type"
          default="$(eval '1' if 60 &lt;= int(arg('robot_version')) % 100 &lt; 70 else '2')"/>
     <param name="robot_type" value="$(arg robot_type)"/>
+    <arg name="depth_frequency" default="60.0"/>
+    <param name="depth_frequency" value="$(arg depth_frequency)"/>
     <!-- Handle version 15 special case: use version 14 scene -->
     <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s14/xml/scene.xml" if="$(eval arg('robot_version') == 15)"/>
     <arg name="legged_robot_scene" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene.xml" unless="$(eval arg('robot_version') == 15)"/>
@@ -17,4 +19,3 @@
 
     <node name="mujoco_cpp" pkg="mujoco_cpp" type="mujoco_cpp_simulate" respawn="false"  output="screen"/>
 </launch>
- 

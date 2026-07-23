@@ -18,7 +18,7 @@ namespace eef_controller
         this->close();
     }
 
-    bool DexhandController::init(MujocoDexHandPtr l_dexhand, MujocoDexHandPtr r_dexhand)
+    bool DexhandController::init(MujocoHandBasePtr l_dexhand, MujocoHandBasePtr r_dexhand)
     {
         left_dexhand_ = l_dexhand;
         right_dexhand_ = r_dexhand;
@@ -176,6 +176,11 @@ namespace eef_controller
 
     bool DexhandController::is_gesture_executing() {
         return gesture_executing_;
+    }
+
+    void DexhandController::abort_gesture() {
+        abort_running_task_flag_ = true;
+        gesture_execute_cv_.notify_all();
     }
 
     bool DexhandController::sleep_for_100ms(int ms_count)

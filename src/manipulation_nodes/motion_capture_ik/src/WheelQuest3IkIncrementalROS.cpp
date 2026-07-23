@@ -20,14 +20,18 @@
 #include <std_msgs/Int32.h>
 #include <std_srvs/Trigger.h>
 #include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/Float64.h>
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <chrono>
 #include <cmath>
+#include <sstream>
 
 #include <leju_utils/define.hpp>
+#include <time.h>
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
+#include <ocs2_core/thread_support/SetThreadPriority.h>
 
 #include "motion_capture_ik/WheelArmControlBaseROS.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
@@ -57,6 +61,73 @@ void updateElbowConstraintUnlocked(std::vector<PoseData>& poseList, int elbowInd
 }
 }  // namespace
 
+void WheelQuest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName, int priority) const {
+  if (priority > 0) {
+    ocs2::setThisThreadPriority(priority);
+    ROS_INFO("[WheelQuest3IkIncrementalROS] %s: SCHED_FIFO priority %d", threadName, priority);
+  } else {
+    ROS_INFO("[WheelQuest3IkIncrementalROS] %s: priority=0, keep SCHED_OTHER", threadName);
+  }
+
+  if (vrIkThreadCpus_.empty()) {
+    return;
+  }
+
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  std::ostringstream cpuList;
+  for (size_t i = 0; i < vrIkThreadCpus_.size(); ++i) {
+    const int cpu = vrIkThreadCpus_[i];
+    if (cpu < 0 || cpu >= CPU_SETSIZE) {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] %s: skip invalid CPU id %d", threadName, cpu);
+      continue;
+    }
+    CPU_SET(cpu, &cpuset);
+    if (!cpuList.str().empty()) {
+      cpuList << ", ";
+    }
+    cpuList << cpu;
+  }
+
+  if (CPU_COUNT(&cpuset) == 0) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] %s: no valid CPU in affinity list, skip binding", threadName);
+    return;
+  }
+
+  ocs2::setThreadAffinity(cpuset);
+  ROS_INFO("[WheelQuest3IkIncrementalROS] %s: CPU affinity -> [%s]", threadName, cpuList.str().c_str());
+}
+
+void WheelQuest3IkIncrementalROS::publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const {
+  if (!enableSolveLoopTimingLog_ || !publisher) {
+    return;
+  }
+  std_msgs::Float64 msg;
+  msg.data = ms;
+  publisher.publish(msg);
+}
+
+void WheelQuest3IkIncrementalROS::publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const {
+  if (!enableLockWaitTimingLog_ || !publisher) {
+    return;
+  }
+  std_msgs::Float64 msg;
+  msg.data = ms;
+  publisher.publish(msg);
+}
+
+void WheelQuest3IkIncrementalROS::logArmTrajPublishStampPeriod(const ros::Time& stamp) {
+  if (!enableLockWaitTimingLog_) {
+    return;
+  }
+  if (hasLastArmTrajPublishStamp_) {
+    publishLockWaitTimingMs(pubArmTrajStampPeriodMsPublisher_,
+                            (stamp - lastArmTrajPublishStamp_).toSec() * 1000.0);
+  }
+  lastArmTrajPublishStamp_ = stamp;
+  hasLastArmTrajPublishStamp_ = true;
+}
+
 WheelQuest3IkIncrementalROS::WheelQuest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
                                                double publishRate,
                                                bool debugPrint,
@@ -72,6 +143,7 @@ WheelQuest3IkIncrementalROS::~WheelQuest3IkIncrementalROS() {
   if (jointStatePublishThread_.joinable()) {
     jointStatePublishThread_.join();
   }
+  arm_traj_writer_.shutdown();
 }
 
 void WheelQuest3IkIncrementalROS::run() {
@@ -108,6 +180,7 @@ void WheelQuest3IkIncrementalROS::run() {
 }
 
 void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
+  // applyWorkerThreadScheduling("ik_solve_thread", ikSolveThreadPriority_);
   ros::Rate rate(publishRate_);
   // 用于统计时间差的静态变量
   static int loopCount = 0;
@@ -142,9 +215,7 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     }
     if (chestPoseUpdateEnabled != chestIncrementalUpdateEnabled_) {
       if (!chestPoseUpdateEnabled) {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        frozenChestQuat_ =
-            computeYawPitchOnlyQuatFromRotationMatrix(chestRotationQuaternion_.toRotationMatrix());
+        frozenChestQuat_ = getRobotChestQuatRef();
         if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
           frozenRobotChestPos_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
         } else {
@@ -177,41 +248,114 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
       rate.sleep();
       continue;  // 机器人未激活，不进行后续流程
     }
-    fsmEnter();
-    fsmChange();
-    fsmProcess();
-    fsmExit();
 
-    publishEndEffectorControlData();
-    publishAuxiliaryStates();
-    publishWholeBodyRefMarkers();
+    const auto loopWallStart = std::chrono::steady_clock::now();
+    if (enableSolveLoopTimingLog_ && hasLastSolveLoopWallStart_) {
+      const double loopPeriodMs =
+          std::chrono::duration<double, std::milli>(loopWallStart - lastSolveLoopWallStart_).count();
+      publishSolveLoopTimingMs(solveLoopPeriodMsPublisher_, loopPeriodMs);
+    }
+
+    const auto fsmBlockStart = std::chrono::steady_clock::now();
+    auto measureStage = [&](const ros::Publisher& publisher, auto&& fn) {
+      if (!enableSolveLoopTimingLog_) {
+        fn();
+        return;
+      }
+      const auto stageStart = std::chrono::steady_clock::now();
+      fn();
+      const double stageMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - stageStart).count();
+      publishSolveLoopTimingMs(publisher, stageMs);
+    };
+
+    measureStage(solveLoopFsmEnterMsPublisher_, [&]() { fsmEnter(); });
+    measureStage(solveLoopFsmChangeMsPublisher_, [&]() { fsmChange(); });
+    measureStage(solveLoopFsmProcessMsPublisher_, [&]() { fsmProcess(); });
+    measureStage(solveLoopFsmExitMsPublisher_, [&]() { fsmExit(); });
+    measureStage(solveLoopPublishEeMsPublisher_, [&]() { publishEndEffectorControlData(); });
+    measureStage(solveLoopPublishAuxMsPublisher_, [&]() { publishAuxiliaryStates(); });
+    measureStage(solveLoopPublishMarkersMsPublisher_, [&]() { publishWholeBodyRefMarkers(); });
+
+    if (enableSolveLoopTimingLog_) {
+      const double fsmBlockTotalMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - fsmBlockStart).count();
+      publishSolveLoopTimingMs(solveLoopFsmBlockTotalMsPublisher_, fsmBlockTotalMs);
+    }
+
+    lastSolveLoopWallStart_ = loopWallStart;
+    hasLastSolveLoopWallStart_ = true;
 
     rate.sleep();
   }
 }
 
 void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
-  ros::Rate rate(jointStatePublishRateHz_);
+  // applyWorkerThreadScheduling("arm_traj_publish_thread", armTrajPublishThreadPriority_);
+  // 不用 ros::Rate：落后时会追赶连发，header.stamp≈同一时刻 → PlotJuggler/录包呈“堆在一起”
+  const double frequency = std::max(jointStatePublishRateHz_, 1.0);
+  const double periodSec = 1.0 / frequency;
+  struct timespec next_time {};
+  clock_gettime(CLOCK_MONOTONIC, &next_time);
+
+  auto advanceNextTime = [&](struct timespec& t) {
+    t.tv_nsec += static_cast<long>(periodSec * 1e9);
+    while (t.tv_nsec >= 1000000000L) {
+      t.tv_sec += 1;
+      t.tv_nsec -= 1000000000L;
+    }
+  };
+
   while (!shouldStop() && ros::ok()) {
+    const auto pubLoopStart = std::chrono::steady_clock::now();
+    if (enableLockWaitTimingLog_ && hasLastPubArmTrajWallStart_) {
+      const double periodMs = std::chrono::duration<double, std::milli>(pubLoopStart - lastPubArmTrajWallStart_).count();
+      publishLockWaitTimingMs(pubArmTrajPeriodMsPublisher_, periodMs);
+    }
+
     if (armControlMode_ == 2) {
       publishJointStates();
     } else {
       publishDefaultJointStates();
     }
-    rate.sleep();
+
+    if (enableLockWaitTimingLog_) {
+      const double totalMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pubLoopStart).count();
+      publishLockWaitTimingMs(pubArmTrajTotalMsPublisher_, totalMs);
+      lastPubArmTrajWallStart_ = pubLoopStart;
+      hasLastPubArmTrajWallStart_ = true;
+    }
+
+    advanceNextTime(next_time);
+    struct timespec now {};
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    const double lagSec =
+        static_cast<double>(now.tv_sec - next_time.tv_sec) +
+        static_cast<double>(now.tv_nsec - next_time.tv_nsec) * 1e-9;
+    if (lagSec > periodSec) {
+      // 严重落后：对齐到 now+period，丢弃追赶补发，避免 stamp 成簇
+      next_time = now;
+      advanceNextTime(next_time);
+      ROS_WARN_THROTTLE(1.0,
+                        "[WheelQuest3IkIncrementalROS] arm_traj publish lag=%.1f ms, skip Rate catch-up",
+                        lagSec * 1e3);
+    }
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next_time, nullptr);
   }
 }
 
 void WheelQuest3IkIncrementalROS::fsmEnter() {
   auto updateChestConstraintFromFk = [&]() {
-    // 如果 FK 可用，直接使用胸部IK目标frame的 FK 结果；否则使用零位胸部目标frame位置
-    Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    Eigen::Matrix3d chestR = Eigen::Matrix3d::Identity();
-    chestR = chestRotationQuaternion_.toRotationMatrix();
+    // 进入准备动作时保持机器人当前胸部 FK 位姿，不跟随 VR 人体躯干
+    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
-      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestR;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
     }
+    frozenRobotChestPos_ = chestPos;
+    frozenChestQuat_ = chestQuat;
   };
   // 正常工作模式 Case 2: (0→2 或 1→2)
   if ((armControlMode_ == 2 && lastArmControlMode_ == 1) || (armControlMode_ == 2 && lastArmControlMode_ == 0)) {
@@ -293,7 +437,9 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
         }
       }
       updateChestConstraintFromFk();
-      incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      if (chestIncrementalUpdateEnabled_) {
+        incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      }
 
       // 处理左臂：计算FK -> 更新约束列表 -> 进入增量模式
       if (shouldEnterLeft) {
@@ -385,7 +531,9 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
         }
       }
       updateChestConstraintFromFk();
-      incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      if (chestIncrementalUpdateEnabled_) {
+        incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+      }
 
       incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
                                                           latestPoseConstraintList_,
@@ -412,8 +560,8 @@ void WheelQuest3IkIncrementalROS::fsmChange() {
 void WheelQuest3IkIncrementalROS::fsmProcess() {
   if (armControlMode_ != 2) return;
   activateController();
-  // mode2 下确保 chest 增量模式已激活，避免胸部更新刷屏警告
-  if (!incrementalController_->isIncrementalModeChest()) {
+  // mode2 下仅在开启躯干控制时激活 chest 增量；进入准备动作时保持机器人当前胸部 FK 姿态
+  if (chestIncrementalUpdateEnabled_ && !incrementalController_->isIncrementalModeChest()) {
     Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
     {
       std::lock_guard<std::mutex> lock(chestPoseMutex_);
@@ -421,13 +569,14 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
         humanChestPos = latestChestPositionInRobot_;
       }
     }
-    // 使用当前 FK 更新胸部约束，避免胸部增量初始跳变
-    Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
+    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
-      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestR;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
     }
+    frozenRobotChestPos_ = chestPos;
+    frozenChestQuat_ = chestQuat;
     incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
   }
   // 0) 在 fsmProcess 统一更新 smoother 状态，确保后续 getModeChangingState() 是最新的
@@ -501,7 +650,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
       input.chestQuatRef = computeYawPitchOnlyQuatFromRotationMatrix(chestR);
       if (!chestIncrementalUpdateEnabled_) {
-        input.chestQuatRef = frozenChestQuat_;
+        input.chestQuatRef = getRobotChestQuatRef();
       }
     }
     return input;
@@ -991,11 +1140,11 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
         humanChestPos = latestChestPositionInRobot_;
       }
     }
-      Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
+    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
-      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestR;
+      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
       frozenRobotChestPos_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
       if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
         frozenLeftHandHeightOffset_ =

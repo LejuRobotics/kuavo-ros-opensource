@@ -1,0 +1,105 @@
+<?xml version="1.0"?>
+<mujoco model="biped_elbows">
+  <compiler angle="radian" meshdir="../../../../../kuavo_assets/models/biped_s70/meshes/"/>
+  <option>
+    <flag gravity="enable" contact="disable" />
+  </option>
+
+  <statistic meansize="0.02" />
+
+  <default>
+    <joint armature="0.01" damping="0.0" frictionloss="0.0" />
+  </default>
+
+  <asset>
+    <!-- Left arm_yaw meshes -->
+    <mesh name="L_arm_yaw" file="L_arm_yaw.STL"/>
+    <!-- Left elbow meshes -->
+    <mesh name="L_foream" file="L_foream.STL"/>
+    <mesh name="L_foream_Prismatic_link" file="L_foream_Prismatic_link.STL"/>
+    <mesh name="L_foream_input_link" file="L_foream_input_link.STL"/>
+
+    <!-- Right arm_yaw meshes -->
+    <mesh name="R_arm_yaw" file="R_arm_yaw.STL"/>
+    <!-- Right elbow meshes -->
+    <mesh name="R_foream" file="R_foream.STL"/>
+    <mesh name="R_foream_Prismatic_link" file="R_foream_Prismatic_link.STL"/>
+    <mesh name="R_foream_input_link" file="R_foream_input_link.STL"/>
+  </asset>
+
+  <worldbody>
+    <camera name="front" fovy="0.01" pos="-0.4 0 -0.6" quat="0.707 0 -0.707 0"/>
+
+    <!-- ========== LEFT ELBOW (fixed base at L_arm_yaw) ========== -->
+    <body name="L_arm_yaw" pos="0 0.12 0">
+      <inertial pos="-0.000774112 1.26464e-05 -0.124662" quat="0.0197197 -0.584104 -0.00487189 -0.811424" mass="0.618073" diaginertia="0.000576997 0.000561409 0.00055851"/>
+      <joint name="L_arm_yaw_joint" pos="0 0 0" axis="0 0 1" limited="true" range="-1.5708 1.5708" actuatorfrcrange="-100 100"/>
+      <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_arm_yaw"/>
+
+      <!-- 与 biped_arms_mujoco.xml 一致：L_foream 与 L_foream_Prismatic_link 同为 L_arm_yaw 子 body，后者不是 L_foream 子级 -->
+      <body name="L_foream" pos="0.028143 0 -0.27226">
+        <inertial pos="-0.0268922 -0.000108114 -0.0499461" quat="0.00640403 -0.710195 -0.00648144 -0.703946" mass="0.16919" diaginertia="0.000151305 0.000127679 0.000121071"/>
+        <joint name="L_foream_joint" pos="0 0 0" axis="0 1 0" range="-2.618 0" actuatorfrcrange="-100 100"/>
+        <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_foream"/>
+        <site name="L_elbow_anchor" size="0.004" pos="-0.01967509 0 0.00359278" rgba="0 0.5 1 0.8"/>
+      </body>
+      <body name="L_foream_Prismatic_link" pos="0 0 -0.22077">
+        <inertial pos="-2.9823e-08 5.45289e-08 0.0589941" quat="0.707107 -6.72288e-07 -6.72288e-07 -0.707107" mass="0.017315" diaginertia="2.35683e-05 2.34566e-05 7.21106e-07"/>
+        <joint name="L_foream_Prismatic_joint" pos="0 0 0" axis="0 0 -1" type="slide" limited="true" range="0 0.0425" actuatorfrcrange="-100 100"/>
+        <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_foream_Prismatic_link"/>
+
+        <body name="L_foream_input_link">
+          <inertial pos="-0.00310499 0.000245452 -0.0226535" quat="0.999298 0.00571073 0.0297877 0.0219784" mass="0.0149783" diaginertia="3.27322e-06 3.15937e-06 1.03964e-06"/>
+          <joint name="L_foream_input_joint" type="hinge" axis="0 1 0"/>
+          <geom type="mesh" rgba="0.8 0.85 0.9 1" mesh="L_foream_input_link"/>
+          <body name="L_foream_input_link_tip" pos="0.00846791 0 -0.04789722">
+            <site name="L_elbow_tip" size="0.004" rgba="1 0.5 0 0.8"/>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- ========== RIGHT ELBOW (fixed base at R_arm_yaw) ========== -->
+    <body name="R_arm_yaw" pos="0 -0.12 0">
+      <inertial pos="-0.000774112 -1.26464e-05 -0.124662" quat="0.0197197 0.584104 -0.00487189 0.811424" mass="0.618073" diaginertia="0.000576997 0.000561409 0.00055851"/>
+      <joint name="R_arm_yaw_joint" pos="0 0 0" axis="0 0 1" limited="true" range="-1.5708 1.5708" actuatorfrcrange="-100 100"/>
+      <geom type="mesh" rgba="1 1 1 1" mesh="R_arm_yaw"/>
+
+      <body name="R_foream" pos="0.028143 0 -0.27226">
+        <inertial pos="-0.0268922 0.000108114 -0.0499461" quat="0.00640403 0.710195 -0.00648144 0.703946" mass="0.16919" diaginertia="0.000151305 0.000127679 0.000121071"/>
+        <joint name="R_foream_joint" pos="0 0 0" axis="0 1 0" range="-2.618 0" actuatorfrcrange="-100 100"/>
+        <geom type="mesh" rgba="1 1 1 1" mesh="R_foream"/>
+        <site name="R_elbow_anchor" size="0.004" pos="-0.01967509 0 0.00359278" rgba="0 0.5 1 0.8"/>
+      </body>
+      <body name="R_foream_Prismatic_link" pos="0 0 -0.22077">
+        <inertial pos="-2.9823e-08 -5.45289e-08 0.0589941" quat="0.707107 6.72288e-07 -6.72288e-07 0.707107" mass="0.017315" diaginertia="2.35683e-05 2.34566e-05 7.21106e-07"/>
+        <joint name="R_foream_Prismatic_joint" pos="0 0 0" axis="0 0 -1" type="slide" limited="true" range="0 0.0425" actuatorfrcrange="-100 100"/>
+        <geom type="mesh" rgba="1 1 1 1" mesh="R_foream_Prismatic_link"/>
+
+        <body name="R_foream_input_link">
+          <inertial pos="-0.00310499 -0.000245452 -0.0226535" quat="0.999298 -0.00571073 0.0297877 -0.0219784" mass="0.0149783" diaginertia="3.27322e-06 3.15937e-06 1.03964e-06"/>
+          <joint name="R_foream_input_joint" type="hinge" axis="0 -1 0"/>
+          <geom type="mesh" rgba="1 1 1 1" mesh="R_foream_input_link"/>
+          <body name="R_foream_input_link_tip" pos="0.00846791 0 -0.04789722">
+            <site name="R_elbow_tip" size="0.004" rgba="1 0.5 0 0.8"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <!-- Elbow closed-loop constraints only -->
+    <!-- body1 anchor is expressed in foream_input_link local frame -->
+    <!-- IMPORTANT: body2 must be on the other branch (foream), not an ancestor of body1, otherwise it locks the chain. -->
+    <connect name="L_loop_foream" body1="L_foream_input_link" body2="L_foream" anchor="0.00846791 0 -0.04789722" solref="0.002 1" />
+    <connect name="R_loop_foream" body1="R_foream_input_link" body2="R_foream" anchor="0.00846791 0 -0.04789722" solref="0.002 1" />
+  </equality>
+
+  <actuator>
+    <position name="L_arm_yaw_motor" joint="L_arm_yaw_joint" kp="0.1" kv="0.1" ctrlrange="-1.5708 1.5708"/>
+    <position name="L_foream_Prismatic_motor" joint="L_foream_Prismatic_joint" kp="1000" kv="200" ctrlrange="0 0.0425" forcerange="-3000 3000"/>
+    <position name="R_arm_yaw_motor" joint="R_arm_yaw_joint" kp="0.1" kv="0.1" ctrlrange="-1.5708 1.5708"/>
+    <position name="R_foream_Prismatic_motor" joint="R_foream_Prismatic_joint" kp="1000" kv="200" ctrlrange="0 0.0425" forcerange="-3000 3000"/>
+  </actuator>
+</mujoco>

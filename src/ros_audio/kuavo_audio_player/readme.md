@@ -1,95 +1,125 @@
 # kuavo_audio_player 使用说明
 
 ## 1. 系统架构说明
-### **************** 建议先看架构图***************
-kuavo_audio_player 是一个 ROS 音频播放系统，由两个主要节点组成：
 
-1. **音频流播放节点(audio_stream_player_node)**：订阅 `audio_data` 话题，接收音频流数据并播放。
-2. **音乐播放节点(music_player_node)**：提供 `/play_music` 服务，用于播放本地音频文件。
+kuavo_audio_player 按机型提供两种部署形态（`play_music.launch` 按 `ROBOT_VERSION` 自动分流）：
 
-系统设计确保只有一个节点可以独占音频设备，避免多个进程同时访问音频设备导致的冲突。
+- **v17 — 单节点 `audio_player_node`**：提供 `/play_music` 服务播放本地音频文件，订阅 `/audio_data` 接收外部 PCM 流，统一经单环形缓冲 + 单 PortAudio 回调输出到声卡。
+- **非 v17 — 旧两节点**：`loundspeaker.py`（文件服务）+ `audio_stream_player.py`（流播放）。
+
+**接口原则**：旧接口定义冻结；新功能只通过新接口名提供，不修改旧定义。
 
 ## 2. 服务与话题接口
 
 ### 2.1 播放本地音频文件
 
-#### 服务接口: `/play_music`
-- **服务类型**: `kuavo_msgs/playmusic`
-- **参数说明**:
-  - `music_number`: 音乐文件名（如 `test.wav`、`test.mp3`），需放在配置的音乐目录下
-  - `volume`: 音量参数，单位为 dB（分贝），建议范围为 0-10，过大可能导致音频失真
-  - `speed`: 播放速度参数，1.0 为原速，大于 1 加速，小于 1 减速
+#### 服务接口：`/play_music`
+- **服务类型**：`kuavo_msgs/playmusic`（旧接口）
+- **请求参数**：
+  - `music_number` (str)：音频文件名（如 `test.wav`、`test.mp3`），需放在 `music_path` 指定的目录下
+  - `volume` (int)：音量，范围 0–100。内部映射为 ffmpeg `volume` 滤镜的 dB 增益：`100` 为原声（0 dB），`0` 近静音（约 −60 dB），对数缩放避免线性乘法溢出破音
+- **响应**：`success_flag` (bool)
+- **语义**：追加到缓冲，按队列顺序播放，不打断当前
 
-#### 示例调用:
+#### 服务接口：`/play_music_immediate`（新接口，仅单节点提供）
+- **服务类型**：`kuavo_msgs/PlayMusicImmediate`
+- **请求参数**：同 `/play_music`
+- **响应**：`success_flag` (bool)
+- **语义**：原子化「打断当前 + 立即播新」。先同步停止当前播放（关流丢弃 ALSA DMA）再加载新文件
+- **兼容性**：旧两节点不提供此服务。调用方应探测其存在（`wait_for_service` 短超时 + 缓存），不存在时降级为 `/stop_music` 同步服务 → `/stop_music` topic → `/play_music`。
+
+#### 示例调用：
 ```bash
+# 追加播放（默认，排队）
 rosservice call /play_music "music_number: '1_挥手.mp3'
-volume: 3"
+volume: 80"
+
+# 立即打断当前并播放新文件（搬运语音切换用，仅单节点机型）
+rosservice call /play_music_immediate "music_number: '进入搬运模式可安全移动.wav'
+volume: 80"
 ```
 
 ### 2.2 音频流播放接口
 
-#### 话题: `audio_data`
-- **话题类型**: `std_msgs/Int16MultiArray`
-- **数据格式**:
-  - `data`: 音频采样数据，格式为 16 位有符号整数（INT16）数组
-  - `layout.dim`: 可包含采样率信息，通过 `dim.label="sample_rate"` 和 `dim.size=采样率值` 指定
+#### 话题：`/audio_data`
+- **话题类型**：`std_msgs/Int16MultiArray`
+- **数据格式**：
+  - `data`：16 位有符号整数（INT16）PCM 采样数组
+  - `layout.dim`：可选，通过 `dim.label="sample_rate"`、`dim.size=采样率` 指定源采样率
+- **采样率**：默认 16000 Hz；若消息带 `sample_rate` 字段则按其重采样至声卡采样率，未带则按 16000 Hz 处理
+- **过载策略**：缓冲溢出时丢弃积压旧帧，保留最新数据，保证实时语音（TTS）优先
 
-#### 采样率说明:
-- 默认采样率为 16000Hz
-- 如需使用其他采样率，可在消息的 `layout.dim` 中添加采样率信息
-- 系统会自动将不同采样率的音频重采样至设备支持的采样率
-
-#### 示例代码:
+#### 示例代码：
 ```python
-# 创建音频消息
-msg = Int16MultiArray()
-msg.data = audio_chunk.tolist()  # audio_chunk 是 numpy int16 数组
+from std_msgs.msg import Int16MultiArray, MultiArrayDimension
 
-# 添加采样率信息（如果不是默认的 16000Hz）
-from std_msgs.msg import MultiArrayDimension
+msg = Int16MultiArray()
+msg.data = audio_chunk.tolist()  # audio_chunk: numpy int16 数组
+
+# 非默认采样率时附带采样率信息
 dim = MultiArrayDimension()
 dim.label = "sample_rate"
-dim.size = 44100  # 设置实际采样率，例如 44100Hz
+dim.size = 44100
 dim.stride = 1
 msg.layout.dim.append(dim)
 
-# 发布消息
 audio_publisher.publish(msg)
 ```
 
 ### 2.3 停止播放接口
 
-#### 话题: `stop_music`
-- **话题类型**: `std_msgs/Bool`
-- **功能**: 发送 `True` 可立即停止当前正在播放的所有音频
+停止播放提供服务与话题两种入口，均立即生效：
 
-#### 示例调用:
+#### 服务：`/stop_music`（推荐）
+- **服务类型**：`std_srvs/Trigger`
+- **功能**：同步停止当前所有音频，返回时已静音
+- **示例**：
+```bash
+rosservice call /stop_music
+```
+
+#### 话题：`/stop_music`（兼容，建议迁移到服务）
+- **话题类型**：`std_msgs/Bool`
+- **功能**：发送 `True` 立即停止；fire-and-forget，不返回停止结果
+- **示例**：
 ```bash
 rostopic pub /stop_music std_msgs/Bool "data: true" -1
 ```
 
+> 两种入口底层都走「置位 abort → 回调返回 `paAbort` 终止流 → 清空环形缓冲 → 关流丢弃 ALSA DMA 尾巴 → 重建流」。旧实现用阻塞模式 `stream.write` 单次喂约 4s 音频块，停止只清软件队列、无法打断进行中的阻塞 write，停止后旧音频会持续播放至该块排尽（残留可达约 4 秒）；本节点改用回调模式，停止可即时打断，已修复。
+
+### 2.4 状态查询接口
+
+#### 服务：`/audio_status`
+- **服务类型**：`kuavo_audio_player/audio_status`
+- **响应**：`is_playing` (bool)，当前是否正在播放
+
+#### 服务：`/get_used_audio_buffer_size`
+- **服务类型**：`std_srvs/Trigger`
+- **响应**：`message` (str)，当前环形缓冲剩余字节数
+
+#### 话题：`/audio_playback_status`
+- **话题类型**：`kuavo_msgs/AudioPlaybackStatus`
+- **字段**：`header`、`playing` (bool)、`message` (str)、`buffer_size` (int32)
+- **频率**：10 Hz 周期发布
+
 ## 3. 软件依赖
 
-- `pyaudio`: 用于音频流播放（`sudo apt-get install python3-pyaudio -y`）
-- `samplerate`: 用于高质量音频重采样（`pip install samplerate`）
-- `scipy`: 科学计算库（用于音频处理）
-- `ffmpeg` 和 `ffplay`: 用于音频格式转换和播放（`sudo apt-get install ffmpeg -y`）
-- 若依赖缺失，节点会尝试自动安装
+- `pyaudio`：音频回调播放（`sudo apt-get install python3-pyaudio -y`）
+- `scipy`：音频重采样与处理（`pip install scipy`）
+- `ffmpeg`：音频格式转换与音量缩放（`sudo apt-get install ffmpeg -y`）
+- 依赖缺失时节点会尝试自动安装
 
 ## 4. 音频格式支持
 
-系统支持各种常见音频格式：
-- MP3、WAV、OGG、AAC、FLAC 等
-- 音频会被自动转换为 16 位 PCM 流
-- 支持音量调节和播放速度控制
-- 支持实时音频重采样，适配不同声卡设备
+- 支持 MP3、WAV、OGG、AAC、FLAC 等常见格式，由 ffmpeg 统一转码为 16 位 PCM
+- 支持音量调节（dB 对数缩放）与实时重采样，适配不同声卡设备
 
-> 注意：音频格式支持基于 ffmpeg，请确保系统已安装该软件
+> 音频格式支持基于 ffmpeg，请确保系统已安装
 
 ## 5. 使用流程
 
 ### 5.1 启动节点
-通过 launch 文件启动：
 ```bash
 roslaunch kuavo_audio_player play_music.launch
 ```
@@ -97,31 +127,18 @@ roslaunch kuavo_audio_player play_music.launch
 ### 5.2 播放本地音频文件
 ```bash
 rosservice call /play_music "music_number: '1_挥手.mp3'
-volume: 3"
+volume: 80"
 ```
 
 ### 5.3 发布音频流测试
-使用测试节点发布音频流：
 ```bash
 rosrun kuavo_audio_player audio_stream_test.py
 ```
 
 ### 5.4 停止当前播放
 ```bash
-rostopic pub /stop_music std_msgs/Bool "data: true" -1
+rosservice call /stop_music
 ```
-
-## 6. 服务
-
-### 6.1 获取音频缓冲区使用情况
-```bash
-rosservice call /get_used_audio_buffer_size
-```
-
 
 ## 注意
 避免播放过大音频文件，否则会导致音频播放卡顿。
-* 实测26M，11分钟的mp3格式的音频文件，播放延时在0.9s左右。
-
-## 6. 架构图
-![架构图](./assets/image.png)

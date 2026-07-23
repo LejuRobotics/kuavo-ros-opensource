@@ -47,7 +47,16 @@ class LEDStripServiceNode:
         rospy.loginfo("可用服务:")
         rospy.loginfo("  - /led_strip_set_mode_and_color (SetLEDMode_free)")
         rospy.loginfo("  - /led_strip_close (Trigger)")
-    
+
+        # 读取 led_for_state 开关（由 set_led_mode.launch 的 <param> 传入）：
+        # 控制 Ctrl+C 打断 launch 时是否亮红灯做失能指示。
+        #   true（默认）= 亮红灯常亮（利用硬件锁存）
+        #   false        = 恢复默认关灯行为，不做失能指示
+        self.led_for_state_enabled = rospy.get_param('~led_for_state', True)
+
+        # 节点关闭时的灯状态由 _on_shutdown 负责，受 led_for_state 开关控制。
+        rospy.on_shutdown(self._on_shutdown)
+
     def handle_set_mode_and_color(self, req):
         """
         处理设置模式和颜色的服务请求
@@ -119,21 +128,27 @@ class LEDStripServiceNode:
             rospy.logerr(f"关闭 LED 时发生错误: {e}")
             return TriggerResponse(success=False, message=f"Error: {str(e)}")
     
-    def run(self):
-        """运行节点"""
+    def _on_shutdown(self):
+        """节点关闭时的灯状态，受 led_for_state 开关控制。
+
+        - led_for_state=True（默认）：亮红灯常亮做失能/打断指示。LED 硬件
+          锁存最后状态，红灯持续亮到下次 launch 启动切回正常颜色。
+        - led_for_state=False：恢复默认关灯行为（熄灭），不做失能指示。
+        """
         try:
-            rospy.spin()
-        except rospy.ROSInterruptException:
-            rospy.loginfo("正在关闭 LED Strip 服务节点...")
-            self.cleanup()
-    
-    def cleanup(self):
-        """清理资源"""
-        try:
-            self.led_strip.close()
-            rospy.loginfo("LED Strip 已关闭")
+            if self.led_for_state_enabled:
+                red = [(255, 0, 0)] * LEDStrip.LED_COUNT
+                self.led_strip.set_mode_and_color(LEDMode.CONSTANT, red)
+                rospy.loginfo("[LED Strip] 节点关闭，已设置红灯常亮（失能指示）")
+            else:
+                self.led_strip.close()
+                rospy.loginfo("[LED Strip] led_for_state=False，节点关闭，已熄灭 LED")
         except Exception as e:
-            rospy.logerr(f"清理时发生错误: {e}")
+            rospy.logerr(f"[LED Strip] 关闭时设置 LED 失败: {e}")
+
+    def run(self):
+        """运行节点。关闭时的灯状态由 rospy.on_shutdown(_on_shutdown) 负责。"""
+        rospy.spin()
 
 
 if __name__ == '__main__':

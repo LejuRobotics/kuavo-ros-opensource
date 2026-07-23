@@ -178,7 +178,21 @@ public:
 protected:
   virtual void modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule) override;
-  
+
+  // enable 控制辅助函数：disable 瞬间冻结所有存储和规划器到快照状态
+  void overwriteCommandStorageWithFrozenState();
+  void resetAllRuckigToFrozenState(scalar_t initTime);
+  void setFlatTargetTrajectoriesFromFrozenState(scalar_t initTime, scalar_t finalTime);
+
+  /// 冻结状态中关节保持 frozen，底盘跟随当前实际位姿
+  vector_t frozenJointsWithLiveBase() const;
+
+  // 通用 helper：将 pose 型 Ruckig 规划器重置到指定状态（current=target=state，vel/acc=0）
+  template<typename PlannerPtr>
+  void resetPoseRuckigToState(PlannerPtr& planner, scalar_t initTime, const vector_t& state,
+                              scalar_t& plannerInitialTime,
+                              vector_t& prevPose, vector_t& prevVel, vector_t& prevAcc);
+
   // ruckig 轨迹生成相关
   // cmdPose
   void calcRuckigTrajWithCmdPose(double initTime, const vector_t &targetBasePose, double desiredTime = 0.0);
@@ -200,6 +214,9 @@ protected:
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetTorsoPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
   void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState);
+  // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
+  // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
+  void applyTorsoVelDeltaCommands(scalar_t initTime);
   // cmdLegJoint
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
@@ -381,6 +398,26 @@ private:
   bool torsoModeFlag_{true}; // true: 笛卡尔控制模式, false: 关节控制模式
   ros::ServiceServer getLbTorsoInitialPoseServiceServer_;
 
+  // 躯干速度 / 相对位移指令（开环最终目标只在 cmdTorsoPose_）
+  // Twist 布局与 /cmd_lb_torso_pose 一致: linear.x/z, angular.z=yaw, angular.y=pitch
+  // 保持语义对齐底盘 /cmd_vel：
+  //   isCmdTorsoVelUpdated_ sticky; isCmdTorsoVelTimeUpdate_ refreshes lastCmdTorsoVelTime_;
+  //   timeout 0.3s zeros cmdTorsoVel_; explicit zero clears sticky flag.
+  Eigen::VectorXd cmdTorsoVel_;          // 4D: vx, vz, vyaw, vpitch
+  Eigen::VectorXd cmdTorsoDelta_;        // 4D oneshot: dx, dz, dyaw, dpitch
+  std::mutex cmdTorsoVel_mtx_;
+  std::mutex cmdTorsoDelta_mtx_;
+  bool isCmdTorsoVelUpdated_{false};     // sticky，对齐 isCmdVelUpdated_
+  bool isCmdTorsoVelTimeUpdate_{false};  // 对齐 isCmdVelTimeUpdate_
+  bool isCmdTorsoDeltaUpdated_{false};   // oneshot，用后即清
+  scalar_t lastCmdTorsoVelTime_{0.0};    // 对齐 lastCmdVelTime_
+  scalar_t lastTorsoVelIntegrateTime_{0.0};  // for Δt integrate (scheme A)
+  bool hasTorsoVelIntegrateTime_{false};
+  static constexpr scalar_t kTorsoVelTimeout_{0.3};
+  ros::Subscriber targetTorsoVelSubscriber_;
+  ros::Subscriber targetTorsoDeltaSubscriber_;
+  ros::Publisher torsoOpenLoopStatePub_;    // /torso_open_loop_state: 4D pose [x,z,yaw,pitch]
+
   // 双臂末端执行器位姿指令 (x,y,z,qx,qy,qz,qw)
   vector_t cmd_arm_zyx_[2]; // [0]: 左臂, [1]: 右臂, 包含位置和欧拉角
   std::mutex armPose_mtx_[2]; // [0]: 左臂, [1]: 右臂
@@ -439,6 +476,17 @@ private:
   // 速度下发开关状态
   std::atomic<bool> use_vel_control_{true};
   ros::Subscriber vel_control_state_sub_;
+
+  // enable 状态（fail-safe：默认 false，未收到信号时不可控）
+  std::atomic<bool> enable_control_{false};
+  std::atomic<bool> prev_enable_control_{false};
+  vector_t frozen_state_;
+  bool frozen_state_valid_{false};
+  vector_t frozen_torso_pose6D_;        // frozen_state_ 对应的躯干位姿缓存
+  vector_t frozen_ee_state_;            // frozen_state_ 对应的双臂末端位姿缓存
+  ros::Subscriber enable_control_state_sub_;
+  bool isEnableControl() const { return enable_control_.load(std::memory_order_acquire); }
+  bool isPrevEnableControl() const { return prev_enable_control_.load(std::memory_order_acquire); }
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 

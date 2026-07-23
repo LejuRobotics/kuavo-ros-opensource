@@ -1,10 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 #include "motion_capture_ik/json.hpp"
 
 #include <ros/ros.h>
@@ -12,6 +15,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <sensor_msgs/JointState.h>
+#include <std_msgs/Float64.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/twoArmHandPose.h>
 #include <kuavo_msgs/Float32MultiArrayStamped.h>
@@ -23,7 +27,9 @@
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "DrakeChestElbowHandPointOpt.hpp"
+#include "motion_capture_ik/ArmTrajWriter.h"
 
 namespace HighlyDynamic {
 
@@ -66,6 +72,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   void solveIkHandElbowThreadFunction();
   void publishJointStatesThreadFunction();
+  void applyWorkerThreadScheduling(const char* threadName, int priority) const;
+  void publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const;
+  void publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const;
+  void logArmTrajPublishStampPeriod(const ros::Time& stamp);
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
@@ -86,6 +96,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void computeRightShoulderFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);
   // FK 辅助函数：计算腰部 yaw 参考点位置（用于胸部增量 anchor）
   void computeWaistYawFK(Eigen::Vector3d& pOut);
+  // 当前机器人胸部(waist_yaw_link) yaw/pitch 朝向，用于未开启躯干控制时保持当前姿态
+  Eigen::Quaterniond getRobotChestQuatRef() const;
   // 启发式计算肘部参考位置
   Eigen::Vector3d computeElbow(const Eigen::Vector3d& link6Pos,
                                const Eigen::Vector3d& endEffectorPos,
@@ -154,6 +166,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 发布函数
   void publishJointStates();
   void publishDefaultJointStates();
+  // 同线程发布 kuavo_arm_traj(_cpp/_rad) 及 shadow 探针（用于对比到达时间）
+  void publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg);
   void publishZeroJointStates();
   void publishLegJointStates();         // 发布下肢关节状态（基于 IK 解）
   void publishDefaultLegJointStates();  // 发布下肢关节默认状态
@@ -161,6 +175,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void publishWholeBodyRefMarkers();  // 发布全身优化参考点（base_link下可视化）
 
   void reset();                          // 重置所有运行时状态，确保进入系统时正常
+  bool loadStandArmAnglesFromRosParam();  // 从 /standJointState 加载站立手臂关节角（rad）
   void forceDeactivateAllArmCtrlMode();  // 强制停用所有手臂控制模式
   void forceActivateAllArmCtrlMode();    // 强制激活所有手臂控制模式
   // 设置轮臂快速模式服务调用函数
@@ -180,6 +195,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   static constexpr double LB_QUICK_MODE_RETRY_INTERVAL_SEC = 0.5;
   static constexpr double DEFAULT_JOINT_STATE_PUBLISH_RATE_HZ = 500.0;
   static constexpr double DEFAULT_LB_LEG_PUBLISH_RATE_MULTIPLIER = 0.25;
+  static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
+  static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 30;
 
   std::mutex controlModeRequestMutex_;
   int lastControlModeRequested_ = -1;
@@ -191,8 +208,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Time lastLbQuickModeRequestTime_;
   bool lastLbQuickModeRequestSuccess_ = false;
 
-  ros::Publisher kuavoArmTrajCppPublisher_;  // 发布kuavo_arm_traj_cpp；launch中通过remap话题方式来接入当前系统
-  ros::Publisher kuavoArmTrajRadPublisher_;  // 与 kuavo_arm_traj_cpp 同步，关节位置/速度为弧度
+  ros::Publisher incrementalArmTrajRecordPublisher_;       // /vr_incremental/arm_traj，录包/观测（度）
+  ros::Publisher incrementalArmTrajRadRecordPublisher_;    // /vr_incremental/arm_traj_rad，录包/观测（弧度）
+  ros::Publisher kuavoArmTrajControlPublisher_;              // /kuavo_arm_traj，始终发布供 MPC 同步；WBC 增量时走 SHM
+  ArmTrajWriter arm_traj_writer_;                           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
+  bool enableArmTrajShadowPublish_{false};
+  ros::Publisher kuavoArmTrajShadowPublisher_;  // /vr_incremental/arm_traj_shadow_rad
   ros::Publisher sensorDataArmJointsPublisher_;      // 发布传感器数据的手臂关节角
   ros::Publisher leftHandPosePublisher_;             // 发布左手pose
   ros::Publisher rightHandPosePublisher_;            // 发布右手pose
@@ -229,7 +250,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLatestLbTargetAngles_ = false;
   bool lbLegTrajPublishEnabled_ = false;
   ros::Publisher cmdVelPublisher_;  // 发布底盘速度控制命令
-  /// 与 /mobile_manipulator_joy/linear_scale_x|y、angular_scale_z 一致（再乘 chassisJoyCmdTravelScale）
+  /// 与 /vr_cmd_vel/linear_scale_x|y、angular_scale_z 一致（轮臂 v61/v62/v63 由 launch_quest3_ik 设置）
   double chassisCmdVelLinearXLimit_ = 0.8;
   double chassisCmdVelLinearYLimit_ = 0.8;
   double chassisCmdVelAngularYawLimit_ = 0.5;
@@ -238,6 +259,35 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Subscriber chestPoseSubscriber_;  // 订阅/robot_chest_pose
 
   ros::Publisher wholeBodyRefMarkerArrayPublisher_;  // 全身参考点可视化（MarkerArray）
+
+  // IK 解算循环分阶段耗时诊断（PlotJuggler: /ik_debug/solve_loop_ms/*）
+  bool enableSolveLoopTimingLog_ = false;
+  ros::Publisher solveLoopFsmEnterMsPublisher_;
+  ros::Publisher solveLoopFsmChangeMsPublisher_;
+  ros::Publisher solveLoopFsmProcessMsPublisher_;
+  ros::Publisher solveLoopFsmExitMsPublisher_;
+  ros::Publisher solveLoopPublishEeMsPublisher_;
+  ros::Publisher solveLoopPublishAuxMsPublisher_;
+  ros::Publisher solveLoopPublishMarkersMsPublisher_;
+  ros::Publisher solveLoopFsmBlockTotalMsPublisher_;
+  ros::Publisher solveLoopPeriodMsPublisher_;
+  std::chrono::steady_clock::time_point lastSolveLoopWallStart_{};
+  bool hasLastSolveLoopWallStart_ = false;
+
+  // 锁等待/持锁耗时诊断（PlotJuggler: /ik_debug/lock_wait_ms/*）
+  bool enableLockWaitTimingLog_ = false;
+  ros::Publisher lockWaitPubIkResultMsPublisher_;
+  ros::Publisher lockWaitPubJointStateMsPublisher_;
+  ros::Publisher lockHoldPubJointStateMsPublisher_;
+  ros::Publisher lockWaitSolveJointStateMsPublisher_;
+  ros::Publisher lockWaitSolveJointMeanMsPublisher_;
+  ros::Publisher pubArmTrajTotalMsPublisher_;
+  ros::Publisher pubArmTrajPeriodMsPublisher_;
+  ros::Publisher pubArmTrajStampPeriodMsPublisher_;
+  std::chrono::steady_clock::time_point lastPubArmTrajWallStart_{};
+  bool hasLastPubArmTrajWallStart_ = false;
+  ros::Time lastArmTrajPublishStamp_;
+  bool hasLastArmTrajPublishStamp_ = false;
 
   std::thread ikSolveThread_;
   std::thread jointStatePublishThread_;
@@ -248,6 +298,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::mutex oneStageIkMutex_;  // 保护 oneStageIkEndEffectorPtr_ 的线程访问
   double jointStatePublishRateHz_ = DEFAULT_JOINT_STATE_PUBLISH_RATE_HZ;
   double lbLegPublishRateMultiplier_ = DEFAULT_LB_LEG_PUBLISH_RATE_MULTIPLIER;
+  int armTrajPublishThreadPriority_ = DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY;
+  int ikSolveThreadPriority_ = DEFAULT_IK_SOLVE_THREAD_PRIORITY;
+  std::vector<int> vrIkThreadCpus_;
   Eigen::Quaterniond chestRotationQuaternion_ = Eigen::Quaterniond::Identity();
   std::mutex chestPoseMutex_;  // 保护最新 chest pose（position）
   Eigen::Vector3d latestChestPositionInRobot_ = Eigen::Vector3d::Zero();
@@ -295,6 +348,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d robotLeftFixedShoulderPos_;                      // 左肩绝对位置
   Eigen::Vector3d robotFixedWaistYawPos_;                          // 胸部IK目标frame(waist_yaw_link)在零位时的位置
   Eigen::Vector3d latestWaistYawFkPos_ = Eigen::Vector3d::Zero();  // 当前关节 FK 计算的胸部IK目标frame(waist_yaw_link)位置
+  Eigen::Quaterniond latestWaistYawFkQuat_ = Eigen::Quaterniond::Identity();
   bool hasLatestWaistYawFk_ = false;
   Eigen::Vector3d chestDefaultOffset_;                             // 兼容旧配置保留，不再作为胸部IK目标的主来源
   Eigen::Vector3d latestLeftShoulderFkPos_ = Eigen::Vector3d::Zero();   // 当前关节 FK 计算的左肩位置
@@ -348,6 +402,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d defaultRightHandPosOnExit_;                   // 退出时右手默认目标位置
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值
   bool useIncrementalHandOrientation_ = true;                   // 是否使用增量式手部姿态
+
+  // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
+  Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};
+  bool standArmAnglesLoaded_{false};
 
   // 保存 ArmJoint 为全零时的双手位姿（在 init 函数中计算，避免运行时频繁调用 FK）
   // Link6 位姿（用于 IK 约束）

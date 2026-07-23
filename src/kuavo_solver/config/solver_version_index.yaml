@@ -1,0 +1,380 @@
+version: 1
+
+# 顶层索引：外部版本字符串 →（按模块拆分的）token/配置入口
+#
+# 说明：
+# - 外部版本字符串是 CLI/上层系统看到的（例如 5gen2、7gen、s70、56/70 等）。
+# - 同一个 version（例如 s70）可以同时拥有 ankle/arm/waist 等多个子模块映射。
+# - token 是子模块内部稳定键（例如 ankle 的 5gen_2/7gen；arm 的 parallellineararmsolver）。
+# - config_dir/params_yaml/spec_yaml 是该模块的配置入口（相对 kuavo_solver 根目录）。
+# - ankle 的 token 与 src/kuavo_assets/config/kuavo_vNN/kuavo.json 的 ankle_solver_type 对齐；
+#   并联偏轴严格 Jacobian 仅当 axisoffsetanklesolver.yaml 含同名 variant（当前 5gen_2/s2gen_2/7gen）。
+#
+# 该文件由脚本按 kuavo.json 批量补全版本号别名；新增机型时请同步 kuavo.json 与本索引。
+
+entries:
+  '100045':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '100049':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '11':
+    module: ankle
+    token: s1gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '13':
+    module: ankle
+    token: s2gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '14':
+    module: ankle
+    token: s2gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '16':
+    module: ankle
+    token: s2gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '17':
+    module: ankle
+    token: s2gen_2
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '200049':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '40':
+    module: ankle
+    token: 4gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '41':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '42':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '43':
+    module: ankle
+    token: 4gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '45':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '46':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '47':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '48':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '49':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  4gen:
+    module: ankle
+    token: 4gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  4gen_pro:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '50':
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  '51':
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '52':
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '53':
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '54':
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '56':
+    module: ankle
+    token: 5gen_2
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  5gen:
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  5gen2:
+    module: ankle
+    token: 5gen_2
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  5gen_2:
+    module: ankle
+    token: 5gen_2
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '60':
+    module: ankle
+    token: none
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '61':
+    module: ankle
+    token: none
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '62':
+    module: ankle
+    token: none
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  '70':
+    modules:
+      ankle:
+        token: 7gen
+        config_dir: config/ankle
+        params_yaml: config/ankle/axisoffsetanklesolver.yaml
+      arm:
+        token: 7gen
+        config_dir: config/arm
+        params_yaml: config/arm/parallel_linear_arm_solver.yaml
+        impl: parallellineararmsolver
+      waist:
+        token: 7gen
+        config_dir: config/waist
+        params_yaml: config/waist/parallel_rotate_waist_solver.yaml
+  7gen:
+    modules:
+      ankle:
+        token: 7gen
+        config_dir: config/ankle
+        params_yaml: config/ankle/axisoffsetanklesolver.yaml
+      arm:
+        token: 7gen
+        config_dir: config/arm
+        params_yaml: config/arm/parallel_linear_arm_solver.yaml
+        impl: parallellineararmsolver
+      waist:
+        token: 7gen
+        config_dir: config/waist
+        params_yaml: config/waist/parallel_rotate_waist_solver.yaml
+  arm_x1:
+    modules:
+      arm:
+        token: 7gen
+        config_dir: config/arm
+        params_yaml: config/arm/parallel_linear_arm_solver.yaml
+        impl: parallellineararmsolver
+  none:
+    module: ankle
+    token: none
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s100045:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s100049:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s11:
+    module: ankle
+    token: s1gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s13:
+    module: ankle
+    token: s2gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s14:
+    module: ankle
+    token: s2gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s16:
+    module: ankle
+    token: s2gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s17:
+    module: ankle
+    token: s2gen_2
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s1gen:
+    module: ankle
+    token: s1gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s200049:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s2gen:
+    module: ankle
+    token: s2gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s2gen_2:
+    module: ankle
+    token: s2gen_2
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s40:
+    module: ankle
+    token: 4gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s41:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s42:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s43:
+    module: ankle
+    token: 4gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s45:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s46:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s47:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s48:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s49:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s50:
+    module: ankle
+    token: 4gen_pro
+    config_dir: config/ankle
+    params_yaml: config/ankle/fixaxisanklesolver.yaml
+  s51:
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s52:
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s53:
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s54:
+    module: ankle
+    token: 5gen
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s56:
+    module: ankle
+    token: 5gen_2
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s60:
+    module: ankle
+    token: none
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s61:
+    module: ankle
+    token: none
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s62:
+    module: ankle
+    token: none
+    config_dir: config/ankle
+    params_yaml: config/ankle/axisoffsetanklesolver.yaml
+  s70:
+    modules:
+      ankle:
+        token: 7gen
+        config_dir: config/ankle
+        params_yaml: config/ankle/axisoffsetanklesolver.yaml
+      arm:
+        token: 7gen
+        config_dir: config/arm
+        params_yaml: config/arm/parallel_linear_arm_solver.yaml
+        impl: parallellineararmsolver
+      waist:
+        token: 7gen
+        config_dir: config/waist
+        params_yaml: config/waist/parallel_rotate_waist_solver.yaml
+        impl: parallelrotatewaistsolver
+  x1:
+    modules:
+      arm:
+        token: 7gen
+        config_dir: config/arm
+        params_yaml: config/arm/parallel_linear_arm_solver.yaml
+        impl: parallellineararmsolver

@@ -44,9 +44,14 @@ topics:
   - /humanoid_eef_poses
   - /mm_base_error
   - /ik.*
+  - /ik_debug/.*
+  - /vr_incremental/.*
   - /mm/two_arm_hand_pose_cmd
   - /mm_kuavo_arm_traj
   - /hand_wrench.*
+  - /dexhand/.*                # qiangnao/Linker O6手状态话题
+  - /control_robot_hand_position  # Linker O6手控制话题
+  - /cb_.*_hand_.*             # Linker L6手所有话题（状态/控制）
   - /tag_world_pose
   - /leju_quest_bone_poses
   - /robot_head_motion_data
@@ -64,6 +69,8 @@ topics:
   - /robot_body_matrices
   - /action_detector_info
   - /leju_claw_command
+  - /leju_claw_debug
+  - /leju_claw_state
   - /leju/fused_hull_boundry_fuse_elevation
   - /leju/elevation_map0
   - /righthand_pose
@@ -77,6 +84,11 @@ topics:
   - /rl_controller.*
   - /arm_controller.*
   - /vmp_controller/.*
+  - /tool_mocap_shoulder
+  - /tool_fk_shoulder
+  - /tool_position_error_shoulder
+  - /belly_pose
+  - /joint_.*
   - /ik_fk_result/.*
   - /r_hand_pose
   - /l_hand_pose

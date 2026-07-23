@@ -9,12 +9,23 @@
 
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
 #include "kuavo_msgs/setContactForceInterpParams.h"
+#include "leju_mobile_base_msgs/SetDispatchMode.h"
+#include <kuavo_common/common/common.h>
 #include "humanoid_interface/common/TopicLogger.h"
 #include <iostream>
 #include <cmath>
+#include <cstring>
+#include <fstream>
+#include <algorithm>
+#include <chrono>
+#include <unistd.h>
+#include <pthread.h>
+#include <sched.h>
+#include <xmlrpcpp/XmlRpcValue.h>
 #include <std_srvs/SetBool.h>
 #include <geometry_msgs/Twist.h>
 #include <angles/angles.h>
+#include <leju_mobile_base_msgs/BaseCmdVelStatus.h>
 
 #include "humanoid_wheel_interface/estimators/ContinuousEulerAnglesFromMatrix.h"
 
@@ -127,6 +138,12 @@ namespace humanoidController_wheel_wbc
     controllerNh_.getParam("/libFolder", libFolder);
     controllerNh_.getParam("/urdfFile", urdfFile);
 
+    if (controllerNh_.hasParam("/real"))
+    {
+      controllerNh_.getParam("/real", is_real_);
+    }
+    std::cout << "is_real: " << is_real_ << std::endl;
+
     setupHumanoidWheelInterface(taskFile, libFolder, urdfFile);
 
     observation_wheel_.state.setZero(manipulatorModelInfo_.stateDim);
@@ -139,6 +156,29 @@ namespace humanoidController_wheel_wbc
     loadData::loadCppDataType(taskFile, "model_settings.mpcArmsDof", armNum_);
     lowJointNum_ = manipulatorModelInfo_.armDim - armNum_;
     baseDim_ = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
+    // 从 task.info 加载 /move_base/base_cmd_vel 专用速度上下界
+    {
+      base_cmd_vel_limit_enable_ = false;
+      loadOptionalTaskParam(taskFile, "baseCmdVelLimit.activate", base_cmd_vel_limit_enable_);
+      vector_t lowerBound = vector_t::Zero(3);
+      vector_t upperBound = vector_t::Zero(3);
+      try
+      {
+        loadData::loadEigenMatrix(taskFile, "baseCmdVelLimit.lowerBound", lowerBound);
+        loadData::loadEigenMatrix(taskFile, "baseCmdVelLimit.upperBound", upperBound);
+        base_cmd_vel_min_ << lowerBound[0], lowerBound[1], lowerBound[2];
+        base_cmd_vel_max_ << upperBound[0], upperBound[1], upperBound[2];
+      }
+      catch (const std::exception& e)
+      {
+        ROS_WARN("[humanoidControllerWheelWbc] baseCmdVelLimit bounds not found in task.info, using default +/-1.2: %s",
+                 e.what());
+      }
+      ROS_INFO("[humanoidControllerWheelWbc] base_cmd_vel limit enable=%s, min=(%.3f, %.3f, %.3f), max=(%.3f, %.3f, %.3f)",
+               base_cmd_vel_limit_enable_ ? "true" : "false",
+               base_cmd_vel_min_[0], base_cmd_vel_min_[1], base_cmd_vel_min_[2],
+               base_cmd_vel_max_[0], base_cmd_vel_max_[1], base_cmd_vel_max_[2]);
+    }
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
     loadData::loadCppDataType(taskFile, "mpc.mpcDesiredFrequency", mpcFreq_);
@@ -155,6 +195,14 @@ namespace humanoidController_wheel_wbc
     drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
     robot_config_ = drake_interface_->getRobotConfig();
     kuavo_settings_ = drake_interface_->getKuavoSettings();
+
+    bool hasQibeng = false;
+    for (const auto& eef_type : kuavo_settings_.hardware_settings.end_effector_type) {
+      if (eef_type == EndEffectorType::qibeng) {
+        hasQibeng = true;
+        break;
+      }
+    }
     /************** Initialize WBC **********************/
     wheel_wbc_ = std::make_shared<mobile_manipulator::ContactForceWbc>(*pinocchioInterface_ptr_, manipulatorModelInfo_);
     wheel_wbc_->setArmNums(armNum_);
@@ -175,14 +223,11 @@ namespace humanoidController_wheel_wbc
 
     if(controllerNh_.hasParam("/robot_version"))
     {
-      controllerNh_.getParam("/robot_version", robotVersion_);
+      int raw_version = 0;
+      controllerNh_.getParam("/robot_version", raw_version);
+      robotVersion_ = RobotVersion::create(raw_version).version_number();
     }
     std::cout << "robotVersion_: " << robotVersion_ << std::endl;
-    if(controllerNh_.hasParam("/real"))
-    {
-      controllerNh_.getParam("/real", is_real_);
-    }
-    std::cout << "is_real: " << is_real_ << std::endl;
     if(controllerNh_.hasParam("/use_vr_control"))
     {
       controllerNh_.getParam("/use_vr_control", use_vr_control_);
@@ -289,15 +334,25 @@ namespace humanoidController_wheel_wbc
     {
       mujoco_q[2] = 0.0;
     }
-    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63)
+    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
     {
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    mujoco_q[11] = 0.5236;
-    mujoco_q[14] = -1.57;
-    mujoco_q[18] = 0.5236;
-    mujoco_q[21] = -1.57;
+    if ((robotVersion_ == 62 || robotVersion_ == 63) && hasQibeng)
+    {
+      mujoco_q[11] = 0.5236;
+      mujoco_q[14] = -1.57;
+      mujoco_q[18] = 0.5236;
+      mujoco_q[21] = -1.57;
+    }
+    else
+    {
+      mujoco_q[11] = 0.2618;
+      mujoco_q[14] = -0.5236;
+      mujoco_q[18] = 0.2618;
+      mujoco_q[21] = -0.5236;
+    }
 
     std::vector<double> robot_init_state_param;
     for (int i = 0; i < mujoco_q.size(); i++)
@@ -315,8 +370,8 @@ namespace humanoidController_wheel_wbc
     /******************************** 双臂初始动作 ****************************************/
     vector_t startAction = mujoco_q.tail(manipulatorModelInfo_.armDim + headNum_).head(manipulatorModelInfo_.armDim);
     vector_t targetAction = startAction;
-    targetAction.tail(armNum_)[3] = startAction.tail(armNum_)[3] - 0.5236;
-    targetAction.tail(armNum_/2)[3] = startAction.tail(armNum_/2)[3] - 0.5236;
+    targetAction.tail(armNum_)[4] = startAction.tail(armNum_)[4] - 0.5236;
+    targetAction.tail(armNum_/2)[4] = startAction.tail(armNum_/2)[4] + 0.5236;
     double preActionDesiredTime = 1.5;
     initialPreTargetActions(startAction, targetAction, preActionDesiredTime); // 设置机器人启动初始动作
     /************************************************************************************/
@@ -348,9 +403,11 @@ namespace humanoidController_wheel_wbc
     // 初始化发布者
     cmdVelPub_ = controllerNh_.advertise<geometry_msgs::Twist>("/move_base/base_cmd_vel", 10, true);
     velControlStatePub_ = controllerNh_.advertise<std_msgs::Bool>("/enable_vel_control_state", 1, true);
+    enableControlStatePub_ = controllerNh_.advertise<std_msgs::Bool>("/enable_control_state", 1, true);
     jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
+    stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
 
     // 发布初始速度控制开关状态
     {
@@ -358,6 +415,17 @@ namespace humanoidController_wheel_wbc
       msg.data = use_vel_control_;
       velControlStatePub_.publish(msg);
     }
+
+    // 发布初始 enable_control 状态 (latched)
+    {
+      std_msgs::Bool msg;
+      msg.data = enable_control_.load();
+      enableControlStatePub_.publish(msg);
+    }
+
+    // 注册 /enable_control service（直接注册，回调需要访问 WBC 成员做 transition 覆写）
+    enableControlServiceServer_ = controllerNh_.advertiseService(
+        "/enable_control", &humanoidControllerWheelWbc::enableControlCallback, this);
 
     // 创建控制数据管理器（替代所有订阅者和服务）
     vector_t leg_initial_state = optimizedState_mrt_.tail(manipulatorModelInfo_.armDim).head(lowJointNum_);
@@ -438,6 +506,41 @@ namespace humanoidController_wheel_wbc
     reset_cmd_vel_ruckig_srv_.request.data = true;  // 重新规划
     last_reset_cmd_vel_ruckig_time_ = ros::Time::now();  // 初始化重置时间
 
+    // 设置CPU内核隔离（与双足 humanoidController 一致；init 在 controlLoop 线程调用）
+    if (is_real_)
+    {
+      if (!setupCpuIsolation())
+      {
+        std::cerr << "\033[1;31m"
+                  << "==============================\n"
+                  << "  错误：未检测到 CPU 内核隔离！\n"
+                  << "  请先配置 CPU 内核隔离且配置内核隔离参数 isolated_cpus\n"
+                  << "  建议使用脚本 isolate_cores.sh 进行设置。\n"
+                  << "  示例：sudo bash ./tools/check_tool/isolate_cores.sh\n"
+                  << "=============================="
+                  << "\033[0m" << std::endl;
+        exit(1);
+      }
+    }
+
+    // 初始化底盘调度模式服务客户端
+    dispatch_mode_client_ = controllerNh_.serviceClient<leju_mobile_base_msgs::SetDispatchMode>("/move_base/set_dispatch_mode");
+    // ========== 底盘急停保护初始化 ==========
+    if (controllerNh_.hasParam("/enable_base_emergency_stop"))
+    {
+      controllerNh_.getParam("/enable_base_emergency_stop", enable_base_emergency_stop_);
+    }
+    ROS_INFO("[humanoidControllerWheelWbc] enable_base_emergency_stop: %s", 
+              enable_base_emergency_stop_ ? "true" : "false");
+
+    if (enable_base_emergency_stop_)
+    {
+      baseCmdVelStatusSub_ = controllerNh_.subscribe<leju_mobile_base_msgs::BaseCmdVelStatus>(
+          "/move_base/base_cmd_vel_status", 10, 
+          &humanoidControllerWheelWbc::baseCmdVelStatusCallback, this);
+      ROS_INFO("[humanoidControllerWheelWbc] Subscribed to /move_base/base_cmd_vel_status for base emergency stop protection");
+    }
+
     return true;
   }
 
@@ -461,6 +564,9 @@ namespace humanoidController_wheel_wbc
             return changeArmCtrlModeCallback(req, res); 
         }
     );
+
+    // SetIncrementalArmTrajLink 由 ArmTrajReceiver 在 initializeSubscribers 中 advertise
+    // (/humanoid_wheel/set_incremental_arm_traj_link)
     
     // 3. 腰部逆运动学服务
     control_data_manager_->registerService<kuavo_msgs::lbBaseLinkPoseCmdSrv>(
@@ -545,6 +651,53 @@ namespace humanoidController_wheel_wbc
 
     res.success = true;
     res.message = "success change vel control to " + std::to_string(req.data);
+    return true;
+  }
+
+  bool humanoidControllerWheelWbc::enableControlCallback(std_srvs::SetBool::Request &req,
+                                                         std_srvs::SetBool::Response &res)
+  {
+    ROS_INFO("[enable_control] 控制使能切换: %s", req.data ? "启用" : "禁用");
+
+    if (req.data == enable_control_.load())
+    {
+      res.success = true;
+      res.message = "enable_control already " + std::to_string(req.data);
+      return true;
+    }
+
+    enable_control_.store(req.data);
+
+    // 发布新状态 (latched) — CDM 同进程订阅同步，RM 通过 topic 收到
+    {
+      std_msgs::Bool msg;
+      msg.data = req.data;
+      enableControlStatePub_.publish(msg);
+    }
+
+    // 通知底盘调度模式：软急停/恢复
+    if (dispatch_mode_client_.exists())
+    {
+      leju_mobile_base_msgs::SetDispatchMode srv;
+      srv.request.control_mode = req.data ? 1 : 0;  // 1: 取消软急停, 0: 软急停
+      if (dispatch_mode_client_.call(srv))
+      {
+        ROS_INFO("[enable_control] 底盘 dispatch_mode=%d 调用成功: %s",
+                 srv.request.control_mode, srv.response.message.c_str());
+      }
+      else
+      {
+        ROS_WARN("[enable_control] 底盘 dispatch_mode=%d 调用失败",
+                 srv.request.control_mode);
+      }
+    }
+    else
+    {
+      ROS_WARN("[enable_control] 底盘 dispatch_mode 服务不可用，跳过");
+    }
+
+    res.success = true;
+    res.message = "enable_control set to " + std::to_string(req.data);
     return true;
   }
 
@@ -678,14 +831,48 @@ namespace humanoidController_wheel_wbc
 
   void humanoidControllerWheelWbc::update(const ros::Time &time, const ros::Duration &dfd)
   {
+    static bool base_emergency_handled_ = false;
+    if (enable_base_emergency_stop_ && base_emergency_triggered_.load() && !base_emergency_handled_)
+    {
+      base_emergency_handled_ = true;
+      publishStopRobot();
+      return;
+    }
+
     static const double firstTime = time.toSec();
     double curTime = time.toSec() - firstTime;
     static double lastTime = curTime - dt_;
     double dt = curTime - lastTime;
-    if(dt < dt_) return;
+    // 外环 controlLoop 若用 nanosleep 定频，ros::Time 抖动会使 dt 略小于 dt_。
+    // 旧逻辑 if(dt < dt_) return 会漏拍，下一拍 dt≈2*dt_ → 频率在 500/250Hz 跳变。
+    // 仅过滤明显的同拍重复（半周期内），并优先采用外环 wall elapsed。
+    const double wallElapsed = dfd.toSec();
+    if (wallElapsed > 0.5 * dt_ && wallElapsed < 1.8 * dt_) {
+      dt = wallElapsed;
+    }
+    if (dt < 0.5 * dt_) {
+      if (ros_logger_) {
+        ros_logger_->publishValue("/monitor/wheel/update_early_return", 1.0);
+      }
+      return;
+    }
     lastTime = curTime;
+    const auto updateWallStart = std::chrono::steady_clock::now();
+    auto stageStart = updateWallStart;
+    auto markStageMs = [&](const char* stage) {
+      const auto now = std::chrono::steady_clock::now();
+      const double ms = std::chrono::duration<double, std::milli>(now - stageStart).count();
+      if (ros_logger_) {
+        ros_logger_->publishValue(std::string("/monitor/time_cost/wheel/") + stage, ms);
+      }
+      stageStart = now;
+      return ms;
+    };
+
     ros_logger_->publishValue("/humanoid_wheel/freq", 1 / dt);
     ros_logger_->publishValue("/humanoid_wheel/dt_real", dt);
+    // 与双足一致的 monitor 话题，便于统一看 WBC 频率/耗时
+    ros_logger_->publishValue("/monitor/frequency/wbc", 1.0 / dt);
     static auto timeInit = time.toSec();
     auto& info = manipulatorModelInfo_;
     static int cnt = 0;
@@ -747,6 +934,7 @@ namespace humanoidController_wheel_wbc
     }
 
     computeObservationFromSensorData(sensors_data_new, odomData_new);
+    markStageMs("sensor_obs");
 
     /********************************  计算关键点笛卡尔跟踪分析(局部系) ********************************/
     vector_t targetStateTmp = optimizedState_mrt_limit_;
@@ -776,7 +964,28 @@ namespace humanoidController_wheel_wbc
         kinemicLimitObs.input.tail(armNum_) = optimizedInput_mrt_.tail(armNum_);
       }
       /**************************************************************************************/
-      
+
+      // 检测 enable 下降沿，记录 disable 瞬间的 WBC 冻结姿态
+      if (prev_enable_control_ && !enable_control_.load())
+      {
+        std::lock_guard<std::mutex> lock(frozen_state_mutex_);
+        // kinemicLimitObs.state 已经是：底盘观测 + 身体规划值
+        frozen_state_ = kinemicLimitObs.state;
+        frozen_state_valid_ = true;
+        ROS_INFO("[enable_control] frozen state recorded at disable transition");
+
+        // 把规划值反向写回 CDM，替代原来的传感器快照
+        control_data_manager_->setLbWaistExternalControlState(
+            frozen_state_.segment(baseDim_, lowJointNum_));
+        control_data_manager_->updateLegExternalControlState(
+            frozen_state_.segment(baseDim_, lowJointNum_),
+            vector_t::Zero(lowJointNum_), vector_t::Zero(lowJointNum_));
+        control_data_manager_->updateArmExternalControlState(
+            frozen_state_.tail(armNum_),
+            vector_t::Zero(armNum_), vector_t::Zero(armNum_));
+      }
+      prev_enable_control_ = enable_control_.load();
+
       kinemicLimitObs.time = curTime;
       mrtRosInterface_->setCurrentObservation_directPub(kinemicLimitObs, mpcDt_);
 
@@ -801,6 +1010,7 @@ namespace humanoidController_wheel_wbc
     // 更新可视化数据
     // robotVisualizer_->update_obs(observation_wheel_);
     robotVisualizer_->update(observation_wheel_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+    markStageMs("mpc_mrt");
 
     /******************  用户修改部分  ***********************/
     vector_t target_qpos, target_qvel;
@@ -884,6 +1094,7 @@ namespace humanoidController_wheel_wbc
     // }
 
     {
+      // 关节段 [baseDim_:stateDim) = 下肢 lowJointNum_ + 手臂 armNum_，见 humanoidController_wheel_wbc.h 维度注释
       static vector_t qposLimit, qvelLimit;
 
       qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
@@ -891,13 +1102,27 @@ namespace humanoidController_wheel_wbc
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
       optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
       static vector_t jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
+      const vector_t jointPosDelta =
+          (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
       if (enable_arm_traj_interpolator_) {
-        optimizedInput_mrt_limit_.tail(info.armDim) = qvelLimit;
+        // 手臂轨迹插补仅应覆盖手臂段速度；下肢仍用位置差分，与 state 同向。
+        // 若对全 armDim 使用 MPC optimizedInput（躯干笛卡尔模式下常为 0 或与 state 不同步），
+        // WBC 下肢 PD 的 vel_error 会被 kd 放大，例如 data[3](knee_pitch) 出现大幅负值。
+        optimizedInput_mrt_limit_.segment(baseDim_, lowJointNum_) = jointPosDelta.head(lowJointNum_);
+        optimizedInput_mrt_limit_.tail(armNum_) = qvelLimit.tail(armNum_);
       } else {
-        optimizedInput_mrt_limit_.tail(info.armDim) =
-            (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
+        optimizedInput_mrt_limit_.tail(info.armDim) = jointPosDelta;
       }
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
+    }
+
+    // disable 期间：WBC 只冻结关节姿态，底盘不冻结（跟 odom 实时走）
+    if (!enable_control_.load() && frozen_state_valid_)
+    {
+      std::lock_guard<std::mutex> lock(frozen_state_mutex_);
+      // 只覆盖关节部分 (tail)，底盘 base 部分 (head) 保持 MPC rollout 输出
+      optimizedState_mrt_limit_.tail(info.armDim) = frozen_state_.tail(info.armDim);
+      optimizedInput_mrt_limit_.setZero();
     }
 
     if(enable_mpc_)   // mpc 仅采用硬约束的state作为反馈, 不修改轨迹的动态特性
@@ -945,16 +1170,20 @@ namespace humanoidController_wheel_wbc
       }
     }
 
+    // WBC 目标：optimizedState_wbc=期望位姿/关节角，optimizedInput_wbc=对应速度，维度见头文件注释
     vector_t optimizedState_wbc = optimizedState_mrt_limit_;
     vector_t optimizedInput_wbc = optimizedInput_mrt_limit_;
-    if (enable_arm_traj_interpolator_ && armNum_ > 0)
-    {
-      ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qpos_smooth", optimizedState_wbc.tail(armNum_));
-      ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qvel_smooth", optimizedInput_wbc.tail(armNum_));
-      // ROS_INFO_THROTTLE(1.0, "[humanoidControllerWheelWbc] WBC arm task uses interpolated arm target.");
-    }
-
+    // if (enable_arm_traj_interpolator_ && armNum_ > 0)
+    // {
+    //   ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qpos_smooth", optimizedState_wbc.tail(armNum_));
+    //   ros_logger_->publishVector("/humanoid_wheel/wbc_arm_target_qvel_smooth", optimizedInput_wbc.tail(armNum_));
+    //   // ROS_INFO_THROTTLE(1.0, "[humanoidControllerWheelWbc] WBC arm task uses interpolated arm target.");
+    // }
+    ros_logger_->publishVector("/humanoid_wheel/optimizedState_wbc_in", optimizedState_wbc);
+    ros_logger_->publishVector("/humanoid_wheel/optimizedInput_wbc_in", optimizedInput_wbc);
+    markStageMs("cmd_prepare");
     vector_t x = wheel_wbc_->update(optimizedState_wbc, optimizedInput_wbc, observation_wheel_);
+    markStageMs("wbc");
 
     // 决策变量顺序：x = [ddq_stateDim, f_contact, tau_armDim]
     vector_t bodyAcc = x.head(info.stateDim-info.armDim);
@@ -1001,12 +1230,12 @@ namespace humanoidController_wheel_wbc
       jointCmdMsg.control_modes.push_back(2);
     }
    
-    // 从控制数据管理器计算头部控制（内部自动获取传感器数据）
+    // 从控制数据管理器计算头部控制
     if (headNum_ > 0)
     {
       vector_t target_pos = control_data_manager_->getHeadExternalControlState();
       vector_t feedback_tau = control_data_manager_->computeHeadControl(target_pos);
-      
+
       for (int i3 = 0; i3 < headNum_; ++i3)
       {
         jointCmdMsg.joint_q.push_back(target_pos[i3]);
@@ -1019,34 +1248,46 @@ namespace humanoidController_wheel_wbc
         jointCmdMsg.joint_kd.push_back(0);
       }
 
-      vector_t head_pos = sensors_data_new.jointPos_.tail(headNum_);
-      robotVisualizer_->updateHeadJointPositions(head_pos);
+      robotVisualizer_->updateHeadJointPositions(sensors_data_new.jointPos_.tail(headNum_));
     }
     replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
     jointCmdPub_.publish(jointCmdMsg);
 
     //更新共享内存中的关节命令
     control_data_manager_->publishJointCmdToShm(jointCmdMsg);
+
+    {
+      const double updateCostMs =
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - updateWallStart).count();
+      // update 本体墙钟耗时（不含 controlLoop 睡眠/调度）
+      ros_logger_->publishValue("/monitor/time_cost/wbc", updateCostMs);
+      markStageMs("publish");
+      // 注意：这里是「两次成功 update 的间隔」，含 sleep/被抢占，不是 WBC 计算耗时。
+      // WBC 本体耗时见 /monitor/time_cost/wbc；分段见 /monitor/time_cost/wheel/*。
+      static double last_ros_time = time.toSec();
+      ros_logger_->publishValue("/monitor/time_cost/controller_loop_time", (time.toSec() - last_ros_time) * 1000.0);
+      last_ros_time = time.toSec();
+    }
     
     // 更新底盘速度（超时自动清零，梯形加减速限制）
     geometry_msgs::Twist cmdVelData;
     control_data_manager_->getRealtimeCmdVel(cmdVelData);  // 失败时cmdVelData保持默认零值
     // 发布速度命令（根据MPC状态选择来源）
     geometry_msgs::Twist velCmdMsg;  // 默认全0
-    if (!enable_mpc_) 
+    if (!enable_mpc_)
     {
       // 使用外部速度命令（经过加减速限制）
       Eigen::Vector3d desired_vel(cmdVelData.linear.x, cmdVelData.linear.y, cmdVelData.angular.z);
       Eigen::Vector3d limited_vel = velLimiter_->limitAcceleration(desired_vel);
-      
+
       velCmdMsg.linear.x = limited_vel[0];
       velCmdMsg.linear.y = limited_vel[1];
       velCmdMsg.angular.z = limited_vel[2];
-    } 
-    else 
+    }
+    else
     {
       Eigen::Vector3d desiredVel = optimizedInput_mrt_limit_.head(3);
-      Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(desiredVel, 
+      Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(desiredVel,
                                                          observation_wheel_.state[2]);
       // 使用MPC优化的速度
       velCmdMsg.linear.x = desiredVelBody[0];
@@ -1055,6 +1296,10 @@ namespace humanoidController_wheel_wbc
     }
     if(use_vel_control_)
     {
+      if (base_cmd_vel_limit_enable_)
+      {
+        clampBaseCmdVel(velCmdMsg);
+      }
       cmdVelPub_.publish(velCmdMsg);
     }else{
         ros::Time current_time = ros::Time::now();
@@ -1099,6 +1344,170 @@ namespace humanoidController_wheel_wbc
 
   humanoidControllerWheelWbc::~humanoidControllerWheelWbc()
   {
+  }
+
+  bool humanoidControllerWheelWbc::setupCpuIsolation()
+  {
+    // 从ROS参数获取隔离的CPU核心索引
+    std::vector<int> isolated_cpus;
+    std::vector<int> actually_isolated_cpus;
+
+    // 从全局参数服务器获取隔离CPU列表
+    if (ros::param::has("/isolated_cpus")) {
+      XmlRpc::XmlRpcValue xml_cpus;
+      if (ros::param::get("/isolated_cpus", xml_cpus)) {
+        if (xml_cpus.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+          for (int i = 0; i < xml_cpus.size(); ++i) {
+            try {
+              if (xml_cpus[i].getType() == XmlRpc::XmlRpcValue::TypeInvalid) {
+                std::cerr << "Error: array element " << i << " is invalid" << std::endl;
+                continue;
+              }
+
+              double value;
+              if (xml_cpus[i].getType() == XmlRpc::XmlRpcValue::TypeInt) {
+                value = static_cast<int>(xml_cpus[i]);
+              } else if (xml_cpus[i].getType() == XmlRpc::XmlRpcValue::TypeDouble) {
+                value = static_cast<double>(xml_cpus[i]);
+              } else {
+                std::cerr << "Error: array element " << i << " is not a number, type: "
+                          << xml_cpus[i].getType() << std::endl;
+                continue;
+              }
+
+              isolated_cpus.push_back(static_cast<int>(value));
+            } catch (const std::exception& e) {
+              std::cerr << "Error: parameter conversion failed, index " << i << ": " << e.what()
+                        << std::endl;
+            }
+          }
+        } else {
+          std::cerr << "Error: isolated_cpus is not an array, type: " << xml_cpus.getType()
+                    << std::endl;
+        }
+      } else {
+        std::cerr << "Error: failed to get isolated_cpus parameter" << std::endl;
+      }
+    } else {
+      std::cout << "未设置 /isolated_cpus 参数，跳过CPU亲和性设置" << std::endl;
+      return false;
+    }
+
+    // 检查是否有隔离的核心
+    if (isolated_cpus.size() >= 1) {
+      bool ruiwo_isolated_core_ = false;
+      int max_cpu = sysconf(_SC_NPROCESSORS_ONLN);
+      std::cout << "系统CPU核心数: " << max_cpu << std::endl;
+
+      for (size_t i = 0; i < isolated_cpus.size(); ++i) {
+        if (isolated_cpus[i] < 0 || isolated_cpus[i] >= max_cpu) {
+          std::cerr << "警告: CPU核心 " << isolated_cpus[i] << " 超出有效范围 [0, " << max_cpu - 1
+                    << "]" << std::endl;
+          return false;
+        }
+      }
+
+      // 获取 /proc/cmdline 中的 isolcpus 参数列表
+      std::vector<int> isolcpus_list;
+      std::ifstream cmdline_file("/proc/cmdline");
+      if (cmdline_file.is_open()) {
+        std::string line;
+        std::getline(cmdline_file, line);
+        cmdline_file.close();
+
+        size_t isolcpus_pos = line.find("isolcpus=");
+        if (isolcpus_pos != std::string::npos) {
+          size_t start = isolcpus_pos + 9;  // "isolcpus=" 长度为9
+          size_t end = line.find(' ', start);
+          if (end == std::string::npos) end = line.length();
+
+          std::string isolcpus_value = line.substr(start, end - start);
+
+          // 解析 isolcpus 参数 (格式如: "1,3-5,7")
+          size_t pos = 0;
+          while (pos < isolcpus_value.length()) {
+            size_t comma_pos = isolcpus_value.find(',', pos);
+            std::string range = isolcpus_value.substr(pos, comma_pos - pos);
+
+            size_t dash_pos = range.find('-');
+            if (dash_pos != std::string::npos) {
+              int start_cpu = std::stoi(range.substr(0, dash_pos));
+              int end_cpu = std::stoi(range.substr(dash_pos + 1));
+              for (int j = start_cpu; j <= end_cpu; ++j) {
+                isolcpus_list.push_back(j);
+              }
+            } else {
+              isolcpus_list.push_back(std::stoi(range));
+            }
+
+            if (comma_pos == std::string::npos) break;
+            pos = comma_pos + 1;
+          }
+          std::cout << "已隔离CPU列表: ";
+          for (size_t i = 0; i < isolcpus_list.size(); ++i) {
+            if (isolcpus_list[i] == 7) {
+              ruiwo_isolated_core_ = true;
+            }
+            std::cout << isolcpus_list[i];
+            if (i < isolcpus_list.size() - 1) std::cout << ", ";
+          }
+          std::cout << std::endl;
+        } else {
+          std::cout << "未在 /proc/cmdline 中找到 isolcpus 参数" << std::endl;
+        }
+      } else {
+        std::cerr << "警告: 无法打开 /proc/cmdline 文件" << std::endl;
+      }
+
+      for (size_t i = 0; i < isolated_cpus.size(); ++i) {
+        int cpu_id = isolated_cpus[i];
+        if (std::find(isolcpus_list.begin(), isolcpus_list.end(), cpu_id) != isolcpus_list.end()) {
+          actually_isolated_cpus.push_back(cpu_id);
+          std::cout << "CPU " << cpu_id << " 已隔离" << std::endl;
+        } else {
+          std::cout << "CPU " << cpu_id << " 未隔离" << std::endl;
+        }
+      }
+      if (!ruiwo_isolated_core_) {  // 7 号核心未隔离，不允许启动
+        std::cout << "7 号核心未隔离，跳过CPU亲和性设置" << std::endl;
+        return false;
+      }
+    } else {
+      std::cout << "隔离的核心列表为空，跳过CPU亲和性设置" << std::endl;
+      return false;
+    }
+
+    // 只有在有真正隔离的CPU时才设置亲和性
+    if (actually_isolated_cpus.size() >= 2) {  // 至少需要两个核心绑定 WBC
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+
+      for (size_t i = 0; i < actually_isolated_cpus.size(); ++i) {
+        CPU_SET(actually_isolated_cpus[i], &cpuset);
+      }
+
+      std::cout << "设置WBC线程亲和性到隔离核心: ";
+      for (size_t i = 0; i < actually_isolated_cpus.size(); ++i) {
+        std::cout << actually_isolated_cpus[i];
+        if (i < actually_isolated_cpus.size() - 1) std::cout << ", ";
+      }
+      std::cout << std::endl;
+
+      int result = pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+      if (result != 0) {
+        std::cerr << "警告: 设置线程CPU亲和性失败，错误码: " << result << " (" << strerror(result)
+                  << ")" << std::endl;
+        return false;
+      } else {
+        std::cout << "成功设置CPU亲和性到隔离核心" << std::endl;
+        return true;
+      }
+    } else {
+      std::cout << "没有真正隔离的CPU核心或隔离的CPU核心数不足（至少需要2个核心，2个核心绑定WBC控制线程），"
+                   "跳过CPU亲和性设置"
+                << std::endl;
+      return false;
+    }
   }
 
   void humanoidControllerWheelWbc::setupHumanoidWheelInterface(const std::string &taskFile, const std::string &libFolder, const std::string &urdfFile)
@@ -1869,6 +2278,13 @@ namespace humanoidController_wheel_wbc
     return true;
   }
 
+  void humanoidControllerWheelWbc::clampBaseCmdVel(geometry_msgs::Twist& cmd) const
+  {
+    cmd.linear.x = std::max(base_cmd_vel_min_[0], std::min(base_cmd_vel_max_[0], cmd.linear.x));
+    cmd.linear.y = std::max(base_cmd_vel_min_[1], std::min(base_cmd_vel_max_[1], cmd.linear.y));
+    cmd.angular.z = std::max(base_cmd_vel_min_[2], std::min(base_cmd_vel_max_[2], cmd.angular.z));
+  }
+
   Eigen::Vector3d humanoidControllerWheelWbc::cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw)
   {
     Eigen::Matrix3d R_world_to_body;
@@ -2177,6 +2593,45 @@ namespace humanoidController_wheel_wbc
         ros_logger_->publishVector("/humanoid_wheel/" + eeFrame + "_error_6d", eeError6d);
       }
     }
+  }
+
+  void humanoidControllerWheelWbc::baseCmdVelStatusCallback(const leju_mobile_base_msgs::BaseCmdVelStatus::ConstPtr& msg)
+  {
+    if (!enable_base_emergency_stop_)
+    {
+      return;
+    }
+
+    if (msg->reason == leju_mobile_base_msgs::BaseCmdVelStatus::REASON_DISABLED ||
+        msg->reason == leju_mobile_base_msgs::BaseCmdVelStatus::REASON_OTHER)
+    {
+      if (!base_emergency_triggered_.load())
+      {
+        ROS_ERROR("[humanoidControllerWheelWbc] Base velocity command ineffective! reason=%d, description=%s",
+                  msg->reason, msg->description.c_str());
+        std::cerr << "[EMERGENCY STOP] Base velocity command ineffective! reason=" 
+                  << static_cast<int>(msg->reason) << ", description=" << msg->description << std::endl;
+
+        base_emergency_triggered_.store(true);
+      }
+    }
+    else
+    {
+      base_emergency_triggered_.store(false);
+    }
+  }
+
+  void humanoidControllerWheelWbc::publishStopRobot()
+  {
+    ROS_ERROR("[humanoidControllerWheelWbc] Publishing stop_robot messages (5 times)");
+    for (int i = 0; i < 5; ++i)
+    {
+      std_msgs::Bool msg;
+      msg.data = true;
+      stopRobotPub_.publish(msg);
+      ros::Duration(0.1).sleep();
+    }
+    ROS_ERROR("[humanoidControllerWheelWbc] stop_robot messages published");
   }
 
 } // namespace humanoidController_wheel_wbc

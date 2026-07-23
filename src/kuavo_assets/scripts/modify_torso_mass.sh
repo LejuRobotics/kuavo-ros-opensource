@@ -23,14 +23,10 @@ function modify_link_mass() {
     # 创建临时文件
     temp_file=$(mktemp)
     
-    # 使用sed进行跨行匹配和替换
-    sed -E '
-    # 读取整个文件到模式空间
-    :a
-    N
-    $!ba
-    # 替换指定link中的mass值
-    s/(<link[[:space:]]*name="'"$link_name"'"[[:space:]]*>.*?<mass[[:space:]]*value=")[0-9.]+(".*?(base_link.obj|torso.obj|base_link.STL|torso.STL|waist_yaw.STL).*?<\/link>)/\1'"$new_mass_value"'\2/
+    # 使用perl进行跨行非贪婪匹配和替换（perl原生支持.*?非贪婪）
+    # 用${1}而不是\1避免后面的数字被当成反向引用的一部分
+    perl -0777 -pe '
+    s/(<link\s+name="'"$link_name"'"[^>]*>.*?<mass\s+value=")[0-9.]+(".*?(base_link\.obj|torso\.obj|base_link\.STL|torso\.STL|waist_yaw\.STL).*?<\/link>)/${1}'"$new_mass_value"'${2}/s
     ' "$urdf_file" > "$temp_file"
     # s/(<link[[:space:]]*name="base_link"[[:space:]]*>.*?<mass[[:space:]]*value=")[0-9.]+(".*?<\/link>)/\1'"$new_mass_value"'\2/
     # 检查替换是否成功

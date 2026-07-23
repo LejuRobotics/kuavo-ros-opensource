@@ -267,7 +267,7 @@ sudo journalctl -u h12pro_node.service -f
 `depth_loco_switch` 是状态机里的事件名，不是控制器名；真正被切换的是 `depth_loco_controller`。
 退出 `depth_loco_controller` 时，系统会优先恢复到进入前的控制器，如果没有记录则回到 `amp_controller`。
 
-使用 `depth_loco_controller` 走楼梯斜坡时，系统必须已经正常发布 `/camera/depth/depth_history_array` 且能收到消息，且话题频率建议达到 50Hz，否则会直接拒绝切换，避免机器人异常动作。
+使用 `depth_loco_controller` 走楼梯斜坡时，建议先确认 `/camera/depth/depth_history_array` 已正常发布并稳定更新；底层 `RLControllerManager` 会在切换前统一检查该话题，不满足条件时直接拒绝切换，避免机器人异常动作。
 
 示例：
 ```json
@@ -317,5 +317,6 @@ sudo journalctl -u h12pro_node.service -f
 
 
 * 开启服务sudo systemctl start ocs2_h12pro_monitor.service
-* 然后机器人头部控制模式要早stance状态下进行，机器人进入站立状态后，使用组合键‘E_IDDLE,F_RIGHT,PRESS B’这时进入头部控制状态
+* 然后机器人头部控制模式要早stance状态下进行，机器人进入站立状态后，使用组合键’E_IDDLE,F_RIGHT,PRESS B’这时进入头部控制状态
 * 此时移动机器人的右遥感上下左右即可操作机器人头部上下左右移动
+* 底层接口：摇杆→角速度(°/s) → 发布 `/cmd_head_vel`（`kuavo_msgs::robotHeadMotionData`），由 ControlDataManager / WBC 做 sticky 积分，遥控节点不再维护头部绝对位姿。旧话题 `/robot_head_motion_data`（绝对值）仍保留给 SDK/VR 等其他调用方。

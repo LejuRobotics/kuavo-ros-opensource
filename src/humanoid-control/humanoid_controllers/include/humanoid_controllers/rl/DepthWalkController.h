@@ -8,8 +8,9 @@
 #include "humanoid_controllers/LowPassFilter.h"
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
+#include <std_msgs/Float64MultiArray.h>
 #include <openvino/openvino.hpp>
 #include <memory>
 #include <map>
@@ -111,6 +112,8 @@ namespace humanoid_controller
     double stance_ratio = 0.5;
     double currentCycleTime_{0.6};
     Eigen::Vector3d net_linvel;
+    Eigen::VectorXd current_depth_latent;
+    ros::Publisher depth_latent_pub_;
     int episodeLength_{0};
     Eigen::VectorXd commandPhase_;     // sin(phase), cos(phase)
     Eigen::VectorXd frePhase_;
@@ -146,7 +149,7 @@ namespace humanoid_controller
     // 真实/机型配置
     bool is_real_{false};
     bool is_roban_{false};
-    AnkleSolver ankleSolver_;
+    kuavo_solver::AnkleSolver ankleSolver_;
 
     // 是否使用 AMP 专用 Ruiwo 手臂增益（由 skw_rl_param.info 中 use_amp_ruiwo_kpkd 配置）
     bool use_amp_ruiwo_kpkd_{false};

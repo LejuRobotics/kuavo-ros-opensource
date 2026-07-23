@@ -22,7 +22,7 @@
 #include "revo2_hand_controller.h"
 #include "hipnuc_imu_receiver.h"
 #include "motor_status_manager.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include <set>
 #include <mutex>
 
@@ -163,6 +163,7 @@ class HardwarePlant
     std::map<int, MotorStatus> getAllJointsStatus() const;
 
     bool checkLejuClawInitialized();
+    void setLejuClawDebugCallback(eef_controller::LejuClawDebugCallback callback);
     bool controlLejuClaw(eef_controller::ControlClawRequest& req, eef_controller::ControlClawResponse& res);
     bool controlLejuClaw(eef_controller::lejuClawCommand& command);
     eef_controller::ClawState getLejuClawState();
@@ -194,6 +195,7 @@ class HardwarePlant
     std::unique_ptr<eef_controller::DexhandController> dexhand_actuator;
     std::unique_ptr<eef_controller::Revo2HandController> revo2_actuator;
     std::string gesture_filepath_;
+    eef_controller::LejuClawDebugCallback leju_claw_debug_callback_;
     
     // 电机状态管理器
     std::unique_ptr<MotorStatusManager> motor_status_manager_;
@@ -303,6 +305,8 @@ private:
     HardwareParam hardware_param_;
 
     std::string robot_module_;
+
+    int head_ruiwo_idx_start_ = -1;         // 头部电机在 ruiwo 数组中的起始索引
 
     // 实际EC电机数目
     uint32_t countECMasters = 0;

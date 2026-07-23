@@ -808,7 +808,7 @@ int main(int argc, char const *argv[])
         std::cout << "按下 'i' 测试单个关节控制" << std::endl;
         std::cout << "按下 'c' 检查EC状态和当前关节角度" << std::endl;
         std::cout << "按下 'p' 打印当前关节角度" << std::endl;
-        std::cout << "按下 'm' 执行磨线功能" << std::endl;
+        // std::cout << "按下 'm' 执行磨线功能" << std::endl;
         std::cout << "按下 'q' 退出" << std::endl;
     };
 
@@ -832,10 +832,10 @@ int main(int argc, char const *argv[])
                     wheel_arm_test->printCurrentJointAngles();
                     output_test_menu();
                     break;
-                case 'm':
-                    wheel_arm_test->runBreakinSequence();
-                    output_test_menu();
-                    break;
+                // case 'm':
+                //     wheel_arm_test->runBreakinSequence();
+                //     output_test_menu();
+                //     break;
                 case 'q':
                     std::cout << "[WheelArmECTest] 退出" << std::endl;
                     // wheel_arm_test->sendJointMoveToRequest(init_joints_q, "初始化");

@@ -1,0 +1,12 @@
+# Request controller-to-base synchronization of costmap data.
+# publish_global_costmap and publish_local_costmap are single-trigger:
+#   when true, the base will publish the full costmap once.
+# publish_incremental_updates is a switch:
+#   when true, enables continuous incremental update publishing;
+#   when false, stops incremental update publishing.
+bool publish_global_costmap
+bool publish_local_costmap
+bool publish_incremental_updates
+---
+bool success
+string message

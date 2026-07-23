@@ -9,22 +9,25 @@
     <arg name="enable_head_control" default="true"/>
     <arg name="use_vr_control" default="true"/>
     <arg name="ip_address" default=""/>
+    <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
+    <arg name="enable_base_emergency_stop" default="true"/>
     
     <!-- 增量VR遥操作控制相关参数 -->
     <arg name="use_cpp_incremental_ik" default="false"/>
     <arg name="use_incremental_hand_orientation" default="false"/>
     <arg name="wheel_ik" default="true"/>
+    <arg name="single_hand_mode" default="false"/> <!-- true: 启动单手摇杆控躯干独立节点 -->
 
     <!-- 设置VR控制参数 -->
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
-    
     <!-- 包含基础的轮臂仿真launch文件 -->
     <include file="$(find humanoid_controllers)/launch/load_kuavo_real_wheel.launch">
         <!-- 覆盖基础launch文件中的参数 -->
         <arg name="vr_remote_control" value="true"/>  <!-- 启用VR远程控制 -->
         <arg name="use_joystick" value="false"/>      <!-- 禁用手柄控制 -->
         <arg name="use_external_mpc" value="true"/>
+        <arg name="enable_base_emergency_stop" value="$(arg enable_base_emergency_stop)"/>
     </include>
 
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
@@ -37,6 +40,7 @@
       <arg name="use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)"/>
       <arg name="use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)"/>
       <arg name="wheel_ik" value="$(arg wheel_ik)"/>
+      <arg name="single_hand_mode" value="$(arg single_hand_mode)"/>
     </include>
 
 </launch>

@@ -6,9 +6,10 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/RlGaitReceiver.h"
 #include "humanoid_controllers/LowPassFilter.h"
+#include "humanoid_controllers/rl/ArmTakeoverBlender.h"
 #include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/rl/waistController.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
 #include "kuavo_msgs/changeArmCtrlMode.h"
 #include <openvino/openvino.hpp>
@@ -121,7 +122,17 @@ namespace humanoid_controller
     // 速度命令限制（简化版：4 维统一上限 + X 负向单独缩放系数）
     // 格式：[linear_x, linear_y, linear_z, angular_z]
     Eigen::Matrix<double, 4, 1> velocityLimits_{Eigen::Matrix<double, 4, 1>::Zero()};
+    double cmdVelLineXLow_{0.0};  ///< amp_hand_controller 手柄十字键下档 X 速度限制
+    double cmdVelLineXUp_{0.0};   ///< amp_hand_controller 手柄十字键高档 X 速度限制
+    double cmdVelLineXNeg_{0.45}; ///< amp_hand_controller cmd_x 负向速度限制 (m/s)
+    double squatHeightMin_{-0.3};  ///< amp_hand_controller 手柄 posture 模式最大下蹲深度 (m)
+    double squatHeightMax_{0.01};   ///< amp_hand_controller 手柄 posture 模式最大站起高度 (m)
+    double ampVRcmdvelLinearXLimit_{0.60};   ///< amp_hand VR 前进最大速度 (m/s)
+    double ampVRcmdvelLinearYLimit_{0.0};    ///< amp_hand VR 侧向最大速度 (m/s)
+    double ampVRcmdvelLinearZLimit_{0.0};    ///< amp_hand VR 高度通道最大速度 (m/s)
+    double ampVRcmdvelAngularYAWLimit_{0.9}; ///< amp_hand VR yaw 最大角速度 (rad/s)
     double cmdVelLineXNegScale_{1.0};  ///< X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
+    double cmdVelLineXNegScaleExternalArm_{1.0};  ///< amp_hand 外部手臂控制时 X 负向缩放系数
 
     // yaw 对齐
     double my_yaw_offset_{0.0};
@@ -138,7 +149,7 @@ namespace humanoid_controller
     // 真实/机型配置
     bool is_real_{false};
     bool is_roban_{false};
-    AnkleSolver ankleSolver_;
+    kuavo_solver::AnkleSolver ankleSolver_;
 
 
     // AMP
@@ -150,6 +161,12 @@ namespace humanoid_controller
     double arm_max_tracking_velocity_{0.5}; ///< 手臂最大跟踪速度 (rad/s)，从配置文件加载
     double arm_tracking_error_threshold_{0.05}; ///< 手臂跟踪误差阈值 (rad)，从配置文件加载
     double arm_mode_interpolation_velocity_{1.0}; ///< 模式2的插值速度 (rad/s)，从配置文件加载
+    bool arm_rl_takeover_blend_enabled_{false}; ///< 是否启用站立外部手臂到行走RL手臂的平滑接管
+    double arm_rl_takeover_blend_duration_{0.3}; ///< 手臂平滑接管时长（秒）
+    bool arm_zero_action_in_standing_{false}; ///< 是否在站立状态下将RL手臂action输出置0
+    int robot_version_int_{0};
+    bool last_stance_state_for_blend_{true}; ///< 用于手臂接管混合的站立状态跟踪
+    ArmTakeoverBlender arm_takeover_blender_; ///< 站立到行走时的手臂RL接管混合器
 
     // 腰部控制相关（可选功能）
     double waist_mode_interpolation_velocity_{1.0}; ///< 腰部模式切换时的插值速度 (rad/s)，从配置文件加载，用于三次多项式插值
@@ -200,23 +217,146 @@ namespace humanoid_controller
     double yaw_compensation_x_bias_clockwise_{0.0};     ///< 顺时针旋转时X轴偏置
     double yaw_compensation_x_bias_counterclockwise_{0.0}; ///< 逆时针旋转时X轴偏置
 
+    // amp_hand_controller 专用：外部手臂接管时 RL 使用虚拟手臂观测（仅 use_virtual_arm_obs 来自配置）
+    bool is_amp_hand_controller_{false};
+    bool use_virtual_arm_obs_{false};
+    static constexpr double kVirtualArmObsPitchBaseDeg_{0.35};
+    static constexpr double kVirtualArmObsPitchCompensationDeg_{1.5};
+    static constexpr double kVirtualArmObsPitchBaseDegNeg_{0.5};
+    static constexpr double kVirtualArmObsPitchCompensationDegNeg_{0.0};
+    static constexpr double kVirtualArmObsArm1BackSumMaxRad_{4.0};          ///< zarm_l1+zarm_r1 后伸合计上限 (rad)，单臂 [0,2]
+    static constexpr double kVirtualArmObsArm1BackSumPitchReductionFullRad_{0.8}; ///< 合计达到该值时削弱量封顶 (rad)
+    static constexpr double kVirtualArmObsArm1BackPitchReductionMaxDeg_{1.5}; ///< 满后伸时削弱后仰补偿量 (deg)
+    static constexpr double kVirtualArmObsArm1BackVelSumPitchReductionFullRadPerSec_{1.0}; ///< 后甩速度合计达到该值时削弱量封顶 (rad/s)
+    static constexpr double kVirtualArmObsArm1BackVelPitchReductionMaxDeg_{1.5}; ///< 满后甩速度时削弱后仰补偿量 (deg)
+    bool lateral_elbow_fix_{false};
+    static constexpr double kLateralElbowFixScale_{0.5};
+    bool enable_elbow_scale_{false};
+    bool enable_back_arm_enhance_{false};
+    static constexpr double kBackArmEnhanceScale_{0.22};
+    static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};
+    bool enable_standup_enhance_{false};
+    static constexpr double kStandUpGravityPitchBiasDeg_{-3.0};     ///< 起身时 projected_gravity 后仰偏置 (deg)
+    static constexpr double kStandUpPitchFullBiasKneeEnd_{1.2};   ///< 满偏置区间深端 (rad)，>1.2 不偏
+    static constexpr double kStandUpPitchFadeKneeStart_{0.6};    ///< 满偏置浅端，[0.6,1.2] 满偏，<0.6 线性淡出 (rad)
+    static constexpr double kStandUpKneeDecreasingEpsilon_{1e-3}; ///< 膝角减小判据阈值 (rad)
+    // defaultJointState 顺序：waist(0), leg_l1(1)..leg_l6(6), leg_r1(7)..leg_r6(12)
+    static constexpr int kStandUpLegL1ActionIdx_{1};              ///< leg_l1_joint
+    static constexpr int kStandUpLegL3ActionIdx_{3};              ///< leg_l3_joint
+    static constexpr int kStandUpLegL4ActionIdx_{4};              ///< leg_l4_joint（左膝）
+    static constexpr int kStandUpLegR1ActionIdx_{7};              ///< leg_r1_joint
+    static constexpr int kStandUpLegR3ActionIdx_{9};              ///< leg_r3_joint
+    static constexpr int kStandUpLegR4ActionIdx_{10};             ///< leg_r4_joint（右膝）
+    static constexpr double kStandUpKneeFullEnhanceRad_{1.2};     ///< 膝角补偿区间上限（深蹲）
+    static constexpr double kStandUpKneeNoEnhanceRad_{0.55};      ///< 膝角补偿区间下限（接近站立）
+    static constexpr double kStandUpLeg1ActionBias_{0.05};         ///< 起身膝角范围内 leg_l1/leg_r1 统一偏置
+    static constexpr double kStandUpKneeActionBias_{-0.6};       ///< 起身膝角范围内 leg_l4/leg_r4 统一偏置
+    bool stand_up_rising_active_{false};                            ///< 本周期是否处于起身上升阶段
+    double prev_stand_up_knee_rad_{0.0};                            ///< 上一周期平均膝角 (rad)，用于起身判据
+    bool stand_up_knee_prev_initialized_{false};
+    bool enable_roll_compensation_closed_loop_{false};
+    bool roll_compensation_closed_loop_initialized_{false};
+    double roll_compensation_filtered_roll_rad_{0.0};
+    double roll_compensation_target_roll_rad_{0.0};
+    double roll_compensation_integral_rad_sec_{0.0};
+    bool enable_off_cmdy_by_cmdx_{false};
+    static constexpr double kOffCmdyByCmdXThreshold_{0.3};   ///< cmdx 超过该值时关闭 cmdy
+    static constexpr double kOffCmdxByCmdYThreshold_{0.3};  ///< abs(cmdy) 超过该值时关闭 cmdx
+    bool enable_off_cmdy_by_cmdangz_{false};
+    static constexpr double kOffCmdyByCmdAngZThreshold_{0.3};   ///< abs(cmdangz) 超过该值时关闭 cmdy
+    static constexpr double kOffCmdAngZByCmdYThreshold_{0.3};   ///< abs(cmdy) 超过该值时关闭 cmdangz
+    bool tiny_cmdx_clip_enabled_{false};
+    double tiny_cmdx_clip_min_{0.0};  ///< cmd_x 正向截断区间最小值
+    double tiny_cmdx_clip_max_{0.0};  ///< cmd_x 正向截断区间最大值，区间内值截断为该值
+    bool tiny_cmdy_clip_enabled_{false};
+    double tiny_cmdy_clip_min_{0.0};  ///< abs(cmd_y) 截断区间最小值
+    double tiny_cmdy_clip_max_{0.0};  ///< abs(cmd_y) 截断区间最大值，区间内值截断为该值
+    bool low_speed_kick_enabled_{false};
+    double low_speed_kick_velocity_{0.60};
+    int low_speed_kick_duration_steps_{10};
+    double low_speed_kick_rest_threshold_{0.05};
+    double low_speed_kick_trigger_velocity_{0.45};
+    double low_speed_kick_trigger_tolerance_{0.05};
+    double low_speed_kick_lateral_threshold_{0.15};
+    double low_speed_kick_yaw_threshold_{0.20};
+    int low_speed_kick_remaining_steps_{0};
+    double prev_raw_cmd_vel_line_x_{0.0};   ///< 上一帧脉冲前的原始 cmd_x（用于加减速判据）
+    bool low_speed_yaw_kick_enabled_{false};
+    double low_speed_yaw_kick_angular_velocity_{1.0};
+    int low_speed_yaw_kick_duration_steps_{10};
+    double low_speed_yaw_kick_rest_threshold_{0.2};
+    double low_speed_yaw_kick_trigger_angular_velocity_{0.5};
+    double low_speed_yaw_kick_trigger_tolerance_{0.25};
+    double low_speed_yaw_kick_forward_threshold_{0.2};
+    double low_speed_yaw_kick_lateral_threshold_{0.2};
+    int low_speed_yaw_kick_remaining_steps_{0};
+    double low_speed_yaw_kick_sign_{1.0};
+    double prev_raw_cmd_vel_angular_z_{0.0};  ///< 上一帧脉冲前的原始 cmd_angz（用于加减速判据）
+    static constexpr double kTurnRollCompensationDeg_{-0.7};        ///< 走弧线开环 roll 补偿系数 (deg/(rad/s))
+    static constexpr double kTurnRollCompensationCmdXMin_{0.2};     ///< 开环补偿生效 cmd_x 下限 (m/s)
+    static constexpr double kTurnRollCompensationAbsAngZMin_{0.5}; ///< 开环补偿生效 |cmd_angz| 下限 (rad/s)
+    double roll_compensation_closed_loop_cmd_x_min_{0.3};
+    double roll_compensation_closed_loop_cmd_x_max_{0.65};
+    double roll_compensation_closed_loop_abs_cmd_y_max_{0.1};
+    double roll_compensation_closed_loop_abs_cmd_ang_z_max_{0.2};
+    double roll_compensation_closed_loop_filter_time_constant_sec_{0.8};
+    double roll_compensation_closed_loop_target_time_constant_sec_{2.0};
+    double roll_compensation_closed_loop_kp_{0.30};
+    double roll_compensation_closed_loop_ki_{0.06};
+    double roll_compensation_closed_loop_max_deg_{1.0};
+    double roll_compensation_closed_loop_target_learning_max_abs_roll_deg_{5.0};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};
     ros::ServiceServer change_amp_mode_srv_;
+    ros::Publisher amp_mode_event_pub_;
+
+    // 站立模式下 posture 高度命令处理（仅 amp_hand_controller）
+    double max_stance_squat_depth_{0.15};             ///< 最大下蹲深度 (m)，高度命令下限为 -max_stance_squat_depth_
+    double smoothed_stance_height_cmd_{0.0};          ///< 平滑后的下蹲高度命令
+    bool squat_height_low_pass_enabled_{false};       ///< roban17 amp_hand posture 高度命令低通滤波
+    double squat_height_low_pass_cutoff_freq_{2.0};   ///< 高度命令低通截止频率 (Hz)
+    double filtered_squat_height_cmd_{0.0};           ///< 低通后的高度目标
+
+    // 下蹲守备（控制器端）：深蹲时拦截退出并屏蔽走/转；物理起身后自动退出 posture 并广播 amp_mode
+    bool squat_posture_defense_enabled_{false};
+    double squat_posture_defense_height_threshold_{1.3};  ///< leg_l4/leg_r4 均高于该值视为深蹲 (rad)
+    bool squat_posture_deep_seen_{false};  ///< 曾处于深蹲，用于检测物理起身后退出 posture
 
     bool changeAmpModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
                                kuavo_msgs::changeArmCtrlMode::Response &res);
 
+    Eigen::VectorXd standDefaultJointPosRL_;
+    bool use_stand_default_joint_state_{false};
+    bool has_stand_default_joint_state_{false};
+    double stand_velocity_threshold_{0.1};
+    double stand_angular_velocity_threshold_{0.1};
+
   private:
+    const Eigen::VectorXd& getActiveDefaultJointPos(const ocs2::humanoid::CommandDataRL& cmd) const;
+
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd);
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
+    void applyArmTakeoverBlend(Eigen::VectorXd& action, const ros::Time& time, bool is_standing);
+    Eigen::VectorXd getDefaultArmJointPos() const;
+    Eigen::VectorXd getArmActionScaleTest() const;
+    Eigen::VectorXd getCurrentArmJointPos(const SensorData& sensor_data) const;
     
     // 手臂控制辅助函数
     void initArmControl(const std::string& urdf_path);
     
     // 腰部控制辅助函数
     void initWaistControl();
+
+    double applyTinyCmdXClip(double cmdx) const;
+    double applyTinyCmdYClip(double cmdy) const;
+    void applyLowSpeedKickStart(CommandDataRL& cmd);
+    void applyLowSpeedYawKickStart(CommandDataRL& cmd);
+    void applyStanceHeightStandUpSmoothing(CommandDataRL& cmd,
+                                           const SensorData& sensor_data);
+    void applySquatPostureDefense(CommandDataRL& cmd, const SensorData& sensor_data);
+    void publishAmpModeEvent();
+    bool isSquatPostureDefenseActive() const;
 
   };
 }

@@ -1,0 +1,157 @@
+<?xml version="1.0"?>
+<mujoco model="4gen_pro_ankles">
+  <compiler angle="radian" meshdir="../../../../../kuavo_assets/models/biped_s45/meshes/"/>
+  <option>
+    <flag gravity="disable" />
+  </option>
+
+  <default>
+    <joint armature="0.01" damping="0.0" frictionloss="0.0" />
+  </default>
+
+  <asset>
+    <mesh name="l_foot_pitch" file="l_foot_pitch.STL"/>
+    <mesh name="l_foot_roll" file="l_foot_roll.STL"/>
+    <mesh name="l_knee" file="l_knee.STL"/>
+    <mesh name="l_knee_bar" file="l_knee_bar.STL"/>
+    <mesh name="l_knee_tendon" file="l_knee_tendon.STL"/>
+    <mesh name="l_l_bar" file="l_l_bar.STL"/>
+    <mesh name="l_l_tendon" file="l_l_tendon.STL"/>
+    <mesh name="l_r_bar" file="l_r_bar.STL"/>
+    <mesh name="l_r_tendon" file="l_r_tendon.STL"/>
+    <mesh name="r_foot_pitch" file="r_foot_pitch.STL"/>
+    <mesh name="r_foot_roll" file="r_foot_roll.STL"/>
+    <mesh name="r_knee" file="r_knee.STL"/>
+    <mesh name="r_knee_bar" file="r_knee_bar.STL"/>
+    <mesh name="r_knee_tendon" file="r_knee_tendon.STL"/>
+    <mesh name="r_l_bar" file="r_l_bar.STL"/>
+    <mesh name="r_l_tendon" file="r_l_tendon.STL"/>
+    <mesh name="r_r_bar" file="r_r_bar.STL"/>
+    <mesh name="r_r_tendon" file="r_r_tendon.STL"/>
+  </asset>
+
+  <worldbody>
+    <!-- LEFT: 对齐 ankle-conversion biped_s42：l_l_bar(z=-0.153), l_r_bar(z=-0.09) -->
+    <body name="l_knee" pos="0 0.15 0">
+      <site name="l_dummy"/>
+      <inertial pos="0 0 0" mass="0.5" diaginertia="0.001 0.001 0.001"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_knee"/>
+
+      <body name="l_foot_pitch" pos="0 0 -0.346">
+        <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
+        <joint name="l_foot_pitch" pos="0 0 0" axis="0 1 0" range="-0.8 0.4" armature="0.01" damping="0.0" />
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="l_foot_pitch"/>
+
+        <body name="l_foot_roll" pos="0 0 0">
+          <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
+          <joint name="l_foot_roll" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" armature="0.01" damping="0.0" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_foot_roll"/>
+          <site name="l_l_eq" group="0" pos="0.0385 0.0283 -0.01" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+          <site name="l_r_eq" group="0" pos="0.0385 -0.0283 -0.01" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+        </body>
+      </body>
+
+      <!-- l_l_bar (z=-0.153) -->
+      <body name="l_l_bar" pos="0 0 -0.153">
+        <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+        <joint name="l_l_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.387637626867941 0.983667566424004"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="l_l_bar"/>
+        <body name="l_l_tendon" pos="0 0.0282564 -0.0100784">
+          <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+          <joint name="l_l_tendon" pos="0.044 0 0" type="ball"/>
+          <geom type="mesh" pos="0.044 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_l_tendon"/>
+          <site name="l_l_tendon" group="0" pos="0.044 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+        </body>
+      </body>
+
+      <!-- l_r_bar (z=-0.09) -->
+      <body name="l_r_bar" pos="0 0 -0.09">
+        <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+        <joint name="l_r_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.991347015132779 0.383448836663154"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="l_r_bar"/>
+        <body name="l_r_tendon" pos="0 -0.0282633 -0.0100591">
+          <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+          <joint name="l_r_tendon" pos="0.044 0 0" type="ball"/>
+          <geom type="mesh" pos="0.044 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_r_tendon"/>
+          <site name="l_r_tendon" group="0" pos="0.044 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+        </body>
+      </body>
+    </body>
+
+    <!-- RIGHT: 对齐 ankle-conversion biped_s42：r_l_bar(z=-0.09), r_r_bar(z=-0.153) -->
+    <body name="r_knee" pos="0 -0.15 0">
+      <site name="r_dummy"/>
+      <inertial pos="0 0 0" mass="0.5" diaginertia="0.001 0.001 0.001"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_knee"/>
+
+      <body name="r_foot_pitch" pos="0 0 -0.346">
+        <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
+        <joint name="r_foot_pitch" pos="0 0 0" axis="0 1 0" range="-0.8 0.4" armature="0.01" damping="0.0" />
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_foot_pitch"/>
+
+        <body name="r_foot_roll" pos="0 0 0">
+          <inertial pos="0 0 0" mass="0.1" diaginertia="0.0001 0.0001 0.0001"/>
+          <joint name="r_foot_roll" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" armature="0.01" damping="0.0" />
+          <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_foot_roll"/>
+          <site name="r_l_eq" group="0" pos="0.0385 0.0283 -0.01" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+          <site name="r_r_eq" group="0" pos="0.0385 -0.0283 -0.01" type="sphere" rgba="0.8 0.2 0.4 1" size="0.0065"/>
+        </body>
+      </body>
+
+      <!-- r_l_bar (z=-0.09) -->
+      <body name="r_l_bar" pos="0 0 -0.09">
+        <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+        <joint name="r_l_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.383448836663154 0.991347015132779"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_l_bar"/>
+        <body name="r_l_tendon" pos="0 0.0282633 -0.0100591">
+          <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+          <joint name="r_l_tendon" pos="0.044 0 0" type="ball"/>
+          <geom type="mesh" pos="0.044 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_l_tendon"/>
+          <site name="r_l_tendon" group="0" pos="0.044 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+        </body>
+      </body>
+
+      <!-- r_r_bar (z=-0.153) -->
+      <body name="r_r_bar" pos="0 0 -0.153">
+        <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+        <joint name="r_r_bar" pos="0 0 0" axis="1 0 0" limited="true" range="-0.983667566424004 0.387637626867941"/>
+        <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.647059 0.619608 0.588235 1" mesh="r_r_bar"/>
+        <body name="r_r_tendon" pos="0 -0.0282564 -0.0100784">
+          <inertial pos="0 0 0" mass="0.01" diaginertia="1e-6 1e-6 1e-6"/>
+          <joint name="r_r_tendon" pos="0.044 0 0" type="ball"/>
+          <geom type="mesh" pos="0.044 0 0" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_r_tendon"/>
+          <site name="r_r_tendon" group="0" pos="0.044 0 0" type="sphere" rgba="0.2 0.6 0.8 1" size="0.0065"/>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <connect name="l_l_eq" body1="l_foot_roll" body2="l_l_tendon" anchor="0.0385 0.0283 -0.01" solref="0.001 1" />
+    <connect name="l_r_eq" body1="l_foot_roll" body2="l_r_tendon" anchor="0.0385 -0.0283 -0.01" solref="0.001 1" />
+    <connect name="r_l_eq" body1="r_foot_roll" body2="r_l_tendon" anchor="0.0385 0.0283 -0.01" solref="0.001 1" />
+    <connect name="r_r_eq" body1="r_foot_roll" body2="r_r_tendon" anchor="0.0385 -0.0283 -0.01" solref="0.001 1" />
+  </equality>
+
+  <actuator>
+    <position name="l_l_bar" joint="l_l_bar" kp="0.1" kv="0.1" ctrlrange="-0.387637626867941 0.983667566424004" forcerange="-30 30"/>
+    <position name="l_r_bar" joint="l_r_bar" kp="0.1" kv="0.1" ctrlrange="-0.991347015132779 0.383448836663154" forcerange="-30 30"/>
+    <general name="l_foot_pitch" joint="l_foot_pitch" gaintype="fixed" gainprm="1" biastype="none" biasprm="0 0" ctrlrange="-10. 10."/>
+    <general name="l_foot_roll" joint="l_foot_roll" gaintype="fixed" gainprm="1" biastype="none" biasprm="0 0" ctrlrange="-10. 10."/>
+    <position name="r_l_bar" joint="r_l_bar" kp="0.1" kv="0.1" ctrlrange="-0.383448836663154 0.991347015132779" forcerange="-30 30"/>
+    <position name="r_r_bar" joint="r_r_bar" kp="0.1" kv="0.1" ctrlrange="-0.983667566424004 0.387637626867941" forcerange="-30 30"/>
+    <general name="r_foot_pitch" joint="r_foot_pitch" gaintype="fixed" gainprm="1" biastype="none" biasprm="0 0" ctrlrange="-10. 10."/>
+    <general name="r_foot_roll" joint="r_foot_roll" gaintype="fixed" gainprm="1" biastype="none" biasprm="0 0" ctrlrange="-10. 10."/>
+  </actuator>
+
+  <sensor>
+    <actuatorfrc name="l_foot_pitch_torque" actuator="l_foot_pitch"/>
+    <actuatorfrc name="l_foot_roll_torque" actuator="l_foot_roll"/>
+    <actuatorfrc name="l_l_bar_torque" actuator="l_l_bar"/>
+    <actuatorfrc name="l_r_bar_torque" actuator="l_r_bar"/>
+    <actuatorfrc name="r_foot_pitch_torque" actuator="r_foot_pitch"/>
+    <actuatorfrc name="r_foot_roll_torque" actuator="r_foot_roll"/>
+    <actuatorfrc name="r_l_bar_torque" actuator="r_l_bar"/>
+    <actuatorfrc name="r_r_bar_torque" actuator="r_r_bar"/>
+  </sensor>
+</mujoco>

@@ -34,13 +34,43 @@ class RobotNavigation:
         orientation = tf.transformations.quaternion_from_euler(roll, pitch, yaw)
         goal = Pose(position=Point(x=x, y=y, z=z), orientation=Quaternion(x=orientation[0], y=orientation[1], z=orientation[2], w=orientation[3]))
         self.robot_navigation.navigate_to_goal(goal)
-        while self.get_current_status() is not NavigationStatus.ACTIVE:
-            time.sleep(0.01)
-        while not rospy.is_shutdown():
-            if self.get_current_status() == NavigationStatus.SUCCEEDED:
+
+        # 等待导航状态变为 ACTIVE，包含超时和失败状态处理。
+        _FAILURE_STATES = (
+            NavigationStatus.ABORTED,
+            NavigationStatus.REJECTED,
+            NavigationStatus.PREEMPTED,
+        )
+        elapsed = 0.0
+        activation_timeout = 10.0
+        while elapsed < activation_timeout:
+            status = self.get_current_status()
+            if status == NavigationStatus.ACTIVE:
                 break
+            if status in _FAILURE_STATES:
+                print(f"导航目标激活失败，状态: {status}")
+                return False
             time.sleep(0.01)
-        return True
+            elapsed += 0.01
+        else:
+            print(f"等待导航目标激活超时，当前状态: {self.get_current_status()}")
+            return False
+
+        # 等待导航完成，包含超时和失败状态处理。
+        elapsed = 0.0
+        navigation_timeout = 120.0
+        while not rospy.is_shutdown() and elapsed < navigation_timeout:
+            status = self.get_current_status()
+            if status == NavigationStatus.SUCCEEDED:
+                return True
+            if status in _FAILURE_STATES:
+                print(f"导航失败，状态: {status}")
+                return False
+            time.sleep(0.01)
+            elapsed += 0.01
+
+        print("导航超时")
+        return False
 
     def navigate_to_task_point(self, task_point_name: str) -> bool:
         """导航到指定的任务点。
@@ -52,13 +82,43 @@ class RobotNavigation:
             bool: 导航是否成功。
         """
         self.robot_navigation.navigate_to_task_point(task_point_name)
-        while self.get_current_status() is not NavigationStatus.ACTIVE:
-            time.sleep(0.01)
-        while not rospy.is_shutdown():
-            if self.get_current_status() == NavigationStatus.SUCCEEDED:
+
+        # 等待导航状态变为 ACTIVE，包含超时和失败状态处理。
+        _FAILURE_STATES = (
+            NavigationStatus.ABORTED,
+            NavigationStatus.REJECTED,
+            NavigationStatus.PREEMPTED,
+        )
+        elapsed = 0.0
+        activation_timeout = 10.0
+        while elapsed < activation_timeout:
+            status = self.get_current_status()
+            if status == NavigationStatus.ACTIVE:
                 break
+            if status in _FAILURE_STATES:
+                print(f"导航任务点激活失败，状态: {status}")
+                return False
             time.sleep(0.01)
-        return True
+            elapsed += 0.01
+        else:
+            print(f"等待导航任务点激活超时，当前状态: {self.get_current_status()}")
+            return False
+
+        # 等待导航完成，包含超时和失败状态处理。
+        elapsed = 0.0
+        navigation_timeout = 120.0
+        while not rospy.is_shutdown() and elapsed < navigation_timeout:
+            status = self.get_current_status()
+            if status == NavigationStatus.SUCCEEDED:
+                return True
+            if status in _FAILURE_STATES:
+                print(f"导航失败，状态: {status}")
+                return False
+            time.sleep(0.01)
+            elapsed += 0.01
+
+        print("导航超时")
+        return False
 
     def stop_navigation(self) -> bool:
         """停止导航。

@@ -1,0 +1,28 @@
+============================================================
+相机标定测试指标报告
+  demo: head
+  时间: 2026-04-24T15:30:51+08:00
+  测试 CSV 目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output_csv/kuavo_head_test
+  测试结果目录: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_head_test
+  FK 使用 URDF: /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/biped_v3_arm.urdf（nominal only）
+============================================================
+
+| sample | pos_err_pre(m) | pos_err_post(m) | rot_err_pre(deg) | rot_err_post(deg) |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.009194 | 0.009194 | 0.9399 | 0.9399 |
+| 1 | 0.010065 | 0.010065 | 0.8953 | 0.8953 |
+| 2 | 0.011509 | 0.011509 | 1.2830 | 1.2830 |
+| 3 | 0.011624 | 0.011624 | 1.2811 | 1.2811 |
+| 4 | 0.010588 | 0.010588 | 0.9420 | 0.9420 |
+| 5 | 0.008578 | 0.008578 | 0.7883 | 0.7883 |
+| 6 | 0.011243 | 0.011243 | 1.1720 | 1.1720 |
+| 7 | 0.011014 | 0.011014 | 1.2063 | 1.2063 |
+| 8 | 0.010216 | 0.010216 | 0.7824 | 0.7824 |
+| mean | 0.010448 | 0.010448 | 1.0323 | 1.0323 |
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_head_test/board_pose_error_pre_post_vs_urdf_test.png
+Wrote /home/lab/guofucheng/kuavo-ros-control/src/Camera_Calibration/output/kuavo_head_test/board_pose_bars_vs_urdf_test.png
+[summary] 平均误差下降（与输出图片一致，基于最终用于绘图的样本）
+  position: mean 0.010448 -> 0.010448 m, drop 0.000000 m (0.00%)
+  rotation: mean 1.0323 -> 1.0323 deg, drop 0.0000 deg (0.00%)
+
+---------- 结束 ----------

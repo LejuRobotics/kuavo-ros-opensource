@@ -53,7 +53,8 @@
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
     <arg name="with_led" default="true"/>
-    <arg name="with_battery" default="false"/>
+    <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
+    <arg name="with_battery" default="true"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
@@ -118,10 +119,10 @@
     <param name="/timeout_warning_ms" value="20"/>
 
     <!-- 自动清理 .ros 文件夹参数 -->
-    <!-- 最大日志大小为 64GB，日志大小大于 64GB 时删除日志 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <!-- 删除日志到大小为 60GB 时停止删除日志 -->
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <group if="$(eval arg('teach_pendant') == 1)">
       <param name="stand_up_protect" value="false"/>
@@ -183,6 +184,7 @@
     </node>
 
     <param name="hardware/is_ready" value="0"/>
+    <param name="hardware/ready_to_start" value="0"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
     <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
@@ -199,7 +201,8 @@
       <group if="$(eval arg('joystick_type') == 'h12')">
 
         <group if="$(eval arg('start_way') == 'manual')">
-          <!-- 此if分支为命令行启动机器人: joystick_type=h12，h12遥控器使用和服务启动(start_way=auto)相同的逻辑。-->
+          <!-- 此if分支为命令行启动机器人: joystick_type=h12。h12 节点启动前由 guard 请求服务让位，
+               终端启动自己的 /joy_node，不再复用服务侧 FSM。-->
           
           <param name="start_way" value="auto"/>
 
@@ -211,8 +214,13 @@
 
           <!-- 补充环境变量，和服务启动的变量一致 -->
           <env name="KUAVO_ROS_CONTROL_WS_PATH" value="$(find humanoid_controllers)/../../../" />
-          <!-- 启动 h12pro 控制节点 -->
+          <!-- 启动 h12pro 控制节点。
+               传入 h12_node_guard.sh 门卫前缀：终端节点启动前自动请求 /start_way=manual，
+               等待 ocs2_h12pro_monitor 停掉服务侧同名 h12 节点（并置 /h12_yield_done=1）后，
+               再启动终端自己的 /joy_node，使终端控制栈和 H12 FSM 生命周期一致。
+               服务未运行时门卫直接放行，保持原有行为。判断在节点启动期完成（roslaunch 解析期无法跑 shell）。 -->
           <include file="$(find h12pro_controller_node)/launch/h12pro_autostart.launch">
+            <arg name="guard_prefix" value="$(find h12pro_controller_node)/scripts/h12_node_guard.sh"/>
           </include>
 
           <param name="joystick_sensitivity" value="20"/>
@@ -293,6 +301,7 @@
     <group if="$(arg with_led)">
       <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
         <arg name="LED" value="enable"/>
+        <arg name="led_for_state" value="$(arg led_for_state)"/>
       </include>
     </group>
 

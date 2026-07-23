@@ -39,6 +39,14 @@ cd <kuavo-ros-control>
 roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_orbbec.launch
 ```
 
+指定 Quest3 IP 启动：
+
+```bash
+roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_orbbec.launch ip_address:=192.168.50.103
+```
+
+不指定 `ip_address` 时使用广播发现；指定后视频回传发现包只发送到该 Quest3 IP。
+
 ### VR 端
 
 由于奥比中光相机 335L 在机器人头部倒装，图像翻转步骤在 VR app 中， VR 端需要安装特定版本 app，链接，https://kuavo.lejurobot.com/Quest_apks/leju_kuavo_hand-0.0.1-298-gdc7cfac.apk

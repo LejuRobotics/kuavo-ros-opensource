@@ -42,7 +42,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="floating_base" type="fixed">
+  <joint name="base_link_to_dummy_link" type="fixed">
     <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="base_link" />
     <child link="dummy_link" />
@@ -1255,7 +1255,7 @@
     name="zhead_1_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.43485" 
+      xyz="0 0 0.43935" 
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />

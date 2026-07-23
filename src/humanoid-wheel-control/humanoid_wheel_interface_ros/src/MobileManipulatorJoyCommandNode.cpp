@@ -10,6 +10,7 @@
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Bool.h>
 #include <kuavo_common/common/json.hpp>
+#include <kuavo_common/common/common.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/SetJoyTopic.h>
 #include <kuavo_msgs/getLbTorsoInitialPose.h>
@@ -93,21 +94,20 @@ namespace mobile_manipulator
       int robotVersion_ = 60;
       if(nodeHandle_.hasParam("robot_version"))
       {
-        nodeHandle_.getParam("robot_version", robotVersion_);
+        int raw_version = 0;
+        nodeHandle_.getParam("robot_version", raw_version);
+        robotVersion_ = RobotVersion::create(raw_version).version_number();
       }
       // 躯干初始化位置xyz
       loadTorsoInitialPoseFromServer(nodeHandle_, robotVersion_);
 
-      // 躯干笛卡尔运动限幅
+      // 躯干 workspace 钳制限位（相对 initialTorsoPose，沿用 beta）
       torsoMax_x_ = 0.25; torsoMin_x_ = 0.0;
       torsoMax_z_ = 0.32; torsoMin_z_ =  0.0;
-      torsoMax_yaw_ = 0.5235; torsoMin_yaw_ = 0.5235;
       torsoMax_pitch_ = 0.5235; torsoMin_pitch_ = 0.0;
+      torsoMax_yaw_ = 0.5235; torsoMin_yaw_ = -0.5235;
 
-      // 检测手柄类型并设置映射
-      detectJoystickType();
-
-      // 加载手柄映射配置
+      // 先加载 launch 指定的映射配置（sim.json / bt2.json 等）
       if (nodeHandle.hasParam("channel_map_path"))
       {
         std::string channel_map_path;
@@ -120,8 +120,15 @@ namespace mobile_manipulator
         ROS_WARN_STREAM("未找到 channel_map_path 参数，使用默认手柄映射");
       }
 
-      // 从 joyAxisMap 获取轴索引（支持JSON配置）
-      // 根据 joy_to_cmd_vel_xy.py: axes[1]->linear.x, axes[0]->linear.y, axes[2]->angular.z
+      // 仿真键盘模式不检测物理手柄，避免 bt2pro 映射(angular=axis2) 覆盖 sim.json(angular=axis3)
+      std::string joystick_type_early;
+      nodeHandle_.getParam("joystick_type", joystick_type_early);
+      if (joystick_type_early != "sim")
+      {
+        detectJoystickType();
+      }
+
+      // 从 joyAxisMap 获取轴索引（sim: axes[3]=右摇杆Yaw -> angular.z）
       linear_axis_index_x_ = joyAxisMap["AXIS_LEFT_STICK_X"];   // axes[1] -> 前进/后退
       linear_axis_index_y_ = joyAxisMap["AXIS_LEFT_STICK_Y"];   // axes[0] -> 左右移动
       angular_axis_index_ = joyAxisMap["AXIS_RIGHT_STICK_YAW"];  // 旋转
@@ -133,11 +140,21 @@ namespace mobile_manipulator
       cmd_vel_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel", 10, true);
       cmd_vel_world_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel_world", 10, true);
       cmd_lb_torso_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_lb_torso_pose", 10, true);
+      cmd_torso_vel_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_torso_vel", 10, false);
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       joy_sub_ = nodeHandle_.subscribe("/joy", 10, &MobileManipulatorJoyControl::joyCallback, this);
 
       // 订阅MPC observation话题，用于判断是否已经完成初始化
       observation_sub_ = nodeHandle_.subscribe("/mobile_manipulator_mpc_observation", 10, &MobileManipulatorJoyControl::observationCallback, this);
+      open_loop_torso_state_sub_ = nodeHandle_.subscribe<geometry_msgs::Twist>(
+          "/torso_open_loop_state", 1,
+          [this](const geometry_msgs::Twist::ConstPtr& msg) {
+            open_loop_torso_x_ = msg->linear.x;
+            open_loop_torso_z_ = msg->linear.z;
+            open_loop_torso_yaw_ = msg->angular.z;
+            open_loop_torso_pitch_ = msg->angular.y;
+            has_open_loop_torso_state_ = true;
+          });
       
       // 初始化MPC模式切换服务客户端
       mpc_control_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeTorsoCtrlMode>("/mobile_manipulator_mpc_control");
@@ -157,34 +174,42 @@ namespace mobile_manipulator
       old_joy_msg_.axes = std::vector<float>(8, 0.0);
       old_joy_msg_.buttons = std::vector<int32_t>(12, 0);
       
-      // 初始化上一次的躯干控制摇杆输入值
-      last_linear_x_input_ = 0.0;
-      last_linear_z_input_ = 0.0;
-      last_angular_y_input_ = 0.0;
-      last_angular_z_input_ = 0.0;
-      
-      // 初始化积分状态变量（从初始位置开始）
-      integrated_linear_x_ = 0.0;
-      integrated_linear_z_ = 0.0;
-      integrated_angular_y_ = 0.0;
-      integrated_angular_z_ = 0.0;
-      
-      // 初始化积分增益参数（可根据需要调整）
-      integral_gain_linear_x_ = 0.01;   // 每次回调的积分增益
-      integral_gain_linear_z_ = 0.01;
-      integral_gain_angular_y_ = 0.01;
-      integral_gain_angular_z_ = 0.01;
+      // 躯干积分增益（沿用旧参数名，内部 ×kTorsoVelCalibHz 转换为 vel_scale）
+      // BT2/BT2Pro/Xbox 默认值（可 ROS param 覆盖，与 G12 同形式）
+      // 体感对齐：假定遥控约 500Hz（旧 per-msg 积分等效速度 = gain × f）
+      // z 默认值 ×0.2 对齐 G12：G12 右摇杆在 Python 层被 SCALE_RIGHT_STICK_Z=0.2 预缩放，
+      // BT2 /joy 不预缩放，故等价于把 BT2 的 vel_scale_z 乘 0.2（0.004×0.2=0.0008 → 0.40 m/s）。
+      bt2_wheelarm_integral_gain_linear_x_ = 0.001;   // ×500 = 0.50 m/s
+      bt2_wheelarm_integral_gain_linear_z_ = 0.0008;  // ×500 = 0.40 m/s（对齐 G12 满杆 0.4）
+      bt2_wheelarm_integral_gain_angular_y_ = 0.003;  // ×500 = 1.50 rad/s
+      bt2_wheelarm_integral_gain_angular_z_ = 0.005;  // ×500 = 2.50 rad/s
+      nodeHandle_.param("bt2_wheelarm_integral_gain_linear_x", bt2_wheelarm_integral_gain_linear_x_, bt2_wheelarm_integral_gain_linear_x_);
+      nodeHandle_.param("bt2_wheelarm_integral_gain_linear_z", bt2_wheelarm_integral_gain_linear_z_, bt2_wheelarm_integral_gain_linear_z_);
+      nodeHandle_.param("bt2_wheelarm_integral_gain_angular_y", bt2_wheelarm_integral_gain_angular_y_, bt2_wheelarm_integral_gain_angular_y_);
+      nodeHandle_.param("bt2_wheelarm_integral_gain_angular_z", bt2_wheelarm_integral_gain_angular_z_, bt2_wheelarm_integral_gain_angular_z_);
 
-      // G12 publishes /joy continuously at a higher fixed rate. Keep its
-      // left-stick torso channels slower so lower-body joints 1/3 do not jump.
-      g12_wheelarm_integral_gain_linear_x_ = 0.003;
-      g12_wheelarm_integral_gain_linear_z_ = 0.01;
+      // G12 轮臂默认值（同 BT2，可 ROS param 覆盖，沿用旧名）
+      g12_wheelarm_integral_gain_linear_x_ = 0.001;
+      g12_wheelarm_integral_gain_linear_z_ = 0.004;
       g12_wheelarm_integral_gain_angular_y_ = 0.003;
-      g12_wheelarm_integral_gain_angular_z_ = 0.01;
+      g12_wheelarm_integral_gain_angular_z_ = 0.005;
       nodeHandle_.param("g12_wheelarm_integral_gain_linear_x", g12_wheelarm_integral_gain_linear_x_, g12_wheelarm_integral_gain_linear_x_);
       nodeHandle_.param("g12_wheelarm_integral_gain_linear_z", g12_wheelarm_integral_gain_linear_z_, g12_wheelarm_integral_gain_linear_z_);
       nodeHandle_.param("g12_wheelarm_integral_gain_angular_y", g12_wheelarm_integral_gain_angular_y_, g12_wheelarm_integral_gain_angular_y_);
       nodeHandle_.param("g12_wheelarm_integral_gain_angular_z", g12_wheelarm_integral_gain_angular_z_, g12_wheelarm_integral_gain_angular_z_);
+
+      // 内部转换：gain → vel_scale = gain × kTorsoVelCalibHz
+      // 体感标定 500Hz（用户手感：旧实现更快；bag 中位 ~300 偏慢）
+      static constexpr double kTorsoVelCalibHz = 500.0;
+      torso_vel_scale_x_ = bt2_wheelarm_integral_gain_linear_x_ * kTorsoVelCalibHz;
+      torso_vel_scale_z_ = bt2_wheelarm_integral_gain_linear_z_ * kTorsoVelCalibHz;
+      torso_vel_scale_pitch_ = bt2_wheelarm_integral_gain_angular_y_ * kTorsoVelCalibHz;
+      torso_vel_scale_yaw_ = bt2_wheelarm_integral_gain_angular_z_ * kTorsoVelCalibHz;
+
+      g12_torso_vel_scale_x_ = g12_wheelarm_integral_gain_linear_x_ * kTorsoVelCalibHz;
+      g12_torso_vel_scale_z_ = g12_wheelarm_integral_gain_linear_z_ * kTorsoVelCalibHz;
+      g12_torso_vel_scale_pitch_ = g12_wheelarm_integral_gain_angular_y_ * kTorsoVelCalibHz;
+      g12_torso_vel_scale_yaw_ = g12_wheelarm_integral_gain_angular_z_ * kTorsoVelCalibHz;
       
       // 初始化控制量为零的时间跟踪
       zero_control_start_time_ = ros::Time::now();
@@ -231,6 +256,7 @@ namespace mobile_manipulator
     ros::Publisher cmd_vel_publisher_;
     ros::Publisher cmd_vel_world_publisher_;
     ros::Publisher cmd_lb_torso_publisher_;
+    ros::Publisher cmd_torso_vel_publisher_;
     ros::Publisher stop_pub_;
     ros::Subscriber joy_sub_;
     ros::ServiceClient mpc_control_client_;
@@ -254,11 +280,18 @@ namespace mobile_manipulator
     double initialTorsoPose_y_;
     double initialTorsoPose_z_;
 
-    // 躯干各轴限幅大小
+    // 躯干各轴限幅大小（沿用 beta，yaw 修正为对称 ±0.5235）
     double torsoMax_x_, torsoMin_x_;
     double torsoMax_z_, torsoMin_z_;
-    double torsoMax_yaw_, torsoMin_yaw_;
     double torsoMax_pitch_, torsoMin_pitch_;
+    double torsoMax_yaw_, torsoMin_yaw_;
+    static constexpr double kTorsoClampEps = 1e-5;
+
+    // open-loop torso state from /torso_open_loop_state (published by ReferenceManager)
+    double open_loop_torso_x_{0.0}, open_loop_torso_z_{0.0}, open_loop_torso_yaw_{0.0}, open_loop_torso_pitch_{0.0};
+    bool has_open_loop_torso_state_{false};
+    ros::Subscriber open_loop_torso_state_sub_;
+
 
     // 摇杆轴索引
     int linear_axis_index_x_;
@@ -273,44 +306,46 @@ namespace mobile_manipulator
 
     // 保存上一次的手柄消息（用于检测按钮按下事件）
     sensor_msgs::Joy old_joy_msg_;
-    
-      // 保存上一次的躯干控制摇杆输入值（用于LB松开时保持值）
-      double last_linear_x_input_;
-      double last_linear_z_input_;
-      double last_angular_y_input_;  // 用于RT松开时保持angular.y值
-      double last_angular_z_input_;
-      
-      // 积分状态变量（用于躯干控制的积分控制）
-      double integrated_linear_x_;
-      double integrated_linear_z_;
-      double integrated_angular_y_;
-      double integrated_angular_z_;
-      
-      // 积分增益参数
-      double integral_gain_linear_x_;
-      double integral_gain_linear_z_;
-      double integral_gain_angular_y_;
-      double integral_gain_angular_z_;
-      double g12_wheelarm_integral_gain_linear_x_;
-      double g12_wheelarm_integral_gain_linear_z_;
-      double g12_wheelarm_integral_gain_angular_y_;
-      double g12_wheelarm_integral_gain_angular_z_;
-      
-      // 控制量为零的时间跟踪（用于模式切换检查）
-      ros::Time zero_control_start_time_;
-      bool is_control_zero_;
-      const double MIN_ZERO_DURATION_ = 2.0;  // 控制量为零的最小持续时间（秒）
 
-      // 底盘急停：按 BACK 时置位，持续发布零速度并每 10 次打印一次
-      bool emergency_stop_chassis_{false};
+    // Torso integral gains (BT2/BT2Pro, ROS-param overridable, aligned with G12)
+    double bt2_wheelarm_integral_gain_linear_x_;
+    double bt2_wheelarm_integral_gain_linear_z_;
+    double bt2_wheelarm_integral_gain_angular_y_;
+    double bt2_wheelarm_integral_gain_angular_z_;
 
-      // G12轮臂模式标志: is_wheel_(ROBOT_VERSION>=60) 且 joystick_type==h12
-      bool is_wheel_;
-      bool use_g12_;
+    // G12 wheel-arm integral gains (defaults same as BT2, can be overridden via ROS param)
+    double g12_wheelarm_integral_gain_linear_x_;
+    double g12_wheelarm_integral_gain_linear_z_;
+    double g12_wheelarm_integral_gain_angular_y_;
+    double g12_wheelarm_integral_gain_angular_z_;
 
-      // MPC observation相关标志，用于判断是否已经完成初始化
-      bool get_observation_ = false;
-      ros::Subscriber observation_sub_;
+    // Internal vel_scale = bt2_wheelarm_integral_gain_* × kTorsoVelCalibHz (BT2/BT2Pro)
+    double torso_vel_scale_x_;
+    double torso_vel_scale_z_;
+    double torso_vel_scale_pitch_;
+    double torso_vel_scale_yaw_;
+
+    // Internal vel_scale for G12 (= g12_wheelarm_integral_gain_* × kTorsoVelCalibHz)
+    double g12_torso_vel_scale_x_;
+    double g12_torso_vel_scale_z_;
+    double g12_torso_vel_scale_pitch_;
+    double g12_torso_vel_scale_yaw_;
+
+    // 控制量为零的时间跟踪（用于模式切换检查）
+    ros::Time zero_control_start_time_;
+    bool is_control_zero_;
+    const double MIN_ZERO_DURATION_ = 2.0;  // 控制量为零的最小持续时间（秒）
+
+    // 底盘急停：按 BACK 时置位，持续发布零速度并每 10 次打印一次
+    bool emergency_stop_chassis_{false};
+
+    // G12轮臂模式标志: is_wheel_(ROBOT_VERSION>=60) 且 joystick_type==h12
+    bool is_wheel_;
+    bool use_g12_;
+
+    // MPC observation相关标志，用于判断是否已经完成初始化
+    bool get_observation_ = false;
+    ros::Subscriber observation_sub_;
       
     // 检测手柄类型（BEITONG/XBOX）并自动加载对应配置
     void detectJoystickType()
@@ -465,7 +500,7 @@ namespace mobile_manipulator
           initialTorsoPose_y_ = 0.0005;
           initialTorsoPose_z_ = 0.789919;
         }
-        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63)
+        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63 || robotVersion == 200062 || robotVersion == 300062)
         {
           initialTorsoPose_x_ = 0.11575;
           initialTorsoPose_y_ = 0.0;
@@ -531,6 +566,61 @@ namespace mobile_manipulator
     {
       return std::max(min_value, std::min(value, max_value));
     }
+
+    // axes with deadzone → 0; used by mode-switch zero check and G12 stick reads
+    double axisWithDeadzone(const sensor_msgs::Joy::ConstPtr &joy_msg, int axis_index) const
+    {
+      if (axis_index < 0 || static_cast<size_t>(axis_index) >= joy_msg->axes.size()) {
+        return 0.0;
+      }
+      const double v = joy_msg->axes[axis_index];
+      return std::abs(v) < deadzone_ ? 0.0 : v;
+    }
+
+    /// z-coupled x-envelope: 根据当前 z 增量返回允许的 x 正向增量幅值（0.05..0.25）。
+    /// z_increment = 当前绝对 z - initialTorsoPos_.z
+    double getTorsoMaxX(double z_increment) const
+    {
+      if (z_increment <= 0.0) {
+        return 0.05;
+      } else if (z_increment <= 0.3) {
+        return 0.05 + (z_increment / 0.3) * 0.1;  // 0.05 → 0.15
+      } else if (z_increment <= 0.5) {
+        return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1;  // 0.15 → 0.25
+      } else {
+        return 0.25;
+      }
+    }
+
+    /// Read /torso_open_loop_state and zero velocity components that would exceed limits.
+    void clampTorsoVelAgainstOpenLoopState(geometry_msgs::Twist& vel) const
+    {
+      if (!has_open_loop_torso_state_) return;
+
+      // --- z ---
+      const double z_abs_lo = initialTorsoPose_z_ + torsoMin_z_;
+      const double z_abs_hi = initialTorsoPose_z_ + torsoMax_z_;
+
+      if      (vel.linear.z > 0.0 && open_loop_torso_z_ >= z_abs_hi - kTorsoClampEps)  vel.linear.z = 0.0;
+      else if (vel.linear.z < 0.0 && open_loop_torso_z_ <= z_abs_lo + kTorsoClampEps)  vel.linear.z = 0.0;
+
+      // --- x (z-coupled envelope, 同旧代码 getTorsoMaxX) ---
+      const double z_increment = open_loop_torso_z_ - initialTorsoPose_z_;
+      const double x_increment = open_loop_torso_x_ - initialTorsoPose_x_;
+      const double current_torso_max_x = getTorsoMaxX(z_increment);
+
+      if      (vel.linear.x > 0.0 && x_increment >= current_torso_max_x - kTorsoClampEps) vel.linear.x = 0.0;
+      else if (vel.linear.x < 0.0 && x_increment <= torsoMin_x_ + kTorsoClampEps)          vel.linear.x = 0.0;
+
+      // --- pitch ---
+      if      (vel.angular.y > 0.0 && open_loop_torso_pitch_ >= torsoMax_pitch_ - kTorsoClampEps) vel.angular.y = 0.0;
+      else if (vel.angular.y < 0.0 && open_loop_torso_pitch_ <= torsoMin_pitch_ + kTorsoClampEps) vel.angular.y = 0.0;
+
+      // --- yaw ---
+      if      (vel.angular.z > 0.0 && open_loop_torso_yaw_ >= torsoMax_yaw_ - kTorsoClampEps)  vel.angular.z = 0.0;
+      else if (vel.angular.z < 0.0 && open_loop_torso_yaw_ <= torsoMin_yaw_ + kTorsoClampEps)  vel.angular.z = 0.0;
+    }
+
 
     // 调用终止服务（发布停止信号）
     void callTerminateSrv()
@@ -611,16 +701,20 @@ namespace mobile_manipulator
       // 检查控制量是否为零
       if (current_mode_ == ControlMode::TORSO_CONTROL)
       {
-        // 躯干模式：检查积分值
-        is_zero = (std::abs(integrated_linear_x_) < 1e-6 && std::abs(integrated_linear_z_) < 1e-6 &&
-                   std::abs(integrated_angular_y_) < 1e-6 && std::abs(integrated_angular_z_) < 1e-6);
+        // All joysticks: torso is instantaneous velocity — zero when sticks released
+        const double lx = axisWithDeadzone(joy_msg, linear_axis_index_x_);
+        const double lz = axisWithDeadzone(joy_msg, linear_z_axis_index_);
+        const double ay = axisWithDeadzone(joy_msg, angular_y_axis_index_);
+        const double az = axisWithDeadzone(joy_msg, angular_axis_index_);
+        is_zero = (std::abs(lx) < 1e-6 && std::abs(lz) < 1e-6 &&
+                   std::abs(ay) < 1e-6 && std::abs(az) < 1e-6);
       }
       else
       {
         // cmd_vel模式：检查摇杆输入（应用死区）
-        double x = std::abs(joy_msg->axes[linear_axis_index_x_]) < deadzone_ ? 0.0 : joy_msg->axes[linear_axis_index_x_];
-        double y = std::abs(joy_msg->axes[linear_axis_index_y_]) < deadzone_ ? 0.0 : joy_msg->axes[linear_axis_index_y_];
-        double z = std::abs(joy_msg->axes[angular_axis_index_]) < deadzone_ ? 0.0 : joy_msg->axes[angular_axis_index_];
+        const double x = axisWithDeadzone(joy_msg, linear_axis_index_x_);
+        const double y = axisWithDeadzone(joy_msg, linear_axis_index_y_);
+        const double z = axisWithDeadzone(joy_msg, angular_axis_index_);
         is_zero = (std::abs(x) < 1e-6 && std::abs(y) < 1e-6 && std::abs(z) < 1e-6);
       }
       
@@ -654,16 +748,7 @@ namespace mobile_manipulator
           {
             ROS_ERROR("切换到ArmOnly模式失败");
           }
-          // 重置积分值和上一次输入值到初始位置
-          integrated_linear_x_ = 0.0;
-          integrated_linear_z_ = 0.0;
-          integrated_angular_y_ = 0.0;
-          integrated_angular_z_ = 0.0;
-          last_linear_x_input_ = 0.0;
-          last_linear_z_input_ = 0.0;
-          last_angular_y_input_ = 0.0;
-          last_angular_z_input_ = 0.0;
-
+          // No local open-loop pose to reset; ReferenceManager holds the final target.
           // G12模式: 禁用humanoid_joy_control_auto_gait节点，防止底盘移动
           if (use_g12_)
           {
@@ -756,25 +841,9 @@ namespace mobile_manipulator
         // G+H同时极值2秒 -> Python层BUTTON_M2=1 -> 躯干复位
         if (m2_pressed)
         {
-          integrated_linear_x_ = 0.0;
-          integrated_linear_z_ = 0.0;
-          integrated_angular_y_ = 0.0;
-          integrated_angular_z_ = 0.0;
-          last_linear_x_input_ = 0.0;
-          last_linear_z_input_ = 0.0;
-          last_angular_y_input_ = 0.0;
-          last_angular_z_input_ = 0.0;
+          // G12 torso has no open-loop integrated pose; only re-arm mode-switch zero timer
           zero_control_start_time_ = ros::Time::now();
           is_control_zero_ = true;
-
-          // geometry_msgs::Twist reset_cmd;
-          // reset_cmd.linear.x = initialTorsoPose_x_;
-          // reset_cmd.linear.y = initialTorsoPose_y_;
-          // reset_cmd.linear.z = initialTorsoPose_z_;
-          // reset_cmd.angular.x = 0.0;
-          // reset_cmd.angular.y = 0.0;
-          // reset_cmd.angular.z = 0.0;
-          // cmd_lb_torso_publisher_.publish(reset_cmd);
           resetTorsoToInitialAsync(nodeHandle_);
           std::cout << "G+H torso reset completed" << std::endl;
         }
@@ -811,53 +880,27 @@ namespace mobile_manipulator
         // 根据模式分发控制
         if (current_mode_ == ControlMode::TORSO_CONTROL)
         {
-          // 躯干积分控制
-          // G极值: 左杆上下->躯干X, 右杆上下->躯干Z
-          // H极值: 右杆左右->躯干Yaw, 左杆上下->躯干Pitch
+          // G12 躯干速度接口（无开环绝对位姿状态）
+          // G极值: 左杆上下->vx, 右杆上下->vz
+          // H极值: 右杆左右->vyaw, 左杆上下->vpitch
+          // Workspace limits enforced here via velocity gate; no residual state across soft-pause.
           double lx = 0.0, lz = 0.0, ay = 0.0, az = 0.0;
-
-          if (guide_pressed)  // G极值: 左杆上下->X, 右杆上下->Z
-          {
-            double raw = joy_msg->axes[linear_axis_index_x_];  // 左杆上下 axes[1]
-            if (std::abs(raw) >= deadzone_) lx = raw;
-            raw = joy_msg->axes[linear_z_axis_index_];         // 右杆上下 axes[4]
-            if (std::abs(raw) >= deadzone_) lz = raw;
+          if (guide_pressed) {  // G极值: 左杆上下->vx, 右杆上下->vz
+            lx = axisWithDeadzone(joy_msg, linear_axis_index_x_);
+            lz = axisWithDeadzone(joy_msg, linear_z_axis_index_);
           }
-          if (m1_pressed)  // H极值: 右杆左右->Yaw, 左杆上下->Pitch
-          {
-            double raw = joy_msg->axes[angular_axis_index_];   // 右杆左右 axes[3]
-            if (std::abs(raw) >= deadzone_) az = raw;
-            raw = joy_msg->axes[linear_axis_index_x_];         // 左杆上下 axes[1]
-            if (std::abs(raw) >= deadzone_) ay = raw;
+          if (m1_pressed) {  // H极值: 右杆左右->vyaw, 左杆上下->vpitch
+            az = axisWithDeadzone(joy_msg, angular_axis_index_);
+            ay = axisWithDeadzone(joy_msg, linear_axis_index_x_);
           }
 
-          integrated_linear_x_ += lx * g12_wheelarm_integral_gain_linear_x_;
-          integrated_linear_z_ += lz * g12_wheelarm_integral_gain_linear_z_;
-          integrated_angular_y_ += ay * g12_wheelarm_integral_gain_angular_y_;
-          integrated_angular_z_ += az * g12_wheelarm_integral_gain_angular_z_;
-          integrated_linear_x_ = clamp(integrated_linear_x_, -1.0, 1.0);
-          integrated_linear_z_ = clamp(integrated_linear_z_, -1.0, 1.0);
-          integrated_angular_y_ = clamp(integrated_angular_y_, -1.0, 1.0);
-          integrated_angular_z_ = clamp(integrated_angular_z_, -1.0, 1.0);
-
-          auto calcOut = [](double v, double sp, double sn) -> double {
-            return (v >= 0) ? v * sp : v * sn;
-          };
-
-          geometry_msgs::Twist torso;
-          torso.linear.x = clamp(calcOut(integrated_linear_x_, torsoMax_x_, torsoMin_x_), -torsoMin_x_, torsoMax_x_) + initialTorsoPose_x_;
-          torso.linear.z = clamp(calcOut(integrated_linear_z_, torsoMax_z_, torsoMin_z_), -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
-          torso.angular.y = clamp(calcOut(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), -torsoMin_pitch_, torsoMax_pitch_);
-          torso.angular.z = clamp(calcOut(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), -torsoMin_yaw_, torsoMax_yaw_);
-
-          if (std::abs(integrated_linear_x_) >= 1e-6 || std::abs(integrated_linear_z_) >= 1e-6 ||
-              std::abs(integrated_angular_y_) >= 1e-6 || std::abs(integrated_angular_z_) >= 1e-6 ||
-              std::abs(torso.linear.x - initialTorsoPose_x_) >= deadzone_ ||
-              std::abs(torso.linear.z - initialTorsoPose_z_) >= deadzone_ ||
-              std::abs(torso.angular.y) >= deadzone_ || std::abs(torso.angular.z) >= deadzone_)
-          {
-            cmd_lb_torso_publisher_.publish(torso);
-          }
+          geometry_msgs::Twist torso_vel;
+          torso_vel.linear.x = lx * g12_torso_vel_scale_x_;
+          torso_vel.linear.z = lz * g12_torso_vel_scale_z_;
+          torso_vel.angular.y = ay * g12_torso_vel_scale_pitch_;
+          torso_vel.angular.z = az * g12_torso_vel_scale_yaw_;
+          clampTorsoVelAgainstOpenLoopState(torso_vel);
+          cmd_torso_vel_publisher_.publish(torso_vel);
         }
         else
         {
@@ -890,11 +933,26 @@ namespace mobile_manipulator
         return;  // G12模式处理完毕
       }
 
-      // ========== 以下是原有BT2Pro手柄控制逻辑（完全未修改） ==========
+      // ========== BT2Pro / BT2 / Xbox：底盘逻辑同前；躯干改为 /cmd_torso_vel ==========
+
+      // 检测RT轴是否按下（用于复位功能，RT轴值通常小于-0.5表示按下）
+      // 此复位逻辑在BT2/Xbox分支顶层处理，与G12的M2复位一致，确保在任何模式下都能复位躯干。
+      bool rt_pressed = (joy_msg->axes[rt_axis_index_] < -0.5);
+      bool old_rt_pressed = (old_joy_msg_.axes.size() > static_cast<size_t>(rt_axis_index_) &&
+                             old_joy_msg_.axes[rt_axis_index_] < -0.5);
+      bool rt_just_pressed = rt_pressed && !old_rt_pressed;
+
+      if (rt_just_pressed)
+      {
+        zero_control_start_time_ = ros::Time::now();
+        is_control_zero_ = true;
+        resetTorsoToInitialAsync(nodeHandle_);
+        ROS_INFO("Torso reset command sent from BT2/Xbox");
+      }
 
       // 检测模式切换组合键
       bool lb_pressed = (joy_msg->buttons[joyButtonMap["BUTTON_LB"]] == 1);
-      
+
       // 尝试切换模式的辅助函数
       auto trySwitchMode = [this, &joy_msg](ControlMode new_mode) {
         if (canSwitchMode(joy_msg))
@@ -954,153 +1012,31 @@ namespace mobile_manipulator
       // 根据当前模式处理不同的控制逻辑
       if (current_mode_ == ControlMode::TORSO_CONTROL)
       {
-        // ========== 躯干控制模式 ==========
+        // ========== 躯干控制模式（速度接口，无上层开环绝对位姿）==========
+        // 与旧 BT2 相同的修饰键语义：LB 管 x/z，RB 管 pitch/yaw；RT 复位已在分支顶层处理。
+        // Workspace limits enforced here via velocity gate; open-loop integration in ReferenceManager (cmdTorsoPose_).
 
-        // 检测RB按钮是否按下（用于angular.z和angular.y控制）
         bool rb_pressed = (joy_msg->buttons[joyButtonMap["BUTTON_RB"]] == 1);
 
-        // 检测RT轴是否按下（用于复位功能，RT轴值通常小于-0.5表示按下）
-        bool rt_pressed = (joy_msg->axes[rt_axis_index_] < -0.5);
-        
-        // 检测RT按下事件（用于复位功能）
-        bool old_rt_pressed = (old_joy_msg_.axes[rt_axis_index_] < -0.5);
-        bool rt_just_pressed = rt_pressed && !old_rt_pressed;
-        
-        // RT按下时复位所有积分值和上一次输入值、并直接将躯干恢复为初始状态
-        if (rt_just_pressed)
-        {
-          integrated_linear_x_ = 0.0;
-          integrated_linear_z_ = 0.0;
-          integrated_angular_y_ = 0.0;
-          integrated_angular_z_ = 0.0;
-          last_linear_x_input_ = 0.0;
-          last_linear_z_input_ = 0.0;
-          last_angular_y_input_ = 0.0;
-          last_angular_z_input_ = 0.0;
-          // 重置控制量为零的时间跟踪，复位后可以立即切换模式（如果满足2秒条件）
-          zero_control_start_time_ = ros::Time::now();
-          is_control_zero_ = true;
-          
-          // // 复位时立即发布初始位置
-          // geometry_msgs::Twist reset_cmd;
-          // reset_cmd.linear.x = initialTorsoPose_x_;
-          // reset_cmd.linear.y = initialTorsoPose_y_;
-          // reset_cmd.linear.z = initialTorsoPose_z_;
-          // reset_cmd.angular.x = 0.0;
-          // reset_cmd.angular.y = 0.0;
-          // reset_cmd.angular.z = 0.0;
-          // cmd_lb_torso_publisher_.publish(reset_cmd);
-          resetTorsoToInitialAsync(nodeHandle_);
-          
-          ROS_INFO("Torso control reset completed");
-        }
-
-        // 读取摇杆输入值（LB按下时更新，LB松开时使用0值避免积分持续累加）
-        double linear_x_input, linear_z_input;
+        double lx = 0.0, lz = 0.0, ay = 0.0, az = 0.0;
         if (lb_pressed)
         {
-          // LB按下时，读取当前摇杆值
-          linear_x_input = joy_msg->axes[linear_axis_index_x_];
-          linear_z_input = joy_msg->axes[linear_z_axis_index_];
-          
-          // 应用死区后保存（避免保存死区内的值）
-          if (std::abs(linear_x_input) < deadzone_)
-            linear_x_input = 0.0;
-          if (std::abs(linear_z_input) < deadzone_)
-            linear_z_input = 0.0;
-          
-          // 更新保存的值（已应用死区）
-          last_linear_x_input_ = linear_x_input;
-          last_linear_z_input_ = linear_z_input;
+          lx = axisWithDeadzone(joy_msg, linear_axis_index_x_);
+          lz = axisWithDeadzone(joy_msg, linear_z_axis_index_);
         }
-        else
-        {
-          // LB松开时，使用0值避免积分持续累加
-          linear_x_input = 0.0;
-          linear_z_input = 0.0;
-        }
-        
-        // angular.y 仅在RB按下时读取，RB松开时使用0值避免积分持续累加
-        double angular_y_input;
         if (rb_pressed)
         {
-          // RB按下时，读取当前摇杆值
-          angular_y_input = joy_msg->axes[angular_y_axis_index_];
-          
-          // 应用死区后保存
-          if (std::abs(angular_y_input) < deadzone_)
-            angular_y_input = 0.0;
-          
-          last_angular_y_input_ = angular_y_input;
-        }
-        else
-        {
-          // RB松开时，使用0值避免积分持续累加
-          angular_y_input = 0.0;
-        }
-        
-        // angular.z 仅在RB按下时读取，RB松开时使用0值避免积分持续累加
-        double angular_z_input;
-        if (rb_pressed)
-        {
-          // RB按下时，读取当前摇杆值
-          angular_z_input = joy_msg->axes[angular_axis_index_];
-          
-          // 应用死区后保存
-          if (std::abs(angular_z_input) < deadzone_)
-            angular_z_input = 0.0;
-          
-          last_angular_z_input_ = angular_z_input;
-        }
-        else
-        {
-          // RB松开时，使用0值避免积分持续累加
-          angular_z_input = 0.0;
+          ay = axisWithDeadzone(joy_msg, angular_y_axis_index_);
+          az = axisWithDeadzone(joy_msg, angular_axis_index_);
         }
 
-        // 积分方式：摇杆为正则增加，为0则保持不变，为负则减小
-        integrated_linear_x_ += linear_x_input * integral_gain_linear_x_;
-        integrated_linear_z_ += linear_z_input * integral_gain_linear_z_;
-        integrated_angular_y_ += angular_y_input * integral_gain_angular_y_;
-        integrated_angular_z_ += angular_z_input * integral_gain_angular_z_;
-
-        // 限制积分值在合理范围内（-1到1）
-        integrated_linear_x_ = clamp(integrated_linear_x_, -1.0, 1.0);
-        integrated_linear_z_ = clamp(integrated_linear_z_, -1.0, 1.0);
-        integrated_angular_y_ = clamp(integrated_angular_y_, -1.0, 1.0);
-        integrated_angular_z_ = clamp(integrated_angular_z_, -1.0, 1.0);
-
-        // 辅助函数：根据输入值选择正向或负向scale
-        auto calculateOutput = [](double input, double scale_pos, double scale_neg) -> double {
-            if (input >= 0) {
-                return input * scale_pos;
-            } else {
-                return input * scale_neg;
-            }
-        };
-
-        // 创建躯干控制消息（使用积分值）
-        geometry_msgs::Twist torso_cmd;
-        torso_cmd.linear.x = clamp(calculateOutput(integrated_linear_x_, torsoMax_x_, torsoMin_x_), 
-                                   -torsoMin_x_, torsoMax_x_) + initialTorsoPose_x_;
-        torso_cmd.linear.z = clamp(calculateOutput(integrated_linear_z_, torsoMax_z_, torsoMin_z_), 
-                                   -torsoMin_z_, torsoMax_z_) + initialTorsoPose_z_;
-        torso_cmd.angular.y = clamp(calculateOutput(integrated_angular_y_, torsoMax_pitch_, torsoMin_pitch_), 
-                                    -torsoMin_pitch_, torsoMax_pitch_);
-        torso_cmd.angular.z = clamp(calculateOutput(integrated_angular_z_, torsoMax_yaw_, torsoMin_yaw_), 
-                                    -torsoMin_yaw_, torsoMax_yaw_);
-        // 判断是否发布：如果积分值非零或命令值不在初始位置，则发布（允许回到初始位置）
-        bool shouldPublish = (std::abs(integrated_linear_x_) >= 1e-6) || (std::abs(integrated_linear_z_) >= 1e-6) ||
-                             (std::abs(integrated_angular_y_) >= 1e-6) || (std::abs(integrated_angular_z_) >= 1e-6) ||
-                             (std::abs(torso_cmd.linear.x - initialTorsoPose_x_) >= deadzone_) ||
-                             (std::abs(torso_cmd.linear.z - initialTorsoPose_z_) >= deadzone_) ||
-                             (std::abs(torso_cmd.angular.y) >= deadzone_) ||
-                             (std::abs(torso_cmd.angular.z) >= deadzone_);
-        // 发布到躯干控制话题
-        if(shouldPublish)
-        {
-          cmd_lb_torso_publisher_.publish(torso_cmd);
-        }
+        geometry_msgs::Twist torso_vel;
+        torso_vel.linear.x = lx * torso_vel_scale_x_;
+        torso_vel.linear.z = lz * torso_vel_scale_z_;
+        torso_vel.angular.y = ay * torso_vel_scale_pitch_;
+        torso_vel.angular.z = az * torso_vel_scale_yaw_;
+        clampTorsoVelAgainstOpenLoopState(torso_vel);
+        cmd_torso_vel_publisher_.publish(torso_vel);
       }
       else
       {

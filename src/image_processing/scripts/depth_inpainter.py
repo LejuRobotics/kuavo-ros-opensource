@@ -127,9 +127,7 @@ class DepthImageInpainter:
         try:
             publish_time =msg.header.stamp.to_sec()
             current_time = rospy.Time.now().to_sec()
-            if current_time - self.last_delay_print_time >= 1.0:
-                print("delay time", current_time - publish_time)
-                self.last_delay_print_time = current_time
+            
             if self.runtime:
                 start_time = time.time()
             if self.debug and not self.runtime:
@@ -288,14 +286,18 @@ class DepthImageInpainter:
                 self.depth_buf_filled = True
             self.cur_buf_idx = (self.cur_buf_idx + 1) % self.buf_size
             depth_history_stack = self.depth_buf[self.selected_ids].reshape(-1).astype(np.float64)
-            history_msg = Float64MultiArray()
-            history_msg.data = depth_history_stack.tolist()
-            self.depth_history_array_pub.publish(history_msg)
+            if current_time - publish_time < 0.03:
+                history_msg = Float64MultiArray()
+                history_msg.data = depth_history_stack.tolist()
+                self.depth_history_array_pub.publish(history_msg)
             
             # if self.debug:
                 # rospy.loginfo(f"Processed image: Enc={output_encoding}, dtype={output_image.dtype}, S={output_image.shape}, min={np.nanmin(output_image):.1f}, max={np.nanmax(output_image):.1f}")
             if self.runtime and not self.debug:
-                rospy.loginfo(f"Runtime >> Mask: {(mask_time-start_time)*1000:.2f} ms | Inpainting: {(inpaint_time-mask_time)*1000:.2f} ms | GaussianBlur: {(blur_time-inpaint_time)*1000:.2f} ms | Total: {(time.time() - start_time)*1000:.2f} ms")
+                if current_time - self.last_delay_print_time >= 1.0:
+                    print("delay time", current_time - publish_time)
+                    self.last_delay_print_time = current_time
+                    rospy.loginfo(f"Runtime >> Mask: {(mask_time-start_time)*1000:.2f} ms | Inpainting: {(inpaint_time-mask_time)*1000:.2f} ms | GaussianBlur: {(blur_time-inpaint_time)*1000:.2f} ms | Total: {(time.time() - start_time)*1000:.2f} ms")
 
             
         except CvBridgeError as e:

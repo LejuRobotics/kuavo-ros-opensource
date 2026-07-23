@@ -98,9 +98,13 @@ public:
 
   void setEnabled(bool enable);
   bool isEnabled() const;
-  
+  void setReuseWalkCommandInStance(bool enable);
+  void setAmpHandController(bool enable);
+  void resetVelocityState();
+
   // Get current command data
   CommandDataRL getCurrentCommand() const;
+  geometry_msgs::Twist getSmoothedCmdVel() const;
   
   // Load in-place stepping configuration from config file
   void loadInPlaceStepConfig(const std::string& config_file, bool verbose = false);
@@ -135,7 +139,9 @@ private:
   // Current command data
   CommandDataRL currentCommand_;
   bool enabled_;
-  
+  bool reuse_walk_command_in_stance_;
+  bool is_amp_hand_controller_{false};
+
   // Smart stop detection parameters
   bool smart_stop_enabled_;
   double torso_velocity_threshold_;
@@ -146,8 +152,16 @@ private:
   geometry_msgs::Twist previous_cmd_vel_;
   double velocity_smooth_factor_;
   double max_velocity_change_;
+  double max_velocity_change_decel_cmd_x_{-1.0};  // 正向 cmd_x 减速单步最大变化量，<0 表示未配置
+  double cmd_x_decel_ema_tau_threshold_{0.5};  // 分段 EMA 速度阈值 (m/s)
+  double cmd_x_decel_ema_tau_high_{0.15};      // speed > threshold 时的 tau (s)
+  double cmd_x_decel_ema_tau_low_{0.35};       // speed <= threshold 时的 tau (s)
+  double max_velocity_change_neg_cmd_x_{-0.5};  // 负向 cmd_x 单步最大变化量，<0 表示未配置
+  double max_velocity_change_cmd_y_{-0.1};      // cmd_y 单步最大变化量，<0 表示未配置
   double velocity_smooth_time_;
+  bool cmd_x_smooth_enabled_{false};  // true: 正向 cmd_x 加/减速 EMA 平滑 + 单步限速；false: 不平滑
   ros::Time last_velocity_update_time_;
+  ros::Time last_cmd_vel_msg_time_;
   
   // Angular velocity smoothing parameters for turning
   double angular_velocity_smooth_factor_;      // 角速度平滑因子（默认0.5，更强的平滑）

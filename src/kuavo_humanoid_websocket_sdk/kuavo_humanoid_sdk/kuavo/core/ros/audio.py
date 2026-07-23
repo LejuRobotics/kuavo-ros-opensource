@@ -15,6 +15,8 @@ class AudioWebsocket:
         websocket = WebSocketKuavoSDK()
         self._audio_stop_publisher = roslibpy.Topic(websocket.client, 'stop_music', 'std_msgs/Bool')
         self._audio_stop_publisher.advertise()
+        self._audio_data_publisher = roslibpy.Topic(websocket.client, 'audio_data', 'std_msgs/Int16MultiArray')
+        self._audio_data_publisher.advertise()
 
     def play_audio(self, file_name: str, volume: int = 100, speed: float = 1.0) -> bool:
         """Play the specified audio file through WebSocket.
@@ -81,6 +83,27 @@ class AudioWebsocket:
             return True
         except Exception as e:
             SDKLogger.error(f"[Robot Audio] Failed to play audio text: {str(e)}")
+            return False
+
+    def publish_audio_chunk(self, audio_chunk, gain: int = 1) -> bool:
+        """Publish a single audio chunk for real-time audio streaming.
+
+        Args:
+            audio_chunk: List of int audio samples
+            gain: Amplification gain factor (default 1)
+
+        Returns:
+            bool: True if the publish was successful, False otherwise
+        """
+        try:
+            if not audio_chunk:
+                return False
+            amplified_chunk = [int(sample * gain) for sample in audio_chunk]
+            msg = {"data": amplified_chunk}
+            self._audio_data_publisher.publish(roslibpy.Message(msg))
+            return True
+        except Exception as e:
+            SDKLogger.error(f"[Robot Audio] Failed to publish audio chunk: {e}")
             return False
 
 

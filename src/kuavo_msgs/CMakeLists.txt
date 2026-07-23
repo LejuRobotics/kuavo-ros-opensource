@@ -151,6 +151,9 @@ add_message_files(
   BatteryInfo.msg
   ControllerSwitchEvent.msg
 
+# Power board status (0x01 系统状态读取)
+  PowerBoardStatus.msg
+
   # Lb single timed cmd
   timedSingleCmd.msg
 
@@ -168,6 +171,7 @@ add_service_files(
   changeArmCtrlMode.srv
   changeWaistCtrlMode.srv
   switchController.srv
+  FallStandCommand.srv
   getControllerList.srv
   switchToNextController.srv
   singleStepControl.srv
@@ -194,6 +198,7 @@ add_service_files(
   handForceLevel.srv
   enableHandTouchSensor.srv
   playmusic.srv
+  PlayMusicImmediate.srv
   changeMotorParam.srv
   getMotorParam.srv
 
@@ -202,10 +207,12 @@ add_service_files(
   twoArmHandPoseCmdSrv.srv
   twoArmHandPoseCmdFreeSrv.srv
   changeArmCtrlModeKuavo.srv
+  SetIncrementalArmTrajLink.srv
   fkSrv.srv
   lbBaseLinkPoseCmdSrv.srv
   lbLegControlSrv.srv
   chassisPoseCmdSrv.srv
+  fkSrvWithReferFrame.srv
 
   SpeechSynthesis.srv
   setMmCtrlFrame.srv
@@ -259,6 +266,9 @@ add_service_files(
 
   # Lb eePose reach error
   eePoseReachError.srv
+
+  # Transport mode
+  TransportModeCommand.srv
 )
 
 ## Generate actions in the 'action' folder

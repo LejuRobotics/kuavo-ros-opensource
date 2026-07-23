@@ -24,12 +24,12 @@ from rosnode import get_node_names
 import subprocess
 import time
 try:
-    import samplerate
+    from scipy import signal as scipy_signal
 except ImportError:
-    print("samplerate 未安装，先安装 samplerate")
-    command = "pip install samplerate -i https://mirrors.aliyun.com/pypi/simple/ --no-input"
+    print("scipy 未安装，先安装 scipy")
+    command = "pip install scipy -i https://mirrors.aliyun.com/pypi/simple/ --no-input"
     os.system(command)
-    import samplerate
+    from scipy import signal as scipy_signal
 
 class AudioStreamPlayerNode:
     # 音频配置常量
@@ -204,16 +204,28 @@ class AudioStreamPlayerNode:
             return False
         
     def resample_audio(self, audio_chunk, source_sample_rate=None):
-        """音频重采样"""
+        """音频重采样（复用上位机 master 的 scipy 实现）"""
         if source_sample_rate is None:
             source_sample_rate = self.DEFAULT_SAMPLE_RATE
+
+        # 如果采样率相同，直接返回
+        if source_sample_rate == self.rate:
+            return audio_chunk
+
         try:
+            # 将 int16 数据转换为 float32 范围 [-1, 1]
             audio_chunk = audio_chunk.astype(np.float32) / self.FLOAT32_DIVISOR
-            resample_ratio = self.rate / source_sample_rate
-            audio_chunk = samplerate.resample(audio_chunk, resample_ratio, 
-                                            converter_type='sinc_fastest')
-            audio_chunk = np.clip(audio_chunk * self.FLOAT32_DIVISOR, 
-                                 self.INT16_MIN, self.INT16_MAX).astype(np.int16)
+
+            # 计算目标采样点数
+            num_samples = len(audio_chunk)
+            target_num_samples = int(num_samples * self.rate / source_sample_rate)
+
+            # 使用 scipy.signal.resample 进行重采样
+            audio_chunk = scipy_signal.resample(audio_chunk, target_num_samples)
+
+            # 重新转为 int16
+            audio_chunk = np.clip(audio_chunk * self.FLOAT32_DIVISOR,
+                                  self.INT16_MIN, self.INT16_MAX).astype(np.int16)
             return audio_chunk
         except Exception as e:
             rospy.logerr(f"音频重采样失败: {e}")

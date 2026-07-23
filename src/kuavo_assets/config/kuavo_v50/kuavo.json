@@ -17,7 +17,7 @@
     "NUM_WAIST_JOINT" : 1,
     "NUM_JOINT" : 29,
     "ROBOT_MODULE": "KUAVO",
-    "ankle_solver_type": 1,
+    "ankle_solver_type": "4gen_pro",
 
     "torsoP": 3.0,
     "torsoP_squat": 3.0,

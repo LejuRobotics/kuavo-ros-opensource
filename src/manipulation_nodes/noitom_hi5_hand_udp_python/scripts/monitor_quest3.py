@@ -200,15 +200,15 @@ class Quest3BoneFramePublisher:
         
         self.head_control_manager.set_joint_limits(yaw_limit, pitch_limit)
         
-        # 设置控制模式
-        mode_str = head_control_config.get("mode", "vr_follow")
-        mode_map = {
-            "fixed": HeadControlMode.FIXED,
-            "auto_track": HeadControlMode.AUTO_TRACK_ACTIVE,
-            "fixed_main": HeadControlMode.FIXED_MAIN_HAND,
-            "vr_follow": HeadControlMode.VR_FOLLOW
-        }
-        mode = mode_map.get(mode_str, HeadControlMode.VR_FOLLOW)
+        # 初始化头部控制模式 （从config.json读取，默认vr_follow模式）
+        mode_str = str(head_control_config.get("mode", "vr_follow") or "vr_follow").strip().lower()
+        mode = HeadControlMode.from_string(mode_str)
+        if mode is None:
+            legacy_mode_map = {
+                "auto_track": HeadControlMode.AUTO_TRACK_ACTIVE,
+                "fixed_main": HeadControlMode.FIXED_MAIN_HAND,
+            }
+            mode = legacy_mode_map.get(mode_str, HeadControlMode.VR_FOLLOW)
         fixed_hand = head_control_config.get("fixed_main_hand", "right")
         self.head_control_manager.set_mode(mode, fixed_hand)
         
@@ -680,7 +680,9 @@ class Quest3BoneFramePublisher:
                 pose_info_list.timestamp_ms = event.timestamp
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
-                self.pose_pub.publish(pose_info_list)
+                # 空 poses(带载 GET/SET 等纯命令包)不下发，避免下游 IK 按固定骨骼下标越界
+                if len(pose_info_list.poses) > 0:
+                    self.pose_pub.publish(pose_info_list)
 
                 # 发布头部控制模式
                 self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, HeadControlMode.to_string(self.head_control_manager.mode), self.head_control_manager.fixed_main_hand)

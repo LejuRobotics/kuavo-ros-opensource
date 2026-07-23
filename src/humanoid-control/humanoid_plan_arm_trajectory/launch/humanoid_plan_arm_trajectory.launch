@@ -1,7 +1,7 @@
 <launch>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
     <!-- Include robot version manager to load URDF and other parameters -->
-    <group unless="$(eval 60 &lt;= arg('robot_version') and arg('robot_version') &lt; 70)">
+    <group unless="$(eval (60 &lt;= arg('robot_version') and arg('robot_version') &lt; 70) or (300060 &lt;= arg('robot_version') and arg('robot_version') &lt;= 300069) or (200060 &lt;= arg('robot_version') and arg('robot_version') &lt;= 200069))">
         <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
             <arg name="rviz" value="false" />
         </include>

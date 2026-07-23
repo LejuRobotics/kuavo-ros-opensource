@@ -9,8 +9,10 @@
 #include "kuavo_msgs/ControllerSwitchEvent.h"
 #include "kuavo_msgs/GetStringList.h"
 #include "kuavo_msgs/SetString.h"
+#include "kuavo_msgs/DanceTrajectoryState.h"
 #include "std_srvs/SetBool.h"
 #include "std_srvs/Trigger.h"
+#include "std_msgs/Int32.h"
 #include <map>
 #include <vector>
 #include <string>
@@ -18,6 +20,8 @@
 #include <mutex>
 #include <functional>
 #include <ros/ros.h>
+
+#include "humanoid_controllers/util/TopicMonitor.h"
 
 namespace humanoid_controller
 {
@@ -36,7 +40,7 @@ namespace humanoid_controller
     /**
      * @brief 析构函数
      */
-    ~RLControllerManager() = default;
+    ~RLControllerManager();
 
     /**
      * @brief 添加控制器
@@ -242,6 +246,18 @@ namespace humanoid_controller
     int getCurrentDanceControllerIndex() const;
 
     /**
+     * @brief 获取共享的 dance_trajectory_state publisher 句柄
+     *
+     * 所有 DanceController 共用此 publisher，避免每个实例自行 advertise 制造启动期
+     * 多 publisher race。
+     * 返回值 ros::Publisher 内部为引用计数共享，拷贝安全。
+     */
+    const ros::Publisher& getDanceTrajectoryStatePublisher() const
+    {
+      return dance_trajectory_state_pub_;
+    }
+
+    /**
      * @brief 注册倒地状态回调函数
      * @param callback 回调函数，参数为FallStandState枚举值（0=STANDING, 1=FALL_DOWN）
      */
@@ -267,12 +283,64 @@ namespace humanoid_controller
      */
     bool isTorsoVelocityStable();
 
+    /**
+     * @brief 待切换MPC：手臂归位后自动补触发
+     * @return 已触发返回 true；仍在等返回 false
+     */
+    bool tryPendingMpcSwitch();
+
   private:
     /**
      * @brief 异步切换手臂控制模式
      * @param mode 目标手臂控制模式
      */
     void changeArmCtrlModeAsync(int mode);
+
+    /**
+     * @brief 加载 depth_loco_controller 切换前检查的 ROS 参数
+     */
+    void loadDepthHistoryCheckParams(ros::NodeHandle& nh);
+
+    /**
+     * @brief 检查 depth_loco_controller 切换前的深度历史话题状态
+     * @param log 是否打印检查结果日志（仅做"能否切换"探测时传 false 以免刷屏）
+     */
+    bool isDepthHistoryTopicAvailable(bool log = true);
+
+    /**
+     * @brief 周期刷新 depth_loco_controller 是否允许切换的缓存标志
+     */
+    void updateDepthHistorySwitchFlag(const ros::TimerEvent& event);
+
+    /**
+     * @brief 读取 depth_loco_controller 是否允许切换的缓存标志
+     */
+    bool canSwitchToDepthWalkController() const;
+
+    /**
+     * @brief 只读探测：在不改变任何状态的前提下，判断"此刻"能否切换到名为 name 的控制器
+     *        （name 为空字符串表示 MPC）。只检查目标侧的前置条件（目标已加载、当前在 MPC 时
+     *        需处于 stance、depth_loco_controller 需深度话题可用等），不检查"当前控制器是否
+     *        允许退出"——后者由调用方在循环外做一次性硬前置判断。
+     */
+    bool canSwitchTo(const std::string& name);
+
+    /**
+     * @brief 从 current_index 出发，沿 dir 方向（+1=下一个，-1=上一个）在 walk_controllers_
+     *        环里找第一个"此刻可切换"的控制器索引（用 canSwitchTo 判定，跳过不可用的）。
+     * @return 找到则返回该索引；环里没有任何可切换的控制器则返回 -1。
+     */
+    int findNextSwitchableIndex(int current_index, int dir);
+
+    /**
+     * @brief 启动深度历史话题后台监控（常驻订阅 + 频率缓存）
+     */
+    void startDepthHistoryMonitor();
+
+    /**
+     * @brief 深度历史话题回调（更新频率缓存）
+     */
+    // 已迁移到 TopicMonitor 内部回调
 
     /**
      * @brief ROS服务回调：切换控制器
@@ -340,6 +408,8 @@ namespace humanoid_controller
     void publishControllerSwitchEvent(const std::string& from_controller,
                                       const std::string& to_controller);
 
+    void publishDepthHistoryStatus(TopicMonitor::CheckResult result);
+
 
   private:
     std::map<std::string, std::unique_ptr<RLControllerBase>> controllers_;  ///< 控制器映射表
@@ -364,6 +434,10 @@ namespace humanoid_controller
     ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
     ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
+    ros::Publisher depth_history_status_pub_;        ///< 深度历史话题检查状态发布器
+    /// 舞蹈轨迹状态发布器（所有 DanceController 共用一份，避免启动期 race）
+    ros::Publisher dance_trajectory_state_pub_;
+    ros::Timer depth_history_check_timer_;           ///< 深度历史话题检查定时器
     ros::NodeHandle* nh_ptr_;                       ///< ROS节点句柄指针
 
     // RL切换模式：true 直接切换到RL；false 使用MPC过渡
@@ -374,7 +448,16 @@ namespace humanoid_controller
     std::function<bool()> torso_stability_callback_;          ///< 获取躯干稳定性状态的回调函数
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
+    bool pending_mpc_switch_ = false;               ///< 手臂归位后自动触发MPC切换
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
+    double depth_history_min_frequency_hz_ = 55.0;  ///< depth 历史话题最低频率要求
+    double depth_history_wait_timeout_sec_ = 0.2;   ///< depth 历史话题最大消息过期时间
+    int depth_history_required_samples_ = 10;       ///< depth 历史话题最少采样点数
+    double depth_history_sample_timeout_sec_ = 0.2; ///< 单次等待消息的超时
+
+    // 深度历史话题后台监控（避免切换路径上阻塞等待）
+    TopicMonitor depth_history_monitor_;
+    bool can_switch_to_depth_walk_controller_ = false;  ///< 是否允许切换到 depth walk 控制器
   };
 
 } // namespace humanoid_controller

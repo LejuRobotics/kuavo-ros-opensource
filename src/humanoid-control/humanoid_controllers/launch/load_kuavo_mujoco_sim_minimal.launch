@@ -44,8 +44,8 @@
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
     
     <!-- 自动清理 .ros 文件夹参数 -->
-    <param name="/nodelet_manager/max_log_size_gb" value="64.0"/>
-    <param name="/nodelet_manager/log_delete_limit_gb" value="60.0"/>
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
 
     <!-- 只启动基本的MPC节点 -->
     <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="false"/>

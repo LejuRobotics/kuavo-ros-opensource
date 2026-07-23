@@ -44,7 +44,7 @@
       <geom pos="0.232489 -0.232489 0.13035" quat="0.92388 0 0 -0.382683" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="wheel_right_front"/>
       <geom pos="-0.232489 0.232489 0.13035" quat="0.382683 0 0 0.92388" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="wheel_left_behind"/>
       <geom pos="-0.232489 -0.232489 0.13035" quat="0.382683 0 0 -0.92388" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="wheel_right_behind"/>
-      <geom pos="0.098 0 0.270643" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="knee_link"/>
+      <geom pos="0.098 0 0.31" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="knee_link"/>
       <body name="LF_wheel_yaw" pos="0.232489 0.232489 0.13035">
         <inertial pos="0 0 0" mass="0.0001" diaginertia="0.0000001 0.0000001 0.0000001"/>
         <joint name="LF_wheel_yaw_joint" pos="0 0 0" axis="0 0 1"/>
@@ -81,7 +81,7 @@
           <geom size="0.13035 0.015" quat="0.707107 0.707107 0 0" type="cylinder" rgba="1 1 1 0" friction="3.0 0.001 0.001"/>
         </body>
       </body>
-      <body name="knee_link" pos="0.098 0 0.376143">
+      <body name="knee_link" pos="0.098 0 0.4155">
         <inertial pos="-0.228954 0.00062518 0.0881745" quat="-0.0046512 0.823659 0.0121074 0.566937" mass="13.4136" diaginertia="0.488625 0.449931 0.0890849"/>
         <joint name="knee_joint" pos="0 0 0" axis="0 1 0" range="0 1.44862" actuatorfrcrange="-668.53 668.53" damping="0.0"/>
         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="leg_Link"/>

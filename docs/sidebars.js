@@ -286,4 +286,5 @@ const sidebars = {
   ],
 };
 
+// 临时强制触发同步以绕过中文路径 Git 转义导致的 CI 过滤 Bug
 module.exports = sidebars;

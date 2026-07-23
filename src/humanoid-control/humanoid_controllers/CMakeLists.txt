@@ -42,9 +42,11 @@ find_package(catkin REQUIRED
         # ocs2_biped_robot_ros
         angles
         kuavo_msgs
+        leju_mobile_base_msgs
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
+        leju_mobile_base_msgs
         )
 find_package(drake REQUIRED)
 find_package(PkgConfig REQUIRED)
@@ -133,8 +135,10 @@ catkin_package(
                 # ocs2_biped_robot_ros
                 angles
                 kuavo_msgs
+                leju_mobile_base_msgs
                 kuavo_common
                 kuavo_solver
+                leju_mobile_base_msgs
 )
 
 ###########
@@ -265,8 +269,10 @@ add_library(${PROJECT_NAME}
         src/ArmContactForceEstimatorWheel.cpp
         src/DesiredForceManager.cpp
         src/ControlDataManager.cpp
+        src/ArmTrajReceiver.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
+        src/util/TopicMonitor.cpp
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp
         src/rl/FallStandController.cpp

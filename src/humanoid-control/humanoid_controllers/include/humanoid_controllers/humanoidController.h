@@ -31,6 +31,9 @@
 #include "kuavo_msgs/getControllerList.h"
 #include "kuavo_msgs/switchToNextController.h"
 #include "kuavo_msgs/robotWaistControl.h"
+#include "kuavo_msgs/TransportModeCommand.h"
+
+#include "humanoid_controllers/ArmTrajReceiver.h"
 
 #include "std_srvs/Trigger.h"
 #include "std_srvs/SetBool.h"
@@ -70,7 +73,7 @@
 #include <openvino/openvino.hpp>
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
-#include "kuavo_solver/ankle_solver.h"
+#include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
 
 namespace humanoid_controller
@@ -89,7 +92,7 @@ namespace humanoid_controller
 
   enum ResettingMpcState
   {
-    NOMAL = 0,
+    NORMAL = 0,
     RESET_INITIAL_POLICY,
     RESET_BASE,
   };
@@ -98,6 +101,15 @@ namespace humanoid_controller
   {
     STANDING = 0,  // 正常状态
     FALL_DOWN      // 倒地状态
+  };
+
+  enum TransportModeState
+  {
+    TRANSPORT_INACTIVE = 0,
+    TRANSPORT_INTERPOLATING,
+    TRANSPORT_READY,
+    TRANSPORT_ACTIVE,
+    TRANSPORT_HANDING_OVER
   };
   
   // struct SensorDataRL
@@ -251,9 +263,10 @@ namespace humanoid_controller
     void updatakinematics(const SensorData &sensor_data, bool is_initialized_);
     void resetKinematicsEstimation();
 
-    // ==================== MPC-RL插值系统函数声明 ====================
+    // MPC-RL 插值系统函数
     void startMPCRLInterpolation(double current_time, const vector6_t& target_torso_pose, const vector_t& target_arm_pos);
     void updateMPCRLInterpolation(double current_time);
+    void startTransportMPCInterpolation();
 
     sensor_msgs::Joy oldJoyMsg_;
     vector_t joystickOriginAxis_ = vector_t::Zero(6);
@@ -353,6 +366,15 @@ namespace humanoid_controller
 
     void swingArmPlanner(double st, double current_time, double stepDuration, Eigen::VectorXd &desire_arm_q, Eigen::VectorXd &desire_arm_v);
     void headCmdCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_start_index, bool push_back_mode);
+    // 头部速度 / 相对位移接口（与躯干 /cmd_torso_vel、/cmd_torso_delta 对齐）
+    // 开环绝对位姿只在 desire_head_pos_（rad），本类为唯一积分终点。
+    // biped 无 soft-pause，无 enable guard。
+    void headVelCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void headDeltaCallback(const kuavo_msgs::robotHeadMotionData::ConstPtr &msg);
+    void applyHeadVelDeltaCommands();
+    static vector_t clampHead2D(const vector_t& pose2d,
+                                const std::vector<std::pair<double, double>>& limits_deg);
     void waistCmdCallback(const kuavo_msgs::robotWaistControl::ConstPtr &msg);
     void joyCallback(const sensor_msgs::Joy::ConstPtr &joy_msg);
     void cmdVelCallback(const geometry_msgs::Twist::ConstPtr &msg);
@@ -380,7 +402,6 @@ namespace humanoid_controller
     static ocs2_msgs::mpc_flattened_controller createMpcPolicyMsg(const PrimalSolution &primalSolution, const CommandData &commandData,
                                                                   const PerformanceIndex &performanceIndices);
 
-    void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
 
     void setJoyCmdState(const vector_t &joyCmdState)
     {
@@ -468,7 +489,7 @@ namespace humanoid_controller
     bool cmdTrotgait_ = false;
     bool cmdRLMode_ = false;                                         // RL模式命令标志
     bool reset_mpc_{false};
-    ResettingMpcState resetting_mpc_state_{ResettingMpcState::NOMAL};
+    ResettingMpcState resetting_mpc_state_{ResettingMpcState::NORMAL};
     bool disable_mpc_{false};
     bool disable_wbc_{false};
     int hardware_status_ = 0;
@@ -502,6 +523,12 @@ namespace humanoid_controller
     bool isInitStandUpStartTime_{false};
     bool isPullUp_{false};
     bool setPullUpState_{false};
+    std::atomic<TransportModeState> transport_mode_state_{TRANSPORT_INACTIVE};
+    std::atomic<bool> transport_handoff_to_fallstand_{false};
+    std::atomic<bool> transport_lock_pending_{false};
+    std::atomic<bool> transport_handover_resume_mpc_{false};
+    vector_t transport_target_pos_;
+    double transport_base_height_{0.7};
     double standupTime_{0.0};
     double pull_up_trigger_time_{0.0};  // 拉起保护触发时间
     double arm_mode_sync_time_{0.0};  // 手臂模式同步完成的时间（当前模式切换到期望模式的时间）
@@ -542,9 +569,10 @@ namespace humanoid_controller
     ros::Subscriber observation_sub_;
     ros::Subscriber gait_scheduler_sub_;
     ros::Subscriber head_sub_;
+    ros::Subscriber head_vel_sub_;
+    ros::Subscriber head_delta_sub_;
     ros::Subscriber waist_sub_;
     ros::Subscriber head_array_sub_;
-    ros::Subscriber arm_joint_traj_sub_;
     ros::Subscriber mm_arm_joint_traj_sub_;
     ros::Subscriber arm_target_traj_sub_;//最终的手臂目标位置
     ros::Subscriber foot_pos_des_sub_;
@@ -559,7 +587,6 @@ namespace humanoid_controller
     ros::Publisher mpcPolicyPublisher_;
     ros::Publisher cmdPoseWorldPublisher_; // 发布躯干位置控制命令 (geometry_msgs::Twist)
 
-    ros::Subscriber dexhand_state_sub_;
 
     ros::ServiceServer armJointSynchronizationSrv_;
     ros::Subscriber enable_mpc_sub_;
@@ -571,6 +598,7 @@ namespace humanoid_controller
     ros::ServiceServer currentGaitNameSrv_;
     ros::ServiceServer triggerFallStandUpSrv_;
     ros::ServiceServer changeRuiwoMotorParamSrv_;
+    ros::ServiceServer transport_mode_service_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -583,7 +611,7 @@ namespace humanoid_controller
     // Node Handle
     ros::NodeHandle controllerNh_;
     HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
-    AnkleSolver ankleSolver;
+    kuavo_solver::AnkleSolver ankleSolver;
 #ifdef KUAVO_CONTROL_LIB_FOUND
     HighlyDynamic::JointFilter *joint_filter_ptr_{nullptr};
 #endif
@@ -597,6 +625,8 @@ namespace humanoid_controller
 
     void publishFeetTrajectory(const TargetTrajectories &targetTrajectories);
 
+    bool transportModeCommandCallback(kuavo_msgs::TransportModeCommand::Request &req,
+                                      kuavo_msgs::TransportModeCommand::Response &res);
     ros::ServiceServer real_initial_start_service_;
     KuavoDataBuffer<SensorData> *sensors_data_buffer_ptr_;
     bool is_real_{false};
@@ -612,6 +642,7 @@ namespace humanoid_controller
     std::unique_ptr<ros::Rate> wbc_rate_;            // WBC 控制频率 Rate 对象
     benchmark::RepeatedTimer mpcTimer_;
     benchmark::RepeatedTimer wbcTimer_;
+    bool wbc_ran_this_frame_{false};                // 本帧 WBC 是否执行过（门控 time_cost 发布，防 DataAnalyzer 方差退化）
     size_t jointNum_ = 12;
     size_t armNum_ = 0;
     size_t headNum_ = 2;
@@ -639,12 +670,22 @@ namespace humanoid_controller
     SensorData sensor_data_waist_;
     Eigen::Quaterniond robot_quat_state_update_;
     vector_t desire_head_pos_ = vector_t::Zero(2);
+    // 头部 vel/delta 缓冲（rad/s, rad）；desire_head_pos_ 为唯一开环终点
+    // vel: sticky + 0.3s 超时清零；delta: oneshot 用后即清
+    static constexpr double kHeadVelTimeout_{0.3};
+    vector_t cmd_head_vel_ = vector_t::Zero(2);    // [yaw, pitch] rad/s
+    vector_t cmd_head_delta_ = vector_t::Zero(2);  // [d_yaw, d_pitch] rad oneshot
+    bool is_cmd_head_vel_updated_{false};          // sticky
+    bool is_cmd_head_vel_time_update_{false};      // 刷新 last_cmd_head_vel_time_
+    bool is_cmd_head_delta_updated_{false};        // oneshot
+    double last_cmd_head_vel_time_{0.0};
+    double last_head_vel_integrate_time_{0.0};
+    bool has_head_vel_integrate_time_{false};
     vector_t desire_waist_pos_ = vector_t::Zero(1);  // 腰部目标位置
     vector_t desire_arm_q_prev_;
     vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
     vector_t jointPosWBC_, jointVelWBC_, jointAccWBC_, jointCurrentWBC_;
     vector_t jointPosRL_, jointVelRL_, jointAccRL_, jointTorqueRL_;
-    vector_t dexhand_joint_pos_ = vector_t::Zero(12);
 
     vector_t motor_c2t_;
     std::vector<std::vector<double>> motor_cul;
@@ -749,7 +790,6 @@ namespace humanoid_controller
     Eigen::VectorXd desire_arm_v_;
     ros::Subscriber joint_sub_; // 添加订阅者成员变量
     bool is_standing_ = false;  // 添加站立状态标志位
-    bool last_standing_state_ = false;  // 添加上一次站立状态标志
 
     // 共享内存通讯
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;
@@ -759,7 +799,10 @@ namespace humanoid_controller
     void publishControlCommands(const kuavo_msgs::jointCmd& jointCmdMsg);       // 发布控制命令的统一接口
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
     bool changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res);  // 修改ruiwo电机kp/kd，更新running_settings后由replaceDefaultEcMotorPdoGait生效
-    
+
+    // 手臂轨迹接收器（ROS topic + 增量 VR SHM 双通道）
+    ArmTrajReceiver arm_traj_receiver_;
+
     // CPU内核隔离设置
     bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性
     
@@ -807,14 +850,6 @@ namespace humanoid_controller
     Eigen::VectorXd arm_interpolation_target_vel_; // 插值目标速度
     bool last_is_rl_controller_ = false;
 
-    // 倒地起身关节层插值相关成员变量
-    Eigen::VectorXd fall_stand_init_joints_;      // RL 轨迹中倒地起身的初始关节目标（腿+腰+臂）
-    Eigen::VectorXd fall_stand_start_pos_;        // 插值起始时的当前关节位置
-    bool is_fall_stand_interpolating_ = false;    // 是否正在进行倒地起身关节插值
-    bool is_fall_stand_interpolating_complete_ = false;    // 是否已完成倒地起身关节插值
-    double fall_stand_interp_start_time_ = 0.0;   // 插值开始时间
-    double fall_stand_required_time_ = 0.0;       // 根据最大关节速度计算得到的所需时长
-    double fall_stand_max_joint_velocity_ = 1.0;  // 倒地起身关节插值的最大关节速度(rad/s)
     bool has_fall_stand_controller_{false};
     
     // ==================== 通用插值系统成员变量 ====================
@@ -888,8 +923,6 @@ namespace humanoid_controller
     
     // 保留 fall_down_state_ 用于向后兼容，但实际逻辑改为控制器切换
     FallStandState fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃，改为控制器切换）
-    FallStandState last_fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃）
-
 
     bool has_fall_down_controller_{false};
     bool condition_pull_up_mpc_height_{true};

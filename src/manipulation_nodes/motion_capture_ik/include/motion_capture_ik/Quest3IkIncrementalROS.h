@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 #include "motion_capture_ik/json.hpp"
 
 #include <ros/ros.h>
@@ -17,6 +18,8 @@
 #include "motion_capture_ik/HandSmoother.h"
 #include "DrakeElbowHandPointOpt.hpp"
 #include <std_msgs/Float64MultiArray.h>
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
+#include "motion_capture_ik/ArmTrajWriter.h"
 
 namespace HighlyDynamic {
 
@@ -86,6 +89,10 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
  private:
   void solveIkHandElbowThreadFunction();
+  void applyWorkerThreadScheduling(const char* threadName, int priority) const;
+
+  static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
+  static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 50;
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
   void updateSensorArmJointMeanFromSensorData();
@@ -141,6 +148,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void forceActivateAllArmCtrlMode();    // 强制激活所有手臂控制模式
 
   ros::Publisher kuavoArmTrajCppPublisher_;  // 发布kuavo_arm_traj_cpp；launch中通过remap话题方式来接入当前系统
+  ArmTrajWriter arm_traj_writer_;           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
   ros::Publisher sensorDataArmJointsPublisher_;      // 发布传感器数据的手臂关节角
   ros::Publisher leftHandPosePublisher_;             // 发布左手pose
   ros::Publisher rightHandPosePublisher_;            // 发布右手pose
@@ -172,6 +180,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   ros::Publisher ikInputPosPublisher_;  // 发布IK输入的目标位姿（与Python版/drake_ik/input_pos一致）
 
   std::thread ikSolveThread_;
+  int armTrajPublishThreadPriority_ = DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY;
+  int ikSolveThreadPriority_ = DEFAULT_IK_SOLVE_THREAD_PRIORITY;
+  std::vector<int> vrIkThreadCpus_;
   std::mutex bonePoseHandElbowMutex_;
   std::mutex poseConstraintListMutex_;  // 保护 latestPoseConstraintList_ 的互斥锁
   std::mutex ikResultMutex_;
