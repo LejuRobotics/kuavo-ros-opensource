@@ -71,7 +71,7 @@ set(SRC_OBJECTS
 add_library(${PROJECT_NAME} SHARED ${SRC_OBJECTS})
 
 # Link dependencies
-target_link_libraries(${PROJECT_NAME} 
+target_link_libraries(${PROJECT_NAME}
     ${EIGEN3_LIBRARIES}
     stdc++fs
     rt

@@ -200,11 +200,11 @@ namespace humanoid_controller
     {
       ROS_ERROR("[%s] Failed to get init_fall_down_state from ROS params", name_.c_str());
     }
+    // 原读取逻辑：设 robot_init_state_param/squat_initial_state 为倒地初始姿态
+    // 倒地开机功能已禁用：强制忽略 init_fall_down_state，不做任何覆盖
+    (void)nh_.getParam("/init_fall_down_state", init_fall_down_state);
     if (init_fall_down_state) {
-      ros::param::set("robot_init_state_param", mujoco_init_state);
-      ros::param::set("/squat_initial_state", squat_initial_state_vector);
-      ROS_INFO("[%s] init_fall_down_state is true, set robot_init_state_param and squat_initial_state", name_.c_str());
-      nh_.deleteParam("/init_fall_down_state");
+      ROS_WARN("[%s] init_fall_down_state=true ignored (倒地开机已禁用), keeping default init/initial_state", name_.c_str());
     }
 
     initialized_ = true;

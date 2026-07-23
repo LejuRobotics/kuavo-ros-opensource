@@ -102,8 +102,8 @@ lowSpeedKickStart
     kickVelocity        0.6   ; 脉冲速度
     durationSteps       25     ; 脉冲持续推理步数(50Hz 下约 0.5s)
     restCmdThreshold    0.2    ; |上一帧 cmd_x| 低于该值则判定静止起步
-    triggerVelocity     0.3   ; 处理后 cmd_x 触发中心值
-    triggerTolerance    0.15   ; 触发区间 [0.15, 0.45]
+    triggerVelocity     0.32   ; 处理后 cmd_x 触发中心值
+    triggerTolerance    0.15   ; 触发区间 [0.17, 0.47]
     lateralThreshold    0.2    ; abs(cmd_y) 超过则取消
     yawThreshold        0.2    ; abs(cmd_angz) 超过则取消
 }
@@ -130,6 +130,7 @@ rollCompensationClosedLoop
     absCmdAngZMax           0.30 ; abs(cmd_ang_z) 超过该值不启用闭环 (rad/s)
     filterTimeConstantSec   1.2 ; roll 低通时间常数，增大更平稳、响应更慢
     targetTimeConstantSec   2.00 ; 站立中立 roll 学习时间常数
+    targetLearningMaxAbsRollDeg  1.0 ; 零点学习允许的最大 |roll|，0=不限制
     kp                      1.2 ; 比例增益，增大可加强即时补偿
     ki                      0.06 ; 积分增益，设为 0 可关闭积分
     maxCompensationDeg      0.70 ; 闭环观测补偿的绝对限幅 (deg)

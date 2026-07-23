@@ -33,6 +33,8 @@
 #include "kuavo_msgs/robotWaistControl.h"
 #include "kuavo_msgs/TransportModeCommand.h"
 
+#include "humanoid_controllers/ArmTrajReceiver.h"
+
 #include "std_srvs/Trigger.h"
 #include "std_srvs/SetBool.h"
 
@@ -571,7 +573,6 @@ namespace humanoid_controller
     ros::Subscriber head_delta_sub_;
     ros::Subscriber waist_sub_;
     ros::Subscriber head_array_sub_;
-    ros::Subscriber arm_joint_traj_sub_;
     ros::Subscriber mm_arm_joint_traj_sub_;
     ros::Subscriber arm_target_traj_sub_;//最终的手臂目标位置
     ros::Subscriber foot_pos_des_sub_;
@@ -798,7 +799,10 @@ namespace humanoid_controller
     void publishControlCommands(const kuavo_msgs::jointCmd& jointCmdMsg);       // 发布控制命令的统一接口
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
     bool changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res);  // 修改ruiwo电机kp/kd，更新running_settings后由replaceDefaultEcMotorPdoGait生效
-    
+
+    // 手臂轨迹接收器（ROS topic + 增量 VR SHM 双通道）
+    ArmTrajReceiver arm_traj_receiver_;
+
     // CPU内核隔离设置
     bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性
     

@@ -2035,15 +2035,8 @@ class JoyCustomizeConfigNode:
             if not self._fall_recovery_enabled:
                 rospy.logwarn("[JoyCustomize] 机器人运行中(MPC), 忽略 LB+RB+X 倒地起身; 需先 START+BACK 终止")
                 return True
-            # 第一下: 重启进入倒地
-            rospy.loginfo("[JoyCustomize] LB+RB+X (1/2): 带 init_fall_down_state:=true 重启, 进入倒地")
-            try:
-                self.launch_humanoid_robot(extra_args="init_fall_down_state:=true")
-            except Exception as e:
-                rospy.logerr(f"[JoyCustomize] 倒地重启失败: {e}")
-                return True
-            self._set_standup_phase(self._FS_WAITING_READY)
-            self._fall_stand_state = -1
+            # 倒地开机功能已禁用，忽略按键
+            rospy.logwarn("[JoyCustomize] 倒地开机功能已禁用, 忽略 LB+RB+X")
             return True
 
         # === 已 armed (phase > IDLE) ===

@@ -143,11 +143,7 @@ WheelQuest3IkIncrementalROS::~WheelQuest3IkIncrementalROS() {
   if (jointStatePublishThread_.joinable()) {
     jointStatePublishThread_.join();
   }
-  setIncrementalArmTrajLink(kuavo_msgs::SetIncrementalArmTrajLink::Request::TRANSPORT_NONE);
-  if (armTrajShm_) {
-    armTrajShm_->cleanup();
-    armTrajShm_.reset();
-  }
+  arm_traj_writer_.shutdown();
 }
 
 void WheelQuest3IkIncrementalROS::run() {

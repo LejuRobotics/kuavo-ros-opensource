@@ -81,21 +81,6 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
         use_shm_communication_ = shm_manager_->initializeSensorsShm() && shm_manager_->initializeCommandShm();
     }
 
-    nh_.param("/vr_ik/enable_incremental_arm_traj_link", incremental_arm_traj_link_capable_, true);
-    nh_.param("/vr_ik/arm_traj_shm_stale_timeout_sec", arm_traj_shm_stale_timeout_sec_, 0.3);
-    if (incremental_arm_traj_link_capable_) {
-        arm_traj_shm_ = std::make_unique<kuavo_common::ArmTrajShmManager>();
-        if (!arm_traj_shm_->initialize(kuavo_common::ArmTrajShmManager::Role::Reader)) {
-            ROS_ERROR("[ControlDataManager] Failed to initialize incremental arm traj SHM reader; "
-                      "incremental link disabled");
-            arm_traj_shm_.reset();
-            incremental_arm_traj_link_capable_ = false;
-        } else {
-            ROS_INFO("[ControlDataManager] Incremental arm traj link ready (service-controlled). "
-                     "Default transport=NONE; stale timeout=%.3fs",
-                     arm_traj_shm_stale_timeout_sec_);
-        }
-    }
     ROS_INFO_STREAM("[ControlDataManager] Using " << 
         (use_shm_communication_ ? "shared memory" : "ROS topics") << " for communication");
     
@@ -104,19 +89,11 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
 }
 
 ControlDataManager::~ControlDataManager() {
-    arm_traj_shm_reader_running_ = false;
-    if (arm_traj_shm_reader_thread_.joinable()) {
-        arm_traj_shm_reader_thread_.join();
-    }
-    if (arm_traj_shm_) {
-        arm_traj_shm_->cleanup();
-        arm_traj_shm_.reset();
-    }
+    arm_traj_receiver_.reset();
     if (cmd_traj_spinner_) {
         cmd_traj_spinner_->stop();
         cmd_traj_spinner_.reset();
     }
-    arm_joint_traj_sub_.shutdown();
     leg_joint_traj_sub_.shutdown();
 }
 
@@ -161,15 +138,18 @@ void ControlDataManager::initializeSubscribers() {
         "/vr_whole_torso_ctrl", 10, 
         &ControlDataManager::wholeTorsoCtrlCallback, this);
     
-    // 指令类话题：独立 CallbackQueue + AsyncSpinner，避免与同进程高频录包/debug 回调互相饿死
+    // 下肢指令：独立 CallbackQueue；手臂 traj 由 ArmTrajReceiver 接管
     cmd_traj_nh_.setCallbackQueue(&cmd_traj_callback_queue_);
-    // 默认订阅 /kuavo_arm_traj；增量 VR 程序启动后（transport=SHM）退订，仅结束增量程序后恢复
-    ensureArmTrajRosSubscription(true);
-    if (incremental_arm_traj_link_capable_) {
-        arm_traj_shm_reader_running_ = true;
-        arm_traj_shm_reader_thread_ = std::thread(&ControlDataManager::armTrajShmReaderThreadFunction, this);
-    }
-    
+    arm_traj_receiver_ = std::make_unique<humanoid_controller::ArmTrajReceiver>();
+    arm_traj_receiver_->init(
+        nh_, arm_num_,
+        [this](const double* pos, const double* vel, const double* tau, int n,
+               uint64_t stamp_nsec) {
+          ingestArmJointTrajectory(pos, vel, tau, n, stamp_nsec);
+        },
+        "/humanoid_wheel/set_incremental_arm_traj_link",
+        kuavo_msgs::SetIncrementalArmTrajLink::Request::TRANSPORT_NONE);
+
     leg_joint_traj_sub_ = cmd_traj_nh_.subscribe<sensor_msgs::JointState>(
         "/lb_leg_traj", 1,
         &ControlDataManager::legJointTrajCallback, this,
@@ -186,8 +166,8 @@ void ControlDataManager::initializeSubscribers() {
         "/enable_control_state", 1,
         &ControlDataManager::enableControlStateCallback, this);
 
-    ROS_INFO("ControlDataManager: All subscribers initialized (arm/leg traj on dedicated CallbackQueue%s)",
-             incremental_arm_traj_link_capable_ ? ", incremental link via service" : "");
+    ROS_INFO("ControlDataManager: All subscribers initialized "
+             "(arm traj via ArmTrajReceiver, leg traj on dedicated CallbackQueue)");
     ensureArmTrajReceiveTimingPublishers();
 }
 
@@ -564,12 +544,6 @@ void ControlDataManager::ensureArmTrajReceiveTimingPublishers() {
     }
     arm_traj_receive_timing_initialized_ = true;
     nh_.param("/vr_ik/enable_arm_traj_receive_timing_log", enable_arm_traj_receive_timing_log_, false);
-    arm_traj_using_shm_pub_ =
-        nh_.advertise<std_msgs::Float64>("/ik_debug/arm_traj_receive/using_shm", 10);
-    arm_traj_transport_pub_ =
-        nh_.advertise<std_msgs::Float64>("/ik_debug/arm_traj_receive/transport", 10);
-    arm_traj_receive_status_initialized_ = true;
-    publishArmTrajReceiveStatus();
     if (!enable_arm_traj_receive_timing_log_) {
         return;
     }
@@ -590,46 +564,6 @@ void ControlDataManager::publishArmTrajReceiveTimingMs(const ros::Publisher& pub
     std_msgs::Float64 msg;
     msg.data = ms;
     publisher.publish(msg);
-}
-
-void ControlDataManager::publishArmTrajReceiveStatus() {
-    if (!arm_traj_receive_status_initialized_ && !arm_traj_receive_timing_initialized_) {
-        return;
-    }
-    if (!arm_traj_using_shm_pub_) {
-        arm_traj_using_shm_pub_ =
-            nh_.advertise<std_msgs::Float64>("/ik_debug/arm_traj_receive/using_shm", 10);
-        arm_traj_transport_pub_ =
-            nh_.advertise<std_msgs::Float64>("/ik_debug/arm_traj_receive/transport", 10);
-        arm_traj_receive_status_initialized_ = true;
-    }
-
-    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
-    const int8_t transport = incremental_arm_traj_transport_.load(std::memory_order_acquire);
-    // 1.0 = WBC 增量 VR 会话中，不从 /kuavo_arm_traj 取数（MPC 等其它节点仍可订阅该 topic）
-    const bool using_shm = transport == Request::TRANSPORT_SHM;
-
-    std_msgs::Float64 msg;
-    msg.data = using_shm ? 1.0 : 0.0;
-    arm_traj_using_shm_pub_.publish(msg);
-    msg.data = static_cast<double>(transport);
-    arm_traj_transport_pub_.publish(msg);
-}
-
-bool ControlDataManager::shouldAcceptArmTrajFrom(ArmTrajSource source) const {
-    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
-    const int8_t transport = incremental_arm_traj_transport_.load(std::memory_order_acquire);
-    switch (transport) {
-        case Request::TRANSPORT_NONE:
-            return source == ArmTrajSource::kRosTopic;
-        case Request::TRANSPORT_SHM:
-            // 增量 VR 程序运行期间 WBC 只走 SHM，不消费 /kuavo_arm_traj
-            return source == ArmTrajSource::kIncrementalShm;
-        case Request::TRANSPORT_KUAVO_ARM_TRAJ:
-            return source == ArmTrajSource::kRosTopic;
-        default:
-            return false;
-    }
 }
 
 void ControlDataManager::recordArmTrajReceiveTiming(uint64_t stamp_nsec) {
@@ -660,15 +594,9 @@ void ControlDataManager::recordArmTrajReceiveTiming(uint64_t stamp_nsec) {
     has_last_arm_traj_header_stamp_ = true;
 }
 
-void ControlDataManager::ingestArmJointTrajectory(ArmTrajSource source,
-                                                  const double* pos_rad,
-                                                  const double* vel_rad,
-                                                  const double* tau,
-                                                  int count,
+void ControlDataManager::ingestArmJointTrajectory(const double* pos_rad, const double* vel_rad,
+                                                  const double* tau, int count,
                                                   uint64_t stamp_nsec) {
-    if (!shouldAcceptArmTrajFrom(source)) {
-        return;
-    }
     if (!prev_enable_control_.load(std::memory_order_acquire)) {
         return;
     }
@@ -693,163 +621,6 @@ void ControlDataManager::ingestArmJointTrajectory(ArmTrajSource source,
         std::lock_guard<std::mutex> lock(external_state_mutex_);
         arm_external_control_state_.update(traj);
     }
-}
-
-bool ControlDataManager::setIncrementalArmTrajLink(int8_t transport, std::string* message) {
-    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
-    if (transport != Request::TRANSPORT_NONE && transport != Request::TRANSPORT_SHM &&
-        transport != Request::TRANSPORT_KUAVO_ARM_TRAJ) {
-        if (message) {
-            *message = "invalid transport";
-        }
-        return false;
-    }
-    if (transport == Request::TRANSPORT_SHM && !incremental_arm_traj_link_capable_) {
-        if (message) {
-            *message = "incremental arm traj SHM link not available";
-        }
-        return false;
-    }
-
-    incremental_arm_traj_transport_.store(transport, std::memory_order_release);
-
-    if (transport == Request::TRANSPORT_SHM) {
-        ensureArmTrajRosSubscription(false);
-        if (message) {
-            *message = "incremental arm traj transport set to SHM";
-        }
-        publishArmTrajReceiveStatus();
-        return true;
-    }
-
-    ensureArmTrajRosSubscription(true);
-    if (transport == Request::TRANSPORT_KUAVO_ARM_TRAJ) {
-        if (message) {
-            *message = "incremental arm traj transport set to /kuavo_arm_traj";
-        }
-    } else if (message) {
-        *message = "incremental arm traj transport disabled";
-    }
-    publishArmTrajReceiveStatus();
-    return true;
-}
-
-bool ControlDataManager::handleSetIncrementalArmTrajLink(
-    typename kuavo_msgs::SetIncrementalArmTrajLink::Request& req,
-    typename kuavo_msgs::SetIncrementalArmTrajLink::Response& res) {
-    res.success = setIncrementalArmTrajLink(req.transport, &res.message);
-    if (res.success) {
-        ROS_INFO("[ControlDataManager] %s", res.message.c_str());
-    } else {
-        ROS_WARN("[ControlDataManager] set incremental arm traj link failed: %s", res.message.c_str());
-    }
-    return true;
-}
-
-void ControlDataManager::ensureArmTrajRosSubscription(bool enable) {
-    std::lock_guard<std::mutex> lock(arm_traj_sub_mutex_);
-    if (enable) {
-        if (!arm_joint_traj_sub_) {
-            arm_joint_traj_sub_ = cmd_traj_nh_.subscribe<sensor_msgs::JointState>(
-                "/kuavo_arm_traj", 10,
-                &ControlDataManager::armJointTrajCallback, this,
-                ros::TransportHints().tcpNoDelay());
-            ROS_INFO("[ControlDataManager] Subscribed /kuavo_arm_traj for WBC arm traj ingest");
-        }
-        return;
-    }
-
-    if (arm_joint_traj_sub_) {
-        arm_joint_traj_sub_.shutdown();
-        arm_joint_traj_sub_ = ros::Subscriber();
-        ROS_INFO("[ControlDataManager] Unsubscribed /kuavo_arm_traj for WBC (incremental VR SHM active; MPC may still subscribe)");
-    }
-}
-
-void ControlDataManager::deactivateIncrementalArmTrajLink(const char* reason) {
-    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
-    if (incremental_arm_traj_transport_.load(std::memory_order_acquire) != Request::TRANSPORT_SHM) {
-        return;
-    }
-    ROS_WARN("[ControlDataManager] %s; auto exit incremental arm traj link -> /kuavo_arm_traj",
-             reason != nullptr ? reason : "unknown");
-    setIncrementalArmTrajLink(Request::TRANSPORT_NONE, nullptr);
-}
-
-void ControlDataManager::armTrajShmReaderThreadFunction() {
-    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
-    kuavo_common::ArmTrajShmData shm_data;
-    while (arm_traj_shm_reader_running_ && ros::ok()) {
-        const auto now_wall = std::chrono::steady_clock::now();
-        bool got_update = false;
-        const int8_t transport = incremental_arm_traj_transport_.load(std::memory_order_acquire);
-
-        if (transport == Request::TRANSPORT_SHM && arm_traj_shm_ && arm_traj_shm_->readIfUpdated(shm_data)) {
-            got_update = true;
-            last_arm_traj_shm_receive_wall_ = now_wall;
-            has_last_arm_traj_shm_receive_wall_ = true;
-
-            if (static_cast<int>(shm_data.num_joints) != arm_num_) {
-                ROS_WARN_THROTTLE(1.0,
-                                  "[ControlDataManager] Arm traj SHM joint count mismatch: %u vs %d",
-                                  shm_data.num_joints,
-                                  arm_num_);
-                continue;
-            }
-
-            ingestArmJointTrajectory(ArmTrajSource::kIncrementalShm,
-                                     shm_data.position,
-                                     shm_data.velocity,
-                                     shm_data.effort,
-                                     arm_num_,
-                                     shm_data.stamp_nsec);
-        }
-
-        if (transport == Request::TRANSPORT_SHM && arm_traj_shm_ && has_last_arm_traj_shm_receive_wall_) {
-            const double stale_sec =
-                std::chrono::duration<double>(now_wall - last_arm_traj_shm_receive_wall_).count();
-            if (stale_sec > arm_traj_shm_stale_timeout_sec_) {
-                deactivateIncrementalArmTrajLink("incremental arm traj SHM stale");
-                continue;
-            }
-        }
-
-        if (!got_update) {
-            std::this_thread::sleep_for(std::chrono::microseconds(200));
-        }
-
-        static auto last_status_publish_wall = std::chrono::steady_clock::now();
-        const double status_publish_elapsed_sec =
-            std::chrono::duration<double>(now_wall - last_status_publish_wall).count();
-        if (status_publish_elapsed_sec >= 1.0) {
-            publishArmTrajReceiveStatus();
-            last_status_publish_wall = now_wall;
-        }
-    }
-}
-
-void ControlDataManager::armJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg) {
-    if(msg->name.size() != static_cast<size_t>(arm_num_)) {
-        ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Arm joint count mismatch: %lu vs %d", msg->name.size(), arm_num_);
-        return;
-    }
-
-    std::vector<double> pos_rad(arm_num_);
-    std::vector<double> vel_rad(arm_num_);
-    std::vector<double> tau(arm_num_);
-    for (int i = 0; i < arm_num_; ++i) {
-        pos_rad[i] = msg->position[i] * M_PI / 180.0;
-        vel_rad[i] = (msg->velocity.size() == static_cast<size_t>(arm_num_)) ? msg->velocity[i] * M_PI / 180.0 : 0.0;
-        tau[i] = (msg->effort.size() == static_cast<size_t>(arm_num_)) ? msg->effort[i] : 0.0;
-    }
-    const uint64_t stamp_nsec = static_cast<uint64_t>(msg->header.stamp.sec) * 1000000000ULL +
-                                static_cast<uint64_t>(msg->header.stamp.nsec);
-    ingestArmJointTrajectory(ArmTrajSource::kRosTopic,
-                             pos_rad.data(),
-                             vel_rad.data(),
-                             tau.data(),
-                             arm_num_,
-                             stamp_nsec);
 }
 
 void ControlDataManager::legJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg) {

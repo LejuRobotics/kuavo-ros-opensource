@@ -269,6 +269,7 @@ add_library(${PROJECT_NAME}
         src/ArmContactForceEstimatorWheel.cpp
         src/DesiredForceManager.cpp
         src/ControlDataManager.cpp
+        src/ArmTrajReceiver.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
         src/util/TopicMonitor.cpp
