@@ -1114,7 +1114,7 @@ class JoyCustomizeConfigNode:
                         if self._launch_phase == "idle":
                             rospy.loginfo("[JoyCustomize] START pressed: launching humanoid robot (once)")
                             try:
-                                self.launch_humanoid_robot()
+                                self.launch_humanoid_robot(extra_args="init_fall_down_state:=false")
                                 if not self.real:
                                     self._robot_launched = True
                                     self._launch_phase = "launched"
@@ -2086,11 +2086,6 @@ class JoyCustomizeConfigNode:
         # 透传额外 launch 参数(如 init_fall_down_state:=true)
         if extra_args:
             launch_cmd = f"{launch_cmd} {extra_args}"
-
-        # 普通启动(START)必须显式把 init_fall_down_state 赋值为 false: voice_control.launch
-        # 不论是否带参都会被拉起, 若不主动覆盖, 上一次倒地起身(true)的 param 可能残留导致误进倒地。
-        if "init_fall_down_state" not in launch_cmd:
-            launch_cmd = f"{launch_cmd} init_fall_down_state:=false"
 
         print(f"launch_cmd: {launch_cmd}")
         print(f"If you want to check the session, please run 'tmux attach -t {HUMANOID_ROBOT_SESSION_NAME}'")

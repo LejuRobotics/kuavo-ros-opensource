@@ -204,6 +204,7 @@ namespace humanoid_controller
       ros::param::set("robot_init_state_param", mujoco_init_state);
       ros::param::set("/squat_initial_state", squat_initial_state_vector);
       ROS_INFO("[%s] init_fall_down_state is true, set robot_init_state_param and squat_initial_state", name_.c_str());
+      nh_.deleteParam("/init_fall_down_state");
     }
 
     initialized_ = true;
