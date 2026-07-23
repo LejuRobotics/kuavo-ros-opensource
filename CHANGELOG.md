@@ -3,6 +3,8 @@
 ## Breaking Changes
 
 ## 文档相关
+- 新增增量数采操作步骤文档，[文档链接](./src/manipulation_nodes/noitom_hi5_hand_udp_python/docs/增量式IK新功能介绍.md)
+- 相机标定文档补充 52/55/56 机型与实操注意事项，[文档链接](./src/Camera_Calibration/README.md)
 - 更新搬运/倒地起身操作文档、RL 接口文档、多控制器框架说明
 - 补充 Quest3 视频回传指定 IP 启动方式说明，以及 H12 部署脚本中 VR 启动选项的实际行为说明，[Quest3 视频回传文档](./src/manipulation_nodes/noitom_hi5_hand_udp_python/docs/Quest3_视频回传显示.md)，[H12 部署文档](./src/humanoid-control/h12pro_controller_node/多控制器H12部署和操作说明.md)
 - 更新强化学习运动控制框架文档，新增虚拟控制器相关内容，[文档链接](./docs/5功能案例/科研框架/强化学习使用案例/强化学习运动控制框架合集.md)
@@ -17,6 +19,8 @@
 - 修复拆垛案例与 aruco_ros README 中失效的图片引用
 
 ## 新增功能
+- 人形增量控制新增多项参数化配置：支持通过参数控制 X+A 是否复位手臂、进入增量时胸部 FK 跟踪策略、进入增量时腰部姿态映射开关、VR 节点启动时关节状态重置控制等
+- 座椅起身功能优化：简化状态机、支持多次起坐流程、流程参数调优
 - 搬运模式升级至 V1.1：搬运语音改用 /play_music 原子打断+播新，LOCK 状态加入灵巧手握拳到位判据，信号驱动调度替代盲延迟，状态机拆分为 INTERPOLATING→READY→ACTIVE 三段，硬起身/软起身统一由 Python Joy 调度，[文档链接](./docs/运动控制API.md)
 - AMP 2.0 模型更新：新增 ampjzx260629_1 行走模型，适配 53/54/55 机型，站立状态可选另一套 standdefaultJointState（默认关闭）
 - 新增 KUAVO_DIAG 环境变量诊断日志开关，默认关闭
@@ -64,6 +68,11 @@
 - 5W 轮臂 VR 遥操新增胸部俯仰软限位，防止躯干过度前倾
 
 ## 修复问题
+- 修复 s200062 在 dev 代码合并后 mujoco 仿真报错及 rviz 中夹爪模型分离问题
+- 修复 s56 棋盘标定系统性误差，更新标定 URDF 及 demo 配置
+- 修复人形增量控制多项问题：手臂模式 0→2 切换映射异常、X+B 需按两次才能切换到固定模式、手柄切换手臂控制模式逻辑异常、增量触发条件去掉移动侦测
+- 修复放音设备检测无法兼容喇叭在上位机的机型问题，改为服务可用性检测
+- 修复 load_kuavo_real.launch 中手臂贝塞尔节点启动引用缺失导致服务未启动
 - 修复轮臂(major=6)半身 IK FK 维度不匹配，统一使用 s63 arm_only urdf
 - 修复 amp_hand_controller 向后行走停下时偶尔踉跄、肘关节 scale 超限的问题
 - 修复按住 LT/RT 期间摇杆与方向键无法控制行走的问题（issue #3348）
@@ -144,6 +153,8 @@
 - 修复 SDK 打包缺失 interfaces 子包的问题
 
 ## 其他改进
+- 控制器切换失败时增加日志输出原因，方便排查切换失败问题
+- 将硬编码版本白名单替换为 RobotVersion.start_with() 前缀匹配，便于扩展新机型
 - 统一手臂控制话题前缀为 /mm/
 - 部署脚本同步写入 KUAVO_CONTROL_SCHEME 环境变量到 bashrc
 - rosbag 日志清理功能调整为默认开启
