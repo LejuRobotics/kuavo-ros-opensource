@@ -690,7 +690,7 @@ void DepthWalkController::updatePhase(const CommandDataRL &cmd,const SensorData 
       if(stand_flag>0 and(gait_phase>0.99999 or gait_phase<delta_time+1e-6)){
         if((par<0.08 and par>-0.08)or turns>=2){
           gait_phase=0;
-          gait_fre=0;
+          // gait_fre=0;
           stand_flag=2;}
           else{turns+=1;}
         }
