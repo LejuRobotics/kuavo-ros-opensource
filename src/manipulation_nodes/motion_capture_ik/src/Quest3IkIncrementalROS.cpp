@@ -2463,8 +2463,12 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       initZeroRightEndEffectorPosition_.z());
 
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
-  arm_traj_writer_.init(nodeHandle_, "/humanoid_controller/set_incremental_arm_traj_link",
-                        "/quest3_ik/set_incremental_arm_traj_link");
+  // 本类被双足与 5W 单臂入口共用；controller 侧 Receiver 的 service 名随平台而异
+  // （双足 /humanoid_controller/...，轮臂 /humanoid_wheel/...），故由入口注入而非写死
+  std::string controller_link_service = "/humanoid_controller/set_incremental_arm_traj_link";  // 双足缺省
+  nodeHandle_.param("/vr_ik/arm_traj_controller_link_service", controller_link_service,
+                    controller_link_service);
+  arm_traj_writer_.init(nodeHandle_, controller_link_service, "/quest3_ik/set_incremental_arm_traj_link");
   sensorDataArmJointsPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_sensor_data", 2);
   leftHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/left_hand_pose", 2);
   rightHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/right_hand_pose", 2);

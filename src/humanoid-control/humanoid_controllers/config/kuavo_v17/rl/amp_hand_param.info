@@ -168,9 +168,9 @@ velocitySmoothing
     cmdxSmooth              true    ; true: 正向 cmd_x 加/减速 EMA 平滑 + 单步限速；false: 不平滑
     maxVelocityChange       0.1     ; 正向 cmd_x 加速单步最大变化量 (m/s)，cmdxSmooth=true 时生效
     maxVelocityChangeDecel  0.03    ; 正向 cmd_x 减速单步最大变化量 (m/s)，cmdxSmooth=true 时生效
-    cmdXDecelEmaTauThreshold  0.35   ; 分段 EMA 速度阈值 (m/s)，cmdxSmooth=true 时按平滑速度分段
-    cmdXDecelEmaTauHigh       0.15  ; max(smoothed,target) cmd_x > threshold 时的 tau (s)
-    cmdXDecelEmaTauLow        0.5   ; max(smoothed,target) cmd_x <= threshold 时的 tau (s)
+    cmdXDecelEmaTauThreshold  0.2   ; 分段 EMA 速度阈值 (m/s)，cmdxSmooth=true 时按平滑速度分段
+    cmdXDecelEmaTauHigh       0.005  ; max(smoothed,target) cmd_x > threshold 时的 tau (s)
+    cmdXDecelEmaTauLow        0.45   ; max(smoothed,target) cmd_x <= threshold 时的 tau (s)
     maxVelocityChangeNegCmdX  0.0051  ; 负向 cmd_x 单步最大变化量 (m/s)，后退，加减速
     maxVelocityChangeCmdY  0.008   ; 单步 cmd_y 最大变化量 (m/s)
     squatHeightLowPassEnabled true ; roban17 amp_hand posture 下蹲高度命令启用一阶低通
