@@ -164,6 +164,10 @@ int main(int argc, char** argv) {
   ChassisCmdVelForwarder chassisCmdVelForwarder(nodeHandle);
 
   HighlyDynamic::Quest3IkIncrementalROS quest3IkIncrementalROS(nodeHandle, 100, false, ctrlArmIdx);
+
+  // 5W 复用双足类，但本平台跑轮臂 controller，其 Receiver service 名是 /humanoid_wheel/...
+  nodeHandle.setParam("/vr_ik/arm_traj_controller_link_service",
+                       "/humanoid_wheel/set_incremental_arm_traj_link");
   quest3IkIncrementalROS.initialize(jsonData);
 
   // [wheel_arm_only] 5W 平台 controller 必需的 VR 增量模式开关
