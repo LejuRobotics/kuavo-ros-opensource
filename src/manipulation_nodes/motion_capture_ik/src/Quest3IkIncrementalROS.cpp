@@ -133,9 +133,12 @@ void Quest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
       }
     }
 
-    if ((armControlMode_ == 0 && lastArmControlMode_ == 0) || (armControlMode_ == 1 && lastArmControlMode_ == 0)) {
-      reset();  // 机器人未激活 (0→0 或 0→1)，持续重置各类状态，确保进入系统时正常
-
+    // 修改后
+    if (armControlMode_ == 0 || armControlMode_ == 1) {
+        if (lastArmControlMode_ == 2) {
+            fsmExit();  // 2→0/1 过渡
+        }
+        reset();
       // 运行 DrakeVelocityIKSolver 测试套件
       if (leftVelocityIkSolverPtr_) {
         // 使用 left shoulder 位置作为 p0 (zarm_l2_joint 位置: -0.017500, 0.292700, 0.424500)
@@ -491,7 +494,9 @@ void Quest3IkIncrementalROS::fsmEnter() {
 
     double elapsedTime = (currentTime - enterTime).toSec();
 
-    if (elapsedTime <= MODE_2_TIMEOUT_DURATION) {
+    // resetJointToDefault_=false 时手臂保持原位，无需5秒长等待，缩短为2秒
+    const double mode2TimeoutDuration = resetJointToDefault_ ? MODE_2_TIMEOUT_DURATION : 2.0;
+    if (elapsedTime <= mode2TimeoutDuration) {
       // print mode2 timeout duration
       std::cout << "[Quest3IkIncrementalROS] Mode 2 timeout duration: " << elapsedTime << "s" << std::endl;
       // 在超时时间内，强制停用所有手臂控制模式，确保可以进入 fsmChange 流程
@@ -1857,8 +1862,9 @@ void Quest3IkIncrementalROS::publishJointStates() {
 
   // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
   // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
-  // 区间 2: [0.3s, 5.0s)      — 从 q_init_cmd_ 线性平滑（resetJointToDefault_=true 时平滑到零位，false 时保持当前位置）
-  // 区间 3: [5.0s, +infty)    — 不在此处改写
+  // 区间 2: [0.3s, T)          — 从 q_init_cmd_ 线性平滑（resetJointToDefault_=true 时平滑到零位，false 时保持当前位置）
+  // 区间 3: [T, +infty)        — 不在此处改写
+  //   T = resetJointToDefault_ ? 5.0 : 2.0（与 fsmEnter 超时一致）
   {
     ros::Time mode2EnterTime;
     {
@@ -1868,7 +1874,8 @@ void Quest3IkIncrementalROS::publishJointStates() {
     const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
     if (inMode2) {
       constexpr double kMode2SensorSyncDurationSec = 0.3;
-      constexpr double kMode2SmoothDurationSec = 5.0;
+      // resetJointToDefault_=false 时手臂保持原位，平滑时长缩短为2秒
+      const double kMode2SmoothDurationSec = resetJointToDefault_ ? 5.0 : 2.0;
       const double elapsed = (ros::Time::now() - mode2EnterTime).toSec();
 
       if (elapsed < kMode2SensorSyncDurationSec) {
