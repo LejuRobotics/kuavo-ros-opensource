@@ -110,6 +110,11 @@ class HardwarePlant
     /** 坐姿 prep jointMoveTo：仅前 12 个 EC 腿关节使用 seat_boot 刚度（由 hardware_node 从 ROS param 注入） */
     void setPrepEcLegGains(const std::vector<double>& kp, const std::vector<double>& kd);
     void clearPrepEcLegGains();
+    /**
+     * 立刻以当前编码器位置做一次 CSP 锁位（prep/默认 kp kd）。
+     * 用于座椅 CSP hold → jointMoveTo 交接，避免 mute 后轨迹启动前的无控空窗。
+     */
+    void latchCurrentJointsCsp();
     SensorData_t sensorsInitHW();
     bool sensorsCheck();
     void HWPlantDeInit();

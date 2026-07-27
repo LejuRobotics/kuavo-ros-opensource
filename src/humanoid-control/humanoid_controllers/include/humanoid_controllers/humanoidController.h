@@ -77,6 +77,7 @@
 #include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
 #include "humanoid_controllers/SitControlManager.h"
+#include "humanoid_controllers/SitUpController.h"
 
 namespace humanoid_controller
 {
@@ -393,13 +394,15 @@ namespace humanoid_controller
     void recomputeOptimizedState2WbcWithSeatTargets(
         const humanoid_controller::SitControlManager::SeatJointTargets& targets);
     void clearSeatOffsetPlan();
-    void clearStandUpFromSeatPlan();
-    /** stand_up 反向 seat_offset：blend∈[0,1] 从 CSP 锁定姿插值到 sit_joint_pos */
-    vector_t computeReverseSeatOffsetStandUpTarget(double blend) const;
-    /** 落座 CSP 锁定姿释放后，进入 stand_up preUpdate（/bot_seat_return_preupdate 底层入口） */
+    /** 落座 CSP 锁定姿释放后的起立入口：主类做 preUpdate 重入 / release hold / pause MPC，
+     *  段0 规划与执行委托 SitUpController（prepare→activate）。 */
     bool beginStandUpFromSeat(std::string& err);
+    /** 座椅起身 preUpdate 重入入口：重置 preUpdate 状态，暂停 MPC，委托 SitUpController 起立。
+     *  统一 /bot_seat_return_preupdate 与 /humanoid_controller/seat_return_to_preupdate 两条触发路径。 */
+    void beginSeatReturnToPreUpdate();
     bool seatReturnToPreUpdateCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
     void onSeatReturnPreUpdateTrigger(const std_msgs::Int8::ConstPtr& msg);
+    bool seatStandUpStartCallback(std_srvs::Trigger::Request& req, std_srvs::Trigger::Response& res);
     void publishSeatReturnDone(bool ok);
     virtual void setupMpc();
     virtual void setupMrt();
@@ -666,9 +669,6 @@ namespace humanoid_controller
     ros::ServiceServer triggerFallStandUpSrv_;
     ros::ServiceServer changeRuiwoMotorParamSrv_;
     ros::ServiceServer transport_mode_service_;
-    ros::ServiceServer seat_return_to_preupdate_srv_;
-    ros::Publisher seat_return_preupdate_done_pub_;
-    ros::Subscriber sub_seat_return_preupdate_;
     GaitManager *gaitManagerPtr_=nullptr;
 
     PinocchioInterface *pinocchioInterface_ptr_;
@@ -698,7 +698,10 @@ namespace humanoid_controller
     bool transportModeCommandCallback(kuavo_msgs::TransportModeCommand::Request &req,
                                       kuavo_msgs::TransportModeCommand::Response &res);
 
-    ros::ServiceServer real_initial_start_service_;
+    ros::ServiceServer real_initial_start_service_;  // /humanoid_controller/real_initial_start（仿真）
+    ros::ServiceServer seat_return_to_preupdate_srv_; // /humanoid_controller/seat_return_to_preupdate
+    ros::Publisher seat_return_preupdate_done_pub_;   // /bot_seat_return_preupdate_done
+    ros::Subscriber sub_seat_return_preupdate_;       // /bot_seat_return_preupdate
     KuavoDataBuffer<SensorData> *sensors_data_buffer_ptr_;
     bool is_real_{false};
     bool is_cali_{false};
@@ -759,6 +762,9 @@ namespace humanoid_controller
     double last_cmd_head_vel_time_{0.0};
     double last_head_vel_integrate_time_{0.0};
     bool has_head_vel_integrate_time_{false};
+    /** 进 MPC 站立后低头→0 插值（仅 keep_head_down 曾为 true；时长=head_raise_duration_seconds） */
+    bool seat_head_raise_active_{false};
+    double seat_head_raise_start_sec_{0.0};
     vector_t desire_waist_pos_ = vector_t::Zero(1);  // 腰部目标位置
     vector_t desire_arm_q_prev_;
     vector_t joint_pos_, joint_vel_, joint_acc_, joint_torque_;
@@ -871,17 +877,11 @@ namespace humanoid_controller
 
     // Seat/Sit control manager
     std::unique_ptr<humanoid_controller::SitControlManager> sitControlManager_;
+    /** 坐起身控制器：段0 reverse / await / 低头律。ROS 入口与 /bot_stand_up_complete 留主类。 */
+    std::unique_ptr<humanoid_controller::SitUpController> sitUp_;
     vector_t seat_offset_centroidal_start_wbc_;
     vector_t seat_offset_centroidal_end_wbc_;
     bool seat_offset_centroidal_plan_ready_{false};
-    humanoid_controller::SitControlManager::StandUpFromSeatStartSnapshot stand_up_from_seat_start_snapshot_;
-    vector_t reverse_seat_offset_centroidal_start_wbc_;
-    vector_t reverse_seat_offset_centroidal_end_wbc_;
-    bool reverse_seat_offset_plan_ready_{false};
-    /** stand_up 指令激活：preUpdate 内执行 反向偏置 → (可选)sit 保持 → sit→stand */
-    bool stand_up_from_seat_active_{false};
-    bool reverse_seat_offset_done_{false};
-    double reverse_seat_offset_start_time_sec_{0.0};
 
     // 共享内存通讯
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;

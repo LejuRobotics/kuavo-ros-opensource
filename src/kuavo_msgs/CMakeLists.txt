@@ -64,6 +64,8 @@ add_message_files(
   robotHandPosition.msg
   picoPoseInfo.msg
   picoPoseInfoList.msg
+  xsensePoseInfo.msg
+  xsensePoseInfoList.msg
   gaitTimeName.msg
   JoySticks.msg
   armTargetPoses.msg
@@ -139,6 +141,7 @@ add_message_files(
   AudioPlaybackStatus.msg
 
   picoPoseRetarget.msg
+  xsensePoseRetarget.msg
   mpc_target_trajectories.msg
   mpc_state.msg
   mpc_input.msg

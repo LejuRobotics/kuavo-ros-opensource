@@ -191,6 +191,19 @@ namespace humanoid_controller
     char Walk_Command = '\0';
     while (ros::ok())
     {
+      // 座椅段0 完成后等 start：允许按 'o' 置 /hardware/is_ready（对齐 HW）
+      if (sitUp_ && sitUp_->isAwaitingStart()) {
+        if (kbhit()) {
+          Walk_Command = getchar();
+          if (Walk_Command == 'o' || Walk_Command == 'O') {
+            ROS_INFO("[HumanoidController] seat stand_up: keyboard 'o' -> /hardware/is_ready=1");
+            ros::param::set("/hardware/is_ready", 1);
+            hardware_status_ = 1;
+          }
+        }
+        usleep(100000);
+        continue;
+      }
       if (hardware_status_ != 1)
       {
         usleep(100000);
@@ -450,10 +463,22 @@ namespace humanoid_controller
                         rl_to_rl_switch_duration_,
                         static_cast<double>(RL_TO_RL_SWITCH_DURATION_DEFAULT));
     
-    if (controllerNh_.hasParam("/use_sit_init"))
+    // box/tmux 启动时 param 可能稍晚于 nodelet；短等避免首次读到缺省 false 并 clear prep
+    use_sit_init_ = false;
     {
-      controllerNh_.getParam("/use_sit_init", use_sit_init_);
-      std::cout << "get use sit init param: " << use_sit_init_ << std::endl;
+      constexpr int kMaxTries = 50;  // ~5s
+      for (int i = 0; i < kMaxTries; ++i) {
+        if (controllerNh_.hasParam("/use_sit_init")) {
+          controllerNh_.getParam("/use_sit_init", use_sit_init_);
+          break;
+        }
+        ros::Duration(0.1).sleep();
+      }
+      std::cout << "get use sit init param: " << use_sit_init_
+                << " (hasParam=" << controllerNh_.hasParam("/use_sit_init") << ")" << std::endl;
+      if (use_sit_init_) {
+        ROS_INFO("[HumanoidController] /use_sit_init=true");
+      }
     }
     // trajectory_publisher_ = new TrajectoryPublisher(controller_nh, 0.001);
 
@@ -644,6 +669,13 @@ namespace humanoid_controller
       use_sit_init_boot_ = humanoid_controller::SitControlManager::configureLaunchBoot(
           use_sit_init_, robot_version, sit_initial_state_, waistNum_, jointNumReal_, armNumReal_,
           hw_prep_joint_count, seat_cfg ? *seat_cfg : kuavo_common::SeatConfig{});
+      if (use_sit_init_boot_ && headNum_ >= 2) {
+        // 从 0 起插值低头（时长 head_raise_duration_seconds），由 fillHeadJointCmd 推进
+        head_mtx.lock();
+        desire_head_pos_(0) = 0.0;
+        desire_head_pos_(1) = 0.0;
+        head_mtx.unlock();
+      }
       controllerNh_.setParam("/squat_initial_state", squat_initial_state_vector);
       controllerNh_.setParam("/sit_initial_state", sit_initial_state_vector);
     }
@@ -1294,6 +1326,14 @@ namespace humanoid_controller
       sitDownWbc_->loadTasksSetting(taskFile, verbose, is_real_);
 
       sitControlManager_->setupRos(controllerNh_);
+      // 坐起身控制器：段0 执行；ROS 入口（seat_return / real_initial_start / done）留主类
+      sitUp_ = std::make_unique<humanoid_controller::SitUpController>(controllerNh_, *sitControlManager_);
+      sitUp_->setMrt(mrtRosInterface_.get());
+      sitUp_->setDrake(drake_interface_);
+      sitUp_->setWbc(standUpWbc_);
+      sitUp_->setJointSpecs(jointNumReal_, waistNum_, armNumReal_, headNum_, joint_kp_, joint_kd_,
+                            kuavo_settings_.hardware_settings.max_current, is_real_);
+      sitUp_->setupRos();
       seat_return_preupdate_done_pub_ =
           controllerNh_.advertise<std_msgs::Int8>("/bot_seat_return_preupdate_done", 10);
       seat_return_to_preupdate_srv_ = controllerNh_.advertiseService(
@@ -1301,6 +1341,12 @@ namespace humanoid_controller
           &humanoidController::seatReturnToPreUpdateCallback, this);
       sub_seat_return_preupdate_ = controllerNh_.subscribe(
           "/bot_seat_return_preupdate", 1, &humanoidController::onSeatReturnPreUpdateTrigger, this);
+      // 仿真无 hardware_node：提供与实机同名 start 入口；实机由 hardware_node 提供
+      if (!is_real_) {
+        real_initial_start_service_ = controllerNh_.advertiseService(
+            "/humanoid_controller/real_initial_start",
+            &humanoidController::seatStandUpStartCallback, this);
+      }
 
       // preupdate
       curRobotLegState_ = vector_t::Zero(centroidalModelInfoWBC_.stateDim);
@@ -1439,8 +1485,10 @@ namespace humanoid_controller
             double boot_kd = 0.0;
             const bool has_boot_gain = sitControlManager_ &&
                 i < jointNumReal_ && sitControlManager_->sitBootLegGain(static_cast<size_t>(i), boot_kp, boot_kd);
+            // use_sit_init 起立、座椅 stand_up preUpdate、以及座椅 CSP hold 均用坐姿高刚度腿增益
             const bool use_sit_boot_leg = sitControlManager_ && has_boot_gain &&
-                ((!isPreUpdateComplete && sitControlManager_->useSitInitBoot()) ||
+                ((!isPreUpdateComplete &&
+                  (sitControlManager_->useSitInitBoot() || (sitUp_ && sitUp_->isActive()))) ||
                  sitControlManager_->isSeatCspHold());
             if (use_sit_boot_leg) {
               jointCmdMsg.joint_kp[i] = boot_kp;
@@ -2562,9 +2610,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       /*******************输入蹲姿和站姿**********************/
       auto &infoWBC = centroidalModelInfoWBC_;
       vector_t squatState;
-      if (stand_up_from_seat_active_) {
+      const bool sit_up_active = sitUp_ && sitUp_->isActive();
+      const bool sit_up_reverse_done = sitUp_ && sitUp_->isReverseDone();
+      if (sit_up_active) {
         // 反向 seat_offset 阶段：起点用当前实测 CSP 态；sit→stand 阶段：起点用纯 sit
-        squatState = reverse_seat_offset_done_
+        squatState = sit_up_reverse_done
                          ? drake_interface_->getSitInitialState()
                          : currentObservationWBC_.state;
       } else if (sitControlManager_)
@@ -2593,7 +2643,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       if(is_roban_)
         motionVel = 0.03;  //鲁班站立速度
       else if (sitControlManager_ &&
-               ((use_sit_init_ && sitControlManager_->useSitInitBoot()) || stand_up_from_seat_active_))
+               ((use_sit_init_ && sitControlManager_->useSitInitBoot()) || sit_up_active))
         motionVel = sitControlManager_->sitToStandComVelocityMps();
       else
         motionVel = 0.11;   //其他机器人站立速度
@@ -2603,8 +2653,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         resetKinematicsEstimation();
         initial_status_(9) = currentObservation_.state(9);
 
-        if (stand_up_from_seat_active_ && !reverse_seat_offset_done_) {
-          reverse_seat_offset_start_time_sec_ = time.toSec();
+        if (sit_up_active && !sit_up_reverse_done) {
+          // 段0 起点时间由 SitUpController 内部管理；这里只标记已初始化
           isInitStandUpStartTime_ = true;
         } else {
           isInitStandUpStartTime_ = true;
@@ -2612,6 +2662,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
           startTime = robotStartStandTime_;
           endTime = startTime + (standState[8] - squatState[8]) / motionVel;
           robotStandUpCompleteTime_ = endTime;
+          if (sitUp_)  // 同步给 SitUp，供 headDownPitchRadAt 过终点线性抬头
+            sitUp_->setRobotStandUpCompleteTime(robotStandUpCompleteTime_);
           ROS_INFO_STREAM("Set standUp start time: " << startTime << " end time: " << robotStandUpCompleteTime_
                                                     << " duration: " << (endTime - startTime) << "s");
         }
@@ -2619,7 +2671,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
       vector_t curState = vector_t::Zero(infoWBC.stateDim);
       vector_t desiredState = vector_t::Zero(infoWBC.stateDim);
-      bool use_reverse_seat_offset_plan = false;
+      bool use_reverse_seat_offset_csp = false;
       bool holding_at_sit_pose_before_stand_up = false;
       if (is_abnor_StandUp_)
       {
@@ -2629,15 +2681,46 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         startTime = robotStartSquatTime_;
         endTime = startTime + (curRobotLegState_[8] - squatState[8]) / motionVel; // 以 motionVel 速度挂起
       }
-      else if (stand_up_from_seat_active_ && !reverse_seat_offset_done_)
+      else if (sit_up_active && !sit_up_reverse_done)
       {
-        const double reverse_offset_end =
-            reverse_seat_offset_start_time_sec_ +
-            stand_up_from_seat_start_snapshot_.reverse_seat_offset_duration_sec;
-        holding_at_sit_pose_before_stand_up = time.toSec() > reverse_offset_end;
-        startTime = reverse_seat_offset_start_time_sec_;
-        endTime = reverse_offset_end;
-        use_reverse_seat_offset_plan = true;
+        // 段0 reverse（实机 HW / 仿真 CSP 复刻）+ await-start：委托 SitUpController
+        kuavo_msgs::jointCmd seat_cmd;
+        const bool still = sitUp_->runPhase0(time, jointPosWBC_, seat_cmd);
+        if (sitUp_->isAborted()) {
+          // 段0 HW reverse 失败：发 stand_up failed，中止 preUpdate
+          std_msgs::Int8 bot_stand_up_failed;
+          bot_stand_up_failed.data = -1;
+          standUpCompletePub_.publish(bot_stand_up_failed);
+          return false;
+        }
+        if (still) {
+          // 仍在段0/await：发 CSP cmd，本帧结束
+          if (sitUp_->isAwaitingStart())
+            hardware_status_ = 0;
+          const double head_pitch = sitUp_->headDownPitchRadAt(time);
+          if (headNum_ >= 2) {
+            head_mtx.lock();
+            desire_head_pos_(0) = 0.0;
+            desire_head_pos_(1) = head_pitch;
+            head_mtx.unlock();
+          }
+          if (!init_fall_down_state_) {
+            replaceDefaultEcMotorPdoGait(seat_cmd);
+            publishControlCommands(seat_cmd);
+          }
+          is_robot_standup_complete_ = false;
+          return true;
+        }
+        // still=false 且未 abort：段0 完成。对齐旧 tickAwait：本帧仍发 sit hold，
+        // 并复位首帧计时，下帧进段1（本帧 squatState 仍按 reverse_done=false 取的）
+        if (!init_fall_down_state_) {
+          replaceDefaultEcMotorPdoGait(seat_cmd);
+          publishControlCommands(seat_cmd);
+        }
+        isInitStandUpStartTime_ = false;
+        hardware_status_ = 1;
+        is_robot_standup_complete_ = false;
+        return true;
       }
       else
       {
@@ -2650,162 +2733,152 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       }
       const double standUpDuration = endTime - startTime;
       double standUpBlend = 1.0;
-      if (!holding_at_sit_pose_before_stand_up && standUpDuration > 1e-6) {
+      if (standUpDuration > 1e-6) {
         const double t = std::min(std::max((time.toSec() - startTime) / standUpDuration, 0.0), 1.0);
-        if (use_reverse_seat_offset_plan && !stand_up_from_seat_start_snapshot_.use_smoothstep)
-          standUpBlend = t;
-        else
-          standUpBlend = humanoid_controller::SitControlManager::smoothstep01(t);
+        // 段1/boot：smoothstep（段0 的 calcCos 由 SitUpController 内部处理）
+        standUpBlend = humanoid_controller::SitControlManager::smoothstep01(t);
       }
-      vector_t curTargetState_wbc =
-          use_reverse_seat_offset_plan ? computeReverseSeatOffsetStandUpTarget(standUpBlend)
-                                       : (1.0 - standUpBlend) * curState + standUpBlend * desiredState;
-      vector_t torque = standUpWbc_->update(curTargetState_wbc, intail_input_, measuredRbdStateReal_, ModeNumber::SS, dt_, false).tail(infoWBC.actuatedDofNum);
 
-      is_robot_standup_complete_ = holding_at_sit_pose_before_stand_up
-                                       ? false
-                                       : (use_reverse_seat_offset_plan
-                                              ? (standUpBlend >= 1.0 - 1e-3)
-                                              : (fabs(standState[8] - curTargetState_wbc[8]) < 0.002));
+      // 段1 sit→stand（原 else 分支，standUpWbc 出力 + jointCmd 填充）
+      {
+        vector_t curTargetState_wbc = (1.0 - standUpBlend) * curState + standUpBlend * desiredState;
+        vector_t torque = standUpWbc_->update(curTargetState_wbc, intail_input_, measuredRbdStateReal_, ModeNumber::SS, dt_, false).tail(infoWBC.actuatedDofNum);
 
-      kuavo_msgs::jointCmd jointCmdMsg;
-      
-      for (int i1 = 0; i1 < jointNumReal_; ++i1)
-      {
-        jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + i1));
-        jointCmdMsg.joint_v.push_back(0);
-        jointCmdMsg.tau.push_back(torque(i1));
-        jointCmdMsg.tau_ratio.push_back(1);
-        
-        double leg_kp = joint_kp_[i1];
-        double leg_kd = joint_kd_[i1];
-        if (sitControlManager_ && sitControlManager_->useSitInitBoot())
-          sitControlManager_->sitBootLegGain(static_cast<size_t>(i1), leg_kp, leg_kd);
-        jointCmdMsg.joint_kp.push_back(leg_kp);
-        jointCmdMsg.joint_kd.push_back(leg_kd);
-        
-        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
-        jointCmdMsg.control_modes.push_back(2);
-      }
-      for (int i1 = 0; i1 < waistNum_; ++i1)
-      {
-        jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + jointNumReal_ + i1));
-        jointCmdMsg.joint_v.push_back(0);
-        jointCmdMsg.tau.push_back(torque(jointNumReal_+i1));
-        jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.joint_kp.push_back(joint_kp_[jointNumReal_+i1]);
-        jointCmdMsg.joint_kd.push_back(joint_kd_[jointNumReal_+i1]);
-        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_+i1]);
-        jointCmdMsg.control_modes.push_back(2);
-      }
-      for (int i2 = 0; i2 < armNumReal_; ++i2)
-      {
-        jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + jointNumReal_ + waistNum_ + i2));
-        jointCmdMsg.joint_v.push_back(0);
-        jointCmdMsg.tau.push_back(torque(jointNumReal_+waistNum_+i2));
-        jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_+waistNum_+i2]);
-        jointCmdMsg.control_modes.push_back(joint_control_modes_[jointNumReal_+waistNum_+i2]);
-        jointCmdMsg.joint_kp.push_back(0);
-        jointCmdMsg.joint_kd.push_back(0);
-      }
-      for (int i3 = 0; i3 < headNum_; ++i3)
-      {
-        jointCmdMsg.joint_q.push_back(0);
-        jointCmdMsg.joint_v.push_back(0);
-        jointCmdMsg.tau.push_back(0);
-        jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.tau_max.push_back(10);
-        jointCmdMsg.control_modes.push_back(2);
-        jointCmdMsg.joint_kp.push_back(10);
-        jointCmdMsg.joint_kd.push_back(2);
-      }
-      // 发布控制命令
-      if (!init_fall_down_state_)
-      { 
-        replaceDefaultEcMotorPdoGait(jointCmdMsg);
-        publishControlCommands(jointCmdMsg);
-      }
-      
-      // if (use_shm_communication_) 
-      //     publishJointCmdToShm(jointCmdMsg);
+        is_robot_standup_complete_ = fabs(standState[8] - curTargetState_wbc[8]) < 0.002;
 
-      if (!wheel_arm_robot_ && stand_up_protect_ && is_real_ &&
-          !use_sit_init_boot_)  // replaces skipStandUpContactProtectOnReal(), normal path stays original
-      {
-        const double norSingleLegSupport = centroidalModelInfo_.robotMass * 9.8 / 4; // 单脚支撑力只要达到重量的1/4的力即认为已落地成功
-        bool bNotLanding = is_robot_standup_complete_ && (contactForce_[2] < norSingleLegSupport || contactForce_[8] < norSingleLegSupport);
-        bool bUneventForce = fabs(contactForce_[2] - contactForce_[8]) > (norSingleLegSupport * 2.0); // 左右脚支撑立差值超过重量的1/2即判断为异常/*  */
-        if (bNotLanding || bUneventForce)
+        kuavo_msgs::jointCmd jointCmdMsg;
+
+        for (int i1 = 0; i1 < jointNumReal_; ++i1)
         {
-          if (!is_abnor_StandUp_ && (bNotLanding || bUneventForce ||
-                                     (time.toSec() > robotStandUpCompleteTime_ +
-                                                          (sitControlManager_ ? sitControlManager_->contactProtectGraceAfterStandUpSec()
-                                                                              : 0.5))))
-          {
-            ROS_WARN("Robot standing abnormal...!!");
-            if(bNotLanding)
-            {
-              ROS_WARN("Single-foot contact force that does not reach one-quarter of body weight");
-              ROS_INFO_STREAM("left feet force: " << contactForce_[2] << "less than " << norSingleLegSupport);
-              ROS_INFO_STREAM("right feet force: " << contactForce_[8] << "less than " << norSingleLegSupport);
-            }
-            if(bUneventForce)
-            {
-              ROS_WARN("Abnormal contact force difference between left and right foot");
-              ROS_INFO_STREAM("left feet force: " << contactForce_[2]);
-              ROS_INFO_STREAM("right feet force: " << contactForce_[8]);
-            }
-            is_abnor_StandUp_ = true;
-            is_robot_standup_complete_ = false;
-            curRobotLegState_ = currentObservationWBC_.state;
-            robotStartSquatTime_ = time.toSec();
-            ROS_INFO_STREAM("Set squat start time: " << robotStartSquatTime_);
-          }
+          jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + i1));
+          jointCmdMsg.joint_v.push_back(0);
+          jointCmdMsg.tau.push_back(torque(i1));
+          jointCmdMsg.tau_ratio.push_back(1);
+
+          double leg_kp = joint_kp_[i1];
+          double leg_kd = joint_kd_[i1];
+          if (sitControlManager_ &&
+              (sitControlManager_->useSitInitBoot() || sit_up_active))
+            sitControlManager_->sitBootLegGain(static_cast<size_t>(i1), leg_kp, leg_kd);
+          jointCmdMsg.joint_kp.push_back(leg_kp);
+          jointCmdMsg.joint_kd.push_back(leg_kd);
+
+          jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
+          jointCmdMsg.control_modes.push_back(2);
+        }
+        for (int i1 = 0; i1 < waistNum_; ++i1)
+        {
+          jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + jointNumReal_ + i1));
+          jointCmdMsg.joint_v.push_back(0);
+          jointCmdMsg.tau.push_back(torque(jointNumReal_+i1));
+          jointCmdMsg.tau_ratio.push_back(1);
+          jointCmdMsg.joint_kp.push_back(joint_kp_[jointNumReal_+i1]);
+          jointCmdMsg.joint_kd.push_back(joint_kd_[jointNumReal_+i1]);
+          jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_+i1]);
+          jointCmdMsg.control_modes.push_back(2);
+        }
+        for (int i2 = 0; i2 < armNumReal_; ++i2)
+        {
+          jointCmdMsg.joint_q.push_back(curTargetState_wbc(12 + jointNumReal_ + waistNum_ + i2));
+          jointCmdMsg.joint_v.push_back(0);
+          jointCmdMsg.tau.push_back(torque(jointNumReal_+waistNum_+i2));
+          jointCmdMsg.tau_ratio.push_back(1);
+          jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[jointNumReal_+waistNum_+i2]);
+          jointCmdMsg.control_modes.push_back(joint_control_modes_[jointNumReal_+waistNum_+i2]);
+          jointCmdMsg.joint_kp.push_back(0);
+          jointCmdMsg.joint_kd.push_back(0);
+        }
+        const double head_pitch = sitUp_->headDownPitchRadAt(time);  // sit_up 与 use_sit_init_boot 统一低头律
+        for (int i3 = 0; i3 < headNum_; ++i3)
+        {
+          const double head_q = (i3 == 1) ? head_pitch : 0.0;
+          jointCmdMsg.joint_q.push_back(head_q);
+          jointCmdMsg.joint_v.push_back(0);
+          jointCmdMsg.tau.push_back(0);
+          jointCmdMsg.tau_ratio.push_back(1);
+          jointCmdMsg.tau_max.push_back(10);
+          jointCmdMsg.control_modes.push_back(2);
+          jointCmdMsg.joint_kp.push_back(10);
+          jointCmdMsg.joint_kd.push_back(2);
+        }
+        if (headNum_ >= 2) {
+          head_mtx.lock();
+          desire_head_pos_(0) = 0.0;
+          desire_head_pos_(1) = head_pitch;
+          head_mtx.unlock();
+        }
+        // 发布控制命令
+        if (!init_fall_down_state_)
+        {
+          replaceDefaultEcMotorPdoGait(jointCmdMsg);
+          publishControlCommands(jointCmdMsg);
         }
 
-        // 等待机器人脚收回
-        if (is_abnor_StandUp_)
+        if (!wheel_arm_robot_ && stand_up_protect_ && is_real_ &&
+            !use_sit_init_boot_ &&
+            !sit_up_active)  // 座椅/坐姿启动起立跳过接触力保护
         {
-          bool isReSquatComplete = fabs(squatState[8] - curTargetState_wbc[8]) < 0.002;
-          if (isReSquatComplete)
+          const double norSingleLegSupport = centroidalModelInfo_.robotMass * 9.8 / 4; // 单脚支撑力只要达到重量的1/4的力即认为已落地成功
+          bool bNotLanding = is_robot_standup_complete_ && (contactForce_[2] < norSingleLegSupport || contactForce_[8] < norSingleLegSupport);
+          bool bUneventForce = fabs(contactForce_[2] - contactForce_[8]) > (norSingleLegSupport * 2.0); // 左右脚支撑立差值超过重量的1/2即判断为异常/*  */
+          if (bNotLanding || bUneventForce)
           {
-            // 判断机器人的脚是否收回
-            ROS_WARN("The robot goes into a squat state, waiting for adjustment...");
-
-            // 将硬件准备状态位设置为0
-            ROS_INFO_STREAM("Set hardware/is_ready is 0.");
-            ros::param::set("/hardware/is_ready", 0);
-            hardware_status_ = 0;
-            isInitStandUpStartTime_ = false;
-            is_abnor_StandUp_ = false;
-
-            std_msgs::Int8 bot_stand_up_failed;
-            bot_stand_up_failed.data = -1;
-            standUpCompletePub_.publish(bot_stand_up_failed);
-            return false;
+            if (!is_abnor_StandUp_ && (bNotLanding || bUneventForce ||
+                                       (time.toSec() > robotStandUpCompleteTime_ +
+                                                            (sitControlManager_ ? sitControlManager_->contactProtectGraceAfterStandUpSec()
+                                                                                : 0.5))))
+            {
+              ROS_WARN("Robot standing abnormal...!!");
+              if(bNotLanding)
+              {
+                ROS_WARN("Single-foot contact force that does not reach one-quarter of body weight");
+                ROS_INFO_STREAM("left feet force: " << contactForce_[2] << "less than " << norSingleLegSupport);
+                ROS_INFO_STREAM("right feet force: " << contactForce_[8] << "less than " << norSingleLegSupport);
+              }
+              if(bUneventForce)
+              {
+                ROS_WARN("Abnormal contact force difference between left and right foot");
+                ROS_INFO_STREAM("left feet force: " << contactForce_[2]);
+                ROS_INFO_STREAM("right feet force: " << contactForce_[8]);
+              }
+              is_abnor_StandUp_ = true;
+              is_robot_standup_complete_ = false;
+              curRobotLegState_ = currentObservationWBC_.state;
+              robotStartSquatTime_ = time.toSec();
+              ROS_INFO_STREAM("Set squat start time: " << robotStartSquatTime_);
+            }
           }
-          return true;
+
+          // 等待机器人脚收回
+          if (is_abnor_StandUp_)
+          {
+            bool isReSquatComplete = fabs(squatState[8] - curTargetState_wbc[8]) < 0.002;
+            if (isReSquatComplete)
+            {
+              // 判断机器人的脚是否收回
+              ROS_WARN("The robot goes into a squat state, waiting for adjustment...");
+
+              // 将硬件准备状态位设置为0
+              ROS_INFO_STREAM("Set hardware/is_ready is 0.");
+              ros::param::set("/hardware/is_ready", 0);
+              hardware_status_ = 0;
+              isInitStandUpStartTime_ = false;
+              is_abnor_StandUp_ = false;
+
+              std_msgs::Int8 bot_stand_up_failed;
+              bot_stand_up_failed.data = -1;
+              standUpCompletePub_.publish(bot_stand_up_failed);
+              return false;
+            }
+            return true;
+          }
         }
       }
     } // 结束 only_half_up_body_ 判断的else块
 
     /*******************超过设置时间，退出******************/
-    // 反向 seat_offset(+缓冲) 完成 → sit→stand
-    if (stand_up_from_seat_active_ && !reverse_seat_offset_done_) {
-      const double hold_delay =
-          sitControlManager_ ? sitControlManager_->holdAtSitPoseBeforeStandUpSec() : 0.0;
-      const double reverse_offset_end =
-          reverse_seat_offset_start_time_sec_ +
-          stand_up_from_seat_start_snapshot_.reverse_seat_offset_duration_sec;
-      if (time.toSec() > reverse_offset_end + hold_delay) {
-        reverse_seat_offset_done_ = true;
-        isInitStandUpStartTime_ = false;
-        ROS_INFO("[HumanoidController] reverse seat_offset complete; start sit->stand.");
-      }
-      return true;
-    }
-    if (stand_up_from_seat_active_ && (!isInitStandUpStartTime_ || robotStandUpCompleteTime_ <= 1e-6))
+    // 段0 + await 由 SitUpController 管理；段1 起立完成后进 MPC
+    if (sitUp_ && sitUp_->isActive() && (!isInitStandUpStartTime_ || robotStandUpCompleteTime_ <= 1e-6))
       return true;
     // 延迟启动, 避免切换不稳定
     // 半身模式下，设置robotStandUpCompleteTime_为过去时间，立即触发MPC初始化
@@ -2813,10 +2886,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     {
       isInitStandUpStartTime_ = true;
       robotStandUpCompleteTime_ = time.toSec() - 1.0;
+      if (sitUp_)
+        sitUp_->setRobotStandUpCompleteTime(robotStandUpCompleteTime_);
     }
     if (time.toSec() > robotStandUpCompleteTime_ +
                           (sitControlManager_ ? sitControlManager_->mpcInitDelayAfterStandUpSec() : 0.8) ||
-        (!stand_up_from_seat_active_ && !(is_real_ || use_sit_init_boot_)) || init_fall_down_state_)
+        (!(sitUp_ && sitUp_->isActive()) && !(is_real_ || use_sit_init_boot_)) || init_fall_down_state_)
     {
       SystemObservation initial_observation = currentObservation_;
       initial_observation.state = initial_status_;
@@ -2836,7 +2911,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         // seathold 释放重入时 MPC 曾被 pauseResumeMpcNode(true) 暂停，此处必须恢复，
         // 否则 initialPolicyReceived 永不满足、preUpdate 卡死。启动路径未暂停，此处为 no-op。
-        if (stand_up_from_seat_active_)
+        if (sitUp_ && sitUp_->isActive())
           mrtRosInterface_->pauseResumeMpcNode(false);
         // Wait for the initial policy
         while (!mrtRosInterface_->initialPolicyReceived() && ros::ok() && ros::master::check())
@@ -2857,10 +2932,32 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
       stateEstimate_->setFixFeetHeights(false);
       isPreUpdateComplete = true;
-      stand_up_from_seat_active_ = false;
-      reverse_seat_offset_done_ = false;
-      clearStandUpFromSeatPlan();
+      if (sitUp_)
+        sitUp_->resetOnComplete();
       standupTime_ = currentObservation_.time;
+      // 进 MPC 站立：仅此前低头期（坐下 / use_sit_init）才插值抬头；普通蹲起保持 0，避免点头
+      bool was_keeping_head_down = false;
+      ros::param::get("/seat/keep_head_down", was_keeping_head_down);
+      if (headNum_ >= 2) {
+        if (was_keeping_head_down) {
+          seat_head_raise_active_ = true;
+          seat_head_raise_start_sec_ = time.toSec();
+          const double pitch =
+              sitControlManager_ ? sitControlManager_->headDownPitchRad() : 0.35;
+          head_mtx.lock();
+          desire_head_pos_(0) = 0.0;
+          desire_head_pos_(1) = pitch;
+          head_mtx.unlock();
+        } else {
+          seat_head_raise_active_ = false;
+          head_mtx.lock();
+          desire_head_pos_(0) = 0.0;
+          desire_head_pos_(1) = 0.0;
+          head_mtx.unlock();
+        }
+      }
+      ros::param::set("/seat/keep_head_down", false);
+      ros::param::del("/seat/head_pitch_cmd");
 
       standUpWbc_->loadSwitchParamsSetting(taskFile_switchParams_, true, is_real_);
 
@@ -2877,100 +2974,64 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     seat_offset_centroidal_end_wbc_.resize(0);
   }
 
-  void humanoidController::clearStandUpFromSeatPlan() {
-    stand_up_from_seat_start_snapshot_ = {};
-    reverse_seat_offset_centroidal_start_wbc_.resize(0);
-    reverse_seat_offset_centroidal_end_wbc_.resize(0);
-    reverse_seat_offset_plan_ready_ = false;
-  }
-
-  vector_t humanoidController::computeReverseSeatOffsetStandUpTarget(double blend) const {
-    // 反向播放正向 P3 plan：reverse target = forward(1 - α_reverse)。
-    // 正向 P3: target(α) = start + α·(end - start), start=sit, end=sit+offset。
-    // 反向段 t∈[0,1] 从 end 回到 start：target = end + (1-t)·(start-end) = start + (1-(1-t))·... 化简为 a·start + (1-a)·end, a = 1 - blend。
-    auto& infoWBC = centroidalModelInfoWBC_;
-    const double a = std::max(0.0, std::min(1.0, 1.0 - blend));
-    if (!reverse_seat_offset_plan_ready_ || !stand_up_from_seat_start_snapshot_.valid ||
-        reverse_seat_offset_centroidal_start_wbc_.size() != static_cast<Eigen::Index>(infoWBC.stateDim) ||
-        reverse_seat_offset_centroidal_end_wbc_.size() != static_cast<Eigen::Index>(infoWBC.stateDim))
-      return reverse_seat_offset_centroidal_end_wbc_;
-    return a * reverse_seat_offset_centroidal_start_wbc_ +
-           (1.0 - a) * reverse_seat_offset_centroidal_end_wbc_;
-  }
-
-  bool humanoidController::beginStandUpFromSeat(std::string& err) {
-    if (!sitControlManager_) {
-      err = "SitControlManager unavailable";
-      publishSeatReturnDone(false);
-      return false;
-    }
-    if (!sitControlManager_->captureStandUpFromSeatStartSnapshot(stand_up_from_seat_start_snapshot_, err)) {
-      publishSeatReturnDone(false);
-      return false;
-    }
-
-    auto& infoWBC = centroidalModelInfoWBC_;
-    // 反向 seat_offset plan：start 复用正向 P3 终点 centroidal（= sit+offset 落点），
-    // end = 纯 sit。正向 plan 未就绪时用 snapshot 重建 start（与正向同算法，见下）。
-    const vector_t sit = drake_interface_->getSitInitialState();
-    reverse_seat_offset_centroidal_end_wbc_ = vector_t::Zero(infoWBC.stateDim);
-    const size_t sit_n = std::min(static_cast<size_t>(sit.size()), static_cast<size_t>(infoWBC.stateDim));
-    if (sit_n > 0)
-      reverse_seat_offset_centroidal_end_wbc_.head(static_cast<Eigen::Index>(sit_n)) =
-          sit.head(static_cast<Eigen::Index>(sit_n));
-
-    if (seat_offset_centroidal_plan_ready_) {
-      reverse_seat_offset_centroidal_start_wbc_ = seat_offset_centroidal_end_wbc_;
-    } else {
-      vector_t offset_baseline = optimizedState2WBC_mrt_.head(infoWBC.stateDim);
-      if (offset_baseline.size() != static_cast<Eigen::Index>(infoWBC.stateDim))
-        offset_baseline = reverse_seat_offset_centroidal_end_wbc_;
-      reverse_seat_offset_centroidal_start_wbc_ = computeSeatOffsetCentroidalEnd(
-          stand_up_from_seat_start_snapshot_.csp_hold_joint_targets, offset_baseline);
-    }
-    reverse_seat_offset_plan_ready_ = reverse_seat_offset_centroidal_start_wbc_.size() == static_cast<Eigen::Index>(infoWBC.stateDim) &&
-                               reverse_seat_offset_centroidal_end_wbc_.size() == static_cast<Eigen::Index>(infoWBC.stateDim);
-    if (!reverse_seat_offset_plan_ready_) {
-      err = "reverse seat_offset centroidal plan failed";
-      clearStandUpFromSeatPlan();
-      publishSeatReturnDone(false);
-      return false;
-    }
-    const double com_z0 = reverse_seat_offset_centroidal_start_wbc_(8);
-    const double com_z1 = reverse_seat_offset_centroidal_end_wbc_(8);
-    ROS_INFO("[HumanoidController] stand_up_from_seat reverse_offset plan: CSP hold -> sit "
-             "(com_z %.4f -> %.4f, %.2fs).",
-             com_z0, com_z1, stand_up_from_seat_start_snapshot_.reverse_seat_offset_duration_sec);
-
-    if (!sitControlManager_->releaseSeatHoldForStandUp(err)) {
-      clearStandUpFromSeatPlan();
-      publishSeatReturnDone(false);
-      return false;
-    }
-
-    clearSeatOffsetPlan();
-    stand_up_from_seat_active_ = true;
-    reverse_seat_offset_done_ = false;
-    reverse_seat_offset_start_time_sec_ = 0.0;
-    isPreUpdateComplete = false;
-    isInitStandUpStartTime_ = false;
-    is_robot_standup_complete_ = false;
-    is_abnor_StandUp_ = false;
-
-    if (mrtRosInterface_)
-      mrtRosInterface_->pauseResumeMpcNode(true);
-
-    publishSeatReturnDone(true);
-    ROS_INFO("[HumanoidController] Seat CSP hold released; stand_up_from_seat preUpdate started.");
-    err.clear();
-    return true;
-  }
-
   void humanoidController::publishSeatReturnDone(bool ok) {
     std_msgs::Int8 done;
     done.data = ok ? 1 : 0;
     if (seat_return_preupdate_done_pub_)
       seat_return_preupdate_done_pub_.publish(done);
+  }
+
+  bool humanoidController::beginStandUpFromSeat(std::string& err) {
+    if (!sitUp_ || !sitControlManager_) {
+      err = "SitUpController / SitControlManager unavailable";
+      publishSeatReturnDone(false);
+      return false;
+    }
+    if (!drake_interface_) {
+      err = "drake_interface unavailable";
+      publishSeatReturnDone(false);
+      return false;
+    }
+
+    sitUp_->setMeasuredStart(jointPosWBC_);
+    if (!sitUp_->beginStandUpFromSeat(err)) {
+      publishSeatReturnDone(false);
+      return false;
+    }
+
+    // 先切入 preUpdate，再释放 CSP：避免 release 后主循环一帧无 hold
+    clearSeatOffsetPlan();
+    isPreUpdateComplete = false;
+    isInitStandUpStartTime_ = false;
+    is_robot_standup_complete_ = false;
+    is_abnor_StandUp_ = false;
+    robotStartStandTime_ = 0.0;
+    robotStandUpCompleteTime_ = 0.0;
+
+    if (!sitControlManager_->releaseSeatHoldForStandUp(err)) {
+      sitUp_->clearPlan();
+      sitUp_->resetOnComplete();
+      isPreUpdateComplete = true;
+      publishSeatReturnDone(false);
+      return false;
+    }
+
+    if (mrtRosInterface_)
+      mrtRosInterface_->pauseResumeMpcNode(true);
+
+    sitUp_->kickHwReverseIfNeeded();
+    publishSeatReturnDone(true);
+    ROS_INFO("[HumanoidController] Seat CSP hold released; stand_up_from_seat preUpdate started "
+             "(phase0=%s, then await start, phase1=standUpWbc sit->stand).",
+             is_real_ ? "HW jointMoveToPrepGoal" : "sim CSP replica");
+    err.clear();
+    return true;
+  }
+
+  void humanoidController::beginSeatReturnToPreUpdate() {
+    std::string err;
+    if (!beginStandUpFromSeat(err))
+      ROS_WARN("[HumanoidController] beginSeatReturnToPreUpdate refused: %s", err.c_str());
   }
 
   bool humanoidController::seatReturnToPreUpdateCallback(std_srvs::Trigger::Request& req,
@@ -2993,6 +3054,22 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     std::string err;
     if (!beginStandUpFromSeat(err))
       ROS_WARN("[HumanoidController] /bot_seat_return_preupdate failed: %s", err.c_str());
+  }
+
+  bool humanoidController::seatStandUpStartCallback(std_srvs::Trigger::Request& req,
+                                                    std_srvs::Trigger::Response& res) {
+    (void)req;
+    if (!sitUp_ || !sitUp_->isAwaitingStart()) {
+      res.success = false;
+      res.message = "not awaiting stand_up start (phase0 not complete or await disabled)";
+      return true;
+    }
+    ros::param::set("/hardware/is_ready", 1);
+    hardware_status_ = 1;
+    res.success = true;
+    res.message = "seat stand_up start accepted (/hardware/is_ready=1)";
+    ROS_INFO("[HumanoidController] seat stand_up start via real_initial_start service.");
+    return true;
   }
 
   void humanoidController::checkMpcPullUp(double current_time, vector_t & current_state, const TargetTrajectories& planner_target_trajectories)
@@ -3033,6 +3110,64 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     // vel/delta first: 读前积分到 desire_head_pos_（唯一开环终点）
     applyHeadVelDeltaCommands();
     get_head_pos = desire_head_pos_;
+    // 座椅期（use_sit_init / 落座 / 起身未进 MPC）：强制低头，忽略外部头控
+    bool keep_head_down = false;
+    if (ros::param::get("/seat/keep_head_down", keep_head_down) && keep_head_down && headNum_ >= 2) {
+      double pitch_target = 0.35;
+      if (sitControlManager_)
+        pitch_target = sitControlManager_->headDownPitchRad();
+      else
+        ros::param::get("/seat/head_down_pitch_rad", pitch_target);
+      double pitch = pitch_target;
+      // use_sit_init：按 head_lower_start_sec + head_raise_duration 插值 0→目标
+      // MPC 坐下：SitReferenceManager 每帧写 head_pitch_cmd（此时无 head_lower_start_sec）
+      double lower_start = 0.0;
+      if (ros::param::get("/seat/head_lower_start_sec", lower_start) && lower_start > 1e-6) {
+        double T = 1.0;
+        if (sitControlManager_)
+          T = sitControlManager_->headRaiseDurationSec();
+        else
+          ros::param::get("/seat/head_raise_duration_seconds", T);
+        const double elapsed = ros::Time::now().toSec() - lower_start;
+        double alpha = 1.0;
+        if (T > 1e-6)
+          alpha = std::min(1.0, std::max(0.0, elapsed / T));
+        pitch = alpha * pitch_target;
+        ros::param::set("/seat/head_pitch_cmd", pitch);
+        if (alpha >= 1.0 - 1e-9)
+          ros::param::del("/seat/head_lower_start_sec");
+      } else {
+        double cmd = pitch_target;
+        if (ros::param::get("/seat/head_pitch_cmd", cmd))
+          pitch = cmd;
+      }
+      get_head_pos.setZero();
+      get_head_pos(1) = pitch;
+      desire_head_pos_(0) = 0.0;
+      desire_head_pos_(1) = pitch;
+    } else if (seat_head_raise_active_ && headNum_ >= 2) {
+      // 进 MPC 站立后抬头：head_down → 0，时长与坐下低头共用 head_raise_duration_seconds
+      double pitch0 = 0.35;
+      double T = 1.0;
+      if (sitControlManager_) {
+        pitch0 = sitControlManager_->headDownPitchRad();
+        T = sitControlManager_->headRaiseDurationSec();
+      } else {
+        ros::param::get("/seat/head_down_pitch_rad", pitch0);
+        ros::param::get("/seat/head_raise_duration_seconds", T);
+      }
+      const double elapsed = ros::Time::now().toSec() - seat_head_raise_start_sec_;
+      double alpha = 1.0;
+      if (T > 1e-6)
+        alpha = std::min(1.0, std::max(0.0, elapsed / T));
+      const double pitch = pitch0 * (1.0 - alpha);
+      get_head_pos.setZero();
+      get_head_pos(1) = pitch;
+      desire_head_pos_(0) = 0.0;
+      desire_head_pos_(1) = pitch;
+      if (alpha >= 1.0 - 1e-9)
+        seat_head_raise_active_ = false;
+    }
     head_mtx.unlock();
 
     auto &hardware_settings = kuavo_settings_.hardware_settings;
@@ -3086,6 +3221,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
   {
     // preUpdate 未完成（含 seathold 释放后的重入起立）时，路由到 preUpdate 起立，跳过主循环
     if (!isPreUpdateComplete) {
+      // SitUp 起立需要 release hold 前实测关节：每帧把 jointPosWBC_ 注入，begin 时即可取用
+      if (sitUp_)
+        sitUp_->setMeasuredStart(jointPosWBC_);
       preUpdate(time);
       return;
     }

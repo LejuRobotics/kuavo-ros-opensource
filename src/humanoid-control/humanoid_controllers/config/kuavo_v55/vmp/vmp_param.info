@@ -21,11 +21,11 @@ postInterpolationFrames  10      ; 后置插值帧数 (从运动轨迹过渡到�
 
 ； —— 单轨迹播放配置
 vmpModelDir                vmp_models/                  ; VMP模型文件目录
-vmpPolicyModelFile         policy_0622bigdof.onnx           ; VMP策略模型文件
+vmpPolicyModelFile         policy_0715legdofvel.onnx           ; VMP策略模型文件
 vmpEncoderModelFile        gen_v_vae.onnx            ; VAE编码器模型文件
-vmpEstimatorModelFile      estimator_0622bigdof.onnx   ; Estimator模型文件（根据enableEstimator是否启用用estimator，需要同步修改onlinePolicyModelFile）
+vmpEstimatorModelFile      estimator_0715legdofvel.onnx   ; Estimator模型文件（根据enableEstimator是否启用用estimator，需要同步修改onlinePolicyModelFile）
 vmpRefDataDir              vmp_ref_data/               ; 参考数据目录
-vmpTaskDataFile            000_liuke_2026-03-30_fbx_F091_aligned_smooth_with_contactmask_data.bin        ; 任务数据文件(默认轨迹yc_126_spec_data，帧数将从文件大小自动计算)
+vmpTaskDataFile            xsense_t009_test1-004_aligned_smooth_refined_contact_height_data.bin        ; 任务数据文件(默认轨迹yc_126_spec_data，帧数将从文件大小自动计算)
 enableLoop                 true                ; 是否启用轨迹循环播放（false时按下VMP启动按钮会继续播放 （目前不稳定!!），true会自动循环播放）
 
 
@@ -51,9 +51,9 @@ onlineVRControlMode        full_body                    ; 在线VR控制模式�
 
 
 ; 在线VR专用模型配置（可选，如果不配置则使用离线模式的模型）
-onlinePolicyModelFile      policy_0622bigdof.onnx    ; 在线VR专用策略模型文件
+onlinePolicyModelFile      policy_0715legdofvel.onnx    ; 在线VR专用策略模型文件
 onlineEncoderModelFile     gen_v_vae.onnx                      ; 在线VR专用VAE编码器模型文件
-onlineEstimatorModelFile   estimator_0622bigdof.onnx   ; 在线VR专用Estimator模型文件（根据enableEstimator是否启用用estimator，需要同步修改onlinePolicyModelFile）
+onlineEstimatorModelFile   estimator_0715legdofvel.onnx   ; 在线VR专用Estimator模型文件（根据enableEstimator是否启用用estimator，需要同步修改onlinePolicyModelFile）
 
 onlineVRBinFile            000_liuke_2026-03-30_fbx_F091_aligned_smooth_with_contactmask_data.bin   ; 用于模拟在线VR的bin文件（仅当onlineVRDataSource=bin_file时使用，帧数将从文件大小自动计算）
 onlineBufferSize           64                          ; 在线缓存区大小（帧数，默认200帧=1秒@100Hz）
@@ -93,7 +93,7 @@ use_vmp_ruiwo_kpkd               true   ; 是否在 VMP 控制器中使用并切
 ; ========== Estimator模块配置（可配置） ==========
 enableEstimator         true                           ; 是否启用Estimator模块（false:关闭, true:启用）
 estimatorHistoryFrames  8                              ; Estimator历史缓存区大小（帧数）
-estimatorInputDim       86                             ; Estimator每帧输入维度（单帧观测维度）
+estimatorInputDim       87                             ; Estimator每帧输入维度（单帧观测维度）
 estimatorOutputDim      64                             ; Estimator输出维度（状态估计编码）
                                                        ; 注意：ONNX输入为flatten后的 (historyFrames*inputDim) 维
                                                        ; 模型文件配置：
@@ -102,7 +102,7 @@ estimatorOutputDim      64                             ; Estimator输出维度�
 
 enableThetaNormalization true  ; 是否启用theta yaw角归一化功能
 actionScale        1    ; 动作缩放系数（恢复到0.25）
-numSingleObs       88     ; 单一时刻的obs的维度 (3*N+7: jp+jv+last_action+ang_vel(3)+ori_xy(2)+anchor_ori_b(2))
+numSingleObs       90     ; 单一时刻的obs的维度 (3*N+9: jp+jv+last_action+ang_vel(3)+euler_w(3)+anchor_euler_b(3))
 numRefMotionObs    79      ; 参考运动观测维度
 numEncoderObs      64      ; 编码器观测维度
 numActions         27      ; 动作维度(VMP策略输出27维)
@@ -113,7 +113,7 @@ clipActions        18.0    ; 动作裁剪值（恢复到18.0）
 obsScale_dof_pos               1.0     ; 关节位置缩放
 obsScale_dof_vel               0.05    ; 关节速度缩放
 obsScale_base_lin_vel          2.0     ; 基座线速度缩放
-obsScale_base_ang_vel          1.0     ; 基座角速度缩放
+obsScale_base_ang_vel          0.25    ; 基座角速度缩放
 obsScale_quat                  1.0     ; 四元数缩放
 
 
@@ -204,18 +204,18 @@ jointKp
     ; 手臂关节
     (13,0)  30      ; zarm_l1_joint      (env.yaml: 30)
     (14,0)  30      ; zarm_l2_joint      (env.yaml: 30)
-    (15,0)  15      ; zarm_l3_joint      (env.yaml: 15)
-    (16,0)  30      ; zarm_l4_joint      (env.yaml: 30)
-    (17,0)  15      ; zarm_l5_joint      (env.yaml: 15)
-    (18,0)  15      ; zarm_l6_joint      (env.yaml: 15)
-    (19,0)  15      ; zarm_l7_joint      (env.yaml: 15)
+    (15,0)  30      ; zarm_l3_joint      (env.yaml: 15)
+    (16,0)  60      ; zarm_l4_joint      (env.yaml: 30)
+    (17,0)  60      ; zarm_l5_joint      (env.yaml: 15)
+    (18,0)  60      ; zarm_l6_joint      (env.yaml: 15)
+    (19,0)  60      ; zarm_l7_joint      (env.yaml: 15)
     (20,0)  30      ; zarm_r1_joint      (env.yaml: 30)
     (21,0)  30      ; zarm_r2_joint      (env.yaml: 30)
-    (22,0)  15      ; zarm_r3_joint      (env.yaml: 15)
-    (23,0)  30      ; zarm_r4_joint      (env.yaml: 30)
-    (24,0)  15      ; zarm_r5_joint      (env.yaml: 15)
-    (25,0)  15      ; zarm_r6_joint      (env.yaml: 15)
-    (26,0)  15      ; zarm_r7_joint      (env.yaml: 15)
+    (22,0)  30      ; zarm_r3_joint      (env.yaml: 15)
+    (23,0)  60      ; zarm_r4_joint      (env.yaml: 30)
+    (24,0)  60      ; zarm_r5_joint      (env.yaml: 15)
+    (25,0)  60      ; zarm_r6_joint      (env.yaml: 15)
+    (26,0)  60      ; zarm_r7_joint      (env.yaml: 15)
 }
 
 jointKd
@@ -238,18 +238,18 @@ jointKd
     ; 手臂关节
     (13,0)  3.0     ; zarm_l1_joint
     (14,0)  3.0     ; zarm_l2_joint
-    (15,0)  3.0     ; zarm_l3_joint
-    (16,0)  3.0     ; zarm_l4_joint
-    (17,0)  3.0     ; zarm_l5_joint
-    (18,0)  3.0     ; zarm_l6_joint
-    (19,0)  3.0     ; zarm_l7_joint
+    (15,0)  0.5     ; zarm_l3_joint
+    (16,0)  0.5     ; zarm_l4_joint
+    (17,0)  0.5     ; zarm_l5_joint
+    (18,0)  0.5     ; zarm_l6_joint
+    (19,0)  0.5     ; zarm_l7_joint
     (20,0)  3.0     ; zarm_r1_joint
     (21,0)  3.0     ; zarm_r2_joint
-    (22,0)  3.0     ; zarm_r3_joint
-    (23,0)  3.0     ; zarm_r4_joint
-    (24,0)  3.0     ; zarm_r5_joint
-    (25,0)  3.0     ; zarm_r6_joint
-    (26,0)  3.0     ; zarm_r7_joint
+    (22,0)  0.5     ; zarm_r3_joint
+    (23,0)  0.5     ; zarm_r4_joint
+    (24,0)  0.5     ; zarm_r5_joint
+    (25,0)  0.5     ; zarm_r6_joint
+    (26,0)  0.5     ; zarm_r7_joint
 }
 
 jointControlMode
@@ -361,31 +361,32 @@ motor_pdo_kd
     ; 定义各关节的PDO Kd参数（从kuavo.json的joint_kd读取，主要用于EC_MASTER电机）
     (0,0)   1491    ; leg_l1_joint
     (1,0)   740     ; leg_l2_joint
-    (2,0)   932    ; leg_l3_joint
+    (2,0)   932     ; leg_l3_joint
     (3,0)   545     ; leg_l4_joint
     (4,0)   2237    ; leg_l5_joint
     (5,0)   2237    ; leg_l6_joint
+
     (6,0)   1491    ; leg_r1_joint
     (7,0)   740     ; leg_r2_joint
-    (8,0)   932    ; leg_r3_joint
+    (8,0)   932     ; leg_r3_joint
     (9,0)   545     ; leg_r4_joint
     (10,0)  2237    ; leg_r5_joint
     (11,0)  2237    ; leg_r6_joint
     (12,0)  2500     ; waist_joint
-    (13,0)  3       ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
-    (14,0)  3       ; zarm_l2_joint
-    (15,0)  3       ; zarm_l3_joint
-    (16,0)  3       ; zarm_l4_joint
-    (17,0)  3       ; zarm_l5_joint
-    (18,0)  3       ; zarm_l6_joint
-    (19,0)  3       ; zarm_l7_joint
-    (20,0)  3       ; zarm_r1_joint
-    (21,0)  3       ; zarm_r2_joint
-    (22,0)  3       ; zarm_r3_joint
-    (23,0)  3       ; zarm_r4_joint
-    (24,0)  3       ; zarm_r5_joint
-    (25,0)  3       ; zarm_r6_joint
-    (26,0)  3       ; zarm_r7_joint
+    (13,0)  3    ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
+    (14,0)  3    ; zarm_l2_joint
+    (15,0)  0.5    ; zarm_l3_joint
+    (16,0)  0.5    ; zarm_l4_joint
+    (17,0)  0.5    ; zarm_l5_joint
+    (18,0)  0.5    ; zarm_l6_joint
+    (19,0)  0.5    ; zarm_l7_joint
+    (20,0)  3    ; zarm_r1_joint
+    (21,0)  3    ; zarm_r2_joint
+    (22,0)  0.5    ; zarm_r3_joint
+    (23,0)  0.5    ; zarm_r4_joint
+    (24,0)  0.5    ; zarm_r5_joint
+    (25,0)  0.5    ; zarm_r6_joint
+    (26,0)  0.5    ; zarm_r7_joint
 }
 
 torqueLimits

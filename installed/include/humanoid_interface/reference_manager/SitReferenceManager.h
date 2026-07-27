@@ -60,6 +60,8 @@ class SitReferenceManager {
 
   vector_t defaultSitDownTargetState_;
   double sitDownDurationSeconds_{2.0};
+  double headDownPitchTargetRad_{0.35};
+  double headPitchDurationSeconds_{1.0};  // 与 head_raise_duration_seconds 同源：低头/抬头共用
   scalar_t sitDownStartTime_ = 0.0;
   vector_t sitDownStartState_;
   vector_t sitDownTargetState_;

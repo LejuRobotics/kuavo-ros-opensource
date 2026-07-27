@@ -287,6 +287,7 @@ add_library(${PROJECT_NAME}
         src/rl/VMPController.cpp
         src/rl/DanceController.cpp
         src/SitControlManager.cpp
+        src/SitUpController.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}

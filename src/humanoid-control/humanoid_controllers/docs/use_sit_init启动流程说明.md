@@ -97,10 +97,10 @@ humanoidController::update 主循环接管 (MPC+WBC 正常运行, stance 就绪)
 2. **读准备姿态**：默认 `squat_joint_pos_`；若读到 `/hardware_prep_joint_pos_deg` 则覆盖为坐姿准备位。
 3. **执行两阶段移动**（`/hardware_prep_two_phase=true`）：
    ```
-   jointMoveToPrepGoal(prep_offset_deg, 0)   # phase1: → sit+offset
+   jointMoveToPrepGoal(prep_offset_deg, 0)   # phase1: → sit+offset（move_speed）
    [if reverse_leg_first]
-     jointMoveToPrepGoal(prep_leg_first_deg, 1)  # phase2a: 反向 offset 腿/腰
-   jointMoveToPrepGoal(moving_pos, 1)        # phase2b: → sit_joint_pos (P3 起点)
+     jointMoveToPrepGoal(prep_leg_first_deg, 0)  # phase2a: 腿/腰→sit（move_speed）
+   jointMoveToPrepGoal(moving_pos, 1)        # phase2b: 臂→sit 或全身→sit（settle_speed）
    ```
    - `jointMoveToPrepGoal` 从 `/hardware_prep_moves[speed_index]` 取速度，调 `hardware_plant_->jointMoveTo(goal, speed, dt)`。
    - 期间用 `/hardware_prep_ec_joint_kp/kd` 作为腿 EC 增益（`setPrepEcLegGains`），移动完 `clearPrepEcLegGains`。
@@ -140,17 +140,19 @@ humanoidController::update 主循环接管 (MPC+WBC 正常运行, stance 就绪)
 
 座椅起身的 `stand_up`（preUpdate 两段重入）刻意复用了 use_sit_init 的起立轨迹：
 
-| | use_sit_init 启动 | 座椅 stand_up 重入 |
+|  | use_sit_init 启动 | 座椅 stand_up 重入 |
 |---|---|---|
-| 段0 | —（HW 把关节摆到 sit） | CSP hold → 纯 sit（反向 P3 offset，standUpWbc 插值） |
-| 段1 起点纯 sit | HW phase2 摆到的 sit_joint_pos | 段0 终点 = `getSitInitialState()` |
+| 段0 | HW：0a 腿 `move_speed` → 0b 臂 `settle_speed`（cosine + min 0.5s） | 同构 CSP，同速键 |
+| 等 start | 按 `o` / `real_initial_start` → `is_ready=1` | 同（段0 hold 后默认等 start，`seat_return.await_start_after_p5`） |
+| 段1 起点纯 sit | HW phase2 摆到的 sit_joint_pos | 段0 终点 = snapshot `sit_joint_targets` |
 | 段1 终点 | `getInitialState()+defalutArmPosMPC_` | 同 |
-| 起立速度 | `sitBootStandUpMotionVel()` | 同 |
-| 起立增益 | `sitBootLegGain`（高刚度） | 同 |
-| WBC | `standUpWbc_->update` + smoothstep | 同 |
+| 起立速度 | `sitToStandComVelocityMps()` | 同 |
+| 起立增益 | `sitBootLegGain`（高刚度） | 同（段0/段1 均开） |
+| 段0 控制 | 硬件位置跟踪 | CSP `mode=2` + `tau=0`（**不用** SitDownWbc/StandUpWbc） |
+| 段1 WBC | `standUpWbc_->update` + smoothstep | 同 |
 | MPC 初始化 | `resetMpcNode` + 等 initialPolicy | 同（+ 额外 `pauseResumeMpcNode(false)` 恢复暂停） |
 
-**即：座椅 stand_up 的段1 == use_sit_init 的起立段。** 段0 只是多了「从 CSP hold 反向 P3 回到纯 sit」这一步，把机器人摆到和开机准备位一样的位姿，再走同一条起立轨迹。
+**即：座椅 stand_up 的段0 一比一复刻 use_sit_init 硬件 settle；等 start 后段1 == use_sit_init 的起立段。**
 
 ---
 

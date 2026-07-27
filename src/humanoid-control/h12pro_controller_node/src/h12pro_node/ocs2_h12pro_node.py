@@ -8,7 +8,7 @@ from sensor_msgs.msg import Joy
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
 from robot_state.robot_state_machine import robot_state_machine, RobotStateMachine, states
-from robot_state.multi_before_callback import is_switch_controller_in_cooldown, clear_switch_controller_cooldown
+from robot_state.multi_before_callback import is_switch_controller_in_cooldown, clear_switch_controller_cooldown, is_sit_stand_in_progress
 from transitions.core import MachineError
 from utils.utils import read_json_file
 import rospkg
@@ -52,7 +52,8 @@ LEGAL_STATES = [
     "vr_remote_control",
     "walk",
     "trot",
-    "climb_stair"
+    "climb_stair",
+    "sit"
 ]
 
 # ROS param 名称用于持久化最后状态
@@ -814,7 +815,8 @@ class H12PROControllerNode:
             # 紧急停止时，清除 switch_controller 的冷却期，确保可以立即停止
             if kuavo_control_scheme == "multi":
                 clear_switch_controller_cooldown()
-                rospy.loginfo("[EmergencyStop] Cleared switch_controller cooldown to allow immediate stop.")
+                rospy.set_param("/sit_stand_abort", True)
+                rospy.loginfo("[EmergencyStop] Cleared switch_controller cooldown, set sit_stand_abort.")
 
             # 检查当前控制器是否为 mpc，只有 mpc 控制器支持缓慢下降
             current_controller = None
@@ -1000,7 +1002,9 @@ class H12PROControllerNode:
         # self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
         # self.h12_to_joy_node.process_channels()
 
-        if self.only_half_up_body or is_switch_controller_in_cooldown() or self.robot_action_executing:
+        if (self.only_half_up_body or is_switch_controller_in_cooldown()
+                or self.robot_action_executing or self.robot_state_machine.state == "sit"
+                or is_sit_stand_in_progress()):
             neutral_msg = h12proRemoteControllerChannel()
             channels = Config.get_default_channels()
             neutral_msg.channels = tuple(channels)
@@ -1008,6 +1012,8 @@ class H12PROControllerNode:
             self.h12_to_joy_node.process_channels()
 
             reasons = []
+            if self.robot_state_machine.state == "sit":
+                reasons.append("sit state")
             if is_switch_controller_in_cooldown():
                 reasons.append("switch_controller cooldown")
             if self.robot_action_executing:

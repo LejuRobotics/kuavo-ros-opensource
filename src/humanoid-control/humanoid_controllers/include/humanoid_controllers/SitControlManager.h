@@ -49,6 +49,14 @@ class SitControlManager {
                                   const Eigen::VectorXd& sit_mpc_state, int hw_waist_joints,
                                   int hw_leg_joints, int hw_arm_joints, int hw_joint_count,
                                   const kuavo_common::SeatConfig& seat);
+  /**
+   * sitcomplete→stand_up 段0（实机）：经 publishHardwarePrepPlan(reverse_only) 发布
+   * /hardware_prep_* 供 hardware/seat_return_reverse_prep（mid=腿/腰 sit + 臂 measured）。
+   */
+  bool publishSeatReturnReversePrepParams(const Eigen::VectorXd& sit_mpc_state,
+                                          const Eigen::VectorXd& measured_hw_pos_rad, int hw_waist_joints,
+                                          int hw_leg_joints, int hw_arm_joints, int hw_joint_count,
+                                          std::string& err) const;
   /** 与 configureLaunchBoot 结果同步实例标志（humanoidController 在 SCM 创建后调用） */
   void setSeatConfig(const kuavo_common::SeatConfig& seat) { seat_config_ = &seat; }
   void syncBootFlags(bool use_sit_init_boot);
@@ -57,6 +65,16 @@ class SitControlManager {
   bool useSitInitBoot() const { return use_sit_init_boot_; }
   bool hasSitBootLegGains() const { return has_sit_boot_leg_gains_; }
   bool sitBootLegGain(size_t leg_index, double& kp, double& kd) const;
+
+  /** hardware_sit_pose_prep 速度（度/秒）：
+   *  move = phase1→offset 与 reverse 腿/腰(0a)；settle = reverse 臂(0b) / 无 reverse 时全身回 sit */
+  double prepMoveSpeedDegPerS() const { return boot_prep_speed_deg_; }
+  double prepSettleSpeedDegPerS() const { return boot_prep_settle_speed_deg_; }
+  /** 回 sit 是否先腿/腰后臂（与 hardware reverse_leg_before_arm 一致） */
+  bool prepReverseLegBeforeArm() const { return boot_prep_reverse_leg_before_arm_; }
+  /** 段0 臂绕扶手中间点是否启用（相对臂段起点实测臂角的增量非全 0） */
+  bool reverseArmClearEnabled() const { return reverse_arm_clear_enabled_; }
+  const std::array<double, kArmDof>& reverseArmClearOffsetRad() const { return reverse_arm_clear_offset_rad_; }
 
   /** preUpdate 起立插值起点：坐姿启动用 sit，否则用 squat（仅填充前 12+jointNum 维） */
   Eigen::VectorXd makeBootStartState(const Eigen::VectorXd& sit_state, const Eigen::VectorXd& squat_state,
@@ -70,11 +88,20 @@ class SitControlManager {
   /** 起立轨迹结束后、init MPC 前的稳定等待（秒） */
   double mpcInitDelayAfterStandUpSec() const { return mpc_init_delay_after_stand_up_sec_; }
 
+  /** 座椅/use_sit_init 起身期低头 pitch（rad，zhead_2；正=低头） */
+  double headDownPitchRad() const { return head_down_pitch_rad_; }
+
+  /** 进 MPC 站立后抬头、以及 MPC 坐下低头：插值共用时长（秒）；0=瞬间到位 */
+  double headRaiseDurationSec() const { return head_raise_duration_sec_; }
+
   /** 起立接触保护：robotStandUpCompleteTime_ 后的额外容忍时间（秒） */
   double contactProtectGraceAfterStandUpSec() const { return contact_protect_grace_after_stand_up_sec_; }
 
   /** 反向 seat_offset 完成后、sit→stand 前的 sit 姿态保持时间（秒）；0=立即起立 */
   double holdAtSitPoseBeforeStandUpSec() const { return hold_at_sit_pose_before_stand_up_sec_; }
+
+  /** 段0 回 sit 后是否等 start（/hardware/is_ready）再进段1；对齐 use_sit_init 按 o */
+  bool awaitStartBeforeSitToStand() const { return await_start_before_sit_to_stand_; }
 
   /** P3 首帧：用硬件/仿真实测 14 臂角覆盖基准（补全 MPC 冻结态可能不足的臂维） */
   void seedArmBaselineFromHardware(const Eigen::VectorXd& arm_hw_pos);
@@ -106,20 +133,61 @@ class SitControlManager {
   /** P1 落座完成后是否已到达最终 CSP hold（P3 无 P4，或 P4 完成） */
   bool isSitSequenceComplete() const { return sit_sequence_complete_; }
 
-  /** stand_up 开始前：快照 CSP 锁定姿关节目标，供反向 seat_offset 插值 */
+  /** stand_up 开始前：快照；段0 对标 HW settle（可选先腿后手 + 臂绕扶手） */
   struct StandUpFromSeatStartSnapshot {
     bool valid = false;
-    SeatJointTargets csp_hold_joint_targets{};
-    /** 反向 seat_offset 插值时长（秒），通常等于 seat_offset_duration_seconds */
-    double reverse_seat_offset_duration_sec = 1.0;
-    bool use_smoothstep = true;
+    SeatJointTargets measured_start_joint_targets{};  ///< 起点：释放 hold 前实测
+    SeatJointTargets sit_joint_targets{};             ///< 终点：sit_joint_pos
+    SeatJointTargets leg_first_mid_targets{};         ///< 中间态：腿/腰=sit，臂=实测
+    SeatJointTargets arm_clear_mid_targets{};         ///< 绕扶手：腿/腰=sit，臂=实测+相对增量
+    bool reverse_leg_before_arm = true;
+    bool reverse_arm_clear = false;
+    double phase0a_duration_sec = 0.0;  ///< 腿/腰（或全身）回 sit
+    double phase0b_duration_sec = 0.0;  ///< 有 clear：臂→clear；无 clear：臂→sit
+    double phase0c_duration_sec = 0.0;  ///< 有 clear：臂 clear→sit；否则 0
   };
 
-  /**
-   * 在 releaseSeatResources 之前调用：捕获最终 CSP 锁定姿关节目标。
-   * @return false 时 err 说明拒绝原因（与 releaseSeatHoldForStandUp 前置条件一致）
-   */
-  bool captureStandUpFromSeatStartSnapshot(StandUpFromSeatStartSnapshot& out, std::string& err) const;
+  /** 归一化时间 t∈[0,1] → HW jointMoveTo/calcCos 的插值系数 (1-cos(πt))/2 */
+  static double jointMoveToCosine01(double t);
+
+  /** HW jointMoveTo 单段最短时长（秒），与 hardware_plant::jointMoveTo 一致 */
+  static constexpr double kJointMoveToMinDurationSec = 0.5;
+
+  /** 当前段0 子阶段时长（0=0a，1=0b，2=0c） */
+  static double phase0StageDurationSec(const StandUpFromSeatStartSnapshot& snap, int stage) {
+    if (stage <= 0)
+      return snap.phase0a_duration_sec;
+    if (stage == 1)
+      return snap.phase0b_duration_sec;
+    return snap.phase0c_duration_sec;
+  }
+
+  /** 段0 最终子阶段索引（有 arm_clear 且 reverse 时为 2，仅 reverse 为 1，否则 0） */
+  static int phase0FinalStage(const StandUpFromSeatStartSnapshot& snap) {
+    if (!snap.reverse_leg_before_arm)
+      return 0;
+    return snap.reverse_arm_clear ? 2 : 1;
+  }
+
+  /** 关节目标线性插值：t=0→from，t=1→to（时间律由调用方用 jointMoveToCosine01 等给出） */
+  static SeatJointTargets lerpJointTargets(const SeatJointTargets& from, const SeatJointTargets& to, double t);
+
+  /** 中间态：腿/腰取 sit，臂取 measured（HW reverse_leg_first） */
+  static SeatJointTargets makeLegFirstMidTargets(const SeatJointTargets& measured,
+                                                 const SeatJointTargets& sit);
+
+  /** 绕扶手中间态：腿/腰=sit，臂=measured+clear_offset（相对臂段起点） */
+  static SeatJointTargets makeArmClearMidTargets(const SeatJointTargets& measured,
+                                                 const SeatJointTargets& sit,
+                                                 const std::array<double, kArmDof>& clear_offset_rad);
+
+  /** max|dq|；legs_waist / arms 可选计入 */
+  static double maxAbsDq(const SeatJointTargets& a, const SeatJointTargets& b, bool legs_waist,
+                         bool arms);
+
+  /** 从硬件关节向量（腿|腰|臂）填充 SeatJointTargets */
+  static SeatJointTargets seatTargetsFromHwJoints(const Eigen::Ref<const Eigen::VectorXd>& hw_pos,
+                                                  size_t leg_dof, size_t waist_num, size_t arm_num);
 
   /**
    * 落座序列到达最终 CSP 锁定姿后，释放座椅资源，供 humanoidController 进入 stand_up preUpdate。
@@ -134,6 +202,15 @@ class SitControlManager {
   void applyRealHardwareCspHold(kuavo_msgs::jointCmd& msg, const Eigen::VectorXd& leg_waist_kp,
                                 const Eigen::VectorXd& leg_waist_kd, int leg_waist_count, int arm_start,
                                 int arm_count) const;
+
+  /**
+   * 按 SeatJointTargets 填充 CSP jointCmd（mode=2 + sitBoot 腿增益）。
+   * real_hw=true 时再套 applyRealHardwareCspHold。!targets.valid 返回 false。
+   */
+  bool fillSeatCspHoldCmd(kuavo_msgs::jointCmd& msg, const SeatJointTargets& targets,
+                          const Eigen::VectorXd& joint_kp, const Eigen::VectorXd& joint_kd,
+                          const std::vector<double>& max_current, int leg_num, int waist_num, int arm_num,
+                          int head_num, bool real_hw, double head_pitch_rad = 0.0) const;
 
   /** P3/P4：更新偏置或腿部序列；RUNNING 写 WBC 关节参考，CSP 阶段写 output 并 skip_wbc=true */
   struct SeatOffsetStep {
@@ -232,10 +309,17 @@ class SitControlManager {
   bool use_sit_init_boot_{false};
   bool has_sit_boot_leg_gains_{false};
   double boot_prep_speed_deg_{8.0};
+  double boot_prep_settle_speed_deg_{8.0};
+  bool boot_prep_reverse_leg_before_arm_{true};
+  bool reverse_arm_clear_enabled_{false};
+  std::array<double, kArmDof> reverse_arm_clear_offset_rad_{};
   double sit_to_stand_com_velocity_mps_{0.08};
   double mpc_init_delay_after_stand_up_sec_{0.8};
   double contact_protect_grace_after_stand_up_sec_{0.5};
   double hold_at_sit_pose_before_stand_up_sec_{0.0};
+  double head_down_pitch_rad_{0.35};       // stand_up_from_seat.head_down_pitch_rad
+  double head_raise_duration_sec_{1.0};    // 低头/抬头插值共用时长
+  bool await_start_before_sit_to_stand_{true};
   std::vector<double> sit_boot_leg_kp_;
   std::vector<double> sit_boot_leg_kd_;
   State state_{State::IDLE};

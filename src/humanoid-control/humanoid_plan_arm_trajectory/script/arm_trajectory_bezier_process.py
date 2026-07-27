@@ -45,9 +45,17 @@ ROBAN = "roban"
 
 
 def is_tact_playback_controller_allowed(control_scheme, controller_name):
+    return get_tact_playback_controller_action(
+        control_scheme, KUAVO, 5, controller_name
+    ) == "allowed"
+
+
+def get_tact_playback_controller_action(control_scheme, robot_class, robot_major, controller_name):
     if control_scheme != "multi":
-        return True
-    return controller_name == "amp_controller"
+        return "allowed"
+    if robot_class == KUAVO and robot_major == 5 and controller_name == "amp_wild_controller":
+        return "switch_to_amp_controller"
+    return "allowed"
 
 
 class ArmTrajectoryBezierDemo:
@@ -670,7 +678,13 @@ class ArmTrajectoryBezierDemo:
 
         while (rospy.Time.now() - start_time).to_sec() < timeout and not rospy.is_shutdown():
             current_controller = self.get_current_controller_name()
-            if is_tact_playback_controller_allowed(self.kuavo_control_scheme, current_controller):
+            action = get_tact_playback_controller_action(
+                self.kuavo_control_scheme,
+                self.robot_class,
+                self.robot_version.major(),
+                current_controller
+            )
+            if action == "allowed":
                 return True
 
             if current_controller is None:
@@ -691,7 +705,12 @@ class ArmTrajectoryBezierDemo:
             rospy.sleep(0.05)
 
         current_controller = self.get_current_controller_name()
-        return is_tact_playback_controller_allowed(self.kuavo_control_scheme, current_controller)
+        return get_tact_playback_controller_action(
+            self.kuavo_control_scheme,
+            self.robot_class,
+            self.robot_version.major(),
+            current_controller
+        ) == "allowed"
 
     def get_current_control_mode(self):
         """获取当前实际控制模式

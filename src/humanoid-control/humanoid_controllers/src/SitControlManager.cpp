@@ -6,6 +6,7 @@
 #include <ros/ros.h>
 #include <sstream>
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace humanoid_controller {
@@ -48,11 +49,63 @@ void fillHwPrepJointPosDegFromSitMpc(std::vector<double>& joint_pos_deg, const E
   }
 }
 
+/** 腿|腰|臂|头：写入低头 pitch（度） */
+void applyHeadDownToHwPrepDeg(std::vector<double>& joint_pos_deg, int leg_num, int waist_num, int arm_num,
+                              double head_down_pitch_rad) {
+  const size_t yaw_i = static_cast<size_t>(leg_num + waist_num + arm_num);
+  if (yaw_i < joint_pos_deg.size())
+    joint_pos_deg[yaw_i] = 0.0;
+  if (yaw_i + 1 < joint_pos_deg.size())
+    joint_pos_deg[yaw_i + 1] = head_down_pitch_rad * 180.0 / M_PI;
+}
+
+void setSeatKeepHeadDown(bool keep, double pitch_rad = 0.35) {
+  ros::param::set("/seat/keep_head_down", keep);
+  if (keep) {
+    ros::param::set("/seat/head_down_pitch_rad", pitch_rad);
+    // use_sit_init：从 0 起按 head_raise_duration_seconds 插值低头（fillHeadJointCmd 推进）
+    ros::param::set("/seat/head_pitch_cmd", 0.0);
+    ros::param::set("/seat/head_lower_start_sec", ros::Time::now().toSec());
+  } else {
+    ros::param::del("/seat/head_pitch_cmd");
+    ros::param::del("/seat/head_lower_start_sec");
+  }
+}
+
+/** reverse_only：sitcomplete→stand_up 段0，无 phase1 offset；不置 hardware_sit_prep_ready */
 void publishHardwarePrepPlan(const SeatBootConfig& boot, const std::vector<double>& prep_sit_deg,
                              const std::vector<double>* prep_offset_deg,
-                             const std::vector<double>* prep_reverse_leg_first_deg = nullptr) {
+                             const std::vector<double>* prep_reverse_leg_first_deg = nullptr,
+                             bool reverse_only = false,
+                             const std::vector<double>* prep_arm_clear_deg = nullptr) {
   ros::param::set("/hardware_prep_joint_pos_deg", prep_sit_deg);
-  if (prep_offset_deg != nullptr) {
+  if (reverse_only) {
+    ros::param::del("/hardware_prep_two_phase");
+    ros::param::del("/hardware_prep_joint_pos_offset_deg");
+    if (prep_reverse_leg_first_deg != nullptr) {
+      ros::param::set("/hardware_prep_reverse_leg_first", true);
+      ros::param::set("/hardware_prep_joint_pos_leg_first_deg", *prep_reverse_leg_first_deg);
+    } else {
+      ros::param::del("/hardware_prep_reverse_leg_first");
+      ros::param::del("/hardware_prep_joint_pos_leg_first_deg");
+    }
+    if (prep_arm_clear_deg != nullptr) {
+      ros::param::set("/hardware_prep_reverse_arm_clear", true);
+      ros::param::set("/hardware_prep_joint_pos_arm_clear_deg", *prep_arm_clear_deg);
+    } else {
+      ros::param::del("/hardware_prep_reverse_arm_clear");
+      ros::param::del("/hardware_prep_joint_pos_arm_clear_deg");
+    }
+    const std::vector<double> moves = {boot.prep_speed_deg, boot.prep_settle_speed_deg};
+    ros::param::set("/hardware_prep_moves", moves);
+    ROS_INFO("[SitControlManager] seat_return reverse prep: move=%.1f settle=%.1f reverse_leg_first=%s "
+             "arm_clear=%s.",
+             boot.prep_speed_deg, boot.prep_settle_speed_deg,
+             prep_reverse_leg_first_deg != nullptr ? "true" : "false",
+             prep_arm_clear_deg != nullptr ? "true" : "false");
+  } else if (prep_offset_deg != nullptr) {
+    ros::param::del("/hardware_prep_reverse_arm_clear");
+    ros::param::del("/hardware_prep_joint_pos_arm_clear_deg");
     ros::param::set("/hardware_prep_two_phase", true);
     ros::param::set("/hardware_prep_joint_pos_offset_deg", *prep_offset_deg);
     if (prep_reverse_leg_first_deg != nullptr) {
@@ -65,8 +118,9 @@ void publishHardwarePrepPlan(const SeatBootConfig& boot, const std::vector<doubl
     const std::vector<double> moves = {boot.prep_speed_deg, boot.prep_settle_speed_deg};
     ros::param::set("/hardware_prep_moves", moves);
     if (prep_reverse_leg_first_deg != nullptr) {
-      ROS_INFO("[SitControlManager] hardware prep: offset (%.1f deg/s) -> reverse legs (%.1f deg/s) -> reverse arms (%.1f deg/s).",
-               boot.prep_speed_deg, boot.prep_settle_speed_deg, boot.prep_settle_speed_deg);
+      ROS_INFO("[SitControlManager] hardware prep: offset (%.1f deg/s) -> reverse legs (%.1f deg/s) -> "
+               "reverse arms (%.1f deg/s).",
+               boot.prep_speed_deg, boot.prep_speed_deg, boot.prep_settle_speed_deg);
     } else {
       ROS_INFO("[SitControlManager] hardware prep: two-phase sit+offset (%.1f deg/s) -> sit_joint_pos (%.1f deg/s).",
                boot.prep_speed_deg, boot.prep_settle_speed_deg);
@@ -76,6 +130,8 @@ void publishHardwarePrepPlan(const SeatBootConfig& boot, const std::vector<doubl
     ros::param::del("/hardware_prep_joint_pos_offset_deg");
     ros::param::del("/hardware_prep_reverse_leg_first");
     ros::param::del("/hardware_prep_joint_pos_leg_first_deg");
+    ros::param::del("/hardware_prep_reverse_arm_clear");
+    ros::param::del("/hardware_prep_joint_pos_arm_clear_deg");
     const std::vector<double> moves = {0.0, boot.prep_speed_deg};
     ros::param::set("/hardware_prep_moves", moves);
   }
@@ -84,17 +140,23 @@ void publishHardwarePrepPlan(const SeatBootConfig& boot, const std::vector<doubl
     ros::param::set("/hardware_prep_ec_joint_kd", boot.leg_joint_kd);
     ROS_INFO("[SitControlManager] hardware prep: sit_boot leg EC kp/kd (%zu dof, waist/arm EC unchanged).",
              boot.leg_joint_kp.size());
-  } else if (prep_offset_deg == nullptr) {
+  } else if (!reverse_only && prep_offset_deg == nullptr) {
     ROS_INFO("[SitControlManager] hardware prep: single jointMoveTo (%.1f deg/s).", boot.prep_speed_deg);
   }
+  // boot 路径：hardware_node 在 cppad 完成后可能立即抢跑
+  if (!reverse_only)
+    ros::param::set("/hardware_sit_prep_ready", true);
 }
 
 void clearHardwarePrepParams() {
+  ros::param::set("/hardware_sit_prep_ready", false);
   ros::param::del("/hardware_prep_joint_pos_deg");
   ros::param::del("/hardware_prep_joint_pos_offset_deg");
   ros::param::del("/hardware_prep_joint_pos_leg_first_deg");
+  ros::param::del("/hardware_prep_joint_pos_arm_clear_deg");
   ros::param::del("/hardware_prep_two_phase");
   ros::param::del("/hardware_prep_reverse_leg_first");
+  ros::param::del("/hardware_prep_reverse_arm_clear");
   ros::param::del("/hardware_prep_moves");
   ros::param::del("/hardware_prep_ec_joint_kp");
   ros::param::del("/hardware_prep_ec_joint_kd");
@@ -145,6 +207,7 @@ bool SitControlManager::configureLaunchBoot(bool use_sit_init, const RobotVersio
                robot_version.to_string().c_str());
     }
     clearHardwarePrepParams();
+    setSeatKeepHeadDown(false);
     return false;
   }
   if (hw_joint_count <= 0) {
@@ -202,6 +265,10 @@ bool SitControlManager::configureLaunchBoot(bool use_sit_init, const RobotVersio
 
   std::vector<double> prep_sit_deg(static_cast<size_t>(hw_joint_count), 0.0);
   fillHwPrepJointPosDegFromSitMpc(prep_sit_deg, sit_mpc_state, hw_waist_joints, hw_leg_joints, hw_arm_joints);
+  double head_down = 0.35;
+  if (seat.contains("stand_up_from_seat") && seat["stand_up_from_seat"].is_object())
+    head_down = seat["stand_up_from_seat"].value("head_down_pitch_rad", head_down);
+  applyHeadDownToHwPrepDeg(prep_sit_deg, hw_leg_joints, hw_waist_joints, hw_arm_joints, head_down);
   // Phase 1: sit_joint_pos + seat_offset（P3 终点，相当于反向 P3 的起始位置）
   std::vector<double> prep_offset_deg = prep_sit_deg;
   for (int i = 0; i < hw_leg_joints && i < static_cast<int>(kLegDof); ++i)
@@ -227,12 +294,97 @@ bool SitControlManager::configureLaunchBoot(bool use_sit_init, const RobotVersio
 
   // Phase 2/3: sit_joint_pos（P3 起点；reverse_leg_first 时先腿后手）
   publishHardwarePrepPlan(boot, prep_sit_deg, &prep_offset_deg, prep_leg_first_ptr);
+  setSeatKeepHeadDown(true, head_down);
+  // 与座椅 stand_up 共用：HW prep 完成后是否等按 o / real_initial_start
+  bool await_start = true;
+  if (seat.contains("seat_return") && seat["seat_return"].is_object())
+    await_start = seat["seat_return"].value("await_start_after_p5", true);
+  ros::param::set("/seat/await_start_after_p5", await_start);
   ROS_INFO(
       "[SitControlManager] use_sit_init hardware prep: phase1=sit+offset, reverse=%s; "
-      "leg[0..%d) waist[%d] arm[%d..%d) (deg).",
+      "leg[0..%d) waist[%d] arm[%d..%d); keep_head_down pitch=%.3f rad; await_start_after_p5=%s.",
       reverse_leg_before_arm ? "legs then arms" : "all joints",
       hw_leg_joints, hw_leg_joints, hw_leg_joints + hw_waist_joints,
-      hw_leg_joints + hw_waist_joints + hw_arm_joints);
+      hw_leg_joints + hw_waist_joints + hw_arm_joints, head_down,
+      await_start ? "true" : "false");
+  return true;
+}
+
+bool SitControlManager::publishSeatReturnReversePrepParams(
+    const Eigen::VectorXd& sit_mpc_state, const Eigen::VectorXd& measured_hw_pos_rad, int hw_waist_joints,
+    int hw_leg_joints, int hw_arm_joints, int hw_joint_count, std::string& err) const {
+  err.clear();
+  if (hw_joint_count <= 0 || hw_leg_joints <= 0) {
+    err = "invalid hw joint dims for seat reverse prep";
+    return false;
+  }
+  if (boot_prep_speed_deg_ <= 0.0 || boot_prep_settle_speed_deg_ <= 0.0) {
+    err = "hardware_sit_pose_prep move/settle speeds not loaded";
+    return false;
+  }
+
+  const Eigen::Index need =
+      static_cast<Eigen::Index>(hw_leg_joints + hw_waist_joints + hw_arm_joints);
+  if (measured_hw_pos_rad.size() < need) {
+    err = "measured_hw_pos too small for reverse mid targets";
+    return false;
+  }
+
+  SeatBootConfig boot;
+  boot.prep_speed_deg = boot_prep_speed_deg_;
+  boot.prep_settle_speed_deg = boot_prep_settle_speed_deg_;
+  if (has_sit_boot_leg_gains_ && sit_boot_leg_kp_.size() == kLegDof && sit_boot_leg_kd_.size() == kLegDof) {
+    boot.leg_joint_kp = sit_boot_leg_kp_;
+    boot.leg_joint_kd = sit_boot_leg_kd_;
+  }
+  boot.valid = true;
+
+  std::vector<double> prep_sit_deg(static_cast<size_t>(hw_joint_count), 0.0);
+  fillHwPrepJointPosDegFromSitMpc(prep_sit_deg, sit_mpc_state, hw_waist_joints, hw_leg_joints, hw_arm_joints);
+  applyHeadDownToHwPrepDeg(prep_sit_deg, hw_leg_joints, hw_waist_joints, hw_arm_joints, head_down_pitch_rad_);
+
+  std::vector<double> prep_leg_first_deg;
+  const std::vector<double>* leg_first_ptr = nullptr;
+  if (boot_prep_reverse_leg_before_arm_) {
+    prep_leg_first_deg = prep_sit_deg;
+    const size_t arm_hw_base = static_cast<size_t>(hw_leg_joints + hw_waist_joints);
+    for (int i = 0; i < hw_arm_joints; ++i) {
+      const Eigen::Index src = static_cast<Eigen::Index>(hw_leg_joints + hw_waist_joints + i);
+      if (arm_hw_base + static_cast<size_t>(i) < prep_leg_first_deg.size() && src < measured_hw_pos_rad.size())
+        prep_leg_first_deg[arm_hw_base + static_cast<size_t>(i)] =
+            measured_hw_pos_rad(src) * 180.0 / M_PI;
+    }
+    applyHeadDownToHwPrepDeg(prep_leg_first_deg, hw_leg_joints, hw_waist_joints, hw_arm_joints,
+                             head_down_pitch_rad_);
+    leg_first_ptr = &prep_leg_first_deg;
+  }
+
+  std::vector<double> prep_arm_clear_deg;
+  const std::vector<double>* arm_clear_ptr = nullptr;
+  if (reverse_arm_clear_enabled_) {
+    if (!boot_prep_reverse_leg_before_arm_) {
+      err = "reverse_arm_clear_joint_offset_rad requires reverse_leg_before_arm=true";
+      return false;
+    }
+    // 腿/腰=sit，臂=实测臂 + 相对增量（绕扶手）
+    prep_arm_clear_deg = prep_sit_deg;
+    const size_t arm_hw_base = static_cast<size_t>(hw_leg_joints + hw_waist_joints);
+    for (int i = 0; i < hw_arm_joints && i < static_cast<int>(kArmDof); ++i) {
+      const Eigen::Index src = static_cast<Eigen::Index>(hw_leg_joints + hw_waist_joints + i);
+      if (arm_hw_base + static_cast<size_t>(i) < prep_arm_clear_deg.size() && src < measured_hw_pos_rad.size()) {
+        prep_arm_clear_deg[arm_hw_base + static_cast<size_t>(i)] =
+            (measured_hw_pos_rad(src) + reverse_arm_clear_offset_rad_[static_cast<size_t>(i)]) * 180.0 /
+            M_PI;
+      }
+    }
+    for (int i = hw_leg_joints + hw_waist_joints + hw_arm_joints; i < hw_joint_count; ++i) {
+      if (i < measured_hw_pos_rad.size())
+        prep_arm_clear_deg[static_cast<size_t>(i)] = measured_hw_pos_rad(i) * 180.0 / M_PI;
+    }
+    arm_clear_ptr = &prep_arm_clear_deg;
+  }
+
+  publishHardwarePrepPlan(boot, prep_sit_deg, nullptr, leg_first_ptr, /*reverse_only=*/true, arm_clear_ptr);
   return true;
 }
 
@@ -331,10 +483,24 @@ bool SitControlManager::loadConfig() {
         "contact_protect_grace_after_stand_up_seconds", contact_protect_grace_after_stand_up_sec_);
     hold_at_sit_pose_before_stand_up_sec_ = stand_up_cfg->value("hold_at_sit_pose_before_stand_up_seconds",
                                                                 hold_at_sit_pose_before_stand_up_sec_);
+    head_down_pitch_rad_ = stand_up_cfg->value("head_down_pitch_rad", head_down_pitch_rad_);
+    head_raise_duration_sec_ = stand_up_cfg->value("head_raise_duration_seconds", head_raise_duration_sec_);
+    ros::param::set("/seat/head_down_pitch_rad", head_down_pitch_rad_);
+    ros::param::set("/seat/head_raise_duration_seconds", head_raise_duration_sec_);
   }
   if (mpc_init_delay_after_stand_up_sec_ < 0.0) mpc_init_delay_after_stand_up_sec_ = 0.0;
   if (contact_protect_grace_after_stand_up_sec_ < 0.0) contact_protect_grace_after_stand_up_sec_ = 0.0;
   if (hold_at_sit_pose_before_stand_up_sec_ < 0.0) hold_at_sit_pose_before_stand_up_sec_ = 0.0;
+  if (head_raise_duration_sec_ < 0.0) head_raise_duration_sec_ = 0.0;
+
+  // ── seat_return（段0 后等 start 再 sit→stand，对齐 use_sit_init 按 o）──
+  await_start_before_sit_to_stand_ = true;
+  if (seat.contains("seat_return") && seat["seat_return"].is_object())
+    await_start_before_sit_to_stand_ = seat["seat_return"].value("await_start_after_p5", true);
+  ros::param::set("/seat/await_start_after_p5", await_start_before_sit_to_stand_);
+  ROS_INFO("[SitControlManager] seat_return: await_start_before_sit_to_stand=%s "
+           "(use_sit_init prep 与座椅 stand_up 段0 后共用).",
+           await_start_before_sit_to_stand_ ? "true" : "false");
 
   // ── hardware_sit_pose_prep（use_sit_init 腿 EC 增益，P3/P4 CSP 锁定复用）──
   const nlohmann::json* prep_obj =
@@ -344,6 +510,33 @@ bool SitControlManager::loadConfig() {
   if (prep_obj) {
     if (prep_obj->contains("move_speed_deg_per_s"))
       boot_prep_speed_deg_ = (*prep_obj)["move_speed_deg_per_s"].get<double>();
+    boot_prep_settle_speed_deg_ = boot_prep_speed_deg_;
+    if (prep_obj->contains("settle_speed_deg_per_s"))
+      boot_prep_settle_speed_deg_ = (*prep_obj)["settle_speed_deg_per_s"].get<double>();
+    if (boot_prep_speed_deg_ <= 0.0)
+      boot_prep_speed_deg_ = 8.0;
+    if (boot_prep_settle_speed_deg_ <= 0.0)
+      boot_prep_settle_speed_deg_ = boot_prep_speed_deg_;
+    boot_prep_reverse_leg_before_arm_ =
+        prep_obj->contains("reverse_leg_before_arm") && (*prep_obj)["reverse_leg_before_arm"].get<bool>();
+    reverse_arm_clear_enabled_ = false;
+    reverse_arm_clear_offset_rad_.fill(0.0);
+    if (prep_obj->contains("reverse_arm_clear_joint_offset_rad")) {
+      const auto& arr = (*prep_obj)["reverse_arm_clear_joint_offset_rad"];
+      if (!arr.is_array() || arr.size() != kArmDof) {
+        ROS_ERROR("[SitControlManager] reverse_arm_clear_joint_offset_rad must be array size %zu.", kArmDof);
+        return false;
+      }
+      for (size_t i = 0; i < kArmDof; ++i) {
+        reverse_arm_clear_offset_rad_[i] = arr[i].get<double>();
+        if (std::abs(reverse_arm_clear_offset_rad_[i]) > 1e-9)
+          reverse_arm_clear_enabled_ = true;
+      }
+      if (reverse_arm_clear_enabled_ && !boot_prep_reverse_leg_before_arm_) {
+        ROS_ERROR("[SitControlManager] reverse_arm_clear_joint_offset_rad requires reverse_leg_before_arm=true.");
+        return false;
+      }
+    }
     if (prep_obj->contains("leg_joint_kp") && prep_obj->contains("leg_joint_kd") &&
         (*prep_obj)["leg_joint_kp"].is_array() && (*prep_obj)["leg_joint_kd"].is_array() &&
         (*prep_obj)["leg_joint_kp"].size() == kLegDof && (*prep_obj)["leg_joint_kd"].size() == kLegDof) {
@@ -356,6 +549,11 @@ bool SitControlManager::loadConfig() {
       has_sit_boot_leg_gains_ = true;
       ROS_INFO("[SitControlManager] hardware_sit_pose_prep leg EC kp/kd loaded for CSP hold.");
     }
+    ROS_INFO("[SitControlManager] hardware_sit_pose_prep speeds: move=%.1f deg/s, settle=%.1f deg/s, "
+             "reverse_leg_before_arm=%s, reverse_arm_clear=%s.",
+             boot_prep_speed_deg_, boot_prep_settle_speed_deg_,
+             boot_prep_reverse_leg_before_arm_ ? "true" : "false",
+             reverse_arm_clear_enabled_ ? "true" : "false");
   }
 
   // ── 踝关节堵转阈值 ──
@@ -371,9 +569,10 @@ bool SitControlManager::loadConfig() {
              kLegActionSteps, leg_action_durations_[0], leg_action_durations_[1], leg_action_durations_[2],
              leg_action_smoothstep_ ? "smoothstep" : "linear");
   ROS_INFO("[SitControlManager] stand_up_from_seat: sit_to_stand_vel=%.3f m/s, mpc_init_delay=%.2fs, "
-           "contact_grace=%.2fs, hold_at_sit=%.2fs.",
+           "contact_grace=%.2fs, hold_at_sit=%.2fs, head_down_pitch=%.3f rad, head_pitch_duration=%.2fs.",
            sit_to_stand_com_velocity_mps_, mpc_init_delay_after_stand_up_sec_,
-           contact_protect_grace_after_stand_up_sec_, hold_at_sit_pose_before_stand_up_sec_);
+           contact_protect_grace_after_stand_up_sec_, hold_at_sit_pose_before_stand_up_sec_,
+           head_down_pitch_rad_, head_raise_duration_sec_);
   return true;
 }
 
@@ -475,36 +674,92 @@ bool SitControlManager::tickAutoAdvance() {
   return false;
 }
 
-bool SitControlManager::captureStandUpFromSeatStartSnapshot(StandUpFromSeatStartSnapshot& out,
-                                                            std::string& err) const {
-  out = {};
-  if (isSeatOffsetRunning() || isSeatLegActionRunning()) {
-    err = "seat motion still running; wait for final CSP hold";
-    return false;
-  }
-  if (!sit_sequence_complete_) {
-    err = "sit sequence not at final hold; wait for P3/P4 auto sequence to finish";
-    return false;
-  }
-  if (state_ != State::OFFSET_DONE && state_ != State::LEG_ACTION_DONE) {
-    err = "must be at final CSP hold (P3 or P4 complete)";
-    return false;
-  }
+SitControlManager::SeatJointTargets SitControlManager::makeLegFirstMidTargets(const SeatJointTargets& measured,
+                                                                              const SeatJointTargets& sit) {
+  SeatJointTargets mid;
+  if (!measured.valid || !sit.valid)
+    return mid;
+  mid.valid = true;
+  mid.leg = sit.leg;
+  mid.waist = sit.waist;
+  mid.arm = measured.arm;
+  return mid;
+}
 
-  if (state_ == State::LEG_ACTION_DONE)
-    out.csp_hold_joint_targets = buildLegActionTargets(1.0);
-  else
-    out.csp_hold_joint_targets = buildTargets(1.0);
-  if (!out.csp_hold_joint_targets.valid) {
-    err = "final CSP hold joint targets unavailable";
-    return false;
-  }
+SitControlManager::SeatJointTargets SitControlManager::makeArmClearMidTargets(
+    const SeatJointTargets& measured, const SeatJointTargets& sit,
+    const std::array<double, kArmDof>& clear_offset_rad) {
+  SeatJointTargets mid;
+  if (!measured.valid || !sit.valid)
+    return mid;
+  mid.valid = true;
+  mid.leg = sit.leg;
+  mid.waist = sit.waist;
+  for (size_t i = 0; i < kArmDof; ++i)
+    mid.arm[i] = measured.arm[i] + clear_offset_rad[i];
+  return mid;
+}
 
-  out.reverse_seat_offset_duration_sec = offset_duration_sec_;
-  out.use_smoothstep = offset_smoothstep_;
+double SitControlManager::maxAbsDq(const SeatJointTargets& a, const SeatJointTargets& b, bool legs_waist,
+                                   bool arms) {
+  if (!a.valid || !b.valid)
+    return 0.0;
+  double m = 0.0;
+  if (legs_waist) {
+    m = std::abs(a.waist - b.waist);
+    for (size_t i = 0; i < kLegDof; ++i)
+      m = std::max(m, std::abs(a.leg[i] - b.leg[i]));
+  }
+  if (arms) {
+    for (size_t i = 0; i < kArmDof; ++i)
+      m = std::max(m, std::abs(a.arm[i] - b.arm[i]));
+  }
+  return m;
+}
+
+SitControlManager::SeatJointTargets SitControlManager::lerpJointTargets(const SeatJointTargets& from,
+                                                                        const SeatJointTargets& to, double t) {
+  SeatJointTargets out;
+  if (!from.valid || !to.valid)
+    return out;
+  const double a = std::max(0.0, std::min(1.0, t));
+  const double b = 1.0 - a;
   out.valid = true;
-  err.clear();
-  return true;
+  out.alpha = a;
+  for (size_t i = 0; i < kLegDof; ++i)
+    out.leg[i] = b * from.leg[i] + a * to.leg[i];
+  out.waist = b * from.waist + a * to.waist;
+  for (size_t i = 0; i < kArmDof; ++i)
+    out.arm[i] = b * from.arm[i] + a * to.arm[i];
+  // ponytail: 端点可验证 — t=0 必须回到 from，t=1 必须到 to（防插值方向写反）
+  if (a <= 0.0) {
+    for (size_t i = 0; i < kLegDof; ++i)
+      assert(std::abs(out.leg[i] - from.leg[i]) < 1e-12);
+  } else if (a >= 1.0) {
+    for (size_t i = 0; i < kLegDof; ++i)
+      assert(std::abs(out.leg[i] - to.leg[i]) < 1e-12);
+  }
+  return out;
+}
+
+SitControlManager::SeatJointTargets SitControlManager::seatTargetsFromHwJoints(
+    const Eigen::Ref<const Eigen::VectorXd>& hw_pos, size_t leg_dof, size_t waist_num, size_t arm_num) {
+  SeatJointTargets t;
+  const Eigen::Index need =
+      static_cast<Eigen::Index>(leg_dof + waist_num + arm_num);
+  if (hw_pos.size() < need)
+    return t;
+  t.valid = true;
+  const size_t n_leg = std::min(leg_dof, kLegDof);
+  for (size_t i = 0; i < n_leg; ++i)
+    t.leg[i] = hw_pos(static_cast<Eigen::Index>(i));
+  if (waist_num > 0)
+    t.waist = hw_pos(static_cast<Eigen::Index>(leg_dof));
+  const size_t n_arm = std::min(arm_num, kArmDof);
+  const size_t arm_base = leg_dof + waist_num;
+  for (size_t i = 0; i < n_arm; ++i)
+    t.arm[i] = hw_pos(static_cast<Eigen::Index>(arm_base + i));
+  return t;
 }
 
 bool SitControlManager::releaseSeatHoldForStandUp(std::string& err) {
@@ -525,6 +780,12 @@ bool SitControlManager::releaseSeatHoldForStandUp(std::string& err) {
   ROS_INFO("[SitControlManager] Released final seat hold for preUpdate re-entry (MPC remains paused until preUpdate completes).");
   err.clear();
   return true;
+}
+
+double SitControlManager::jointMoveToCosine01(double t) {
+  // hardware_plant::calcCos(start,stop,T,t) 的归一化形式：q = start + (stop-start)*(1-cos(π·α))/2
+  t = std::max(0.0, std::min(1.0, t));
+  return 0.5 * (1.0 - std::cos(M_PI * t));
 }
 
 double SitControlManager::smoothstep01(double t) {
@@ -929,6 +1190,68 @@ void SitControlManager::applyRealHardwareCspHold(kuavo_msgs::jointCmd& msg,
     msg.tau[j] = 0.0;
     msg.joint_v[j] = 0.0;
   }
+}
+
+bool SitControlManager::fillSeatCspHoldCmd(kuavo_msgs::jointCmd& msg, const SeatJointTargets& targets,
+                                           const Eigen::VectorXd& joint_kp, const Eigen::VectorXd& joint_kd,
+                                           const std::vector<double>& max_current, int leg_num, int waist_num,
+                                           int arm_num, int head_num, bool real_hw, double head_pitch_rad) const {
+  if (!targets.valid)
+    return false;
+  msg = kuavo_msgs::jointCmd{};
+  const int total = leg_num + waist_num + arm_num + head_num;
+  msg.joint_q.reserve(static_cast<size_t>(total));
+  msg.joint_v.reserve(static_cast<size_t>(total));
+  msg.tau.reserve(static_cast<size_t>(total));
+  msg.tau_ratio.reserve(static_cast<size_t>(total));
+  msg.joint_kp.reserve(static_cast<size_t>(total));
+  msg.joint_kd.reserve(static_cast<size_t>(total));
+  msg.tau_max.reserve(static_cast<size_t>(total));
+  msg.control_modes.reserve(static_cast<size_t>(total));
+
+  auto push_joint = [&](double q, double kp, double kd, double tau_max) {
+    msg.joint_q.push_back(q);
+    msg.joint_v.push_back(0.0);
+    msg.tau.push_back(0.0);
+    msg.tau_ratio.push_back(1.0);
+    msg.joint_kp.push_back(kp);
+    msg.joint_kd.push_back(kd);
+    msg.tau_max.push_back(tau_max);
+    msg.control_modes.push_back(2);
+  };
+
+  for (int i = 0; i < leg_num; ++i) {
+    const double q = (static_cast<size_t>(i) < kLegDof) ? targets.leg[static_cast<size_t>(i)] : 0.0;
+    double kp = (i < joint_kp.size()) ? joint_kp[i] : 0.0;
+    double kd = (i < joint_kd.size()) ? joint_kd[i] : 0.0;
+    sitBootLegGain(static_cast<size_t>(i), kp, kd);
+    const double tmax =
+        (static_cast<size_t>(i) < max_current.size()) ? max_current[static_cast<size_t>(i)] : 0.0;
+    push_joint(q, kp, kd, tmax);
+  }
+  for (int i = 0; i < waist_num; ++i) {
+    const int idx = leg_num + i;
+    const double kp = (idx < joint_kp.size()) ? joint_kp[idx] : 0.0;
+    const double kd = (idx < joint_kd.size()) ? joint_kd[idx] : 0.0;
+    const double tmax =
+        (static_cast<size_t>(idx) < max_current.size()) ? max_current[static_cast<size_t>(idx)] : 0.0;
+    push_joint(targets.waist, kp, kd, tmax);
+  }
+  for (int i = 0; i < arm_num; ++i) {
+    const double q = (static_cast<size_t>(i) < kArmDof) ? targets.arm[static_cast<size_t>(i)] : 0.0;
+    const int idx = leg_num + waist_num + i;
+    const double tmax =
+        (static_cast<size_t>(idx) < max_current.size()) ? max_current[static_cast<size_t>(idx)] : 0.0;
+    push_joint(q, 0.0, 0.0, tmax);
+  }
+  for (int i = 0; i < head_num; ++i) {
+    const double q = (i == 1) ? head_pitch_rad : 0.0;  // zhead_1=yaw, zhead_2=pitch
+    push_joint(q, 10.0, 2.0, 10.0);
+  }
+
+  if (real_hw)
+    applyRealHardwareCspHold(msg, joint_kp, joint_kd, leg_num + waist_num, leg_num + waist_num, arm_num);
+  return true;
 }
 
 bool SitControlManager::checkAnkleStall(const Eigen::Ref<const Eigen::VectorXd>& ankle_torques) {

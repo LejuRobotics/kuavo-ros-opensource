@@ -16,6 +16,20 @@
 #include <sstream>
 #include <iomanip>
 
+namespace {
+// Match Isaac Lab ObsTerm and sim2sim: clip raw values, then scale per term.
+Eigen::VectorXd applyVmpObsTerm(const Eigen::VectorXd& raw, double scale, double clip_val)
+{
+  return raw.cwiseMax(-clip_val).cwiseMin(clip_val) * scale;
+}
+
+Eigen::Vector3d applyVmpObsTerm(const Eigen::Vector3d& raw, double scale, double clip_val)
+{
+  Eigen::Vector3d clipped = raw.cwiseMax(-clip_val).cwiseMin(clip_val);
+  return clipped * scale;
+}
+}  // namespace
+
 // VAE全局归一化系数 - 与Python vae_module.py对齐
 // v52格式：79维 = h(1) + theta(6) + v(6) + q(27) + q_dot(27) + p(12)
 namespace vae_normalization {
@@ -195,11 +209,11 @@ namespace humanoid_controller
       int expected_actions = jointNum_ + jointArmNum_ + waistNum_;
       numActions_ = pt.get<int>("numActions", expected_actions);
       
-      // 观测格式: [joint_pos_offset(N), joint_vel(N), last_actions(N), ang_vel(3), euler(2)，anchor_ori_b(2)]
+      // 观测格式: [joint_pos_offset(N), joint_vel(N), last_actions(N), ang_vel(3), euler_w(3), anchor_euler_b(3)]
       // 其中 N = numActions_
-      int expected_numSingleObs = 3 * numActions_ + 3 + 2 + 2;  // 3N + 7
+      int expected_numSingleObs = 3 * numActions_ + 3 + 3 + 3;  // 3N + 9
       if (vmp_numSingleObs_ != expected_numSingleObs) {
-        ROS_WARN("[%s] numSingleObs (%d) may not match expected (%d = 3*%d + 7). "
+        ROS_WARN("[%s] numSingleObs (%d) may not match expected (%d = 3*%d + 9). "
                  "Please verify VMP observation dimension configuration.",
                  name_.c_str(), vmp_numSingleObs_, expected_numSingleObs, numActions_);
       }
@@ -231,7 +245,7 @@ namespace humanoid_controller
       vmp_obsScale_dof_pos_ = pt.get<double>("obsScale_dof_pos", 1.0);
       vmp_obsScale_dof_vel_ = pt.get<double>("obsScale_dof_vel", 0.05);
       vmp_obsScale_base_lin_vel_ = pt.get<double>("obsScale_base_lin_vel", 2.0);
-      vmp_obsScale_base_ang_vel_ = pt.get<double>("obsScale_base_ang_vel", 1.0);
+      vmp_obsScale_base_ang_vel_ = pt.get<double>("obsScale_base_ang_vel", 0.25);
       vmp_obsScale_quat_ = pt.get<double>("obsScale_quat", 1.0);
       
       ROS_INFO("[%s] Final joint config: jointNum=%d, jointArmNum=%d, waistNum=%d, numActions=%d", 
@@ -779,9 +793,6 @@ namespace humanoid_controller
       return false;
     }
     
-    // 获取当前动作
-    Eigen::VectorXd local_action = getCurrentAction();
-    
     // 计算执行器输出
     Eigen::VectorXd actuation = updateVMPcmd(measuredRbdState);
     
@@ -1020,23 +1031,25 @@ namespace humanoid_controller
       Eigen::VectorXd current_jointVel = sensor_data.jointVel_.head(joint_dim);
 
       // 观测索引
-      // 观测格式: [joint_pos_offset(N), joint_vel(N), last_actions(N), ang_vel(3), euler(2), anchor_ori_b(2)]
+      // 观测格式: [joint_pos_offset(N), joint_vel(N), last_actions(N), ang_vel(3), euler_w(3), anchor_euler_b(3)]
       int dof_pos_idx = 0;
       int dof_vel_idx = dof_pos_idx + joint_dim;
       int actions_idx = dof_vel_idx + joint_dim;
       int ang_vel_idx = actions_idx + joint_dim;
-      int anchor_ori_idx = ang_vel_idx + 5;  // ang_vel(3) + base_ori_xy(2)
+      int anchor_euler_idx = ang_vel_idx + 6;  // ang_vel(3) + robot_anchor_euler_w(3)
 
-      // 关节位置偏移
+      // 关节位置偏移（先 clip 再 scale，与训练 ObsTerm 一致）
       if (vmp_defalutJointPos_.size() >= joint_dim) {
         Eigen::VectorXd joint_pos_offset = current_jointPos - vmp_defalutJointPos_.head(joint_dim);
-        robot_observation.segment(dof_pos_idx, joint_dim) = joint_pos_offset * vmp_obsScale_dof_pos_;
+        robot_observation.segment(dof_pos_idx, joint_dim) =
+            applyVmpObsTerm(joint_pos_offset, vmp_obsScale_dof_pos_, vmp_clipObservations_);
       }
 
-      // 关节速度（缩放 0.05）
-      robot_observation.segment(dof_vel_idx, joint_dim) = current_jointVel * vmp_obsScale_dof_vel_;
+      // 关节速度（先 clip 再 scale）
+      robot_observation.segment(dof_vel_idx, joint_dim) =
+          applyVmpObsTerm(current_jointVel, vmp_obsScale_dof_vel_, vmp_clipObservations_);
 
-      // 上一次动作（action scale + offset + clip，与 updateVMPcmd 一致）
+      // 上一次动作（scale + offset + clip，与训练 last_processed_action 一致，不再做 ObsTerm clip/scale）
       if (vmp_actions_.size() >= joint_dim &&
           vmp_actionScaleTest_.size() >= joint_dim &&
           vmp_defalutJointPos_.size() >= joint_dim) {
@@ -1048,20 +1061,21 @@ namespace humanoid_controller
                 .cwiseMin(vmp_clipActions_);
       }
 
-      // 角速度
-      robot_observation.segment(ang_vel_idx, 3) = bodyAngVel * vmp_obsScale_base_ang_vel_;
+      // 角速度、姿态（先 clip 再 scale）
+      robot_observation.segment(ang_vel_idx, 3) =
+          applyVmpObsTerm(bodyAngVel, vmp_obsScale_base_ang_vel_, vmp_clipObservations_);
 
-      robot_observation.segment(ang_vel_idx + 3, 2) = baseEuler.head(2) * vmp_obsScale_quat_;
-      // anchor_ori_b
-      robot_observation.segment(anchor_ori_idx, 2) = computeAnchorOriXY(sensor_data) * vmp_obsScale_quat_;
+      robot_observation.segment(ang_vel_idx + 3, 3) =
+          applyVmpObsTerm(baseEuler, vmp_obsScale_quat_, vmp_clipObservations_);
+      // motion_anchor_euler_b
+      robot_observation.segment(anchor_euler_idx, 3) =
+          applyVmpObsTerm(computeAnchorEulerB(sensor_data), vmp_obsScale_quat_, vmp_clipObservations_);
       // 验证观测维度
-      int expected_dim = ang_vel_idx + 3 + 2 + 2;  // 3*joint_dim + 7
+      int expected_dim = ang_vel_idx + 3 + 3 + 3;  // 3*joint_dim + 9
       if (expected_dim != vmp_numSingleObs_) {
         ROS_WARN_THROTTLE(5.0, "[%s] Observation dimension mismatch! Built %d, expected %d",
                           name_.c_str(), expected_dim, vmp_numSingleObs_);
       }
-      // 裁剪观测
-      robot_observation = robot_observation.cwiseMax(-vmp_clipObservations_).cwiseMin(vmp_clipObservations_);
 
       // 更新 Estimator 观测缓存
       if (vmp_enable_estimator_) {
@@ -1605,6 +1619,13 @@ namespace humanoid_controller
     cmd_out = cmd_filter.cwiseProduct(vmp_jointCmdFilterState_) + 
               cmd.cwiseProduct(Eigen::VectorXd::Ones(total_joints) - vmp_jointCmdFilterState_);
     
+    // Debug topics, matching AmpWalkController style:
+    if (ros_logger_) {
+      ros_logger_->publishVector("/vmp_controller/cmd", cmd);
+      ros_logger_->publishVector("/vmp_controller/torque", torque);
+      ros_logger_->publishVector("/vmp_controller/actuation", cmd_out);
+    }
+    
     return cmd_out;
   }
 
@@ -1740,6 +1761,13 @@ namespace humanoid_controller
             &VMPController::mocapRetargetedPoseCallback, this);
           ROS_INFO("[%s] Mocap subscriber initialized: /gmr/vmp_input", name_.c_str());
         }
+        // 初始化Xsense数据订阅器（如果使用Xsense设备模式）
+        else if (online_vr_data_source_ == "xsense") {
+          xsense_retargeted_pose_sub_ = nh_.subscribe<kuavo_msgs::xsensePoseRetarget>(
+            "/xsense/retargeted_pose", 10,
+            &VMPController::xsenseRetargetedPoseCallback, this);
+          ROS_INFO("[%s] Xsense subscriber initialized: /xsense/retargeted_pose", name_.c_str());
+        }
         // 如果使用bin文件数据源，加载bin文件
         else if (online_vr_data_source_ == "bin_file" && !online_vr_bin_file_.empty()) {
           std::string bin_file_path = baseModelPath_ + "/" + vmpRefDataDir_ + online_vr_bin_file_;
@@ -1749,7 +1777,7 @@ namespace humanoid_controller
         // ========== 初始化PICO推流中断/恢复功能 ==========
         // 注册PICO推流控制服务（供 pico-body-tracking-server 的手柄按键回调调用）
         // 按键触发由 Python 端 JoySticksHandler 处理：RT+Y=暂停, RT+X=恢复
-        if (online_vr_data_source_ == "pico" || online_vr_data_source_ == "mocap") {
+        if (online_vr_data_source_ == "pico" || online_vr_data_source_ == "mocap" || online_vr_data_source_ == "xsense") {
           pico_stream_control_srv_ = nh_.advertiseService(
             "/vmp/pico_stream_control",
             &VMPController::picoStreamControlServiceCallback, this);
@@ -2067,8 +2095,8 @@ namespace humanoid_controller
       
       // 根据数据源类型获取数据
       bool callback_updated = false;  // 本tick是否有新的callback写入
-      if (online_vr_data_source_ == "pico" || online_vr_data_source_ == "mocap") {
-        // PICO设备 或 Mocap 实时数据模式
+      if (online_vr_data_source_ == "pico" || online_vr_data_source_ == "mocap" || online_vr_data_source_ == "xsense") {
+        // PICO设备、Mocap 或 Xsense 实时数据模式
         {
           std::lock_guard<std::mutex> lock(latest_frame_mutex_);
           if (has_received_online_data_ && !latest_online_raw_frame_.empty()) {
@@ -2621,6 +2649,21 @@ namespace humanoid_controller
     ROS_DEBUG_THROTTLE(1.0, "[%s] Mocap callback rate: %d Hz (approx)", name_.c_str(), mocap_callback_count);
   }
 
+  void VMPController::xsenseRetargetedPoseCallback(const kuavo_msgs::xsensePoseRetarget::ConstPtr& msg)
+  {
+    kuavo_msgs::MocapPoseRetarget converted_msg;
+    converted_msg.header = msg->header;
+    converted_msg.base_link_pose = msg->base_link_pose;
+    converted_msg.base_velocity = msg->base_velocity;
+    converted_msg.joint_position = msg->joint_position;
+    converted_msg.joint_velocity = msg->joint_velocity;
+    converted_msg.end_effector_poses = msg->end_effector_poses;
+
+    const kuavo_msgs::MocapPoseRetarget::ConstPtr converted_ptr(
+        new kuavo_msgs::MocapPoseRetarget(converted_msg));
+    mocapRetargetedPoseCallback(converted_ptr);
+  }
+
   std::vector<float> VMPController::fuseMultiTopicData()
   {
     // 多话题数据融合（简化版）
@@ -2634,8 +2677,8 @@ namespace humanoid_controller
 
   bool VMPController::isOnlineVRDeviceMode() const
   {
-    // 支持 pico 和 mocap 两种在线设备模式
-    return enable_online_vr_mode_ && (online_vr_data_source_ == "pico" || online_vr_data_source_ == "mocap");
+    // 支持 pico、mocap 和 xsense 在线设备模式
+    return enable_online_vr_mode_ && (online_vr_data_source_ == "pico" || online_vr_data_source_ == "mocap" || online_vr_data_source_ == "xsense");
   }
 
   // ========== PICO推流中断/恢复控制 ==========
@@ -2816,28 +2859,28 @@ namespace humanoid_controller
     
     return rotation_matrix;
   }
-  Eigen::Vector2d VMPController::computeAnchorOriXY(const SensorData& sensor_data)
+  Eigen::Vector3d VMPController::computeAnchorEulerB(const SensorData& sensor_data)
   {
-    Eigen::Vector2d ori_xy = Eigen::Vector2d::Zero();
+    Eigen::Vector3d anchor_euler = Eigen::Vector3d::Zero();
     if (vmp_ref_motion_raw_buffer_.empty()) {
-      return ori_xy;
+      return anchor_euler;
     }
-    // Match training semantics: anchor_ori_xy_b is computed from raw anchor quat.
+    // Match training semantics: motion_anchor_euler_b is computed from raw anchor quat.
     const Eigen::VectorXd& ref = vmp_ref_motion_raw_buffer_.back();
     const int ts = vmp_config_.theta_start_id;
     const int te = vmp_config_.theta_end_id;
     if (ts < 0 || te > static_cast<int>(ref.size()) || (te - ts) != 6) {
-      return ori_xy;
+      return anchor_euler;
     }
     Eigen::Vector3d c0_raw(ref[ts + 0], ref[ts + 1], ref[ts + 2]);
     Eigen::Vector3d c1_raw(ref[ts + 3], ref[ts + 4], ref[ts + 5]);
     if (c0_raw.norm() < 1e-8) {
-      return ori_xy;  // 参考帧 rot6d 尚未填充
+      return anchor_euler;  // 参考帧 rot6d 尚未填充
     }
     Eigen::Vector3d c0 = c0_raw.normalized();
     Eigen::Vector3d c1 = c1_raw - c1_raw.dot(c0) * c0;
     if (c1.norm() < 1e-8) {
-      return ori_xy;
+      return anchor_euler;
     }
     c1.normalize();
     Eigen::Vector3d c2 = c0.cross(c1);
@@ -2850,7 +2893,7 @@ namespace humanoid_controller
     Eigen::Quaterniond q_robot(sensor_data.quat_.w(), sensor_data.quat_.x(),
                                sensor_data.quat_.y(), sensor_data.quat_.z());
     if (q_robot.norm() < 1e-8) {
-      return ori_xy;
+      return anchor_euler;
     }
     q_robot.normalize();
     if (!vmp_entry_imu_quat_valid_) {
@@ -2864,16 +2907,20 @@ namespace humanoid_controller
     q_robot.normalize();
     Eigen::Quaterniond q_rel = q_robot.conjugate() * q_anchor;
     q_rel.normalize();
-    // 提取 (roll, pitch)
+    // 提取 (roll, pitch, yaw)，与训练代码 _quat_to_euler_xyz 一致
     const double w = q_rel.w(), x = q_rel.x(), y = q_rel.y(), z = q_rel.z();
     const double sin_roll = 2.0 * (w * x + y * z);
     const double cos_roll = 1.0 - 2.0 * (x * x + y * y);
     const double roll = std::atan2(sin_roll, cos_roll);
     const double sin_pitch = std::clamp(2.0 * (w * y - z * x), -1.0, 1.0);
     const double pitch = std::asin(sin_pitch);
-    ori_xy[0] = roll;
-    ori_xy[1] = pitch;
-    return ori_xy;
+    const double sin_yaw = 2.0 * (w * z + x * y);
+    const double cos_yaw = 1.0 - 2.0 * (y * y + z * z);
+    const double yaw = std::atan2(sin_yaw, cos_yaw);
+    anchor_euler[0] = roll;
+    anchor_euler[1] = pitch;
+    anchor_euler[2] = yaw;
+    return anchor_euler;
   }
 
   void VMPController::applyTemporalNormalization(float* input_data, size_t data_size)
@@ -2889,29 +2936,17 @@ namespace humanoid_controller
       return;
     }
     
-    // 提取中心帧的方向向量 [theta_start_id : theta_end_id]
-    float cfr_data[6]; 
-    for (int i = 0; i < 6; i++) {
+    // 提取中心帧方向向量 col0（用于估计 yaw）
+    float cfr_data[3];
+    for (int i = 0; i < 3; i++) {
       int tensor_idx = past_frames * feature_dim + (vmp_config_.theta_start_id + i);
       cfr_data[i] = input_data[tensor_idx];
     }
     
     float c0[3] = {cfr_data[0], cfr_data[1], cfr_data[2]};
-    float c1[3] = {cfr_data[3], cfr_data[4], cfr_data[5]};
-    
-    // Gram-Schmidt正交化
     float c0_norm = std::sqrt(c0[0]*c0[0] + c0[1]*c0[1] + c0[2]*c0[2]);
     if (c0_norm > 1e-6f) {
       c0[0] /= c0_norm; c0[1] /= c0_norm; c0[2] /= c0_norm;
-    }
-    
-    float dot_product = c0[0]*c1[0] + c0[1]*c1[1] + c0[2]*c1[2];
-    float proj[3] = {dot_product * c0[0], dot_product * c0[1], dot_product * c0[2]};
-    
-    c1[0] -= proj[0]; c1[1] -= proj[1]; c1[2] -= proj[2];
-    float c1_norm = std::sqrt(c1[0]*c1[0] + c1[1]*c1[1] + c1[2]*c1[2]);
-    if (c1_norm > 1e-6f) {
-      c1[0] /= c1_norm; c1[1] /= c1_norm; c1[2] /= c1_norm;
     }
 
     // 计算yaw角和逆旋转矩阵 (inv_z_rotate)
@@ -2940,39 +2975,32 @@ namespace humanoid_controller
       
       // === Step 1: complete_orthogonal - 从6D构建3x3正交矩阵 ===
       // col0 = normalize(rot6[0:3])
-      float c0[3] = {rot6[0], rot6[1], rot6[2]};
-      float c0_norm = std::sqrt(c0[0]*c0[0] + c0[1]*c0[1] + c0[2]*c0[2]);
-      if (c0_norm > 1e-6f) {
-        c0[0] /= c0_norm; c0[1] /= c0_norm; c0[2] /= c0_norm;
+      float col0[3] = {rot6[0], rot6[1], rot6[2]};
+      float col0_norm = std::sqrt(col0[0]*col0[0] + col0[1]*col0[1] + col0[2]*col0[2]);
+      if (col0_norm > 1e-6f) {
+        col0[0] /= col0_norm; col0[1] /= col0_norm; col0[2] /= col0_norm;
       }
       
-      // col1 = normalize(rot6[3:6] - proj(rot6[3:6] onto c0))
-      float c1_raw[3] = {rot6[3], rot6[4], rot6[5]};
-      float dot_c0_c1 = c0[0]*c1_raw[0] + c0[1]*c1_raw[1] + c0[2]*c1_raw[2];
-      float c1[3] = {
-        c1_raw[0] - dot_c0_c1 * c0[0],
-        c1_raw[1] - dot_c0_c1 * c0[1],
-        c1_raw[2] - dot_c0_c1 * c0[2]
+      // col1 = normalize(rot6[3:6] - proj(rot6[3:6] onto col0))
+      float col1_raw[3] = {rot6[3], rot6[4], rot6[5]};
+      float dot_col0_col1 = col0[0]*col1_raw[0] + col0[1]*col1_raw[1] + col0[2]*col1_raw[2];
+      float col1[3] = {
+        col1_raw[0] - dot_col0_col1 * col0[0],
+        col1_raw[1] - dot_col0_col1 * col0[1],
+        col1_raw[2] - dot_col0_col1 * col0[2]
       };
-      float c1_norm = std::sqrt(c1[0]*c1[0] + c1[1]*c1[1] + c1[2]*c1[2]);
-      if (c1_norm > 1e-6f) {
-        c1[0] /= c1_norm; c1[1] /= c1_norm; c1[2] /= c1_norm;
+      float col1_norm = std::sqrt(col1[0]*col1[0] + col1[1]*col1[1] + col1[2]*col1[2]);
+      if (col1_norm > 1e-6f) {
+        col1[0] /= col1_norm; col1[1] /= col1_norm; col1[2] /= col1_norm;
       }
       
-      // col2 = cross(c0, c1)
-      float c2[3] = {
-        c0[1]*c1[2] - c0[2]*c1[1],
-        c0[2]*c1[0] - c0[0]*c1[2],
-        c0[0]*c1[1] - c0[1]*c1[0]
-      };
-      
-      // R_full = [c0, c1, c2] (列主序)
+      // R_full 前两列 = [col0, col1]；deyaw 只需这两列
       // === Step 2: R_deyaw = inv_rot @ R_full ===
       // 对每一列应用inv_rot
       float new_c0[3], new_c1[3];
       for (int i = 0; i < 3; i++) {
-        new_c0[i] = inv_rot[i][0] * c0[0] + inv_rot[i][1] * c0[1] + inv_rot[i][2] * c0[2];
-        new_c1[i] = inv_rot[i][0] * c1[0] + inv_rot[i][1] * c1[1] + inv_rot[i][2] * c1[2];
+        new_c0[i] = inv_rot[i][0] * col0[0] + inv_rot[i][1] * col0[1] + inv_rot[i][2] * col0[2];
+        new_c1[i] = inv_rot[i][0] * col1[0] + inv_rot[i][1] * col1[1] + inv_rot[i][2] * col1[2];
       }
       
       // === Step 3: 取前两列作为新的6D ===
@@ -3998,11 +4026,11 @@ namespace humanoid_controller
     // [N:2N]    dof_vel (关节速度，已缩放)
     // [2N:3N]   actions (上一次动作)
     // [3N:3N+3] ang_vel (角速度，已缩放)
-    // [3N+3:3N+5] euler_xy (欧拉角roll/pitch，已缩放)
+    // [3N+3:3N+6] robot_anchor_euler_w (先 clip 再 scale)
     
     if (!vmp_enable_estimator_) return;
     const int N = numActions_;
-    const int est_frame_dim = 3 * N + 5;
+    const int est_frame_dim = 3 * N + 6;
     Eigen::VectorXd estimator_obs = robot_observation.head(est_frame_dim);
     // 验证维度
     if (estimator_obs.size() != vmp_estimator_input_dim_) {

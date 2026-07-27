@@ -4,4 +4,9 @@
 
 export ROBOT_VERSION=53
 source devel/setup.bash
+# roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=bt2
+
+# roslaunch humanoid_controllers load_kuavo_real_with_xsense_gmr.launch with_xsense_gmr:=true xsense_enable_viewer:=false joystick_type:=bt2
 roslaunch humanoid_controllers load_kuavo_real.launch with_pico_gmr:=true pico_enable_viewer:=false joystick_type:=bt2
+
+

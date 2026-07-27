@@ -185,6 +185,8 @@
     </group>
     
     <param name="/use_sit_init" value="$(arg use_sit_init)" />
+    <!-- 启动时清零，避免沿用上一次 session 的 ready 导致 HW 抢跑 -->
+    <param name="/hardware_sit_prep_ready" value="false" />
     
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
        output="screen" required="true" clear_params="true"

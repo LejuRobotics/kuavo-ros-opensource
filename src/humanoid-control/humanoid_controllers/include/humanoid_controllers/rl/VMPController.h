@@ -11,6 +11,8 @@
 #include "kuavo_msgs/picoPoseRetarget.h"
 // Mocap相关头文件
 #include "kuavo_msgs/MocapPoseRetarget.h"
+// Xsense相关头文件
+#include "kuavo_msgs/xsensePoseRetarget.h"
 // Ruiwo电机参数切换服务
 #include "kuavo_msgs/ExecuteArmAction.h"
 // ROS服务
@@ -436,6 +438,12 @@ namespace humanoid_controller
     void mocapRetargetedPoseCallback(const kuavo_msgs::MocapPoseRetarget::ConstPtr& msg);
     
     /**
+     * @brief 处理Xsense重定向姿态消息（/xsense/retargeted_pose）
+     * @param msg Xsense重定向姿态消息（字段格式与Mocap/PICO一致）
+     */
+    void xsenseRetargetedPoseCallback(const kuavo_msgs::xsensePoseRetarget::ConstPtr& msg);
+    
+    /**
      * @brief PICO推流暂停/恢复 ROS 服务回调
      * @param req SetBool请求 (true=暂停推流, false=恢复推流)
      * @param res SetBool响应
@@ -487,9 +495,9 @@ namespace humanoid_controller
     void normalizeRefMotion(Eigen::VectorXd& ref_motion);
 
     /**
-     * @brief 计算 anchor_ori_xy 观测项（机器人 base 相对参考 anchor 的 roll/pitch）
+     * @brief 计算 motion_anchor_euler_b 观测项（参考 anchor 在 robot anchor 坐标系下的相对姿态误差）
      */
-    Eigen::Vector2d computeAnchorOriXY(const SensorData& sensor_data);
+    Eigen::Vector3d computeAnchorEulerB(const SensorData& sensor_data);
     
     /**
      * @brief 矩阵转四元数
@@ -654,7 +662,7 @@ namespace humanoid_controller
     VMPConfig vmp_config_;
     double vmp_actionScale_{0.25};
     int vmp_frameStack_{1};
-    int vmp_numSingleObs_{83};       // 观测维度 (v46=83, v52=86)
+    int vmp_numSingleObs_{90};       // 观测维度 (v46=87, v52/v53=90)
     double vmp_clipObservations_{18.0};
     double vmp_clipActions_{18.0};
     int numRefMotionObs_{77};        // 参考运动维度 (v46=77, v52=79)
@@ -667,7 +675,7 @@ namespace humanoid_controller
     double vmp_obsScale_dof_pos_{1.0};
     double vmp_obsScale_dof_vel_{0.05};
     double vmp_obsScale_base_lin_vel_{2.0};
-    double vmp_obsScale_base_ang_vel_{1.0};
+    double vmp_obsScale_base_ang_vel_{0.25};
     double vmp_obsScale_height_measurements_{5.0};
     double vmp_obsScale_quat_{1.0};
 
@@ -800,6 +808,7 @@ namespace humanoid_controller
     // ========== ROS订阅器 ==========
     ros::Subscriber pico_retargeted_pose_sub_;
     ros::Subscriber mocap_retargeted_pose_sub_;  // Mocap重定向姿态订阅器
+    ros::Subscriber xsense_retargeted_pose_sub_;  // Xsense重定向姿态订阅器
     ros::Publisher vmp_input_data_pub_;
     
     // ========== VMP服务 ==========
