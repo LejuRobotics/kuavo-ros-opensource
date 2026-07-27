@@ -51,8 +51,8 @@ velocityLimits
     ; 定义速度命令的限制（正负方向独立设置）
     ; 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
     ;        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
-    (0,0)  0.55      ; cmdVelLineX positive
-    (1,0)  -0.6     ; cmdVelLineX negative
+    (0,0)  0.35      ; cmdVelLineX positive
+    (1,0)  -0.35     ; cmdVelLineX negative
     (2,0)  0.3      ; cmdVelLineY positive
     (3,0)  -0.3     ; cmdVelLineY negative
     (4,0)  0.5      ; cmdVelLineZ positive

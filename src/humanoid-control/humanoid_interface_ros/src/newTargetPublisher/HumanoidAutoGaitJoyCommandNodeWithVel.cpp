@@ -88,6 +88,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <memory>
 #include <stdexcept>
 #include <array>
+#include <atomic>
 #include <thread>
 #include <future>
 #include <chrono>
@@ -2640,27 +2641,33 @@ namespace ocs2
     bool resetGrabBoxDemo(bool reset)
     {
       const std::string service_name = "/grab_box_demo/reset_bt";
-      ros::NodeHandle nh;
-
-      // 等待服务可用
-      if (!ros::service::waitForService(service_name, ros::Duration(1))) {
-        ROS_ERROR("Service %s not available", service_name.c_str());
+      auto in_flight = grab_box_reset_in_flight_;
+      bool expected = false;
+      if (!in_flight->compare_exchange_strong(expected, true)) {
+        ROS_DEBUG("Grab box reset request already in flight");
         return false;
       }
 
-      // 创建服务代理
-      ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
-      std_srvs::SetBool srv;
-      srv.request.data = reset;
+      std::thread([service_name, reset, in_flight]() {
+        ros::NodeHandle nh;
+        if (!ros::service::waitForService(service_name, ros::Duration(1))) {
+          ROS_ERROR("Service %s not available", service_name.c_str());
+          in_flight->store(false);
+          return;
+        }
 
-      // 调用服务
-      if (client.call(srv)) {
-        ROS_INFO("resetGrabBoxDemo call succeeded, received response: %s", srv.response.success ? "Success" : "Failure");
-        return srv.response.success; // 服务调用成功
-      } else {
-        ROS_ERROR("Failed to call service %s", service_name.c_str());
-        return false; // 服务调用失败
-      }
+        ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
+        std_srvs::SetBool srv;
+        srv.request.data = reset;
+        if (client.call(srv)) {
+          ROS_INFO("resetGrabBoxDemo call succeeded, received response: %s", srv.response.success ? "Success" : "Failure");
+        } else {
+          ROS_ERROR("Failed to call service %s", service_name.c_str());
+        }
+        in_flight->store(false);
+      }).detach();
+
+      return true;
     }
 
     bool callExecuteArmAction(const std::string &action_name)
@@ -2925,6 +2932,7 @@ namespace ocs2
     ros::ServiceClient switch_to_next_controller_client_;
     ros::ServiceClient switch_to_previous_controller_client_;
     ros::ServiceClient auto_gait_change_client_;
+    std::shared_ptr<std::atomic_bool> grab_box_reset_in_flight_{std::make_shared<std::atomic_bool>(false)};
     
     // 楼梯检测相关
     bool stair_detection_enabled_ = false;

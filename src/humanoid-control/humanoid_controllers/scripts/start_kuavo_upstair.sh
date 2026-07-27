@@ -43,7 +43,7 @@ tmux send-keys -t $SESSION:0.0 "roscore" C-m
 # 窗格 1: image_processing (中上)
 tmux send-keys -t $SESSION:0.1 "source $ROS_WS_PATH/devel/setup.bash" C-m
 tmux send-keys -t $SESSION:0.1 "sleep 2" C-m
-tmux send-keys -t $SESSION:0.1 "roslaunch image_processing depth_inpainter.launch" C-m
+tmux send-keys -t $SESSION:0.1 "roslaunch image_processing depth_inpainter.launch input_topic:=/waist_camera/depth/image_raw output_topic:=/waist_camera/depth/image_processed" C-m
 
 # 窗格 2: camera_ssh (右上)
 tmux send-keys -t $SESSION:0.2 "cd $SSH_SCRIPT_DIR" C-m

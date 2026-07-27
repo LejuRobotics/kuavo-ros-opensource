@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
     <arg name="input_topic" default="/ffs/depth/image" />
-    <arg name="output_topic" default="/camera/depth/image_processed" />
+    <arg name="output_topic" default="/waist_camera/depth/image_processed" />
 
     <arg name="queue_size" default="1" />
 
