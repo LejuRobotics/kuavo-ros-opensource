@@ -404,9 +404,11 @@ namespace humanoid_controller
     if (controllerNh_.hasParam("/init_fall_down_state"))
     {
       controllerNh_.getParam("/init_fall_down_state", init_fall_down_state_);
+      if (init_fall_down_state_)
+      {
+        fall_down_state_ = FallStandState::FALL_DOWN;
+      }
     }
-    // 倒地开机功能已禁用：强制忽略入参，永不当 false 之外的值
-    init_fall_down_state_ = false;
 
     // 检测is_rl_start参数，如果为true则绕过MPC控制器，直接使用RL控制器
     controllerNh_.param<bool>("/is_rl_start", is_rl_start_, false);

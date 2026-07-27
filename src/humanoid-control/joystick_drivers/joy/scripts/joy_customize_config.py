@@ -1074,6 +1074,15 @@ class JoyCustomizeConfigNode:
                     self._b_hold_start = None
                     self._reset_handover_state()
                     self._fall_recovery_enabled = True
+                    # 清理倒地开机残留参数，防止直腿值泄露到下一轮正常开机
+                    try:
+                        rospy.delete_param("/init_fall_down_state")
+                    except KeyError:
+                        pass
+                    try:
+                        rospy.delete_param("/squat_initial_state")
+                    except KeyError:
+                        pass
                     # 更新前一帧，避免被下方逻辑继续处理
                     self._prev_buttons = list(joy_msg.buttons)
                     self._prev_axes = list(joy_msg.axes)
@@ -2035,8 +2044,15 @@ class JoyCustomizeConfigNode:
             if not self._fall_recovery_enabled:
                 rospy.logwarn("[JoyCustomize] 机器人运行中(MPC), 忽略 LB+RB+X 倒地起身; 需先 START+BACK 终止")
                 return True
-            # 倒地开机功能已禁用，忽略按键
-            rospy.logwarn("[JoyCustomize] 倒地开机功能已禁用, 忽略 LB+RB+X")
+            # 第一下: 重启进入倒地
+            rospy.loginfo("[JoyCustomize] LB+RB+X (1/2): 带 init_fall_down_state:=true 重启, 进入倒地")
+            try:
+                self.launch_humanoid_robot(extra_args="init_fall_down_state:=true")
+            except Exception as e:
+                rospy.logerr(f"[JoyCustomize] 倒地重启失败: {e}")
+                return True
+            self._set_standup_phase(self._FS_WAITING_READY)
+            self._fall_stand_state = -1
             return True
 
         # === 已 armed (phase > IDLE) ===
