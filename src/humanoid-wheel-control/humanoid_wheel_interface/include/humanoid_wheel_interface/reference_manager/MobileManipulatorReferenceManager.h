@@ -19,6 +19,7 @@
 #include <kuavo_msgs/accessIkSolve.h>
 #include <kuavo_msgs/eePoseReachError.h>
 #include <kuavo_msgs/sensorsData.h>
+#include <leju_mobile_base_msgs/BaseCmdVelStatus.h>
 #include <std_srvs/SetBool.h>
 #include <std_srvs/Trigger.h>
 
@@ -341,6 +342,10 @@ private:
 
   // 声明多线程spinner
   ros::AsyncSpinner asyncSpinner_;
+
+  // 底盘运动模式相关
+  bool baseCmdVelStatus_{true};
+  ros::Subscriber base_cmd_vel_status_sub_;
 
   // 判断末端位姿运动后的误差
   ros::Subscriber sensors_data_sub_;

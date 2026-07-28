@@ -1284,7 +1284,7 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = limited_vel[1];
       velCmdMsg.angular.z = limited_vel[2];
     }
-    else
+    else if(baseCmdVelStatus_ == true)  // BaseCmdVelStatus 为 false 时，不设置速度
     {
       Eigen::Vector3d desiredVel = optimizedInput_mrt_limit_.head(3);
       Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(desiredVel,
@@ -1294,7 +1294,7 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = desiredVelBody[1];
       velCmdMsg.angular.z = desiredVelBody[2];
     }
-    if(use_vel_control_)
+    if(use_vel_control_ && baseCmdVelStatus_ == true)
     {
       if (base_cmd_vel_limit_enable_)
       {
@@ -2618,6 +2618,12 @@ namespace humanoidController_wheel_wbc
     else
     {
       base_emergency_triggered_.store(false);
+    }
+
+    if(msg->cmd_vel_effective != baseCmdVelStatus_)   // 仅当命令生效时才更新状态
+    {
+      ROS_INFO_STREAM("[baseCmdVelStatusCallback] baseCmdVelStatus:  [ " << (msg->cmd_vel_effective ? "true" : "false") << " ]");
+      baseCmdVelStatus_ = msg->cmd_vel_effective;
     }
   }
 

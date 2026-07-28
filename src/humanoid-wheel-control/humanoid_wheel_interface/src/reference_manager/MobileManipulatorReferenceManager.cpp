@@ -683,7 +683,7 @@ namespace mobile_manipulator {
     auto targetVelocityCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       // 直接判断 msg 中的速度是否非零
       if(fabs(msg->linear.x) > 1e-6 || 
@@ -705,7 +705,7 @@ namespace mobile_manipulator {
     auto targetVelocityWorldCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       // 直接判断 msg 中的速度是否非零
       if(fabs(msg->linear.x) > 1e-6 || 
@@ -782,7 +782,7 @@ namespace mobile_manipulator {
     auto targetPoseCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       cmdPose_mtx_.lock();
       isCmdPoseUpdated_ = true;
@@ -799,7 +799,7 @@ namespace mobile_manipulator {
     auto targetPoseWorldCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       cmdPoseWorld_mtx_.lock();
       isCmdPoseWorldUpdated_ = true;
@@ -1019,6 +1019,17 @@ namespace mobile_manipulator {
       }
     };
     sensors_data_sub_ = nodeHandle_.subscribe<kuavo_msgs::sensorsData>("/sensors_data_raw", 10, sensorsDataCallback);
+
+    // BaseCmdVelStatus 话题，获取当前机器人是否可控底盘
+    auto baseCmdVelStatusCallback = [this](const leju_mobile_base_msgs::BaseCmdVelStatus::ConstPtr &msg)
+    {
+      if(msg->cmd_vel_effective != baseCmdVelStatus_)
+      {
+        ROS_INFO_STREAM("[baseCmdVelStatusCallback] baseCmdVelStatus:  [ " << (msg->cmd_vel_effective ? "true" : "false") << " ]");
+        baseCmdVelStatus_ = msg->cmd_vel_effective;
+      }
+    };
+    base_cmd_vel_status_sub_ = nodeHandle_.subscribe<leju_mobile_base_msgs::BaseCmdVelStatus>("/move_base/base_cmd_vel_status", 10, baseCmdVelStatusCallback);
   }
 
   // // 获取第一次的目标轨迹，并分配到不同的约束轨迹，后续添加额外约束, 也需要在此初始化
@@ -3832,9 +3843,16 @@ namespace mobile_manipulator {
 
       resetCmdPoseRuckig(initTime, initState, true);
     }
-    else    // 默认跟踪位置
+    else if(baseCmdVelStatus_)   // 底盘可运动情况下，可运动，默认跟踪位置
     {
       generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
+    }
+    else if(!baseCmdVelStatus_)   // 底盘不可运动情况下，不可运动，采用速度控制跟踪零速度
+    {
+      vector_t zeroVel = vector_t::Zero(baseDim_);
+      calcRuckigTrajWithCmdVel(initTime, zeroVel);
+      generateVelTargetWithRuckig(initTime, finalTime, ruckigDt_, initState);
+      resetCmdPoseRuckig(initTime, initState, true);
     }
   }
 
