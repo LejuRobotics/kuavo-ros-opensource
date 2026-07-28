@@ -15,9 +15,9 @@
 
   "__stand_up_from_seat__": "座椅 stand_up / use_sit_init 共用；head_raise_duration_seconds=MPC坐下低头与进MPC站立抬头的共用插值时长",
   "stand_up_from_seat": {
-    "sit_to_stand_com_velocity_mps": 0.06,
+    "sit_to_stand_com_velocity_mps": 0.04,
     "hold_at_sit_pose_before_stand_up_seconds":0.3,
-    "mpc_init_delay_after_stand_up_seconds": 0.5,
+    "mpc_init_delay_after_stand_up_seconds": 1,
     "contact_protect_grace_after_stand_up_seconds": 0.3,
     "head_down_pitch_rad": 0.35,
     "head_raise_duration_seconds": 1.0

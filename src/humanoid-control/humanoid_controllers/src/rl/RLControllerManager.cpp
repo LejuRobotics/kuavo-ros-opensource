@@ -2,6 +2,7 @@
 #include <pinocchio/fwd.hpp>
 
 #include "humanoid_controllers/rl/RLControllerManager.h"
+#include "humanoid_controllers/rl/AutoControllerSwitchPolicy.h"
 #include "humanoid_controllers/rl/FallStandController.h"
 #include "humanoid_controllers/rl/AmpWalkController.h"
 #include "humanoid_controllers/rl/DepthWalkController.h"
@@ -1819,11 +1820,13 @@ namespace humanoid_controller
   bool RLControllerManager::isWalkingCommandExecutionAllowed() const
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (!auto_switch_config_.enabled || auto_switch_config_.walking_controller.empty())
+    if (!auto_switch_config_.enabled)
     {
       return true;
     }
-    return current_controller_name_ == auto_switch_config_.walking_controller;
+    return isWalkingCommandExecutionAllowedByAutoSwitch(current_controller_name_,
+                                                        auto_switch_config_.manipulation_controller,
+                                                        auto_switch_config_.walking_controller);
   }
 
   bool RLControllerManager::isExternalControlCommandExecutionAllowed() const
@@ -1877,6 +1880,18 @@ namespace humanoid_controller
       {
         target_name = auto_switch_config_.walking_controller;
         buffer_type = AutoSwitchCommandBufferType::WALKING;
+        if (!isAutoWalkingSwitchSourceAllowed(current_controller_name_,
+                                              auto_switch_config_.manipulation_controller,
+                                              target_name))
+        {
+          ROS_DEBUG_THROTTLE(2.0,
+                             "[RLControllerManager] autoControllerSwitch skipped: walking target=%s only allowed from %s, current=%s, reason=%s",
+                             target_name.c_str(),
+                             auto_switch_config_.manipulation_controller.c_str(),
+                             current_controller_name_.c_str(),
+                             reason.c_str());
+          return;
+        }
         if (last_auto_switch_attempt_time_.isValid() &&
             (now - last_auto_switch_attempt_time_).toSec() < auto_switch_config_.min_switch_interval)
         {
