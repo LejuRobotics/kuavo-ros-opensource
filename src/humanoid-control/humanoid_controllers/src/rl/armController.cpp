@@ -161,8 +161,13 @@ bool ArmController::initialize(const std::string& urdf_path,
   
   // Subscribe to VR input topic
   joint_sub_ = nh_.subscribe<sensor_msgs::JointState>(
-    "/kuavo_arm_traj", 3, 
+    "/kuavo_arm_traj", 3,
     boost::bind(&ArmController::jointStateCallback, this, _1));
+
+  // Subscribe to action trajectory topic（不受 external_target_locked_ 控制）
+  action_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
+    "/kuavo_action_traj", 3,
+    boost::bind(&ArmController::actionTrajectoryCallback, this, _1));
   
   // 滤波器参数将在首次 update() 调用时根据实际 dt 初始化
   // 这里只标记需要初始化，不预设 dt 值
@@ -211,6 +216,24 @@ void ArmController::setExternalCommandBufferCallback(std::function<bool()> callb
 {
   std::lock_guard<std::mutex> lock(state_mutex_);
   external_command_buffer_callback_ = std::move(callback);
+}
+
+void ArmController::clearExternalTarget()
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  external_target_received_ = false;
+  raw_external_target_q_.setZero();
+  external_target_q_ = desire_arm_q_;
+  external_target_v_.setZero();
+  buffered_mode2_target_received_ = false;
+}
+
+void ArmController::updateInternalState(const Eigen::VectorXd& joint_pos,
+                                         const Eigen::VectorXd& joint_vel,
+                                         size_t arm_start_idx)
+{
+  current_arm_pos_ = joint_pos.segment(arm_start_idx, joint_arm_num_);
+  current_arm_vel_ = joint_vel.segment(arm_start_idx, joint_arm_num_);
 }
 
 void ArmController::update(const ros::Time& time,
@@ -638,6 +661,7 @@ void ArmController::applyRateLimitedInterpolation(double dt,
 
 void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
+  if (external_target_locked_) return;
   std::function<bool()> external_command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
@@ -651,6 +675,16 @@ void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& 
     return;
   }
 
+  if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
+  {
+    storeMode2Target(*msg, raw_external_target_q_, raw_external_target_v_);
+    external_target_received_ = true;
+  }
+}
+
+void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg)
+{
+  // 动作轨迹回调：不受 external_target_locked_ 控制，专用于离线动作播放
   if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
   {
     storeMode2Target(*msg, raw_external_target_q_, raw_external_target_v_);

@@ -278,6 +278,7 @@ add_library(${PROJECT_NAME}
         src/rl/FallStandController.cpp
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
+        src/rl/MoREController.cpp
         src/rl/VMPController.cpp
         src/rl/armController.cpp
         src/rl/DepthWalkController.cpp

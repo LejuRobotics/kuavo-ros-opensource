@@ -280,35 +280,31 @@ void WaistController::applyModeChange(int target_mode)
   if (target_mode == 1)
   {
     // 模式1：RL控制
-    // 目标设置为默认腰部位置，通过低通滤波器平滑过渡
-    // 不重置滤波器，让滤波器从当前状态平滑过渡到默认位置
-    
-    // 检查当前位置和默认位置的差异
+    // 使用 smoothstep 从当前位置平滑过渡到默认腰部位置（与 ArmController 一致）
+
     Eigen::VectorXd error = default_waist_pos_ - current_waist_pos_;
     double error_norm = error.norm();
     std::cout << "error_norm" << error_norm << std::endl;
     std::cout << "default_waist_pos_" << default_waist_pos_.transpose() << std::endl;
     std::cout << "current_waist_pos_" << current_waist_pos_.transpose() << std::endl;
-    // 使用阈值（0.05 rad，约3度）来判断是否需要插值
-    const double waist_tracking_error_threshold = 0.02;
-    
-    if (error_norm > waist_tracking_error_threshold)
-    {
-      // 差异较大，标记为插值状态，使用低通滤波器平滑过渡到默认位置
-      waist_is_interpolating_ = true;
-      ROS_INFO("[WaistController] Switching to Mode 1: will use low-pass filter to transition to default position (error=%.4f rad, cutoff=%.1f Hz)", 
-               error_norm, mode2_cutoff_freq_);
-    }
-    else
-    {
-      // 差异较小，直接设置为默认位置，不需要插值
-      desire_waist_q_ = default_waist_pos_;
-      desire_waist_v_ = Eigen::VectorXd::Zero(joint_waist_num_);
-      waist_is_interpolating_ = false;
-      ROS_INFO("[WaistController] Switching to Mode 1: already at default position");
-    }
+
+    // 保存当前期望位置作为插值起点（平滑衔接当前状态）
+    desire_waist_q_ = current_waist_pos_;
+    desire_waist_v_ = current_waist_vel_;
+
+    waist_interpolation_start_time_ = ros::Time::now();
+    waist_interpolation_start_pos_ = current_waist_pos_;
+    // 动态计算时长：最大关节偏差 / 插值速度 (0.5 rad/s)，下限 0.1s
+    const double max_dist = error.cwiseAbs().maxCoeff();
+    const double waist_interp_velocity = 0.5;
+    waist_interpolation_duration_ = std::max(1.5 * max_dist / waist_interp_velocity, 0.1);
+
+    waist_is_interpolating_ = true;
     mode2_waist_target_received_ = false;
-    
+
+    ROS_INFO("[WaistController] Switching to Mode 1: smoothstep to default (error=%.4f rad, duration=%.2f s)",
+             error_norm, waist_interpolation_duration_);
+
     ROS_INFO("[WaistController] Switching to Mode 1: RL control");
   }
   else if (target_mode == 2)
@@ -328,49 +324,28 @@ void WaistController::applyModeChange(int target_mode)
 void WaistController::updateMode1(double dt)
 {
   // 模式1：RL控制
-  // 如果正在插值到默认位置，使用低通滤波器平滑过渡
+  // 如果正在插值到默认位置，使用 smoothstep 平滑过渡（与 ArmController 一致）
   if (waist_is_interpolating_)
   {
-    // 使用低通滤波器从当前位置平滑过渡到默认位置
-    desire_waist_q_ = waist_joint_pos_filter_.update(default_waist_pos_);
-    
-    // 通过位置差分计算速度
-    static Eigen::VectorXd prev_filtered_pos_mode1;
-    static bool first_call_mode1 = true;
-    
-    if (first_call_mode1)
+    const double elapsed = (ros::Time::now() - waist_interpolation_start_time_).toSec();
+    const double duration = std::max(waist_interpolation_duration_, 0.001);
+    double alpha = std::min(elapsed / duration, 1.0);
+
+    if (alpha >= 1.0)
     {
-      prev_filtered_pos_mode1 = desire_waist_q_;
-      first_call_mode1 = false;
-    }
-    
-    if (prev_filtered_pos_mode1.size() != joint_waist_num_)
-    {
-      prev_filtered_pos_mode1 = desire_waist_q_;
-    }
-    
-    // 计算速度：v = (q_current - q_prev) / dt
-    Eigen::VectorXd computed_vel = (desire_waist_q_ - prev_filtered_pos_mode1) / dt;
-    
-    // 对计算出的速度进行低通滤波
-    desire_waist_v_ = waist_joint_vel_filter_.update(computed_vel);
-    
-    prev_filtered_pos_mode1 = desire_waist_q_;
-    
-    // 检查误差，如果小于阈值则结束插值，让RL控制器完全接管
-    Eigen::VectorXd error = default_waist_pos_ - desire_waist_q_;
-    double error_norm = error.norm();
-    const double waist_tracking_error_threshold = 0.02;
-    
-    if (error_norm <= waist_tracking_error_threshold)
-    {
-      // 误差小于阈值，结束插值
-      waist_joint_pos_filter_.reset(default_waist_pos_);
+      // 插值完成，RL控制器接管
       desire_waist_q_ = default_waist_pos_;
       desire_waist_v_ = Eigen::VectorXd::Zero(joint_waist_num_);
       waist_is_interpolating_ = false;
-      first_call_mode1 = true;  // 重置静态变量，为下次插值做准备
-      ROS_INFO("[WaistController] Mode 1 interpolation completed, RL controller takes over (error=%.4f rad)", error_norm);
+      ROS_INFO("[WaistController] Mode 1 smoothstep completed (elapsed=%.2f s)", elapsed);
+    }
+    else
+    {
+      // smoothstep: s = 3τ² - 2τ³，零速起止
+      const double s = alpha * alpha * (3.0 - 2.0 * alpha);
+      desire_waist_q_ = waist_interpolation_start_pos_
+                      + s * (default_waist_pos_ - waist_interpolation_start_pos_);
+      desire_waist_v_ = (default_waist_pos_ - waist_interpolation_start_pos_) / duration;
     }
   }
   // 插值完成后，不更新命令消息，让RL控制器完全接管

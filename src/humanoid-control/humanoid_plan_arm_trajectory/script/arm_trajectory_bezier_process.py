@@ -153,6 +153,7 @@ class ArmTrajectoryBezierDemo:
         self.traj_sub = rospy.Subscriber('/bezier/arm_traj', JointTrajectory, self.traj_callback, queue_size=1,
                                          tcp_nodelay=True)
         self.kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
+        self.kuavo_action_traj_pub = rospy.Publisher('/kuavo_action_traj', JointState, queue_size=1, tcp_nodelay=True)
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1, tcp_nodelay=True)
         self.gait_name_pub = rospy.Publisher('/humanoid_mpc_gait_name_request', String, queue_size=1, tcp_nodelay=True)
         self.control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1,
@@ -668,6 +669,15 @@ class ArmTrajectoryBezierDemo:
             rospy.logwarn("Switch controller service '%s' call failed: %s", service_name, e)
             return False
 
+    def _get_preferred_controller(self):
+        """MoRE 优先，不在线则 fallback AMP"""
+        try:
+            resp = rospy.ServiceProxy("/humanoid_controller/get_controller_list", getControllerList)()
+            if resp.success and "more_controller" in resp.controller_names:
+                return "more_controller"
+        except: pass
+        return "amp_controller"
+
     def ensure_tact_playback_controller(self, timeout=3.0):
         if self.kuavo_control_scheme != "multi":
             return True
@@ -718,7 +728,7 @@ class ArmTrajectoryBezierDemo:
         """
         # 控制模式到控制器名称集合的映射
         mode_controllers = {
-            "rl": {"amp_controller"},
+            "rl": {"amp_controller", "more_controller"},
             "ocs2": {"mpc"},
         }
         
@@ -1774,12 +1784,15 @@ class ArmTrajectoryBezierDemo:
         self.running_action = True
         threading.Thread(target=self.publish_running_action_state).start()
 
-        if not self.wait_for_stance_before_action(timeout=3.0):
-            msg = "机器人停止行走超时，取消上肢动作播放"
-            rospy.logwarn(msg)
-            self.running_action = False
-            self.publish_action_state(0)
-            return ExecuteArmActionResponse(success=False, message=msg)
+        # MoRE 控制器支持行走中播动作，不需要强制停止
+        current_ctrl = self.get_current_controller_name()
+        if current_ctrl != "more_controller":
+            if not self.wait_for_stance_before_action(timeout=3.0):
+                msg = "机器人停止行走超时，取消上肢动作播放"
+                rospy.logwarn(msg)
+                self.running_action = False
+                self.publish_action_state(0)
+                return ExecuteArmActionResponse(success=False, message=msg)
 
         if not self.ensure_tact_playback_controller(timeout=3.0):
             current_controller = self.get_current_controller_name()
@@ -1792,12 +1805,14 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
-        if not self.ensure_arm_ctrl_mode(2, timeout=5.0):
-            msg = "手臂控制模式未切换到外部控制模式，取消动作播放"
-            rospy.logwarn(msg)
-            self.running_action = False
-            self.publish_action_state(0)
-            return ExecuteArmActionResponse(success=False, message=msg)
+        # MoRE 控制器已自行处理手臂模式切换，跳过 MPC arm mode 检查（避免冗余 ROS service 延迟）
+        if current_ctrl != "more_controller":
+            if not self.ensure_arm_ctrl_mode(2, timeout=5.0):
+                msg = "手臂控制模式未切换到外部控制模式，取消动作播放"
+                rospy.logwarn(msg)
+                self.running_action = False
+                self.publish_action_state(0)
+                return ExecuteArmActionResponse(success=False, message=msg)
 
         # 获取初始帧时间
         self.arm_flag = True
@@ -1912,6 +1927,7 @@ class ArmTrajectoryBezierDemo:
             try:
                 if len(self.joint_state.position) != 0:
                     self.kuavo_arm_traj_pub.publish(self.joint_state)
+                    self.kuavo_action_traj_pub.publish(self.joint_state)
                 if len(self.hand_state.right_hand_position) != 0 or len(self.hand_state.left_hand_position) != 0:
                     self.control_hand_pub.publish(self.hand_state)
                 if len(self.head_state.joint_data) != 0:

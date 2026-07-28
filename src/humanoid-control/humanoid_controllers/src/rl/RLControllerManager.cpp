@@ -7,6 +7,7 @@
 #include "humanoid_controllers/rl/AmpWalkController.h"
 #include "humanoid_controllers/rl/DepthWalkController.h"
 #include "humanoid_controllers/rl/VMPController.h"
+#include "humanoid_controllers/rl/MoREController.h"
 #include "humanoid_controllers/rl/DanceController.h"
 #include <algorithm>
 #include <ros/master.h>
@@ -1104,6 +1105,10 @@ namespace humanoid_controller
           // VMP 控制器
           controller = std::make_unique<VMPController>(name, config_file_abs, nh, ros_logger);
         }
+        else if (type == RLControllerType::MORE_CONTROLLER)
+        {
+          controller = std::make_unique<MoREController>(name, config_file_abs, nh, ros_logger);
+        }
         else if (type == RLControllerType::DANCE_CONTROLLER)
         {
           // Dance 控制器
@@ -1832,11 +1837,13 @@ namespace humanoid_controller
   bool RLControllerManager::isExternalControlCommandExecutionAllowed() const
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    if (!auto_switch_config_.enabled || auto_switch_config_.manipulation_controller.empty())
+    if (!auto_switch_config_.enabled)
     {
       return true;
     }
-    return current_controller_name_ == auto_switch_config_.manipulation_controller;
+    return isExternalControlCommandExecutionAllowedByAutoSwitch(current_controller_name_,
+                                                                auto_switch_config_.manipulation_controller,
+                                                                auto_switch_config_.walking_controller);
   }
 
   void RLControllerManager::evaluateAutoControllerSwitch(const std::string& reason)
@@ -1870,6 +1877,18 @@ namespace humanoid_controller
       {
         target_name = auto_switch_config_.manipulation_controller;
         buffer_type = AutoSwitchCommandBufferType::EXTERNAL_CONTROL;
+        if (!isAutoManipulationSwitchSourceAllowed(current_controller_name_,
+                                                   auto_switch_config_.manipulation_controller,
+                                                   auto_switch_config_.walking_controller))
+        {
+          ROS_DEBUG_THROTTLE(2.0,
+                             "[RLControllerManager] autoControllerSwitch skipped: manipulation target=%s only allowed from %s, current=%s, reason=%s",
+                             target_name.c_str(),
+                             auto_switch_config_.walking_controller.c_str(),
+                             current_controller_name_.c_str(),
+                             reason.c_str());
+          return;
+        }
         if (walking_command_blocked)
         {
           ROS_DEBUG_THROTTLE(2.0,

@@ -105,6 +105,12 @@ public:
      * @return 当前模式：1 或 2
      */
     int getMode() const { return waist_control_mode_; }
+
+    /**
+     * @brief 检查是否已收到外部腰部目标输入
+     * @return true表示已收到外部输入，false表示无外部输入
+     */
+    bool hasExternalTarget() const { return mode2_waist_target_received_; }
     
     /**
      * @brief 启用/禁用腰部控制覆盖
@@ -222,7 +228,10 @@ private:
     
     // 模式1相关
     Eigen::VectorXd default_waist_pos_;  // 默认腰部位置（用于模式1）
-    bool waist_is_interpolating_;  // 是否正在插值到默认位置（模式1使用低通滤波器插值）
+    bool waist_is_interpolating_;  // 是否正在插值到默认位置（模式1使用 smoothstep）
+    ros::Time waist_interpolation_start_time_;  // smoothstep 起始时间
+    Eigen::VectorXd waist_interpolation_start_pos_;  // smoothstep 起始位置
+    double waist_interpolation_duration_{0.5};  // smoothstep 时长 (s)
     
     // 模式2相关（外部控制）
     Eigen::VectorXd raw_mode2_waist_target_q_;  // 模式2原始目标位置

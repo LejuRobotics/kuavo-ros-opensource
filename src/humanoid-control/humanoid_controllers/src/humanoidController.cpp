@@ -2307,6 +2307,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
   bool humanoidController::shouldBlockWalkingCommandForExternalArmTarget() const
   {
+    // MoRE 走不停腿：ROS param 为 true 时跳过外部手臂位置检查
+    bool allow_walking = false;
+    ros::param::get("/allow_walking_during_arm_action", allow_walking);
+    if (allow_walking)
+      return false;
+
     if (armNumReal_ <= 0)
     {
       return false;

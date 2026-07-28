@@ -35,3 +35,8 @@ controllers:
     config_file: "rl/dance_param.info"  # 相对于版本配置目录的路径
     enabled: true  # 是否启用该控制器  
 
+  # - name: "more_controller"
+  #   class: "BASE_CONTROLLER"
+  #   type: "MORE_CONTROLLER"
+  #   config_file: "MoRE/more_rl_param.info"
+  #   enabled: true

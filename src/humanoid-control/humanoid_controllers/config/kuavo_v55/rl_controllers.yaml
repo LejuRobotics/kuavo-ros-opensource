@@ -34,3 +34,8 @@ controllers:
     config_file: "rl/depth_loco_param.info" 
     enabled: true  
 
+  # - name: "more_controller"
+  #   class: "BASE_CONTROLLER"
+  #   type: "MORE_CONTROLLER"
+  #   config_file: "MoRE/more_rl_param.info"
+  #   enabled: true     
