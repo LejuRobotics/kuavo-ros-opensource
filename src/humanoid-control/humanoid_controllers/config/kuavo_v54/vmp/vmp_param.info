@@ -202,20 +202,20 @@ jointKp
     ; 腰部关节
     (12,0)  30      ; waist_joint        (env.yaml: 30)
     ; 手臂关节
-    (13,0)  30      ; zarm_l1_joint      (env.yaml: 30)
+    (13,0)  15      ; zarm_l1_joint      (env.yaml: 30)
     (14,0)  30      ; zarm_l2_joint      (env.yaml: 30)
     (15,0)  30      ; zarm_l3_joint      (env.yaml: 15)
-    (16,0)  60      ; zarm_l4_joint      (env.yaml: 30)
-    (17,0)  60      ; zarm_l5_joint      (env.yaml: 15)
-    (18,0)  60      ; zarm_l6_joint      (env.yaml: 15)
-    (19,0)  60      ; zarm_l7_joint      (env.yaml: 15)
-    (20,0)  30      ; zarm_r1_joint      (env.yaml: 30)
+    (16,0)  30      ; zarm_l4_joint      (env.yaml: 30)
+    (17,0)  50      ; zarm_l5_joint      (env.yaml: 15)
+    (18,0)  15      ; zarm_l6_joint      (env.yaml: 15)
+    (19,0)  15      ; zarm_l7_joint      (env.yaml: 15)
+    (20,0)  15      ; zarm_r1_joint      (env.yaml: 30)
     (21,0)  30      ; zarm_r2_joint      (env.yaml: 30)
     (22,0)  30      ; zarm_r3_joint      (env.yaml: 15)
-    (23,0)  60      ; zarm_r4_joint      (env.yaml: 30)
-    (24,0)  60      ; zarm_r5_joint      (env.yaml: 15)
-    (25,0)  60      ; zarm_r6_joint      (env.yaml: 15)
-    (26,0)  60      ; zarm_r7_joint      (env.yaml: 15)
+    (23,0)  30      ; zarm_r4_joint      (env.yaml: 30)
+    (24,0)  50      ; zarm_r5_joint      (env.yaml: 15)
+    (25,0)  15      ; zarm_r6_joint      (env.yaml: 15)
+    (26,0)  15      ; zarm_r7_joint      (env.yaml: 15)
 }
 
 jointKd
@@ -238,18 +238,18 @@ jointKd
     ; 手臂关节
     (13,0)  3.0     ; zarm_l1_joint
     (14,0)  3.0     ; zarm_l2_joint
-    (15,0)  0.5     ; zarm_l3_joint
-    (16,0)  0.5     ; zarm_l4_joint
-    (17,0)  0.5     ; zarm_l5_joint
-    (18,0)  0.5     ; zarm_l6_joint
-    (19,0)  0.5     ; zarm_l7_joint
+    (15,0)  3.0     ; zarm_l3_joint
+    (16,0)  1.0     ; zarm_l4_joint
+    (17,0)  2.0     ; zarm_l5_joint
+    (18,0)  1.0     ; zarm_l6_joint
+    (19,0)  1.0     ; zarm_l7_joint
     (20,0)  3.0     ; zarm_r1_joint
     (21,0)  3.0     ; zarm_r2_joint
-    (22,0)  0.5     ; zarm_r3_joint
-    (23,0)  0.5     ; zarm_r4_joint
-    (24,0)  0.5     ; zarm_r5_joint
-    (25,0)  0.5     ; zarm_r6_joint
-    (26,0)  0.5     ; zarm_r7_joint
+    (22,0)  3.0     ; zarm_r3_joint
+    (23,0)  1.0     ; zarm_r4_joint
+    (24,0)  2.0     ; zarm_r5_joint
+    (25,0)  1.0     ; zarm_r6_joint
+    (26,0)  1.0     ; zarm_r7_joint
 }
 
 jointControlMode
@@ -374,18 +374,18 @@ motor_pdo_kd
     (12,0)  2500     ; waist_joint
     (13,0)  2684    ; zarm_l1_joint (除了第一个ec电机之外其他手臂关节暂设为0，ruiwo暂不支持，可根据需要调整)
     (14,0)  3    ; zarm_l2_joint
-    (15,0)  0.5    ; zarm_l3_joint
-    (16,0)  0.5    ; zarm_l4_joint
-    (17,0)  0.5    ; zarm_l5_joint
-    (18,0)  0.5    ; zarm_l6_joint
-    (19,0)  0.5    ; zarm_l7_joint
+    (15,0)  3.0    ; zarm_l3_joint
+    (16,0)  1.0    ; zarm_l4_joint
+    (17,0)  2.0    ; zarm_l5_joint
+    (18,0)  1.0    ; zarm_l6_joint
+    (19,0)  1.0    ; zarm_l7_joint
     (20,0)  2684    ; zarm_r1_joint
     (21,0)  3    ; zarm_r2_joint
-    (22,0)  0.5    ; zarm_r3_joint
-    (23,0)  0.5    ; zarm_r4_joint
-    (24,0)  0.5    ; zarm_r5_joint
-    (25,0)  0.5    ; zarm_r6_joint
-    (26,0)  0.5    ; zarm_r7_joint
+    (22,0)  3.0    ; zarm_r3_joint
+    (23,0)  1.0    ; zarm_r4_joint
+    (24,0)  2.0    ; zarm_r5_joint
+    (25,0)  1.0    ; zarm_r6_joint
+    (26,0)  1.0    ; zarm_r7_joint
 }
 
 torqueLimits
