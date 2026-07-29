@@ -2562,11 +2562,56 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             ROS_ERROR("[HumanoidController] Failed to switch to AMP walk controller");
           }
         }
-        else
+        else if (is_fall_stand_controller_active)  // 倒地起身完成
+        {
+          if (controller_manager_->hasController(RLControllerType::AMP_CONTROLLER))
+          {
+            if (controller_manager_->switchController(RLControllerType::AMP_CONTROLLER))
+            {
+              current_controller_ptr_ = controller_manager_->getCurrentController();
+              ROS_INFO("[HumanoidController] FallStand finished, switched to AMP controller");
+              fall_down_state_ = FallStandState::STANDING;
+            }
+            else
+            {
+              ROS_ERROR("[HumanoidController] Failed to switch to AMP controller after FallStand");
+            }
+          }
+          else
+          {
+            ROS_WARN_THROTTLE(5.0, "[HumanoidController] No AMP controller available, staying in FallStand");
+          }
+        }
+        else if (current_controller_type == RLControllerType::AMP_CONTROLLER)
+        {
+          // AMP 倒地：有 FallStand 直切（跳过 MPC 中转，避免倒地瞬间撞 isTorsoVelocityStable 阻塞）。
+          if (controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER))
+          {
+            ROS_WARN("[HumanoidController] AMP detected fall, switching to FallStand directly (skip MPC)");
+            if (controller_manager_->switchController(RLControllerType::FALL_STAND_CONTROLLER))
+            {
+              current_controller_ptr_ = controller_manager_->getCurrentController();
+              current_controller_ptr_->reset();
+              mrtRosInterface_->pauseResumeMpcNode(true);
+              fall_down_state_ = FallStandState::FALL_DOWN;
+            }
+            else
+            {
+              ROS_ERROR("[HumanoidController] Failed to switch to FallStand after AMP fall detection");
+            }
+          }
+          else
+          {
+            ROS_WARN("[HumanoidController] AMP requests exit (fall), no FallStand available, switching to BASE controller");
+            controller_manager_->switchToBaseController();
+            fall_down_state_ = FallStandState::FALL_DOWN;
+          }
+        }
+        else  // 其余 RL 控制器请求退出 → 切回 MPC，由 MPC safety check 分流
         {
           ROS_WARN("[HumanoidController] Current controller requests exit, switching to BASE controller");
           controller_manager_->switchToBaseController();
-          fall_down_state_ = FallStandState::STANDING;
+          fall_down_state_ = FallStandState::FALL_DOWN;
         }
       }
     }
@@ -2689,9 +2734,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       ROS_INFO("[RL->MPC] 清理手臂轨迹缓存，重置为当前位置: [%.3f, %.3f, ...]", 
                current_arm_pos(0), current_arm_pos(1));
       
-      // 从RL切换到MPC时，重置运动学估计（包括状态估计器、时间戳、yaw连续性等）
+      // resetKinematicsEstimation 内部已刷新 stanceState_mrt_，无需重复赋值。
       resetKinematicsEstimation();
-      stanceState_mrt_ = currentObservation_.state;
     }
     last_is_rl_controller_ = is_rl_controller_;
     kuavo_msgs::jointCmd jointCmdMsg;
@@ -2707,11 +2751,12 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       transport_mode_state_ = TRANSPORT_ACTIVE;
       ROS_INFO("[HumanoidController] Transport mode ACTIVE (joints locked)");
     }
-    // 处理 HAND_OVER 的 MPC resume（从 ACTIVE 退出时需要）
-    if (transport_handover_resume_mpc_.load())
+    // HAND_OVER 退出：先对齐当前状态再插值，避免 yaw 回弹到搬运进入时的陈旧值。
+    if (transport_reset_mpc_pending_.load())
     {
-      transport_handover_resume_mpc_ = false;
-      mrtRosInterface_->pauseResumeMpcNode(false);
+      transport_reset_mpc_pending_ = false;
+      resetKinematicsEstimation();
+      ROS_INFO("[HumanoidController] Transport HAND_OVER: reset kinematics (aligned to current state)");
     }
 
     // MPC+WBC / RL / 搬运 三种控制流门控
@@ -4611,11 +4656,12 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       if (transport_mode_state_ == TRANSPORT_READY)
       {
         reset_mpc_ = true;  // 退出 RESET_BASE 插值
+        transport_reset_mpc_pending_ = true;  // 主循环先对齐当前状态再插值
       }
-      else  // ACTIVE: CSP 锁死期间 MPC 被暂停，需恢复(主循环处理)
+      else  // ACTIVE: CSP 锁死期间已暂停 MPC
       {
-        transport_handover_resume_mpc_ = true;
         reset_mpc_ = true;
+        transport_reset_mpc_pending_ = true;  // 同上
       }
       transport_mode_state_ = TRANSPORT_HANDING_OVER;
       ROS_INFO("[HumanoidController] Transport mode HANDING_OVER");
@@ -5055,15 +5101,15 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     
     cmdPoseWorldPublisher_.publish(twist_msg);
     
-    // 每0.1秒输出一次进度信息
+    // 插值过程中按固定间隔打印一次，避免刷屏
     static double last_debug_time = current_time;
-    if (current_time - last_debug_time > 0.05)
+    if (current_time - last_debug_time > 0.2)
     {
       double elapsed_time = current_time - torso_interpolation_start_time_;
       //double progress = (elapsed_time / torso_interpolation_duration_) * 100.0;
       double z_diff = interpolated_pose(2) - default_state_[8];
-      std::cout << "MPC-RL: TO "<< (is_rl_controller_ ? "RL" : "MPC") << ", elapsed_time: " 
-                << elapsed_time << "s, expected duration: " << torso_interpolation_duration_ 
+      std::cout << "MPC-RL: TO "<< (is_rl_controller_ ? "RL" : "MPC") << ", elapsed_time: "
+                << elapsed_time << "s, expected duration: " << torso_interpolation_duration_
                 << "s, distance_to_target: " << distance_to_target << "m" << std::endl;
       std::cout << "torso_interpolation_target_pose_: " << torso_interpolation_target_pose_.transpose() << std::endl;
       std::cout << "arm_interpolated_pos: " << arm_interpolation_result_.transpose() << std::endl;

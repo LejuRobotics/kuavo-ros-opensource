@@ -488,7 +488,8 @@ namespace humanoid_controller
     bool contactTrotgait_ = false;
     bool cmdTrotgait_ = false;
     bool cmdRLMode_ = false;                                         // RL模式命令标志
-    bool reset_mpc_{false};
+    // 跨线程触发: service 回调/keyboard 置位, 主循环 update 消费。原子避免数据竞争。
+    std::atomic<bool> reset_mpc_{false};
     ResettingMpcState resetting_mpc_state_{ResettingMpcState::NORMAL};
     bool disable_mpc_{false};
     bool disable_wbc_{false};
@@ -526,7 +527,7 @@ namespace humanoid_controller
     std::atomic<TransportModeState> transport_mode_state_{TRANSPORT_INACTIVE};
     std::atomic<bool> transport_handoff_to_fallstand_{false};
     std::atomic<bool> transport_lock_pending_{false};
-    std::atomic<bool> transport_handover_resume_mpc_{false};
+    std::atomic<bool> transport_reset_mpc_pending_{false};
     vector_t transport_target_pos_;
     double transport_base_height_{0.7};
     double standupTime_{0.0};

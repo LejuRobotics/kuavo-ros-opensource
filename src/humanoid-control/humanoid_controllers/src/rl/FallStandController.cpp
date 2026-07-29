@@ -851,6 +851,13 @@ namespace humanoid_controller
         {
           ROS_INFO("[%s] Motion trajectory finished, switch state to STANDING (allow exit)", name_.c_str());
           fall_stand_state_ = FallStandState::STANDING;
+          // 进入 STANDING 态这一刻同步发布完成值, 避免主线程切走 AMP 后 updateImpl 不再被调、
+          // 常规 publish 发不出 STANDING → Joy 末值冻结在上一个状态、_standup_phase 不清。
+          if (ros_logger_)
+          {
+            ros_logger_->publishValue("/humanoid_controller/FallStandController/fall_stand_state_",
+                                      static_cast<int>(fall_stand_state_));
+          }
         }
       }
       else
