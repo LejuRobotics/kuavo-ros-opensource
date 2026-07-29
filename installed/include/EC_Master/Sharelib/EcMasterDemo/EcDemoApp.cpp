@@ -79,6 +79,7 @@
 #define ENCODER_FEEDBACK_MODE 0x381C  //编码器工作模式
 #define MOTOR_PARAMETER_CODE 0x3E01 //电机参数代码
 #define DRIVER_SAVE_SETTING_PARAMETER 0x313D  //驱动器保存参数
+#define INDEX_TEMPERATURE_LIMIT 0x3F0D  //驱动器温度限幅值（单位：℃，YD驱动器）
 /*-LOCAL VARIABLES-----------------------------------------------------------*/
 static EC_T_PERF_MEAS_INFO_PARMS S_aPerfMeasInfos[MAX_JOB_NUM] =
     {
@@ -1086,6 +1087,89 @@ static int motorWriteJointKd(const std::vector<uint16_t> &ids, EcMasterType driv
   return 0;
 }
 
+/**
+ * @brief 向YD驱动器写入温度限幅值（对象索引0x3F0D）
+ * @param ids EC从站ID列表（1-based）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limits 温度限幅值列表（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示写入失败，3表示参数尺寸不匹配
+ */
+static int motorWriteTemperatureLimitImpl(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t> &temp_limits)
+{
+  if(driver_type != EcMasterType::YD) {
+    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
+    return 1;
+  }
+
+  if(temp_limits.size() != ids.size())
+  {
+    std::cout << "[EcMaster] Invalid temperature limit size, expected " << ids.size() << ", got " << temp_limits.size() << std::endl;
+    return 3;
+  }
+
+  for(uint32_t i = 0; i < ids.size(); i++)
+  {
+    int32_t temp_limit = temp_limits[i];
+    // 写入温度限幅值到0x3F0D，子索引0；不启用断电保存，避免每次上电写flash损耗
+    bool write_status = writeSingleSdo(g_motor_id[ids[i]-1].slave_id-1, INDEX_TEMPERATURE_LIMIT, 0, &temp_limit, false);
+    if(!write_status)
+    {
+      printf("[EcMaster] Failed to write temperature limit, Joint %d, Slave %d, Value %d\n",
+             ids[i], g_motor_id[ids[i]-1].slave_id, temp_limit);
+      return 2;
+    }
+    printf("[EcMaster] Write temperature limit success, Joint %d, Slave %d, Value %d\n",
+           ids[i], g_motor_id[ids[i]-1].slave_id, temp_limit);
+  }
+
+  return 0;
+}
+
+/**
+ * @brief 向所有YD驱动器写入统一的温度限幅值（对象索引0x3F0D）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limit 温度限幅值（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示有写入失败
+ */
+static int motorWriteTemperatureLimitAllImpl(EcMasterType driver_type, int32_t temp_limit)
+{
+  if(driver_type != EcMasterType::YD) {
+    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
+    return 1;
+  }
+
+  int32_t value = temp_limit;
+  int success_count = 0;
+  int fail_count = 0;
+
+  for(uint32_t i = 0; i < num_motor_slave; i++)
+  {
+    if(g_motor_id[i].driver_type != YD) {
+      continue;
+    }
+
+    bool write_status = writeSingleSdo(g_motor_id[i].slave_id-1, INDEX_TEMPERATURE_LIMIT, 0, &value, false);
+    if(!write_status)
+    {
+      printf("[EcMaster] Failed to write temperature limit, Joint %d, Slave %d, Value %d\n",
+             g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, temp_limit);
+      fail_count++;
+    }
+    else
+    {
+      printf("[EcMaster] Write temperature limit success, Joint %d, Slave %d, Value %d\n",
+             g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, temp_limit);
+      success_count++;
+    }
+  }
+
+  printf("[EcMaster] Temperature limit write done: success=%d, fail=%d\n", success_count, fail_count);
+  if(fail_count > 0) {
+    return 2;
+  }
+  return 0;
+}
+
 
 
 // void motorGetCurrent(double *current_actual)
@@ -1824,6 +1908,17 @@ int motorWriteKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, con
 {
   return motorWriteJointKd(ids, driver_type, joint_kd);
 }
+
+int motorWriteTemperatureLimit(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t> &temp_limits)
+{
+  return motorWriteTemperatureLimitImpl(ids, driver_type, temp_limits);
+}
+
+int motorWriteTemperatureLimitAll(EcMasterType driver_type, int32_t temp_limit)
+{
+  return motorWriteTemperatureLimitAllImpl(driver_type, temp_limit);
+}
+
 bool isMotorEnable(void)
 {
   return motor_enabled;

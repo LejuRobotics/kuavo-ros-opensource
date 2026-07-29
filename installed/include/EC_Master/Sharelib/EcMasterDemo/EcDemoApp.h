@@ -271,6 +271,23 @@ extern int motorReadKd(const std::vector<uint16_t> &ids, EcMasterType driver_typ
 extern int motorWriteKp(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kp);
 extern int motorWriteKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kd);
 
+/**
+ * @brief 向YD驱动器写入温度限幅值（对象索引0x3F0D）
+ * @param ids EC从站ID列表（1-based）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limits 温度限幅值列表（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示写入失败，3表示参数尺寸不匹配
+ */
+extern int motorWriteTemperatureLimit(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& temp_limits);
+
+/**
+ * @brief 向所有YD驱动器写入统一的温度限幅值（对象索引0x3F0D）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limit 温度限幅值（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示有写入失败
+ */
+extern int motorWriteTemperatureLimitAll(EcMasterType driver_type, int32_t temp_limit);
+
 extern bool isMotorEnable(void);
 extern uint32_t getNumMotorSlave(void);
 void setEcEncoderRange(uint32_t *encoder_range_set, uint16_t num);
