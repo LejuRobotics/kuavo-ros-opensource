@@ -1,16 +1,17 @@
 '''
 Description: 统一音频播放节点 — loundspeaker (文件转换) + audio_stream_player (PyAudio 播放)
-  /play_music srv:     immediate=False → 追加 (队列语义); immediate=True → 先停下立即播放
-  /play_music_immediate srv: 兼容 beta 调用方 (等同 immediate=True)
+  /play_music srv:            追加播放 (旧接口, 队列语义)
+  /play_music_immediate srv:  打断当前立即播放 (新接口, 原子 stop+play)
   /stop_music srv:   同步停止，返回时已静音 (推荐)
-  /stop_music topic:  fire-and-forget 停止 (兼容, 推荐迁移到 service)
-  /audio_data sub:     接收外部 PCM 推流 (TTS / llm_doubao.py 兼容, 自动重采样至声卡采样率)
+  /stop_music topic:  fire-and-forget 停止 (兼容)
+  /audio_data sub:     接收外部 PCM 推流 (TTS 兼容, 自动重采样至声卡采样率)
   /audio_status srv:   查询当前播放状态
   /get_used_audio_buffer_size srv: 查询缓冲大小
   /audio_playback_status topic: STATUS_RATE Hz 状态发布
 '''
 #!/usr/bin/env python3
 import os
+import sys
 import time
 import uuid
 import wave
@@ -30,9 +31,9 @@ except ImportError:
     import pyaudio
 
 try:
-    import samplerate
+    from scipy import signal as scipy_signal
 except ImportError:
-    samplerate = None
+    scipy_signal = None
 
 from kuavo_msgs.srv import playmusic, playmusicResponse, PlayMusicImmediate, PlayMusicImmediateResponse
 from kuavo_audio_player.srv import audio_status, audio_statusResponse
@@ -53,7 +54,11 @@ MIN_DB = -60.0   # vol→0⁺ 时的 dB 下限 (−60dB≈振幅×0.001, 接近�
 class AudioPlayerNode:
 
     def __init__(self):
-        # 必须先 init_node, 否则声卡检测循环中无法响应 SIGINT
+        # 先检测音频设备，不存在则不注册节点，避免与上位机冲突
+        if not AudioPlayerNode._check_sound_card():
+            print("未检测到播音设备，不启用播音功能！")
+            sys.exit(0)
+
         rospy.init_node('audio_player_node')
 
         self._music_dir = rospy.get_param('music_path', '/home/lab/.config/lejuconfig/music')
@@ -225,7 +230,7 @@ class AudioPlayerNode:
             self._buf = bytearray()
             self._read_pos = 0
 
-    def _close_stream(self):
+    def _close_stream(self):src/ros_audio/kuavo_audio_player/scripts/audio_player.py
         """关闭当前流 (丢弃 ALSA DMA), 不重建。"""
         self._stop_evt.set()
         try:
@@ -243,13 +248,11 @@ class AudioPlayerNode:
         self._init_stream()
         self._cleanup_temp()
 
-    # 服务: /play_music
-    #   req.immediate=True  → 先停止当前, 再加载新文件 (打断+播新, 无竞态)
-    #   req.immediate=False → 追加到缓冲 (队列语义, 不打断, 默认)
-    # 服务: /play_music_immediate — 兼容 beta 调用方
+    # 服务: /play_music (旧接口, 冻结) — 追加到缓冲 (队列语义, 不打断)
+    # 服务: /play_music_immediate (新接口) — 先停止当前, 再加载新文件 (打断+播新, 无竞态)
 
     def _on_play_music(self, req):
-        return self._load_to_buffer(req, interrupt=req.immediate)
+        return self._load_to_buffer(req, interrupt=False)
 
     def _on_play_music_immediate(self, req):
         result = self._load_to_buffer(req, interrupt=True)
@@ -361,10 +364,10 @@ class AudioPlayerNode:
                     src_rate = int(dim.size)
                     break
 
-            if src_rate != self._dev_rate and samplerate is not None:
-                ratio = self._dev_rate / src_rate
+            if src_rate != self._dev_rate and scipy_signal is not None:
+                target_num_samples = int(len(audio) * self._dev_rate / src_rate)
                 audio = audio.astype(np.float32) / 32768.0
-                audio = samplerate.resample(audio, ratio, converter_type='sinc_fastest')
+                audio = scipy_signal.resample(audio, target_num_samples)
                 audio = np.clip(audio * 32768.0, -32768, 32767).astype(np.int16)
 
             data = audio.tobytes()

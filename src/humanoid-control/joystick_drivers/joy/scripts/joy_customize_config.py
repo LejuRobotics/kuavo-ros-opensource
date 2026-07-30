@@ -633,14 +633,13 @@ class JoyCustomizeConfigNode:
         name = str(names).strip()
         return [name] if name else []
 
-    def _set_robot_play_music(self, music_file_name: str, music_volume: int, immediate: bool = False) -> bool:
-        """机器人播放指定文件的音乐。immediate=True 时服务端先停止当前再加载 (打断+播新)。"""
+    def _set_robot_play_music(self, music_file_name: str, music_volume: int) -> bool:
+        """机器人播放指定文件的音乐"""
         try:
             _robot_music_play_client = rospy.ServiceProxy("/play_music", playmusic)
             request = playmusicRequest()
             request.music_number = music_file_name
             request.volume = music_volume
-            request.immediate = immediate
             response = _robot_music_play_client(request)
             rospy.loginfo(f"Service call /play_music: {response.success_flag}")
             return response.success_flag
@@ -1673,11 +1672,11 @@ class JoyCustomizeConfigNode:
     }
 
     def _transport_voice(self, key: str) -> None:
-        """搬运语音: 打断当前 → 立即播新 (immediate=True, 服务端原子 stop+play, 无竞态)。"""
+        """搬运语音: 打断当前 → 立即播新。"""
         name = self._TRANSPORT_VOICE.get(key, "")
         rospy.loginfo(f"[JoyCustomize][搬运][语音] {key}: {name}")
         if name:
-            self._set_robot_play_music(name, 100, immediate=True)
+            self._play_music_immediate(name, 100)
 
     def _set_head_pos(self, pitch_deg: float = 0.0) -> None:
         """发布头部目标角度(yaw=0, pitch 可变)。

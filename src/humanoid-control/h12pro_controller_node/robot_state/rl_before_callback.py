@@ -21,7 +21,7 @@ except ImportError:
     print("pyserial 库未安装，正在尝试安装...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
     import serial
-from kuavo_msgs.srv import playmusic, playmusicRequest, playmusicResponse
+from h12pro_controller_node.srv import playmusic, playmusicRequest, playmusicResponse
 from h12pro_controller_node.srv import ExecuteArmAction, ExecuteArmActionRequest, ExecuteArmActionResponse
 from h12pro_controller_node.msg import RobotActionState
 import os

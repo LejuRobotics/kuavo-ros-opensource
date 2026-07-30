@@ -1218,7 +1218,7 @@ namespace
           {
             for (size_t i = 0; i < numClawJoints; i++)
             {
-              d->ctrl[i + 28] = claw_cmd[i];
+              d->ctrl[i + numJoints] = claw_cmd[i];
               // std::cout << "claw_cmd: " << claw_cmd[i] << std::endl;
             }
           }
