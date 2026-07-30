@@ -1672,7 +1672,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
   }
 
   auto computeGripAlpha = [&](bool armMoved, const ros::Time& gripStartTime) -> double {
-    double alpha = 0.01;
+    double alpha = 0.00;
     if (armMoved && !gripStartTime.isZero()) {
       const double elapsedTime = (now - gripStartTime).toSec();
       if (elapsedTime > 0.0) {
@@ -1819,7 +1819,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
     q_ = defaultArmAngles;
     dq_.setZero();
 
-    const double alpha = 0.01;
+    const double alpha = 0.00;
     latest_q_ = (1.0 - alpha) * latest_q_ + alpha * q_;
     latest_dq_.setZero();
     lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
@@ -1906,7 +1906,7 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
       startTime = lbLegMoveStartTime_;
     }
 
-    double alpha = 0.01;
+    double alpha = 0.00;
     if (lbLegMoved && !startTime.isZero()) {
       const double elapsedTime = (currentTime - startTime).toSec();
       if (elapsedTime > 0.0) {
@@ -1958,7 +1958,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
     lb_dq_.setZero();
 
     // alpha 平滑：将 lb_q_ 平滑到 latest_lb_q_
-    const double alpha = 0.001;
+    const double alpha = 0.000;
     latest_lb_q_ = (1.0 - alpha) * latest_lb_q_ + alpha * lb_q_;
 
     // latest_lb_dq_ 设置为零
