@@ -4,11 +4,21 @@
 #include <iostream>
 
 #include <errno.h>
-#include <fcntl.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
 namespace kuavo_common {
+
+namespace {
+void clearWriterPayload(ArmTrajShmData* ptr, uint64_t* write_seq) {
+  std::memset(ptr, 0, sizeof(ArmTrajShmData));
+  ptr->valid = false;
+  __atomic_store_n(&ptr->seq, 0, __ATOMIC_RELEASE);
+  if (write_seq) {
+    *write_seq = 0;
+  }
+}
+}  // namespace
 
 ArmTrajShmManager::ArmTrajShmManager() = default;
 
@@ -40,23 +50,13 @@ bool ArmTrajShmManager::initialize(Role role) {
   }
 
   role_ = role;
-  sem_ = sem_open(SEM_NAME, O_CREAT, 0666, 1);
-  if (sem_ == SEM_FAILED) {
-    std::cerr << "[ArmTrajShmManager] sem_open failed: " << std::strerror(errno) << std::endl;
-    return false;
-  }
-
   if (!attachShm()) {
-    sem_close(sem_);
-    sem_ = nullptr;
     return false;
   }
 
+  // Writer 清零；不用 POSIX named sem（曾出现 0 字节坏文件 → sem_wait SIGBUS）
   if (role == Role::Writer) {
-    sem_wait(sem_);
-    std::memset(shm_ptr_, 0, sizeof(ArmTrajShmData));
-    shm_ptr_->valid = false;
-    sem_post(sem_);
+    clearWriterPayload(shm_ptr_, &write_seq_);
   }
 
   initialized_ = true;
@@ -69,15 +69,17 @@ void ArmTrajShmManager::cleanup() {
     shm_ptr_ = nullptr;
   }
 
-  if (sem_ != nullptr && sem_ != SEM_FAILED) {
-    sem_close(sem_);
-    sem_ = nullptr;
-  }
-
   shm_id_ = -1;
   initialized_ = false;
   last_read_seq_ = 0;
   write_seq_ = 0;
+}
+
+void ArmTrajShmManager::invalidate() {
+  if (!initialized_ || role_ != Role::Writer || shm_ptr_ == nullptr) {
+    return;
+  }
+  clearWriterPayload(shm_ptr_, &write_seq_);
 }
 
 bool ArmTrajShmManager::writeTrajRad(uint32_t num_joints,
@@ -85,7 +87,7 @@ bool ArmTrajShmManager::writeTrajRad(uint32_t num_joints,
                                      const double* velocity_rad,
                                      const double* effort,
                                      uint64_t stamp_nsec) {
-  if (!initialized_ || role_ != Role::Writer || shm_ptr_ == nullptr || sem_ == SEM_FAILED) {
+  if (!initialized_ || role_ != Role::Writer || shm_ptr_ == nullptr) {
     return false;
   }
   if (num_joints == 0 || num_joints > static_cast<uint32_t>(ArmTrajShmData::MAX_ARM_JOINTS)) {
@@ -95,9 +97,8 @@ bool ArmTrajShmManager::writeTrajRad(uint32_t num_joints,
     return false;
   }
 
-  sem_wait(sem_);
-  ++write_seq_;
-  shm_ptr_->seq = write_seq_;
+  // seqlock：先置 seq=0 使 Reader 丢弃半写快照，写完再发布新 seq
+  __atomic_store_n(&shm_ptr_->seq, 0, __ATOMIC_RELEASE);
   shm_ptr_->stamp_nsec = stamp_nsec;
   shm_ptr_->num_joints = num_joints;
   for (uint32_t i = 0; i < num_joints; ++i) {
@@ -106,25 +107,31 @@ bool ArmTrajShmManager::writeTrajRad(uint32_t num_joints,
     shm_ptr_->effort[i] = (effort != nullptr) ? effort[i] : 0.0;
   }
   shm_ptr_->valid = true;
-  sem_post(sem_);
+  ++write_seq_;
+  __atomic_store_n(&shm_ptr_->seq, write_seq_, __ATOMIC_RELEASE);
   return true;
 }
 
 bool ArmTrajShmManager::readIfUpdated(ArmTrajShmData& out) {
-  if (!initialized_ || role_ != Role::Reader || shm_ptr_ == nullptr || sem_ == SEM_FAILED) {
+  if (!initialized_ || role_ != Role::Reader || shm_ptr_ == nullptr) {
     return false;
   }
 
-  sem_wait(sem_);
-  if (!shm_ptr_->valid || shm_ptr_->seq == last_read_seq_) {
-    sem_post(sem_);
-    return false;
+  // Reader 用 seq 双读一致性快照（不依赖 sem）
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const uint64_t seq1 = __atomic_load_n(&shm_ptr_->seq, __ATOMIC_ACQUIRE);
+    if (!shm_ptr_->valid || seq1 == 0 || seq1 == last_read_seq_) {
+      return false;
+    }
+    ArmTrajShmData snap = *shm_ptr_;
+    const uint64_t seq2 = __atomic_load_n(&shm_ptr_->seq, __ATOMIC_ACQUIRE);
+    if (seq1 == seq2 && snap.valid && snap.seq == seq1) {
+      out = snap;
+      last_read_seq_ = seq1;
+      return true;
+    }
   }
-
-  out = *shm_ptr_;
-  last_read_seq_ = shm_ptr_->seq;
-  sem_post(sem_);
-  return true;
+  return false;
 }
 
 }  // namespace kuavo_common

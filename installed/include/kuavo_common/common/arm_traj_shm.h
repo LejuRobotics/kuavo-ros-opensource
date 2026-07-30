@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <semaphore.h>
 
 namespace kuavo_common {
 
@@ -29,6 +28,8 @@ class ArmTrajShmManager {
 
   bool initialize(Role role);
   void cleanup();
+  /// Writer：清掉残留帧，避免 Receiver 把旧 seq 当成新数据触发 stale
+  void invalidate();
   bool isInitialized() const { return initialized_; }
 
   bool writeTrajRad(uint32_t num_joints,
@@ -44,14 +45,12 @@ class ArmTrajShmManager {
 
   ArmTrajShmData* shm_ptr_ = nullptr;
   int shm_id_ = -1;
-  sem_t* sem_ = nullptr;
   Role role_ = Role::Reader;
   uint64_t last_read_seq_ = 0;
   uint64_t write_seq_ = 0;
   bool initialized_ = false;
 
   static constexpr int SHM_KEY = 343434;
-  static constexpr const char* SEM_NAME = "/kuavo_arm_traj_shm_sem";
 };
 
 }  // namespace kuavo_common

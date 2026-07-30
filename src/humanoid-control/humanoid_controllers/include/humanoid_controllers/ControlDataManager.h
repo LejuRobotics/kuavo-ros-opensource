@@ -30,7 +30,7 @@
 #include "humanoid_interface_drake/kuavo_data_buffer.h"
 #include "humanoid_controllers/shm_manager.h"
 #include "humanoid_controllers/shm_data_structure.h"
-#include "kuavo_common/common/arm_traj_shm.h"
+#include "humanoid_controllers/ArmTrajReceiver.h"
 #include <thread>
 
 namespace humanoidController_wheel_wbc {
@@ -182,10 +182,6 @@ public:
      */
     bool isDataReady(bool check_motion_data = true) const;
 
-    bool setIncrementalArmTrajLink(int8_t transport, std::string* message = nullptr);
-    bool handleSetIncrementalArmTrajLink(typename kuavo_msgs::SetIncrementalArmTrajLink::Request& req,
-                                         typename kuavo_msgs::SetIncrementalArmTrajLink::Response& res);
-    
     // ========== 服务注册接口 ==========
     
     /**
@@ -220,12 +216,11 @@ private:
     bool whole_torso_ctrl_{false};  // VR全身控制模式默认关闭
     int8_t lb_mpc_control_mode_{2}; // 轮臂MPC控制模式，默认2（baseonly模式）
     bool use_shm_communication_{false};  // 是否使用共享内存通信
-    bool incremental_arm_traj_link_capable_{true};
-    std::atomic<int8_t> incremental_arm_traj_transport_{
-        kuavo_msgs::SetIncrementalArmTrajLink::Request::TRANSPORT_NONE};
     int arm_num_{-1};
     int low_joint_num_{-1};
     int head_num_{-1};
+    // 与人形共用 ArmTrajReceiver（service: /humanoid_wheel/set_incremental_arm_traj_link）
+    std::unique_ptr<humanoid_controller::ArmTrajReceiver> arm_traj_receiver_;
 
     // enable 控制（订阅 /enable_control_state，同进程同步触发 callback）
     std::atomic<bool> prev_enable_control_{true};
@@ -240,29 +235,11 @@ private:
     Eigen::Vector3d resetOrigin_{0.0, 0.0, 0.0};
     Eigen::Matrix2d R_resetOrigin_;  // 重置机器人世界系方向的旋转矩阵（2D）
 
-    // 共享内存管理器
+    // 共享内存管理器（传感器/关节命令）
     std::unique_ptr<gazebo_shm::ShmManager> shm_manager_;
-    std::unique_ptr<kuavo_common::ArmTrajShmManager> arm_traj_shm_;
-    std::thread arm_traj_shm_reader_thread_;
-    std::atomic<bool> arm_traj_shm_reader_running_{false};
-    std::mutex arm_traj_sub_mutex_;
-    std::chrono::steady_clock::time_point last_arm_traj_shm_receive_wall_{};
-    bool has_last_arm_traj_shm_receive_wall_{false};
-    double arm_traj_shm_stale_timeout_sec_{0.3};
-    void armTrajShmReaderThreadFunction();
-    void ensureArmTrajRosSubscription(bool enable);
-    void deactivateIncrementalArmTrajLink(const char* reason);
-
-    enum class ArmTrajSource { kRosTopic, kIncrementalShm };
-    bool shouldAcceptArmTrajFrom(ArmTrajSource source) const;
-    void ingestArmJointTrajectory(ArmTrajSource source,
-                                  const double* pos_rad,
-                                  const double* vel_rad,
-                                  const double* tau,
-                                  int count,
-                                  uint64_t stamp_nsec = 0);
+    void ingestArmJointTrajectory(const double* pos_rad, const double* vel_rad, const double* tau,
+                                  int count, uint64_t stamp_nsec = 0);
     void recordArmTrajReceiveTiming(uint64_t stamp_nsec);
-    void publishArmTrajReceiveStatus();
 
      // 头部关节限位 [yaw, pitch]（角度）
      static constexpr std::array<std::pair<double, double>, 2> HEAD_JOINT_LIMITS = {
@@ -301,11 +278,10 @@ private:
     ros::Subscriber waist_yaw_link_pose_sub_;
     ros::Subscriber torso_pose_sub_;
     ros::Subscriber whole_torso_ctrl_sub_;
-    ros::Subscriber arm_joint_traj_sub_;
     ros::Subscriber leg_joint_traj_sub_;
     ros::Subscriber lb_mpc_control_mode_sub_;
 
-    // 手臂/下肢指令独立回调队列，避免与默认队列里高频 debug/录包回调互相饿死
+    // 下肢指令独立回调队列（手臂 traj 已迁到 ArmTrajReceiver）
     ros::CallbackQueue cmd_traj_callback_queue_;
     ros::NodeHandle cmd_traj_nh_;
     std::unique_ptr<ros::AsyncSpinner> cmd_traj_spinner_;
@@ -342,19 +318,15 @@ private:
     void waistYawLinkPoseCallback(const nav_msgs::Odometry::ConstPtr& msg);
     void vrTorsoPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
     void wholeTorsoCtrlCallback(const std_msgs::Bool::ConstPtr& msg);
-    void armJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
     void legJointTrajCallback(const sensor_msgs::JointState::ConstPtr& msg);
     void lbMpcControlModeCallback(const std_msgs::Int8::ConstPtr& msg);
 
-    // /kuavo_arm_traj 订阅端到达诊断（PlotJuggler: /ik_debug/arm_traj_receive/*）
+    // /kuavo_arm_traj 到达诊断（PlotJuggler: /ik_debug/arm_traj_receive/*）
     bool enable_arm_traj_receive_timing_log_{false};
     bool arm_traj_receive_timing_initialized_{false};
     ros::Publisher arm_traj_receive_latency_ms_pub_;
     ros::Publisher arm_traj_receive_period_ms_pub_;
     ros::Publisher arm_traj_receive_stamp_period_ms_pub_;
-    ros::Publisher arm_traj_using_shm_pub_;
-    ros::Publisher arm_traj_transport_pub_;
-    bool arm_traj_receive_status_initialized_{false};
     std::chrono::steady_clock::time_point last_arm_traj_receive_wall_{};
     ros::Time last_arm_traj_header_stamp_;
     bool has_last_arm_traj_receive_wall_{false};

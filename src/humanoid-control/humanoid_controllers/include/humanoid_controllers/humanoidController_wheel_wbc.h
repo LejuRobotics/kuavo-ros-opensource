@@ -321,6 +321,11 @@ namespace humanoidController_wheel_wbc
     HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
     HighlyDynamic::JSONConfigReader *robot_config_;
     HighlyDynamic::KuavoSettings kuavo_settings_;
+
+    // ========== 底盘运动模式相关 ==========
+    bool baseCmdVelStatus_{true};
+    ros::Subscriber base_cmd_vel_status_sub_;
+
   };
 
 } // namespace humanoidController_wheel_wbc

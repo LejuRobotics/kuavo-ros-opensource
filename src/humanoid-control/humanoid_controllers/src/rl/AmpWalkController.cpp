@@ -331,6 +331,8 @@ namespace humanoid_controller
                                  "rollCompensationClosedLoop.ki", false);
         loadData::loadPtreeValue(pt, roll_compensation_closed_loop_max_deg_,
                                  "rollCompensationClosedLoop.maxCompensationDeg", false);
+        loadData::loadPtreeValue(pt, roll_compensation_closed_loop_target_learning_max_abs_roll_deg_,
+                                 "rollCompensationClosedLoop.targetLearningMaxAbsRollDeg", false);
       }
       roll_compensation_closed_loop_cmd_x_min_ =
           std::max(roll_compensation_closed_loop_cmd_x_min_, 0.0);
@@ -345,6 +347,8 @@ namespace humanoid_controller
           std::max(roll_compensation_closed_loop_ki_, 0.0);
       roll_compensation_closed_loop_max_deg_ =
           std::max(roll_compensation_closed_loop_max_deg_, 0.0);
+      roll_compensation_closed_loop_target_learning_max_abs_roll_deg_ =
+          std::max(roll_compensation_closed_loop_target_learning_max_abs_roll_deg_, 0.0);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdx_, "enable_off_cmdy_by_cmdx", false);
       loadData::loadPtreeValue(pt, enable_off_cmdy_by_cmdangz_, "enable_off_cmdy_by_cmdangz", false);
       try
@@ -1412,7 +1416,13 @@ namespace humanoid_controller
       if (!roll_compensation_closed_loop_initialized_)
       {
         roll_compensation_filtered_roll_rad_ = measured_roll_rad;
-        roll_compensation_target_roll_rad_ = measured_roll_rad;
+        const double init_max_abs_roll_rad =
+            roll_compensation_closed_loop_target_learning_max_abs_roll_deg_ * M_PI / 180.0;
+        if (init_max_abs_roll_rad <= 1e-9 ||
+            std::abs(measured_roll_rad) <= init_max_abs_roll_rad)
+        {
+          roll_compensation_target_roll_rad_ = measured_roll_rad;
+        }
         roll_compensation_integral_rad_sec_ = 0.0;
         roll_compensation_closed_loop_initialized_ = true;
       }
@@ -1423,9 +1433,15 @@ namespace humanoid_controller
           filter_alpha * roll_compensation_filtered_roll_rad_ +
           (1.0 - filter_alpha) * measured_roll_rad;
 
-      if (!is_walking_mode)
+      const bool roll_target_learning_active = !is_walking_mode;
+      const double target_learning_max_abs_roll_rad =
+          roll_compensation_closed_loop_target_learning_max_abs_roll_deg_ * M_PI / 180.0;
+      const bool roll_within_target_learning_range =
+          target_learning_max_abs_roll_rad <= 1e-9 ||
+          std::abs(roll_compensation_filtered_roll_rad_) <= target_learning_max_abs_roll_rad;
+      if (roll_target_learning_active && roll_within_target_learning_range)
       {
-        // 站立时缓慢学习本机 IMU/装配的中立 roll，不把静态安装误差带入行走补偿。
+        // 站立时缓慢学习中立 roll；行走模式（含 amp_hand 停走 cmdStance=0）不更新零点。
         const double target_alpha =
             std::exp(-observation_dt / roll_compensation_closed_loop_target_time_constant_sec_);
         roll_compensation_target_roll_rad_ =
@@ -1465,6 +1481,14 @@ namespace humanoid_controller
             -max_compensation_rad, max_compensation_rad);
         total_roll_compensation_deg += closed_loop_compensation_rad * 180.0 / M_PI;
       }
+    }
+
+    if (is_amp_hand_controller_ && is_walking_mode &&
+        cmd.cmdVelLineX_ > kTurnRollCompensationCmdXMin_ &&
+        std::abs(cmd.cmdVelAngularZ_) > kTurnRollCompensationAbsAngZMin_)
+    {
+      total_roll_compensation_deg +=
+          kTurnRollCompensationDeg_ * cmd.cmdVelAngularZ_;
     }
 
     if (std::abs(total_roll_compensation_deg) > 1e-6)

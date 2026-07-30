@@ -18,6 +18,8 @@
 #include "motion_capture_ik/HandSmoother.h"
 #include "DrakeElbowHandPointOpt.hpp"
 #include <std_msgs/Float64MultiArray.h>
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
+#include "motion_capture_ik/ArmTrajWriter.h"
 
 namespace HighlyDynamic {
 
@@ -148,6 +150,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void forceActivateAllArmCtrlMode();    // 强制激活所有手臂控制模式
 
   ros::Publisher kuavoArmTrajCppPublisher_;  // 发布kuavo_arm_traj_cpp；launch中通过remap话题方式来接入当前系统
+  ArmTrajWriter arm_traj_writer_;           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
   ros::Publisher sensorDataArmJointsPublisher_;      // 发布传感器数据的手臂关节角
   ros::Publisher leftHandPosePublisher_;             // 发布左手pose
   ros::Publisher rightHandPosePublisher_;            // 发布右手pose

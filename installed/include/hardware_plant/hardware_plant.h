@@ -39,6 +39,10 @@ inline std::vector<double> eigenToStdVector(const Eigen::VectorXd& vec) {
     return std::vector<double>(vec.data(), vec.data() + vec.size());
 }
 
+inline bool isLunbiModule(const std::string& robot_module) {
+    return robot_module == "LUNBI" || robot_module == "LUNBI_V62";
+}
+
 struct HardwareParam {
     bool cali_leg{false};
     std::vector<double> default_joint_pos;

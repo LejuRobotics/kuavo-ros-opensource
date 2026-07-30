@@ -11,6 +11,7 @@
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/Float32MultiArrayStamped.h>
 #include <kuavo_msgs/twoArmHandPose.h>
+#include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include <ros/package.h>
 #include <sensor_msgs/JointState.h>
 #include <geometry_msgs/Pose.h>
@@ -21,8 +22,10 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <iomanip>
 #include <cmath>
+#include <chrono>
 #include <sstream>
 #include <algorithm>
+#include <vector>
 #include <XmlRpcValue.h>
 
 #include <leju_utils/define.hpp>
@@ -90,6 +93,7 @@ Quest3IkIncrementalROS::~Quest3IkIncrementalROS() {
   if (ikSolveThread_.joinable()) {
     ikSolveThread_.join();
   }
+  arm_traj_writer_.shutdown();
 }
 
 void Quest3IkIncrementalROS::run() {
@@ -106,6 +110,7 @@ void Quest3IkIncrementalROS::run() {
     return;
   }
 
+  // SHM 生命周期跟 mode2 对齐（方案 A）：进 2 切 SHM，退 2 切 NONE；不在 startup 预链
   ikSolveThread_ = std::thread(&Quest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   ros::spin();
 }
@@ -610,10 +615,9 @@ void Quest3IkIncrementalROS::fsmChange() {
     // fsmChange 结束后，调用 forceActivateAllArmCtrlMode（执行指定次数，增强鲁棒性）
     if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
       forceActivateAllArmCtrlMode();
-      kuavo_msgs::changeArmCtrlMode srv3;
-      srv3.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
-      // srv3.request.control_mode = static_cast<int>(1);
-      enableWbcArmTrajectoryControlClient_.call(srv3);
+      kuavo_msgs::changeArmCtrlMode srv;
+      srv.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
+      enableWbcArmTrajectoryControlClient_.call(srv);
       activateAllArmCtrlModeCounter_++;
     }
     return;  // 没有模式切换，直接返回
@@ -636,14 +640,6 @@ void Quest3IkIncrementalROS::fsmChange() {
   if (rightChangingMaintainUpdated) {
     rightProcessed = processChangingDataRightArm(rightHandCtrlModeChanged);
   }
-  // 手臂复位，退出极速模式
-  if (!joyStickHandlerPtr_->isLeftArmCtrlModeActive() && !joyStickHandlerPtr_->isRightArmCtrlModeActive())
-  {
-    kuavo_msgs::changeArmCtrlMode srv3;
-    srv3.request.control_mode = static_cast<int>(0);
-    enableWbcArmTrajectoryControlClient_.call(srv3);
-  }
-
   // 只有当至少一个臂处理成功时才继续
   if (!leftProcessed && !rightProcessed) return;
 
@@ -972,6 +968,15 @@ void Quest3IkIncrementalROS::fsmExit() {
     lowpass_dq_.tail(7).setZero();
   }
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
+
+  // 【修复】仅在真正退出 VR (2→1) 时清零 use_ros_arm_joint_trajectory_。
+  bool isExitingVR = (armControlMode_ == 1 && lastArmControlMode_ == 2);
+  if (isExitingVR) {
+    kuavo_msgs::changeArmCtrlMode srv;
+    srv.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
+    enableWbcArmTrajectoryControlClient_.call(srv);
+  }
+
   deactivateController();
 }
 
@@ -1585,13 +1590,20 @@ void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
     armControlMode_.store(newMode);
     ROS_INFO("[Quest3IkIncrementalROS] Arm control mode changed from %d to %d", oldMode, newMode);
 
-    // 记录进入 mode 2 的时间戳（0→2 和 1→2 都需要）
+    using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
     if ((oldMode == 0 || oldMode == 1) && newMode == 2) {
       std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
       mode2EnterTime_ = ros::Time::now();
       ROS_INFO("[Quest3IkIncrementalROS] Mode 2 entered at time: %.3f, timeout duration: %.1f seconds",
                mode2EnterTime_.toSec(),
                MODE_2_TIMEOUT_DURATION);
+      if (!arm_traj_writer_.setTransport(Request::TRANSPORT_SHM)) {
+        ROS_ERROR("[Quest3IkIncrementalROS] Failed to enable SHM on mode 2 enter");
+      }
+    } else if (oldMode == 2 && newMode != 2) {
+      if (!arm_traj_writer_.setTransport(Request::TRANSPORT_NONE)) {
+        ROS_ERROR("[Quest3IkIncrementalROS] Failed to disable SHM on mode 2 exit");
+      }
     }
   } else {
     armControlMode_.store(newMode);
@@ -2028,6 +2040,22 @@ void Quest3IkIncrementalROS::publishJointStates() {
   }
 
   kuavoArmTrajCppPublisher_.publish(jointStateMsg);
+
+  // WBC 增量期间写 SHM；topic 仍发供 MPC/其它节点
+  {
+    const uint64_t stamp_nsec =
+        static_cast<uint64_t>(jointStateMsg.header.stamp.sec) * 1000000000ULL +
+        static_cast<uint64_t>(jointStateMsg.header.stamp.nsec);
+    std::vector<double> pos_rad(static_cast<size_t>(jointStateSize_));
+    std::vector<double> vel_rad(static_cast<size_t>(jointStateSize_));
+    std::vector<double> effort(static_cast<size_t>(jointStateSize_), 0.0);
+    for (int i = 0; i < jointStateSize_; ++i) {
+      pos_rad[static_cast<size_t>(i)] = latest_q_(i);
+      vel_rad[static_cast<size_t>(i)] = lowpass_dq_(i);
+    }
+    arm_traj_writer_.writeIfActive(static_cast<uint32_t>(jointStateSize_), pos_rad.data(),
+                                   vel_rad.data(), effort.data(), stamp_nsec);
+  }
 
   // 发布 /drake_ik/eef_pose（与Python版 pub_solved_arm_eef_pose 一致）
   // 使用滤波后的 latest_q_（弧度）进行FK计算，保证与实际发送给机器人的关节角度一致
@@ -2561,6 +2589,12 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       initZeroRightEndEffectorPosition_.z());
 
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
+  // 本类被双足与 5W 单臂入口共用；controller 侧 Receiver 的 service 名随平台而异
+  // （双足 /humanoid_controller/...，轮臂 /humanoid_wheel/...），故由入口注入而非写死
+  std::string controller_link_service = "/humanoid_controller/set_incremental_arm_traj_link";  // 双足缺省
+  nodeHandle_.param("/vr_ik/arm_traj_controller_link_service", controller_link_service,
+                    controller_link_service);
+  arm_traj_writer_.init(nodeHandle_, controller_link_service, "/quest3_ik/set_incremental_arm_traj_link");
   sensorDataArmJointsPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_sensor_data", 2);
   leftHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/left_hand_pose", 2);
   rightHandPosePublisher_ = nodeHandle_.advertise<geometry_msgs::Pose>("/right_hand_pose", 2);

@@ -186,7 +186,7 @@ class JoyCustomizeConfigNode:
         self._standup_phase = self._FS_IDLE
         self._auto_stand_up = False           # 硬起身标记(搬运ACTIVE→切FallStand→自动STAND_UP)
         self._stand_up_from_transport = False  # 从搬运ACTIVE发起的倒地起身(B或X), 完成后播退出语音
-        self._fall_stand_state = -1
+        self._fall_stand_state = self._FSS_UNKNOWN
         self._fall_stand_state_time = 0.0   # 最近一次收到阶段事件的墙钟时刻(判断"当前确在倒地")
         # 起身前握拳、起身成功后张开: 起身开始时置 True, 起身成功(切回 MPC)张手后清零
         self._pending_hand_open = False
@@ -1075,6 +1075,28 @@ class JoyCustomizeConfigNode:
                     self._b_hold_start = None
                     self._reset_handover_state()
                     self._fall_recovery_enabled = True
+                    # 重置所有由 topic 驱动、控制器死后不再刷新的状态
+                    # 避免残留值影响下一轮操作（如 _transport_mode_state 卡 ACTIVE 导致
+                    # LB+RB+X 永远走硬起身死循环 #3719）
+                    self._transport_mode_state = self._TS_INACTIVE
+                    self._fall_stand_state = self._FSS_UNKNOWN
+                    self._fall_stand_state_time = 0.0
+                    self._is_rl_controller = False
+                    self._is_stance_mode = False
+                    self._resetting_mpc_state = 0
+                    self._imu_quat = None
+                    self._fz_left = 0.0
+                    self._fz_right = 0.0
+                    self._dexhand_positions = []
+                    # 清理倒地开机残留参数，防止直腿值泄露到下一轮正常开机
+                    try:
+                        rospy.delete_param("/init_fall_down_state")
+                    except KeyError:
+                        pass
+                    try:
+                        rospy.delete_param("/squat_initial_state")
+                    except KeyError:
+                        pass
                     # 更新前一帧，避免被下方逻辑继续处理
                     self._prev_buttons = list(joy_msg.buttons)
                     self._prev_axes = list(joy_msg.axes)
@@ -1115,7 +1137,7 @@ class JoyCustomizeConfigNode:
                         if self._launch_phase == "idle":
                             rospy.loginfo("[JoyCustomize] START pressed: launching humanoid robot (once)")
                             try:
-                                self.launch_humanoid_robot()
+                                self.launch_humanoid_robot(extra_args="init_fall_down_state:=false")
                                 if not self.real:
                                     self._robot_launched = True
                                     self._launch_phase = "launched"
@@ -1577,8 +1599,8 @@ class JoyCustomizeConfigNode:
 
     def _drive_stand_up(self) -> None:
         """驱动 PREPARE 和状态清理（每帧调用）。
-        state==0 → PREPARE(无条件插值), phase PREPARING→READY_FOR_STAND_UP
-        state in {3,4} → 起身完成, 清理待命
+        FALL_DOWN → PREPARE(无条件插值), phase PREPARING→READY_FOR_STAND_UP
+        STAND_UP/STANDING → 起身完成, 清理待命
         STAND_UP 由 _try_stand_up() 单独触发(第二按或 ACTIVE 自动)。"""
         if not self._hands_closed_done:
             if self._hands_closed_ready():
@@ -1586,14 +1608,14 @@ class JoyCustomizeConfigNode:
             else:
                 return
         s = self._fall_stand_state
-        if s == 0 and self._standup_phase == self._FS_PREPARING:
+        if s == self._FSS_FALL_DOWN and self._standup_phase == self._FS_PREPARING:
             rospy.loginfo("[JoyCustomize] 起身(1/2): FALL_DOWN → PREPARE(插值到起身初始姿态)")
             if self._call_fall_stand_command(FallStandCommandRequest.PREPARE):
                 self._set_standup_phase(self._FS_READY_FOR_STAND_UP)
-        elif s == 3:
+        elif s == self._FSS_STAND_UP:
             # STAND_UP 仍在执行中（RL 推理起身），不做清理
             pass
-        elif s == 4:
+        elif s == self._FSS_STANDING:
             # STANDING: 起身完成，轨迹结束，张手
             if self._pending_hand_open:
                 rospy.loginfo("[JoyCustomize] 起身完成(STANDING), 灵巧手张开")
@@ -1609,13 +1631,13 @@ class JoyCustomizeConfigNode:
                     # _stand_up_from_transport 保持 True, _poll_handover 用 topic 信号判断
             else:
                 # 非搬运路径：正常清理倒地起身待命
-                rospy.loginfo("[JoyCustomize] 起身完成(state=4), 结束倒地起身待命")
+                rospy.loginfo("[JoyCustomize] 起身完成(STANDING), 结束倒地起身待命")
                 self._reset_fall_recovery_state()
 
     def _try_stand_up(self) -> None:
-        """触发 STAND_UP：state==2 READY → STAND_UP(RL 起身)。"""
+        """触发 STAND_UP：READY_FOR_STAND_UP → STAND_UP(RL 起身)。"""
         s = self._fall_stand_state
-        if s != 2 or self._standup_phase != self._FS_READY_FOR_STAND_UP:
+        if s != self._FSS_READY_FOR_STAND_UP or self._standup_phase != self._FS_READY_FOR_STAND_UP:
             return
         rospy.loginfo("[JoyCustomize] 起身(2/2): READY → STAND_UP")
         if self._call_fall_stand_command(FallStandCommandRequest.STAND_UP):
@@ -1663,6 +1685,13 @@ class JoyCustomizeConfigNode:
     _FS_STANDING_UP        = 4  # STAND_UP 已调, RL 起身进行中
     _FS_NAMES = {0: "IDLE", 1: "WAITING_READY", 2: "PREPARING",
                  3: "READY_FOR_STAND_UP", 4: "STANDING_UP"}
+    # 倒地起身控制器阶段 (_fall_stand_state, 与 C++ FallStandController::FallStandState 对齐)
+    _FSS_FALL_DOWN          = 0   # 瘫软: 零力矩、关节自由
+    _FSS_INTERPOLATING      = 1   # 关节插值中(FALL_DOWN → 轨迹起点)
+    _FSS_READY_FOR_STAND_UP = 2   # 插值完成, 等待触发起身
+    _FSS_STAND_UP           = 3   # RL 推理执行起身
+    _FSS_STANDING           = 4   # 起身完成, 可切出
+    _FSS_UNKNOWN            = -1  # 未收到 topic
     # 搬运语音文件名（对应 raw V1.1 四段音频）。文件必须部署到 /home/lab/.config/lejuconfig/music/。
     _TRANSPORT_VOICE = {
         "enter":  "电机未锁定请扶住背部把手禁止抬起机器人.wav",  # 第1次Y: ENTER
@@ -1772,9 +1801,39 @@ class JoyCustomizeConfigNode:
 
     def _poll_handover(self, joy_msg) -> None:
         """HANDING_OVER 期内信号驱动调度。
-        MPC 路径: wait_mpc → exit
-        AMP 路径: wait_mpc → switch → wait_amp → exit。"""
 
+        正常搬运退出(_stand_up_from_transport==False): 起身时已切回原控制器, 按原逻辑等就绪。
+            MPC 路径: wait_mpc → exit
+            AMP 路径: wait_mpc → switch → wait_amp → exit
+        倒地起身后退出(_stand_up_from_transport==True): C++ 固定切 AMP, 不回切原控制器。
+            用倒地起身发布的阶段(fall_stand_state==STANDING)作为判据: C++ 在
+            requestToExit()(==STANDING)后切 AMP, 故 topic 收到 STANDING 即可 exit。
+        """
+
+        # 倒地起身后分支: C++ 收到 STANDING 后切 AMP, 收到 STANDING 即可 exit
+        if self._stand_up_from_transport:
+            if self._handover_phase is None:
+                self._handover_phase = "wait_amp"
+                rospy.loginfo("[JoyCustomize][搬运] 倒地起身后等 STANDING 完成(C++ 将切 AMP)")
+            if self._handover_phase == "wait_amp":
+                # fall_stand_state_==STANDING 表示 C++ 即将/已经切 AMP, 可直接 exit
+                if self._fall_stand_state != self._FSS_STANDING:
+                    return
+                self._handover_phase = "exit"
+                rospy.loginfo("[JoyCustomize][搬运] STANDING 收到, 起身完成, 退出")
+            if self._handover_phase == "exit":
+                ok, _ = self._call_transport_mode(
+                    TransportModeCommandRequest.TRANSPORT_EXIT, "最终退出(EXIT)")
+                if ok:
+                    rospy.loginfo("[JoyCustomize][搬运] EXIT 成功, 倒地起身搬运流程结束")
+                    self._reset_handover_state()
+                    self._stand_up_from_transport = False
+                    self._transport_origin_controller = None
+                else:
+                    rospy.logwarn("[JoyCustomize][搬运] EXIT 被拒, 下帧重试")
+            return
+
+        # 正常搬运退出分支: 起身时已切回原控制器, 按原逻辑等就绪
         # 首次进入 HANDING_OVER：起始阶段 wait_mpc
         if self._handover_phase is None:
             self._handover_phase = "wait_mpc"
@@ -2008,7 +2067,7 @@ class JoyCustomizeConfigNode:
                 self._set_standup_phase(self._FS_IDLE)
                 return True
             self._set_head_pos(0.0)  # 退出搬运模式头归位
-            self._fall_stand_state = -1
+            self._fall_stand_state = self._FSS_UNKNOWN
             self._auto_stand_up = True
             self._stand_up_from_transport = True
             self._reset_protection_state()
@@ -2023,7 +2082,7 @@ class JoyCustomizeConfigNode:
             if not pressed:
                 return False
             # 已在倒地(FALL_DOWN): 不重启，直接进 PREPARE
-            fresh_falldown = (self._fall_stand_state == 0 and
+            fresh_falldown = (self._fall_stand_state == self._FSS_FALL_DOWN and
                               (time.time() - self._fall_stand_state_time) < self._FRESH_FALLDOWN_WINDOW)
             if fresh_falldown:
                 rospy.loginfo("[JoyCustomize] LB+RB+X: 机器人已倒地, 第1按→PREPARE(插值)")
@@ -2044,7 +2103,7 @@ class JoyCustomizeConfigNode:
                 rospy.logerr(f"[JoyCustomize] 倒地重启失败: {e}")
                 return True
             self._set_standup_phase(self._FS_WAITING_READY)
-            self._fall_stand_state = -1
+            self._fall_stand_state = self._FSS_UNKNOWN
             return True
 
         # === 已 armed (phase > IDLE) ===
@@ -2087,11 +2146,6 @@ class JoyCustomizeConfigNode:
         # 透传额外 launch 参数(如 init_fall_down_state:=true)
         if extra_args:
             launch_cmd = f"{launch_cmd} {extra_args}"
-
-        # 普通启动(START)必须显式把 init_fall_down_state 赋值为 false: voice_control.launch
-        # 不论是否带参都会被拉起, 若不主动覆盖, 上一次倒地起身(true)的 param 可能残留导致误进倒地。
-        if "init_fall_down_state" not in launch_cmd:
-            launch_cmd = f"{launch_cmd} init_fall_down_state:=false"
 
         print(f"launch_cmd: {launch_cmd}")
         print(f"If you want to check the session, please run 'tmux attach -t {HUMANOID_ROBOT_SESSION_NAME}'")

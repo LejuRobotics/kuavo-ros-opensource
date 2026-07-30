@@ -154,6 +154,7 @@ add_executable(ik_ros_uni_cpp_node
   src/ik_ros_uni_cpp_node.cpp 
   src/ArmControlBaseROS.cpp
   src/Quest3IkIncrementalROS.cpp 
+  src/ArmTrajWriter.cpp
   src/IncrementalControlModule.cpp
   src/KeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp
@@ -176,6 +177,7 @@ add_executable(wheel_ik_ros_uni_cpp_node
   src/WheelArmControlBaseROS.cpp
   src/WheelQuest3IkIncrementalROS.cpp 
   src/WheelQuest3IkIncrementalTools.cpp
+  src/ArmTrajWriter.cpp
   src/WheelIncrementalControlModule.cpp
   src/WheelKeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp
@@ -199,6 +201,7 @@ add_executable(wheel_arm_only_ik_ros_uni_cpp_node
   src/wheel_arm_only_ik_ros_uni_cpp_node.cpp
   src/ArmControlBaseROS.cpp
   src/Quest3IkIncrementalROS.cpp
+  src/ArmTrajWriter.cpp
   src/IncrementalControlModule.cpp
   src/KeyFramesVisualizer.cpp
   src/BaseIKSolver.cpp

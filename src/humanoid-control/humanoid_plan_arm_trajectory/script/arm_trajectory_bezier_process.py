@@ -561,7 +561,9 @@ class ArmTrajectoryBezierDemo:
 
     def call_enable_wbc_arm_trajectory_control_service(self, enable):
         """使能/禁用 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源）。
-        轮臂无此服务，静默跳过。"""
+        Roban / 轮臂跳过：走 MPC 简化自由度路径，避免锁定解锁后再进抽臂 (#3624)。"""
+        if self.robot_class == ROBAN or self.is_wheeled:
+            return
         service_name = "/enable_wbc_arm_trajectory_control"
         try:
             rospy.wait_for_service(service_name, timeout=0.5)

@@ -207,6 +207,7 @@ private:
   double velocity_smooth_time_;
   bool cmd_x_smooth_enabled_{false};  // true: 正向 cmd_x 加/减速 EMA 平滑 + 单步限速；false: 不平滑
   ros::Time last_velocity_update_time_;
+  ros::Time last_cmd_vel_msg_time_;
   
   // Angular velocity smoothing parameters for turning
   double angular_velocity_smooth_factor_;      // 角速度平滑因子（默认0.5，更强的平滑）

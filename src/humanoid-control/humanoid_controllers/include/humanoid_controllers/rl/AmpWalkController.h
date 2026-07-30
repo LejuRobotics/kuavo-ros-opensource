@@ -324,6 +324,9 @@ namespace humanoid_controller
     int low_speed_yaw_kick_remaining_steps_{0};
     double low_speed_yaw_kick_sign_{1.0};
     double prev_raw_cmd_vel_angular_z_{0.0};  ///< 上一帧脉冲前的原始 cmd_angz（用于加减速判据）
+    static constexpr double kTurnRollCompensationDeg_{-0.7};        ///< 走弧线开环 roll 补偿系数 (deg/(rad/s))
+    static constexpr double kTurnRollCompensationCmdXMin_{0.2};     ///< 开环补偿生效 cmd_x 下限 (m/s)
+    static constexpr double kTurnRollCompensationAbsAngZMin_{0.5}; ///< 开环补偿生效 |cmd_angz| 下限 (rad/s)
     double roll_compensation_closed_loop_cmd_x_min_{0.3};
     double roll_compensation_closed_loop_cmd_x_max_{0.65};
     double roll_compensation_closed_loop_abs_cmd_y_max_{0.1};
@@ -333,6 +336,7 @@ namespace humanoid_controller
     double roll_compensation_closed_loop_kp_{0.30};
     double roll_compensation_closed_loop_ki_{0.06};
     double roll_compensation_closed_loop_max_deg_{1.0};
+    double roll_compensation_closed_loop_target_learning_max_abs_roll_deg_{5.0};
 
     // AMP 模型模式（影响 command_state 第 0 维：0 纯 AMP 走路，1 站立/弯腰/下蹲动手，2 走路动手）
     int amp_mode_{0};

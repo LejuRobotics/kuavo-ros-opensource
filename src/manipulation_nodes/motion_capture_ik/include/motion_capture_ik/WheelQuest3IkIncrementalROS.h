@@ -29,7 +29,7 @@
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "DrakeChestElbowHandPointOpt.hpp"
-#include "kuavo_common/common/arm_traj_shm.h"
+#include "motion_capture_ik/ArmTrajWriter.h"
 
 namespace HighlyDynamic {
 
@@ -168,9 +168,6 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void publishDefaultJointStates();
   // 同线程发布 kuavo_arm_traj(_cpp/_rad) 及 shadow 探针（用于对比到达时间）
   void publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg);
-  bool setIncrementalArmTrajLink(int8_t transport);
-  bool handleSetIncrementalArmTrajLink(kuavo_msgs::SetIncrementalArmTrajLink::Request& req,
-                                       kuavo_msgs::SetIncrementalArmTrajLink::Response& res);
   void publishZeroJointStates();
   void publishLegJointStates();         // 发布下肢关节状态（基于 IK 解）
   void publishDefaultLegJointStates();  // 发布下肢关节默认状态
@@ -214,11 +211,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher incrementalArmTrajRecordPublisher_;       // /vr_incremental/arm_traj，录包/观测（度）
   ros::Publisher incrementalArmTrajRadRecordPublisher_;    // /vr_incremental/arm_traj_rad，录包/观测（弧度）
   ros::Publisher kuavoArmTrajControlPublisher_;              // /kuavo_arm_traj，始终发布供 MPC 同步；WBC 增量时走 SHM
-  std::atomic<int8_t> incrementalArmTrajTransport_{
-      kuavo_msgs::SetIncrementalArmTrajLink::Request::TRANSPORT_NONE};
-  ros::ServiceClient setIncrementalArmTrajLinkClient_;
-  ros::ServiceServer setIncrementalArmTrajLinkServer_;
-  std::unique_ptr<kuavo_common::ArmTrajShmManager> armTrajShm_;
+  ArmTrajWriter arm_traj_writer_;                           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
   bool enableArmTrajShadowPublish_{false};
   ros::Publisher kuavoArmTrajShadowPublisher_;  // /vr_incremental/arm_traj_shadow_rad
   ros::Publisher sensorDataArmJointsPublisher_;      // 发布传感器数据的手臂关节角

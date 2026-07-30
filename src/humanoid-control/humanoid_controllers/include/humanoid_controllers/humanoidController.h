@@ -34,6 +34,8 @@
 #include "kuavo_msgs/robotWaistControl.h"
 #include "kuavo_msgs/TransportModeCommand.h"
 
+#include "humanoid_controllers/ArmTrajReceiver.h"
+
 #include "std_srvs/Trigger.h"
 #include "std_srvs/SetBool.h"
 
@@ -555,7 +557,8 @@ namespace humanoid_controller
     bool contactTrotgait_ = false;
     bool cmdTrotgait_ = false;
     bool cmdRLMode_ = false;                                         // RL模式命令标志
-    bool reset_mpc_{false};
+    // 跨线程触发: service 回调/keyboard 置位, 主循环 update 消费。原子避免数据竞争。
+    std::atomic<bool> reset_mpc_{false};
     ResettingMpcState resetting_mpc_state_{ResettingMpcState::NORMAL};
     bool disable_mpc_{false};
     bool disable_wbc_{false};
@@ -594,7 +597,7 @@ namespace humanoid_controller
     std::atomic<TransportModeState> transport_mode_state_{TRANSPORT_INACTIVE};
     std::atomic<bool> transport_handoff_to_fallstand_{false}; // FALL_DOWN 命令标志(主循环一帧消费)
     std::atomic<bool> transport_lock_pending_{false};       // LOCK 命令标志(主循环处理)
-    std::atomic<bool> transport_handover_resume_mpc_{false}; // HAND_OVER 需 resume MPC(主循环处理)
+    std::atomic<bool> transport_reset_mpc_pending_{false};  // HAND_OVER 先对齐当前状态再插值(主循环处理)
     vector_t transport_target_pos_;  // ACTIVE 状态下的 CSP 目标关节位置(LOCK 时从当前位姿捕获)
     double transport_base_height_{0.7};  // 搬运躯干高度(m)，低于正常 MPC 站高以降低重心
     double standupTime_{0.0};
@@ -642,7 +645,6 @@ namespace humanoid_controller
     ros::Subscriber head_delta_sub_;
     ros::Subscriber waist_sub_;
     ros::Subscriber head_array_sub_;
-    ros::Subscriber arm_joint_traj_sub_;
     ros::Subscriber mm_arm_joint_traj_sub_;
     ros::Subscriber arm_target_traj_sub_;//最终的手臂目标位置
     ros::Subscriber foot_pos_des_sub_;
@@ -891,7 +893,10 @@ namespace humanoid_controller
     void publishControlCommands(kuavo_msgs::jointCmd& jointCmdMsg);             // 发布控制命令的统一接口
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);                // 替换EC_MASTER电机的kp/kd（从running_settings）
     bool changeRuiwoMotorParamCallback(kuavo_msgs::ExecuteArmActionRequest &req, kuavo_msgs::ExecuteArmActionResponse &res);  // 修改ruiwo电机kp/kd，更新running_settings后由replaceDefaultEcMotorPdoGait生效
-    
+
+    // 手臂轨迹接收器（ROS topic + 增量 VR SHM 双通道）
+    ArmTrajReceiver arm_traj_receiver_;
+
     // CPU内核隔离设置
     bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性
     

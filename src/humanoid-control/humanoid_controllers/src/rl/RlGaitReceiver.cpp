@@ -77,6 +77,7 @@ RlGaitReceiver::RlGaitReceiver(ros::NodeHandle& nh, CommandDataRL* initialComman
   trot_latched_ = false;
   last_velocity_update_time_ = ros::Time::now();
   last_pose_update_time_ = ros::Time::now();
+  last_cmd_vel_msg_time_ = ros::Time::now();
   
   // Initialize in-place stepping velocities
   in_place_step_velocity_.linear.x = 0.0;
@@ -215,6 +216,7 @@ void RlGaitReceiver::resetVelocityState()
   smoothed_cmd_vel_.angular.z = 0.0;
   previous_cmd_vel_ = smoothed_cmd_vel_;
   last_velocity_update_time_ = ros::Time::now();
+  last_cmd_vel_msg_time_ = ros::Time::now();
   stopInPlaceStepping();
 }
 
@@ -223,10 +225,20 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   if (!enabled_) {
     return;
   }
-  double velocity_magnitude = calculateVelocityMagnitude(smoothed_cmd_vel_);
   std::function<bool()> command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(command_mutex_);
+
+    // amp_hand: 摇杆零速发布窗口结束后，控制环仍继续把 smoothed_cmd_vel 衰减到 0.05（仅前进）
+    const double cmd_vel_silent_sec = (time - last_cmd_vel_msg_time_).toSec();
+    constexpr double kPassiveDecayForwardCmdXMin = 0.05;
+    if (is_amp_hand_controller_ && cmd_vel_silent_sec > 0.25 &&
+        smoothed_cmd_vel_.linear.x > kPassiveDecayForwardCmdXMin)
+    {
+      geometry_msgs::Twist zero_cmd;
+      smoothed_cmd_vel_ = smoothVelocityCommand(zero_cmd, time);
+    }
+
     command_buffer_callback = command_buffer_callback_;
   }
   const bool command_blocked = command_buffer_callback && command_buffer_callback();
@@ -248,6 +260,7 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     ROS_INFO_STREAM("[RlGaitReceiver] Applied pending walking gait after controller switch: " << gait_name);
   }
 
+  double velocity_magnitude = calculateVelocityMagnitude(smoothed_cmd_vel_);
   // sim-to-sim: 站立模式下复用行走三维指令（x/y/yaw）作为姿态命令通道。
   // 这与训练侧 vel_command_b 的复用语义一致：x->弯腰，y->保留，yaw(z)->下蹲高度。
   if (currentCommand_.cmdStance_ == 1 && reuse_walk_command_in_stance_)
@@ -466,6 +479,7 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
   // Apply velocity smoothing
   std::lock_guard<std::mutex> lock(command_mutex_);
   ros::Time current_time = ros::Time::now();
+  last_cmd_vel_msg_time_ = current_time;
   geometry_msgs::Twist smoothed_vel = smoothVelocityCommand(*msg, current_time);
   
   latest_cmd_vel_ = *msg;

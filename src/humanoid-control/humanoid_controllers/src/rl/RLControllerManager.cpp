@@ -363,7 +363,7 @@ namespace humanoid_controller
           // 躯干已稳定（物理静止）→ 允许 RL→MPC，对应 V1.1 的 STATIONARY 状态
           if (!isTorsoVelocityStable())
           {
-            ROS_WARN("[RLControllerManager] RL not in stance and torso not stable, switch to MPC blocked! Stop walking first.");
+            ROS_WARN_THROTTLE(1.0, "[RLControllerManager] RL not in stance and torso not stable, switch to MPC blocked! Stop walking first.");
             return false;
           }
           ROS_INFO("[RLControllerManager] Allowing RL->MPC switch with stable torso (stationary)");
