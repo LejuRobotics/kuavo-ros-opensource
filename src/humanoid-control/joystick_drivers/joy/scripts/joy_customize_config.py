@@ -1074,6 +1074,19 @@ class JoyCustomizeConfigNode:
                     self._b_hold_start = None
                     self._reset_handover_state()
                     self._fall_recovery_enabled = True
+                    # 重置所有由 topic 驱动、控制器死后不再刷新的状态
+                    # 避免残留值影响下一轮操作（如 _transport_mode_state 卡 ACTIVE 导致
+                    # LB+RB+X 永远走硬起身死循环 #3719）
+                    self._transport_mode_state = self._TS_INACTIVE
+                    self._fall_stand_state = self._FSS_UNKNOWN
+                    self._fall_stand_state_time = 0.0
+                    self._is_rl_controller = False
+                    self._is_stance_mode = False
+                    self._resetting_mpc_state = 0
+                    self._imu_quat = None
+                    self._fz_left = 0.0
+                    self._fz_right = 0.0
+                    self._dexhand_positions = []
                     # 清理倒地开机残留参数，防止直腿值泄露到下一轮正常开机
                     try:
                         rospy.delete_param("/init_fall_down_state")
