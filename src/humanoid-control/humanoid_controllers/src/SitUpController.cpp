@@ -327,13 +327,23 @@ bool SitUpController::runHwReversePhase0(const ros::Time& time, const Eigen::Vec
     return true;  // 桥接/运行中：本帧 return
   }
   if (st == Hw::Done) {
+    // 对齐仿真：段0 完成后先 hold_at_sit_pose_before_stand_up_sec 静持，再 await start
+    if (hold_at_sit_complete_time_sec_ < 1e-6)
+      hold_at_sit_complete_time_sec_ = time.toSec();
+    const double hold_delay = scm_.holdAtSitPoseBeforeStandUpSec();
+    const bool hold_elapsed = time.toSec() >= hold_at_sit_complete_time_sec_ + hold_delay;
+    if (!hold_elapsed) {
+      publishSeatCspHoldFromTargets(snapshot_.sit_joint_targets, out_cmd);
+      return true;
+    }
     const bool was_awaiting = awaiting_stand_up_start_;
     const bool still_waiting = tickAwaitStandUpStart(true, out_cmd);
     if (still_waiting && !was_awaiting) {
-      ROS_INFO("%s phase0 HW reverse complete; waiting for start "
-               "(/hardware/is_ready=1 via 'o' or /humanoid_controller/real_initial_start).", kLogTag);
+      ROS_INFO("%s phase0 HW reverse complete (hold=%.2fs); waiting for start "
+               "(/hardware/is_ready=1 via 'o' or /humanoid_controller/real_initial_start).",
+               kLogTag, hold_delay);
     } else if (!still_waiting && !was_awaiting) {
-      ROS_INFO("%s phase0 HW reverse complete; start sit->stand.", kLogTag);
+      ROS_INFO("%s phase0 HW reverse complete (hold=%.2fs); start sit->stand.", kLogTag, hold_delay);
     }
     return still_waiting;  // true=仍在等 → return；false=切段1
   }

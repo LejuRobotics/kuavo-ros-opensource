@@ -2635,6 +2635,19 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       /*******采用 standUp_controller 从蹲姿运动到站姿*********/
       stateEstimate_->setFixFeetHeights(true);
       updateStateEstimation(time, false);
+      // 座椅起身：Drake sit/stand 名义态的 xy/yaw 是开机原点；叠当前观测，
+      // 避免走后 sit→stand WBC 把 COM 拉回原点。
+      if (sit_up_active) {
+        const double x = currentObservation_.state(6);
+        const double y = currentObservation_.state(7);
+        const double yaw = currentObservation_.state(9);
+        squatState(6) = x;
+        squatState(7) = y;
+        squatState(9) = yaw;
+        standState(6) = x;
+        standState(7) = y;
+        standState(9) = yaw;
+      }
       // vector_t measuredRbdStateRL_;
       // measuredRbdStateRL_ = getRobotState();
       double startTime;
@@ -2651,7 +2664,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       if (!isInitStandUpStartTime_)
       {
         resetKinematicsEstimation();
+        // 座椅/开机起身：yaw 跟实测；座椅重入时 xy 也在下方 resetMpc 再对齐一次
         initial_status_(9) = currentObservation_.state(9);
+        if (sit_up_active) {
+          initial_status_(6) = currentObservation_.state(6);
+          initial_status_(7) = currentObservation_.state(7);
+        }
 
         if (sit_up_active && !sit_up_reverse_done) {
           // 段0 起点时间由 SitUpController 内部管理；这里只标记已初始化
@@ -2894,6 +2912,16 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         (!(sitUp_ && sitUp_->isActive()) && !(is_real_ || use_sit_init_boot_)) || init_fall_down_state_)
     {
       SystemObservation initial_observation = currentObservation_;
+      // 座椅起身重入：initial_status_ 关节/高度仍用 Drake 名义站立，但 COM xy/yaw 必须对齐
+      // 当前实测；否则走几步再坐起后 MPC 参考仍锚开机原点，会逐次劣化。
+      if (sitUp_ && sitUp_->isActive()) {
+        initial_status_(6) = currentObservation_.state(6);
+        initial_status_(7) = currentObservation_.state(7);
+        initial_status_(9) = currentObservation_.state(9);
+        ROS_INFO("[HumanoidController] seat re-entry resetMpc: align COM xy/yaw to measured "
+                 "(%.3f, %.3f, yaw=%.3f)",
+                 initial_status_(6), initial_status_(7), initial_status_(9));
+      }
       initial_observation.state = initial_status_;
       TargetTrajectories target_trajectories({initial_observation.time}, {initial_observation.state}, {initial_observation.input});
       mpc_current_target_trajectories_ = target_trajectories;
