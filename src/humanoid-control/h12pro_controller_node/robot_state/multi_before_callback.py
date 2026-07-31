@@ -1338,8 +1338,8 @@ def _publish_and_wait_for_controller_switch(target_controller, timeout=3.0):
 
 def depth_loco_switch_callback(event):
     """切换走楼梯斜坡控制器回调函数
-    - 如果当前是 amp_controller，切换到 depth_loco_controller
-    - 如果当前是 depth_loco_controller，切换回 amp_controller
+    - 如果当前是 RL 控制器（非 mpc），切换到 depth_loco_controller
+    - 如果当前是 depth_loco_controller，切换回进入前的 RL 控制器
     - 通过话题 /humanoid_controller/nav_switch_rl_controller_by_name 发布切换请求
     - 订阅 /humanoid_controller/controller_switch_event 等待确认切换完成
     - 确认成功后设置冷却期；失败则清理 restore_record、不设冷却期允许重试
@@ -1348,6 +1348,9 @@ def depth_loco_switch_callback(event):
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
     print_state_transition(trigger, source, "stance")
+
+    # 不允许从 mpc 切换：depth_loco 是 RL 控制器，只能走 RL→RL 通道
+    _FORBIDDEN_FROM_CONTROLLERS = {"mpc"}
 
     try:
         current_controller = get_current_controller_name()
@@ -1360,20 +1363,23 @@ def depth_loco_switch_callback(event):
 
         target_controller = None
         is_entering_depth = False
-        if current_controller_lower == "amp_controller":
-            _set_depth_loco_restore_controller_name(current_controller_lower)
-            target_controller = "depth_loco_controller"
-            is_entering_depth = True
-            rospy.loginfo("[DepthLocoSwitch] Switching from amp_controller to depth_loco_controller")
-        elif current_controller_lower == "depth_loco_controller":
+        if current_controller_lower == "depth_loco_controller":
+            # 退出 depth_loco：恢复到进入前记录的 RL 控制器
             restore_controller_name = _get_depth_loco_restore_controller_name()
-            if restore_controller_name != "amp_controller":
+            if restore_controller_name is None or restore_controller_name in _FORBIDDEN_FROM_CONTROLLERS:
                 restore_controller_name = "amp_controller"
             target_controller = restore_controller_name
             rospy.loginfo(f"[DepthLocoSwitch] Switching back to {target_controller}")
-        else:
-            rospy.logwarn(f"[DepthLocoSwitch] Current controller '{current_controller}' is not amp_controller or depth_loco_controller. Cannot switch via navigation topic.")
+        elif current_controller_lower in _FORBIDDEN_FROM_CONTROLLERS:
+            rospy.logwarn(f"[DepthLocoSwitch] Current controller '{current_controller}' is not an RL controller."
+                          f" Cannot switch to depth_loco_controller via navigation topic.")
             return
+        else:
+            # 任意 RL 控制器 → depth_loco_controller
+            _set_depth_loco_restore_controller_name(current_controller_lower)
+            target_controller = "depth_loco_controller"
+            is_entering_depth = True
+            rospy.loginfo(f"[DepthLocoSwitch] Switching from {current_controller_lower} to depth_loco_controller")
 
         if target_controller:
             confirmed = _publish_and_wait_for_controller_switch(target_controller, timeout=3.0)
@@ -1385,7 +1391,7 @@ def depth_loco_switch_callback(event):
                     _set_depth_loco_restore_controller_name(None)
                     rospy.logerr("[DepthLocoSwitch] Switch to depth_loco_controller not confirmed, restore record cleared")
                 else:
-                    rospy.logerr("[DepthLocoSwitch] Switch back to amp_controller not confirmed, restore record kept")
+                    rospy.logerr(f"[DepthLocoSwitch] Switch back to {target_controller} not confirmed, restore record kept")
                 # 切换未确认，不设冷却期，允许用户立即重试
                 return
 

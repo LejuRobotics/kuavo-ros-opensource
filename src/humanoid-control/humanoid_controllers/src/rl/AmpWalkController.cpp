@@ -56,6 +56,8 @@ namespace humanoid_controller
     initial_cmd_.cmdStance_ = 1;
     gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
     gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
+    gait_receiver_->setAllowWalkingDuringAction(true);  // AMP 始终允许边走边做动作
+    ros::param::set("/allow_walking_during_arm_action", true);
     
     // 加载原地踏步速度配置
     gait_receiver_->loadInPlaceStepConfig(config_file_, false);
