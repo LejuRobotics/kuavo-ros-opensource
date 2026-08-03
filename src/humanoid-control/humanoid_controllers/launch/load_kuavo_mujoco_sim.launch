@@ -38,6 +38,8 @@
     <arg name="waist_move_spd"     default="2.3"/>
     <arg name="deformation_flag"   default="false"/>
     <arg name="init_fall_down_state" default="false"/>
+    <arg name="use_sit_init" default="false" doc="Sit pose boot (Kuavo5 seat workflow)"/>
+    <arg name="seat_scene" default="false" doc="MuJoCo scene_seat_adjust.xml with chair and foot slots"/>
     <!-- Set with_coredump parameter based on coredump value -->
     <arg name="coredump" default="false"/>
     <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
@@ -92,6 +94,8 @@
     <param name="torso_interpolation_max_velocity" value="0.06"/>
     <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
+    <param name="/use_sit_init" value="$(arg use_sit_init)"/>
+    <param name="/hardware_sit_prep_ready" value="false"/>
     <param name="run_mujoco_camera" value="$(arg run_mujoco_camera)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -139,7 +143,9 @@
     </node>
     <group unless="$(arg play_back)">
       <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch">
+        <arg name="robot_version" value="$(arg robot_version)"/>
         <arg name="depth_frequency" value="$(arg depth_frequency)"/>
+        <arg name="seat_scene" value="$(arg seat_scene)"/>
       </include>
     </group>
     <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
@@ -194,4 +200,168 @@
         </include>
       </group>
     </group>
+
+    <!-- ==================== kuavo_mocap_gmr (Motion Capture GMR) ==================== -->
+    <arg name="with_mocap_gmr" default="false" doc="Enable motion capture GMR"/>
+    <arg name="gmr_use_sim" default="true" doc="Use simulated motion (true) or OptiTrack streaming (false)"/>
+    <!-- Common GMR configuration -->
+    <arg name="gmr_robot" default="kuavo_s52" doc="Target robot type for GMR"/>
+    <arg name="gmr_format" default="motive_streaming" doc="Motion format (lafan1, motive_bj, motive_sz)"/>
+    <arg name="gmr_cali_arm_pose_deg" default="80.0" doc="Calibration arm pose angle"/>
+    <arg name="gmr_fps" default="100.0" doc="GMR publishing rate (Hz)"/>
+    <arg name="gmr_enable_viewer" default="false" doc="Enable MuJoCo viewer for GMR"/>
+    <!-- CPU affinity: bind GMR process to specific cores (empty=no binding in sim) -->
+    <arg name="gmr_cpu_cores" default="[]" doc="CPU cores to bind GMR process"/>
+    <!-- Simulation parameters (when gmr_use_sim=true) -->
+    <arg name="gmr_data_file" default="" doc="Path to recorded motion file (.pkl or .bvh), empty for synthetic"/>
+    <arg name="gmr_loop" default="true" doc="Loop motion data"/>
+    <arg name="gmr_human_height" default="1.75" doc="Simulated human height (meters)"/>
+    <!-- OptiTrack streaming parameters (when gmr_use_sim=false) -->
+    <arg name="gmr_server_ip" default="192.168.200.160" doc="OptiTrack server IP"/>
+    <arg name="gmr_client_ip" default="192.168.200.117" doc="Client (robot) IP"/>
+    <arg name="gmr_use_multicast" default="false" doc="Use multicast for OptiTrack"/>
+
+    <group if="$(arg with_mocap_gmr)">
+      <!-- Use gmr_sim.launch for simulated motion (default in sim) -->
+      <group if="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_sim.launch">
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="data_file" value="$(arg gmr_data_file)"/>
+          <arg name="loop" value="$(arg gmr_loop)"/>
+          <arg name="human_height" value="$(arg gmr_human_height)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+        </include>
+      </group>
+      <!-- Use gmr_streaming.launch for real OptiTrack -->
+      <group unless="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_streaming.launch">
+          <arg name="server_ip" value="$(arg gmr_server_ip)"/>
+          <arg name="client_ip" value="$(arg gmr_client_ip)"/>
+          <arg name="use_multicast" value="$(arg gmr_use_multicast)"/>
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+          <arg name="cpu_cores" value="$(arg gmr_cpu_cores)"/>
+        </include>
+      </group>
+    </group>
+
+    <!-- ==================== kuavo_xsense_gmr (Xsens UDP BVH GMR) ==================== -->
+    <arg name="with_xsense_gmr" default="false" doc="Enable Xsens UDP BVH GMR"/>
+    <arg name="xsense_listen_ip" default="0.0.0.0" doc="Xsens UDP listen IP"/>
+    <arg name="xsense_listen_port" default="9763" doc="Xsens UDP listen port"/>
+    <arg name="xsense_receive_timeout_ms" default="100" doc="Xsens UDP receive timeout (ms)"/>
+    <arg name="xsense_bvh_topic" default="/xsense/bvh_seg_desc" doc="Xsens BVH segment description topic"/>
+    <arg name="xsense_pose_topic" default="/xsense/world_bone_poses" doc="Xsens pose topic"/>
+    <arg name="xsense_summary_topic" default="/xsense/packet_summary" doc="Xsens packet summary topic"/>
+    <arg name="xsense_bvh_tcp_port" default="9764" doc="Xsens BVH TCP description port"/>
+    <arg name="xsense_enable_pico_pause_control" default="true" doc="Use /pico/joy to pause/resume Xsens forwarding"/>
+    <arg name="xsense_pico_joy_topic" default="/pico/joy" doc="PICO JoySticks topic for Xsens pause/resume and control"/>
+    <arg name="xsense_pico_pause_combo" default="RT+Y" doc="PICO combo to pause Xsens stream"/>
+    <arg name="xsense_pico_resume_combo" default="RT+X" doc="PICO combo to resume Xsens stream"/>
+    <arg name="xsense_pico_trigger_threshold" default="0.5" doc="PICO trigger threshold"/>
+    <arg name="xsense_pico_grip_threshold" default="0.5" doc="PICO grip threshold"/>
+    <arg name="xsense_pose_publish_hz" default="120.0" doc="Xsens pose publish rate after FIFO buffering"/>
+    <arg name="xsense_pose_queue_target_depth" default="20" doc="Target FIFO depth before publishing"/>
+    <arg name="xsense_pose_queue_max_size" default="30" doc="Maximum FIFO depth"/>
+    <arg name="xsense_pose_queue_prefill" default="true" doc="Wait until FIFO reaches target depth before publishing"/>
+    <arg name="xsense_pose_hold_on_empty" default="true" doc="Keep publishing last pose when FIFO is temporarily empty"/>
+    <arg name="xsense_pose_stale_timeout_s" default="0.2" doc="Timeout before stale held pose warning/reset"/>
+    <arg name="xsense_update_output_header_stamp" default="true" doc="Use publish time as output pose header stamp"/>
+    <arg name="xsense_pose_queue_stats_topic" default="/xsense/pose_queue_stats" doc="Xsens FIFO statistics topic"/>
+    <arg name="xsense_pose_queue_stats_hz" default="0.0" doc="FIFO statistics publish rate, 0 disables statistics"/>
+    <arg name="xsense_robot" default="kuavo_s54" doc="Target robot type for Xsens GMR"/>
+    <arg name="xsense_enable_viewer" default="false" doc="Enable MuJoCo viewer for Xsens GMR"/>
+    <arg name="xsense_fps" default="100.0" doc="Xsens GMR publishing rate (Hz)"/>
+    <arg name="xsense_cpu_cores" default="[]" doc="CPU cores to bind Xsens retarget process"/>
+    <arg name="xsense_bvh_offset_scale" default="" doc="Optional BVH offset scale"/>
+    <arg name="xsense_enable_pico_joy_receiver" default="true" doc="Start PICO joystick receiver and publish /pico/joy"/>
+    <arg name="xsense_pico_host" default="0.0.0.0" doc="PICO joy receiver host"/>
+    <arg name="xsense_pico_port" default="12345" doc="PICO joy receiver UDP port"/>
+    <arg name="xsense_pico_enable_ip_broadcast" default="true" doc="Broadcast robot IP for PICO discovery"/>
+    <arg name="xsense_pico_robot_name" default="KUAVO" doc="Robot name broadcast to PICO"/>
+    <arg name="xsense_pico_broadcast_port" default="8443" doc="PICO robot info broadcast port"/>
+    <arg name="xsense_pico_startup_delay" default="0.0" doc="PICO receiver/control startup delay"/>
+    <arg name="xsense_enable_pico_head_control" default="false" doc="Enable PICO head control node"/>
+    <arg name="xsense_enable_pico_claw_control" default="false" doc="Enable PICO trigger to claw command"/>
+
+    <group if="$(arg with_xsense_gmr)">
+      <include file="$(find kuavo_xsense_gmr)/launch/xsense_udp_bvh_to_gmr.launch">
+        <arg name="listen_ip" value="$(arg xsense_listen_ip)"/>
+        <arg name="listen_port" value="$(arg xsense_listen_port)"/>
+        <arg name="receive_timeout_ms" value="$(arg xsense_receive_timeout_ms)"/>
+        <arg name="bvh_topic" value="$(arg xsense_bvh_topic)"/>
+        <arg name="pose_topic" value="$(arg xsense_pose_topic)"/>
+        <arg name="summary_topic" value="$(arg xsense_summary_topic)"/>
+        <arg name="bvh_tcp_port" value="$(arg xsense_bvh_tcp_port)"/>
+        <arg name="enable_pico_pause_control" value="$(arg xsense_enable_pico_pause_control)"/>
+        <arg name="pico_joy_topic" value="$(arg xsense_pico_joy_topic)"/>
+        <arg name="pico_pause_combo" value="$(arg xsense_pico_pause_combo)"/>
+        <arg name="pico_resume_combo" value="$(arg xsense_pico_resume_combo)"/>
+        <arg name="pico_trigger_threshold" value="$(arg xsense_pico_trigger_threshold)"/>
+        <arg name="pico_grip_threshold" value="$(arg xsense_pico_grip_threshold)"/>
+        <arg name="pose_publish_hz" value="$(arg xsense_pose_publish_hz)"/>
+        <arg name="pose_queue_target_depth" value="$(arg xsense_pose_queue_target_depth)"/>
+        <arg name="pose_queue_max_size" value="$(arg xsense_pose_queue_max_size)"/>
+        <arg name="pose_queue_prefill" value="$(arg xsense_pose_queue_prefill)"/>
+        <arg name="pose_hold_on_empty" value="$(arg xsense_pose_hold_on_empty)"/>
+        <arg name="pose_stale_timeout_s" value="$(arg xsense_pose_stale_timeout_s)"/>
+        <arg name="update_output_header_stamp" value="$(arg xsense_update_output_header_stamp)"/>
+        <arg name="pose_queue_stats_topic" value="$(arg xsense_pose_queue_stats_topic)"/>
+        <arg name="pose_queue_stats_hz" value="$(arg xsense_pose_queue_stats_hz)"/>
+        <arg name="robot" value="$(arg xsense_robot)"/>
+        <arg name="enable_viewer" value="$(arg xsense_enable_viewer)"/>
+        <arg name="fps" value="$(arg xsense_fps)"/>
+        <arg name="cpu_cores" value="$(arg xsense_cpu_cores)"/>
+        <arg name="bvh_offset_scale" value="$(arg xsense_bvh_offset_scale)"/>
+        <arg name="enable_pico_joy_receiver" value="$(arg xsense_enable_pico_joy_receiver)"/>
+        <arg name="pico_host" value="$(arg xsense_pico_host)"/>
+        <arg name="pico_port" value="$(arg xsense_pico_port)"/>
+        <arg name="pico_enable_ip_broadcast" value="$(arg xsense_pico_enable_ip_broadcast)"/>
+        <arg name="pico_robot_name" value="$(arg xsense_pico_robot_name)"/>
+        <arg name="pico_broadcast_port" value="$(arg xsense_pico_broadcast_port)"/>
+        <arg name="pico_startup_delay" value="$(arg xsense_pico_startup_delay)"/>
+        <arg name="enable_pico_head_control" value="$(arg xsense_enable_pico_head_control)"/>
+        <arg name="enable_pico_claw_control" value="$(arg xsense_enable_pico_claw_control)"/>
+      </include>
+    </group>
+
+    <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
+    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
+    <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR"/>
+    <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>
+    <arg name="pico_enable_viewer" default="false" doc="Enable MuJoCo viewer for PICO GMR"/>
+    <arg name="pico_enable_gmr_smoothing" default="false" doc="Enable Gaussian filter smoothing"/>
+    <arg name="pico_gmr_gaussian_sigma" default="1.0" doc="Gaussian kernel sigma"/>
+    <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
+    <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
+    <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
+    <!-- 头控参数（GMR 和 Teleop 路径共享） -->
+    <arg name="pico_enable_head_control" default="true" doc="Enable independent head control node"/>
+    <arg name="pico_head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+    <!-- CPU affinity: bind PICO retarget process to specific cores (empty=no binding for sim) -->
+    <arg name="pico_cpu_cores" default="[]" doc="CPU cores to bind PICO retarget process (empty=no binding)"/>
+
+    <group if="$(arg with_pico_gmr)">
+      <include file="$(find kuavo_pico_gmr)/launch/pico_streaming.launch">
+        <arg name="robot" value="$(arg pico_robot)"/>
+        <arg name="human_height" value="$(arg pico_human_height)"/>
+        <arg name="enable_viewer" value="$(arg pico_enable_viewer)"/>
+        <arg name="enable_gmr_smoothing" value="$(arg pico_enable_gmr_smoothing)"/>
+        <arg name="gmr_gaussian_sigma" value="$(arg pico_gmr_gaussian_sigma)"/>
+        <arg name="gmr_velocity_clip" value="$(arg pico_gmr_velocity_clip)"/>
+        <arg name="gmr_velocity_deadzone" value="$(arg pico_gmr_velocity_deadzone)"/>
+        <arg name="enable_dexhand_control" value="$(arg pico_enable_dexhand_control)"/>
+        <arg name="enable_head_control" value="$(arg pico_enable_head_control)"/>
+        <arg name="head_control_mode" value="$(arg pico_head_control_mode)"/>
+        <arg name="cpu_cores" value="$(arg pico_cpu_cores)"/>
+      </include>
+    </group>
+
+
 </launch>

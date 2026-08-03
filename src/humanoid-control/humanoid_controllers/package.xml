@@ -52,6 +52,7 @@
     <depend>kuavo_led_controller</depend>
     <exec_depend>nodelet</exec_depend>
     <exec_depend>controller_manager</exec_depend>
+    <exec_depend>kuavo_mocap_gmr</exec_depend>
 
     <export>
         <controller_interface plugin="${prefix}/humanoid_controllers_plugins.xml"/>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<robot name="biped_s52">
+<robot name="biped_s56">
   <mujoco>
     <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
   </mujoco>
@@ -57,7 +57,7 @@
   </link>
   <joint name="zarm_l1_ref_joint" type="fixed">
     <!-- 位置与 zarm_l1_joint 的 origin 完全一致 -->
-    <origin xyz="-0.003 0.1737 0.2831" rpy="0 0 0" />
+    <origin xyz="-0.003 0.2527 0.283" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zarm_l1_ref_link" />
   </joint>
@@ -86,7 +86,7 @@
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
     <dynamics damping="0.2" friction="0.0" />
-    <calibration rising="0.0377012" />
+    <calibration rising="-0.19609" />
   </joint>
   <link name="zarm_l2_link">
     <inertial>
@@ -105,13 +105,13 @@
     </visual>
   </link>
   <joint name="zarm_l2_joint" type="revolute">
-    <origin xyz="0 0.081 0" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_l1_link" />
     <child link="zarm_l2_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.349065850398866" upper="2.0943951023932" effort="50.0" velocity="8.37333333333333" />
     <dynamics damping="0.2" friction="0.0" />
-    <calibration rising="-0.00900159" />
+    <calibration rising="-0.430184" />
   </joint>
   <link name="zarm_l3_link">
     <inertial>
@@ -130,13 +130,13 @@
     </visual>
   </link>
   <joint name="zarm_l3_joint" type="revolute">
-    <origin xyz="0 0 -0.104" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_l2_link" />
     <child link="zarm_l3_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="36.0" velocity="9.94333333333333" />
     <dynamics damping="0.2" friction="0.0" />
-    <calibration rising="-0.000539228" />
+    <calibration rising="0.0881008" />
   </joint>
   <link name="zarm_l4_link">
     <inertial>
@@ -155,13 +155,13 @@
     </visual>
   </link>
   <joint name="zarm_l4_joint" type="revolute">
-    <origin xyz="0.02 0 -0.1797" rpy="0 0 0" />
+    <origin xyz="0.02 0 -0.2837" rpy="0 0 0" />
     <parent link="zarm_l3_link" />
     <child link="zarm_l4_link" />
     <axis xyz="0 1 0" />
     <limit lower="-2.61799387799149" upper="0.0" effort="50.0" velocity="8.37333333333333" />
     <dynamics damping="0.2" friction="0.0" />
-    <calibration rising="-0.0274436" />
+    <calibration rising="0.0429669" />
   </joint>
   <link name="zarm_l5_link">
     <inertial>
@@ -180,13 +180,13 @@
     </visual>
   </link>
   <joint name="zarm_l5_joint" type="revolute">
-    <origin xyz="-0.02 0 -0.1195" rpy="0 0 0" />
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
     <parent link="zarm_l4_link" />
     <child link="zarm_l5_link" />
     <axis xyz="0 0 1" />
     <limit lower="-1.5707963267949" upper="1.5707963267949" effort="12.0" velocity="7.32666666666667" />
     <dynamics damping="0.2" friction="0.0" />
-    <calibration rising="-0.00824505" />
+    <calibration rising="0.201164" />
   </joint>
   <link name="zarm_l6_link">
     <inertial>
@@ -211,7 +211,7 @@
     <axis xyz="1 0 0" />
     <limit lower="-1.30899693899575" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
     <dynamics damping="0.2" friction="0.0" />
-    <calibration rising="0.0342893" />
+    <calibration rising="1.29558" />
   </joint>
   <link name="zarm_l7_link">
     <inertial>
@@ -236,7 +236,7 @@
     <axis xyz="0 1 0" />
     <limit lower="-0.698131700797732" upper="0.698131700797732" effort="12.0" velocity="7.32666666666667" />
     <dynamics damping="0.2" friction="0.0" />
-    <calibration rising="0.0386927" />
+    <calibration rising="0.627341" />
   </joint>
   <link name="zarm_l7_end_effector">
     <collision>
@@ -351,7 +351,7 @@
     </collision>
   </link>
   <joint name="zhead_1_joint" type="revolute">
-    <origin xyz="-0.003 0.0 0.3715" rpy="0 0 0" />
+    <origin xyz="-0.003 0.0 0.49535" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
@@ -375,10 +375,10 @@
     </visual>
   </link>
   <joint name="zhead_2_joint" type="revolute">
-    <origin xyz="0 0 0.137954074182872" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zhead_1_link" />
     <child link="zhead_2_link" />
-    <axis xyz="0 -1 0" />
+    <axis xyz="0 1 0" />
     <limit lower="-0.349065850398866" upper="0.785398163397448" effort="12.0" velocity="5.23" />
     <dynamics damping="0.2" friction="0.0" />
   </joint>
@@ -400,11 +400,29 @@
     </visual>
   </link>
   <joint name="camera_base" type="fixed">
-    <origin xyz="0.119717018973535 0.0237514612535074 0.0262044145991832" rpy="0 0.480224871300295 0" />
+    <origin xyz="0.115442 0.047500 0.042420" rpy="0 0.3406 0" />
     <parent link="zhead_2_link" />
     <child link="camera_base" />
   </joint>
   <!-- 相机光学坐标系：采用标准光学坐标 (z 前, x 右, y 下)，直接以 camera_base 为父节点 -->
+  <link name="head_camera_color_optical_frame_0">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="camera_optical_material">
+        <color rgba="0 1 0 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="head_camera_color_optical_frame_joint_0" type="fixed">
+    <!-- 经典光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
+    <parent link="camera_base" />
+    <child link="head_camera_color_optical_frame_0" />
+  </joint>
+  <!-- 相机rgb坐标系：相对于depth坐标系有偏移 -->
   <link name="head_camera_color_optical_frame">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -418,8 +436,8 @@
   </link>
   <joint name="head_camera_color_optical_frame_joint" type="fixed">
     <!-- 经典光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
-    <parent link="camera_base" />
+    <origin xyz="0.02375 0 0" rpy="0 0 0" />
+    <parent link="head_camera_color_optical_frame_0" />
     <child link="head_camera_color_optical_frame" />
   </joint>
   <!-- 棋盘 link/joint：tag 相对左臂 joint_1（zarm_l1_ref_link）位姿，来自动捕 CSV + optitrack_poses.yaml 多帧均值 -->
@@ -435,7 +453,10 @@
     </visual>
   </link>
   <joint name="checkerboard_joint" type="fixed">
-    <origin xyz="1.00327467669963 -0.176934723317098 -0.17142623754583" rpy="-2.15010713166199 -0.0125236852930088 -1.57002984265249" />
+    <!-- s56 棋盘格：waist系位置同s52 -->
+    <origin xyz="0.97327467669963 -0.175934723317098 -0.17142623754583" rpy="-2.08010713166199 -0.0125236852930088 -1.50002984265249" />
+    <!-- <origin xyz="1.0000866 -0.1717 -0.15955"
+    rpy="-2.617993877991495 0.0 -1.570796326794897" /> -->
     <parent link="zarm_l1_ref_link" />
     <child link="checkerboard_link" />
   </joint>
@@ -456,7 +477,7 @@
     </visual>
   </link>
   <joint name="zarm_r1_joint" type="revolute">
-    <origin xyz="-0.003 -0.1737 0.2831" rpy="0 0 0" />
+    <origin xyz="-0.003 -0.2527 0.283" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
@@ -480,7 +501,7 @@
     </visual>
   </link>
   <joint name="zarm_r2_joint" type="revolute">
-    <origin xyz="0 -0.081 0" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_r1_link" />
     <child link="zarm_r2_link" />
     <axis xyz="1 0 0" />
@@ -504,7 +525,7 @@
     </visual>
   </link>
   <joint name="zarm_r3_joint" type="revolute">
-    <origin xyz="0 0 -0.104" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zarm_r2_link" />
     <child link="zarm_r3_link" />
     <axis xyz="0 0 1" />
@@ -528,7 +549,7 @@
     </visual>
   </link>
   <joint name="zarm_r4_joint" type="revolute">
-    <origin xyz="0.02 0 -0.1797" rpy="0 0 0" />
+    <origin xyz="0.02 0 -0.2837" rpy="0 0 0" />
     <parent link="zarm_r3_link" />
     <child link="zarm_r4_link" />
     <axis xyz="0 1 0" />
@@ -552,7 +573,7 @@
     </visual>
   </link>
   <joint name="zarm_r5_joint" type="revolute">
-    <origin xyz="-0.02 0 -0.1195" rpy="0 0 0" />
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
     <parent link="zarm_r4_link" />
     <child link="zarm_r5_link" />
     <axis xyz="0 0 1" />
@@ -600,7 +621,7 @@
     </visual>
   </link>
   <joint name="zarm_r7_joint" type="revolute">
-    <origin xyz="0 0 -0.022284" rpy="0 0 0" />
+    <origin xyz="0 0 -0.021" rpy="0 0 0" />
     <parent link="zarm_r6_link" />
     <child link="zarm_r7_link" />
     <axis xyz="0 1 0" />
@@ -645,7 +666,7 @@
     </collision>
   </link>
   <joint name="r_hand_tripod_joint" type="fixed">
-    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <origin xyz="0.00881126 -0.00953293 -0.00286888" rpy="0.05840253 -0.00094767 0.03244089" />
     <parent link="zarm_r7_link" />
     <child link="r_hand_tripod" />
     <axis xyz="0 0 0" />

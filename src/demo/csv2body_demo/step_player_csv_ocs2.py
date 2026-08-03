@@ -18,7 +18,7 @@ import argparse
 import time
 from std_msgs.msg import Float64MultiArray, Bool
 import threading  # 添加线程支持
-import subprocess
+
 import sys
 
 def load_dynamic_qr_service(gait_name="taiji"):
@@ -90,29 +90,13 @@ class MusicPlayer:
         self.music_thread = None
         self.is_playing = False
 
-    def speaker_available(self):
-        """检测是否存在可用扬声器/音频输出设备"""
+    def music_service_available(self):
+        """检测放音服务是否可用（喇叭可能在上位机，不能只探测本机硬件）"""
         try:
-            speaker_cmd = "pactl list | grep -i Speaker"
-            speaker_result = subprocess.run(
-                speaker_cmd, shell=True, capture_output=True, text=True
-            )
-            if speaker_result.stdout.strip():
-                rospy.loginfo("检测到扬声器输出（pactl）")
-                return True
-
-            fallback_cmd = "aplay -l | grep -i Audio"
-            fallback_result = subprocess.run(
-                fallback_cmd, shell=True, capture_output=True, text=True
-            )
-            if fallback_result.stdout.strip():
-                rospy.loginfo("检测到扬声器输出（aplay）")
-                return True
-
-            rospy.logwarn("未检测到扬声器或音频输出设备，将跳过音乐播放")
-            return False
-        except Exception as e:
-            rospy.logwarn(f"检测扬声器状态失败: {str(e)}，将跳过音乐播放")
+            rospy.wait_for_service('/play_music', timeout=5.0)
+            return True
+        except rospy.ROSException:
+            rospy.logwarn("放音服务 /play_music 未就绪，将跳过音乐播放")
             return False
 
     def play_music(self, music_file, volume=80):
@@ -782,7 +766,7 @@ def main():
         change_ruiwo_motor_param("taiji_kpkd")
     try:
         # 执行动作序列
-        if music_player.speaker_available():
+        if music_player.music_service_available():
             music_player.play_music(args.music_file)
         player.execute_action_with_csv(args.time_offset, args.music_file)
     except rospy.ROSInterruptException:

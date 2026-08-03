@@ -10,7 +10,7 @@
     <!-- 非 v17: 旧两节点架构 -->
     <group unless="$(eval int(arg('robot_version')) == 17)">
         <!-- 先启动流式播放节点 -->
-        <node pkg="kuavo_audio_player" type="audio_stream_player.py" name="audio_stream_player_node" output="screen" respawn="true" respawn_delay="5"/>
+        <node pkg="kuavo_audio_player" type="audio_stream_player.py" name="audio_stream_player_node" output="screen"/>
 
         <!-- 再启动音乐文件服务节点 -->
         <node pkg="kuavo_audio_player" type="loundspeaker.py" name="play_music_node" output="screen"  />

@@ -22,6 +22,7 @@ import time
 import signal
 import datetime
 import json
+from std_msgs.msg import String, Int8
 from std_srvs.srv import Trigger, TriggerRequest
 
 import threading
@@ -36,6 +37,7 @@ except ImportError:
 from h12pro_controller_node.srv import playmusic, playmusicRequest, playmusicResponse
 from h12pro_controller_node.srv import ExecuteArmAction, ExecuteArmActionRequest, ExecuteArmActionResponse
 from h12pro_controller_node.msg import RobotActionState
+from kuavo_msgs.msg import ControllerSwitchEvent
 import os
 # import netifaces
 import json
@@ -358,6 +360,7 @@ rospy.Subscriber('/robot_action_state', RobotActionState, robot_action_state_cal
 # 全局话题发布
 joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
 com_pose_pub = rospy.Publisher('/cmd_pose', Twist, queue_size=10)
+nav_switch_pub = rospy.Publisher('/humanoid_controller/nav_switch_rl_controller_by_name', String, queue_size=10)
 # 控制拨杆
 BUTTON_A = 0
 BUTTON_B = 1
@@ -624,7 +627,7 @@ def print_state_transition(trigger, source, target) -> None:
     )
 
 
-def launch_humanoid_robot(real_robot=True,calibrate=False):
+def launch_humanoid_robot(real_robot=True,calibrate=False,use_sit_init=False):
     
     robot_version = os.getenv('ROBOT_VERSION')
     print(f"current robot version: {robot_version}")
@@ -670,6 +673,9 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     only_half_up_body = kuavo_json_data["only_half_up_body"]
     if only_half_up_body:
         launch_cmd += " only_half_up_body:=true"
+
+    if use_sit_init:
+        launch_cmd += " use_sit_init:=true"
 
     if rospy.has_param("h12_log_channel"):
         log_channel_status = rospy.get_param("h12_log_channel")
@@ -1294,16 +1300,57 @@ def switch_controller_callback(event):
     except Exception as e:
         rospy.logerr(f"Error in switch_controller_callback: {e}")
 
+def _publish_and_wait_for_controller_switch(target_controller, timeout=3.0):
+    """发布切换请求并等待 /humanoid_controller/controller_switch_event 确认
+
+    先创建 subscriber 再 publish，避免 TOCTOU 竞态导致事件丢失。
+
+    :param target_controller: 目标控制器名称
+    :param timeout: 超时时间（秒）
+    :return: bool, True 表示确认切换成功，False 表示超时
+    """
+    switch_event = threading.Event()
+    request_time = time.time()
+
+    def callback(msg):
+        if (msg.to_controller.lower() == target_controller.lower() and
+                msg.header.stamp.to_sec() >= request_time):
+            switch_event.set()
+
+    sub = rospy.Subscriber('/humanoid_controller/controller_switch_event',
+                           ControllerSwitchEvent, callback)
+
+    # 先建 subscriber，再 publish — 消除竞态窗口
+    nav_switch_pub.publish(String(data=target_controller))
+    rospy.loginfo(f"[DepthLocoSwitch] Published switch request to "
+                  f"/humanoid_controller/nav_switch_rl_controller_by_name: {target_controller}")
+
+    confirmed = switch_event.wait(timeout=timeout)
+    sub.unregister()
+
+    if confirmed:
+        rospy.loginfo(f"[DepthLocoSwitch] Confirmed switch to '{target_controller}' via controller_switch_event")
+    else:
+        rospy.logwarn(f"[DepthLocoSwitch] Timeout ({timeout}s) waiting for switch to '{target_controller}'")
+
+    return confirmed
+
+
 def depth_loco_switch_callback(event):
     """切换走楼梯斜坡控制器回调函数
-    - 如果当前是 mpc 或 amp_controller，切换到 depth_loco_controller
-    - 如果当前是 depth_loco_controller，切换回进入前的控制器
-    - 执行后设置冷却期，期间不允许其他状态转换
+    - 如果当前是 RL 控制器（非 mpc），切换到 depth_loco_controller
+    - 如果当前是 depth_loco_controller，切换回进入前的 RL 控制器
+    - 通过话题 /humanoid_controller/nav_switch_rl_controller_by_name 发布切换请求
+    - 订阅 /humanoid_controller/controller_switch_event 等待确认切换完成
+    - 确认成功后设置冷却期；失败则清理 restore_record、不设冷却期允许重试
     """
     global _switch_controller_cooling_until
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
     print_state_transition(trigger, source, "stance")
+
+    # 不允许从 mpc 切换：depth_loco 是 RL 控制器，只能走 RL→RL 通道
+    _FORBIDDEN_FROM_CONTROLLERS = {"mpc"}
 
     try:
         current_controller = get_current_controller_name()
@@ -1314,33 +1361,43 @@ def depth_loco_switch_callback(event):
 
         current_controller_lower = current_controller.lower()
 
-        success = False
-        if current_controller_lower in ["mpc", "amp_controller"]:
-            _set_depth_loco_restore_controller_name(current_controller_lower)
-            rospy.loginfo("[DepthLocoSwitch] Switching to depth_loco_controller")
-            success = call_switch_controller_service("depth_loco_controller")
-            if not success:
-                _set_depth_loco_restore_controller_name(None)
-                rospy.logwarn("[DepthLocoSwitch] Failed to switch to depth_loco_controller.")
-        elif current_controller_lower == "depth_loco_controller":
+        target_controller = None
+        is_entering_depth = False
+        if current_controller_lower == "depth_loco_controller":
+            # 退出 depth_loco：恢复到进入前记录的 RL 控制器
             restore_controller_name = _get_depth_loco_restore_controller_name()
-            if restore_controller_name not in ["mpc", "amp_controller"]:
+            if restore_controller_name is None or restore_controller_name in _FORBIDDEN_FROM_CONTROLLERS:
                 restore_controller_name = "amp_controller"
-            rospy.loginfo(f"[DepthLocoSwitch] Switching back to {restore_controller_name}")
-            success = call_switch_controller_service(restore_controller_name)
-            if not success:
-                rospy.logwarn(f"[DepthLocoSwitch] Failed to switch back to {restore_controller_name}.")
-            else:
-                _clear_depth_loco_restore_controller_name()
+            target_controller = restore_controller_name
+            rospy.loginfo(f"[DepthLocoSwitch] Switching back to {target_controller}")
+        elif current_controller_lower in _FORBIDDEN_FROM_CONTROLLERS:
+            rospy.logwarn(f"[DepthLocoSwitch] Current controller '{current_controller}' is not an RL controller."
+                          f" Cannot switch to depth_loco_controller via navigation topic.")
+            return
         else:
-            rospy.logwarn(f"[DepthLocoSwitch] Unsupported current controller: {current_controller}.")
+            # 任意 RL 控制器 → depth_loco_controller
+            _set_depth_loco_restore_controller_name(current_controller_lower)
+            target_controller = "depth_loco_controller"
+            is_entering_depth = True
+            rospy.loginfo(f"[DepthLocoSwitch] Switching from {current_controller_lower} to depth_loco_controller")
+
+        if target_controller:
+            confirmed = _publish_and_wait_for_controller_switch(target_controller, timeout=3.0)
+            if confirmed:
+                if not is_entering_depth:
+                    _clear_depth_loco_restore_controller_name()
+            else:
+                if is_entering_depth:
+                    _set_depth_loco_restore_controller_name(None)
+                    rospy.logerr("[DepthLocoSwitch] Switch to depth_loco_controller not confirmed, restore record cleared")
+                else:
+                    rospy.logerr(f"[DepthLocoSwitch] Switch back to {target_controller} not confirmed, restore record kept")
+                # 切换未确认，不设冷却期，允许用户立即重试
+                return
 
         with _switch_controller_lock:
             _switch_controller_cooling_until = time.time() + SWITCH_CONTROLLER_COOLDOWN
-            if success:
-                rospy.loginfo(f"[DepthLocoSwitch] Controller switched successfully. Cooldown period started for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
-            else:
-                rospy.loginfo(f"[DepthLocoSwitch] Cooldown period started (service call failed). State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
+            rospy.loginfo(f"[DepthLocoSwitch] Cooldown period started. State transitions will be blocked for {SWITCH_CONTROLLER_COOLDOWN} seconds.")
 
         cooldown_thread = threading.Thread(target=_release_switch_controller_cooldown, daemon=True)
         cooldown_thread.start()
@@ -1520,3 +1577,234 @@ def vmp_action_callback(event):
             rospy.logwarn(f"VMP No configuration found for trigger: {trigger}")
     except Exception as e:
         rospy.logerr(f"Error in vmp_action_callback: {e}")
+
+
+# ======================== G12 航空箱坐/站 ========================
+
+SIT_STAND_ABORT_PARAM = "/sit_stand_abort"
+
+
+def _is_sit_stand_aborted():
+    """检查是否收到坐/站中断信号（CD 紧急停止触发）"""
+    return rospy.get_param(SIT_STAND_ABORT_PARAM, False)
+
+
+def _clear_sit_stand_abort():
+    """清除坐/站中断信号"""
+    try:
+        rospy.delete_param(SIT_STAND_ABORT_PARAM)
+    except KeyError:
+        pass
+
+
+# ── 坐/站进行中标志：阻断摇杆输入，FSM 尚未切换到 sit 时仍需屏蔽 ──
+
+_sit_stand_in_progress = False
+_sit_stand_lock = threading.Lock()
+
+
+def is_sit_stand_in_progress():
+    """坐/站回调执行中（含等待完成阶段），摇杆应被阻断"""
+    with _sit_stand_lock:
+        return _sit_stand_in_progress
+
+
+def _set_sit_stand_in_progress():
+    global _sit_stand_in_progress
+    with _sit_stand_lock:
+        _sit_stand_in_progress = True
+
+
+def _clear_sit_stand_in_progress():
+    global _sit_stand_in_progress
+    with _sit_stand_lock:
+        _sit_stand_in_progress = False
+
+
+def _wait_for_topic_msg(topic, msg_type, timeout_sec, condition_fn=None):
+    """订阅指定话题等待一条消息，支持中断检测。
+    :param topic: 话题名
+    :param msg_type: 消息类型
+    :param timeout_sec: 超时秒数
+    :param condition_fn: 可选，对消息的判断函数，返回 True 表示满足条件
+    :return: (success, msg) — success=True 表示收到满足条件的消息
+    """
+    result = {"msg": None, "done": False}
+
+    def _callback(msg):
+        if condition_fn is None or condition_fn(msg):
+            result["msg"] = msg
+            result["done"] = True
+
+    sub = rospy.Subscriber(topic, msg_type, _callback)
+    start = time.time()
+    while not result["done"] and not rospy.is_shutdown():
+        if _is_sit_stand_aborted():
+            rospy.logwarn("[SitStand] Aborted by emergency stop")
+            sub.unregister()
+            return False, None
+        if time.time() - start > timeout_sec:
+            rospy.logwarn("[SitStand] Timeout waiting for %s (%.1fs)", topic, timeout_sec)
+            sub.unregister()
+            return False, None
+        rospy.sleep(0.5)
+    sub.unregister()
+    return result["done"], result["msg"]
+
+
+def _wait_for_param_true(param_name, timeout_sec):
+    """轮询 rosparam 直到值为 True，支持中断和超时"""
+    start = time.time()
+    while not rospy.is_shutdown():
+        if _is_sit_stand_aborted():
+            rospy.logwarn("[SitStand] Aborted by emergency stop")
+            return False
+        if rospy.get_param(param_name, False):
+            return True
+        if time.time() - start > timeout_sec:
+            rospy.logwarn("[SitStand] Timeout waiting for param %s (%.1fs)", param_name, timeout_sec)
+            return False
+        rospy.sleep(0.5)
+    return False
+
+
+def _wait_for_service_response(service_name, timeout_sec):
+    """轮询等待服务返回 ready_stance/launched，支持中断"""
+    start = time.time()
+    while not rospy.is_shutdown():
+        if _is_sit_stand_aborted():
+            rospy.logwarn("[SitStand] Aborted by emergency stop")
+            return False
+        try:
+            client = rospy.ServiceProxy(service_name, Trigger)
+            resp = client.call(TriggerRequest())
+            if resp.success and resp.message in ["ready_stance", "launched"]:
+                return True
+        except (rospy.ServiceException, rospy.ROSException):
+            pass
+        if time.time() - start > timeout_sec:
+            rospy.logwarn("[SitStand] Timeout waiting for %s (%.1fs)", service_name, timeout_sec)
+            return False
+        rospy.sleep(1.0)
+    return False
+
+
+# ── 条件函数 ──
+
+
+def check_no_tact_action(event):
+    """坐回条件：无 tact 动作在执行"""
+    if robot_action_executing:
+        rospy.logwarn("[SitStand] sit_down blocked: tact action is executing")
+        return False
+    return True
+
+
+def check_is_mpc_controller(event):
+    """坐回条件：当前控制器为 mpc"""
+    current = get_current_controller_name()
+    if current is None or current.lower() != "mpc":
+        rospy.logwarn("[SitStand] sit_down blocked: current controller is '%s', not mpc", current)
+        return False
+    return True
+
+
+def check_sit_sequence_complete(event):
+    """起身条件：坐姿流程已完成"""
+    complete = rospy.get_param("/seat_sit_sequence_complete", False)
+    if not complete:
+        rospy.logwarn("[SitStand] sit_to_stand blocked: sit sequence not complete")
+        return False
+    return True
+
+
+# ── 回调函数 ──
+
+
+def sit_down_callback(event):
+    """stance → sit: 调 /humanoid/sit_down 服务，等完成"""
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+    _clear_sit_stand_abort()
+    _set_sit_stand_in_progress()
+    try:
+        try:
+            rospy.wait_for_service("/humanoid/sit_down", timeout=3.0)
+            client = rospy.ServiceProxy("/humanoid/sit_down", Trigger)
+            resp = client.call(TriggerRequest())
+            if not resp.success:
+                rospy.logerr("[SitStand] sit_down service failed: %s", resp.message)
+                return
+            rospy.loginfo("[SitStand] sit_down service called, waiting for sequence completion...")
+        except (rospy.ServiceException, rospy.ROSException) as e:
+            rospy.logerr("[SitStand] Failed to call /humanoid/sit_down: %s", e)
+            return
+
+        if not _wait_for_param_true("/seat_sit_sequence_complete", 60.0):
+            return
+
+        print_state_transition(trigger, source, "sit")
+    finally:
+        _clear_sit_stand_in_progress()
+
+
+def sit_to_stand_callback(event):
+    """起身：initial→stance（首次开机）或 sit→stance（坐姿起身）"""
+    source = event.kwargs.get("source")
+    trigger = event.kwargs.get("trigger")
+    _clear_sit_stand_abort()
+    _set_sit_stand_in_progress()
+
+    try:
+        if source == "initial":
+            # 首次开机起身：设 use_sit_init → launch → 等 prep → real_initial_start → 等起身完成
+            rospy.set_param("/use_sit_init", True)
+            rospy.loginfo("[SitStand] Set /use_sit_init=true, launching robot...")
+
+            launch_humanoid_robot(event.kwargs.get("real_robot"), use_sit_init=True)
+
+            rospy.loginfo("[SitStand] Waiting for hardware prep (real_launch_status)...")
+            if not _wait_for_service_response("/humanoid_controller/real_launch_status", 120.0):
+                return
+
+            rospy.loginfo("[SitStand] Hardware prep done, calling real_initial_start...")
+            call_real_initialize_srv()
+
+            rospy.loginfo("[SitStand] Waiting for stand up complete (/bot_stand_up_complete)...")
+            if not _wait_for_topic_msg("/bot_stand_up_complete", Int8, 120.0,
+                                       condition_fn=lambda m: m.data == 1):
+                return
+
+            rospy.loginfo("[SitStand] Stand up complete!")
+            print_state_transition(trigger, source, "stance")
+
+        elif source == "sit":
+            # 坐姿起身：调 /humanoid/stand_up → 等 /bot_stand_up_complete
+            try:
+                rospy.wait_for_service("/humanoid/stand_up", timeout=3.0)
+                client = rospy.ServiceProxy("/humanoid/stand_up", Trigger)
+                resp = client.call(TriggerRequest())
+                if not resp.success:
+                    rospy.logerr("[SitStand] stand_up service failed: %s", resp.message)
+                    return
+                rospy.loginfo("[SitStand] stand_up service called, waiting for completion...")
+            except (rospy.ServiceException, rospy.ROSException) as e:
+                rospy.logerr("[SitStand] Failed to call /humanoid/stand_up: %s", e)
+                return
+
+            if not _wait_for_topic_msg("/bot_stand_up_complete", Int8, 60.0,
+                                       condition_fn=lambda m: m.data == 1):
+                return
+
+            rospy.loginfo("[SitStand] Stand up complete!")
+            print_state_transition(trigger, source, "stance")
+
+    finally:
+        _clear_sit_stand_in_progress()
+        # 无论成功/超时/abort，清理 use_sit_init 避免残留
+        if source == "initial":
+            try:
+                rospy.delete_param("/use_sit_init")
+            except KeyError:
+                pass
+        _clear_sit_stand_abort()

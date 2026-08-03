@@ -3,7 +3,10 @@
 import rospy
 import json
 import math
+import os
+import sys
 import numpy as np
+import rospkg
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
 from kuavo_ros_interfaces.srv import stopPlanArmTrajectory
@@ -11,6 +14,18 @@ from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.msg import sensorsData, robotHandPosition, robotHeadMotionData
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    _kuavo_common_python = os.path.join(rospkg.RosPack().get_path('kuavo_common'), 'python')
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError):
+    _kuavo_common_python = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../kuavo_common/python'))
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
 
 # 机器人手臂的初始位置（以角度表示）
 # 机器人手臂的初始位置,包含28个关节角度值(单位:度)
@@ -37,22 +52,24 @@ joint_data_footer = None
 def get_version_parameter():
     param_name = 'robot_version'
     try:
-        # 获取参数值
         param_value = rospy.get_param(param_name)
         rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
-        # 适配1000xx版本号
-        valid_series = [42, 45, 49, 52]
-        MMMMN_MASK = 100000
-        series = param_value % MMMMN_MASK
-        if series not in valid_series:
-            rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
+        if not RobotVersion.is_valid(param_value):
+            rospy.logerr(f"无效的机器人版本号: {param_value}，版本号格式不合法！程序退出。")
             rospy.signal_shutdown("参数无效")
+            return param_value
+
+        rv = RobotVersion.create(int(param_value))
+        if (rv.start_with(4, 2) or rv.start_with(4, 5) or rv.start_with(4, 9)
+                or rv.start_with(5, 2)):
+            rospy.loginfo(f"✅ 机器人版本号有效: {param_value} ({rv.version_name()})")
         else:
-            rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
+            rospy.logerr(f"无效的机器人版本号: {param_value} ({rv.version_name()})，仅支持 42 45 49 52 系列！程序退出。")
+            rospy.signal_shutdown("参数无效")
         return param_value
     except rospy.ROSException:
         rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
-        rospy.signal_shutdown("参数获取失败") 
+        rospy.signal_shutdown("参数获取失败")
         return None
 
 # 存储当前手臂关节状态的列表
@@ -441,11 +458,12 @@ def main():
     # 获取机器人版本
     robot_version = get_version_parameter()
     # 根据机器人版本 设定sensors_data_raw中手臂角度的索引
-    global joint_data_header, joint_data_footer  # 声明使用全局变量
-    if robot_version in [42, 45, 49]:
+    global joint_data_header, joint_data_footer
+    rv = RobotVersion.create(int(robot_version))
+    if rv.start_with(4, 2) or rv.start_with(4, 5) or rv.start_with(4, 9):
         joint_data_header = 12
         joint_data_footer = 26
-    elif robot_version == 52:
+    elif rv.start_with(5, 2):
         joint_data_header = 13
         joint_data_footer = 27
     # 创建订阅者和发布者

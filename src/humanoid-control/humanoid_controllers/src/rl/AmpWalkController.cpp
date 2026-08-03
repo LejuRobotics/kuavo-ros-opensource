@@ -56,6 +56,8 @@ namespace humanoid_controller
     initial_cmd_.cmdStance_ = 1;
     gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
     gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
+    gait_receiver_->setAllowWalkingDuringAction(true);  // AMP 始终允许边走边做动作
+    ros::param::set("/allow_walking_during_arm_action", true);
     
     // 加载原地踏步速度配置
     gait_receiver_->loadInPlaceStepConfig(config_file_, false);
@@ -643,6 +645,8 @@ namespace humanoid_controller
     episodeLength_ = 0;
     currentCycleTime_ = cycleTime_;
     actions_.setZero();
+    has_valid_phase_ = false;
+    external_phase_override_enabled_ = false;
     // networkInputDataRL_ 和 singleInputData_ 清零
     networkInputDataRL_.setZero();
     singleInputData_.setZero();
@@ -690,6 +694,18 @@ namespace humanoid_controller
 
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
     reset();
+  }
+
+  //waao：热启动策略
+  void AmpWalkController::resumeWarm()
+  {
+    RLControllerBase::resume();
+    if (gait_receiver_)
+    {
+      gait_receiver_->setEnabled(true);
+    }
+    sensor_data_updated_ = false;
+    ROS_INFO("[%s] Controller warm-resumed without reset", name_.c_str());
   }
 
   bool AmpWalkController::requestToExit() const
@@ -742,6 +758,129 @@ namespace humanoid_controller
     // cmdStance_ == 1 表示 stance 模式，== 0 表示行走模式
     return cmd.cmdStance_ >= 0.5;  // 使用 0.5 作为阈值，兼容浮点数比较
   }
+
+  double AmpWalkController::getWalkingPhaseRad() const
+  {
+    double phase_rad = std::fmod(phase_, 1.0) * 2.0 * M_PI;
+    if (phase_rad < 0.0)
+    {
+      phase_rad += 2.0 * M_PI;
+    }
+    return phase_rad;
+  }
+
+  double AmpWalkController::getWalkingFrequencyHz() const
+  {
+    return (currentCycleTime_ > 1e-6) ? (1.0 / currentCycleTime_) : 0.0;
+  }
+
+  void AmpWalkController::setExternalPhaseOverride(bool enabled,
+                                                   double sin_phase,
+                                                   double cos_phase,
+                                                   double gait_frequency_hz)
+  {
+    external_phase_override_enabled_ = enabled;
+    external_phase_sin_ = sin_phase;
+    external_phase_cos_ = cos_phase;
+    external_phase_frequency_hz_ = gait_frequency_hz;
+  }
+
+  void AmpWalkController::resetGaitCommandState(bool stance_mode)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->resetCommandState(stance_mode);
+    }
+  }
+
+  bool AmpWalkController::getGaitCommandState(CommandDataRL& command) const
+  {
+    if (!gait_receiver_)
+    {
+      return false;
+    }
+    command = gait_receiver_->getCurrentCommand();
+    return true;
+  }
+
+  void AmpWalkController::setGaitCommandState(const CommandDataRL& command)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->overrideCommandState(command);
+    }
+  }
+
+  void AmpWalkController::setSwitchVelocityScale(double scale)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->setSwitchVelocityScale(scale);
+    }
+  }
+
+  void AmpWalkController::setCommandBufferCallback(std::function<bool()> callback)
+  {
+    if (gait_receiver_)
+    {
+      gait_receiver_->setCommandBufferCallback(std::move(callback));
+    }
+  }
+
+  void AmpWalkController::setExternalCommandBufferCallback(std::function<bool()> callback)
+  {
+    external_command_buffer_callback_ = std::move(callback);
+    if (arm_controller_)
+    {
+      arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+    }
+    if (waist_controller_)
+    {
+      waist_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+    }
+  }
+
+  bool AmpWalkController::hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const
+  {
+    if (!gait_receiver_)
+    {
+      return true;
+    }
+    const auto cmd = gait_receiver_->getCurrentCommand();
+    const double linear_norm = std::hypot(cmd.cmdVelLineX_, cmd.cmdVelLineY_);
+    return linear_norm < linear_thresh &&
+           std::abs(cmd.cmdVelLineZ_) < linear_thresh &&
+           std::abs(cmd.cmdVelAngularZ_) < angular_thresh;
+  }
+
+  bool AmpWalkController::isInPlaceSteppingActive() const
+  {
+    return gait_receiver_ && gait_receiver_->isInPlaceSteppingActive();
+  }
+
+  bool AmpWalkController::isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const
+  {
+    return gait_receiver_ && gait_receiver_->isInPlaceWalkingCommand(linear_thresh, angular_thresh);
+  }
+
+  //waao：计算关节参考
+  Eigen::VectorXd AmpWalkController::getCurrentJointReference() const
+  {
+    const int total_joints = jointNum_ + jointArmNum_ + waistNum_;
+    Eigen::VectorXd q_ref = defalutJointPosRL_.head(total_joints);
+    const Eigen::VectorXd action = getCurrentAction();
+    if (action.size() >= total_joints && actionScaleTestRL_.size() >= total_joints)
+    {
+      q_ref.array() += action.head(total_joints).array() * actionScale_ * actionScaleTestRL_.head(total_joints).array();
+      if (enable_elbow_scale_)
+      {
+        q_ref[16] += action[16] * actionScaleTestRL_[16] * (0.2 - actionScale_);
+        q_ref[20] += action[20] * actionScaleTestRL_[20] * (0.2 - actionScale_);
+      }
+    }
+    return q_ref;
+  }
+
 
   bool AmpWalkController::shouldRunInference() const
   {
@@ -1031,7 +1170,7 @@ namespace humanoid_controller
     }
     double alpha = 1.0;
     currentCycleTime_ = (1.0 - alpha) * currentCycleTime_ + alpha * targetCycleTime;
-
+    
     phase_ = cmd.cmdStance_ == 1.0 ? 0.0 : episodeLength_ * dt_ / currentCycleTime_;
 
     commandPhase_(0) = std::sin(2 * M_PI * phase_);
@@ -1039,6 +1178,7 @@ namespace humanoid_controller
     rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
                     : (commandPhase_(0) < 0) ? ModeNumber::FS
                                              : ModeNumber::SS;
+    has_valid_phase_ = true;
   }
 
   void AmpWalkController::updateObservation(const Eigen::VectorXd& state_est,
@@ -1051,6 +1191,16 @@ namespace humanoid_controller
     applySquatPostureDefense(cmd, sensor_data);
     
     updatePhase(cmd);
+
+    //waao：切换过程中使用耦合相位
+    // if (external_phase_override_enabled_)
+    // {
+    //   commandPhase_(0) = external_phase_sin_;
+    //   commandPhase_(1) = external_phase_cos_;
+    //   rl_plannedMode_ = (commandPhase_(0) > 0) ? ModeNumber::SF
+    //                   : (commandPhase_(0) < 0) ? ModeNumber::FS
+    //                                            : ModeNumber::SS;
+    // }
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
     static bool yaw_offset_initialized = false;
     if (!yaw_offset_initialized)
@@ -1135,6 +1285,7 @@ namespace humanoid_controller
     velocity_commands << cmd.cmdVelLineX_,
                          cmd.cmdVelLineY_,
                          cmd.cmdVelAngularZ_;
+    // std::cout << "amp vx = " << cmd.cmdVelLineX_ << std::endl;
         
     // 应用 YAW 补偿（当旋转时给 X 方向速度添加偏置）
     if (yaw_compensation_enabled_) {
@@ -1394,6 +1545,12 @@ namespace humanoid_controller
 
     Eigen::VectorXd local_action = getCurrentAction();
 
+    if(cmd.cmdStance_) commanState_ << 1.0;
+    else commanState_ << 0.0;
+    
+
+    // std::cout << "欧拉角：" << baseEuler << std::endl;
+
     // === 3. 填充 singleInputData / networkInputDataRL_ ===
     std::map<std::string, Eigen::VectorXd> singleInputDataMap = {
         // old name:
@@ -1419,6 +1576,7 @@ namespace humanoid_controller
         {"bodyLineFreeAcc", bodyLineFreeAcc},
         {"bodyLineVel", bodyLineVel},
         {"commandPhase", commandPhase_},
+        {"command_state", commanState_},
         {"command", tempCommand_},
         {"command_scalar_state", tempCommand_scalar_state},
         {"action", local_action}
@@ -1515,7 +1673,7 @@ namespace humanoid_controller
 
       if (is_amp_hand_controller_ && lateral_elbow_fix_ && action.size() == 21)
       {
-        CommandDataRL elbowCmd = gait_receiver_->getCurrentCommand();
+        CommandDataRL elbowCmd = gait_receiver_->getPolicyCommand();
         elbowCmd.scale();
 
         const bool external_arm_control_active = arm_command_replacement_enabled_ &&
@@ -1588,7 +1746,7 @@ namespace humanoid_controller
       }
       
       // 获取当前命令数据判断是否从站立切换到行走
-      CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
+      CommandDataRL currentCmdData = gait_receiver_->getPolicyCommand();
       bool is_standing = (currentCmdData.cmdStance_ >= 1.0);
       
       // 更新站立状态（用于下次检测切换）
@@ -1688,7 +1846,7 @@ namespace humanoid_controller
     }
 
     // 应用手臂接管平滑处理（站立时置零，行走时平滑过渡）
-    CommandDataRL currentCmdData = gait_receiver_->getCurrentCommand();
+    CommandDataRL currentCmdData = gait_receiver_->getPolicyCommand();
     currentCmdData.scale();
     if (currentCmdData.cmdVelLineX_ < 0.0)
     {
@@ -1817,9 +1975,12 @@ namespace humanoid_controller
 
     Eigen::VectorXd cmd(jointNum_ + jointArmNum_ + waistNum_);
     Eigen::VectorXd torque(jointNum_ + jointArmNum_ + waistNum_);// 策略理论计算扭矩
+    auto joint_action_scale = [this](int i) {
+      return (enable_elbow_scale_ && (i == 16 || i == 20)) ? 0.18 : actionScale_;
+    };
     for (int i = 0; i < jointNum_ + jointArmNum_ + waistNum_; i++)
     {
-      jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
+      jointTor(i) = jointTor(i) + jointKpRL_(i) * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
     }
     if (is_real_)
     {
@@ -1829,19 +1990,22 @@ namespace humanoid_controller
         {
           if (JointPDModeRL_(i) == 0)
           {
-            cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
             cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
             torque[i] = cmd[i];
           }
           else
           {
-            cmd[i] = (local_action[i] * actionScale_ * actionScaleTestRL_[i] + active_default[i]);
-            torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+            cmd[i] = (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] + active_default[i]);
+            torque[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
           }
         }
         else if (JointControlModeRL_(i) == 2)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
+          cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]);
+          // cmd[i] = local_action[i] + defalutJointPosRL_[i];
+          // std::cout << "cmd[" << i << "] = " << cmd[i] << "jointKpRL_:" << jointKpRL_[i] << std::endl;
+          // cmd[i] = defalutJointPosRL_[i];
           torque[i] = jointTor[i];
         }
       }
@@ -1853,14 +2017,14 @@ namespace humanoid_controller
       {
         if (JointControlModeRL_(i) == 0)
         {
-          cmd[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+          cmd[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
         }
         else if (JointControlModeRL_(i) == 2)
         {
           cmd[i] = jointTor[i];
         }
         cmd[i] = std::clamp(cmd[i], -torqueLimitsRL_[i], torqueLimitsRL_[i]);
-        torque[i] = jointKpRL_[i] * (local_action[i] * actionScale_ * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
+        torque[i] = jointKpRL_[i] * (local_action[i] * joint_action_scale(i) * actionScaleTestRL_[i] - jointPos[i] + active_default[i]) - jointKdRL_[i] * jointVel[i];
       }
 
     }
@@ -2171,6 +2335,7 @@ namespace humanoid_controller
           jointArmNum_,   // 手臂关节数量
           ros_logger_     // ROS日志发布器
         );
+        arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
         
         // 初始化 ArmController
         // 提取手臂部分的 kp 和 kd 参数
@@ -2255,7 +2420,7 @@ namespace humanoid_controller
     CommandDataRL cmdData;
     if (gait_receiver_)
     {
-      cmdData = gait_receiver_->getCurrentCommand();
+      cmdData = gait_receiver_->getPolicyCommand();
     }
 
     // 构建完整的关节位置和速度向量（腿 + 腰 + 手）
@@ -2328,6 +2493,7 @@ namespace humanoid_controller
           ros_logger_,
           is_real_
         );
+        waist_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
         
         // 使用从配置文件读取的 kp 和 kd 参数（如果已加载），否则使用默认值
         Eigen::VectorXd waist_kp, waist_kd;
@@ -2414,7 +2580,7 @@ namespace humanoid_controller
     CommandDataRL cmdData;
     if (gait_receiver_)
     {
-      cmdData = gait_receiver_->getCurrentCommand();
+      cmdData = gait_receiver_->getPolicyCommand();
     }
 
     // 构建完整的关节位置和速度向量（腿 + 腰 + 手）

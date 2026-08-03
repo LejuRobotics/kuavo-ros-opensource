@@ -277,7 +277,8 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                                               rightElbowRefRel,  // rightElbowRef - offset,
                                               rightHandRefRel,   // rightHandRef - offset;
                                               drakeSolveUpdateChestOrientation_,
-                                              drakeSolveUpdateChestPosition_);
+                                              drakeSolveUpdateChestPosition_,
+                                              resetJointToDefaultWheel_ || !justEnteredMode2_);
   recordTimestamp("chestElbowHandPointOptSolverPtr_->solveFinish", loopSyncCount_);
   const bool freezeFeedAfterOpt =
       !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled && sol.success;
@@ -1768,7 +1769,14 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
                            (kMode2SmoothDurationSec - kMode2SensorSyncDurationSec),
                        0.0),
               1.0);
-          armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(14);
+          if(resetJointToDefaultWheel_)
+          {
+            armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(14);
+          }
+          else
+          {
+            armPositionForPublish = q_init_cmd_;
+          }
           latest_q_ = armPositionForPublish;
         }
         armVelocityForPublish.setZero();
@@ -2479,7 +2487,10 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
                                 // armMode!=2 或 mode2过渡窗口内，统一走默认下肢发布；其余 mode2 情况走 IK 下肢发布
                                 if (armMode != 2 || inMode2Warmup) {
-                                  publishDefaultLegJointStates();
+                                  if(resetJointToDefaultWheel_)
+                                  {
+                                    publishDefaultLegJointStates();
+                                  }
                                 } else {
                                   publishLegJointStates();
                                 }
@@ -2604,6 +2615,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   std::cout << "/ik_ros_uni_cpp_node/quest3/use_incremental_hand_orientation="
             << (useIncrementalHandOrientation_ ? "true" : "false") << std::endl;
 
+  // 读取进入增量控制时是否重置到默认位置
+  nodeHandle_.param(
+      "/reset_joint_to_default", resetJointToDefaultWheel_, true);
+  std::cout << "reset_joint_to_default="
+            << (resetJointToDefaultWheel_ ? "true" : "false") << std::endl;
+
   // 读取 box 边界参数（向量形式）
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
                            "/quest3/box_min_bound",
@@ -2686,6 +2703,11 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         Eigen::IOFormat(Eigen::FullPrecision, 0, ", ", ", ", "", "", "", ""));
     ROS_INFO("[WheelQuest3IkIncrementalROS] Left hand clip result: %s", oss_left.str().c_str());
     ROS_INFO("[WheelQuest3IkIncrementalROS] Right hand clip result: %s", oss_right.str().c_str());
+    if(!resetJointToDefaultWheel_)
+    {
+      defaultLeftHandPosOnExit_ = leftLink6Position;
+      defaultRightHandPosOnExit_ = rightLink6Position;
+    }
   }
 
   // 使用默认手部位置初始化 latestPoseConstraintList_，确保进入增量模式时能正确初始化

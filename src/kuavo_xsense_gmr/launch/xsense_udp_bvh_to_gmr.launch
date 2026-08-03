@@ -1,0 +1,123 @@
+<launch>
+  <arg name="listen_ip" default="0.0.0.0"/>
+  <arg name="listen_port" default="9763"/>
+  <arg name="receive_timeout_ms" default="100"/>
+  <arg name="bvh_topic" default="/xsense/bvh_seg_desc"/>
+  <arg name="pose_topic" default="/xsense/world_bone_poses"/>
+  <arg name="summary_topic" default="/xsense/packet_summary"/>
+  <arg name="bvh_tcp_port" default="9764"/>
+  <arg name="enable_pico_pause_control" default="true"/>
+  <arg name="pico_joy_topic" default="/pico/joy"/>
+  <arg name="pico_pause_combo" default="RT+Y"/>
+  <arg name="pico_resume_combo" default="RT+X"/>
+  <arg name="pico_trigger_threshold" default="0.5"/>
+  <arg name="pico_grip_threshold" default="0.5"/>
+  <arg name="pose_publish_hz" default="120.0"/>
+  <arg name="pose_queue_target_depth" default="10"/>
+  <arg name="pose_queue_max_size" default="15"/>
+  <arg name="pose_queue_prefill" default="true"/>
+  <arg name="pose_hold_on_empty" default="true"/>
+  <arg name="pose_stale_timeout_s" default="0.2"/>
+  <arg name="update_output_header_stamp" default="true"/>
+  <arg name="pose_queue_stats_topic" default="/xsense/pose_queue_stats"/>
+  <arg name="pose_queue_stats_hz" default="0.0"/>
+
+  <arg name="robot" default="kuavo_s54"/>
+  <arg name="enable_viewer" default="false"/>
+  <arg name="fps" default="100.0"/>
+  <arg name="cpu_cores" default="[]"/>
+  <arg name="bvh_offset_scale" default=""/>
+
+  <arg name="enable_pico_joy_receiver" default="true"/>
+  <arg name="pico_host" default="0.0.0.0"/>
+  <arg name="pico_port" default="12345"/>
+  <arg name="pico_enable_ip_broadcast" default="true"/>
+  <arg name="pico_robot_name" default="KUAVO"/>
+  <arg name="pico_broadcast_port" default="8443"/>
+  <arg name="pico_startup_delay" default="0.0"/>
+  <arg name="pico_body_matrices_topic" default="/robot_body_matrices"/>
+  <arg name="enable_pico_control_node" default="true"/>
+  <arg name="enable_pico_head_control" default="false"/>
+  <arg name="enable_pico_claw_control" default="false"/>
+
+  <group if="$(arg enable_pico_joy_receiver)">
+    <node pkg="kuavo_xsense_gmr"
+          type="xsense_pico_joy_receiver_node"
+          name="xsense_pico_joy_receiver"
+          output="screen"
+          launch-prefix="bash -c 'sleep $(arg pico_startup_delay); exec $0 $@'">
+      <param name="host" value="$(arg pico_host)"/>
+      <param name="port" value="$(arg pico_port)"/>
+      <param name="joy_topic" value="$(arg pico_joy_topic)"/>
+      <param name="body_matrices_topic" value="$(arg pico_body_matrices_topic)"/>
+      <param name="enable_ip_broadcast" value="$(arg pico_enable_ip_broadcast)"/>
+      <param name="robot_name" value="$(arg pico_robot_name)"/>
+      <param name="broadcast_port" value="$(arg pico_broadcast_port)"/>
+    </node>
+  </group>
+
+  <group if="$(arg enable_pico_control_node)">
+    <node pkg="kuavo_xsense_gmr"
+          type="xsense_pico_control_node"
+          name="xsense_pico_control"
+          output="screen"
+          launch-prefix="bash -c 'sleep $(arg pico_startup_delay); exec $0 $@'">
+      <param name="enable_head_control" value="$(arg enable_pico_head_control)"/>
+      <param name="enable_claw_control" value="$(arg enable_pico_claw_control)"/>
+      <param name="joy_topic" value="$(arg pico_joy_topic)"/>
+      <param name="body_matrices_topic" value="$(arg pico_body_matrices_topic)"/>
+    </node>
+  </group>
+
+  <node pkg="kuavo_xsense_gmr"
+        type="xsense_bvh_desc_publisher.py"
+        name="xsense_bvh_desc_publisher"
+        output="screen"
+        required="true">
+    <param name="tcp_port" value="$(arg bvh_tcp_port)"/>
+  </node>
+
+  <node pkg="kuavo_xsense_gmr"
+        type="xsense_udp_receiver_node"
+        name="xsense_udp_receiver_node"
+        output="screen"
+        required="true">
+    <param name="listen_ip" value="$(arg listen_ip)"/>
+    <param name="listen_port" value="$(arg listen_port)"/>
+    <param name="receive_timeout_ms" value="$(arg receive_timeout_ms)"/>
+    <param name="pose_topic" value="$(arg pose_topic)"/>
+    <param name="summary_topic" value="$(arg summary_topic)"/>
+    <param name="enable_pico_pause_control" value="$(arg enable_pico_pause_control)"/>
+    <param name="pico_joy_topic" value="$(arg pico_joy_topic)"/>
+    <param name="pico_pause_combo" value="$(arg pico_pause_combo)"/>
+    <param name="pico_resume_combo" value="$(arg pico_resume_combo)"/>
+    <param name="pico_trigger_threshold" value="$(arg pico_trigger_threshold)"/>
+    <param name="pico_grip_threshold" value="$(arg pico_grip_threshold)"/>
+    <param name="pose_publish_hz" value="$(arg pose_publish_hz)"/>
+    <param name="pose_queue_target_depth" value="$(arg pose_queue_target_depth)"/>
+    <param name="pose_queue_max_size" value="$(arg pose_queue_max_size)"/>
+    <param name="pose_queue_prefill" value="$(arg pose_queue_prefill)"/>
+    <param name="pose_hold_on_empty" value="$(arg pose_hold_on_empty)"/>
+    <param name="pose_stale_timeout_s" value="$(arg pose_stale_timeout_s)"/>
+    <param name="update_output_header_stamp" value="$(arg update_output_header_stamp)"/>
+    <param name="pose_queue_stats_topic" value="$(arg pose_queue_stats_topic)"/>
+    <param name="pose_queue_stats_hz" value="$(arg pose_queue_stats_hz)"/>
+  </node>
+
+  <node pkg="kuavo_xsense_gmr"
+        type="run_with_venv.sh"
+        name="xsense_streaming_retarget"
+        output="screen"
+        required="true"
+        args="$(find kuavo_xsense_gmr)/scripts/xsense_streaming_node.py">
+    <param name="robot" value="$(arg robot)"/>
+    <param name="format" value="xsense"/>
+    <param name="enable_viewer" value="$(arg enable_viewer)"/>
+    <param name="topic" value="$(arg pose_topic)"/>
+    <param name="topic_cali" value="$(arg bvh_topic)"/>
+    <param name="pico_joy_topic" value="$(arg pico_joy_topic)"/>
+    <param name="fps" value="$(arg fps)"/>
+    <param name="bvh_offset_scale" value="$(arg bvh_offset_scale)"/>
+    <rosparam param="cpu_cores" subst_value="true">$(arg cpu_cores)</rosparam>
+  </node>
+</launch>

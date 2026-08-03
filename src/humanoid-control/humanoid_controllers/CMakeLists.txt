@@ -46,6 +46,7 @@ find_package(catkin REQUIRED
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
+        std_srvs
         leju_mobile_base_msgs
         )
 find_package(drake REQUIRED)
@@ -278,6 +279,8 @@ add_library(${PROJECT_NAME}
         src/rl/FallStandController.cpp
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
+        src/rl/MoREController.cpp
+        src/rl/VMPController.cpp
         src/rl/armController.cpp
         src/rl/DepthWalkController.cpp
         src/rl/waistController.cpp
@@ -285,6 +288,8 @@ add_library(${PROJECT_NAME}
         # src/MinicController.cpp
         src/rl/VMPController.cpp
         src/rl/DanceController.cpp
+        src/SitControlManager.cpp
+        src/SitUpController.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}

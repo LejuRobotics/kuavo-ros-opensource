@@ -50,10 +50,44 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <humanoid_wheel_interface/HumanoidWheelInterface.h>
 #include <humanoid_wheel_interface_ros/MobileManipulatorDummyVisualization.h>
 
+#include <algorithm>
+#include <array>
+
 namespace ocs2 {
 namespace mobile_manipulator {
 
 static const double baseHeightOffset = 0.0;
+
+// 与 200062 MuJoCo XML 的闭环夹爪平衡姿态保持一致。
+static std::array<double, 5> getClawLinkageAngles(double commandAngle) {
+  static const double kJointAngles[5][5] = {
+      { 0.000000,  0.000000,  0.000000, 0.000000,  0.000000},
+      {-0.109209, -0.101740, -0.092681, 0.121829, -0.413562},
+      {-0.145684, -0.128299, -0.112237, 0.170645, -0.521204},
+      {-0.174150, -0.146919, -0.125623, 0.209873, -0.599041},
+      {-0.198813, -0.161801, -0.136211, 0.244441, -0.663050},
+  };
+  constexpr double kNominalOpenAngle = -0.6981317008;
+  const double openness = std::max(0.0, std::min(1.0, commandAngle / kNominalOpenAngle));
+  const double tablePosition = openness * 4.0;
+  const size_t lower = std::min(static_cast<size_t>(tablePosition), static_cast<size_t>(3));
+  const double alpha = tablePosition - static_cast<double>(lower);
+
+  std::array<double, 5> result{};
+  for (size_t i = 0; i < result.size(); ++i) {
+    result[i] = kJointAngles[lower][i] + alpha * (kJointAngles[lower + 1][i] - kJointAngles[lower][i]);
+  }
+  return result;
+}
+
+static const std::array<const char*, 5> kLeftFrontClawJoints200062 = {
+    "l_f_bar_1_joint", "l_f_bar_2_joint", "l_f_bar_3_joint", "l_f_finger_joint", "l_f_bar_4_joint"};
+static const std::array<const char*, 5> kLeftBackClawJoints200062 = {
+    "l_b_bar_1_joint", "l_b_bar_2_joint", "l_b_bar_3_joint", "l_b_finger_joint", "l_b_bar_4_joint"};
+static const std::array<const char*, 5> kRightFrontClawJoints200062 = {
+    "r_f_bar_1_joint", "r_f_bar_2_joint", "r_f_bar_3_joint", "r_f_finger_joint", "r_f_bar_4_joint"};
+static const std::array<const char*, 5> kRightBackClawJoints200062 = {
+    "r_b_bar_1_joint", "r_b_bar_2_joint", "r_b_bar_3_joint", "r_b_finger_joint", "r_b_bar_4_joint"};
 /******************************************************************************************************/
 /******************************************************************************************************/
 /******************************************************************************************************/
@@ -84,6 +118,8 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   if (!model.initParam(urdfName)) {
     ROS_ERROR("URDF model load was NOT successful");
   }
+  const auto leftBar4Joint = model.getJoint("l_f_bar_4_joint");
+  useArticulatedClawKinematics_ = leftBar4Joint && leftBar4Joint->type == urdf::Joint::REVOLUTE;
   // 缓存 URDF 模型,后续在向 robot_state_publisher 写入夹爪/灵巧手关节前用作存在性守卫,
   // 避免在 URDF 不含相应关节的机型(如 62/200062)上刷出 "not found in URDF" 警告。
   urdfModel_ = model;
@@ -223,16 +259,33 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
   // 仅向 jointPositions 写入 URDF 中实际存在的关节,避免 robot_state_publisher 输出
   // "Joint state with name: ... was received but not found in URDF" 警告。
   if (updateClawJointPositions_) {
-    static const char* kLeftClaw[] = {"l_f_bar_1_joint", "l_b_bar_1_joint", "l_f_bar_3_joint", "l_b_bar_3_joint"};
-    static const double kLeftFactor[] = {+1.0, -1.0, +1.0, -1.0};
-    static const char* kRightClaw[] = {"r_f_bar_1_joint", "r_b_bar_1_joint", "r_f_bar_3_joint", "r_b_bar_3_joint"};
-    static const double kRightFactor[] = {+1.0, -1.0, +1.0, -1.0};
-    for (int i = 0; i < 4; i++) {
-      if (urdfModel_.getJoint(kLeftClaw[i])) {
-        jointPositions[kLeftClaw[i]] = kLeftFactor[i] * claw_joint_positions_[0];
-      }
-      if (urdfModel_.getJoint(kRightClaw[i])) {
-        jointPositions[kRightClaw[i]] = kRightFactor[i] * claw_joint_positions_[1];
+    if (useArticulatedClawKinematics_) {
+      auto insertLinkage = [&jointPositions](const std::array<const char*, 5>& names,
+                                             const std::array<double, 5>& angles, double direction) {
+        for (size_t i = 0; i < names.size(); ++i) {
+          jointPositions[names[i]] = direction * angles[i];
+        }
+      };
+      const auto leftAngles = getClawLinkageAngles(claw_joint_positions_[0]);
+      const auto rightAngles = getClawLinkageAngles(claw_joint_positions_[1]);
+      insertLinkage(kLeftFrontClawJoints200062, leftAngles, +1.0);
+      insertLinkage(kLeftBackClawJoints200062, leftAngles, -1.0);
+      insertLinkage(kRightFrontClawJoints200062, rightAngles, +1.0);
+      insertLinkage(kRightBackClawJoints200062, rightAngles, -1.0);
+    } else {
+      static const char* kLeftClaw[] = {"l_f_bar_1_joint", "l_b_bar_1_joint", "l_f_bar_3_joint", "l_b_bar_3_joint"};
+      static const double kLeftFactor[] = {+1.0, -1.0, +1.0, -1.0};
+      static const char* kRightClaw[] = {"r_f_bar_1_joint", "r_b_bar_1_joint", "r_f_bar_3_joint", "r_b_bar_3_joint"};
+      static const double kRightFactor[] = {+1.0, -1.0, +1.0, -1.0};
+      for (int i = 0; i < 4; i++) {
+        if (urdfModel_.getJoint(kLeftClaw[i]))
+        {
+          jointPositions[kLeftClaw[i]] = kLeftFactor[i] * claw_joint_positions_[0];
+        }
+        if (urdfModel_.getJoint(kRightClaw[i]))
+        {
+          jointPositions[kRightClaw[i]] = kRightFactor[i] * claw_joint_positions_[1];
+        }
       }
     }
 

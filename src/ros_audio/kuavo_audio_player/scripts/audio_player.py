@@ -11,6 +11,7 @@ Description: 统一音频播放节点 — loundspeaker (文件转换) + audio_st
 '''
 #!/usr/bin/env python3
 import os
+import sys
 import time
 import uuid
 import wave
@@ -53,7 +54,11 @@ MIN_DB = -60.0   # vol→0⁺ 时的 dB 下限 (−60dB≈振幅×0.001, 接近�
 class AudioPlayerNode:
 
     def __init__(self):
-        # 必须先 init_node, 否则声卡检测循环中无法响应 SIGINT
+        # 先检测音频设备，不存在则不注册节点，避免与上位机冲突
+        if not AudioPlayerNode._check_sound_card():
+            print("未检测到播音设备，不启用播音功能！")
+            sys.exit(0)
+
         rospy.init_node('audio_player_node')
 
         self._music_dir = rospy.get_param('music_path', '/home/lab/.config/lejuconfig/music')
@@ -225,7 +230,7 @@ class AudioPlayerNode:
             self._buf = bytearray()
             self._read_pos = 0
 
-    def _close_stream(self):
+    def _close_stream(self):src/ros_audio/kuavo_audio_player/scripts/audio_player.py
         """关闭当前流 (丢弃 ALSA DMA), 不重建。"""
         self._stop_evt.set()
         try:

@@ -286,7 +286,7 @@ class DepthImageInpainter:
                 self.depth_buf_filled = True
             self.cur_buf_idx = (self.cur_buf_idx + 1) % self.buf_size
             depth_history_stack = self.depth_buf[self.selected_ids].reshape(-1).astype(np.float64)
-            if current_time - publish_time < 0.03:
+            if current_time - publish_time < 0.1:
                 history_msg = Float64MultiArray()
                 history_msg.data = depth_history_stack.tolist()
                 self.depth_history_array_pub.publish(history_msg)

@@ -35,6 +35,7 @@ namespace humanoid_controller
     void reset() override;
     void pause() override;
     void resume() override;
+    void resumeWarm() override;
 
     /**
      * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致）
@@ -55,6 +56,30 @@ namespace humanoid_controller
      * 使用从配置文件加载的velocityLimits_设置速度限制
      */
     void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
+    
+    /**
+     * @waao 计算当前的关节参考
+     */
+    Eigen::VectorXd getCurrentJointReference() const override;
+
+    //waao：相位对齐
+    bool supportsWalkingPhaseSyncSwitch() const override { return true; }
+    bool hasValidWalkingPhase() const override { return has_valid_phase_; }
+    double getWalkingPhaseRad() const override;
+    double getWalkingFrequencyHz() const override;
+    void setExternalPhaseOverride(bool enabled,
+                                  double sin_phase,
+                                  double cos_phase,
+                                  double gait_frequency_hz) override;
+    void resetGaitCommandState(bool stance_mode = true) override;
+    bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const override;
+    void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) override;
+    void setSwitchVelocityScale(double scale) override;
+    void setCommandBufferCallback(std::function<bool()> callback) override;
+    void setExternalCommandBufferCallback(std::function<bool()> callback) override;
+    bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const override;
+    bool isInPlaceSteppingActive() const override;
+    bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const override;
 
   protected:
     // 主循环：从 RLControllerBase::update 调用
@@ -107,7 +132,13 @@ namespace humanoid_controller
     double currentCycleTime_{0.6};
     int episodeLength_{0};
     Eigen::Vector2d commandPhase_{Eigen::Vector2d::Zero()};
+    Eigen::VectorXd commanState_{Eigen::VectorXd::Zero(1)};
     ModeNumber rl_plannedMode_{ModeNumber::SS};
+    bool has_valid_phase_{false};
+    bool external_phase_override_enabled_{false};
+    double external_phase_sin_{0.0};
+    double external_phase_cos_{1.0};
+    double external_phase_frequency_hz_{0.0};
 
     // 观测相关
     int frameStack_{1};
@@ -174,6 +205,7 @@ namespace humanoid_controller
     Eigen::VectorXd waist_kp_from_config_; ///< 从配置文件读取的腰部 kp 参数
     Eigen::VectorXd waist_kd_from_config_; ///< 从配置文件读取的腰部 kd 参数
     std::unique_ptr<WaistController> waist_controller_; ///< 腰部控制器
+    std::function<bool()> external_command_buffer_callback_;
     bool waist_zero_tracking_enabled_{false}; ///< 行走时是否启用腰部0位跟踪（忽略RL输出，强制跟踪默认位置）
 
     // 站立切换到行走时的支撑腿髋关节roll偏置参数

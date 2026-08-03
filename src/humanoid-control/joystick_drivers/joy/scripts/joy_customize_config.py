@@ -736,11 +736,12 @@ class JoyCustomizeConfigNode:
         if self._last_action_source == "m1m2":
             self._publish_m1m2_action_active(False)
 
-    # 允许做自定义动作(tact)的控制器白名单：MPC / AMP 均允许 tact，
-    # 但 AMP 走路时(步态非 stance) LT/RT 也会被单独拒(MPC 走路时 LT/RT 不受限,符合 PDF §4)；
+    # 允许做自定义动作(tact)的控制器白名单：MPC / AMP 均允许 tact；
+    # amp_wild_controller 放行到动作服务侧，服务侧只在 kuavo5 下切回 amp_controller；
+    # AMP 走路时(步态非 stance) LT/RT 也会被单独拒(MPC 走路时 LT/RT 不受限,符合 PDF §4)；
     # M1/M2 任何走路状态下一律拒(不分控制器)；
     # 其它(dance_*、fall_stand_controller 等) 一律拒。
-    _ACTION_ALLOWED_CONTROLLERS = ("mpc", "amp_controller", "amp_hand_controller")
+    _ACTION_ALLOWED_CONTROLLERS = ("mpc", "amp_controller", "amp_wild_controller", "amp_hand_controller")
 
     def _is_action_allowed_by_controller(self) -> bool:
         """按需查询当前控制器名是否在允许做动作的白名单内（带 TTL 缓存避免每帧调服务）。
@@ -1266,7 +1267,7 @@ class JoyCustomizeConfigNode:
                                 1.0,
                                 f"Skipping {action_key}: controller "
                                 f"'{self._cached_controller_name}' does not allow tact actions "
-                                f"(only mpc / amp_controller)")
+                                f"(only mpc / amp_controller / amp_wild_controller)")
                             continue
 
                         # 走路时的精细化拒绝(判据见 _has_motion_intent):

@@ -18,18 +18,18 @@ models:
 
 # 关节零位偏置（弧度，标量）
 free_params:
-  - zhead_1_joint
-  - zhead_2_joint
+   - zhead_1_joint
+   - zhead_2_joint
 
 # 不标定相机外参（全 false）；若将来要估 camera_base 6DOF，再把对应轴改为 true
 free_frames:
   - name: camera_base
-    x: false
-    y: false
-    z: false
-    roll: false
-    pitch: false
-    yaw: false
+    x: true
+    y: true
+    z: true
+    roll: true
+    pitch: true
+    yaw: true
 
 error_blocks:
   - name: board_align
@@ -50,8 +50,8 @@ error_blocks:
     type: outrageous
     param: camera_base
     joint_scale: 0.0
-    position_scale: 0.1
-    rotation_scale: 0.1
+    position_scale: 0.8
+    rotation_scale: 0.8
 
   
 

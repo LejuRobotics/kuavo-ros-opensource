@@ -1,0 +1,1769 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="biped_s54">
+  <mujoco>
+    <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
+  </mujoco>
+  <link name="dummy_link" />
+  <link name="base_link">
+    <inertial>
+      <!-- 质心：( -0.04862767, -0.00011335, -0.01073125 ) -->
+      <origin xyz="-0.04862767 -0.00011335 -0.01073125" rpy="0 0 0" />
+      <!-- 质量：7.54372700 kg -->
+      <mass value="7.54373" />
+      <!-- 惯性张量：由重心决定，对齐输出坐标系 -->
+      <inertia
+        ixx="0.08017682"
+        ixy="0.00007096"
+        ixz="-0.01913378"
+        iyy="0.05814749"
+        iyz="0.00006879"
+        izz="0.07704308" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/torso.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="dummy_to_base_link" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="dummy_link" />
+    <child link="base_link" />
+  </joint>
+  <!-- ============ l_leg_roll ============ -->
+  <!-- 坐标系：l_leg_yaw_roll -->
+  <!-- 对称源：r_leg_roll (X-Z平面对称) -->
+  <link name="leg_l1_link">
+    <inertial>
+      <!-- 质心：( -0.00669035, 0.00031614, -0.00217433 ) -->
+      <origin xyz="-0.00669035 0.00031614 -0.00217433" rpy="0 0 0" />
+      <!-- 质量：1.56066556 kg -->
+      <mass value="1.56067" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.00193116"
+        ixy="-0.00001445"
+        ixz="0.00001640"
+        iyy="0.00255162"
+        iyz="0.00000039"
+        izz="0.00258412" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/l_leg_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_l1_joint" type="revolute">
+    <origin xyz="0.0 0.095075 -0.066" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="leg_l1_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.314159265358979" upper="0.663225115757845" effort="127.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <!-- ============ l_leg_yaw ============ -->
+  <!-- 坐标系：l_leg_yaw_roll -->
+  <!-- 对称源：r_leg_yaw (X-Z平面对称) -->
+  <link name="leg_l2_link">
+    <inertial>
+      <!-- 质心：( 0.00028446, -0.00794956, -0.09316636 ) -->
+      <origin xyz="0.00028446 -0.00794956 -0.09316636" rpy="0 0 0" />
+      <!-- 质量：0.77767000 kg -->
+      <mass value="0.77767" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.00355000"
+        ixy="0.00000698"
+        ixz="-0.00001062"
+        iyy="0.00209625"
+        iyz="-0.00031869"
+        izz="0.00235880" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/l_leg_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_l2_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="leg_l1_link" />
+    <child link="leg_l2_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-0.785398163397448" upper="1.91986217719376" effort="71.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_leg_pitch ============ -->
+  <!-- 坐标系：l_leg_pitch -->
+  <!-- 对称源：r_leg_pitch (X-Z平面对称) -->
+  <link name="leg_l3_link">
+    <inertial>
+      <!-- 质心：( 0.00279899, 0.01532926, -0.08586233 ) -->
+      <origin xyz="0.00279899 0.01532926 -0.08586233" rpy="0 0 0" />
+      <!-- 质量：6.52431750 kg -->
+      <mass value="6.52432" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.05865239"
+        ixy="0.00013537"
+        ixz="0.00154590"
+        iyy="0.05732636"
+        iyz="0.00115971"
+        izz="0.01556119" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/l_leg_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_l3_joint" type="revolute">
+    <origin xyz="0 0 -0.1437" rpy="0 0 0" />
+    <parent link="leg_l2_link" />
+    <child link="leg_l3_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132" velocity="12.7" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_knee ============ -->
+  <!-- 坐标系：l_knee -->
+  <!-- 对称源：r_knee (X-Z平面对称) -->
+  <link name="leg_l4_link">
+    <inertial>
+      <!-- 质心：( 0.00569729, -0.00005180, -0.16159239 ) -->
+      <origin xyz="0.00569729 -0.00005180 -0.16159239" rpy="0 0 0" />
+      <!-- 质量：3.55158656 kg -->
+      <mass value="3.55159" />
+      <!-- ✅ 惯性张量：由重心决定，对齐输出坐标系，负张量记数法，ixy/ixz/iyz符号取反 -->
+      <inertia
+        ixx="0.04304970"
+        ixy="-0.00000042"
+        ixz="-0.00040640"
+        iyy="0.04262733"
+        iyz="-0.00004129"
+        izz="0.00324950" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/l_knee.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_l4_joint" type="revolute">
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
+    <parent link="leg_l3_link" />
+    <child link="leg_l4_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_foot_pitch ============ -->
+  <!-- 坐标系：l_foot_pitch_roll -->
+  <!-- 对称源：r_foot_pitch (完全对称) -->
+  <link name="leg_l5_link">
+    <inertial>
+      <!-- 质心：( 0, 0, 0 ) -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <!-- 质量：0.07553705 kg -->
+      <mass value="0.07554" />
+      <!-- ✅ 惯性张量：完全对称，与右腿完全相同 -->
+      <inertia
+        ixx="0.00000729"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.00000729"
+        iyz="0.00000000"
+        izz="0.00001268" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/l_foot_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_l5_joint" type="revolute">
+    <origin xyz="0.002 0 -0.416" rpy="0 0 0" />
+    <parent link="leg_l4_link" />
+    <child link="leg_l5_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="91.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <!-- ============ l_foot_roll ============ -->
+  <!-- 坐标系：l_foot_pitch_roll -->
+  <!-- 对称源：r_foot_roll (完全对称，用户覆盖值相同) -->
+  <link name="leg_l6_link">
+    <inertial>
+      <!-- 质心：( 0.03005823, -0.00000161, -0.03531089 ) -->
+      <origin xyz="0.03005823 -0.00000161 -0.03531089" rpy="0 0 0" />
+      <!-- 质量：0.60537517 kg -->
+      <mass value="0.60538" />
+      <!-- ✅ 惯性张量：完全对称，与右腿完全相同（质心Y为负，无需镜像） -->
+      <inertia
+        ixx="0.00049465"
+        ixy="0.00000004"
+        ixz="0.00014546"
+        iyy="0.00188391"
+        iyz="0.00000000"
+        izz="0.00198778" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/l_foot_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+    	<origin xyz="0.0488 0 0" rpy="0 0 0"/>
+	    <geometry>
+		    <box size="0.25 0.1 0.04"/>
+	    </geometry>
+    </collision>
+  </link>
+  <joint name="leg_l6_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="leg_l5_link" />
+    <child link="leg_l6_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <link name="ll_foot_toe">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="ll_foot_toe_joint" type="fixed">
+    <origin xyz="0.17084 0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_l6_link" />
+    <child link="ll_foot_toe" />
+  </joint>
+  <link name="ll_foot_heel">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="ll_foot_heel_joint" type="fixed">
+    <origin xyz="-0.073164 0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_l6_link" />
+    <child link="ll_foot_heel" />
+  </joint>
+  <link name="lr_foot_toe">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lr_foot_toe_joint" type="fixed">
+    <origin xyz="0.17084 -0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_l6_link" />
+    <child link="lr_foot_toe" />
+  </joint>
+  <link name="lr_foot_heel">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="lr_foot_heel_joint" type="fixed">
+    <origin xyz="-0.073164 -0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_l6_link" />
+    <child link="lr_foot_heel" />
+  </joint>
+  <link name="l_foot_toe">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_foot_toe_joint" type="fixed">
+    <origin xyz="0.17084 0.0 -0.0595" rpy="0 0 0" />
+    <parent link="leg_l6_link" />
+    <child link="l_foot_toe" />
+  </joint>
+  <link name="l_foot_heel">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="l_foot_heel_joint" type="fixed">
+    <origin xyz="-0.073164 0.0 -0.0595" rpy="0 0 0" />
+    <parent link="leg_l6_link" />
+    <child link="l_foot_heel" />
+  </joint>
+  <!-- ============ r_leg_roll ============ -->
+  <!-- 坐标系：r_leg_roll_yaw -->
+  <link name="leg_r1_link">
+    <inertial>
+      <!-- 质心：左(-0.00669035, 0.00031614, -0.00217433) -> 右(-0.00669035, -0.00031614, -0.00217433) -->
+      <origin xyz="-0.00669035 -0.00031614 -0.00217433" rpy="0 0 0" />
+      <!-- 质量：1.56066556 kg -->
+      <mass value="1.56067" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00193116"
+        ixy="0.00001445"
+        ixz="0.00001640"
+        iyy="0.00255162"
+        iyz="-0.00000039"
+        izz="0.00258412" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/r_leg_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_r1_joint" type="revolute">
+    <origin xyz="0.0 -0.095075 -0.066" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="leg_r1_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.663225115757845" upper="0.314159265358979" effort="127.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <!-- ============ r_leg_yaw ============ -->
+  <!-- 坐标系：r_leg_roll_yaw -->
+  <link name="leg_r2_link">
+    <inertial>
+      <!-- 质心：左(0.00028446, -0.00794956, -0.09316636) -> 右(0.00028446, 0.00794956, -0.09316636) -->
+      <origin xyz="0.00028446 0.00794956 -0.09316636" rpy="0 0 0" />
+      <!-- 质量：0.77767000 kg -->
+      <mass value="0.77767" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00355000"
+        ixy="-0.00000698"
+        ixz="-0.00001062"
+        iyy="0.00209625"
+        iyz="0.00031869"
+        izz="0.00235880" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/r_leg_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_r2_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="leg_r1_link" />
+    <child link="leg_r2_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.91986217719376" upper="0.785398163397448" effort="71.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <!-- ============ r_leg_pitch ============ -->
+  <!-- 坐标系：r_leg_pitch -->
+  <link name="leg_r3_link">
+    <inertial>
+      <!-- 质心：左(0.00279899, 0.01532926, -0.08586233) -> 右(0.00279899, -0.01532926, -0.08586233) -->
+      <origin xyz="0.00279899 -0.01532926 -0.08586233" rpy="0 0 0" />
+      <!-- 质量：6.52431750 kg -->
+      <mass value="6.52432" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.05865239"
+        ixy="-0.00013537"
+        ixz="0.00154590"
+        iyy="0.05732636"
+        iyz="-0.00115971"
+        izz="0.01556119" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/r_leg_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_r3_joint" type="revolute">
+    <origin xyz="0 0 -0.1437" rpy="0 0 0" />
+    <parent link="leg_r2_link" />
+    <child link="leg_r3_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.91986217719376" upper="1.5707963267949" effort="132.0" velocity="12.7" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_knee ============ -->
+  <!-- 坐标系：r_knee -->
+  <link name="leg_r4_link">
+    <inertial>
+      <!-- 质心：左(0.00569729, -0.00005180, -0.16159239) -> 右(0.00569729, 0.00005180, -0.16159239) -->
+      <origin xyz="0.00569729 0.00005180 -0.16159239" rpy="0 0 0" />
+      <!-- 质量：3.55158656 kg -->
+      <mass value="3.55159" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.04304970"
+        ixy="0.00000042"
+        ixz="-0.00040640"
+        iyy="0.04262733"
+        iyz="0.00004129"
+        izz="0.00324950" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/r_knee.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_r4_joint" type="revolute">
+    <origin xyz="-0.0011639 0 -0.284" rpy="0 0 0" />
+    <parent link="leg_r3_link" />
+    <child link="leg_r4_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="0.0" upper="2.53072741539178" effort="280.0" velocity="10.4" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_foot_pitch ============ -->
+  <!-- 坐标系：r_foot_pitch_roll -->
+  <link name="leg_r5_link">
+    <inertial>
+      <!-- 质心：( 0, 0, 0 ) - 质心在原点，无需镜像 -->
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <!-- 质量：0.07553705 kg -->
+      <mass value="0.07554" />
+      <!-- 惯性张量：完全对称，无需改变符号 -->
+      <inertia
+        ixx="0.00000729"
+        ixy="0.00000000"
+        ixz="0.00000000"
+        iyy="0.00000729"
+        iyz="0.00000000"
+        izz="0.00001268" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/r_foot_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="leg_r5_joint" type="revolute">
+    <origin xyz="0.002 0 -0.416" rpy="0 0 0" />
+    <parent link="leg_r4_link" />
+    <child link="leg_r5_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.872664625997165" upper="0.349065850398866" effort="91.6" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_foot_roll ============ -->
+  <!-- 坐标系：r_foot_pitch_roll -->
+  <link name="leg_r6_link">
+    <inertial>
+      <!-- 质心：左(0.03005823, -0.00000161, -0.03531089) -> 右(0.03005823, 0.00000161, -0.03531089) -->
+      <origin xyz="0.03005823 0.00000161 -0.03531089" rpy="0 0 0" />
+      <!-- 质量：0.60537517 kg -->
+      <mass value="0.60538" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00049465"
+        ixy="-0.00000004"
+        ixz="0.00014546"
+        iyy="0.00188391"
+        iyz="0.00000000"
+        izz="0.00198778" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/r_foot_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+    	<origin xyz="0.0488 0 0" rpy="0 0 0"/>
+	    <geometry>
+		    <box size="0.25 0.1 0.04"/>
+	    </geometry>
+    </collision>
+  </link>
+  <joint name="leg_r6_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="leg_r5_link" />
+    <child link="leg_r6_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.261799387799149" upper="0.261799387799149" effort="30.0" velocity="17.8" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <link name="rl_foot_toe">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rl_foot_toe_joint" type="fixed">
+    <origin xyz="0.17084 0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_r6_link" />
+    <child link="rl_foot_toe" />
+  </joint>
+  <link name="rl_foot_heel">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rl_foot_heel_joint" type="fixed">
+    <origin xyz="-0.073164 0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_r6_link" />
+    <child link="rl_foot_heel" />
+  </joint>
+  <link name="rr_foot_toe">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rr_foot_toe_joint" type="fixed">
+    <origin xyz="0.17084 -0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_r6_link" />
+    <child link="rr_foot_toe" />
+  </joint>
+  <link name="rr_foot_heel">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="rr_foot_heel_joint" type="fixed">
+    <origin xyz="-0.073164 -0.05 -0.0595" rpy="0 0 0" />
+    <parent link="leg_r6_link" />
+    <child link="rr_foot_heel" />
+  </joint>
+  <link name="r_foot_toe">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_foot_toe_joint" type="fixed">
+    <origin xyz="0.17084 0.0 -0.0595" rpy="0 0 0" />
+    <parent link="leg_r6_link" />
+    <child link="r_foot_toe" />
+  </joint>
+  <link name="r_foot_heel">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="r_foot_heel_joint" type="fixed">
+    <origin xyz="-0.073164 0.0 -0.0595" rpy="0 0 0" />
+    <parent link="leg_r6_link" />
+    <child link="r_foot_heel" />
+  </joint>
+  <link name="waist_yaw_link">
+    <inertial>
+      <!-- 质心：( -0.00204947, -0.00083286, 0.17189597 ) -->
+      <origin xyz="0.04204947 -0.00083286 0.17189597" rpy="0 0 0" />
+      <!-- 质量：17.39118181 kg -->
+      <mass value="20.23838" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自waist_yaw Lxx/Lyy/Lzz -->
+      <inertia
+        ixx="0.34870252"
+        ixy="0.00016632"
+        ixz="0.00524373"
+        iyy="0.26683447"
+        iyz="0.00039067"
+        izz="0.21260401" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/waist_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_yaw_joint" type="revolute">
+    <origin xyz="0 0 0.1114" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="waist_yaw_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14159" upper="3.14159" effort="102.0" velocity="8.7" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <!-- ============ l_arm_pitch ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_l1_link">
+    <inertial>
+      <!-- 质心：( 0.00158747, -0.01043185, 0.00030593 ) -->
+      <origin xyz="0.00158747 -0.01043185 0.00030593" rpy="0 0 0" />
+      <!-- 质量：0.96331759 kg -->
+      <mass value="0.96332" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00140558"
+        ixy="-0.00001295"
+        ixz="0.00000090"
+        iyy="0.00088012"
+        iyz="-0.00000328"
+        izz="0.00138366" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/l_arm_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l1_joint"
+    type="revolute">
+    <origin
+      xyz="-0.003 0.2527 0.283"
+      rpy="0 0 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="zarm_l1_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <!-- ============ l_arm_roll ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_l2_link">
+    <inertial>
+      <!-- 质心：( -0.00184339, -0.00000348, -0.04708172 ) -->
+      <origin xyz="-0.00184339 -0.00000348 -0.04708172" rpy="0 0 0" />
+      <!-- 质量：0.44946057 kg -->
+      <mass value="0.44946" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00089068"
+        ixy="0.00000011"
+        ixz="-0.00001710"
+        iyy="0.00130230"
+        iyz="0.00000014"
+        izz="0.00078679" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/l_arm_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l2_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l1_link" />
+    <child
+      link="zarm_l2_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-0.349065850398866" upper="3.49065850398866" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_arm_yaw ============ -->
+  <!-- 坐标系：l_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_l3_link">
+    <inertial>
+      <!-- 质心：( 0.00946602, 0.00338592, -0.22979710 ) -->
+      <origin xyz="0.00946602 0.00338592 -0.22979710" rpy="0 0 0" />
+      <!-- 质量：1.83951250 kg -->
+      <mass value="1.83951" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00720937"
+        ixy="-0.00007650"
+        ixz="0.00083950"
+        iyy="0.00730189"
+        iyz="0.00032798"
+        izz="0.00197014" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/l_arm_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l3_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l2_link" />
+    <child
+      link="zarm_l3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.48352986419518" upper="1.48352986419518" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_foream ============ -->
+  <!-- 坐标系：l_foream -->
+  <link
+    name="zarm_l4_link">
+    <inertial>
+      <!-- 质心：( -0.01807966, 0.00115288, -0.06638468 ) -->
+      <origin xyz="-0.01807966 0.00115288 -0.06638468" rpy="0 0 0" />
+      <!-- 质量：0.66448067 kg -->
+      <mass value="0.66448" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00159694"
+        ixy="-0.00000774"
+        ixz="-0.00013459"
+        iyy="0.00136432"
+        iyz="-0.00002619"
+        izz="0.00073291" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/l_forearm.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l4_joint"
+    type="revolute">
+    <origin
+      xyz="0.02 0 -0.2837"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l3_link" />
+    <child
+      link="zarm_l4_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_hand_yaw ============ -->
+  <!-- 坐标系：l_hand_yaw -->
+  <link
+    name="zarm_l5_link">
+    <inertial>
+      <!-- 质心：( -0.00858374, 0.00001292, -0.05739202 ) -->
+      <origin xyz="-0.00858374 0.00001292 -0.05739202" rpy="0 0 0" />
+      <!-- 质量：0.67508041 kg -->
+      <mass value="0.67508" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00071024"
+        ixy="0.00000007"
+        ixz="-0.00006511"
+        iyy="0.00105532"
+        iyz="-0.00000148"
+        izz="0.00059033" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/l_hand_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l5_joint"
+    type="revolute">
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
+    <parent
+      link="zarm_l4_link" />
+    <child
+      link="zarm_l5_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_hand_roll ============ -->
+  <!-- 坐标系：l_hand_roll -->
+  <link
+    name="zarm_l6_link">
+    <inertial>
+      <!-- 质心：( -0.00148455, 0.00633133, -0.01455089 ) -->
+      <origin xyz="-0.00148455 0.00633133 -0.01455089" rpy="0 0 0" />
+      <!-- 质量：0.51483636 kg -->
+      <mass value="0.51484" />
+      <!-- 惯性张量：由重心决定，对齐输出坐标系 -->
+      <inertia
+        ixx="0.00020477"
+        ixy="-0.00000421"
+        ixz="0.00001076"
+        iyy="0.00028911"
+        iyz="0.00001014"
+        izz="0.00030011" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/l_hand_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l6_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.114"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l5_link" />
+    <child
+      link="zarm_l6_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ l_hand_pitch ============ -->
+  <!-- 坐标系：l_hand_pitch -->
+  <link
+    name="zarm_l7_link">
+    <inertial>
+      <!-- 质心：( 0.03810742, 0.00267575, -0.05086389 ) -->
+      <origin xyz="0.00481393 0.00873606 -0.0837543" rpy="0 0 0" />
+      <!-- 质量：0.18939501 kg -->
+      <mass value="0.7374" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00112502"
+        ixy="0"
+        ixz="0"
+        iyy="0.00133239"
+        iyz="0"
+        izz="0.000373427" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/l_hand_pitch_nohand.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_l7_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 -0.021"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_l6_link" />
+    <child
+      link="zarm_l7_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <link name="zarm_l7_end_effector">
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <sphere radius="0.005" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_l7_end_effector_joint" type="fixed">
+    <origin xyz="0 0.0 -0.17" rpy="0 0 0" />
+    <parent link="zarm_l7_link" />
+    <child link="zarm_l7_end_effector" />
+  </joint>
+  <!-- ============ r_arm_pitch ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_r1_link">
+    <inertial>
+      <!-- 质心：左(0.00158747, -0.01043185, 0.00030593) -> 右(0.00158747, 0.01043185, 0.00030593) -->
+      <origin xyz="0.00158747 0.01043185 0.00030593" rpy="0 0 0" />
+      <!-- 质量：0.96331759 kg -->
+      <mass value="0.96332" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00140558"
+        ixy="0.00001295"
+        ixz="0.00000090"
+        iyy="0.00088012"
+        iyz="0.00000328"
+        izz="0.00138366" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/r_arm_pitch.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r1_joint"
+    type="revolute">
+    <origin
+      xyz="-0.003 -0.2527 0.283"
+      rpy="0 0 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="zarm_r1_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.0" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_arm_roll ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_r2_link">
+    <inertial>
+      <!-- 质心：左(-0.00184339, -0.00000348, -0.04708172) -> 右(-0.00184339, 0.00000348, -0.04708172) -->
+      <origin xyz="-0.00184339 0.00000348 -0.04708172" rpy="0 0 0" />
+      <!-- 质量：0.44946057 kg -->
+      <mass value="0.44946" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00089068"
+        ixy="-0.00000011"
+        ixz="-0.00001710"
+        iyy="0.00130230"
+        iyz="-0.00000014"
+        izz="0.00078679" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/r_arm_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r2_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r1_link" />
+    <child
+      link="zarm_r2_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-3.49065850398866" upper="0.349065850398866" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_arm_yaw ============ -->
+  <!-- 坐标系：r_arm_pitch_roll_yaw -->
+  <link
+    name="zarm_r3_link">
+    <inertial>
+      <!-- 质心：左(0.00946602, 0.00338592, -0.22979710) -> 右(0.00946602, -0.00338592, -0.22979710) -->
+      <origin xyz="0.00946602 -0.00338592 -0.22979710" rpy="0 0 0" />
+      <!-- 质量：1.83951250 kg -->
+      <mass value="1.83951" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00720937"
+        ixy="0.00007650"
+        ixz="0.00083950"
+        iyy="0.00730189"
+        iyz="-0.00032798"
+        izz="0.00197014" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/r_arm_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r3_joint"
+    type="revolute">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r2_link" />
+    <child
+      link="zarm_r3_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.48352986419518" upper="1.48352986419518" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_foream ============ -->
+  <!-- 坐标系：r_foream -->
+  <link
+    name="zarm_r4_link">
+    <inertial>
+      <!-- 质心：左(-0.01807966, 0.00115288, -0.06638468) -> 右(-0.01807966, -0.00115288, -0.06638468) -->
+      <origin xyz="-0.01807966 -0.00115288 -0.06638468" rpy="0 0 0" />
+      <!-- 质量：0.66448067 kg -->
+      <mass value="0.66448" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00159694"
+        ixy="0.00000774"
+        ixz="-0.00013459"
+        iyy="0.00136432"
+        iyz="0.00002619"
+        izz="0.00073291" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/r_forearm.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r4_joint"
+    type="revolute">
+    <origin
+      xyz="0.02 0 -0.2837"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r3_link" />
+    <child
+      link="zarm_r4_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_hand_yaw ============ -->
+  <!-- 坐标系：r_hand_yaw -->
+  <link
+    name="zarm_r5_link">
+    <inertial>
+      <!-- 质心：左(-0.00858374, 0.00001292, -0.05739202) -> 右(-0.00858374, -0.00001292, -0.05739202) -->
+      <origin xyz="-0.00858374 -0.00001292 -0.05739202" rpy="0 0 0" />
+      <!-- 质量：0.67508041 kg -->
+      <mass value="0.67508" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00071024"
+        ixy="-0.00000007"
+        ixz="-0.00006511"
+        iyy="0.00105532"
+        iyz="0.00000148"
+        izz="0.00059033" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/r_hand_yaw.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r5_joint"
+    type="revolute">
+    <origin xyz="-0.02 0 -0.1201" rpy="0 0 0" />
+    <parent
+      link="zarm_r4_link" />
+    <child
+      link="zarm_r5_link" />
+    <axis
+      xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_hand_roll ============ -->
+  <!-- 坐标系：r_hand_roll -->
+  <link
+    name="zarm_r6_link">
+    <inertial>
+      <!-- 质心：左(-0.00148455, 0.00633133, -0.01455089) -> 右(-0.00148455, -0.00633133, -0.01455089) -->
+      <origin xyz="-0.00148455 -0.00633133 -0.01455089" rpy="0 0 0" />
+      <!-- 质量：0.51483636 kg -->
+      <mass value="0.51484" />
+      <!-- 惯性张量：ixy/iyz符号取反，ixz保持不变 -->
+      <inertia
+        ixx="0.00020477"
+        ixy="0.00000421"
+        ixz="0.00001076"
+        iyy="0.00028911"
+        iyz="-0.00001014"
+        izz="0.00030011" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/r_hand_roll.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="zarm_r6_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.114"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r5_link" />
+    <child
+      link="zarm_r6_link" />
+    <axis
+      xyz="1 0 0" />
+    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ r_hand_pitch ============ -->
+  <!-- 坐标系：r_hand_pitch -->
+  <link
+    name="zarm_r7_link">
+    <inertial>
+      <!-- 质心：( 0.03616769, -0.00232464, -0.04975256 ) -->
+      <origin xyz="0.00481393 -0.00870857 -0.0836411" rpy="0 0 0" />
+      <!-- 质量：0.19960270 kg -->
+      <mass value="0.7374" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法） -->
+      <inertia
+        ixx="0.00110836"
+        ixy="0"
+        ixz="0"
+        iyy="0.00131607"
+        iyz="0"
+        izz="0.000374168" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/r_hand_pitch_nohand.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.158" rpy="0 0 -3.1415" />
+      <geometry>
+        <box size="0.08 0.05 0.16" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0505 0.0292 -0.116372" rpy="0 -0.2545 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.08" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="zarm_r7_joint"
+    type="revolute">
+    <origin
+      xyz="0.0 0 -0.021"
+      rpy="0 0 0" />
+    <parent
+      link="zarm_r6_link" />
+    <child
+      link="zarm_r7_link" />
+    <axis
+      xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <link name="zarm_r7_end_effector">
+  </link>
+  <joint name="zarm_r7_end_effector_joint" type="fixed">
+    <origin xyz="0 0.0 -0.17" rpy="0 0 0" />
+    <parent link="zarm_r7_link" />
+    <child link="zarm_r7_end_effector" />
+  </joint>
+  <link name="zhead_1_link">
+    <inertial>
+      <!-- 质心：( -0.00014294, -0.00421395, -0.03087239 ) -->
+      <origin xyz="-0.00014294 -0.00421395 -0.03087239" rpy="0 0 0" />
+      <!-- 质量：0.55195346 kg -->
+      <mass value="0.55195" />
+      <!-- 惯性张量：由重心决定，对齐输出坐标系 -->
+      <inertia
+        ixx="0.00135912"
+        ixy="0.00000114"
+        ixz="-0.00000327"
+        iyy="0.00127152"
+        iyz="0.00005906"
+        izz="0.00034115" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/head_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zhead_1_joint" type="revolute">
+    <origin xyz="-0.003 0.0 0.49535" rpy="0 0 0" />
+    <parent link="waist_yaw_link" />
+    <child link="zhead_1_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="1.5" velocity="5.23" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+  <link name="zhead_2_link">
+    <inertial>
+      <!-- 质心：( 0.03522567, 0.00045985, 0.04494372 ) -->
+      <origin xyz="0.03522567 0.00045985 0.04494372" rpy="0 0 0" />
+      <!-- 质量：0.82379681 kg -->
+      <mass value="0.82380" />
+      <!-- 惯性张量：由重心决定，对齐输出坐标系 -->
+      <inertia
+        ixx="0.00420019"
+        ixy="0.00001243"
+        ixz="0.00028841"
+        iyy="0.00472455"
+        iyz="0.00001336"
+        izz="0.00467660" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/head_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zhead_2_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zhead_1_link" />
+    <child link="zhead_2_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.23" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <!-- ============ head_camera - 完全按照txt文件 ============ -->
+  <link name="camera_base">
+    <inertial>
+      <!-- 质心：( 0.01583173, -0.04712613, -0.00019589 ) 完全按照txt -->
+      <origin xyz="0.01583173 -0.04712613 -0.00019589" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）= 0.00000000 千克，完全按照txt -->
+      <mass value="0.00000000" />
+      <!-- txt中没有惯性张量数据，设置为0 -->
+      <inertia
+        ixx="0.0"
+        ixy="0.0"
+        ixz="0.0"
+        iyy="0.0"
+        iyz="0.0"
+        izz="0.0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/head_camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="camera_base" type="fixed">
+    <origin xyz="0.093839 0.0475 0.050077" rpy="0 0.3406 0" />
+    <parent link="zhead_2_link" />
+    <child link="camera_base" />
+  </joint>
+
+  <link name="head_rader">
+    <inertial>
+      <!-- 质心：( 0.00018505, -0.00000652, 0.01776962 ) -->
+      <origin xyz="0.00018505 -0.00000652 0.01776962" rpy="0 0 0" />
+      <!-- 质量（用户覆盖）：0.26500000 kg -->
+      <mass value="0.26500" />
+      <!-- ✅ 由重心决定，并且对齐输出的坐标系（使用负张量记数法）- 来自head_radar Lxx/Lxy/Lxz... -->
+      <inertia
+        ixx="0.00012489"
+        ixy="0.00000001"
+        ixz="0.00000004"
+        iyy="0.00013451"
+        iyz="0.00000003"
+        izz="0.00013326" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s54/meshes/head_rader.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.61176 0.65882 0.67059 1" />
+      </material>
+    </visual>
+  </link>
+  
+  <joint name="head_rader_joint" type="fixed">
+    <origin xyz="0 0 -0.078253" rpy="0 0 0" />
+    <parent link="zhead_1_link" />
+    <child link="head_rader" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link
+    name="waist_camera">
+    <inertial>
+      <!-- 质心：( 0.00471770, 0.00007850, 0.01403306 ) -->
+      <origin
+        xyz="0.00471770 0.00007850 0.01403306" 
+        rpy="0 0 0" />
+      <!-- 质量：0.13300000 kg -->
+      <mass
+        value="0.13300" />
+      <!-- 惯性张量：由重心决定，对齐输出坐标系 -->
+      <inertia
+        ixx="0.00016465"
+        ixy="0.00000040"
+        ixz="-0.00000032"
+        iyy="0.00001688"
+        iyz="-0.00000006"
+        izz="0.00016361" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://kuavo_assets/models/biped_s54/meshes/waist_camera.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint
+    name="waist_camera"
+    type="fixed">
+    <origin
+      xyz="0.0787 0 -0.028449"
+      rpy="0 0.59341 0" />
+    <parent
+      link="waist_yaw_link" />
+    <child
+      link="waist_camera" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  
+  <!-- 在原有的gazebo插件配置后添加 -->
+  <!-- 真值 -->
+  <gazebo>
+    <plugin filename="libgazebo_ros_p3d.so" name="p3d_base_controller">
+      <alwaysOn>true</alwaysOn>
+      <updateRate>500.0</updateRate>
+      <bodyName>base_link</bodyName>
+      <topicName>ground_truth/state</topicName>
+      <gaussianNoise>0</gaussianNoise>
+      <frameName>world</frameName>
+      <xyzOffsets>0 0 0</xyzOffsets>
+      <rpyOffsets>0 0 0</rpyOffsets>
+    </plugin>
+  </gazebo>
+
+  <!-- 左脚 -->
+  <gazebo reference="leg_l6_link">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="l_foot_heel">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="l_foot_toe">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="lr_foot_heel">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="lr_foot_toe">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="ll_foot_heel">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="ll_foot_toe">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+
+  <!-- 右脚 -->
+  <gazebo reference="leg_r6_link">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="r_foot_heel">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="r_foot_toe">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="rl_foot_toe">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="rl_foot_heel">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="rr_foot_toe">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+  <gazebo reference="rr_foot_heel">
+    <mu1>1.5</mu1>
+    <mu2>2.5</mu2>
+    <self_collide>1</self_collide>
+    <kp value="1000000.0"/>
+    <kd value="100.0"/>
+    <maxVel>3</maxVel>
+    <minDepth>0.00</minDepth>
+  </gazebo>
+
+  <!-- 仿真插件 -->
+  <gazebo>
+    <plugin name="gazebo_shm_interface" filename="libgazebo_sim_shm_interface.so">
+      <!-- IMU配置 gazebo中fixed连接的link都只能获取第一个-->
+      <imu>
+        <frame_id>dummy_link</frame_id>
+      </imu>
+      
+      <!-- 关节配置 -->
+      <joints>
+        <!-- 左腿关节 -->
+        <joint><name>leg_l1_joint</name></joint>
+        <joint><name>leg_l2_joint</name></joint>
+        <joint><name>leg_l3_joint</name></joint>
+        <joint><name>leg_l4_joint</name></joint>
+        <joint><name>leg_l5_joint</name></joint>
+        <joint><name>leg_l6_joint</name></joint>
+        
+        <!-- 右腿关节 -->
+        <joint><name>leg_r1_joint</name></joint>
+        <joint><name>leg_r2_joint</name></joint>
+        <joint><name>leg_r3_joint</name></joint>
+        <joint><name>leg_r4_joint</name></joint>
+        <joint><name>leg_r5_joint</name></joint>
+        <joint><name>leg_r6_joint</name></joint>
+        
+        <!-- 腰关节 -->
+        <joint><name>waist_yaw_joint</name></joint>
+
+        <!-- 左臂关节 -->
+        <joint><name>zarm_l1_joint</name></joint>
+        <joint><name>zarm_l2_joint</name></joint>
+        <joint><name>zarm_l3_joint</name></joint>
+        <joint><name>zarm_l4_joint</name></joint>
+        <joint><name>zarm_l5_joint</name></joint>
+        <joint><name>zarm_l6_joint</name></joint>
+        <joint><name>zarm_l7_joint</name></joint>
+        
+        <!-- 右臂关节 -->
+        <joint><name>zarm_r1_joint</name></joint>
+        <joint><name>zarm_r2_joint</name></joint>
+        <joint><name>zarm_r3_joint</name></joint>
+        <joint><name>zarm_r4_joint</name></joint>
+        <joint><name>zarm_r5_joint</name></joint>
+        <joint><name>zarm_r6_joint</name></joint>
+        <joint><name>zarm_r7_joint</name></joint>
+        
+        <!-- 头部关节 -->
+        <joint><name>zhead_1_joint</name></joint>
+        <joint><name>zhead_2_joint</name></joint>
+      </joints>
+      
+      <!-- 接触传感器配置 -->
+      <contacts>
+        <contact><link>ll_foot_toe</link></contact>
+        <contact><link>ll_foot_heel</link></contact>
+        <contact><link>lr_foot_toe</link></contact>
+        <contact><link>lr_foot_heel</link></contact>
+        <contact><link>rl_foot_toe</link></contact>
+        <contact><link>rl_foot_heel</link></contact>
+        <contact><link>rr_foot_toe</link></contact>
+        <contact><link>rr_foot_heel</link></contact>
+      </contacts>
+      </plugin>
+  </gazebo>
+  
+</robot>

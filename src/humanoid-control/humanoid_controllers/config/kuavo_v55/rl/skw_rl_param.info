@@ -18,6 +18,7 @@ use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
+
 networkModelFile          /ampjzx260324_7_2.onnx; 
 commandData 
 {
@@ -56,6 +57,21 @@ velocityLimits
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
+
+; ==================== RL控制器自动切换配置 ====================
+autoControllerSwitch
+{
+    enabled                     true    ; 是否启用站立态RL控制器自动切换
+    manipulationController       amp_controller       ; 外部手臂/腰部控制优先使用的控制器
+    walkingController            amp_wild_controller  ; 站立态收到行走意图时使用的控制器
+    cmdVelLinearThreshold        0.05    ; 线速度x/y/z范数超过该值认为有行走意图
+    cmdVelAngularThreshold       0.05    ; 角速度z超过该绝对值认为有行走意图
+    cmdVelCommandHoldTime        0.5     ; 行走命令保持活跃的时间(s)
+    externalCommandHoldTime      0.5     ; 外部手臂/腰部信号保持活跃的时间(s)
+    minSwitchInterval            1.0     ; 自动切换尝试最小间隔(s)
+    walkingSwitchRequireStance  false   ; 切到walkingController时不强制当前motion_state为STANCE
+    switchCommandBufferTime     0.5     ; 自动切换发起后命令暂缓执行时间(s)
+}
 
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity

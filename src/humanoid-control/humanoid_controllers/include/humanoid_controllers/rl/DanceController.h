@@ -306,6 +306,11 @@ namespace humanoid_controller
                               std_srvs::Trigger::Response& res);
 
     /**
+     * @waao 计算当前的关节参考
+     */
+    Eigen::VectorXd getCurrentJointReference() const override;
+
+    /** 
      * @brief 发布舞蹈轨迹播放状态
      */
     void publishDanceTrajectoryState(const ros::Time& stamp,

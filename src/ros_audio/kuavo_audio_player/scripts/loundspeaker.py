@@ -13,6 +13,7 @@ from std_msgs.msg import Bool
 from kuavo_audio_player.srv import playmusic, playmusicResponse, audio_status, audio_statusResponse
 from std_srvs.srv import Trigger
 import subprocess
+import sys
 import signal
 import uuid
 
@@ -37,8 +38,8 @@ class MusicPlayerNode:
     def __init__(self):
         # 检查音频设备
         while not self.check_sound_card():
-            print("未检测到播音设备，等待设备连接...")
-            rospy.sleep(10000)
+            rospy.logerr("未检测到播音设备，不启用播音功能！")
+            sys.exit(0)
         
         # 检测get_used_audio_buffer_size服务是否启动
         while True:

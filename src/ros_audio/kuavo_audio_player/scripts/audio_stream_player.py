@@ -22,6 +22,7 @@ from kuavo_msgs.msg import AudioPlaybackStatus
 from std_msgs.msg import Header
 from rosnode import get_node_names
 import subprocess
+import sys
 import time
 try:
     from scipy import signal as scipy_signal
@@ -61,8 +62,8 @@ class AudioStreamPlayerNode:
     
     def __init__(self):
         while not self.check_sound_card():
-            print("未检测到播音设备，不启用播音功能！")
-            time.sleep(1000000)
+            rospy.logerr("未检测到播音设备，不启用播音功能！")
+            sys.exit(0)
 
         rospy.init_node('audio_stream_player_node')
         self.audio_subscriber = rospy.Subscriber('audio_data', Int16MultiArray, self.audio_callback, queue_size=self.SUBSCRIBER_QUEUE_SIZE)

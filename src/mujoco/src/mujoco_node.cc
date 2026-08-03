@@ -66,6 +66,7 @@
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/CameraInfo.h"
 #include <opencv2/opencv.hpp>
+#include <cmath>
 
 //  ************************* lcm ****************************
 
@@ -120,20 +121,22 @@ namespace
   const mjtNum VERTICAL_APERTURE = 2.4480;  // 2.4480
   const mjtNum DEPTH_CAMERA_MIN_RANGE = 0.17;
   const mjtNum DEPTH_CAMERA_MAX_RANGE = 2.5;
+  const mjtNum DEPTH_CAMERA_H_PIXEL_SIZE = HORIZONTAL_APERTURE / DEPTH_CAMERA_WIDTH;
+  const mjtNum DEPTH_CAMERA_V_PIXEL_SIZE = VERTICAL_APERTURE / DEPTH_CAMERA_HEIGHT;
   // raycaster camera thread
   std::thread depth_thread;
   std::atomic<bool> depth_thread_running{true};
   std::mutex mujoco_data_mutex;  // Protects access to m and d
-  constexpr double kDefaultDepthFrequency = 60.0;
+  constexpr double kDefaultDepthFrequency = 30.0;
   double depth_frequency = kDefaultDepthFrequency;  // Hz
   bool isRunCamera_{false};
 
-  // Depth image history buffer (6*6+7=43 frames)
+  // Depth image history buffer (3*7+1=22 frames)
   struct DepthImageFrame {
       std::vector<float> data;
       ros::Time timestamp;
   };
-  static const int DEPTH_BUFFER_SIZE = 43;
+  static const int DEPTH_BUFFER_SIZE = 22;
   std::array<DepthImageFrame, DEPTH_BUFFER_SIZE> depth_buffer;
   size_t current_buffer_index = 0;
   bool depth_buffer_filled = false;  // Track if buffer has been filled once
@@ -219,6 +222,16 @@ namespace
   std::vector<double> fixed_leg_r_qpos;  // 右腿关节固定位置
   std::unique_ptr<mujoco_sim::ActuatorDynamicsCompensator> actuatorDynamicsCompensator;
   constexpr int kArmCompensationDof = 14;
+  
+  double RayDistanceToZDepth(double ray_distance, double pixel_x, double pixel_y,
+                                    double focal_length) {
+    const double ray_norm = std::sqrt(pixel_x * pixel_x + pixel_y * pixel_y +
+                                      focal_length * focal_length);
+    if (ray_norm <= 0.0) {
+      return 0.0;
+    }
+    return ray_distance * focal_length / ray_norm;
+  }
 
   void ResetDepthBufferState()
   {
@@ -287,10 +300,10 @@ namespace
   {
     std::unique_lock<std::mutex> lock(depth_buffer_mutex);
 
-    // From 6*7+1=43 frames, take frame indices: 0, 6, 12, 18, 24, 30, 36, 42 (8 frames total)
+    // From 6*7+1=43 frames, take frame indices: 0, 3, 6, 9, 12, 15, 18, 21 (8 frames total)
     std::vector<int> selected_indices;
     for (int i = 0; i < 7; ++i) {
-      selected_indices.push_back(i * 6); // 1st frame of each group
+      selected_indices.push_back(i * 3); // 1st frame of each group
     }
     selected_indices.push_back(DEPTH_BUFFER_SIZE - 1);  // Last remaining frame
     
@@ -1205,7 +1218,7 @@ namespace
           {
             for (size_t i = 0; i < numClawJoints; i++)
             {
-              d->ctrl[i + 28] = claw_cmd[i];
+              d->ctrl[i + numJoints] = claw_cmd[i];
               // std::cout << "claw_cmd: " << claw_cmd[i] << std::endl;
             }
           }
@@ -1678,9 +1691,9 @@ void apply_wrench_to_link(mjModel* m, mjData* d, const char* link_name, const mj
   d->xfrc_applied[6 * link_index + 0] = force[0]; // 力 x
   d->xfrc_applied[6 * link_index + 1] = force[1]; // 力 y
   d->xfrc_applied[6 * link_index + 2] = force[2]; // 力 z
-  d->xfrc_applied[6 * link_index + 3] = torque[0]; // 劳动 x
-  d->xfrc_applied[6 * link_index + 4] = torque[1]; // 劳动 y
-  d->xfrc_applied[6 * link_index + 5] = torque[2]; // 劳动 z
+  d->xfrc_applied[6 * link_index + 3] = torque[0]; // 力矩 x
+  d->xfrc_applied[6 * link_index + 4] = torque[1]; // 力矩 y
+  d->xfrc_applied[6 * link_index + 5] = torque[2]; // 力矩 z
 }
 
 void chassicPoseCallback(const geometry_msgs::Pose::ConstPtr &msg)
@@ -1925,7 +1938,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 depth_msg.step = DEPTH_CAMERA_WIDTH * sizeof(float);
                 depth_msg.is_bigendian = 0;
                 depth_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH * sizeof(float));
-                float* depth_data = reinterpret_cast<float*>(depth_msg.data.data());
+                float* z_depth_data = reinterpret_cast<float*>(depth_msg.data.data());
 
                 if (g_depth_camera->dist != nullptr) {
                     // const mjtNum range_inv = 1.0 / (DEPTH_CAMERA_MAX_RANGE - DEPTH_CAMERA_MIN_RANGE);
@@ -1933,22 +1946,28 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                         for (int h = 0; h < DEPTH_CAMERA_WIDTH; ++h) {
                             int pixel_idx = v * DEPTH_CAMERA_WIDTH + h;
                             mjtNum dist = g_depth_camera->dist[pixel_idx];
+                            mjtNum pixel_x =
+                                (h + 0.5 - DEPTH_CAMERA_WIDTH / 2.0) * DEPTH_CAMERA_H_PIXEL_SIZE;
+                            mjtNum pixel_y =
+                                (DEPTH_CAMERA_HEIGHT / 2.0 - v - 0.5) * DEPTH_CAMERA_V_PIXEL_SIZE;
+                            mjtNum z_depth =
+                                RayDistanceToZDepth(dist, pixel_x, pixel_y, FOCAL_LENGTH);
                             // float norm = (dist - DEPTH_CAMERA_MIN_RANGE) * range_inv;
                             // norm = std::clamp(norm, 0.0f, 1.0f);
                             // depth_data[pixel_idx] = norm;
-                            dist = std::clamp(dist, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
-                            depth_data[pixel_idx] = dist / DEPTH_CAMERA_MAX_RANGE;
+                            z_depth = std::clamp(z_depth, mjtNum(0), DEPTH_CAMERA_MAX_RANGE);
+                            z_depth_data[pixel_idx] = z_depth / DEPTH_CAMERA_MAX_RANGE;
                         }
                     }
                 }
   
                 // Apply Gaussian blur
-                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, depth_data);
+                cv::Mat depth_mat(DEPTH_CAMERA_HEIGHT, DEPTH_CAMERA_WIDTH, CV_32FC1, z_depth_data);
                 cv::GaussianBlur(depth_mat, depth_mat, cv::Size(3, 3), 1, 1);
 
                 // Update circular buffer with current frame
                 std::unique_lock<std::mutex> buffer_lock(depth_buffer_mutex);
-                depth_buffer[current_buffer_index].data.assign(depth_data, depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
+                depth_buffer[current_buffer_index].data.assign(z_depth_data, z_depth_data + DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);  // deep copy
                 depth_buffer[current_buffer_index].timestamp = depth_msg.header.stamp;
                 current_buffer_index = (current_buffer_index + 1) % DEPTH_BUFFER_SIZE;
                 
@@ -1961,7 +1980,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 std_msgs::Float64MultiArray depth_array_msg;
                 depth_array_msg.data.resize(DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH);
                 for (int i = 0; i < DEPTH_CAMERA_HEIGHT * DEPTH_CAMERA_WIDTH; ++i) {
-                    depth_array_msg.data[i] = depth_data[i];
+                    depth_array_msg.data[i] = z_depth_data[i];
                 }
                 depthImagePub.publish(depth_msg);
                 depthImageArrayPub.publish(depth_array_msg);
@@ -1971,7 +1990,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
                 std::unique_lock<std::mutex> lock(depth_buffer_mutex);
                 std::vector<int> selected_indices;
                 // printf("buf filled:%d | ", depth_buffer_filled);
-                for (int i = 0; i < 6 * 8; i += 6) {
+                for (int i = 0; i < 3 * 8; i += 3) {
                   int idx = (current_buffer_index + i) % DEPTH_BUFFER_SIZE;
                   // printf("idx %d ", idx);
                   selected_indices.push_back(idx); // 1st frame of each group
@@ -2184,7 +2203,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   ros::Subscriber torsoRopeActiveSub = g_nh_ptr->subscribe<std_msgs::Bool>(
       "/mujoco/torso_rope/active", 10, [&](const std_msgs::Bool::ConstPtr &msg) {
         torso_rope_active_ = msg->data;
-        ROS_WARN("[TorsoRope] active = %s", torso_rope_active_ ? "ON" : "OFF");
+        ROS_INFO("[TorsoRope] active = %s", torso_rope_active_ ? "ON" : "OFF");
       });
   ros::Subscriber torsoRopeParamsSub = g_nh_ptr->subscribe<geometry_msgs::Vector3>(
       "/mujoco/torso_rope/params", 10, [&](const geometry_msgs::Vector3::ConstPtr &msg) {

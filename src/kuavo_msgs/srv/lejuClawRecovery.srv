@@ -1,0 +1,17 @@
+# direction:
+#   "toward_open" / "open"      : pulse in the open-claw direction
+#   "toward_close" / "close"    : pulse in the close-claw direction
+#   "stuck_open"                : claw is stuck at open side, pulse toward close
+#   "stuck_close"               : claw is stuck at close side, pulse toward open
+#   "stop"                      : only send zero current, no pulse
+#
+# current: recovery current in A. Driver clamps to its safety limit.
+# duration_ms: pulse duration in ms. Driver clamps to its safety limit.
+# repeat: pulse count. Values <= 0 are treated as 1, values > 3 are clamped.
+string direction
+float32 current
+int32 duration_ms
+int32 repeat
+---
+bool success
+string message
