@@ -31,6 +31,7 @@
 #include <vector>
 #include <atomic>
 /*-DEFINES-------------------------------------------------------------------*/
+
 #define EC_DEMO_APP_NAME (EC_T_CHAR *)"EcMasterDemoDc"
 
 /* the RAS server is necessary to support the EC-Engineer or other remote applications */
@@ -147,6 +148,7 @@ typedef struct
   int32_t velocity_actual_value;
   int16_t torque_demand_raw;
   uint16_t error_code;
+  uint64_t padding;
 } SELFD_SlaveRead_t;
 
 typedef struct
@@ -160,6 +162,8 @@ typedef struct
   int32_t position_offset;
   int32_t velocity_offset;
   int16_t torque_offset;
+  int32_t position_kp;
+  int32_t velocity_kp;
 } SELFD_SlaveWrite_t;
 
 #pragma pack()

@@ -21,7 +21,7 @@ app_nodes_to_check = [
         # "/humanoid_plan_arm_trajectory_node",
         "/joint_state_publisher",
         # "/joy_node",
-        "/play_music_node",
+        "/audio_player_node",
         "/point_cloud_mask_node",
         "/realsense_yolo_segment_node",
         "/realsense_yolo_transform_torso_node",

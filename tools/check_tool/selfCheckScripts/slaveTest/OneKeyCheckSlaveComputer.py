@@ -92,8 +92,8 @@ def main():
 
     # 测试音箱
     print("2. 检测触发音响服务：")
-    play_music_node_check = "/play_music_node"
-    if check_roslaunch_success(play_music_node_check):
+    # 音响服务节点为 /audio_player_node
+    if check_roslaunch_success("/audio_player_node"):
         command = f'bash -ic "cd ~/kuavo_ros_application/ && rosservice call /play_music \'{{music_number: \'say_hello_sir.mp3\', volume: 80}}\'"'
         ssh_send_command(host, port, username, password, command)
 

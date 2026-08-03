@@ -300,6 +300,9 @@ def stop_wifi_info_report():
 _switch_controller_lock = threading.Lock()
 _switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
 SWITCH_CONTROLLER_COOLDOWN = 3.0  # 冷却期时长（秒）
+# 可与 mpc 互相切换的 amp 侧控制器（switch_controller_callback 使用）
+# 当前控制器只要在此列表内即可切到 mpc；从 mpc 切回时固定切到 amp_controller
+SWITCHABLE_AMP_CONTROLLERS = ("amp_controller", "amp_wild_controller")
 _depth_loco_restore_controller_name = None  # 进入 depth_loco_controller 前的控制器名
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
@@ -1278,11 +1281,11 @@ def switch_controller_callback(event):
             success = call_switch_controller_service("amp_controller")
             if not success:
                 rospy.logwarn("[SwitchController] Failed to switch from MPC to amp_controller. Current controller remains MPC.")
-        elif current_controller_lower == "amp_controller":
-            rospy.loginfo("[SwitchController] Current controller is amp_controller, switching to MPC")
+        elif current_controller_lower in SWITCHABLE_AMP_CONTROLLERS:
+            rospy.loginfo(f"[SwitchController] Current controller is {current_controller}, switching to MPC")
             success = call_switch_controller_service("mpc")
             if not success:
-                rospy.logwarn("[SwitchController] Failed to switch from amp_controller to MPC. Current controller remains amp_controller.")
+                rospy.logwarn(f"[SwitchController] Failed to switch from {current_controller} to MPC. Current controller remains {current_controller}.")
         else:
             rospy.logwarn(f"[SwitchController] Unknown controller type: {current_controller}. Cannot switch.")
 

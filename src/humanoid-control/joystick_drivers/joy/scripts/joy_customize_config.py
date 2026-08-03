@@ -326,12 +326,6 @@ class JoyCustomizeConfigNode:
         # 头部目标角度(搬运模式 one-shot: ENTER→平视, LOCK→低头, HAND_OVER→归位)
         # PD 反馈 + 硬件限速自动平滑，无需插值
         self._head_pub = rospy.Publisher("/robot_head_motion_data", robotHeadMotionData, queue_size=1)
-        # 打断当前音频播放（搬运语音播放前清空 audio_stream_player 缓冲区）
-        self._stop_music_pub = rospy.Publisher("/stop_music", Bool, queue_size=1)
-        # /play_music_immediate 新接口可用性 (None=未探测, 首次用到时探测并缓存)
-        self._has_play_music_immediate = None
-        # /stop_music 同步服务可用性 (None=未探测)
-        self._has_stop_music_srv = None
         # 告知 cpp 节点 M1/M2 动作正在执行（latched），cpp 据此屏蔽推杆走路。
         # 语义 = robot_action_executing AND 最近一次触发是 M1/M2。
         self.m1m2_action_active_pub = rospy.Publisher(
@@ -649,65 +643,17 @@ class JoyCustomizeConfigNode:
 
     def _play_music_immediate(self, music_file_name: str, music_volume: int) -> bool:
         """打断当前播放，立即播放指定文件。"""
-        if self._has_play_music_immediate is None:
-            try:
-                rospy.wait_for_service("/play_music_immediate", timeout=0.2)
-                self._has_play_music_immediate = True
-            except rospy.ROSException:
-                self._has_play_music_immediate = False
-            rospy.loginfo(f"[JoyCustomize] /play_music_immediate 可用: {self._has_play_music_immediate}")
-
-        if self._has_play_music_immediate:
-            try:
-                client = rospy.ServiceProxy("/play_music_immediate", PlayMusicImmediate)
-                request = PlayMusicImmediateRequest()
-                request.music_number = music_file_name
-                request.volume = music_volume
-                response = client(request)
-                rospy.loginfo(f"Service call /play_music_immediate: {response.success_flag}")
-                return response.success_flag
-            except Exception as e:
-                rospy.logwarn(f"/play_music_immediate 调用失败, 降级旧序列: {e}")
-                self._has_play_music_immediate = False
-
-        # 降级: 旧接口场景
-        if self._has_stop_music_srv is None:
-            try:
-                rospy.wait_for_service("/stop_music", timeout=0.2)
-                self._has_stop_music_srv = True
-            except rospy.ROSException:
-                self._has_stop_music_srv = False
-            rospy.loginfo(f"[JoyCustomize] /stop_music service 可用: {self._has_stop_music_srv}")
-
-        if self._has_stop_music_srv:
-            try:
-                stop_client = rospy.ServiceProxy("/stop_music", Trigger)
-                stop_client()
-                rospy.loginfo("/stop_music service: 已停止当前播放")
-            except Exception as e:
-                rospy.logwarn(f"/stop_music service 调用失败, 转 topic: {e}")
-                self._has_stop_music_srv = False
-
-        if not self._has_stop_music_srv:
-            self._stop_music_pub.publish(Bool(data=True))
-            # 轮询音频缓冲区，确认 stop topic 已被处理后再发 /play_music
-            timeout = rospy.Time.now() + rospy.Duration(2.0)
-            cleared = False
-            try:
-                buf_client = rospy.ServiceProxy('/get_used_audio_buffer_size', Trigger)
-                buf_client.wait_for_service(timeout=0.5)
-                while rospy.Time.now() < timeout and not rospy.is_shutdown():
-                    resp = buf_client()
-                    if resp.success and int(resp.message) == 0:
-                        cleared = True
-                        break
-                    rospy.sleep(0.05)
-            except Exception as e:
-                rospy.logwarn(f"[JoyCustomize] 查询音频缓冲区失败: {e}")
-            if not cleared:
-                rospy.logwarn("[JoyCustomize] /stop_music topic 发送后缓冲区未在 2s 内清空，继续播放")
-
-        return self._set_robot_play_music(music_file_name, music_volume)
+        try:
+            client = rospy.ServiceProxy("/play_music_immediate", PlayMusicImmediate)
+            request = PlayMusicImmediateRequest()
+            request.music_number = music_file_name
+            request.volume = music_volume
+            response = client(request)
+            rospy.loginfo(f"Service call /play_music_immediate: {response.success_flag}")
+            return response.success_flag
+        except Exception as e:
+            rospy.logerr(f"Service /play_music_immediate call failed: {e}")
+            return False
 
     def _robot_action_state_callback(self, msg):
         """动作执行状态回调函数"""

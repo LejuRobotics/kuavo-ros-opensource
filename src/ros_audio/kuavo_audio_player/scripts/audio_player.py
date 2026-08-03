@@ -1,9 +1,11 @@
 '''
-Description: 统一音频播放节点 — loundspeaker (文件转换) + audio_stream_player (PyAudio 播放)
+Description: 统一音频播放节点 — 本地文件转码 (ffmpeg) + 外部 PCM 推流,
+  经单环形缓冲 + 单 PyAudio 回调输出声卡
   /play_music srv:            追加播放 (旧接口, 队列语义)
   /play_music_immediate srv:  打断当前立即播放 (新接口, 原子 stop+play)
   /stop_music srv:   同步停止，返回时已静音 (推荐)
-  /stop_music topic:  fire-and-forget 停止 (兼容)
+  /stop_music topic:  fire-and-forget 停止 (已过时, 仅为兼容旧调用方保留;
+                      播放成功后 STOP_TOPIC_GRACE 秒内到达的停止会被丢弃, 防时序反转)
   /audio_data sub:     接收外部 PCM 推流 (TTS 兼容, 自动重采样至声卡采样率)
   /audio_status srv:   查询当前播放状态
   /get_used_audio_buffer_size srv: 查询缓冲大小
@@ -49,16 +51,14 @@ STATUS_RATE = 10
 STREAM_RESTART_RETRIES = 3     # ALSA 设备偶尔 transient busy; 3 次覆盖多数热插场景
 STREAM_RESTART_DELAY = 0.5      # 0.5 s 等待内核释放声卡设备节点
 MIN_DB = -60.0   # vol→0⁺ 时的 dB 下限 (−60dB≈振幅×0.001, 接近底噪); vol=0 本身走线性 0 完全静音
+STOP_TOPIC_GRACE = 0.3  # s: 播放成功后丢弃兼容 /stop_music topic 的窗口 (防旧调用方 stop→play 时序反转;
+                        # 装入成功前已有 ffmpeg 转码耗时, 迟到 stop 只需再覆盖跨机延迟偏移, 0.3s 足够)
 
 
 class AudioPlayerNode:
 
     def __init__(self):
-        # 先检测音频设备，不存在则不注册节点，避免与上位机冲突
-        if not AudioPlayerNode._check_sound_card():
-            print("未检测到播音设备，不启用播音功能！")
-            sys.exit(0)
-
+        # 必须先 init_node, 否则声卡检测循环中无法响应 SIGINT
         rospy.init_node('audio_player_node')
 
         self._music_dir = rospy.get_param('music_path', '/home/lab/.config/lejuconfig/music')
@@ -71,6 +71,7 @@ class AudioPlayerNode:
         self._read_pos = 0
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()   # True → 回调返回 paAbort
+        self._ignore_stop_topic_until = 0.0  # 兼容 /stop_music topic 丢弃窗口的截止时间
 
         # enable_control 冻结: 订阅 latched topic，disable 时掐断+拒绝新音频
         self._enable_control = True
@@ -230,7 +231,7 @@ class AudioPlayerNode:
             self._buf = bytearray()
             self._read_pos = 0
 
-    def _close_stream(self):src/ros_audio/kuavo_audio_player/scripts/audio_player.py
+    def _close_stream(self):
         """关闭当前流 (丢弃 ALSA DMA), 不重建。"""
         self._stop_evt.set()
         try:
@@ -298,6 +299,9 @@ class AudioPlayerNode:
         with self._lock:
             self._buf.extend(raw)
 
+        # 开启兼容窗口: 旧调用方 "先 pub stop 再 call play" 若时序反转 (stop 迟到),
+        # 窗口内到达的兼容 topic 停止会被丢弃, 不抹掉刚装入的音频
+        self._ignore_stop_topic_until = time.time() + STOP_TOPIC_GRACE
         dur = len(raw) / (self._dev_rate * SAMPLE_WIDTH)
         rospy.loginfo(f"音频就绪: {len(raw)} bytes ({dur:.1f}s), 已追加到缓冲")
         return playmusicResponse(success_flag=True)
@@ -336,11 +340,20 @@ class AudioPlayerNode:
     # /stop_music: topic (兼容) + service (推荐)
 
     def _on_stop_music(self, msg):
-        """话题 /stop_music — fire-and-forget, 推荐迁移到同名 service。"""
-        if msg.data:
-            rospy.logwarn_throttle(300, "/stop_music topic 已过时, 推荐迁移到 /stop_music service (std_srvs/Trigger)")
-            self._stop_and_recreate()
-            rospy.loginfo("/stop_music: 已停止")
+        """话题 /stop_music — fire-and-forget, 推荐迁移到同名 service。
+
+        播放成功后 STOP_TOPIC_GRACE 秒内到达的停止直接丢弃: 旧调用方习惯
+        "先 pub stop 再 call play", 跨机/跨线程下 stop 可能迟到 (时序反转),
+        若不丢弃会把刚装入的音频抹掉。
+        """
+        if not msg.data:
+            return
+        if time.time() < self._ignore_stop_topic_until:
+            rospy.logwarn("/stop_music topic 在播放后兼容窗口内到达 (疑似时序反转), 已丢弃")
+            return
+        rospy.logwarn_throttle(300, "/stop_music topic 已过时, 推荐迁移到 /stop_music service (std_srvs/Trigger)")
+        self._stop_and_recreate()
+        rospy.loginfo("/stop_music: 已停止")
 
     def _on_stop_music_srv(self, req):
         """服务 /stop_music — 同步停止, 返回时已静音。"""
@@ -466,5 +479,37 @@ class AudioPlayerNode:
         rospy.spin()
 
 
+def _startup_gate():
+    """启动闸门 (必须在 init_node 之前执行): 任一不过则退出, 由 launch
+    respawn 周期重试 (喇叭热插拔 / 对机节点死亡后自动接管)。
+
+    1. 无声卡 → 退出: 该机不应提供音频服务 (如 5W 下位机无喇叭, 让位上位机)
+    2. /play_music 已有存活提供者 → 退出: 上下位机共享 master, 服务名全局
+       排他, 保证全网唯一提供者。注意必须做 TCP 活性探测: 对机 (或本机前任)
+       被 kill -9 时 master 上的服务注册是陈旧的, 仅查 lookupService 会误判
+       成"有人活着"导致永远无法接管。
+    """
+    if not AudioPlayerNode._check_sound_card():
+        print("未检测到播音设备, 退出等待 respawn 重检")
+        sys.exit(0)
+    try:
+        from rosgraph import Master
+        uri = Master('audio_player_gate').lookupService('/play_music')
+    except Exception:
+        uri = None
+    if uri:
+        try:
+            from urllib.parse import urlparse
+            import socket
+            p = urlparse(uri)   # rosrpc://host:port
+            with socket.create_connection((p.hostname, p.port), timeout=2):
+                pass
+            print(f"/play_music 已由 {uri} 提供 (对机节点在活), 退出等待 respawn 重检")
+            sys.exit(0)
+        except Exception:
+            print(f"/play_music 存在陈旧注册 {uri} (提供者已死), 忽略并继续启动")
+
+
 if __name__ == '__main__':
+    _startup_gate()
     AudioPlayerNode().run()

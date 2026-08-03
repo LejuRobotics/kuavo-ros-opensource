@@ -26,6 +26,11 @@
 #define DRIVER_SAVE_SETTING_PARAMETER 0x313D  //驱动器保存参数
 
 
+/*-------------LEJU / SELFD-------------------------*/
+#define LEJU_JOINT_CSP_KP 0x3A16   //位置环P增益 (REAL32)
+#define LEJU_JOINT_CSV_KP 0x3A17   //速度环P增益 (REAL32)
+#define LEJU_JOINT_CSV_KI 0x3A18   //速度环积分增益
+
 /*-------------ELMO-------------------------*/
 #define ELMO_VENDOR_ID 0x0000009A
 #define ELMO_PRODUCT_CODE 0x00030924

@@ -2307,6 +2307,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     if (allow_walking)
       return false;
 
+    if (drake_interface_ && drake_interface_->getRobotVersion().version_number() == 17)
+      return false;
+
     if (armNumReal_ <= 0)
     {
       return false;
