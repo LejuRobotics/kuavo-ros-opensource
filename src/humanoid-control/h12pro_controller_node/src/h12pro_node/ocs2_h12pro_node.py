@@ -830,7 +830,56 @@ class H12PROControllerNode:
                     self.h12_to_joy_node.is_stopping = False
             
             # 发布全局停止指令到/stop_robot话题（True表示停止，项目统一协议）
-            self.stop_robot_pub.publish(Bool(data=True))  
+            self.stop_robot_pub.publish(Bool(data=True))
+
+            # 无论当前状态是什么，急停时统一清理 hardware prep 相关参数，
+            # 避免硬件节点在后续重新启动时读到残留的蹲姿关节角导致站姿启动变蹲姿。
+            # hardware_node.cc L342-359: 若 /hardware_prep_joint_pos_deg 残留且 size==num_joint，
+            # 会直接覆盖 squat_joint_pos_ → moving_pos → 蹲姿启动，即使 /use_sit_init=false 也无效。
+            _HARDWARE_PREP_KEYS = (
+                "/use_sit_init",
+                "/hardware_sit_prep_ready",
+                "/hardware_prep_joint_pos_deg",
+                "/hardware_prep_joint_pos_offset_deg",
+                "/hardware_prep_joint_pos_leg_first_deg",
+                "/hardware_prep_joint_pos_arm_clear_deg",
+                "/hardware_prep_moves",
+                "/hardware_prep_two_phase",
+                "/hardware_prep_reverse_leg_first",
+                "/hardware_prep_reverse_arm_clear",
+            )
+            for key in _HARDWARE_PREP_KEYS:
+                try:
+                    rospy.delete_param(key)
+                except KeyError:
+                    pass
+            rospy.loginfo("[EmergencyStop] Cleaned all /hardware_prep_* and /use_sit_init params.")
+
+            # 当 current_state 为 initial 时（sit_to_stand_callback 在线程池中运行），
+            # stop(source="initial") 会抛 MachineError 导致 stop_callback 不被调用。
+            # 在此额外处理：杀死 tmux 会话并强制 FSM 回到 initial。
+            if current_state == "initial":
+                import subprocess as _subprocess_emergency
+                # sit_to_stand 长按A 启动时会启动 WiFi 上报；先停止避免残留线程
+                try:
+                    from robot_state.multi_before_callback import stop_wifi_info_report
+                    stop_wifi_info_report()
+                except (ImportError, Exception):
+                    pass
+                _subprocess_emergency.run(
+                    ["tmux", "kill-session", "-t", "humanoid_robot"],
+                    stderr=_subprocess_emergency.DEVNULL,
+                )
+                # 强制 FSM 回到 initial，避免 sit_to_stand_callback 返回后
+                # transitions 将状态改为 stance
+                self.robot_state_machine.machine.set_state(
+                    "initial", self.robot_state_machine,
+                )
+                rospy.set_param(LAST_STATE_PARAM, "initial")
+                rospy.logwarn(
+                    "[EmergencyStop] current_state=initial, "
+                    "killed humanoid_robot tmux session, forced FSM to initial.",
+                )
 
             getattr(self.robot_state_machine, "stop")(source=current_state)
 
