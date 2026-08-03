@@ -72,7 +72,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   // 超时机制相关
   ros::Time mode2EnterTime_;                              // 记录进入 mode 2 的时间戳
   std::mutex mode2EnterTimeMutex_;                        // 保护时间戳的互斥锁
-  static constexpr double MODE_2_TIMEOUT_DURATION = 5.0;  // 超时时间：5秒
+  static constexpr double MODE_2_TIMEOUT_DURATION = 2.0;  // 超时时间：2秒
   bool resetJointToDefault_ = true;                  // 是否在进入mode2时将手臂重置到零位（与轮臂一致）
   Eigen::VectorXd q_init_cmd_;                            // mode2进入时保存的初始关节命令（用于平滑过渡）
 
