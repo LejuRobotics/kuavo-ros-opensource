@@ -654,6 +654,8 @@ namespace humanoid_controller
     ros::Time last_gait_name_time_;
     ros::Time last_robot_action_active_time_;
     ros::Time last_auto_switch_attempt_time_;
+    ros::Time last_manual_switch_time_;           ///< 手动切换时间戳（冷却期防快速连切）
+    double manual_switch_min_interval_ = 3.0;     ///< 手动切换最小间隔（秒），默认3秒对齐G12
     geometry_msgs::Twist latest_cmd_vel_;
     std::string latest_gait_name_;
     bool robot_action_active_for_auto_switch_ = false;
