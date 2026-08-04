@@ -2404,7 +2404,7 @@ namespace ocs2
     }
 
     // 通用 /play_music 调用。music_number 透传给服务，支持纯文件名(从默认 music 目录解析)
-    // 或绝对路径(loundspeaker 用 os.path.join 处理，绝对路径会原样使用)。
+    // 或绝对路径(audio_player 用 os.path.join 处理，绝对路径会原样使用)。
     bool playMusic(const std::string& music_number)
     {
       kuavo_msgs::playmusic srv;

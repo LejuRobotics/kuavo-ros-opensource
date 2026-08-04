@@ -142,6 +142,8 @@ private:
   void gaitNameCallback(const std_msgs::String::ConstPtr& msg);
   void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg);
   bool isRobotActionActiveLocked(const ros::Time& now) const;
+  /// 动作期间是否允许继续行走：v17 / 显式标志 / ROS param
+  bool resolveAllowWalkingDuringAction() const;
   void syncPostureToCommand();
   
   // Smart stop detection functions
@@ -175,6 +177,7 @@ private:
   bool enabled_;
   bool reuse_walk_command_in_stance_;
   bool is_amp_hand_controller_{false};
+  bool is_v17_{false};  ///< /robot_version==17：动作期间不 suppress 行走
   bool robot_action_active_{false};
   bool allow_walking_during_action_{false};
   ros::Time last_robot_action_active_time_;

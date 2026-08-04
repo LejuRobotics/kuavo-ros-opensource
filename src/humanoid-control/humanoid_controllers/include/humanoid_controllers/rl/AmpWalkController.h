@@ -260,10 +260,11 @@ namespace humanoid_controller
     static constexpr double kVirtualArmObsArm1BackSumPitchReductionFullRad_{0.8}; ///< 合计达到该值时削弱量封顶 (rad)
     static constexpr double kVirtualArmObsArm1BackPitchReductionMaxDeg_{1.5}; ///< 满后伸时削弱后仰补偿量 (deg)
     static constexpr double kVirtualArmObsArm1BackVelSumPitchReductionFullRadPerSec_{1.0}; ///< 后甩速度合计达到该值时削弱量封顶 (rad/s)
-    static constexpr double kVirtualArmObsArm1BackVelPitchReductionMaxDeg_{1.5}; ///< 满后甩速度时削弱后仰补偿量 (deg)
+    static constexpr double kVirtualArmObsArm1BackVelPitchReductionMaxDeg_{0.2}; ///< 满后甩速度时削弱后仰补偿量 (deg)
     bool lateral_elbow_fix_{false};
     static constexpr double kLateralElbowFixScale_{0.5};
     bool enable_elbow_scale_{false};
+    bool enable_elbow_upper_{false};
     bool enable_back_arm_enhance_{false};
     static constexpr double kBackArmEnhanceScale_{0.22};
     static constexpr double kBackArmEnhanceCmdXThreshold_{-0.2};

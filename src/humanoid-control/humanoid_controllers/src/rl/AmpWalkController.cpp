@@ -56,9 +56,11 @@ namespace humanoid_controller
     initial_cmd_.cmdStance_ = 1;
     gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
     gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
-    gait_receiver_->setAllowWalkingDuringAction(true);  // AMP 始终允许边走边做动作
-    ros::param::set("/allow_walking_during_arm_action", true);
-    
+    if (is_amp_hand_controller_) {
+      gait_receiver_->setAllowWalkingDuringAction(true);  // amp_hand 始终允许边走边做动作
+      ros::param::set("/allow_walking_during_arm_action", true);
+    }
+
     // 加载原地踏步速度配置
     gait_receiver_->loadInPlaceStepConfig(config_file_, false);
 
@@ -309,6 +311,7 @@ namespace humanoid_controller
       loadData::loadPtreeValue(pt, use_virtual_arm_obs_, "use_virtual_arm_obs", false);
       loadData::loadPtreeValue(pt, lateral_elbow_fix_, "lateral_elbow_fix", false);
       loadData::loadPtreeValue(pt, enable_elbow_scale_, "enable_elbow_scale", false);
+      loadData::loadPtreeValue(pt, enable_elbow_upper_, "enable_elbow_upper", false);
       loadData::loadPtreeValue(pt, enable_back_arm_enhance_, "enable_back_arm_enhance", false);
       loadData::loadPtreeValue(pt, enable_standup_enhance_, "enable_standup_enhance", false);
       loadData::loadPtreeValue(pt, enable_roll_compensation_closed_loop_,
@@ -1923,7 +1926,7 @@ namespace humanoid_controller
       }
     }
 
-    if (enable_elbow_scale_)
+    if (enable_elbow_upper_)
     {
       // zarm_l4_joint=16, zarm_r4_joint=20: final target (action*scale+default) must stay < -0.05
       static constexpr int kElbowActionIndices[] = {16, 20};

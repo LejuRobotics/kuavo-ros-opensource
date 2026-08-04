@@ -1067,9 +1067,9 @@ namespace mobile_manipulator {
   // 删除 TargetTrajectories 中 initTime 之前的所有帧，保留 initTime 前一个关键帧及之后的所有帧
   void MobileManipulatorReferenceManager::trimTargetTrajectoriesBeforeTime(scalar_t startTime)
   {
-    // 辅助函数：修剪单个轨迹
-    auto trimTrajectory = [startTime](TargetTrajectories& trajectory) {
-      if (trajectory.timeTrajectory.empty() || trajectory.timeTrajectory.front() >= startTime) 
+    // 辅助函数：修剪单个轨迹, 按 trimTime 对应的时间轴进行裁剪
+    auto trimTrajectory = [](TargetTrajectories& trajectory, scalar_t trimTime) {
+      if (trajectory.timeTrajectory.empty() || trajectory.timeTrajectory.front() >= trimTime) 
       {
         return;
       }
@@ -1079,12 +1079,12 @@ namespace mobile_manipulator {
         return;
       }
 
-      // 查找第一个大于或等于 startTime 的元素
+      // 查找第一个大于或等于 trimTime 的元素
       auto index = std::lower_bound(trajectory.timeTrajectory.begin(), 
                                 trajectory.timeTrajectory.end(), 
-                                startTime);
+                                trimTime);
       
-      // 计算要删除的元素数量, 保留 startTime 的之前一个及之后所有
+      // 计算要删除的元素数量, 保留 trimTime 的之前一个及之后所有
       size_t eraseCount = std::distance(trajectory.timeTrajectory.begin(), index) - 1;
 
       // 如果存在需要删除的轨迹, 执行删除
@@ -1102,19 +1102,23 @@ namespace mobile_manipulator {
       }
     };
 
-    // 对所有轨迹应用修剪
-    trimTrajectory(stateInputTargetTrajectories_);
-    trimTrajectory(torsoTargetTrajectories_);
+    // 对所有轨迹应用修剪 (绝对时间轴)
+    trimTrajectory(stateInputTargetTrajectories_, startTime);
+    trimTrajectory(torsoTargetTrajectories_, startTime);
     for(size_t i=0; i<info_.eeFrames.size(); i++)
     {
-      trimTrajectory(eeTargetTrajectories_[i]);
+      trimTrajectory(eeTargetTrajectories_[i], startTime);
     }
     if(isOfflineTrajUpdate_ && startTime > isofflineTrajUpdateStartTime_ + 1.0)  // 避免删除起始的未执行的数据, 1秒内需要将轨迹更新完成
     {
-      trimTrajectory(torsoOfflineTraj_);
+      // 离线轨迹缓存(torsoOfflineTraj_/armEeOfflineTraj_)的时间轴为相对时间(从0开始),
+      // 必须用相对时间裁剪; 否则用绝对startTime会误删几乎全部点只剩末点,
+      // 导致后续 getDesiredState 一直返回末点 -> 机械臂直接跳到末点
+      scalar_t offlineRelativeTime = startTime - isofflineTrajUpdateStartTime_;
+      trimTrajectory(torsoOfflineTraj_, offlineRelativeTime);
       for(size_t i=0; i<info_.eeFrames.size(); i++)
       {
-        trimTrajectory(armEeOfflineTraj_[i]);
+        trimTrajectory(armEeOfflineTraj_[i], offlineRelativeTime);
       }
     }
   }
@@ -3019,6 +3023,11 @@ namespace mobile_manipulator {
             return true;
           }
           int index = offlineTraj.plannerIndex;
+          if (j == 0)
+          {
+            armEeOfflineTraj_[index].timeTrajectory.clear();
+            armEeOfflineTraj_[index].stateTrajectory.clear();
+          }
           isArmEeOfflineTrajUpdate_[index] = true;
           eeOfflineTrajFrame_[index] = offlineTraj.frame;
           armEeOfflineTraj_[index].timeTrajectory.push_back(timedCmd.desireTime);
@@ -3031,6 +3040,11 @@ namespace mobile_manipulator {
             res.message = "Invalid trajectory: cmdVec size is not 4 for torso";
             ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
             return true;
+          }
+          if (j == 0)
+          {
+            torsoOfflineTraj_.timeTrajectory.clear();
+            torsoOfflineTraj_.stateTrajectory.clear();
           }
           isTorsoOfflineTrajUpdate_ = true;
           torsoOfflineTraj_.timeTrajectory.push_back(timedCmd.desireTime);

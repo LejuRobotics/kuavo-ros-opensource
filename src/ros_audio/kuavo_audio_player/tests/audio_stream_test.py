@@ -34,7 +34,7 @@ class AudioStreamTestNode:
                                        queue_size=self.PUBLISHER_QUEUE_SIZE)
         rospy.loginfo("音频流测试节点已启动")
         
-        # 设置音频块大小与loundspeaker.py相同
+        # 设置音频块大小
         self.chunk_size = self.LARGE_CHUNK_SIZE
         # 设置发布速率
         self.rate = rospy.Rate(self.PUBLISH_RATE_HZ)  # 10Hz，可以根据需要调整

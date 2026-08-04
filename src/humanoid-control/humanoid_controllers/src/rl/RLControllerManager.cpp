@@ -1472,10 +1472,24 @@ namespace humanoid_controller
     return true;
   }
 
-  bool RLControllerManager::switchControllerCallback(kuavo_msgs::switchController::Request &req, 
+  bool RLControllerManager::switchControllerCallback(kuavo_msgs::switchController::Request &req,
                                                       kuavo_msgs::switchController::Response &res)
   {
     ROS_INFO("[RLControllerManager] Received controller switch request: %s", req.controller_name.c_str());
+
+    // 手动切换冷却检查：防止快速连续切换导致机身跳动（对标 G12 的 SWITCH_CONTROLLER_COOLDOWN = 3.0s）
+    {
+      const ros::Time now = ros::Time::now();
+      if (!last_manual_switch_time_.isZero() &&
+          (now - last_manual_switch_time_).toSec() < manual_switch_min_interval_)
+      {
+        res.success = false;
+        res.message = "Manual switch cooldown active, please wait.";
+        ROS_WARN_THROTTLE(1.0, "[RLControllerManager] Manual switch blocked: cooldown (%.1fs remaining)",
+                          manual_switch_min_interval_ - (now - last_manual_switch_time_).toSec());
+        return true;
+      }
+    }
 
     std::vector<std::string> walk_list;
     {
@@ -1497,6 +1511,7 @@ namespace humanoid_controller
     if (res.success)
     {
       res.message += " (index: " + std::to_string(new_index) + ")";
+      last_manual_switch_time_ = ros::Time::now();
     }
     return true;
   }
@@ -1911,7 +1926,7 @@ namespace humanoid_controller
                              reason.c_str());
           return;
         }
-        if (last_auto_switch_attempt_time_.isValid() &&
+        if (!last_auto_switch_attempt_time_.isZero() &&
             (now - last_auto_switch_attempt_time_).toSec() < auto_switch_config_.min_switch_interval)
         {
           return;
@@ -2210,9 +2225,27 @@ namespace humanoid_controller
     return true;
   }
 
-  bool RLControllerManager::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req, 
+  bool RLControllerManager::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req,
                                                            kuavo_msgs::switchToNextController::Response &res)
   {
+    // 手动切换冷却检查：防止快速连续切换导致机身跳动（对标 G12 的 SWITCH_CONTROLLER_COOLDOWN = 3.0s）
+    {
+      const ros::Time now = ros::Time::now();
+      if (!last_manual_switch_time_.isZero() &&
+          (now - last_manual_switch_time_).toSec() < manual_switch_min_interval_)
+      {
+        res.success = false;
+        res.message = "Manual switch cooldown active, please wait.";
+        res.current_controller = "";
+        res.next_controller = "";
+        res.current_index = -1;
+        res.next_index = -1;
+        ROS_WARN_THROTTLE(1.0, "[RLControllerManager] Manual switch blocked: cooldown (%.1fs remaining)",
+                          manual_switch_min_interval_ - (now - last_manual_switch_time_).toSec());
+        return true;
+      }
+    }
+
     // 获取当前状态
     std::vector<std::string> walk_list;
     std::string current_name;
@@ -2337,13 +2370,33 @@ namespace humanoid_controller
                   ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
     
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
-    
+
+    last_manual_switch_time_ = ros::Time::now();
+
     return true;
   }
 
-  bool RLControllerManager::switchToPreviousControllerCallback(kuavo_msgs::switchToNextController::Request &req, 
+  bool RLControllerManager::switchToPreviousControllerCallback(kuavo_msgs::switchToNextController::Request &req,
                                                                kuavo_msgs::switchToNextController::Response &res)
   {
+    // 手动切换冷却检查：防止快速连续切换导致机身跳动（对标 G12 的 SWITCH_CONTROLLER_COOLDOWN = 3.0s）
+    {
+      const ros::Time now = ros::Time::now();
+      if (!last_manual_switch_time_.isZero() &&
+          (now - last_manual_switch_time_).toSec() < manual_switch_min_interval_)
+      {
+        res.success = false;
+        res.message = "Manual switch cooldown active, please wait.";
+        res.current_controller = "";
+        res.next_controller = "";
+        res.current_index = -1;
+        res.next_index = -1;
+        ROS_WARN_THROTTLE(1.0, "[RLControllerManager] Manual switch blocked: cooldown (%.1fs remaining)",
+                          manual_switch_min_interval_ - (now - last_manual_switch_time_).toSec());
+        return true;
+      }
+    }
+
     // 获取当前状态
     std::vector<std::string> walk_list;
     std::string current_name;
@@ -2470,7 +2523,9 @@ namespace humanoid_controller
                   ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
     
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
-    
+
+    last_manual_switch_time_ = ros::Time::now();
+
     return true;
   }
 

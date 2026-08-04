@@ -26,7 +26,7 @@ SERVICES = [
             "/camera/realsense2_camera_manager",
             "/camera_to_real_frame",
             "/joint_state_publisher",
-            "/play_music_node",
+            "/audio_player_node",
             "/point_cloud_mask_node",
             "/realsense_yolo_segment_node",
             "/realsense_yolo_transform_torso_node",
