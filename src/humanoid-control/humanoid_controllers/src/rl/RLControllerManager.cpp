@@ -441,9 +441,15 @@ namespace humanoid_controller
     {
       auto* current_controller = controllers_[current_controller_name_].get();
       allow_walking_phase_sync_switch = allowWalkingPhaseSyncSwitchRequest(name);
+      // 倒地应急切换(AMP→FallStand)不受行走保护限制——倒地必须无条件切入
+      // (与上方 MPC→RL 分支的 desired_switch_to_falldown 同类例外一致)
+      bool target_is_falldown = false;
+      auto target_it = controllers_.find(name);
+      if (target_it != controllers_.end() && target_it->second)
+        target_is_falldown = target_it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
 
       if (current_controller && source_motion_state == SwitchMotionState::WALKING &&
-          !allow_walking_phase_sync_switch)
+          !target_is_falldown && !allow_walking_phase_sync_switch)
       {
         logSwitchBlocked("RL->RL switch blocked because controller '" + current_controller_name_ + "' is not in stance");
         return false;

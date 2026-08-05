@@ -1571,7 +1571,7 @@ class JoyCustomizeConfigNode:
                 # one-shot: 仅在仍在起身流程内(phase != IDLE)时触发一次
                 # 清 arm 放行 transport gate, 让 _poll_handover 接管后续
                 if self._standup_phase != self._FS_IDLE:
-                    rospy.loginfo("[JoyCustomize] 搬运起身完成, 等 MPC 就绪后退出")
+                    rospy.loginfo("[JoyCustomize] 搬运起身完成, 等切 AMP 后退出")
                     self._transport_voice("exit")
                     self._reset_fall_recovery_state(keep_transport_flag=True)
                     # _stand_up_from_transport 保持 True, _poll_handover 用 topic 信号判断
