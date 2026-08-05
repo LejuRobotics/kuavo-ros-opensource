@@ -215,8 +215,12 @@ else
     ECHO_WARN "DexHand Protobuf SDK 安装失败"
 fi
 
-ECHO_WARN "Install openvino ..."
-install_openvino
+if [[ "$(uname -m)" == "aarch64" || "$(uname -m)" == "arm64" ]]; then
+    ECHO_WARN "Skipping OpenVINO install on aarch64 (wheel-arm / AGX Orin builds)."
+else
+    ECHO_WARN "Install openvino ..."
+    install_openvino
+fi
 
 ECHO_WARN "Check and Install depend packages ..."
 
@@ -232,13 +236,17 @@ else
 fi
 
 
-check_packages_installed "bash"
-result=$?
-
-if [ $result -eq 0 ]; then
-    ECHO_WARN "All Packages are installed."
-    exit 0
+if [[ "$(uname -m)" == "aarch64" || "$(uname -m)" == "arm64" ]]; then
+    ECHO_WARN "aarch64: install libusb without amd64 pins from packages_with_versions.txt"
+    sudo apt-get install -y libusb-1.0-0 libusb-1.0-0-dev || true
 else
-    install_packages
+    check_packages_installed "bash"
+    result=$?
+    if [ $result -eq 0 ]; then
+        ECHO_WARN "All Packages are installed."
+        exit 0
+    else
+        install_packages
+    fi
 fi
 exit 0

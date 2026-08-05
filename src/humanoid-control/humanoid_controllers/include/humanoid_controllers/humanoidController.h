@@ -9,9 +9,11 @@
 #include <hardware_interface/imu_sensor_interface.h>
 #include <humanoid_common/hardware_interface/ContactSensorInterface.h>
 #include "humanoid_controllers/sensor_data_types.h"
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/FallStandController.h"
 #include "humanoid_controllers/rl/RLControllerManager.h"
+#endif
 
 #include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
 #include <ocs2_core/misc/Benchmark.h>
@@ -72,7 +74,9 @@
 #include <thread>
 #include <functional>
 #include <cmath>
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
 #include <openvino/openvino.hpp>
+#endif
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/rl/rl_switch_config.h"
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
@@ -86,7 +90,17 @@ namespace humanoid_controller
   using namespace ocs2;
   using namespace humanoid;
   
-  // MotionTrajectoryData 已移动到 FallStandController.h 中
+#ifndef HUMANOID_CONTROLLERS_HAS_OPENVINO
+  class RLControllerBase;
+  class RLControllerManager;
+
+  struct MotionTrajectoryData {
+    int current_time_step{0};
+    double reference_yaw{0.0};
+    MotionTrajectoryData() = default;
+  };
+#endif
+  // MotionTrajectoryData 已移动到 FallStandController.h 中 (when OpenVINO enabled)
 
   struct gaitTimeName
   {
@@ -356,9 +370,11 @@ namespace humanoid_controller
     double defaultBaseHeightControl_ = 0.9;
     double ruiwo_motor_velocities_factor_{0.0};
     std::string networkModelPath_;
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
     ov::Core core_;
     ov::CompiledModel compiled_model_;
     ov::InferRequest infer_request_;
+#endif
     std::unordered_map<std::string, double> scales_;                 // 存储obs的scale系数
     std::map<std::string, std::array<double, 3>> singleInputDataRLID_; // 存储singleInputData的id、min、max、scale
     std::vector<std::string> singleInputDataRLKeys;
@@ -1060,8 +1076,10 @@ namespace humanoid_controller
 
     bool init_fall_down_state_{false};
     // 控制器管理系统：使用控制器管理类统一管理
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
     std::unique_ptr<RLControllerManager> controller_manager_;  // 控制器管理类
     RLControllerBase* current_controller_ptr_{nullptr};        // 当前控制器指针（从管理类获取）
+#endif
     
     // 保留 fall_down_state_ 用于向后兼容，但实际逻辑改为控制器切换
     FallStandState fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃，改为控制器切换）

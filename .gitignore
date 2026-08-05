@@ -1,4 +1,5 @@
 .idea/
+.memory/
 .vscode/
 __pycache__/
 .catkin_tools/
@@ -32,6 +33,9 @@ bag/*
 **/cursor/*
 **/ws_config/*
 **/docker/*
+# Jammy aarch64 dev container (allow versioned scripts; rest of docker/ stays ignored)
+!docker/run_jammy_aarch64.sh
+!docker/aarch64/**
 **/plot*.xml
 mm_two_hand_pose.xml
 tmp_ik/**

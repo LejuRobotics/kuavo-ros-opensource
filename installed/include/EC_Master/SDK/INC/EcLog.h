@@ -31,7 +31,7 @@
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_LOG_PARMS
 {
-    EC_T_DWORD                  dwLogLevel;   /**< [in] Log level. See EC_LOG_LEVEL_... */
+    EC_T_DWORD                  dwLogLevel;   /**< [in] Log level. See \ref EC_LOG_LEVELS "EC_LOG_LEVEL_..." */
     EC_PF_LOGMSGHK              pfLogMsg;     /**< [in] Log callback function called on every message */
     struct _EC_T_LOG_CONTEXT*   pLogContext;  /**< [in] Log context to be passed to log callback */
 } EC_PACKED_API EC_T_LOG_PARMS;

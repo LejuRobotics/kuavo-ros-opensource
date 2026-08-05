@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <math.h>
+#include <string>
+#include <vector>
 // #include "elmo_motor.h"
 #include "EcDemoPlatform.h"
 #include "EcDemoApp.h"

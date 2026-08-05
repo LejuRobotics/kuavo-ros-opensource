@@ -503,6 +503,17 @@ namespace humanoid_controller
     reset();
   }
 
+  void FallStandController::resumeWarm()
+  {
+    // STANDING 为 no-op: 推理冻结无内容可恢复, reset 会发布 0 令 Python joy 永不 EXIT (详见头文件)
+    if (fall_stand_state_ != FallStandState::STANDING)
+    {
+      resume();  // 未完成: 维持原重启语义
+      return;
+    }
+    ROS_INFO("[%s] Controller warm-resume no-op (keep STANDING, output frozen at terminal pose)", name_.c_str());
+  }
+
   bool FallStandController::requestToExit() const
   {
     // 当控制器处于 STANDING 状态时，表示已完成起身任务，可以退出

@@ -1,0 +1,14 @@
+.git
+.git/**
+**/build
+**/devel
+**/logs
+**/.catkin_tools
+**/_bazel_*
+**/bazel-*
+*.bag
+*.tar.gz
+*.tar
+third_party_libs/cyclonedds-0.10.2
+tools/check_tool
+docs/images

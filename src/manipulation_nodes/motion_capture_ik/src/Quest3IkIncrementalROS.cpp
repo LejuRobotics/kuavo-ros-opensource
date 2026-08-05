@@ -29,6 +29,7 @@
 #include <XmlRpcValue.h>
 
 #include <leju_utils/define.hpp>
+#include "motion_capture_ik/drake_parser_compat.hpp"
 #include <leju_utils/math.hpp>
 #include <leju_utils/RosMsgConvertor.hpp>
 #include <ocs2_core/thread_support/SetThreadPriority.h>
@@ -500,7 +501,7 @@ void Quest3IkIncrementalROS::fsmEnter() {
     double elapsedTime = (currentTime - enterTime).toSec();
 
     // resetJointToDefault_=false 时手臂保持原位，无需5秒长等待，缩短为2秒
-    const double mode2TimeoutDuration = MODE_2_TIMEOUT_DURATION;//2.0s
+    const double mode2TimeoutDuration = MODE_2_TIMEOUT_DURATION;//1.0s
     if (elapsedTime <= mode2TimeoutDuration) {
       // print mode2 timeout duration
       std::cout << "[Quest3IkIncrementalROS] Mode 2 timeout duration: " << elapsedTime << "s" << std::endl;
@@ -1874,8 +1875,8 @@ void Quest3IkIncrementalROS::publishJointStates() {
 
   // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
   // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
-  // 区间 2: [0.3s, 2.0s)          — 从 q_init_cmd_ 线性平滑（resetJointToDefault_=true 时平滑到零位，false 时保持当前位置）
-  // 区间 3: [2.0s, +infty)        — 不在此处改写
+  // 区间 2: [0.3s, 1.0s)          — 从 q_init_cmd_ 线性平滑（resetJointToDefault_=true 时平滑到零位，false 时保持当前位置）
+  // 区间 3: [1.0s, +infty)        — 不在此处改写
   {
     ros::Time mode2EnterTime;
     {
@@ -1885,8 +1886,8 @@ void Quest3IkIncrementalROS::publishJointStates() {
     const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
     if (inMode2) {
       constexpr double kMode2SensorSyncDurationSec = 0.3;
-      // 平滑时长缩短为2秒
-      const double kMode2SmoothDurationSec = 2.0;
+      // 平滑时长缩短为1秒
+      const double kMode2SmoothDurationSec = 1.0;
       const double elapsed = (ros::Time::now() - mode2EnterTime).toSec();
 
       if (elapsed < kMode2SensorSyncDurationSec) {
@@ -1902,7 +1903,7 @@ void Quest3IkIncrementalROS::publishJointStates() {
         latest_dq_.setZero();
         lowpass_dq_.setZero();
       } else if (elapsed < kMode2SmoothDurationSec) {
-        // 区间 2: [0.3s, 2.0s) — 平滑过渡
+        // 区间 2: [0.3s, 1.0s) — 平滑过渡
         if (q_init_cmd_.size() == jointStateSize_) {
           const double alpha = std::min(
               std::max((elapsed - kMode2SensorSyncDurationSec) /
@@ -1922,7 +1923,7 @@ void Quest3IkIncrementalROS::publishJointStates() {
         latest_dq_.setZero();
         lowpass_dq_.setZero();
       }
-      // 区间 3: elapsed >= 2.0s 时不做处理，armPositionForPublish/armVelocityForPublish 保持本帧初的拷贝
+      // 区间 3: elapsed >= 1.0s 时不做处理，armPositionForPublish/armVelocityForPublish 保持本帧初的拷贝
     }
   }
 
@@ -2462,7 +2463,7 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   auto [plant, sceneGraph] = drake::multibody::AddMultibodyPlantSceneGraph(diagramBuilder.get(), 0.0);
 
   drake::multibody::Parser parser(&plant);
-  auto modelInstance = parser.AddModelFromFile(urdfFilePath);
+  (void)motion_capture_ik::drake_parser_compat::AddUrdfModel(parser, urdfFilePath);
 
   const auto& baseFrame = plant.GetFrameByName("base_link");
   plant.WeldFrames(plant.world_frame(), baseFrame);  // Weld base_link to world frame
@@ -2478,12 +2479,13 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   for (drake::multibody::JointIndex i(0); i < plant.num_joints(); ++i) {
     const auto& joint = plant.get_joint(i);
     if (joint.num_positions() > 0) {
-      mec_limit_lower_(i) = joint.position_lower_limits()(0);
-      mec_limit_upper_(i) = joint.position_upper_limits()(0);
+      const Eigen::Index ji = static_cast<Eigen::Index>(static_cast<int>(i));
+      mec_limit_lower_(ji) = joint.position_lower_limits()(0);
+      mec_limit_upper_(ji) = joint.position_upper_limits()(0);
 
       std::cout << std::left << std::setw(10) << i << std::setw(30) << joint.name() << std::fixed
-                << std::setprecision(4) << std::setw(20) << mec_limit_lower_(i) << std::setw(20) << mec_limit_upper_(i)
-                << std::endl;
+                << std::setprecision(4) << std::setw(20) << joint.position_lower_limits()(0) << std::setw(20)
+                << joint.position_upper_limits()(0) << std::endl;
     }
   }
 

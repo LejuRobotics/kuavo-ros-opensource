@@ -36,6 +36,18 @@ namespace humanoid_controller
              controller_class == ControllerClass::DANCE_CONTROLLER;
     }
 
+    bool isVmpToAmpSwitch(RLControllerType source_type, RLControllerType target_type)
+    {
+      return source_type == RLControllerType::VMP_CONTROLLER &&
+             target_type == RLControllerType::AMP_CONTROLLER;
+    }
+
+    bool isAmpToVmpSwitch(RLControllerType source_type, RLControllerType target_type)
+    {
+      return source_type == RLControllerType::AMP_CONTROLLER &&
+             target_type == RLControllerType::VMP_CONTROLLER;
+    }
+
     const char* switchMotionStateName(RLControllerManager::SwitchMotionState state)
     {
       switch (state)
@@ -328,6 +340,7 @@ namespace humanoid_controller
     SwitchMotionState source_motion_state = SwitchMotionState::STANCE;
     bool source_is_stance_or_stationary = false;
     bool allow_walking_phase_sync_switch = false;
+    RLControllerType source_controller_type = RLControllerType::MPC;
     
     // mimic 类控制器（倒地起身/舞蹈）：仅在未完成（isAllowToExit==false）时禁止切出
     if (!current_controller_name_.empty())
@@ -344,6 +357,7 @@ namespace humanoid_controller
       
 
       has_source_gait_command = current_controller->getGaitCommandState(source_gait_command);
+      source_controller_type = current_controller->getType();
       updateSwitchMotionStateLocked();
       source_motion_state = switch_motion_state_;
       source_is_stance_or_stationary = source_motion_state != SwitchMotionState::WALKING;
@@ -441,9 +455,15 @@ namespace humanoid_controller
     {
       auto* current_controller = controllers_[current_controller_name_].get();
       allow_walking_phase_sync_switch = allowWalkingPhaseSyncSwitchRequest(name);
+      // 倒地应急切换(AMP→FallStand)不受行走保护限制——倒地必须无条件切入
+      // (与上方 MPC→RL 分支的 desired_switch_to_falldown 同类例外一致)
+      bool target_is_falldown = false;
+      auto target_it = controllers_.find(name);
+      if (target_it != controllers_.end() && target_it->second)
+        target_is_falldown = target_it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
 
       if (current_controller && source_motion_state == SwitchMotionState::WALKING &&
-          !allow_walking_phase_sync_switch)
+          !target_is_falldown && !allow_walking_phase_sync_switch)
       {
         logSwitchBlocked("RL->RL switch blocked because controller '" + current_controller_name_ + "' is not in stance");
         return false;
@@ -503,58 +523,85 @@ namespace humanoid_controller
       {
         new_controller->resetGaitCommandState(true);
       }
-#if RL_TO_RL_USE_WARM_RESUME
-      bool use_warm_resume = false;
-      if (!current_controller_name_.empty())
+
+      const bool force_cold_reset_for_vmp_to_amp =
+          !current_controller_name_.empty() &&
+          isVmpToAmpSwitch(source_controller_type, new_controller->getType());
+      const bool force_cold_reset_for_amp_to_vmp =
+          !current_controller_name_.empty() &&
+          isAmpToVmpSwitch(source_controller_type, new_controller->getType());
+
+      if (force_cold_reset_for_vmp_to_amp)
       {
-        const auto current_class_it = controller_classes_.find(current_controller_name_);
-        const auto target_class_it = controller_classes_.find(name);
-        const bool current_supports_stance_interpolation =
-            current_class_it != controller_classes_.end() &&
-            isStanceInterpolatedControllerClass(current_class_it->second);
-        const bool target_supports_stance_interpolation =
-            target_class_it != controller_classes_.end() &&
-            isStanceInterpolatedControllerClass(target_class_it->second);
-        const bool use_stance_interpolated_resume =
-            source_is_stance_or_stationary &&
-            current_supports_stance_interpolation &&
-            target_supports_stance_interpolation;
-        use_warm_resume =
-            (source_motion_state == SwitchMotionState::WALKING && allow_walking_phase_sync_switch) ||
-            use_stance_interpolated_resume;
+        // VMP->AMP：禁止 warm resume / 步态同步，强制冷 reset
+        new_controller->resetGaitCommandState(true);
+        new_controller->resume();
+        ROS_INFO("[RLControllerManager] VMP->AMP force cold resume (skip warm reset): %s -> %s",
+                 current_controller_name_.c_str(), name.c_str());
       }
-#else
-      const bool use_warm_resume = false;
-#endif
-      if (!current_controller_name_.empty())
+      else if (force_cold_reset_for_amp_to_vmp)
       {
-        if (source_is_stance_or_stationary)
-        {
-          new_controller->resetGaitCommandState(true);
-          ROS_INFO("[RLControllerManager] Reset target gait command to stance during RL->RL switch: %s -> %s",
-                   current_controller_name_.c_str(), name.c_str());
-        }
-        else if (auto_switch_config_.enabled &&
-                 name == auto_switch_config_.manipulation_controller)
-        {
-          new_controller->resetGaitCommandState(true);
-          ROS_INFO("[RLControllerManager] Reset manipulation controller gait command to stance during RL->RL switch: %s -> %s",
-                   current_controller_name_.c_str(), name.c_str());
-        }
-        else if (has_source_gait_command)
-        {
-          new_controller->setGaitCommandState(source_gait_command);
-          ROS_INFO("[RLControllerManager] Sync gait command state during RL->RL switch: %s -> %s",
-                   current_controller_name_.c_str(), name.c_str());
-        }
-      }
-      if (use_warm_resume)
-      {
-        new_controller->resumeWarm();
+        // AMP->VMP：清 VMP buffer/estimator，禁止 warm resume（resume 不调用 reset）
+        new_controller->reset();
+        new_controller->resume();
+        ROS_INFO("[RLControllerManager] AMP->VMP force cold reset (skip warm resume): %s -> %s",
+                 current_controller_name_.c_str(), name.c_str());
       }
       else
       {
-        new_controller->resume();
+#if RL_TO_RL_USE_WARM_RESUME
+        bool use_warm_resume = false;
+        if (!current_controller_name_.empty())
+        {
+          const auto current_class_it = controller_classes_.find(current_controller_name_);
+          const auto target_class_it = controller_classes_.find(name);
+          const bool current_supports_stance_interpolation =
+              current_class_it != controller_classes_.end() &&
+              isStanceInterpolatedControllerClass(current_class_it->second);
+          const bool target_supports_stance_interpolation =
+              target_class_it != controller_classes_.end() &&
+              isStanceInterpolatedControllerClass(target_class_it->second);
+          const bool use_stance_interpolated_resume =
+              source_is_stance_or_stationary &&
+              current_supports_stance_interpolation &&
+              target_supports_stance_interpolation;
+          use_warm_resume =
+              (source_motion_state == SwitchMotionState::WALKING && allow_walking_phase_sync_switch) ||
+              use_stance_interpolated_resume;
+        }
+#else
+        const bool use_warm_resume = false;
+#endif
+        if (!current_controller_name_.empty())
+        {
+          if (source_is_stance_or_stationary)
+          {
+            new_controller->resetGaitCommandState(true);
+            ROS_INFO("[RLControllerManager] Reset target gait command to stance during RL->RL switch: %s -> %s",
+                     current_controller_name_.c_str(), name.c_str());
+          }
+          else if (auto_switch_config_.enabled &&
+                   name == auto_switch_config_.manipulation_controller)
+          {
+            new_controller->resetGaitCommandState(true);
+            ROS_INFO("[RLControllerManager] Reset manipulation controller gait command to stance during RL->RL switch: %s -> %s",
+                     current_controller_name_.c_str(), name.c_str());
+          }
+          else if (has_source_gait_command)
+          {
+            new_controller->setGaitCommandState(source_gait_command);
+            ROS_INFO("[RLControllerManager] Sync gait command state during RL->RL switch: %s -> %s",
+                     current_controller_name_.c_str(), name.c_str());
+          }
+        }
+        if (use_warm_resume)
+        {
+          new_controller->resumeWarm();
+        }
+        else
+        {
+          new_controller->resume();
+        }
       }
     }
 

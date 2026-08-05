@@ -1,11 +1,24 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(motion_capture_ik)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_common/cmake/kuavo_arch.cmake)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
 # 可重现构建：固定调试信息中的时间戳，使 .so 内容仅取决于源码内容而非文件 mtime
 set(ENV{SOURCE_DATE_EPOCH} "0")
+
+# VR incremental C++ nodes (wheel_ik / ik_ros_uni_cpp); enabled on aarch64 when Drake is available.
+option(MOTION_CAPTURE_IK_BUILD_VR_CPP_NODES "Build ik_ros_uni_cpp_node / wheel_ik / topic_logger" ON)
+if(KUAVO_BUILD_FOR_AARCH64)
+  set(CATKIN_MESSAGE_GENERATORS "gencpp;genlisp;gennodejs;genpy")
+endif()
 find_package(drake CONFIG REQUIRED)
+if(drake_VERSION)
+  message(STATUS "[motion_capture_ik] drake_VERSION=${drake_VERSION}")
+endif()
 find_package(Eigen3 REQUIRED)
 
 # catkin_package(DEPENDS Eigen3) expects Eigen3_INCLUDE_DIRS/Eigen3_LIBRARIES.
@@ -112,7 +125,9 @@ include_directories(
   ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
 
-add_subdirectory(test)
+if(MOTION_CAPTURE_IK_BUILD_VR_CPP_NODES)
+  add_subdirectory(test)
+endif()
 
 add_executable(arms_ik_node src/arms_ik_node.cpp)
 add_dependencies(arms_ik_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -124,10 +139,14 @@ endif()
 target_include_directories(arms_ik_node PUBLIC
   ${PROJECT_BINARY_DIR}/include
 )
+target_compile_features(arms_ik_node PUBLIC cxx_std_17)
 
 #############
 ## Install ##
 #############
+install(TARGETS arms_ik_node
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 if(EXISTS "${PLANT_IK_FILE}")
 install(TARGETS plantIK
     LIBRARY DESTINATION lib
@@ -138,6 +157,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
 )
 
+if(MOTION_CAPTURE_IK_BUILD_VR_CPP_NODES)
 # topic_logger
 add_executable(topic_logger src/topic_logger.cpp)
 target_include_directories(topic_logger PRIVATE
@@ -170,12 +190,13 @@ target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
 )
 target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
+target_compile_features(ik_ros_uni_cpp_node PUBLIC cxx_std_17)
 
 # wheel_ik_ros_uni_cpp_node
-add_executable(wheel_ik_ros_uni_cpp_node 
-  src/wheel_ik_ros_uni_cpp_node.cpp 
+add_executable(wheel_ik_ros_uni_cpp_node
+  src/wheel_ik_ros_uni_cpp_node.cpp
   src/WheelArmControlBaseROS.cpp
-  src/WheelQuest3IkIncrementalROS.cpp 
+  src/WheelQuest3IkIncrementalROS.cpp
   src/WheelQuest3IkIncrementalTools.cpp
   src/ArmTrajWriter.cpp
   src/WheelIncrementalControlModule.cpp
@@ -217,3 +238,8 @@ target_include_directories(wheel_arm_only_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
 )
 target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
+
+install(TARGETS ik_ros_uni_cpp_node wheel_ik_ros_uni_cpp_node wheel_arm_only_ik_ros_uni_cpp_node topic_logger
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+endif()

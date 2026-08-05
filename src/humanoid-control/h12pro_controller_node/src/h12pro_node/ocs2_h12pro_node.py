@@ -196,7 +196,7 @@ class H12ToJoyControllerNode:
         # G12轮臂模式: C+D长按急停检测状态
         self.cd_emergency_triggered = False
         self.cd_press_start_time = None
-        # G+H同时极值2秒复位
+        # G+H同时极值2秒复位：仅脉冲触发一次，避免按住期间持续置位 M2
         self.gh_press_start_time = None
         self.gh_triggered = False
 
@@ -350,7 +350,7 @@ class H12ToJoyControllerNode:
                 self.gh_triggered = True
                 rospy.logwarn("[G12] G+H torso reset TRIGGERED!")
         else:
-            if self.gh_press_start_time is not None:
+            if self.gh_press_start_time is not None and not self.gh_triggered:
                 rospy.loginfo("[G12] G+H torso reset: released, %.1fs elapsed (not triggered)",
                               time.time() - self.gh_press_start_time)
             self.gh_press_start_time = None

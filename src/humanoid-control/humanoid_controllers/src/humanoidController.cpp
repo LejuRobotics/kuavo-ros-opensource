@@ -4352,7 +4352,18 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       if (is_rl_to_rl_switch)  //waao：如果切换rl策略
       {
 #if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
-        if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+        const bool is_vmp_to_amp_switch =
+            current_controller_ptr_ != nullptr &&
+            last_rl_controller != nullptr &&
+            last_rl_controller->getType() == RLControllerType::VMP_CONTROLLER &&
+            current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
+        if (is_vmp_to_amp_switch)
+        {
+          ROS_INFO("[RL->RL] Hard switch for VMP->AMP (skip live joint_cmd interpolation): %s -> %s",
+                   last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+          stopRLToRLInterpolation();
+        }
+        else if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
         {
           //waao：双策略推理模式
           activateRLToRLLiveSourceController(last_rl_controller,
@@ -4367,7 +4378,18 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           stopRLToRLInterpolation();
         }
 #else
-        if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+        const bool is_vmp_to_amp_switch =
+            current_controller_ptr_ != nullptr &&
+            last_rl_controller != nullptr &&
+            last_rl_controller->getType() == RLControllerType::VMP_CONTROLLER &&
+            current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
+        if (is_vmp_to_amp_switch)
+        {
+          ROS_INFO("[RL->RL] Hard switch for VMP->AMP (skip joint_cmd interpolation): %s -> %s",
+                   last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+          stopRLToRLInterpolation();
+        }
+        else if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
         {
           startRLToRLInterpolation(currentObservation_.time,
                                    last_rl_controller_name_,
@@ -4398,15 +4420,22 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       if (is_rl_to_rl_interpolation_active_)
       {
         applyRLToRLSwitchVelocityProfile(currentObservation_.time);
-        kuavo_msgs::jointCmd source_joint_cmd;
-        if (buildRLControllerJointCmd(rl_to_rl_live_source_controller_ptr_, time, source_joint_cmd))
+        if (rl_to_rl_live_source_controller_ptr_ != nullptr)
         {
-          applyRLToRLLiveInterpolation(currentObservation_.time, source_joint_cmd, jointCmdMsg);
+          kuavo_msgs::jointCmd source_joint_cmd;
+          if (buildRLControllerJointCmd(rl_to_rl_live_source_controller_ptr_, time, source_joint_cmd))
+          {
+            applyRLToRLLiveInterpolation(currentObservation_.time, source_joint_cmd, jointCmdMsg);
+          }
+          else
+          {
+            ROS_WARN("[RL->RL] Live interpolation stopped because source controller joint_cmd is unavailable.");
+            stopRLToRLInterpolation();
+          }
         }
         else
         {
-          ROS_WARN("[RL->RL] Live interpolation stopped because source controller joint_cmd is unavailable.");
-          stopRLToRLInterpolation();
+          applyRLToRLInterpolation(currentObservation_.time, jointCmdMsg);
         }
       }
 #else

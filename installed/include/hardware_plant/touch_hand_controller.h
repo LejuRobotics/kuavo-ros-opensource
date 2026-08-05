@@ -11,6 +11,9 @@
 #include <condition_variable>
 #include <optional>
 #include <functional>
+#include <vector>
+#include <string>
+#include <unordered_map>
 
 namespace eef_controller {  
 using namespace dexhand;

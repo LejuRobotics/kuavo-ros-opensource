@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(noitom_hi5_hand_udp_python)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_common/cmake/kuavo_arch.cmake)
+
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
 
@@ -21,9 +23,13 @@ find_package(catkin REQUIRED COMPONENTS
   roslib
 )
 
-# Find protobuf library (only need to link, not generate code)
-# Using pre-generated .pb.cc/.pb.h files from generated_cpp/protos/
-find_package(Protobuf REQUIRED)
+# Quest3 C++ monitor uses protobuf; wheel-arm / Jammy often only needs ROS msgs (PoseInfoList, etc.).
+option(BUILD_MONITOR_QUEST3_CPP "Build monitor_quest3_cpp (protobuf)" ON)
+if(KUAVO_BUILD_FOR_AARCH64)
+  set(BUILD_MONITOR_QUEST3_CPP OFF CACHE BOOL "Build monitor_quest3_cpp (protobuf)" FORCE)
+  # Jammy aarch64: skip roseus/eus (geneus paths break when CMAKE_PREFIX_PATH is overlaid).
+  set(CATKIN_MESSAGE_GENERATORS "gencpp;genlisp;gennodejs;genpy")
+endif()
 
 add_message_files(
   FILES handRotation.msg
@@ -144,37 +150,46 @@ catkin_package(
 ## Build ##
 ###########
 
-## Specify additional locations of header files
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
-  ${Protobuf_INCLUDE_DIRS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c  # Pre-generated protobuf headers
 )
 
-## Pre-generated protobuf C++ sources (generated with protoc 3.6.1)
-## This avoids protoc version mismatch issues on CI
-set(PROTO_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/hand_pose.pb.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/robot_info.pb.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/robot_state.pb.cc
-)
-
-## Declare C++ executable for Quest3 monitoring (C++ implementation)
-add_executable(monitor_quest3_cpp
-  src/monitor_quest3_node.cpp
-  ${PROTO_SRCS}
-)
-
-add_dependencies(monitor_quest3_cpp
-  ${${PROJECT_NAME}_EXPORTED_TARGETS}
-  ${catkin_EXPORTED_TARGETS}
-)
-
-target_link_libraries(monitor_quest3_cpp
-  ${catkin_LIBRARIES}
-  ${Protobuf_LIBRARIES}
-)
+if(BUILD_MONITOR_QUEST3_CPP)
+  find_package(Protobuf REQUIRED)
+  if(KUAVO_BUILD_FOR_AARCH64)
+    set(_proto_dir "${CMAKE_CURRENT_SOURCE_DIR}/protos")
+    set(_proto_out "${CMAKE_CURRENT_BINARY_DIR}/protos_c")
+    file(MAKE_DIRECTORY "${_proto_out}")
+    set(PROTO_SRCS "")
+    foreach(_proto hand_pose robot_info robot_state)
+      set(_src "${_proto_out}/${_proto}.pb.cc")
+      set(_hdr "${_proto_out}/${_proto}.pb.h")
+      list(APPEND PROTO_SRCS "${_src}")
+      add_custom_command(
+        OUTPUT "${_src}" "${_hdr}"
+        COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+          --cpp_out=${_proto_out}
+          -I ${_proto_dir}
+          ${_proto_dir}/${_proto}.proto
+        DEPENDS ${_proto_dir}/${_proto}.proto
+        COMMENT "Generating ${_proto}.pb from proto"
+      )
+    endforeach()
+    include_directories(${Protobuf_INCLUDE_DIRS} ${_proto_out})
+  else()
+    # x86: use pre-generated protos (protoc 3.6.1), same as eee7f6b8 — avoids optional-field proto3 errors
+    include_directories(${Protobuf_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/protos_c)
+    set(PROTO_SRCS
+      ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/hand_pose.pb.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/robot_info.pb.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/protos_c/robot_state.pb.cc
+    )
+  endif()
+  add_executable(monitor_quest3_cpp src/monitor_quest3_node.cpp ${PROTO_SRCS})
+  add_dependencies(monitor_quest3_cpp ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(monitor_quest3_cpp ${catkin_LIBRARIES} ${Protobuf_LIBRARIES})
+endif()
 
 #############
 ## Install ##
@@ -192,9 +207,11 @@ target_link_libraries(monitor_quest3_cpp
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
-install(TARGETS monitor_quest3_cpp
-  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
+if(BUILD_MONITOR_QUEST3_CPP)
+  install(TARGETS monitor_quest3_cpp
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  )
+endif()
 
 ## Mark libraries for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_libraries.html

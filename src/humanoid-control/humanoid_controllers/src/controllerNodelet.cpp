@@ -4,6 +4,7 @@
 #include "humanoid_controllers/humanoidController_wheel_wbc.h"
 #include <clocale>
 #include <thread>
+#include <chrono>
 #include <time.h>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
@@ -119,7 +120,16 @@ public:
     }
     ~HumanoidControllerNodelet()
     {
-       std::cerr << "[HumanoidControllerNodelet] destructor called" << std::endl;
+        std::cerr << "[HumanoidControllerNodelet] destructor called, stopping control thread. joinable="
+                  << control_thread.joinable() << std::endl;
+        is_running = false;
+        if (control_thread.joinable())
+        {
+            control_thread.join();
+            std::cerr << "[HumanoidControllerNodelet] control thread joined" << std::endl;
+        }
+        delete robot_hw;
+        robot_hw = nullptr;
     }
 
 private:
@@ -287,11 +297,16 @@ private:
         } 
         else
         {
+#ifndef HUMANOID_CONTROLLERS_HAS_DRAKE
+            ROS_ERROR("Biped humanoid controller requires Drake (not available on this platform). Set nodelet_robot_type:=1 for wheel-arm.");
+            return;
+#else
             if (!controller_ptr_->init(robot_hw, nh, true))
             {
                 ROS_ERROR("Failed to initialize the humanoid controller!");
                 return;
             }
+#endif
         }
         
         // Time setup record start time in both system and ros time

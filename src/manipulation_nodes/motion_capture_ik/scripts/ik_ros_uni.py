@@ -26,29 +26,6 @@ from kuavo_msgs.msg import sensorsData
 from std_srvs.srv import Trigger, TriggerResponse, SetBool, SetBoolRequest, SetBoolResponse
 
 import numpy as np
-from pydrake.all import (
-    AddMultibodyPlantSceneGraph,
-    DiagramBuilder,
-    JacobianWrtVariable,
-    MathematicalProgram,
-    MeshcatVisualizer,
-    PiecewisePolynomial,
-    PiecewisePose,
-    RigidTransform,
-    RotationMatrix,
-    Solve,
-    StartMeshcat,
-    Quaternion,
-    RollPitchYaw,
-    Parser,
-)
-
-import threading
-
-# import matplotlib.pyplot as plt
-
-# from scipy.spatial.transform import Rotation as R
-
 from ik.diff_ik import DiffIK, interpolate_pose
 from ik.torso_ik import ArmIk
 

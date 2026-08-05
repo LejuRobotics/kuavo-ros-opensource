@@ -1469,16 +1469,33 @@ namespace humanoidController_wheel_wbc
         }
       }
       if (!ruiwo_isolated_core_) {  // 7 号核心未隔离，不允许启动
+#if !defined(__aarch64__)
         std::cout << "7 号核心未隔离，跳过CPU亲和性设置" << std::endl;
         return false;
+#endif
       }
     } else {
       std::cout << "隔离的核心列表为空，跳过CPU亲和性设置" << std::endl;
       return false;
     }
 
+#if defined(__aarch64__)
+    // Orin 降本版：WBC 仅绑定隔离核心 2
+    constexpr int kWbcCpuAarch64 = 2;
+    if (std::find(actually_isolated_cpus.begin(), actually_isolated_cpus.end(), kWbcCpuAarch64) ==
+        actually_isolated_cpus.end()) {
+      std::cout << "CPU " << kWbcCpuAarch64 << " 未隔离，跳过CPU亲和性设置" << std::endl;
+      return false;
+    }
+    actually_isolated_cpus.assign(1, kWbcCpuAarch64);
+#endif
+
     // 只有在有真正隔离的CPU时才设置亲和性
-    if (actually_isolated_cpus.size() >= 2) {  // 至少需要两个核心绑定 WBC
+#if defined(__aarch64__)
+    if (actually_isolated_cpus.size() >= 1) {  // aarch64 WBC 单核
+#else
+    if (actually_isolated_cpus.size() >= 2) {  // x86 至少需要两个核心绑定 WBC
+#endif
       cpu_set_t cpuset;
       CPU_ZERO(&cpuset);
 
@@ -1503,8 +1520,12 @@ namespace humanoidController_wheel_wbc
         return true;
       }
     } else {
+#if defined(__aarch64__)
+      std::cout << "没有真正隔离的 CPU 核心（aarch64 需核心 2），跳过CPU亲和性设置"
+#else
       std::cout << "没有真正隔离的CPU核心或隔离的CPU核心数不足（至少需要2个核心，2个核心绑定WBC控制线程），"
                    "跳过CPU亲和性设置"
+#endif
                 << std::endl;
       return false;
     }

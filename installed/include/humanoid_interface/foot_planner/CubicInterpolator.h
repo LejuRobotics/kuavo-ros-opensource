@@ -1,3 +1,5 @@
+#pragma once
+
 #include <drake/common/trajectories/piecewise_polynomial.h>
 #include <vector>
 #include <iostream>
@@ -74,7 +76,7 @@ public:
     // 构造函数
     DrakeShapedInterpolator(const std::vector<double>& times,
                            const std::vector<double>& positions,
-                           bool zero_end_point_derivatives = true) 
+                           bool zero_end_point_derivatives = true)
         : DrakeInterpolator(times, positions, 0.0, 0.0),  // 调用父类构造函数
           zero_end_point_derivatives_(zero_end_point_derivatives) {
         // 重新生成轨迹

@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(robot_localization)
 
+# Wheel-arm / AGX Orin: do not build EKF nodelets (Jammy aarch64 compile fails; mujoco wheel launch does not use them).
+set(_kuavo_arch_cmake "${CMAKE_CURRENT_SOURCE_DIR}/../kuavo_common/cmake/kuavo_arch.cmake")
+if(EXISTS "${_kuavo_arch_cmake}")
+  include("${_kuavo_arch_cmake}")
+endif()
+if(KUAVO_BUILD_FOR_AARCH64)
+  find_package(catkin REQUIRED)
+  message(STATUS "[robot_localization] Skipping build on aarch64 (x86_64 unchanged)")
+  catkin_package()
+  return()
+endif()
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   message("${PROJECT_NAME}: You did not request a specific build type: selecting 'RelWithDebInfo'.")
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
