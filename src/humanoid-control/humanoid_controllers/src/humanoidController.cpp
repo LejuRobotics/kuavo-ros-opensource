@@ -3650,6 +3650,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
                   standupTime_ = currentObservation_.time;
                   std::cout << "[RL->MPC] Torso interpolation completed, switching to NORMAL" << std::endl;
                   resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                  // 重置手臂滤波器，避免下一帧 MPC 策略输出与滤波器状态不匹配导致 joint_cmd 突变
+                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
                 }
                 }
 
