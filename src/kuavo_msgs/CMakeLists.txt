@@ -250,6 +250,7 @@ add_service_files(
 
   # Battery service
   GetBatteryInfo.srv
+  RelaySelectChannel.srv
   # Power board status service (0x01 系统状态读取)
   GetPowerBoardStatus.srv
 
