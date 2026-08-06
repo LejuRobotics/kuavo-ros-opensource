@@ -66,14 +66,17 @@ find_package(catkin REQUIRED
 # pkg_check_modules(LCM_MSG REQUIRED lcm_msg)
 
 find_package(Threads REQUIRED)
+# ponytail: explicit path avoids stale find_library cache after per-arch lib layout move
 if(KUAVO_BUILD_FOR_AARCH64 AND EXISTS ${PROJECT_SOURCE_DIR}/lib/aarch64/libmujoco.so)
-  set(MUJOCO_LIB_HINTS ${PROJECT_SOURCE_DIR}/lib/aarch64 ${PROJECT_SOURCE_DIR}/lib)
-elseif(NOT KUAVO_BUILD_FOR_AARCH64 AND EXISTS ${PROJECT_SOURCE_DIR}/lib/x86_64/libmujoco.so)
-  set(MUJOCO_LIB_HINTS ${PROJECT_SOURCE_DIR}/lib/x86_64 ${PROJECT_SOURCE_DIR}/lib)
+  set(MUJOCO_LIB ${PROJECT_SOURCE_DIR}/lib/aarch64/libmujoco.so)
+elseif(EXISTS ${PROJECT_SOURCE_DIR}/lib/x86_64/libmujoco.so)
+  set(MUJOCO_LIB ${PROJECT_SOURCE_DIR}/lib/x86_64/libmujoco.so)
 else()
-  set(MUJOCO_LIB_HINTS ${PROJECT_SOURCE_DIR}/lib)
+  find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
 endif()
-find_library(MUJOCO_LIB mujoco HINTS ${MUJOCO_LIB_HINTS})
+if(NOT MUJOCO_LIB)
+  message(FATAL_ERROR "libmujoco not found under ${PROJECT_SOURCE_DIR}/lib")
+endif()
 find_package(glfw3 REQUIRED)
 
 find_package(Eigen3 REQUIRED)
