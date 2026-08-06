@@ -273,6 +273,7 @@ add_library(${PROJECT_NAME}
         src/ArmTrajReceiver.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
+        src/ControllerCmdBlend.cpp
         src/util/TopicMonitor.cpp
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp

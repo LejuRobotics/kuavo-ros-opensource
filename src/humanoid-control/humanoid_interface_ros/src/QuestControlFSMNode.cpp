@@ -255,6 +255,17 @@ namespace ocs2
                 "/humanoid_controller/controller_switch_event", 1,
                 [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
                     c_relative_base_limit_ = default_vr_cmdvel_limit_;
+
+                    // 使用当前控制器速度限制
+                    std::vector<double> velocity_limits;
+                    if (nodeHandle_.getParam("/velocity_limits", velocity_limits) &&
+                        velocity_limits.size() == 6)
+                    {
+                        c_relative_base_limit_[0] = velocity_limits[0];
+                        c_relative_base_limit_[1] = velocity_limits[1];
+                        c_relative_base_limit_[3] = velocity_limits[5];
+                    }
+
                     if (msg->to_controller == "amp_hand_controller")
                     {
                         nodeHandle_.param("/amp_hand_controller/ampVRcmdvelLinearXLimit",
