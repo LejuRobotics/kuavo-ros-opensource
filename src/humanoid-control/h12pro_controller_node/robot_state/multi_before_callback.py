@@ -6,7 +6,7 @@ from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planA
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
 from kuavo_msgs.srv import changeArmCtrlMode, switchToNextController, getControllerList, switchController, SetString, SetStringRequest
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
-from utils.h12_vr_launch_config import build_vr_launch_args, H12VrLaunchConfigError
+from utils.h12_vr_launch_config import build_vr_launch_args_for_command, H12VrLaunchConfigError
 
 # 导入RobotVersion，兼容不同环境
 try:
@@ -728,17 +728,17 @@ def launch_humanoid_robot(real_robot=True,calibrate=False,use_sit_init=False):
 def start_vr_remote_control_callback(event):
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
-    # 读取 h12_vr_launch.yaml，将 IP/遥操形式/控腰/急停开关拼成 launch 参数追加到拉起命令。
-    # 仅作用于标准 launch_quest3_ik.launch；videostream 等变体未声明这些 arg，跳过以避免
-    # roslaunch unused args。配置非法时输出异常日志并终止启动，不回退默认。
+    # 读取 h12_vr_launch.yaml，按拉起命令把 IP/遥操形式/控腰/急停开关拼成
+    # launch 参数追加到拉起命令（videostream 变体只注入 ip_address）。
+    # 配置非法时输出异常日志并终止启动，不回退默认。
     launch_cmd = LAUNCH_VR_REMOTE_CONTROL_CMD
-    if LAUNCH_VR_REMOTE_CONTROL_CMD and "launch_quest3_ik.launch" in LAUNCH_VR_REMOTE_CONTROL_CMD:
-        try:
-            vr_launch_args = build_vr_launch_args()
-        except H12VrLaunchConfigError as e:
-            print(f"[h12_vr_launch] yaml 配置校验失败，已终止 VR 启动: {e}")
-            raise
-        launch_cmd = f"{LAUNCH_VR_REMOTE_CONTROL_CMD} {vr_launch_args}"
+    try:
+        vr_launch_args = build_vr_launch_args_for_command(launch_cmd)
+    except H12VrLaunchConfigError as e:
+        print(f"[h12_vr_launch] yaml 配置校验失败，已终止 VR 启动: {e}")
+        raise
+    if vr_launch_args:
+        launch_cmd = f"{launch_cmd} {vr_launch_args}"
     print(f"`launch_cmd`: {launch_cmd}")
     tmux_cmd = [
         "tmux", "new-session",
@@ -826,14 +826,35 @@ def stop_callback(event):
     subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME],
                   stderr=subprocess.DEVNULL)
     kill_record_vr_rosbag()
-    
+
+    # 急停时清理 /hardware_prep_* 参数残留，避免硬件节点重新启动时
+    # 读到蹲姿关节角导致站姿启动变蹲姿（与 ocs2_h12pro_node.py 的
+    # _handle_emergency_stop 和 launch 文件的清零构成三层防护）。
+    _STOP_CLEANUP_KEYS = (
+        "/use_sit_init",
+        "/hardware_sit_prep_ready",
+        "/hardware_prep_joint_pos_deg",
+        "/hardware_prep_joint_pos_offset_deg",
+        "/hardware_prep_joint_pos_leg_first_deg",
+        "/hardware_prep_joint_pos_arm_clear_deg",
+        "/hardware_prep_moves",
+        "/hardware_prep_two_phase",
+        "/hardware_prep_reverse_leg_first",
+        "/hardware_prep_reverse_arm_clear",
+    )
+    for key in _STOP_CLEANUP_KEYS:
+        try:
+            rospy.delete_param(key)
+        except KeyError:
+            pass
+
     manual_h12_init_state = rospy.get_param("manual_h12_init_state", "none")
     if "none" != manual_h12_init_state:
         # 此if分支为命令行启动机器人: joystick_type=h12，遥控器使用和服务启动相同的逻辑。
         # manual_h12_init_state为初始状态，其值为none表示当前是用服务启动的机器人。
         # manual_h12_init_state不是none表示是命令行启动的机器人，此时启动机器人程序没有使用tmux，需要额外关闭
 
-        subprocess.run(["rosnode", "kill", "/nodelet_manager"], 
+        subprocess.run(["rosnode", "kill", "/nodelet_manager"],
                     stderr=subprocess.DEVNULL)
 
 def arm_pose_callback(event):
@@ -1600,6 +1621,10 @@ def _clear_sit_stand_abort():
         pass
 
 
+class SitStandAbortedError(RuntimeError):
+    """坐/站流程被急停中断或超时，用于阻止 transitions 库在 before 回调异常返回后修改状态。"""
+
+
 # ── 坐/站进行中标志：阻断摇杆输入，FSM 尚未切换到 sit 时仍需屏蔽 ──
 
 _sit_stand_in_progress = False
@@ -1737,14 +1762,14 @@ def sit_down_callback(event):
             resp = client.call(TriggerRequest())
             if not resp.success:
                 rospy.logerr("[SitStand] sit_down service failed: %s", resp.message)
-                return
+                raise SitStandAbortedError("sit_down service returned failure")
             rospy.loginfo("[SitStand] sit_down service called, waiting for sequence completion...")
         except (rospy.ServiceException, rospy.ROSException) as e:
             rospy.logerr("[SitStand] Failed to call /humanoid/sit_down: %s", e)
-            return
+            raise SitStandAbortedError("sit_down service call failed") from e
 
         if not _wait_for_param_true("/seat_sit_sequence_complete", 60.0):
-            return
+            raise SitStandAbortedError("Aborted during sit down wait")
 
         print_state_transition(trigger, source, "sit")
     finally:
@@ -1760,15 +1785,14 @@ def sit_to_stand_callback(event):
 
     try:
         if source == "initial":
-            # 首次开机起身：设 use_sit_init → launch → 等 prep → real_initial_start → 等起身完成
-            rospy.set_param("/use_sit_init", True)
-            rospy.loginfo("[SitStand] Set /use_sit_init=true, launching robot...")
+            # 首次开机起身：use_sit_init 由 launch 文件 arg 权威设置，不在此预写
+            rospy.loginfo("[SitStand] Launching robot with use_sit_init=true...")
 
             launch_humanoid_robot(event.kwargs.get("real_robot"), use_sit_init=True)
 
             rospy.loginfo("[SitStand] Waiting for hardware prep (real_launch_status)...")
             if not _wait_for_service_response("/humanoid_controller/real_launch_status", 120.0):
-                return
+                raise SitStandAbortedError("Aborted during hardware prep wait")
 
             rospy.loginfo("[SitStand] Hardware prep done, calling real_initial_start...")
             call_real_initialize_srv()
@@ -1776,7 +1800,7 @@ def sit_to_stand_callback(event):
             rospy.loginfo("[SitStand] Waiting for stand up complete (/bot_stand_up_complete)...")
             if not _wait_for_topic_msg("/bot_stand_up_complete", Int8, 120.0,
                                        condition_fn=lambda m: m.data == 1):
-                return
+                raise SitStandAbortedError("Aborted during stand up wait")
 
             rospy.loginfo("[SitStand] Stand up complete!")
             print_state_transition(trigger, source, "stance")
@@ -1789,15 +1813,15 @@ def sit_to_stand_callback(event):
                 resp = client.call(TriggerRequest())
                 if not resp.success:
                     rospy.logerr("[SitStand] stand_up service failed: %s", resp.message)
-                    return
+                    raise SitStandAbortedError("stand_up service returned failure")
                 rospy.loginfo("[SitStand] stand_up service called, waiting for completion...")
             except (rospy.ServiceException, rospy.ROSException) as e:
                 rospy.logerr("[SitStand] Failed to call /humanoid/stand_up: %s", e)
-                return
+                raise SitStandAbortedError("stand_up service call failed") from e
 
             if not _wait_for_topic_msg("/bot_stand_up_complete", Int8, 60.0,
                                        condition_fn=lambda m: m.data == 1):
-                return
+                raise SitStandAbortedError("Aborted during stand up from sit wait")
 
             rospy.loginfo("[SitStand] Stand up complete!")
             print_state_transition(trigger, source, "stance")

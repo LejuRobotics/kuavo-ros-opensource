@@ -6,7 +6,7 @@ from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planA
 from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveCubicPoint
 from kuavo_msgs.srv import changeArmCtrlMode
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
-from utils.h12_vr_launch_config import build_vr_launch_args, H12VrLaunchConfigError
+from utils.h12_vr_launch_config import build_vr_launch_args_for_command, H12VrLaunchConfigError
 
 # 导入RobotVersion，兼容不同环境
 try:
@@ -702,17 +702,17 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
 def start_vr_remote_control_callback(event):
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
-    # 读取 h12_vr_launch.yaml，将 IP/遥操形式/控腰/急停开关拼成 launch 参数追加到拉起命令。
-    # 仅作用于标准 launch_quest3_ik.launch；videostream 等变体未声明这些 arg，跳过以避免
-    # roslaunch unused args。配置非法时输出异常日志并终止启动，不回退默认。
+    # 读取 h12_vr_launch.yaml，按拉起命令把 IP/遥操形式/控腰/急停开关拼成
+    # launch 参数追加到拉起命令（videostream 变体只注入 ip_address）。
+    # 配置非法时输出异常日志并终止启动，不回退默认。
     launch_cmd = LAUNCH_VR_REMOTE_CONTROL_CMD
-    if LAUNCH_VR_REMOTE_CONTROL_CMD and "launch_quest3_ik.launch" in LAUNCH_VR_REMOTE_CONTROL_CMD:
-        try:
-            vr_launch_args = build_vr_launch_args()
-        except H12VrLaunchConfigError as e:
-            print(f"[h12_vr_launch] yaml 配置校验失败，已终止 VR 启动: {e}")
-            raise
-        launch_cmd = f"{LAUNCH_VR_REMOTE_CONTROL_CMD} {vr_launch_args}"
+    try:
+        vr_launch_args = build_vr_launch_args_for_command(launch_cmd)
+    except H12VrLaunchConfigError as e:
+        print(f"[h12_vr_launch] yaml 配置校验失败，已终止 VR 启动: {e}")
+        raise
+    if vr_launch_args:
+        launch_cmd = f"{launch_cmd} {vr_launch_args}"
     print(f"launch_cmd: {launch_cmd}")
     tmux_cmd = [
         "tmux", "new-session",

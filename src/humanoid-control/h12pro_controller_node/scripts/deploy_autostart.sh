@@ -186,7 +186,19 @@ case $vr_launch_choice in
         echo -n "请输入 Quest3 IP (可选，直接回车不指定): "
         read -r quest3_ip_address
         if [ -n "$quest3_ip_address" ]; then
-            LAUNCH_VR_REMOTE_CONTROL_CMD="$LAUNCH_VR_REMOTE_CONTROL_CMD ip_address:=$quest3_ip_address"
+            # 写入用户配置 yaml，运行时统一读取该文件，避免硬编码进 systemd 环境变量
+            USER_VR_CONFIG="$HOME/.config/lejuconfig/h12_vr_launch.yaml"
+            if [ -f "$USER_VR_CONFIG" ]; then
+                if grep -q '^ip_address:' "$USER_VR_CONFIG"; then
+                    sed -i "s|^ip_address:.*|ip_address: \"$quest3_ip_address\"|" "$USER_VR_CONFIG"
+                else
+                    echo "ip_address: \"$quest3_ip_address\"" >> "$USER_VR_CONFIG"
+                fi
+            else
+                mkdir -p "$HOME/.config/lejuconfig"
+                echo "ip_address: \"$quest3_ip_address\"" > "$USER_VR_CONFIG"
+            fi
+            echo "已写入 $USER_VR_CONFIG"
         fi
         echo "已选择: VR 控制 + Orbbec 视频回传"
         ;;

@@ -908,6 +908,12 @@
       },
       {
         "trigger": "stop",
+        "source": "initial",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stop",
         "source": "sit",
         "dest": "initial",
         "before": "stop_callback"

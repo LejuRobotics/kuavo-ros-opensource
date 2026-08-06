@@ -58,17 +58,36 @@ def validate_config(config):
         )
 
 
-def build_launch_args(config):
-    """把配置拼成 roslaunch 的 key:=value 串；ip_address 为空则不注入。"""
+def build_launch_args(config, fields=None):
+    """把配置拼成 roslaunch 的 key:=value 串；ip_address 为空则不注入。
+
+    fields 限定时只拼装指定的字段名（例如 videostream 变体只接受 ip_address，
+    传入 fields=("ip_address",) 以避免 roslaunch unused args 报错）。
+    """
     args = []
-    ip_address = config.get("ip_address", "")
-    if ip_address:
-        args.append(f"ip_address:={ip_address}")
+    if fields is None or "ip_address" in fields:
+        ip_address = config.get("ip_address", "")
+        if ip_address:
+            args.append(f"ip_address:={ip_address}")
     for field in BOOL_FIELDS:
-        args.append(f"{field}:={'true' if config[field] else 'false'}")
+        if fields is None or field in fields:
+            args.append(f"{field}:={'true' if config[field] else 'false'}")
     return " ".join(args)
 
-
-def build_vr_launch_args():
+def build_vr_launch_args(fields=None):
     """加载并校验配置后返回 launch 参数串，供 VR 启动回调直接拼接。"""
-    return build_launch_args(load_config())
+    return build_launch_args(load_config(), fields=fields)
+
+
+def build_vr_launch_args_for_command(launch_cmd):
+    """按拉起命令决定注入哪些字段并返回参数串。
+
+    标准 launch_quest3_ik.launch 注入全部参数；videostream 等变体只注入
+    ip_address（其他 bool 参数未声明），避免 roslaunch unused args 报错。
+    非 quest3_ik 命令返回空串。
+    """
+    if not launch_cmd or "launch_quest3_ik" not in launch_cmd:
+        return ""
+    if "launch_quest3_ik.launch" in launch_cmd:
+        return build_vr_launch_args()
+    return build_vr_launch_args(fields=("ip_address",))
