@@ -88,6 +88,26 @@ namespace humanoid_controller
       return start + (target - start) * alpha;
     }
 
+    Eigen::VectorXd jointCmdDoublesToEigen(const std::vector<double>& field, size_t joint_count)
+    {
+      Eigen::VectorXd out(joint_count);
+      for (size_t i = 0; i < joint_count; ++i)
+      {
+        out[i] = (i < field.size()) ? field[i] : 0.0;
+      }
+      return out;
+    }
+
+    Eigen::VectorXd jointCmdModesToEigen(const std::vector<int>& field, size_t joint_count)
+    {
+      Eigen::VectorXd out(joint_count);
+      for (size_t i = 0; i < joint_count; ++i)
+      {
+        out[i] = (i < field.size()) ? static_cast<double>(field[i]) : 0.0;
+      }
+      return out;
+    }
+
     double computeRlToRlVelocityDipScale(double alpha, double min_scale, double midpoint)
     {
       alpha = std::clamp(alpha, 0.0, 1.0);
@@ -4351,17 +4371,46 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 #if ENABLE_RL_TO_RL_INTERPOLATION
       if (is_rl_to_rl_switch)  //waao：如果切换rl策略
       {
-#if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
         const bool is_vmp_to_amp_switch =
             current_controller_ptr_ != nullptr &&
             last_rl_controller != nullptr &&
             last_rl_controller->getType() == RLControllerType::VMP_CONTROLLER &&
             current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
+#if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
         if (is_vmp_to_amp_switch)
         {
-          ROS_INFO("[RL->RL] Hard switch for VMP->AMP (skip live joint_cmd interpolation): %s -> %s",
-                   last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
-          stopRLToRLInterpolation();
+          const size_t body_joint_count =
+              static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+          if (has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+          {
+            const Eigen::VectorXd vmp_start_reference =
+                has_last_rl_joint_reference_
+                    ? last_rl_joint_reference_
+                    : jointCmdDoublesToEigen(last_rl_joint_cmd_.joint_q, body_joint_count);
+            ROS_INFO("[RL->RL] Single-strategy joint_cmd interpolation for VMP->AMP: %s -> %s",
+                     last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+            startRLToRLInterpolation(currentObservation_.time,
+                                     last_rl_controller_name_,
+                                     active_rl_controller_name,
+                                     vmp_start_reference,
+                                     current_controller_ptr_->getCurrentJointReference(),
+                                     jointCmdDoublesToEigen(last_rl_joint_cmd_.joint_kp, body_joint_count),
+                                     jointCmdDoublesToEigen(last_rl_joint_cmd_.joint_kd, body_joint_count),
+                                     jointCmdDoublesToEigen(last_rl_joint_cmd_.tau_max, body_joint_count),
+                                     jointCmdModesToEigen(last_rl_joint_cmd_.control_modes, body_joint_count),
+                                     Eigen::VectorXd::Zero(body_joint_count),
+                                     current_controller_ptr_->getJointKpVector(),
+                                     current_controller_ptr_->getJointKdVector(),
+                                     current_controller_ptr_->getJointTorqueLimits(),
+                                     current_controller_ptr_->getJointControlModes(),
+                                     current_controller_ptr_->getJointPdModes(),
+                                     jointCmdMsg);
+          }
+          else
+          {
+            ROS_WARN("[RL->RL] VMP->AMP interpolation skipped because last_rl_joint_cmd cache is incomplete.");
+            stopRLToRLInterpolation();
+          }
         }
         else if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
         {
@@ -4378,19 +4427,14 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           stopRLToRLInterpolation();
         }
 #else
-        const bool is_vmp_to_amp_switch =
-            current_controller_ptr_ != nullptr &&
-            last_rl_controller != nullptr &&
-            last_rl_controller->getType() == RLControllerType::VMP_CONTROLLER &&
-            current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
-        if (is_vmp_to_amp_switch)
+        if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr &&
+            last_rl_controller != nullptr)
         {
-          ROS_INFO("[RL->RL] Hard switch for VMP->AMP (skip joint_cmd interpolation): %s -> %s",
-                   last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
-          stopRLToRLInterpolation();
-        }
-        else if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
-        {
+          if (is_vmp_to_amp_switch)
+          {
+            ROS_INFO("[RL->RL] Single-strategy joint_cmd interpolation for VMP->AMP: %s -> %s",
+                     last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+          }
           startRLToRLInterpolation(currentObservation_.time,
                                    last_rl_controller_name_,
                                    active_rl_controller_name,
@@ -4453,6 +4497,12 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       if (current_controller_ptr_ != nullptr)
       {
         last_rl_joint_reference_ = current_controller_ptr_->getCurrentJointReference();
+        if (last_rl_joint_reference_.size() == 0 && !jointCmdMsg.joint_q.empty())
+        {
+          const size_t body_joint_count =
+              static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+          last_rl_joint_reference_ = jointCmdDoublesToEigen(jointCmdMsg.joint_q, body_joint_count);
+        }
         has_last_rl_joint_reference_ = (last_rl_joint_reference_.size() > 0);
       }
       else
@@ -6623,6 +6673,12 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
                                                    const Eigen::VectorXd& target_joint_pd_modes,
                                                    const kuavo_msgs::jointCmd& target_joint_cmd)
   {
+    if (rl_to_rl_live_source_controller_ptr_ != nullptr)
+    {
+      rl_to_rl_live_source_controller_ptr_->pause();
+      rl_to_rl_live_source_controller_ptr_ = nullptr;
+    }
+
     const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
     const bool size_ok = start_joint_reference.size() >= static_cast<Eigen::Index>(body_joint_count) &&
                          target_joint_reference.size() >= static_cast<Eigen::Index>(body_joint_count) &&

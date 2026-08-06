@@ -48,11 +48,22 @@
   <arg name="enable_head_control" default="true" doc="Enable head control node"/>
   <arg name="head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
 
+  <!-- Operation mode -->
+  <arg name="vpn_mode" default="false" doc="Enable VPN session authorization mode (UDP TeleopCommand)"/>
+
   <!-- CPU affinity: bind retarget process to specific cores, e.g. [4] for P-core on Ultra 7 255H -->
   <arg name="cpu_cores" default="[]" doc="CPU cores to bind retarget process (empty=no binding)"/>
 
+  <arg name="__is_lan" value="$(eval not arg('vpn_mode'))"/>
+
   <!-- Node 1: PICO data receiver (UDP communication, no venv needed) -->
-  <node pkg="kuavo_pico_gmr" type="pico_comm_minimal_wrapper.sh" name="pico_comm_minimal"
+  <node if="$(arg __is_lan)"
+        pkg="kuavo_pico_gmr" type="pico_comm_minimal_wrapper.sh" name="pico_comm_minimal"
+        output="screen" respawn="true" respawn_delay="5"/>
+
+  <!-- VPN mode: session authorization via UDP TeleopCommand -->
+  <node if="$(arg vpn_mode)"
+        pkg="kuavo_pico_gmr" type="pico_comm_vpn_wrapper.sh" name="pico_comm_vpn"
         output="screen" respawn="true" respawn_delay="5"/>
 
   <!-- Node 2: Motion retargeting (requires gmr_venv) -->

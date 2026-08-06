@@ -652,7 +652,7 @@ namespace humanoid_controller
                  name_.c_str(), qpos_smooth_buffer_size_);
       }
     }
-    // 保留 vmp_entry_imu_quat_：AMP↔VMP 重入时维持 yaw 锚点，避免 anchor_euler 跳变导致转身
+    vmp_entry_imu_quat_valid_ = false;
 
     if (enable_online_vr_mode_ && online_ref_buffer_.is_initialized)
     {
@@ -665,7 +665,7 @@ namespace humanoid_controller
   void VMPController::resume()
   {
     RLControllerBase::resume();
-    // 不重置 vmp_entry_imu_quat_valid_，与 reset() 一致保持 yaw 锚点连续
+    vmp_entry_imu_quat_valid_ = false;
     if (enable_online_vr_mode_) {
       if (use_interpolate_from_mpc_) {
         ROS_INFO("[%s] MPC->VMP interpolation active, starting sampling early (inference not running yet)", name_.c_str());
