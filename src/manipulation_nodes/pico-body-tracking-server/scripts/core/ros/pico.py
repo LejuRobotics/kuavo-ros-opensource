@@ -34,7 +34,7 @@ from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode, changeTorsoCt
 from kuavo_msgs.srv import fkSrv
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeRequest
 from std_msgs.msg import Float32MultiArray, Int32, Bool, Empty
-from std_srvs.srv import Trigger, TriggerResponse
+from std_srvs.srv import Trigger, TriggerResponse, SetBool
 from geometry_msgs.msg import Twist
 from .pico_utils import KuavoPicoInfoTransformer
 from common.logger import SDKLogger
@@ -702,6 +702,47 @@ class KuavoPicoNode:
     def _freeze_finger_callback(self, key_combination: Set[str], joy:JoySticks)->None:
         """Callback for freeze finger."""
         self.toggle_freeze_finger.toggle() # 锁定/解锁手指
+
+    def _get_vmp_stream_control_client(self):
+        """获取VMP推流控制服务客户端（惰性初始化）"""
+        if self._vmp_stream_control_client is None:
+            service_name = "/vmp/pico_stream_control"
+            try:
+                rospy.wait_for_service(service_name, timeout=1.0)
+                self._vmp_stream_control_client = rospy.ServiceProxy(service_name, SetBool)
+                SDKLogger.info(f"VMP推流控制服务客户端已连接: {service_name}")
+            except rospy.ROSException:
+                SDKLogger.warning(f"VMP推流控制服务 {service_name} 不可用（VMPController可能未启动）")
+                return None
+        return self._vmp_stream_control_client
+
+    def _vmp_stream_pause_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
+        """VMP推流暂停回调 - RG+Y按键"""
+        client = self._get_vmp_stream_control_client()
+        if client is not None:
+            try:
+                resp = client(True)  # data=True -> 暂停推流
+                if resp.success:
+                    SDKLogger.info(f"\033[93m========== VMP推流已暂停 (RG+Y) ==========\033[0m")
+                else:
+                    SDKLogger.warning(f"VMP推流暂停失败: {resp.message}")
+            except rospy.ServiceException as e:
+                SDKLogger.error(f"调用VMP推流控制服务失败: {e}")
+                self._vmp_stream_control_client = None  # 重置客户端，下次重新连接
+
+    def _vmp_stream_resume_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
+        """VMP推流恢复回调 - RG+X按键"""
+        client = self._get_vmp_stream_control_client()
+        if client is not None:
+            try:
+                resp = client(False)  # data=False -> 恢复推流
+                if resp.success:
+                    SDKLogger.info(f"\033[92m========== VMP推流已恢复 (RG+X) ==========\033[0m")
+                else:
+                    SDKLogger.warning(f"VMP推流恢复失败: {resp.message}")
+            except rospy.ServiceException as e:
+                SDKLogger.error(f"调用VMP推流控制服务失败: {e}")
+                self._vmp_stream_control_client = None  # 重置客户端，下次重新连接
 
     def _left_thumb_open_toggle_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
         """Callback for left thumb open toggle."""

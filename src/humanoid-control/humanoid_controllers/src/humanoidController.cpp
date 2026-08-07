@@ -482,6 +482,11 @@ namespace humanoid_controller
     controllerNh_.param("/rl_to_rl_switch_duration",
                         rl_to_rl_switch_duration_,
                         static_cast<double>(RL_TO_RL_SWITCH_DURATION_DEFAULT));
+    {
+      double blend_duration = CONTROLLER_CMD_BLEND_DURATION_DEFAULT;
+      controllerNh_.param("/controller_cmd_blend_duration", blend_duration, blend_duration);
+      cmd_blend_.setDuration(blend_duration);
+    }
     
     // box/tmux 启动时 param 可能稍晚于 nodelet；短等避免首次读到缺省 false 并 clear prep
     use_sit_init_ = false;
@@ -3425,7 +3430,6 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       arm_joint_trajectory_.pos = current_arm_pos;
       arm_joint_trajectory_.vel = current_arm_vel;
       arm_joint_trajectory_.tau = Eigen::VectorXd::Zero(armNumReal_);
-      ROS_INFO("[MPC->RL] 清理手臂轨迹缓存");
 
       // 启动躯干插值，XY 基于当前双脚中心 + RL 控制器配置的 base X 偏移，Z 对齐 RL 默认高度
       // 使用已有的躯干插值系统，并覆盖目标高度为 RL 默认高度
@@ -3492,11 +3496,14 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       arm_joint_trajectory_.vel = current_arm_vel;
       arm_joint_trajectory_.tau = Eigen::VectorXd::Zero(armNumReal_);
       
-      ROS_INFO("[RL->MPC] 清理手臂轨迹缓存，重置为当前位置: [%.3f, %.3f, ...]", 
-               current_arm_pos(0), current_arm_pos(1));
-      
       // resetKinematicsEstimation 内部已刷新 stanceState_mrt_，无需重复赋值。
       resetKinematicsEstimation();
+
+      if (has_last_rl_joint_cmd_)
+        cmd_blend_.start(currentObservation_.time, last_rl_joint_cmd_,
+                         static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_), "RL->MPC");
+      else
+        ROS_WARN("[Switch/RL->MPC] skip: no cached last_rl_joint_cmd");
     }
     // last_is_rl_controller_ = is_rl_controller_;
 
@@ -3570,16 +3577,11 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         }
 
         mrtRosInterface_->pauseResumeMpcNode(false);
-        std::cout << "resume MPC" << std::endl;
         // Trigger MRT callbacks
         mrtRosInterface_->spinMRT();
         currentObservation_.input.setZero(HumanoidInterface_->getCentroidalModelInfo().inputDim);      
         auto target_trajectories = TargetTrajectories({currentObservation_.time}, {currentObservation_.state}, {currentObservation_.input});
-        ROS_INFO("[RL->MPC] target_trajectories.stateTrajectory[0](9) (yaw): %.6f", 
-                 target_trajectories.stateTrajectory[0](9));
-        ROS_INFO("[RL->MPC] ====== 调用resetMpcNode ======");
         mrtRosInterface_->resetMpcNode(target_trajectories);
-        ROS_INFO("[RL->MPC] resetMpcNode完成");
         // 修复：滤波器重置为当前实际手臂位置，避免跳变
         vector_t current_arm_pos = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
         vector_t current_arm_vel = jointVelWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
@@ -3658,18 +3660,22 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
                                           mrtRosInterface_->getPolicyReceiveCount() > 1;
                 if (is_rl_controller_)// 切换到RL
                 {
-                  std::cout << "[MPC->RL] Torso interpolation completed, switching to NORMAL" << std::endl;
                   resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                  // 插值阶段直接输出 arm_interpolation_result_，滤波器未随之更新
+                  // 在切到 AMP 前对齐滤波器，避免本帧剩余 WBC 流程使用旧 MPC 状态回跳
+                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
                   // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
                   if (current_controller_ptr_) {
                     current_controller_ptr_->onInterpolationComplete();
                   }
                 }else if (mpc_ready)
                 {
-                  std::cout << "MPC-RL interpolation completed, policy receive count: " << mrtRosInterface_->getPolicyReceiveCount() << std::endl;
                   standupTime_ = currentObservation_.time;
-                  std::cout << "[RL->MPC] Torso interpolation completed, switching to NORMAL" << std::endl;
                   resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                  // 重置手臂滤波器，避免下一帧 MPC 策略输出与滤波器状态不匹配导致 joint_cmd 突变
+                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
                 }
                 }
 
@@ -4301,7 +4307,6 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       // 对于 control_modes == 2 且 driver == EC_MASTER 的电机，使用 running_settings.joint_kp 和 joint_kd
       // running_settings.joint_kp 和 joint_kd 只包含 EC_MASTER 电机的值，需要建立映射
       replaceDefaultEcMotorPdoGait(jointCmdMsg);
-
     }
     else   //RL控制器
     {
@@ -4423,7 +4428,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         }
         else
         {
-          ROS_WARN("[RL->RL] Skip live interpolation because source/target controller is missing.");
+          ROS_WARN("[Switch/RL->RL] skip: source/target controller missing");
           stopRLToRLInterpolation();
         }
 #else
@@ -4454,7 +4459,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         }
         else
         {
-          ROS_WARN("[RL->RL] Skip interpolation because RL joint reference/joint_cmd cache is incomplete.");
+          ROS_WARN("[Switch/RL->RL] skip: joint reference/joint_cmd cache incomplete");
           stopRLToRLInterpolation();
         }
 #endif
@@ -4473,7 +4478,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           }
           else
           {
-            ROS_WARN("[RL->RL] Live interpolation stopped because source controller joint_cmd is unavailable.");
+            ROS_WARN("[Switch/RL->RL] stop: source joint_cmd unavailable");
             stopRLToRLInterpolation();
           }
         }
@@ -4488,7 +4493,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 #else
       if (is_rl_to_rl_switch)
       {
-        ROS_INFO("[RL->RL] Hard switch enabled by macro: %s -> %s",
+        ROS_INFO("[Switch/RL->RL] hard %s -> %s",
                  last_rl_controller_name_.c_str(),
                  active_rl_controller_name.c_str());
       }
@@ -4585,6 +4590,13 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       }
       transport_mode_state_ = TRANSPORT_HANDING_OVER;
     }
+
+    // RL→MPC joint_cmd 续接（须在 publish 前）
+    if (transport_flow)
+      cmd_blend_.stop();
+    else
+      cmd_blend_.apply(currentObservation_.time, jointCmdMsg,
+                       static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_), ros_logger_);
 
     // 发布控制命令
     publishControlCommands(jointCmdMsg);
@@ -6088,8 +6100,9 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     }
     else
     {
-      std::cout << "[MPCRLInterpolation] 错误：手臂位置维度不匹配(" 
-                << target_arm_pos.size() << " vs " << current_arm_pos.size() << ")" << std::endl;
+      ROS_ERROR("[Switch/%s] skip: arm dim mismatch (%zu vs %zu)",
+                is_rl_controller_ ? "MPC->RL" : "RL->MPC",
+                target_arm_pos.size(), current_arm_pos.size());
     }
 
     // 设置插值参数
@@ -6114,8 +6127,9 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     }
     else
     {
-      std::cout << "[MPCRLInterpolation] 错误：下肢位置维度不匹配(" 
-                << leg_interpolation_start_pose_.size() << " vs " << leg_interpolation_target_pose_.size() << ")" << std::endl;
+      ROS_ERROR("[Switch/%s] skip: leg dim mismatch (%zu vs %zu)",
+                is_rl_controller_ ? "MPC->RL" : "RL->MPC",
+                leg_interpolation_start_pose_.size(), leg_interpolation_target_pose_.size());
     }
 
     // torso_interpolation_target_pose_.head(2) = current_torso_pose.head(2);
@@ -6133,16 +6147,9 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     // 初始化插值状态变量
     last_interpolated_pose_ = current_torso_pose;
     // last_interpolation_time_ = current_time;
-    std::cout << std::fixed << std::setprecision(3);
-    std::cout << "Starting MPC-RL interpolation:" << std::endl;
-    std::cout << "  Torso from [" << current_torso_pose.transpose() 
-              << "] to [" << target_torso_pose.transpose() << "] (distance: " << torso_distance << "m)" << std::endl;
-    std::cout << "  Leg from [" << leg_interpolation_start_pose_.transpose() 
-              << "] to [" << leg_interpolation_target_pose_.transpose() << "] (distance: " << leg_distance << "rad)" << std::endl;
-    std::cout << "  Arm from [" << current_arm_pos.transpose() 
-              << "] to [" << target_arm_pos.transpose() << "] (distance: " << arm_distance << "rad)" << std::endl;
-    std::cout << "  Max velocity: " << torso_interpolation_max_velocity_ 
-              << " m/s, duration: " << torso_interpolation_duration_ << "s" << std::endl;
+    ROS_INFO("[Switch/%s] torso %.2fs (t=%.2fm a=%.2frad)",
+             is_rl_controller_ ? "MPC->RL" : "RL->MPC",
+             torso_interpolation_duration_, torso_distance, arm_distance);
   }
 
   void humanoidController::updateMPCRLInterpolation(double current_time)
@@ -6171,7 +6178,9 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     {
       is_torso_interpolation_active_ = false;
       is_arm_interpolating_ = false;
-      std::cout << "MPC-RL interpolation complete，elapsed_time: " << current_time - torso_interpolation_start_time_  << "s, duration: " << torso_interpolation_duration_ << "s" << std::endl;
+      ROS_INFO("[Switch/%s] torso done %.2fs",
+               is_rl_controller_ ? "MPC->RL" : "RL->MPC",
+               current_time - torso_interpolation_start_time_);
       return;
     }
     
@@ -6199,21 +6208,6 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     twist_msg.angular.z = torso_interpolation_target_pose_(5); // yaw
     
     cmdPoseWorldPublisher_.publish(twist_msg);
-    
-    // 插值过程中按固定间隔打印一次，避免刷屏
-    static double last_debug_time = current_time;
-    if (current_time - last_debug_time > 0.2)
-    {
-      double elapsed_time = current_time - torso_interpolation_start_time_;
-      //double progress = (elapsed_time / torso_interpolation_duration_) * 100.0;
-      double z_diff = interpolated_pose(2) - default_state_[8];
-      std::cout << "MPC-RL: TO "<< (is_rl_controller_ ? "RL" : "MPC") << ", elapsed_time: "
-                << elapsed_time << "s, expected duration: " << torso_interpolation_duration_
-                << "s, distance_to_target: " << distance_to_target << "m" << std::endl;
-      std::cout << "torso_interpolation_target_pose_: " << torso_interpolation_target_pose_.transpose() << std::endl;
-      std::cout << "arm_interpolated_pos: " << arm_interpolation_result_.transpose() << std::endl;
-      last_debug_time = current_time;
-    }
   }
 
 
@@ -6363,7 +6357,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     {
       clearRLToRLWalkingPhaseSync();
       ROS_WARN_THROTTLE(0.5,
-                        "[RL->RL] Walking phase sync gate rejected: same_sign=%d away_from_boundary=%d delta=%.3f thresh=%.3f",
+                        "[Switch/RL->RL] reject: phase sync gate, same_sign=%d away_from_boundary=%d delta=%.3f thresh=%.3f",
                         static_cast<int>(same_sign),
                         static_cast<int>(away_from_boundary),
                         delta_phi,
@@ -6388,11 +6382,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     const double sync_cos = std::cos(rl_to_rl_phase_sync_phi_rad_);
     source_controller->setExternalPhaseOverride(true, sync_sin, sync_cos, rl_to_rl_phase_sync_frequency_hz_);
     target_controller->setExternalPhaseOverride(true, sync_sin, sync_cos, rl_to_rl_phase_sync_frequency_hz_);
-    ROS_INFO("[RL->RL] Activate walking phase sync: phi=%.3f delta=%.3f freqA=%.3f freqB=%.3f",
-             rl_to_rl_phase_sync_phi_rad_,
-             rl_to_rl_phase_sync_delta_phi_rad_,
-             rl_to_rl_phase_sync_source_frequency_hz_,
-             rl_to_rl_phase_sync_target_frequency_hz_);
+    ROS_INFO("[Switch/RL->RL] phase sync phi=%.2f", rl_to_rl_phase_sync_phi_rad_);
     return true;
   }
 
@@ -6534,24 +6524,10 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     rl_to_rl_live_source_controller_ptr_->resume();
 #endif
 
-    size_t mode_change_count = 0;
-    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
-    const size_t valid_joint_count = std::min({body_joint_count,
-                                               last_rl_joint_cmd_.control_modes.size(),
-                                               target_joint_cmd.control_modes.size()});
-    for (size_t i = 0; i < valid_joint_count; ++i)
-    {
-      if (last_rl_joint_cmd_.control_modes[i] != target_joint_cmd.control_modes[i])
-      {
-        ++mode_change_count;
-      }
-    }
-
-    ROS_INFO("[RL->RL] Start quintic live joint_cmd interpolation: %s -> %s, duration=%.3fs, mode_changes=%zu",
+    ROS_INFO("[Switch/RL->RL] live %s -> %s %.2fs",
              source_controller_name.c_str(),
              target_controller_name.c_str(),
-             rl_to_rl_switch_duration_,
-             mode_change_count);
+             rl_to_rl_switch_duration_);
     publishRLToRLSwitchDebugState(0.0, "started_live", current_time);
   }
 
@@ -6570,13 +6546,6 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
     const double blend = quinticBlend(alpha);
     publishRLToRLSwitchDebugState(alpha, "in_progress_live", current_time);
-    ROS_INFO_THROTTLE(0.2,
-                      "[RL->RL] Live interpolating %s -> %s: progress=%.1f%% elapsed=%.3fs/%.3fs",
-                      rl_to_rl_source_controller_name_.c_str(),
-                      rl_to_rl_target_controller_name_.c_str(),
-                      alpha * 100.0,
-                      elapsed,
-                      duration);
 
     const size_t valid_joint_count = std::min({body_joint_count,
                                                source_joint_cmd.joint_q.size(),
@@ -6647,7 +6616,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
         rl_to_rl_live_source_controller_ptr_->pause();
         rl_to_rl_live_source_controller_ptr_ = nullptr;
       }
-      ROS_INFO("[RL->RL] Live q/Kp/Kd interpolation finished: %s -> %s",
+      ROS_INFO("[Switch/RL->RL] live done %s -> %s",
                rl_to_rl_source_controller_name_.c_str(),
                rl_to_rl_target_controller_name_.c_str());
       publishRLToRLSwitchDebugState(1.0, "finished_live", current_time);
@@ -6710,7 +6679,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
                          target_joint_cmd.control_modes.size() >= body_joint_count;
     if (!size_ok)
     {
-      ROS_WARN("[RL->RL] Interpolation skipped because cached RL command dimensions are incomplete.");
+      ROS_WARN("[Switch/RL->RL] skip: cached RL command dimensions incomplete");
       stopRLToRLInterpolation();
       return;
     }
@@ -6747,19 +6716,8 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     rl_to_rl_target_joint_pd_modes_ = target_joint_pd_modes.head(body_joint_count);
     is_rl_to_rl_interpolation_active_ = true;
 
-    size_t mode_change_count = 0;
-    for (size_t i = 0; i < body_joint_count; ++i)
-    {
-      const int start_control_mode = static_cast<int>(std::lround(rl_to_rl_start_joint_control_modes_[i]));
-      const int target_control_mode = target_joint_cmd.control_modes[i];
-      if (start_control_mode != target_control_mode)
-      {
-        ++mode_change_count;
-      }
-    }
-
-    ROS_INFO("[RL->RL] Start quintic joint_cmd interpolation: %s -> %s, duration=%.3fs, mode_changes=%zu",
-             source_controller.c_str(), target_controller.c_str(), rl_to_rl_switch_duration_, mode_change_count);
+    ROS_INFO("[Switch/RL->RL] %s -> %s %.2fs",
+             source_controller.c_str(), target_controller.c_str(), rl_to_rl_switch_duration_);
     publishRLToRLSwitchDebugState(0.0, "started", current_time);
   }
 
@@ -6779,13 +6737,6 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
     const double blend = quinticBlend(alpha);
     publishRLToRLSwitchDebugState(alpha, "in_progress", current_time);
-    ROS_INFO_THROTTLE(0.2,
-                      "[RL->RL] Interpolating %s -> %s: progress=%.1f%% elapsed=%.3fs/%.3fs",
-                      rl_to_rl_source_controller_name_.c_str(),
-                      rl_to_rl_target_controller_name_.c_str(),
-                      alpha * 100.0,
-                      elapsed,
-                      duration);
 
     const size_t valid_joint_count = std::min({body_joint_count,
                                                joint_cmd.joint_q.size(),
@@ -6852,7 +6803,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       is_rl_to_rl_interpolation_active_ = false;
       applyRLToRLSwitchVelocityProfile(current_time);
       clearRLToRLWalkingPhaseSync();
-      ROS_INFO("[RL->RL] q/Kp/Kd interpolation finished: %s -> %s",
+      ROS_INFO("[Switch/RL->RL] done %s -> %s",
                rl_to_rl_source_controller_name_.c_str(), rl_to_rl_target_controller_name_.c_str());
       publishRLToRLSwitchDebugState(1.0, "finished", current_time);
     }
@@ -6866,7 +6817,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);
       const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
       const double progress = std::clamp(elapsed / duration, 0.0, 1.0);
-      ROS_WARN("[RL->RL] Interpolation stopped: %s -> %s at progress=%.1f%%",
+      ROS_WARN("[Switch/RL->RL] stop: %s -> %s at %.1f%%",
                rl_to_rl_source_controller_name_.c_str(),
                rl_to_rl_target_controller_name_.c_str(),
                progress * 100.0);
@@ -6933,10 +6884,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     resetting_mpc_state_ = ResettingMpcState::RESET_BASE;
 
 
-    ROS_INFO_STREAM("[TransportMPC] Starting interpolation (via RESET_BASE):\n"
-                    << "  Torso target: [" << target_torso.transpose()
-                    << "] from feet_center xy=[" << feet_center(0) << "," << feet_center(1)
-                    << "] z=" << transport_base_height_);
+    ROS_INFO("[Switch/Transport] torso z=%.2f", transport_base_height_);
   }
 
   void humanoidController::waitForNextCycle()

@@ -3,6 +3,7 @@
 ## Breaking Changes
 
 ## 文档相关
+- 补充 PICO RG+A/B 切换 RL 控制器使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - 新增增量数采操作步骤文档，[文档链接](./src/manipulation_nodes/noitom_hi5_hand_udp_python/docs/增量式IK新功能介绍.md)
 - 相机标定文档补充 52/55/56 机型与实操注意事项，[文档链接](./src/Camera_Calibration/README.md)
 - 更新搬运/倒地起身操作文档、RL 接口文档、多控制器框架说明
@@ -21,6 +22,11 @@
 - 补充轮臂 v62/v63 下肢限位标零说明，完善 readme 通用标定章节与限位标零入口，[文档链接](./docs/3调试教程/Kuavo%205-W%20全身零点标定.md)
 
 ## 新增功能
+- PICO 遥操新增 RG+A/B 切换上下 RL 控制器功能，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- depth_loco 控制器切换来源从 amp_controller 扩展为任意 RL 控制器
+- 新增 v200062/v300062 机型配置
+- 新增轮臂上半身 URDF 模型
+- 为 v62/v63 补充下肢限位标零配置
 - 人形增量控制新增多项参数化配置：支持通过参数控制 X+A 是否复位手臂、进入增量时胸部 FK 跟踪策略、进入增量时腰部姿态映射开关、VR 节点启动时关节状态重置控制等
 - 座椅起身功能优化：简化状态机、支持多次起坐流程、流程参数调优
 - 搬运模式升级至 V1.1：搬运语音改用 /play_music 原子打断+播新，LOCK 状态加入灵巧手握拳到位判据，信号驱动调度替代盲延迟，状态机拆分为 INTERPOLATING→READY→ACTIVE 三段，硬起身/软起身统一由 Python Joy 调度，[文档链接](./docs/运动控制API.md)
@@ -73,6 +79,20 @@
 - 新增 G12 航空箱坐/站功能：按键映射与状态回调实现，座椅起身流程重构支持臂绕扶手
 
 ## 修复问题
+- 修复 AMP↔VMP 双向切换 yaw 锚点不连续与冷 reset 问题，h12pro switch_controller 支持 amp_wild 与 mpc 互切（#3687）
+- 修复 Quest3 增量模式多项问题：X+A 手臂复位缓慢、arm_ctrl_mode_ 状态残留导致退出后动作帧异常、增量退出时竞态导致手臂控制模式残留
+- 修复鲁班 AMP 多项问题：绕过夸父行走动手拦截、allow_walking_during_action 限定 amp_hand_controller、tact 动作期间允许行走、走弧线偏斜优化、_mpc_arm_commanded 全维度判定消除锁定后再动抽臂（#3624）
+- 修复头部二次标定跳变及假限位导致的方向交替问题
+- 修复手柄/H12 多项问题：北通 X 键控制器切换增加 3 秒冷却间隔、joy START 重启后偶发直腿、back+start 后手柄服务状态需重置（#3719）、搬运模式倒地起身后手柄失效（#3770）、H12 G+H 躯干复位反复触发震荡
+- 修复急停后 /use_sit_init 参数残留导致短按 C 蹲姿启动及姿态残留问题
+- 修复轮臂多项问题：离线轨迹指令跳变、G12/BT2 躯干未升起时腰部 yaw 门控、LUNBI_V62 下肢限位标零菜单缺失
+- 恢复旧两节点音频架构，修复与上位机音频冲突、无音频设备时干净退出及 audio_player 声卡检测问题
+- 修复硬件/驱动多项问题：EC 启动 kp/kd 读垃圾值与异常转向值、VMP kp/kd 参数、arm64 nodelet 退出崩溃、x86 ec 预编译库 ABI 不匹配、cali 缩腿抢跑 is_ready 导致第二次 start 挂死、amp_wild 手臂内翻导致灵巧手打腿
+- 修复 kuavo_led 与电池串口冲突导致 led_for_state 状态灯失效
+- 修复收到 /leju_claw_command 话题后右夹爪不受控制问题
+- 修复发布关节指令时平滑系数初始值导致手臂漂移问题
+- 座椅起身实机段 0 完成后应用 hold_at_sit 静持兜底，防姿态未稳就起立摔倒
+- Roban 移除电源板检测及灯带功能
 - 修复 s200062 在 dev 代码合并后 mujoco 仿真报错及 rviz 中夹爪模型分离问题
 - 修复 s56 棋盘标定系统性误差，更新标定 URDF 及 demo 配置
 - 修复人形增量控制多项问题：手臂模式 0→2 切换映射异常、X+B 需按两次才能切换到固定模式、手柄切换手臂控制模式逻辑异常、增量触发条件去掉移动侦测
@@ -167,6 +187,16 @@
 - 修复 s52 VR 增量遥操由于 IK 缺少夹爪虚拟关节导致的问题
 
 ## 其他改进
+- 适配 arm64 平台（Orin）编译与运行：WBC 绑定隔离核心、arm64 版 EC/灵巧手 SDK、Drake 兼容层、MuJoCo arm64 二进制等
+- 轮臂 WBC 绑定到隔离核心 2,3
+- YD 驱动器启动阶段写入温度限幅值（0x3F0D）
+- 统一单节点音频架构，全机型支持 enable_control 软暂停
+- 自研驱动器与 YD 驱动器增益转换逻辑优化
+- lejukpkd codec 下沉到硬件层，清理运动驱动感知
+- 人形对齐轮臂 ArmTraj SHM，统一 Receiver/Writer（#3198）
+- 优化增量 VR 遥操的状态切换
+- lejudriver 适配 55 版本、AMP 模式与 MPC 模式
+- G12 启动采用 systemd→Docker→内部入口脚本三层架构
 - 控制器切换失败时增加日志输出原因，方便排查切换失败问题
 - 将硬编码版本白名单替换为 RobotVersion.start_with() 前缀匹配，便于扩展新机型
 - 统一手臂控制话题前缀为 /mm/

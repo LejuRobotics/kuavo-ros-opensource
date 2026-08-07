@@ -68,7 +68,12 @@
     <arg name="use_external_odom_tf" default="$(arg real)"/>
     <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
     <arg name="enable_base_emergency_stop" default="true"/>
-    
+    <!-- modbus io bridge -->
+    <arg name="with_modbus_io_bridge" default="true"/>
+    <arg name="relay_port" default="/dev/kuavo_relay"/>
+    <arg name="pressure_port" default="/dev/kuavo_pressure"/>
+    <arg name="pressure_publish_rate" default="1.0"/>
+
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
     
@@ -208,6 +213,15 @@
     <group if="$(arg output_system_info)">
       <node pkg="humanoid_controllers" type="system_info_publisher.py" name="system_info_publisher"/>
     </group>
+
+    <group if="$(arg with_modbus_io_bridge)">
+      <node pkg="humanoid_controllers" type="modbus_io_bridge_node.py" name="modbus_io_bridge_node" output="screen">
+        <param name="relay_port" value="$(arg relay_port)"/>
+        <param name="pressure_port" value="$(arg pressure_port)"/>
+        <param name="pressure_publish_rate" value="$(arg pressure_publish_rate)"/>
+      </node>
+    </group>
+
     <!-- monitor node -->
     <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
 

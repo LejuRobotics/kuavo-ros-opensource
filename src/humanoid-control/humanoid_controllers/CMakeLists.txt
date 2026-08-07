@@ -298,6 +298,7 @@ set(${PROJECT_NAME}_SOURCES
         src/ArmTrajReceiver.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
+        src/ControllerCmdBlend.cpp
         src/util/TopicMonitor.cpp
         )
 # Full biped controller (RL/OpenVINO) on x86_64; aarch64 uses stub when Drake/OpenVINO absent.
@@ -486,6 +487,8 @@ install(FILES humanoid_controllers_plugins.xml
 )
 
 # Install scripts
-install(PROGRAMS scripts/restart_urobot_service.sh
+install(PROGRAMS 
+        scripts/restart_urobot_service.sh
+        scripts/modbus_io_bridge_node.py
         DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -79,6 +79,7 @@
 #endif
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/rl/rl_switch_config.h"
+#include "humanoid_controllers/ControllerCmdBlend.h"
 #include "humanoid_controllers/LowPassFilter5thOrder.h"
 #include "kuavo_solver/ankle/ankle_solver.h"
 #include "humanoid_interface/foot_planner/floatInterpolation.h"
@@ -1009,6 +1010,8 @@ namespace humanoid_controller
     bool rl_to_rl_velocity_dip_enabled_ = RL_TO_RL_VELOCITY_DIP_ENABLED_DEFAULT != 0;
     double rl_to_rl_velocity_dip_min_scale_ = RL_TO_RL_VELOCITY_DIP_MIN_SCALE_DEFAULT;
     double rl_to_rl_velocity_dip_midpoint_ = RL_TO_RL_VELOCITY_DIP_MIDPOINT_DEFAULT;
+
+    ControllerCmdBlend cmd_blend_;
 
     // ==================== 通用插值系统成员变量 ====================
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁

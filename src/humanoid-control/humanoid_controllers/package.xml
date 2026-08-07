@@ -12,6 +12,8 @@
 
     <build_depend>cmake_clang_tools</build_depend>
     <depend>roscpp</depend>
+    <depend>rospy</depend>
+    <depend>std_srvs</depend>
     <depend>std_msgs</depend>
     <depend>leju_utils</depend>
     <depend>kuavo_common</depend>
