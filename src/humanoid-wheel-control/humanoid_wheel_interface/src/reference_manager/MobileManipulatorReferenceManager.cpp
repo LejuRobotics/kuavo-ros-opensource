@@ -10,6 +10,8 @@
 #include <ocs2_core/misc/LoadData.h>
 #include <ocs2_core/misc/LinearInterpolation.h>
 #include <chrono>
+#include <iostream>
+#include <sstream>
 #include <unordered_set>
 
 namespace ocs2 {
@@ -225,27 +227,30 @@ namespace mobile_manipulator {
   }
 
   /**
-  * @brief 从旋转矩阵提取 pitch 和 yaw (假设 roll=0)
+  * @brief 从旋转矩阵提取 pitch 和 yaw (躯干控制仅使用 pitch/yaw，roll 由调用方置 0)
   * @param R 3x3旋转矩阵
   * @return std::pair<double, double> (pitch, yaw) 弧度
-  * @throw 如果矩阵不符合 roll=0 的约束
+  * @throw 若 R 非合法旋转矩阵（det/正交性异常）
   */
   std::pair<double, double> rotationMatrixToPitchYaw(const Eigen::Matrix3d& R) {
       // 静态变量用于存储上一次的 yaw 值
       static double last_yaw = 0.0;
       static bool has_last = false;
 
-      // 验证 roll 接近0 (通过检查 R(2,1) 是否接近0)
-      const double eps = 1e-6;
-      if (std::abs(R(1,2)) > eps) {
-          throw std::runtime_error("旋转矩阵不满足 roll=0 约束");
+      // 仅在校验旋转矩阵非法时 throw；勿用 R(1,2) 或 roll 角判断（后者在 pitch≈±90° 万向节锁时会误报）
+      const double det_err = std::abs(R.determinant() - 1.0);
+      const double ortho_err = (R * R.transpose() - Eigen::Matrix3d::Identity()).norm();
+      const double matrix_eps = 1e-2;
+      if (det_err > matrix_eps || ortho_err > matrix_eps) {
+          std::ostringstream oss;
+          oss << "非法旋转矩阵, det_err=" << det_err << ", ortho_err=" << ortho_err << ", R=\n" << R;
+          std::cerr << "[rotationMatrixToPitchYaw] " << oss.str() << std::endl;
+          throw std::runtime_error(oss.str());
       }
 
-      // pitch: 从 R(0,2) 和 R(2,2) 提取
-      double pitch = std::atan2(R(0,2), R(2,2));
-
-      // yaw: 从 R(1,0) 和 R(1,1) 提取
-      double yaw_raw = std::atan2(R(1,0), R(1,1));
+      // ZYX: pitch/yaw（输出 roll 由调用方固定为 0）
+      const double pitch = std::atan2(-R(2,0), std::hypot(R(2,1), R(2,2)));
+      const double yaw_raw = std::atan2(R(1,0), R(0,0));
 
       double yaw = 0;
       if (!has_last) {

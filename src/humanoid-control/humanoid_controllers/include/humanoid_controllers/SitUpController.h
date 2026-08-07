@@ -25,7 +25,8 @@ using ocs2::vector_t;
 /** 从坐姿 CSP hold 起身（段0 reverse → await start → 段1 sit→stand）。
  *
  * ROS 入口留主类。调用序：beginStandUpFromSeat（门禁需 hold）→ 主类重入 preUpdate /
- * release hold / pause MPC → kickHwReverseIfNeeded。/bot_stand_up_complete 由主类发布。 */
+ * pause MPC → kickHwReverseIfNeeded；CSP hold 在 preUpdate 段0 同线程再 release。
+ * /bot_stand_up_complete 由主类发布。 */
 class SitUpController {
  public:
   using Snapshot = SitControlManager::StandUpFromSeatStartSnapshot;
@@ -67,16 +68,20 @@ class SitUpController {
   bool isAwaitingStart() const { return awaiting_stand_up_start_; }
   bool isAborted() const { return aborted_; }
 
-  /** 段0 reverse + await-start。
+  /** 段0 进行中：主循环必须走 preUpdate，禁止正常 WBC 路径抢发。 */
+  bool ownsPreUpdate() const { return isActive() && !isReverseDone(); }
+
+  /** 段0 reverse + await-start（含同线程延后 release CSP hold）。
    *  @return true=仍在段0/await；false=结束（查 isAborted：DONE 时 isReverseDone，phase 保持至 resetOnComplete）。 */
   bool runPhase0(const ros::Time& time, const Eigen::VectorXd& jointPosWBC,
                  kuavo_msgs::jointCmd& out_cmd);
 
-  /** 门禁+规划+进 PHASE0_REVERSE。不 kick HW、不发 done（主类 release/pause 后再 kick）。 */
+  /** 门禁+规划+进 PHASE0_REVERSE。不 kick HW、不发 done、不 release hold
+   *  （主类 pause/kick 后，在 preUpdate 段0 同线程再 release）。 */
   bool beginStandUpFromSeat(std::string& err);
-  /** 主类 release hold 后调用：实机启动 HW reverse。 */
+  /** 主类 arm preUpdate 后调用：实机启动 HW reverse（此时 CSP hold 仍可未释放）。 */
   void kickHwReverseIfNeeded();
-  /** 主类 release 失败时回滚。 */
+  /** 主类 begin 失败时回滚。 */
   void clearPlan();
 
   void resetOnComplete();

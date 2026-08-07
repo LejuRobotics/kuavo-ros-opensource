@@ -82,12 +82,13 @@ def build_vr_launch_args(fields=None):
 def build_vr_launch_args_for_command(launch_cmd):
     """按拉起命令决定注入哪些字段并返回参数串。
 
-    标准 launch_quest3_ik.launch 注入全部参数；videostream 等变体只注入
-    ip_address（其他 bool 参数未声明），避免 roslaunch unused args 报错。
-    非 quest3_ik 命令返回空串。
+    标准 launch_quest3_ik.launch 与 videostream_orbbec 变体（deploy 视频回传
+    实际使用的 variant）注入全部参数，使双足/轮臂平台都能按配置启用增量 IK；
+    其余 videostream 变体（手动拉起）只注入其已声明字段，避免 roslaunch
+    unused args 报错。非 quest3_ik 命令返回空串。
     """
     if not launch_cmd or "launch_quest3_ik" not in launch_cmd:
         return ""
-    if "launch_quest3_ik.launch" in launch_cmd:
+    if "launch_quest3_ik.launch" in launch_cmd or "videostream_orbbec" in launch_cmd:
         return build_vr_launch_args()
-    return build_vr_launch_args(fields=("ip_address",))
+    return build_vr_launch_args(fields=("ip_address", "control_torso", "enable_vr_stop_robot"))

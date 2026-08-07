@@ -2710,10 +2710,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       else if (sit_up_active && !sit_up_reverse_done)
       {
         // 段0 reverse（实机 HW / 仿真 CSP 复刻）+ await-start：委托 SitUpController
+        // （CSP hold 延后 release 也在 runPhase0 内）
         kuavo_msgs::jointCmd seat_cmd;
         const bool still = sitUp_->runPhase0(time, jointPosWBC_, seat_cmd);
         if (sitUp_->isAborted()) {
-          // 段0 HW reverse 失败：发 stand_up failed，中止 preUpdate
+          // 段0 HW reverse / deferred release 失败：发 stand_up failed，中止 preUpdate
           std_msgs::Int8 bot_stand_up_failed;
           bot_stand_up_failed.data = -1;
           standUpCompletePub_.publish(bot_stand_up_failed);
@@ -3035,7 +3036,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return false;
     }
 
-    // 先切入 preUpdate，再释放 CSP：避免 release 后主循环一帧无 hold
+    // 只切入 preUpdate + kick；CSP hold 由 SitUpController::runPhase0 同线程延后 release。
+    // 若在 ROS 回调里先 release，主循环 update 可能已越过 isPreUpdateComplete 检查，
+    // 随后 seat_post.csp_hold=false 会发出一帧站立 WBC（mode 混杂、关节大幅跳变）。
     clearSeatOffsetPlan();
     isPreUpdateComplete = false;
     isInitStandUpStartTime_ = false;
@@ -3044,21 +3047,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     robotStartStandTime_ = 0.0;
     robotStandUpCompleteTime_ = 0.0;
 
-    if (!sitControlManager_->releaseSeatHoldForStandUp(err)) {
-      sitUp_->clearPlan();
-      sitUp_->resetOnComplete();
-      isPreUpdateComplete = true;
-      publishSeatReturnDone(false);
-      return false;
-    }
-
     if (mrtRosInterface_)
       mrtRosInterface_->pauseResumeMpcNode(true);
 
     sitUp_->kickHwReverseIfNeeded();
     publishSeatReturnDone(true);
-    ROS_INFO("[HumanoidController] Seat CSP hold released; stand_up_from_seat preUpdate started "
-             "(phase0=%s, then await start, phase1=standUpWbc sit->stand).",
+    ROS_INFO("[HumanoidController] stand_up_from_seat preUpdate armed "
+             "(CSP hold deferred to SitUp::runPhase0; phase0=%s, then await start, phase1=sit->stand).",
              is_real_ ? "HW jointMoveToPrepGoal" : "sim CSP replica");
     err.clear();
     return true;
@@ -3081,7 +3076,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return true;
     }
     res.success = true;
-    res.message = "Seat CSP hold released; stand_up_from_seat started.";
+    res.message = "stand_up_from_seat started (CSP hold release deferred to preUpdate phase0).";
     return true;
   }
 
@@ -3255,8 +3250,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
   void humanoidController::update(const ros::Time &time, const ros::Duration &dfd)
   {
-    // preUpdate 未完成（含 seathold 释放后的重入起立）时，路由到 preUpdate 起立，跳过主循环
-    if (!isPreUpdateComplete) {
+    // 正常：仅看 isPreUpdateComplete。座椅段0：SitUp 专属 ownsPreUpdate，与开机蹲起路径隔离。
+    if (!isPreUpdateComplete || (sitUp_ && sitUp_->ownsPreUpdate())) {
       // SitUp 起立需要 release hold 前实测关节：每帧把 jointPosWBC_ 注入，begin 时即可取用
       if (sitUp_)
         sitUp_->setMeasuredStart(jointPosWBC_);
@@ -3641,6 +3636,10 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
                 if (is_rl_controller_)// 切换到RL
                 {
                   resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                  // 插值阶段直接输出 arm_interpolation_result_，滤波器未随之更新
+                  // 在切到 AMP 前对齐滤波器，避免本帧剩余 WBC 流程使用旧 MPC 状态回跳
+                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
                   // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
                   if (current_controller_ptr_) {
                     current_controller_ptr_->onInterpolationComplete();

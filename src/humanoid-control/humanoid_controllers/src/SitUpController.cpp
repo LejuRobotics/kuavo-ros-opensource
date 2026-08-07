@@ -251,7 +251,7 @@ bool SitUpController::beginStandUpFromSeat(std::string& err) {
     }
   }
 
-  // 状态机进入段0（kick HW / done pub 由主类在 release hold 之后做）
+  // 状态机进入段0（kick HW / done pub 由主类做；CSP hold 延到 preUpdate 段0 再 release）
   phase_ = Phase::PHASE0_REVERSE;
   reverse_seat_offset_done_ = false;
   awaiting_stand_up_start_ = false;
@@ -435,6 +435,16 @@ bool SitUpController::runPhase0(const ros::Time& time, const Eigen::VectorXd& jo
                                 kuavo_msgs::jointCmd& out_cmd) {
   if (phase_ == Phase::IDLE)
     return false;
+
+  // 同线程延后 release：勿在 ROS 回调里先清 CSP，否则主循环可能发一帧站立 WBC。
+  if (scm_.isSeatCspHold()) {
+    std::string rel_err;
+    if (!scm_.releaseSeatHoldForStandUp(rel_err)) {
+      ROS_ERROR("%s deferred releaseSeatHoldForStandUp failed: %s", kLogTag, rel_err.c_str());
+      markAborted();
+      return false;
+    }
+  }
 
   bool still;
   if (is_real_)

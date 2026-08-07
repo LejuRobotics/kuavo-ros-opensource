@@ -729,7 +729,7 @@ def start_vr_remote_control_callback(event):
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
     # 读取 h12_vr_launch.yaml，按拉起命令把 IP/遥操形式/控腰/急停开关拼成
-    # launch 参数追加到拉起命令（videostream 变体只注入 ip_address）。
+    # launch 参数追加到拉起命令（videostream 变体只注入其已声明字段）。
     # 配置非法时输出异常日志并终止启动，不回退默认。
     launch_cmd = LAUNCH_VR_REMOTE_CONTROL_CMD
     try:
