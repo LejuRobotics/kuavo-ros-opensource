@@ -580,7 +580,16 @@ namespace humanoid_controller
       new_controller->updateVelocityLimitsParam(*nh_ptr_);
     }
     // 切换到非 MPC 控制器后，异步切换手臂模式到 1
-    if (new_controller && new_controller->getType() != RLControllerType::MPC)
+    // 豁免：autoControllerSwitch 因最近的外部手臂/腰部控制活动自动切到 manipulation_controller 时，
+    // 保留手臂外部控制模式(2)，避免覆盖 VR/动作播放刚设置的模式 2（humanoidController 会在
+    // tryApplyPendingExternalArmControllerMode 中兑现缓存的外部控制模式）。
+    // 外部活动由 [x,2] 模式消息持续刷新，VR 运行期间豁免稳定成立；手动切换（无外部活动）不豁免。
+    const bool keep_arm_external_mode =
+        auto_switch_config_.enabled &&
+        name == auto_switch_config_.manipulation_controller &&
+        hasRecentExternalControlActivityLocked(ros::Time::now());
+    if (new_controller && new_controller->getType() != RLControllerType::MPC &&
+        !keep_arm_external_mode)
     {
       changeArmCtrlModeAsync(1);
     }
