@@ -70,9 +70,76 @@ KUAVO_REMOTE_PATH=$(dirname $SCRIPT_DIR)/lib/kuavo_remote
 ROBOT_VERSION=$ROBOT_VERSION
 INSTALLED_DIR=$KUAVO_ROS_CONTROL_WS_PATH/installed
 RL_INSTALLED_DIR=$KUAVO_RL_WS_PATH/installed
+# 架构：仅用于 arm64 额外编译 hardware_node
+ARCH=$(uname -m)
+IS_ARM64=0
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    IS_ARM64=1
+fi
+
+# 系统版本：Ubuntu >= 24.04 使用 requirements.noble.txt + PEP 668 兼容安装
+UBUNTU_VERSION_ID=""
+if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    UBUNTU_VERSION_ID="${VERSION_ID:-}"
+fi
+IS_UBUNTU_24_04_OR_NEWER=0
+if [ -n "$UBUNTU_VERSION_ID" ]; then
+    if dpkg --compare-versions "$UBUNTU_VERSION_ID" ge "24.04"; then
+        IS_UBUNTU_24_04_OR_NEWER=1
+    fi
+fi
+echo "Current architecture: $ARCH (IS_ARM64=$IS_ARM64)"
+echo "Ubuntu VERSION_ID: ${UBUNTU_VERSION_ID:-unknown} (IS_UBUNTU_24_04_OR_NEWER=$IS_UBUNTU_24_04_OR_NEWER)"
+
+# 解析要安装的 requirements 文件：
+# - Ubuntu 24.04+：优先同目录 requirements.noble.txt
+# - 其他系统（含传统 x86/20.04）：使用传入的原 requirements.txt
+resolve_requirements_file() {
+    local req_file="$1"
+    local req_dir
+    local noble_file
+
+    if [ "$IS_UBUNTU_24_04_OR_NEWER" -eq 1 ]; then
+        req_dir="$(dirname "$req_file")"
+        if [ "$req_dir" = "." ]; then
+            noble_file="requirements.noble.txt"
+        else
+            noble_file="${req_dir}/requirements.noble.txt"
+        fi
+        if [ -f "$noble_file" ]; then
+            echo "$noble_file"
+            return 0
+        fi
+        echo "warning: Ubuntu ${UBUNTU_VERSION_ID} 未找到 $noble_file，回退到 $req_file" >&2
+    fi
+    echo "$req_file"
+}
+
+pip_install_requirements() {
+    local req_file="$1"
+    local resolved_req
+
+    resolved_req="$(resolve_requirements_file "$req_file")"
+    if [ ! -f "$resolved_req" ]; then
+        echo "requirements 文件不存在，跳过: $resolved_req"
+        return 0
+    fi
+
+    echo "Installing Python deps from: $resolved_req"
+    if [ "$IS_UBUNTU_24_04_OR_NEWER" -eq 1 ]; then
+        # PEP 668: 系统 Python 需显式允许（部署脚本场景）
+        python3 -m pip install -r "$resolved_req" --break-system-packages
+    else
+        # 传统环境（如 x86 + Ubuntu 20.04）保持原行为
+        pip3 install -r "$resolved_req"
+    fi
+}
+
 cd $H12PRO_CONTROLLER_NODE_DIR
-pip3 install -r requirements.txt
-pip3 install -r $NOITOM_HI5_HAND_UDP_PYTHON/requirements.txt
+pip_install_requirements "requirements.txt"
+pip_install_requirements "$NOITOM_HI5_HAND_UDP_PYTHON/requirements.txt"
 
 echo "KUAVO_ROS_CONTROL_WS_PATH: $KUAVO_ROS_CONTROL_WS_PATH"
 echo "SERVICE_DIR: $SERVICE_DIR"
@@ -87,6 +154,10 @@ if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
         source $RL_INSTALLED_DIR/setup.bash
     fi
     catkin build humanoid_controllers
+    if [ "$IS_ARM64" -eq 1 ]; then
+        echo "arm64: building hardware_node after humanoid_controllers (rl)..."
+        catkin build hardware_node
+    fi
 fi
 
 cd $KUAVO_ROS_CONTROL_WS_PATH
@@ -96,6 +167,10 @@ if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
     source $INSTALLED_DIR/setup.bash
 fi
 catkin build humanoid_controllers
+if [ "$IS_ARM64" -eq 1 ]; then
+    echo "arm64: building hardware_node after humanoid_controllers..."
+    catkin build hardware_node
+fi
 catkin build h12pro_controller_node
 catkin build humanoid_plan_arm_trajectory
 catkin build kuavo_ros_interfaces

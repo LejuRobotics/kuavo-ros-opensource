@@ -16,7 +16,7 @@
     </include>
 
     <arg name="use_external_mpc"   default="true"/>
-    <arg name="wbc_frequency"      default="500"/>
+    <arg name="wbc_frequency"      default="1000"/>
     <arg name="sensor_frequency"   default="1000"/>
     <arg name="use_joystick"       default="true"/>
     <arg name="with_estimation"    default="true"/>
@@ -30,6 +30,7 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
     <arg name="stand_up_protect" default="true"/>
+    <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -52,13 +53,19 @@
     <arg name="with_coredump" value="" unless="$(arg coredump)"/>
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
-    <arg name="with_led" default="true"/>
+    <!-- 电源板/电池/灯带检测仅在 5 代(major==5)与轮臂(major==6)机型启动；
+         ROBAN(1X)与 4 代双足(4X)不启动这三项检测。 -->
+    <arg name="with_led" default="$(eval (arg('robot_version') // 10) % 10 in (5, 6))"/>
     <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
-    <arg name="with_battery" default="true"/>
+    <arg name="with_battery" default="$(eval (arg('robot_version') // 10) % 10 in (5, 6))"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
-    
+
+    <!-- 启动期 EC 驱动器固件与参数校验 -->
+    <arg name="check_firmware_param" default="false" doc="硬件层启动后对 youda EC 驱动器固件版本与全量参数进行校验，与标准定义 JSON 比对；默认关闭，需要时显式 check_firmware_param:=true"/>
+    <arg name="allow_mismatch" default="false" doc="true=校验不一致时仅告警继续启动；false=严格模式，不一致即中止启动"/>
+
     <!-- RL相关参数 -->
     <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
@@ -100,7 +107,7 @@
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
     <param name="pull_up_force_threshold_roban" value="0.50"/>
-    <param name="torso_interpolation_max_velocity" value="0.06"/>
+    <param name="torso_interpolation_max_velocity" value="0.1"/>
     <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
     <!-- Launch script to collect kuavo-launch information -->
     <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
@@ -108,6 +115,8 @@
     
     <!-- teach_pendant=1, teach pendant mode -->
     <param name="teach_pendant"  value="$(arg teach_pendant)"/>
+    <param name="check_firmware_param" value="$(arg check_firmware_param)"/>
+    <param name="allow_mismatch"       value="$(arg allow_mismatch)"/>
 
     <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
     <param name="arm_move_spd_half_up_body" value="$(arg arm_move_spd_half_up_body)"/>
@@ -176,6 +185,20 @@
     <group if="$(arg cali_set_zero)">
         <param name="cali" value="true" />
     </group>
+    
+    <!-- 启动时强制清零，避免沿用上一次 session 的 /use_sit_init 残留导致站姿启动变蹲姿 -->
+    <param name="/use_sit_init" value="false" />
+    <param name="/use_sit_init" value="$(arg use_sit_init)" />
+    <!-- 启动时清零，避免沿用上一次 session 的 ready 导致 HW 抢跑 -->
+    <param name="/hardware_sit_prep_ready" value="false" />
+    <rosparam param="/hardware_prep_joint_pos_deg">[]</rosparam>
+    <rosparam param="/hardware_prep_joint_pos_offset_deg">[]</rosparam>
+    <rosparam param="/hardware_prep_joint_pos_leg_first_deg">[]</rosparam>
+    <rosparam param="/hardware_prep_joint_pos_arm_clear_deg">[]</rosparam>
+    <rosparam param="/hardware_prep_moves">[]</rosparam>
+    <param name="/hardware_prep_two_phase" value="false" />
+    <param name="/hardware_prep_reverse_leg_first" value="false" />
+    <param name="/hardware_prep_reverse_arm_clear" value="false" /> 
     
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
        output="screen" required="true" clear_params="true"
@@ -308,6 +331,8 @@
     <group if="$(arg with_battery)">
       <include file="$(find kuavo_led_controller)/launch/battery_info.launch">
         <arg name="BATTERY" value="enable"/>
+        <!-- 当 LED 同时启用时, 电池信息通过 LED 节点的 _query_battery_hw 服务获取, 避免串口冲突 -->
+        <arg name="backend" value="$(eval 'ros_service' if arg('with_led') else 'serial')" />
       </include>
     </group>
 
@@ -318,6 +343,93 @@
       <include file="$(find kuavo_audio_receiver)/launch/receive_voice.launch"/>
 
     </group>
+
+    <!-- ==================== kuavo_mocap_gmr (Motion Capture GMR) ==================== -->
+    <arg name="with_mocap_gmr" default="false" doc="Enable motion capture GMR"/>
+    <arg name="gmr_use_sim" default="false" doc="Use simulated motion instead of OptiTrack"/>
+    <!-- Common GMR configuration -->
+    <arg name="gmr_robot" default="kuavo_s52" doc="Target robot type for GMR"/>
+    <arg name="gmr_format" default="motive_streaming" doc="Motion format (lafan1, motive_bj, motive_sz)"/>
+    <arg name="gmr_cali_arm_pose_deg" default="75.0" doc="Calibration arm pose angle"/>
+    <arg name="gmr_fps" default="100.0" doc="GMR publishing rate (Hz)"/>
+    <arg name="gmr_enable_viewer" default="false" doc="Enable MuJoCo viewer for GMR"/>
+    <!-- CPU affinity: bind GMR process to specific P-cores (Ultra 7 255H: P-cores 0-5) -->
+    <arg name="gmr_cpu_cores" default="[]" doc="CPU cores to bind GMR process"/>
+    <!-- OptiTrack streaming parameters (when gmr_use_sim=false) -->
+    <arg name="gmr_server_ip" default="192.168.200.160" doc="OptiTrack server IP"/>
+    <arg name="gmr_client_ip" default="192.168.200.117" doc="Client (robot) IP"/>
+    <arg name="gmr_use_multicast" default="false" doc="Use multicast for OptiTrack"/>
+    <!-- Simulation parameters (when gmr_use_sim=true) -->
+    <arg name="gmr_data_file" default="" doc="Path to recorded motion file (.pkl or .bvh), empty for synthetic"/>
+    <arg name="gmr_loop" default="true" doc="Loop motion data"/>
+    <arg name="gmr_human_height" default="1.75" doc="Simulated human height (meters)"/>
+
+    <group if="$(arg with_mocap_gmr)">
+      <!-- Use gmr_streaming.launch for real OptiTrack -->
+      <group unless="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_streaming.launch">
+          <arg name="server_ip" value="$(arg gmr_server_ip)"/>
+          <arg name="client_ip" value="$(arg gmr_client_ip)"/>
+          <arg name="use_multicast" value="$(arg gmr_use_multicast)"/>
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+          <arg name="cpu_cores" value="$(arg gmr_cpu_cores)"/>
+        </include>
+      </group>
+      <!-- Use gmr_sim.launch for simulated motion -->
+      <group if="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_sim.launch">
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="data_file" value="$(arg gmr_data_file)"/>
+          <arg name="loop" value="$(arg gmr_loop)"/>
+          <arg name="human_height" value="$(arg gmr_human_height)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+        </include>
+      </group>
+    </group>
+
+    <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
+    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
+    <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR (GMR IK only supports kuavo_s52)"/>
+    <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>
+    <arg name="pico_enable_viewer" default="false" doc="Enable MuJoCo viewer for PICO GMR"/>
+    <arg name="pico_enable_gmr_smoothing" default="true" doc="Enable Gaussian filter smoothing"/>
+    <arg name="pico_gmr_gaussian_sigma" default="1.0" doc="Gaussian kernel sigma"/>
+    <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
+    <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
+    <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
+    <!-- 末端执行器类型: none / qiangnao / qiangnao_touch / jodell / lejuclaw / revo2 -->
+    <arg name="pico_end_effector_type" default="qiangnao" doc="End effector type for PICO GMR dexhand control"/>
+    <!-- 头控参数（GMR 和 Teleop 路径共享） -->
+    <arg name="pico_enable_head_control" default="true" doc="Enable independent head control node"/>
+    <arg name="pico_head_control_mode" default="fixed" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+    <!-- CPU affinity: bind PICO retarget process to specific P-cores (Ultra 7 255H: P-cores 0-5) -->
+    <arg name="pico_cpu_cores" default="[]" doc="CPU cores to bind PICO retarget process (empty=no binding)"/>
+
+    <group if="$(arg with_pico_gmr)">
+      <!-- 设置末端执行器类型，供 pico_dexhand_control_node.py 读取 -->
+      <param name="/end_effector_type" value="$(arg pico_end_effector_type)"/>
+      <include file="$(find kuavo_pico_gmr)/launch/pico_streaming.launch">
+        <arg name="robot" value="$(arg pico_robot)"/>
+        <arg name="human_height" value="$(arg pico_human_height)"/>
+        <arg name="enable_viewer" value="$(arg pico_enable_viewer)"/>
+        <arg name="enable_gmr_smoothing" value="$(arg pico_enable_gmr_smoothing)"/>
+        <arg name="gmr_gaussian_sigma" value="$(arg pico_gmr_gaussian_sigma)"/>
+        <arg name="gmr_velocity_clip" value="$(arg pico_gmr_velocity_clip)"/>
+        <arg name="gmr_velocity_deadzone" value="$(arg pico_gmr_velocity_deadzone)"/>
+        <arg name="enable_dexhand_control" value="$(arg pico_enable_dexhand_control)"/>
+        <arg name="enable_head_control" value="$(arg pico_enable_head_control)"/>
+        <arg name="head_control_mode" value="$(arg pico_head_control_mode)"/>
+        <arg name="cpu_cores" value="$(arg pico_cpu_cores)"/>
+      </include>
+    </group>
+
 
     <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
     <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>

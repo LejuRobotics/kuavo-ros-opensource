@@ -118,8 +118,11 @@ class KuavoRobotLLM:
             self.tts_end.close()
 
         # 停止播音
-        stop_publisher = roslibpy.Topic(self._ws_client, '/stop_music', 'std_msgs/Bool')
-        stop_publisher.publish(roslibpy.Message({"data": True}))
+        try:
+            stop_service = roslibpy.Service(self._ws_client, '/stop_music', 'std_srvs/Trigger')
+            stop_service.call({})
+        except Exception as e:
+            print(f"【停止服务】停止播音失败: {e}")
 
         print("【停止服务】所有服务已停止")
 

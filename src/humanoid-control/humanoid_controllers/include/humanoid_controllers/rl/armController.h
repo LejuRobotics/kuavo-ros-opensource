@@ -9,6 +9,7 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include <Eigen/Dense>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -124,6 +125,13 @@ public:
                 kuavo_msgs::jointCmd& joint_cmd_msg);
 
     /**
+     * @brief 仅更新内部状态（current_arm_pos_/vel_），不触发模式切换或写入 joint_cmd
+     */
+    void updateInternalState(const Eigen::VectorXd& joint_pos,
+                              const Eigen::VectorXd& joint_vel,
+                              size_t arm_start_idx);
+
+    /**
      * @brief 平滑插值到目标位置（专用插值函数）
      *
      * 使用五次多项式插值从当前位置平滑移动到目标位置，并直接替换joint_cmd_msg中的手臂指令。
@@ -154,7 +162,8 @@ public:
      * @return 是否切换成功（false表示指令已缓存）
      */
     bool changeMode(int target_mode);
-
+    void setExternalCommandBufferCallback(std::function<bool()> callback);
+    
     /**
      * @brief 获取当前控制模式
      * @return 当前模式：0=锁定, 1=自动摆臂, 2=外部控制
@@ -197,6 +206,21 @@ public:
      * @return 手臂关节起始索引（joint_num_ + joint_waist_num_）
      */
     size_t getArmStartIndex() const { return arm_start_idx_; }
+
+    /**
+     * @brief 清除外部模式下的缓冲目标
+     */
+    void clearExternalTarget();
+    /**
+     * @brief 锁定外部轨迹接收（动作期间屏蔽 VR 干扰，只让 Python action 通过）
+     */
+    void lockExternalTarget(bool lock) { external_target_locked_ = lock; }
+
+    /**
+     * @brief 检查是否已收到外部目标输入（VR/外部轨迹）
+     * @return true表示已收到外部输入，false表示无外部输入
+     */
+    bool hasExternalTarget() const { return external_target_received_; }
 
     // ==================== 回调函数（供ROS服务使用） ====================
     
@@ -257,6 +281,12 @@ private:
      * @brief VR输入回调函数（处理/kuavo_arm_traj话题）
      */
     void jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg);
+    void actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg);
+
+    void applyBufferedMode2TargetIfReady();
+    void storeMode2Target(const sensor_msgs::JointState& msg,
+                          Eigen::VectorXd& target_q,
+                          Eigen::VectorXd& target_v) const;
     
     /**
      * @brief 更新锁定状态的期望值
@@ -321,6 +351,7 @@ private:
     // ROS相关
     ros::NodeHandle nh_;
     ros::Subscriber joint_sub_;
+    ros::Subscriber action_traj_sub_;
     ocs2::humanoid::TopicLogger* ros_logger_;  // ROS日志发布器（可选）
     
     // 关节信息
@@ -360,6 +391,11 @@ private:
     Eigen::VectorXd external_target_q_;  // 外部控制目标位置（滤波或插值后）
     Eigen::VectorXd external_target_v_;  // 外部控制目标速度
     bool external_target_received_;      // 是否已收到外部输入
+    bool external_target_locked_{false}; ///< 锁定外部轨迹，动作期间屏蔽 VR 信号
+    Eigen::VectorXd buffered_mode2_target_q_; // 自动切换缓冲期缓存的最新外部目标
+    Eigen::VectorXd buffered_mode2_target_v_;
+    bool buffered_mode2_target_received_{false};
+    std::function<bool()> external_command_buffer_callback_;
     ros::Time last_external_input_time_; // 上一次外部输入的时间戳
     bool last_external_input_time_valid_; // 上一次时间戳是否有效
     

@@ -156,7 +156,8 @@ class DrakeChestElbowHandPointOptSolver final {
                                     const Eigen::Vector3d& pRightElbowRef,
                                     const Eigen::Vector3d& pRightHandRef,
                                     bool updateChestOrientation = true,
-                                    bool updateChestPosition = true) {
+                                    bool updateChestPosition = true,
+                                    bool freezeChestPosition = true) {
     using drake::symbolic::Expression;
 
     syncCachedPointsFromCachedState();  // 防御性初始化，确保cached points与cached state一致
@@ -195,7 +196,7 @@ class DrakeChestElbowHandPointOptSolver final {
     prog.AddBoundingBoxConstraint(boundsConfig_.rightHandLb, boundsConfig_.rightHandUb, p2Right);  // right hand box
     prog.AddBoundingBoxConstraint(boundsConfig_.yawLb, boundsConfig_.yawUb, yaw);                  // yaw 1 dim limit
     prog.AddBoundingBoxConstraint(boundsConfig_.pitchLb, boundsConfig_.pitchUb, pitch);            // pitch 1 dim limit
-    if (!updateChestPositionEffective) {
+    if (!updateChestPositionEffective && freezeChestPosition) {
       for (int i = 0; i < 3; ++i) {
         prog.AddConstraint(pChest(i) == pChestPrev_(i));
       }

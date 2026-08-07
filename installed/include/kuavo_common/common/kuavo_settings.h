@@ -167,6 +167,9 @@ namespace HighlyDynamic
         std::vector<int32_t> vr_joint_kd;
         std::vector<double> vr_ruiwo_kp;
         std::vector<double> vr_ruiwo_kd;
+        // EC/YD驱动器温度限幅值（对象索引0x3F0D，单位：℃）
+        // 为空则不写入；元素个数应与EC电机数一致，按EC电机顺序对应
+        std::vector<int32_t> temperature_limit;
     };
 
     struct HardwareSettings

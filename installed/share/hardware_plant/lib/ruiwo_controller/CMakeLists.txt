@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 查找 Python 库
-find_package(Python3 3.8 EXACT COMPONENTS Interpreter Development NumPy REQUIRED)
+find_package(Python3 3.8 COMPONENTS Interpreter Development NumPy REQUIRED)
 # find_package(PythonInterp REQUIRED 3.8)
 if(Python3_FOUND)
     message(STATUS "Found Python: ${Python3_EXECUTABLE}")

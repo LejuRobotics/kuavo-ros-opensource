@@ -200,11 +200,10 @@ namespace humanoid_controller
     {
       ROS_ERROR("[%s] Failed to get init_fall_down_state from ROS params", name_.c_str());
     }
-    // 原读取逻辑：设 robot_init_state_param/squat_initial_state 为倒地初始姿态
-    // 倒地开机功能已禁用：强制忽略 init_fall_down_state，不做任何覆盖
-    (void)nh_.getParam("/init_fall_down_state", init_fall_down_state);
     if (init_fall_down_state) {
-      ROS_WARN("[%s] init_fall_down_state=true ignored (倒地开机已禁用), keeping default init/initial_state", name_.c_str());
+      ros::param::set("robot_init_state_param", mujoco_init_state);
+      ros::param::set("/squat_initial_state", squat_initial_state_vector);
+      ROS_INFO("[%s] init_fall_down_state is true, set robot_init_state_param and squat_initial_state", name_.c_str());
     }
 
     initialized_ = true;
@@ -502,6 +501,17 @@ namespace humanoid_controller
     RLControllerBase::resume();
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
     reset();
+  }
+
+  void FallStandController::resumeWarm()
+  {
+    // STANDING 为 no-op: 推理冻结无内容可恢复, reset 会发布 0 令 Python joy 永不 EXIT (详见头文件)
+    if (fall_stand_state_ != FallStandState::STANDING)
+    {
+      resume();  // 未完成: 维持原重启语义
+      return;
+    }
+    ROS_INFO("[%s] Controller warm-resume no-op (keep STANDING, output frozen at terminal pose)", name_.c_str());
   }
 
   bool FallStandController::requestToExit() const
@@ -852,6 +862,13 @@ namespace humanoid_controller
         {
           ROS_INFO("[%s] Motion trajectory finished, switch state to STANDING (allow exit)", name_.c_str());
           fall_stand_state_ = FallStandState::STANDING;
+          // 进入 STANDING 态这一刻同步发布完成值, 避免主线程切走 AMP 后 updateImpl 不再被调、
+          // 常规 publish 发不出 STANDING → Joy 末值冻结在上一个状态、_standup_phase 不清。
+          if (ros_logger_)
+          {
+            ros_logger_->publishValue("/humanoid_controller/FallStandController/fall_stand_state_",
+                                      static_cast<int>(fall_stand_state_));
+          }
         }
       }
       else

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-一键相机标定接口（按 layout 分流 52 / 62）：
+一键相机标定接口（按 layout 分流 52 / 56 / 62）：
 1) 自动对「头部 + 左右手」三个 demo 进行采样（capture -> 写 CSV）
 2) 自动进行优化（optimize -> 读 CSV 输出 calibration.yaml / calibrated URDF）
 3) 打印优化得到的关节修正量（dry-run 零点脚本）
@@ -8,7 +8,7 @@
 
 依赖：
 - src/Camera_Calibration/run_chessboard_calibration.sh
-- biped52: apply_zero_deltas_to_arms_zero.py
+- biped52/biped56: apply_zero_deltas_to_arms_zero.py（内部按版本选择 14/16 维）
 - wheel62: apply_zero_deltas_to_arms_zero_wheel62.py
 """
 
@@ -31,11 +31,13 @@ def _cc_dir() -> Path:
 
 def _resolve_robot_layout(arg: str) -> str:
     """解析 robot_layout：auto 时读 ROBOT_VERSION。"""
-    if arg in ("biped52", "wheel62"):
+    if arg in ("biped52", "wheel62", "biped56"):
         return arg
     rv = os.environ.get("ROBOT_VERSION", "").strip()
     if rv == "52":
         return "biped52"
+    if rv == "56":
+        return "biped56"
     if rv in ("62", "63"):
         return "wheel62"
     if rv:
@@ -62,6 +64,8 @@ def _run_chessboard(stage: str, robot_layout: str) -> int:
 
 
 def _apply_script_for_layout(robot_layout: str) -> Path:
+    # wheel62/63 为 Motorevo 16 维,单独走轮臂脚本;
+    # biped52/56 共用入口，脚本内部区分 52 的 14 维+EC 与 56 的 16 维 Ruiwo。
     if robot_layout == "wheel62":
         return _cc_dir() / "apply_zero_deltas_to_arms_zero_wheel62.py"
     return _cc_dir() / "apply_zero_deltas_to_arms_zero.py"
@@ -74,6 +78,9 @@ def _apply_deltas(dry_run: bool, robot_layout: str) -> int:
         return 2
 
     cmd = [sys.executable, str(apply_py)]
+    if robot_layout in ("biped52", "biped56"):
+        robot_version = "52" if robot_layout == "biped52" else "56"
+        cmd.extend(["--robot-version", robot_version])
     if dry_run:
         cmd.append("--dry-run")
     p = subprocess.run(cmd, cwd=str(_ws_root()), env=os.environ.copy())
@@ -81,12 +88,12 @@ def _apply_deltas(dry_run: bool, robot_layout: str) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="一键相机标定 + 零点回写（52/62 分流）")
+    ap = argparse.ArgumentParser(description="一键相机标定 + 零点回写（52/56/62 分流）")
     ap.add_argument(
         "--robot_layout",
         default="auto",
-        choices=["auto", "biped52", "wheel62"],
-        help="机型布局；auto 时读 ROBOT_VERSION（52→biped52，62/63→wheel62）",
+        choices=["auto", "biped52", "biped56","wheel62"],
+        help="机型布局；auto 时读 ROBOT_VERSION（52→biped52，56→biped56，62/63→wheel62）",
     )
     args = ap.parse_args()
     robot_layout = _resolve_robot_layout(args.robot_layout)
@@ -136,4 +143,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

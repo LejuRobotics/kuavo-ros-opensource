@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(humanoid_controllers)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_common/cmake/kuavo_arch.cmake)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -46,11 +48,34 @@ find_package(catkin REQUIRED
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
+        std_srvs
         leju_mobile_base_msgs
         )
-find_package(drake REQUIRED)
+if(KUAVO_BUILD_FOR_AARCH64)
+    find_package(drake QUIET)
+    find_package(OpenVINO QUIET)
+else()
+    find_package(drake REQUIRED)
+    find_package(OpenVINO REQUIRED)
+endif()
+if(drake_FOUND)
+    set(KUAVO_HAS_DRAKE TRUE)
+    add_definitions(-DHUMANOID_CONTROLLERS_HAS_DRAKE)
+    add_definitions(-DKUAVO_HAS_DRAKE)
+    message(STATUS "[humanoid_controllers] drake FOUND")
+else()
+    set(KUAVO_HAS_DRAKE FALSE)
+    message(WARNING "[humanoid_controllers] drake NOT FOUND - wheel-arm stub only (aarch64 without Drake)")
+endif()
 find_package(PkgConfig REQUIRED)
-find_package(OpenVINO REQUIRED)
+if(OpenVINO_FOUND)
+    add_definitions(-DHUMANOID_CONTROLLERS_HAS_OPENVINO)
+    message(STATUS "[humanoid_controllers] OpenVINO FOUND")
+elseif(NOT KUAVO_BUILD_FOR_AARCH64)
+    message(FATAL_ERROR "[humanoid_controllers] OpenVINO required on x86_64")
+else()
+    message(WARNING "[humanoid_controllers] OpenVINO NOT FOUND - RL biped disabled (aarch64 wheel-arm)")
+endif()
 find_package(yaml-cpp REQUIRED)
 pkg_check_modules(pinocchio REQUIRED pinocchio)
 
@@ -71,7 +96,7 @@ if (USE_DDS OR USE_LEJU_DDS)
         )
 
         set(UNITREE_SDK_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/include)
-        set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/x86_64)
+        set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/${KUAVO_UNITREE_SDK_ARCH_SUBDIR})
 
         # Convert to absolute paths and print them
         get_filename_component(UNITREE_SDK_INCLUDE_PATH_ABS ${UNITREE_SDK_INCLUDE_PATH} ABSOLUTE)
@@ -102,9 +127,11 @@ if (USE_DDS OR USE_LEJU_DDS)
 endif()
 
 find_package(kuavo_estimation)
-if(kuavo_estimation_FOUND)
+if(kuavo_estimation_FOUND AND NOT KUAVO_BUILD_FOR_AARCH64)
     add_definitions(-DKUAVO_CONTROL_LIB_FOUND)
     message(STATUS "Found kuavo_estimation")
+elseif(kuavo_estimation_FOUND AND KUAVO_BUILD_FOR_AARCH64)
+    message(STATUS "[humanoid_controllers] kuavo_estimation stub on aarch64 — inEKF/joint_filter disabled")
 else()
     message(WARNING "Could not find kuavo_estimation, disabling kuavo_control library, if you need it, just update submodules")
 endif()
@@ -164,7 +191,7 @@ if(USE_DDS OR USE_LEJU_DDS)
 endif()
 
 # CycloneDDS include directories will be handled by the target_link_libraries with CycloneDDS-CXX::ddscxx
-if (kuavo_estimation_FOUND)
+if (kuavo_estimation_FOUND AND NOT KUAVO_BUILD_FOR_AARCH64)
 message(STATUS "add kuavo_estimation include")
 include_directories(${kuavo_estimation_INCLUDE_DIRS})
 endif()
@@ -262,8 +289,7 @@ if (USE_DDS OR USE_LEJU_DDS)
 endif()
 
 ## Declare a cpp library
-add_library(${PROJECT_NAME}
-        src/humanoidController.cpp
+set(${PROJECT_NAME}_SOURCES
         src/humanoidWheelController.cpp
         src/humanoidController_wheel_wbc.cpp
         src/ArmContactForceEstimatorWheel.cpp
@@ -273,11 +299,27 @@ add_library(${PROJECT_NAME}
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
         src/util/TopicMonitor.cpp
+        )
+# Full biped controller (RL/OpenVINO) on x86_64; aarch64 uses stub when Drake/OpenVINO absent.
+# Wheel WBC uses humanoidController_wheel_wbc.cpp; stub satisfies nodelet link for biped symbols.
+if(KUAVO_BUILD_FOR_AARCH64)
+  if(drake_FOUND AND OpenVINO_FOUND)
+    list(APPEND ${PROJECT_NAME}_SOURCES src/humanoidController.cpp)
+  else()
+    list(APPEND ${PROJECT_NAME}_SOURCES src/humanoidController_wheel_only_stub.cpp)
+  endif()
+else()
+  list(APPEND ${PROJECT_NAME}_SOURCES src/humanoidController.cpp)
+endif()
+if(OpenVINO_FOUND)
+  list(APPEND ${PROJECT_NAME}_SOURCES
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp
         src/rl/FallStandController.cpp
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
+        src/rl/MoREController.cpp
+        src/rl/VMPController.cpp
         src/rl/armController.cpp
         src/rl/DepthWalkController.cpp
         src/rl/waistController.cpp
@@ -285,31 +327,41 @@ add_library(${PROJECT_NAME}
         # src/MinicController.cpp
         src/rl/VMPController.cpp
         src/rl/DanceController.cpp
+        src/SitControlManager.cpp
+        src/SitUpController.cpp
         )
+endif()
+add_library(${PROJECT_NAME} ${${PROJECT_NAME}_SOURCES})
 
 target_link_libraries(${PROJECT_NAME}
         ${catkin_LIBRARIES}
         ${pinocchio_LIBRARIES}
         humanoid_interface_shm
-        drake::drake
-        openvino::runtime
         arm_torque_controller
         yaml-cpp
         )
+if(drake_FOUND)
+        target_link_libraries(${PROJECT_NAME} drake::drake)
+endif()
+if(OpenVINO_FOUND)
+        target_link_libraries(${PROJECT_NAME} openvino::runtime)
+endif()
 if (USE_DDS OR USE_LEJU_DDS)
         target_link_libraries(${PROJECT_NAME}
                 common_dds_lib
         )
 endif()
-if (kuavo_estimation_FOUND)
+if (kuavo_estimation_FOUND AND NOT KUAVO_BUILD_FOR_AARCH64)
 message(STATUS "add kuavo_estimation link")
 target_link_libraries(${PROJECT_NAME}
         ${kuavo_estimation_LIBRARIES}
         )
 endif()
 
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_compile_options(${PROJECT_NAME} PUBLIC ${OCS2_CXX_FLAGS})
 
+if(drake_FOUND)
 # Target trajectories publish node
 add_executable(humanoid_target_trajectories_publisher
         src/TargetTrajectoriesPublisher.cpp
@@ -337,48 +389,47 @@ target_link_libraries(cheat_controller_node
         ${catkin_LIBRARIES}
         )
 target_compile_options(cheat_controller_node PRIVATE ${OCS2_CXX_FLAGS})
+endif()
 
-# Controller Nodelet
+# Controller Nodelet (optional when ROS nodelet stack not in Jammy source install)
+find_path(_KUAVO_NODELET_INCLUDE nodelet/nodelet.h
+  PATHS /opt/ros/noetic/include ${CMAKE_INSTALL_PREFIX}/include)
+if(_KUAVO_NODELET_INCLUDE)
+  add_library(nodelet_controller
+    src/controllerNodelet.cpp
+  )
+  set_target_properties(nodelet_controller PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CATKIN_DEVEL_PREFIX}/lib)
+  add_dependencies(nodelet_controller ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(nodelet_controller
+    ${PROJECT_NAME}
+    ${catkin_LIBRARIES}
+  )
+  target_compile_features(nodelet_controller PUBLIC cxx_std_17)
+  install(TARGETS nodelet_controller
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  )
 
-add_library(nodelet_controller
-  src/controllerNodelet.cpp
-)
-set_target_properties(nodelet_controller PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CATKIN_DEVEL_PREFIX}/lib)
+  if(drake_FOUND)
+    add_library(nodelet_player
+      src/playBackNodelet.cpp
+    )
+    set_target_properties(nodelet_player PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CATKIN_DEVEL_PREFIX}/lib)
+    add_dependencies(nodelet_player ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+    target_link_libraries(nodelet_player
+      ${catkin_LIBRARIES}
+      ${pinocchio_LIBRARIES}
+      ${PROJECT_NAME}
+      drake::drake
+    )
+    install(TARGETS nodelet_player
+      LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+    )
+  endif()
+else()
+  message(STATUS "[humanoid_controllers] Skipping nodelet targets (nodelet headers not installed)")
+endif()
 
-add_dependencies(nodelet_controller ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(nodelet_controller
-        ${PROJECT_NAME}
-        ${catkin_LIBRARIES}
-)
-
-install(TARGETS nodelet_controller
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-)
-
-# playback nodelet
-add_library(nodelet_player
-  src/playBackNodelet.cpp
-)
-set_target_properties(nodelet_player PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CATKIN_DEVEL_PREFIX}/lib)
-
-add_dependencies(nodelet_player ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(nodelet_player
-        ${catkin_LIBRARIES}
-        ${pinocchio_LIBRARIES}
-        ${PROJECT_NAME}
-        drake::drake 
-)
-
-# if (kuavo_estimation_FOUND)
-# message(STATUS "add kuavo_estimation link to nodelet_player")
-# target_link_libraries(nodelet_player
-#         ${kuavo_estimation_LIBRARIES}
-#         )
-# endif()
-install(TARGETS nodelet_player
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-)
-
+if(drake_FOUND)
 # Normal Controller Node
 add_executable(normal_controller_node
         src/NormalControllerNode.cpp
@@ -392,6 +443,7 @@ target_link_libraries(normal_controller_node
         ${catkin_LIBRARIES}
         )
 target_compile_options(normal_controller_node PRIVATE ${OCS2_CXX_FLAGS})
+endif()
 
 #########################
 ###   CLANG TOOLING   ###
@@ -412,11 +464,13 @@ endif (cmake_clang_tools_FOUND)
 #############
 
 # Mark executables and/or libraries for installation
+if(drake_FOUND)
 install(TARGETS humanoid_target_trajectories_publisher cheat_controller_node normal_controller_node
         ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
         LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
         RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
         )
+endif()
 
 # Mark cpp header files for installation
 install(DIRECTORY include/${PROJECT_NAME}/

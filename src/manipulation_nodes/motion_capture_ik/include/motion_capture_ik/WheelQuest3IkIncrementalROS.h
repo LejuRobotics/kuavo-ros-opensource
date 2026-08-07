@@ -402,6 +402,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d defaultRightHandPosOnExit_;                   // 退出时右手默认目标位置
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值
   bool useIncrementalHandOrientation_ = true;                   // 是否使用增量式手部姿态
+  bool resetJointToDefaultWheel_ = true;                        // 进入增量控制时是否重置关节到默认位置
+  bool justEnteredMode2_ = false;                               // mode 0 -> mode 2 切换瞬间标志（约2秒内为true）
+  bool mode2Initialized_ = false;                               // mode 2 是否已初始化（避免fsmEnter重复进入）
 
   // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
   Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};

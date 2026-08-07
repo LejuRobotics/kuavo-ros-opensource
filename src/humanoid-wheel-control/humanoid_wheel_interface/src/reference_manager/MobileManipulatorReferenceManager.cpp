@@ -683,7 +683,7 @@ namespace mobile_manipulator {
     auto targetVelocityCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       // 直接判断 msg 中的速度是否非零
       if(fabs(msg->linear.x) > 1e-6 || 
@@ -705,7 +705,7 @@ namespace mobile_manipulator {
     auto targetVelocityWorldCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       // 直接判断 msg 中的速度是否非零
       if(fabs(msg->linear.x) > 1e-6 || 
@@ -782,7 +782,7 @@ namespace mobile_manipulator {
     auto targetPoseCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       cmdPose_mtx_.lock();
       isCmdPoseUpdated_ = true;
@@ -799,7 +799,7 @@ namespace mobile_manipulator {
     auto targetPoseWorldCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
       // disable 期间丢弃所有运动指令
-      if (!isEnableControl()) return;
+      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
 
       cmdPoseWorld_mtx_.lock();
       isCmdPoseWorldUpdated_ = true;
@@ -1019,6 +1019,17 @@ namespace mobile_manipulator {
       }
     };
     sensors_data_sub_ = nodeHandle_.subscribe<kuavo_msgs::sensorsData>("/sensors_data_raw", 10, sensorsDataCallback);
+
+    // BaseCmdVelStatus 话题，获取当前机器人是否可控底盘
+    auto baseCmdVelStatusCallback = [this](const leju_mobile_base_msgs::BaseCmdVelStatus::ConstPtr &msg)
+    {
+      if(msg->cmd_vel_effective != baseCmdVelStatus_)
+      {
+        ROS_INFO_STREAM("[baseCmdVelStatusCallback] baseCmdVelStatus:  [ " << (msg->cmd_vel_effective ? "true" : "false") << " ]");
+        baseCmdVelStatus_ = msg->cmd_vel_effective;
+      }
+    };
+    base_cmd_vel_status_sub_ = nodeHandle_.subscribe<leju_mobile_base_msgs::BaseCmdVelStatus>("/move_base/base_cmd_vel_status", 10, baseCmdVelStatusCallback);
   }
 
   // // 获取第一次的目标轨迹，并分配到不同的约束轨迹，后续添加额外约束, 也需要在此初始化
@@ -1056,9 +1067,9 @@ namespace mobile_manipulator {
   // 删除 TargetTrajectories 中 initTime 之前的所有帧，保留 initTime 前一个关键帧及之后的所有帧
   void MobileManipulatorReferenceManager::trimTargetTrajectoriesBeforeTime(scalar_t startTime)
   {
-    // 辅助函数：修剪单个轨迹
-    auto trimTrajectory = [startTime](TargetTrajectories& trajectory) {
-      if (trajectory.timeTrajectory.empty() || trajectory.timeTrajectory.front() >= startTime) 
+    // 辅助函数：修剪单个轨迹, 按 trimTime 对应的时间轴进行裁剪
+    auto trimTrajectory = [](TargetTrajectories& trajectory, scalar_t trimTime) {
+      if (trajectory.timeTrajectory.empty() || trajectory.timeTrajectory.front() >= trimTime) 
       {
         return;
       }
@@ -1068,12 +1079,12 @@ namespace mobile_manipulator {
         return;
       }
 
-      // 查找第一个大于或等于 startTime 的元素
+      // 查找第一个大于或等于 trimTime 的元素
       auto index = std::lower_bound(trajectory.timeTrajectory.begin(), 
                                 trajectory.timeTrajectory.end(), 
-                                startTime);
+                                trimTime);
       
-      // 计算要删除的元素数量, 保留 startTime 的之前一个及之后所有
+      // 计算要删除的元素数量, 保留 trimTime 的之前一个及之后所有
       size_t eraseCount = std::distance(trajectory.timeTrajectory.begin(), index) - 1;
 
       // 如果存在需要删除的轨迹, 执行删除
@@ -1091,19 +1102,23 @@ namespace mobile_manipulator {
       }
     };
 
-    // 对所有轨迹应用修剪
-    trimTrajectory(stateInputTargetTrajectories_);
-    trimTrajectory(torsoTargetTrajectories_);
+    // 对所有轨迹应用修剪 (绝对时间轴)
+    trimTrajectory(stateInputTargetTrajectories_, startTime);
+    trimTrajectory(torsoTargetTrajectories_, startTime);
     for(size_t i=0; i<info_.eeFrames.size(); i++)
     {
-      trimTrajectory(eeTargetTrajectories_[i]);
+      trimTrajectory(eeTargetTrajectories_[i], startTime);
     }
     if(isOfflineTrajUpdate_ && startTime > isofflineTrajUpdateStartTime_ + 1.0)  // 避免删除起始的未执行的数据, 1秒内需要将轨迹更新完成
     {
-      trimTrajectory(torsoOfflineTraj_);
+      // 离线轨迹缓存(torsoOfflineTraj_/armEeOfflineTraj_)的时间轴为相对时间(从0开始),
+      // 必须用相对时间裁剪; 否则用绝对startTime会误删几乎全部点只剩末点,
+      // 导致后续 getDesiredState 一直返回末点 -> 机械臂直接跳到末点
+      scalar_t offlineRelativeTime = startTime - isofflineTrajUpdateStartTime_;
+      trimTrajectory(torsoOfflineTraj_, offlineRelativeTime);
       for(size_t i=0; i<info_.eeFrames.size(); i++)
       {
-        trimTrajectory(armEeOfflineTraj_[i]);
+        trimTrajectory(armEeOfflineTraj_[i], offlineRelativeTime);
       }
     }
   }
@@ -3008,6 +3023,11 @@ namespace mobile_manipulator {
             return true;
           }
           int index = offlineTraj.plannerIndex;
+          if (j == 0)
+          {
+            armEeOfflineTraj_[index].timeTrajectory.clear();
+            armEeOfflineTraj_[index].stateTrajectory.clear();
+          }
           isArmEeOfflineTrajUpdate_[index] = true;
           eeOfflineTrajFrame_[index] = offlineTraj.frame;
           armEeOfflineTraj_[index].timeTrajectory.push_back(timedCmd.desireTime);
@@ -3020,6 +3040,11 @@ namespace mobile_manipulator {
             res.message = "Invalid trajectory: cmdVec size is not 4 for torso";
             ROS_ERROR_STREAM("[setLbMultiTimedOfflineTrajService] " + res.message);
             return true;
+          }
+          if (j == 0)
+          {
+            torsoOfflineTraj_.timeTrajectory.clear();
+            torsoOfflineTraj_.stateTrajectory.clear();
           }
           isTorsoOfflineTrajUpdate_ = true;
           torsoOfflineTraj_.timeTrajectory.push_back(timedCmd.desireTime);
@@ -3832,9 +3857,16 @@ namespace mobile_manipulator {
 
       resetCmdPoseRuckig(initTime, initState, true);
     }
-    else    // 默认跟踪位置
+    else if(baseCmdVelStatus_)   // 底盘可运动情况下，可运动，默认跟踪位置
     {
       generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
+    }
+    else if(!baseCmdVelStatus_)   // 底盘不可运动情况下，不可运动，采用速度控制跟踪零速度
+    {
+      vector_t zeroVel = vector_t::Zero(baseDim_);
+      calcRuckigTrajWithCmdVel(initTime, zeroVel);
+      generateVelTargetWithRuckig(initTime, finalTime, ruckigDt_, initState);
+      resetCmdPoseRuckig(initTime, initState, true);
     }
   }
 

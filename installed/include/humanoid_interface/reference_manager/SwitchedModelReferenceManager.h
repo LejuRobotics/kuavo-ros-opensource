@@ -51,6 +51,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/footPoseTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/footPose6DTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/kuavoModeSchedule.h"
+#include "humanoid_interface/reference_manager/SitReferenceManager.h"
 
 #include <ocs2_msgs/mpc_target_trajectories.h>
 #include "std_srvs/SetBool.h"
@@ -375,6 +376,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::ServiceServer load_dynamic_qr_service_;  // Service to load dynamic Q and R matrices based on gait name
   ros::Publisher isArmExecutingPublisher_;
   ros::Publisher modeSchedulePublisher_;
+  std::unique_ptr<class SitReferenceManager> sitReferenceManager_;
+
 
   vector_t cmdVel_;
   vector_t cmdPose_;

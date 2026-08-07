@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <algorithm>
 #include <ocs2_core/misc/LoadData.h>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/info_parser.hpp>
@@ -13,6 +14,11 @@
 
 namespace humanoid_controller
 {
+  namespace
+  {
+    constexpr double kDanceSwitchSafeStanceMaxJointVelRadPerSec = 0.15;
+  }  // namespace
+
   using namespace ocs2;
 
   DanceController::DanceController(const std::string& name, 
@@ -615,6 +621,23 @@ namespace humanoid_controller
     last_published_dance_step_ = current_step;
   }
 
+  Eigen::VectorXd DanceController::getCurrentJointReference() const
+  {
+    const int total_joints = jointNum_ + jointArmNum_ + waistNum_;
+    Eigen::VectorXd q_ref = defalutJointPosRL_.head(total_joints);
+    if (residualAction_)
+    {
+      q_ref = dance_trajectory_.getCurrentCommand().head(total_joints);  //waao：mimic的defaultpose是参考轨迹
+    }
+
+    const Eigen::VectorXd action = getCurrentAction();
+    if (action.size() >= total_joints && actionScaleTestRL_.size() >= total_joints)
+    {
+      q_ref.array() += action.head(total_joints).array() * actionScale_ * actionScaleTestRL_.head(total_joints).array();
+    }
+    return q_ref;
+  }
+
   bool DanceController::requestToExit() const
   {
     // 与 RLControllerBase::requestToExit：仅当配置 holdFrameIndex == -2 且轨迹已结束，才向上层请求自动切到 AMP
@@ -635,12 +658,27 @@ namespace humanoid_controller
 
   bool DanceController::isAllowToExit() const
   {
-    // 与 RLControllerBase::isAllowToExit：轨迹未播完不允许切出（如切回 MPC）；播完后允许
-    if (!dance_trajectory_.isFinish())
+    if (dance_trajectory_.time_step_total <= 0 || dance_trajectory_.joint_vel.rows() <= 0)
     {
       return false;
     }
-    return true;
+
+    const int current_step =
+        std::clamp(dance_trajectory_.getTimeStep(), 0, dance_trajectory_.time_step_total - 1);
+    const bool is_boundary_stance_step = (current_step == 0) || dance_trajectory_.isFinish();
+    if (!is_boundary_stance_step)
+    {
+      return false;
+    }
+
+    const Eigen::VectorXd reference_joint_vel = dance_trajectory_.joint_vel.row(current_step).transpose();
+    if (reference_joint_vel.size() == 0)
+    {
+      return false;
+    }
+
+    const double max_abs_joint_vel = reference_joint_vel.cwiseAbs().maxCoeff();
+    return max_abs_joint_vel <= kDanceSwitchSafeStanceMaxJointVelRadPerSec;
   }
 
   bool DanceController::updateImpl(const ros::Time& time,

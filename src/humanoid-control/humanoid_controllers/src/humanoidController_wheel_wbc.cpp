@@ -1284,7 +1284,7 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = limited_vel[1];
       velCmdMsg.angular.z = limited_vel[2];
     }
-    else
+    else if(baseCmdVelStatus_ == true)  // BaseCmdVelStatus 为 false 时，不设置速度
     {
       Eigen::Vector3d desiredVel = optimizedInput_mrt_limit_.head(3);
       Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(desiredVel,
@@ -1294,7 +1294,7 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = desiredVelBody[1];
       velCmdMsg.angular.z = desiredVelBody[2];
     }
-    if(use_vel_control_)
+    if(use_vel_control_ && baseCmdVelStatus_ == true)
     {
       if (base_cmd_vel_limit_enable_)
       {
@@ -1469,16 +1469,33 @@ namespace humanoidController_wheel_wbc
         }
       }
       if (!ruiwo_isolated_core_) {  // 7 号核心未隔离，不允许启动
+#if !defined(__aarch64__)
         std::cout << "7 号核心未隔离，跳过CPU亲和性设置" << std::endl;
         return false;
+#endif
       }
     } else {
       std::cout << "隔离的核心列表为空，跳过CPU亲和性设置" << std::endl;
       return false;
     }
 
+#if defined(__aarch64__)
+    // Orin 降本版：WBC 仅绑定隔离核心 2
+    constexpr int kWbcCpuAarch64 = 2;
+    if (std::find(actually_isolated_cpus.begin(), actually_isolated_cpus.end(), kWbcCpuAarch64) ==
+        actually_isolated_cpus.end()) {
+      std::cout << "CPU " << kWbcCpuAarch64 << " 未隔离，跳过CPU亲和性设置" << std::endl;
+      return false;
+    }
+    actually_isolated_cpus.assign(1, kWbcCpuAarch64);
+#endif
+
     // 只有在有真正隔离的CPU时才设置亲和性
-    if (actually_isolated_cpus.size() >= 2) {  // 至少需要两个核心绑定 WBC
+#if defined(__aarch64__)
+    if (actually_isolated_cpus.size() >= 1) {  // aarch64 WBC 单核
+#else
+    if (actually_isolated_cpus.size() >= 2) {  // x86 至少需要两个核心绑定 WBC
+#endif
       cpu_set_t cpuset;
       CPU_ZERO(&cpuset);
 
@@ -1503,8 +1520,12 @@ namespace humanoidController_wheel_wbc
         return true;
       }
     } else {
+#if defined(__aarch64__)
+      std::cout << "没有真正隔离的 CPU 核心（aarch64 需核心 2），跳过CPU亲和性设置"
+#else
       std::cout << "没有真正隔离的CPU核心或隔离的CPU核心数不足（至少需要2个核心，2个核心绑定WBC控制线程），"
                    "跳过CPU亲和性设置"
+#endif
                 << std::endl;
       return false;
     }
@@ -2618,6 +2639,12 @@ namespace humanoidController_wheel_wbc
     else
     {
       base_emergency_triggered_.store(false);
+    }
+
+    if(msg->cmd_vel_effective != baseCmdVelStatus_)   // 仅当命令生效时才更新状态
+    {
+      ROS_INFO_STREAM("[baseCmdVelStatusCallback] baseCmdVelStatus:  [ " << (msg->cmd_vel_effective ? "true" : "false") << " ]");
+      baseCmdVelStatus_ = msg->cmd_vel_effective;
     }
   }
 

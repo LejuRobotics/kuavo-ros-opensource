@@ -3,20 +3,43 @@
 ## Breaking Changes
 
 ## 文档相关
+- 补充 PICO RG+A/B 切换 RL 控制器使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- 新增增量数采操作步骤文档，[文档链接](./src/manipulation_nodes/noitom_hi5_hand_udp_python/docs/增量式IK新功能介绍.md)
+- 相机标定文档补充 52/55/56 机型与实操注意事项，[文档链接](./src/Camera_Calibration/README.md)
+- 更新搬运/倒地起身操作文档、RL 接口文档、多控制器框架说明
 - 补充 Quest3 视频回传指定 IP 启动方式说明，以及 H12 部署脚本中 VR 启动选项的实际行为说明，[Quest3 视频回传文档](./src/manipulation_nodes/noitom_hi5_hand_udp_python/docs/Quest3_视频回传显示.md)，[H12 部署文档](./src/humanoid-control/h12pro_controller_node/多控制器H12部署和操作说明.md)
 - 更新强化学习运动控制框架文档，新增虚拟控制器相关内容，[文档链接](./docs/5功能案例/科研框架/强化学习使用案例/强化学习运动控制框架合集.md)
 - 新增 WiFi 上报脚本使用说明文档
 - 新增 VR 启动 YAML 配置与按键开关说明文档
 - 更新相机/动捕标定说明文档，支持人形与轮臂整机标定及单个部位标定，[相机标定文档](./src/Camera_Calibration/README.md)
 - 修订轮臂单手增量遥操躯干说明文档，[文档链接](./docs/轮臂V1.4开发文档/轮臂单手增量摇操躯干说明.md)
+- 精简文档站点案例目录，下线百度 EdgeBoard 接入等过时案例，优化机器人关节标定与快速开始教程，[文档链接](./docs/3调试教程/机器人关节标定.md)
+- 新增 Websocket SDK PyTree 策略开发指南文档，补充搬箱策略架构图与仿真运行说明，[文档链接](./src/kuavo_humanoid_websocket_sdk/docs/kuavo_strategy_pytree/WS_SDK搬箱说明文档.md)
+- 更新 kuavo_led Readme，补充 LED Strip 服务列表、backend 参数说明、启动方式及串口共享架构说明，[文档链接](./src/kuavo_led/Readme.md)
+- 完善 WS SDK 搬箱说明文档：补充场景布置要求、tag 高度/距离约束、零点标定与仿真运行步骤，并全面精简内容，[文档链接](./src/kuavo_humanoid_websocket_sdk/docs/kuavo_strategy_pytree/WS_SDK搬箱说明文档.md)
+- 修复拆垛案例与 aruco_ros README 中失效的图片引用
+- 新增 G12 航空箱坐/站操作说明及姿态参考图，[文档链接](./docs/2快速开始/G12手柄控制文档/Kuavo%205-W%20G12操作.md)
+- 补充轮臂 v62/v63 下肢限位标零说明，完善 readme 通用标定章节与限位标零入口，[文档链接](./docs/3调试教程/Kuavo%205-W%20全身零点标定.md)
 
 ## 新增功能
+- PICO 遥操新增 RG+A/B 切换上下 RL 控制器功能，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
+- depth_loco 控制器切换来源从 amp_controller 扩展为任意 RL 控制器
+- 新增 v200062/v300062 机型配置
+- 新增轮臂上半身 URDF 模型
+- 为 v62/v63 补充下肢限位标零配置
+- 人形增量控制新增多项参数化配置：支持通过参数控制 X+A 是否复位手臂、进入增量时胸部 FK 跟踪策略、进入增量时腰部姿态映射开关、VR 节点启动时关节状态重置控制等
+- 座椅起身功能优化：简化状态机、支持多次起坐流程、流程参数调优
+- 搬运模式升级至 V1.1：搬运语音改用 /play_music 原子打断+播新，LOCK 状态加入灵巧手握拳到位判据，信号驱动调度替代盲延迟，状态机拆分为 INTERPOLATING→READY→ACTIVE 三段，硬起身/软起身统一由 Python Joy 调度，[文档链接](./docs/运动控制API.md)
+- AMP 2.0 模型更新：新增 ampjzx260629_1 行走模型，适配 53/54/55 机型，站立状态可选另一套 standdefaultJointState（默认关闭）
+- 新增 KUAVO_DIAG 环境变量诊断日志开关，默认关闭
+- WS SDK 新增速度斜坡控制（ramp_duration），消除搬箱倒退摔跤
+- WS SDK launch 新增 real 参数支持自动切换仿真/实机配置
 - 5W 增量单手遥操新增坐姿单手控制躯干能力，单手即可控制折叠臂升降与前后倾、腰部左右旋转，另一只手可自由控制底盘或手臂，[使用文档](./docs/轮臂V1.4开发文档/轮臂单手增量摇操躯干说明.md)
 - 鲁班2.2 新增 AMP 行走动手步态，支持行走中下蹲弯腰
 - Websocket SDK 补齐搬箱策略所需的原子技能接口
 - 新增 5W 轮臂 V63 机型支持
 - 5W 轮臂适配气泵末端执行器
-- Roban2.2 手柄 V2.0 按键需求实现：倒地起身（LB+RB+X 事件驱动，灵巧手握拳/张开保护）；M1/M2 自定义动作；飞吻动作迁至 RT+B；RB+B 预留给太极舞蹈；舞蹈切换支持中文名映射
+- Roban2.2 手柄 V2.0 按键需求实现：倒地起身（LB+RB+X 事件驱动，灵巧手握拳/张开保护）；M1/M2 自定义动作；飞吻动作迁至 RT+B；RB+B 绑定爱情鸟舞蹈；舞蹈切换支持中文名映射
 - KUAVO5 Quest 遥操按键优化：VR 启动参数 YAML 配置化，X+Y 急停开关可控，新增交互式编辑脚本
 - AMP 模式下增加遥控器高度控制保护（忽略右摇杆上下）
 - 深度图像感知：发布深度 latent 话题与深度图像状态值，新增后处理脚本
@@ -30,8 +53,61 @@
 - VR 节点启动新增是否开启腰部控制的参数开关
 - v63 轮臂适配 VR 增量遥操作配置与 Drake 模型
 - 新增 53/54 AMP 跑步与崎岖路面步态模型及配置（默认不开启）
+- KUAVO5 新增座椅起身功能，包含完整起身流程、收脚动作、堵转保护与起身刚度调整
+- 倒地起身新增后倒（仰卧）姿态支持，前倒/后倒由控制器自动识别
+- Websocket SDK 适配无 ROS 运行环境，新增 ros_env 适配层并将 ROS 消息/服务改为按需导入，同时新增双臂 IK 手部位姿命令处理
+- 相机启动新增推流相关参数配置
+- 新增搬运模式（transport mode）：提供 transport_mode_command 服务与状态机，支持手柄按键触发、进入握拳/退出张开、掉使能倒地与两步起身及音频播报，[文档链接](./docs/运动控制API.md)
+- 新增 VMP-online 模块与 PICO 手柄 GMR 遥操作支持（适配 kuavo_v46/v52），支持任务动作插值切换、初始标定按键（RT+B/LT+B）及灵巧手、头部联动控制
+- LED 灯状态显示重构：细分启动-准备站立-站立-摔倒保护等状态灯效，适配轮臂机型，电源保护/硬件失能时红灯常亮
+- 新增巡检（RL）多策略状态机切换能力：支持站立/行走/跳舞/导航等策略间插值切换、双策略推理模式与热启动
+- 新增嘉腾底盘 leju_mobile_base_msgs 消息与服务定义
+- 轮臂 WBC 新增仿真专用 kpkd 参数，与实物参数区分以提升仿真跟踪效果
+- amp_hand_controller 新增下蹲/站立姿态开关（axes[3] 控制），并优化侧移、原地旋转平滑度与小角速度截断
+- Roban2.2 手柄新增 M1/M2 上一次状态记忆能力
+- leju 夹爪新增故障恢复（recovery）与更安全的初始化流程
+- 单手遥操新增双击握把复位躯干至初始姿态功能
+- 新增启动期 EC 驱动器固件与参数一致性校验功能（默认关闭）
+- 新增 AMP 与 AMP-wild 控制器自动切换功能（默认关闭）：同时开启两控制器时行走自动使用 amp_wild、动作播放自动使用 amp，并更新 amp_wild 模型，[设计文档](./docs/controller_switching_report/RL%20sw/auto_controller_switch_design_zh.md)
+- 新增 CSV 手臂轨迹播放脚本，支持手臂、腰部、灵巧手与头部轨迹跟踪，[使用说明](./src/humanoid-control/humanoid_plan_arm_trajectory/README_csv_arm_traj_player.md)
+- 轮臂躯干/头部遥控接口改为速度/增量（vel/delta）模式，输入源统一钳制，软暂停后无残留指令，[文档链接](./docs/轮臂相关接口文档说明.md)
+- 轮臂底盘急停或防撞条触发时联动上半身急停
+- 轮臂自检根据末端执行器类型自适应选择手臂姿势
+- 5W 轮臂 VR 遥操新增胸部俯仰软限位，防止躯干过度前倾
+- Xsens 动作捕捉遥操作接入 VMP-online：集成 Xsens UDP/BVH 实时链路与缓冲池、轻量 Pico 手柄节点，支持手柄暂停/恢复遥操
+- 新增多判别器 MoRE 控制器，适配 53/54/55 机型，可根据输入切换 gait，[设计文档](./docs/9功能开发文档/More控制器/MoRE控制器设计文档.md)
+- 新增 G12 航空箱坐/站功能：按键映射与状态回调实现，座椅起身流程重构支持臂绕扶手
 
 ## 修复问题
+- 修复 AMP↔VMP 双向切换 yaw 锚点不连续与冷 reset 问题，h12pro switch_controller 支持 amp_wild 与 mpc 互切（#3687）
+- 修复 Quest3 增量模式多项问题：X+A 手臂复位缓慢、arm_ctrl_mode_ 状态残留导致退出后动作帧异常、增量退出时竞态导致手臂控制模式残留
+- 修复鲁班 AMP 多项问题：绕过夸父行走动手拦截、allow_walking_during_action 限定 amp_hand_controller、tact 动作期间允许行走、走弧线偏斜优化、_mpc_arm_commanded 全维度判定消除锁定后再动抽臂（#3624）
+- 修复头部二次标定跳变及假限位导致的方向交替问题
+- 修复手柄/H12 多项问题：北通 X 键控制器切换增加 3 秒冷却间隔、joy START 重启后偶发直腿、back+start 后手柄服务状态需重置（#3719）、搬运模式倒地起身后手柄失效（#3770）、H12 G+H 躯干复位反复触发震荡
+- 修复急停后 /use_sit_init 参数残留导致短按 C 蹲姿启动及姿态残留问题
+- 修复轮臂多项问题：离线轨迹指令跳变、G12/BT2 躯干未升起时腰部 yaw 门控、LUNBI_V62 下肢限位标零菜单缺失
+- 恢复旧两节点音频架构，修复与上位机音频冲突、无音频设备时干净退出及 audio_player 声卡检测问题
+- 修复硬件/驱动多项问题：EC 启动 kp/kd 读垃圾值与异常转向值、VMP kp/kd 参数、arm64 nodelet 退出崩溃、x86 ec 预编译库 ABI 不匹配、cali 缩腿抢跑 is_ready 导致第二次 start 挂死、amp_wild 手臂内翻导致灵巧手打腿
+- 修复 kuavo_led 与电池串口冲突导致 led_for_state 状态灯失效
+- 修复收到 /leju_claw_command 话题后右夹爪不受控制问题
+- 修复发布关节指令时平滑系数初始值导致手臂漂移问题
+- 座椅起身实机段 0 完成后应用 hold_at_sit 静持兜底，防姿态未稳就起立摔倒
+- Roban 移除电源板检测及灯带功能
+- 修复 s200062 在 dev 代码合并后 mujoco 仿真报错及 rviz 中夹爪模型分离问题
+- 修复 s56 棋盘标定系统性误差，更新标定 URDF 及 demo 配置
+- 修复人形增量控制多项问题：手臂模式 0→2 切换映射异常、X+B 需按两次才能切换到固定模式、手柄切换手臂控制模式逻辑异常、增量触发条件去掉移动侦测
+- 修复放音设备检测无法兼容喇叭在上位机的机型问题，改为服务可用性检测
+- 修复 load_kuavo_real.launch 中手臂贝塞尔节点启动引用缺失导致服务未启动
+- 修复轮臂(major=6)半身 IK FK 维度不匹配，统一使用 s63 arm_only urdf
+- 修复 amp_hand_controller 向后行走停下时偶尔踉跄、肘关节 scale 超限的问题
+- 修复按住 LT/RT 期间摇杆与方向键无法控制行走的问题（issue #3348）
+- 修复 M1+M2 动作执行期间误触发步态切换（踏步/站立/控制器切换）
+- 修复 WS SDK 多项问题：手臂动作卡顿/振荡、walk→stance 切换卡顿、轮臂 is_gait() 判定异常、腰关节反馈数据始终为 0
+- 修复自研CAN版本夹爪无法通过配置文件动态调整参数，优化退刀槽后夹爪的开爪限位与 KD 参数
+- 修复手臂磨线选择"仅启动手臂磨线"模式时只执行 1 轮的问题
+- 修复软暂停/恢复未同步调用底盘 /move_base/set_dispatch_mode 的问题
+- 修复 Drake 解算脚掌位置未修正为脚掌中心的问题
+- 修复 s62 模型底座高度实测比仿真高 3cm 的问题
 - 修复手臂零点话题发布值与配置文件不一致的问题
 - 修复 kuavo5 v52 无法切换步态的问题
 - 修复 rviz 中机器人模型闪烁的问题
@@ -57,13 +133,85 @@
 - 修复 Quest VR 转腰回中 1s 内误切 AMP 步态的问题
 - 修复轮臂 VR 后退速度与前进不一致的问题
 - 拆分 G12 手柄与 VR 底盘速度限制，统一 v61-63 轮臂 VR 横向速度限制
+- 修复 Roban（major 版本号为 1）的控制判断及 tact 动作的机器人版本兼容判断
+- 修复 rosbag 日志清理（cleanRosLogDirectory）误删 stdout 日志的问题
+- 修复各代机器人 Gazebo 仿真 IMU 配置 frame_id 错误，并补充头部相机到相机树的 TF 变换
+- 修复 Websocket SDK 多项控制问题：control_robot_height 抬升失效、导航接口死循环、轮臂 waist 控制误将躯干位置归零、leju 夹爪仿真回退丢首帧，并以 S 曲线优化关节运动插值
+- 修复 LED 与电池查询串口冲突问题：电池查询改为后台缓存模式，增加应答包校验与服务注册异常保护
+- 修复 Roban tact 动作首帧顺移问题
+- 修复轮臂 AMP 步态抱拳动作大拇指抖动问题（issue #3231）
+- 修复轮臂使能控制（/enable_control）IDE 误操作导致的冻结逻辑异常
+- 修复 Websocket SDK PyTree 策略示例缺少 Init/websocket_mode 配置及 py_trees、scipy 依赖缺失的问题
+- 修复走路中动作结束后手臂不摆臂（EXTERN->AUTO_SWING 切换卡死）的问题
+- 修复 amp_hand_controller 切换到 MPC 前未等待躯干稳定导致的切换异常
+- 修复 amp_hand_controller 下 LB+A 屏蔽摇杆失效的问题（issue #3359）
+- 修复 H12 owner 模式下终端启动重复拉栈及按 C 键重启异常的问题
+- 修复轮臂 s60/61/62/63 默认开启速度限幅导致的运动异常，改为默认关闭
+- 修复轮臂 VR 默认手臂姿态问题，改用 /standJointState，并调整初始化关节角度
+- 修复 Roban bt2pro 按 X 错误切换到 amp_hand_controller 的逻辑，RB+X 键位改为预留
+- 修复 joy 踏步（trot）期间 M1/M2 组合键误触发的问题
+- 修复 joy M2+X 等空动作触发后摇杆永久失灵的问题（issue #3303）
+- 修复 v63 ankle_solver_type 配置迁移问题（issue #3294）
+- 修复轮臂搬运过程中面对二维码朝向异常及手臂控制模式切换默认参数问题
+- 修复搬箱子案例轮臂最低速度导致底盘死区的问题，并调整默认 ik 参数与安全空间
+- 修复轮臂模式下 H12 手柄按钮透传与状态机长短按语义冲突的问题
+- 修复 WS SDK 搬箱案例多项问题：RobotSDK 初始化时序导致传感器订阅失败、tag 检测代理对象 len() 失败、放箱后手臂撞桌；tag 搜索改为先扫描再猜测并自动回正头部，抓取/放置与行走参数调优改善走偏
+- 修复轮臂 VR 遥操手臂轨迹卡顿问题（issue #3198）：控制循环改绝对时间定频、手臂/腿部轨迹独立回调队列、WBC 线程绑定隔离 CPU、VR 增量模式跳过误差限幅
+- 修复 VR 准备姿态下 leju 夹爪锁死的问题，move_paw 支持被 VR 指令打断（issue #3505）
+- 修复 AMP 下蹲起身踉跄、卡在中间及右摇杆复用导致下蹲突然冲起的问题，MPC 切换 AMP 时清零残留控制指令
+- 修复 VR 单手遥操躯干限位饱和及开启手臂插补后躯干控制异常的问题（issue #3238）
+- 修复 VR 绝对模式肩部俯仰超限的问题，上限可通过 rosparam 配置（issue #3448）
+- 修复 Quest3 VR pose 数据为空或含 NaN 时节点异常的问题
+- 修复 VR 手柄按下 grip+Y 时手指被冻结的问题
+- 修复 Quest VR 节点初始化时头部控制模式未从配置文件读取的问题
+- 修复手腕补全自由度使用默认值的问题，腕部输入直通 WBC 并增加缺失目标时的安全回退
+- 修复解锁手臂后行走中手臂瞬间归位的问题
+- 修复 MPC 切换 RL 控制器时的插值抖动问题
+- 修复 tact 动作播放多项问题：进度重复上报、二次播放机器人不动、预览动画滞后于实机、keep_arm_pose 泄漏及动作速度/进度同步
+- 修复限位标定时头部电机不回零点、标定方向偶发反向的问题
+- 修复关节磨线动作文件调用异常的问题
+- 修复 M1/M2 动作出口未解除激活状态导致按键失效的问题（issue #3507）
+- 修复轮臂 /enable_control 暂停时灵巧手与音频未冻结、底盘被误冻结的问题（issue #3480）
+- 对齐轮臂躯干限位与 H12（Z 0.32m / pitch 30°）
+- 降低 Roban（v17）行走线速度与偏航角速度限幅（issue #3450）
+- 修复 RL 策略 VR 手臂观测数据偏移取值错误的问题
+- 修复 SDK 打包缺失 interfaces 子包的问题
+- 修复 AMP 自动切换逻辑异常问题：避免非 amp/amp_wild 模型被强制切至 amp，及五代 AMP 自动模型切换影响其余机型上肢动作
+- 修复人形 VR 增量遥操手臂模式从 2 切换到 0/1 时未退出增量主线程的问题
+- 修复站立后 gait_fre 置零逻辑导致模型站立歪斜的问题
+- 修复座椅起身速度过快、MPC 初始化过快导致的稳定性问题（回退调试参数）
+- 修复搬运退出后 yaw 甩回旧值及倒地起身后未正确切回 AMP 的问题（issue #3614）
+- 修复倒地开机功能失效的问题，相关 param 清理改由 START+BACK 触发（issue #3616）
+- 修复 move_base/base_cmd_vel 不可控时底盘失控的问题，MPC 与主程序改为速度控制且期望速度归零
+- 修复 5W 单臂 X+A 无臂控的问题：注入 /humanoid_wheel/ Receiver service 名（issue #3632）
+- 修复 s52 VR 增量遥操由于 IK 缺少夹爪虚拟关节导致的问题
 
 ## 其他改进
+- 适配 arm64 平台（Orin）编译与运行：WBC 绑定隔离核心、arm64 版 EC/灵巧手 SDK、Drake 兼容层、MuJoCo arm64 二进制等
+- 轮臂 WBC 绑定到隔离核心 2,3
+- YD 驱动器启动阶段写入温度限幅值（0x3F0D）
+- 统一单节点音频架构，全机型支持 enable_control 软暂停
+- 自研驱动器与 YD 驱动器增益转换逻辑优化
+- lejukpkd codec 下沉到硬件层，清理运动驱动感知
+- 人形对齐轮臂 ArmTraj SHM，统一 Receiver/Writer（#3198）
+- 优化增量 VR 遥操的状态切换
+- lejudriver 适配 55 版本、AMP 模式与 MPC 模式
+- G12 启动采用 systemd→Docker→内部入口脚本三层架构
+- 控制器切换失败时增加日志输出原因，方便排查切换失败问题
+- 将硬编码版本白名单替换为 RobotVersion.start_with() 前缀匹配，便于扩展新机型
+- 统一手臂控制话题前缀为 /mm/
+- 部署脚本同步写入 KUAVO_CONTROL_SCHEME 环境变量到 bashrc
 - rosbag 日志清理功能调整为默认开启
 - 优化 OCS2 进程管理，避免残留进程影响下次启动
 - 部署脚本支持 GitCode 仓库源，统一版本注册表
 - rosbag 日志新增乐聚夹爪相关调试话题
 - 更新 KUAVO5 s55 舞蹈模型资产
+- 新增 KUAVO5 s53 舞蹈模型资产
+- 优化深度图像射线采样：将采样深度转为平面 z 轴距离、限制最大采样深度并加入高斯模糊
+- 搬箱示例 grasp_box_example.py 从 ROS SDK 迁移至 Websocket SDK
+- amp_hand_controller 下蹲时不再联动弯腰
+- 禁用编译时自动更新 URDF/XML 质量，避免构建时意外修改模型文件
+- 优化鲁班 amp_hand_controller 直行急停参数
 
 # 1.4.4
 

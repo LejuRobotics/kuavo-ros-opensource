@@ -60,6 +60,11 @@ ArmController::ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint
   raw_external_target_v_.resize(joint_arm_num);
   raw_external_target_q_.setZero();
   raw_external_target_v_.setZero();
+  buffered_mode2_target_q_.resize(joint_arm_num);
+  buffered_mode2_target_v_.resize(joint_arm_num);
+  buffered_mode2_target_q_.setZero();
+  buffered_mode2_target_v_.setZero();
+  buffered_mode2_target_received_ = false;
   external_target_q_.resize(joint_arm_num);
   external_target_v_.resize(joint_arm_num);
   external_target_q_.setZero();
@@ -101,6 +106,7 @@ void ArmController::reset()
   
   // 重置外部控制的目标
   external_target_received_ = false;
+  buffered_mode2_target_received_ = false;
   last_external_input_time_valid_ = false;
   
   // 重置滤波器
@@ -155,8 +161,13 @@ bool ArmController::initialize(const std::string& urdf_path,
   
   // Subscribe to VR input topic
   joint_sub_ = nh_.subscribe<sensor_msgs::JointState>(
-    "/kuavo_arm_traj", 3, 
+    "/kuavo_arm_traj", 3,
     boost::bind(&ArmController::jointStateCallback, this, _1));
+
+  // Subscribe to action trajectory topic（不受 external_target_locked_ 控制）
+  action_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
+    "/kuavo_action_traj", 3,
+    boost::bind(&ArmController::actionTrajectoryCallback, this, _1));
   
   // 滤波器参数将在首次 update() 调用时根据实际 dt 初始化
   // 这里只标记需要初始化，不预设 dt 值
@@ -201,6 +212,30 @@ void ArmController::loadSettings(double max_tracking_velocity,
            arm_max_tracking_velocity_, arm_tracking_error_threshold_, mode_interpolation_velocity_);
 }
 
+void ArmController::setExternalCommandBufferCallback(std::function<bool()> callback)
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  external_command_buffer_callback_ = std::move(callback);
+}
+
+void ArmController::clearExternalTarget()
+{
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  external_target_received_ = false;
+  raw_external_target_q_.setZero();
+  external_target_q_ = desire_arm_q_;
+  external_target_v_.setZero();
+  buffered_mode2_target_received_ = false;
+}
+
+void ArmController::updateInternalState(const Eigen::VectorXd& joint_pos,
+                                         const Eigen::VectorXd& joint_vel,
+                                         size_t arm_start_idx)
+{
+  current_arm_pos_ = joint_pos.segment(arm_start_idx, joint_arm_num_);
+  current_arm_vel_ = joint_vel.segment(arm_start_idx, joint_arm_num_);
+}
+
 void ArmController::update(const ros::Time& time,
                            double dt,
                            const Eigen::VectorXd& joint_pos,
@@ -223,6 +258,8 @@ void ArmController::update(const ros::Time& time,
     arm_filter_initialized_ = true;
     ROS_INFO("[ArmController] Filter initialized: dt=%.4f s, cutoff=%.1f Hz", dt, external_cutoff_freq_);
   }
+
+  applyBufferedMode2TargetIfReady();
 
   // 2. 根据当前模式更新期望状态
   if (arm_control_mode_ == ControlMode::kLocked)
@@ -624,25 +661,90 @@ void ArmController::applyRateLimitedInterpolation(double dt,
 
 void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
-  // 只有在外部控制时更新目标位置
+  if (external_target_locked_) return;
+  std::function<bool()> external_command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    external_command_buffer_callback = external_command_buffer_callback_;
+  }
+  if (external_command_buffer_callback && external_command_buffer_callback())
+  {
+    storeMode2Target(*msg, buffered_mode2_target_q_, buffered_mode2_target_v_);
+    buffered_mode2_target_received_ = true;
+    ROS_DEBUG_THROTTLE(1.0, "[ArmController] Buffer arm trajectory until manipulation controller is active");
+    return;
+  }
+
   if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
   {
-    for (size_t i = 0; i < msg->name.size() && i < joint_arm_num_; ++i)
-    {
-      raw_external_target_q_(i) = msg->position[i] * M_PI / 180.0;
-      if (msg->velocity.size() == joint_arm_num_)
-      {
-        raw_external_target_v_(i) = msg->velocity[i] * M_PI / 180.0;
-      }
-      else
-      {
-        // 如果没有提供速度，设置为零（后续在updateMode2中通过位置差分计算）
-        raw_external_target_v_(i) = 0.0;
-      }
-    }
-    
-    // 标记已收到外部输入
+    storeMode2Target(*msg, raw_external_target_q_, raw_external_target_v_);
     external_target_received_ = true;
+  }
+}
+
+void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg)
+{
+  // 动作轨迹回调：不受 external_target_locked_ 控制，专用于离线动作播放
+  if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
+  {
+    storeMode2Target(*msg, raw_external_target_q_, raw_external_target_v_);
+    external_target_received_ = true;
+  }
+}
+
+void ArmController::applyBufferedMode2TargetIfReady()
+{
+  if (!buffered_mode2_target_received_)
+  {
+    return;
+  }
+
+  std::function<bool()> external_command_buffer_callback;
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    external_command_buffer_callback = external_command_buffer_callback_;
+  }
+  if (external_command_buffer_callback && external_command_buffer_callback())
+  {
+    return;
+  }
+  if (arm_control_mode_ != ControlMode::kExternal || !arm_vr_enabled_)
+  {
+    return;
+  }
+
+  raw_external_target_q_ = buffered_mode2_target_q_;
+  raw_external_target_v_ = buffered_mode2_target_v_;
+  external_target_received_ = true;
+  buffered_mode2_target_received_ = false;
+  ROS_INFO("[ArmController] Applied buffered arm trajectory after manipulation controller became active");
+}
+
+void ArmController::storeMode2Target(const sensor_msgs::JointState& msg,
+                                     Eigen::VectorXd& target_q,
+                                     Eigen::VectorXd& target_v) const
+{
+  if (target_q.size() != static_cast<int>(joint_arm_num_))
+  {
+    target_q = Eigen::VectorXd::Zero(joint_arm_num_);
+  }
+  if (target_v.size() != static_cast<int>(joint_arm_num_))
+  {
+    target_v = Eigen::VectorXd::Zero(joint_arm_num_);
+  }
+
+  const size_t target_size = std::min({msg.name.size(), msg.position.size(), joint_arm_num_});
+  for (size_t i = 0; i < target_size; ++i)
+  {
+    target_q(i) = msg.position[i] * M_PI / 180.0;
+    if (msg.velocity.size() == joint_arm_num_)
+    {
+      target_v(i) = msg.velocity[i] * M_PI / 180.0;
+    }
+    else
+    {
+      target_v(i) = 0.0;
+    }
   }
 }
 

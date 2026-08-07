@@ -67,14 +67,14 @@ set(humanoid_interface_CONFIG_INCLUDED TRUE)
 
 # set variables for source/devel/install prefixes
 if("FALSE" STREQUAL "TRUE")
-  set(humanoid_interface_SOURCE_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/humanoid-control/humanoid_interface)
-  set(humanoid_interface_DEVEL_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel)
+  set(humanoid_interface_SOURCE_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/src/humanoid-control/humanoid_interface)
+  set(humanoid_interface_DEVEL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel)
   set(humanoid_interface_INSTALL_PREFIX "")
   set(humanoid_interface_PREFIX ${humanoid_interface_DEVEL_PREFIX})
 else()
   set(humanoid_interface_SOURCE_PREFIX "")
   set(humanoid_interface_DEVEL_PREFIX "")
-  set(humanoid_interface_INSTALL_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed)
+  set(humanoid_interface_INSTALL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed)
   set(humanoid_interface_PREFIX ${humanoid_interface_INSTALL_PREFIX})
 endif()
 
@@ -91,9 +91,9 @@ endif()
 # flag project as catkin-based to distinguish if a find_package()-ed project is a catkin project
 set(humanoid_interface_FOUND_CATKIN_PROJECT TRUE)
 
-if(NOT "include;/usr/include/eigen3;/usr/include;/opt/ros/noetic/lib/pkgconfig/../../include;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/opt/ros/noetic/include " STREQUAL " ")
+if(NOT "include;/usr/include/eigen3;/usr/include;/opt/ros/noetic/lib/pkgconfig/../../include;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include " STREQUAL " ")
   set(humanoid_interface_INCLUDE_DIRS "")
-  set(_include_dirs "include;/usr/include/eigen3;/usr/include;/opt/ros/noetic/lib/pkgconfig/../../include;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include;/opt/ros/noetic/include")
+  set(_include_dirs "include;/usr/include/eigen3;/usr/include;/opt/ros/noetic/lib/pkgconfig/../../include;/opt/ros/noetic/lib/x86_64-linux-gnu/pkgconfig/../../../include")
   if(NOT " " STREQUAL " ")
     set(_report "Check the issue tracker '' and consider creating a ticket if the problem has not been reported yet.")
   elseif(NOT " " STREQUAL " ")
@@ -116,7 +116,7 @@ if(NOT "include;/usr/include/eigen3;/usr/include;/opt/ros/noetic/lib/pkgconfig/.
   endforeach()
 endif()
 
-set(libraries "humanoid_interface;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;pinocchio;boost_filesystem;boost_serialization;boost_system;urdfdom_sensor;urdfdom_model_state;urdfdom_model;urdfdom_world;console_bridge;hpp-fcl;octomap;octomath;/opt/drake/lib/libdrake.so")
+set(libraries "humanoid_interface;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;pinocchio;boost_filesystem;boost_serialization;boost_system;urdfdom_sensor;urdfdom_model_state;urdfdom_model;urdfdom_world;console_bridge;hpp-fcl;octomap;octomath")
 foreach(library ${libraries})
   # keep build configuration keywords, target names and absolute libraries as-is
   if("${library}" MATCHES "^(debug|optimized|general)$")
@@ -154,7 +154,7 @@ foreach(library ${libraries})
     set(lib_path "")
     set(lib "${library}-NOTFOUND")
     # since the path where the library is found is returned we have to iterate over the paths manually
-    foreach(path /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed/lib;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
+    foreach(path /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed/lib;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
       find_library(lib ${library}
         PATHS ${path}
         NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)

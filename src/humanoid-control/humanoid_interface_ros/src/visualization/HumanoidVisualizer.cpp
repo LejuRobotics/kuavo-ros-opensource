@@ -27,6 +27,8 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ******************************************************************************/
 
+#include <algorithm>
+
 // Pinocchio forward declarations must be included first
 #include <pinocchio/fwd.hpp>
 
@@ -55,6 +57,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <std_msgs/Float32MultiArray.h>
 #include <algorithm>
+#include <array>
 
 namespace ocs2
 {
@@ -91,6 +94,40 @@ namespace ocs2
     static constexpr size_t kRightClawJointInsertMapSize = sizeof(kRightClawJointInsertMap) / sizeof(kRightClawJointInsertMap[0]);
     static constexpr size_t kLeftClawJointInsertMap200053Size = sizeof(kLeftClawJointInsertMap200053) / sizeof(kLeftClawJointInsertMap200053[0]);
     static constexpr size_t kRightClawJointInsertMap200053Size = sizeof(kRightClawJointInsertMap200053) / sizeof(kRightClawJointInsertMap200053[0]);
+
+    // 200062 的闭环夹爪在 URDF 中展开为树。下表是在 MuJoCo XML 中对控制量
+    // 0、-25、-50、-75、-100 采样得到的平衡关节角，按开度分段插值用于 RViz。
+    static std::array<double, 5> getClawLinkageAngles(double commandAngle)
+    {
+      static const double kJointAngles[5][5] = {
+        { 0.000000,  0.000000,  0.000000, 0.000000,  0.000000},
+        {-0.109209, -0.101740, -0.092681, 0.121829, -0.413562},
+        {-0.145684, -0.128299, -0.112237, 0.170645, -0.521204},
+        {-0.174150, -0.146919, -0.125623, 0.209873, -0.599041},
+        {-0.198813, -0.161801, -0.136211, 0.244441, -0.663050},
+      };
+      constexpr double kNominalOpenAngle = -0.6981317008;
+      const double openness = std::max(0.0, std::min(1.0, commandAngle / kNominalOpenAngle));
+      const double tablePosition = openness * 4.0;
+      const size_t lower = std::min(static_cast<size_t>(tablePosition), static_cast<size_t>(3));
+      const double alpha = tablePosition - static_cast<double>(lower);
+
+      std::array<double, 5> result{};
+      for (size_t i = 0; i < result.size(); ++i)
+      {
+        result[i] = kJointAngles[lower][i] + alpha * (kJointAngles[lower + 1][i] - kJointAngles[lower][i]);
+      }
+      return result;
+    }
+
+    static const std::array<const char*, 5> kLeftFrontClawJoints200062 = {
+      "l_f_bar_1_joint", "l_f_bar_2_joint", "l_f_bar_3_joint", "l_f_finger_joint", "l_f_bar_4_joint"};
+    static const std::array<const char*, 5> kLeftBackClawJoints200062 = {
+      "l_b_bar_1_joint", "l_b_bar_2_joint", "l_b_bar_3_joint", "l_b_finger_joint", "l_b_bar_4_joint"};
+    static const std::array<const char*, 5> kRightFrontClawJoints200062 = {
+      "r_f_bar_1_joint", "r_f_bar_2_joint", "r_f_bar_3_joint", "r_f_finger_joint", "r_f_bar_4_joint"};
+    static const std::array<const char*, 5> kRightBackClawJoints200062 = {
+      "r_b_bar_1_joint", "r_b_bar_2_joint", "r_b_bar_3_joint", "r_b_finger_joint", "r_b_bar_4_joint"};
 
     /******************************************************************************************************/
     /******************************************************************************************************/
@@ -642,9 +679,33 @@ namespace ocs2
           };
           tryInsertGroupRaw(kLeftClawJointInsertMap,  kLeftClawJointInsertMapSize,  claw_joint_positions_[0]);
           tryInsertGroupRaw(kRightClawJointInsertMap, kRightClawJointInsertMapSize, claw_joint_positions_[1]);
-          // 200053/200062 使用下划线命名
-          tryInsertGroupRaw(kLeftClawJointInsertMap200053,  kLeftClawJointInsertMap200053Size,  claw_joint_positions_[0]);
-          tryInsertGroupRaw(kRightClawJointInsertMap200053, kRightClawJointInsertMap200053Size, claw_joint_positions_[1]);
+          const auto leftBar4Joint = urdfModel_.getJoint("l_f_bar_4_joint");
+          const bool useArticulatedClawKinematics = leftBar4Joint && leftBar4Joint->type == urdf::Joint::REVOLUTE;
+          if (useArticulatedClawKinematics)
+          {
+            auto insertLinkage = [this, &jointPositions](const std::array<const char*, 5>& names,
+                                                        const std::array<double, 5>& angles, double direction){
+              for (size_t i = 0; i < names.size(); ++i)
+              {
+                if (urdfModel_.getJoint(names[i]))
+                {
+                  jointPositions[names[i]] = direction * angles[i];
+                }
+              }
+            };
+            const auto leftAngles = getClawLinkageAngles(claw_joint_positions_[0]);
+            const auto rightAngles = getClawLinkageAngles(claw_joint_positions_[1]);
+            insertLinkage(kLeftFrontClawJoints200062, leftAngles, +1.0);
+            insertLinkage(kLeftBackClawJoints200062, leftAngles, -1.0);
+            insertLinkage(kRightFrontClawJoints200062, rightAngles, +1.0);
+            insertLinkage(kRightBackClawJoints200062, rightAngles, -1.0);
+          }
+          else
+          {
+            // 200053 使用下划线命名，但仍采用原来的简化夹爪模型。
+            tryInsertGroupRaw(kLeftClawJointInsertMap200053,  kLeftClawJointInsertMap200053Size,  claw_joint_positions_[0]);
+            tryInsertGroupRaw(kRightClawJointInsertMap200053, kRightClawJointInsertMap200053Size, claw_joint_positions_[1]);
+          }
         }
         robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
 

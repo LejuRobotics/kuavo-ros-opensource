@@ -20,6 +20,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   message_generation
   geometry_msgs
+  kuavo_msgs
 )
 
 catkin_python_setup()
@@ -42,7 +43,6 @@ add_service_files(
   srvChangePhases.srv
   changeAMBACCtrlMode.srv
   changeHandArmPosesByConfigName.srv
-  playmusic.srv
   ExecuteArmAction.srv
 )
 
@@ -53,7 +53,7 @@ generate_messages(
 )
 
 catkin_package(
-  CATKIN_DEPENDS rospy roscpp std_msgs message_runtime
+  CATKIN_DEPENDS rospy roscpp std_msgs message_runtime kuavo_msgs
 )
 
 ## System dependencies are found with CMake's conventions

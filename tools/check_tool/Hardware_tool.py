@@ -18,6 +18,7 @@ import random
 import string
 import pwd
 import grp
+import getpass
 
 if sys.version_info[0] == 2:
     print("你正在使用 Python 2.x , 请更换运行指令为：$ sudo python3 tools/check_tool/Hardware_tool.py ")
@@ -25,6 +26,13 @@ if sys.version_info[0] == 2:
 
 
 folder_path = os.path.dirname(os.path.abspath(__file__))    # check_tool/
+
+CURRENT_USER = os.getenv("SUDO_USER") or getpass.getuser()
+try:
+    USER_HOME = pwd.getpwnam(CURRENT_USER).pw_dir
+except KeyError:
+    USER_HOME = os.path.expanduser('~{}'.format(CURRENT_USER))
+LAB_CONFIG_DIR = os.path.join(USER_HOME, '.config', 'lejuconfig')
 
 # 导入 robot_version 模块
 robot_version_path = os.path.join(os.path.dirname(os.path.dirname(folder_path)), 'src/kuavo_common/python')
@@ -35,7 +43,7 @@ except ImportError:
     RobotVersion = None
     # 只在需要时打印警告，避免在导入时就打印
 
-sys.path.append('/home/lab/.local/lib/python3.8/site-packages/')
+sys.path.append(os.path.join(USER_HOME, '.local/lib/python3.8/site-packages/'))
 sys.path.append(os.path.join(folder_path,"Ruierman"))
 
 import yaml
@@ -76,8 +84,7 @@ class bcolors:
 
 def get_robot_version():
     # 获取用户的主目录
-    home_dir = os.path.expanduser('/home/lab/')
-    bashrc_path = os.path.join(home_dir, '.bashrc')
+    bashrc_path = os.path.join(USER_HOME, '.bashrc')
 
     # 初始化变量
     robot_version = None
@@ -160,8 +167,7 @@ def usb_port():
 
 def imu_software():
     # 定义要运行的命令
-    command = "/home/lab/mtmanager/linux-x64/bin/mtmanager" 
-
+    command = os.path.join(USER_HOME, "mtmanager/linux-x64/bin/mtmanager")
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
@@ -224,10 +230,10 @@ def leju_claw_test():
     """
     主菜单使用的简单测试函数
     """
-    uid = pwd.getpwnam('lab').pw_uid
-    gid = grp.getgrnam('lab').gr_gid
+    uid = pwd.getpwnam(CURRENT_USER).pw_uid
+    gid = grp.getgrnam(CURRENT_USER).gr_gid
     source_file = folder_path + '/config.yaml'
-    target_file = '/home/lab/.config/lejuconfig/config.yaml'
+    target_file = os.path.join(LAB_CONFIG_DIR, 'config.yaml')
     if not os.path.exists(source_file):
         print("kuavo_opensource 手臂电机 config.yaml 文件丢失")
     elif not os.path.exists(target_file):
@@ -289,10 +295,10 @@ def leju_claw_test_with_menu():
     """
     开发者工具菜单使用的带子菜单的测试函数
     """
-    uid = pwd.getpwnam('lab').pw_uid
-    gid = grp.getgrnam('lab').gr_gid
+    uid = pwd.getpwnam(CURRENT_USER).pw_uid
+    gid = grp.getgrnam(CURRENT_USER).gr_gid
     source_file = folder_path + '/config.yaml'
-    target_file = '/home/lab/.config/lejuconfig/config.yaml'
+    target_file = os.path.join(LAB_CONFIG_DIR, 'config.yaml')
     if not os.path.exists(source_file):
         print("kuavo_opensource 手臂电机 config.yaml 文件丢失")
     elif not os.path.exists(target_file):
@@ -446,8 +452,8 @@ def leju_claw_send_position():
 
 def dxl_zero():
     # 定义要运行的命令
-    if(folder_path.startswith("/home/lab/kuavo_opensource/")):
-        command = "sudo bash /home/lab/kuavo_opensource/bin/start_tools.sh /home/lab/kuavo_opensource/bin/dynamixel_calibrate_servos  --record"
+    if(folder_path.startswith(os.path.join(USER_HOME, "kuavo_opensource/"))):
+        command = "sudo bash " + os.path.join(USER_HOME, "kuavo_opensource/bin/start_tools.sh") + " " + os.path.join(USER_HOME, "kuavo_opensource/bin/dynamixel_calibrate_servos") + "  --record"
     else:
         command =  folder_path +"/../../build/lib/DynamixelSDK/dynamixel_calibrate_servos --record" 
 
@@ -516,7 +522,7 @@ def elmo_position_read():
     almoZR_path = folder_path + "/elmoZeroRead.py"
     print("1.复制运行该行命令修改内容进行零点数据转换：code " + almoZR_path)
     print("2.复制运行指令，将运行结果复制粘贴到零点文件中保存：python3 " + almoZR_path)
-    print("3.复制运行该行命令打开零点文件进行修改：code /home/lab/.config/lejuconfig/offset.csv")
+    print("3.复制运行该行命令打开零点文件进行修改：code " + os.path.join(LAB_CONFIG_DIR, "offset.csv"))
 
 def claw_usb(choice):
 
@@ -1093,7 +1099,7 @@ def isolate_cores():
     subprocess.run(command, shell=True)
 
 def license_sign():
-    FILE = "/home/lab/.config/lejuconfig/ec_master.key"
+    FILE = os.path.join(LAB_CONFIG_DIR, "ec_master.key")
     # 检查文件是否存在
     if os.path.exists(FILE):
         # 打开文件并读取内容
@@ -1171,7 +1177,7 @@ def reset_folder():
     }
 
     # 指定目标路径
-    target_path = "/home/lab/"
+    target_path = USER_HOME + "/"
 
     license_str = input("请谨慎，此操作将会删除文件和文件夹内容不可恢复！！！（回车继续）：")
 
@@ -1182,7 +1188,7 @@ def reset_folder():
     # 检查用户输入是否正确（区分大小写）
     if user_input == random_char:
         delete_except_preserved(target_path, preserve)
-        delete_except_preserved("/home/lab/.ssh/", {})
+        delete_except_preserved(os.path.join(USER_HOME, ".ssh/"), {})
         print("文件夹清除成功。")
     else:
         print("您输入的字符不符，请重试。")
@@ -1387,7 +1393,7 @@ def secondary_menu():
             break
         if option == "0":
             print(bcolors.HEADER + "###开始，打开零点文件###" + bcolors.ENDC)
-            print("复制运行该行命令打开：code /home/lab/.config/lejuconfig/offset.csv")
+            print("复制运行该行命令打开：code " + os.path.join(LAB_CONFIG_DIR, "offset.csv"))
             print(bcolors.HEADER + "###结束，打开零点文件###" + bcolors.ENDC)
             break
         elif option == "1":
@@ -1491,6 +1497,7 @@ def secondary_menu():
             if robot_version:
                 try:
                     version_num = int(robot_version)
+                    rv = RobotVersion.create(version_num)
 
                     if version_num == 62 or version_num == 63:
                         # 检查是开源仓库还是闭源仓库
@@ -1544,23 +1551,17 @@ def secondary_menu():
                         else:
                             print(bcolors.WARNING + "无效输入，将执行默认的单关节测试" + bcolors.ENDC)
 
-                    elif 13 <= version_num <= 14:
+                    elif (rv.start_with(1, 3) or rv.start_with(1, 4) or rv.start_with(1, 7)):
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+                        script_description = f"roban磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
-                    elif version_num == 17:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
-
-                    elif version_num == 17:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
-
-                    elif 40 <= version_num <= 49:
+                    elif rv.start_with(4):
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
                         script_description = f"Kuavo4磨线脚本 joint_breakin/joint_breakin.py (版本 {robot_version})"
 
-                    elif 50 <= version_num <= 56:
+                    elif (rv.start_with(5, 0) or rv.start_with(5, 1) or rv.start_with(5, 2)
+                          or rv.start_with(5, 3) or rv.start_with(5, 4) or rv.start_with(5, 5)
+                          or rv.start_with(5, 6)):
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
@@ -1725,7 +1726,7 @@ if __name__ == '__main__':
             break
         elif option == "0":
             print(bcolors.HEADER + "###开始，打开零点文件###" + bcolors.ENDC)
-            print("复制运行该行命令打开：code /home/lab/.config/lejuconfig/offset.csv")
+            print("复制运行该行命令打开：code " + os.path.join(LAB_CONFIG_DIR, "offset.csv"))
             print(bcolors.HEADER + "###结束，打开零点文件###" + bcolors.ENDC)
             break
         elif option == "1":

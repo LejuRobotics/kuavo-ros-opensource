@@ -135,5 +135,15 @@ set_target_properties(hardware_plant::ruiwo_actuatorCXXLib PROPERTIES
 list(APPEND _IMPORT_CHECK_TARGETS hardware_plant::ruiwo_actuatorCXXLib )
 list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::ruiwo_actuatorCXXLib "${_IMPORT_PREFIX}/lib/libruiwo_actuatorCXXLib.so" )
 
+# Import target "hardware_plant::xsens-lcm-types-lib" for configuration "RelWithDebInfo"
+set_property(TARGET hardware_plant::xsens-lcm-types-lib APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
+set_target_properties(hardware_plant::xsens-lcm-types-lib PROPERTIES
+  IMPORTED_LINK_INTERFACE_LANGUAGES_RELWITHDEBINFO "CXX"
+  IMPORTED_LOCATION_RELWITHDEBINFO "${_IMPORT_PREFIX}/lib/libxsens-lcm-types-lib.a"
+  )
+
+list(APPEND _IMPORT_CHECK_TARGETS hardware_plant::xsens-lcm-types-lib )
+list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::xsens-lcm-types-lib "${_IMPORT_PREFIX}/lib/libxsens-lcm-types-lib.a" )
+
 # Commands beyond this point should not need to know the version.
 set(CMAKE_IMPORT_FILE_VERSION)

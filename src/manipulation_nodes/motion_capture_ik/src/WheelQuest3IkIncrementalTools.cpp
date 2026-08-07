@@ -35,6 +35,7 @@
 #include "motion_capture_ik/json.hpp"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelJoyStickHandler.h"
+#include "motion_capture_ik/drake_parser_compat.hpp"
 
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
@@ -277,7 +278,8 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                                               rightElbowRefRel,  // rightElbowRef - offset,
                                               rightHandRefRel,   // rightHandRef - offset;
                                               drakeSolveUpdateChestOrientation_,
-                                              drakeSolveUpdateChestPosition_);
+                                              drakeSolveUpdateChestPosition_,
+                                              resetJointToDefaultWheel_ || !justEnteredMode2_);
   recordTimestamp("chestElbowHandPointOptSolverPtr_->solveFinish", loopSyncCount_);
   const bool freezeFeedAfterOpt =
       !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled && sol.success;
@@ -1672,7 +1674,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
   }
 
   auto computeGripAlpha = [&](bool armMoved, const ros::Time& gripStartTime) -> double {
-    double alpha = 0.01;
+    double alpha = 0.00;
     if (armMoved && !gripStartTime.isZero()) {
       const double elapsedTime = (now - gripStartTime).toSec();
       if (elapsedTime > 0.0) {
@@ -1768,7 +1770,14 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
                            (kMode2SmoothDurationSec - kMode2SensorSyncDurationSec),
                        0.0),
               1.0);
-          armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(14);
+          if(resetJointToDefaultWheel_)
+          {
+            armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(14);
+          }
+          else
+          {
+            armPositionForPublish = q_init_cmd_;
+          }
           latest_q_ = armPositionForPublish;
         }
         armVelocityForPublish.setZero();
@@ -1819,7 +1828,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
     q_ = defaultArmAngles;
     dq_.setZero();
 
-    const double alpha = 0.01;
+    const double alpha = 0.00;
     latest_q_ = (1.0 - alpha) * latest_q_ + alpha * q_;
     latest_dq_.setZero();
     lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
@@ -1906,7 +1915,7 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
       startTime = lbLegMoveStartTime_;
     }
 
-    double alpha = 0.01;
+    double alpha = 0.00;
     if (lbLegMoved && !startTime.isZero()) {
       const double elapsedTime = (currentTime - startTime).toSec();
       if (elapsedTime > 0.0) {
@@ -1958,7 +1967,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
     lb_dq_.setZero();
 
     // alpha 平滑：将 lb_q_ 平滑到 latest_lb_q_
-    const double alpha = 0.001;
+    const double alpha = 0.000;
     latest_lb_q_ = (1.0 - alpha) * latest_lb_q_ + alpha * lb_q_;
 
     // latest_lb_dq_ 设置为零
@@ -2115,7 +2124,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   drake::multibody::Parser parser(&plant);
   parser.package_map().Add("kuavo_assets", ros::package::getPath("kuavo_assets"));
-  auto modelInstance = parser.AddModelFromFile(urdfFilePath);
+  (void)motion_capture_ik::drake_parser_compat::AddUrdfModel(parser, urdfFilePath);
 
   const auto& baseFrame = plant.GetFrameByName("base_link");
   plant.WeldFrames(plant.world_frame(), baseFrame);  // Weld base_link to world frame
@@ -2131,12 +2140,13 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   for (drake::multibody::JointIndex i(0); i < plant.num_joints(); ++i) {
     const auto& joint = plant.get_joint(i);
     if (joint.num_positions() > 0) {
-      mec_limit_lower_(i) = joint.position_lower_limits()(0);
-      mec_limit_upper_(i) = joint.position_upper_limits()(0);
+      const Eigen::Index ji = static_cast<Eigen::Index>(static_cast<int>(i));
+      mec_limit_lower_(ji) = joint.position_lower_limits()(0);
+      mec_limit_upper_(ji) = joint.position_upper_limits()(0);
 
       std::cout << std::left << std::setw(10) << i << std::setw(30) << joint.name() << std::fixed
-                << std::setprecision(4) << std::setw(20) << mec_limit_lower_(i) << std::setw(20) << mec_limit_upper_(i)
-                << std::endl;
+                << std::setprecision(4) << std::setw(20) << joint.position_lower_limits()(0) << std::setw(20)
+                << joint.position_upper_limits()(0) << std::endl;
     }
   }
 
@@ -2479,7 +2489,10 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
                                 // armMode!=2 或 mode2过渡窗口内，统一走默认下肢发布；其余 mode2 情况走 IK 下肢发布
                                 if (armMode != 2 || inMode2Warmup) {
-                                  publishDefaultLegJointStates();
+                                  if(resetJointToDefaultWheel_)
+                                  {
+                                    publishDefaultLegJointStates();
+                                  }
                                 } else {
                                   publishLegJointStates();
                                 }
@@ -2604,6 +2617,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   std::cout << "/ik_ros_uni_cpp_node/quest3/use_incremental_hand_orientation="
             << (useIncrementalHandOrientation_ ? "true" : "false") << std::endl;
 
+  // 读取进入增量控制时是否重置到默认位置
+  nodeHandle_.param(
+      "/reset_joint_to_default", resetJointToDefaultWheel_, true);
+  std::cout << "reset_joint_to_default="
+            << (resetJointToDefaultWheel_ ? "true" : "false") << std::endl;
+
   // 读取 box 边界参数（向量形式）
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
                            "/quest3/box_min_bound",
@@ -2686,6 +2705,11 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         Eigen::IOFormat(Eigen::FullPrecision, 0, ", ", ", ", "", "", "", ""));
     ROS_INFO("[WheelQuest3IkIncrementalROS] Left hand clip result: %s", oss_left.str().c_str());
     ROS_INFO("[WheelQuest3IkIncrementalROS] Right hand clip result: %s", oss_right.str().c_str());
+    if(!resetJointToDefaultWheel_)
+    {
+      defaultLeftHandPosOnExit_ = leftLink6Position;
+      defaultRightHandPosOnExit_ = rightLink6Position;
+    }
   }
 
   // 使用默认手部位置初始化 latestPoseConstraintList_，确保进入增量模式时能正确初始化

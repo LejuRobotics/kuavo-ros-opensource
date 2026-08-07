@@ -167,15 +167,15 @@ class KuavoRobotCore:
             start_time = time.time()
             # slow down walk
             try:
-                while time.time() - start_time < 1.5:
+                while time.time() - start_time < 0.5:
                     self._control.robot_walk(0.0, 0.0, 0.0)
                     # linear_x, linear_y, angular_z
-                    if (abs(self._rb_state.odom_data.linear[0]) < 0.05 and abs(self._rb_state.odom_data.linear[1]) < 0.08 
+                    if (abs(self._rb_state.odom_data.linear[0]) < 0.05 and abs(self._rb_state.odom_data.linear[1]) < 0.08
                         and abs(self._rb_state.odom_data.angular[2]) < 0.05):
                         SDKLogger.debug(f"walk stop, time_cost:{time.time() - start_time}, odom_data:{self._rb_state.odom_data.linear}")
                         break
                     # SDKLogger.debug(f"kuavo robot linear: {self._rb_state.odom_data.linear}")
-                    time.sleep(0.1)
+                    time.sleep(0.05)
             except KeyboardInterrupt:
                 pass
             self._control.robot_stance()
@@ -186,7 +186,7 @@ class KuavoRobotCore:
         #  may already be True; the minimum settle time ensures the robot has actually
         #  processed the stance command before we proceed)
         _WAIT_TIMEOUT = 2.0
-        _MIN_SETTLE_TIME = 1.0
+        _MIN_SETTLE_TIME = 0.3
         start_time = time.time()
         while time.time() - start_time < _WAIT_TIMEOUT:
             if self._rb_state.is_gait('stance') and (time.time() - start_time) >= _MIN_SETTLE_TIME:

@@ -29,18 +29,22 @@
     <depend>leju_mobile_base_msgs</depend>
     <!-- <depend>mujoco_sim</depend> -->
     <depend>mujoco_cpp</depend>
+    <!-- EKF nodelet optional at build on aarch64 — stubs in robot_localization/CMakeLists.txt -->
     <depend>robot_localization</depend>
     <depend>humanoid_wbc</depend>
     <depend>humanoid_wheel_wbc</depend>
     <depend>controller_interface</depend>
     <depend>h12pro_controller_node</depend>
     <depend>joy</depend>
-    <depend>motion_capture_ik</depend>
-    <depend>hardware_node</depend>
+    <!-- motion_capture_ik: launch-time only (with_ik); catkin build still compiles it via exec_depend -->
+    <exec_depend>motion_capture_ik</exec_depend>
+    <!-- hardware_node: real-robot only; omit from catkin graph (Jammy aarch64 lacks py3.8 for ruiwo_controller) -->
+    <!-- <exec_depend>hardware_node</exec_depend> -->
     <depend>kuavo_assets</depend>
     <depend>ocs2_self_collision_visualization</depend>
     <depend>kuavo_audio_player</depend>
-    <depend>mobile_manipulator_controllers</depend>
+    <!-- real-robot / isaac launch only -->
+    <!-- <exec_depend>mobile_manipulator_controllers</exec_depend> -->
     <!-- <depend>gazebo_sim</depend> -->
     <!-- <depend>realsense_ros_gazebo</depend> -->
     <depend>realsense_sim_metadata</depend>
@@ -52,6 +56,7 @@
     <depend>kuavo_led_controller</depend>
     <exec_depend>nodelet</exec_depend>
     <exec_depend>controller_manager</exec_depend>
+    <exec_depend>kuavo_mocap_gmr</exec_depend>
 
     <export>
         <controller_interface plugin="${prefix}/humanoid_controllers_plugins.xml"/>

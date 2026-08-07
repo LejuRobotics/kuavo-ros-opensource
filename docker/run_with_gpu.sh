@@ -122,7 +122,7 @@ else
 		-v "$PARENT_DIR:/root/kuavo_ws" \
 		-v "${HOME}/.config/lejuconfig:/root/.config/lejuconfig" \
         -e NVIDIA_VISIBLE_DEVICES=all \
-        -e NVIDIA_DRIVER_CAPABILITIES=all,display \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
         -e CARB_GRAPHICS_API=vulkan \
         -e GDK_SYNCHRONIZE=1 \
 		--group-add=dialout \

@@ -84,12 +84,16 @@ topics:
   - /rl_controller.*
   - /arm_controller.*
   - /vmp_controller/.*
+  - /gmr/vmp_input
   - /tool_mocap_shoulder
   - /tool_fk_shoulder
   - /tool_position_error_shoulder
   - /belly_pose
   - /joint_.*
   - /ik_fk_result/.*
+  - /pico/world_bone_poses
+  - /pico/retargeted_pose
+  - /pico/raw_bone_poses
   - /r_hand_pose
   - /l_hand_pose
   - /car_pose

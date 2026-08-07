@@ -54,8 +54,8 @@ endif()
 add_library(hardware_plant::hardware_plant STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/kuavo_solver;${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "hardware_plant::xsens_mti_driver;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/kuavo_solver;${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller;${_IMPORT_PREFIX}/include/dexhand_sdk;${_IMPORT_PREFIX}/include"
+  INTERFACE_LINK_LIBRARIES "hardware_plant::xsens_mti_driver;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;\$<LINK_ONLY:hardware_plant::ec_master_main>;\$<LINK_ONLY:hardware_plant::ec_app>;\$<LINK_ONLY:hardware_plant::dexhand_sdk>;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
 )
 
 # Create imported target hardware_plant::hardware_plant_cxx
@@ -63,7 +63,7 @@ add_library(hardware_plant::hardware_plant_cxx STATIC IMPORTED)
 
 set_target_properties(hardware_plant::hardware_plant_cxx PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/kuavo_solver;${_IMPORT_PREFIX}/include/hardware_plant;${_IMPORT_PREFIX}/include/kuavo_common;${_IMPORT_PREFIX}/include/ruiwo_controller_cxx;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "hardware_plant::xsens_mti_driver;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
+  INTERFACE_LINK_LIBRARIES "hardware_plant::xsens_mti_driver;hardware_plant::ec_master_main;hardware_plant::ec_app;hardware_plant::mathtools_hw;hardware_plant::lejuclaw;hardware_plant::hipnuc_imu_receiver;hardware_plant::dexhand_sdk;hardware_plant::canbus_sdk;hardware_plant::motorevo_controller;stdc++fs;hardware_plant::ruiwo_actuatorCXXLib;/opt/ros/noetic/lib/libroscpp.so;/usr/lib/x86_64-linux-gnu/libpthread.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;/opt/ros/noetic/lib/librosconsole.so;/opt/ros/noetic/lib/librosconsole_log4cxx.so;/opt/ros/noetic/lib/librosconsole_backend_interface.so;/usr/lib/x86_64-linux-gnu/liblog4cxx.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so.1.71.0;/opt/ros/noetic/lib/libxmlrpcpp.so;/opt/ros/noetic/lib/libroscpp_serialization.so;/opt/ros/noetic/lib/librostime.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so.1.71.0;/opt/ros/noetic/lib/libcpp_common.so;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_thread.so.1.71.0;/usr/lib/x86_64-linux-gnu/libconsole_bridge.so.0.4;\$<LINK_ONLY:hardware_plant::ec_master_main>;\$<LINK_ONLY:hardware_plant::ec_app>;\$<LINK_ONLY:hardware_plant::dexhand_sdk>;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_common.so;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel/lib/libkuavo_solver.so"
 )
 
 # Create imported target hardware_plant::xsens_mti_driver
@@ -118,9 +118,9 @@ set_target_properties(hardware_plant::hipnuc_imu_receiver PROPERTIES
 add_library(hardware_plant::dexhand_sdk STATIC IMPORTED)
 
 set_target_properties(hardware_plant::dexhand_sdk PROPERTIES
+  INTERFACE_COMPILE_DEFINITIONS "ARCH_X86_64"
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/dexhand_sdk;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_DIRECTORIES "${_IMPORT_PREFIX}/lib"
-  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;m;pthread;rt;dl;hardware_plant::canbus_sdk"
+  INTERFACE_LINK_LIBRARIES "bc_stark_sdk;m;pthread;rt;dl;hardware_plant::canbus_sdk;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_plant/lib/dexhand_sdk/modbus_sdk/dist/shared/linux/libbc_stark_sdk.so"
 )
 
 # Create imported target hardware_plant::canbus_sdk
@@ -156,15 +156,15 @@ set_target_properties(hardware_plant::ruiwo_actuatorCXXLib PROPERTIES
 )
 
 # Create imported target hardware_plant::xsens-lcm-types-lib
-add_library(hardware_plant::xsens-lcm-types-lib INTERFACE IMPORTED)
+add_library(hardware_plant::xsens-lcm-types-lib STATIC IMPORTED)
 
 set_target_properties(hardware_plant::xsens-lcm-types-lib PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/xsens_ros_mti_driver/lcmtypes;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "lcm::lcm-coretypes"
+  INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/xsens_ros_mti_driver/lcmtypes;/usr/local/include;/usr/include/glib-2.0;/usr/lib/x86_64-linux-gnu/glib-2.0/include;${_IMPORT_PREFIX}/include"
+  INTERFACE_LINK_LIBRARIES "lcm;glib-2.0"
 )
 
-if(CMAKE_VERSION VERSION_LESS 3.0.0)
-  message(FATAL_ERROR "This file relies on consumers using CMake 3.0.0 or greater.")
+if(CMAKE_VERSION VERSION_LESS 2.8.12)
+  message(FATAL_ERROR "This file relies on consumers using CMake 2.8.12 or greater.")
 endif()
 
 # Load information for each installed configuration.

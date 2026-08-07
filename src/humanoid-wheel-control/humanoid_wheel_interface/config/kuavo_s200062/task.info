@@ -19,6 +19,18 @@ model_information {
     [11] "r_f_bar_3_joint"
     [12] "r_b_bar_1_joint"
     [13] "r_b_bar_3_joint"
+    [14] "l_f_bar_2_joint"
+    [15] "l_f_finger_joint"
+    [16] "l_f_bar_4_joint"
+    [17] "l_b_bar_2_joint"
+    [18] "l_b_finger_joint"
+    [19] "l_b_bar_4_joint"
+    [20] "r_f_bar_2_joint"
+    [21] "r_f_finger_joint"
+    [22] "r_f_bar_4_joint"
+    [23] "r_b_bar_2_joint"
+    [24] "r_b_finger_joint"
+    [25] "r_b_bar_4_joint"
   }
 
   ; base frame of the robot (from URDF)
@@ -593,9 +605,9 @@ torsoTracking
     (0,0)    20.0   ; torso X
     (1,0)    20.0   ; torso Y
     (2,0)    20.0   ; torso Z
-    (3,0)    10.0   ; torso roll
-    (4,0)    10.0   ; torso pitch
-    (5,0)    10.0   ; torso yaw
+    (3,0)    50.0   ; torso roll
+    (4,0)    50.0   ; torso pitch
+    (5,0)    50.0   ; torso yaw
   }
 }
 
@@ -1170,6 +1182,20 @@ lowJointAccelTask
     (1,0)   6.2     ; leg_pitch
     (2,0)   6.2     ; waist_pitch
     (3,0)   6.2     ; waist_yaw_link
+  }
+  kp_sim
+  {
+    (0,0)   200.00   ; knee_pitch
+    (1,0)   200.00   ; leg_pitch
+    (2,0)   200.00   ; waist_pitch
+    (3,0)   200.00   ; waist_yaw_link
+  }
+  kd_sim
+  {
+    (0,0)   40.2     ; knee_pitch
+    (1,0)   40.2     ; leg_pitch
+    (2,0)   40.2     ; waist_pitch
+    (3,0)   40.2     ; waist_yaw_link
   }
   kp_sim
   {

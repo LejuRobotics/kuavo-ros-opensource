@@ -588,9 +588,9 @@ torsoTracking
     (0,0)    20.0   ; torso X
     (1,0)    20.0   ; torso Y
     (2,0)    20.0   ; torso Z
-    (3,0)    10.0   ; torso roll
-    (4,0)    10.0   ; torso pitch
-    (5,0)    10.0   ; torso yaw
+    (3,0)    50.0   ; torso roll
+    (4,0)    50.0   ; torso pitch
+    (5,0)    50.0   ; torso yaw
   }
 }
 

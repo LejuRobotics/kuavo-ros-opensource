@@ -3,11 +3,11 @@
 
   <!-- 不依赖 ROS 包查找；优先 CAMERA_CALIB_ROOT，否则相对 launch 文件定位到 Camera_Calibration 根目录 -->
   <arg name="camera_calib_root" default="$(eval optenv('CAMERA_CALIB_ROOT', dirname() + '/../..'))" />
-  <!-- robot_layout：默认读 ROBOT_VERSION（52→biped52，62/63→wheel62）；可 roslaunch 显式 robot_layout:= 覆盖 -->
-  <arg name="robot_layout" default="$(eval 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped52')" />
+  <!-- robot_layout：默认读 ROBOT_VERSION（52→biped52，56→biped56，62/63→wheel62）；可显式覆盖 -->
+  <arg name="robot_layout" default="$(eval 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped56' if optenv('ROBOT_VERSION', '52') == '56' else 'biped52')" />
   <arg name="use_wheel62" default="$(eval arg('robot_layout') == 'wheel62')" />
-  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm.urdf')" />
-  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_calibrated.urdf')" />
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm.urdf')" />
+  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_calibrated.urdf')" />
   <arg name="csv_dir" default="$(arg camera_calib_root)/output_csv/kuavo_head"/>
 
   <!-- 选择流程（默认只开 capture_to_csv 手动采样） -->
@@ -107,7 +107,7 @@
       <!-- 离群点剔除：阈值 pos=0.1m, rot=10deg -->
       <param name="outlier_reject_enable" value="true" />
       <param name="outlier_reject_pos_m" value="1" />
-      <param name="outlier_reject_rot_deg" value="100.0" />
+      <param name="outlier_reject_rot_deg" value="200.0" />
       <param name="output_dir" value="$(arg camera_calib_root)/output/kuavo_head" />
       <!-- 固定输出文件名 + 输出共享 calibrated URDF 到 src/Camera_Calibration -->
       <param name="fixed_output_names" value="true" />
@@ -136,4 +136,3 @@
     </node>
   </group>
 </launch>
-

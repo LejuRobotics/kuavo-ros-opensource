@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <math.h>
+#include <string>
+#include <vector>
 // #include "elmo_motor.h"
 #include "EcDemoPlatform.h"
 #include "EcDemoApp.h"
@@ -53,6 +55,15 @@ typedef struct
    */
   int (*writeJointKp)(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kp);
   int (*writeJointKd)(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kd);
+
+  /**
+   * @brief 向YD驱动器写入温度限幅值（对象索引0x3F0D）
+   * @param ids EC从站ID列表（1-based）
+   * @param driver_type 驱动器类型，必须为YD
+   * @param temp_limits 温度限幅值列表（单位：℃）
+   * @return int 0表示成功，1表示驱动类型不支持，2表示写入失败，3表示参数尺寸不匹配
+   */
+  int (*writeTemperatureLimit)(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& temp_limits);
 
 } ActuatorsInterface_t;
 

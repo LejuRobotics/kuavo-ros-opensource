@@ -33,9 +33,6 @@ echo "========================================"
 
 # SSH连接信息
 SSH_HOST="192.168.26.22"
-
-# 目标NTP服务器
-TARGET_NTP="192.168.26.12"
 TIMESYNCD_CONF="/etc/systemd/timesyncd.conf"
 
 # 颜色定义
@@ -45,9 +42,25 @@ YELLOW='\033[33m'
 BLUE='\033[34m'
 RESET='\033[0m'
 
+# 检测本机架构，按架构选择 NTP 服务器地址
+ARCH=$(uname -m)
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    TARGET_NTP="192.168.26.1"
+elif [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
+    TARGET_NTP="192.168.26.12"
+else
+    echo -e "${RED}错误: 不支持的本机架构: $ARCH${RESET}"
+    echo "支持的架构: x86_64/amd64, aarch64/arm64"
+    exit 1
+fi
+
 echo ""
 echo -e "${BLUE}开始检查底盘时间同步状态...${RESET}"
 echo "========================================"
+
+echo ""
+echo -e "${BLUE}本机架构: ${YELLOW}$ARCH${RESET}"
+echo -e "${BLUE}目标 NTP 服务器: ${YELLOW}$TARGET_NTP${RESET}"
 
 # ========================================
 # 第一部分：检查本机（下位机）时间同步状态
@@ -65,20 +78,39 @@ LOCAL_SYNC_STATUS=$(echo "$LOCAL_STATUS" | grep "System clock synchronized" | aw
 echo ""
 echo -e "本机 System clock synchronized状态: ${YELLOW}$LOCAL_SYNC_STATUS${RESET}"
 
-# 检查本机chrony.conf配置
-echo ""
-echo -e "${BLUE}[本机步骤2] 检查 /etc/chrony/chrony.conf 配置${RESET}"
-if [ -f /etc/chrony/chrony.conf ]; then
-    CHRONY_CONF=$(cat /etc/chrony/chrony.conf | grep -E "^server.*$TARGET_NTP" | head -1)
-    echo "当前配置: $CHRONY_CONF"
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    # arm64: Ubuntu 22.04 AGX Orin, 检查 chrony allow 配置
+    echo ""
+    echo -e "${BLUE}[本机步骤2] 检查 chrony allow 配置 (arm64)${RESET}"
 
-    if echo "$CHRONY_CONF" | grep -q "server.*$TARGET_NTP"; then
-        echo -e "${GREEN}✓ 本机 chrony.conf 配置正确 (server $TARGET_NTP)${RESET}"
+    if [ -f /etc/chrony/chrony.conf ]; then
+        ALLOW_CONF=$(grep -E "^allow" /etc/chrony/chrony.conf)
+        echo "chrony allow 配置："
+        echo "$ALLOW_CONF"
+        if echo "$ALLOW_CONF" | grep -q "allow"; then
+            echo -e "${GREEN}✓ chrony.conf 已配置 allow 网段${RESET}"
+        else
+            echo -e "${YELLOW}⚠ chrony.conf 未配置 allow，底盘可能无法同步${RESET}"
+        fi
     else
-        echo -e "${RED}✗ 本机 chrony.conf 配置不正确，需要修复${RESET}"
+        echo -e "${RED}✗ /etc/chrony/chrony.conf 不存在${RESET}"
     fi
 else
-    echo -e "${RED}✗ /etc/chrony/chrony.conf 文件不存在${RESET}"
+    # x86_64: 原方案, 使用 chrony
+    echo ""
+    echo -e "${BLUE}[本机步骤2] 检查 /etc/chrony/chrony.conf 配置 (x86_64)${RESET}"
+    if [ -f /etc/chrony/chrony.conf ]; then
+        CHRONY_CONF=$(cat /etc/chrony/chrony.conf | grep -E "^server.*$TARGET_NTP" | head -1)
+        echo "当前配置: $CHRONY_CONF"
+
+        if echo "$CHRONY_CONF" | grep -q "server.*$TARGET_NTP"; then
+            echo -e "${GREEN}✓ 本机 chrony.conf 配置正确 (server $TARGET_NTP)${RESET}"
+        else
+            echo -e "${RED}✗ 本机 chrony.conf 配置不正确，需要修复${RESET}"
+        fi
+    else
+        echo -e "${RED}✗ /etc/chrony/chrony.conf 文件不存在${RESET}"
+    fi
 fi
 
 echo ""

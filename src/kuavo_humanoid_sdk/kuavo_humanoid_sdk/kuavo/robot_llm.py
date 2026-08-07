@@ -19,7 +19,8 @@ import signal
 
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 
-from std_msgs.msg import Int16MultiArray, Bool
+from std_msgs.msg import Int16MultiArray
+from std_srvs.srv import Trigger
 
 
 class KuavoRobotLLM:
@@ -114,10 +115,11 @@ class KuavoRobotLLM:
             self.tts_end.close()
 
         # 停止播音
-        stop_publisher = rospy.Publisher("/stop_music", Bool, queue_size=10)
-        stop_msg = Bool()
-        stop_msg.data = True
-        stop_publisher.publish(stop_msg)
+        try:
+            rospy.wait_for_service("/stop_music", timeout=2.0)
+            rospy.ServiceProxy("/stop_music", Trigger)()
+        except Exception as e:
+            print(f"【停止服务】停止播音失败: {e}")
 
         print("【停止服务】所有服务已停止")
 

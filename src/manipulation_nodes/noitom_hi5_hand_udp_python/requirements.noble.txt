@@ -1,0 +1,17 @@
+# Ubuntu 24.04 (noble) / Python 3.12 已验证版本
+# 对应原 requirements.txt，供 deploy_autostart.sh 在 VERSION_ID>=24.04 时使用
+# 说明：原 pin（如 numpy==1.24.4、scipy==1.10.1、aiortc==1.9.0）在 Py3.12 上无法安装
+beautifulsoup4==4.12.3
+distro==1.9.0
+docutils==0.20.1
+google==3.0.0
+numpy==1.26.4
+protobuf==7.35.1
+pyparsing==3.1.1
+python-dateutil==2.8.2
+PyYAML==6.0.1
+six==1.16.0
+soupsieve==2.5
+numpy-quaternion==2024.0.13
+scipy==1.11.4
+aiortc==1.15.0

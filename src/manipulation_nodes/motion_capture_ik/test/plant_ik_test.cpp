@@ -6,6 +6,7 @@
 #include <ros/package.h>
 
 #include "plantIK.h"
+#include "motion_capture_ik/drake_parser_compat.hpp"
 
 #include "drake/systems/framework/diagram_builder.h"
 #include "drake/systems/analysis/simulator.h"
@@ -48,7 +49,8 @@ int main(int argc, char* argv[])
     
     drake::systems::DiagramBuilder<double> builder;
     drake::multibody::MultibodyPlant<double>* plant = builder.AddSystem<drake::multibody::MultibodyPlant>(dt);
-    drake::multibody::Parser(plant).AddModelFromFile(model_path);
+    drake::multibody::Parser parser(plant);
+    (void)motion_capture_ik::drake_parser_compat::AddUrdfModel(parser, model_path);
     plant->WeldFrames(plant->world_frame(), plant->GetFrameByName("torso"));
     plant->Finalize();
     std::cout << "plant nq: " << plant->num_positions() << ", nv: " << plant->num_velocities() << std::endl;
