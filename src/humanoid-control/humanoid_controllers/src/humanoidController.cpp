@@ -3586,7 +3586,27 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           target_arm_pos = currentDefalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
         }
 
-        startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
+        // cmd_blend 仍在跑时先 hold 当前姿态，等 blend 结束后再开躯干插值
+        if (cmd_blend_.active())
+        {
+          torso_interpolation_result_.setZero();
+          torso_interpolation_result_.segment<3>(0) = currentObservation_.state.segment<3>(6);
+          torso_interpolation_result_(3) = currentObservation_.state(9);   // yaw
+          torso_interpolation_result_(4) = currentObservation_.state(10);  // pitch
+          torso_interpolation_result_(5) = 0.0;
+          arm_interpolation_result_ = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
+          leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
+          leg_interpolation_result_.head(jointNumReal_) = currentObservation_.state.segment(12, jointNumReal_);
+          torso_interpolation_target_pose_ = targetTorsoPose;
+          arm_interpolation_target_pos_ = target_arm_pos;
+          pending_rl_to_mpc_torso_interp_ = true;
+          is_torso_interpolation_active_ = false;
+        }
+        else
+        {
+          pending_rl_to_mpc_torso_interp_ = false;
+          startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
+        }
       }
       // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getNextData();
       // // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getData(ros::Time::now().toSec());
@@ -3616,44 +3636,56 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             plannedMode_ = ModeNumber::SS;
             if (resetting_mpc_state_ == ResettingMpcState::RESET_BASE)
             {// 插值阶段
-              // 更新躯干插值
-              updateMPCRLInterpolation(currentObservation_.time);
-              // 检查插值是否完成
-              if (!is_torso_interpolation_active_)
+              if (pending_rl_to_mpc_torso_interp_)
               {
-                // 搬运插值完成 → READY（保持 RESET_BASE，继续喂搬运姿态给 MPC）
-                if (transport_mode_state_ == TRANSPORT_INTERPOLATING)
+                if (!cmd_blend_.active())
                 {
-                  transport_mode_state_ = TRANSPORT_READY;
-                  ROS_INFO("[HumanoidController] Transport mode READY (posture reached, joints unlocked)");
+                  startMPCRLInterpolation(currentObservation_.time, torso_interpolation_target_pose_,
+                                          arm_interpolation_target_pos_);
+                  pending_rl_to_mpc_torso_interp_ = false;
                 }
-                else if (transport_mode_state_ != TRANSPORT_READY)
+              }
+              else
+              {
+                // 更新躯干插值
+                updateMPCRLInterpolation(currentObservation_.time);
+                // 检查插值是否完成
+                if (!is_torso_interpolation_active_)
                 {
-                bool mpc_ready = mrtRosInterface_->initialPolicyReceived() &&
-                                          mrtRosInterface_->updatePolicy() &&
-                                          mrtRosInterface_->isPolicyUpdated() &&
-                                          mrtRosInterface_->getPolicyReceiveCount() > 1;
-                if (is_rl_controller_)// 切换到RL
-                {
-                  resetting_mpc_state_ = ResettingMpcState::NORMAL;
-                  // 插值阶段直接输出 arm_interpolation_result_，滤波器未随之更新
-                  // 在切到 AMP 前对齐滤波器，避免本帧剩余 WBC 流程使用旧 MPC 状态回跳
-                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
-                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
-                  // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
-                  if (current_controller_ptr_) {
-                    current_controller_ptr_->onInterpolationComplete();
+                  // 搬运插值完成 → READY（保持 RESET_BASE，继续喂搬运姿态给 MPC）
+                  if (transport_mode_state_ == TRANSPORT_INTERPOLATING)
+                  {
+                    transport_mode_state_ = TRANSPORT_READY;
+                    ROS_INFO("[HumanoidController] Transport mode READY (posture reached, joints unlocked)");
                   }
-                }else if (mpc_ready)
-                {
-                  standupTime_ = currentObservation_.time;
-                  resetting_mpc_state_ = ResettingMpcState::NORMAL;
-                  // 重置手臂滤波器，避免下一帧 MPC 策略输出与滤波器状态不匹配导致 joint_cmd 突变
-                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
-                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
-                }
-                }
+                  else if (transport_mode_state_ != TRANSPORT_READY)
+                  {
+                  bool mpc_ready = mrtRosInterface_->initialPolicyReceived() &&
+                                            mrtRosInterface_->updatePolicy() &&
+                                            mrtRosInterface_->isPolicyUpdated() &&
+                                            mrtRosInterface_->getPolicyReceiveCount() > 1;
+                  if (is_rl_controller_)// 切换到RL
+                  {
+                    resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                    // 插值阶段直接输出 arm_interpolation_result_，滤波器未随之更新
+                    // 在切到 AMP 前同步滤波器，避免本帧剩余 WBC 流程使用旧 MPC 状态回跳
+                    arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                    arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
+                    // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
+                    if (current_controller_ptr_) {
+                      current_controller_ptr_->onInterpolationComplete();
+                    }
+                  }else if (mpc_ready)
+                  {
+                    standupTime_ = currentObservation_.time;
+                    resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                    // 重置手臂滤波器，避免下一帧 MPC 策略输出与滤波器状态不匹配导致 joint_cmd 突变
+                    arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                    arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
+                  }
+                  }
 
+                }
               }
             }
             if (mrtRosInterface_->updatePolicy())

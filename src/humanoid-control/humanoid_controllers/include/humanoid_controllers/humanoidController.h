@@ -996,6 +996,8 @@ namespace humanoid_controller
     double rl_to_rl_velocity_dip_midpoint_ = RL_TO_RL_VELOCITY_DIP_MIDPOINT_DEFAULT;
 
     ControllerCmdBlend cmd_blend_;
+    // RL→MPC：cmd_blend 结束后再启动躯干插值（目标复用 torso/arm_interpolation_target_*）
+    bool pending_rl_to_mpc_torso_interp_{false};
 
     // ==================== 通用插值系统成员变量 ====================
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁
