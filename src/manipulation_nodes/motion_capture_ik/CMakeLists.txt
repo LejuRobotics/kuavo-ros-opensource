@@ -151,6 +151,10 @@ if(EXISTS "${PLANT_IK_FILE}")
 install(TARGETS plantIK
     LIBRARY DESTINATION lib
 )
+else()
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/lib/libplantIK.so
+    DESTINATION lib
+)
 endif()
 
 install(DIRECTORY include/${PROJECT_NAME}/
