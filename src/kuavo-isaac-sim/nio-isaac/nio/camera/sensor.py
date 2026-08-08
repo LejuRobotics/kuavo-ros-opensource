@@ -1,9 +1,10 @@
 # from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.sensor import Camera, IMUSensor
 import numpy as np
+import cv2
 import rospy
 from std_msgs.msg import Float32
-from sensor_msgs.msg import Image, PointCloud2, PointField
+from sensor_msgs.msg import Image, PointCloud2, PointField, CompressedImage
 import sensor_msgs.point_cloud2 as pc2
 from cv_bridge import CvBridge
 import struct
@@ -42,6 +43,8 @@ class Sensor:
         # 创建ros发布器
         self.freq_pub = rospy.Publisher('/kuavo_isaac_sim/sensor_estimate', Float32, queue_size=10)
         self.rgb_pub = rospy.Publisher('/camera/color/image_raw', Image, queue_size=10)
+        # 仿真中也发布 compressed，保证订阅方在仿真环境能收到图像 (#3678)
+        self.rgb_compressed_pub = rospy.Publisher('/camera/color/image_raw/compressed', CompressedImage, queue_size=10)
         self.depth_pub = rospy.Publisher('/camera/depth/image_raw', Image, queue_size=10)
         self.pointcloud_pub = rospy.Publisher('/camera/depth/points', PointCloud2, queue_size=10)
         self.bridge = CvBridge()
@@ -200,6 +203,16 @@ class Sensor:
                         rgb_msg.header.stamp = rospy.Time.now()
                         rgb_msg.header.frame_id = "camera_color_optical_frame"
                         self.rgb_pub.publish(rgb_msg)
+
+                        # 同步发布 compressed (JPEG)，供订阅方使用 (#3678)
+                        rgb_bgr = rgb_data[:, :, ::-1] if rgb_data.shape[2] == 3 else rgb_data
+                        ok, jpeg_data = cv2.imencode('.jpg', rgb_bgr, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                        if ok:
+                            compressed_msg = CompressedImage()
+                            compressed_msg.header = rgb_msg.header
+                            compressed_msg.format = "jpeg"
+                            compressed_msg.data = jpeg_data.tobytes()
+                            self.rgb_compressed_pub.publish(compressed_msg)
                     except Exception as e:
                         print(f"Error publishing RGB image: {e}")
                 

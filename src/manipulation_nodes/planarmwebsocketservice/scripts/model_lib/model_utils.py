@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import rospy
 import rospkg
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
 from kuavo_msgs.msg import yoloOutputData, yoloDetection
 
@@ -27,7 +27,7 @@ class YOLO_detection:
         
         self.cameras = {
             'head': {
-                'topic': '/camera/color/image_raw',
+                'topic': '/camera/color/image_raw/compressed',
                 'pub_topic': '/model_output_data',
                 'image': None,
                 'lock': threading.Lock(),
@@ -58,7 +58,7 @@ class YOLO_detection:
 
     def head_cam_callback(self, msg):
         try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
             self.cv_image_shape = cv_image.shape
             # rospy.loginfo(f"Image resolution: {cv_image_shape[1]}x{cv_image_shape[0]}")
 
@@ -88,7 +88,7 @@ class YOLO_detection:
         for camera_name, camera_info in self.cameras.items():
             try:
                 if camera_name == 'head':
-                    rospy.Subscriber(camera_info['topic'], Image, self.head_cam_callback, queue_size=1)
+                    rospy.Subscriber(camera_info['topic'], CompressedImage, self.head_cam_callback, queue_size=1)
                 elif camera_name == 'chest':
                     rospy.Subscriber(camera_info['topic'], Image, self.chest_cam_callback, queue_size=1)
                 print(f"Subscribed to {camera_name} camera topic")
