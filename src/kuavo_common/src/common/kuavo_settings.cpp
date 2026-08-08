@@ -136,12 +136,12 @@ namespace HighlyDynamic
         std::string ecMasterType;
 
         if (!file.is_open()) {
-            std::cerr << "\033[33mwarning: " << filePath << " 文件不存在, 未指定EcMasterType, 使用默认值 'elmo' 驱动器类型\033[0m" << std::endl;
+            std::cerr << "\033[33mwarning: " << filePath << " 文件不存在, 未指定EcMasterType, 将根据机器人型号使用默认驱动器类型\033[0m" << std::endl;
             
             // For Roban robots (version 1X), use "leju" as default
-            if (rb_version.major() > 1 && rb_version.major() < 2) {
+            if (rb_version.major() == 1) {
                 std::cerr << "\033[33mRoban robot detected (version " << std::to_string(rb_version.major()) << "), using 'leju' as default driver type\033[0m" << std::endl;
-                return "youda1";
+                return "youda3";
             }
 
             return "elmo";  
