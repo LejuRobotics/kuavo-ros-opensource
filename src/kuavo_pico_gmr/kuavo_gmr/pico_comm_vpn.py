@@ -39,6 +39,7 @@ from std_srvs.srv import SetBool, SetBoolRequest, Trigger, TriggerRequest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pico_comm_minimal import MinimalPicoReceiver
+from pico_diagnostic_runtime import monotonic_ns
 
 
 IDLE_AMP = "IDLE_AMP"
@@ -661,17 +662,19 @@ class SessionManager:
 
 
 class PicoReceiverVPN(MinimalPicoReceiver):
-    def __init__(self, session_manager, host, port, publish_tf):
+    def __init__(self, session_manager, host, port, publish_tf, **diagnostic_kwargs):
         super().__init__(
             host=host,
             port=port,
             publish_tf=publish_tf,
             enable_ip_broadcast=False,
+            **diagnostic_kwargs,
         )
         self.session_manager = session_manager
 
     def start(self):
         self.running = True
+        self.diagnostics.start()
         self.process_thread = threading.Thread(
             target=self._process_data_thread, daemon=True
         )
@@ -680,6 +683,7 @@ class PicoReceiverVPN(MinimalPicoReceiver):
         while self.running and not rospy.is_shutdown():
             try:
                 data, address = self.socket.recvfrom(65535)
+                recv_ns = monotonic_ns()
             except socket.timeout:
                 continue
             except OSError:
@@ -689,16 +693,22 @@ class PicoReceiverVPN(MinimalPicoReceiver):
                 continue
 
             if not self.session_manager.input_allowed(address[0]):
+                self.diagnostics.record_unauthorized_drop(address, len(data))
                 rospy.logwarn_throttle(
                     5.0, "Dropped unauthorized PICO UDP from %s", address[0]
                 )
                 continue
+            datagram = self.diagnostics.decode_datagram(data, address, recv_ns)
+            if datagram is None:
+                continue
+            datagram.enqueue_monotonic_ns = monotonic_ns()
             try:
-                self.data_queue.put_nowait(data)
+                self.data_queue.put_nowait(datagram)
             except queue.Full:
                 try:
-                    self.data_queue.get_nowait()
-                    self.data_queue.put_nowait(data)
+                    dropped = self.data_queue.get_nowait()
+                    self.diagnostics.record_queue_drop(dropped)
+                    self.data_queue.put_nowait(datagram)
                 except queue.Empty:
                     pass
 
@@ -711,6 +721,21 @@ def main():
         host=rospy.get_param("~host", "0.0.0.0"),
         port=int(rospy.get_param("~udp_port", 12345)),
         publish_tf=bool(rospy.get_param("~publish_tf", True)),
+        enable_diagnostics=bool(rospy.get_param("~enable_diagnostics", True)),
+        diagnostic_log_enable=bool(rospy.get_param("~diagnostic_log_enable", False)),
+        diagnostic_log_dir=rospy.get_param("~diagnostic_log_dir", "~/.ros/pico_diagnostics"),
+        diagnostic_log_max_file_mb=float(rospy.get_param("~diagnostic_log_max_file_mb", 300.0)),
+        diagnostic_log_compress=bool(rospy.get_param("~diagnostic_log_compress", True)),
+        diagnostic_udp_reply=bool(rospy.get_param("~diagnostic_udp_reply", True)),
+        enable_time_sync=bool(rospy.get_param("~enable_time_sync", True)),
+        diagnostic_publish_hz=float(rospy.get_param("~diagnostic_publish_hz", 1.0)),
+        diagnostic_allow_legacy=bool(rospy.get_param("~diagnostic_allow_legacy", False)),
+        diagnostic_ping_enable=bool(rospy.get_param("~diagnostic_ping_enable", True)),
+        diagnostic_ping_lower_ip=rospy.get_param("~diagnostic_ping_lower_ip", ""),
+        diagnostic_ping_interval_sec=float(rospy.get_param("~diagnostic_ping_interval_sec", 5.0)),
+        diagnostic_ping_timeout_sec=float(rospy.get_param("~diagnostic_ping_timeout_sec", 1.0)),
+        diagnostic_sync_max_valid_rtt_ms=float(rospy.get_param("~diagnostic_sync_max_valid_rtt_ms", 200.0)),
+        diagnostic_sync_max_valid_residual_ms=float(rospy.get_param("~diagnostic_sync_max_valid_residual_ms", 10.0)),
     )
     rospy.on_shutdown(manager.shutdown)
     try:
