@@ -7,8 +7,24 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
-# 可重现构建：固定调试信息中的时间戳，使 .so 内容仅取决于源码内容而非文件 mtime
+# 可重现构建：固定调试信息中的时间戳与编译目录路径，使 .so 字节内容仅取决于源码
+# 而非构建机器的工作区路径 / 文件 mtime / 编译时刻。
+# - SOURCE_DATE_EPOCH=0：固定 .debug_line 文件表里的 mtime 列与 __DATE__/__TIME__ 宏
+# - -ffile-prefix-map / -fdebug-prefix-map / -fmacro-prefix-map：把源码目录和构建目录
+#   在调试信息 (__FILE__ / DW_AT_comp_dir / .debug_line 路径) 与宏里映射为固定占位串，
+#   消除跨机器(开发者 / CI runner / arm runner)的绝对路径 diff。
+# 这三者叠加后，同一份源码在不同路径下编出的 plantIK.so 逐字节一致。
 set(ENV{SOURCE_DATE_EPOCH} "0")
+set(REPRODUCIBLE_PREFIX_MAP_FLAGS
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+    "-fdebug-prefix-map=${CMAKE_SOURCE_DIR}=."
+    "-fmacro-prefix-map=${CMAKE_SOURCE_DIR}=."
+    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
+    "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=."
+    "-fmacro-prefix-map=${CMAKE_BINARY_DIR}=."
+)
+string(REPLACE ";" " " REPRODUCIBLE_PREFIX_MAP_FLAGS_STR "${REPRODUCIBLE_PREFIX_MAP_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${REPRODUCIBLE_PREFIX_MAP_FLAGS_STR}")
 
 # VR incremental C++ nodes (wheel_ik / ik_ros_uni_cpp); enabled on aarch64 when Drake is available.
 option(MOTION_CAPTURE_IK_BUILD_VR_CPP_NODES "Build ik_ros_uni_cpp_node / wheel_ik / topic_logger" ON)
