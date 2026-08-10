@@ -148,6 +148,18 @@ namespace ocs2
       endEffectorSpatialKinematicsPtr_->setPinocchioInterface(pinocchioInterface_);
       visualModeSettings_ = loadModelSettings(fileName);
       launchVisualizerNode(nodeHandle);
+
+      // 读取是否为真机环境：真机由 hardware_node 发布真实的 /leju_claw_state，
+      // visualizer 不再补发假 state，避免与真实反馈冲突。
+      // 该参数由 humanoidController 的 ros::param::set("/is_real", is_real_) 设置；
+      // 仿真/回放路径（HumanoidDummyNode / PlayBackNodelet 未设该参数）默认为仿真，
+      // 仍保留补发逻辑以供 rosbag 录制。
+      bool is_real_param = false;
+      if (ros::param::has("/is_real"))
+      {
+        ros::param::get("/is_real", is_real_param);
+      }
+      isReal_ = is_real_param;
       head_joint_names_ = {"zhead_1_joint", "zhead_2_joint"};
       head_joint_positions_ = {0.0, 0.0};
       // 原有qiangnao手关节初始化
@@ -710,7 +722,10 @@ namespace ocs2
         robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
 
         // publish /leju_claw_state for bag recording
-        if (updateClawJointPositions_) {
+        // 仅在仿真/回放路径补发假 state（供 rosbag 录制）；
+        // 真机由 hardware_node 发布真实反馈，此处若再补发会与真实 state 冲突
+        // （假 state 恒为 kReached，会让上层提前误判夹爪到位）。
+        if (updateClawJointPositions_ && !isReal_) {
           kuavo_msgs::lejuClawState claw_state_msg;
           claw_state_msg.header.stamp = timeStamp;
           claw_state_msg.header.frame_id = "leju_claw";

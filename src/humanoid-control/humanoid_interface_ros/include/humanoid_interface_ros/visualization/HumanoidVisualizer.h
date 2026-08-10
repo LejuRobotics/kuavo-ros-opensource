@@ -198,6 +198,10 @@ namespace ocs2
       ros::Publisher lejuClawStatePub_;
       urdf::Model urdfModel_;
 
+      // 是否为真机环境。真机下由 hardware_node 发布真实的 /leju_claw_state，
+      // visualizer 不再补发假 state，避免与真实反馈冲突（仿真/回放路径仍补发以供 bag 录制）。
+      bool isReal_ = false;
+
     };
 
   } // namespace humanoid
