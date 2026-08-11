@@ -126,6 +126,8 @@ public:
   // Get current command data
   CommandDataRL getCurrentCommand() const;
   Eigen::Vector2d getCurrentPostureCommand() const;
+  /// 清空姿态控制命令（下蹲/俯仰），用于退出 VR 躯干控制时恢复站姿
+  void resetPostureCommand();
   CommandDataRL getPolicyCommand() const;
   bool shouldBlockCommandExecution() const;
   geometry_msgs::Twist getSmoothedCmdVel() const;

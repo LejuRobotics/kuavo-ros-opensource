@@ -396,6 +396,16 @@ Eigen::Vector2d RlGaitReceiver::getCurrentPostureCommand() const
   return posture;
 }
 
+void RlGaitReceiver::resetPostureCommand()
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  smoothed_cmd_pose_.linear.z = 0.0;
+  smoothed_cmd_pose_.angular.y = 0.0;
+  currentCommand_.cmdPostureSquatHeight_ = 0.0;
+  currentCommand_.cmdPostureTrunkPitch_ = 0.0;
+  ROS_DEBUG("[RlGaitReceiver] Posture command reset to zero (squat/pitch cleared)");
+}
+
 void RlGaitReceiver::syncPostureToCommand()
 {
   currentCommand_.cmdPostureSquatHeight_ = smoothed_cmd_pose_.linear.z;

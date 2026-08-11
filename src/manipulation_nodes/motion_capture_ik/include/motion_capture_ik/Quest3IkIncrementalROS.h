@@ -92,6 +92,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
  private:
   void solveIkHandElbowThreadFunction();
   void applyWorkerThreadScheduling(const char* threadName, int priority) const;
+  bool requestWbcArmTrajectoryControl(int controlMode, bool requireIncrementalMode, const char* context);
 
   static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
   static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 50;
@@ -100,6 +101,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void updateSensorArmJointMeanFromSensorData();
 
   ros::Subscriber arm_ctrl_mode_vr_sub_;
+  std::mutex wbcArmTrajectoryControlMutex_;
 
   // FK 辅助函数：计算左手末端执行器姿态
   void computeLeftEndEffectorFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);

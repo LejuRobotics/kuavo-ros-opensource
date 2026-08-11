@@ -615,9 +615,10 @@ void Quest3IkIncrementalROS::fsmChange() {
     // fsmChange 结束后，调用 forceActivateAllArmCtrlMode（执行指定次数，增强鲁棒性）
     if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
       forceActivateAllArmCtrlMode();
-      kuavo_msgs::changeArmCtrlMode srv;
-      srv.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
-      enableWbcArmTrajectoryControlClient_.call(srv);
+      requestWbcArmTrajectoryControl(
+          static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode),
+          true,
+          "enable incremental arm trajectory control");
       activateAllArmCtrlModeCounter_++;
     }
     return;  // 没有模式切换，直接返回
@@ -968,14 +969,6 @@ void Quest3IkIncrementalROS::fsmExit() {
     lowpass_dq_.tail(7).setZero();
   }
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
-
-  // 【修复】仅在真正退出 VR (2→1) 时清零 use_ros_arm_joint_trajectory_。
-  bool isExitingVR = (armControlMode_ == 1 && lastArmControlMode_ == 2);
-  if (isExitingVR) {
-    kuavo_msgs::changeArmCtrlMode srv;
-    srv.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
-    enableWbcArmTrajectoryControlClient_.call(srv);
-  }
 
   deactivateController();
 }
@@ -1581,6 +1574,25 @@ void Quest3IkIncrementalROS::armCtrlModeCallback(const std_msgs::Float64MultiArr
   currentArmCtrlMode_ = static_cast<int>(msg->data[0]); // 对应 Python __arm_control_mode（current_mode）
 }
 
+bool Quest3IkIncrementalROS::requestWbcArmTrajectoryControl(int controlMode,
+                                                             bool requireIncrementalMode,
+                                                             const char* context) {
+  std::lock_guard<std::mutex> lock(wbcArmTrajectoryControlMutex_);
+
+  if (requireIncrementalMode && armControlMode_.load() != 2) {
+    ROS_DEBUG("[Quest3IkIncrementalROS] Skip %s: arm control mode is no longer incremental", context);
+    return true;
+  }
+
+  kuavo_msgs::changeArmCtrlMode srv;
+  srv.request.control_mode = controlMode;
+  if (!enableWbcArmTrajectoryControlClient_.call(srv) || !srv.response.result) {
+    ROS_ERROR("[Quest3IkIncrementalROS] Failed to %s", context);
+    return false;
+  }
+  return true;
+}
+
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
   int newMode = msg->data;
   int oldMode = armControlMode_.load();
@@ -1601,6 +1613,9 @@ void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
         ROS_ERROR("[Quest3IkIncrementalROS] Failed to enable SHM on mode 2 enter");
       }
     } else if (oldMode == 2 && newMode != 2) {
+      requestWbcArmTrajectoryControl(
+          static_cast<int>(MpcRefUpdateMode::DISABLED_ARM), false, "disable WBC ROS arm trajectory control");
+
       if (!arm_traj_writer_.setTransport(Request::TRANSPORT_NONE)) {
         ROS_ERROR("[Quest3IkIncrementalROS] Failed to disable SHM on mode 2 exit");
       }

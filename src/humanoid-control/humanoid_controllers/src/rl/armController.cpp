@@ -380,6 +380,14 @@ bool ArmController::changeMode(int target_mode)
     ROS_WARN("[ArmController] Invalid control mode: %d", target_mode);
     return false;
   }
+
+  // External -> AutoSwing 归位期间 getMode() 仍为 2。重复的 mode1 请求不能
+  // 重新初始化插值，否则归位曲线会在每个控制周期从头开始、永远无法完成。
+  if (target_mode == static_cast<int>(ControlMode::kAutoSwing) &&
+      arm_control_mode_ == ControlMode::kExternal && is_returning_from_external_)
+  {
+    return true;
+  }
   
   // 执行模式切换
   applyModeChange(target_mode);

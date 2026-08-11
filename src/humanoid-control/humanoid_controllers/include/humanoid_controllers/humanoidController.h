@@ -735,7 +735,9 @@ namespace humanoid_controller
     vector_t humanoidState_;
     ArmControlMode mpcArmControlMode_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
     ArmControlMode mpcArmControlMode_desired_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
+    std::atomic_int arm_control_mode_desired_cache_{static_cast<int>(ArmControlMode::AUTO_SWING)};
     std::atomic_bool pending_external_arm_controller_mode_{false};
+    std::atomic_bool more_activation_waiting_mode1_{false};
     double external_arm_default_position_tolerance_{0.05};
     double external_arm_target_hold_time_{0.5};
     Eigen::VectorXd external_arm_target_pos_;

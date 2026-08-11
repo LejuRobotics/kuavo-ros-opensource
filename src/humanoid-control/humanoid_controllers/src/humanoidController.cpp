@@ -955,6 +955,26 @@ namespace humanoid_controller
       controller_manager_->registerWalkingCommandBlockCallback([this]() -> bool {
         return shouldBlockWalkingCommandForExternalArmTarget();
       });
+      controller_manager_->registerControllerActivatedCallback(
+          [this](const std::string& controller_name, RLControllerType controller_type) -> bool {
+            if (controller_type != RLControllerType::MORE_CONTROLLER)
+            {
+              more_activation_waiting_mode1_ = false;
+              return false;
+            }
+
+            // 切入 MoRE 的边沿只接受 reset 后的 mode1。切入前因外部控制
+            // 缓存的 mode2 不得在新控制器上补发；新的双 Trigger/X+A 会在
+            // MoRE 激活后形成新的明确 mode2 请求。
+            pending_external_arm_controller_mode_ = false;
+            const bool waiting_mode1 =
+                arm_control_mode_desired_cache_.load(std::memory_order_acquire) !=
+                static_cast<int>(ArmControlMode::AUTO_SWING);
+            more_activation_waiting_mode1_.store(waiting_mode1, std::memory_order_release);
+            ROS_INFO("[controller] Activated '%s': cleared stale external arm mode, reset to mode1 (waiting_global_mode1=%d)",
+                     controller_name.c_str(), waiting_mode1);
+            return waiting_mode1;
+          });
       
       // 注册倒地状态回调函数
       controller_manager_->registerFallDownStateCallback([this](int state) {
@@ -1210,10 +1230,38 @@ namespace humanoid_controller
           arm_mode_sync_time_ = ros::Time::now().toSec();
           
         }
+        const int raw_desired_arm_mode = static_cast<int>(msg->data[1]);
+        arm_control_mode_desired_cache_.store(raw_desired_arm_mode, std::memory_order_release);
+
+        // 若切入前遗留的是 mode2，MoRE 激活后先等待全局 mode1 确认。
+        // 该窗口中的 mode2 属于旧请求（或过早按键），不能覆盖刚完成的 reset。
+        if (more_activation_waiting_mode1_.load(std::memory_order_acquire))
+        {
+          pending_external_arm_controller_mode_ = false;
+          if (raw_desired_arm_mode == static_cast<int>(ArmControlMode::AUTO_SWING))
+          {
+            more_activation_waiting_mode1_.store(false, std::memory_order_release);
+            ROS_INFO("[controller] MoRE activation received global mode1 confirmation");
+          }
+          else
+          {
+            ROS_WARN_THROTTLE(1.0,
+                              "[controller] Ignore arm mode %d while MoRE activation waits for global mode1",
+                              raw_desired_arm_mode);
+            return;
+          }
+        }
         if (msg->data[1] != mpcArmControlMode_desired_)
         {
           mpcArmControlMode_desired_ = static_cast<ArmControlMode>(msg->data[1]);
           std::cout << "[controller] mpc arm control mode desired changed to: " << mpcArmControlMode_desired_ << std::endl;
+
+          // pending 只代表尚未兑现的 mode2。全局意图一旦离开 mode2，
+          // 即使当前处于 MPC 或目标控制器尚未就绪，也必须立即作废。
+          if (mpcArmControlMode_desired_ != ArmControlMode::EXTERN_CONTROL)
+          {
+            pending_external_arm_controller_mode_ = false;
+          }
           
           // 如果当前是 RL 控制器，设置 arm_controller_ 的模式
           if (controller_manager_)
@@ -1267,9 +1315,9 @@ namespace humanoid_controller
                   }
                 }
                 pending_external_arm_controller_mode_ = false;
-                arm_controller->changeMode(arm_controller_mode);
-                ROS_INFO("[controller] Set arm_controller mode to %d (from mpcArmControlMode_desired_=%d)",
-                         arm_controller_mode, static_cast<int>(mpcArmControlMode_desired_));
+                const bool accepted = current_controller->requestArmControlMode(arm_controller_mode);
+                ROS_INFO("[controller] Requested arm_controller mode %d (mpc desired=%d, accepted=%d)",
+                         arm_controller_mode, static_cast<int>(mpcArmControlMode_desired_), accepted);
               }
             }
           }
@@ -2272,8 +2320,21 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   bool humanoidController::tryApplyPendingExternalArmControllerMode()
   {
     constexpr int kExternalArmControlMode = 2;
+    if (more_activation_waiting_mode1_.load(std::memory_order_acquire))
+    {
+      pending_external_arm_controller_mode_ = false;
+      return false;
+    }
     if (!pending_external_arm_controller_mode_ || !controller_manager_)
     {
+      return false;
+    }
+
+    // pending mode2 只能在全局意图仍为 mode2 时兑现。进入 MoRE 时发送的
+    // mode1 会使旧 pending 失效，避免 reset 后又被历史请求切回自由手臂。
+    if (mpcArmControlMode_desired_ != ArmControlMode::EXTERN_CONTROL)
+    {
+      pending_external_arm_controller_mode_ = false;
       return false;
     }
 
@@ -2298,7 +2359,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return false;
     }
 
-    arm_controller->changeMode(kExternalArmControlMode);
+    current_controller->requestArmControlMode(kExternalArmControlMode);
     pending_external_arm_controller_mode_ = false;
     ROS_INFO("[controller] Applied pending arm_controller mode 2 after auto controller switch");
     return true;

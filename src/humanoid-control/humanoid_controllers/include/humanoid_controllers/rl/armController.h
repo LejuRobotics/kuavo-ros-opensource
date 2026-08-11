@@ -169,6 +169,21 @@ public:
      * @return 当前模式：0=锁定, 1=自动摆臂, 2=外部控制
      */
     int getMode() const { return static_cast<int>(arm_control_mode_); }
+
+    /**
+     * @brief 获取当前已经接受的目标模式。
+     *
+     * External -> AutoSwing 归位期间，执行外壳仍是 mode2，但目标已经是 mode1。
+     * 调用方用该值判断是否需要再次请求，避免每个控制周期重启归位曲线。
+     */
+    int getRequestedMode() const
+    {
+      if (arm_control_mode_ == ControlMode::kExternal && is_returning_from_external_)
+      {
+        return static_cast<int>(ControlMode::kAutoSwing);
+      }
+      return static_cast<int>(arm_control_mode_);
+    }
     
     /**
      * @brief 检查VR控制是否启用
