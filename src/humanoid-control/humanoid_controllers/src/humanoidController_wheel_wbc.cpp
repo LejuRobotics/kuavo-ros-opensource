@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <sstream>
+#include <iomanip>
 #include <algorithm>
 #include <chrono>
 #include <unistd.h>
@@ -408,6 +410,7 @@ namespace humanoidController_wheel_wbc
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
     stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
+    resetToStatePub_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/mobile_manipulator_reset_to_state", 1);
 
     // 发布初始速度控制开关状态
     {
@@ -438,7 +441,11 @@ namespace humanoidController_wheel_wbc
     
     // 注册服务回调
     registerAllServices();
-    init_arm_target_qpos_ = vector_t::Zero(armNum_);
+    // 3791: 双臂 home 取 mujoco_q 初始臂段（[7+lowJointNum_ : 7+lowJointNum_+armNum_)，左臂7+右臂7，
+    // 与站姿初始化处提取方式一致（起蹦版在其初始化处同样自动适配）。
+    // 此前 firstRun 写死双足遗留值 [-0.0, 0.4, 0.2, -1.5, ...]，关节序不符轮臂，
+    // mode 1 会把 WBC 目标拉到错误关节位。
+    init_arm_target_qpos_ = mujoco_q.segment(7 + lowJointNum_, armNum_);
     
     // 初始化手臂目标位置向量
     prev_arm_trajectory_mode_ = arm_trajectory_mode_;
@@ -657,7 +664,26 @@ namespace humanoidController_wheel_wbc
   bool humanoidControllerWheelWbc::enableControlCallback(std_srvs::SetBool::Request &req,
                                                          std_srvs::SetBool::Response &res)
   {
-    ROS_INFO("[enable_control] 控制使能切换: %s", req.data ? "启用" : "禁用");
+    ROS_INFO("[enable_control] 控制使能切换请求: %s", req.data ? "启用" : "禁用");
+
+    // 3791: 受理/拒绝矩阵（简单拒绝，不入队）：
+    //   IDLE    → 受理 disable（进 PAUSING），拒绝 enable（already）
+    //   PAUSING → 拒绝一切（250 帧过渡中）
+    //   PAUSED  → 受理 enable（进 RESUMING），拒绝 disable（已暂停）
+    //   RESUMING → 拒绝一切（250 帧过渡中）
+    // 快速 toggle 被固定周期数吸收：请求只在稳定态被受理，服务不会堆积排队。
+    const SoftPauseState st = soft_pause_state_.load();
+    const bool accept = (st == SoftPauseState::IDLE && !req.data)
+                     || (st == SoftPauseState::PAUSED && req.data);
+    if (!accept)
+    {
+      ROS_WARN_THROTTLE(0.5, "[enable_control] 状态=%d 拒绝本次 %s 请求（仅稳定态受理，简单拒绝不入队）",
+                        static_cast<int>(st), req.data ? "启用" : "禁用");
+      res.success = false;
+      res.message = "soft pause state " + std::to_string(static_cast<int>(st))
+                  + " rejects " + (req.data ? "enable" : "disable") + ", retry later";
+      return true;
+    }
 
     if (req.data == enable_control_.load())
     {
@@ -667,13 +693,6 @@ namespace humanoidController_wheel_wbc
     }
 
     enable_control_.store(req.data);
-
-    // 发布新状态 (latched) — CDM 同进程订阅同步，RM 通过 topic 收到
-    {
-      std_msgs::Bool msg;
-      msg.data = req.data;
-      enableControlStatePub_.publish(msg);
-    }
 
     // 通知底盘调度模式：软急停/恢复
     if (dispatch_mode_client_.exists())
@@ -694,6 +713,48 @@ namespace humanoidController_wheel_wbc
     else
     {
       ROS_WARN("[enable_control] 底盘 dispatch_mode 服务不可用，跳过");
+    }
+
+    if (!req.data)
+    {
+      // ===== disable 受理：立即让整条管线停 =====
+      // 受理即发 enable=false（全局同步总开关），不等主循环；
+      // 冻结记录刻意不做——由主循环 PAUSING 首拍从上一拍执行值冻结，保证"执行值 == 冻结值"零跳变。
+      {
+        std_msgs::Bool msg;
+        msg.data = false;
+        enableControlStatePub_.publish(msg);
+      }
+      mpc_policy_gate_open_ = false;
+      if (enable_mpc_)
+      {
+        mrtRosInterface_->pauseResumeMpcNode(true);
+      }
+      // 3791: 每次 disable 重新记录冻结姿态 —— frozen_state_valid_ 置 true 后不会自动复位，
+      // 若不清，第二次及以后 disable 时 PAUSING 首拍的冻结记录块（!frozen_state_valid_ 门控）
+      // 被跳过，frozen_state_ 停留在第一次 disable 的陈旧姿态（如 home），软暂停时机身
+      // 会回陈旧冻结位、enable 后 rst/观测/RM 锚定全部错位导致甩飞。清掉后 PAUSING 首拍
+      // 自然重新记录本次 disable 的真实姿态。
+      frozen_state_valid_.store(false);
+      soft_pause_state_.store(SoftPauseState::PAUSING);
+      soft_pause_transition_cycles_.store(0);
+      ROS_INFO("[enable_control] disable 受理: enable=false 已发布, MPC pause 已发, 进入 PAUSING");
+    }
+    else
+    {
+      // ===== enable 受理：从冻结干净重启（不发 enable=true，到 IDLE 才发） =====
+      // resume 立即发（solver 尽快恢复）；resetMpcNode/rst_target/滤波器 reset
+      // 由主循环 RESUMING 首拍完成（FK 计算需主线程）；RESUMING 期间 MPC 观测
+      // 强制 = 冻结+odom（反向写回），保证 solver 起点与 RM 参考锚一致。
+      mpc_policy_gate_open_ = false;
+      if (enable_mpc_)
+      {
+        mrtRosInterface_->pauseResumeMpcNode(false);
+      }
+      soft_pause_state_.store(SoftPauseState::RESUMING);
+      soft_pause_transition_cycles_.store(0);
+      resuming_reset_done_.store(false);
+      ROS_INFO("[enable_control] enable 受理: MPC resume 已发, 进入 RESUMING（IDLE 时发布 enable=true）");
     }
 
     res.success = true;
@@ -953,63 +1014,96 @@ namespace humanoidController_wheel_wbc
       kinemicLimitObs.input = obsInputLimitFilterPtr_->update(observation_wheel_.input);
 
       /****************************允许采用mpc输出作为反馈**************************************/
-      if(mpcObsUpdateMode_ == 1 || mpcObsUpdateMode_ == 3)
-      {
-        kinemicLimitObs.state.segment(baseDim_, lowJointNum_) = optimizedState_mrt_.segment(baseDim_, lowJointNum_);
-        kinemicLimitObs.input.segment(baseDim_, lowJointNum_) = optimizedInput_mrt_.segment(baseDim_, lowJointNum_);
-      }
-      if(mpcObsUpdateMode_ == 2 || mpcObsUpdateMode_ == 3)
-      {
-        kinemicLimitObs.state.tail(armNum_) = optimizedState_mrt_.tail(armNum_);
-        kinemicLimitObs.input.tail(armNum_) = optimizedInput_mrt_.tail(armNum_);
-      }
-      /**************************************************************************************/
-
-      // 检测 enable 下降沿，记录 disable 瞬间的 WBC 冻结姿态
-      if (prev_enable_control_ && !enable_control_.load())
+      // 3791 反向写回：RESUMING 期间（solver 已 resume、rollout 未接管）MPC 观测强制 =
+      // 冻结关节段 + 当前 odom（== 主循环 rst_state），覆盖模式 1/2/3。250 帧（0.5s）
+      // 过渡窗口内观测恒为冻结起点，resume 服务何时生效无关（生效后第一帧观测必然 =
+      // rst_state），solver 求解起点与 RM 参考锚一致，第一帧求解不跳。
+      if (soft_pause_state_.load() == SoftPauseState::RESUMING)
       {
         std::lock_guard<std::mutex> lock(frozen_state_mutex_);
-        // kinemicLimitObs.state 已经是：底盘观测 + 身体规划值
-        frozen_state_ = kinemicLimitObs.state;
-        frozen_state_valid_ = true;
-        ROS_INFO("[enable_control] frozen state recorded at disable transition");
-
-        // 把规划值反向写回 CDM，替代原来的传感器快照
-        control_data_manager_->setLbWaistExternalControlState(
-            frozen_state_.segment(baseDim_, lowJointNum_));
-        control_data_manager_->updateLegExternalControlState(
-            frozen_state_.segment(baseDim_, lowJointNum_),
-            vector_t::Zero(lowJointNum_), vector_t::Zero(lowJointNum_));
-        control_data_manager_->updateArmExternalControlState(
-            frozen_state_.tail(armNum_),
-            vector_t::Zero(armNum_), vector_t::Zero(armNum_));
+        if (frozen_state_valid_.load())
+        {
+          kinemicLimitObs.state = frozen_state_;
+          // 底盘段刷新为当前滤波 odom（disable 期间 rollout 块每拍刷新的优化State_mrt_.head）
+          kinemicLimitObs.state.head(baseDim_) = optimizedState_mrt_.head(baseDim_);
+        }
       }
-      prev_enable_control_ = enable_control_.load();
+      else
+      {
+        if(mpcObsUpdateMode_ == 1 || mpcObsUpdateMode_ == 3)
+        {
+          kinemicLimitObs.state.segment(baseDim_, lowJointNum_) = optimizedState_mrt_.segment(baseDim_, lowJointNum_);
+          kinemicLimitObs.input.segment(baseDim_, lowJointNum_) = optimizedInput_mrt_.segment(baseDim_, lowJointNum_);
+        }
+        if(mpcObsUpdateMode_ == 2 || mpcObsUpdateMode_ == 3)
+        {
+          kinemicLimitObs.state.tail(armNum_) = optimizedState_mrt_.tail(armNum_);
+          kinemicLimitObs.input.tail(armNum_) = optimizedInput_mrt_.tail(armNum_);
+        }
+      }
+      /**************************************************************************************/
 
       kinemicLimitObs.time = curTime;
       mrtRosInterface_->setCurrentObservation_directPub(kinemicLimitObs, mpcDt_);
 
       // Trigger MRT callbacks
       mrtRosInterface_->spinMRT();
-      // Update the policy if a new on was received
-      if (mrtRosInterface_->updatePolicy())
-      {
-      }
+      // Update the policy if a new one was received
+      mrtRosInterface_->updatePolicy();
 
-      // mrtRosInterface_->evaluatePolicy(kinemicLimitObs.time + dt_, kinemicLimitObs.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
-      mrtRosInterface_->rolloutPolicy(kinemicLimitObs.time, kinemicLimitObs.state, dt_, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
-      if(enable_mpc_)
+      // 3791: disable 下降沿 pauseResumeMpcNode(true)、enable 上升沿 resetMpcNode 均异步调用 reset()，
+      // 会清空 activePrimalSolutionPtr_。此时 rolloutPolicy/getPolicy/getCommand 会抛
+      // "[MRT_BASE::rolloutPolicy] updatePolicy() should be called first!"。
+      // 双足用 resetting_mpc_state_ 状态机在重置未就绪时跳过 MPC 输出；此处用 isPolicyUpdated()
+      // 判活：active policy 无效时跳过 rollout，optimizedState_mrt_ 维持缓存值
+      // （disable=frozen，enable 上升沿=rst_state），由后续 freeze 覆写/限幅滤波保持稳定。
+      // 闸门：MRT reset() 在 detached 线程执行（立即或 pause 服务往返后析构 active policy），
+      // getPolicy() 返回裸引用不持有计数——仅靠 isPolicyUpdated() 检查仍存在"检查通过后 reset
+      // 析构 → 悬垂访问"的竞态（曾崩于 publishOptimizedTrajectory，GPF）。故边沿处理先置
+      // mpc_policy_gate_open_=false，主线程观察到 active 被清空（reset 完成）后才开门，
+      // 期间 rollout/可视化均不访问 MRT。与双足 resetting_mpc_state_（非 NORMAL 不碰 policy）
+      // 同思想，且边沿处理在本线程串行执行，无跨线程窗口。
+      if (!mpc_policy_gate_open_ && !mrtRosInterface_->isPolicyUpdated())
+        mpc_policy_gate_open_ = true;
+      // 3791: 仅 IDLE（状态机稳定 + enable 已发布 true）才使用 MPC policy 输出；
+      // PAUSING/PAUSED/RESUMING 期间 rollout 不跑，optimizedState_mrt_ 维持缓存值
+      // （disable=frozen / enable=rst_state），由冻结覆写/限幅滤波保持稳定。
+      const bool mpc_policy_ready = soft_pause_state_.load() == SoftPauseState::IDLE
+                                    && mpc_policy_gate_open_ && mrtRosInterface_->isPolicyUpdated();
+      if (mpc_policy_ready)
       {
-        optimizedState_mrt_ = optimizedState_mrt;
-        optimizedInput_mrt_ = optimizedInput_mrt;
+        // mrtRosInterface_->evaluatePolicy(kinemicLimitObs.time + dt_, kinemicLimitObs.state, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+        mrtRosInterface_->rolloutPolicy(kinemicLimitObs.time, kinemicLimitObs.state, dt_, optimizedState_mrt, optimizedInput_mrt, plannedMode_);
+        if(enable_mpc_)
+        {
+          optimizedState_mrt_ = optimizedState_mrt;
+          optimizedInput_mrt_ = optimizedInput_mrt;
+        }
+        if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
+        if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
+        if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
       }
-      if(std::fabs(optimizedInput_mrt_[0]) < 0.05) optimizedInput_mrt_[0] = 0;
-      if(std::fabs(optimizedInput_mrt_[1]) < 0.05) optimizedInput_mrt_[1] = 0;
-      if(std::fabs(optimizedInput_mrt_[2]) < 0.05) optimizedInput_mrt_[2] = 0;
+      else
+      {
+        // MPC 输出不可用（暂停中 / 重置后等待首帧策略）：跳过 rollout，不写回关节段，
+        // 保持 optimizedState_mrt_ 关节段为缓存值（disable=frozen，enable 上升沿=rst_state）。
+        // 但底盘段必须每拍从 odom 实时刷新——基线靠 rollout 每拍产出 base≈odom（rollout 输入
+        // kinemicLimitObs.state.head 即滤波 odom），跳过 rollout 后需手动补，否则底盘位姿冻在
+        // disable 瞬间。用 kinemicLimitObs.state.head 与基线 rollout 输入同源（滤波 odom）。
+        optimizedState_mrt_.head(baseDim_) = kinemicLimitObs.state.head(baseDim_);
+      }
     }
-    // 更新可视化数据
-    // robotVisualizer_->update_obs(observation_wheel_);
-    robotVisualizer_->update(observation_wheel_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+    // 更新可视化数据：active policy 无效时 getPolicy/getCommand 会抛异常，退化为仅发布观测。
+    // 加 enable_control_ + 闸门：disable 期间/重置未就绪时一律不取 policy（getPolicy 返回裸引用，
+    // 与 MRT 异步 reset() 析构存在悬垂竞态，详见上方 rollout 块注释）。
+    if (soft_pause_state_.load() == SoftPauseState::IDLE && mpc_policy_gate_open_ && mrtRosInterface_->isPolicyUpdated())
+    {
+      robotVisualizer_->update(observation_wheel_, mrtRosInterface_->getPolicy(), mrtRosInterface_->getCommand());
+    }
+    else
+    {
+      robotVisualizer_->update_obs(observation_wheel_);
+    }
     markStageMs("mpc_mrt");
 
     /******************  用户修改部分  ***********************/
@@ -1116,12 +1210,15 @@ namespace humanoidController_wheel_wbc
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
 
-    // disable 期间：WBC 只冻结关节姿态，底盘不冻结（跟 odom 实时走）
-    if (!enable_control_.load() && frozen_state_valid_)
+    // disable 期间：冻结全身关节角度、清零所有速度，底盘不冻结（跟 odom 实时走）
+    // 3791: 冻结覆写条件改为状态机 —— enable 受理后 enable_control_ 已 true 但状态机
+    // 还在 RESUMING，WBC 输出仍需保持冻结（直到 IDLE rollout 接管）
+    // 并发协议：frozen_state_ 仅主线程锁内写（PAUSING 首拍）；frozen_state_valid_ 是
+    // atomic 可锁外查，服务线程 disable 受理只清 flag 不碰数据，故先查 flag 再加锁安全
+    if (soft_pause_state_.load() != SoftPauseState::IDLE && frozen_state_valid_)
     {
       std::lock_guard<std::mutex> lock(frozen_state_mutex_);
-      // 只覆盖关节部分 (tail)，底盘 base 部分 (head) 保持 MPC rollout 输出
-      optimizedState_mrt_limit_.tail(info.armDim) = frozen_state_.tail(info.armDim);
+      optimizedState_mrt_limit_.segment(baseDim_, info.armDim) = frozen_state_.segment(baseDim_, info.armDim);
       optimizedInput_mrt_limit_.setZero();
     }
 
@@ -1129,6 +1226,135 @@ namespace humanoidController_wheel_wbc
     {
       optimizedState_mrt_ = optimizedState_mrt_limit_;
       optimizedInput_mrt_ = optimizedInput_mrt_limit_;
+    }
+
+    // ===== 软暂停状态机推进（3791 重构：四状态 + 固定周期数）=====
+    // 受理/拒绝在 enableControlCallback（服务线程）完成，此处主线程只做推进：
+    //   PAUSING  首拍冻结记录 + CDM 写回（主循环消费，取上一拍实际执行值）；
+    //            250 帧（0.5s @ 500Hz）到点 → PAUSED
+    //   RESUMING 首拍构建 rst_target（FK 需主线程）+ resetMpcNode + 限幅滤波器 reset；
+    //            250 帧到点 → IDLE 并发布 enable=true（全局同步总开关）
+    // 期间 WBC 输出由冻结覆写（状态 != IDLE）保证为冻结姿态；MPC 观测由观测组装块
+    // 强制为冻结+odom（RESUMING，反向写回）。
+    // 过渡计时按控制循环帧数（受理时置 0，本块每帧 ++）：计数发生在 update() 主循环
+    // 内，与受理记录天然同源，不再有墙钟/仿真时间基准错位问题（3791 状态卡死根因）。
+    {
+      // --- PAUSING：主循环冻结（首拍）+ 到点转 PAUSED ---
+      if (soft_pause_state_.load() == SoftPauseState::PAUSING)
+      {
+        if (!frozen_state_valid_.load())
+        {
+          std::lock_guard<std::mutex> lock(frozen_state_mutex_);
+          // 取 disable 受理后第一拍的实际执行值（limit filter 后、WBC 输入前的
+          // optimizedState_mrt_limit_）：受理后本拍它仍是禁用前最后一拍的输出，即
+          // 机器人此刻正在执行的目标位置。取它保证"执行值 == 冻结值"零跳变。
+          // 不要取 kinemicLimitObs.state（limit filter 前的 MPC 原始输出，与电机
+          // 实际跟踪值可能差一个限幅量）。
+          frozen_state_ = optimizedState_mrt_limit_;
+          frozen_state_valid_ = true;
+          ROS_INFO("[enable_control] frozen state recorded (PAUSING first cycle)");
+
+          // 规划值反向写回 CDM（替代传感器快照），VR/快速模式恢复时与冻结一致
+          control_data_manager_->setLbWaistExternalControlState(
+              frozen_state_.segment(baseDim_, lowJointNum_));
+          control_data_manager_->updateLegExternalControlState(
+              frozen_state_.segment(baseDim_, lowJointNum_),
+              vector_t::Zero(lowJointNum_), vector_t::Zero(lowJointNum_));
+          control_data_manager_->updateArmExternalControlState(
+              frozen_state_.tail(armNum_),
+              vector_t::Zero(armNum_), vector_t::Zero(armNum_));
+        }
+        if (soft_pause_transition_cycles_.fetch_add(1) + 1 >= SOFT_PAUSE_TRANSITION_CYCLES)
+        {
+          soft_pause_state_.store(SoftPauseState::PAUSED);
+          ROS_INFO("[enable_control] PAUSING -> PAUSED");
+        }
+      }
+      // --- RESUMING：首拍 reset（从冻结干净重启）+ 到点转 IDLE（发布 enable=true）---
+      else if (soft_pause_state_.load() == SoftPauseState::RESUMING)
+      {
+        // resuming_reset_done_ 首拍保护：resetMpcNode 每次调用都清 active policy，
+        // 每帧重复执行会让 solver 永远无法收敛
+        if (enable_mpc_ && frozen_state_valid_.load() && !resuming_reset_done_.load())
+        {
+          std::lock_guard<std::mutex> lock(frozen_state_mutex_);
+          // 重置起点：关节段取冻结值（开环规划），底盘段刷新为当前滤波 odom（闭环）。
+          // 底盘段取 optimizedState_mrt_.head（禁用期间跳过 rollout 分支每拍从
+          // kinemicLimitObs.state.head 刷新的滤波 odom），与 MPC 观测同源，避免起点错位。
+          vector_t rst_state = frozen_state_;
+          rst_state.head(baseDim_) = optimizedState_mrt_.head(baseDim_);
+          vector_t zero_input = vector_t::Zero(optimizedInput_mrt_.size());
+
+          // 目标轨迹必须用 target-pose 格式（仿 initMPC L1792-1815）：
+          //   [base(3) + torso_pos(3) + torso_quat(4) + ee_pos(3)*N + ee_quat(4)*N]
+          // 不能传 21 维 MPC state —— 基类缓冲被 getTargetTrajectories()（约束层）与
+          // publishTargetTrajectories（rviz "command" 帧）按目标姿态格式解析，传 state
+          // 会把关节角当四元数（invalid quaternion）并污染 RM 目标缓冲。
+          const int base_nums = static_cast<int>(manipulatorModelInfo_.stateDim
+                                               - manipulatorModelInfo_.armDim);
+          std::vector<Eigen::Vector3d> rst_ee_pos(manipulatorModelInfo_.eeFrames.size());
+          std::vector<Eigen::Matrix3d> rst_ee_rot(manipulatorModelInfo_.eeFrames.size());
+          getEEPose(rst_state, rst_ee_pos, rst_ee_rot);
+          Eigen::Vector3d rst_torso_pos;
+          Eigen::Matrix3d rst_torso_rot;
+          getTorsoPose(rst_state, rst_torso_pos, rst_torso_rot);
+
+          vector_t rst_target(base_nums + 7 + manipulatorModelInfo_.eeFrames.size() * 7);
+          rst_target.head(base_nums) = rst_state.head(base_nums);
+          rst_target.segment(base_nums, 3) = rst_torso_pos;
+          rst_target.segment(base_nums + 3, 4) = Eigen::Quaternion<scalar_t>(rst_torso_rot).coeffs();
+          for (int eef_inx = 0; eef_inx < manipulatorModelInfo_.eeFrames.size(); eef_inx++)
+          {
+            rst_target.tail(manipulatorModelInfo_.eeFrames.size() * 7)
+                     .segment(eef_inx * 7, 3) = rst_ee_pos[eef_inx];
+            rst_target.tail(manipulatorModelInfo_.eeFrames.size() * 7)
+                     .segment(eef_inx * 7 + 3, 4) = Eigen::Quaternion<scalar_t>(rst_ee_rot[eef_inx]).coeffs();
+          }
+
+          mrtRosInterface_->spinMRT();
+          mrtRosInterface_->resetMpcNode(
+              TargetTrajectories({curTime}, {rst_target}, {zero_input}));
+
+          // 同步限幅滤波器到冻结姿态，消除 Ruckig 滞后跳变
+          mrtStateLimitFilterPtr_->reset(rst_state);
+          mrtInputLimitFilterPtr_->reset(zero_input);
+
+          // 3791: 把冻结姿态发给 RM（resetAllMpcToState：storage/Ruckig 锚冻结）。
+          // 连续发布 3 拍兜底：话题未 latch 且 pub/sub 队列均为 1，单拍可能错位；
+          // RM 只消费一次，多余拍无害
+          reset_state_to_publish_ = rst_state;
+          reset_to_state_publish_cnt_ = 3;
+          resuming_reset_done_.store(true);
+          ROS_INFO("[enable_control] MPC reset from frozen state (RESUMING first cycle)");
+        }
+        if (soft_pause_transition_cycles_.fetch_add(1) + 1 >= SOFT_PAUSE_TRANSITION_CYCLES)
+        {
+          soft_pause_state_.store(SoftPauseState::IDLE);
+          // 全局同步总开关：仅 IDLE 发布 true（enable 受理时未发，延迟到此）
+          std_msgs::Bool msg;
+          msg.data = true;
+          enableControlStatePub_.publish(msg);
+          ROS_INFO("[enable_control] RESUMING -> IDLE, enable=true published");
+        }
+      }
+
+      // 连续发布冻结姿态给 RM（reset_to_state_publish_cnt_ 在 RESUMING 首拍设置，
+      // 兜底话题丢包）
+      if (reset_to_state_publish_cnt_ > 0)
+      {
+        std_msgs::Float64MultiArray msg;
+        msg.layout.dim.resize(1);
+        msg.layout.dim[0].label = "state";
+        msg.layout.dim[0].size = reset_state_to_publish_.size();
+        msg.layout.dim[0].stride = reset_state_to_publish_.size();
+        msg.data.resize(reset_state_to_publish_.size());
+        for (size_t i = 0; i < reset_state_to_publish_.size(); ++i)
+        {
+          msg.data[i] = reset_state_to_publish_[i];
+        }
+        resetToStatePub_.publish(msg);
+        reset_to_state_publish_cnt_--;
+      }
     }
 
     // 更新期望力插值
@@ -1895,13 +2121,10 @@ namespace humanoidController_wheel_wbc
       // target_qpos[4] = -0.5;
       // target_qpos[7] = -0.5;
       // target_qpos[8] = -0.5;
-      vector_t arm_target_qpos(armNum_);
-      arm_target_qpos << -0.0, 0.4, 0.2, -1.5, -0.0, -0.0, -0.0, 
-                         -0.0, -0.4, -0.2, -1.5, 0.0, -0.0, -0.0;
-      init_arm_target_qpos_ = arm_target_qpos;
-      for(int i=0; i<arm_target_qpos.size(); i++)
+      // 双臂 home 复用 init 阶段从 mujoco_q 提取的值（真实站姿，非写死双足遗留值，见 init 处注释）
+      for(int i=0; i<init_arm_target_qpos_.size(); i++)
       {
-        target_qpos[lowJointNum_+i] = arm_target_qpos[i];
+        target_qpos[lowJointNum_+i] = init_arm_target_qpos_[i];
       }
       control_data_manager_->setLbWaistExternalControlState(target_qpos.head(lowJointNum_));
       firstRun = false;

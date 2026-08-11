@@ -180,10 +180,15 @@ protected:
   virtual void modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule) override;
 
-  // enable 控制辅助函数：disable 瞬间冻结所有存储和规划器到快照状态
+  // 3791 reset-to-state 辅助：storage + 全部 Ruckig 锚定到冻结状态（软暂停恢复干净重启）
   void overwriteCommandStorageWithFrozenState();
   void resetAllRuckigToFrozenState(scalar_t initTime);
-  void setFlatTargetTrajectoriesFromFrozenState(scalar_t initTime, scalar_t finalTime);
+
+  // 3791: 软暂停恢复时整体重置 RM —— storage + 全部 Ruckig 锚定到指定状态（冻结姿态）。
+  // 复用冻结机制实现（overwriteCommandStorageWithFrozenState / resetAllRuckigToFrozenState），
+  // 躯干/ee 位姿用 FK 现场计算，锚当前而非初始位。由 /mobile_manipulator_reset_to_state
+  // 话题（pending 标志）在 modifyReferences 的 enable 分支触发。
+  void resetAllMpcToState(scalar_t initTime, const vector_t& state);
 
   /// 冻结状态中关节保持 frozen，底盘跟随当前实际位姿
   vector_t frozenJointsWithLiveBase() const;
@@ -482,16 +487,23 @@ private:
   std::atomic<bool> use_vel_control_{true};
   ros::Subscriber vel_control_state_sub_;
 
-  // enable 状态（fail-safe：默认 false，未收到信号时不可控）
+  // enable 状态（fail-safe：默认 false，未收到信号时不可控）。仅用于指令入口拒绝
+  // （disable 期间丢弃一切动作指令）；冻结输出语义由 controller 承担。
   std::atomic<bool> enable_control_{false};
-  std::atomic<bool> prev_enable_control_{false};
+  // 3791 reset-to-state 机制复用冻结存储：frozen_state_ 作为 resetAllMpcToState 的
+  // 入参载体（storage 锚定目标），frozen_torso_pose6D_/frozen_ee_state_ 为 FK 缓存
   vector_t frozen_state_;
   bool frozen_state_valid_{false};
   vector_t frozen_torso_pose6D_;        // frozen_state_ 对应的躯干位姿缓存
   vector_t frozen_ee_state_;            // frozen_state_ 对应的双臂末端位姿缓存
   ros::Subscriber enable_control_state_sub_;
+
+  // 3791: 软暂停恢复的 reset-to-state 机制（话题写入 pending，modifyReferences 消费）
+  ros::Subscriber resetToStateSub_;
+  std::atomic<bool> is_reset_to_state_pending_{false};
+  std::mutex reset_to_state_mtx_;
+  vector_t reset_state_;
   bool isEnableControl() const { return enable_control_.load(std::memory_order_acquire); }
-  bool isPrevEnableControl() const { return prev_enable_control_.load(std::memory_order_acquire); }
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 
