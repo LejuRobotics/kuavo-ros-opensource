@@ -380,6 +380,9 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     // Reset smart stop checking when there's significant velocity command
     // resetSmartStopCheck();
   }
+
+  // Y方向行走补偿：横向行走时注入 X/Z 偏置（原地踏步/站立分支不受影响，linear_y 为 0）
+  applyYDirectionCompensation();
 }
 
 CommandDataRL RlGaitReceiver::getCurrentCommand() const
@@ -1052,6 +1055,60 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
               << max_velocity_change_neg_cmd_x_
               << ", maxVelocityChangeCmdY=" << max_velocity_change_cmd_y_ << std::endl;
   }
+
+  // Load Y direction compensation parameters
+  if (pt.find("yDirectionCompensation") != pt.not_found()) {
+    loadData::loadPtreeValue(pt, y_direction_compensation_enabled_, "yDirectionCompensation.enabled", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_x_bias_, "yDirectionCompensation.xBias", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_z_bias_, "yDirectionCompensation.zBias", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_threshold_, "yDirectionCompensation.threshold", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_separate_enabled_,
+                             "yDirectionCompensation.enableSeparateCompensation", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_x_bias_left_, "yDirectionCompensation.xBiasLeft", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_x_bias_right_, "yDirectionCompensation.xBiasRight", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_z_bias_left_, "yDirectionCompensation.zBiasLeft", verbose);
+    loadData::loadPtreeValue(pt, y_direction_compensation_z_bias_right_, "yDirectionCompensation.zBiasRight", verbose);
+
+    ROS_INFO("[RlGaitReceiver] Y direction compensation loaded: enabled=%s, xBias=%.4f, zBias=%.4f, threshold=%.4f, separate=%s",
+             y_direction_compensation_enabled_ ? "true" : "false",
+             y_direction_compensation_x_bias_, y_direction_compensation_z_bias_,
+             y_direction_compensation_threshold_,
+             y_direction_compensation_separate_enabled_ ? "true" : "false");
+    if (y_direction_compensation_enabled_ && y_direction_compensation_separate_enabled_) {
+      ROS_INFO("[RlGaitReceiver] Y direction separate compensation: left(x=%.4f,z=%.4f), right(x=%.4f,z=%.4f)",
+               y_direction_compensation_x_bias_left_, y_direction_compensation_z_bias_left_,
+               y_direction_compensation_x_bias_right_, y_direction_compensation_z_bias_right_);
+    }
+  } else {
+    ROS_WARN("[RlGaitReceiver] No yDirectionCompensation section found in config file, using default values (disabled)");
+  }
+}
+
+void RlGaitReceiver::applyYDirectionCompensation()
+{
+  if (!y_direction_compensation_enabled_)
+  {
+    return;
+  }
+
+  const double linear_y = currentCommand_.cmdVelLineY_;
+  if (std::abs(linear_y) <= y_direction_compensation_threshold_)
+  {
+    return;
+  }
+
+  double x_bias = y_direction_compensation_x_bias_;
+  double z_bias = y_direction_compensation_z_bias_;
+  if (y_direction_compensation_separate_enabled_)
+  {
+    // linear_y > 0 向左行走、linear_y < 0 向右行走（cmd_vel 左为正值）
+    x_bias = (linear_y > 0) ? y_direction_compensation_x_bias_right_
+                            : y_direction_compensation_x_bias_left_;
+    z_bias = (linear_y > 0) ? y_direction_compensation_z_bias_right_
+                            : y_direction_compensation_z_bias_left_;
+  }
+  currentCommand_.cmdVelLineX_ += x_bias;
+  currentCommand_.cmdVelAngularZ_ += z_bias;
 }
 
 void RlGaitReceiver::startInPlaceStepping(const ros::Time& current_time)

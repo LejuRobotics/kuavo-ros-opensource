@@ -157,6 +157,8 @@ private:
   geometry_msgs::Twist applyMixedMotionLimits(const geometry_msgs::Twist& cmd_vel) const;
   geometry_msgs::Twist smoothVelocityCommand(const geometry_msgs::Twist& cmd_vel, const ros::Time& current_time);
   geometry_msgs::Twist smoothPoseCommand(const geometry_msgs::Twist& cmd_pose, const ros::Time& current_time);
+  /// Y方向行走补偿：横向行走时给 cmdVelLineX_/cmdVelAngularZ_ 注入偏置（须在持锁状态下调用）
+  void applyYDirectionCompensation();
   
   // In-place stepping functions
   void startInPlaceStepping(const ros::Time& current_time);
@@ -235,6 +237,17 @@ private:
   bool is_in_place_stepping_;
   ros::Time in_place_step_start_time_;
   bool is_real_;
+  
+  // Y方向行走补偿参数（横向行走时X/Z偏置补偿）
+  bool y_direction_compensation_enabled_{false};          // 是否启用Y方向行走补偿
+  double y_direction_compensation_x_bias_{0.0};           // 通用X轴偏置
+  double y_direction_compensation_z_bias_{0.0};           // 通用Z轴角速度偏置
+  double y_direction_compensation_threshold_{0.0};        // Y方向速度阈值（超过才补偿）
+  bool y_direction_compensation_separate_enabled_{false}; // 是否启用分开补偿（左/右）
+  double y_direction_compensation_x_bias_left_{0.0};      // 向右行走时X轴偏置(从后往前看)
+  double y_direction_compensation_x_bias_right_{0.0};     // 向左行走时X轴偏置(从后往前看)
+  double y_direction_compensation_z_bias_left_{0.0};      // 向右行走时Z轴角速度偏置(从后往前看)
+  double y_direction_compensation_z_bias_right_{0.0};     // 向左行走时Z轴角速度偏置(从后往前看)
   
   // Thread safety
   mutable std::mutex command_mutex_;

@@ -606,6 +606,7 @@ namespace humanoid_controller
     // 外部活动由 [x,2] 模式消息持续刷新，VR 运行期间豁免稳定成立；手动切换（无外部活动）不豁免。
     const bool keep_arm_external_mode =
         auto_switch_config_.enabled &&
+        current_before != "mpc" &&
         name == auto_switch_config_.manipulation_controller &&
         hasRecentExternalControlActivityLocked(ros::Time::now());
     const bool should_reset_arm_mode =
