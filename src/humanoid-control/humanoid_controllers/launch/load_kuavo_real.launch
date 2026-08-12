@@ -31,6 +31,8 @@
     <arg name="only_half_up_body" default="false"/>
     <arg name="stand_up_protect" default="true"/>
     <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
+    <!-- 是否启用 rosbag 录制 -->
+    <arg name="record_bag" default="true" doc="If true, start rosbag recording nodelet"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -219,7 +221,9 @@
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodeletCXX nodelet_manager" respawn="false" output="screen" required="true"  />
     </group>
 
-    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    <group if="$(arg record_bag)">
+      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    </group>
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
 
@@ -444,5 +448,11 @@
 
     <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
     <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+
+    <!-- 握手功能 -->
+    <arg name="with_handshake" default="false" doc="Enable handshake node"/>
+    <group if="$(arg with_handshake)">
+      <include file="$(find kuavo_handshake)/launch/handshake_standalone.launch"/>
+    </group>
 
 </launch>

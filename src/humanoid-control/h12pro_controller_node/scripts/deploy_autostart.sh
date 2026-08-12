@@ -70,12 +70,6 @@ KUAVO_REMOTE_PATH=$(dirname $SCRIPT_DIR)/lib/kuavo_remote
 ROBOT_VERSION=$ROBOT_VERSION
 INSTALLED_DIR=$KUAVO_ROS_CONTROL_WS_PATH/installed
 RL_INSTALLED_DIR=$KUAVO_RL_WS_PATH/installed
-# 架构：仅用于 arm64 额外编译 hardware_node
-ARCH=$(uname -m)
-IS_ARM64=0
-if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-    IS_ARM64=1
-fi
 
 # 系统版本：Ubuntu >= 24.04 使用 requirements.noble.txt + PEP 668 兼容安装
 UBUNTU_VERSION_ID=""
@@ -90,7 +84,7 @@ if [ -n "$UBUNTU_VERSION_ID" ]; then
         IS_UBUNTU_24_04_OR_NEWER=1
     fi
 fi
-echo "Current architecture: $ARCH (IS_ARM64=$IS_ARM64)"
+echo "Current architecture: $ARCH"
 echo "Ubuntu VERSION_ID: ${UBUNTU_VERSION_ID:-unknown} (IS_UBUNTU_24_04_OR_NEWER=$IS_UBUNTU_24_04_OR_NEWER)"
 
 # 解析要安装的 requirements 文件：
@@ -154,10 +148,7 @@ if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
         source $RL_INSTALLED_DIR/setup.bash
     fi
     catkin build humanoid_controllers
-    if [ "$IS_ARM64" -eq 1 ]; then
-        echo "arm64: building hardware_node after humanoid_controllers (rl)..."
-        catkin build hardware_node
-    fi
+
 fi
 
 cd $KUAVO_ROS_CONTROL_WS_PATH
@@ -167,10 +158,6 @@ if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
     source $INSTALLED_DIR/setup.bash
 fi
 catkin build humanoid_controllers
-if [ "$IS_ARM64" -eq 1 ]; then
-    echo "arm64: building hardware_node after humanoid_controllers..."
-    catkin build hardware_node
-fi
 catkin build h12pro_controller_node
 catkin build humanoid_plan_arm_trajectory
 catkin build kuavo_ros_interfaces

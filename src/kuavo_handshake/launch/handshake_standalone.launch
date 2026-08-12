@@ -1,0 +1,5 @@
+<launch>
+  <!-- 握手节点 (独立版, 零 SDK 依赖) -->
+  <node name="handshake_node" pkg="kuavo_handshake" type="handshake_node_standalone.py"
+        output="screen" required="false" />
+</launch>

@@ -113,6 +113,10 @@
         <arg name="use_grab_box_scene" value="$(arg use_grab_box_scene)"/>
         <arg name="use_grab_box_new_scene" value="$(arg use_grab_box_new_scene)"/>
         <arg name="world_name" value="$(find gazebo_sim)/worlds/grab_box.world"/>
+        <!-- 抓取场景整体绕Z转+90°：tag组从-y转到+x，机器人默认朝+x站立即可看到tag。箱子位置同步旋转(0,-1.9)→(1.9,0) -->
+        <arg name="scene_yaw" value="1.5708"/>
+        <arg name="block_x" value="1.9"/>
+        <arg name="block_y" value="0.0"/>
       </include>
       </group>
     </group>

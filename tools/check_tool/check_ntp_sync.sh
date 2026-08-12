@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# 检查是否以 root 用户执行
+if [ "$(id -u)" -ne 0 ]; then
+    echo "错误: 该脚本需要使用 sudo 执行"
+    echo "请使用: sudo $0"
+    exit 1
+fi
+
 # 根据 ROBOT_VERSION 环境变量选择配置
 if [ -z "$ROBOT_VERSION" ]; then
     echo -e "${RED}错误: 未设置 ROBOT_VERSION 环境变量${RESET}"
@@ -121,6 +128,13 @@ echo -e "${YELLOW}本机检查完成！${RESET}"
 # ========================================
 echo ""
 echo -e "${BLUE}=== 检查底盘（192.168.26.22）时间同步状态 ===${RESET}"
+
+# 清理旧的 SSH host key，避免因主机密钥变更导致连接失败
+echo ""
+echo "[底盘步骤0] 清理旧的 SSH host key..."
+ssh-keygen -R 192.168.26.22 2>/dev/null
+ssh-keygen -f '/root/.ssh/known_hosts' -R '192.168.26.22' 2>/dev/null
+echo -e "${GREEN}✓ SSH host key 已清理${RESET}"
 
 # 检查网络连通性（ping测试）
 echo ""

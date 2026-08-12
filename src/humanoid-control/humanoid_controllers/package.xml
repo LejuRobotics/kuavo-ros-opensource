@@ -40,8 +40,8 @@
     <depend>joy</depend>
     <!-- motion_capture_ik: launch-time only (with_ik); catkin build still compiles it via exec_depend -->
     <exec_depend>motion_capture_ik</exec_depend>
-    <!-- hardware_node: real-robot only; omit from catkin graph (Jammy aarch64 lacks py3.8 for ruiwo_controller) -->
-    <!-- <exec_depend>hardware_node</exec_depend> -->
+    <!-- hardware_node: real-robot only -->
+    <exec_depend>hardware_node</exec_depend>
     <depend>kuavo_assets</depend>
     <depend>ocs2_self_collision_visualization</depend>
     <depend>kuavo_audio_player</depend>

@@ -102,6 +102,7 @@ add_message_files(
   robotArmQVVD.msg
   ikSolveError.msg
   handPose.msg
+  HandshakeTarget.msg
   armHandPose.msg
   twoArmHandPose.msg
   headBodyPose.msg

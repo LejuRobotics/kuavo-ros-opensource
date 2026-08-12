@@ -6,7 +6,6 @@ from geometry_msgs.msg import TransformStamped
 import tf2_ros
 import tf2_geometry_msgs
 from kuavo_msgs.msg import robotHeadMotionData  # 头部电机控制
-from joint_state_publisher import JointStatePublisher
 import copy
 from geometry_msgs.msg import TransformStamped, PoseStamped
 

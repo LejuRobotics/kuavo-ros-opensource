@@ -245,7 +245,7 @@
                                    1, 1, -1, 1, -1, -1, 1,
                                    -1, -1],
     "leg_calibration_safe_pose": [14.27, -25.27, 11.80, 0],
-    "leg_calibration_limits": [-0.4, 0.4, -15, -187],
+    "leg_calibration_limits": [-0.4, 0.4, -15, -186],
     "leg_calibration_directions": [-1, 1, -1, -1],
     "arm_calibration_velocity": 15.0,
     "arm_calibration_timeout": 20.0,
