@@ -227,6 +227,7 @@ protected:
   
   double targetYawPreProcess(double currentYaw, double targetYaw);
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
+  bool isBaseNearStationary() const;
   void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void resetAllMpcTraj(scalar_t initTime, const vector_t& initState);
@@ -554,6 +555,11 @@ private:
   Eigen::VectorXd cmdVel_prevTargetPose_;
   Eigen::VectorXd cmdVel_prevTargetVel_;
   Eigen::VectorXd cmdVel_prevTargetAcc_;
+
+  // vel→pose hold 切换后：actual 未停稳前持续锚定 ref，避免过早锁定 (#3867)
+  bool chassisPoseHoldFollowActual_{false};
+  int chassisPoseHoldSettleCnt_{0};
+  vector_t actualBaseVel_{vector_t::Zero(3)};
 
   // 当前实际机器人状态
   vector_t currentActualState_;

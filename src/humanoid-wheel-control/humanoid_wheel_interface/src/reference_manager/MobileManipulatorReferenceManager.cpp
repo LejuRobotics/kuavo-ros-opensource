@@ -698,6 +698,8 @@ namespace mobile_manipulator {
         cmdvel_mtx_.lock();
         isCmdVelUpdated_ = true;
         isCmdVelTimeUpdate_ = true;
+        chassisPoseHoldFollowActual_ = false;
+        chassisPoseHoldSettleCnt_ = 0;
         cmdVel_[0] = msg->linear.x;
         cmdVel_[1] = msg->linear.y;
         cmdVel_[2] = msg->angular.z;
@@ -720,6 +722,8 @@ namespace mobile_manipulator {
         cmdvelWorld_mtx_.lock();
         isCmdVelWorldUpdated_ = true;
         isCmdVelTimeUpdate_ = true;
+        chassisPoseHoldFollowActual_ = false;
+        chassisPoseHoldSettleCnt_ = 0;
         cmdVelWorld_[0] = msg->linear.x;
         cmdVelWorld_[1] = msg->linear.y;
         cmdVelWorld_[2] = msg->angular.z;
@@ -1297,6 +1301,7 @@ namespace mobile_manipulator {
     static double stateDiffTime;
     stateDiffTime += ruckigDt_;   // 采用稳定的时间步长进行差分
     stateDiff.differentiate(initState_, stateDiffTime, dState, ddState);
+    actualBaseVel_ = dState.head(baseDim_);
     /**************************************************************************************/
 
     // 获取开始时间点
@@ -3714,6 +3719,14 @@ namespace mobile_manipulator {
     return newTargetYaw;
   }
 
+  bool MobileManipulatorReferenceManager::isBaseNearStationary() const
+  {
+    // ponytail: 固定阈值 0.03，仿真/实物摩擦差大时可改为 task.info 参数
+    constexpr scalar_t kLinSpeedEps = 0.03;
+    constexpr scalar_t kYawRateEps = 0.03;
+    return actualBaseVel_.head(2).norm() < kLinSpeedEps && std::abs(actualBaseVel_[2]) < kYawRateEps;
+  }
+
   void MobileManipulatorReferenceManager::setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState)
   {
     // 生成底盘指令轨迹（包含速度指令和位置指令处理）
@@ -3817,6 +3830,7 @@ namespace mobile_manipulator {
 
       // 判断速度为0，跳出速度控制
       static int zero_vel_cnt;
+      bool exitCmdVelMode = false;
       if(zero_vel_cnt < int(0.5 / ruckigDt_))
       {
         if(cmdVel_prevTargetVel_.isZero(1e-6)) zero_vel_cnt++;
@@ -3826,9 +3840,22 @@ namespace mobile_manipulator {
       {
         zero_vel_cnt = 0;
         isCmdVelUpdated_ = false;
+        exitCmdVelMode = true;
       }
 
-      resetCmdPoseRuckig(initTime, initState, true);
+      if(exitCmdVelMode)
+      {
+        chassisPoseHoldFollowActual_ = true;
+        chassisPoseHoldSettleCnt_ = 0;
+        resetCmdPoseRuckigFromActualState(initTime, initState, true);
+        cmdVel_prevTargetPose_ = initState.head(baseDim_);
+        cmdVel_prevTargetVel_.setZero(baseDim_);
+        cmdVel_prevTargetAcc_.setZero(baseDim_);
+      }
+      else
+      {
+        resetCmdPoseRuckig(initTime, initState, true);
+      }
     }
     else if(isCmdVelWorldUpdated_)
     {
@@ -3849,6 +3876,7 @@ namespace mobile_manipulator {
 
       // 判断速度为0，跳出速度控制
       static int zero_vel_cnt;
+      bool exitCmdVelWorldMode = false;
       if(zero_vel_cnt < int(0.5 / ruckigDt_))
       {
         if(cmdVel_prevTargetVel_.isZero(1e-6)) zero_vel_cnt++;
@@ -3858,12 +3886,40 @@ namespace mobile_manipulator {
       {
         zero_vel_cnt = 0;
         isCmdVelWorldUpdated_ = false;
+        exitCmdVelWorldMode = true;
       }
 
-      resetCmdPoseRuckig(initTime, initState, true);
+      if(exitCmdVelWorldMode)
+      {
+        chassisPoseHoldFollowActual_ = true;
+        chassisPoseHoldSettleCnt_ = 0;
+        resetCmdPoseRuckigFromActualState(initTime, initState, true);
+        cmdVel_prevTargetPose_ = initState.head(baseDim_);
+        cmdVel_prevTargetVel_.setZero(baseDim_);
+        cmdVel_prevTargetAcc_.setZero(baseDim_);
+      }
+      else
+      {
+        resetCmdPoseRuckig(initTime, initState, true);
+      }
     }
     else if(baseCmdVelStatus_)   // 底盘可运动情况下，可运动，默认跟踪位置
     {
+      if(chassisPoseHoldFollowActual_)
+      {
+        resetCmdPoseRuckigFromActualState(initTime, initState, true);
+        if(isBaseNearStationary())
+        {
+          if(++chassisPoseHoldSettleCnt_ >= static_cast<int>(0.2 / ruckigDt_))
+          {
+            chassisPoseHoldFollowActual_ = false;
+          }
+        }
+        else
+        {
+          chassisPoseHoldSettleCnt_ = 0;
+        }
+      }
       generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
     }
     else if(!baseCmdVelStatus_)   // 底盘不可运动情况下，不可运动，采用速度控制跟踪零速度
