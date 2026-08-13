@@ -15,7 +15,7 @@ class TopicLogger;
 namespace humanoid_controller
 {
 
-/** RL→MPC 刚切时用末帧 RL joint_cmd 做 quintic 衰减混合。 */
+/** RL→MPC：仅 quintic 混合 q/v/tau；kp/kd 与 control_mode 同源绑定，不插值。 */
 class ControllerCmdBlend
 {
 public:
@@ -25,6 +25,7 @@ public:
   void apply(double time, kuavo_msgs::jointCmd& joint_cmd, size_t body_joint_count,
              ocs2::humanoid::TopicLogger* logger);
   void stop() { active_ = false; }
+  bool active() const { return active_; }
 
 private:
   bool active_{false};

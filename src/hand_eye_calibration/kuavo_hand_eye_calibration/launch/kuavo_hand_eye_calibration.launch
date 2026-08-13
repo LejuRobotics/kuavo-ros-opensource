@@ -20,7 +20,11 @@
           args="0 0 0 0 0 0 1 base_link dummy_link 100" />
 
     <arg name="use_remote_camera" default="true" />
-    
+
+    <!-- 将相机 raw 转 compressed，供标定 aruco 节点跨网络订阅 (#3678) -->
+    <node name="republish_camera_color" pkg="image_transport" type="republish"
+          args="raw in:=$(arg aruco_camera_image_topic) compressed" />
+
     <group unless="$(arg use_remote_camera)">
         <include file="$(find realsense2_camera)/launch/rs_camera.launch"> 
           <!-- <arg name="color_width" value="1280" />
@@ -38,6 +42,7 @@
         <param name="reference_frame" value="$(arg aruco_ref_frame)" />
         <param name="camera_frame" value="$(arg aruco_camera_frame)" />
         <param name="marker_frame" value="$(arg aruco_marker_frame)" />
+        <param name="image_transport" value="compressed" />
     </node>
                         
     <include file="$(find easy_handeye)/launch/calibrate.launch">

@@ -24,6 +24,7 @@
 import math, sys, select, termios, tty
 import rospy
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Bool
 from std_srvs.srv import SetBool
 import lb_ctrl_api as ct
 
@@ -79,7 +80,15 @@ class Test:
         self._enable_control = True
         self._enable_vel_control = True
         self._torso_initial = None   # 躯干初始绝对位姿 (x, y, z, roll, pitch, yaw)
+        # 订阅 latched 使能话题（发布值 = 状态机衍生，仅 IDLE 为 true）：
+        # 过渡窗口（PAUSING/PAUSED/RESUMING）内 /enable_control 请求会被拒绝，
+        # 以话题值为准同步本地状态，避免脚本内部状态与 controller 错位。
+        self._enable_state_sub = rospy.Subscriber('/enable_control_state', Bool,
+                                                  self._on_enable_control_state, queue_size=1)
         self._init()
+
+    def _on_enable_control_state(self, msg):
+        self._enable_control = msg.data
 
     def _init(self):
         print('[init] ...')
@@ -188,9 +197,12 @@ class Test:
                     if self._base_cmd_vel_vx != 0: self._cmd_vel_vx = 0.0; self._cmd_vel_wz = 0.0
                     print(f'  /move_base/base_cmd_vel vx={self._base_cmd_vel_vx}')
                 elif c == 'e':
-                    self._enable_control = not self._enable_control
-                    ct.set_wheel_control_enable(self._enable_control)
-                    print(f'  /enable_control -> {self._enable_control}')
+                    target = not self._enable_control   # 基于话题真实值取反
+                    if ct.set_wheel_control_enable(target):
+                        self._enable_control = target
+                        print(f'  /enable_control -> {self._enable_control}')
+                    else:
+                        print(f'  /enable_control 被拒（过渡窗口内），保持 {self._enable_control}，稍后重试')
                 elif c == 'v':
                     self._enable_vel_control = not self._enable_vel_control
                     self._call_enable_vel_control(self._enable_vel_control)

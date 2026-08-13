@@ -99,10 +99,10 @@ yDirectionCompensation
     zBias                       0.0     ; 通用Z轴角速度偏置
     threshold                   0.0     ; Y方向速度阈值
     enableSeparateCompensation  true    ; 是否启用分开补偿（左/右）(true/false)
-    xBiasLeft                   0.06     ; 向右行走时X轴偏置(从后往前看)
-    xBiasRight                 -0.045     ; 向左行走时X轴偏置(从后往前看)
-    zBiasLeft                  -0.03     ; 向右行走时Z轴角速度偏置(从后往前看)
-    zBiasRight                  0.03     ; 向左行走时Z轴角速度偏置(从后往前看) 往左旋转是正
+    xBiasLeft                   -0.1     ; 向右行走时X轴偏置(从后往前看)
+    xBiasRight                  -0.1     ; 向左行走时X轴偏置(从后往前看)
+    zBiasLeft                   -0.0     ; 向右行走时Z轴角速度偏置(从后往前看)
+    zBiasRight                  0.0     ; 向左行走时Z轴角速度偏置(从后往前看) 往左旋转是正
 }
 
 ; ==================== 混合运动速度限制配置====================
@@ -166,27 +166,27 @@ defaultJointState
 {
     ; 定义各关节的默认状态
     (0,0)  0.005       ; leg_l1_joint
-    (1,0)  0.0       ; leg_l2_joint
+    (1,0)  -0.       ; leg_l2_joint
     (2,0)  -0.1     ; leg_l3_joint
     (3,0)   0.25     ; leg_l4_joint
     (4,0)  -0.15     ; leg_l5_joint
     (5,0)   0.       ; leg_l6_joint
     (6,0)   -0.005       ; leg_r1_joint
-    (7,0)   -0.0       ; leg_r2_joint
+    (7,0)   0.       ; leg_r2_joint
     (8,0)  -0.1     ; leg_r3_joint
     (9,0)   0.25     ; leg_r4_joint
     (10,0) -0.15     ; leg_r5_joint
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
     (13,0)  0.1        ; zarm_l1_joint
-    (14,0)  0        ; zarm_l2_joint
+    (14,0)  0.075        ; zarm_l2_joint
     (15,0)  0        ; zarm_l3_joint
     (16,0)  -0.3        ; zarm_l4_joint
     (17,0)  0        ; zarm_l5_joint
     (18,0)  0        ; zarm_l6_joint
     (19,0)  0        ; zarm_l7_joint
     (20,0)  0.1        ; zarm_r1_joint
-    (21,0)  0        ; zarm_r2_joint
+    (21,0)  -0.075        ; zarm_r2_joint
     (22,0)  0        ; zarm_r3_joint
     (23,0)  -0.3        ; zarm_r4_joint
     (24,0)  0        ; zarm_r5_joint
@@ -204,17 +204,17 @@ use_stand_default_joint_state  true
 standdefaultJointState
 {
     ; 定义各关节的站立默认状态（与 defaultJointState 相同，可按需调整为更直立的姿态）
-    (0,0)  0.0       ; leg_l1_joint
+    (0,0)  0.005       ; leg_l1_joint
     (1,0)  0.0       ; leg_l2_joint
     (2,0)  -0.1     ; leg_l3_joint
     (3,0)   0.25     ; leg_l4_joint
-    (4,0)  -0.15     ; leg_l5_joint
+    (4,0)  -0.13     ; leg_l5_joint
     (5,0)   0.       ; leg_l6_joint
-    (6,0)   -0.0       ; leg_r1_joint
+    (6,0)   -0.005       ; leg_r1_joint
     (7,0)   -0.0       ; leg_r2_joint
     (8,0)  -0.1     ; leg_r3_joint
     (9,0)   0.25     ; leg_r4_joint
-    (10,0) -0.15     ; leg_r5_joint
+    (10,0) -0.13     ; leg_r5_joint
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
     (13,0)  0.1        ; zarm_l1_joint

@@ -3,6 +3,8 @@
 ## Breaking Changes
 
 ## 文档相关
+- 新增握手功能部署文档，[文档链接](./src/kuavo_handshake/DEPLOY.md)
+- 更新搬箱说明文档：修正 TF 转发工作目录路径，默认关闭 rosbag 录制并调整搬箱次数，[文档链接](./src/kuavo_humanoid_websocket_sdk/docs/kuavo_strategy_pytree/WS_SDK搬箱说明文档.md)
 - 补充 PICO RG+A/B 切换 RL 控制器使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - 新增增量数采操作步骤文档，[文档链接](./src/manipulation_nodes/noitom_hi5_hand_udp_python/docs/增量式IK新功能介绍.md)
 - 相机标定文档补充 52/55/56 机型与实操注意事项，[文档链接](./src/Camera_Calibration/README.md)
@@ -22,6 +24,15 @@
 - 补充轮臂 v62/v63 下肢限位标零说明，完善 readme 通用标定章节与限位标零入口，[文档链接](./docs/3调试教程/Kuavo%205-W%20全身零点标定.md)
 
 ## 新增功能
+- 新增握手功能节点 kuavo_handshake：HandshakeTarget 消息接口、独立启动文件与测试脚本，集成到 load_kuavo_real（默认关闭），[文档链接](./src/kuavo_handshake/DEPLOY.md)
+- Gazebo 搬箱场景支持 scene_yaw 整体旋转使 tag 正对机器人，launch 新增 record_bag 参数控制 rosbag 录制
+- PICO 遥操新增链路诊断功能：UDP 诊断协议（丢包统计、时钟同步、分块日志），附链路耗时可视化与 CSV 转换脚本
+- 新增气泵开关服务与气压话题发布
+- 新增 53 版本腿部磨线功能（自研/YD 驱动器），适配 55 版本自研驱动器磨线
+- MoRE 新增手臂冻结功能，降低手臂跟随速度防剧烈动作
+- PICO GMR 遥操新增 VPN 模式：pico_comm_vpn 会话管理器与 pico_streaming VPN 启动方式，LAN 模式向后兼容，load_kuavo_real 新增 pico_gmr_vpn_mode 参数
+- amp_wild 新增 Y 方向行走补偿配置，微调站立姿态
+- G12 遥控器在 amp_wild 步态下支持 B 踏步、D 停止
 - PICO 遥操新增 RG+A/B 切换上下 RL 控制器功能，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
 - depth_loco 控制器切换来源从 amp_controller 扩展为任意 RL 控制器
 - 新增 v200062/v300062 机型配置
@@ -79,6 +90,31 @@
 - 新增 G12 航空箱坐/站功能：按键映射与状态回调实现，座椅起身流程重构支持臂绕扶手
 
 ## 修复问题
+- 修复搬箱策略多项问题（#3629）：多轮切换 tag 时旧位姿残留导致抓取反向、轮次切换未清除放置 tag 旧数据、扫描不到 tag 时盲目猜测回退，改为原地循环重扫直接判定失败
+- 修复位姿保持切换问题（#3867）：vel 模式退出后位姿保持对齐实际状态，底盘停止前持续跟随实际值
+- 修复 kuavo5 VR 遥操切到 AMP 步态后无法行走、无法切回 MPC 步态问题（覆盖普通 VR 摇操与增量遥操退出两场景）
+- 修复 amp_wild 模型安装灵巧手打腿问题（v53/54/55 参数微调）
+- 修复软暂停恢复时躯干抖动问题（#3791）：状态机改为四状态，恢复时全量重置 RM 参考并加切换门控
+- 修复 MoRE 下蹲状态解除后无法复位问题
+- 修复蹲姿启动/use_sit_init 起立提示为英文与实机行为不一致问题，统一为中文提示
+- 修复 5W Quest3 增量模式退出时躯干和下肢未复位问题
+- 修复 5W VR 增量模式下缓慢移动手臂不跟随问题
+- 修复 RL→MPC 切换时手臂抖动问题：joint_cmd 五阶多项式续接并增加保持时长，修复 kp/kd 参数错误混合
+- 修复 kuavo5 AMP 切换 MPC 时手臂抽动问题
+- 修复 VMP↔AMP 切换插值问题：改用单策略插值，恢复 vmp_entry_imu_quat_valid_ 重置
+- 修复座椅起身 stand_up 交接时 WBC 跳变问题：sit 基准位置按当前 yaw 旋转到世界系，延后释放 CSP hold
+- 修复 VR 视频回传方式 2 下 X+A 复位/固定及底盘移动无反应问题（#3716）
+- 修复 VR 视频回传 Orbbec 模式无法动态更新 Quest3 IP 问题，支持通过 h12_vr_launch.yaml 配置
+- 修复视频回传模式下双足/轮臂增量 IK 配置与 h12_vr_launch.yaml 按键配置不生效问题
+- 修复相机回传 camera_info 订阅话题错误问题，AGX 端订阅改为 compressed 话题
+- 修复 G12 遥控器 MPC 切 AMP 时手臂抽动问题
+- 修复轮臂躯干 pitch/yaw 旋转矩阵提取异常导致崩溃问题
+- 修复 amp_wild 模式下开启 VR 无法直接进入 VR 模式问题
+- 修复 kuavo5 amp_wild 步态 VR 遥操下左右行走非常缓慢问题
+- 修复 kuavo5 PICO 连接后手柄无法控制机器人解锁及终端日志报错问题
+- 修复真机可视化中补发假 /leju_claw_state 夹爪状态的问题
+- 修复 Roban（1X）EcMasterType 默认驱动器回退类型错误问题
+- 修复 x86 平台 Drake IK 预编译库链接差异导致的 IK 位置偏移问题
 - 修复 AMP↔VMP 双向切换 yaw 锚点不连续与冷 reset 问题，h12pro switch_controller 支持 amp_wild 与 mpc 互切（#3687）
 - 修复 Quest3 增量模式多项问题：X+A 手臂复位缓慢、arm_ctrl_mode_ 状态残留导致退出后动作帧异常、增量退出时竞态导致手臂控制模式残留
 - 修复鲁班 AMP 多项问题：绕过夸父行走动手拦截、allow_walking_during_action 限定 amp_hand_controller、tact 动作期间允许行走、走弧线偏斜优化、_mpc_arm_commanded 全维度判定消除锁定后再动抽臂（#3624）
@@ -187,6 +223,8 @@
 - 修复 s52 VR 增量遥操由于 IK 缺少夹爪虚拟关节导致的问题
 
 ## 其他改进
+- hardware_node 纳入 humanoid_controllers 统一编译；check_tool 脚本增加 root 权限检查，check_ntp_sync 新增 SSH host key 清理步骤避免连接失败
+- 更新 v62/v63 腿部标定限位配置
 - 适配 arm64 平台（Orin）编译与运行：WBC 绑定隔离核心、arm64 版 EC/灵巧手 SDK、Drake 兼容层、MuJoCo arm64 二进制等
 - 轮臂 WBC 绑定到隔离核心 2,3
 - YD 驱动器启动阶段写入温度限幅值（0x3F0D）

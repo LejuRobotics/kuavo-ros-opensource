@@ -446,15 +446,9 @@
   </joint>
   <link name="zarm_l7_link">
     <inertial>
-      <origin xyz="0.0 0.0 -0.10230994"
-              rpy="0 0 0" />
-      <mass value="0.71537800" />
-      <inertia ixx="0.001060440"
-               ixy="0.0"
-               ixz="0.0"
-               iyy="0.001064636"
-               iyz="0.0"
-               izz="0.001061427" />
+      <origin xyz="0.00186 0.01014 -0.09044" rpy="0 0 0" />
+      <mass value="0.0542110173081966" />
+      <inertia ixx="0.00071" ixy="1e-05" ixz="2e-05" iyy="0.0007" iyz="-4e-05" izz="0.00012" />
     </inertial>
     <visual>
       <origin xyz="0 0 0"
@@ -755,15 +749,9 @@
   </joint>
   <link name="zarm_r7_link">
     <inertial>
-      <origin xyz="0.0 0.0 -0.10230994"
-              rpy="0 0 0" />
-      <mass value="0.71537800" />
-      <inertia ixx="0.001060440"
-               ixy="0.0"
-               ixz="0.0"
-               iyy="0.001064636"
-               iyz="0.0"
-               izz="0.001061427" />
+      <origin xyz="0.00000000 -0.01153440 -0.03004157" rpy="0 0 0" />
+      <mass value="0.11660000" />
+      <inertia ixx="0.00013730" ixy="-0.00000004" ixz="-0.00000002" iyy="0.00008156" iyz="0.00002135" izz="0.00010541" />
     </inertial>
     <visual>
       <origin xyz="0 0 0"

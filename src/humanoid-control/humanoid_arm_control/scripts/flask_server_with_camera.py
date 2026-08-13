@@ -6,7 +6,7 @@ import os
 import sys
 import rospy
 from humanoid_arm_control.srv import armControl, armControlRequest  # 导入你实际的ROS服务
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge
 import cv2
 import base64
@@ -101,14 +101,14 @@ def get_image():
         kuavo_instance.set_head_target(30.0, -20.0)
         rospy.sleep(5)
         
-        cv_image = bridge.imgmsg_to_cv2(latest_image, "bgr8")
+        cv_image = bridge.compressed_imgmsg_to_cv2(latest_image, "bgr8")
         _, buffer = cv2.imencode('.jpg', cv_image)
         left_image = base64.b64encode(buffer).decode('utf-8')
         
         kuavo_instance.set_head_target(-30.0, -20.0)
         rospy.sleep(5)
         
-        cv_image = bridge.imgmsg_to_cv2(latest_image, "bgr8")
+        cv_image = bridge.compressed_imgmsg_to_cv2(latest_image, "bgr8")
         _, buffer = cv2.imencode('.jpg', cv_image)
         right_image = base64.b64encode(buffer).decode('utf-8')
         
@@ -146,7 +146,7 @@ def wave_hand():
     kuavo_instance.move_with_trajactory(time_list_wave, torque_list_wave)
     return jsonify({'success': True}), 200
 
-rospy.Subscriber('/camera/color/image_raw', Image, image_callback, queue_size=1)
+rospy.Subscriber('/camera/color/image_raw/compressed', CompressedImage, image_callback, queue_size=1)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8031, threaded=True)

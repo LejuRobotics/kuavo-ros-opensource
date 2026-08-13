@@ -975,6 +975,26 @@ namespace humanoid_controller
       controller_manager_->registerWalkingCommandBlockCallback([this]() -> bool {
         return shouldBlockWalkingCommandForExternalArmTarget();
       });
+      controller_manager_->registerControllerActivatedCallback(
+          [this](const std::string& controller_name, RLControllerType controller_type) -> bool {
+            if (controller_type != RLControllerType::MORE_CONTROLLER)
+            {
+              more_activation_waiting_mode1_ = false;
+              return false;
+            }
+
+            // 切入 MoRE 的边沿只接受 reset 后的 mode1。切入前因外部控制
+            // 缓存的 mode2 不得在新控制器上补发；新的双 Trigger/X+A 会在
+            // MoRE 激活后形成新的明确 mode2 请求。
+            pending_external_arm_controller_mode_ = false;
+            const bool waiting_mode1 =
+                arm_control_mode_desired_cache_.load(std::memory_order_acquire) !=
+                static_cast<int>(ArmControlMode::AUTO_SWING);
+            more_activation_waiting_mode1_.store(waiting_mode1, std::memory_order_release);
+            ROS_INFO("[controller] Activated '%s': cleared stale external arm mode, reset to mode1 (waiting_global_mode1=%d)",
+                     controller_name.c_str(), waiting_mode1);
+            return waiting_mode1;
+          });
       
       // 注册倒地状态回调函数
       controller_manager_->registerFallDownStateCallback([this](int state) {
@@ -1230,10 +1250,38 @@ namespace humanoid_controller
           arm_mode_sync_time_ = ros::Time::now().toSec();
           
         }
+        const int raw_desired_arm_mode = static_cast<int>(msg->data[1]);
+        arm_control_mode_desired_cache_.store(raw_desired_arm_mode, std::memory_order_release);
+
+        // 若切入前遗留的是 mode2，MoRE 激活后先等待全局 mode1 确认。
+        // 该窗口中的 mode2 属于旧请求（或过早按键），不能覆盖刚完成的 reset。
+        if (more_activation_waiting_mode1_.load(std::memory_order_acquire))
+        {
+          pending_external_arm_controller_mode_ = false;
+          if (raw_desired_arm_mode == static_cast<int>(ArmControlMode::AUTO_SWING))
+          {
+            more_activation_waiting_mode1_.store(false, std::memory_order_release);
+            ROS_INFO("[controller] MoRE activation received global mode1 confirmation");
+          }
+          else
+          {
+            ROS_WARN_THROTTLE(1.0,
+                              "[controller] Ignore arm mode %d while MoRE activation waits for global mode1",
+                              raw_desired_arm_mode);
+            return;
+          }
+        }
         if (msg->data[1] != mpcArmControlMode_desired_)
         {
           mpcArmControlMode_desired_ = static_cast<ArmControlMode>(msg->data[1]);
           std::cout << "[controller] mpc arm control mode desired changed to: " << mpcArmControlMode_desired_ << std::endl;
+
+          // pending 只代表尚未兑现的 mode2。全局意图一旦离开 mode2，
+          // 即使当前处于 MPC 或目标控制器尚未就绪，也必须立即作废。
+          if (mpcArmControlMode_desired_ != ArmControlMode::EXTERN_CONTROL)
+          {
+            pending_external_arm_controller_mode_ = false;
+          }
           
           // 如果当前是 RL 控制器，设置 arm_controller_ 的模式
           if (controller_manager_)
@@ -1287,9 +1335,9 @@ namespace humanoid_controller
                   }
                 }
                 pending_external_arm_controller_mode_ = false;
-                arm_controller->changeMode(arm_controller_mode);
-                ROS_INFO("[controller] Set arm_controller mode to %d (from mpcArmControlMode_desired_=%d)",
-                         arm_controller_mode, static_cast<int>(mpcArmControlMode_desired_));
+                const bool accepted = current_controller->requestArmControlMode(arm_controller_mode);
+                ROS_INFO("[controller] Requested arm_controller mode %d (mpc desired=%d, accepted=%d)",
+                         arm_controller_mode, static_cast<int>(mpcArmControlMode_desired_), accepted);
               }
             }
           }
@@ -2292,8 +2340,21 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
   bool humanoidController::tryApplyPendingExternalArmControllerMode()
   {
     constexpr int kExternalArmControlMode = 2;
+    if (more_activation_waiting_mode1_.load(std::memory_order_acquire))
+    {
+      pending_external_arm_controller_mode_ = false;
+      return false;
+    }
     if (!pending_external_arm_controller_mode_ || !controller_manager_)
     {
+      return false;
+    }
+
+    // pending mode2 只能在全局意图仍为 mode2 时兑现。进入 MoRE 时发送的
+    // mode1 会使旧 pending 失效，避免 reset 后又被历史请求切回自由手臂。
+    if (mpcArmControlMode_desired_ != ArmControlMode::EXTERN_CONTROL)
+    {
+      pending_external_arm_controller_mode_ = false;
       return false;
     }
 
@@ -2318,7 +2379,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return false;
     }
 
-    arm_controller->changeMode(kExternalArmControlMode);
+    current_controller->requestArmControlMode(kExternalArmControlMode);
     pending_external_arm_controller_mode_ = false;
     ROS_INFO("[controller] Applied pending arm_controller mode 2 after auto controller switch");
     return true;
@@ -2730,10 +2791,11 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       else if (sit_up_active && !sit_up_reverse_done)
       {
         // 段0 reverse（实机 HW / 仿真 CSP 复刻）+ await-start：委托 SitUpController
+        // （CSP hold 延后 release 也在 runPhase0 内）
         kuavo_msgs::jointCmd seat_cmd;
         const bool still = sitUp_->runPhase0(time, jointPosWBC_, seat_cmd);
         if (sitUp_->isAborted()) {
-          // 段0 HW reverse 失败：发 stand_up failed，中止 preUpdate
+          // 段0 HW reverse / deferred release 失败：发 stand_up failed，中止 preUpdate
           std_msgs::Int8 bot_stand_up_failed;
           bot_stand_up_failed.data = -1;
           standUpCompletePub_.publish(bot_stand_up_failed);
@@ -3055,7 +3117,9 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return false;
     }
 
-    // 先切入 preUpdate，再释放 CSP：避免 release 后主循环一帧无 hold
+    // 只切入 preUpdate + kick；CSP hold 由 SitUpController::runPhase0 同线程延后 release。
+    // 若在 ROS 回调里先 release，主循环 update 可能已越过 isPreUpdateComplete 检查，
+    // 随后 seat_post.csp_hold=false 会发出一帧站立 WBC（mode 混杂、关节大幅跳变）。
     clearSeatOffsetPlan();
     isPreUpdateComplete = false;
     isInitStandUpStartTime_ = false;
@@ -3064,21 +3128,13 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     robotStartStandTime_ = 0.0;
     robotStandUpCompleteTime_ = 0.0;
 
-    if (!sitControlManager_->releaseSeatHoldForStandUp(err)) {
-      sitUp_->clearPlan();
-      sitUp_->resetOnComplete();
-      isPreUpdateComplete = true;
-      publishSeatReturnDone(false);
-      return false;
-    }
-
     if (mrtRosInterface_)
       mrtRosInterface_->pauseResumeMpcNode(true);
 
     sitUp_->kickHwReverseIfNeeded();
     publishSeatReturnDone(true);
-    ROS_INFO("[HumanoidController] Seat CSP hold released; stand_up_from_seat preUpdate started "
-             "(phase0=%s, then await start, phase1=standUpWbc sit->stand).",
+    ROS_INFO("[HumanoidController] stand_up_from_seat preUpdate armed "
+             "(CSP hold deferred to SitUp::runPhase0; phase0=%s, then await start, phase1=sit->stand).",
              is_real_ ? "HW jointMoveToPrepGoal" : "sim CSP replica");
     err.clear();
     return true;
@@ -3101,7 +3157,7 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return true;
     }
     res.success = true;
-    res.message = "Seat CSP hold released; stand_up_from_seat started.";
+    res.message = "stand_up_from_seat started (CSP hold release deferred to preUpdate phase0).";
     return true;
   }
 
@@ -3275,8 +3331,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
   void humanoidController::update(const ros::Time &time, const ros::Duration &dfd)
   {
-    // preUpdate 未完成（含 seathold 释放后的重入起立）时，路由到 preUpdate 起立，跳过主循环
-    if (!isPreUpdateComplete) {
+    // 正常：仅看 isPreUpdateComplete。座椅段0：SitUp 专属 ownsPreUpdate，与开机蹲起路径隔离。
+    if (!isPreUpdateComplete || (sitUp_ && sitUp_->ownsPreUpdate())) {
       // SitUp 起立需要 release hold 前实测关节：每帧把 jointPosWBC_ 注入，begin 时即可取用
       if (sitUp_)
         sitUp_->setMeasuredStart(jointPosWBC_);
@@ -3611,7 +3667,27 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           target_arm_pos = currentDefalutJointPosRL_.segment(jointNumReal_+ waistNum_, armNumReal_);
         }
 
-        startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
+        // cmd_blend 仍在跑时先 hold 当前姿态，等 blend 结束后再开躯干插值
+        if (cmd_blend_.active())
+        {
+          torso_interpolation_result_.setZero();
+          torso_interpolation_result_.segment<3>(0) = currentObservation_.state.segment<3>(6);
+          torso_interpolation_result_(3) = currentObservation_.state(9);   // yaw
+          torso_interpolation_result_(4) = currentObservation_.state(10);  // pitch
+          torso_interpolation_result_(5) = 0.0;
+          arm_interpolation_result_ = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
+          leg_interpolation_result_.setZero(waistNum_ + jointNumReal_);
+          leg_interpolation_result_.head(jointNumReal_) = currentObservation_.state.segment(12, jointNumReal_);
+          torso_interpolation_target_pose_ = targetTorsoPose;
+          arm_interpolation_target_pos_ = target_arm_pos;
+          pending_rl_to_mpc_torso_interp_ = true;
+          is_torso_interpolation_active_ = false;
+        }
+        else
+        {
+          pending_rl_to_mpc_torso_interp_ = false;
+          startMPCRLInterpolation(currentObservation_.time, targetTorsoPose, target_arm_pos);
+        }
       }
       // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getNextData();
       // // kuavo_msgs::sensorsData msg = sensors_data_buffer_ptr_->getData(ros::Time::now().toSec());
@@ -3641,44 +3717,56 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             plannedMode_ = ModeNumber::SS;
             if (resetting_mpc_state_ == ResettingMpcState::RESET_BASE)
             {// 插值阶段
-              // 更新躯干插值
-              updateMPCRLInterpolation(currentObservation_.time);
-              // 检查插值是否完成
-              if (!is_torso_interpolation_active_)
+              if (pending_rl_to_mpc_torso_interp_)
               {
-                // 搬运插值完成 → READY（保持 RESET_BASE，继续喂搬运姿态给 MPC）
-                if (transport_mode_state_ == TRANSPORT_INTERPOLATING)
+                if (!cmd_blend_.active())
                 {
-                  transport_mode_state_ = TRANSPORT_READY;
-                  ROS_INFO("[HumanoidController] Transport mode READY (posture reached, joints unlocked)");
+                  startMPCRLInterpolation(currentObservation_.time, torso_interpolation_target_pose_,
+                                          arm_interpolation_target_pos_);
+                  pending_rl_to_mpc_torso_interp_ = false;
                 }
-                else if (transport_mode_state_ != TRANSPORT_READY)
+              }
+              else
+              {
+                // 更新躯干插值
+                updateMPCRLInterpolation(currentObservation_.time);
+                // 检查插值是否完成
+                if (!is_torso_interpolation_active_)
                 {
-                bool mpc_ready = mrtRosInterface_->initialPolicyReceived() &&
-                                          mrtRosInterface_->updatePolicy() &&
-                                          mrtRosInterface_->isPolicyUpdated() &&
-                                          mrtRosInterface_->getPolicyReceiveCount() > 1;
-                if (is_rl_controller_)// 切换到RL
-                {
-                  resetting_mpc_state_ = ResettingMpcState::NORMAL;
-                  // 插值阶段直接输出 arm_interpolation_result_，滤波器未随之更新
-                  // 在切到 AMP 前对齐滤波器，避免本帧剩余 WBC 流程使用旧 MPC 状态回跳
-                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
-                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
-                  // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
-                  if (current_controller_ptr_) {
-                    current_controller_ptr_->onInterpolationComplete();
+                  // 搬运插值完成 → READY（保持 RESET_BASE，继续喂搬运姿态给 MPC）
+                  if (transport_mode_state_ == TRANSPORT_INTERPOLATING)
+                  {
+                    transport_mode_state_ = TRANSPORT_READY;
+                    ROS_INFO("[HumanoidController] Transport mode READY (posture reached, joints unlocked)");
                   }
-                }else if (mpc_ready)
-                {
-                  standupTime_ = currentObservation_.time;
-                  resetting_mpc_state_ = ResettingMpcState::NORMAL;
-                  // 重置手臂滤波器，避免下一帧 MPC 策略输出与滤波器状态不匹配导致 joint_cmd 突变
-                  arm_joint_pos_filter_.reset(arm_interpolation_result_);
-                  arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
-                }
-                }
+                  else if (transport_mode_state_ != TRANSPORT_READY)
+                  {
+                  bool mpc_ready = mrtRosInterface_->initialPolicyReceived() &&
+                                            mrtRosInterface_->updatePolicy() &&
+                                            mrtRosInterface_->isPolicyUpdated() &&
+                                            mrtRosInterface_->getPolicyReceiveCount() > 1;
+                  if (is_rl_controller_)// 切换到RL
+                  {
+                    resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                    // 插值阶段直接输出 arm_interpolation_result_，滤波器未随之更新
+                    // 在切到 AMP 前同步滤波器，避免本帧剩余 WBC 流程使用旧 MPC 状态回跳
+                    arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                    arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
+                    // 通知 RL 控制器插值完成（VMP 用此回调启动在线采样）
+                    if (current_controller_ptr_) {
+                      current_controller_ptr_->onInterpolationComplete();
+                    }
+                  }else if (mpc_ready)
+                  {
+                    standupTime_ = currentObservation_.time;
+                    resetting_mpc_state_ = ResettingMpcState::NORMAL;
+                    // 重置手臂滤波器，避免下一帧 MPC 策略输出与滤波器状态不匹配导致 joint_cmd 突变
+                    arm_joint_pos_filter_.reset(arm_interpolation_result_);
+                    arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(armNumReal_));
+                  }
+                  }
 
+                }
               }
             }
             if (mrtRosInterface_->updatePolicy())

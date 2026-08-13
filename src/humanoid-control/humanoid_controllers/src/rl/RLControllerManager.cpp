@@ -394,7 +394,7 @@ namespace humanoid_controller
           if (arm_ctrl && arm_ctrl->getMode() != 1)
           {
             changeArmCtrlModeAsync(1);
-            arm_ctrl->changeMode(1);
+            current_controller->requestArmControlMode(1);
             pending_mpc_switch_ = true;
             ROS_INFO("[RLControllerManager] RL→MPC: arm in external mode, deferring switch until interpolation completes");
             return true;  // RL 保持运行，不切
@@ -415,6 +415,10 @@ namespace humanoid_controller
 
       const std::string to_controller = "mpc";
       ROS_INFO("[RLControllerManager] Switched to BASE controller");
+      if (controller_activated_callback_)
+      {
+        (void)controller_activated_callback_(to_controller, RLControllerType::MPC);
+      }
       // 切换到 MPC 控制器时也异步切换手臂模式到 1
       changeArmCtrlModeAsync(1);
       if (current_before != to_controller)
@@ -610,6 +614,21 @@ namespace humanoid_controller
     stationary_candidate_active_ = false;
     clearPendingWalkingSwitchRequest("switch completed");
     const std::string to_controller = current_controller_name_;
+    const bool entering_more_controller =
+        new_controller && new_controller->getType() == RLControllerType::MORE_CONTROLLER;
+
+    // MoRE 每次激活都从 mode1 开始。先在控制器内部同步清除旧的
+    // pose/style/freeze 意图，再通知上层丢弃切入前缓存的 mode2。
+    if (entering_more_controller)
+    {
+      new_controller->requestArmControlMode(1);
+    }
+    bool reset_more_global_arm_mode = entering_more_controller;
+    if (controller_activated_callback_)
+    {
+      reset_more_global_arm_mode =
+          controller_activated_callback_(to_controller, new_controller->getType());
+    }
 
     ROS_INFO("[RLControllerManager] Switched to controller '%s' (type: %d, source motion state: %s)",
              name.c_str(),
@@ -620,19 +639,25 @@ namespace humanoid_controller
     if (nh_ptr_) {
       new_controller->updateVelocityLimitsParam(*nh_ptr_);
     }
-    // 切换到非 MPC 控制器后，异步切换手臂模式到 1
+    // 切换到非 MPC 控制器后，异步切换手臂模式到 1。
+    // MoRE 不继承旧的外部 mode2：每次激活都必须从 mode1 开始。
     // 豁免：autoControllerSwitch 因最近的外部手臂/腰部控制活动自动切到 manipulation_controller 时，
     // 保留手臂外部控制模式(2)，避免覆盖 VR/动作播放刚设置的模式 2（humanoidController 会在
     // tryApplyPendingExternalArmControllerMode 中兑现缓存的外部控制模式）。
     // 外部活动由 [x,2] 模式消息持续刷新，VR 运行期间豁免稳定成立；手动切换（无外部活动）不豁免。
     const bool keep_arm_external_mode =
         auto_switch_config_.enabled &&
+        current_before != "mpc" &&
         name == auto_switch_config_.manipulation_controller &&
         hasRecentExternalControlActivityLocked(ros::Time::now());
+    const bool should_reset_arm_mode =
+        entering_more_controller ? reset_more_global_arm_mode : !keep_arm_external_mode;
     if (new_controller && new_controller->getType() != RLControllerType::MPC &&
-        !keep_arm_external_mode)
+        should_reset_arm_mode)
     {
-      changeArmCtrlModeAsync(1);
+      // 对 MoRE 记录预期控制器与本地请求模式；若切入后用户已经明确请求
+      // mode2，则丢弃迟到的后台 mode1，避免覆盖新的双 Trigger/X+A。
+      changeArmCtrlModeAsync(1, entering_more_controller ? to_controller : "");
     }
     if (current_before != to_controller)
     {
@@ -883,7 +908,7 @@ namespace humanoid_controller
     return false;
   }
 
-  void RLControllerManager::changeArmCtrlModeAsync(int mode)
+  void RLControllerManager::changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name)
   {
     // 如果还没有初始化 NodeHandle，则无法调用服务
     if (!nh_ptr_)
@@ -892,7 +917,7 @@ namespace humanoid_controller
       return;
     }
 
-    std::thread([this, mode]()
+    std::thread([this, mode, expected_controller_name]()
     {
       try
       {
@@ -910,6 +935,26 @@ namespace humanoid_controller
                             "[RLControllerManager] Arm ctrl mode service '/humanoid_change_arm_ctrl_mode' "
                             "not available (timeout: 2s)");
           return;
+        }
+
+        if (!expected_controller_name.empty())
+        {
+          std::lock_guard<std::recursive_mutex> lock(mutex_);
+          auto it = controllers_.find(expected_controller_name);
+          if (current_controller_name_ != expected_controller_name ||
+              it == controllers_.end() || !it->second)
+          {
+            ROS_INFO("[RLControllerManager] Drop stale arm mode %d request for controller '%s'",
+                     mode, expected_controller_name.c_str());
+            return;
+          }
+          const auto* arm_controller = it->second->getArmController();
+          if (arm_controller && arm_controller->getRequestedMode() != mode)
+          {
+            ROS_INFO("[RLControllerManager] Drop stale arm mode %d request for controller '%s'",
+                     mode, expected_controller_name.c_str());
+            return;
+          }
         }
 
         if (client.call(srv))

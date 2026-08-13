@@ -363,7 +363,7 @@ namespace humanoid_controller
         if (arm_controller_)
           arm_controller_->lockExternalTarget(false);
         // style0: 恢复 pose_arm_control_mode_，sync 在 updateInternalState 后用传感器值切 mode
-        if (pre_action_style_ == 0)
+        if (pre_action_style_ == 0 && (saved_arm_mode == 1 || saved_arm_mode == 2))
           pose_arm_control_mode_ = saved_arm_mode;
         restore_time_ = ros::Time::now();  // 释放 resolveMotionStyleIndex / getCurrentGaitStyleIndex 风格锁
         skip_sync_after_restore_ = 0;
@@ -882,11 +882,12 @@ namespace humanoid_controller
            waist_controller_->hasExternalTarget();
   }
 
-  int MoREController::resolveArmControlMode(int gait_style_index) const
+  int MoREController::resolveUnfrozenArmControlMode(int gait_style_index) const
   {
     if (gait_style_index == 0)
     {
-      return pose_arm_control_mode_;  // X+A 切换 1(RL自然放下)↔2(VR跟随)
+      // mode0 仅是冻结派生状态，不能成为长期偏好；任何非2值安全回落到 mode1。
+      return pose_arm_control_mode_ == 2 ? 2 : 1;
     }
     if (usesThreeGaitExperts() && gait_style_index == 2)
     {
@@ -894,6 +895,13 @@ namespace humanoid_controller
     }
     // 二风格 walk 与三风格 walk_policy 均走策略手臂
     return 1;
+  }
+
+  int MoREController::resolveArmControlMode(int gait_style_index) const
+  {
+    const int unfrozen_mode = resolveUnfrozenArmControlMode(gait_style_index);
+    // 冻结属于外部手臂(mode2)的派生状态；基础 mode1 永远不受冻结影响。
+    return (arm_frozen_ && unfrozen_mode == 2) ? 0 : unfrozen_mode;
   }
 
   int MoREController::resolveWaistControlMode(int gait_style_index) const
@@ -909,6 +917,48 @@ namespace humanoid_controller
     return 1;
   }
 
+  bool MoREController::requestArmControlMode(int target_mode)
+  {
+    if (!arm_controller_)
+    {
+      return false;
+    }
+
+    // mode0 仍按原有全局语义直接处理；它不能反写为 pose/style 的长期偏好。
+    // 动作播放期间的临时模式也由原动作状态机保存和恢复，不污染用户偏好。
+    if ((target_mode != 1 && target_mode != 2) || action_pending_restore_)
+    {
+      return arm_controller_->changeMode(target_mode);
+    }
+
+    const int current_style = getCurrentGaitStyleIndex();
+
+    // 双 Trigger 与 X+A 最终都会形成明确的全局 mode1/mode2 请求。
+    // 这里以该明确意图同步 MoRE 的站立和下一次行走偏好，避免再从
+    // ArmController 的瞬时/过渡状态反推用户意图。
+    pose_arm_control_mode_ = target_mode;
+    stand_origin_style_ = target_mode;
+
+    int target_style = current_style;
+    if (current_style != 0 && usesThreeGaitExperts())
+    {
+      target_style = target_mode;
+      if (gait_style_mode_ == "command")
+      {
+        std::lock_guard<std::mutex> lock(style_command_mutex_);
+        style_command_index_ = target_mode;
+      }
+    }
+
+    // syncArmControllerMode 会在进入基础 mode1 时清除冻结；基础 mode2 下
+    // 保留 X+B 冻结，只有 X+B 解冻或切入 mode1 才解除。
+    syncArmControllerMode(target_style);
+    ROS_INFO("[%s] Global arm mode intent -> %d (style %d -> %d, pose=%d, stand_origin=%d, frozen=%d)",
+             name_.c_str(), target_mode, current_style, target_style,
+             pose_arm_control_mode_, stand_origin_style_, arm_frozen_);
+    return true;
+  }
+
   void MoREController::handleQuestArmControlButtons(const kuavo_msgs::JoySticks& joy)
   {
     const bool arm_active = arm_controller_ && arm_command_replacement_enabled_;
@@ -917,34 +967,36 @@ namespace humanoid_controller
     {
       return;
     }
-    // X+A 切手臂模式：站着切 arm mode(1↔2)，走着切 walk style(1↔2)
-    //   pose_arm_control_mode_ 记录站立模式偏好，stand_origin_style_ 记录行走模式偏好
-    if (joy.left_first_button_pressed && !quest_joystick_prev_.right_first_button_pressed &&
-        joy.right_first_button_pressed)
+    // X+A 由 QuestControlFSM 作为唯一入口，通过全局 mode 请求进入
+    // requestArmControlMode()；此处只独占处理 X+B，避免同一按键被两处翻转。
+    // X+B 只冻结外部手臂：基础 mode2 可切换 mode0↔mode2，基础 mode1 忽略。
+    if (arm_active &&
+        joy.left_first_button_pressed && !quest_joystick_prev_.right_second_button_pressed &&
+        joy.right_second_button_pressed)
     {
       const int current_style = getCurrentGaitStyleIndex();
-      if (current_style != 0)
+      const int unfrozen_mode = resolveUnfrozenArmControlMode(current_style);
+      if (unfrozen_mode == 2)
       {
-        // 走路中：切行走风格 + 同步站立偏好
-        stand_origin_style_ = (stand_origin_style_ == 1) ? 2 : 1;
-        pose_arm_control_mode_ = stand_origin_style_;
-        style_command_index_ = stand_origin_style_;
-        syncArmControllerMode(stand_origin_style_);
-        ROS_INFO("[%s] VR X+A: walk style -> %s (stand_origin=%d, pose_arm_mode=%d)",
-                 name_.c_str(),
-                 stand_origin_style_ == 2 ? "style2/walk_ext" : "style1/walk_policy",
-                 stand_origin_style_, pose_arm_control_mode_);
+        arm_frozen_ = !arm_frozen_;
+        if (arm_frozen_)
+        {
+          // 冻结: 切 mode=0 (kLocked)。kLocked 下 jointStateCallback 丢弃 /kuavo_arm_traj，
+          // 冻结完全独立，不受 Python IK hold_arm_timer 影响。
+          arm_controller_->changeMode(0);
+        }
+        else
+        {
+          arm_controller_->changeMode(unfrozen_mode);
+        }
+        ROS_INFO("[%s] VR X+B: arm %s (style=%d)", name_.c_str(),
+                 arm_frozen_ ? "FROZEN" : "UNFROZEN", current_style);
       }
       else
       {
-        // 站立：切手臂模式 + 同步行走偏好
-        pose_arm_control_mode_ = (pose_arm_control_mode_ == 1) ? 2 : 1;
-        stand_origin_style_ = pose_arm_control_mode_;
-        syncArmControllerMode(0);
-        ROS_INFO("[%s] VR X+A: pose arm mode -> %d (stand_origin=%d)", name_.c_str(),
-                 pose_arm_control_mode_, stand_origin_style_);
+        ROS_INFO("[%s] VR X+B ignored: unfrozen arm mode=%d (style=%d)",
+                 name_.c_str(), unfrozen_mode, current_style);
       }
-      // waist 模式由 syncWaistControllerMode 根据 style 自动同步，无需手动切换
     }
   }
 
@@ -1004,6 +1056,15 @@ namespace humanoid_controller
     const bool style_changed = (gait_style_index != last_synced_gait_style_index_);
     syncWaistControllerMode(gait_style_index, style_changed);
 
+    const int unfrozen_arm_mode = resolveUnfrozenArmControlMode(gait_style_index);
+    // 一旦目标不再是外部手臂 mode2，就永久取消冻结；mode2 状态之间切换则保留。
+    if (unfrozen_arm_mode != 2 && arm_frozen_)
+    {
+      arm_frozen_ = false;
+      ROS_INFO("[%s] Arm freeze cleared: unfrozen arm mode -> %d (gait_style=%d)",
+               name_.c_str(), unfrozen_arm_mode, gait_style_index);
+    }
+
     if (!arm_controller_)
     {
       if (style_changed)
@@ -1013,11 +1074,11 @@ namespace humanoid_controller
       return;
     }
     const int arm_mode = resolveArmControlMode(gait_style_index);
-    const int current_mode = arm_controller_->getMode();
+    const int requested_mode = arm_controller_->getRequestedMode();
 
     if (style_changed)
     {
-      if (current_mode != arm_mode)
+      if (requested_mode != arm_mode)
       {
         arm_controller_->changeMode(arm_mode);
         ROS_INFO("[%s] ArmController mode -> %d (gait style %d -> %d, more_mode_=%d, pose_arm_mode=%d)",
@@ -1029,7 +1090,7 @@ namespace humanoid_controller
     }
 
     // 所有风格（含 pose）：手臂模式被外部改错时纠正回来
-    if (current_mode != arm_mode)
+    if (requested_mode != arm_mode)
     {
       arm_controller_->changeMode(arm_mode);
       ROS_INFO("[%s] ArmController mode -> %d (sync, gait_style=%d, more_mode_=%d)",
@@ -1091,12 +1152,43 @@ namespace humanoid_controller
 
   Eigen::Vector2d MoREController::computePostureCommands(int gait_style_index)
   {
+    // 从行走回到站立时，清 squat 状态恢复站姿
+    if (last_posture_style_index_ >= 0 && last_posture_style_index_ != gait_style_index && gait_style_index == 0)
+    {
+      squat_blend_target_ = 0.0;
+      smoothed_squat_ = 0.0;
+      if (gait_receiver_)
+      {
+        gait_receiver_->resetPostureCommand();
+      }
+      ROS_INFO("[%s] squat state cleared (style %d -> 0)", name_.c_str(), last_posture_style_index_);
+    }
+    last_posture_style_index_ = gait_style_index;
+
     // [squat_height_delta_m, trunk_pitch_delta_rad]
     Eigen::Vector2d posture_commands = Eigen::Vector2d::Zero();
     if (gait_receiver_)
     {
       posture_commands = gait_receiver_->getCurrentPostureCommand();
     }
+
+    // FSM 退出躯干控制时发零 /cmd_pose，这个零经过 RlGaitReceiver 低通滤波后逐渐收敛。
+    // 检测 smoothed 值从非零→零的过渡，立即清 squat 状态 + 复位 WaistController，无需等行走触发。
+    if (std::abs(last_posture_raw_) > 1e-4 && std::abs(posture_commands.x()) < 1e-4 && std::abs(squat_blend_target_) > 1e-4)
+    {
+      squat_blend_target_ = 0.0;
+      smoothed_squat_ = 0.0;
+      if (gait_receiver_) gait_receiver_->resetPostureCommand();
+      posture_commands.setZero();
+      if (waist_controller_ && waist_controller_->getMode() == 2)
+      {
+        waist_controller_->changeMode(1);
+        waist_controller_->changeMode(2);
+      }
+      ROS_INFO("[%s] posture zero detected (FSM exit torso ctrl), squat state cleared + waist reset",
+               name_.c_str());
+    }
+    last_posture_raw_ = posture_commands.x();
 
     posture_commands.x() = std::clamp(posture_commands.x(), posture_height_min_, posture_height_max_);
     posture_commands.y() = std::clamp(posture_commands.y(), posture_bend_min_, posture_bend_max_);
@@ -1141,11 +1233,12 @@ namespace humanoid_controller
     history_tensor_.setZero();
     my_yaw_offset_ = 0.0;
     yaw_offset_initialized_ = false;
-    // pose_arm_control_mode_ = 1;  // deprecated: mode1 废弃
+    pose_arm_control_mode_ = 1;  // 与 ArmController::reset() 的默认 mode1 保持一致
     // pose_waist_control_mode_ = 1;
     stand_origin_style_ = 1;  // 初始默认为 style1 侧
     last_synced_gait_style_index_ = -1;
     quest_joystick_initialized_ = false;
+    arm_frozen_ = false;
     if (arm_controller_)
     {
       arm_controller_->reset();
@@ -1153,6 +1246,9 @@ namespace humanoid_controller
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = false;
     smoothed_squat_ = 0.0;
+    squat_blend_target_ = 0.0;
+    last_posture_style_index_ = -1;
+    last_posture_raw_ = 0.0;
     if (waist_controller_)
     {
       waist_controller_->reset();
@@ -1904,11 +2000,6 @@ namespace humanoid_controller
       {
         last_stance_state_for_blend_ = true;
       }
-    }
-
-    if (getCurrentGaitStyleIndex() == 0)
-    {
-      pose_arm_control_mode_ = arm_controller_->getMode();
     }
 
     if (arm_controller_->getMode() == 1)

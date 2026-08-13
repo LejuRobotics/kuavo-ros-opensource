@@ -132,6 +132,21 @@ namespace humanoid_controller
     }
 
     /**
+     * @brief 注册控制器激活完成回调
+     *
+     * RL 回调发生在目标控制器 resume/reset 完成且 current_controller_name_ 已更新之后；
+     * 切回 MPC 时使用名称 "mpc" 和类型 MPC。
+     * 用于让上层清理仅属于上一个控制器的待处理命令。
+     * 返回 true 表示该次激活还需要把全局手臂模式重置为 mode1。
+     */
+    void registerControllerActivatedCallback(
+        std::function<bool(const std::string&, RLControllerType)> callback)
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      controller_activated_callback_ = std::move(callback);
+    }
+
+    /**
      * @brief 获取当前控制器类型
      * @return 当前控制器类型
      */
@@ -447,7 +462,7 @@ namespace humanoid_controller
      * @brief 异步切换手臂控制模式
      * @param mode 目标手臂控制模式
      */
-    void changeArmCtrlModeAsync(int mode);
+    void changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name = "");
 
     /**
      * @brief 加载 depth_loco_controller 切换前检查的 ROS 参数
@@ -632,6 +647,7 @@ namespace humanoid_controller
     std::function<bool()> torso_stability_callback_;          ///< 获取躯干稳定性状态的回调函数
     std::function<bool()> stationary_physical_state_callback_; ///< 躯干线速度和双脚接触条件
     std::function<bool()> walking_command_block_callback_; ///< 额外的行走速度命令屏蔽条件
+    std::function<bool(const std::string&, RLControllerType)> controller_activated_callback_;
     std::function<bool(const std::string&, const std::string&, std::string&)> walking_phase_sync_switch_guard_callback_;
         ///< walking 状态下 AMP/DEPTH 直切的额外保护回调
 

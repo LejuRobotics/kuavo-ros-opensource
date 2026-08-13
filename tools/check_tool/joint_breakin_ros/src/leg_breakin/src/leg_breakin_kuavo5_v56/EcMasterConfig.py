@@ -239,6 +239,12 @@ class EcMasterConfig:
             # return f"./config/ENI_config/yd_{slave_num}_c501.xml"
         elif driver_type == "youda3":
             return f"./config/ENI_config/yd300_{slave_num}_c501.xml"
+        elif driver_type == "leju":
+            # 53/55/56 leju 驱动器使用同一 ENI（与主程序 53/55 + leju 一致）
+            return "./config/ENI_config/leju_driver_T27_new.xml"
+        else:
+            print(f"\033[31merror: 不支持的驱动器类型 '{driver_type}'\033[0m", file=sys.stderr)
+            return None
 
     def build_command(self, eni_config_path):
         base_command = [

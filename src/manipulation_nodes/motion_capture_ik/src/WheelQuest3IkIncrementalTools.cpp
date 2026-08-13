@@ -1967,7 +1967,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
     lb_dq_.setZero();
 
     // alpha 平滑：将 lb_q_ 平滑到 latest_lb_q_
-    const double alpha = 0.000;
+    const double alpha = 0.001;
     latest_lb_q_ = (1.0 - alpha) * latest_lb_q_ + alpha * lb_q_;
 
     // latest_lb_dq_ 设置为零

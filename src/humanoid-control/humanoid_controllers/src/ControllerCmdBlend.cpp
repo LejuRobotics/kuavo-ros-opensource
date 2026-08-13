@@ -27,7 +27,7 @@ void selfCheckOnce()
   static bool done = false;
   if (done)
     return;
-  // ponytail: ceiling — fixed-duration source-mode hold; ankle still flips → defer torque mode
+  // hold source mode+kp/kd for whole blend; only q/v/tau quintic
   auto check = [](bool ok, const char* msg) {
     if (!ok)
     {
@@ -87,12 +87,16 @@ void ControllerCmdBlend::apply(double time, kuavo_msgs::jointCmd& joint_cmd, siz
     max_d_raw = std::max(max_d_raw, std::abs(joint_cmd.tau[i] - source_.tau[i]));
     const double out_tau = blendScalar(source_.tau[i], joint_cmd.tau[i], blend);
     max_d_out = std::max(max_d_out, std::abs(out_tau - source_.tau[i]));
+    // 只混合 q/v/tau；kp/kd 与 control_mode 绑定，模式未切前保持源端，禁止插值
     joint_cmd.joint_q[i] = blendScalar(source_.joint_q[i], joint_cmd.joint_q[i], blend);
     joint_cmd.joint_v[i] = blendScalar(source_.joint_v[i], joint_cmd.joint_v[i], blend);
     joint_cmd.tau[i] = out_tau;
-    joint_cmd.joint_kp[i] = blendScalar(source_.joint_kp[i], joint_cmd.joint_kp[i], blend);
-    joint_cmd.joint_kd[i] = blendScalar(source_.joint_kd[i], joint_cmd.joint_kd[i], blend);
-    joint_cmd.control_modes[i] = (alpha < 1.0) ? source_.control_modes[i] : joint_cmd.control_modes[i];
+    if (alpha < 1.0)
+    {
+      joint_cmd.joint_kp[i] = source_.joint_kp[i];
+      joint_cmd.joint_kd[i] = source_.joint_kd[i];
+      joint_cmd.control_modes[i] = source_.control_modes[i];
+    }
   }
 
   if (logger)

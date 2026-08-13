@@ -299,6 +299,16 @@ public:
   double getControlFrequency() const { return control_frequency_; }
 
   /**
+   * @brief 请求当前 RL 控制器切换手臂模式。
+   *
+   * 默认直接转发给 ArmController；需要维护额外模式意图的控制器可重写。
+   */
+  virtual bool requestArmControlMode(int target_mode)
+  {
+    return arm_controller_ && arm_controller_->changeMode(target_mode);
+  }
+
+  /**
    * @brief 获取手臂控制器（如果存在）
    * @return 手臂控制器指针，如果不存在则返回 nullptr
    */

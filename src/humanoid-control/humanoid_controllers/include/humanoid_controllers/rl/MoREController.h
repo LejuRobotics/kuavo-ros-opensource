@@ -50,6 +50,7 @@ namespace humanoid_controller
     bool requestToExit() const override;
     bool isAllowToExit() const override;
     void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
+    bool requestArmControlMode(int target_mode) override;
 
   protected:
     bool updateImpl(const ros::Time& time,
@@ -167,6 +168,10 @@ namespace humanoid_controller
     double smoothed_squat_{0.0};
     double squat_blend_start_{0.0};
     double squat_blend_target_{0.0};
+    /// 上一次 computePostureCommands 时的 gait style，用于检测 style 回到 0 时清 squat
+    int last_posture_style_index_{-1};
+    /// 上一次 posture_commands.x() 原始值，用于检测 FSM 退出躯干控制时 posture→0
+    double last_posture_raw_{0.0};
 
     double waist_mode_interpolation_velocity_{1.0};
     double waist_mode2_cutoff_freq_{1.0};
@@ -185,8 +190,10 @@ namespace humanoid_controller
 
     // MoRE 手臂/上身控制模式切换（0/1/2，语义同 ArmController）
     int more_mode_{0};
-    /// pose 风格下由 VR 手柄 X+A 设定的手臂模式；默认 2=外部控制
+    /// pose 风格下由 VR 手柄 X+A 设定的手臂模式；默认 1=策略/自然摆臂
     int pose_arm_control_mode_{1};  // 站立默认 RL 手臂自然放下，X+A 切换 1↔2
+    /// VR 手柄 X+B 设定的手臂冻结标志；仅未冻结目标为 mode2 时允许保持冻结
+    bool arm_frozen_{false};
     /// pose 风格下由 VR 手柄 X+A 设定的腰部模式；默认 2=外部控制（与手臂一致）
     int pose_waist_control_mode_{2};
     /// 进入站立前的行走风格：1=from style1, 2=from style2；决定站立→行走时切哪个style
@@ -235,6 +242,8 @@ namespace humanoid_controller
 
     /// 当前 gate index（三风格 0/1/2；二风格 0=pose, 1=walk）
     int getCurrentGaitStyleIndex() const;
+    /// 不考虑 X+B 冻结时，各 gait style 对应的基础手臂模式
+    int resolveUnfrozenArmControlMode(int gait_style_index) const;
     /// numGait>=3 与现逻辑一致；numGait==2 时 walk(index 1) 固定策略手臂(1)
     int resolveArmControlMode(int gait_style_index) const;
     /// numGait>=3 与现逻辑一致；numGait==2 时 walk(index 1) 固定 RL 腰部(1)

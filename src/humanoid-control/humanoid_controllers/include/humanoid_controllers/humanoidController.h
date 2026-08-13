@@ -751,7 +751,9 @@ namespace humanoid_controller
     vector_t humanoidState_;
     ArmControlMode mpcArmControlMode_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
     ArmControlMode mpcArmControlMode_desired_ = ArmControlMode::AUTO_SWING; // KEEP = 0, AUTO_SWING = 1, EXTERN_CONTROL = 2
+    std::atomic_int arm_control_mode_desired_cache_{static_cast<int>(ArmControlMode::AUTO_SWING)};
     std::atomic_bool pending_external_arm_controller_mode_{false};
+    std::atomic_bool more_activation_waiting_mode1_{false};
     double external_arm_default_position_tolerance_{0.05};
     double external_arm_target_hold_time_{0.5};
     Eigen::VectorXd external_arm_target_pos_;
@@ -1012,6 +1014,8 @@ namespace humanoid_controller
     double rl_to_rl_velocity_dip_midpoint_ = RL_TO_RL_VELOCITY_DIP_MIDPOINT_DEFAULT;
 
     ControllerCmdBlend cmd_blend_;
+    // RL→MPC：cmd_blend 结束后再启动躯干插值（目标复用 torso/arm_interpolation_target_*）
+    bool pending_rl_to_mpc_torso_interp_{false};
 
     // ==================== 通用插值系统成员变量 ====================
     std::mutex interpolation_mutex_;                                      // 插值任务的线程安全锁
