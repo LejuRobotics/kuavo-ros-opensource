@@ -1664,8 +1664,12 @@ class ArmTrajectoryBezierDemo:
             # freeze 额外：把手臂控制权交回自动摆臂（freeze 服务本身不切 mode）
             try:
                 self.call_enable_wbc_arm_trajectory_control_service(0)
-                self.call_change_arm_ctrl_mode_service(1)
-                rospy.loginfo("[%s] arm mode switched to 1 (auto swing)", rospy.get_time())
+                # 软暂停过渡窗口内 mode 切换会被 RM 拒绝（3791 守卫），如实记录结果，
+                # 不再无条件打印 "switched"
+                if self.call_change_arm_ctrl_mode_service(1):
+                    rospy.loginfo("[%s] arm mode switched to 1 (auto swing)", rospy.get_time())
+                else:
+                    rospy.logwarn("[%s] arm mode switch to 1 (auto swing) rejected, arm keeps current mode", rospy.get_time())
             except Exception as e:
                 rospy.logwarn("Failed to switch arm mode: %s", e)
 

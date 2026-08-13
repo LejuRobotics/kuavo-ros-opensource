@@ -81,7 +81,8 @@ class Test:
         self._enable_vel_control = True
         self._torso_initial = None   # 躯干初始绝对位姿 (x, y, z, roll, pitch, yaw)
         # 订阅 latched 使能话题（发布值 = 状态机衍生，仅 IDLE 为 true）：
-        # 过渡窗口（PAUSING/PAUSED/RESUMING）内 /enable_control 请求会被拒绝，
+        # /enable_control 受理矩阵：过渡态（PAUSING/RESUMING）拒绝一切；稳定态只受理
+        # 有效切换（IDLE 受理 disable、PAUSED 受理 enable），重复请求也被拒（预期）。
         # 以话题值为准同步本地状态，避免脚本内部状态与 controller 错位。
         self._enable_state_sub = rospy.Subscriber('/enable_control_state', Bool,
                                                   self._on_enable_control_state, queue_size=1)
@@ -145,9 +146,11 @@ class Test:
 
         success, actual_time, msg = ct.send_timed_multi_commands(timed_cmd_vec, is_sync=True)
         if success:
-            print(f'  torso+arms sync done in {actual_time:.1f}s')
+            print(f'  ✓ 躯干+手臂联动完成 ({actual_time:.1f}s)')
+        elif ct._is_soft_pause_rejection(msg):
+            print(f'  \033[92m✓ 躯干+手臂联动被拒（预期：软暂停窗口内）\033[0m')
         else:
-            print(f'  torso+arms sync failed: {msg}')
+            print(f'  ⚠️ 躯干+手臂联动失败: {msg}')
 
     def _body_home(self):
         """躯干复位 + 手臂复位"""
@@ -202,7 +205,7 @@ class Test:
                         self._enable_control = target
                         print(f'  /enable_control -> {self._enable_control}')
                     else:
-                        print(f'  /enable_control 被拒（过渡窗口内），保持 {self._enable_control}，稍后重试')
+                        print(f'  \033[92m✓ /enable_control 被拒（预期：过渡窗口内 或 已处于目标态），保持 {self._enable_control}\033[0m')
                 elif c == 'v':
                     self._enable_vel_control = not self._enable_vel_control
                     self._call_enable_vel_control(self._enable_vel_control)

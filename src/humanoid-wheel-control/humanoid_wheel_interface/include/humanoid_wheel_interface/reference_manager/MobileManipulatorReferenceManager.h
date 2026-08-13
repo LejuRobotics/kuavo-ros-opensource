@@ -180,18 +180,20 @@ protected:
   virtual void modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule) override;
 
-  // 3791 reset-to-state 辅助：storage + 全部 Ruckig 锚定到冻结状态（软暂停恢复干净重启）
-  void overwriteCommandStorageWithFrozenState();
-  void resetAllRuckigToFrozenState(scalar_t initTime);
+  // 3791 reset-to-state 辅助：command storage / 全部 Ruckig 锚定到指定状态（软暂停恢复干净重启）。
+  // 状态与 FK 缓存全部由 resetAllMpcToState 以局部变量传入，不再经成员载体。
+  void overwriteCommandStorageWithState(const vector_t& state, const vector_t& torsoPose6D, const vector_t& eeState);
+  // EE ruckig 锚点仅为占位：恢复后首条 EE 指令被 forceEeReanchorOnNextCmd_ 强制重锚定，不消费此值
+  void resetAllRuckigToState(scalar_t initTime, const vector_t& state, const vector_t& torsoPose6D,
+                             const vector_t& eeState);
 
   // 3791: 软暂停恢复时整体重置 RM —— storage + 全部 Ruckig 锚定到指定状态（冻结姿态）。
-  // 复用冻结机制实现（overwriteCommandStorageWithFrozenState / resetAllRuckigToFrozenState），
   // 躯干/ee 位姿用 FK 现场计算，锚当前而非初始位。由 /mobile_manipulator_reset_to_state
-  // 话题（pending 标志）在 modifyReferences 的 enable 分支触发。
+  // 话题（pending 标志）触发，在 solver 重启后 modifyReferences 首拍消费。
   void resetAllMpcToState(scalar_t initTime, const vector_t& state);
 
-  /// 冻结状态中关节保持 frozen，底盘跟随当前实际位姿
-  vector_t frozenJointsWithLiveBase() const;
+  /// 锚定状态中关节保持给定值，底盘跟随当前实际位姿
+  vector_t jointsWithLiveBase(const vector_t& state) const;
 
   // 通用 helper：将 pose 型 Ruckig 规划器重置到指定状态（current=target=state，vel/acc=0）
   template<typename PlannerPtr>
@@ -432,6 +434,11 @@ private:
   vector_t cmd_arm_zyx_[2]; // [0]: 左臂, [1]: 右臂, 包含位置和欧拉角
   std::mutex armPose_mtx_[2]; // [0]: 左臂, [1]: 右臂
   bool isCmdDualArmPoseUpdated_[2]{false, false}; // [0]: 左臂, [1]: 右臂
+  // 3791: resetAllMpcToState（软暂停恢复）/ resetAllMpcTrajAndTarget（home 归位）后置位，
+  // 强制下一条 EE 指令走 isChange=true 重锚定（resetDualArmRuckig 用活状态+指令自身
+  // 坐标系），不消费可能滞留的 EE ruckig 旧状态。免疫 preMode static 滞留、reset 时序
+  // 异常、归位窗口内手臂被其他路径挪走导致的锚点帧混淆/位姿拉回（3791 甩飞、home+b 跳变）
+  bool forceEeReanchorOnNextCmd_[2]{false, false}; // [0]: 左臂, [1]: 右臂
   double cmdDualArmPoseDesiredTime_[2]{0.0, 0.0}; // [0]: 左臂, [1]: 右臂
   ros::Subscriber armEndEffectorSubscriber_;
   ros::Publisher armEndEffectorReachTimePub_[2]; // [0]: 左臂, [1]: 右臂
@@ -490,12 +497,6 @@ private:
   // enable 状态（fail-safe：默认 false，未收到信号时不可控）。仅用于指令入口拒绝
   // （disable 期间丢弃一切动作指令）；冻结输出语义由 controller 承担。
   std::atomic<bool> enable_control_{false};
-  // 3791 reset-to-state 机制复用冻结存储：frozen_state_ 作为 resetAllMpcToState 的
-  // 入参载体（storage 锚定目标），frozen_torso_pose6D_/frozen_ee_state_ 为 FK 缓存
-  vector_t frozen_state_;
-  bool frozen_state_valid_{false};
-  vector_t frozen_torso_pose6D_;        // frozen_state_ 对应的躯干位姿缓存
-  vector_t frozen_ee_state_;            // frozen_state_ 对应的双臂末端位姿缓存
   ros::Subscriber enable_control_state_sub_;
 
   // 3791: 软暂停恢复的 reset-to-state 机制（话题写入 pending，modifyReferences 消费）
