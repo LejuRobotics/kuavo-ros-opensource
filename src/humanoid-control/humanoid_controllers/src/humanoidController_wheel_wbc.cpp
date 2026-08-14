@@ -96,7 +96,7 @@ namespace humanoidController_wheel_wbc
 
     // 等待服务可用
     ROS_WARN_THROTTLE(1.0, "[callSimStartSrv] Waiting for sim_start service...");
-    bool service_available = ros::service::waitForService("sim_start", ros::Duration(100.0)); // 5秒超时
+    bool service_available = ros::service::waitForService("sim_start", ros::Duration(100.0)); // 100秒超时
 
     if (service_available)
     {
@@ -248,7 +248,7 @@ namespace humanoidController_wheel_wbc
       std::cout << "enable_manipulation_mpc: true" << std::endl;
     }
     
-    double controlFrequency = 500.0; // 1000Hz
+    double controlFrequency = 500.0; // 500Hz
     controllerNh_.getParam("/wbc_frequency", controlFrequency);
     std::cout << "wbc_frequency: " << controlFrequency << std::endl;
     dt_ = 1.0 / controlFrequency;
@@ -419,14 +419,14 @@ namespace humanoidController_wheel_wbc
       velControlStatePub_.publish(msg);
     }
 
-    // 发布初始 enable_control 状态 (latched)
+    // 发布初始 enable_control 状态 (latched)：启动即 IDLE 可控
     {
       std_msgs::Bool msg;
-      msg.data = enable_control_.load();
+      msg.data = true;
       enableControlStatePub_.publish(msg);
     }
 
-    // 注册 /enable_control service（直接注册，回调需要访问 WBC 成员做 transition 覆写）
+    // 注册 /enable_control service（回调访问 WBC 成员推进软暂停状态机）
     enableControlServiceServer_ = controllerNh_.advertiseService(
         "/enable_control", &humanoidControllerWheelWbc::enableControlCallback, this);
 
@@ -685,16 +685,51 @@ namespace humanoidController_wheel_wbc
       return true;
     }
 
-    if (req.data == enable_control_.load())
+    if (!req.data)
     {
-      res.success = true;
-      res.message = "enable_control already " + std::to_string(req.data);
-      return true;
+      // ===== disable 受理：立即让整条管线停 =====
+      // 受理即发 enable=false（全局同步总开关），不等主循环；
+      // 冻结记录刻意不做——由主循环 PAUSING 首拍从上一拍执行值冻结，保证"执行值 == 冻结值"零跳变。
+      {
+        std_msgs::Bool msg;
+        msg.data = false;
+        enableControlStatePub_.publish(msg);
+      }
+      mpc_policy_gate_open_ = false;
+      // 3791: pause 转交主循环安全点执行——pauseResumeMpcNode 内部是 roscpp 同步服务
+      // 调用（无超时），不能阻塞本回调线程（会卡住整个服务队列）。标志由主循环消费。
+      mpc_pause_requested_.store(true);
+      // 3791: 每次 disable 重新记录冻结姿态 —— frozen_state_valid_ 置 true 后不会自动复位，
+      // 若不清，第二次及以后 disable 时 PAUSING 首拍的冻结记录块（!frozen_state_valid_ 门控）
+      // 被跳过，frozen_state_ 停留在第一次 disable 的陈旧姿态（如 home），软暂停时机身
+      // 会回陈旧冻结位、enable 后 rst/观测/RM 锚定全部错位导致甩飞。清掉后 PAUSING 首拍
+      // 自然重新记录本次 disable 的真实姿态。
+      frozen_state_valid_.store(false);
+      // 计数器先于状态置位：state 可见时主循环读到的配套值必为当前值（与 enable 分支同序）
+      soft_pause_transition_cycles_.store(0);
+      soft_pause_state_.store(SoftPauseState::PAUSING);
+      ROS_INFO("[enable_control] disable 受理: enable=false 已发布, MPC pause 已请求(主循环执行), 进入 PAUSING");
+    }
+    else
+    {
+      // ===== enable 受理：从冻结干净重启（不发 enable=true，到 IDLE 才发） =====
+      // resume 立即发（solver 尽快恢复）；resetMpcNode/rst_target/滤波器 reset
+      // 由主循环 RESUMING 首拍完成（FK 计算需主线程）；RESUMING 期间 MPC 观测
+      // 强制 = 冻结+odom（反向写回），保证 solver 起点与 RM 参考锚一致。
+      mpc_policy_gate_open_ = false;
+      // resume 同样转交主循环安全点执行（理由同 disable 分支）
+      mpc_resume_requested_.store(true);
+      // 计数器与 reset_done 必须先于 state 置位：若 state 先可见，主循环可能读到
+      // 上一周期的陈旧值（reset_done=true 跳过首拍 reset、counter=250 立即转 IDLE），
+      // 导致 RM 未重置就解锁（3791 审查 WBC-T1）
+      soft_pause_transition_cycles_.store(0);
+      resuming_reset_done_.store(false);
+      soft_pause_state_.store(SoftPauseState::RESUMING);
+      ROS_INFO("[enable_control] enable 受理: MPC resume 已请求(主循环执行), 进入 RESUMING（IDLE 时发布 enable=true）");
     }
 
-    enable_control_.store(req.data);
-
-    // 通知底盘调度模式：软急停/恢复
+    // 通知底盘调度模式：软急停/恢复。刻意放在本地副作用之后——roscpp call 无超时，
+    // 底盘服务挂起不能阻塞本地冻结（安全链不依赖外部服务结果）
     if (dispatch_mode_client_.exists())
     {
       leju_mobile_base_msgs::SetDispatchMode srv;
@@ -713,48 +748,6 @@ namespace humanoidController_wheel_wbc
     else
     {
       ROS_WARN("[enable_control] 底盘 dispatch_mode 服务不可用，跳过");
-    }
-
-    if (!req.data)
-    {
-      // ===== disable 受理：立即让整条管线停 =====
-      // 受理即发 enable=false（全局同步总开关），不等主循环；
-      // 冻结记录刻意不做——由主循环 PAUSING 首拍从上一拍执行值冻结，保证"执行值 == 冻结值"零跳变。
-      {
-        std_msgs::Bool msg;
-        msg.data = false;
-        enableControlStatePub_.publish(msg);
-      }
-      mpc_policy_gate_open_ = false;
-      if (enable_mpc_)
-      {
-        mrtRosInterface_->pauseResumeMpcNode(true);
-      }
-      // 3791: 每次 disable 重新记录冻结姿态 —— frozen_state_valid_ 置 true 后不会自动复位，
-      // 若不清，第二次及以后 disable 时 PAUSING 首拍的冻结记录块（!frozen_state_valid_ 门控）
-      // 被跳过，frozen_state_ 停留在第一次 disable 的陈旧姿态（如 home），软暂停时机身
-      // 会回陈旧冻结位、enable 后 rst/观测/RM 锚定全部错位导致甩飞。清掉后 PAUSING 首拍
-      // 自然重新记录本次 disable 的真实姿态。
-      frozen_state_valid_.store(false);
-      soft_pause_state_.store(SoftPauseState::PAUSING);
-      soft_pause_transition_cycles_.store(0);
-      ROS_INFO("[enable_control] disable 受理: enable=false 已发布, MPC pause 已发, 进入 PAUSING");
-    }
-    else
-    {
-      // ===== enable 受理：从冻结干净重启（不发 enable=true，到 IDLE 才发） =====
-      // resume 立即发（solver 尽快恢复）；resetMpcNode/rst_target/滤波器 reset
-      // 由主循环 RESUMING 首拍完成（FK 计算需主线程）；RESUMING 期间 MPC 观测
-      // 强制 = 冻结+odom（反向写回），保证 solver 起点与 RM 参考锚一致。
-      mpc_policy_gate_open_ = false;
-      if (enable_mpc_)
-      {
-        mrtRosInterface_->pauseResumeMpcNode(false);
-      }
-      soft_pause_state_.store(SoftPauseState::RESUMING);
-      soft_pause_transition_cycles_.store(0);
-      resuming_reset_done_.store(false);
-      ROS_INFO("[enable_control] enable 受理: MPC resume 已发, 进入 RESUMING（IDLE 时发布 enable=true）");
     }
 
     res.success = true;
@@ -941,43 +934,6 @@ namespace humanoidController_wheel_wbc
     {
       // std::cout << "update is running, time is " << time.toSec() - timeInit << std::endl;
     }
-    if(reset_mpc_) // 重置mpc
-    {
-      // use pinocchio 
-      std::vector<Eigen::Vector3d> init_ee_pos(info.eeFrames.size());
-      std::vector<Eigen::Matrix3d> init_ee_rot(info.eeFrames.size());
-      getEEPose(observation_wheel_.state, init_ee_pos, init_ee_rot);
-
-      Eigen::Vector3d init_torso_pos;
-      Eigen::Matrix3d init_torso_rot;
-      getTorsoPose(observation_wheel_.state, init_torso_pos, init_torso_rot);
-
-      // initial command
-      int base_nums = info.stateDim - info.armDim;
-      vector_t initTarget(base_nums + 7 + info.eeFrames.size() * 7);
-      initTarget.head(base_nums) = observation_wheel_.state.head(base_nums);
-      initTarget.segment(base_nums, 3) = init_torso_pos;
-      initTarget.segment(base_nums+3, 4) = Eigen::Quaternion<scalar_t>(init_torso_rot).coeffs();
-      for(int eef_inx = 0; eef_inx < info.eeFrames.size(); eef_inx++)
-      {
-        initTarget.tail(info.eeFrames.size() * 7).segment(eef_inx*7, 3) = init_ee_pos[eef_inx];
-        initTarget.tail(info.eeFrames.size() * 7).segment(eef_inx*7+3, 4) = Eigen::Quaternion<scalar_t>(init_ee_rot[eef_inx]).coeffs();
-      }
-      auto target_trajectories = TargetTrajectories({curTime}, 
-                                                    {initTarget}, 
-                                                    {observation_wheel_.input});
-      mrtRosInterface_->resetMpcNode(target_trajectories);
-
-      reset_mpc_ = false;
-      std::cout << "reset MPC node at " << observation_wheel_.time << "\n";
-
-      // reset kinemic Limit Filters
-      obsStateLimitFilterPtr_->reset(observation_wheel_.state);
-      obsInputLimitFilterPtr_->reset(observation_wheel_.input);
-      mrtStateLimitFilterPtr_->reset(observation_wheel_.state);
-      mrtInputLimitFilterPtr_->reset(observation_wheel_.input);
-
-    }
     // 获取关节数据，并更新 Observation
     SensorData sensors_data_new;
     auto bIsgetSensorData = control_data_manager_->getRealtimeSensorData(sensors_data_new);
@@ -1094,7 +1050,7 @@ namespace humanoidController_wheel_wbc
       }
     }
     // 更新可视化数据：active policy 无效时 getPolicy/getCommand 会抛异常，退化为仅发布观测。
-    // 加 enable_control_ + 闸门：disable 期间/重置未就绪时一律不取 policy（getPolicy 返回裸引用，
+    // 加状态机 + 闸门：disable 期间/重置未就绪时一律不取 policy（getPolicy 返回裸引用，
     // 与 MRT 异步 reset() 析构存在悬垂竞态，详见上方 rollout 块注释）。
     if (soft_pause_state_.load() == SoftPauseState::IDLE && mpc_policy_gate_open_ && mrtRosInterface_->isPolicyUpdated())
     {
@@ -1104,6 +1060,14 @@ namespace humanoidController_wheel_wbc
     {
       robotVisualizer_->update_obs(observation_wheel_);
     }
+    // 3791: 消费 enableControlCallback 转交的 MPC pause/resume 请求（安全点）。
+    // 本点位于本拍 rollout/可视化之后、下一拍 rollout 之前；受理时已先关
+    // mpc_policy_gate_open_（观察到 post-reset policy 才重开），此处无任何
+    // in-flight policy 访问，detached reset 落地时无人在飞。
+    if (mpc_pause_requested_.exchange(false) && enable_mpc_ && mrtRosInterface_)
+      mrtRosInterface_->pauseResumeMpcNode(true);
+    if (mpc_resume_requested_.exchange(false) && enable_mpc_ && mrtRosInterface_)
+      mrtRosInterface_->pauseResumeMpcNode(false);
     markStageMs("mpc_mrt");
 
     /******************  用户修改部分  ***********************/
@@ -1211,8 +1175,8 @@ namespace humanoidController_wheel_wbc
     }
 
     // disable 期间：冻结全身关节角度、清零所有速度，底盘不冻结（跟 odom 实时走）
-    // 3791: 冻结覆写条件改为状态机 —— enable 受理后 enable_control_ 已 true 但状态机
-    // 还在 RESUMING，WBC 输出仍需保持冻结（直到 IDLE rollout 接管）
+    // 3791: 冻结覆写条件改为状态机 —— enable 受理后状态机仍在 RESUMING，
+    // WBC 输出仍需保持冻结（直到 IDLE rollout 接管）
     // 并发协议：frozen_state_ 仅主线程锁内写（PAUSING 首拍）；frozen_state_valid_ 是
     // atomic 可锁外查，服务线程 disable 受理只清 flag 不碰数据，故先查 flag 再加锁安全
     if (soft_pause_state_.load() != SoftPauseState::IDLE && frozen_state_valid_)
@@ -1285,31 +1249,8 @@ namespace humanoidController_wheel_wbc
           rst_state.head(baseDim_) = optimizedState_mrt_.head(baseDim_);
           vector_t zero_input = vector_t::Zero(optimizedInput_mrt_.size());
 
-          // 目标轨迹必须用 target-pose 格式（仿 initMPC L1792-1815）：
-          //   [base(3) + torso_pos(3) + torso_quat(4) + ee_pos(3)*N + ee_quat(4)*N]
-          // 不能传 21 维 MPC state —— 基类缓冲被 getTargetTrajectories()（约束层）与
-          // publishTargetTrajectories（rviz "command" 帧）按目标姿态格式解析，传 state
-          // 会把关节角当四元数（invalid quaternion）并污染 RM 目标缓冲。
-          const int base_nums = static_cast<int>(manipulatorModelInfo_.stateDim
-                                               - manipulatorModelInfo_.armDim);
-          std::vector<Eigen::Vector3d> rst_ee_pos(manipulatorModelInfo_.eeFrames.size());
-          std::vector<Eigen::Matrix3d> rst_ee_rot(manipulatorModelInfo_.eeFrames.size());
-          getEEPose(rst_state, rst_ee_pos, rst_ee_rot);
-          Eigen::Vector3d rst_torso_pos;
-          Eigen::Matrix3d rst_torso_rot;
-          getTorsoPose(rst_state, rst_torso_pos, rst_torso_rot);
-
-          vector_t rst_target(base_nums + 7 + manipulatorModelInfo_.eeFrames.size() * 7);
-          rst_target.head(base_nums) = rst_state.head(base_nums);
-          rst_target.segment(base_nums, 3) = rst_torso_pos;
-          rst_target.segment(base_nums + 3, 4) = Eigen::Quaternion<scalar_t>(rst_torso_rot).coeffs();
-          for (int eef_inx = 0; eef_inx < manipulatorModelInfo_.eeFrames.size(); eef_inx++)
-          {
-            rst_target.tail(manipulatorModelInfo_.eeFrames.size() * 7)
-                     .segment(eef_inx * 7, 3) = rst_ee_pos[eef_inx];
-            rst_target.tail(manipulatorModelInfo_.eeFrames.size() * 7)
-                     .segment(eef_inx * 7 + 3, 4) = Eigen::Quaternion<scalar_t>(rst_ee_rot[eef_inx]).coeffs();
-          }
+          // 目标轨迹必须用 target-pose 格式而非 21 维 MPC state（原因见 buildTargetPoseFromState 注释）
+          vector_t rst_target = buildTargetPoseFromState(rst_state, /*zeroBase=*/false);
 
           mrtRosInterface_->spinMRT();
           mrtRosInterface_->resetMpcNode(
@@ -1320,26 +1261,38 @@ namespace humanoidController_wheel_wbc
           mrtInputLimitFilterPtr_->reset(zero_input);
 
           // 3791: 把冻结姿态发给 RM（resetAllMpcToState：storage/Ruckig 锚冻结）。
-          // 连续发布 3 拍兜底：话题未 latch 且 pub/sub 队列均为 1，单拍可能错位；
-          // RM 只消费一次，多余拍无害
+          // 单拍即可：RM pending 锁存至消费，localhost 话题无丢包；多拍曾被跨周期
+          // 分批消费导致一次 resume 触发多次 resetAllMpcToState（3791 甩飞诱因之一）
           reset_state_to_publish_ = rst_state;
-          reset_to_state_publish_cnt_ = 3;
+          reset_to_state_publish_cnt_ = 1;
           resuming_reset_done_.store(true);
           ROS_INFO("[enable_control] MPC reset from frozen state (RESUMING first cycle)");
         }
         if (soft_pause_transition_cycles_.fetch_add(1) + 1 >= SOFT_PAUSE_TRANSITION_CYCLES)
         {
-          soft_pause_state_.store(SoftPauseState::IDLE);
-          // 全局同步总开关：仅 IDLE 发布 true（enable 受理时未发，延迟到此）
-          std_msgs::Bool msg;
-          msg.data = true;
-          enableControlStatePub_.publish(msg);
-          ROS_INFO("[enable_control] RESUMING -> IDLE, enable=true published");
+          // 3791: 恢复完成握手——250 帧到点且 MPC policy 已就绪才解锁转 IDLE；
+          // 等不到则计数器清零、再顺延一个完整 250 帧窗口（永远不强转），期间
+          // WBC 仍冻结输出、enable=true 不发布，不会带着空 policy 解锁。
+          // enable_mpc_ 关闭时无 policy 可等，直接转 IDLE。
+          if (!enable_mpc_ || (mrtRosInterface_ && mrtRosInterface_->isPolicyUpdated()))
+          {
+            soft_pause_state_.store(SoftPauseState::IDLE);
+            // 全局同步总开关：仅 IDLE 发布 true（enable 受理时未发，延迟到此）
+            std_msgs::Bool msg;
+            msg.data = true;
+            enableControlStatePub_.publish(msg);
+            ROS_INFO("[enable_control] RESUMING -> IDLE, enable=true published");
+          }
+          else
+          {
+            soft_pause_transition_cycles_.store(0);  // 顺延一个完整窗口再查
+            ROS_WARN("[enable_control] RESUMING 250 帧已到但 MPC policy 未就绪，顺延一个窗口（250 帧）再查");
+          }
         }
       }
 
-      // 连续发布冻结姿态给 RM（reset_to_state_publish_cnt_ 在 RESUMING 首拍设置，
-      // 兜底话题丢包）
+      // 发布冻结姿态给 RM（reset_to_state_publish_cnt_ 在 RESUMING 首拍设置为 1，
+      // 发完即止）
       if (reset_to_state_publish_cnt_ > 0)
       {
         std_msgs::Float64MultiArray msg;
@@ -1850,6 +1803,35 @@ namespace humanoidController_wheel_wbc
     mrtRosInterface_->launchNodes(controllerNh_);
   }
 
+  // 由 MPC state 构建 target-pose 格式的单点目标（FK 现场计算）：
+  //   [base(3) + torso_pos(3) + torso_quat(4) + ee_pos(3)*N + ee_quat(4)*N]
+  // 不能传 21 维 MPC state —— 基类缓冲被 getTargetTrajectories()（约束层）与
+  // publishTargetTrajectories（rviz "command" 帧）按目标姿态格式解析，传 state
+  // 会把关节角当四元数（invalid quaternion）并污染 RM 目标缓冲。
+  vector_t humanoidControllerWheelWbc::buildTargetPoseFromState(const vector_t& state, bool zeroBase)
+  {
+    std::vector<Eigen::Vector3d> eePos(manipulatorModelInfo_.eeFrames.size());
+    std::vector<Eigen::Matrix3d> eeRot(manipulatorModelInfo_.eeFrames.size());
+    getEEPose(state, eePos, eeRot);
+
+    Eigen::Vector3d torsoPos;
+    Eigen::Matrix3d torsoRot;
+    getTorsoPose(state, torsoPos, torsoRot);
+
+    const int base_nums = static_cast<int>(manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim);
+    vector_t target(base_nums + 7 + manipulatorModelInfo_.eeFrames.size() * 7);
+    if (zeroBase) target.head(base_nums) = vector_t::Zero(base_nums);
+    else          target.head(base_nums) = state.head(base_nums);
+    target.segment(base_nums, 3) = torsoPos;
+    target.segment(base_nums + 3, 4) = Eigen::Quaternion<scalar_t>(torsoRot).coeffs();
+    for (int eef_inx = 0; eef_inx < manipulatorModelInfo_.eeFrames.size(); eef_inx++)
+    {
+      target.tail(manipulatorModelInfo_.eeFrames.size() * 7).segment(eef_inx * 7, 3) = eePos[eef_inx];
+      target.tail(manipulatorModelInfo_.eeFrames.size() * 7).segment(eef_inx * 7 + 3, 4) = Eigen::Quaternion<scalar_t>(eeRot[eef_inx]).coeffs();
+    }
+    return target;
+  }
+
   void humanoidControllerWheelWbc::initMPC()
   {
     SystemObservation initial_observation = observation_wheel_;
@@ -1863,26 +1845,8 @@ namespace humanoidController_wheel_wbc
     mrtStateLimitFilterPtr_->reset(initial_observation.state);
     mrtInputLimitFilterPtr_->reset(initial_observation.input);
 
-    // use pinocchio 
-    std::vector<Eigen::Vector3d> init_ee_pos(manipulatorModelInfo_.eeFrames.size());
-    std::vector<Eigen::Matrix3d> init_ee_rot(manipulatorModelInfo_.eeFrames.size());
-    getEEPose(initial_observation.state, init_ee_pos, init_ee_rot);
-
-    Eigen::Vector3d init_torso_pos;
-    Eigen::Matrix3d init_torso_rot;
-    getTorsoPose(initial_observation.state, init_torso_pos, init_torso_rot);
-
-    // initial command
-    int base_nums = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
-    vector_t initTarget(base_nums + 7 + manipulatorModelInfo_.eeFrames.size() * 7);
-    initTarget.head(base_nums) = vector_t::Zero(base_nums);
-    initTarget.segment(base_nums, 3) = init_torso_pos;
-    initTarget.segment(base_nums+3, 4) = Eigen::Quaternion<scalar_t>(init_torso_rot).coeffs();
-    for(int eef_inx = 0; eef_inx < manipulatorModelInfo_.eeFrames.size(); eef_inx++)
-    {
-      initTarget.tail(manipulatorModelInfo_.eeFrames.size() * 7).segment(eef_inx*7, 3) = init_ee_pos[eef_inx];
-      initTarget.tail(manipulatorModelInfo_.eeFrames.size() * 7).segment(eef_inx*7+3, 4) = Eigen::Quaternion<scalar_t>(init_ee_rot[eef_inx]).coeffs();
-    }
+    // initial command（底盘段置零，启动语义）
+    vector_t initTarget = buildTargetPoseFromState(initial_observation.state, /*zeroBase=*/true);
 
     TargetTrajectories initial_target({initial_observation.time},
                                       {initTarget},
@@ -2310,6 +2274,17 @@ namespace humanoidController_wheel_wbc
 
   bool humanoidControllerWheelWbc::changeArmCtrlModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res)
   {
+    // 3791: 软暂停期间拒绝（非 IDLE 含 PAUSING/PAUSED/RESUMING）——暂停中翻模式会在
+    // 恢复瞬间被消费并触发保持期过渡，"接受但延迟执行"与 RM 侧"拒绝且无副作用"不一致
+    if (soft_pause_state_.load() != SoftPauseState::IDLE)
+    {
+      res.result = false;
+      res.mode = arm_trajectory_mode_;
+      res.message = "Rejected: control disabled (soft pause).";
+      ROS_WARN("[ArmControl] 软暂停期间拒绝模式切换请求: %d", req.control_mode);
+      return true;
+    }
+
     int new_mode = req.control_mode;
     
     // 检查模式是否发生变化

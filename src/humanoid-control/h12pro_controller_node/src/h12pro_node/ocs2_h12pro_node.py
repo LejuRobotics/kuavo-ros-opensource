@@ -196,9 +196,10 @@ class H12ToJoyControllerNode:
         # G12轮臂模式: C+D长按急停检测状态
         self.cd_emergency_triggered = False
         self.cd_press_start_time = None
-        # G+H同时极值2秒复位：仅脉冲触发一次，避免按住期间持续置位 M2
+        # G+H同时极值2秒复位：触发后持续置位 M2 200ms，避免单帧脉冲丢失导致复位偶发失效
         self.gh_press_start_time = None
         self.gh_triggered = False
+        self.gh_reset_pulse_until = 0.0
 
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
@@ -341,20 +342,26 @@ class H12ToJoyControllerNode:
             self.joy_msg.buttons[G12_BUTTON_M1] = 1
 
         # G+H both at extreme for 2s -> torso reset - requires E/F at middle
+        # 触发后持续置位 M2 200ms：单帧脉冲可能因下游回调阻塞被丢弃，导致复位偶发失效
         if safe_enabled and g_at_extreme and h_at_extreme:
             if self.gh_press_start_time is None:
                 self.gh_press_start_time = time.time()
                 self.gh_triggered = False
             elif time.time() - self.gh_press_start_time >= 2.0 and not self.gh_triggered:
-                self.joy_msg.buttons[G12_BUTTON_M2] = 1
                 self.gh_triggered = True
-                rospy.logwarn("[G12] G+H torso reset TRIGGERED!")
+                self.gh_reset_pulse_until = time.time() + 0.2
+                rospy.logwarn("[G12] G+H torso reset TRIGGERED (200ms pulse)!")
         else:
             if self.gh_press_start_time is not None and not self.gh_triggered:
                 rospy.loginfo("[G12] G+H torso reset: released, %.1fs elapsed (not triggered)",
                               time.time() - self.gh_press_start_time)
             self.gh_press_start_time = None
-            self.gh_triggered = False
+            if time.time() >= self.gh_reset_pulse_until:
+                self.gh_triggered = False
+
+        # M2复位脉冲持续200ms，保证C++侧边沿检测可靠收到（边沿+锁存，重复帧安全）
+        if self.gh_triggered and time.time() < self.gh_reset_pulse_until:
+            self.joy_msg.buttons[G12_BUTTON_M2] = 1
 
 class H12PROControllerNode:
     """Main controller node for H12PRO remote controller."""

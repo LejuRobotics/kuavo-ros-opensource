@@ -296,8 +296,8 @@ namespace mobile_manipulator {
     cmd_arm_zyx_[0] = vector_t::Zero(6);
     cmd_arm_zyx_[1] = vector_t::Zero(6);
     
-    // 初始化MPC控制模式为NoControl（完全接收上层下发的 TargetTrajectory, 其余话题无法接收）
-    currentMpcControlMode_ = 2;  // NoControl
+    // 初始化MPC控制模式为BaseOnly（2）
+    currentMpcControlMode_ = 2;  // BaseOnly
 
     /*************cmdPose相关初始化********************/
     currentCmdPose_.setZero();
@@ -687,7 +687,7 @@ namespace mobile_manipulator {
       });
 
     // 3791: 软暂停恢复时控制器把冻结姿态（21 维 MPC state）发到这里，置 pending，
-    // 由 modifyReferences 的 enable 分支在 solver 重启后消费（resetAllMpcToState）。
+    // 在 solver 重启后由 modifyReferences 首拍消费（resetAllMpcToState）。
     // 不检查 isEnableControl()：pending 与 solver 周期天然同步，无竞态。
     resetToStateSub_ = nodeHandle_.subscribe<std_msgs::Float64MultiArray>(
       "/mobile_manipulator_reset_to_state", 1,
@@ -1628,11 +1628,15 @@ namespace mobile_manipulator {
         return vector_t::Zero(6);
     }
 
-    Eigen::VectorXd currentEePose, currentEeVel, currentEeAcc;
-    timedPlannerScheduler_.getTimedPlannerStates(cmdType, currentEePose, currentEeVel, currentEeAcc);
-
-    currentEePose.tail(3) = zyx;
-    return currentEePose;
+    // 3791: 轨迹起点位置也取活状态（与姿态同源）。原实现取 planner 内部滞留位置，
+    // 手臂被其他路径（如 h 归位）挪走后 planner 不更新，新轨迹从滞留点起步导致
+    // 瞬间拉回（home 途中按 b 跳变）。机器人不会瞬移，轨迹本就该从实际位置出发
+    int posOffset = (cmdType == LbTimedPosCmdType::RIGHT_ARM_WORLD_CMD ||
+                     cmdType == LbTimedPosCmdType::RIGHT_ARM_LOCAL_CMD) ? 7 : 0;
+    vector_t initialPose = vector_t::Zero(6);
+    initialPose.head(3) = eeState.segment<3>(posOffset);
+    initialPose.tail(3) = zyx;
+    return initialPose;
   }
 
   void MobileManipulatorReferenceManager::calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime)
@@ -2228,6 +2232,15 @@ namespace mobile_manipulator {
   bool MobileManipulatorReferenceManager::controlModeService(kuavo_msgs::changeTorsoCtrlMode::Request& req, 
                                                            kuavo_msgs::changeTorsoCtrlMode::Response& res)
   {
+    // 3791: 软暂停期间拒绝——暂停中改写 MPC 模式会带入恢复后（该服务是 RM 运动类
+    // 服务中唯一漏门的，补齐与其他服务一致的守卫，拒绝路径无副作用）
+    if (!isEnableControl()) {
+      res.result = false;
+      res.mode = currentMpcControlMode_;
+      res.message = "Rejected: control disabled.";
+      return true;
+    }
+
     controlMode_mtx_.lock();
     
     // 验证控制模式的有效性
@@ -3988,6 +4001,13 @@ namespace mobile_manipulator {
     if(isCmdDualArmPoseUpdated_[armIdx] && isArmEeOfflineTrajUpdate_[armIdx] == false)
     {
       bool isChange = getLbArmControlModeIsChange(armIdx, desireMode_[armIdx]);
+      // 3791: 软暂停恢复后首条 EE 指令强制重锚定——preMode static 可能滞留在暂停前
+      // 模式导致 isChange=false，进而消费 reset 时的占位锚点（帧可能不匹配，3791 甩飞）
+      if (forceEeReanchorOnNextCmd_[armIdx])
+      {
+        isChange = true;
+        forceEeReanchorOnNextCmd_[armIdx] = false;
+      }
       // TODO: 如果 isChange 为 true, 则根据当前模式重置一次初值
       armPose_mtx_[armIdx].lock();
       armEeTarget[armIdx] = cmd_arm_zyx_[armIdx];
@@ -4297,6 +4317,13 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState)
   {
+    // 3791: home（reset torso）路径同样强制下一条 EE 指令重锚定——归位窗口内手臂被
+    // mode 1 关节轨迹挪走，而 EE ruckig 状态（cmdDualArm_prevTargetPose_）滞留在上次
+    // EE 指令处，preMode static 又不翻（isChange=false），窗口结束后首条 EE 指令会从
+    // 滞留位姿起步瞬间拉回（home 途中按 b 跳变）
+    forceEeReanchorOnNextCmd_[0] = true;
+    forceEeReanchorOnNextCmd_[1] = true;
+
     vector_t eeState_6d = vector_t::Zero(info_.eeFrames.size() * 6);
     getCurrentEeWorldPoseContinuous(eeState_6d, initState);
     for(int i = 0; i < info_.eeFrames.size(); i++)
@@ -4743,18 +4770,18 @@ namespace mobile_manipulator {
     std::cout << "quatVec: " << initialTorsoQuat_.transpose() << std::endl;
   }
 
-  /// 返回冻结状态：关节保持 frozen，底盘用当前实际位姿替换
-  vector_t MobileManipulatorReferenceManager::frozenJointsWithLiveBase() const
+  /// 返回锚定状态：关节保持给定状态，底盘用当前实际位姿替换
+  vector_t MobileManipulatorReferenceManager::jointsWithLiveBase(const vector_t& state) const
   {
-    vector_t s = frozen_state_;
+    vector_t s = state;
     s.head(baseDim_) = initState_.head(baseDim_);
     return s;
   }
 
-  void MobileManipulatorReferenceManager::overwriteCommandStorageWithFrozenState()
+  void MobileManipulatorReferenceManager::overwriteCommandStorageWithState(const vector_t& state, const vector_t& torsoPose6D,
+                                                                            const vector_t& eeState)
   {
-    if (!frozen_state_valid_) return;
-    const vector_t& s = frozen_state_;
+    const vector_t& s = state;
 
     // 底盘速度：保持为零
     {
@@ -4772,7 +4799,7 @@ namespace mobile_manipulator {
       isCmdVelWorldUpdated_ = false;
     }
 
-    // 底盘位姿：保持为 frozen 状态
+    // 底盘位姿：保持为给定状态
     {
       std::lock_guard<std::mutex> lock(cmdPose_mtx_);
       cmdPose_ = s.head(baseDim_);
@@ -4785,19 +4812,19 @@ namespace mobile_manipulator {
       isCmdPoseWorldUpdated_ = false;
     }
 
-    // 躯干：保持为 frozen x,z,yaw,pitch（planner 不控制 y 和 roll）
+    // 躯干：保持为给定 x,z,yaw,pitch（planner 不控制 y 和 roll）
     {
       std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
-      cmdTorsoPose_[0] = frozen_torso_pose6D_[0];
+      cmdTorsoPose_[0] = torsoPose6D[0];
       cmdTorsoPose_[1] = 0.0;
-      cmdTorsoPose_[2] = frozen_torso_pose6D_[2];
-      cmdTorsoPose_[3] = frozen_torso_pose6D_[3];
-      cmdTorsoPose_[4] = frozen_torso_pose6D_[4];
+      cmdTorsoPose_[2] = torsoPose6D[2];
+      cmdTorsoPose_[3] = torsoPose6D[3];
+      cmdTorsoPose_[4] = torsoPose6D[4];
       cmdTorsoPose_[5] = 0.0;
       isCmdTorsoPoseUpdated_ = false;
     }
 
-    // Torso vel/delta: clear sticky velocity and oneshot on freeze to avoid residual integration after unpause
+    // Torso vel/delta: clear sticky velocity and oneshot on resume-reset to avoid residual integration after unpause
     {
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
       cmdTorsoVel_.setZero();
@@ -4812,16 +4839,16 @@ namespace mobile_manipulator {
       isCmdTorsoDeltaUpdated_ = false;
     }
 
-    // 双臂末端：保持为 frozen 世界系位姿
+    // 双臂末端：保持为给定世界系位姿
     {
       for (size_t armIdx = 0; armIdx < info_.eeFrames.size(); ++armIdx) {
         std::lock_guard<std::mutex> lock(armPose_mtx_[armIdx]);
-        cmd_arm_zyx_[armIdx] = frozen_ee_state_.segment(armIdx * 6, 6);
+        cmd_arm_zyx_[armIdx] = eeState.segment(armIdx * 6, 6);
         isCmdDualArmPoseUpdated_[armIdx] = false;
       }
     }
 
-    // 手臂关节：保持为 frozen 状态
+    // 手臂关节：保持为给定状态
     for (int armIdx = 0; armIdx < 2; ++armIdx) {
       std::lock_guard<std::mutex> lock(armJoint_mtx_[armIdx]);
       arm_joint_traj_[armIdx] = s.tail(info_.armDim - 4)
@@ -4830,7 +4857,7 @@ namespace mobile_manipulator {
       desireMode_[armIdx] = LbArmControlMode::JointSpace;
     }
 
-    // 下肢关节：保持为 frozen 状态
+    // 下肢关节：保持为给定状态
     {
       std::lock_guard<std::mutex> lock(lbLegJoint_mtx_);
       lb_leg_traj_ = s.segment(baseDim_, 4);
@@ -4860,21 +4887,21 @@ namespace mobile_manipulator {
     prevAcc.setZero(state.size());
   }
 
-  void MobileManipulatorReferenceManager::resetAllRuckigToFrozenState(scalar_t initTime)
+  void MobileManipulatorReferenceManager::resetAllRuckigToState(scalar_t initTime, const vector_t& state, const vector_t& torsoPose6D,
+                                                                 const vector_t& eeState)
   {
-    if (!frozen_state_valid_) return;
-    const vector_t& s = frozen_state_;
+    const vector_t& s = state;
 
     // 底盘位姿/速度：用当前实际位姿，不冻结底盘
     {
-      vector_t s_with_current_base = frozenJointsWithLiveBase();
+      vector_t s_with_current_base = jointsWithLiveBase(state);
       resetCmdPoseRuckigFromActualState(initTime, s_with_current_base, true);
       resetCmdVelRuckigFromActualState(initTime, s_with_current_base, true);
     }
 
     // 躯干：x, z, yaw, pitch
     vector_t torsoPose4D(4);
-    torsoPose4D << frozen_torso_pose6D_[0], frozen_torso_pose6D_[2], frozen_torso_pose6D_[3], frozen_torso_pose6D_[4];
+    torsoPose4D << torsoPose6D[0], torsoPose6D[2], torsoPose6D[3], torsoPose6D[4];
     resetPoseRuckigToState(torsoPosePlannerRuckigPtr_, initTime, torsoPose4D,
                            torsoPose_plannerInitialTime_,
                            torsoPose_prevTargetPose_, torsoPose_prevTargetVel_, torsoPose_prevTargetAcc_);
@@ -4893,9 +4920,10 @@ namespace mobile_manipulator {
                              armJoint_prevTargetPose_[armIdx], armJoint_prevTargetVel_[armIdx], armJoint_prevTargetAcc_[armIdx]);
     }
 
-    // 双臂末端
+    // 双臂末端：占位锚定（世界系）。恢复后首条 EE 指令被 forceEeReanchorOnNextCmd_
+    // 强制走 isChange=true 重锚定（活状态+指令坐标系），此值不会被消费
     for (int armIdx = 0; armIdx < info_.eeFrames.size(); ++armIdx) {
-      vector_t eeCurrent = frozen_ee_state_.segment(armIdx * 6, 6);
+      vector_t eeCurrent = eeState.segment(armIdx * 6, 6);
       resetPoseRuckigToState(cmdDualArmEePlannerRuckigPtr_[armIdx], initTime, eeCurrent,
                              cmdDualArm_plannerInitialTime_[armIdx],
                              cmdDualArm_prevTargetPose_[armIdx], cmdDualArm_prevTargetVel_[armIdx], cmdDualArm_prevTargetAcc_[armIdx]);
@@ -4907,33 +4935,37 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::resetAllMpcToState(scalar_t initTime, const vector_t& state)
   {
     // 3791: 软暂停恢复时整体重置 RM —— command storage + 全部 Ruckig 锚定到指定状态（冻结姿态）。
-    // 复用冻结机制的实现（overwriteCommandStorageWithFrozenState / resetAllRuckigToFrozenState），
-    // 只是把 frozen_state_ 换成入参；躯干/ee 位姿用 FK 现场计算（锚当前，而非复位到初始位）。
+    // 躯干/ee 位姿用 FK 现场计算（锚当前，而非复位到初始位）。
     // 之后 updateBaseArmControl 从重置后的 storage 生成目标 = 冻结姿态，与 MPC 起点一致。
-    frozen_state_ = state;
-    frozen_state_valid_ = true;
 
-    frozen_torso_pose6D_.setZero(6);
-    getCurrentTorsoPoseInBasePitchYaw(frozen_torso_pose6D_, state);
-    frozen_ee_state_.setZero(info_.eeFrames.size() * 6);
-    getCurrentEeWorldPoseContinuous(frozen_ee_state_, state);
+    vector_t torsoPose6D = vector_t::Zero(6);
+    getCurrentTorsoPoseInBasePitchYaw(torsoPose6D, state);
+    vector_t eeState = vector_t::Zero(info_.eeFrames.size() * 6);
+    getCurrentEeWorldPoseContinuous(eeState, state);
+    vector_t eeBaseState = vector_t::Zero(info_.eeFrames.size() * 6);
+    getCurrentEeBasePoseContinuous(eeBaseState, state);
 
-    overwriteCommandStorageWithFrozenState();
-    resetAllRuckigToFrozenState(initTime);
+    overwriteCommandStorageWithState(state, torsoPose6D, eeState);
+    resetAllRuckigToState(initTime, state, torsoPose6D, eeState);
+
+    // 恢复后首条 EE 指令强制重锚定（见头文件 forceEeReanchorOnNextCmd_ 注释）：
+    // EE ruckig 的 reset 锚点只是占位，preMode static 滞留/reset 时序异常都不再影响正确性
+    forceEeReanchorOnNextCmd_[0] = true;
+    forceEeReanchorOnNextCmd_[1] = true;
 
     // 3791 全量重置：enable 上升沿不持有 disable 前的内部状态（timed scheduler 轨迹、
     // EE/躯干目标缓冲、离线轨迹标志全部锚定冻结值）。否则 MPC resume 后仍读 disable
     // 前的旧 b 键轨迹（eeTargetTrajectories_ 在 desireMode=JointSpace 时不被 setArmControl
     // 重写），MPC 追旧目标导致 WBC 限幅爬升甩飞（实测 25 rad/s）。
     {
-      const vector_t& s = frozen_state_;
+      const vector_t& s = state;
       // timed scheduler 各规划器锚定冻结（原地轨迹）：0/1 底盘, 2 躯干4D, 3 腿,
       // 4/5 臂世界EE, 6/7 臂局部EE, 8/9 臂关节
       // 躯干 4D 规划器轴序 (x,z,yaw,pitch) = 6D 位姿下标 {0,2,3,4}（丢 y/roll），
       // 与 updateBaseArmControl 的 torsoPose4Dof 取法一致，改动须两处同步
       vector_t torso4(4);
-      torso4 << frozen_torso_pose6D_[0], frozen_torso_pose6D_[2],
-                frozen_torso_pose6D_[3], frozen_torso_pose6D_[4];
+      torso4 << torsoPose6D[0], torsoPose6D[2],
+                torsoPose6D[3], torsoPose6D[4];
       timedPlannerScheduler_.resetTimedPlanner(0, s.head(baseDim_));
       timedPlannerScheduler_.resetTimedPlanner(1, s.head(baseDim_));
       timedPlannerScheduler_.resetTimedPlanner(2, torso4);
@@ -4941,8 +4973,8 @@ namespace mobile_manipulator {
       // 故腿段 segment(baseDim_,4)、臂段 tail(armDim-4)，改腿数需两处同步
       timedPlannerScheduler_.resetTimedPlanner(3, s.segment(baseDim_, 4));
       for (int armIdx = 0; armIdx < info_.eeFrames.size(); ++armIdx) {
-        timedPlannerScheduler_.resetTimedPlanner(4 + armIdx, frozen_ee_state_.segment(armIdx * 6, 6));
-        timedPlannerScheduler_.resetTimedPlanner(6 + armIdx, frozen_ee_state_.segment(armIdx * 6, 6));
+        timedPlannerScheduler_.resetTimedPlanner(4 + armIdx, eeState.segment(armIdx * 6, 6));       // 世界系 EE
+        timedPlannerScheduler_.resetTimedPlanner(6 + armIdx, eeBaseState.segment(armIdx * 6, 6));  // 局部系 EE 用基座系锚
         timedPlannerScheduler_.resetTimedPlanner(8 + armIdx, s.tail(info_.armDim - 4)
                                                                  .segment(armIdx * singleArmJointDim_, singleArmJointDim_));
       }
@@ -4950,12 +4982,12 @@ namespace mobile_manipulator {
       // EE 目标轨迹重置为冻结单点（防止 solver 读 disable 前的旧轨迹）
       for (int armIdx = 0; armIdx < info_.eeFrames.size(); ++armIdx) {
         eeTargetTrajectories_[armIdx].timeTrajectory = {initTime};
-        eeTargetTrajectories_[armIdx].stateTrajectory = {frozen_ee_state_.segment(armIdx * 6, 6)};
+        eeTargetTrajectories_[armIdx].stateTrajectory = {eeState.segment(armIdx * 6, 6)};
         eeTargetTrajectories_[armIdx].inputTrajectory = {vector_t::Zero(6)};
       }
       // 躯干目标轨迹重置为冻结单点（6D：x,y,z,yaw,pitch,roll）
       torsoTargetTrajectories_.timeTrajectory = {initTime};
-      torsoTargetTrajectories_.stateTrajectory = {frozen_torso_pose6D_};
+      torsoTargetTrajectories_.stateTrajectory = {torsoPose6D};
       torsoTargetTrajectories_.inputTrajectory = {vector_t::Zero(6)};
 
       // 离线轨迹状态清空（enable 后不继续执行 disable 前的动作）
@@ -4966,9 +4998,6 @@ namespace mobile_manipulator {
       isofflineTrajUpdateStartTime_ = 0.0;
       offlineTrajDisable_ = true;
     }
-
-    // 恢复"非冻结"语义：enable 分支后续的 updateBaseArmControl 正常生成目标
-    frozen_state_valid_ = false;
 
     ROS_INFO_STREAM("[resetAllMpcToState] RM reset to frozen state at t=" << initTime);
   }

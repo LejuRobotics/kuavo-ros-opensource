@@ -542,7 +542,7 @@ namespace mobile_manipulator
       return false;
     }
 
-    bool resetTorsoToInitialAsync(ros::NodeHandle& nh) 
+    bool resetTorsoToInitialAsync(ros::NodeHandle& nh)
     {
       if (!ros::service::waitForService("/mobile_manipulator_reset_torso", ros::Duration(10.0))) {
           ROS_ERROR("Service not available");
@@ -551,16 +551,22 @@ namespace mobile_manipulator
 
       ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(
           "/mobile_manipulator_reset_torso");
-      
+
       std_srvs::SetBool srv;
       srv.request.data = true;
-      
-      if (client.call(srv) && srv.response.success) {
-          ROS_INFO("Torso reset command sent successfully");
+
+      if (client.call(srv))
+      {
+        if (srv.response.success)
+        {
+          ROS_INFO("Torso reset command sent successfully: %s", srv.response.message.c_str());
           return true;
+        }
+        ROS_WARN("Torso reset rejected by service: %s", srv.response.message.c_str());
+        return false;
       }
 
-      ROS_ERROR("Failed to send torso reset command");
+      ROS_ERROR("Failed to call torso reset service");
       return false;
     }
 

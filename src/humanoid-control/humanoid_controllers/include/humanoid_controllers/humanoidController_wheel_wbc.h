@@ -106,6 +106,9 @@ namespace humanoidController_wheel_wbc
     // ========== 运动学计算相关函数 ==========
     void getEEPose(const vector_t& init_q, std::vector<Eigen::Vector3d>& ee_pos, std::vector<Eigen::Matrix3d>& ee_rot);
     void getTorsoPose(const vector_t& init_q, Eigen::Vector3d& torso_pos, Eigen::Matrix3d& torso_rot);
+    // 由 MPC state 构建 target-pose 格式单点目标（FK 现场计算），initMPC 与软暂停 RESUMING 共用。
+    // zeroBase=true 底盘段置零（启动语义）；false 取 state 底盘段（恢复锚定）
+    vector_t buildTargetPoseFromState(const vector_t& state, bool zeroBase);
     void computeObservationFromSensorData(const SensorData& sensorData, const vector6_t& odomData);
 
     // ========== 关节控制相关函数 ==========
@@ -231,7 +234,6 @@ namespace humanoidController_wheel_wbc
     std::shared_ptr<PinocchioInterface> pinocchioInterface_ptr_;
     mobile_manipulator::ManipulatorModelInfo manipulatorModelInfo_;
     std::shared_ptr<MRT_ROS_Interface> mrtRosInterface_;
-    bool reset_mpc_{false};
     bool enable_mpc_{false};
     size_t plannedMode_{0};
     vector_t optimizedState_mrt_, optimizedInput_mrt_, optimizedState_mrt_limit_, optimizedInput_mrt_limit_;
@@ -264,9 +266,6 @@ namespace humanoidController_wheel_wbc
     std_srvs::SetBool reset_cmd_vel_ruckig_srv_;  // 重置cmdVel Ruckig规划器服务请求
 
     // ========== enable control ==========
-    std::atomic<bool> enable_control_{true};  // 默认 true：启动时可控。内部 = 用户请求，
-                                              // 与 /enable_control_state 发布值分离：
-                                              // 发布值 = (状态机 == IDLE) && enable_control_
     ros::ServiceServer enableControlServiceServer_;
     int reset_to_state_publish_cnt_{0};  // RESUMING 受理后剩余发布拍数（连续发布兜底 RM 订阅竞态）
     vector_t reset_state_to_publish_;    // 待发布给 RM 的冻结姿态（21 维 MPC state）
@@ -285,6 +284,14 @@ namespace humanoidController_wheel_wbc
     // 与双足 resetting_mpc_state_（非 NORMAL 不碰 policy）同思想：disable/enable 受理置
     // false，主线程观察到 active policy 被清空（reset 完成）后才开门，期间不访问 MRT。
     std::atomic<bool> mpc_policy_gate_open_{true};
+
+    // 3791: MPC pause/resume 请求标志（受理 → 主循环安全点转交）。
+    // enableControlCallback 在 roscpp 服务线程执行，pauseResumeMpcNode 内部是对 MPC
+    // 节点服务的 roscpp 同步调用（无超时），若在回调线程内直接阻塞会卡住整个服务
+    // 队列（dispatch_mode 等后续服务全部排队）。改为受理时仅置标志，主循环在可视化
+    // 块之后（无任何 in-flight rollout/getPolicy 的安全点）消费并发起调用。
+    std::atomic<bool> mpc_pause_requested_{false};
+    std::atomic<bool> mpc_resume_requested_{false};
 
     // 3791: 软暂停四状态机（新语义，disable 受理即发 enable=false，仅 IDLE 发 true）：
     //   IDLE     运行稳定。受理 disable → PAUSING
