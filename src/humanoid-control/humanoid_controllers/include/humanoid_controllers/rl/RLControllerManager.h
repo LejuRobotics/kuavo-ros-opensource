@@ -459,6 +459,22 @@ namespace humanoid_controller
     void evaluateAutoControllerSwitch(const std::string& reason);
 
     /**
+     * @brief mode0 的 AMP 手臂先归位到 mode1，再允许切入行走控制器
+     * @return true 表示本次切换已经进入等待队列，调用方不应立即切换
+     */
+    bool deferWalkingSwitchUntilArmReadyLocked(const std::string& target_name);
+
+    /**
+     * @brief 处理 AMP 手臂归位完成后挂起的 AMP->AMP_Wild 切换
+     */
+    void processPendingArmPreparedSwitch();
+
+    /**
+     * @brief 清除 AMP 手臂归位切换请求，调用方必须持有 mutex_
+     */
+    void clearPendingArmPreparedSwitchLocked(const std::string& reason = "");
+
+    /**
      * @brief 异步切换手臂控制模式
      * @param mode 目标手臂控制模式
      */
@@ -658,6 +674,11 @@ namespace humanoid_controller
     std::string pending_walking_switch_source_name_;
     std::string pending_walking_switch_target_name_;
     std::string pending_walking_switch_reason_;
+    bool pending_arm_prepared_switch_ = false;       ///< AMP mode0 归位后再切 AMP_Wild
+    std::string pending_arm_switch_source_name_;
+    std::string pending_arm_switch_target_name_;
+    ros::Time pending_arm_switch_start_time_;
+    double pending_arm_switch_timeout_ = 3.0;
     SwitchMotionState switch_motion_state_ = SwitchMotionState::STANCE;
     SwitchMotionState last_switch_motion_state_ = SwitchMotionState::STANCE;
     ros::Time stationary_candidate_start_time_;

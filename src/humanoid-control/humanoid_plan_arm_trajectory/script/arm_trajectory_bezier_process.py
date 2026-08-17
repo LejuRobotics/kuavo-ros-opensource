@@ -640,6 +640,14 @@ class ArmTrajectoryBezierDemo:
             return None
         
         service_name = "/humanoid_controller/get_controller_list"
+        # lookupService 对缺失服务返回 [-1,'no provider','']（不抛异常），故按返回码判断；
+        # 服务未 advertise 时立即返回，避免 wait_for_service 阻塞 0.5s
+        try:
+            code, _, _ = rospy.get_master().lookupService(service_name)
+            if code != 1:
+                return None
+        except Exception:
+            pass  # master 不可达，走下方 wait_for_service 超时兜底
         try:
             rospy.wait_for_service(service_name, timeout=0.5)
             get_controller_client = rospy.ServiceProxy(service_name, getControllerList)
