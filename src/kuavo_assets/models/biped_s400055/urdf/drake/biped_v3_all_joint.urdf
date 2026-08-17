@@ -788,7 +788,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_hand_pitch.STL" />
+        <mesh filename="../../meshes/l_hand_pitch_nohand.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -806,6 +806,318 @@
     <joint name="zarm_l7_joint" />
     <actuator name="zarm_l7_joint_motor" />
   </transmission>
+
+    <link name="l_hand_base">
+    <inertial>
+      <origin xyz="-0.0041481 -0.021938 0.067528" rpy="0 0 0" />
+      <mass value="0.373" />
+      <inertia ixx="0.00018466" ixy="-1.0056E-06" ixz="-9.0897E-06" iyy="0.00026432" iyz="6.9047E-06" izz="0.00014072" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_hand_base.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_thumb_link1">
+    <inertial>
+      <origin xyz="-0.012037 -0.00088697 0.01722" rpy="0 0 0" />
+      <mass value="0.020283" />
+      <inertia ixx="1.5364E-06" ixy="2.736E-07" ixz="3.2696E-07" iyy="1.5999E-06" iyz="-1.6394E-07" izz="1.5673E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_thumb_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_thumb_link2">
+    <inertial>
+      <origin xyz="-0.013248 0.021201 0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="9.5915E-06" ixy="1.6122E-06" ixz="3.767E-11" iyy="8.0189E-06" iyz="2.3525E-11" izz="9.2199E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_thumb_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_thumb_link3">
+    <inertial>
+      <origin xyz="-0.0090616 0.017566 0.015458" rpy="0 0 0" />
+      <mass value="0.032862" />
+      <inertia ixx="3.2743E-06" ixy="4.4324E-07" ixz="8.893E-08" iyy="2.0788E-06" iyz="-1.112E-07" izz="3.3116E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_thumb_link3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_index_link1">
+    <inertial>
+      <origin xyz="-0.00054283 0.014975 0.019498" rpy="0 0 0" />
+      <mass value="0.025394" />
+      <inertia ixx="2.7079E-06" ixy="-2.5018E-07" ixz="-3.8693E-07" iyy="2.1436E-06" iyz="-6.2218E-07" izz="2.667E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_index_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_index_link2">
+    <inertial>
+      <origin xyz="-3.5328E-08 0.025 -0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="1.0599E-05" ixy="-7.9138E-12" ixz="-4.5358E-11" iyy="7.0115E-06" iyz="-2.7198E-16" izz="9.22E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_index_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_index_link3">
+    <inertial>
+      <origin xyz="-0.0016236 0.019698 -0.015458" rpy="0 0 0" />
+      <mass value="0.032861" />
+      <inertia ixx="3.3369E-06" ixy="3.4291E-07" ixz="1.6492E-08" iyy="2.0161E-06" iyz="1.4144E-07" izz="3.3115E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_index_link3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_middle_link1">
+    <inertial>
+      <origin xyz="-3.5355E-08 0.025 -0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="1.0599E-05" ixy="-7.9707E-12" ixz="-4.5242E-11" iyy="7.0115E-06" iyz="9.622E-14" izz="9.22E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_middle_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_middle_link2">
+    <inertial>
+      <origin xyz="-0.0016236 0.019698 -0.015458" rpy="0 0 0" />
+      <mass value="0.032861" />
+      <inertia ixx="3.3369E-06" ixy="3.4292E-07" ixz="1.6493E-08" iyy="2.0161E-06" iyz="1.4144E-07" izz="3.3115E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_middle_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_little_link1">
+    <inertial>
+      <origin xyz="0.0033432 0.015178 0.019587" rpy="0 0 0" />
+      <mass value="0.025089" />
+      <inertia ixx="2.6147E-06" ixy="-2.9798E-07" ixz="-4.0466E-07" iyy="2.147E-06" iyz="-5.8866E-07" izz="2.6391E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_little_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_little_link2">
+    <inertial>
+      <origin xyz="-3.5376E-08 0.025 -0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="1.0599E-05" ixy="-7.9138E-12" ixz="-4.5169E-11" iyy="7.0115E-06" iyz="2.067E-13" izz="9.22E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_little_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="l_little_link3">
+    <inertial>
+      <origin xyz="-0.0016236 0.019698 -0.015458" rpy="0 0 0" />
+      <mass value="0.032861" />
+      <inertia ixx="3.3369E-06" ixy="3.4292E-07" ixz="1.6493E-08" iyy="2.0161E-06" iyz="1.4144E-07" izz="3.3115E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/l_little_link3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="l_hand_base_joint" type="fixed">
+    <origin xyz="0 0 -0.07" rpy="0 3.14159265358979 0" />
+    <parent link="zarm_l7_link" />
+    <child link="l_hand_base" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_thumb_j1" type="fixed">
+    <origin xyz="-0.031492 -0.031853 0.0384" rpy="0 0 0" />
+    <parent link="l_hand_base" />
+    <child link="l_thumb_link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="2.182" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_thumb_j2" type="fixed">
+    <origin xyz="-0.024 0.0155 0.0176" rpy="1.5708 0 0" />
+    <parent link="l_thumb_link1" />
+    <child link="l_thumb_link2" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-2.62" upper="0" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_thumb_j3" type="fixed">
+    <origin xyz="-0.026496 0.042402 0.001" rpy="0 0 0" />
+    <parent link="l_thumb_link2" />
+    <child link="l_thumb_link3" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_index_j1" type="fixed">
+    <origin xyz="-0.0315 -0.020758 0.086" rpy="1.5708 0 0" />
+    <parent link="l_hand_base" />
+    <child link="l_index_link1" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-1.57" upper="0" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_index_j2" type="fixed">
+    <origin xyz="0.0155 0.024 0.0281" rpy="0 1.5708 0" />
+    <parent link="l_index_link1" />
+    <child link="l_index_link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="2.18" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_index_j3" type="fixed">
+    <origin xyz="0 0.05 -0.001" rpy="0 0 0" />
+    <parent link="l_index_link2" />
+    <child link="l_index_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_middle_j1" type="fixed">
+    <origin xyz="0.018 -0.048858 0.1135" rpy="1.5708 0 1.5708" />
+    <parent link="l_hand_base" />
+    <child link="l_middle_link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="2.18" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_middle_j2" type="fixed">
+    <origin xyz="0 0.05 -0.001" rpy="0 0 0" />
+    <parent link="l_middle_link1" />
+    <child link="l_middle_link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_little_j1" type="fixed">
+    <origin xyz="0.0315 -0.020758 0.08" rpy="1.5708 0 0" />
+    <parent link="l_hand_base" />
+    <child link="l_little_link1" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="3.14" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_little_j2" type="fixed">
+    <origin xyz="0.0205 0.024 0.0281" rpy="0 1.5708 0" />
+    <parent link="l_little_link1" />
+    <child link="l_little_link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="2.18" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="l_little_j3" type="fixed">
+    <origin xyz="0 0.05 -0.001" rpy="0 0 0" />
+    <parent link="l_little_link2" />
+    <child link="l_little_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
   <!-- right arm -->
   <link name="zarm_r1_link">
     <inertial>
@@ -978,7 +1290,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_hand_pitch.STL" />
+        <mesh filename="../../meshes/r_hand_pitch_nohand.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -996,6 +1308,318 @@
     <joint name="zarm_r7_joint" />
     <actuator name="zarm_r7_joint_motor" />
   </transmission>
+    <link name="r_hand_base">
+    <inertial>
+      <origin xyz="0.0039726 -0.021926 0.067524" rpy="0 0 0" />
+      <mass value="0.373" />
+      <inertia ixx="0.00018484" ixy="-5.1099E-06" ixz="-1.1319E-06" iyy="0.00026468" iyz="6.9239E-06" izz="0.00014092" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_hand_base.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_thumb_link1">
+    <inertial>
+      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 0" />
+      <mass value="0.020436" />
+      <inertia ixx="1.5424E-06" ixy="-2.736E-07" ixz="-3.2699E-07" iyy="1.605E-06" iyz="-1.6394E-07" izz="1.5682E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_thumb_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_thumb_link2">
+    <inertial>
+      <origin xyz="0.013248 0.021201 0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="9.5915E-06" ixy="-1.6122E-06" ixz="-3.7798E-11" iyy="8.0189E-06" iyz="2.3497E-11" izz="9.2199E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_thumb_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_thumb_link3">
+    <inertial>
+      <origin xyz="0.0090614 0.017566 0.015387" rpy="0 0 0" />
+      <mass value="0.03286" />
+      <inertia ixx="3.2742E-06" ixy="-4.4325E-07" ixz="-9.7288E-08" iyy="2.0786E-06" iyz="-1.1677E-07" izz="3.3115E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_thumb_link3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_index_link1">
+    <inertial>
+      <origin xyz="0.00054285 0.014975 0.019498" rpy="0 0 0" />
+      <mass value="0.025394" />
+      <inertia ixx="2.7079E-06" ixy="2.5018E-07" ixz="3.8693E-07" iyy="2.1436E-06" iyz="-6.2218E-07" izz="2.667E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_index_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_index_link2">
+    <inertial>
+      <origin xyz="3.5277E-08 0.025 0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="1.0599E-05" ixy="7.9117E-12" ixz="-4.5147E-11" iyy="7.0115E-06" iyz="2.0026E-13" izz="9.22E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_index_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_index_link3">
+    <inertial>
+      <origin xyz="-0.001624 0.019699 0.015387" rpy="0 0 0" />
+      <mass value="0.03286" />
+      <inertia ixx="3.3368E-06" ixy="3.4294E-07" ixz="-2.0618E-08" iyy="2.0159E-06" iyz="-1.5057E-07" izz="3.3115E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_index_link3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_middle_link1">
+    <inertial>
+      <origin xyz="3.5301E-08 0.025 0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="1.0599E-05" ixy="7.8652E-12" ixz="-4.5242E-11" iyy="7.0115E-06" iyz="9.6764E-14" izz="9.22E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_middle_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_middle_link2">
+    <inertial>
+      <origin xyz="-0.001624 0.019699 0.015387" rpy="0 0 0" />
+      <mass value="0.03286" />
+      <inertia ixx="3.3368E-06" ixy="3.4294E-07" ixz="-2.0618E-08" iyy="2.0159E-06" iyz="-1.5057E-07" izz="3.3115E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_middle_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_little_link1">
+    <inertial>
+      <origin xyz="-0.0033432 0.015178 0.019587" rpy="0 0 0" />
+      <mass value="0.025089" />
+      <inertia ixx="2.6147E-06" ixy="2.9798E-07" ixz="4.0466E-07" iyy="2.147E-06" iyz="-5.8866E-07" izz="2.6391E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_little_link1.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_little_link2">
+    <inertial>
+      <origin xyz="3.5301E-08 0.025 0.014859" rpy="0 0 0" />
+      <mass value="0.11925" />
+      <inertia ixx="1.0599E-05" ixy="7.8652E-12" ixz="-4.5242E-11" iyy="7.0115E-06" iyz="9.6764E-14" izz="9.22E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_little_link2.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+  <link name="r_little_link3">
+    <inertial>
+      <origin xyz="-0.001624 0.019699 0.015387" rpy="0 0 0" />
+      <mass value="0.03286" />
+      <inertia ixx="3.3368E-06" ixy="3.4294E-07" ixz="-2.0618E-08" iyy="2.0159E-06" iyz="-1.5057E-07" izz="3.3115E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="../../../heiman_sg100/meshes/r_little_link3.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+  </link>
+
+<joint name="r_hand_base_joint" type="fixed">
+    <origin xyz="0 0 -0.07" rpy="3.14159265358979 0 0" />
+    <parent link="zarm_r7_link" />
+    <child link="r_hand_base" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_thumb_j1" type="fixed">
+    <origin xyz="0.0315 -0.031858 0.0384" rpy="0 0 0" />
+    <parent link="r_hand_base" />
+    <child link="r_thumb_link1" />
+    <axis xyz="0 0 -1" />
+    <limit lower="0" upper="2.182" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_thumb_j2" type="fixed">
+    <origin xyz="0.024 0.0155 0.0176" rpy="1.5708 0 0" />
+    <parent link="r_thumb_link1" />
+    <child link="r_thumb_link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.618" upper="0" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_thumb_j3" type="fixed">
+    <origin xyz="0.026496 0.042402 0.001" rpy="0 0 0" />
+    <parent link="r_thumb_link2" />
+    <child link="r_thumb_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_index_j1" type="fixed">
+    <origin xyz="0.031500034087637 -0.0207580841574733 0.0860000000000403" rpy="1.5707963267949 0 0" />
+    <parent link="r_hand_base" />
+    <child link="r_index_link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.57" upper="0" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_index_j2" type="fixed">
+    <origin xyz="-0.0155 0.024 0.0281" rpy="0 1.5708 0" />
+    <parent link="r_index_link1" />
+    <child link="r_index_link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="2.18" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_index_j3" type="fixed">
+    <origin xyz="0 0.05 0.001" rpy="0 0 0" />
+    <parent link="r_index_link2" />
+    <child link="r_index_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_middle_j1" type="fixed">
+    <origin xyz="-0.018 -0.048858 0.1135" rpy="1.5708 0 1.5708" />
+    <parent link="r_hand_base" />
+    <child link="r_middle_link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="2.18" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_middle_j2" type="fixed">
+    <origin xyz="0 0.05 0.001" rpy="0 0 0" />
+    <parent link="r_middle_link1" />
+    <child link="r_middle_link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_little_j1" type="fixed">
+    <origin xyz="-0.0315 -0.020758 0.08" rpy="1.5708 0 0" />
+    <parent link="r_hand_base" />
+    <child link="r_little_link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="3.14" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_little_j2" type="fixed">
+    <origin xyz="-0.0205 0.024 0.0281" rpy="0 1.5708 0" />
+    <parent link="r_little_link1" />
+    <child link="r_little_link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="0" upper="2.18" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
+  <joint name="r_little_j3" type="fixed">
+    <origin xyz="0 0.05 0.001" rpy="0 0 0" />
+    <parent link="r_little_link2" />
+    <child link="r_little_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0" />
+    <dynamics damping="0.02" friction="0.0" />
+  </joint>
+
   <!-- end frame -->
   <!-- <frame link="l_hand_pitch" name="l_hand_sole" xyz="0 0 -0.1" /> -->
   <!-- end frame -->
