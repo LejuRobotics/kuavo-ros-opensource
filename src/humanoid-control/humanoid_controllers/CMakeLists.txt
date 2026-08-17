@@ -490,5 +490,6 @@ install(FILES humanoid_controllers_plugins.xml
 install(PROGRAMS 
         scripts/restart_urobot_service.sh
         scripts/modbus_io_bridge_node.py
+        scripts/start_modbus_io_bridge.sh
         DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

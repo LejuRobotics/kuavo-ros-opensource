@@ -215,7 +215,8 @@
     </group>
 
     <group if="$(arg with_modbus_io_bridge)">
-      <node pkg="humanoid_controllers" type="modbus_io_bridge_node.py" name="modbus_io_bridge_node" output="screen">
+      <node pkg="humanoid_controllers" type="start_modbus_io_bridge.sh" name="modbus_io_bridge_node" output="screen"
+            args="$(arg pressure_port)">
         <param name="relay_port" value="$(arg relay_port)"/>
         <param name="pressure_port" value="$(arg pressure_port)"/>
         <param name="pressure_publish_rate" value="$(arg pressure_publish_rate)"/>
