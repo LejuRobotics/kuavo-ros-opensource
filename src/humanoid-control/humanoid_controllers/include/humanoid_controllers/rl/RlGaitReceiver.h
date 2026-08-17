@@ -128,6 +128,12 @@ public:
   Eigen::Vector2d getCurrentPostureCommand() const;
   /// 清空姿态控制命令（下蹲/俯仰），用于退出 VR 躯干控制时恢复站姿
   void resetPostureCommand();
+  /// 设置一个由控制周期持续跟踪的姿态目标。目标生效期间忽略 /cmd_pose，
+  /// 直到调用 clearPostureTargetOverride()，或 Receiver 被禁用/完整重置时释放控制权。
+  /// Receiver 已禁用时拒绝请求并返回 false。
+  bool setPostureTargetOverride(const Eigen::Vector2d& target);
+  /// 释放姿态目标覆盖；不改变当前平滑姿态值。
+  void clearPostureTargetOverride();
   CommandDataRL getPolicyCommand() const;
   bool shouldBlockCommandExecution() const;
   geometry_msgs::Twist getSmoothedCmdVel() const;
@@ -179,6 +185,9 @@ private:
   CommandDataRL currentCommand_;
   double switch_velocity_scale_ = 1.0;
   bool enabled_;
+  /// 通用的姿态目标覆盖。业务层决定何时设置/释放，Receiver 只负责平滑跟踪。
+  bool posture_target_override_active_{false};
+  geometry_msgs::Twist posture_target_override_;
   bool reuse_walk_command_in_stance_;
   bool is_amp_hand_controller_{false};
   bool is_v17_{false};  ///< /robot_version==17：动作期间不 suppress 行走

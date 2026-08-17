@@ -11,6 +11,7 @@ at www.bridgedp.com.
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/info_parser.hpp>
 #include <std_msgs/String.h>
+#include <cmath>
 
 namespace ocs2
 {
@@ -119,6 +120,11 @@ void RlGaitReceiver::setEnabled(bool enable)
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
   enabled_ = enable;
+  if (!enabled_)
+  {
+    posture_target_override_active_ = false;
+    posture_target_override_ = geometry_msgs::Twist();
+  }
 }
 
 void RlGaitReceiver::resetToStance()
@@ -158,6 +164,8 @@ void RlGaitReceiver::resetCommandState(bool stance_mode)
   smoothed_cmd_pose_.linear.z = 0.0;
   smoothed_cmd_pose_.angular.y = 0.0;
   previous_cmd_pose_ = smoothed_cmd_pose_;
+  posture_target_override_active_ = false;
+  posture_target_override_ = geometry_msgs::Twist();
   latest_gait_name_ = stance_mode ? "stance" : "walk";
   pending_gait_name_.clear();
   trot_latched_ = false;
@@ -227,12 +235,13 @@ void RlGaitReceiver::resetVelocityState()
 
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
-  if (!enabled_) {
-    return;
-  }
   std::function<bool()> command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(command_mutex_);
+    if (!enabled_)
+    {
+      return;
+    }
 
     // amp_hand: 摇杆零速发布窗口结束后，控制环仍继续把 smoothed_cmd_vel 衰减到 0.05（仅前进）
     const double cmd_vel_silent_sec = (time - last_cmd_vel_msg_time_).toSec();
@@ -249,6 +258,15 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   const bool command_blocked = command_buffer_callback && command_buffer_callback();
 
   std::lock_guard<std::mutex> lock(command_mutex_);
+  if (!enabled_)
+  {
+    return;
+  }
+
+  if (posture_target_override_active_)
+  {
+    smoothed_cmd_pose_ = smoothPoseCommand(posture_target_override_, time);
+  }
 
   syncPostureToCommand();
 
@@ -409,6 +427,44 @@ void RlGaitReceiver::resetPostureCommand()
   ROS_DEBUG("[RlGaitReceiver] Posture command reset to zero (squat/pitch cleared)");
 }
 
+bool RlGaitReceiver::setPostureTargetOverride(const Eigen::Vector2d& target)
+{
+  if (!std::isfinite(target.x()) || !std::isfinite(target.y()))
+  {
+    ROS_WARN_THROTTLE(1.0, "[RlGaitReceiver] Reject non-finite posture override target");
+    return false;
+  }
+
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  if (!enabled_)
+  {
+    return false;
+  }
+
+  if (!posture_target_override_active_)
+  {
+    // 避免覆盖刚启用时把长时间未更新累计成一个大步长。
+    last_pose_update_time_ = ros::Time::now();
+  }
+  posture_target_override_.linear.z = target.x();
+  posture_target_override_.angular.y = target.y();
+  posture_target_override_active_ = true;
+  return true;
+}
+
+void RlGaitReceiver::clearPostureTargetOverride()
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  if (!posture_target_override_active_)
+  {
+    return;
+  }
+  posture_target_override_active_ = false;
+  posture_target_override_ = geometry_msgs::Twist();
+  // 交还 /cmd_pose 控制权时重新计时，避免第一帧因长 dt 瞬跳。
+  last_pose_update_time_ = ros::Time::now();
+}
+
 void RlGaitReceiver::syncPostureToCommand()
 {
   currentCommand_.cmdPostureSquatHeight_ = smoothed_cmd_pose_.linear.z;
@@ -508,19 +564,24 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
 
 void RlGaitReceiver::cmdPoseCallback(const geometry_msgs::Twist::ConstPtr& msg)
 {
+  geometry_msgs::Twist pose_msg;
+  pose_msg.linear.z = msg->linear.z;
+  pose_msg.angular.y = msg->angular.y;
+  const ros::Time current_time = ros::Time::now();
+
+  std::lock_guard<std::mutex> lock(command_mutex_);
   if (!enabled_)
   {
     return;
   }
+  if (posture_target_override_active_)
+  {
+    // 业务层显式持有姿态目标时，忽略共享 /cmd_pose，避免旧消息覆盖目标。
+    return;
+  }
 
-  geometry_msgs::Twist pose_msg;
-  pose_msg.linear.z = msg->linear.z;
-  pose_msg.angular.y = msg->angular.y;
-
-  const ros::Time current_time = ros::Time::now();
   const geometry_msgs::Twist smoothed_pose = smoothPoseCommand(pose_msg, current_time);
 
-  std::lock_guard<std::mutex> lock(command_mutex_);
   smoothed_cmd_pose_ = smoothed_pose;
   syncPostureToCommand();
 

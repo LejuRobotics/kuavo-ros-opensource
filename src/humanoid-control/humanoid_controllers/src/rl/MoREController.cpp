@@ -125,6 +125,14 @@ namespace humanoid_controller
     ros::param::set("/rl_gait_receiver/robot_action_active_timeout", 0.001);
     gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
     ros::param::set("/rl_gait_receiver/robot_action_active_timeout", saved_timeout);
+    // Manager 初始化控制器时只会置 PAUSED，不一定调用派生 pause()；
+    // 因此在第一次 resume 前显式禁用，避免非活跃 MoRE 接受复位请求。
+    gait_receiver_->setEnabled(false);
+
+    // MoRE 自己持有 VR 躯干退出语义；RlGaitReceiver 只提供通用目标跟踪能力。
+    posture_reset_control_sub_ = nh_.subscribe<std_msgs::Bool>(
+        "/rl_controller/more_posture_reset", 10,
+        &MoREController::postureResetControlCallback, this);
 
     // 加载原地踏步速度配置
     gait_receiver_->loadInPlaceStepConfig(config_file_, false);
@@ -845,6 +853,43 @@ namespace humanoid_controller
     }
   }
 
+  void MoREController::postureResetControlCallback(const std_msgs::Bool::ConstPtr& msg)
+  {
+    if (!msg)
+    {
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(posture_reset_mutex_);
+    if (!msg->data)
+    {
+      // 与 reset 请求共用同一私有 topic，保证快速退出/重进时按发布顺序释放。
+      posture_reset_pending_ = false;
+      posture_reset_owned_ = false;
+      if (gait_receiver_)
+      {
+        gait_receiver_->clearPostureTargetOverride();
+      }
+      return;
+    }
+
+    if (!posture_reset_accepting_ || !gait_receiver_ || posture_reset_owned_)
+    {
+      return;
+    }
+
+    if (!gait_receiver_->setPostureTargetOverride(Eigen::Vector2d::Zero()))
+    {
+      // pause/切出期间拒绝事件，避免把陈旧复位带到下一次 resume。
+      return;
+    }
+
+    posture_reset_owned_ = true;
+    posture_reset_pending_ = true;
+    ROS_INFO("[%s] MoRE posture reset requested; tracking height/pitch target [0, 0]",
+             name_.c_str());
+  }
+
   int MoREController::getCurrentGaitStyleIndex() const
   {
     // 动作播放期间锁定风格，避免 auto 模式被 Python reset 阶段 state=1 误导返回 0
@@ -1172,23 +1217,37 @@ namespace humanoid_controller
       posture_commands = gait_receiver_->getCurrentPostureCommand();
     }
 
-    // FSM 退出躯干控制时发零 /cmd_pose，这个零经过 RlGaitReceiver 低通滤波后逐渐收敛。
-    // 检测 smoothed 值从非零→零的过渡，立即清 squat 状态 + 复位 WaistController，无需等行走触发。
-    if (std::abs(last_posture_raw_) > 1e-4 && std::abs(posture_commands.x()) < 1e-4 && std::abs(squat_blend_target_) > 1e-4)
+    // 仅由 MoRE 专属退出事件触发收尾；普通 /cmd_pose 数值回零不再被误判。
+    // override 在到零后仍保持，直到下一次私有控制消息 false（新会话），
+    // 保证退出前尾帧无法重新覆盖默认站姿。
     {
-      squat_blend_target_ = 0.0;
-      smoothed_squat_ = 0.0;
-      if (gait_receiver_) gait_receiver_->resetPostureCommand();
-      posture_commands.setZero();
-      if (waist_controller_ && waist_controller_->getMode() == 2)
+      std::lock_guard<std::mutex> lock(posture_reset_mutex_);
+      const bool posture_at_zero =
+          std::max(std::abs(posture_commands.x()), std::abs(posture_commands.y())) < 1e-4;
+      if (posture_reset_pending_ && posture_at_zero)
       {
-        waist_controller_->changeMode(1);
-        waist_controller_->changeMode(2);
+        squat_blend_target_ = 0.0;
+        squat_blend_start_ = ros::Time::now().toSec();
+        if (!posture_smooth_enabled_)
+        {
+          smoothed_squat_ = 0.0;
+        }
+        if (gait_receiver_)
+        {
+          // 只清数值，不释放 override；ownership 由下一次私有 false 消息释放。
+          gait_receiver_->resetPostureCommand();
+        }
+        posture_commands.setZero();
+        if (waist_controller_ && waist_controller_->getMode() == 2)
+        {
+          waist_controller_->changeMode(1);
+          waist_controller_->changeMode(2);
+        }
+        posture_reset_pending_ = false;
+        ROS_INFO("[%s] MoRE posture reset reached zero; squat state cleared + waist reset",
+                 name_.c_str());
       }
-      ROS_INFO("[%s] posture zero detected (FSM exit torso ctrl), squat state cleared + waist reset",
-               name_.c_str());
     }
-    last_posture_raw_ = posture_commands.x();
 
     posture_commands.x() = std::clamp(posture_commands.x(), posture_height_min_, posture_height_max_);
     posture_commands.y() = std::clamp(posture_commands.y(), posture_bend_min_, posture_bend_max_);
@@ -1248,7 +1307,16 @@ namespace humanoid_controller
     smoothed_squat_ = 0.0;
     squat_blend_target_ = 0.0;
     last_posture_style_index_ = -1;
-    last_posture_raw_ = 0.0;
+    {
+      std::lock_guard<std::mutex> lock(posture_reset_mutex_);
+      posture_reset_pending_ = false;
+      posture_reset_owned_ = false;
+      if (gait_receiver_)
+      {
+        gait_receiver_->clearPostureTargetOverride();
+        gait_receiver_->resetPostureCommand();
+      }
+    }
     if (waist_controller_)
     {
       waist_controller_->reset();
@@ -1259,10 +1327,17 @@ namespace humanoid_controller
 
   void MoREController::pause()
   {
-    RLControllerBase::pause();
-    if (gait_receiver_)
     {
-      gait_receiver_->setEnabled(false);
+      std::lock_guard<std::mutex> lock(posture_reset_mutex_);
+      RLControllerBase::pause();
+      posture_reset_accepting_ = false;
+      posture_reset_pending_ = false;
+      posture_reset_owned_ = false;
+      if (gait_receiver_)
+      {
+        gait_receiver_->clearPostureTargetOverride();
+        gait_receiver_->setEnabled(false);
+      }
     }
 
     // Ruiwo 手臂增益已通过 joint_cmd 实时下发，无需单独调用 ROS 服务切换
@@ -1270,17 +1345,30 @@ namespace humanoid_controller
 
   void MoREController::resume()
   {
-    RLControllerBase::resume();
+    // 在控制器仍为 PAUSED 时完成全部重置，避免推理线程看到半重置状态。
+    {
+      std::lock_guard<std::mutex> lock(posture_reset_mutex_);
+      posture_reset_accepting_ = false;
+    }
+    reset();
     if (gait_receiver_)
     {
-      gait_receiver_->setEnabled(true);
       gait_receiver_->resetToStance();
+      gait_receiver_->setEnabled(true);
+    }
+    {
+      std::lock_guard<std::mutex> lock(posture_reset_mutex_);
+      RLControllerBase::resume();
+      posture_reset_accepting_ = (state_ == ControllerState::RUNNING);
+      if (!posture_reset_accepting_ && gait_receiver_)
+      {
+        gait_receiver_->setEnabled(false);
+      }
     }
 
     // Ruiwo 手臂增益已通过 motor_pdo_kp/kd（skw_rl_param.info）在 joint_cmd 中实时下发
 
     ROS_INFO("[%s] Controller resumed, reset state", name_.c_str());
-    reset();
   }
 
   bool MoREController::requestToExit() const
