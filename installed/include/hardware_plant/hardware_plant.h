@@ -171,6 +171,16 @@ class HardwarePlant
     // 退出0扭矩模式，恢复正常控制
     bool exitZeroTorqueMode();
 
+    // 内部复用实现：对给定 EC 关节 id 列表下发 0 扭矩 / 恢复位置控制
+    void setZeroTorqueForJoints(const std::vector<uint8_t>& ec_ids);
+    void exitZeroTorqueForJoints(const std::vector<uint8_t>& ec_ids);
+
+    // 单关节手动限位标定（用于腰部电机）：0扭矩 -> 人工摆正 -> 按x锁定（当前位设为零点并保存）
+    bool setZeroTorqueForSingleLegJoint(int joint_idx);
+    bool exitZeroTorqueForSingleLegJoint(int joint_idx);
+    bool setCurrentPositionAsOffsetForJoint(int joint_idx);
+    bool manualCalibrateSingleLegJoint(int joint_idx);
+
     // 电机状态管理器接口
     void setMotorStatusHardwareSettings();  // 设置硬件配置到电机状态管理器
     
