@@ -11,8 +11,16 @@
     <arg name="enable_head_control" default="true"/>
     <arg name="head_control_mode" default="vr_follow"/>
     <arg name="use_pico" default="true"/>
+    <arg name="pico_diagnostic_allow_legacy" default="false"/>
+    <arg name="pico_diagnostic_log_enable" default="false"/>
+    <arg name="pico_tf_publish_enable" default="false"/>
+    <arg name="pico_tf_publish_hz" default="100.0"/>
     <!-- 传递头部控制模式参数 -->
     <param name="/head_control_mode" value="$(arg head_control_mode)"/>
+    <param name="/pico_diagnostic_allow_legacy" value="$(arg pico_diagnostic_allow_legacy)" type="bool"/>
+    <param name="/pico_diagnostic_log_enable" value="$(arg pico_diagnostic_log_enable)" type="bool"/>
+    <param name="/pico_tf_publish_enable" value="$(arg pico_tf_publish_enable)" type="bool"/>
+    <param name="/pico_tf_publish_hz" value="$(arg pico_tf_publish_hz)" type="double"/>
 
     <node
         pkg="humanoid_controllers"

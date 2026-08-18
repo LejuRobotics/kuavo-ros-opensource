@@ -20,10 +20,10 @@ import enum
 import time
 import math
 import threading
-import threading
+from collections import deque
 from typing import List, Optional, Any
 from tf2_msgs.msg import TFMessage
-from std_msgs.msg import Float64MultiArray,Float64,String
+from std_msgs.msg import Float64MultiArray, String
 from kuavo_msgs.msg import (
     twoArmHandPoseCmd, robotBodyMatrices, picoPoseInfoList,
     robotHeadMotionData, ikSolveParam, footPoseTargetTrajectories,
@@ -44,6 +44,7 @@ from copy import deepcopy
 from scipy.spatial.transform import Rotation as R
 from ..config.pico_vr_config import PicoVrConfig, HandWrenchConfig
 from ..utils.toggle_switch import ToggleSwitch, ToggleEvent
+from ..pico_diagnostic_runtime import monotonic_ns
 
 class ControlMode(enum.Enum):
         NONE_MODE = 0
@@ -282,6 +283,11 @@ class KuavoPicoNode:
             self._init_toggle_switch()
             # Initialize model and transformers
             self._init_model_and_transformers()
+            self.diagnostic_logger = None
+            self._pico_bone_trace_lock = threading.Lock()
+            self._pico_bone_traces = {}
+            self._pico_bone_trace_order = deque()
+            self._pico_bone_trace_limit = 512
             # Initialize publishers
             self._init_publishers()
             # Initialize subscribers
@@ -323,6 +329,38 @@ class KuavoPicoNode:
         else:
             # Allow updating play_mode if already initialized
             self._play_mode = play_mode
+
+    @staticmethod
+    def _duration_ns(end_ns, start_ns):
+        return end_ns - start_ns if end_ns > 0 and start_ns > 0 and end_ns >= start_ns else None
+
+    def set_diagnostic_logger(self, logger):
+        self.diagnostic_logger = logger
+
+    def record_pico_bone_trace(self, trace: dict):
+        stamp_ms = int(trace.get("stamp_ms", 0) or 0)
+        if stamp_ms <= 0:
+            return
+        with self._pico_bone_trace_lock:
+            if stamp_ms not in self._pico_bone_traces:
+                self._pico_bone_trace_order.append(stamp_ms)
+            self._pico_bone_traces[stamp_ms] = dict(trace)
+            while len(self._pico_bone_traces) > self._pico_bone_trace_limit:
+                old_key = self._pico_bone_trace_order.popleft()
+                self._pico_bone_traces.pop(old_key, None)
+
+    def _take_pico_bone_trace(self, stamp_ms: int):
+        if stamp_ms <= 0:
+            return None
+        with self._pico_bone_trace_lock:
+            trace = self._pico_bone_traces.pop(stamp_ms, None)
+            if trace is not None:
+                return trace
+            candidates = [key for key in self._pico_bone_traces.keys() if abs(key - stamp_ms) <= 5]
+            if not candidates:
+                return None
+            closest = min(candidates, key=lambda key: abs(key - stamp_ms))
+            return self._pico_bone_traces.pop(closest, None)
 
     def set_play_mode(self, enable: bool):
         """Enable or disable play mode (controls /robot_body_matrices subscription)."""
@@ -1684,6 +1722,41 @@ class KuavoPicoNode:
 
     def pico_hands_poses_callback_choose(self, pico_hands_poses_msg: picoPoseInfoList) -> None:
         """Callback for Pico hands poses."""
+        if self.diagnostic_logger is not None:
+            callback_monotonic_ns = monotonic_ns()
+            trace = self._take_pico_bone_trace(int(getattr(pico_hands_poses_msg, "timestamp_ms", 0) or 0))
+            log_fields = {
+                "stamp_ms": int(getattr(pico_hands_poses_msg, "timestamp_ms", 0) or 0),
+                "callback_monotonic_ns": callback_monotonic_ns,
+                "trace_found": trace is not None,
+                "bone_topic": "/leju_pico_bone_poses",
+            }
+            if trace:
+                log_fields.update(trace)
+                log_fields.update({
+                    "bone_publish_done_to_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("bone_publish_done_monotonic_ns", 0) or 0),
+                    ),
+                    "bone_publish_start_to_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("bone_publish_start_monotonic_ns", 0) or 0),
+                    ),
+                    "udp_recv_to_bone_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("recv_monotonic_ns", 0) or 0),
+                    ),
+                    "receiver_start_to_bone_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("process_start_monotonic_ns", 0) or 0),
+                    ),
+                    "protobuf_parse_to_bone_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("protobuf_parse_done_monotonic_ns", 0) or 0),
+                    ),
+                })
+            self.diagnostic_logger.log("pico_bone_callback_timing", **log_fields)
+
         # 控制头部运动
         self._pub_head_pose()
 
