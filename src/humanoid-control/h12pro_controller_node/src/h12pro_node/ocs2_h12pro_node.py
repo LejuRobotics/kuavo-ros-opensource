@@ -412,30 +412,39 @@ class H12PROControllerNode:
                 )
             
         print(f"[H12PROControllerNode]: robot_state_machine init state is {self.robot_state_machine.state}")
-        # 将初始状态写入 param，避免上次运行的残留值错误反映当前 FSM 状态
-        rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
+        # 先读旧 last_state（崩溃续态 / 仿真预置 stance），避免先写 initial 盖掉恢复源
+        try:
+            last_saved_state = rospy.get_param(LAST_STATE_PARAM, "none")
+        except Exception as e:
+            last_saved_state = "none"
+            rospy.logwarn(
+                f"[StateRecovery] Failed to read {LAST_STATE_PARAM}: {e}; "
+                "treat as none (no recovery)"
+            )
+
+        # 手动模式只同步 param，不走恢复
+        if self.manual_h12_init_state != "none":
+            rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
 
         self.h12_to_joy_node = H12ToJoyControllerNode()
 
-        # ===== 状态恢复逻辑 =====
+        # 服务/仿真：按 last_state + 控制栈是否在线恢复
         if self.manual_h12_init_state == "none":
             try:
-                last_saved_state = rospy.get_param(LAST_STATE_PARAM, "none")
                 rospy.loginfo(f"[StateRecovery] Last saved state: {last_saved_state}")
 
                 if last_saved_state != "none" and last_saved_state in LEGAL_STATES \
                         and last_saved_state not in ["initial", "calibrate"]:
 
                     if self._control_stack_online():
-                        # 控制栈仍在线：joy_node 崩溃后被 monitor 重启，续上运行态。
+                        # 栈在线：续运行态 / 仿真进 stance
                         self.robot_state_machine.machine.set_state(
                             last_saved_state, self.robot_state_machine
                         )
+                        rospy.set_param(LAST_STATE_PARAM, last_saved_state)
                         rospy.loginfo(f"[StateRecovery] stack online, recovered to: {last_saved_state}")
                     else:
-                        # 控制栈不在线（终端退出后服务 reclaim 起新 joy_node）：
-                        # 丢弃跨 rosmaster 存活的遗留 last_state，回 initial 待命，
-                        # 否则会被钉在 stance，按 E左+F右+C 不命中 initial_pre 无法重新拉栈。
+                        # 栈离线：丢弃残留 last_state，回 initial 待命
                         self.robot_state_machine.machine.set_state(
                             "initial", self.robot_state_machine
                         )
@@ -444,10 +453,12 @@ class H12PROControllerNode:
                             "[StateRecovery] control stack offline; reset FSM to initial "
                             f"(discarded stale last_state={last_saved_state}) so H12 can relaunch."
                         )
+                else:
+                    # 无有效旧态：冷启动同步 initial
+                    rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
 
             except Exception as e:
                 rospy.logerr(f"[StateRecovery] Failed to recover: {e}")
-        # =====================================================
 
         self.key_timestamp: Dict[str, float] = {}
         self._config = self._load_configuration()

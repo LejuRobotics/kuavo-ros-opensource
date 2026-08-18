@@ -111,6 +111,80 @@ namespace humanoid_controller
     pending_walking_switch_reason_.clear();
   }
 
+  void RLControllerManager::clearPendingArmPreparedSwitchLocked(const std::string& reason)
+  {
+    if (pending_arm_prepared_switch_)
+    {
+      ROS_INFO("[RLControllerManager] Clear pending arm-prepared switch: %s -> %s%s%s",
+               pending_arm_switch_source_name_.c_str(),
+               pending_arm_switch_target_name_.c_str(),
+               reason.empty() ? "" : ". reason: ",
+               reason.c_str());
+    }
+
+    pending_arm_prepared_switch_ = false;
+    pending_arm_switch_source_name_.clear();
+    pending_arm_switch_target_name_.clear();
+    pending_arm_switch_start_time_ = ros::Time();
+  }
+
+  bool RLControllerManager::deferWalkingSwitchUntilArmReadyLocked(const std::string& target_name)
+  {
+    // 该保护只约束配置中的 manipulation(AMP) -> walking(AMP_Wild) 方向，
+    // 不改变其他 RL 控制器的既有切换行为
+    if (!auto_switch_config_.enabled ||
+        current_controller_name_ != auto_switch_config_.manipulation_controller ||
+        target_name != auto_switch_config_.walking_controller)
+    {
+      return false;
+    }
+
+    auto source_it = controllers_.find(current_controller_name_);
+    if (source_it == controllers_.end() || !source_it->second)
+    {
+      return false;
+    }
+
+    auto* source_controller = source_it->second.get();
+    auto* arm_controller = source_controller->getArmController();
+    if (!arm_controller)
+    {
+      return false;
+    }
+
+    const bool arm_is_locked = arm_controller->getMode() == 0;
+    const bool auto_swing_is_preparing =
+        arm_controller->getRequestedMode() == 1 &&
+        arm_controller->isRateLimitedTracking();
+    if (!arm_is_locked && !auto_swing_is_preparing)
+    {
+      return false;
+    }
+
+    pending_arm_prepared_switch_ = true;
+    pending_arm_switch_source_name_ = current_controller_name_;
+    pending_arm_switch_target_name_ = target_name;
+    pending_arm_switch_start_time_ = ros::Time::now();
+
+    // 保持源 AMP 站立，让大幅手臂归位始终由熟悉当前状态的源策略维持平衡
+    source_controller->resetGaitCommandState(true);
+
+    // 只在当前 AMP 本地启动归位
+    // 全局模式由切换完成后的既有逻辑同步
+    if (arm_is_locked && !source_controller->requestArmControlMode(1))
+    {
+      clearPendingArmPreparedSwitchLocked("source arm rejected AUTO_SWING request");
+      // 安全优先：本次不继续执行原切换，自动路径可由下一条新命令重试
+      // 手动路径会保持在当前 AMP，避免 mode0 直接交给 AMP_Wild
+      return true;
+    }
+
+    ROS_WARN("[RLControllerManager] Defer controller switch %s -> %s: arm AUTO_SWING homing is not complete",
+             pending_arm_switch_source_name_.c_str(),
+             pending_arm_switch_target_name_.c_str());
+    return true;
+  }
+
   RLControllerManager::~RLControllerManager()
   {
     depth_history_monitor_.stop();
@@ -335,6 +409,18 @@ namespace humanoid_controller
     std::unique_lock<std::recursive_mutex> lock(mutex_);
     const std::string current_before = current_controller_name_.empty() ? "mpc" : current_controller_name_;
 
+    if (pending_arm_prepared_switch_)
+    {
+      // 同一目标在手臂归位期间可能被持续的摇杆/导航消息重复请求；保持原请求，
+      // 不重复启动归位曲线，其他目标视为用户改变意图并取消等待
+      if (current_controller_name_ == pending_arm_switch_source_name_ &&
+          name == pending_arm_switch_target_name_)
+      {
+        return true;
+      }
+      clearPendingArmPreparedSwitchLocked("superseded by another controller switch request");
+    }
+
     ocs2::humanoid::CommandDataRL source_gait_command;
     bool has_source_gait_command = false;
     SwitchMotionState source_motion_state = SwitchMotionState::STANCE;
@@ -439,6 +525,13 @@ namespace humanoid_controller
     if (current_controller_name_ == name)
     {
       clearPendingWalkingSwitchRequest("target controller already active");
+      return true;
+    }
+
+    // AMP 的本地手臂为 mode0 时，不能直接把全身控制权交给 AMP_Wild
+    // 归位在当前 AMP 中非阻塞执行，完成后由控制循环补做真正的切换
+    if (deferWalkingSwitchUntilArmReadyLocked(name))
+    {
       return true;
     }
 
@@ -1842,6 +1935,7 @@ namespace humanoid_controller
 
   void RLControllerManager::processAutoControllerSwitch()
   {
+    processPendingArmPreparedSwitch();
     evaluateAutoControllerSwitch("control loop");
   }
 
@@ -2324,6 +2418,73 @@ namespace humanoid_controller
     pending_mpc_switch_ = false;
     switchController("");
     return true;
+  }
+
+  void RLControllerManager::processPendingArmPreparedSwitch()
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+
+    if (!pending_arm_prepared_switch_)
+    {
+      return;
+    }
+
+    if (current_controller_name_ != pending_arm_switch_source_name_)
+    {
+      clearPendingArmPreparedSwitchLocked("source controller changed while waiting");
+      return;
+    }
+
+    auto source_it = controllers_.find(pending_arm_switch_source_name_);
+    if (source_it == controllers_.end() || !source_it->second)
+    {
+      clearPendingArmPreparedSwitchLocked("source controller is unavailable");
+      return;
+    }
+
+    auto* source_controller = source_it->second.get();
+    auto* arm_controller = source_controller->getArmController();
+    if (!arm_controller)
+    {
+      clearPendingArmPreparedSwitchLocked("source controller has no arm controller");
+      return;
+    }
+
+    // 用户在准备阶段重新锁臂或进入外部控制，视为撤销这次行走切换
+    if (arm_controller->getRequestedMode() != 1)
+    {
+      source_controller->resetGaitCommandState(true);
+      clearPendingArmPreparedSwitchLocked("arm mode changed while waiting");
+      return;
+    }
+
+    if (arm_controller->getMode() != 1 || arm_controller->isRateLimitedTracking())
+    {
+      if (pending_arm_switch_start_time_.isValid() &&
+          (ros::Time::now() - pending_arm_switch_start_time_).toSec() > pending_arm_switch_timeout_)
+      {
+        source_controller->resetGaitCommandState(true);
+        ROS_ERROR("[RLControllerManager] Arm preparation timed out after %.1f s; keep controller '%s' in stance",
+                  pending_arm_switch_timeout_, current_controller_name_.c_str());
+        clearPendingArmPreparedSwitchLocked("arm preparation timeout");
+      }
+      return;
+    }
+
+    const std::string source_name = pending_arm_switch_source_name_;
+    const std::string target_name = pending_arm_switch_target_name_;
+    clearPendingArmPreparedSwitchLocked("arm AUTO_SWING homing completed");
+
+    const bool switched = switchController(target_name);
+    if (!switched)
+    {
+      ROS_ERROR("[RLControllerManager] Arm is ready but deferred controller switch failed: %s -> %s",
+                source_name.c_str(), target_name.c_str());
+      return;
+    }
+
+    ROS_INFO("[RLControllerManager] Deferred arm-prepared switch completed: %s -> %s",
+             source_name.c_str(), target_name.c_str());
   }
 
   bool RLControllerManager::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req,

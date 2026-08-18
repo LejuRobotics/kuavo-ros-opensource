@@ -207,6 +207,8 @@ namespace ocs2
 
             get_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_get_arm_ctrl_mode");
             whole_torso_ctrl_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/vr_whole_torso_ctrl", 1);
+            more_posture_reset_pub_ =
+                nodeHandle_.advertise<std_msgs::Bool>("/rl_controller/more_posture_reset", 1);
 
             cmd_torso_pose_pub_ = nodeHandle_.advertise<geometry_msgs::PoseStamped>("/cmd_torso_pose_vr", 1);
             
@@ -243,6 +245,8 @@ namespace ocs2
 
             // 添加arm_collision_control服务
             arm_collision_control_service_ = nodeHandle_.advertiseService("/quest3/set_arm_collision_control", &QuestControlFSM::armCollisionControlCallback, this);
+            reset_vr_torso_state_service_ = nodeHandle_.advertiseService(
+                "/quest3/reset_vr_torso_state", &QuestControlFSM::resetVrTorsoStateCallback, this);
             bootstrap_wheel_arm_mode_service_ = nodeHandle_.advertiseService(
                 "/quest3/bootstrap_wheel_arm_mode", &QuestControlFSM::bootstrapWheelArmModeCallback, this);
             
@@ -723,6 +727,48 @@ namespace ocs2
             }
             res.message = "Arm collision control set to " + std::string(req.data ? "true" : "false");
             ROS_INFO("Arm collision control set to %s", req.data ? "true" : "false");
+            return true;
+        }
+
+        bool resetVrTorsoStateCallback(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res)
+        {
+            const bool was_torso_control_enabled = torso_control_enabled_;
+            torso_control_enabled_ = false;
+
+            std_msgs::Bool whole_torso_ctrl_msg;
+            whole_torso_ctrl_msg.data = false;
+            whole_torso_ctrl_pub_.publish(whole_torso_ctrl_msg);
+
+            if (was_torso_control_enabled && robot_type_ != 1)
+            {
+                // 先通知 ReferenceManager 以当前命令为起点进行平滑回正，再清空 VR 的 /cmd_pose
+                callAutoGaitModeSrv(true);
+                callVRWaistControlSrv(false);
+
+                geometry_msgs::Twist cmd_pose;
+                cmd_pose_pub_.publish(cmd_pose);
+
+                if (waist_dof_ > 0)
+                {
+                    controlWaist(0.0);
+                }
+            }
+
+            torso_yaw_zero_ = 0.0;
+            torso_pitch_zero_ = 0.0;
+            torso_roll_zero_ = 0.0;
+            body_height_zero_ = 0.0;
+            body_x_zero_ = 0.0;
+            last_relative_height_ = 0.0;
+            last_body_pitch_ = 0.0;
+            last_body_yaw_ = 0.0;
+            accumulated_yaw_offset_ = 0.0;
+            torso_control_start_time_ = ros::Time(0);
+
+            res.success = true;
+            res.message = was_torso_control_enabled ? "Torso control disabled (VR node shutdown reset)"
+                                                   : "Torso control already disabled (VR node shutdown reset)";
+            ROS_INFO("[QuestControlFSM] %s", res.message.c_str());
             return true;
         }
 
@@ -1289,6 +1335,13 @@ namespace ocs2
 
                         if(1 != robot_type_)
                         {
+                            if (isMoreControllerActive())
+                            {
+                                // 与退出复位共用同一 MoRE 私有 topic，保证快速重进时消息有序。
+                                std_msgs::Bool more_posture_reset_msg;
+                                more_posture_reset_msg.data = false;
+                                more_posture_reset_pub_.publish(more_posture_reset_msg);
+                            }
                             // 失能GaitReceiver的自动步态模式
                             callAutoGaitModeSrv(false);
                             // 调用VR腰部控制服务，启用VR腰部控制动态Q矩阵
@@ -1309,27 +1362,19 @@ namespace ocs2
                         const bool more_controller_active = isMoreControllerActive();
                         if(1 != robot_type_)
                         {
-                            geometry_msgs::Twist cmd_pose;
-                            cmd_pose.linear.x = 0.0;
-                            cmd_pose.linear.y = 0.0;
-                            cmd_pose.angular.x = 0.0;
-                            cmd_pose.angular.z = 0.0;
-
                             if (more_controller_active)
                             {
-                                // MoRE 退出躯干控制后回到默认站姿。保留原修复的 5 帧零指令，
-                                // 让 RlGaitReceiver 的姿态限速器能够逐步收敛到零。
-                                cmd_pose.linear.z = 0.0;
-                                cmd_pose.angular.y = 0.0;
-                                for (int i = 0; i < 5; ++i)
-                                {
-                                    cmd_pose_pub_.publish(cmd_pose);
-                                    ros::Duration(0.01).sleep();
-                                }
+                                // MoRE 自己接管退出复位；不向共享 /cmd_pose 发布零值，
+                                // 避免通过退出零帧改写 MPC 与其他 RL 控制器的姿态缓存。
+                                std_msgs::Bool more_posture_reset_msg;
+                                more_posture_reset_msg.data = true;
+                                more_posture_reset_pub_.publish(more_posture_reset_msg);
                             }
                             else
                             {
-                                // MPC 及其他 RL 控制器保持原行为：退出后保留最后姿态。
+                                // MPC 及其他 RL 控制器沿用原路径：仍发布最后姿态，
+                                // 后续 auto-gait / VR-waist 服务调用保持不变。
+                                geometry_msgs::Twist cmd_pose;
                                 cmd_pose.linear.z = last_relative_height_;
                                 cmd_pose.angular.y = last_body_pitch_;
                                 cmd_pose_pub_.publish(cmd_pose);
@@ -1343,7 +1388,7 @@ namespace ocs2
 
                         if (more_controller_active)
                         {
-                            std::cout << "躯干控制退出，MoRE /cmd_pose 清零，恢复默认站立高度" << std::endl;
+                            std::cout << "躯干控制退出，已请求 MoRE 平滑恢复默认站姿" << std::endl;
                         }
                         else
                         {
@@ -2012,6 +2057,7 @@ namespace ocs2
         ros::Publisher stop_pub_;
         ros::Publisher vel_control_pub_;
         ros::Publisher whole_torso_ctrl_pub_;
+        ros::Publisher more_posture_reset_pub_;
         geometry_msgs::Twist cmdVel_;
 
         ros::ServiceClient change_arm_mode_service_client_;
@@ -2025,6 +2071,7 @@ namespace ocs2
         ros::ServiceClient control_mode_client_;              // MPC控制模式切换服务客户端
         ros::ServiceClient switch_to_next_controller_client_; // 切换控制器服务客户端
         ros::ServiceServer arm_collision_control_service_;
+        ros::ServiceServer reset_vr_torso_state_service_;
         ros::ServiceServer bootstrap_wheel_arm_mode_service_;
 
         // 腰部控制相关的订阅者和发布者

@@ -16,6 +16,7 @@
 #include <kuavo_msgs/switchController.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
 #include <openvino/openvino.hpp>
+#include <std_msgs/Bool.h>
 #include <std_msgs/Int32.h>
 #include <deque>
 #include <map>
@@ -140,6 +141,13 @@ namespace humanoid_controller
     bool has_obs_history_encoder_{true};
 
     std::unique_ptr<ocs2::humanoid::RlGaitReceiver> gait_receiver_;
+    std::mutex posture_reset_mutex_;
+    bool posture_reset_pending_{false};
+    bool posture_reset_owned_{false};
+    bool posture_reset_accepting_{false};
+    /// MoRE 私有的姿态复位控制：true=退出复位，false=新会话释放覆盖。
+    /// 声明在状态成员之后，析构时会先 shutdown subscriber。
+    ros::Subscriber posture_reset_control_sub_;
 
     bool is_real_{false};
     bool is_roban_{false};
@@ -170,8 +178,6 @@ namespace humanoid_controller
     double squat_blend_target_{0.0};
     /// 上一次 computePostureCommands 时的 gait style，用于检测 style 回到 0 时清 squat
     int last_posture_style_index_{-1};
-    /// 上一次 posture_commands.x() 原始值，用于检测 FSM 退出躯干控制时 posture→0
-    double last_posture_raw_{0.0};
 
     double waist_mode_interpolation_velocity_{1.0};
     double waist_mode2_cutoff_freq_{1.0};
@@ -227,6 +233,7 @@ namespace humanoid_controller
     Eigen::VectorXd computeMotionStyleWeights(const ocs2::humanoid::CommandDataRL& cmd) const;
     Eigen::Vector2d computePostureCommands(int gait_style_index);
     void styleCommandCallback(const std_msgs::Int32::ConstPtr& msg);
+    void postureResetControlCallback(const std_msgs::Bool::ConstPtr& msg);
     void initHistoryBuffer();
     void packHistoryTensor();
     /// 推理成功后 roll 并写入 body_t（供下一拍 cat(stored[1:], body) 使用）

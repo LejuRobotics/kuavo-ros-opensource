@@ -9,7 +9,7 @@
 - STRING: PPPPMMMMN  Patch 为 0 时，不显示 Patch 部分, 比如 M(4), N(5),P(0) 表示为 45 而非 000000045 (0000,0004,5)
 """
 
-# 同步维护: SDK 内嵌副本 src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/common/robot_version.py 需同步更新
+# 同步维护: 上游真源 src/kuavo_common/python/robot_version.py 需同步更新
 import warnings
 
 
