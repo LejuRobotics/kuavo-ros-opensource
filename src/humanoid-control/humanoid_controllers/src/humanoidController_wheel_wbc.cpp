@@ -180,6 +180,10 @@ namespace humanoidController_wheel_wbc
                base_cmd_vel_limit_enable_ ? "true" : "false",
                base_cmd_vel_min_[0], base_cmd_vel_min_[1], base_cmd_vel_min_[2],
                base_cmd_vel_max_[0], base_cmd_vel_max_[1], base_cmd_vel_max_[2]);
+      // 限频发布：urobot 按 50Hz 消费底盘命令，500Hz 灌入会使其内部队列堆积（见 底盘命令执行延迟分析记录.md）
+      loadOptionalTaskParam(taskFile, "baseCmdVelLimit.publish_rate", base_cmd_vel_publish_rate_);
+      base_cmd_vel_publish_rate_ = std::max(1.0, base_cmd_vel_publish_rate_);
+      ROS_INFO("[humanoidControllerWheelWbc] base_cmd_vel publish rate=%.1f Hz", base_cmd_vel_publish_rate_);
     }
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
@@ -1479,7 +1483,14 @@ namespace humanoidController_wheel_wbc
       {
         clampBaseCmdVel(velCmdMsg);
       }
-      cmdVelPub_.publish(velCmdMsg);
+      // 限频发布：控制循环 500Hz，但底盘节点按 50Hz 消费，直接满频发布会导致命令
+      // 在其内部队列堆积数秒（见 底盘命令执行延迟分析记录.md），这里按 publish_rate 节流
+      if (last_cmd_vel_pub_time_.isZero() ||
+          (time - last_cmd_vel_pub_time_).toSec() >= 1.0 / base_cmd_vel_publish_rate_)
+      {
+        cmdVelPub_.publish(velCmdMsg);
+        last_cmd_vel_pub_time_ = time;
+      }
     }else{
         ros::Time current_time = ros::Time::now();
         bool should_reset = false;

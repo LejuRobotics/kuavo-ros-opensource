@@ -253,6 +253,8 @@ namespace humanoidController_wheel_wbc
     Eigen::Vector3d base_cmd_vel_max_{1.2, 1.2, 1.2};   // vx, vy, wz 上限 [m/s, m/s, rad/s]
     Eigen::Vector3d base_cmd_vel_min_{-1.2, -1.2, -1.2};  // vx, vy, wz 下限
     bool base_cmd_vel_limit_enable_{false};  // 是否启用 base_cmd_vel 速度限幅
+    double base_cmd_vel_publish_rate_{50.0};  // /move_base/base_cmd_vel 发布频率上限 [Hz]，避免 500Hz 灌满底盘节点
+    ros::Time last_cmd_vel_pub_time_;  // 上次发布 /move_base/base_cmd_vel 的时间，用于限频
 
     // ========== 期望力管理器 ==========
     std::unique_ptr<DesiredForceManager> desired_force_manager_;

@@ -38,7 +38,10 @@ int main(int argc, char **argv) {
     ros::Publisher pub_channel = nh.advertise<h12pro_controller_node::h12proRemoteControllerChannel>("h12pro_channel", 1);
     h12pro_controller_node::h12proRemoteControllerChannel channel_msg;
     channel_msg.channels.resize(12);
-    ros::Rate rate(250);
+    // 发布频率 50Hz：SBUS 手柄输入硬件更新率本就在 50Hz 量级，250Hz 属过度采样
+    // （同一帧重复发布 5 次），高频空发持续占用订阅方（joy_node / nodelet_manager）
+    // 的 CPU 与网络带宽。50Hz（20ms 一帧）对手柄控制无感知。
+    ros::Rate rate(50);
     
     while (ros::ok()) {
         recSbusData();

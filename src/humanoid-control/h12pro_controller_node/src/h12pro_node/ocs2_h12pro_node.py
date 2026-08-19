@@ -164,6 +164,11 @@ class ChannelMapping:
 # G/H滚轮极值判断阈值
 G12_DIAL_THRESHOLD = 50
 
+# /joy 发布限频周期:G12 遥控器轴数据硬件上限为 50Hz(20ms),发布频率对齐硬件上限,
+# 更高频率只是重复值。多路径高频调用(250Hz 通道回调 + 100Hz 主循环 + 事件路径)
+# 统一在发布层去重,实测可把 /joy 从 ~850Hz 降到 50Hz。
+JOY_PUB_PERIOD = 0.02
+
 # G12轮臂模式JoyButton常量
 G12_BUTTON_A = 0
 G12_BUTTON_B = 1
@@ -184,6 +189,7 @@ class H12ToJoyControllerNode:
         self.joy_msg = Joy(axes=[0.0] * 8, buttons=[0] * 11)
         self.channels_msg: Optional[Tuple[int, ...]] = None
         self.joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
+        self._last_joy_pub_time = 0.0   # /joy 发布限频时间戳(见 JOY_PUB_PERIOD)
         self.is_stopping = False    # cd按钮下蹲标志位
 
         # G12轮臂模式检测
@@ -247,10 +253,15 @@ class H12ToJoyControllerNode:
         """Update channel message data."""
         self.channels_msg = msg.channels
 
-    def process_channels(self) -> None:
-        """Process and publish channel data."""
+    def process_channels(self, publish_immediately: bool = False) -> None:
+        """Process and publish channel data.
+
+        /joy 发布按 JOY_PUB_PERIOD 限频(G12 硬件轴数据上限 50Hz):周期路径
+        (250Hz 通道回调 + 100Hz 主循环)在发布层去重,状态照常更新;
+        急停、状态切换等一次性事件传 publish_immediately=True 保证即时下发。
+        """
         if self.channels_msg is None:
-            self.joy_pub.publish(self.joy_msg)
+            self._publish_joy(False)
             return
 
         # Reset messages
@@ -263,7 +274,21 @@ class H12ToJoyControllerNode:
         else:
             self._process_default_channels()
 
-        self.joy_pub.publish(self.joy_msg)
+        self._publish_joy(publish_immediately)
+
+    def _publish_joy(self, publish_immediately: bool) -> None:
+        """发布 /joy;非即时模式按 JOY_PUB_PERIOD 限频去重"""
+        now = time.time()
+        if not publish_immediately and now - self._last_joy_pub_time < JOY_PUB_PERIOD:
+            return
+        self._last_joy_pub_time = now
+        try:
+            self.joy_pub.publish(self.joy_msg)
+        except rospy.ROSException as e:
+            # 让位/关闭过程中 publisher 会被 close，此时 publish 抛
+            # "publish() to a closed topic"；节点正在退出，静默丢弃，避免主循环异常退出
+            if not rospy.is_shutdown():
+                rospy.logwarn_throttle(5.0, 'publish /joy failed: %s' % e)
 
     def _process_default_channels(self) -> None:
         """默认双足模式：使用标准channel映射"""
@@ -914,7 +939,8 @@ class H12PROControllerNode:
             stop_msg.channels = tuple(channels)
             
             self.h12_to_joy_node.update_channels_msg(msg=stop_msg)
-            self.h12_to_joy_node.process_channels()
+            # 急停信号一次性下发,绕过周期限频,保证即时生效
+            self.h12_to_joy_node.process_channels(publish_immediately=True)
             return
             
         except MachineError as e:
@@ -1047,7 +1073,8 @@ class H12PROControllerNode:
                         new_msg.channels = tuple(channels)
                         
                         self.h12_to_joy_node.update_channels_msg(msg=new_msg)
-                        self.h12_to_joy_node.process_channels()
+                        # 状态切换触发信号一次性下发,绕过周期限频,保证即时生效
+                        self.h12_to_joy_node.process_channels(publish_immediately=True)
                 except Exception as e:
                     rospy.logerr(f"Error in state transition task: {e}")
                 finally:
@@ -1186,6 +1213,9 @@ def main():
             node.publish_arm_joint_state()
             rate.sleep()
             
+    except rospy.exceptions.ROSInterruptException:
+        # 正常关闭路径（rosnode kill / roslaunch 停机 / 让位），不作为错误处理
+        pass
     except Exception as e:
         rospy.logerr(f"Error in main loop: {e}")
         raise
