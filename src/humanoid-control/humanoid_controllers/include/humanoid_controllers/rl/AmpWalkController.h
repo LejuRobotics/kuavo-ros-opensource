@@ -167,6 +167,7 @@ namespace humanoid_controller
 
     // yaw 对齐
     double my_yaw_offset_{0.0};
+    bool yaw_offset_initialized_{false};
 
     // OpenVINO
     std::string networkModelPath_;

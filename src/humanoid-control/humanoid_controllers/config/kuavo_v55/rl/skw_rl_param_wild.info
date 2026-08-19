@@ -52,7 +52,7 @@ velocityLimits
     (0,0)  0.7      ; cmdVelLineX limit (positive)
     (1,0)  0.5       ; cmdVelLineY limit (positive and negative)
     (2,0)  0.3       ; cmdVelLineZ limit (positive and negative)
-    (3,0)  0.25       ; cmdVelAngularZ limit (positive and negative)
+    (3,0)  0.45       ; cmdVelAngularZ limit (positive and negative)
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller

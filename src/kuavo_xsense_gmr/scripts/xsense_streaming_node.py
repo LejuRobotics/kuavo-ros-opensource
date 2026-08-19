@@ -15,8 +15,10 @@ from typing import Dict, List, Tuple, Optional
 
 import rospy
 from geometry_msgs.msg import Pose, Point, Quaternion
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Header
 from kuavo_msgs.msg import (
+    ControllerSwitchEvent,
     JoySticks,
     RigidBodyDescription,
     xsensePoseInfoList,
@@ -59,6 +61,12 @@ XS_NAME_MAPPING: Dict[str, str]= {
     "Right Toe": "RightToeBase",
 }
 xsense_body_names = list(XS_NAME_MAPPING.keys())
+ARM_JOINT_NAMES = [
+    "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint",
+    "zarm_l5_joint", "zarm_l6_joint", "zarm_l7_joint",
+    "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint",
+    "zarm_r5_joint", "zarm_r6_joint", "zarm_r7_joint",
+]
 FrameDict = Dict[str, Tuple[np.ndarray, np.ndarray]]
 
 # ------------------------------------------------------------
@@ -179,9 +187,12 @@ class GMRStreamingNode:
         self.robot = rospy.get_param("~robot", "kuavo_s54")
         self.format = rospy.get_param("~format", "xsense")
         self.enable_viewer = bool(rospy.get_param("~enable_viewer", True))
+        self.publish_kuavo_arm_traj = bool(rospy.get_param("~publish_kuavo_arm_traj", False))
         self.topic_name = rospy.get_param("~topic", "/xsense/world_bone_poses")
         self.topic_name_cali = rospy.get_param("~topic_cali", "/xsense/bvh_seg_desc")
         self.pico_joy_topic = rospy.get_param("~pico_joy_topic", "/pico/joy")
+        self.pico_trigger_threshold = float(rospy.get_param("~pico_trigger_threshold", 0.5))
+        self.vmp_controller_name = rospy.get_param("~vmp_controller_name", "vmp_controller")
         self.fps = float(rospy.get_param("~fps", 100.0))
         self.cali_arm_pose_deg = rospy.get_param('~cali_arm_pose_deg', 90.0)
 
@@ -190,6 +201,10 @@ class GMRStreamingNode:
 
         # Publishers
         self.vmp_pub = rospy.Publisher('/xsense/retargeted_pose', xsensePoseRetarget, queue_size=10)
+        self.arm_traj_pub = (
+            rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=10)
+            if self.publish_kuavo_arm_traj else None
+        )
         # Subscribers
         self.xsense_pose_subscriber = rospy.Subscriber(self.topic_name, xsensePoseInfoList, self.bone_poses_callback, queue_size=10)
         self.xsense_seg_desc = None
@@ -205,16 +220,27 @@ class GMRStreamingNode:
         self._heading_p0 = None       # np.ndarray(3,)
         self._heading_init_qpos_buf = deque(maxlen=6)
 
-        # RT+Y freezes the stream; RT+X resumes it. Keep published root yaw
+        # RT+Y pauses VMP; RT+X resumes it. Keep published root yaw
         # continuous across that resume by left-applying a yaw-only correction.
         self._vmp_yaw_lock = threading.Lock()
         self._vmp_yaw_correction = 0.0
         self._vmp_yaw_freeze_yaw = None
         self._vmp_yaw_resume_pending = False
+        self._vmp_yaw_auto_resume_pending = False
+        self._vmp_yaw_ready_frames_remaining = 0
         self._vmp_yaw_last_pause_combo = False
         self._vmp_yaw_last_resume_combo = False
         self._latest_published_root_rot_wxyz = None
+        self.vmp_yaw_resume_ready_pub = rospy.Publisher(
+            '/xsense/vmp_yaw_resume_ready', Header, queue_size=1
+        )
         self.pico_joy_subscriber = rospy.Subscriber(self.pico_joy_topic, JoySticks, self.vmp_yaw_joy_callback, queue_size=10)
+        self.controller_switch_subscriber = rospy.Subscriber(
+            "/humanoid_controller/controller_switch_event",
+            ControllerSwitchEvent,
+            self.vmp_yaw_controller_switch_callback,
+            queue_size=10,
+        )
 
         # dt based on ROS stamp (publish-time 100Hz)
         self.prev_pub_stamp = None
@@ -252,6 +278,7 @@ class GMRStreamingNode:
         rospy.loginfo(f"  Robot: {self.robot}")
         rospy.loginfo(f"  Format: {self.format}")
         rospy.loginfo(f"  FPS: {self.fps:.1f}")
+        rospy.loginfo(f"  Publish /kuavo_arm_traj: {'Enabled' if self.publish_kuavo_arm_traj else 'Disabled'}")
 
     # ------------------------------------------------------------
     # CPU affinity: bind process to specific cores
@@ -420,8 +447,14 @@ class GMRStreamingNode:
     # ------------------------------------------------------------------
     # VMP yaw invariant across pause/resume
     # ------------------------------------------------------------------
-    def _mark_vmp_yaw_freeze(self):
+    def _mark_vmp_yaw_freeze(self, preserve_existing=False):
         with self._vmp_yaw_lock:
+            # A new pause/exit invalidates any older resume request or retry.
+            self._vmp_yaw_resume_pending = False
+            self._vmp_yaw_auto_resume_pending = False
+            self._vmp_yaw_ready_frames_remaining = 0
+            if preserve_existing and self._vmp_yaw_freeze_yaw is not None:
+                return
             latest = None if self._latest_published_root_rot_wxyz is None else self._latest_published_root_rot_wxyz.copy()
 
         if latest is None:
@@ -431,54 +464,60 @@ class GMRStreamingNode:
         freeze_yaw = _yaw_from_quat_wxyz(latest)
         with self._vmp_yaw_lock:
             self._vmp_yaw_freeze_yaw = freeze_yaw
-            self._vmp_yaw_resume_pending = False
 
         rospy.loginfo(
             f"[VMPYawInvariant] freeze yaw captured: {freeze_yaw:.6f} rad "
             f"({np.degrees(freeze_yaw):.2f} deg)"
         )
 
-    def _request_vmp_yaw_resume(self):
+    def _request_vmp_yaw_resume(self, automatic=False):
         with self._vmp_yaw_lock:
             has_freeze_yaw = self._vmp_yaw_freeze_yaw is not None
             if has_freeze_yaw:
                 self._vmp_yaw_resume_pending = True
+                self._vmp_yaw_auto_resume_pending = automatic
+                self._vmp_yaw_ready_frames_remaining = 0
 
         if not has_freeze_yaw:
             rospy.logwarn_throttle(1.0, "[VMPYawInvariant] resume ignored: freeze yaw was not captured")
 
     def vmp_yaw_joy_callback(self, joy: JoySticks):
         try:
-            rt_pressed = float(joy.right_trigger) >= 0.5
+            rt_pressed = float(joy.right_trigger) >= self.pico_trigger_threshold
             y_pressed = bool(joy.left_second_button_pressed)
             x_pressed = bool(joy.left_first_button_pressed)
-            pause_combo_active = rt_pressed and y_pressed
-            resume_combo_active = rt_pressed and x_pressed
-
-            if pause_combo_active and not self._vmp_yaw_last_pause_combo:
+            if rt_pressed and y_pressed and not self._vmp_yaw_last_y_pressed:
                 self._mark_vmp_yaw_freeze()
-            if resume_combo_active and not self._vmp_yaw_last_resume_combo:
+            if rt_pressed and x_pressed and not self._vmp_yaw_last_x_pressed:
                 self._request_vmp_yaw_resume()
 
-            self._vmp_yaw_last_pause_combo = pause_combo_active
-            self._vmp_yaw_last_resume_combo = resume_combo_active
+            self._vmp_yaw_last_y_pressed = y_pressed
+            self._vmp_yaw_last_x_pressed = x_pressed
         except Exception as e:
             rospy.logwarn_throttle(1.0, f"[VMPYawInvariant] joy callback failed: {e}")
 
+    def vmp_yaw_controller_switch_callback(self, event: ControllerSwitchEvent):
+        """Apply the same yaw handling as RT+Y/X on VMP controller transitions."""
+        try:
+            if event.from_controller == self.vmp_controller_name:
+                # Do not replace an earlier explicit RT+Y reference.
+                self._mark_vmp_yaw_freeze(preserve_existing=True)
+            if event.to_controller == self.vmp_controller_name:
+                self._request_vmp_yaw_resume(automatic=True)
+        except Exception as e:
+            rospy.logwarn_throttle(1.0, f"[VMPYawInvariant] controller switch callback failed: {e}")
+
     def _complete_vmp_yaw_resume_if_needed(self, root_rot_wxyz: np.ndarray):
         with self._vmp_yaw_lock:
-            pending = self._vmp_yaw_resume_pending
-            freeze_yaw = self._vmp_yaw_freeze_yaw
+            if not self._vmp_yaw_resume_pending or self._vmp_yaw_freeze_yaw is None:
+                return False
 
-        if not pending or freeze_yaw is None:
-            return
-
-        resume_yaw = _yaw_from_quat_wxyz(root_rot_wxyz)
-        yaw_correction = _wrap_to_pi(freeze_yaw - resume_yaw)
-
-        with self._vmp_yaw_lock:
+            resume_yaw = _yaw_from_quat_wxyz(root_rot_wxyz)
+            yaw_correction = _wrap_to_pi(self._vmp_yaw_freeze_yaw - resume_yaw)
+            automatic_resume = self._vmp_yaw_auto_resume_pending
             self._vmp_yaw_correction = yaw_correction
             self._vmp_yaw_resume_pending = False
+            self._vmp_yaw_auto_resume_pending = False
             self._vmp_yaw_freeze_yaw = None
 
         self.prev_root_loc = None
@@ -491,6 +530,7 @@ class GMRStreamingNode:
             f"[VMPYawInvariant] resume yaw={resume_yaw:.6f} rad, "
             f"correction={yaw_correction:.6f} rad ({np.degrees(yaw_correction):.2f} deg)"
         )
+        return automatic_resume
 
     def _apply_vmp_yaw_correction(self, root_rot_wxyz: np.ndarray) -> np.ndarray:
         root_rot_wxyz = _quat_normalize_wxyz(root_rot_wxyz)
@@ -713,6 +753,22 @@ class GMRStreamingNode:
             self.prev_ee_world_pub = {k: v.copy() for k, v in ee_world_pub.items()}
 
         self.vmp_pub.publish(msg)
+
+        if self.arm_traj_pub is not None:
+            if len(dof_pos) < 27 or len(dof_vel) < 27:
+                rospy.logwarn_throttle(
+                    1.0,
+                    f"[XSense] Cannot publish /kuavo_arm_traj: expected 27 DOF, "
+                    f"got position={len(dof_pos)}, velocity={len(dof_vel)}",
+                )
+            else:
+                arm_traj = JointState()
+                arm_traj.header.stamp = msg.header.stamp
+                arm_traj.name = list(ARM_JOINT_NAMES)
+                arm_traj.position = (np.asarray(dof_pos[13:27], dtype=np.float64) * 180.0 / np.pi).tolist()
+                arm_traj.velocity = (np.asarray(dof_vel[13:27], dtype=np.float64) * 180.0 / np.pi).tolist()
+                self.arm_traj_pub.publish(arm_traj)
+
         return root_loc_pub
 
 
@@ -819,7 +875,7 @@ class GMRStreamingNode:
 
             root_loc = qpos_pub[:3]           # aligned root position
             root_rot_wxyz = qpos_pub[3:7]     # aligned root orientation (wxyz)
-            self._complete_vmp_yaw_resume_if_needed(root_rot_wxyz)
+            yaw_resume_completed = self._complete_vmp_yaw_resume_if_needed(root_rot_wxyz)
             root_rot_wxyz = self._apply_vmp_yaw_correction(root_rot_wxyz)
             dof_pos = qpos_raw[7:-2]          # same as qpos_pub[7:-2], alignment only changes root
 
@@ -835,6 +891,20 @@ class GMRStreamingNode:
                                     dt_sec=dt_sec,
                                     stamp=pub_stamp,
                                 )
+
+            # Publish readiness only after the corrected retarget pose. VMP
+            # matches this stamp to the pose before releasing its frozen frame.
+            with self._vmp_yaw_lock:
+                if yaw_resume_completed:
+                    self._vmp_yaw_ready_frames_remaining = 10
+                publish_yaw_ready = self._vmp_yaw_ready_frames_remaining > 0
+                if publish_yaw_ready:
+                    self._vmp_yaw_ready_frames_remaining -= 1
+            if publish_yaw_ready:
+                ready = Header()
+                ready.stamp = pub_stamp
+                ready.frame_id = "xsense"
+                self.vmp_yaw_resume_ready_pub.publish(ready)
 
             # Update viewer if enabled
             if self.viewer is not None:

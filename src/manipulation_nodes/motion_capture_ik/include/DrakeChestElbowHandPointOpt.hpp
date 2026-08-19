@@ -157,7 +157,9 @@ class DrakeChestElbowHandPointOptSolver final {
                                     const Eigen::Vector3d& pRightHandRef,
                                     bool updateChestOrientation = true,
                                     bool updateChestPosition = true,
-                                    bool freezeChestPosition = true) {
+                                    bool freezeChestPosition = true,
+                                    double leftElbowTrackingActivation = 1.0,
+                                    double rightElbowTrackingActivation = 1.0) {
     using drake::symbolic::Expression;
 
     syncCachedPointsFromCachedState();  // 防御性初始化，确保cached points与cached state一致
@@ -264,16 +266,22 @@ class DrakeChestElbowHandPointOptSolver final {
     prog.AddCost(weightConfig_.wqv0.x() * qVec_v0(0) * qVec_v0(0) + weightConfig_.wqv0.y() * qVec_v0(1) * qVec_v0(1) +
                  weightConfig_.wqv0.z() * qVec_v0(2) * qVec_v0(2));
 
-    // keep elbows close to previous chest center (pull-back term)
-    prog.AddQuadraticErrorCost(weightConfig_.qv1 * I3, pChestPrev_, p1Left);
-    prog.AddQuadraticErrorCost(weightConfig_.qv1 * I3, pChestPrev_, p1Right);
+    // Position continuity must reference the previous elbow, never the chest
+    // center.  Pulling p1 toward pChest creates an inward bias that competes
+    // with the natural-elbow guide and drives retraction toward the waist.
+    prog.AddQuadraticErrorCost(weightConfig_.qv1 * I3, pLeftElbowPrev_, p1Left);
+    prog.AddQuadraticErrorCost(weightConfig_.qv1 * I3, pRightElbowPrev_, p1Right);
 
     // left arm tracking
-    prog.AddQuadraticErrorCost(weightConfig_.q1 * I3, pLeftElbowRef, p1Left);
+    const double leftElbowTrackingWeight =
+        weightConfig_.q1 * std::clamp(leftElbowTrackingActivation, 0.0, 1.0);
+    prog.AddQuadraticErrorCost(leftElbowTrackingWeight * I3, pLeftElbowRef, p1Left);
     prog.AddQuadraticErrorCost(weightConfig_.q2 * I3, pLeftHandRef, p2Left);
 
     // right arm tracking
-    prog.AddQuadraticErrorCost(weightConfig_.q1 * I3, pRightElbowRef, p1Right);
+    const double rightElbowTrackingWeight =
+        weightConfig_.q1 * std::clamp(rightElbowTrackingActivation, 0.0, 1.0);
+    prog.AddQuadraticErrorCost(rightElbowTrackingWeight * I3, pRightElbowRef, p1Right);
     prog.AddQuadraticErrorCost(weightConfig_.q2 * I3, pRightHandRef, p2Right);
 
     const SolverStateSample* tMinus1Vel = nullptr;

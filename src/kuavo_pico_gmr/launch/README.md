@@ -155,6 +155,34 @@ source devel/setup.bash
 - `scripts/pico_realtime_to_robot.py` - 运动重定向节点
 - `package.xml` - ROS 包配置文件
 
+## PICO 手柄按键（`pico_comm_minimal`）
+
+PICO 协议**无 Quest 的 touch（触摸）语义**，组合键均基于**按下（pressed）**与**上升沿**触发。
+
+### 按键缩写
+
+| 缩写 | 含义 |
+|------|------|
+| LT / RT | 左 / 右扳机（trigger ≥ 0.5） |
+| LG / RG | 左 / 右握把边键（grip_button 或 grip ≥ 0.5） |
+| X / Y | 左手柄面键 |
+| A / B | 右手柄面键 |
+
+### `pico_comm_minimal` 组合键
+
+| 组合 | 功能 | 备注 |
+|------|------|------|
+| RT + Y | 暂停 VMP 推流 | 调 `/vmp/pico_stream_control` |
+| RT + X | 恢复 VMP 推流 | |
+| RT + B | GMR 半身校准 | `/pico/gmr_calibrate` |
+| LT + B | GMR 全身校准 | `/pico/gmr_calibrate_whole` |
+| **RG + A** | **下一个 RL 控制器** | `/humanoid_controller/switch_to_next_controller` |
+| **RG + B** | **上一个 RL 控制器** | `/humanoid_controller/switch_to_previous_controller`；与 RT+B 互斥 |
+
+控制器按 `rl_controllers.yaml` 中 `enabled: true` 的列表循环：`mpc → RL1 → … → mpc`。切换受 `RLControllerManager` 保护（stance、转腰回中等），失败时见节点日志。
+
+与 Quest3（`QuestControlFSM`）对比：Quest 用 **X+Y 触摸 + A** 切下一个，且**无**手柄切上一个；PICO 用 **RG + A/B** 双向切换。
+
 ## 联系方式
 
 如有问题，请联系 KUAVO 团队。

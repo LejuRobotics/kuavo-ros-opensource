@@ -306,7 +306,8 @@ namespace humanoid_controller
                                             const std::string& source_controller_name,
                                             const std::string& target_controller_name,
                                             double current_time,
-                                            const kuavo_msgs::jointCmd& target_joint_cmd);
+                                            const kuavo_msgs::jointCmd& target_joint_cmd,
+                                            bool enable_target_warmup = false);
     void applyRLToRLSwitchVelocityProfile(double current_time);
     void applyRLToRLLiveInterpolation(double current_time,
                                       const kuavo_msgs::jointCmd& source_joint_cmd,
@@ -996,6 +997,10 @@ namespace humanoid_controller
     bool rl_to_rl_velocity_dip_enabled_ = RL_TO_RL_VELOCITY_DIP_ENABLED_DEFAULT != 0;
     double rl_to_rl_velocity_dip_min_scale_ = RL_TO_RL_VELOCITY_DIP_MIN_SCALE_DEFAULT;
     double rl_to_rl_velocity_dip_midpoint_ = RL_TO_RL_VELOCITY_DIP_MIDPOINT_DEFAULT;
+    bool rl_to_rl_target_warmup_active_ = false;
+    bool rl_to_rl_warmup_blend_armed_ = false;
+    double rl_to_rl_target_warmup_end_time_ = 0.0;
+    double rl_to_rl_vmp_amp_target_warmup_duration_ = RL_TO_RL_VMP_AMP_TARGET_WARMUP_DURATION_DEFAULT;
 
     ControllerCmdBlend cmd_blend_;
     // RL→MPC：cmd_blend 结束后再启动躯干插值（目标复用 torso/arm_interpolation_target_*）

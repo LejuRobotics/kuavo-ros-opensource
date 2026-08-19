@@ -38,6 +38,14 @@ bool FragmentAssembler::addDatagram(const std::vector<uint8_t>& datagram,
     return true;
   }
 
+  // Scale 每个 UDP 数据报都有独立的 segment_count/point_count 结构，必须逐包解析。
+  // 它的最后一包实测为 0x80，不能按普通多分片 Payload 做字节拼接。
+  if (header.message_type == "13")
+  {
+    *complete_datagram = datagram;
+    return true;
+  }
+
   if (header.fragment_index() == 0 && header.is_last_fragment())
   {
     *complete_datagram = datagram;

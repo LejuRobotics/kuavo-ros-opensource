@@ -102,7 +102,7 @@ namespace humanoid_controller
     /**
      * @brief 切换当前控制器
      * @param name 控制器名称（空字符串表示切换到MPC控制器）
-     * @return 是否切换成功
+     * @return 请求是否被接受；VMP->AMP 返回 true 时可能仍在等待手臂归零
      */
     bool switchController(const std::string& name);
 
@@ -419,6 +419,13 @@ namespace humanoid_controller
      */
     bool tryPendingMpcSwitch();
 
+    /**
+     * @brief Complete a deferred VMP->AMP switch after the VMP arm reaches its default pose.
+     */
+    bool tryPendingVmpToAmpSwitch();
+
+    bool isVmpToAmpSwitchPending() const;
+
   private:
     enum class AutoSwitchCommandBufferType
     {
@@ -613,6 +620,9 @@ namespace humanoid_controller
     void publishControllerSwitchEvent(const std::string& from_controller,
                                       const std::string& to_controller);
 
+    void clearPendingVmpToAmpSwitchLocked(const std::string& reason,
+                                          bool cancel_arm_return);
+
     void publishDepthHistoryStatus(TopicMonitor::CheckResult result);
 
     void updateSwitchMotionStateLocked();
@@ -669,6 +679,11 @@ namespace humanoid_controller
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     bool pending_mpc_switch_ = false;               ///< 手臂归位后自动触发MPC切换
+    bool pending_vmp_to_amp_switch_ = false;        ///< VMP手臂归零后自动触发AMP切换
+    bool pending_vmp_to_amp_switch_completing_ = false;
+    std::string pending_vmp_to_amp_source_name_;
+    std::string pending_vmp_to_amp_target_name_;
+    ros::Time pending_vmp_to_amp_start_time_;
     std::string mpc_current_gait_name_ = "stance";  ///< MPC控制器当前步态名称
     bool has_pending_walking_switch_request_ = false;
     std::string pending_walking_switch_source_name_;

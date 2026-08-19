@@ -88,6 +88,26 @@ namespace humanoid_controller
       return start + (target - start) * alpha;
     }
 
+    Eigen::VectorXd jointCmdDoublesToEigen(const std::vector<double>& field, size_t joint_count)
+    {
+      Eigen::VectorXd out(joint_count);
+      for (size_t i = 0; i < joint_count; ++i)
+      {
+        out[i] = (i < field.size()) ? field[i] : 0.0;
+      }
+      return out;
+    }
+
+    Eigen::VectorXd jointCmdModesToEigen(const std::vector<int>& field, size_t joint_count)
+    {
+      Eigen::VectorXd out(joint_count);
+      for (size_t i = 0; i < joint_count; ++i)
+      {
+        out[i] = (i < field.size()) ? static_cast<double>(field[i]) : 0.0;
+      }
+      return out;
+    }
+
     double computeRlToRlVelocityDipScale(double alpha, double min_scale, double midpoint)
     {
       alpha = std::clamp(alpha, 0.0, 1.0);
@@ -3333,6 +3353,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
     // 检查待触发的 MPC 切换（手臂归位后自动补触发）
     controller_manager_->tryPendingMpcSwitch();
+    // VMP->AMP：保持VMP运行并用PD+重力补偿将手臂归零，完成后再切换
+    controller_manager_->tryPendingVmpToAmpSwitch();
 
     // 同步MPC stance状态到RLControllerManager
     controller_manager_->setMpcStanceState(is_stance_mode_, current_gait_.name);
@@ -4444,15 +4466,25 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 #if ENABLE_RL_TO_RL_INTERPOLATION
       if (is_rl_to_rl_switch)  //waao：如果切换rl策略
       {
+        const bool is_vmp_to_amp_switch =
+            current_controller_ptr_ != nullptr &&
+            last_rl_controller != nullptr &&
+            last_rl_controller->getType() == RLControllerType::VMP_CONTROLLER &&
+            current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
 #if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
         if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
         {
-          //waao：双策略推理模式
+          if (is_vmp_to_amp_switch)
+          {
+            ROS_INFO("[RL->RL] Live dual interpolation for VMP->AMP (target warmup): %s -> %s",
+                     last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+          }
           activateRLToRLLiveSourceController(last_rl_controller,
                                              last_rl_controller_name_,
                                              active_rl_controller_name,
                                              currentObservation_.time,
-                                             jointCmdMsg);
+                                             jointCmdMsg,
+                                             is_vmp_to_amp_switch);
         }
         else
         {
@@ -4460,8 +4492,14 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           stopRLToRLInterpolation();
         }
 #else
-        if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+        if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr &&
+            last_rl_controller != nullptr)
         {
+          if (is_vmp_to_amp_switch)
+          {
+            ROS_INFO("[RL->RL] Single-strategy joint_cmd interpolation for VMP->AMP: %s -> %s",
+                     last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+          }
           startRLToRLInterpolation(currentObservation_.time,
                                    last_rl_controller_name_,
                                    active_rl_controller_name,
@@ -4491,15 +4529,22 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       if (is_rl_to_rl_interpolation_active_)
       {
         applyRLToRLSwitchVelocityProfile(currentObservation_.time);
-        kuavo_msgs::jointCmd source_joint_cmd;
-        if (buildRLControllerJointCmd(rl_to_rl_live_source_controller_ptr_, time, source_joint_cmd))
+        if (rl_to_rl_live_source_controller_ptr_ != nullptr)
         {
-          applyRLToRLLiveInterpolation(currentObservation_.time, source_joint_cmd, jointCmdMsg);
+          kuavo_msgs::jointCmd source_joint_cmd;
+          if (buildRLControllerJointCmd(rl_to_rl_live_source_controller_ptr_, time, source_joint_cmd))
+          {
+            applyRLToRLLiveInterpolation(currentObservation_.time, source_joint_cmd, jointCmdMsg);
+          }
+          else
+          {
+            ROS_WARN("[RL->RL] Live interpolation stopped because source controller joint_cmd is unavailable.");
+            stopRLToRLInterpolation();
+          }
         }
         else
         {
-          ROS_WARN("[Switch/RL->RL] stop: source joint_cmd unavailable");
-          stopRLToRLInterpolation();
+          applyRLToRLInterpolation(currentObservation_.time, jointCmdMsg);
         }
       }
 #else
@@ -4517,6 +4562,12 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       if (current_controller_ptr_ != nullptr)
       {
         last_rl_joint_reference_ = current_controller_ptr_->getCurrentJointReference();
+        if (last_rl_joint_reference_.size() == 0 && !jointCmdMsg.joint_q.empty())
+        {
+          const size_t body_joint_count =
+              static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+          last_rl_joint_reference_ = jointCmdDoublesToEigen(jointCmdMsg.joint_q, body_joint_count);
+        }
         has_last_rl_joint_reference_ = (last_rl_joint_reference_.size() > 0);
       }
       else
@@ -6407,8 +6458,12 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     controllerNh_.param("/rl_to_rl_velocity_dip_enabled", rl_to_rl_velocity_dip_enabled_, rl_to_rl_velocity_dip_enabled_);
     controllerNh_.param("/rl_to_rl_velocity_dip_min_scale", rl_to_rl_velocity_dip_min_scale_, rl_to_rl_velocity_dip_min_scale_);
     controllerNh_.param("/rl_to_rl_velocity_dip_midpoint", rl_to_rl_velocity_dip_midpoint_, rl_to_rl_velocity_dip_midpoint_);
+    controllerNh_.param("/rl_to_rl_vmp_amp_target_warmup_duration",
+                        rl_to_rl_vmp_amp_target_warmup_duration_,
+                        rl_to_rl_vmp_amp_target_warmup_duration_);
     rl_to_rl_velocity_dip_min_scale_ = std::clamp(rl_to_rl_velocity_dip_min_scale_, 0.0, 1.0);
     rl_to_rl_velocity_dip_midpoint_ = std::clamp(rl_to_rl_velocity_dip_midpoint_, 0.05, 0.95);
+    rl_to_rl_vmp_amp_target_warmup_duration_ = std::max(rl_to_rl_vmp_amp_target_warmup_duration_, 0.0);
   }
 
   void humanoidController::applyRLToRLSwitchVelocityProfile(double current_time)
@@ -6514,7 +6569,8 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
                                                               const std::string& source_controller_name,
                                                               const std::string& target_controller_name,
                                                               double current_time,
-                                                              const kuavo_msgs::jointCmd& target_joint_cmd)
+                                                              const kuavo_msgs::jointCmd& target_joint_cmd,
+                                                              bool enable_target_warmup)
   {
     if (source_controller == nullptr)
     {
@@ -6522,22 +6578,61 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       return;
     }
 
+    if (rl_to_rl_live_source_controller_ptr_ != nullptr &&
+        rl_to_rl_live_source_controller_ptr_ != source_controller)
+    {
+      if (auto* arm_controller = rl_to_rl_live_source_controller_ptr_->getArmController())
+      {
+        arm_controller->cancelDefaultPoseReturnForSwitch();
+      }
+      rl_to_rl_live_source_controller_ptr_->pause();
+      rl_to_rl_live_source_controller_ptr_ = nullptr;
+    }
+
     rl_to_rl_live_source_controller_ptr_ = source_controller;
     rl_to_rl_switch_start_time_ = current_time;
     rl_to_rl_source_controller_name_ = source_controller_name;
     rl_to_rl_target_controller_name_ = target_controller_name;
     is_rl_to_rl_interpolation_active_ = true;
+    rl_to_rl_target_warmup_active_ = enable_target_warmup;
+    rl_to_rl_warmup_blend_armed_ = false;
+    if (enable_target_warmup)
+    {
+      rl_to_rl_target_warmup_end_time_ =
+          current_time + rl_to_rl_vmp_amp_target_warmup_duration_;
+    }
+    else
+    {
+      rl_to_rl_target_warmup_end_time_ = 0.0;
+    }
 #if RL_TO_RL_USE_WARM_RESUME
     rl_to_rl_live_source_controller_ptr_->resumeWarm();
 #else
     rl_to_rl_live_source_controller_ptr_->resume();
 #endif
 
-    ROS_INFO("[Switch/RL->RL] live %s -> %s %.2fs",
+    size_t mode_change_count = 0;
+    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+    const size_t valid_joint_count = std::min({body_joint_count,
+                                               last_rl_joint_cmd_.control_modes.size(),
+                                               target_joint_cmd.control_modes.size()});
+    for (size_t i = 0; i < valid_joint_count; ++i)
+    {
+      if (last_rl_joint_cmd_.control_modes[i] != target_joint_cmd.control_modes[i])
+      {
+        ++mode_change_count;
+      }
+    }
+
+    ROS_INFO("[RL->RL] Start quintic live joint_cmd interpolation: %s -> %s, duration=%.3fs, mode_changes=%zu%s",
              source_controller_name.c_str(),
              target_controller_name.c_str(),
-             rl_to_rl_switch_duration_);
-    publishRLToRLSwitchDebugState(0.0, "started_live", current_time);
+             rl_to_rl_switch_duration_,
+             mode_change_count,
+             enable_target_warmup ? " (target warmup)" : "");
+    publishRLToRLSwitchDebugState(0.0,
+                                  enable_target_warmup ? "started_live_warmup" : "started_live",
+                                  current_time);
   }
 
   void humanoidController::applyRLToRLLiveInterpolation(double current_time,
@@ -6550,6 +6645,52 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     }
 
     const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+    if (rl_to_rl_target_warmup_active_)
+    {
+      if (current_time < rl_to_rl_target_warmup_end_time_)
+      {
+        publishRLToRLSwitchDebugState(0.0, "warmup_live", current_time);
+        const size_t valid_joint_count = std::min({body_joint_count,
+                                                   source_joint_cmd.joint_q.size(),
+                                                   source_joint_cmd.joint_v.size(),
+                                                   source_joint_cmd.tau.size(),
+                                                   source_joint_cmd.tau_max.size(),
+                                                   source_joint_cmd.tau_ratio.size(),
+                                                   source_joint_cmd.joint_kp.size(),
+                                                   source_joint_cmd.joint_kd.size(),
+                                                   source_joint_cmd.control_modes.size(),
+                                                   target_joint_cmd.joint_q.size(),
+                                                   target_joint_cmd.joint_v.size(),
+                                                   target_joint_cmd.tau.size(),
+                                                   target_joint_cmd.tau_max.size(),
+                                                   target_joint_cmd.tau_ratio.size(),
+                                                   target_joint_cmd.joint_kp.size(),
+                                                   target_joint_cmd.joint_kd.size(),
+                                                   target_joint_cmd.control_modes.size()});
+        for (size_t i = 0; i < valid_joint_count; ++i)
+        {
+          target_joint_cmd.joint_q[i] = source_joint_cmd.joint_q[i];
+          target_joint_cmd.joint_v[i] = source_joint_cmd.joint_v[i];
+          target_joint_cmd.tau[i] = source_joint_cmd.tau[i];
+          target_joint_cmd.tau_ratio[i] = source_joint_cmd.tau_ratio[i];
+          target_joint_cmd.tau_max[i] = source_joint_cmd.tau_max[i];
+          target_joint_cmd.joint_kp[i] = source_joint_cmd.joint_kp[i];
+          target_joint_cmd.joint_kd[i] = source_joint_cmd.joint_kd[i];
+          target_joint_cmd.control_modes[i] = source_joint_cmd.control_modes[i];
+        }
+        return;
+      }
+      if (!rl_to_rl_warmup_blend_armed_)
+      {
+        rl_to_rl_warmup_blend_armed_ = true;
+        rl_to_rl_target_warmup_active_ = false;
+        rl_to_rl_switch_start_time_ = current_time;
+        ROS_INFO("[RL->RL] target warmup done, begin blend %s -> %s",
+                 rl_to_rl_source_controller_name_.c_str(),
+                 rl_to_rl_target_controller_name_.c_str());
+      }
+    }
+
     const double duration = std::max(rl_to_rl_switch_duration_, 1e-3);
     const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
     const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
@@ -6622,6 +6763,10 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       clearRLToRLWalkingPhaseSync();
       if (rl_to_rl_live_source_controller_ptr_ != nullptr)
       {
+        if (auto* arm_controller = rl_to_rl_live_source_controller_ptr_->getArmController())
+        {
+          arm_controller->cancelDefaultPoseReturnForSwitch();
+        }
         rl_to_rl_live_source_controller_ptr_->pause();
         rl_to_rl_live_source_controller_ptr_ = nullptr;
       }
@@ -6651,6 +6796,16 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
                                                    const Eigen::VectorXd& target_joint_pd_modes,
                                                    const kuavo_msgs::jointCmd& target_joint_cmd)
   {
+    if (rl_to_rl_live_source_controller_ptr_ != nullptr)
+    {
+      if (auto* arm_controller = rl_to_rl_live_source_controller_ptr_->getArmController())
+      {
+        arm_controller->cancelDefaultPoseReturnForSwitch();
+      }
+      rl_to_rl_live_source_controller_ptr_->pause();
+      rl_to_rl_live_source_controller_ptr_ = nullptr;
+    }
+
     const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
     const bool size_ok = start_joint_reference.size() >= static_cast<Eigen::Index>(body_joint_count) &&
                          target_joint_reference.size() >= static_cast<Eigen::Index>(body_joint_count) &&
@@ -6833,9 +6988,16 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     is_rl_to_rl_interpolation_active_ = false;
     applyRLToRLSwitchVelocityProfile(currentObservation_.time);
     clearRLToRLWalkingPhaseSync();
+    rl_to_rl_target_warmup_active_ = false;
+    rl_to_rl_warmup_blend_armed_ = false;
+    rl_to_rl_target_warmup_end_time_ = 0.0;
     //waao：状态机切换结束后暂停原策略推理
     if (rl_to_rl_live_source_controller_ptr_ != nullptr)
     {
+      if (auto* arm_controller = rl_to_rl_live_source_controller_ptr_->getArmController())
+      {
+        arm_controller->cancelDefaultPoseReturnForSwitch();
+      }
       rl_to_rl_live_source_controller_ptr_->pause();
       rl_to_rl_live_source_controller_ptr_ = nullptr;
     }

@@ -9,6 +9,7 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include <Eigen/Dense>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -163,6 +164,29 @@ public:
      */
     bool changeMode(int target_mode);
     void setExternalCommandBufferCallback(std::function<bool()> callback);
+
+    /**
+     * @brief Start an arm-only return to the configured default pose before a controller switch.
+     *
+     * The request stays latched so the default-pose PD/gravity command is still emitted while
+     * VMP is used as the live source of the subsequent RL->RL blend.
+     */
+    bool requestDefaultPoseReturnForSwitch();
+    bool isDefaultPoseReturnForSwitchComplete() const
+    {
+      return default_pose_return_for_switch_state_.load(std::memory_order_acquire) ==
+             DefaultPoseReturnState::kComplete;
+    }
+    void cancelDefaultPoseReturnForSwitch();
+
+    /**
+     * @brief Pause/resume external (mode 2) arm tracking without changing modes.
+     *
+     * While paused, the last emitted arm position is held with zero target
+     * velocity and incoming external targets are discarded.
+     */
+    void setExternalControlPaused(bool paused);
+    bool isExternalControlPaused() const { return external_control_pause_requested_.load(); }
     
     /**
      * @brief 获取当前控制模式
@@ -178,6 +202,11 @@ public:
      */
     int getRequestedMode() const
     {
+      if (default_pose_return_for_switch_state_.load(std::memory_order_acquire) !=
+          DefaultPoseReturnState::kIdle)
+      {
+        return static_cast<int>(ControlMode::kAutoSwing);
+      }
       if (arm_control_mode_ == ControlMode::kExternal && is_returning_from_external_)
       {
         return static_cast<int>(ControlMode::kAutoSwing);
@@ -273,12 +302,20 @@ private:
         kHolding   // 按住：到位后持续按住默认位（仅站立）
     };
 
+    enum class DefaultPoseReturnState
+    {
+        kIdle,
+        kRequested,
+        kStarted,
+        kComplete
+    };
+
     // ==================== 内部辅助函数 ====================
     
     /**
      * @brief 应用模式切换的核心逻辑（使用保存的当前位置和速度）
      */
-    void applyModeChange(int target_mode);
+    void applyModeChange(int target_mode, bool force_interpolation_to_default = false);
     
     /**
      * @brief 执行缓存的模式切换指令（使用保存的当前位置和速度）
@@ -317,6 +354,19 @@ private:
      * @brief 更新外部控制的期望值
      */
     void updateExternalControl(double dt);
+
+    /**
+     * @brief Apply an external-control pause transition in the control thread.
+     */
+    void applyExternalControlPauseState();
+
+    /**
+     * @brief Reacquire an external target without the normal error-threshold snap.
+     * @return true once every joint has reached the target.
+     */
+    bool applyStrictRateLimitedInterpolation(double dt,
+                                             const Eigen::VectorXd& target_pos,
+                                             double max_velocity);
     
     /**
      * @brief 限速插值函数（用于模式1和模式2）
@@ -399,6 +449,9 @@ private:
     Eigen::VectorXd default_arm_pos_;  // 默认手臂位置（自动摆臂时站立回家的目标）
     AutoSwingState auto_swing_state_{AutoSwingState::kSwing}; // 自动摆臂内部子状态（门禁：!= kSwing 时本控制器填充手臂指令）
     bool is_returning_from_external_{false}; // 外部控制→自动摆臂 归位中：外壳保持外部控制，回家完成后翻回
+    std::atomic<DefaultPoseReturnState> default_pose_return_for_switch_state_{
+        DefaultPoseReturnState::kIdle};
+    int default_pose_return_settled_cycles_{0};
     
     // 外部控制相关
     Eigen::VectorXd raw_external_target_q_; // 外部控制原始目标位置（从/kuavo_arm_traj获取）
@@ -413,6 +466,13 @@ private:
     std::function<bool()> external_command_buffer_callback_;
     ros::Time last_external_input_time_; // 上一次外部输入的时间戳
     bool last_external_input_time_valid_; // 上一次时间戳是否有效
+    std::atomic<bool> external_control_pause_requested_{false};
+    bool external_control_pause_active_{false};
+    bool external_pause_resume_reacquiring_{false};
+    bool has_emitted_arm_command_{false};
+    Eigen::VectorXd external_pause_hold_q_;
+    Eigen::VectorXd external_pause_source_q_;
+    bool external_pause_source_valid_{false};
     
     // 手臂关节指令低通滤波相关
     LowPassFilter2ndOrder arm_joint_pos_filter_; // 手臂位置指令低通滤波器
@@ -450,6 +510,7 @@ private:
 
     // 线程安全
     mutable std::mutex state_mutex_;    // 状态访问互斥锁
+    mutable std::mutex external_target_mutex_; // ROS 外部目标回调与控制线程同步
 };
 
 } // namespace humanoid_controller

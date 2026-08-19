@@ -25,6 +25,7 @@ import os
 import rospy
 from geometry_msgs.msg import Point, Quaternion
 from kuavo_msgs.msg import picoPoseInfo, picoPoseInfoList, robotBodyMatrices, JoySticks
+from kuavo_msgs.srv import switchToNextController
 from std_srvs.srv import SetBool, Trigger
 import tf
 from typing import Optional, Tuple, List
@@ -337,15 +338,21 @@ class MinimalPicoReceiver:
         self._trigger_threshold = 0.5
         
         # 按钮前一帧状态（用于上升沿检测）
-        self._prev_btn = {'X': False, 'Y': False, 'B': False}
+        self._prev_btn = {'X': False, 'Y': False, 'A': False, 'B': False}
         
         # VMP 推流控制服务客户端（惰性初始化）
         self._vmp_stream_control_client = None
         # GMR 校准服务客户端（惰性初始化）
         self._gmr_calibrate_client = None          # RT+B → 半身校准
         self._gmr_calibrate_whole_client = None     # LT+B → 全身校准
+        # RL 控制器切换服务客户端（惰性初始化）
+        self._switch_next_controller_client = None
+        self._switch_previous_controller_client = None
         
-        rospy.loginfo("PICO joy handler initialized (RT+Y=pause, RT+X=resume VMP stream, RT+B=半身校准, LT+B=全身校准)")
+        rospy.loginfo(
+            "PICO joy handler initialized (RT+Y=pause, RT+X=resume VMP stream, "
+            "RT+B=半身校准, LT+B=全身校准, RG+A=下一个控制器, RG+B=上一个控制器)"
+        )
     
     def _process_controller_data(self, controller_data):
         """
@@ -388,8 +395,9 @@ class MinimalPicoReceiver:
             if not rospy.is_shutdown():
                 self.pico_joy_pub.publish(joy_msg)
             
-            # 处理 VMP 推流控制按键组合
-            self._handle_vmp_stream_buttons(joy_msg)
+            # 处理 VMP 推流 / GMR 校准 / 控制器切换按键组合
+            right_grip_pressed = right["buttons"][2] or right["axes"][2] >= self._trigger_threshold
+            self._handle_vmp_stream_buttons(joy_msg, right_grip_pressed=right_grip_pressed)
             
         except Exception as e:
             rospy.logerr(f"Error processing controller data: {e}")
@@ -415,17 +423,20 @@ class MinimalPicoReceiver:
             ]
         }
     
-    def _handle_vmp_stream_buttons(self, joy_msg: JoySticks):
+    def _handle_vmp_stream_buttons(self, joy_msg: JoySticks, right_grip_pressed: bool = False):
         """
-        处理 VMP 推流控制和 GMR 校准的按键组合：
+        处理 VMP 推流控制、GMR 校准与 RL 控制器切换的按键组合：
         - RT + Y（上升沿）→ 暂停推流
         - RT + X（上升沿）→ 恢复推流
         - RT + B（上升沿）→ GMR 半身校准 (upper_body)
         - LT + B（上升沿）→ GMR 全身校准 (whole_body)
+        - RG + A（上升沿）→ 下一个 RL 控制器
+        - RG + B（上升沿）→ 上一个 RL 控制器
         """
         # 当前按钮状态
         curr_x = bool(joy_msg.left_first_button_pressed)   # X 按钮
         curr_y = bool(joy_msg.left_second_button_pressed)  # Y 按钮
+        curr_a = bool(joy_msg.right_first_button_pressed)  # A 按钮
         curr_b = bool(joy_msg.right_second_button_pressed) # B 按钮
         
         # RT（右扳机）/ LT（左扳机）是否按下
@@ -435,6 +446,7 @@ class MinimalPicoReceiver:
         # 检测上升沿（当前按下且前一帧未按下）
         y_rising = curr_y and not self._prev_btn['Y']
         x_rising = curr_x and not self._prev_btn['X']
+        a_rising = curr_a and not self._prev_btn['A']
         b_rising = curr_b and not self._prev_btn['B']
         
         # RT + Y 上升沿 → 暂停推流
@@ -453,9 +465,16 @@ class MinimalPicoReceiver:
         if lt_pressed and b_rising:
             self._call_gmr_calibrate("whole_body")
         
+        # RG（右手握把边键）+ A/B 上升沿 → RL 控制器循环切换（B 与 RT+B 半身校准时互斥）
+        if right_grip_pressed and a_rising:
+            self._call_switch_controller("next")
+        elif right_grip_pressed and b_rising and not rt_pressed:
+            self._call_switch_controller("previous")
+        
         # 更新前一帧状态
         self._prev_btn['X'] = curr_x
         self._prev_btn['Y'] = curr_y
+        self._prev_btn['A'] = curr_a
         self._prev_btn['B'] = curr_b
     
     def _call_vmp_stream_control(self, pause: bool):
@@ -479,6 +498,43 @@ class MinimalPicoReceiver:
         except rospy.ServiceException as e:
             rospy.logerr(f"VMP推流控制服务调用失败: {e}")
             self._vmp_stream_control_client = None
+
+    def _call_switch_controller(self, direction: str):
+        """调用 RL 控制器切换服务（RG+A=下一个，RG+B=上一个）"""
+        if direction == "next":
+            service_name = "/humanoid_controller/switch_to_next_controller"
+            combo_label = "RG+A"
+            client_attr = "_switch_next_controller_client"
+        elif direction == "previous":
+            service_name = "/humanoid_controller/switch_to_previous_controller"
+            combo_label = "RG+B"
+            client_attr = "_switch_previous_controller_client"
+        else:
+            return
+
+        try:
+            client = getattr(self, client_attr)
+            if client is None:
+                rospy.wait_for_service(service_name, timeout=1.0)
+                client = rospy.ServiceProxy(service_name, switchToNextController)
+                setattr(self, client_attr, client)
+
+            resp = client()
+            if resp.success:
+                rospy.loginfo(
+                    "\033[93m控制器切换成功 (%s): %s -> %s\033[0m",
+                    combo_label,
+                    resp.current_controller,
+                    resp.next_controller,
+                )
+            else:
+                rospy.logwarn("控制器切换失败 (%s): %s", combo_label, resp.message)
+        except rospy.ROSException:
+            rospy.logwarn_once("控制器切换服务不可用: %s", service_name)
+            setattr(self, client_attr, None)
+        except rospy.ServiceException as e:
+            rospy.logerr("控制器切换服务调用失败 (%s): %s", combo_label, e)
+            setattr(self, client_attr, None)
 
     def _call_gmr_calibrate(self, cali_option: str = "upper_body"):
         """调用 GMR 校准服务

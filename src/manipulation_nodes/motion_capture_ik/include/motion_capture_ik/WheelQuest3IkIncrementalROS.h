@@ -26,6 +26,7 @@
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
+#include "motion_capture_ik/WheelNaturalElbowGuide.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "DrakeChestElbowHandPointOpt.hpp"
@@ -136,10 +137,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
     Eigen::Quaterniond chestQuatRef = Eigen::Quaterniond::Identity();  // yaw/pitch-only
 
     Eigen::Vector3d leftElbowRef = Eigen::Vector3d::Zero();
+    double leftElbowTrackingActivation = 1.0;
     Eigen::Vector3d leftHandRef = Eigen::Vector3d::Zero();
     Eigen::Quaterniond leftHandQuat = Eigen::Quaterniond::Identity();
 
     Eigen::Vector3d rightElbowRef = Eigen::Vector3d::Zero();
+    double rightElbowTrackingActivation = 1.0;
     Eigen::Vector3d rightHandRef = Eigen::Vector3d::Zero();
     Eigen::Quaterniond rightHandQuat = Eigen::Quaterniond::Identity();
   };
@@ -323,6 +326,13 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::unique_ptr<DrakeChestElbowHandPointOptSolver> chestElbowHandPointOptSolverPtr_;
   DrakeChestElbowHandWeightConfig chestElbowHandWeightConfig_;
   DrakeChestElbowHandBoundsConfig chestElbowHandBoundsConfig_;
+  bool enableWheelNaturalElbowGuide_ = true;
+  WheelNaturalElbowGuideConfig wheelNaturalElbowGuideConfig_;
+  double wheelNaturalElbowSoftTrackingScale_ = 0.10;
+  double latestLeftElbowTrackingActivation_ = 1.0;
+  double latestRightElbowTrackingActivation_ = 1.0;
+  std::unique_ptr<WheelNaturalElbowGuide> leftNaturalElbowGuide_;
+  std::unique_ptr<WheelNaturalElbowGuide> rightNaturalElbowGuide_;
   bool drakeSolveUpdateChestOrientation_ = true;
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;
@@ -422,9 +432,14 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::vector<PoseData> latestPoseConstraintList_;  // 保存最新的pose约束列表
   WheelIncrementalPoseResult latestIncrementalResult_;
 
-  // 保存 incrementalController_ 查询结果的手部和肘部位置
-  Eigen::Vector3d latestHumanLeftElbowPos_;   // 左肘位置（通过 FK 计算）
-  Eigen::Vector3d latestHumanRightElbowPos_;  // 右肘位置（通过 FK 计算）
+  // Quest3 transformed human arm points, in the same robot-base convention as
+  // latestLeftHandPose_vr_ / latestRightHandPose_vr_.
+  Eigen::Vector3d latestHumanLeftShoulderPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanRightShoulderPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanLeftElbowPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanRightElbowPos_ = Eigen::Vector3d::Zero();
+  bool latestHumanLeftArmPoseValid_ = false;
+  bool latestHumanRightArmPoseValid_ = false;
 
   Eigen::Vector3d latestRobotLeftElbowPos_;
   Eigen::Vector3d latestRobotRightElbowPos_;

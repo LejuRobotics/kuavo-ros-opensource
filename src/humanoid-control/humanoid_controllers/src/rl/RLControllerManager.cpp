@@ -36,6 +36,18 @@ namespace humanoid_controller
              controller_class == ControllerClass::DANCE_CONTROLLER;
     }
 
+    bool isVmpToAmpSwitch(RLControllerType source_type, RLControllerType target_type)
+    {
+      return source_type == RLControllerType::VMP_CONTROLLER &&
+             target_type == RLControllerType::AMP_CONTROLLER;
+    }
+
+    bool isAmpToVmpSwitch(RLControllerType source_type, RLControllerType target_type)
+    {
+      return source_type == RLControllerType::AMP_CONTROLLER &&
+             target_type == RLControllerType::VMP_CONTROLLER;
+    }
+
     const char* switchMotionStateName(RLControllerManager::SwitchMotionState state)
     {
       switch (state)
@@ -397,6 +409,56 @@ namespace humanoid_controller
     std::unique_lock<std::recursive_mutex> lock(mutex_);
     const std::string current_before = current_controller_name_.empty() ? "mpc" : current_controller_name_;
 
+    // A deferred handoff owns the switch slot until it commits. Repeated presses
+    // are idempotent; only an emergency FallStand request may interrupt it.
+    if (pending_vmp_to_amp_switch_ && !pending_vmp_to_amp_switch_completing_)
+    {
+      if (current_controller_name_ == pending_vmp_to_amp_source_name_ &&
+          name == pending_vmp_to_amp_source_name_)
+      {
+        clearPendingVmpToAmpSwitchLocked("cancelled by explicitly re-selecting VMP", true);
+        ROS_INFO("[RLControllerManager] VMP->AMP arm return cancelled; VMP remains active in mode 1");
+        return true;
+      }
+
+      if (current_controller_name_ == pending_vmp_to_amp_source_name_ &&
+          name == pending_vmp_to_amp_target_name_)
+      {
+        ROS_INFO_THROTTLE(1.0,
+                          "[RLControllerManager] VMP->AMP arm return already pending: %s -> %s",
+                          pending_vmp_to_amp_source_name_.c_str(),
+                          pending_vmp_to_amp_target_name_.c_str());
+        return true;
+      }
+
+      const auto interrupt_it = controllers_.find(name);
+      const bool emergency_fall_stand =
+          interrupt_it != controllers_.end() && interrupt_it->second &&
+          interrupt_it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+      if (!emergency_fall_stand)
+      {
+        logSwitchBlocked("VMP->AMP arm return is in progress for '" +
+                         pending_vmp_to_amp_target_name_ +
+                         "'; reject concurrent switch to '" +
+                         (name.empty() ? std::string("mpc") : name) + "'");
+        return false;
+      }
+
+      // Keep the zero-output latch until the emergency switch has consumed the
+      // source command. It will be cleared when the live-source blend ends or
+      // when VMP is activated again.
+      clearPendingVmpToAmpSwitchLocked("interrupted by emergency FallStand", false);
+    }
+
+    if (pending_vmp_to_amp_switch_completing_ &&
+        (!pending_vmp_to_amp_switch_ ||
+         current_controller_name_ != pending_vmp_to_amp_source_name_ ||
+         name != pending_vmp_to_amp_target_name_))
+    {
+      logSwitchBlocked("invalid deferred VMP->AMP completion state");
+      return false;
+    }
+
     if (pending_arm_prepared_switch_)
     {
       // 同一目标在手臂归位期间可能被持续的摇杆/导航消息重复请求；保持原请求，
@@ -414,6 +476,9 @@ namespace humanoid_controller
     SwitchMotionState source_motion_state = SwitchMotionState::STANCE;
     bool source_is_stance_or_stationary = false;
     bool allow_walking_phase_sync_switch = false;
+    RLControllerType source_controller_type = RLControllerType::MPC;
+    Eigen::Quaterniond source_robot_imu_quat = Eigen::Quaterniond::Identity();
+    ros::Time source_robot_sensor_stamp(0);
     
     // mimic 类控制器（倒地起身/舞蹈）：仅在未完成（isAllowToExit==false）时禁止切出
     if (!current_controller_name_.empty())
@@ -430,6 +495,7 @@ namespace humanoid_controller
       
 
       has_source_gait_command = current_controller->getGaitCommandState(source_gait_command);
+      source_controller_type = current_controller->getType();
       updateSwitchMotionStateLocked();
       source_motion_state = switch_motion_state_;
       source_is_stance_or_stationary = source_motion_state != SwitchMotionState::WALKING;
@@ -501,9 +567,21 @@ namespace humanoid_controller
     }
 
     // 检查控制器是否存在
-    if (controllers_.find(name) == controllers_.end())
+    const auto requested_target_it = controllers_.find(name);
+    if (requested_target_it == controllers_.end() || !requested_target_it->second)
     {
       logSwitchBlocked("target controller '" + name + "' is not loaded");
+      return false;
+    }
+
+    const bool is_deferred_vmp_to_amp_commit =
+        pending_vmp_to_amp_switch_completing_ && pending_vmp_to_amp_switch_ &&
+        current_controller_name_ == pending_vmp_to_amp_source_name_ &&
+        name == pending_vmp_to_amp_target_name_ &&
+        isVmpToAmpSwitch(source_controller_type, requested_target_it->second->getType());
+    if (pending_vmp_to_amp_switch_completing_ && !is_deferred_vmp_to_amp_commit)
+    {
+      logSwitchBlocked("invalid deferred VMP->AMP source or target");
       return false;
     }
 
@@ -586,6 +664,63 @@ namespace humanoid_controller
       }
     }
 
+    // VMP needs the active source controller's IMU sample. The inactive VMP
+    // copy is stale while AMP is rotating the robot, so snapshot before pause.
+    auto* target_controller = requested_target_it->second.get();
+
+    if (!is_deferred_vmp_to_amp_commit && target_controller &&
+        !current_controller_name_.empty() &&
+        isVmpToAmpSwitch(source_controller_type, target_controller->getType()))
+    {
+      auto* current_controller = controllers_[current_controller_name_].get();
+      auto* arm_controller = current_controller ? current_controller->getArmController() : nullptr;
+      if (!arm_controller)
+      {
+        logSwitchBlocked("VMP->AMP requires an initialized VMP ArmController");
+        return false;
+      }
+      if (pending_mpc_switch_)
+      {
+        logSwitchBlocked("an RL->MPC arm return is already pending");
+        return false;
+      }
+      if (!arm_controller->requestDefaultPoseReturnForSwitch())
+      {
+        logSwitchBlocked("failed to start VMP arm return to default pose");
+        return false;
+      }
+
+      pending_vmp_to_amp_switch_ = true;
+      pending_vmp_to_amp_source_name_ = current_controller_name_;
+      pending_vmp_to_amp_target_name_ = name;
+      pending_vmp_to_amp_start_time_ = ros::Time::now();
+      changeArmCtrlModeAsync(1, current_controller_name_);
+      ROS_INFO("[RLControllerManager] VMP->AMP deferred: returning arm to default pose first (%s -> %s)",
+               current_controller_name_.c_str(), name.c_str());
+      return true;
+    }
+
+    if (target_controller &&
+        target_controller->getType() == RLControllerType::VMP_CONTROLLER &&
+        !current_controller_name_.empty())
+    {
+      auto* current_controller = controllers_[current_controller_name_].get();
+      SensorData sensor_snapshot;
+      if (current_controller && current_controller->getRobotSensorDataSnapshot(sensor_snapshot))
+      {
+        Eigen::Quaterniond q(static_cast<double>(sensor_snapshot.quat_.w()),
+                             static_cast<double>(sensor_snapshot.quat_.x()),
+                             static_cast<double>(sensor_snapshot.quat_.y()),
+                             static_cast<double>(sensor_snapshot.quat_.z()));
+        const double q_norm = q.norm();
+        if (q.coeffs().allFinite() && std::isfinite(q_norm) && q_norm > 1e-8)
+        {
+          source_robot_imu_quat = q.normalized();
+          source_robot_sensor_stamp = sensor_snapshot.timeStamp_;
+        }
+      }
+    }
+
     // 暂停当前控制器（如果存在）
     if (!current_controller_name_.empty())
     {
@@ -602,62 +737,102 @@ namespace humanoid_controller
     auto* new_controller = controllers_[name].get();
     if (new_controller)
     {
+      if (new_controller->getType() == RLControllerType::VMP_CONTROLLER)
+      {
+        // This is a real VMP activation through the manager, not the temporary
+        // warm resume used while VMP supplies the source side of an RL blend.
+        if (auto* arm_controller = new_controller->getArmController())
+        {
+          arm_controller->cancelDefaultPoseReturnForSwitch();
+        }
+        static_cast<VMPController*>(new_controller)->prepareRetargetedStreamingResume(
+            source_robot_imu_quat, source_robot_sensor_stamp);
+      }
+
       if (current_controller_name_.empty())
       {
         new_controller->resetGaitCommandState(true);
       }
-#if RL_TO_RL_USE_WARM_RESUME
-      bool use_warm_resume = false;
-      if (!current_controller_name_.empty())
+
+      const bool force_cold_reset_for_vmp_to_amp =
+          !current_controller_name_.empty() &&
+          isVmpToAmpSwitch(source_controller_type, new_controller->getType());
+      const bool force_cold_reset_for_amp_to_vmp =
+          !current_controller_name_.empty() &&
+          isAmpToVmpSwitch(source_controller_type, new_controller->getType());
+
+      if (force_cold_reset_for_vmp_to_amp)
       {
-        const auto current_class_it = controller_classes_.find(current_controller_name_);
-        const auto target_class_it = controller_classes_.find(name);
-        const bool current_supports_stance_interpolation =
-            current_class_it != controller_classes_.end() &&
-            isStanceInterpolatedControllerClass(current_class_it->second);
-        const bool target_supports_stance_interpolation =
-            target_class_it != controller_classes_.end() &&
-            isStanceInterpolatedControllerClass(target_class_it->second);
-        const bool use_stance_interpolated_resume =
-            source_is_stance_or_stationary &&
-            current_supports_stance_interpolation &&
-            target_supports_stance_interpolation;
-        use_warm_resume =
-            (source_motion_state == SwitchMotionState::WALKING && allow_walking_phase_sync_switch) ||
-            use_stance_interpolated_resume;
+        // VMP->AMP：清 AMP 观测历史帧并重锚 yaw，再冷启动
+        new_controller->resetGaitCommandState(true);
+        new_controller->reset();
+        new_controller->resume();
+        ROS_INFO("[RLControllerManager] VMP->AMP force cold reset (clear obs history): %s -> %s",
+                 current_controller_name_.c_str(), name.c_str());
       }
-#else
-      const bool use_warm_resume = false;
-#endif
-      if (!current_controller_name_.empty())
+      else if (force_cold_reset_for_amp_to_vmp)
       {
-        if (source_is_stance_or_stationary)
-        {
-          new_controller->resetGaitCommandState(true);
-          ROS_INFO("[RLControllerManager] Reset target gait command to stance during RL->RL switch: %s -> %s",
-                   current_controller_name_.c_str(), name.c_str());
-        }
-        else if (auto_switch_config_.enabled &&
-                 name == auto_switch_config_.manipulation_controller)
-        {
-          new_controller->resetGaitCommandState(true);
-          ROS_INFO("[RLControllerManager] Reset manipulation controller gait command to stance during RL->RL switch: %s -> %s",
-                   current_controller_name_.c_str(), name.c_str());
-        }
-        else if (has_source_gait_command)
-        {
-          new_controller->setGaitCommandState(source_gait_command);
-          ROS_INFO("[RLControllerManager] Sync gait command state during RL->RL switch: %s -> %s",
-                   current_controller_name_.c_str(), name.c_str());
-        }
-      }
-      if (use_warm_resume)
-      {
-        new_controller->resumeWarm();
+        // AMP->VMP：清 VMP buffer/estimator，禁止 warm resume（resume 不调用 reset）
+        new_controller->reset();
+        new_controller->resume();
+        ROS_INFO("[RLControllerManager] AMP->VMP force cold reset (skip warm resume): %s -> %s",
+                 current_controller_name_.c_str(), name.c_str());
       }
       else
       {
-        new_controller->resume();
+#if RL_TO_RL_USE_WARM_RESUME
+        bool use_warm_resume = false;
+        if (!current_controller_name_.empty())
+        {
+          const auto current_class_it = controller_classes_.find(current_controller_name_);
+          const auto target_class_it = controller_classes_.find(name);
+          const bool current_supports_stance_interpolation =
+              current_class_it != controller_classes_.end() &&
+              isStanceInterpolatedControllerClass(current_class_it->second);
+          const bool target_supports_stance_interpolation =
+              target_class_it != controller_classes_.end() &&
+              isStanceInterpolatedControllerClass(target_class_it->second);
+          const bool use_stance_interpolated_resume =
+              source_is_stance_or_stationary &&
+              current_supports_stance_interpolation &&
+              target_supports_stance_interpolation;
+          use_warm_resume =
+              (source_motion_state == SwitchMotionState::WALKING && allow_walking_phase_sync_switch) ||
+              use_stance_interpolated_resume;
+        }
+#else
+        const bool use_warm_resume = false;
+#endif
+        if (!current_controller_name_.empty())
+        {
+          if (source_is_stance_or_stationary)
+          {
+            new_controller->resetGaitCommandState(true);
+            ROS_INFO("[RLControllerManager] Reset target gait command to stance during RL->RL switch: %s -> %s",
+                     current_controller_name_.c_str(), name.c_str());
+          }
+          else if (auto_switch_config_.enabled &&
+                   name == auto_switch_config_.manipulation_controller)
+          {
+            new_controller->resetGaitCommandState(true);
+            ROS_INFO("[RLControllerManager] Reset manipulation controller gait command to stance during RL->RL switch: %s -> %s",
+                     current_controller_name_.c_str(), name.c_str());
+          }
+          else if (has_source_gait_command)
+          {
+            new_controller->setGaitCommandState(source_gait_command);
+            ROS_INFO("[RLControllerManager] Sync gait command state during RL->RL switch: %s -> %s",
+                     current_controller_name_.c_str(), name.c_str());
+          }
+        }
+        if (use_warm_resume)
+        {
+          new_controller->resumeWarm();
+        }
+        else
+        {
+          new_controller->resume();
+        }
       }
     }
 
@@ -707,9 +882,14 @@ namespace humanoid_controller
     if (new_controller && new_controller->getType() != RLControllerType::MPC &&
         should_reset_arm_mode)
     {
-      // 对 MoRE 记录预期控制器与本地请求模式；若切入后用户已经明确请求
-      // mode2，则丢弃迟到的后台 mode1，避免覆盖新的双 Trigger/X+A。
-      changeArmCtrlModeAsync(1, entering_more_controller ? to_controller : "");
+      const int arm_mode_on_activate =
+      entering_more_controller
+          ? 1
+          : new_controller->getArmControlModeOnControllerActivate();
+
+      changeArmCtrlModeAsync(
+          arm_mode_on_activate,
+          entering_more_controller ? to_controller : "");
     }
     if (current_before != to_controller)
     {
@@ -1620,7 +1800,15 @@ namespace humanoid_controller
       return false;
     }
 
-    message = "Successfully switched to controller: " + target_name;
+    if (isVmpToAmpSwitchPending())
+    {
+      message = "VMP->AMP switch accepted; arm return to zero is in progress before activating: " +
+                target_name;
+    }
+    else
+    {
+      message = "Successfully switched to controller: " + target_name;
+    }
     ROS_INFO("[RLControllerManager] %s", message.c_str());
     return true;
   }
@@ -1994,6 +2182,12 @@ namespace humanoid_controller
   bool RLControllerManager::isWalkingCommandExecutionAllowed() const
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (pending_vmp_to_amp_switch_)
+    {
+      // The handoff was accepted from stance/stationary. Do not let a new
+      // walking command invalidate that assumption while the arms settle.
+      return false;
+    }
     if (!auto_switch_config_.enabled)
     {
       return true;
@@ -2446,6 +2640,119 @@ namespace humanoid_controller
              source_name.c_str(), target_name.c_str());
   }
 
+  void RLControllerManager::clearPendingVmpToAmpSwitchLocked(const std::string& reason,
+                                                              bool cancel_arm_return)
+  {
+    if (!pending_vmp_to_amp_switch_)
+      return;
+
+    if (cancel_arm_return)
+    {
+      auto source_it = controllers_.find(pending_vmp_to_amp_source_name_);
+      if (source_it != controllers_.end() && source_it->second)
+      {
+        auto* arm_controller = source_it->second->getArmController();
+        if (arm_controller)
+          arm_controller->cancelDefaultPoseReturnForSwitch();
+      }
+    }
+
+    ROS_INFO("[RLControllerManager] Clear deferred VMP->AMP switch %s -> %s: %s",
+             pending_vmp_to_amp_source_name_.c_str(),
+             pending_vmp_to_amp_target_name_.c_str(),
+             reason.c_str());
+    pending_vmp_to_amp_switch_ = false;
+    pending_vmp_to_amp_switch_completing_ = false;
+    pending_vmp_to_amp_source_name_.clear();
+    pending_vmp_to_amp_target_name_.clear();
+    pending_vmp_to_amp_start_time_ = ros::Time();
+  }
+
+  bool RLControllerManager::tryPendingVmpToAmpSwitch()
+  {
+    // Keep the recursive manager lock across validation and the real switch so
+    // another ROS callback cannot replace the source/target in between.
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!pending_vmp_to_amp_switch_ || pending_vmp_to_amp_switch_completing_)
+      return false;
+
+    if (current_controller_name_ != pending_vmp_to_amp_source_name_)
+    {
+      clearPendingVmpToAmpSwitchLocked("source controller is no longer active", true);
+      return false;
+    }
+
+    auto source_it = controllers_.find(pending_vmp_to_amp_source_name_);
+    auto target_it = controllers_.find(pending_vmp_to_amp_target_name_);
+    if (source_it == controllers_.end() || !source_it->second ||
+        target_it == controllers_.end() || !target_it->second ||
+        !isVmpToAmpSwitch(source_it->second->getType(), target_it->second->getType()))
+    {
+      clearPendingVmpToAmpSwitchLocked("source or target controller is unavailable", true);
+      return false;
+    }
+
+    auto* arm_controller = source_it->second->getArmController();
+    if (!arm_controller)
+    {
+      clearPendingVmpToAmpSwitchLocked("VMP ArmController became unavailable", true);
+      return false;
+    }
+    if (!arm_controller->isDefaultPoseReturnForSwitchComplete())
+    {
+      constexpr double kArmReturnTimeoutSec = 10.0;
+      const double elapsed_sec =
+          pending_vmp_to_amp_start_time_.isZero()
+              ? 0.0
+              : (ros::Time::now() - pending_vmp_to_amp_start_time_).toSec();
+
+      if (elapsed_sec < kArmReturnTimeoutSec)
+      {
+        if (elapsed_sec >= 5.0)
+        {
+          ROS_ERROR_THROTTLE(1.0,
+                             "[RLControllerManager] VMP->AMP still waiting for the arm to settle at zero; "
+                             "re-select VMP to cancel or use FallStand for an emergency");
+        }
+        return false;
+      }
+
+      ROS_WARN("[RLControllerManager] VMP->AMP arm return not confirmed after %.1fs; "
+               "proceeding with AMP activation assuming arm is close enough", elapsed_sec);
+    }
+
+    if (!isTorsoVelocityStable())
+    {
+      ROS_WARN_THROTTLE(1.0,
+                        "[RLControllerManager] VMP arm is at zero; waiting for the torso to become physically stable before AMP activation");
+      return false;
+    }
+
+    const std::string target_name = pending_vmp_to_amp_target_name_;
+    pending_vmp_to_amp_switch_completing_ = true;
+    ROS_INFO("[RLControllerManager] Triggering deferred VMP->AMP switch after arm return");
+    const bool switched = switchController(target_name);
+    pending_vmp_to_amp_switch_completing_ = false;
+    if (switched)
+    {
+      // Keep the ArmController latch active while VMP is the live source of the
+      // following warmup/blend. humanoidController clears it when that use ends.
+      clearPendingVmpToAmpSwitchLocked("arm reached default pose and switch completed", false);
+    }
+    else
+    {
+      ROS_ERROR_THROTTLE(1.0,
+                         "[RLControllerManager] Deferred VMP->AMP commit failed; keep zero hold pending");
+    }
+    return switched;
+  }
+
+  bool RLControllerManager::isVmpToAmpSwitchPending() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    return pending_vmp_to_amp_switch_;
+  }
+
   bool RLControllerManager::switchToNextControllerCallback(kuavo_msgs::switchToNextController::Request &req,
                                                            kuavo_msgs::switchToNextController::Response &res)
   {
@@ -2587,8 +2894,17 @@ namespace humanoid_controller
     res.next_controller = target_name.empty() ? "mpc" : target_name;
     res.next_index = target_index;
     res.success = true;
-    res.message = "Successfully switched from " + res.current_controller + " (index: " + std::to_string(res.current_index) + 
-                  ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+    if (isVmpToAmpSwitchPending())
+    {
+      res.message = "VMP->AMP switch accepted; arm return to zero is in progress before activating " +
+                    res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+    }
+    else
+    {
+      res.message = "Successfully switched from " + res.current_controller + " (index: " +
+                    std::to_string(res.current_index) + ") to " + res.next_controller + " (index: " +
+                    std::to_string(res.next_index) + ")";
+    }
     
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
 
@@ -2740,8 +3056,17 @@ namespace humanoid_controller
     res.next_controller = target_name.empty() ? "mpc" : target_name;
     res.next_index = target_index;
     res.success = true;
-    res.message = "Successfully switched from " + res.current_controller + " (index: " + std::to_string(res.current_index) + 
-                  ") to " + res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+    if (isVmpToAmpSwitchPending())
+    {
+      res.message = "VMP->AMP switch accepted; arm return to zero is in progress before activating " +
+                    res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+    }
+    else
+    {
+      res.message = "Successfully switched from " + res.current_controller + " (index: " +
+                    std::to_string(res.current_index) + ") to " + res.next_controller + " (index: " +
+                    std::to_string(res.next_index) + ")";
+    }
     
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
 

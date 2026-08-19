@@ -10,9 +10,12 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -24,6 +27,8 @@
 #include <ros/ros.h>
 #include <kuavo_msgs/JoySticks.h>
 #include <kuavo_msgs/robotBodyMatrices.h>
+#include <kuavo_msgs/switchToNextController.h>
+#include <std_srvs/SetBool.h>
 
 namespace
 {
@@ -616,10 +621,53 @@ public:
     private_nh_.param<std::string>("robot_name", robot_name_, "KUAVO");
     private_nh_.param<int>("broadcast_port", broadcast_port_, 8443);
     private_nh_.param<double>("receive_timeout_s", receive_timeout_s_, 1.0);
+    private_nh_.param<bool>("enable_vmp_stream_control", enable_vmp_stream_control_, true);
+    private_nh_.param<std::string>("vmp_stream_control_service",
+                                   vmp_stream_control_service_,
+                                   "/vmp/pico_stream_control");
+    private_nh_.param<double>("vmp_stream_trigger_threshold",
+                              vmp_stream_trigger_threshold_,
+                              0.5);
+    // Keep the standalone receiver backward-compatible.  The launch file
+    // explicitly enables this feature together with Pico AMP walking.
+    private_nh_.param<bool>("enable_controller_switch", enable_controller_switch_, false);
+    private_nh_.param<double>("controller_switch_grip_threshold",
+                              controller_switch_grip_threshold_,
+                              0.5);
+    private_nh_.param<double>("controller_switch_trigger_threshold",
+                              controller_switch_trigger_threshold_,
+                              0.5);
+
+    if (!std::isfinite(controller_switch_grip_threshold_) ||
+        !std::isfinite(controller_switch_trigger_threshold_))
+    {
+      throw std::invalid_argument("controller switch thresholds must be finite");
+    }
+    controller_switch_grip_threshold_ =
+        std::max(0.0, std::min(1.0, controller_switch_grip_threshold_));
+    controller_switch_trigger_threshold_ =
+        std::max(0.0, std::min(1.0, controller_switch_trigger_threshold_));
 
     joy_pub_ = nh_.advertise<kuavo_msgs::JoySticks>(joy_topic_, 10);
     if (enable_body_matrices_)
       body_matrices_pub_ = nh_.advertise<kuavo_msgs::robotBodyMatrices>(body_matrices_topic_, 10);
+    if (enable_vmp_stream_control_)
+    {
+      vmp_stream_control_client_ =
+          nh_.serviceClient<std_srvs::SetBool>(vmp_stream_control_service_);
+      ROS_INFO_STREAM("VMP stream control enabled: RT+Y=pause, RT+X=resume, service="
+                      << vmp_stream_control_service_);
+    }
+    if (enable_controller_switch_)
+    {
+      switch_next_client_ = nh_.serviceClient<kuavo_msgs::switchToNextController>(
+          "/humanoid_controller/switch_to_next_controller");
+      switch_previous_client_ = nh_.serviceClient<kuavo_msgs::switchToNextController>(
+          "/humanoid_controller/switch_to_previous_controller");
+      ROS_INFO_STREAM("Pico controller switch enabled: RG+A=next, RG+B=previous, grip_threshold="
+                      << controller_switch_grip_threshold_ << ", trigger_exclusion_threshold="
+                      << controller_switch_trigger_threshold_);
+    }
 
     if (enable_ip_broadcast_)
     {
@@ -630,6 +678,7 @@ public:
 
   ~PicoJoyReceiverNode()
   {
+    stopControllerSwitchWorkers();
     if (broadcaster_)
       broadcaster_->stop();
     if (socket_fd_ >= 0)
@@ -718,6 +767,8 @@ public:
         if (parsePicoJoyPacket(buffer.data(), static_cast<std::size_t>(received), joy))
         {
           joy_pub_.publish(joy);
+          handleVmpStreamButtons(joy);
+          handleControllerSwitchButtons(joy);
           parsed_any = true;
           ROS_INFO_THROTTLE(5.0, "Receiving Pico controller data and publishing %s", joy_topic_.c_str());
         }
@@ -751,10 +802,210 @@ public:
   }
 
 private:
+  void handleControllerSwitchButtons(const kuavo_msgs::JoySticks& joy)
+  {
+    if (!enable_controller_switch_)
+      return;
+
+    const bool right_grip_pressed =
+        joy.right_grip >= controller_switch_grip_threshold_;
+    const bool a_pressed = joy.right_first_button_pressed;
+    const bool b_pressed = joy.right_second_button_pressed;
+    const bool a_rising = a_pressed && !previous_a_pressed_;
+    const bool b_rising = b_pressed && !previous_b_pressed_;
+
+    previous_a_pressed_ = a_pressed;
+    previous_b_pressed_ = b_pressed;
+
+    if (!right_grip_pressed)
+      return;
+
+    if (a_rising)
+    {
+      requestControllerSwitch(true);
+    }
+    else if (b_rising &&
+             joy.left_trigger < controller_switch_trigger_threshold_ &&
+             joy.right_trigger < controller_switch_trigger_threshold_)
+    {
+      // LT+B/RT+B may be used by calibration flows; do not also switch controllers.
+      requestControllerSwitch(false);
+    }
+  }
+
+  void requestControllerSwitch(const bool next)
+  {
+    if (switch_worker_state_->in_flight.exchange(true))
+    {
+      ROS_WARN_STREAM_THROTTLE(2.0,
+                               "Ignore Pico controller switch: another request is still in flight");
+      return;
+    }
+
+    // ServiceClient::call has no application-level timeout.  Run at most one
+    // call outside the UDP receive loop so controller-manager latency cannot
+    // stop Joy/body-matrix reception.  The worker captures no node object;
+    // shared state and the copied client remain valid if shutdown races it.
+    ros::ServiceClient client = next ? switch_next_client_ : switch_previous_client_;
+    const std::string service_name = next
+                                         ? "/humanoid_controller/switch_to_next_controller"
+                                         : "/humanoid_controller/switch_to_previous_controller";
+    const std::string combo = next ? "RG+A" : "RG+B";
+    const std::shared_ptr<ControllerSwitchWorkerState> state = switch_worker_state_;
+    try
+    {
+      std::thread([client, service_name, combo, state]() mutable {
+        const auto finish = [&state]() {
+          state->in_flight.store(false);
+          state->finished_cv.notify_all();
+        };
+        if (!state->owner_alive.load() || !ros::ok())
+        {
+          finish();
+          return;
+        }
+
+        bool call_ok = false;
+        kuavo_msgs::switchToNextController request;
+        std::string error_message;
+        bool service_available = false;
+        try
+        {
+          service_available = client.waitForExistence(ros::Duration(0.2));
+          if (service_available && state->owner_alive.load() && ros::ok())
+            call_ok = client.call(request);
+        }
+        catch (const std::exception& exception)
+        {
+          error_message = exception.what();
+        }
+        catch (...)
+        {
+          error_message = "unknown exception";
+        }
+
+        const bool may_log = state->owner_alive.load() && ros::ok();
+        if (may_log && !error_message.empty())
+        {
+          ROS_ERROR_STREAM("Controller switch worker failed: " << error_message);
+        }
+        else if (may_log && !service_available)
+        {
+          ROS_WARN_STREAM("Controller switch service unavailable: " << service_name);
+        }
+        else if (may_log && !call_ok)
+        {
+          ROS_WARN_STREAM("Failed to call controller switch service: " << service_name);
+        }
+        else if (may_log && request.response.success)
+        {
+          ROS_INFO_STREAM("Controller switch (" << combo << "): "
+                                                 << request.response.current_controller << " -> "
+                                                 << request.response.next_controller);
+        }
+        else if (may_log)
+        {
+          ROS_WARN_STREAM("Controller switch (" << combo << ") rejected: "
+                                                 << request.response.message);
+        }
+        finish();
+      }).detach();
+    }
+    catch (const std::exception& exception)
+    {
+      state->in_flight.store(false);
+      state->finished_cv.notify_all();
+      ROS_ERROR_STREAM("Failed to start controller switch worker: " << exception.what());
+    }
+    catch (...)
+    {
+      state->in_flight.store(false);
+      state->finished_cv.notify_all();
+      ROS_ERROR("Failed to start controller switch worker: unknown exception");
+    }
+  }
+
+  void stopControllerSwitchWorkers()
+  {
+    const std::shared_ptr<ControllerSwitchWorkerState> state = switch_worker_state_;
+    state->owner_alive.store(false);
+    if (!state->in_flight.load())
+      return;
+
+    // Normal local calls complete quickly.  Give them a bounded grace period,
+    // but never make receiver shutdown depend indefinitely on a remote service.
+    std::unique_lock<std::mutex> lock(state->finished_mutex);
+    state->finished_cv.wait_for(lock, std::chrono::milliseconds(200), [state]() {
+      return !state->in_flight.load();
+    });
+  }
+
+  struct ControllerSwitchWorkerState
+  {
+    std::atomic_bool in_flight{false};
+    std::atomic_bool owner_alive{true};
+    std::mutex finished_mutex;
+    std::condition_variable finished_cv;
+  };
+
+  void handleVmpStreamButtons(const kuavo_msgs::JoySticks& joy)
+  {
+    if (!enable_vmp_stream_control_)
+      return;
+
+    const bool x_pressed = joy.left_first_button_pressed;
+    const bool y_pressed = joy.left_second_button_pressed;
+    const bool rt_pressed = joy.right_trigger >= vmp_stream_trigger_threshold_;
+    const bool pause_requested = rt_pressed && y_pressed && !previous_y_pressed_;
+    const bool resume_requested = rt_pressed && x_pressed && !previous_x_pressed_;
+
+    previous_x_pressed_ = x_pressed;
+    previous_y_pressed_ = y_pressed;
+
+    // Match pico_comm_minimal.py: button rising edges while RT is held.
+    if (pause_requested)
+      callVmpStreamControl(true, "RT+Y");
+    if (resume_requested)
+      callVmpStreamControl(false, "RT+X");
+  }
+
+  void callVmpStreamControl(const bool pause, const char* combo)
+  {
+    if (!vmp_stream_control_client_.exists())
+    {
+      ROS_WARN_STREAM_THROTTLE(2.0, "VMP stream control service is unavailable: "
+                                        << vmp_stream_control_service_);
+      return;
+    }
+
+    std_srvs::SetBool request;
+    request.request.data = pause;
+    if (!vmp_stream_control_client_.call(request))
+    {
+      ROS_WARN_STREAM("Failed to call VMP stream control service "
+                      << vmp_stream_control_service_ << " (" << combo << ")");
+      return;
+    }
+
+    if (request.response.success)
+    {
+      ROS_INFO_STREAM("VMP stream " << (pause ? "paused" : "resumed")
+                                    << " by Pico combo " << combo);
+    }
+    else
+    {
+      ROS_WARN_STREAM("VMP stream control rejected " << combo << ": "
+                                                     << request.response.message);
+    }
+  }
+
   ros::NodeHandle nh_;
   ros::NodeHandle private_nh_;
   ros::Publisher joy_pub_;
   ros::Publisher body_matrices_pub_;
+  ros::ServiceClient vmp_stream_control_client_;
+  ros::ServiceClient switch_next_client_;
+  ros::ServiceClient switch_previous_client_;
   std::unique_ptr<RobotInfoBroadcaster> broadcaster_;
   int socket_fd_ = -1;
 
@@ -769,6 +1020,18 @@ private:
   std::string robot_name_;
   int broadcast_port_ = 8443;
   double receive_timeout_s_ = 1.0;
+  bool enable_vmp_stream_control_ = true;
+  std::string vmp_stream_control_service_;
+  double vmp_stream_trigger_threshold_ = 0.5;
+  bool previous_x_pressed_ = false;
+  bool previous_y_pressed_ = false;
+  bool enable_controller_switch_ = false;
+  double controller_switch_grip_threshold_ = 0.5;
+  double controller_switch_trigger_threshold_ = 0.5;
+  bool previous_a_pressed_ = false;
+  bool previous_b_pressed_ = false;
+  std::shared_ptr<ControllerSwitchWorkerState> switch_worker_state_ =
+      std::make_shared<ControllerSwitchWorkerState>();
 };
 
 }  // namespace
