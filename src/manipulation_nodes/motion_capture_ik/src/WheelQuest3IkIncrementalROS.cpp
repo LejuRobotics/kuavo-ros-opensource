@@ -230,12 +230,18 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
 
     {
       std::lock_guard<std::mutex> lock(chestPoseMutex_);
-      latestLeftHandPose_vr_ = quest3ArmInfoTransformerPtr_->getLeftHandPose();
-      latestRightHandPose_vr_ = quest3ArmInfoTransformerPtr_->getRightHandPose();
-      latestHumanLeftShoulderPos_ = quest3ArmInfoTransformerPtr_->getLeftShoulderPose().position;
-      latestHumanRightShoulderPos_ = quest3ArmInfoTransformerPtr_->getRightShoulderPose().position;
-      latestHumanLeftElbowPos_ = quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
-      latestHumanRightElbowPos_ = quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
+      latestLeftHandPose_vr_ =
+          quest3ArmInfoTransformerPtr_->getLeftHandPoseRelativeToChest();
+      latestRightHandPose_vr_ =
+          quest3ArmInfoTransformerPtr_->getRightHandPoseRelativeToChest();
+      latestHumanLeftShoulderPos_ =
+          quest3ArmInfoTransformerPtr_->getLeftShoulderPose().position;
+      latestHumanRightShoulderPos_ =
+          quest3ArmInfoTransformerPtr_->getRightShoulderPose().position;
+      latestHumanLeftElbowPos_ =
+          quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
+      latestHumanRightElbowPos_ =
+          quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
     }
 
     // 【三点跳变检测】验证并过滤 VR 数据中的异常跳变
@@ -831,6 +837,49 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       }
     }
 
+    // The incremental controller returns active hand targets in the world frame
+    // captured at grip entry. Re-express those targets through the current robot
+    // chest frame so torso translation/rotation moves the hands in world space
+    // while preserving the commanded hand-to-chest relative pose.
+    auto followChestForActiveHand = [&](bool isActive,
+                                        bool hasChestAnchor,
+                                        const Eigen::Vector3d& chestAnchorPos,
+                                        const Eigen::Quaterniond& chestAnchorQuat,
+                                        Eigen::Vector3d& handPos,
+                                        Eigen::Quaterniond& handQuat) {
+      if (!isActive || !chestIncrementalUpdateEnabled_ || !hasChestAnchor) return;
+      const Eigen::Quaterniond chestFrameDelta =
+          (input.chestQuatRef.normalized() * chestAnchorQuat.normalized().conjugate()).normalized();
+      handPos = input.chestPosRef + chestFrameDelta * (handPos - chestAnchorPos);
+      handQuat = (chestFrameDelta * handQuat).normalized();
+    };
+    followChestForActiveHand(input.leftRefActive,
+                             hasLeftActiveChestAnchor_,
+                             leftActiveChestAnchorPos_,
+                             leftActiveChestAnchorQuat_,
+                             leftHandPos,
+                             leftHandQuat);
+    followChestForActiveHand(input.rightRefActive,
+                             hasRightActiveChestAnchor_,
+                             rightActiveChestAnchorPos_,
+                             rightActiveChestAnchorQuat_,
+                             rightHandPos,
+                             rightHandQuat);
+
+    // Active elbow references come from the current robot FK.  Map that point
+    // from the current robot chest frame into the commanded chest frame before
+    // giving it to the whole-body solver.  Otherwise the hand/shoulder targets
+    // follow the commanded chest while the elbow remains in the world frame,
+    // forcing the arm to articulate during a rigid torso movement.
+    auto mapCurrentFkPointToChestTarget =
+        [&](bool isActive, const Eigen::Vector3d& currentPoint) -> Eigen::Vector3d {
+      if (!isActive || !chestIncrementalUpdateEnabled_ || !hasLatestWaistYawFk_) return currentPoint;
+      const Eigen::Quaterniond currentChestQuat = getRobotChestQuatRef().normalized();
+      const Eigen::Quaterniond chestFrameDelta =
+          (input.chestQuatRef.normalized() * currentChestQuat.conjugate()).normalized();
+      return input.chestPosRef + chestFrameDelta * (currentPoint - latestWaistYawFkPos_);
+    };
+
     const Eigen::Matrix3d chestRRef = input.chestQuatRef.normalized().toRotationMatrix();
     Eigen::Matrix3d waistSafetyR = chestRRef;
     if (hasLatestWaistYawFk_) {
@@ -846,22 +895,25 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     input.leftHandQuat = leftHandQuat.normalized();
     input.rightHandQuat = rightHandQuat.normalized();
     if (input.leftRefActive) {
-      input.leftElbowRef = computeElbowRef("left",
-                                           input.leftRefActive,
-                                           leftNaturalElbowGuide_.get(),
-                                           leftShoulderRef,
-                                           input.leftHandRef,
-                                           leftLink4Position_,
-                                           latestHumanLeftShoulderPos_,
-                                           latestHumanLeftElbowPos_,
-                                           latestLeftHandPose_vr_.position,
-                                           latestHumanLeftArmPoseValid_,
-                                           leftLink6Position_,
-                                           leftEndEffectorPosition_,
-                                           chestPosForFk,
-                                           waistSafetyR * Eigen::Vector3d::UnitY(),
-                                           frozen.leftElbowPos,
-                                           input.leftElbowTrackingActivation);
+      const Eigen::Vector3d currentLeftElbowRef =
+          computeElbowRef("left",
+                          input.leftRefActive,
+                          leftNaturalElbowGuide_.get(),
+                          leftShoulderRef,
+                          input.leftHandRef,
+                          leftLink4Position_,
+                          latestHumanLeftShoulderPos_,
+                          latestHumanLeftElbowPos_,
+                          latestLeftHandPose_vr_.position,
+                          latestHumanLeftArmPoseValid_,
+                          leftLink6Position_,
+                          leftEndEffectorPosition_,
+                          chestPosForFk,
+                          waistSafetyR * Eigen::Vector3d::UnitY(),
+                          frozen.leftElbowPos,
+                          input.leftElbowTrackingActivation);
+      input.leftElbowRef =
+          mapCurrentFkPointToChestTarget(input.leftRefActive, currentLeftElbowRef);
     } else if (hasLeftElbowPosInChest_) {
       input.leftElbowRef = input.chestPosRef + input.chestQuatRef * leftElbowPosInChest_;
       input.leftElbowTrackingActivation = 1.0;
@@ -870,22 +922,25 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       input.leftElbowTrackingActivation = 1.0;
     }
     if (input.rightRefActive) {
-      input.rightElbowRef = computeElbowRef("right",
-                                            input.rightRefActive,
-                                            rightNaturalElbowGuide_.get(),
-                                            rightShoulderRef,
-                                            input.rightHandRef,
-                                            rightLink4Position_,
-                                            latestHumanRightShoulderPos_,
-                                            latestHumanRightElbowPos_,
-                                            latestRightHandPose_vr_.position,
-                                            latestHumanRightArmPoseValid_,
-                                            rightLink6Position_,
-                                            rightEndEffectorPosition_,
-                                            chestPosForFk,
-                                            -(waistSafetyR * Eigen::Vector3d::UnitY()),
-                                            frozen.rightElbowPos,
-                                            input.rightElbowTrackingActivation);
+      const Eigen::Vector3d currentRightElbowRef =
+          computeElbowRef("right",
+                          input.rightRefActive,
+                          rightNaturalElbowGuide_.get(),
+                          rightShoulderRef,
+                          input.rightHandRef,
+                          rightLink4Position_,
+                          latestHumanRightShoulderPos_,
+                          latestHumanRightElbowPos_,
+                          latestRightHandPose_vr_.position,
+                          latestHumanRightArmPoseValid_,
+                          rightLink6Position_,
+                          rightEndEffectorPosition_,
+                          chestPosForFk,
+                          -(waistSafetyR * Eigen::Vector3d::UnitY()),
+                          frozen.rightElbowPos,
+                          input.rightElbowTrackingActivation);
+      input.rightElbowRef =
+          mapCurrentFkPointToChestTarget(input.rightRefActive, currentRightElbowRef);
     } else if (hasRightElbowPosInChest_) {
       input.rightElbowRef = input.chestPosRef + input.chestQuatRef * rightElbowPosInChest_;
       input.rightElbowTrackingActivation = 1.0;
@@ -1173,6 +1228,9 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
                                                     leftEndEffectorPosition_,
                                                     leftEndEffectorQuat_,
                                                     leftLink4Quat_);
+    leftActiveChestAnchorPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : frozenRobotChestPos_;
+    leftActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
+    hasLeftActiveChestAnchor_ = true;
   }
 
   if (rightGripRisingEdge && !rightMaintainProcess) {
@@ -1190,6 +1248,9 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
                                                      rightEndEffectorPosition_,
                                                      rightEndEffectorQuat_,
                                                      rightLink4Quat_);
+    rightActiveChestAnchorPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : frozenRobotChestPos_;
+    rightActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
+    hasRightActiveChestAnchor_ = true;
   }
 }
 

@@ -474,6 +474,16 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLeftElbowPosInChest_ = false;
   bool hasRightElbowPosInChest_ = false;
 
+  // Robot chest frames captured on each grip rising edge. Active hand targets
+  // are first computed as independent hand increments in these frames, then
+  // mapped through the current chest target so they follow torso motion.
+  Eigen::Vector3d leftActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond leftActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Vector3d rightActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond rightActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
+  bool hasLeftActiveChestAnchor_ = false;
+  bool hasRightActiveChestAnchor_ = false;
+
   Eigen::VectorXd mec_limit_lower_;
   Eigen::VectorXd mec_limit_upper_;
   Eigen::Vector3d deltaScaleRPY_ = Eigen::Vector3d(1.0, 1.0, 1.0);

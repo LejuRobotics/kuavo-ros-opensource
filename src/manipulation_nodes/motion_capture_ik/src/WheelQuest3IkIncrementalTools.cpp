@@ -620,12 +620,18 @@ void WheelQuest3IkIncrementalROS::reset() {
   hasRightHandPoseInChest_ = false;
   hasLeftElbowPosInChest_ = false;
   hasRightElbowPosInChest_ = false;
+  hasLeftActiveChestAnchor_ = false;
+  hasRightActiveChestAnchor_ = false;
   leftHandPosInChest_.setZero();
   rightHandPosInChest_.setZero();
   leftElbowPosInChest_.setZero();
   rightElbowPosInChest_.setZero();
   leftHandQuatInChest_.setIdentity();
   rightHandQuatInChest_.setIdentity();
+  leftActiveChestAnchorPos_.setZero();
+  rightActiveChestAnchorPos_.setZero();
+  leftActiveChestAnchorQuat_.setIdentity();
+  rightActiveChestAnchorQuat_.setIdentity();
   // 重置 grip 超时机制状态
   {
     std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
