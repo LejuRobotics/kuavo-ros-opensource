@@ -91,6 +91,13 @@ upper_body_cali_part = [
     "RightShoulder", "RightArm", "RightForeArm", "RightHand",
 ]
 
+position_parent = {
+    "LeftForeArm": "Hips",
+    "LeftHand": "Hips",
+    "RightForeArm": "Hips",
+    "RightHand": "Hips",
+}
+
 
 class VMR_bvh(GeneralMotionRetargeting):
     """ based on General Motion Retargeting (GMR).
@@ -187,6 +194,8 @@ class VMR_bvh(GeneralMotionRetargeting):
         self.rot_offsets1 = {}
         self.pos_offsets2 = {}
         self.rot_offsets2 = {}
+        self.use_parent_frame_position = src_human == "bvh_xsense"
+        self.parent_frame_position_bodies = set()
 
         self.task_errors1 = {}
         self.task_errors2 = {}
@@ -240,10 +249,11 @@ class VMR_bvh(GeneralMotionRetargeting):
     def update_targets(self, human_data, offset_to_ground=False):
         # scale human data in local frame
         human_data = self.to_numpy(human_data)
+        self.scaled_human_data = human_data
         human_data = self.scale_human_data(human_data, self.human_root_name, self.human_scale_table)
         human_data = self.offset_human_data_robotframe(human_data, self.pos_offsets1, self.rot_offsets1)
         
-        self.scaled_human_data = human_data
+        
 
         if self.use_ik_match_table1:
             for body_name in self.human_body_to_task1.keys():
@@ -315,9 +325,11 @@ class VMR_bvh(GeneralMotionRetargeting):
         """Overwrite the (pos_offset, rot_offset) in `ik_match_table1/2` and the
         runtime `pos_offsets*/rot_offsets*` dicts using a BVH default pose.
 
-        The produced offsets are in robot tracker frame:
-            t_r2s = RR^T (p_s - p_r)
+        The produced offsets are in a robot reference frame:
+            t_r2s = R_position^T (p_s - p_r)
             R_s2r = RR^T RS
+        R_position is RR for most bodies and the mapped parent frame for
+        forearms and hands.
         """
         d = mj.MjData(self.model)
         try:
@@ -354,8 +366,18 @@ class VMR_bvh(GeneralMotionRetargeting):
 
         cali_part_set = set(cali_part) if cali_part is not None else None
 
-        def _update_table(table: dict, pos_offsets: dict, rot_offsets: dict, tag: str):
+        def _update_table(
+            table: dict,
+            pos_offsets: dict,
+            rot_offsets: dict,
+            tag: str,
+        ):
             updated_count = 0
+            human_to_robot_frame = {
+                entry[0]: frame_name
+                for frame_name, entry in table.items()
+                if isinstance(entry, (list, tuple)) and len(entry) >= 1
+            }
 
             for frame_name, entry in table.items():
                 if not isinstance(entry, (list, tuple)) or len(entry) < 5:
@@ -381,7 +403,31 @@ class VMR_bvh(GeneralMotionRetargeting):
                 qs_wxyz = np.asarray(qs_wxyz, dtype=np.float64)
                 RS = R.from_quat(qs_wxyz, scalar_first=True).as_matrix()
 
-                t_r2s = RR.T @ (ps - pr)
+                # Keep forearm/hand translation attached to the mapped parent,
+                # not to the child orientation changing at the elbow/wrist.
+                position_RR = RR
+                parent_body_name = (
+                    position_parent.get(human_name)
+                    if self.use_parent_frame_position
+                    else None
+                )
+                parent_frame_name = human_to_robot_frame.get(parent_body_name)
+                parent_is_calibrated = (
+                    parent_body_name in cali_pose
+                    and (
+                        cali_option != "upper_body"
+                        or parent_body_name in cali_part_set
+                    )
+                )
+                self.parent_frame_position_bodies.discard(human_name)
+                if parent_frame_name is not None and parent_is_calibrated:
+                    try:
+                        position_RR = d.body(parent_frame_name).xmat.reshape(3, 3).copy()
+                        self.parent_frame_position_bodies.add(human_name)
+                    except Exception:
+                        pass
+
+                t_r2s = position_RR.T @ (ps - pr)
                 R_s2r = RR.T @ RS
                 q_xyzw = R.from_matrix(R_s2r).as_quat()
                 q_wxyz = q_xyzw[[3, 0, 1, 2]]
@@ -441,7 +487,7 @@ class VMR_bvh(GeneralMotionRetargeting):
         Pure-numpy implementation (no per-frame scipy Rotation objects).
 
         human_data[body] = (p_s, q_s) where q_s is global tracker orientation (wxyz)
-        pos_offsets[body] = t_r2s in ROBOT frame (3,)
+        pos_offsets[body] = t_r2s in the robot body frame, or mapped parent frame
         rot_offsets[body] = R_s2r (Rotation), mapping tracker frame -> robot frame
 
         Uses pre-cached inverse matrices from _build_offset_cache().
@@ -472,12 +518,24 @@ class VMR_bvh(GeneralMotionRetargeting):
             # quat_r (wxyz)
             quat_r = _mat_to_quat_wxyz(R_r_mat)
 
-            # pos_r = pos_s - R_r @ t_r2s  (equivalent to pos_s - R_r.apply(t_r2s))
+            # Forearm/hand translation offsets use the mapped parent orientation,
+            # so elbow/wrist rotations do not create artificial target translation.
+            position_R_r_mat = R_r_mat
+            parent_body_name = (
+                position_parent.get(body_name)
+                if body_name in self.parent_frame_position_bodies
+                else None
+            )
+            if (
+                parent_body_name in human_data
+                and parent_body_name in inv_mat_cache
+            ):
+                parent_R_s_mat = _quat_wxyz_to_mat(human_data[parent_body_name][1])
+                position_R_r_mat = parent_R_s_mat @ inv_mat_cache[parent_body_name]
+
             t_r2s = pos_cache[body_name]
-            pos_r = pos_s - R_r_mat @ t_r2s
+            pos_r = pos_s - position_R_r_mat @ t_r2s
 
             out[body_name] = [pos_r, quat_r]
 
         return out
-
-

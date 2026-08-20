@@ -30,6 +30,7 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="only_half_up_body" default="false"/>
     <arg name="stand_up_protect" default="true"/>
+    <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -53,11 +54,16 @@
     <arg name="with_ik" default="true"/>
     <arg name="with_mm_ik" default="true"/>
     <arg name="with_led" default="true"/>
-    <arg name="with_battery" default="false"/>
+    <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
+    <arg name="with_battery" default="true"/>
     
     <!-- -->
     <arg name="teach_pendant" default="0"/>
-    
+
+    <!-- 启动期 EC 驱动器固件与参数校验 -->
+    <arg name="check_firmware_param" default="false" doc="硬件层启动后对 youda EC 驱动器固件版本与全量参数进行校验，与标准定义 JSON 比对；默认关闭，需要时显式 check_firmware_param:=true"/>
+    <arg name="allow_mismatch" default="false" doc="true=校验不一致时仅告警继续启动；false=严格模式，不一致即中止启动"/>
+
     <!-- RL相关参数 -->
     <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
@@ -107,6 +113,8 @@
     
     <!-- teach_pendant=1, teach pendant mode -->
     <param name="teach_pendant"  value="$(arg teach_pendant)"/>
+    <param name="check_firmware_param" value="$(arg check_firmware_param)"/>
+    <param name="allow_mismatch"       value="$(arg allow_mismatch)"/>
 
     <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
     <param name="arm_move_spd_half_up_body" value="$(arg arm_move_spd_half_up_body)"/>
@@ -176,6 +184,10 @@
         <param name="cali" value="true" />
     </group>
     
+    <param name="/use_sit_init" value="$(arg use_sit_init)" />
+    <!-- 启动时清零，避免沿用上一次 session 的 ready 导致 HW 抢跑 -->
+    <param name="/hardware_sit_prep_ready" value="false" />
+    
     <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
        output="screen" required="true" clear_params="true"
        launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
@@ -183,6 +195,7 @@
     </node>
 
     <param name="hardware/is_ready" value="0"/>
+    <param name="hardware/ready_to_start" value="0"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
     <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
@@ -199,7 +212,8 @@
       <group if="$(eval arg('joystick_type') == 'h12')">
 
         <group if="$(eval arg('start_way') == 'manual')">
-          <!-- 此if分支为命令行启动机器人: joystick_type=h12，h12遥控器使用和服务启动(start_way=auto)相同的逻辑。-->
+          <!-- 此if分支为命令行启动机器人: joystick_type=h12。h12 节点启动前由 guard 请求服务让位，
+               终端启动自己的 /joy_node，不再复用服务侧 FSM。-->
           
           <param name="start_way" value="auto"/>
 
@@ -212,9 +226,10 @@
           <!-- 补充环境变量，和服务启动的变量一致 -->
           <env name="KUAVO_ROS_CONTROL_WS_PATH" value="$(find humanoid_controllers)/../../../" />
           <!-- 启动 h12pro 控制节点。
-               传入 joy_node 门卫前缀：服务 ocs2_h12pro_monitor 已正常运行时，本手动路径起的
-               joy_node 在启动瞬间自退、复用服务那套，避免两套同名 /joy_node 争抢导致手柄失灵；
-               服务未运行时则正常自起，保持原有行为。判断在节点启动期完成（roslaunch 解析期无法跑 shell）。 -->
+               传入 h12_node_guard.sh 门卫前缀：终端节点启动前自动请求 /start_way=manual，
+               等待 ocs2_h12pro_monitor 停掉服务侧同名 h12 节点（并置 /h12_yield_done=1）后，
+               再启动终端自己的 /joy_node，使终端控制栈和 H12 FSM 生命周期一致。
+               服务未运行时门卫直接放行，保持原有行为。判断在节点启动期完成（roslaunch 解析期无法跑 shell）。 -->
           <include file="$(find h12pro_controller_node)/launch/h12pro_autostart.launch">
             <arg name="guard_prefix" value="$(find h12pro_controller_node)/scripts/h12_node_guard.sh"/>
           </include>
@@ -297,12 +312,15 @@
     <group if="$(arg with_led)">
       <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
         <arg name="LED" value="enable"/>
+        <arg name="led_for_state" value="$(arg led_for_state)"/>
       </include>
     </group>
 
     <group if="$(arg with_battery)">
       <include file="$(find kuavo_led_controller)/launch/battery_info.launch">
         <arg name="BATTERY" value="enable"/>
+        <!-- 当 LED 同时启用时, 电池信息通过 LED 节点的 _query_battery_hw 服务获取, 避免串口冲突 -->
+        <arg name="backend" value="$(eval 'ros_service' if arg('with_led') else 'serial')" />
       </include>
     </group>
 
@@ -373,14 +391,16 @@
     <arg name="xsense_pose_topic" default="/xsense/world_bone_poses" doc="Xsens pose topic"/>
     <arg name="xsense_summary_topic" default="/xsense/packet_summary" doc="Xsens packet summary topic"/>
     <arg name="xsense_bvh_tcp_port" default="9764" doc="Xsens BVH TCP description port"/>
-    <arg name="xsense_enable_pico_pause_control" default="true" doc="Use /pico/joy to pause/resume Xsens forwarding"/>
+    <arg name="xsense_enable_pico_pause_control" default="false" doc="Legacy: freeze Xsens forwarding directly from /pico/joy"/>
+    <arg name="xsense_enable_vmp_stream_control" default="true" doc="Use Pico RT+Y/RT+X to pause/resume inside VMPController"/>
+    <arg name="xsense_vmp_stream_control_service" default="/vmp/pico_stream_control" doc="VMP stream-control service"/>
     <arg name="xsense_pico_joy_topic" default="/pico/joy" doc="PICO JoySticks topic for Xsens pause/resume and control"/>
     <arg name="xsense_pico_pause_combo" default="RT+Y" doc="PICO combo to pause Xsens stream"/>
     <arg name="xsense_pico_resume_combo" default="RT+X" doc="PICO combo to resume Xsens stream"/>
     <arg name="xsense_pico_trigger_threshold" default="0.5" doc="PICO trigger threshold"/>
     <arg name="xsense_pico_grip_threshold" default="0.5" doc="PICO grip threshold"/>
     <arg name="xsense_pose_publish_hz" default="120.0" doc="Xsens output pose publish rate"/>
-    <arg name="xsense_pose_queue_target_depth" default="20" doc="Xsens pose queue target depth"/>
+    <arg name="xsense_pose_queue_target_depth" default="10" doc="Xsens pose queue target depth"/>
     <arg name="xsense_pose_queue_max_size" default="30" doc="Xsens pose queue max size"/>
     <arg name="xsense_pose_queue_prefill" default="true" doc="Prefill Xsens pose queue before publishing"/>
     <arg name="xsense_pose_hold_on_empty" default="true" doc="Hold latest Xsens pose when queue is empty"/>
@@ -393,7 +413,10 @@
     <arg name="xsense_fps" default="100.0" doc="Xsens GMR publishing rate (Hz)"/>
     <arg name="xsense_cpu_cores" default="[]" doc="CPU cores to bind Xsens retarget process"/>
     <arg name="xsense_bvh_offset_scale" default="" doc="Optional BVH offset scale"/>
+    <arg name="xsense_publish_kuavo_arm_traj" default="true" doc="Publish Xsens-retargeted arm joints to /kuavo_arm_traj"/>
     <arg name="xsense_enable_pico_joy_receiver" default="true" doc="Start PICO joystick receiver and publish /pico/joy"/>
+    <arg name="xsense_enable_pico_amp_walk" default="$(arg xsense_enable_pico_joy_receiver)" doc="Use PICO Joy as the AMP walking source"/>
+    <arg name="xsense_enable_pico_controller_switch" default="$(arg xsense_enable_pico_amp_walk)" doc="Enable PICO RG+A/B controller switching"/>
     <arg name="xsense_pico_host" default="0.0.0.0" doc="PICO joy receiver host"/>
     <arg name="xsense_pico_port" default="12345" doc="PICO joy receiver UDP port"/>
     <arg name="xsense_pico_enable_ip_broadcast" default="true" doc="Broadcast robot IP for PICO discovery"/>
@@ -401,9 +424,12 @@
     <arg name="xsense_pico_broadcast_port" default="8443" doc="PICO robot info broadcast port"/>
     <arg name="xsense_pico_startup_delay" default="0.0" doc="PICO receiver/control startup delay"/>
     <arg name="xsense_enable_pico_head_control" default="true" doc="Enable PICO head control node"/>
+    <arg name="xsense_pico_head_control_mode" default="vr_follow" doc="PICO head mode for XSense: fixed, auto_track_active, fixed_main_hand (fixed_main alias), or vr_follow"/>
+    <arg name="xsense_pico_head_fixed_main_hand" default="right" doc="Hand tracked by XSense fixed_main_hand mode: left or right"/>
     <arg name="xsense_enable_pico_claw_control" default="true" doc="Enable PICO trigger to claw command"/>
 
     <group if="$(arg with_xsense_gmr)">
+      <param name="/vmp/pico_joy_topic" value="$(arg xsense_pico_joy_topic)"/>
       <include file="$(find kuavo_xsense_gmr)/launch/xsense_udp_bvh_to_gmr.launch">
         <arg name="listen_ip" value="$(arg xsense_listen_ip)"/>
         <arg name="listen_port" value="$(arg xsense_listen_port)"/>
@@ -432,7 +458,10 @@
         <arg name="fps" value="$(arg xsense_fps)"/>
         <arg name="cpu_cores" value="$(arg xsense_cpu_cores)"/>
         <arg name="bvh_offset_scale" value="$(arg xsense_bvh_offset_scale)"/>
+        <arg name="publish_kuavo_arm_traj" value="$(arg xsense_publish_kuavo_arm_traj)"/>
         <arg name="enable_pico_joy_receiver" value="$(arg xsense_enable_pico_joy_receiver)"/>
+        <arg name="enable_pico_amp_walk" value="$(arg xsense_enable_pico_amp_walk)"/>
+        <arg name="enable_pico_controller_switch" value="$(arg xsense_enable_pico_controller_switch)"/>
         <arg name="pico_host" value="$(arg xsense_pico_host)"/>
         <arg name="pico_port" value="$(arg xsense_pico_port)"/>
         <arg name="pico_enable_ip_broadcast" value="$(arg xsense_pico_enable_ip_broadcast)"/>
@@ -440,6 +469,8 @@
         <arg name="pico_broadcast_port" value="$(arg xsense_pico_broadcast_port)"/>
         <arg name="pico_startup_delay" value="$(arg xsense_pico_startup_delay)"/>
         <arg name="enable_pico_head_control" value="$(arg xsense_enable_pico_head_control)"/>
+        <arg name="pico_head_control_mode" value="$(arg xsense_pico_head_control_mode)"/>
+        <arg name="pico_head_fixed_main_hand" value="$(arg xsense_pico_head_fixed_main_hand)"/>
         <arg name="enable_pico_claw_control" value="$(arg xsense_enable_pico_claw_control)"/>
       </include>
     </group>
@@ -482,5 +513,8 @@
       </include>
     </group>
 
+
+    <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
+    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
 
 </launch>

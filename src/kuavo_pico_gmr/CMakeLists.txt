@@ -5,6 +5,7 @@ project(kuavo_pico_gmr)
 find_package(catkin REQUIRED COMPONENTS
   rospy
   geometry_msgs
+  sensor_msgs
   tf
   kuavo_msgs
 )
@@ -17,6 +18,7 @@ catkin_package(
   CATKIN_DEPENDS 
     rospy 
     geometry_msgs 
+    sensor_msgs
     tf
     kuavo_msgs
 )
@@ -74,4 +76,3 @@ install(DIRECTORY kuavo_gmr/
   PATTERN "*.pyc" EXCLUDE
   PATTERN "__pycache__" EXCLUDE
 )
-

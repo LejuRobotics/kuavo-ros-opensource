@@ -11,6 +11,7 @@
   
   <depend>rospy</depend>
   <depend>geometry_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>tf</depend>
   <depend>kuavo_msgs</depend>
   
@@ -19,4 +20,3 @@
   <export>
   </export>
 </package>
-

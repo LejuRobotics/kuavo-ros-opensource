@@ -650,9 +650,14 @@ namespace humanoid_controller
     actions_.setZero();
     has_valid_phase_ = false;
     external_phase_override_enabled_ = false;
-    // networkInputDataRL_ 和 singleInputData_ 清零
+    // networkInputDataRL_ / singleInputData_ / inputDeque_ 清零，避免 VMP->AMP 切换时带入过期历史帧
     networkInputDataRL_.setZero();
     singleInputData_.setZero();
+    for (auto& frame : inputDeque_)
+    {
+      frame.setZero();
+    }
+    yaw_offset_initialized_ = false;
     
     // 重置手臂控制器状态
     if (arm_controller_)
@@ -1204,9 +1209,8 @@ namespace humanoid_controller
     //                   : (commandPhase_(0) < 0) ? ModeNumber::FS
     //                                            : ModeNumber::SS;
     // }
-    // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）
-    static bool yaw_offset_initialized = false;
-    if (!yaw_offset_initialized)
+    // 初始化 my_yaw_offset_（VMP->AMP 冷 reset 后会重新锚定当前 yaw）
+    if (!yaw_offset_initialized_)
     {
       auto mat = sensor_data.quat_.toRotationMatrix();
       double current_yaw = std::atan2(mat(1, 0), mat(0, 0));
@@ -1214,7 +1218,7 @@ namespace humanoid_controller
       // 归一化到[-π, π]范围
       while (my_yaw_offset_ > M_PI) my_yaw_offset_ -= 2 * M_PI;
       while (my_yaw_offset_ < -M_PI) my_yaw_offset_ += 2 * M_PI;
-      yaw_offset_initialized = true;
+      yaw_offset_initialized_ = true;
       ROS_INFO("[%s] Initialized yaw_offset: %.6f (current_yaw: %.6f)", name_.c_str(), my_yaw_offset_, current_yaw);
     }
 

@@ -8,17 +8,16 @@
 #include <string>
 #include <vector>
 
-#include <geometry_msgs/Point.h>
-#include <geometry_msgs/Quaternion.h>
 #include <kuavo_msgs/JoySticks.h>
-#include <kuavo_msgs/xsensePoseInfo.h>
 #include <kuavo_msgs/xsensePoseInfoList.h>
 #include <ros/ros.h>
 #include <std_msgs/String.h>
 
+#include "kuavo_xsense_gmr/xsens_udp/elbow_landmark_cache.h"
 #include "kuavo_xsense_gmr/xsens_udp/fragment_assembler.h"
 #include "kuavo_xsense_gmr/xsens_udp/parser.h"
 #include "kuavo_xsense_gmr/xsens_udp/udp_receiver.h"
+#include "kuavo_xsense_gmr/xsens_udp/xsens_pose_builder.h"
 
 namespace
 {
@@ -29,39 +28,6 @@ struct Publishers
   ros::Publisher pose_info;
   ros::Publisher pose_queue_stats;
 };
-
-struct BodyMapping
-{
-  const char* output_name;
-  const char* xsens_segment_name;
-};
-
-const std::vector<BodyMapping>& bodyMappings()
-{
-  static const std::vector<BodyMapping> mappings = {
-      {"Hips", "Pelvis"},
-      {"Chest", "L5"},
-      {"Neck", "Neck"},
-      {"Head", "Head"},
-      {"LeftCollar", "Left Shoulder"},
-      {"LeftShoulder", "Left Upper Arm"},
-      {"LeftElbow", "Left Forearm"},
-      {"LeftWrist", "Left Hand"},
-      {"RightCollar", "Right Shoulder"},
-      {"RightShoulder", "Right Upper Arm"},
-      {"RightElbow", "Right Forearm"},
-      {"RightWrist", "Right Hand"},
-      {"LeftHip", "Left Upper Leg"},
-      {"LeftKnee", "Left Lower Leg"},
-      {"LeftAnkle", "Left Foot"},
-      {"LeftToe", "Left Toe"},
-      {"RightHip", "Right Upper Leg"},
-      {"RightKnee", "Right Lower Leg"},
-      {"RightAnkle", "Right Foot"},
-      {"RightToe", "Right Toe"},
-  };
-  return mappings;
-}
 
 std::string jsonEscape(const std::string& value)
 {
@@ -154,47 +120,6 @@ std::string packetSummaryJson(const kuavo_xsense_gmr::ParsedPacket& packet,
   json << ",\"invalid_reason\":\"" << jsonEscape(packet.invalid_reason) << "\"";
   json << "}";
   return json.str();
-}
-
-geometry_msgs::Point toPoint(const kuavo_xsense_gmr::Vector3f& value)
-{
-  geometry_msgs::Point point;
-  point.x = value.x;
-  point.y = value.y;
-  point.z = value.z;
-  return point;
-}
-
-geometry_msgs::Quaternion toQuaternion(const kuavo_xsense_gmr::Quaternionf& value)
-{
-  geometry_msgs::Quaternion quaternion;
-  quaternion.w = value.w;
-  quaternion.x = value.x;
-  quaternion.y = value.y;
-  quaternion.z = value.z;
-  return quaternion;
-}
-
-std::string segmentNameFromId(const uint32_t segment_id)
-{
-  static const char* kStandardNames[] = {
-      "Pelvis",          "L5",            "L3",           "T12",
-      "T8",              "Neck",          "Head",         "Right Shoulder",
-      "Right Upper Arm", "Right Forearm", "Right Hand",   "Left Shoulder",
-      "Left Upper Arm",  "Left Forearm",  "Left Hand",    "Right Upper Leg",
-      "Right Lower Leg", "Right Foot",    "Right Toe",    "Left Upper Leg",
-      "Left Lower Leg",  "Left Foot",     "Left Toe"};
-  constexpr std::size_t kNameCount = 23;
-
-  if (segment_id >= 1 && segment_id <= kNameCount)
-    return kStandardNames[segment_id - 1];
-  if (segment_id == 0)
-    return kStandardNames[0];
-  if (segment_id == 24)
-    return "Prop1";
-  if (segment_id >= 25 && segment_id <= 28)
-    return "Prop" + std::to_string(segment_id - 24);
-  return "";
 }
 
 std::string normalizeComboToken(const std::string& raw_token)
@@ -476,54 +401,13 @@ std::string poseQueueStatsJsonLocked(PosePublishQueue& pose_queue,
   return out.str();
 }
 
-bool buildPoseInfoList(const kuavo_xsense_gmr::ParsedPacket& packet,
-                       const std::string& frame_id,
-                       kuavo_msgs::xsensePoseInfoList* msg)
-{
-  if (msg == nullptr)
-    return false;
-  if (!packet.valid || packet.header.message_type != "02")
-    return false;
-
-  std::map<std::string, const kuavo_xsense_gmr::XsensSegmentPoseQuaternion*> segment_by_name;
-  for (const auto& segment : packet.pose_quaternion)
-  {
-    const std::string name = segmentNameFromId(segment.segment_id);
-    if (!name.empty())
-      segment_by_name[name] = &segment;
-  }
-
-  msg->poses.clear();
-  msg->header.stamp = ros::Time::now();
-  msg->header.frame_id = frame_id;
-
-  for (const BodyMapping& mapping : bodyMappings())
-  {
-    const auto it = segment_by_name.find(mapping.xsens_segment_name);
-    if (it == segment_by_name.end())
-    {
-      ROS_WARN_STREAM_THROTTLE(2.0, "Skipping Xsens pose frame: missing segment "
-                                        << mapping.xsens_segment_name);
-      return false;
-    }
-
-    const kuavo_xsense_gmr::XsensSegmentPoseQuaternion& source = *it->second;
-    kuavo_msgs::xsensePoseInfo pose;
-    pose.name = mapping.output_name;
-    pose.segment_id = source.segment_id;
-    pose.position = toPoint(source.position_m);
-    pose.orientation = toQuaternion(source.orientation);
-    msg->poses.push_back(pose);
-  }
-
-  return true;
-}
-
 bool isReconstructedPacket(const std::vector<uint8_t>& original_datagram,
                            const kuavo_xsense_gmr::XsensPacketParser& parser)
 {
   const kuavo_xsense_gmr::XsensPacketHeader header = parser.parseHeader(original_datagram);
   if (!header.valid)
+    return false;
+  if (header.message_type == "13")
     return false;
   return !(header.fragment_index() == 0 && header.is_last_fragment());
 }
@@ -545,7 +429,7 @@ int main(int argc, char** argv)
   std::string pose_topic;
   std::string summary_topic;
   std::string frame_id;
-  bool enable_pico_pause_control = true;
+  bool enable_pico_pause_control = false;
   std::string pico_joy_topic;
   std::string pico_pause_combo;
   std::string pico_resume_combo;
@@ -570,7 +454,7 @@ int main(int argc, char** argv)
   pnh.param<std::string>("pose_topic", pose_topic, "/xsense/world_bone_poses");
   pnh.param<std::string>("summary_topic", summary_topic, "/xsense/packet_summary");
   pnh.param<std::string>("frame_id", frame_id, "xsense");
-  pnh.param("enable_pico_pause_control", enable_pico_pause_control, true);
+  pnh.param("enable_pico_pause_control", enable_pico_pause_control, false);
   pnh.param<std::string>("pico_joy_topic", pico_joy_topic, "/pico/joy");
   pnh.param<std::string>("pico_pause_combo", pico_pause_combo, "RT+Y");
   pnh.param<std::string>("pico_resume_combo", pico_resume_combo, "RT+X");
@@ -900,6 +784,7 @@ int main(int argc, char** argv)
 
   kuavo_xsense_gmr::XsensPacketParser parser;
   kuavo_xsense_gmr::FragmentAssembler assembler(fragment_timeout_s);
+  kuavo_xsense_gmr::ElbowLandmarkCache elbow_landmark_cache;
   std::map<std::string, uint32_t> last_sample_by_type;
   ros::WallTime last_summary_publish = ros::WallTime(0);
   const ros::WallDuration min_summary_period(1.0 / summary_rate_limit_hz);
@@ -937,6 +822,39 @@ int main(int argc, char** argv)
       packet.header.invalid_reason = packet.invalid_reason;
     }
 
+    if (!packet.valid && packet.header.message_type == "13")
+    {
+      ROS_WARN_STREAM_THROTTLE(
+          2.0, "Invalid Xsens Scale packet: datagram_counter=0x"
+                   << std::hex << std::setw(2) << std::setfill('0')
+                   << static_cast<unsigned int>(packet.header.datagram_counter)
+                   << std::dec << ", sample_counter=" << packet.header.sample_counter
+                   << ", reason=" << packet.invalid_reason);
+    }
+
+    if (packet.valid && packet.header.message_type == "13")
+    {
+      const kuavo_xsense_gmr::ScaleCacheResult scale_result =
+          elbow_landmark_cache.consume(packet);
+      if (scale_result.event == kuavo_xsense_gmr::ScaleCacheEvent::kReady)
+      {
+        ROS_INFO_STREAM("Xsens 左右肱骨外上髁 Scale 缓存已就绪，character_id="
+                        << static_cast<unsigned int>(scale_result.character_id));
+      }
+      else if (scale_result.event == kuavo_xsense_gmr::ScaleCacheEvent::kUpdated)
+      {
+        // Pose 在入队前已完成计算，所以 Scale 更新只影响后续帧，不清空现有 FIFO。
+        ROS_INFO_STREAM("Xsens 左右肱骨外上髁 Scale 已原子更新，保留 FIFO 中已有帧，character_id="
+                        << static_cast<unsigned int>(scale_result.character_id));
+      }
+      else if (scale_result.event == kuavo_xsense_gmr::ScaleCacheEvent::kRejected)
+      {
+        ROS_WARN_STREAM_THROTTLE(
+            2.0, "拒绝不完整或非法的 Xsens Scale 批次，继续使用旧缓存："
+                     << scale_result.reason);
+      }
+    }
+
     int64_t sample_delta = -1;
     if (!packet.header.message_type.empty())
     {
@@ -949,36 +867,58 @@ int main(int argc, char** argv)
       last_sample_by_type[packet.header.message_type] = packet.header.sample_counter;
     }
 
-    kuavo_msgs::xsensePoseInfoList pose_msg;
-    if (buildPoseInfoList(packet, frame_id, &pose_msg))
+    if (packet.valid && packet.header.message_type == "02")
     {
-      bool paused = false;
+      kuavo_xsense_gmr::ElbowLandmarkOffsets elbow_offsets;
+      if (!elbow_landmark_cache.getOffsets(packet.header.character_id, &elbow_offsets))
       {
-        std::lock_guard<std::mutex> lock(pause_state.mutex);
-        paused = pause_state.enabled && pause_state.paused;
+        ROS_WARN_STREAM_THROTTLE(
+            2.0,
+            "尚未收到当前演员完整的 Xsens Scale 外上髁数据，暂不发布 "
+                << pose_topic
+                << "。请确认 MVN Network Streamer 已同时启用 Quaternion(0x02) 和 Scale(0x13)");
       }
-
-      // 暂停期间继续收 UDP，但不把暂停期间的新动作放入对外发布队列。
-      if (!paused)
+      else
       {
-        std::lock_guard<std::mutex> lock(pose_queue.mutex);
-        const ros::WallTime now = ros::WallTime::now();
-        accountPoseQueueDepthLocked(pose_queue, now);
-        // UDP 到达可能是 burst，这里只负责解析和入队，不直接发布 ROS 话题。
-        while (pose_queue.queue.size() >= queue_max_size)
+        kuavo_msgs::xsensePoseInfoList pose_msg;
+        std::string pose_error;
+        if (!kuavo_xsense_gmr::buildXsensPoseInfoList(
+                packet, elbow_offsets, frame_id, &pose_msg, &pose_error))
         {
-          pose_queue.queue.pop_front();
-          ++pose_queue.overflow_drop_count;
-          ++pose_queue.stats_window_overflow_drop_count;
-          ROS_WARN_STREAM_THROTTLE(1.0, "Xsens pose FIFO overflow, dropping oldest frame. dropped="
-                                            << pose_queue.overflow_drop_count);
+          ROS_WARN_STREAM_THROTTLE(2.0, "跳过非法 Xsens 姿态帧：" << pose_error);
         }
-        pose_queue.queue.push_back(pose_msg);
-        observePoseQueueDepthLocked(pose_queue);
-        pose_queue.have_input = true;
-        pose_queue.last_input_time = now;
-        ++pose_queue.enqueued_count;
-        ++pose_queue.stats_window_enqueued_count;
+        else
+        {
+          bool paused = false;
+          {
+            std::lock_guard<std::mutex> lock(pause_state.mutex);
+            paused = pause_state.enabled && pause_state.paused;
+          }
+
+          // 暂停期间继续收 UDP，但不把暂停期间的新动作放入对外发布队列。
+          if (!paused)
+          {
+            std::lock_guard<std::mutex> lock(pose_queue.mutex);
+            const ros::WallTime now = ros::WallTime::now();
+            accountPoseQueueDepthLocked(pose_queue, now);
+            // 消息在此之前已使用一套完整 Scale 计算完成，入队后不再依赖缓存。
+            while (pose_queue.queue.size() >= queue_max_size)
+            {
+              pose_queue.queue.pop_front();
+              ++pose_queue.overflow_drop_count;
+              ++pose_queue.stats_window_overflow_drop_count;
+              ROS_WARN_STREAM_THROTTLE(
+                  1.0, "Xsens pose FIFO overflow, dropping oldest frame. dropped="
+                           << pose_queue.overflow_drop_count);
+            }
+            pose_queue.queue.push_back(pose_msg);
+            observePoseQueueDepthLocked(pose_queue);
+            pose_queue.have_input = true;
+            pose_queue.last_input_time = now;
+            ++pose_queue.enqueued_count;
+            ++pose_queue.stats_window_enqueued_count;
+          }
+        }
       }
     }
 

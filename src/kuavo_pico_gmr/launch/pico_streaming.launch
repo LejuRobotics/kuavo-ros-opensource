@@ -62,6 +62,9 @@
   <!-- CPU affinity: bind retarget process to specific cores, e.g. [4] for P-core on Ultra 7 255H -->
   <arg name="cpu_cores" default="[]" doc="CPU cores to bind retarget process (empty=no binding)"/>
 
+  <!-- Arm trajectory bridge for VMP ArmController external VR input -->
+  <arg name="publish_kuavo_arm_traj" default="true" doc="Publish /kuavo_arm_traj from retargeted arm joints"/>
+
   <!-- compute LAN mode boolean -->
   <arg name="__is_lan" value="$(eval not arg('vpn_mode'))"/>
 
@@ -102,6 +105,8 @@
     <param name="gmr_velocity_clip" value="$(arg gmr_velocity_clip)"/>
     <param name="gmr_velocity_deadzone" value="$(arg gmr_velocity_deadzone)"/>
     <rosparam param="cpu_cores" subst_value="true">$(arg cpu_cores)</rosparam>
+    <!-- Arm trajectory bridge -->
+    <param name="publish_kuavo_arm_traj" value="$(arg publish_kuavo_arm_traj)"/>
   </node>
 
   <!-- Node 3: Dexterous hand control -->

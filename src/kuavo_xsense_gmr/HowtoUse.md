@@ -4,6 +4,30 @@
 - ros-noetic 环境需求
 - python 3.10 及以上的 python3 版本。
 
+## Xsens Network Streamer 配置
+
+运行 Xsens UDP 接收节点时，MVN Network Streamer 必须同时启用：
+
+- `Position + Orientation (Quaternion)`，对应 `MXTP02`；
+- `Scale`，对应 `MXTP13`。
+
+节点需要从 Scale 数据中取得左右肱骨外上髁相对大臂的局部偏移。第一套完整
+Scale 就绪前，`/xsense/world_bone_poses` 不发布姿态，并以节流日志提示检查
+MVN 配置。运行中收到完整的新 Scale 后，左右偏移会一起切换；已经进入 Pose
+FIFO 的旧帧保持不变，后续新帧使用新 Scale。
+
+`/xsense/world_bone_poses` 继续使用
+`kuavo_msgs/xsensePoseInfoList`，20 项的名称、顺序和 `segment_id` 均不变。
+其中两个肘部条目是项目定义的混合 Pose：
+
+| 条目 | `position` | `orientation` | `segment_id` |
+|---|---|---|---:|
+| `LeftElbow` | 左肱骨外上髁世界位置 | `Left Forearm` 四元数 | 14 |
+| `RightElbow` | 右肱骨外上髁世界位置 | `Right Forearm` 四元数 | 10 |
+
+肱骨外上髁是关键点而不是独立刚体，因此没有自身四元数。这里保留小臂朝向是
+现有 GMR 接口的数据契约。
+
 ### 方法一：通过 PPA 安装（推荐，如果网络正常）
 ```bash
 sudo add-apt-repository ppa:deadsnakes/ppa -y

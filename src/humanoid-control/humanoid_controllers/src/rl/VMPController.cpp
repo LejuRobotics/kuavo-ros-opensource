@@ -156,6 +156,25 @@ namespace humanoid_controller
       ROS_ERROR("[%s] Failed to initialize VMP", name_.c_str());
       return false;
     }
+
+    // 初始化手臂控制（可选功能，需在 initializeVMP 之后，vmp_jointKp_/Kd_ 已就绪）
+    std::string urdf_path;
+    if (nh_.getParam("/urdfFile", urdf_path))
+    {
+      ROS_INFO("[%s] Using URDF path from ROS param /urdfFile: %s", name_.c_str(), urdf_path.c_str());
+    }
+    else
+    {
+      int robot_version_int = 45;
+      nh_.param("/robot_version", robot_version_int, 45);
+      int major = robot_version_int / 10;
+      int minor = robot_version_int % 10;
+      std::string package_path = ros::package::getPath("kuavo_assets");
+      std::string version_str = "biped_s" + std::to_string(major) + std::to_string(minor);
+      urdf_path = package_path + "/models/" + version_str + "/urdf/" + version_str + ".urdf";
+      ROS_INFO("[%s] Constructed URDF path from robot_version: %s", name_.c_str(), urdf_path.c_str());
+    }
+    initArmControl(urdf_path);
     
     vmp_initialized_ = true;
     initialized_ = true;
@@ -250,6 +269,23 @@ namespace humanoid_controller
       
       ROS_INFO("[%s] Final joint config: jointNum=%d, jointArmNum=%d, waistNum=%d, numActions=%d", 
                name_.c_str(), jointNum_, jointArmNum_, waistNum_, numActions_);
+
+      bool arm_command_replacement_enabled = false;
+      loadData::loadPtreeValue(pt, arm_command_replacement_enabled, "use_external_arm_controller", false);
+      use_external_arm_controller(arm_command_replacement_enabled);
+      ROS_INFO("[%s] Arm command replacement enabled: %s",
+               name_.c_str(), arm_command_replacement_enabled ? "true" : "false");
+
+      if (arm_command_replacement_enabled && jointArmNum_ > 0)
+      {
+        loadData::loadPtreeValue(pt, arm_max_tracking_velocity_, "armVelocityLimit.maxTrackingVelocity", false);
+        loadData::loadPtreeValue(pt, arm_tracking_error_threshold_, "armVelocityLimit.trackingErrorThreshold", false);
+        loadData::loadPtreeValue(pt, arm_mode_interpolation_velocity_, "armVelocityLimit.modeInterpolationVelocity", false);
+        loadData::loadPtreeValue(pt, arm_mode2_cutoff_freq_, "armVelocityLimit.mode2CutoffFreq", false);
+        ROS_INFO("[%s] Arm control parameters: max_vel=%.3f, err_th=%.3f, mode_interp_vel=%.3f, mode2_cutoff=%.1f Hz",
+                 name_.c_str(), arm_max_tracking_velocity_,
+                 arm_tracking_error_threshold_, arm_mode_interpolation_velocity_, arm_mode2_cutoff_freq_);
+      }
       
       // 加载模型路径
       std::string vmpModelDir, vmpPolicyModelFile, vmpEncoderModelFile, vmpEstimatorModelFile;
@@ -619,11 +655,23 @@ namespace humanoid_controller
       ROS_INFO("[%s] Estimator buffer reset with %d zero frames", name_.c_str(), vmp_estimator_history_frames_);
     }
     
-    // 重置PICO推流暂停状态
-    pico_streaming_paused_.store(false);
+    // 普通 reset 保持原行为；控制器切换入 VMP 时则继续冻结，
+    // 直到 GMR 确认 RT+X 偏航重定向已应用到新帧。
+    bool waiting_for_retarget_resume = false;
+    bool using_retarget_entry_frame = false;
+    std::vector<float> reset_prefill_frame = vmp_standing_frame_;
     {
-      std::lock_guard<std::mutex> lock(pico_frozen_frame_mutex_);
-      pico_frozen_frame_.clear();
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      waiting_for_retarget_resume = retarget_resume_waiting_;
+      if (retarget_entry_frame_pending_ && !retarget_entry_frame_.empty())
+      {
+        reset_prefill_frame = retarget_entry_frame_;
+        using_retarget_entry_frame = true;
+      }
+    }
+    if (!waiting_for_retarget_resume)
+    {
+      resumeRetargetedStreaming();
     }
     
     // 重置Qpos平滑缓冲区，并用静止帧预填充，消除启动空窗期
@@ -639,18 +687,23 @@ namespace humanoid_controller
         std::lock_guard<std::mutex> lock2(latest_frame_mutex_);
         last_consumed_frame_seq_ = latest_frame_seq_;  // 同步序列号，避免reset后误判
       }
-      if (enable_qpos_smoothing_ && !vmp_standing_frame_.empty()) {
+      if (enable_qpos_smoothing_ && !reset_prefill_frame.empty()) {
         for (int i = 0; i < qpos_smooth_buffer_size_; ++i) {
           PendingQposSample s;
-          s.frame    = vmp_standing_frame_;
+          s.frame    = reset_prefill_frame;
           s.anchor   = (i == 0);  // 首帧作为anchor，其余作为held
           s.smoothed = false;
           qpos_pending_buffer_.push_back(std::move(s));
         }
-        qpos_last_ingested_ = vmp_standing_frame_;
-        ROS_INFO("[%s] Qpos smooth buffer pre-filled with %d standing frames",
-                 name_.c_str(), qpos_smooth_buffer_size_);
+        qpos_last_ingested_ = reset_prefill_frame;
+        ROS_INFO("[%s] Qpos smooth buffer pre-filled with %d %s frames",
+                 name_.c_str(), qpos_smooth_buffer_size_,
+                 using_retarget_entry_frame ? "VMP-entry" : "standing");
       }
+    }
+    if (using_retarget_entry_frame)
+    {
+      prefillRetargetedReferenceBuffers(reset_prefill_frame);
     }
     vmp_entry_imu_quat_valid_ = false;
 
@@ -658,14 +711,165 @@ namespace humanoid_controller
     {
       initializeOnlineReferenceBuffer();
     }
+
+    if (arm_controller_)
+      arm_controller_->reset();
     
     ROS_INFO("[%s] VMP controller reset", name_.c_str());
   }
 
-  void VMPController::resume()
+  void VMPController::setExternalCommandBufferCallback(std::function<bool()> callback)
   {
-    RLControllerBase::resume();
+    external_command_buffer_callback_ = std::move(callback);
+    if (arm_controller_)
+    {
+      arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+    }
+  }
+
+  void VMPController::initArmControl(const std::string& urdf_path)
+  {
+    if (!arm_command_replacement_enabled_ || jointArmNum_ <= 0)
+    {
+      ROS_INFO("[%s] Arm command replacement disabled or no arm joints", name_.c_str());
+      return;
+    }
+    try
+    {
+      arm_controller_ = std::make_unique<ArmController>(
+          nh_, jointNum_, waistNum_, jointArmNum_, ros_logger_);
+      arm_controller_->setExternalCommandBufferCallback(external_command_buffer_callback_);
+
+      Eigen::VectorXd arm_kp, arm_kd;
+      if (is_roban_)
+      {
+        arm_kp = vmp_jointKp_.segment(waistNum_ + jointNum_, jointArmNum_);
+        arm_kd = vmp_jointKd_.segment(waistNum_ + jointNum_, jointArmNum_);
+      }
+      else
+      {
+        arm_kp = vmp_jointKp_.segment(jointNum_ + waistNum_, jointArmNum_);
+        arm_kd = vmp_jointKd_.segment(jointNum_ + waistNum_, jointArmNum_);
+      }
+
+      if (!arm_controller_->initialize(urdf_path, arm_kp, arm_kd))
+      {
+        ROS_ERROR("[%s] Failed to initialize arm controller", name_.c_str());
+        arm_command_replacement_enabled_ = false;
+        arm_controller_.reset();
+        return;
+      }
+
+      Eigen::VectorXd default_arm_pos = Eigen::VectorXd::Zero(jointArmNum_);
+      if (vmp_defalutJointPos_.size() >= jointNum_ + waistNum_ + jointArmNum_)
+      {
+        if (is_roban_)
+          default_arm_pos = vmp_defalutJointPos_.segment(waistNum_ + jointNum_, jointArmNum_);
+        else
+          default_arm_pos = vmp_defalutJointPos_.segment(jointNum_ + waistNum_, jointArmNum_);
+      }
+      else
+      {
+        ROS_WARN("[%s] Cannot get default arm position, using zeros", name_.c_str());
+      }
+
+      arm_controller_->loadSettings(arm_max_tracking_velocity_, arm_tracking_error_threshold_,
+                                    arm_mode_interpolation_velocity_, default_arm_pos,
+                                    arm_mode2_cutoff_freq_);
+      ROS_INFO("[%s] Arm controller initialized (urdf=%s)", name_.c_str(), urdf_path.c_str());
+    }
+    catch (const std::exception& e)
+    {
+      ROS_ERROR("[%s] Failed to initialize arm controller: %s", name_.c_str(), e.what());
+      arm_command_replacement_enabled_ = false;
+      arm_controller_.reset();
+    }
+  }
+
+  bool VMPController::updateArmCommand(const ros::Time& time,
+                                       const SensorData& sensor_data,
+                                       kuavo_msgs::jointCmd& joint_cmd)
+  {
+    if (!arm_command_replacement_enabled_ || jointArmNum_ == 0 || !arm_controller_)
+      return false;
+
+    // Pico uses pico_streaming_paused_; Xsens sets the arm-only request from
+    // the shared /pico/joy RT+Y/RT+X callback below.
+    arm_controller_->setExternalControlPaused(
+        pico_streaming_paused_.load() || arm_stream_pause_requested_.load());
+
+    double dt = dt_;
+    if (dt <= 0.0 || dt > 0.1) dt = 0.002;
+
+    Eigen::VectorXd full_joint_pos(jointNum_ + waistNum_ + jointArmNum_);
+    Eigen::VectorXd full_joint_vel(jointNum_ + waistNum_ + jointArmNum_);
+
+    if (is_roban_)
+    {
+      Eigen::VectorXd waist_pos = sensor_data.jointPos_.segment(0, waistNum_);
+      Eigen::VectorXd leg_pos = sensor_data.jointPos_.segment(waistNum_, jointNum_);
+      Eigen::VectorXd arm_pos = sensor_data.jointPos_.segment(waistNum_ + jointNum_, jointArmNum_);
+      Eigen::VectorXd waist_vel = sensor_data.jointVel_.segment(0, waistNum_);
+      Eigen::VectorXd leg_vel = sensor_data.jointVel_.segment(waistNum_, jointNum_);
+      Eigen::VectorXd arm_vel = sensor_data.jointVel_.segment(waistNum_ + jointNum_, jointArmNum_);
+      full_joint_pos << leg_pos, waist_pos, arm_pos;
+      full_joint_vel << leg_vel, waist_vel, arm_vel;
+    }
+    else
+    {
+      full_joint_pos = sensor_data.jointPos_.head(jointNum_ + waistNum_ + jointArmNum_);
+      full_joint_vel = sensor_data.jointVel_.head(jointNum_ + waistNum_ + jointArmNum_);
+    }
+
+    const int cmd_stance = 0;  // VMP 无 gait_receiver；固定行走语义
+    arm_controller_->update(time, dt, full_joint_pos, full_joint_vel, cmd_stance, joint_cmd);
+
+    if (arm_controller_->getMode() == 1)
+      return false;
+    return true;
+  }
+
+  int VMPController::getArmControlModeOnControllerActivate() const
+  {
+    if (arm_command_replacement_enabled_ && enable_online_vr_mode_)
+      return 2;
+    return 1;
+  }
+
+  void VMPController::activateExternalArmControlIfNeeded()
+  {
+    if (!arm_command_replacement_enabled_ || !enable_online_vr_mode_ || !arm_controller_)
+      return;
+    if (arm_controller_->getMode() == 2)
+      return;
+    arm_controller_->changeMode(2);
+    ROS_INFO("[%s] Auto-switched arm to external mode (2) for online teleoperation",
+             name_.c_str());
+  }
+
+void VMPController::resume()
+  {
+    // A warm target entry does not call reset(). Install the newly captured
+    // entry frame into both policy paths before RUNNING for the same first-tick
+    // behavior as the AMP->VMP cold-reset path.
+    std::vector<float> pending_entry_frame;
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      if (retarget_entry_frame_pending_ && !retarget_entry_frame_.empty())
+      {
+        pending_entry_frame = retarget_entry_frame_;
+      }
+    }
+    if (enable_online_vr_mode_ && !pending_entry_frame.empty())
+    {
+      prefillRetargetedReferenceBuffers(pending_entry_frame);
+      initializeOnlineReferenceBuffer();
+    }
+
+    // Invalidate before RUNNING so the first VMP inference cannot use the
+    // previous activation's robot/anchor alignment.
     vmp_entry_imu_quat_valid_ = false;
+    RLControllerBase::resume();
     if (enable_online_vr_mode_) {
       if (use_interpolate_from_mpc_) {
         ROS_INFO("[%s] MPC->VMP interpolation active, starting sampling early (inference not running yet)", name_.c_str());
@@ -680,6 +884,332 @@ namespace humanoid_controller
     }
     
     ROS_INFO("[%s] VMP controller resumed", name_.c_str());
+  }
+
+  void VMPController::resumeRetargetedStreaming()
+  {
+    std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+    retarget_resume_waiting_ = false;
+    retarget_frozen_frame_valid_ = false;
+    retarget_auto_freeze_valid_ = false;
+    retarget_resume_min_stamp_ = ros::Time(0);
+    retarget_resume_ready_stamp_ = ros::Time(0);
+    retarget_resume_min_frame_seq_ = latest_retargeted_frame_seq_;
+    pico_streaming_paused_.store(false);
+  }
+
+  void VMPController::prepareRetargetedStreamingResume(
+      const Eigen::Quaterniond& robot_imu_quat,
+      const ros::Time& robot_sensor_stamp)
+  {
+    const bool supports_yaw_resume_ack =
+        isOnlineVRDeviceMode() &&
+        (online_vr_data_source_ == "pico" || online_vr_data_source_ == "xsense");
+
+    bool use_frozen_entry_frame = false;
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      use_frozen_entry_frame = supports_yaw_resume_ack &&
+                               pico_streaming_paused_.load() &&
+                               retarget_auto_freeze_valid_;
+    }
+
+    // Keep source data canonical. Repeated entries anchor to the frame frozen
+    // on VMP exit because the Python RT+X correction returns new GMR frames to
+    // that heading. A first AMP->VMP entry anchors to the latest live frame.
+    std::vector<float> entry_frame;
+    bool entry_frame_is_live = false;
+    if (use_frozen_entry_frame)
+    {
+      std::lock_guard<std::mutex> lock(pico_frozen_frame_mutex_);
+      if (!pico_frozen_frame_.empty())
+      {
+        entry_frame = pico_frozen_frame_;
+        entry_frame_is_live = true;
+      }
+    }
+    if (!entry_frame_is_live)
+    {
+      std::lock_guard<std::mutex> lock(latest_frame_mutex_);
+      if (has_received_online_data_ && !latest_online_raw_frame_.empty())
+      {
+        entry_frame = latest_online_raw_frame_;
+        entry_frame_is_live = true;
+      }
+    }
+    if (entry_frame.empty() && !vmp_standing_frame_.empty())
+    {
+      entry_frame = vmp_standing_frame_;
+    }
+
+    double reference_yaw = 0.0;
+    const bool reference_yaw_valid =
+        entry_frame_is_live && extractRetargetedFrameYaw(entry_frame, reference_yaw);
+    Eigen::Quaterniond normalized_robot_quat = robot_imu_quat;
+    const double robot_quat_norm = normalized_robot_quat.norm();
+    const bool robot_yaw_valid = !robot_sensor_stamp.isZero() &&
+                                 normalized_robot_quat.coeffs().allFinite() &&
+                                 std::isfinite(robot_quat_norm) &&
+                                 robot_quat_norm > 1e-8;
+    double robot_yaw = 0.0;
+    if (robot_yaw_valid)
+    {
+      normalized_robot_quat.normalize();
+      const double w = normalized_robot_quat.w();
+      const double x = normalized_robot_quat.x();
+      const double y = normalized_robot_quat.y();
+      const double z = normalized_robot_quat.z();
+      robot_yaw = std::atan2(2.0 * (w * z + x * y),
+                             1.0 - 2.0 * (y * y + z * z));
+    }
+
+    // A first-ever VMP entry has no automatic RT+Y freeze reference to
+    // preserve, so it resumes immediately after installing this alignment.
+    bool wait_for_corrected_frame = false;
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      retarget_entry_frame_ = entry_frame;
+      retarget_entry_frame_pending_ = supports_yaw_resume_ack && !entry_frame.empty();
+
+      if (supports_yaw_resume_ack && robot_yaw_valid && reference_yaw_valid)
+      {
+        retarget_heading_offset_ = std::atan2(
+            std::sin(robot_yaw - reference_yaw),
+            std::cos(robot_yaw - reference_yaw));
+        retarget_heading_offset_valid_ = true;
+      }
+      else if (supports_yaw_resume_ack)
+      {
+        // Never reuse a previous activation's robot heading when the new
+        // source snapshot is unavailable.
+        retarget_heading_offset_ = 0.0;
+        retarget_heading_offset_valid_ = false;
+      }
+      else if (!supports_yaw_resume_ack)
+      {
+        retarget_heading_offset_ = 0.0;
+        retarget_heading_offset_valid_ = false;
+        retarget_entry_frame_pending_ = false;
+        retarget_entry_frame_.clear();
+      }
+
+      wait_for_corrected_frame = use_frozen_entry_frame;
+      if (wait_for_corrected_frame)
+      {
+        retarget_resume_waiting_ = true;
+        retarget_resume_min_stamp_ = latest_retargeted_frame_stamp_;
+        retarget_resume_ready_stamp_ = ros::Time(0);
+        retarget_resume_min_frame_seq_ = latest_retargeted_frame_seq_;
+      }
+    }
+
+    if (supports_yaw_resume_ack && robot_yaw_valid && reference_yaw_valid)
+    {
+      ROS_INFO("[%s] VMP entry reference aligned: robot_yaw=%.4f, reference_yaw=%.4f, offset=%.4f rad, sensor_age=%.3f s",
+               name_.c_str(), robot_yaw, reference_yaw,
+               std::atan2(std::sin(robot_yaw - reference_yaw),
+                          std::cos(robot_yaw - reference_yaw)),
+               std::max(0.0, (ros::Time::now() - robot_sensor_stamp).toSec()));
+    }
+    else if (supports_yaw_resume_ack)
+    {
+      ROS_WARN("[%s] VMP entry heading alignment unavailable (robot_imu=%s, live_reference=%s); alignment disabled for this activation",
+               name_.c_str(), robot_yaw_valid ? "valid" : "invalid",
+               reference_yaw_valid ? "valid" : "invalid");
+    }
+
+    if (!wait_for_corrected_frame)
+    {
+      resumeRetargetedStreaming();
+      return;
+    }
+
+    ROS_INFO("[%s] Waiting for %s GMR yaw-resume frame before unfreezing retargeted streaming",
+             name_.c_str(), online_vr_data_source_.c_str());
+  }
+
+  bool VMPController::extractRetargetedFrameYaw(const std::vector<float>& frame,
+                                                 double& yaw) const
+  {
+    const int theta_start = vmp_config_.theta_start_id;
+    if (theta_start < 0 || theta_start + 6 > static_cast<int>(frame.size()))
+    {
+      return false;
+    }
+
+    const double c0_x = static_cast<double>(frame[theta_start]);
+    const double c0_y = static_cast<double>(frame[theta_start + 1]);
+    if (!std::isfinite(c0_x) || !std::isfinite(c0_y) ||
+        std::hypot(c0_x, c0_y) < 1e-8)
+    {
+      return false;
+    }
+
+    yaw = std::atan2(c0_y, c0_x);
+    return true;
+  }
+
+  void VMPController::applyRetargetedHeadingAlignment(std::vector<float>& frame) const
+  {
+    if (static_cast<int>(frame.size()) < vmp_config_.in_c)
+    {
+      return;
+    }
+    applyRetargetedHeadingAlignment(frame.data(), 1);
+  }
+
+  void VMPController::applyRetargetedHeadingAlignment(float* frames,
+                                                       int frame_count) const
+  {
+    if (frames == nullptr || frame_count <= 0 || vmp_config_.in_c <= 0)
+    {
+      return;
+    }
+
+    double yaw_offset = 0.0;
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      if (!retarget_heading_offset_valid_)
+      {
+        return;
+      }
+      yaw_offset = retarget_heading_offset_;
+    }
+
+    const float c = static_cast<float>(std::cos(yaw_offset));
+    const float s = static_cast<float>(std::sin(yaw_offset));
+    const int frame_dim = vmp_config_.in_c;
+    const int theta_start = vmp_config_.theta_start_id;
+    const int v_start = vmp_config_.v_start_id;
+    const int p_start = vmp_config_.p_start_id;
+
+    const auto rotate_xy = [c, s](float* frame, int index)
+    {
+      const float x = frame[index];
+      const float y = frame[index + 1];
+      frame[index] = c * x - s * y;
+      frame[index + 1] = s * x + c * y;
+    };
+
+    for (int frame_index = 0; frame_index < frame_count; ++frame_index)
+    {
+      float* frame = frames + frame_index * frame_dim;
+
+      // rot6 is column-major [R[:,0], R[:,1]], so left-multiply each
+      // stored column by the same world-frame yaw rotation.
+      if (theta_start >= 0 && theta_start + 6 <= frame_dim)
+      {
+        rotate_xy(frame, theta_start);
+        rotate_xy(frame, theta_start + 3);
+      }
+
+      // Base linear and angular velocities are both world-frame vectors.
+      if (v_start >= 0 && v_start + 6 <= frame_dim)
+      {
+        rotate_xy(frame, v_start);
+        rotate_xy(frame, v_start + 3);
+      }
+
+      // End-effector positions are four base-relative world-frame vectors;
+      // rotate all of them without adding a translation.
+      if (p_start >= 0 && p_start + 12 <= frame_dim)
+      {
+        for (int end_effector = 0; end_effector < 4; ++end_effector)
+        {
+          rotate_xy(frame, p_start + end_effector * 3);
+        }
+      }
+    }
+  }
+
+  void VMPController::prefillRetargetedReferenceBuffers(
+      const std::vector<float>& canonical_frame)
+  {
+    if (static_cast<int>(canonical_frame.size()) != vmp_config_.in_c)
+    {
+      return;
+    }
+
+    std::vector<float> aligned_frame = canonical_frame;
+    applyRetargetedHeadingAlignment(aligned_frame);
+
+    Eigen::VectorXd raw_frame(vmp_config_.in_c);
+    for (int i = 0; i < vmp_config_.in_c; ++i)
+    {
+      raw_frame[i] = static_cast<double>(aligned_frame[i]);
+    }
+    Eigen::VectorXd normalized_frame = raw_frame;
+    if (vmp_enable_theta_normalization_)
+    {
+      normalizeRefMotion(normalized_frame);
+    }
+
+    vmp_ref_motion_raw_buffer_.clear();
+    vmp_ref_motion_buffer_.clear();
+    for (int i = 0; i < vmp_config_.window_l; ++i)
+    {
+      vmp_ref_motion_raw_buffer_.push_back(raw_frame);
+      vmp_ref_motion_buffer_.push_back(normalized_frame);
+    }
+  }
+
+  void VMPController::recordRetargetedFrameStamp(const ros::Time& stamp)
+  {
+    bool resume_streaming = false;
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      latest_retargeted_frame_stamp_ = stamp;
+      ++latest_retargeted_frame_seq_;
+      if (retarget_resume_waiting_ &&
+          !retarget_resume_ready_stamp_.isZero() &&
+          latest_retargeted_frame_seq_ > retarget_resume_min_frame_seq_ &&
+          latest_retargeted_frame_stamp_ >= retarget_resume_ready_stamp_)
+      {
+        retarget_resume_waiting_ = false;
+        retarget_frozen_frame_valid_ = false;
+        retarget_auto_freeze_valid_ = false;
+        pico_streaming_paused_.store(false);
+        resume_streaming = true;
+      }
+    }
+
+    if (resume_streaming)
+    {
+      ROS_INFO("[%s] Corrected GMR frame received; retargeted streaming resumed", name_.c_str());
+    }
+  }
+
+  void VMPController::retargetYawResumeReadyCallback(const std_msgs::Header::ConstPtr& msg)
+  {
+    bool resume_streaming = false;
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      if (!retarget_resume_waiting_ || msg->stamp < retarget_resume_min_stamp_)
+      {
+        return;
+      }
+
+      // Keep the first valid acknowledgement for this activation. Repeated
+      // readiness messages are retries, not a moving timestamp threshold.
+      if (retarget_resume_ready_stamp_.isZero())
+      {
+        retarget_resume_ready_stamp_ = msg->stamp;
+      }
+      if (latest_retargeted_frame_seq_ > retarget_resume_min_frame_seq_ &&
+          latest_retargeted_frame_stamp_ >= retarget_resume_ready_stamp_)
+      {
+        retarget_resume_waiting_ = false;
+        retarget_frozen_frame_valid_ = false;
+        retarget_auto_freeze_valid_ = false;
+        pico_streaming_paused_.store(false);
+        resume_streaming = true;
+      }
+    }
+
+    if (resume_streaming)
+    {
+      ROS_INFO("[%s] GMR yaw-resume acknowledged; retargeted streaming resumed", name_.c_str());
+    }
   }
 
   void VMPController::onInterpolationComplete()
@@ -702,11 +1232,41 @@ namespace humanoid_controller
                name_.c_str(), new_read_index, write_idx, future_frames, offset,
                static_cast<float>(offset) * 1000.0 / online_update_rate_);
     }
+    activateExternalArmControlIfNeeded();
   }
 
   void VMPController::pause()
   {
     RLControllerBase::pause();
+
+    // Leaving VMP is equivalent to RT+Y. Keep this state if VMP is temporarily
+    // resumed as the source of an RL-to-RL interpolation.
+    if (isOnlineVRDeviceMode())
+    {
+      std::lock_guard<std::mutex> resume_lock(retarget_resume_mutex_);
+      retarget_resume_waiting_ = false;
+      retarget_resume_ready_stamp_ = ros::Time(0);
+
+      if (!pico_streaming_paused_.load())
+      {
+        std::lock_guard<std::mutex> frozen_lock(pico_frozen_frame_mutex_);
+        std::lock_guard<std::mutex> latest_lock(latest_frame_mutex_);
+        retarget_frozen_frame_valid_ = has_received_online_data_ && !latest_online_raw_frame_.empty();
+        if (retarget_frozen_frame_valid_)
+        {
+          pico_frozen_frame_ = latest_online_raw_frame_;
+        }
+        else if (!vmp_standing_frame_.empty())
+        {
+          pico_frozen_frame_ = vmp_standing_frame_;
+        }
+        pico_streaming_paused_.store(true);
+      }
+
+      // Only a controller lifecycle exit creates an automatic-switch freeze.
+      // Manual/CLI pause alone must not arm an automatic resume handshake.
+      retarget_auto_freeze_valid_ = retarget_frozen_frame_valid_;
+    }
     
     // 真实机器人暂停时切回正常 Ruiwo 电机参数（异步调用避免阻塞控制线程）
     if (is_real_ && use_vmp_ruiwo_kpkd_)
@@ -1253,6 +1813,12 @@ namespace humanoid_controller
         }
         ROS_WARN_THROTTLE(1.0, "[%s] Using standing frame as fallback for VAE input", name_.c_str());
       }
+
+      // Re-express online reference copies in the robot's AMP-entry heading.
+      // Canonical latest/frozen/ring frames are deliberately left unchanged.
+      if (enable_online_vr_mode_) {
+        applyRetargetedHeadingAlignment(sample_batch.data(), vmp_config_.window_l);
+      }
       
       // 应用时间归一化
       applyTemporalNormalization(sample_batch.data(), sample_batch.size());
@@ -1395,7 +1961,8 @@ namespace humanoid_controller
     if (enable_online_vr_mode_) {
       // 【注意】读取指针的移动已经在VAE编码器输入准备时处理（computeVMPAction中）
       // 这里只负责将当前帧添加到vmp_ref_motion_buffer_用于policy输入
-      
+      std::vector<float> frame_data;
+      {
       std::lock_guard<std::mutex> lock(online_buffer_mutex_);
       
       if (!online_ref_buffer_.is_initialized) {
@@ -1403,14 +1970,17 @@ namespace humanoid_controller
         return;
       }
       
-      // 从读取指针位置获取当前帧
+        // Copy under the ring-buffer lock, then release it before taking the
+        // independent entry-alignment state lock.
       int read_index = online_ref_buffer_.current_read_index;
       if (read_index < 0 || read_index >= static_cast<int>(online_ref_buffer_.data_buffer.size())) {
         ROS_WARN_THROTTLE(1.0, "[%s] Invalid read index %d", name_.c_str(), read_index);
         return;
+        }
+        frame_data = online_ref_buffer_.data_buffer[read_index];
       }
       
-      const auto& frame_data = online_ref_buffer_.data_buffer[read_index];
+      applyRetargetedHeadingAlignment(frame_data);
       
       if (static_cast<int>(frame_data.size()) == vmp_config_.in_c) {
         // 转换为Eigen::VectorXd
@@ -1757,6 +2327,9 @@ namespace humanoid_controller
           pico_retargeted_pose_sub_ = nh_.subscribe<kuavo_msgs::picoPoseRetarget>(
             "/pico/retargeted_pose", 10, 
             &VMPController::picoRetargetedPoseCallback, this);
+          retarget_yaw_resume_ready_sub_ = nh_.subscribe<std_msgs::Header>(
+            "/pico/vmp_yaw_resume_ready", 1,
+            &VMPController::retargetYawResumeReadyCallback, this);
           ROS_INFO("[%s] PICO subscriber initialized: /pico/retargeted_pose", name_.c_str());
         }
         // 初始化Mocap数据订阅器（如果使用Mocap设备模式）
@@ -1771,6 +2344,13 @@ namespace humanoid_controller
           xsense_retargeted_pose_sub_ = nh_.subscribe<kuavo_msgs::xsensePoseRetarget>(
             "/xsense/retargeted_pose", 10,
             &VMPController::xsenseRetargetedPoseCallback, this);
+          std::string pico_joy_topic = "/pico/joy";
+          nh_.param<std::string>("/vmp/pico_joy_topic", pico_joy_topic, pico_joy_topic);
+          pico_stream_control_joy_sub_ = nh_.subscribe<kuavo_msgs::JoySticks>(
+            pico_joy_topic, 10, &VMPController::picoJoyStreamControlCallback, this);
+          retarget_yaw_resume_ready_sub_ = nh_.subscribe<std_msgs::Header>(
+            "/xsense/vmp_yaw_resume_ready", 1,
+            &VMPController::retargetYawResumeReadyCallback, this);
           ROS_INFO("[%s] Xsense subscriber initialized: /xsense/retargeted_pose", name_.c_str());
         }
         // 如果使用bin文件数据源，加载bin文件
@@ -1936,6 +2516,17 @@ namespace humanoid_controller
   
   void VMPController::initializeOnlineReferenceBuffer()
   {
+    std::vector<float> prefill_frame = vmp_standing_frame_;
+    bool using_retarget_entry_frame = false;
+    {
+      std::lock_guard<std::mutex> resume_lock(retarget_resume_mutex_);
+      if (retarget_entry_frame_pending_ && !retarget_entry_frame_.empty())
+      {
+        prefill_frame = retarget_entry_frame_;
+        using_retarget_entry_frame = true;
+        retarget_entry_frame_pending_ = false;
+      }
+    }
     std::lock_guard<std::mutex> lock(online_buffer_mutex_);
     
     try {
@@ -1951,17 +2542,17 @@ namespace humanoid_controller
       online_ref_buffer_.data_buffer.reserve(online_buffer_size_);
       
       // 使用静止帧填充整个缓存区
-      if (vmp_standing_frame_.empty() || static_cast<int>(vmp_standing_frame_.size()) != vmp_config_.in_c) {
-        ROS_WARN("[%s] Standing frame not properly initialized, using zero frame", name_.c_str());
+      if (prefill_frame.empty() || static_cast<int>(prefill_frame.size()) != vmp_config_.in_c) {
+        ROS_WARN("[%s] Online buffer prefill frame is invalid, using zero frame", name_.c_str());
         std::vector<float> zero_frame(vmp_config_.in_c, 0.0f);
         zero_frame[0] = static_cast<float>(standingHeight_);  // 至少设置高度
         for (int i = 0; i < online_buffer_size_; ++i) {
           online_ref_buffer_.data_buffer.push_back(zero_frame);
         }
       } else {
-        // 使用配置的静止帧填充
+        // 普通启动用静止帧；控制器切入时用同一 canonical entry 帧填充。
         for (int i = 0; i < online_buffer_size_; ++i) {
-          online_ref_buffer_.data_buffer.push_back(vmp_standing_frame_);
+          online_ref_buffer_.data_buffer.push_back(prefill_frame);
         }
       }
       
@@ -2008,6 +2599,8 @@ namespace humanoid_controller
       ROS_INFO("[%s] Read window: [read_index ~ read_index+%d), includes past+current+future frames", 
                name_.c_str(), vmp_config_.window_l);
       ROS_INFO("[%s] Frame dimension: %d per frame", name_.c_str(), vmp_config_.in_c);
+      ROS_INFO("[%s] Prefill source: %s", name_.c_str(),
+               using_retarget_entry_frame ? "VMP-entry frame" : "standing frame");
       ROS_INFO("[%s] =========================================================", name_.c_str());
       
     } catch (const std::exception& e) {
@@ -2429,6 +3022,7 @@ namespace humanoid_controller
       has_received_online_data_ = true;
       latest_frame_seq_++;  // 每次callback写入递增序列号
     }
+    recordRetargetedFrameStamp(msg->header.stamp);
     
     // ===== 6. 首次接收日志 =====
     static bool first_pico_data = false;
@@ -2636,6 +3230,7 @@ namespace humanoid_controller
       has_received_online_data_ = true;
       latest_frame_seq_++;  // 每次callback写入递增序列号
     }
+    recordRetargetedFrameStamp(msg->header.stamp);
     
     // ===== 6. 首次接收日志 =====
     static bool first_mocap_data = false;
@@ -2688,8 +3283,8 @@ namespace humanoid_controller
 
   // ========== PICO推流中断/恢复控制 ==========
   // 按键检测由 pico-body-tracking-server (Python端) JoySticksHandler 处理：
-  //   RG + Y = 暂停推流 → 调用 /vmp/pico_stream_control (data=true)
-  //   RG + X = 恢复推流 → 调用 /vmp/pico_stream_control (data=false)
+  //   RT + Y = 暂停推流 → 调用 /vmp/pico_stream_control (data=true)
+  //   RT + X = 恢复推流 → 调用 /vmp/pico_stream_control (data=false)
   // 也可通过命令行直接调用：rosservice call /vmp/pico_stream_control "data: true/false"
   
   bool VMPController::picoStreamControlServiceCallback(std_srvs::SetBool::Request& req,
@@ -2697,11 +3292,16 @@ namespace humanoid_controller
   {
     if (req.data) {
       // 暂停推流
+      std::lock_guard<std::mutex> resume_lock(retarget_resume_mutex_);
+      retarget_resume_waiting_ = false;
+      retarget_resume_ready_stamp_ = ros::Time(0);
+      retarget_auto_freeze_valid_ = false;
       if (!pico_streaming_paused_.load()) {
         {
           std::lock_guard<std::mutex> lock_frozen(pico_frozen_frame_mutex_);
           std::lock_guard<std::mutex> lock_latest(latest_frame_mutex_);
-          if (has_received_online_data_ && !latest_online_raw_frame_.empty()) {
+          retarget_frozen_frame_valid_ = has_received_online_data_ && !latest_online_raw_frame_.empty();
+          if (retarget_frozen_frame_valid_) {
             pico_frozen_frame_ = latest_online_raw_frame_;
           } else if (!vmp_standing_frame_.empty()) {
             pico_frozen_frame_ = vmp_standing_frame_;
@@ -2715,17 +3315,30 @@ namespace humanoid_controller
     } else {
       // 恢复推流
       if (pico_streaming_paused_.load()) {
-        pico_streaming_paused_.store(false);
-        {
-          std::lock_guard<std::mutex> lock(pico_frozen_frame_mutex_);
-          pico_frozen_frame_.clear();
-        }
+        resumeRetargetedStreaming();
         ROS_INFO("[%s] PICO推流已通过服务恢复", name_.c_str());
       }
       res.success = true;
       res.message = "PICO streaming resumed";
     }
     return true;
+  }
+
+  void VMPController::picoJoyStreamControlCallback(const kuavo_msgs::JoySticks::ConstPtr& msg)
+  {
+    if (!msg)
+      return;
+
+    const bool rt_pressed = msg->right_trigger >= 0.5f;
+    const bool pause_active = rt_pressed && msg->left_second_button_pressed;  // RT+Y
+    const bool resume_active = rt_pressed && msg->left_first_button_pressed; // RT+X
+    const bool pause_was_active = joy_pause_combo_active_.exchange(pause_active);
+    const bool resume_was_active = joy_resume_combo_active_.exchange(resume_active);
+
+    if (resume_active && !resume_was_active)
+      arm_stream_pause_requested_.store(false);
+    else if (pause_active && !pause_was_active)
+      arm_stream_pause_requested_.store(true);
   }
 
   // ========== 数学工具函数 ==========
@@ -2902,10 +3515,19 @@ namespace humanoid_controller
     }
     q_robot.normalize();
     if (!vmp_entry_imu_quat_valid_) {
-      vmp_entry_imu_quat_ = q_robot;
+      // Align the current robot yaw with the current motion-anchor yaw. This
+      // makes switch-in yaw error zero even if AMP rotated the robot and/or
+      // the incoming GMR heading is nonzero. Subsequent anchor error then
+      // represents motion-yaw delta minus robot-yaw delta since this entry.
+      const double anchor_yaw = std::atan2(R_anchor(1, 0), R_anchor(0, 0));
+      const Eigen::Quaterniond q_anchor_heading(
+          Eigen::AngleAxisd(anchor_yaw, Eigen::Vector3d::UnitZ()));
+      vmp_entry_imu_quat_ = q_robot * q_anchor_heading.conjugate();
+      vmp_entry_imu_quat_.normalize();
       vmp_entry_imu_quat_valid_ = true;
-      ROS_INFO("[%s] Captured entry IMU quaternion: w=%.4f x=%.4f y=%.4f z=%.4f",
-               name_.c_str(), vmp_entry_imu_quat_.w(), vmp_entry_imu_quat_.x(),
+      ROS_INFO("[%s] Captured VMP entry alignment (anchor_yaw=%.4f rad): w=%.4f x=%.4f y=%.4f z=%.4f",
+               name_.c_str(), anchor_yaw,
+               vmp_entry_imu_quat_.w(), vmp_entry_imu_quat_.x(),
                vmp_entry_imu_quat_.y(), vmp_entry_imu_quat_.z());
     }
     q_robot = vmp_entry_imu_quat_.conjugate() * q_robot;
@@ -4154,4 +4776,3 @@ namespace humanoid_controller
   }
 
 } // namespace humanoid_controller
-

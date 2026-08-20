@@ -6,7 +6,9 @@
   <arg name="pose_topic" default="/xsense/world_bone_poses"/>
   <arg name="summary_topic" default="/xsense/packet_summary"/>
   <arg name="bvh_tcp_port" default="9764"/>
-  <arg name="enable_pico_pause_control" default="true"/>
+  <arg name="enable_pico_pause_control" default="false"/>
+  <arg name="enable_vmp_stream_control" default="true"/>
+  <arg name="vmp_stream_control_service" default="/vmp/pico_stream_control"/>
   <arg name="pico_joy_topic" default="/pico/joy"/>
   <arg name="pico_pause_combo" default="RT+Y"/>
   <arg name="pico_resume_combo" default="RT+X"/>
@@ -27,6 +29,7 @@
   <arg name="fps" default="100.0"/>
   <arg name="cpu_cores" default="[]"/>
   <arg name="bvh_offset_scale" default=""/>
+  <arg name="publish_kuavo_arm_traj" default="true" doc="Publish Xsens-retargeted arm joints to /kuavo_arm_traj"/>
 
   <arg name="enable_pico_joy_receiver" default="true"/>
   <arg name="pico_host" default="0.0.0.0"/>
@@ -37,8 +40,69 @@
   <arg name="pico_startup_delay" default="0.0"/>
   <arg name="pico_body_matrices_topic" default="/robot_body_matrices"/>
   <arg name="enable_pico_control_node" default="true"/>
+  <arg name="enable_pico_amp_walk" default="$(arg enable_pico_joy_receiver)"
+       doc="Convert Pico Joy for AMP walking and follow the active controller's Joy source"/>
+  <arg name="enable_pico_controller_switch" default="$(arg enable_pico_amp_walk)"/>
+  <arg name="pico_controller_switch_grip_threshold" default="0.5"/>
+  <arg name="pico_converted_joy_topic" default="/pico/joy_converted"/>
+  <arg name="pico_default_joy_topic" default="/joy"/>
+  <arg name="pico_amp_joy_retry_period_s" default="1.0"/>
+  <arg name="pico_amp_joy_input_timeout_s" default="0.5"/>
+  <arg name="pico_amp_gamepad_input_timeout_s" default="0.2"/>
+  <arg name="pico_amp_gamepad_axis_deadzone" default="0.05"/>
+  <arg name="pico_amp_gamepad_trigger_pressed_threshold" default="-0.5"/>
+  <arg name="pico_amp_neutral_publish_hz" default="20.0"/>
+  <arg name="pico_amp_head_offset_release_threshold" default="0.5"/>
+  <arg name="pico_amp_head_offset_stick_center_deadzone" default="0.05"/>
+  <arg name="pico_amp_head_offset_center_stable_frames" default="2"/>
+  <arg name="pico_gait_a_short_press_max_s" default="0.5"/>
+  <arg name="pico_amp_controller_names"
+       default="[amp_controller, amp_wild_controller, amp_run_controller, amp_hand_controller]"/>
   <arg name="enable_pico_head_control" default="false"/>
+  <arg name="pico_head_control_mode" default="vr_follow"
+       doc="PICO head mode: fixed, auto_track_active, fixed_main_hand (fixed_main alias), or vr_follow"/>
+  <arg name="pico_head_fixed_main_hand" default="right"
+       doc="Hand tracked by fixed_main_hand mode: left or right"/>
+  <arg name="pico_head_reference_frame" default="waist_yaw_link"/>
+  <arg name="pico_head_origin_frame" default="zhead_1_link"/>
+  <arg name="pico_head_left_motion_frame" default="zarm_l5_link"/>
+  <arg name="pico_head_right_motion_frame" default="zarm_r5_link"/>
+  <arg name="pico_head_left_target_frame" default="zarm_l7_end_effector"/>
+  <arg name="pico_head_right_target_frame" default="zarm_r7_end_effector"/>
+  <arg name="pico_head_activity_window_s" default="0.20"/>
+  <arg name="pico_head_activity_enter_speed_mps" default="0.08"/>
+  <arg name="pico_head_activity_exit_speed_mps" default="0.04"/>
+  <arg name="pico_head_activity_dominance_margin_mps" default="0.05"/>
+  <arg name="pico_head_activity_dominance_ratio" default="1.5"/>
+  <arg name="pico_head_activity_acquire_confirm_s" default="0.25"/>
+  <arg name="pico_head_activity_switch_confirm_s" default="0.25"/>
+  <arg name="pico_head_activity_both_active_confirm_s" default="0.45"/>
+  <arg name="pico_head_activity_min_hold_s" default="0.75"/>
+  <arg name="pico_head_activity_max_sample_gap_s" default="0.10"/>
+  <arg name="pico_head_activity_max_valid_speed_mps" default="3.0"/>
+  <arg name="pico_head_auto_tf_hold_timeout_s" default="0.50"/>
+  <arg name="pico_head_auto_smoothing_tau_s" default="0.12"/>
+  <arg name="pico_head_yaw_rate_limit_dps" default="60.0"/>
+  <arg name="pico_head_pitch_rate_limit_dps" default="45.0"/>
+  <!-- 头部 pitch 偏移量微调 -->
+  <arg name="pico_head_pitch_offset_enabled" default="true"/>
+  <arg name="pico_head_pitch_offset_rate_dps" default="3.0"/>
+  <arg name="pico_head_pitch_offset_limit" default="[-20.0, 20.0]"/>
+  <arg name="pico_head_pitch_offset_trigger_threshold" default="0.7"/>
+  <arg name="pico_head_pitch_offset_stick_threshold" default="0.7"/>
+  <arg name="pico_head_pitch_offset_pitch_sign" default="1.0"/>
+  <arg name="pico_head_yaw_offset_rate_dps" default="3.0"/>
+  <arg name="pico_head_yaw_offset_limit" default="[-20.0, 20.0]"/>
+  <arg name="pico_head_yaw_offset_yaw_sign" default="1.0"/>
+  <arg name="pico_head_offset_zero_stick_threshold" default="0.8"/>
+  <arg name="pico_head_offset_joy_timeout_s" default="0.5"/>
   <arg name="enable_pico_claw_control" default="false"/>
+  <arg name="pico_end_effector_type" default="auto"/>
+  <arg name="pico_dexhand_thumb_aux_long_press_s" default="0.8"/>
+  <arg name="pico_dexhand_thumb_aux_inactive_command" default="0"/>
+  <arg name="pico_dexhand_thumb_aux_active_command" default="100"/>
+  <arg name="pico_dexhand_thumb_aux_joy_timeout_s" default="2.0"/>
+  <arg name="pico_dexhand_thumb_aux_max_sample_gap_s" default="0.5"/>
 
   <group if="$(arg enable_pico_joy_receiver)">
     <node pkg="kuavo_xsense_gmr"
@@ -53,6 +117,64 @@
       <param name="enable_ip_broadcast" value="$(arg pico_enable_ip_broadcast)"/>
       <param name="robot_name" value="$(arg pico_robot_name)"/>
       <param name="broadcast_port" value="$(arg pico_broadcast_port)"/>
+      <param name="enable_vmp_stream_control" value="$(arg enable_vmp_stream_control)"/>
+      <param name="vmp_stream_control_service" value="$(arg vmp_stream_control_service)"/>
+      <param name="vmp_stream_trigger_threshold" value="$(arg pico_trigger_threshold)"/>
+      <param name="enable_controller_switch" value="$(arg enable_pico_controller_switch)"/>
+      <param name="controller_switch_grip_threshold"
+             value="$(arg pico_controller_switch_grip_threshold)"/>
+      <param name="controller_switch_trigger_threshold"
+             value="$(arg pico_trigger_threshold)"/>
+    </node>
+  </group>
+
+  <group if="$(arg enable_pico_amp_walk)">
+    <node pkg="kuavo_xsense_gmr"
+          type="pico_joy_to_sensor_joy_node"
+          name="pico_joy_converter"
+          output="screen">
+      <param name="input_topic" value="$(arg pico_joy_topic)"/>
+      <param name="gamepad_input_topic" value="$(arg pico_default_joy_topic)"/>
+      <param name="output_topic" value="$(arg pico_converted_joy_topic)"/>
+      <param name="gamepad_input_timeout_s"
+             value="$(arg pico_amp_gamepad_input_timeout_s)"/>
+      <param name="gamepad_axis_deadzone"
+             value="$(arg pico_amp_gamepad_axis_deadzone)"/>
+      <param name="gamepad_trigger_pressed_threshold"
+             value="$(arg pico_amp_gamepad_trigger_pressed_threshold)"/>
+      <param name="controller_switch_grip_threshold"
+             value="$(arg pico_controller_switch_grip_threshold)"/>
+      <param name="calibration_trigger_threshold" value="$(arg pico_trigger_threshold)"/>
+      <param name="gait_a_short_press_max_s"
+             value="$(arg pico_gait_a_short_press_max_s)"/>
+      <param name="gait_a_long_press_min_s"
+             value="$(arg pico_dexhand_thumb_aux_long_press_s)"/>
+      <param name="input_timeout_s" value="$(arg pico_amp_joy_input_timeout_s)"/>
+      <param name="neutral_publish_hz" value="$(arg pico_amp_neutral_publish_hz)"/>
+      <param name="suppress_controller_switch_buttons"
+             value="$(arg enable_pico_controller_switch)"/>
+      <param name="suppress_calibration_buttons" value="true"/>
+      <param name="control_node_enabled" value="$(arg enable_pico_control_node)"/>
+      <param name="head_control_enabled" value="$(arg enable_pico_head_control)"/>
+      <param name="head_offset_enabled" value="$(arg pico_head_pitch_offset_enabled)"/>
+      <param name="head_offset_trigger_threshold"
+             value="$(arg pico_head_pitch_offset_trigger_threshold)"/>
+      <param name="head_offset_release_threshold"
+             value="$(arg pico_amp_head_offset_release_threshold)"/>
+      <param name="head_offset_stick_center_deadzone"
+             value="$(arg pico_amp_head_offset_stick_center_deadzone)"/>
+      <param name="head_offset_center_stable_frames"
+             value="$(arg pico_amp_head_offset_center_stable_frames)"/>
+    </node>
+
+    <node pkg="kuavo_xsense_gmr"
+          type="pico_joy_topic_manager.py"
+          name="pico_joy_topic_manager"
+          output="screen">
+      <param name="pico_joy_topic" value="$(arg pico_converted_joy_topic)"/>
+      <param name="default_joy_topic" value="$(arg pico_default_joy_topic)"/>
+      <param name="retry_period_s" value="$(arg pico_amp_joy_retry_period_s)"/>
+      <rosparam param="amp_controller_names" subst_value="true">$(arg pico_amp_controller_names)</rosparam>
     </node>
   </group>
 
@@ -63,9 +185,71 @@
           output="screen"
           launch-prefix="bash -c 'sleep $(arg pico_startup_delay); exec $0 $@'">
       <param name="enable_head_control" value="$(arg enable_pico_head_control)"/>
-      <param name="enable_claw_control" value="$(arg enable_pico_claw_control)"/>
+      <param name="head_control_mode" type="str" value="$(arg pico_head_control_mode)"/>
+      <param name="head_fixed_main_hand" type="str" value="$(arg pico_head_fixed_main_hand)"/>
+      <param name="head_reference_frame" type="str" value="$(arg pico_head_reference_frame)"/>
+      <param name="head_origin_frame" type="str" value="$(arg pico_head_origin_frame)"/>
+      <param name="head_left_motion_frame" type="str" value="$(arg pico_head_left_motion_frame)"/>
+      <param name="head_right_motion_frame" type="str" value="$(arg pico_head_right_motion_frame)"/>
+      <param name="head_left_target_frame" type="str" value="$(arg pico_head_left_target_frame)"/>
+      <param name="head_right_target_frame" type="str" value="$(arg pico_head_right_target_frame)"/>
+      <param name="head_activity_window_s" value="$(arg pico_head_activity_window_s)"/>
+      <param name="head_activity_enter_speed_mps"
+             value="$(arg pico_head_activity_enter_speed_mps)"/>
+      <param name="head_activity_exit_speed_mps"
+             value="$(arg pico_head_activity_exit_speed_mps)"/>
+      <param name="head_activity_dominance_margin_mps"
+             value="$(arg pico_head_activity_dominance_margin_mps)"/>
+      <param name="head_activity_dominance_ratio"
+             value="$(arg pico_head_activity_dominance_ratio)"/>
+      <param name="head_activity_acquire_confirm_s"
+             value="$(arg pico_head_activity_acquire_confirm_s)"/>
+      <param name="head_activity_switch_confirm_s"
+             value="$(arg pico_head_activity_switch_confirm_s)"/>
+      <param name="head_activity_both_active_confirm_s"
+             value="$(arg pico_head_activity_both_active_confirm_s)"/>
+      <param name="head_activity_min_hold_s"
+             value="$(arg pico_head_activity_min_hold_s)"/>
+      <param name="head_activity_max_sample_gap_s"
+             value="$(arg pico_head_activity_max_sample_gap_s)"/>
+      <param name="head_activity_max_valid_speed_mps"
+             value="$(arg pico_head_activity_max_valid_speed_mps)"/>
+      <param name="head_auto_tf_hold_timeout_s"
+             value="$(arg pico_head_auto_tf_hold_timeout_s)"/>
+      <param name="head_auto_smoothing_tau_s"
+             value="$(arg pico_head_auto_smoothing_tau_s)"/>
+      <param name="head_yaw_rate_limit_dps"
+             value="$(arg pico_head_yaw_rate_limit_dps)"/>
+      <param name="head_pitch_rate_limit_dps"
+             value="$(arg pico_head_pitch_rate_limit_dps)"/>
+      <param name="head_pitch_offset_enabled" value="$(arg pico_head_pitch_offset_enabled)"/>
+      <param name="head_pitch_offset_rate_dps" value="$(arg pico_head_pitch_offset_rate_dps)"/>
+      <rosparam param="head_pitch_offset_limit" subst_value="true">$(arg pico_head_pitch_offset_limit)</rosparam>
+      <param name="head_pitch_offset_trigger_threshold" value="$(arg pico_head_pitch_offset_trigger_threshold)"/>
+      <param name="head_pitch_offset_stick_threshold" value="$(arg pico_head_pitch_offset_stick_threshold)"/>
+      <param name="head_pitch_offset_pitch_sign" value="$(arg pico_head_pitch_offset_pitch_sign)"/>
+      <param name="head_yaw_offset_rate_dps" value="$(arg pico_head_yaw_offset_rate_dps)"/>
+      <rosparam param="head_yaw_offset_limit" subst_value="true">$(arg pico_head_yaw_offset_limit)</rosparam>
+      <param name="head_yaw_offset_yaw_sign" value="$(arg pico_head_yaw_offset_yaw_sign)"/>
+      <param name="head_offset_zero_stick_threshold"
+             value="$(arg pico_head_offset_zero_stick_threshold)"/>
+      <param name="head_offset_joy_timeout_s" value="$(arg pico_head_offset_joy_timeout_s)"/>
+      <param name="enable_claw_control"  value="$(arg enable_pico_claw_control)"/>
+      <param name="end_effector_type" type="str" value="$(arg pico_end_effector_type)"/>
       <param name="joy_topic" value="$(arg pico_joy_topic)"/>
       <param name="body_matrices_topic" value="$(arg pico_body_matrices_topic)"/>
+      <param name="gait_a_short_press_max_s"
+             value="$(arg pico_gait_a_short_press_max_s)"/>
+      <param name="dexhand_thumb_aux_long_press_s"
+             value="$(arg pico_dexhand_thumb_aux_long_press_s)"/>
+      <param name="dexhand_thumb_aux_inactive_command"
+             value="$(arg pico_dexhand_thumb_aux_inactive_command)"/>
+      <param name="dexhand_thumb_aux_active_command"
+             value="$(arg pico_dexhand_thumb_aux_active_command)"/>
+      <param name="dexhand_thumb_aux_joy_timeout_s"
+             value="$(arg pico_dexhand_thumb_aux_joy_timeout_s)"/>
+      <param name="dexhand_thumb_aux_max_sample_gap_s"
+             value="$(arg pico_dexhand_thumb_aux_max_sample_gap_s)"/>
     </node>
   </group>
 
@@ -116,8 +300,10 @@
     <param name="topic" value="$(arg pose_topic)"/>
     <param name="topic_cali" value="$(arg bvh_topic)"/>
     <param name="pico_joy_topic" value="$(arg pico_joy_topic)"/>
+    <param name="pico_trigger_threshold" value="$(arg pico_trigger_threshold)"/>
     <param name="fps" value="$(arg fps)"/>
     <param name="bvh_offset_scale" value="$(arg bvh_offset_scale)"/>
+    <param name="publish_kuavo_arm_traj" value="$(arg publish_kuavo_arm_traj)"/>
     <rosparam param="cpu_cores" subst_value="true">$(arg cpu_cores)</rosparam>
   </node>
 </launch>

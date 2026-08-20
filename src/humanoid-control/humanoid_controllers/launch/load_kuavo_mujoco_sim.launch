@@ -283,6 +283,8 @@
     <arg name="xsense_cpu_cores" default="[]" doc="CPU cores to bind Xsens retarget process"/>
     <arg name="xsense_bvh_offset_scale" default="" doc="Optional BVH offset scale"/>
     <arg name="xsense_enable_pico_joy_receiver" default="true" doc="Start PICO joystick receiver and publish /pico/joy"/>
+    <arg name="xsense_enable_pico_amp_walk" default="$(arg xsense_enable_pico_joy_receiver)" doc="Use PICO Joy as the AMP walking source"/>
+    <arg name="xsense_enable_pico_controller_switch" default="$(arg xsense_enable_pico_amp_walk)" doc="Enable PICO RG+A/B controller switching"/>
     <arg name="xsense_pico_host" default="0.0.0.0" doc="PICO joy receiver host"/>
     <arg name="xsense_pico_port" default="12345" doc="PICO joy receiver UDP port"/>
     <arg name="xsense_pico_enable_ip_broadcast" default="true" doc="Broadcast robot IP for PICO discovery"/>
@@ -290,6 +292,8 @@
     <arg name="xsense_pico_broadcast_port" default="8443" doc="PICO robot info broadcast port"/>
     <arg name="xsense_pico_startup_delay" default="0.0" doc="PICO receiver/control startup delay"/>
     <arg name="xsense_enable_pico_head_control" default="false" doc="Enable PICO head control node"/>
+    <arg name="xsense_pico_head_control_mode" default="vr_follow" doc="PICO head mode for XSense: fixed, auto_track_active, fixed_main_hand (fixed_main alias), or vr_follow"/>
+    <arg name="xsense_pico_head_fixed_main_hand" default="right" doc="Hand tracked by XSense fixed_main_hand mode: left or right"/>
     <arg name="xsense_enable_pico_claw_control" default="false" doc="Enable PICO trigger to claw command"/>
 
     <group if="$(arg with_xsense_gmr)">
@@ -322,6 +326,8 @@
         <arg name="cpu_cores" value="$(arg xsense_cpu_cores)"/>
         <arg name="bvh_offset_scale" value="$(arg xsense_bvh_offset_scale)"/>
         <arg name="enable_pico_joy_receiver" value="$(arg xsense_enable_pico_joy_receiver)"/>
+        <arg name="enable_pico_amp_walk" value="$(arg xsense_enable_pico_amp_walk)"/>
+        <arg name="enable_pico_controller_switch" value="$(arg xsense_enable_pico_controller_switch)"/>
         <arg name="pico_host" value="$(arg xsense_pico_host)"/>
         <arg name="pico_port" value="$(arg xsense_pico_port)"/>
         <arg name="pico_enable_ip_broadcast" value="$(arg xsense_pico_enable_ip_broadcast)"/>
@@ -329,6 +335,8 @@
         <arg name="pico_broadcast_port" value="$(arg xsense_pico_broadcast_port)"/>
         <arg name="pico_startup_delay" value="$(arg xsense_pico_startup_delay)"/>
         <arg name="enable_pico_head_control" value="$(arg xsense_enable_pico_head_control)"/>
+        <arg name="pico_head_control_mode" value="$(arg xsense_pico_head_control_mode)"/>
+        <arg name="pico_head_fixed_main_hand" value="$(arg xsense_pico_head_fixed_main_hand)"/>
         <arg name="enable_pico_claw_control" value="$(arg xsense_enable_pico_claw_control)"/>
       </include>
     </group>

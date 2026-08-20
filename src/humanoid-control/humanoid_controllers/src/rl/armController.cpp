@@ -5,11 +5,21 @@
 #include "humanoid_controllers/armTorqueController.h"
 #include <ros/ros.h>
 #include <ros/package.h>
+#include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace humanoid_controller
 {
+namespace
+{
+constexpr double kSwitchReturnPositionTolerance = 0.08;  // rad (~4.6 deg)
+constexpr double kSwitchReturnVelocityTolerance = 0.20;  // rad/s
+constexpr int kSwitchReturnSettledCycles = 3;
+constexpr double kSwitchReturnInterpolationEpsilon = 1e-6;
+}  // namespace
 
 ArmController::ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint_waist_num, size_t joint_arm_num,
                               ocs2::humanoid::TopicLogger* ros_logger)
@@ -69,6 +79,10 @@ ArmController::ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint
   external_target_v_.resize(joint_arm_num);
   external_target_q_.setZero();
   external_target_v_.setZero();
+  external_pause_hold_q_.resize(joint_arm_num);
+  external_pause_hold_q_.setZero();
+  external_pause_source_q_.resize(joint_arm_num);
+  external_pause_source_q_.setZero();
   external_target_received_ = false;
   last_external_input_time_valid_ = false;
   
@@ -87,6 +101,15 @@ ArmController::~ArmController()
 
 void ArmController::reset()
 {
+  default_pose_return_for_switch_state_.store(DefaultPoseReturnState::kIdle,
+                                               std::memory_order_release);
+  default_pose_return_settled_cycles_ = 0;
+  external_control_pause_requested_.store(false);
+  external_control_pause_active_ = false;
+  external_pause_resume_reacquiring_ = false;
+  external_pause_source_valid_ = false;
+  has_emitted_arm_command_ = false;
+
   // 重置插值状态
   arm_control_mode_ = ControlMode::kAutoSwing;
   arm_vr_enabled_ = false;
@@ -105,9 +128,18 @@ void ArmController::reset()
   locked_pos_set_ = false;
   
   // 重置外部控制的目标
-  external_target_received_ = false;
-  buffered_mode2_target_received_ = false;
-  last_external_input_time_valid_ = false;
+  {
+    std::lock_guard<std::mutex> lock(external_target_mutex_);
+    raw_external_target_q_ = current_arm_pos_;
+    raw_external_target_v_.setZero();
+    external_target_q_ = current_arm_pos_;
+    external_target_v_.setZero();
+    external_target_received_ = false;
+    buffered_mode2_target_received_ = false;
+    last_external_input_time_valid_ = false;
+  }
+  external_pause_hold_q_ = current_arm_pos_;
+  external_pause_source_q_ = current_arm_pos_;
   
   // 重置滤波器
   if (arm_filter_initialized_)
@@ -218,11 +250,17 @@ void ArmController::setExternalCommandBufferCallback(std::function<bool()> callb
   external_command_buffer_callback_ = std::move(callback);
 }
 
+void ArmController::setExternalControlPaused(bool paused)
+{
+  external_control_pause_requested_.store(paused);
+}
+
 void ArmController::clearExternalTarget()
 {
-  std::lock_guard<std::mutex> lock(state_mutex_);
+  std::lock_guard<std::mutex> lock(external_target_mutex_);
   external_target_received_ = false;
-  raw_external_target_q_.setZero();
+  raw_external_target_q_ = desire_arm_q_;
+  raw_external_target_v_.setZero();
   external_target_q_ = desire_arm_q_;
   external_target_v_.setZero();
   buffered_mode2_target_received_ = false;
@@ -247,6 +285,17 @@ void ArmController::update(const ros::Time& time,
   current_arm_pos_ = joint_pos.segment(arm_start_idx_, joint_arm_num_);
   current_arm_vel_ = joint_vel.segment(arm_start_idx_, joint_arm_num_);
 
+  DefaultPoseReturnState expected_return_state = DefaultPoseReturnState::kRequested;
+  if (default_pose_return_for_switch_state_.compare_exchange_strong(
+          expected_return_state, DefaultPoseReturnState::kStarted,
+          std::memory_order_acq_rel))
+  {
+    default_pose_return_settled_cycles_ = 0;
+    external_control_pause_requested_.store(false);
+    applyModeChange(static_cast<int>(ControlMode::kAutoSwing), true);
+    ROS_INFO("[ArmController] Started control-thread interpolation to default pose for controller switch");
+  }
+
   // 1. 处理自动模式切换
   // handleAutoModeSwitch(cmd_stance);
   // 确保滤波器参数与实际控制频率匹配（仅在未初始化时使用传入的 dt 初始化）
@@ -259,7 +308,11 @@ void ArmController::update(const ros::Time& time,
     ROS_INFO("[ArmController] Filter initialized: dt=%.4f s, cutoff=%.1f Hz", dt, external_cutoff_freq_);
   }
 
-  applyBufferedMode2TargetIfReady();
+  applyExternalControlPauseState();
+  if (!external_control_pause_active_)
+  {
+    applyBufferedMode2TargetIfReady();
+  }
 
   // 2. 根据当前模式更新期望状态
   if (arm_control_mode_ == ControlMode::kLocked)
@@ -272,7 +325,14 @@ void ArmController::update(const ros::Time& time,
   }
   else if (arm_control_mode_ == ControlMode::kExternal)
   {
-    if (is_returning_from_external_) {
+    if (external_control_pause_active_)
+    {
+      // Keep emitting the exact latched command while recomputing torque from
+      // the current measured state in fillJointCmdMessage().
+      desire_arm_q_ = external_pause_hold_q_;
+      desire_arm_v_.setZero();
+    }
+    else if (is_returning_from_external_) {
       updateAutoSwing(time, dt, cmd_stance);
       // 回家曲线跑完（已离开 kHoming）才翻回自动摆臂 —— 判定看"曲线跑完"，不看子状态终值
       if (auto_swing_state_ != AutoSwingState::kHoming) {
@@ -288,11 +348,62 @@ void ArmController::update(const ros::Time& time,
   // 3. 填充命令消息（根据模式决定是否填充）
   // 注意：不再对全模式应用滤波，锁定和自动摆臂的平滑插值不需要滤波
   // 自动摆臂门禁：子状态非摆臂（回家中/按住）时，本控制器填充手臂指令，覆盖 RL
+  const bool force_default_pose_output =
+      default_pose_return_for_switch_state_.load(std::memory_order_acquire) !=
+      DefaultPoseReturnState::kIdle;
   if (arm_control_mode_ == ControlMode::kLocked || arm_control_mode_ == ControlMode::kExternal ||
-      (arm_control_mode_ == ControlMode::kAutoSwing && auto_swing_state_ != AutoSwingState::kSwing))
+      (arm_control_mode_ == ControlMode::kAutoSwing && auto_swing_state_ != AutoSwingState::kSwing) ||
+      force_default_pose_output)
   {
     fillJointCmdMessage(joint_cmd_msg, desire_arm_q_, desire_arm_v_,
                        joint_pos, joint_vel);
+
+    if (force_default_pose_output)
+    {
+      const bool dimensions_valid =
+          desire_arm_q_.size() == default_arm_pos_.size() &&
+          current_arm_pos_.size() == default_arm_pos_.size() &&
+          current_arm_vel_.size() == default_arm_pos_.size();
+      const double desired_error = dimensions_valid
+                                       ? (desire_arm_q_ - default_arm_pos_).lpNorm<Eigen::Infinity>()
+                                       : std::numeric_limits<double>::infinity();
+      const double measured_error = dimensions_valid
+                                        ? (current_arm_pos_ - default_arm_pos_).lpNorm<Eigen::Infinity>()
+                                        : std::numeric_limits<double>::infinity();
+      const double measured_velocity = dimensions_valid
+                                           ? current_arm_vel_.lpNorm<Eigen::Infinity>()
+                                           : std::numeric_limits<double>::infinity();
+      const double position_tolerance =
+          std::min(arm_tracking_error_threshold_, kSwitchReturnPositionTolerance);
+      const bool settled_this_cycle =
+          dimensions_valid && !is_interpolating_ &&
+          desired_error <= kSwitchReturnInterpolationEpsilon &&
+          measured_error <= position_tolerance &&
+          measured_velocity <= kSwitchReturnVelocityTolerance;
+      default_pose_return_settled_cycles_ = settled_this_cycle
+                                                ? default_pose_return_settled_cycles_ + 1
+                                                : 0;
+      const bool return_complete =
+          default_pose_return_settled_cycles_ >= kSwitchReturnSettledCycles;
+      auto return_state = default_pose_return_for_switch_state_.load(std::memory_order_acquire);
+      bool became_complete = false;
+      if (return_complete && return_state == DefaultPoseReturnState::kStarted)
+      {
+        became_complete = default_pose_return_for_switch_state_.compare_exchange_strong(
+            return_state, DefaultPoseReturnState::kComplete, std::memory_order_acq_rel);
+      }
+      else if (!return_complete && return_state == DefaultPoseReturnState::kComplete)
+      {
+        (void)default_pose_return_for_switch_state_.compare_exchange_strong(
+            return_state, DefaultPoseReturnState::kStarted, std::memory_order_acq_rel);
+      }
+      if (became_complete)
+      {
+        ROS_INFO("[ArmController] Default-pose return complete for controller switch "
+                 "(max error=%.4f rad, max velocity=%.4f rad/s)",
+                 measured_error, measured_velocity);
+      }
+    }
   }
   
   // 5. 发布模式状态（如果ros_logger可用）
@@ -300,6 +411,8 @@ void ArmController::update(const ros::Time& time,
   {
     // 发布当前模式
     ros_logger_->publishValue("/arm_controller/mode", static_cast<double>(static_cast<int>(arm_control_mode_)));
+    ros_logger_->publishValue("/arm_controller/external_paused",
+                              external_control_pause_active_ ? 1.0 : 0.0);
     
 
   }
@@ -325,6 +438,7 @@ void ArmController::update(const ros::Time& time,
       cmd_arm_vel_(i) = current_arm_vel_(i);
     }
   }
+  has_emitted_arm_command_ = true;
   
 }
 
@@ -361,6 +475,27 @@ void ArmController::fillJointCmdMessage(kuavo_msgs::jointCmd& joint_cmd_msg,
   }
 }
 
+bool ArmController::requestDefaultPoseReturnForSwitch()
+{
+  auto expected = DefaultPoseReturnState::kIdle;
+  if (!default_pose_return_for_switch_state_.compare_exchange_strong(
+          expected, DefaultPoseReturnState::kRequested, std::memory_order_acq_rel))
+  {
+    return true;
+  }
+
+  // A paused teleoperation stream must not keep the arm latched at its last VR pose.
+  external_control_pause_requested_.store(false);
+  ROS_INFO("[ArmController] Queued control-thread arm return to default pose for controller switch");
+  return true;
+}
+
+void ArmController::cancelDefaultPoseReturnForSwitch()
+{
+  default_pose_return_for_switch_state_.store(DefaultPoseReturnState::kIdle,
+                                               std::memory_order_release);
+}
+
 bool ArmController::changeMode(int target_mode)
 {
   // 检查是否处于插值过程中
@@ -378,6 +513,24 @@ bool ArmController::changeMode(int target_mode)
   if (target_mode < 0 || target_mode > 2)
   {
     ROS_WARN("[ArmController] Invalid control mode: %d", target_mode);
+    return false;
+  }
+
+  if (default_pose_return_for_switch_state_.load(std::memory_order_acquire) !=
+          DefaultPoseReturnState::kIdle &&
+      target_mode == static_cast<int>(ControlMode::kAutoSwing))
+  {
+    // The control loop owns initialization of the homing curve. A matching
+    // global mode-1 acknowledgement must not restart it from a ROS callback.
+    return true;
+  }
+
+  if (default_pose_return_for_switch_state_.load(std::memory_order_acquire) !=
+      DefaultPoseReturnState::kIdle)
+  {
+    ROS_WARN_THROTTLE(1.0,
+                      "[ArmController] Ignore mode %d while returning to default pose for controller switch",
+                      target_mode);
     return false;
   }
 
@@ -508,7 +661,7 @@ bool ArmController::getModeCallback(kuavo_msgs::changeArmCtrlMode::Request &req,
   return true;
 }
 
-void ArmController::applyModeChange(int target_mode)
+void ArmController::applyModeChange(int target_mode, bool force_interpolation_to_default)
 {
   if (target_mode == 0)
   {
@@ -550,7 +703,10 @@ void ArmController::applyModeChange(int target_mode)
     Eigen::VectorXd error = default_arm_pos_ - current_arm_pos_;
     double error_norm = error.norm();
 
-    if (error_norm > arm_tracking_error_threshold_)
+    const bool needs_interpolation = force_interpolation_to_default
+                                         ? error.lpNorm<Eigen::Infinity>() > kSwitchReturnInterpolationEpsilon
+                                         : error_norm > arm_tracking_error_threshold_;
+    if (needs_interpolation)
     {
       // 偏差大：发起回家，平滑过渡到默认位置（行走中也允许跑完，见 updateMode1）
       is_interpolating_ = true;
@@ -669,7 +825,7 @@ void ArmController::applyRateLimitedInterpolation(double dt,
 
 void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
-  if (external_target_locked_) return;
+  if (external_target_locked_ || external_control_pause_requested_.load()) return;
   std::function<bool()> external_command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
@@ -677,6 +833,8 @@ void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& 
   }
   if (external_command_buffer_callback && external_command_buffer_callback())
   {
+    std::lock_guard<std::mutex> lock(external_target_mutex_);
+    if (external_control_pause_requested_.load()) return;
     storeMode2Target(*msg, buffered_mode2_target_q_, buffered_mode2_target_v_);
     buffered_mode2_target_received_ = true;
     ROS_DEBUG_THROTTLE(1.0, "[ArmController] Buffer arm trajectory until manipulation controller is active");
@@ -685,6 +843,9 @@ void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& 
 
   if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
   {
+    std::lock_guard<std::mutex> lock(external_target_mutex_);
+    if (external_control_pause_requested_.load() ||
+        arm_control_mode_ != ControlMode::kExternal || !arm_vr_enabled_) return;
     storeMode2Target(*msg, raw_external_target_q_, raw_external_target_v_);
     external_target_received_ = true;
   }
@@ -693,8 +854,12 @@ void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& 
 void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
   // 动作轨迹回调：不受 external_target_locked_ 控制，专用于离线动作播放
-  if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
+  if (!external_control_pause_requested_.load() &&
+      arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
   {
+    std::lock_guard<std::mutex> lock(external_target_mutex_);
+    if (external_control_pause_requested_.load() ||
+        arm_control_mode_ != ControlMode::kExternal || !arm_vr_enabled_) return;
     storeMode2Target(*msg, raw_external_target_q_, raw_external_target_v_);
     external_target_received_ = true;
   }
@@ -702,9 +867,12 @@ void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::Cons
 
 void ArmController::applyBufferedMode2TargetIfReady()
 {
-  if (!buffered_mode2_target_received_)
   {
-    return;
+    std::lock_guard<std::mutex> lock(external_target_mutex_);
+    if (!buffered_mode2_target_received_ || external_control_pause_requested_.load())
+    {
+      return;
+    }
   }
 
   std::function<bool()> external_command_buffer_callback;
@@ -721,6 +889,12 @@ void ArmController::applyBufferedMode2TargetIfReady()
     return;
   }
 
+  std::lock_guard<std::mutex> lock(external_target_mutex_);
+  if (!buffered_mode2_target_received_ || external_control_pause_requested_.load() ||
+      arm_control_mode_ != ControlMode::kExternal || !arm_vr_enabled_)
+  {
+    return;
+  }
   raw_external_target_q_ = buffered_mode2_target_q_;
   raw_external_target_v_ = buffered_mode2_target_v_;
   external_target_received_ = true;
@@ -816,8 +990,145 @@ void ArmController::updateAutoSwing(const ros::Time& time, double dt, int cmd_st
   }
 }
 
+void ArmController::applyExternalControlPauseState()
+{
+  const bool switch_return_active =
+      default_pose_return_for_switch_state_.load(std::memory_order_acquire) !=
+      DefaultPoseReturnState::kIdle;
+  if (switch_return_active)
+  {
+    // RT+Y/Pico streaming pause is subordinate to the safety return. VMP may
+    // re-publish the pause request every tick while the outer mode is still 2.
+    external_control_pause_requested_.store(false);
+  }
+  const bool pause_requested = switch_return_active
+                                   ? false
+                                   : external_control_pause_requested_.load();
+
+  // The pause applies only to external control. If another mode is selected,
+  // keep the request latched so a later transition to mode 2 starts held.
+  if (arm_control_mode_ != ControlMode::kExternal)
+  {
+    external_control_pause_active_ = false;
+    external_pause_resume_reacquiring_ = false;
+    external_pause_source_valid_ = false;
+    return;
+  }
+
+  if (pause_requested && !external_control_pause_active_)
+  {
+    // cmd_arm_pos_ is the exact position emitted by the previous update. On
+    // the first update, use the freshly captured measured state instead of
+    // the constructor's zero-initialized command.
+    if (has_emitted_arm_command_ &&
+        cmd_arm_pos_.size() == static_cast<int>(joint_arm_num_) &&
+        cmd_arm_pos_.allFinite())
+    {
+      external_pause_hold_q_ = cmd_arm_pos_;
+    }
+    else
+    {
+      external_pause_hold_q_ = current_arm_pos_;
+    }
+
+    desire_arm_q_ = external_pause_hold_q_;
+    desire_arm_v_.setZero();
+    {
+      std::lock_guard<std::mutex> lock(external_target_mutex_);
+      external_pause_source_valid_ =
+          external_target_received_ &&
+          raw_external_target_q_.size() == static_cast<int>(joint_arm_num_) &&
+          raw_external_target_q_.allFinite();
+      if (external_pause_source_valid_)
+      {
+        external_pause_source_q_ = raw_external_target_q_;
+      }
+      raw_external_target_q_ = external_pause_hold_q_;
+      raw_external_target_v_.setZero();
+      external_target_q_ = external_pause_hold_q_;
+      external_target_v_.setZero();
+      external_target_received_ = false;
+      buffered_mode2_target_received_ = false;
+      last_external_input_time_valid_ = false;
+    }
+    if (arm_filter_initialized_)
+    {
+      arm_joint_pos_filter_.reset(external_pause_hold_q_);
+      arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(joint_arm_num_));
+    }
+    is_interpolating_ = true;
+    external_pause_resume_reacquiring_ = false;
+    external_control_pause_active_ = true;
+    ROS_INFO("[ArmController] External control paused: holding last arm command");
+    return;
+  }
+
+  if (!pause_requested && external_control_pause_active_)
+  {
+    // Clear every pre-pause target while serialized with the ROS callbacks.
+    // A callback that arrives after this critical section is the first target
+    // eligible for smooth post-resume reacquisition.
+    {
+      std::lock_guard<std::mutex> lock(external_target_mutex_);
+      raw_external_target_q_ = external_pause_hold_q_;
+      raw_external_target_v_.setZero();
+      external_target_q_ = external_pause_hold_q_;
+      external_target_v_.setZero();
+      external_target_received_ = false;
+      buffered_mode2_target_received_ = false;
+      last_external_input_time_valid_ = false;
+    }
+    desire_arm_q_ = external_pause_hold_q_;
+    desire_arm_v_.setZero();
+    if (arm_filter_initialized_)
+    {
+      arm_joint_pos_filter_.reset(external_pause_hold_q_);
+      arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(joint_arm_num_));
+    }
+    is_interpolating_ = true;
+    external_pause_resume_reacquiring_ = true;
+    external_control_pause_active_ = false;
+    ROS_INFO("[ArmController] External control resumed: waiting for an updated arm target");
+  }
+}
+
+bool ArmController::applyStrictRateLimitedInterpolation(double dt,
+                                                        const Eigen::VectorXd& target_pos,
+                                                        double max_velocity)
+{
+  if (target_pos.size() != desire_arm_q_.size())
+  {
+    desire_arm_v_.setZero();
+    return false;
+  }
+
+  const double max_step = std::max(0.0, max_velocity) * std::max(0.0, dt);
+  bool completed = true;
+  for (int i = 0; i < target_pos.size(); ++i)
+  {
+    const double error = target_pos(i) - desire_arm_q_(i);
+    if (std::abs(error) > max_step)
+    {
+      if (max_step > 0.0)
+      {
+        desire_arm_q_(i) += std::copysign(max_step, error);
+      }
+      completed = false;
+    }
+    else
+    {
+      desire_arm_q_(i) = target_pos(i);
+    }
+  }
+  desire_arm_v_.setZero();
+  is_interpolating_ = !completed;
+  return completed;
+}
+
 void ArmController::updateExternalControl(double dt)
 {
+  std::lock_guard<std::mutex> target_lock(external_target_mutex_);
+
   // 外部控制模式
   // 使用和humanoidController相同的滤波逻辑：先滤波位置，然后通过位置差分计算速度，再滤波速度
   
@@ -877,12 +1188,42 @@ void ArmController::updateExternalControl(double dt)
     }
     else
     {
-      // 收到目标后，向"原始目标"(raw_external_target_q_) 靠拢
-      // 关键：不使用滤波后的目标进行插值，以确保产生足够的误差触发限速
-      applyRateLimitedInterpolation(dt, raw_external_target_q_, Eigen::VectorXd::Zero(joint_arm_num_), mode_interpolation_velocity_);
-      
-      // 当误差减小到阈值，is_interpolating 会被 applyRateLimitedInterpolation 设为 false
-      if (!is_interpolating_) {
+      bool interpolation_finished = false;
+      if (external_pause_resume_reacquiring_)
+      {
+        // Resume-specific path: clamp every joint on every tick. Unlike the
+        // normal path, this cannot snap across arm_tracking_error_threshold_.
+        // Xsens repeats its frozen source frame while paused. Compare against
+        // that last accepted source target (not the filtered command) and
+        // remain held until the source content actually changes.
+        if (external_pause_source_valid_ &&
+            (raw_external_target_q_ - external_pause_source_q_)
+                    .lpNorm<Eigen::Infinity>() <= 1e-6)
+        {
+          desire_arm_q_ = external_pause_hold_q_;
+          desire_arm_v_.setZero();
+          is_interpolating_ = true;
+        }
+        else
+        {
+          external_pause_source_valid_ = false;
+          interpolation_finished = applyStrictRateLimitedInterpolation(
+              dt, raw_external_target_q_, mode_interpolation_velocity_);
+        }
+        if (interpolation_finished)
+        {
+          external_pause_resume_reacquiring_ = false;
+        }
+      }
+      else
+      {
+        // 收到目标后，向"原始目标"(raw_external_target_q_) 靠拢
+        // 关键：不使用滤波后的目标进行插值，以确保产生足够的误差触发限速
+        applyRateLimitedInterpolation(dt, raw_external_target_q_, Eigen::VectorXd::Zero(joint_arm_num_), mode_interpolation_velocity_);
+        interpolation_finished = !is_interpolating_;
+      }
+
+      if (interpolation_finished) {
           // 插值结束瞬间，重置滤波器到当前位置，确保接管瞬间无跳变
           arm_joint_pos_filter_.reset(desire_arm_q_);
           arm_joint_vel_filter_.reset(desire_arm_v_);

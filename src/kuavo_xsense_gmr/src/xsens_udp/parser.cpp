@@ -108,7 +108,7 @@ std::string coordinateSystemFor(const std::string& type)
   if (type == "05")
     return "Y-Up left-handed Unity3D protocol, positions in m";
   if (type == "13")
-    return "Y-Up right-handed, converted from Xsens Z-Up, positions in m";
+    return "BVH-aligned frame: X-left, Y-up, Z-forward, converted from Xsens type13 raw Z-up, positions in m";
   if (type == "20" || type == "21" || type == "22" || type == "23" || type == "24")
     return "Y-Up right-handed, converted from Xsens Z-Up, protocol units";
   return "";
@@ -306,9 +306,9 @@ void convertCoordinateFrames(ParsedPacket* packet)
   else if (type == "13")
   {
     for (auto& segment : packet->scale_segments)
-      segment.origin_m = zUpToYUp(segment.origin_m);
+      segment.origin_m = xsensType02RawToBvhFrame(segment.origin_m);
     for (auto& point : packet->scale_points)
-      point.position_m = zUpToYUp(point.position_m);
+      point.position_m = xsensType02RawToBvhFrame(point.position_m);
   }
   else if (type == "20")
   {
@@ -512,6 +512,7 @@ bool parseScaleInfo(ByteReader* reader, ParsedPacket* packet, std::string* error
     packet->scale_segments.push_back(segment);
   }
 
+  // 每个 Scale Payload 都包含 point_count；即使包含 Segment，该值也可能为 0。
   uint32_t point_count = 0;
   if (!reader->readU32(&point_count))
   {

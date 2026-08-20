@@ -1,6 +1,8 @@
 # rosbag 录制参数
 # 最大分割文件数量
 max_splits: 8
+# 录制内存队列 (MB)。默认 rosbag 是 256；写盘跟不上会 Dropping oldest queued message
+buffsize: 256
 # 每次运行最多保留的 bag 文件数量
 max_num_bags_per_run: 8
 # 是否按每次运行批次保留max_num_bags_per_run数量的bag：

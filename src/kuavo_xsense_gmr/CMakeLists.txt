@@ -6,8 +6,11 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  sensor_msgs
   geometry_msgs
+  std_srvs
   tf
+  kuavo_common
   kuavo_msgs
 )
 
@@ -22,8 +25,11 @@ catkin_package(
     roscpp
     rospy 
     std_msgs
+    sensor_msgs
     geometry_msgs 
+    std_srvs
     tf
+    kuavo_common
     kuavo_msgs
 )
 
@@ -40,6 +46,8 @@ include_directories(
 add_library(kuavo_xsense_udp_core
   src/xsens_udp/parser.cpp
   src/xsens_udp/fragment_assembler.cpp
+  src/xsens_udp/elbow_landmark_cache.cpp
+  src/xsens_udp/xsens_pose_builder.cpp
   src/xsens_udp/udp_receiver.cpp
 )
 target_link_libraries(kuavo_xsense_udp_core
@@ -80,6 +88,16 @@ add_dependencies(xsense_pico_control_node
   ${catkin_EXPORTED_TARGETS}
 )
 
+add_executable(pico_joy_to_sensor_joy_node
+  src/pico_joy_to_sensor_joy_node.cpp
+)
+target_link_libraries(pico_joy_to_sensor_joy_node
+  ${catkin_LIBRARIES}
+)
+add_dependencies(pico_joy_to_sensor_joy_node
+  ${catkin_EXPORTED_TARGETS}
+)
+
 #############
 ## Install ##
 #############
@@ -89,10 +107,16 @@ catkin_install_python(PROGRAMS
   scripts/xsense_streaming_node.py
   scripts/xsens_bag_to_xsense_topics.py
   scripts/xsense_bvh_desc_publisher.py
+  scripts/pico_joy_topic_manager.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-install(TARGETS kuavo_xsense_udp_core xsense_udp_receiver_node xsense_pico_joy_receiver_node xsense_pico_control_node
+install(TARGETS
+  kuavo_xsense_udp_core
+  xsense_udp_receiver_node
+  xsense_pico_joy_receiver_node
+  xsense_pico_control_node
+  pico_joy_to_sensor_joy_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

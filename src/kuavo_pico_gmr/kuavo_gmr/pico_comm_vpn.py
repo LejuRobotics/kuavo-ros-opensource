@@ -97,6 +97,9 @@ class SessionManager:
             rospy.get_param("~require_upper_precheck", True)
         )
         self.dry_run = bool(rospy.get_param("~dry_run", False))
+        self.teleop_idle_timeout = float(
+            rospy.get_param("~teleop_idle_timeout", 5.0)
+        )
 
         self._lock = threading.RLock()
         self._state = IDLE_AMP
@@ -105,6 +108,7 @@ class SessionManager:
         self._allowed_vr_ip = None
         self._started_at = None
         self._last_activity_at = None
+        self._last_packet_time = 0.0
         self._disconnect_reason = None
         self._last_task_id = None
         self._last_error = ""
@@ -193,6 +197,7 @@ class SessionManager:
             )
             if allowed:
                 self._last_activity_at = utc_now()
+                self._last_packet_time = time.monotonic()
             return allowed
 
     def submit(self, action, task_id, vr_ip=None, reason="", timeout=60.0):
@@ -214,6 +219,7 @@ class SessionManager:
             try:
                 command = self._commands.get(timeout=0.5)
             except queue.Empty:
+                self._check_idle_timeout()
                 continue
             try:
                 if command.action == "start":
@@ -235,6 +241,20 @@ class SessionManager:
                 )
             command.response.put(result)
 
+    def _check_idle_timeout(self):
+        with self._lock:
+            if self._state != TELEOPERATING:
+                return
+            task_id = self._active_task_id
+            idle = time.monotonic() - self._last_packet_time
+            if idle <= self.teleop_idle_timeout:
+                return
+        rospy.logwarn(
+            "Teleoperation idle timeout after %.1fs (limit %.1fs), auto-stopping",
+            idle, self.teleop_idle_timeout,
+        )
+        self._stop(task_id, "vr_idle_timeout")
+
     def _start(self, task_id, vr_ip):
         with self._lock:
             if (
@@ -254,6 +274,7 @@ class SessionManager:
             self._allowed_vr_ip = None
             self._started_at = utc_now()
             self._last_activity_at = self._started_at
+            self._last_packet_time = time.monotonic()
             self._disconnect_reason = None
             self._last_error = ""
             self._recorder_started = False

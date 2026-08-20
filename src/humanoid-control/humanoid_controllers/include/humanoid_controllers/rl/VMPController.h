@@ -4,6 +4,7 @@
 #include <pinocchio/fwd.hpp>
 
 #include "humanoid_controllers/rl/RLControllerBase.h"
+#include "humanoid_controllers/rl/armController.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include "kuavo_solver/ankle/ankle_solver.h"
 
@@ -13,10 +14,13 @@
 #include "kuavo_msgs/MocapPoseRetarget.h"
 // Xsense相关头文件
 #include "kuavo_msgs/xsensePoseRetarget.h"
+// PICO/Xsens 共用手柄消息
+#include "kuavo_msgs/JoySticks.h"
 // Ruiwo电机参数切换服务
 #include "kuavo_msgs/ExecuteArmAction.h"
 // ROS服务
 #include <std_srvs/SetBool.h>
+#include <std_msgs/Header.h>
 
 #include <openvino/openvino.hpp>
 #include <memory>
@@ -24,6 +28,7 @@
 #include <mutex>
 #include <deque>
 #include <atomic>
+#include <functional>
 #include <thread>
 
 namespace humanoid_controller
@@ -233,6 +238,17 @@ namespace humanoid_controller
     void resume() override;
 
     /**
+     * @brief 恢复使用最新的重定向数据（等效于 RT+X）
+     */
+    void resumeRetargetedStreaming();
+
+    /**
+     * @brief 切入 VMP 前将在线参考朝向对齐到机器人，并等待 GMR 完成 RT+X
+     */
+    void prepareRetargetedStreamingResume(const Eigen::Quaterniond& robot_imu_quat,
+                                          const ros::Time& robot_sensor_stamp);
+
+    /**
      * @brief MPC→VMP 插值完成后的回调，启动在线采样
      */
     void onInterpolationComplete() override;
@@ -249,6 +265,10 @@ namespace humanoid_controller
      * 循环/多轨迹模式下始终允许；单次离线轨迹需播放完成后才允许。
      */
     bool isAllowToExit() const override;
+
+    int getArmControlModeOnControllerActivate() const override;
+
+    void setExternalCommandBufferCallback(std::function<bool()> callback) override;
 
   protected:
     /**
@@ -287,6 +307,10 @@ namespace humanoid_controller
      * @brief 推理条件检查
      */
     bool shouldRunInference() const override;
+
+    bool updateArmCommand(const ros::Time& time,
+                          const SensorData& sensor_data,
+                          kuavo_msgs::jointCmd& joint_cmd) override;
 
   private:
     // ========== VMP核心推理函数 ==========
@@ -442,6 +466,18 @@ namespace humanoid_controller
      * @param msg Xsense重定向姿态消息（字段格式与Mocap/PICO一致）
      */
     void xsenseRetargetedPoseCallback(const kuavo_msgs::xsensePoseRetarget::ConstPtr& msg);
+
+    /**
+     * @brief GMR 已发布完成偏航重定向的新帧
+     */
+    void retargetYawResumeReadyCallback(const std_msgs::Header::ConstPtr& msg);
+
+    void recordRetargetedFrameStamp(const ros::Time& stamp);
+
+    bool extractRetargetedFrameYaw(const std::vector<float>& frame, double& yaw) const;
+    void applyRetargetedHeadingAlignment(std::vector<float>& frame) const;
+    void applyRetargetedHeadingAlignment(float* frames, int frame_count) const;
+    void prefillRetargetedReferenceBuffers(const std::vector<float>& canonical_frame);
     
     /**
      * @brief PICO推流暂停/恢复 ROS 服务回调
@@ -450,12 +486,17 @@ namespace humanoid_controller
      * @return 服务是否成功执行
      * 
      * 由 pico-body-tracking-server 的 PICO 手柄按键回调触发：
-     * - RG + Y：暂停推流（调用 service data=true）
-     * - RG + X：恢复推流（调用 service data=false）
+     * - RT + Y：暂停推流（调用 service data=true）
+     * - RT + X：恢复推流（调用 service data=false）
      * 也可通过 rosservice call 直接调用
      */
     bool picoStreamControlServiceCallback(std_srvs::SetBool::Request& req,
                                           std_srvs::SetBool::Response& res);
+
+    /**
+     * @brief Xsens 手柄推流暂停/恢复回调，同步冻结/恢复外部手臂控制
+     */
+    void picoJoyStreamControlCallback(const kuavo_msgs::JoySticks::ConstPtr& msg);
     
     /**
      * @brief 融合多话题数据
@@ -614,8 +655,17 @@ namespace humanoid_controller
      */
     void printOnlineBufferStatus();
 
+    void initArmControl(const std::string& urdf_path);
+    void activateExternalArmControlIfNeeded();
+
   private:
     // ========== 基本控制参数 ==========
+    double arm_max_tracking_velocity_{0.5};
+    double arm_tracking_error_threshold_{0.05};
+    double arm_mode_interpolation_velocity_{1.0};
+    double arm_mode2_cutoff_freq_{2.0}; ///< 外部手臂 mode2 输入低通截止频率 (Hz)
+    std::function<bool()> external_command_buffer_callback_;
+
     double dt_{0.002};                    // 控制周期
     bool is_real_{false};                 // 是否真机
   bool is_roban_{false};                // 是否是roban机器人
@@ -679,7 +729,8 @@ namespace humanoid_controller
     double vmp_obsScale_height_measurements_{5.0};
     double vmp_obsScale_quat_{1.0};
 
-    // Entry IMU quaternion when VMP becomes active; removes fixed orientation offset at switch-in
+    // Entry alignment: maps the robot IMU at VMP activation onto the current
+    // motion-anchor heading, removing any fixed yaw error at switch-in.
     Eigen::Quaterniond vmp_entry_imu_quat_{Eigen::Quaterniond::Identity()};
     bool vmp_entry_imu_quat_valid_{false};
     
@@ -756,6 +807,23 @@ namespace humanoid_controller
     std::vector<float> pico_frozen_frame_;                 // 暂停时冻结的帧数据
     std::mutex pico_frozen_frame_mutex_;                   // 冻结帧互斥锁
     ros::ServiceServer pico_stream_control_srv_;           // PICO推流控制服务
+    mutable std::mutex retarget_resume_mutex_;
+    bool retarget_resume_waiting_{false};
+    bool retarget_frozen_frame_valid_{false};
+    bool retarget_auto_freeze_valid_{false};
+    ros::Time retarget_resume_min_stamp_;
+    ros::Time retarget_resume_ready_stamp_;
+    ros::Time latest_retargeted_frame_stamp_;
+    uint64_t retarget_resume_min_frame_seq_{0};
+    uint64_t latest_retargeted_frame_seq_{0};
+    double retarget_heading_offset_{0.0};
+    bool retarget_heading_offset_valid_{false};
+    bool retarget_entry_frame_pending_{false};
+    std::vector<float> retarget_entry_frame_;
+    ros::Subscriber pico_stream_control_joy_sub_;          // Xsens 不调用服务，直接监听共用手柄话题
+    std::atomic<bool> arm_stream_pause_requested_{false};  // RT+Y/RT+X 请求的手臂暂停状态
+    std::atomic<bool> joy_pause_combo_active_{false};      // RT+Y 组合键上一帧状态
+    std::atomic<bool> joy_resume_combo_active_{false};     // RT+X 组合键上一帧状态
     
     // ========== 多话题数据融合 ==========
     ArmData latest_arm_data_;
@@ -809,6 +877,7 @@ namespace humanoid_controller
     ros::Subscriber pico_retargeted_pose_sub_;
     ros::Subscriber mocap_retargeted_pose_sub_;  // Mocap重定向姿态订阅器
     ros::Subscriber xsense_retargeted_pose_sub_;  // Xsense重定向姿态订阅器
+    ros::Subscriber retarget_yaw_resume_ready_sub_;
     ros::Publisher vmp_input_data_pub_;
     
     // ========== VMP服务 ==========
@@ -817,4 +886,3 @@ namespace humanoid_controller
   };
 
 } // namespace humanoid_controller
-

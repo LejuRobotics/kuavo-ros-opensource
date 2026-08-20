@@ -158,6 +158,16 @@ public:
   bool isInitialized() const { return initialized_; }
 
   /**
+   * @brief Copy the latest sensor sample received by this controller.
+   * @return false until the controller has received a timestamped sample
+   */
+  bool getRobotSensorDataSnapshot(SensorData& sensor_data) const
+  {
+    sensor_data = getRobotSensorData();
+    return !sensor_data.timeStamp_.isZero();
+  }
+
+  /**
    * @brief 是否请求退出当前 RL 模式（由 humanoidController 等每周期轮询）
    * @return 本周期希望上层自动退出/切换时返回 true
    */
@@ -319,6 +329,12 @@ public:
    * @return 手臂控制器指针，如果不存在则返回 nullptr
    */
   const ArmController* getArmController() const { return arm_controller_.get(); }
+
+  /**
+   * @brief 切换到本 RL 控制器时请求的手臂控制模式（0/1/2）
+   * 默认 1（策略持臂）；VMP online 遥操作 + 外部手臂替换时返回 2
+   */
+  virtual int getArmControlModeOnControllerActivate() const { return 1; }
 
 protected:
   /**

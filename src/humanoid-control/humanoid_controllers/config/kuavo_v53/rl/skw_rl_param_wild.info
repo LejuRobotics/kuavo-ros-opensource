@@ -52,7 +52,7 @@ velocityLimits
     (0,0)  0.7      ; cmdVelLineX limit (positive)
     (1,0)  0.5       ; cmdVelLineY limit (positive and negative)
     (2,0)  0.3       ; cmdVelLineZ limit (positive and negative)
-    (3,0)  0.25       ; cmdVelAngularZ limit (positive and negative)
+    (3,0)  0.4       ; cmdVelAngularZ limit (positive and negative)
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
@@ -483,17 +483,17 @@ actionScaleTest
     (10,0)  1       ; leg_r5_joint
     (11,0)  1       ; leg_r6_joint
     (12,0)  1       ; waist_joint
-    (13,0)  1       ; zarm_l1_joint
+    (13,0)  0.8       ; zarm_l1_joint
     (14,0)  1       ; zarm_l2_joint
     (15,0)  1       ; zarm_l3_joint
-    (16,0)  1       ; zarm_l4_joint
+    (16,0)  0.7       ; zarm_l4_joint
     (17,0)  1       ; zarm_l5_joint
     (18,0)  1       ; zarm_l6_joint
     (19,0)  1       ; zarm_l7_joint
-    (20,0)  1       ; zarm_r1_joint
+    (20,0)  0.8       ; zarm_r1_joint
     (21,0)  1       ; zarm_r2_joint
     (22,0)  1       ; zarm_r3_joint
-    (23,0)  1       ; zarm_r4_joint
+    (23,0)  0.7       ; zarm_r4_joint
     (24,0)  1       ; zarm_r5_joint
     (25,0)  1       ; zarm_r6_joint
     (26,0)  1       ; zarm_r7_joint
