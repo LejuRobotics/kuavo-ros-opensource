@@ -3781,9 +3781,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
               mpc_current_target_trajectories_ = command.mpcTargetTrajectories_;
               // checkMpcPullUp(currentObservation_.time, currentObservation_.state, command.mpcTargetTrajectories_);
               // trajectory_publisher_->publishTrajectory(state_trajectory);
-              TargetTrajectories target_trajectories(policy.timeTrajectory_, policy.stateTrajectory_, policy.inputTrajectory_);
-
-              publishFeetTrajectory(target_trajectories);
+              // TargetTrajectories target_trajectories(policy.timeTrajectory_, policy.stateTrajectory_, policy.inputTrajectory_);
+              // publishFeetTrajectory(target_trajectories);
               double height_tol = 0.002;
               auto& check_state_traj = mpc_current_target_trajectories_.stateTrajectory;
               // 鲁班检查是否是摇杆上下拉起

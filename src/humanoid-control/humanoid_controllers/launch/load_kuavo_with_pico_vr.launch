@@ -18,6 +18,8 @@
     <arg name="pico_detection_mode" default="vr"/>
     <arg name="pico_startup_delay" default="2.0"/>
     <arg name="head_control_mode" default="vr_follow"/>
+    <arg name="pico_tf_publish_enable" default="false"/>
+    <arg name="pico_tf_publish_hz" default="100.0"/>
 
     <!-- 仿真 -->
     <group if="$(arg sim_mode)">
@@ -45,5 +47,7 @@
         <arg name="detection_mode" value="$(arg pico_detection_mode)"/>
         <arg name="startup_delay" value="$(arg pico_startup_delay)"/>
         <arg name="head_control_mode" value="$(arg head_control_mode)"/>
+        <arg name="pico_tf_publish_enable" value="$(arg pico_tf_publish_enable)"/>
+        <arg name="pico_tf_publish_hz" value="$(arg pico_tf_publish_hz)"/>
     </include>
 </launch>

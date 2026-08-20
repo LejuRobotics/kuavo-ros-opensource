@@ -30,6 +30,12 @@ from std_srvs.srv import SetBool, Trigger
 import tf
 from typing import Optional, Tuple, List
 import body_tracking_extended_pb2 as proto
+from pico_diagnostic_runtime import (
+    JsonlDiagnosticLogger,
+    PicoDiagnosticsRuntime,
+    ReceivedDatagram,
+    monotonic_ns,
+)
 from tf.transformations import (
     quaternion_matrix,
     quaternion_from_matrix,
@@ -240,7 +246,22 @@ class MinimalPicoReceiver:
     
     def __init__(self, host: str = '0.0.0.0', port: int = 12345, 
                  publish_tf: bool = True, enable_ip_broadcast: bool = True,
-                 robot_name: str = "KUAVO", broadcast_port: int = 8443):
+                 robot_name: str = "KUAVO", broadcast_port: int = 8443,
+                 enable_diagnostics: bool = True,
+                 diagnostic_log_enable: bool = False,
+                 diagnostic_log_dir: str = "~/.ros/pico_diagnostics",
+                 diagnostic_log_max_file_mb: float = 300.0,
+                 diagnostic_log_compress: bool = True,
+                 diagnostic_udp_reply: bool = True,
+                 enable_time_sync: bool = True,
+                 diagnostic_publish_hz: float = 1.0,
+                 diagnostic_allow_legacy: bool = False,
+                 diagnostic_ping_enable: bool = True,
+                 diagnostic_ping_lower_ip: str = "",
+                 diagnostic_ping_interval_sec: float = 5.0,
+                 diagnostic_ping_timeout_sec: float = 1.0,
+                 diagnostic_sync_max_valid_rtt_ms: float = 20.0,
+                 diagnostic_sync_max_valid_residual_ms: float = 5.0):
         """
         初始化 PICO 接收器
         
@@ -265,6 +286,28 @@ class MinimalPicoReceiver:
         
         # 数据队列（异步处理）
         self.data_queue = queue.Queue(maxsize=10)
+
+        self.diagnostic_logger = JsonlDiagnosticLogger(
+            enabled=diagnostic_log_enable,
+            log_dir=diagnostic_log_dir,
+            max_file_size_mb=diagnostic_log_max_file_mb,
+            compress_closed_files=diagnostic_log_compress,
+        )
+        self.diagnostics = PicoDiagnosticsRuntime(
+            sock=self.socket,
+            logger=self.diagnostic_logger,
+            enabled=enable_diagnostics,
+            udp_reply_enabled=diagnostic_udp_reply,
+            sync_enabled=enable_time_sync,
+            diagnostic_publish_hz=diagnostic_publish_hz,
+            allow_legacy_vrdata=diagnostic_allow_legacy,
+            ping_enabled=diagnostic_ping_enable,
+            ping_lower_ip=diagnostic_ping_lower_ip,
+            ping_interval_sec=diagnostic_ping_interval_sec,
+            ping_timeout_sec=diagnostic_ping_timeout_sec,
+            sync_max_valid_rtt_ms=diagnostic_sync_max_valid_rtt_ms,
+            sync_max_valid_residual_ms=diagnostic_sync_max_valid_residual_ms,
+        )
         
         # ROS 发布器
         self._init_publishers()
@@ -298,6 +341,8 @@ class MinimalPicoReceiver:
             rospy.loginfo("IP broadcast disabled")
         
         rospy.loginfo(f"MinimalPicoReceiver initialized on {host}:{port}")
+        if diagnostic_log_enable:
+            rospy.loginfo(f"PICO diagnostic log: {self.diagnostic_logger.path}")
         
         # ========== PICO 手柄按键处理（VMP推流中断/恢复） ==========
         self._init_joy_handler()
@@ -634,7 +679,25 @@ class MinimalPicoReceiver:
         
         return matrices, current_time
     
-    def _parse_protobuf(self, data: bytes) -> Optional[picoPoseInfoList]:
+    @staticmethod
+    def _message_payload_fields(message) -> List[str]:
+        fields = []
+        for field_name in [
+            "full_body",
+            "upper_body",
+            "controller",
+            "robot_data",
+            "vr_command",
+            "delayed_diagnosis_command",
+        ]:
+            try:
+                if message.HasField(field_name):
+                    fields.append(field_name)
+            except ValueError:
+                pass
+        return fields
+
+    def _parse_protobuf(self, datagram) -> Optional[picoPoseInfoList]:
         """
         解析 Protobuf 数据
         
@@ -645,31 +708,82 @@ class MinimalPicoReceiver:
         4. 解析手柄数据 → /pico/joy + VMP推流控制
         
         Args:
-            data: UDP 接收的二进制数据
+            datagram: UDP 接收的二进制数据或 ReceivedDatagram
         
         Returns:
             picoPoseInfoList 或 None
         """
+        payload_fields = []
+        handled_controller = False
+        handled_full_body = False
         try:
+            if isinstance(datagram, ReceivedDatagram):
+                data = datagram.payload
+            else:
+                data = datagram
+                datagram = ReceivedDatagram(
+                    raw_data=data,
+                    payload=data,
+                    addr=("", 0),
+                    recv_monotonic_ns=monotonic_ns(),
+                    legacy=True,
+                )
+
+            if datagram.process_start_monotonic_ns <= 0:
+                datagram.process_start_monotonic_ns = monotonic_ns()
+
             # 解析 protobuf
             message = proto.VRData()
             message.ParseFromString(data)
+            datagram.protobuf_parse_done_monotonic_ns = monotonic_ns()
+            payload_fields = self._message_payload_fields(message)
+            self.diagnostics.record_vrdata_fields(datagram, payload_fields, parse_ok=True)
             
             # 处理手柄数据（不依赖 full_body 是否存在）
             if message.HasField('controller'):
                 self._process_controller_data(message.controller)
+                handled_controller = True
             
             # 检查是否有全身数据
             if not message.HasField('full_body'):
+                self.diagnostics.record_processing_timing(
+                    datagram,
+                    payload_fields,
+                    process_done_monotonic_ns=monotonic_ns(),
+                    handled_controller=handled_controller,
+                    handled_full_body=handled_full_body,
+                    process_ok=True,
+                )
                 return None
 
             matrices, current_time = self.get_robot_urdf_matrix_from_proto(data)
-            
-            
+            handled_full_body = True
+            process_done_ns = monotonic_ns()
+            self.diagnostics.record_processing_timing(
+                datagram,
+                payload_fields,
+                process_done_monotonic_ns=process_done_ns,
+                handled_controller=handled_controller,
+                handled_full_body=handled_full_body,
+                process_ok=True,
+            )
             return matrices, current_time
             
         except Exception as e:
             rospy.logerr(f"Error parsing protobuf: {e}")
+            if isinstance(datagram, ReceivedDatagram):
+                if datagram.process_start_monotonic_ns <= 0:
+                    datagram.process_start_monotonic_ns = monotonic_ns()
+                self.diagnostics.record_parse_failure(datagram, str(e))
+                self.diagnostics.record_processing_timing(
+                    datagram,
+                    payload_fields,
+                    process_done_monotonic_ns=monotonic_ns(),
+                    handled_controller=handled_controller,
+                    handled_full_body=handled_full_body,
+                    process_ok=False,
+                    error=str(e),
+                )
             import traceback
             traceback.print_exc()
             return None
@@ -916,10 +1030,12 @@ class MinimalPicoReceiver:
         while self.running and not rospy.is_shutdown():
             try:
                 # 从队列获取数据
-                data = self.data_queue.get(timeout=0.1)
+                datagram = self.data_queue.get(timeout=0.1)
+                if isinstance(datagram, ReceivedDatagram):
+                    datagram.process_start_monotonic_ns = monotonic_ns()
                 
                 # 解析数据
-                pose_list = self._parse_protobuf(data)
+                pose_list = self._parse_protobuf(datagram)
                 
                     
             except queue.Empty:
@@ -930,6 +1046,7 @@ class MinimalPicoReceiver:
     def start(self):
         """启动接收器"""
         self.running = True
+        self.diagnostics.start()
         
         # 启动数据处理线程
         self.process_thread = threading.Thread(
@@ -945,16 +1062,22 @@ class MinimalPicoReceiver:
         while self.running and not rospy.is_shutdown():
             try:
                 # 接收数据
-                data, addr = self.socket.recvfrom(4096)
+                data, addr = self.socket.recvfrom(65535)
+                recv_ns = monotonic_ns()
+                datagram = self.diagnostics.decode_datagram(data, addr, recv_ns)
+                if datagram is None:
+                    continue
+                datagram.enqueue_monotonic_ns = monotonic_ns()
                 
                 # 放入队列（异步处理）
                 try:
-                    self.data_queue.put_nowait(data)
+                    self.data_queue.put_nowait(datagram)
                 except queue.Full:
                     # 队列满时，丢弃最旧的数据
                     try:
-                        self.data_queue.get_nowait()
-                        self.data_queue.put_nowait(data)
+                        dropped = self.data_queue.get_nowait()
+                        self.diagnostics.record_queue_drop(dropped)
+                        self.data_queue.put_nowait(datagram)
                     except queue.Empty:
                         pass
                     
@@ -966,6 +1089,8 @@ class MinimalPicoReceiver:
     def stop(self):
         """停止接收器"""
         self.running = False
+        self.diagnostics.stop()
+        self.diagnostic_logger.close()
         
         # 停止广播器
         if self.broadcaster:
@@ -989,6 +1114,21 @@ def main():
     enable_ip_broadcast = rospy.get_param('~enable_ip_broadcast', True)
     robot_name = rospy.get_param('~robot_name', 'KUAVO')
     broadcast_port = rospy.get_param('~broadcast_port', 8443)
+    enable_diagnostics = rospy.get_param('~enable_diagnostics', True)
+    diagnostic_log_enable = rospy.get_param('~diagnostic_log_enable', False)
+    diagnostic_log_dir = rospy.get_param('~diagnostic_log_dir', '~/.ros/pico_diagnostics')
+    diagnostic_log_max_file_mb = rospy.get_param('~diagnostic_log_max_file_mb', 300.0)
+    diagnostic_log_compress = rospy.get_param('~diagnostic_log_compress', True)
+    diagnostic_udp_reply = rospy.get_param('~diagnostic_udp_reply', True)
+    enable_time_sync = rospy.get_param('~enable_time_sync', True)
+    diagnostic_publish_hz = rospy.get_param('~diagnostic_publish_hz', 1.0)
+    diagnostic_allow_legacy = rospy.get_param('~diagnostic_allow_legacy', False)
+    diagnostic_ping_enable = rospy.get_param('~diagnostic_ping_enable', True)
+    diagnostic_ping_lower_ip = rospy.get_param('~diagnostic_ping_lower_ip', '')
+    diagnostic_ping_interval_sec = rospy.get_param('~diagnostic_ping_interval_sec', 5.0)
+    diagnostic_ping_timeout_sec = rospy.get_param('~diagnostic_ping_timeout_sec', 1.0)
+    diagnostic_sync_max_valid_rtt_ms = rospy.get_param('~diagnostic_sync_max_valid_rtt_ms', 20.0)
+    diagnostic_sync_max_valid_residual_ms = rospy.get_param('~diagnostic_sync_max_valid_residual_ms', 5.0)
     
     # 创建接收器
     receiver = MinimalPicoReceiver(
@@ -997,7 +1137,22 @@ def main():
         publish_tf=publish_tf,
         enable_ip_broadcast=enable_ip_broadcast,
         robot_name=robot_name,
-        broadcast_port=broadcast_port
+        broadcast_port=broadcast_port,
+        enable_diagnostics=enable_diagnostics,
+        diagnostic_log_enable=diagnostic_log_enable,
+        diagnostic_log_dir=diagnostic_log_dir,
+        diagnostic_log_max_file_mb=diagnostic_log_max_file_mb,
+        diagnostic_log_compress=diagnostic_log_compress,
+        diagnostic_udp_reply=diagnostic_udp_reply,
+        enable_time_sync=enable_time_sync,
+        diagnostic_publish_hz=diagnostic_publish_hz,
+        diagnostic_allow_legacy=diagnostic_allow_legacy,
+        diagnostic_ping_enable=diagnostic_ping_enable,
+        diagnostic_ping_lower_ip=diagnostic_ping_lower_ip,
+        diagnostic_ping_interval_sec=diagnostic_ping_interval_sec,
+        diagnostic_ping_timeout_sec=diagnostic_ping_timeout_sec,
+        diagnostic_sync_max_valid_rtt_ms=diagnostic_sync_max_valid_rtt_ms,
+        diagnostic_sync_max_valid_residual_ms=diagnostic_sync_max_valid_residual_ms,
     )
     
     try:
@@ -1011,4 +1166,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -485,6 +485,7 @@
     <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
     <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
     <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
+    <arg name="pico_diagnostic_log_enable" default="false" doc="Write PICO diagnostic JSONL logs"/>
     <!-- 末端执行器类型: none / qiangnao / qiangnao_touch / jodell / lejuclaw / revo2 -->
     <arg name="pico_end_effector_type" default="qiangnao" doc="End effector type for PICO GMR dexhand control"/>
     <!-- 头控参数（GMR 和 Teleop 路径共享） -->
@@ -508,6 +509,7 @@
         <arg name="enable_head_control" value="$(arg pico_enable_head_control)"/>
         <arg name="head_control_mode" value="$(arg pico_head_control_mode)"/>
         <arg name="cpu_cores" value="$(arg pico_cpu_cores)"/>
+        <arg name="diagnostic_log_enable" value="$(arg pico_diagnostic_log_enable)"/>
       </include>
     </group>
 

@@ -351,6 +351,10 @@
     <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
     <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
     <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
+    <arg name="pico_diagnostic_allow_legacy" default="false" doc="Allow old bare VRData packets"/>
+    <arg name="pico_diagnostic_log_enable" default="false" doc="Write PICO diagnostic JSONL logs"/>
+    <arg name="pico_diagnostic_sync_max_valid_rtt_ms" default="20.0" doc="PICO clock-sync sample RTT limit in ms"/>
+    <arg name="pico_diagnostic_sync_max_valid_residual_ms" default="5.0" doc="PICO clock-sync model residual P95 limit in ms"/>
     <!-- 头控参数（GMR 和 Teleop 路径共享） -->
     <arg name="pico_enable_head_control" default="true" doc="Enable independent head control node"/>
     <arg name="pico_head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
@@ -370,6 +374,10 @@
         <arg name="enable_head_control" value="$(arg pico_enable_head_control)"/>
         <arg name="head_control_mode" value="$(arg pico_head_control_mode)"/>
         <arg name="cpu_cores" value="$(arg pico_cpu_cores)"/>
+        <arg name="diagnostic_allow_legacy" value="$(arg pico_diagnostic_allow_legacy)"/>
+        <arg name="diagnostic_log_enable" value="$(arg pico_diagnostic_log_enable)"/>
+        <arg name="diagnostic_sync_max_valid_rtt_ms" value="$(arg pico_diagnostic_sync_max_valid_rtt_ms)"/>
+        <arg name="diagnostic_sync_max_valid_residual_ms" value="$(arg pico_diagnostic_sync_max_valid_residual_ms)"/>
       </include>
     </group>
 
