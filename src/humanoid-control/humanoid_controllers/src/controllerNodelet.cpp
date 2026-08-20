@@ -456,9 +456,6 @@ private:
                                 break;
                             }
                         }
-                        ROS_WARN_THROTTLE(1.0,
-                                          "[controlLoop] wheel schedule lag=%.2f ms, skip %d slots",
-                                          lagSec * 1e3, skipped);
                     }
                 }
                 else
