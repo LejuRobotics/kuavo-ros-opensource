@@ -2,31 +2,32 @@
 
 ## 1. 系统架构说明
 
-kuavo_audio_player 按机型提供两种部署形态（`play_music.launch` 按 `ROBOT_VERSION` 自动分流）：
+kuavo_audio_player 全机型统一为单节点 `audio_player_node`（`audio_player.py`）：提供 `/play_music` 服务播放本地音频文件，订阅 `/audio_data` 接收外部 PCM 流，统一经单环形缓冲 + 单 PortAudio 回调输出到声卡。
 
-- **v17 — 单节点 `audio_player_node`**：提供 `/play_music` 服务播放本地音频文件，订阅 `/audio_data` 接收外部 PCM 流，统一经单环形缓冲 + 单 PortAudio 回调输出到声卡。
-- **非 v17 — 旧两节点**：`loundspeaker.py`（文件服务）+ `audio_stream_player.py`（流播放）。
+**启动闸门**（`init_node` 之前执行，任一不过则进程退出，由 launch `respawn` 周期重检）：
 
-**接口原则**：旧接口定义冻结；新功能只通过新接口名提供，不修改旧定义。
+1. **声卡检测**：无播音设备（如 5W 下位机）则退出，不注册任何服务/话题，避免抢占对机的 `/play_music`；
+2. **唯一提供者**：`/play_music` 已被对机提供（`lookupService` + TCP 活性探测，能识别 kill -9 残留的陈旧注册）则退出。上下位机共享 master 时保证全网只有一个音频节点。
+
+热插拔喇叭、对机节点死亡后的自动接管均由 respawn 重检自然覆盖。
 
 ## 2. 服务与话题接口
 
 ### 2.1 播放本地音频文件
 
 #### 服务接口：`/play_music`
-- **服务类型**：`kuavo_msgs/playmusic`（旧接口）
+- **服务类型**：`kuavo_msgs/playmusic`
 - **请求参数**：
   - `music_number` (str)：音频文件名（如 `test.wav`、`test.mp3`），需放在 `music_path` 指定的目录下
   - `volume` (int)：音量，范围 0–100。内部映射为 ffmpeg `volume` 滤镜的 dB 增益：`100` 为原声（0 dB），`0` 近静音（约 −60 dB），对数缩放避免线性乘法溢出破音
 - **响应**：`success_flag` (bool)
 - **语义**：追加到缓冲，按队列顺序播放，不打断当前
 
-#### 服务接口：`/play_music_immediate`（新接口，仅单节点提供）
+#### 服务接口：`/play_music_immediate`
 - **服务类型**：`kuavo_msgs/PlayMusicImmediate`
 - **请求参数**：同 `/play_music`
 - **响应**：`success_flag` (bool)
 - **语义**：原子化「打断当前 + 立即播新」。先同步停止当前播放（关流丢弃 ALSA DMA）再加载新文件
-- **兼容性**：旧两节点不提供此服务。调用方应探测其存在（`wait_for_service` 短超时 + 缓存），不存在时降级为 `/stop_music` 同步服务 → `/stop_music` topic → `/play_music`。
 
 #### 示例调用：
 ```bash
@@ -34,7 +35,7 @@ kuavo_audio_player 按机型提供两种部署形态（`play_music.launch` 按 `
 rosservice call /play_music "music_number: '1_挥手.mp3'
 volume: 80"
 
-# 立即打断当前并播放新文件（搬运语音切换用，仅单节点机型）
+# 打断当前并立即播放新文件
 rosservice call /play_music_immediate "music_number: '进入搬运模式可安全移动.wav'
 volume: 80"
 ```
@@ -68,7 +69,7 @@ audio_publisher.publish(msg)
 
 ### 2.3 停止播放接口
 
-停止播放提供服务与话题两种入口，均立即生效：
+停止播放提供服务与话题两种入口：
 
 #### 服务：`/stop_music`（推荐）
 - **服务类型**：`std_srvs/Trigger`
@@ -80,13 +81,14 @@ rosservice call /stop_music
 
 #### 话题：`/stop_music`（兼容，建议迁移到服务）
 - **话题类型**：`std_msgs/Bool`
-- **功能**：发送 `True` 立即停止；fire-and-forget，不返回停止结果
+- **功能**：发送 `True` 停止播放；fire-and-forget，不返回停止结果
+- **注意**：`/play_music` / `/play_music_immediate` 播放成功后的 0.3 秒内，通过话题到达的停止请求会被丢弃（避免「先停后播」调用序列中话题延迟造成的时序反转把刚加载的音频抹掉）。需要可靠停止请使用服务
 - **示例**：
 ```bash
 rostopic pub /stop_music std_msgs/Bool "data: true" -1
 ```
 
-> 两种入口底层都走「置位 abort → 回调返回 `paAbort` 终止流 → 清空环形缓冲 → 关流丢弃 ALSA DMA 尾巴 → 重建流」。旧实现用阻塞模式 `stream.write` 单次喂约 4s 音频块，停止只清软件队列、无法打断进行中的阻塞 write，停止后旧音频会持续播放至该块排尽（残留可达约 4 秒）；本节点改用回调模式，停止可即时打断，已修复。
+> 两种入口底层处理一致：置位 abort → 回调返回 `paAbort` 终止流 → 清空环形缓冲 → 关流丢弃 ALSA DMA 残留 → 重建流。回调式播放使停止即时生效，无残留音频。
 
 ### 2.4 状态查询接口
 

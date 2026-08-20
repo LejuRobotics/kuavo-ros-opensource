@@ -217,8 +217,6 @@ install(DIRECTORY launch
 
 catkin_install_python(PROGRAMS
   scripts/audio_player.py
-  scripts/loundspeaker.py
-  scripts/audio_stream_player.py
   tests/audio_stream_test.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

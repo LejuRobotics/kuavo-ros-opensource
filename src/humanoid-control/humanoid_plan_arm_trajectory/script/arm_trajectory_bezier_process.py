@@ -11,6 +11,7 @@ import os
 import sys
 import rospkg
 import subprocess
+from geometry_msgs.msg import Twist
 from humanoid_plan_arm_trajectory.srv import planArmTrajectoryBezierCurve, planArmTrajectoryBezierCurveRequest
     
 # 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
@@ -29,7 +30,7 @@ except (rospkg.ResourceNotFound, ImportError) as e:
     from robot_version import RobotVersion, is_tact_robot_type_compatible
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl, gaitTimeName
-from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getControllerList
+from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getControllerList, switchController
 from ocs2_msgs.msg import mpc_observation
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray, String, Bool
@@ -41,6 +42,21 @@ from std_srvs.srv  import Trigger, TriggerResponse, SetBool, SetBoolResponse  # 
 # 根据机器人型号确定关节数据
 KUAVO = "kuavo"
 ROBAN = "roban"
+
+
+def is_tact_playback_controller_allowed(control_scheme, controller_name):
+    return get_tact_playback_controller_action(
+        control_scheme, KUAVO, 5, controller_name
+    ) == "allowed"
+
+
+def get_tact_playback_controller_action(control_scheme, robot_class, robot_major, controller_name):
+    if control_scheme != "multi":
+        return "allowed"
+    if robot_class == KUAVO and robot_major == 5 and controller_name == "amp_wild_controller":
+        return "switch_to_amp_controller"
+    return "allowed"
+
 
 class ArmTrajectoryBezierDemo:
     # START_FRAME_TIME = 0
@@ -137,6 +153,9 @@ class ArmTrajectoryBezierDemo:
         self.traj_sub = rospy.Subscriber('/bezier/arm_traj', JointTrajectory, self.traj_callback, queue_size=1,
                                          tcp_nodelay=True)
         self.kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
+        self.kuavo_action_traj_pub = rospy.Publisher('/kuavo_action_traj', JointState, queue_size=1, tcp_nodelay=True)
+        self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1, tcp_nodelay=True)
+        self.gait_name_pub = rospy.Publisher('/humanoid_mpc_gait_name_request', String, queue_size=1, tcp_nodelay=True)
         self.control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1,
                                                 tcp_nodelay=True)
         self.control_head_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=1,
@@ -407,15 +426,37 @@ class ArmTrajectoryBezierDemo:
         self._publish_walking_status()
 
     def _publish_walking_status(self):
+        walking = self.is_robot_walking()
+        if walking != self._last_walking_status_pub:
+            self.walking_status_pub.publish(Bool(data=walking))
+            self._last_walking_status_pub = walking
+
+    def is_robot_walking(self):
         now = rospy.Time.now()
         mpc_fresh = self._mpc_last_recv is not None and \
             (now - self._mpc_last_recv) < self._walking_status_freshness
         rl_fresh = self._rl_last_recv is not None and \
             (now - self._rl_last_recv) < self._walking_status_freshness
-        walking = (mpc_fresh and self._mpc_is_walking) or (rl_fresh and self._rl_is_walking)
-        if walking != self._last_walking_status_pub:
-            self.walking_status_pub.publish(Bool(data=walking))
-            self._last_walking_status_pub = walking
+        return (mpc_fresh and self._mpc_is_walking) or (rl_fresh and self._rl_is_walking)
+
+    def request_stance(self):
+        self.cmd_vel_pub.publish(Twist())
+        self.gait_name_pub.publish(String(data="stance"))
+
+    def wait_for_stance_before_action(self, timeout=3.0):
+        if not self.is_robot_walking():
+            return True
+
+        rospy.loginfo("机器人正在行走，先请求停止后再播放上肢动作")
+        start_time = rospy.Time.now()
+        while (rospy.Time.now() - start_time).to_sec() < timeout and not rospy.is_shutdown():
+            self.request_stance()
+            if not self.is_robot_walking():
+                rospy.loginfo("机器人已停止行走，继续播放上肢动作")
+                return True
+            rospy.sleep(0.05)
+
+        return not self.is_robot_walking()
 
     def _get_servos_from_kuavo_arm_traj(self, tact_length):
         """从 /kuavo_arm_traj 获取起始关节角（度），不足部分按长度填充0。"""
@@ -503,8 +544,12 @@ class ArmTrajectoryBezierDemo:
             change_arm_ctrl_mode = rospy.ServiceProxy(
                 service_name, changeArmCtrlMode
             )
-            change_arm_ctrl_mode(control_mode=arm_ctrl_mode)
-            rospy.loginfo("Service call successful")
+            resp = change_arm_ctrl_mode(control_mode=arm_ctrl_mode)
+            result = bool(resp.result)
+            if result:
+                rospy.loginfo("Service call successful")
+            else:
+                rospy.logwarn(f"Service {service_name} rejected mode {arm_ctrl_mode}: {resp.message}")
         except rospy.ServiceException as e:
             rospy.loginfo("Service call failed: %s", e)
             result = False
@@ -563,6 +608,30 @@ class ArmTrajectoryBezierDemo:
         rospy.logwarn(f"Arm control mode change timeout after {timeout} seconds, current mode: {final_mode}, target: {target_mode}")
         return False
 
+    def ensure_arm_ctrl_mode(self, target_mode, timeout=5.0):
+        """Request arm trajectory mode and wait until the controller reports it."""
+        start_time = rospy.Time.now()
+        last_request_time = rospy.Time(0)
+        while (rospy.Time.now() - start_time).to_sec() < timeout:
+            current_mode = self.get_arm_ctrl_mode()
+            if current_mode == target_mode:
+                rospy.loginfo(f"Arm control mode changed to {target_mode} successfully")
+                return True
+
+            now = rospy.Time.now()
+            if (not last_request_time.is_zero() and
+                    (now - last_request_time).to_sec() < 0.2):
+                rospy.sleep(0.02)
+                continue
+
+            if not self.call_change_arm_ctrl_mode_service(target_mode):
+                rospy.sleep(0.05)
+            last_request_time = now
+
+        final_mode = self.get_arm_ctrl_mode()
+        rospy.logwarn(f"Arm control mode change timeout after {timeout} seconds, current mode: {final_mode}, target: {target_mode}")
+        return False
+
     def get_current_controller_name(self):
         """获取当前控制器名称（用于 multi 模式判断）
         :return: str, 当前控制器名称，如果获取失败返回 None
@@ -571,12 +640,20 @@ class ArmTrajectoryBezierDemo:
             return None
         
         service_name = "/humanoid_controller/get_controller_list"
+        # lookupService 对缺失服务返回 [-1,'no provider','']（不抛异常），故按返回码判断；
+        # 服务未 advertise 时立即返回，避免 wait_for_service 阻塞 0.5s
+        try:
+            code, _, _ = rospy.get_master().lookupService(service_name)
+            if code != 1:
+                return None
+        except Exception:
+            pass  # master 不可达，走下方 wait_for_service 超时兜底
         try:
             rospy.wait_for_service(service_name, timeout=0.5)
             get_controller_client = rospy.ServiceProxy(service_name, getControllerList)
             response = get_controller_client()
             if response.success:
-                rospy.loginfo(f"Current controller in multi mode: {response.current_controller}")
+                rospy.logdebug(f"Current controller in multi mode: {response.current_controller}")
                 return response.current_controller
             else:
                 rospy.logwarn(f"Get controller list failed: {response.message}")
@@ -584,13 +661,84 @@ class ArmTrajectoryBezierDemo:
             rospy.logwarn(f"Service '{service_name}' call failed: {e}, assuming ocs2 behavior")
         return None
 
+    def call_switch_controller_service(self, controller_name):
+        service_name = "/humanoid_controller/switch_controller"
+        try:
+            rospy.wait_for_service(service_name, timeout=0.5)
+            switch_controller = rospy.ServiceProxy(service_name, switchController)
+            resp = switch_controller(controller_name=controller_name)
+            if not resp.success:
+                rospy.logwarn(
+                    "Switch controller to %s rejected: %s",
+                    controller_name,
+                    resp.message
+                )
+                return False
+            return True
+        except (rospy.ServiceException, rospy.ROSException) as e:
+            rospy.logwarn("Switch controller service '%s' call failed: %s", service_name, e)
+            return False
+
+    def _get_preferred_controller(self):
+        """MoRE 优先，不在线则 fallback AMP"""
+        try:
+            resp = rospy.ServiceProxy("/humanoid_controller/get_controller_list", getControllerList)()
+            if resp.success and "more_controller" in resp.controller_names:
+                return "more_controller"
+        except: pass
+        return "amp_controller"
+
+    def ensure_tact_playback_controller(self, timeout=3.0):
+        if self.kuavo_control_scheme != "multi":
+            return True
+
+        target_controller = "amp_controller"
+        start_time = rospy.Time.now()
+        switch_requested = False
+
+        while (rospy.Time.now() - start_time).to_sec() < timeout and not rospy.is_shutdown():
+            current_controller = self.get_current_controller_name()
+            action = get_tact_playback_controller_action(
+                self.kuavo_control_scheme,
+                self.robot_class,
+                self.robot_version.major(),
+                current_controller
+            )
+            if action == "allowed":
+                return True
+
+            if current_controller is None:
+                rospy.sleep(0.05)
+                continue
+
+            if not switch_requested:
+                rospy.loginfo(
+                    "当前控制器为 %s，播放上肢动作前请求切换到 %s",
+                    current_controller,
+                    target_controller
+                )
+                self.request_stance()
+                if not self.call_switch_controller_service(target_controller):
+                    return False
+                switch_requested = True
+
+            rospy.sleep(0.05)
+
+        current_controller = self.get_current_controller_name()
+        return get_tact_playback_controller_action(
+            self.kuavo_control_scheme,
+            self.robot_class,
+            self.robot_version.major(),
+            current_controller
+        ) == "allowed"
+
     def get_current_control_mode(self):
         """获取当前实际控制模式
         :return: str, 当前控制模式 ("rl" 或 "ocs2")，如果获取失败返回 "ocs2"（保守策略）
         """
         # 控制模式到控制器名称集合的映射
         mode_controllers = {
-            "rl": {"amp_controller"},
+            "rl": {"amp_controller", "more_controller"},
             "ocs2": {"mpc"},
         }
         
@@ -1524,8 +1672,12 @@ class ArmTrajectoryBezierDemo:
             # freeze 额外：把手臂控制权交回自动摆臂（freeze 服务本身不切 mode）
             try:
                 self.call_enable_wbc_arm_trajectory_control_service(0)
-                self.call_change_arm_ctrl_mode_service(1)
-                rospy.loginfo("[%s] arm mode switched to 1 (auto swing)", rospy.get_time())
+                # 软暂停过渡窗口内 mode 切换会被 RM 拒绝（3791 守卫），如实记录结果，
+                # 不再无条件打印 "switched"
+                if self.call_change_arm_ctrl_mode_service(1):
+                    rospy.loginfo("[%s] arm mode switched to 1 (auto swing)", rospy.get_time())
+                else:
+                    rospy.logwarn("[%s] arm mode switch to 1 (auto swing) rejected, arm keeps current mode", rospy.get_time())
             except Exception as e:
                 rospy.logwarn("Failed to switch arm mode: %s", e)
 
@@ -1643,13 +1795,38 @@ class ArmTrajectoryBezierDemo:
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
+        self.running_action = True
+        threading.Thread(target=self.publish_running_action_state).start()
 
-        self.call_change_arm_ctrl_mode_service(2)
+        # MoRE 控制器支持行走中播动作，不需要强制停止
+        current_ctrl = self.get_current_controller_name()
+        if current_ctrl != "more_controller":
+            if not self.wait_for_stance_before_action(timeout=3.0):
+                msg = "机器人停止行走超时，取消上肢动作播放"
+                rospy.logwarn(msg)
+                self.running_action = False
+                self.publish_action_state(0)
+                return ExecuteArmActionResponse(success=False, message=msg)
 
-        # 等待手臂控制模式切换完成
-        if not self.wait_for_arm_mode_change_complete(2, timeout=2.0):
-            rospy.logwarn("Arm control mode change may not be complete, but continuing...")
+        if not self.ensure_tact_playback_controller(timeout=3.0):
+            current_controller = self.get_current_controller_name()
+            msg = (
+                f"当前控制器为 {current_controller}，不允许播放上肢动作，"
+                "请先切换到 amp_controller"
+            )
+            rospy.logwarn(msg)
+            self.running_action = False
+            self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
 
+        # MoRE 控制器已自行处理手臂模式切换，跳过 MPC arm mode 检查（避免冗余 ROS service 延迟）
+        if current_ctrl != "more_controller":
+            if not self.ensure_arm_ctrl_mode(2, timeout=5.0):
+                msg = "手臂控制模式未切换到外部控制模式，取消动作播放"
+                rospy.logwarn(msg)
+                self.running_action = False
+                self.publish_action_state(0)
+                return ExecuteArmActionResponse(success=False, message=msg)
 
         # 获取初始帧时间
         self.arm_flag = True
@@ -1740,10 +1917,6 @@ class ArmTrajectoryBezierDemo:
         bezier_request = self.create_bezier_request(filtered_data)
 
         rospy.loginfo(f"Planning arm trajectory for action: {action_name}...")
-        # 开始执行，持续发布 state=1
-        self.running_action = True
-        threading.Thread(target=self.publish_running_action_state).start()
-
         success = self.plan_arm_trajectory_bezier_curve_client(bezier_request)
         # self.call_change_arm_ctrl_mode_service(1)
         if success:
@@ -1755,6 +1928,7 @@ class ArmTrajectoryBezierDemo:
             return ExecuteArmActionResponse(success=True, message="Action executed successfully")
         else:
             rospy.logerr("Failed to plan arm trajectory")
+            self.running_action = False
             self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message="Failed to exefcute action")
 
@@ -1767,6 +1941,7 @@ class ArmTrajectoryBezierDemo:
             try:
                 if len(self.joint_state.position) != 0:
                     self.kuavo_arm_traj_pub.publish(self.joint_state)
+                    self.kuavo_action_traj_pub.publish(self.joint_state)
                 if len(self.hand_state.right_hand_position) != 0 or len(self.hand_state.left_hand_position) != 0:
                     self.control_hand_pub.publish(self.hand_state)
                 if len(self.head_state.joint_data) != 0:

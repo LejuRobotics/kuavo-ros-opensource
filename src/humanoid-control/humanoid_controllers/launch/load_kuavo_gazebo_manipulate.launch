@@ -25,7 +25,9 @@
     <arg name="use_joint_filter"   default="false"/>
     <arg name="estimator_type"     default="1"/>
     <arg name="wbc_only"           default="false"/>
-    <arg name="play_back"          default="false"/>  
+    <arg name="play_back"          default="false"/>
+    <arg name="real"               default="false"/>   <!-- false表示仿真环境，true表示真实机器人 -->
+    <env name="KUAVO_REAL" value="$(arg real)"/>
     <arg name="joystick_type"      default="sim"/>
     <arg name="arm_move_spd"      default="3.0"/>
     <arg name="waist_move_spd"     default="2.6"/>
@@ -59,6 +61,7 @@
     <param name="use_joint_filter"  value="$(arg use_joint_filter)"/>
     <param name="estimator_type"    value="$(arg estimator_type)"/>
     <param name="play_back"         value="$(arg play_back)"/>
+    <param name="real"             value="$(arg real)"/>
     <param name="joystick_type"  value="$(arg joystick_type)"/>
     <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
     <param name="waist_move_spd"  value="$(arg waist_move_spd)"/>

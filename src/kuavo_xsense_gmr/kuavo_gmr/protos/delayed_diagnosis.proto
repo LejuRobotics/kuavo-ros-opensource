@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+enum Status {
+    NOT_STARTED = 0;    // 未开始
+    IN_PROGRESS = 1;    // 进行中
+    SUCCESS = 2;        // 成功
+    FAILED = 3;         // 失败
+    FORCE_KILLED = 4;   // 强制停止
+}
+
+message Result {
+  // FINAL SYSTEM IDENTIFICATION RESULTS 最终系统辨识结果
+  double bias_calib = 1;        // 偏置 (校准): 0.0851
+  double time_delay_calib = 2;  // 时间延迟 (校准): 0.2602s
+  double bandwidth = 3;         // 带宽 (-3dB): 0.85 Hz
+  double mean_coherence = 4;    // 平均相干性: 0.785
+}
+
+message DelayedDiagnosisResult { 
+    Status status = 1;
+    string message = 2;
+    double progress = 3;
+    optional Result result = 4;
+}

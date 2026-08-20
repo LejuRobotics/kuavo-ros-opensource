@@ -4,12 +4,26 @@ import rospy
 import argparse
 import rosbag
 import os
+import sys
 import math
 import time
+import rospkg
 from kuavo_msgs.msg import sensorsData, armTargetPoses
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest
 from sensor_msgs.msg import JointState
 from key_listener import KeyListener
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    _kuavo_common_python = os.path.join(rospkg.RosPack().get_path('kuavo_common'), 'python')
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError):
+    _kuavo_common_python = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../kuavo_common/python'))
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
 
 
 arm_joint_names = [
@@ -71,22 +85,24 @@ joint_data_header = joint_data_footer = None
 def get_version_parameter():
     param_name = 'robot_version'
     try:
-        # 获取参数值
         param_value = rospy.get_param(param_name)
         rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
-        # 适配1000xx版本号
-        valid_series = [42, 45, 49, 52]
-        MMMMN_MASK = 100000
-        series = param_value % MMMMN_MASK
-        if series not in valid_series:
-            rospy.logerr(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！程序退出。")
+        if not RobotVersion.is_valid(param_value):
+            rospy.logerr(f"无效的机器人版本号: {param_value}，版本号格式不合法！程序退出。")
             rospy.signal_shutdown("参数无效")
+            return param_value
+
+        rv = RobotVersion.create(int(param_value))
+        if (rv.start_with(4, 2) or rv.start_with(4, 5) or rv.start_with(4, 9)
+                or rv.start_with(5, 2)):
+            rospy.loginfo(f"✅ 机器人版本号有效: {param_value} ({rv.version_name()})")
         else:
-            rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
+            rospy.logerr(f"无效的机器人版本号: {param_value} ({rv.version_name()})，仅支持 42 45 49 52 系列！程序退出。")
+            rospy.signal_shutdown("参数无效")
         return param_value
     except rospy.ROSException:
         rospy.logerr(f"参数 {param_name} 不存在！程序退出。")
-        rospy.signal_shutdown("参数获取失败") 
+        rospy.signal_shutdown("参数获取失败")
         return None
 
 # 回调函数,获取手臂角度数据,索引由全局变量joint_data_header和joint_data_footer确定
@@ -258,10 +274,11 @@ def listener(record=False, save_bag=None, play=None, save_to_file=None, play_fil
     # 获取机器人版本
     robot_version = get_version_parameter()
     # 根据机器人版本 设定sensors_data_raw中手臂角度的索引
-    global joint_data_header, joint_data_footer  # 声明使用全局变量
-    if robot_version in [42, 45, 49]:
+    global joint_data_header, joint_data_footer
+    rv = RobotVersion.create(int(robot_version))
+    if rv.start_with(4, 2) or rv.start_with(4, 5) or rv.start_with(4, 9):
         joint_data_header, joint_data_footer = 12, 26
-    elif robot_version == 52:
+    elif rv.start_with(5, 2):
         joint_data_header, joint_data_footer = 13, 27
 
     # record joint state publisher

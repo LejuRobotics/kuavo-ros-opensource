@@ -24,8 +24,15 @@ topics:
   - /state_estimate/.*
   - /external_wrench
   - /ground_truth/state
-  - /humanoid.*
-  - /mobile_manipulator.*
+  # /humanoid.* 会把 Marker 可视化也录进去（currentState 单包 ~100MB）。
+  # 数据/debug 在 /humanoid_* ；/humanoid/ 下只留非可视化。
+  - /humanoid_.*
+  - /humanoid/mm_state
+  - /humanoid/mpc/.*
+  # /mobile_manipulator.* 同样会录 500Hz MarkerArray/PoseArray 轨迹。
+  # 去掉 optimizedStateTrajectory / optimizedPoseTrajectory / targetTrajectories。
+  - /mobile_manipulator_.*
+  - /mobile_manipulator/(?!optimizedStateTrajectory$|optimizedPoseTrajectory$|targetTrajectories$).*
   - /inekf_state/.*
   - /visualization_marker.*
   - /route_plan_pose_array
@@ -84,12 +91,16 @@ topics:
   - /rl_controller.*
   - /arm_controller.*
   - /vmp_controller/.*
+  - /gmr/vmp_input
   - /tool_mocap_shoulder
   - /tool_fk_shoulder
   - /tool_position_error_shoulder
   - /belly_pose
   - /joint_.*
   - /ik_fk_result/.*
+  - /pico/world_bone_poses
+  - /pico/retargeted_pose
+  - /pico/raw_bone_poses
   - /r_hand_pose
   - /l_hand_pose
   - /car_pose

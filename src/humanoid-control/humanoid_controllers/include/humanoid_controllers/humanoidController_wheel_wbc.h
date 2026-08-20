@@ -13,6 +13,7 @@
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <std_srvs/SetBool.h>
 
 // ROS Messages
@@ -105,6 +106,9 @@ namespace humanoidController_wheel_wbc
     // ========== 运动学计算相关函数 ==========
     void getEEPose(const vector_t& init_q, std::vector<Eigen::Vector3d>& ee_pos, std::vector<Eigen::Matrix3d>& ee_rot);
     void getTorsoPose(const vector_t& init_q, Eigen::Vector3d& torso_pos, Eigen::Matrix3d& torso_rot);
+    // 由 MPC state 构建 target-pose 格式单点目标（FK 现场计算），initMPC 与软暂停 RESUMING 共用。
+    // zeroBase=true 底盘段置零（启动语义）；false 取 state 底盘段（恢复锚定）
+    vector_t buildTargetPoseFromState(const vector_t& state, bool zeroBase);
     void computeObservationFromSensorData(const SensorData& sensorData, const vector6_t& odomData);
 
     // ========== 关节控制相关函数 ==========
@@ -208,6 +212,7 @@ namespace humanoidController_wheel_wbc
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
     ros::Publisher stopRobotPub_;  // /stop_robot 话题发布者，用于底盘急停保护
+    ros::Publisher resetToStatePub_;  // /mobile_manipulator_reset_to_state 发布者（3791 软暂停恢复时把冻结姿态发给 RM）
     
     // 日志
     humanoid::TopicLogger *ros_logger_{nullptr};
@@ -229,7 +234,6 @@ namespace humanoidController_wheel_wbc
     std::shared_ptr<PinocchioInterface> pinocchioInterface_ptr_;
     mobile_manipulator::ManipulatorModelInfo manipulatorModelInfo_;
     std::shared_ptr<MRT_ROS_Interface> mrtRosInterface_;
-    bool reset_mpc_{false};
     bool enable_mpc_{false};
     size_t plannedMode_{0};
     vector_t optimizedState_mrt_, optimizedInput_mrt_, optimizedState_mrt_limit_, optimizedInput_mrt_limit_;
@@ -262,14 +266,53 @@ namespace humanoidController_wheel_wbc
     std_srvs::SetBool reset_cmd_vel_ruckig_srv_;  // 重置cmdVel Ruckig规划器服务请求
 
     // ========== enable control ==========
-    std::atomic<bool> enable_control_{true};  // 默认 true：启动时可控
-    bool prev_enable_control_{true};  // 用于 update 中检测下降沿
     ros::ServiceServer enableControlServiceServer_;
+    int reset_to_state_publish_cnt_{0};  // RESUMING 受理后剩余发布拍数（连续发布兜底 RM 订阅竞态）
+    vector_t reset_state_to_publish_;    // 待发布给 RM 的冻结姿态（21 维 MPC state）
 
-    // disable 瞬间记录 WBC 维度的状态，disable 期间直接让 WBC 跟踪该冻结姿态
+    // disable 期间记录 WBC 实际执行值（limit filter 后、WBC 输入前）。PAUSING 首拍
+    // 由主循环冻结（记录 optimizedState_mrt_limit_ + 写回 CDM），PAUSED/RESUMING 期间
+    // WBC 冻结输出、RESUMING 期间 MPC 观测强制为它（反向写回，与 RM 参考锚一致）。
     vector_t frozen_state_;
     std::atomic<bool> frozen_state_valid_{false};
     std::mutex frozen_state_mutex_;
+
+    // 3791: MPC policy 访问闸门（防 MRT reset() 异步线程与主线程 rollout/可视化竞态）。
+    // pauseResumeMpcNode/resetMpcNode 内部 detached 线程执行 MRT_BASE::reset()，会析构
+    // active policy 对象；getPolicy() 返回裸引用，主线程"isPolicyUpdated 检查→使用"之间
+    // reset 抢先析构 → 悬垂访问 GPF（曾崩于 publishOptimizedTrajectory）。
+    // 与双足 resetting_mpc_state_（非 NORMAL 不碰 policy）同思想：disable/enable 受理置
+    // false，主线程观察到 active policy 被清空（reset 完成）后才开门，期间不访问 MRT。
+    std::atomic<bool> mpc_policy_gate_open_{true};
+
+    // 3791: MPC pause/resume 请求标志（受理 → 主循环安全点转交）。
+    // enableControlCallback 在 roscpp 服务线程执行，pauseResumeMpcNode 内部是对 MPC
+    // 节点服务的 roscpp 同步调用（无超时），若在回调线程内直接阻塞会卡住整个服务
+    // 队列（dispatch_mode 等后续服务全部排队）。改为受理时仅置标志，主循环在可视化
+    // 块之后（无任何 in-flight rollout/getPolicy 的安全点）消费并发起调用。
+    std::atomic<bool> mpc_pause_requested_{false};
+    std::atomic<bool> mpc_resume_requested_{false};
+
+    // 3791: 软暂停四状态机（新语义，disable 受理即发 enable=false，仅 IDLE 发 true）：
+    //   IDLE     运行稳定。受理 disable → PAUSING
+    //   PAUSING  disable 过渡：PAUSING 首拍主循环冻结记录+CDM 写回；250 帧到点 → PAUSED
+    //   PAUSED   暂停稳定。WBC 冻结输出；受理 enable → RESUMING
+    //   RESUMING enable 过渡：RESUMING 首拍构建 rst_target 并 resetMpcNode；期间 MPC 观测
+    //   强制 = 冻结+odom（反向写回）；250 帧到点 → IDLE 并发布 enable=true
+    // 过渡态固定 250 帧（0.5s @ 500Hz WBC 循环）、到点退出（不做收敛判据，先实测再调）。
+    // 拒绝窗口内的请求简单拒绝，不入队。快速 toggle 由固定周期吸收，不再打穿状态机。
+    enum class SoftPauseState { IDLE, PAUSING, PAUSED, RESUMING };
+    // atomic：enableControlCallback（服务线程）入口也要检查（受理/拒绝矩阵见实现）
+    std::atomic<SoftPauseState> soft_pause_state_{SoftPauseState::IDLE};
+    // 过渡态按控制循环帧数计数（受理时置 0，主循环每帧 ++）：250 帧 = 0.5s @ 500Hz。
+    // 计数发生在 update() 主循环内，与受理记录天然同源，避免墙钟/仿真时间基准错位（3791）。
+    std::atomic<int> soft_pause_transition_cycles_{0};
+    static constexpr int SOFT_PAUSE_TRANSITION_CYCLES = 250;  // [帧] 过渡态固定周期数
+    // RESUMING 首拍 reset 保护：单周期内 frozen_state_valid_ 置 true 后不变 false，
+    // RESUMING 仅查它会每帧重复 resetMpcNode（solver 无法收敛）。本 flag 在 enable
+    // 受理时置 false、RESUMING 首拍 reset 后置 true（disable 受理会清 frozen_state_valid_
+    // 触发重冻结，故仅单周期内成立）。
+    std::atomic<bool> resuming_reset_done_{false};
 
     // ========== 平滑过渡相关 ==========
     bool is_transitioning_{false};  // 是否正在过渡
@@ -321,6 +364,11 @@ namespace humanoidController_wheel_wbc
     HighlyDynamic::HumanoidInterfaceDrake *drake_interface_{nullptr};
     HighlyDynamic::JSONConfigReader *robot_config_;
     HighlyDynamic::KuavoSettings kuavo_settings_;
+
+    // ========== 底盘运动模式相关 ==========
+    bool baseCmdVelStatus_{true};
+    ros::Subscriber base_cmd_vel_status_sub_;
+
   };
 
 } // namespace humanoidController_wheel_wbc

@@ -138,6 +138,7 @@ class WheelJoyStickHandler {
   double joyStickAlpha_;
 
   // RightJoyStickY 按下时间检查相关变量
+  bool resetJointToDefaultWheel_{true};  // 进入增量控制时是否重置关节到默认位置
   bool RightJoyStickYHold_;      // RightJoyStickY 保持状态，默认值为 true
   int rightJoyStickYHoldCount_;  // 连续满足条件的计数
   bool rightJoyStickYHoldWithX_;      // X键按下时 RightJoyStickY 保持状态

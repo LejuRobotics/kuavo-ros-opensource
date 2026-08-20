@@ -26,6 +26,7 @@
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
+#include "motion_capture_ik/WheelNaturalElbowGuide.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "DrakeChestElbowHandPointOpt.hpp"
@@ -136,10 +137,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
     Eigen::Quaterniond chestQuatRef = Eigen::Quaterniond::Identity();  // yaw/pitch-only
 
     Eigen::Vector3d leftElbowRef = Eigen::Vector3d::Zero();
+    double leftElbowTrackingActivation = 1.0;
     Eigen::Vector3d leftHandRef = Eigen::Vector3d::Zero();
     Eigen::Quaterniond leftHandQuat = Eigen::Quaterniond::Identity();
 
     Eigen::Vector3d rightElbowRef = Eigen::Vector3d::Zero();
+    double rightElbowTrackingActivation = 1.0;
     Eigen::Vector3d rightHandRef = Eigen::Vector3d::Zero();
     Eigen::Quaterniond rightHandQuat = Eigen::Quaterniond::Identity();
   };
@@ -323,6 +326,13 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::unique_ptr<DrakeChestElbowHandPointOptSolver> chestElbowHandPointOptSolverPtr_;
   DrakeChestElbowHandWeightConfig chestElbowHandWeightConfig_;
   DrakeChestElbowHandBoundsConfig chestElbowHandBoundsConfig_;
+  bool enableWheelNaturalElbowGuide_ = true;
+  WheelNaturalElbowGuideConfig wheelNaturalElbowGuideConfig_;
+  double wheelNaturalElbowSoftTrackingScale_ = 0.10;
+  double latestLeftElbowTrackingActivation_ = 1.0;
+  double latestRightElbowTrackingActivation_ = 1.0;
+  std::unique_ptr<WheelNaturalElbowGuide> leftNaturalElbowGuide_;
+  std::unique_ptr<WheelNaturalElbowGuide> rightNaturalElbowGuide_;
   bool drakeSolveUpdateChestOrientation_ = true;
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;
@@ -402,6 +412,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d defaultRightHandPosOnExit_;                   // 退出时右手默认目标位置
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值
   bool useIncrementalHandOrientation_ = true;                   // 是否使用增量式手部姿态
+  bool resetJointToDefaultWheel_ = true;                        // 进入增量控制时是否重置关节到默认位置
+  bool justEnteredMode2_ = false;                               // mode 0 -> mode 2 切换瞬间标志（约2秒内为true）
+  bool mode2Initialized_ = false;                               // mode 2 是否已初始化（避免fsmEnter重复进入）
 
   // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
   Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};
@@ -419,9 +432,14 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::vector<PoseData> latestPoseConstraintList_;  // 保存最新的pose约束列表
   WheelIncrementalPoseResult latestIncrementalResult_;
 
-  // 保存 incrementalController_ 查询结果的手部和肘部位置
-  Eigen::Vector3d latestHumanLeftElbowPos_;   // 左肘位置（通过 FK 计算）
-  Eigen::Vector3d latestHumanRightElbowPos_;  // 右肘位置（通过 FK 计算）
+  // Quest3 transformed human arm points, in the same robot-base convention as
+  // latestLeftHandPose_vr_ / latestRightHandPose_vr_.
+  Eigen::Vector3d latestHumanLeftShoulderPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanRightShoulderPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanLeftElbowPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanRightElbowPos_ = Eigen::Vector3d::Zero();
+  bool latestHumanLeftArmPoseValid_ = false;
+  bool latestHumanRightArmPoseValid_ = false;
 
   Eigen::Vector3d latestRobotLeftElbowPos_;
   Eigen::Vector3d latestRobotRightElbowPos_;
@@ -455,6 +473,16 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasRightHandPoseInChest_ = false;
   bool hasLeftElbowPosInChest_ = false;
   bool hasRightElbowPosInChest_ = false;
+
+  // Robot chest frames captured on each grip rising edge. Active hand targets
+  // are first computed as independent hand increments in these frames, then
+  // mapped through the current chest target so they follow torso motion.
+  Eigen::Vector3d leftActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond leftActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Vector3d rightActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond rightActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
+  bool hasLeftActiveChestAnchor_ = false;
+  bool hasRightActiveChestAnchor_ = false;
 
   Eigen::VectorXd mec_limit_lower_;
   Eigen::VectorXd mec_limit_upper_;

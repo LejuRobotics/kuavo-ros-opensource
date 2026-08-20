@@ -64,7 +64,9 @@ namespace humanoid_controller
       if (time_step_total > 0 && current_time_step < time_step_total - 1) {
         current_time_step++;
       }
-      printf("Current time step: %d / %d\n", current_time_step, time_step_total);
+      // 节流: 每 50 步打印一次 (主循环每帧推进, 不节流会刷屏)
+      if (current_time_step % 50 == 0)
+        printf("Current time step: %d / %d\n", current_time_step, time_step_total);
       // current_time_step = time_step_total * 0.7;
       // current_time_step = 392;
     }
@@ -127,6 +129,13 @@ namespace humanoid_controller
     void reset() override;
 
     void resume() override;
+
+    /**
+     * @brief 双推理插值恢复 source 时的适配。STANDING 下推理已冻结无可恢复,
+     * 但也不能 reset(否则发布 0, Python joy 永不 EXIT)——保持 PAUSED, updateImpl
+     * 由主线程驱动仍输出起身终态。未完成时维持原 resume 重启语义。
+     */
+    void resumeWarm() override;
 
     /**
      * @brief 是否请求退出当前 RL 模式（与 RLControllerBase 一致，见 humanoidController 轮询）

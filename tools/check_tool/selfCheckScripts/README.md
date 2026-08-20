@@ -70,7 +70,7 @@ source devel/setup.bash
 - **SSH连接测试**：验证与上位机（192.168.26.1）的连接
 - **ROS节点启动**：
   - `ros_application` 和 `ros_navigation` 程序
-  - `/play_music_node` 音响服务节点
+  - `/audio_player_node` 音响服务节点
   - `/record_music_node` 麦克风服务节点
 - **音响测试**：播放测试音频文件
 - **麦克风测试**：录制音频并保存

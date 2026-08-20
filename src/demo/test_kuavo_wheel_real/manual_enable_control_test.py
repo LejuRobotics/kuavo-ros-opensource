@@ -12,28 +12,40 @@
     e        调用 /enable_control (切换)
     v        调用 /enable_vel_control (切换)
 
-  身体 (躯干 /cmd_lb_torso_pose + 手臂 /kuavo_arm_traj):
-    b        发送躯干+手臂动作指令
-    h        发送躯干+手臂归位指令
+  身体 (躯干 + 双臂联动, Ruckig 平滑同步):
+    b        send_timed_multi_commands(is_sync=True): 躯干(planner=2) + 左臂(6) + 右臂(7)
+    h        躯干复位 + 手臂复位 (/mobile_manipulator_reset_torso + arm_ctrl_mode=1)
 
     space    停止所有底盘移动 (速度归零)
     p        打印当前各状态量
     q        退出
 """
 
-import sys, select, termios, tty
+import math, sys, select, termios, tty
 import rospy
 from geometry_msgs.msg import Twist
-from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 from std_srvs.srv import SetBool
 import lb_ctrl_api as ct
 
 LINEAR_SPEED = 0.3
 ANGULAR_SPEED = 0.5
 
-ARM_MOVE = [-30, 20, 15, -45, 25, 10, -35, -30, -20, -15, -45, -25, -10, -35]
-ARM_HOME = [0.0] * 14
-ARM_NAMES = [f'joint{i}' for i in range(1, 15)]
+# ---------- 躯干 + 双臂联动轨迹 ----------
+# 躯干: planner_index=2, cmdVec=[x, z, yaw, pitch] (绝对, 局部系)
+# 左臂: planner_index=6, cmdVec=[x, y, z, roll, pitch, yaw] (deg, 局部系 ← RPM 内部转弧度)
+# 右臂: planner_index=7, cmdVec=[x, y, z, roll, pitch, yaw] (deg, 局部系)
+#
+# 数值参考 cmd_torso_ee_local_test.py，按需调整
+# 躯干 workspace 限位（对齐 BT2 MobileManipulatorJoyCommandNode.cpp:104-108 + getTorsoMaxX）：
+#   x: 0~0.25 (z联动: z=0.22→x≤0.123)
+#   z: 0~0.32  pitch: 0~0.5235  yaw: ±0.5235
+ARM_EE_POSE_DEG = {
+    "torso_rel": (0.06, 0.22, 0.0, 0.0),    # (dx, dz, yaw, pitch): 前移6cm, 升高22cm
+    "left":      (0.50, 0.30, 1.15, 0.0, -60.0, 0.0),  # (x, y, z, roll, pitch, yaw) deg
+    "right":     (0.50, -0.30, 1.15, 0.0, -60.0, 0.0),
+}
+DESIRE_TIME = 4.0   # 动作时长 (秒)，越大越缓慢
 
 
 def getch():
@@ -47,24 +59,37 @@ def getch():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
+def _deg_to_rad(deg_vec):
+    """前 3 维 (位置 m) 不动，后 3 维角度 deg → rad"""
+    return [deg_vec[0], deg_vec[1], deg_vec[2],
+            math.radians(deg_vec[3]), math.radians(deg_vec[4]), math.radians(deg_vec[5])]
+
+
 class Test:
     def __init__(self):
         rospy.init_node('manual_test', anonymous=True)
 
         self._pub_cmd_vel = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         self._pub_base_cmd_vel = rospy.Publisher('/move_base/base_cmd_vel', Twist, queue_size=10)
-        self._pub_arm_traj = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=10)
-        self._pub_torso_pose = rospy.Publisher('/cmd_lb_torso_pose', Twist, queue_size=10)
 
-        self._cmd_vel_vx = 0.0       # /cmd_vel 当前线速度
-        self._cmd_vel_wz = 0.0       # /cmd_vel 当前角速度
-        self._base_cmd_vel_vx = 0.0  # /move_base/base_cmd_vel 当前线速度
+        self._cmd_vel_vx = 0.0
+        self._cmd_vel_wz = 0.0
+        self._base_cmd_vel_vx = 0.0
         self._running = True
 
         self._enable_control = True
         self._enable_vel_control = True
-        self._home_torso_xyz = None
+        self._torso_initial = None   # 躯干初始绝对位姿 (x, y, z, roll, pitch, yaw)
+        # 订阅 latched 使能话题（发布值 = 状态机衍生，仅 IDLE 为 true）：
+        # /enable_control 受理矩阵：过渡态（PAUSING/RESUMING）拒绝一切；稳定态只受理
+        # 有效切换（IDLE 受理 disable、PAUSED 受理 enable），重复请求也被拒（预期）。
+        # 以话题值为准同步本地状态，避免脚本内部状态与 controller 错位。
+        self._enable_state_sub = rospy.Subscriber('/enable_control_state', Bool,
+                                                  self._on_enable_control_state, queue_size=1)
         self._init()
+
+    def _on_enable_control_state(self, msg):
+        self._enable_control = msg.data
 
     def _init(self):
         print('[init] ...')
@@ -72,14 +97,18 @@ class Test:
         ct.set_arm_control_mode(1);  rospy.sleep(1.5)
         ct.set_arm_control_mode(2)
         ct.set_focus_ee(True); ct.set_focus_z(False)
-        ct.set_wheel_control_enable(True)          # /enable_control true
+        ct.set_wheel_control_enable(True)
         self._call_enable_vel_control(True)
         rospy.sleep(3.0)
+
+        # 记录初始躯干位姿，用于联动轨迹的绝对坐标计算
         ok, pose = ct.get_torso_initial_pose(True)
         if ok and pose:
-            p = pose['position']; self._home_torso_xyz = [p[0], 0.0, p[2], 0.0, 0.0, 0.0]
-        self._send_arm_traj(ARM_HOME)
-        rospy.sleep(2.0)
+            self._torso_initial = pose['position']  # [x, y, z, roll, pitch, yaw]
+            print(f'[init] torso initial: x={self._torso_initial[0]:.3f} z={self._torso_initial[2]:.3f}')
+        else:
+            print('[init] WARN: failed to get torso initial pose')
+
         print('[init] ok')
         print('w/s=/cmd_vel前进后退 a/d=/cmd_vel转向 i/o=/move_base/base_cmd_vel直驱 space=停 e=/enable_control v=/enable_vel_control b=身体动作 h=身体归位 p=状态 q=退出')
 
@@ -94,29 +123,42 @@ class Test:
         tw = Twist(); tw.linear.x = vx; tw.angular.z = wz
         pub.publish(tw)
 
-    def _send_arm_traj(self, deg):
-        m = JointState(); m.header.stamp = rospy.Time.now()
-        m.name = ARM_NAMES; m.position = deg
-        m.velocity = [0.0]*14; m.effort = [0.0]*14
-        self._pub_arm_traj.publish(m)
-
-    def _send_torso_pose(self, xyz_ypr):
-        tw = Twist()
-        tw.linear.x, tw.linear.y, tw.linear.z = xyz_ypr[0], xyz_ypr[1], xyz_ypr[2]
-        tw.angular.z, tw.angular.y = xyz_ypr[3], xyz_ypr[4]
-        self._pub_torso_pose.publish(tw)
-
     def _body_action(self):
-        self._send_torso_pose([0, 0, 0.15, 0.25, -0.08, 0])
-        self._send_arm_traj(ARM_MOVE)
+        """躯干 + 双臂联动，Ruckig 同步规划"""
+        if self._torso_initial is None:
+            print('  no torso initial pose, skip')
+            return
+
+        ct.set_arm_control_mode(2)   # 切到外部控制，确保手臂能收 timed command
+
+        t = ARM_EE_POSE_DEG
+        dx, dz, yaw, pitch = t["torso_rel"]
+        torso_cmd = [self._torso_initial[0] + dx,
+                     self._torso_initial[2] + dz,
+                     yaw,
+                     pitch]
+
+        timed_cmd_vec = [
+            {'planner_index': 2, 'desire_time': DESIRE_TIME, 'cmd_vec': torso_cmd},
+            {'planner_index': 6, 'desire_time': DESIRE_TIME, 'cmd_vec': _deg_to_rad(t["left"])},
+            {'planner_index': 7, 'desire_time': DESIRE_TIME, 'cmd_vec': _deg_to_rad(t["right"])},
+        ]
+
+        success, actual_time, msg = ct.send_timed_multi_commands(timed_cmd_vec, is_sync=True)
+        if success:
+            print(f'  ✓ 躯干+手臂联动完成 ({actual_time:.1f}s)')
+        elif ct._is_soft_pause_rejection(msg):
+            print(f'  \033[92m✓ 躯干+手臂联动被拒（预期：软暂停窗口内）\033[0m')
+        else:
+            print(f'  ⚠️ 躯干+手臂联动失败: {msg}')
 
     def _body_home(self):
-        if self._home_torso_xyz:
-            self._send_torso_pose(self._home_torso_xyz)
-        self._send_arm_traj(ARM_HOME)
+        """躯干复位 + 手臂复位"""
+        ct.reset_torso_to_initial()
+        ct.set_arm_control_mode(1)   # 手臂回初始站姿
+        print('  torso + arm reset done')
 
     def _publish_all(self):
-        """同时发布 /cmd_vel 和 /move_base/base_cmd_vel 的当前速度"""
         self._pub_twist(self._pub_cmd_vel, vx=self._cmd_vel_vx, wz=self._cmd_vel_wz)
         self._pub_twist(self._pub_base_cmd_vel, vx=self._base_cmd_vel_vx)
 
@@ -158,19 +200,22 @@ class Test:
                     if self._base_cmd_vel_vx != 0: self._cmd_vel_vx = 0.0; self._cmd_vel_wz = 0.0
                     print(f'  /move_base/base_cmd_vel vx={self._base_cmd_vel_vx}')
                 elif c == 'e':
-                    self._enable_control = not self._enable_control
-                    ct.set_wheel_control_enable(self._enable_control)
-                    print(f'  /enable_control -> {self._enable_control}')
+                    target = not self._enable_control   # 基于话题真实值取反
+                    if ct.set_wheel_control_enable(target):
+                        self._enable_control = target
+                        print(f'  /enable_control -> {self._enable_control}')
+                    else:
+                        print(f'  \033[92m✓ /enable_control 被拒（预期：过渡窗口内 或 已处于目标态），保持 {self._enable_control}\033[0m')
                 elif c == 'v':
                     self._enable_vel_control = not self._enable_vel_control
                     self._call_enable_vel_control(self._enable_vel_control)
                     print(f'  /enable_vel_control -> {self._enable_vel_control}')
                 elif c == 'b':
                     self._body_action()
-                    print('  /cmd_lb_torso_pose + /kuavo_arm_traj -> action')
+                    print(f'  torso+arms sync ({DESIRE_TIME}s)')
                 elif c == 'h':
                     self._body_home()
-                    print('  /cmd_lb_torso_pose + /kuavo_arm_traj -> home')
+                    print('  torso + arm reset')
                 elif c == 'p':
                     print(f'  /enable_control={self._enable_control}'
                           f'  /enable_vel_control={self._enable_vel_control}'

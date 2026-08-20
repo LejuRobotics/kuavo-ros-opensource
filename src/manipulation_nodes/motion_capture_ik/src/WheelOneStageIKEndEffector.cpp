@@ -251,6 +251,8 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   // Use WheelPointTrackIKSolverConfig weights if available, otherwise use defaults
   double eeWeight = pointTrackConfig_ ? pointTrackConfig_->eeTrackingWeight : 4e3;
   double elbowWeight = pointTrackConfig_ ? pointTrackConfig_->elbowTrackingWeight : 4e2;
+  const double leftElbowWeight = elbowWeight * leftElbowTrackingActivation_;
+  const double rightElbowWeight = elbowWeight * rightElbowTrackingActivation_;
   double link6Weight = pointTrackConfig_ ? pointTrackConfig_->link6TrackingWeight : 4e3;
   double virtualThumbWeight = pointTrackConfig_ ? pointTrackConfig_->virtualThumbTrackingWeight : 4e3;
   double shoulderWeight = pointTrackConfig_ ? pointTrackConfig_->shoulderTrackingWeight : 4e3;
@@ -289,6 +291,17 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   }
 
   if (controlArmIndex == ArmIdx::LEFT || controlArmIndex == ArmIdx::BOTH) {
+    if (pointTrackConfig_ && pointTrackConfig_->enableWaistElbowClearanceConstraint) {
+      const double clearance = std::max(0.0, pointTrackConfig_->waistElbowLateralClearance);
+      const Eigen::Vector3d lower(-1.0e3, clearance, -1.0e3);
+      const Eigen::Vector3d upper = Eigen::Vector3d::Ones() * 1.0e3;
+      ik.AddPositionConstraint(plant_->GetFrameByName("zarm_l4_link"),
+                               Eigen::Vector3d::Zero(),
+                               plant_->GetFrameByName("waist_yaw_link"),
+                               lower,
+                               upper);
+    }
+
     // Add LEFT HAND (End Effector) position constraint
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
@@ -308,7 +321,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position,
                          plant_->GetFrameByName("zarm_l4_link"),
                          Eigen::Vector3d::Zero(),
-                         elbowWeight * Eigen::Matrix3d::Identity());
+                         leftElbowWeight * Eigen::Matrix3d::Identity());
     } else {
       // print size err POSE_DATA_LIST_INDEX_LEFT_ELBOW
       std::cout << "WheelOneStageIKEndEffector::setConstraints: size error POSE_DATA_LIST_INDEX_LEFT_ELBOW" << std::endl;
@@ -341,6 +354,17 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   }
 
   if (controlArmIndex == ArmIdx::RIGHT || controlArmIndex == ArmIdx::BOTH) {
+    if (pointTrackConfig_ && pointTrackConfig_->enableWaistElbowClearanceConstraint) {
+      const double clearance = std::max(0.0, pointTrackConfig_->waistElbowLateralClearance);
+      const Eigen::Vector3d lower = -Eigen::Vector3d::Ones() * 1.0e3;
+      const Eigen::Vector3d upper(1.0e3, -clearance, 1.0e3);
+      ik.AddPositionConstraint(plant_->GetFrameByName("zarm_r4_link"),
+                               Eigen::Vector3d::Zero(),
+                               plant_->GetFrameByName("waist_yaw_link"),
+                               lower,
+                               upper);
+    }
+
     // Add RIGHT HAND (End Effector) position constraint
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
@@ -360,7 +384,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position,
                          plant_->GetFrameByName("zarm_r4_link"),
                          Eigen::Vector3d::Zero(),
-                         elbowWeight * Eigen::Matrix3d::Identity());
+                         rightElbowWeight * Eigen::Matrix3d::Identity());
     } else {
       // print size err POSE_DATA_LIST_INDEX_RIGHT_ELBOW
       std::cout << "WheelOneStageIKEndEffector::setConstraints: size error POSE_DATA_LIST_INDEX_RIGHT_ELBOW" << std::endl;

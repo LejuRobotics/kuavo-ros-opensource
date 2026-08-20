@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>kuavo_mocap_gmr</name>
+  <version>1.0.0</version>
+  <description>
+    General Motion Retargeting (GMR) ROS package for Kuavo humanoid robot.
+    Provides real-time motion retargeting from OptiTrack motion capture to robot joints.
+  </description>
+
+  <maintainer email="zhongxu@example.com">zhongxu</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>kuavo_msgs</depend>
+
+  <export>
+  </export>
+</package>

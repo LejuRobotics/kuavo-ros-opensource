@@ -14,6 +14,7 @@ set(CATKIN_PACKAGE_DEPENDENCIES
   ocs2_self_collision
   humanoid_interface
   kuavo_msgs
+  leju_mobile_base_msgs
   ruckig_catkin
 )
 

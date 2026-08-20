@@ -1,0 +1,40 @@
+<launch>
+  <arg name="bag" default="$(find kuavo_xsense_gmr)/data/xsens_bvh_udp_20260623_201247.bag"/>
+  <arg name="robot" default="kuavo_s54"/>
+  <arg name="enable_viewer" default="false"/>
+  <arg name="fps" default="100.0"/>
+  <arg name="rate_scale" default="1.0"/>
+  <arg name="loop" default="false"/>
+  <arg name="position_scale" default="1.0"/>
+  <arg name="offset_scale" default=""/>
+  <arg name="preserve_bag_stamp" default="false"/>
+  <arg name="bag_startup_delay" default="2.0"/>
+  <arg name="cpu_cores" default="[]"/>
+
+  <node pkg="kuavo_xsense_gmr"
+        type="xsens_bag_to_xsense_topics.py"
+        name="xsens_bag_to_xsense_topics"
+        output="screen">
+    <param name="bag" value="$(arg bag)"/>
+    <param name="rate_scale" value="$(arg rate_scale)"/>
+    <param name="loop" value="$(arg loop)"/>
+    <param name="position_scale" value="$(arg position_scale)"/>
+    <param name="offset_scale" value="$(arg offset_scale)"/>
+    <param name="preserve_bag_stamp" value="$(arg preserve_bag_stamp)"/>
+    <param name="startup_delay" value="$(arg bag_startup_delay)"/>
+  </node>
+
+  <node pkg="kuavo_xsense_gmr"
+        type="run_with_venv.sh"
+        name="xsense_streaming_retarget"
+        output="screen"
+        args="$(find kuavo_xsense_gmr)/scripts/xsense_streaming_node.py">
+    <param name="robot" value="$(arg robot)"/>
+    <param name="format" value="xsense"/>
+    <param name="enable_viewer" value="$(arg enable_viewer)"/>
+    <param name="topic" value="/xsense/world_bone_poses"/>
+    <param name="topic_cali" value="/xsense/bvh_seg_desc"/>
+    <param name="fps" value="$(arg fps)"/>
+    <rosparam param="cpu_cores" subst_value="true">$(arg cpu_cores)</rosparam>
+  </node>
+</launch>

@@ -53,6 +53,7 @@
   <depend>tf2_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
   <depend>kuavo_msgs</depend>
   <depend>roslib</depend>
   <depend>kuavo_ros_interfaces</depend>

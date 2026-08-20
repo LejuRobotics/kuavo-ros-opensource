@@ -91,7 +91,8 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   bool updateHeadJointPositions_ = false;
 
   // 夹爪相关
-  bool updateClawJointPositions_ = false;
+  bool updateClawJointPositions_ = true;
+  bool useArticulatedClawKinematics_ = false;
   std::vector<double> claw_joint_positions_ = {0.0, 0.0};
   ros::Subscriber clawCmdSubscriber_;
   ros::Publisher lejuClawStatePub_;

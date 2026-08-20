@@ -9,6 +9,7 @@
 - STRING: PPPPMMMMN  Patch 为 0 时，不显示 Patch 部分, 比如 M(4), N(5),P(0) 表示为 45 而非 000000045 (0000,0004,5)
 """
 
+# 同步维护: SDK 内嵌副本 src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/common/robot_version.py 需同步更新
 import warnings
 
 
@@ -286,6 +287,10 @@ VERSION_REGISTRY = {
     "55":   {"internal": 55,     "series": "kuavo5",  "desc": "手臂部分电机改ruiwoPA4310"},
     "60":   {"internal": 60,     "series": "kuavo5w", "desc": "悟时底盘轮臂"},
     "61":   {"internal": 61,     "series": "kuavo5w", "desc": "玖物底盘轮臂"},
+    "62":   {"internal": 62,     "series": "kuavo5w", "desc": "62夹爪轮臂"},
+    "63":   {"internal": 63,     "series": "kuavo5w", "desc": "63轮臂版本"},
+    "62.2": {"internal": 200062, "series": "kuavo5w", "desc": "62夹爪轮臂(v2)"},
+    "62.3": {"internal": 300062, "series": "kuavo5w", "desc": "62夹爪轮臂(v3)"},
     "13":   {"internal": 13,     "series": "roban",   "desc": "roban2.0版本"},
     "14":   {"internal": 14,     "series": "roban",   "desc": "roban2.1版本"},
     "15":   {"internal": 15,     "series": "roban",   "desc": "roban2.2版本"},

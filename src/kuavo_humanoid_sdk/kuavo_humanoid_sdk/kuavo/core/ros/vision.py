@@ -14,7 +14,7 @@ import rospy
 from std_msgs.msg import Float64
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState
-from apriltag_ros.msg import AprilTagDetectionArray
+from kuavo_msgs.msg import AprilTagDetectionArray
 from geometry_msgs.msg import TransformStamped, PoseStamped
 
 

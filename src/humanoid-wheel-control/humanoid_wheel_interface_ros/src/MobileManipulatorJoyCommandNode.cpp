@@ -617,8 +617,15 @@ namespace mobile_manipulator
       else if (vel.angular.y < 0.0 && open_loop_torso_pitch_ <= torsoMin_pitch_ + kTorsoClampEps) vel.angular.y = 0.0;
 
       // --- yaw ---
-      if      (vel.angular.z > 0.0 && open_loop_torso_yaw_ >= torsoMax_yaw_ - kTorsoClampEps)  vel.angular.z = 0.0;
-      else if (vel.angular.z < 0.0 && open_loop_torso_yaw_ <= torsoMin_yaw_ + kTorsoClampEps)  vel.angular.z = 0.0;
+      // kuavodevlab#3801: block waist yaw until torso z raised 5cm (same z gate as getTorsoMaxX at z=0)
+      constexpr double kWaistYawMinZIncrement = 0.05;
+      if (z_increment < kWaistYawMinZIncrement - kTorsoClampEps) {
+        vel.angular.z = 0.0;
+      } else if (vel.angular.z > 0.0 && open_loop_torso_yaw_ >= torsoMax_yaw_ - kTorsoClampEps) {
+        vel.angular.z = 0.0;
+      } else if (vel.angular.z < 0.0 && open_loop_torso_yaw_ <= torsoMin_yaw_ + kTorsoClampEps) {
+        vel.angular.z = 0.0;
+      }
     }
 
 
