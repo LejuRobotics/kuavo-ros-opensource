@@ -11,7 +11,7 @@
     <arg name="enable_head_control" default="true"/>
     <arg name="head_control_mode" default="vr_follow"/>
     <arg name="use_pico" default="true"/>
-    <arg name="pico_diagnostic_allow_legacy" default="false"/>
+    <arg name="pico_diagnostic_allow_legacy" default="true"/>
     <arg name="pico_diagnostic_log_enable" default="false"/>
     <arg name="pico_tf_publish_enable" default="false"/>
     <arg name="pico_tf_publish_hz" default="100.0"/>
