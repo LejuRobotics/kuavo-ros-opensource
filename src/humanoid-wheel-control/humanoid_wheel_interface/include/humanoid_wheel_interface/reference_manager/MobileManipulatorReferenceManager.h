@@ -221,7 +221,7 @@ protected:
   void calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime = 0.0);
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetTorsoPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
-  void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState);
+  void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState, bool anchorOpenLoopStart);
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
   void applyTorsoVelDeltaCommands(scalar_t initTime);
@@ -236,8 +236,8 @@ protected:
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
-  void resetAllMpcTraj(scalar_t initTime, const vector_t& initState);
-  void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState);
+  void resetAllMpcTraj(scalar_t initTime, const vector_t& initState, bool anchorOpenLoopStart);
+  void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState, bool anchorOpenLoopStart);
   void updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState);
   void updateTimedSchedulerTargetTraj(void);
   void updateTimedOfflineTraj(scalar_t initTime, scalar_t finalTime);
@@ -335,6 +335,7 @@ private:
   double resetTorsoInitTime_{0.0};
   bool isResetTorso_{false};
   bool isResetTorsoRePlanning_{false};
+  vector_t resetTorsoOpenLoopStart4_{vector_t::Zero(4)};  // snap at service call (#3973 VR race)
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 
