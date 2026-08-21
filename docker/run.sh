@@ -86,7 +86,7 @@ if [[ -n "$EXISTING_CONTAINER" ]]; then
 else
     echo "Creating a new container '${CONTAINER_NAME}' based on image '${IMAGE_NAME}' ..."
     echo "Note: Container will be preserved for future use. Use 'docker rm ${CONTAINER_NAME}' to remove it."
-    docker run -it --net host \
+    docker run -it --net host --ipc=host \
         --name $CONTAINER_NAME \
         --privileged \
         -v /dev:/dev \

@@ -222,7 +222,7 @@ class KuavoPicoServer:
             udp_reply_enabled=bool(self._get_diag_param("udp_reply_enable", True)),
             sync_enabled=bool(self._get_diag_param("enable_time_sync", True)),
             diagnostic_publish_hz=float(self._get_diag_param("publish_hz", 1.0)),
-            allow_legacy_vrdata=bool(self._get_diag_param("allow_legacy", False)),
+            allow_legacy_vrdata=bool(self._get_diag_param("allow_legacy", True)),
             ping_enabled=diagnostic_log_enable and bool(self._get_diag_param("ping_enable", True)),
             ping_interval_sec=float(self._get_diag_param("ping_interval_sec", 5.0)),
             ping_timeout_sec=float(self._get_diag_param("ping_timeout_sec", 1.0)),
