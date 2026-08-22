@@ -357,6 +357,7 @@ private:
   bool isResetTorso_{false};
   bool isResetTorsoRePlanning_{false};
   vector_t resetTorsoOpenLoopStart4_{vector_t::Zero(4)};  // snap at service call (#3973 VR race)
+  vector_t resetTorsoMpcStart4_{vector_t::Zero(4)};       // MPC track snap at service call (#3991)
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 

@@ -742,6 +742,7 @@ namespace ocs2
             if (req.data) {
                 callSetArmModeSrv(0);
                 arm_ctrl_mode_ = 0;
+                arm_ctrl_mode_current_ = 0;
             }
             res.message = "Arm collision control set to " + std::string(req.data ? "true" : "false");
             ROS_INFO("Arm collision control set to %s", req.data ? "true" : "false");
@@ -808,6 +809,7 @@ namespace ocs2
             callSetArmModeSrv(bootstrapArmMode);
             callWheelMpcControlMode(3);
             arm_ctrl_mode_ = bootstrapArmMode;
+            arm_ctrl_mode_current_ = bootstrapArmMode;
             res.success = true;
             res.message = "wheel arm mode initialized to " + std::to_string(bootstrapArmMode);
             ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode %d", bootstrapArmMode);
@@ -982,12 +984,14 @@ namespace ocs2
         {
             if(mode_msg->data.size() >= 2)
             {
+                arm_ctrl_mode_dual_feed_ = true;
                 arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]); // 兼容MPC发布 [current, desired]
                 arm_ctrl_mode_ = static_cast<int>(mode_msg->data[1]);
                 return;
             }
             if(mode_msg->data.size() == 1)
             {
+                arm_ctrl_mode_dual_feed_ = false; // 轮臂仅发布 current，无过渡态语义
                 arm_ctrl_mode_current_ = static_cast<int>(mode_msg->data[0]);
                 arm_ctrl_mode_ = static_cast<int>(mode_msg->data[0]); // 兼容轮臂发布 [current]
                 return;
@@ -1289,7 +1293,8 @@ namespace ocs2
                         return;
                     }
                     ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
-                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_dual_feed_
+                        && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
                         ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
@@ -1517,7 +1522,8 @@ namespace ocs2
                         return;
                     }
                     ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
-                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_dual_feed_
+                        && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
                         ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
@@ -2134,7 +2140,8 @@ namespace ocs2
         bool suppress_next_quest3_head_fixed_intent_{false};
         bool quest3_arm_reset_head_snapshot_active_{false};
         int arm_ctrl_mode_current_{2};
-        int arm_ctrl_mode_{1};
+        int arm_ctrl_mode_{2};
+        bool arm_ctrl_mode_dual_feed_{false};
         
         std::string head_ctrl_mode_{"vr_follow"};
         std::string last_head_ctrl_mode_;

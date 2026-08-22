@@ -3231,6 +3231,7 @@ namespace mobile_manipulator {
         std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
         resetTorsoOpenLoopStart4_ << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
       }
+      resetTorsoMpcStart4_ = torsoPose_prevTargetPose_;
       isResetTorso_ = true;
       return true;
     }
@@ -4263,6 +4264,20 @@ namespace mobile_manipulator {
       // (VR double-click publishes /cmd_lb_torso_pose right after service → would zero cmdTorsoPose_
       // before modifyReferences runs if we read live here).
       start4 = resetTorsoOpenLoopStart4_;
+      // kuavodevlab#3991: timed offline cmd may leave cmdTorsoPose_ at command target while MPC
+      // already tracks a different pose; use MPC snapshot when they diverge.
+      constexpr scalar_t kPosTol = 0.05;
+      constexpr scalar_t kAngTol = 0.05;
+      const scalar_t dx = std::abs(start4[0] - resetTorsoMpcStart4_[0]);
+      const scalar_t dz = std::abs(start4[1] - resetTorsoMpcStart4_[1]);
+      const scalar_t dyaw = std::abs(start4[2] - resetTorsoMpcStart4_[2]);
+      const scalar_t dpitch = std::abs(start4[3] - resetTorsoMpcStart4_[3]);
+      if (dx > kPosTol || dz > kPosTol || dyaw > kAngTol || dpitch > kAngTol) {
+        ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso: open-loop/MPC diverged (openLoop="
+                        << start4.transpose() << ", mpc=" << resetTorsoMpcStart4_.transpose()
+                        << "), using MPC start");
+        start4 = resetTorsoMpcStart4_;
+      }
     } else {
       resetTorsoPoseRuckig(initTime, initState, false);
       start4 = torsoPose_prevTargetPose_;

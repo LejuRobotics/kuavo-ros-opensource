@@ -961,6 +961,9 @@ namespace humanoid_controller
     std::string rl_to_rl_source_controller_name_;
     std::string rl_to_rl_target_controller_name_;
     RLControllerBase* rl_to_rl_live_source_controller_ptr_ = nullptr;
+    // Dance 退出后保持暂停，切换期间使用其最后一帧 joint_cmd，禁止恢复 Dance 推理。
+    bool rl_to_rl_frozen_dance_source_active_ = false;
+    kuavo_msgs::jointCmd rl_to_rl_frozen_dance_source_joint_cmd_;
     Eigen::VectorXd last_rl_joint_reference_;
     kuavo_msgs::jointCmd last_rl_joint_cmd_;
     Eigen::VectorXd rl_to_rl_start_joint_reference_;

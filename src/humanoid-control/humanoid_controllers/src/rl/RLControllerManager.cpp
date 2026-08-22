@@ -760,14 +760,19 @@ namespace humanoid_controller
       const bool force_cold_reset_for_amp_to_vmp =
           !current_controller_name_.empty() &&
           isAmpToVmpSwitch(source_controller_type, new_controller->getType());
+      const bool force_cold_reset_for_dance_to_amp =
+          !current_controller_name_.empty() &&
+          source_controller_type == RLControllerType::DANCE_CONTROLLER &&
+          new_controller->getType() == RLControllerType::AMP_CONTROLLER;
 
-      if (force_cold_reset_for_vmp_to_amp)
+      if (force_cold_reset_for_vmp_to_amp || force_cold_reset_for_dance_to_amp)
       {
-        // VMP->AMP：清 AMP 观测历史帧并重锚 yaw，再冷启动
+        // VMP/Dance->AMP：清 AMP action/观测历史并冷启动；Dance->AMP 随后直接接管。
         new_controller->resetGaitCommandState(true);
         new_controller->reset();
         new_controller->resume();
-        ROS_INFO("[RLControllerManager] VMP->AMP force cold reset (clear obs history): %s -> %s",
+        ROS_INFO("[RLControllerManager] %s->AMP force cold reset (clear obs history): %s -> %s",
+                 force_cold_reset_for_dance_to_amp ? "Dance" : "VMP",
                  current_controller_name_.c_str(), name.c_str());
       }
       else if (force_cold_reset_for_amp_to_vmp)
