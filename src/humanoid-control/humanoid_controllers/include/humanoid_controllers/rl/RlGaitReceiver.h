@@ -19,6 +19,7 @@ at www.bridgedp.com.
 #include <mutex>
 #include <functional>
 #include <Eigen/Dense>
+#include "humanoid_controllers/rl/StanceDwellGate.h"
 
 namespace ocs2
 {
@@ -201,6 +202,8 @@ private:
   bool smart_stop_enabled_;
   double torso_velocity_threshold_;
   double feet_alignment_threshold_;
+  double stance_dwell_duration_{0.4};
+  humanoid_controller::StanceDwellGate stance_dwell_gate_;
   
   // Velocity smoothing parameters
   geometry_msgs::Twist latest_cmd_vel_;

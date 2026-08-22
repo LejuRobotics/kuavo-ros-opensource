@@ -98,6 +98,12 @@ public:
                      const Eigen::VectorXd& default_arm_pos = Eigen::VectorXd(),
                      double mode2_cutoff_freq = 2.0);
 
+    /**
+     * @brief 更新自动摆臂/回家使用的默认手臂位置
+     * @param default_arm_pos 默认手臂位置（手臂段）
+     */
+    void setDefaultArmPos(const Eigen::VectorXd& default_arm_pos);
+
     // ==================== 主要更新函数（核心接口）====================
     
     /**

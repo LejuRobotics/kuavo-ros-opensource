@@ -232,7 +232,6 @@ void ArmController::loadSettings(double max_tracking_velocity,
   if (default_arm_pos.size() == joint_arm_num_)
   {
     default_arm_pos_ = default_arm_pos;
-    std::cout << "[ArmController] Default arm position: " << default_arm_pos.transpose() << std::endl;
   }
   else if (default_arm_pos.size() > 0)
   {
@@ -242,6 +241,25 @@ void ArmController::loadSettings(double max_tracking_velocity,
   
   ROS_INFO("[ArmController] Loaded settings: auto_swing_max_velocity=%.3f rad/s, error_threshold=%.3f rad, interpolation_velocity=%.3f rad/s",
            arm_max_tracking_velocity_, arm_tracking_error_threshold_, mode_interpolation_velocity_);
+}
+
+void ArmController::setDefaultArmPos(const Eigen::VectorXd& default_arm_pos)
+{
+  if (default_arm_pos.size() != static_cast<Eigen::Index>(joint_arm_num_))
+  {
+    ROS_WARN("[ArmController] Ignoring default arm position update: expected=%zu, got=%ld",
+             joint_arm_num_, static_cast<long>(default_arm_pos.size()));
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  if (default_arm_pos_.size() == default_arm_pos.size() &&
+      (default_arm_pos_ - default_arm_pos).cwiseAbs().maxCoeff() < 1e-12)
+  {
+    return;
+  }
+
+  default_arm_pos_ = default_arm_pos;
 }
 
 void ArmController::setExternalCommandBufferCallback(std::function<bool()> callback)
@@ -696,9 +714,6 @@ void ArmController::applyModeChange(int target_mode, bool force_interpolation_to
     // 初始化平滑插值状态
     resetInterpolationState(ros::Time::now(), current_arm_pos_, default_arm_pos_);
     
-    std::cout << "[ArmController] applyModeChange: current_arm_pos_ " << current_arm_pos_.transpose() << std::endl;
-    std::cout << "[ArmController] applyModeChange: default_arm_pos_ " << default_arm_pos_.transpose() << std::endl;
-    
     // 检查当前位置和默认位置的差异
     Eigen::VectorXd error = default_arm_pos_ - current_arm_pos_;
     double error_norm = error.norm();
@@ -1127,7 +1142,20 @@ bool ArmController::applyStrictRateLimitedInterpolation(double dt,
 
 void ArmController::updateExternalControl(double dt)
 {
-  std::lock_guard<std::mutex> target_lock(external_target_mutex_);
+  Eigen::VectorXd raw_target_q;
+  Eigen::VectorXd raw_target_v;
+  bool target_received = false;
+  {
+    // Copy callback-owned data quickly so the walking control loop never runs
+    // filtering/interpolation while holding a ROS callback mutex.
+    std::lock_guard<std::mutex> target_lock(external_target_mutex_);
+    target_received = external_target_received_;
+    if (target_received)
+    {
+      raw_target_q = raw_external_target_q_;
+      raw_target_v = raw_external_target_v_;
+    }
+  }
 
   // 外部控制模式
   // 使用和humanoidController相同的滤波逻辑：先滤波位置，然后通过位置差分计算速度，再滤波速度
@@ -1137,27 +1165,27 @@ void ArmController::updateExternalControl(double dt)
   static bool first_call = true;
   
   // 初始化静态变量
-  if (first_call && external_target_received_)
+  if (first_call && target_received)
   {
     prev_filtered_pos = external_target_q_;
     first_call = false;
   }
   
   // 1. 始终更新滤波后的目标（供接管阶段使用）
-  if (external_target_received_)
+  if (target_received)
   {
     // 1.1 先对位置进行滤波（和humanoidController一致）
-    external_target_q_ = arm_joint_pos_filter_.update(raw_external_target_q_);
+    external_target_q_ = arm_joint_pos_filter_.update(raw_target_q);
     
     // 1.2 如果原始轨迹没有提供速度，使用滤波后的位置计算速度（和humanoidController一致）
     // 检查原始轨迹是否提供了速度（通过检查raw_external_target_v_是否为零向量）
-    bool has_velocity = raw_external_target_v_.norm() > 1e-6;
+    bool has_velocity = raw_target_v.norm() > 1e-6;
     
     Eigen::VectorXd computed_vel;
     if (has_velocity)
     {
       // 如果提供了速度，先对原始速度进行滤波
-      computed_vel = arm_joint_vel_filter_.update(raw_external_target_v_);
+      computed_vel = arm_joint_vel_filter_.update(raw_target_v);
     }
     else
     {
@@ -1181,7 +1209,7 @@ void ArmController::updateExternalControl(double dt)
   {
     // 插值阶段：
     // 如果还没收到第一个目标，我们保持不动，并维持 is_interpolating = true
-    if (!external_target_received_)
+    if (!target_received)
     {
       desire_arm_v_.setZero();
       // 不调用 applyRateLimitedInterpolation，防止其因为误差为0而误判结束
@@ -1197,7 +1225,7 @@ void ArmController::updateExternalControl(double dt)
         // that last accepted source target (not the filtered command) and
         // remain held until the source content actually changes.
         if (external_pause_source_valid_ &&
-            (raw_external_target_q_ - external_pause_source_q_)
+            (raw_target_q - external_pause_source_q_)
                     .lpNorm<Eigen::Infinity>() <= 1e-6)
         {
           desire_arm_q_ = external_pause_hold_q_;
@@ -1208,7 +1236,7 @@ void ArmController::updateExternalControl(double dt)
         {
           external_pause_source_valid_ = false;
           interpolation_finished = applyStrictRateLimitedInterpolation(
-              dt, raw_external_target_q_, mode_interpolation_velocity_);
+              dt, raw_target_q, mode_interpolation_velocity_);
         }
         if (interpolation_finished)
         {
@@ -1219,7 +1247,7 @@ void ArmController::updateExternalControl(double dt)
       {
         // 收到目标后，向"原始目标"(raw_external_target_q_) 靠拢
         // 关键：不使用滤波后的目标进行插值，以确保产生足够的误差触发限速
-        applyRateLimitedInterpolation(dt, raw_external_target_q_, Eigen::VectorXd::Zero(joint_arm_num_), mode_interpolation_velocity_);
+        applyRateLimitedInterpolation(dt, raw_target_q, Eigen::VectorXd::Zero(joint_arm_num_), mode_interpolation_velocity_);
         interpolation_finished = !is_interpolating_;
       }
 

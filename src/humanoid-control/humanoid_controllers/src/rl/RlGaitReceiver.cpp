@@ -11,6 +11,7 @@ at www.bridgedp.com.
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/info_parser.hpp>
 #include <std_msgs/String.h>
+#include <algorithm>
 #include <cmath>
 
 namespace ocs2
@@ -221,6 +222,7 @@ void RlGaitReceiver::resetVelocityState()
 {
   std::lock_guard<std::mutex> lock(command_mutex_);
   currentCommand_.setzero();
+  stance_dwell_gate_.reset();
   smoothed_cmd_vel_.linear.x = 0.0;
   smoothed_cmd_vel_.linear.y = 0.0;
   smoothed_cmd_vel_.linear.z = 0.0;
@@ -333,15 +335,25 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   }
   // Process current velocity command
 
-  if (velocity_magnitude < 0.01 && currentCommand_.cmdStance_ == 0) // Low velocity, already walking, and smart stop enabled
+  const bool low_speed_for_stance = velocity_magnitude < 0.01;
+  if (!low_speed_for_stance)
   {
+    stance_dwell_gate_.reset();
+  }
+
+  if (low_speed_for_stance && currentCommand_.cmdStance_ == 0) // Low velocity, already walking, and smart stop enabled
+  {
+    const bool stance_dwell_satisfied =
+        stance_dwell_gate_.update(true, time.toSec(), stance_dwell_duration_);
     // Velocity is very small, check for smart stop
-    if (smart_stop_enabled_ && !allow_walking_during_action_ && shouldSmartStop(torsostate, feetPositions)) {
+    if (stance_dwell_satisfied && smart_stop_enabled_ && !allow_walking_during_action_ &&
+        shouldSmartStop(torsostate, feetPositions)) {
       // Smart stop conditions met.
       // amp_hand_controller 保持 walking 模式 (模型内部有自然停下)，其余控制器切 stance。
       // 走不停腿：动作期间禁止 smart-stop 切 stance，避免打断行走。
       currentCommand_.setzero();
       currentCommand_.cmdStance_ = is_amp_hand_controller_ ? 0 : 1;
+      stance_dwell_gate_.reset();
       stopInPlaceStepping();
       if (!is_amp_hand_controller_)
       {
@@ -394,6 +406,7 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     currentCommand_.cmdVelAngularY_ = smoothed_cmd_vel_.angular.y * switch_velocity_scale_;
     currentCommand_.cmdVelAngularZ_ = smoothed_cmd_vel_.angular.z * switch_velocity_scale_;
     currentCommand_.cmdStance_ = 0; // Walking mode
+    stance_dwell_gate_.reset();
     
     // Reset smart stop checking when there's significant velocity command
     // resetSmartStopCheck();
@@ -534,6 +547,7 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
     smoothed_cmd_vel_ = geometry_msgs::Twist();
     previous_cmd_vel_ = geometry_msgs::Twist();
     currentCommand_.setzero();
+    stance_dwell_gate_.reset();
     pending_gait_name_.clear();
     stopInPlaceStepping();
     ROS_DEBUG_THROTTLE(1.0, "[RlGaitReceiver] Suppress cmd_vel while robot action is active");
@@ -608,6 +622,7 @@ void RlGaitReceiver::robotActionStateCallback(const humanoid_plan_arm_trajectory
   if (robot_action_active_ && !allow_walking)
   {
     currentCommand_.setzero();
+    stance_dwell_gate_.reset();
     latest_cmd_vel_ = geometry_msgs::Twist();
     smoothed_cmd_vel_ = geometry_msgs::Twist();
     previous_cmd_vel_ = geometry_msgs::Twist();
@@ -672,6 +687,7 @@ void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
     pending_gait_name_.clear();
     currentCommand_.setzero();
     currentCommand_.cmdStance_ = 1.0;
+    stance_dwell_gate_.reset();
     trot_latched_ = false;
     latest_cmd_vel_ = geometry_msgs::Twist();
     smoothed_cmd_vel_ = geometry_msgs::Twist();
@@ -689,6 +705,7 @@ void RlGaitReceiver::gaitNameCallback(const std_msgs::String::ConstPtr& msg)
       return;
     }
     currentCommand_.cmdStance_ = 0.0;
+    stance_dwell_gate_.reset();
     if (gait_name == "trot")
     {
       trot_latched_ = true;
@@ -1088,6 +1105,13 @@ void RlGaitReceiver::loadInPlaceStepConfig(const std::string& config_file, bool 
   } else {
     ROS_WARN("[RlGaitReceiver] No mixedMotionLimits section found in config file, using default values");
   }
+
+  if (pt.find("smartStop") != pt.not_found()) {
+    loadData::loadPtreeValue(pt, stance_dwell_duration_, "smartStop.stanceDwellDuration", verbose);
+    stance_dwell_duration_ = std::max(0.0, stance_dwell_duration_);
+  }
+  ROS_INFO("[RlGaitReceiver] Smart stop stance dwell duration: %.3f s",
+           stance_dwell_duration_);
 
   // Load velocity smoothing overrides (e.g. amp_hand_param.info for v17 amp_hand_controller)
   if (pt.find("velocitySmoothing") != pt.not_found()) {
