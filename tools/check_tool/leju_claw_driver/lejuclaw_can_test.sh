@@ -9,6 +9,7 @@ PROJECT_DIR=$(realpath "$current_script_dir/../../..")
 EXECUTABLE_PATHS=(
     "$PROJECT_DIR/devel/lib/hardware_node/lejuclaw_can_test_single_position"
     "$PROJECT_DIR/devel/lib/lejuclaw_can_test_single_position"
+    "$PROJECT_DIR/installed/bin/lejuclaw_can_test_single_position"
     "$PROJECT_DIR/installed/lib/lejuclaw_can_test_single_position"
 )
 
