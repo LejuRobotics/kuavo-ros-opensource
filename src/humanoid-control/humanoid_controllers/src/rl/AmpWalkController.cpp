@@ -229,7 +229,6 @@ namespace humanoid_controller
         standDefaultJointPosRL_ = defalutJointPosRL_;
       }
     }
-
     loadEigenMatrix("defaultBaseState", defaultBaseStateRL_);
     loadEigenMatrix("JointControlMode", JointControlModeRL_);
     loadEigenMatrix("JointPDMode", JointPDModeRL_);
@@ -2429,6 +2428,18 @@ namespace humanoid_controller
     {
       cmdData = gait_receiver_->getPolicyCommand();
     }
+
+    const Eigen::VectorXd& active_default = getActiveDefaultJointPos(cmdData);
+    Eigen::VectorXd active_default_arm(jointArmNum_);
+    if (is_roban_)
+    {
+      active_default_arm = active_default.segment(waistNum_ + jointNum_, jointArmNum_);
+    }
+    else
+    {
+      active_default_arm = active_default.segment(jointNum_ + waistNum_, jointArmNum_);
+    }
+    arm_controller_->setDefaultArmPos(active_default_arm);
 
     // 构建完整的关节位置和速度向量（腿 + 腰 + 手）
     // 注意：ArmController 期望的顺序是：腿 + 腰 + 手

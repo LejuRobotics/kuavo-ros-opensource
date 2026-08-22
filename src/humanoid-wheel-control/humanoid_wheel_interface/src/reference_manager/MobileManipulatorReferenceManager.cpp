@@ -1354,7 +1354,7 @@ namespace mobile_manipulator {
       // 确认是否需要重置
       if(isResetTorso_)
       {
-        resetAllMpcTrajAndTarget(initTime, initState_);
+        resetAllMpcTrajAndTarget(initTime, initState_, true);
         isResetTorso_ = false;
       }
       // 软暂停恢复的干净重启 —— storage + 全部 Ruckig 锚定到控制器传来的冻结姿态，
@@ -3160,6 +3160,10 @@ namespace mobile_manipulator {
       /*********************************************************************/
       res.success = true;
       res.message = std::to_string(actualTime);  // 直接转换
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+        resetTorsoOpenLoopStart4_ << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
+      }
       isResetTorso_ = true;
       return true;
     }
@@ -3627,7 +3631,7 @@ namespace mobile_manipulator {
     static bool isFirstRun = true;
     if(isFirstRun)
     {
-      resetAllMpcTrajAndTarget(initTime_, initState_);
+      resetAllMpcTrajAndTarget(initTime_, initState_, false);
 
       isFirstRun = false;
       // return;
@@ -4125,7 +4129,8 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::resetTorsoControlPoseWithRuckig(scalar_t initTime, const vector_t& initState)
+  void MobileManipulatorReferenceManager::resetTorsoControlPoseWithRuckig(scalar_t initTime, const vector_t& initState,
+                                                                         bool anchorOpenLoopStart)
   {
     setEnableLegJointTrack(false); // 关闭下肢关节跟踪
     isCmdLegJointUpdated_ = false;  // 关闭关节控制标志位
@@ -4134,9 +4139,23 @@ namespace mobile_manipulator {
     vector_t resetPose = vector_t::Zero(4);
     resetPose[0] = initialTorsoPos_[0];
     resetPose[1] = initialTorsoPos_[2];
-    resetTorsoPoseRuckig(initTime, initState, false);
+
+    vector_t start4 = vector_t::Zero(4);
+    if (anchorOpenLoopStart) {
+      // kuavodevlab#3973: anchor at open-loop pose snapshotted in setLbResetTorsoService
+      // (VR double-click publishes /cmd_lb_torso_pose right after service → would zero cmdTorsoPose_
+      // before modifyReferences runs if we read live here).
+      start4 = resetTorsoOpenLoopStart4_;
+    } else {
+      resetTorsoPoseRuckig(initTime, initState, false);
+      start4 = torsoPose_prevTargetPose_;
+    }
+    torsoPose_prevTargetPose_ = start4;
+    torsoPose_prevTargetVel_.setZero(4);
+    torsoPose_prevTargetAcc_.setZero(4);
 
     /*************************根据期望速度, 设置切换时间*******************************/
+    // Timing always from FK (unchanged vs pre-#3973); only Ruckig start uses open-loop when anchored.
     vector_t torsoPose = vector_t::Zero(6);
     getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState);
     Eigen::VectorXd err = Eigen::VectorXd::Zero(6);
@@ -4151,15 +4170,35 @@ namespace mobile_manipulator {
     ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso require time: " << resetTorsoTime_ << " s, err: " << err.transpose());
     /*****************************************************************************/
 
+    if (anchorOpenLoopStart) {
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+        cmdTorsoVel_.setZero();
+        isCmdTorsoVelUpdated_ = false;
+        isCmdTorsoVelTimeUpdate_ = false;
+        lastCmdTorsoVelTime_ = 0.0;
+        hasTorsoVelIntegrateTime_ = false;
+      }
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+        cmdTorsoDelta_.setZero();
+        isCmdTorsoDeltaUpdated_ = false;
+      }
+    }
+
     isResetTorsoRePlanning_ = true;
     calcRuckigTrajWithTorsoPose(initTime, resetPose, resetTorsoTime_);
 
-    cmdTorsoPose_.setZero();
-    cmdTorsoPose_[0] = initialTorsoPos_[0];
-    cmdTorsoPose_[1] = initialTorsoPos_[1];
-    cmdTorsoPose_[2] = initialTorsoPos_[2];
-    cmdTorsoPose_[3] = 0;
-    cmdTorsoPose_[4] = 0;
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+      cmdTorsoPose_.setZero();
+      cmdTorsoPose_[0] = initialTorsoPos_[0];
+      cmdTorsoPose_[1] = initialTorsoPos_[1];
+      cmdTorsoPose_[2] = initialTorsoPos_[2];
+      cmdTorsoPose_[3] = 0;
+      cmdTorsoPose_[4] = 0;
+      isCmdTorsoPoseUpdated_ = false;
+    }
 
     generateTorsoPoseTargetWithRuckig(initTime, initTime + resetTorsoTime_ + 0.5, ruckigDt_);
   }
@@ -4295,7 +4334,8 @@ namespace mobile_manipulator {
     }
   }
 
-  void MobileManipulatorReferenceManager::resetAllMpcTraj(scalar_t initTime, const vector_t& initState)
+  void MobileManipulatorReferenceManager::resetAllMpcTraj(scalar_t initTime, const vector_t& initState,
+                                                         bool anchorOpenLoopStart)
   {
     // 默认以 baseArm 关节控制切换
       setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
@@ -4303,7 +4343,7 @@ namespace mobile_manipulator {
       setEnableArmJointTrack(true); // 关闭手臂跟踪
       setEnableBaseTrack(true);   // 关闭底盘跟踪
 
-      resetTorsoControlPoseWithRuckig(initTime, initState); // 重置躯干位置
+      resetTorsoControlPoseWithRuckig(initTime, initState, anchorOpenLoopStart); // 重置躯干位置
 
       resetCmdPoseRuckig(initTime, initState, true);    // 重置底盘轨迹
       resetLegJointRuckig(initTime, initState, true);   // 重置下肢关节轨迹
@@ -4315,7 +4355,8 @@ namespace mobile_manipulator {
       }
   }
 
-  void MobileManipulatorReferenceManager::resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState)
+  void MobileManipulatorReferenceManager::resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState,
+                                                                  bool anchorOpenLoopStart)
   {
     // 3791: home（reset torso）路径同样强制下一条 EE 指令重锚定——归位窗口内手臂被
     // mode 1 关节轨迹挪走，而 EE ruckig 状态（cmdDualArm_prevTargetPose_）滞留在上次
@@ -4338,7 +4379,7 @@ namespace mobile_manipulator {
       arm_joint_traj_[i] = initState.tail(info_.armDim - 4).segment(i * singleArmJointDim_, singleArmJointDim_);
     }
       
-    resetAllMpcTraj(initTime, initState);
+    resetAllMpcTraj(initTime, initState, anchorOpenLoopStart);
   }
 
   void MobileManipulatorReferenceManager::updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState)
