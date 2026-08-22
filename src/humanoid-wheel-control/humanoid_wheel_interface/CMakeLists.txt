@@ -105,6 +105,7 @@ add_library(${PROJECT_NAME}
   src/cost/EndEffectorLocalBoxSoftCost.cpp
   src/cost/selfDistanceBoxSoftCost.cpp
   src/cost/EndEffectorJointBias.cpp
+  src/cost/ShoulderTightenCost.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)

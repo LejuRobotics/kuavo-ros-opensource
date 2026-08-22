@@ -76,11 +76,17 @@ class BaseStateInputCost final : public QuadraticStateInputCost {
             referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).tail(info_.armDim - 4).head(7);
       inputDeviation.tail(info_.armDim - 4).head(7) = input.tail(info_.armDim - 4).head(7) - 
             referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4).head(7);
+    }else{ // 保留能量代价
+      inputDeviation.tail(info_.armDim - 4).head(7) = input.tail(info_.armDim - 4).head(7) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4).head(7);
     }
     if(referenceManager_.getEnableArmJointTrackForArm(1)) // 使能右臂关节跟踪
     {
       stateDeviation.tail(info_.armDim - 4).tail(7) = state.tail(info_.armDim - 4).tail(7) - 
             referenceManager_.getStateInputTargetTrajectories().getDesiredState(time).tail(info_.armDim - 4).tail(7);
+      inputDeviation.tail(info_.armDim - 4).tail(7) = input.tail(info_.armDim - 4).tail(7) - 
+            referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4).tail(7);
+    }else{ // 保留速度能量代价
       inputDeviation.tail(info_.armDim - 4).tail(7) = input.tail(info_.armDim - 4).tail(7) - 
             referenceManager_.getStateInputTargetTrajectories().getDesiredInput(time).tail(info_.armDim - 4).tail(7);
     }

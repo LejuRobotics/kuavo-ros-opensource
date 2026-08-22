@@ -2,9 +2,11 @@
 
 #include <ros/ros.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/Float32MultiArray.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float32.h>
 #include <atomic>
+#include <algorithm>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
 #include <std_msgs/Int8MultiArray.h>
@@ -150,6 +152,25 @@ public:
   void setEnableTorsoPoseTargetTrajectories(bool flag) { enableTorsoPoseFlag_ = flag; }
   const bool getEnableBaseTrack() const { return enableBaseTrackFlag_; }
   void setEnableBaseTrack(bool flag) { enableBaseTrackFlag_ = flag; }
+  // 肩部关节的紧约束
+  const bool getEnableShoulderTight() const { return enableShoulderTightFlag_[0] || enableShoulderTightFlag_[1]; }
+  const bool getEnableShoulderTightForArm(int armIdx) const { return enableShoulderTightFlag_[armIdx]; }
+  void setEnableShoulderTight(bool flag,int armIdx) { enableShoulderTightFlag_[armIdx] = flag; }
+  void setEnableShoulderTighteningForArm(int armIdx, bool flag) { enableShoulderTightFlag_[armIdx] = flag; }
+  // 肩部收紧松弛系数 alpha (1=收紧/锁肩, 0=释放), 供 shoulderTightenCost 自适应权重使用
+  const scalar_t getShoulderTightAlpha(int armIdx) const { return shoulderTightAlpha_[armIdx]; }
+  void setShoulderTightAlpha(int armIdx, scalar_t alpha) { shoulderTightAlpha_[armIdx] = alpha; }
+  // α 低通滤波: alpha = smooth * alpha_prev + (1 - smooth) * alpha_raw, 防止权重抖动
+  void updateShoulderTightAlpha(int armIdx, scalar_t alphaRaw) {
+    const scalar_t raw = std::max(0.0, std::min(1.0, alphaRaw));
+    shoulderTightAlpha_[armIdx] =
+        shoulderTightAlphaSmooth_ * shoulderTightAlpha_[armIdx] + (1.0 - shoulderTightAlphaSmooth_) * raw;
+  }
+  const scalar_t getShoulderTightAlphaSmooth() const { return shoulderTightAlphaSmooth_; }
+  void setShoulderTightAlphaSmooth(scalar_t smooth) { shoulderTightAlphaSmooth_ = smooth; }
+
+  // 每周期计算肩部收紧 α: H_joint(肘腕限位余量) × H_task(末端位移) → σ 合成 → 低通滤波, 返回滤波后 α
+  scalar_t computeShoulderTightAlpha(int armIdx, scalar_t initTime, const vector_t& initState);
 
   // 末端跟踪优先级调整的相关函数
   const bool getIsFocusEeStatus() const { return isFocusEe_; }
@@ -410,6 +431,7 @@ private:
   ros::Publisher targetTorsoPoseReachTimePub_;
   bool torsoModeFlag_{true}; // true: 笛卡尔控制模式, false: 关节控制模式
   ros::ServiceServer getLbTorsoInitialPoseServiceServer_;
+  ros::Publisher shoulderTightAlphaPub_;   // 发布肩部收紧 α [左臂, 右臂] 便于 rqt 监控
 
   // 躯干速度 / 相对位移指令（开环最终目标只在 cmdTorsoPose_）
   // Twist 布局与 /cmd_lb_torso_pose 一致: linear.x/z, angular.z=yaw, angular.y=pitch
@@ -525,6 +547,18 @@ private:
   bool enableLegJointTrackFlag_{false};
   bool enableTorsoPoseFlag_{false};
   bool enableBaseTrackFlag_{true};
+  bool enableShoulderTightFlag_[2]{false, false};                 // 肩部关节的紧约束
+  ocs2::vector_t shoulderTightAlpha_{ocs2::vector_t::Constant(2, 1.0)};  // 肩部收紧松弛系数 [左臂, 右臂]
+  scalar_t shoulderTightAlphaSmooth_{0.9};                      // α 低通滤波系数 (doc 建议 0.9~0.95)
+  // 肩部收紧 α 调度参数 (对应 mpc_cost.md 自动松弛)
+  scalar_t shoulderHThOn_{0.20};                                 // H_joint 锁肩阈值 (滞回): 余量高于此才锁肩
+  scalar_t shoulderHThOff_{0.15};                                // H_joint 解锁阈值 (滞回): 余量低于此才解锁
+  scalar_t shoulderTThOn_{0.25};                                 // H_task 锁肩阈值 (滞回): 位移低于此才锁肩
+  scalar_t shoulderTThOff_{0.30};                                // H_task 解锁阈值 (滞回): 位移高于此才解锁
+  scalar_t shoulderK1_{30.0};                                   // H_joint sigmoid 斜率
+  scalar_t shoulderK2_{30.0};                                   // H_task sigmoid 斜率
+  scalar_t shoulderDMax_{0.1};                                  // 典型大幅末端位移 [m]
+  std::vector<std::vector<size_t>> shoulderRelaxStateIndices_;  // 每臂肘腕关节的状态下标 [左臂, 右臂]
 
   // 规划器周期
   double ruckigDt_{0.0};
@@ -544,6 +578,7 @@ private:
   double isofflineTrajUpdateStartTime_{0.0};
   bool offlineTrajDisable_{true};
   bool trajFrameUpdate_{false};
+  std::atomic<bool> mm_no_elbow_data_{false};
 
   // 多规划器时间同步相关
   ros::ServiceServer setLbTimedPosCmdServiceServer_;
