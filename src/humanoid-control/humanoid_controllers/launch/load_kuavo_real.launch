@@ -408,7 +408,7 @@
     <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
     <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
     <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
-    <arg name="pico_diagnostic_allow_legacy" default="false" doc="Allow old bare VRData packets"/>
+    <arg name="pico_diagnostic_allow_legacy" default="true" doc="Allow old bare VRData packets"/>
     <arg name="pico_diagnostic_log_enable" default="false" doc="Write PICO diagnostic JSONL logs"/>
     <!-- 末端执行器类型: none / qiangnao / qiangnao_touch / jodell / lejuclaw / revo2 -->
     <arg name="pico_end_effector_type" default="qiangnao" doc="End effector type for PICO GMR dexhand control"/>

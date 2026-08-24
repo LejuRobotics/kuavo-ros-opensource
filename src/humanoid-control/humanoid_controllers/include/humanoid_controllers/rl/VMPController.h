@@ -473,6 +473,9 @@ namespace humanoid_controller
     void retargetYawResumeReadyCallback(const std_msgs::Header::ConstPtr& msg);
 
     void recordRetargetedFrameStamp(const ros::Time& stamp);
+    void notifyOnlineFrameReceived();
+    void resetOnlineStaleFallbackState(bool clear_recv_time = true);
+    bool applyOnlineRetargetStaleFallback(std::vector<float>& processed_frame, bool callback_updated);
 
     bool extractRetargetedFrameYaw(const std::vector<float>& frame, double& yaw) const;
     void applyRetargetedHeadingAlignment(std::vector<float>& frame) const;
@@ -788,7 +791,11 @@ namespace humanoid_controller
     std::string online_vr_bin_file_;
     int online_buffer_size_{100};
     double online_update_rate_{100.0};
-    
+    bool online_retarget_stale_fallback_enable_{true};
+    double online_retarget_stale_timeout_ms_{150.0};
+    int online_stale_to_standing_interp_frames_{50};
+    bool online_retarget_stale_require_reentry_{true};
+
     OnlineReferenceBuffer online_ref_buffer_;
     std::mutex online_buffer_mutex_;
     
@@ -798,6 +805,13 @@ namespace humanoid_controller
     bool has_received_online_data_{false};
     uint64_t latest_frame_seq_{0};          // callback 写入序列号（每次 callback 递增）
     uint64_t last_consumed_frame_seq_{0};   // sampling loop 上次消费的序列号
+    mutable std::mutex online_stale_mutex_;
+    bool online_stale_standing_active_{false};
+    bool online_retarget_stale_latched_{false};
+    int online_stale_interp_progress_{0};
+    std::vector<float> online_stale_interp_start_frame_;
+    ros::Time latest_online_frame_recv_wall_time_;
+    bool latest_online_frame_recv_time_valid_{false};
     std::thread online_sampling_thread_;
     std::atomic<bool> online_sampling_running_{false};
     std::atomic<bool> online_sampling_has_written_{false};  // 采样线程已完成第一次写入，read指针可以推进
