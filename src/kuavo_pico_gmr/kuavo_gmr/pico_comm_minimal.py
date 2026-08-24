@@ -255,7 +255,7 @@ class MinimalPicoReceiver:
                  diagnostic_udp_reply: bool = True,
                  enable_time_sync: bool = True,
                  diagnostic_publish_hz: float = 1.0,
-                 diagnostic_allow_legacy: bool = False,
+                 diagnostic_allow_legacy: bool = True,
                  diagnostic_ping_enable: bool = True,
                  diagnostic_ping_lower_ip: str = "",
                  diagnostic_ping_interval_sec: float = 5.0,
@@ -1122,7 +1122,7 @@ def main():
     diagnostic_udp_reply = rospy.get_param('~diagnostic_udp_reply', True)
     enable_time_sync = rospy.get_param('~enable_time_sync', True)
     diagnostic_publish_hz = rospy.get_param('~diagnostic_publish_hz', 1.0)
-    diagnostic_allow_legacy = rospy.get_param('~diagnostic_allow_legacy', False)
+    diagnostic_allow_legacy = rospy.get_param('~diagnostic_allow_legacy', True)
     diagnostic_ping_enable = rospy.get_param('~diagnostic_ping_enable', True)
     diagnostic_ping_lower_ip = rospy.get_param('~diagnostic_ping_lower_ip', '')
     diagnostic_ping_interval_sec = rospy.get_param('~diagnostic_ping_interval_sec', 5.0)
