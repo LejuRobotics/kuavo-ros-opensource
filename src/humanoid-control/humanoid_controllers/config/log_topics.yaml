@@ -54,6 +54,7 @@ topics:
   - /ik_debug/.*
   - /vr_incremental/.*
   - /mm/two_arm_hand_pose_cmd
+  - /lb_shoulder_tight_alpha
   - /mm_kuavo_arm_traj
   - /hand_wrench.*
   - /dexhand/.*                # qiangnao/Linker O6手状态话题

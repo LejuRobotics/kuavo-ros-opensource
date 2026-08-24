@@ -55,7 +55,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace ocs2 {
 namespace mobile_manipulator {
-
 static const double baseHeightOffset = 0.0;
 
 // 与 200062 MuJoCo XML 的闭环夹爪平衡姿态保持一致。
@@ -151,6 +150,19 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
 
   stateOptimizedPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/mobile_manipulator/optimizedStateTrajectory", 1);
   stateOptimizedPosePublisher_ = nodeHandle.advertise<geometry_msgs::PoseArray>("/mobile_manipulator/optimizedPoseTrajectory", 1);
+
+  // 末端完整位姿轨迹发布器（PoseArray，仅用作 rosbag 记录）
+  // optimizedEePosePublishers_.resize(modelInfo_.eeFrames.size());
+  // for (size_t i = 0; i < modelInfo_.eeFrames.size(); ++i) {
+  //   optimizedEePosePublishers_[i] = nodeHandle.advertise<geometry_msgs::PoseArray>(
+  //       "/mobile_manipulator/optimized_ee_pose_trajectory/" + modelInfo_.eeFrames[i], 1);
+  // }
+
+  // // 末端预测轨迹最终点 TF frame 名称（保持与 URDF eeFrames 名一一对应，保证唯一）
+  // eePredictedFrameNames_.resize(modelInfo_.eeFrames.size());
+  // for (size_t i = 0; i < modelInfo_.eeFrames.size(); ++i) {
+  //   eePredictedFrameNames_[i] = "ee_predicted_" + modelInfo_.eeFrames[i];
+  // }
   // Get ROS parameter
   std::string urdfFile, taskFile;
   nodeHandle.getParam("/urdfFile", urdfFile);
@@ -357,19 +369,32 @@ void MobileManipulatorDummyVisualization::publishOptimizedTrajectory(const ros::
   auto& data = pinocchioInterface_.getData();
 
   std::vector<std::vector<geometry_msgs::Point>> endEffectorTrajectories(modelInfo_.eeFrames.size());
+  // 每个末端完整位姿（用于 PoseArray 发布）
+  // std::vector<std::vector<geometry_msgs::Pose>> endEffectorPoses;
   // 预留内层向量的容量
   for (auto& trajectory : endEffectorTrajectories) {
       trajectory.reserve(mpcStateTrajectory.size());
   }
+  // endEffectorPoses.resize(modelInfo_.eeFrames.size());
+  // for (auto& poseTraj : endEffectorPoses) {
+  //     poseTraj.reserve(mpcStateTrajectory.size());
+  // }
   std::for_each(mpcStateTrajectory.begin(), mpcStateTrajectory.end(), [&](const Eigen::VectorXd& state) {
     pinocchio::forwardKinematics(model, data, state);
     pinocchio::updateFramePlacements(model, data);
     // 处理多个末端执行器
     for (int eeIdx = 0; eeIdx < modelInfo_.eeFrames.size(); ++eeIdx) {
       const auto eeIndex = model.getBodyId(modelInfo_.eeFrames[eeIdx]);
-      vector_t eePosition = data.oMf[eeIndex].translation();
+      const pinocchio::SE3& eePose = data.oMf[eeIndex];
+      vector_t eePosition = eePose.translation();
       eePosition[2] += baseHeightOffset;
       endEffectorTrajectories[eeIdx].push_back(ros_msg_helpers::getPointMsg(eePosition));
+
+      // 完整位姿（位置 + 姿态）用于 PoseArray 发布
+      // geometry_msgs::Pose eeMsgPose;
+      // eeMsgPose.position = ros_msg_helpers::getPointMsg(eePosition);
+      // eeMsgPose.orientation = ros_msg_helpers::getOrientationMsg(Eigen::Quaterniond(eePose.rotation()));
+      // endEffectorPoses[eeIdx].push_back(std::move(eeMsgPose));
     }
   });
 
@@ -409,6 +434,26 @@ void MobileManipulatorDummyVisualization::publishOptimizedTrajectory(const ros::
 
   stateOptimizedPublisher_.publish(markerArray);
   stateOptimizedPosePublisher_.publish(poseArray);
+  // for (int eeIdx = 0; eeIdx < modelInfo_.eeFrames.size(); ++eeIdx) {
+  //   geometry_msgs::PoseArray eePoseArray;
+  //   eePoseArray.header = ros_msg_helpers::getHeaderMsg("odom", timeStamp);
+  //   eePoseArray.poses = std::move(endEffectorPoses[eeIdx]);
+  //   optimizedEePosePublishers_[eeIdx].publish(eePoseArray);
+
+  //   // 发布预测轨迹最终点的 TF，用于 rviz 显示末端位姿
+  //   if (!eePoseArray.poses.empty()) {
+  //     const auto& lastPose = eePoseArray.poses.back();
+  //     geometry_msgs::TransformStamped eePredictedTf;
+  //     eePredictedTf.header.stamp = timeStamp;
+  //     eePredictedTf.header.frame_id = "odom";
+  //     eePredictedTf.child_frame_id = eePredictedFrameNames_[eeIdx];
+  //     eePredictedTf.transform.translation.x = lastPose.position.x;
+  //     eePredictedTf.transform.translation.y = lastPose.position.y;
+  //     eePredictedTf.transform.translation.z = lastPose.position.z;
+  //     eePredictedTf.transform.rotation = lastPose.orientation;
+  //     tfBroadcaster_.sendTransform(eePredictedTf);
+  //   }
+  // }
 }
 
 /******************************************************************************************************/

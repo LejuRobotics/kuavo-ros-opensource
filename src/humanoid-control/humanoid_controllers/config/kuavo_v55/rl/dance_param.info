@@ -11,7 +11,7 @@ clipObservations        5000.0  ; 观测裁剪限制
 clipActions             5000.0  ; 动作裁剪限制
 
 ; Dance控制器特定参数
-trajectoryCSVFile       kuavos55_dance_120fps_modified_0613_basier11_deploy.csv    ; 轨迹CSV文件（相对路径）
+trajectoryCSVFile       kuavos55_dance_120fps_0615_basier13_deploy.csv    ; 轨迹CSV文件（相对路径）
 trajectoryTimeStep      0.02    ; 轨迹时间步长（秒），默认50Hz
 holdFrameIndex          -2      ; 轨迹完成后保持的帧索引（-1表示最后一帧，>=0表示指定帧）
 networkModelFile        /s55_dance_push/2026-07-06_10-46-51_dev16_100000.onnx      ; 神经网络模型文件路径

@@ -169,6 +169,11 @@ G12_DIAL_THRESHOLD = 50
 # 统一在发布层去重,实测可把 /joy 从 ~850Hz 降到 50Hz。
 JOY_PUB_PERIOD = 0.02
 
+# A/B/C/D 按键边沿脉冲保持时长:与 G+H 复位(M2)同一策略,边沿触发后至少保持 200ms(约 10 帧@50Hz),
+# 避免单帧脉冲被 /joy 50Hz 限频(_publish_joy)丢弃,导致 C++ 侧(MobileManipulatorJoyCommandNode)
+# 的 a_just/b_just/c_just 边沿检测收不到 1 跳变而需多次按键才能切换控制模式。
+G12_BUTTON_PULSE = 0.2
+
 # G12轮臂模式JoyButton常量
 G12_BUTTON_A = 0
 G12_BUTTON_B = 1
@@ -206,6 +211,10 @@ class H12ToJoyControllerNode:
         self.gh_press_start_time = None
         self.gh_triggered = False
         self.gh_reset_pulse_until = 0.0
+        # A/B/C/D 按键脉冲保持截止时间(btn_idx -> time.time() 时间戳)
+        # 边沿检测只在一帧返回 True,若该帧被 /joy 50Hz 限频丢弃,下游边沿检测会漏触发;
+        # 此处把边沿展宽为持续脉冲,保证至少若干个 /joy 帧携带 button=1。
+        self._button_pulse_until = {}
 
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
@@ -339,14 +348,20 @@ class H12ToJoyControllerNode:
                 self.cd_press_start_time = time.time()
                 rospy.loginfo("[G12] C+D emergency stop: holding, waiting 1.0s...")
             elif time.time() - self.cd_press_start_time >= 1.0 and not self.cd_emergency_triggered:
-                self.joy_msg.buttons[G12_BUTTON_BACK] = 1
+                # BACK 急停脉冲展宽:与 A/B/C/D/M2 同策略,边沿触发后保持 200ms,
+                # 避免单帧脉冲被 /joy 50Hz 限频丢弃导致 C++ 侧 back_just 漏触发。
                 self.cd_emergency_triggered = True
+                self._button_pulse_until[G12_BUTTON_BACK] = time.time() + G12_BUTTON_PULSE
                 rospy.logwarn("[G12] C+D emergency stop TRIGGERED!")
         else:
             if self.cd_emergency_triggered:
                 rospy.loginfo("[G12] C+D emergency stop released")
             self.cd_press_start_time = None
             self.cd_emergency_triggered = False
+
+        # BACK 急停脉冲保持:急停触发后持续置位 200ms,确保 C++ 侧 back_just 边沿检测可靠收到
+        if time.time() < self._button_pulse_until.get(G12_BUTTON_BACK, 0.0):
+            self.joy_msg.buttons[G12_BUTTON_BACK] = 1
 
         # Button mapping (A/B/C/D) - always active
         wheel_button_map = {
@@ -358,7 +373,15 @@ class H12ToJoyControllerNode:
         for ch_idx, btn_idx in wheel_button_map.items():
             mapping = self.channel_mapping.get(ch_idx + 1)
             if mapping and mapping.is_button:
-                self.joy_msg.buttons[btn_idx] = mapping.get_current_state(channels[ch_idx])
+                # get_current_state 仅在通道值由"未按下→按下"跳变的那一帧返回 True(边沿)。
+                # 该单帧脉冲在 /joy 50Hz 限频下大概率被 _publish_joy 丢弃,导致下游
+                # MobileManipulatorJoyCommandNode 的边沿检测漏触发(G12 模式切换偶发需多次按键)。
+                # 边沿触发后把 button 展宽为持续 200ms 脉冲,与 G+H 复位(M2)同一策略。
+                edge = mapping.get_current_state(channels[ch_idx])
+                if edge:
+                    self._button_pulse_until[btn_idx] = time.time() + G12_BUTTON_PULSE
+                if time.time() < self._button_pulse_until.get(btn_idx, 0.0):
+                    self.joy_msg.buttons[btn_idx] = 1
 
         # G/H dial buttons - always active
         if g_at_extreme:

@@ -543,6 +543,18 @@ namespace mobile_manipulator {
     loadData::loadEigenMatrix(taskFile_, prefix + "armJoint_move.max_acc", armJoint_move_acc_);
     loadData::loadEigenMatrix(taskFile_, prefix + "armJoint_move.max_jerk", armJoint_move_jerk_);
 
+    // 肩部收紧: 初始 α (relaxation_coeff) 与低通滤波系数 (relaxation_alpha)
+    {
+      boost::property_tree::ptree ptSh;
+      boost::property_tree::read_info(taskFile_, ptSh);
+      loadData::loadPtreeValue(ptSh, shoulderTightAlphaSmooth_, "shoulder_adapt_tighten.relaxation_alpha", true);
+    }
+    std::vector<double> initAlpha;
+    loadData::loadStdVector<double>(taskFile_, "shoulder_adapt_tighten.relaxation_coeff", initAlpha, true);
+    if (initAlpha.size() == 2) {
+      shoulderTightAlpha_ = Eigen::Map<const vector_t>(initAlpha.data(), initAlpha.size());
+    }
+
     // 打印加载的参数
     std::cout << "[MobileManipulatorReferenceManager] Loaded Parameters from Task File:" << std::endl;
     std::cout << "  wheel_move_spd_: " << wheel_move_spd_.transpose() << std::endl;
@@ -564,6 +576,49 @@ namespace mobile_manipulator {
     std::cout << "  armJoint_move_spd_: " << armJoint_move_spd_ << std::endl;
     std::cout << "  armJoint_move_acc_: " << armJoint_move_acc_ << std::endl;
     std::cout << "  armJoint_move_jerk_: " << armJoint_move_jerk_ << std::endl;
+
+    // 肩部收紧 α 调度参数 (对应 mpc_cost.md 自动松弛)
+    {
+      boost::property_tree::ptree ptSh;
+      boost::property_tree::read_info(taskFile_, ptSh);
+      const std::string shPrefix = "shoulder_adapt_tighten.";
+
+      loadData::loadPtreeValue(ptSh, shoulderHThOn_, shPrefix + "H_th_on", true);
+      loadData::loadPtreeValue(ptSh, shoulderHThOff_, shPrefix + "H_th_off", true);
+      loadData::loadPtreeValue(ptSh, shoulderTThOn_, shPrefix + "T_th_on", true);
+      loadData::loadPtreeValue(ptSh, shoulderTThOff_, shPrefix + "T_th_off", true);
+      loadData::loadPtreeValue(ptSh, shoulderK1_, shPrefix + "k1", true);
+      loadData::loadPtreeValue(ptSh, shoulderK2_, shPrefix + "k2", true);
+      loadData::loadPtreeValue(ptSh, shoulderDMax_, shPrefix + "D_max", true);
+
+      // 肘腕关节名 -> 状态下标 (用于 H_joint), 按臂分组
+      std::vector<std::string> relaxJointNames;
+      loadData::loadStdVector<std::string>(taskFile_, shPrefix + "relax_jointNames", relaxJointNames, true);
+
+      const auto& model = pinocchioInterface_.getModel();
+      const auto& jointNames = model.names;
+      // 注意: 必须用 mpcArmsDof(=14), 不能用 info_.armDim(=18, 含躯干/腿), 否则状态索引整体偏移 4
+      int mpcArmsDof = 0;
+      loadData::loadPtreeValue(ptSh, mpcArmsDof, "model_settings.mpcArmsDof", true);
+      const int armStartIndex = info_.stateDim - mpcArmsDof;
+      int armIndexInPin = 0;
+      for (; armIndexInPin < jointNames.size(); armIndexInPin++) {
+        if (jointNames[armIndexInPin] == "zarm_l1_joint") break;
+      }
+      shoulderRelaxStateIndices_.assign(2, std::vector<size_t>());
+      for (const auto& name : relaxJointNames) {
+        for (int j = armIndexInPin; j < jointNames.size(); j++) {
+          if (jointNames[j] == name) {
+            const size_t stateIdx = static_cast<size_t>(armStartIndex + j - armIndexInPin);
+            shoulderRelaxStateIndices_[name.rfind("zarm_l", 0) == 0 ? 0 : 1].push_back(stateIdx);
+            break;
+          }
+        }
+      }
+    }
+
+    std::cout << "  shoulderTightAlphaSmooth_: " << shoulderTightAlphaSmooth_ << std::endl;
+    std::cout << "  shoulderTightAlpha_: " << shoulderTightAlpha_.transpose() << std::endl;
 
     /**************************ruckig 时间周期获取************************************/
     double desiredFreq = 0.0;
@@ -806,6 +861,7 @@ namespace mobile_manipulator {
     
     targetTorsoPoseReachTimePub_ = nodeHandle_.advertise<std_msgs::Float32>("/lb_torso_pose_reach_time", 10, false);
     torsoOpenLoopStatePub_ = nodeHandle_.advertise<geometry_msgs::Twist>("/torso_open_loop_state", 10, false);
+    shoulderTightAlphaPub_ = nodeHandle_.advertise<std_msgs::Float32MultiArray>("/lb_shoulder_tight_alpha", 10, false);
     
     auto targetPoseCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
@@ -848,6 +904,22 @@ namespace mobile_manipulator {
     {
       // disable 期间丢弃所有运动指令
       if (!isEnableControl()) return;
+
+      // 检测是否提供肘部数据: 左右臂 elbow_pos_xyz 全为 0 时视为未提供
+      bool elbowDataAllZero = true;
+      for (size_t i = 0; i < 3; ++i)
+      {
+        if (std::abs(msg->hand_poses.left_pose.elbow_pos_xyz[i]) > 1e-6 ||
+            std::abs(msg->hand_poses.right_pose.elbow_pos_xyz[i]) > 1e-6)
+        {
+          elbowDataAllZero = false;
+          break;
+        }
+      }
+      if (elbowDataAllZero)
+      {
+        mm_no_elbow_data_.store(true);
+      }
 
       for(int armIdx = 0; armIdx < info_.eeFrames.size(); armIdx++)
       {
@@ -944,7 +1016,7 @@ namespace mobile_manipulator {
     };
     armEndEffectorSubscriber_ =
         nodeHandle_.subscribe<kuavo_msgs::twoArmHandPoseCmd>("/mm/two_arm_hand_pose_cmd", 1, armEndEffectorCallback);
-    
+
     armEndEffectorReachTimePub_[0] = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_ee_reach_time/left", 10, false);
     armEndEffectorReachTimePub_[1] = nodeHandle_.advertise<std_msgs::Float32>("/lb_arm_ee_reach_time/right", 10, false);
     
@@ -3164,6 +3236,7 @@ namespace mobile_manipulator {
         std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
         resetTorsoOpenLoopStart4_ << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
       }
+      resetTorsoMpcStart4_ = torsoPose_prevTargetPose_;
       isResetTorso_ = true;
       return true;
     }
@@ -3647,6 +3720,16 @@ namespace mobile_manipulator {
       setArmControl(0, initTime, finalTime, initState);
       setArmControl(1, initTime, finalTime, initState);
       setTorsoControl(initTime, finalTime, initState);
+
+      // 每周期更新肩部收紧 α (在 setArmControl 之后, 确保 enable 标志与 EE 目标已更新)
+      computeShoulderTightAlpha(0, initTime, initState);
+      computeShoulderTightAlpha(1, initTime, initState);
+
+      // 发布左右臂 α 供 rqt 监控: data[0]=左臂, data[1]=右臂
+      std_msgs::Float32MultiArray alphaMsg;
+      alphaMsg.data.push_back(static_cast<float>(getShoulderTightAlpha(0)));
+      alphaMsg.data.push_back(static_cast<float>(getShoulderTightAlpha(1)));
+      shoulderTightAlphaPub_.publish(alphaMsg);
     }
     else
     {
@@ -3968,6 +4051,92 @@ namespace mobile_manipulator {
     }
   }
 
+  // 每周期计算肩部收紧 α: H_joint(肘腕限位余量) × H_task(末端位移) → σ 合成 → 低通滤波
+  scalar_t MobileManipulatorReferenceManager::computeShoulderTightAlpha(int armIdx, scalar_t initTime, const vector_t& initState)
+  {
+    // 未启用肩部收紧时不更新 α
+    if (!getEnableShoulderTightForArm(armIdx)) {
+      return getShoulderTightAlpha(armIdx);
+    }
+
+    // H_joint: 该臂肘腕关节的最小归一化限位余量, ∈[0,1], 1=居中, 0=到达限位
+    const auto& model = pinocchioInterface_.getModel();
+    scalar_t hJoint = 1.0;
+    for (const size_t idx : shoulderRelaxStateIndices_[armIdx]) {
+      const scalar_t q = initState(idx);
+      const scalar_t qmin = model.lowerPositionLimit(idx);
+      const scalar_t qmax = model.upperPositionLimit(idx);
+      const scalar_t range = qmax - qmin;
+      if (range <= 0.0) continue;
+      const scalar_t margin = std::min(q - qmin, qmax - q) / range;
+      hJoint = std::min(hJoint, std::max(0.0, std::min(1.0, margin)));
+    }
+
+    // H_task: 末端期望位移幅度, ∈[0,1]; 统一在局部(基座)坐标系比较
+    scalar_t hTask = 0.0;
+    if (shoulderDMax_ > 0.0) {
+      const vector_t eeDesired = eeTargetTrajectories_[armIdx].getDesiredState(initTime);
+
+      // 期望末端位置转到基座系: WorldFrame 目标在世界系, 用基座位姿反变换; LocalFrame 目标已是基座系
+      Eigen::Vector3d desiredPos = eeDesired.head(3);
+      if (desireMode_[armIdx] == LbArmControlMode::WorldFrame) {
+        const auto& model = pinocchioInterface_.getModel();
+        auto& data = pinocchioInterface_.getData();
+        pinocchio::forwardKinematics(model, data, initState.head(model.nq));
+        pinocchio::updateFramePlacements(model, data);
+        const pinocchio::SE3 world_to_base = data.oMf[model.getFrameId(info_.baseFrame)].inverse();
+        desiredPos = world_to_base.rotation() * eeDesired.head(3) + world_to_base.translation();
+      }
+
+      // 当前末端位置 (基座系)
+      vector_t eeCurrent(info_.eeFrames.size() * 6);
+      getCurrentEeBasePoseContinuous(eeCurrent, initState);
+      const Eigen::Vector3d currentPos = eeCurrent.segment(armIdx * 6, 3);
+
+      const scalar_t displacement = (desiredPos - currentPos).norm();
+      hTask = std::max(0.0, std::min(1.0, displacement / shoulderDMax_));
+    }
+
+    // 添加滞回环，防止在阈值附近来回抖动
+    const scalar_t alphaPrev = getShoulderTightAlpha(armIdx);
+    const scalar_t hTh = (alphaPrev > 0.5) ? shoulderHThOff_ : shoulderHThOn_;
+    const scalar_t tTh = (alphaPrev > 0.5) ? shoulderTThOff_ : shoulderTThOn_;
+
+    // α_raw = σ(k1·(H_joint−hTh)) · σ(k2·(H_task−tTh)), 满足"健康且小幅"时 → α→1 锁肩
+    const scalar_t sigma1 = 1.0 / (1.0 + std::exp(-shoulderK1_ * (hJoint - hTh)));
+    const scalar_t sigma2 = 1.0 / (1.0 + std::exp(shoulderK2_ * (hTask - tTh)));
+    const scalar_t alphaRaw = sigma1 * sigma2;
+
+    updateShoulderTightAlpha(armIdx, alphaRaw);
+
+    // 调试: 打印 α 调度中间量 (限流, 便于定位 α 偏低原因), 用完可删
+    // static int shoulderDebugCnt = 0;
+    // if ((++shoulderDebugCnt) % 50 == 1) {
+    //   std::cerr << "[shoulderTight] arm=" << armIdx
+    //             << " mode=" << static_cast<int>(desireMode_[armIdx])
+    //             << " enable=" << getEnableShoulderTightForArm(armIdx)
+    //             << " H_joint=" << hJoint
+    //             << " H_task=" << hTask
+    //             << " hTh=" << hTh
+    //             << " tTh=" << tTh
+    //             << " sigma1=" << sigma1
+    //             << " sigma2=" << sigma2
+    //             << " alphaRaw=" << alphaRaw
+    //             << " alpha=" << getShoulderTightAlpha(armIdx);
+    //   for (const size_t idx : shoulderRelaxStateIndices_[armIdx]) {
+    //     const scalar_t qq = initState(idx);
+    //     const scalar_t qmin = model.lowerPositionLimit(idx);
+    //     const scalar_t qmax = model.upperPositionLimit(idx);
+    //     const scalar_t rr = qmax - qmin;
+    //     const scalar_t mm = (rr > 0.0) ? std::min(qq - qmin, qmax - qq) / rr : -1.0;
+    //     std::cerr << " | idx=" << idx << " q=" << qq << " min=" << qmin << " max=" << qmax << " m=" << mm;
+    //   }
+    //   std::cerr << std::endl;
+    // }
+
+    return getShoulderTightAlpha(armIdx);
+  }
+
   void MobileManipulatorReferenceManager::setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState)
   {
     // 手臂控制模式接受三种收发逻辑（desireMode_用于选择）: 
@@ -4048,8 +4217,11 @@ namespace mobile_manipulator {
           setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
           setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
           setEnableEeTargetTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔
-
-          generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
+          if (mm_no_elbow_data_.load()) {
+            setEnableShoulderTighteningForArm(armIdx, true); // 开启肩部收紧
+          }
+          generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime,
+                                              ruckigDt_);
         }
       }
       else if(desireMode_[armIdx] == LbArmControlMode::LocalFrame)  // 局部系的笛卡尔末端控制
@@ -4059,7 +4231,9 @@ namespace mobile_manipulator {
           setEnableArmJointTrackForArm(armIdx, false); // 关闭手臂跟踪
           setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
           setEnableEeTargetLocalTrajectoriesForArm(armIdx, true); // 开启末端笛卡尔局部跟踪
-      
+          if (mm_no_elbow_data_.load()) {
+            setEnableShoulderTighteningForArm(armIdx, true); // 开启肩部收紧
+          }
           generateDualArmEeTargetWithRuckig(armIdx, initTime, finalTime, ruckigDt_);
         }
       }
@@ -4146,6 +4320,20 @@ namespace mobile_manipulator {
       // (VR double-click publishes /cmd_lb_torso_pose right after service → would zero cmdTorsoPose_
       // before modifyReferences runs if we read live here).
       start4 = resetTorsoOpenLoopStart4_;
+      // kuavodevlab#3991: timed offline cmd may leave cmdTorsoPose_ at command target while MPC
+      // already tracks a different pose; use MPC snapshot when they diverge.
+      constexpr scalar_t kPosTol = 0.05;
+      constexpr scalar_t kAngTol = 0.05;
+      const scalar_t dx = std::abs(start4[0] - resetTorsoMpcStart4_[0]);
+      const scalar_t dz = std::abs(start4[1] - resetTorsoMpcStart4_[1]);
+      const scalar_t dyaw = std::abs(start4[2] - resetTorsoMpcStart4_[2]);
+      const scalar_t dpitch = std::abs(start4[3] - resetTorsoMpcStart4_[3]);
+      if (dx > kPosTol || dz > kPosTol || dyaw > kAngTol || dpitch > kAngTol) {
+        ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso: open-loop/MPC diverged (openLoop="
+                        << start4.transpose() << ", mpc=" << resetTorsoMpcStart4_.transpose()
+                        << "), using MPC start");
+        start4 = resetTorsoMpcStart4_;
+      }
     } else {
       resetTorsoPoseRuckig(initTime, initState, false);
       start4 = torsoPose_prevTargetPose_;

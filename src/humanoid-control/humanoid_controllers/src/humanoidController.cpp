@@ -4465,13 +4465,25 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 #if ENABLE_RL_TO_RL_INTERPOLATION
       if (is_rl_to_rl_switch)  //waao：如果切换rl策略
       {
+        const bool is_dance_to_amp_switch =
+            current_controller_ptr_ != nullptr &&
+            last_rl_controller != nullptr &&
+            last_rl_controller->getType() == RLControllerType::DANCE_CONTROLLER &&
+            current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
         const bool is_vmp_to_amp_switch =
             current_controller_ptr_ != nullptr &&
             last_rl_controller != nullptr &&
             last_rl_controller->getType() == RLControllerType::VMP_CONTROLLER &&
             current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
 #if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
-        if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+        if (is_dance_to_amp_switch)
+        {
+          // 与 s55_dance_beta 一致：Dance 保持暂停，冷启动后的 AMP 在当前周期直接接管。
+          // 不恢复 Dance、不运行 Dance inference，也不进入 RL->RL 插值状态机。
+          ROS_WARN("[Dance->AMP] beta-compatible hard switch: AMP takes control immediately");
+          stopRLToRLInterpolation();
+        }
+        else if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
         {
           if (is_vmp_to_amp_switch)
           {
@@ -4491,7 +4503,12 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           stopRLToRLInterpolation();
         }
 #else
-        if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr &&
+        if (is_dance_to_amp_switch)
+        {
+          ROS_WARN("[Dance->AMP] beta-compatible hard switch: AMP takes control immediately");
+          stopRLToRLInterpolation();
+        }
+        else if (has_last_rl_joint_reference_ && has_last_rl_joint_cmd_ && current_controller_ptr_ != nullptr &&
             last_rl_controller != nullptr)
         {
           if (is_vmp_to_amp_switch)
@@ -4530,15 +4547,25 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         applyRLToRLSwitchVelocityProfile(currentObservation_.time);
         if (rl_to_rl_live_source_controller_ptr_ != nullptr)
         {
-          kuavo_msgs::jointCmd source_joint_cmd;
-          if (buildRLControllerJointCmd(rl_to_rl_live_source_controller_ptr_, time, source_joint_cmd))
+          if (rl_to_rl_frozen_dance_source_active_)
           {
-            applyRLToRLLiveInterpolation(currentObservation_.time, source_joint_cmd, jointCmdMsg);
+            // Dance 必须保持暂停：只复用切换前锁存的末帧，不调用 update()/inference。
+            applyRLToRLLiveInterpolation(currentObservation_.time,
+                                          rl_to_rl_frozen_dance_source_joint_cmd_,
+                                          jointCmdMsg);
           }
           else
           {
-            ROS_WARN("[Switch/RL->RL] stop: source joint_cmd unavailable");
-            stopRLToRLInterpolation();
+            kuavo_msgs::jointCmd source_joint_cmd;
+            if (buildRLControllerJointCmd(rl_to_rl_live_source_controller_ptr_, time, source_joint_cmd))
+            {
+              applyRLToRLLiveInterpolation(currentObservation_.time, source_joint_cmd, jointCmdMsg);
+            }
+            else
+            {
+              ROS_WARN("[RL->RL] Live interpolation stopped because source controller joint_cmd is unavailable.");
+              stopRLToRLInterpolation();
+            }
           }
         }
         else
@@ -6584,8 +6611,45 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       {
         arm_controller->cancelDefaultPoseReturnForSwitch();
       }
-      rl_to_rl_live_source_controller_ptr_->pause();
+      if (!rl_to_rl_frozen_dance_source_active_)
+      {
+        rl_to_rl_live_source_controller_ptr_->pause();
+      }
       rl_to_rl_live_source_controller_ptr_ = nullptr;
+      rl_to_rl_frozen_dance_source_active_ = false;
+      rl_to_rl_frozen_dance_source_joint_cmd_ = kuavo_msgs::jointCmd();
+    }
+
+    const bool freeze_dance_source =
+        source_controller->getType() == RLControllerType::DANCE_CONTROLLER;
+    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
+    if (freeze_dance_source)
+    {
+      // 切换管理器通常已经暂停 Dance；这里再次保证它保持暂停，pause() 不重置舞蹈时间步。
+      source_controller->pause();
+      const bool cached_cmd_complete =
+          has_last_rl_joint_cmd_ &&
+          last_rl_joint_cmd_.joint_q.size() >= body_joint_count &&
+          last_rl_joint_cmd_.joint_v.size() >= body_joint_count &&
+          last_rl_joint_cmd_.tau.size() >= body_joint_count &&
+          last_rl_joint_cmd_.tau_ratio.size() >= body_joint_count &&
+          last_rl_joint_cmd_.tau_max.size() >= body_joint_count &&
+          last_rl_joint_cmd_.joint_kp.size() >= body_joint_count &&
+          last_rl_joint_cmd_.joint_kd.size() >= body_joint_count &&
+          last_rl_joint_cmd_.control_modes.size() >= body_joint_count;
+      if (!cached_cmd_complete)
+      {
+        ROS_ERROR("[RL->RL] Refusing to resume Dance source: cached terminal joint_cmd is incomplete.");
+        stopRLToRLInterpolation();
+        return;
+      }
+      rl_to_rl_frozen_dance_source_joint_cmd_ = last_rl_joint_cmd_;
+      rl_to_rl_frozen_dance_source_active_ = true;
+    }
+    else
+    {
+      rl_to_rl_frozen_dance_source_active_ = false;
+      rl_to_rl_frozen_dance_source_joint_cmd_ = kuavo_msgs::jointCmd();
     }
 
     rl_to_rl_live_source_controller_ptr_ = source_controller;
@@ -6595,7 +6659,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     is_rl_to_rl_interpolation_active_ = true;
     rl_to_rl_target_warmup_active_ = enable_target_warmup;
     rl_to_rl_warmup_blend_armed_ = false;
-    if (enable_target_warmup)
+    if (rl_to_rl_target_warmup_active_)
     {
       rl_to_rl_target_warmup_end_time_ =
           current_time + rl_to_rl_vmp_amp_target_warmup_duration_;
@@ -6604,14 +6668,16 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     {
       rl_to_rl_target_warmup_end_time_ = 0.0;
     }
+    if (!freeze_dance_source)
+    {
 #if RL_TO_RL_USE_WARM_RESUME
-    rl_to_rl_live_source_controller_ptr_->resumeWarm();
+      rl_to_rl_live_source_controller_ptr_->resumeWarm();
 #else
-    rl_to_rl_live_source_controller_ptr_->resume();
+      rl_to_rl_live_source_controller_ptr_->resume();
 #endif
+    }
 
     size_t mode_change_count = 0;
-    const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
     const size_t valid_joint_count = std::min({body_joint_count,
                                                last_rl_joint_cmd_.control_modes.size(),
                                                target_joint_cmd.control_modes.size()});
@@ -6623,14 +6689,16 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       }
     }
 
-    ROS_INFO("[RL->RL] Start quintic live joint_cmd interpolation: %s -> %s, duration=%.3fs, mode_changes=%zu%s",
+    ROS_INFO("[RL->RL] Start quintic %s joint_cmd interpolation: %s -> %s, duration=%.3fs, mode_changes=%zu%s",
+             freeze_dance_source ? "frozen-Dance-source" : "live",
              source_controller_name.c_str(),
              target_controller_name.c_str(),
              rl_to_rl_switch_duration_,
              mode_change_count,
-             enable_target_warmup ? " (target warmup)" : "");
+             rl_to_rl_target_warmup_active_ ? " (target warmup)" : "");
     publishRLToRLSwitchDebugState(0.0,
-                                  enable_target_warmup ? "started_live_warmup" : "started_live",
+                                  freeze_dance_source ? "started_frozen_dance" :
+                                  (enable_target_warmup ? "started_live_warmup" : "started_live"),
                                   current_time);
   }
 
@@ -6694,7 +6762,10 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     const double elapsed = std::max(0.0, current_time - rl_to_rl_switch_start_time_);
     const double alpha = std::clamp(elapsed / duration, 0.0, 1.0);
     const double blend = quinticBlend(alpha);
-    publishRLToRLSwitchDebugState(alpha, "in_progress_live", current_time);
+    publishRLToRLSwitchDebugState(alpha,
+                                  rl_to_rl_frozen_dance_source_active_ ?
+                                      "in_progress_frozen_dance" : "in_progress_live",
+                                  current_time);
 
     const size_t valid_joint_count = std::min({body_joint_count,
                                                source_joint_cmd.joint_q.size(),
@@ -6766,13 +6837,22 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
         {
           arm_controller->cancelDefaultPoseReturnForSwitch();
         }
-        rl_to_rl_live_source_controller_ptr_->pause();
+        if (!rl_to_rl_frozen_dance_source_active_)
+        {
+          rl_to_rl_live_source_controller_ptr_->pause();
+        }
         rl_to_rl_live_source_controller_ptr_ = nullptr;
       }
-      ROS_INFO("[Switch/RL->RL] live done %s -> %s",
+      const bool finished_frozen_dance = rl_to_rl_frozen_dance_source_active_;
+      rl_to_rl_frozen_dance_source_active_ = false;
+      rl_to_rl_frozen_dance_source_joint_cmd_ = kuavo_msgs::jointCmd();
+      ROS_INFO("[Switch/RL->RL] %s done %s -> %s",
+               finished_frozen_dance ? "frozen Dance source" : "live",
                rl_to_rl_source_controller_name_.c_str(),
                rl_to_rl_target_controller_name_.c_str());
-      publishRLToRLSwitchDebugState(1.0, "finished_live", current_time);
+      publishRLToRLSwitchDebugState(1.0,
+                                    finished_frozen_dance ? "finished_frozen_dance" : "finished_live",
+                                    current_time);
     }
   }
 
@@ -6801,9 +6881,14 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       {
         arm_controller->cancelDefaultPoseReturnForSwitch();
       }
-      rl_to_rl_live_source_controller_ptr_->pause();
+      if (!rl_to_rl_frozen_dance_source_active_)
+      {
+        rl_to_rl_live_source_controller_ptr_->pause();
+      }
       rl_to_rl_live_source_controller_ptr_ = nullptr;
     }
+    rl_to_rl_frozen_dance_source_active_ = false;
+    rl_to_rl_frozen_dance_source_joint_cmd_ = kuavo_msgs::jointCmd();
 
     const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
     const bool size_ok = start_joint_reference.size() >= static_cast<Eigen::Index>(body_joint_count) &&
@@ -6997,9 +7082,14 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       {
         arm_controller->cancelDefaultPoseReturnForSwitch();
       }
-      rl_to_rl_live_source_controller_ptr_->pause();
+      if (!rl_to_rl_frozen_dance_source_active_)
+      {
+        rl_to_rl_live_source_controller_ptr_->pause();
+      }
       rl_to_rl_live_source_controller_ptr_ = nullptr;
     }
+    rl_to_rl_frozen_dance_source_active_ = false;
+    rl_to_rl_frozen_dance_source_joint_cmd_ = kuavo_msgs::jointCmd();
     rl_to_rl_source_controller_name_.clear();
     rl_to_rl_target_controller_name_.clear();
   }

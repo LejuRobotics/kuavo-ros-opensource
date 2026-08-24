@@ -83,6 +83,11 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   ros::Publisher stateOptimizedPublisher_;
   ros::Publisher stateOptimizedPosePublisher_;
 
+  // 每个末端执行器的完整位姿轨迹（PoseArray，用于 rosbag 记录）
+  std::vector<ros::Publisher> optimizedEePosePublishers_;
+  // 每个末端执行器预测轨迹最终点的 TF frame 名称
+  std::vector<std::string> eePredictedFrameNames_;
+
   std::unique_ptr<GeometryInterfaceVisualization> geometryVisualization_;
 
   // 头部关节相关
