@@ -22,6 +22,7 @@
 
 #include <noitom_hi5_hand_udp_python/PoseInfoList.h>
 #include <leju_utils/define.hpp>
+#include <std_srvs/SetBool.h>
 #include "motion_capture_ik/WheelArmControlBaseROS.h"
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
@@ -336,6 +337,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool drakeSolveUpdateChestOrientation_ = true;
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;
+  // 锁下肢前两个关节（knee/leg），只留 waist_pitch/waist_yaw 随动。
+  // 动态切换：rosservice /quest3/set_lock_knee_leg 或 rosparam set /ik_ros_uni_cpp_node/quest3/lock_knee_leg
+  std::atomic<bool> lockKneeLegEnabled_{false};
+  ros::ServiceServer setLockKneeLegServer_;
+  bool setLockKneeLegCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
 
   // Drake diagram and context for plant
   std::unique_ptr<drake::systems::Diagram<double>> diagram_;

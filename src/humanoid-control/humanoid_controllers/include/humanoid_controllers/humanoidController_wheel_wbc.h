@@ -115,6 +115,10 @@ namespace humanoidController_wheel_wbc
     void updateUserJointCmd(const ros::Time &time, vector_t& target_qpos, vector_t& target_qvel);
     void applyArmTrajectoryInterpolation(const ros::Time& time, int8_t lbMpcMode, const SensorData& sensorData,
                                          vector_t& target_qpos, vector_t& target_qvel);
+    int applyFinalArmJointLimitVelocityDamper(const vector_t& previousArmQ,
+                                              const vector_t& requestedArmV,
+                                              vector_t& nextArmQ,
+                                              vector_t& nextArmV);
     vector_t smoothTransition(const vector_t& current_pos, const vector_t& target_pos, double transition_duration = 1.0);
     vector_t interpolateArmTarget(scalar_t currentTime, const vector_t& currentArmState, const vector_t& newDesiredArmState, scalar_t maxSpeed);
     vector_t processArmControlModeSwitch(const ros::Time& time, const vector_t& current_qpos, const vector_t& target_qpos);
@@ -327,6 +331,16 @@ namespace humanoidController_wheel_wbc
     vector_t last_filtered_low_joint_pos_ = vector_t::Zero(4);
     vector_t arm_start_pos_ = vector_t::Zero(14);
 
+    // ========== 下肢 1/2 号电机（knee/leg）锁定 ==========
+    // 与增量 IK 复用同一 rosparam（/ik_ros_uni_cpp_node/quest3/lock_knee_leg）：
+    // 锁定开启后在最终输出处（optimizedState_mrt_limit_）硬覆盖 1、2 号关节，
+    // 无论 MPC / 快速模式 / 主控回发哪条路都被钉死，waist_pitch/waist_yaw 不受影响。
+    std::atomic<bool> lockKneeLegEnabled_{false};  // 锁定开关（跟随 rosparam）
+    bool lockKneeLegCaptured_{false};              // 是否已捕获锁定快照
+    double lockKneeQ_{0.0};                        // 锁定的 knee 目标角 [rad]
+    double lockLegQ_{0.0};                         // 锁定的 leg 目标角 [rad]
+    ros::Time lastLockParamCheckTime_{0.0};        // 上次实时查询 lock rosparam 的时刻（节流用）
+
     // ========== 运动学计算 ==========
     std::shared_ptr<humanoid_controller::WaistKinematics> waistKinematics_;
 
@@ -359,6 +373,18 @@ namespace humanoidController_wheel_wbc
     vector_t optimizedTrajMaxVel_, optimizedTrajMaxAcc_, optimizedTrajMaxJerk_;
 
     std::shared_ptr<mobile_manipulator::jointCmdLimiter> jointCmdLimiterPtr_;
+    // Mode-independent final arm command guard, shared by normal and quick paths.
+    bool arm_joint_limit_velocity_damper_enabled_{true};
+    bool arm_joint_limits_valid_{false};
+    double arm_joint_limit_soft_zone_{0.14};
+    double arm_joint_limit_stop_acceleration_{80.0};
+    double arm_joint_limit_max_velocity_{4.0};
+    double arm_joint_limit_settle_velocity_{1e-3};
+    double arm_joint_limit_hard_epsilon_{1e-4};
+    vector_t arm_joint_lower_limits_;
+    vector_t arm_joint_upper_limits_;
+    // Per-joint latch: keep q integrated until a limited command can rejoin upstream q continuously.
+    std::vector<unsigned char> arm_joint_limit_integration_active_;
 
     // ========== 手臂末端力估计器 ==========
     std::unique_ptr<ArmContactForceEstimatorWheel> arm_force_estimator_;

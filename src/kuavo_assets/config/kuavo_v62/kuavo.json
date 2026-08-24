@@ -333,12 +333,12 @@
 
     "drake_chest_elbow_hand_bounds": {
         "chest_lower_bound": [0.12, -0.001, 0.45],
-        "chest_upper_bound": [0.65, 0.001, 1.15],
+        "chest_upper_bound": [0.65, 0.001, 1.65],
 
         "left_hand_lower_bound": [-1.25, -1000.0, -0.05],
-        "left_hand_upper_bound": [1.25, 1000.0, 1.5],
+        "left_hand_upper_bound": [1.25, 1000.0, 2],
         "right_hand_lower_bound": [-1.25, -1000.0, -0.05],
-        "right_hand_upper_bound": [1.25, 1000.0, 1.5],
+        "right_hand_upper_bound": [1.25, 1000.0, 2],
 
         "yaw_lower": -0.7853981634 ,
         "yaw_upper": 0.7853981634,

@@ -4563,7 +4563,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             }
             else
             {
-              ROS_WARN("[RL->RL] Live interpolation stopped because source controller joint_cmd is unavailable.");
+              ROS_WARN("[Switch/RL->RL] stop: source joint_cmd unavailable");
               stopRLToRLInterpolation();
             }
           }

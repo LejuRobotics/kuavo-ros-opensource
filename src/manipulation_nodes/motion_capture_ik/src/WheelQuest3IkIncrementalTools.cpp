@@ -141,6 +141,19 @@ void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPt
   }
 }
 
+bool WheelQuest3IkIncrementalROS::setLockKneeLegCallback(std_srvs::SetBool::Request& req,
+                                                         std_srvs::SetBool::Response& res) {
+  lockKneeLegEnabled_.store(req.data);
+  // 同步写 param，保证 rosparam get 与 service 调用结果一致
+  ros::param::set("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", req.data);
+  res.success = true;
+  res.message = req.data ? "Knee/leg joints LOCKED (waist_pitch/waist_yaw remain free)"
+                         : "Knee/leg joints UNLOCKED (all 4 lower-body joints follow VR)";
+  ROS_INFO("[WheelQuest3IkIncrementalROS] lock_knee_leg -> %s (via /quest3/set_lock_knee_leg)",
+           req.data ? "true" : "false");
+  return true;
+}
+
 void WheelQuest3IkIncrementalROS::updateLeftConstraintList(const Eigen::Vector3d& leftHandPos,
                                                       const Eigen::Quaterniond& leftHandQuat,
                                                       const Eigen::Vector3d& leftElbowPos) {
@@ -2832,9 +2845,24 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       }
     }
     drakeSolveUpdateChestPosition_ = drakeSolveUpdateChestPositionConfig_;
-    ROS_INFO("[WheelQuest3IkIncrementalROS] drake solve update flags: orientation=%s, position=%s",
+    if (configJson.contains("lock_knee_leg")) {
+      lockKneeLegEnabled_.store(configJson["lock_knee_leg"].get<bool>());
+    }
+    // launch 入参覆盖 json 默认值（/quest3/lock_knee_leg 由 launch arg 传入），并注册动态切换 service
+    {
+      bool lockKneeLegParam = lockKneeLegEnabled_.load();
+      nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockKneeLegParam, lockKneeLegParam);
+      lockKneeLegEnabled_.store(lockKneeLegParam);
+      setLockKneeLegServer_ = nodeHandle_.advertiseService(
+          "/quest3/set_lock_knee_leg", &WheelQuest3IkIncrementalROS::setLockKneeLegCallback, this);
+      ROS_INFO(
+          "[WheelQuest3IkIncrementalROS] lock_knee_leg switch ready: service=/quest3/set_lock_knee_leg, "
+          "param=/ik_ros_uni_cpp_node/quest3/lock_knee_leg");
+    }
+    ROS_INFO("[WheelQuest3IkIncrementalROS] drake solve update flags: orientation=%s, position=%s, lock_knee_leg=%s",
              drakeSolveUpdateChestOrientation_ ? "true" : "false",
-             drakeSolveUpdateChestPosition_ ? "true" : "false");
+             drakeSolveUpdateChestPosition_ ? "true" : "false",
+             lockKneeLegEnabled_.load() ? "true" : "false");
 
     chestElbowHandWeightConfig_ = loadDrakeChestElbowHandWeightsFromJson(configJson);
     chestElbowHandBoundsConfig_ = loadDrakeChestElbowHandBoundsFromJson(configJson);

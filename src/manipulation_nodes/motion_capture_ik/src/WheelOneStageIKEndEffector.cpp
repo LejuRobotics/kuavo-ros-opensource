@@ -293,6 +293,14 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     ik.get_mutable_prog()->AddCost(barrier, vars);
   }
 
+  // 锁下肢前两个关节（knee=q[0], leg=q[1]）——硬等式约束，保证电机不动，
+  // 只保留 waist_pitch(q[2]) / waist_yaw(q[3]) 随动
+  if (lockKneeLegEnabled_) {
+    auto* prog = ik.get_mutable_prog();
+    prog->AddBoundingBoxConstraint(lockKneeQ_, lockKneeQ_, ik.q()[0]);
+    prog->AddBoundingBoxConstraint(lockLegQ_, lockLegQ_, ik.q()[1]);
+  }
+
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_SHOULDER) {
     ik.AddPositionCost(plant_->world_frame(),
                        PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position,

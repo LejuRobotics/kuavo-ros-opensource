@@ -38,6 +38,8 @@
          true 时启动 wheel_arm_only_ik_ros_uni_cpp_node 替代 wheel_ik_ros_uni_cpp_node。
          chest 控制交给 5W 平台原生方案 (lb_ctrl_api → MPC)。 -->
     <arg name="use_arm_only_ik" default="false"/>
+    <!-- 锁定下肢前两个关节(knee/leg)，只留 waist_pitch/waist_yaw 随动；false: 不锁定, true: 锁定 -->
+    <arg name="lock_knee_leg" default="false"/>
     <!-- 全局 single_hand_mode：让 wheel_ik_ros_uni_cpp_node 在 wheel_ik=true 时跳过 chest 增量，
          让位 torso_joystick_node 独占躯干控制（避免 chest 关节命令覆盖 /cmd_lb_torso_pose 链路） -->
     <param name="/single_hand_mode" value="$(arg single_hand_mode)" type="bool"/>
@@ -191,6 +193,7 @@
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
         <param name="/end_effector_type" value="$(arg ee_type)"/>
+        <param name="/quest3/lock_knee_leg" value="$(arg lock_knee_leg)" type="bool"/>
         <param name="/quest3/task_space_acc_limit" value="$(arg task_space_acc_limit)" />
         <param name="/quest3/task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
         <param name="/quest3/joint_space_acc_limit" value="$(arg joint_space_acc_limit)" />

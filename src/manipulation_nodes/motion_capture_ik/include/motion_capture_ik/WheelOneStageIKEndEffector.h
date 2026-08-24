@@ -166,6 +166,16 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
     rightElbowTrackingActivation_ = std::clamp(rightActivation, 0.0, 1.0);
   }
 
+  // 锁下肢前两个关节（knee=q[0], leg=q[1]），只留 waist_pitch(q[2])/waist_yaw(q[3]) 随动。
+  // 通过硬等式约束钉死 knee/leg，保证对应电机不动作。锁定值应取当前滤波关节角，避免跳变。
+  void setKneeLegLock(double kneeQ, double legQ) {
+    lockKneeLegEnabled_ = true;
+    lockKneeQ_ = kneeQ;
+    lockLegQ_ = legQ;
+  }
+
+  void disableKneeLegLock() { lockKneeLegEnabled_ = false; }
+
  private:
   struct LowpassBiquadCoeff {
     double b0{0.0};
@@ -208,6 +218,11 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   std::unique_ptr<WheelPointTrackIKSolverConfig> pointTrackConfig_;
   double leftElbowTrackingActivation_{1.0};
   double rightElbowTrackingActivation_{1.0};
+
+  // 锁下肢前两个关节（knee/leg）的硬约束状态（setConstraints 为 const，故用 mutable）
+  mutable bool lockKneeLegEnabled_{false};
+  mutable double lockKneeQ_{0.0};
+  mutable double lockLegQ_{0.0};
 };
 
 }  // namespace HighlyDynamic

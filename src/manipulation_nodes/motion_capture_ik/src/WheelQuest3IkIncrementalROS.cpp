@@ -1375,6 +1375,23 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   std::vector<PoseData> poseConstraintListCopy;
   poseConstraintListCopy = latestPoseConstraintList_;
 
+  // 支持 rosparam 动态切换（getCached 自动感知参数服务器更新）
+  {
+    bool lockKneeLegParam = lockKneeLegEnabled_.load();
+    if (ros::param::getCached("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockKneeLegParam)) {
+      lockKneeLegEnabled_.store(lockKneeLegParam);
+    }
+  }
+
+  // 锁下肢前两关节（knee=q[0], leg=q[1]）到当前滤波值，只留 waist_pitch/waist_yaw 随动
+  if (lockKneeLegEnabled_.load()) {
+    if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ && drakeJointStateSize_ == 18) {
+      oneStageIkEndEffectorPtr_->setKneeLegLock(filterJointDataForDrakeFK_(0), filterJointDataForDrakeFK_(1));
+    }
+  } else {
+    oneStageIkEndEffectorPtr_->disableKneeLegLock();
+  }
+
   auto startTime = std::chrono::high_resolution_clock::now();
   oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
       latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);

@@ -324,6 +324,71 @@ namespace humanoidController_wheel_wbc
       mrtInputLimitFilterPtr_->setSecondOrderDerivativeLimit(optimizedTrajMaxJerk_);
     }
 
+    // Final arm q/v consistency guard. This is intentionally independent of
+    // armTrajInterpKinematicLimit and quick mode so every upstream path uses
+    // the same joint-boundary behavior.
+    {
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.enable",
+                            arm_joint_limit_velocity_damper_enabled_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.soft_zone",
+                            arm_joint_limit_soft_zone_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.stop_acceleration",
+                            arm_joint_limit_stop_acceleration_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.max_velocity",
+                            arm_joint_limit_max_velocity_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.settle_velocity",
+                            arm_joint_limit_settle_velocity_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.hard_epsilon",
+                            arm_joint_limit_hard_epsilon_);
+
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/enable",
+                          arm_joint_limit_velocity_damper_enabled_,
+                          arm_joint_limit_velocity_damper_enabled_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/soft_zone",
+                          arm_joint_limit_soft_zone_, arm_joint_limit_soft_zone_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/stop_acceleration",
+                          arm_joint_limit_stop_acceleration_, arm_joint_limit_stop_acceleration_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/max_velocity",
+                          arm_joint_limit_max_velocity_, arm_joint_limit_max_velocity_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/settle_velocity",
+                          arm_joint_limit_settle_velocity_, arm_joint_limit_settle_velocity_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/hard_epsilon",
+                          arm_joint_limit_hard_epsilon_, arm_joint_limit_hard_epsilon_);
+
+      const auto& model = pinocchioInterface_ptr_->getModel();
+      arm_joint_limits_valid_ = armNum_ > 0 &&
+          model.lowerPositionLimit.size() >= armNum_ &&
+          model.upperPositionLimit.size() >= armNum_;
+      if (arm_joint_limits_valid_) {
+        arm_joint_lower_limits_ = model.lowerPositionLimit.tail(armNum_);
+        arm_joint_upper_limits_ = model.upperPositionLimit.tail(armNum_);
+        arm_joint_limits_valid_ = arm_joint_lower_limits_.allFinite() &&
+            arm_joint_upper_limits_.allFinite() &&
+            (arm_joint_lower_limits_.array() < arm_joint_upper_limits_.array()).all();
+      }
+      const bool numericConfigValid = std::isfinite(arm_joint_limit_soft_zone_) &&
+          arm_joint_limit_soft_zone_ > 0.0 &&
+          std::isfinite(arm_joint_limit_stop_acceleration_) &&
+          arm_joint_limit_stop_acceleration_ > 0.0 &&
+          std::isfinite(arm_joint_limit_max_velocity_) &&
+          arm_joint_limit_max_velocity_ > 0.0 &&
+          std::isfinite(arm_joint_limit_settle_velocity_) &&
+          arm_joint_limit_settle_velocity_ >= 0.0 &&
+          std::isfinite(arm_joint_limit_hard_epsilon_) &&
+          arm_joint_limit_hard_epsilon_ >= 0.0;
+      if (!arm_joint_limits_valid_ || !numericConfigValid) {
+        ROS_ERROR("[humanoidControllerWheelWbc] invalid final arm joint-limit damper configuration; disabled");
+        arm_joint_limit_velocity_damper_enabled_ = false;
+      }
+      ROS_INFO_STREAM("[humanoidControllerWheelWbc] final arm joint-limit velocity damper enable="
+                      << (arm_joint_limit_velocity_damper_enabled_ ? "true" : "false")
+                      << ", soft_zone=" << arm_joint_limit_soft_zone_
+                      << ", stop_acceleration=" << arm_joint_limit_stop_acceleration_
+                      << ", max_velocity=" << arm_joint_limit_max_velocity_
+                      << ", settle_velocity=" << arm_joint_limit_settle_velocity_
+                      << ", hard_epsilon=" << arm_joint_limit_hard_epsilon_);
+    }
+
     // 关节输出限制
     jointCmdLimiterPtr_ = std::make_shared<mobile_manipulator::jointCmdLimiter>(manipulatorModelInfo_.armDim, 
                                                             *pinocchioInterface_ptr_,
@@ -1162,19 +1227,29 @@ namespace humanoidController_wheel_wbc
       qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
       qvelLimit = optimizedInput_mrt_limit_.tail(info.armDim);
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
-      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
       static vector_t jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
       const vector_t jointPosDelta =
-          (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
-      if (enable_arm_traj_interpolator_) {
-        // 手臂轨迹插补仅应覆盖手臂段速度；下肢仍用位置差分，与 state 同向。
-        // 若对全 armDim 使用 MPC optimizedInput（躯干笛卡尔模式下常为 0 或与 state 不同步），
-        // WBC 下肢 PD 的 vel_error 会被 kd 放大，例如 data[3](knee_pitch) 出现大幅负值。
-        optimizedInput_mrt_limit_.segment(baseDim_, lowJointNum_) = jointPosDelta.head(lowJointNum_);
-        optimizedInput_mrt_limit_.tail(armNum_) = qvelLimit.tail(armNum_);
+          (qposLimit - jointPosTarget_last) / dt_;
+
+      const bool quickArmModeActive =
+          (quickMode_ == 2 || quickMode_ == 3) && (lbMpcMode == 1 || lbMpcMode == 3);
+      vector_t requestedArmV;
+      if (enable_arm_traj_interpolator_ || quickArmModeActive) {
+        requestedArmV = qvelLimit.tail(armNum_);
       } else {
-        optimizedInput_mrt_limit_.tail(info.armDim) = jointPosDelta;
+        requestedArmV = jointPosDelta.tail(armNum_);
       }
+
+      vector_t finalArmQ = qposLimit.tail(armNum_);
+      vector_t finalArmV;
+      applyFinalArmJointLimitVelocityDamper(
+          jointPosTarget_last.tail(armNum_), requestedArmV, finalArmQ, finalArmV);
+      qposLimit.tail(armNum_) = finalArmQ;
+
+      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
+      // 下肢保持位置差分；手臂统一使用最终边界阻尼后的速度。
+      optimizedInput_mrt_limit_.segment(baseDim_, lowJointNum_) = jointPosDelta.head(lowJointNum_);
+      optimizedInput_mrt_limit_.tail(armNum_) = finalArmV;
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
 
@@ -1351,6 +1426,47 @@ namespace humanoidController_wheel_wbc
               contact_force_wbc->resetForceDisabled();
           }
       }
+    }
+
+    // ===== 下肢 1/2 号电机（knee/leg）锁定：最终输出处硬覆盖 =====
+    // 与增量 IK 复用同一 rosparam，锁定语义 = 钉死到开启瞬间捕获的快照（弧度）。
+    // 无论 MPC / 快速模式 / 主控回发哪条路，1、2 号都被硬覆盖，waist 关节不受影响。
+    {
+      // 每 100ms 实时查询一次 rosparam。必须用 get()（无缓存）而非 getCached()：
+      // getCached() 带本地缓存，首次读到"参数不存在"后缓存不会随 IK 节点/终端 set 而刷新，
+      // 会一直读到旧的 false，导致锁定永远不生效。
+      ros::Time now = ros::Time::now();
+      if ((now - lastLockParamCheckTime_).toSec() >= 0.1) {
+        lastLockParamCheckTime_ = now;
+        bool lockParam = false;
+        // 参数可能是 bool(true/false) 也可能是 int(1/0)，两种都要兼容：
+        // ros::param::get(name, bool&) 只认 XmlRpc boolean 类型，遇到 int(1) 会返回 false，
+        // 导致锁定失效。因此 bool 读取失败时再尝试按 int 读取。
+        if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParam)) {
+          lockKneeLegEnabled_.store(lockParam);
+        } else {
+          int lockParamInt = 0;
+          if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParamInt)) {
+            lockKneeLegEnabled_.store(lockParamInt != 0);
+          }
+        }
+      }
+    }
+    if (lockKneeLegEnabled_.load()) {
+      if (!lockKneeLegCaptured_) {
+        // 开启首拍：捕获当前实际关节角作为固定目标（knee=idx0, leg=idx1）
+        lockKneeQ_ = observation_wheel_.state[baseDim_ + 0];
+        lockLegQ_  = observation_wheel_.state[baseDim_ + 1];
+        lockKneeLegCaptured_ = true;
+        ROS_INFO("[humanoidController_wheel_wbc] knee/leg lock: captured knee=%.4f leg=%.4f",
+                 lockKneeQ_, lockLegQ_);
+      }
+      optimizedState_mrt_limit_[baseDim_ + 0] = lockKneeQ_;
+      optimizedState_mrt_limit_[baseDim_ + 1] = lockLegQ_;
+      optimizedInput_mrt_limit_[baseDim_ + 0] = 0.0;
+      optimizedInput_mrt_limit_[baseDim_ + 1] = 0.0;
+    } else {
+      lockKneeLegCaptured_ = false;  // 解锁后，下次锁定重新捕获快照
     }
 
     // WBC 目标：optimizedState_wbc=期望位姿/关节角，optimizedInput_wbc=对应速度，维度见头文件注释
@@ -2090,6 +2206,177 @@ namespace humanoidController_wheel_wbc
     }
     ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_interp", output.smoothQ);
     ros_logger_->publishVector("/humanoid_wheel/arm_target_qvel_interp", output.smoothV);
+  }
+
+  int humanoidControllerWheelWbc::applyFinalArmJointLimitVelocityDamper(
+      const vector_t& previousArmQ, const vector_t& requestedArmV,
+      vector_t& nextArmQ, vector_t& nextArmV)
+  {
+    nextArmV = requestedArmV;
+    if (!arm_joint_limit_velocity_damper_enabled_ || !arm_joint_limits_valid_ ||
+        previousArmQ.size() != armNum_ || requestedArmV.size() != armNum_ ||
+        nextArmQ.size() != armNum_ || arm_joint_lower_limits_.size() != armNum_ ||
+        arm_joint_upper_limits_.size() != armNum_) {
+      return 0;
+    }
+
+    const double cycle = std::clamp(dt_, 1e-4, 0.02);
+    if (arm_joint_limit_integration_active_.size() !=
+        static_cast<std::size_t>(armNum_)) {
+      arm_joint_limit_integration_active_.assign(armNum_, 0);
+    }
+
+    // This correction is used only after limiting has created a q tracking
+    // error.  Normal joints remain a zero-delay upstream q/v pass-through.
+    constexpr double kResyncGain = 20.0;          // [1/s]
+    constexpr double kResyncPositionTolerance = 1e-4;  // [rad]
+    constexpr double kCompareTolerance = 1e-12;
+
+    int dampedCount = 0;
+    for (int i = 0; i < armNum_; ++i) {
+      const double lower = arm_joint_lower_limits_[i] +
+                           arm_joint_limit_hard_epsilon_;
+      const double upper = arm_joint_upper_limits_[i] -
+                           arm_joint_limit_hard_epsilon_;
+      const double requestedQRaw = std::isfinite(nextArmQ[i])
+                                       ? nextArmQ[i]
+                                       : previousArmQ[i];
+      const double requestedQ = std::clamp(requestedQRaw, lower, upper);
+      const double previousQRaw = std::isfinite(previousArmQ[i])
+                                      ? previousArmQ[i]
+                                      : requestedQ;
+      const double previousQ = std::clamp(previousQRaw, lower, upper);
+      const double rawRequestedV = std::isfinite(requestedArmV[i])
+                                       ? requestedArmV[i]
+                                       : 0.0;
+      const double cappedRequestedV = std::clamp(
+          rawRequestedV, -arm_joint_limit_max_velocity_,
+          arm_joint_limit_max_velocity_);
+
+      auto applyBoundaryDamper = [&](double desiredV,
+                                     bool& boundaryDamperActive) {
+        double boundedV = desiredV;
+        boundaryDamperActive = false;
+
+        if (desiredV > 0.0) {
+          const double distance = std::max(0.0, upper - previousQ);
+          const double brakingDistance = desiredV * desiredV /
+              (2.0 * arm_joint_limit_stop_acceleration_);
+          const double activationDistance = std::max(
+              arm_joint_limit_soft_zone_, brakingDistance);
+          if (distance < activationDistance) {
+            const double ratio = std::clamp(
+                distance / activationDistance, 0.0, 1.0);
+            const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+            const double softLimit = desiredV * smoothScale;
+            const double brakeLimit = std::sqrt(
+                2.0 * arm_joint_limit_stop_acceleration_ * distance);
+            boundedV = std::min(
+                {desiredV, softLimit, brakeLimit, distance / cycle});
+            boundaryDamperActive =
+                boundedV < desiredV - kCompareTolerance;
+          }
+        } else if (desiredV < 0.0) {
+          const double distance = std::max(0.0, previousQ - lower);
+          const double speed = std::abs(desiredV);
+          const double brakingDistance = speed * speed /
+              (2.0 * arm_joint_limit_stop_acceleration_);
+          const double activationDistance = std::max(
+              arm_joint_limit_soft_zone_, brakingDistance);
+          if (distance < activationDistance) {
+            const double ratio = std::clamp(
+                distance / activationDistance, 0.0, 1.0);
+            const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+            const double softLimit = speed * smoothScale;
+            const double brakeLimit = std::sqrt(
+                2.0 * arm_joint_limit_stop_acceleration_ * distance);
+            boundedV = -std::min(
+                {speed, softLimit, brakeLimit, distance / cycle});
+            boundaryDamperActive =
+                boundedV > desiredV + kCompareTolerance;
+          }
+        }
+
+        const bool insideSoftZone =
+            (boundedV > 0.0 && upper - previousQ <
+                                   arm_joint_limit_soft_zone_) ||
+            (boundedV < 0.0 && previousQ - lower <
+                                   arm_joint_limit_soft_zone_);
+        if (insideSoftZone &&
+            std::abs(boundedV) < arm_joint_limit_settle_velocity_) {
+          boundaryDamperActive = boundaryDamperActive ||
+              std::abs(boundedV) > kCompareTolerance;
+          boundedV = 0.0;
+        }
+        return boundedV;
+      };
+
+      bool baseBoundaryDamperActive = false;
+      const double baseBoundedV = applyBoundaryDamper(
+          cappedRequestedV, baseBoundaryDamperActive);
+      const bool velocityCapActive =
+          std::abs(cappedRequestedV - rawRequestedV) > kCompareTolerance;
+      const bool positionClampActive =
+          std::abs(requestedQ - requestedQRaw) > kCompareTolerance;
+      const bool limiterActs = velocityCapActive ||
+          baseBoundaryDamperActive || positionClampActive;
+      const bool wasIntegrating =
+          arm_joint_limit_integration_active_[i] != 0;
+
+      // With no current or historical limiting, preserve the low-latency
+      // path exactly: do not integrate and do not add a tracking filter.
+      if (!wasIntegrating && !limiterActs) {
+        nextArmQ[i] = requestedQ;
+        nextArmV[i] = rawRequestedV;
+        continue;
+      }
+
+      arm_joint_limit_integration_active_[i] = 1;
+
+      // Once q has fallen behind because of a limiter, add a bounded catch-up
+      // term.  This prevents a direct q snap when the requested velocity drops
+      // back below max_velocity.  Boundary damping is applied after catch-up.
+      const double positionError = requestedQ - previousQ;
+      double trackingV = cappedRequestedV + kResyncGain * positionError;
+      trackingV = std::clamp(trackingV,
+                             -arm_joint_limit_max_velocity_,
+                             arm_joint_limit_max_velocity_);
+      bool trackingBoundaryDamperActive = false;
+      double finalV = applyBoundaryDamper(
+          trackingV, trackingBoundaryDamperActive);
+
+      double finalQ = std::clamp(previousQ + finalV * cycle,
+                                 lower, upper);
+      finalV = (finalQ - previousQ) / cycle;
+
+      // Close only a tiny residual in a q/v-consistent way.  Do not release
+      // while an outward boundary damper or velocity cap is still required.
+      const double remainingError = requestedQ - finalQ;
+      if (!limiterActs && !trackingBoundaryDamperActive &&
+          std::abs(remainingError) <= kResyncPositionTolerance) {
+        const double syncV = (requestedQ - previousQ) / cycle;
+        if (std::abs(syncV) <=
+            arm_joint_limit_max_velocity_ + kCompareTolerance) {
+          bool syncBoundaryDamperActive = false;
+          const double safeSyncV = applyBoundaryDamper(
+              syncV, syncBoundaryDamperActive);
+          if (!syncBoundaryDamperActive &&
+              std::abs(safeSyncV - syncV) <= kCompareTolerance) {
+            finalQ = requestedQ;
+            finalV = syncV;
+            arm_joint_limit_integration_active_[i] = 0;
+          }
+        }
+      }
+
+      if (std::abs(finalV - rawRequestedV) > kCompareTolerance ||
+          std::abs(finalQ - requestedQRaw) > kCompareTolerance) {
+        ++dampedCount;
+      }
+      nextArmQ[i] = finalQ;
+      nextArmV[i] = finalV;
+    }
+    return dampedCount;
   }
 
   void humanoidControllerWheelWbc::updateUserJointCmd(const ros::Time &time, vector_t& target_qpos, vector_t& target_qvel)
@@ -2871,4 +3158,3 @@ namespace humanoidController_wheel_wbc
   }
 
 } // namespace humanoidController_wheel_wbc
-
