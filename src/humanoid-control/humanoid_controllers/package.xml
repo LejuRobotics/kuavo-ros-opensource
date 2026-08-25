@@ -55,6 +55,8 @@
     <exec_depend>nodelet</exec_depend>
     <exec_depend>controller_manager</exec_depend>
     <exec_depend>kuavo_mocap_gmr</exec_depend>
+    <!-- launch-time only (with_pico_gmr); catkin build still compiles it via exec_depend -->
+    <exec_depend>kuavo_pico_gmr</exec_depend>
 
     <export>
         <controller_interface plugin="${prefix}/humanoid_controllers_plugins.xml"/>
