@@ -242,7 +242,7 @@ protected:
   void calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime = 0.0);
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetTorsoPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
-  void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState, bool anchorOpenLoopStart);
+  void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState, bool isServiceReset);
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
   void applyTorsoVelDeltaCommands(scalar_t initTime);
@@ -257,8 +257,8 @@ protected:
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
-  void resetAllMpcTraj(scalar_t initTime, const vector_t& initState, bool anchorOpenLoopStart);
-  void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState, bool anchorOpenLoopStart);
+  void resetAllMpcTraj(scalar_t initTime, const vector_t& initState, bool isServiceReset);
+  void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState, bool isServiceReset);
   void updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState);
   void updateTimedSchedulerTargetTraj(void);
   void updateTimedOfflineTraj(scalar_t initTime, scalar_t finalTime);
@@ -356,8 +356,9 @@ private:
   double resetTorsoInitTime_{0.0};
   bool isResetTorso_{false};
   bool isResetTorsoRePlanning_{false};
-  vector_t resetTorsoOpenLoopStart4_{vector_t::Zero(4)};  // snap at service call (#3973 VR race)
-  vector_t resetTorsoMpcStart4_{vector_t::Zero(4)};       // MPC track snap at service call (#3991)
+  // #3973: service 调用起到复位窗口结束期间丢弃躯干开环指令，避免 VR 双击后紧跟的
+  // /cmd_lb_torso_pose 覆盖 cmdTorsoPose_（原先靠开环快照回避，见 #3991）
+  std::atomic<bool> torsoResetWindowActive_{false};
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 
