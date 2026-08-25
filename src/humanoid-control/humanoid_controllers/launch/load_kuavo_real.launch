@@ -403,7 +403,8 @@
     </group>
 
     <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
-    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
+    <arg name="with_pico_gmr" default="true" doc="Enable PICO body tracking GMR"/>
+    <arg name="pico_enable_amp_walk" default="true" doc="Enable G12-priority/PICO walking only in AMP controllers"/>
     <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR (GMR IK only supports kuavo_s52)"/>
     <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>
     <arg name="pico_enable_viewer" default="false" doc="Enable MuJoCo viewer for PICO GMR"/>
@@ -412,7 +413,7 @@
     <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
     <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
     <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
-    <arg name="pico_diagnostic_allow_legacy" default="false" doc="Allow old bare VRData packets"/>
+    <arg name="pico_diagnostic_allow_legacy" default="true" doc="Allow old bare VRData packets"/>
     <arg name="pico_diagnostic_log_enable" default="false" doc="Write PICO diagnostic JSONL logs"/>
     <!-- 末端执行器类型: none / qiangnao / qiangnao_touch / jodell / lejuclaw / revo2 -->
     <arg name="pico_end_effector_type" default="qiangnao" doc="End effector type for PICO GMR dexhand control"/>
@@ -428,6 +429,7 @@
       <include file="$(find kuavo_pico_gmr)/launch/pico_streaming.launch">
         <arg name="robot" value="$(arg pico_robot)"/>
         <arg name="human_height" value="$(arg pico_human_height)"/>
+        <arg name="enable_pico_amp_walk" value="$(arg pico_enable_amp_walk)"/>
         <arg name="enable_viewer" value="$(arg pico_enable_viewer)"/>
         <arg name="enable_gmr_smoothing" value="$(arg pico_enable_gmr_smoothing)"/>
         <arg name="gmr_gaussian_sigma" value="$(arg pico_gmr_gaussian_sigma)"/>

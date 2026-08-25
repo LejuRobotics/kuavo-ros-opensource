@@ -70,6 +70,10 @@ onlineEstimatorModelFile   estimator_0720footslip2.onnx  ; 在线VR专用Estimat
 onlineVRBinFile            000_liuke_2026-03-30_fbx_F091_aligned_smooth_with_contactmask_data.bin   ; 用于模拟在线VR的bin文件（仅当onlineVRDataSource=bin_file时使用，帧数将从文件大小自动计算）
 onlineBufferSize           64                            ; 在线缓存区大小（帧数，默认200帧=1秒@100Hz）
 onlineUpdateRate           100.0                         ; 在线缓存区更新频率（Hz，默认100Hz）
+onlineRetargetStaleFallbackEnable   true               ; retarget断流超时后自动过渡写入站立参考（不影响RT+Y主动暂停）
+onlineRetargetStaleTimeoutMs        150.0              ; 判定断流的超时阈值（ms，无新retarget callback）
+onlineStaleToStandingInterpFrames   50                 ; 断流后过渡到站立参考的采样帧数（@100Hz约500ms）
+onlineRetargetStaleRequireReentry   true               ; 断流后锁存：保持站立，GMR恢复不跟操；需切到MPC/AMP后重新进入VMP才能遥操
 
 ; Qpos平滑配置（重复帧回溯插值，消除阶梯状重复数据）
 enableQposSmoothing        true                          ; 是否启用Qpos平滑（true:启用重复帧插值, false:直接使用原始数据）

@@ -476,7 +476,8 @@
     </group>
 
     <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
-    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
+    <arg name="with_pico_gmr" default="true" doc="Enable PICO body tracking GMR"/>
+    <arg name="pico_enable_amp_walk" default="true" doc="Enable G12-priority/PICO walking only in AMP controllers"/>
     <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR (GMR IK only supports kuavo_s52)"/>
     <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>
     <arg name="pico_enable_viewer" default="false" doc="Enable MuJoCo viewer for PICO GMR"/>
@@ -494,12 +495,14 @@
     <!-- CPU affinity: bind PICO retarget process to specific P-cores (Ultra 7 255H: P-cores 0-5) -->
     <arg name="pico_cpu_cores" default="[]" doc="CPU cores to bind PICO retarget process (empty=no binding)"/>
 
-    <group if="$(arg with_pico_gmr)">
+    <!-- XSense GMR and PICO GMR own the same PICO UDP/Joy resources. -->
+    <group if="$(eval arg('with_pico_gmr') and not arg('with_xsense_gmr'))">
       <!-- 设置末端执行器类型，供 pico_dexhand_control_node.py 读取 -->
       <param name="/end_effector_type" value="$(arg pico_end_effector_type)"/>
       <include file="$(find kuavo_pico_gmr)/launch/pico_streaming.launch">
         <arg name="robot" value="$(arg pico_robot)"/>
         <arg name="human_height" value="$(arg pico_human_height)"/>
+        <arg name="enable_pico_amp_walk" value="$(arg pico_enable_amp_walk)"/>
         <arg name="enable_viewer" value="$(arg pico_enable_viewer)"/>
         <arg name="enable_gmr_smoothing" value="$(arg pico_enable_gmr_smoothing)"/>
         <arg name="gmr_gaussian_sigma" value="$(arg pico_gmr_gaussian_sigma)"/>

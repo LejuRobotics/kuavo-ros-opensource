@@ -3,6 +3,7 @@ project(kuavo_pico_gmr)
 
 ## 找到 catkin 和依赖包
 find_package(catkin REQUIRED COMPONENTS
+  roscpp
   rospy
   geometry_msgs
   sensor_msgs
@@ -16,6 +17,7 @@ catkin_python_setup()
 ## 声明 catkin 包
 catkin_package(
   CATKIN_DEPENDS 
+    roscpp
     rospy 
     geometry_msgs 
     sensor_msgs
@@ -32,12 +34,23 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
+add_executable(pico_gmr_joy_converter_node
+  src/pico_gmr_joy_converter_node.cpp
+)
+target_link_libraries(pico_gmr_joy_converter_node
+  ${catkin_LIBRARIES}
+)
+add_dependencies(pico_gmr_joy_converter_node
+  ${catkin_EXPORTED_TARGETS}
+)
+
 #############
 ## Install ##
 #############
 
 # 安装 Python 脚本
 catkin_install_python(PROGRAMS
+  scripts/pico_gmr_joy_topic_manager.py
   scripts/pico_realtime_to_robot.py
   scripts/pico_dexhand_control_node.py
   scripts/extract_pico_data.py
@@ -48,6 +61,11 @@ catkin_install_python(PROGRAMS
   scripts/visualize_kuavo.py
   scripts/visualize_pico_bones_matplotlib.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(TARGETS
+  pico_gmr_joy_converter_node
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
 # 安装 Wrapper Shell 脚本

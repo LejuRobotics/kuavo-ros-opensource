@@ -506,6 +506,33 @@ namespace humanoid_controller
           } catch (...) {
             online_vr_bin_file_ = "";
           }
+
+          try {
+            loadData::loadCppDataType(config_file, "onlineRetargetStaleFallbackEnable",
+                                      online_retarget_stale_fallback_enable_);
+          } catch (...) {
+            online_retarget_stale_fallback_enable_ = true;
+          }
+          try {
+            loadData::loadCppDataType(config_file, "onlineRetargetStaleTimeoutMs",
+                                      online_retarget_stale_timeout_ms_);
+          } catch (...) {
+            online_retarget_stale_timeout_ms_ = 150.0;
+          }
+          try {
+            loadData::loadCppDataType(config_file, "onlineStaleToStandingInterpFrames",
+                                      online_stale_to_standing_interp_frames_);
+          } catch (...) {
+            online_stale_to_standing_interp_frames_ = 50;
+          }
+          online_retarget_stale_timeout_ms_ = std::max(10.0, online_retarget_stale_timeout_ms_);
+          online_stale_to_standing_interp_frames_ = std::max(1, online_stale_to_standing_interp_frames_);
+          try {
+            loadData::loadCppDataType(config_file, "onlineRetargetStaleRequireReentry",
+                                      online_retarget_stale_require_reentry_);
+          } catch (...) {
+            online_retarget_stale_require_reentry_ = true;
+          }
           
           ROS_INFO("[%s] Online VR config:", name_.c_str());
           ROS_INFO("[%s]   Data source: %s", name_.c_str(), online_vr_data_source_.c_str());
@@ -515,6 +542,12 @@ namespace humanoid_controller
           if (!online_vr_bin_file_.empty()) {
             ROS_INFO("[%s]   Bin file: %s", name_.c_str(), online_vr_bin_file_.c_str());
           }
+          ROS_INFO("[%s]   Stale fallback: enable=%d, timeout=%.0f ms, standing_interp=%d frames, require_reentry=%d",
+                   name_.c_str(),
+                   static_cast<int>(online_retarget_stale_fallback_enable_),
+                   online_retarget_stale_timeout_ms_,
+                   online_stale_to_standing_interp_frames_,
+                   static_cast<int>(online_retarget_stale_require_reentry_));
         } catch (...) {
           ROS_WARN("[%s] Online VR config not found, using defaults", name_.c_str());
         }
@@ -712,6 +745,8 @@ namespace humanoid_controller
       initializeOnlineReferenceBuffer();
     }
 
+    resetOnlineStaleFallbackState();
+
     if (arm_controller_)
       arm_controller_->reset();
     
@@ -888,14 +923,126 @@ void VMPController::resume()
 
   void VMPController::resumeRetargetedStreaming()
   {
-    std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
-    retarget_resume_waiting_ = false;
-    retarget_frozen_frame_valid_ = false;
-    retarget_auto_freeze_valid_ = false;
-    retarget_resume_min_stamp_ = ros::Time(0);
-    retarget_resume_ready_stamp_ = ros::Time(0);
-    retarget_resume_min_frame_seq_ = latest_retargeted_frame_seq_;
-    pico_streaming_paused_.store(false);
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      retarget_resume_waiting_ = false;
+      retarget_frozen_frame_valid_ = false;
+      retarget_auto_freeze_valid_ = false;
+      retarget_resume_min_stamp_ = ros::Time(0);
+      retarget_resume_ready_stamp_ = ros::Time(0);
+      retarget_resume_min_frame_seq_ = latest_retargeted_frame_seq_;
+      pico_streaming_paused_.store(false);
+    }
+    resetOnlineStaleFallbackState(false);
+  }
+
+  void VMPController::notifyOnlineFrameReceived()
+  {
+    std::lock_guard<std::mutex> lock(online_stale_mutex_);
+    latest_online_frame_recv_wall_time_ = ros::Time::now();
+    latest_online_frame_recv_time_valid_ = true;
+  }
+
+  void VMPController::resetOnlineStaleFallbackState(bool clear_recv_time)
+  {
+    std::lock_guard<std::mutex> lock(online_stale_mutex_);
+    online_stale_standing_active_ = false;
+    online_stale_interp_progress_ = 0;
+    online_stale_interp_start_frame_.clear();
+    if (clear_recv_time) {
+      latest_online_frame_recv_time_valid_ = false;
+      online_retarget_stale_latched_ = false;
+    }
+  }
+
+  bool VMPController::applyOnlineRetargetStaleFallback(std::vector<float>& processed_frame,
+                                                       bool callback_updated)
+  {
+    if (!online_retarget_stale_fallback_enable_ || vmp_standing_frame_.empty()) {
+      return false;
+    }
+
+    // RT+Y 主动暂停走 pico_frozen_frame_ 专用路径，不在此处改写参考。
+    if (pico_streaming_paused_.load()) {
+      return false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(retarget_resume_mutex_);
+      if (retarget_resume_waiting_) {
+        return false;
+      }
+    }
+
+    std::lock_guard<std::mutex> lock(online_stale_mutex_);
+    bool enforce_standing = false;
+
+    if (online_retarget_stale_latched_ && online_retarget_stale_require_reentry_) {
+      enforce_standing = true;
+      if (callback_updated) {
+        ROS_WARN_THROTTLE(2.0,
+                          "[%s] Retarget recovered while stale latch active; "
+                          "live teleop disabled. Switch to MPC/AMP, then re-enter VMP to resume.",
+                          name_.c_str());
+      }
+    } else if (callback_updated) {
+      if (online_stale_standing_active_) {
+        ROS_INFO("[%s] Retarget stream recovered, resuming live reference", name_.c_str());
+      }
+      online_stale_standing_active_ = false;
+      online_stale_interp_progress_ = 0;
+      online_stale_interp_start_frame_.clear();
+      return false;
+    } else {
+      bool is_stale = false;
+      if (latest_online_frame_recv_time_valid_) {
+        const double age_ms =
+            (ros::Time::now() - latest_online_frame_recv_wall_time_).toSec() * 1000.0;
+        is_stale = age_ms > online_retarget_stale_timeout_ms_;
+      }
+      if (!is_stale) {
+        return false;
+      }
+      enforce_standing = true;
+      if (!online_stale_standing_active_) {
+        online_stale_standing_active_ = true;
+        online_stale_interp_progress_ = 0;
+        online_stale_interp_start_frame_ = processed_frame;
+        if (online_stale_interp_start_frame_.size() < vmp_standing_frame_.size()) {
+          online_stale_interp_start_frame_.resize(vmp_standing_frame_.size(), 0.0f);
+        }
+        if (online_retarget_stale_require_reentry_) {
+          online_retarget_stale_latched_ = true;
+          ROS_ERROR("[%s] Retarget stream stale (>%.0f ms); blending to standing. "
+                    "Teleop locked: switch to MPC/AMP, then re-enter VMP to resume.",
+                    name_.c_str(), online_retarget_stale_timeout_ms_);
+        } else {
+          ROS_WARN("[%s] Retarget stream stale (>%.0f ms), blending reference to standing frame over %d samples",
+                   name_.c_str(), online_retarget_stale_timeout_ms_,
+                   online_stale_to_standing_interp_frames_);
+        }
+      }
+    }
+
+    if (!enforce_standing) {
+      return false;
+    }
+
+    const int interp_frames = std::max(1, online_stale_to_standing_interp_frames_);
+    if (online_stale_interp_progress_ < interp_frames) {
+      const float alpha = static_cast<float>(online_stale_interp_progress_ + 1) /
+                          static_cast<float>(interp_frames);
+      processed_frame = interpolateFrame(online_stale_interp_start_frame_, vmp_standing_frame_, alpha);
+      online_stale_interp_progress_++;
+      if (online_stale_interp_progress_ >= interp_frames &&
+          online_retarget_stale_latched_ && online_retarget_stale_require_reentry_) {
+        ROS_WARN("[%s] Standing hold active after retarget stale. "
+                 "Switch to MPC/AMP, then re-enter VMP to resume teleoperation.",
+                 name_.c_str());
+      }
+    } else {
+      processed_frame = vmp_standing_frame_;
+    }
+    return true;
   }
 
   void VMPController::prepareRetargetedStreamingResume(
@@ -1261,6 +1408,7 @@ void VMPController::resume()
           pico_frozen_frame_ = vmp_standing_frame_;
         }
         pico_streaming_paused_.store(true);
+        resetOnlineStaleFallbackState(false);
       }
 
       // Only a controller lifecycle exit creates an automatic-switch freeze.
@@ -1711,24 +1859,21 @@ void VMPController::resume()
         //   这样消除了写线程（采样线程）因等待锁而丢失 100Hz 节拍的问题。
         int current_frame_index;
         int max_future_offset;
+        bool pointer_tight = false;
+        int write_index = 0;
+        int pointer_distance = 0;
+        int min_safe_distance = future_frames + 1;
         {
           std::lock_guard<std::mutex> lock(online_buffer_mutex_);
 
           current_frame_index = online_ref_buffer_.current_read_index;
-          int write_index = online_ref_buffer_.current_write_index;
+          write_index = online_ref_buffer_.current_write_index;
 
           // 计算读写指针距离（环形缓冲区）
-          int pointer_distance = (write_index - current_frame_index + online_buffer_size_) % online_buffer_size_;
+          pointer_distance = (write_index - current_frame_index + online_buffer_size_) % online_buffer_size_;
 
           // 安全检查：确保写指针比读指针超前至少 future_frames+1 帧
-          int min_safe_distance = future_frames + 1;
-          bool pointer_tight = (pointer_distance < min_safe_distance);
-          if (pointer_tight) {
-            ROS_WARN("[%s] Online buffer pointer distance tight! "
-                     "read=%d, write=%d, distance=%d, min_safe=%d, max_future_allowed=%d. Clamping future frames.",
-                     name_.c_str(), current_frame_index, write_index,
-                     pointer_distance, min_safe_distance, future_frames);
-          }
+          pointer_tight = (pointer_distance < min_safe_distance);
 
           // 计算可安全读取的最远未来帧偏移量
           max_future_offset = future_frames;
@@ -1736,13 +1881,20 @@ void VMPController::resume()
             max_future_offset = std::min(future_frames, std::max(0, pointer_distance - 1));
           }
 
-          // 推进读指针：仅当采样线程已完成第一次写入后才推进。
-          // 原因：采样线程启动需要 ~30ms（线程调度开销），期间 read 不应推进，
-          //       否则 gap 会从初始值 17 缩小到 14，导致持续触发 pointer_tight 警告。
-          if (online_sampling_has_written_.load(std::memory_order_acquire)) {
+          // 推进读指针：采样已就绪且间距充足时才推进。
+          // - 采样启动前（~30ms）：read 不动，等待 write 先行建立正确间距。
+          // - pointer_tight：冻结 read，等待 write 重新拉开 >= future_frames+1，
+          //   避免 clamp 未来帧的同时继续消费 buffer 导致 distance 归零。
+          if (online_sampling_has_written_.load(std::memory_order_acquire) && !pointer_tight) {
             online_ref_buffer_.current_read_index = (current_frame_index + 1) % online_buffer_size_;
           }
-          // else: 采样线程尚未就绪，保持 read 不动，等待 write 先行建立正确间距
+        }
+        if (pointer_tight) {
+          ROS_WARN_THROTTLE(1.0, "[%s] Online buffer pointer distance tight! "
+                            "read=%d, write=%d, distance=%d, min_safe=%d, max_future_allowed=%d. "
+                            "Clamping future frames and freezing read pointer.",
+                            name_.c_str(), current_frame_index, write_index,
+                            pointer_distance, min_safe_distance, max_future_offset);
         }
         // 锁已释放——读取帧数据（无锁，ring buffer distance 保证无竞争槽位）
         for (int t = 0; t < vmp_config_.window_l; ++t) {
@@ -2737,6 +2889,11 @@ void VMPController::resume()
         ROS_INFO("[%s] First data ready, starting to sample! (source: %s)", 
                  name_.c_str(), online_vr_data_source_.c_str());
       }
+
+      // 非主动暂停时，retarget 断流超时后过渡到站立参考写入 buffer。
+      if (has_data) {
+        applyOnlineRetargetStaleFallback(processed_frame, callback_updated);
+      }
       
       if (has_data) {
         if (enable_qpos_smoothing_) {
@@ -3022,6 +3179,7 @@ void VMPController::resume()
       has_received_online_data_ = true;
       latest_frame_seq_++;  // 每次callback写入递增序列号
     }
+    notifyOnlineFrameReceived();
     recordRetargetedFrameStamp(msg->header.stamp);
     
     // ===== 6. 首次接收日志 =====
@@ -3230,6 +3388,7 @@ void VMPController::resume()
       has_received_online_data_ = true;
       latest_frame_seq_++;  // 每次callback写入递增序列号
     }
+    notifyOnlineFrameReceived();
     recordRetargetedFrameStamp(msg->header.stamp);
     
     // ===== 6. 首次接收日志 =====
@@ -3308,6 +3467,7 @@ void VMPController::resume()
           }
         }
         pico_streaming_paused_.store(true);
+        resetOnlineStaleFallbackState(false);
         ROS_INFO("[%s] PICO推流已通过服务暂停", name_.c_str());
       }
       res.success = true;
