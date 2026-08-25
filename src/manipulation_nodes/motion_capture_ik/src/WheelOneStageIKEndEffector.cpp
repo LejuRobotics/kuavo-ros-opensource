@@ -260,11 +260,21 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
 
   // add chest position constraint
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_CHEST) {
-    ik.AddPositionCost(plant_->world_frame(),
-                       PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,
-                       plant_->GetFrameByName("waist_yaw_link"),
-                       Eigen::Vector3d::Zero(),
-                       chestWeight * Eigen::Matrix3d::Identity());
+    if (freezeChestPosition_) {
+      // 位置跟随细分关闭：更改为高权重软约束
+      ik.AddPositionCost(plant_->world_frame(),
+                         PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,
+                         plant_->GetFrameByName("waist_yaw_link"),
+                         Eigen::Vector3d::Zero(),
+                         chestWeight * 1e4 * Eigen::Matrix3d::Identity());
+    } else {
+      // 位置跟随开启：软代价协同跟随，允许与手臂可达性权衡
+      ik.AddPositionCost(plant_->world_frame(),
+                         PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,
+                         plant_->GetFrameByName("waist_yaw_link"),
+                         Eigen::Vector3d::Zero(),
+                         chestWeight * Eigen::Matrix3d::Identity());
+    }
   }
 
   // add chest pitch barrier cost

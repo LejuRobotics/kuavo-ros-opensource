@@ -166,6 +166,9 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
     rightElbowTrackingActivation_ = std::clamp(rightActivation, 0.0, 1.0);
   }
 
+  // 腰部位置跟随细分关闭时（chestPositionUpdateEnable_=false），chest 位置更改为超高权重软代价近似
+  void setFreezeChestPosition(bool freeze) { freezeChestPosition_ = freeze; }
+
  private:
   struct LowpassBiquadCoeff {
     double b0{0.0};
@@ -208,6 +211,7 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   std::unique_ptr<WheelPointTrackIKSolverConfig> pointTrackConfig_;
   double leftElbowTrackingActivation_{1.0};
   double rightElbowTrackingActivation_{1.0};
+  bool freezeChestPosition_{false};  // true 时 chest 位置用超高权重软代价近似锁定（位置跟随细分关闭）
 };
 
 }  // namespace HighlyDynamic
