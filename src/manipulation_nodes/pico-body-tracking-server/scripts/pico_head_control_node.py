@@ -34,10 +34,17 @@ class PicoHeadControlNode:
     def __init__(self):
         rospy.init_node("pico_head_control_node")
 
-        self.mode = rospy.get_param("/head_control_mode", HeadControlMode.VR_FOLLOW)
+        # GMR launch passes _mode:=; teleop launch sets /head_control_mode and _head_control_mode:=
+        if rospy.has_param("~mode"):
+            self.mode = rospy.get_param("~mode")
+        elif rospy.has_param("~head_control_mode"):
+            self.mode = rospy.get_param("~head_control_mode")
+        else:
+            self.mode = rospy.get_param("/head_control_mode", HeadControlMode.VR_FOLLOW)
         if self.mode not in HeadControlMode.ALL:
             rospy.logwarn("Invalid head mode '%s', fallback to vr_follow", self.mode)
             self.mode = HeadControlMode.VR_FOLLOW
+        rospy.set_param("/head_control_mode", self.mode)
 
         self.fixed_main_hand = rospy.get_param("~fixed_main_hand", "right").lower()
         if self.fixed_main_hand not in ("left", "right"):
@@ -101,6 +108,7 @@ class PicoHeadControlNode:
             self.mode = mode
             self.mode_changed = True
             rospy.loginfo("Head mode switched: %s -> %s", self.last_mode, self.mode)
+            rospy.set_param("/head_control_mode", self.mode)
             self._publish_head_mode_status()
         elif mode not in HeadControlMode.ALL:
             rospy.logwarn("Ignore invalid head mode: %s", mode)
@@ -137,6 +145,7 @@ class PicoHeadControlNode:
             self.mode_changed = True
             rospy.loginfo("Head mode switched via service: %s -> %s", self.last_mode, self.mode)
 
+        rospy.set_param("/head_control_mode", self.mode)
         self._publish_head_mode_status()
         if mode == HeadControlMode.FIXED:
             self._pub_head_fixed_user_intent.publish(Empty())

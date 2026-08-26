@@ -358,7 +358,7 @@
     <arg name="pico_diagnostic_sync_max_valid_residual_ms" default="5.0" doc="PICO clock-sync model residual P95 limit in ms"/>
     <!-- 头控参数（GMR 和 Teleop 路径共享） -->
     <arg name="pico_enable_head_control" default="true" doc="Enable independent head control node"/>
-    <arg name="pico_head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+    <arg name="pico_head_control_mode" default="vr_follow" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
     <!-- CPU affinity: bind PICO retarget process to specific cores (empty=no binding for sim) -->
     <arg name="pico_cpu_cores" default="[]" doc="CPU cores to bind PICO retarget process (empty=no binding)"/>
 
