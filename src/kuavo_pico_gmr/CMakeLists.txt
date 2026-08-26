@@ -3,24 +3,35 @@ project(kuavo_pico_gmr)
 
 ## 找到 catkin 和依赖包
 find_package(catkin REQUIRED COMPONENTS
+  message_generation
   roscpp
   rospy
   geometry_msgs
   sensor_msgs
+  std_srvs
   tf
   kuavo_msgs
+)
+
+add_service_files(
+  FILES
+  AmpJoyRoute.srv
 )
 
 ## Python 设置
 catkin_python_setup()
 
+generate_messages()
+
 ## 声明 catkin 包
 catkin_package(
   CATKIN_DEPENDS 
+    message_runtime
     roscpp
     rospy 
     geometry_msgs 
     sensor_msgs
+    std_srvs
     tf
     kuavo_msgs
 )
@@ -41,6 +52,7 @@ target_link_libraries(pico_gmr_joy_converter_node
   ${catkin_LIBRARIES}
 )
 add_dependencies(pico_gmr_joy_converter_node
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
   ${catkin_EXPORTED_TARGETS}
 )
 
