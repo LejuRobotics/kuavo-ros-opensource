@@ -2140,7 +2140,7 @@ namespace ocs2
         bool suppress_next_quest3_head_fixed_intent_{false};
         bool quest3_arm_reset_head_snapshot_active_{false};
         int arm_ctrl_mode_current_{2};
-        int arm_ctrl_mode_{2};
+        int arm_ctrl_mode_{1};  // #4019: VR 未收到 MPC 发布前视为 mode1，首次 X+A 应 1→2 激活；#3992 的 dual_feed 守卫已单独修复
         bool arm_ctrl_mode_dual_feed_{false};
         
         std::string head_ctrl_mode_{"vr_follow"};
