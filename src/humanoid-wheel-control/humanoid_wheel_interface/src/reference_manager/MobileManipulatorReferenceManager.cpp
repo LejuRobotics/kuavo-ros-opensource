@@ -3217,6 +3217,18 @@ namespace mobile_manipulator {
 
     if(req.data)
     {
+      // 复位进行中时忽略重复请求，避免轨迹被反复 resetAllMpcTrajAndTarget 打断产生震荡
+      if (isResetTorso_ || (initTime_ < resetTorsoTime_ + resetTorsoInitTime_))
+      {
+        const double remain = std::max(0.0, resetTorsoTime_ + resetTorsoInitTime_ - initTime_);
+        res.success = true;
+        res.message = std::to_string(remain);
+        ROS_WARN_STREAM_THROTTLE(1.0,
+            "[setLbResetTorsoService] torso reset already in progress, ignore duplicate request. remain="
+            << remain << "s");
+        return true;
+      }
+
       offlineTrajDisable_ = true;
       /***********************根据期望速度, 设置切换时间************************/
       vector_t torsoPose = vector_t::Zero(6);

@@ -342,6 +342,9 @@ namespace mobile_manipulator
     // G12轮臂模式标志: is_wheel_(ROBOT_VERSION>=60) 且 joystick_type==h12
     bool is_wheel_;
     bool use_g12_;
+    // G+H 复位边沿保护：避免按住期间反复调用 reset 服务导致轨迹重规划震荡
+    bool g12_torso_reset_latched_{false};
+    ros::Time g12_torso_reset_cooldown_until_;
 
     // MPC observation相关标志，用于判断是否已经完成初始化
     bool get_observation_ = false;
@@ -539,7 +542,7 @@ namespace mobile_manipulator
       return false;
     }
 
-    bool resetTorsoToInitialAsync(ros::NodeHandle& nh) 
+    bool resetTorsoToInitialAsync(ros::NodeHandle& nh)
     {
       if (!ros::service::waitForService("/mobile_manipulator_reset_torso", ros::Duration(10.0))) {
           ROS_ERROR("Service not available");
@@ -548,16 +551,22 @@ namespace mobile_manipulator
 
       ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(
           "/mobile_manipulator_reset_torso");
-      
+
       std_srvs::SetBool srv;
       srv.request.data = true;
-      
-      if (client.call(srv) && srv.response.success) {
-          ROS_INFO("Torso reset command sent successfully");
+
+      if (client.call(srv))
+      {
+        if (srv.response.success)
+        {
+          ROS_INFO("Torso reset command sent successfully: %s", srv.response.message.c_str());
           return true;
+        }
+        ROS_WARN("Torso reset rejected by service: %s", srv.response.message.c_str());
+        return false;
       }
 
-      ROS_ERROR("Failed to send torso reset command");
+      ROS_ERROR("Failed to call torso reset service");
       return false;
     }
 
@@ -844,20 +853,36 @@ namespace mobile_manipulator
         bool guide_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_GUIDE && joy_msg->buttons[G12_BTN_GUIDE] == 1);
         bool m1_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_M1 && joy_msg->buttons[G12_BTN_M1] == 1);
         bool m2_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_M2 && joy_msg->buttons[G12_BTN_M2] == 1);
+        bool old_m2_pressed = (old_joy_msg_.buttons.size() > (size_t)G12_BTN_M2 && old_joy_msg_.buttons[G12_BTN_M2] == 1);
+        // G+H 同时处于极值时，禁止摇杆继续积分/发 torso 指令，避免与复位服务抢轨迹
+        const bool gh_combo_active = guide_pressed && m1_pressed;
+        const ros::Time now = ros::Time::now();
+        const bool torso_reset_cooldown_active =
+            (!g12_torso_reset_cooldown_until_.isZero() && now < g12_torso_reset_cooldown_until_);
 
         // G+H同时极值2秒 -> Python层BUTTON_M2=1 -> 躯干复位
-        if (m2_pressed)
+        // 必须边沿触发：按住期间若持续 call reset 服务，会反复 resetAllMpcTrajAndTarget 导致震荡/撞限位
+        if (m2_pressed && !old_m2_pressed && !g12_torso_reset_latched_)
         {
           // G12 torso has no open-loop integrated pose; only re-arm mode-switch zero timer
-          zero_control_start_time_ = ros::Time::now();
+          zero_control_start_time_ = now;
           is_control_zero_ = true;
+          g12_torso_reset_latched_ = true;
+          // 给底层 Ruckig 复位留出执行窗口，期间不再发 torso 速度指令
+          g12_torso_reset_cooldown_until_ = now + ros::Duration(3.0);
+
           resetTorsoToInitialAsync(nodeHandle_);
-          std::cout << "G+H torso reset completed" << std::endl;
+          std::cout << "G+H torso reset triggered (edge)" << std::endl;
+        }
+        if (!m2_pressed && !gh_combo_active)
+        {
+          g12_torso_reset_latched_ = false;
         }
 
         // G极值 + A/B/C 模式切换
         // Python层G12按钮映射: A->buttons[3](Y), B->buttons[1](B), C->buttons[2](X)
-        if (guide_pressed)
+        // 复位组合键期间禁止切模式，避免与 reset 冲突
+        if (guide_pressed && !gh_combo_active && !torso_reset_cooldown_active)
         {
           const int G12_BTN_A = 3;  // Python层: channel 7(A) -> BUTTON_Y(3)
           const int G12_BTN_B = 1;  // Python层: channel 8(B) -> BUTTON_B(1)
@@ -892,13 +917,17 @@ namespace mobile_manipulator
           // H极值: 右杆左右->vyaw, 左杆上下->vpitch
           // Workspace limits enforced here via velocity gate; no residual state across soft-pause.
           double lx = 0.0, lz = 0.0, ay = 0.0, az = 0.0;
-          if (guide_pressed) {  // G极值: 左杆上下->vx, 右杆上下->vz
-            lx = axisWithDeadzone(joy_msg, linear_axis_index_x_);
-            lz = axisWithDeadzone(joy_msg, linear_z_axis_index_);
-          }
-          if (m1_pressed) {  // H极值: 右杆左右->vyaw, 左杆上下->vpitch
-            az = axisWithDeadzone(joy_msg, angular_axis_index_);
-            ay = axisWithDeadzone(joy_msg, linear_axis_index_x_);
+          // G+H 复位组合键 / 复位冷却期内禁止发 torso 速度，避免与复位服务抢轨迹
+          if (!gh_combo_active && !torso_reset_cooldown_active)
+          {
+            if (guide_pressed) {  // G极值: 左杆上下->vx, 右杆上下->vz
+              lx = axisWithDeadzone(joy_msg, linear_axis_index_x_);
+              lz = axisWithDeadzone(joy_msg, linear_z_axis_index_);
+            }
+            if (m1_pressed) {  // H极值: 右杆左右->vyaw, 左杆上下->vpitch
+              az = axisWithDeadzone(joy_msg, angular_axis_index_);
+              ay = axisWithDeadzone(joy_msg, linear_axis_index_x_);
+            }
           }
 
           geometry_msgs::Twist torso_vel;
