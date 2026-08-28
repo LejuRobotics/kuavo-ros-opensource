@@ -217,6 +217,60 @@ public:
      */
     Result<BusId> getBusIdByName(const std::string& bus_name);
 
+    // ===== RT 实时发送 slot =====
+    /**
+     * @brief 注册一个实时发送源（RT slot）
+     *
+     * 注册后，sender 线程每轮循环会**先**执行所有 RT 源回调（直写 CAN，绕过 ring 队列），
+     * 然后才从 ring 队列 pop 常规消息。RT 源回调在 sender 线程内执行，天然与 ring 消费串行，
+     * 不受 blocks_mutex_ 阻塞，也无需额外加锁。
+     *
+     * @note 用途：电机控制帧等 "latest-wins" 语义的高实时性消息，走 RT 直发路径；
+     *       灵巧手/使能/配置等请求-响应型消息继续走 ring，保证不丢帧。
+     * @param bus_id 目标总线 ID（由 openCanBus 返回）
+     * @param callback RT 源回调：在 sender 线程内，负责取最新 cmd → 编码 CAN 帧 → 直写。
+     *                 回调内必须调用 sendMessageRt()（或 bus 级直发），不得调用 sendMessage()（会入队，形成环）。
+     * @return 成功返回 true
+     */
+    bool registerRtSource(BusId bus_id, std::function<void()> callback);
+
+    /**
+     * @brief 注销指定总线的 RT 发送源
+     * @param bus_id 目标总线 ID
+     * @return 成功返回 true
+     */
+    bool unregisterRtSource(BusId bus_id);
+
+    /**
+     * @brief 注销全部 RT 发送源
+     * @return 成功返回 true
+     */
+    bool unregisterRtSources();
+
+    /**
+     * @brief 直发一条 CAN 帧（绕过 ring 队列）
+     *
+     * 线程安全：内部加 blocks_mutex_ 保护，可被任意线程调用。
+     *
+     * @param bus_id 目标总线 ID
+     * @param frame 要发送的 CAN 帧
+     * @return 成功返回成功码
+     */
+    Result<ErrorType> sendMessageRt(BusId bus_id, const CanMessageFrame& frame);
+
+    /**
+     * @brief 直发一条 CAN 帧（不加锁版本）
+     *
+     * 仅供 sender 线程的 RT 源回调内部使用。调用方必须保证已持有 blocks_mutex_
+     * （senderThreadFunction 的 RT 扫描段持锁调用 RT 源回调）。外部线程误用会与
+     * sender 线程竞争，导致数据竞争。
+     *
+     * @param bus_id 目标总线 ID
+     * @param frame 要发送的 CAN 帧
+     * @return 成功返回成功码
+     */
+    Result<ErrorType> sendMessageRtUnlocked(BusId bus_id, const CanMessageFrame& frame);
+
 private:
     CanBusController() = default;
     ~CanBusController();  // Destructor implementation in cpp file

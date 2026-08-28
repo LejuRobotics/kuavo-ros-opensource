@@ -135,6 +135,19 @@ public:
     void setTargets(const std::vector<RevoMotorCmd_t>& targets);
 
     /**
+     * @brief 设置电机控制是否走 RT 直发路径
+     * @param enable true=电机控制帧注册为 RT 源，由 sender 线程直发（绕过 ring 队列）
+     *               控制线程只更新 cmd，不再周期 write() 发帧
+     * @note 必须在 initialize() 之前调用
+     */
+    void setRtEnabled(bool enable);
+
+    /**
+     * @brief 获取是否启用 RT 直发
+     */
+    bool isRtEnabled() const;
+
+    /**
      * @brief 设置控制线程CPU亲和性
      * @param cpu_core CPU核心编号
      * @return 设置是否成功
@@ -201,6 +214,7 @@ private:
     std::thread control_thread_;              // 控制线程
     std::atomic<bool> running_;               // 线程运行标志
     std::atomic<int> control_frequency_;      // 控制频率(Hz)
+    std::atomic<bool> rt_enabled_{true};      // RT 直发模式标志（电机控制帧走 RT slot 绕过 ring）
     
     std::string config_file_;                 // 配置文件路径
     bool cali_;                               // 是否需要校准零点   
