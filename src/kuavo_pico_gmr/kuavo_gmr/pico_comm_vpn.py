@@ -64,6 +64,23 @@ ERROR = "ERROR"
 
 AMP_FAMILY_CONTROLLERS = frozenset(("amp_controller", "amp_wild_controller"))
 
+# /joy layouts accepted by AutoGait.  The 8/11 layout is shared by G12/H12
+# and BT2, while BT2Pro publishes 8 axes and 16 buttons with different axis
+# indices.  Keep these indices in the physical input layout: the AMP selector
+# preserves the active controller's 8/11 or 8/16 layout rather than converting
+# BT2Pro to the canonical 8/11 layout.
+LOCAL_JOY_AXIS_COUNT = 8
+LOCAL_JOY_BUTTON_COUNTS = frozenset((11, 16))
+LOCAL_JOY_AXIS_RANGE_TOLERANCE = 1e-3
+LOCAL_JOY_MOTION_AXES = {
+    11: (0, 1, 3, 4, 6, 7),
+    16: (0, 1, 2, 3, 6, 7),
+}
+LOCAL_JOY_TRIGGER_AXES = {
+    11: (2, 5),
+    16: (4, 5),
+}
+
 
 class _TimeoutTransport(xmlrpc.client.Transport):
     """Bound ROS Master XML-RPC calls used by bridge readiness checks."""
@@ -146,6 +163,9 @@ class SessionManager:
         self.g12_axis_deadzone = float(
             rospy.get_param("~g12_axis_deadzone", 0.05)
         )
+        self.g12_trigger_pressed_threshold = float(
+            rospy.get_param("~g12_trigger_pressed_threshold", -0.5)
+        )
         self.g12_input_timeout = float(
             rospy.get_param("~g12_input_timeout", 0.2)
         )
@@ -170,6 +190,17 @@ class SessionManager:
         self.auto_gait_node = rospy.get_param(
             "~auto_gait_node", "/humanoid_joy_control_auto_gait_with_vel"
         )
+
+        if not math.isfinite(self.g12_axis_deadzone) or not (
+            0.0 < self.g12_axis_deadzone < 1.0
+        ):
+            raise ValueError("g12_axis_deadzone must be finite and in (0, 1)")
+        if not math.isfinite(self.g12_trigger_pressed_threshold) or not (
+            -1.0 < self.g12_trigger_pressed_threshold <= 0.0
+        ):
+            raise ValueError(
+                "g12_trigger_pressed_threshold must be finite and in (-1, 0]"
+            )
 
         self._lock = threading.RLock()
         self._state = IDLE_AMP
@@ -292,27 +323,74 @@ class SessionManager:
 
     def _on_g12_joy(self, message):
         now = time.monotonic()
-        valid_layout = len(message.axes) == 8 and len(message.buttons) == 11
-        axes_valid = valid_layout and all(
-            math.isfinite(float(value)) and -1.001 <= float(value) <= 1.001
-            for value in message.axes
-        )
-        buttons_valid = valid_layout and all(
-            int(value) in (0, 1) for value in message.buttons
-        )
-        has_intent = bool(
-            axes_valid
-            and buttons_valid
-            and (
-                any(abs(float(value)) > self.g12_axis_deadzone for value in message.axes)
-                or any(int(value) != 0 for value in message.buttons)
-            )
-        )
+        has_intent = self._local_joy_has_intent(message)
         with self._lock:
+            if has_intent is None:
+                # An invalid frame must never refresh local-controller
+                # ownership.  If it follows an active frame, release the
+                # active flag immediately while retaining the neutral-hold
+                # timestamp from the last valid operation.
+                self._g12_has_intent = False
+                return
             self._last_g12_input_time = now
             self._g12_has_intent = has_intent
             if has_intent:
                 self._last_g12_active_time = now
+
+    def _local_joy_has_intent(self, message):
+        """Return local /joy intent, or None when the frame is invalid."""
+        button_count = len(message.buttons)
+        if (
+            len(message.axes) != LOCAL_JOY_AXIS_COUNT
+            or button_count not in LOCAL_JOY_BUTTON_COUNTS
+        ):
+            rospy.logwarn_throttle(
+                2.0,
+                "Ignore local Joy with unexpected layout: axes=%d, buttons=%d; "
+                "expected G12/BT2 8/11 or BT2Pro 8/16",
+                len(message.axes),
+                button_count,
+            )
+            return None
+
+        axes = tuple(float(value) for value in message.axes)
+        if any(
+            not math.isfinite(value)
+            or value < -1.0 - LOCAL_JOY_AXIS_RANGE_TOLERANCE
+            or value > 1.0 + LOCAL_JOY_AXIS_RANGE_TOLERANCE
+            for value in axes
+        ):
+            rospy.logwarn_throttle(
+                2.0,
+                "Ignore local Joy with a non-finite/out-of-range axis",
+            )
+            return None
+        if any(value not in (0, 1) for value in message.buttons):
+            rospy.logwarn_throttle(
+                2.0,
+                "Ignore local Joy with a button value other than 0/1",
+            )
+            return None
+
+        # Any deliberate local button operation owns the whole output frame.
+        # This also prevents a PICO command from being mixed in while the user
+        # operates a valid BT2Pro-only button.
+        if any(value != 0 for value in message.buttons):
+            return True
+
+        if any(
+            abs(axes[index]) > self.g12_axis_deadzone
+            for index in LOCAL_JOY_MOTION_AXES[button_count]
+        ):
+            return True
+
+        # LT/RT rest at either 0 or +1 depending on the driver and move toward
+        # -1 when pressed.  An absolute deadzone would therefore make a
+        # neutral BT2/BT2Pro permanently revoke the PICO joystick lease.
+        return any(
+            axes[index] < self.g12_trigger_pressed_threshold
+            for index in LOCAL_JOY_TRIGGER_AXES[button_count]
+        )
 
     def _g12_active_locked(self, now=None):
         now = time.monotonic() if now is None else now
@@ -501,11 +579,13 @@ class SessionManager:
             )
             g12_interrupt = (
                 state == PICO_JOYSTICK_ACTIVE
-                and self._g12_active_locked(now)
+                and self._g12_blocks_transition_locked(now)
             )
 
         if g12_interrupt:
-            rospy.logwarn("G12 input took priority; revoking PICO joystick lease")
+            rospy.logwarn(
+                "Local Joy input took priority; revoking PICO joystick lease"
+            )
             self._interrupt_pico_joystick_for_g12(task_id)
             return
 
@@ -609,7 +689,7 @@ class SessionManager:
             if self._g12_blocks_transition_locked():
                 return 409, self._failure(
                     "G12_ACTIVE",
-                    "G12 input is active or has not been neutral long enough",
+                    "Local Joy input is active or has not been neutral long enough",
                 )
 
         try:
@@ -710,7 +790,7 @@ class SessionManager:
             self._allowed_vr_ip = None
             self._disconnect_reason = reason or "requested"
 
-            g12_active = self._g12_active_locked()
+            g12_active = self._g12_blocks_transition_locked()
 
         if g12_active:
             return self._interrupt_pico_joystick_for_g12(task_id)
@@ -765,7 +845,7 @@ class SessionManager:
             if self._g12_blocks_transition_locked():
                 return 409, self._failure(
                     "G12_ACTIVE",
-                    "G12 input is active or has not been neutral long enough",
+                    "Local Joy input is active or has not been neutral long enough",
                 )
             self._state = (
                 PICO_JOYSTICK_STOPPING
@@ -1050,14 +1130,16 @@ class SessionManager:
         with self._lock:
             if task_id != self._active_task_id:
                 return 409, self._failure(
-                    "TASK_MISMATCH", "G12 interruption no longer matches the active task"
+                    "TASK_MISMATCH",
+                    "Local Joy interruption no longer matches the active task",
                 )
             self._state = PICO_JOYSTICK_STOPPING
             self._allowed_vr_ip = None
             self._disconnect_reason = "g12_override"
 
-        # G12 owns the converter output now. Revoke the remote lease without
-        # issuing stance commands that would fight the local operator.
+        # The local controller owns the converter output now. Revoke the
+        # remote lease without issuing stance commands that would fight the
+        # local operator.
         self._publish_neutral_joy()
         with self._lock:
             self._last_task_id = task_id
@@ -1070,14 +1152,16 @@ class SessionManager:
             self._joystick_zeroed = True
             self._last_error = ""
             self._state = IDLE_AMP
-        rospy.logwarn("PICO joystick session interrupted by G12: task=%s", task_id)
-        return 200, self._success("PICO joystick interrupted by G12")
+        rospy.logwarn(
+            "PICO joystick session interrupted by local Joy: task=%s", task_id
+        )
+        return 200, self._success("PICO joystick interrupted by local Joy")
 
     def _require_g12_neutral(self):
         with self._lock:
             if self._g12_blocks_transition_locked():
                 raise RuntimeError(
-                    "G12 input is active or has not been neutral long enough"
+                    "Local Joy input is active or has not been neutral long enough"
                 )
 
     def _bridge_graph_error(self):

@@ -7,11 +7,13 @@ import math
 import struct
 import threading
 import time
+import uuid
 import xmlrpc.client
 
 import rosgraph
 import rosgraph.network
 import rospy
+from kuavo_pico_gmr.srv import AmpJoyRoute, AmpJoyRouteRequest
 from kuavo_msgs.msg import ControllerSwitchEvent
 from kuavo_msgs.srv import SetJoyTopic, getControllerList
 import rospy.impl.tcpros_base as tcpros_base
@@ -177,6 +179,16 @@ class PicoJoyTopicManager:
             "~set_joy_topic_service",
             "/set_joy_topic",
         )
+        self._prepare_amp_route_service = rospy.get_param(
+            "~prepare_amp_route_service",
+            "/pico_gmr_joy_converter/prepare_amp_route",
+        )
+        self._route_subscriber_node = rospy.resolve_name(
+            rospy.get_param(
+                "~route_subscriber_node",
+                "/humanoid_joy_control_auto_gait_with_vel",
+            )
+        )
         self._pico_joy_topic = rospy.get_param(
             "~pico_joy_topic",
             "/pico/joy_converted",
@@ -193,6 +205,10 @@ class PicoJoyTopicManager:
         self._service_call_timeout_s = self._positive_finite_param(
             "~service_call_timeout_s",
             1.0,
+        )
+        self._route_ready_timeout_s = self._positive_finite_param(
+            "~route_ready_timeout_s",
+            1.5,
         )
 
         configured_amp_names = rospy.get_param(
@@ -225,12 +241,26 @@ class PicoJoyTopicManager:
         self._controller_known = False
         self._desired_topic = None
         self._applied_topic = None
+        self._desired_route_revision = 0
+        self._desired_route_context = {
+            "reason": AmpJoyRouteRequest.REASON_CONTROLLER_QUERY,
+            "event_revision": 0,
+            "event_stamp": rospy.Time(),
+            "from_controller": "",
+            "to_controller": "",
+        }
+        self._manager_epoch = uuid.uuid4().hex
+        self._next_route_generation = 0
+        self._route_transaction = None
 
         # UNKNOWN is deliberately different from ABSENT.  A transient Master
         # timeout must not erase a previously verified provider identity.
         self._set_topic_service_identity_status = _IDENTITY_UNKNOWN
         self._set_topic_service_identity = None
         self._set_topic_service_generation = 0
+        self._prepare_route_service_identity_status = _IDENTITY_UNKNOWN
+        self._prepare_route_service_identity = None
+        self._prepare_route_service_generation = 0
         self._controller_list_service_identity_status = _IDENTITY_UNKNOWN
         self._controller_list_service_identity = None
         self._controller_list_service_generation = 0
@@ -239,6 +269,10 @@ class PicoJoyTopicManager:
         self._set_joy_topic = rospy.ServiceProxy(
             self._set_joy_topic_service,
             SetJoyTopic,
+        )
+        self._prepare_amp_route = rospy.ServiceProxy(
+            self._prepare_amp_route_service,
+            AmpJoyRoute,
         )
         self._get_controller_list = rospy.ServiceProxy(
             self._controller_list_service,
@@ -260,7 +294,8 @@ class PicoJoyTopicManager:
         self._worker.start()
 
         rospy.loginfo(
-            "Pico joy topic manager: AMP=%s, other=%s, AMP controllers=%s",
+            "Pico joy topic manager epoch=%s: AMP=%s, other=%s, AMP controllers=%s",
+            self._manager_epoch,
             self._pico_joy_topic,
             self._default_joy_topic,
             sorted(self._amp_controller_names),
@@ -293,7 +328,24 @@ class PicoJoyTopicManager:
         with self._state_cv:
             self._event_revision += 1
             changed = desired_topic != self._desired_topic
+            if changed:
+                self._desired_route_revision += 1
+                # A discarded AMP transaction may already have an in-flight
+                # /set_joy_topic request.  Its service callback can mutate the
+                # real AutoGait subscription even though the stale response is
+                # ignored below.  Forget the cached route so the new desired
+                # controller always performs an authoritative setter call.
+                if self._route_transaction is not None:
+                    self._applied_topic = None
+                self._route_transaction = None
             self._desired_topic = desired_topic
+            self._desired_route_context = {
+                "reason": AmpJoyRouteRequest.REASON_CONTROLLER_EVENT,
+                "event_revision": self._event_revision,
+                "event_stamp": message.header.stamp,
+                "from_controller": str(message.from_controller),
+                "to_controller": controller_name,
+            }
             self._controller_known = True
             self._wake_revision += 1
             self._state_cv.notify()
@@ -335,6 +387,7 @@ class PicoJoyTopicManager:
             try:
                 if time.monotonic() >= next_identity_refresh:
                     self._refresh_service_registrations()
+                    self._audit_joy_subscription()
                     next_identity_refresh = time.monotonic() + self._retry_period_s
 
                 self._query_current_controller()
@@ -402,7 +455,19 @@ class PicoJoyTopicManager:
             ):
                 return
             changed = desired_topic != self._desired_topic
+            if changed:
+                self._desired_route_revision += 1
+                if self._route_transaction is not None:
+                    self._applied_topic = None
+                self._route_transaction = None
             self._desired_topic = desired_topic
+            self._desired_route_context = {
+                "reason": AmpJoyRouteRequest.REASON_CONTROLLER_QUERY,
+                "event_revision": self._event_revision,
+                "event_stamp": rospy.Time(),
+                "from_controller": "",
+                "to_controller": controller_name,
+            }
             self._controller_known = True
 
         if changed:
@@ -413,62 +478,454 @@ class PicoJoyTopicManager:
             )
 
     def _apply_desired_topic(self):
-        # Chase controller events that arrive while a service call is in flight.
-        # The cap protects the worker if another source is intentionally toggling
-        # controllers at a very high rate; the latest state is retried next pass.
+        # Chase controller events that arrive while a bounded service call is
+        # in flight.  AMP routing is a transaction: prepare the converter once,
+        # ask AutoGait to subscribe, then require a same-token target-connection
+        # ACK before considering the route applied.
         for _attempt in range(8):
             with self._state_cv:
                 desired_topic = self._desired_topic
-                if desired_topic is None or desired_topic == self._applied_topic:
-                    return
-                if (
-                    self._set_topic_service_identity_status != _IDENTITY_FOUND
-                    or self._set_topic_service_identity is None
-                ):
-                    return
-                service_generation = self._set_topic_service_generation
-                service_uri = self._set_topic_service_identity[0]
-
-            request = self._set_joy_topic.request_class()
-            request.topic_name = desired_topic
-            try:
-                response = self._call_service_bounded(
-                    self._set_joy_topic,
-                    service_uri,
-                    request,
-                )
-            except Exception as exception:
-                rospy.logwarn_throttle(
-                    5.0,
-                    "Set Joy topic service unavailable: %s" % exception,
-                )
+            if desired_topic is None:
                 return
 
-            if not response.success:
-                rospy.logwarn_throttle(
-                    5.0,
-                    "Set Joy topic rejected: %s" % response.message,
-                )
-                return
-
-            with self._state_cv:
-                # Never let a late reply from an old service provider mark the
-                # new provider's real subscription as already reconciled.
-                if (
-                    self._set_topic_service_generation != service_generation
-                    or self._set_topic_service_identity_status != _IDENTITY_FOUND
-                ):
-                    continue
-                self._applied_topic = desired_topic
-                latest_desired_topic = self._desired_topic
-
-            rospy.loginfo("Joy topic switched to %s", desired_topic)
-            if latest_desired_topic == desired_topic:
+            if desired_topic == self._pico_joy_topic:
+                result = self._reconcile_amp_route()
+            else:
+                result = self._reconcile_default_route()
+            if result != "desired_changed":
                 return
 
         rospy.logwarn(
             "Joy topic kept changing while applying; retry latest state next pass"
         )
+
+    def _new_route_transaction_locked(self):
+        self._next_route_generation += 1
+        context = dict(self._desired_route_context)
+        transaction = {
+            "manager_epoch": self._manager_epoch,
+            "route_generation": self._next_route_generation,
+            "desired_revision": self._desired_route_revision,
+            "set_generation": self._set_topic_service_generation,
+            "set_service_uri": self._set_topic_service_identity[0],
+            "prepare_generation": self._prepare_route_service_generation,
+            "prepare_service_uri": self._prepare_route_service_identity[0],
+            "reason": context["reason"],
+            "event_revision": context["event_revision"],
+            "event_stamp": context["event_stamp"],
+            "from_controller": context["from_controller"],
+            "to_controller": context["to_controller"],
+            # Unknown/fused applied state first goes through a confirmed raw
+            # route.  Besides being a safe fallback, this guarantees that any
+            # old converted-topic TCP connection is closing before PREPARE;
+            # only a subsequent /set_joy_topic(fused) connection may ACK the
+            # new generation.
+            "phase": (
+                "new"
+                if self._applied_topic == self._default_joy_topic
+                else "preflight_raw"
+            ),
+            "ready_deadline": None,
+        }
+        self._route_transaction = transaction
+        return transaction
+
+    def _route_transaction_is_current_locked(self, transaction):
+        return (
+            self._route_transaction is transaction
+            and self._desired_topic == self._pico_joy_topic
+            and self._desired_route_revision == transaction["desired_revision"]
+            and self._set_topic_service_generation == transaction["set_generation"]
+            and self._prepare_route_service_generation
+            == transaction["prepare_generation"]
+            and self._set_topic_service_identity_status == _IDENTITY_FOUND
+            and self._prepare_route_service_identity_status == _IDENTITY_FOUND
+        )
+
+    @staticmethod
+    def _route_response_matches(transaction, response):
+        return (
+            response.manager_epoch == transaction["manager_epoch"]
+            and response.route_generation == transaction["route_generation"]
+        )
+
+    def _make_route_request(self, transaction, action):
+        request = AmpJoyRouteRequest()
+        request.action = action
+        request.manager_epoch = transaction["manager_epoch"]
+        request.route_generation = transaction["route_generation"]
+        request.reason = transaction["reason"]
+        request.controller_event_revision = transaction["event_revision"]
+        request.controller_event_stamp = transaction["event_stamp"]
+        request.from_controller = transaction["from_controller"]
+        request.to_controller = transaction["to_controller"]
+        return request
+
+    def _call_route_transaction(self, transaction, action):
+        request = self._make_route_request(transaction, action)
+        return self._call_service_bounded(
+            self._prepare_amp_route,
+            transaction["prepare_service_uri"],
+            request,
+        )
+
+    def _reconcile_amp_route(self):
+        with self._state_cv:
+            if self._desired_topic != self._pico_joy_topic:
+                return "desired_changed"
+            if (
+                self._set_topic_service_identity_status != _IDENTITY_FOUND
+                or self._set_topic_service_identity is None
+            ):
+                return "wait"
+            if (
+                self._prepare_route_service_identity_status != _IDENTITY_FOUND
+                or self._prepare_route_service_identity is None
+            ):
+                if self._applied_topic == self._default_joy_topic:
+                    return "wait"
+                service_generation = self._set_topic_service_generation
+                service_uri = self._set_topic_service_identity[0]
+                route_unavailable = True
+            else:
+                route_unavailable = False
+
+            if route_unavailable:
+                transaction = None
+            else:
+                transaction = self._route_transaction
+                if (
+                    transaction is None
+                    or transaction["desired_revision"] != self._desired_route_revision
+                    or transaction["set_generation"]
+                    != self._set_topic_service_generation
+                    or transaction["prepare_generation"]
+                    != self._prepare_route_service_generation
+                ):
+                    transaction = self._new_route_transaction_locked()
+
+        if route_unavailable:
+            return self._fallback_when_converter_unavailable(
+                service_generation,
+                service_uri,
+            )
+
+        if transaction["phase"] == "preflight_raw":
+            request = self._set_joy_topic.request_class()
+            request.topic_name = self._default_joy_topic
+            try:
+                response = self._call_service_bounded(
+                    self._set_joy_topic,
+                    transaction["set_service_uri"],
+                    request,
+                )
+            except Exception as exception:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "AMP route raw-Joy preflight unavailable: %s" % exception,
+                )
+                return "wait"
+            if not response.success:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "AMP route raw-Joy preflight rejected: %s" % response.message,
+                )
+                return "wait"
+            with self._state_cv:
+                if not self._route_transaction_is_current_locked(transaction):
+                    return "desired_changed"
+                self._applied_topic = self._default_joy_topic
+                transaction["phase"] = "new"
+
+        if transaction["phase"] == "new":
+            try:
+                response = self._call_route_transaction(
+                    transaction,
+                    AmpJoyRouteRequest.ACTION_PREPARE,
+                )
+            except Exception as exception:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "AMP Joy route prepare service unavailable: %s" % exception,
+                )
+                return "wait"
+
+            if not response.success:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "AMP Joy route prepare rejected: %s" % response.message,
+                )
+                return "wait"
+            if not self._route_response_matches(transaction, response):
+                rospy.logwarn("Ignore mismatched AMP route prepare response")
+                return "wait"
+
+            with self._state_cv:
+                if not self._route_transaction_is_current_locked(transaction):
+                    return "desired_changed"
+                transaction["phase"] = "prepared"
+
+        if transaction["phase"] == "prepared":
+            request = self._set_joy_topic.request_class()
+            request.topic_name = self._pico_joy_topic
+            try:
+                response = self._call_service_bounded(
+                    self._set_joy_topic,
+                    transaction["set_service_uri"],
+                    request,
+                )
+            except Exception as exception:
+                # The server may have executed before the bounded client timed
+                # out.  Do not immediately repeat the setter: that would tear
+                # down a connection which may already be establishing this
+                # token's neutral/input-generation barrier.  First wait for
+                # the same-token ready ACK; on timeout the normal raw-/joy
+                # fallback closes the ambiguous route before a fresh retry.
+                rospy.logwarn_throttle(
+                    5.0,
+                    "Set AMP Joy topic service unavailable: %s" % exception,
+                )
+                with self._state_cv:
+                    if not self._route_transaction_is_current_locked(transaction):
+                        return "desired_changed"
+                    transaction["phase"] = "waiting_ready"
+                    transaction["ready_deadline"] = (
+                        time.monotonic() + self._route_ready_timeout_s
+                    )
+                response = None
+
+            if response is not None and not response.success:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "Set AMP Joy topic rejected: %s" % response.message,
+                )
+                return self._fallback_amp_route(transaction)
+
+            with self._state_cv:
+                if not self._route_transaction_is_current_locked(transaction):
+                    return "desired_changed"
+                transaction["phase"] = "waiting_ready"
+                transaction["ready_deadline"] = (
+                    time.monotonic() + self._route_ready_timeout_s
+                )
+
+        try:
+            route_status = self._call_route_transaction(
+                transaction,
+                AmpJoyRouteRequest.ACTION_STATUS,
+            )
+        except Exception as exception:
+            rospy.logwarn_throttle(
+                5.0,
+                "AMP Joy route status unavailable: %s" % exception,
+            )
+            route_status = None
+
+        ready = (
+            route_status is not None
+            and self._route_response_matches(transaction, route_status)
+            and route_status.success
+            and route_status.ready
+            and route_status.target_connected
+            and route_status.local_barrier_established
+        )
+        if ready:
+            with self._state_cv:
+                if not self._route_transaction_is_current_locked(transaction):
+                    return "desired_changed"
+                was_applied = self._applied_topic == self._pico_joy_topic
+                transaction["phase"] = "ready"
+                transaction["ready_deadline"] = None
+                self._applied_topic = self._pico_joy_topic
+            if not was_applied:
+                rospy.loginfo(
+                    "Joy topic switched to %s with route generation %d ready",
+                    self._pico_joy_topic,
+                    transaction["route_generation"],
+                )
+            return "done"
+
+        with self._state_cv:
+            if not self._route_transaction_is_current_locked(transaction):
+                return "desired_changed"
+            if transaction["ready_deadline"] is None:
+                transaction["phase"] = "waiting_ready"
+                transaction["ready_deadline"] = (
+                    time.monotonic() + self._route_ready_timeout_s
+                )
+                self._applied_topic = None
+            deadline_expired = time.monotonic() >= transaction["ready_deadline"]
+
+        if not deadline_expired:
+            return "wait"
+
+        rospy.logerr(
+            "AMP Joy route generation %d did not become ready within %.3fs; "
+            "falling back to %s",
+            transaction["route_generation"],
+            self._route_ready_timeout_s,
+            self._default_joy_topic,
+        )
+        return self._fallback_amp_route(transaction)
+
+    def _fallback_when_converter_unavailable(
+        self,
+        service_generation,
+        service_uri,
+    ):
+        """Keep AMP controllable through raw /joy while its converter is absent."""
+
+        request = self._set_joy_topic.request_class()
+        request.topic_name = self._default_joy_topic
+        try:
+            response = self._call_service_bounded(
+                self._set_joy_topic,
+                service_uri,
+                request,
+            )
+        except Exception as exception:
+            rospy.logwarn_throttle(
+                5.0,
+                "Cannot fall back to default Joy while AMP converter is "
+                "unavailable: %s" % exception,
+            )
+            return "wait"
+        if not response.success:
+            rospy.logwarn_throttle(
+                5.0,
+                "Default Joy fallback rejected while AMP converter is "
+                "unavailable: %s" % response.message,
+            )
+            return "wait"
+
+        with self._state_cv:
+            if (
+                self._desired_topic != self._pico_joy_topic
+                or self._set_topic_service_generation != service_generation
+                or self._set_topic_service_identity_status != _IDENTITY_FOUND
+            ):
+                return "desired_changed"
+            self._applied_topic = self._default_joy_topic
+
+        rospy.logerr(
+            "AMP Joy converter route is unavailable; AutoGait fell back to %s. "
+            "Pico walking is disabled until the converter route recovers.",
+            self._default_joy_topic,
+        )
+        return "wait"
+
+    def _fallback_amp_route(self, transaction):
+        request = self._set_joy_topic.request_class()
+        request.topic_name = self._default_joy_topic
+        try:
+            response = self._call_service_bounded(
+                self._set_joy_topic,
+                transaction["set_service_uri"],
+                request,
+            )
+        except Exception as exception:
+            rospy.logwarn_throttle(
+                5.0,
+                "Failed to restore default Joy after AMP route timeout: %s"
+                % exception,
+            )
+            return "wait"
+        if not response.success:
+            rospy.logwarn_throttle(
+                5.0,
+                "Default Joy fallback rejected: %s" % response.message,
+            )
+            return "wait"
+
+        with self._state_cv:
+            if self._set_topic_service_generation != transaction["set_generation"]:
+                return "desired_changed"
+            self._applied_topic = self._default_joy_topic
+            if self._route_transaction is transaction:
+                self._route_transaction = None
+        self._abort_route_transaction(transaction)
+        return "wait"
+
+    def _reconcile_default_route(self):
+        with self._state_cv:
+            if self._desired_topic == self._pico_joy_topic:
+                return "desired_changed"
+            if (
+                self._set_topic_service_identity_status != _IDENTITY_FOUND
+                or self._set_topic_service_identity is None
+            ):
+                return "wait"
+            transaction = self._route_transaction
+            if self._applied_topic == self._default_joy_topic and transaction is None:
+                return "done"
+            service_generation = self._set_topic_service_generation
+            service_uri = self._set_topic_service_identity[0]
+
+        # Confirm raw /joy before aborting a prepared converter transaction.
+        # A late/unknown AMP set response can otherwise leave AutoGait on the
+        # frozen converted topic while the converter has already unfrozen.
+        request = self._set_joy_topic.request_class()
+        request.topic_name = self._default_joy_topic
+        try:
+            response = self._call_service_bounded(
+                self._set_joy_topic,
+                service_uri,
+                request,
+            )
+        except Exception as exception:
+            rospy.logwarn_throttle(
+                5.0,
+                "Set default Joy topic service unavailable: %s" % exception,
+            )
+            return "wait"
+        if not response.success:
+            rospy.logwarn_throttle(
+                5.0,
+                "Set default Joy topic rejected: %s" % response.message,
+            )
+            return "wait"
+
+        with self._state_cv:
+            if (
+                self._set_topic_service_generation != service_generation
+                or self._set_topic_service_identity_status != _IDENTITY_FOUND
+            ):
+                return "desired_changed"
+            self._applied_topic = self._default_joy_topic
+            latest_desired_topic = self._desired_topic
+            if self._route_transaction is transaction:
+                self._route_transaction = None
+
+        if transaction is not None:
+            self._abort_route_transaction(transaction)
+        rospy.loginfo("Joy topic switched to %s", self._default_joy_topic)
+        return (
+            "done"
+            if latest_desired_topic != self._pico_joy_topic
+            else "desired_changed"
+        )
+
+    def _abort_route_transaction(self, transaction):
+        try:
+            response = self._call_route_transaction(
+                transaction,
+                AmpJoyRouteRequest.ACTION_ABORT,
+            )
+            if not self._route_response_matches(transaction, response):
+                rospy.logwarn("Ignore mismatched AMP route abort response")
+            elif not response.success:
+                rospy.logwarn_throttle(
+                    5.0,
+                    "AMP Joy route abort rejected: %s" % response.message,
+                )
+        except Exception as exception:
+            # The target has already been confirmed on raw /joy.  A failed
+            # cleanup cannot compromise that route; a future PREPARE with a new
+            # token supersedes this converter state.
+            rospy.logwarn_throttle(
+                5.0,
+                "AMP Joy route abort service unavailable: %s" % exception,
+            )
 
     def _call_service_bounded(self, proxy, service_uri, request):
         """Call a rospy service without an unbounded Master or TCP wait.
@@ -573,9 +1030,95 @@ class PicoJoyTopicManager:
         # at a new TCP port without changing either its XML-RPC URI or PID.
         return _IDENTITY_FOUND, (service_uri, tuple(provider_identities))
 
+    def _lookup_joy_subscriptions(self):
+        """Read the target node's actual raw/fused Joy subscriptions.
+
+        SetJoyTopic has no getter and a client-side timeout cannot cancel a
+        request that the server has already accepted.  The ROS node XML-RPC
+        API is therefore the authoritative read-back used to repair a late
+        service mutation or an out-of-band caller of /set_joy_topic.
+        """
+
+        try:
+            code, _message, node_uri = self._master_rpc(
+                "lookupNode",
+                self._route_subscriber_node,
+            )
+            if code != 1 or not node_uri:
+                return _IDENTITY_ABSENT, set()
+            with xmlrpc.client.ServerProxy(
+                node_uri,
+                transport=_TimeoutTransport(self._master_probe_timeout_s),
+                allow_none=True,
+            ) as node:
+                code, _message, subscriptions = node.getSubscriptions(
+                    rospy.get_name()
+                )
+            if code != 1:
+                return _IDENTITY_UNKNOWN, set()
+        except Exception as exception:
+            rospy.logwarn_throttle(
+                5.0,
+                "ROS subscription lookup failed for %s: %s"
+                % (self._route_subscriber_node, exception),
+            )
+            return _IDENTITY_UNKNOWN, set()
+
+        expected_topics = {self._default_joy_topic, self._pico_joy_topic}
+        actual_topics = {
+            str(subscription[0])
+            for subscription in subscriptions
+            if isinstance(subscription, (list, tuple))
+            and len(subscription) >= 2
+            and str(subscription[0]) in expected_topics
+            and str(subscription[1]) == "sensor_msgs/Joy"
+        }
+        return _IDENTITY_FOUND, actual_topics
+
+    def _audit_joy_subscription(self):
+        status, actual_topics = self._lookup_joy_subscriptions()
+        if status == _IDENTITY_UNKNOWN:
+            return
+
+        with self._state_cv:
+            applied_topic = self._applied_topic
+            transaction = self._route_transaction
+            # PREPARE/set/READY transitions intentionally pass through raw,
+            # disconnected, and fused graph states.  Their tokenized STATUS
+            # ACK is stronger than a point-in-time snapshot.  A transaction in
+            # phase "new", however, has not called PREPARE yet and requires a
+            # confirmed raw route; auditing it prevents a late/out-of-band
+            # fused setter from leaving PREPARE stuck behind an old connection.
+            if transaction is not None and transaction["phase"] in (
+                "preflight_raw",
+                "prepared",
+                "waiting_ready",
+            ):
+                return
+            if applied_topic not in (self._default_joy_topic, self._pico_joy_topic):
+                return
+            if actual_topics == {applied_topic}:
+                return
+
+            self._applied_topic = None
+            if transaction is not None:
+                self._route_transaction = None
+            self._wake_revision += 1
+            self._state_cv.notify()
+
+        rospy.logwarn_throttle(
+            5.0,
+            "AutoGait Joy subscription drift detected: cached=%s, actual=%s; "
+            "reapplying the controller-selected route"
+            % (applied_topic, sorted(actual_topics)),
+        )
+
     def _refresh_service_registrations(self):
         set_topic_probe = self._lookup_service_identity(
             self._set_joy_topic_service
+        )
+        prepare_route_probe = self._lookup_service_identity(
+            self._prepare_amp_route_service
         )
         with self._state_cv:
             controller_probe_event_revision = self._event_revision
@@ -587,6 +1130,10 @@ class PicoJoyTopicManager:
             "set_topic",
             *set_topic_probe,
         )
+        prepare_route_changed = self._commit_identity_probe(
+            "prepare_route",
+            *prepare_route_probe,
+        )
         controller_list_changed = self._commit_identity_probe(
             "controller_list",
             *controller_list_probe,
@@ -596,6 +1143,11 @@ class PicoJoyTopicManager:
         if set_topic_changed:
             rospy.logwarn(
                 "Set Joy topic service registration changed; reapplying desired topic"
+            )
+        if prepare_route_changed:
+            rospy.logwarn(
+                "AMP route prepare service registration changed; "
+                "reconciling the fused route when needed"
             )
         if controller_list_changed:
             rospy.logwarn(
@@ -624,6 +1176,49 @@ class PicoJoyTopicManager:
                 self._set_topic_service_identity = identity
                 self._set_topic_service_generation += 1
                 self._applied_topic = None
+                if (
+                    old_status != _IDENTITY_UNKNOWN
+                    and self._desired_topic == self._pico_joy_topic
+                ):
+                    self._desired_route_revision += 1
+                    self._desired_route_context = {
+                        "reason": AmpJoyRouteRequest.REASON_SET_TOPIC_RECOVERY,
+                        "event_revision": self._event_revision,
+                        "event_stamp": rospy.Time(),
+                        "from_controller": "",
+                        "to_controller": "",
+                    }
+                    self._route_transaction = None
+            elif service_kind == "prepare_route":
+                old_status = self._prepare_route_service_identity_status
+                old_identity = self._prepare_route_service_identity
+                changed = old_status != status or old_identity != identity
+                if not changed:
+                    return False
+                self._prepare_route_service_identity_status = status
+                self._prepare_route_service_identity = identity
+                self._prepare_route_service_generation += 1
+                # A restarted converter has lost its layout/edge guards.  Only
+                # invalidate a route that uses the fused AMP topic; in a
+                # non-AMP mode the raw /joy subscription is independent of
+                # this service and must not be needlessly torn down/recreated.
+                if (
+                    old_status != _IDENTITY_UNKNOWN
+                    and (
+                        self._desired_topic == self._pico_joy_topic
+                        or self._applied_topic == self._pico_joy_topic
+                    )
+                ):
+                    self._applied_topic = None
+                    self._desired_route_revision += 1
+                    self._desired_route_context = {
+                        "reason": AmpJoyRouteRequest.REASON_CONVERTER_RECOVERY,
+                        "event_revision": self._event_revision,
+                        "event_stamp": rospy.Time(),
+                        "from_controller": "",
+                        "to_controller": "",
+                    }
+                    self._route_transaction = None
             elif service_kind == "controller_list":
                 old_status = self._controller_list_service_identity_status
                 old_identity = self._controller_list_service_identity
@@ -656,7 +1251,7 @@ class PicoJoyTopicManager:
         # current reconciliation pass.  The daemon flag remains a final guard.
         join_timeout = (
             8.0 * self._master_probe_timeout_s
-            + 2.0 * self._service_call_timeout_s
+            + 4.0 * self._service_call_timeout_s
             + 1.0
         )
         self._worker.join(timeout=join_timeout)

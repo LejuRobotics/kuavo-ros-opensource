@@ -175,6 +175,8 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   }
 
   void disableKneeLegLock() { lockKneeLegEnabled_ = false; }
+  // 腰部位置跟随细分关闭时（chestPositionUpdateEnable_=false），chest 位置更改为超高权重软代价近似
+  void setFreezeChestPosition(bool freeze) { freezeChestPosition_ = freeze; }
 
  private:
   struct LowpassBiquadCoeff {
@@ -218,11 +220,11 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   std::unique_ptr<WheelPointTrackIKSolverConfig> pointTrackConfig_;
   double leftElbowTrackingActivation_{1.0};
   double rightElbowTrackingActivation_{1.0};
-
   // 锁下肢前两个关节（knee/leg）的硬约束状态（setConstraints 为 const，故用 mutable）
   mutable bool lockKneeLegEnabled_{false};
   mutable double lockKneeQ_{0.0};
   mutable double lockLegQ_{0.0};
-};
+  bool freezeChestPosition_{false};  // true 时 chest 位置用超高权重软代价近似锁定（位置跟随细分关闭）
+  };
 
 }  // namespace HighlyDynamic

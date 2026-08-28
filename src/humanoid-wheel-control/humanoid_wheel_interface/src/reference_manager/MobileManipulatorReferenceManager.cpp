@@ -811,6 +811,8 @@ namespace mobile_manipulator {
     {
       // disable 期间丢弃所有运动指令
       if (!isEnableControl()) return;
+      // #3973: 躯干复位窗口内丢弃，避免 VR 双击后紧跟的指令把复位途中的躯干拽走
+      if (torsoResetWindowActive_.load(std::memory_order_acquire)) return;
 
       cmdTorsoPose_mtx_.lock();
       isCmdTorsoPoseUpdated_ = true;
@@ -840,6 +842,7 @@ namespace mobile_manipulator {
     auto targetTorsoVelCallback = [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr &msg)
     {
       if (!isEnableControl()) return;
+      if (torsoResetWindowActive_.load(std::memory_order_acquire)) return;  // #3973: 复位窗口内丢弃
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
       mapTorsoTwist4D(*msg, cmdTorsoVel_);
       isCmdTorsoVelUpdated_ = true;
@@ -852,6 +855,7 @@ namespace mobile_manipulator {
     auto targetTorsoDeltaCallback = [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr &msg)
     {
       if (!isEnableControl()) return;
+      if (torsoResetWindowActive_.load(std::memory_order_acquire)) return;  // #3973: 复位窗口内丢弃
       std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
       mapTorsoTwist4D(*msg, cmdTorsoDelta_);
       isCmdTorsoDeltaUpdated_ = true;
@@ -3218,6 +3222,18 @@ namespace mobile_manipulator {
 
     if(req.data)
     {
+      // 复位进行中时忽略重复请求，避免轨迹被反复 resetAllMpcTrajAndTarget 打断产生震荡
+      if (isResetTorso_ || (initTime_ < resetTorsoTime_ + resetTorsoInitTime_))
+      {
+        const double remain = std::max(0.0, resetTorsoTime_ + resetTorsoInitTime_ - initTime_);
+        res.success = true;
+        res.message = std::to_string(remain);
+        ROS_WARN_STREAM_THROTTLE(1.0,
+            "[setLbResetTorsoService] torso reset already in progress, ignore duplicate request. remain="
+            << remain << "s");
+        return true;
+      }
+
       offlineTrajDisable_ = true;
       /***********************根据期望速度, 设置切换时间************************/
       vector_t torsoPose = vector_t::Zero(6);
@@ -3232,11 +3248,9 @@ namespace mobile_manipulator {
       /*********************************************************************/
       res.success = true;
       res.message = std::to_string(actualTime);  // 直接转换
-      {
-        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
-        resetTorsoOpenLoopStart4_ << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
-      }
-      resetTorsoMpcStart4_ = torsoPose_prevTargetPose_;
+      // #3973: 从这一刻起到复位窗口结束，丢弃躯干开环指令。VR 双击复位后会紧跟着发
+      // /cmd_lb_torso_pose，若被接收则会在复位途中/窗口结束时把躯干拽走。
+      torsoResetWindowActive_ = true;
       isResetTorso_ = true;
       return true;
     }
@@ -3712,6 +3726,11 @@ namespace mobile_manipulator {
     static bool isTriggerSetTorsoFirst = false;
     if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
     {
+      // #3973: 窗口结束后恢复接收躯干开环指令。isResetTorso_ 为真说明 service 已请求但
+      // 本轮还没执行到，此时窗口终点还是上一次的旧值，不能提前放行。
+      if (!isResetTorso_) {
+        torsoResetWindowActive_.store(false, std::memory_order_release);
+      }
       if(isTriggerSetTorsoFirst == true)
       {
         leftArmJointTrigger_ = true;  // 触发一次重置躯干位置，该标志和手臂ee共用
@@ -4304,7 +4323,7 @@ namespace mobile_manipulator {
   }
 
   void MobileManipulatorReferenceManager::resetTorsoControlPoseWithRuckig(scalar_t initTime, const vector_t& initState,
-                                                                         bool anchorOpenLoopStart)
+                                                                         bool isServiceReset)
   {
     setEnableLegJointTrack(false); // 关闭下肢关节跟踪
     isCmdLegJointUpdated_ = false;  // 关闭关节控制标志位
@@ -4314,36 +4333,13 @@ namespace mobile_manipulator {
     resetPose[0] = initialTorsoPos_[0];
     resetPose[1] = initialTorsoPos_[2];
 
-    vector_t start4 = vector_t::Zero(4);
-    if (anchorOpenLoopStart) {
-      // kuavodevlab#3973: anchor at open-loop pose snapshotted in setLbResetTorsoService
-      // (VR double-click publishes /cmd_lb_torso_pose right after service → would zero cmdTorsoPose_
-      // before modifyReferences runs if we read live here).
-      start4 = resetTorsoOpenLoopStart4_;
-      // kuavodevlab#3991: timed offline cmd may leave cmdTorsoPose_ at command target while MPC
-      // already tracks a different pose; use MPC snapshot when they diverge.
-      constexpr scalar_t kPosTol = 0.05;
-      constexpr scalar_t kAngTol = 0.05;
-      const scalar_t dx = std::abs(start4[0] - resetTorsoMpcStart4_[0]);
-      const scalar_t dz = std::abs(start4[1] - resetTorsoMpcStart4_[1]);
-      const scalar_t dyaw = std::abs(start4[2] - resetTorsoMpcStart4_[2]);
-      const scalar_t dpitch = std::abs(start4[3] - resetTorsoMpcStart4_[3]);
-      if (dx > kPosTol || dz > kPosTol || dyaw > kAngTol || dpitch > kAngTol) {
-        ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso: open-loop/MPC diverged (openLoop="
-                        << start4.transpose() << ", mpc=" << resetTorsoMpcStart4_.transpose()
-                        << "), using MPC start");
-        start4 = resetTorsoMpcStart4_;
-      }
-    } else {
-      resetTorsoPoseRuckig(initTime, initState, false);
-      start4 = torsoPose_prevTargetPose_;
-    }
-    torsoPose_prevTargetPose_ = start4;
-    torsoPose_prevTargetVel_.setZero(4);
-    torsoPose_prevTargetAcc_.setZero(4);
+    // kuavodevlab#3991: 复位轨迹起点必须是机器人当前实际所在位姿（FK + 差分速度），
+    // 这样复位第一帧的跟踪误差为零，MPC 不会先把躯干往别处推。#3973 曾改用 service 时刻的
+    // cmdTorsoPose_ 开环快照来回避 VR 竞态，但 timed 指令下该快照是整条轨迹的终点目标，
+    // 与实际位姿差 0.04~0.14m，复位一开始就把躯干往上顶。竞态改由 torsoResetWindowActive_ 处理。
+    resetTorsoPoseRuckig(initTime, initState, false);
 
     /*************************根据期望速度, 设置切换时间*******************************/
-    // Timing always from FK (unchanged vs pre-#3973); only Ruckig start uses open-loop when anchored.
     vector_t torsoPose = vector_t::Zero(6);
     getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState);
     Eigen::VectorXd err = Eigen::VectorXd::Zero(6);
@@ -4352,13 +4348,28 @@ namespace mobile_manipulator {
     err[3] = std::fabs(torsoPose[3] - 0.0);
     err[4] = std::fabs(torsoPose[4] - 0.0);
 
-    Eigen::ArrayXd validTimes = err.array() / torsoResetMaxVel_.array();
-    resetTorsoTime_ = validTimes.maxCoeff();
+    // kuavodevlab#3991: err/vmax 是"静止起步"的最短时间。按 b 上抬中途按 h 时躯干仍在运动，
+    // 这个估计偏小，Ruckig 只能拿 torsoPose_move.max_acc(9 m/s²) 硬刹 —— torsoResetMaxVel_
+    // 只约束速度，约束不到加速度。这里额外给出收掉起始速度所需的时间，并补上 service 已经
+    // 回给调用方的 0.3s 缓冲（原先只有 service 加，规划里没加，两边不一致）。
+    // ponytail: |v0|*kResetRampTime/vmax 是保守启发式，非 jerk 限下的时间最优解；
+    //           要更准需按 max_jerk 反解 S 曲线。
+    constexpr double kResetRampTime = 0.3;  // s, 复位加速度尺度取 vmax/kResetRampTime
+    Eigen::VectorXd startVel = Eigen::VectorXd::Zero(6);
+    if (torsoPose_prevTargetVel_.size() == 4) {  // [x, z, yaw, pitch] -> err 的 0/2/3/4 位
+      startVel[0] = std::fabs(torsoPose_prevTargetVel_[0]);
+      startVel[2] = std::fabs(torsoPose_prevTargetVel_[1]);
+      startVel[3] = std::fabs(torsoPose_prevTargetVel_[2]);
+      startVel[4] = std::fabs(torsoPose_prevTargetVel_[3]);
+    }
+    Eigen::ArrayXd validTimes = (err.array() + startVel.array() * kResetRampTime) / torsoResetMaxVel_.array();
+    resetTorsoTime_ = validTimes.maxCoeff() + kResetRampTime;
     resetTorsoInitTime_ = initTime;
-    ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso require time: " << resetTorsoTime_ << " s, err: " << err.transpose());
+    ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso require time: " << resetTorsoTime_
+                    << " s, err: " << err.transpose() << ", startVel: " << torsoPose_prevTargetVel_.transpose());
     /*****************************************************************************/
 
-    if (anchorOpenLoopStart) {
+    if (isServiceReset) {
       {
         std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
         cmdTorsoVel_.setZero();
@@ -4523,7 +4534,7 @@ namespace mobile_manipulator {
   }
 
   void MobileManipulatorReferenceManager::resetAllMpcTraj(scalar_t initTime, const vector_t& initState,
-                                                         bool anchorOpenLoopStart)
+                                                         bool isServiceReset)
   {
     // 默认以 baseArm 关节控制切换
       setEnableEeTargetTrajectories(false); // 关闭末端笛卡尔跟踪
@@ -4531,7 +4542,7 @@ namespace mobile_manipulator {
       setEnableArmJointTrack(true); // 关闭手臂跟踪
       setEnableBaseTrack(true);   // 关闭底盘跟踪
 
-      resetTorsoControlPoseWithRuckig(initTime, initState, anchorOpenLoopStart); // 重置躯干位置
+      resetTorsoControlPoseWithRuckig(initTime, initState, isServiceReset); // 重置躯干位置
 
       resetCmdPoseRuckig(initTime, initState, true);    // 重置底盘轨迹
       resetLegJointRuckig(initTime, initState, true);   // 重置下肢关节轨迹
@@ -4544,7 +4555,7 @@ namespace mobile_manipulator {
   }
 
   void MobileManipulatorReferenceManager::resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState,
-                                                                  bool anchorOpenLoopStart)
+                                                                  bool isServiceReset)
   {
     // 3791: home（reset torso）路径同样强制下一条 EE 指令重锚定——归位窗口内手臂被
     // mode 1 关节轨迹挪走，而 EE ruckig 状态（cmdDualArm_prevTargetPose_）滞留在上次
@@ -4567,7 +4578,7 @@ namespace mobile_manipulator {
       arm_joint_traj_[i] = initState.tail(info_.armDim - 4).segment(i * singleArmJointDim_, singleArmJointDim_);
     }
       
-    resetAllMpcTraj(initTime, initState, anchorOpenLoopStart);
+    resetAllMpcTraj(initTime, initState, isServiceReset);
   }
 
   void MobileManipulatorReferenceManager::updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState)

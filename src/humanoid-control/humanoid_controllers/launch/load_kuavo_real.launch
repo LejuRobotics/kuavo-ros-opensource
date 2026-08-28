@@ -403,7 +403,7 @@
     </group>
 
     <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
-    <arg name="with_pico_gmr" default="true" doc="Enable PICO body tracking GMR"/>
+    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
     <arg name="pico_enable_amp_walk" default="true" doc="Enable G12-priority/PICO walking only in AMP controllers"/>
     <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR (GMR IK only supports kuavo_s52)"/>
     <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>

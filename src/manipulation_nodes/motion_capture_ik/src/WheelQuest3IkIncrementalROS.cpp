@@ -966,8 +966,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
     if (!updateLatestIncrementalResult()) return;  // check update success
 
-    // 任意手处于增量更新期时，同步更新 chest 位置增量
-    if (chestIncrementalUpdateEnabled_) {
+    // 任意手处于增量更新期时，同步更新 chest 位置增量（位置跟随细分关闭时不更新）
+    if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_) {
       Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
       {
         std::lock_guard<std::mutex> lock(chestPoseMutex_);
@@ -1144,8 +1144,9 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
   handleGripRisingEdge(leftGripRisingEdge, rightGripRisingEdge, leftMaintainProcess, rightMaintainProcess);
 
-  // 由胸部更新开关控制增量更新（与 grip 解耦）
-  if (chestIncrementalUpdateEnabled_ && (lastLeftGripPressed_ || lastRightGripPressed_)) {
+  // 由胸部更新开关控制增量更新（与 grip 解耦）；位置跟随细分关闭时冻结位置
+  if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_ &&
+      (lastLeftGripPressed_ || lastRightGripPressed_)) {
     Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
     {
       std::lock_guard<std::mutex> lock(transformerDataMutex_);
@@ -1171,9 +1172,9 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
         latestRightHandPose_vr_, true, rightEndEffectorQuat_);
   }
 
-  // 任意手 grip 就绪时，同步更新 chest 位置增量，并写入约束列表
+  // 任意手 grip 就绪时，同步更新 chest 位置增量，并写入约束列表（位置跟随细分关闭时不更新）
   if (leftGripReady || rightGripReady) {
-    if (chestIncrementalUpdateEnabled_) {
+    if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_) {
       Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
       {
         std::lock_guard<std::mutex> lock(chestPoseMutex_);
@@ -1395,6 +1396,8 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   auto startTime = std::chrono::high_resolution_clock::now();
   oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
       latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);
+  // 腰部位置跟随细分关闭（或总开关关闭）时，chest 位置在 IK 中用硬约束锁定，不随手臂摆动
+  oneStageIkEndEffectorPtr_->setFreezeChestPosition(!chestPositionUpdateEnable_);
   auto ikResult = oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
   auto endTime = std::chrono::high_resolution_clock::now();
   const auto durationUs = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();

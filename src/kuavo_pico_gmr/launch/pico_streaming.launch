@@ -61,15 +61,19 @@
   <!-- Dexterous hand control (subscribes /pico/joy, publishes /control_robot_hand_position) -->
   <arg name="enable_dexhand_control" default="true" doc="Enable dexterous hand control via PICO grip"/>
 
-  <!-- G12-priority/PICO joystick walking: routed to AutoGait only for AMP controllers -->
-  <arg name="enable_pico_amp_walk" default="true" doc="Enable G12-priority/PICO joystick walking in AMP controllers"/>
+  <!-- Local Joy-priority/PICO joystick walking: routed to AutoGait only for AMP controllers -->
+  <arg name="enable_pico_amp_walk" default="true" doc="Enable G12/BT2/BT2Pro-priority PICO joystick walking in AMP controllers"/>
   <arg name="pico_amp_input_topic"
        default="$(eval '/pico/joy_amp_authorized' if arg('vpn_mode') else '/pico/joy')"
        doc="Authorized VPN JoySticks input, or raw /pico/joy in LAN mode"/>
-  <arg name="pico_amp_g12_input_topic" default="/joy" doc="Canonical G12 Joy input"/>
-  <arg name="pico_amp_output_topic" default="/pico/joy_converted" doc="Canonical AMP Joy output"/>
+  <arg name="pico_amp_g12_input_topic" default="/joy" doc="Local G12/BT2/BT2Pro Joy input; legacy arg name is retained for compatibility"/>
+  <arg name="pico_amp_output_topic" default="/pico/joy_converted" doc="AMP Joy output; preserves the detected local 8/11 or 8/16 layout"/>
   <arg name="pico_amp_default_joy_topic" default="/joy" doc="Non-AMP Joy input topic"/>
+  <arg name="pico_amp_initial_joy_layout" default="auto" doc="Initial AMP output layout before the first valid /joy frame: auto (/joystick_type), bt2/g12/11, or bt2pro/16"/>
+  <arg name="pico_amp_prepare_route_service" default="/pico_gmr_joy_converter/prepare_amp_route" doc="Tokenized converter handshake used before routing AutoGait into the AMP fusion topic"/>
+  <arg name="pico_amp_route_subscriber_node" default="/humanoid_joy_control_auto_gait_with_vel" doc="AutoGait node that receives the connection-specific neutral baseline after AMP routing"/>
   <arg name="pico_amp_g12_axis_deadzone" default="0.05"/>
+  <arg name="pico_amp_g12_trigger_pressed_threshold" default="-0.5" doc="LT/RT are active below this value; supports trigger rest values of 0 or +1"/>
   <arg name="pico_amp_g12_input_timeout_s" default="0.2"/>
   <arg name="pico_amp_g12_neutral_hold_s" default="0.3"/>
   <arg name="pico_amp_input_timeout_s" default="0.5"/>
@@ -81,12 +85,14 @@
   <arg name="pico_amp_joy_retry_period_s" default="1.0"/>
   <arg name="pico_amp_master_probe_timeout_s" default="0.5"/>
   <arg name="pico_amp_service_call_timeout_s" default="1.0"/>
+  <arg name="pico_amp_route_ready_timeout_s" default="1.5" doc="Maximum wall-clock wait for the converted-topic connection and input barrier before falling back to raw /joy"/>
   <arg name="pico_amp_controller_names"
        default="[amp_controller, amp_wild_controller, amp_run_controller, amp_hand_controller]"/>
 
   <!-- Head control (subscribes /robot_body_matrices, publishes /robot_head_motion_data) -->
   <arg name="enable_head_control" default="true" doc="Enable head control node"/>
   <arg name="head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+  <param name="/head_control_mode" value="$(arg head_control_mode)"/>
 
   <!-- CPU affinity: bind retarget process to specific cores, e.g. [4] for P-core on Ultra 7 255H -->
   <arg name="cpu_cores" default="[]" doc="CPU cores to bind retarget process (empty=no binding)"/>
@@ -128,6 +134,7 @@
     <param name="converted_joy_topic" value="$(arg pico_amp_output_topic)"/>
     <param name="g12_joy_topic" value="$(arg pico_amp_g12_input_topic)"/>
     <param name="g12_axis_deadzone" value="$(arg pico_amp_g12_axis_deadzone)"/>
+    <param name="g12_trigger_pressed_threshold" value="$(arg pico_amp_g12_trigger_pressed_threshold)"/>
     <param name="g12_input_timeout" value="$(arg pico_amp_g12_input_timeout_s)"/>
     <param name="g12_neutral_hold" value="$(arg pico_amp_g12_neutral_hold_s)"/>
     <param name="bridge_output_timeout" value="$(arg pico_amp_bridge_output_timeout_s)"/>
@@ -163,7 +170,7 @@
         output="screen" respawn="true" respawn_delay="3"
         args="python3 $(find noitom_hi5_hand_udp_python)/../pico-body-tracking-server/scripts/pico_head_control_node.py _mode:=$(arg head_control_mode)"/>
 
-  <!-- Node 5/6: G12-priority/PICO AMP Joy selection and controller-aware routing -->
+  <!-- Node 5/6: Local Joy-priority/PICO AMP Joy selection and controller-aware routing -->
   <group if="$(arg enable_pico_amp_walk)">
     <node pkg="kuavo_pico_gmr"
           type="pico_gmr_joy_converter_node"
@@ -172,7 +179,11 @@
       <param name="input_topic" value="$(arg pico_amp_input_topic)"/>
       <param name="g12_input_topic" value="$(arg pico_amp_g12_input_topic)"/>
       <param name="output_topic" value="$(arg pico_amp_output_topic)"/>
+      <param name="initial_joy_layout" value="$(arg pico_amp_initial_joy_layout)"/>
+      <param name="prepare_route_service" value="$(arg pico_amp_prepare_route_service)"/>
+      <param name="route_subscriber_node" value="$(arg pico_amp_route_subscriber_node)"/>
       <param name="g12_axis_deadzone" value="$(arg pico_amp_g12_axis_deadzone)"/>
+      <param name="g12_trigger_pressed_threshold" value="$(arg pico_amp_g12_trigger_pressed_threshold)"/>
       <param name="g12_input_timeout_s" value="$(arg pico_amp_g12_input_timeout_s)"/>
       <param name="input_timeout_s" value="$(arg pico_amp_input_timeout_s)"/>
       <param name="neutral_publish_hz" value="$(arg pico_amp_neutral_publish_hz)"/>
@@ -184,11 +195,15 @@
           output="screen" respawn="true" respawn_delay="1">
       <param name="pico_joy_topic" value="$(arg pico_amp_output_topic)"/>
       <param name="default_joy_topic" value="$(arg pico_amp_default_joy_topic)"/>
+      <param name="prepare_amp_route_service" value="$(arg pico_amp_prepare_route_service)"/>
+      <param name="route_subscriber_node" value="$(arg pico_amp_route_subscriber_node)"/>
       <param name="retry_period_s" value="$(arg pico_amp_joy_retry_period_s)"/>
       <param name="master_probe_timeout_s"
              value="$(arg pico_amp_master_probe_timeout_s)"/>
       <param name="service_call_timeout_s"
              value="$(arg pico_amp_service_call_timeout_s)"/>
+      <param name="route_ready_timeout_s"
+             value="$(arg pico_amp_route_ready_timeout_s)"/>
       <rosparam param="amp_controller_names" subst_value="true">$(arg pico_amp_controller_names)</rosparam>
     </node>
   </group>

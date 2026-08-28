@@ -854,7 +854,7 @@ namespace mobile_manipulator
         bool m1_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_M1 && joy_msg->buttons[G12_BTN_M1] == 1);
         bool m2_pressed = (joy_msg->buttons.size() > (size_t)G12_BTN_M2 && joy_msg->buttons[G12_BTN_M2] == 1);
         bool old_m2_pressed = (old_joy_msg_.buttons.size() > (size_t)G12_BTN_M2 && old_joy_msg_.buttons[G12_BTN_M2] == 1);
-        // G+H 同时处于极值时，禁止摇杆继续发 torso 速度，避免与复位服务抢轨迹
+        // G+H 同时处于极值时，禁止摇杆继续积分/发 torso 指令，避免与复位服务抢轨迹
         const bool gh_combo_active = guide_pressed && m1_pressed;
         const ros::Time now = ros::Time::now();
         const bool torso_reset_cooldown_active =
@@ -868,7 +868,7 @@ namespace mobile_manipulator
           zero_control_start_time_ = now;
           is_control_zero_ = true;
           g12_torso_reset_latched_ = true;
-          // 给底层 Ruckig 复位留出执行窗口，期间发零速度避免 sticky /cmd_torso_vel
+          // 给底层 Ruckig 复位留出执行窗口，期间不再发 torso 速度指令
           g12_torso_reset_cooldown_until_ = now + ros::Duration(3.0);
 
           resetTorsoToInitialAsync(nodeHandle_);
@@ -917,6 +917,7 @@ namespace mobile_manipulator
           // H极值: 右杆左右->vyaw, 左杆上下->vpitch
           // Workspace limits enforced here via velocity gate; no residual state across soft-pause.
           double lx = 0.0, lz = 0.0, ay = 0.0, az = 0.0;
+          // G+H 复位组合键 / 复位冷却期内禁止发 torso 速度，避免与复位服务抢轨迹
           if (!gh_combo_active && !torso_reset_cooldown_active)
           {
             if (guide_pressed) {  // G极值: 左杆上下->vx, 右杆上下->vz
