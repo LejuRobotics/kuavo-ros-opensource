@@ -169,6 +169,13 @@ public:
      * @return 是否切换成功（false表示指令已缓存）
      */
     bool changeMode(int target_mode);
+
+    /**
+     * @brief 从非控制线程请求模式切换
+     *
+     * 只记录请求；实际模式状态由下一个 update() 控制周期修改
+     */
+    bool requestModeChange(int target_mode);
     void setExternalCommandBufferCallback(std::function<bool()> callback);
 
     /**
@@ -208,6 +215,11 @@ public:
      */
     int getRequestedMode() const
     {
+      const int pending_mode = requested_arm_mode_.load(std::memory_order_acquire);
+      if (pending_mode != kNoRequestedArmMode)
+      {
+        return pending_mode;
+      }
       if (default_pose_return_for_switch_state_.load(std::memory_order_acquire) !=
           DefaultPoseReturnState::kIdle)
       {
@@ -322,6 +334,11 @@ private:
      * @brief 应用模式切换的核心逻辑（使用保存的当前位置和速度）
      */
     void applyModeChange(int target_mode, bool force_interpolation_to_default = false);
+
+    /**
+     * @brief 在控制线程中取出并执行外部模式请求
+     */
+    void executeRequestedModeChange();
     
     /**
      * @brief 执行缓存的模式切换指令（使用保存的当前位置和速度）
@@ -500,6 +517,8 @@ private:
     Eigen::VectorXd target_interpolation_target_pos_; // 专用插值目标位置
     
     // 指令缓存机制
+    static constexpr int kNoRequestedArmMode = -1;
+    std::atomic<int> requested_arm_mode_{kNoRequestedArmMode}; // 跨线程模式请求邮箱
     std::optional<ControlMode> pending_arm_mode_; // 缓存的待执行模式
     bool is_interpolating_;             // 曲线引擎正在跑（锁定/回家/外部靠拢各插值机制共用的底层标志）
 

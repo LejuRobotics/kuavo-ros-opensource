@@ -230,6 +230,12 @@ namespace mobile_manipulator {
 
   /**
   * @brief 从旋转矩阵提取 pitch 和 yaw (躯干控制仅使用 pitch/yaw，roll 由调用方置 0)
+  *
+  * 这里的 pitch/yaw 不是 ZYX 欧拉角分量，而是对应 5W 下肢构型的关节量：
+  * 腿链俯仰关节（knee/leg/waist_pitch，均绕底盘 Y 轴）在下、腰 yaw 关节（绕 Z 轴）在上，
+  * 姿态由两角直接确定：R = Ry(pitch)·Rz(yaw)，其中 pitch = knee + leg + waist_pitch 关节角之和。
+  * 对上式求逆：R(0,2)=sin(pitch)、R(2,2)=cos(pitch)；R(1,0)=sin(yaw)、R(1,1)=cos(yaw)。
+  *
   * @param R 3x3旋转矩阵
   * @return std::pair<double, double> (pitch, yaw) 弧度
   * @throw 若 R 非合法旋转矩阵（det/正交性异常）
@@ -250,9 +256,8 @@ namespace mobile_manipulator {
           throw std::runtime_error(oss.str());
       }
 
-      // ZYX: pitch/yaw（输出 roll 由调用方固定为 0）
-      const double pitch = std::atan2(-R(2,0), std::hypot(R(2,1), R(2,2)));
-      const double yaw_raw = std::atan2(R(1,0), R(0,0));
+      const double pitch = std::atan2(R(0,2), R(2,2));
+      const double yaw_raw = std::atan2(R(1,0), R(1,1));
 
       double yaw = 0;
       if (!has_last) {
