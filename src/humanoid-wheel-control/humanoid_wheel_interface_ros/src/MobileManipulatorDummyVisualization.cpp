@@ -179,6 +179,17 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   // 订阅 /external_odom/active：当有外部 odom->base_link 发布时，该话题为 true，则不发布内部的 odom->base_link
   // 也可通过 /use_external_odom_tf 参数强制使用外部 odom
   nodeHandle.param("/use_external_odom_tf", use_external_odom_tf_, false);
+  // 可视化发布节流频率（Hz）：/tf、目标轨迹、优化轨迹、自碰撞距离都跟随控制环发布，
+  // 跨机会被多节点复制订阅(尤其 /tf)打满百兆链路。
+  // 从 task.info 的 visualization.publishRate 读取；缺省 30Hz；<=0 表示不节流(跟随控制环)。
+  double publishRate = 30.0;
+  loadData::loadPtreeValue(pt, publishRate, "visualization.publishRate", true);
+  if (publishRate > 0.0) {
+    minPublishTimeDifference_ = 1.0 / publishRate;
+  } else {
+    minPublishTimeDifference_ = 0.0;  // <=0 表示不节流，置 0 使门控判断恒不生效
+  }
+  ROS_INFO("[MobileManipulatorVisualization] visualization publish rate: %.1f Hz (min interval %.4f s)", publishRate, minPublishTimeDifference_);
   external_odom_active_sub_ = nodeHandle.subscribe(
       "/external_odom/active", 1, &MobileManipulatorDummyVisualization::externalOdomActiveCallback, this);
   // create pinocchio interface
@@ -198,6 +209,15 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
 /******************************************************************************************************/
 void MobileManipulatorDummyVisualization::update(const SystemObservation& observation, const PrimalSolution& policy,
                                                  const CommandData& command) {
+  // 可视化统一节流：/tf、目标轨迹、优化轨迹、自碰撞距离都是可视化数据，
+  // 原本跟随 500Hz 控制环发布，跨机被多节点复制订阅打满百兆链路。
+  // 未到节流周期直接 return，跳过本次所有可视化发布。
+  const double now = observation.time;
+  if (now - lastPublishTime_ >= 0.0 && now - lastPublishTime_ < minPublishTimeDifference_) {
+    return;
+  }
+  lastPublishTime_ = now;
+
   const ros::Time timeStamp = ros::Time::now();
 
   publishObservation(timeStamp, observation);

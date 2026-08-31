@@ -121,6 +121,12 @@ mpc
   mrtDesiredFrequency             500   ; [Hz]
 }
 
+; 可视化发布设置（/tf、目标轨迹、优化轨迹、自碰撞距离等统一节流）
+visualization
+{
+  publishRate                     30    ; [Hz] 可视化统一发布频率，默认30；<=0 表示不节流(跟随控制环)
+}
+
 ; /move_base/base_cmd_vel 发布前速度限幅，单位: vx/vy [m/s], wz [rad/s]
 baseCmdVelLimit
 {

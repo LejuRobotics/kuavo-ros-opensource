@@ -76,6 +76,11 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   std::unique_ptr<robot_state_publisher::RobotStatePublisher> robotStatePublisherPtr_;
   tf::TransformBroadcaster tfBroadcaster_;
 
+  // 可视化发布统一节流：/tf、目标轨迹、优化轨迹、自碰撞距离等都跟随控制环(数百Hz)发布，
+  // 跨机会被多节点复制订阅打满百兆链路(尤其 /tf 被底盘节点重复订阅)。
+  double lastPublishTime_ = -1e9;            // 上次发布的 observation.time（秒），负初值保证首帧立即发布
+  double minPublishTimeDifference_ = 1.0 / 30.0; // 最小发布间隔（默认 30Hz），从 task.info 的 visualization.publishRate 读取；0 表示不节流
+
   // 缓存 URDF 模型,用于运行期判断关节是否存在,避免向 robot_state_publisher 发布
   // URDF 中不存在的关节(否则会刷出 "Joint state with name: ... was received but not found in URDF")
   urdf::Model urdfModel_;
