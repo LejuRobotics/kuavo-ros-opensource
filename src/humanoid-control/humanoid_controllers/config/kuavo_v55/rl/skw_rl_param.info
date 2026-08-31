@@ -70,7 +70,7 @@ autoControllerSwitch
     externalCommandHoldTime      0.5     ; 外部手臂/腰部信号保持活跃的时间(s)
     minSwitchInterval            1.0     ; 自动切换尝试最小间隔(s)
     walkingSwitchRequireStance  false   ; 切到walkingController时不强制当前motion_state为STANCE
-    switchCommandBufferTime     0.5     ; 自动切换发起后命令暂缓执行时间(s)
+    switchCommandBufferTime     0.8     ; 自动切换发起后命令暂缓执行时间(s)
 }
 
 ; ==================== 原地踏步速度配置 ====================

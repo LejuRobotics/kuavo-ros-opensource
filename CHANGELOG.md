@@ -3,6 +3,8 @@
 ## Breaking Changes
 
 ## 文档相关
+- 更新 AGX 烧录教程，新增强制恢复接线图片，[文档链接](./docs/8上下位机镜像烧录/上位机AGX烧录镜像.md)
+- 精简文档站点：侧边栏下线产品介绍参数（内容仍保留在 markdown 中）
 - 新增握手功能部署文档，[文档链接](./src/kuavo_handshake/DEPLOY.md)
 - 更新搬箱说明文档：修正 TF 转发工作目录路径，默认关闭 rosbag 录制并调整搬箱次数，[文档链接](./src/kuavo_humanoid_websocket_sdk/docs/kuavo_strategy_pytree/WS_SDK搬箱说明文档.md)
 - 补充 PICO RG+A/B 切换 RL 控制器使用文档，[文档链接](./src/manipulation_nodes/pico-body-tracking-server/README.md)
@@ -24,6 +26,16 @@
 - 补充轮臂 v62/v63 下肢限位标零说明，完善 readme 通用标定章节与限位标零入口，[文档链接](./docs/3调试教程/Kuavo%205-W%20全身零点标定.md)
 
 ## 新增功能
+- 轮臂增量遥操新增下肢锁定控制：新增下肢关节角度控制 TUI，支持按 param 在 WBC 控制前将下肢 1、2 号电机锁定在当前角度，含解锁/重新锁定
+- PICO 遥操新增头部控制增强：活动手头部跟随模式、四模式头部控制、头部 pitch 偏移量微调
+- BT2Pro 手柄支持 AMP 优先接管 Pico；AMP 模式下游戏手柄优先接管 Pico 输入
+- Xsens 动作捕捉新增肱骨外上髁肘部位置计算，改用上臂朝向替换肘部朝向
+- 5W MPC 新增肩部收紧代价函数（仅 /mm 分支且无肘部数据时生效）
+- 硬件标定新增腰部电机（关节 4）单关节手动限位标定
+- 轮臂 dance 步态支持直接切换至 amp
+- PICO 遥控经授权 Joy 话题中转收敛 /cmd_vel 单一来源，新增 G12 优先 PICO AMP 行走
+- 新增黑漫 SG100 灵巧手 URDF 模型，集成到 v400055/062 机型，对齐 Drake 手部结构与末端 frame 方向，修复手腕 mesh 显示与手指下垂
+- PICO 诊断链路新增 TF 发布控制与时延汇总，分离骨骼与控制器处理线程，统一默认参数，时钟同步模型锁对称
 - 新增握手功能节点 kuavo_handshake：HandshakeTarget 消息接口、独立启动文件与测试脚本，集成到 load_kuavo_real（默认关闭），[文档链接](./src/kuavo_handshake/DEPLOY.md)
 - Gazebo 搬箱场景支持 scene_yaw 整体旋转使 tag 正对机器人，launch 新增 record_bag 参数控制 rosbag 录制
 - PICO 遥操新增链路诊断功能：UDP 诊断协议（丢包统计、时钟同步、分块日志），附链路耗时可视化与 CSV 转换脚本
@@ -90,6 +102,30 @@
 - 新增 G12 航空箱坐/站功能：按键映射与状态回调实现，座椅起身流程重构支持臂绕扶手
 
 ## 修复问题
+- 修复 h12pro 多项问题：SBUS 接收组帧缓冲区越界写、monitor 重启死循环与让位期 publish 崩溃
+- 修复底盘 NTP 时间同步、气泵串口自动检测
+- 修复 RRNIS netlink 消息遍历死循环并增加 ENOBUFS 自愈
+- 灵巧手拇指辅助改锁存模式并修复 joy 超时保护问题
+- 修复 dance→amp 切换时 reset 跳到第 0 帧（action=0）问题，现 dance 维持最后一帧
+- 修复 G12 切换控制模式按键脉冲展宽避免被限频丢弃
+- 修复 wheel-arm joint-limit q/v 保持一致
+- 修复腰部手动标定返回值、取消路径及代码重复
+- 修复 hardware_node 抬手途中按 C 不抢跑 is_ready，避免控制器提前苏醒导致手臂抽动（#3978）
+- 修复 PICO 有线/无线连接无法遥操，接收端默认回退 allow_legacy
+- 修复 amp_wild 55/53 机型手臂摆动过大并微调参数，进入 stance 状态时手臂外部接管突变增加 0.2s 时间判断
+- 修复 VR X+B/X+A 手臂模式切换统一 kuavo5 与 5W（#3714）
+- 修复 wheel 单手遥操复现 X+A、torso 复位锚定 open-loop 位姿（#3921/#3973）、MPC 优先躯干复位（#3991）
+- 修复 VMP 无法在线遥操
+- 修复 G12 G+H 躯干复位偶发不复位问题：M2 脉冲延长至 200ms，并落到实际运行的 ocs2_h12pro_node.py 修复（#3914）
+- 修复 ctrl+c 退出整机时 canbus1 经常性未失能的问题
+- 修复 SDK 控制器查询定时器泄漏问题
+- 修复气泵桥接：仅在检测到压力传感器设备时启动 modbus_io_bridge 节点
+- 修复 kuavo5 VR 躯干控制状态残留：使用增量+躯干参数进入 VR 后退出、再以绝对式 VR 解锁手臂时自动开启躯干的问题
+- 修复 MoRE 进入躯干模式蹲到最底退出后未完全复位、复位时腰部未复位的问题
+- 修复 arm_trajectory 动作前 0.6s 阻塞：服务存在判断改用 lookupService 单查、按返回码判断，替代全量 getSystemState（并修复 has_service 启动崩溃）
+- 修复 5W 语音动作下发后等待 3 秒才执行的延迟
+- 修复 kuavo5 VR 模式下 AMP 步态 X+B 锁住手臂再切步态导致机器人跳起的问题
+- 修复 joy_node 状态恢复先写后读导致失效的问题
 - 修复搬箱策略多项问题（#3629）：多轮切换 tag 时旧位姿残留导致抓取反向、轮次切换未清除放置 tag 旧数据、扫描不到 tag 时盲目猜测回退，改为原地循环重扫直接判定失败
 - 修复位姿保持切换问题（#3867）：vel 模式退出后位姿保持对齐实际状态，底盘停止前持续跟随实际值
 - 修复 kuavo5 VR 遥操切到 AMP 步态后无法行走、无法切回 MPC 步态问题（覆盖普通 VR 摇操与增量遥操退出两场景）
@@ -223,6 +259,9 @@
 - 修复 s52 VR 增量遥操由于 IK 缺少夹爪虚拟关节导致的问题
 
 ## 其他改进
+- h12pro monitor 常驻 Python 化，秒级探活开销降 27 倍；各话题发布限频对齐 50Hz，消除命令堆积延迟
+- docker 添加 --ipc=host 支持增量 VR 共享内存
+- kuavo_pico_gmr 增加 exec_depend 依赖，规避 launch 启动顺序问题
 - hardware_node 纳入 humanoid_controllers 统一编译；check_tool 脚本增加 root 权限检查，check_ntp_sync 新增 SSH host key 清理步骤避免连接失败
 - 更新 v62/v63 腿部标定限位配置
 - 适配 arm64 平台（Orin）编译与运行：WBC 绑定隔离核心、arm64 版 EC/灵巧手 SDK、Drake 兼容层、MuJoCo arm64 二进制等

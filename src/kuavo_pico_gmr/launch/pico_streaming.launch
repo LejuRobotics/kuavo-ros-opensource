@@ -91,7 +91,7 @@
 
   <!-- Head control (subscribes /robot_body_matrices, publishes /robot_head_motion_data) -->
   <arg name="enable_head_control" default="true" doc="Enable head control node"/>
-  <arg name="head_control_mode" default="auto_track_active" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+  <arg name="head_control_mode" default="vr_follow" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
   <param name="/head_control_mode" value="$(arg head_control_mode)"/>
 
   <!-- CPU affinity: bind retarget process to specific cores, e.g. [4] for P-core on Ultra 7 255H -->

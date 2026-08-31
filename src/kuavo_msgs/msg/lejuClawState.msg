@@ -8,3 +8,4 @@ int8 kGrabbed = 3
 
 int8[] state # 0:; left; 1: right
 kuavo_msgs/endEffectorData data
+bool is_high_freq

@@ -317,7 +317,7 @@ public:
             std::cout << "夹爪力矩：" << state.data.effort[0] << " " << state.data.effort[1] << std::endl;
         };
 
-        auto result = hardware_plant_->controlLejuClaw(controller_req, controller_res);
+        auto result = hardware_plant_->controlLejuClaw(controller_req, controller_res, false);
         output_controller_req(controller_req);
         std::this_thread::sleep_for(std::chrono::seconds(3));
 
@@ -333,7 +333,7 @@ public:
 
 
         controller_req.data.position = {100.0, 100.0};
-        result = hardware_plant_->controlLejuClaw(controller_req, controller_res);
+        result = hardware_plant_->controlLejuClaw(controller_req, controller_res, false);
         output_controller_req(controller_req);
         std::this_thread::sleep_for(std::chrono::seconds(3));
 

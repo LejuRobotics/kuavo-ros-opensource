@@ -239,6 +239,15 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   double maxJointVelocity_ = 1.0;  // 关节最大角速度限制（弧度/秒）
   double lowpassDqAlpha_ = 0.9;    // lowpass_dq_低通滤波因子（历史值权重，新值权重为1-alpha）
 
+  // 腕部软限位速度阻尼参数：在 Quest3 最终 q/v 状态形成后平滑制动，并保持位置、速度一致
+  bool wristJointLimitVelocityDamperEnabled_ = true;
+  double wristJointLimitSoftZone_ = 0.14;          // [rad] 距离软限位多远开始减速
+  double wristJointLimitStopAcceleration_ = 80.0; // [rad/s^2] 动态制动距离使用的减速度
+  double wristJointLimitMaxVelocity_ = 4.0;        // [rad/s] 阻尼层允许的最大速度
+  double wristJointLimitMaxAcceleration_ = 80.0;  // [rad/s^2] 相邻周期最大速度变化
+  double wristJointLimitSettleVelocity_ = 0.001;   // [rad/s] 软区内消除渐近爬行的阈值
+  double wristJointLimitHardEpsilon_ = 0.0001;     // [rad] 软限位内侧数值安全余量
+
   // 手部位置约束参数
   double sphereRadiusLimit_ = 0.5;                                  // 手部位置约束球体半径
   double minReachableDistance_ = 0.20;                              // 最小可达距离

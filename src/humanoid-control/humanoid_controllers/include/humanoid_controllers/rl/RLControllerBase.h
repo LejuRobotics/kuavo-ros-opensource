@@ -311,11 +311,11 @@ public:
   /**
    * @brief 请求当前 RL 控制器切换手臂模式。
    *
-   * 默认直接转发给 ArmController；需要维护额外模式意图的控制器可重写。
+   * 默认投递给 ArmController 的控制线程处理；需要维护额外模式意图的控制器可重写
    */
   virtual bool requestArmControlMode(int target_mode)
   {
-    return arm_controller_ && arm_controller_->changeMode(target_mode);
+    return arm_controller_ && arm_controller_->requestModeChange(target_mode);
   }
 
   /**

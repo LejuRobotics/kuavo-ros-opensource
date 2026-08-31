@@ -101,6 +101,7 @@ ArmController::~ArmController()
 
 void ArmController::reset()
 {
+  requested_arm_mode_.store(kNoRequestedArmMode, std::memory_order_release);
   default_pose_return_for_switch_state_.store(DefaultPoseReturnState::kIdle,
                                                std::memory_order_release);
   default_pose_return_settled_cycles_ = 0;
@@ -325,6 +326,10 @@ void ArmController::update(const ros::Time& time,
     arm_filter_initialized_ = true;
     ROS_INFO("[ArmController] Filter initialized: dt=%.4f s, cutoff=%.1f Hz", dt, external_cutoff_freq_);
   }
+
+  // 模式回调只投递请求；所有控制状态统一在此线程修改，
+  // 避免 ROS 回调与 updateAutoSwing()/updateExternalControl() 交叉写状态
+  executeRequestedModeChange();
 
   applyExternalControlPauseState();
   if (!external_control_pause_active_)
@@ -563,6 +568,44 @@ bool ArmController::changeMode(int target_mode)
   // 执行模式切换
   applyModeChange(target_mode);
   return true;
+}
+
+bool ArmController::requestModeChange(int target_mode)
+{
+  if (target_mode < 0 || target_mode > 2)
+  {
+    ROS_WARN("[ArmController] Invalid requested control mode: %d", target_mode);
+    return false;
+  }
+
+  const auto return_state =
+      default_pose_return_for_switch_state_.load(std::memory_order_acquire);
+  if (return_state != DefaultPoseReturnState::kIdle)
+  {
+    // 与 changeMode() 的原有语义一致：归位期间接受重复 mode1，拒绝其他模式
+    return target_mode == static_cast<int>(ControlMode::kAutoSwing);
+  }
+
+  requested_arm_mode_.store(target_mode, std::memory_order_release);
+  return true;
+}
+
+void ArmController::executeRequestedModeChange()
+{
+  const int target_mode =
+      requested_arm_mode_.exchange(kNoRequestedArmMode, std::memory_order_acq_rel);
+  if (target_mode == kNoRequestedArmMode)
+  {
+    return;
+  }
+
+  // 上层可能重复投递同一模式；不能因此重置已经开始的插值
+  if (target_mode == static_cast<int>(arm_control_mode_) && !is_returning_from_external_)
+  {
+    return;
+  }
+
+  (void)changeMode(target_mode);
 }
 
 void ArmController::resetInterpolationState(const ros::Time& time, const Eigen::VectorXd& start_pos, const Eigen::VectorXd& target_pos)
