@@ -39,6 +39,7 @@ class LeJuClawCan {
 public:
     enum class PawMoveState  : int8_t {
     ERROR = -1,                       // 出现错误
+    STREAM_EXPIRED = -2,              // 高频控制流断流（看门狗触发，安全停机）
     LEFT_REACHED_RIGHT_REACHED = 0,   // 所有夹爪到位
     LEFT_REACHED_RIGHT_GRABBED = 1,   // 左夹爪到位，右夹爪抓取到物品
     LEFT_GRABBED_RIGHT_REACHED = 2,   // 右夹爪到位，左夹爪抓取到物品
@@ -98,12 +99,12 @@ public:
     bool disableAll();
 
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque);
-    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque, bool is_vr_mode);
+    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque, bool is_high_freq);
     // 基于 unordered_map 的控制接口（百分比位置 → 物理映射并下发），键为 MotorId
     PawMoveState move_paw(const std::unordered_map<MotorId, double>& positions_percent,
                           const std::unordered_map<MotorId, double>& velocity,
                           const std::unordered_map<MotorId, double>& torque,
-                          bool is_vr_mode);
+                          bool is_high_freq);
     void set_joint_state(const std::unordered_map<MotorId, motorevo::RevoMotorCmd_t>& cmd);
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> get_joint_state();
     std::vector<double> get_positions();
@@ -114,6 +115,20 @@ public:
     void cancel_motion();
     void stop_all_current(int repeat_count = 5, int interval_ms = 10);
     bool apply_recovery_current(RecoveryDirection direction, float current, int duration_ms);
+
+    // ===== 断流看门狗（高频控制流断流 → 安全 PTM 防堵转） =====
+    uint64_t refresh_stream_watchdog();   // 武装+刷新租约（高频命令到达时调用），返回 generation
+    void disarm_stream_watchdog();        // 解除武装（低频命令/关闭时调用）
+    bool stream_watchdog_expired();       // 是否已断流（expired 状态下 move_paw 应立即中止）
+
+    // ===== 真实下发指令回调（观察口，不参与控制） =====
+    // 每次 control_thread 实际下发 PTM 前，把最终参数（含 kp=0 安全 PTM）回报给上层
+    // 参数：motor_id, pos(已换算为行程百分比，逻辑坐标系), vel, torque, kp, kd, zero_kp（本次是否为安全 PTM）
+    using TxCallback = std::function<void(uint8_t, float, float, float, float, float, bool)>;
+    void set_tx_callback(TxCallback callback);
+
+    // 获取按 MotorId 升序排列的电机 ID 列表（升序槽位 ↔ {left_claw, right_claw}，供上层稳定映射）
+    std::vector<MotorId> get_sorted_motor_ids() const;
 
 private:
     bool init_lejuclaw_can_customed();
@@ -251,6 +266,10 @@ private:
     int   cfg_CLOSE_IMPACT_INTERVAL_MS = CLOSE_IMPACT_INTERVAL_MS;
     int   cfg_CLOSE_MAX_ATTEMPTS = CLOSE_MAX_ATTEMPTS;
 
+    // 断流看门狗（高频控制流断流超时时间，单位 ms）
+    static constexpr int STREAM_WATCHDOG_TIMEOUT_MS = 500;
+    int cfg_STREAM_WATCHDOG_TIMEOUT_MS = STREAM_WATCHDOG_TIMEOUT_MS;
+
     bool measure_range();
     bool find_claw_limit_velocity_control(bool is_open_direction, float kp, float kd, float alpha,
         float max_current, float stall_current_threshold, 
@@ -277,9 +296,6 @@ private:
     void init_status_variables();
     bool waitForOperationStatus(MotorId id, Operation expected_op, OperationStatus expected_status, int timeout_ms, const char* operation_name);
     void set_init_fault(InitFault fault, const std::string& message);
-
-    // 获取按 MotorId 升序排列的电机 ID 列表（用于 vector<->map 的稳定映射）
-    std::vector<MotorId> get_sorted_motor_ids() const;
 
     // 回调上下文
     canbus_sdk::CallbackContext msg_callback_context_;
@@ -349,6 +365,19 @@ private:
     std::thread control_thread_;
     std::atomic<bool> target_updated_{false};
     std::atomic<bool> motion_cancel_requested_{false};
+
+    // 断流看门狗状态
+    bool stream_watchdog_armed_ = false;                          // 是否已武装（高频流活跃期间为 true）
+    bool stream_watchdog_expired_ = false;                        // 是否已断流超时
+    uint64_t stream_generation_ = 0;                              // 租约代数（latest-wins 备用）
+    std::chrono::steady_clock::time_point last_stream_command_time_;  // 最后一次高频命令到达时间
+    std::mutex stream_watchdog_mutex_;                            // 保护看门狗状态
+    std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> safe_command_cache_;  // 断流期间权威下发的安全命令缓存
+
+    // 真实下发指令回调（观察口）：control_thread 在实际下发前调用
+    // 安装可能与控制线程并发调用（setTargetCallback/initialize 时线程已在跑），拷贝到栈上再调用
+    std::mutex tx_callback_mutex_;
+    TxCallback tx_callback_;
 };
 
 }

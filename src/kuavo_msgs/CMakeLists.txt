@@ -80,6 +80,7 @@ add_message_files(
   gestureInfo.msg
   gestureTask.msg
   lejuClawState.msg
+  lejuClawTarget.msg
   Metadata.msg
   switchGaitByName.msg
   lejuClawCommand.msg

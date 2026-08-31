@@ -64,14 +64,15 @@ public:
      * @param res   Control response
      * @return false if failed. 
      */
-    bool controlGripper(ControlClawRequest &req, ControlClawResponse &res);
+    bool controlGripper(ControlClawRequest &req, ControlClawResponse &res, bool is_high_freq);
 
     /**
      * @brief ROS topic callback
-     * 
+     *
      * @param msg   ROS topic message
+     * @param is_high_freq  高频（连续流/允许覆盖）或低频（一次性定位/执行中拒绝）
      */
-    void command(const lejuClawCommand &msg);
+    void command(const lejuClawCommand &msg, bool is_high_freq);
 
     /**
      * @brief Initialize the Leju Claw
@@ -84,6 +85,14 @@ public:
      */
     bool initialize(bool init_bmapilib);
     void setDebugCallback(LejuClawDebugCallback callback);
+
+    /**
+     * @brief 设置真实下发指令回调（观察口）：驱动层每次实际下发 PTM 前回报最终参数
+     *
+     * 串口/CAN 回调签名不同（串口一次回两爪数组，CAN 逐电机回），控制器内部
+     * 各自适配为统一的 LejuClawTargetCallback（claw_types.h 定义）再上报。
+     */
+    void setTargetCallback(LejuClawTargetCallback callback);
     bool recover(const std::string& direction, float current, int duration_ms, int repeat, std::string& err_msg);
 
     /**
@@ -124,28 +133,43 @@ public:
     }
 
     /**
+     * @brief Get the current control mode
+     *
+     * @return true if the claw is in high-freq (continuous stream) mode, false if low-freq (one-shot)
+     */
+    bool get_is_high_freq() const {
+        return current_is_high_freq_.load();
+    }
+
+    /**
      * @brief control the claws to move to the given position
      * 
      * @note  this function is synchronous, it will block until the claws reach the given position
      * 
-     * @param positions  0 ~ 100, the percentage of the claw's opening angle
-     *                   0: closed, 100: open   
+     * @param positions  5 ~ 95, the percentage of the claw's opening angle
+     *                   5: closed limit, 95: open limit
      * @param velocity   0 ~ 100
      * @param torque     torque/current, better 1A ~ 2A
      * @return std::array<State, 2>     the state of the claws
      */
-    std::array<State, 2> move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque);
+    std::array<State, 2> move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque, bool is_high_freq);
 
 private:
-    bool execute(const lejuClawCommand &data, std::string &err_msg);
-    
-    // VR控制检测相关变量
-    std::chrono::steady_clock::time_point last_command_time_;
-    bool is_vr_control_mode_ = false;
-    static constexpr int VR_CONTROL_DETECTION_INTERVAL_MS = 200;    // VR控制检测间隔，该ms时间内连续调用认为是VR模式
-    
-    // VR检测方法
-    void update_vr_detection();
+    bool execute(const lejuClawCommand &data, bool is_high_freq, std::string &err_msg);
+
+    /**
+     * @brief 武装/刷新断流看门狗（高频命令到达时调用）
+     */
+    void armStreamWatchdog();
+    /**
+     * @brief 解除断流看门狗武装（低频命令/关闭时调用）
+     */
+    void disarmStreamWatchdog();
+    /**
+     * @brief 把 target_callback_ 以对应协议的适配 lambda 装进已存在的驱动
+     * @note  setTargetCallback 与 initialize（驱动创建后）都会调用，保证两种时序下都能装上
+     */
+    void installTargetCallback();
 
     bool is_can_protocol_;
     explicit LejuClawController(bool is_can_protocol) : is_can_protocol_(is_can_protocol) {}
@@ -171,7 +195,10 @@ private:
     std::atomic_bool recovery_in_progress_{false};
 
     std::array<State, 2> gripper_state_ = {State::kUnknown, State::kUnknown};
+    std::atomic_bool current_is_high_freq_{false};   // 当前控制模式：true=高频，false=低频
     LejuClawDebugCallback debug_callback_;
+    std::mutex target_callback_mutex_;
+    LejuClawTargetCallback target_callback_;         // 真实下发指令回调（观察口）
 };
 } // namespace eef_controller
 

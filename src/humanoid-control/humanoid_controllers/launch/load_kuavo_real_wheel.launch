@@ -76,6 +76,8 @@
 
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
+    <arg name="lejuclaw_high_freq_switch" default="false" doc="Use high-frequency continuous claw control by default; a live /quest_joystick_data stream also enables it."/>
+    <arg name="lejuclaw_vr_stream_timeout_ms" default="1000" doc="Timeout in ms before the Quest joystick stream is considered inactive."/>
     
     <!-- wheel bridge -->
     <arg name="use_wheel_bridge" default="true" if="$(eval arg('robot_version') == 60)"/>
@@ -167,6 +169,8 @@
 
     <param name="hardware/is_ready" value="0"/>
     <param name="hardware/ready_to_start" value="0"/>
+    <param name="lejuclaw_high_freq_switch" value="$(arg lejuclaw_high_freq_switch)"/>
+    <param name="lejuclaw_vr_stream_timeout_ms" value="$(arg lejuclaw_vr_stream_timeout_ms)" type="int"/>
    
     <!-- <group unless="$(arg ruiwo_cxx_sdk)">
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodelet nodelet_manager" respawn="false" output="screen" required="true"  />

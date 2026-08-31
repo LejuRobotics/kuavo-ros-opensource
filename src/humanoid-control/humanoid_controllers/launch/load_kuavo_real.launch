@@ -35,6 +35,8 @@
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
     <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
+    <arg name="lejuclaw_high_freq_switch" default="false" doc="Use high-frequency continuous claw control by default; a live /quest_joystick_data stream also enables it." />
+    <arg name="lejuclaw_vr_stream_timeout_ms" default="1000" doc="Timeout in ms before the Quest joystick stream is considered inactive." />
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <arg name="arm_move_spd"      default="1.2"/>
     <arg name="waist_move_spd"      default="1.8"/>
@@ -208,6 +210,8 @@
 
     <param name="hardware/is_ready" value="0"/>
     <param name="hardware/ready_to_start" value="0"/>
+    <param name="lejuclaw_high_freq_switch" value="$(arg lejuclaw_high_freq_switch)"/>
+    <param name="lejuclaw_vr_stream_timeout_ms" value="$(arg lejuclaw_vr_stream_timeout_ms)" type="int"/>
     <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
     <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
       <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
