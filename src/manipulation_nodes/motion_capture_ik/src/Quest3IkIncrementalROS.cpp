@@ -25,6 +25,7 @@
 #include <chrono>
 #include <sstream>
 #include <algorithm>
+#include <array>
 #include <vector>
 #include <XmlRpcValue.h>
 
@@ -1761,6 +1762,35 @@ void Quest3IkIncrementalROS::publishJointStates() {
     jointStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
   }
 
+  // 保存上一帧真正进入发布链路的状态，供本帧边界阻尼限制速度变化并重新积分位置
+  const Eigen::VectorXd previousPublishedQ = latest_q_;
+  const Eigen::VectorXd previousPublishedDq = lowpass_dq_;
+
+  // 腕部关节软限位（由 URDF 限位按原有比例缩放得到）。保证目标角度、fhan 状态和滤波速度在限位处一致，
+  // 避免位置指令已经到达限位时仍然下发朝限位外运动的速度指令
+  struct JointSoftLimit {
+    int index;
+    double lower;
+    double upper;
+  };
+  static constexpr std::array<JointSoftLimit, 6> kWristJointSoftLimits{{
+      {4, 0.95 * -1.5707963267949, 0.95 * 1.5707963267949},          // 左臂第 5 关节：[-85.5°, 85.5°]
+      {5, 0.85 * -1.30899693899575, 0.85 * 0.698131700797732},      // 左臂第 6 关节：[-63.75°, 34°]
+      {6, 0.85 * -0.698131700797732, 0.85 * 0.698131700797732},     // 左臂第 7 关节：[-34°, 34°]
+      {11, 0.95 * -1.5707963267949, 0.95 * 1.5707963267949},       // 右臂第 5 关节：[-85.5°, 85.5°]
+      {12, 0.85 * -0.698131700797732, 0.85 * 1.30899693899575},    // 右臂第 6 关节：[-34°, 63.75°]
+      {13, 0.85 * -0.698131700797732, 0.85 * 0.698131700797732},   // 右臂第 7 关节：[-34°, 34°]
+  }};
+
+  const auto clampPosition = [](double position, const JointSoftLimit& limit) {
+    return std::min(std::max(position, limit.lower), limit.upper);
+  };
+  const auto stopOutwardVelocity = [](double position, double& velocity, const JointSoftLimit& limit) {
+    if ((position <= limit.lower && velocity < 0.0) || (position >= limit.upper && velocity > 0.0)) {
+      velocity = 0.0;
+    }
+  };
+
   Eigen::VectorXd finalArmAngles = armAngleLimited;  // 默认使用目标角度
 
   double fhanH = 1.0 / publishRate_;
@@ -1770,6 +1800,12 @@ void Quest3IkIncrementalROS::publishJointStates() {
     double targetAngle = finalArmAngles(i);
     if (i == 5 || i == 6 || i == 12 || i == 13) {
       targetAngle = targetAngle * deltaScaleRPY_(1);
+    }
+    for (const auto& limit : kWristJointSoftLimits) {
+      if (limit.index == i) {
+        targetAngle = clampPosition(targetAngle, limit);
+        break;
+      }
     }
     if (i <= 6 && joyStickHandlerPtr_->isLeftGrip()) {
       leju_utils::fhanStepForwardWithVelLimit(q_(i),               // 滤波后的关节角度（输出）
@@ -1792,30 +1828,10 @@ void Quest3IkIncrementalROS::publishJointStates() {
     dq_(i) = dq_(i) > 18.0 ? 18.0 : dq_(i);
     dq_(i) = dq_(i) < -18.0 ? -18.0 : dq_(i);
   }
-  // Wrist joint limits (hard-coded from URDF):
-  //   src/kuavo_assets/models/biped_s49/urdf/biped_s49.urdf
-  // This avoids relying on MultibodyPlant joint indexing (mec_limit_*), which can drift when the URDF changes.
-  static constexpr double kZarmL5Lower = -1.5707963267949;
-  static constexpr double kZarmL5Upper = 1.5707963267949;
-  static constexpr double kZarmL6Lower = -1.30899693899575;
-  static constexpr double kZarmL6Upper = 0.698131700797732;
-  static constexpr double kZarmL7Lower = -0.698131700797732;
-  static constexpr double kZarmL7Upper = 0.698131700797732;
-
-  static constexpr double kZarmR5Lower = -1.5707963267949;
-  static constexpr double kZarmR5Upper = 1.5707963267949;
-  static constexpr double kZarmR6Lower = -0.698131700797732;
-  static constexpr double kZarmR6Upper = 1.30899693899575;
-  static constexpr double kZarmR7Lower = -0.698131700797732;
-  static constexpr double kZarmR7Upper = 0.698131700797732;
-
-  q_(4) = std::min(std::max(q_(4), 0.95 * kZarmL5Lower), 0.95 * kZarmL5Upper);
-  q_(5) = std::min(std::max(q_(5), 0.85 * kZarmL6Lower), 0.85 * kZarmL6Upper);
-  q_(6) = std::min(std::max(q_(6), 0.85 * kZarmL7Lower), 0.85 * kZarmL7Upper);
-
-  q_(11) = std::min(std::max(q_(11), kZarmR5Lower), kZarmR5Upper);
-  q_(12) = std::min(std::max(q_(12), 0.85 * kZarmR6Lower), 0.85 * kZarmR6Upper);
-  q_(13) = std::min(std::max(q_(13), 0.85 * kZarmR7Lower), 0.85 * kZarmR7Upper);
+  for (const auto& limit : kWristJointSoftLimits) {
+    q_(limit.index) = clampPosition(q_(limit.index), limit);
+    stopOutwardVelocity(q_(limit.index), dq_(limit.index), limit);
+  }
 
   // 处理左手平滑过渡：根据超时时间进度逐步增大 alpha 值（仅在检测到移动时计算）
   {
@@ -1882,6 +1898,92 @@ void Quest3IkIncrementalROS::publishJointStates() {
   }
 
   lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
+
+  // 在现有 Quest3 指令层做边界速度阻尼。仅在关节向边界运动且进入制动区时接管该关节，
+  // 其余区域保持原有位置平滑和速度低通行为不变
+  if (wristJointLimitVelocityDamperEnabled_ &&
+      previousPublishedQ.size() == jointStateSize_ && previousPublishedDq.size() == jointStateSize_) {
+    const double cycle = std::min(std::max(fhanH, 1e-4), 0.02);
+    for (const auto& limit : kWristJointSoftLimits) {
+      if (limit.index < 0 || limit.index >= jointStateSize_) {
+        continue;
+      }
+
+      const double lower = limit.lower + wristJointLimitHardEpsilon_;
+      const double upper = limit.upper - wristJointLimitHardEpsilon_;
+      const double previousQ = std::min(std::max(previousPublishedQ(limit.index), lower), upper);
+      const double requestedQ = std::min(std::max(latest_q_(limit.index), lower), upper);
+      const double rawRequestedV = (requestedQ - previousQ) / cycle;
+      const double requestedV = std::min(std::max(rawRequestedV, -wristJointLimitMaxVelocity_),
+                                         wristJointLimitMaxVelocity_);
+      const double previousV = std::isfinite(previousPublishedDq(limit.index))
+                                   ? previousPublishedDq(limit.index)
+                                   : 0.0;
+
+      const double upperDistance = std::max(0.0, upper - previousQ);
+      const double lowerDistance = std::max(0.0, previousQ - lower);
+      const double upperReferenceSpeed = std::max(std::max(requestedV, 0.0), std::max(previousV, 0.0));
+      const double lowerReferenceSpeed = std::max(std::max(-requestedV, 0.0), std::max(-previousV, 0.0));
+      const double upperActivationDistance =
+          std::max(wristJointLimitSoftZone_,
+                   upperReferenceSpeed * upperReferenceSpeed / (2.0 * wristJointLimitStopAcceleration_));
+      const double lowerActivationDistance =
+          std::max(wristJointLimitSoftZone_,
+                   lowerReferenceSpeed * lowerReferenceSpeed / (2.0 * wristJointLimitStopAcceleration_));
+      const bool upperDamperActive = upperReferenceSpeed > 0.0 && upperDistance < upperActivationDistance;
+      const bool lowerDamperActive = lowerReferenceSpeed > 0.0 && lowerDistance < lowerActivationDistance;
+      if (!upperDamperActive && !lowerDamperActive) {
+        continue;
+      }
+
+      double damperTargetV = requestedV;
+      if (requestedV > 0.0 && upperDamperActive) {
+        const double ratio = std::min(std::max(upperDistance / upperActivationDistance, 0.0), 1.0);
+        const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+        const double softLimit = requestedV * smoothScale;
+        const double brakeLimit = std::sqrt(2.0 * wristJointLimitStopAcceleration_ * upperDistance);
+        damperTargetV = std::min({requestedV, softLimit, brakeLimit, upperDistance / cycle});
+      } else if (requestedV < 0.0 && lowerDamperActive) {
+        const double ratio = std::min(std::max(lowerDistance / lowerActivationDistance, 0.0), 1.0);
+        const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+        const double softLimit = std::abs(requestedV) * smoothScale;
+        const double brakeLimit = std::sqrt(2.0 * wristJointLimitStopAcceleration_ * lowerDistance);
+        damperTargetV = -std::min({std::abs(requestedV), softLimit, brakeLimit, lowerDistance / cycle});
+      }
+
+      const double maxDeltaV = wristJointLimitMaxAcceleration_ * cycle;
+      double boundedV = std::min(std::max(damperTargetV, previousV - maxDeltaV), previousV + maxDeltaV);
+      if (boundedV > 0.0) {
+        const double discreteBrakeLimit =
+            -wristJointLimitStopAcceleration_ * cycle +
+            std::sqrt(wristJointLimitStopAcceleration_ * wristJointLimitStopAcceleration_ * cycle * cycle +
+                      2.0 * wristJointLimitStopAcceleration_ * upperDistance);
+        boundedV = std::min({boundedV, upperDistance / cycle, std::max(0.0, discreteBrakeLimit)});
+      } else if (boundedV < 0.0) {
+        const double discreteBrakeLimit =
+            -wristJointLimitStopAcceleration_ * cycle +
+            std::sqrt(wristJointLimitStopAcceleration_ * wristJointLimitStopAcceleration_ * cycle * cycle +
+                      2.0 * wristJointLimitStopAcceleration_ * lowerDistance);
+        boundedV = -std::min({std::abs(boundedV), lowerDistance / cycle, std::max(0.0, discreteBrakeLimit)});
+      }
+
+      const bool movingOutwardInSoftZone =
+          (boundedV > 0.0 && upperDistance < wristJointLimitSoftZone_) ||
+          (boundedV < 0.0 && lowerDistance < wristJointLimitSoftZone_);
+      if (movingOutwardInSoftZone && std::abs(boundedV) < wristJointLimitSettleVelocity_) {
+        boundedV = 0.0;
+      }
+
+      const double candidateQ = previousQ + boundedV * cycle;
+      const double boundedQ = std::min(std::max(candidateQ, lower), upper);
+      boundedV = (boundedQ - previousQ) / cycle;
+
+      // 同步更新三层状态，避免下一帧的 EMA/低通重新带回朝边界外的历史速度
+      latest_q_(limit.index) = boundedQ;
+      latest_dq_(limit.index) = boundedV;
+      lowpass_dq_(limit.index) = boundedV;
+    }
+  }
 
   // 使用局部变量保存本帧要发送的关节位置/速度，避免填充消息时读到被其他线程改写的 latest_q_/lowpass_dq_
   Eigen::VectorXd armPositionForPublish = latest_q_;
@@ -2433,6 +2535,14 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         "(alpha=%.3f)",
         lowpassDqAlpha_);
   }
+
+  ROS_INFO(
+      "[Quest3IkIncrementalROS] Wrist joint-limit velocity damper: enable=%s, soft_zone=%.4f, "
+      "stop_acceleration=%.3f, max_velocity=%.3f, max_acceleration=%.3f, settle_velocity=%.6f, "
+      "hard_epsilon=%.6f",
+      wristJointLimitVelocityDamperEnabled_ ? "true" : "false", wristJointLimitSoftZone_,
+      wristJointLimitStopAcceleration_, wristJointLimitMaxVelocity_, wristJointLimitMaxAcceleration_,
+      wristJointLimitSettleVelocity_, wristJointLimitHardEpsilon_);
 
   // TEST: 初始化关节限制中间值（硬编码，从URDF中提取）
   // 关节顺序：左臂7个(zarm_l1~l7) + 右臂7个(zarm_r1~r7) = 14个
