@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <deque>
 #include <string>
@@ -39,6 +40,12 @@ struct WheelPointTrackIKSolverConfig : public IKSolverConfig {
   double virtualThumbTrackingWeight = 4e3;
   double shoulderTrackingWeight = 4e3;
   double chestTrackingWeight = 4e3;
+
+  // Final-IK safety floor.  Elbow tracking remains a soft posture cost, but
+  // the elbow origin may not cross into the waist-side keep-out band.  The
+  // bound is expressed laterally in waist_yaw_link, so it follows torso yaw.
+  bool enableWaistElbowClearanceConstraint = true;
+  double waistElbowLateralClearance = 0.20;  // [m]
 
   // joint smoothness weights (7 joints per arm, symmetric for left and right)
   double jointSmoothWeightDefault = 5e1;  // Default weight for all joints
@@ -154,6 +161,14 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
 
   std::chrono::milliseconds getMeanSolveDuration() const { return historyBuffer_.getMeanDuration(); }
 
+  void setElbowTrackingActivations(double leftActivation, double rightActivation) {
+    leftElbowTrackingActivation_ = std::clamp(leftActivation, 0.0, 1.0);
+    rightElbowTrackingActivation_ = std::clamp(rightActivation, 0.0, 1.0);
+  }
+
+  // 腰部位置跟随细分关闭时（chestPositionUpdateEnable_=false），chest 位置更改为超高权重软代价近似
+  void setFreezeChestPosition(bool freeze) { freezeChestPosition_ = freeze; }
+
  private:
   struct LowpassBiquadCoeff {
     double b0{0.0};
@@ -194,6 +209,9 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
 
   // Optional extended config for tracking weights
   std::unique_ptr<WheelPointTrackIKSolverConfig> pointTrackConfig_;
+  double leftElbowTrackingActivation_{1.0};
+  double rightElbowTrackingActivation_{1.0};
+  bool freezeChestPosition_{false};  // true 时 chest 位置用超高权重软代价近似锁定（位置跟随细分关闭）
 };
 
 }  // namespace HighlyDynamic

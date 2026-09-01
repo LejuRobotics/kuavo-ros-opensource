@@ -19,7 +19,7 @@ lateral_elbow_fix           true ; 纯侧移时缩放对应侧肘关节 action
 enable_roll_compensation_closed_loop    true ; 是否启用直行时 projected_gravity 的 roll 观测闭环补偿
 enable_off_cmdy_by_cmdx     true ; 当cmdx大于0.3时关闭cmdy,且 abs(cmdy)大于0.41时关闭cmdx
 enable_off_cmdy_by_cmdangz  true ; 当 abs(cmdangz)大于0.3时关闭cmdy，且abs(cmdy)大于0.3时关闭cmdangz
-enable_elbow_scale          true ; 肘关节单独使用 0.18 actionscale，并限制最终关节角(加default后)<-0.2
+enable_elbow_upper          true ; 限制最终肘关节角(加default后)<-0.15
 enable_back_arm_enhance     true ; cmd_x<-0.2 时 arm 摆动增强
 enable_standup_enhance        true ; 起身时添加后仰偏置避免前倾，并增强leg1和leg4的输出
 use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
@@ -133,7 +133,7 @@ rollCompensationClosedLoop
     targetLearningMaxAbsRollDeg  1.0 ; 零点学习允许的最大 |roll|，0=不限制
     kp                      1.2 ; 比例增益，增大可加强即时补偿
     ki                      0.06 ; 积分增益，设为 0 可关闭积分
-    maxCompensationDeg      0.70 ; 闭环观测补偿的绝对限幅 (deg)
+    maxCompensationDeg      1.0 ; 闭环观测补偿的绝对限幅 (deg)
 }
 
 defaultBaseHeightControl    0.77 ; Actual standing height when using RL controller

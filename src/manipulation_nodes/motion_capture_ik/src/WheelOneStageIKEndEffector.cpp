@@ -43,7 +43,44 @@ struct ChestPitchBarrierCost {
     if constexpr (std::is_same_v<U, double>) {
       return v;
     } else {
-      return v.value(); 
+      return v.value();
+    }
+  }
+};
+
+// 位置跟随细分关闭时（freezeChestPosition_），把 chest 姿态（yaw）锁到 VR 参考的障碍函数。
+struct ChestYawBarrierCost {
+  double q3Ref;  // VR 参考 yaw 对应的期望 waist_yaw 关节角
+  static constexpr double kSoftLimit = 1.0 * M_PI / 180.0;   // 允许偏差 ±2°
+  static constexpr double kSaturationError = 2.0 * M_PI / 180.0;
+  static constexpr double kWeight = 2e5;
+
+  size_t numInputs() const { return 1; }
+  size_t numOutputs() const { return 1; }
+
+  template <typename T>
+  void eval(const Eigen::Ref<const Eigen::Matrix<T, Eigen::Dynamic, 1>>& x,
+            Eigen::Matrix<T, Eigen::Dynamic, 1>* y) const {
+    const T dev = x(0) - T(q3Ref);
+    const T abs_dev = abs(dev);
+
+    const double abs_val = toDouble(abs_dev);
+    if (abs_val <= kSoftLimit) {
+      (*y)(0) = T(0.0);
+      return;
+    }
+    T overshoot = abs_dev - T(kSoftLimit);
+    T gainfactor = T(2.0)/(1.0 + exp(-overshoot/T(kSaturationError)))-T(1.0);
+    (*y)(0) = T(kWeight) * overshoot * overshoot * gainfactor;
+  }
+
+ private:
+  template <typename U>
+  static double toDouble(const U& v) {
+    if constexpr (std::is_same_v<U, double>) {
+      return v;
+    } else {
+      return v.value();
     }
   }
 };
@@ -251,6 +288,8 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   // Use WheelPointTrackIKSolverConfig weights if available, otherwise use defaults
   double eeWeight = pointTrackConfig_ ? pointTrackConfig_->eeTrackingWeight : 4e3;
   double elbowWeight = pointTrackConfig_ ? pointTrackConfig_->elbowTrackingWeight : 4e2;
+  const double leftElbowWeight = elbowWeight * leftElbowTrackingActivation_;
+  const double rightElbowWeight = elbowWeight * rightElbowTrackingActivation_;
   double link6Weight = pointTrackConfig_ ? pointTrackConfig_->link6TrackingWeight : 4e3;
   double virtualThumbWeight = pointTrackConfig_ ? pointTrackConfig_->virtualThumbTrackingWeight : 4e3;
   double shoulderWeight = pointTrackConfig_ ? pointTrackConfig_->shoulderTrackingWeight : 4e3;
@@ -258,11 +297,43 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
 
   // add chest position constraint
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_CHEST) {
-    ik.AddPositionCost(plant_->world_frame(),
-                       PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,
-                       plant_->GetFrameByName("waist_yaw_link"),
-                       Eigen::Vector3d::Zero(),
-                       chestWeight * Eigen::Matrix3d::Identity());
+    if (freezeChestPosition_) {
+      // 位置跟随细分关闭：更改为高权重软约束
+      ik.AddPositionCost(plant_->world_frame(),
+                         PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,
+                         plant_->GetFrameByName("waist_yaw_link"),
+                         Eigen::Vector3d::Zero(),
+                         chestWeight * 1e4 * Eigen::Matrix3d::Identity());
+      // 位置冻结的同时，用障碍函数把 chest 姿态（yaw）锁到 VR 参考：
+      const Eigen::Matrix3d chestR = PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix;
+      if (chestR.allFinite() && !chestR.isZero(1e-9)) {
+        // 目标 yaw（world 系）：R = Rz(yaw)*Ry(pitch) 的 yaw 分量
+        const double yawTarget = std::atan2(chestR(1, 0), chestR(0, 0));
+        // 用参考解 FK 校准 waist_yaw 关节角到 world yaw 的偏移（base welded，偏移固定）
+        double q3Current = (referenceSolution.size() >= 18) ? referenceSolution[3] : 0.0;
+        double yawCurrent = yawTarget;
+        if (referenceSolution.size() >= 18 && plant_) {
+          auto tmpCtx = plant_->CreateDefaultContext();
+          plant_->SetPositions(tmpCtx.get(), referenceSolution);
+          const auto Rcur = plant_->GetFrameByName("waist_yaw_link").CalcRotationMatrix(
+              *tmpCtx, plant_->world_frame());
+          yawCurrent = std::atan2(Rcur.matrix()(1, 0), Rcur.matrix()(0, 0));
+        }
+        // 期望 q3 = 当前 q3 + (目标 yaw - 当前 yaw)：VR 转身时跟随，手摆动时不变
+        const double q3Ref = q3Current + (yawTarget - yawCurrent);
+        ChestYawBarrierCost barrier{q3Ref};
+        Eigen::Matrix<drake::symbolic::Variable, 1, 1> vars;
+        vars << ik.q()[3];
+        ik.get_mutable_prog()->AddCost(barrier, vars);
+      }
+    } else {
+      // 位置跟随开启：软代价协同跟随，允许与手臂可达性权衡
+      ik.AddPositionCost(plant_->world_frame(),
+                         PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,
+                         plant_->GetFrameByName("waist_yaw_link"),
+                         Eigen::Vector3d::Zero(),
+                         chestWeight * Eigen::Matrix3d::Identity());
+    }
   }
 
   // add chest pitch barrier cost
@@ -289,6 +360,17 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   }
 
   if (controlArmIndex == ArmIdx::LEFT || controlArmIndex == ArmIdx::BOTH) {
+    if (pointTrackConfig_ && pointTrackConfig_->enableWaistElbowClearanceConstraint) {
+      const double clearance = std::max(0.0, pointTrackConfig_->waistElbowLateralClearance);
+      const Eigen::Vector3d lower(-1.0e3, clearance, -1.0e3);
+      const Eigen::Vector3d upper = Eigen::Vector3d::Ones() * 1.0e3;
+      ik.AddPositionConstraint(plant_->GetFrameByName("zarm_l4_link"),
+                               Eigen::Vector3d::Zero(),
+                               plant_->GetFrameByName("waist_yaw_link"),
+                               lower,
+                               upper);
+    }
+
     // Add LEFT HAND (End Effector) position constraint
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
@@ -308,7 +390,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position,
                          plant_->GetFrameByName("zarm_l4_link"),
                          Eigen::Vector3d::Zero(),
-                         elbowWeight * Eigen::Matrix3d::Identity());
+                         leftElbowWeight * Eigen::Matrix3d::Identity());
     } else {
       // print size err POSE_DATA_LIST_INDEX_LEFT_ELBOW
       std::cout << "WheelOneStageIKEndEffector::setConstraints: size error POSE_DATA_LIST_INDEX_LEFT_ELBOW" << std::endl;
@@ -341,6 +423,17 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   }
 
   if (controlArmIndex == ArmIdx::RIGHT || controlArmIndex == ArmIdx::BOTH) {
+    if (pointTrackConfig_ && pointTrackConfig_->enableWaistElbowClearanceConstraint) {
+      const double clearance = std::max(0.0, pointTrackConfig_->waistElbowLateralClearance);
+      const Eigen::Vector3d lower = -Eigen::Vector3d::Ones() * 1.0e3;
+      const Eigen::Vector3d upper(1.0e3, -clearance, 1.0e3);
+      ik.AddPositionConstraint(plant_->GetFrameByName("zarm_r4_link"),
+                               Eigen::Vector3d::Zero(),
+                               plant_->GetFrameByName("waist_yaw_link"),
+                               lower,
+                               upper);
+    }
+
     // Add RIGHT HAND (End Effector) position constraint
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
@@ -360,7 +453,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position,
                          plant_->GetFrameByName("zarm_r4_link"),
                          Eigen::Vector3d::Zero(),
-                         elbowWeight * Eigen::Matrix3d::Identity());
+                         rightElbowWeight * Eigen::Matrix3d::Identity());
     } else {
       // print size err POSE_DATA_LIST_INDEX_RIGHT_ELBOW
       std::cout << "WheelOneStageIKEndEffector::setConstraints: size error POSE_DATA_LIST_INDEX_RIGHT_ELBOW" << std::endl;

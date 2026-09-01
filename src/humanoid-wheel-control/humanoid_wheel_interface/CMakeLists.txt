@@ -14,6 +14,7 @@ set(CATKIN_PACKAGE_DEPENDENCIES
   ocs2_self_collision
   humanoid_interface
   kuavo_msgs
+  leju_mobile_base_msgs
   ruckig_catkin
 )
 
@@ -104,6 +105,7 @@ add_library(${PROJECT_NAME}
   src/cost/EndEffectorLocalBoxSoftCost.cpp
   src/cost/selfDistanceBoxSoftCost.cpp
   src/cost/EndEffectorJointBias.cpp
+  src/cost/ShoulderTightenCost.cpp
 )
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)

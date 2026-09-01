@@ -10,7 +10,7 @@ from sensor_msgs.msg import JointState
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList, JoySticks
-from kuavo_msgs.msg import headBodyPose
+from kuavo_msgs.msg import ControllerSwitchEvent, headBodyPose
 import rospy
 import time
 import tf
@@ -134,11 +134,16 @@ class Quest3ArmInfoTransformer:
         self.last_right_upper_arm_vec = None
         self.last_left_arm_timestamp = None
         self.last_right_arm_timestamp = None
-        self.max_shoulder_angular_velocity = 4.0  # rad/s, 肩关节最大角速度
+        self.max_shoulder_angular_velocity = 4.0  # rad/s, 当前控制器配置的肩关节最大角速度
         # 添加小臂向量角速度限制相关变量
         self.last_left_lower_arm_vec = None
         self.last_right_lower_arm_vec = None
-        self.max_elbow_angular_velocity = 4.0  # rad/s, 肘关节最大角速度（通常比肩关节灵活）
+        self.max_elbow_angular_velocity = 4.0  # rad/s, 当前控制器配置的肘关节最大角速度
+        self.enable_elbow_angular_velocity_limit = False
+        self._motion_limit_profiles = {}
+        self._active_motion_limit_profile = {}
+        self._motion_limit_profile_name = None
+        self.controller_switch_event_sub = None
         # 添加上臂向量空间约束参数
         self.upper_arm_cone_angle_forward = 140.0 * np.pi / 180.0  # 前方锥角（相对于前方x轴）
         self.marker_pub = rospy.Publisher("visualization_marker", Marker, queue_size=10)
@@ -205,12 +210,19 @@ class Quest3ArmInfoTransformer:
             self.max_shoulder_angular_velocity = rospy.get_param("/quest3/max_shoulder_angular_velocity")
             print(f"get rosparams max_shoulder_angular_velocity: {self.max_shoulder_angular_velocity}")
         else:
-            print("/quest3/max_shoulder_angular_velocity not found, using default 3.0 rad/s")
+            print("/quest3/max_shoulder_angular_velocity not found, using default 4.0 rad/s")
         if rospy.has_param("/quest3/max_elbow_angular_velocity"):
             self.max_elbow_angular_velocity = rospy.get_param("/quest3/max_elbow_angular_velocity")
             print(f"get rosparams max_elbow_angular_velocity: {self.max_elbow_angular_velocity}")
         else:
             print("/quest3/max_elbow_angular_velocity not found, using default 4.0 rad/s")
+        self._load_motion_limit_profiles()
+        self.controller_switch_event_sub = rospy.Subscriber(
+            "/humanoid_controller/controller_switch_event",
+            ControllerSwitchEvent,
+            self._controller_switch_event_callback,
+            queue_size=1,
+        )
         if rospy.has_param("/quest3/upper_arm_cone_angle_forward"):
             self.upper_arm_cone_angle_forward = rospy.get_param("/quest3/upper_arm_cone_angle_forward") * np.pi / 180.0
             print(f"get rosparams upper_arm_cone_angle_forward: {self.upper_arm_cone_angle_forward * 180.0 / np.pi} degrees")
@@ -221,6 +233,52 @@ class Quest3ArmInfoTransformer:
             self.upper_arm_cone_angle_back = rospy.get_param("/quest3/upper_arm_cone_angle_back") * np.pi / 180.0
             print(f"get rosparams upper_arm_cone_angle_back: {self.upper_arm_cone_angle_back * 180.0 / np.pi} degrees")
     
+    def _load_motion_limit_profiles(self):
+        """Load MoRE-specific limits without changing other controllers' legacy settings."""
+        self._motion_limit_profiles = {
+            "base": {
+                # 非 MoRE 保持 MR 父版本行为：肩部沿用原有全局参数，肘部不限速。
+                "max_shoulder_angular_velocity": self.max_shoulder_angular_velocity,
+                "max_elbow_angular_velocity": self.max_elbow_angular_velocity,
+                "enable_elbow_angular_velocity_limit": False,
+            },
+            "more": {
+                "max_shoulder_angular_velocity": rospy.get_param(
+                    "/quest3/more_max_shoulder_angular_velocity", 2.4
+                ),
+                "max_elbow_angular_velocity": rospy.get_param(
+                    "/quest3/more_max_elbow_angular_velocity", 2.4
+                ),
+                "enable_elbow_angular_velocity_limit": rospy.get_param(
+                    "/quest3/more_enable_elbow_angular_velocity_limit", True
+                ),
+            },
+        }
+        self._apply_motion_limit_profile("base")
+
+    def _apply_motion_limit_profile(self, profile_name):
+        if profile_name == self._motion_limit_profile_name:
+            return
+        profile = self._motion_limit_profiles[profile_name]
+        # Replacing the profile reference lets read_msg take one consistent snapshot
+        # even if the controller-switch callback runs concurrently.
+        self._active_motion_limit_profile = profile
+        self._motion_limit_profile_name = profile_name
+        self.max_shoulder_angular_velocity = profile["max_shoulder_angular_velocity"]
+        self.max_elbow_angular_velocity = profile["max_elbow_angular_velocity"]
+        self.enable_elbow_angular_velocity_limit = profile["enable_elbow_angular_velocity_limit"]
+        rospy.loginfo(
+            "Quest3 arm rate-limit profile=%s: shoulder=%.3f rad/s, elbow=%s (%.3f rad/s)",
+            profile_name,
+            self.max_shoulder_angular_velocity,
+            "enabled" if self.enable_elbow_angular_velocity_limit else "disabled",
+            self.max_elbow_angular_velocity,
+        )
+
+    def _controller_switch_event_callback(self, msg):
+        profile_name = "more" if msg.to_controller == "more_controller" else "base"
+        self._apply_motion_limit_profile(profile_name)
+
     def constrain_upper_arm_vector(self, upper_arm_vec, side):
         """
         限制上臂向量在允许的锥形空间内（以肩膀自然姿态为中心的锥）
@@ -357,7 +415,7 @@ class Quest3ArmInfoTransformer:
             p2.x, p2.y, p2.z = base_points[(i + 1) % num_points]
             marker.points.append(p2)
     
-    def limit_arm_vector_rotation(self, current_vec, last_vec, dt):
+    def limit_arm_vector_rotation(self, current_vec, last_vec, dt, max_angular_velocity=None):
         """
         限制上臂向量的旋转角速度
         Args:
@@ -385,7 +443,9 @@ class Quest3ArmInfoTransformer:
         angle = np.arccos(cos_angle)
         
         # 计算最大允许角度
-        max_angle = self.max_shoulder_angular_velocity * dt
+        if max_angular_velocity is None:
+            max_angular_velocity = self.max_shoulder_angular_velocity
+        max_angle = max_angular_velocity * dt
         
         if angle > max_angle:
             # 使用球面线性插值 (SLERP) 限制旋转
@@ -409,7 +469,7 @@ class Quest3ArmInfoTransformer:
         
         return current_vec
     
-    def limit_arm_vector_rotation_elbow(self, current_vec, last_vec, dt):
+    def limit_arm_vector_rotation_elbow(self, current_vec, last_vec, dt, max_angular_velocity=None):
         """
         限制小臂向量的旋转角速度（肘关节）
         Args:
@@ -437,7 +497,9 @@ class Quest3ArmInfoTransformer:
         angle = np.arccos(cos_angle)
         
         # 计算最大允许角度（使用肘关节的最大角速度）
-        max_angle = self.max_elbow_angular_velocity * dt
+        if max_angular_velocity is None:
+            max_angular_velocity = self.max_elbow_angular_velocity
+        max_angle = max_angular_velocity * dt
         
         if angle > max_angle:
             # 使用球面线性插值 (SLERP) 限制旋转
@@ -1011,6 +1073,10 @@ class Quest3ArmInfoTransformer:
         # 即手越过胸部时允许的速度是正常情况的5倍
         speed_limit_multiplier = 1.0 
         # + (adapt_width_gamma / 0.3) * 2.0  # 1.0 -> 5.0
+        motion_limit_profile = self._active_motion_limit_profile
+        max_shoulder_angular_velocity = motion_limit_profile["max_shoulder_angular_velocity"]
+        max_elbow_angular_velocity = motion_limit_profile["max_elbow_angular_velocity"]
+        enable_elbow_angular_velocity_limit = motion_limit_profile["enable_elbow_angular_velocity_limit"]
         
         if side == "Left":
             if self.last_left_arm_timestamp is not None:
@@ -1019,14 +1085,12 @@ class Quest3ArmInfoTransformer:
             else:
                 dt = 0.01  # 默认100Hz
             
-            # 临时提高最大角速度限制
-            original_max_vel = self.max_shoulder_angular_velocity
-            self.max_shoulder_angular_velocity = original_max_vel * speed_limit_multiplier
-            
-            upper_arm_vec = self.limit_arm_vector_rotation(upper_arm_vec, self.last_left_upper_arm_vec, dt)
-            
-            # 恢复原始限制
-            self.max_shoulder_angular_velocity = original_max_vel
+            upper_arm_vec = self.limit_arm_vector_rotation(
+                upper_arm_vec,
+                self.last_left_upper_arm_vec,
+                dt,
+                max_shoulder_angular_velocity * speed_limit_multiplier,
+            )
             
             self.last_left_upper_arm_vec = upper_arm_vec.copy()
             self.last_left_arm_timestamp = current_timestamp
@@ -1037,47 +1101,35 @@ class Quest3ArmInfoTransformer:
             else:
                 dt = 0.01  # 默认100Hz
             
-            # 临时提高最大角速度限制
-            original_max_vel = self.max_shoulder_angular_velocity
-            self.max_shoulder_angular_velocity = original_max_vel * speed_limit_multiplier
-            
-            upper_arm_vec = self.limit_arm_vector_rotation(upper_arm_vec, self.last_right_upper_arm_vec, dt)
-            
-            # 恢复原始限制
-            self.max_shoulder_angular_velocity = original_max_vel
+            upper_arm_vec = self.limit_arm_vector_rotation(
+                upper_arm_vec,
+                self.last_right_upper_arm_vec,
+                dt,
+                max_shoulder_angular_velocity * speed_limit_multiplier,
+            )
             
             self.last_right_upper_arm_vec = upper_arm_vec.copy()
             self.last_right_arm_timestamp = current_timestamp
         
-        # # 限制小臂向量的旋转角速度（肘关节）
-        # if side == "Left":
-        #     # 临时提高最大角速度限制
-        #     original_max_vel_elbow = self.max_elbow_angular_velocity
-        #     self.max_elbow_angular_velocity = original_max_vel_elbow * speed_limit_multiplier
-            
-        #     # 使用相同的limit函数，但传入小臂向量
-        #     lower_arm_vec = np.array([hand_pos[i] - elbow_pos[i] for i in range(3)])
-        #     lower_arm_vec_limited = self.limit_arm_vector_rotation_elbow(lower_arm_vec, self.last_left_lower_arm_vec, dt)
-            
-        #     # 恢复原始限制
-        #     self.max_elbow_angular_velocity = original_max_vel_elbow
-            
-        #     self.last_left_lower_arm_vec = lower_arm_vec_limited.copy()
-        #     lower_arm_vec = lower_arm_vec_limited
-        # else:  # Right
-        #     # 临时提高最大角速度限制
-        #     original_max_vel_elbow = self.max_elbow_angular_velocity
-        #     self.max_elbow_angular_velocity = original_max_vel_elbow * speed_limit_multiplier
-            
-        #     # 使用相同的limit函数，但传入小臂向量
-        #     lower_arm_vec = np.array([hand_pos[i] - elbow_pos[i] for i in range(3)])
-        #     lower_arm_vec_limited = self.limit_arm_vector_rotation_elbow(lower_arm_vec, self.last_right_lower_arm_vec, dt)
-            
-        #     # 恢复原始限制
-        #     self.max_elbow_angular_velocity = original_max_vel_elbow
-            
-        #     self.last_right_lower_arm_vec = lower_arm_vec_limited.copy()
-        #     lower_arm_vec = lower_arm_vec_limited
+        # 限制小臂向量的旋转角速度（肘关节）
+        if side == "Left":
+            if enable_elbow_angular_velocity_limit:
+                lower_arm_vec = self.limit_arm_vector_rotation_elbow(
+                    lower_arm_vec,
+                    self.last_left_lower_arm_vec,
+                    dt,
+                    max_elbow_angular_velocity * speed_limit_multiplier,
+                )
+            self.last_left_lower_arm_vec = lower_arm_vec.copy()
+        else:  # Right
+            if enable_elbow_angular_velocity_limit:
+                lower_arm_vec = self.limit_arm_vector_rotation_elbow(
+                    lower_arm_vec,
+                    self.last_right_lower_arm_vec,
+                    dt,
+                    max_elbow_angular_velocity * speed_limit_multiplier,
+                )
+            self.last_right_lower_arm_vec = lower_arm_vec.copy()
         
         # Apply rotation to upper arm vector based on adapt_width_gamma
         # adapt_width_gamma ranges from 0 (hand far outside) to 0.3 (hand deep inside)

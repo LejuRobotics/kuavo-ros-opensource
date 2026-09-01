@@ -1,0 +1,523 @@
+<?xml version="1.0" ?>
+
+<launch>
+    <!-- 输出日志格式 -->
+    <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
+
+    <arg name="vr_remote_control" default="false"/>
+    <arg name="robot_type"         default="2"/>
+    <arg name="rviz"                default="false" />
+    <arg name="multiplot"          default="false"/>
+    <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <!-- load the robot version manager -->
+    <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+      <arg name="robot_version" value="$(arg robot_version)"/>
+      <arg name="rviz" value="$(arg rviz)"/>
+    </include>
+
+    <arg name="use_external_mpc"   default="true"/>
+    <arg name="wbc_frequency"      default="1000"/>
+    <arg name="sensor_frequency"   default="1000"/>
+    <arg name="use_joystick"       default="true"/>
+    <arg name="with_estimation"    default="true"/>
+    <arg name="estimator_type"     default="1"/>
+    <arg name="use_joint_filter"   default="false"/>
+    <arg name="wbc_only"           default="false"/>
+    <arg name="joystick_type"      default="bt2"/>
+    <arg name="sim_input_mode"     default="keyboard"/>
+    <!-- The reference related config file of the robot -->
+    <arg name="start_way"         default="manual"/>
+    <arg name="use_estimator_contact"   default="false"/>
+    <arg name="only_half_up_body" default="false"/>
+    <arg name="stand_up_protect" default="true"/>
+    <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
+    <arg name="redundant_imu" default="false"/>
+    <arg name="joint_protect_enable" default="false" />
+    <arg name="cmd_truncation_enable" default="false" />
+    <arg name="leg_disable_mode" default="true" doc="If true, when any leg joint fails, all leg joints (1-12) will be disabled" />
+    <arg name="ruiwo_cxx_sdk" default="true"/>
+    <arg name="arm_move_spd"      default="1.2"/>
+    <arg name="waist_move_spd"      default="1.8"/>
+
+    <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->
+    <arg name="joy_execute_action" default="true"/>
+
+    <!-- 半身控制手臂模式切换插值相关参数 -->
+    <arg name="arm_move_spd_half_up_body" default="0.15"/>
+    <arg name="threshold_arm_diff_half_up_body" default="0.15"/>
+    <!-- The file defining gait definition -->
+
+    <!-- Set with_coredump parameter based on coredump value -->
+    <arg name="coredump" default="true"/>
+    <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
+    <arg name="with_coredump" value="" unless="$(arg coredump)"/>
+    <arg name="with_ik" default="true"/>
+    <arg name="with_mm_ik" default="true"/>
+    <arg name="with_led" default="true"/>
+    <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）"/>
+    <arg name="with_battery" default="true"/>
+    
+    <!-- -->
+    <arg name="teach_pendant" default="0"/>
+
+    <!-- 启动期 EC 驱动器固件与参数校验 -->
+    <arg name="check_firmware_param" default="false" doc="硬件层启动后对 youda EC 驱动器固件版本与全量参数进行校验，与标准定义 JSON 比对；默认关闭，需要时显式 check_firmware_param:=true"/>
+    <arg name="allow_mismatch" default="false" doc="true=校验不一致时仅告警继续启动；false=严格模式，不一致即中止启动"/>
+
+    <!-- RL相关参数 -->
+    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
+    <arg name="init_fall_down_state" default="false"/>
+    <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
+
+    <!-- multiplot -->
+    <group if="$(arg multiplot)">
+      <include file="$(find humanoid_interface_ros)/launch/multiplot.launch"/>
+    </group>
+
+    <param name="wbc_only"          value="$(arg wbc_only)"/>
+    <!-- make the files into global parameters -->
+    <param name="multiplot"         value="$(arg multiplot)"/>
+    <param name="use_external_mpc"   value="$(arg use_external_mpc)"/>
+    <param name="wbc_frequency"   value="$(arg wbc_frequency)"/>
+    <param name="sensor_frequency"   value="$(arg sensor_frequency)"/>
+    <param name="with_estimation"    value="$(arg with_estimation)"/>
+    <param name="estimator_type"     value="$(arg estimator_type)"/>
+    <param name="use_joint_filter"     value="$(arg use_joint_filter)"/>
+    <param name="network_model_file"   value="$(arg network_model_file)"/>
+    <param name="rl_param"             value="$(arg rl_param)"/>
+    <param name="is_rl_start"           value="$(arg is_rl_start)"/>
+    <param name="joystick_type"  value="$(arg joystick_type)"/>
+    <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>
+    <param name="build_cppad_state"   value="0"/>  <!-- build_cppad_state is set to 0(waiting), 1(building), 2(done) -->
+    <param name="start_way"  value="$(arg start_way)"/>
+    <param name="use_estimator_contact"  value="$(arg use_estimator_contact)"/>
+    <param name="waist_move_spd"     value="$(arg waist_move_spd)"/>
+    <param name="joy_execute_action" value="$(arg joy_execute_action)"/>
+
+    <param name="stand_up_protect" value="$(arg stand_up_protect)"/>
+    <param name="redundant_imu" value="$(arg redundant_imu)"/>
+    <param name="ruiwo_cxx_sdk" value="$(arg ruiwo_cxx_sdk)"/>
+    <param name="joint_protect_enable" value="$(arg joint_protect_enable)" />
+    <param name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)" />
+    <param name="leg_disable_mode" value="$(arg leg_disable_mode)" />
+    <rosparam param="isolated_cpus">[2, 3]</rosparam>
+    <param name="enable_pull_up_protect" value="true"/>
+    <param name="pull_up_force_threshold" value="0.70"/>
+    <param name="pull_up_force_threshold_roban" value="0.50"/>
+    <param name="torso_interpolation_max_velocity" value="0.1"/>
+    <param name="init_fall_down_state" value="$(arg init_fall_down_state)"/>
+    <!-- Launch script to collect kuavo-launch information -->
+    <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+    <param name="robot_type"      value="$(arg robot_type)"/>
+    
+    <!-- teach_pendant=1, teach pendant mode -->
+    <param name="teach_pendant"  value="$(arg teach_pendant)"/>
+    <param name="check_firmware_param" value="$(arg check_firmware_param)"/>
+    <param name="allow_mismatch"       value="$(arg allow_mismatch)"/>
+
+    <param name="arm_move_spd"  value="$(arg arm_move_spd)"/>
+    <param name="arm_move_spd_half_up_body" value="$(arg arm_move_spd_half_up_body)"/>
+    <param name="threshold_arm_diff_half_up_body" value="$(arg threshold_arm_diff_half_up_body)"/>
+
+    <!-- MPC调度相关参数 -->
+    <param name="/mpc/schedule/enable" value="false"/>
+    <param name="/mpc/schedule/start_time" value="-1.0"/>
+    <param name="/timeout_warning_ms" value="20"/>
+
+    <!-- 自动清理 .ros 文件夹参数 -->
+    <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
+    <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
+    <!-- 删除日志到大小为 34GB 时停止删除日志 -->
+    <param name="/nodelet_manager/log_delete_limit_gb" value="34.0"/>
+
+    <group if="$(eval arg('teach_pendant') == 1)">
+      <param name="stand_up_protect" value="false"/>
+      <param name="only_half_up_body" value="true"/>
+    </group>
+
+    <group unless="$(eval arg('robot_version') >= 30)">
+        <!-- <param name="enable_pull_up_protect" value="false"/> -->
+        <param name="stand_up_protect" value="false"/>
+    </group>
+
+    <!-- 初始倒地起身模式下，禁用站立保护以确保兼容 -->
+    <group if="$(arg init_fall_down_state)">
+        <param name="stand_up_protect" value="false"/>
+    </group>
+    
+    <!-- mpc node -->
+    <group if="$(arg use_external_mpc)">
+      <node pkg="humanoid_interface_ros" type="humanoid_sqp_mpc" name="humanoid_sqp_mpc" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    </group>
+
+    <group unless="$(arg use_joystick)">
+
+      <node pkg="humanoid_interface_ros" type="humanoid_gait_command" name="humanoid_gait_command"
+            output="screen" launch-prefix="gnome-terminal --disable-factory --"/>
+    </group>
+    <node pkg="humanoid_interface_ros" type="humanoid_hand_control" name="humanoid_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_VR_hand_control" name="humanoid_VR_hand_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+    <node pkg="humanoid_interface_ros" type="humanoid_Arm_time_target_control" name="humanoid_Arm_time_target_control" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+    <node pkg="humanoid_interface_ros" type="humanoid_gait_switch_by_name" name="humanoid_gait_switch_by_name" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+    <!-- nodelet manager -->
+    <arg name="real" default="true" />
+    <arg name="log" default="true" />
+    <arg name="cali" default="false" />
+    <arg name="cali_arm" default="false" />
+    <arg name="cali_leg" default="false" />
+    <!-- 是否进入到手臂展开的零点校准姿态 -->
+    <arg name="cali_set_zero" default="false" />
+
+    <param name="real" value="$(arg real)" />
+    <param name="log_lcm" value="$(arg log)" />
+    <param name="cali" value="$(arg cali)" />
+    <param name="cali_arm" value="$(arg cali_arm)" />
+    <param name="cali_leg" value="$(arg cali_leg)" />
+    <param name="cali_set_zero" value="$(arg cali_set_zero)" />
+
+    <!-- If cali_set_zero is true, force cali to true -->
+    <group if="$(arg cali_set_zero)">
+        <param name="cali" value="true" />
+    </group>
+    
+    <param name="/use_sit_init" value="$(arg use_sit_init)" />
+    <!-- 启动时清零，避免沿用上一次 session 的 ready 导致 HW 抢跑 -->
+    <param name="/hardware_sit_prep_ready" value="false" />
+    
+    <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" 
+       output="screen" required="true" clear_params="true"
+       launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+        <param name="num_worker_threads" type="int" value="10" />
+    </node>
+
+    <param name="hardware/is_ready" value="0"/>
+    <param name="hardware/ready_to_start" value="0"/>
+    <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load HumanoidControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" />
+    <node pkg="nodelet" type="nodelet" name="ekf_se" args="load RobotLocalization/EkfNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="taskset -c 12">
+      <rosparam command="load" file="$(find humanoid_estimation)/params/ekf_template.yaml" />
+    </node>    
+    <group unless="$(arg ruiwo_cxx_sdk)">
+      <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodelet nodelet_manager" respawn="false" output="screen" required="true"  />
+    </group>
+    <group if="$(arg ruiwo_cxx_sdk)">
+      <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodeletCXX nodelet_manager" respawn="false" output="screen" required="true"  />
+    </group>
+
+    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    <group if="$(arg use_joystick)">
+      <group if="$(eval arg('joystick_type') == 'h12')">
+
+        <group if="$(eval arg('start_way') == 'manual')">
+          <!-- 此if分支为命令行启动机器人: joystick_type=h12。h12 节点启动前由 guard 请求服务让位，
+               终端启动自己的 /joy_node，不再复用服务侧 FSM。-->
+          
+          <param name="start_way" value="auto"/>
+
+          <!-- 确定状态机初始状态 -->
+          <param name="manual_h12_init_state" value="ready_stance"/>
+          <group if="$(eval arg('cali') or arg('cali_arm'))">
+              <param name="manual_h12_init_state" value="calibrate"/>
+          </group>
+
+          <!-- 补充环境变量，和服务启动的变量一致 -->
+          <env name="KUAVO_ROS_CONTROL_WS_PATH" value="$(find humanoid_controllers)/../../../" />
+          <!-- 启动 h12pro 控制节点。
+               传入 h12_node_guard.sh 门卫前缀：终端节点启动前自动请求 /start_way=manual，
+               等待 ocs2_h12pro_monitor 停掉服务侧同名 h12 节点（并置 /h12_yield_done=1）后，
+               再启动终端自己的 /joy_node，使终端控制栈和 H12 FSM 生命周期一致。
+               服务未运行时门卫直接放行，保持原有行为。判断在节点启动期完成（roslaunch 解析期无法跑 shell）。 -->
+          <include file="$(find h12pro_controller_node)/launch/h12pro_autostart.launch">
+            <arg name="guard_prefix" value="$(find h12pro_controller_node)/scripts/h12_node_guard.sh"/>
+          </include>
+
+          <param name="joystick_sensitivity" value="20"/>
+          <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
+          
+        </group>
+
+        <group if="$(eval arg('start_way') == 'auto')">
+
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
+            <arg name="start_way" value="$(arg start_way)"/>
+          </include>
+        </group>
+
+      </group>
+      <group if="$(eval arg('joystick_type') == 'sim')">
+        <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim.launch">
+          <arg name="joystick_type" value="$(arg joystick_type)"/>
+          <arg name="sim_input_mode" value="$(arg sim_input_mode)"/>
+        </include>
+      </group>
+      <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+        <group if="$(eval arg('start_way') == 'manual')">
+          <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+            <arg name="joystick_type" value="$(arg joystick_type)"/>
+            <arg name="real" value="$(arg real)"/>
+          </include>
+        </group>
+        <node pkg="humanoid_interface_ros" type="humanoid_joy_control_auto_gait_with_vel" name="humanoid_joy_control_auto_gait_with_vel" output="screen"/>
+      </group>
+    </group>
+
+    <!--publish system state  -->
+    <node pkg="humanoid_controllers" type="system_info_publisher.py" name="system_info_publisher" />
+    <!-- monitor node -->
+    <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+
+    <!-- 启动上位机服务节点 -->
+    <group if="$(eval arg('robot_version') >= 40)">
+      <node pkg="humanoid_controllers" type="upper_computer_service.py" name="upper_computer_service" output="screen" />
+    </group>
+
+    <group if="$(arg vr_remote_control)">
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
+    </group>
+
+    <!-- 添加播放音乐参数 -->
+    <arg name="music" default="enable" />
+
+    <!-- 音频服务跳过条件：
+         1. music == 'disable' 时禁用
+         2. robot_version == 53 时禁用（与上位机服务冲突）
+    -->
+    <group if="$(eval arg('music') != 'disable' and arg('robot_version') != 53)">
+        <!-- 设置音频文件路径参数 -->
+        <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
+
+        <!-- 启动 播放音乐服务 -->
+        <include file="$(find kuavo_audio_player)/launch/play_music.launch"/>
+    </group>
+
+
+    <group if="$(arg with_ik)">
+      <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+    </group>
+
+    <group if="$(arg with_mm_ik)">
+      <group if="$(eval arg('robot_version') >= 30)">
+      <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+        <arg name="sqp_mpc" value="1"/>
+        <arg name="rviz"    value="false"/>
+        <arg name="visualize_mm"   value="false"/>
+        <arg name="coredump" value="$(arg coredump)"/>
+      </include>
+      </group>
+    </group>
+
+    <group if="$(arg with_led)">
+      <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
+        <arg name="LED" value="enable"/>
+        <arg name="led_for_state" value="$(arg led_for_state)"/>
+      </include>
+    </group>
+
+    <group if="$(arg with_battery)">
+      <include file="$(find kuavo_led_controller)/launch/battery_info.launch">
+        <arg name="BATTERY" value="enable"/>
+        <!-- 当 LED 同时启用时, 电池信息通过 LED 节点的 _query_battery_hw 服务获取, 避免串口冲突 -->
+        <arg name="backend" value="$(eval 'ros_service' if arg('with_led') else 'serial')" />
+      </include>
+    </group>
+
+    <arg name="microphone" default="true" />
+
+    <group if="$(arg microphone)">
+      <!-- 添加音频接收节点 -->
+      <include file="$(find kuavo_audio_receiver)/launch/receive_voice.launch"/>
+
+    </group>
+
+    <!-- ==================== kuavo_mocap_gmr (Motion Capture GMR) ==================== -->
+    <arg name="with_mocap_gmr" default="false" doc="Enable motion capture GMR"/>
+    <arg name="gmr_use_sim" default="false" doc="Use simulated motion instead of OptiTrack"/>
+    <!-- Common GMR configuration -->
+    <arg name="gmr_robot" default="kuavo_s52" doc="Target robot type for GMR"/>
+    <arg name="gmr_format" default="motive_streaming" doc="Motion format (lafan1, motive_bj, motive_sz)"/>
+    <arg name="gmr_cali_arm_pose_deg" default="75.0" doc="Calibration arm pose angle"/>
+    <arg name="gmr_fps" default="100.0" doc="GMR publishing rate (Hz)"/>
+    <arg name="gmr_enable_viewer" default="false" doc="Enable MuJoCo viewer for GMR"/>
+    <!-- CPU affinity: bind GMR process to specific P-cores (Ultra 7 255H: P-cores 0-5) -->
+    <arg name="gmr_cpu_cores" default="[]" doc="CPU cores to bind GMR process"/>
+    <!-- OptiTrack streaming parameters (when gmr_use_sim=false) -->
+    <arg name="gmr_server_ip" default="192.168.200.160" doc="OptiTrack server IP"/>
+    <arg name="gmr_client_ip" default="192.168.200.117" doc="Client (robot) IP"/>
+    <arg name="gmr_use_multicast" default="false" doc="Use multicast for OptiTrack"/>
+    <!-- Simulation parameters (when gmr_use_sim=true) -->
+    <arg name="gmr_data_file" default="" doc="Path to recorded motion file (.pkl or .bvh), empty for synthetic"/>
+    <arg name="gmr_loop" default="true" doc="Loop motion data"/>
+    <arg name="gmr_human_height" default="1.75" doc="Simulated human height (meters)"/>
+
+    <group if="$(arg with_mocap_gmr)">
+      <!-- Use gmr_streaming.launch for real OptiTrack -->
+      <group unless="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_streaming.launch">
+          <arg name="server_ip" value="$(arg gmr_server_ip)"/>
+          <arg name="client_ip" value="$(arg gmr_client_ip)"/>
+          <arg name="use_multicast" value="$(arg gmr_use_multicast)"/>
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+          <arg name="cpu_cores" value="$(arg gmr_cpu_cores)"/>
+        </include>
+      </group>
+      <!-- Use gmr_sim.launch for simulated motion -->
+      <group if="$(arg gmr_use_sim)">
+        <include file="$(find kuavo_mocap_gmr)/launch/gmr_sim.launch">
+          <arg name="robot" value="$(arg gmr_robot)"/>
+          <arg name="format" value="$(arg gmr_format)"/>
+          <arg name="fps" value="$(arg gmr_fps)"/>
+          <arg name="data_file" value="$(arg gmr_data_file)"/>
+          <arg name="loop" value="$(arg gmr_loop)"/>
+          <arg name="human_height" value="$(arg gmr_human_height)"/>
+          <arg name="cali_arm_pose_deg" value="$(arg gmr_cali_arm_pose_deg)"/>
+          <arg name="enable_viewer" value="$(arg gmr_enable_viewer)"/>
+        </include>
+      </group>
+    </group>
+
+    <!-- ==================== kuavo_xsense_gmr (Xsens UDP BVH GMR) ==================== -->
+    <arg name="with_xsense_gmr" default="false" doc="Enable Xsens UDP BVH GMR"/>
+    <arg name="xsense_listen_ip" default="0.0.0.0" doc="Xsens UDP listen IP"/>
+    <arg name="xsense_listen_port" default="9763" doc="Xsens UDP listen port"/>
+    <arg name="xsense_receive_timeout_ms" default="100" doc="Xsens UDP receive timeout (ms)"/>
+    <arg name="xsense_bvh_topic" default="/xsense/bvh_seg_desc" doc="Xsens BVH segment description topic"/>
+    <arg name="xsense_pose_topic" default="/xsense/world_bone_poses" doc="Xsens pose topic"/>
+    <arg name="xsense_summary_topic" default="/xsense/packet_summary" doc="Xsens packet summary topic"/>
+    <arg name="xsense_bvh_tcp_port" default="9764" doc="Xsens BVH TCP description port"/>
+    <arg name="xsense_enable_pico_pause_control" default="false" doc="Legacy: freeze Xsens forwarding directly from /pico/joy"/>
+    <arg name="xsense_enable_vmp_stream_control" default="true" doc="Use Pico RT+Y/RT+X to pause/resume inside VMPController"/>
+    <arg name="xsense_vmp_stream_control_service" default="/vmp/pico_stream_control" doc="VMP stream-control service"/>
+    <arg name="xsense_pico_joy_topic" default="/pico/joy" doc="PICO JoySticks topic for Xsens pause/resume and control"/>
+    <arg name="xsense_pico_pause_combo" default="RT+Y" doc="PICO combo to pause Xsens stream"/>
+    <arg name="xsense_pico_resume_combo" default="RT+X" doc="PICO combo to resume Xsens stream"/>
+    <arg name="xsense_pico_trigger_threshold" default="0.5" doc="PICO trigger threshold"/>
+    <arg name="xsense_pico_grip_threshold" default="0.5" doc="PICO grip threshold"/>
+    <arg name="xsense_pose_publish_hz" default="120.0" doc="Xsens output pose publish rate"/>
+    <arg name="xsense_pose_queue_target_depth" default="10" doc="Xsens pose queue target depth"/>
+    <arg name="xsense_pose_queue_max_size" default="30" doc="Xsens pose queue max size"/>
+    <arg name="xsense_pose_queue_prefill" default="true" doc="Prefill Xsens pose queue before publishing"/>
+    <arg name="xsense_pose_hold_on_empty" default="true" doc="Hold latest Xsens pose when queue is empty"/>
+    <arg name="xsense_pose_stale_timeout_s" default="0.2" doc="Xsens pose stale timeout in seconds"/>
+    <arg name="xsense_update_output_header_stamp" default="true" doc="Update Xsens output pose header stamp"/>
+    <arg name="xsense_pose_queue_stats_topic" default="/xsense/pose_queue_stats" doc="Xsens FIFO statistics topic"/>
+    <arg name="xsense_pose_queue_stats_hz" default="0.0" doc="FIFO statistics publish rate, 0 disables statistics"/>
+    <arg name="xsense_robot" default="kuavo_s54" doc="Target robot type for Xsens GMR"/>
+    <arg name="xsense_enable_viewer" default="false" doc="Enable MuJoCo viewer for Xsens GMR"/>
+    <arg name="xsense_fps" default="100.0" doc="Xsens GMR publishing rate (Hz)"/>
+    <arg name="xsense_cpu_cores" default="[]" doc="CPU cores to bind Xsens retarget process"/>
+    <arg name="xsense_bvh_offset_scale" default="" doc="Optional BVH offset scale"/>
+    <arg name="xsense_publish_kuavo_arm_traj" default="true" doc="Publish Xsens-retargeted arm joints to /kuavo_arm_traj"/>
+    <arg name="xsense_enable_pico_joy_receiver" default="true" doc="Start PICO joystick receiver and publish /pico/joy"/>
+    <arg name="xsense_enable_pico_amp_walk" default="$(arg xsense_enable_pico_joy_receiver)" doc="Use PICO Joy as the AMP walking source"/>
+    <arg name="xsense_enable_pico_controller_switch" default="$(arg xsense_enable_pico_amp_walk)" doc="Enable PICO RG+A/B controller switching"/>
+    <arg name="xsense_pico_host" default="0.0.0.0" doc="PICO joy receiver host"/>
+    <arg name="xsense_pico_port" default="12345" doc="PICO joy receiver UDP port"/>
+    <arg name="xsense_pico_enable_ip_broadcast" default="true" doc="Broadcast robot IP for PICO discovery"/>
+    <arg name="xsense_pico_robot_name" default="KUAVO" doc="Robot name broadcast to PICO"/>
+    <arg name="xsense_pico_broadcast_port" default="8443" doc="PICO robot info broadcast port"/>
+    <arg name="xsense_pico_startup_delay" default="0.0" doc="PICO receiver/control startup delay"/>
+    <arg name="xsense_enable_pico_head_control" default="true" doc="Enable PICO head control node"/>
+    <arg name="xsense_pico_head_control_mode" default="vr_follow" doc="PICO head mode for XSense: fixed, auto_track_active, fixed_main_hand (fixed_main alias), or vr_follow"/>
+    <arg name="xsense_pico_head_fixed_main_hand" default="right" doc="Hand tracked by XSense fixed_main_hand mode: left or right"/>
+    <arg name="xsense_enable_pico_claw_control" default="true" doc="Enable PICO trigger to claw command"/>
+
+    <group if="$(arg with_xsense_gmr)">
+      <param name="/vmp/pico_joy_topic" value="$(arg xsense_pico_joy_topic)"/>
+      <include file="$(find kuavo_xsense_gmr)/launch/xsense_udp_bvh_to_gmr.launch">
+        <arg name="listen_ip" value="$(arg xsense_listen_ip)"/>
+        <arg name="listen_port" value="$(arg xsense_listen_port)"/>
+        <arg name="receive_timeout_ms" value="$(arg xsense_receive_timeout_ms)"/>
+        <arg name="bvh_topic" value="$(arg xsense_bvh_topic)"/>
+        <arg name="pose_topic" value="$(arg xsense_pose_topic)"/>
+        <arg name="summary_topic" value="$(arg xsense_summary_topic)"/>
+        <arg name="bvh_tcp_port" value="$(arg xsense_bvh_tcp_port)"/>
+        <arg name="enable_pico_pause_control" value="$(arg xsense_enable_pico_pause_control)"/>
+        <arg name="pico_joy_topic" value="$(arg xsense_pico_joy_topic)"/>
+        <arg name="pico_pause_combo" value="$(arg xsense_pico_pause_combo)"/>
+        <arg name="pico_resume_combo" value="$(arg xsense_pico_resume_combo)"/>
+        <arg name="pico_trigger_threshold" value="$(arg xsense_pico_trigger_threshold)"/>
+        <arg name="pico_grip_threshold" value="$(arg xsense_pico_grip_threshold)"/>
+        <arg name="pose_publish_hz" value="$(arg xsense_pose_publish_hz)"/>
+        <arg name="pose_queue_target_depth" value="$(arg xsense_pose_queue_target_depth)"/>
+        <arg name="pose_queue_max_size" value="$(arg xsense_pose_queue_max_size)"/>
+        <arg name="pose_queue_prefill" value="$(arg xsense_pose_queue_prefill)"/>
+        <arg name="pose_hold_on_empty" value="$(arg xsense_pose_hold_on_empty)"/>
+        <arg name="pose_stale_timeout_s" value="$(arg xsense_pose_stale_timeout_s)"/>
+        <arg name="update_output_header_stamp" value="$(arg xsense_update_output_header_stamp)"/>
+        <arg name="pose_queue_stats_topic" value="$(arg xsense_pose_queue_stats_topic)"/>
+        <arg name="pose_queue_stats_hz" value="$(arg xsense_pose_queue_stats_hz)"/>
+        <arg name="robot" value="$(arg xsense_robot)"/>
+        <arg name="enable_viewer" value="$(arg xsense_enable_viewer)"/>
+        <arg name="fps" value="$(arg xsense_fps)"/>
+        <arg name="cpu_cores" value="$(arg xsense_cpu_cores)"/>
+        <arg name="bvh_offset_scale" value="$(arg xsense_bvh_offset_scale)"/>
+        <arg name="publish_kuavo_arm_traj" value="$(arg xsense_publish_kuavo_arm_traj)"/>
+        <arg name="enable_pico_joy_receiver" value="$(arg xsense_enable_pico_joy_receiver)"/>
+        <arg name="enable_pico_amp_walk" value="$(arg xsense_enable_pico_amp_walk)"/>
+        <arg name="enable_pico_controller_switch" value="$(arg xsense_enable_pico_controller_switch)"/>
+        <arg name="pico_host" value="$(arg xsense_pico_host)"/>
+        <arg name="pico_port" value="$(arg xsense_pico_port)"/>
+        <arg name="pico_enable_ip_broadcast" value="$(arg xsense_pico_enable_ip_broadcast)"/>
+        <arg name="pico_robot_name" value="$(arg xsense_pico_robot_name)"/>
+        <arg name="pico_broadcast_port" value="$(arg xsense_pico_broadcast_port)"/>
+        <arg name="pico_startup_delay" value="$(arg xsense_pico_startup_delay)"/>
+        <arg name="enable_pico_head_control" value="$(arg xsense_enable_pico_head_control)"/>
+        <arg name="pico_head_control_mode" value="$(arg xsense_pico_head_control_mode)"/>
+        <arg name="pico_head_fixed_main_hand" value="$(arg xsense_pico_head_fixed_main_hand)"/>
+        <arg name="enable_pico_claw_control" value="$(arg xsense_enable_pico_claw_control)"/>
+      </include>
+    </group>
+
+    <!-- ==================== kuavo_pico_gmr (PICO Body Tracking GMR) ==================== -->
+    <arg name="with_pico_gmr" default="false" doc="Enable PICO body tracking GMR"/>
+    <arg name="pico_enable_amp_walk" default="true" doc="Enable G12-priority/PICO walking only in AMP controllers"/>
+    <arg name="pico_robot" default="kuavo_s52" doc="Target robot type for PICO GMR (GMR IK only supports kuavo_s52)"/>
+    <arg name="pico_human_height" default="1.75" doc="PICO user human height (meters)"/>
+    <arg name="pico_enable_viewer" default="false" doc="Enable MuJoCo viewer for PICO GMR"/>
+    <arg name="pico_enable_gmr_smoothing" default="true" doc="Enable Gaussian filter smoothing"/>
+    <arg name="pico_gmr_gaussian_sigma" default="1.0" doc="Gaussian kernel sigma"/>
+    <arg name="pico_gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
+    <arg name="pico_gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone"/>
+    <arg name="pico_enable_dexhand_control" default="true" doc="Enable dexterous hand control in GMR mode (via /pico/joy)"/>
+    <arg name="pico_diagnostic_log_enable" default="false" doc="Write PICO diagnostic JSONL logs"/>
+    <!-- 末端执行器类型: none / qiangnao / qiangnao_touch / jodell / lejuclaw / revo2 -->
+    <arg name="pico_end_effector_type" default="qiangnao" doc="End effector type for PICO GMR dexhand control"/>
+    <!-- 头控参数（GMR 和 Teleop 路径共享） -->
+    <arg name="pico_enable_head_control" default="true" doc="Enable independent head control node"/>
+    <arg name="pico_head_control_mode" default="vr_follow" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+    <!-- CPU affinity: bind PICO retarget process to specific P-cores (Ultra 7 255H: P-cores 0-5) -->
+    <arg name="pico_cpu_cores" default="[]" doc="CPU cores to bind PICO retarget process (empty=no binding)"/>
+
+    <!-- XSense GMR and PICO GMR own the same PICO UDP/Joy resources. -->
+    <group if="$(eval arg('with_pico_gmr') and not arg('with_xsense_gmr'))">
+      <!-- 设置末端执行器类型，供 pico_dexhand_control_node.py 读取 -->
+      <param name="/end_effector_type" value="$(arg pico_end_effector_type)"/>
+      <include file="$(find kuavo_pico_gmr)/launch/pico_streaming.launch">
+        <arg name="robot" value="$(arg pico_robot)"/>
+        <arg name="human_height" value="$(arg pico_human_height)"/>
+        <arg name="enable_pico_amp_walk" value="$(arg pico_enable_amp_walk)"/>
+        <arg name="enable_viewer" value="$(arg pico_enable_viewer)"/>
+        <arg name="enable_gmr_smoothing" value="$(arg pico_enable_gmr_smoothing)"/>
+        <arg name="gmr_gaussian_sigma" value="$(arg pico_gmr_gaussian_sigma)"/>
+        <arg name="gmr_velocity_clip" value="$(arg pico_gmr_velocity_clip)"/>
+        <arg name="gmr_velocity_deadzone" value="$(arg pico_gmr_velocity_deadzone)"/>
+        <arg name="enable_dexhand_control" value="$(arg pico_enable_dexhand_control)"/>
+        <arg name="enable_head_control" value="$(arg pico_enable_head_control)"/>
+        <arg name="head_control_mode" value="$(arg pico_head_control_mode)"/>
+        <arg name="cpu_cores" value="$(arg pico_cpu_cores)"/>
+        <arg name="diagnostic_log_enable" value="$(arg pico_diagnostic_log_enable)"/>
+      </include>
+    </group>
+
+
+    <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
+    <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+
+</launch>

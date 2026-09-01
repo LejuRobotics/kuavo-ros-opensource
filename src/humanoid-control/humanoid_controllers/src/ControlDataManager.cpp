@@ -795,7 +795,7 @@ bool ControlDataManager::getRealtimeCmdVel(geometry_msgs::Twist& out) const {
     }
 
     std::lock_guard<std::mutex> lock(motion_mutex_);
-    if (cmd_vel_.isValid(0.2)) {  // 速度命令使用500ms超时，确保安全性
+    if (cmd_vel_.isValid(0.2)) {  // 速度命令使用200ms超时，确保安全性
         out = cmd_vel_.data;
         return true;
     }

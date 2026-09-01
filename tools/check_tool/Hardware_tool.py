@@ -1491,6 +1491,7 @@ def secondary_menu():
             if robot_version:
                 try:
                     version_num = int(robot_version)
+                    rv = RobotVersion.create(version_num)
 
                     if version_num == 62 or version_num == 63:
                         # 检查是开源仓库还是闭源仓库
@@ -1544,23 +1545,17 @@ def secondary_menu():
                         else:
                             print(bcolors.WARNING + "无效输入，将执行默认的单关节测试" + bcolors.ENDC)
 
-                    elif 13 <= version_num <= 14:
+                    elif (rv.start_with(1, 3) or rv.start_with(1, 4) or rv.start_with(1, 7)):
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
+                        script_description = f"roban磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 
-                    elif version_num == 17:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
-
-                    elif version_num == 17:
-                        kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
-                        script_description = f"roban2磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
-
-                    elif 40 <= version_num <= 49:
+                    elif rv.start_with(4):
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin", "joint_breakin.py")
                         script_description = f"Kuavo4磨线脚本 joint_breakin/joint_breakin.py (版本 {robot_version})"
 
-                    elif 50 <= version_num <= 56:
+                    elif (rv.start_with(5, 0) or rv.start_with(5, 1) or rv.start_with(5, 2)
+                          or rv.start_with(5, 3) or rv.start_with(5, 4) or rv.start_with(5, 5)
+                          or rv.start_with(5, 6)):
                         kuavo_breakin_script = os.path.join(folder_path, "joint_breakin_ros", "src", "breakin_control", "scripts", "breakin_main_controller.py")
                         script_description = f"Kuavo5磨线脚本 joint_breakin_ros/src/breakin_control/scripts/breakin_main_controller.py (版本 {robot_version})"
 

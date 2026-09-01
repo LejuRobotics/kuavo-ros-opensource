@@ -88,6 +88,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <memory>
 #include <stdexcept>
 #include <array>
+#include <atomic>
 #include <thread>
 #include <future>
 #include <chrono>
@@ -532,6 +533,8 @@ namespace ocs2
       real_launch_status_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid_controller/real_launch_status");
       // Dance controller: kuavo_msgs/SetString（空 data=列表首项，或 #下标/名称）
       switch_dance_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetString>("/humanoid_controller/switch_to_dance_controller");
+      seat_sit_down_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid/sit_down");
+      seat_stand_up_client_ = nodeHandle_.serviceClient<std_srvs::Trigger>("/humanoid/stand_up");
       last_status_check_time_ = ros::Time(0);
 
       // 加载命令配置
@@ -1640,6 +1643,34 @@ namespace ocs2
         controlHead(current_head_yaw_, current_head_pitch_);
         // return;
 
+        // Kuavo5 北通：RT+B 坐下，RT+A 起立
+        if (rb_version_.start_with(5) && joy_msg->buttons.size() == JOYSTICK_BEITONG_BUTTON_NUM)
+        {
+          const int b_trot = joyButtonMap["BUTTON_TROT"];
+          const int b_stance = joyButtonMap["BUTTON_STANCE"];
+          std_srvs::Trigger seat_srv;
+          if (!old_joy_msg_.buttons[b_trot] && joy_msg->buttons[b_trot])
+          {
+            seat_sit_down_client_.call(seat_srv);
+            seat_b_button_held_ = true;
+          }
+          else if (!old_joy_msg_.buttons[b_stance] && joy_msg->buttons[b_stance])
+          {
+            seat_stand_up_client_.call(seat_srv);
+            seat_a_button_held_ = true;
+          }
+          // 记录 B/A 抬起，允许下一轮 rising edge
+          if (seat_b_button_held_ && !joy_msg->buttons[b_trot])
+            seat_b_button_held_ = false;
+          if (seat_a_button_held_ && !joy_msg->buttons[b_stance])
+            seat_a_button_held_ = false;
+          // 有按钮按下时立即返回，避免落入后续 walk/stance 逻辑
+          if (joy_msg->buttons[b_trot] || joy_msg->buttons[b_stance]){
+            old_joy_msg_ = *joy_msg;
+            return;
+          }
+        }
+
         // 按住 RT 时仍用左摇杆/方向键控制行走（推走松停），避免主循环发布冻结速度导致松杆继续行走
         updateWalkAxisDuringLtRtHold(joy_msg);
 
@@ -1882,6 +1913,17 @@ namespace ocs2
 
     void checkGaitSwitchCommand(const sensor_msgs::Joy::ConstPtr &joy_msg)
     {
+      const bool rl_button_pressed =
+          !old_joy_msg_.buttons[joyButtonMap["BUTTON_RL"]] &&
+          joy_msg->buttons[joyButtonMap["BUTTON_RL"]];
+
+      // RL 控制器切换允许在 walking 中触发，不能被摇杆轴量提前吞掉。
+      if (rl_button_pressed && !IS_ROBAN(rb_version_))
+      {
+        ROS_INFO("[JoyControl] switch to next controller");
+        switchToNextController();
+        return;
+      }
       // 有摇杆数据不可以步态切换
       if (
         std::abs(joy_msg->axes[joyAxisMap["AXIS_LEFT_STICK_Y"]]) > DEAD_ZONE ||
@@ -2110,7 +2152,12 @@ namespace ocs2
         // 姿态控制模式:
         // linear.y -> 预留/侧向姿态通道
         // linear.z -> base高度偏移(下蹲)
-        // angular.z -> 入口处 axis_local(3)=0 已禁止旋转
+        // angular.z -> 禁止旋转，避免与下蹲语义冲突
+        if (std::abs(joystick_origin_axis(0)) > DEAD_ZONE && commad_line_target_(0) >= 0.0)
+        {
+          cmdVel.linear.x = commad_line_target_(0);
+          updated[0] = true;
+        }
         if (std::abs(axis_local(1)) > DEAD_ZONE)
         {
           cmdVel.linear.y = commad_line_target_(1);
@@ -2357,7 +2404,7 @@ namespace ocs2
     }
 
     // 通用 /play_music 调用。music_number 透传给服务，支持纯文件名(从默认 music 目录解析)
-    // 或绝对路径(loundspeaker 用 os.path.join 处理，绝对路径会原样使用)。
+    // 或绝对路径(audio_player 用 os.path.join 处理，绝对路径会原样使用)。
     bool playMusic(const std::string& music_number)
     {
       kuavo_msgs::playmusic srv;
@@ -2594,27 +2641,33 @@ namespace ocs2
     bool resetGrabBoxDemo(bool reset)
     {
       const std::string service_name = "/grab_box_demo/reset_bt";
-      ros::NodeHandle nh;
-
-      // 等待服务可用
-      if (!ros::service::waitForService(service_name, ros::Duration(1))) {
-        ROS_ERROR("Service %s not available", service_name.c_str());
+      auto in_flight = grab_box_reset_in_flight_;
+      bool expected = false;
+      if (!in_flight->compare_exchange_strong(expected, true)) {
+        ROS_DEBUG("Grab box reset request already in flight");
         return false;
       }
 
-      // 创建服务代理
-      ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
-      std_srvs::SetBool srv;
-      srv.request.data = reset;
+      std::thread([service_name, reset, in_flight]() {
+        ros::NodeHandle nh;
+        if (!ros::service::waitForService(service_name, ros::Duration(1))) {
+          ROS_ERROR("Service %s not available", service_name.c_str());
+          in_flight->store(false);
+          return;
+        }
 
-      // 调用服务
-      if (client.call(srv)) {
-        ROS_INFO("resetGrabBoxDemo call succeeded, received response: %s", srv.response.success ? "Success" : "Failure");
-        return srv.response.success; // 服务调用成功
-      } else {
-        ROS_ERROR("Failed to call service %s", service_name.c_str());
-        return false; // 服务调用失败
-      }
+        ros::ServiceClient client = nh.serviceClient<std_srvs::SetBool>(service_name);
+        std_srvs::SetBool srv;
+        srv.request.data = reset;
+        if (client.call(srv)) {
+          ROS_INFO("resetGrabBoxDemo call succeeded, received response: %s", srv.response.success ? "Success" : "Failure");
+        } else {
+          ROS_ERROR("Failed to call service %s", service_name.c_str());
+        }
+        in_flight->store(false);
+      }).detach();
+
+      return true;
     }
 
     bool callExecuteArmAction(const std::string &action_name)
@@ -2879,6 +2932,7 @@ namespace ocs2
     ros::ServiceClient switch_to_next_controller_client_;
     ros::ServiceClient switch_to_previous_controller_client_;
     ros::ServiceClient auto_gait_change_client_;
+    std::shared_ptr<std::atomic_bool> grab_box_reset_in_flight_{std::make_shared<std::atomic_bool>(false)};
     
     // 楼梯检测相关
     bool stair_detection_enabled_ = false;
@@ -2913,6 +2967,10 @@ namespace ocs2
     ros::ServiceClient execute_arm_action_client_;
     // Launch status
     ros::ServiceClient real_launch_status_client_;
+    ros::ServiceClient seat_sit_down_client_;
+    ros::ServiceClient seat_stand_up_client_;
+    bool seat_b_button_held_{false};   // 防重复：B 抬起后才允许下一轮 rising edge
+    bool seat_a_button_held_{false};   // 防重复：A 抬起后才允许下一轮 rising edge
     // Dance controller (SetString, 同 RLControllerManager::switchDanceControllerByStringCallback)
     ros::ServiceClient switch_dance_client_;
     // 搬运模式状态订阅（由 Python joy 驱动，C++ 仅读取用于早返）

@@ -112,7 +112,7 @@ if [[ $(docker ps -aq -f ancestor=${IMAGE_NAME} -f name=${CONTAINER_NAME}) ]]; t
     docker exec -it $CONTAINER_NAME zsh
 else
     echo "Creating a new container '${CONTAINER_NAME}' based on image '${IMAGE_NAME}' ..."
-	docker run -it --net host --gpus all \
+	docker run -it --net host --ipc=host --gpus all \
 		--runtime nvidia \
         --name $CONTAINER_NAME \
 		--privileged \
@@ -122,7 +122,7 @@ else
 		-v "$PARENT_DIR:/root/kuavo_ws" \
 		-v "${HOME}/.config/lejuconfig:/root/.config/lejuconfig" \
         -e NVIDIA_VISIBLE_DEVICES=all \
-        -e NVIDIA_DRIVER_CAPABILITIES=all,display \
+        -e NVIDIA_DRIVER_CAPABILITIES=all \
         -e CARB_GRAPHICS_API=vulkan \
         -e GDK_SYNCHRONIZE=1 \
 		--group-add=dialout \

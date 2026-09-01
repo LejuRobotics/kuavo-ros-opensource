@@ -254,10 +254,8 @@ class FaceTrack:
         
         # 定义优先级话题列表（优先使用压缩话题）
         priority_topics = [
-            "/camera/color/image_raw/compressed", 
-            "/cam_h/color/image_raw/compressed",
-            "/camera/color/image_raw", 
-            "/cam_h/color/image_raw"
+            "/camera/color/image_raw/compressed",
+            "/cam_h/color/image_raw/compressed"
         ]
         
         # 根据优先级订阅第一个可用的话题

@@ -1,0 +1,71 @@
+{
+  "_": "Kuavo5 代际共享座椅配置（v50-v59）",
+
+  "__sit_pose__": "落座终点关节/基座位姿（Drake CoMIK：12腿+1腰+14臂）",
+  "sit_down_duration_seconds": 1.5,
+  "sit_joint_pos": [
+    0.0, 0.00, -1.92, 1.75, -0.289, -0.01,
+    0.0, 0.00, -1.92, 1.75, -0.289, -0.01,
+    0.0,
+    -1.0, 0.0, -0.0, -0.57, 0.0, 0.0, 0.0,
+    -1.00, -0.0, 0.0, -0.57, 0.0, 0.0, 0.0
+  ],
+  "sit_base_position": [-0.25, 0.0, 0.655],
+  "sit_base_orientation": [0.0, 20.31, 0.0],
+
+  "__stand_up_from_seat__": "座椅 stand_up / use_sit_init 共用；head_raise_duration_seconds=MPC坐下低头与进MPC站立抬头的共用插值时长",
+  "stand_up_from_seat": {
+    "sit_to_stand_com_velocity_mps": 0.04,
+    "hold_at_sit_pose_before_stand_up_seconds":0.3,
+    "mpc_init_delay_after_stand_up_seconds": 1,
+    "contact_protect_grace_after_stand_up_seconds": 0.3,
+    "head_down_pitch_rad": 0.35,
+    "head_raise_duration_seconds": 1.0
+  },
+
+  "__hardware_sit_pose_prep__": "use_sit_init 与 sitcomplete→stand_up 段0 共用：move=腿/腰回sit，settle=臂回sit",
+  "hardware_sit_pose_prep": {
+    "move_speed_deg_per_s": 15.0,
+    "settle_speed_deg_per_s": 30.0,
+    "reverse_leg_before_arm": true,
+    "__reverse_arm_clear__": "段0臂回sit前绕扶手：相对「臂段起点」实测臂角的增量(rad)，非绝对角、非相对sit；全0=不启用。须 reverse_leg_before_arm=true",
+    "reverse_arm_clear_joint_offset_rad": [
+      -0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0,
+      -0.5, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0
+    ],
+    "leg_joint_kp": [220, 100, 224, 448, 116, 116,
+                     220, 100, 224, 448, 116, 116],
+    "leg_joint_kd": [4880, 5376, 6746, 13492, 7830, 7830,
+                     4880, 5376, 6746, 13492, 7830, 7830]
+  },
+
+  "__seat_joint_offset__": "落座后关节偏置插值（WBC→CSP 锁定）；stand_up 反向段复用 seat_offset_duration_seconds",
+  "seat_offset_duration_seconds": 5.0,
+  "seat_offset_alpha_profile": "smoothstep",
+  "seat_offset_leg_joint_offset_rad": [0, 0, 0.252, 0, 0, 0,
+                                       0, 0, 0.252, 0, 0, 0],
+  "seat_offset_arm_joint_offset_rad": [1.4, -0.0, 0, -1.57, 0, 0, 0,
+                                       1.4, 0.0, 0, -1.57, 0, 0, 0],
+
+  "__leg_retract_after_sit__": "落座偏置完成后收脚三步（false=停在偏置 CSP 锁定姿）",
+  "seat_leg_action_enabled": false,
+  "seat_leg_action_alpha_profile": "smoothstep",
+  "seat_leg_action_step1_duration_seconds": 4,
+  "seat_leg_action_step2_duration_seconds": 4,
+  "seat_leg_action_step3_duration_seconds": 4,
+  "seat_leg_action_step1_leg_joint_rad": [0.00, 0.000, -1.92, 2.00, 0.35, -0,
+                                          0.00, 0.000, -1.92, 2.00, 0.35, -0],
+  "seat_leg_action_step2_leg_joint_rad": [0.00, 0.000, -1.92, 2.4, 0.35, -0.01,
+                                          0.00, 0.000, -1.92, 2.4, 0.35, -0.01],
+  "seat_leg_action_step3_leg_joint_rad": [0.00, 0.000, -1.55, 2.4, -0.87, -0.01,
+                                          0.00, 0.000, -1.55, 2.4, -0.87, -0.01],
+
+  "__seat_return__": "从 sit 回退后复用硬件 START 流程（real_initial_start→is_ready）",
+  "seat_return": {
+    "await_start_after_p5": false
+  },
+
+  "__csp_hold_stall_protect__": "偏置/收脚 CSP 锁定期间踝关节堵转保护",
+  "seat_stall_ankle_torque_nm": 5.0,
+  "seat_stall_consecutive_frames": 10
+}

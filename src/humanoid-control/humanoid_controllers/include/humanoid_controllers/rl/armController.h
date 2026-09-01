@@ -9,6 +9,8 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include <Eigen/Dense>
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -96,6 +98,12 @@ public:
                      const Eigen::VectorXd& default_arm_pos = Eigen::VectorXd(),
                      double mode2_cutoff_freq = 2.0);
 
+    /**
+     * @brief 更新自动摆臂/回家使用的默认手臂位置
+     * @param default_arm_pos 默认手臂位置（手臂段）
+     */
+    void setDefaultArmPos(const Eigen::VectorXd& default_arm_pos);
+
     // ==================== 主要更新函数（核心接口）====================
     
     /**
@@ -122,6 +130,13 @@ public:
                 const Eigen::VectorXd& joint_vel,
                 int cmd_stance,
                 kuavo_msgs::jointCmd& joint_cmd_msg);
+
+    /**
+     * @brief 仅更新内部状态（current_arm_pos_/vel_），不触发模式切换或写入 joint_cmd
+     */
+    void updateInternalState(const Eigen::VectorXd& joint_pos,
+                              const Eigen::VectorXd& joint_vel,
+                              size_t arm_start_idx);
 
     /**
      * @brief 平滑插值到目标位置（专用插值函数）
@@ -156,10 +171,66 @@ public:
     bool changeMode(int target_mode);
 
     /**
+     * @brief 从非控制线程请求模式切换
+     *
+     * 只记录请求；实际模式状态由下一个 update() 控制周期修改
+     */
+    bool requestModeChange(int target_mode);
+    void setExternalCommandBufferCallback(std::function<bool()> callback);
+
+    /**
+     * @brief Start an arm-only return to the configured default pose before a controller switch.
+     *
+     * The request stays latched so the default-pose PD/gravity command is still emitted while
+     * VMP is used as the live source of the subsequent RL->RL blend.
+     */
+    bool requestDefaultPoseReturnForSwitch();
+    bool isDefaultPoseReturnForSwitchComplete() const
+    {
+      return default_pose_return_for_switch_state_.load(std::memory_order_acquire) ==
+             DefaultPoseReturnState::kComplete;
+    }
+    void cancelDefaultPoseReturnForSwitch();
+
+    /**
+     * @brief Pause/resume external (mode 2) arm tracking without changing modes.
+     *
+     * While paused, the last emitted arm position is held with zero target
+     * velocity and incoming external targets are discarded.
+     */
+    void setExternalControlPaused(bool paused);
+    bool isExternalControlPaused() const { return external_control_pause_requested_.load(); }
+    
+    /**
      * @brief 获取当前控制模式
      * @return 当前模式：0=锁定, 1=自动摆臂, 2=外部控制
      */
     int getMode() const { return static_cast<int>(arm_control_mode_); }
+
+    /**
+     * @brief 获取当前已经接受的目标模式。
+     *
+     * External -> AutoSwing 归位期间，执行外壳仍是 mode2，但目标已经是 mode1。
+     * 调用方用该值判断是否需要再次请求，避免每个控制周期重启归位曲线。
+     */
+    int getRequestedMode() const
+    {
+      const int pending_mode = requested_arm_mode_.load(std::memory_order_acquire);
+      if (pending_mode != kNoRequestedArmMode)
+      {
+        return pending_mode;
+      }
+      if (default_pose_return_for_switch_state_.load(std::memory_order_acquire) !=
+          DefaultPoseReturnState::kIdle)
+      {
+        return static_cast<int>(ControlMode::kAutoSwing);
+      }
+      if (arm_control_mode_ == ControlMode::kExternal && is_returning_from_external_)
+      {
+        return static_cast<int>(ControlMode::kAutoSwing);
+      }
+      return static_cast<int>(arm_control_mode_);
+    }
     
     /**
      * @brief 检查VR控制是否启用
@@ -198,6 +269,21 @@ public:
      */
     size_t getArmStartIndex() const { return arm_start_idx_; }
 
+    /**
+     * @brief 清除外部模式下的缓冲目标
+     */
+    void clearExternalTarget();
+    /**
+     * @brief 锁定外部轨迹接收（动作期间屏蔽 VR 干扰，只让 Python action 通过）
+     */
+    void lockExternalTarget(bool lock) { external_target_locked_ = lock; }
+
+    /**
+     * @brief 检查是否已收到外部目标输入（VR/外部轨迹）
+     * @return true表示已收到外部输入，false表示无外部输入
+     */
+    bool hasExternalTarget() const { return external_target_received_; }
+
     // ==================== 回调函数（供ROS服务使用） ====================
     
     /**
@@ -234,12 +320,25 @@ private:
         kHolding   // 按住：到位后持续按住默认位（仅站立）
     };
 
+    enum class DefaultPoseReturnState
+    {
+        kIdle,
+        kRequested,
+        kStarted,
+        kComplete
+    };
+
     // ==================== 内部辅助函数 ====================
     
     /**
      * @brief 应用模式切换的核心逻辑（使用保存的当前位置和速度）
      */
-    void applyModeChange(int target_mode);
+    void applyModeChange(int target_mode, bool force_interpolation_to_default = false);
+
+    /**
+     * @brief 在控制线程中取出并执行外部模式请求
+     */
+    void executeRequestedModeChange();
     
     /**
      * @brief 执行缓存的模式切换指令（使用保存的当前位置和速度）
@@ -257,6 +356,12 @@ private:
      * @brief VR输入回调函数（处理/kuavo_arm_traj话题）
      */
     void jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg);
+    void actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg);
+
+    void applyBufferedMode2TargetIfReady();
+    void storeMode2Target(const sensor_msgs::JointState& msg,
+                          Eigen::VectorXd& target_q,
+                          Eigen::VectorXd& target_v) const;
     
     /**
      * @brief 更新锁定状态的期望值
@@ -272,6 +377,19 @@ private:
      * @brief 更新外部控制的期望值
      */
     void updateExternalControl(double dt);
+
+    /**
+     * @brief Apply an external-control pause transition in the control thread.
+     */
+    void applyExternalControlPauseState();
+
+    /**
+     * @brief Reacquire an external target without the normal error-threshold snap.
+     * @return true once every joint has reached the target.
+     */
+    bool applyStrictRateLimitedInterpolation(double dt,
+                                             const Eigen::VectorXd& target_pos,
+                                             double max_velocity);
     
     /**
      * @brief 限速插值函数（用于模式1和模式2）
@@ -321,6 +439,7 @@ private:
     // ROS相关
     ros::NodeHandle nh_;
     ros::Subscriber joint_sub_;
+    ros::Subscriber action_traj_sub_;
     ocs2::humanoid::TopicLogger* ros_logger_;  // ROS日志发布器（可选）
     
     // 关节信息
@@ -353,6 +472,9 @@ private:
     Eigen::VectorXd default_arm_pos_;  // 默认手臂位置（自动摆臂时站立回家的目标）
     AutoSwingState auto_swing_state_{AutoSwingState::kSwing}; // 自动摆臂内部子状态（门禁：!= kSwing 时本控制器填充手臂指令）
     bool is_returning_from_external_{false}; // 外部控制→自动摆臂 归位中：外壳保持外部控制，回家完成后翻回
+    std::atomic<DefaultPoseReturnState> default_pose_return_for_switch_state_{
+        DefaultPoseReturnState::kIdle};
+    int default_pose_return_settled_cycles_{0};
     
     // 外部控制相关
     Eigen::VectorXd raw_external_target_q_; // 外部控制原始目标位置（从/kuavo_arm_traj获取）
@@ -360,8 +482,20 @@ private:
     Eigen::VectorXd external_target_q_;  // 外部控制目标位置（滤波或插值后）
     Eigen::VectorXd external_target_v_;  // 外部控制目标速度
     bool external_target_received_;      // 是否已收到外部输入
+    bool external_target_locked_{false}; ///< 锁定外部轨迹，动作期间屏蔽 VR 信号
+    Eigen::VectorXd buffered_mode2_target_q_; // 自动切换缓冲期缓存的最新外部目标
+    Eigen::VectorXd buffered_mode2_target_v_;
+    bool buffered_mode2_target_received_{false};
+    std::function<bool()> external_command_buffer_callback_;
     ros::Time last_external_input_time_; // 上一次外部输入的时间戳
     bool last_external_input_time_valid_; // 上一次时间戳是否有效
+    std::atomic<bool> external_control_pause_requested_{false};
+    bool external_control_pause_active_{false};
+    bool external_pause_resume_reacquiring_{false};
+    bool has_emitted_arm_command_{false};
+    Eigen::VectorXd external_pause_hold_q_;
+    Eigen::VectorXd external_pause_source_q_;
+    bool external_pause_source_valid_{false};
     
     // 手臂关节指令低通滤波相关
     LowPassFilter2ndOrder arm_joint_pos_filter_; // 手臂位置指令低通滤波器
@@ -383,6 +517,8 @@ private:
     Eigen::VectorXd target_interpolation_target_pos_; // 专用插值目标位置
     
     // 指令缓存机制
+    static constexpr int kNoRequestedArmMode = -1;
+    std::atomic<int> requested_arm_mode_{kNoRequestedArmMode}; // 跨线程模式请求邮箱
     std::optional<ControlMode> pending_arm_mode_; // 缓存的待执行模式
     bool is_interpolating_;             // 曲线引擎正在跑（锁定/回家/外部靠拢各插值机制共用的底层标志）
 
@@ -399,6 +535,7 @@ private:
 
     // 线程安全
     mutable std::mutex state_mutex_;    // 状态访问互斥锁
+    mutable std::mutex external_target_mutex_; // ROS 外部目标回调与控制线程同步
 };
 
 } // namespace humanoid_controller

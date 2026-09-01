@@ -403,7 +403,7 @@ using namespace ocs2;
   Eigen::VectorXd RLControllerBase::getCurrentAction() const
   {
     std::lock_guard<std::mutex> lock(action_mtx_);
-    return actions_;
+    return actions_; //waao：获得推理后得到的action
   }
 
   void RLControllerBase::setCurrentAction(Eigen::VectorXd action)
@@ -474,6 +474,11 @@ using namespace ocs2;
       ROS_WARN("[%s] Cannot resume controller: current state=%d (expected PAUSED)",
                name_.c_str(), static_cast<int>(state_));
     }
+  }
+
+  void RLControllerBase::resumeWarm()
+  {
+    resume();
   }
 
   void RLControllerBase::waitForNextCycle()
@@ -647,7 +652,6 @@ using namespace ocs2;
   }
 
 } // namespace humanoid_controller
-
 
 
 

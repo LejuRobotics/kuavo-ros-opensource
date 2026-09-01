@@ -13,6 +13,7 @@ bool cmd_vel_effective
 uint8 REASON_NONE = 0
 uint8 REASON_MANUAL_MODE = 1          # Chassis in manual mode
 uint8 REASON_DISABLED = 2             # Motors de-energized / disabled
+uint8 REASON_SOFT_ESTOP = 3          # Soft emergency stop (dispatch_mode=0)
 uint8 REASON_OTHER = 255              # Other reason
 uint8 reason
 

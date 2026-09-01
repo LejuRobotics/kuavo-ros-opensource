@@ -1,0 +1,23 @@
+# GMR Streaming Node Parameters
+gmr:
+  # OptiTrack connection settings
+  server_ip: "192.168.200.160"
+  client_ip: "192.168.200.117"
+  use_multicast: false
+
+  # Robot configuration
+  robot: "kuavo_s52"
+  format: "lafan1"
+
+  # Calibration parameters
+  cali_arm_pose_deg: 75.0
+  fps: 100.0
+
+  # CPU affinity: bind GMR process to specific cores for deterministic scheduling.
+  # Set to list of core IDs, e.g. [4] for P-core 4 on Ultra 7 255H.
+  # Empty list [] means no binding (OS free scheduling).
+  # Verify core topology on target machine with: lscpu -e
+  cpu_cores: []
+
+  # Visualization (optional, may impact performance)
+  enable_viewer: false

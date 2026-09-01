@@ -1,101 +1,113 @@
 topics:
-  - /cmd_vel
-  - /filter_cmd_vel
-  - /cmd_pose
-  - /joint_cmd.*
-  - /cmd.*
-  - /sensors_data_raw
-  - /sensor_data/.*
-  - /h12pro_channel
-  - /joy
-  - /joy/set_feedback
-  - /kuavo_.*
-  - /monitor/.*
-  - /odom
-  - /estimation_odom
-  - /waist_yaw_kinematic
-  - /pose
-  - /quest_joystick_data
-  - /rosout
-  - /rosout_agg
-  - /stop_robot
-  - /tf
-  - /tf_static
-  - /state_estimate/.*
-  - /external_wrench
-  - /ground_truth/state
-  - /humanoid.*
-  - /mobile_manipulator.*
-  - /inekf_state/.*
-  - /visualization_marker.*
-  - /route_plan_pose_array
-  - /state_motion_control
-  - /kuavo_arm_traj
-  - /lb_leg_traj
-  - /gait_receiver/.*
-  - /SwitchedModelReferenceManager/.*
-  - /motor_cmd/.*
-  - /sensor_data_motor/.*
-  - /imu
-  - /joint_states
-  - /share_memory/.*
-  - /mm_eef_poses
-  - /mm_eef_poses_error
-  - /humanoid_eef_poses
-  - /mm_base_error
-  - /ik.*
-  - /ik_debug/.*
-  - /vr_incremental/.*
-  - /mm/two_arm_hand_pose_cmd
-  - /mm_kuavo_arm_traj
-  - /hand_wrench.*
-  - /dexhand/.*                # qiangnao/Linker O6手状态话题
-  - /control_robot_hand_position  # Linker O6手控制话题
-  - /cb_.*_hand_.*             # Linker L6手所有话题（状态/控制）
-  - /tag_world_pose
-  - /leju_quest_bone_poses
-  - /robot_head_motion_data
-  - /robot_waist_motion_data
-  - /tag_data
-  - /test/.*
-  - /kinematic_data
-  - /odometry/filtered
-  - /sensor_data_new/.*
-  - /imu_data
-  - /lb_joint_cmd
-  - /mm/end_effector_trajectory
-  - /mm/.*
-  - /grasp_box/.*
-  - /robot_body_matrices
-  - /action_detector_info
-  - /leju_claw_command
-  - /leju_claw_debug
-  - /leju_claw_state
-  - /leju/fused_hull_boundry_fuse_elevation
-  - /leju/elevation_map0
-  - /righthand_pose
-  - /lefthand_pose
-  - /base_pose
-  - /keyframe_flag
-  - /polygon_new_markers
-  - /polygon_markers
-  - /l515/color/image_raw
-  - /livox/points
-  - /rl_controller.*
-  - /arm_controller.*
-  - /vmp_controller/.*
-  - /tool_mocap_shoulder
-  - /tool_fk_shoulder
-  - /tool_position_error_shoulder
-  - /belly_pose
-  - /joint_.*
-  - /ik_fk_result/.*
-  - /r_hand_pose
-  - /l_hand_pose
-  - /car_pose
-  - /waist_pose
-  - /r_shoulder_pose
-  - /l_shoulder_pose
-  - /head_pose
-  - /dance_controller/.*
-  - /move_base/base_cmd_vel
+  # - /cmd_vel
+  # - /filter_cmd_vel
+  # - /cmd_pose
+  # - /joint_cmd.*
+  # - /cmd.*
+  # - /sensors_data_raw
+  # - /sensor_data/.*
+  # - /h12pro_channel
+  # - /joy
+  # - /joy/set_feedback
+  # - /kuavo_.*
+  # - /monitor/.*
+  # - /odom
+  # - /estimation_odom
+  # - /waist_yaw_kinematic
+  # - /pose
+  # - /quest_joystick_data
+  # - /rosout
+  # - /rosout_agg
+  # - /stop_robot
+  # - /tf
+  # - /tf_static
+  # - /state_estimate/.*
+  # - /external_wrench
+  # - /ground_truth/state
+  # # /humanoid.* 会把 Marker 可视化也录进去（currentState 单包 ~100MB）。
+  # # 数据/debug 在 /humanoid_* ；/humanoid/ 下只留非可视化。
+  # - /humanoid_.*
+  # - /humanoid/mm_state
+  # - /humanoid/mpc/.*
+  # # /mobile_manipulator.* 同样会录 500Hz MarkerArray/PoseArray 轨迹。
+  # # 去掉 optimizedStateTrajectory / optimizedPoseTrajectory / targetTrajectories。
+  # - /mobile_manipulator_.*
+  # - /mobile_manipulator/(?!optimizedStateTrajectory$|optimizedPoseTrajectory$|targetTrajectories$).*
+  # - /inekf_state/.*
+  # - /visualization_marker.*
+  # - /route_plan_pose_array
+  # - /state_motion_control
+  # - /kuavo_arm_traj
+  # - /lb_leg_traj
+  # - /gait_receiver/.*
+  # - /SwitchedModelReferenceManager/.*
+  # - /motor_cmd/.*
+  # - /sensor_data_motor/.*
+  # - /imu
+  # - /joint_states
+  # - /share_memory/.*
+  # - /mm_eef_poses
+  # - /mm_eef_poses_error
+  # - /humanoid_eef_poses
+  # - /mm_base_error
+  # - /ik.*
+  # - /ik_debug/.*
+  # - /vr_incremental/.*
+  # - /mm/two_arm_hand_pose_cmd
+  # - /lb_shoulder_tight_alpha
+  # - /mm_kuavo_arm_traj
+  # - /hand_wrench.*
+  # - /dexhand/.*                # qiangnao/Linker O6手状态话题
+  # - /control_robot_hand_position  # Linker O6手控制话题
+  # - /cb_.*_hand_.*             # Linker L6手所有话题（状态/控制）
+  # - /tag_world_pose
+  # - /leju_quest_bone_poses
+  # - /robot_head_motion_data
+  # - /robot_waist_motion_data
+  # - /tag_data
+  # - /test/.*
+  # - /kinematic_data
+  # - /odometry/filtered
+  # - /sensor_data_new/.*
+  # - /imu_data
+  # - /lb_joint_cmd
+  # - /mm/end_effector_trajectory
+  # - /mm/.*
+  # - /grasp_box/.*
+  # - /robot_body_matrices
+  # - /action_detector_info
+  # - /leju_claw_command
+  # - /leju_claw_debug
+  # - /leju_claw_state
+  # - /leju/fused_hull_boundry_fuse_elevation
+  # - /leju/elevation_map0
+  # - /righthand_pose
+  # - /lefthand_pose
+  # - /base_pose
+  # - /keyframe_flag
+  # - /polygon_new_markers
+  # - /polygon_markers
+  # - /l515/color/image_raw
+  # - /livox/points
+  # - /rl_controller.*
+  # - /arm_controller.*
+  # - /vmp_controller/.*
+  # - /gmr/vmp_input
+  # - /tool_mocap_shoulder
+  # - /tool_fk_shoulder
+  # - /tool_position_error_shoulder
+  # - /belly_pose
+  # - /joint_.*
+  # - /ik_fk_result/.*
+  # - /pico/world_bone_poses
+  # - /pico/retargeted_pose
+  # - /pico/raw_bone_poses
+  # - /r_hand_pose
+  # - /l_hand_pose
+  # - /car_pose
+  # - /waist_pose
+  # - /r_shoulder_pose
+  # - /l_shoulder_pose
+  # - /head_pose
+  # - /dance_controller/.*
+  # - /move_base/base_cmd_vel

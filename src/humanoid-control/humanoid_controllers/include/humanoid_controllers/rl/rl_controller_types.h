@@ -25,6 +25,7 @@ namespace humanoid_controller
     PERCEPTION_LOCO_CONTROLLER, ///< 感知行走控制器
     DEPTH_LOCO_CONTROLLER,
     VMP_CONTROLLER,           ///< VMP控制器
+    MORE_CONTROLLER,          ///< MoRE (Mixture-of-Residual-Experts) 行走控制器
     DANCE_CONTROLLER,         ///< Dance控制器
   };
 
@@ -107,6 +108,11 @@ namespace humanoid_controller
     else if (type_str == "VMP_CONTROLLER")
     {
       type = RLControllerType::VMP_CONTROLLER;
+      return true;
+    }
+    else if (type_str == "MORE_CONTROLLER")
+    {
+      type = RLControllerType::MORE_CONTROLLER;
       return true;
     }
     else if (type_str == "DANCE_CONTROLLER")

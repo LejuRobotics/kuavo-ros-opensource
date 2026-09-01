@@ -12,7 +12,7 @@ import fractions
 import sys
 import subprocess
 import rospy
-from sensor_msgs.msg import Image,CameraInfo
+from sensor_msgs.msg import Image, CameraInfo, CompressedImage
 from cv_bridge import CvBridge
 import signal
 import threading
@@ -20,7 +20,7 @@ import threading
 class WebRTCVideoStreamClient:
     def __init__(self, server_ip, ros_topic):
         self.server_ip = server_ip
-        self.ros_topic = f"{ros_topic}/image_raw"
+        self.ros_topic = f"{ros_topic}/image_raw/compressed"
         self.ros_camera_info_topic = f"{ros_topic}/camera_info"
 
         if not self.topic_exists(self.ros_topic):
@@ -138,7 +138,7 @@ class WebRTCVideoStreamClient:
         # print(f"Camera resolution: {msg.width}x{msg.height}")
 
     def image_callback(self, ros_image):
-        self.latest_frame = self.bridge.imgmsg_to_cv2(ros_image, "bgr8")
+        self.latest_frame = self.bridge.compressed_imgmsg_to_cv2(ros_image, "bgr8")
 
     async def main(self):
         while not self.start_connect_webrtc_singal:
@@ -165,8 +165,8 @@ class WebRTCVideoStreamClient:
 
     async def handle_ros(self):
         # rospy.init_node('image_to_webrtc', anonymous=True)
-        rospy.Subscriber(self.ros_topic, Image, self.image_callback)
-        rospy.Subscriber(self.ros_topic, CameraInfo, self.camera_info_callback)
+        rospy.Subscriber(self.ros_topic, CompressedImage, self.image_callback)
+        rospy.Subscriber(self.ros_camera_info_topic, CameraInfo, self.camera_info_callback)
 
         while not rospy.is_shutdown():
             await asyncio.sleep(0.03)

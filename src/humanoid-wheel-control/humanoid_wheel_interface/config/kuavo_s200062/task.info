@@ -19,6 +19,18 @@ model_information {
     [11] "r_f_bar_3_joint"
     [12] "r_b_bar_1_joint"
     [13] "r_b_bar_3_joint"
+    [14] "l_f_bar_2_joint"
+    [15] "l_f_finger_joint"
+    [16] "l_f_bar_4_joint"
+    [17] "l_b_bar_2_joint"
+    [18] "l_b_finger_joint"
+    [19] "l_b_bar_4_joint"
+    [20] "r_f_bar_2_joint"
+    [21] "r_f_finger_joint"
+    [22] "r_f_bar_4_joint"
+    [23] "r_b_bar_2_joint"
+    [24] "r_b_finger_joint"
+    [25] "r_b_bar_4_joint"
   }
 
   ; base frame of the robot (from URDF)
@@ -593,9 +605,9 @@ torsoTracking
     (0,0)    20.0   ; torso X
     (1,0)    20.0   ; torso Y
     (2,0)    20.0   ; torso Z
-    (3,0)    10.0   ; torso roll
-    (4,0)    10.0   ; torso pitch
-    (5,0)    10.0   ; torso yaw
+    (3,0)    50.0   ; torso roll
+    (4,0)    50.0   ; torso pitch
+    (5,0)    50.0   ; torso yaw
   }
 }
 
@@ -888,7 +900,61 @@ selfDistanceConstraint
     [1] 0.53
   }
 }
+;; 自适应松弛肩部收紧约束
+shoulder_adapt_tighten
+{
+  activate  true
 
+  ;; 松弛滤波系数 (α 低通滤波, doc 建议 0.9~0.95, 越大切换越平滑)
+  relaxation_alpha  0.85
+
+  ;; 参与收紧的肩关节 (与 weight 一一对应)
+  jointNames
+  {
+    [0] "zarm_l1_joint"
+    [1] "zarm_l2_joint"
+    [2] "zarm_r1_joint"
+    [3] "zarm_r2_joint"
+  }
+
+  ;; 权值
+  weight
+  {
+    [0] 10; "zarm_l1_link"
+    [1] 1000; "zarm_l2_link"
+    [2] 10; "zarm_r1_link"
+    [3] 1000; "zarm_r2_link"
+  }
+
+  ;; 松弛系数 (α 的初值)
+  relaxation_coeff
+  {
+    [0] 1; "lhand"
+    [1] 1; "rhand"
+  }
+
+  ;; α 调度参数 (mpc_cost.md 自动松弛), 采用滞回环双阈值防抖
+  H_th_on   0.20   ; 锁肩阈值: H_joint 余量高于此才锁肩
+  H_th_off  0.15   ; 解锁阈值: H_joint 余量低于此才解锁
+  T_th_on   0.25   ; 锁肩阈值: H_task 位移低于此才锁肩
+  T_th_off  0.30   ; 解锁阈值: H_task 位移高于此才解锁
+  k1      30.0   ; H_joint sigmoid 斜率
+  k2      30.0   ; H_task sigmoid 斜率
+  D_max   0.1    ; 典型大幅末端位移 [m]
+
+  ;; 肘腕关节 (用于 H_joint)
+  relax_jointNames
+  {
+    [0] "zarm_l4_joint"
+    [1] "zarm_l5_joint"
+    [2] "zarm_l6_joint"
+    [3] "zarm_l7_joint"
+    [4] "zarm_r4_joint"
+    [5] "zarm_r5_joint"
+    [6] "zarm_r6_joint"
+    [7] "zarm_r7_joint"
+  }
+}
 selfCollision
 { 
   ; activate self-collision constraint
@@ -1170,6 +1236,20 @@ lowJointAccelTask
     (1,0)   6.2     ; leg_pitch
     (2,0)   6.2     ; waist_pitch
     (3,0)   6.2     ; waist_yaw_link
+  }
+  kp_sim
+  {
+    (0,0)   200.00   ; knee_pitch
+    (1,0)   200.00   ; leg_pitch
+    (2,0)   200.00   ; waist_pitch
+    (3,0)   200.00   ; waist_yaw_link
+  }
+  kd_sim
+  {
+    (0,0)   40.2     ; knee_pitch
+    (1,0)   40.2     ; leg_pitch
+    (2,0)   40.2     ; waist_pitch
+    (3,0)   40.2     ; waist_yaw_link
   }
   kp_sim
   {

@@ -39,6 +39,10 @@ inline std::vector<double> eigenToStdVector(const Eigen::VectorXd& vec) {
     return std::vector<double>(vec.data(), vec.data() + vec.size());
 }
 
+inline bool isLunbiModule(const std::string& robot_module) {
+    return robot_module == "LUNBI" || robot_module == "LUNBI_V62";
+}
+
 struct HardwareParam {
     bool cali_leg{false};
     std::vector<double> default_joint_pos;
@@ -49,6 +53,9 @@ struct HardwareParam {
     bool only_half_up_body{false};
     int teach_pendant_{0};
     std::string kuavo_assets_path{""};
+    // 启动期 EC 驱动器固件与参数校验（load_kuavo_real.launch 启动硬件层后执行）
+    bool check_firmware_param_{true};  // 是否执行校验
+    bool allow_mismatch_{false};        // true=有 mismatch 仅告警不阻断启动
 };
 
 enum ImuType
@@ -102,6 +109,16 @@ class HardwarePlant
       return motor_info;
     };
     int8_t HWPlantInit();
+    /** 在 HWPlantInit() 之前由 hardware_node 根据 /use_sit_init 设置 */
+    void setSkipBootMoveToZero(bool skip) { skip_boot_move_to_zero_ = skip; }
+    /** 坐姿 prep jointMoveTo：仅前 12 个 EC 腿关节使用 seat_boot 刚度（由 hardware_node 从 ROS param 注入） */
+    void setPrepEcLegGains(const std::vector<double>& kp, const std::vector<double>& kd);
+    void clearPrepEcLegGains();
+    /**
+     * 立刻以当前编码器位置做一次 CSP 锁位（prep/默认 kp kd）。
+     * 用于座椅 CSP hold → jointMoveTo 交接，避免 mute 后轨迹启动前的无控空窗。
+     */
+    void latchCurrentJointsCsp();
     SensorData_t sensorsInitHW();
     bool sensorsCheck();
     void HWPlantDeInit();
@@ -154,6 +171,16 @@ class HardwarePlant
     // 退出0扭矩模式，恢复正常控制
     bool exitZeroTorqueMode();
 
+    // 内部复用实现：对给定 EC 关节 id 列表下发 0 扭矩 / 恢复位置控制
+    void setZeroTorqueForJoints(const std::vector<uint8_t>& ec_ids);
+    void exitZeroTorqueForJoints(const std::vector<uint8_t>& ec_ids);
+
+    // 单关节手动限位标定（用于腰部电机）：0扭矩 -> 人工摆正 -> 按x锁定（当前位设为零点并保存）
+    bool setZeroTorqueForSingleLegJoint(int joint_idx);
+    bool exitZeroTorqueForSingleLegJoint(int joint_idx);
+    bool setCurrentPositionAsOffsetForJoint(int joint_idx);
+    bool manualCalibrateSingleLegJoint(int joint_idx);
+
     // 电机状态管理器接口
     void setMotorStatusHardwareSettings();  // 设置硬件配置到电机状态管理器
     
@@ -164,8 +191,10 @@ class HardwarePlant
 
     bool checkLejuClawInitialized();
     void setLejuClawDebugCallback(eef_controller::LejuClawDebugCallback callback);
-    bool controlLejuClaw(eef_controller::ControlClawRequest& req, eef_controller::ControlClawResponse& res);
-    bool controlLejuClaw(eef_controller::lejuClawCommand& command);
+    void setLejuClawTargetCallback(eef_controller::LejuClawTargetCallback callback);
+    bool controlLejuClaw(eef_controller::ControlClawRequest& req, eef_controller::ControlClawResponse& res, bool is_high_freq);
+    bool controlLejuClaw(eef_controller::lejuClawCommand& command, bool is_high_freq);
+    bool recoverLejuClaw(const std::string& direction, float current, int duration_ms, int repeat, std::string& message);
     eef_controller::ClawState getLejuClawState();
 
     void setHardwareParam(const HardwareParam& param) { hardware_param_ = param; }
@@ -196,6 +225,7 @@ class HardwarePlant
     std::unique_ptr<eef_controller::Revo2HandController> revo2_actuator;
     std::string gesture_filepath_;
     eef_controller::LejuClawDebugCallback leju_claw_debug_callback_;
+    eef_controller::LejuClawTargetCallback leju_claw_target_callback_;
     
     // 电机状态管理器
     std::unique_ptr<MotorStatusManager> motor_status_manager_;
@@ -254,6 +284,9 @@ private:
     std::mutex motor_joint_data_mtx_;
     SensorData_t sensor_data_joint;
 
+    bool skip_boot_move_to_zero_{false};
+    std::vector<double> prep_ec_leg_kp_;
+    std::vector<double> prep_ec_leg_kd_;
     double dt_ = 1e-3;
     uint8_t control_mode_ = MOTOR_CONTROL_MODE_TORQUE;
     uint16_t num_actuated_ = 0;

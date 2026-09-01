@@ -197,6 +197,10 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
     ROS_ERROR("[WheelQuest3IkIncrementalROS] chestElbowHandPointOptSolverPtr_ is not initialized");
     return false;
   }
+  latestLeftElbowTrackingActivation_ =
+      std::clamp(input.leftElbowTrackingActivation, 0.0, 1.0);
+  latestRightElbowTrackingActivation_ =
+      std::clamp(input.rightElbowTrackingActivation, 0.0, 1.0);
   bool chestIncrementalUpdateEnabled =
       chestIncrementalUpdateEnabled_ && (lastLeftGripPressed_ || lastRightGripPressed_);
   const bool bothGripsReleased = !lastLeftGripPressed_ && !lastRightGripPressed_;
@@ -277,7 +281,10 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                                               rightElbowRefRel,  // rightElbowRef - offset,
                                               rightHandRefRel,   // rightHandRef - offset;
                                               drakeSolveUpdateChestOrientation_,
-                                              drakeSolveUpdateChestPosition_);
+                                              drakeSolveUpdateChestPosition_,
+                                              resetJointToDefaultWheel_ || !justEnteredMode2_,
+                                              input.leftElbowTrackingActivation,
+                                              input.rightElbowTrackingActivation);
   recordTimestamp("chestElbowHandPointOptSolverPtr_->solveFinish", loopSyncCount_);
   const bool freezeFeedAfterOpt =
       !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled && sol.success;
@@ -596,6 +603,16 @@ void WheelQuest3IkIncrementalROS::reset() {
   if (incrementalController_) {
     incrementalController_->reset();
   }
+  if (leftNaturalElbowGuide_) {
+    leftNaturalElbowGuide_->reset();
+  }
+  if (rightNaturalElbowGuide_) {
+    rightNaturalElbowGuide_->reset();
+  }
+  latestHumanLeftArmPoseValid_ = false;
+  latestHumanRightArmPoseValid_ = false;
+  latestLeftElbowTrackingActivation_ = 1.0;
+  latestRightElbowTrackingActivation_ = 1.0;
   // 重置 grip 状态跟踪变量，避免系统重置后出现错误的上升沿检测
   lastLeftGripPressed_ = false;
   lastRightGripPressed_ = false;
@@ -603,12 +620,18 @@ void WheelQuest3IkIncrementalROS::reset() {
   hasRightHandPoseInChest_ = false;
   hasLeftElbowPosInChest_ = false;
   hasRightElbowPosInChest_ = false;
+  hasLeftActiveChestAnchor_ = false;
+  hasRightActiveChestAnchor_ = false;
   leftHandPosInChest_.setZero();
   rightHandPosInChest_.setZero();
   leftElbowPosInChest_.setZero();
   rightElbowPosInChest_.setZero();
   leftHandQuatInChest_.setIdentity();
   rightHandQuatInChest_.setIdentity();
+  leftActiveChestAnchorPos_.setZero();
+  rightActiveChestAnchorPos_.setZero();
+  leftActiveChestAnchorQuat_.setIdentity();
+  rightActiveChestAnchorQuat_.setIdentity();
   // 重置 grip 超时机制状态
   {
     std::lock_guard<std::mutex> lock(leftGripTimeMutex_);
@@ -1089,6 +1112,19 @@ WheelPointTrackIKSolverConfig WheelQuest3IkIncrementalROS::loadPointTrackIKSolve
       if (ikConfig.contains("chestTrackingWeight")) {
         config.chestTrackingWeight = ikConfig["chestTrackingWeight"].get<double>();
         ROS_INFO("  ✅ chestTrackingWeight: %.2e", config.chestTrackingWeight);
+      }
+
+      if (ikConfig.contains("enableWaistElbowClearanceConstraint")) {
+        config.enableWaistElbowClearanceConstraint =
+            ikConfig["enableWaistElbowClearanceConstraint"].get<bool>();
+        ROS_INFO("  ✅ enableWaistElbowClearanceConstraint: %s",
+                 config.enableWaistElbowClearanceConstraint ? "true" : "false");
+      }
+      if (ikConfig.contains("waistElbowLateralClearance")) {
+        config.waistElbowLateralClearance =
+            std::max(0.0, ikConfig["waistElbowLateralClearance"].get<double>());
+        ROS_INFO("  ✅ waistElbowLateralClearance: %.3f m",
+                 config.waistElbowLateralClearance);
       }
 
       // Load IKSolverConfig base class fields
@@ -1672,7 +1708,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
   }
 
   auto computeGripAlpha = [&](bool armMoved, const ros::Time& gripStartTime) -> double {
-    double alpha = 0.01;
+    double alpha = 0.00;
     if (armMoved && !gripStartTime.isZero()) {
       const double elapsedTime = (now - gripStartTime).toSec();
       if (elapsedTime > 0.0) {
@@ -1768,7 +1804,14 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
                            (kMode2SmoothDurationSec - kMode2SensorSyncDurationSec),
                        0.0),
               1.0);
-          armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(14);
+          if(resetJointToDefaultWheel_)
+          {
+            armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(14);
+          }
+          else
+          {
+            armPositionForPublish = q_init_cmd_;
+          }
           latest_q_ = armPositionForPublish;
         }
         armVelocityForPublish.setZero();
@@ -1819,7 +1862,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
     q_ = defaultArmAngles;
     dq_.setZero();
 
-    const double alpha = 0.01;
+    const double alpha = 0.00;
     latest_q_ = (1.0 - alpha) * latest_q_ + alpha * q_;
     latest_dq_.setZero();
     lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
@@ -1906,7 +1949,7 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
       startTime = lbLegMoveStartTime_;
     }
 
-    double alpha = 0.01;
+    double alpha = 0.00;
     if (lbLegMoved && !startTime.isZero()) {
       const double elapsedTime = (currentTime - startTime).toSec();
       if (elapsedTime > 0.0) {
@@ -2312,23 +2355,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   leftEndEffectorPosition_ = leftEndEffectorPosition;
   rightEndEffectorPosition_ = rightEndEffectorPosition;
 
-  // 初始化人肘参考（沿着ee->手腕方向，长度为l2_）
-  {
-    const Eigen::Vector3d leftEeToWrist = leftLink6Position_ - leftEndEffectorPosition_;
-    const double leftNorm = leftEeToWrist.norm();
-    if (leftNorm > 1e-6) {
-      latestHumanLeftElbowPos_ = leftLink6Position_ + leftEeToWrist * (l2_ / leftNorm);
-    } else {
-      latestHumanLeftElbowPos_ = leftLink6Position_;
-    }
-    const Eigen::Vector3d rightEeToWrist = rightLink6Position_ - rightEndEffectorPosition_;
-    const double rightNorm = rightEeToWrist.norm();
-    if (rightNorm > 1e-6) {
-      latestHumanRightElbowPos_ = rightLink6Position_ + rightEeToWrist * (l2_ / rightNorm);
-    } else {
-      latestHumanRightElbowPos_ = rightLink6Position_;
-    }
-  }
+  latestHumanLeftShoulderPos_.setZero();
+  latestHumanRightShoulderPos_.setZero();
+  latestHumanLeftElbowPos_.setZero();
+  latestHumanRightElbowPos_.setZero();
+  latestHumanLeftArmPoseValid_ = false;
+  latestHumanRightArmPoseValid_ = false;
 
   ROS_INFO("✅ [WheelQuest3IkIncrementalROS] Initial positions calculated by FK (zero joint angles):");
   ROS_INFO("   Left Link6: [%.6f, %.6f, %.6f]", leftLink6Position_.x(), leftLink6Position_.y(), leftLink6Position_.z());
@@ -2479,7 +2511,10 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
                                 // armMode!=2 或 mode2过渡窗口内，统一走默认下肢发布；其余 mode2 情况走 IK 下肢发布
                                 if (armMode != 2 || inMode2Warmup) {
-                                  publishDefaultLegJointStates();
+                                  if(resetJointToDefaultWheel_)
+                                  {
+                                    publishDefaultLegJointStates();
+                                  }
                                 } else {
                                   publishLegJointStates();
                                 }
@@ -2604,6 +2639,69 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   std::cout << "/ik_ros_uni_cpp_node/quest3/use_incremental_hand_orientation="
             << (useIncrementalHandOrientation_ ? "true" : "false") << std::endl;
 
+  const std::string naturalElbowParam = "/ik_ros_uni_cpp_node/quest3/natural_elbow/";
+  nodeHandle_.param(naturalElbowParam + "enabled", enableWheelNaturalElbowGuide_, true);
+  nodeHandle_.param(naturalElbowParam + "natural_direction_blend",
+                    wheelNaturalElbowGuideConfig_.naturalDirectionBlend,
+                    0.90);
+  nodeHandle_.param(naturalElbowParam + "down_projection_min_norm",
+                    wheelNaturalElbowGuideConfig_.downProjectionMinNorm,
+                    0.05);
+  nodeHandle_.param(naturalElbowParam + "reach_margin",
+                    wheelNaturalElbowGuideConfig_.reachMargin,
+                    0.002);
+  nodeHandle_.param(naturalElbowParam + "extension_fade_start_distance",
+                    wheelNaturalElbowGuideConfig_.extensionFadeStartDistance,
+                    0.002);
+  nodeHandle_.param(naturalElbowParam + "extension_fade_full_distance",
+                    wheelNaturalElbowGuideConfig_.extensionFadeFullDistance,
+                    0.030);
+  nodeHandle_.param(naturalElbowParam + "soft_tracking_scale",
+                    wheelNaturalElbowSoftTrackingScale_,
+                    0.10);
+  nodeHandle_.param(naturalElbowParam + "waist_avoidance_enabled",
+                    wheelNaturalElbowGuideConfig_.waistAvoidanceEnabled,
+                    true);
+  nodeHandle_.param(naturalElbowParam + "waist_soft_clearance",
+                    wheelNaturalElbowGuideConfig_.waistSoftClearance,
+                    0.260);
+  nodeHandle_.param(naturalElbowParam + "waist_full_activation_clearance",
+                    wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
+                    0.200);
+  wheelNaturalElbowSoftTrackingScale_ =
+      std::clamp(wheelNaturalElbowSoftTrackingScale_, 0.0, 1.0);
+  wheelNaturalElbowGuideConfig_.waistSoftClearance =
+      std::max(0.0, wheelNaturalElbowGuideConfig_.waistSoftClearance);
+  wheelNaturalElbowGuideConfig_.waistFullActivationClearance =
+      std::clamp(wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
+                 0.0,
+                 wheelNaturalElbowGuideConfig_.waistSoftClearance);
+  leftNaturalElbowGuide_ =
+      std::make_unique<WheelNaturalElbowGuide>(l1_, l2_, wheelNaturalElbowGuideConfig_);
+  rightNaturalElbowGuide_ =
+      std::make_unique<WheelNaturalElbowGuide>(l1_, l2_, wheelNaturalElbowGuideConfig_);
+  ROS_INFO(
+      "[WheelQuest3IkIncrementalROS] Natural elbow circle: enabled=%s, "
+      "gravity=%.2f, human=%.2f, soft_tracking_scale=%.2f, "
+      "reach_margin=%.3f m, extension_fade_retraction=[%.3f, %.3f] m, "
+      "waist_avoidance=%s, waist_clearance=[full %.3f, soft %.3f] m",
+      enableWheelNaturalElbowGuide_ ? "true" : "false",
+      std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
+      1.0 - std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
+      wheelNaturalElbowSoftTrackingScale_,
+      wheelNaturalElbowGuideConfig_.reachMargin,
+      wheelNaturalElbowGuideConfig_.extensionFadeStartDistance,
+      wheelNaturalElbowGuideConfig_.extensionFadeFullDistance,
+      wheelNaturalElbowGuideConfig_.waistAvoidanceEnabled ? "true" : "false",
+      wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
+      wheelNaturalElbowGuideConfig_.waistSoftClearance);
+
+  // 读取进入增量控制时是否重置到默认位置
+  nodeHandle_.param(
+      "/reset_joint_to_default", resetJointToDefaultWheel_, true);
+  std::cout << "reset_joint_to_default="
+            << (resetJointToDefaultWheel_ ? "true" : "false") << std::endl;
+
   // 读取 box 边界参数（向量形式）
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
                            "/quest3/box_min_bound",
@@ -2686,6 +2784,11 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         Eigen::IOFormat(Eigen::FullPrecision, 0, ", ", ", ", "", "", "", ""));
     ROS_INFO("[WheelQuest3IkIncrementalROS] Left hand clip result: %s", oss_left.str().c_str());
     ROS_INFO("[WheelQuest3IkIncrementalROS] Right hand clip result: %s", oss_right.str().c_str());
+    if(!resetJointToDefaultWheel_)
+    {
+      defaultLeftHandPosOnExit_ = leftLink6Position;
+      defaultRightHandPosOnExit_ = rightLink6Position;
+    }
   }
 
   // 使用默认手部位置初始化 latestPoseConstraintList_，确保进入增量模式时能正确初始化
@@ -2963,28 +3066,34 @@ void WheelQuest3IkIncrementalROS::remapUpperBodyRefPoints(const Eigen::Vector3d&
                                                      Eigen::Vector3d& rightHandRef,
                                                      Eigen::Vector3d& leftElbowRef,
                                                      Eigen::Vector3d& rightElbowRef) {
-  double L = l1_ + l2_;  // total
-
-  // 保存hand elbow 向量（在归一化之前）
-  const Eigen::Vector3d leftHandElbowVec = leftHandRef - leftElbowRef;
-  const Eigen::Vector3d rightHandElbowVec = rightHandRef - rightElbowRef;
+  (void)chestPos;
+  (void)chestQuat;
+  const double reachMargin = enableWheelNaturalElbowGuide_
+                                 ? std::max(0.0, wheelNaturalElbowGuideConfig_.reachMargin)
+                                 : 0.0;
+  const double maxReach = std::max(1.0e-6, l1_ + l2_ - reachMargin);
 
   // leftHandRef - leftShoulderPos 的模长应该 < L， 否则进行归一化
   const Eigen::Vector3d leftHandToShoulder = leftHandRef - leftShoulderPos;
   const double leftHandToShoulderNorm = leftHandToShoulder.norm();
-  if (leftHandToShoulderNorm > L && leftHandToShoulderNorm > 1e-6) {
-    leftHandRef = leftShoulderPos + leftHandToShoulder.normalized() * L;
+  if (leftHandToShoulderNorm > maxReach && leftHandToShoulderNorm > 1e-6) {
+    leftHandRef = leftShoulderPos + leftHandToShoulder.normalized() * maxReach;
   }
 
   // rightHandRef - rightShoulderPos 的模长应该 < L， 否则进行归一化
   const Eigen::Vector3d rightHandToShoulder = rightHandRef - rightShoulderPos;
   const double rightHandToShoulderNorm = rightHandToShoulder.norm();
-  if (rightHandToShoulderNorm > L && rightHandToShoulderNorm > 1e-6) {
-    rightHandRef = rightShoulderPos + rightHandToShoulder.normalized() * L;
+  if (rightHandToShoulderNorm > maxReach && rightHandToShoulderNorm > 1e-6) {
+    rightHandRef = rightShoulderPos + rightHandToShoulder.normalized() * maxReach;
   }
-  // 根据hand elbow向量，重新计算elbow
-  leftElbowRef = leftHandRef - leftHandElbowVec;
-  rightElbowRef = rightHandRef - rightHandElbowVec;
+
+  // Hand clipping changes the elbow circle. Reproject the already-selected
+  // natural/human bending direction onto the new circle instead of preserving
+  // an arbitrary hand-elbow translation vector.
+  leftElbowRef = WheelNaturalElbowGuide::projectElbowToCircle(
+      leftShoulderPos, leftHandRef, leftElbowRef, l1_, l2_, reachMargin);
+  rightElbowRef = WheelNaturalElbowGuide::projectElbowToCircle(
+      rightShoulderPos, rightHandRef, rightElbowRef, l1_, l2_, reachMargin);
 }
 
 }  // namespace HighlyDynamic

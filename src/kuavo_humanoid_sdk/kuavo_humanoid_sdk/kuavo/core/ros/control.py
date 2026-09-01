@@ -2,7 +2,7 @@ import os
 import numpy as np
 import threading
 from typing import Tuple
-from kuavo_humanoid_sdk.common.logger import SDKLogger
+from kuavo_humanoid_sdk.common.logger import SDKLogger, is_diag_enabled
 from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKParams, KuavoPose, 
                                                       KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode
                                                       ,KuavoManipulationMpcFrame, KuavoMotorParam)
@@ -212,17 +212,10 @@ class ControlEndEffector:
 class ControlRobotArm:
     def __init__(self):
 
-        # Detect robot type to select correct topic prefix
-        # wheel-arm robot → /mm/ (mobile manipulator)
-        # bipedal robot    → /ik/ (inverse kinematics)
-        is_wheel_arm = kuavo_ros_param.is_wheel_arm_robot()
-        topic_prefix = 'mm' if is_wheel_arm else 'ik'
-        SDKLogger.info(f"[ControlRobotArm] is_wheel_arm={is_wheel_arm}, using /{topic_prefix}/two_arm_hand_pose_cmd")
-
         # 带有碰撞检查的轨迹发布
         self._pub_ctrl_arm_traj_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_traj', JointState, queue_size=10)
         self._pub_ctrl_arm_target_poses_arm_collision = rospy.Publisher('/arm_collision/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
-        self._pub_ctrl_hand_pose_cmd_arm_collision = rospy.Publisher(f'/arm_collision/{topic_prefix}/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
+        self._pub_ctrl_hand_pose_cmd_arm_collision = rospy.Publisher('/arm_collision/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
 
         # 判断当前是否发生碰撞
         self._sub_arm_collision_info = rospy.Subscriber('/arm_collision/info', armCollisionCheckInfo, self.callback_arm_collision_info, queue_size=10)
@@ -232,7 +225,7 @@ class ControlRobotArm:
         # 正常轨迹发布
         self._pub_ctrl_arm_traj = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=10)
         self._pub_ctrl_arm_target_poses = rospy.Publisher('/kuavo_arm_target_poses', armTargetPoses, queue_size=10)
-        self._pub_ctrl_hand_pose_cmd = rospy.Publisher(f'/{topic_prefix}/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
+        self._pub_ctrl_hand_pose_cmd = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
         self._pub_hand_wrench = rospy.Publisher('/hand_wrench_cmd', Float64MultiArray, queue_size=10)
         self._pub_torso_pose_cmd = rospy.Publisher('/cmd_lb_torso_pose', Twist, queue_size=10)
         self._pub_wheel_lower_joint_cmd = rospy.Publisher('/lb_leg_traj', JointState, queue_size=10)
@@ -324,17 +317,25 @@ class ControlRobotArm:
         return False
     def pub_end_effector_pose_cmd(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:
         try:
+            if is_diag_enabled():
+                # DIAG: 定位 frame=1/2 交替的发布源(TID+调用栈)
+                import threading, traceback
+                if not hasattr(self, '_diag_seq'): self._diag_seq = {}
+                tid = threading.get_ident(); self._diag_seq[tid] = self._diag_seq.get(tid, 0) + 1
+                stack = traceback.extract_stack()
+                caller = ""
+                for s in reversed(stack[:-1]):
+                    if 'control.py' not in s.filename and 'threading.py' not in s.filename:
+                        caller = f"{s.filename.split('/')[-1]}:{s.lineno} {s.name}"; break
+                print(f"[DIAG-PUB] TID={tid%10000:04d} #{self._diag_seq[tid]:<3d} frame={frame.value} caller={caller} L=({left_pose.position[0]:.2f},{left_pose.position[1]:.2f},{left_pose.position[2]:.2f})")
+
             msg = twoArmHandPoseCmd()
             left_pose_msg = armHandPose()
             left_pose_msg.pos_xyz = left_pose.position
             left_pose_msg.quat_xyzw = left_pose.orientation
-            left_pose_msg.elbow_pos_xyz = (0.0, 0.0, 0.0)
-            left_pose_msg.joint_angles = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
             right_pose_msg = armHandPose()
             right_pose_msg.pos_xyz = right_pose.position
             right_pose_msg.quat_xyzw = right_pose.orientation
-            right_pose_msg.elbow_pos_xyz = (0.0, 0.0, 0.0)
-            right_pose_msg.joint_angles = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
             msg.hand_poses.left_pose = left_pose_msg
             msg.hand_poses.right_pose = right_pose_msg
             if frame.value not in [0, 1, 2, 3, 4]:

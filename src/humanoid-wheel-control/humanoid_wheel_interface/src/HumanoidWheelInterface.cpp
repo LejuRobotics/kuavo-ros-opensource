@@ -62,6 +62,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_wheel_interface/cost/EndEffectorLocalBoxSoftCost.h"
 #include "humanoid_wheel_interface/cost/TorsoTrackingBoxSoftCost.h"
 #include "humanoid_wheel_interface/cost/EndEffectorJointBias.h"
+#include "humanoid_wheel_interface/cost/ShoulderTightenCost.h"
 #include "humanoid_wheel_interface/cost/selfDistanceBoxSoftCost.h"
 #include "humanoid_wheel_interface/dynamics/WheelBasedMobileManipulatorDynamics.h"
 #include "humanoid_wheel_interface/dynamics/WheelWorldBasedMobileManipulatorDynamics.h"
@@ -245,6 +246,14 @@ HumanoidWheelInterface::HumanoidWheelInterface(const std::string& taskFile, cons
   if(useEeJointBias)
   {
     problem_.stateCostPtr->add("endEffectorJointBias", getEndEffectorJointBias(*pinocchioInterfacePtr_, taskFile));
+  }
+
+  // shoulder tighten cost
+  bool useShoulderTighten = false;
+  loadData::loadPtreeValue(pt, useShoulderTighten, "shoulder_adapt_tighten.activate", true);
+  if(useShoulderTighten)
+  {
+    problem_.stateCostPtr->add("shoulderTighten", getShoulderTightenCost(*pinocchioInterfacePtr_, taskFile));
   }
 
   // self-collision avoidance constraint
@@ -991,11 +1000,89 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getEndEffectorJointBias(const
   std::unique_ptr<StateCost> constraint;
 
   constraint.reset(new EndEffectorJointBias(biasLimits, *referenceManagerPtr_));
-  
+
   return constraint;
 }
 
-std::unique_ptr<StateCost> HumanoidWheelInterface::getSelfDistanceConstraint(int index, const PinocchioInterface& pinocchioInterface, 
+std::unique_ptr<StateCost> HumanoidWheelInterface::getShoulderTightenCost(const PinocchioInterface& pinocchioInterface,
+                                                                          const std::string& taskFile)
+{
+  const std::string prefix = "shoulder_adapt_tighten.";
+
+  boost::property_tree::ptree pt;
+  boost::property_tree::read_info(taskFile, pt);
+
+  std::vector<std::string> shoulderJointNames;
+  std::vector<double> shoulderWeights;
+  std::vector<double> relaxationCoeff;
+  loadData::loadStdVector<std::string>(taskFile, prefix + "jointNames", shoulderJointNames, true);
+  loadData::loadStdVector<double>(taskFile, prefix + "weight", shoulderWeights, true);
+  loadData::loadStdVector<double>(taskFile, prefix + "relaxation_coeff", relaxationCoeff, true);
+
+  if (shoulderJointNames.size() != shoulderWeights.size()) {
+    throw std::runtime_error("[getShoulderTightenCost] shoulder_adapt_tighten.jointNames/weight size mismatch: names=" +
+                             std::to_string(shoulderJointNames.size()) + ", weights=" + std::to_string(shoulderWeights.size()));
+  }
+  if (shoulderJointNames.empty()) {
+    throw std::runtime_error("[getShoulderTightenCost] shoulder_adapt_tighten.jointNames is empty!");
+  }
+  if (relaxationCoeff.size() != 2) {
+    throw std::runtime_error("[getShoulderTightenCost] shoulder_adapt_tighten.relaxation_coeff should have size 2 (left/right arm), got " +
+                             std::to_string(relaxationCoeff.size()));
+  }
+
+  if (referenceManagerPtr_ == nullptr) {
+    throw std::runtime_error("[getShoulderTightenCost] referenceManagerPtr_ should be set first!");
+  }
+
+  // 计算手臂在状态中的起始下标与 pinocchio 锚点 (与 getEndEffectorJointBias 相同)
+  int armDof = 0;
+  loadData::loadPtreeValue(pt, armDof, "model_settings.mpcArmsDof", true);
+  int armStartIndex = manipulatorModelInfo_.stateDim - armDof;
+
+  const auto& model = pinocchioInterface.getModel();
+  const auto& jointName = model.names;
+  int armIndexInPin = 0;
+  for (armIndexInPin = 0; armIndexInPin < jointName.size(); armIndexInPin++) {
+    if (jointName[armIndexInPin] == "zarm_l1_joint") {
+      break;
+    }
+  }
+
+  std::vector<size_t> shoulderStateIndices;
+  std::vector<int> armIndices;
+  shoulderStateIndices.reserve(shoulderJointNames.size());
+  armIndices.reserve(shoulderJointNames.size());
+  for (const auto& name : shoulderJointNames) {
+    int idx = -1;
+    for (int j = armIndexInPin; j < jointName.size(); j++) {
+      if (jointName[j] == name) {
+        idx = j;
+        break;
+      }
+    }
+    if (idx < 0) {
+      throw std::runtime_error("[getShoulderTightenCost] joint " + name + " not found in model!");
+    }
+    shoulderStateIndices.push_back(armStartIndex + idx - armIndexInPin);
+    armIndices.push_back(name.rfind("zarm_l", 0) == 0 ? 0 : 1);
+  }
+
+  // 将松弛系数写入参考管理器, 作为肩部收紧 alpha 的初值 (之后可由 H_joint/H_task 在线更新)
+  for (int arm = 0; arm < 2; arm++) {
+    referenceManagerPtr_->setShoulderTightAlpha(arm, relaxationCoeff[arm]);
+  }
+  // α 低通滤波系数
+  scalar_t alphaSmooth = 0.9;
+  loadData::loadPtreeValue(pt, alphaSmooth, prefix + "relaxation_alpha", true);
+  referenceManagerPtr_->setShoulderTightAlphaSmooth(alphaSmooth);
+
+  vector_t weightsVector = Eigen::Map<const vector_t>(shoulderWeights.data(), shoulderWeights.size());
+
+  return std::make_unique<shoulderTightenCost>(std::move(shoulderStateIndices), armIndices, weightsVector, *referenceManagerPtr_);
+}
+
+std::unique_ptr<StateCost> HumanoidWheelInterface::getSelfDistanceConstraint(int index, const PinocchioInterface& pinocchioInterface,
                                                                              std::pair<std::string, std::string> linkPair, 
                                                                              const std::string& taskFile, bool verbose)
 {
