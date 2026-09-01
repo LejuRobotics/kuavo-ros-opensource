@@ -6,6 +6,7 @@ import os
 import json
 import time
 import signal
+from collections import deque
 import rospy
 import tf
 import numpy as np
@@ -36,6 +37,11 @@ from head_control_manager import HeadControlManager, HeadControlMode
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeResponse
 
 class Quest3BoneFramePublisher:
+    MAX_PENDING_REQUESTS = 32
+    DEFAULT_JOYSTICK_TIMEOUT_SEC = 0.3
+    DEFAULT_QUEST_DISCONNECT_TIMEOUT_SEC = 1.0
+    UDP_RECEIVER_POLL_INTERVAL_SEC = 0.1
+
     def __init__(self):
         self.bone_names = [
             "LeftArmUpper", "LeftArmLower", "RightArmUpper", "RightArmLower",
@@ -60,15 +66,44 @@ class Quest3BoneFramePublisher:
         self.chest_motion_range = self.get_chest_motion_range()
         
         self.sock = None
+        self.socket_lock = threading.Lock()
         self.server_address = None
         self.port = None
+        self.udp_packets_received = 0
+        self.stale_pose_frames_dropped = 0
+        self.last_reported_stale_pose_frames = 0
+        self.receiver_condition = threading.Condition()
+        self.receiver_stop_event = threading.Event()
+        self.receiver_thread = None
+        self.receiver_socket = None
+        self.receiver_error = None
+        self.latest_pose_event = None
+        self.latest_pose_receive_time = None
+        self.pending_requests = deque()
+        self.pending_request_keys = set()
+        self.joystick_publish_lock = threading.Lock()
+        self.joystick_neutral_published = False
+        self.shutdown_lock = threading.Lock()
+        self.shutdown_started = False
 
         self.listening_udp_ports_cnt = 0
         
         rospy.init_node('Quest3_bone_frame_publisher', anonymous=True)
         self.reset_vr_torso_state = rospy.ServiceProxy('/quest3/reset_vr_torso_state', Trigger)
         self.vr_torso_state_reset = False
-        rospy.on_shutdown(self.reset_vr_torso_state_on_shutdown)
+        self.joystick_timeout_sec = max(
+            0.05,
+            float(rospy.get_param("~joystick_timeout_sec", self.DEFAULT_JOYSTICK_TIMEOUT_SEC)),
+        )
+        self.quest_disconnect_timeout_sec = max(
+            self.joystick_timeout_sec,
+            float(
+                rospy.get_param(
+                    "~quest_disconnect_timeout_sec",
+                    self.DEFAULT_QUEST_DISCONNECT_TIMEOUT_SEC,
+                )
+            ),
+        )
         self.rate = rospy.Rate(100.0)
         
         self.br = tf.TransformBroadcaster()
@@ -94,7 +129,9 @@ class Quest3BoneFramePublisher:
         self.chest_data_pub = rospy.Publisher('/robot_chest_motion_data', Float64MultiArray, queue_size=10)
         self.head_pose_pub = rospy.Publisher('/robot_head_pose', PoseStamped, queue_size=10)
         self.chest_pose_pub = rospy.Publisher('/robot_chest_pose', PoseStamped, queue_size=10)
-        self.joysticks_pub = rospy.Publisher('quest_joystick_data', JoySticks, queue_size=2)
+        # JoySticks is a current-state command. Keep only the newest outbound snapshot
+        # so a slow subscriber cannot make the robot replay stale stick positions.
+        self.joysticks_pub = rospy.Publisher('quest_joystick_data', JoySticks, queue_size=1)
         
         # 末端力配置发布器
         self.hand_wrench_config_pub = rospy.Publisher('/quest3/hand_wrench_config', Float64MultiArray, queue_size=1)
@@ -109,6 +146,7 @@ class Quest3BoneFramePublisher:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGHUP, self.signal_handler)
+        rospy.on_shutdown(self.shutdown)
         self.broadcast_ips = []
         self.robot_info_sent_initial_broadcast = False
         self.robot_info_lock = threading.Lock()
@@ -249,12 +287,26 @@ class Quest3BoneFramePublisher:
     def signal_handler(self, sig, frame):
         print('Exiting gracefully...')
         self.exit_listen_thread_for_quest3_broadcast = True
+        self.receiver_stop_event.set()
+        with self.receiver_condition:
+            self.receiver_condition.notify_all()
+        # Neutralize motion commands before ROS publishers and services begin shutdown.
+        self.publish_neutral_joystick("termination signal received")
         # 在 ROS 标记为 shutdown 前完成服务调用，保证仍可连接到常驻 Quest FSM
         self.reset_vr_torso_state_on_shutdown()
         rospy.signal_shutdown('Quest3 monitor received a termination signal')
-        if self.sock:
-            self.sock.close()
-        sys.exit(0)
+
+    def shutdown(self):
+        """Stop the receiver exactly once and leave the last joystick command neutral."""
+        with self.shutdown_lock:
+            if self.shutdown_started:
+                return
+            self.shutdown_started = True
+
+        self.exit_listen_thread_for_quest3_broadcast = True
+        self.publish_neutral_joystick("Quest3 monitor shutting down")
+        self.reset_vr_torso_state_on_shutdown()
+        self.stop_udp_receiver()
 
     def reset_vr_torso_state_on_shutdown(self):
         if self.vr_torso_state_reset:
@@ -272,13 +324,14 @@ class Quest3BoneFramePublisher:
             rospy.logwarn('Could not reset Quest VR torso state during shutdown: %s', error)
 
     def setup_socket(self, server_address, port):
-        if self.sock is not None:
-            print("Socket is already established, skip creating a new one.")
-        else:
-            self.server_address = (server_address, port)
-            self.port = port
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock.settimeout(1)
+        with self.socket_lock:
+            if self.sock is not None:
+                print("Socket is already established, skip creating a new one.")
+            else:
+                self.server_address = (server_address, port)
+                self.port = port
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.sock.settimeout(self.DEFAULT_QUEST_DISCONNECT_TIMEOUT_SEC)
         return (server_address, port)
 
 
@@ -286,9 +339,16 @@ class Quest3BoneFramePublisher:
         message = b'hi'
         max_retries = 200
         for attempt in range(max_retries):
+            if rospy.is_shutdown():
+                return False
             try:
-                self.sock.sendto(message, self.server_address)
-                self.sock.recvfrom(1024)
+                with self.socket_lock:
+                    handshake_socket = self.sock
+                if handshake_socket is None:
+                    rospy.logerr("Cannot connect to Quest3: UDP socket is not available")
+                    return False
+                handshake_socket.sendto(message, self.server_address)
+                handshake_socket.recvfrom(1024)
                 print(f"\033[92mAcknowledgment From Quest3 received on attempt {attempt + 1}, start to receiving data...\033[0m")
                 # 连接成功后设置参数服务器参数
                 rospy.set_param('/quest3/connected', True)
@@ -296,9 +356,15 @@ class Quest3BoneFramePublisher:
                 return True
             except socket.timeout:
                 print(f"\033[91mQuest3_timeout: Attempt {attempt + 1} timed out. Retrying...\033[0m")
+            except OSError as error:
+                if rospy.is_shutdown():
+                    return False
+                rospy.logerr("Quest3 UDP handshake failed: %s", error)
+                return False
             except KeyboardInterrupt:
                 print("Force quit by Ctrl-c.")
                 self.signal_handler(signal.SIGINT, None)
+                return False
         print("Failed to send message after 200 attempts.")
         return False
 
@@ -517,11 +583,17 @@ class Quest3BoneFramePublisher:
         # 从TF树获取机器人本体头部位置（相对于base_link）
         head_pos = self._get_robot_head_pos_from_tf()
         
-        # 更新头部控制管理器
+        # 历史代码每帧完整调用本方法两次。保留两次滤波更新以维持最终头部
+        # 目标响应，但只查询一次TF并只发布一次，避免重复的昂贵工作。
         self.head_control_manager.update(
             left_hand_tcp_pos=left_tcp_pos,
             right_hand_tcp_pos=right_tcp_pos,
             head_pos=head_pos  # 使用实时位置，如果为None则使用配置值
+        )
+        self.head_control_manager.update(
+            left_hand_tcp_pos=left_tcp_pos,
+            right_hand_tcp_pos=right_tcp_pos,
+            head_pos=head_pos
         )
         
         # 发布头部控制命令
@@ -694,6 +766,187 @@ class Quest3BoneFramePublisher:
             import traceback
             traceback.print_exc()
 
+    def _publish_receiver_error(self, error):
+        with self.receiver_condition:
+            self.receiver_error = error
+            self.receiver_condition.notify_all()
+
+    def publish_neutral_joystick(self, reason):
+        """Publish one all-zero snapshot when input becomes stale or disconnects."""
+        with self.joystick_publish_lock:
+            if self.joystick_neutral_published:
+                return False
+            try:
+                self.joysticks_pub.publish(JoySticks())
+            except Exception as error:
+                rospy.logerr("Failed to neutralize Quest3 joystick: %s", error)
+                return False
+            self.joystick_neutral_published = True
+
+        rospy.logwarn("Quest3 joystick neutralized: %s", reason)
+        return True
+
+    def _udp_receiver_loop(self, receiver_socket, stop_event):
+        """Continuously drain UDP independently from the slower ROS/TF processing."""
+        last_packet_time = time.monotonic()
+        receiver_socket.settimeout(self.UDP_RECEIVER_POLL_INTERVAL_SEC)
+
+        while not stop_event.is_set() and not rospy.is_shutdown():
+            try:
+                datagram, _ = receiver_socket.recvfrom(4096)
+                receive_time = None
+                if self.enable_vr_latency_diagnostics:
+                    # 同一数据包：UDP接收到原始数据的时刻。
+                    receive_time = rospy.Time.now()
+            except socket.timeout as error:
+                if stop_event.is_set() or rospy.is_shutdown():
+                    return
+
+                idle_time = time.monotonic() - last_packet_time
+                if idle_time >= self.joystick_timeout_sec:
+                    self.publish_neutral_joystick(
+                        "no valid Quest3 packet for {:.0f} ms".format(idle_time * 1000.0)
+                    )
+                if idle_time >= self.quest_disconnect_timeout_sec:
+                    self._publish_receiver_error(
+                        socket.timeout(
+                            "no Quest3 UDP packet for {:.3f} seconds".format(idle_time)
+                        )
+                    )
+                    return
+                continue
+            except OSError as error:
+                if not stop_event.is_set():
+                    self.publish_neutral_joystick("Quest3 UDP socket error")
+                    self._publish_receiver_error(error)
+                return
+
+            if stop_event.is_set():
+                return
+
+            event = event_pb2.LejuHandPoseEvent()
+            try:
+                event.ParseFromString(datagram)
+            except Exception as error:
+                rospy.logwarn_throttle(5.0, "Invalid Quest3 UDP protobuf ignored: %s", error)
+                continue
+
+            last_packet_time = time.monotonic()
+
+            # Joystick commands are safety-sensitive snapshots. Publish each original
+            # snapshot unchanged; never merge states from different UDP frames. The ROS
+            # publisher queue is one, so transport keeps the freshest complete snapshot.
+            try:
+                self.process_joystick_data(event, JoySticks(), stop_event)
+            except Exception as error:
+                rospy.logerr_throttle(5.0, "Failed to publish Quest3 joystick data: %s", error)
+
+            if stop_event.is_set():
+                return
+
+            with self.receiver_condition:
+                self.udp_packets_received += 1
+
+                if len(event.poses) > 0:
+                    if self.latest_pose_event is not None:
+                        self.stale_pose_frames_dropped += 1
+                    self.latest_pose_event = event
+                    self.latest_pose_receive_time = receive_time
+
+                if event.HasField('item_mass_force_request'):
+                    request = hand_wrench_srv_pb2.ItemMassForceRequest()
+                    request.CopyFrom(event.item_mass_force_request)
+                    request_key = request.SerializeToString()
+                    if request_key not in self.pending_request_keys:
+                        if len(self.pending_requests) >= self.MAX_PENDING_REQUESTS:
+                            discarded = self.pending_requests.popleft()
+                            self.pending_request_keys.discard(discarded.SerializeToString())
+                            rospy.logerr_throttle(
+                                5.0,
+                                "Quest3 request queue full; oldest request discarded",
+                            )
+                        self.pending_requests.append(request)
+                        self.pending_request_keys.add(request_key)
+
+                self.receiver_condition.notify()
+
+    def start_udp_receiver(self):
+        if self.receiver_thread is not None and self.receiver_thread.is_alive():
+            return
+
+        with self.socket_lock:
+            receiver_socket = self.sock
+        if receiver_socket is None:
+            raise RuntimeError("Cannot start Quest3 UDP receiver without a socket")
+
+        self.receiver_stop_event = threading.Event()
+        with self.receiver_condition:
+            self.receiver_error = None
+            self.latest_pose_event = None
+            self.latest_pose_receive_time = None
+            self.pending_requests.clear()
+            self.pending_request_keys.clear()
+        self.receiver_thread = threading.Thread(
+            target=self._udp_receiver_loop,
+            args=(receiver_socket, self.receiver_stop_event),
+            name="quest3_udp_receiver",
+            daemon=True,
+        )
+        self.receiver_socket = receiver_socket
+        self.receiver_thread.start()
+
+    def stop_udp_receiver(self):
+        stop_event = self.receiver_stop_event
+        receiver_thread = self.receiver_thread
+        receiver_socket = self.receiver_socket
+
+        stop_event.set()
+        with self.receiver_condition:
+            self.receiver_condition.notify_all()
+
+        self.publish_neutral_joystick("Quest3 UDP receiver stopped")
+
+        # The receiver polls at 100 ms, so it normally observes stop_event and exits
+        # before its socket is closed. This avoids close/recvfrom races and fd reuse.
+        if (
+            receiver_thread is not None
+            and receiver_thread.is_alive()
+            and receiver_thread is not threading.current_thread()
+        ):
+            receiver_thread.join(timeout=self.UDP_RECEIVER_POLL_INTERVAL_SEC + 0.5)
+
+        receiver_socket_forced_closed = False
+        if receiver_thread is not None and receiver_thread.is_alive():
+            rospy.logwarn("Quest3 UDP receiver did not stop in time; forcing socket close")
+            if receiver_socket is not None:
+                try:
+                    receiver_socket.close()
+                    receiver_socket_forced_closed = True
+                except OSError:
+                    pass
+            if receiver_thread is not threading.current_thread():
+                receiver_thread.join(timeout=0.5)
+
+        with self.socket_lock:
+            socket_to_close = self.sock
+            self.sock = None
+        if (
+            socket_to_close is not None
+            and not (receiver_socket_forced_closed and socket_to_close is receiver_socket)
+        ):
+            try:
+                socket_to_close.close()
+            except OSError:
+                pass
+
+        if receiver_thread is not None and receiver_thread.is_alive():
+            rospy.logerr("Quest3 UDP receiver thread is still alive; refusing socket restart")
+            return False
+
+        self.receiver_thread = None
+        self.receiver_socket = None
+        return True
+
     def _log_latency_stats(self, vr_timestamp):
         """打印最近一批数据包的节点处理延迟统计(单位: ms)"""
         samples = self._latency_samples
@@ -706,74 +959,116 @@ class Quest3BoneFramePublisher:
         )
         self._latency_samples = []
 
+    def receive_latest_events(self):
+        """Return the freshest pose, its receive time, and queued requests.
+
+        Teleoperation needs fresh data rather than lossless delivery.  Processing every
+        queued pose makes latency grow without bound whenever TF/ROS work is briefly
+        slower than Quest's sender.  A dedicated receiver drains the socket continuously;
+        joystick snapshots are published there unchanged, while this consumer takes only
+        the newest pose and a bounded, de-duplicated list of one-shot requests.
+        """
+        with self.receiver_condition:
+            self.receiver_condition.wait_for(
+                lambda: (
+                    self.latest_pose_event is not None
+                    or bool(self.pending_requests)
+                    or self.receiver_error is not None
+                    or self.receiver_stop_event.is_set()
+                    or rospy.is_shutdown()
+                ),
+                timeout=1.2,
+            )
+
+            # Consume pending data before reporting a timeout/error from the receiver.
+            if self.latest_pose_event is None and not self.pending_requests:
+                if self.receiver_error is not None:
+                    error = self.receiver_error
+                    self.receiver_error = None
+                    raise error
+                return None, None, []
+
+            latest_pose_event = self.latest_pose_event
+            latest_pose_receive_time = self.latest_pose_receive_time
+            requests = list(self.pending_requests)
+            dropped_total = self.stale_pose_frames_dropped
+            self.latest_pose_event = None
+            self.latest_pose_receive_time = None
+            self.pending_requests.clear()
+            self.pending_request_keys.clear()
+
+        if dropped_total > self.last_reported_stale_pose_frames:
+            rospy.logwarn_throttle(
+                5.0,
+                "Quest3 UDP backlog: %d stale pose frames discarded in total; "
+                "newest frame kept",
+                dropped_total,
+            )
+            self.last_reported_stale_pose_frames = dropped_total
+
+        return latest_pose_event, latest_pose_receive_time, requests
+
     def run(self):
-        loop_count = 0
-        while not rospy.is_shutdown():
-            try:
-                loop_count += 1
-                data, _ = self.sock.recvfrom(4096)
-                t_recv = None
-                if self.enable_vr_latency_diagnostics:
-                    # 同一数据包: UDP接收到原始数据的时刻
-                    t_recv = rospy.Time.now()
-                event = event_pb2.LejuHandPoseEvent()
-                event.ParseFromString(data)
-                
-                time_now = rospy.Time.now()
-                pose_info_list = PoseInfoList()
-                joysticks_msg = JoySticks()
-                
-                # Process joystick data
-                self.process_joystick_data(event, joysticks_msg, loop_count)
-                
-                # Process pose data
-                self.process_pose_data(event, pose_info_list, time_now)
-                
-                # Process hand wrench request if present
-                if event.HasField('item_mass_force_request'):
-                    self.process_item_mass_force_request(event.item_mass_force_request)
-                
-                # Publish data
-                # 用本机Unix毫秒时间戳覆盖VR端时间戳，使下游C++节点能用ros::Time::now()计算通信延迟
-                pose_info_list.timestamp_ms = int(time.time() * 1000)
-                pose_info_list.is_high_confidence = event.IsDataHighConfidence
-                pose_info_list.is_hand_tracking = event.IsHandTracking
-                # 空 poses(带载 GET/SET 等纯命令包)不下发，避免下游 IK 按固定骨骼下标越界
-                if len(pose_info_list.poses) > 0:
-                    if self.enable_vr_latency_diagnostics:
-                        # 同一数据包: 即将发布到话题的时刻
-                        t_pub = rospy.Time.now()
-                    self.pose_pub.publish(pose_info_list)
-                    if self.enable_vr_latency_diagnostics:
-                        delay_ms = (t_pub - t_recv).to_sec() * 1000.0
-                        self.latency_pub.publish(Float64(data=delay_ms))
-                        self._latency_samples.append(delay_ms)
-                        if len(self._latency_samples) >= self._latency_log_every:
-                            self._log_latency_stats(event.timestamp)
+        self.start_udp_receiver()
+        try:
+            while not rospy.is_shutdown():
+                try:
+                    pose_event, pose_receive_time, item_mass_force_requests = self.receive_latest_events()
+                    if pose_event is None and not item_mass_force_requests:
+                        continue
 
-                # 发布头部控制模式
-                self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, HeadControlMode.to_string(self.head_control_manager.mode), self.head_control_manager.fixed_main_hand)
+                    time_now = rospy.Time.now()
 
-                # if pose_info_list.is_high_confidence:
-                #     self.pose_pub.publish(pose_info_list)
-                # else:
-                #     rospy.logwarn("Low confidence pose data, not publishing.")
-                
-                self.rate.sleep()
-            except socket.timeout:
-                print('Timeout occurred, no data received. Restarting socket...')
-                rospy.set_param('/quest3/connected', False)
-                rospy.logwarn("VR连接断开！已设置参数: /quest3/connected=False")
-                if not self.restart_socket():
-                    break
-            except Exception as e:
-                print(f'An error occurred: {e}')
-                rospy.set_param('/quest3/connected', False)
-                rospy.logwarn("VR连接异常！已设置参数: /quest3/connected=False")
-                if not self.restart_socket():
-                    break
+                    # Requests are independent from superseded pose frames.
+                    for request in item_mass_force_requests:
+                        self.process_item_mass_force_request(request)
 
-    def process_joystick_data(self, event, joysticks_msg, loop_count):
+                    if pose_event is not None:
+                        pose_info_list = PoseInfoList()
+                        self.process_pose_data(pose_event, pose_info_list, time_now)
+                        # 使用本机Unix毫秒时间戳，供下游节点与ros::Time::now()同钟计算延迟。
+                        pose_info_list.timestamp_ms = int(time.time() * 1000)
+                        pose_info_list.is_high_confidence = pose_event.IsDataHighConfidence
+                        pose_info_list.is_hand_tracking = pose_event.IsHandTracking
+                        if self.enable_vr_latency_diagnostics:
+                            # 同一数据包：即将发布到姿态话题的时刻。
+                            pose_publish_time = rospy.Time.now()
+                        self.pose_pub.publish(pose_info_list)
+                        if self.enable_vr_latency_diagnostics and pose_receive_time is not None:
+                            delay_ms = (pose_publish_time - pose_receive_time).to_sec() * 1000.0
+                            self.latency_pub.publish(Float64(data=delay_ms))
+                            self._latency_samples.append(delay_ms)
+                            if len(self._latency_samples) >= self._latency_log_every:
+                                self._log_latency_stats(pose_event.timestamp)
+
+                    self.head_control_manager.publish_head_control_mode(
+                        self.head_ctrl_mode_pub,
+                        HeadControlMode.to_string(self.head_control_manager.mode),
+                        self.head_control_manager.fixed_main_hand,
+                    )
+                    self.rate.sleep()
+                except socket.timeout:
+                    print('Timeout occurred, no data received. Restarting socket...')
+                    rospy.set_param('/quest3/connected', False)
+                    rospy.logwarn("VR连接断开！已设置参数: /quest3/connected=False")
+                    if not self.stop_udp_receiver():
+                        break
+                    if not self.restart_socket():
+                        break
+                    self.start_udp_receiver()
+                except Exception as e:
+                    print(f'An error occurred: {e}')
+                    rospy.set_param('/quest3/connected', False)
+                    rospy.logwarn("VR连接异常！已设置参数: /quest3/connected=False")
+                    if not self.stop_udp_receiver():
+                        break
+                    if not self.restart_socket():
+                        break
+                    self.start_udp_receiver()
+        finally:
+            self.stop_udp_receiver()
+
+    def process_joystick_data(self, event, joysticks_msg, stop_event=None):
         joysticks_msg.left_x = event.left_joystick.x
         joysticks_msg.left_y = event.left_joystick.y
         joysticks_msg.left_trigger = event.left_joystick.trigger
@@ -790,9 +1085,12 @@ class Quest3BoneFramePublisher:
         joysticks_msg.right_second_button_pressed = event.right_joystick.secondButtonPressed
         joysticks_msg.right_first_button_touched = event.right_joystick.firstButtonTouched
         joysticks_msg.right_second_button_touched = event.right_joystick.secondButtonTouched
-        # if loop_count % 20 == 0:
-            # rospy.loginfo(joysticks_msg)
-        self.joysticks_pub.publish(joysticks_msg)
+        with self.joystick_publish_lock:
+            if stop_event is not None and stop_event.is_set():
+                return False
+            self.joysticks_pub.publish(joysticks_msg)
+            self.joystick_neutral_published = False
+        return True
 
     def add_transform_to_tf_message(self, tf_msg, time_now, bone_name, scaled_position, right_hand_quat):
         """
@@ -863,18 +1161,29 @@ class Quest3BoneFramePublisher:
         # 非VR模式：更新头部控制（在TF发布后，确保可以查询到手部位置）
         if self.enable_head_control and self.head_control_manager.mode != HeadControlMode.VR_FOLLOW:
             self._update_head_control_from_hands()
-        
-        # 非VR模式：更新头部控制（在TF发布后，确保可以查询到手部位置）
-        if self.enable_head_control and self.head_control_manager.mode != HeadControlMode.VR_FOLLOW:
-            self._update_head_control_from_hands()
 
     def restart_socket(self):
         print("Restarting socket connection...")
-        self.sock.close()
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.settimeout(1)
+        if self.receiver_thread is not None and self.receiver_thread.is_alive():
+            rospy.logerr("Refusing to restart Quest3 socket while receiver thread is alive")
+            return False
+
+        new_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        new_socket.settimeout(self.DEFAULT_QUEST_DISCONNECT_TIMEOUT_SEC)
+        with self.socket_lock:
+            if self.sock is not None:
+                rospy.logerr("Refusing to overwrite an active Quest3 socket")
+                new_socket.close()
+                return False
+            self.sock = new_socket
+
         if not self.send_initial_message():
             print("Failed to restart socket connection.")
+            with self.socket_lock:
+                failed_socket = self.sock
+                self.sock = None
+            if failed_socket is not None:
+                failed_socket.close()
             return False
         print("Socket connection restarted successfully.")
         # send_initial_message() 成功时已设置 /quest3/connected=True
