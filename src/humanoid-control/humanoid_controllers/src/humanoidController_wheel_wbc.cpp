@@ -479,6 +479,7 @@ namespace humanoidController_wheel_wbc
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
     stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
+    armTrajFilteredPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_filtered", 10);
     resetToStatePub_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/mobile_manipulator_reset_to_state", 1);
 
     // 发布初始速度控制开关状态
@@ -1550,6 +1551,32 @@ namespace humanoidController_wheel_wbc
       robotVisualizer_->updateHeadJointPositions(sensors_data_new.jointPos_.tail(headNum_));
     }
     replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
+
+    // 测量 WBC 处理延迟：从共享内存读取手臂轨迹数据到发布 /joint_cmd 的时间
+    {
+      const ros::Time armTrajRecvTime = control_data_manager_->getArmExternalControlStateTimestamp();
+      if (armTrajRecvTime.isValid()) {
+        const double wbcProcessingLatencyMs = (ros::Time::now() - armTrajRecvTime).toSec() * 1000.0;
+        ros_logger_->publishValue("/vr_incremental/wbc_processing_latency_ms", wbcProcessingLatencyMs);
+      }
+    }
+
+    // 发布滤波后手臂轨迹（JointState 格式, deg），用于互相关测量相位延迟
+    // 对比 /vr_incremental/kuavo_arm_traj_shm（滤波前）与此话题（滤波后）即可得到纯相位延迟
+    if (armTrajFilteredPub_) {
+        sensor_msgs::JointState filteredMsg;
+        filteredMsg.header.stamp = time;
+        filteredMsg.position.resize(armNum_);
+        filteredMsg.velocity.resize(armNum_);
+        filteredMsg.name.resize(armNum_);
+        for (int i = 0; i < armNum_; ++i) {
+            filteredMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+            filteredMsg.position[i] = optimizedState_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
+            filteredMsg.velocity[i] = optimizedInput_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
+        }
+        armTrajFilteredPub_.publish(filteredMsg);
+    }
+
     jointCmdPub_.publish(jointCmdMsg);
 
     //更新共享内存中的关节命令

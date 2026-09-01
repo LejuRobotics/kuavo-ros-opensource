@@ -216,6 +216,7 @@ namespace humanoidController_wheel_wbc
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
     ros::Publisher stopRobotPub_;  // /stop_robot 话题发布者，用于底盘急停保护
+    ros::Publisher armTrajFilteredPub_;  // 滤波后手臂轨迹发布者（用于互相关测量相位延迟）
     ros::Publisher resetToStatePub_;  // /mobile_manipulator_reset_to_state 发布者（3791 软暂停恢复时把冻结姿态发给 RM）
     
     // 日志

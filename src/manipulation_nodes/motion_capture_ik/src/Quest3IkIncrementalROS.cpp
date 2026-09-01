@@ -1416,7 +1416,38 @@ bool Quest3IkIncrementalROS::processDataRightArm() {
   return true;
 }
 
+void Quest3IkIncrementalROS::processBonePoses(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg) {
+  // 先调用基类处理（更新 Transformer），再记录延迟测量数据
+  // 注意：基类 processBonePoses 内部会获取 transformerDataMutex_，此处不持锁
+  ArmControlBaseROS::processBonePoses(msg);
+
+  // 记录骨骼数据到达时刻、序列号、VR端时间戳，用于跨线程延迟测量
+  {
+    std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+    boneRecvTime_ = std::chrono::steady_clock::now();
+    ++boneDataSeq_;
+    boneVrTimestampMs_ = msg->timestamp_ms;
+  }
+
+  // 测量通信延迟：VR节点发布时刻(timestamp_ms) → IK节点回调接收时刻
+  if (commLatencyPublisher_ && msg->timestamp_ms > 0) {
+    const double nowSec = ros::Time::now().toSec();
+    const double vrSec = static_cast<double>(msg->timestamp_ms) / 1000.0;
+    const double commLatencyMs = (nowSec - vrSec) * 1000.0;
+    std_msgs::Float64 commMsg;
+    commMsg.data = commLatencyMs;
+    commLatencyPublisher_.publish(commMsg);
+  }
+}
+
 void Quest3IkIncrementalROS::solveIk() {
+  // 捕获当前骨骼数据接收时刻和序列号，用于IK线程延迟测量
+  {
+    std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+    ikResultBoneRecvTime_ = boneRecvTime_;
+    currentBoneSeq_ = boneDataSeq_;
+  }
+
   std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
   auto ikResult = oneStageIkEndEffectorPtr_->solveIK(latestPoseConstraintList_, ctrlArmIdx_, jointMidValues_);
 
@@ -1446,6 +1477,17 @@ void Quest3IkIncrementalROS::solveIk() {
 
       latestIkSolution_ = filteredSolution;
       hasValidIkSolution_ = true;
+    }
+
+    // 在IK线程内直接测量并发布延迟：骨骼接收 → FSM处理 → IK求解
+    // 只在收到新VR数据的那一轮测量，避免无数据时延迟虚增（锯齿现象）
+    if (armTrajLatencyPublisher_ && currentBoneSeq_ != lastProcessedBoneSeq_) {
+      lastProcessedBoneSeq_ = currentBoneSeq_;
+      const auto latencyMs = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - ikResultBoneRecvTime_).count();
+      std_msgs::Float64 latencyMsg;
+      latencyMsg.data = latencyMs;
+      armTrajLatencyPublisher_.publish(latencyMsg);
     }
   }
 }
@@ -2758,6 +2800,10 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/right_hand_pose_from_transformer", 2);
   ikSolvedEefPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::twoArmHandPose>("/ik_fk_result/eef_pose", 10);
   ikInputPosPublisher_ = nodeHandle_.advertise<kuavo_msgs::Float32MultiArrayStamped>("/ik_fk_result/input_pos", 10);
+
+  // 延迟测量话题：VR数据处理层→人形增量IK节点通信延迟 + IK线程计算延迟
+  commLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/comm_latency_ms", 10);
+  armTrajLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/arm_traj_latency_ms", 10);
 
   // 初始化增量控制模块
   IncrementalControlConfig incrementalConfig;

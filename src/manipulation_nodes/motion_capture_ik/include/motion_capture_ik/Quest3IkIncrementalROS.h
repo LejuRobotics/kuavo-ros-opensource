@@ -18,6 +18,7 @@
 #include "motion_capture_ik/HandSmoother.h"
 #include "DrakeElbowHandPointOpt.hpp"
 #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/Float64.h>
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "motion_capture_ik/ArmTrajWriter.h"
 
@@ -124,6 +125,10 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void solveIk();
   void processVisual();
 
+  // 重写基类 processBonePoses，在VR数据到达时记录接收时刻、序列号、VR时间戳，
+  // 并测量 VR数据处理层→人形增量IK节点 的通信延迟
+  void processBonePoses(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg) override;
+
   bool detectLeftArmMove();
   bool detectRightArmMove();
 
@@ -182,6 +187,18 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   ros::Publisher rightHandPoseFromTransformerPublisher_;  // 发布来自Transformer的右手pose
   ros::Publisher ikSolvedEefPosePublisher_;  // 发布IK求解后的末端执行器位姿（与Python版/drake_ik/eef_pose一致）
   ros::Publisher ikInputPosPublisher_;  // 发布IK输入的目标位姿（与Python版/drake_ik/input_pos一致）
+
+  // 跨线程延迟测量：VR数据处理层→人形增量IK节点通信延迟 + IK线程计算延迟
+  ros::Publisher commLatencyPublisher_;   // /vr_incremental/comm_latency_ms，VR节点→IK节点通信延迟(ms)
+  ros::Publisher armTrajLatencyPublisher_;  // /vr_incremental/arm_traj_latency_ms，骨骼接收→IK求解延迟(ms)
+  std::mutex boneRecvTimeMutex_;            // 保护 boneRecvTime_ / boneDataSeq_ / boneVrTimestampMs_
+  std::chrono::steady_clock::time_point boneRecvTime_;  // 骨骼数据到达回调的时刻
+  uint64_t boneDataSeq_ = 0;                // 骨骼数据序列号，每次回调递增
+  int64_t boneVrTimestampMs_ = 0;           // VR端时间戳（Unix毫秒），来自PoseInfoList.timestamp_ms
+  // IK线程中捕获的骨骼接收时刻和序列号，随IK结果传播
+  std::chrono::steady_clock::time_point ikResultBoneRecvTime_;
+  uint64_t currentBoneSeq_ = 0;
+  uint64_t lastProcessedBoneSeq_ = 0;        // 上一轮IK处理过的骨骼数据序列号
 
   std::thread ikSolveThread_;
   int armTrajPublishThreadPriority_ = DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY;

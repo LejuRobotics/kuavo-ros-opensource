@@ -20,7 +20,7 @@ import threading
 from visualization_msgs.msg import Marker
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
-from std_msgs.msg import Float64MultiArray, String, Empty
+from std_msgs.msg import Float64MultiArray, String, Empty, Float64
 from std_srvs.srv import Trigger
 # Add the parent directory to the system path to allow relative imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
@@ -72,7 +72,24 @@ class Quest3BoneFramePublisher:
         self.rate = rospy.Rate(100.0)
         
         self.br = tf.TransformBroadcaster()
-        self.pose_pub = rospy.Publisher('/leju_quest_bone_poses', PoseInfoList, queue_size=2)
+        # Bone targets are real-time commands: never retain more than the newest
+        # unsent frame for a slow subscriber connection.
+        self.pose_pub = rospy.Publisher('/leju_quest_bone_poses', PoseInfoList, queue_size=1)
+        # 延迟诊断默认关闭，避免常规遥操作时的统计、ROS发布和日志开销。
+        self.enable_vr_latency_diagnostics = rospy.get_param(
+            '~enable_vr_latency_diagnostics', False
+        )
+        self.latency_pub = None
+        if self.enable_vr_latency_diagnostics:
+            self.latency_pub = rospy.Publisher(
+                '/quest3/node_processing_latency_ms', Float64, queue_size=10
+            )
+        self._latency_samples = []
+        self._latency_log_every = 100
+        rospy.loginfo(
+            "Quest3 VR latency diagnostics: %s",
+            "enabled" if self.enable_vr_latency_diagnostics else "disabled",
+        )
         self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
         self.chest_data_pub = rospy.Publisher('/robot_chest_motion_data', Float64MultiArray, queue_size=10)
         self.head_pose_pub = rospy.Publisher('/robot_head_pose', PoseStamped, queue_size=10)
@@ -677,12 +694,28 @@ class Quest3BoneFramePublisher:
             import traceback
             traceback.print_exc()
 
+    def _log_latency_stats(self, vr_timestamp):
+        """打印最近一批数据包的节点处理延迟统计(单位: ms)"""
+        samples = self._latency_samples
+        if not samples:
+            return
+        arr = np.array(samples)
+        rospy.loginfo(
+            f"[Latency] samples={len(arr)} "
+            f"mean={arr.mean():.3f}ms min={arr.min():.3f}ms max={arr.max():.3f}ms"
+        )
+        self._latency_samples = []
+
     def run(self):
         loop_count = 0
         while not rospy.is_shutdown():
             try:
                 loop_count += 1
                 data, _ = self.sock.recvfrom(4096)
+                t_recv = None
+                if self.enable_vr_latency_diagnostics:
+                    # 同一数据包: UDP接收到原始数据的时刻
+                    t_recv = rospy.Time.now()
                 event = event_pb2.LejuHandPoseEvent()
                 event.ParseFromString(data)
                 
@@ -701,12 +734,22 @@ class Quest3BoneFramePublisher:
                     self.process_item_mass_force_request(event.item_mass_force_request)
                 
                 # Publish data
-                pose_info_list.timestamp_ms = event.timestamp
+                # 用本机Unix毫秒时间戳覆盖VR端时间戳，使下游C++节点能用ros::Time::now()计算通信延迟
+                pose_info_list.timestamp_ms = int(time.time() * 1000)
                 pose_info_list.is_high_confidence = event.IsDataHighConfidence
                 pose_info_list.is_hand_tracking = event.IsHandTracking
                 # 空 poses(带载 GET/SET 等纯命令包)不下发，避免下游 IK 按固定骨骼下标越界
                 if len(pose_info_list.poses) > 0:
+                    if self.enable_vr_latency_diagnostics:
+                        # 同一数据包: 即将发布到话题的时刻
+                        t_pub = rospy.Time.now()
                     self.pose_pub.publish(pose_info_list)
+                    if self.enable_vr_latency_diagnostics:
+                        delay_ms = (t_pub - t_recv).to_sec() * 1000.0
+                        self.latency_pub.publish(Float64(data=delay_ms))
+                        self._latency_samples.append(delay_ms)
+                        if len(self._latency_samples) >= self._latency_log_every:
+                            self._log_latency_stats(event.timestamp)
 
                 # 发布头部控制模式
                 self.head_control_manager.publish_head_control_mode(self.head_ctrl_mode_pub, HeadControlMode.to_string(self.head_control_manager.mode), self.head_control_manager.fixed_main_hand)

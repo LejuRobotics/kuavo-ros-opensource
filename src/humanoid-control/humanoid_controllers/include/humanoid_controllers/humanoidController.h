@@ -649,6 +649,13 @@ namespace humanoid_controller
     ros::Publisher rHandWrenchPub_;
     ros::Publisher armEefWbcPosePublisher_;
 
+    // 延迟测量: WBC从SHM收到的手臂轨迹原始数据 + 滤波后数据 + 处理延迟
+    ros::Publisher armTrajReceivedPub_;   // /vr_incremental/kuavo_arm_traj_shm
+    ros::Publisher armTrajFilteredPub_;   // /vr_incremental/kuavo_arm_traj_filtered
+    std::mutex armTrajRecvTimeMutex_;
+    ros::Time armTrajRecvTime_;           // SHM/ROS回调收到数据的时间戳
+    bool armTrajRecvTimeValid_ = false;   // 标记是否已收到过手臂轨迹数据
+
     ros::Publisher standUpCompletePub_;
     ros::Subscriber jointPosVelSub_;
     ros::Subscriber sensorsDataSub_;

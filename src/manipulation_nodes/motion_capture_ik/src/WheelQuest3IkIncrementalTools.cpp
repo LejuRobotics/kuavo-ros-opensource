@@ -2424,6 +2424,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   incrementalArmTrajRadRecordPublisher_ =
       nodeHandle_.advertise<sensor_msgs::JointState>("/vr_incremental/arm_traj_rad", 2);
   kuavoArmTrajControlPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 2);
+  armTrajLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/arm_traj_latency_ms", 10);
   arm_traj_writer_.init(nodeHandle_, "/humanoid_wheel/set_incremental_arm_traj_link",
                         "/wheel_ik/set_incremental_arm_traj_link");
   nodeHandle_.param("vr_ik/enable_arm_traj_shadow_publish", enableArmTrajShadowPublish_, false);

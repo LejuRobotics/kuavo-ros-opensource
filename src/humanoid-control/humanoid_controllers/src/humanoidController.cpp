@@ -827,7 +827,7 @@ namespace humanoid_controller
     arm_traj_receiver_.init(
         controllerNh_, armNumReal_,
         [this](const double* pos, const double* vel, const double* tau, int n,
-               uint64_t /*stamp_nsec*/) {
+               uint64_t stamp_nsec) {
           const int count = std::min(n, static_cast<int>(armNumReal_));
           Eigen::VectorXd target_pos = Eigen::VectorXd::Zero(armNumReal_);
           for (int i = 0; i < count; ++i) {
@@ -851,6 +851,26 @@ namespace humanoid_controller
           {
             controller_manager_->notifyExternalArmControlActivity();
           }
+          // 记录SHM回调收到数据的时间戳
+          {
+            std::lock_guard<std::mutex> lk(armTrajRecvTimeMutex_);
+            armTrajRecvTime_ = ros::Time::now();
+            armTrajRecvTimeValid_ = true;
+          }
+          // 发布WBC从共享内存获取到的手臂轨迹原始数据（弧度转角度，与IK节点发布格式一致）
+          if (armTrajReceivedPub_) {
+            sensor_msgs::JointState receivedMsg;
+            receivedMsg.header.stamp = ros::Time::now();
+            receivedMsg.position.resize(count);
+            receivedMsg.velocity.resize(count);
+            receivedMsg.name.resize(count);
+            for (int i = 0; i < count; ++i) {
+              receivedMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+              receivedMsg.position[i] = pos[i] * 180.0 / M_PI;
+              receivedMsg.velocity[i] = (vel != nullptr) ? vel[i] * 180.0 / M_PI : 0.0;
+            }
+            armTrajReceivedPub_.publish(receivedMsg);
+          }
         },
         "/humanoid_controller/set_incremental_arm_traj_link");
     mm_arm_joint_traj_sub_ = controllerNh_.subscribe<sensor_msgs::JointState>("/mm_kuavo_arm_traj", 10, [this](const sensor_msgs::JointState::ConstPtr &msg)
@@ -868,7 +888,12 @@ namespace humanoid_controller
           if(msg->effort.size() == armNumReal_)
             mm_arm_joint_trajectory_.tau[i] = msg->effort[i];
         }
-        // std::cout << "arm joint pos: " << arm_joint_trajectory_.pos.size() << std::endl;
+        // 记录ROS话题回调收到数据的时间戳（非SHM模式下的数据路径）
+        {
+          std::lock_guard<std::mutex> lk(armTrajRecvTimeMutex_);
+          armTrajRecvTime_ = ros::Time::now();
+          armTrajRecvTimeValid_ = true;
+        }
       });
       // Arm TargetTrajectories
       auto armTargetTrajectoriesCallback = [this](const ocs2_msgs::mpc_target_trajectories::ConstPtr &msg)
@@ -953,6 +978,9 @@ namespace humanoid_controller
       enableMmArmCtrlSrv_ = controllerNh_.advertiseService("/enable_mm_wbc_arm_trajectory_control", &humanoidController::enableMmArmTrajectoryControlCallback, this);
       getMmArmCtrlSrv_ = controllerNh_.advertiseService("/get_mm_wbc_arm_trajectory_control", &humanoidController::getMmArmCtrlCallback, this);
       jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
+      // 延迟测量: 发布SHM收到的原始手臂轨迹 + 滤波后手臂轨迹
+      armTrajReceivedPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_shm", 10);
+      armTrajFilteredPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_filtered", 10);
       imuPub_ = controllerNh_.advertise<sensor_msgs::Imu>("/imu_data", 10);
       kinematicPub_ = controllerNh_.advertise<nav_msgs::Odometry>("/kinematic_data", 10);
       mpcPolicyPublisher_ = controllerNh_.advertise<ocs2_msgs::mpc_flattened_controller>(robotName_ + "_mpc_policy", 1, true);
@@ -4685,9 +4713,36 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
                        static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_), ros_logger_);
 
     // 发布控制命令
+    // 延迟测量: 发布滤波后的手臂轨迹数据 + WBC处理延迟
+    {
+      // 发布滤波后的手臂轨迹数据（弧度转角度，与IK节点发布格式一致）
+      if (armTrajFilteredPub_ && armNumReal_ > 0) {
+        sensor_msgs::JointState filteredMsg;
+        filteredMsg.header.stamp = time;
+        filteredMsg.position.resize(armNumReal_);
+        filteredMsg.velocity.resize(armNumReal_);
+        filteredMsg.name.resize(armNumReal_);
+        for (int i = 0; i < armNumReal_; ++i) {
+          filteredMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+          filteredMsg.position[i] = output_pos_(waistNum_ + jointNum_ + i) * 180.0 / M_PI;
+          filteredMsg.velocity[i] = output_vel_(waistNum_ + jointNum_ + i) * 180.0 / M_PI;
+        }
+        armTrajFilteredPub_.publish(filteredMsg);
+      }
+      // WBC处理延迟: 从SHM/ROS回调到发布joint_cmd的时间差
+      ros::Time armTrajRecvTime;
+      bool armTrajRecvTimeValid;
+      {
+        std::lock_guard<std::mutex> lk(armTrajRecvTimeMutex_);
+        armTrajRecvTime = armTrajRecvTime_;
+        armTrajRecvTimeValid = armTrajRecvTimeValid_;
+      }
+      if (armTrajRecvTimeValid) {
+        const double wbcProcessingLatencyMs = (ros::Time::now() - armTrajRecvTime).toSec() * 1000.0;
+        ros_logger_->publishValue("/vr_incremental/wbc_processing_latency_ms", wbcProcessingLatencyMs);
+      }
+    }
     publishControlCommands(jointCmdMsg);
-    // Visualization
-    if (visualizeHumanoid_)
     {
       robotVisualizer_->updateSimplifiedArmPositions(simplifiedJointPos_);
       if (is_rl_controller_ || resetting_mpc_state_ != ResettingMpcState::NORMAL)

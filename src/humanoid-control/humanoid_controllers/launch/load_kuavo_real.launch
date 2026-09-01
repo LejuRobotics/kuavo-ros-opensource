@@ -5,10 +5,17 @@
     <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
 
     <arg name="vr_remote_control" default="false"/>
+    <!-- 默认关闭，开启后才发布并录制VR链路延迟诊断话题。 -->
+    <arg name="enable_vr_latency_diagnostics" default="false"/>
+    <arg name="enable_vr_transform_diagnostics" default="false"/>
+    <arg name="ik_solution_timeout_s" default="0.2"/>
     <arg name="robot_type"         default="2"/>
     <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics.yaml"/>
+    <arg name="vr_latency_rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics_vr_latency.yaml"/>
+    <param name="/enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
     <!-- load the robot version manager -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
       <arg name="robot_version" value="$(arg robot_version)"/>
@@ -226,7 +233,9 @@
     </group>
 
     <group if="$(arg record_bag)">
-      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch">
+        <arg name="topic_config" value="$(eval arg('vr_latency_rosbag_topic_config') if arg('enable_vr_latency_diagnostics') else arg('rosbag_topic_config'))"/>
+      </include>
     </group>
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
@@ -295,7 +304,11 @@
     </group>
 
     <group if="$(arg vr_remote_control)">
-      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
+        <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
+        <arg name="enable_vr_transform_diagnostics" value="$(arg enable_vr_transform_diagnostics)"/>
+        <arg name="ik_solution_timeout_s" value="$(arg ik_solution_timeout_s)"/>
+      </include>
     </group>
 
     <!-- 添加播放音乐参数 -->

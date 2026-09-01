@@ -14,6 +14,7 @@
 
 #include <std_msgs/Bool.h>
 #include <std_msgs/Int32.h>
+#include <std_msgs/Float64.h>
 #include <std_srvs/Trigger.h>
 #include <std_srvs/SetBool.h>
 #include <kuavo_msgs/lejuClawCommand.h>
@@ -78,6 +79,7 @@ class WheelArmControlBaseROS {
   ros::Publisher headBodyPosePublisher_;
   ros::Publisher kuavoArmTrajCppPublisher_;
   ros::Publisher questJoystickDataPublisher_;
+  ros::Publisher commLatencyPublisher_;  // /vr_incremental/comm_latency_ms，VR节点→IK节点的通信延迟(ms)
 
   // Atomic state variables for thread-safe operation
   std::atomic<bool> shouldStop_;
@@ -118,6 +120,13 @@ class WheelArmControlBaseROS {
   std::mutex bonePosesMutex_;
   std::mutex joystickMutex_;
   std::mutex transformerDataMutex_;
+  // 跨线程延迟测量：记录骨骼数据到达回调的时刻，随数据传播到IK线程和发布线程
+  std::mutex boneRecvTimeMutex_;
+  std::chrono::steady_clock::time_point boneRecvTime_;
+  // 骨骼数据序列号：每次回调递增，IK线程用它判断是否有新数据到达
+  uint64_t boneDataSeq_ = 0;
+  // VR端时间戳（Unix毫秒），来自PoseInfoList.timestamp_ms，用于计算VR节点→IK节点的通信延迟
+  int64_t boneVrTimestampMs_ = 0;
   std::shared_ptr<noitom_hi5_hand_udp_python::PoseInfoList> latestBonePosesPtr_;
   std::unique_ptr<WheelJoyStickHandler> joyStickHandlerPtr_;
   std::unique_ptr<Quest3ArmInfoTransformer> quest3ArmInfoTransformerPtr_;

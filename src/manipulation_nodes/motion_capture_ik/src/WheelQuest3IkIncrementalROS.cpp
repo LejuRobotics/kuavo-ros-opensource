@@ -243,6 +243,12 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
       latestHumanRightElbowPos_ =
           quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
     }
+    // 捕获当前骨骼数据接收时刻和序列号，随IK结果一起传播
+    {
+      std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+      ikResultBoneRecvTime_ = boneRecvTime_;
+      currentBoneSeq_ = boneDataSeq_;
+    }
 
     // 【三点跳变检测】验证并过滤 VR 数据中的异常跳变
     bool currentLeftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
@@ -1409,6 +1415,8 @@ void WheelQuest3IkIncrementalROS::solveIk() {
       std::lock_guard<std::mutex> lock(ikResultMutex_);
       latestIkSolution_ = ikResult.solution;
       hasValidIkSolution_ = true;
+      // 同步骨骼接收时刻到IK结果，供发布线程计算全链路延迟
+      ikResultBoneRecvTime_ = ikResultBoneRecvTime_;
 
       // 当IK成功且size == 18时，保存前4个关节角度到ikLowerBodyJointCommand_
       if (latestIkSolution_.size() == 18) {
@@ -1417,6 +1425,16 @@ void WheelQuest3IkIncrementalROS::solveIk() {
         ikLowerBodyJointCommand_ = latestIkSolution_.head(4);
         ikUpperBodyJointCommand_ = latestIkSolution_.tail(14);
       }
+    }
+    // 在IK线程内直接测量并发布延迟：骨骼接收 → FSM处理 → IK求解
+    // 只在收到新VR数据的那一轮测量，避免无数据时延迟虚增（锯齿现象）
+    if (armTrajLatencyPublisher_ && currentBoneSeq_ != lastProcessedBoneSeq_) {
+      lastProcessedBoneSeq_ = currentBoneSeq_;
+      const auto latencyMs = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - ikResultBoneRecvTime_).count();
+      std_msgs::Float64 latencyMsg;
+      latencyMsg.data = latencyMs;
+      armTrajLatencyPublisher_.publish(latencyMsg);
     }
   } else {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] solveIk failed: %s", ikResult.solverLog.c_str());

@@ -215,6 +215,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher incrementalArmTrajRecordPublisher_;       // /vr_incremental/arm_traj，录包/观测（度）
   ros::Publisher incrementalArmTrajRadRecordPublisher_;    // /vr_incremental/arm_traj_rad，录包/观测（弧度）
   ros::Publisher kuavoArmTrajControlPublisher_;              // /kuavo_arm_traj，始终发布供 MPC 同步；WBC 增量时走 SHM
+  ros::Publisher armTrajLatencyPublisher_;                   // /vr_incremental/arm_traj_latency_ms，骨骼数据到发布的全链路延迟(ms)
   ArmTrajWriter arm_traj_writer_;                           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
   bool enableArmTrajShadowPublish_{false};
   ros::Publisher kuavoArmTrajShadowPublisher_;  // /vr_incremental/arm_traj_shadow_rad
@@ -350,6 +351,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // IK求解结果
   Eigen::VectorXd latestIkSolution_;
   bool hasValidIkSolution_ = false;
+  // 跨线程延迟测量：IK线程读取骨骼数据时捕获的接收时刻，随IK结果一起在ikResultMutex_下传播到发布线程
+  std::chrono::steady_clock::time_point ikResultBoneRecvTime_;
+  // 上一轮IK处理过的骨骼数据序列号，用于判断当前轮是否有新VR数据到达
+  uint64_t lastProcessedBoneSeq_ = 0;
+  // 当前轮从boneRecvTimeMutex_下读取的骨骼数据序列号
+  uint64_t currentBoneSeq_ = 0;
   Eigen::VectorXd ikLowerBodyJointCommand_;  // 保存IK结果的前4个关节角度（size = 4）
   Eigen::VectorXd ikUpperBodyJointCommand_;  // 保存IK结果的前4个关节角度的指数均值滤波状态（size = 14）
   // 双扳机同时松开时捕获的lb关节命令快照（用于胸部增量模式激活时冻结knee/leg/waist_pitch，只允许waist_yaw跟随VR）

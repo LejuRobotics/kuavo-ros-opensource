@@ -1,0 +1,21 @@
+# 仅在 enable_vr_latency_diagnostics:=true 时使用。
+# 常规运行默认使用 log_topics.yaml，不录制本文件中的延迟诊断话题。
+topics:
+  # VR发布、接收、转换和同帧IK端到端指标
+  - /leju_quest_bone_poses
+  - /quest_joystick_data
+  - /quest3/node_processing_latency_ms
+  # 包含转换细分诊断、IK等待、求解和后处理等指标；
+  # /vr_absolute/transform_stage_latency_ms 为带字段标签的同帧数组。
+  - /vr_absolute/.*
+
+  # IK输入、求解耗时和输出轨迹
+  - /drake_ik/time_cost/ik
+  - /drake_ik/input_pos
+  - /kuavo_arm_traj
+
+  # 对照控制循环与运行错误，不录制高频可视化和全量状态
+  - /monitor/time_cost/controller_loop_time
+  - /humanoid/mpc/arm_control_mode
+  - /rosout
+  - /rosout_agg

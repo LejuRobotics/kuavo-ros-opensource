@@ -4,8 +4,16 @@
 import signal
 import rospy
 import argparse
-import argparse
-from std_msgs.msg import Float32, Float32MultiArray, Float64MultiArray, Int32, Bool, Float64
+from std_msgs.msg import (
+    Float32,
+    Float32MultiArray,
+    Float64MultiArray,
+    Int32,
+    Bool,
+    Float64,
+    UInt64,
+    MultiArrayDimension,
+)
 from sensor_msgs.msg import JointState
 from handcontrollerdemorosnode.msg import armPoseWithTimeStamp
 from kuavo_msgs.msg import robotHandPosition
@@ -19,6 +27,7 @@ import sys
 import struct
 import threading
 import ctypes
+from dataclasses import dataclass
 from tools.drake_trans import *
 
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeKuavo
@@ -86,9 +95,20 @@ def set_thread_priority(thread, policy, priority):
         thread_id = thread.ident
         ret = pthread_setschedparam(thread_id, policy, ctypes.byref(param))
         if ret != 0:
-            rospy.logerr(f"Failed to set thread priority! try to run as root.")
+            rospy.logerr(
+                "Failed to set thread priority: tid=%s policy=%s priority=%s error=%s. "
+                "Try to run with permission to set real-time scheduling.",
+                thread_id, policy, priority, ret,
+            )
+            return False
+        rospy.loginfo(
+            "IK thread priority configured: tid=%s policy=%s priority=%s",
+            thread_id, policy, priority,
+        )
+        return True
     except Exception as e:
         rospy.logerr(f"Failed to set thread priority: {e}")
+        return False
     
 QIANGNAO = "qiangnao"
 JODELL = "jodell"
@@ -99,6 +119,107 @@ LINKER_HAND = "linker_hand"
 
 control_finger_type = 0
 control_torso = 0
+
+
+@dataclass(frozen=True)
+class BoneInputFrame:
+    """Bone message and the timing metadata captured at callback entry."""
+
+    sequence: int
+    message: object
+    receive_time: float
+    receive_monotonic: float
+    source_timestamp_ms: int
+
+
+@dataclass(frozen=True)
+class ProcessedBoneFrame:
+    """Immutable same-frame target snapshot consumed by the IK thread."""
+
+    sequence: int
+    receive_time: float
+    source_timestamp_ms: int
+    transform_done_time: float
+    transform_done_monotonic: float
+    left_pose: object
+    right_pose: object
+    left_elbow_pos: object
+    right_elbow_pos: object
+    left_finger_joints: object
+    right_finger_joints: object
+    left_shoulder_rpy: object
+    right_shoulder_rpy: object
+    is_running: bool
+    is_hand_tracking: bool
+    vr_error: bool
+
+
+@dataclass(frozen=True)
+class IkSolutionFrame:
+    """Latest valid IK result consumed by the fixed-rate publisher."""
+
+    target_generation: int
+    processed_bone: object
+    desired_arm_q: object
+    shoulder_velocity_limit: float
+    ready_time: float
+    ready_monotonic: float
+
+
+# /vr_absolute/transform_stage_latency_ms 的 data 顺序。字段名写入
+# Float32MultiArray.layout.dim[0].label，使 bag 本身可以解释各列含义。
+TRANSFORM_STAGE_DIAGNOSTIC_FIELDS = (
+    "callback_to_worker_ms",
+    "worker_housekeeping_ms",
+    "transformer_lock_wait_ms",
+    "input_validation_ms",
+    "finger_compute_ms",
+    "chest_context_compute_ms",
+    "left_hand_compute_ms",
+    "right_hand_compute_ms",
+    "arm_debug_publish_ms",
+    "arm_pair_compute_ms",
+    "gesture_publish_ms",
+    "snapshot_build_ms",
+    "target_lock_wait_ms",
+    "target_update_ms",
+    "worker_total_ms",
+    "callback_to_transform_done_ms",
+    "read_msg_total_ms",
+)
+
+
+def calculate_ik_stage_latencies_ms(
+        processed_bone, solve_start_monotonic, solve_done_monotonic,
+        ik_done_monotonic):
+    """返回同一骨骼帧在IK阶段的等待/准备、求解和后处理耗时。"""
+    return (
+        (solve_start_monotonic - processed_bone.transform_done_monotonic) * 1000.0,
+        (solve_done_monotonic - solve_start_monotonic) * 1000.0,
+        (ik_done_monotonic - solve_done_monotonic) * 1000.0,
+    )
+
+
+def calculate_first_publish_latencies_ms(solution, publish_time,
+                                         publish_monotonic):
+    """Return solution wait and same-frame published output latencies."""
+    solution_to_publish_ms = max(
+        0.0, (publish_monotonic - solution.ready_monotonic) * 1000.0
+    )
+    if solution.processed_bone is None:
+        return solution_to_publish_ms, None, None
+    processed_bone = solution.processed_bone
+    callback_to_publish_ms = max(
+        0.0, (publish_time - processed_bone.receive_time) * 1000.0
+    )
+    source_to_publish_ms = None
+    if processed_bone.source_timestamp_ms > 0:
+        source_to_publish_ms = max(
+            0.0,
+            (publish_time - processed_bone.source_timestamp_ms / 1000.0)
+            * 1000.0,
+        )
+    return solution_to_publish_ms, callback_to_publish_ms, source_to_publish_ms
 
 class IkRos:
     def __init__(self, ik, ctrl_arm_idx=ArmIdx.LEFT, q_limit=None, publish_err=True, use_original_pose=False, end_effector_type="", send_srv=True, predict_gesture=False, hand_reference_mode="thumb_index", use_two_stage_ik=False):
@@ -139,6 +260,45 @@ class IkRos:
         self.__arm_dof = num_arm_joints_var
         self.__single_arm_dof = self.__arm_dof//2
         self.trigger_reset_mode = False
+
+        # Thread lifecycle and latest-frame handoff. The subscriber callback only
+        # replaces _pending_bone_frame; all expensive transforms run elsewhere.
+        self.stop_event = threading.Event()
+        self._bone_condition = threading.Condition()
+        self._pending_bone_frame = None
+        self._bone_input_seq = 0
+        self._bone_overwrite_count = 0
+        self._last_reported_bone_overwrite_count = 0
+        self._target_lock = threading.Lock()
+        # Coordinate conversion notifies this condition after atomically
+        # committing a new target. IK solving is event driven; it no longer
+        # polls the target from a fixed-rate loop.
+        self._ik_condition = threading.Condition(self._target_lock)
+        self._ik_target_generation = 0
+        self._ik_target_ready_time = 0.0
+        self._ik_target_ready_monotonic = 0.0
+        # The fixed-rate publisher reads one immutable latest solution. The
+        # last published command is kept separately so velocity limiting still
+        # advances at controller_dt even when IK input arrives at a lower rate.
+        self._ik_solution_lock = threading.Lock()
+        self._latest_ik_solution = None
+        self._last_published_arm_q = None
+        self._ik_stale_solution_drop_count = 0
+        self._ik_publish_timeout_count = 0
+        self.ik_solution_timeout_s = max(
+            0.05, float(rospy.get_param("~ik_solution_timeout_s", 0.2))
+        )
+        # Joystick callbacks publish an immutable snapshot. They never mutate
+        # the arm transformer, so a joystick burst cannot block bone transforms.
+        self._joystick_lock = threading.Lock()
+        self._joystick_snapshot = None
+        # Finger work has its own latest-frame mailbox and lower-rate worker.
+        self._finger_condition = threading.Condition()
+        self._pending_finger_input = None
+        self._latest_processed_bone = None
+        self._vr_is_running = False
+        self._vr_is_hand_tracking = False
+        self._vr_error = False
         
         # 添加两阶段IK控制参数
         self.__use_two_stage_ik = use_two_stage_ik  # 从构造函数参数获取
@@ -178,17 +338,53 @@ class IkRos:
         )
 
         self.use_arm_collision = rospy.get_param('~use_arm_collision', False)
-        # 添加服务
-        self.arm_mode_service = rospy.Service('/quest3/set_arm_mode_changing', Trigger, self.set_arm_mode_changing_callback)
-
         # self.hand_pub_timer = rospy.Timer(rospy.Duration(0.001), self.hand_finger_data_process)
-
-        # 添加两阶段IK控制服务
-        self.set_two_stage_ik_service = rospy.Service('/quest3/set_two_stage_ik', SetBool, self.set_two_stage_ik_callback)
 
 
         model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
-        self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(model_path, predict_gesture=predict_gesture, hand_reference_mode=hand_reference_mode)
+        self.enable_vr_visualization = rospy.get_param("~enable_vr_visualization", False)
+        self.enable_vr_latency_diagnostics = rospy.get_param(
+            "~enable_vr_latency_diagnostics", False
+        )
+        self.enable_vr_transform_diagnostics = (
+            self.enable_vr_latency_diagnostics
+            and rospy.get_param("~enable_vr_transform_diagnostics", False)
+        )
+        self.enable_vr_transform_debug_topics = rospy.get_param(
+            "~enable_vr_transform_debug_topics", False
+        )
+        self.vr_transform_debug_publish_hz = max(
+            0.0, float(rospy.get_param("~vr_transform_debug_publish_hz", 10.0))
+        )
+        self.finger_processing_hz = max(
+            1.0, float(rospy.get_param("~finger_processing_hz", 30.0))
+        )
+        self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(
+            model_path,
+            vis_pub=self.enable_vr_visualization,
+            predict_gesture=predict_gesture,
+            hand_reference_mode=hand_reference_mode,
+            debug_pub=self.enable_vr_transform_debug_topics,
+            debug_publish_hz=self.vr_transform_debug_publish_hz,
+        )
+        rospy.loginfo(
+            "[IkRos] VR visualization publishers: %s",
+            "enabled" if self.enable_vr_visualization else "disabled",
+        )
+        rospy.loginfo(
+            "[IkRos] VR latency diagnostics: %s",
+            "enabled" if self.enable_vr_latency_diagnostics else "disabled",
+        )
+        rospy.loginfo(
+            "[IkRos] VR transform diagnostics: %s",
+            "enabled" if self.enable_vr_transform_diagnostics else "disabled",
+        )
+        rospy.loginfo(
+            "[IkRos] VR transform debug topics: %s (%.1f Hz), finger worker: %.1f Hz",
+            "enabled" if self.enable_vr_transform_debug_topics else "disabled",
+            self.vr_transform_debug_publish_hz,
+            self.finger_processing_hz,
+        )
         self.quest3_arm_info_transformer.control_torso = control_torso
         initial_state = np.array([0, 0, 0, 0, 0, 0])  # 初始状态 [x, y, z, vx, vy, vz]
         initial_covariance = np.eye(6)  # 初始协方差矩阵
@@ -205,54 +401,6 @@ class IkRos:
         if hasattr(self.arm_ik, 'set_use_two_stage_ik'):
             self.arm_ik.set_use_two_stage_ik(self.__use_two_stage_ik)
             rospy.loginfo(f"[IkRos] ArmIk实例两阶段IK模式设置为: {self.__use_two_stage_ik}")
-        
-        # TO-DO(matthew): subscribe to joint states
-        # update joint states
-        self.joint_sub = rospy.Subscriber(
-            "/robot_arm_q_v_tau", robotArmQVVD, self.kuavo_joint_states_callback, queue_size=10
-        )
-        self.quest_bone_poses_sub = rospy.Subscriber(
-            "/leju_quest_bone_poses", PoseInfoList, self.quest_bone_poses_callback, queue_size=3
-        )
-
-        self.joySticks_sub = rospy.Subscriber(
-            "/quest_joystick_data",
-            JoySticks,
-            self.joySticks_data_callback,
-            queue_size=3
-        )
-
-        self.ik_cmd_sub = rospy.Subscriber(
-            "/ik/two_arm_hand_pose_cmd", twoArmHandPoseCmd, self.two_arm_hand_pose_target_callback, queue_size=10
-        )
-
-        self.sensor_data_raw_sub = rospy.Subscriber(
-            "/sensors_data_raw", sensorsData, self.sensor_data_raw_callback, queue_size=1
-        )
-        
-        # 订阅MPC优化后的状态，用于半身模式的插值和保持
-        self.optimized_state_sub = rospy.Subscriber(
-            "/humanoid_controller/optimizedState_wbc_mrt_origin", Float64MultiArray, self.optimized_state_callback, queue_size=10
-        )
-
-        # 轮臂：订阅 MPC observation，用 msg.time（MPC 内部时间）判断是否可发 mm / 切手臂模式（#3009）
-        self._wheel_mpc_obs_sub = None
-        if self.robot_type == 1:
-            self._wheel_mpc_obs_sub = rospy.Subscriber(
-                self._wheel_mm_mpc_observation_topic,
-                mpc_observation,
-                self.wheel_mpc_observation_callback,
-                queue_size=10,
-            )
-        
-        # 订阅停止机器人信号
-        self.stop_robot_sub = rospy.Subscriber(
-            "/stop_robot", Bool, self.stop_robot_callback, queue_size=1
-        )
-
-        self.robot_walking_status_sub = rospy.Subscriber(
-            "/robot_walking_status", Bool, self.robot_walking_status_callback, queue_size=1
-        )
         
         self.arm_mode_changing = False
         # 检测到碰撞后，由外部控制手臂
@@ -308,7 +456,114 @@ class IkRos:
         self.ik_visualization_pub = rospy.Publisher(
             "/ik_visualization_markers", MarkerArray, queue_size=10
         )
-        
+
+        # ── 延迟测量发布器 ──
+        # 默认不向ROS master注册这些诊断话题；只有显式开启统一开关时
+        # 才创建真实发布器，避免常规运行时的序列化、传输和录包开销。
+        def latency_publisher(topic, msg_type, queue_size=10):
+            if not self.enable_vr_latency_diagnostics:
+                return None
+            return rospy.Publisher(topic, msg_type, queue_size=queue_size)
+
+        # VR数据处理节点 → 绝对式IK节点 的通信延迟
+        self.comm_latency_pub = latency_publisher(
+            "/vr_absolute/comm_latency_ms", Float64, queue_size=10
+        )
+        # 绝对式IK处理延迟（骨骼接收 → IK求解完成）
+        self.arm_traj_latency_pub = latency_publisher(
+            "/vr_absolute/arm_traj_latency_ms", Float64, queue_size=10
+        )
+        # 骨骼回调入口 → 坐标转换完成（包含最新帧邮箱等待）
+        self.transform_pipeline_latency_pub = latency_publisher(
+            "/vr_absolute/transform_pipeline_latency_ms", Float64, queue_size=10
+        )
+        # 单帧坐标转换本身的处理耗时
+        self.transform_processing_latency_pub = latency_publisher(
+            "/vr_absolute/transform_processing_latency_ms", Float64, queue_size=10
+        )
+        # Finger work is asynchronous and excluded from the arm transform path.
+        self.finger_processing_latency_pub = latency_publisher(
+            "/vr_absolute/finger_processing_latency_ms", Float64, queue_size=10
+        )
+        # VR发布时刻 → 同一帧IK求解完成
+        self.end_to_end_latency_pub = latency_publisher(
+            "/vr_absolute/end_to_end_latency_ms", Float64, queue_size=10
+        )
+        # 坐标转换完成 → computeIK开始（含IK线程等待与求解前准备）
+        self.ik_wait_latency_pub = latency_publisher(
+            "/vr_absolute/ik_wait_latency_ms", Float64, queue_size=10
+        )
+        # computeIK调用本身的求解耗时
+        self.ik_solve_latency_pub = latency_publisher(
+            "/vr_absolute/ik_solve_latency_ms", Float64, queue_size=10
+        )
+        # computeIK返回 → 本轮轨迹后处理完成
+        self.ik_postprocess_latency_pub = latency_publisher(
+            "/vr_absolute/ik_postprocess_latency_ms", Float64, queue_size=10
+        )
+        # 坐标转换完成 → 目标快照提交并通知IK线程
+        self.ik_target_commit_latency_pub = latency_publisher(
+            "/vr_absolute/ik_target_commit_latency_ms", Float64, queue_size=10
+        )
+        # 目标提交通知 → IK线程取得该目标（包含线程调度和锁等待）
+        self.ik_thread_wakeup_latency_pub = latency_publisher(
+            "/vr_absolute/ik_thread_wakeup_latency_ms", Float64, queue_size=10
+        )
+        # IK线程持锁复制同一目标快照
+        self.ik_target_snapshot_latency_pub = latency_publisher(
+            "/vr_absolute/ik_target_snapshot_latency_ms", Float64, queue_size=10
+        )
+        # 求解前双臂正运动学
+        self.ik_fk_latency_pub = latency_publisher(
+            "/vr_absolute/ik_fk_latency_ms", Float64, queue_size=10
+        )
+        # FK完成 → computeIK开始（滤波、姿态转换、初值与约束准备）
+        self.ik_input_prepare_latency_pub = latency_publisher(
+            "/vr_absolute/ik_input_prepare_latency_ms", Float64, queue_size=10
+        )
+        # 目标提交 → 最新有效IK解写入发布邮箱
+        self.ik_solution_ready_latency_pub = latency_publisher(
+            "/vr_absolute/ik_solution_ready_latency_ms", Float64, queue_size=10
+        )
+        # 最新有效解 → 第一次100Hz轨迹发布
+        self.ik_solution_to_publish_latency_pub = latency_publisher(
+            "/vr_absolute/ik_solution_to_publish_latency_ms", Float64, queue_size=10
+        )
+        # 单次100Hz发布线程内的限速、消息构造与发布耗时
+        self.ik_publish_execution_latency_pub = latency_publisher(
+            "/vr_absolute/ik_publish_execution_latency_ms", Float64, queue_size=10
+        )
+        # 实际轨迹发布周期间隔，用于观察100Hz抖动
+        self.ik_publish_period_pub = latency_publisher(
+            "/vr_absolute/ik_publish_period_ms", Float64, queue_size=10
+        )
+        # IK回调接收/VR节点发布 → 同一解首次轨迹发布
+        self.published_arm_traj_latency_pub = latency_publisher(
+            "/vr_absolute/published_arm_traj_latency_ms", Float64, queue_size=10
+        )
+        self.published_end_to_end_latency_pub = latency_publisher(
+            "/vr_absolute/published_end_to_end_latency_ms", Float64, queue_size=10
+        )
+        self.ik_stale_solution_drop_pub = latency_publisher(
+            "/vr_absolute/ik_stale_solution_dropped_frames",
+            UInt64,
+            queue_size=10,
+        )
+        self.ik_publish_timeout_pub = latency_publisher(
+            "/vr_absolute/ik_publish_timeout_events", UInt64, queue_size=10
+        )
+        # 最新帧邮箱覆盖的累计帧数
+        self.bone_overwrite_count_pub = latency_publisher(
+            "/vr_absolute/mailbox_overwritten_frames", UInt64, queue_size=10
+        )
+        self.transform_stage_latency_pub = None
+        if self.enable_vr_transform_diagnostics:
+            self.transform_stage_latency_pub = rospy.Publisher(
+                "/vr_absolute/transform_stage_latency_ms",
+                Float32MultiArrayStamped,
+                queue_size=50,
+            )
+
         try:
             end_effector_mapping = {
                 QIANGNAO: QIANGNAO,
@@ -329,38 +584,135 @@ class IkRos:
         print(f"\033[93m- End effector type: {self.end_effector_type} \033[0m")
         print(f"\033[93m--------------------------------------------------\033[0m")        
 
+        # All callback-visible state must be initialized before subscriptions
+        # are registered. This also removes the startup race seen in rosout.
+        self.initial_q_first = None
+        self.__need_reset_ik_guess = False
+        self.__first_change_arm_mode = True
+
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
-        self.stop_event = threading.Event()
-        self.ik_thread = threading.Thread(target=self.ik_controller_thread)
+        rospy.on_shutdown(self._stop_threads)
+
+        self.bone_processing_thread = threading.Thread(
+            target=self._bone_processing_loop,
+            name="vr-bone-latest-frame",
+        )
+        self.bone_processing_thread.start()
+
+        self.finger_processing_thread = threading.Thread(
+            target=self._finger_processing_loop,
+            name="vr-finger-latest-frame",
+        )
+        self.finger_processing_thread.start()
+
+        self._initialize_ros_interfaces()
+
+        self.ik_publish_thread = threading.Thread(
+            target=self.ik_fixed_rate_publish_thread,
+            name="vr-absolute-ik-publisher",
+        )
+        self.ik_publish_thread.start()
+        # Output cadence is safety-critical; keep it above the event-driven
+        # solver when real-time scheduling permission is available.
+        set_thread_priority(self.ik_publish_thread, int(SCHED_FIFO), 51)
+
+        self.hand_command_publish_thread = threading.Thread(
+            target=self.hand_fixed_rate_publish_thread,
+            name="vr-absolute-hand-publisher",
+        )
+        self.hand_command_publish_thread.start()
+
+        self.ik_thread = threading.Thread(
+            target=self.ik_controller_thread,
+            name="vr-absolute-ik-solver",
+        )
         self.ik_thread.start()
         set_thread_priority(self.ik_thread, int(SCHED_FIFO), 50)
 
-        # 保存初始关节角度
-        self.initial_q_first = None
-        
-        # 订阅手臂模式topic
-        self.arm_mode_sub = rospy.Subscriber('/quest3/triger_arm_mode', Int32, self.arm_mode_callback)
-        
-        # 订阅手臂控制模式变化话题，用于检测退出复位模式
+        self.run()
+        self.ik_thread.join()
+        self.ik_publish_thread.join()
+        self.hand_command_publish_thread.join()
+        self.bone_processing_thread.join()
+        self.finger_processing_thread.join()
+
+    def _initialize_ros_interfaces(self):
+        """Register callbacks only after every callback dependency exists."""
+        self.joint_sub = rospy.Subscriber(
+            "/robot_arm_q_v_tau", robotArmQVVD, self.kuavo_joint_states_callback, queue_size=10
+        )
+        self.quest_bone_poses_sub = rospy.Subscriber(
+            "/leju_quest_bone_poses",
+            PoseInfoList,
+            self.quest_bone_poses_callback,
+            queue_size=1,
+            # Read a possible burst in one pass, then rospy keeps only the newest message.
+            buff_size=1024 * 1024,
+        )
+        self.joySticks_sub = rospy.Subscriber(
+            "/quest_joystick_data", JoySticks, self.joySticks_data_callback, queue_size=3
+        )
+        self.ik_cmd_sub = rospy.Subscriber(
+            "/ik/two_arm_hand_pose_cmd", twoArmHandPoseCmd,
+            self.two_arm_hand_pose_target_callback, queue_size=10
+        )
+        self.sensor_data_raw_sub = rospy.Subscriber(
+            "/sensors_data_raw", sensorsData, self.sensor_data_raw_callback, queue_size=1
+        )
+        self.optimized_state_sub = rospy.Subscriber(
+            "/humanoid_controller/optimizedState_wbc_mrt_origin",
+            Float64MultiArray,
+            self.optimized_state_callback,
+            queue_size=10,
+        )
+
+        self._wheel_mpc_obs_sub = None
+        if self.robot_type == 1:
+            self._wheel_mpc_obs_sub = rospy.Subscriber(
+                self._wheel_mm_mpc_observation_topic,
+                mpc_observation,
+                self.wheel_mpc_observation_callback,
+                queue_size=10,
+            )
+
+        self.stop_robot_sub = rospy.Subscriber(
+            "/stop_robot", Bool, self.stop_robot_callback, queue_size=1
+        )
+        self.robot_walking_status_sub = rospy.Subscriber(
+            "/robot_walking_status", Bool, self.robot_walking_status_callback, queue_size=1
+        )
+        self.arm_mode_sub = rospy.Subscriber(
+            "/quest3/triger_arm_mode", Int32, self.arm_mode_callback
+        )
         self.arm_control_mode_sub = rospy.Subscriber(
             "/humanoid/mpc/arm_control_mode",
             Float64MultiArray,
-            self.arm_control_mode_callback
+            self.arm_control_mode_callback,
         )
-        self.__need_reset_ik_guess = False  # 标志是否需要重置IK初始猜测
-        self.__first_change_arm_mode = True  # 标志是否为第一次切换手臂模式
-
-        self.run()
-        self.ik_thread.join()
+        self.arm_mode_service = rospy.Service(
+            "/quest3/set_arm_mode_changing", Trigger, self.set_arm_mode_changing_callback
+        )
+        self.set_two_stage_ik_service = rospy.Service(
+            "/quest3/set_two_stage_ik", SetBool, self.set_two_stage_ik_callback
+        )
    
     def run(self):
         while rospy.is_shutdown() is False:
             rospy.spin()
 
+    def _stop_threads(self):
+        self.stop_event.set()
+        with self._bone_condition:
+            self._bone_condition.notify_all()
+        with self._finger_condition:
+            self._finger_condition.notify_all()
+        with self._ik_condition:
+            self._ik_condition.notify_all()
+
     def shutdown(self, signal, frame):
         rospy.loginfo("Shutting down...")
-        self.stop_event.set()
+        self._stop_threads()
         rospy.signal_shutdown("Shutdown")
         rospy.loginfo("Shutdown complete.")
 
@@ -492,6 +844,183 @@ class IkRos:
         msg.right_pose.joint_angles = q_robot[-self.__single_arm_dof:]
         self.pub_ik_solved_eef_pose.publish(msg)
 
+    def _clear_latest_ik_solution(self, clear_published_command=False):
+        with self._ik_solution_lock:
+            self._latest_ik_solution = None
+            if clear_published_command:
+                self._last_published_arm_q = None
+
+    def _wait_for_latest_ik_target(self, last_generation):
+        """Wait for and atomically copy the newest committed IK target."""
+        with self._ik_condition:
+            has_target = self._ik_condition.wait_for(
+                lambda: (
+                    self._ik_target_generation != last_generation
+                    or self.stop_event.is_set()
+                    or rospy.is_shutdown()
+                ),
+                timeout=0.1,
+            )
+            if self.stop_event.is_set() or rospy.is_shutdown():
+                return None
+            if not has_target or self._ik_target_generation == last_generation:
+                return ()
+
+            snapshot_start = time.perf_counter()
+            target_generation = self._ik_target_generation
+            target_ready_time = self._ik_target_ready_time
+            target_ready_monotonic = self._ik_target_ready_monotonic
+            target_pose = self._copy_pose(self.__target_pose)
+            target_pose_right = self._copy_pose(self.__target_pose_right)
+            left_elbow_snapshot = self._copy_optional_array(self.__left_elbow_pos)
+            right_elbow_snapshot = self._copy_optional_array(self.__right_elbow_pos)
+            processed_bone = self._latest_processed_bone
+            vr_error = self._vr_error
+            snapshot_done = time.perf_counter()
+
+        return {
+            "generation": target_generation,
+            "ready_time": target_ready_time,
+            "ready_monotonic": target_ready_monotonic,
+            "snapshot_start_monotonic": snapshot_start,
+            "snapshot_done_monotonic": snapshot_done,
+            "target_pose": target_pose,
+            "target_pose_right": target_pose_right,
+            "left_elbow": left_elbow_snapshot,
+            "right_elbow": right_elbow_snapshot,
+            "processed_bone": processed_bone,
+            "vr_error": vr_error,
+        }
+
+    def ik_fixed_rate_publish_thread(self):
+        """Publish the newest safe IK solution at the controller's fixed rate."""
+        rate = rospy.Rate(1.0 / self.controller_dt)
+        last_publish_monotonic = None
+        first_published_generation = -1
+        timeout_active = False
+
+        while not self.stop_event.is_set() and not rospy.is_shutdown():
+            try:
+                with self._ik_solution_lock:
+                    solution = self._latest_ik_solution
+                    last_command = (
+                        None if self._last_published_arm_q is None
+                        else np.asarray(self._last_published_arm_q).copy()
+                    )
+
+                now_monotonic = time.perf_counter()
+                solution_is_fresh = solution is not None
+                if (solution_is_fresh and solution.processed_bone is not None
+                        and now_monotonic - solution.ready_monotonic
+                        > self.ik_solution_timeout_s):
+                    solution_is_fresh = False
+                    if not timeout_active:
+                        timeout_active = True
+                        self._ik_publish_timeout_count += 1
+                        if self.enable_vr_latency_diagnostics:
+                            self.ik_publish_timeout_pub.publish(
+                                UInt64(self._ik_publish_timeout_count)
+                            )
+                    rospy.logwarn_throttle(
+                        1.0,
+                        "Latest absolute VR IK solution is older than %.0f ms; "
+                        "trajectory publishing is paused.",
+                        self.ik_solution_timeout_s * 1000.0,
+                    )
+                elif solution_is_fresh:
+                    timeout_active = False
+
+                if solution_is_fresh:
+                    desired_arm_q = np.asarray(solution.desired_arm_q).copy()
+                    if not self.arm_mode_changing and last_command is not None:
+                        command_arm_q = self.limit_angle_by_velocity(
+                            last_command,
+                            desired_arm_q,
+                            vel_limit=720,
+                            shoulder_vel_limit=solution.shoulder_velocity_limit,
+                        )
+                    else:
+                        command_arm_q = desired_arm_q
+
+                    publish_start = (
+                        time.perf_counter()
+                        if self.enable_vr_latency_diagnostics else None
+                    )
+                    filtered_msg = Float32MultiArray()
+                    filtered_msg.data = command_arm_q * 180.0 / np.pi
+                    self.pub_filtered_joint.publish(filtered_msg)
+                    published = self.publish_joint_states(
+                        q_now=command_arm_q, q_last=last_command
+                    )
+                    publish_done = (
+                        time.perf_counter()
+                        if self.enable_vr_latency_diagnostics else None
+                    )
+
+                    if published:
+                        with self._ik_solution_lock:
+                            self._last_published_arm_q = command_arm_q.copy()
+                        if self.enable_vr_latency_diagnostics:
+                            publish_time = time.time()
+                            self.ik_publish_execution_latency_pub.publish(
+                                Float64((publish_done - publish_start) * 1000.0)
+                            )
+                            if last_publish_monotonic is not None:
+                                self.ik_publish_period_pub.publish(
+                                    Float64(
+                                        (publish_done - last_publish_monotonic)
+                                        * 1000.0
+                                    )
+                                )
+                            last_publish_monotonic = publish_done
+
+                            if solution.target_generation != first_published_generation:
+                                first_published_generation = solution.target_generation
+                                (solution_to_publish_ms,
+                                 callback_to_publish_ms,
+                                 source_to_publish_ms) = (
+                                    calculate_first_publish_latencies_ms(
+                                        solution, publish_time, publish_done
+                                    )
+                                )
+                                self.ik_solution_to_publish_latency_pub.publish(
+                                    Float64(solution_to_publish_ms)
+                                )
+                                if callback_to_publish_ms is not None:
+                                    self.published_arm_traj_latency_pub.publish(
+                                        Float64(callback_to_publish_ms)
+                                    )
+                                if source_to_publish_ms is not None:
+                                    self.published_end_to_end_latency_pub.publish(
+                                        Float64(source_to_publish_ms)
+                                    )
+
+            except Exception as exc:
+                rospy.logerr_throttle(
+                    1.0, "Fixed-rate absolute IK publishing failed: %s", exc
+                )
+
+            try:
+                rate.sleep()
+            except rospy.ROSInterruptException:
+                return
+
+    def hand_fixed_rate_publish_thread(self):
+        """Preserve 100 Hz hand commands without delaying arm publication."""
+        rate = rospy.Rate(1.0 / self.controller_dt)
+        while not self.stop_event.is_set() and not rospy.is_shutdown():
+            if self.__ik_claw_publish_active:
+                try:
+                    self.hand_finger_data_process(0)
+                except Exception as exc:
+                    rospy.logerr_throttle(
+                        1.0, "Fixed-rate hand publishing failed: %s", exc
+                    )
+            try:
+                rate.sleep()
+            except rospy.ROSInterruptException:
+                return
+
     def ik_controller_thread(self):
         rate = rospy.Rate(1 / self.controller_dt)
         traj_X_G = None
@@ -509,12 +1038,17 @@ class IkRos:
         print("[ik]: First eef target pose recieved.")
         if self.__as_mc_ik:
             print("[ik]: Waiting for OK-guesture(hold on for 1-2 seconds) to start teleoperation...")
-            while not self.quest3_arm_info_transformer.is_runing:
+            while True:
+                with self._target_lock:
+                    vr_is_running = self._vr_is_running
+                    vr_error = self._vr_error
+                if vr_is_running:
+                    break
                 self.hand_finger_data_process(0)
                 if self.stop_event.is_set():
                     print("[ik]: Stop event is set, exit.")
                     return
-                if(self.quest3_arm_info_transformer.check_if_vr_error()):
+                if vr_error:
                     sys.stdout.write("\r\033[91mDetected VR ERROR!!! Please restart VR app in quest3 or check the battery level of the joystick!!!\033[0m")
                 rate.sleep()
             print("[ik]: OK-guesture recieved!!!")
@@ -556,7 +1090,47 @@ class IkRos:
         arm_q_filtered = [0.0] * self.__arm_dof
         is_runing = False
         self.__ik_claw_publish_active = True
-        while not rospy.is_shutdown():
+        last_target_generation = 0
+        while not self.stop_event.is_set() and not rospy.is_shutdown():
+            ik_solve_start_monotonic = None
+            ik_solve_done_monotonic = None
+            solution = None
+            target_state = self._wait_for_latest_ik_target(
+                last_target_generation
+            )
+            if target_state is None:
+                return
+            if not target_state:
+                continue
+            last_target_generation = target_state["generation"]
+
+            target_ready_monotonic = target_state["ready_monotonic"]
+            if (self.enable_vr_latency_diagnostics
+                    and target_ready_monotonic > 0.0):
+                self.ik_thread_wakeup_latency_pub.publish(
+                    Float64(
+                        max(
+                            0.0,
+                            (target_state["snapshot_start_monotonic"]
+                             - target_ready_monotonic) * 1000.0,
+                        )
+                    )
+                )
+            if self.enable_vr_latency_diagnostics:
+                self.ik_target_snapshot_latency_pub.publish(
+                    Float64(
+                        (target_state["snapshot_done_monotonic"]
+                         - target_state["snapshot_start_monotonic"]) * 1000.0
+                    )
+                )
+
+            target_pose = target_state["target_pose"]
+            target_pose_right = target_state["target_pose_right"]
+            left_elbow_snapshot = target_state["left_elbow"]
+            right_elbow_snapshot = target_state["right_elbow"]
+            processed_bone = target_state["processed_bone"]
+            vr_error = target_state["vr_error"]
+
             # 检测是否需要重置IK初始猜测（模式切换时）
             if self.__need_reset_ik_guess:
                 # 重置q_last和arm_ik内部的last_solution
@@ -573,59 +1147,85 @@ class IkRos:
                 arm_q_filtered = q_last[-self.__arm_dof:].copy()
                 
                 self.__need_reset_ik_guess = False
-            self.hand_finger_data_process(0)
-            # print(f"q_now: {q_now}")
-            is_runing_last = is_runing
-            is_runing = True
-            self.__current_pose, self.__current_pose_right = self.get_two_arm_pose(q_last)
-            self.pub_solved_arm_eef_pose(q_last, self.__current_pose, self.__current_pose_right)
+
             if self.trigger_reset_mode:
-                self.__target_pose = (None, None)
+                with self._ik_condition:
+                    self.__target_pose = (None, None)
+                    self.__target_pose_right = (None, None)
+                    self._latest_processed_bone = None
                 self.__current_pose = (None, None)
-                self.__target_pose_right = (None, None)
                 self.__current_pose_right = (None, None)
                 q_last = pre_q_first.copy()
+                q_now = q_last.copy()
+                self._clear_latest_ik_solution(clear_published_command=True)
                 self.trigger_reset_mode = False
+                continue
 
-            if(self.__as_mc_ik and self.quest3_arm_info_transformer.check_if_vr_error()):
-                rate.sleep()
-                print("\033[91mDetected VR ERROR!!! Please restart VR app in quest3 or check the battery level of the joystick!!!\.\033[0m")
+            if self.__as_mc_ik and vr_error:
+                self._clear_latest_ik_solution()
+                rospy.logerr_throttle(
+                    1.0,
+                    "Detected VR ERROR; absolute IK publishing is paused.",
+                )
                 continue
-            elif(self.__as_mc_ik and (not is_runing)):
-                rate.sleep()
-                sys.stdout.write("\rStatus0: {}, is target far?: {}".format("RUNING" if is_runing else "STOPED", self.judge_target_is_far()))
-                continue
+
+            # Keep the IK initial state close to the command actually emitted
+            # by the 100 Hz publisher, not merely the last raw solver result.
+            with self._ik_solution_lock:
+                last_published_arm_q = (
+                    None if self._last_published_arm_q is None
+                    else np.asarray(self._last_published_arm_q).copy()
+                )
+            if last_published_arm_q is not None:
+                q_last[-self.__arm_dof:] = last_published_arm_q
+
+            fk_start_monotonic = time.perf_counter()
+            self.__current_pose, self.__current_pose_right = (
+                self.get_two_arm_pose(q_last)
+            )
+            fk_done_monotonic = time.perf_counter()
+            if self.enable_vr_latency_diagnostics:
+                self.ik_fk_latency_pub.publish(
+                    Float64((fk_done_monotonic - fk_start_monotonic) * 1000.0)
+                )
+            self.pub_solved_arm_eef_pose(
+                q_last, self.__current_pose, self.__current_pose_right
+            )
+
+            is_runing_last = is_runing
+            is_runing = True
             
             if(not is_runing_last and is_runing):
                 self.arm_mode_changing = True
-            if self.__target_pose[0] is None or self.__target_pose_right[0] is None or \
+            if target_pose[0] is None or target_pose_right[0] is None or \
                 self.__current_pose[0] is None or self.__current_pose_right[0] is None:
-                rate.sleep()
                 continue
             if self.arm_ik.type().name() == IkTypeIdx.TorsoIK.name():
                 l_hand_pose, l_hand_RPY, l_hand_quat = None, None, None
                 r_hand_pose, r_hand_RPY, r_hand_quat = None, None, None
                 l_elbow_pos, r_elbow_pos = None, None
                 left_shoulder_rpy_in_robot, right_shoulder_rpy_in_robot = None, None
-                if self.__target_pose[0] is not None and (self.__ctrl_arm_idx == ArmIdx.BOTH
+                if target_pose[0] is not None and (self.__ctrl_arm_idx == ArmIdx.BOTH
                                                           or self.__ctrl_arm_idx == ArmIdx.LEFT):
-                    l_hand_pose, l_hand_quat = self.__target_pose
+                    l_hand_pose, l_hand_quat = target_pose
                     l_hand_pose = self.kf_left.filter(l_hand_pose)
                     l_hand_RPY = quaternion_to_RPY(l_hand_quat)
-                    l_elbow_pos = self.__left_elbow_pos
+                    l_elbow_pos = left_elbow_snapshot
                     # if l_elbow_pos is not None:
                     #     # print(f"l_elbow_pos: {l_elbow_pos}")
                     #     l_elbow_pos[0] = -0.3 if l_elbow_pos[0] < -0.3 else l_elbow_pos[0]
-                    left_shoulder_rpy_in_robot = self.quest3_arm_info_transformer.left_shoulder_rpy_in_robot
-                if self.__target_pose_right[0] is not None and (self.__ctrl_arm_idx == ArmIdx.BOTH
+                    if processed_bone is not None:
+                        left_shoulder_rpy_in_robot = processed_bone.left_shoulder_rpy
+                if target_pose_right[0] is not None and (self.__ctrl_arm_idx == ArmIdx.BOTH
                                                                 or self.__ctrl_arm_idx == ArmIdx.RIGHT):
-                    r_hand_pose, r_hand_quat = self.__target_pose_right
+                    r_hand_pose, r_hand_quat = target_pose_right
                     r_hand_pose = self.kf_right.filter(r_hand_pose)
                     r_hand_RPY = quaternion_to_RPY(r_hand_quat)
-                    r_elbow_pos = self.__right_elbow_pos
+                    r_elbow_pos = right_elbow_snapshot
                     # if r_elbow_pos is not None:
                     #     r_elbow_pos[0] = -0.3 if r_elbow_pos[0] < -0.3 else r_elbow_pos[0]
-                    right_shoulder_rpy_in_robot = self.quest3_arm_info_transformer.right_shoulder_rpy_in_robot
+                    if processed_bone is not None:
+                        right_shoulder_rpy_in_robot = processed_bone.right_shoulder_rpy
 
                 ik_input_data = []
                 if l_hand_pose is not None and l_hand_quat is not None:
@@ -702,12 +1302,24 @@ class IkRos:
                 # self.pub_q0_tmp.publish(q0_tmp_msg)
                 
                 
-                q_now = arm_ik.computeIK(
+                ik_solve_start_monotonic = time.perf_counter()
+                if self.enable_vr_latency_diagnostics:
+                    self.ik_input_prepare_latency_pub.publish(
+                        Float64(
+                            (ik_solve_start_monotonic - fk_done_monotonic) * 1000.0
+                        )
+                    )
+                q_now = self.arm_ik.computeIK(
                     q0_tmp, l_hand_pose, r_hand_pose, l_hand_RPY, r_hand_RPY, l_elbow_pos, r_elbow_pos, left_shoulder_rpy_in_robot, right_shoulder_rpy_in_robot
                 )
+                ik_solve_done_monotonic = time.perf_counter()
                 time_cost = time.time() - time_0
-                if time_cost >= 10.0:
-                    print(f"\033[91m The time-cost of ik is {1e3*time_cost:.2f} ms !!!\033[0m")
+                if time_cost >= 0.010:
+                    rospy.logwarn_throttle(
+                        1.0,
+                        "IK solve time exceeded 10 ms: %.2f ms",
+                        1e3 * time_cost,
+                    )
                 self.pub_time_cost.publish(Float32(1e3 * time_cost))
                 if q_now is not None:
                     msg = Float32MultiArray()
@@ -740,16 +1352,39 @@ class IkRos:
                         # 正常情况，使用正常速度限制
                         shoulder_vel_limit = 120.0  # deg/s
                     # print(f"shoulder_vel_limit: {shoulder_vel_limit}")
-                    # 手臂模式切换时不进行关节速度限制
-                    if not self.arm_mode_changing:
-                        arm_q_filtered = self.limit_angle_by_velocity(q_last[-self.__arm_dof:], arm_q_filtered, vel_limit=720, shoulder_vel_limit=shoulder_vel_limit)
-                    
-                    msg.data = arm_q_filtered * 180.0 / np.pi
-                    self.pub_filtered_joint.publish(msg)
-                    self.publish_joint_states(q_now=arm_q_filtered, q_last=q_last)
-                    # self.quest3_arm_info_transformer.pub_whole_body_joint_state_msg(arm_q_filtered, map_finger=self.__as_mc_ik)
+                    # 关节速度限制已移到100 Hz发布线程，使限速步长仍严格
+                    # 对应controller_dt，不受VR输入频率影响。
                     q_last[:self.__single_arm_dof] = q_now[:self.__single_arm_dof]
                     q_last[-self.__arm_dof:] = arm_q_filtered
+
+                    solution_ready_time = time.time()
+                    solution_ready_monotonic = time.perf_counter()
+                    solution = IkSolutionFrame(
+                        target_generation=last_target_generation,
+                        processed_bone=processed_bone,
+                        desired_arm_q=np.asarray(arm_q_filtered).copy(),
+                        shoulder_velocity_limit=float(shoulder_vel_limit),
+                        ready_time=solution_ready_time,
+                        ready_monotonic=solution_ready_monotonic,
+                    )
+                    # A mode reset or a newer target may arrive while the
+                    # solver is running. Never publish the superseded result.
+                    with self._ik_condition:
+                        solution_is_current = (
+                            not self.trigger_reset_mode
+                            and self._ik_target_generation
+                            == last_target_generation
+                        )
+                        if solution_is_current:
+                            with self._ik_solution_lock:
+                                self._latest_ik_solution = solution
+                        else:
+                            self._ik_stale_solution_drop_count += 1
+                            if self.enable_vr_latency_diagnostics:
+                                self.ik_stale_solution_drop_pub.publish(
+                                    UInt64(self._ik_stale_solution_drop_count)
+                                )
+                            solution = None
                 else:
                     fail_count += 1
                     # print(f"""\nq_last:{q_last}\n l_hand_pose:{l_hand_pose}\n 
@@ -760,6 +1395,57 @@ class IkRos:
                     #       r_elbow_pos:{r_elbow_pos}\n 
                     #       left_shoulder_rpy_in_robot:{left_shoulder_rpy_in_robot}\n 
                     #       right_shoulder_rpy_in_robot:{right_shoulder_rpy_in_robot}\n""")
+
+                # Same-frame measurements: this event-driven IK round uses one
+                # immutable target and one immutable solution snapshot.
+                if (self.enable_vr_latency_diagnostics
+                        and solution is not None):
+                    ik_done_time = solution.ready_time
+                    ik_done_monotonic = solution.ready_monotonic
+                    if (ik_solve_start_monotonic is not None
+                            and ik_solve_done_monotonic is not None):
+                        self.ik_solve_latency_pub.publish(
+                            Float64(
+                                (ik_solve_done_monotonic
+                                 - ik_solve_start_monotonic) * 1000.0
+                            )
+                        )
+                        self.ik_postprocess_latency_pub.publish(
+                            Float64(
+                                (ik_done_monotonic
+                                 - ik_solve_done_monotonic) * 1000.0
+                            )
+                        )
+                    if target_ready_monotonic > 0.0:
+                        self.ik_solution_ready_latency_pub.publish(
+                            Float64(
+                                (ik_done_monotonic - target_ready_monotonic)
+                                * 1000.0
+                            )
+                        )
+
+                    if processed_bone is not None:
+                        ik_wait_ms, _, _ = calculate_ik_stage_latencies_ms(
+                            processed_bone,
+                            ik_solve_start_monotonic,
+                            ik_solve_done_monotonic,
+                            ik_done_monotonic,
+                        )
+                        self.ik_wait_latency_pub.publish(Float64(ik_wait_ms))
+                        arm_traj_latency_ms = (
+                            ik_done_time - processed_bone.receive_time
+                        ) * 1000.0
+                        self.arm_traj_latency_pub.publish(
+                            Float64(arm_traj_latency_ms)
+                        )
+                        if processed_bone.source_timestamp_ms > 0:
+                            end_to_end_latency_ms = (
+                                ik_done_time
+                                - processed_bone.source_timestamp_ms / 1000.0
+                            ) * 1000.0
+                            self.end_to_end_latency_pub.publish(
+                                Float64(end_to_end_latency_ms)
+                            )
 
                 run_count += 1
                 success_rate = 100 * (1.0 - fail_count / float(run_count))
@@ -774,16 +1460,15 @@ class IkRos:
             if self.__publish_err and q_now is not None:
                 msg_pose_err = ikSolveError()
                 msg_pose_err.ik_type = self.arm_ik.type().name()
-                pose_left = arm_ik.left_hand_pose(q_now)
-                pose_right = arm_ik.right_hand_pose(q_now)
-                if self.__target_pose[0] is not None:
-                    pose_left_des = (self.__target_pose[0], quaternion_to_RPY(self.__target_pose[1]))
+                pose_left = self.arm_ik.left_hand_pose(q_now)
+                pose_right = self.arm_ik.right_hand_pose(q_now)
+                if target_pose[0] is not None:
+                    pose_left_des = (target_pose[0], quaternion_to_RPY(target_pose[1]))
                     msg_pose_err.left_pose_error = self.generate_ik_solve_error_msg(pose_res=pose_left, pose_des=pose_left_des)
-                if self.__target_pose_right[0] is not None:
-                    pose_right_des = (self.__target_pose_right[0], quaternion_to_RPY(self.__target_pose_right[1]))
+                if target_pose_right[0] is not None:
+                    pose_right_des = (target_pose_right[0], quaternion_to_RPY(target_pose_right[1]))
                     msg_pose_err.right_pose_error = self.generate_ik_solve_error_msg(pose_res=pose_right, pose_des=pose_right_des)
                 self.pub_ik_solve_error.publish(msg_pose_err)
-            rate.sleep()
 
     def publish_joint_states(self, q_now, q_last):
         arm_agl_limited = self.limit_angle(q_now[-self.__arm_dof:])
@@ -793,7 +1478,7 @@ class IkRos:
         
         if self.only_half_up_body and self.optimized_state is None and self.sensor_data_raw is None:
             print(f"[ik_ros_uni]: optimized_state is None")
-            return
+            return False
 
         if self.only_half_up_body and self.arm_mode_changing:
             # 获取当前关节角度（从MPC优化后的状态中提取手臂部分，索引24:38）
@@ -825,6 +1510,8 @@ class IkRos:
         # 只有在没有hold_arm_timer激活时才发布（避免与保持位置定时器冲突）
         if self.hold_arm_timer is None:
             self.pub.publish(msg)
+            return True
+        return False
 
     def kuavo_joint_states_callback(self, joint_states_msg):
         # 手臂状态正解
@@ -849,70 +1536,359 @@ class IkRos:
         # print(f"received joint_states: {self.__joint_states}")
 
     def quest_bone_poses_callback(self, quest_bone_poses_msg):
-        self.quest3_arm_info_transformer.read_msg(quest_bone_poses_msg)
-        pose, self.__left_elbow_pos = self.quest3_arm_info_transformer.get_hand_pose("Left")
-        self.__target_pose = pose
-        pose, self.__right_elbow_pos = self.quest3_arm_info_transformer.get_hand_pose("Right")
-        self.__target_pose_right = pose
-        if self.__recieved_new_target_pose == False:
-            self.__recieved_new_target_pose = True
-        left_finger_joints = self.quest3_arm_info_transformer.get_finger_joints("Left")
-        right_finger_joints = self.quest3_arm_info_transformer.get_finger_joints("Right")
-        self.hand_finger_data = [left_finger_joints, right_finger_joints]
-        
-        # 发布/mm/two_arm_hand_pose_cmd话题 - 直接使用获取到的pose数据（轮臂需 mpc_observation.time > 阈值，避免 #3009）
-        if (self.robot_type == 1 and self.quest3_arm_info_transformer.is_runing
+        """Keep the TCPROS receive callback short and always retain the newest frame."""
+        recv_time = time.time()
+        recv_monotonic = time.perf_counter()
+        vr_ts_ms = int(quest_bone_poses_msg.timestamp_ms)
+
+        with self._bone_condition:
+            self._bone_input_seq += 1
+            frame = BoneInputFrame(
+                sequence=self._bone_input_seq,
+                message=quest_bone_poses_msg,
+                receive_time=recv_time,
+                receive_monotonic=recv_monotonic,
+                source_timestamp_ms=vr_ts_ms,
+            )
+            overwritten = self._pending_bone_frame is not None
+            if overwritten:
+                self._bone_overwrite_count += 1
+            self._pending_bone_frame = frame
+            self._bone_condition.notify()
+
+        # 测量通信延迟：VR节点发布时刻(timestamp_ms) → IK节点回调接收时刻
+        if self.enable_vr_latency_diagnostics and vr_ts_ms > 0:
+            comm_latency_ms = (recv_time - vr_ts_ms / 1000.0) * 1000.0
+            self.comm_latency_pub.publish(Float64(comm_latency_ms))
+
+    def _publish_transform_stage_diagnostics(self, frame, timings):
+        """Publish one self-describing, same-frame transform timing sample."""
+        if self.transform_stage_latency_pub is None:
+            return
+        msg = Float32MultiArrayStamped()
+        msg.header.seq = int(frame.sequence) & 0xFFFFFFFF
+        msg.header.stamp = rospy.Time.from_sec(frame.receive_time)
+        msg.header.frame_id = "vr_absolute_transform_stage_v1"
+        dimension = MultiArrayDimension()
+        dimension.label = ",".join(TRANSFORM_STAGE_DIAGNOSTIC_FIELDS)
+        dimension.size = len(TRANSFORM_STAGE_DIAGNOSTIC_FIELDS)
+        dimension.stride = len(TRANSFORM_STAGE_DIAGNOSTIC_FIELDS)
+        msg.data.layout.dim = [dimension]
+        msg.data.layout.data_offset = 0
+        msg.data.data = [
+            float(timings.get(name, float("nan")))
+            for name in TRANSFORM_STAGE_DIAGNOSTIC_FIELDS
+        ]
+        self.transform_stage_latency_pub.publish(msg)
+
+    @staticmethod
+    def _copy_pose(pose):
+        if pose is None or pose[0] is None or pose[1] is None:
+            return (None, None)
+        return (np.asarray(pose[0]).copy(), np.asarray(pose[1]).copy())
+
+    @staticmethod
+    def _copy_optional_array(value):
+        return None if value is None else np.asarray(value).copy()
+
+    def _take_latest_bone_frame(self):
+        with self._bone_condition:
+            self._bone_condition.wait_for(
+                lambda: self._pending_bone_frame is not None or self.stop_event.is_set(),
+                timeout=0.1,
+            )
+            if self.stop_event.is_set():
+                return None
+            frame = self._pending_bone_frame
+            self._pending_bone_frame = None
+            return frame
+
+    def _get_joystick_snapshot(self):
+        with self._joystick_lock:
+            return self._joystick_snapshot
+
+    def _queue_latest_finger_input(self, frame, joystick_snapshot):
+        with self._finger_condition:
+            self._pending_finger_input = (frame, joystick_snapshot)
+            self._finger_condition.notify()
+
+    def _take_latest_finger_input(self):
+        with self._finger_condition:
+            self._finger_condition.wait_for(
+                lambda: self._pending_finger_input is not None
+                or self.stop_event.is_set(),
+                timeout=0.1,
+            )
+            if self.stop_event.is_set():
+                return None
+            value = self._pending_finger_input
+            self._pending_finger_input = None
+            return value
+
+    def _finger_processing_loop(self):
+        """Process only the newest finger frame at a bounded lower rate."""
+        min_period = 1.0 / self.finger_processing_hz
+        last_started = 0.0
+        while not self.stop_event.is_set() and not rospy.is_shutdown():
+            pending = self._take_latest_finger_input()
+            if pending is None:
+                continue
+
+            remaining = min_period - (time.monotonic() - last_started)
+            if remaining > 0.0:
+                with self._finger_condition:
+                    self._finger_condition.wait(timeout=remaining)
+                    if self.stop_event.is_set():
+                        return
+                    if self._pending_finger_input is not None:
+                        pending = self._pending_finger_input
+                        self._pending_finger_input = None
+
+            frame, joystick_snapshot = pending
+            process_start = time.perf_counter()
+            try:
+                result = self.quest3_arm_info_transformer.process_finger_frame(
+                    frame.message, joystick_snapshot
+                )
+                if result is None:
+                    continue
+                with self._target_lock:
+                    self.hand_finger_data = [
+                        result["left_finger_joints"],
+                        result["right_finger_joints"],
+                    ]
+                    self._vr_is_running = result["is_running"]
+                if self.enable_vr_latency_diagnostics:
+                    self.finger_processing_latency_pub.publish(
+                        Float64((time.perf_counter() - process_start) * 1000.0)
+                    )
+            except Exception as exc:
+                rospy.logerr_throttle(
+                    1.0, "Failed to process latest VR finger frame: %s", exc
+                )
+            finally:
+                last_started = time.monotonic()
+
+    def _bone_processing_loop(self):
+        """Transform only the newest pending bone frame and publish an atomic snapshot."""
+        while not self.stop_event.is_set() and not rospy.is_shutdown():
+            frame = self._take_latest_bone_frame()
+            if frame is None:
+                continue
+            worker_start = time.perf_counter()
+
+            with self._bone_condition:
+                overwrite_count = self._bone_overwrite_count
+            if (self.enable_vr_latency_diagnostics
+                    and overwrite_count
+                    != self._last_reported_bone_overwrite_count):
+                self._last_reported_bone_overwrite_count = overwrite_count
+                self.bone_overwrite_count_pub.publish(UInt64(overwrite_count))
+
+            processing_start = time.perf_counter()
+            try:
+                joystick_snapshot = self._get_joystick_snapshot()
+                transformer_lock_request = time.perf_counter()
+                # The transformer now has a single arm writer. Joystick and
+                # finger workers exchange immutable snapshots, so no shared
+                # Transformer lock is required on this critical path.
+                transformer_lock_acquired = transformer_lock_request
+                read_msg_timings = self.quest3_arm_info_transformer.read_msg(
+                    frame.message,
+                    collect_timing=self.transform_stage_latency_pub is not None,
+                    joystick_snapshot=joystick_snapshot,
+                    defer_finger_processing=True,
+                )
+                if read_msg_timings is False:
+                    continue
+                read_msg_done = time.perf_counter()
+                left_pose, left_elbow_pos = (
+                    self.quest3_arm_info_transformer.get_hand_pose("Left")
+                )
+                right_pose, right_elbow_pos = (
+                    self.quest3_arm_info_transformer.get_hand_pose("Right")
+                )
+                finger_state = self.quest3_arm_info_transformer.get_finger_state()
+                transform_done_time = time.time()
+                transform_done_monotonic = time.perf_counter()
+                snapshot = ProcessedBoneFrame(
+                    sequence=frame.sequence,
+                    receive_time=frame.receive_time,
+                    source_timestamp_ms=frame.source_timestamp_ms,
+                    transform_done_time=transform_done_time,
+                    transform_done_monotonic=transform_done_monotonic,
+                    left_pose=self._copy_pose(left_pose),
+                    right_pose=self._copy_pose(right_pose),
+                    left_elbow_pos=self._copy_optional_array(left_elbow_pos),
+                    right_elbow_pos=self._copy_optional_array(right_elbow_pos),
+                    left_finger_joints=finger_state["left_finger_joints"],
+                    right_finger_joints=finger_state["right_finger_joints"],
+                    left_shoulder_rpy=np.asarray(
+                        self.quest3_arm_info_transformer.left_shoulder_rpy_in_robot
+                    ).copy(),
+                    right_shoulder_rpy=np.asarray(
+                        self.quest3_arm_info_transformer.right_shoulder_rpy_in_robot
+                    ).copy(),
+                    is_running=finger_state["is_running"],
+                    is_hand_tracking=bool(
+                        self.quest3_arm_info_transformer.is_hand_tracking
+                    ),
+                    vr_error=bool(
+                        self.quest3_arm_info_transformer.check_if_vr_error()
+                    ),
+                )
+                snapshot_done = time.perf_counter()
+                self._queue_latest_finger_input(frame, joystick_snapshot)
+
+                target_lock_request = time.perf_counter()
+                with self._ik_condition:
+                    target_lock_acquired = time.perf_counter()
+                    self._latest_processed_bone = snapshot
+                    self.__target_pose = snapshot.left_pose
+                    self.__target_pose_right = snapshot.right_pose
+                    self.__left_elbow_pos = snapshot.left_elbow_pos
+                    self.__right_elbow_pos = snapshot.right_elbow_pos
+                    # Finger data and gesture state have a single writer: the
+                    # asynchronous finger worker. Do not overwrite a newer
+                    # result with the snapshot observed by this arm frame.
+                    self._vr_is_hand_tracking = snapshot.is_hand_tracking
+                    self._vr_error = snapshot.vr_error
+                    if snapshot.left_pose[0] is not None and snapshot.right_pose[0] is not None:
+                        self.__recieved_new_target_pose = True
+                    target_ready_time = time.time()
+                    target_ready_monotonic = time.perf_counter()
+                    self._ik_target_generation += 1
+                    self._ik_target_ready_time = target_ready_time
+                    self._ik_target_ready_monotonic = target_ready_monotonic
+                    self._ik_condition.notify()
+                target_update_done = time.perf_counter()
+
+                if self.enable_vr_latency_diagnostics:
+                    processing_ms = (
+                        target_update_done - processing_start
+                    ) * 1000.0
+                    pipeline_ms = (
+                        snapshot.transform_done_time - frame.receive_time
+                    ) * 1000.0
+                    self.transform_processing_latency_pub.publish(
+                        Float64(processing_ms)
+                    )
+                    self.transform_pipeline_latency_pub.publish(
+                        Float64(pipeline_ms)
+                    )
+                    self.ik_target_commit_latency_pub.publish(
+                        Float64(
+                            max(
+                                0.0,
+                                (target_ready_monotonic
+                                 - snapshot.transform_done_monotonic) * 1000.0,
+                            )
+                        )
+                    )
+                self._publish_wheel_target_from_snapshot(snapshot)
+                if self.transform_stage_latency_pub is not None:
+                    read_msg_timings = read_msg_timings or {}
+                    stage_timings = {
+                        "callback_to_worker_ms": (
+                            worker_start - frame.receive_monotonic
+                        ) * 1000.0,
+                        "worker_housekeeping_ms": (
+                            transformer_lock_request - worker_start
+                        ) * 1000.0,
+                        "transformer_lock_wait_ms": (
+                            transformer_lock_acquired - transformer_lock_request
+                        ) * 1000.0,
+                        "snapshot_build_ms": (
+                            snapshot_done - read_msg_done
+                        ) * 1000.0,
+                        "target_lock_wait_ms": (
+                            target_lock_acquired - target_lock_request
+                        ) * 1000.0,
+                        "target_update_ms": (
+                            target_update_done - target_lock_acquired
+                        ) * 1000.0,
+                        "worker_total_ms": (
+                            target_update_done - worker_start
+                        ) * 1000.0,
+                        "callback_to_transform_done_ms": (
+                            transform_done_monotonic - frame.receive_monotonic
+                        ) * 1000.0,
+                    }
+                    stage_timings.update(read_msg_timings)
+                    self._publish_transform_stage_diagnostics(frame, stage_timings)
+            except Exception as exc:
+                rospy.logerr_throttle(1.0, "Failed to process latest VR bone frame: %s", exc)
+
+    def _publish_wheel_target_from_snapshot(self, snapshot):
+        # 轮臂需 mpc_observation.time > 阈值，避免 #3009。
+        if (self.robot_type == 1 and snapshot.is_running
                 and self._wheel_mpc_stable_for_mm_cmd()
-                and self.__target_pose is not None and self.__target_pose_right is not None):
+                and snapshot.left_pose[0] is not None
+                and snapshot.right_pose[0] is not None):
             eef_pose_msg = twoArmHandPoseCmd()
             eef_pose_msg.frame = 3
-            # self.__target_pose 是 (hand_pos, hand_quat) 元组
-            eef_pose_msg.hand_poses.left_pose.pos_xyz = self.__target_pose[0]  # hand_pos [x, y, z]
-            eef_pose_msg.hand_poses.left_pose.quat_xyzw = self.__target_pose[1]  # hand_quat [x, y, z, w]
-            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = self.__left_elbow_pos if self.__left_elbow_pos is not None else [0.0, 0.0, 0.0]
-
-            # self.__target_pose_right 是 (hand_pos, hand_quat) 元组
-            eef_pose_msg.hand_poses.right_pose.pos_xyz = self.__target_pose_right[0]  # hand_pos [x, y, z]
-            eef_pose_msg.hand_poses.right_pose.quat_xyzw = self.__target_pose_right[1]  # hand_quat [x, y, z, w]
-            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = self.__right_elbow_pos if self.__right_elbow_pos is not None else [0.0, 0.0, 0.0]
-            
+            eef_pose_msg.hand_poses.left_pose.pos_xyz = snapshot.left_pose[0]
+            eef_pose_msg.hand_poses.left_pose.quat_xyzw = snapshot.left_pose[1]
+            eef_pose_msg.hand_poses.left_pose.elbow_pos_xyz = (
+                snapshot.left_elbow_pos if snapshot.left_elbow_pos is not None else [0.0, 0.0, 0.0]
+            )
+            eef_pose_msg.hand_poses.right_pose.pos_xyz = snapshot.right_pose[0]
+            eef_pose_msg.hand_poses.right_pose.quat_xyzw = snapshot.right_pose[1]
+            eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = (
+                snapshot.right_elbow_pos if snapshot.right_elbow_pos is not None else [0.0, 0.0, 0.0]
+            )
+            eef_pose_msg.timestamp_ms = int(snapshot.receive_time * 1000)
             self.pub_mm_two_arm_hand_pose_cmd.publish(eef_pose_msg)
-        
-        # self.pub_robot_end_hand(left_finger_joints, right_finger_joints)
 
     def two_arm_hand_pose_target_callback(self, msg_ori):
         msg = msg_ori.hand_poses
         if msg_ori.use_custom_ik_param:
             self.external_q0 = list(msg.left_pose.joint_angles) + list(msg.right_pose.joint_angles)
-        self.__target_pose = (msg.left_pose.pos_xyz, msg.left_pose.quat_xyzw)
-        self.__target_pose_right = (msg.right_pose.pos_xyz, msg.right_pose.quat_xyzw)
+        target_pose = (np.asarray(msg.left_pose.pos_xyz), np.asarray(msg.left_pose.quat_xyzw))
+        target_pose_right = (np.asarray(msg.right_pose.pos_xyz), np.asarray(msg.right_pose.quat_xyzw))
         if(abs(msg.left_pose.elbow_pos_xyz[0]) <= 1e-5 
             and abs(msg.left_pose.elbow_pos_xyz[1]) <= 1e-5 
             and abs(msg.left_pose.elbow_pos_xyz[2]) <= 1e-5):  # 都为0，则不控制elbow
-            self.__left_elbow_pos = None      
+            left_elbow_pos = None
         else:
-            self.__left_elbow_pos = np.array(msg.left_pose.elbow_pos_xyz)
+            left_elbow_pos = np.array(msg.left_pose.elbow_pos_xyz)
         if(abs(msg.right_pose.elbow_pos_xyz[0]) <= 1e-5 
             and abs(msg.right_pose.elbow_pos_xyz[1]) <= 1e-5 
             and abs(msg.right_pose.elbow_pos_xyz[2]) <= 1e-5):
-            self.__right_elbow_pos = None
+            right_elbow_pos = None
         else:
-            self.__right_elbow_pos = np.array(msg.right_pose.elbow_pos_xyz)
-        
-        if self.__recieved_new_target_pose == False:
-            self.__recieved_new_target_pose = True
+            right_elbow_pos = np.array(msg.right_pose.elbow_pos_xyz)
+
         if self.__as_mc_ik:
             self.__as_mc_ik = False
             self.arm_ik.set_as_mc_ik(self.__as_mc_ik)
+        with self._ik_condition:
+            self.__target_pose = target_pose
+            self.__target_pose_right = target_pose_right
+            self.__left_elbow_pos = left_elbow_pos
+            self.__right_elbow_pos = right_elbow_pos
+            self._latest_processed_bone = None
+            self.__recieved_new_target_pose = True
+            self._ik_target_generation += 1
+            self._ik_target_ready_time = time.time()
+            self._ik_target_ready_monotonic = time.perf_counter()
+            self._ik_condition.notify()
 
     def joySticks_data_callback(self, msg):
-        self.quest3_arm_info_transformer.read_joySticks_msg(msg)
+        joystick_snapshot = (
+            (float(msg.left_trigger), float(msg.left_grip)),
+            (float(msg.right_trigger), float(msg.right_grip)),
+        )
+        with self._joystick_lock:
+            self._joystick_snapshot = joystick_snapshot
+        with self._target_lock:
+            is_hand_tracking = self._vr_is_hand_tracking
         self.joySticks_data = msg
         # 准备姿态下 IK 线程可能卡在等待首帧姿态/MPC 就绪，此时由回调补发夹爪指令。
         # 遥操主循环启动后改由 hand_finger_data_process 单路发布，避免双路重复下发。
         # qa: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/3505
         if (self.end_effector_type == LEJUCLAW
-                and not self.quest3_arm_info_transformer.is_hand_tracking
+                and not is_hand_tracking
                 and not self.__ik_claw_publish_active):
             self.pub_robot_end_hand(joyStick_data=msg)
 
@@ -1021,7 +1997,13 @@ class IkRos:
         last_v = np.zeros(self.__single_arm_dof)
         while t_sim < t_duration:
             pose = arm_ik.left_hand_pose(last_q) if ctrl_arm_idx.name() == ArmIdx.LEFT.name() else arm_ik.right_hand_pose(last_q)
-            pos_target, quat_target = self.__target_pose if ctrl_arm_idx.name() == ArmIdx.LEFT.name() else self.__target_pose_right
+            with self._target_lock:
+                target_pose = (
+                    self.__target_pose
+                    if ctrl_arm_idx.name() == ArmIdx.LEFT.name()
+                    else self.__target_pose_right
+                )
+            pos_target, quat_target = target_pose
 
             is_close, norm = self.check_if_close(pose, (pos_target, quaternion_to_RPY(quat_target)))
             if is_close:
@@ -1079,14 +2061,17 @@ class IkRos:
         """
         If target is far, return True, else return False.
         """
-        if self.__target_pose[0] is None or self.__target_pose_right[0] is None:
+        with self._target_lock:
+            target_pose = self.__target_pose
+            target_pose_right = self.__target_pose_right
+        if target_pose[0] is None or target_pose_right[0] is None:
             return False
         if self.__current_pose[0] is None or self.__current_pose_right[0] is None:
             return False
         pos_left, _ = self.__current_pose
         pos_right, _ = self.__current_pose_right
-        pos_target_left, _ = self.__target_pose
-        pos_target_right, _ = self.__target_pose_right
+        pos_target_left, _ = target_pose
+        pos_target_right, _ = target_pose_right
         dist_left = np.linalg.norm(pos_left - pos_target_left)
         dist_right = np.linalg.norm(pos_right - pos_target_right)
         if dist_left > threshold and self.__ctrl_arm_idx.name() != ArmIdx.RIGHT.name():
@@ -1110,12 +2095,15 @@ class IkRos:
 
     def hand_finger_data_process(self, event):
         # if(self.isJoyPushed(self.joySticks_data)):
-        if(not self.quest3_arm_info_transformer.is_hand_tracking):
+        with self._target_lock:
+            is_hand_tracking = self._vr_is_hand_tracking
+            hand_finger_data = self.hand_finger_data
+        if not is_hand_tracking:
             # print(f"\033[91mJoystick is pushed, stop control.\033[0m")
             self.pub_robot_end_hand(joyStick_data=self.joySticks_data)            
         else:
             # print(f"\033[91mJoystick is not pushed, continue control.\033[0m")
-            self.pub_robot_end_hand(hand_finger_data=self.hand_finger_data)
+            self.pub_robot_end_hand(hand_finger_data=hand_finger_data)
 
 
     def pub_robot_end_hand(self, joyStick_data=None, hand_finger_data = None):
@@ -1235,6 +2223,12 @@ class IkRos:
             # 重置所有姿态
             print(f"\033[91m[IK]Reset arm mode.\033[0m")
             self.trigger_reset_mode = True
+            with self._ik_condition:
+                self._ik_target_generation += 1
+                self._ik_target_ready_time = time.time()
+                self._ik_target_ready_monotonic = time.perf_counter()
+                self._ik_condition.notify()
+            self._clear_latest_ik_solution(clear_published_command=True)
             self.arm_mode_changing = False
             self.collision_check_control = False
             
@@ -1252,6 +2246,12 @@ class IkRos:
             # 重置所有姿态
             print(f"\033[91m[IK]Reset arm mode.\033[0m")
             self.trigger_reset_mode = True
+            with self._ik_condition:
+                self._ik_target_generation += 1
+                self._ik_target_ready_time = time.time()
+                self._ik_target_ready_monotonic = time.perf_counter()
+                self._ik_condition.notify()
+            self._clear_latest_ik_solution(clear_published_command=True)
             self.collision_check_control = False
             
             # 半身模式下，保存当前手臂状态并启动定时器持续发布
@@ -1346,7 +2346,7 @@ class IkRos:
         """停止机器人信号回调函数"""
         if msg.data:  # 当收到True信号时退出程序
             rospy.loginfo("[IkRos] 收到停止机器人信号，正在退出程序...")
-            self.stop_event.set()  # 设置停止事件
+            self._stop_threads()
             rospy.signal_shutdown("Received stop signal")  # 触发ROS节点关闭
 
     def robot_walking_status_callback(self, msg):

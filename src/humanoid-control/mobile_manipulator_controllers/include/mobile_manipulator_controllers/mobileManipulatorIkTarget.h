@@ -10,6 +10,7 @@
 #include "ros/publisher.h"
 #include "ros/service_server.h"
 #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/Float64.h>
 #include <std_srvs/SetBool.h>
 #include <ocs2_robotic_tools/common/RotationTransforms.h>
 #include <kuavo_msgs/setMmCtrlFrame.h>
@@ -23,6 +24,7 @@
 #include <ocs2_mobile_manipulator/MobileManipulatorPinocchioMapping.h>
 #include <ocs2_pinocchio_interface/PinocchioEndEffectorSpatialKinematics.h>
 #include <mutex>
+#include <chrono>
 
 namespace mobile_manipulator_controller
 {
@@ -73,6 +75,11 @@ class MobileManipulatorIkTarget {
     bool isHumanoidObservationReceived() const;
     int getEffTrajReceived() const;
     bool getTargetTrajectories(TargetTrajectories& targetTrajectories);
+    
+    // 延迟测量: 获取最近一次IK指令的接收时刻和序列号
+    bool getLatestIkRecvInfo(std::chrono::steady_clock::time_point& recvTime, uint32_t& seq) const;
+    // 延迟测量: 消费新IK数据标记，返回该数据接收时刻（端到端管线延迟用）
+    bool consumeNewIkData(std::chrono::steady_clock::time_point& recvTime);
     void setEnableHumanoidObservationCallback(bool enable){enableHumanoidObservationCallback_ = enable;}
     bool getEnableHumanoidObservationCallback() const {return enableHumanoidObservationCallback_;}
     bool setHumanoidObservationByMmState(const vector_t& mmState);
@@ -136,6 +143,12 @@ class MobileManipulatorIkTarget {
     
     // 发布者
     ::ros::Publisher effTrajReceivedPublisher_;
+    ::ros::Publisher ocs2CommLatencyPublisher_;  // OCS2 IK通信延迟发布器
+    
+    // 延迟测量: 端到端管线延迟跟踪
+    std::chrono::steady_clock::time_point processedRecvSteadyTime_;  // 本周期处理的数据接收时刻
+    uint32_t processedSeq_ = 0;       // 本周期处理的数据序列号
+    bool newDataProcessed_ = false;  // 本周期是否处理了新数据（seq变化）
     
     // 服务
     ::ros::ServiceServer setQuest3UtilsService_;
@@ -171,7 +184,11 @@ class MobileManipulatorIkTarget {
         bool isValid;            // 数据是否有效
         ros::Time timestamp;     // 数据时间戳
         
-        LocalFrameData() : isValid(false) {}
+        // 延迟测量: IK指令接收时刻和序列号
+        std::chrono::steady_clock::time_point recvSteadyTime;  // 接收时刻（单调时钟，用于IK处理延迟）
+        uint32_t seq;             // 序列号（用于跨线程数据匹配）
+        
+        LocalFrameData() : isValid(false), seq(0) {}
     };
 
     // 局部坐标系下的数据存储
