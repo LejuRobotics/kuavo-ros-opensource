@@ -364,6 +364,19 @@ namespace humanoidController_wheel_wbc
     vector_t wbc_arm_raw_q_;
     vector_t wbc_arm_raw_v_;
 
+    // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
+    // ABSOLUTE_QUICK_JOINT3_SHAPER_BETA_FDB60BBC_V2
+    // 仅在绝对式上肢快速直通路径使用；普通 MPC、增量式和插补路径均不经过该状态。
+    bool absolute_quick_q_lowpass_initialized_{false};
+    vector_t absolute_quick_q_lowpass_q_;       // 500 Hz first-order LPF internal state
+    vector_t absolute_quick_q_shaped_q_;        // final coherent q command
+    vector_t absolute_quick_q_shaped_v_;        // final coherent dq command
+    double absolute_quick_q_lowpass_cutoff_hz_{3.5};
+    double absolute_quick_joint3_cutoff_hz_{2.0};
+    double absolute_quick_joint3_max_velocity_{2.5};
+    double absolute_quick_joint3_soft_limit_rad_{1.25};
+    double absolute_quick_joint3_hard_limit_rad_{1.484};
+
     // ========== 运动学限制滤波相关 ==========
     std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  obsStateLimitFilterPtr_;    // observation.state 限制滤波
     std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  obsInputLimitFilterPtr_;    // observation.input 限制滤波

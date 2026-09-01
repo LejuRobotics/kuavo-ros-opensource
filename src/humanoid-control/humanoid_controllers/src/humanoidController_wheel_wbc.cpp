@@ -1159,6 +1159,18 @@ namespace humanoidController_wheel_wbc
     }
     else  // 轮臂MPC模式下的特殊处理
     {
+      // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
+      // 只跟踪“上肢快速 + 直接位置通路”的有效期。离开该通路立即清除状态，
+      // 保证下次进入时从进入前控制目标重新初始化，避免沿用旧滤波状态。
+      const bool absoluteQuickQLowPassActive =
+          (quickMode_ == 2 || quickMode_ == 3) &&
+          (lbMpcMode == 1 || lbMpcMode == 3) &&
+          !enable_arm_traj_interpolator_;
+      if (!absoluteQuickQLowPassActive)
+      {
+        absolute_quick_q_lowpass_initialized_ = false;
+      }
+
       // 手臂跟踪快模式: 直接从 kuavo_arm_traj 话题获取手臂关节指令
       if (quickMode_ != 0 && (lbMpcMode == 1 || lbMpcMode == 3))  // 设置仅在armOnly和baseArm模式下生效
       {
@@ -1182,9 +1194,176 @@ namespace humanoidController_wheel_wbc
             vector_t arm_target_qvel = vector_t::Zero(armNum_);
             arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
             arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
-            optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
-            optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
-            ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
+
+            // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
+            // ABSOLUTE_QUICK_JOINT3_SHAPER_BETA_FDB60BBC_V2
+            // 首帧从本周期尚未被快速目标覆盖的控制目标起步，避免切入瞬间跳到 VR 目标。
+            if (!absolute_quick_q_lowpass_initialized_ ||
+                absolute_quick_q_lowpass_q_.size() != armNum_ ||
+                absolute_quick_q_shaped_q_.size() != armNum_ ||
+                absolute_quick_q_shaped_v_.size() != armNum_)
+            {
+              const vector_t seed = optimizedState_mrt_.tail(armNum_);
+              absolute_quick_q_lowpass_q_ = seed;
+              absolute_quick_q_shaped_q_ = seed;
+              absolute_quick_q_shaped_v_ = vector_t::Zero(armNum_);
+
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/cutoff_hz",
+                  absolute_quick_q_lowpass_cutoff_hz_,
+                  3.5);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_cutoff_hz",
+                  absolute_quick_joint3_cutoff_hz_,
+                  2.0);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_max_velocity",
+                  absolute_quick_joint3_max_velocity_,
+                  2.5);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_soft_limit_rad",
+                  absolute_quick_joint3_soft_limit_rad_,
+                  1.25);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_hard_limit_rad",
+                  absolute_quick_joint3_hard_limit_rad_,
+                  1.484);
+
+              if (!(absolute_quick_q_lowpass_cutoff_hz_ >= 0.5 &&
+                    absolute_quick_q_lowpass_cutoff_hz_ <= 20.0))
+              {
+                ROS_WARN("[absolute quick shaper] invalid general cutoff %.3f Hz; use 3.5 Hz",
+                         absolute_quick_q_lowpass_cutoff_hz_);
+                absolute_quick_q_lowpass_cutoff_hz_ = 3.5;
+              }
+              if (!(absolute_quick_joint3_cutoff_hz_ >= 0.5 &&
+                    absolute_quick_joint3_cutoff_hz_ <=
+                        absolute_quick_q_lowpass_cutoff_hz_))
+              {
+                ROS_WARN("[absolute quick shaper] invalid joint3 cutoff %.3f Hz; use 2.0 Hz",
+                         absolute_quick_joint3_cutoff_hz_);
+                absolute_quick_joint3_cutoff_hz_ = 2.0;
+              }
+              if (!(absolute_quick_joint3_max_velocity_ >= 0.2 &&
+                    absolute_quick_joint3_max_velocity_ <= 7.5))
+              {
+                ROS_WARN("[absolute quick shaper] invalid joint3 max velocity %.3f; use 2.5 rad/s",
+                         absolute_quick_joint3_max_velocity_);
+                absolute_quick_joint3_max_velocity_ = 2.5;
+              }
+              if (!(absolute_quick_joint3_soft_limit_rad_ >= 0.5 &&
+                    absolute_quick_joint3_hard_limit_rad_ <= 1.55 &&
+                    absolute_quick_joint3_hard_limit_rad_ -
+                            absolute_quick_joint3_soft_limit_rad_ >=
+                        0.05))
+              {
+                ROS_WARN("[absolute quick shaper] invalid joint3 limits soft=%.3f hard=%.3f; use 1.25/1.484 rad",
+                         absolute_quick_joint3_soft_limit_rad_,
+                         absolute_quick_joint3_hard_limit_rad_);
+                absolute_quick_joint3_soft_limit_rad_ = 1.25;
+                absolute_quick_joint3_hard_limit_rad_ = 1.484;
+              }
+
+              absolute_quick_q_lowpass_initialized_ = true;
+              ROS_INFO("[absolute quick shaper] entered: general_fc=%.3f joint3_fc=%.3f vmax=%.3f soft=%.3f hard=%.3f",
+                       absolute_quick_q_lowpass_cutoff_hz_,
+                       absolute_quick_joint3_cutoff_hz_,
+                       absolute_quick_joint3_max_velocity_,
+                       absolute_quick_joint3_soft_limit_rad_,
+                       absolute_quick_joint3_hard_limit_rad_);
+            }
+
+            const double safeDt = std::max(0.0005, std::min(0.010, dt_));
+            const vector_t previousShapedQ = absolute_quick_q_shaped_q_;
+
+            // 500 Hz exact-discrete first-order LPF. The two third joints use a
+            // lower cutoff; all other joints retain the general cutoff.
+            for (int i = 0; i < armNum_; ++i)
+            {
+              const bool isJoint3 = (i == 2 || i == 9);
+              const double cutoffHz =
+                  isJoint3 ? absolute_quick_joint3_cutoff_hz_
+                           : absolute_quick_q_lowpass_cutoff_hz_;
+              const double alpha =
+                  1.0 - std::exp(-2.0 * 3.14159265358979323846 *
+                                 cutoffHz * safeDt);
+              absolute_quick_q_lowpass_q_(i) +=
+                  alpha * (arm_target_qpos(i) -
+                           absolute_quick_q_lowpass_q_(i));
+
+              if (!isJoint3)
+              {
+                absolute_quick_q_shaped_q_(i) =
+                    absolute_quick_q_lowpass_q_(i);
+                absolute_quick_q_shaped_v_(i) =
+                    (absolute_quick_q_shaped_q_(i) - previousShapedQ(i)) /
+                    safeDt;
+                continue;
+              }
+
+              // The physical controller already has a hard joint limit. Clamp
+              // the shaper target slightly before handing it downstream, then
+              // reduce admissible velocity continuously inside the soft zone.
+              const double hard = absolute_quick_joint3_hard_limit_rad_;
+              const double soft = absolute_quick_joint3_soft_limit_rad_;
+              const double boundedTarget =
+                  std::max(-hard,
+                           std::min(hard, absolute_quick_q_lowpass_q_(i)));
+              const double error =
+                  boundedTarget - absolute_quick_q_shaped_q_(i);
+              const double direction =
+                  error > 0.0 ? 1.0 : (error < 0.0 ? -1.0 : 0.0);
+
+              double softScale = 1.0;
+              if (direction > 0.0 && absolute_quick_q_shaped_q_(i) > soft)
+              {
+                softScale =
+                    (hard - absolute_quick_q_shaped_q_(i)) / (hard - soft);
+              }
+              else if (direction < 0.0 &&
+                       absolute_quick_q_shaped_q_(i) < -soft)
+              {
+                softScale =
+                    (hard + absolute_quick_q_shaped_q_(i)) / (hard - soft);
+              }
+              softScale = std::max(0.0, std::min(1.0, softScale));
+
+              // A memoryless slew limit is deliberate here. It never carries
+              // an old acceleration/velocity state through a hand reversal,
+              // and the clamped delta cannot pass the current filtered target.
+              const double maxPositionStep =
+                  absolute_quick_joint3_max_velocity_ * softScale * safeDt;
+              const double positionStep =
+                  std::max(-maxPositionStep,
+                           std::min(maxPositionStep, error));
+              absolute_quick_q_shaped_q_(i) += positionStep;
+              absolute_quick_q_shaped_q_(i) =
+                  std::max(-hard,
+                           std::min(hard, absolute_quick_q_shaped_q_(i)));
+              absolute_quick_q_shaped_v_(i) = positionStep / safeDt;
+            }
+
+            optimizedState_mrt_.tail(armNum_) = absolute_quick_q_shaped_q_;
+            // q and dq are now generated by the same 500 Hz shaper state.
+            optimizedInput_mrt_.tail(armNum_) = absolute_quick_q_shaped_v_;
+            ros_logger_->publishVector(
+                "/humanoid_wheel/arm_target_qpos_quick_mode",
+                absolute_quick_q_shaped_q_);
+
+            if (armNum_ > 9)
+            {
+              vector_t joint3ShaperState(8);
+              joint3ShaperState <<
+                  arm_target_qpos(2), absolute_quick_q_lowpass_q_(2),
+                  absolute_quick_q_shaped_q_(2),
+                  absolute_quick_q_shaped_v_(2),
+                  arm_target_qpos(9), absolute_quick_q_lowpass_q_(9),
+                  absolute_quick_q_shaped_q_(9),
+                  absolute_quick_q_shaped_v_(9);
+              ros_logger_->publishVector(
+                  "/wheel_arm_latency/absolute_joint3_shaper_state",
+                  joint3ShaperState);
+            }
           }
         }
       }

@@ -335,4 +335,14 @@
           name="webrtc_videostream" output="screen"
           args="$(arg camera_publisher_name) $(arg ip_address)"
           if="$(arg enable_videostream)" />
+
+    <!-- ABSOLUTE_QUICK_COMBO_BETA_FDB60BBC_V1: absolute Python IK only; left trigger + X toggles quickMode 0/2. -->
+    <node pkg="motion_capture_ik"
+          type="absolute_quick_mode_combo_node.py"
+          name="absolute_quick_mode_combo"
+          output="screen"
+          unless="$(arg use_cpp_incremental_ik)">
+      <param name="left_trigger_threshold" value="0.8"/>
+      <param name="debounce_sec" value="0.35"/>
+    </node>
 </launch>
