@@ -1283,12 +1283,55 @@ def robot_login():
     
 
     # 定义要运行的命令
-    command = "bash "+ folder_path +"/report_robot_network_info_service/setup.sh"  
+    command = "bash "+ folder_path +"/report_robot_network_info_service/setup.sh"
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
-    
+
     # sudo systemctl start report_robot_network_info.service
+
+def is_hotspot_installed():
+    """检测热点是否已安装（依据 dpkg 中 linux-wifi-hotspot 软件包状态）"""
+    try:
+        result = subprocess.run(
+            ["dpkg", "-s", "linux-wifi-hotspot"],
+            capture_output=True, text=True
+        )
+        # 仅在状态为 install ok installed 时判定为已安装
+        return result.returncode == 0 and "install ok installed" in result.stdout
+    except Exception as e:
+        print("Error checking hotspot install state: {}".format(e))
+        return False
+
+
+def hotspot_toggle():
+    """一键安装/卸载热点，按当前状态自动切换（已安装→卸载，未安装→安装）"""
+    hotspot_dir = os.path.normpath(os.path.join(folder_path, "..", "linux_wifi_hotspot"))
+    install_script = os.path.join(hotspot_dir, "kuavo_hotspot_install.sh")
+    uninstall_script = os.path.join(hotspot_dir, "uninstall.sh")
+
+    if is_hotspot_installed():
+        print(bcolors.OKGREEN + "检测到热点已安装，当前可执行【卸载】操作" + bcolors.ENDC)
+        print("提示：卸载后开机不再自动开启热点，如需恢复请重新安装")
+        if not os.path.exists(uninstall_script):
+            print(bcolors.FAIL + "错误：未找到卸载脚本: {}".format(uninstall_script) + bcolors.ENDC)
+            return
+        confirm = input("确定要卸载热点吗？(yes/no)：").strip().lower()
+        if confirm == "yes":
+            subprocess.run("sudo bash " + uninstall_script, shell=True)
+        else:
+            print("操作已取消")
+    else:
+        print(bcolors.OKCYAN + "检测到热点未安装，当前可执行【安装】操作" + bcolors.ENDC)
+        print("提示：安装过程需要联网下载依赖包，请保持网络畅通")
+        if not os.path.exists(install_script):
+            print(bcolors.FAIL + "错误：未找到安装脚本: {}".format(install_script) + bcolors.ENDC)
+            return
+        confirm = input("确定要安装热点吗？(yes/no)：").strip().lower()
+        if confirm == "yes":
+            subprocess.run("sudo bash " + install_script, shell=True)
+        else:
+            print("操作已取消")
 
 def get_git_info():
     """
@@ -1384,6 +1427,7 @@ def secondary_menu():
         print("p. 国产IMU测试")
         print("r. 隔离CPU核心 ")
         print("u. 配置robot上线提醒")
+        print("s. 一键安装/卸载WiFi热点")
         print("t. 恢复出厂文件夹")
         print("v. 执行CPU压力测试，检查散热")
 
@@ -1631,10 +1675,15 @@ def secondary_menu():
             print("运行指令将触发提示：sudo systemctl start report_robot_network_info.service")
             print(bcolors.HEADER + "###结束，robot上线提醒配置###" + bcolors.ENDC)   
             break
+        elif option == "s":
+            print(bcolors.HEADER + "###开始，一键安装/卸载WiFi热点###" + bcolors.ENDC)
+            hotspot_toggle()
+            print(bcolors.HEADER + "###结束，一键安装/卸载WiFi热点###" + bcolors.ENDC)
+            break
         elif option == "t":
             print(bcolors.HEADER + "###开始，恢复出厂文件夹###" + bcolors.ENDC)
             reset_folder()
-            print(bcolors.HEADER + "###结束，恢复出厂文件夹###" + bcolors.ENDC) 
+            print(bcolors.HEADER + "###结束，恢复出厂文件夹###" + bcolors.ENDC)
             break
         elif option == "v":
             print(bcolors.HEADER + "###开始，执行CPU压力测试，检查散热###" + bcolors.ENDC)
