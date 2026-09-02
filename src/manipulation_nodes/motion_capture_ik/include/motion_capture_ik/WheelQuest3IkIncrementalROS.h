@@ -23,6 +23,7 @@
 #include <noitom_hi5_hand_udp_python/PoseInfoList.h>
 #include <leju_utils/define.hpp>
 #include "motion_capture_ik/WheelArmControlBaseROS.h"
+#include "motion_capture_ik/WheelChestReferenceMapping.h"
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
@@ -104,6 +105,93 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
                                const Eigen::Vector3d& endEffectorPos,
                                const double link2Length);
 
+  struct CommandPose {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    Eigen::Vector3d position = Eigen::Vector3d::Zero();
+    Eigen::Quaterniond orientation = Eigen::Quaterniond::Identity();
+  };
+
+  struct ArmCommandFk {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    CommandPose shoulder;
+    CommandPose elbow;
+    CommandPose hand;
+    CommandPose endEffector;
+    CommandPose virtualThumb;
+  };
+
+  struct PublishedCommandFkSnapshot {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    uint64_t sequence = 0;
+    uint64_t leftArmSequence = 0;
+    uint64_t rightArmSequence = 0;
+    ros::Time stamp;
+    Eigen::VectorXd wholeBodyJoints;
+    CommandPose chest;
+    ArmCommandFk left;
+    ArmCommandFk right;
+    bool valid = false;
+    bool measuredFallback = false;
+  };
+
+  enum class GripTransferPhase { InactiveHold, PressSync, ActiveTrack, ReleaseSync };
+
+  struct ArmGripTransferState {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    GripTransferPhase phase = GripTransferPhase::InactiveHold;
+    uint64_t commandSequence = 0;
+    uint64_t gripGeneration = 0;
+    Eigen::VectorXd publishedArmJoints = Eigen::VectorXd::Zero(7);
+    ArmCommandFk poseInChest;
+    WheelThreePointHandAnchor threePointHandAnchor;
+    bool valid = false;
+
+    void reset() {
+      phase = GripTransferPhase::InactiveHold;
+      commandSequence = 0;
+      gripGeneration = 0;
+      publishedArmJoints.setZero(7);
+      poseInChest = ArmCommandFk{};
+      threePointHandAnchor.reset();
+      valid = false;
+    }
+  };
+
+  // Shared chest-reference transfer for the interval in which at least one
+  // arm is tracking.  publishedChestAtGrip is the exact FK(q_pub) state used
+  // for bumpless entry; desiredChestAtGrip belongs exclusively to the VR
+  // reference stream and is used only to calculate motion after that entry.
+  struct ChestReferenceTransferState {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    WheelChestReferencePose publishedChestAtGrip;
+    WheelChestReferencePose desiredChestAtGrip;
+    bool valid = false;
+
+    void reset() {
+      publishedChestAtGrip = WheelChestReferencePose{};
+      desiredChestAtGrip = WheelChestReferencePose{};
+      valid = false;
+    }
+  };
+
+  bool buildPublishedCommandFkSnapshot(PublishedCommandFkSnapshot& snapshot,
+                                       bool allowMeasuredFallback = true);
+  static CommandPose poseInReference(const CommandPose& reference, const CommandPose& pose);
+  static CommandPose poseFromReference(const CommandPose& reference, const CommandPose& relativePose);
+  static ArmCommandFk armPoseInReference(const CommandPose& reference, const ArmCommandFk& armPose);
+  static ArmCommandFk armPoseFromReference(const CommandPose& reference, const ArmCommandFk& relativeArmPose);
+  bool synchronizeArmTransferFromSnapshot(ArmIdx side,
+                                          const PublishedCommandFkSnapshot& snapshot,
+                                          bool updateIncrementalAnchor);
+  bool synchronizeNonTrackingSolverStates(const WheelChestReferencePose& currentChestRef,
+                                           bool synchronizeLeft,
+                                           bool synchronizeRight);
+  void markPublishedArmCommand(const ros::Time& stamp);
+  void markPublishedLowerBodyCommand(const ros::Time& stamp);
+  static uint64_t observeGripGeneration(bool pressed,
+                                        std::atomic<bool>& observedPressed,
+                                        std::atomic<uint64_t>& generation);
+
   // 初始化关节过滤器
   void initializeFilter(std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter>& filterPtr,
                         int dimension,
@@ -114,11 +202,16 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
                         const std::string& filterName = "",
                         const Eigen::VectorXd* initialState = nullptr);
 
-  // Grip 上升沿事件处理：更新锚点，使增量归零（避免 grip 切换瞬间位置跳变）
-  void handleGripRisingEdge(bool leftGripRisingEdge,
-                            bool rightGripRisingEdge,
-                            bool leftMaintainProcess,
-                            bool rightMaintainProcess);
+  // Grip 边沿事件处理：以最后实际发布的关节命令 FK 作为唯一锚点。
+  void handleGripEdges(bool leftGripRisingEdge,
+                       bool rightGripRisingEdge,
+                       bool leftGripFallingEdge,
+                       bool rightGripFallingEdge,
+                       bool leftMaintainProcess,
+                       bool rightMaintainProcess,
+                       const WheelChestReferencePose& currentChestRef,
+                       uint64_t leftGripGeneration,
+                       uint64_t rightGripGeneration);
 
   void remapUpperBodyRefPoints(const Eigen::Vector3d& chestPos,
                                const Eigen::Quaterniond& chestQuat,
@@ -150,7 +243,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   static Eigen::Quaterniond computeYawPitchOnlyQuatFromRotationMatrix(const Eigen::Matrix3d& rotationMatrix);
   bool updateWholeBodyConstraintList(const WholeBodyRefInput& input);
 
-  void solveIk();
+  bool solveIk();
 
   bool detectLeftArmMove();
   bool detectRightArmMove();
@@ -314,6 +407,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   double frozenRightHandHeightOffset_ = 0.0;
   double frozenLeftElbowHeightOffset_ = 0.0;
   double frozenRightElbowHeightOffset_ = 0.0;
+  bool chestExitAnchorPending_ = false;
 
   int drakeJointStateSize_;
   ArmIdx ctrlArmIdx_;  // 控制哪个手臂：LEFT, RIGHT, 或 BOTH
@@ -333,6 +427,16 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   double latestRightElbowTrackingActivation_ = 1.0;
   std::unique_ptr<WheelNaturalElbowGuide> leftNaturalElbowGuide_;
   std::unique_ptr<WheelNaturalElbowGuide> rightNaturalElbowGuide_;
+  WheelElbowReferenceAnchor leftActiveElbowReferenceAnchor_;
+  WheelElbowReferenceAnchor rightActiveElbowReferenceAnchor_;
+  WheelElbowActivationTransition leftElbowActivationTransition_;
+  WheelElbowActivationTransition rightElbowActivationTransition_;
+  double wheelElbowActivationTransitionDuration_ = 0.4;
+  double wheelElbowRefVelocityLimit_ = 0.35;
+  double wheelElbowRefAccelerationLimit_ = 1.5;
+  double wheelElbowRefJerkLimit_ = 10.0;
+  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> leftElbowGuideDeltaFilterPtr_;
+  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> rightElbowGuideDeltaFilterPtr_;
   bool drakeSolveUpdateChestOrientation_ = true;
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;
@@ -346,6 +450,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasValidIkSolution_ = false;
   Eigen::VectorXd ikLowerBodyJointCommand_;  // 保存IK结果的前4个关节角度（size = 4）
   Eigen::VectorXd ikUpperBodyJointCommand_;  // 保存IK结果的前4个关节角度的指数均值滤波状态（size = 14）
+  uint64_t latestIkCandidateSequence_ = 0;  // protected by ikResultMutex_
   // 双扳机同时松开时捕获的lb关节命令快照（用于胸部增量模式激活时冻结knee/leg/waist_pitch，只允许waist_yaw跟随VR）
   Eigen::VectorXd frozenLbJointCommand_;
   bool hasLbJointCommandFrozen_ = false;
@@ -386,6 +491,45 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Time lbLegMoveStartTime_;   // 下肢目标变化开始时间戳（用于 alpha 从 0.01->1.0 的超时插值）
   std::mutex lbLegMoveTimeMutex_;  // 保护 lbLegMoveStartTime_ 的互斥锁
   double lbLegMoveThresholdRad_ = 0.01;  // 下肢“发生明显变化”的角度阈值（弧度）
+
+  // Last commands that really reached the arm/lower-body publishers.  These
+  // flags and timestamps are protected by jointStateMutex_.  Solver
+  // candidates and measured FK must never be substituted for this state at a
+  // grip boundary.
+  bool hasPublishedArmCommand_ = false;
+  bool hasPublishedLowerBodyCommand_ = false;
+  Eigen::VectorXd publishedArmCommand_ = Eigen::VectorXd::Zero(14);
+  Eigen::VectorXd publishedLowerBodyCommand_ = Eigen::VectorXd::Zero(4);
+  ros::Time publishedArmCommandStamp_;
+  ros::Time publishedLowerBodyCommandStamp_;
+  uint64_t publishedCommandSequence_ = 0;
+  uint64_t publishedArmCommandSequence_ = 0;
+  uint64_t publishedLowerBodyCommandSequence_ = 0;
+  uint64_t publishedLeftArmCommandSequence_ = 0;
+  uint64_t publishedRightArmCommandSequence_ = 0;
+  bool lastLeftGripForPublish_ = false;
+  bool lastRightGripForPublish_ = false;
+
+  // Solve/publish handshake.  The publisher holds one side at its last q_pub
+  // until a successful whole-body solve has committed a candidate for the
+  // same grip state.  The candidate grip value prevents a stale pre-edge ACK
+  // from opening the gate under adverse thread scheduling.
+  std::atomic<bool> leftArmCandidateReadyForPublish_{false};
+  std::atomic<bool> rightArmCandidateReadyForPublish_{false};
+  std::atomic<bool> leftArmCandidateGripPressed_{false};
+  std::atomic<bool> rightArmCandidateGripPressed_{false};
+  std::atomic<uint64_t> leftArmCandidateGripGeneration_{0};
+  std::atomic<uint64_t> rightArmCandidateGripGeneration_{0};
+  std::atomic<uint64_t> leftArmAcknowledgedIkCandidateSequence_{0};
+  std::atomic<uint64_t> rightArmAcknowledgedIkCandidateSequence_{0};
+  std::atomic<bool> observedLeftGripPressed_{false};
+  std::atomic<bool> observedRightGripPressed_{false};
+  std::atomic<uint64_t> leftGripGeneration_{0};
+  std::atomic<uint64_t> rightGripGeneration_{0};
+
+  ArmGripTransferState leftGripTransferState_;
+  ArmGripTransferState rightGripTransferState_;
+  ChestReferenceTransferState chestReferenceTransferState_;
 
   Eigen::VectorXd filterJointDataForDrakeFK_;
   Eigen::VectorXd jointDataForDrakeFK_;
@@ -445,22 +589,22 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d latestRobotRightElbowPos_;
 
   // 保存优化前后的手部位置（用于可视化对比）
-  Eigen::Vector3d latestLeftHandPosBeforeOpt_;   // 优化前的左手位置
-  Eigen::Vector3d latestLeftHandPosAfterOpt_;    // 优化后的左手位置
-  Eigen::Vector3d latestRightHandPosBeforeOpt_;  // 优化前的右手位置
-  Eigen::Vector3d latestRightHandPosAfterOpt_;   // 优化后的右手位置
+  Eigen::Vector3d latestLeftHandPosBeforeOpt_ = Eigen::Vector3d::Zero();   // 优化前的左手位置
+  Eigen::Vector3d latestLeftHandPosAfterOpt_ = Eigen::Vector3d::Zero();    // 优化后的左手位置
+  Eigen::Vector3d latestRightHandPosBeforeOpt_ = Eigen::Vector3d::Zero();  // 优化前的右手位置
+  Eigen::Vector3d latestRightHandPosAfterOpt_ = Eigen::Vector3d::Zero();   // 优化后的右手位置
 
   // 保存优化前后的胸/肩/肘位置（用于可视化对比）
-  Eigen::Vector3d latestChestPosBeforeOpt_;
-  Eigen::Vector3d latestChestPosAfterOpt_;
-  Eigen::Vector3d latestLeftShoulderPosBeforeOpt_;
-  Eigen::Vector3d latestLeftShoulderPosAfterOpt_;
-  Eigen::Vector3d latestRightShoulderPosBeforeOpt_;
-  Eigen::Vector3d latestRightShoulderPosAfterOpt_;
-  Eigen::Vector3d latestLeftElbowPosBeforeOpt_;
-  Eigen::Vector3d latestLeftElbowPosAfterOpt_;
-  Eigen::Vector3d latestRightElbowPosBeforeOpt_;
-  Eigen::Vector3d latestRightElbowPosAfterOpt_;
+  Eigen::Vector3d latestChestPosBeforeOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestChestPosAfterOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestLeftShoulderPosBeforeOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestLeftShoulderPosAfterOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestRightShoulderPosBeforeOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestRightShoulderPosAfterOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestLeftElbowPosBeforeOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestLeftElbowPosAfterOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestRightElbowPosBeforeOpt_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestRightElbowPosAfterOpt_ = Eigen::Vector3d::Zero();
 
   // chest-frame cached pose for inactive hands/elbows
   Eigen::Vector3d leftHandPosInChest_ = Eigen::Vector3d::Zero();
@@ -474,15 +618,15 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLeftElbowPosInChest_ = false;
   bool hasRightElbowPosInChest_ = false;
 
-  // Robot chest frames captured on each grip rising edge. Active hand targets
-  // are first computed as independent hand increments in these frames, then
-  // mapped through the current chest target so they follow torso motion.
-  Eigen::Vector3d leftActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
-  Eigen::Quaterniond leftActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
-  Eigen::Vector3d rightActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
-  Eigen::Quaterniond rightActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
-  bool hasLeftActiveChestAnchor_ = false;
-  bool hasRightActiveChestAnchor_ = false;
+  // Chest command references captured at the first active cycle after grip
+  // entry.  The anchor and the live pose deliberately come from the same
+  // reference stream; measured FK must not be mixed into this transform.
+  Eigen::Vector3d leftActiveChestRefAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond leftActiveChestRefAnchorQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Vector3d rightActiveChestRefAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond rightActiveChestRefAnchorQuat_ = Eigen::Quaterniond::Identity();
+  bool hasLeftActiveChestRefAnchor_ = false;
+  bool hasRightActiveChestRefAnchor_ = false;
 
   Eigen::VectorXd mec_limit_lower_;
   Eigen::VectorXd mec_limit_upper_;
@@ -492,7 +636,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool lastLeftGripPressed_ = false;
   bool lastRightGripPressed_ = false;
 
-  bool chestIncrementalUpdateEnabled_ = true;  // pose 总开关：true 更新位姿，false 冻结位姿
+  std::atomic<bool> chestIncrementalUpdateEnabled_{true};  // pose 总开关：true 更新位姿，false 冻结位姿
   bool chestPositionUpdateEnable_ = true;      // position 子开关：仅在 pose 总开关为 true 时允许更新
 
   struct ModeChangeCycleCache {

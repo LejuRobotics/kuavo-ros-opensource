@@ -48,6 +48,9 @@ class WheelIncrementalPoseResult {
 
   Eigen::Quaterniond humanLeftHandQuatAnchor_ = Eigen::Quaterniond::Identity();
   Eigen::Quaterniond humanLeftHandQuatMeas_ = Eigen::Quaterniond::Identity();
+  // Maps the neutral-chest VR orientation into the robot base frame captured
+  // at grip entry: q_map = q_robot_anchor * q_vr_anchor^{-1}.
+  Eigen::Quaterniond leftHandAbsFrameMap_ = Eigen::Quaterniond::Identity();
 
   Eigen::Quaterniond robotRightHandQuatAnchor_ = Eigen::Quaterniond::Identity();    // 退出时目标四元数
   Eigen::Quaterniond robotRightHandQuatSlerpDes_ = Eigen::Quaterniond::Identity();  // Slerp插值后的四元数
@@ -57,6 +60,7 @@ class WheelIncrementalPoseResult {
 
   Eigen::Quaterniond humanRightHandQuatAnchor_ = Eigen::Quaterniond::Identity();
   Eigen::Quaterniond humanRightHandQuatMeas_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond rightHandAbsFrameMap_ = Eigen::Quaterniond::Identity();
   // ##############################################################quat#################################################################
   // ##############################################################quat#################################################################
   // ==============================================================
@@ -157,15 +161,19 @@ class WheelIncrementalPoseResult {
                  bool isLeftActive,
                  bool isRightActive) {
     if (isLeftActive) {
-      const Eigen::Quaterniond anchor = robotLeftHandQuatAnchor_;
-      robotLeftHandQuatSlerpDes_ = anchor.slerp(leftSlerpQuatT_, leftHandQuat).normalized();
+      const Eigen::Quaterniond anchor = robotLeftHandQuatAnchor_.normalized();
+      const Eigen::Quaterniond mappedTarget =
+          (leftHandAbsFrameMap_ * leftHandQuat.normalized()).normalized();
+      robotLeftHandQuatSlerpDes_ = anchor.slerp(leftSlerpQuatT_, mappedTarget).normalized();
       if (!usePythonIncrementalOrientation_) {
         robotLeftHandQuatTarget_ = robotLeftHandQuatSlerpDes_;
       }
     }
     if (isRightActive) {
-      const Eigen::Quaterniond anchor = robotRightHandQuatAnchor_;
-      robotRightHandQuatSlerpDes_ = anchor.slerp(rightSlerpQuatT_, rightHandQuat).normalized();
+      const Eigen::Quaterniond anchor = robotRightHandQuatAnchor_.normalized();
+      const Eigen::Quaterniond mappedTarget =
+          (rightHandAbsFrameMap_ * rightHandQuat.normalized()).normalized();
+      robotRightHandQuatSlerpDes_ = anchor.slerp(rightSlerpQuatT_, mappedTarget).normalized();
       if (!usePythonIncrementalOrientation_) {
         robotRightHandQuatTarget_ = robotRightHandQuatSlerpDes_;
       }
