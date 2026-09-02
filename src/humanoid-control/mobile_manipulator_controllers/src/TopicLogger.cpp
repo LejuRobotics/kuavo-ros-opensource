@@ -37,36 +37,45 @@ namespace ocs2
     }
     void TopicLogger::publishVector(const std::string &topic_name, const std::vector<double> &data, const std::string &label)
     {
-      if (publishedTopics_.count(topic_name) == 0)
+      ros::Publisher pub;
       {
-        // 如果该topic尚未发布过，则创建新的发布者
-        ros::Publisher newPublisher = nh_.advertise<std_msgs::Float64MultiArray>(topic_name, 10);
-        publishedTopics_[topic_name] = newPublisher;
+        std::lock_guard<std::mutex> lock(publish_mutex_);
+        auto it = publishedTopics_.find(topic_name);
+        if (it == publishedTopics_.end())
+        {
+          pub = nh_.advertise<std_msgs::Float64MultiArray>(topic_name, 10);
+          publishedTopics_.emplace(topic_name, pub);
+        }
+        else
+        {
+          pub = it->second;
+        }
       }
 
-      // 发布数据到对应的topic
       std_msgs::Float64MultiArray arrayMsg;
       arrayMsg.data = data;
-      // arrayMsg.layout.dim.push_back(std_msgs::MultiArrayDimension());
-      // arrayMsg.layout.dim[0].size = arrayMsg.data.size();
-      // arrayMsg.layout.dim[0].stride = 1;
-      // arrayMsg.layout.dim[0].label = label;
-
-      publishedTopics_[topic_name].publish(arrayMsg);
+      pub.publish(arrayMsg);
     }
     void TopicLogger::publishValue(const std::string &topic_name, const double &data)
     {
-      if (publishedValueTopics_.count(topic_name) == 0)
+      ros::Publisher pub;
       {
-        // 如果该topic尚未发布过，则创建新的发布者
-        ros::Publisher newPublisher = nh_.advertise<std_msgs::Float64>(topic_name, 10);
-        publishedValueTopics_[topic_name] = newPublisher;
+        std::lock_guard<std::mutex> lock(publish_mutex_);
+        auto it = publishedValueTopics_.find(topic_name);
+        if (it == publishedValueTopics_.end())
+        {
+          pub = nh_.advertise<std_msgs::Float64>(topic_name, 10);
+          publishedValueTopics_.emplace(topic_name, pub);
+        }
+        else
+        {
+          pub = it->second;
+        }
       }
 
-      // 发布数据到对应的topic
       std_msgs::Float64 arrayMsg;
       arrayMsg.data = data;
-      publishedValueTopics_[topic_name].publish(arrayMsg);
+      pub.publish(arrayMsg);
     }
   }
 }
