@@ -20,7 +20,11 @@
 
 using Duration = std::chrono::duration<double>;
 using Clock = std::chrono::high_resolution_clock;
-static ros::Publisher stop_pub_; 
+
+namespace {
+constexpr char kHardwareStateParam[] = "/nodelet_manager/hardware_state";
+constexpr int kHardwareDeinitialized = 2;
+}  // namespace
 
 class HumanoidControllerNodelet : public nodelet::Nodelet
 {
@@ -33,22 +37,11 @@ public:
         ros::param::set("/nodelet_manager/controller_state", 0);
         robot_hw = new humanoid_controller::HybridJointInterface(); // TODO:useless
         pause_sub = nh.subscribe<std_msgs::Bool>("pauseFlag", 1, &HumanoidControllerNodelet::pauseCallback, this);
-        stop_pub_ = nh.advertise<std_msgs::Bool>("/stop_robot", 10);
         stop_sub_ = nh.subscribe<std_msgs::Bool>("/stop_robot", 1, &HumanoidControllerNodelet::stopCallback, this);
         control_thread = std::thread(&HumanoidControllerNodelet::controlLoop, this);
         
         // 设置控制循环线程的实时调度策略和CPU亲和性，减少系统调度延迟
         setControlThreadScheduling();
-        // signal(SIGINT, signalHandler);
-        // signal(SIGTERM, signalHandler);
-
-        struct sigaction sa;
-        memset(&sa, 0, sizeof(sa));
-        sa.sa_handler = signalHandler;
-        sigemptyset(&sa.sa_mask);
-        sa.sa_flags = 0;
-        // sigaction(SIGINT, &sa, NULL);
-        sigaction(SIGTERM, &sa, NULL); 
 
         NODELET_INFO("HumanoidControllerNodelet nodelet initialized.");
     }
@@ -65,16 +58,14 @@ public:
         const int check_interval_ms = 100;   // 每100ms检查一次
         const int max_checks = static_cast<int>(max_wait_seconds * 1000 / check_interval_ms);
         int check_count = 0;
+        int hardware_state = 0;
         while (check_count < max_checks && ros::ok())
         {
-            int logger_state, controller_state, hardware_state;
-            //  ros::param::has("/nodelet_manager/controller_state") && ros::param::get("/nodelet_manager/controller_state", controller_state);
-            // ros::param::has("/nodelet_manager/hardware_state") && ros::param::get("/nodelet_manager/hardware_state", hardware_state);
-            if (ros::param::has("/nodelet_manager/logger_state") && ros::param::get("/nodelet_manager/logger_state", logger_state))
+            if (ros::param::get(kHardwareStateParam, hardware_state))
             {
-                if (logger_state == 2)
+                if (hardware_state == kHardwareDeinitialized)
                 {
-                    ROS_INFO("[HumanoidControllerNodelet] Nodelets ready to exit, state: 1");
+                    ROS_INFO("[HumanoidControllerNodelet] Hardware deinitialization completed");
                     break;
                 }
             }
@@ -88,7 +79,7 @@ public:
             {
                 ROS_INFO_STREAM("[HumanoidControllerNodelet] Waiting for nodelets to be ready... " << std::fixed << std::setprecision(1) 
                               << remaining_time << "s remaining, current state: " 
-                              << logger_state);
+                              << hardware_state);
             }
         }
         
@@ -101,22 +92,6 @@ public:
         std::cerr << "[controllerNodelet] controllerExit invoking ros::shutdown()" << std::endl;
         ros::shutdown();
 
-    }
-    static void signalHandler(int sig)
-    {
-        //waao
-        std::cerr << "[HumanoidControllerNodelet] signal handler called with signal=" << sig << std::endl;
-        // 发布停止信号
-        std_msgs::Bool stop_msg;
-        stop_msg.data = true;
-        
-        // 发布几次确保消息被接收
-        for(int i = 0; i < 3; i++) {
-            std::cerr << "[HumanoidControllerNodelet] signal handler publishing /stop_robot, attempt=" << (i + 1) << std::endl;
-            stop_pub_.publish(stop_msg);
-            usleep(10000); // 等待10ms
-        }
-        
     }
     ~HumanoidControllerNodelet()
     {
