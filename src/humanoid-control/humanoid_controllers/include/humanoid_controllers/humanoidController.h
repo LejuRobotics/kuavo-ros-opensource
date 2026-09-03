@@ -756,6 +756,7 @@ namespace humanoid_controller
     SensorData sensor_data_headRL_;
     SensorData sensor_data_waist_;
     Eigen::Quaterniond robot_quat_state_update_;
+    bool align_fused_yaw_to_imu_{false};  // resetKinematicsEstimation 后第一帧用当前 IMU yaw
     vector_t desire_head_pos_ = vector_t::Zero(2);
     // 头部 vel/delta 缓冲（rad/s, rad）；desire_head_pos_ 为唯一开环终点
     // vel: sticky + 0.3s 超时清零；delta: oneshot 用后即清

@@ -2179,7 +2179,17 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     kinematicPub_.publish(kinematics_odom);
     { // robotlocalization_data_mutex_
       std::lock_guard<std::mutex> lock(robotlocalization_data_mutex_);
-      if(!robotlocalizationDataQueue.empty())
+      // 重置后优先对齐 IMU，并丢掉回调线程可能刚塞回来的 localization，避免标志被推迟消费
+      if (align_fused_yaw_to_imu_)
+      {
+        while (!robotlocalizationDataQueue.empty())
+        {
+          robotlocalizationDataQueue.pop();
+        }
+        robot_quat_state_update_ = sensor_data_new.quat_;
+        align_fused_yaw_to_imu_ = false;
+      }
+      else if(!robotlocalizationDataQueue.empty())
       {
         nav_msgs::Odometry robot_localization_ = robotlocalizationDataQueue.front();
         Eigen::Quaterniond robot_quat(robot_localization_.pose.pose.orientation.w, 
@@ -2250,7 +2260,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         robotlocalizationDataQueue.pop();
       }
-      // robot_quat_state_update_会在第一次updatakinematics调用时自动更新为当前传感器值
+      // 下一帧丢弃 localization 并对齐当前 IMU yaw
+      align_fused_yaw_to_imu_ = true;
     }
     
     // 重置状态估计器
