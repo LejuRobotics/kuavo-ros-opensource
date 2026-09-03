@@ -250,6 +250,7 @@ void WheelIncrementalControlModule::updateLeftArmPoseAnchor(const ArmPose& vrLef
                                                        const Eigen::Quaterniond& qEndEffector,
                                                        const Eigen::Quaterniond& qLink4) {
   (void)pEndEffector;
+  (void)qLink4;
   // humanAnchor
   result_.humanLeftHandPosAnchor_ = vrLeftPose.position;
   result_.humanLeftHandQuatAnchor_ = vrLeftPose.quaternion.normalized();
@@ -259,22 +260,13 @@ void WheelIncrementalControlModule::updateLeftArmPoseAnchor(const ArmPose& vrLef
 
   // robotAnchor
   if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
-    // result_.robotLeftHandQuatAnchor = qEndEffector.normalized();
-    // result_.robotLeftHandQuatAnchor = vrLeftPose.quaternion.normalized();
-
-    Eigen::Quaterniond qTargetQuatAnchor =
-        Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix).normalized();
-    // 1) 相对 end-effector 的限幅（保持现有逻辑）
-    Eigen::Quaterniond qTargetQuatAnchorRelEE = qEndEffector.conjugate() * qTargetQuatAnchor;
-    qTargetQuatAnchorRelEE = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelEE, zyxLimitsEE_);
-    Eigen::Quaterniond qTargetQuatAnchorLimited = qEndEffector * qTargetQuatAnchorRelEE;
-
-    // 2) 额外增加：相对 link4 的限幅（zyx = [pi/2, 0.6, 0.6]）
-    Eigen::Quaterniond qTargetQuatAnchorRelLink4 = qLink4.conjugate() * qTargetQuatAnchorLimited;
-    qTargetQuatAnchorRelLink4 = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelLink4, zyxLimitsLink4_);
-    result_.robotLeftHandQuatAnchor_ = (qLink4 * qTargetQuatAnchorRelLink4).normalized();
-    // Python compatible: incremental target seed should be the current target (pose constraint), not qEndEffector.
-    // This matches quest3_node_incremental.py where the target quaternion is updated incrementally each frame.
+    // A grip edge is a state transfer. Seed both absolute and incremental
+    // orientation paths from the exact physical EE FK(q_pub); clipping the
+    // anchor itself would create motion before the operator moves.
+    const Eigen::Quaterniond qTargetQuatAnchor = qEndEffector.normalized();
+    result_.robotLeftHandQuatAnchor_ = qTargetQuatAnchor;
+    result_.leftHandAbsFrameMap_ =
+        (result_.robotLeftHandQuatAnchor_ * result_.humanLeftHandQuatAnchor_.conjugate()).normalized();
     result_.robotLeftHandQuatTarget_ = qTargetQuatAnchor;
 
     result_.robotLeftHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
@@ -296,6 +288,7 @@ void WheelIncrementalControlModule::updateRightArmPoseAnchor(const ArmPose& vrRi
                                                         const Eigen::Quaterniond& qEndEffector,
                                                         const Eigen::Quaterniond& qLink4) {
   (void)pEndEffector;
+  (void)qLink4;
   // humanAnchor
   result_.humanRightHandPosAnchor_ = vrRightPose.position;
   result_.humanRightHandQuatAnchor_ = vrRightPose.quaternion.normalized();
@@ -305,21 +298,10 @@ void WheelIncrementalControlModule::updateRightArmPoseAnchor(const ArmPose& vrRi
 
   // robotAnchor
   if (latestPoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
-    // result_.robotRightHandQuatAnchor = qEndEffector.normalized();
-    // result_.robotRightHandQuatAnchor = vrRightPose.quaternion.normalized();
-
-    Eigen::Quaterniond qTargetQuatAnchor =
-        Eigen::Quaterniond(latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix).normalized();
-    // 1) 相对 end-effector 的限幅（与左手对称一致）
-    Eigen::Quaterniond qTargetQuatAnchorRelEE = qEndEffector.conjugate() * qTargetQuatAnchor;
-    qTargetQuatAnchorRelEE = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelEE, zyxLimitsEE_);
-    Eigen::Quaterniond qTargetQuatAnchorLimited = qEndEffector * qTargetQuatAnchorRelEE;
-
-    // 2) 额外增加：相对 link4 的限幅（zyx = [pi/2, 0.6, 0.6]），与左手对称一致
-    Eigen::Quaterniond qTargetQuatAnchorRelLink4 = qLink4.conjugate() * qTargetQuatAnchorLimited;
-    qTargetQuatAnchorRelLink4 = limitQuaternionAngleEulerZYX(qTargetQuatAnchorRelLink4, zyxLimitsLink4_);
-    result_.robotRightHandQuatAnchor_ = (qLink4 * qTargetQuatAnchorRelLink4).normalized();
-    // Python compatible: incremental target seed should be the current target (pose constraint), not qEndEffector.
+    const Eigen::Quaterniond qTargetQuatAnchor = qEndEffector.normalized();
+    result_.robotRightHandQuatAnchor_ = qTargetQuatAnchor;
+    result_.rightHandAbsFrameMap_ =
+        (result_.robotRightHandQuatAnchor_ * result_.humanRightHandQuatAnchor_.conjugate()).normalized();
     result_.robotRightHandQuatTarget_ = qTargetQuatAnchor;
 
     result_.robotRightHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
