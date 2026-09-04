@@ -90,6 +90,7 @@ namespace ocs2
       std::queue<std::pair<std::string, std::vector<double>>> queue_;
       std::thread worker_thread_;
       std::mutex mutex_;
+      std::mutex publish_mutex_;
       std::condition_variable cv_;
 
       bool thread_running_ = false;

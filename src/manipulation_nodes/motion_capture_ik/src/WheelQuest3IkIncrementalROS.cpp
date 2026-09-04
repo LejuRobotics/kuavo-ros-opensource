@@ -34,6 +34,7 @@
 #include <ocs2_core/thread_support/SetThreadPriority.h>
 
 #include "motion_capture_ik/WheelArmControlBaseROS.h"
+#include "motion_capture_ik/WheelChestReferenceMapping.h"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelJoyStickHandler.h"
@@ -215,11 +216,15 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     }
     if (chestPoseUpdateEnabled != chestIncrementalUpdateEnabled_) {
       if (!chestPoseUpdateEnabled) {
-        frozenChestQuat_ = getRobotChestQuatRef();
-        if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
-          frozenRobotChestPos_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
+        PublishedCommandFkSnapshot commandSnapshot;
+        if (buildPublishedCommandFkSnapshot(commandSnapshot, true)) {
+          frozenRobotChestPos_ = commandSnapshot.chest.position;
+          frozenChestQuat_ = commandSnapshot.chest.orientation;
         } else {
-          frozenRobotChestPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+          // Startup-only fallback: no command has reached either publisher yet.
+          frozenChestQuat_ = getRobotChestQuatRef();
+          frozenRobotChestPos_ =
+              hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
         }
       }
       chestIncrementalUpdateEnabled_ = chestPoseUpdateEnabled;
@@ -375,10 +380,16 @@ void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
 }
 
 void WheelQuest3IkIncrementalROS::fsmEnter() {
-  auto updateChestConstraintFromFk = [&]() {
-    // 进入准备动作时保持机器人当前胸部 FK 位姿，不跟随 VR 人体躯干
-    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
+  auto updateChestConstraintFromCommand = [&](const PublishedCommandFkSnapshot* commandSnapshot) {
+    // At mode entry prefer the last command that really reached the publisher.
+    // Measured FK is retained only as the startup fallback when no command has
+    // ever been published.
+    const bool hasCommandSnapshot = commandSnapshot && commandSnapshot->valid;
+    const Eigen::Vector3d chestPos =
+        hasCommandSnapshot ? commandSnapshot->chest.position
+                           : (hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_);
+    const Eigen::Quaterniond chestQuat =
+        hasCommandSnapshot ? commandSnapshot->chest.orientation : getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
@@ -393,7 +404,10 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
     if (!mode2Initialized_) {
       justEnteredMode2_ = true;  // 只在第一次进入mode 2时标记
       mode2Initialized_ = true;  // 标记mode 2已初始化
-      mode2EnterTime_ = ros::Time::now();  // 记录进入mode 2的时间戳
+      {
+        std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+        mode2EnterTime_ = ros::Time::now();  // 记录进入mode 2的时间戳
+      }
     }
     auto resetMode2State = [&](bool resetIkSolution) {
       {
@@ -456,57 +470,8 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
       enterMode2ResetCounter_++;
     }
 
-    const bool shouldEnterLeft =
-        incrementalController_->shouldEnterIncrementalModeLeftArm(joyStickHandlerPtr_->isLeftGrip());
-    const bool shouldEnterRight =
-        incrementalController_->shouldEnterIncrementalModeRightArm(joyStickHandlerPtr_->isRightGrip());
-
-    if (shouldEnterLeft || shouldEnterRight) {
-      // 任意手进入增量模式时，同步激活 chest 增量（第二只手进入时不重复激活）
-      Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-      {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        if (hasChestPose_) {
-          humanChestPos = latestChestPositionInRobot_;
-        }
-      }
-      updateChestConstraintFromFk();
-      if (chestIncrementalUpdateEnabled_) {
-        incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
-      }
-
-      // 处理左臂：计算FK -> 更新约束列表 -> 进入增量模式
-      if (shouldEnterLeft) {
-        // FK 已在主循环更新到缓存
-
-        // 【核心修复】在进入增量模式前，先更新 latestPoseConstraintList_ 为当前 FK 计算的 Link6 位置
-        // 避免使用上次退出时保存的旧位置，导致跳变
-        updateHandConstraintUnlocked(
-            latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
-
-        incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
-                                                            latestPoseConstraintList_,
-                                                            leftEndEffectorPosition_,
-                                                            leftEndEffectorQuat_,
-                                                            leftLink4Quat_);
-      }
-
-      // 处理右臂：计算FK -> 更新约束列表 -> 进入增量模式
-      if (shouldEnterRight) {
-        // FK 已在主循环更新到缓存
-
-        // 【核心修复】在进入增量模式前，先更新 latestPoseConstraintList_ 为当前 FK 计算的 Link6 位置
-        // 避免使用上次退出时保存的旧位置，导致跳变
-        updateHandConstraintUnlocked(
-            latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
-
-        incrementalController_->enterIncrementalModeRightArm(latestRightHandPose_vr_,
-                                                             latestPoseConstraintList_,
-                                                             rightEndEffectorPosition_,
-                                                             rightEndEffectorQuat_,
-                                                             rightLink4Quat_);
-      }
-    }
+    // Grip press/release is owned exclusively by handleGripEdges() in
+    // fsmProcess, after this cycle's chest reference has been finalized.
 
     // 超时机制：0→2 和 1→2 都需要超时保护
     ros::Time currentTime = ros::Time::now();
@@ -552,10 +517,8 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
       resetMode2State(false);
 
       // 在超时时间内，执行进入增量模式（0→2 和 1→2 都需要）
-      updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
-      updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
+      PublishedCommandFkSnapshot exitSnapshot;
+      buildPublishedCommandFkSnapshot(exitSnapshot, true);
       // 进入增量模式前，同步激活 chest 增量（避免腰部目标跳变）
       Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
       {
@@ -564,22 +527,10 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
           humanChestPos = latestChestPositionInRobot_;
         }
       }
-      updateChestConstraintFromFk();
+      updateChestConstraintFromCommand(exitSnapshot.valid ? &exitSnapshot : nullptr);
       if (chestIncrementalUpdateEnabled_) {
         incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
       }
-
-      incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
-                                                          latestPoseConstraintList_,
-                                                          leftEndEffectorPosition_,
-                                                          leftEndEffectorQuat_,
-                                                          leftLink4Quat_);
-
-      incrementalController_->enterIncrementalModeRightArm(latestRightHandPose_vr_,
-                                                           latestPoseConstraintList_,
-                                                           rightEndEffectorPosition_,
-                                                           rightEndEffectorQuat_,
-                                                           rightLink4Quat_);
     }
   }
 }
@@ -593,6 +544,43 @@ void WheelQuest3IkIncrementalROS::fsmChange() {
 
 void WheelQuest3IkIncrementalROS::fsmProcess() {
   if (armControlMode_ != 2) return;
+
+  // fsmEnter() deliberately keeps both arm-control modes disabled while the
+  // mode-2 startup pose is being published.  Finish that warmup with one
+  // explicit handoff before processing HandSmoother state.  Otherwise the
+  // deactivate event can leave the smoother in "maintain" while the
+  // incremental arm controller is still reset; updateLatestIncrementalResult()
+  // then fails forever and a grip held through startup can never be accepted.
+  if (justEnteredMode2_) {
+    ros::Time mode2EnterTime;
+    {
+      std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+      mode2EnterTime = mode2EnterTime_;
+    }
+    if (!mode2EnterTime.isZero() &&
+        (ros::Time::now() - mode2EnterTime).toSec() >= MODE_2_TIMEOUT_DURATION) {
+      if (leftHandSmoother_) {
+        leftHandSmoother_->reset();
+      }
+      if (rightHandSmoother_) {
+        rightHandSmoother_->reset();
+      }
+      modeChangeCycle_.resetAll();
+
+      // Re-enable both sides once, then consume this forced transition.  Grip
+      // press/release remains owned by handleGripEdges() below, which will
+      // synthesize a PressSync for a trigger that stayed held during warmup.
+      forceActivateAllArmCtrlMode();
+      if (joyStickHandlerPtr_) {
+        joyStickHandlerPtr_->hasLeftArmCtrlModeChanged();
+        joyStickHandlerPtr_->hasRightArmCtrlModeChanged();
+      }
+      activateAllArmCtrlModeCounter_ = 0;
+      justEnteredMode2_ = false;
+      ROS_INFO("[WheelQuest3IkIncrementalROS] Mode-2 warmup handoff complete");
+    }
+  }
+
   activateController();
   // mode2 下仅在开启躯干控制时激活 chest 增量；进入准备动作时保持机器人当前胸部 FK 姿态
   if (chestIncrementalUpdateEnabled_ && !incrementalController_->isIncrementalModeChest()) {
@@ -603,8 +591,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
         humanChestPos = latestChestPositionInRobot_;
       }
     }
-    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
+    PublishedCommandFkSnapshot releaseSnapshot;
+    const bool hasReleaseSnapshot = buildPublishedCommandFkSnapshot(releaseSnapshot, true);
+    const Eigen::Vector3d chestPos =
+        hasReleaseSnapshot ? releaseSnapshot.chest.position
+                           : (hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_);
+    const Eigen::Quaterniond chestQuat =
+        hasReleaseSnapshot ? releaseSnapshot.chest.orientation : getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
@@ -728,10 +721,15 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       frozen.rightElbowPos = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position;
     }
     {
-      Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
+      Eigen::Quaterniond measuredChestQuat = Eigen::Quaterniond::Identity();
+      {
+        std::lock_guard<std::mutex> lock(chestPoseMutex_);
+        measuredChestQuat = chestRotationQuaternion_;
+      }
+      Eigen::Matrix3d chestR = measuredChestQuat.toRotationMatrix();
       input.chestQuatRef = computeYawPitchOnlyQuatFromRotationMatrix(chestR);
       if (!chestIncrementalUpdateEnabled_) {
-        input.chestQuatRef = getRobotChestQuatRef();
+        input.chestQuatRef = frozenChestQuat_.normalized();
       }
     }
     return input;
@@ -743,80 +741,69 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                                     Eigen::Vector3d rightHandPos,
                                     Eigen::Quaterniond rightHandQuat,
                                     const FrozenRefs& frozen) -> bool {
-    const Eigen::Vector3d chestPosForFk = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : input.chestPosRef;
-    auto updateHandPoseInChest = [&](bool isActive,
-                                     const Eigen::Vector3d& handFkPos,
-                                     const Eigen::Quaterniond& handFkQuat,
-                                     const Eigen::Vector3d& fallbackWorldPos,
-                                     const Eigen::Quaterniond& fallbackWorldQuat,
-                                     Eigen::Vector3d& handPosInChest,
-                                     Eigen::Quaterniond& handQuatInChest,
-                                     bool& hasPoseInChest) {
-      if (isActive) {
-        auto [handQuatChest, handPosChest] = transformPose(input.chestQuatRef, chestPosForFk, handFkQuat, handFkPos);
-        handPosInChest = handPosChest;
-        handQuatInChest = handQuatChest.normalized();
-        hasPoseInChest = true;
-        return;
-      }
+    const WheelChestReferencePose currentChestRef{input.chestPosRef, input.chestQuatRef.normalized()};
+
+    // Capture the exact chest command reference used in this solve cycle.  A
+    // grip edge only invalidates the old anchor because chestPosRef may still
+    // be updated later in the same fsmProcess cycle.
+    auto captureChestReferenceAnchor = [&](bool isActive,
+                                           Eigen::Vector3d& anchorPos,
+                                           Eigen::Quaterniond& anchorQuat,
+                                           bool& hasAnchor) {
+      if (!isActive || hasAnchor) return;
+      anchorPos = currentChestRef.position;
+      anchorQuat = currentChestRef.orientation;
+      hasAnchor = true;
+    };
+    captureChestReferenceAnchor(input.leftRefActive,
+                                leftActiveChestRefAnchorPos_,
+                                leftActiveChestRefAnchorQuat_,
+                                hasLeftActiveChestRefAnchor_);
+    captureChestReferenceAnchor(input.rightRefActive,
+                                rightActiveChestRefAnchorPos_,
+                                rightActiveChestRefAnchorQuat_,
+                                hasRightActiveChestRefAnchor_);
+
+    auto initializeInactiveHandPoseInChest = [&](bool isActive,
+                                                  const Eigen::Vector3d& fallbackWorldPos,
+                                                  const Eigen::Quaterniond& fallbackWorldQuat,
+                                                  Eigen::Vector3d& handPosInChest,
+                                                  Eigen::Quaterniond& handQuatInChest,
+                                                  bool& hasPoseInChest) {
+      if (isActive) return;
       if (!hasPoseInChest) {
-        auto [handQuatChest, handPosChest] =
-            transformPose(input.chestQuatRef, input.chestPosRef, fallbackWorldQuat, fallbackWorldPos);
-        handPosInChest = handPosChest;
-        handQuatInChest = handQuatChest.normalized();
+        handPosInChest = pointInChestReference(currentChestRef, fallbackWorldPos);
+        handQuatInChest = orientationInChestReference(currentChestRef, fallbackWorldQuat);
         hasPoseInChest = true;
       }
     };
-    auto updateElbowPosInChest = [&](bool isActive,
-                                     const Eigen::Vector3d& currentElbowPos,
-                                     const Eigen::Vector3d& fallbackWorldPos,
-                                     Eigen::Vector3d& elbowPosInChest,
-                                     bool& hasElbowPosInChest) {
-      if (isActive) {
-        auto [elbowQuatChest, elbowPosChest] =
-            transformPose(input.chestQuatRef, chestPosForFk, Eigen::Quaterniond::Identity(), currentElbowPos);
-        (void)elbowQuatChest;
-        elbowPosInChest = elbowPosChest;
-        hasElbowPosInChest = true;
-        return;
-      }
+    auto initializeInactiveElbowPosInChest = [&](bool isActive,
+                                                  const Eigen::Vector3d& fallbackWorldPos,
+                                                  Eigen::Vector3d& elbowPosInChest,
+                                                  bool& hasElbowPosInChest) {
+      if (isActive) return;
       if (!hasElbowPosInChest) {
-        auto [elbowQuatChest, elbowPosChest] =
-            transformPose(input.chestQuatRef, input.chestPosRef, Eigen::Quaterniond::Identity(), fallbackWorldPos);
-        (void)elbowQuatChest;
-        elbowPosInChest = elbowPosChest;
+        elbowPosInChest = pointInChestReference(currentChestRef, fallbackWorldPos);
         hasElbowPosInChest = true;
       }
     };
 
-    // 仅在手部增量控制激活时做胸部 FK 跟踪；grip 按下但未进入增量时不走此路径，避免
-    // chestPosRef 与 chestPosForFk 混用导致 handTarget = handFK + offset 的正反馈上漂。
-    updateHandPoseInChest(input.leftRefActive,
-                          leftLink6Position_,
-                          leftLink6Quat_,
-                          frozen.leftHandPos,
-                          frozen.leftHandQuat,
-                          leftHandPosInChest_,
-                          leftHandQuatInChest_,
-                          hasLeftHandPoseInChest_);
-    updateHandPoseInChest(input.rightRefActive,
-                          rightLink6Position_,
-                          rightLink6Quat_,
-                          frozen.rightHandPos,
-                          frozen.rightHandQuat,
-                          rightHandPosInChest_,
-                          rightHandQuatInChest_,
-                          hasRightHandPoseInChest_);
-    updateElbowPosInChest(input.leftRefActive,
-                          leftLink4Position_,
-                          frozen.leftElbowPos,
-                          leftElbowPosInChest_,
-                          hasLeftElbowPosInChest_);
-    updateElbowPosInChest(input.rightRefActive,
-                          rightLink4Position_,
-                          frozen.rightElbowPos,
-                          rightElbowPosInChest_,
-                          hasRightElbowPosInChest_);
+    initializeInactiveHandPoseInChest(input.leftRefActive,
+                                      frozen.leftHandPos,
+                                      frozen.leftHandQuat,
+                                      leftHandPosInChest_,
+                                      leftHandQuatInChest_,
+                                      hasLeftHandPoseInChest_);
+    initializeInactiveHandPoseInChest(input.rightRefActive,
+                                      frozen.rightHandPos,
+                                      frozen.rightHandQuat,
+                                      rightHandPosInChest_,
+                                      rightHandQuatInChest_,
+                                      hasRightHandPoseInChest_);
+    initializeInactiveElbowPosInChest(
+        input.leftRefActive, frozen.leftElbowPos, leftElbowPosInChest_, hasLeftElbowPosInChest_);
+    initializeInactiveElbowPosInChest(
+        input.rightRefActive, frozen.rightElbowPos, rightElbowPosInChest_, hasRightElbowPosInChest_);
 
     if (!input.leftRefActive) {
       if (hasLeftHandPoseInChest_) {
@@ -837,10 +824,9 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       }
     }
 
-    // The incremental controller returns active hand targets in the world frame
-    // captured at grip entry. Re-express those targets through the current robot
-    // chest frame so torso translation/rotation moves the hands in world space
-    // while preserving the commanded hand-to-chest relative pose.
+    // The incremental controller returns active hand targets in the base frame
+    // captured at grip entry. Apply only chest command-reference motion since
+    // that entry; never inject measured chest tracking error into the hand.
     auto followChestForActiveHand = [&](bool isActive,
                                         bool hasChestAnchor,
                                         const Eigen::Vector3d& chestAnchorPos,
@@ -848,43 +834,23 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                                         Eigen::Vector3d& handPos,
                                         Eigen::Quaterniond& handQuat) {
       if (!isActive || !chestIncrementalUpdateEnabled_ || !hasChestAnchor) return;
-      const Eigen::Quaterniond chestFrameDelta =
-          (input.chestQuatRef.normalized() * chestAnchorQuat.normalized().conjugate()).normalized();
-      handPos = input.chestPosRef + chestFrameDelta * (handPos - chestAnchorPos);
-      handQuat = (chestFrameDelta * handQuat).normalized();
+      const WheelChestReferencePose anchorChestRef{chestAnchorPos, chestAnchorQuat};
+      followChestReference(anchorChestRef, currentChestRef, handPos, handQuat);
     };
     followChestForActiveHand(input.leftRefActive,
-                             hasLeftActiveChestAnchor_,
-                             leftActiveChestAnchorPos_,
-                             leftActiveChestAnchorQuat_,
+                             hasLeftActiveChestRefAnchor_,
+                             leftActiveChestRefAnchorPos_,
+                             leftActiveChestRefAnchorQuat_,
                              leftHandPos,
                              leftHandQuat);
     followChestForActiveHand(input.rightRefActive,
-                             hasRightActiveChestAnchor_,
-                             rightActiveChestAnchorPos_,
-                             rightActiveChestAnchorQuat_,
+                             hasRightActiveChestRefAnchor_,
+                             rightActiveChestRefAnchorPos_,
+                             rightActiveChestRefAnchorQuat_,
                              rightHandPos,
                              rightHandQuat);
 
-    // Active elbow references come from the current robot FK.  Map that point
-    // from the current robot chest frame into the commanded chest frame before
-    // giving it to the whole-body solver.  Otherwise the hand/shoulder targets
-    // follow the commanded chest while the elbow remains in the world frame,
-    // forcing the arm to articulate during a rigid torso movement.
-    auto mapCurrentFkPointToChestTarget =
-        [&](bool isActive, const Eigen::Vector3d& currentPoint) -> Eigen::Vector3d {
-      if (!isActive || !chestIncrementalUpdateEnabled_ || !hasLatestWaistYawFk_) return currentPoint;
-      const Eigen::Quaterniond currentChestQuat = getRobotChestQuatRef().normalized();
-      const Eigen::Quaterniond chestFrameDelta =
-          (input.chestQuatRef.normalized() * currentChestQuat.conjugate()).normalized();
-      return input.chestPosRef + chestFrameDelta * (currentPoint - latestWaistYawFkPos_);
-    };
-
     const Eigen::Matrix3d chestRRef = input.chestQuatRef.normalized().toRotationMatrix();
-    Eigen::Matrix3d waistSafetyR = chestRRef;
-    if (hasLatestWaistYawFk_) {
-      waistSafetyR = latestWaistYawFkQuat_.normalized().toRotationMatrix();
-    }
     const Eigen::Vector3d vLeftShoulderInChest = robotLeftFixedShoulderPos_ - robotFixedWaistYawPos_;
     const Eigen::Vector3d vRightShoulderInChest = robotRightFixedShoulderPos_ - robotFixedWaistYawPos_;
     const Eigen::Vector3d leftShoulderRef = input.chestPosRef + chestRRef * vLeftShoulderInChest;
@@ -894,26 +860,67 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     input.rightHandRef = rightHandPos;
     input.leftHandQuat = leftHandQuat.normalized();
     input.rightHandQuat = rightHandQuat.normalized();
+
+    // The natural-elbow guide produces an absolute posture preference.  Map
+    // only its change since grip entry onto the last effective optimized elbow
+    // command.  Anchoring to measured FK would make every command/plant
+    // tracking residual an input jump at the mode boundary.
+    auto applyAnchoredElbowGuide = [&](WheelElbowReferenceAnchor& anchor,
+                                       ocs2::mobile_manipulator::KinemicLimitFilter* guideDeltaFilter,
+                                       const Eigen::Vector3d& currentElbowCommand,
+                                       const Eigen::Vector3d& rawGuideElbow) -> Eigen::Vector3d {
+      const bool captured =
+          captureElbowReferenceAnchor(anchor, currentChestRef, currentElbowCommand, rawGuideElbow);
+      if (captured && guideDeltaFilter) {
+        guideDeltaFilter->reset(Eigen::VectorXd::Zero(3));
+      }
+
+      const Eigen::Vector3d commandBaseline = anchoredElbowCommandBaseline(anchor, currentChestRef);
+      const Eigen::Vector3d rawGuideDeltaWorld =
+          incrementalElbowGuideDelta(anchor, currentChestRef, rawGuideElbow);
+      if (!guideDeltaFilter) return commandBaseline + rawGuideDeltaWorld;
+
+      // Filter in the live chest frame.  A rigid torso rotation then leaves a
+      // constant hand-to-chest guide increment constant, instead of making a
+      // world-frame filter chase the rotation and introduce elbow lag.
+      const Eigen::Vector3d rawGuideDeltaInChest =
+          vectorInChestReference(currentChestRef, rawGuideDeltaWorld);
+      const Eigen::VectorXd filteredGuideDeltaInChest =
+          guideDeltaFilter->update(rawGuideDeltaInChest);
+      if (filteredGuideDeltaInChest.size() != 3 || !filteredGuideDeltaInChest.allFinite()) {
+        return commandBaseline;
+      }
+      return commandBaseline +
+             vectorFromChestReference(currentChestRef, filteredGuideDeltaInChest.head<3>());
+    };
+
     if (input.leftRefActive) {
-      const Eigen::Vector3d currentLeftElbowRef =
+      const Eigen::Vector3d rawLeftElbowGuide =
           computeElbowRef("left",
                           input.leftRefActive,
                           leftNaturalElbowGuide_.get(),
                           leftShoulderRef,
                           input.leftHandRef,
-                          leftLink4Position_,
+                          latestLeftElbowPosAfterOpt_,
                           latestHumanLeftShoulderPos_,
                           latestHumanLeftElbowPos_,
                           latestLeftHandPose_vr_.position,
                           latestHumanLeftArmPoseValid_,
-                          leftLink6Position_,
-                          leftEndEffectorPosition_,
-                          chestPosForFk,
-                          waistSafetyR * Eigen::Vector3d::UnitY(),
+                          input.leftHandRef,
+                          input.leftHandRef +
+                              input.leftHandQuat *
+                                  (leftGripTransferState_.threePointHandAnchor.valid
+                                       ? leftGripTransferState_.threePointHandAnchor
+                                             .endEffectorOffsetInEndEffector
+                                       : leftEE2Link6Offset_),
+                          input.chestPosRef,
+                          chestRRef * Eigen::Vector3d::UnitY(),
                           frozen.leftElbowPos,
                           input.leftElbowTrackingActivation);
-      input.leftElbowRef =
-          mapCurrentFkPointToChestTarget(input.leftRefActive, currentLeftElbowRef);
+      input.leftElbowRef = applyAnchoredElbowGuide(leftActiveElbowReferenceAnchor_,
+                                                   leftElbowGuideDeltaFilterPtr_.get(),
+                                                   latestLeftElbowPosAfterOpt_,
+                                                   rawLeftElbowGuide);
     } else if (hasLeftElbowPosInChest_) {
       input.leftElbowRef = input.chestPosRef + input.chestQuatRef * leftElbowPosInChest_;
       input.leftElbowTrackingActivation = 1.0;
@@ -922,25 +929,32 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       input.leftElbowTrackingActivation = 1.0;
     }
     if (input.rightRefActive) {
-      const Eigen::Vector3d currentRightElbowRef =
+      const Eigen::Vector3d rawRightElbowGuide =
           computeElbowRef("right",
                           input.rightRefActive,
                           rightNaturalElbowGuide_.get(),
                           rightShoulderRef,
                           input.rightHandRef,
-                          rightLink4Position_,
+                          latestRightElbowPosAfterOpt_,
                           latestHumanRightShoulderPos_,
                           latestHumanRightElbowPos_,
                           latestRightHandPose_vr_.position,
                           latestHumanRightArmPoseValid_,
-                          rightLink6Position_,
-                          rightEndEffectorPosition_,
-                          chestPosForFk,
-                          -(waistSafetyR * Eigen::Vector3d::UnitY()),
+                          input.rightHandRef,
+                          input.rightHandRef +
+                              input.rightHandQuat *
+                                  (rightGripTransferState_.threePointHandAnchor.valid
+                                       ? rightGripTransferState_.threePointHandAnchor
+                                             .endEffectorOffsetInEndEffector
+                                       : rightEE2Link6Offset_),
+                          input.chestPosRef,
+                          -(chestRRef * Eigen::Vector3d::UnitY()),
                           frozen.rightElbowPos,
                           input.rightElbowTrackingActivation);
-      input.rightElbowRef =
-          mapCurrentFkPointToChestTarget(input.rightRefActive, currentRightElbowRef);
+      input.rightElbowRef = applyAnchoredElbowGuide(rightActiveElbowReferenceAnchor_,
+                                                    rightElbowGuideDeltaFilterPtr_.get(),
+                                                    latestRightElbowPosAfterOpt_,
+                                                    rawRightElbowGuide);
     } else if (hasRightElbowPosInChest_) {
       input.rightElbowRef = input.chestPosRef + input.chestQuatRef * rightElbowPosInChest_;
       input.rightElbowTrackingActivation = 1.0;
@@ -949,11 +963,115 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       input.rightElbowTrackingActivation = 1.0;
     }
 
+    // The same smooth activation is consumed by both optimization stages.
+    // The first cycle after either press or release returns the previous value
+    // exactly; subsequent cycles use a zero-slope smoothstep transition.
+    const double elbowActivationDt = 1.0 / std::max(publishRate_, 1.0);
+    input.leftElbowTrackingActivation = leftElbowActivationTransition_.update(
+        input.leftRefActive,
+        input.leftElbowTrackingActivation,
+        elbowActivationDt,
+        wheelElbowActivationTransitionDuration_);
+    input.rightElbowTrackingActivation = rightElbowActivationTransition_.update(
+        input.rightRefActive,
+        input.rightElbowTrackingActivation,
+        elbowActivationDt,
+        wheelElbowActivationTransitionDuration_);
+
+    // Grip edges are synchronized transactionally by handleGripEdges() from
+    // the exact FK(q_pub) snapshot.  Re-synchronizing PressSync/ReleaseSync
+    // here with the live chest reference would immediately overwrite that
+    // coherent state.  Only an already inactive side is periodically rebased
+    // to prevent hidden solver history from accumulating while publication is
+    // held.
+    const bool synchronizeLeftSolver =
+        leftGripTransferState_.valid && !input.leftRefActive &&
+        leftGripTransferState_.phase == GripTransferPhase::InactiveHold;
+    const bool synchronizeRightSolver =
+        rightGripTransferState_.valid && !input.rightRefActive &&
+        rightGripTransferState_.phase == GripTransferPhase::InactiveHold;
+    if ((synchronizeLeftSolver || synchronizeRightSolver) &&
+        !synchronizeNonTrackingSolverStates(
+            currentChestRef, synchronizeLeftSolver, synchronizeRightSolver)) {
+      return false;
+    }
+
     if (!updateWholeBodyConstraintList(input)) return false;
+
+    // Cache the effective point-optimizer output used by downstream IK.  The
+    // inactive reference and the next grip anchor must never cache the raw
+    // pre-optimization guide target.
+    WheelChestReferencePose optimizedChestRef;
+    optimizedChestRef.position = latestChestPosAfterOpt_;
+    optimizedChestRef.orientation = Eigen::Quaterniond(
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix).normalized();
+    if (input.leftRefActive) {
+      leftHandPosInChest_ = pointInChestReference(optimizedChestRef, latestLeftHandPosAfterOpt_);
+      leftHandQuatInChest_ = orientationInChestReference(optimizedChestRef, input.leftHandQuat);
+      hasLeftHandPoseInChest_ = true;
+      leftElbowPosInChest_ = pointInChestReference(optimizedChestRef, latestLeftElbowPosAfterOpt_);
+      hasLeftElbowPosInChest_ = true;
+    }
+    if (input.rightRefActive) {
+      rightHandPosInChest_ = pointInChestReference(optimizedChestRef, latestRightHandPosAfterOpt_);
+      rightHandQuatInChest_ = orientationInChestReference(optimizedChestRef, input.rightHandQuat);
+      hasRightHandPoseInChest_ = true;
+      rightElbowPosInChest_ = pointInChestReference(optimizedChestRef, latestRightElbowPosAfterOpt_);
+      hasRightElbowPosInChest_ = true;
+    }
     recordTimestamp("solveIkStart", loopSyncCount_);
-    solveIk();
+    if (!solveIk()) return false;
     // 记录时间戳
     recordTimestamp("solveIkFinish", loopSyncCount_);
+    uint64_t committedIkCandidateSequence = 0;
+    {
+      std::lock_guard<std::mutex> lock(ikResultMutex_);
+      committedIkCandidateSequence = latestIkCandidateSequence_;
+    }
+
+    auto acknowledgeCandidate = [](bool active,
+                                   const ArmGripTransferState& transferState,
+                                   std::atomic<bool>& candidateGripPressed,
+                                   std::atomic<uint64_t>& candidateGripGeneration,
+                                   std::atomic<uint64_t>& acknowledgedIkCandidateSequence,
+                                   uint64_t committedCandidateSequence,
+                                   std::atomic<bool>& candidateReady) {
+      const bool transferMatchesGrip =
+          active ? (transferState.valid &&
+                    (transferState.phase == GripTransferPhase::PressSync ||
+                     transferState.phase == GripTransferPhase::ActiveTrack))
+                 : (transferState.phase == GripTransferPhase::ReleaseSync ||
+                    transferState.phase == GripTransferPhase::InactiveHold);
+      if (!transferMatchesGrip) return;
+      candidateGripPressed.store(active);
+      candidateGripGeneration.store(transferState.gripGeneration);
+      acknowledgedIkCandidateSequence.store(committedCandidateSequence);
+      candidateReady.store(true);
+    };
+    acknowledgeCandidate(input.leftRefActive,
+                         leftGripTransferState_,
+                         leftArmCandidateGripPressed_,
+                         leftArmCandidateGripGeneration_,
+                         leftArmAcknowledgedIkCandidateSequence_,
+                         committedIkCandidateSequence,
+                         leftArmCandidateReadyForPublish_);
+    acknowledgeCandidate(input.rightRefActive,
+                         rightGripTransferState_,
+                         rightArmCandidateGripPressed_,
+                         rightArmCandidateGripGeneration_,
+                         rightArmAcknowledgedIkCandidateSequence_,
+                         committedIkCandidateSequence,
+                         rightArmCandidateReadyForPublish_);
+    if (leftGripTransferState_.phase == GripTransferPhase::PressSync) {
+      leftGripTransferState_.phase = GripTransferPhase::ActiveTrack;
+    } else if (leftGripTransferState_.phase == GripTransferPhase::ReleaseSync) {
+      leftGripTransferState_.phase = GripTransferPhase::InactiveHold;
+    }
+    if (rightGripTransferState_.phase == GripTransferPhase::PressSync) {
+      rightGripTransferState_.phase = GripTransferPhase::ActiveTrack;
+    } else if (rightGripTransferState_.phase == GripTransferPhase::ReleaseSync) {
+      rightGripTransferState_.phase = GripTransferPhase::InactiveHold;
+    }
     return true;
   };
 
@@ -1046,6 +1164,10 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
   bool currentLeftGripPressed = joyStickHandlerPtr_->isLeftGrip();
   bool currentRightGripPressed = joyStickHandlerPtr_->isRightGrip();
+  const uint64_t currentLeftGripGeneration =
+      observeGripGeneration(currentLeftGripPressed, observedLeftGripPressed_, leftGripGeneration_);
+  const uint64_t currentRightGripGeneration =
+      observeGripGeneration(currentRightGripPressed, observedRightGripPressed_, rightGripGeneration_);
   const bool isLeftActive = joyStickHandlerPtr_->isLeftArmCtrlModeActive();
   const bool isRightActive = joyStickHandlerPtr_->isRightArmCtrlModeActive();
 
@@ -1124,6 +1246,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
   bool leftGripRisingEdge = currentLeftGripPressed && !lastLeftGripPressed_;
   bool rightGripRisingEdge = currentRightGripPressed && !lastRightGripPressed_;
+  bool leftGripFallingEdge = !currentLeftGripPressed && lastLeftGripPressed_;
+  bool rightGripFallingEdge = !currentRightGripPressed && lastRightGripPressed_;
 
   // 双扳机同时松开的下降沿：捕获当前 lb 关节命令快照
   // 目的：胸部增量模式激活时，松开扳机后仅允许 waist_yaw（关节4）跟随 VR 旋转，
@@ -1142,14 +1266,12 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   lastLeftGripPressed_ = currentLeftGripPressed;
   lastRightGripPressed_ = currentRightGripPressed;
 
-  handleGripRisingEdge(leftGripRisingEdge, rightGripRisingEdge, leftMaintainProcess, rightMaintainProcess);
-
   // 由胸部更新开关控制增量更新（与 grip 解耦）；位置跟随细分关闭时冻结位置
   if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_ &&
       (lastLeftGripPressed_ || lastRightGripPressed_)) {
     Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
     {
-      std::lock_guard<std::mutex> lock(transformerDataMutex_);
+      std::lock_guard<std::mutex> lock(chestPoseMutex_);
       if (hasChestPose_) {
         humanChestPos = latestChestPositionInRobot_;
       }
@@ -1163,30 +1285,87 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   const bool leftGripReady = !leftMaintainProcess && currentLeftGripPressed && isLeftActive;
   const bool rightGripReady = !rightMaintainProcess && currentRightGripPressed && isRightActive;
 
+  WheelChestReferencePose gripTransferChestRef;
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
+    gripTransferChestRef.position = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
+  } else {
+    gripTransferChestRef.position = frozenRobotChestPos_;
+  }
+  {
+    std::lock_guard<std::mutex> lock(chestPoseMutex_);
+    gripTransferChestRef.orientation =
+        computeYawPitchOnlyQuatFromRotationMatrix(chestRotationQuaternion_.toRotationMatrix());
+  }
+  if (!chestIncrementalUpdateEnabled_) {
+    gripTransferChestRef.orientation = frozenChestQuat_.normalized();
+  }
+
+  // The edge snapshot is captured only after this cycle's chest command has
+  // been finalized.  This keeps chest/shoulder/elbow/hand in one command frame
+  // on the very first active sample.
+  const bool gripTransferAllowed = !justEnteredMode2_;
+  const bool leftPressSyncRequested =
+      gripTransferAllowed &&
+      (leftGripRisingEdge ||
+       (leftGripReady &&
+        (leftGripTransferState_.phase == GripTransferPhase::InactiveHold ||
+         leftGripTransferState_.gripGeneration != currentLeftGripGeneration)));
+  const bool rightPressSyncRequested =
+      gripTransferAllowed &&
+      (rightGripRisingEdge ||
+       (rightGripReady &&
+        (rightGripTransferState_.phase == GripTransferPhase::InactiveHold ||
+         rightGripTransferState_.gripGeneration != currentRightGripGeneration)));
+  const bool leftReleaseSyncRequested =
+      gripTransferAllowed && !currentLeftGripPressed &&
+      (leftGripFallingEdge || leftGripTransferState_.phase == GripTransferPhase::PressSync ||
+       leftGripTransferState_.phase == GripTransferPhase::ActiveTrack ||
+       leftGripTransferState_.gripGeneration != currentLeftGripGeneration);
+  const bool rightReleaseSyncRequested =
+      gripTransferAllowed && !currentRightGripPressed &&
+      (rightGripFallingEdge || rightGripTransferState_.phase == GripTransferPhase::PressSync ||
+       rightGripTransferState_.phase == GripTransferPhase::ActiveTrack ||
+       rightGripTransferState_.gripGeneration != currentRightGripGeneration);
+  handleGripEdges(leftPressSyncRequested,
+                  rightPressSyncRequested,
+                  leftReleaseSyncRequested,
+                  rightReleaseSyncRequested,
+                  leftMaintainProcess,
+                  rightMaintainProcess,
+                  gripTransferChestRef,
+                  currentLeftGripGeneration,
+                  currentRightGripGeneration);
+
+  // While at least one arm is tracking, the effective robot chest starts at
+  // FK(q_pub) captured on the first press.  The absolute VR/reference chest is
+  // never substituted for that state; only motion of the desired reference
+  // after entry is applied.
+  WheelChestReferencePose effectiveChestRef = gripTransferChestRef;
+  if ((currentLeftGripPressed || currentRightGripPressed) &&
+      chestReferenceTransferState_.valid) {
+    effectiveChestRef = followPublishedPoseWithDesiredReferenceDelta(
+        chestReferenceTransferState_.desiredChestAtGrip,
+        gripTransferChestRef,
+        chestReferenceTransferState_.publishedChestAtGrip);
+  }
+
+  Eigen::Quaterniond leftCommandHandQuat = leftEndEffectorQuat_;
+  Eigen::Quaterniond rightCommandHandQuat = rightEndEffectorQuat_;
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
+    leftCommandHandQuat = Eigen::Quaterniond(
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix).normalized();
+  }
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
+    rightCommandHandQuat = Eigen::Quaterniond(
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix).normalized();
+  }
   if (leftGripReady) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseLeftArm(
-        latestLeftHandPose_vr_, true, leftEndEffectorQuat_);
+        latestLeftHandPose_vr_, true, leftCommandHandQuat);
   }
   if (rightGripReady) {
     latestIncrementalResult_ = incrementalController_->computeIncrementalPoseRightArm(
-        latestRightHandPose_vr_, true, rightEndEffectorQuat_);
-  }
-
-  // 任意手 grip 就绪时，同步更新 chest 位置增量，并写入约束列表（位置跟随细分关闭时不更新）
-  if (leftGripReady || rightGripReady) {
-    if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_) {
-      Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-      {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        if (hasChestPose_) {
-          humanChestPos = latestChestPositionInRobot_;
-        }
-      }
-      incrementalController_->computeIncrementalChestPos(humanChestPos, true);
-      if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
-        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = incrementalController_->getLatestRobotChestPos();
-      }
-    }
+        latestRightHandPose_vr_, true, rightCommandHandQuat);
   }
 
   latestIncrementalResult_ = incrementalController_->getLatestIncrementalResult();
@@ -1194,6 +1373,10 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   // Whole-body reference update (chest + L/R elbow/hand) and then solve IK once.
   FrozenRefs frozen;
   WholeBodyRefInput input = buildWholeBodyInput(leftGripReady, rightGripReady, frozen);
+  if (currentLeftGripPressed || currentRightGripPressed) {
+    input.chestPosRef = effectiveChestRef.position;
+    input.chestQuatRef = effectiveChestRef.orientation.normalized();
+  }
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
       latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
@@ -1202,56 +1385,352 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   applyWholeBodyAndSolve(
       input, scaledLeftHandPos, incrementalLeftQuat, scaledRightHandPos, incrementalRightQuat, frozen);
   recordTimestamp("applyWholeBodyAndSolveFinish", loopSyncCount_);
-  
-  // 进入mode 2约2秒后重置标志位
-  if (justEnteredMode2_ && (ros::Time::now() - mode2EnterTime_).toSec() >= 2.0) {
-    justEnteredMode2_ = false;
-  }
 }
 
-void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
-                                                  bool rightGripRisingEdge,
-                                                  bool leftMaintainProcess,
-                                                  bool rightMaintainProcess) {
-  // 处理左臂 grip 上升沿：更新锚点，使增量归零
-  if (leftGripRisingEdge && !leftMaintainProcess) {
-    if (leftNaturalElbowGuide_) leftNaturalElbowGuide_->reset();
-    // On grip rising edge, defensively sync constraint list to current FK to avoid jumps.
-    updateHandConstraintUnlocked(
-        latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
-    updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, leftLink4Position_);
-
-    hasLeftHandPoseInChest_ = false;
-    hasLeftElbowPosInChest_ = false;
-
-    incrementalController_->updateLeftArmPoseAnchor(latestLeftHandPose_vr_,
-                                                    latestPoseConstraintList_,
-                                                    leftEndEffectorPosition_,
-                                                    leftEndEffectorQuat_,
-                                                    leftLink4Quat_);
-    leftActiveChestAnchorPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : frozenRobotChestPos_;
-    leftActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
-    hasLeftActiveChestAnchor_ = true;
+bool WheelQuest3IkIncrementalROS::synchronizeArmTransferFromSnapshot(
+    ArmIdx side,
+    const PublishedCommandFkSnapshot& snapshot,
+    bool updateIncrementalAnchor) {
+  if (!snapshot.valid || snapshot.wholeBodyJoints.size() != 18 ||
+      (side != ArmIdx::LEFT && side != ArmIdx::RIGHT)) {
+    return false;
   }
 
-  if (rightGripRisingEdge && !rightMaintainProcess) {
-    if (rightNaturalElbowGuide_) rightNaturalElbowGuide_->reset();
-    // On grip rising edge, defensively sync constraint list to current FK to avoid jumps.
-    updateHandConstraintUnlocked(
-        latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
-    updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, rightLink4Position_);
+  const bool isLeft = side == ArmIdx::LEFT;
+  const std::size_t armOffset = isLeft ? 0U : 7U;
+  const uint64_t snapshotSideSequence =
+      isLeft ? snapshot.leftArmSequence : snapshot.rightArmSequence;
+  std::unique_lock<std::mutex> jointLock(jointStateMutex_);
+  if (!snapshot.measuredFallback) {
+    const uint64_t currentSideSequence =
+        isLeft ? publishedLeftArmCommandSequence_ : publishedRightArmCommandSequence_;
+    if (!hasPublishedArmCommand_ || snapshotSideSequence != currentSideSequence ||
+        publishedArmCommand_.size() != 14 ||
+        !publishedArmCommand_
+             .segment(static_cast<Eigen::Index>(armOffset), 7)
+             .isApprox(snapshot.wholeBodyJoints.segment(isLeft ? 4 : 11, 7), 1.0e-12)) {
+      ROS_WARN_THROTTLE(1.0,
+                        "[WheelQuest3IkIncrementalROS] Rejecting stale %s command snapshot",
+                        isLeft ? "left" : "right");
+      return false;
+    }
+  }
 
-    hasRightHandPoseInChest_ = false;
-    hasRightElbowPosInChest_ = false;
+  ArmGripTransferState& transferState = isLeft ? leftGripTransferState_ : rightGripTransferState_;
+  const ArmCommandFk& commandArm = isLeft ? snapshot.left : snapshot.right;
+  transferState.commandSequence = snapshotSideSequence;
+  transferState.publishedArmJoints =
+      isLeft ? snapshot.wholeBodyJoints.segment(4, 7) : snapshot.wholeBodyJoints.segment(11, 7);
+  transferState.poseInChest = armPoseInReference(snapshot.chest, commandArm);
+  const bool threePointAnchorValid =
+      captureThreePointHandAnchor(transferState.threePointHandAnchor,
+                                  commandArm.hand.position,
+                                  commandArm.endEffector.position,
+                                  commandArm.virtualThumb.position,
+                                  commandArm.endEffector.orientation);
+  transferState.valid =
+      transferState.publishedArmJoints.allFinite() && threePointAnchorValid;
+  if (!transferState.valid) return false;
 
-    incrementalController_->updateRightArmPoseAnchor(latestRightHandPose_vr_,
-                                                     latestPoseConstraintList_,
-                                                     rightEndEffectorPosition_,
-                                                     rightEndEffectorQuat_,
-                                                     rightLink4Quat_);
-    rightActiveChestAnchorPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : frozenRobotChestPos_;
-    rightActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
-    hasRightActiveChestAnchor_ = true;
+  // A grip boundary is a state transfer, not a chest tracking update.  Keep
+  // every Cartesian seed in the exact FK(q_pub) domain.  The desired chest
+  // reference is captured separately and only its post-entry delta is applied
+  // by the normal tracking path.
+  const ArmCommandFk& mappedArm = commandArm;
+
+  if (latestPoseConstraintList_.size() < POSE_DATA_LIST_SIZE_PLUS) {
+    latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
+  }
+
+  if (isLeft) {
+    updateHandConstraintUnlocked(latestPoseConstraintList_,
+                                 POSE_DATA_LIST_INDEX_LEFT_HAND,
+                                 mappedArm.hand.position,
+                                 mappedArm.endEffector.orientation);
+    updateElbowConstraintUnlocked(
+        latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, mappedArm.elbow.position);
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position = mappedArm.shoulder.position;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_LINK6].position = mappedArm.hand.position;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position =
+        mappedArm.endEffector.position;
+
+    leftLink6Position_ = mappedArm.hand.position;
+    leftLink6Quat_ = mappedArm.hand.orientation;
+    leftLink4Position_ = mappedArm.elbow.position;
+    leftLink4Quat_ = mappedArm.elbow.orientation;
+    leftEndEffectorPosition_ = mappedArm.endEffector.position;
+    leftEndEffectorQuat_ = mappedArm.endEffector.orientation;
+    leftVirtualThumbPosition_ = mappedArm.virtualThumb.position;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position =
+        leftVirtualThumbPosition_;
+
+    leftHandPosInChest_ = transferState.poseInChest.hand.position;
+    leftHandQuatInChest_ = transferState.poseInChest.endEffector.orientation;
+    leftElbowPosInChest_ = transferState.poseInChest.elbow.position;
+    hasLeftHandPoseInChest_ = true;
+    hasLeftElbowPosInChest_ = true;
+    latestLeftHandPosBeforeOpt_ = mappedArm.hand.position;
+    latestLeftHandPosAfterOpt_ = mappedArm.hand.position;
+    latestLeftElbowPosBeforeOpt_ = mappedArm.elbow.position;
+    latestLeftElbowPosAfterOpt_ = mappedArm.elbow.position;
+
+    if (updateIncrementalAnchor && incrementalController_) {
+      incrementalController_->updateLeftArmPoseAnchor(latestLeftHandPose_vr_,
+                                                      latestPoseConstraintList_,
+                                                      mappedArm.endEffector.position,
+                                                      mappedArm.endEffector.orientation,
+                                                      mappedArm.elbow.orientation);
+    }
+  } else {
+    updateHandConstraintUnlocked(latestPoseConstraintList_,
+                                 POSE_DATA_LIST_INDEX_RIGHT_HAND,
+                                 mappedArm.hand.position,
+                                 mappedArm.endEffector.orientation);
+    updateElbowConstraintUnlocked(
+        latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, mappedArm.elbow.position);
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = mappedArm.shoulder.position;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position = mappedArm.hand.position;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR].position =
+        mappedArm.endEffector.position;
+
+    rightLink6Position_ = mappedArm.hand.position;
+    rightLink6Quat_ = mappedArm.hand.orientation;
+    rightLink4Position_ = mappedArm.elbow.position;
+    rightLink4Quat_ = mappedArm.elbow.orientation;
+    rightEndEffectorPosition_ = mappedArm.endEffector.position;
+    rightEndEffectorQuat_ = mappedArm.endEffector.orientation;
+    rightVirtualThumbPosition_ = mappedArm.virtualThumb.position;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position =
+        rightVirtualThumbPosition_;
+
+    rightHandPosInChest_ = transferState.poseInChest.hand.position;
+    rightHandQuatInChest_ = transferState.poseInChest.endEffector.orientation;
+    rightElbowPosInChest_ = transferState.poseInChest.elbow.position;
+    hasRightHandPoseInChest_ = true;
+    hasRightElbowPosInChest_ = true;
+    latestRightHandPosBeforeOpt_ = mappedArm.hand.position;
+    latestRightHandPosAfterOpt_ = mappedArm.hand.position;
+    latestRightElbowPosBeforeOpt_ = mappedArm.elbow.position;
+    latestRightElbowPosAfterOpt_ = mappedArm.elbow.position;
+
+    if (updateIncrementalAnchor && incrementalController_) {
+      incrementalController_->updateRightArmPoseAnchor(latestRightHandPose_vr_,
+                                                       latestPoseConstraintList_,
+                                                       mappedArm.endEffector.position,
+                                                       mappedArm.endEffector.orientation,
+                                                       mappedArm.elbow.orientation);
+    }
+  }
+
+  if (armJointRuckigFilterPtr_ &&
+      !armJointRuckigFilterPtr_->resetRange(armOffset, transferState.publishedArmJoints)) {
+    return false;
+  }
+  q_.segment(static_cast<Eigen::Index>(armOffset), 7) = transferState.publishedArmJoints;
+  dq_.segment(static_cast<Eigen::Index>(armOffset), 7).setZero();
+  latest_dq_.segment(static_cast<Eigen::Index>(armOffset), 7).setZero();
+  lowpass_dq_.segment(static_cast<Eigen::Index>(armOffset), 7).setZero();
+  return true;
+}
+
+bool WheelQuest3IkIncrementalROS::synchronizeNonTrackingSolverStates(
+    const WheelChestReferencePose& currentChestRef,
+    bool synchronizeLeft,
+    bool synchronizeRight) {
+  CommandPose currentChest;
+  currentChest.position = currentChestRef.position;
+  currentChest.orientation = currentChestRef.orientation.normalized();
+
+  auto synchronizeSide = [&](ArmIdx side, ArmGripTransferState& transferState) -> bool {
+    if (!transferState.valid || transferState.publishedArmJoints.size() != 7) return false;
+    const ArmCommandFk mappedArm = armPoseFromReference(currentChest, transferState.poseInChest);
+    const bool isLeft = side == ArmIdx::LEFT;
+    bool success = true;
+    if (chestElbowHandPointOptSolverPtr_) {
+      const auto pointSide = isLeft ? DrakeChestElbowHandPointOptSolver::ArmSide::Left
+                                    : DrakeChestElbowHandPointOptSolver::ArmSide::Right;
+      if (!chestElbowHandPointOptSolverPtr_->synchronizeArmCommandState(pointSide,
+                                                                        currentChest.position,
+                                                                        currentChest.orientation,
+                                                                        mappedArm.shoulder.position,
+                                                                        mappedArm.elbow.position,
+                                                                        mappedArm.hand.position)) {
+        ROS_WARN_THROTTLE(1.0,
+                          "[WheelQuest3IkIncrementalROS] Failed to synchronize %s point-optimizer state",
+                          isLeft ? "left" : "right");
+        success = false;
+      }
+    } else {
+      success = false;
+    }
+    std::lock_guard<std::mutex> ikLock(oneStageIkMutex_);
+    if (oneStageIkEndEffectorPtr_ &&
+        !oneStageIkEndEffectorPtr_->resyncArmJointState(side, transferState.publishedArmJoints)) {
+      ROS_WARN_THROTTLE(1.0,
+                        "[WheelQuest3IkIncrementalROS] Failed to synchronize %s one-stage IK state",
+                        isLeft ? "left" : "right");
+      success = false;
+    } else if (!oneStageIkEndEffectorPtr_) {
+      success = false;
+    }
+    return success;
+  };
+
+  bool success = true;
+  if (synchronizeLeft) success = synchronizeSide(ArmIdx::LEFT, leftGripTransferState_) && success;
+  if (synchronizeRight) success = synchronizeSide(ArmIdx::RIGHT, rightGripTransferState_) && success;
+  return success;
+}
+
+void WheelQuest3IkIncrementalROS::handleGripEdges(
+    bool leftGripRisingEdge,
+    bool rightGripRisingEdge,
+    bool leftGripFallingEdge,
+    bool rightGripFallingEdge,
+    bool leftMaintainProcess,
+    bool rightMaintainProcess,
+    const WheelChestReferencePose& currentChestRef,
+    uint64_t leftGripGeneration,
+    uint64_t rightGripGeneration) {
+  const bool syncLeft = (leftGripRisingEdge && !leftMaintainProcess) || leftGripFallingEdge;
+  const bool syncRight = (rightGripRisingEdge && !rightMaintainProcess) || rightGripFallingEdge;
+  if (!syncLeft && !syncRight) return;
+
+  // Close the publisher gate before any potentially slow FK/optimizer work.
+  // It remains closed until applyWholeBodyAndSolve commits a finite IK result
+  // for the matching grip state.
+  if (syncLeft) leftArmCandidateReadyForPublish_.store(false);
+  if (syncRight) rightArmCandidateReadyForPublish_.store(false);
+
+  PublishedCommandFkSnapshot snapshot;
+  // Runtime grip transitions must never splice measured joints into q_pub.
+  // Startup bootstrap is handled separately by fsmEnter.
+  if (!buildPublishedCommandFkSnapshot(snapshot, false)) {
+    ROS_ERROR_THROTTLE(1.0,
+                       "[WheelQuest3IkIncrementalROS] Grip transfer aborted: no coherent command snapshot");
+    return;
+  }
+
+  WheelChestReferencePose publishedChestRef;
+  publishedChestRef.position = snapshot.chest.position;
+  publishedChestRef.orientation = snapshot.chest.orientation.normalized();
+
+  auto phaseTracksArm = [](GripTransferPhase phase) {
+    return phase == GripTransferPhase::PressSync || phase == GripTransferPhase::ActiveTrack;
+  };
+  const bool hadTrackingArm = phaseTracksArm(leftGripTransferState_.phase) ||
+                              phaseTracksArm(rightGripTransferState_.phase);
+  const bool startsNewChestTransfer =
+      (leftGripRisingEdge || rightGripRisingEdge) &&
+      (!hadTrackingArm || !chestReferenceTransferState_.valid);
+
+  ChestReferenceTransferState transitionChestState = chestReferenceTransferState_;
+  if (startsNewChestTransfer) {
+    transitionChestState.publishedChestAtGrip = publishedChestRef;
+    transitionChestState.desiredChestAtGrip = currentChestRef;
+    transitionChestState.desiredChestAtGrip.orientation.normalize();
+    transitionChestState.valid = true;
+  }
+
+  WheelChestReferencePose effectiveChestRef = publishedChestRef;
+  if (transitionChestState.valid) {
+    effectiveChestRef = followPublishedPoseWithDesiredReferenceDelta(
+        transitionChestState.desiredChestAtGrip,
+        currentChestRef,
+        transitionChestState.publishedChestAtGrip);
+  }
+
+  auto resetGuide = [&](bool isLeft) {
+    auto& guide = isLeft ? leftNaturalElbowGuide_ : rightNaturalElbowGuide_;
+    auto& anchor = isLeft ? leftActiveElbowReferenceAnchor_ : rightActiveElbowReferenceAnchor_;
+    auto& filter = isLeft ? leftElbowGuideDeltaFilterPtr_ : rightElbowGuideDeltaFilterPtr_;
+    if (guide) guide->reset();
+    anchor.reset();
+    if (filter) filter->reset(Eigen::VectorXd::Zero(3));
+  };
+
+  bool leftTransferReady = false;
+  bool rightTransferReady = false;
+  const GripTransferPhase requestedLeftPhase =
+      leftGripRisingEdge ? GripTransferPhase::PressSync : GripTransferPhase::ReleaseSync;
+  const GripTransferPhase requestedRightPhase =
+      rightGripRisingEdge ? GripTransferPhase::PressSync : GripTransferPhase::ReleaseSync;
+
+  if (syncLeft) {
+    resetGuide(true);
+    leftTransferReady =
+        synchronizeArmTransferFromSnapshot(ArmIdx::LEFT, snapshot, false);
+    if (leftTransferReady) {
+      leftActiveChestRefAnchorPos_ = effectiveChestRef.position;
+      leftActiveChestRefAnchorQuat_ = effectiveChestRef.orientation.normalized();
+      hasLeftActiveChestRefAnchor_ = leftGripRisingEdge;
+    }
+  }
+  if (syncRight) {
+    resetGuide(false);
+    rightTransferReady =
+        synchronizeArmTransferFromSnapshot(ArmIdx::RIGHT, snapshot, false);
+    if (rightTransferReady) {
+      rightActiveChestRefAnchorPos_ = effectiveChestRef.position;
+      rightActiveChestRefAnchorQuat_ = effectiveChestRef.orientation.normalized();
+      hasRightActiveChestRefAnchor_ = rightGripRisingEdge;
+    }
+  }
+
+  const bool leftSolverReady =
+      leftTransferReady && synchronizeNonTrackingSolverStates(publishedChestRef, true, false);
+  const bool rightSolverReady =
+      rightTransferReady && synchronizeNonTrackingSolverStates(publishedChestRef, false, true);
+
+  auto commitLeftTransition = [&]() {
+    leftGripTransferState_.phase = requestedLeftPhase;
+    leftGripTransferState_.gripGeneration = leftGripGeneration;
+    if (leftGripRisingEdge) {
+      incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
+                                                          latestPoseConstraintList_,
+                                                          leftEndEffectorPosition_,
+                                                          leftEndEffectorQuat_,
+                                                          leftLink4Quat_);
+    } else {
+      incrementalController_->exitIncrementalModeLeftArm(latestLeftHandPose_vr_,
+                                                         latestPoseConstraintList_,
+                                                         leftEndEffectorPosition_,
+                                                         leftEndEffectorQuat_,
+                                                         leftLink4Quat_);
+    }
+  };
+  auto commitRightTransition = [&]() {
+    rightGripTransferState_.phase = requestedRightPhase;
+    rightGripTransferState_.gripGeneration = rightGripGeneration;
+    if (rightGripRisingEdge) {
+      incrementalController_->enterIncrementalModeRightArm(latestRightHandPose_vr_,
+                                                           latestPoseConstraintList_,
+                                                           rightEndEffectorPosition_,
+                                                           rightEndEffectorQuat_,
+                                                           rightLink4Quat_);
+    } else {
+      incrementalController_->exitIncrementalModeRightArm(latestRightHandPose_vr_,
+                                                          latestPoseConstraintList_,
+                                                          rightEndEffectorPosition_,
+                                                          rightEndEffectorQuat_,
+                                                          rightLink4Quat_);
+    }
+  };
+
+  if (leftSolverReady) commitLeftTransition();
+  if (rightSolverReady) commitRightTransition();
+  const bool committedPress =
+      (leftSolverReady && leftGripRisingEdge) ||
+      (rightSolverReady && rightGripRisingEdge);
+  if (startsNewChestTransfer && committedPress) {
+    chestReferenceTransferState_ = transitionChestState;
+  }
+  const bool committedRelease =
+      (leftSolverReady && !leftGripRisingEdge) ||
+      (rightSolverReady && !rightGripRisingEdge);
+  if (committedRelease && !joyStickHandlerPtr_->isLeftGrip() &&
+      !joyStickHandlerPtr_->isRightGrip()) {
+    chestExitAnchorPending_ = true;
   }
 }
 
@@ -1278,22 +1757,6 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
         lbLegMoveStartTime_ = ros::Time(0);
       }
 
-      updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
-      updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
-
-      incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
-                                                          latestPoseConstraintList_,
-                                                          leftEndEffectorPosition_,
-                                                          leftEndEffectorQuat_,
-                                                          leftLink4Quat_);
-
-      incrementalController_->enterIncrementalModeRightArm(latestRightHandPose_vr_,
-                                                           latestPoseConstraintList_,
-                                                           rightEndEffectorPosition_,
-                                                           rightEndEffectorQuat_,
-                                                           rightLink4Quat_);
       exitMode2Counter_++;
     }
   }
@@ -1302,7 +1765,8 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
   const bool rightGripPressed = joyStickHandlerPtr_->isRightGrip();
   const bool bothGripReleased = !leftGripPressed && !rightGripPressed;
 
-  if (bothGripReleased && incrementalController_ && incrementalController_->isIncrementalModeChest()) {
+  if (bothGripReleased && incrementalController_ &&
+      (incrementalController_->isIncrementalModeChest() || chestExitAnchorPending_)) {
     Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
     {
       std::lock_guard<std::mutex> lock(chestPoseMutex_);
@@ -1310,8 +1774,13 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
         humanChestPos = latestChestPositionInRobot_;
       }
     }
-    const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
-    const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
+    PublishedCommandFkSnapshot releaseSnapshot;
+    const bool hasReleaseSnapshot = buildPublishedCommandFkSnapshot(releaseSnapshot, true);
+    const Eigen::Vector3d chestPos =
+        hasReleaseSnapshot ? releaseSnapshot.chest.position
+                           : (hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_);
+    const Eigen::Quaterniond chestQuat =
+        hasReleaseSnapshot ? releaseSnapshot.chest.orientation : getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
       latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
@@ -1334,7 +1803,13 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
       }
     }
     incrementalController_->updateChestAnchorOnExit(humanChestPos, latestPoseConstraintList_);
+    chestExitAnchorPending_ = false;
   }
+
+  // While mode 2 is running, handleGripEdges() is the sole owner of arm
+  // press/release anchors and activation state.  A second exit here would
+  // overwrite its q_pub anchor with an uncommitted solver candidate.
+  if (armControlMode_.load() == 2) return;
 
   bool shouldExitIncrementalLeftArm = incrementalController_->shouldExitIncrementalModeLeftArm(leftGripPressed);
   bool shouldExitIncrementalRightArm = incrementalController_->shouldExitIncrementalModeRightArm(rightGripPressed);
@@ -1372,22 +1847,26 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
   deactivateController();
 }
 
-void WheelQuest3IkIncrementalROS::solveIk() {
+bool WheelQuest3IkIncrementalROS::solveIk() {
   std::vector<PoseData> poseConstraintListCopy;
   poseConstraintListCopy = latestPoseConstraintList_;
 
   auto startTime = std::chrono::high_resolution_clock::now();
-  oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
-      latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);
-  // 腰部位置跟随细分关闭（或总开关关闭）时，chest 位置在 IK 中用硬约束锁定，不随手臂摆动
-  oneStageIkEndEffectorPtr_->setFreezeChestPosition(!chestPositionUpdateEnable_);
-  auto ikResult = oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
+  auto ikResult = [&]() {
+    std::lock_guard<std::mutex> ikLock(oneStageIkMutex_);
+    oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
+        latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);
+    // 腰部位置跟随细分关闭（或总开关关闭）时，chest 位置在 IK 中用硬约束锁定，不随手臂摆动
+    oneStageIkEndEffectorPtr_->setFreezeChestPosition(!chestPositionUpdateEnable_);
+    return oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
+  }();
   auto endTime = std::chrono::high_resolution_clock::now();
   const auto durationUs = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
   const double durationMs = static_cast<double>(durationUs) / 1000.0;
   ROS_INFO_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] one-stage IK latest duration: %.3f ms (%ld us)", durationMs, static_cast<long>(durationUs));
 
-  if (ikResult.isSuccess) {
+  if (ikResult.isSuccess && ikResult.solution.size() == drakeJointStateSize_ &&
+      ikResult.solution.allFinite()) {
     {
       std::lock_guard<std::mutex> lock(ikResultMutex_);
       latestIkSolution_ = ikResult.solution;
@@ -1399,10 +1878,14 @@ void WheelQuest3IkIncrementalROS::solveIk() {
         // ROS_INFO("[WheelQuest3IkIncrementalROS] extract ik command into lower body and upper body");
         ikLowerBodyJointCommand_ = latestIkSolution_.head(4);
         ikUpperBodyJointCommand_ = latestIkSolution_.tail(14);
+        ++latestIkCandidateSequence_;
       }
     }
+    return true;
   } else {
-    ROS_ERROR("[WheelQuest3IkIncrementalROS] solveIk failed: %s", ikResult.solverLog.c_str());
+    ROS_ERROR("[WheelQuest3IkIncrementalROS] solveIk failed or returned an invalid solution: %s",
+              ikResult.solverLog.c_str());
+    return false;
   }
 }
 

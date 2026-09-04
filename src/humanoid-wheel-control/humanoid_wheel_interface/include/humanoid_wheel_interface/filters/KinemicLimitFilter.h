@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <ros/ros.h>
 #include <iostream>
 #include <vector>
@@ -37,6 +38,26 @@ public:
 
     // 重置滤波器
     void reset(const Eigen::VectorXd& initialValue);
+
+    /**
+     * @brief Reset a contiguous subset of DOFs without disturbing the others.
+     *
+     * The selected positions are synchronized to @p values and their velocity
+     * and acceleration histories are cleared.  The corresponding internal
+     * Ruckig trajectories are invalidated, so the next update starts from the
+     * supplied state.  State belonging to DOFs outside the selected range is
+     * left unchanged.
+     *
+     * This class is not internally synchronized.  Callers must use the same
+     * external lock that protects update() when resetRange() can run from a
+     * different thread.
+     *
+     * @param offset First DOF to reset.
+     * @param values New positions for [offset, offset + values.size()).
+     * @return true on success; false for an empty, non-finite, or out-of-range
+     *         request.  A rejected request does not change any state.
+     */
+    bool resetRange(std::size_t offset, const Eigen::VectorXd& values);
 
 private:
     // 常规成员 
