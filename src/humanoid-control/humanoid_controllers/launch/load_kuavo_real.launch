@@ -47,7 +47,7 @@
     <arg name="lejuclaw_high_freq_switch" default="false" doc="Use high-frequency continuous claw control by default; a live /quest_joystick_data stream also enables it." />
     <arg name="lejuclaw_vr_stream_timeout_ms" default="1000" doc="Timeout in ms before the Quest joystick stream is considered inactive." />
     <arg name="ruiwo_cxx_sdk" default="true"/>
-    <arg name="arm_move_spd"      default="1.2"/>
+    <arg name="arm_move_spd"      default="2.0"/>
     <arg name="waist_move_spd"      default="1.8"/>
 
     <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->

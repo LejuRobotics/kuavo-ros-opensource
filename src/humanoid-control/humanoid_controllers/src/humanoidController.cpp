@@ -2207,7 +2207,17 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
     kinematicPub_.publish(kinematics_odom);
     { // robotlocalization_data_mutex_
       std::lock_guard<std::mutex> lock(robotlocalization_data_mutex_);
-      if(!robotlocalizationDataQueue.empty())
+      // 重置后优先对齐 IMU，并丢掉回调线程可能刚塞回来的 localization，避免标志被推迟消费
+      if (align_fused_yaw_to_imu_)
+      {
+        while (!robotlocalizationDataQueue.empty())
+        {
+          robotlocalizationDataQueue.pop();
+        }
+        robot_quat_state_update_ = sensor_data_new.quat_;
+        align_fused_yaw_to_imu_ = false;
+      }
+      else if(!robotlocalizationDataQueue.empty())
       {
         nav_msgs::Odometry robot_localization_ = robotlocalizationDataQueue.front();
         Eigen::Quaterniond robot_quat(robot_localization_.pose.pose.orientation.w, 
@@ -2278,7 +2288,8 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       {
         robotlocalizationDataQueue.pop();
       }
-      // robot_quat_state_update_会在第一次updatakinematics调用时自动更新为当前传感器值
+      // 下一帧丢弃 localization 并对齐当前 IMU yaw
+      align_fused_yaw_to_imu_ = true;
     }
     
     // 重置状态估计器
@@ -3957,43 +3968,74 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             optimizedState2WBC_mrt_.tail(armNumReal_) = mm_arm_joint_trajectory_.pos;
         }
       }
-      static bool low_latency_first_enter = true;
-      if (mpcArmControlMode_desired_ != ArmControlMode::EXTERN_CONTROL)
-      {
-        low_latency_first_enter = true;
-      }
       if (use_ros_arm_joint_trajectory_ && resetting_mpc_state_ == ResettingMpcState::NORMAL)
       {
         if (mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL && mpcArmControlMode_ == ArmControlMode::EXTERN_CONTROL)
         {
-          vector_t filtered_pos = arm_joint_pos_filter_.update(arm_joint_trajectory_.pos);
-          optimizedState2WBC_mrt_.tail(armNumReal_) = filtered_pos;
-    
-        // 2. 如果外部轨迹没有提供速度，使用滤波后的位置计算速度
-          static vector_t prev_filtered_pos = filtered_pos;
-          if (low_latency_first_enter)
-          {
-            prev_filtered_pos = filtered_pos;
-            low_latency_first_enter = false;
-          }
-          // vector_t computed_vel = (filtered_pos - prev_filtered_pos) / dt_;
-          vector_t computed_vel = vector_t::Zero(armNumReal_);
-            
-            // 3. 对计算出的速度再次滤波
-          optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(computed_vel);
-
-          //ros_logger_->publishVector("/humanoid_controller/arm_joint_computed_vel", computed_vel);
-          prev_filtered_pos = filtered_pos;
-
           if(ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode)
           {
-            optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.pos;          
+            // 超低延时模式沿用上游直接提供的位置、速度参考。
+            optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.pos;
             optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.vel;
+            absolute_arm_velocity_initialized_ = false;
           }
-    
+          else
+          {
+            // 普通绝对式轨迹通常不提供有效速度。先得到最终位置参考，再直接对该
+            // 位置做差分，保证发送给驱动的 q/dq 运动学一致。这里不能再叠加独立
+            // 的速度低通，否则 dq 会相对 q 的导数产生额外相位延迟。
+            const vector_t filtered_pos = arm_joint_pos_filter_.update(arm_joint_trajectory_.pos);
+            optimizedState2WBC_mrt_.tail(armNumReal_) = filtered_pos;
+
+            vector_t computed_vel = vector_t::Zero(armNumReal_);
+            const double actual_dt = dfd.toSec();
+            const double nominal_dt = (std::isfinite(dt_) && dt_ > 0.0) ? dt_ : 0.002;
+            const bool valid_dt = std::isfinite(actual_dt) &&
+                                  actual_dt >= 0.5 * nominal_dt &&
+                                  actual_dt <= 3.0 * nominal_dt;
+            const bool valid_history = absolute_arm_velocity_initialized_ &&
+                                       absolute_arm_prev_filtered_pos_.size() == armNumReal_;
+
+            if (valid_dt && valid_history)
+            {
+              computed_vel = (filtered_pos - absolute_arm_prev_filtered_pos_) / actual_dt;
+
+              // 使用硬件配置中的逐关节速度上限。配置异常时采用保守的手臂插值
+              // 上限，避免错误时间基准或目标跳变产生速度尖峰。
+              const auto& velocity_limits = kuavo_settings_.hardware_settings.joint_velocity_limits;
+              const size_t arm_start = static_cast<size_t>(jointNumReal_ + waistNum_);
+              const double fallback_limit = std::max(0.0, arm_interpolation_max_velocity_);
+              for (int i = 0; i < armNumReal_; ++i)
+              {
+                double limit = fallback_limit;
+                const size_t limit_index = arm_start + static_cast<size_t>(i);
+                if (limit_index < velocity_limits.size() &&
+                    std::isfinite(velocity_limits[limit_index]) &&
+                    velocity_limits[limit_index] > 0.0)
+                {
+                  limit = velocity_limits[limit_index];
+                }
+                computed_vel(i) = limit > 0.0
+                                      ? std::clamp(computed_vel(i), -limit, limit)
+                                      : 0.0;
+              }
+            }
+            else if (absolute_arm_velocity_initialized_ && !valid_dt)
+            {
+              ROS_WARN_THROTTLE(1.0,
+                                "[humanoidController] Invalid arm velocity reconstruction dt %.6f s "
+                                "(nominal %.6f s), reset velocity history",
+                                actual_dt, nominal_dt);
+            }
+
+            absolute_arm_prev_filtered_pos_ = filtered_pos;
+            absolute_arm_velocity_initialized_ = true;
+            optimizedInput2WBC_mrt_.tail(armNumReal_) = computed_vel;
+          }
         }
         else if(only_half_up_body_ && mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL)
         {
+          absolute_arm_velocity_initialized_ = false;
           optimizedState2WBC_mrt_.segment<7>(24) = arm_joint_trajectory_.pos.segment<7>(0);
           optimizedState2WBC_mrt_.segment<7>(24+7) = arm_joint_trajectory_.pos.segment<7>(7);
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_pos_filter_.update(optimizedState2WBC_mrt_.tail(armNumReal_));
@@ -4001,6 +4043,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         }
         else
         {
+          absolute_arm_velocity_initialized_ = false;
           // use filter output
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_pos_filter_.update(optimizedState2WBC_mrt_.tail(armNumReal_));
           optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(optimizedInput2WBC_mrt_.tail(armNumReal_));
@@ -4009,6 +4052,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       }
       else
       {
+        absolute_arm_velocity_initialized_ = false;
         if (resetting_mpc_state_ != ResettingMpcState::NORMAL)
         {
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_interpolation_result_;
@@ -4019,10 +4063,13 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_pos_filter_.update(optimizedState2WBC_mrt_.tail(armNumReal_));
           optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(optimizedInput2WBC_mrt_.tail(armNumReal_));
         }
-        low_latency_first_enter = true;
       }
 
       }  // !seat.wbc_bypass
+      else
+      {
+        absolute_arm_velocity_initialized_ = false;
+      }
 
       // *************************** arm joint trajectory **********************************
 

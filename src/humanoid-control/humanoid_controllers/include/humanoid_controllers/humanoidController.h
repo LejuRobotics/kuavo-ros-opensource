@@ -779,6 +779,7 @@ namespace humanoid_controller
     SensorData sensor_data_headRL_;
     SensorData sensor_data_waist_;
     Eigen::Quaterniond robot_quat_state_update_;
+    bool align_fused_yaw_to_imu_{false};  // resetKinematicsEstimation 后第一帧用当前 IMU yaw
     vector_t desire_head_pos_ = vector_t::Zero(2);
     // 头部 vel/delta 缓冲（rad/s, rad）；desire_head_pos_ 为唯一开环终点
     // vel: sticky + 0.3s 超时清零；delta: oneshot 用后即清
@@ -859,6 +860,11 @@ namespace humanoid_controller
     LowPassFilter2ndOrder gyro_filter_;
     LowPassFilter2ndOrder arm_joint_pos_filter_;
     LowPassFilter2ndOrder arm_joint_vel_filter_;
+
+    // 绝对式手臂外控的位置/速度参考必须保持差分一致。速度由已经过位置滤波的
+    // 最终目标重建，不再经过独立低通；该状态在模式切换或异常控制周期时复位。
+    vector_t absolute_arm_prev_filtered_pos_;
+    bool absolute_arm_velocity_initialized_{false};
 
     double sensor_frequency_{1000.0};   // 传感器数据频率
     double sensor_dt_{0.001};           // 传感器数据采样周期，用于滤波器和数据缓冲区
