@@ -122,7 +122,7 @@ class HardwarePlant
     SensorData_t sensorsInitHW();
     bool sensorsCheck();
     void HWPlantDeInit();
-    void jointMoveTo(std::vector<double> goal_pos, double speed, double dt = 1e-3, double current_limit=-1);
+    bool jointMoveTo(std::vector<double> goal_pos, double speed, double dt = 1e-3, double current_limit=-1);
 
     void qv_joint_to_motor(Eigen::VectorXd &no_arm_state, Eigen::VectorXd &with_arm_state, uint32_t nq_with_arm, uint32_t nq_no_arm);
     int8_t PDInitialize(Eigen::VectorXd &q0);
@@ -278,6 +278,18 @@ public:
 
 
 private:
+
+    // 将电机原始反馈按当前机型的分段 c2t 配置换算为关节力矩
+    double motorFeedbackToJointTorqueNm(size_t joint_idx, double motor_feedback) const;
+
+    // 根据当前机器人配置计算标定堵转保护的力矩阈值
+    double getCalibrationStallTorqueThreshold(size_t joint_idx) const;
+
+    // 标定堵转保护独立使用的峰值力矩倍率
+    double calibration_stall_torque_ratio_{0.3};
+
+    // 标定失败时停止所有手臂关节
+    bool stopArmForCalibrationFailure();
 
     SensorData_t sensor_data_motor_last;
     SensorData_t sensor_data_joint_last;
