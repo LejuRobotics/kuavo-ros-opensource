@@ -20,7 +20,13 @@ controllers:
     class: "BASE_CONTROLLER"  # VMP控制器
     type: "VMP_CONTROLLER"    # VMP控制器类型
     config_file: "vmp/vmp_param.info"  # VMP配置文件路径
-    enabled: false  # 默认不启用，需要时设为true
+    enabled: &vmp_with_amp2 false  # 默认不启用，需要时设置为true，与 amp_controller_2 共用，只改这一处
+
+  - name: "amp_controller_2"
+    class: "BASE_CONTROLLER"  # 基础行走控制器
+    type: "AMP_CONTROLLER"    # 具体控制器类型
+    config_file: "rl/skw_rl_param.info"
+    enabled: *vmp_with_amp2  # 默认不启用，必须与 vmp_controller 同开同关，避免 VMP 切 MPC 不稳定
 
   - name: "dance_controller"
     class: "DANCE_CONTROLLER"  # 舞蹈控制器
