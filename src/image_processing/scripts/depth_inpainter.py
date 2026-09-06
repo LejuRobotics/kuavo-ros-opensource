@@ -54,7 +54,8 @@ class DepthImageInpainter:
         self.min_depth_physics = rospy.get_param('~min_depth_physics', 0.17)
         self.max_depth = rospy.get_param('~max_depth', 2.5)
 
-        self.resize_scale = rospy.get_param('~resize_scale', 0.5)
+        self.resize_w = rospy.get_param('~resize_w', 36)
+        self.resize_h = rospy.get_param('~resize_h', 64)
 
         self.crop_top = rospy.get_param('~crop_top', 0)
         self.crop_bottom = rospy.get_param('~crop_bottom', 0)
@@ -448,13 +449,12 @@ class DepthImageInpainter:
         return inpainted_depth
     
     def apply_resize(self, image, interpolation=cv2.INTER_NEAREST):
-        if self.resize_scale != 1.0 and self.resize_scale > 0:
-            orig_h, orig_w = image.shape[:2]
-            new_h = int(orig_h * self.resize_scale*2)
-            new_w = int(orig_w * self.resize_scale*2)
-            image = cv2.resize(image, (new_w, new_h), interpolation=interpolation)
-            if self.debug:
-                rospy.loginfo(f"Resized image to scale {self.resize_scale} ({new_h}x{new_w})")
+        orig_h, orig_w = image.shape[:2]
+        new_h = int(self.resize_h)
+        new_w = int(self.resize_w)
+        image = cv2.resize(image, (new_w, new_h), interpolation=interpolation)
+        if self.debug:
+            rospy.loginfo(f"Resized image from ({orig_h}x{orig_w}) to ({new_h}x{new_w})")
         return image
 
     def apply_crop(self, image):
