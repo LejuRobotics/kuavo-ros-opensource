@@ -79,6 +79,7 @@ topics:
   - /leju_claw_command
   - /leju_claw_debug
   - /leju_claw_state
+  - /leju_claw_target
   - /leju/fused_hull_boundry_fuse_elevation
   - /leju/elevation_map0
   - /righthand_pose
@@ -111,4 +112,3 @@ topics:
   - /head_pose
   - /dance_controller/.*
   - /move_base/base_cmd_vel
-  - /waist_camera/depth/image_raw/compressedDepth

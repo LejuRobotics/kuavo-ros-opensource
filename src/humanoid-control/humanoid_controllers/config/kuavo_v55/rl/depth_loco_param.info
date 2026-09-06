@@ -14,7 +14,7 @@ episodeLength      0       ; 用于计算相位，每走一个step就加1
 clipObservations   10000.0    ; 用于对输入进行clip
 clipActions        100.0    ; 用于对actions进行clip
 use_jointcmd_filter false       ; 是否对输出使用关节指令滤波器 0:不使用 1:使用
-use_external_arm_controller false ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
+use_external_arm_controller true ; 是否使用外部手臂控制器指令替代模型输出的手臂指令 0:不使用 1:使用
 use_external_waist_controller false ; 是否使用外部腰部控制器指令替代模型输出的腰部指令 0:不使用 1:使用
 use_interploate_from_mpc     false       ; 从MPC切换到这个模型时是使用插值还是直接切换 0:不使用 1:使用
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
@@ -51,7 +51,7 @@ velocityLimits
     ; 定义速度命令的限制（正负方向独立设置）
     ; 格式：[linear_x_pos, linear_x_neg, linear_y_pos, linear_y_neg, 
     ;        linear_z_pos, linear_z_neg, angular_z_pos, angular_z_neg]
-    (0,0)  0.4      ; cmdVelLineX positive
+    (0,0)  0.35      ; cmdVelLineX positive
     (1,0)  -0.35     ; cmdVelLineX negative
     (2,0)  0.3      ; cmdVelLineY positive
     (3,0)  -0.3     ; cmdVelLineY negative
@@ -326,19 +326,19 @@ motor_pdo_kp
 {
     ; 定义各关节的PDO Kp参数
     ; EC_MASTER（腿、腰、手臂第1关节）：与 skw 一致；RUIWO（l2-l7,r2-r7）：kuavo.json amp_kpkd.ruiwo_kp[0-11]
-    (0,0)   96     ; leg_l1_joint
-    (1,0)   96     ; leg_l2_joint
-    (2,0)   128     ; leg_l3_joint
-    (3,0)   106     ; leg_l4_joint
-    (4,0)   24      ; leg_l5_joint
-    (5,0)   24      ; leg_l6_joint
-    (6,0)   96     ; leg_r1_joint
-    (7,0)   96     ; leg_r2_joint
-    (8,0)   128     ; leg_r3_joint
-    (9,0)   106     ; leg_r4_joint
-    (10,0)  24      ; leg_r5_joint
-    (11,0)  24      ; leg_r6_joint
-    (12,0)  100     ; waist_joint
+    (0,0)   100     ; leg_l1_joint
+    (1,0)   100     ; leg_l2_joint
+    (2,0)   80     ; leg_l3_joint
+    (3,0)   80     ; leg_l4_joint
+    (4,0)   30      ; leg_l5_joint
+    (5,0)   50      ; leg_l6_joint
+    (6,0)   100     ; leg_r1_joint
+    (7,0)   100     ; leg_r2_joint
+    (8,0)   80     ; leg_r3_joint
+    (9,0)   80     ; leg_r4_joint
+    (10,0)  30      ; leg_r5_joint
+    (11,0)  50      ; leg_r6_joint
+    (12,0)  30     ; waist_joint
     (13,0)  30      ; zarm_l1_joint (EC_MASTER)
     (14,0)  30      ; zarm_l2_joint (RUIWO amp_kpkd ruiwo_kp[0])
     (15,0)  15      ; zarm_l3_joint (RUIWO amp_kpkd ruiwo_kp[1])
@@ -359,19 +359,19 @@ motor_pdo_kd
 {
     ; 定义各关节的PDO Kd参数
     ; EC_MASTER：joint_kd；RUIWO 手臂：kuavo.json amp_kpkd.ruiwo_kd[0-11]
-    (0,0)   1491    ; leg_l1_joint
-    (1,0)   867     ; leg_l2_joint;
-    (2,0)   932    ; leg_l3_joint
-    (3,0)   545     ; leg_l4_joint
-    (4,0)   2796    ; leg_l5_joint
-    (5,0)   2796    ; leg_l6_joint
-    (6,0)   1491    ; leg_r1_joint
-    (7,0)   867     ; leg_r2_joint;
-    (8,0)   932    ; leg_r3_joint
-    (9,0)   545     ; leg_r4_joint
-    (10,0)  2796    ; leg_r5_joint
-    (11,0)  2796    ; leg_r6_joint
-    (12,0)  520     ; waist_joint
+    (0,0)   1506    ; leg_l1_joint
+    (1,0)   868     ; leg_l2_joint;
+    (2,0)   941    ; leg_l3_joint
+    (3,0)   551     ; leg_l4_joint
+    (4,0)   2793    ; leg_l5_joint
+    (5,0)   2793    ; leg_l6_joint
+    (6,0)   1506    ; leg_r1_joint
+    (7,0)   868     ; leg_r2_joint;
+    (8,0)   941    ; leg_r3_joint
+    (9,0)   551     ; leg_r4_joint
+    (10,0)  2793    ; leg_r5_joint
+    (11,0)  2793    ; leg_r6_joint
+    (12,0)  929     ; waist_joint
     (13,0)  3    ; zarm_l1_joint (RUIWO)
     (14,0)  3       ; zarm_l2_joint (RUIWO amp_kpkd ruiwo_kd[0])
     (15,0)  3       ; zarm_l3_joint (RUIWO amp_kpkd ruiwo_kd[1])

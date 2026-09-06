@@ -11,8 +11,6 @@
 #include "kuavo_solver/ankle/ankle_solver.h"
 #include "kuavo_msgs/ExecuteArmAction.h"
 #include <std_msgs/Float64MultiArray.h>
-#include <std_msgs/Int32.h>
-#include <atomic>
 #include <openvino/openvino.hpp>
 #include <memory>
 #include <map>
@@ -119,8 +117,6 @@ namespace humanoid_controller
                          kuavo_msgs::jointCmd& joint_cmd) override;
 
     void depthCallback(const std_msgs::Float64MultiArray::ConstPtr &msg);
-    void depthHistoryStatusCallback(const std_msgs::Int32::ConstPtr &msg);
-    bool isDepthHistoryFault() const;
 
   private:
     // === 来自 humanoidController_rl.cpp::loadSettings 的关键参数 ===
@@ -253,9 +249,6 @@ namespace humanoid_controller
     ros::ServiceClient srv_change_motor_param_;
 
     ros::Subscriber depthSub_;
-    ros::Subscriber depth_history_status_sub_;
-    // -1 means no status received yet; keep the visual controller fail-safe.
-    std::atomic<int> depth_history_status_{-1};
     std::vector<double> depth_;
   private:
     void updatePhase(const ocs2::humanoid::CommandDataRL& cmd,const SensorData &sensor_data);
