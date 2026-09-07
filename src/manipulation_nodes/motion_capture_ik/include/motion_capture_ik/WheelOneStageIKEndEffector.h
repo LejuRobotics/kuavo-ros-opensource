@@ -124,27 +124,6 @@ class WheelIKResultHistoryBuffer {
   const IKMotionState* prev() const { return fromBack(1); }
   const IKMotionState* pprev() const { return fromBack(2); }
 
-  // Reconcile one arm with the command that was actually published without
-  // disturbing the other arm or the four lower-body joints.  Replacing the
-  // selected segment in every sample also makes the finite-difference
-  // acceleration/jerk targets start from rest at the mode boundary.
-  void resyncSegment(Eigen::Index offset, const Eigen::VectorXd& values) {
-    for (auto& state : buffer_) {
-      if (state.result.solution.size() >= offset + values.size()) {
-        state.result.solution.segment(offset, values.size()) = values;
-      }
-      if (state.velocity.size() >= offset + values.size()) {
-        state.velocity.segment(offset, values.size()).setZero();
-      }
-      if (state.acceleration.size() >= offset + values.size()) {
-        state.acceleration.segment(offset, values.size()).setZero();
-      }
-      if (state.jerk.size() >= offset + values.size()) {
-        state.jerk.segment(offset, values.size()).setZero();
-      }
-    }
-  }
-
   std::chrono::milliseconds getMeanDuration() const {
     if (buffer_.empty()) {
       return std::chrono::milliseconds(0);
@@ -181,13 +160,6 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   std::pair<Eigen::Vector3d, Eigen::Quaterniond> FK(const Eigen::VectorXd& q, const std::string& frameName);
 
   std::chrono::milliseconds getMeanSolveDuration() const { return historyBuffer_.getMeanDuration(); }
-
-  // Synchronize one arm's complete solver state with the last seven joint
-  // positions actually sent to the robot.  Only ArmIdx::LEFT/RIGHT are valid;
-  // the other arm and lower-body/chest state are preserved exactly.
-  //
-  // Calls must be serialized with solveIK() by the owner of this solver.
-  bool resyncArmJointState(ArmIdx side, const Eigen::VectorXd& publishedArmJoints);
 
   void setElbowTrackingActivations(double leftActivation, double rightActivation) {
     leftElbowTrackingActivation_ = std::clamp(leftActivation, 0.0, 1.0);

@@ -241,74 +241,25 @@ void KinemicLimitFilter::setThirdOrderDerivativeLimit(const Eigen::VectorXd& lim
 
 void KinemicLimitFilter::reset(const Eigen::VectorXd& initialValue) {
     // 检查输入数据维度
-    if (initialValue.size() != static_cast<Eigen::Index>(dofNum_)) {
+    if (initialValue.size() != dofNum_) {
         ROS_ERROR_STREAM("Reset value dimension mismatch! Expected: " 
                         << dofNum_ << ", Got: " << initialValue.size());
         return;
     }
-
-    if (!resetRange(0, initialValue)) {
-        ROS_ERROR_STREAM("Failed to reset KinemicLimitFilter");
+    
+    // 重置历史数据为指定值, 一阶和二阶导清零
+    prevData_ = initialValue;
+    prevDataFirstOrder_ = Eigen::VectorXd::Zero(dofNum_);
+    prevDataSecondOrder_ = Eigen::VectorXd::Zero(dofNum_);
+    
+    // 重置每个自由度的ruckig状态
+    for (size_t i = 0; i < dofNum_; ++i) {
+        inputVec_[i].current_position = {initialValue(i)};
+        inputVec_[i].current_velocity = {0.0};
+        inputVec_[i].current_acceleration = {0.0};
     }
-
+    
     // ROS_INFO_STREAM("KinemicLimitFilter reset to specified initial state");
-}
-
-bool KinemicLimitFilter::resetRange(std::size_t offset, const Eigen::VectorXd& values) {
-    const Eigen::Index valueCountSigned = values.size();
-    if (valueCountSigned <= 0) {
-        ROS_ERROR_STREAM("Reset range must contain at least one DOF");
-        return false;
-    }
-    if (!values.allFinite()) {
-        ROS_ERROR_STREAM("Reset range contains non-finite values");
-        return false;
-    }
-
-    const std::size_t valueCount = static_cast<std::size_t>(valueCountSigned);
-    // Subtraction-based bounds checking avoids overflow in offset + valueCount.
-    if (offset >= dofNum_ || valueCount > dofNum_ - offset) {
-        ROS_ERROR_STREAM("Reset range out of bounds! DOFs: " << dofNum_
-                         << ", offset: " << offset << ", count: " << valueCount);
-        return false;
-    }
-
-    // Validate all inputs before touching state.  From here on the operation is
-    // atomic from the caller's perspective (provided update/reset calls share
-    // the external lock documented in the header).
-    for (std::size_t localIndex = 0; localIndex < valueCount; ++localIndex) {
-        const std::size_t dofIndex = offset + localIndex;
-        const Eigen::Index valueIndex = static_cast<Eigen::Index>(localIndex);
-        const double value = values(valueIndex);
-
-        prevData_(static_cast<Eigen::Index>(dofIndex)) = value;
-        prevDataFirstOrder_(static_cast<Eigen::Index>(dofIndex)) = 0.0;
-        prevDataSecondOrder_(static_cast<Eigen::Index>(dofIndex)) = 0.0;
-
-        auto& input = inputVec_[dofIndex];
-        input.current_position = {value};
-        input.current_velocity = {0.0};
-        input.current_acceleration = {0.0};
-        input.target_position = {value};
-        input.target_velocity = {0.0};
-        input.target_acceleration = {0.0};
-
-        // Ruckig caches the previous InputParameter internally.  Merely
-        // changing inputVec_ is not sufficient when it happens to compare
-        // equal to that cache, so force a fresh trajectory on the next update.
-        ruckigVec_[dofIndex].reset();
-
-        // Clear the public trajectory/output object as well.  This prevents a
-        // stale time/section or derivative from being observed before the next
-        // update and keeps the reset state self-consistent.
-        outputVec_[dofIndex] = ruckig::OutputParameter<1>();
-        outputVec_[dofIndex].new_position = {value};
-        outputVec_[dofIndex].new_velocity = {0.0};
-        outputVec_[dofIndex].new_acceleration = {0.0};
-        outputVec_[dofIndex].new_jerk = {0.0};
-    }
-
-    return true;
 }
 
 }  // namespace mobile_manipulator
