@@ -111,4 +111,6 @@ topics:
   - /head_pose
   - /dance_controller/.*
   - /move_base/base_cmd_vel
+  - /sensors_data_raw/ee_fk/.*
+  - /mobile_manipulator_timed_single_cmd
   - /waist_camera/depth/image_raw/compressedDepth

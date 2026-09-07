@@ -247,6 +247,11 @@ namespace humanoidController_wheel_wbc
       controllerNh_.setParam("/enable_manipulation_mpc", true);
       std::cout << "enable_manipulation_mpc: true" << std::endl;
     }
+    if (controllerNh_.hasParam("/play_back"))
+    {
+      controllerNh_.getParam("/play_back", is_play_back_mode_);
+      std::cout << "play_back: " << is_play_back_mode_ << std::endl;
+    }
     
     double controlFrequency = 500.0; // 500Hz
     controllerNh_.getParam("/wbc_frequency", controlFrequency);
@@ -411,6 +416,13 @@ namespace humanoidController_wheel_wbc
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
     stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
     resetToStatePub_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/mobile_manipulator_reset_to_state", 1);
+
+    // 双手末端 FK 话题：/sensors_data_raw/ee_fk/<末端帧名>
+    handFkPubs_.resize(manipulatorModelInfo_.eeFrames.size());
+    for (size_t i = 0; i < manipulatorModelInfo_.eeFrames.size(); ++i) {
+      handFkPubs_[i] = controllerNh_.advertise<geometry_msgs::PoseStamped>(
+          "/sensors_data_raw/ee_fk/" + manipulatorModelInfo_.eeFrames[i], 10);
+    }
 
     // 发布初始速度控制开关状态
     {
@@ -953,6 +965,10 @@ namespace humanoidController_wheel_wbc
     computeObservationFromSensorData(sensors_data_new, odomData_new);
     markStageMs("sensor_obs");
 
+    // 对 update() 中读回的关节角做双手末端 FK，发布到 /sensors_data_raw/ee_fk/
+    publishHandEndEffectorFK(observation_wheel_.state);
+    markStageMs("hand_fk");
+
     /********************************  计算关键点笛卡尔跟踪分析(局部系) ********************************/
     vector_t targetStateTmp = optimizedState_mrt_limit_;
     targetStateTmp.head(3) = Eigen::Vector3d::Zero();
@@ -1005,7 +1021,24 @@ namespace humanoidController_wheel_wbc
       // Trigger MRT callbacks
       mrtRosInterface_->spinMRT();
       // Update the policy if a new one was received
-      mrtRosInterface_->updatePolicy();
+      bool mrtPolicyUpdated = mrtRosInterface_->updatePolicy();
+
+      // 回放模式下将 MRT 请求时间锚定到 bag 策略时间轴（录制/回放时钟偏移对齐）。
+      // bag 中的策略按"录制控制器 curTime"锚定，回放控制器用的是自身 curTime，
+      // 两条时钟偏移一旦超过 MPC 时域(0.3s)就报 "currentTime > received plan"。
+      // 每次换入新策略时记录 bag 时间锚(=策略初始观测时间)与本地时间锚(=当时
+      // curTime)，请求时间 = bag锚 + (curTime - 本地锚)，随 bag 策略推进并吸收偏移。
+      if (is_play_back_mode_ && mrtPolicyUpdated && mpc_policy_gate_open_ && mrtRosInterface_->isPolicyUpdated())
+      {
+        const auto &activeCmd = mrtRosInterface_->getCommand();
+        bag_time_anchor_ = activeCmd.mpcInitObservation_.time;
+        local_time_anchor_ = curTime;
+        policy_time_anchor_valid_ = true;
+      }
+      if (is_play_back_mode_ && policy_time_anchor_valid_)
+      {
+        kinemicLimitObs.time = bag_time_anchor_ + (curTime - local_time_anchor_);
+      }
 
       // 3791: disable 下降沿 pauseResumeMpcNode(true)、enable 上升沿 resetMpcNode 均异步调用 reset()，
       // 会清空 activePrimalSolutionPtr_。此时 rolloutPolicy/getPolicy/getCommand 会抛
@@ -1878,6 +1911,52 @@ namespace humanoidController_wheel_wbc
     int torso_id = model.getBodyId(manipulatorModelInfo_.torsoFrame);
     torso_pos = data.oMf[torso_id].translation();
     torso_rot = data.oMf[torso_id].rotation();
+  }
+
+  // 对 update() 中从 /sensors_data_raw 读回的关节角做双手末端 FK，并发布 PoseStamped：
+  //   /sensors_data_raw/ee_fk/zarm_l7_end_effector
+  //   /sensors_data_raw/ee_fk/zarm_r7_end_effector
+  // state 为 MPC 观测，布局 [base_x, base_y, base_yaw, 下肢4 + 手臂14]。
+  // 位姿以 base_link 为参考坐标系，去掉浮动基底的 x/y/yaw，得到纯关节 FK 结果。
+  void humanoidControllerWheelWbc::publishHandEndEffectorFK(const vector_t& state)
+  {
+    auto model = pinocchioInterface_ptr_->getModel();
+    auto data = pinocchioInterface_ptr_->getData();
+    pinocchio::framesForwardKinematics(model, data, state.head(model.nq));
+
+    const int baseFrameId = model.getFrameId(manipulatorModelInfo_.baseFrame);
+    if (baseFrameId == model.frames.size()) {
+      ROS_WARN_THROTTLE(1.0, "[publishHandEndEffectorFK] baseFrame %s not found in model",
+                        manipulatorModelInfo_.baseFrame.c_str());
+      return;
+    }
+    const pinocchio::SE3 basePose = data.oMf[baseFrameId];
+    const ros::Time stamp = ros::Time::now();
+
+    for (size_t i = 0; i < manipulatorModelInfo_.eeFrames.size(); ++i)
+    {
+      const auto& eeFrame = manipulatorModelInfo_.eeFrames[i];
+      const int eeFrameId = model.getFrameId(eeFrame);
+      if (eeFrameId == model.frames.size()) {
+        ROS_WARN_THROTTLE(1.0, "[publishHandEndEffectorFK] eeFrame %s not found in model", eeFrame.c_str());
+        continue;
+      }
+      // 末端在 base_link 系下的位姿
+      const pinocchio::SE3 eeInBase = basePose.inverse() * data.oMf[eeFrameId];
+
+      geometry_msgs::PoseStamped msg;
+      msg.header.stamp = stamp;
+      msg.header.frame_id = manipulatorModelInfo_.baseFrame;
+      msg.pose.position.x = eeInBase.translation()[0];
+      msg.pose.position.y = eeInBase.translation()[1];
+      msg.pose.position.z = eeInBase.translation()[2];
+      const Eigen::Quaterniond q(eeInBase.rotation());
+      msg.pose.orientation.x = q.x();
+      msg.pose.orientation.y = q.y();
+      msg.pose.orientation.z = q.z();
+      msg.pose.orientation.w = q.w();
+      handFkPubs_[i].publish(msg);
+    }
   }
 
   // 简化的线性插值函数：生成从当前状态到目标状态的轨迹

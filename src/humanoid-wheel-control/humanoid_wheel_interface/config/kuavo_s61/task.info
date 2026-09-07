@@ -884,8 +884,13 @@ shoulder_adapt_tighten
 {
   activate  true
 
-  ;; 松弛滤波系数 (α 低通滤波, doc 建议 0.9~0.95, 越大切换越平滑)
+  ;; 旧的低通滤波系数 (已废弃, 不再使用; 现在用下面的 step 限速)
   relaxation_alpha  0.85
+
+  ;; α 变化限速: 每周期最大变化量, 统一爬升/回落速度 (线性斜坡)
+  ;; 上升(锁肩)用小值=爬升慢, 下降(释放)用大值=回落快
+  relaxation_alpha_step_up    0.005
+  relaxation_alpha_step_down  0.05
 
   ;; 参与收紧的肩关节 (与 weight 一一对应)
   jointNames
@@ -899,10 +904,10 @@ shoulder_adapt_tighten
   ;; 权值
   weight
   {
-    [0] 10; "zarm_l1_link"
-    [1] 1000; "zarm_l2_link"
-    [2] 10; "zarm_r1_link"
-    [3] 1000; "zarm_r2_link"
+    [0] 5; "zarm_l1_link"
+    [1] 50; "zarm_l2_link"
+    [2] 5; "zarm_r1_link"
+    [3] 50; "zarm_r2_link"
   }
 
   ;; 松弛系数 (α 的初值)
@@ -915,11 +920,18 @@ shoulder_adapt_tighten
   ;; α 调度参数 (mpc_cost.md 自动松弛), 采用滞回环双阈值防抖
   H_th_on   0.20   ; 锁肩阈值: H_joint 余量高于此才锁肩
   H_th_off  0.15   ; 解锁阈值: H_joint 余量低于此才解锁
-  T_th_on   0.25   ; 锁肩阈值: H_task 位移低于此才锁肩
-  T_th_off  0.30   ; 解锁阈值: H_task 位移高于此才解锁
+  T_th_on   0.25   ; 锁肩阈值: H_task(参考末端速度) 低于此才锁肩
+  T_th_off  0.30   ; 解锁阈值: H_task(参考末端速度) 高于此才解锁
   k1      30.0   ; H_joint sigmoid 斜率
   k2      30.0   ; H_task sigmoid 斜率
-  D_max   0.1    ; 典型大幅末端位移 [m]
+  D_max   0.1    ; 典型大幅末端位移 [m] (旧 H_task 用, 已由 v_max 替代)
+  ;; H_task 改用参考末端速度, v_max 为其归一化尺度 [m/s]
+  v_max   0.2
+  ;; α 临界阻尼二阶低通自然频率 [rad/s] (越大响应越快, 过小会拖慢收紧)
+  relaxation_alpha_w   6.0
+  ;; 收紧锚定冻结/跟踪阈值 (α≥此值冻结参考, α<此值跟踪当前肩部姿态)
+  anchor_th   0.5
+
 
   ;; 肘腕关节 (用于 H_joint)
   relax_jointNames
@@ -951,29 +963,30 @@ selfCollision
     [1]  "waist_yaw_link, zarm_r2_link"
     [2]  "waist_yaw_link, zarm_l4_link"
     [3]  "waist_yaw_link, zarm_r4_link"
-    [4]  "waist_yaw_link, zarm_l7_link"
-    [5]  "waist_yaw_link, zarm_l7_link"
-    [6]  "zhead_1_link, zarm_l2_link"
-    [7]  "zhead_1_link, zarm_r2_link"
-    [8]  "zhead_1_link, zarm_l4_link"
-    [9]  "zhead_1_link, zarm_r4_link"
-    [10] "zhead_1_link, zarm_l7_link"
-    [11] "zhead_1_link, zarm_r7_link"
-    [12] "zarm_l2_link, zarm_r2_link"
-    [13] "zarm_l2_link, zarm_r4_link"
-    [14] "zarm_l2_link, zarm_r7_link"
-    [15] "zarm_l4_link, zarm_r2_link"
-    [16] "zarm_l4_link, zarm_r4_link"
-    [17] "zarm_l4_link, zarm_r7_link"
-    [18] "zarm_l7_link, zarm_r2_link"
-    [19] "zarm_l7_link, zarm_r4_link"
-    [20] "zarm_l7_link, zarm_r7_link"
-    [21] "base_link, zarm_l7_link"
-    [22] "base_link, zarm_r7_link"
+    [4]  "waist_yaw_link, zarm_l5_link"
+    [5]  "waist_yaw_link, zarm_r5_link"
+    [6]  "waist_yaw_link, zarm_l7_link"
+    [7]  "zhead_1_link, zarm_l2_link"
+    [8]  "zhead_1_link, zarm_r2_link"
+    [9]  "zhead_1_link, zarm_l4_link"
+    [10] "zhead_1_link, zarm_r4_link"
+    [11] "zhead_1_link, zarm_l7_link"
+    [12] "zhead_1_link, zarm_r7_link"
+    [13] "zarm_l2_link, zarm_r2_link"
+    [14] "zarm_l2_link, zarm_r4_link"
+    [15] "zarm_l2_link, zarm_r7_link"
+    [16] "zarm_l4_link, zarm_r2_link"
+    [17] "zarm_l4_link, zarm_r4_link"
+    [18] "zarm_l4_link, zarm_r7_link"
+    [19] "zarm_l7_link, zarm_r2_link"
+    [20] "zarm_l7_link, zarm_r4_link"
+    [21] "zarm_l7_link, zarm_r7_link"
+    [22] "base_link, zarm_l7_link"
+    [23] "base_link, zarm_r7_link"
   }
 
   ; minimum distance allowed between the pairs
-  minimumDistance  0.01
+  minimumDistance  0.02
 
   ; relaxed log barrier mu
   mu      1e-3

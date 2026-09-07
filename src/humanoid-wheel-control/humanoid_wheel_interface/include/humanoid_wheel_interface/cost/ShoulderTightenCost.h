@@ -13,12 +13,14 @@ namespace ocs2 {
 
 namespace mobile_manipulator {
 /**
- * 肩部收紧成本: 把配置的肩关节 (如 zarm_l1/l2 与 zarm_r1/r2) 以自适应权重拉向参考轨迹中的肩部姿态。
+ * 肩部收紧成本: 把配置的肩关节 (如 zarm_l1/l2 与 zarm_r1/r2) 以自适应权重拉向收紧锚定参考中的肩部姿态。
  *
  *   cost = sum_i weight_i * alpha(arm_i) * (q_i - q_ref_i)^2
  *
  * 其中 alpha ∈ [0,1] 由参考管理器暴露 (1 = 锁肩/收紧, 0 = 释放), 使得小幅度摆动时
  * 肩部尽量保持不动, 而肘腕接近限位或大幅度运动时权重自动下降、允许肩部参与。
+ * q_ref 采用"收紧锚定参考": 释放时跟踪当前肩部姿态、收紧时冻结, 接合瞬间偏差从 ~0 开始,
+ * 消除对陈旧参考(初始/上次 reset 姿态)的"回拽"导致的抖动 (方案D)。
  */
 class shoulderTightenCost final : public StateCost {
  public:

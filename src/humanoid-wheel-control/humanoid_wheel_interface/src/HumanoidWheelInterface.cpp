@@ -1072,10 +1072,24 @@ std::unique_ptr<StateCost> HumanoidWheelInterface::getShoulderTightenCost(const 
   for (int arm = 0; arm < 2; arm++) {
     referenceManagerPtr_->setShoulderTightAlpha(arm, relaxationCoeff[arm]);
   }
-  // α 低通滤波系数
-  scalar_t alphaSmooth = 0.9;
-  loadData::loadPtreeValue(pt, alphaSmooth, prefix + "relaxation_alpha", true);
-  referenceManagerPtr_->setShoulderTightAlphaSmooth(alphaSmooth);
+  // α 变化限速: 每周期最大变化量, 统一爬升/回落速度
+  scalar_t alphaStepUp = 0.02;
+  scalar_t alphaStepDown = 0.05;
+  loadData::loadPtreeValue(pt, alphaStepUp, prefix + "relaxation_alpha_step_up", true);
+  loadData::loadPtreeValue(pt, alphaStepDown, prefix + "relaxation_alpha_step_down", true);
+  referenceManagerPtr_->setShoulderTightAlphaStepUp(alphaStepUp);
+  referenceManagerPtr_->setShoulderTightAlphaStepDown(alphaStepDown);
+
+  // 每个控制获取手臂位置
+  {
+    std::vector<std::vector<size_t>> shoulderIdxByArm(2);
+    for (size_t i = 0; i < shoulderStateIndices.size(); ++i) {
+      shoulderIdxByArm[armIndices[i]].push_back(shoulderStateIndices[i]);
+    }
+    for (int arm = 0; arm < 2; arm++) {
+      referenceManagerPtr_->setShoulderStateIndicesForArm(arm, shoulderIdxByArm[arm]);
+    }
+  }
 
   vector_t weightsVector = Eigen::Map<const vector_t>(shoulderWeights.data(), shoulderWeights.size());
 

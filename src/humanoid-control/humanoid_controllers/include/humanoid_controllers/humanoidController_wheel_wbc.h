@@ -106,6 +106,9 @@ namespace humanoidController_wheel_wbc
     // ========== 运动学计算相关函数 ==========
     void getEEPose(const vector_t& init_q, std::vector<Eigen::Vector3d>& ee_pos, std::vector<Eigen::Matrix3d>& ee_rot);
     void getTorsoPose(const vector_t& init_q, Eigen::Vector3d& torso_pos, Eigen::Matrix3d& torso_rot);
+    // 对 update() 中从 /sensors_data_raw 读回的关节角做双手末端 FK，
+    // 发布 base_link 系下的 PoseStamped 到 /sensors_data_raw/ee_fk/<末端帧名>
+    void publishHandEndEffectorFK(const vector_t& state);
     // 由 MPC state 构建 target-pose 格式单点目标（FK 现场计算），initMPC 与软暂停 RESUMING 共用。
     // zeroBase=true 底盘段置零（启动语义）；false 取 state 底盘段（恢复锚定）
     vector_t buildTargetPoseFromState(const vector_t& state, bool zeroBase);
@@ -213,6 +216,8 @@ namespace humanoidController_wheel_wbc
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
     ros::Publisher stopRobotPub_;  // /stop_robot 话题发布者，用于底盘急停保护
     ros::Publisher resetToStatePub_;  // /mobile_manipulator_reset_to_state 发布者（3791 软暂停恢复时把冻结姿态发给 RM）
+    // 双手末端 FK 的 PoseStamped 发布者，对应 /sensors_data_raw/ee_fk/<末端帧名>（与 eeFrames 同序）
+    std::vector<ros::Publisher> handFkPubs_;
     
     // 日志
     humanoid::TopicLogger *ros_logger_{nullptr};
@@ -241,6 +246,18 @@ namespace humanoidController_wheel_wbc
                                   // 屏蔽反馈时, 采用MPC输出的期望作为反馈
     double mpcDt_{0.01};
     double mpcFreq_{100};
+
+    // ========== 回放时间基准对齐 ==========
+    // 轮臂回放时 bag 中的 MPC 策略按"录制控制器 curTime"（录制墙钟相对）锚定，
+    // 而回放控制器用自己的 curTime（回放墙钟相对），两条时钟天然存在偏移，导致
+    // MRT 请求时间超出策略时域（报 "currentTime > received plan"）。
+    // 修复：每次换入新策略时记录 bag 时间锚（= 该策略 initObservation.time）与
+    // 本地时间锚（= 当时的 curTime），请求时间 = bag锚 + (curTime - 本地锚)，
+    // 从而完全吸收回放/录制时钟偏移，跟随 bag 策略时间轴推进。
+    bool is_play_back_mode_{false};         // 是否回放模式（/play_back）
+    bool policy_time_anchor_valid_{false};  // 是否已捕获策略时间锚
+    double bag_time_anchor_{0.0};           // 新策略对应的 bag 时间（策略初始观测时间）
+    double local_time_anchor_{0.0};         // 换入该策略时刻的回放 curTime
 
     // ========== 状态估计 ==========
     SystemObservation observation_wheel_;
