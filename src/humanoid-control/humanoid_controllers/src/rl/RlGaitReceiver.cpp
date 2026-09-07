@@ -237,6 +237,7 @@ void RlGaitReceiver::resetVelocityState()
 
 void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, const vector_t& feetPositions)
 {
+  const bool allow_walking_during_action = resolveAllowWalkingDuringAction();
   std::function<bool()> command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(command_mutex_);
@@ -305,7 +306,7 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
   if (velocity_magnitude < 0.01 && currentCommand_.cmdStance_ == 1) // Low velocity and already in stance mode
   {
     // 走不停腿：动作期间允许行走时，若摇杆仍有输入则切回 walking，不卡在 stance
-    if (allow_walking_during_action_)
+    if (allow_walking_during_action)
     {
       const double latest_linear_mag = std::hypot(latest_cmd_vel_.linear.x, latest_cmd_vel_.linear.y);
       const bool has_active_cmd = (latest_linear_mag >= 0.01 ||
@@ -346,7 +347,7 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
     const bool stance_dwell_satisfied =
         stance_dwell_gate_.update(true, time.toSec(), stance_dwell_duration_);
     // Velocity is very small, check for smart stop
-    if (stance_dwell_satisfied && smart_stop_enabled_ && !allow_walking_during_action_ &&
+    if (stance_dwell_satisfied && smart_stop_enabled_ && !allow_walking_during_action &&
         shouldSmartStop(torsostate, feetPositions)) {
       // Smart stop conditions met.
       // amp_hand_controller 保持 walking 模式 (模型内部有自然停下)，其余控制器切 stance。
@@ -486,6 +487,7 @@ void RlGaitReceiver::syncPostureToCommand()
 
 CommandDataRL RlGaitReceiver::getPolicyCommand() const
 {
+  const bool allow_walking_during_action = resolveAllowWalkingDuringAction();
   CommandDataRL command;
   std::function<bool()> command_buffer_callback;
   bool robot_action_active = false;
@@ -497,8 +499,7 @@ CommandDataRL RlGaitReceiver::getPolicyCommand() const
     robot_action_active = isRobotActionActiveLocked(now);
   }
 
-  if ((robot_action_active && !resolveAllowWalkingDuringAction()) ||
-      (command_buffer_callback && command_buffer_callback()))
+  if ((robot_action_active && !allow_walking_during_action) || (command_buffer_callback && command_buffer_callback()))
   {
     command.setzero();
   }
@@ -507,6 +508,7 @@ CommandDataRL RlGaitReceiver::getPolicyCommand() const
 
 bool RlGaitReceiver::shouldBlockCommandExecution() const
 {
+  const bool allow_walking_during_action = resolveAllowWalkingDuringAction();
   std::function<bool()> command_buffer_callback;
   bool robot_action_active = false;
   const ros::Time now = ros::Time::now();
@@ -515,8 +517,13 @@ bool RlGaitReceiver::shouldBlockCommandExecution() const
     command_buffer_callback = command_buffer_callback_;
     robot_action_active = isRobotActionActiveLocked(now);
   }
-  return (robot_action_active && !resolveAllowWalkingDuringAction()) ||
-         (command_buffer_callback && command_buffer_callback());
+  return (robot_action_active && !allow_walking_during_action) || (command_buffer_callback && command_buffer_callback());
+}
+
+bool RlGaitReceiver::isRobotActionActive() const
+{
+  std::lock_guard<std::mutex> lock(command_mutex_);
+  return isRobotActionActiveLocked(ros::Time::now());
 }
 
 geometry_msgs::Twist RlGaitReceiver::getSmoothedCmdVel() const
@@ -537,7 +544,7 @@ void RlGaitReceiver::cmdVelCallback(const geometry_msgs::Twist::ConstPtr& msg)
     robot_action_active = isRobotActionActiveLocked(now);
   }
 
-  // 走不停腿：v17 / 成员标志 / ROS param（后者由 MoRE executeArmActionCallback 设置）
+  // 走不停腿：v17 或控制器本地能力标志。
   const bool allow_walking = resolveAllowWalkingDuringAction();
 
   if (robot_action_active && !allow_walking)
@@ -617,7 +624,7 @@ void RlGaitReceiver::robotActionStateCallback(const humanoid_plan_arm_trajectory
   }
 
   robot_action_active_ = active;
-  // 走不停腿：v17 / 成员标志 / ROS param
+  // 走不停腿：v17 或控制器本地能力标志。
   const bool allow_walking = resolveAllowWalkingDuringAction();
   if (robot_action_active_ && !allow_walking)
   {
@@ -645,13 +652,7 @@ void RlGaitReceiver::robotActionStateCallback(const humanoid_plan_arm_trajectory
 
 bool RlGaitReceiver::resolveAllowWalkingDuringAction() const
 {
-  if (is_v17_ || allow_walking_during_action_)
-  {
-    return true;
-  }
-  bool allow = false;
-  ros::param::param<bool>("/allow_walking_during_arm_action", allow, false);
-  return allow;
+  return is_v17_ || allowsWalkingDuringAction();
 }
 
 bool RlGaitReceiver::isRobotActionActiveLocked(const ros::Time& now) const

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import rospy
+import copy
 import json
 import math
 import re
@@ -29,11 +30,11 @@ except (rospkg.ResourceNotFound, ImportError) as e:
         sys.path.insert(0, kuavo_common_python_path)
     from robot_version import RobotVersion, is_tact_robot_type_compatible
 from humanoid_plan_arm_trajectory.msg import bezierCurveCubicPoint, jointBezierTrajectory
-from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl, gaitTimeName
+from kuavo_msgs.msg import ControllerSwitchEvent, robotHandPosition, robotHeadMotionData, sensorsData, robotWaistControl, gaitTimeName
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getControllerList, switchController
 from ocs2_msgs.msg import mpc_observation
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray, String, Bool
+from std_msgs.msg import Empty, Float64MultiArray, String, Bool
 from trajectory_msgs.msg import JointTrajectory
 from humanoid_plan_arm_trajectory.msg import RobotActionState
 from humanoid_plan_arm_trajectory.srv import ExecuteArmAction, ExecuteArmActionResponse  # Import new service type
@@ -74,6 +75,29 @@ class ArmTrajectoryBezierDemo:
         self.running_action = False
         self.arm_flag = False
         self._timer = None
+        self._timer_token = None
+        # rospy service/timer callbacks run on different threads. Serialize lifecycle
+        # transitions so interrupt/freeze cannot race action completion/reset.
+        self._action_transition_lock = threading.RLock()
+        self._execute_request_lock = threading.Lock()
+        # 动作状态心跳和轨迹发布分别使用独立的停止事件。主动作切到复位动作时，
+        # 必须先确认旧发布线程已经退出，避免 arm_flag 短暂 false 后又变 true
+        # 导致两个 run() 线程同时发布同一条轨迹。
+        self._action_state_thread = None
+        self._action_state_stop_event = None
+        self._action_state_lock = threading.Lock()
+        self._action_state_publish_lock = threading.Lock()
+        self._terminal_state_published = True
+        self._trajectory_thread = None
+        self._trajectory_stop_event = None
+        self._controller_switch_abort_event = threading.Event()
+        self._preparing_more_action = False
+        self._active_action_controller = None
+        self._pending_terminal_state = 2
+        # 只清理本 session 真正获得过的共享控制权，避免一个在
+        # preflight 阶段失败的请求误改其他控制器现有的手臂模式。
+        self._action_owns_phase2 = False
+        self._action_owns_external_arm_mode = False
         self.interrupt_flag  = False
         self.enable_control_state_ = True  # 软暂停状态，默认 enable=1
         self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印
@@ -153,7 +177,12 @@ class ArmTrajectoryBezierDemo:
         self.traj_sub = rospy.Subscriber('/bezier/arm_traj', JointTrajectory, self.traj_callback, queue_size=1,
                                          tcp_nodelay=True)
         self.kuavo_arm_traj_pub = rospy.Publisher('/kuavo_arm_traj', JointState, queue_size=1, tcp_nodelay=True)
-        self.kuavo_action_traj_pub = rospy.Publisher('/kuavo_action_traj', JointState, queue_size=1, tcp_nodelay=True)
+        # MoRE 离线动作使用独立输入；ArmController 在动作 session 内只接收
+        # 该话题，Quest/SDK 继续发布的 /kuavo_arm_traj 不会覆盖动作目标。
+        # 其他控制器仍只走已有的 /kuavo_arm_traj，不做双发布。
+        self.kuavo_action_traj_pub = rospy.Publisher(
+            '/kuavo_action_traj', JointState, queue_size=1, tcp_nodelay=True
+        )
         self.cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1, tcp_nodelay=True)
         self.gait_name_pub = rospy.Publisher('/humanoid_mpc_gait_name_request', String, queue_size=1, tcp_nodelay=True)
         self.control_hand_pub = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=1,
@@ -162,6 +191,12 @@ class ArmTrajectoryBezierDemo:
                                                 tcp_nodelay=True)
         self.control_waist_pub = rospy.Publisher('/robot_waist_motion_data', robotWaistControl, queue_size=1, 
                                                 tcp_nodelay=True)
+        # 与手臂相同，MoRE 动作腰部采用专用输入，避免 Quest torso 与 tact
+        # 同时写 /robot_waist_motion_data 时最后到达者覆盖。
+        self.action_waist_pub = rospy.Publisher(
+            '/robot_action_waist_motion_data', robotWaistControl,
+            queue_size=1, tcp_nodelay=True
+        )
 
         self.sensor_data_sub = rospy.Subscriber('/sensors_data_raw', 
                                                 sensorsData,
@@ -175,10 +210,24 @@ class ArmTrajectoryBezierDemo:
                                                 queue_size=1, 
                                                 tcp_nodelay=True)
 
-        # 订阅 /kuavo_arm_traj 用于 create_action_data 的起始帧（使用当前指令位姿而非关节反馈）
+        # 缓存两类手臂输入，供 create_action_data 选择正确 owner 的起始帧。
+        # MoRE 新 session 的第一段轨迹从实测关节开始；进入 reset 阶段后，
+        # 再使用本 session 的 action 末帧，不能误用 Quest 持续发布的 generic 目标。
         self._last_kuavo_arm_traj_msg = None
+        self._last_kuavo_action_traj_msg = None
+        # Full tact-space command (arm + hands + head + optional waist) last
+        # produced for the active MoRE action.  /kuavo_action_traj carries only
+        # the 14 arm joints, so it cannot by itself provide a safe reset start.
+        self._last_more_published_servos_deg = None
+        self._more_bezier_accept_after = rospy.Time(0)
+        self._more_output_snapshot = None
+        self._more_output_lock = threading.Lock()
         self.kuavo_arm_traj_sub = rospy.Subscriber(
             '/kuavo_arm_traj', JointState, self._kuavo_arm_traj_callback, queue_size=1, tcp_nodelay=True
+        )
+        self.kuavo_action_traj_sub = rospy.Subscriber(
+            '/kuavo_action_traj', JointState, self._kuavo_action_traj_callback,
+            queue_size=1, tcp_nodelay=True
         )
 
         # ===================================================================
@@ -220,9 +269,23 @@ class ArmTrajectoryBezierDemo:
         self._enable_control_sub = rospy.Subscriber(
             '/enable_control_state', Bool, self._enable_control_callback, queue_size=1
         )
+        self._controller_switch_event_sub = rospy.Subscriber(
+            '/humanoid_controller/controller_switch_event',
+            ControllerSwitchEvent,
+            self._controller_switch_event_callback,
+            queue_size=1,
+        )
+        self._more_action_abort_sub = rospy.Subscriber(
+            '/humanoid_controller/more_arm_action_abort',
+            Empty,
+            self._more_action_abort_callback,
+            queue_size=1,
+        )
 
         # 添加发布者
-        self.robot_action_state_pub = rospy.Publisher('/robot_action_state', RobotActionState, queue_size=1)
+        # 保留终态和紧随其后的新 session 心跳，避免 queue=1 在快速
+        # 重入时用新的 state=1 覆盖尚未发出的上一次 terminal。
+        self.robot_action_state_pub = rospy.Publisher('/robot_action_state', RobotActionState, queue_size=10)
 
         # Add service to execute arm actions
         self.execute_service = rospy.Service('/execute_arm_action', ExecuteArmAction, self.handle_execute_action)
@@ -386,6 +449,16 @@ class ArmTrajectoryBezierDemo:
         """缓存 /kuavo_arm_traj 最新消息，供 create_action_data 使用"""
         self._last_kuavo_arm_traj_msg = msg
 
+    def _kuavo_action_traj_callback(self, msg):
+        """缓存当前 MoRE 离线动作的最新手臂目标，供 reset 起始帧使用。"""
+        self._last_kuavo_action_traj_msg = msg
+
+    def _begin_more_bezier_phase(self):
+        """Discard prior-phase planner output and establish a timestamp fence."""
+        with self._more_output_lock:
+            self._more_output_snapshot = None
+            self._more_bezier_accept_after = rospy.Time.now()
+
     def _gait_changed_callback(self, msg):
         """
         [步态切换回调] 当 MPC/AMP 步态变更时被调用。
@@ -459,21 +532,34 @@ class ArmTrajectoryBezierDemo:
         return not self.is_robot_walking()
 
     def _get_servos_from_kuavo_arm_traj(self, tact_length):
-        """从 /kuavo_arm_traj 获取起始关节角（度），不足部分按长度填充0。"""
-        if getattr(self, '_last_kuavo_arm_traj_msg', None) is None or not getattr(
-            self._last_kuavo_arm_traj_msg, 'position', None
-        ):
-            return [int(round(math.degrees(x))) for x in self.current_arm_joint_state[:tact_length]]
+        """从当前 session 的有效输入获取起始关节角（度）。
 
-        msg = self._last_kuavo_arm_traj_msg
+        MoRE 首段动作开始前 action cache 会被清空，因此使用实测关节；
+        reset 阶段则使用当前 action 末帧。其他控制器保持原 generic 逻辑。
+        """
+        is_more_action = self._active_action_controller == "more_controller"
+        if is_more_action:
+            full_action_target = self._last_more_published_servos_deg
+            if full_action_target is not None and len(full_action_target) >= tact_length:
+                return list(full_action_target[:tact_length])
+            msg = getattr(self, '_last_kuavo_action_traj_msg', None)
+        else:
+            msg = getattr(self, '_last_kuavo_arm_traj_msg', None)
+
+        # Start from the measured complete tact state.  Arm trajectory topics
+        # contain only 14 values; padding the remaining hand/head/waist values
+        # with zero made reset jump the waist to zero before interpolation.
+        current = [math.degrees(x) for x in self.current_arm_joint_state[:tact_length]]
+        if len(current) < tact_length:
+            current.extend([0.0] * (tact_length - len(current)))
+
+        if msg is None or not getattr(msg, 'position', None):
+            return current
+
         pos = list(msg.position)
         n_from_topic = min(len(pos), tact_length)
-        from_topic = [int(round(x)) for x in pos[:n_from_topic]]
-        if n_from_topic >= tact_length:
-            return from_topic[:tact_length]
-        # 其余关节按长度填充0
-        rest = [0] * (tact_length - n_from_topic)
-        return from_topic + rest
+        current[:n_from_topic] = pos[:n_from_topic]
+        return current
 
     def traj_callback(self, msg):
         if len(msg.points) == 0:
@@ -509,6 +595,33 @@ class ArmTrajectoryBezierDemo:
                 # KUAVO v50+: 腰部关节在joint_q[12]位置
                 self.waist_state.header.stamp = rospy.Time.now()
                 self.waist_state.data.data = [math.degrees(pos) for pos in point.positions[28:29]]
+
+            if (self._active_action_controller == "more_controller" and
+                    msg.header.stamp >= self._more_bezier_accept_after):
+                tact_length = self.KUAVO_TACT_LENGTH + (1 if self.has_waist else 0)
+                if len(point.positions) >= tact_length:
+                    # Store a new immutable-by-convention list in one
+                    # assignment, so reset observes a complete frame rather
+                    # than combining independently delivered ROS topics.
+                    full_target = [math.degrees(pos) for pos in point.positions[:tact_length]]
+                    full_target[14:20] = [
+                        max(0, int(math.degrees(pos))) for pos in point.positions[14:20]
+                    ]
+                    full_target[20:26] = [
+                        max(0, int(math.degrees(pos))) for pos in point.positions[20:26]
+                    ]
+                    output_snapshot = (
+                        copy.deepcopy(self.joint_state),
+                        copy.deepcopy(self.hand_state),
+                        copy.deepcopy(self.head_state),
+                        copy.deepcopy(self.waist_state),
+                        full_target,
+                    )
+                    with self._more_output_lock:
+                        # Recheck the fence after constructing the snapshot: a
+                        # reset phase may have started concurrently.
+                        if msg.header.stamp >= self._more_bezier_accept_after:
+                            self._more_output_snapshot = output_snapshot
             
         elif self.robot_class == ROBAN:
             self.joint_state.name = [
@@ -535,6 +648,26 @@ class ArmTrajectoryBezierDemo:
 
                 self.waist_state.header.stamp = rospy.Time.now()
                 self.waist_state.data.data = [math.degrees(pos) for pos in point.positions[22:]]
+
+                if (self._active_action_controller == "more_controller" and
+                        msg.header.stamp >= self._more_bezier_accept_after):
+                    full_target = [math.degrees(pos) for pos in point.positions]
+                    full_target[8:14] = [
+                        max(0, int(math.degrees(pos))) for pos in point.positions[8:14]
+                    ]
+                    full_target[14:20] = [
+                        max(0, int(math.degrees(pos))) for pos in point.positions[14:20]
+                    ]
+                    output_snapshot = (
+                        copy.deepcopy(self.joint_state),
+                        copy.deepcopy(self.hand_state),
+                        copy.deepcopy(self.head_state),
+                        copy.deepcopy(self.waist_state),
+                        full_target,
+                    )
+                    with self._more_output_lock:
+                        if msg.header.stamp >= self._more_bezier_accept_after:
+                            self._more_output_snapshot = output_snapshot
 
     def call_change_arm_ctrl_mode_service(self, arm_ctrl_mode):
         result = True
@@ -568,10 +701,20 @@ class ArmTrajectoryBezierDemo:
         try:
             rospy.wait_for_service(service_name, timeout=0.5)
             client = rospy.ServiceProxy(service_name, changeArmCtrlMode)
-            client(control_mode=enable)
-            rospy.loginfo(f"{service_name} call successful, enable={enable}")
-        except (rospy.ServiceException, rospy.ROSException):
+            response = client(control_mode=enable)
+            if response.result:
+                rospy.loginfo(f"{service_name} call successful, enable={enable}")
+                return True
+            rospy.logwarn(
+                "%s rejected enable=%s: %s",
+                service_name,
+                enable,
+                response.message,
+            )
+        except (rospy.ServiceException, rospy.ROSException) as exc:
             rospy.loginfo(f"{service_name} not available, skipping")
+            rospy.logdebug("%s call failed: %s", service_name, exc)
+        return False
 
     def get_arm_ctrl_mode(self):
         """获取当前手臂控制模式"""
@@ -624,11 +767,17 @@ class ArmTrajectoryBezierDemo:
                 rospy.sleep(0.02)
                 continue
 
-            if not self.call_change_arm_ctrl_mode_service(target_mode):
+            mode_request_accepted = self.call_change_arm_ctrl_mode_service(target_mode)
+            if mode_request_accepted and target_mode == 2:
+                self._action_owns_external_arm_mode = True
+            if not mode_request_accepted:
                 rospy.sleep(0.05)
             last_request_time = now
 
         final_mode = self.get_arm_ctrl_mode()
+        if final_mode == target_mode:
+            rospy.loginfo(f"Arm control mode changed to {target_mode} successfully")
+            return True
         rospy.logwarn(f"Arm control mode change timeout after {timeout} seconds, current mode: {final_mode}, target: {target_mode}")
         return False
 
@@ -660,6 +809,23 @@ class ArmTrajectoryBezierDemo:
         except (rospy.ServiceException, rospy.ROSException) as e:
             rospy.logwarn(f"Service '{service_name}' call failed: {e}, assuming ocs2 behavior")
         return None
+
+    def prepare_more_arm_action(self, action_name):
+        """Ask MoRE to validate and prepare an action before publishing any action state."""
+        service_name = "/humanoid_controller/more_prepare_arm_action"
+        try:
+            rospy.wait_for_service(service_name, timeout=0.5)
+            prepare_action = rospy.ServiceProxy(service_name, ExecuteArmAction)
+            response = prepare_action(action_name=action_name)
+            if not response.success:
+                rospy.logwarn(
+                    "MoRE rejected action '%s': %s", action_name, response.message
+                )
+            return bool(response.success), response.message
+        except (rospy.ServiceException, rospy.ROSException) as e:
+            message = f"MoRE action preparation service failed: {e}"
+            rospy.logwarn(message)
+            return False, message
 
     def call_switch_controller_service(self, controller_name):
         service_name = "/humanoid_controller/switch_controller"
@@ -1343,22 +1509,203 @@ class ArmTrajectoryBezierDemo:
             filtered_action_data[key] = filtered_frames
         return filtered_action_data
 
+    def _start_action_state_heartbeat(self, controller_name):
+        """Start one state=1 heartbeat thread for the complete play/reset session."""
+        with self._action_state_lock:
+            if (self.running_action or
+                    self._controller_switch_abort_event.is_set() or
+                    not self.enable_control_state_):
+                self._preparing_more_action = False
+                return None
+
+            stop_event = threading.Event()
+            state_thread = threading.Thread(
+                target=self.publish_running_action_state,
+                args=(stop_event,),
+                name="arm_action_state_heartbeat",
+                daemon=True,
+            )
+            self.running_action = True
+            self._terminal_state_published = False
+            self._active_action_controller = controller_name
+            if controller_name == "more_controller":
+                # 丢弃前一个动作 session 的 action 尾帧。当前新动作的第一段
+                # 必须从传感器实测姿态开始，不能从旧动作缓存开始。
+                self._last_kuavo_action_traj_msg = None
+                self._last_more_published_servos_deg = None
+                self._begin_more_bezier_phase()
+            self._pending_terminal_state = 2
+            self._action_owns_phase2 = False
+            self._action_owns_external_arm_mode = False
+            self._preparing_more_action = False
+            self._action_state_stop_event = stop_event
+            self._action_state_thread = state_thread
+            # Commit ACTIVE synchronously before any zero-duration action timer
+            # can publish its terminal state.  The background thread only
+            # supplies subsequent heartbeats.
+            self.publish_action_state(1)
+            state_thread.start()
+        return True
+
+    def _finish_action(self, state):
+        """Stop the state=1 heartbeat, then publish exactly one terminal state."""
+        if state not in (0, 2):
+            raise ValueError(f"Invalid terminal action state: {state}")
+
+        with self._action_state_lock:
+            if self._terminal_state_published:
+                return False
+            # Safety abort wins over a concurrently completing timer.  The
+            # trajectory may have reached its nominal end, but ownership was
+            # revoked before the session committed its terminal result.
+            if (state == 2 and
+                    (not self.enable_control_state_ or
+                     (self._active_action_controller == "more_controller" and
+                      self._controller_switch_abort_event.is_set()))):
+                state = 0
+            self._terminal_state_published = True
+            stop_event = self._action_state_stop_event
+            state_thread = self._action_state_thread
+            active_controller = self._active_action_controller
+            owns_phase2 = self._action_owns_phase2
+            owns_external_arm_mode = self._action_owns_external_arm_mode
+
+        # MoRE 的最终 mode/style 恢复由 C++ session 统一完成。
+        # 其他控制器仅释放本 session 真正获取过的共享控制权；
+        # 正常 keep-pose/freeze 仍保留原有语义。
+        if state == 0 and owns_phase2:
+            self.call_enable_wbc_arm_trajectory_control_service(0)
+        if (state == 0 and owns_external_arm_mode
+                and active_controller != "more_controller"):
+            self.call_change_arm_ctrl_mode_service(1)
+
+        if stop_event is not None:
+            stop_event.set()
+        if state_thread is not None and state_thread is not threading.current_thread():
+            state_thread.join(timeout=1.0)
+            if state_thread.is_alive():
+                rospy.logwarn("Action-state heartbeat thread did not stop within 1 second")
+
+        with self._action_state_lock:
+            # Re-evaluate at the actual publication commit point.  A safety
+            # callback may have arrived while the heartbeat thread was joining.
+            if (state == 2 and
+                    (not self.enable_control_state_ or
+                     (active_controller == "more_controller" and
+                      self._controller_switch_abort_event.is_set()))):
+                state = 0
+            self.publish_action_state(state)
+            # 终态已发布后才释放 busy，防止新动作的 state=1
+            # 与旧动作延迟发布的终态发生倒序。
+            self.running_action = False
+            if self._action_state_thread is state_thread:
+                self._action_state_thread = None
+                self._action_state_stop_event = None
+            self._active_action_controller = None
+            self._preparing_more_action = False
+            self._pending_terminal_state = 2
+            self._action_owns_phase2 = False
+            self._action_owns_external_arm_mode = False
+        return True
+
+    def _stop_trajectory_publisher(self):
+        """Stop and join the current trajectory publisher before changing phases."""
+        self.arm_flag = False
+        stop_event = self._trajectory_stop_event
+        trajectory_thread = self._trajectory_thread
+        if stop_event is not None:
+            stop_event.set()
+
+        if trajectory_thread is not None and trajectory_thread is not threading.current_thread():
+            trajectory_thread.join(timeout=1.0)
+            if trajectory_thread.is_alive():
+                rospy.logerr("Trajectory publisher thread did not stop within 1 second")
+                return False
+
+        if self._trajectory_thread is trajectory_thread:
+            self._trajectory_thread = None
+            self._trajectory_stop_event = None
+        return True
+
+    def _start_trajectory_publisher(self):
+        """Start one trajectory publisher for either the main action or reset phase."""
+        if (self._controller_switch_abort_event.is_set() or
+                not self.enable_control_state_):
+            rospy.logwarn("Refuse to start arm trajectory after its controller switched away")
+            return False
+        if not self._stop_trajectory_publisher():
+            return False
+        if (self._controller_switch_abort_event.is_set() or
+                not self.enable_control_state_):
+            return False
+
+        self.interrupt_flag = False
+        self.arm_flag = True
+        stop_event = threading.Event()
+        trajectory_thread = threading.Thread(
+            target=self.run,
+            args=(stop_event,),
+            name="arm_trajectory_publisher",
+            daemon=True,
+        )
+        self._trajectory_stop_event = stop_event
+        self._trajectory_thread = trajectory_thread
+        trajectory_thread.start()
+        if (self._controller_switch_abort_event.is_set() or
+                not self.enable_control_state_):
+            self.arm_flag = False
+            stop_event.set()
+            trajectory_thread.join(timeout=1.0)
+            if (not trajectory_thread.is_alive() and
+                    self._trajectory_thread is trajectory_thread):
+                self._trajectory_thread = None
+                self._trajectory_stop_event = None
+            return False
+        return True
+
     def delayed_publish_action_state(self, delay):
         """
         延时发布动作完成状态。（增加中断检查）
         :param delay: 延迟时间（秒）
         """
         rospy.loginfo(f"Delaying action completion state for {delay} seconds...")
-        self._timer = rospy.Timer(rospy.Duration(delay), self._on_timer_trigger, oneshot=True)
+        self._schedule_action_timer(delay, self._on_timer_trigger)
+
+    def _schedule_action_timer(self, delay, callback):
+        """Schedule a session timer whose stale callback can be identified and ignored."""
+        timer_token = object()
+        self._timer_token = timer_token
+        self._timer = rospy.Timer(
+            rospy.Duration(delay),
+            lambda event: callback(event, timer_token),
+            oneshot=True,
+        )
+
+    def _claim_action_timer(self, timer_token):
+        """Return False when a shutdown/replaced timer callback arrives late."""
+        if timer_token is not self._timer_token:
+            rospy.logdebug("Ignoring stale arm-action timer callback")
+            return False
+        self._timer = None
+        self._timer_token = None
+        return True
 
     def reset_robot_state(self):
-        # 复位开始，发布 state=1 表示正在复位
-        rospy.loginfo("[RESET_START] Starting robot reset, publishing action state=1")
-        self.publish_action_state(1)
+        # running_action 和 state=1 心跳在整个复位阶段保持，不在主动作
+        # 结束与复位开始之间插入中间 state=2。
+        rospy.loginfo("[RESET_START] Starting robot reset; keeping action state=1")
 
-        current_control_mode = self.get_current_control_mode()
+        # MoRE 在 prepare 时已确认为当前控制器。复位期间即使
+        # get_controller_list 短暂查询失败，也不得误落入 OCS2 分支切 mode1。
+        current_control_mode = (
+            "rl" if self._active_action_controller == "more_controller"
+            else self.get_current_control_mode()
+        )
         if current_control_mode == "rl":
-            self.rl_reset_robot_state()
+            if not self.rl_reset_robot_state():
+                rospy.logerr("[RESET_FAILED] Failed to plan or start RL reset trajectory")
+                self._stop_trajectory_publisher()
+                self._finish_action(0)
         else:
             # 先禁用 Phase 2 再切 mode，避免竞态窗口内 Phase 2 stale 输出导致全关节 spike
             self.call_enable_wbc_arm_trajectory_control_service(0)
@@ -1379,9 +1726,8 @@ class ArmTrajectoryBezierDemo:
                 self.waist_state.data.data = [0]
                 self.control_waist_pub.publish(self.waist_state)
 
-            # OCS2/MPC 复位完成，发布 state=2
-            rospy.loginfo("[RESET_COMPLETE] OCS2/MPC reset finished, publishing action state=2")
-            self.publish_action_state(2)
+            rospy.loginfo("[RESET_COMPLETE] OCS2/MPC reset finished")
+            self._finish_action(self._pending_terminal_state)
 
     def create_action_data(self, finish_time, is_rl=False):
         # 根据是否有腰部关节确定TACT长度
@@ -1417,7 +1763,6 @@ class ArmTrajectoryBezierDemo:
         return {"frames": frames}
 
     def rl_reset_robot_state(self):
-        self.arm_flag = True
         self.START_FRAME_TIME = 0
         self.x_shift = self.START_FRAME_TIME  # 动态调整 x_shift
         finish_time = 1
@@ -1429,7 +1774,10 @@ class ArmTrajectoryBezierDemo:
         action_data = self.add_init_frame(data["frames"], is_rl=True, is_first_stage=False)
 
         # RL模式下，add_init_frame可能插入了过渡帧，需要更新END_FRAME_TIME
-        current_control_mode = self.get_current_control_mode()
+        current_control_mode = (
+            "rl" if self._active_action_controller == "more_controller"
+            else self.get_current_control_mode()
+        )
         if current_control_mode == "rl":
             frames = data["frames"]
             if frames:
@@ -1440,56 +1788,106 @@ class ArmTrajectoryBezierDemo:
         filtered_data = self.filter_data(action_data)
         bezier_request = self.create_bezier_request(filtered_data)
 
+        if self._active_action_controller == "more_controller":
+            # Do not let the reset publisher replay the main action's last
+            # shared JointState while waiting for the planner's first reset
+            # sample.  Keep _last_more_published_servos_deg intact: it is the
+            # reset trajectory's start pose.
+            self._begin_more_bezier_phase()
         success = self.plan_arm_trajectory_bezier_curve_client(bezier_request)
         if success:
             rospy.loginfo("Arm trajectory planned successfully")
-            # 清除中断标志位，启动发布线程执行回归初始位的轨迹
-            self.interrupt_flag = False
-            threading.Thread(target=self.run).start()
+            # 启动发布线程执行回归初始位的轨迹。主动作的
+            # 发布线程已在 _on_timer_trigger 中停止并 join。
+            if not self._start_trajectory_publisher():
+                return False
             # 在复位动作完成后，仅停止发布，不再触发再次复位
-            self._timer = rospy.Timer(
-                rospy.Duration(self.END_FRAME_TIME), self._on_reset_timer_trigger, oneshot=True
-            )
-            return ExecuteArmActionResponse(success=True, message="Action executed successfully")
+            self._schedule_action_timer(self.END_FRAME_TIME, self._on_reset_timer_trigger)
+            return True
         else:
-            return ExecuteArmActionResponse(success=False, message="Failed to execute action")
+            return False
 
-    def _on_timer_trigger(self, event):
-        self.running_action = False  # 结束 state=1 的发布
-        self.publish_action_state(2)
-        self.arm_flag = False
-        # 动作播放完成以后恢复机器人初始状态
-        if self.arm_restore_flag and not self.keep_arm_pose:
-            self.reset_robot_state()
-            rospy.loginfo("After the action playback is complete, revert the robot initial state")
-        elif self.keep_arm_pose:
-            rospy.loginfo("After the action playback is complete, keep arm pose at the last tact frame")
-            self.keep_arm_pose = False  # 一次性语义，用完即清，避免污染后续其他入口的动作
-        else:
-            rospy.loginfo("After the action playback is complete, arm restore is disabled")
+    def _on_timer_trigger(self, event, timer_token):
+        with self._action_transition_lock:
+            try:
+                if not self._claim_action_timer(timer_token):
+                    return
+                # 必须等主动作发布线程真正退出，再开始复位或发布终态。
+                if not self._stop_trajectory_publisher():
+                    self._finish_action(0)
+                    return
+                # 动作播放完成以后恢复机器人初始状态
+                if self.arm_restore_flag and not self.keep_arm_pose:
+                    self.reset_robot_state()
+                    rospy.loginfo("After the action playback is complete, revert the robot initial state")
+                elif self.keep_arm_pose:
+                    rospy.loginfo("After the action playback is complete, keep arm pose at the last tact frame")
+                    self.keep_arm_pose = False  # 一次性语义，用完即清，避免污染后续其他入口的动作
+                    self._finish_action(2)
+                else:
+                    rospy.loginfo("After the action playback is complete, arm restore is disabled")
+                    self._finish_action(2)
+            except Exception as e:
+                rospy.logerr("Arm action completion/reset failed: %s", e)
+                self.stop_action()
+                self._stop_trajectory_publisher()
+                if self.running_action:
+                    self._finish_action(0)
 
     def stop_action(self):
-        if self._timer:
-            self._timer.shutdown()
+        with self._action_transition_lock:
+            timer = self._timer
+            self._timer = None
+            self._timer_token = None
+        if timer:
+            timer.shutdown()
 
-    def _on_reset_timer_trigger(self, event):
-        """复位动作结束后停止发布，并恢复手臂模式为自动摆臂（AMP/RL 下行走时摆手）。"""
-        self.arm_flag = False
-        rospy.loginfo(f"[RESET_COMPLETE] Reset trajectory finished at {time.time():.3f}. Stopping publishers. [DEBUG] arm_flag={self.arm_flag}, running_action={self.running_action}")
-        # 复位完成，发布 state=2
-        self.publish_action_state(2)
-        # 先禁用 Phase 2 再切 mode，避免竞态窗口内全关节 spike
-        self.call_enable_wbc_arm_trajectory_control_service(0)
-        current_control_mode = self.get_current_control_mode()
-        if current_control_mode == "rl":
-            self.call_change_arm_ctrl_mode_service(1)
+    def _on_reset_timer_trigger(self, event, timer_token):
+        """复位发布结束后发布唯一的最终成功状态。"""
+        with self._action_transition_lock:
+            try:
+                if not self._claim_action_timer(timer_token):
+                    return
+                if not self._stop_trajectory_publisher():
+                    self._finish_action(0)
+                    return
+                rospy.loginfo(f"[RESET_COMPLETE] Reset trajectory finished at {time.time():.3f}. Stopping publishers. [DEBUG] arm_flag={self.arm_flag}, running_action={self.running_action}")
+                is_more_action = self._active_action_controller == "more_controller"
+                # MoRE 本 session 从未获取 Phase2；非 MoRE 复位完成后
+                # 先释放共享 Phase2，再交还手臂模式。
+                if not is_more_action:
+                    self.call_enable_wbc_arm_trajectory_control_service(0)
+                current_control_mode = (
+                    "rl" if is_more_action
+                    else self.get_current_control_mode()
+                )
+                current_controller = self.get_current_controller_name()
+                if current_controller is None:
+                    current_controller = self._active_action_controller
+                # MoRE 由自身动作状态机恢复动作前 style/mode，Python 不得
+                # 无条件将它切到 mode1。其他 RL 控制器保持原有恢复行为。
+                if (current_control_mode == "rl" and not is_more_action
+                        and current_controller != "more_controller"):
+                    self.call_change_arm_ctrl_mode_service(1)
 
-    def publish_running_action_state(self):
+                self._finish_action(self._pending_terminal_state)
+            except Exception as e:
+                rospy.logerr("Arm reset completion failed: %s", e)
+                self.stop_action()
+                self._stop_trajectory_publisher()
+                if self.running_action:
+                    self._finish_action(0)
+
+    def publish_running_action_state(self, stop_event):
         """持续发布 state=1"""
-        rate = rospy.Rate(10)  # 每秒发布 2 次
-        while self.running_action:
+        while not rospy.is_shutdown():
+            if stop_event.wait(0.1):
+                break
+            if (not self.running_action or
+                    self._controller_switch_abort_event.is_set() or
+                    not self.enable_control_state_):
+                break
             self.publish_action_state(1)
-            rate.sleep()
 
     def publish_action_state(self, state):
         """
@@ -1497,13 +1895,14 @@ class ArmTrajectoryBezierDemo:
         :param state: 动作状态 (0: 失败, 1:执行 2: 成功)
         :param message: 状态描述信息
         """
-        state_msg = RobotActionState()
-        state_msg.state = state
-        self.robot_action_state_pub.publish(state_msg)
-        # 只在状态变化时打印日志，减少重复打印
-        if self.last_published_state != state:
-            rospy.loginfo(f"Robot action state published: state={state}")
-            self.last_published_state = state
+        with self._action_state_publish_lock:
+            state_msg = RobotActionState()
+            state_msg.state = state
+            self.robot_action_state_pub.publish(state_msg)
+            # 只在状态变化时打印日志，减少重复打印
+            if self.last_published_state != state:
+                rospy.loginfo(f"Robot action state published: state={state}")
+                self.last_published_state = state
 
     def create_bezier_request(self, action_data):
         req = planArmTrajectoryBezierCurveRequest()
@@ -1530,15 +1929,20 @@ class ArmTrajectoryBezierDemo:
             req.joint_names = base_joint_names
         return req
 
-    def plan_arm_trajectory_bezier_curve_client(self, req):
+    def plan_arm_trajectory_bezier_curve_client(self, req, wait_timeout=5.0):
+        """Wait a bounded time for the planner, then keep the issued call synchronous."""
         service_name = '/bezier/plan_arm_trajectory'
-        rospy.wait_for_service(service_name)
+        try:
+            rospy.wait_for_service(service_name, timeout=wait_timeout)
+        except rospy.ROSException as e:
+            rospy.logerr("Planner service %s is unavailable: %s", service_name, e)
+            return False
         try:
             plan_service = rospy.ServiceProxy(service_name, planArmTrajectoryBezierCurve)
-            res = plan_service(req)
-            return res.success
+            response = plan_service(req)
+            return bool(response.success)
         except rospy.ServiceException as e:
-            rospy.logerr(f"Service call failed: {e}")
+            rospy.logerr("Planner service call failed: %s", e)
             return False
 
     def check_nodelet_manager_alive(self):
@@ -1637,21 +2041,38 @@ class ArmTrajectoryBezierDemo:
         return False
 
     def handle_interrupt(self, req):
+        with self._action_transition_lock:
+            try:
+                return self._handle_interrupt_locked(req)
+            except Exception as e:
+                rospy.logerr("Failed to interrupt/reset arm action: %s", e)
+                self.stop_action()
+                self._stop_trajectory_publisher()
+                if self.running_action:
+                    self._finish_action(0)
+                return TriggerResponse(success=False, message=f"中断动作失败: {e}")
+
+    def _handle_interrupt_locked(self, req):
         """处理中断请求的服务回调"""
         rospy.loginfo("[%s]  接收到机械臂中断指令", rospy.get_time())  
-        
-        # 设置中断标志位 
-        self.interrupt_flag  = True 
-        self.arm_flag  = False 
-        self.running_action  = False 
-        
-        # 发布动作完成状态
-        self.publish_action_state(2)   
-        
+
+        had_active_action = self.arm_flag or self.running_action
+        if not had_active_action:
+            return TriggerResponse(success=True, message="当前没有正在执行的手臂动作")
+
+        self.interrupt_flag = True
         # 停止等待动作的timer
         self.stop_action()
 
+        if not self._stop_trajectory_publisher():
+            self._finish_action(0)
+            return TriggerResponse(success=False, message="动作发布线程停止超时")
+
         # 恢复机器人初始状态
+        # 中断请求处理成功不代表原动作执行成功；复位完成后应
+        # 将原动作的唯一终态上报为失败/取消。
+        self._pending_terminal_state = 0
+        self.interrupt_flag = False
         self.reset_robot_state()
         
         # 返回标准Trigger响应 
@@ -1667,8 +2088,19 @@ class ArmTrajectoryBezierDemo:
         prev = self.enable_control_state_
         self.enable_control_state_ = bool(msg.data)
         if prev and not self.enable_control_state_:
-            # 与 handle_freeze_arm_traj 相同：停发布、不复位手/头/腰
-            self._freeze_tact_pipeline(reason="enable_control=false")
+            # Stop producers before waiting for the lifecycle transition lock;
+            # execute may currently be blocked in a synchronous planner call.
+            self.arm_flag = False
+            if self._trajectory_stop_event is not None:
+                self._trajectory_stop_event.set()
+            if self._action_state_stop_event is not None:
+                self._action_state_stop_event.set()
+            # 软暂停是取消而非正常完成：停发布、不复位手/头/腰，
+            # 但最终状态必须是 0，不能让上层误判为动作成功。
+            self._freeze_tact_pipeline(
+                reason="enable_control=false",
+                terminal_state=0,
+            )
             # freeze 额外：把手臂控制权交回自动摆臂（freeze 服务本身不切 mode）
             try:
                 self.call_enable_wbc_arm_trajectory_control_service(0)
@@ -1681,31 +2113,108 @@ class ArmTrajectoryBezierDemo:
             except Exception as e:
                 rospy.logwarn("Failed to switch arm mode: %s", e)
 
-    def _freeze_tact_pipeline(self, reason="freeze"):
-        """停 tact 发布管线：interrupt + 清 arm_flag/running + 状态=2 + 停 timer。
+    def _controller_switch_event_callback(self, msg):
+        """Hard-abort a MoRE action when a safety switch actually leaves MoRE."""
+        if (msg.from_controller != "more_controller" or
+                msg.to_controller == "more_controller"):
+            return
+
+        self._request_more_action_hard_abort(
+            "controller switched %s -> %s" % (
+                msg.from_controller,
+                msg.to_controller,
+            )
+        )
+
+    def _more_action_abort_callback(self, _msg):
+        """Stop the producer when C++ cancels a MoRE session for safety."""
+        self._request_more_action_hard_abort("MoRE safety exit requested")
+
+    def _request_more_action_hard_abort(self, reason):
+        """Idempotently stop a MoRE trajectory and publish terminal ABORTED."""
+
+        with self._action_state_lock:
+            preparing_more_action = self._preparing_more_action
+            owns_more_action = (
+                self.running_action and
+                self._active_action_controller == "more_controller"
+            )
+            if preparing_more_action or owns_more_action:
+                self._pending_terminal_state = 0
+                self._controller_switch_abort_event.set()
+                if self._action_state_stop_event is not None:
+                    self._action_state_stop_event.set()
+        if not (preparing_more_action or owns_more_action):
+            return
+
+        # 先用线程安全事件阻止/停止发布；即使 execute callback 正在等待
+        # planner 并持有 transition lock，也不会在返回后启动新的发布线程。
+        self.interrupt_flag = True
+        self.arm_flag = False
+        trajectory_stop_event = self._trajectory_stop_event
+        if trajectory_stop_event is not None:
+            trajectory_stop_event.set()
+
+        if owns_more_action:
+            # MoRE owns neither the shared Phase2 path nor a generic mode
+            # transition here, so its state machine can commit ABORTED without
+            # waiting for a planner/ServiceProxy that may be blocked while
+            # holding _action_transition_lock.  Stop/join the publisher first
+            # to preserve the terminal-after-last-frame contract.
+            self._stop_trajectory_publisher()
+            self._finish_action(0)
+
+        with self._action_transition_lock:
+            rospy.logwarn("MoRE arm action aborted: %s", reason)
+            self.stop_action()
+            self._stop_trajectory_publisher()
+            if self.running_action:
+                self._finish_action(0)
+
+    def _freeze_tact_pipeline(self, reason="freeze", terminal_state=None):
+        with self._action_transition_lock:
+            return self._freeze_tact_pipeline_locked(reason, terminal_state)
+
+    def _freeze_tact_pipeline_locked(self, reason="freeze", terminal_state=None):
+        """停 tact 发布管线：interrupt + 清 arm_flag/running + 发布终态 + 停 timer。
         不调用 reset_robot_state()，保持当前手/头/腰姿态。"""
         rospy.loginfo("[%s] freeze tact pipeline (%s)", rospy.get_time(), reason)
         # 仅在动作执行中才改标志；无动作时的 freeze/unfreeze 无副作用
         if not (self.arm_flag or self.running_action):
             return
         self.interrupt_flag = True
-        self.arm_flag = False
-        self.running_action = False
-        self.publish_action_state(2)
         self.stop_action()
+        if self._stop_trajectory_publisher():
+            final_state = self._pending_terminal_state if terminal_state is None else terminal_state
+            self._finish_action(final_state)
+        else:
+            self._finish_action(0)
 
     def handle_freeze_arm_traj(self, req):
         """冻结：立即停止发布 /kuavo_arm_traj 且不复位，使手臂停在当前帧。
         与 handle_interrupt 的区别：不调用 reset_robot_state()（不切回 auto、不复位手/头/腰），
         以便配合上层将手臂控制模式置为 keep pose，把 tact 定在当前位置。"""
-        self._freeze_tact_pipeline(reason="freeze_arm_traj service")
+        with self._action_transition_lock:
+            if self._active_action_controller == "more_controller":
+                return TriggerResponse(
+                    success=False,
+                    message="MoRE 动作不支持冻结保持；请使用 /interrupt_arm_traj 取消并复位",
+                )
+            self._freeze_tact_pipeline_locked(reason="freeze_arm_traj service")
         return TriggerResponse(
             success=True,
             message=f"动作于{time.strftime('%Y-%m-%d  %H:%M:%S')}冻结于当前帧"
         )
 
     def handle_keep_arm_pose(self, req):
-        self.keep_arm_pose = req.data
+        with self._action_transition_lock:
+            if req.data and (self._active_action_controller == "more_controller"
+                             or self.get_current_controller_name() == "more_controller"):
+                self.keep_arm_pose = False
+                message = "MoRE 动作必须在终态交还 mode1，不支持 keep_arm_pose"
+                rospy.logwarn(message)
+                return SetBoolResponse(success=False, message=message)
+            self.keep_arm_pose = req.data
         if self.keep_arm_pose:
             message = "keep_arm_pose enabled: action will keep arm pose at the last tact frame"
         else:
@@ -1714,6 +2223,34 @@ class ArmTrajectoryBezierDemo:
         return SetBoolResponse(success=True, message=message)
 
     def handle_execute_action(self, req):
+        if not self._execute_request_lock.acquire(blocking=False):
+            return ExecuteArmActionResponse(
+                success=False,
+                message="另一个动作请求正在准备或规划中",
+            )
+        try:
+            # Keep planner mutation and lifecycle commit in one transition. The ROS
+            # service has no session/cancel field, so abandoning an in-flight call
+            # could let an old plan overwrite a newer reset/action.
+            with self._action_transition_lock:
+                return self._handle_execute_action_locked(req)
+        except Exception as e:
+            rospy.logerr("Unexpected error while executing arm action: %s", e)
+            with self._action_transition_lock:
+                with self._action_state_lock:
+                    self._preparing_more_action = False
+                self.stop_action()
+                self._stop_trajectory_publisher()
+                if self.running_action:
+                    self._finish_action(0)
+            return ExecuteArmActionResponse(
+                success=False,
+                message=f"执行上肢动作时发生异常: {e}",
+            )
+        finally:
+            self._execute_request_lock.release()
+
+    def _handle_execute_action_locked(self, req):
         action_name = req.action_name
 
         # 软暂停期间拒绝新动作（无 tact 残留入口）
@@ -1732,36 +2269,14 @@ class ArmTrajectoryBezierDemo:
                 message=f"另一个动作正在执行中，请等待当前动作完成后再试"
             )
 
-        # 清理旧动作的定时器，防止旧定时器在新动作执行时触发
-        if hasattr(self, '_timer') and self._timer:
-            rospy.loginfo(f"Stopping old timer before executing: {action_name}")
-            self._timer.shutdown()
-            self._timer = None
-
-        # 停止旧动作的执行线程
-        if self.arm_flag:
-            rospy.loginfo(f"Stopping old action thread before executing: {action_name}")
-            self.interrupt_flag = True
-            rospy.sleep(0.05)  # 给旧线程一点时间退出
-            self.interrupt_flag = False
-
-        # 无论之前是什么状态，执行新动作前必须清掉 interrupt_flag
-        # 否则 run() 会因 while self.arm_flag and not self.interrupt_flag 立即退出
-        self.interrupt_flag = False
-
-        # 重置过渡帧状态，避免上一次播放的 _last_inserted_init_kf 残留影响 END_FRAME_TIME 重算
-        self._last_inserted_init_kf = 0
-
         file_path = f"{self.action_files_path}/{action_name}.tact"
         data = self.load_json_file(file_path)
         if not data:
-            self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=f"Action file {action_name} not found")
 
         if not self.check_nodelet_manager_alive():
             msg = "话题 /kuavo_arm_traj 的订阅者 nodelet_manager 节点无法通信或不存在。请检查 nodelet_manager 节点是否正常运行。"
             rospy.logerr(msg)
-            self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
         robot_type_raw = data.get("robotType", None)
@@ -1770,20 +2285,17 @@ class ArmTrajectoryBezierDemo:
         is_valid, validation_error = self.validate_tact_file(data)
         if not is_valid:
             rospy.logerr(f"Tact file validation failed: {validation_error}")
-            self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=f"文件合法性检查失败: {validation_error}")
         
         if robot_type_raw is None:
             msg = "Action file missing required field: robotType"
             rospy.logerr(msg)
-            self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
         try:
             tact_robot_version = int(robot_type_raw)
         except (TypeError, ValueError):
             msg = f"Invalid robotType in action file: {robot_type_raw}"
             rospy.logerr(msg)
-            self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
         robot_version_number = self.robot_version.version_number()
@@ -1792,20 +2304,84 @@ class ArmTrajectoryBezierDemo:
                 f"Version mismatch: tact {tact_robot_version} is incompatible with robot {robot_version_number} ({self.robot_version.version_name()})"
             )
             rospy.logerr(msg)
-            self.publish_action_state(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
-        self.running_action = True
-        threading.Thread(target=self.publish_running_action_state).start()
-
-        # MoRE 控制器支持行走中播动作，不需要强制停止
         current_ctrl = self.get_current_controller_name()
+
+        # multi 模式下无法确认当前控制器时，不能猜测为 MPC/其他控制器。
+        # 否则可能绕过 MoRE VR 占用门禁，或对 Depth 误切手臂模式。
+        if self.kuavo_control_scheme == "multi" and current_ctrl is None:
+            msg = "无法确认当前控制器，拒绝执行上肢动作"
+            rospy.logwarn("Action '%s' rejected: %s", action_name, msg)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        # Depth 没有外部手臂控制链。在发布 state 或切换任何模式前
+        # 拒绝，保证请求对当前机器人状态零副作用。
+        if current_ctrl == "depth_loco_controller":
+            msg = "depth_loco_controller 不支持外部手臂动作"
+            rospy.logwarn("Action '%s' rejected: %s", action_name, msg)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        if current_ctrl == "more_controller" and self.keep_arm_pose:
+            msg = "MoRE 动作不支持 keep_arm_pose，请先关闭该选项"
+            rospy.logwarn("Action '%s' rejected: %s", action_name, msg)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        # preflight 和控制器路由校验完成后，先确认本地没有旧的
+        # timer/发布线程。此时还没有建立 MoRE session，失败不发全局状态。
+        if self._timer:
+            rospy.loginfo(f"Stopping old timer before executing: {action_name}")
+            self.stop_action()
+        if not self._stop_trajectory_publisher():
+            msg = "旧动作发布线程停止超时"
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        # A safety-abort event belongs to one action session.  Clear the old
+        # generation before MoRE prepare, then mark the tiny prepare->heartbeat
+        # window so a C++ safety notification cannot be lost there.
+        with self._action_state_lock:
+            self._controller_switch_abort_event.clear()
+            self._preparing_more_action = current_ctrl == "more_controller"
+
+        # 无论之前是什么状态，执行新动作前必须清掉 interrupt_flag。
+        self.interrupt_flag = False
+        # 重置过渡帧状态，避免上一次播放的状态影响时长重算。
+        self._last_inserted_init_kf = 0
+
+        # MoRE 必须先原子校验 style/mode 并保存恢复快照。校验被拒绝
+        # 时不发布 /robot_action_state，避免影响已有的 VR 控制。
+        if current_ctrl == "more_controller":
+            prepared, prepare_message = self.prepare_more_arm_action(action_name)
+            if not prepared:
+                with self._action_state_lock:
+                    self._preparing_more_action = False
+                return ExecuteArmActionResponse(success=False, message=prepare_message)
+            if self._controller_switch_abort_event.is_set():
+                with self._action_state_lock:
+                    self._preparing_more_action = False
+                msg = "MoRE 安全退出已取消本次上肢动作"
+                rospy.logwarn("Action '%s' cancelled after MoRE prepare: %s", action_name, msg)
+                return ExecuteArmActionResponse(success=False, message=msg)
+
+        # prepare 成功后立即建立心跳，后续等待、模式切换和规划期间
+        # 都持续发布 state=1。
+        if not self._start_action_state_heartbeat(current_ctrl):
+            safety_aborted = self._controller_switch_abort_event.is_set()
+            msg = ("MoRE 安全退出已取消本次上肢动作"
+                   if safety_aborted else "另一个动作正在执行中")
+            rospy.logwarn("Action '%s' rejected after preflight: %s", action_name, msg)
+            # 理论上 busy 前置检查会保证这里成功。若发生并发竞态，
+            # MoRE prepare 已建立 session，必须发 0 让 C++ 恢复快照。
+            if current_ctrl == "more_controller" and not safety_aborted:
+                self.publish_action_state(0)
+            return ExecuteArmActionResponse(success=False, message=msg)
+
+        # MoRE 控制器支持行走中播动作，不需要强制停止。
         if current_ctrl != "more_controller":
             if not self.wait_for_stance_before_action(timeout=3.0):
                 msg = "机器人停止行走超时，取消上肢动作播放"
                 rospy.logwarn(msg)
-                self.running_action = False
-                self.publish_action_state(0)
+                self._finish_action(0)
                 return ExecuteArmActionResponse(success=False, message=msg)
 
         if not self.ensure_tact_playback_controller(timeout=3.0):
@@ -1815,8 +2391,7 @@ class ArmTrajectoryBezierDemo:
                 "请先切换到 amp_controller"
             )
             rospy.logwarn(msg)
-            self.running_action = False
-            self.publish_action_state(0)
+            self._finish_action(0)
             return ExecuteArmActionResponse(success=False, message=msg)
 
         # MoRE 控制器已自行处理手臂模式切换，跳过 MPC arm mode 检查（避免冗余 ROS service 延迟）
@@ -1824,19 +2399,20 @@ class ArmTrajectoryBezierDemo:
             if not self.ensure_arm_ctrl_mode(2, timeout=5.0):
                 msg = "手臂控制模式未切换到外部控制模式，取消动作播放"
                 rospy.logwarn(msg)
-                self.running_action = False
-                self.publish_action_state(0)
+                self._finish_action(0)
                 return ExecuteArmActionResponse(success=False, message=msg)
 
         # 获取初始帧时间
-        self.arm_flag = True
         first_value = data.get("first", 0)
         self.START_FRAME_TIME = round(first_value * 0.01, 2)  # 转换为秒，取两位小数
         self.x_shift = self.START_FRAME_TIME  # 动态调整 x_shift
 
         # 读取动作完成时间
         finish_time = data.get("finish", 0) * 0.01 # 转换为秒
-        current_control_mode = self.get_current_control_mode()
+        current_control_mode = (
+            "rl" if current_ctrl == "more_controller"
+            else self.get_current_control_mode()
+        )
         # RL模式和OCS2模式的过渡时间都会在 add_init_frame 中动态添加，这里不需要额外增加时间
         # ocs2 模式的过渡时间将在 add_init_frame 中动态计算并更新
         self.END_FRAME_TIME = finish_time
@@ -1917,47 +2493,94 @@ class ArmTrajectoryBezierDemo:
         bezier_request = self.create_bezier_request(filtered_data)
 
         rospy.loginfo(f"Planning arm trajectory for action: {action_name}...")
+        if current_ctrl == "more_controller":
+            self._begin_more_bezier_phase()
         success = self.plan_arm_trajectory_bezier_curve_client(bezier_request)
         # self.call_change_arm_ctrl_mode_service(1)
         if success:
             rospy.loginfo("Arm trajectory planned successfully")
-            self.interrupt_flag = False  # 清 freeze/interrupt 残留，防 run() 立即退出
-            threading.Thread(target=self.run).start()
+            if not self._start_trajectory_publisher():
+                msg = "Failed to start arm trajectory publisher"
+                rospy.logerr(msg)
+                self._finish_action(0)
+                return ExecuteArmActionResponse(success=False, message=msg)
             # 使用更新后的 END_FRAME_TIME（包含过渡帧时间）
             self.delayed_publish_action_state(self.END_FRAME_TIME)
             return ExecuteArmActionResponse(success=True, message="Action executed successfully")
         else:
             rospy.logerr("Failed to plan arm trajectory")
-            self.running_action = False
-            self.publish_action_state(0)
-            return ExecuteArmActionResponse(success=False, message="Failed to exefcute action")
+            self._finish_action(0)
+            return ExecuteArmActionResponse(success=False, message="Failed to execute action")
 
-    def run(self):
+    def run(self, stop_event):
         rate = rospy.Rate(100)
-        # 使能 WBC 手臂轨迹控制（走 /kuavo_arm_traj 滤波路径，与 VR 同源，避免 tact 腕部抖动 #2992）
+        if (self._controller_switch_abort_event.is_set() or
+                not self.enable_control_state_):
+            return
+        # 非 MoRE 控制器使能已有 WBC /kuavo_arm_traj 滤波路径（避免 tact 腕部抖动 #2992）。
         # 放在这里确保 arm_joint_trajectory_.pos 已有数据，避免 Phase 2 入口竞态 spike
-        self.call_enable_wbc_arm_trajectory_control_service(1)
-        while self.arm_flag and not self.interrupt_flag:
+        # MoRE ArmController 直接订阅专用 /kuavo_action_traj，不需要开启
+        # humanoidController 的 MPC/WBC Phase2 共享分支。
+        if self._active_action_controller != "more_controller":
+            with self._action_transition_lock:
+                if stop_event.is_set() or not self.arm_flag:
+                    return
+                if self.call_enable_wbc_arm_trajectory_control_service(1):
+                    self._action_owns_phase2 = True
+                else:
+                    rospy.logwarn(
+                        "Failed to enable shared WBC arm trajectory path; "
+                        "continuing with the active controller's arm input path"
+                    )
+        is_more_action = self._active_action_controller == "more_controller"
+        arm_traj_pub = self.kuavo_action_traj_pub if is_more_action else self.kuavo_arm_traj_pub
+        waist_traj_pub = self.action_waist_pub if is_more_action else self.control_waist_pub
+
+        while (self.arm_flag and not self.interrupt_flag
+               and not self._controller_switch_abort_event.is_set()
+               and self.enable_control_state_
+               and not stop_event.is_set() and not rospy.is_shutdown()):
             try:
-                if len(self.joint_state.position) != 0:
-                    self.kuavo_arm_traj_pub.publish(self.joint_state)
-                    self.kuavo_action_traj_pub.publish(self.joint_state)
-                if len(self.hand_state.right_hand_position) != 0 or len(self.hand_state.left_hand_position) != 0:
-                    self.control_hand_pub.publish(self.hand_state)
-                if len(self.head_state.joint_data) != 0:
-                    self.control_head_pub.publish(self.head_state)
+                if is_more_action:
+                    with self._more_output_lock:
+                        output_snapshot = self._more_output_snapshot
+                    if output_snapshot is None:
+                        # The planner has not delivered a complete frame for
+                        # this phase yet. Publishing old shared state here would
+                        # leak the previous main/reset trajectory.
+                        rate.sleep()
+                        continue
+                    (joint_state_msg, hand_state_msg, head_state_msg,
+                     waist_state_msg, published_full_target) = output_snapshot
+                else:
+                    joint_state_msg = self.joint_state
+                    hand_state_msg = self.hand_state
+                    head_state_msg = self.head_state
+                    waist_state_msg = self.waist_state
+                    published_full_target = None
+
+                if len(joint_state_msg.position) != 0:
+                    arm_traj_pub.publish(joint_state_msg)
+                if (len(hand_state_msg.right_hand_position) != 0 or
+                        len(hand_state_msg.left_hand_position) != 0):
+                    self.control_hand_pub.publish(hand_state_msg)
+                if len(head_state_msg.joint_data) != 0:
+                    self.control_head_pub.publish(head_state_msg)
                 # 发布腰部数据（KUAVO v50+ 或 ROBAN）
                 if (self.robot_class == KUAVO and self.has_waist) or self.robot_class == ROBAN:
-                    if len(self.waist_state.data.data) != 0:
-                        self.control_waist_pub.publish(self.waist_state)
+                    if len(waist_state_msg.data.data) != 0:
+                        waist_traj_pub.publish(waist_state_msg)
+                if is_more_action and published_full_target is not None:
+                    # Assignment of a fresh list is atomic under the CPython
+                    # GIL.  After _stop_trajectory_publisher() joins this
+                    # thread, this is the complete last frame actually sent by
+                    # the action owner and is safe to use as reset start.
+                    self._last_more_published_servos_deg = published_full_target
             except Exception as e:
                 rospy.logerr(f"Failed to publish arm trajectory: {e}")
             except KeyboardInterrupt:
                 break
             rate.sleep()
-
-        if self.interrupt_flag: 
-            self.interrupt_flag  = False
 
 # 在类定义完成后注册提取函数到注册表
 ArmTrajectoryBezierDemo._JOINT_EXTRACTORS = {

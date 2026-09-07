@@ -102,6 +102,9 @@ public:
      */
     virtual int disable() = 0;
 
+    // 标定保护使用的严格失能接口 默认复用现有失能实现
+    virtual int disableForCalibration() { return disable(); }
+
     /**
      * @brief 失能指定电机，执行 Enter Reset State
      *

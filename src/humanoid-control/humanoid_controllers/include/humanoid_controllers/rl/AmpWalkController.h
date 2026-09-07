@@ -80,6 +80,7 @@ namespace humanoid_controller
     bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const override;
     bool isInPlaceSteppingActive() const override;
     bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const override;
+    bool allowsWalkingDuringArmAction() const noexcept override;
 
   protected:
     // 主循环：从 RLControllerBase::update 调用

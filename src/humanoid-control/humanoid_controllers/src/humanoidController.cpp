@@ -1254,10 +1254,35 @@ namespace humanoid_controller
       
       arm_control_mode_sub_ = controllerNh_.subscribe<std_msgs::Float64MultiArray>("/humanoid/mpc/arm_control_mode", 10,[&](const std_msgs::Float64MultiArray::ConstPtr &msg)
       {
-        if(msg->data.size() == 0)
+        if(msg->data.size() < 2)
         {
-          ROS_ERROR("The dimensin of arm control mode is 0!!");
+          ROS_ERROR("The dimension of arm control mode is %zu, expected at least 2", msg->data.size());
           return;
+        }
+        const int raw_desired_arm_mode = static_cast<int>(msg->data[1]);
+        arm_control_mode_desired_cache_.store(raw_desired_arm_mode, std::memory_order_release);
+
+        if (controller_manager_)
+        {
+          auto* current_controller = controller_manager_->getCurrentController();
+          if (current_controller && current_controller->hasActiveArmActionSession())
+          {
+            // MoRE may still be waiting for the asynchronous mode1 acknowledgement
+            // sent during activation.  Consume that acknowledgement here without
+            // applying mode1 to the ArmController owned by the active action.
+            if (more_activation_waiting_mode1_.load(std::memory_order_acquire) &&
+                raw_desired_arm_mode == static_cast<int>(ArmControlMode::AUTO_SWING))
+            {
+              pending_external_arm_controller_mode_ = false;
+              more_activation_waiting_mode1_.store(false, std::memory_order_release);
+              ROS_INFO("[controller] MoRE activation received global mode1 confirmation during arm action");
+            }
+            // 动作 session 期间整条模式消息延后处理，避免先改写全局
+            // desired 状态后又跳过本地 ArmController，造成终态后不再重试。
+            ROS_WARN_THROTTLE(1.0,
+                              "[controller] Ignore arm mode message while current RL controller owns an offline arm action");
+            return;
+          }
         }
         if (msg->data[0] != mpcArmControlMode_)
         {
@@ -1278,9 +1303,6 @@ namespace humanoid_controller
           arm_mode_sync_time_ = ros::Time::now().toSec();
           
         }
-        const int raw_desired_arm_mode = static_cast<int>(msg->data[1]);
-        arm_control_mode_desired_cache_.store(raw_desired_arm_mode, std::memory_order_release);
-
         // 若切入前遗留的是 mode2，MoRE 激活后先等待全局 mode1 确认。
         // 该窗口中的 mode2 属于旧请求（或过早按键），不能覆盖刚完成的 reset。
         if (more_activation_waiting_mode1_.load(std::memory_order_acquire))
@@ -2426,11 +2448,10 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
   bool humanoidController::shouldBlockWalkingCommandForExternalArmTarget() const
   {
-    // MoRE 走不停腿：ROS param 为 true 时跳过外部手臂位置检查
-    bool allow_walking = false;
-    ros::param::get("/allow_walking_during_arm_action", allow_walking);
-    if (allow_walking)
+    if (controller_manager_ && controller_manager_->currentControllerAllowsWalkingDuringArmAction())
+    {
       return false;
+    }
 
     if (drake_interface_ && drake_interface_->getRobotVersion().version_number() == 17)
       return false;

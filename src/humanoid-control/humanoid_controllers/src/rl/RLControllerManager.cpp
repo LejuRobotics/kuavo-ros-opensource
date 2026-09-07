@@ -484,6 +484,26 @@ namespace humanoid_controller
     if (!current_controller_name_.empty())
     {
       auto* current_controller = controllers_[current_controller_name_].get();
+      const auto target_it = name.empty() ? controllers_.end() : controllers_.find(name);
+      const bool target_is_fall_stand =
+          target_it != controllers_.end() && target_it->second &&
+          target_it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+      const bool switching_to_same_controller = name == current_controller_name_;
+      const bool has_active_arm_action = current_controller->hasActiveArmActionSession();
+      const bool safety_exit_requested = has_active_arm_action && current_controller->requestToExit();
+      if (!switching_to_same_controller && has_active_arm_action &&
+          (target_is_fall_stand || safety_exit_requested))
+      {
+        current_controller->abortActiveArmActionSessionForSafety();
+      }
+      if (!switching_to_same_controller && has_active_arm_action &&
+          !target_is_fall_stand && !safety_exit_requested)
+      {
+        logSwitchBlocked("current controller '" + current_controller_name_ +
+                         "' is executing or restoring an arm action");
+        return false;
+      }
+
       const bool current_is_mimic_controller =
           current_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER ||
           current_controller->getType() == RLControllerType::DANCE_CONTROLLER;
@@ -592,6 +612,9 @@ namespace humanoid_controller
       return true;
     }
 
+    const bool desired_switch_to_falldown =
+        requested_target_it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
+
     // AMP 的本地手臂为 mode0 时，不能直接把全身控制权交给 AMP_Wild
     // 归位在当前 AMP 中非阻塞执行，完成后由控制循环补做真正的切换
     if (deferWalkingSwitchUntilArmReadyLocked(name))
@@ -602,9 +625,6 @@ namespace humanoid_controller
     // 保护逻辑：MPC->RL 切换时，如果机器人不在 stance 状态，不允许切换
     if (current_controller_name_.empty())
     {
-      auto* next_controller = controllers_[name].get();
-      const bool desired_switch_to_falldown = next_controller->getType() == RLControllerType::FALL_STAND_CONTROLLER;
-      
       const bool is_current_stance = (mpc_current_gait_name_ == "stance") || mpc_is_stance_mode_;
       if (!desired_switch_to_falldown && !is_current_stance)
       {
@@ -616,22 +636,16 @@ namespace humanoid_controller
     {
       auto* current_controller = controllers_[current_controller_name_].get();
       allow_walking_phase_sync_switch = allowWalkingPhaseSyncSwitchRequest(name);
-      // 倒地应急切换(AMP→FallStand)不受行走保护限制——倒地必须无条件切入
-      // (与上方 MPC→RL 分支的 desired_switch_to_falldown 同类例外一致)
-      bool target_is_falldown = false;
-      auto target_it = controllers_.find(name);
-      if (target_it != controllers_.end() && target_it->second)
-        target_is_falldown = target_it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
-
+      // 倒地应急切换不受行走保护限制——倒地必须无条件切入。
       if (current_controller && source_motion_state == SwitchMotionState::WALKING &&
-          !target_is_falldown && !allow_walking_phase_sync_switch)
+          !allow_walking_phase_sync_switch && !desired_switch_to_falldown)
       {
         logSwitchBlocked("RL->RL switch blocked because controller '" + current_controller_name_ + "' is not in stance");
         return false;
       }
       //waao：当前为行走状态
       if (current_controller && source_motion_state == SwitchMotionState::WALKING &&
-          allow_walking_phase_sync_switch)
+          allow_walking_phase_sync_switch && !desired_switch_to_falldown)
       {
         std::string switch_guard_message;
         if (!checkWalkingPhaseSyncSwitchGuard(name, switch_guard_message))
@@ -814,6 +828,12 @@ namespace humanoid_controller
           {
             new_controller->resetGaitCommandState(true);
             ROS_INFO("[RLControllerManager] Reset target gait command to stance during RL->RL switch: %s -> %s",
+                     current_controller_name_.c_str(), name.c_str());
+          }
+          else if (desired_switch_to_falldown)
+          {
+            new_controller->resetGaitCommandState(true);
+            ROS_INFO("[RLControllerManager] Reset fall-stand controller gait command during safety switch: %s -> %s",
                      current_controller_name_.c_str(), name.c_str());
           }
           else if (auto_switch_config_.enabled &&
@@ -1186,12 +1206,19 @@ namespace humanoid_controller
             return;
           }
           const auto* arm_controller = it->second->getArmController();
-          if (arm_controller && arm_controller->getRequestedMode() != mode)
+          const bool more_activation_ack_during_action =
+              mode == 1 && it->second->hasActiveArmActionSession();
+          if (arm_controller && arm_controller->getRequestedMode() != mode &&
+              !more_activation_ack_during_action)
           {
             ROS_INFO("[RLControllerManager] Drop stale arm mode %d request for controller '%s'",
                      mode, expected_controller_name.c_str());
             return;
           }
+          // MoRE activation may have queued this mode1 request immediately before
+          // an offline action temporarily switched its local ArmController to
+          // mode2.  Still send the global acknowledgement; humanoidController
+          // consumes it during the action without applying mode1 locally.
         }
 
         if (client.call(srv))
@@ -1235,6 +1262,19 @@ namespace humanoid_controller
       return it->second.get();
     }
     return nullptr;
+  }
+
+  bool RLControllerManager::currentControllerAllowsWalkingDuringArmAction() const
+  {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (current_controller_name_.empty())
+    {
+      return false;
+    }
+
+    const auto it = controllers_.find(current_controller_name_);
+    return it != controllers_.end() && it->second != nullptr &&
+           it->second->allowsWalkingDuringArmAction();
   }
 
   RLControllerType RLControllerManager::getCurrentControllerType()
