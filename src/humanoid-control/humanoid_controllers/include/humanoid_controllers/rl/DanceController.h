@@ -321,6 +321,16 @@ namespace humanoid_controller
      */
     void resetDanceTrajectoryStatePublishCache();
 
+    /**
+     * @brief 轨迹播完后，hold 帧（固定命令的那一帧）的 CSV
+     * 参考关节速度是否已接近静止。
+     * 若已静止则无需“播后静置”，播完即可安全切出；否则需静置
+     * kDanceFinishSettleDurationSec。
+     * 仅在轨迹已加载时有效，读取离线参考行，数值恒定——仅用于“缩短/跳过”有上界的静置等待，
+     * 不构成新的永久封锁。
+     */
+    bool isHeldFrameCalm() const;
+
     // ===== 控制参数 =====
     double dt_{0.002};                    // 控制周期（从/wbc_frequency获取）
     double actionScale_{0.25};             // 动作缩放因子
@@ -362,7 +372,10 @@ namespace humanoid_controller
     bool dance_started_published_{false};    // 本轮是否已发布started状态
     std::string last_published_dance_state_; // 上一次发布的状态
     int last_published_dance_step_{-1};      // 上一次发布的轨迹步
-    
+
+    bool trajectory_finish_settle_done_{false}; // 播后静置是否完成（可安全切出）
+    double trajectory_finish_settle_accum_{0.0}; // 播后静置已累计时长（秒）
+
     // ===== ROS服务 =====
     ros::ServiceServer restart_dance_srv_;  // 重新开始舞蹈服务
     ros::Publisher dance_trajectory_state_pub_;  // 舞蹈轨迹状态发布器

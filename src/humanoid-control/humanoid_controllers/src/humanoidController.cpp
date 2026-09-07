@@ -4487,14 +4487,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             last_rl_controller->getType() == RLControllerType::VMP_CONTROLLER &&
             current_controller_ptr_->getType() == RLControllerType::AMP_CONTROLLER;
 #if RL_TO_RL_USE_CONTINUOUS_DUAL_INFERENCE
-        if (is_dance_to_amp_switch)
-        {
-          // 与 s55_dance_beta 一致：Dance 保持暂停，冷启动后的 AMP 在当前周期直接接管。
-          // 不恢复 Dance、不运行 Dance inference，也不进入 RL->RL 插值状态机。
-          ROS_WARN("[Dance->AMP] beta-compatible hard switch: AMP takes control immediately");
-          stopRLToRLInterpolation();
-        }
-        else if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
+        if (current_controller_ptr_ != nullptr && last_rl_controller != nullptr)
         {
           if (is_vmp_to_amp_switch)
           {

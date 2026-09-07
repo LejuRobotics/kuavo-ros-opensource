@@ -16,7 +16,13 @@ namespace humanoid_controller
 {
   namespace
   {
-    constexpr double kDanceSwitchSafeStanceMaxJointVelRadPerSec = 0.15;
+  // 舞蹈播完后的”静置”时长：
+  // 静置计时有明确上界（超时即放行），不会死锁。
+  constexpr double kDanceFinishSettleDurationSec = 0.7;
+
+  // hold 帧被视为”已接近静止”的最大参考关节速度，与旧实现 isAllowToExit
+  // 阈值一致。
+  constexpr double kDanceSettleSkipMaxJointVelRadPerSec = 0.15;
   }  // namespace
 
   using namespace ocs2;
@@ -546,6 +552,8 @@ namespace humanoid_controller
     ++dance_run_id_;
     resetDanceTrajectoryStatePublishCache();
     res.success = true;
+    trajectory_finish_settle_done_ = false;
+    trajectory_finish_settle_accum_ = 0.0;
     res.message = "Dance trajectory reset to beginning";
     ROS_INFO("[%s] Dance trajectory restarted (run_id=%u)", name_.c_str(), dance_run_id_);
     return true;
@@ -558,6 +566,8 @@ namespace humanoid_controller
     resetDanceTrajectoryStatePublishCache();
     // 注意：reset() 仅在控制器暂停时被调用，不应改变状态
     // state_ 由 resume() 控制
+    trajectory_finish_settle_done_ = false;
+    trajectory_finish_settle_accum_ = 0.0;
     ROS_INFO("[%s] Controller reset", name_.c_str());
   }
 
@@ -576,6 +586,8 @@ namespace humanoid_controller
     first_run_ = true;
     ++dance_run_id_;
     resetDanceTrajectoryStatePublishCache();
+    trajectory_finish_settle_done_ = false;
+    trajectory_finish_settle_accum_ = 0.0;
 
     ROS_INFO("[%s] Controller resumed (run_id=%u), waiting for first update to set yaw offset", name_.c_str(), dance_run_id_);
   }
@@ -638,12 +650,39 @@ namespace humanoid_controller
     return q_ref;
   }
 
+  bool DanceController::isHeldFrameCalm() const {
+    if (dance_trajectory_.time_step_total <= 0 ||
+        dance_trajectory_.joint_vel.rows() <= 0) {
+      return false;
+    }
+
+    // hold 帧索引：与 getCurrentCommand 播完后保持一致——holdFrameIndex<0
+    // 取末帧，>=0 取指定帧
+    const int total = dance_trajectory_.time_step_total;
+    const int hold_row =
+        dance_trajectory_.hold_frame_index < 0
+            ? total - 1
+            : std::min(dance_trajectory_.hold_frame_index, total - 1);
+    if (hold_row < 0 || hold_row >= dance_trajectory_.joint_vel.rows()) {
+      return false;
+    }
+
+    const double max_abs_joint_vel =
+        dance_trajectory_.joint_vel.row(hold_row).cwiseAbs().maxCoeff();
+    return max_abs_joint_vel <= kDanceSettleSkipMaxJointVelRadPerSec;
+  }
+
   bool DanceController::requestToExit() const
   {
-    // 与 RLControllerBase::requestToExit：仅当配置 holdFrameIndex == -2 且轨迹已结束，才向上层请求自动切到 AMP
-    if (dance_trajectory_.isFinish() && (dance_trajectory_.hold_frame_index == -2))
-    {
-        return true;
+    // 与 RLControllerBase::requestToExit：仅当配置 holdFrameIndex == -2
+    // 且轨迹已结束、 且可安全切出（hold
+    // 帧参考已静止，或“播后静置”已完成）时，才向上层请求自动切到 AMP。 hold
+    // 帧仍在动的轨迹（如 hello3）会先静置 kDanceFinishSettleDurationSec 再切，
+    // 避免在身体仍有残余运动时直接交接。
+    if (dance_trajectory_.isFinish() &&
+        (dance_trajectory_.hold_frame_index == -2) &&
+        (isHeldFrameCalm() || trajectory_finish_settle_done_)){
+      return true;
     }
     return false;
   }
@@ -663,22 +702,14 @@ namespace humanoid_controller
       return false;
     }
 
-    const int current_step =
-        std::clamp(dance_trajectory_.getTimeStep(), 0, dance_trajectory_.time_step_total - 1);
-    const bool is_boundary_stance_step = (current_step == 0) || dance_trajectory_.isFinish();
-    if (!is_boundary_stance_step)
-    {
-      return false;
+    // 动作进行中：仅在起始帧（尚未真正起跳）允许切出，舞蹈中途不允许中断
+    if (!dance_trajectory_.isFinish()) {
+      return dance_trajectory_.getTimeStep() <= 0;
     }
 
-    const Eigen::VectorXd reference_joint_vel = dance_trajectory_.joint_vel.row(current_step).transpose();
-    if (reference_joint_vel.size() == 0)
-    {
-      return false;
-    }
-
-    const double max_abs_joint_vel = reference_joint_vel.cwiseAbs().maxCoeff();
-    return max_abs_joint_vel <= kDanceSwitchSafeStanceMaxJointVelRadPerSec;
+    // 轨迹已播放完成：hold 帧参考已静止则直接放行；
+    // 否则须等“播后静置”完成（updateImpl 计时，有上界超时兜底）才允许切走（含切回 MPC）。
+    return isHeldFrameCalm() || trajectory_finish_settle_done_;
   }
 
   bool DanceController::updateImpl(const ros::Time& time,
@@ -759,6 +790,21 @@ namespace humanoid_controller
                          hold_frame,
                          dance_trajectory_.getTimeStep(),
                          dance_trajectory_.getTimeStepTotal());
+        // 播后静置：hold
+        // 帧参考已接近静止（isHeldFrameCalm）则无需等待，播完即切；
+        // 否则保持末帧让 PD 阻尼把残余运动停稳，计时到
+        // kDanceFinishSettleDurationSec 置位
+        // trajectory_finish_settle_done_（有上界，超时兜底）后放行。
+        if (!trajectory_finish_settle_done_ && !isHeldFrameCalm()) {
+          trajectory_finish_settle_accum_ += dt_;
+          if (trajectory_finish_settle_accum_ >=
+              kDanceFinishSettleDurationSec) {
+            trajectory_finish_settle_done_ = true;
+            ROS_INFO("[%s] Dance finish settle completed after %.1fs, exit "
+                     "allowed (hold frame %d)",
+                     name_.c_str(), kDanceFinishSettleDurationSec, hold_frame);
+          }
+        }
       }
     }
     else
