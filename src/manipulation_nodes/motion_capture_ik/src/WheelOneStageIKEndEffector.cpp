@@ -193,6 +193,82 @@ WheelOneStageIKEndEffector::WheelOneStageIKEndEffector(drake::multibody::Multibo
   }
 }
 
+bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
+    const Eigen::Vector3d& frozenLowerBodyPitchJoints) {
+  if (nq_ != 18 || !frozenLowerBodyPitchJoints.allFinite()) {
+    ROS_ERROR("WheelOneStageIKEndEffector::activateChestPositionFreeze: expected three finite joints and nq=18");
+    return false;
+  }
+
+  if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ &&
+      frozenLowerBodyPitchJoints_.isApprox(frozenLowerBodyPitchJoints, 1.0e-12)) {
+    return true;
+  }
+
+  Eigen::VectorXd fallback = initialGuessSeed_;
+  if (hasRefLowpassState_ && isValidSolution(refLowpassLatest_, nq_)) {
+    fallback = refLowpassLatest_;
+  } else if (hasLatestSolution_ && isValidSolution(latestSolution_, nq_)) {
+    fallback = latestSolution_;
+  } else {
+    const auto* latestState = historyBuffer_.latest();
+    if (latestState && isValidSolution(latestState->result.solution, nq_)) {
+      fallback = latestState->result.solution;
+    }
+  }
+  if (fallback.size() != nq_ || !fallback.allFinite()) {
+    fallback = Eigen::VectorXd::Zero(nq_);
+  }
+  fallback.head<3>() = frozenLowerBodyPitchJoints;
+
+  frozenLowerBodyPitchJoints_ = frozenLowerBodyPitchJoints;
+  hasFrozenLowerBodyPitchJoints_ = true;
+  freezeChestPosition_ = true;
+
+  auto resyncState = [&](Eigen::VectorXd& state) {
+    if (state.size() != nq_ || !state.allFinite()) {
+      state = fallback;
+    } else {
+      state.head<3>() = frozenLowerBodyPitchJoints_;
+    }
+  };
+  resyncState(initialGuessSeed_);
+  resyncState(refLpX1_);
+  resyncState(refLpX2_);
+  resyncState(refLpY1_);
+  resyncState(refLpY2_);
+  resyncState(refLowpassLatest_);
+  hasRefLowpassState_ = true;
+
+  if (hasLatestSolution_ && latestSolution_.size() == nq_ && latestSolution_.allFinite()) {
+    latestSolution_.head<3>() = frozenLowerBodyPitchJoints_;
+  } else {
+    latestSolution_ = fallback;
+  }
+  hasLatestSolution_ = true;
+
+  if (historyBuffer_.empty()) {
+    const IKSolveResult seededResult(fallback, std::chrono::milliseconds(0));
+    const Eigen::VectorXd zeroDerivative = Eigen::VectorXd::Zero(nq_);
+    historyBuffer_.add(WheelIKResultHistoryBuffer::IKMotionState(
+        seededResult, zeroDerivative, zeroDerivative, zeroDerivative));
+  } else {
+    historyBuffer_.resyncSegment(0, frozenLowerBodyPitchJoints_);
+  }
+  return true;
+}
+
+void WheelOneStageIKEndEffector::deactivateChestPositionFreeze() {
+  freezeChestPosition_ = false;
+  hasFrozenLowerBodyPitchJoints_ = false;
+}
+
+void WheelOneStageIKEndEffector::forceFrozenLowerBodyPitchState(Eigen::VectorXd& state) const {
+  if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ && state.size() >= 3) {
+    state.head<3>() = frozenLowerBodyPitchJoints_;
+  }
+}
+
 IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& PoseConstraintList,
                                              ArmIdx controlArmIndex,
                                              const Eigen::VectorXd& jointMidValues /*未使用，可传空*/) {
@@ -246,7 +322,18 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
     return IKSolveResult(nq_, "EndEffectorIK solve failed");
   }
 
-  const Eigen::VectorXd filteredSolution = applyRefLowpass(ikResult.second);
+  Eigen::VectorXd filteredSolution = applyRefLowpass(ikResult.second);
+  // The hard constraint applies to the raw optimization result.  Keep every
+  // state of the post-solve biquad on the same fixed anchor as well, otherwise
+  // its previous velocity can produce a small pitch transient after switch-off.
+  if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_) {
+    forceFrozenLowerBodyPitchState(filteredSolution);
+    forceFrozenLowerBodyPitchState(refLpX1_);
+    forceFrozenLowerBodyPitchState(refLpX2_);
+    forceFrozenLowerBodyPitchState(refLpY1_);
+    forceFrozenLowerBodyPitchState(refLpY2_);
+    forceFrozenLowerBodyPitchState(refLowpassLatest_);
+  }
   updateLatestSolution(filteredSolution);
   IKSolveResult result(filteredSolution, duration);
 
@@ -326,6 +413,19 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
         vars << ik.q()[3];
         ik.get_mutable_prog()->AddCost(barrier, vars);
       }
+      // Lock the complete pitch chain to the one command snapshot captured at
+      // the position-switch falling edge.  A box around referenceSolution is
+      // only a per-cycle slew limit because referenceSolution moves every solve.
+      // q3/waist_yaw deliberately remains free.
+      if (hasFrozenLowerBodyPitchJoints_) {
+        drake::solvers::VectorXDecisionVariable chestJointVars(3);
+        chestJointVars << ik.q()[0], ik.q()[1], ik.q()[2];
+        ik.get_mutable_prog()->AddBoundingBoxConstraint(
+            frozenLowerBodyPitchJoints_, frozenLowerBodyPitchJoints_, chestJointVars);
+      } else {
+        ROS_ERROR_THROTTLE(1.0,
+                           "WheelOneStageIKEndEffector: chest freeze requested without a fixed joint anchor");
+      }
     } else {
       // 位置跟随开启：软代价协同跟随，允许与手臂可达性权衡
       ik.AddPositionCost(plant_->world_frame(),
@@ -333,15 +433,14 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
                          plant_->GetFrameByName("waist_yaw_link"),
                          Eigen::Vector3d::Zero(),
                          chestWeight * Eigen::Matrix3d::Identity());
+      // add chest pitch barrier cost
+      {
+        ChestPitchBarrierCost barrier;
+        Eigen::Matrix<drake::symbolic::Variable, 3, 1> vars;
+        vars << ik.q()[0], ik.q()[1], ik.q()[2];
+        ik.get_mutable_prog()->AddCost(barrier, vars);
+      }
     }
-  }
-
-  // add chest pitch barrier cost
-  {
-    ChestPitchBarrierCost barrier;
-    Eigen::Matrix<drake::symbolic::Variable, 3, 1> vars;
-    vars << ik.q()[0], ik.q()[1], ik.q()[2];
-    ik.get_mutable_prog()->AddCost(barrier, vars);
   }
 
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_SHOULDER) {

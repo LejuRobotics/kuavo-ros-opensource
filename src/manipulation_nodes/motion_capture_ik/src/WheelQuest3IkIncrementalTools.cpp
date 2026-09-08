@@ -586,8 +586,85 @@ bool WheelQuest3IkIncrementalROS::setControlMode(int targetMode) {
   }
 }
 
+bool WheelQuest3IkIncrementalROS::copyChestPositionFreezeAnchor(Eigen::Vector3d& anchor) {
+  std::lock_guard<std::mutex> lock(chestPositionFreezeMutex_);
+  if (!chestPositionFreezeActive_ || !chestPositionFreezeAnchor_.allFinite()) {
+    return false;
+  }
+  anchor = chestPositionFreezeAnchor_;
+  return true;
+}
+
+void WheelQuest3IkIncrementalROS::updateChestPositionFreezeState(bool freezeRequested) {
+  bool freezeActive = false;
+  {
+    std::lock_guard<std::mutex> lock(chestPositionFreezeMutex_);
+    freezeActive = chestPositionFreezeActive_;
+  }
+  if (freezeRequested == freezeActive) {
+    return;
+  }
+
+  if (!freezeRequested) {
+    {
+      std::lock_guard<std::mutex> lock(chestPositionFreezeMutex_);
+      chestPositionFreezeActive_ = false;
+      chestPositionFreezeAnchor_.setZero();
+    }
+    ROS_INFO("[WheelQuest3IkIncrementalROS] Chest position follow enabled: released q0-q2 freeze");
+    return;
+  }
+
+  // Capture the q0/knee, q1/leg and q2/waist_pitch snapshot once at the
+  // position-follow falling edge.  Prefer the coherent joint vector used for
+  // Drake FK; fall back to the latest measured lower-body joints, then to the
+  // last whole-body IK lower-body command.
+  Eigen::Vector3d anchor = Eigen::Vector3d::Zero();
+  bool hasAnchor = false;
+  {
+    std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ &&
+        filterJointDataForDrakeFK_.size() >= 3 && filterJointDataForDrakeFK_.allFinite()) {
+      anchor = filterJointDataForDrakeFK_.head<3>();
+      hasAnchor = true;
+    } else if (latest_lb_q_.size() == 4 && latest_lb_q_.allFinite()) {
+      anchor = latest_lb_q_.head<3>();
+      hasAnchor = true;
+    }
+  }
+  if (!hasAnchor) {
+    std::lock_guard<std::mutex> ikLock(ikResultMutex_);
+    if (ikLowerBodyJointCommand_.size() == 4 && ikLowerBodyJointCommand_.allFinite()) {
+      anchor = ikLowerBodyJointCommand_.head<3>();
+      hasAnchor = true;
+    }
+  }
+  if (!hasAnchor || !anchor.allFinite()) {
+    ROS_ERROR_THROTTLE(1.0,
+                       "[WheelQuest3IkIncrementalROS] Cannot freeze chest position: no finite q0-q2 source");
+    return;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(chestPositionFreezeMutex_);
+    chestPositionFreezeAnchor_ = anchor;
+    chestPositionFreezeActive_ = true;
+  }
+  ROS_INFO("[WheelQuest3IkIncrementalROS] Chest position follow disabled: froze q0-q2 at "
+           "[%.3f, %.3f, %.3f] deg",
+           anchor(0) * 180.0 / M_PI,
+           anchor(1) * 180.0 / M_PI,
+           anchor(2) * 180.0 / M_PI);
+}
+
 void WheelQuest3IkIncrementalROS::reset() {
   // 持续重置各类状态，确保进入系统时正常
+  // 清除 chest 位置快照冻结状态；位置跟随再次关闭时在 solve 循环里重新捕获
+  {
+    std::lock_guard<std::mutex> lock(chestPositionFreezeMutex_);
+    chestPositionFreezeActive_ = false;
+    chestPositionFreezeAnchor_.setZero();
+  }
   // 重置左右手状态管理：maintain为false，instant为false
   if (leftHandSmoother_) {
     leftHandSmoother_->reset();
@@ -1981,7 +2058,7 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
       startTime = lbLegMoveStartTime_;
     }
 
-    double alpha = 0.00;
+    double alpha = 0.01;
     if (lbLegMoved && !startTime.isZero()) {
       const double elapsedTime = (currentTime - startTime).toSec();
       if (elapsedTime > 0.0) {

@@ -124,6 +124,27 @@ class WheelIKResultHistoryBuffer {
   const IKMotionState* prev() const { return fromBack(1); }
   const IKMotionState* pprev() const { return fromBack(2); }
 
+  // Reconcile one segment (e.g. the four lower-body joints) with the value
+  // that is active at a mode boundary.  Replacing the selected segment in every
+  // sample also makes the finite-difference acceleration/jerk targets start
+  // from rest at the boundary.
+  void resyncSegment(Eigen::Index offset, const Eigen::VectorXd& values) {
+    for (auto& state : buffer_) {
+      if (state.result.solution.size() >= offset + values.size()) {
+        state.result.solution.segment(offset, values.size()) = values;
+      }
+      if (state.velocity.size() >= offset + values.size()) {
+        state.velocity.segment(offset, values.size()).setZero();
+      }
+      if (state.acceleration.size() >= offset + values.size()) {
+        state.acceleration.segment(offset, values.size()).setZero();
+      }
+      if (state.jerk.size() >= offset + values.size()) {
+        state.jerk.segment(offset, values.size()).setZero();
+      }
+    }
+  }
+
   std::chrono::milliseconds getMeanDuration() const {
     if (buffer_.empty()) {
       return std::chrono::milliseconds(0);
@@ -166,8 +187,10 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
     rightElbowTrackingActivation_ = std::clamp(rightActivation, 0.0, 1.0);
   }
 
-  // 腰部位置跟随细分关闭时（chestPositionUpdateEnable_=false），chest 位置更改为超高权重软代价近似
-  void setFreezeChestPosition(bool freeze) { freezeChestPosition_ = freeze; }
+  // Freeze q0/knee, q1/leg and q2/waist_pitch at one fixed command snapshot.
+  // Calls must be serialized with solveIK() by the owner of this solver.
+  bool activateChestPositionFreeze(const Eigen::Vector3d& frozenLowerBodyPitchJoints);
+  void deactivateChestPositionFreeze();
 
  private:
   struct LowpassBiquadCoeff {
@@ -188,6 +211,7 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
                                                     Eigen::VectorXd& y2);
   void initializeRefLowpass();
   Eigen::VectorXd applyRefLowpass(const Eigen::VectorXd& input);
+  void forceFrozenLowerBodyPitchState(Eigen::VectorXd& state) const;
 
   void setConstraints(drake::multibody::InverseKinematics& ik,
                       const std::vector<PoseData>& PoseConstraintList,
@@ -211,7 +235,9 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   std::unique_ptr<WheelPointTrackIKSolverConfig> pointTrackConfig_;
   double leftElbowTrackingActivation_{1.0};
   double rightElbowTrackingActivation_{1.0};
-  bool freezeChestPosition_{false};  // true 时 chest 位置用超高权重软代价近似锁定（位置跟随细分关闭）
+  bool freezeChestPosition_{false};
+  bool hasFrozenLowerBodyPitchJoints_{false};
+  Eigen::Vector3d frozenLowerBodyPitchJoints_{Eigen::Vector3d::Zero()};
 };
 
 }  // namespace HighlyDynamic

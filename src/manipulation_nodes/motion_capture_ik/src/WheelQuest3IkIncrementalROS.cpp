@@ -1647,8 +1647,15 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   auto startTime = std::chrono::high_resolution_clock::now();
   oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
       latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);
-  // 腰部位置跟随细分关闭（或总开关关闭）时，chest 位置在 IK 中用硬约束锁定，不随手臂摆动
-  oneStageIkEndEffectorPtr_->setFreezeChestPosition(!chestPositionUpdateEnable_);
+  // 腰部位置跟随细分关闭（或总开关关闭）时，把 q0-q2 俯仰链硬锁到切换瞬间的
+  // 快照（q3/waist_yaw 仍跟随 VR），chest 位置不再随手臂摆动而缓慢升高。
+  updateChestPositionFreezeState(!chestPositionUpdateEnable_);
+  Eigen::Vector3d chestPositionFreezeAnchor;
+  if (copyChestPositionFreezeAnchor(chestPositionFreezeAnchor)) {
+    oneStageIkEndEffectorPtr_->activateChestPositionFreeze(chestPositionFreezeAnchor);
+  } else {
+    oneStageIkEndEffectorPtr_->deactivateChestPositionFreeze();
+  }
   auto ikResult = oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
   auto endTime = std::chrono::high_resolution_clock::now();
   const auto durationUs = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();

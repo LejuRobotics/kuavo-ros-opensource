@@ -165,6 +165,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   void solveIk();
 
+  // Chest-position freeze: capture q0/knee, q1/leg and q2/waist_pitch once when
+  // the position sub-switch turns off, then pin the whole IK pitch chain to that
+  // snapshot inside the solver (WheelOneStageIKEndEffector::activateChestPositionFreeze).
+  void updateChestPositionFreezeState(bool freezeRequested);
+  bool copyChestPositionFreezeAnchor(Eigen::Vector3d& anchor);
+
   bool detectLeftArmMove();
   bool detectRightArmMove();
 
@@ -535,6 +541,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   bool chestIncrementalUpdateEnabled_ = true;  // pose 总开关：true 更新位姿，false 冻结位姿
   bool chestPositionUpdateEnable_ = true;      // position 子开关：仅在 pose 总开关为 true 时允许更新
+
+  // Reintroduced pitch snapshot freeze (independent of grip): one immutable
+  // q0-q2 hold shared by the position-follow sub-switch-off path.
+  std::mutex chestPositionFreezeMutex_;
+  Eigen::Vector3d chestPositionFreezeAnchor_{Eigen::Vector3d::Zero()};
+  bool chestPositionFreezeActive_{false};
 
   struct ModeChangeCycleCache {
     bool leftHandCtrlModeChanged = false;
