@@ -1609,8 +1609,8 @@ void WheelQuest3IkIncrementalROS::handleGripEdges(
   if (syncRight) rightArmCandidateReadyForPublish_.store(false);
 
   PublishedCommandFkSnapshot snapshot;
-  // Runtime grip transitions must never splice measured joints into q_pub.
-  // Startup bootstrap is handled separately by fsmEnter.
+  // Runtime grip must keep published arm q_pub.  Missing lower-body command
+  // (chest incremental off) is allowed to fall back to measured LB joints.
   if (!buildPublishedCommandFkSnapshot(snapshot, false)) {
     ROS_ERROR_THROTTLE(1.0,
                        "[WheelQuest3IkIncrementalROS] Grip transfer aborted: no coherent command snapshot");

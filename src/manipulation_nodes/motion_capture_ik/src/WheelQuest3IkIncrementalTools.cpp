@@ -1055,6 +1055,13 @@ bool WheelQuest3IkIncrementalROS::buildPublishedCommandFkSnapshot(
     if (drakeJointStateSize_ == 18 && armPublished && lowerBodyPublished) {
       snapshot.wholeBodyJoints.head(4) = publishedLowerBodyCommand_;
       snapshot.wholeBodyJoints.tail(14) = publishedArmCommand_;
+    } else if (drakeJointStateSize_ == 18 && armPublished &&
+               measuredJoints.size() == drakeJointStateSize_ && measuredJoints.head(4).allFinite()) {
+      // Chest incremental may never publish /lb_leg_traj (e.g. reset_joint_to_default:=false).
+      // Keep published arm q_pub and fill the 4-DoF lower body from measured joints.
+      snapshot.wholeBodyJoints.head(4) = measuredJoints.head(4);
+      snapshot.wholeBodyJoints.tail(14) = publishedArmCommand_;
+      snapshot.lowerBodyMeasuredFallback = true;
     } else if (drakeJointStateSize_ == 18 && allowMeasuredFallback &&
                measuredJoints.size() == drakeJointStateSize_) {
       // Bootstrap from one coherent measured whole-body state.  Never splice
@@ -1072,20 +1079,21 @@ bool WheelQuest3IkIncrementalROS::buildPublishedCommandFkSnapshot(
     return false;
   }
   const bool hasCompletePublishedCommand = armPublished && lowerBodyPublished;
+  const bool hasArmWithMeasuredLowerBody = armPublished && snapshot.lowerBodyMeasuredFallback;
   const bool hasCompleteMeasuredFallback =
       snapshot.measuredFallback && measuredJoints.size() == drakeJointStateSize_;
-  if (!hasCompletePublishedCommand && !allowMeasuredFallback) {
+  if (!hasCompletePublishedCommand && !hasArmWithMeasuredLowerBody && !allowMeasuredFallback) {
     return false;
   }
-  if (!hasCompletePublishedCommand && !hasCompleteMeasuredFallback) {
+  if (!hasCompletePublishedCommand && !hasCompleteMeasuredFallback && !hasArmWithMeasuredLowerBody) {
     ROS_WARN_THROTTLE(1.0,
                       "[WheelQuest3IkIncrementalROS] Neither a complete published command nor a coherent measured "
                       "bootstrap state is available");
     return false;
   }
 
-  snapshot.stamp = snapshot.measuredFallback
-                       ? ros::Time::now()
+  snapshot.stamp = (snapshot.measuredFallback || snapshot.lowerBodyMeasuredFallback)
+                       ? (snapshot.lowerBodyMeasuredFallback && !armStamp.isZero() ? armStamp : ros::Time::now())
                        : (armStamp > lowerBodyStamp ? armStamp : lowerBodyStamp);
   try {
     std::lock_guard<std::mutex> ikLock(oneStageIkMutex_);
@@ -1128,6 +1136,9 @@ bool WheelQuest3IkIncrementalROS::buildPublishedCommandFkSnapshot(
                    poseIsValid(snapshot.right.endEffector) && poseIsValid(snapshot.right.virtualThumb);
   if (!snapshot.valid) {
     ROS_ERROR_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] Published command FK contains invalid poses");
+  } else if (snapshot.lowerBodyMeasuredFallback) {
+    ROS_WARN_THROTTLE(2.0,
+                      "[WheelQuest3IkIncrementalROS] Grip snapshot using published arm + measured lower-body fallback");
   } else if (snapshot.measuredFallback) {
     ROS_WARN_THROTTLE(2.0,
                       "[WheelQuest3IkIncrementalROS] Using measured FK only as startup grip-transfer fallback");

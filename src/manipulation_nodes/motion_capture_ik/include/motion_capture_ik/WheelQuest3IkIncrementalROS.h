@@ -133,6 +133,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
     ArmCommandFk right;
     bool valid = false;
     bool measuredFallback = false;
+    bool lowerBodyMeasuredFallback = false;
   };
 
   enum class GripTransferPhase { InactiveHold, PressSync, ActiveTrack, ReleaseSync };

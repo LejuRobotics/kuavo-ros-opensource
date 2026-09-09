@@ -2,13 +2,15 @@
 """下肢 4 关节角度控制 TUI
 
 通过 Textual 界面调整 joint1~joint4 角度并发布到 /lb_leg_traj
-发布时通过 EMA 指数平滑从当前实际关节角过渡到目标角度, 并实时显示当前关节角
+发布时用五次多项式 rest-to-rest 轨迹（起止速度/加速度为 0），
+按速度与加速度上限规划时间，从当前实际关节角过渡到目标角度。
 """
 
 from __future__ import annotations
 
 import math
 import threading
+import time
 
 import rospy
 from sensor_msgs.msg import JointState
@@ -29,12 +31,36 @@ JOINT_MAX = [60.0, 0.0, 0.0, 0.0]
 
 INTERP_RATE = 50.0
 """插值频率"""
-INTERP_ALPHA = 0.05
-"""插值 EMA 系数"""
-INTERP_CONVERGE_DEG = 0.1
-"""插值收敛阈值"""
+INTERP_MAX_VEL_DEG_S = 12.0
+"""关节最大速度 (deg/s)，大角度行程靠拉长时长而不是提高起步速度"""
+INTERP_MAX_ACC_DEG_S2 = 15.0
+"""关节最大加速度 (deg/s^2)"""
+# 五次多项式 s=10τ³-15τ⁴+6τ⁵ 的 |ds/dτ|、|d²s/dτ²| 峰值
+_QUINTIC_VEL_COEFF = 15.0 / 8.0
+_QUINTIC_ACC_COEFF = 10.0 * math.sqrt(3.0) / 3.0
 CURRENT_REFRESH_RATE = 5.0
 """当前关节角刷新频率"""
+
+
+def _quintic_s(tau: float) -> float:
+    """Rest-to-rest 五次多项式位置比例, tau in [0, 1]."""
+    tau = max(0.0, min(1.0, tau))
+    tau2 = tau * tau
+    tau3 = tau2 * tau
+    return tau3 * (10.0 + tau * (-15.0 + 6.0 * tau))
+
+
+def _plan_interp_duration(start: list[float], target: list[float]) -> float:
+    """按 vmax/amax 规划四关节同步到达时长。"""
+    duration = 1.0 / INTERP_RATE
+    for q0, qf in zip(start, target):
+        delta = abs(qf - q0)
+        if delta < 1e-9:
+            continue
+        t_vel = _QUINTIC_VEL_COEFF * delta / INTERP_MAX_VEL_DEG_S
+        t_acc = math.sqrt(_QUINTIC_ACC_COEFF * delta / INTERP_MAX_ACC_DEG_S2)
+        duration = max(duration, t_vel, t_acc)
+    return duration
 
 
 class LegJointTui(App):
@@ -48,10 +74,16 @@ class LegJointTui(App):
     """当前关节角缓存 (度)"""
     _interp_timer: Timer | None = None
     """插值 Timer"""
+    _interp_start: list[float] | None = None
+    """插值起点角度 (度)"""
     _interp_target: list[float] | None = None
     """插值目标角度 (度)"""
     _interp_current: list[float] | None = None
     """插值当前角度 (度)"""
+    _interp_t0: float = 0.0
+    """插值开始单调时钟"""
+    _interp_duration: float = 0.0
+    """插值总时长 (s)"""
 
     TITLE = "下肢关节控制"
     CSS = """
@@ -156,15 +188,16 @@ class LegJointTui(App):
             rospy.logwarn(f"set_lock_knee_leg({lock}) 调用失败: {exc}")
 
     def _publish(self) -> None:
-        """发布目标关节角度到 /lb_leg_traj, 通过 EMA 插值平滑过渡
+        """发布目标关节角度到 /lb_leg_traj, 用限速五次多项式平滑过渡
 
-        发布前解锁 knee/leg, 插值完成后重新锁定
+        发布前解锁 knee/leg, 插值完成后重新锁定。中途再次发布时从当前插值点重规划。
         """
         if self._pub is None:
             self._set_status("ROS 未就绪, 无法发布")
             return
 
-        if self._current_angles is None:
+        start = self._interp_current if self._interp_timer is not None else self._current_angles
+        if start is None:
             self._set_status("当前关节角未知, 等待传感器数据")
             return
 
@@ -175,30 +208,39 @@ class LegJointTui(App):
 
         self._stop_interp()
         self._set_lock_knee_leg(False)
+        self._interp_start = list(start)
         self._interp_target = values
-        self._interp_current = list(self._current_angles)
+        self._interp_current = list(start)
+        self._interp_t0 = time.monotonic()
+        self._interp_duration = _plan_interp_duration(self._interp_start, values)
         self._interp_timer = self.set_interval(1.0 / INTERP_RATE, self._interp_step)
-        self._set_status("插值中...")
+        self._set_status(f"插值中... 预计 {self._interp_duration:.1f}s")
 
     def _interp_step(self) -> None:
-        """EMA 插值一步并发布, 收敛后停止插值并锁定 knee/leg"""
+        """按规划时长走五次多项式一步并发布, 到达后停止并锁定 knee/leg"""
+        start = self._interp_start
         target = self._interp_target
-        current = self._interp_current
-        if target is None or current is None:
+        if start is None or target is None:
             self._stop_interp()
             return
-        converged = True
-        for i in range(len(JOINT_NAMES)):
-            current[i] += INTERP_ALPHA * (target[i] - current[i])
-            if abs(target[i] - current[i]) >= INTERP_CONVERGE_DEG:
-                converged = False
-        self._publish_values(current)
-        if not converged:
+
+        elapsed = time.monotonic() - self._interp_t0
+        duration = max(self._interp_duration, 1.0 / INTERP_RATE)
+        tau = elapsed / duration
+        if tau >= 1.0:
+            self._interp_current = list(target)
+            self._publish_values(target)
+            self._stop_interp()
+            self._set_lock_knee_leg(True)
+            self._set_status(f"已发布: {[f'{v:g}' for v in target]}")
             return
-        self._publish_values(target)
-        self._stop_interp()
-        self._set_lock_knee_leg(True)
-        self._set_status(f"已发布: {[f'{v:g}' for v in target]}")
+
+        scale = _quintic_s(tau)
+        current = [q0 + scale * (qf - q0) for q0, qf in zip(start, target)]
+        self._interp_current = current
+        self._publish_values(current)
+        remaining = duration - elapsed
+        self._set_status(f"插值中... 剩余 {remaining:.1f}s")
 
     def _publish_values(self, values) -> None:
         """发布指定关节角度到 /lb_leg_traj
