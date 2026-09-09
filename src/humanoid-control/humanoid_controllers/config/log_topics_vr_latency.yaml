@@ -1,20 +1,42 @@
-# 仅在 enable_vr_latency_diagnostics:=true 时使用。
-# 常规运行默认使用 log_topics.yaml，不录制本文件中的延迟诊断话题。
+# 仅在 enable_vr_latency_diagnostics:=true 时使用 (会替换默认 log_topics.yaml)。
+# 必须覆盖 Quest3 四段离线分析所需话题: VR / VR→IK通信 / IK解算 / 控制器 / 电机+反馈。
 topics:
-  # VR发布、接收、转换和同帧IK端到端指标
   - /leju_quest_bone_poses
   - /quest_joystick_data
   - /quest3/node_processing_latency_ms
-  # 包含转换细分诊断、IK等待、求解和后处理等指标；
-  # /vr_absolute/transform_stage_latency_ms 为带字段标签的同帧数组。
+  - /pico/node_processing_latency_ms
+  - /pico/comm_latency_ms
+  - /pico/node_latency_ms
+
+  # 增量式: VR→IK 通信、IK 解算 (骨骼收到→求解完成)
+  - /vr_incremental/comm_latency_ms
+  - /vr_incremental/arm_traj_latency_ms
+  - /vr_incremental/.*
+
+  # 绝对式粗指标 + 细分诊断
+  - /vr_absolute/comm_latency_ms
+  - /vr_absolute/arm_traj_latency_ms
   - /vr_absolute/.*
 
-  # IK输入、求解耗时和输出轨迹
+  # Pico 绝对式 (OCS2): VR→IK 通信、IK 解算
+  - /ocs2_ik/comm_latency_ms
+  - /ocs2_ik/processing_latency_ms
+
+  # IK 输入/输出轨迹 (bag 互相关: 控制器层)
   - /drake_ik/time_cost/ik
   - /drake_ik/input_pos
   - /kuavo_arm_traj
+  - /vr_incremental/kuavo_arm_traj_shm
+  - /vr_incremental/kuavo_arm_traj_filtered
+  - /mm_kuavo_arm_traj
+  - /mm/two_arm_hand_pose_cmd
 
-  # 对照控制循环与运行错误，不录制高频可视化和全量状态
+  # 控制器处理打点 + 关节指令/反馈 (bag 互相关: 控制器 / 电机+反馈)
+  - /vr_incremental/wbc_processing_latency_ms
+  - /joint_cmd
+  - /joint_cmd.*
+  - /sensors_data_raw
+
   - /monitor/time_cost/controller_loop_time
   - /humanoid/mpc/arm_control_mode
   - /rosout

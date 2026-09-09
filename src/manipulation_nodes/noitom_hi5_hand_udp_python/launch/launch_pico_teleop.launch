@@ -15,12 +15,15 @@
     <arg name="pico_diagnostic_log_enable" default="false"/>
     <arg name="pico_tf_publish_enable" default="false"/>
     <arg name="pico_tf_publish_hz" default="100.0"/>
+    <arg name="enable_vr_latency_diagnostics" default="false"
+         doc="Publish Pico VR processing latency and enable bag recording of /ocs2_ik/* delay topics"/>
     <!-- 传递头部控制模式参数 -->
     <param name="/head_control_mode" value="$(arg head_control_mode)"/>
     <param name="/pico_diagnostic_allow_legacy" value="$(arg pico_diagnostic_allow_legacy)" type="bool"/>
     <param name="/pico_diagnostic_log_enable" value="$(arg pico_diagnostic_log_enable)" type="bool"/>
     <param name="/pico_tf_publish_enable" value="$(arg pico_tf_publish_enable)" type="bool"/>
     <param name="/pico_tf_publish_hz" value="$(arg pico_tf_publish_hz)" type="double"/>
+    <param name="/enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
 
     <node
         pkg="humanoid_controllers"
@@ -30,6 +33,7 @@
         args="python3 $(find noitom_hi5_hand_udp_python)/../pico-body-tracking-server/scripts/pico_whole_body_teleop_example.py --host $(arg host) --port $(arg port) --control_mode $(arg control_mode) --control_torso $(arg control_torso) --service_mode $(arg service_mode) --detection_mode $(arg detection_mode) --play_mode $(arg play_mode)"
         launch-prefix="bash -c 'sleep $(arg startup_delay); exec $0 $@'"
     >
+        <param name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
     </node>
 
     <node

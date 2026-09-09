@@ -42,6 +42,7 @@ using json = nlohmann::json;
 #include <unistd.h>
 #include <ifaddrs.h>
 
+#include <chrono>
 #include <cerrno>
 #include <cmath>
 #include <cstring>
@@ -358,7 +359,12 @@ public:
       processPoseData(event, pose_info_list_msg, now);
 
       // Fill meta fields and publish
-      pose_info_list_msg.timestamp_ms      = event.timestamp();
+      // 与 Python monitor 一致: 本机 Unix 毫秒, 供增量 IK 用 ros::Time::now() 同钟算 VR→IK 通信延迟。
+      // 不要用 event.timestamp() (Quest 设备钟), 否则 /vr_incremental/comm_latency_ms 会失真或不可用。
+      pose_info_list_msg.timestamp_ms = static_cast<int64_t>(
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count());
       pose_info_list_msg.is_high_confidence = event.isdatahighconfidence();
       pose_info_list_msg.is_hand_tracking   = event.ishandtracking();
 

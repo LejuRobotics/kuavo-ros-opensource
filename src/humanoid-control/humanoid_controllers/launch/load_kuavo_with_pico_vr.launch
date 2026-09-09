@@ -20,6 +20,7 @@
     <arg name="head_control_mode" default="vr_follow"/>
     <arg name="pico_tf_publish_enable" default="false"/>
     <arg name="pico_tf_publish_hz" default="100.0"/>
+    <arg name="enable_vr_latency_diagnostics" default="false"/>
 
     <!-- 仿真 -->
     <group if="$(arg sim_mode)">
@@ -34,6 +35,7 @@
             <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
             <arg name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)"/>
             <arg name="joint_protect_enable" value="$(arg joint_protect_enable)"/>
+            <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
         </include>
     </group>
 
@@ -49,5 +51,6 @@
         <arg name="head_control_mode" value="$(arg head_control_mode)"/>
         <arg name="pico_tf_publish_enable" value="$(arg pico_tf_publish_enable)"/>
         <arg name="pico_tf_publish_hz" value="$(arg pico_tf_publish_hz)"/>
+        <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
     </include>
 </launch>

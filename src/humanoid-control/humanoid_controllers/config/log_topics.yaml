@@ -53,6 +53,18 @@ topics:
   - /ik.*
   - /ik_debug/.*
   - /vr_incremental/.*
+  # Quest3 四段延迟打点 (显式列出, 避免只靠通配符漏录)
+  - /quest3/node_processing_latency_ms
+  - /vr_incremental/comm_latency_ms
+  - /vr_incremental/arm_traj_latency_ms
+  - /vr_incremental/wbc_processing_latency_ms
+  - /vr_absolute/comm_latency_ms
+  - /vr_absolute/arm_traj_latency_ms
+  - /pico/node_processing_latency_ms
+  - /pico/comm_latency_ms
+  - /pico/node_latency_ms
+  - /ocs2_ik/comm_latency_ms
+  - /ocs2_ik/processing_latency_ms
   - /mm/two_arm_hand_pose_cmd
   - /lb_shoulder_tight_alpha
   - /mm_kuavo_arm_traj
