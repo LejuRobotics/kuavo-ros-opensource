@@ -78,6 +78,9 @@ namespace humanoid_controller
       depth_[i] = 0.5;
     }
     depthSub_ = nh_.subscribe<std_msgs::Float64MultiArray>("/camera/depth/depth_history_array", 10, &DepthWalkController::depthCallback, this);
+    depth_history_status_sub_ = nh_.subscribe<std_msgs::Int32>(
+        "/humanoid_controller/depth_history_status", 1,
+        &DepthWalkController::depthHistoryStatusCallback, this);
 
     // 初始化 ankleSolver（从 ROS 参数获取类型 token；与 AmpWalk/FallStand/VMP 保持一致）
     std::string ankle_solver_type = "4gen_pro"; // 默认值（token）
@@ -726,11 +729,39 @@ void DepthWalkController::updatePhase(const CommandDataRL &cmd,const SensorData 
       depth_[i] = msg->data[i];
   }
 
+  bool DepthWalkController::isDepthHistoryFault() const
+  {
+    const int status = depth_history_status_.load(std::memory_order_relaxed);
+    return status != 0 && status != 5;
+  }
+
+  void DepthWalkController::depthHistoryStatusCallback(const std_msgs::Int32::ConstPtr &msg)
+  {
+    const int previous_status =
+        depth_history_status_.exchange(msg->data, std::memory_order_relaxed);
+    const bool fault = msg->data != 0 && msg->data != 5;
+
+    if (fault && (previous_status == -1 || previous_status == 0 || previous_status == 5))
+    {
+      ROS_WARN("%s", u8"\u76f8\u673a\u5904\u4e8e\u65ad\u6d41\u72b6\u6001");
+    }
+
+    if (fault && gait_receiver_)
+    {
+      gait_receiver_->resetCommandState(true);
+    }
+  }
+
   void DepthWalkController::updateObservation(const Eigen::VectorXd &state_est,
                                               const SensorData &sensor_data)
   {
     // === 1. 从 gait receiver 获取 CommandDataRL 并更新 phase ===
     CommandDataRL cmd = gait_receiver_->getCurrentCommand();
+
+    if (isDepthHistoryFault())
+    {
+      cmd.setzero();
+    }
 
     updatePhase(cmd, sensor_data);
     // 初始化 my_yaw_offset_（仅在第一次调用时，与 humanoidController_rl.cpp 一致）

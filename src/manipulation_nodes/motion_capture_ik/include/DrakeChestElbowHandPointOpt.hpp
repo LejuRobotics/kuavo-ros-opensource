@@ -95,8 +95,6 @@ class DrakeChestElbowHandPointOptSolver final {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  enum class ArmSide { Left, Right };
-
   explicit DrakeChestElbowHandPointOptSolver(const Eigen::Vector3d& vClsInChest,
                                              const Eigen::Vector3d& vCrsInChest,
                                              double link1Length,
@@ -150,96 +148,6 @@ class DrakeChestElbowHandPointOptSolver final {
   }
 
   void setBounds(const DrakeChestElbowHandBoundsConfig& config) { boundsConfig_ = config; }
-
-  /**
-   * Rebase one arm's warm-start and motion-history state from a coherent
-   * command-FK snapshot without changing the other arm or the shared chest
-   * state.
-   *
-   * The supplied shoulder, elbow and hand belong to commandChestPosition /
-   * commandChestOrientation.  Their link directions are first expressed in
-   * that command-chest frame and then mapped into the solver's current shared
-   * chest frame.  This is important when one arm is re-engaged while the
-   * shared chest (or the other arm) continues moving.
-   *
-   * Existing history samples for the selected arm are overwritten with the
-   * rebased pose.  Consequently its velocity, acceleration and jerk history
-   * starts from rest, while timestamps, chest samples and the opposite arm's
-   * samples remain untouched.
-   *
-   * This class is not internally synchronized; callers must use the same
-   * external serialization as solve().
-   */
-  bool synchronizeArmCommandState(ArmSide side,
-                                  const Eigen::Vector3d& commandChestPosition,
-                                  const Eigen::Quaterniond& commandChestOrientation,
-                                  const Eigen::Vector3d& commandShoulderPosition,
-                                  const Eigen::Vector3d& commandElbowPosition,
-                                  const Eigen::Vector3d& commandHandPosition) {
-    constexpr double kMinNorm = 1.0e-9;
-    if (!commandChestPosition.allFinite() || !commandChestOrientation.coeffs().allFinite() ||
-        !commandShoulderPosition.allFinite() || !commandElbowPosition.allFinite() ||
-        !commandHandPosition.allFinite() || !pChestPrev_.allFinite() || !qPrev_.coeffs().allFinite()) {
-      return false;
-    }
-
-    const double commandChestQuaternionNorm = commandChestOrientation.norm();
-    const double currentChestQuaternionNorm = qPrev_.norm();
-    if (!(commandChestQuaternionNorm > kMinNorm) || !(currentChestQuaternionNorm > kMinNorm)) {
-      return false;
-    }
-
-    const Eigen::Quaterniond commandChestQuaternion = commandChestOrientation.normalized();
-    const Eigen::Quaterniond currentChestQuaternion = qPrev_.normalized();
-    const Eigen::Vector3d shoulderInCommandChest =
-        commandChestQuaternion.conjugate() * (commandShoulderPosition - commandChestPosition);
-    const Eigen::Vector3d elbowInCommandChest =
-        commandChestQuaternion.conjugate() * (commandElbowPosition - commandChestPosition);
-    const Eigen::Vector3d handInCommandChest =
-        commandChestQuaternion.conjugate() * (commandHandPosition - commandChestPosition);
-
-    const Eigen::Vector3d upperArmInCommandChest = elbowInCommandChest - shoulderInCommandChest;
-    const Eigen::Vector3d forearmInCommandChest = handInCommandChest - elbowInCommandChest;
-    if (!(upperArmInCommandChest.norm() > kMinNorm) || !(forearmInCommandChest.norm() > kMinNorm)) {
-      return false;
-    }
-
-    const Eigen::Vector3d upperArmDirection =
-        normalizeSafe(currentChestQuaternion * upperArmInCommandChest);
-    const Eigen::Vector3d forearmDirection =
-        normalizeSafe(currentChestQuaternion * forearmInCommandChest);
-
-    Eigen::Vector3d* cachedElbow = nullptr;
-    Eigen::Vector3d* cachedHand = nullptr;
-    if (side == ArmSide::Left) {
-      u1LeftPrev_ = upperArmDirection;
-      u2LeftPrev_ = forearmDirection;
-      pLeftElbowPrev_ =
-          pChestPrev_ + currentChestQuaternion * vClsInChest_ + link1Length_ * u1LeftPrev_;
-      pLeftHandPrev_ = pLeftElbowPrev_ + link2Length_ * u2LeftPrev_;
-      cachedElbow = &pLeftElbowPrev_;
-      cachedHand = &pLeftHandPrev_;
-    } else {
-      u1RightPrev_ = upperArmDirection;
-      u2RightPrev_ = forearmDirection;
-      pRightElbowPrev_ =
-          pChestPrev_ + currentChestQuaternion * vCrsInChest_ + link1Length_ * u1RightPrev_;
-      pRightHandPrev_ = pRightElbowPrev_ + link2Length_ * u2RightPrev_;
-      cachedElbow = &pRightElbowPrev_;
-      cachedHand = &pRightHandPrev_;
-    }
-
-    for (auto& sample : historySample2_) {
-      if (side == ArmSide::Left) {
-        sample.p1Left = *cachedElbow;
-        sample.p2Left = *cachedHand;
-      } else {
-        sample.p1Right = *cachedElbow;
-        sample.p2Right = *cachedHand;
-      }
-    }
-    return true;
-  }
 
   DrakeChestElbowHandSolution solve(const Eigen::Vector3d& pChestRef,
                                     const Eigen::Quaterniond& qChestRef,  // unit quaternion, yaw/pitch-only; roll=0

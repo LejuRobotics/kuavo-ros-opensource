@@ -22,22 +22,22 @@
         ],
         "launch_waist_orbbec_camera_stereo_10hz": [
             "pkill -f '[r]oslaunch orbbec_camera' || true; pkill -f '[o]rbbec_camera_node' || true; sleep 2",
-            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_10hz_stereo.launch enable_hardware_reset:=true  camera_name:=waist_camera usb_port:=2-3.1' "
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_10hz_stereo.launch enable_hardware_reset:=true   log_level:=debug   enable_heartbeat:=true    camera_name:=waist_camera usb_port:=2-3.1' "
         ],
         "launch_waist_orbbec_camera_stereo_30hz": [
             "pkill -f '[r]oslaunch orbbec_camera' || true; pkill -f '[o]rbbec_camera_node' || true; sleep 2",
-            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_stereo.launch  enable_hardware_reset:=true camera_name:=waist_camera right_ir_fps:=30 left_ir_fps:=30 usb_port:=2-3.1' "
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_stereo.launch  enable_hardware_reset:=true   log_level:=debug   enable_heartbeat:=true camera_name:=waist_camera right_ir_fps:=30 left_ir_fps:=30 usb_port:=2-3.1' "
         ],
         "launch_waist_orbbec_camera_stereo_60hz": [
             "pkill -f '[r]oslaunch orbbec_camera' || true; pkill -f '[o]rbbec_camera_node' || true; sleep 2",
-            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_stereo.launch enable_hardware_reset:=true right_ir_fps:=60  camera_name:=waist_camera left_ir_fps:=60 usb_port:=2-3.1' "
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_stereo.launch enable_hardware_reset:=true   log_level:=debug   enable_heartbeat:=true right_ir_fps:=60  camera_name:=waist_camera left_ir_fps:=60 usb_port:=2-3.1' "
         ],
         "launch_waist_orbbec_camera": [
             "pkill -f '[r]oslaunch orbbec_camera' || true; pkill -f '[o]rbbec_camera_node' || true; sleep 2",
-            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_60hz_depth.launch enable_hardware_reset:=true usb_port:=2-3.1 camera_name:=waist_camera' > ~/camera.log"
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_60hz_depth.launch enable_hardware_reset:=true   log_level:=debug   enable_heartbeat:=true usb_port:=2-3.1 camera_name:=waist_camera' > ~/camera.log"
         ],
         "launch_waist_orbbec_camera_dont_kill_ros": [
-            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_60hz_depth.launch   enable_hardware_reset:=true usb_port:=2-3.1  camera_name:=waist_camera' > ~/camera.log"
+            "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series_60hz_depth.launch   enable_hardware_reset:=true   log_level:=debug   enable_heartbeat:=true usb_port:=2-3.1  camera_name:=waist_camera' > ~/camera.log"
         ],
         "launch_orbbec_camera": [
             "pkill -f '[r]oslaunch orbbec_camera' || true; pkill -f '[o]rbbec_camera_node' || true; sleep 3",

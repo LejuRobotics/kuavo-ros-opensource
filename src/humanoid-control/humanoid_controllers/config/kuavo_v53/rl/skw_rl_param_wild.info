@@ -223,13 +223,13 @@ standdefaultJointState
     (1,0)  0.0       ; leg_l2_joint
     (2,0)  -0.1     ; leg_l3_joint
     (3,0)   0.25     ; leg_l4_joint
-    (4,0)  -0.13     ; leg_l5_joint
+    (4,0)  -0.15     ; leg_l5_joint
     (5,0)   0.       ; leg_l6_joint
     (6,0)   -0.005       ; leg_r1_joint
     (7,0)   -0.0       ; leg_r2_joint
     (8,0)  -0.1     ; leg_r3_joint
     (9,0)   0.25     ; leg_r4_joint
-    (10,0) -0.13     ; leg_r5_joint
+    (10,0) -0.15     ; leg_r5_joint
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
     (13,0)  0.1        ; zarm_l1_joint

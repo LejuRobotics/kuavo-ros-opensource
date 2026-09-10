@@ -124,10 +124,10 @@ class WheelIKResultHistoryBuffer {
   const IKMotionState* prev() const { return fromBack(1); }
   const IKMotionState* pprev() const { return fromBack(2); }
 
-  // Reconcile one arm with the command that was actually published without
-  // disturbing the other arm or the four lower-body joints.  Replacing the
-  // selected segment in every sample also makes the finite-difference
-  // acceleration/jerk targets start from rest at the mode boundary.
+  // Reconcile one segment (e.g. the four lower-body joints) with the value
+  // that is active at a mode boundary.  Replacing the selected segment in every
+  // sample also makes the finite-difference acceleration/jerk targets start
+  // from rest at the boundary.
   void resyncSegment(Eigen::Index offset, const Eigen::VectorXd& values) {
     for (auto& state : buffer_) {
       if (state.result.solution.size() >= offset + values.size()) {
@@ -182,13 +182,6 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
 
   std::chrono::milliseconds getMeanSolveDuration() const { return historyBuffer_.getMeanDuration(); }
 
-  // Synchronize one arm's complete solver state with the last seven joint
-  // positions actually sent to the robot.  Only ArmIdx::LEFT/RIGHT are valid;
-  // the other arm and lower-body/chest state are preserved exactly.
-  //
-  // Calls must be serialized with solveIK() by the owner of this solver.
-  bool resyncArmJointState(ArmIdx side, const Eigen::VectorXd& publishedArmJoints);
-
   void setElbowTrackingActivations(double leftActivation, double rightActivation) {
     leftElbowTrackingActivation_ = std::clamp(leftActivation, 0.0, 1.0);
     rightElbowTrackingActivation_ = std::clamp(rightActivation, 0.0, 1.0);
@@ -203,8 +196,11 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   }
 
   void disableKneeLegLock() { lockKneeLegEnabled_ = false; }
-  // 腰部位置跟随细分关闭时（chestPositionUpdateEnable_=false），chest 位置更改为超高权重软代价近似
-  void setFreezeChestPosition(bool freeze) { freezeChestPosition_ = freeze; }
+
+  // Freeze q0/knee, q1/leg and q2/waist_pitch at one fixed command snapshot.
+  // Calls must be serialized with solveIK() by the owner of this solver.
+  bool activateChestPositionFreeze(const Eigen::Vector3d& frozenLowerBodyPitchJoints);
+  void deactivateChestPositionFreeze();
 
  private:
   struct LowpassBiquadCoeff {
@@ -225,6 +221,7 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
                                                     Eigen::VectorXd& y2);
   void initializeRefLowpass();
   Eigen::VectorXd applyRefLowpass(const Eigen::VectorXd& input);
+  void forceFrozenLowerBodyPitchState(Eigen::VectorXd& state) const;
 
   void setConstraints(drake::multibody::InverseKinematics& ik,
                       const std::vector<PoseData>& PoseConstraintList,
@@ -252,7 +249,9 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   mutable bool lockKneeLegEnabled_{false};
   mutable double lockKneeQ_{0.0};
   mutable double lockLegQ_{0.0};
-  bool freezeChestPosition_{false};  // true 时 chest 位置用超高权重软代价近似锁定（位置跟随细分关闭）
-  };
+  bool freezeChestPosition_{false};
+  bool hasFrozenLowerBodyPitchJoints_{false};
+  Eigen::Vector3d frozenLowerBodyPitchJoints_{Eigen::Vector3d::Zero()};
+};
 
 }  // namespace HighlyDynamic

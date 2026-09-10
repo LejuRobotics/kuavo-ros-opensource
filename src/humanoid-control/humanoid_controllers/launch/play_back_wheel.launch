@@ -19,6 +19,10 @@
   <arg name="estimator_type"     default="1"/>
   <arg name="wbc_only"           default="false"/>
   <arg name="play_back"          default="true"/>
+  <!-- 回放模式下 odom->base_link 的 TF 来源：
+       false(默认)=控制器自己发布 odom->base_link，bag 未录制 /tf 时 rviz 也能正常显示；
+       true=不发布，完全使用 bag 中的 odom->base_link（需 bag 内含 /tf，否则 rviz 白模/堆在原点） -->
+  <arg name="use_external_odom_tf" default="false"/>
 
   <!-- 轮臂链路参数 -->
   <arg name="robot_type"         default="1"/>
@@ -58,8 +62,9 @@
   <param name="use_joint_filter" value="$(arg use_joint_filter)"/>
   <param name="estimator_type" value="$(arg estimator_type)"/>
   <param name="play_back" value="$(arg play_back)"/>
-  <!-- 回放模式下不发布 odom->base_link tf，使用 bag 中的 tf -->
-  <param name="use_external_odom_tf" type="bool" value="$(arg play_back)"/>
+  <!-- 回放模式下默认由控制器发布 odom->base_link tf；若 bag 内含 odom->base_link 且
+       希望完全采用 bag 的 tf，可把 use_external_odom_tf 参数改为 true -->
+  <param name="use_external_odom_tf" type="bool" value="$(arg use_external_odom_tf)"/>
   <param name="joystick_type" value="$(arg joystick_type)"/>
   <param name="arm_move_spd" value="$(arg arm_move_spd)"/>
   <param name="start_way" value="$(arg start_way)"/>

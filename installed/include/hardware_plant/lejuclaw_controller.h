@@ -196,6 +196,10 @@ private:
 
     std::array<State, 2> gripper_state_ = {State::kUnknown, State::kUnknown};
     std::atomic_bool current_is_high_freq_{false};   // 当前控制模式：true=高频，false=低频
+    // 左右夹爪最近一次被接受的目标位置，顺序为 {left_claw, right_claw}。
+    // 单爪请求未指定的另一爪沿用这里的目标，避免被默认成 0% 产生误动作。
+    std::array<double, 2> last_command_positions_ = {0.0, 0.0};
+    bool command_positions_initialized_ = false;
     LejuClawDebugCallback debug_callback_;
     std::mutex target_callback_mutex_;
     LejuClawTargetCallback target_callback_;         // 真实下发指令回调（观察口）

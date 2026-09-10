@@ -292,6 +292,7 @@ namespace mobile_manipulator {
   , eeTargetTrajectories_{TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)}), 
                           TargetTrajectories({0}, {vector_t::Zero(6)}, {vector_t::Zero(6)})}
   , currentActualState_(vector_t::Zero(info_.stateDim))
+  , shoulderRefAnchorState_(vector_t::Zero(info_.stateDim))  // 方案D: 锚定参考与 stateDim 对齐
   , asyncSpinner_(4)  // 使用4线程的AsyncSpinner
   {
 
@@ -548,11 +549,13 @@ namespace mobile_manipulator {
     loadData::loadEigenMatrix(taskFile_, prefix + "armJoint_move.max_acc", armJoint_move_acc_);
     loadData::loadEigenMatrix(taskFile_, prefix + "armJoint_move.max_jerk", armJoint_move_jerk_);
 
-    // 肩部收紧: 初始 α (relaxation_coeff) 与低通滤波系数 (relaxation_alpha)
+    // 肩部收紧: 初始 α (relaxation_coeff) 与 α 变化限速
+    // (relaxation_alpha_step_up/_down: 每周期最大变化量, 统一爬升/回落速度)
     {
       boost::property_tree::ptree ptSh;
       boost::property_tree::read_info(taskFile_, ptSh);
-      loadData::loadPtreeValue(ptSh, shoulderTightAlphaSmooth_, "shoulder_adapt_tighten.relaxation_alpha", true);
+      loadData::loadPtreeValue(ptSh, shoulderTightAlphaStepUp_, "shoulder_adapt_tighten.relaxation_alpha_step_up", true);
+      loadData::loadPtreeValue(ptSh, shoulderTightAlphaStepDown_, "shoulder_adapt_tighten.relaxation_alpha_step_down", true);
     }
     std::vector<double> initAlpha;
     loadData::loadStdVector<double>(taskFile_, "shoulder_adapt_tighten.relaxation_coeff", initAlpha, true);
@@ -595,6 +598,12 @@ namespace mobile_manipulator {
       loadData::loadPtreeValue(ptSh, shoulderK1_, shPrefix + "k1", true);
       loadData::loadPtreeValue(ptSh, shoulderK2_, shPrefix + "k2", true);
       loadData::loadPtreeValue(ptSh, shoulderDMax_, shPrefix + "D_max", true);
+      // 方案B: H_task 速度尺度 (参考末端速度归一化), 缺省 0.2 m/s
+      loadData::loadPtreeValue(ptSh, shoulderVMax_, shPrefix + "v_max", true);
+      // 方案B: α 临界阻尼二阶低通自然频率, 缺省 6.0 rad/s
+      loadData::loadPtreeValue(ptSh, shoulderAlphaW_, shPrefix + "relaxation_alpha_w", true);
+      // 方案D: 锚定冻结/跟踪阈值, 缺省 0.5
+      loadData::loadPtreeValue(ptSh, shoulderRefAnchorTh_, shPrefix + "anchor_th", true);
 
       // 肘腕关节名 -> 状态下标 (用于 H_joint), 按臂分组
       std::vector<std::string> relaxJointNames;
@@ -622,7 +631,8 @@ namespace mobile_manipulator {
       }
     }
 
-    std::cout << "  shoulderTightAlphaSmooth_: " << shoulderTightAlphaSmooth_ << std::endl;
+    std::cout << "  shoulderTightAlphaStepUp_: " << shoulderTightAlphaStepUp_ << std::endl;
+    std::cout << "  shoulderTightAlphaStepDown_: " << shoulderTightAlphaStepDown_ << std::endl;
     std::cout << "  shoulderTightAlpha_: " << shoulderTightAlpha_.transpose() << std::endl;
 
     /**************************ruckig 时间周期获取************************************/
@@ -928,6 +938,9 @@ namespace mobile_manipulator {
       if (elbowDataAllZero)
       {
         mm_no_elbow_data_.store(true);
+      } else
+      {
+        mm_no_elbow_data_.store(false);
       }
 
       for(int armIdx = 0; armIdx < info_.eeFrames.size(); armIdx++)
@@ -2871,7 +2884,16 @@ namespace mobile_manipulator {
     // 调用对应的轨迹规划器计算所需时间
     double desiredTime = 0.0;
     LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(req.planner_index);
-    
+
+    // 与 /mm 一致：双臂末端笛卡尔指令（无肘部数据字段）触发 mm_no_elbow_data_，开启肩部收紧
+    if (cmdType == LEFT_ARM_WORLD_CMD || cmdType == RIGHT_ARM_WORLD_CMD ||
+        cmdType == LEFT_ARM_LOCAL_CMD || cmdType == RIGHT_ARM_LOCAL_CMD)
+    {
+      mm_no_elbow_data_.store(true);
+    } else {
+      mm_no_elbow_data_.store(false);
+    }
+
     if(cmdType != LEFT_ARM_WORLD_CMD && cmdType != RIGHT_ARM_WORLD_CMD &&
        cmdType != LEFT_ARM_LOCAL_CMD && cmdType != RIGHT_ARM_LOCAL_CMD)
     {
@@ -3015,6 +3037,15 @@ namespace mobile_manipulator {
         // 调用对应的轨迹规划器计算所需时间
         double desiredTime = 0.0;
         LbTimedPosCmdType cmdType = static_cast<LbTimedPosCmdType>(timedCmd.planner_index);
+
+        // 与 /mm 一致：双臂末端笛卡尔指令（无肘部数据字段）触发 mm_no_elbow_data_，开启肩部收紧
+        if (cmdType == LEFT_ARM_WORLD_CMD || cmdType == RIGHT_ARM_WORLD_CMD ||
+            cmdType == LEFT_ARM_LOCAL_CMD || cmdType == RIGHT_ARM_LOCAL_CMD)
+        {
+          mm_no_elbow_data_.store(true);
+        } else {
+          mm_no_elbow_data_.store(false);
+        }
 
         if(cmdType != LEFT_ARM_WORLD_CMD && cmdType != RIGHT_ARM_WORLD_CMD &&
            cmdType != LEFT_ARM_LOCAL_CMD && cmdType != RIGHT_ARM_LOCAL_CMD)
@@ -4075,7 +4106,7 @@ namespace mobile_manipulator {
     }
   }
 
-  // 每周期计算肩部收紧 α: H_joint(肘腕限位余量) × H_task(末端位移) → σ 合成 → 低通滤波
+  // 每周期计算肩部收紧 α: H_joint(肘腕限位余量) × H_task(参考末端速度) → σ 合成 → 限速+二阶低通
   scalar_t MobileManipulatorReferenceManager::computeShoulderTightAlpha(int armIdx, scalar_t initTime, const vector_t& initState)
   {
     // 未启用肩部收紧时不更新 α
@@ -4096,29 +4127,31 @@ namespace mobile_manipulator {
       hJoint = std::min(hJoint, std::max(0.0, std::min(1.0, margin)));
     }
 
-    // H_task: 末端期望位移幅度, ∈[0,1]; 统一在局部(基座)坐标系比较
+    // H_task: 参考末端速度在基座系下的幅值, ∈[0,1]; 仅用参考轨迹(不取实测位姿), 切断 α 与求解/测量的反馈环
     scalar_t hTask = 0.0;
-    if (shoulderDMax_ > 0.0) {
-      const vector_t eeDesired = eeTargetTrajectories_[armIdx].getDesiredState(initTime);
+    if (shoulderVMax_ > 0.0) {
+      Eigen::VectorXd eePoseRef, eeVelRef, eeAccRef;
+      cmdDualArmEePlannerRuckigPtr_[armIdx]->getTrajectoryAtTime(
+          initTime - cmdDualArm_plannerInitialTime_[armIdx], eePoseRef, eeVelRef, eeAccRef);
+      Eigen::Vector3d velBase = eeVelRef.head(3);  // 规划器坐标系: WorldFrame=世界系, LocalFrame=基座系
 
-      // 期望末端位置转到基座系: WorldFrame 目标在世界系, 用基座位姿反变换; LocalFrame 目标已是基座系
-      Eigen::Vector3d desiredPos = eeDesired.head(3);
+      // WorldFrame 目标在世界系: 扣除参考基座速度并转到基座系, 避免底盘运动被误判为肩部任务
       if (desireMode_[armIdx] == LbArmControlMode::WorldFrame) {
-        const auto& model = pinocchioInterface_.getModel();
-        auto& data = pinocchioInterface_.getData();
-        pinocchio::forwardKinematics(model, data, initState.head(model.nq));
-        pinocchio::updateFramePlacements(model, data);
-        const pinocchio::SE3 world_to_base = data.oMf[model.getFrameId(info_.baseFrame)].inverse();
-        desiredPos = world_to_base.rotation() * eeDesired.head(3) + world_to_base.translation();
+        const vector_t desInput = stateInputTargetTrajectories_.getDesiredInput(initTime);
+        const vector_t desState = stateInputTargetTrajectories_.getDesiredState(initTime);
+        const Eigen::Vector3d vBaseWorld(desInput(0), desInput(1), 0.0);
+        const Eigen::Vector3d pBaseWorld(desState(0), desState(1), 0.0);
+        const Eigen::Vector3d omega(0.0, 0.0, desInput(2));
+        // 物化为固定 3 维向量, 否则 head(3) 为动态尺寸, .cross() 编译期断言失败
+        const Eigen::Vector3d r = eePoseRef.head<3>() - pBaseWorld;
+        const Eigen::Vector3d vEeWorld = velBase - vBaseWorld - omega.cross(r);
+        const scalar_t yaw = initState(2);
+        const Eigen::Matrix2d R_wb = Eigen::Rotation2D<scalar_t>(yaw).toRotationMatrix();
+        velBase.head(2) = R_wb.transpose() * vEeWorld.head(2);
+        velBase(2) = vEeWorld(2);
       }
 
-      // 当前末端位置 (基座系)
-      vector_t eeCurrent(info_.eeFrames.size() * 6);
-      getCurrentEeBasePoseContinuous(eeCurrent, initState);
-      const Eigen::Vector3d currentPos = eeCurrent.segment(armIdx * 6, 3);
-
-      const scalar_t displacement = (desiredPos - currentPos).norm();
-      hTask = std::max(0.0, std::min(1.0, displacement / shoulderDMax_));
+      hTask = std::max(0.0, std::min(1.0, velBase.norm() / shoulderVMax_));
     }
 
     // 添加滞回环，防止在阈值附近来回抖动
@@ -4126,12 +4159,38 @@ namespace mobile_manipulator {
     const scalar_t hTh = (alphaPrev > 0.5) ? shoulderHThOff_ : shoulderHThOn_;
     const scalar_t tTh = (alphaPrev > 0.5) ? shoulderTThOff_ : shoulderTThOn_;
 
+    // 方案D: 更新肩部收紧参考锚定 (释放时跟踪当前姿态, 收紧时冻结), 基于上一周期 α 判定
+    updateShoulderRefAnchor(armIdx, initState, alphaPrev);
+
     // α_raw = σ(k1·(H_joint−hTh)) · σ(k2·(H_task−tTh)), 满足"健康且小幅"时 → α→1 锁肩
     const scalar_t sigma1 = 1.0 / (1.0 + std::exp(-shoulderK1_ * (hJoint - hTh)));
     const scalar_t sigma2 = 1.0 / (1.0 + std::exp(shoulderK2_ * (hTask - tTh)));
     const scalar_t alphaRaw = sigma1 * sigma2;
 
-    updateShoulderTightAlpha(armIdx, alphaRaw);
+    // 方案B: α 更新 = 限速(保留统一爬升/回落速度) + 临界阻尼二阶低通(去掉斜坡拐点, C1 连续)
+    {
+      const scalar_t dt = std::max(ruckigDt_, 1e-3);
+      // 1) 限速: 每周期最多变化 step, 得到输入目标 (线性斜坡)
+      scalar_t alphaTarget = alphaPrev;
+      const scalar_t delta = alphaRaw - alphaTarget;
+      if (delta >= 0.0) alphaTarget += std::min(delta, shoulderTightAlphaStepUp_);
+      else              alphaTarget += std::max(delta, -shoulderTightAlphaStepDown_);
+      alphaTarget = std::max(0.0, std::min(1.0, alphaTarget));
+
+      // 2) 临界阻尼二阶低通: ẏ=ẏ, ÿ = w²(target−y) − 2w·ẏ (semi-implicit Euler)
+      scalar_t& y = shoulderAlphaFilterY_[armIdx];
+      scalar_t& yd = shoulderAlphaFilterYd_[armIdx];
+      if (!shoulderAlphaFilterInit_[armIdx]) {
+        y = alphaPrev;  // 以初始 α 起步, 避免从 0 爬升
+        yd = 0.0;
+        shoulderAlphaFilterInit_[armIdx] = true;
+      }
+      const scalar_t w = std::max(shoulderAlphaW_, 1e-3);
+      y  += yd * dt;
+      yd += (w * w * (alphaTarget - y) - 2.0 * w * yd) * dt;
+      y = std::max(0.0, std::min(1.0, y));
+      setShoulderTightAlpha(armIdx, y);
+    }
 
     // 调试: 打印 α 调度中间量 (限流, 便于定位 α 偏低原因), 用完可删
     // static int shoulderDebugCnt = 0;
@@ -4159,6 +4218,33 @@ namespace mobile_manipulator {
     // }
 
     return getShoulderTightAlpha(armIdx);
+  }
+
+  // 方案D: 更新肩部收紧参考锚定 —— 首次以当前姿态初始化; 释放(α<阈值)时跟踪当前肩部姿态, 收紧(α≥阈值)时冻结。
+  // 这样收紧接合瞬间的参考 ≈ 当前姿态, 偏差从 ~0 开始, 消除对陈旧参考(初始/上次 reset 姿态)的"回拽"运动。
+  void MobileManipulatorReferenceManager::updateShoulderRefAnchor(int armIdx, const vector_t& initState, scalar_t alphaPrev)
+  {
+    if (shoulderStateIndicesForArm_[armIdx].empty()) {
+      return;
+    }
+    if (shoulderRefAnchorState_.size() != static_cast<size_t>(initState.size())) {
+      shoulderRefAnchorState_ = initState;  // 与 stateDim 对齐, 防御性重设
+    }
+    // 首次运行: 直接用当前肩部姿态初始化, 避免 α 高时锚定仍为零导致猛拉
+    if (!shoulderRefAnchorInit_[armIdx]) {
+      for (const size_t idx : shoulderStateIndicesForArm_[armIdx]) {
+        shoulderRefAnchorState_(idx) = initState(idx);
+      }
+      shoulderRefAnchorInit_[armIdx] = true;
+      return;
+    }
+    // 释放状态: 跟踪当前肩部姿态 (成本权重 ≈0, 不影响解; 保证接合时锚定 ≈ 当前)
+    if (alphaPrev < shoulderRefAnchorTh_) {
+      for (const size_t idx : shoulderStateIndicesForArm_[armIdx]) {
+        shoulderRefAnchorState_(idx) = initState(idx);
+      }
+    }
+    // 收紧状态: 冻结锚定, 提供对当前姿态的恢复力
   }
 
   void MobileManipulatorReferenceManager::setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState)
@@ -4268,6 +4354,7 @@ namespace mobile_manipulator {
           setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
           setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
           setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
+          setEnableShoulderTighteningForArm(armIdx, false); // 关节控制下关闭肩部收紧 (防止标志泄漏, 与锚定参考冲突)
 
           armJoint_mtx_[armIdx].lock();
           armJointTarget[armIdx] = arm_joint_traj_[armIdx];
@@ -4290,6 +4377,7 @@ namespace mobile_manipulator {
         setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
         setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
         setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
+        setEnableShoulderTighteningForArm(armIdx, false); // KEEP 模式下关闭肩部收紧
 
         armJointTarget[armIdx] = initState.tail(info_.armDim - 4).segment(armIdx * singleArmJointDim_, singleArmJointDim_);
 
@@ -4308,7 +4396,8 @@ namespace mobile_manipulator {
         setEnableEeTargetTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔跟踪
         setEnableEeTargetLocalTrajectoriesForArm(armIdx, false); // 关闭末端笛卡尔局部跟踪
         setEnableArmJointTrackForArm(armIdx, true); // 开启手臂跟踪
-        
+        setEnableShoulderTighteningForArm(armIdx, false); // AUTO_SWING 模式下关闭肩部收紧
+
         isArmEeOfflineTrajUpdate_[armIdx] = false;
         armJointTarget[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
         arm_joint_traj_[armIdx] = arm_init_joint_traj_.segment(armIdx * singleArmJointDim_, singleArmJointDim_);
