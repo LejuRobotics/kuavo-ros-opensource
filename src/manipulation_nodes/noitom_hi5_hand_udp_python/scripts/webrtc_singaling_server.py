@@ -1,7 +1,10 @@
 import asyncio
+import time
 import websockets
 from datetime import datetime
 import threading
+
+ROBOT_SIGNALING_CLIENT_ID = "leju_robot_webrtc"  # 机器人自身信令客户端 ID，用于与 VR 端区分
 
 class WebRTCSinglingServer:
     def __init__(self):
@@ -15,6 +18,11 @@ class WebRTCSinglingServer:
     def get_connected_clients_count(self):
         with self.lock:
             return len(self.connected_clients)
+
+    def get_vr_clients_count(self):
+        # 统计除机器人自身信令客户端外的客户端数，用于感知 VR 端在线状态
+        with self.lock:
+            return len([cid for cid in self.connected_clients if cid != ROBOT_SIGNALING_CLIENT_ID])
 
     async def signaling(self, websocket, path):
         client_id = await websocket.recv()
@@ -51,28 +59,39 @@ class WebRTCSinglingServer:
     def run_server(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        try:
-            self.loop.run_until_complete(self.start_server())
-        except Exception as e:
-            if hasattr(e, 'errno') and e.errno == 98:
-                print(f"\033[91mwebrtc_singaling_server: Port 8765 is already in use (Error 98)\033[0m")
-                print(f"\033[91mwebrtc信令服务器: 端口8765已被占用 (错误98)\033[0m")
-                print(f"\033[91mwebrtc_singaling_server: Port 8765 is already in use (Error 98)\033[0m")
-                print(f"\033[91mwebrtc信令服务器: 端口8765已被占用 (错误98)\033[0m")
-                # 查看占用端口8765的进程信息
-                try:
-                    import subprocess
-                    result = subprocess.run(['lsof', '-i', ':8765'], capture_output=True, text=True)
-                    if result.stdout:
-                        print(f"\033[93m占用端口8765的进程信息:\033[0m")
-                        print(f"\033[93m{result.stdout}\033[0m")
-                    else:
-                        print(f"\033[93m未找到占用端口8765的进程\033[0m")
-                except Exception:
-                    pass
-            else:
+        max_bind_retries = 10
+        for retry in range(max_bind_retries):
+            if not self.running:
+                return
+            try:
+                self.loop.run_until_complete(self.start_server())
+                return
+            except OSError as e:
+                if e.errno != 98:
+                    print(f"\033[91mwebrtc_singaling_server: bind failed - {e}\033[0m")
+                    return
+                # 快速重启时旧进程 socket 未完全释放，等待 1s 后重试绑定
+                print(f"\033[91mwebrtc_singaling_server: Port 8765 is busy (Error 98), retry {retry + 1}/{max_bind_retries} in 1s\033[0m")
+                time.sleep(1)
+            except Exception as e:
+                if not self.running:
+                    return  # 主动 shutdown，静默退出
                 print(f"\033[91mwebrtc_singaling_server: Except - {str(e)}\033[0m")
-            pass
+                return
+        print(f"\033[91mwebrtc_singaling_server: Port 8765 still busy after {max_bind_retries} retries, giving up\033[0m")
+        self._print_port_occupier()
+
+    def _print_port_occupier(self):
+        # 打印占用 8765 端口的进程，便于排查端口被长期占用的情况
+        try:
+            import subprocess
+            result = subprocess.run(['lsof', '-i', ':8765'], capture_output=True, text=True)
+            if result.stdout:
+                print(f"\033[93mProcesses occupying port 8765:\n{result.stdout}\033[0m")
+            else:
+                print(f"\033[93mNo process listed for port 8765 (lsof empty)\033[0m")
+        except Exception as e:
+            print(f"\033[91mFailed to inspect port 8765: {e}\033[0m")
     def start(self):
         self.server_thread = threading.Thread(target=self.run_server)
         self.server_thread.start()

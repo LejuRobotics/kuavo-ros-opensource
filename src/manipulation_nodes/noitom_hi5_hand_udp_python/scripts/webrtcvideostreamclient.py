@@ -16,12 +16,14 @@ from sensor_msgs.msg import Image, CameraInfo, CompressedImage
 from cv_bridge import CvBridge
 import signal
 import threading
+from webrtc_singaling_server import ROBOT_SIGNALING_CLIENT_ID
 
 class WebRTCVideoStreamClient:
-    def __init__(self, server_ip, ros_topic):
+    def __init__(self, server_ip, ros_topic, signaling_server=None):
         self.server_ip = server_ip
         self.ros_topic = f"{ros_topic}/image_raw/compressed"
         self.ros_camera_info_topic = f"{ros_topic}/camera_info"
+        self.signaling_server = signaling_server  # 重连模式下用于感知 VR 客户端在线状态
 
         if not self.topic_exists(self.ros_topic):
             print(f"\033[91mcarlos_WebRTCVideoStreamClient_Topic_not_found: Topic {self.ros_topic} does not exist\033[0m")
@@ -141,27 +143,66 @@ class WebRTCVideoStreamClient:
         self.latest_frame = self.bridge.compressed_imgmsg_to_cv2(ros_image, "bgr8")
 
     async def main(self):
-        while not self.start_connect_webrtc_singal:
-            # print("Wait Quest3 Connect for start video stream ")
-            await asyncio.sleep(1)
+        # 断线重连循环：VR 客户端在线时发起一轮新会话，掉线后等待下次重连
+        # 注意：仅覆盖「App 重开、机器端保持」场景；机器端进程重启后 VR App 不主动重连，见 webrtc_videostream.py
+        while not rospy.is_shutdown():
+            await self.wait_vr_client_online()
+            if rospy.is_shutdown():
+                break
+            await self.run_session()
 
-        print("Start video stream...")
+    async def wait_vr_client_online(self):
+        if self.signaling_server is not None:
+            # 重连模式：轮询信令服务器，直到有 VR 客户端在线
+            while not rospy.is_shutdown() and self.signaling_server.get_vr_clients_count() == 0:
+                await asyncio.sleep(0.5)
+        else:
+            # 兼容单机模式（无信令服务器引用）：等待外部置位一次性标志
+            while not self.start_connect_webrtc_singal and not rospy.is_shutdown():
+                await asyncio.sleep(1)
 
+    async def run_session(self):
+        # 发起一轮新的 WebRTC 会话；信令 WS 关闭（VR 掉线/主动断开）后结束本轮
         uri = f"ws://{self.server_ip}:8765"
-
         self.pc = RTCPeerConnection()
+        self.pc.addTrack(self.ImageVideoTrack(self))
+        print(f"[{datetime.now()}] Start new video stream session, create RTCPeerConnection")
 
-        video_track = self.ImageVideoTrack(self)
+        try:
+            async with websockets.connect(uri) as websocket:
+                await websocket.send(ROBOT_SIGNALING_CLIENT_ID)
+                print("Video track has been added to the peer connection.")
+                await self.create_offer(websocket, self.pc)
+                await self.watch_session(websocket, self.pc)
+        except websockets.exceptions.ConnectionClosed as e:
+            print(f"[{datetime.now()}] Video stream session closed: {e}")
+        except Exception as e:
+            # 临时网络错误不终止重连循环，记录后进入下一轮等待
+            print(f"\033[91m[{datetime.now()}] Video stream session error, will retry: {e}\033[0m")
+        finally:
+            await self.pc.close()
+            self.pc = None
 
-        self.pc.addTrack(video_track)
-        print("Video track has been added to the peer connection.")
+    async def watch_session(self, websocket, pc):
+        # 单机模式（无信令服务器引用）：直接跑信令循环，保持一次会话行为
+        if self.signaling_server is None:
+            await self.signaling(websocket, pc)
+            return
+        # 重连模式：并发处理信令消息与 VR 在线监控，任一结束即终止本轮会话
+        signaling_task = asyncio.create_task(self.signaling(websocket, pc))
+        presence_task = asyncio.create_task(self.monitor_vr_presence(websocket))
+        await asyncio.wait([signaling_task, presence_task], return_when=asyncio.FIRST_COMPLETED)
+        for task in (signaling_task, presence_task):
+            task.cancel()
+        await asyncio.gather(signaling_task, presence_task, return_exceptions=True)
 
-        async with websockets.connect(uri) as websocket:
-            await websocket.send("client1")
-            await self.create_offer(websocket, self.pc)
-            await self.signaling(websocket, self.pc)
-
-        await self.pc.close()
+    async def monitor_vr_presence(self, websocket):
+        # VR 客户端掉线时关闭当前信令 WS，结束本轮会话以等待下次重连
+        while not rospy.is_shutdown():
+            if self.signaling_server.get_vr_clients_count() == 0:
+                await websocket.close()
+                return
+            await asyncio.sleep(0.5)
 
     async def handle_ros(self):
         # rospy.init_node('image_to_webrtc', anonymous=True)
