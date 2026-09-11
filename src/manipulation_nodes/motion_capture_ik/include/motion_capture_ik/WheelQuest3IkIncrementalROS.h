@@ -417,6 +417,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   Eigen::VectorXd filterJointDataForDrakeFK_;
   Eigen::VectorXd jointDataForDrakeFK_;
+  bool hasDrakeFkJointMeasurement_{false};
 
   // 滤波参数
   double jointSpaceAccLimit_ = 100.0;   // 关节角度ruckig滤波加速度约束参数

@@ -638,7 +638,8 @@ void WheelQuest3IkIncrementalROS::updateChestPositionFreezeState(bool freezeRequ
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
     if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ &&
-        filterJointDataForDrakeFK_.size() >= 3 && filterJointDataForDrakeFK_.allFinite()) {
+        filterJointDataForDrakeFK_.size() >= 3 && filterJointDataForDrakeFK_.allFinite() &&
+        hasDrakeFkJointMeasurement_) {
       anchor = filterJointDataForDrakeFK_.head<3>();
       hasAnchor = true;
     } else if (latest_lb_q_.size() == 4 && latest_lb_q_.allFinite()) {
@@ -954,6 +955,7 @@ void WheelQuest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
                                 .count());
     filterJointDataForDrakeFK_ = kKeep * filterJointDataForDrakeFK_ + kNew * qNew;
+    hasDrakeFkJointMeasurement_ = true;
   }
 }
 
@@ -985,6 +987,11 @@ void WheelQuest3IkIncrementalROS::updateSensorArmJointFromSensorData() {
       for (int i = 0; i < drakeJointStateSize_; ++i) {
         jointDataForDrakeFK_(i) = currentSensorData->joint_data.joint_q[i];
       }
+    }
+    if (!hasDrakeFkJointMeasurement_ && jointDataForDrakeFK_.size() == drakeJointStateSize_ &&
+        jointDataForDrakeFK_.allFinite()) {
+      filterJointDataForDrakeFK_ = jointDataForDrakeFK_;
+      hasDrakeFkJointMeasurement_ = true;
     }
   }
 }

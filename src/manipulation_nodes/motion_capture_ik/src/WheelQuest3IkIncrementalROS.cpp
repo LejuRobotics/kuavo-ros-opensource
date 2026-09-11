@@ -1658,9 +1658,15 @@ void WheelQuest3IkIncrementalROS::solveIk() {
     }
   }
 
-  // 锁下肢前两关节（knee=q[0], leg=q[1]）到当前滤波值，只留 waist_pitch/waist_yaw 随动
+  // 锁下肢前两关节（knee=q[0], leg=q[1]）到当前滤波值，只留 waist_pitch/waist_yaw 随动。
+  // reset_joint_to_default:=false 时胸部增量关闭，solve 会冻结 q0-q2；若此处再用
+  // 实时滤波值锁 q0/q1，会和冻结快照冲突（快照常在全零初值上捕获），SNOPT 无解、手臂失控。
+  // 胸部冻结生效时必须把 lock 钉在同一组 q0/q1 上。
   if (lockKneeLegEnabled_.load()) {
-    if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ && drakeJointStateSize_ == 18) {
+    Eigen::Vector3d freezeAnchor;
+    if (copyChestPositionFreezeAnchor(freezeAnchor)) {
+      oneStageIkEndEffectorPtr_->setKneeLegLock(freezeAnchor(0), freezeAnchor(1));
+    } else if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ && drakeJointStateSize_ == 18) {
       oneStageIkEndEffectorPtr_->setKneeLegLock(filterJointDataForDrakeFK_(0), filterJointDataForDrakeFK_(1));
     }
   } else {

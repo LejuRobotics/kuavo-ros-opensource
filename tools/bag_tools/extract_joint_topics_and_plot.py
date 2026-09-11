@@ -4,7 +4,7 @@
 Quest3 遥操延迟诊断 (离线, 单一入口)。
 
 不再依赖在线 latency_monitor: 从 rosbag 读取各遥操方式的延迟话题,
-再对关节波形做互相关, 汇总成一份四段 + 端到端报告。
+再对关节波形做最小二乘时移估计 (互相关作对照), 汇总成一份四段 + 端到端报告。
 
 Quest3 四条链路请用 --preset:
   q3-abs-humanoid  Quest3+绝对+人形
@@ -24,7 +24,7 @@ Pico 绝对式:
     1. VR 数据处理
     层间 VR→IK 通信
     2. IK 解算
-  后半段 (关节角互相关, delay>0 表示下游滞后上游):
+  后半段 (关节角最小二乘, delay>0 表示下游滞后上游):
     3. 控制器  /joint_cmd 滞后 IK轨迹
     4. 电机+反馈  传感器滞后 /joint_cmd
   端到端:
@@ -151,7 +151,7 @@ FRONT_STAGE_TOPICS = {
 
 CTRL_STOPWATCH_TOPIC = "/vr_incremental/wbc_processing_latency_ms"
 
-# 互相关顶到 ±max_lag 附近视为搜索失败; 与最小二乘相差过大时改用最小二乘.
+# 最小二乘顶到 ±max_lag 附近视为搜索失败, 回退互相关; 两者都顶边界则不进总平均.
 LAG_BOUND_FRAC = 0.95
 LAG_DISAGREE_SEC = 0.15
 
@@ -516,6 +516,52 @@ def _print_stopwatch_line(label: str, topic: str, stats: dict) -> Optional[float
     return float(st["avg"])
 
 
+def _joint_who(entry: dict) -> str:
+    return f"#{entry['joint']} {entry['side']}"
+
+
+def summarize_joint_stage(all_delays: List[dict], key: str) -> Optional[dict]:
+    """跨关节延迟统计: 均值/中位/标准差/方差, 以及最小、最大各是哪个关节。"""
+    rows = [d for d in all_delays if np.isfinite(d.get(key, float("nan")))]
+    if not rows:
+        return None
+    vals = np.asarray([d[key] for d in rows], dtype=float)
+    i_min = int(np.argmin(vals))
+    i_max = int(np.argmax(vals))
+    n = int(vals.size)
+    std = float(np.std(vals, ddof=1)) if n > 1 else 0.0
+    var = float(np.var(vals, ddof=1)) if n > 1 else 0.0
+    return {
+        "n": n,
+        "mean": float(np.mean(vals)),
+        "median": float(np.median(vals)),
+        "std": std,
+        "var": var,
+        "min": float(vals[i_min]),
+        "min_joint": int(rows[i_min]["joint"]),
+        "min_side": str(rows[i_min]["side"]),
+        "min_who": _joint_who(rows[i_min]),
+        "max": float(vals[i_max]),
+        "max_joint": int(rows[i_max]["joint"]),
+        "max_side": str(rows[i_max]["side"]),
+        "max_who": _joint_who(rows[i_max]),
+    }
+
+
+def _print_joint_stage_stats(label: str, st: Optional[dict], indent: str = "  ") -> None:
+    if st is None:
+        print(f"{indent}{label:28s}  无有效样本")
+        return
+    print(
+        f"{indent}{label:28s}  均值={st['mean']:+7.2f} ms  "
+        f"中位={st['median']:+7.2f}  标准差={st['std']:.2f}  方差={st['var']:.2f}  n={st['n']}"
+    )
+    print(
+        f"{indent}{'':28s}  最小={st['min']:+7.2f} ms  {st['min_who']}"
+        f"    最大={st['max']:+7.2f} ms  {st['max_who']}"
+    )
+
+
 def build_and_print_report(
     mode: str,
     link_label: Optional[str],
@@ -534,7 +580,7 @@ def build_and_print_report(
     if link_label:
         print(f"  链路: {link_label}")
     print(f"  模式: {mode}    IK轨迹: {topic_arm_traj}")
-    print("  前半段=bag 延迟话题均值; 后半段=下游滞后上游 (全臂关节互相关均值)")
+    print("  前半段=bag 延迟话题均值; 后半段=下游滞后上游 (全臂关节最小二乘均值)")
     print("-" * 88)
     print("  【前半段】")
     for key, topic, label in front_spec:
@@ -547,23 +593,18 @@ def build_and_print_report(
     traj_sens = None
     filt_ms = None
     n_j = len(all_delays)
-
-    def _stage_mean(key):
-        vals = [d[key] for d in all_delays if np.isfinite(d.get(key, float("nan")))]
-        if not vals:
-            return None, 0
-        return float(np.mean(vals)), len(vals)
+    ctrl_st = summarize_joint_stage(all_delays, "traj_cmd_delay")
+    motor_st = summarize_joint_stage(all_delays, "cmd_sens_delay")
+    traj_sens_st = summarize_joint_stage(all_delays, "traj_sens_delay")
+    filt_st = summarize_joint_stage(all_delays, "traj_filtered_delay")
 
     if n_j:
-        ctrl_xcorr, n_ctrl = _stage_mean("traj_cmd_delay")
-        motor_xcorr, n_motor = _stage_mean("cmd_sens_delay")
-        traj_sens, n_ts = _stage_mean("traj_sens_delay")
-        filt_ms, n_filt = _stage_mean("traj_filtered_delay")
-        if ctrl_xcorr is not None:
-            print(
-                f"  {'3.控制器 /joint_cmd滞后IK':28s}  {ctrl_xcorr:+8.2f} ms"
-                f"  (互相关, {n_ctrl}/{n_j}关节)"
-            )
+        ctrl_xcorr = None if ctrl_st is None else ctrl_st["mean"]
+        motor_xcorr = None if motor_st is None else motor_st["mean"]
+        traj_sens = None if traj_sens_st is None else traj_sens_st["mean"]
+        filt_ms = None if filt_st is None else filt_st["mean"]
+        if ctrl_st is not None:
+            _print_joint_stage_stats("3.控制器 /joint_cmd滞后IK", ctrl_st)
         else:
             print("  3.控制器 /joint_cmd滞后IK       缺失  (无可靠关节)")
         wbc = _avg_or_none(stats, CTRL_STOPWATCH_TOPIC)
@@ -572,20 +613,14 @@ def build_and_print_report(
                 f"  {'   对照 控制器 stopwatch':28s}  {wbc:8.2f} ms"
                 f"  ({CTRL_STOPWATCH_TOPIC})"
             )
-        if motor_xcorr is not None:
-            print(
-                f"  {'4.电机+反馈 传感器滞后cmd':28s}  {motor_xcorr:+8.2f} ms"
-                f"  (互相关, {n_motor}/{n_j}关节)"
-            )
+        if motor_st is not None:
+            _print_joint_stage_stats("4.电机+反馈 传感器滞后cmd", motor_st)
         else:
             print("  4.电机+反馈                     缺失  (无可靠关节)")
-        if mode == "incremental" and filt_ms is not None:
-            print(
-                f"  {'   对照 控制器滤波相位':28s}  {filt_ms:+8.2f} ms"
-                f"  (filtered 滞后 traj, {n_filt}/{n_j}关节)"
-            )
+        if mode == "incremental" and filt_st is not None:
+            _print_joint_stage_stats("   对照 控制器滤波相位", filt_st)
     else:
-        print("  3.控制器 / 4.电机+反馈           缺失  (关节话题不足, 无法互相关)")
+        print("  3.控制器 / 4.电机+反馈           缺失  (关节话题不足, 无法估延迟)")
 
     print("-" * 88)
     print("  【端到端】")
@@ -615,11 +650,8 @@ def build_and_print_report(
     else:
         front_sum = None
 
-    if traj_sens is not None:
-        print(
-            f"  {'IK输出→传感器 (不含前半段)':28s}  {traj_sens:+8.2f} ms"
-            f"  (互相关, 传感器滞后 IK轨迹)"
-        )
+    if traj_sens_st is not None:
+        _print_joint_stage_stats("IK输出→传感器 (不含前半段)", traj_sens_st)
 
     for topic, label in E2E_STOPWATCH_TOPICS:
         if topic in stats:
@@ -657,6 +689,10 @@ def build_and_print_report(
         "e2e_four_stage_ms": e2e_sum,
         "e2e_front_ms": front_sum,
         "n_joints": n_j,
+        "controller_stats": ctrl_st,
+        "motor_stats": motor_st,
+        "traj_sens_stats": traj_sens_st,
+        "filter_stats": filt_st if mode == "incremental" else None,
     }
 
 
@@ -669,23 +705,40 @@ def save_latency_report_csv(report: dict, stats: dict, all_delays: List[dict],
         w.writerow(["meta", "link", "", report.get("link") or ""])
         w.writerow(["meta", "mode", "", report.get("mode") or ""])
         w.writerow(["meta", "traj_topic", "", report.get("traj_topic") or ""])
-        w.writerow(["meta", "n_joints", report.get("n_joints"), "互相关关节数"])
+        w.writerow(["meta", "n_joints", report.get("n_joints"), "估延迟关节数"])
         rows = [
             ("front", "1.VR数据处理", report.get("vr_ms"), "Float64"),
             ("front", "层间骨骼话题通信", report.get("bone_hop_ms"), "Pico /leju_pico_bone_poses"),
             ("front", "Pico末端指令处理", report.get("eef_ms"), "骨骼回调→/mm/two_arm_hand_pose_cmd"),
             ("front", "层间VR→IK通信", report.get("hop_ms"), "Float64"),
             ("front", "2.IK解算", report.get("ik_ms"), "Float64"),
-            ("back", "3.控制器 cmd滞后traj", report.get("controller_xcorr_ms"), "互相关 下游滞后"),
+            ("back", "3.控制器 cmd滞后traj", report.get("controller_xcorr_ms"), "最小二乘 下游滞后"),
             ("back", "控制器 stopwatch", report.get("controller_stopwatch_ms"), "Float64"),
-            ("back", "4.电机+反馈 sens滞后cmd", report.get("motor_xcorr_ms"), "互相关 下游滞后"),
+            ("back", "4.电机+反馈 sens滞后cmd", report.get("motor_xcorr_ms"), "最小二乘 下游滞后"),
             ("e2e", "链路相加", report.get("e2e_four_stage_ms"), "前半段+控制+电机"),
             ("e2e", "软件前半段", report.get("e2e_front_ms"), "VR+中间节点+IK"),
-            ("e2e", "IK输出→传感器", report.get("traj_sens_xcorr_ms"), "互相关"),
+            ("e2e", "IK输出→传感器", report.get("traj_sens_xcorr_ms"), "最小二乘"),
         ]
         for section, metric, value, note in rows:
             val = "" if value is None else f"{value:.4f}"
             w.writerow([section, metric, val, note])
+        def _write_stage_stats(section: str, title: str, st: Optional[dict]) -> None:
+            if not st:
+                return
+            w.writerow([section, f"{title} 均值", f"{st['mean']:.4f}", f"n={st['n']}"])
+            w.writerow([section, f"{title} 中位", f"{st['median']:.4f}", ""])
+            w.writerow([section, f"{title} 标准差", f"{st['std']:.4f}", "样本标准差 ddof=1"])
+            w.writerow([section, f"{title} 方差", f"{st['var']:.4f}", "样本方差 ddof=1"])
+            w.writerow([section, f"{title} 最小", f"{st['min']:.4f}", st["min_who"]])
+            w.writerow([section, f"{title} 最大", f"{st['max']:.4f}", st["max_who"]])
+
+        w.writerow([])
+        w.writerow(["# 跨关节统计 (ms)"])
+        _write_stage_stats("back_stats", "3.控制器 cmd滞后traj", report.get("controller_stats"))
+        _write_stage_stats("back_stats", "4.电机+反馈 sens滞后cmd", report.get("motor_stats"))
+        _write_stage_stats("e2e_stats", "IK输出→传感器", report.get("traj_sens_stats"))
+        if report.get("filter_stats"):
+            _write_stage_stats("back_stats", "控制器滤波相位", report.get("filter_stats"))
         w.writerow([])
         w.writerow(["# stopwatch topics in bag"])
         w.writerow(["topic", "n", "avg_ms", "std_ms", "min_ms", "max_ms"])
@@ -694,7 +747,7 @@ def save_latency_report_csv(report: dict, stats: dict, all_delays: List[dict],
                         f"{st['min']:.4f}", f"{st['max']:.4f}"])
         if all_delays:
             w.writerow([])
-            w.writerow(["# per-joint cross-correlation (ms)"])
+            w.writerow(["# per-joint delay (ms)"])
             w.writerow(["joint", "side", "traj_cmd", "cmd_sens", "traj_sens",
                         "traj_filtered"])
             for d in all_delays:
@@ -747,7 +800,7 @@ def plot_stage_report(report: dict, out_path: str) -> None:
 
 
 # ==============================================================================
-# 延迟估计 (互相关法)
+# 延迟估计 (最小二乘为主, 互相关作对照)
 # ==============================================================================
 def _resample_uniform_abs(times: np.ndarray, values: np.ndarray, dt: float,
                           t_start: float, t_end: float
@@ -849,7 +902,7 @@ def estimate_delay_cross_corr(a: TopicData, b: TopicData, max_lag: float = 2.0
 
 def estimate_delay_ls(a: TopicData, b: TopicData, max_lag: float = 2.0
                       ) -> Tuple[float, float]:
-    """用最小二乘拟合估计 a 相对 b 的延迟 (基于绝对时间重叠区间, 作为互相关法的交叉验证)。
+    """用最小二乘拟合估计 a 相对 b 的延迟 (基于绝对时间重叠区间)。
 
     模型: a(t) ≈ b(t - delay)  =>  delay>0 表示 a 滞后 b
     通过在 [-max_lag, max_lag] 范围内扫描, 找最小化 ||a(t) - b(t-delay)|| 的 delay。
@@ -911,7 +964,7 @@ def estimate_downstream_lag(
 ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
     """下游相对上游的滞后。delay>0 表示 downstream 比 upstream 晚发生。
 
-    互相关与最小二乘均按 (downstream, upstream) 估计, 与四段报告「下游滞后」一致。
+    最小二乘与互相关均按 (downstream, upstream) 估计, 与四段报告「下游滞后」一致。
     返回 ((xcorr_sec, r), (ls_sec, r2)).
     """
     xcorr = estimate_delay_cross_corr(downstream, upstream, max_lag)
@@ -928,9 +981,9 @@ def select_reliable_lag(
     ls: Tuple[float, float],
     max_lag: float,
 ) -> Tuple[Tuple[float, float], bool, str]:
-    """从互相关 / 最小二乘中选出用于总报告的延迟.
+    """选用最小二乘延迟写入总报告, 互相关仅作对照与回退.
 
-    互相关顶到搜索边界、或与最小二乘相差过大时改用最小二乘, 避免单关节污染总平均.
+    最小二乘顶到搜索边界且互相关未顶边界时改用互相关.
     两者都顶到边界则不参与总平均.
     返回 ((delay_sec, r), ok, note).
     """
@@ -939,12 +992,12 @@ def select_reliable_lag(
     x_bound = _at_search_bound(xd, max_lag)
     l_bound = _at_search_bound(ld, max_lag)
     if x_bound and l_bound:
-        return (ld, lr), False, "互相关与最小二乘均顶到搜索边界, 不参与总平均"
-    if x_bound and not l_bound:
-        return (ld, lr), True, "互相关顶到搜索边界, 改用最小二乘"
+        return (ld, lr), False, "最小二乘与互相关均顶到搜索边界, 不参与总平均"
+    if l_bound and not x_bound:
+        return (xd, xr), True, "最小二乘顶到搜索边界, 改用互相关"
     if (not l_bound) and abs(float(xd) - float(ld)) > LAG_DISAGREE_SEC:
-        return (ld, lr), True, "互相关与最小二乘相差过大, 改用最小二乘"
-    return (xd, xr), True, ""
+        return (ld, lr), True, "与互相关相差过大, 仍用最小二乘"
+    return (ld, lr), True, ""
 
 
 # ==============================================================================
@@ -1120,7 +1173,7 @@ def save_csv(traj: TopicData, cmd: TopicData, sens: TopicData, out_path: str) ->
 # ==============================================================================
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="从 rosbag 做 Quest3 延迟诊断: 前半段读延迟话题, 后半段关节互相关, "
+        description="从 rosbag 做 Quest3 延迟诊断: 前半段读延迟话题, 后半段关节最小二乘, "
                     "输出四段+端到端报告。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
@@ -1266,8 +1319,8 @@ def main() -> int:
             xcorr, ls = estimate_downstream_lag(traj, cmd, args.max_lag)
             delay_traj_cmd, traj_cmd_ok, traj_cmd_note = select_reliable_lag(
                 xcorr, ls, args.max_lag)
-            print(f"  控制器 cmd滞后traj 互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f} | "
-                  f"最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f}")
+            print(f"  控制器 cmd滞后traj 最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f} | "
+                  f"互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f}")
             if traj_cmd_note:
                 print(f"    选用 {delay_traj_cmd[0]*1000:+.1f}ms  ({traj_cmd_note})")
 
@@ -1275,8 +1328,8 @@ def main() -> int:
             xcorr, ls = estimate_downstream_lag(cmd, sens, args.max_lag)
             delay_cmd_sens, cmd_sens_ok, cmd_sens_note = select_reliable_lag(
                 xcorr, ls, args.max_lag)
-            print(f"  电机   sens滞后cmd 互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f} | "
-                  f"最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f}")
+            print(f"  电机   sens滞后cmd 最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f} | "
+                  f"互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f}")
             if cmd_sens_note:
                 print(f"    选用 {delay_cmd_sens[0]*1000:+.1f}ms  ({cmd_sens_note})")
 
@@ -1284,7 +1337,8 @@ def main() -> int:
             xcorr, ls = estimate_downstream_lag(traj, sens, args.max_lag)
             delay_traj_sens, traj_sens_ok, traj_sens_note = select_reliable_lag(
                 xcorr, ls, args.max_lag)
-            print(f"  总表观 sens滞后traj 互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f}")
+            print(f"  总表观 sens滞后traj 最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f} | "
+                  f"互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f}")
             if traj_sens_note:
                 print(f"    选用 {delay_traj_sens[0]*1000:+.1f}ms  ({traj_sens_note})")
 
@@ -1294,8 +1348,8 @@ def main() -> int:
             xcorr, ls = estimate_downstream_lag(traj, filtered, args.max_lag)
             delay_traj_filtered, filt_ok, filt_note = select_reliable_lag(
                 xcorr, ls, args.max_lag)
-            print(f"  滤波   filtered滞后traj 互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f} | "
-                  f"最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f}")
+            print(f"  滤波   filtered滞后traj 最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f} | "
+                  f"互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f}")
             if filt_note:
                 print(f"    选用 {delay_traj_filtered[0]*1000:+.1f}ms  ({filt_note})")
 
@@ -1336,7 +1390,7 @@ def main() -> int:
 
     # ---- 汇总 ----
     if len(all_delays) == 0:
-        print("\n[WARN] 无有效关节互相关数据 (控制器/电机层)")
+        print("\n[WARN] 无有效关节延迟数据 (控制器/电机层)")
     else:
         print("\n" + "=" * 70)
         print("                      全关节延迟汇总")
@@ -1353,57 +1407,30 @@ def main() -> int:
                   f"{_fmt_ms(d['traj_filtered_delay'])}")
         print("-" * 70)
 
-        def _mean_ok(key):
-            vals = [d[key] for d in all_delays if np.isfinite(d[key])]
-            if not vals:
-                return float("nan"), float("nan"), 0
-            arr = np.asarray(vals, dtype=float)
-            return float(np.mean(arr)), float(np.std(arr)), len(vals)
-
-        mean_tc, std_tc, n_tc = _mean_ok("traj_cmd_delay")
-        mean_cs, std_cs, n_cs = _mean_ok("cmd_sens_delay")
-        mean_ts, std_ts, n_ts = _mean_ok("traj_sens_delay")
-        mean_tf, std_tf, n_tf = _mean_ok("traj_filtered_delay")
-
-        def _fmt_avg(mean, std, n):
-            if n == 0 or not np.isfinite(mean):
-                return "      无有效样本"
-            return f"{mean:+9.1f}±{std:.1f} (n={n})"
-
-        print(f"{'平均':>6}        {_fmt_avg(mean_tc, std_tc, n_tc):<22}  "
-              f"{_fmt_avg(mean_cs, std_cs, n_cs):<22}  "
-              f"{_fmt_avg(mean_ts, std_ts, n_ts):<22}  "
-              f"{_fmt_avg(mean_tf, std_tf, n_tf)}")
+        print("=" * 70)
+        print("跨关节统计 (样本标准差/方差 ddof=1)")
+        _print_joint_stage_stats("cmd滞后traj", summarize_joint_stage(all_delays, "traj_cmd_delay"), indent="")
+        _print_joint_stage_stats("sens滞后cmd", summarize_joint_stage(all_delays, "cmd_sens_delay"), indent="")
+        _print_joint_stage_stats("sens滞后traj", summarize_joint_stage(all_delays, "traj_sens_delay"), indent="")
+        filt_all = summarize_joint_stage(all_delays, "traj_filtered_delay")
+        if filt_all is not None and filt_all["n"] > 0 and np.isfinite(filt_all["mean"]) and abs(filt_all["mean"]) > 1e-9:
+            _print_joint_stage_stats("filt滞后traj", filt_all, indent="")
         print("=" * 70)
         n_skip = sum(1 for d in all_delays if not d.get("traj_cmd_ok", True)
                      or not d.get("cmd_sens_ok", True)
                      or not d.get("traj_sens_ok", True))
         if n_skip:
-            print("[INFO] 部分关节互相关顶到搜索边界或与最小二乘严重不一致, 已排除出总平均")
+            print("[INFO] 部分关节最小二乘顶到搜索边界, 已排除出总平均")
 
         left_delays = [d for d in all_delays if d["joint"] <= single_arm]
         right_delays = [d for d in all_delays if d["joint"] > single_arm]
         for side_name, side_data in [("左臂", left_delays), ("右臂", right_delays)]:
-            def _side_mean(key):
-                vals = [d[key] for d in side_data if np.isfinite(d[key])]
-                if len(vals) < 1:
-                    return None
-                arr = np.asarray(vals, dtype=float)
-                return float(np.mean(arr)), float(np.std(arr)), len(vals)
-
-            tc = _side_mean("traj_cmd_delay")
-            cs = _side_mean("cmd_sens_delay")
-            ts = _side_mean("traj_sens_delay")
-            if tc is None and cs is None:
+            if not side_data:
                 continue
-            parts = []
-            if tc:
-                parts.append(f"cmd滞后traj: {tc[0]:+.1f}±{tc[1]:.1f}ms (n={tc[2]})")
-            if cs:
-                parts.append(f"sens滞后cmd: {cs[0]:+.1f}±{cs[1]:.1f}ms (n={cs[2]})")
-            if ts:
-                parts.append(f"sens滞后traj: {ts[0]:+.1f}±{ts[1]:.1f}ms (n={ts[2]})")
-            print(f"{side_name}   " + "  ".join(parts))
+            print(f"{side_name}")
+            _print_joint_stage_stats("  cmd滞后traj", summarize_joint_stage(side_data, "traj_cmd_delay"), indent="")
+            _print_joint_stage_stats("  sens滞后cmd", summarize_joint_stage(side_data, "cmd_sens_delay"), indent="")
+            _print_joint_stage_stats("  sens滞后traj", summarize_joint_stage(side_data, "traj_sens_delay"), indent="")
         print("=" * 70)
         print()
 
