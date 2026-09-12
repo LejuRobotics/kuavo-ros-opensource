@@ -72,7 +72,7 @@
     "vr_ruiwo_kd": [20, 10, 30, 10, 5, 5, 5, 
                     20, 10, 30, 10, 5, 5, 5, 
                     4, 3],
-    "EndEffectorType": ["qiangnao", "qiangnao"],
+    "EndEffectorType": ["qibeng", "qibeng"],
     "min_joint_position_limits":[
         -5.5, -161, 
         -25, -190,

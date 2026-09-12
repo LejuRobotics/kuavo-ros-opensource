@@ -196,7 +196,7 @@ protected:
   // ruckig 轨迹生成相关
   // cmdPose
   void calcRuckigTrajWithCmdPose(double initTime, const vector_t &targetBasePose, double desiredTime = 0.0);
-  void generatePoseTargetWithRuckig(double initTime, double finalTime, double dt);
+  void generatePoseTargetWithRuckig(double initTime, double finalTime, double dt, const vector_t& initState);
   void resetCmdPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
   // cmdVel
   void calcRuckigTrajWithCmdVel(double initTime, const vector_t &targetBaseVel);

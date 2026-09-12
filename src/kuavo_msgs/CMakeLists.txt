@@ -240,7 +240,7 @@ add_service_files(
 
   # Battery service
   GetBatteryInfo.srv
-
+  RelaySelectChannel.srv
 
   # Lb obs update mode
   changeLbMpcObsUpdateModeSrv.srv

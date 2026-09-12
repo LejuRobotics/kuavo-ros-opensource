@@ -1718,7 +1718,7 @@ namespace mobile_manipulator {
     targetCmdPoseReachTimePub_.publish(time_msg); // 发布到达时间
   }
 
-  void MobileManipulatorReferenceManager::generatePoseTargetWithRuckig(double initTime, double finalTime, double dt)
+  void MobileManipulatorReferenceManager::generatePoseTargetWithRuckig(double initTime, double finalTime, double dt, const vector_t& initState)
   {
     // 使用 Ruckig 库生成平滑的底盘位姿轨迹
     scalar_array_t timeTraj;
@@ -1761,13 +1761,44 @@ namespace mobile_manipulator {
       targetState.head(baseDim_) = currentTargetPose; // [x, y, yaw]
       targetInput.head(baseDim_) = currentTargetVel;  // [vx, vy, wz]
 
-      targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
-      targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
+      //   未使能跟踪的关节通道: 参考段恒等于实测状态(initState), 输入恒 0。
+      //   停用期间若沿用 planner 残值, 参考会停在旧目标上(即观测到的
+      //   currentMpcTarget/state 与 policy state 的 data[3:5] 差异); 一旦使能跟踪,
+      //   MPC 会从"实测"去追"旧参考", 表现为预测先发散后收敛的抖动。
+      //   未使能段本就不参与 BaseStateInputCost(对应 enable 标志为 false), 此处只影响
+      //   参考的准备与发布, 不改变 MPC 行为; 使能瞬间参考与实测连续, 消除该抖动。
+      if(getEnableLegJointTrack())
+      {
+        targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
+        targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
+      }
+      else
+      {
+        targetState.segment(baseDim_, 4) = initState.segment(baseDim_, 4);
+        targetInput.segment(baseDim_, 4).setZero();
+      }
 
-      targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
-      targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
-      targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
-      targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
+      if(getEnableArmJointTrackForArm(0))
+      {
+        targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
+        targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
+      }
+      else
+      {
+        targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = initState.tail(info_.armDim - 4).head(singleArmJointDim_);
+        targetInput.tail(info_.armDim - 4).head(singleArmJointDim_).setZero();
+      }
+
+      if(getEnableArmJointTrackForArm(1))
+      {
+        targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
+        targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
+      }
+      else
+      {
+        targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = initState.tail(info_.armDim - 4).tail(singleArmJointDim_);
+        targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_).setZero();
+      }
 
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
@@ -1931,13 +1962,39 @@ namespace mobile_manipulator {
       targetInput.head(2) = velWorld.head(3);  // [vx, vy, vyaw]
       targetInput(2) = currentTargetVel[2];
 
-      targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
-      targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
+      // [Plan B] 未使能跟踪的关节通道: 参考段恒等于实测(initState), 输入 0 (同 generatePoseTargetWithRuckig)
+      if(getEnableLegJointTrack())
+      {
+        targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
+        targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
+      }
+      else
+      {
+        targetState.segment(baseDim_, 4) = initState.segment(baseDim_, 4);
+        targetInput.segment(baseDim_, 4).setZero();
+      }
 
-      targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
-      targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
-      targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
-      targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
+      if(getEnableArmJointTrackForArm(0))
+      {
+        targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
+        targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
+      }
+      else
+      {
+        targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = initState.tail(info_.armDim - 4).head(singleArmJointDim_);
+        targetInput.tail(info_.armDim - 4).head(singleArmJointDim_).setZero();
+      }
+
+      if(getEnableArmJointTrackForArm(1))
+      {
+        targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
+        targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
+      }
+      else
+      {
+        targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = initState.tail(info_.armDim - 4).tail(singleArmJointDim_);
+        targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_).setZero();
+      }
 
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
@@ -2032,13 +2089,39 @@ namespace mobile_manipulator {
       targetState.head(3) = currentTargetPose; // [x, y, yaw]
       targetInput.head(3) = currentTargetVel;  // [vx, vy, wz]
 
-      targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
-      targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
+      // [Plan B] 未使能跟踪的关节通道: 参考段恒等于实测(initstate), 输入 0 (同 generatePoseTargetWithRuckig)
+      if(getEnableLegJointTrack())
+      {
+        targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
+        targetInput.segment(baseDim_, 4) = currentTargetVel_legJoint;
+      }
+      else
+      {
+        targetState.segment(baseDim_, 4) = initstate.segment(baseDim_, 4);
+        targetInput.segment(baseDim_, 4).setZero();
+      }
 
-      targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
-      targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
-      targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
-      targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
+      if(getEnableArmJointTrackForArm(0))
+      {
+        targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetPose_leftArm;  // 上肢左臂7自由度
+        targetInput.tail(info_.armDim - 4).head(singleArmJointDim_) = currentTargetVel_leftArm;
+      }
+      else
+      {
+        targetState.tail(info_.armDim - 4).head(singleArmJointDim_) = initstate.tail(info_.armDim - 4).head(singleArmJointDim_);
+        targetInput.tail(info_.armDim - 4).head(singleArmJointDim_).setZero();
+      }
+
+      if(getEnableArmJointTrackForArm(1))
+      {
+        targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetPose_rightArm;  // 上肢右臂7自由度
+        targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_) = currentTargetVel_rightArm;
+      }
+      else
+      {
+        targetState.tail(info_.armDim - 4).tail(singleArmJointDim_) = initstate.tail(info_.armDim - 4).tail(singleArmJointDim_);
+        targetInput.tail(info_.armDim - 4).tail(singleArmJointDim_).setZero();
+      }
 
       timeTraj.push_back(currentTime);
       stateTraj.push_back(targetState);
@@ -3834,7 +3917,7 @@ namespace mobile_manipulator {
     }
     else    // 默认跟踪位置
     {
-      generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_);
+      generatePoseTargetWithRuckig(initTime, finalTime, ruckigDt_, initState);
     }
   }
 
@@ -3940,6 +4023,15 @@ namespace mobile_manipulator {
 
           if(isCmdArmJointUpdated_[armIdx])
           {
+            // 关节空间首点对齐到实测: 收到新关节命令并重建轨迹的瞬间, 把
+            // armJoint 规划器初值锚定到实际关节(initState), 速度/加速度清零。保证
+            // stateInputTargetTrajectories_ 的上肢关节段在 initTime 处采样点 == 实测,
+            // 避免 "使能跟踪第一帧参考≠实际" 造成 MPC 先发散后收敛的抖动。
+            // 仅关节空间, 不影响笛卡尔参考; 仅在新命令时锚定, 不覆盖轨迹推进。
+            armJoint_prevTargetPose_[armIdx] = initState.tail(info_.armDim - 4).segment(armIdx * singleArmJointDim_, singleArmJointDim_);
+            armJoint_prevTargetVel_[armIdx].setZero(singleArmJointDim_);
+            armJoint_prevTargetAcc_[armIdx].setZero(singleArmJointDim_);
+
             calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
             isCmdArmJointUpdated_[armIdx] = false;
           }
@@ -4137,6 +4229,16 @@ namespace mobile_manipulator {
       lbLegJoint_mtx_.lock();
       legJointTarget = lb_leg_traj_;
       lbLegJoint_mtx_.unlock();
+
+      // 关节空间首点对齐到实测: 开启下肢跟踪的瞬间, 把下肢规划器初值锚定到
+      // 实际关节位置(initState), 速度/加速度清零。保证 stateInputTargetTrajectories_ 的
+      // 下肢关节段在 initTime 处的采样点 == policy 实测关节, 消除 "使能跟踪第一帧
+      // 参考(old 残留)≠实际" 造成 MPC 先发散后收敛的抖动。仅对齐关节空间(state 的
+      // 下肢段), 不影响底盘/躯干/末端的笛卡尔参考。
+      // 注意: 这里同时被 resetAllMpcTrajAndTarget 首次运行 + /lb_leg_traj 触发, 均安全。
+      legJoint_prevTargetPose_ = initState.segment(baseDim_, 4);
+      legJoint_prevTargetVel_.setZero(4);
+      legJoint_prevTargetAcc_.setZero(4);
 
       calcRuckigTrajWithLegJoint(initTime, legJointTarget, cmdLegJointDesiredTime_);
 
