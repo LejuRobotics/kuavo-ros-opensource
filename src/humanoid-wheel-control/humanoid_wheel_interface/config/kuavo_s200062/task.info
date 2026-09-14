@@ -910,8 +910,8 @@ shoulder_adapt_tighten
 
   ;; α 变化限速: 每周期最大变化量, 统一爬升/回落速度 (线性斜坡)
   ;; 上升(锁肩)用小值=爬升慢, 下降(释放)用大值=回落快
-  relaxation_alpha_step_up    0.08
-  relaxation_alpha_step_down  0.4
+  relaxation_alpha_step_up    0.005
+  relaxation_alpha_step_down  0.05
 
   ;; 参与收紧的肩关节 (与 weight 一一对应)
   jointNames
@@ -1007,7 +1007,7 @@ selfCollision
   }
 
   ; minimum distance allowed between the pairs
-  minimumDistance  0.01
+  minimumDistance  0.02
 
   ; relaxed log barrier mu
   mu      1e-3
