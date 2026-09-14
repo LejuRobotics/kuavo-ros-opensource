@@ -968,27 +968,28 @@ selfCollision
     [4]  "waist_yaw_link, zarm_l5_link"
     [5]  "waist_yaw_link, zarm_r5_link"
     [6]  "waist_yaw_link, zarm_l7_link"
-    [7]  "zhead_1_link, zarm_l2_link"
-    [8]  "zhead_1_link, zarm_r2_link"
-    [9]  "zhead_1_link, zarm_l4_link"
-    [10] "zhead_1_link, zarm_r4_link"
-    [11] "zhead_1_link, zarm_l7_link"
-    [12] "zhead_1_link, zarm_r7_link"
-    [13] "zarm_l2_link, zarm_r2_link"
-    [14] "zarm_l2_link, zarm_r4_link"
-    [15] "zarm_l2_link, zarm_r7_link"
-    [16] "zarm_l4_link, zarm_r2_link"
-    [17] "zarm_l4_link, zarm_r4_link"
-    [18] "zarm_l4_link, zarm_r7_link"
-    [19] "zarm_l7_link, zarm_r2_link"
-    [20] "zarm_l7_link, zarm_r4_link"
-    [21] "zarm_l7_link, zarm_r7_link"
-    [22] "base_link, zarm_l7_link"
-    [23] "base_link, zarm_r7_link"
+    [7]  "waist_yaw_link, zarm_r7_link"
+    [8]  "zhead_1_link, zarm_l2_link"
+    [9]  "zhead_1_link, zarm_r2_link"
+    [10] "zhead_1_link, zarm_l4_link"
+    [11] "zhead_1_link, zarm_r4_link"
+    [12] "zhead_1_link, zarm_l7_link"
+    [13] "zhead_1_link, zarm_r7_link"
+    [14] "zarm_l2_link, zarm_r2_link"
+    [15] "zarm_l2_link, zarm_r4_link"
+    [16] "zarm_l2_link, zarm_r7_link"
+    [17] "zarm_l4_link, zarm_r2_link"
+    [18] "zarm_l4_link, zarm_r4_link"
+    [19] "zarm_l4_link, zarm_r7_link"
+    [20] "zarm_l7_link, zarm_r2_link"
+    [21] "zarm_l7_link, zarm_r4_link"
+    [22] "zarm_l7_link, zarm_r7_link"
+    [23] "base_link, zarm_l7_link"
+    [24] "base_link, zarm_r7_link"
   }
 
   ; minimum distance allowed between the pairs
-  minimumDistance  0.02
+  minimumDistance  0.01
 
   ; relaxed log barrier mu
   mu      1e-3
