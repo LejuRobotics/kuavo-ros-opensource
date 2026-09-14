@@ -6,7 +6,9 @@ PROJECT_DIR=$(realpath "$SCRIPT_DIR/../../") # project: kuavo-ros-control/kuavo-
 CONFIG_DIR="$HOME/.config/lejuconfig"
 CANBUS_WIRING_TYPE_FILE="$CONFIG_DIR/CanbusWiringType.ini"
 HAND_PROTOCOL_TYPE_FILE="$CONFIG_DIR/HandProtocolType.ini"
-CANBUS_CONFIG_FILE="$CONFIG_DIR/canbus_device_cofig.yaml"
+CANBUS_CONFIG_FILE_CORRECT="$CONFIG_DIR/canbus_device_config.yaml"
+CANBUS_CONFIG_FILE_LEGACY="$CONFIG_DIR/canbus_device_cofig.yaml"
+CANBUS_CONFIG_FILE="$CANBUS_CONFIG_FILE_CORRECT"
 
 # Roban2-0
 ROBAN2_0_DUAL_SOURCE_CONFIG_FILE="$PROJECT_DIR/src/kuavo_assets/config/roban2-0_dual_canbus_cofig.yaml"
@@ -255,6 +257,21 @@ write_config_files() {
         cp "$config_file" "$CANBUS_CONFIG_FILE"
         echo_success "✓ CANBUS配置文件已保存到: $CANBUS_CONFIG_FILE"
         cat "$CANBUS_CONFIG_FILE"
+    fi
+}
+
+# 与运行时保持相同的配置文件优先级，只选择读写目标，不迁移文件。
+select_canbus_config_file() {
+    if [ -f "$CANBUS_CONFIG_FILE_CORRECT" ]; then
+        CANBUS_CONFIG_FILE="$CANBUS_CONFIG_FILE_CORRECT"
+        if [ -f "$CANBUS_CONFIG_FILE_LEGACY" ]; then
+            echo_warning "⚠️  检测到新旧两份 CANBUS 配置，将使用正确文件名: $CANBUS_CONFIG_FILE_CORRECT"
+        fi
+    elif [ -f "$CANBUS_CONFIG_FILE_LEGACY" ]; then
+        CANBUS_CONFIG_FILE="$CANBUS_CONFIG_FILE_LEGACY"
+        echo_warning "⚠️  使用历史错误文件名: $CANBUS_CONFIG_FILE_LEGACY"
+    else
+        CANBUS_CONFIG_FILE="$CANBUS_CONFIG_FILE_CORRECT"
     fi
 }
 
@@ -570,6 +587,8 @@ configure_kuavo() {
 
 # 主函数
 main() {
+    select_canbus_config_file
+
     echo_title "🔧 CANBUS 配置脚本"
     echo ""
 

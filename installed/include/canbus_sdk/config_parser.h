@@ -97,7 +97,11 @@ public:
 
     /**
      * @brief 获取默认配置文件路径
-     * @return 默认配置文件路径 $HOME/.config/lejuconfig/canbus_device_cofig.yaml
+     * @return 优先返回 $HOME/.config/lejuconfig/canbus_device_config.yaml；
+     *         正确名不存在而历史错误名 canbus_device_cofig.yaml 存在时，打印警告并返回旧路径；
+     *         两者都不存在时返回正确名路径
+     * @note 两份文件同时存在时使用正确名，并警告旧文件不会生效
+     * @note 仅做只读路径选择，不会复制、重命名或删除配置文件
      */
     static std::string getDefaultConfigFilePath();
 
