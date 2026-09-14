@@ -19,6 +19,17 @@ from kuavo_msgs.srv import eePoseReachError, eePoseReachErrorRequest
 from std_srvs.srv import SetBool, SetBoolRequest
 from std_msgs.msg import Bool
 
+# ---- 日志语义约定 ----
+# 成功 → ✅ 单行 loginfo；被拒（含软暂停窗口内的守卫拒绝）→ ⚠️ logwarn；
+# 服务异常（超时/调用失败）→ ❌ logerr。
+
+def _is_soft_pause_rejection(message: str) -> bool:
+    """软暂停守卫拒绝的消息特征（controller 侧约定：'Rejected' 前缀或含 'soft pause'）。"""
+    return message.startswith("Rejected") or "soft pause" in message
+
+def _log_rejected(what: str, message: str):
+    rospy.logwarn(f"⚠️ {what}被拒: {message}")
+
 def set_control_mode(target_mode: int) -> bool:
     """
     设置移动机械臂控制模式
@@ -44,10 +55,13 @@ def set_control_mode(target_mode: int) -> bool:
         req.control_mode = target_mode
         resp = client(req)
         if resp.result:
-            rospy.loginfo(f"✅ 已切换到模式 {target_mode}: {MODES[target_mode]}")
+            rospy.loginfo(f"✅ 控制模式 -> {target_mode}: {MODES[target_mode]}")
             return True
         else:
-            rospy.logerr(f"❌ 切换失败: {resp.message}")
+            if _is_soft_pause_rejection(resp.message):
+                _log_rejected(f"控制模式->{target_mode}", resp.message)
+            else:
+                rospy.logwarn(f"⚠️ 控制模式切换失败: {resp.message}")
             return False
     except rospy.ROSException as e:
         rospy.logerr(f"❌ 服务等待超时: {e}")
@@ -94,13 +108,13 @@ def set_arm_control_mode(control_mode: int) -> bool:
         resp = client(req)
         
         if resp.result:
-            rospy.loginfo(f"✅ 手臂控制模式设置成功")
-            rospy.loginfo(f"   模式: {control_mode} - {MODES[control_mode]}")
-            rospy.loginfo(f"   返回消息: {resp.message}")
-            rospy.loginfo(f"   当前模式值: {resp.mode}")
+            rospy.loginfo(f"✅ 手臂控制模式 -> {control_mode}: {MODES[control_mode]}")
             return True
         else:
-            rospy.logerr(f"❌ 手臂控制模式设置失败: {resp.message}")
+            if _is_soft_pause_rejection(resp.message):
+                _log_rejected(f"手臂控制模式->{control_mode}", resp.message)
+            else:
+                rospy.logwarn(f"⚠️ 手臂控制模式设置失败: {resp.message}")
             return False
             
     except rospy.ROSException as e:
@@ -418,15 +432,13 @@ def send_timed_multi_commands(timed_cmd_vec: list, is_sync: bool = False) -> tup
         resp = client(req)
         
         if resp.isSuccess:
-            rospy.loginfo(f"✅ 多指令执行成功")
-            rospy.loginfo(f"   实际时间: {resp.actualTime}s")
-            rospy.loginfo(f"   消息: {resp.message}")
-            rospy.loginfo(f"   同步模式: {'同步' if is_sync else '异步'}")
-            rospy.loginfo(f"   指令数量: {len(timed_cmd_vec)}")
+            rospy.loginfo(f"✅ 多指令执行成功: 实际 {resp.actualTime:.1f}s, {'同步' if is_sync else '异步'}, {len(timed_cmd_vec)} 条")
             return True, resp.actualTime, resp.message
         else:
-            rospy.logerr(f"❌ 多指令执行失败")
-            rospy.logerr(f"   消息: {resp.message}")
+            if _is_soft_pause_rejection(resp.message):
+                _log_rejected("多指令", resp.message)
+            else:
+                rospy.logwarn(f"⚠️ 多指令执行失败: {resp.message}")
             return False, resp.actualTime, resp.message
             
     except rospy.ROSException as e:
@@ -461,7 +473,10 @@ def reset_torso_to_initial():
                 rospy.logwarn(f"Invalid time estimate: {resp.message}")
                 return 0.0
         else:
-            rospy.logwarn("Torso reset request denied")
+            if _is_soft_pause_rejection(resp.message):
+                _log_rejected("躯干复位", resp.message)
+            else:
+                rospy.logwarn("⚠️ 躯干复位被拒")
             return 0.0
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")
@@ -610,11 +625,12 @@ def set_wheel_control_enable(enable: bool) -> bool:
         client = rospy.ServiceProxy('/enable_control', SetBool)
         resp = client(enable)
         if resp.success:
-            status = "enabled" if enable else "disabled"
-            rospy.loginfo(f"Enable control {status}: {resp.message}")
+            rospy.loginfo(f"✅ 控制使能 -> {'enabled' if enable else 'disabled'}")
             return True
         else:
-            rospy.logwarn(f"Failed: {resp.message}")
+            # 软暂停状态机拒绝（过渡窗口内 或 已处于目标态）是预期行为，不算调用失败；
+            # 真失败（服务异常）走下面 except 的 logerr
+            _log_rejected(f"控制使能->{'enabled' if enable else 'disabled'}", resp.message)
             return False
     except rospy.ServiceException as e:
         rospy.logerr(f"Service call failed: {e}")

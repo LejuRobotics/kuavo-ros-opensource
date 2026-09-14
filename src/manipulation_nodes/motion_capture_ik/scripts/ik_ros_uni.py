@@ -155,6 +155,18 @@ class IkRos:
         self.__frozen_left_hand_position = [0 for i in range(6)]
         self.__frozen_right_hand_position = [0 for i in range(6)]
         self.__robot_walking_status = False
+        # [4033] /robot_walking_status 在实机 launch 里没有发布者（发布方 arm_trajectory_bezier_process.py
+        # 未启动）。VR 遥操 AMP 踏步时拇指要内扣防打膝盖电机，改为直接从 RL 命令话题推断行走：
+        #   amp_wild_controller: /rl_controller/InputData/command_scalar_state  data[3] = 1 - cmdStance，>= 0.5 即行走
+        #   amp_controller     : /rl_controller/InputData/command               data[3] = cmdStance，  < 0.5 即行走
+        # （MPC 步态下的拇指内扣不在本 issue 范围：/humanoid_mpc_gait_time_name 是事件式、
+        #   带 start_time，需按 MPC 内部时间比对才准，后续单独处理。）
+        self.__amp_wild_walking = False
+        self.__amp_walking = False
+        self.__amp_wild_walk_recv = None
+        self.__amp_walk_recv = None
+        self.__rl_walk_fresh = rospy.Duration(0.5)         # RL 命令话题 ~100Hz，控制器活跃时不会陈旧
+        self.__amp_wild_walk_fresh = rospy.Duration(3.0)   # 控制器 amp_wild ⇄ mpc ⇄ amp_controller 切换 gap 期间跨过去
         self.__arm_control_mode = 0
         self.__frozen_claw_pos = [0.0, 0.0]
         # IK 主循环已接管夹爪发布时为 True；准备姿态等待阶段为 False
@@ -276,7 +288,16 @@ class IkRos:
         self.robot_walking_status_sub = rospy.Subscriber(
             "/robot_walking_status", Bool, self.robot_walking_status_callback, queue_size=1
         )
-        
+        # [4033] 从活的话题推断行走状态（见 __init__ 注释，/robot_walking_status 实机无发布者）
+        self._amp_wild_cmd_sub = rospy.Subscriber(
+            "/rl_controller/InputData/command_scalar_state", Float64MultiArray,
+            self._amp_wild_cmd_cb, queue_size=1
+        )
+        self._amp_cmd_sub = rospy.Subscriber(
+            "/rl_controller/InputData/command", Float64MultiArray,
+            self._amp_cmd_cb, queue_size=1
+        )
+
         self.arm_mode_changing = False
         # 检测到碰撞后，由外部控制手臂
         self.collision_check_control = False
@@ -1185,7 +1206,7 @@ class IkRos:
                             right_hand_position[i] = 100 
                         right_hand_position[2] = 0
                     
-                    if self.end_effector_type == LINKER_HAND and self.__robot_walking_status:
+                    if self.end_effector_type == LINKER_HAND and self._is_robot_walking():
                         left_hand_position[0] = left_hand_position[0] if joyStick_data.left_first_button_touched else 100
                         right_hand_position[0] = right_hand_position[0] if joyStick_data.right_first_button_touched else 100
 
@@ -1374,6 +1395,27 @@ class IkRos:
 
     def robot_walking_status_callback(self, msg):
         self.__robot_walking_status = msg.data
+
+    # [4033] 从活的话题推断行走状态（/robot_walking_status 实机无发布者）
+    def _amp_wild_cmd_cb(self, msg):
+        if len(msg.data) >= 4:
+            self.__amp_wild_walking = (msg.data[3] >= 0.5)
+            self.__amp_wild_walk_recv = rospy.Time.now()
+
+    def _amp_cmd_cb(self, msg):
+        if len(msg.data) >= 4:
+            self.__amp_walking = (msg.data[3] < 0.5)
+            self.__amp_walk_recv = rospy.Time.now()
+
+    def _is_robot_walking(self):
+        now = rospy.Time.now()
+        if self.__amp_wild_walk_recv is not None and self.__amp_wild_walking \
+                and (now - self.__amp_wild_walk_recv) < self.__amp_wild_walk_fresh:
+            return True
+        if self.__amp_walk_recv is not None and self.__amp_walking \
+                and (now - self.__amp_walk_recv) < self.__rl_walk_fresh:
+            return True
+        return self.__robot_walking_status
 
     def set_arm_mode_changing_callback(self, req):
         """服务回调函数，设置arm_mode_changing为True"""

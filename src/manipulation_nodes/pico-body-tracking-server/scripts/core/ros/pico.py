@@ -20,9 +20,10 @@ import enum
 import time
 import math
 import threading
+from collections import deque
 from typing import List, Optional, Any
 from tf2_msgs.msg import TFMessage
-from std_msgs.msg import Float64MultiArray,Float64,String
+from std_msgs.msg import Float64MultiArray, String
 from kuavo_msgs.msg import (
     twoArmHandPoseCmd, robotBodyMatrices, picoPoseInfoList,
     robotHeadMotionData, ikSolveParam, footPoseTargetTrajectories,
@@ -33,7 +34,7 @@ from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode, changeTorsoCt
 from kuavo_msgs.srv import fkSrv
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeRequest
 from std_msgs.msg import Float32MultiArray, Int32, Bool, Empty
-from std_srvs.srv import Trigger, TriggerResponse
+from std_srvs.srv import Trigger, TriggerResponse, SetBool
 from geometry_msgs.msg import Twist
 from .pico_utils import KuavoPicoInfoTransformer
 from common.logger import SDKLogger
@@ -43,6 +44,7 @@ from copy import deepcopy
 from scipy.spatial.transform import Rotation as R
 from ..config.pico_vr_config import PicoVrConfig, HandWrenchConfig
 from ..utils.toggle_switch import ToggleSwitch, ToggleEvent
+from ..pico_diagnostic_runtime import monotonic_ns
 
 class ControlMode(enum.Enum):
         NONE_MODE = 0
@@ -281,6 +283,11 @@ class KuavoPicoNode:
             self._init_toggle_switch()
             # Initialize model and transformers
             self._init_model_and_transformers()
+            self.diagnostic_logger = None
+            self._pico_bone_trace_lock = threading.Lock()
+            self._pico_bone_traces = {}
+            self._pico_bone_trace_order = deque()
+            self._pico_bone_trace_limit = 512
             # Initialize publishers
             self._init_publishers()
             # Initialize subscribers
@@ -322,6 +329,38 @@ class KuavoPicoNode:
         else:
             # Allow updating play_mode if already initialized
             self._play_mode = play_mode
+
+    @staticmethod
+    def _duration_ns(end_ns, start_ns):
+        return end_ns - start_ns if end_ns > 0 and start_ns > 0 and end_ns >= start_ns else None
+
+    def set_diagnostic_logger(self, logger):
+        self.diagnostic_logger = logger
+
+    def record_pico_bone_trace(self, trace: dict):
+        stamp_ms = int(trace.get("stamp_ms", 0) or 0)
+        if stamp_ms <= 0:
+            return
+        with self._pico_bone_trace_lock:
+            if stamp_ms not in self._pico_bone_traces:
+                self._pico_bone_trace_order.append(stamp_ms)
+            self._pico_bone_traces[stamp_ms] = dict(trace)
+            while len(self._pico_bone_traces) > self._pico_bone_trace_limit:
+                old_key = self._pico_bone_trace_order.popleft()
+                self._pico_bone_traces.pop(old_key, None)
+
+    def _take_pico_bone_trace(self, stamp_ms: int):
+        if stamp_ms <= 0:
+            return None
+        with self._pico_bone_trace_lock:
+            trace = self._pico_bone_traces.pop(stamp_ms, None)
+            if trace is not None:
+                return trace
+            candidates = [key for key in self._pico_bone_traces.keys() if abs(key - stamp_ms) <= 5]
+            if not candidates:
+                return None
+            closest = min(candidates, key=lambda key: abs(key - stamp_ms))
+            return self._pico_bone_traces.pop(closest, None)
 
     def set_play_mode(self, enable: bool):
         """Enable or disable play mode (controls /robot_body_matrices subscription)."""
@@ -601,6 +640,8 @@ class KuavoPicoNode:
         """Initialize joy controller"""
         self.joy_button_handler = JoySticksHandler()
         rospy.Subscriber("/pico/joy", JoySticks, self.sub_joy_callback)
+        # 初始化VMP推流控制服务客户端
+        self._vmp_stream_control_client = None
         # 按键回调配置字典
         self.joy_callbacks = {
             "teleop_unlock": ({"LT_PRESSED", "LG_PRESSED"}, self._teleop_unlock_callback),  # 基础模式/全身遥操模式 - 解锁
@@ -615,7 +656,10 @@ class KuavoPicoNode:
             # "switch_view": ({"Y_LONG_PRESSED"}, self._switch_view_callback),                # 基础模式/全身遥操模式 - 切换视角
             "enter_walk": ({"B_PRESSED"}, self._enter_walk_callback),                       # 基础模式 - 切换到行走模式
             "auto_swing_arm": ({"LT_PRESSED","Y_PRESSED"}, self._auto_swing_arm_callback),  # 基础模式 - 切换手臂模式
-            "switch_increase_arm": ({"LT_PRESSED", "X_PRESSED"}, self._switch_increase_arm_mode_callback)        # 基础模式/全身遥操模式 - 增量模式开启/关闭
+            "switch_increase_arm": ({"LT_PRESSED", "X_PRESSED"}, self._switch_increase_arm_mode_callback),       # 基础模式/全身遥操模式 - 增量模式开启/关闭
+            "vmp_stream_pause": ({"RG_PRESSED", "Y_PRESSED"}, self._vmp_stream_pause_callback),   # VMP模式 - 暂停推流（冻结当前姿态）
+            "vmp_stream_resume": ({"RG_PRESSED", "X_PRESSED"}, self._vmp_stream_resume_callback), # VMP模式 - 恢复推流
+            # gmr_calibrate 已迁移到 pico_comm_minimal.py（LG+B 触发）
         }
         for name, (key_combination, callback) in self.joy_callbacks.items():
             self.joy_button_handler.add_callback(name, key_combination, callback)
@@ -696,6 +740,47 @@ class KuavoPicoNode:
     def _freeze_finger_callback(self, key_combination: Set[str], joy:JoySticks)->None:
         """Callback for freeze finger."""
         self.toggle_freeze_finger.toggle() # 锁定/解锁手指
+
+    def _get_vmp_stream_control_client(self):
+        """获取VMP推流控制服务客户端（惰性初始化）"""
+        if self._vmp_stream_control_client is None:
+            service_name = "/vmp/pico_stream_control"
+            try:
+                rospy.wait_for_service(service_name, timeout=1.0)
+                self._vmp_stream_control_client = rospy.ServiceProxy(service_name, SetBool)
+                SDKLogger.info(f"VMP推流控制服务客户端已连接: {service_name}")
+            except rospy.ROSException:
+                SDKLogger.warning(f"VMP推流控制服务 {service_name} 不可用（VMPController可能未启动）")
+                return None
+        return self._vmp_stream_control_client
+
+    def _vmp_stream_pause_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
+        """VMP推流暂停回调 - RG+Y按键"""
+        client = self._get_vmp_stream_control_client()
+        if client is not None:
+            try:
+                resp = client(True)  # data=True -> 暂停推流
+                if resp.success:
+                    SDKLogger.info(f"\033[93m========== VMP推流已暂停 (RG+Y) ==========\033[0m")
+                else:
+                    SDKLogger.warning(f"VMP推流暂停失败: {resp.message}")
+            except rospy.ServiceException as e:
+                SDKLogger.error(f"调用VMP推流控制服务失败: {e}")
+                self._vmp_stream_control_client = None  # 重置客户端，下次重新连接
+
+    def _vmp_stream_resume_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
+        """VMP推流恢复回调 - RG+X按键"""
+        client = self._get_vmp_stream_control_client()
+        if client is not None:
+            try:
+                resp = client(False)  # data=False -> 恢复推流
+                if resp.success:
+                    SDKLogger.info(f"\033[92m========== VMP推流已恢复 (RG+X) ==========\033[0m")
+                else:
+                    SDKLogger.warning(f"VMP推流恢复失败: {resp.message}")
+            except rospy.ServiceException as e:
+                SDKLogger.error(f"调用VMP推流控制服务失败: {e}")
+                self._vmp_stream_control_client = None  # 重置客户端，下次重新连接
 
     def _left_thumb_open_toggle_callback(self, key_combination: Set[str], joy: JoySticks) -> None:
         """Callback for left thumb open toggle."""
@@ -1637,6 +1722,41 @@ class KuavoPicoNode:
 
     def pico_hands_poses_callback_choose(self, pico_hands_poses_msg: picoPoseInfoList) -> None:
         """Callback for Pico hands poses."""
+        if self.diagnostic_logger is not None:
+            callback_monotonic_ns = monotonic_ns()
+            trace = self._take_pico_bone_trace(int(getattr(pico_hands_poses_msg, "timestamp_ms", 0) or 0))
+            log_fields = {
+                "stamp_ms": int(getattr(pico_hands_poses_msg, "timestamp_ms", 0) or 0),
+                "callback_monotonic_ns": callback_monotonic_ns,
+                "trace_found": trace is not None,
+                "bone_topic": "/leju_pico_bone_poses",
+            }
+            if trace:
+                log_fields.update(trace)
+                log_fields.update({
+                    "bone_publish_done_to_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("bone_publish_done_monotonic_ns", 0) or 0),
+                    ),
+                    "bone_publish_start_to_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("bone_publish_start_monotonic_ns", 0) or 0),
+                    ),
+                    "udp_recv_to_bone_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("recv_monotonic_ns", 0) or 0),
+                    ),
+                    "receiver_start_to_bone_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("process_start_monotonic_ns", 0) or 0),
+                    ),
+                    "protobuf_parse_to_bone_callback_ns": self._duration_ns(
+                        callback_monotonic_ns,
+                        int(trace.get("protobuf_parse_done_monotonic_ns", 0) or 0),
+                    ),
+                })
+            self.diagnostic_logger.log("pico_bone_callback_timing", **log_fields)
+
         # 控制头部运动
         self._pub_head_pose()
 

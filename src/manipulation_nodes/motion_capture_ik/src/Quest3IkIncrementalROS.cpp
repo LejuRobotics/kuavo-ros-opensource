@@ -25,6 +25,7 @@
 #include <chrono>
 #include <sstream>
 #include <algorithm>
+#include <array>
 #include <vector>
 #include <XmlRpcValue.h>
 
@@ -138,9 +139,12 @@ void Quest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
       }
     }
 
-    if ((armControlMode_ == 0 && lastArmControlMode_ == 0) || (armControlMode_ == 1 && lastArmControlMode_ == 0)) {
-      reset();  // 机器人未激活 (0→0 或 0→1)，持续重置各类状态，确保进入系统时正常
-
+    // 修改后
+    if (armControlMode_ == 0 || armControlMode_ == 1) {
+        if (lastArmControlMode_ == 2) {
+            fsmExit();  // 2→0/1 过渡
+        }
+        reset();
       // 运行 DrakeVelocityIKSolver 测试套件
       if (leftVelocityIkSolverPtr_) {
         // 使用 left shoulder 位置作为 p0 (zarm_l2_joint 位置: -0.017500, 0.292700, 0.424500)
@@ -332,25 +336,35 @@ void Quest3IkIncrementalROS::fsmEnter() {
 
   // 正常工作模式 Case 2: (0→2 或 1→2)
   if ((armControlMode_ == 2 && lastArmControlMode_ == 1) || (armControlMode_ == 2 && lastArmControlMode_ == 0)) {
+    // 读取参数（与轮臂一致，每次进入 mode2 时刷新）
+    ros::param::getCached("/reset_joint_to_default", resetJointToDefault_);
+
     exitMode2Counter_ = 0;
 
     if (enterMode2ResetCounter_ < ENTER_MODE_2_RESET_COUNT) {
       // print entermode count
       std::cout << "[Quest3IkIncrementalROS] Enter mode 2 reset all states (including incrementalController): "
-                << enterMode2ResetCounter_ << "/" << ENTER_MODE_2_RESET_COUNT << std::endl;
-      // [v62 fix] 用机器人当前 sensor 关节角的 FK 作为 anchor（替代固定零位 FK），
-      // 避免 v62 等启动时手臂不在零位的平台，按下 grip 后手臂被强行拉到零位再跟随。
-      // computeLink6FK 内置 fallback：sensor 未就绪时返回 Zero/Identity → 退化到原 v52 行为。
-      Eigen::Vector3d currentLeftHandPos, currentRightHandPos;
-      Eigen::Quaterniond currentLeftHandQuat, currentRightHandQuat;
-      computeLeftLink6FK(currentLeftHandPos, currentLeftHandQuat);
-      computeRightLink6FK(currentRightHandPos, currentRightHandQuat);
-      if (currentLeftHandPos.isZero() && currentRightHandPos.isZero()) {
-        // sensor 未就绪 → 退化到零位 anchor（v52 原行为）
+                << enterMode2ResetCounter_ << "/" << ENTER_MODE_2_RESET_COUNT
+                << ", resetJointToDefault_=" << resetJointToDefault_ << std::endl;
+
+      // 根据 resetJointToDefault_ 决定初始参考位姿：
+      //   true  -> 使用全零关节角度对应的 Link6 位姿（准备姿态）
+      //   false -> 使用当前传感器关节角度对应的 FK 位姿（保持当前位置）
+      Eigen::Vector3d currentLeftHandPos;
+      Eigen::Vector3d currentRightHandPos;
+      Eigen::Quaterniond currentLeftHandQuat;
+      Eigen::Quaterniond currentRightHandQuat;
+
+      if (resetJointToDefault_) {
+        // 使用初始化时保存的全零关节角度位姿（Link6），避免运行时频繁调用 FK
         currentLeftHandPos = initZeroLeftLink6Position_;
         currentRightHandPos = initZeroRightLink6Position_;
         currentLeftHandQuat = Eigen::Quaterniond::Identity();
         currentRightHandQuat = Eigen::Quaterniond::Identity();
+      } else {
+        // 保持当前位置：用当前传感器关节角度做 FK
+        computeLeftLink6FK(currentLeftHandPos, currentLeftHandQuat);
+        computeRightLink6FK(currentRightHandPos, currentRightHandQuat);
       }
 
       {
@@ -369,26 +383,42 @@ void Quest3IkIncrementalROS::fsmEnter() {
             currentLeftHandQuat, currentRightHandQuat, useIncrementalHandOrientation_);
       }
 
-      // 【核心修复】重置关节角度 fhan 滤波状态，避免从 t1 时刻的旧关节角度开始过渡
-      // [v62 fix] q_/latest_q_ 用 sensor 当前关节角作为初始（替代全零），
-      // 避免 IK 内部"当前 q"误认为是零位，导致输出关节命令把手臂往零位拉。
-      const bool sensorReady = (sensorArmJointQ_.size() == jointStateSize_);
-      if (q_.size() == jointStateSize_ && dq_.size() == jointStateSize_) {
-        q_ = sensorReady ? sensorArmJointQ_ : Eigen::VectorXd::Zero(jointStateSize_);
-        dq_.setZero();
-      }
-      if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
-        latest_q_ = sensorReady ? sensorArmJointQ_ : Eigen::VectorXd::Zero(jointStateSize_);
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
-      }
-
-      {
-        std::lock_guard<std::mutex> lock(ikResultMutex_);
-        if (latestIkSolution_.size() == jointStateSize_) {
-          latestIkSolution_.setZero();
+      // 根据 resetJointToDefault_ 决定关节滤波状态初值：
+      //   true  -> 归零（准备从零位开始）
+      //   false -> 保持当前传感器关节角度（避免跳变）
+      if (resetJointToDefault_) {
+        if (q_.size() == jointStateSize_ && dq_.size() == jointStateSize_) {
+          q_.setZero();
+          dq_.setZero();
         }
-        hasValidIkSolution_ = false;
+        if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
+          latest_q_.setZero();
+          latest_dq_.setZero();
+          lowpass_dq_.setZero();
+        }
+        {
+          std::lock_guard<std::mutex> lock(ikResultMutex_);
+          if (latestIkSolution_.size() == jointStateSize_) {
+            latestIkSolution_.setZero();
+          }
+          hasValidIkSolution_ = false;
+        }
+      } else {
+        // 保持当前位置：用传感器关节角度初始化滤波状态
+        if (sensorArmJointQ_.size() == jointStateSize_) {
+          q_ = sensorArmJointQ_;
+          dq_.setZero();
+          latest_q_ = sensorArmJointQ_;
+          latest_dq_.setZero();
+          lowpass_dq_.setZero();
+          {
+            std::lock_guard<std::mutex> lock(ikResultMutex_);
+            if (latestIkSolution_.size() == jointStateSize_) {
+              latestIkSolution_ = sensorArmJointQ_;
+            }
+            hasValidIkSolution_ = true;
+          }
+        }
       }
 
       // 重置增量控制结果（Quest3IkIncrementalROS 类的成员变量）
@@ -470,36 +500,73 @@ void Quest3IkIncrementalROS::fsmEnter() {
 
     double elapsedTime = (currentTime - enterTime).toSec();
 
-    if (elapsedTime <= MODE_2_TIMEOUT_DURATION) {
+    // resetJointToDefault_=false 时手臂保持原位，无需5秒长等待，缩短为2秒
+    const double mode2TimeoutDuration = MODE_2_TIMEOUT_DURATION;//1.0s
+    if (elapsedTime <= mode2TimeoutDuration) {
       // print mode2 timeout duration
       std::cout << "[Quest3IkIncrementalROS] Mode 2 timeout duration: " << elapsedTime << "s" << std::endl;
       // 在超时时间内，强制停用所有手臂控制模式，确保可以进入 fsmChange 流程
       forceDeactivateAllArmCtrlMode();
 
-      {
+      // 根据 resetJointToDefault_ 决定约束参考位姿：
+      //   true  -> 使用全零关节角度对应的 Link6 位姿（准备姿态）
+      //   false -> 使用当前传感器关节角度对应的 FK 位姿（保持当前位置）
+      if (resetJointToDefault_) {
         std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = initZeroLeftLink6Position_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = Eigen::Matrix3d::Identity();
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = initZeroRightLink6Position_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = Eigen::Matrix3d::Identity();
+      } else {
+        // 保持当前位置：用当前传感器关节角度做 FK 更新约束
+        Eigen::Vector3d pLeftLink6Cur, pRightLink6Cur;
+        Eigen::Quaterniond qLeftLink6Cur, qRightLink6Cur;
+        computeLeftLink6FK(pLeftLink6Cur, qLeftLink6Cur);
+        computeRightLink6FK(pRightLink6Cur, qRightLink6Cur);
+        std::lock_guard<std::mutex> lock(poseConstraintListMutex_);
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position = pLeftLink6Cur;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix = qLeftLink6Cur.toRotationMatrix();
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = pRightLink6Cur;
+        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = qRightLink6Cur.toRotationMatrix();
       }
 
       // 重置增量控制模块，清除可能被 fsmChange/fsmProcess 更新的 fhan 滤波状态
       if (incrementalController_) {
         incrementalController_->reset();
-        incrementalController_->setHandQuatSeeds(
-            Eigen::Quaterniond::Identity(), Eigen::Quaterniond::Identity(), useIncrementalHandOrientation_);
+        // 根据 resetJointToDefault_ 决定手部姿态种子
+        if (resetJointToDefault_) {
+          incrementalController_->setHandQuatSeeds(
+              Eigen::Quaterniond::Identity(), Eigen::Quaterniond::Identity(), useIncrementalHandOrientation_);
+        } else {
+          Eigen::Vector3d pLeftLink6Seed, pRightLink6Seed;
+          Eigen::Quaterniond qLeftSeed, qRightSeed;
+          computeLeftLink6FK(pLeftLink6Seed, qLeftSeed);
+          computeRightLink6FK(pRightLink6Seed, qRightSeed);
+          incrementalController_->setHandQuatSeeds(
+              qLeftSeed, qRightSeed, useIncrementalHandOrientation_);
+        }
       }
 
-      // 重置关节角度 fhan 滤波状态
-      if (q_.size() == jointStateSize_ && dq_.size() == jointStateSize_) {
-        q_.setZero();
-        dq_.setZero();
-      }
-      if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
-        latest_q_.setZero();
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
+      // 根据 resetJointToDefault_ 决定关节角度 fhan 滤波状态初值
+      if (resetJointToDefault_) {
+        if (q_.size() == jointStateSize_ && dq_.size() == jointStateSize_) {
+          q_.setZero();
+          dq_.setZero();
+        }
+        if (latest_q_.size() == jointStateSize_ && latest_dq_.size() == jointStateSize_) {
+          latest_q_.setZero();
+          latest_dq_.setZero();
+          lowpass_dq_.setZero();
+        }
+      } else {
+        // 保持当前位置：用传感器关节角度初始化滤波状态
+        if (sensorArmJointQ_.size() == jointStateSize_) {
+          q_ = sensorArmJointQ_;
+          dq_.setZero();
+          latest_q_ = sensorArmJointQ_;
+          latest_dq_.setZero();
+          lowpass_dq_.setZero();
+        }
       }
 
       // 在超时时间内，执行进入增量模式（0→2 和 1→2 都需要）
@@ -549,9 +616,10 @@ void Quest3IkIncrementalROS::fsmChange() {
     // fsmChange 结束后，调用 forceActivateAllArmCtrlMode（执行指定次数，增强鲁棒性）
     if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
       forceActivateAllArmCtrlMode();
-      kuavo_msgs::changeArmCtrlMode srv;
-      srv.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
-      enableWbcArmTrajectoryControlClient_.call(srv);
+      requestWbcArmTrajectoryControl(
+          static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode),
+          true,
+          "enable incremental arm trajectory control");
       activateAllArmCtrlModeCounter_++;
     }
     return;  // 没有模式切换，直接返回
@@ -902,14 +970,6 @@ void Quest3IkIncrementalROS::fsmExit() {
     lowpass_dq_.tail(7).setZero();
   }
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
-
-  // 【修复】仅在真正退出 VR (2→1) 时清零 use_ros_arm_joint_trajectory_。
-  bool isExitingVR = (armControlMode_ == 1 && lastArmControlMode_ == 2);
-  if (isExitingVR) {
-    kuavo_msgs::changeArmCtrlMode srv;
-    srv.request.control_mode = static_cast<int>(MpcRefUpdateMode::DISABLED_ARM);
-    enableWbcArmTrajectoryControlClient_.call(srv);
-  }
 
   deactivateController();
 }
@@ -1476,6 +1536,7 @@ void Quest3IkIncrementalROS::activateController() {
   if (controllerActivated_.load()) return;
   if (!humanoidArmCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
+  if (arm_ctrl_mode_ == 0) return; //如果当前是模式0，不切换到外部控制模式，防止使用手柄控制进入固定模式时，误触切换到外部控制模式
 
   ROS_INFO("[Quest3IkIncrementalROS] Activating controller");
   kuavo_msgs::changeArmCtrlMode srv2;
@@ -1514,6 +1575,25 @@ void Quest3IkIncrementalROS::armCtrlModeCallback(const std_msgs::Float64MultiArr
   currentArmCtrlMode_ = static_cast<int>(msg->data[0]); // 对应 Python __arm_control_mode（current_mode）
 }
 
+bool Quest3IkIncrementalROS::requestWbcArmTrajectoryControl(int controlMode,
+                                                             bool requireIncrementalMode,
+                                                             const char* context) {
+  std::lock_guard<std::mutex> lock(wbcArmTrajectoryControlMutex_);
+
+  if (requireIncrementalMode && armControlMode_.load() != 2) {
+    ROS_DEBUG("[Quest3IkIncrementalROS] Skip %s: arm control mode is no longer incremental", context);
+    return true;
+  }
+
+  kuavo_msgs::changeArmCtrlMode srv;
+  srv.request.control_mode = controlMode;
+  if (!enableWbcArmTrajectoryControlClient_.call(srv) || !srv.response.result) {
+    ROS_ERROR("[Quest3IkIncrementalROS] Failed to %s", context);
+    return false;
+  }
+  return true;
+}
+
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
   int newMode = msg->data;
   int oldMode = armControlMode_.load();
@@ -1534,6 +1614,9 @@ void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
         ROS_ERROR("[Quest3IkIncrementalROS] Failed to enable SHM on mode 2 enter");
       }
     } else if (oldMode == 2 && newMode != 2) {
+      requestWbcArmTrajectoryControl(
+          static_cast<int>(MpcRefUpdateMode::DISABLED_ARM), false, "disable WBC ROS arm trajectory control");
+
       if (!arm_traj_writer_.setTransport(Request::TRANSPORT_NONE)) {
         ROS_ERROR("[Quest3IkIncrementalROS] Failed to disable SHM on mode 2 exit");
       }
@@ -1679,6 +1762,35 @@ void Quest3IkIncrementalROS::publishJointStates() {
     jointStateMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
   }
 
+  // 保存上一帧真正进入发布链路的状态，供本帧边界阻尼限制速度变化并重新积分位置
+  const Eigen::VectorXd previousPublishedQ = latest_q_;
+  const Eigen::VectorXd previousPublishedDq = lowpass_dq_;
+
+  // 腕部关节软限位（由 URDF 限位按原有比例缩放得到）。保证目标角度、fhan 状态和滤波速度在限位处一致，
+  // 避免位置指令已经到达限位时仍然下发朝限位外运动的速度指令
+  struct JointSoftLimit {
+    int index;
+    double lower;
+    double upper;
+  };
+  static constexpr std::array<JointSoftLimit, 6> kWristJointSoftLimits{{
+      {4, 0.95 * -1.5707963267949, 0.95 * 1.5707963267949},          // 左臂第 5 关节：[-85.5°, 85.5°]
+      {5, 0.85 * -1.30899693899575, 0.85 * 0.698131700797732},      // 左臂第 6 关节：[-63.75°, 34°]
+      {6, 0.85 * -0.698131700797732, 0.85 * 0.698131700797732},     // 左臂第 7 关节：[-34°, 34°]
+      {11, 0.95 * -1.5707963267949, 0.95 * 1.5707963267949},       // 右臂第 5 关节：[-85.5°, 85.5°]
+      {12, 0.85 * -0.698131700797732, 0.85 * 1.30899693899575},    // 右臂第 6 关节：[-34°, 63.75°]
+      {13, 0.85 * -0.698131700797732, 0.85 * 0.698131700797732},   // 右臂第 7 关节：[-34°, 34°]
+  }};
+
+  const auto clampPosition = [](double position, const JointSoftLimit& limit) {
+    return std::min(std::max(position, limit.lower), limit.upper);
+  };
+  const auto stopOutwardVelocity = [](double position, double& velocity, const JointSoftLimit& limit) {
+    if ((position <= limit.lower && velocity < 0.0) || (position >= limit.upper && velocity > 0.0)) {
+      velocity = 0.0;
+    }
+  };
+
   Eigen::VectorXd finalArmAngles = armAngleLimited;  // 默认使用目标角度
 
   double fhanH = 1.0 / publishRate_;
@@ -1688,6 +1800,12 @@ void Quest3IkIncrementalROS::publishJointStates() {
     double targetAngle = finalArmAngles(i);
     if (i == 5 || i == 6 || i == 12 || i == 13) {
       targetAngle = targetAngle * deltaScaleRPY_(1);
+    }
+    for (const auto& limit : kWristJointSoftLimits) {
+      if (limit.index == i) {
+        targetAngle = clampPosition(targetAngle, limit);
+        break;
+      }
     }
     if (i <= 6 && joyStickHandlerPtr_->isLeftGrip()) {
       leju_utils::fhanStepForwardWithVelLimit(q_(i),               // 滤波后的关节角度（输出）
@@ -1710,30 +1828,10 @@ void Quest3IkIncrementalROS::publishJointStates() {
     dq_(i) = dq_(i) > 18.0 ? 18.0 : dq_(i);
     dq_(i) = dq_(i) < -18.0 ? -18.0 : dq_(i);
   }
-  // Wrist joint limits (hard-coded from URDF):
-  //   src/kuavo_assets/models/biped_s49/urdf/biped_s49.urdf
-  // This avoids relying on MultibodyPlant joint indexing (mec_limit_*), which can drift when the URDF changes.
-  static constexpr double kZarmL5Lower = -1.5707963267949;
-  static constexpr double kZarmL5Upper = 1.5707963267949;
-  static constexpr double kZarmL6Lower = -1.30899693899575;
-  static constexpr double kZarmL6Upper = 0.698131700797732;
-  static constexpr double kZarmL7Lower = -0.698131700797732;
-  static constexpr double kZarmL7Upper = 0.698131700797732;
-
-  static constexpr double kZarmR5Lower = -1.5707963267949;
-  static constexpr double kZarmR5Upper = 1.5707963267949;
-  static constexpr double kZarmR6Lower = -0.698131700797732;
-  static constexpr double kZarmR6Upper = 1.30899693899575;
-  static constexpr double kZarmR7Lower = -0.698131700797732;
-  static constexpr double kZarmR7Upper = 0.698131700797732;
-
-  q_(4) = std::min(std::max(q_(4), 0.95 * kZarmL5Lower), 0.95 * kZarmL5Upper);
-  q_(5) = std::min(std::max(q_(5), 0.85 * kZarmL6Lower), 0.85 * kZarmL6Upper);
-  q_(6) = std::min(std::max(q_(6), 0.85 * kZarmL7Lower), 0.85 * kZarmL7Upper);
-
-  q_(11) = std::min(std::max(q_(11), kZarmR5Lower), kZarmR5Upper);
-  q_(12) = std::min(std::max(q_(12), 0.85 * kZarmR6Lower), 0.85 * kZarmR6Upper);
-  q_(13) = std::min(std::max(q_(13), 0.85 * kZarmR7Lower), 0.85 * kZarmR7Upper);
+  for (const auto& limit : kWristJointSoftLimits) {
+    q_(limit.index) = clampPosition(q_(limit.index), limit);
+    stopOutwardVelocity(q_(limit.index), dq_(limit.index), limit);
+  }
 
   // 处理左手平滑过渡：根据超时时间进度逐步增大 alpha 值（仅在检测到移动时计算）
   {
@@ -1801,9 +1899,153 @@ void Quest3IkIncrementalROS::publishJointStates() {
 
   lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
 
+  // 在现有 Quest3 指令层做边界速度阻尼。仅在关节向边界运动且进入制动区时接管该关节，
+  // 其余区域保持原有位置平滑和速度低通行为不变
+  if (wristJointLimitVelocityDamperEnabled_ &&
+      previousPublishedQ.size() == jointStateSize_ && previousPublishedDq.size() == jointStateSize_) {
+    const double cycle = std::min(std::max(fhanH, 1e-4), 0.02);
+    for (const auto& limit : kWristJointSoftLimits) {
+      if (limit.index < 0 || limit.index >= jointStateSize_) {
+        continue;
+      }
+
+      const double lower = limit.lower + wristJointLimitHardEpsilon_;
+      const double upper = limit.upper - wristJointLimitHardEpsilon_;
+      const double previousQ = std::min(std::max(previousPublishedQ(limit.index), lower), upper);
+      const double requestedQ = std::min(std::max(latest_q_(limit.index), lower), upper);
+      const double rawRequestedV = (requestedQ - previousQ) / cycle;
+      const double requestedV = std::min(std::max(rawRequestedV, -wristJointLimitMaxVelocity_),
+                                         wristJointLimitMaxVelocity_);
+      const double previousV = std::isfinite(previousPublishedDq(limit.index))
+                                   ? previousPublishedDq(limit.index)
+                                   : 0.0;
+
+      const double upperDistance = std::max(0.0, upper - previousQ);
+      const double lowerDistance = std::max(0.0, previousQ - lower);
+      const double upperReferenceSpeed = std::max(std::max(requestedV, 0.0), std::max(previousV, 0.0));
+      const double lowerReferenceSpeed = std::max(std::max(-requestedV, 0.0), std::max(-previousV, 0.0));
+      const double upperActivationDistance =
+          std::max(wristJointLimitSoftZone_,
+                   upperReferenceSpeed * upperReferenceSpeed / (2.0 * wristJointLimitStopAcceleration_));
+      const double lowerActivationDistance =
+          std::max(wristJointLimitSoftZone_,
+                   lowerReferenceSpeed * lowerReferenceSpeed / (2.0 * wristJointLimitStopAcceleration_));
+      const bool upperDamperActive = upperReferenceSpeed > 0.0 && upperDistance < upperActivationDistance;
+      const bool lowerDamperActive = lowerReferenceSpeed > 0.0 && lowerDistance < lowerActivationDistance;
+      if (!upperDamperActive && !lowerDamperActive) {
+        continue;
+      }
+
+      double damperTargetV = requestedV;
+      if (requestedV > 0.0 && upperDamperActive) {
+        const double ratio = std::min(std::max(upperDistance / upperActivationDistance, 0.0), 1.0);
+        const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+        const double softLimit = requestedV * smoothScale;
+        const double brakeLimit = std::sqrt(2.0 * wristJointLimitStopAcceleration_ * upperDistance);
+        damperTargetV = std::min({requestedV, softLimit, brakeLimit, upperDistance / cycle});
+      } else if (requestedV < 0.0 && lowerDamperActive) {
+        const double ratio = std::min(std::max(lowerDistance / lowerActivationDistance, 0.0), 1.0);
+        const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+        const double softLimit = std::abs(requestedV) * smoothScale;
+        const double brakeLimit = std::sqrt(2.0 * wristJointLimitStopAcceleration_ * lowerDistance);
+        damperTargetV = -std::min({std::abs(requestedV), softLimit, brakeLimit, lowerDistance / cycle});
+      }
+
+      const double maxDeltaV = wristJointLimitMaxAcceleration_ * cycle;
+      double boundedV = std::min(std::max(damperTargetV, previousV - maxDeltaV), previousV + maxDeltaV);
+      if (boundedV > 0.0) {
+        const double discreteBrakeLimit =
+            -wristJointLimitStopAcceleration_ * cycle +
+            std::sqrt(wristJointLimitStopAcceleration_ * wristJointLimitStopAcceleration_ * cycle * cycle +
+                      2.0 * wristJointLimitStopAcceleration_ * upperDistance);
+        boundedV = std::min({boundedV, upperDistance / cycle, std::max(0.0, discreteBrakeLimit)});
+      } else if (boundedV < 0.0) {
+        const double discreteBrakeLimit =
+            -wristJointLimitStopAcceleration_ * cycle +
+            std::sqrt(wristJointLimitStopAcceleration_ * wristJointLimitStopAcceleration_ * cycle * cycle +
+                      2.0 * wristJointLimitStopAcceleration_ * lowerDistance);
+        boundedV = -std::min({std::abs(boundedV), lowerDistance / cycle, std::max(0.0, discreteBrakeLimit)});
+      }
+
+      const bool movingOutwardInSoftZone =
+          (boundedV > 0.0 && upperDistance < wristJointLimitSoftZone_) ||
+          (boundedV < 0.0 && lowerDistance < wristJointLimitSoftZone_);
+      if (movingOutwardInSoftZone && std::abs(boundedV) < wristJointLimitSettleVelocity_) {
+        boundedV = 0.0;
+      }
+
+      const double candidateQ = previousQ + boundedV * cycle;
+      const double boundedQ = std::min(std::max(candidateQ, lower), upper);
+      boundedV = (boundedQ - previousQ) / cycle;
+
+      // 同步更新三层状态，避免下一帧的 EMA/低通重新带回朝边界外的历史速度
+      latest_q_(limit.index) = boundedQ;
+      latest_dq_(limit.index) = boundedV;
+      lowpass_dq_(limit.index) = boundedV;
+    }
+  }
+
+  // 使用局部变量保存本帧要发送的关节位置/速度，避免填充消息时读到被其他线程改写的 latest_q_/lowpass_dq_
+  Eigen::VectorXd armPositionForPublish = latest_q_;
+  Eigen::VectorXd armVelocityForPublish = lowpass_dq_;
+
+  // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
+  // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
+  // 区间 2: [0.3s, 1.0s)          — 从 q_init_cmd_ 线性平滑（resetJointToDefault_=true 时平滑到零位，false 时保持当前位置）
+  // 区间 3: [1.0s, +infty)        — 不在此处改写
+  {
+    ros::Time mode2EnterTime;
+    {
+      std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+      mode2EnterTime = mode2EnterTime_;
+    }
+    const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
+    if (inMode2) {
+      constexpr double kMode2SensorSyncDurationSec = 0.3;
+      // 平滑时长缩短为1秒
+      const double kMode2SmoothDurationSec = 1.0;
+      const double elapsed = (ros::Time::now() - mode2EnterTime).toSec();
+
+      if (elapsed < kMode2SensorSyncDurationSec) {
+        // 区间 1: [0, 0.3s) — 传感器同步
+        Eigen::VectorXd sensorArmQ = latest_q_;
+        if (sensorArmJointQ_.size() == jointStateSize_) {
+          sensorArmQ = sensorArmJointQ_;
+        }
+        q_init_cmd_ = sensorArmQ;
+        armPositionForPublish = sensorArmQ;
+        armVelocityForPublish.setZero();
+        latest_q_ = sensorArmQ;
+        latest_dq_.setZero();
+        lowpass_dq_.setZero();
+      } else if (elapsed < kMode2SmoothDurationSec) {
+        // 区间 2: [0.3s, 1.0s) — 平滑过渡
+        if (q_init_cmd_.size() == jointStateSize_) {
+          const double alpha = std::min(
+              std::max((elapsed - kMode2SensorSyncDurationSec) /
+                           (kMode2SmoothDurationSec - kMode2SensorSyncDurationSec),
+                       0.0),
+              1.0);
+          if (resetJointToDefault_) {
+            // 平滑到零位（准备姿态）
+            armPositionForPublish = (1.0 - alpha) * q_init_cmd_ + alpha * Eigen::VectorXd::Zero(jointStateSize_);
+          } else {
+            // 保持当前位置不动
+            armPositionForPublish = q_init_cmd_;
+          }
+          latest_q_ = armPositionForPublish;
+        }
+        armVelocityForPublish.setZero();
+        latest_dq_.setZero();
+        lowpass_dq_.setZero();
+      }
+      // 区间 3: elapsed >= 1.0s 时不做处理，armPositionForPublish/armVelocityForPublish 保持本帧初的拷贝
+    }
+  }
+
   for (int i = 0; i < jointStateSize_; ++i) {
-    jointStateMsg.position[i] = latest_q_(i) * 180.0 / M_PI;
-    jointStateMsg.velocity[i] = lowpass_dq_(i) * 180.0 / M_PI;
+    jointStateMsg.position[i] = armPositionForPublish(i) * 180.0 / M_PI;
+    jointStateMsg.velocity[i] = armVelocityForPublish(i) * 180.0 / M_PI;
     jointStateMsg.effort[i] = 0.0;
   }
 
@@ -2293,6 +2535,14 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         "(alpha=%.3f)",
         lowpassDqAlpha_);
   }
+
+  ROS_INFO(
+      "[Quest3IkIncrementalROS] Wrist joint-limit velocity damper: enable=%s, soft_zone=%.4f, "
+      "stop_acceleration=%.3f, max_velocity=%.3f, max_acceleration=%.3f, settle_velocity=%.6f, "
+      "hard_epsilon=%.6f",
+      wristJointLimitVelocityDamperEnabled_ ? "true" : "false", wristJointLimitSoftZone_,
+      wristJointLimitStopAcceleration_, wristJointLimitMaxVelocity_, wristJointLimitMaxAcceleration_,
+      wristJointLimitSettleVelocity_, wristJointLimitHardEpsilon_);
 
   // TEST: 初始化关节限制中间值（硬编码，从URDF中提取）
   // 关节顺序：左臂7个(zarm_l1~l7) + 右臂7个(zarm_r1~r7) = 14个

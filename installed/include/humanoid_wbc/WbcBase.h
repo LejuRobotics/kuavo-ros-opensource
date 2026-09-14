@@ -172,6 +172,7 @@ namespace ocs2
       Task formulateWaistJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateArmJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateStandUpJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
+      Task formulateSitDownJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
       Task formulateJointAccelTask(const vector_t &stateDesied, const vector_t &inputDesired, scalar_t period);
 
       void compensateFriction(vector_t &x);
@@ -202,7 +203,9 @@ namespace ocs2
       scalar_t baseHeightKp_{}, baseHeightKd_{};
       scalar_t baseAngularKp_{}, baseAngularKd_{};
       vector_t armJointKp_, armJointKd_, waistJointKp_, waistJointKd_;
-      scalar_t standUp_legKp_{}, standUp_legKd_{}, standUp_armKp_{}, standUp_armKd_{}, standUp_waistKp_{}, standUp_waistKd_{}, jointAcc_Kp_{}, jointAcc_Kd_{};
+      scalar_t standUp_legKp_{}, standUp_legKd_{}, standUp_armKp_{}, standUp_armKd_{}, standUp_waistKp_{}, standUp_waistKd_{};
+      scalar_t sitDown_legKp_{}, sitDown_legKd_{}, sitDown_armKp_{}, sitDown_armKd_{}, sitDown_waistKp_{}, sitDown_waistKd_{};
+      scalar_t jointAcc_Kp_{}, jointAcc_Kd_{};
       vector3_t baseAngular3dKp_, baseAngular3dKd_;
 
       vector_t cmd_body_pos_;

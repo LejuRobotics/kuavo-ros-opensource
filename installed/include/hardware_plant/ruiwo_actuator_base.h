@@ -254,6 +254,13 @@ public:
      * @note 此接口用于在保存零点时对特定电机应用额外的偏移调整，例如v15版本机器人的特殊处理
      */
     virtual void setZeroOffsetAdjustments(const std::map<size_t, double>& zero_offset_adjustments) = 0;
+
+    /** /use_sit_init 时由 hardware_node → hardware_plant 在 initialize() 前设置，跳过启动回零 */
+    void setSkipBootMoveToZero(bool skip) { skip_boot_move_to_zero_ = skip; }
+    bool skipBootMoveToZero() const { return skip_boot_move_to_zero_; }
+
+protected:
+    bool skip_boot_move_to_zero_{false};
 };
 
 #endif // RUIWO_ACTUATOR_BASE_H

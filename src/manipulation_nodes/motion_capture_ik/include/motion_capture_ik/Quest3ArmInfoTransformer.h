@@ -28,6 +28,11 @@ class Quest3ArmInfoTransformer final {
 
   ArmPose getRightHandPose() const { return rightHandPose_; }
 
+  // Wheel incremental control needs the hand motion with rigid torso motion removed.
+  ArmPose getLeftHandPoseRelativeToChest() const { return leftHandPoseRelativeToChest_; }
+
+  ArmPose getRightHandPoseRelativeToChest() const { return rightHandPoseRelativeToChest_; }
+
   ArmPose getLeftElbowPose() const { return leftElbowPose_; }
 
   ArmPose getRightElbowPose() const { return rightElbowPose_; }
@@ -100,6 +105,8 @@ class Quest3ArmInfoTransformer final {
  private:
   ArmPose leftHandPose_;
   ArmPose rightHandPose_;
+  ArmPose leftHandPoseRelativeToChest_;
+  ArmPose rightHandPoseRelativeToChest_;
   ArmPose leftElbowPose_;
   ArmPose rightElbowPose_;
   ArmPose leftShoulderPose_;

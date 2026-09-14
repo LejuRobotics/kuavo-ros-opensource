@@ -70,7 +70,7 @@ int main(int argc, char **argv)
         // 夹爪运动到20位置
         std::cout << "Moved to position -------------------------------------20" << std::endl;
         positions = {20.0, 20.0};
-        auto result = actuator->move_paw(positions, velocity, torque);
+        auto result = actuator->move_paw(positions, velocity, torque, false);
         print_gripper_state("LEFT", result[0]);
         print_gripper_state("RIGHT", result[1]);
         usleep(1000000); // 延时1秒
@@ -87,7 +87,7 @@ int main(int argc, char **argv)
         // 夹爪运动到95位置
         std::cout << "Moved to position -------------------------------------95" << std::endl;
         positions = {95.0, 95.0};
-        result = actuator->move_paw(positions, velocity, torque);
+        result = actuator->move_paw(positions, velocity, torque, false);
         std::cout << "[move_paw Result]: ";
         print_gripper_state("LEFT", result[0]);
         print_gripper_state("RIGHT", result[1]);

@@ -201,7 +201,7 @@ class VRHandCommandNode {
                                                         , const vector_t& lastEeState) {
       
       const vector_t currentPose = observation.state.segment<6>(6);
-      vector_t currentArmPose = observation.state.segment(12+12,num_mpc_arm_joints_);
+      vector_t currentArmPose = observation.state.tail(num_mpc_arm_joints_);
 
       vector_t targetPose = currentPose;
       // targetPose(0) = headBodyPose_.body_x;
@@ -252,9 +252,12 @@ class VRHandCommandNode {
      * Converts the joint state of the arm to LeftHandTargetTrajectories.
     */
     TargetTrajectories goalHandPoseToTargetTrajectories(const vector_t& armJointState, const SystemObservation& observation) {
-      
+
       const vector_t currentPose = observation.state.segment<6>(6);
-      vector_t currentArmPose = observation_.state.segment(12+12,num_arm_joints_);
+      // 起点取 obs 末尾的当前臂位。obs 布局: [6动量][6base][腿][腰][臂]，臂恒在尾部；
+      // 简化模型下 controller 同样把完整臂段填到 state.tail(armNumReal_)，故三机型通用。
+      vector_t currentArmPose = observation.state.tail(num_arm_joints_);
+
       vector_t targetPose = currentPose;
       // targetPose(0) = headBodyPose_.body_x;
       // targetPose(1) = headBodyPose_.body_y;
@@ -273,8 +276,8 @@ class VRHandCommandNode {
 
       // desired state trajectory
       vector_array_t stateTrajectory(2, vector_t::Zero(num_arm_joints_));
-      stateTrajectory[0] << currentArmPose;
-      stateTrajectory[1] << armJointState;
+      stateTrajectory[0] = currentArmPose;
+      stateTrajectory[1] = armJointState;
 
       // desired input trajectory (just right dimensions, they are not used)
       const vector_array_t inputTrajectory(2, vector_t::Zero(observation.input.size()));

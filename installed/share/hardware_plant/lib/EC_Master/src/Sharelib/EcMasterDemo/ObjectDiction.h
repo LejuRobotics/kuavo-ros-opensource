@@ -20,11 +20,16 @@
 #define JOINT_CSV_KP 0x3504   //速度环P增益
 #define JOINT_CSV_KI 0x3505   //速度环积分增益
 #define JOINT_CSP_OFFSET 0x3502  //位置环前馈
-#define JOINT_CSP_COMMAND_FILTER 0x3532  //位置指令滤波
+#define JOINT_CSP_COMMAND_FILTER 0x3520  //位置指令滤波
 #define ENCODER_FEEDBACK_MODE 0x381C  //编码器工作模式
 #define MOTOR_PARAMETER_CODE 0x3E01 //电机参数代码
 #define DRIVER_SAVE_SETTING_PARAMETER 0x313D  //驱动器保存参数
 
+
+/*-------------LEJU / SELFD-------------------------*/
+#define LEJU_JOINT_CSP_KP 0x3A16   //位置环P增益 (REAL32)
+#define LEJU_JOINT_CSV_KP 0x3A17   //速度环P增益 (REAL32)
+#define LEJU_JOINT_CSV_KI 0x3A18   //速度环积分增益
 
 /*-------------ELMO-------------------------*/
 #define ELMO_VENDOR_ID 0x0000009A

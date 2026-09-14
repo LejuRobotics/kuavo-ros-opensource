@@ -96,7 +96,7 @@ case_doubao_leju_kuavo() {
     # -------------------------- 步骤1：清理旧进程（不变） --------------------------
     echo -e "\033[33m【步骤1/5】清理所有旧ROS进程\033[0m"
     # 本地清理
-    pkill -f "play_music.launch|play_music_node|audio_stream_player_node" >/dev/null 2>&1
+    pkill -f "play_music.launch|audio_player_node|audio_player.py" >/dev/null 2>&1
     rm -f $LOWER_LOG  # 删除旧下位机日志
     sleep 2
     success "本地旧进程清理完成"
@@ -150,18 +150,19 @@ case_doubao_leju_kuavo() {
             source /home/lab/kuavo-ros-opensource/devel/setup.bash
             export ROS_MASTER_URI=http://kuavo_master:11311
             export ROS_IP=192.168.26.1
-            rosnode list 2>/dev/null | grep -E 'audio_stream_player_node|play_music_node' | wc -l
-        ")
-        if [ "$NODE_EXISTS" -eq 2 ]; then
+            nodes=\$(rosnode list 2>/dev/null)
+            echo \"\$nodes\" | grep -q 'audio_player_node'
+        " && echo 1 || echo 0)
+        if [ "$NODE_EXISTS" -eq 1 ]; then
             success "下位机启动成功！\n"
             break
         else
-            info "第 $CHECK_COUNT/$MAX_CHECK 次检测：当前存在 $NODE_EXISTS/2 个节点，2秒后重试..."
+            info "第 $CHECK_COUNT/$MAX_CHECK 次检测：音频节点未就绪，2秒后重试..."
             sleep 2
         fi
     done
 
-    if [ "$NODE_EXISTS" -ne 2 ]; then
+    if [ "$NODE_EXISTS" -ne 1 ]; then
         kill -9 "$LOWER_PID" >/dev/null 2>&1
         error "下位机启动失败！查看日志：cat $LOWER_LOG"
         return 1
@@ -265,7 +266,7 @@ case_doubao_kuavo() {
     # 上位机清理
     sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
         "$CURRENT_SSH_USER@$UPPER_IP" "
-        pkill -f 'play_music.launch|play_music_node|audio_stream_player_node|receive_voice.launch|micphone_receiver_node|python3 src/kuavo_doubao_model/start_communication.py' >/dev/null 2>&1
+        pkill -f 'play_music.launch|audio_player_node|audio_player.py|receive_voice.launch|micphone_receiver_node|python3 src/kuavo_doubao_model/start_communication.py' >/dev/null 2>&1
         rm -f $MIC_LOG $MAIN_LOG
         sleep 2
         echo '[上位机] 旧进程和日志清理完成'
@@ -307,9 +308,10 @@ case_doubao_kuavo() {
         source /opt/ros/noetic/setup.bash
         export ROS_MASTER_URI=http://kuavo_master:11311
         export ROS_IP=192.168.26.12
-        NODE_EXISTS=\$(rosnode list 2>/dev/null | grep -wE 'audio_stream_player_node|play_music_node' | wc -l)
-        [ \$NODE_EXISTS -eq 2 ] && echo 1 || echo 0
-    ")
+        nodes=\$(rosnode list 2>/dev/null)
+        echo \"\$nodes\" | grep -q 'audio_player_node' && exit 0
+        exit 1
+    " && echo 1 || echo 0)
 
     if [ "$VERIFY_RESULT" -eq 1 ]; then
         success "音响节点验证正常！\n"
@@ -384,8 +386,7 @@ case_doubao_kuavo() {
     # 清理麦克风
     [ -n "$MIC_PID" ] && sshpass -p "$SSH_PASS" ssh -o ConnectTimeout=10 \
         "$CURRENT_SSH_USER@$UPPER_IP" "rosnode kill /micphone_receiver_node 2>/dev/null;
-        rosnode kill /audio_stream_player_node 2>/dev/null;
-        rosnode kill /play_music_node 2>/dev/null;
+        rosnode kill /audio_player_node 2>/dev/null;
         rosnode kill /doubao_communication_node 2>/dev/null"
 
     # 清理下位机

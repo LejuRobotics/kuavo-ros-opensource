@@ -172,15 +172,22 @@ class TorsoController:
         self._first_click_release_t: Optional[float] = None
         self._reset_cooldown_until = 0.0
         self._reset_busy_until = 0.0
+        self._pending_post_reset_pose = False
         # True after a non-zero /cmd_torso_vel publish; used to emit a single zero to clear ReferenceManager velocity latch.
         self._latched_vel_active = False
 
     def handle_joystick(self, msg) -> None:
         l_pressed, r_pressed, l_released, r_released = self._get_grip_states(msg)
         now = self._clock()
+        busy_eps = 1e-6
+
+        # 复位窗口结束后再发绝对零位（SDK/观测）；紧接在服务后发布会抢先清零 RM 开环起点 → 复位过快
+        if self._pending_post_reset_pose and now + busy_eps >= self._reset_busy_until:
+            self._publish_torso_pose()
+            self._pending_post_reset_pose = False
 
         # 复位轨迹未完成前不接受新的摇杆/按键控制，避免覆盖复位目标。
-        if now < self._reset_busy_until:
+        if now + busy_eps < self._reset_busy_until:
             self._l_was_pressed = l_pressed
             self._r_was_pressed = r_pressed
             return
@@ -207,8 +214,7 @@ class TorsoController:
             return
 
         if reset_triggered:
-            # 复位成功后同步发一次绝对零位（SDK/观测兼容）；服务本身已复位
-            self._publish_torso_pose()
+            self._pending_post_reset_pose = True
             self._l_was_pressed = l_pressed
             self._r_was_pressed = r_pressed
             return

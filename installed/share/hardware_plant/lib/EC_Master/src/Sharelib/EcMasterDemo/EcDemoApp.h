@@ -31,6 +31,7 @@
 #include <vector>
 #include <atomic>
 /*-DEFINES-------------------------------------------------------------------*/
+
 #define EC_DEMO_APP_NAME (EC_T_CHAR *)"EcMasterDemoDc"
 
 /* the RAS server is necessary to support the EC-Engineer or other remote applications */
@@ -147,6 +148,7 @@ typedef struct
   int32_t velocity_actual_value;
   int16_t torque_demand_raw;
   uint16_t error_code;
+  uint64_t padding;
 } SELFD_SlaveRead_t;
 
 typedef struct
@@ -160,6 +162,8 @@ typedef struct
   int32_t position_offset;
   int32_t velocity_offset;
   int16_t torque_offset;
+  int32_t position_kp;
+  int32_t velocity_kp;
 } SELFD_SlaveWrite_t;
 
 #pragma pack()
@@ -271,9 +275,71 @@ extern int motorReadKd(const std::vector<uint16_t> &ids, EcMasterType driver_typ
 extern int motorWriteKp(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kp);
 extern int motorWriteKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kd);
 
+/**
+ * @brief 向YD驱动器写入温度限幅值（对象索引0x3F0D）
+ * @param ids EC从站ID列表（1-based）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limits 温度限幅值列表（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示写入失败，3表示参数尺寸不匹配
+ */
+extern int motorWriteTemperatureLimit(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& temp_limits);
+
+/**
+ * @brief 向所有YD驱动器写入统一的温度限幅值（对象索引0x3F0D）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limit 温度限幅值（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示有写入失败
+ */
+extern int motorWriteTemperatureLimitAll(EcMasterType driver_type, int32_t temp_limit);
+
 extern bool isMotorEnable(void);
 extern uint32_t getNumMotorSlave(void);
 void setEcEncoderRange(uint32_t *encoder_range_set, uint16_t num);
+
+/**
+ * @brief 读取单个从站的 SDO 参数（子索引固定为 0）。
+ *
+ * 注意：当前实现将 SubIndex 参数透传给 emCoeSdoUpload（此前为硬编码 0），
+ * 但返回值**无脑按 32 位拼装**，不区分 emCoeSdoUpload 实际返回长度。
+ * 因此对 16 位对象会吞入未初始化的高位字节。
+ *
+ * 现仅由内部 motorGetConfig/motorReadKp 等读取 kp/kd 等场景使用。
+ * 固件/参数校验模块请改用 readSingleSdo（按 outdata_len 正确拼装）。
+ *
+ * @param SlaveId  从站物理 ID（0-based，与 emCoeSdoUpload 一致）
+ * @param ObIndex  对象字典索引（如 0x3020 固件版本、0x3507 工作模式）
+ * @param SubIndex 子索引
+ * @param read_data 输出：读取到的 int32 值
+ * @return true 读取成功；false 读取失败（超时/对象不存在等）
+ */
+bool ReadSingleSdo(const uint8_t SlaveId, const uint16_t ObIndex, const uint16_t SubIndex, int32_t &read_data);
+
+/**
+ * @brief 读取单个从站的 SDO 参数（支持任意子索引）。
+ *
+ * 与 ReadSingleSdo 不同，本函数按 emCoeSdoUpload 实际返回长度 outdata_len
+ * 拼装：16 位对象取 buf[0..1]，32 位对象取全 4 字节。对 16 位对象安全。
+ * 供固件/参数校验模块（EcFirmwareParamCheck）及 ec_master_tools 口径使用。
+ *
+ * @param SlaveId 从站物理 ID（0-based）
+ * @param ObIndex 对象字典索引
+ * @param SubIndex 子索引
+ * @param read_data 输出：读取到的 int32 值
+ * @return true 读取成功；false 读取失败
+ */
+bool readSingleSdo(const uint8_t SlaveId, const uint16_t ObIndex, const uint16_t SubIndex, int32_t *read_data);
+
+/**
+ * @brief 获取第 i 个 EC 电机从站的物理从站 ID（1-based，与驱动器枚举顺序一致）。
+ *
+ * 校验模块按 EC 从站枚举顺序遍历，调用此接口得到 slave_id 后
+ * （-1 转为 0-based）传给 readSingleSdo。
+ *
+ * @param index 电机在 g_motor_id 数组中的下标（0-based，< getNumMotorSlave()）
+ * @return 从站物理 ID（1-based）；index 越界时返回 0
+ */
+uint8_t getMotorSlaveId(uint32_t index);
+
 
 // void motorGetCurrent(double *current_actual);
 bool loadOffset();

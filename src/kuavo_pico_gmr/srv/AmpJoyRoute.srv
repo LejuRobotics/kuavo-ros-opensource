@@ -1,0 +1,26 @@
+uint8 ACTION_PREPARE=1
+uint8 ACTION_STATUS=2
+uint8 ACTION_ABORT=3
+
+uint8 REASON_CONTROLLER_EVENT=1
+uint8 REASON_CONTROLLER_QUERY=2
+uint8 REASON_SET_TOPIC_RECOVERY=3
+uint8 REASON_CONVERTER_RECOVERY=4
+
+uint8 action
+string manager_epoch
+uint64 route_generation
+uint8 reason
+uint64 controller_event_revision
+time controller_event_stamp
+string from_controller
+string to_controller
+---
+bool success
+bool ready
+bool target_connected
+bool local_barrier_established
+uint8 output_button_count
+string manager_epoch
+uint64 route_generation
+string message

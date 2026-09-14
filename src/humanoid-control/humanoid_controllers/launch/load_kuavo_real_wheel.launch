@@ -68,9 +68,16 @@
     <arg name="use_external_odom_tf" default="$(arg real)"/>
     <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
     <arg name="enable_base_emergency_stop" default="true"/>
-    
+    <!-- modbus io bridge -->
+    <arg name="with_modbus_io_bridge" default="true"/>
+    <arg name="relay_port" default="/dev/kuavo_relay"/>
+    <arg name="pressure_port" default="/dev/kuavo_pressure"/>
+    <arg name="pressure_publish_rate" default="1.0"/>
+
     <!-- teach_pendant -->
     <arg name="teach_pendant" default="0"/>
+    <arg name="lejuclaw_high_freq_switch" default="false" doc="Use high-frequency continuous claw control by default; a live /quest_joystick_data stream also enables it."/>
+    <arg name="lejuclaw_vr_stream_timeout_ms" default="1000" doc="Timeout in ms before the Quest joystick stream is considered inactive."/>
     
     <!-- wheel bridge -->
     <arg name="use_wheel_bridge" default="true" if="$(eval arg('robot_version') == 60)"/>
@@ -162,6 +169,8 @@
 
     <param name="hardware/is_ready" value="0"/>
     <param name="hardware/ready_to_start" value="0"/>
+    <param name="lejuclaw_high_freq_switch" value="$(arg lejuclaw_high_freq_switch)"/>
+    <param name="lejuclaw_vr_stream_timeout_ms" value="$(arg lejuclaw_vr_stream_timeout_ms)" type="int"/>
    
     <!-- <group unless="$(arg ruiwo_cxx_sdk)">
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodelet nodelet_manager" respawn="false" output="screen" required="true"  />
@@ -208,6 +217,16 @@
     <group if="$(arg output_system_info)">
       <node pkg="humanoid_controllers" type="system_info_publisher.py" name="system_info_publisher"/>
     </group>
+
+    <group if="$(arg with_modbus_io_bridge)">
+      <node pkg="humanoid_controllers" type="start_modbus_io_bridge.sh" name="modbus_io_bridge_node" output="screen"
+            args="$(arg pressure_port)">
+        <param name="relay_port" value="$(arg relay_port)"/>
+        <param name="pressure_port" value="$(arg pressure_port)"/>
+        <param name="pressure_publish_rate" value="$(arg pressure_publish_rate)"/>
+      </node>
+    </group>
+
     <!-- monitor node -->
     <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
 

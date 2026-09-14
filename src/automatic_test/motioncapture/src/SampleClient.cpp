@@ -602,27 +602,27 @@ void DataHandler(sFrameOfMocapData *data, void *pUserData)
             }
             else if (rbName == "r_hand_pose")
             {
-                publishers->rigid_body_r_hand_pose_pub.publish(rb_pose);
+                publishers->rigid_body_r_hand_pose_pub.publish(rb_pose_stamped.pose);
             }
             else if (rbName == "l_hand_pose")
             {
-                publishers->rigid_body_l_hand_pose_pub.publish(rb_pose);
+                publishers->rigid_body_l_hand_pose_pub.publish(rb_pose_stamped.pose);
             }
             else if (rbName == "waist_pose")
             {
-                publishers->rigid_body_waist_pose_pub.publish(rb_pose);
+                publishers->rigid_body_waist_pose_pub.publish(rb_pose_stamped.pose);
             }
             else if (rbName == "r_shoulder_pose")
             {
-                publishers->rigid_body_r_shoulder_pose_pub.publish(rb_pose);
+                publishers->rigid_body_r_shoulder_pose_pub.publish(rb_pose_stamped.pose);
             }
             else if (rbName == "l_shoulder_pose")
             {
-                publishers->rigid_body_l_shoulder_pose_pub.publish(rb_pose);
+                publishers->rigid_body_l_shoulder_pose_pub.publish(rb_pose_stamped.pose);
             }
             else if (rbName == "head_pose")
             {
-                publishers->rigid_body_head_pose_pub.publish(rb_pose);
+                publishers->rigid_body_head_pose_pub.publish(rb_pose_stamped.pose);
             }
             else
             {

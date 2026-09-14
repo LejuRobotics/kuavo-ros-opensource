@@ -20,6 +20,7 @@
         <param name="camera_frame"       value="$(arg camera_frame)"/>
         <param name="marker_frame"       value="$(arg marker_frame)" />
         <param name="corner_refinement"  value="$(arg corner_refinement)" />
+        <param name="image_transport"  value="compressed" />
     </node>
 
 </launch>

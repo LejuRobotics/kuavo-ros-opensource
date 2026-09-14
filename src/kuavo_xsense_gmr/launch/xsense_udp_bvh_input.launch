@@ -1,0 +1,57 @@
+<launch>
+  <arg name="default_bvh_remote_path" default=""/>
+  <arg name="default_remote_user" default=""/>
+  <arg name="bvh_path" default="~/bvh/caoleibiaodingbvh.bvh"/>
+  <arg name="local_bvh_dir" default="~/bvh"/>
+  <arg name="local_bvh_path" default=""/>
+  <arg name="remote_port" default="22"/>
+  <arg name="ssh_key" default=""/>
+  <arg name="connect_timeout_sec" default="10"/>
+  <arg name="scp_timeout_sec" default="60"/>
+  <arg name="ssh_batch_mode" default="true"/>
+  <arg name="bvh_topic" default="/xsense/bvh_seg_desc"/>
+  <arg name="bvh_frame_id" default="xsense_bvh"/>
+  <arg name="bvh_unit_hint" default="cm"/>
+  <arg name="bvh_publish_repeat_count" default="3"/>
+  <arg name="bvh_publish_repeat_interval" default="0.2"/>
+
+  <arg name="listen_ip" default="0.0.0.0"/>
+  <arg name="listen_port" default="9763"/>
+  <arg name="expected_character_id" default="-1"/>
+  <arg name="summary_rate_limit_hz" default="20.0"/>
+  <arg name="receive_timeout_ms" default="100"/>
+  <arg name="fragment_timeout_s" default="1.0"/>
+  <arg name="pose_topic" default="/xsense/world_bone_poses"/>
+  <arg name="summary_topic" default="/xsense/packet_summary"/>
+  <arg name="pose_frame_id" default="xsens_bvh"/>
+
+  <node pkg="kuavo_xsense_gmr" type="xsense_bvh_desc_publisher.py" name="xsense_bvh_desc_publisher" output="screen" required="true">
+    <param name="default_bvh_remote_path" value="$(arg default_bvh_remote_path)"/>
+    <param name="default_remote_user" value="$(arg default_remote_user)"/>
+    <param name="bvh_path" value="$(arg bvh_path)"/>
+    <param name="local_bvh_dir" value="$(arg local_bvh_dir)"/>
+    <param name="local_bvh_path" value="$(arg local_bvh_path)"/>
+    <param name="remote_port" value="$(arg remote_port)"/>
+    <param name="ssh_key" value="$(arg ssh_key)"/>
+    <param name="connect_timeout_sec" value="$(arg connect_timeout_sec)"/>
+    <param name="scp_timeout_sec" value="$(arg scp_timeout_sec)"/>
+    <param name="ssh_batch_mode" value="$(arg ssh_batch_mode)"/>
+    <param name="topic_name" value="$(arg bvh_topic)"/>
+    <param name="frame_id" value="$(arg bvh_frame_id)"/>
+    <param name="unit_hint" value="$(arg bvh_unit_hint)"/>
+    <param name="publish_repeat_count" value="$(arg bvh_publish_repeat_count)"/>
+    <param name="publish_repeat_interval" value="$(arg bvh_publish_repeat_interval)"/>
+  </node>
+
+  <node pkg="kuavo_xsense_gmr" type="xsense_udp_receiver_node" name="xsense_udp_receiver_node" output="screen" required="true">
+    <param name="listen_ip" value="$(arg listen_ip)"/>
+    <param name="listen_port" value="$(arg listen_port)"/>
+    <param name="expected_character_id" value="$(arg expected_character_id)"/>
+    <param name="summary_rate_limit_hz" value="$(arg summary_rate_limit_hz)"/>
+    <param name="receive_timeout_ms" value="$(arg receive_timeout_ms)"/>
+    <param name="fragment_timeout_s" value="$(arg fragment_timeout_s)"/>
+    <param name="pose_topic" value="$(arg pose_topic)"/>
+    <param name="summary_topic" value="$(arg summary_topic)"/>
+    <param name="frame_id" value="$(arg pose_frame_id)"/>
+  </node>
+</launch>

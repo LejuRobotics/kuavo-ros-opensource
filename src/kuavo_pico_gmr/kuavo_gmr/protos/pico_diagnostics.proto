@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+message ClockSyncRequest {
+  uint32 protocol_version = 1;
+  bytes session_uuid = 2;
+  uint64 sync_sequence = 3;
+}
+
+message ClockSyncResponse {
+  uint32 protocol_version = 1;
+  bytes session_uuid = 2;
+  uint64 sync_sequence = 3;
+  fixed64 ubuntu_send_monotonic_ns = 4;
+  fixed64 pico_receive_monotonic_ns = 5;
+}
+
+message ClockModelStatus {
+  uint32 clock_model_version = 1;
+  bool valid = 2;
+  double slope = 3;
+  sint64 offset_ns = 4;
+  uint32 sample_count = 5;
+  fixed64 last_sync_rtt_ns = 6;
+  sint64 last_residual_ns = 7;
+  fixed64 residual_p95_ns = 8;
+}
+
+message DiagnosticResult {
+  uint32 protocol_version = 1;
+  bytes session_uuid = 2;
+  uint32 stream = 3;
+  uint64 packet_sequence = 4;
+  uint64 stream_sequence = 5;
+  ClockModelStatus clock_model = 6;
+  bool latency_valid = 7;
+  fixed64 one_way_latency_ns = 8;
+  uint64 window_received_packets = 9;
+  uint64 window_lost_packets = 10;
+  double window_loss_rate = 11;
+  uint64 total_received_packets = 12;
+  uint64 total_lost_packets = 13;
+  double total_loss_rate = 14;
+  uint64 out_of_order_packets = 15;
+  uint64 duplicate_packets = 16;
+  uint64 queue_dropped_packets = 17;
+  uint64 parse_failed_packets = 18;
+  uint64 unauthorized_dropped_packets = 19;
+}
+
+message StreamSendSummary {
+  uint32 stream = 1;
+  uint64 last_stream_sequence = 2;
+  uint64 socket_send_success_packets = 3;
+  uint64 socket_send_failed_packets = 4;
+}
+
+message PicoSenderSummary {
+  uint32 protocol_version = 1;
+  bytes session_uuid = 2;
+  uint64 summary_sequence = 3;
+  bool final = 4;
+  uint64 last_packet_sequence = 5;
+  uint64 socket_send_success_packets = 6;
+  uint64 socket_send_failed_packets = 7;
+  repeated StreamSendSummary streams = 8;
+}

@@ -88,9 +88,13 @@ bool success
 
 | 服务名 | 类型 | 说明 |
 |--------|------|------|
-| `/control_led` | SetLEDMode | 控制10个LED灯的颜色和模式 |
-| `/control_led_free` | SetLEDMode_free | 使用Color消息数组的LED控制服务（推荐） |
-| `/close_led` | Trigger | 关闭所有LED灯 |
+| `/control_led` | SetLEDMode | 控制10个LED灯的颜色和模式（ROBOT_VERSION < 52） |
+| `/control_led_free` | SetLEDMode_free | 使用Color消息数组的LED控制服务（ROBOT_VERSION < 52） |
+| `/close_led` | Trigger | 关闭所有LED灯（ROBOT_VERSION < 52） |
+| `/led_strip_set_mode_and_color` | SetLEDMode_free | 控制24个LED灯的颜色和模式（ROBOT_VERSION 52-59） |
+| `/led_strip_close` | Trigger | 关闭所有LED灯（ROBOT_VERSION 52-59） |
+| `/get_battery_info` | GetBatteryInfo | 查询电池信息 |
+| `/_query_battery_hw` | GetBatteryInfo | 内部服务，由 LED 节点提供，battery_info_node 通过该服务获取电池硬件数据 |
 
 ### 显示模式说明
 
@@ -285,28 +289,49 @@ rosservice call /get_battery_info "battery_id: 1"
 ```
 
 ### 启动参数
-在 `set_led_mode.launch` 中可配置以下参数：
+
+**set_led_mode.launch**：
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `LED` | `enable` | 是否启动LED节点 |
+| `ROBOT_VERSION` | `52` | 机器人版本，52-59 启动新 LED Strip 服务，其余版本启动旧 LED 控制器 |
+
+**battery_info.launch**：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
 | `BATTERY` | `enable` | 是否启动电池节点 |
-| `port` | `/dev/ttyLED0` | 串口设备路径（电池节点） |
-| `baudrate` | `115200` | 波特率（电池节点） |
+| `backend` | `serial` | `serial`=电池节点直接打开串口；`ros_service`=通过 LED 节点的 `_query_battery_hw` 服务获取数据（与 LED 共存时使用） |
+| `port` | `/dev/ttyLED0` | 串口设备路径（仅 `backend=serial` 时生效） |
+| `baudrate` | `115200` | 波特率（仅 `backend=serial` 时生效） |
 | `publish_rate` | `1.0` | 电池信息发布频率 (Hz) |
 
-**灵活启动方式**：
-```bash
+**load_kuavo_real.launch**（全局参数）：
 
-# 启动LED
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `with_led` | `true` | 是否启用 LED |
+| `with_battery` | `false` | 是否启用电池信息 |
+
+**启动方式**：
+
+```bash
+# 方式一：仅 LED
 roslaunch kuavo_led_controller set_led_mode.launch
 
-# 启动电池
+# 方式二：仅电池
 roslaunch kuavo_led_controller battery_info.launch
 
-# 启动机器人时启动
-roslaunch humanoid_controllers load_kuavo_real.launch with_battery:=true（默认关闭）
+# 方式三：LED + 电池同时启用（必须传 backend:=ros_service 避免串口冲突）
+roslaunch kuavo_led_controller set_led_mode.launch
+roslaunch kuavo_led_controller battery_info.launch backend:=ros_service
+
+# 方式四：通过 load_kuavo_real.launch 统一调度（推荐，backend 自动设置）
+roslaunch humanoid_controllers load_kuavo_real.launch with_led:=true with_battery:=true
 ```
+
+> **注意**：分启 LED 和电池两个 launch 时，`battery_info.launch` 默认 `backend=serial` 会尝试独立打开 `/dev/ttyLED0`，与 LED 节点冲突。必须显式传 `backend:=ros_service`。推荐通过 `load_kuavo_real.launch` 统一调度，`with_led=true with_battery=true` 时自动设置 `backend=ros_service`。
 
 
 ## 硬件说明
@@ -324,4 +349,9 @@ roslaunch humanoid_controllers load_kuavo_real.launch with_battery:=true（默�
    - 该电源板同时支持LED控制和电池读取功能
    - 不适用于Roban机器人的独立LED板（ID: `1a86:55d3`）
 
-2. **串口共享**：LED和电池节点共用同一个串口设备 `/dev/ttyLED0`，实测多进程访问无冲突
+2. **串口共享**：LED和电池节点共用同一个串口设备 `/dev/ttyLED0`。Linux 内核禁止多进程同时持有 TTY 设备的独占锁，因此两个独立节点不可各自直接打开串口。本包的解决方案：
+   - LED 节点通过 `SerialPort` 单例持有串口，后台 `_read_loop` daemon 线程持续将硬件 UART 数据读入共享缓冲区 `_read_buffer`
+   - `battery_query.py` 通过 `BatteryQueryCache` 后台线程以 `try_lock` 方式查询电池硬件并缓存结果，不阻塞 LED 操作
+   - LED 节点提供的 `_query_battery_hw` 内部服务直接返回缓存，瞬时响应（不获取锁，不访问串口），确保音频呼吸灯等实时 LED 控制永不延迟
+   - `battery_info_node` 通过 `backend` 参数选择：`backend=serial` 直接打开串口（仅电池模式），`backend=ros_service` 通过 LED 节点的 `_query_battery_hw` 服务获取缓存数据（LED+电池共存模式）
+   - `battery_query.py` 内置 `_validate_battery_response` 对 35 字节应答包做长度字段 + 校验和二次验证，防止共享缓冲区中 LED 残留数据误匹配为电池数据

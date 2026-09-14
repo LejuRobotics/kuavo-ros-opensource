@@ -1,0 +1,64 @@
+# 末端 l_hand / r_hand 动捕精度测试配置
+
+teach:
+  left_json: ../teach_capture_output/teach_left_joint_test.json
+  right_json: ../teach_capture_output/teach_right_joint_test.json
+  skip_first_last: false  # true 时跳过首尾零位关键点
+
+# Motive 刚体话题（OptiTrack: PoseStamped；Nokov 可能为 Pose）
+# link_offset_mm：URDF link 系 [x,y,z] (mm)，与 Motive Y-up/Z-up 显示无关
+mocap_bodies:
+  - name: l_hand
+    topic: /l_hand_pose
+    msg_type: PoseStamped
+    link_offset_mm: [0.0, -0.5, 55.4]   # zarm_l7_end_effector 系
+  - name: r_hand
+    topic: /r_hand_pose
+    msg_type: PoseStamped
+    link_offset_mm: [0.0, 0.5, 55.4]
+  - name: torso
+    topic: /torso_pose
+    msg_type: PoseStamped
+    link_offset_mm: [122.02, -45.82, 2.5]   # waist_yaw_link 系
+
+# Motive torso 刚体系 → URDF waist_yaw_link 系（对比 TF 前施加）
+# 若报告 dy≈±500mm 且 dx/dz 正常，多为 Y 轴反向，用 axis_flip: [1, -1, 1]
+# 根治：在 Motive 里重对齐 torso 刚体轴向后设 enabled: false
+mocap_frame_align:
+  enabled: true
+  axis_flip: [1, -1, 1]
+
+# TF：torso 动捕 link 对应 waist_yaw_link
+tf:
+  parent_frame: waist_yaw_link
+  left_child_frame: zarm_l7_end_effector
+  right_child_frame: zarm_r7_end_effector
+  lookup_timeout_sec: 2.0
+
+# 双臂下发（wheel62）
+robot:
+  robot_layout: wheel62
+  sensor_topic: /sensors_data_raw
+  arm_traj_topic: /kuavo_arm_traj
+  left_start_index: 4
+  right_start_index: 11
+  dt: 0.01
+  move_duration: 2.0
+  hold_sec: 5.0          # 到位后静止时长，再采集
+  mocap_collect_sec: 1.0
+  startup_align_sec: 2.0
+  return_to_zero_sec: 2.0
+  wait_sensors_timeout: 30.0
+  set_external_control_mode: true
+  enable_arm_quick_mode: true
+  enable_arm_traj_interpolator: true
+
+# 动捕滤波与报告
+processing:
+  sigma: 3.0
+  warn_threshold_mm: 5.0
+
+output:
+  # 相对本模块目录；留空则自动生成 hand_accuracy_report_<timestamp>
+  json_path: ""
+  csv_path: ""

@@ -10,6 +10,7 @@
 #include <yaml-cpp/yaml.h>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <pwd.h>
 #include <unistd.h>
 #include <iostream>
@@ -26,6 +27,7 @@ class LeJuClaw
     
      enum class PawMoveState  : int8_t {
         ERROR = -1,                       // 出现错误
+        STREAM_EXPIRED = -2,              // 高频控制流断流（看门狗触发，安全停机）
         LEFT_REACHED_RIGHT_REACHED = 0,   // 所有夹爪到位
         LEFT_REACHED_RIGHT_GRABBED = 1,   // 左夹爪到位，右夹爪抓取到物品
         LEFT_GRABBED_RIGHT_REACHED = 2,   // 右夹爪到位，左夹爪抓取到物品
@@ -64,7 +66,7 @@ public:
     void set_velocity(const std::vector<uint8_t> &index, const std::vector<double> &velocity);
     void set_joint_state(int index, const std::vector<float> &state);
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque);
-    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque, bool is_vr_mode);
+    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque, bool is_high_freq);
     std::vector<std::vector<float>> get_joint_state();
     std::vector<double> get_positions();
     std::vector<double> get_torque();
@@ -77,6 +79,19 @@ public:
     void set_claw_kpkd(int kp, int kd);
     float lowPassFilter(float input, float prevOutput, float alpha);
     void clear_all_torque();
+
+    // ===== 断流看门狗（高频控制流断流 → 安全 PTM 防堵转） =====
+    uint64_t refresh_stream_watchdog();   // 武装+刷新租约（高频命令到达时调用），返回 generation
+    void disarm_stream_watchdog();        // 解除武装（低频命令/关闭时调用）
+    bool stream_watchdog_expired();       // 是否已断流（expired 状态下 move_paw 应立即中止）
+
+    // ===== 真实下发指令回调（观察口，不参与控制） =====
+    // 每次 send_positions 实际下发 PTM 前，把最终参数（含 kp=0 安全 PTM）回报给上层
+    using TxCallback = std::function<void(const std::vector<int>&, const std::vector<float>&,
+                                          const std::vector<float>&, const std::vector<float>&,
+                                          const std::vector<int>&, const std::vector<int>&, bool)>;
+    // 参数：index, pos(%), velocity(%), torque(A), kp, kd, zero_kp
+    void set_tx_callback(TxCallback callback);
 
 private:
     // 控制参数常量
@@ -206,7 +221,11 @@ private:
     int   cfg_CLOSE_IMPACT_DURATION_MS = CLOSE_IMPACT_DURATION_MS;
     int   cfg_CLOSE_IMPACT_INTERVAL_MS = CLOSE_IMPACT_INTERVAL_MS;
     int   cfg_CLOSE_MAX_ATTEMPTS = CLOSE_MAX_ATTEMPTS;
-    
+
+    // 断流看门狗（高频控制流断流超时时间，单位 ms）
+    static constexpr int STREAM_WATCHDOG_TIMEOUT_MS = 500;
+    int cfg_STREAM_WATCHDOG_TIMEOUT_MS = STREAM_WATCHDOG_TIMEOUT_MS;
+
     std::vector<float> create_zero_vector(size_t size);
     void send_torque_with_lock(const std::vector<float>& torques);
     void send_claw_torque_only(const std::vector<float>& torques);  // 发送夹爪电流，左右独立控
@@ -225,7 +244,7 @@ private:
     std::string get_home_path();
     void interpolate_move(const std::vector<float> &start_positions, const std::vector<float> &target_positions, const std::vector<float> &speeds, float dt);
     std::vector<std::vector<float>> interpolate_positions_with_speed(const std::vector<float> &a, const std::vector<float> &b, const std::vector<float> &speeds, float dt);
-    void send_positions(const std::vector<int> &index, const std::vector<float> &pos, const std::vector<float> &torque, const std::vector<float> &velocity);
+    void send_positions(const std::vector<int> &index, const std::vector<float> &pos, const std::vector<float> &torque, const std::vector<float> &velocity, bool zero_kp = false);
     std::vector<int> get_joint_addresses(const YAML::Node &config, const std::string &joint_type, int count);
     std::vector<bool> get_joint_online_status(const YAML::Node &config, const std::string &joint_type, int count);
     std::vector<std::vector<int>> get_joint_parameters(const YAML::Node &config, const std::string &joint_type, int count);
@@ -284,9 +303,8 @@ private:
     std::vector<float> joint_start_positions;  // 行程起点位置
     std::vector<float> joint_end_positions;    // 行程终点位置
     
-    // VR控制相关变量
+    // 控制模式相关变量
     std::chrono::steady_clock::time_point last_target_update_time;  // 上次目标位置更新时间
-    bool is_vr_control_mode;                                        // 是否为VR控制模式
     std::chrono::steady_clock::time_point movement_start_time;      // 运动开始时间
     bool movement_timeout_enabled;                                  // 是否启用运动超时机制
     
@@ -297,6 +315,19 @@ private:
     // move_paw状态记录
     std::vector<double> last_move_paw_target_positions;           // 上次move_paw调用的目标位置（百分比0-100）
     std::vector<bool> last_exit_with_grip_current;                 // 上次退出时是否处于维持夹持电流状态
+
+    // 断流看门狗状态
+    bool stream_watchdog_armed_ = false;                          // 是否已武装（高频流活跃期间为 true）
+    bool stream_watchdog_expired_ = false;                        // 是否已断流超时
+    bool force_zero_kp_once_ = false;                             // 下一次发送位置指令时强制 kp=0（安全 PTM）
+    uint64_t stream_generation_ = 0;                              // 租约代数（latest-wins 备用）
+    std::chrono::steady_clock::time_point last_stream_command_time_;  // 最后一次高频命令到达时间
+    std::mutex stream_watchdog_mutex_;                            // 保护看门狗状态
+
+    // 真实下发指令回调（观察口）：send_positions 在实际下发前调用，report 最后真实指令
+    // 安装可能与控制线程并发调用（setTargetCallback/initialize 时线程已在跑），拷贝到栈上再调用
+    std::mutex tx_callback_mutex_;
+    TxCallback tx_callback_;
 };
 
 #endif // LEJUCLAW_CPP_H

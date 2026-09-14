@@ -1,5 +1,5 @@
 import rospy
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CameraInfo, CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import os
@@ -39,7 +39,7 @@ def image_callback(msg):
 
     try:
         # 将 ROS 图像消息转换为 OpenCV 格式
-        cv_image = bridge.imgmsg_to_cv2(msg, "bgr8")
+        cv_image = bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
         if cv_image.size == 0:
             rospy.logerr("Converted color image has zero size.")
         else:
@@ -78,7 +78,7 @@ def timer_callback(event):
 
 def main():
     rospy.init_node('image_subscriber_downstream', anonymous=True)
-    rospy.Subscriber("/camera/color/image_raw", Image, image_callback)
+    rospy.Subscriber("/camera/color/image_raw/compressed", CompressedImage, image_callback)
     rospy.Subscriber('/camera/depth/image_rect_raw', Image, depth_callback)
 
     # 设置一个3秒的定时器

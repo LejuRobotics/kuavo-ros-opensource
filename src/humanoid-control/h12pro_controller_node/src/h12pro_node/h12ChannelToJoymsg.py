@@ -123,6 +123,9 @@ class H12ToJoyControllerNode:
         # C+D长按急停检测状态
         self.cd_emergency_triggered = False
         self.cd_press_start_time = None
+        # G+H同时极值2秒复位：仅脉冲触发一次，避免按住期间持续置位 M2
+        self.gh_press_start_time = None
+        self.gh_reset_triggered = False
 
         self.callback_frequency = 100  # Hz
         self.last_time = time.time()
@@ -228,10 +231,14 @@ class H12ToJoyControllerNode:
         if safe_enabled and g_at_extreme and h_at_extreme:
             if not hasattr(self, 'gh_press_start_time') or self.gh_press_start_time is None:
                 self.gh_press_start_time = time.time()
-            elif time.time() - self.gh_press_start_time >= 2.0:
+            elif (not self.gh_reset_triggered and
+                  time.time() - self.gh_press_start_time >= 2.0):
                 self.joy_msg.buttons[BUTTON_M2] = 1
+                self.gh_reset_triggered = True
+                rospy.logwarn("[G12] G+H torso reset TRIGGERED (one-shot)!")
         else:
             self.gh_press_start_time = None
+            self.gh_reset_triggered = False
 
 if __name__ == '__main__':
     rospy.init_node('joy_node')

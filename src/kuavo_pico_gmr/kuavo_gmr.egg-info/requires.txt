@@ -1,0 +1,16 @@
+loop_rate_limiters
+mink
+mujoco
+numpy
+scipy
+qpsolvers[proxqp]
+rich
+tqdm
+opencv-python
+natsort
+psutil
+protobuf
+redis[hiredis]
+imageio[ffmpeg]
+pandas
+bagpy

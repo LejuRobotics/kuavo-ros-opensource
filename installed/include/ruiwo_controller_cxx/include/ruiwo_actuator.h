@@ -141,6 +141,8 @@ public:
      * 2: 严重错误!!! 严重错误!!! 返回 2 时说明有电机存在严重故障码(RuiwoErrorCode 中大于 128 的故障码)
      */
     int disable() override;
+    // 非虚接口：标定要求所有有效电机失能成功，不改变原有虚函数表
+    int disableForCalibration();
 
     /**
      * @brief 对指定 index 的电机执行 Enter Reset State 进入 Reset State 运行模式，即失能电机
@@ -261,6 +263,7 @@ public:
     }
 
 private:
+    int disableImpl(bool require_all_success);
     void go_to_zero();
     void set_zero();
     void multi_turn_zeroing(const std::vector<int>& dev_ids);

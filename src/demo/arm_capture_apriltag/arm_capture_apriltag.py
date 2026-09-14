@@ -3,7 +3,22 @@
 import rospy
 from kuavo_msgs.msg import AprilTagDetectionArray
 import math
-import numpy as np  # 引入numpy库用于数值计算
+import os
+import sys
+import numpy as np
+import rospkg
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    _kuavo_common_python = os.path.join(rospkg.RosPack().get_path('kuavo_common'), 'python')
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError):
+    _kuavo_common_python = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../kuavo_common/python'))
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
 
 import time
 import argparse
@@ -406,22 +421,18 @@ def main():
     # 获取机器人版本
     robot_version = get_parameter('robot_version')
     #不同型号机器人的初始位置 (机器人坐标系)
-    def start_with_version(version_number:int, series:int):
-        """判断版本号是否属于某系列"""
-        # PPPPMMMMN
-        MMMMN_MASK = 100000
-        return (version_number % MMMMN_MASK) == series
-    if start_with_version(robot_version, 45) or start_with_version(robot_version, 49):
+    rv = RobotVersion.create(int(robot_version))
+    if rv.start_with(4, 5) or rv.start_with(4, 9):
         robot_zero_x = -0.0173
         robot_zero_y = -0.2927
         robot_zero_z = -0.2837
-        
-    elif start_with_version(robot_version, 42):
+
+    elif rv.start_with(4, 2):
         robot_zero_x = -0.0175
         robot_zero_y = -0.25886
         robot_zero_z = -0.20115
 
-    elif start_with_version(robot_version, 52):
+    elif rv.start_with(5, 2):
         robot_zero_x = -0.012
         robot_zero_y = -0.255 + 0.03
         robot_zero_z = -0.315

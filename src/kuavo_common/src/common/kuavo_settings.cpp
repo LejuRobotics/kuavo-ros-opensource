@@ -125,6 +125,8 @@ namespace HighlyDynamic
         running_settings.vr_joint_kd = robot_config.getValue<std::vector<int32_t>>("vr_joint_kd");
         running_settings.vr_ruiwo_kp = robot_config.getValue<std::vector<double>>("vr_ruiwo_kp");
         running_settings.vr_ruiwo_kd = robot_config.getValue<std::vector<double>>("vr_ruiwo_kd");
+        // 温度限幅值（可选，未配置时为空，表示不写入）
+        running_settings.temperature_limit = robot_config.getValueOrDefault<std::vector<int32_t>>("temperature_limit", {});
     }
 
     std::string HardwareSettings::getEcmasterType(RobotVersion rb_version) {

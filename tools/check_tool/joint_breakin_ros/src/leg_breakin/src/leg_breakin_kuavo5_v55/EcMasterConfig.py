@@ -216,15 +216,19 @@ class EcMasterConfig:
         if driver_type == "elmo":
             return f"./config/ENI_config/elmo_{slave_num}_c500.xml"
         elif driver_type == "youda":
-            # 55
-            if self.robot_version == 55:
-                return f"./config/ENI_config/kuavo5_55_version.xml"
-            if self.robot_version == 53:
-                return f"./config/ENI_config/Kuavo5_T26_yangxu.xml"
+            # 53/55 与 actuators_interface / hardware_plant 一致，使用 kpkd_ntc（硬件与 ENI 相同）
+            if self.robot_version in (53, 55):
+                return "./config/ENI_config/Kuavo5_T26_kpkd_ntc.xml"
             return f"./config/ENI_config/Kuavo5_T25_kpkd.xml"
             # return f"./config/ENI_config/yd_{slave_num}_c501.xml"
         elif driver_type == "youda3":
             return f"./config/ENI_config/yd300_{slave_num}_c501.xml"
+        elif driver_type == "leju":
+            # 与 actuators_interface.cpp 中 53/55 + leju 一致
+            return "./config/ENI_config/leju_driver_T27_new.xml"
+        else:
+            print(f"\033[31merror: 不支持的驱动器类型 '{driver_type}'\033[0m", file=sys.stderr)
+            return None
 
     def build_command(self, eni_config_path):
         base_command = [

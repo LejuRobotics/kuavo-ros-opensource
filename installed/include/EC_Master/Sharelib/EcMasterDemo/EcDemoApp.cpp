@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cassert>
 #include <mutex>
+#include <cstring>
 /*-DEFINES-------------------------------------------------------------------*/
 #include "ObjectDiction.h"
 
@@ -30,7 +31,8 @@
 #define YD_VENDOR_ID 0x0000005A
 #define YD_PRODUCT_CODE 0x00000003
 
-#define SELFD_VENDOR_ID 0x0000000A
+#define SELFD_VENDOR_ID 0x00123456
+#define SELFD_VENDOR_ID_LEGACY 0x0000000A
 #define SELFD_PRODUCT_CODE 0x26483062
 
 #define PERF_myAppWorkpd 0
@@ -75,10 +77,11 @@
 #define JOINT_CSV_KP 0x3504   //速度环P增益
 #define JOINT_CSV_KI 0x3505   //速度环积分增益
 #define JOINT_CSP_OFFSET 0x3502  //位置环前馈
-#define JOINT_CSP_COMMAND_FILTER 0x3532  //位置指令滤波
+#define JOINT_CSP_COMMAND_FILTER 0x3520  //位置指令滤波
 #define ENCODER_FEEDBACK_MODE 0x381C  //编码器工作模式
 #define MOTOR_PARAMETER_CODE 0x3E01 //电机参数代码
 #define DRIVER_SAVE_SETTING_PARAMETER 0x313D  //驱动器保存参数
+#define INDEX_TEMPERATURE_LIMIT 0x3F0D  //驱动器温度限幅值（单位：℃，YD驱动器）
 /*-LOCAL VARIABLES-----------------------------------------------------------*/
 static EC_T_PERF_MEAS_INFO_PARMS S_aPerfMeasInfos[MAX_JOB_NUM] =
     {
@@ -276,6 +279,55 @@ clock_t last_restart_time[NUM_SLAVE_MAX] = {0};
 
 static bool g_motor_disabled[NUM_SLAVE_MAX] = {false};  // 被 _disable 的电机Id
 static bool use_anthropomorphic_gait = false;//拟人步态默认关闭
+
+// LEJU kp/kd：上层传 YD 控制域寄存器语义，此处转为 REAL32 浮点增益并以 IEEE754 位型写入 PDO/SDO
+namespace {
+constexpr double kYdAmpKpToLejuFloatDiv = 10.0;   // Kp: gain = yd_kp / 10
+constexpr double kYdVkpRegToLejuKdDiv = 1000.0;   // Kd: gain = yd_kd / 1000 * scale
+// LEJU 速度环增益(对应上层 kd)相对 YD 的电流档比例系数
+constexpr double kLejuKdScale40A = 0.468;
+constexpr double kLejuKdScale80A = 0.936;
+
+int32_t ieeeBitsFromFloatGain(float gain)
+{
+  int32_t bits = 0;
+  static_assert(sizeof(float) == sizeof(int32_t));
+  std::memcpy(&bits, &gain, sizeof(bits));
+  return bits;
+}
+
+bool useLejuKdScale80A(int joint_id_1based)
+{
+  // 3/4/9/10：80A 腿关节用 0.936；1/7（髋 yaw）标定同样用 0.936（MPC/AMP 均生效）
+  return joint_id_1based == 1 || joint_id_1based == 7 ||
+         joint_id_1based == 3 || joint_id_1based == 4 ||
+         joint_id_1based == 9 || joint_id_1based == 10;
+}
+
+double lejuKdScaleForJoint(int joint_id_1based)
+{
+  if (joint_id_1based >= 1 && joint_id_1based <= 12)
+  {
+    return useLejuKdScale80A(joint_id_1based) ? kLejuKdScale80A : kLejuKdScale40A;
+  }
+  return kLejuKdScale40A;
+}
+
+int32_t lejuPdoKpFromControlReg(double yd_kp_reg, int joint_id_1based)
+{
+  (void)joint_id_1based;
+  const float gain = static_cast<float>(yd_kp_reg / kYdAmpKpToLejuFloatDiv);
+  return ieeeBitsFromFloatGain(gain);
+}
+
+int32_t lejuPdoKdFromControlReg(double yd_kd_reg, int joint_id_1based)
+{
+  // gain = yd_kd / 1000 * scale
+  const double scale = lejuKdScaleForJoint(joint_id_1based);
+  const float gain = static_cast<float>(yd_kd_reg / kYdVkpRegToLejuKdDiv * scale);
+  return ieeeBitsFromFloatGain(gain);
+}
+}  // namespace
 static std::vector<int32_t> joint_kp_write_vec;
 static std::vector<int32_t> joint_kd_write_vec;
 
@@ -429,7 +481,7 @@ bool ReadSingleSdo(const uint8_t SlaveId, const uint16_t ObIndex, const uint16_t
   EC_T_DWORD dwRes = EC_E_NOERROR;
   uint8_t buf[4];
   uint32_t outdata_len;
-  dwRes = emCoeSdoUpload(0, SlaveId, ObIndex, 0, buf, 4, &outdata_len, 100, 0);
+  dwRes = emCoeSdoUpload(0, SlaveId, ObIndex, SubIndex, buf, 4, &outdata_len, 100, 0);
   if (dwRes != 0)
   {
     return false;
@@ -983,15 +1035,85 @@ static bool motorGetConfig(T_EC_DEMO_APP_CONTEXT *pAppContext)
       //   }
       // }
     }
+    else if (g_motor_id[i].driver_type == LEJU)
+    {
+      const int joint_id = g_motor_id[i].logical_id + 1;
+      const int32_t joint_kd_reg = joint_kd_write_vec[g_motor_id[i].logical_id];
+      const int32_t joint_kp_reg = joint_kp_write_vec[g_motor_id[i].logical_id];
+      int32_t joint_kp = lejuPdoKpFromControlReg(static_cast<double>(joint_kp_reg), joint_id);
+      int32_t joint_kd = lejuPdoKdFromControlReg(static_cast<double>(joint_kd_reg), joint_id);
+
+      int32_t init_kd, init_kp, act_kp, act_kd;
+      auto kp_read_status = ReadSingleSdo(g_motor_id[i].slave_id-1, LEJU_JOINT_CSP_KP, 0, init_kp);
+      if (!kp_read_status)
+      {
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read init kp, Joint %d, Slave %d\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id));
+        return false;
+      }
+
+      auto kd_read_status = ReadSingleSdo(g_motor_id[i].slave_id-1, LEJU_JOINT_CSV_KP, 0, init_kd);
+      if (!kd_read_status)
+      {
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read init kd, Joint %d, Slave %d\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id));
+        return false;
+      }
+
+      kp_write_status = writeSingleSdo(g_motor_id[i].slave_id-1, LEJU_JOINT_CSP_KP, 0, &joint_kp, false);
+      if (!kp_write_status)
+      {
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to change joint kp, Joint %d, Slave %d\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id));
+        return false;
+      }
+
+      kd_write_status = writeSingleSdo(g_motor_id[i].slave_id-1, LEJU_JOINT_CSV_KP, 0, &joint_kd, false);
+      if (!kd_write_status)
+      {
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to change joint kd, Joint %d, Slave %d\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id));
+        return false;
+      }
+
+      int32_t joint_ki = 0;
+      auto ki_write_status = writeSingleSdo(g_motor_id[i].slave_id-1, LEJU_JOINT_CSV_KI, 0, &joint_ki, false);
+      if (!ki_write_status)
+      {
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to change joint ki, Joint %d, Slave %d\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id));
+        return false;
+      }
+
+      kp_read_status = ReadSingleSdo(g_motor_id[i].slave_id-1, LEJU_JOINT_CSP_KP, 0, act_kp);
+      if (!kp_read_status)
+      {
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read kp after write, Joint %d, Slave %d\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id));
+        return false;
+      }
+
+      kd_read_status = ReadSingleSdo(g_motor_id[i].slave_id-1, LEJU_JOINT_CSV_KP, 0, act_kd);
+      if (!kd_read_status)
+      {
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to read kd after write, Joint %d, Slave %d\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id));
+        return false;
+      }
+
+      EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Joint %d, Slave %d init kp value %d, and set kp value %d successfully\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, init_kp, act_kp));
+      EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Read Joint %d, Slave %d init kd value %d, and set kd value %d successfully\n", g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, init_kd, act_kd));
+
+      g_motor_position_kp[g_motor_id[i].logical_id] = static_cast<double>(joint_kp_reg);
+      g_motor_velocity_kp[g_motor_id[i].logical_id] = static_cast<double>(joint_kd_reg);
+    }
   }
   return true;
 }
 
 static int motorReadJointKp(const std::vector<uint16_t> &ids, EcMasterType driver_type, std::vector<int32_t> &joint_kp)
 {
-  if(driver_type != EcMasterType::YD) {
-    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
-    return 1; // 1 表示驱动类型不支持该操作
+  uint16_t sdo_index = 0;
+  if(driver_type == EcMasterType::YD) {
+    sdo_index = JOINT_CSP_KP;
+  } else if(driver_type == EcMasterType::LEJU) {
+    sdo_index = LEJU_JOINT_CSP_KP;
+  } else {
+    std::cout << "[EcMaster] Invalid driver type, expected YD or LEJU\n";
+    return 1;
   }
 
   joint_kp.resize(ids.size(), 0);
@@ -999,10 +1121,10 @@ static int motorReadJointKp(const std::vector<uint16_t> &ids, EcMasterType drive
   for (uint32_t i = 0; i < ids.size(); i++)
   {
     int32_t kp;
-    if (!ReadSingleSdo(g_motor_id[ids[i]-1].slave_id-1, JOINT_CSP_KP, 0, kp))
+    if (!ReadSingleSdo(g_motor_id[ids[i]-1].slave_id-1, sdo_index, 0, kp))
     {
       printf("[EcMaster] Failed to read joint kp, Joint %d, Slave %d\n", ids[i], g_motor_id[ids[i]-1].slave_id);
-      return 2; // 1 表示读取失败
+      return 2;
     }
     joint_kp[i] = kp;
   }
@@ -1012,19 +1134,24 @@ static int motorReadJointKp(const std::vector<uint16_t> &ids, EcMasterType drive
 
 static int motorReadJointKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, std::vector<int32_t> &joint_kd)
 {
-  if(driver_type != EcMasterType::YD) {
-    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
-    return 1; // 1 表示驱动类型不支持该操作
+  uint16_t sdo_index = 0;
+  if(driver_type == EcMasterType::YD) {
+    sdo_index = JOINT_CSV_KP;
+  } else if(driver_type == EcMasterType::LEJU) {
+    sdo_index = LEJU_JOINT_CSV_KP;
+  } else {
+    std::cout << "[EcMaster] Invalid driver type, expected YD or LEJU\n";
+    return 1;
   }
 
   joint_kd.resize(ids.size(), 0);
   for (uint32_t i = 0; i < ids.size(); i++)
   {
       int32_t kd;
-      if (!ReadSingleSdo(g_motor_id[ids[i]-1].slave_id-1, JOINT_CSV_KP, 0, kd))
+      if (!ReadSingleSdo(g_motor_id[ids[i]-1].slave_id-1, sdo_index, 0, kd))
       {
         printf("[EcMaster] Failed to read joint kd, Joint %d, Slave %d\n", ids[i], g_motor_id[ids[i]-1].slave_id);
-        return 2; // 2 表示读取失败
+        return 2;
       }
       joint_kd[i] = kd;
   }
@@ -1034,9 +1161,14 @@ static int motorReadJointKd(const std::vector<uint16_t> &ids, EcMasterType drive
 
 static int motorWriteJointKp(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t> &joint_kp)
 {
-  if(driver_type != EcMasterType::YD) {
-    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
-    return 1; // 1 表示驱动类型不支持该操作
+  uint16_t sdo_index = 0;
+  if(driver_type == EcMasterType::YD) {
+    sdo_index = JOINT_CSP_KP;
+  } else if(driver_type == EcMasterType::LEJU) {
+    sdo_index = LEJU_JOINT_CSP_KP;
+  } else {
+    std::cout << "[EcMaster] Invalid driver type, expected YD or LEJU\n";
+    return 1;
   }
 
   if(joint_kp.size() != ids.size())
@@ -1048,7 +1180,12 @@ static int motorWriteJointKp(const std::vector<uint16_t> &ids, EcMasterType driv
   for(uint32_t i = 0; i < ids.size(); i++) 
   {
     int32_t kp = joint_kp[i];
-    bool write_status = writeSingleSdo(g_motor_id[ids[i]-1].slave_id-1, JOINT_CSP_KP, 0, &kp, false);
+    if (driver_type == EcMasterType::LEJU)
+    {
+      const int joint_id = g_motor_id[ids[i] - 1].logical_id + 1;
+      kp = lejuPdoKpFromControlReg(static_cast<double>(joint_kp[i]), joint_id);
+    }
+    bool write_status = writeSingleSdo(g_motor_id[ids[i]-1].slave_id-1, sdo_index, 0, &kp, false);
     if(!write_status)
     {
       printf("[EcMaster] Failed to write joint kp, Joint %d, Slave %d\n", ids[i], g_motor_id[ids[i]-1].slave_id);
@@ -1061,9 +1198,14 @@ static int motorWriteJointKp(const std::vector<uint16_t> &ids, EcMasterType driv
 
 static int motorWriteJointKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t> &joint_kd)
 {
-  if(driver_type != EcMasterType::YD) {
-    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
-    return 1; // 1 表示驱动类型不支持该操作
+  uint16_t sdo_index = 0;
+  if(driver_type == EcMasterType::YD) {
+    sdo_index = JOINT_CSV_KP;
+  } else if(driver_type == EcMasterType::LEJU) {
+    sdo_index = LEJU_JOINT_CSV_KP;
+  } else {
+    std::cout << "[EcMaster] Invalid driver type, expected YD or LEJU\n";
+    return 1;
   }
 
   if(joint_kd.size() != ids.size())
@@ -1075,7 +1217,12 @@ static int motorWriteJointKd(const std::vector<uint16_t> &ids, EcMasterType driv
   for(uint32_t i = 0; i < ids.size(); i++)
   {
       int32_t kd = joint_kd[i];
-      bool write_status = writeSingleSdo(g_motor_id[ids[i]-1].slave_id-1, JOINT_CSV_KP, 0, &kd, false);
+      if (driver_type == EcMasterType::LEJU)
+      {
+        const int joint_id = g_motor_id[ids[i] - 1].logical_id + 1;
+        kd = lejuPdoKdFromControlReg(static_cast<double>(joint_kd[i]), joint_id);
+      }
+      bool write_status = writeSingleSdo(g_motor_id[ids[i]-1].slave_id-1, sdo_index, 0, &kd, false);
       if(!write_status)
       {
         printf("[EcMaster] Failed to write joint kd, Joint %d, Slave %d\n", ids[i], g_motor_id[ids[i]-1].slave_id);
@@ -1083,6 +1230,89 @@ static int motorWriteJointKd(const std::vector<uint16_t> &ids, EcMasterType driv
       }
   }
 
+  return 0;
+}
+
+/**
+ * @brief 向YD驱动器写入温度限幅值（对象索引0x3F0D）
+ * @param ids EC从站ID列表（1-based）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limits 温度限幅值列表（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示写入失败，3表示参数尺寸不匹配
+ */
+static int motorWriteTemperatureLimitImpl(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t> &temp_limits)
+{
+  if(driver_type != EcMasterType::YD) {
+    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
+    return 1;
+  }
+
+  if(temp_limits.size() != ids.size())
+  {
+    std::cout << "[EcMaster] Invalid temperature limit size, expected " << ids.size() << ", got " << temp_limits.size() << std::endl;
+    return 3;
+  }
+
+  for(uint32_t i = 0; i < ids.size(); i++)
+  {
+    int32_t temp_limit = temp_limits[i];
+    // 写入温度限幅值到0x3F0D，子索引0；不启用断电保存，避免每次上电写flash损耗
+    bool write_status = writeSingleSdo(g_motor_id[ids[i]-1].slave_id-1, INDEX_TEMPERATURE_LIMIT, 0, &temp_limit, false);
+    if(!write_status)
+    {
+      printf("[EcMaster] Failed to write temperature limit, Joint %d, Slave %d, Value %d\n",
+             ids[i], g_motor_id[ids[i]-1].slave_id, temp_limit);
+      return 2;
+    }
+    printf("[EcMaster] Write temperature limit success, Joint %d, Slave %d, Value %d\n",
+           ids[i], g_motor_id[ids[i]-1].slave_id, temp_limit);
+  }
+
+  return 0;
+}
+
+/**
+ * @brief 向所有YD驱动器写入统一的温度限幅值（对象索引0x3F0D）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limit 温度限幅值（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示有写入失败
+ */
+static int motorWriteTemperatureLimitAllImpl(EcMasterType driver_type, int32_t temp_limit)
+{
+  if(driver_type != EcMasterType::YD) {
+    std::cout << "[EcMaster] Invalid driver type, expected YD\n";
+    return 1;
+  }
+
+  int32_t value = temp_limit;
+  int success_count = 0;
+  int fail_count = 0;
+
+  for(uint32_t i = 0; i < num_motor_slave; i++)
+  {
+    if(g_motor_id[i].driver_type != YD) {
+      continue;
+    }
+
+    bool write_status = writeSingleSdo(g_motor_id[i].slave_id-1, INDEX_TEMPERATURE_LIMIT, 0, &value, false);
+    if(!write_status)
+    {
+      printf("[EcMaster] Failed to write temperature limit, Joint %d, Slave %d, Value %d\n",
+             g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, temp_limit);
+      fail_count++;
+    }
+    else
+    {
+      printf("[EcMaster] Write temperature limit success, Joint %d, Slave %d, Value %d\n",
+             g_motor_id[i].logical_id+1, g_motor_id[i].slave_id, temp_limit);
+      success_count++;
+    }
+  }
+
+  printf("[EcMaster] Temperature limit write done: success=%d, fail=%d\n", success_count, fail_count);
+  if(fail_count > 0) {
+    return 2;
+  }
   return 0;
 }
 
@@ -1191,6 +1421,10 @@ static bool motorEnable(const uint16_t id_logical)
       nextOut->selfd_slave_output[g_motor_id[id_logical].pdo_id].target_position = currentIn->selfd_slave_input[g_motor_id[id_logical].pdo_id].position_actual_value;
       nextOut->selfd_slave_output[g_motor_id[id_logical].pdo_id].velocity_offset = 0;
       nextOut->selfd_slave_output[g_motor_id[id_logical].pdo_id].torque_offset = 0;
+      nextOut->selfd_slave_output[g_motor_id[id_logical].pdo_id].position_kp =
+          lejuPdoKpFromControlReg(g_motor_position_kp[id_logical], id_logical + 1);
+      nextOut->selfd_slave_output[g_motor_id[id_logical].pdo_id].velocity_kp =
+          lejuPdoKdFromControlReg(g_motor_velocity_kp[id_logical], id_logical + 1);
       nextOut->selfd_slave_output[g_motor_id[id_logical].pdo_id].mode_of_opration = MODE_CSP;
       nextOut->selfd_slave_output[g_motor_id[id_logical].pdo_id].control_word = sw2cw(sw);
       torque_feedback_targetA[id_logical].target_position = currentIn->selfd_slave_input[g_motor_id[id_logical].pdo_id].position_actual_value * (360.0 / encoder_range[id_logical]);
@@ -1461,6 +1695,10 @@ void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t 
         nextOut->selfd_slave_output[g_motor_id[index].pdo_id].velocity_offset = params[i].velocityOffset * (encoder_range[index] / 360.0);
         nextOut->selfd_slave_output[g_motor_id[index].pdo_id].torque_offset = params[i].torqueOffset * (1000.0 / rated_current[index]) * 1000;
         nextOut->selfd_slave_output[g_motor_id[index].pdo_id].max_torque = params[i].maxTorque * (1000.0 / rated_current[index]) * 1000;
+        nextOut->selfd_slave_output[g_motor_id[index].pdo_id].position_kp =
+            lejuPdoKpFromControlReg(params[i].kp, g_motor_id[index].logical_id + 1);
+        nextOut->selfd_slave_output[g_motor_id[index].pdo_id].velocity_kp =
+            lejuPdoKdFromControlReg(params[i].kd, g_motor_id[index].logical_id + 1);
         nextOut->selfd_slave_output[g_motor_id[index].pdo_id].mode_of_opration = MODE_CSP;
         nextOut->selfd_slave_output[g_motor_id[index].pdo_id].control_word = sw2cw(currentIn->selfd_slave_input[g_motor_id[index].pdo_id].status_word & 0x6f);
         currentMode[index].store(MODE_CSP, std::memory_order_release);
@@ -1824,6 +2062,17 @@ int motorWriteKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, con
 {
   return motorWriteJointKd(ids, driver_type, joint_kd);
 }
+
+int motorWriteTemperatureLimit(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t> &temp_limits)
+{
+  return motorWriteTemperatureLimitImpl(ids, driver_type, temp_limits);
+}
+
+int motorWriteTemperatureLimitAll(EcMasterType driver_type, int32_t temp_limit)
+{
+  return motorWriteTemperatureLimitAllImpl(driver_type, temp_limit);
+}
+
 bool isMotorEnable(void)
 {
   return motor_enabled;
@@ -1832,6 +2081,15 @@ bool isMotorEnable(void)
 uint32_t getNumMotorSlave(void)
 {
   return num_motor_slave;
+}
+
+uint8_t getMotorSlaveId(uint32_t index)
+{
+  if (index >= num_motor_slave)
+  {
+    return 0;
+  }
+  return g_motor_id[index].slave_id;
 }
 
 void setEcEncoderRange(uint32_t *encoder_range_set, uint16_t num)
@@ -3430,7 +3688,7 @@ static EC_T_DWORD myAppPrepare(T_EC_DEMO_APP_CONTEXT *pAppContext)
       motor_count++;
       // printf("num_elmo_slave = %d\n",num_elmo_slave);
     }
-    else if(oCfgSlaveInfo.dwVendorId == SELFD_VENDOR_ID)
+    else if(oCfgSlaveInfo.dwVendorId == SELFD_VENDOR_ID || oCfgSlaveInfo.dwVendorId == SELFD_VENDOR_ID_LEGACY)
     {      
       g_motor_id[motor_count].physical_id = motor_count;
       g_motor_id[motor_count].slave_id = dwSlaveIdx+1;
@@ -3816,6 +4074,10 @@ static EC_T_DWORD myAppWorkpd(T_EC_DEMO_APP_CONTEXT *pAppContext)
           currentOut->selfd_slave_output[g_motor_id[i].pdo_id].velocity_offset = currentPositionOut->selfd_slave_output[g_motor_id[i].pdo_id].velocity_offset;
           currentOut->selfd_slave_output[g_motor_id[i].pdo_id].torque_offset = currentPositionOut->selfd_slave_output[g_motor_id[i].pdo_id].torque_offset;
           currentOut->selfd_slave_output[g_motor_id[i].pdo_id].max_torque = currentPositionOut->selfd_slave_output[g_motor_id[i].pdo_id].max_torque;
+          currentOut->selfd_slave_output[g_motor_id[i].pdo_id].position_kp =
+              currentPositionOut->selfd_slave_output[g_motor_id[i].pdo_id].position_kp;
+          currentOut->selfd_slave_output[g_motor_id[i].pdo_id].velocity_kp =
+              currentPositionOut->selfd_slave_output[g_motor_id[i].pdo_id].velocity_kp;
           currentOut->selfd_slave_output[g_motor_id[i].pdo_id].mode_of_opration = currentPositionOut->selfd_slave_output[g_motor_id[i].pdo_id].mode_of_opration;
           currentOut->selfd_slave_output[g_motor_id[i].pdo_id].control_word = currentPositionOut->selfd_slave_output[g_motor_id[i].pdo_id].control_word;
         }

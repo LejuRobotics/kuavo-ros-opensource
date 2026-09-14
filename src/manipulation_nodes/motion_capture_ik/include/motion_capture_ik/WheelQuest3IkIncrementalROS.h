@@ -26,6 +26,7 @@
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
+#include "motion_capture_ik/WheelNaturalElbowGuide.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "DrakeChestElbowHandPointOpt.hpp"
@@ -119,6 +120,19 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
                             bool leftMaintainProcess,
                             bool rightMaintainProcess);
 
+  // Grip 上升沿后的首帧使用切换前的 hand 参考，避免增量锚点/姿态滤波器
+  // 在同一周期切换时造成 handQuat * EE2Link6Offset 的不连续跳变。
+  void latchGripTransferPose(bool leftGripRisingEdge,
+                             bool rightGripRisingEdge,
+                             bool leftMaintainProcess,
+                             bool rightMaintainProcess);
+
+  // 防止 Quest 姿态在 grip 跟随期间单帧翻转，旋转 EE offset 后形成 Z 尖峰。
+  void stabilizeGripQuaternion(bool leftArm, bool gripPressed, Eigen::Quaterniond& quat);
+
+  void captureGripReleaseSnapshot(bool leftGripFallingEdge,
+                                  bool rightGripFallingEdge);
+
   void remapUpperBodyRefPoints(const Eigen::Vector3d& chestPos,
                                const Eigen::Quaterniond& chestQuat,
                                const Eigen::Vector3d& leftShoulderPos,
@@ -136,10 +150,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
     Eigen::Quaterniond chestQuatRef = Eigen::Quaterniond::Identity();  // yaw/pitch-only
 
     Eigen::Vector3d leftElbowRef = Eigen::Vector3d::Zero();
+    double leftElbowTrackingActivation = 1.0;
     Eigen::Vector3d leftHandRef = Eigen::Vector3d::Zero();
     Eigen::Quaterniond leftHandQuat = Eigen::Quaterniond::Identity();
 
     Eigen::Vector3d rightElbowRef = Eigen::Vector3d::Zero();
+    double rightElbowTrackingActivation = 1.0;
     Eigen::Vector3d rightHandRef = Eigen::Vector3d::Zero();
     Eigen::Quaterniond rightHandQuat = Eigen::Quaterniond::Identity();
   };
@@ -148,6 +164,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool updateWholeBodyConstraintList(const WholeBodyRefInput& input);
 
   void solveIk();
+
+  // Chest-position freeze: capture q0/knee, q1/leg and q2/waist_pitch once when
+  // the position sub-switch turns off, then pin the whole IK pitch chain to that
+  // snapshot inside the solver (WheelOneStageIKEndEffector::activateChestPositionFreeze).
+  void updateChestPositionFreezeState(bool freezeRequested);
+  bool copyChestPositionFreezeAnchor(Eigen::Vector3d& anchor);
 
   bool detectLeftArmMove();
   bool detectRightArmMove();
@@ -235,10 +257,6 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher rightLink6PoseMeasuredPublisher_;  // 发布右手link6 measured pose（基于传感器数据的FK计算）
   ros::Publisher leftEePoseMeasuredPublisher_;  // 发布左手末端执行器measured pose（基于传感器数据的FK计算）
   ros::Publisher rightEePoseMeasuredPublisher_;  // 发布右手末端执行器measured pose（基于传感器数据的FK计算）
-  ros::Publisher leftHandPosBeforeOptPublisher_;          // 发布优化前的左手位置
-  ros::Publisher leftHandPosAfterOptPublisher_;           // 发布优化后的左手位置
-  ros::Publisher rightHandPosBeforeOptPublisher_;         // 发布优化前的右手位置
-  ros::Publisher rightHandPosAfterOptPublisher_;          // 发布优化后的右手位置
   ros::Publisher leftHandPoseFromTransformerPublisher_;   // 发布来自Transformer的左手pose
   ros::Publisher rightHandPoseFromTransformerPublisher_;  // 发布来自Transformer的右手pose
   ros::Publisher ikSolvedEefPosePublisher_;  // 发布IK求解后的末端执行器pose（/ik_fk_result/eef_pose）
@@ -323,6 +341,13 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::unique_ptr<DrakeChestElbowHandPointOptSolver> chestElbowHandPointOptSolverPtr_;
   DrakeChestElbowHandWeightConfig chestElbowHandWeightConfig_;
   DrakeChestElbowHandBoundsConfig chestElbowHandBoundsConfig_;
+  bool enableWheelNaturalElbowGuide_ = true;
+  WheelNaturalElbowGuideConfig wheelNaturalElbowGuideConfig_;
+  double wheelNaturalElbowSoftTrackingScale_ = 0.10;
+  double latestLeftElbowTrackingActivation_ = 1.0;
+  double latestRightElbowTrackingActivation_ = 1.0;
+  std::unique_ptr<WheelNaturalElbowGuide> leftNaturalElbowGuide_;
+  std::unique_ptr<WheelNaturalElbowGuide> rightNaturalElbowGuide_;
   bool drakeSolveUpdateChestOrientation_ = true;
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;
@@ -402,6 +427,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::Vector3d defaultRightHandPosOnExit_;                   // 退出时右手默认目标位置
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值
   bool useIncrementalHandOrientation_ = true;                   // 是否使用增量式手部姿态
+  bool resetJointToDefaultWheel_ = true;                        // 进入增量控制时是否重置关节到默认位置
+  bool justEnteredMode2_ = false;                               // mode 0 -> mode 2 切换瞬间标志（约2秒内为true）
+  bool mode2Initialized_ = false;                               // mode 2 是否已初始化（避免fsmEnter重复进入）
 
   // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
   Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};
@@ -419,9 +447,14 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::vector<PoseData> latestPoseConstraintList_;  // 保存最新的pose约束列表
   WheelIncrementalPoseResult latestIncrementalResult_;
 
-  // 保存 incrementalController_ 查询结果的手部和肘部位置
-  Eigen::Vector3d latestHumanLeftElbowPos_;   // 左肘位置（通过 FK 计算）
-  Eigen::Vector3d latestHumanRightElbowPos_;  // 右肘位置（通过 FK 计算）
+  // Quest3 transformed human arm points, in the same robot-base convention as
+  // latestLeftHandPose_vr_ / latestRightHandPose_vr_.
+  Eigen::Vector3d latestHumanLeftShoulderPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanRightShoulderPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanLeftElbowPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d latestHumanRightElbowPos_ = Eigen::Vector3d::Zero();
+  bool latestHumanLeftArmPoseValid_ = false;
+  bool latestHumanRightArmPoseValid_ = false;
 
   Eigen::Vector3d latestRobotLeftElbowPos_;
   Eigen::Vector3d latestRobotRightElbowPos_;
@@ -456,6 +489,16 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLeftElbowPosInChest_ = false;
   bool hasRightElbowPosInChest_ = false;
 
+  // Robot chest frames captured on each grip rising edge. Active hand targets
+  // are first computed as independent hand increments in these frames, then
+  // mapped through the current chest target so they follow torso motion.
+  Eigen::Vector3d leftActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond leftActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Vector3d rightActiveChestAnchorPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond rightActiveChestAnchorQuat_ = Eigen::Quaterniond::Identity();
+  bool hasLeftActiveChestAnchor_ = false;
+  bool hasRightActiveChestAnchor_ = false;
+
   Eigen::VectorXd mec_limit_lower_;
   Eigen::VectorXd mec_limit_upper_;
   Eigen::Vector3d deltaScaleRPY_ = Eigen::Vector3d(1.0, 1.0, 1.0);
@@ -464,8 +507,46 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool lastLeftGripPressed_ = false;
   bool lastRightGripPressed_ = false;
 
+  bool leftGripTransferPending_ = false;
+  bool rightGripTransferPending_ = false;
+  // grip 上升沿后保持切换前姿态的 IK 周期数，避免 EE offset 在过渡期尖峰。
+  static constexpr int kGripOrientationHoldFrames = 5;
+  // 防止上一次 grip 切换尚未完成时重复建立 anchor。
+  static constexpr int kGripTransferLockFrames = 10;
+  int leftGripOrientationHoldFrames_ = 0;
+  int rightGripOrientationHoldFrames_ = 0;
+  int leftGripTransferLockFrames_ = 0;
+  int rightGripTransferLockFrames_ = 0;
+  bool leftGripTransferAccepted_ = false;
+  bool rightGripTransferAccepted_ = false;
+  Eigen::Vector3d leftGripTransferHandPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d rightGripTransferHandPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond leftGripTransferHandQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond rightGripTransferHandQuat_ = Eigen::Quaterniond::Identity();
+  bool hasPreviousLeftGripQuat_ = false;
+  bool hasPreviousRightGripQuat_ = false;
+  Eigen::Quaterniond previousLeftGripQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond previousRightGripQuat_ = Eigen::Quaterniond::Identity();
+
+  // 松开 grip 后保持的整臂约束快照，避免每次释放/重新按下都从新的 IK
+  // 优化结果递推 anchor，形成逐次下沉。
+  bool hasLeftGripReleaseSnapshot_ = false;
+  bool hasRightGripReleaseSnapshot_ = false;
+  Eigen::Vector3d leftGripReleaseHandPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d rightGripReleaseHandPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d leftGripReleaseElbowPos_ = Eigen::Vector3d::Zero();
+  Eigen::Vector3d rightGripReleaseElbowPos_ = Eigen::Vector3d::Zero();
+  Eigen::Quaterniond leftGripReleaseHandQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond rightGripReleaseHandQuat_ = Eigen::Quaterniond::Identity();
+
   bool chestIncrementalUpdateEnabled_ = true;  // pose 总开关：true 更新位姿，false 冻结位姿
   bool chestPositionUpdateEnable_ = true;      // position 子开关：仅在 pose 总开关为 true 时允许更新
+
+  // Reintroduced pitch snapshot freeze (independent of grip): one immutable
+  // q0-q2 hold shared by the position-follow sub-switch-off path.
+  std::mutex chestPositionFreezeMutex_;
+  Eigen::Vector3d chestPositionFreezeAnchor_{Eigen::Vector3d::Zero()};
+  bool chestPositionFreezeActive_{false};
 
   struct ModeChangeCycleCache {
     bool leftHandCtrlModeChanged = false;

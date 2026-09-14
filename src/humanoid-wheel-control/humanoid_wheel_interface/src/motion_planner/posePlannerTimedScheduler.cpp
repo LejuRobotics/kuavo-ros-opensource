@@ -53,6 +53,32 @@ void posePlannerTimedScheduler::setTimedPlannerStates(
     currentTime += diffDt_;
 }
 
+// 重置指定规划器到给定状态（current=target=state，原地轨迹，丢弃旧轨迹状态）
+void posePlannerTimedScheduler::resetTimedPlanner(int8_t plannerIndex, const Eigen::VectorXd& state)
+{
+    if (plannerIndex < 0 || static_cast<size_t>(plannerIndex) >= timedPlannerPosePtrVec_.size()) {
+        ROS_ERROR_STREAM("Invalid planner index in resetTimedPlanner.");
+        return;
+    }
+
+    int dofNum = timedPlannerPosePtrVec_[plannerIndex]->getDofNum();
+    if (state.size() != dofNum) {
+        ROS_ERROR_STREAM("Dimension mismatch in resetTimedPlanner: state size = " << state.size()
+                         << ", expected DOF = " << dofNum << " for planner index " << (int)plannerIndex);
+        return;
+    }
+
+    currentPos_[plannerIndex] = state;
+    currentVel_[plannerIndex] = Eigen::VectorXd::Zero(dofNum);
+    currentAcc_[plannerIndex] = Eigen::VectorXd::Zero(dofNum);
+
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentPose(state);
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentVelocity(Eigen::VectorXd::Zero(dofNum));
+    timedPlannerPosePtrVec_[plannerIndex]->setCurrentAcceleration(Eigen::VectorXd::Zero(dofNum));
+    timedPlannerPosePtrVec_[plannerIndex]->setTargetPose(state);
+    timedPlannerPosePtrVec_[plannerIndex]->calcTrajectory();
+}
+
 // 设置时间同步器中的状态信息(独立索引)
 void posePlannerTimedScheduler::setTimedPlannerStates(Eigen::VectorXd currentPose, const int8_t plannerIndex)
 {

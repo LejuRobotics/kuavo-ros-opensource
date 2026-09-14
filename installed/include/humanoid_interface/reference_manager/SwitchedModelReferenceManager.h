@@ -51,6 +51,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "kuavo_msgs/footPoseTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/footPose6DTargetTrajectoriesSrv.h"
 #include "kuavo_msgs/kuavoModeSchedule.h"
+#include "humanoid_interface/reference_manager/SitReferenceManager.h"
 
 #include <ocs2_msgs/mpc_target_trajectories.h>
 #include "std_srvs/SetBool.h"
@@ -375,6 +376,8 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   ros::ServiceServer load_dynamic_qr_service_;  // Service to load dynamic Q and R matrices based on gait name
   ros::Publisher isArmExecutingPublisher_;
   ros::Publisher modeSchedulePublisher_;
+  std::unique_ptr<class SitReferenceManager> sitReferenceManager_;
+
 
   vector_t cmdVel_;
   vector_t cmdPose_;
@@ -422,11 +425,7 @@ class SwitchedModelReferenceManager : public ReferenceManager {
   double prev_is_rl_controller_ = 0.0;  // 上一次的RL控制器标志，用于检测切换
   bool isArmControlModeChanged_ = false;
   bool isArmControlModeChangedTrigger_ = false;
-  bool isCalcArmControlModeChangedTime_ = false;
-  scalar_t arm_mode_change_start_time_ = -1.0;  // 模式切换开始时间，-1表示未开始切换
-  scalar_t min_arm_mode_change_time_ = 0.5;  // 最小模式切换时间（秒）
   bool update_stop_single_step_ = false;
-  bool skip_interpolate = false; // 是否跳过插值
 
   bool begin_step_gait = false;
   scalar_t customGait_start_time = 0;

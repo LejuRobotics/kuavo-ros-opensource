@@ -57,6 +57,21 @@ velocityLimits
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
 
+; ==================== RL控制器自动切换配置 ====================
+autoControllerSwitch
+{
+    enabled                     true    ; 是否启用站立态RL控制器自动切换
+    manipulationController       amp_controller       ; 外部手臂/腰部控制优先使用的控制器
+    walkingController            amp_wild_controller  ; 站立态收到行走意图时使用的控制器
+    cmdVelLinearThreshold        0.05    ; 线速度x/y/z范数超过该值认为有行走意图
+    cmdVelAngularThreshold       0.05    ; 角速度z超过该绝对值认为有行走意图
+    cmdVelCommandHoldTime        0.5     ; 行走命令保持活跃的时间(s)
+    externalCommandHoldTime      0.5     ; 外部手臂/腰部信号保持活跃的时间(s)
+    minSwitchInterval            1.0     ; 自动切换尝试最小间隔(s)
+    walkingSwitchRequireStance  false   ; 切到walkingController时不强制当前motion_state为STANCE
+    switchCommandBufferTime     0.8     ; 自动切换发起后命令暂缓执行时间(s)
+}
+
 ; ==================== 原地踏步速度配置 ====================
 inPlaceStepVelocity
 {
@@ -171,14 +186,14 @@ defaultJointState
     (11,0) -0.       ; leg_r6_joint
     (12,0)  0        ; waist_joint
     (13,0)  0        ; zarm_l1_joint
-    (14,0)  0        ; zarm_l2_joint
+    (14,0)  0.075        ; zarm_l2_joint
     (15,0)  0        ; zarm_l3_joint
     (16,0)  0        ; zarm_l4_joint
     (17,0)  0        ; zarm_l5_joint
     (18,0)  0        ; zarm_l6_joint
     (19,0)  0        ; zarm_l7_joint
     (20,0)  0        ; zarm_r1_joint
-    (21,0)  0        ; zarm_r2_joint
+    (21,0)  -0.075        ; zarm_r2_joint
     (22,0)  0        ; zarm_r3_joint
     (23,0)  0        ; zarm_r4_joint
     (24,0)  0        ; zarm_r5_joint

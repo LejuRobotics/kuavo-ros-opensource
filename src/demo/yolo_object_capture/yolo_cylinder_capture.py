@@ -3,11 +3,25 @@
 import rospy
 
 import math
-import numpy as np  # 引入numpy库用于数值计算
+import numpy as np
 import os
+import sys
 import yaml
 import argparse
+import rospkg
 from kuavo_msgs.msg import twoArmHandPoseCmd
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    _kuavo_common_python = os.path.join(rospkg.RosPack().get_path('kuavo_common'), 'python')
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError):
+    _kuavo_common_python = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../kuavo_common/python'))
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
 
 from utils.tools import get_version_parameter, \
                         call_ik_srv, ik_solve_param, set_arm_control_mode, \
@@ -76,8 +90,9 @@ def main():
 
     # 获取机器人版本
     robot_version = get_version_parameter()
-    #不同型号机器人的初始位置 (机器人坐标系)
-    if robot_version == 52 or 53 or 54:
+    # 不同型号机器人的初始位置 (机器人坐标系)
+    rv = RobotVersion.create(int(robot_version))
+    if rv.start_with(5, 2) or rv.start_with(5, 3) or rv.start_with(5, 4):
         robot_zero_x = -0.003 
         robot_zero_y = -0.2527
         robot_zero_z = -0.3144 

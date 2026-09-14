@@ -6,15 +6,19 @@
     <arg name="ik_type_idx" default="0" />
     <arg name="ip_address" default="" />
     <arg name="control_torso" default="0" /> <!-- 0: do NOT control, 1: control torso  -->
+    <arg name="enable_vr_stop_robot" default="true"/> <!-- false: 禁用 VR 手柄 X+Y 触发 stop_robot，仅遥控器可关机 -->
     <arg name="camera_publisher_name" default="/camera/color" />
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
+    <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/> <!-- 轮臂机器人（6x 系列）为 true -->
 
-    <!-- motion_capture_ik -->
-    <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --send_srv=$(arg send_srv) --control_torso=$(arg control_torso) --hand_reference_mode=$(arg hand_reference_mode)" output="screen">
-    </node>
-
-    <!-- noitom_hi5_hand_udp_python -->
-    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen">
-    </node>
-    <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py" name="webrtc_videostream" args="$(arg camera_publisher_name) $(arg ip_address)" output="screen"/>
+    <!-- 视频回传模式（deploy 方式2）：复用标准 launch_quest3_ik.launch 的全部
+         VR/IK 节点（含双足/轮臂/5W 增量 IK C++ 节点），仅默认开启 WebRTC 推流。
+         配置字段（h12_vr_launch.yaml → h12_vr_launch_config.py 注入，含
+         use_cpp_incremental_ik 等）由 pass_all_args 透传给标准 launch。
+         use_two_stage_ik 覆盖为标准 launch 默认 true → false（单阶段 IK），
+         保持改动前 Python IK 行为；需要两阶段时命令行 use_two_stage_ik:=true。 -->
+    <arg name="enable_videostream" default="true"/> <!-- 视频回传模式默认开启 WebRTC 推流 -->
+    <arg name="use_two_stage_ik" default="false"/> <!-- 覆盖标准 launch 默认(true, 两阶段) → 单阶段，与改动前一致 -->
+    <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch" pass_all_args="true"/>
 </launch>

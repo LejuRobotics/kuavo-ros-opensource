@@ -12,7 +12,7 @@
     <arg name="camera_info"       default="/camera/color/camera_info" />        <!-- TODO: Your rgb camera info topic -->
     <arg name="parent_name"       default="stereo_gazebo_$(arg eye)_camera_optical_frame" />
 
-    <node pkg="aruco_ros" type="double" name="$(anon aruco_simple)">    
+    <node pkg="aruco_ros" type="double" name="$(anon aruco_simple)">
         <remap from="/camera_info" to="$(arg camera_info)" />
         <remap from="/image" to="$(arg image)" />
         <param name="image_is_rectified" value="True"/>
@@ -24,6 +24,7 @@
         <param name="parent_name" value="$(arg parent_name)" />
         <param name="child_name1" value="$(arg marker1_frame)" />
         <param name="child_name2" value="$(arg marker2_frame)" />
+        <param name="image_transport" value="compressed" />
     </node>
 
 </launch>

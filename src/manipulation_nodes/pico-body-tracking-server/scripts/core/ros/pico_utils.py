@@ -100,6 +100,18 @@ ALIGN_TO_ROBOT_URDF_JOINTS = [
     "LEFT_WRIST", "RIGHT_WRIST", "LEFT_HAND", "RIGHT_HAND"
 ]
 
+UPPER_BODY_CONTROL_JOINTS = {
+    "Pelvis",
+    "LEFT_SHOULDER",
+    "RIGHT_SHOULDER",
+    "LEFT_ELBOW",
+    "RIGHT_ELBOW",
+    "LEFT_WRIST",
+    "RIGHT_WRIST",
+    "LEFT_HAND",
+    "RIGHT_HAND",
+}
+
 CONTROL_MODES = ["WholeBody", "UpperBody", "LowerBody"]
 
 class RobotInfoBroadcaster:
@@ -218,6 +230,8 @@ class KuavoPicoInfoTransformer():
         self.tf_broadcaster = tf_broadcaster
         self.bone_frame_publisher = bone_frame_publisher
         self.is_mobile_mpc = True
+        self.tf_publish_hz = float(rospy.get_param("/pico_tf_publish_hz", 100.0))
+        self._last_tf_publish_monotonic = 0.0
         
         # Initialize bone names and indices
         self._init_bone_names()
@@ -267,7 +281,23 @@ class KuavoPicoInfoTransformer():
         """Initialize poses and transformation matrices."""
         self.head_body_pose = Twist()
         self.cached_matrices = np.tile(np.eye(4), (len(self.bone_names), 1, 1))
+        self._quat_buffer = np.zeros((len(self.bone_names), 4), dtype=np.float64)
         self.T_spine3_to_base = translation_matrix([0, 0, 0.34])  # base_link is 0.34m below SPINE3
+        self.T_unity_2_ros = np.array([[0, 0, -1, 0],
+                                       [-1, 0, 0, 0],
+                                       [0, 1, 0, 0],
+                                       [0, 0, 0, 1]])
+        self.T_ros_2_robot_urdf = np.array([[0, -1, 0, 0],
+                                            [0, 0, 1, 0],
+                                            [-1, 0, 0, 0],
+                                            [0, 0, 0, 1]])
+        self.T_left_arm_correction = self.homogeneous_matrix_roll(90)
+        self.T_right_arm_correction = self.homogeneous_matrix_roll(-90)
+        self.rotation_reflection_matrix = np.array([
+            [1, 0, 0],
+            [0, -1, 0],
+            [0, 0, -1],
+        ])
 
     def _init_arm_poses(self) -> None:
         """Initialize arm pose variables."""
@@ -736,45 +766,67 @@ class KuavoPicoInfoTransformer():
         
     def transform_matrix_to_ros(self, matrix):
         """Transform Unity coordinate system matrices to robot URDF coordinate system."""
-        # Unity to ROS transformation
-        T_unity_2_ros = np.array([[0, 0, -1, 0],
-                                 [-1, 0, 0, 0],
-                                 [0, 1, 0, 0],
-                                 [0, 0, 0, 1]])
-        
-        T_ros_2_robot_urdf = np.array([[0, -1, 0, 0],
-                                      [0, 0, 1, 0],
-                                      [-1, 0, 0, 0],
-                                      [0, 0, 0, 1]])
-        
-        # Arm correction matrices
-        T_LEFT_ARM_CORRECTION = self.homogeneous_matrix_roll(90)
-        T_RIGHT_ARM_CORRECTION = self.homogeneous_matrix_roll(-90)
-        
-        ros_matrices = np.matmul(T_unity_2_ros, matrix)
-        ros_matrices = np.matmul(ros_matrices, T_ros_2_robot_urdf)
+        ros_matrices = np.matmul(self.T_unity_2_ros, matrix)
+        ros_matrices = np.matmul(ros_matrices, self.T_ros_2_robot_urdf)
 
         # Reverse x position
         ros_matrices[:,0,3] = -ros_matrices[:,0,3]
 
-        # start_time = time.time()
-        # Reverse y and z rotation using vectorized reflection method (76x faster than original)
-        ros_matrices = self.reverse_y_z_rotation_vectorized_reflection(ros_matrices)
-        # ros_matrices = self.reverse_y_z_rotation_original(ros_matrices)
-        # end_time = time.time()
-        # print(f"Time taken: {end_time - start_time} seconds")
+        result = ros_matrices.copy()
+        result[:, :3, :3] = np.einsum(
+            'ij,njk,kl->nil',
+            self.rotation_reflection_matrix,
+            ros_matrices[:, :3, :3],
+            self.rotation_reflection_matrix.T,
+        )
+        ros_matrices = result
 
         # Align to robot urdf
         for idx in self.left_arm_idxs:
-            ros_matrices[idx] = ros_matrices[idx] @ T_LEFT_ARM_CORRECTION
+            ros_matrices[idx] = ros_matrices[idx] @ self.T_left_arm_correction
         for idx in self.right_arm_idxs:
-            ros_matrices[idx] = ros_matrices[idx] @ T_RIGHT_ARM_CORRECTION
+            ros_matrices[idx] = ros_matrices[idx] @ self.T_right_arm_correction
         return ros_matrices
 
     
-    def get_robot_urdf_matrix_from_proto(self, proto_data):
+    @staticmethod
+    def _quaternions_xyzw_to_rotation_matrices(quaternions):
+        x = quaternions[:, 0]
+        y = quaternions[:, 1]
+        z = quaternions[:, 2]
+        w = quaternions[:, 3]
+        norm = x * x + y * y + z * z + w * w
+        scale = np.zeros_like(norm)
+        valid = norm > np.finfo(np.float64).eps
+        scale[valid] = 2.0 / norm[valid]
+
+        xx = x * x * scale
+        yy = y * y * scale
+        zz = z * z * scale
+        xy = x * y * scale
+        xz = x * z * scale
+        yz = y * z * scale
+        wx = w * x * scale
+        wy = w * y * scale
+        wz = w * z * scale
+
+        matrices = np.empty((len(quaternions), 3, 3), dtype=np.float64)
+        matrices[:, 0, 0] = 1.0 - (yy + zz)
+        matrices[:, 0, 1] = xy - wz
+        matrices[:, 0, 2] = xz + wy
+        matrices[:, 1, 0] = xy + wz
+        matrices[:, 1, 1] = 1.0 - (xx + zz)
+        matrices[:, 1, 2] = yz - wx
+        matrices[:, 2, 0] = xz - wy
+        matrices[:, 2, 1] = yz + wx
+        matrices[:, 2, 2] = 1.0 - (xx + yy)
+        if not np.all(valid):
+            matrices[~valid] = np.eye(3)
+        return matrices
+
+    def get_robot_urdf_matrix_from_proto(self, full_body_data):
         """Get the robot URDF matrix from FullBodyData protobuf bytes."""
-        matrices = self.parse_full_body_to_matrix(proto_data)
+        matrices = self.parse_full_body_to_matrix(full_body_data)
         if matrices is None or matrices.size == 0:
             SDKLogger.warning("Received invalid matrices data")
             return
@@ -783,23 +835,28 @@ class KuavoPicoInfoTransformer():
         current_time = rospy.Time.now()
         return robot_urdf_matrices, current_time
     
-    def parse_full_body_to_matrix(self, data_bytes: bytes):
+    def parse_full_body_to_matrix(self, full_body_data):
         """Parse protobuf FullBodyData bytes into [N, 4, 4] matrices."""
         try:
-            full_body_msg = proto.VRData()
-            full_body_msg.ParseFromString(data_bytes)
-            
-            poses = full_body_msg.full_body.full_body
+            poses = full_body_data.full_body
             if not poses:
                 SDKLogger.warning("No poses in full_body")
                 return None
-            
-            for i, pose in enumerate(poses):
-                translation = np.array([pose.pos_x, pose.pos_y, pose.pos_z])
-                rotation = np.array([pose.rot_qx, pose.rot_qy, pose.rot_qz, pose.rot_qw])
-                
-                self.cached_matrices[i][:3, :3] = quaternion_matrix(rotation)[:3, :3]
-                self.cached_matrices[i][:3, 3] = translation
+
+            count = min(len(poses), len(self.cached_matrices))
+            for i in range(count):
+                pose = poses[i]
+                self.cached_matrices[i, 0, 3] = pose.pos_x
+                self.cached_matrices[i, 1, 3] = pose.pos_y
+                self.cached_matrices[i, 2, 3] = pose.pos_z
+                self._quat_buffer[i, 0] = pose.rot_qx
+                self._quat_buffer[i, 1] = pose.rot_qy
+                self._quat_buffer[i, 2] = pose.rot_qz
+                self._quat_buffer[i, 3] = pose.rot_qw
+
+            self.cached_matrices[:count, :3, :3] = self._quaternions_xyzw_to_rotation_matrices(
+                self._quat_buffer[:count]
+            )
             
             return self.cached_matrices
         except Exception as e:
@@ -1066,6 +1123,14 @@ class KuavoPicoInfoTransformer():
     
     def publish_tf_transforms(self, robot_urdf_matrices, current_time):
         """Publish TF transforms for all bones"""
+        if self.tf_publish_hz <= 0:
+            return
+        now_monotonic = time.monotonic()
+        min_interval = 1.0 / self.tf_publish_hz
+        if self._last_tf_publish_monotonic > 0 and now_monotonic - self._last_tf_publish_monotonic < min_interval:
+            return
+        self._last_tf_publish_monotonic = now_monotonic
+
         for i, matrix in enumerate(robot_urdf_matrices):
             try:
                 pos, quat = self.get_pose_from_matrix(matrix)
@@ -1149,6 +1214,25 @@ class KuavoPicoInfoTransformer():
         except Exception as e:
             SDKLogger.error(f"Error getting local pose: {e}")
             return None
+
+    @staticmethod
+    def make_pose_from_matrix(matrix):
+        pos = matrix[:3, 3]
+        quat = quaternion_from_matrix(matrix)
+        pose = picoPoseInfo()
+        pose.position = Point(*pos)
+        pose.orientation = Quaternion(*quat)
+        return pose
+
+    @staticmethod
+    def make_base_pose_from_matrix(joint_matrix, pelvis_inv):
+        T_joint_to_base = pelvis_inv @ joint_matrix
+        pos = T_joint_to_base[:3, 3]
+        quat = quaternion_from_matrix(T_joint_to_base)
+        pose = picoPoseInfo()
+        pose.position = Point(*pos)
+        pose.orientation = Quaternion(*quat)
+        return pose
     
     def get_world_pose(self, joint_matrix, pelvis_matrix):
         try:
@@ -1204,14 +1288,11 @@ class KuavoPicoInfoTransformer():
         """Publish local poses relative to base_link"""
         # self.compute_head_body_pose(robot_urdf_matrices)
 
-        # Get SPINE3 matrix for base_link calculations
-        spine3_idx = BODY_TRACKER_ROLES.index('SPINE3')
-        spine3_matrix = robot_urdf_matrices[spine3_idx]
-
         pelvis_idx = BODY_TRACKER_ROLES.index('Pelvis')
         pelvis_matrix = robot_urdf_matrices[pelvis_idx]
 
         pelvis_matrix = self.align_pelvis(pelvis_matrix)
+        pelvis_inv = np.linalg.inv(pelvis_matrix)
         
         pose_info_list = picoPoseInfoList()
         pose_info_list.timestamp_ms = int(current_time.to_sec() * 1000)  # Convert Time to milliseconds
@@ -1220,15 +1301,17 @@ class KuavoPicoInfoTransformer():
         
         for i, matrix in enumerate(robot_urdf_matrices):
             try:
-                # Create pose info for each bone
+                bone_name = BODY_TRACKER_ROLES[i]
                 if self.control_torso_mode:
                     joint_pose = self.get_world_pose(matrix, pelvis_matrix)
                     # joint_pose = self.get_local_pose(matrix, pelvis_matrix)
                 else:
-                    if self.is_mobile_mpc:
+                    if self.control_mode == "UpperBody" and bone_name not in UPPER_BODY_CONTROL_JOINTS:
+                        joint_pose = self.make_pose_from_matrix(matrix)
+                    elif self.is_mobile_mpc:
                         joint_pose = self.get_local_pose(matrix, pelvis_matrix)
                     else:
-                        joint_pose = self.get_base_pose(matrix, pelvis_matrix)
+                        joint_pose = self.make_base_pose_from_matrix(matrix, pelvis_inv)
                 
                 if joint_pose is not None:
                     pose_info_list.poses.append(joint_pose)

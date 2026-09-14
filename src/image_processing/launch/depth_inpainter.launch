@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="input_topic" default="/camera/depth/image_raw" />
-    <arg name="output_topic" default="/camera/depth/image_processed" />
+    <arg name="input_topic" default="/waist_camera/depth/image_raw" />
+    <arg name="output_topic" default="/waist_camera/depth/image_processed" />
 
     <arg name="queue_size" default="1" />
 
@@ -20,7 +20,8 @@
     <arg name="min_depth_physics" default="0.17" />
     <arg name="max_depth" default="2.5" />
 
-    <arg name="resize_scale" default="0.151" />
+    <arg name="resize_h" default="36" />
+    <arg name="resize_w" default="64" />
 
     <!-- <arg name="crop_top" default="6" />
     <arg name="crop_bottom" default="0" />
@@ -72,7 +73,9 @@
         <param name="min_depth_physics" value="$(arg min_depth_physics)" />
         <param name="max_depth" value="$(arg max_depth)" />
 
-        <param name="resize_scale" value="$(arg resize_scale)" />
+        <param name="resize_h" value="$(arg resize_h)" />
+        <param name="resize_w" value="$(arg resize_w)" />
+
         <param name="crop_top" value="$(arg crop_top)" />
         <param name="crop_bottom" value="$(arg crop_bottom)" />
         <param name="crop_left" value="$(arg crop_left)" />

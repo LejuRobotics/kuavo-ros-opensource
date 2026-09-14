@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="3" project_name="Project">
+    <include path="claw_test.xml"/>
+    <!-- Description of Node Models (used by Groot) -->
+    <TreeNodesModel>
+        <Action ID="ArmMoveToReadyPose" editable="true">
+            <input_port name="action_name"/>
+            <input_port name="move_speed"/>
+        </Action>
+        <Condition ID="BoxTagOK" editable="true">
+            <input_port name="tag_id"/>
+            <output_port name="box_pos"/>
+            <output_port name="box_quat"/>
+            <input_port name="time_check" default="false"/>
+        </Condition>
+        <Condition ID="CheckStatusOK" editable="true"/>
+        <Action ID="ClawPart" editable="true">
+            <input_port name="hand_pos"/>
+            <input_port name="hand_quat"/>
+            <input_port name="hand_offset"/>
+            <input_port name="hand_side"/>
+            <input_port name="part_type"/>
+        </Action>
+        <Action ID="CmdPoseWorldMoveToDestination">
+            <input_port name="target_pose"/>
+        </Action>
+        <Condition ID="ComputeTargetPose" editable="true">
+            <input_port name="box_pos"/>
+            <input_port name="box_quat"/>
+            <input_port name="target_box_offset"/>
+            <output_port name="target_pose"/>
+        </Condition>
+        <Action ID="ControlClaw" editable="true">
+            <input_port name="action_mode"/>
+            <input_port name="hand_to_control"/>
+            <input_port name="duration"/>
+        </Action>
+        <Condition ID="DelTagID" editable="true">
+            <input_port name="tag_id"/>
+        </Condition>
+        <Decorator ID="ForEachTag" editable="true">
+            <input_port name="tag_status_map"/>
+            <input_port name="sorted_tag_ids"/>
+            <output_port name="current_tag_id"/>
+        </Decorator>
+        <Condition ID="ForceCheck" editable="true">
+            <input_port name="force_threshold"/>
+        </Condition>
+        <Action ID="GetPartPose" editable="true">
+            <output_port name="part_pos"/>
+            <output_port name="part_quat"/>
+        </Action>
+        <Condition ID="GetTagMap" editable="true">
+            <input_port name="put_tag_id"/>
+            <output_port name="tag_status_map"/>
+            <output_port name="sorted_tag_ids"/>
+        </Condition>
+        <Action ID="GraspBox" editable="true">
+            <input_port name="box_pos"/>
+            <input_port name="box_quat">xyzw</input_port>
+            <input_port name="box_size"/>
+            <input_port name="box_offset"/>
+            <input_port name="grasp_type">0:grasp, 1:put</input_port>
+        </Action>
+        <Action ID="HeadMove" editable="true">
+            <input_port name="control_mode"/>
+        </Action>
+        <Action ID="MakePlan" editable="true">
+            <input_port name="target_pose"/>
+            <output_port name="planed_trajectory"/>
+        </Action>
+        <Action ID="MoveToDestination" editable="true">
+            <input_port name="planed_trajectory"/>
+            <input_port name="move_type" default="0">int</input_port>
+        </Action>
+        <Action ID="ResetState" editable="true"/>
+        <Action ID="SelectHandSide" editable="true">
+            <input_port name="part_pos"/>
+            <input_port name="part_quat"/>
+            <input_port name="target_part_offset"/>
+            <output_port name="hand_side"/>
+        </Action>
+        <Condition ID="SleepMs" editable="true">
+            <input_port name="sleep_ms"/>
+        </Condition>
+        <Decorator ID="TimingDecorator" editable="true"/>
+    </TreeNodesModel>
+</root>

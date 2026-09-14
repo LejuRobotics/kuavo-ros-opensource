@@ -1,0 +1,8 @@
+# 请求电源板系统状态（对应协议 0x01 系统状态读取）
+---
+# 电源板系统状态（复用 PowerBoardStatus.msg，对应 0x01 System_Runtime_Status_t）
+kuavo_msgs/PowerBoardStatus status
+# 是否成功
+bool success
+# 消息
+string message

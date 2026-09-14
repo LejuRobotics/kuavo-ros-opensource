@@ -2,19 +2,18 @@
 # -*- coding: utf-8 -*-
 
 import rospy
+import threading
 from kuavo_msgs.srv import SetLEDMode, SetLEDModeResponse, SetLEDMode_free, SetLEDMode_freeResponse
+from kuavo_msgs.srv import GetBatteryInfo, GetBatteryInfoResponse
 from std_srvs.srv import Trigger, TriggerResponse
 import os
-try:
-    import serial
-except ImportError:
-    import subprocess
-    import sys
-    print("正在安装pyserial库...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
-    import serial
-import time
 import sys
+
+# 添加 controller 目录到路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'controller'))
+
+from hardware.serial_port import SerialPort
+from hardware.battery_query import BatteryQueryCache
 
 class LEDController:
     def __init__(self, port='/dev/ttyLED0', baudrate=115200):
@@ -23,20 +22,7 @@ class LEDController:
         :param port: 串口设备路径
         :param baudrate: 波特率
         """
-        try:
-            self.ser = serial.Serial(
-                port=port,
-                baudrate=baudrate,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=1
-            )
-            print(f"成功连接到设备: {port}")
-        except serial.SerialException as e:
-            print(f"无法连接到设备: {e}")
-            print("请检查 UDEV 规则以及硬件设备是否正常！！")
-            sys.exit(1)
+        self.ser = SerialPort()
 
     def calculate_checksum(self, data):
         """
@@ -64,12 +50,12 @@ class LEDController:
         packet.append(checksum)
         
         # 发送数据
-        self.ser.write(bytes(packet))
+        self.ser.send_data(bytes(packet))
         # print(f"发送数据: {[hex(x) for x in packet]}")
 
     def close(self):
-        """关闭串口连接"""
-        self.ser.close()
+        """关闭LED连接"""
+        self.set_led_mode(0x00, [(0, 0, 0)] * 10)
 
     def deinit(self):
         self.set_led_mode(0x00, [(0, 0, 0)] * 10)
@@ -82,19 +68,44 @@ class LEDControllerNode:
 
         # 创建LED控制器实例
         self.led_controller = LEDController()
-        
+
+        # 获取共享串口单例引用
+        self.serial_port = SerialPort()
+        # 操作锁，确保 LED 和电池查询互斥使用串口
+        self._op_lock = threading.Lock()
+        # 后台电池查询缓存，使用 try_lock 不阻塞 LED 操作
+        self._battery_cache = BatteryQueryCache(self.serial_port, self._op_lock)
+
         # 创建ROS服务
         self.led_service = rospy.Service('control_led', SetLEDMode, self.handle_led_control)
         self.led_service_free = rospy.Service('control_led_free', SetLEDMode_free, self.handle_led_control_free)
         self.stop_led_service = rospy.Service('close_led',Trigger,self.handle_close_led)
+
+        # 电池查询内部服务，供 battery_info_node 通过 ROS service 调用
+        try:
+            self._battery_service = rospy.Service(
+                '_query_battery_hw',
+                GetBatteryInfo,
+                self.handle_query_battery_hw
+            )
+        except rospy.ServiceException as e:
+            rospy.logwarn(f"无法注册 _query_battery_hw 服务（另一 LED 节点已注册）: {e}")
+
         rospy.loginfo("LED控制服务已启动，等待请求...")
+        rospy.on_shutdown(self._shutdown)
+
+    def _shutdown(self):
+        """节点退出时清理后台线程"""
+        self._battery_cache.stop()
     
     def handle_close_led(self,req):
         colors = [(0,0,0),(0,0,0),(0,0,0),
                   (0,0,0),(0,0,0),(0,0,0),
                   (0,0,0),(0,0,0),(0,0,0),
                   (0,0,0)]
-        self.led_controller.set_led_mode(0,colors)
+        with self._op_lock:
+            self.serial_port.clear_buffer()
+            self.led_controller.set_led_mode(0,colors)
         return TriggerResponse(success=True,message="success")
     
     def handle_led_control(self, req):
@@ -112,7 +123,9 @@ class LEDControllerNode:
             req.color9,
             req.color10
         ]
-        self.led_controller.set_led_mode(req.mode, colors)
+        with self._op_lock:
+            self.serial_port.clear_buffer()
+            self.led_controller.set_led_mode(req.mode, colors)
         response.success = True
         # rospy.loginfo("LED控制成功")
 
@@ -123,9 +136,47 @@ class LEDControllerNode:
         colors = []
         for i in req.colors:
             colors.append((i.r,i.g,i.b))
-        self.led_controller.set_led_mode(req.mode, colors)
+        with self._op_lock:
+            self.serial_port.clear_buffer()
+            self.led_controller.set_led_mode(req.mode, colors)
         response.success = True
         return response
+
+    def handle_query_battery_hw(self, req):
+        """返回后台缓存的最新电池数据（瞬时返回，不阻塞 LED）"""
+        try:
+            battery_info, age = self._battery_cache.get(req.battery_id)
+
+            if battery_info is None:
+                if age < 0:
+                    msg = f"No cached data for battery {req.battery_id} yet"
+                else:
+                    msg = f"Battery {req.battery_id} data stale ({age:.0f}s old, may be disconnected)"
+                return GetBatteryInfoResponse(
+                    success=False,
+                    message=msg
+                )
+
+            return GetBatteryInfoResponse(
+                battery_id=req.battery_id,
+                voltage=battery_info['voltage'],
+                current=battery_info['current'],
+                remaining_capacity=battery_info['remaining_capacity'],
+                full_capacity=battery_info['full_capacity'],
+                percentage=battery_info['percentage'],
+                cycle_count=battery_info['cycle_count'],
+                protection_flags=battery_info['protection_flags'],
+                temperatures=battery_info['temperatures'],
+                success=True,
+                message=f"Battery {req.battery_id} (cached)"
+            )
+
+        except Exception as e:
+            rospy.logerr(f"电池查询失败: {e}")
+            return GetBatteryInfoResponse(
+                success=False,
+                message=f"Service error: {str(e)}"
+            )
 
 if __name__ == '__main__':
     try:

@@ -72,7 +72,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   // 超时机制相关
   ros::Time mode2EnterTime_;                              // 记录进入 mode 2 的时间戳
   std::mutex mode2EnterTimeMutex_;                        // 保护时间戳的互斥锁
-  static constexpr double MODE_2_TIMEOUT_DURATION = 5.0;  // 超时时间：5秒
+  static constexpr double MODE_2_TIMEOUT_DURATION = 1.0;  // 超时时间：1秒
+  bool resetJointToDefault_ = true;                  // 是否在进入mode2时将手臂重置到零位（与轮臂一致）
+  Eigen::VectorXd q_init_cmd_;                            // mode2进入时保存的初始关节命令（用于平滑过渡）
 
   void fsmEnter() override;
   void fsmChange() override;
@@ -90,6 +92,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
  private:
   void solveIkHandElbowThreadFunction();
   void applyWorkerThreadScheduling(const char* threadName, int priority) const;
+  bool requestWbcArmTrajectoryControl(int controlMode, bool requireIncrementalMode, const char* context);
 
   static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
   static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 50;
@@ -98,6 +101,7 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void updateSensorArmJointMeanFromSensorData();
 
   ros::Subscriber arm_ctrl_mode_vr_sub_;
+  std::mutex wbcArmTrajectoryControlMutex_;
 
   // FK 辅助函数：计算左手末端执行器姿态
   void computeLeftEndEffectorFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);
@@ -234,6 +238,15 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   double fhanKh0Joint_ = 6.0;      // 关节角度fhan滤波平滑系数
   double maxJointVelocity_ = 1.0;  // 关节最大角速度限制（弧度/秒）
   double lowpassDqAlpha_ = 0.9;    // lowpass_dq_低通滤波因子（历史值权重，新值权重为1-alpha）
+
+  // 腕部软限位速度阻尼参数：在 Quest3 最终 q/v 状态形成后平滑制动，并保持位置、速度一致
+  bool wristJointLimitVelocityDamperEnabled_ = true;
+  double wristJointLimitSoftZone_ = 0.14;          // [rad] 距离软限位多远开始减速
+  double wristJointLimitStopAcceleration_ = 80.0; // [rad/s^2] 动态制动距离使用的减速度
+  double wristJointLimitMaxVelocity_ = 4.0;        // [rad/s] 阻尼层允许的最大速度
+  double wristJointLimitMaxAcceleration_ = 80.0;  // [rad/s^2] 相邻周期最大速度变化
+  double wristJointLimitSettleVelocity_ = 0.001;   // [rad/s] 软区内消除渐近爬行的阈值
+  double wristJointLimitHardEpsilon_ = 0.0001;     // [rad] 软限位内侧数值安全余量
 
   // 手部位置约束参数
   double sphereRadiusLimit_ = 0.5;                                  // 手部位置约束球体半径

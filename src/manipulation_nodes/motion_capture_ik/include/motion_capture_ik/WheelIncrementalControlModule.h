@@ -289,11 +289,10 @@ struct HandStatus {
     double normError = (currentPosition - lastPosition).norm();
     lastMovementDistance = normError;  // 保存移动距离，供外部使用
 
-    // 更新上一帧位置
-    lastPosition = currentPosition;
-
     // 检查是否超过阈值
     if (normError > threshold) {
+      // 更新上一帧位置
+      lastPosition = currentPosition;
       moving = true;
       return true;
     }

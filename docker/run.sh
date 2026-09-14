@@ -67,31 +67,39 @@ show_container_info() {
 }
 
 
-if [[ $(docker ps -aq -f ancestor=${IMAGE_NAME} -f name=${CONTAINER_NAME}) ]]; then
-    echo "Container '${CONTAINER_NAME}' based on image '${IMAGE_NAME}' is already exists."
-    if [[ $(docker ps -aq -f status=exited -f name=${CONTAINER_NAME}) ]]; then
-        echo "Restarting exited container '$CONTAINER_NAME' ..."
+# Check if container exists (regardless of image)
+EXISTING_CONTAINER=$(docker ps -aq -f name=^/${CONTAINER_NAME}$)
+if [[ -n "$EXISTING_CONTAINER" ]]; then
+    echo "Container '${CONTAINER_NAME}' already exists (ID: ${EXISTING_CONTAINER})."
+    
+    # Check if container is running
+    if [[ $(docker ps -q -f name=^/${CONTAINER_NAME}$) ]]; then
+        echo "Container is already running."
+    else
+        echo "Restarting stopped container '$CONTAINER_NAME' ..."
         docker start $CONTAINER_NAME
     fi
+    
     show_container_info
     echo "Exec into container '$CONTAINER_NAME' ..."
     docker exec -it $CONTAINER_NAME zsh
 else
     echo "Creating a new container '${CONTAINER_NAME}' based on image '${IMAGE_NAME}' ..."
-	docker run -it --net host \
-		--name $CONTAINER_NAME \
-		--privileged \
-		-v /dev:/dev \
-		-v "${HOME}/.ros:/root/.ros" \
-		-v "$CCACHE_DIR:/root/.ccache" \
-		-v "$PARENT_DIR:/root/kuavo_ws" \
-		-v "${HOME}/.config/lejuconfig:/root/.config/lejuconfig" \
-		--group-add=dialout \
-		--ulimit rtprio=99 \
-		--cap-add=sys_nice \
-		-e DISPLAY=$DISPLAY \
-		-e ROBOT_VERSION=42 \
-		--volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
-		${IMAGE_NAME} \
-		zsh
+    echo "Note: Container will be preserved for future use. Use 'docker rm ${CONTAINER_NAME}' to remove it."
+    docker run -it --net host --ipc=host \
+        --name $CONTAINER_NAME \
+        --privileged \
+        -v /dev:/dev \
+        -v "${HOME}/.ros:/root/.ros" \
+        -v "$CCACHE_DIR:/root/.ccache" \
+        -v "$PARENT_DIR:/root/kuavo_ws" \
+        -v "${HOME}/.config/lejuconfig:/root/.config/lejuconfig" \
+        --group-add=dialout \
+        --ulimit rtprio=99 \
+        --cap-add=sys_nice \
+        -e DISPLAY=$DISPLAY \
+        -e ROBOT_VERSION=42 \
+        --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
+        ${IMAGE_NAME} \
+        zsh
 fi

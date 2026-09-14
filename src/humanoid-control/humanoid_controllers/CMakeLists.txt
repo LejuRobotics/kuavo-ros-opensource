@@ -46,6 +46,7 @@ find_package(catkin REQUIRED
         humanoid_interface_drake
         kuavo_common
         kuavo_solver
+        std_srvs
         leju_mobile_base_msgs
         )
 find_package(drake REQUIRED)
@@ -272,12 +273,15 @@ add_library(${PROJECT_NAME}
         src/ArmTrajReceiver.cpp
         src/ArmTrajectoryInterpolator.cpp
         src/WaistKinematics.cpp
+        src/ControllerCmdBlend.cpp
         src/util/TopicMonitor.cpp
         src/rl/RlGaitReceiver.cpp
         src/rl/RLControllerBase.cpp
         src/rl/FallStandController.cpp
         src/rl/RLControllerManager.cpp
         src/rl/AmpWalkController.cpp
+        src/rl/MoREController.cpp
+        src/rl/VMPController.cpp
         src/rl/armController.cpp
         src/rl/DepthWalkController.cpp
         src/rl/waistController.cpp
@@ -285,6 +289,8 @@ add_library(${PROJECT_NAME}
         # src/MinicController.cpp
         src/rl/VMPController.cpp
         src/rl/DanceController.cpp
+        src/SitControlManager.cpp
+        src/SitUpController.cpp
         )
 
 target_link_libraries(${PROJECT_NAME}
@@ -432,6 +438,9 @@ install(FILES humanoid_controllers_plugins.xml
 )
 
 # Install scripts
-install(PROGRAMS scripts/restart_urobot_service.sh
+install(PROGRAMS 
+        scripts/restart_urobot_service.sh
+        scripts/modbus_io_bridge_node.py
+        scripts/start_modbus_io_bridge.sh
         DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

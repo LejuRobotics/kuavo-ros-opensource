@@ -6,6 +6,21 @@ from collections import defaultdict
 
 import math
 import numpy as np  # 引入numpy库用于数值计算
+import sys
+import os
+import rospkg
+
+# 使用 rospkg 获取 kuavo_common 包路径并导入 RobotVersion
+try:
+    _kuavo_common_python = os.path.join(rospkg.RosPack().get_path('kuavo_common'), 'python')
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
+except (rospkg.ResourceNotFound, ImportError):
+    _kuavo_common_python = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../kuavo_common/python'))
+    if _kuavo_common_python not in sys.path:
+        sys.path.insert(0, _kuavo_common_python)
+    from robot_version import RobotVersion
 
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, changeArmCtrlModeResponse
 from kuavo_msgs.srv import twoArmHandPoseCmdSrv
@@ -33,21 +48,22 @@ ik_solve_param.pos_cost_weight = 1.0 # 最大化位置权重, 确保目标点结
 def get_version_parameter():
     param_name = 'robot_version'
     try:
-        # 获取参数值
         param_value = rospy.get_param(param_name)
         rospy.loginfo(f"参数 {param_name} 的值为: {param_value}")
-        # 适配1000xx版本号
-        valid_series = [42, 45, 49, 52, 53, 54]
-        MMMMN_MASK = 100000
-        series = param_value % MMMMN_MASK
-        if series not in valid_series:
-            rospy.logwarn(f"无效的机器人版本号: {param_value}，仅支持 {valid_series} 系列！")
+        if not RobotVersion.is_valid(param_value):
+            rospy.logwarn(f"无效的机器人版本号: {param_value}，版本号格式不合法！")
             return None
-        else:
-            rospy.loginfo(f"✅ 机器人版本号有效: {param_value}")
+
+        rv = RobotVersion.create(int(param_value))
+        if (rv.start_with(4, 2) or rv.start_with(4, 5) or rv.start_with(4, 9)
+                or rv.start_with(5, 2) or rv.start_with(5, 3) or rv.start_with(5, 4)):
+            rospy.loginfo(f"✅ 机器人版本号有效: {param_value} ({rv.version_name()})")
             return param_value
+        else:
+            rospy.logwarn(f"无效的机器人版本号: {param_value} ({rv.version_name()})，仅支持 42 45 49 52 53 54 系列！")
+            return None
     except rospy.ROSException:
-        rospy.logerr(f"参数 {param_name} 不存在！") 
+        rospy.logerr(f"参数 {param_name} 不存在！")
         return None
 
 # IK 逆解服务

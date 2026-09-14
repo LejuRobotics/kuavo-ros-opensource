@@ -60,6 +60,9 @@ public:
     // 设置指定规划器的同步模式
     void setTimedPlannerSyncMode(int8_t plannerIndex, bool isSync);
 
+    // 重置指定规划器到给定状态（current=target=state，原地轨迹，丢弃旧轨迹状态）
+    void resetTimedPlanner(int8_t plannerIndex, const Eigen::VectorXd& state);
+
     // 获取指定规划器的自由度数量
     int getTimedPlannerDofNum(int8_t plannerIndex) const;
 

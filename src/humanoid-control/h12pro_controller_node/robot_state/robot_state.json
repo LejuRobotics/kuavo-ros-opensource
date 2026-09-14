@@ -37,7 +37,8 @@
       "walk",
       "trot",
       "vmp_controller",
-      "dance_controller"
+      "dance_controller",
+      "sit"
     ]
   },
   "transitions": {
@@ -882,6 +883,38 @@
       {
         "trigger": "stop",
         "source": "dance_controller",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "sit_to_stand",
+        "source": "initial",
+        "dest": "stance",
+        "before": "sit_to_stand_callback"
+      },
+      {
+        "trigger": "sit_down",
+        "source": "stance",
+        "dest": "sit",
+        "before": "sit_down_callback",
+        "conditions": ["check_no_tact_action", "check_is_mpc_controller"]
+      },
+      {
+        "trigger": "sit_to_stand",
+        "source": "sit",
+        "dest": "stance",
+        "before": "sit_to_stand_callback",
+        "conditions": "check_sit_sequence_complete"
+      },
+      {
+        "trigger": "stop",
+        "source": "initial",
+        "dest": "initial",
+        "before": "stop_callback"
+      },
+      {
+        "trigger": "stop",
+        "source": "sit",
         "dest": "initial",
         "before": "stop_callback"
       }

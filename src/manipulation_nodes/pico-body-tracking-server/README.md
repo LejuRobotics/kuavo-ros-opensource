@@ -101,6 +101,109 @@ rosservice call /pico/set_head_control_mode "{mode: 'vr_follow', fixed_hand: ''}
   - `grip_deadzone`：抓握死区
   - `stable_unlock.enabled` / `stable_unlock.reengage_threshold`：解锁回切防突变阈值
 
+标准 launch 启动（推荐）：
+```bash
+roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch
+```
+
+也可以使用一键 launch（仿真/实物 + PICO + 头控）：
+```bash
+# 仿真
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true
+
+# 实物
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true
+```
+
+### GMR 模式下灵巧手控制
+
+当使用 `load_kuavo_real.launch with_pico_gmr:=true` 启动 GMR 链路时，灵巧手控制由
+独立的 `pico_dexhand_control` 节点自动提供（默认启用），无需额外启动 `pico_whole_body_teleop`。
+
+> **背景说明**：`pico_whole_body_teleop` 和 `pico_comm_minimal` 都会绑定 UDP 12345 端口，
+> 不能同时运行。`pico_dexhand_control` 节点不占用任何端口，仅订阅 `/pico/joy` 话题。
+
+```bash
+# GMR + 灵巧手（默认已启用灵巧手）
+roslaunch humanoid_controllers load_kuavo_real.launch with_pico_gmr:=true with_mm_ik:=true
+
+# 如需关闭 GMR 模式下的灵巧手控制
+roslaunch humanoid_controllers load_kuavo_real.launch with_pico_gmr:=true with_mm_ik:=true pico_enable_dexhand_control:=false
+```
+
+**GMR 模式灵巧手支持的按键**：
+| 按键 | 功能 |
+|------|------|
+| 左/右 Grip（连续值） | 灵巧手抓握控制 |
+| Y | 锁定/解锁手指输出 |
+| X 长按（LT/RT 空闲时） | 左拇指张开切换 |
+| A 长按（LT/RT 空闲时） | 右拇指张开切换 |
+
+如需启用迁移后的 PICO 主动手头控（独立节点）：
+
+> **GMR 模式下自动启动**：使用 `load_kuavo_real.launch with_pico_gmr:=true` 时，头控节点默认自动启动，无需手动运行。
+> `pico_comm_minimal` 会发布 `/robot_body_matrices`，头控节点订阅该话题实现头部跟踪。
+
+```bash
+# GMR + 灵巧手 + 头控（默认全部启用）
+roslaunch humanoid_controllers load_kuavo_real.launch with_pico_gmr:=true
+
+# 切换头控模式（默认 auto_track_active）
+roslaunch humanoid_controllers load_kuavo_real.launch with_pico_gmr:=true pico_head_control_mode:=vr_follow
+
+# 关闭 GMR 模式下的头控
+roslaunch humanoid_controllers load_kuavo_real.launch with_pico_gmr:=true pico_enable_head_control:=false
+```
+
+如需单独运行头控节点（调试用）：
+```bash
+sudo su
+cd kuavo-ros-opensource
+source devel/setup.bash
+cd src/manipulation_nodes/pico-body-tracking-server
+python3 scripts/pico_head_control_node.py _mode:=auto_track_active
+```
+
+说明：
+- 该节点会发布 `/robot_head_motion_data`，并自动设置 `/pico/use_external_head_control=true`，避免与旧链路重复发布。
+- 支持模式：`fixed`、`auto_track_active`、`fixed_main_hand`、`vr_follow`。
+- 可通过话题 `/pico/head_control_mode`（`std_msgs/String`）在运行时切换模式。
+- 头控服务接口：`/pico/set_head_control_mode`（`kuavo_msgs/SetHeadControlMode`）。
+
+头部控制服务接口：
+- 服务名：`/pico/set_head_control_mode`
+- 服务类型：`kuavo_msgs/SetHeadControlMode`
+- 请求字段：
+  - `mode`：`fixed` / `auto_track_active` / `fixed_main_hand` / `vr_follow`
+  - `fixed_hand`：仅 `fixed_main_hand` 时必填，`left` 或 `right`
+- 响应字段：
+  - `success`：是否成功
+  - `message`：错误或成功信息
+  - `current_mode`：当前生效模式
+
+示例：
+```bash
+# 固定模式
+rosservice call /pico/set_head_control_mode "{mode: 'fixed', fixed_hand: ''}"
+
+# 自动跟踪主动手
+rosservice call /pico/set_head_control_mode "{mode: 'auto_track_active', fixed_hand: ''}"
+
+# 固定主手（左手）
+rosservice call /pico/set_head_control_mode "{mode: 'fixed_main_hand', fixed_hand: 'left'}"
+
+# VR随动
+rosservice call /pico/set_head_control_mode "{mode: 'vr_follow', fixed_hand: ''}"
+```
+
+灵巧手迁移说明（PICO）：
+- 已对齐“抓握 + 锁定/解锁”的控制链路，按键逻辑保持不变（`Y` 锁定/解锁）。
+- 新增抓握配置项在 `config/pico_vr_config.yaml` 的 `dex_hand` 下：
+  - `command_min` / `command_max`：抓握输出范围
+  - `smoothing_alpha`：抓握平滑系数
+  - `grip_deadzone`：抓握死区
+  - `stable_unlock.enabled` / `stable_unlock.reengage_threshold`：解锁回切防突变阈值
+
 ### Pico App 端启动
 
 打开2个体感追踪器，会闪蓝光，佩戴到左右脚踝处，注意裤子不要遮挡传感器，必要时可以卷起裤脚。

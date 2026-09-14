@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- ============================================= -->
+    <!-- 参数定义 -->
+    <!-- ============================================= -->
+    
+    <!-- 是否启用 Mujoco 可视化 -->
+    <arg name="visualize" default="true" 
+         doc="是否启用 Mujoco 可视化 (true/false)"/>
+    
+    <!-- GMR 高斯滤波平滑参数 -->
+    <arg name="enable_gmr_smoothing" default="true" 
+         doc="是否启用GMR高斯滤波平滑"/>
+    <arg name="gmr_gaussian_sigma" default="1.0" 
+         doc="高斯核标准差 (越大越平滑)"/>
+    <arg name="gmr_velocity_clip" default="20.0" 
+         doc="速度裁剪阈值"/>
+    <arg name="gmr_velocity_deadzone" default="0.05" 
+         doc="速度死区阈值 (小于此值的速度置为0)"/>
+    
+    <!-- ============================================= -->
+    <!-- 节点启动 -->
+    <!-- ============================================= -->
+
+    <!-- 节点 1: PICO 数据接收器 -->
+    <node pkg="kuavo_pico_gmr" type="pico_comm_minimal.py" name="pico_comm_minimal" output="screen" respawn="true" respawn_delay="5"/>
+    
+    <!-- 节点 2: 运动重定向与可视化 (在 gmr_venv 环境中运行) -->
+    <node pkg="kuavo_pico_gmr" type="pico_realtime_to_robot_wrapper.sh" name="pico_realtime_retarget" 
+          output="screen" respawn="true" respawn_delay="5">
+        <!-- 可视化参数 -->
+        <param name="enable_viewer" value="$(arg visualize)"/>
+        <!-- GMR 平滑参数 -->
+        <param name="enable_gmr_smoothing" value="$(arg enable_gmr_smoothing)"/>
+        <param name="gmr_gaussian_sigma" value="$(arg gmr_gaussian_sigma)"/>
+        <param name="gmr_velocity_clip" value="$(arg gmr_velocity_clip)"/>
+        <param name="gmr_velocity_deadzone" value="$(arg gmr_velocity_deadzone)"/>
+    </node>
+
+    
+    <!-- ============================================= -->
+    <!-- 启动信息 -->
+    <!-- ============================================= -->
+    <param name="launch_info" value="PICO Motion Retargeting System Started"/>
+    <param name="visualize_enabled" value="$(arg visualize)"/>
+    <param name="robot_type" value="kuavo_s45"/>
+    
+</launch>
+

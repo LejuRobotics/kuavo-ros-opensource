@@ -270,9 +270,15 @@ def test_double_click_reset_success_and_guards():
     _double_click_reset(ctrl, clock)
     resetter.assert_called_once()
     assert ctrl.main_hand is None
-    pub.assert_called()  # 一次绝对零位
+    pub.assert_not_called()  # 绝对零位延后到复位窗口结束
+    assert ctrl._pending_post_reset_pose is True
+
+    clock.return_value = 0.82  # t0+0.32 + reset_duration 0.5
+    ctrl.handle_joystick(make_msg())
+    pub.assert_called_once()
     tw = pub.call_args[0][0]
     assert abs(tw.linear.x) < 1e-9 and abs(tw.linear.z) < 1e-9
+    assert ctrl._pending_post_reset_pose is False
 
     # 摇杆非零拒绝
     resetter.reset_mock()

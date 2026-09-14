@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="3"
+      main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence>
+      <SetBlackboard value="-0.35,0.0,0.0"
+                     output_key="pre_grab_box_offset"/>
+      <SetBlackboard value="-0.3,0.0,0.0"
+                     output_key="pre_grab_box_offset_after_sgl_step"/>
+      <SetBlackboard value="0.3,0.4,0.22"
+                     output_key="box_size"/>
+      <SetBlackboard value="-0.35,0.0,0"
+                     output_key="pre_grab_box_offset2"/>
+      <SetBlackboard value="0"
+                     output_key="cur_id"/>
+      <SetBlackboard value="0,0.0,0.0"
+                     output_key="force_threshold"/>
+      <SetBlackboard value="0.12,0.0,-0.9"
+                     output_key="put_box_offset"/>
+      <SetBlackboard value="0"
+                     output_key="put_tag_id"/>
+      <Repeat num_cycles="10">
+        <Sequence>
+          <Sequence>
+            <HeadMove/>
+            <CmdPoseWorldMoveToDestination target_pose="0.0, 0.0, 0.0, -180.0"/>
+            <HeadMove/>
+            <!-- <CmdPoseWorldMoveToDestination target_pose="0.0, 0.0, 0.0, 0.0"/> -->
+          </Sequence>
+          <GetTagMap put_tag_id="{put_tag_id}"
+                     tag_status_map="{tag_map}"
+                     sorted_tag_ids="{sorted_tag_ids}"/>
+          <ForEachTag tag_status_map="{tag_map}"
+                      sorted_tag_ids="{sorted_tag_ids}"
+                      current_tag_id="{cur_id}">
+            <Sequence>
+              <Fallback>
+                <ReactiveSequence>
+                  <ForceCheck force_threshold="{force_threshold}"/>
+                  <TimingDecorator name="Total">
+                    <Sequence>
+                      <RetryUntilSuccessful num_attempts="3">
+                        <CheckStatusOK/>
+                      </RetryUntilSuccessful>
+                      <SequenceStar>
+                        <SequenceStar>
+                          <TimingDecorator name="MoveToGraspCMD">
+                            <Parallel failure_threshold="1"
+                                      success_threshold="2">
+                              <ReactiveSequence>
+                                <RetryUntilSuccessful num_attempts="3">
+                                  <BoxTagOK tag_id="{cur_id}"
+                                            box_pos="{box_pose}"
+                                            box_quat="{box_quat}"
+                                            time_check="false"/>
+                                </RetryUntilSuccessful>
+                                <ComputeTargetPose box_pos="{box_pose}"
+                                                   box_quat="{box_quat}"
+                                                   target_box_offset="{pre_grab_box_offset}"
+                                                   target_pose="{target_pose}"/>
+                                <CmdPoseWorldMoveToDestination target_pose="{target_pose}"/>
+                              </ReactiveSequence>
+                              <Delay delay_msec="1000">
+                                <ArmMoveToReadyPose action_name="ready_joints"
+                                                    move_speed="1.0"/>
+                              </Delay>
+                            </Parallel>
+                          </TimingDecorator>
+                          <TimingDecorator name="Grasp">
+                            <Sequence>
+                              <RetryUntilSuccessful num_attempts="10">
+                                <BoxTagOK tag_id="{cur_id}"
+                                          box_pos="{box_pose}"
+                                          box_quat="{box_quat}"
+                                          time_check="true"/>
+                              </RetryUntilSuccessful>
+                              <RetryUntilSuccessful num_attempts="3">
+                                <GraspBox box_pos="{box_pose}"
+                                          box_quat="{box_quat}"
+                                          box_size="{box_size}"
+                                          box_offset="0.0,0.0,0.02"
+                                          grasp_type="0"/>
+                              </RetryUntilSuccessful>
+                              <MoveToDestination planed_trajectory="0.0, 0.0, 0.0, 0.0"
+                                                 move_type="2"/>
+                              <SetBlackboard value="0,0,0"
+                                             output_key="force_threshold"/>
+                              <Sequence>
+                                <ComputeTargetPose box_pos="{box_pose}"
+                                                   box_quat="{box_quat}"
+                                                   target_box_offset="-1.0,0.0,0.0"
+                                                   target_pose="{target_pose_end}"/>
+                                <MakePlan target_pose="{target_pose_end}"
+                                          planed_trajectory="{traj_end}"/>
+                                <MoveToDestination planed_trajectory="{traj_end}"
+                                                   move_type="1"/>
+                              </Sequence>
+                              <Sequence>
+                                <MoveToDestination planed_trajectory="0.0, 0.0, 0.0, 0.0"
+                                                   move_type="2"/>
+                                <GraspBox box_pos="{box_pose}"
+                                          box_quat="{box_quat}"
+                                          box_size="{box_size}"
+                                          box_offset="-0.07,0.0,0.13"
+                                          grasp_type="2"/>
+                                <MoveToDestination planed_trajectory="0.0, 0.0, 0.0, 0.0"
+                                                   move_type="2"/>
+                              </Sequence>
+                            </Sequence>
+                          </TimingDecorator>
+                        </SequenceStar>
+                        <SequenceStar>
+                          <TimingDecorator name="MoveToPutCMD">
+                            <ReactiveSequence>
+                              <RetryUntilSuccessful num_attempts="3">
+                                <BoxTagOK tag_id="{put_tag_id}"
+                                          box_pos="{box_pose2}"
+                                          box_quat="{box_quat2}"
+                                          time_check="false"/>
+                              </RetryUntilSuccessful>
+                              <ComputeTargetPose box_pos="{box_pose2}"
+                                                 box_quat="{box_quat2}"
+                                                 target_box_offset="{pre_grab_box_offset2}"
+                                                 target_pose="{target_pose_pre_put}"/>
+                              <CmdPoseWorldMoveToDestination target_pose="{target_pose_pre_put}"/>
+                            </ReactiveSequence>
+                          </TimingDecorator>
+                          <Sequence>
+                            <TimingDecorator name="Put">
+                              <Sequence>
+                                <RetryUntilSuccessful num_attempts="3">
+                                  <BoxTagOK tag_id="{put_tag_id}"
+                                            box_pos="{box_pose2}"
+                                            box_quat="{box_quat2}"
+                                            time_check="false"/>
+                                </RetryUntilSuccessful>
+                                <SetBlackboard value="0,0,0"
+                                               output_key="force_threshold"/>
+                                <RetryUntilSuccessful num_attempts="5">
+                                  <GraspBox box_pos="{box_pose2}"
+                                            box_quat="{box_quat2}"
+                                            box_size="{box_size}"
+                                            box_offset="{put_box_offset}"
+                                            grasp_type="1"/>
+                                </RetryUntilSuccessful>
+                              </Sequence>
+                            </TimingDecorator>
+                            <MoveToDestination planed_trajectory="0.0, 0.0, 0.0, 0.0"
+                                               move_type="2"/>
+                            <SetBlackboard value="0,0,0"
+                                           output_key="force_threshold"/>
+                            <Parallel failure_threshold="1"
+                                      success_threshold="2">
+                              <TimingDecorator name="PutBackCMD">
+                                <Sequence>
+                                  <ComputeTargetPose box_pos="{box_pose2}"
+                                                     box_quat="{box_quat2}"
+                                                     target_box_offset="-1,0.0,0.0"
+                                                     target_pose="{target_pose_end}"/>
+                                  <MakePlan target_pose="{target_pose_end}"
+                                            planed_trajectory="{traj_end}"/>
+                                  <MoveToDestination planed_trajectory="{traj_end}"
+                                                     move_type="1"/>
+                                  <ResetState/>
+                                </Sequence>
+                              </TimingDecorator>
+                              <TimingDecorator name="ArmHome">
+                                <Delay delay_msec="2000">
+                                  <ArmMoveToReadyPose action_name="home_joints"
+                                                      move_speed="1.0"/>
+                                </Delay>
+                              </TimingDecorator>
+                            </Parallel>
+                          </Sequence>
+                        </SequenceStar>
+                      </SequenceStar>
+                    </Sequence>
+                  </TimingDecorator>
+                </ReactiveSequence>
+                <Sequence>
+                  <SleepMs sleep_ms="1000"/>
+                  <CmdPoseWorldMoveToDestination target_pose="0.0, 0.0, 0.0, 0.0"/>
+                </Sequence>
+              </Fallback>
+              <DelTagID tag_id="{cur_id}"/>
+            </Sequence>
+          </ForEachTag>
+        </Sequence>
+      </Repeat>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- Description of Node Models (used by Groot) -->
+  <TreeNodesModel>
+    <Action ID="ArmMoveToReadyPose"
+            editable="true">
+      <input_port name="action_name"/>
+      <input_port name="move_speed"/>
+    </Action>
+    <Condition ID="BoxTagOK"
+               editable="true">
+      <input_port name="tag_id"/>
+      <output_port name="box_pos"/>
+      <output_port name="box_quat"/>
+      <input_port name="time_check"
+                  default="false"/>
+    </Condition>
+    <Condition ID="CheckStatusOK"
+               editable="true"/>
+    <Action ID="CmdPoseWorldMoveToDestination">
+      <input_port name="target_pose"/>
+    </Action>
+    <Condition ID="ComputeTargetPose"
+               editable="true">
+      <input_port name="box_pos"/>
+      <input_port name="box_quat"/>
+      <input_port name="target_box_offset"/>
+      <output_port name="target_pose"/>
+    </Condition>
+    <Condition ID="DelTagID"
+               editable="true">
+      <input_port name="tag_id"/>
+    </Condition>
+    <Decorator ID="ForEachTag"
+               editable="true">
+      <input_port name="tag_status_map"/>
+      <input_port name="sorted_tag_ids"/>
+      <output_port name="current_tag_id"/>
+    </Decorator>
+    <Condition ID="ForceCheck"
+               editable="true">
+      <input_port name="force_threshold"/>
+    </Condition>
+    <Condition ID="GetTagMap"
+               editable="true">
+      <input_port name="put_tag_id"/>
+      <output_port name="tag_status_map"/>
+      <output_port name="sorted_tag_ids"/>
+    </Condition>
+    <Action ID="GraspBox"
+            editable="true">
+      <input_port name="box_pos"/>
+      <input_port name="box_quat">xyzw</input_port>
+      <input_port name="box_size"/>
+      <input_port name="box_offset"/>
+      <input_port name="grasp_type">0:grasp, 1:put</input_port>
+    </Action>
+    <Action ID="HeadMove"
+            editable="true"/>
+    <Action ID="MakePlan"
+            editable="true">
+      <input_port name="target_pose"/>
+      <output_port name="planed_trajectory"/>
+    </Action>
+    <Action ID="MoveToDestination"
+            editable="true">
+      <input_port name="planed_trajectory"/>
+      <input_port name="move_type"
+                  default="0">int</input_port>
+    </Action>
+    <Action ID="ResetState"
+            editable="true"/>
+    <Condition ID="SleepMs"
+               editable="true">
+      <input_port name="sleep_ms"/>
+    </Condition>
+    <Decorator ID="TimingDecorator"
+               editable="true"/>
+  </TreeNodesModel>
+
+</root>

@@ -781,7 +781,7 @@
     <parent link="zarm_r7_link" />
     <child link="zarm_r7_end_effector" />
   </joint>
-    <link name="zarm_r7_virtual_thumb_link">
+  <link name="zarm_r7_virtual_thumb_link">
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0" />
       <geometry>

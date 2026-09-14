@@ -73,7 +73,11 @@ class KuavoRobotStateCoreWebsocket:
                     mpc_obs_topic = '/humanoid_mpc_observation'
 
                 # Initialize subscribers
-                self._sub_sensors_data = roslibpy.Topic(self.websocket.client, '/sensors_data_raw', 'kuavo_msgs/sensorsData')
+                # 根据 /use_shm_communication 参数选择传感器数据话题（与 ROS SDK 保持一致）
+                use_shm = self._get_ros_param('/use_shm_communication', False)
+                sensor_topic = '/sensors_data_raw_shm' if use_shm else '/sensors_data_raw'
+                SDKLogger.info(f"Using {'shared memory' if use_shm else 'standard'} mode, sensor topic: {sensor_topic}")
+                self._sub_sensors_data = roslibpy.Topic(self.websocket.client, sensor_topic, 'kuavo_msgs/sensorsData')
                 self._sub_odom = roslibpy.Topic(self.websocket.client, '/odom', 'nav_msgs/Odometry')
                 self._sub_terrain_height = roslibpy.Topic(self.websocket.client, '/humanoid/mpc/terrainHeight', 'std_msgs/Float64')
                 self._sub_gait_time_name = roslibpy.Topic(self.websocket.client, '/humanoid_mpc_gait_time_name', 'kuavo_msgs/gaitTimeName')
@@ -272,6 +276,8 @@ class KuavoRobotStateCoreWebsocket:
         return self._srv_get_current_gait_name()
     
     def is_gait(self, gait_name: str) -> bool:
+        if self._is_wheel_arm:
+            return gait_name == 'stance'
         if not hasattr(self, '_mpc_observation_data') or self._mpc_observation_data is None:
             return False
         return self._gait_manager.get_gait(self._mpc_observation_data['time']) == gait_name
@@ -386,6 +392,32 @@ class KuavoRobotStateCoreWebsocket:
                             callback(curr_time, current_gait)
         except Exception as e:
             SDKLogger.error(f"Error processing MPC observation: {e}")
+
+    def _get_ros_param(self, param_name: str, default=None):
+        """通过 rosbridge 获取 ROS 参数"""
+        try:
+            service = roslibpy.Service(self.websocket.client, '/rosapi/get_param', 'rosapi/GetParam')
+            request = {'name': param_name, 'default': str(default) if default is not None else ''}
+            response = service.call(request)
+            value = response.get('value', None)
+            if value is not None:
+                # 根据类型做解析
+                if isinstance(value, str):
+                    if value.lower() == 'true':
+                        return True
+                    elif value.lower() == 'false':
+                        return False
+                    try:
+                        return int(value)
+                    except ValueError:
+                        try:
+                            return float(value)
+                        except ValueError:
+                            return value
+                return value
+        except Exception as e:
+            SDKLogger.debug(f"Failed to get param {param_name}: {e}")
+        return default
 
     def _srv_get_arm_ctrl_mode(self):
         try:

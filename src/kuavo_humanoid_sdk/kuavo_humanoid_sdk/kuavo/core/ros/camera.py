@@ -4,7 +4,7 @@ import rospy
 from std_msgs.msg import Bool, Int16MultiArray
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.kuavo.core.core import KuavoRobotCore
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from cv_bridge import CvBridge, CvBridgeError
 from kuavo_msgs.msg import yoloOutputData, yoloDetection
 import threading
@@ -15,7 +15,7 @@ class CameraROSInterface:
         
         self.cameras = {
             'head': {
-                'topic': '/camera/color/image_raw',
+                'topic': '/camera/color/image_raw/compressed',
                 'pub_topic': '/model_output_data',
                 'publisher': None
             },
@@ -48,8 +48,12 @@ class CameraROSInterface:
             
         try:
             # 使用rospy.wait_for_message()获取一帧图像
-            msg = rospy.wait_for_message(self.cameras[camera]['topic'], Image, timeout=1.0)
-            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            if camera == 'head':
+                msg = rospy.wait_for_message(self.cameras[camera]['topic'], CompressedImage, timeout=1.0)
+                cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+            else:
+                msg = rospy.wait_for_message(self.cameras[camera]['topic'], Image, timeout=1.0)
+                cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             self.cv_image_shape = cv_image.shape
             return cv_image
         except rospy.ROSException as e:

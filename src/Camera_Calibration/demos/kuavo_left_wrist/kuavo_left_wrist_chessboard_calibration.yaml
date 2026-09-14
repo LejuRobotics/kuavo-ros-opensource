@@ -20,15 +20,16 @@ free_params:
   - zarm_l6_joint
   - zarm_l7_joint
 
-# 不标定腕部相机安装；若将来要估 l_hand_camera_joint 6DOF，改为 true
+# 小幅放开腕部相机安装 6DOF（与头部 camera_base 做法一致），棋盘几何不动。
+# 用较大 outrageous 正则把平移漂移压在 <1cm、旋转 <0.01rad。
 free_frames:
   - name: l_hand_camera_joint
-    x: false
-    y: false
-    z: false
-    roll: false
-    pitch: false
-    yaw: false
+    x: true
+    y: true
+    z: true
+    roll: true
+    pitch: true
+    yaw: true
 
 error_blocks:
   - name: board_align
@@ -46,5 +47,5 @@ error_blocks:
     type: outrageous
     param: l_hand_camera_joint
     joint_scale: 0.0
-    position_scale: 0.1
-    rotation_scale: 0.1
+    position_scale: 0.8
+    rotation_scale: 0.8

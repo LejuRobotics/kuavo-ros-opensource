@@ -175,13 +175,13 @@ void ArmContactForceEstimatorWheel::estArmContactForce_wheel(const vector_t& sta
   // 计算扰动力矩
   vector_t estDisturbancetorque = beta * p - pSCg_z_inv;
 
-  // 调试输出
-  if (ros_logger_) {
-    ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/qMeasured", qMeasured);
-    ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/vMeasured", vMeasured);
-    ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/tauCmd", cmdTorque_);
-    ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/estDisturbancetorque", estDisturbancetorque);
-  }
+  // // 调试输出
+  // if (ros_logger_) {
+  //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/qMeasured", qMeasured);
+  //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/vMeasured", vMeasured);
+  //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/tauCmd", cmdTorque_);
+  //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/estDisturbancetorque", estDisturbancetorque);
+  // }
 
   // 手臂末端力估计主循环（左右臂）
   std::vector<std::string> eeNames = {"zarm_l7_end_effector", "zarm_r7_end_effector"};
@@ -214,13 +214,13 @@ void ArmContactForceEstimatorWheel::estArmContactForce_wheel(const vector_t& sta
     Eigen::Matrix<scalar_t, Eigen::Dynamic, 6> S_JT = S_li_arm * jac.transpose();
     vector_t S_tau = S_li_arm * estDisturbancetorque;
 
-    // 调试输出
-    if (ros_logger_) {
-      std::string arm_side = (i == 0) ? "left" : "right";
-      ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/armStartIdx",
-                                static_cast<double>(armStartIdx));
-      ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/S_tau", S_tau);
-    }
+    // // 调试输出
+    // if (ros_logger_) {
+    //   std::string arm_side = (i == 0) ? "left" : "right";
+    //   ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/armStartIdx",
+    //                             static_cast<double>(armStartIdx));
+    //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/S_tau", S_tau);
+    // }
 
     // SVD奇异值/条件数
     Eigen::JacobiSVD<Eigen::MatrixXd> svd_sjt(S_JT, Eigen::ComputeThinU | Eigen::ComputeThinV);
@@ -230,13 +230,13 @@ void ArmContactForceEstimatorWheel::estArmContactForce_wheel(const vector_t& sta
     const double condNum = (minS > 1e-12) ? (maxS / minS) : 1e12;
     jacobian_conditions[i] = condNum;
 
-    if (ros_logger_) {
-      std::string arm_side = (i == 0) ? "left" : "right";
-      ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/jacobian_condition",
-                                condNum);
-      ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/max_singular_value", maxS);
-      ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/min_singular_value", minS);
-    }
+    // if (ros_logger_) {
+    //   std::string arm_side = (i == 0) ? "left" : "right";
+    //   ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/jacobian_condition",
+    //                             condNum);
+    //   ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/max_singular_value", maxS);
+    //   ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/min_singular_value", minS);
+    // }
 
     // 自适应阻尼计算
     const bool cond_trigger = (condNum > armJacCondThresh_);
@@ -254,12 +254,12 @@ void ArmContactForceEstimatorWheel::estArmContactForce_wheel(const vector_t& sta
     // 求解接触力
     vector6_t F_estimated = in_singular_damping ? dlsSolve6(S_JT, S_tau, lambda) : svd_sjt.solve(S_tau);
 
-    if (ros_logger_) {
-      std::string arm_side = (i == 0) ? "left" : "right";
-      ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/damping_lambda", lambda);
-      ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/F_estimated_raw",
-                                 F_estimated);
-    }
+    // if (ros_logger_) {
+    //   std::string arm_side = (i == 0) ? "left" : "right";
+    //   ros_logger_->publishValue("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/damping_lambda", lambda);
+    //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/" + arm_side + "/F_estimated_raw",
+    //                              F_estimated);
+    // }
 
     // 末端力硬限幅
     F_estimated.segment<3>(0) = F_estimated.segment<3>(0).cwiseMax(-armForceMax_).cwiseMin(armForceMax_);    // 力分量
@@ -301,15 +301,15 @@ void ArmContactForceEstimatorWheel::estArmContactForce_wheel(const vector_t& sta
   estArmContactforce_ = alpha * estArmContactforce_ + (1.0 - alpha) * estArmContactforceLast_;
   estArmContactforceLast_ = estArmContactforce_;
 
-  // 调试输出：发布最终的接触力估计结果
-  if (ros_logger_) {
-    ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/estArmContactforce_final",
-                               estArmContactforce_);
-    ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/left_arm_force",
-                               estArmContactforce_.segment<6>(0));
-    ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/right_arm_force",
-                               estArmContactforce_.segment<6>(6));
-  }
+  // // 调试输出：发布最终的接触力估计结果
+  // if (ros_logger_) {
+  //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/estArmContactforce_final",
+  //                              estArmContactforce_);
+  //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/left_arm_force",
+  //                              estArmContactforce_.segment<6>(0));
+  //   ros_logger_->publishVector("/humanoid_wheel/arm_contact_force_debug/right_arm_force",
+  //                              estArmContactforce_.segment<6>(6));
+  // }
 }
 
 }  // namespace humanoidController_wheel_wbc

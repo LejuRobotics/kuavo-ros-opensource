@@ -1,2 +1,8 @@
-zhead_1_joint: -0.000270146
-zhead_2_joint: -0.00241545
+zhead_1_joint: -0.00384107
+zhead_2_joint: 0.00434048
+camera_base_x: 0.0109237
+camera_base_y: 0.00339202
+camera_base_z: 0.00232208
+camera_base_a: 0.000806231
+camera_base_b: -0.000669458
+camera_base_c: 9.74121e-05

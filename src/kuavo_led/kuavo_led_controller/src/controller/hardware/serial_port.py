@@ -7,7 +7,6 @@ LED 串口通信模块
 
 import serial
 import threading
-import fcntl
 from collections import deque
 from typing import Optional, Dict
 
@@ -99,23 +98,12 @@ class SerialPort:
         while not self._stop_read.is_set():
             if self.is_open():
                 try:
-                    # 跨进程串口锁：用非阻塞 flock 抢锁，抢不到说明 battery_info_node
-                    # 正在读电池/系统状态，此时跳过读取避免抢走它的应答字节。
-                    try:
-                        fcntl.flock(self.serial.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    except BlockingIOError:
-                        # 串口被 battery 节点占用，跳过本次读取
-                        self._stop_read.wait(0.005)
-                        continue
-                    try:
-                        # 检查有多少数据可读
-                        in_waiting = self.serial.in_waiting
-                        if in_waiting > 0:
-                            # 一次性读取所有可用数据
-                            data = self.serial.read(in_waiting)
-                            self._add_to_buffer(data)
-                    finally:
-                        fcntl.flock(self.serial.fileno(), fcntl.LOCK_UN)
+                    # 检查有多少数据可读
+                    in_waiting = self.serial.in_waiting
+                    if in_waiting > 0:
+                        # 一次性读取所有可用数据
+                        data = self.serial.read(in_waiting)
+                        self._add_to_buffer(data)
                 except serial.SerialException:
                     pass
             # 短暂休眠，避免 CPU 占用过高（1ms）
@@ -237,6 +225,11 @@ class SerialPort:
                 'usage_percent': current_size / self._MAX_BUFFER_SIZE * 100,
                 'overflow_count': self._overflow_count
             }
+
+    def clear_buffer(self) -> None:
+        """清空读取缓冲区（在发送新指令前调用，避免读到旧数据）"""
+        with self._buffer_lock:
+            self._read_buffer.clear()
 
     def __del__(self):
         """析构函数，关闭串口"""

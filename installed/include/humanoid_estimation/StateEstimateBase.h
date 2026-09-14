@@ -408,6 +408,7 @@ namespace ocs2
       const size_t pullup_window_size_ = 20;  // 滑动窗口大小
       bool last_pullup_state_ = false;  // 保存上一次的pullup状态
       ros::Time last_pullup_check_time_;
+
       int waistNum_ = 0;
       
       // 躯干速度稳定性检测

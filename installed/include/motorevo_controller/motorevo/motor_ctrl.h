@@ -145,7 +145,8 @@ public:
      *  @param calibrate 是否进行零点校准
      *  @return 初始化是否成功
      */
-    bool init(const std::vector<RevoMotorConfig_t> &motor_configs, bool calibrate);
+    bool init(const std::vector<RevoMotorConfig_t> &motor_configs, bool calibrate,
+              bool skip_move_to_zero = false);
 
     /** @brief 使能所有电机 */
     bool enableAll();

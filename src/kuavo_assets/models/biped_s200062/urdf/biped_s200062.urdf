@@ -896,10 +896,12 @@
       </material>
     </visual>
   </link>
-  <joint name="l_f_bar_2" type="fixed">
+  <joint name="l_f_bar_2_joint" type="revolute">
     <origin xyz="0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="l_f_bar_1" />
     <child link="l_f_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="l_f_bar_3">
@@ -932,10 +934,12 @@
       </material>
     </visual>
   </link>
-  <joint name="l_f_finger_joint" type="fixed">
+  <joint name="l_f_finger_joint" type="revolute">
     <origin xyz="-0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="l_f_bar_3" />
     <child link="l_f_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="l_f_bar_4">
@@ -949,10 +953,12 @@
       </material>
     </visual>
   </link>
-  <joint name="l_f_bar_4_joint" type="fixed">
+  <joint name="l_f_bar_4_joint" type="revolute">
     <origin xyz="0.02 0 -0.09" rpy="0 0 0" />
     <parent link="l_twofinger_base" />
     <child link="l_f_bar_4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="l_b_bar_1">
@@ -985,10 +991,12 @@
       </material>
     </visual>
   </link>
-  <joint name="l_b_bar_2_joint" type="fixed">
+  <joint name="l_b_bar_2_joint" type="revolute">
     <origin xyz="-0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="l_b_bar_1" />
     <child link="l_b_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="l_b_bar_3">
@@ -1021,10 +1029,12 @@
       </material>
     </visual>
   </link>
-  <joint name="l_b_finger_joint" type="fixed">
+  <joint name="l_b_finger_joint" type="revolute">
     <origin xyz="0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="l_b_bar_3" />
     <child link="l_b_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="l_b_bar_4">
@@ -1038,10 +1048,12 @@
       </material>
     </visual>
   </link>
-  <joint name="l_b_bar_4_joint" type="fixed">
+  <joint name="l_b_bar_4_joint" type="revolute">
     <origin xyz="-0.02 0 -0.09" rpy="0 0 0" />
     <parent link="l_twofinger_base" />
     <child link="l_b_bar_4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <!-- Left d405 camera connect (interface link) -->
@@ -1513,10 +1525,12 @@
       </material>
     </visual>
   </link>
-  <joint name="r_f_bar_2" type="fixed">
+  <joint name="r_f_bar_2_joint" type="revolute">
     <origin xyz="0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="r_f_bar_1" />
     <child link="r_f_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="r_f_bar_3">
@@ -1549,10 +1563,12 @@
       </material>
     </visual>
   </link>
-  <joint name="r_f_finger_joint" type="fixed">
+  <joint name="r_f_finger_joint" type="revolute">
     <origin xyz="-0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="r_f_bar_3" />
     <child link="r_f_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="r_f_bar_4">
@@ -1566,10 +1582,12 @@
       </material>
     </visual>
   </link>
-  <joint name="r_f_bar_4_joint" type="fixed">
+  <joint name="r_f_bar_4_joint" type="revolute">
     <origin xyz="0.02 0 -0.09" rpy="0 0 0" />
     <parent link="r_twofinger_base" />
     <child link="r_f_bar_4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="r_b_bar_1">
@@ -1602,10 +1620,12 @@
       </material>
     </visual>
   </link>
-  <joint name="r_b_bar_2_joint" type="fixed">
+  <joint name="r_b_bar_2_joint" type="revolute">
     <origin xyz="-0.011329 0 0.0063767" rpy="0 0 0" />
     <parent link="r_b_bar_1" />
     <child link="r_b_bar_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="r_b_bar_3">
@@ -1638,10 +1658,12 @@
       </material>
     </visual>
   </link>
-  <joint name="r_b_finger_joint" type="fixed">
+  <joint name="r_b_finger_joint" type="revolute">
     <origin xyz="0.0081591 0 -0.047301" rpy="0 0 0" />
     <parent link="r_b_bar_3" />
     <child link="r_b_finger" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <link name="r_b_bar_4">
@@ -1655,10 +1677,12 @@
       </material>
     </visual>
   </link>
-  <joint name="r_b_bar_4_joint" type="fixed">
+  <joint name="r_b_bar_4_joint" type="revolute">
     <origin xyz="-0.02 0 -0.09" rpy="0 0 0" />
     <parent link="r_twofinger_base" />
     <child link="r_b_bar_4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
   </joint>
 
   <!-- Right d405 camera connect (interface link) -->
@@ -1831,7 +1855,7 @@
   <joint name="camera_base_joint" type="fixed">
     <origin xyz="0.099478 0 0.032897" rpy="0 0.35805 0" />
     <parent link="zhead_2_link" />
-    <child link="camera_base" />
+    <child link="head_camera_base" />
   </joint>
   <link name="camera">
     <inertial>
@@ -1842,7 +1866,7 @@
   </link>
   <joint name="camera" type="fixed">
     <origin xyz="0.011715 0.0475 0.014311" rpy="0 0 0" />
-    <parent link="camera_base" />
+    <parent link="head_camera_base" />
     <child link="camera" />
   </joint>
   <link

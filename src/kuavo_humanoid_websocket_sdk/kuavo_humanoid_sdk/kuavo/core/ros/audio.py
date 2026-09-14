@@ -13,8 +13,6 @@ class AudioWebsocket:
     def __init__(self):
         """Initialize the WebSocket audio system."""
         websocket = WebSocketKuavoSDK()
-        self._audio_stop_publisher = roslibpy.Topic(websocket.client, 'stop_music', 'std_msgs/Bool')
-        self._audio_stop_publisher.advertise()
         self._audio_data_publisher = roslibpy.Topic(websocket.client, 'audio_data', 'std_msgs/Int16MultiArray')
         self._audio_data_publisher.advertise()
 
@@ -49,10 +47,9 @@ class AudioWebsocket:
     def stop_audio(self) -> bool:
         """Stop the currently playing audio through WebSocket."""
         try:
-            msg = {
-                "data": True
-            }
-            self._audio_stop_publisher.publish(roslibpy.Message(msg))
+            websocket = WebSocketKuavoSDK()
+            stop_service = roslibpy.Service(websocket.client, 'stop_music', 'std_srvs/Trigger')
+            stop_service.call({})
             SDKLogger.info("[Robot Audio] Requested to stop audio playback")
             return True
         except Exception as e:

@@ -35,11 +35,11 @@ using motorevo::RevoMotorConfig_t;
 
 struct DeviceHandler; // 前置声明，避免额外包含
 
-
 class LeJuClawCan {
 public:
     enum class PawMoveState  : int8_t {
     ERROR = -1,                       // 出现错误
+    STREAM_EXPIRED = -2,              // 高频控制流断流（看门狗触发，安全停机）
     LEFT_REACHED_RIGHT_REACHED = 0,   // 所有夹爪到位
     LEFT_REACHED_RIGHT_GRABBED = 1,   // 左夹爪到位，右夹爪抓取到物品
     LEFT_GRABBED_RIGHT_REACHED = 2,   // 右夹爪到位，左夹爪抓取到物品
@@ -66,6 +66,17 @@ public:
     Disabled
     };
 
+    enum class InitFault {
+        NONE = 0,
+        BIDIRECTION_STUCK = 1,
+        CLOSE_NO_MOTION = 2
+    };
+
+    enum class RecoveryDirection {
+        TOWARD_OPEN = 0,
+        TOWARD_CLOSE = 1
+    };
+
     struct MotorStateData {
     uint8_t id;
     State   state;
@@ -78,6 +89,7 @@ public:
     LeJuClawCan();
     ~LeJuClawCan();
     int initialize();
+    int initialize_recovery_mode();
     void close();
     void set_debug_callback(DebugCallback callback);
 
@@ -87,17 +99,36 @@ public:
     bool disableAll();
 
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque);
-    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque, bool is_vr_mode);
+    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque, bool is_high_freq);
     // 基于 unordered_map 的控制接口（百分比位置 → 物理映射并下发），键为 MotorId
     PawMoveState move_paw(const std::unordered_map<MotorId, double>& positions_percent,
                           const std::unordered_map<MotorId, double>& velocity,
                           const std::unordered_map<MotorId, double>& torque,
-                          bool is_vr_mode);
+                          bool is_high_freq);
     void set_joint_state(const std::unordered_map<MotorId, motorevo::RevoMotorCmd_t>& cmd);
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> get_joint_state();
     std::vector<double> get_positions();
     std::vector<double> get_torque();
     std::vector<double> get_velocity();
+    InitFault get_init_fault() const;
+    std::string get_init_fault_message() const;
+    void cancel_motion();
+    void stop_all_current(int repeat_count = 5, int interval_ms = 10);
+    bool apply_recovery_current(RecoveryDirection direction, float current, int duration_ms);
+
+    // ===== 断流看门狗（高频控制流断流 → 安全 PTM 防堵转） =====
+    uint64_t refresh_stream_watchdog();   // 武装+刷新租约（高频命令到达时调用），返回 generation
+    void disarm_stream_watchdog();        // 解除武装（低频命令/关闭时调用）
+    bool stream_watchdog_expired();       // 是否已断流（expired 状态下 move_paw 应立即中止）
+
+    // ===== 真实下发指令回调（观察口，不参与控制） =====
+    // 每次 control_thread 实际下发 PTM 前，把最终参数（含 kp=0 安全 PTM）回报给上层
+    // 参数：motor_id, pos(已换算为行程百分比，逻辑坐标系), vel, torque, kp, kd, zero_kp（本次是否为安全 PTM）
+    using TxCallback = std::function<void(uint8_t, float, float, float, float, float, bool)>;
+    void set_tx_callback(TxCallback callback);
+
+    // 获取按 MotorId 升序排列的电机 ID 列表（升序槽位 ↔ {left_claw, right_claw}，供上层稳定映射）
+    std::vector<MotorId> get_sorted_motor_ids() const;
 
 private:
     bool init_lejuclaw_can_customed();
@@ -156,7 +187,7 @@ private:
     // 初始化寻找零点参数
     static constexpr float ZERO_CONTROL_KP = 0.0f;                  // 零点控制比例增益，零点寻找时使用
     static constexpr float ZERO_CONTROL_KD = 1.0f;                  // 零点控制微分增益，零点寻找时使用
-    static constexpr float ZERO_CONTROL_ALPHA = 1.50f;              // 零点控制低通滤波系数
+    static constexpr float ZERO_CONTROL_ALPHA = 1.00f;              // 零点控制低通滤波系数，合法范围 0~1
     static constexpr float ZERO_CONTROL_MAX_CURRENT = 1.80f;        // 零点控制最大电流限制，单位 A，仅作最大电流限制保护使用
     static constexpr float STALL_CURRENT_THRESHOLD = 1.50f;         // 堵转电流阈值，超过阈值后认为到达限位，单位 A
     static constexpr float STALL_VELOCITY_THRESHOLD = 0.10f;        // 堵转速度阈值，小于阈值后认为到达限位，单位 rad/s
@@ -165,7 +196,9 @@ private:
     static constexpr int ZERO_WAIT_MS = 500;                        // 零点等待时间，单位 ms
     static constexpr float OPEN_LIMIT_ADJUSTMENT = 0.0f;            // 开限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
     static constexpr float CLOSE_LIMIT_ADJUSTMENT = 0.0f;           // 关限位调整值，百分比，单位 %（正数往行程外扩展，负数往行程内收缩）
-    static constexpr float TARGET_VELOCITY = 5.0f;                  // 限位寻找目标速度，单位 rad/s
+    static constexpr float TARGET_VELOCITY = 3.0f;                  // 限位寻找目标速度，单位 rad/s
+    static constexpr float ZERO_TARGET_VELOCITY_MAX = 3.0f;         // 寻零/限位搜索目标速度上限，避免配置过大导致猛冲
+    static constexpr float ZERO_STUCK_POSITION_THRESHOLD = 0.03f;   // 寻零/限位搜索卡死位置阈值，单位 rad
     // 关爪限位寻找参数
     static constexpr float OPEN_POSITION_CHANGE_THRESHOLD = 0.03f;  // 开爪位置变化阈值，开爪过程位置变化大于该值，明确有开爪动作，才可进行高电流冲关爪，避免错方向，单位 rad
     static constexpr float CLOSE_STUCK_CURRENT_THRESHOLD = 1.0f;    // 关爪卡死检测电流阈值，超过阈值后可判断为卡死状态，单位 A
@@ -222,6 +255,8 @@ private:
     float cfg_OPEN_LIMIT_ADJUSTMENT = OPEN_LIMIT_ADJUSTMENT;
     float cfg_CLOSE_LIMIT_ADJUSTMENT = CLOSE_LIMIT_ADJUSTMENT;
     float cfg_TARGET_VELOCITY = TARGET_VELOCITY;
+    float cfg_ZERO_TARGET_VELOCITY_MAX = ZERO_TARGET_VELOCITY_MAX;
+    float cfg_ZERO_STUCK_POSITION_THRESHOLD = ZERO_STUCK_POSITION_THRESHOLD;
     float cfg_OPEN_POSITION_CHANGE_THRESHOLD = OPEN_POSITION_CHANGE_THRESHOLD;
     float cfg_CLOSE_STUCK_CURRENT_THRESHOLD = CLOSE_STUCK_CURRENT_THRESHOLD;
     float cfg_CLOSE_STUCK_DETECTION_THRESHOLD = CLOSE_STUCK_DETECTION_THRESHOLD;
@@ -231,12 +266,16 @@ private:
     int   cfg_CLOSE_IMPACT_INTERVAL_MS = CLOSE_IMPACT_INTERVAL_MS;
     int   cfg_CLOSE_MAX_ATTEMPTS = CLOSE_MAX_ATTEMPTS;
 
-    void measure_range();
+    // 断流看门狗（高频控制流断流超时时间，单位 ms）
+    static constexpr int STREAM_WATCHDOG_TIMEOUT_MS = 500;
+    int cfg_STREAM_WATCHDOG_TIMEOUT_MS = STREAM_WATCHDOG_TIMEOUT_MS;
+
+    bool measure_range();
     bool find_claw_limit_velocity_control(bool is_open_direction, float kp, float kd, float alpha,
         float max_current, float stall_current_threshold, 
         float stall_velocity_threshold, float dt, 
         int timeout_ms,
-        const std::unordered_map<MotorId, bool>& can_perform_3a_impact);
+        const std::unordered_map<MotorId, bool>& allow_reverse_impact);
     void adjust_range(std::unordered_map<MotorId, float> open_limit_positions, std::unordered_map<MotorId, float> close_limit_positions);
 
     // YAML配置加载
@@ -256,9 +295,7 @@ private:
     bool waitForAllMotorsFeedback(int timeout_ms);
     void init_status_variables();
     bool waitForOperationStatus(MotorId id, Operation expected_op, OperationStatus expected_status, int timeout_ms, const char* operation_name);
-
-    // 获取按 MotorId 升序排列的电机 ID 列表（用于 vector<->map 的稳定映射）
-    std::vector<MotorId> get_sorted_motor_ids() const;
+    void set_init_fault(InitFault fault, const std::string& message);
 
     // 回调上下文
     canbus_sdk::CallbackContext msg_callback_context_;
@@ -302,6 +339,8 @@ private:
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> target_cmd; // 对应原来的8个并列的数组，舍弃 vel_kpid
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> old_target_cmd;
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> current_cmd;
+    InitFault last_init_fault_ = InitFault::NONE;
+    std::string last_init_fault_message_;
 
     // 量程测量与映射（按电机ID存储）
     std::unordered_map<MotorId, float> open_limit_positions_;   // 开爪限位（rad）
@@ -325,6 +364,20 @@ private:
     std::atomic<bool> thread_running{false};
     std::thread control_thread_;
     std::atomic<bool> target_updated_{false};
+    std::atomic<bool> motion_cancel_requested_{false};
+
+    // 断流看门狗状态
+    bool stream_watchdog_armed_ = false;                          // 是否已武装（高频流活跃期间为 true）
+    bool stream_watchdog_expired_ = false;                        // 是否已断流超时
+    uint64_t stream_generation_ = 0;                              // 租约代数（latest-wins 备用）
+    std::chrono::steady_clock::time_point last_stream_command_time_;  // 最后一次高频命令到达时间
+    std::mutex stream_watchdog_mutex_;                            // 保护看门狗状态
+    std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> safe_command_cache_;  // 断流期间权威下发的安全命令缓存
+
+    // 真实下发指令回调（观察口）：control_thread 在实际下发前调用
+    // 安装可能与控制线程并发调用（setTargetCallback/initialize 时线程已在跑），拷贝到栈上再调用
+    std::mutex tx_callback_mutex_;
+    TxCallback tx_callback_;
 };
 
 }

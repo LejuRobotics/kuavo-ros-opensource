@@ -13,7 +13,6 @@ import asyncio
 import math
 import json
 import os
-import sys
 import rospkg
 import rospy
 import threading
@@ -34,18 +33,7 @@ from kuavo_humanoid_sdk.kuavo.core.model_utils import model_utils as model_utils
 
 from enum import IntEnum
 
-try:
-    kuavo_common_path = rospkg.RosPack().get_path('kuavo_common')
-    kuavo_common_python_path = os.path.join(kuavo_common_path, 'python')
-    if kuavo_common_python_path not in sys.path:
-        sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion, is_tact_robot_type_compatible
-except (rospkg.ResourceNotFound, ImportError):
-    current_file_dir = os.path.dirname(os.path.abspath(__file__))
-    kuavo_common_python_path = os.path.abspath(os.path.join(current_file_dir, "../../../../kuavo_common/python"))
-    if kuavo_common_python_path not in sys.path:
-        sys.path.insert(0, kuavo_common_python_path)
-    from robot_version import RobotVersion, is_tact_robot_type_compatible
+from kuavo_humanoid_sdk.common.robot_version import RobotVersion, is_tact_robot_type_compatible
 
 # Global flag for handling Ctrl+C
 running = False

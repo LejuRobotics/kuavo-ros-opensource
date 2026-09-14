@@ -222,7 +222,7 @@ private:
     // 与人形共用 ArmTrajReceiver（service: /humanoid_wheel/set_incremental_arm_traj_link）
     std::unique_ptr<humanoid_controller::ArmTrajReceiver> arm_traj_receiver_;
 
-    // enable 控制（订阅 /enable_control_state，同进程同步触发 callback）
+    // enable 控制（订阅 /enable_control_state，由 nodelet manager 线程异步派发 callback）
     std::atomic<bool> prev_enable_control_{true};
     ros::Subscriber enable_control_state_sub_;
     void enableControlStateCallback(const std_msgs::Bool::ConstPtr& msg);

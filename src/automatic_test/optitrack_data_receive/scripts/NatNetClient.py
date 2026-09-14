@@ -2022,6 +2022,9 @@ class NatNetClient:
         while not stop():
             try:
                 data, addr = in_socket.recvfrom(recv_buffer_size)
+            except socket.timeout:
+                # 等待 Motive 推帧时超时属正常，不可退出数据线程
+                continue
             except socket.error as e:
                 if stop():
                     return 0
@@ -2036,8 +2039,6 @@ class NatNetClient:
             except socket.gaierror:
                 print("ERROR: data socket access gaierror occurred")
                 return 3
-            except socket.timeout:
-                continue
             if len(data) > 0:
                 message_id = get_message_id(data)
                 tmp_str = "mi_%1.1d" % message_id

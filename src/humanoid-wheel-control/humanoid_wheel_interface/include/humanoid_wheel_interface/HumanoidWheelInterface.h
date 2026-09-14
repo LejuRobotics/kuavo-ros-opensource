@@ -106,8 +106,10 @@ class HumanoidWheelInterface final : public RobotInterface {
                                                             const std::string& taskFile);
   std::unique_ptr<StateCost> getTorsoTrackingBoxSoftCost(const PinocchioInterface& pinocchioInterface,
                                                          const std::string& taskFile);
-  std::unique_ptr<StateCost> getEndEffectorJointBias(const PinocchioInterface& pinocchioInterface, 
+  std::unique_ptr<StateCost> getEndEffectorJointBias(const PinocchioInterface& pinocchioInterface,
                                                      const std::string& taskFile);
+  std::unique_ptr<StateCost> getShoulderTightenCost(const PinocchioInterface& pinocchioInterface,
+                                                    const std::string& taskFile);
   std::unique_ptr<StateCost> getSelfDistanceConstraint(int index, const PinocchioInterface& pinocchioInterface, 
                                                        std::pair<std::string, std::string> linkPair,
                                                        const std::string& taskFile, bool verbose);

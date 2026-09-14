@@ -25,6 +25,7 @@
   <depend>ocs2_self_collision</depend>
   <depend>pinocchio</depend>
   <depend>kuavo_msgs</depend>
+  <depend>leju_mobile_base_msgs</depend>
   <depend>ruckig_catkin</depend>
 
 </package>

@@ -1,0 +1,4 @@
+<mujoco model="kuavo v55 scene seat adjust">
+  <include file="biped_s55.xml"/>
+  <include file="../../kuavo5_seat/xml/seat_scene_common.xml"/>
+</mujoco>

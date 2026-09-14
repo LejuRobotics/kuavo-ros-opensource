@@ -104,6 +104,22 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
       chestPose.orientation.w, chestPose.orientation.x, chestPose.orientation.y, chestPose.orientation.z);
   const Eigen::Quaterniond qRelativeChest = (qInitChest_.inverse() * qCurrentChest).normalized();
 
+  // Express the controller pose in the neutral chest frame.  Subtracting the
+  // chest position removes crouching translation; rotating the offset and hand
+  // orientation back with the chest removes bending/rolling/yaw motion.  Keep
+  // this pose separate from the legacy raw hand pose used by other controllers
+  // and data-recording topics.
+  const Eigen::Quaterniond chestMotionCompensation =
+      (qInitChest_.normalized() * qCurrentChest.normalized().inverse()).normalized();
+  const ArmPose handPoseRelativeToChest(
+      chestMotionCompensation * (extractPosition(handPose) - chestPosition_),
+      (chestMotionCompensation * handQuatInW).normalized());
+  if (side == "Left") {
+    leftHandPoseRelativeToChest_ = handPoseRelativeToChest;
+  } else {
+    rightHandPoseRelativeToChest_ = handPoseRelativeToChest;
+  }
+
   Eigen::Vector3d axis;
   double angle;
   quatToAxisAngle(qRelativeChest, axis, angle);

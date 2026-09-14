@@ -21,6 +21,7 @@ from visualization_msgs.msg import Marker
 from tf2_msgs.msg import TFMessage
 from geometry_msgs.msg import TransformStamped
 from std_msgs.msg import Float64MultiArray, String, Empty
+from std_srvs.srv import Trigger
 # Add the parent directory to the system path to allow relative imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
@@ -65,6 +66,9 @@ class Quest3BoneFramePublisher:
         self.listening_udp_ports_cnt = 0
         
         rospy.init_node('Quest3_bone_frame_publisher', anonymous=True)
+        self.reset_vr_torso_state = rospy.ServiceProxy('/quest3/reset_vr_torso_state', Trigger)
+        self.vr_torso_state_reset = False
+        rospy.on_shutdown(self.reset_vr_torso_state_on_shutdown)
         self.rate = rospy.Rate(100.0)
         
         self.br = tf.TransformBroadcaster()
@@ -86,6 +90,8 @@ class Quest3BoneFramePublisher:
         self.enable_head_control = rospy.get_param("~enable_head_control", True)
         rospy.loginfo(f"enable_head_control: {self.enable_head_control}")
         signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGHUP, self.signal_handler)
         self.broadcast_ips = []
         self.robot_info_sent_initial_broadcast = False
         self.robot_info_lock = threading.Lock()
@@ -226,9 +232,27 @@ class Quest3BoneFramePublisher:
     def signal_handler(self, sig, frame):
         print('Exiting gracefully...')
         self.exit_listen_thread_for_quest3_broadcast = True
+        # 在 ROS 标记为 shutdown 前完成服务调用，保证仍可连接到常驻 Quest FSM
+        self.reset_vr_torso_state_on_shutdown()
+        rospy.signal_shutdown('Quest3 monitor received a termination signal')
         if self.sock:
             self.sock.close()
         sys.exit(0)
+
+    def reset_vr_torso_state_on_shutdown(self):
+        if self.vr_torso_state_reset:
+            return
+
+        self.vr_torso_state_reset = True
+        try:
+            rospy.wait_for_service('/quest3/reset_vr_torso_state', timeout=1.0)
+            response = self.reset_vr_torso_state()
+            if response.success:
+                rospy.loginfo('Quest VR torso state reset during monitor shutdown.')
+            else:
+                rospy.logwarn('Quest VR torso-state reset failed during shutdown: %s', response.message)
+        except (rospy.ROSException, rospy.ServiceException) as error:
+            rospy.logwarn('Could not reset Quest VR torso state during shutdown: %s', error)
 
     def setup_socket(self, server_address, port):
         if self.sock is not None:

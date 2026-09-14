@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!--
+  GMR Streaming Launch File
+
+  This launch file starts the GMR motion retargeting node that:
+  - Connects to OptiTrack motion capture system
+  - Performs real-time motion retargeting to Kuavo S52 robot
+  - Publishes VMP input data, skeleton frames, and rigid body descriptions
+
+  Prerequisites:
+  1. Python 3.10 virtual environment with GMR dependencies installed
+     - Run: cd <package_dir> && bash scripts/setup_venv.sh
+     - Or set GMR_VENV_PATH environment variable
+
+  2. catkin_make to generate custom messages
+
+  Usage:
+    roslaunch kuavo_mocap_gmr gmr_streaming.launch
+    roslaunch kuavo_mocap_gmr gmr_streaming.launch server_ip:=192.168.1.100
+-->
+<launch>
+  <!-- OptiTrack connection arguments -->
+  <arg name="server_ip" default="192.168.200.160" doc="OptiTrack server IP address"/>
+  <arg name="client_ip" default="192.168.200.117" doc="Client (robot) IP address"/>
+  <arg name="use_multicast" default="false" doc="Use multicast for OptiTrack"/>
+
+  <!-- Robot configuration arguments -->
+  <arg name="robot" default="kuavo_s52" doc="Target robot type"/>
+  <arg name="format" default="motive_streaming" doc="Motion format (lafan1, motive_bj, motive_sz)"/>
+
+  <!-- Calibration arguments -->
+  <arg name="cali_arm_pose_deg" default="75.0" doc="Calibration arm pose angle in degrees"/>
+  <arg name="fps" default="100.0" doc="Target publishing rate (Hz)"/>
+
+  <!-- Optional features -->
+  <arg name="enable_viewer" default="false" doc="Enable MuJoCo viewer (may impact performance)"/>
+
+  <!-- CPU affinity: bind GMR process to specific cores, e.g. [4] for P-core on Ultra 7 255H -->
+  <arg name="cpu_cores" default="[]" doc="CPU cores to bind GMR process (empty=no binding)"/>
+
+  <!-- Load default parameters from yaml -->
+  <rosparam file="$(find kuavo_mocap_gmr)/config/gmr_params.yaml" command="load" ns="gmr"/>
+
+  <!-- GMR Streaming Node -->
+  <!-- Directly run the script with venv wrapper to bypass catkin's Python wrapper -->
+  <node pkg="kuavo_mocap_gmr" type="run_with_venv.sh" name="gmr_streaming_node"
+        output="screen" respawn="false"
+        args="$(find kuavo_mocap_gmr)/scripts/gmr_streaming_node.py">
+
+    <!-- Node parameters (override yaml defaults) -->
+    <param name="server_ip" value="$(arg server_ip)"/>
+    <param name="client_ip" value="$(arg client_ip)"/>
+    <param name="use_multicast" value="$(arg use_multicast)"/>
+    <param name="robot" value="$(arg robot)"/>
+    <param name="format" value="$(arg format)"/>
+    <param name="cali_arm_pose_deg" value="$(arg cali_arm_pose_deg)"/>
+    <param name="fps" value="$(arg fps)"/>
+    <param name="enable_viewer" value="$(arg enable_viewer)"/>
+    <rosparam param="cpu_cores" subst_value="true">$(arg cpu_cores)</rosparam>
+  </node>
+</launch>

@@ -1,0 +1,210 @@
+<?xml version="1.0"?>
+<!--
+  PICO GMR Streaming Launch File
+
+  This launch file starts the PICO motion retargeting system that:
+  - Receives PICO body tracking data via UDP (pico_comm_minimal / pico_comm_vpn)
+  - Performs real-time motion retargeting to Kuavo robot (pico_realtime_retarget node)
+  - Publishes retargeted pose to /pico/retargeted_pose (picoPoseRetarget)
+  - Publishes VMP input data to /vmp/input_data (Float32MultiArray)
+
+  Prerequisites:
+  1. Python 3.10 virtual environment with GMR dependencies installed
+     - Run: cd $(rospack find kuavo_pico_gmr) && bash setup_venv.sh
+     - Or set PICO_GMR_VENV_PATH environment variable
+
+  2. PICO device on the same network as the robot (LAN mode)
+     OR WireGuard VPN with server (VPN mode, vpn_mode:=true)
+
+  Usage:
+    # LAN mode (default)
+    roslaunch kuavo_pico_gmr pico_streaming.launch
+
+    # VPN mode (UDP TeleopCommand authorization)
+    roslaunch kuavo_pico_gmr pico_streaming.launch vpn_mode:=true
+
+    # Custom robot type and human height
+    roslaunch kuavo_pico_gmr pico_streaming.launch robot:=kuavo_s52 human_height:=1.54
+-->
+<launch>
+  <!-- Robot configuration -->
+  <arg name="robot" default="kuavo_s52" doc="Target robot type (kuavo_s45, kuavo_s52)"/>
+
+  <!-- PICO parameters -->
+  <arg name="human_height" default="1.32" doc="Estimated human height in meters"/>
+
+  <!-- PICO UDP diagnostics -->
+  <arg name="diagnostic_allow_legacy" default="true" doc="Allow old bare VRData packets without fixed header"/>
+  <arg name="diagnostic_log_enable" default="false" doc="Write PICO diagnostic JSONL logs"/>
+
+  <!-- PICO joystick locomotion (VPN mode only) -->
+  <arg name="pico_joystick_idle_timeout" default="5.0" doc="Stop the joystick session after this many seconds without authorized PICO UDP"/>
+  <arg name="pico_joystick_command_timeout" default="0.3" doc="Publish neutral authorized Joy after this many seconds without a valid joystick sample"/>
+  <arg name="pico_joystick_stop_neutral_duration" default="0.5" doc="Duration to repeat neutral authorized Joy during stop/handoff"/>
+  <arg name="pico_joystick_gait_timeout" default="5.0" doc="Timeout for verified walk/stance gait transitions"/>
+
+  <!-- Operation mode (mutually exclusive) -->
+  <arg name="vpn_mode" default="false" doc="Enable VPN session authorization mode (UDP TeleopCommand)"/>
+  <arg name="vpn_server_url" default="http://10.77.0.1:9090" doc="VPN server URL for robot_status notify"/>
+  <arg name="diagnostic_sync_max_valid_rtt_ms" default="$(eval 200.0 if arg('vpn_mode') else 20.0)" doc="Clock-sync sample RTT limit in ms; raise it for VPN/5G-A jitter"/>
+  <arg name="diagnostic_sync_max_valid_residual_ms" default="$(eval 10.0 if arg('vpn_mode') else 5.0)" doc="Clock-sync model residual P95 limit in ms"/>
+
+  <!-- Visualization -->
+  <arg name="enable_viewer" default="false" doc="Enable MuJoCo viewer (may impact performance)"/>
+
+  <!-- GMR smoothing parameters -->
+  <arg name="enable_gmr_smoothing" default="true" doc="Enable Gaussian filter smoothing"/>
+  <arg name="gmr_gaussian_sigma" default="1.0" doc="Gaussian kernel sigma (larger = smoother)"/>
+  <arg name="gmr_velocity_clip" default="20.0" doc="Velocity clipping threshold"/>
+  <arg name="gmr_velocity_deadzone" default="0.05" doc="Velocity deadzone (values below this are set to 0)"/>
+
+  <!-- Dexterous hand control (subscribes /pico/joy, publishes /control_robot_hand_position) -->
+  <arg name="enable_dexhand_control" default="true" doc="Enable dexterous hand control via PICO grip"/>
+
+  <!-- Local Joy-priority/PICO joystick walking: routed to AutoGait only for AMP controllers -->
+  <arg name="enable_pico_amp_walk" default="true" doc="Enable G12/BT2/BT2Pro-priority PICO joystick walking in AMP controllers"/>
+  <arg name="pico_amp_input_topic"
+       default="$(eval '/pico/joy_amp_authorized' if arg('vpn_mode') else '/pico/joy')"
+       doc="Authorized VPN JoySticks input, or raw /pico/joy in LAN mode"/>
+  <arg name="pico_amp_g12_input_topic" default="/joy" doc="Local G12/BT2/BT2Pro Joy input; legacy arg name is retained for compatibility"/>
+  <arg name="pico_amp_output_topic" default="/pico/joy_converted" doc="AMP Joy output; preserves the detected local 8/11 or 8/16 layout"/>
+  <arg name="pico_amp_default_joy_topic" default="/joy" doc="Non-AMP Joy input topic"/>
+  <arg name="pico_amp_initial_joy_layout" default="auto" doc="Initial AMP output layout before the first valid /joy frame: auto (/joystick_type), bt2/g12/11, or bt2pro/16"/>
+  <arg name="pico_amp_prepare_route_service" default="/pico_gmr_joy_converter/prepare_amp_route" doc="Tokenized converter handshake used before routing AutoGait into the AMP fusion topic"/>
+  <arg name="pico_amp_route_subscriber_node" default="/humanoid_joy_control_auto_gait_with_vel" doc="AutoGait node that receives the connection-specific neutral baseline after AMP routing"/>
+  <arg name="pico_amp_g12_axis_deadzone" default="0.05"/>
+  <arg name="pico_amp_g12_trigger_pressed_threshold" default="-0.5" doc="LT/RT are active below this value; supports trigger rest values of 0 or +1"/>
+  <arg name="pico_amp_g12_input_timeout_s" default="0.2"/>
+  <arg name="pico_amp_g12_neutral_hold_s" default="0.3"/>
+  <arg name="pico_amp_input_timeout_s" default="0.5"/>
+  <arg name="pico_amp_neutral_publish_hz" default="20.0"/>
+  <arg name="pico_amp_bridge_output_timeout_s" default="1.0"/>
+  <arg name="pico_amp_bridge_start_timeout_s" default="3.0"/>
+  <arg name="pico_amp_bridge_master_timeout_s" default="0.5"/>
+  <arg name="pico_amp_bridge_graph_check_interval_s" default="1.0"/>
+  <arg name="pico_amp_joy_retry_period_s" default="1.0"/>
+  <arg name="pico_amp_master_probe_timeout_s" default="0.5"/>
+  <arg name="pico_amp_service_call_timeout_s" default="1.0"/>
+  <arg name="pico_amp_route_ready_timeout_s" default="1.5" doc="Maximum wall-clock wait for the converted-topic connection and input barrier before falling back to raw /joy"/>
+  <arg name="pico_amp_controller_names"
+       default="[amp_controller, amp_wild_controller, amp_run_controller, amp_hand_controller]"/>
+
+  <!-- Head control (subscribes /robot_body_matrices, publishes /robot_head_motion_data) -->
+  <arg name="enable_head_control" default="true" doc="Enable head control node"/>
+  <arg name="head_control_mode" default="vr_follow" doc="Head control mode (fixed/auto_track_active/fixed_main_hand/vr_follow)"/>
+  <param name="/head_control_mode" value="$(arg head_control_mode)"/>
+
+  <!-- CPU affinity: bind retarget process to specific cores, e.g. [4] for P-core on Ultra 7 255H -->
+  <arg name="cpu_cores" default="[]" doc="CPU cores to bind retarget process (empty=no binding)"/>
+
+  <!-- Arm trajectory bridge for VMP ArmController external VR input -->
+  <arg name="publish_kuavo_arm_traj" default="true" doc="Publish /kuavo_arm_traj from retargeted arm joints"/>
+
+  <!-- compute LAN mode boolean -->
+  <arg name="__is_lan" value="$(eval not arg('vpn_mode'))"/>
+
+  <!-- ================================================================ -->
+  <!-- Node 1: PICO data receiver — one of two modes, mutually exclusive -->
+  <!-- ================================================================ -->
+
+  <!-- LAN mode: broadcast discovery (default, no vpn) -->
+  <node if="$(arg __is_lan)"
+        pkg="kuavo_pico_gmr" type="pico_comm_minimal_wrapper.sh" name="pico_comm_minimal"
+        output="screen" respawn="true" respawn_delay="5">
+    <param name="diagnostic_allow_legacy" value="$(arg diagnostic_allow_legacy)"/>
+    <param name="diagnostic_log_enable" value="$(arg diagnostic_log_enable)"/>
+    <param name="diagnostic_sync_max_valid_rtt_ms" value="$(arg diagnostic_sync_max_valid_rtt_ms)"/>
+    <param name="diagnostic_sync_max_valid_residual_ms" value="$(arg diagnostic_sync_max_valid_residual_ms)"/>
+  </node>
+
+  <!-- VPN mode: session authorization via UDP TeleopCommand -->
+  <node if="$(arg vpn_mode)"
+        pkg="kuavo_pico_gmr" type="pico_comm_vpn_wrapper.sh" name="pico_comm_vpn"
+        output="screen" respawn="true" respawn_delay="5">
+    <param name="vpn_server_url" value="$(arg vpn_server_url)"/>
+    <param name="diagnostic_allow_legacy" value="$(arg diagnostic_allow_legacy)"/>
+    <param name="diagnostic_log_enable" value="$(arg diagnostic_log_enable)"/>
+    <param name="diagnostic_sync_max_valid_rtt_ms" value="$(arg diagnostic_sync_max_valid_rtt_ms)"/>
+    <param name="diagnostic_sync_max_valid_residual_ms" value="$(arg diagnostic_sync_max_valid_residual_ms)"/>
+    <param name="pico_joystick_idle_timeout" value="$(arg pico_joystick_idle_timeout)"/>
+    <param name="pico_joystick_command_timeout" value="$(arg pico_joystick_command_timeout)"/>
+    <param name="pico_joystick_stop_neutral_duration" value="$(arg pico_joystick_stop_neutral_duration)"/>
+    <param name="pico_joystick_gait_timeout" value="$(arg pico_joystick_gait_timeout)"/>
+    <param name="authorized_joy_topic" value="$(arg pico_amp_input_topic)"/>
+    <param name="converted_joy_topic" value="$(arg pico_amp_output_topic)"/>
+    <param name="g12_joy_topic" value="$(arg pico_amp_g12_input_topic)"/>
+    <param name="g12_axis_deadzone" value="$(arg pico_amp_g12_axis_deadzone)"/>
+    <param name="g12_trigger_pressed_threshold" value="$(arg pico_amp_g12_trigger_pressed_threshold)"/>
+    <param name="g12_input_timeout" value="$(arg pico_amp_g12_input_timeout_s)"/>
+    <param name="g12_neutral_hold" value="$(arg pico_amp_g12_neutral_hold_s)"/>
+    <param name="bridge_output_timeout" value="$(arg pico_amp_bridge_output_timeout_s)"/>
+    <param name="bridge_start_timeout" value="$(arg pico_amp_bridge_start_timeout_s)"/>
+    <param name="bridge_master_timeout" value="$(arg pico_amp_bridge_master_timeout_s)"/>
+    <param name="bridge_graph_check_interval" value="$(arg pico_amp_bridge_graph_check_interval_s)"/>
+  </node>
+
+
+  <!-- ================================================================ -->
+  <!-- Node 2: Motion retargeting (requires gmr_venv)                    -->
+  <!-- ================================================================ -->
+  <node pkg="kuavo_pico_gmr" type="run_with_venv.sh" name="pico_realtime_retarget"
+        output="screen" respawn="true" respawn_delay="5"
+        args="$(find kuavo_pico_gmr)/scripts/pico_realtime_to_robot.py --robot $(arg robot) --human-height $(arg human_height)">
+    <param name="enable_viewer" value="$(arg enable_viewer)"/>
+    <param name="enable_gmr_smoothing" value="$(arg enable_gmr_smoothing)"/>
+    <param name="gmr_velocity_clip" value="$(arg gmr_velocity_clip)"/>
+    <param name="gmr_velocity_deadzone" value="$(arg gmr_velocity_deadzone)"/>
+    <rosparam param="cpu_cores" subst_value="true">$(arg cpu_cores)</rosparam>
+    <!-- Arm trajectory bridge -->
+    <param name="publish_kuavo_arm_traj" value="$(arg publish_kuavo_arm_traj)"/>
+  </node>
+
+  <!-- Node 3: Dexterous hand control -->
+  <node if="$(arg enable_dexhand_control)"
+        pkg="kuavo_pico_gmr" type="pico_dexhand_control_node.py" name="pico_dexhand_control"
+        output="screen" respawn="true" respawn_delay="3"/>
+
+  <!-- Node 4: Head control -->
+  <node if="$(arg enable_head_control)"
+        pkg="humanoid_controllers" type="start_node.sh" name="pico_head_control_gmr"
+        output="screen" respawn="true" respawn_delay="3"
+        args="python3 $(find noitom_hi5_hand_udp_python)/../pico-body-tracking-server/scripts/pico_head_control_node.py _mode:=$(arg head_control_mode)"/>
+
+  <!-- Node 5/6: Local Joy-priority/PICO AMP Joy selection and controller-aware routing -->
+  <group if="$(arg enable_pico_amp_walk)">
+    <node pkg="kuavo_pico_gmr"
+          type="pico_gmr_joy_converter_node"
+          name="pico_gmr_joy_converter"
+          output="screen" respawn="true" respawn_delay="1">
+      <param name="input_topic" value="$(arg pico_amp_input_topic)"/>
+      <param name="g12_input_topic" value="$(arg pico_amp_g12_input_topic)"/>
+      <param name="output_topic" value="$(arg pico_amp_output_topic)"/>
+      <param name="initial_joy_layout" value="$(arg pico_amp_initial_joy_layout)"/>
+      <param name="prepare_route_service" value="$(arg pico_amp_prepare_route_service)"/>
+      <param name="route_subscriber_node" value="$(arg pico_amp_route_subscriber_node)"/>
+      <param name="g12_axis_deadzone" value="$(arg pico_amp_g12_axis_deadzone)"/>
+      <param name="g12_trigger_pressed_threshold" value="$(arg pico_amp_g12_trigger_pressed_threshold)"/>
+      <param name="g12_input_timeout_s" value="$(arg pico_amp_g12_input_timeout_s)"/>
+      <param name="input_timeout_s" value="$(arg pico_amp_input_timeout_s)"/>
+      <param name="neutral_publish_hz" value="$(arg pico_amp_neutral_publish_hz)"/>
+    </node>
+
+    <node pkg="kuavo_pico_gmr"
+          type="pico_gmr_joy_topic_manager.py"
+          name="pico_gmr_joy_topic_manager"
+          output="screen" respawn="true" respawn_delay="1">
+      <param name="pico_joy_topic" value="$(arg pico_amp_output_topic)"/>
+      <param name="default_joy_topic" value="$(arg pico_amp_default_joy_topic)"/>
+      <param name="prepare_amp_route_service" value="$(arg pico_amp_prepare_route_service)"/>
+      <param name="route_subscriber_node" value="$(arg pico_amp_route_subscriber_node)"/>
+      <param name="retry_period_s" value="$(arg pico_amp_joy_retry_period_s)"/>
+      <param name="master_probe_timeout_s"
+             value="$(arg pico_amp_master_probe_timeout_s)"/>
+      <param name="service_call_timeout_s"
+             value="$(arg pico_amp_service_call_timeout_s)"/>
+      <param name="route_ready_timeout_s"
+             value="$(arg pico_amp_route_ready_timeout_s)"/>
+      <rosparam param="amp_controller_names" subst_value="true">$(arg pico_amp_controller_names)</rosparam>
+    </node>
+  </group>
+</launch>

@@ -1,0 +1,20 @@
+<launch>
+  <arg name="bag" default="$(find kuavo_xsense_gmr)/data/xsens_bvh_udp_20260623_201247.bag"/>
+  <arg name="rate_scale" default="1.0"/>
+  <arg name="loop" default="false"/>
+  <arg name="position_scale" default="1.0"/>
+  <arg name="offset_scale" default=""/>
+  <arg name="preserve_bag_stamp" default="false"/>
+
+  <node pkg="kuavo_xsense_gmr"
+        type="xsens_bag_to_xsense_topics.py"
+        name="xsens_bag_to_xsense_topics"
+        output="screen">
+    <param name="bag" value="$(arg bag)"/>
+    <param name="rate_scale" value="$(arg rate_scale)"/>
+    <param name="loop" value="$(arg loop)"/>
+    <param name="position_scale" value="$(arg position_scale)"/>
+    <param name="preserve_bag_stamp" value="$(arg preserve_bag_stamp)"/>
+    <param name="offset_scale" value="$(arg offset_scale)"/>
+  </node>
+</launch>

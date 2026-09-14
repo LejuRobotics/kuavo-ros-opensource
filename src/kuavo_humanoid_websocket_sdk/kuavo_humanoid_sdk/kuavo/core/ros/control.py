@@ -3,7 +3,7 @@ import time
 import roslibpy
 import numpy as np
 from typing import Tuple
-from kuavo_humanoid_sdk.common.logger import SDKLogger
+from kuavo_humanoid_sdk.common.logger import SDKLogger, is_diag_enabled
 from kuavo_humanoid_sdk.common.websocket_kuavo_sdk import WebSocketKuavoSDK
 from kuavo_humanoid_sdk.interfaces.data_types import (KuavoArmCtrlMode, KuavoIKParams, KuavoPose,
                                                       KuavoManipulationMpcControlFlow, KuavoManipulationMpcCtrlMode
@@ -172,17 +172,9 @@ class ControlEndEffectorWebsocket:
 class ControlRobotArmWebsocket:
     def __init__(self):
         websocket = WebSocketKuavoSDK()
-
-        # Detect robot type to select correct topic prefix
-        # wheel-arm robot → /mm/ (mobile manipulator)
-        # bipedal robot    → /ik/ (inverse kinematics)
-        is_wheel_arm = is_wheel_arm_robot_from_client(websocket.client)
-        topic_prefix = 'mm' if is_wheel_arm else 'ik'
-        SDKLogger.info(f"[ControlRobotArmWebsocket] is_wheel_arm={is_wheel_arm}, using /{topic_prefix}/two_arm_hand_pose_cmd")
-
         self._pub_ctrl_arm_traj_arm_collision =  roslibpy.Topic(websocket.client,'/arm_collision/kuavo_arm_traj', 'sensor_msgs/JointState')
         self._pub_ctrl_arm_target_poses_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
-        self._pub_ctrl_hand_pose_cmd_arm_collision = roslibpy.Topic(websocket.client, f'/arm_collision/{topic_prefix}/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
+        self._pub_ctrl_hand_pose_cmd_arm_collision = roslibpy.Topic(websocket.client, '/arm_collision/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
         self._sub_arm_collision_info = roslibpy.Topic(websocket.client, '/arm_collision/info', 'kuavo_msgs/armCollisionCheckInfo')
         self._sub_arm_collision_info.subscribe(self.callback_arm_collision_info)
         self._is_collision = False
@@ -190,7 +182,7 @@ class ControlRobotArmWebsocket:
         #正常轨迹发布
         self._pub_ctrl_arm_traj = roslibpy.Topic(websocket.client, '/kuavo_arm_traj', 'sensor_msgs/JointState')
         self._pub_ctrl_arm_target_poses = roslibpy.Topic(websocket.client, '/kuavo_arm_target_poses', 'kuavo_msgs/armTargetPoses')
-        self._pub_ctrl_hand_pose_cmd = roslibpy.Topic(websocket.client, f'/{topic_prefix}/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
+        self._pub_ctrl_hand_pose_cmd = roslibpy.Topic(websocket.client, '/mm/two_arm_hand_pose_cmd', 'kuavo_msgs/twoArmHandPoseCmd')
         self._pub_ctrl_arm_traj.advertise()
         self._pub_ctrl_arm_target_poses.advertise()
         self._pub_ctrl_hand_pose_cmd.advertise()
@@ -274,19 +266,27 @@ class ControlRobotArmWebsocket:
 
     def pub_end_effector_pose_cmd(self, left_pose: KuavoPose, right_pose: KuavoPose, frame: KuavoManipulationMpcFrame)->bool:
         try:
+            if is_diag_enabled():
+                # DIAG: 定位 frame=1/2 交替的发布源(TID+调用栈)
+                import threading, traceback
+                if not hasattr(self, '_diag_seq'): self._diag_seq = {}
+                tid = threading.get_ident(); self._diag_seq[tid] = self._diag_seq.get(tid, 0) + 1
+                stack = traceback.extract_stack()
+                caller = ""
+                for s in reversed(stack[:-1]):
+                    if 'control.py' not in s.filename and 'threading.py' not in s.filename:
+                        caller = f"{s.filename.split('/')[-1]}:{s.lineno} {s.name}"; break
+                print(f"[DIAG-PUB] TID={tid%10000:04d} #{self._diag_seq[tid]:<3d} frame={frame.value} caller={caller} L=({left_pose.position[0]:.2f},{left_pose.position[1]:.2f},{left_pose.position[2]:.2f})")
+
             msg = {
                 "hand_poses": {
                     "left_pose": {
                         "pos_xyz": left_pose.position,
-                        "quat_xyzw": left_pose.orientation,
-                        "elbow_pos_xyz": (0.0, 0.0, 0.0),
-                        "joint_angles": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                        "quat_xyzw": left_pose.orientation
                     },
                     "right_pose": {
                         "pos_xyz": right_pose.position,
-                        "quat_xyzw": right_pose.orientation,
-                        "elbow_pos_xyz": (0.0, 0.0, 0.0),
-                        "joint_angles": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                        "quat_xyzw": right_pose.orientation
                     }
                 },
                 "frame": frame.value
