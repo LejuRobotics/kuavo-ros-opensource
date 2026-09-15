@@ -67,14 +67,14 @@ set(kuavo_solver_CONFIG_INCLUDED TRUE)
 
 # set variables for source/devel/install prefixes
 if("FALSE" STREQUAL "TRUE")
-  set(kuavo_solver_SOURCE_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/src/kuavo_solver)
-  set(kuavo_solver_DEVEL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel)
+  set(kuavo_solver_SOURCE_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/src/kuavo_solver)
+  set(kuavo_solver_DEVEL_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/devel)
   set(kuavo_solver_INSTALL_PREFIX "")
   set(kuavo_solver_PREFIX ${kuavo_solver_DEVEL_PREFIX})
 else()
   set(kuavo_solver_SOURCE_PREFIX "")
   set(kuavo_solver_DEVEL_PREFIX "")
-  set(kuavo_solver_INSTALL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed)
+  set(kuavo_solver_INSTALL_PREFIX /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed)
   set(kuavo_solver_PREFIX ${kuavo_solver_INSTALL_PREFIX})
 endif()
 
@@ -154,7 +154,7 @@ foreach(library ${libraries})
     set(lib_path "")
     set(lib "${library}-NOTFOUND")
     # since the path where the library is found is returned we have to iterate over the paths manually
-    foreach(path /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
+    foreach(path /media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
       find_library(lib ${library}
         PATHS ${path}
         NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
