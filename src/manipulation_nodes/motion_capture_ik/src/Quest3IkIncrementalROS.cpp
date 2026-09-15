@@ -46,6 +46,10 @@
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
+namespace {
+
+}  // namespace
+
 void Quest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName, int priority) const {
   if (priority > 0) {
     ocs2::setThisThreadPriority(priority);
@@ -114,6 +118,9 @@ void Quest3IkIncrementalROS::run() {
 
   // SHM 生命周期跟 mode2 对齐（方案 A）：进 2 切 SHM，退 2 切 NONE；不在 startup 预链
   ikSolveThread_ = std::thread(&Quest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
+
+  // SG100 手指命令发布线程（需在 initialize 加载手势库成功后启动）
+
   ros::spin();
 }
 
@@ -2484,6 +2491,21 @@ void Quest3IkIncrementalROS::publishHandPoseFromTransformer() {
 void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
 
+  // SG100 heiman 手指：仅当本机型末端为 heiman 时加载手势库
+  // （6 个 /sg100/* service 与 /sg100_hand_command publisher 均在该函数内注册），
+  // 避免非黑漫机型凭空多出 SG100 话题与服务
+  const bool enableSg100Hand =
+      (joyStickHandlerPtr_ != nullptr &&
+       joyStickHandlerPtr_->getEndEffectorType() == EndEffectorType::HEIMAN);
+  if (enableSg100Hand) {
+    sg100_bridge_ = std::make_unique<HighlyDynamic::SG100HandBridge>(
+        nodeHandle_, makeSg100VrInput());
+    sg100_bridge_->start();
+  } else {
+    ROS_INFO("[Quest3IkIncrementalROS] end_effector_type is not heiman; "
+             "SG100 hand disabled (no /sg100/* service, no /sg100_hand_command)");
+  }
+
   // 初始化pose约束列表
   latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
 
@@ -3753,4 +3775,33 @@ bool Quest3IkIncrementalROS::validateVrPose(const ArmPose& currentPose, ArmPose&
   
   return !isSpike;
 }
+HighlyDynamic::SG100VrInput Quest3IkIncrementalROS::makeSg100VrInput() {
+  HighlyDynamic::SG100VrInput in;
+  in.left_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getLeftTrigger()) : 0.0f;
+  };
+  in.right_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getRightTrigger()) : 0.0f;
+  };
+  in.left_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonTouched();
+  };
+  in.left_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonPressed();
+  };
+  in.right_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonTouched();
+  };
+  in.right_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonPressed();
+  };
+  in.right_second_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonTouched();
+  };
+  in.right_second_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonPressed();
+  };
+  return in;
+}
+
 }  // namespace HighlyDynamic

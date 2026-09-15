@@ -21,6 +21,7 @@
 #include <std_msgs/Float64.h>
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "motion_capture_ik/ArmTrajWriter.h"
+#include "motion_capture_ik/SG100HandBridge.h"
 
 namespace HighlyDynamic {
 
@@ -155,6 +156,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void reset();                          // 重置所有运行时状态，确保进入系统时正常
   void forceDeactivateAllArmCtrlMode();  // 强制停用所有手臂控制模式
   void forceActivateAllArmCtrlMode();    // 强制激活所有手臂控制模式
+
+  // SG100 heiman 手:VR 输入注入(服务注册与发布线程由 SG100HandBridge 负责)
+  HighlyDynamic::SG100VrInput makeSg100VrInput();
 
   ros::Publisher kuavoArmTrajCppPublisher_;  // 发布kuavo_arm_traj_cpp；launch中通过remap话题方式来接入当前系统
   ArmTrajWriter arm_traj_writer_;           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
@@ -364,6 +368,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   int rightHandSpikeCount_ = 0;        // 右手连续跳变计数
   ros::Time leftHandSpikeStartTime_;   // 左手跳变开始时间
   ros::Time rightHandSpikeStartTime_;  // 右手跳变开始时间
+
+  // SG100 heiman 手 ROS 桥接(手势库 + /sg100/* service + /sg100_hand_command 发布线程)
+  std::unique_ptr<HighlyDynamic::SG100HandBridge> sg100_bridge_;
 };
 
 }  // namespace HighlyDynamic

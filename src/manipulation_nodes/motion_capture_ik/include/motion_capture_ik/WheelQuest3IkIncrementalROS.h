@@ -27,6 +27,7 @@
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
+#include "motion_capture_ik/SG100HandBridge.h"
 #include "motion_capture_ik/WheelNaturalElbowGuide.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
@@ -71,6 +72,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
  private:
   void chestPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+  // SG100 heiman 手:VR 输入注入(服务注册与发布线程由 SG100HandBridge 负责)
+  HighlyDynamic::SG100VrInput makeSg100VrInput();
 
   void solveIkHandElbowThreadFunction();
   void publishJointStatesThreadFunction();
@@ -311,6 +314,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   std::thread ikSolveThread_;
   std::thread jointStatePublishThread_;
+  // SG100 heiman 手 ROS 桥接(手势库 + /sg100/* service + /sg100_hand_command 发布线程)
+  std::unique_ptr<HighlyDynamic::SG100HandBridge> sg100_bridge_;
   std::mutex bonePoseHandElbowMutex_;
   std::mutex poseConstraintListMutex_;  // 保护 latestPoseConstraintList_ 的互斥锁
   std::mutex ikResultMutex_;

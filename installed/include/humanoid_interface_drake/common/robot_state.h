@@ -90,6 +90,7 @@ enum EndEffectorType
   lejuclaw,
   qibeng,
   linker_hand,
+  heiman,
 };
 enum MotorDriveType
 {

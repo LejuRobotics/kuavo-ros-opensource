@@ -7,9 +7,12 @@
 #include "dexhand/dexhand_def.h"
 #include "dexhand/dexhand_controller.h"
 #include "dexhand/mujoco_hand_base.hpp"
+#include "dexhand/heiman_hand.hpp"
 #include "sensor_msgs/JointState.h"
 
 #include "kuavo_msgs/dexhandCommand.h"
+#include "kuavo_msgs/SG100HandCommand.h"
+#include "kuavo_msgs/SG100HandState.h"
 #include "kuavo_msgs/robotHandPosition.h"
 #include "kuavo_msgs/gestureExecute.h"
 #include "kuavo_msgs/gestureList.h"
@@ -23,7 +26,8 @@ using namespace eef_controller;
 enum class HandType {
     QIANGNAO,  // 老的强脑手，范围0-100
     LINKER_L6, // 新的LinkerL6灵巧手，范围0-255
-    LINKER_O6  // 新的LinkerO6灵巧手，范围0-255
+    LINKER_O6, // 新的LinkerO6灵巧手，范围0-255
+    HEIMAN     // 黑漫 SG100 五指灵巧手，11-DOF
 };
 
 class DexHandMujocoRosNode {
@@ -69,6 +73,9 @@ private:
     void linkerLeftHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
     void linkerRightHandCommandCallback(const sensor_msgs::JointState::ConstPtr& msg);
 
+    // heiman SG100 手的控制指令回调（/sg100_hand_command, 11维弧度）
+    void heimanCommandCallback(const kuavo_msgs::SG100HandCommand::ConstPtr& msg);
+
     // enable control callback
     void enableControlCallback(const std_msgs::Bool::ConstPtr& msg);
 
@@ -93,6 +100,10 @@ private:
     // Linker系列灵巧手的话题订阅者
     ros::Subscriber linker_l_hand_command_sub_;
     ros::Subscriber linker_r_hand_command_sub_;
+    // heiman SG100 手的命令订阅者
+    ros::Subscriber heiman_command_sub_;
+    // heiman SG100 手的状态发布者
+    ros::Publisher heiman_state_pub_;
     // Linker系列灵巧手的状态发布者
     ros::Publisher l_hand_state_pub_;
     ros::Publisher r_hand_state_pub_;

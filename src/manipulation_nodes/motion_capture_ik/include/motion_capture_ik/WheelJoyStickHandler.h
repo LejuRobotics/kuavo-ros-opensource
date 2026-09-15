@@ -39,6 +39,10 @@ class WheelJoyStickHandler {
   bool getRightJoyStickYHold() const;
   bool getRightJoyStickYHoldWithX() const;
 
+  // SG100 heiman 手指驱动：读取最新 VR 扳机值 (0~1)。
+  double getLeftTrigger() const;
+  double getRightTrigger() const;
+
   void updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
   void processHandEndEffectorData();
   void processHandEndEffectorDataWithFingerTracking();
@@ -51,6 +55,9 @@ class WheelJoyStickHandler {
   bool isRightFirstButtonPressed() const;
   bool isLeftSecondButtonPressed() const;
   bool isRightSecondButtonPressed() const;
+  bool isLeftFirstButtonTouched() const;   // 左手 X 键触摸
+  bool isRightFirstButtonTouched() const;  // 右手 A 键触摸
+  bool isRightSecondButtonTouched() const; // 右手 B 键触摸
 
   bool isLeftRightFirstButtonTouched() const;
   bool isLeftRightFirstButtonPressed() const;
@@ -85,6 +92,7 @@ class WheelJoyStickHandler {
   bool leftFirstButtonTouched_;
   bool leftFirstButtonPressed_;  // 左手第一个按键按下状态
   bool rightSecondButtonPressed_;
+  bool rightSecondButtonTouched_;   // 右手 B 键触摸状态
   bool rightFirstButtonTouched_;
   bool rightFirstButtonPressed_;  // 右手第一个按键按下状态
 

@@ -44,6 +44,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "humanoid_interface/common/ModelSettings.h"
 #include <urdf/model.h>
 #include <kuavo_msgs/lejuClawCommand.h>
+#include <kuavo_msgs/SG100HandState.h>
 #include <sensor_msgs/JointState.h>
 #include <mutex>
 
@@ -131,6 +132,7 @@ namespace ocs2
     private:
       HumanoidVisualizer(const HumanoidVisualizer &) = delete;
       void updateDexhandJointPositions();
+      void updateHeimanJointPositions();
       void publishJointTransforms(ros::Time timeStamp, const vector_t &jointAngles) const;
       void publishBaseTransform(ros::Time timeStamp, const vector_t &basePose);
       void publishCartesianMarkers(ros::Time timeStamp, const contact_flag_t &contactFlags, const std::vector<vector3_t> &feetPositions,
@@ -164,6 +166,9 @@ namespace ocs2
       std::vector<double> dexhand_joint_positions_;
       std::vector<std::string> linker_hand_joint_names_;
       std::vector<double> linker_hand_joint_positions_;
+      // heiman (黑漫 SG100) 专用关节与状态（关节名表/注入副本）
+      std::vector<std::string> heiman_joint_names_;
+      std::vector<double> heiman_joint_positions_;
 
 
       bool updateClawJointPositions_ = false;
@@ -175,17 +180,21 @@ namespace ocs2
       ros::Subscriber dexhandStateSub_;
       ros::Subscriber linkerLeftHandStateSub_;
       ros::Subscriber linkerRightHandStateSub_;
+      ros::Subscriber heimanStateSubscriber_;
 
       // 灵巧手回调函数
       void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
       void linkerLeftHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
       void linkerRightHandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
       void linkerO6HandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
+      void heimanStateCallback(const kuavo_msgs::SG100HandState::ConstPtr &msg);
 
       // 灵巧手关节位置存储
       vector_t dexhandJointPositions_ = vector_t::Zero(12);      // qiangnao手
       vector_t linkerL6HandJointPositions_ = vector_t::Zero(12); // Linker L6手
       vector_t linkerO6HandJointPositions_ = vector_t::Zero(12); // Linker O6手
+      vector_t heimanHandJointPositions_ = vector_t::Zero(22);   // heiman 手 (SG100, 左右各 11 维)，受 dexhand_mutex_ 保护
+      bool updateHeimanHand_ = false;
       std::mutex dexhand_mutex_; // 保护上述灵巧手关节位置变量的互斥锁
 
 

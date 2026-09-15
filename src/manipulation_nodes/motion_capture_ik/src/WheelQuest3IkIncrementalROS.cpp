@@ -42,6 +42,7 @@ namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
 namespace {
+
 void updateHandConstraintUnlocked(std::vector<PoseData>& poseList,
                                   int handIndex,
                                   const Eigen::Vector3d& handPos,
@@ -1845,6 +1846,37 @@ bool WheelQuest3IkIncrementalROS::validateVrPose(const ::ArmPose& currentPose, :
   *prev1 = validatedPose.position;
   
   return !isSpike;
+}
+
+
+
+HighlyDynamic::SG100VrInput WheelQuest3IkIncrementalROS::makeSg100VrInput() {
+  HighlyDynamic::SG100VrInput in;
+  in.left_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getLeftTrigger()) : 0.0f;
+  };
+  in.right_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getRightTrigger()) : 0.0f;
+  };
+  in.left_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonTouched();
+  };
+  in.left_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonPressed();
+  };
+  in.right_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonTouched();
+  };
+  in.right_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonPressed();
+  };
+  in.right_second_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonTouched();
+  };
+  in.right_second_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonPressed();
+  };
+  return in;
 }
 
 }  // namespace HighlyDynamic

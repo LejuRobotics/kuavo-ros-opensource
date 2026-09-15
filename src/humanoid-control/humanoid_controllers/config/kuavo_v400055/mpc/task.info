@@ -1,36 +1,5 @@
 centroidalModelType             0      // 0: FullCentroidalDynamics, 1: Single Rigid Body Dynamics
-
-model_information
-{
-  manipulatorModelType     1  // WheelBasedMobileManipulator
-  baseFrame                base_link
-  torsoFrame               torso
-  removeJoints {
-    [0] "l_thumb_j1"
-    [1] "l_thumb_j2"
-    [2] "l_thumb_j3"
-    [3] "l_index_j1"
-    [4] "l_index_j2"
-    [5] "l_index_j3"
-    [6] "l_middle_j1"
-    [7] "l_middle_j2"
-    [8] "l_little_j1"
-    [9] "l_little_j2"
-    [10] "l_little_j3"
-    [11] "r_thumb_j1"
-    [12] "r_thumb_j2"
-    [13] "r_thumb_j3"
-    [14] "r_index_j1"
-    [15] "r_index_j2"
-    [16] "r_index_j3"
-    [17] "r_middle_j1"
-    [18] "r_middle_j2"
-    [19] "r_little_j1"
-    [20] "r_little_j2"
-    [21] "r_little_j3"
-  }
-}
-
+  
 humanoid_interface
 {
   verbose                               false  // show the loaded parameters

@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<robot name="biped_s55">
+<robot name="biped_s400055">
   <mujoco>
     <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
   </mujoco>
@@ -594,7 +594,7 @@
     </visual>
   </link>
   <joint name="l_hand_base_joint" type="fixed">
-    <origin xyz="0 0 -0.07" rpy="0 3.14159265358979 0" />
+    <origin xyz="0 0 -0.053" rpy="0 3.14159265358979 0" />
     <parent link="zarm_l7_link" />
     <child link="l_hand_base" />
     <axis xyz="0 1 0" />
@@ -1073,12 +1073,12 @@
 
   <link name="r_thumb_link1">
     <inertial>
-      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 0" />
+      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 3.14" />
       <mass value="0.020436" />
       <inertia ixx="1.5424E-06" ixy="-2.736E-07" ixz="-3.2699E-07" iyy="1.605E-06" iyz="-1.6394E-07" izz="1.5682E-06" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 3.14" />
       <geometry>
         <mesh filename="../../../heiman_sg100/meshes/r_thumb_link1.STL" />
       </geometry>
@@ -1259,7 +1259,7 @@
   </link>
 
 <joint name="r_hand_base_joint" type="fixed">
-    <origin xyz="0 0 -0.07" rpy="3.14159265358979 0 0" />
+    <origin xyz="0 0 -0.053" rpy="3.14159265358979 0 0" />
     <parent link="zarm_r7_link" />
     <child link="r_hand_base" />
     <axis xyz="0 1 0" />

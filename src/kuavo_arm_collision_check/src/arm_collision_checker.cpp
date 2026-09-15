@@ -77,6 +77,24 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
                         << ", enable_link_list size: " << enable_link_list.size());
     }
 
+    // 黑漫(heiman) SG100 四指灵巧手版本补齐手部碰撞 link(400055/400062/400063)。
+    const std::set<std::string> heiman_hand_versions = {"400055", "400062", "400063"};
+    if(heiman_hand_versions.count(robot_version) > 0) {
+        std::vector<std::string> extra_links_heiman = {
+            "l_hand_base", "l_thumb_link1", "l_thumb_link2", "l_thumb_link3",
+            "l_index_link1", "l_index_link2", "l_index_link3",
+            "l_middle_link1", "l_middle_link2",
+            "l_little_link1", "l_little_link2", "l_little_link3",
+            "r_hand_base", "r_thumb_link1", "r_thumb_link2", "r_thumb_link3",
+            "r_index_link1", "r_index_link2", "r_index_link3",
+            "r_middle_link1", "r_middle_link2",
+            "r_little_link1", "r_little_link2", "r_little_link3"
+        };
+        enable_link_list.insert(enable_link_list.end(), extra_links_heiman.begin(), extra_links_heiman.end());
+        ROS_INFO_STREAM("Added extra links for heiman-hand ROBOT_VERSION " << robot_version
+                        << ", enable_link_list size: " << enable_link_list.size());
+    }
+
     // Read parameter for publishing markers
     nh_.param("/arm_collision/publish_collision_markers", publish_markers_, false);
     if (publish_markers_) {

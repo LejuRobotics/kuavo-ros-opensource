@@ -72,6 +72,8 @@ topics:
   - /dexhand/.*                # qiangnao/Linker O6手状态话题
   - /control_robot_hand_position  # Linker O6手控制话题
   - /cb_.*_hand_.*             # Linker L6手所有话题（状态/控制）
+  - /sg100_hand_command          # SG100 灵巧手控制话题
+  - /sg100_hand_state            # SG100 灵巧手状态话题
   - /tag_world_pose
   - /leju_quest_bone_poses
   - /robot_head_motion_data

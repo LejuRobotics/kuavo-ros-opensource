@@ -663,6 +663,11 @@ namespace
               std::cout << "[mujoco_node]: Initialize LinkerO6 dexhand joint addresses" << std::endl;
               init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
               init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          } else if (hand_type_value == 3) {
+              // 黑漫 heiman SG100 手关节命名
+              std::cout << "[mujoco_node]: Initialize Heiman dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_j1", "l_little_j3");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_j1", "r_little_j3");
           }
       } else {
           // 旧版无hand_type元数据时，默认使用强脑手关节命名
@@ -1250,7 +1255,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
+                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062 || robotVersion_ == 400062 || robotVersion_ == 400063)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -2071,6 +2076,9 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
           } else if (hand_type_value == 2) {
               hand_type = mujoco_node::HandType::LINKER_O6;
               std::cout << "[mujoco_node]: Detected LinkerO6 dexhand from URDF custom metadata" << std::endl;
+          } else if (hand_type_value == 3) {
+              hand_type = mujoco_node::HandType::HEIMAN;
+              std::cout << "[mujoco_node]: Detected Heiman hand from URDF custom metadata" << std::endl;
           } else {
               hand_type = mujoco_node::HandType::QIANGNAO;
               std::cout << "[mujoco_node]: Detected Qiangnao hand from URDF custom metadata" << std::endl;

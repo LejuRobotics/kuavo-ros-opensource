@@ -1,5 +1,5 @@
 <mujoco model="kuavo scene">
-  <include file="biped_s55.xml"/>
+  <include file="biped_s400055.xml"/>
 
   <statistic center="0 0 1" extent="1.8"/>
 

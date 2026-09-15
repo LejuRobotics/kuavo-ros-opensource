@@ -1110,12 +1110,12 @@
 
   <link name="r_thumb_link1">
     <inertial>
-      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 0" />
+      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 3.14" />
       <mass value="0.020436" />
       <inertia ixx="1.5424E-06" ixy="-2.736E-07" ixz="-3.2699E-07" iyy="1.605E-06" iyz="-1.6394E-07" izz="1.5682E-06" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 3.14" />
       <geometry>
         <mesh filename="../../../heiman_sg100/meshes/r_thumb_link1.STL" />
       </geometry>

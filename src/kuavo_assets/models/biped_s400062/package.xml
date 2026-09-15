@@ -1,10 +1,10 @@
 <package format="2">
-  <name>biped_s62</name>
+  <name>biped_s400062</name>
   <version>1.0.0</version>
   <description>
-    <p>URDF Description package for biped_s62</p>
+    <p>URDF Description package for biped_s400062</p>
     <p>This package contains configuration data, 3D models and launch files
-for biped_s62 robot</p>
+for biped_s400062 robot</p>
   </description>
   <author>TODO</author>
   <maintainer email="TODO@email.com" />

@@ -1,5 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
 <mujoco model="biped_s400055">
+  <custom>
+    <numeric name="hand_type" data="3.0" />
+  </custom>
   <compiler angle="radian" meshdir="../meshes/"/>
   <size njmax="500" nconmax="100" />
   <default>
@@ -44,7 +47,6 @@
     <mesh name="l_hand_yaw" file="l_hand_yaw.STL"/>
     <mesh name="l_hand_roll" file="l_hand_roll.STL"/>
     <mesh name="l_hand_pitch" file="l_hand_pitch.STL"/>
-    <mesh name="l_hand_pitch_nohand" file="l_hand_pitch_nohand.STL"/>
     <mesh name="r_arm_pitch" file="r_arm_pitch.STL"/>
     <mesh name="r_arm_roll" file="r_arm_roll.STL"/>
     <mesh name="r_arm_yaw" file="r_arm_yaw.STL"/>
@@ -52,7 +54,6 @@
     <mesh name="r_hand_yaw" file="r_hand_yaw.STL"/>
     <mesh name="r_hand_roll" file="r_hand_roll.STL"/>
     <mesh name="r_hand_pitch" file="r_hand_pitch.STL"/>
-    <mesh name="r_hand_pitch_nohand" file="r_hand_pitch_nohand.STL"/>
     <mesh name="head_yaw" file="head_yaw.STL"/>
     <mesh name="head_pitch" file="head_pitch.STL"/>
     <mesh name="head_camera_base" file="head_camera_base.STL"/>
@@ -238,60 +239,60 @@
                       <geom size="0.01 0.04" pos="0.0505 -0.0292 -0.116372" quat="0.991915 0 -0.126907 0" type="cylinder" class="collision-left"/>
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_pitch"/>
 
-                      <body name="l_hand_base" pos="0 0 -0.07" quat="0 0 1 0">
+                      <body name="l_hand_base" pos="0 0 -0.053" quat="0 0 1 0">
                         <inertial pos="-0.0041481 -0.021938 0.067528" quat="1 0 0 0" mass="0.373" diaginertia="0.00018466 0.00026432 0.00014072"/>
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_base"/>
                         <body name="l_thumb_link1" pos="-0.031492 -0.031853 0.0384">
                           <inertial pos="-0.012037 -0.00088697 0.01722" quat="1 0 0 0" mass="0.020283" diaginertia="1.5364E-06 1.5999E-06 1.5673E-06"/>
-                          <joint name="l_thumb_j1" pos="0 0 0" axis="0 0 1" range="0.0 2.182" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="l_thumb_j1" pos="0 0 0" axis="0 0 1" range="0.0 2.182" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_thumb_link1"/>
                           <body name="l_thumb_link2" pos="-0.024 0.0155 0.0176" quat="0.707105 0.707108 0.000000 0.000000">
                             <inertial pos="-0.013248 0.021201 0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="9.5915E-06 8.0189E-06 9.2199E-06"/>
-                            <joint name="l_thumb_j2" pos="0 0 0" axis="0 0 -1" range="-2.62 0.0" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="l_thumb_j2" pos="0 0 0" axis="0 0 -1" range="-2.62 0.0" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_thumb_link2"/>
                             <body name="l_thumb_link3" pos="-0.026496 0.042402 0.001">
                               <inertial pos="-0.0090616 0.017566 0.015458" quat="1 0 0 0" mass="0.032862" diaginertia="3.2743E-06 2.0788E-06 3.3116E-06"/>
-                              <joint name="l_thumb_j3" pos="0 0 0" axis="0 0 -1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                              <joint name="l_thumb_j3" pos="0 0 0" axis="0 0 -1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_thumb_link3"/>
                             </body>
                           </body>
                         </body>
                         <body name="l_index_link1" pos="-0.0315 -0.020758 0.086" quat="0.707105 0.707108 0.000000 0.000000">
                           <inertial pos="-0.00054283 0.014975 0.019498" quat="1 0 0 0" mass="0.025394" diaginertia="2.7079E-06 2.1436E-06 2.667E-06"/>
-                          <joint name="l_index_j1" pos="0 0 0" axis="0 0 -1" range="-1.57 0.0" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="l_index_j1" pos="0 0 0" axis="0 0 -1" range="-1.57 0.0" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_index_link1"/>
                           <body name="l_index_link2" pos="0.0155 0.024 0.0281" quat="0.707105 0.000000 0.707108 0.000000">
                             <inertial pos="-3.5328E-08 0.025 -0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="1.0599E-05 7.0115E-06 9.22E-06"/>
-                            <joint name="l_index_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="l_index_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_index_link2"/>
                             <body name="l_index_link3" pos="0 0.05 -0.001">
                               <inertial pos="-0.0016236 0.019698 -0.015458" quat="1 0 0 0" mass="0.032861" diaginertia="3.3369E-06 2.0161E-06 3.3115E-06"/>
-                              <joint name="l_index_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                              <joint name="l_index_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_index_link3"/>
                             </body>
                           </body>
                         </body>
                         <body name="l_middle_link1" pos="0.018 -0.048858 0.1135" quat="0.499998 0.500000 0.500002 0.500000">
                           <inertial pos="-3.5355E-08 0.025 -0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="1.0599E-05 7.0115E-06 9.22E-06"/>
-                          <joint name="l_middle_j1" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="l_middle_j1" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_middle_link1"/>
                           <body name="l_middle_link2" pos="0 0.05 -0.001">
                             <inertial pos="-0.0016236 0.019698 -0.015458" quat="1 0 0 0" mass="0.032861" diaginertia="3.3369E-06 2.0161E-06 3.3115E-06"/>
-                            <joint name="l_middle_j2" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="l_middle_j2" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_middle_link2"/>
                           </body>
                         </body>
                         <body name="l_little_link1" pos="0.0315 -0.020758 0.08" quat="0.707105 0.707108 0.000000 0.000000">
                           <inertial pos="0.0033432 0.015178 0.019587" quat="1 0 0 0" mass="0.025089" diaginertia="2.6147E-06 2.147E-06 2.6391E-06"/>
-                          <joint name="l_little_j1" pos="0 0 0" axis="0 0 -1" range="0.0 3.14" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="l_little_j1" pos="0 0 0" axis="0 0 -1" range="0.0 3.14" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_little_link1"/>
                           <body name="l_little_link2" pos="0.0205 0.024 0.0281" quat="0.707105 0.000000 0.707108 0.000000">
                             <inertial pos="-3.5376E-08 0.025 -0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="1.0599E-05 7.0115E-06 9.22E-06"/>
-                            <joint name="l_little_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="l_little_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_little_link2"/>
                             <body name="l_little_link3" pos="0 0.05 -0.001">
                               <inertial pos="-0.0016236 0.019698 -0.015458" quat="1 0 0 0" mass="0.032861" diaginertia="3.3369E-06 2.0161E-06 3.3115E-06"/>
-                              <joint name="l_little_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                              <joint name="l_little_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_little_link3"/>
                             </body>
                           </body>
@@ -338,60 +339,60 @@
                       <geom size="0.01 0.04" pos="0.0505 0.0292 -0.116372" quat="0.991915 0 -0.126907 0" type="cylinder" class="collision-right"/>
                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_pitch"/>
 
-                      <body name="r_hand_base" pos="0 0 -0.07" quat="0 1 0 0">
+                      <body name="r_hand_base" pos="0 0 -0.053" quat="0 1 0 0">
                         <inertial pos="0.0039726 -0.021926 0.067524" quat="1 0 0 0" mass="0.373" diaginertia="0.00018484 0.00026468 0.00014092"/>
                         <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_base"/>
                         <body name="r_thumb_link1" pos="0.0315 -0.031858 0.0384">
                           <inertial pos="0.012043 -0.00088035 0.017161" quat="1 0 0 0" mass="0.020436" diaginertia="1.5424E-06 1.605E-06 1.5682E-06"/>
-                          <joint name="r_thumb_j1" pos="0 0 0" axis="0 0 -1" range="0.0 2.182" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="r_thumb_j1" pos="0 0 0" axis="0 0 -1" range="0.0 2.182" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_thumb_link1"/>
                           <body name="r_thumb_link2" pos="0.024 0.0155 0.0176" quat="0.707105 0.707108 0.000000 0.000000">
                             <inertial pos="0.013248 0.021201 0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="9.5915E-06 8.0189E-06 9.2199E-06"/>
-                            <joint name="r_thumb_j2" pos="0 0 0" axis="0 0 1" range="-2.618 0.0" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="r_thumb_j2" pos="0 0 0" axis="0 0 1" range="-2.618 0.0" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_thumb_link2"/>
                             <body name="r_thumb_link3" pos="0.026496 0.042402 0.001">
                               <inertial pos="0.0090614 0.017566 0.015387" quat="1 0 0 0" mass="0.03286" diaginertia="3.2742E-06 2.0786E-06 3.3115E-06"/>
-                              <joint name="r_thumb_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                              <joint name="r_thumb_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_thumb_link3"/>
                             </body>
                           </body>
                         </body>
                         <body name="r_index_link1" pos="0.031500034087637 -0.0207580841574733 0.0860000000000403" quat="0.707107 0.707107 0.000000 0.000000">
                           <inertial pos="0.00054285 0.014975 0.019498" quat="1 0 0 0" mass="0.025394" diaginertia="2.7079E-06 2.1436E-06 2.667E-06"/>
-                          <joint name="r_index_j1" pos="0 0 0" axis="0 0 1" range="-1.57 0.0" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="r_index_j1" pos="0 0 0" axis="0 0 1" range="-1.57 0.0" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_index_link1"/>
                           <body name="r_index_link2" pos="-0.0155 0.024 0.0281" quat="0.707105 0.000000 0.707108 0.000000">
                             <inertial pos="3.5277E-08 0.025 0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="1.0599E-05 7.0115E-06 9.22E-06"/>
-                            <joint name="r_index_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="r_index_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_index_link2"/>
                             <body name="r_index_link3" pos="0 0.05 0.001">
                               <inertial pos="-0.001624 0.019699 0.015387" quat="1 0 0 0" mass="0.03286" diaginertia="3.3368E-06 2.0159E-06 3.3115E-06"/>
-                              <joint name="r_index_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                              <joint name="r_index_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_index_link3"/>
                             </body>
                           </body>
                         </body>
                         <body name="r_middle_link1" pos="-0.018 -0.048858 0.1135" quat="0.499998 0.500000 0.500002 0.500000">
                           <inertial pos="3.5301E-08 0.025 0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="1.0599E-05 7.0115E-06 9.22E-06"/>
-                          <joint name="r_middle_j1" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="r_middle_j1" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_middle_link1"/>
                           <body name="r_middle_link2" pos="0 0.05 0.001">
                             <inertial pos="-0.001624 0.019699 0.015387" quat="1 0 0 0" mass="0.03286" diaginertia="3.3368E-06 2.0159E-06 3.3115E-06"/>
-                            <joint name="r_middle_j2" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="r_middle_j2" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_middle_link2"/>
                           </body>
                         </body>
                         <body name="r_little_link1" pos="-0.0315 -0.020758 0.08" quat="0.707105 0.707108 0.000000 0.000000">
                           <inertial pos="-0.0033432 0.015178 0.019587" quat="1 0 0 0" mass="0.025089" diaginertia="2.6147E-06 2.147E-06 2.6391E-06"/>
-                          <joint name="r_little_j1" pos="0 0 0" axis="0 0 1" range="0.0 3.14" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                          <joint name="r_little_j1" pos="0 0 0" axis="0 0 1" range="0.0 3.14" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                           <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_little_link1"/>
                           <body name="r_little_link2" pos="-0.0205 0.024 0.0281" quat="0.707105 0.000000 0.707108 0.000000">
                             <inertial pos="3.5301E-08 0.025 0.014859" quat="1 0 0 0" mass="0.11925" diaginertia="1.0599E-05 7.0115E-06 9.22E-06"/>
-                            <joint name="r_little_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                            <joint name="r_little_j2" pos="0 0 0" axis="0 0 1" range="0.0 2.18" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_little_link2"/>
                             <body name="r_little_link3" pos="0 0.05 0.001">
                               <inertial pos="-0.001624 0.019699 0.015387" quat="1 0 0 0" mass="0.03286" diaginertia="3.3368E-06 2.0159E-06 3.3115E-06"/>
-                              <joint name="r_little_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                              <joint name="r_little_j3" pos="0 0 0" axis="0 0 1" range="-1.05 1.57" damping="0.02" armature="0" frictionloss="0" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_little_link3"/>
                             </body>
                           </body>

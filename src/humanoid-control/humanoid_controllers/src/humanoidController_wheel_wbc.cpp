@@ -406,16 +406,14 @@ namespace humanoidController_wheel_wbc
     ros::param::set("/headRealDof",  2);
     ros::param::set("/waistRealDof",  0);
     vector_t mujoco_q = vector_t::Zero(7 + 4 + 7*2 + 2);
-    if(robotVersion_ == 60)
-    {
-      mujoco_q[2] = 0.0;
-    }
-    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
+    // 轮臂（major==6）统一初始化：mujoco_q[2] 置 0（60/61/62/63/200062/300062/400062/400063 等价）
+    if (rb_version.major() == 6)
     {
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    if ((robotVersion_ == 62 || robotVersion_ == 63) && hasQibeng)
+    // 62/63 夹爪气泵版（短版本 patch==0）的特殊初始臂姿
+    if ((rb_version.major() == 6 && rb_version.patch() == 0 && (rb_version.minor() == 2 || rb_version.minor() == 3)) && hasQibeng)
     {
       mujoco_q[11] = 0.5236;
       mujoco_q[14] = -1.57;

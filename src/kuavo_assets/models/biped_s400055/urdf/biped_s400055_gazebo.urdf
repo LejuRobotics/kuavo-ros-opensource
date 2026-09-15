@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
-<robot name="biped_s55">
+<robot name="biped_s400055">
   <mujoco>
-    <compiler meshdir="package://kuavo_assets/models/biped_s55/meshes/" balanceinertia="true" discardvisual="false" />
+    <compiler meshdir="package://kuavo_assets/models/biped_s400055/meshes/" balanceinertia="true" discardvisual="false" />
   </mujoco>
   <link name="dummy_link" />
   <link name="base_link">
@@ -16,7 +16,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/torso.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/torso.STL" />
       </geometry>
       <material name="">
         <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
@@ -43,7 +43,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_leg_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_leg_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -73,7 +73,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_leg_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_leg_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -104,7 +104,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_leg_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_leg_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -135,7 +135,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_knee.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_knee.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -166,7 +166,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_foot_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_foot_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -196,7 +196,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_foot_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_foot_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -309,7 +309,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_leg_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_leg_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -338,7 +338,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_leg_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_leg_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -367,7 +367,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_leg_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_leg_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -397,7 +397,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_knee.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_knee.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -427,7 +427,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_foot_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_foot_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -457,7 +457,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_foot_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_foot_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -568,7 +568,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/waist_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/waist_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -597,7 +597,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_arm_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_arm_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -626,7 +626,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_arm_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_arm_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -656,7 +656,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_arm_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_arm_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -686,7 +686,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_forearm.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_forearm.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -716,7 +716,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_hand_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_hand_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -746,7 +746,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/l_hand_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_hand_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -769,7 +769,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s49/meshes/l_hand_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_hand_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1081,7 +1081,7 @@
   </link>
 
   <joint name="l_hand_base_joint" type="fixed">
-    <origin xyz="0 0 -0.07" rpy="0 3.14159265358979 0" />
+    <origin xyz="0 0 -0.053" rpy="0 3.14159265358979 0" />
     <parent link="zarm_l7_link" />
     <child link="l_hand_base" />
     <axis xyz="0 1 0" />
@@ -1201,7 +1201,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_arm_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_arm_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1231,7 +1231,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_arm_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_arm_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1261,7 +1261,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_arm_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_arm_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1291,7 +1291,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_forearm.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_forearm.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1321,7 +1321,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_hand_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_hand_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1351,7 +1351,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/r_hand_roll.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_hand_roll.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1379,7 +1379,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s49/meshes/r_hand_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_hand_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1439,12 +1439,12 @@
 
   <link name="r_thumb_link1">
     <inertial>
-      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 0" />
+      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 3.14" />
       <mass value="0.020436" />
       <inertia ixx="1.5424E-06" ixy="-2.736E-07" ixz="-3.2699E-07" iyy="1.605E-06" iyz="-1.6394E-07" izz="1.5682E-06" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 3.14" />
       <geometry>
         <mesh filename="package://kuavo_assets/models/heiman_sg100/meshes/r_thumb_link1.STL" />
       </geometry>
@@ -1690,7 +1690,7 @@
     </collision>
   </link>
   <joint name="r_hand_base_joint" type="fixed">
-    <origin xyz="0 0 -0.07" rpy="3.14159265358979 0 0" />
+    <origin xyz="0 0 -0.053" rpy="3.14159265358979 0 0" />
     <parent link="zarm_r7_link" />
     <child link="r_hand_base" />
     <axis xyz="0 1 0" />
@@ -1808,7 +1808,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/head_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/head_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1835,7 +1835,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/head_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/head_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1860,7 +1860,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/head_camera_base.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/head_camera_base.STL" />
       </geometry>
       <material name="">
         <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
@@ -1882,7 +1882,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/head_camera_depth.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/head_camera_depth.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1904,7 +1904,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/head_radar.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/head_radar.STL" />
       </geometry>
       <material name="">
         <color rgba="0.611764705882353 0.658823529411765 0.670588235294118 1" />
@@ -1926,7 +1926,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/waist_camera_base.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/waist_camera_base.STL" />
       </geometry>
       <material name="">
         <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
@@ -1948,7 +1948,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s55/meshes/waist_camera_depth.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/waist_camera_depth.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />

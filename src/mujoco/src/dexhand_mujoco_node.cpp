@@ -2,6 +2,7 @@
 #include "dexhand/mujoco_dexhand.hpp"
 #include "dexhand/linkerl6_hand.hpp"
 #include "dexhand/linkero6_hand.hpp"
+#include "dexhand/heiman_hand.hpp"
 #include "sensor_msgs/JointState.h"
 #include "std_msgs/Bool.h"
 #include <tuple>
@@ -56,6 +57,12 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
         hand_sub_ = nh_.subscribe("control_robot_hand_position", 10, &DexHandMujocoRosNode::linkerO6ControlHandCallback, this);
         ROS_INFO("[DexHandMujoco] ✅ LinkerO6 hand compatible topics subscribed! Listening to control_robot_hand_position");
         ROS_INFO("[DexHandMujoco] ✅ LinkerO6 hand compatible state topic advertised! Publishing to dexhand/state");
+    } else if (hand_type_ == HandType::HEIMAN) {
+        // heiman SG100手：订阅 11 维弧度命令话题，发布 11 维状态话题
+        heiman_command_sub_ = nh_.subscribe("/sg100_hand_command", 10, &DexHandMujocoRosNode::heimanCommandCallback, this);
+        heiman_state_pub_ = nh_.advertise<kuavo_msgs::SG100HandState>("/sg100_hand_state", 10);
+        ROS_INFO("[DexHandMujoco] ✅ Heiman hand subscribed to /sg100_hand_command");
+        ROS_INFO("[DexHandMujoco] ✅ Heiman hand publishes /sg100_hand_state");
     } else {
         // 强脑手：兼容旧的所有控制话题和状态发布
         status_pub_ = nh_.advertise<sensor_msgs::JointState>("dexhand/state", 10);
@@ -78,6 +85,9 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
     } else if (hand_type_ == HandType::LINKER_O6) {
         l_dexhand_ = std::make_shared<LinkerO6Hand>(model, l_hand_address);
         r_dexhand_ = std::make_shared<LinkerO6Hand>(model, r_hand_address);
+    } else if (hand_type_ == HandType::HEIMAN) {
+        l_dexhand_ = std::make_shared<HeimanHand>(model, l_hand_address);
+        r_dexhand_ = std::make_shared<HeimanHand>(model, r_hand_address);
     }
 
     auto kuavo_assets_path = ocs2::kuavo_assets::getPath();
@@ -148,6 +158,26 @@ void DexHandMujocoRosNode::writeCallback(mjData *d)
 void DexHandMujocoRosNode::publish_loop()
 {
     while (running_)  {
+        // heiman：发布 11 维弧度状态到 /sg100_hand_state
+        if (hand_type_ == HandType::HEIMAN) {
+            auto l_heiman = std::static_pointer_cast<HeimanHand>(l_dexhand_);
+            auto r_heiman = std::static_pointer_cast<HeimanHand>(r_dexhand_);
+            if (l_heiman && r_heiman) {
+                kuavo_msgs::SG100HandState state;
+                state.header.stamp = ros::Time::now();
+                state.left_hand_connected = true;
+                state.right_hand_connected = true;
+                auto lp = l_heiman->getJointPositions();
+                auto rp = r_heiman->getJointPositions();
+                for (int i = 0; i < HeimanHand::JOINT_COUNT; ++i) {
+                    state.left_hand_positions.push_back(lp[i]);
+                    state.right_hand_positions.push_back(rp[i]);
+                }
+                heiman_state_pub_.publish(state);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(1000.0/frequency_)));
+            continue;
+        }
         auto finger_status = controller_->get_finger_status();
 
         // 强脑手发布旧状态话题dexhand/state
@@ -224,6 +254,29 @@ void DexHandMujocoRosNode::publish_loop()
 
 int DexHandMujocoRosNode::get_hand_joints_num() {
     return finger_count_ * hand_count_;
+}
+
+void DexHandMujocoRosNode::heimanCommandCallback(const kuavo_msgs::SG100HandCommand::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire)) return;
+
+    // 11 维弧度命令：left_hand_positions / right_hand_positions
+    auto l = std::static_pointer_cast<HeimanHand>(l_dexhand_);
+    auto r = std::static_pointer_cast<HeimanHand>(r_dexhand_);
+
+    if (l && static_cast<int>(msg->left_hand_positions.size()) >= HeimanHand::JOINT_COUNT) {
+        std::array<double, HeimanHand::JOINT_COUNT> lp{};
+        for (int i = 0; i < HeimanHand::JOINT_COUNT; ++i) {
+            lp[i] = msg->left_hand_positions[i];
+        }
+        l->setJointPositionsRadians(lp);
+    }
+    if (r && static_cast<int>(msg->right_hand_positions.size()) >= HeimanHand::JOINT_COUNT) {
+        std::array<double, HeimanHand::JOINT_COUNT> rp{};
+        for (int i = 0; i < HeimanHand::JOINT_COUNT; ++i) {
+            rp[i] = msg->right_hand_positions[i];
+        }
+        r->setJointPositionsRadians(rp);
+    }
 }
 
 void DexHandMujocoRosNode::dualHandCommandCallback(const kuavo_msgs::dexhandCommand::ConstPtr& msg) {

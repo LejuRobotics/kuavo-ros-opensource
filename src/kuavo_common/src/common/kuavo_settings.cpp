@@ -347,6 +347,7 @@ namespace HighlyDynamic
                                                                         {"lejuclaw", EndEffectorType::lejuclaw},
                                                                         {"qiangnao_touch", EndEffectorType::qiangnao_touch},
                                                                         {"revo2", EndEffectorType::revo2},
+                                                                        {"heiman", EndEffectorType::heiman},
                                                                         {"linker_hand", EndEffectorType::linker_hand},
                                                                         {"qibeng", EndEffectorType::qibeng}};
         for (auto &name : end_effector_type)

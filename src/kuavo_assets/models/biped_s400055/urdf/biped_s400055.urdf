@@ -125,7 +125,7 @@
     <collision>
       <origin xyz="0 0 -0.11" rpy="0 0 1.57" />
       <geometry>
-        <capsule radius="0.065" length="0.25" />
+        <cylinder radius="0.065" length="0.25" />
       </geometry>
     </collision>
     <collision>
@@ -168,7 +168,7 @@
     <collision>
       <origin xyz="0 0 -0.23" rpy="0 0 1.57" />
       <geometry>
-        <capsule radius="0.05" length="0.3" />
+        <cylinder radius="0.05" length="0.3" />
       </geometry>
     </collision>
   </link>
@@ -248,47 +248,47 @@
     
     <collision>
       <origin xyz="-0.008 0 -0.044" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="-0.016 0 -0.051" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="-0.063 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.076" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.076" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.09 0 -0.043" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.1 0 -0.046" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.109 0 -0.05" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.12 0 -0.053" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.13 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.139 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.082" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.082" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.152 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.064" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.064" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.165 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.04" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.04" /></geometry>
     </collision>
   </link>
   <joint name="leg_l6_joint" type="revolute">
@@ -458,7 +458,7 @@
     <collision>
       <origin xyz="0 0 -0.11" rpy="0 0 1.57" />
       <geometry>
-        <capsule radius="0.065" length="0.25" />
+        <cylinder radius="0.065" length="0.25" />
       </geometry>
     </collision>
     <collision>
@@ -500,7 +500,7 @@
     <collision>
       <origin xyz="0 0 -0.23" rpy="0 0 1.57" />
       <geometry>
-        <capsule radius="0.05" length="0.3" />
+        <cylinder radius="0.05" length="0.3" />
       </geometry>
     </collision>
   </link>
@@ -579,47 +579,47 @@
     
     <collision>
       <origin xyz="-0.008 0 -0.044" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="-0.016 0 -0.051" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="-0.063 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.076" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.076" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.09 0 -0.043" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.1 0 -0.046" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.109 0 -0.05" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.12 0 -0.053" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.13 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.092" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.092" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.139 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.082" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.082" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.152 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.064" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.064" /></geometry>
     </collision>
     <collision>
       <origin xyz="0.165 0 -0.054" rpy="-1.5708 0 0" />
-      <geometry><capsule radius="0.008" length="0.04" /></geometry>
+      <geometry><cylinder radius="0.008" length="0.04" /></geometry>
     </collision>
   </link>
   <joint name="leg_r6_joint" type="revolute">
@@ -729,13 +729,13 @@
     <collision>
       <origin xyz="0.008 0 0.2486" rpy="1.57 0 0" />
       <geometry>
-        <capsule radius="0.13" length="0.12" />
+        <cylinder radius="0.13" length="0.12" />
       </geometry>
     </collision>
     <collision>
       <origin xyz="0.008 0 0.0886" rpy="0 0 0" />
       <geometry>
-        <capsule radius="0.13" length="0.06" />
+        <cylinder radius="0.13" length="0.06" />
       </geometry>
     </collision>
   </link>
@@ -770,7 +770,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 1.5708 0" />
       <geometry>
-        <capsule radius="0.05" length="0.04" />
+        <cylinder radius="0.05" length="0.04" />
       </geometry>
     </collision>
   </link>
@@ -835,7 +835,7 @@
     <collision>
       <origin xyz="0 0 -0.18" rpy="0 0 0" />
       <geometry>
-        <capsule radius="0.045" length="0.14" />
+        <cylinder radius="0.045" length="0.14" />
       </geometry>
     </collision>
   </link>
@@ -871,7 +871,7 @@
     <collision>
       <origin xyz="-0.02 0 -0.14" rpy="0 0 0" />
       <geometry>
-        <capsule radius="0.045" length="0.18" />
+        <cylinder radius="0.045" length="0.18" />
       </geometry>
     </collision>
   </link>
@@ -953,7 +953,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s49/meshes/l_hand_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/l_hand_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1264,7 +1264,7 @@
     </collision>
   </link>
   <joint name="l_hand_base_joint" type="fixed">
-    <origin xyz="0 0 -0.07" rpy="0 3.14159265358979 0" />
+    <origin xyz="0 0 -0.053" rpy="0 3.14159265358979 0" />
     <parent link="zarm_l7_link" />
     <child link="l_hand_base" />
     <axis xyz="0 1 0" />
@@ -1272,7 +1272,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_thumb_j1" type="fixed">
+  <joint name="l_thumb_j1" type="revolute">
     <origin xyz="-0.031492 -0.031853 0.0384" rpy="0 0 0" />
     <parent link="l_hand_base" />
     <child link="l_thumb_link1" />
@@ -1281,7 +1281,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_thumb_j2" type="fixed">
+  <joint name="l_thumb_j2" type="revolute">
     <origin xyz="-0.024 0.0155 0.0176" rpy="1.5708 0 0" />
     <parent link="l_thumb_link1" />
     <child link="l_thumb_link2" />
@@ -1290,7 +1290,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_thumb_j3" type="fixed">
+  <joint name="l_thumb_j3" type="revolute">
     <origin xyz="-0.026496 0.042402 0.001" rpy="0 0 0" />
     <parent link="l_thumb_link2" />
     <child link="l_thumb_link3" />
@@ -1299,7 +1299,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_index_j1" type="fixed">
+  <joint name="l_index_j1" type="revolute">
     <origin xyz="-0.0315 -0.020758 0.086" rpy="1.5708 0 0" />
     <parent link="l_hand_base" />
     <child link="l_index_link1" />
@@ -1308,7 +1308,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_index_j2" type="fixed">
+  <joint name="l_index_j2" type="revolute">
     <origin xyz="0.0155 0.024 0.0281" rpy="0 1.5708 0" />
     <parent link="l_index_link1" />
     <child link="l_index_link2" />
@@ -1317,7 +1317,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_index_j3" type="fixed">
+  <joint name="l_index_j3" type="revolute">
     <origin xyz="0 0.05 -0.001" rpy="0 0 0" />
     <parent link="l_index_link2" />
     <child link="l_index_link3" />
@@ -1326,7 +1326,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_middle_j1" type="fixed">
+  <joint name="l_middle_j1" type="revolute">
     <origin xyz="0.018 -0.048858 0.1135" rpy="1.5708 0 1.5708" />
     <parent link="l_hand_base" />
     <child link="l_middle_link1" />
@@ -1335,7 +1335,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_middle_j2" type="fixed">
+  <joint name="l_middle_j2" type="revolute">
     <origin xyz="0 0.05 -0.001" rpy="0 0 0" />
     <parent link="l_middle_link1" />
     <child link="l_middle_link2" />
@@ -1344,7 +1344,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_little_j1" type="fixed">
+  <joint name="l_little_j1" type="revolute">
     <origin xyz="0.0315 -0.020758 0.08" rpy="1.5708 0 0" />
     <parent link="l_hand_base" />
     <child link="l_little_link1" />
@@ -1353,7 +1353,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_little_j2" type="fixed">
+  <joint name="l_little_j2" type="revolute">
     <origin xyz="0.0205 0.024 0.0281" rpy="0 1.5708 0" />
     <parent link="l_little_link1" />
     <child link="l_little_link2" />
@@ -1362,7 +1362,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="l_little_j3" type="fixed">
+  <joint name="l_little_j3" type="revolute">
     <origin xyz="0 0.05 -0.001" rpy="0 0 0" />
     <parent link="l_little_link2" />
     <child link="l_little_link3" />
@@ -1391,7 +1391,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 1.5708 0" />
       <geometry>
-        <capsule radius="0.05" length="0.04" />
+        <cylinder radius="0.05" length="0.04" />
       </geometry>
     </collision>
   </link>
@@ -1457,7 +1457,7 @@
     <collision>
       <origin xyz="0 0 -0.18" rpy="0 0 0" />
       <geometry>
-        <capsule radius="0.045" length="0.14" />
+        <cylinder radius="0.045" length="0.14" />
       </geometry>
     </collision>
   </link>
@@ -1493,7 +1493,7 @@
     <collision>
       <origin xyz="-0.02 0 -0.14" rpy="0 0 0" />
       <geometry>
-        <capsule radius="0.045" length="0.18" />
+        <cylinder radius="0.045" length="0.18" />
       </geometry>
     </collision>
   </link>
@@ -1576,7 +1576,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s49/meshes/r_hand_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s400055/meshes/r_hand_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -1636,12 +1636,12 @@
 
   <link name="r_thumb_link1">
     <inertial>
-      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 0" />
+      <origin xyz="0.012043 -0.00088035 0.017161" rpy="0 0 3.14" />
       <mass value="0.020436" />
       <inertia ixx="1.5424E-06" ixy="-2.736E-07" ixz="-3.2699E-07" iyy="1.605E-06" iyz="-1.6394E-07" izz="1.5682E-06" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 3.14" />
       <geometry>
         <mesh filename="package://kuavo_assets/models/heiman_sg100/meshes/r_thumb_link1.STL" />
       </geometry>
@@ -1888,7 +1888,7 @@
   </link>
 
 <joint name="r_hand_base_joint" type="fixed">
-    <origin xyz="0 0 -0.07" rpy="3.14159265358979 0 0" />
+    <origin xyz="0 0 -0.053" rpy="3.14159265358979 0 0" />
     <parent link="zarm_r7_link" />
     <child link="r_hand_base" />
     <axis xyz="0 1 0" />
@@ -1896,7 +1896,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_thumb_j1" type="fixed">
+  <joint name="r_thumb_j1" type="revolute">
     <origin xyz="0.0315 -0.031858 0.0384" rpy="0 0 0" />
     <parent link="r_hand_base" />
     <child link="r_thumb_link1" />
@@ -1905,7 +1905,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_thumb_j2" type="fixed">
+  <joint name="r_thumb_j2" type="revolute">
     <origin xyz="0.024 0.0155 0.0176" rpy="1.5708 0 0" />
     <parent link="r_thumb_link1" />
     <child link="r_thumb_link2" />
@@ -1914,7 +1914,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_thumb_j3" type="fixed">
+  <joint name="r_thumb_j3" type="revolute">
     <origin xyz="0.026496 0.042402 0.001" rpy="0 0 0" />
     <parent link="r_thumb_link2" />
     <child link="r_thumb_link3" />
@@ -1923,7 +1923,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_index_j1" type="fixed">
+  <joint name="r_index_j1" type="revolute">
     <origin xyz="0.031500034087637 -0.0207580841574733 0.0860000000000403" rpy="1.5707963267949 0 0" />
     <parent link="r_hand_base" />
     <child link="r_index_link1" />
@@ -1932,7 +1932,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_index_j2" type="fixed">
+  <joint name="r_index_j2" type="revolute">
     <origin xyz="-0.0155 0.024 0.0281" rpy="0 1.5708 0" />
     <parent link="r_index_link1" />
     <child link="r_index_link2" />
@@ -1941,7 +1941,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_index_j3" type="fixed">
+  <joint name="r_index_j3" type="revolute">
     <origin xyz="0 0.05 0.001" rpy="0 0 0" />
     <parent link="r_index_link2" />
     <child link="r_index_link3" />
@@ -1950,7 +1950,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_middle_j1" type="fixed">
+  <joint name="r_middle_j1" type="revolute">
     <origin xyz="-0.018 -0.048858 0.1135" rpy="1.5708 0 1.5708" />
     <parent link="r_hand_base" />
     <child link="r_middle_link1" />
@@ -1959,7 +1959,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_middle_j2" type="fixed">
+  <joint name="r_middle_j2" type="revolute">
     <origin xyz="0 0.05 0.001" rpy="0 0 0" />
     <parent link="r_middle_link1" />
     <child link="r_middle_link2" />
@@ -1968,7 +1968,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_little_j1" type="fixed">
+  <joint name="r_little_j1" type="revolute">
     <origin xyz="-0.0315 -0.020758 0.08" rpy="1.5708 0 0" />
     <parent link="r_hand_base" />
     <child link="r_little_link1" />
@@ -1977,7 +1977,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_little_j2" type="fixed">
+  <joint name="r_little_j2" type="revolute">
     <origin xyz="-0.0205 0.024 0.0281" rpy="0 1.5708 0" />
     <parent link="r_little_link1" />
     <child link="r_little_link2" />
@@ -1986,7 +1986,7 @@
     <dynamics damping="0.02" friction="0.0" />
   </joint>
 
-  <joint name="r_little_j3" type="fixed">
+  <joint name="r_little_j3" type="revolute">
     <origin xyz="0 0.05 0.001" rpy="0 0 0" />
     <parent link="r_little_link2" />
     <child link="r_little_link3" />

@@ -95,7 +95,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="../../meshes/r_forearm_pitch.STL"/>
+        <mesh filename="../../meshes/r_forearm.STL"/>
       </geometry>
       <material name="">
         <color rgba="1 1 1 1"/>

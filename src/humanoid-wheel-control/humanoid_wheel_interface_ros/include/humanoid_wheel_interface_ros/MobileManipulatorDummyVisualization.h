@@ -41,6 +41,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <kuavo_msgs/lejuClawCommand.h>
 #include <kuavo_msgs/lejuClawState.h>
+#include <kuavo_msgs/SG100HandState.h>
 #include <sensor_msgs/JointState.h>
 
 namespace ocs2 {
@@ -116,6 +117,14 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   ros::Subscriber dexhandStateSubscriber_;
   void dexhandStateCallback(const sensor_msgs::JointState::ConstPtr &msg);
   void updateHandJointPositions(const Eigen::VectorXd& positions);
+
+  // heiman (黑漫 SG100 五指灵巧手) 专用关节与命令
+  std::vector<std::string> heiman_joint_names_;
+  std::vector<double> heiman_joint_positions_;
+  bool updateHeimanHand_ = false;
+  ros::Subscriber heimanStateSubscriber_;
+  void heimanStateCallback(const kuavo_msgs::SG100HandState::ConstPtr &msg);
+  std::mutex heiman_mutex_;  // 保护 heiman_joint_positions_（回调与发布线程并发）
 
   // 检测到外部 odom->base_link 时（/external_odom/active 为 true），不发布内部的 odom->base_link
   bool use_external_odom_tf_ = false;

@@ -36,6 +36,7 @@ if(drake_VERSION)
   message(STATUS "[motion_capture_ik] drake_VERSION=${drake_VERSION}")
 endif()
 find_package(Eigen3 REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # catkin_package(DEPENDS Eigen3) expects Eigen3_INCLUDE_DIRS/Eigen3_LIBRARIES.
 # FindEigen3.cmake typically defines EIGEN3_INCLUDE_DIRS instead (note the case).
@@ -64,6 +65,7 @@ find_package(catkin REQUIRED COMPONENTS
   kuavo_common
   ocs2_core
   ocs2_msgs
+  urdf
 )
 find_package(BZip2 REQUIRED)
 
@@ -120,11 +122,6 @@ if(EXISTS "${PLANT_IK_FILE}")
   message(STATUS "Found plantIK.cc")
     add_library(plantIK SHARED src/plantIK.cc include/plantIK.h)
     target_link_libraries(plantIK drake::drake)
-
-    # 指定输出目录
-    set_target_properties(plantIK PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib
-    )
 else()
     # 当 src/plantIK.cc 不存在时，加载动态库
     find_library(PLANTIK_LIBRARY NAMES plantIK PATHS ${CMAKE_CURRENT_SOURCE_DIR}/lib)
@@ -205,11 +202,14 @@ add_executable(ik_ros_uni_cpp_node
   src/JoyStickHandler.cpp
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
+  src/SG100GestureLibrary.cpp
+  src/SG100JointLimits.cpp
+  src/SG100HandBridge.cpp
 )
 target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
 )
-target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
+target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake yaml-cpp)
 target_compile_features(ik_ros_uni_cpp_node PUBLIC cxx_std_17)
 
 # wheel_ik_ros_uni_cpp_node
@@ -227,13 +227,16 @@ add_executable(wheel_ik_ros_uni_cpp_node
   src/ArmLengthMeasurement.cpp
   src/WheelJoyStickHandler.cpp
   src/WheelHandSmoother.cpp
+  src/SG100GestureLibrary.cpp
+  src/SG100JointLimits.cpp
+  src/SG100HandBridge.cpp
 )
 add_dependencies(wheel_ik_ros_uni_cpp_node ${catkin_EXPORTED_TARGETS})
 target_include_directories(wheel_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
   ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
-target_link_libraries(wheel_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake)
+target_link_libraries(wheel_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake yaml-cpp)
 target_compile_features(wheel_ik_ros_uni_cpp_node PUBLIC cxx_std_17)
 
 # wheel_arm_only_ik_ros_uni_cpp_node — v62 (5W) 平台半身 IK 入口
@@ -253,11 +256,14 @@ add_executable(wheel_arm_only_ik_ros_uni_cpp_node
   src/JoyStickHandler.cpp
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
+  src/SG100GestureLibrary.cpp
+  src/SG100JointLimits.cpp
+  src/SG100HandBridge.cpp
 )
 target_include_directories(wheel_arm_only_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
 )
-target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
+target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake yaml-cpp)
 
 install(TARGETS ik_ros_uni_cpp_node wheel_ik_ros_uni_cpp_node wheel_arm_only_ik_ros_uni_cpp_node topic_logger
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
