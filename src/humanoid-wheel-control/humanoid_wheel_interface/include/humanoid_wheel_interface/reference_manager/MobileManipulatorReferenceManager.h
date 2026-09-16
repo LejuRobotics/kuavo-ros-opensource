@@ -234,6 +234,14 @@ protected:
   void updateTimedSchedulerTargetTraj(void);
   void updateTimedOfflineTraj(scalar_t initTime, scalar_t finalTime);
   void updateIndexRuckigPlanner(int plannerIndex, double desireTime, const Eigen::VectorXd& cmd_vec);
+
+  // 距最近一次下肢指令(话题或 timed 服务)不超过阈值
+  bool isLbLegTrajFresh(scalar_t initTime) const
+  {
+    const double lastRecv = lastLbLegTrajRecvTime_.load(std::memory_order_acquire);
+    if(lastRecv <= 0.0) return false;   // 从未收到
+    return (initTime - lastRecv) <= lbLegTrajHeartbeatTimeout_;
+  }
   
   // 辅助函数
   bool getControlModeIsChange(int currentMode)
@@ -443,6 +451,11 @@ private:
   std::mutex lbLegJoint_mtx_;
   ros::Subscriber lb_leg_joint_traj_sub_;
   ros::Publisher targetLegJointReachTimePub_;
+
+  // 心跳检测相关
+  std::atomic<double> lastLbLegTrajRecvTime_{0.0};   // 最近一次下肢指令的 ROS 时间 [s], <=0 表示从未收到
+  double lbLegTrajHeartbeatTimeout_{0.1};            // 超时阈值 [s]
+  bool isLbLegTrajResetPending_{false};              // 超时后置位, 待下次收到指令时对齐实测一次
 
   // 用于记录末端笛卡尔模式的 focus 对象, true 为末端, false 为躯干
   bool isFocusEe_{true};

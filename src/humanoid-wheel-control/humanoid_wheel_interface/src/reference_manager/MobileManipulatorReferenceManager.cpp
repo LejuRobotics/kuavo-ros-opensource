@@ -976,6 +976,9 @@ namespace mobile_manipulator {
       cmdLegJointDesiredTime_ = 0.0;
       lbLegJoint_mtx_.unlock();
 
+      // 记录下肢命令流时间戳
+      lastLbLegTrajRecvTime_.store(ros::Time::now().toSec(), std::memory_order_release);
+
       isCmdLegJointUpdated_ = true;
     };
     lb_leg_joint_traj_sub_ = nodeHandle_.subscribe<sensor_msgs::JointState>("/lb_leg_traj", 10, lbLegJointTrajCallback);
@@ -1761,12 +1764,7 @@ namespace mobile_manipulator {
       targetState.head(baseDim_) = currentTargetPose; // [x, y, yaw]
       targetInput.head(baseDim_) = currentTargetVel;  // [vx, vy, wz]
 
-      //   未使能跟踪的关节通道: 参考段恒等于实测状态(initState), 输入恒 0。
-      //   停用期间若沿用 planner 残值, 参考会停在旧目标上(即观测到的
-      //   currentMpcTarget/state 与 policy state 的 data[3:5] 差异); 一旦使能跟踪,
-      //   MPC 会从"实测"去追"旧参考", 表现为预测先发散后收敛的抖动。
-      //   未使能段本就不参与 BaseStateInputCost(对应 enable 标志为 false), 此处只影响
-      //   参考的准备与发布, 不改变 MPC 行为; 使能瞬间参考与实测连续, 消除该抖动。
+      // 未使能跟踪的关节通道: 参考段恒等于实测状态(initState), 输入恒 0
       if(getEnableLegJointTrack())
       {
         targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
@@ -1962,7 +1960,7 @@ namespace mobile_manipulator {
       targetInput.head(2) = velWorld.head(3);  // [vx, vy, vyaw]
       targetInput(2) = currentTargetVel[2];
 
-      // [Plan B] 未使能跟踪的关节通道: 参考段恒等于实测(initState), 输入 0 (同 generatePoseTargetWithRuckig)
+      // 未使能跟踪的关节通道: 参考段恒等于实测状态(initState), 输入恒 0
       if(getEnableLegJointTrack())
       {
         targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
@@ -2089,7 +2087,6 @@ namespace mobile_manipulator {
       targetState.head(3) = currentTargetPose; // [x, y, yaw]
       targetInput.head(3) = currentTargetVel;  // [vx, vy, wz]
 
-      // [Plan B] 未使能跟踪的关节通道: 参考段恒等于实测(initstate), 输入 0 (同 generatePoseTargetWithRuckig)
       if(getEnableLegJointTrack())
       {
         targetState.segment(baseDim_, 4) = currentTargetPose_legJoint;  // 下肢4自由度
@@ -3936,6 +3933,9 @@ namespace mobile_manipulator {
     static bool isArmEeOfflineTrajUpdate_prev[2]{false, false};
     static bool armEeOfflineEnd[2]{false, false};
 
+    // 进入本拍时的手臂关节跟踪使能状态, 用于检测 "关->开" 边沿，且首点对齐只允许在该边沿做一次: 
+    const bool armJointTrackWasEnabled = getEnableArmJointTrackForArm(armIdx);
+
     if(isArmEeOfflineTrajUpdate_prev[armIdx] == true && 
        isArmEeOfflineTrajUpdate_[armIdx] == false)    // 从离线调整为在线的第一次执行, 从离线轨迹最后一帧获取期望
     {
@@ -4023,14 +4023,12 @@ namespace mobile_manipulator {
 
           if(isCmdArmJointUpdated_[armIdx])
           {
-            // 关节空间首点对齐到实测: 收到新关节命令并重建轨迹的瞬间, 把
-            // armJoint 规划器初值锚定到实际关节(initState), 速度/加速度清零。保证
-            // stateInputTargetTrajectories_ 的上肢关节段在 initTime 处采样点 == 实测,
-            // 避免 "使能跟踪第一帧参考≠实际" 造成 MPC 先发散后收敛的抖动。
-            // 仅关节空间, 不影响笛卡尔参考; 仅在新命令时锚定, 不覆盖轨迹推进。
-            armJoint_prevTargetPose_[armIdx] = initState.tail(info_.armDim - 4).segment(armIdx * singleArmJointDim_, singleArmJointDim_);
-            armJoint_prevTargetVel_[armIdx].setZero(singleArmJointDim_);
-            armJoint_prevTargetAcc_[armIdx].setZero(singleArmJointDim_);
+            if(!armJointTrackWasEnabled)
+            {
+              armJoint_prevTargetPose_[armIdx] = initState.tail(info_.armDim - 4).segment(armIdx * singleArmJointDim_, singleArmJointDim_);
+              armJoint_prevTargetVel_[armIdx].setZero(singleArmJointDim_);
+              armJoint_prevTargetAcc_[armIdx].setZero(singleArmJointDim_);
+            }
 
             calcRuckigTrajWithArmJoint(armIdx, initTime, armJointTarget[armIdx], cmdArmJointDesiredTime_[armIdx]);
             isCmdArmJointUpdated_[armIdx] = false;
@@ -4219,6 +4217,8 @@ namespace mobile_manipulator {
       setIsFocusEeStatus(desiredFocusEe_);
     }
 
+    const bool legJointTrackWasEnabled = getEnableLegJointTrack();
+
     if(isCmdLegJointUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
       setEnableLegJointTrack(true); // 开启下肢关节跟踪
@@ -4230,20 +4230,33 @@ namespace mobile_manipulator {
       legJointTarget = lb_leg_traj_;
       lbLegJoint_mtx_.unlock();
 
-      // 关节空间首点对齐到实测: 开启下肢跟踪的瞬间, 把下肢规划器初值锚定到
-      // 实际关节位置(initState), 速度/加速度清零。保证 stateInputTargetTrajectories_ 的
-      // 下肢关节段在 initTime 处的采样点 == policy 实测关节, 消除 "使能跟踪第一帧
-      // 参考(old 残留)≠实际" 造成 MPC 先发散后收敛的抖动。仅对齐关节空间(state 的
-      // 下肢段), 不影响底盘/躯干/末端的笛卡尔参考。
-      // 注意: 这里同时被 resetAllMpcTrajAndTarget 首次运行 + /lb_leg_traj 触发, 均安全。
-      legJoint_prevTargetPose_ = initState.segment(baseDim_, 4);
-      legJoint_prevTargetVel_.setZero(4);
-      legJoint_prevTargetAcc_.setZero(4);
+      // 关节空间首点对齐到实测 —— 两个时机各执行一次, 均只锚定一次(清零速度/加速度)
+      if(!legJointTrackWasEnabled || isLbLegTrajResetPending_)
+      {
+        legJoint_prevTargetPose_ = initState.segment(baseDim_, 4);
+        legJoint_prevTargetVel_.setZero(4);
+        legJoint_prevTargetAcc_.setZero(4);
+        isLbLegTrajResetPending_ = false;   // 已消费该次重置, 清除标志
+      }
 
       calcRuckigTrajWithLegJoint(initTime, legJointTarget, cmdLegJointDesiredTime_);
 
       isCmdLegJointUpdated_ = false;
       torsoModeFlag_ = false;
+    }
+
+    //  **注意**：下肢命令流(/lb_leg_traj 及经 timed 服务的下肢指令) 超过阈值未收到:
+    //   仅置位"待重置"标志并记录一次日志, 不在此处改动规划器 —— 真正的对齐放在下一次
+    //   收到指令的那一拍(见上方 isCmdLegJointUpdated_ 分支消费该标志)。
+    if(getEnableLegJointTrack() && isTorsoOfflineTrajUpdate_ != true &&
+       !isLbLegTrajFresh(initTime))
+    {
+      if(!isLbLegTrajResetPending_)
+      {
+        ROS_WARN_STREAM("[下肢心跳] 超过 " << lbLegTrajHeartbeatTimeout_
+                        << "s 未收到下肢指令(/lb_leg_traj 或 timed 服务), 置位重置标志, 待下次收到指令时对齐实测一次");
+        isLbLegTrajResetPending_ = true;
+      }
     }
     
     if(torsoModeFlag_)
@@ -4544,6 +4557,8 @@ namespace mobile_manipulator {
         isCmdLegJointUpdated_ = true;
         cmdLegJointDesiredTime_ = desireTime;
         lb_leg_traj_ = cmd_vec.head(desiredSize);
+        // [心跳] 经 timed 服务下发的下肢指令同样计入命令流, 避免被误判为超时
+        lastLbLegTrajRecvTime_.store(ros::Time::now().toSec(), std::memory_order_release);
         break;
       }
       case LbTimedPosCmdType::LEFT_ARM_WORLD_CMD:
