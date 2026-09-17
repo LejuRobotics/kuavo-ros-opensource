@@ -45,8 +45,8 @@
     <depend>kuavo_assets</depend>
     <depend>ocs2_self_collision_visualization</depend>
     <depend>kuavo_audio_player</depend>
-    <!-- real-robot / isaac launch only -->
-    <!-- <exec_depend>mobile_manipulator_controllers</exec_depend> -->
+    <!-- real-robot / isaac launch (with_mm_ik default true); catkin build still compiles it via exec_depend -->
+    <exec_depend>mobile_manipulator_controllers</exec_depend>
     <!-- <depend>gazebo_sim</depend> -->
     <!-- <depend>realsense_ros_gazebo</depend> -->
     <depend>realsense_sim_metadata</depend>
