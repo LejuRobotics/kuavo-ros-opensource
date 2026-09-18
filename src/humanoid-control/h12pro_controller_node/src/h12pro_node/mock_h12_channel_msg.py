@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 import rospy
 import time
+import os
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 
 MIN_VALUE = 282
 MID_VALUE = 1002
 MAX_VALUE = 1722
-DEFAULT_CHANNELS = [MIN_VALUE] * 12
+# 通道数与真实发布器 h12pro_channel_publisher 保持一致:
+#   REMOTE_CONTROLLER_TYPE=g11 -> 16 通道; 其他/未配置(H12/G12/旧部署) -> 12 通道
+def _total_channels():
+    return 16 if os.getenv("REMOTE_CONTROLLER_TYPE", "").lower() == "g11" else 12
+
+DEFAULT_CHANNELS = [MIN_VALUE] * _total_channels()
 DEFAULT_CHANNELS[:4] = [MID_VALUE] * 4
+# G11 的 CH13~CH16 是屏幕虚拟通道, 空闲值为 1002(与驱动 initializeSbusRxData 一致);
+# 留 282 会被解析成一次"硬件启动"脉冲且页面不匹配, 产生日志噪声。
+if _total_channels() == 16:
+    DEFAULT_CHANNELS[12:16] = [MID_VALUE] * 4
 
 STATE_TO_CHANNEL = {
     "E_LEFT": {

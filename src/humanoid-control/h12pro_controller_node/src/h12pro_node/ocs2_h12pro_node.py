@@ -8,7 +8,7 @@ from sensor_msgs.msg import Joy
 from h12pro_controller_node.msg import h12proRemoteControllerChannel
 from h12pro_controller_node.msg import UpdateH12CustomizeConfig
 from robot_state.robot_state_machine import robot_state_machine, RobotStateMachine, states
-from robot_state.multi_before_callback import is_switch_controller_in_cooldown, clear_switch_controller_cooldown, is_sit_stand_in_progress
+from robot_state.multi_before_callback import is_switch_controller_in_cooldown, clear_switch_controller_cooldown, is_sit_stand_in_progress, set_g11_robot_kind, set_g11_boot_force
 from transitions.core import MachineError
 from utils.utils import read_json_file
 import rospkg
@@ -18,6 +18,28 @@ import sys
 from ocs2_msgs.msg import mpc_observation
 from kuavo_msgs.msg import sensorsData
 from kuavo_msgs.msg import robotHandPosition, robotHeadMotionData
+
+# ===== G11 末端(夹爪/灵巧手)跟随桥消息 =====
+# 遥控端只表达"使能(CH14 claw 位)+AUX 开度", 末端类型由机器人端
+# /end_effector_type 决定, 遥控器不区分。
+#   lejuclaw: /leju_claw_command, position 0=闭合/100=全开
+#   qiangnao/linker_hand 灵巧手: /dexhand/command, 0=全开/100=全闭(方向相反),
+#     6 个手指同比例联动(AUX1 左/AUX2 右), 暂不做单指/手势。
+try:
+    from kuavo_msgs.msg import lejuClawCommand as _G11LejuClawCmdMsg
+    _G11_LEJUCLAW_MSG_OK = True
+except Exception as _e:
+    _G11LejuClawCmdMsg = None
+    _G11_LEJUCLAW_MSG_OK = False
+    rospy.logwarn(f"[G11Claw] lejuClawCommand import failed, AUX 夹爪桥禁用: {_e}")
+
+try:
+    from kuavo_msgs.msg import dexhandCommand as _G11DexhandCmdMsg
+    _G11_DEXHAND_MSG_OK = True
+except Exception as _e:
+    _G11DexhandCmdMsg = None
+    _G11_DEXHAND_MSG_OK = False
+    rospy.logwarn(f"[G11Claw] dexhandCommand import failed, AUX 灵巧手桥禁用: {_e}")
 from kuavo_msgs.srv import getControllerList
 from sensor_msgs.msg import JointState
 import math
@@ -31,6 +53,30 @@ rospack = rospkg.RosPack()
 pkg_path = rospack.get_path('h12pro_controller_node')
 h12pro_remote_controller_path = os.path.join(pkg_path, "src", "h12pro_node", "h12pro_remote_controller.json")
 kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "ocs2")
+
+# 遥控器型号: 由部署的 systemd 服务注入 REMOTE_CONTROLLER_TYPE 环境变量决定(优先)
+#   h12  = H12 / G12 遥控器 (默认: 无 env / json 无字段时保持老逻辑, 不受 G11 影响)
+#   g11  = G11 遥控器 (service 部署时 Environment=REMOTE_CONTROLLER_TYPE=g11)
+try:
+    _rcfg = read_json_file(h12pro_remote_controller_path)
+    _controller_type = str(_rcfg.get("controller_type", "h12")).lower()
+except Exception:
+    _controller_type = "h12"
+# strip().lower() 与包内 mock_h12_channel_msg.py / send_h12_trigger.py 口径一致:
+# 大小写不一致会让 publisher 发 12 通道而 joy 节点按 16 通道解析 -> 每帧 IndexError
+_controller_type = os.getenv("REMOTE_CONTROLLER_TYPE", _controller_type).strip().lower()
+rospy.logwarn(f"[REMOTE] controller_type = {_controller_type} "
+              f"(env REMOTE_CONTROLLER_TYPE={os.getenv('REMOTE_CONTROLLER_TYPE', '(unset)')})")
+
+# ===== G11 屏幕指令解析 (协议库独立在 g11_controller_node 包) =====
+# 仅 controller_type == g11 时启用; 缺库时降级为禁用(不影响实体按键端 / H12/G12)
+try:
+    import g11_screen_protocol as g11proto
+    _G11_SCREEN_AVAILABLE = True
+except Exception as _e:
+    g11proto = None
+    _G11_SCREEN_AVAILABLE = False
+    rospy.logwarn(f"[REMOTE] g11_screen_protocol import failed, screen cmd disabled: {_e}")
 
 try:
     from robot_version import RobotVersion
@@ -68,7 +114,15 @@ class Config:
     H12_AXIS_MID_VALUE = (H12_AXIS_RANGE_MAX + H12_AXIS_RANGE_MIN) // 2
     
     # State configurations
-    VALID_STATES = {"ready_stance", "rl_control", "stance", "walk", "trot"}
+    # VALID_STATES: 状态切换后需向 /joy 下发"状态反馈"脉冲的运动态集合。
+    # ⚠️ 本集合为 H12/G12 与 G11 共用(实体键路径 _execute_state_transition 与 G11
+    #    屏幕路径 _g11_state_transition_task 都读它), 改动等价于改 H12/G12 行为。
+    # 注意: ready_stance 不在此集合 —— 它是过渡态, 站立由
+    # ready_stance_callback 调 /humanoid_controller/real_initial_start 服务完成,
+    # 无需 /joy 通道反馈(历史 ee93ed18d8 注释了 map 里的 ready_stance:5,
+    # 若留在 VALID_STATES 会因 TRIGGER_CHANNEL_MAP 缺键抛 KeyError,
+    # 该 KeyError 此前被外层 except 吞成日志, 行为等价但会刷日志)。
+    VALID_STATES = {"rl_control", "stance", "walk", "trot"}
     TRIGGER_CHANNEL_MAP = {
         "stop": 8,
         # "ready_stance": 5,
@@ -77,8 +131,6 @@ class Config:
         "walk": 6,
         "trot": 7
     }
-    
-    # Button and axis mappings
     BUTTON_MAPPING = {
         'A': 0, 'B': 1, 'X': 2, 'Y': 3,
         'LB': 4, 'RB': 5, 'BACK': 6, 'START': 7
@@ -103,7 +155,9 @@ class Config:
     
     @staticmethod
     def get_default_channels() -> List[int]:
-        channels = [Config.H12_AXIS_RANGE_MIN] * 12
+        # 通道数与真实发布器保持一致: g11 -> 16, 其他/默认 -> 12
+        n = 16 if _controller_type == "g11" else 12
+        channels = [Config.H12_AXIS_RANGE_MIN] * n
         channels[:4] = [Config.H12_AXIS_MID_VALUE] * 4
         return channels
 
@@ -216,19 +270,44 @@ class H12ToJoyControllerNode:
         # 此处把边沿展宽为持续脉冲,保证至少若干个 /joy 帧携带 button=1。
         self._button_pulse_until = {}
 
+        # ===== G11 轮臂下肢桥(屏幕驱动 C++ MobileManipulatorJoyCommandNode) =====
+        # C++ use_g12_ 分支只认 G12 语义 /joy 按钮:
+        #   GUIDE=buttons[8](模拟 G 极值按住), M1=buttons[9](模拟 H 按住),
+        #   M2=buttons[10](复位), 切模式需 GUIDE + A[3]/B[1]/C[2] 边沿。
+        # G11 无 G/H 滚轮, 由屏幕下肢页码驱动: 362/370/378 切模式, 386 复位,
+        # 394/402 选躯干组(锁存 GUIDE 或 M1 持续按下, 使摇杆持续产该组指令)。
+        self.g11_torso_group = None       # None/xz(394)/yawpitch(402)
+        self.g11_leg_pulse = {}           # {btn_idx: 截止时间} 一次性边沿脉冲(切模式/复位)
+        # 组锁存看门狗: 最近一次收到下肢页(CH12=1178)的时间戳。
+        # 屏幕在下肢页期间会持续逐帧上报 1178; 若长时间收不到(屏幕卡死/协议失联),
+        # 说明锁存来源已不可信, 需自动释放, 否则 GUIDE/M1 会被永久按住。
+        self._g11_leg_page_at = 0.0
+
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
             rospy.loginfo("[G12] Wheel mode enabled, ROBOT_VERSION=%s, joystick_type=h12", robot_version)
 
     @staticmethod
     def _create_channel_mapping() -> Dict[int, ChannelMapping]:
-        """Create channel mapping configuration."""
+        """Create channel mapping configuration.
+
+        G11 遥控器(CH5/6=SW1/SW2 开关, CH7=H, CH8/9=AUX 旋钮, CH10/11=B1/B2):
+        实体键/开关全部走状态机 g11_* 映射表触发, 不映射为 G12 语义的 /joy
+        按钮(避免 G12 通道布局把 SW2 右档/极值误当 START/A 等按钮)。仅保留
+        摇杆 CH1-4 axes 透传, 按钮恒为 0。
+        """
+        # 摇杆 4 通道(G11/G12 相同): axes 映射
+        stick_axes = {
+            1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
+            2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
+            3: ChannelMapping(3, axis_index=Config.AXIS_MAPPING['LEFT_STICK_X']),
+            4: ChannelMapping(4, axis_index=Config.AXIS_MAPPING['LEFT_STICK_Y'], reverse=True, scale=Config.SCALE_LEFT_STICK_Y),
+        }
+        if _controller_type == "g11":
+            return stick_axes
         if kuavo_control_scheme == "rl":
             return {
-                1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
-                2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
-                3: ChannelMapping(3, axis_index=Config.AXIS_MAPPING['LEFT_STICK_X']),
-                4: ChannelMapping(4, axis_index=Config.AXIS_MAPPING['LEFT_STICK_Y'], reverse=True, scale=Config.SCALE_LEFT_STICK_Y),
+                **stick_axes,
                 6: ChannelMapping(6, button_index=Config.BUTTON_MAPPING['START'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
                 7: ChannelMapping(7, button_index=Config.BUTTON_MAPPING['LB'], 
@@ -242,10 +321,7 @@ class H12ToJoyControllerNode:
             }
         elif kuavo_control_scheme == "ocs2" or kuavo_control_scheme == "multi":
             return {
-                1: ChannelMapping(1, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_YAW'], reverse=True),
-                2: ChannelMapping(2, axis_index=Config.AXIS_MAPPING['RIGHT_STICK_Z'], reverse=True, scale=Config.SCALE_RIGHT_STICK_Z),
-                3: ChannelMapping(3, axis_index=Config.AXIS_MAPPING['LEFT_STICK_X']),
-                4: ChannelMapping(4, axis_index=Config.AXIS_MAPPING['LEFT_STICK_Y'], reverse=True, scale=Config.SCALE_LEFT_STICK_Y),
+                **stick_axes,
                 6: ChannelMapping(6, button_index=Config.BUTTON_MAPPING['START'], 
                                 is_button=True, trigger_value=Config.H12_AXIS_RANGE_MAX),
                 7: ChannelMapping(7, button_index=Config.BUTTON_MAPPING['Y'], 
@@ -277,8 +353,16 @@ class H12ToJoyControllerNode:
         self.joy_msg.axes = [0.0] * 8
         self.joy_msg.buttons = [0] * 11
 
+        # G11 遥控器: 无 G12 语义的 A/B/C/D 按钮与 G/H 滚轮, 全部实体键走
+        # 状态机 g11_* 表; /joy 仅透传摇杆 axes, 不执行 G12 轮臂按钮/急停逻辑。
+        if _controller_type == "g11":
+            self._process_default_channels()
+            # G11 轮臂下肢桥: 屏幕选躯干组后锁存 GUIDE/M1(模拟 G/H 按住), 驱动
+            # C++ MobileManipulatorJoyCommandNode 的躯干控制; 一次性边沿也在此打。
+            if self.is_wheel:
+                self._apply_g11_leg_buttons()
         # G12轮臂模式特殊处理
-        if self.is_wheel:
+        elif self.is_wheel:
             self._process_wheel_channels()
         else:
             self._process_default_channels()
@@ -311,6 +395,107 @@ class H12ToJoyControllerNode:
                     self.joy_msg.axes[mapping.axis_index] = mapping.get_current_state(channel_value)
                 if index + 1 == 2 and self.is_stopping:
                     mapping.scale = Config.SCALE_RIGHT_STICK_Z
+
+    # ==================== G11 轮臂下肢桥(屏幕 → /joy → C++) ====================
+    # 常数: C++ use_g12_ 分支读取的 /joy 按钮 index
+    G12_BTN_GUIDE = 8   # 模拟 G 滚轮极值按住
+    G12_BTN_M1 = 9      # 模拟 H 滚轮极值按住
+    G12_BTN_M2 = 10     # G+H 2s 复位
+    G12_BTN_C = 2       # 切 TORSO_CONTROL 用的按键(X)
+    G12_BTN_B = 1       # 切 CMD_VEL_WORLD 用的按键(B)
+    G12_BTN_A = 3       # 切 CMD_VEL 用的按键(Y)
+
+    # 一次性边沿脉冲保持时长(秒): 与 G12 _button_pulse_until 同策略,
+    # 保证下游 C++ 边沿检测可靠收到(50Hz 限频下不丢帧)
+    G11_LEG_PULSE_DURATION = 0.2
+
+    # 组锁存看门狗超时(秒): 超过该时长未再收到下肢页(1178)则自动释放组锁存。
+    # 屏幕在下肢页会持续上报 CH12=1178, 正常操作不会触发该兜底。
+    G11_LEG_LATCH_TIMEOUT = 2.0
+
+    def note_g11_leg_page(self) -> None:
+        """下肢页(1178)每帧调用, 刷新组锁存看门狗时间戳。"""
+        self._g11_leg_page_at = time.time()
+
+    def release_g11_leg_latch(self, reason: str = "") -> None:
+        """释放轮臂下肢桥锁存(躯干组选择 + 未过期的边沿脉冲)。
+
+        离开下肢页 / 遥控器断连 / 下肢页失联超时时调用。否则 g11_torso_group
+        会一直被锁存按压 GUIDE/M1: 在 C++ 侧 current_mode_==TORSO_CONTROL 时,
+        摇杆将只产躯干速度而不下发底盘速度(gh_combo_active 需 GUIDE+M1 同按,
+        单锁存不会屏蔽), 底盘将无法驾驶。
+        """
+        if self.g11_torso_group is not None or self.g11_leg_pulse:
+            rospy.logwarn(
+                f"[G11Leg] 释放下肢锁存 group={self.g11_torso_group} "
+                f"pulse={sorted(self.g11_leg_pulse)} "
+                f"({reason or 'unspecified'})")
+        self.g11_torso_group = None
+        self.g11_leg_pulse.clear()
+
+    def _apply_g11_leg_buttons(self) -> None:
+        """把 G11 轮臂下肢桥状态写进 /joy buttons(在 publish 前调用)。
+
+        - g11_torso_group == "xz"(394): 锁存 GUIDE=1 → C++ 躯干模式读 vx/vz
+        - g11_torso_group == "yawpitch"(402): 锁存 M1=1 → C++ 读 vyaw/vpitch
+        - g11_leg_pulse 内的一次性边沿(切模式 GUIDE+A/B/C、复位 M2)也在此写
+        """
+        now = time.time()
+        # 0) 看门狗兜底: 下肢页失联/屏幕卡死 -> 自动释放锁存
+        if (self.g11_torso_group is not None
+                and now - self._g11_leg_page_at > self.G11_LEG_LATCH_TIMEOUT):
+            self.release_g11_leg_latch(
+                f"下肢页 {self.G11_LEG_LATCH_TIMEOUT:.1f}s 无上报")
+        # 1) 锁存修饰键(躯干组选择)
+        if self.g11_torso_group == "xz":
+            self.joy_msg.buttons[self.G12_BTN_GUIDE] = 1
+        elif self.g11_torso_group == "yawpitch":
+            self.joy_msg.buttons[self.G12_BTN_M1] = 1
+
+        # 2) 一次性边沿脉冲(切模式/复位): 时间未到就置 1
+        expired = []
+        for btn_idx, deadline in self.g11_leg_pulse.items():
+            if now < deadline:
+                self.joy_msg.buttons[btn_idx] = 1
+            else:
+                expired.append(btn_idx)
+        for btn_idx in expired:
+            del self.g11_leg_pulse[btn_idx]
+
+    def g11_leg_action(self, target: str) -> None:
+        """G11 屏幕下肢页码 → C++ MobileManipulatorJoyCommandNode 动作(经 /joy 按钮)。
+
+        Args:
+            target: 协议库下肢页的 target 值:
+                cmd_vel / cmd_vel_world / torso_control / torso_reset /
+                torso_group_xz(394) / torso_group_yawpitch(402)
+        """
+        # 进入非躯干模式: 清组锁存, C++ 只切模式
+        if target in ("cmd_vel", "cmd_vel_world", "torso_control"):
+            self.g11_torso_group = None
+            # 切模式需 GUIDE 保持 + A/B/C 边沿; 用脉冲保证 C++ 收到边沿
+            now = time.time()
+            if target == "cmd_vel":
+                self.g11_leg_pulse[self.G12_BTN_GUIDE] = now + self.G11_LEG_PULSE_DURATION
+                self.g11_leg_pulse[self.G12_BTN_A] = now + self.G11_LEG_PULSE_DURATION
+            elif target == "cmd_vel_world":
+                self.g11_leg_pulse[self.G12_BTN_GUIDE] = now + self.G11_LEG_PULSE_DURATION
+                self.g11_leg_pulse[self.G12_BTN_B] = now + self.G11_LEG_PULSE_DURATION
+            elif target == "torso_control":
+                self.g11_leg_pulse[self.G12_BTN_GUIDE] = now + self.G11_LEG_PULSE_DURATION
+                self.g11_leg_pulse[self.G12_BTN_C] = now + self.G11_LEG_PULSE_DURATION
+        elif target == "torso_reset":
+            # 复位: M2 边沿(G+H 2s 等价), C++ 内部复位躯干
+            now = time.time()
+            self.g11_leg_pulse[self.G12_BTN_M2] = now + self.G11_LEG_PULSE_DURATION
+        elif target == "torso_group_xz":
+            # 选组1 平移/升降: 锁存 GUIDE(模拟按住 G); 需已在躯干模式才有效
+            self.g11_torso_group = "xz"
+        elif target == "torso_group_yawpitch":
+            # 选组2 旋转/俯仰: 锁存 M1(模拟按住 H)
+            self.g11_torso_group = "yawpitch"
+        else:
+            rospy.logwarn(f"[G11Leg] unknown target: {target}")
 
     def _process_wheel_channels(self) -> None:
         """Wheel-arm mode (G12) special channel processing."""
@@ -540,6 +725,22 @@ class H12PROControllerNode:
         # 动作执行状态跟踪（用于屏蔽摇杆输入）
         self.robot_action_executing = False  # True表示有tact动作正在执行
 
+        # ===== G11 屏幕指令解析器(协议库来自 g11_controller_node 包) =====
+        self.screen_cmd_enabled = (_controller_type == "g11" and _G11_SCREEN_AVAILABLE)
+        self.screen_parser = g11proto.ScreenCmdParser() if (g11proto is not None) else None
+        self.screen_prev_page = -1
+        self._g11_parser_counters = None   # (noise, unknown, hidden) 上次上报值
+        # ================================================================
+
+        # ===== G11 末端(夹爪)跟随桥状态 =====
+        self._g11_claw_was_enabled = False     # CH14 claw 位上一帧使能沿
+        self._g11_claw_last_aux = None         # (left_pct, right_pct)
+        self._g11_ee_type = None               # /end_effector_type 缓存
+        self._g11_ee_checked_at = 0.0
+        # 默认 AUX 值越大开度越大; 实机旋钮方向相反时置 True (~claw_aux_reverse)
+        self._claw_aux_reverse = rospy.get_param("~claw_aux_reverse", False)
+        # ================================================================
+
         # 添加线程池
         self.executor = ThreadPoolExecutor(max_workers=2)
         self._state_transition_lock = threading.Lock()
@@ -611,6 +812,17 @@ class H12PROControllerNode:
         )
         # 初始化全局停止话题发布者（项目统一用Bool协议，True表示停止）
         self.stop_robot_pub = rospy.Publisher('/stop_robot', Bool, queue_size=1)
+
+        # ===== G11 末端(夹爪/灵巧手)跟随: AUX1/2 开度 → 对应命令话题 =====
+        # 按 /end_effector_type 分发: lejuclaw→/leju_claw_command, 灵巧手→/dexhand/command。
+        self.g11_claw_pub = None       # /leju_claw_command (二指夹爪)
+        self.g11_dexhand_pub = None    # /dexhand/command (灵巧手)
+        if _G11_LEJUCLAW_MSG_OK:
+            self.g11_claw_pub = rospy.Publisher(
+                '/leju_claw_command', _G11LejuClawCmdMsg, queue_size=1)
+        if _G11_DEXHAND_MSG_OK:
+            self.g11_dexhand_pub = rospy.Publisher(
+                '/dexhand/command', _G11DexhandCmdMsg, queue_size=1)
         self.update_h12_customize_config_sub = rospy.Subscriber(
             "/update_h12_customize_config",
             UpdateH12CustomizeConfig,
@@ -667,7 +879,11 @@ class H12PROControllerNode:
 
     def _load_configuration(self) -> Dict[str, Any]:
         """Load and validate configuration from JSON file.
-        
+
+        G11 遥控器使用独立的 g11_* 映射表(实体键 SW1/SW2/H/B1/B2 + AUX 旋钮,
+        通道布局/按键语义与 G12 完全不同); H12/G12 使用默认表, 零改动。
+        屏幕通道(CH12/CH13)不在此表内, 由 _handle_g11_screen 单独解析。
+
         Returns:
             Dict containing validated configuration.
             
@@ -686,7 +902,29 @@ class H12PROControllerNode:
                 state_transition_key = "multi_robot_state_transition_keycombination"
             else:
                 raise ConfigError(f"Invalid control scheme: {kuavo_control_scheme}")
-            
+
+            # G11 遥控器使用 g11_ 前缀的独立映射表 (实体按键布局不同, 见 json)
+            # 仅 multi scheme 提供 G11 表; 其他 scheme 回退默认表(安全: token
+            # 名不匹配则不会触发, 实体键无效但不误动作)。
+            if _controller_type == "g11":
+                prefix = "g11_"
+                if f"{prefix}{state_transition_key}" in config:
+                    state_transition_key = f"{prefix}{state_transition_key}"
+                else:
+                    rospy.logwarn(
+                        f"[Config] G11 遥控器无 {prefix}{state_transition_key} 映射表, "
+                        f"回退默认表(实体键将不触发状态转换, 屏幕指令不受影响)")
+            else:
+                prefix = ""
+
+            g11_key_name_key = f"{prefix}channel_to_key_name"
+            g11_key_state_key = f"{prefix}channel_to_key_state"
+            g11_emergency_key = f"{prefix}emergency_stop_key_combination"
+
+            channel_to_key_name = config.get(g11_key_name_key, config["channel_to_key_name"])
+            channel_to_key_state = config.get(g11_key_state_key, config["channel_to_key_state"])
+            emergency_stop = config.get(g11_emergency_key, config["emergency_stop_key_combination"])
+
             required_fields = [
                 "channel_to_key_name",
                 "channel_to_key_state",
@@ -702,10 +940,10 @@ class H12PROControllerNode:
             rospy.loginfo(f"Loading configuration for control scheme: {kuavo_control_scheme}")
             
             return {
-                "channel_to_key_name": config["channel_to_key_name"],
-                "channel_to_key_state": config["channel_to_key_state"],
+                "channel_to_key_name": channel_to_key_name,
+                "channel_to_key_state": channel_to_key_state,
                 "state_transitions": config[state_transition_key],
-                "emergency_stop_keys": set(config["emergency_stop_key_combination"])
+                "emergency_stop_keys": set(emergency_stop)
             }
             
         except Exception as e:
@@ -725,13 +963,389 @@ class H12PROControllerNode:
         """
         if msg.sbus_state == 0:
             rospy.logwarn_throttle(5.0, "No receive h12pro channel message. Please check device `/dev/usb_remote` exist or not and re-plug the h12pro signal receiver.")
+            # 断连保护: 驱动在 ≥100ms 无新帧时会把通道复位为默认值并置 sbus_state=0
+            # (drivers_sbus.c initializeSbusRxData)。此前这里直接 return, 复位后的中性
+            # 通道永远进不到 joy 节点, 而主循环仍以 100Hz 用"断连前最后一帧"重算并按
+            # 50Hz 发 /joy -> 若断连时正推着行走杆, 机器人会继续按旧速度行走。
+            # 这里补喂一帧中性通道(前 4 通道回中)并立即下发, 让"断连 = 摇杆回中"真正生效。
+            # 注: 其余通道取 MIN(按键松开/开关归位); G12 轮臂下 GUIDE/M1 会被判为极值,
+            #     而 C++ 侧 gh_combo_active 恰好会屏蔽切模式与躯干指令, 属安全态。
+            try:
+                neutral_msg = h12proRemoteControllerChannel()
+                neutral_msg.channels = tuple(Config.get_default_channels())
+                self.h12_to_joy_node.update_channels_msg(msg=neutral_msg)
+                self.h12_to_joy_node.process_channels(publish_immediately=True)
+                # 头部控制若处于开启态, 断连同样要停住(否则会按断连前的角速度继续转)
+                if self.head_control_mode:
+                    self._handle_head_control(neutral_msg)
+                # 下肢桥锁存同样要释放: 断连时通道虽已回中, 但 _apply_g11_leg_buttons
+                # 仍会按锁存强制写 GUIDE/M1=1, 使中性帧退化为"躯干极值按住",
+                # 断连保护失效。
+                self.h12_to_joy_node.release_g11_leg_latch("遥控器断连")
+            except Exception as e:
+                rospy.logerr(f"Error handling sbus disconnect neutral frame: {e}")
             return
 
         try:
             key_combination = self._process_channels(msg.channels)
             self._handle_state_transitions(key_combination, msg)
+            # G11 屏幕指令解析(仅 g11 生效, 协议库在 g11_controller_node 包)
+            self._handle_g11_screen(msg)
+            # G11 末端(夹爪)跟随: CH14 claw 位使能 + CH8/9 AUX 开度
+            self._update_g11_claw_follow(msg)
         except Exception as e:
             rospy.logerr(f"Error processing channel message: {e}")
+
+    # ==================== G11 屏幕指令(薄引用 g11_screen_protocol) ====================
+    def _report_g11_parser_counters(self) -> None:
+        """上报协议库诊断计数(越界丢帧/未知码/未启用码), 有变化时节流打印。
+
+        越界帧(如固件偶发写 2100 -> 收 1962)会被整帧丢弃: 只丢不报时现场
+        "偶尔不响应"没有任何线索; 842~882 这 6 个"已知但未启用"的码同样如此。
+        """
+        p = self.screen_parser
+        if p is None:
+            return
+        cur = (getattr(p, "noise_frames", 0),
+               getattr(p, "unknown_cmds", 0),
+               getattr(p, "hidden_cmds", 0))
+        if cur == getattr(self, "_g11_parser_counters", None):
+            return
+        old = getattr(self, "_g11_parser_counters", None) or (0, 0, 0)
+        self._g11_parser_counters = cur
+        rospy.logwarn_throttle(5.0,
+            f"[G11Screen] 协议计数: 越界丢帧={cur[0]}(+{cur[0] - old[0]}) "
+            f"未知码={cur[1]}(+{cur[1] - old[1]}) "
+            f"未启用码(842~882)={cur[2]}(+{cur[2] - old[2]})")
+
+    def _handle_g11_screen(self, msg: h12proRemoteControllerChannel) -> None:
+        """解析 G11 屏幕虚拟通道指令: CH12 页面码 + CH13 功能码脉冲。
+        协议表/上升沿/页面校验全部由 g11_controller_node 包的协议库实现,
+        本方法只负责: 取通道值喂解析器, 命中后映射到本进程的状态机/头部控制执行。
+        """
+        if not self.screen_cmd_enabled or self.screen_parser is None:
+            return
+        # 通道数保护: 屏幕虚拟通道在 CH12~CH14, 需要 16 通道。若 REMOTE_CONTROLLER_TYPE
+        # 只在一侧生效(publisher 发 12 / joy 节点按 16 解析), 下面取下标会 IndexError,
+        # 被外层 except 吞成每帧一条日志(50Hz 刷屏)且屏幕指令静默失效。
+        if len(msg.channels) < 16:
+            rospy.logwarn_throttle(5.0,
+                f"[G11Screen] 通道数不足({len(msg.channels)}), 需要 16 通道; 请确认 "
+                f"REMOTE_CONTROLLER_TYPE=g11 在 h12pro_channel_publisher 与 joy_node 上均已生效")
+            return
+        try:
+            ch12_page = int(msg.channels[11])   # CH12 页面码(接收值)
+            ch13_cmd = int(msg.channels[12])    # CH13 功能码(接收值)
+            ch14_val = int(msg.channels[13])    # CH14 扩展状态(接收值)
+
+            hit = self.screen_parser.update(ch12_page, ch13_cmd, ch14=ch14_val)
+            self._report_g11_parser_counters()
+            try:
+                set_g11_boot_force(self.screen_parser.boot_force)
+            except Exception as _e:
+                rospy.logwarn_throttle(5.0, f"[G11Screen] sync boot_force failed: {_e}")
+
+            # 下肢页(1178)逐帧刷新看门狗时间戳(供组锁存失联自动释放)
+            if ch12_page == g11proto.PAGE_LEG_RECV:
+                self.h12_to_joy_node.note_g11_leg_page()
+
+            # 页面变化日志(节流)
+            if self.screen_prev_page != ch12_page:
+                prev_page = self.screen_prev_page
+                page_name = g11proto.SCREEN_PAGE_RECV.get(
+                    ch12_page, f"UNKNOWN({ch12_page})")
+                rospy.loginfo(f"[G11Screen] CH12 page -> {ch12_page} ({page_name})")
+                self.screen_prev_page = ch12_page
+
+                # 离开下肢页 -> 释放轮臂下肢锁存(躯干组选择/未过期边沿脉冲)。
+                # 否则 g11_torso_group 常驻, C++ 躯干控制模式下 GUIDE/M1 一直被
+                # 按住, 摇杆只产躯干速度、底盘无法驾驶。
+                if (prev_page == g11proto.PAGE_LEG_RECV
+                        and ch12_page != g11proto.PAGE_LEG_RECV):
+                    self.h12_to_joy_node.release_g11_leg_latch(
+                        f"离开下肢页 {prev_page} -> {ch12_page}")
+
+                # 屏幕选型绑定: 进入人型/轮臂二级菜单 -> 记录; 回到首页/空闲 -> 清除
+                # (三级页 1162+ 不改变绑定; 未选择时首页直接实体H启动走旧推断逻辑)
+                try:
+                    if ch12_page == g11proto.PAGE_HUMANOID_RECV:
+                        set_g11_robot_kind("humanoid")
+                        rospy.loginfo("[G11Screen] 绑定机器人类型: humanoid (人型)")
+                    elif ch12_page == g11proto.PAGE_WHEEL_RECV:
+                        set_g11_robot_kind("wheel")
+                        rospy.loginfo("[G11Screen] 绑定机器人类型: wheel (轮臂)")
+                    elif ch12_page == g11proto.PAGE_IDLE_RECV:
+                        set_g11_robot_kind("")
+                        rospy.loginfo("[G11Screen] 回到首页, 已清除机器人类型绑定")
+                except Exception as e:
+                    rospy.logwarn(f"[G11Screen] update robot kind binding failed: {e}")
+
+            if hit is None:
+                return
+
+            if hit.get("rejected"):
+                rospy.logwarn(
+                    f"[G11Screen] {hit['func_name']} (CH13={hit['cmd']}) rejected: "
+                    f"page mismatch (CH12={hit['page']}, expect {hit['expect_page']})")
+                return
+
+            rospy.logwarn(
+                f"[G11Screen] TRIGGER: {hit['func_name']} (CH13={hit['cmd']}, CH12={hit['page']})")
+            self._g11_screen_exec(hit["func_name"], hit["type"], hit["target"])
+        except Exception as e:
+            rospy.logerr(f"[G11Screen] error: {e}")
+
+    def _g11_screen_exec(self, func_name: str, ftype: str, target) -> None:
+        """执行 G11 屏幕指令(与实体按键端共用状态机/头部控制/动作通道)。"""
+        cur_state = self.robot_state_machine.state
+
+        # 冷却期闸门: 与实体键路径 _handle_normal_transitions 口径一致 ——
+        # switch_controller / depth_loco 切换后有 SWITCH_CONTROLLER_COOLDOWN(3s) 冷却,
+        # 期间禁止再触发状态转换; 否则屏幕上连点两次「切换MPC/AMP」会真的切两次。
+        # 例外: wheel_leg 属轮臂下肢子系统(走 /joy 桥, 有自己的 C++ 侧冷却), 不经状态机。
+        if (kuavo_control_scheme == "multi" and ftype != "wheel_leg"
+                and is_switch_controller_in_cooldown()):
+            rospy.logwarn(
+                f"[G11Screen] {func_name} rejected: switch_controller in cooldown")
+            return
+
+        # --- 头部控制: 特殊处理(复刻实体按键 toggle_head_control) ---
+        if ftype == "head":
+            if cur_state == "stance":
+                self.head_control_mode = not self.head_control_mode
+                if not self.head_control_mode:
+                    self._publish_head_vel(0.0, 0.0)
+                    self._head_vel_latched = False
+                rospy.loginfo(
+                    f"[G11Screen/Head] mode {'enabled' if self.head_control_mode else 'disabled'}")
+            else:
+                if self.head_control_mode:
+                    self.head_control_mode = False
+                    self._publish_head_vel(0.0, 0.0)
+                    self._head_vel_latched = False
+                    rospy.logwarn("[G11Screen/Head] exited stance, head control disabled")
+            return
+
+        # --- 下肢/轮臂页: 本期人型不处理 ---
+        if ftype == "skip":
+            rospy.logwarn(f"[G11Screen] {func_name} not supported on this robot")
+            return
+
+        # --- 轮臂下肢控制: 屏幕页码 → C++ MobileManipulatorJoyCommandNode ---
+        # 经 /joy 伪造按钮驱动(不改 C++); 仅轮臂(is_wheel)有效, 人型忽略。
+        if ftype == "wheel_leg" and target:
+            if self.h12_to_joy_node.is_wheel:
+                self.h12_to_joy_node.g11_leg_action(target)
+                rospy.logwarn(f"[G11Leg] {func_name} -> {target}")
+            else:
+                rospy.logwarn(f"[G11Screen] {func_name} 仅轮臂支持, 人型忽略")
+            return
+
+        # --- 状态机 trigger / 自定义动作 / 硬件启动(boot) ---
+        if ftype in ("trigger", "action", "boot") and target:
+            trigger = target
+            if self._state_transition_executing:
+                rospy.logwarn(
+                    f"[G11Screen] trigger '{trigger}' rejected: another transition executing")
+                return
+            if (("arm_pose" in trigger or "customize_action" in trigger)
+                    and self.robot_action_executing):
+                rospy.logwarn(
+                    f"[G11Screen] trigger '{trigger}' rejected: arm action executing")
+                return
+
+            avail = self.robot_state_machine.machine.get_triggers(cur_state)
+            if trigger not in avail:
+                rospy.logwarn(
+                    f"[G11Screen] trigger '{trigger}' not available from '{cur_state}' "
+                    f"({func_name})")
+                return
+
+            kwargs = {
+                "trigger": trigger,
+                "source": cur_state,
+                "real_robot": self.real_robot,
+            }
+            if "arm_pose" in trigger:
+                kwargs["current_arm_joint_state"] = self.current_arm_joint_state
+            self._g11_state_transition_task(trigger, kwargs, func_name)
+
+    # ==================== G11 AUX 旋钮 → 末端执行器跟随桥(二指夹爪 / 灵巧手) ====================
+    # 遥控端语义:  CH14 claw 位 = 末端跟踪使能开关; CH8 AUX1 / CH9 AUX2 = 左/右开度。
+    # 机器人端语义: 读 /end_effector_type 自动区分末端, 遥控器不感知末端型号。
+    #   lejuclaw: position 0=闭合 / 100=全开(直通)。
+    #   qiangnao/linker_hand 灵巧手: /dexhand/command, 0=全开 / 100=全闭(方向相反),
+    #     6 指同比例联动(AUX1 左/AUX2 右), 暂不做单指/手势。
+    def _resolve_g11_ee_type(self) -> str:
+        """读取 /end_effector_type(1s 缓存); 硬件节点未启动时返回 ''。"""
+        now = time.time()
+        if self._g11_ee_type is not None and now - self._g11_ee_checked_at < 1.0:
+            return self._g11_ee_type
+        self._g11_ee_checked_at = now
+        try:
+            ee = str(rospy.get_param("/end_effector_type", "")).strip().lower()
+        except Exception:
+            ee = ""
+        self._g11_ee_type = ee
+        return ee
+
+    def _aux_raw_to_pct(self, raw: int) -> Optional[int]:
+        """AUX 通道接收值 [282,1722] → 开度百分比 [0,100] 整数; 越界返回 None。"""
+        if not (Config.H12_AXIS_RANGE_MIN <= raw <= Config.H12_AXIS_RANGE_MAX):
+            return None
+        pct = (raw - Config.H12_AXIS_RANGE_MIN) / \
+            (Config.H12_AXIS_RANGE_MAX - Config.H12_AXIS_RANGE_MIN) * 100.0
+        if self._claw_aux_reverse:
+            pct = 100.0 - pct
+        return int(round(max(0.0, min(100.0, pct))))
+
+    def _update_g11_claw_follow(self, msg: h12proRemoteControllerChannel) -> None:
+        """按 CH14 claw 位与 AUX 开度向夹爪发布目标位置(仅 g11 遥控器)。"""
+        if _controller_type != "g11" or self.screen_parser is None:
+            return
+        try:
+            enable = bool(self.screen_parser.claw_mode)
+        except Exception:
+            return
+
+        if not enable:
+            if self._g11_claw_was_enabled:
+                self._g11_claw_was_enabled = False
+                self._g11_claw_last_aux = None
+                print("========== 末端跟随 ==========", flush=True)
+                print("当前模式: 关闭(AUX 旋钮不再控制夹爪)", flush=True)
+                print("==================================", flush=True)
+            return
+
+        if not self._g11_claw_was_enabled:
+            self._g11_claw_was_enabled = True
+            ee = self._resolve_g11_ee_type()
+            print("========== 末端跟随 ==========", flush=True)
+            print(f"末端类型: {ee or '(待硬件上报)'}", flush=True)
+            print("当前模式: AUX1/2 旋钮控制末端执行器开度", flush=True)
+            print("==================================", flush=True)
+
+        ee = self._resolve_g11_ee_type()
+        # 末端类型未上报/为 none: 机器人(硬件节点)未启动, 静默等待, 不刷日志
+        if ee in ("", "none"):
+            return
+        # 灵巧手(qiangnao/linker_hand): AUX → /dexhand/command 全手指同比例
+        # (0=全开 / 100=全闭, 与二指夹爪方向相反)
+        if ee in ("qiangnao", "qiangnao_touch", "linker_hand"):
+            if not _G11_DEXHAND_MSG_OK or self.g11_dexhand_pub is None:
+                return
+            try:
+                left_raw = int(msg.channels[7])
+                right_raw = int(msg.channels[8])
+            except (IndexError, ValueError, TypeError):
+                return
+            left = self._aux_raw_to_pct(left_raw)
+            right = self._aux_raw_to_pct(right_raw)
+            if left is None or right is None:
+                return
+            # 任何开度变化立即发; 仅左右都完全未变化时跳过
+            now = time.time()
+            if self._g11_claw_last_aux is not None:
+                if (left == self._g11_claw_last_aux[0]
+                        and right == self._g11_claw_last_aux[1]):
+                    return
+            self._g11_claw_last_aux = (left, right)
+            try:
+                cmd = _G11DexhandCmdMsg()
+                cmd.control_mode = 0  # 位置控制
+                # 灵巧手 0=全开 / 100=全闭 → 旋钮开度取反; 双手各 6 指同比例
+                l_val = 100 - left
+                r_val = 100 - right
+                cmd.data = [l_val] * 6 + [r_val] * 6
+                self.g11_dexhand_pub.publish(cmd)
+            except Exception as e:
+                rospy.logerr_throttle(5.0, f"[G11Claw] dexhand publish failed: {e}")
+            return
+        if ee in ("revo2", "dexhand"):
+            rospy.logwarn_throttle(5.0,
+                f"[G11Claw] 当前末端 '{ee}' 暂未接入 AUX 同比例控制")
+            return
+        if ee != "lejuclaw":
+            rospy.logwarn_throttle(5.0, f"[G11Claw] 未知末端类型 '{ee}', 忽略")
+            return
+        if not _G11_LEJUCLAW_MSG_OK or self.g11_claw_pub is None:
+            return
+
+        # AUX1=左(CH8), AUX2=右(CH9)
+        try:
+            left_raw = int(msg.channels[7])
+            right_raw = int(msg.channels[8])
+        except (IndexError, ValueError, TypeError):
+            return
+        left = self._aux_raw_to_pct(left_raw)
+        right = self._aux_raw_to_pct(right_raw)
+        if left is None or right is None:
+            return
+
+        # 任何开度变化立即发; 仅左右都完全未变化时跳过
+        now = time.time()
+        if self._g11_claw_last_aux is not None:
+            if (left == self._g11_claw_last_aux[0]
+                    and right == self._g11_claw_last_aux[1]):
+                return
+        self._g11_claw_last_aux = (left, right)
+
+        try:
+            cmd = _G11LejuClawCmdMsg()
+            cmd.data.name = ["left_claw", "right_claw"]
+            # 百分比整数下发(0 闭合 ~ 100 全开)
+            cmd.data.position = [float(left), float(right)]
+            cmd.data.velocity = [50.0, 50.0]
+            cmd.data.effort = [1.0, 1.0]
+            self.g11_claw_pub.publish(cmd)
+        except Exception as e:
+            rospy.logerr_throttle(5.0, f"[G11Claw] publish failed: {e}")
+
+    def _g11_state_transition_task(self, trigger: str, kwargs: Dict[str, Any],
+                                   func_name: str = "") -> None:
+        """带锁线程池执行状态机 trigger + 状态持久化(不构造实体按键反馈消息)。"""
+        def task():
+            with self._state_transition_lock:
+                before = "<unknown>"
+                try:
+                    before = self.robot_state_machine.state
+                    self._state_transition_executing = True
+                    getattr(self.robot_state_machine, trigger)(**kwargs)
+                    after = self.robot_state_machine.state
+                    print("========== 模式切换 ==========", flush=True)
+                    print(f"调用功能: {func_name or trigger}", flush=True)
+                    print(f"上一个模式: {before}", flush=True)
+                    print(f"当前模式: {after}", flush=True)
+                    print("==================================", flush=True)
+                    if after != before:
+                        rospy.loginfo(
+                            f"[G11Screen] trigger '{trigger}': {before} -> {after}")
+                    else:
+                        rospy.logwarn(
+                            f"[G11Screen] trigger '{trigger}' executed but state unchanged "
+                            f"(still {after}); maybe blocked by conditions")
+                    try:
+                        rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
+                    except Exception:
+                        pass
+                    # 离开 stance 自动关闭头部控制并清 latch(与实体键路径口径一致;
+                    # 否则屏幕切到 walk 等状态后 head_control_mode 会残留为 True)
+                    if self.robot_state_machine.state != "stance" and self.head_control_mode:
+                        rospy.logwarn("[HeadControl] Current state is not 'stance'. Disabling head control mode.")
+                        self.head_control_mode = False
+                        self._publish_head_vel(0.0, 0.0)
+                        self._head_vel_latched = False
+                except Exception as e:
+                    print("========== 状态切换失败 ==========", flush=True)
+                    print(f"调用功能: {func_name or trigger}", flush=True)
+                    print(f"上一个模式: {before}", flush=True)
+                    print("当前模式: 执行失败", flush=True)
+                    print(f"失败原因: {e}", flush=True)
+                    print("==================================", flush=True)
+                    rospy.logerr(f"[G11Screen] state transition task error: {e}")
+                finally:
+                    self._state_transition_executing = False
+        self.executor.submit(task)
 
     def _process_channels(self, channels: Tuple[int, ...]) -> Set[str]:
         """Process channel data and return key combination.

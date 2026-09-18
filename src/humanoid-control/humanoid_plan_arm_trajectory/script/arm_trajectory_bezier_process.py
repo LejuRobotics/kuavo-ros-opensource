@@ -2250,6 +2250,31 @@ class ArmTrajectoryBezierDemo:
         finally:
             self._execute_request_lock.release()
 
+    # 4 代动作资源以 *_45.tact 形式提供(robotType=45), 非 4 代资源不带后缀
+    # (如 resources/kuavo5/action_files/抱拳.tact, robotType=52)。后缀只是 4 代
+    # 打包习惯, 不应写死进公共配置默认值。
+    ARM_POSE_VERSION_SUFFIX = "_45"
+
+    def _resolve_action_name(self, action_name: str) -> str:
+        """按 ROBOT_VERSION 选择 tact 名, 使同一份公共配置适配各代机型。
+
+        - 4 代(major==4): 使用原名(资源以 *_45.tact 形式提供, robotType=45)
+        - 非 4 代: 去掉 _45 后缀, 回落到通用名(robotType 与 5/6 代匹配)
+
+        这样 customize_config.json 保留 4 代原名即可: 45 代直接命中, 5/6 代
+        自动解析到同名通用资源。
+        """
+        name = action_name or ""
+        if (name.endswith(self.ARM_POSE_VERSION_SUFFIX)
+                and self.robot_version.major() != 4):
+            resolved = name[: -len(self.ARM_POSE_VERSION_SUFFIX)]
+            rospy.loginfo(
+                "Action name '%s' resolved to '%s' (robot %s, major=%d)",
+                action_name, resolved,
+                self.robot_version.version_name(), self.robot_version.major())
+            return resolved
+        return name
+
     def _handle_execute_action_locked(self, req):
         action_name = req.action_name
 
@@ -2269,10 +2294,14 @@ class ArmTrajectoryBezierDemo:
                 message=f"另一个动作正在执行中，请等待当前动作完成后再试"
             )
 
-        file_path = f"{self.action_files_path}/{action_name}.tact"
+        resolved_name = self._resolve_action_name(action_name)
+        file_path = f"{self.action_files_path}/{resolved_name}.tact"
         data = self.load_json_file(file_path)
         if not data:
-            return ExecuteArmActionResponse(success=False, message=f"Action file {action_name} not found")
+            detail = (action_name if resolved_name == action_name
+                      else f"{action_name} (resolved: {resolved_name})")
+            rospy.logwarn("Action file not found: %s", file_path)
+            return ExecuteArmActionResponse(success=False, message=f"Action file {detail} not found")
 
         if not self.check_nodelet_manager_alive():
             msg = "话题 /kuavo_arm_traj 的订阅者 nodelet_manager 节点无法通信或不存在。请检查 nodelet_manager 节点是否正常运行。"

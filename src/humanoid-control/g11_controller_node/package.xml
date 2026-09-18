@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>g11_controller_node</name>
+  <version>0.1.0</version>
+  <description>G11 remote controller screen command protocol adaptation layer</description>
+
+  <maintainer email="wangyangxu@lejurobot.com">Yangxu Wang</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <!-- 注意: 本包是纯协议库(只依赖 rospy), 被 h12pro_controller_node 在运行时 import。
+       依赖方向是 h12pro_controller_node -> g11_controller_node, 不要在此反向声明
+       exec_depend h12pro_controller_node(会误导 catkin build 顺序与打包依赖图)。 -->
+</package>

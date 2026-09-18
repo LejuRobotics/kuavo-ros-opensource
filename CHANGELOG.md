@@ -114,6 +114,7 @@
 - Xsens 动作捕捉遥操作接入 VMP-online：集成 Xsens UDP/BVH 实时链路与缓冲池、轻量 Pico 手柄节点，支持手柄暂停/恢复遥操
 - 新增多判别器 MoRE 控制器，适配 53/54/55 机型，可根据输入切换 gait，[设计文档](./docs/9功能开发文档/More控制器/MoRE控制器设计文档.md)
 - 新增 G12 航空箱坐/站功能：按键映射与状态回调实现，座椅起身流程重构支持臂绕扶手
+- SG100/heiman 灵巧手手势库改为折线图格式：支持位置/力矩前馈/kp/kd/输出限位/模式 6 条曲线自定义与增量 IK 联动，[文档链接](./docs_internal/heiman灵巧手/SG100手势管理Service说明.md)
 
 ## 修复问题
 - 修复轮臂增量握持切换问题（重做并增强上一版修复）：松开侧扳机瞬间继承上一帧约束列表值而非硬切 FK、freeze 重建原点统一为 chestPosForFK、松手下降沿把高度冻结基准更新为松手瞬间高度、按下侧扳机不硬切 FK；并修复握持切换 chest frame 过渡、跨手臂模式切换状态未复位、位姿漂移与手部方向切换尖峰
@@ -301,11 +302,22 @@
 - 修复 move_base/base_cmd_vel 不可控时底盘失控的问题，MPC 与主程序改为速度控制且期望速度归零
 - 修复 5W 单臂 X+A 无臂控的问题：注入 /humanoid_wheel/ Receiver service 名（issue #3632）
 - 修复 s52 VR 增量遥操由于 IK 缺少夹爪虚拟关节导致的问题
+- 修复 s200049 drake URDF 手臂末端 Y 方向偏移问题
+- 修复 CAN 设备配置文件名拼写不一致问题：正确文件名优先读取并保留旧文件名兼容回退，部署脚本统一写入正确文件名（highlydynamic/qa#962）
+- 微调 MPC 自碰撞极限接触距离（0.02→0.01）、重新校准 5W 肩部收紧参数（此前肩部数据未对齐）并新增手腕碰撞约束
+- 优化 bag 离线延迟诊断脚本算法为最小二乘计算，补全报告方差、最值等信息
+- 修复胸部增量关闭且锁定下肢 1、2 号电机时 lock_knee_leg 与实时滤波抢值的问题，改为同步胸部冻结的 q0/q1
+- 修复轮臂增量式 reset_joint_to_default:=false 时手臂初始化模式错误的问题
+- 修复单爪指令未沿用另一爪上一次目标、被重置为默认位置的问题
+- WebRTC 视频回传新增断线重连机制（issue #961），并补充说明该机制仅适用于 App 重启、机器人进程存活的场景
+- 限制 TUI 控制下肢插值运动速度，按速度/加速度上限规划轨迹
+- 修复轮臂增量式侧扳机切增量时若无已发布下肢命令直接 abort 的问题，改为用实测下肢拼接已发布手臂生成快照
 
 ## 其他改进
 - h12pro monitor 常驻 Python 化，秒级探活开销降 27 倍；各话题发布限频对齐 50Hz，消除命令堆积延迟
 - docker 添加 --ipc=host 支持增量 VR 共享内存
 - kuavo_pico_gmr 增加 exec_depend 依赖，规避 launch 启动顺序问题
+- humanoid_controllers 补充 image_processing 的 exec_depend 依赖，修复 launch 找不到包的问题
 - hardware_node 纳入 humanoid_controllers 统一编译；check_tool 脚本增加 root 权限检查，check_ntp_sync 新增 SSH host key 清理步骤避免连接失败
 - 更新 v62/v63 腿部标定限位配置
 - 适配 arm64 平台（Orin）编译与运行：WBC 绑定隔离核心、arm64 版 EC/灵巧手 SDK、Drake 兼容层、MuJoCo arm64 二进制等

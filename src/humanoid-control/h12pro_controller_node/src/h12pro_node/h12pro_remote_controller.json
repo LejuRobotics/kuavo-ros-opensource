@@ -281,6 +281,65 @@
     }
   },
   "emergency_stop_key_combination": ["C_LONG_PRESS", "D_LONG_PRESS"],
+
+  "g11_channel_to_key_name": {
+    "1": {"name": "right_joystick_horizontal", "type": "joystick"},
+    "2": {"name": "right_joystick_vertical", "type": "joystick"},
+    "3": {"name": "left_joystick_vertical", "type": "joystick"},
+    "4": {"name": "left_joystick_horizontal", "type": "joystick"},
+    "5": {"name": "SW1", "type": "switch"},
+    "6": {"name": "SW2", "type": "switch"},
+    "7": {"name": "H", "type": "button"},
+    "8": {"name": "AUX1", "type": "dial"},
+    "9": {"name": "AUX2", "type": "dial"},
+    "10": {"name": "B1", "type": "button"},
+    "11": {"name": "B2", "type": "button"}
+  },
+  "g11_channel_to_key_state": {
+    "SW1": {"282": "SW1_LEFT", "1002": "SW1_MIDDLE", "1722": "SW1_RIGHT"},
+    "SW2": {"282": "SW2_LEFT", "1002": "SW2_MIDDLE", "1722": "SW2_RIGHT"},
+    "H": {"282": "H_RELEASE", "1722": "H_PRESS"},
+    "B1": {"282": "B1_RELEASE", "1722": "B1_PRESS"},
+    "B2": {"282": "B2_RELEASE", "1722": "B2_PRESS"}
+  },
+  "g11_multi_robot_state_transition_keycombination": {
+    "initial": {
+      "initial_pre": ["SW1_LEFT", "SW2_RIGHT", "H_PRESS"]
+    },
+    "calibrate": {
+      "cali_to_ready_stance": ["SW1_LEFT", "SW2_RIGHT", "H_PRESS"],
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "ready_stance": {
+      "ready_stance": ["SW1_LEFT", "SW2_RIGHT", "H_PRESS"],
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "stance": {
+      "walk": ["SW1_MIDDLE", "SW2_MIDDLE", "B1_PRESS"],
+      "switch_controller": ["SW1_MIDDLE", "SW2_MIDDLE", "H_PRESS"],
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "walk": {
+      "stance": ["SW1_MIDDLE", "SW2_MIDDLE", "B2_PRESS"],
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "trot": {
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "vr_remote_control": {
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "vmp_controller": {
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "dance_controller": {
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    },
+    "sit": {
+      "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
+    }
+  },
+  "g11_emergency_stop_key_combination": ["B1_LONG_PRESS", "B2_LONG_PRESS"],
   "joystick_range":{
     "min":282,
     "max":1722

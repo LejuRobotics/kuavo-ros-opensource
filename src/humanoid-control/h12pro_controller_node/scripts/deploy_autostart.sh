@@ -37,6 +37,26 @@ else
     echo "服务 ocs2_h12pro_monitor.service 未开启。"
 fi
 
+# 询问遥控器类型 (写入 REMOTE_CONTROLLER_TYPE, 供节点运行时区分 G11 / H12)
+while true; do
+    echo "请问遥控器类型："
+    echo "1. G11"
+    echo "2. H12/G12"
+    echo -n "请选择 (默认为 H12/G12，直接回车选择默认): "
+    read -r remote_type_input
+    if [ -z "$remote_type_input" ] || [ "$remote_type_input" = "2" ]; then
+        REMOTE_CONTROLLER_TYPE=h12
+        echo "已选择: H12/G12 遥控器"
+        break
+    elif [ "$remote_type_input" = "1" ]; then
+        REMOTE_CONTROLLER_TYPE=g11
+        echo "已选择: G11 遥控器"
+        break
+    else
+        echo "输入无效，请输入 1 (G11) 或 2 (H12/G12)，直接回车默认 H12/G12。"
+    fi
+done
+
 while true; do
     echo "请选择控制方案 (1: ocs2, 2: rl, 3: multi)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
     read -r user_input
@@ -56,6 +76,17 @@ while true; do
         echo "输入无效，请输入1、2或3。"
     fi
 done
+
+# G11 遥控器目前只提供了 g11_multi_* 映射表: ocs2/rl 方案下按键表(产生
+# SW1_LEFT/H_PRESS/B1_PRESS)与状态转换表(只认 E_LEFT/F_RIGHT/C_PRESS)永不相交,
+# 现场表现为"实体键全部没反应、屏幕能用", 易被误判成硬件故障。此处直接拦截。
+if [ "$REMOTE_CONTROLLER_TYPE" = "g11" ] && [ "$KUAVO_CONTROL_SCHEME" != "multi" ]; then
+    echo ""
+    echo "[错误] G11 遥控器目前仅支持 multi 控制方案。"
+    echo "       已选控制方案: $KUAVO_CONTROL_SCHEME —— 该方案下 G11 实体按键将全部失效。"
+    echo "       请重新运行本脚本, 遥控器类型选 1 (G11), 控制方案选 3 (multi)。"
+    exit 1
+fi
 
 KUAVO_RL_WS_PATH="/home/lab/kuavo-RL/kuavo-robot-deploy" # 在没合并到 kuavo-ros-control 的之前，先固定路径或手动修改
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -159,6 +190,21 @@ if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
 fi
 catkin build humanoid_controllers
 catkin build h12pro_controller_node
+# G11 遥控器需编译 g11_controller_node：其 g11_screen_protocol 协议库由
+# ocs2_h12pro_node.py 运行时 import（屏幕端指令），不编译则屏幕端指令降级禁用。
+if [ "$REMOTE_CONTROLLER_TYPE" = "g11" ]; then
+    echo "已选择 G11 遥控器, 编译 g11_controller_node (屏幕指令协议层)..."
+    catkin build g11_controller_node
+    G11_SCREEN_PROTOCOL_SRC="$KUAVO_ROS_CONTROL_WS_PATH/src/humanoid-control/g11_controller_node/scripts/g11_screen_protocol.py"
+    G11_DIST_DIR="$KUAVO_ROS_CONTROL_WS_PATH/devel/lib/python3/dist-packages"
+    if [ -f "$G11_SCREEN_PROTOCOL_SRC" ]; then
+        mkdir -p "$G11_DIST_DIR"
+        ln -sf "$G11_SCREEN_PROTOCOL_SRC" "$G11_DIST_DIR/g11_screen_protocol.py"
+        echo "g11_screen_protocol 已挂载到 devel python 路径: $G11_DIST_DIR/g11_screen_protocol.py"
+    else
+        echo "警告: 未找到 $G11_SCREEN_PROTOCOL_SRC, 屏幕端指令将不可用"
+    fi
+fi
 catkin build humanoid_plan_arm_trajectory
 catkin build kuavo_ros_interfaces
 
@@ -288,6 +334,14 @@ else
 fi
 sed -i "s|^ExecStart=.*|ExecStart=$MONITOR_OCS2_H12PRO|" $OCS2_H12PRO_MONITOR_SERVICE
 
+# 写入遥控器类型到 systemd 服务 (REMOTE_CONTROLLER_TYPE 环境变量)
+# 供 monitor -> start 脚本 -> roslaunch -> ocs2_h12pro_node 链路读取
+if grep -q "^Environment=REMOTE_CONTROLLER_TYPE=" $OCS2_H12PRO_MONITOR_SERVICE; then
+    sed -i "s|^Environment=REMOTE_CONTROLLER_TYPE=.*|Environment=REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE|" $OCS2_H12PRO_MONITOR_SERVICE
+else
+    sed -i "/^Environment=STAIR_DETECTION_CAMERA=.*/a Environment=REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE" $OCS2_H12PRO_MONITOR_SERVICE
+fi
+
 sudo cp $OCS2_H12PRO_MONITOR_SERVICE /etc/systemd/system/
 sudo systemctl daemon-reload
 
@@ -298,6 +352,14 @@ else
     echo "export KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME" >> ~/.bashrc
 fi
 echo "已将 KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME 写入 ~/.bashrc"
+
+# 同步写入 bashrc，确保终端 roslaunch 也能读取 REMOTE_CONTROLLER_TYPE
+if grep -q "^export REMOTE_CONTROLLER_TYPE=" ~/.bashrc; then
+    sed -i "s|^export REMOTE_CONTROLLER_TYPE=.*|export REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE|" ~/.bashrc
+else
+    echo "export REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE" >> ~/.bashrc
+fi
+echo "已将 REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE 写入 ~/.bashrc"
 
 sudo apt-get install tmux
 

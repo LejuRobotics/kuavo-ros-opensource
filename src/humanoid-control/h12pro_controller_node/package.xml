@@ -62,6 +62,7 @@
   <exec_depend>roscpp</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>kuavo_msgs</exec_depend>
+  <exec_depend>g11_controller_node</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
