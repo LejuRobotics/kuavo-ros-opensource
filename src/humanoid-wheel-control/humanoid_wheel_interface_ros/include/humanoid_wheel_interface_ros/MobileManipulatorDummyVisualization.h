@@ -83,11 +83,6 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   ros::Publisher stateOptimizedPublisher_;
   ros::Publisher stateOptimizedPosePublisher_;
 
-  // 每个末端执行器的完整位姿轨迹（PoseArray，用于 rosbag 记录）
-  std::vector<ros::Publisher> optimizedEePosePublishers_;
-  // 每个末端执行器预测轨迹最终点的 TF frame 名称
-  std::vector<std::string> eePredictedFrameNames_;
-
   std::unique_ptr<GeometryInterfaceVisualization> geometryVisualization_;
 
   // 头部关节相关
@@ -96,8 +91,7 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   bool updateHeadJointPositions_ = false;
 
   // 夹爪相关
-  bool updateClawJointPositions_ = true;
-  bool useArticulatedClawKinematics_ = false;
+  bool updateClawJointPositions_ = false;
   std::vector<double> claw_joint_positions_ = {0.0, 0.0};
   ros::Subscriber clawCmdSubscriber_;
   ros::Publisher lejuClawStatePub_;

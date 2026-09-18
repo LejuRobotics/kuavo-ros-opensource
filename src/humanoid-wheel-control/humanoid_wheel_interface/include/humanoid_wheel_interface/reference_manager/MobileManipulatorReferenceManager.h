@@ -2,11 +2,9 @@
 
 #include <ros/ros.h>
 #include <std_msgs/Float64MultiArray.h>
-#include <std_msgs/Float32MultiArray.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float32.h>
 #include <atomic>
-#include <algorithm>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
 #include <std_msgs/Int8MultiArray.h>
@@ -21,7 +19,6 @@
 #include <kuavo_msgs/accessIkSolve.h>
 #include <kuavo_msgs/eePoseReachError.h>
 #include <kuavo_msgs/sensorsData.h>
-#include <leju_mobile_base_msgs/BaseCmdVelStatus.h>
 #include <std_srvs/SetBool.h>
 #include <std_srvs/Trigger.h>
 
@@ -152,49 +149,6 @@ public:
   void setEnableTorsoPoseTargetTrajectories(bool flag) { enableTorsoPoseFlag_ = flag; }
   const bool getEnableBaseTrack() const { return enableBaseTrackFlag_; }
   void setEnableBaseTrack(bool flag) { enableBaseTrackFlag_ = flag; }
-  // 肩部关节的紧约束
-  const bool getEnableShoulderTight() const { return enableShoulderTightFlag_[0] || enableShoulderTightFlag_[1]; }
-  const bool getEnableShoulderTightForArm(int armIdx) const { return enableShoulderTightFlag_[armIdx]; }
-  void setEnableShoulderTight(bool flag,int armIdx) { enableShoulderTightFlag_[armIdx] = flag; }
-  void setEnableShoulderTighteningForArm(int armIdx, bool flag) { enableShoulderTightFlag_[armIdx] = flag; }
-  // 肩部收紧松弛系数 alpha (1=收紧/锁肩, 0=释放), 供 shoulderTightenCost 自适应权重使用
-  const scalar_t getShoulderTightAlpha(int armIdx) const { return shoulderTightAlpha_[armIdx]; }
-  void setShoulderTightAlpha(int armIdx, scalar_t alpha) { shoulderTightAlpha_[armIdx] = alpha; }
-  // α 变化限速 (rate limiter): 每周期最多变化 step, 得到统一爬升/回落速度 (线性斜坡, 非指数)
-  // 上升(锁肩)用 step_up, 下降(释放)用 step_down
-  void updateShoulderTightAlpha(int armIdx, scalar_t alphaRaw) {
-    const scalar_t raw = std::max(0.0, std::min(1.0, alphaRaw));
-    scalar_t& alpha = shoulderTightAlpha_[armIdx];
-    const scalar_t delta = raw - alpha;
-    if (delta >= 0.0) {
-      alpha += std::min(delta, shoulderTightAlphaStepUp_);
-    } else {
-      alpha += std::max(delta, -shoulderTightAlphaStepDown_);
-    }
-  }
-  const scalar_t getShoulderTightAlphaStepUp() const { return shoulderTightAlphaStepUp_; }
-  const scalar_t getShoulderTightAlphaStepDown() const { return shoulderTightAlphaStepDown_; }
-  void setShoulderTightAlphaStepUp(scalar_t step) { shoulderTightAlphaStepUp_ = step; }
-  void setShoulderTightAlphaStepDown(scalar_t step) { shoulderTightAlphaStepDown_ = step; }
-
-  // 方案B: H_task 改用参考末端速度 (消除实测位姿反馈), 速度归一化尺度 v_max [m/s]
-  const scalar_t getShoulderVMax() const { return shoulderVMax_; }
-  void setShoulderVMax(scalar_t v) { shoulderVMax_ = v; }
-  // 方案B: α 临界阻尼二阶低通的自然频率 (rad/s), 去掉斜坡拐点使 α 轨迹 C1 连续
-  const scalar_t getShoulderAlphaW() const { return shoulderAlphaW_; }
-  void setShoulderAlphaW(scalar_t w) { shoulderAlphaW_ = w; }
-  // 方案D: 锚定冻结/跟踪阈值 —— α≥此值冻结参考(收紧), α<此值跟踪当前肩部姿态(释放)
-  const scalar_t getShoulderRefAnchorTh() const { return shoulderRefAnchorTh_; }
-  void setShoulderRefAnchorTh(scalar_t th) { shoulderRefAnchorTh_ = th; }
-  // 方案D: 配置每臂肩关节的状态下标 (由 getShoulderTightenCost 写入), 供锚定参考使用
-  void setShoulderStateIndicesForArm(int armIdx, const std::vector<size_t>& indices) { shoulderStateIndicesForArm_[armIdx] = indices; }
-  // 方案D: 当前锚定参考 (与 stateDim 等长, 仅肩部条目有效), 供 shoulderTightenCost 读取
-  const vector_t& getShoulderRefAnchorState() const { return shoulderRefAnchorState_; }
-  // 方案D: 该臂锚定是否已初始化 (未初始化时 cost 应回退到参考轨迹, 避免锚定为零猛拉)
-  bool getShoulderRefAnchorInit(int armIdx) const { return shoulderRefAnchorInit_[armIdx]; }
-
-  // 每周期计算肩部收紧 α: H_joint(肘腕限位余量) × H_task(参考末端速度) → σ 合成 → 限速+二阶低通, 返回滤波后 α
-  scalar_t computeShoulderTightAlpha(int armIdx, scalar_t initTime, const vector_t& initState);
 
   // 末端跟踪优先级调整的相关函数
   const bool getIsFocusEeStatus() const { return isFocusEe_; }
@@ -225,20 +179,13 @@ protected:
   virtual void modifyReferences(scalar_t initTime, scalar_t finalTime, const vector_t& initState, TargetTrajectories& targetTrajectories,
                                 ModeSchedule& modeSchedule) override;
 
-  // 3791 reset-to-state 辅助：command storage / 全部 Ruckig 锚定到指定状态（软暂停恢复干净重启）。
-  // 状态与 FK 缓存全部由 resetAllMpcToState 以局部变量传入，不再经成员载体。
-  void overwriteCommandStorageWithState(const vector_t& state, const vector_t& torsoPose6D, const vector_t& eeState);
-  // EE ruckig 锚点仅为占位：恢复后首条 EE 指令被 forceEeReanchorOnNextCmd_ 强制重锚定，不消费此值
-  void resetAllRuckigToState(scalar_t initTime, const vector_t& state, const vector_t& torsoPose6D,
-                             const vector_t& eeState);
+  // enable 控制辅助函数：disable 瞬间冻结所有存储和规划器到快照状态
+  void overwriteCommandStorageWithFrozenState();
+  void resetAllRuckigToFrozenState(scalar_t initTime);
+  void setFlatTargetTrajectoriesFromFrozenState(scalar_t initTime, scalar_t finalTime);
 
-  // 3791: 软暂停恢复时整体重置 RM —— storage + 全部 Ruckig 锚定到指定状态（冻结姿态）。
-  // 躯干/ee 位姿用 FK 现场计算，锚当前而非初始位。由 /mobile_manipulator_reset_to_state
-  // 话题（pending 标志）触发，在 solver 重启后 modifyReferences 首拍消费。
-  void resetAllMpcToState(scalar_t initTime, const vector_t& state);
-
-  /// 锚定状态中关节保持给定值，底盘跟随当前实际位姿
-  vector_t jointsWithLiveBase(const vector_t& state) const;
+  /// 冻结状态中关节保持 frozen，底盘跟随当前实际位姿
+  vector_t frozenJointsWithLiveBase() const;
 
   // 通用 helper：将 pose 型 Ruckig 规划器重置到指定状态（current=target=state，vel/acc=0）
   template<typename PlannerPtr>
@@ -266,7 +213,7 @@ protected:
   void calcRuckigTrajWithTorsoPose(double initTime, const vector_t &targetTorsoPose, double desiredTime = 0.0);
   void generateTorsoPoseTargetWithRuckig(double initTime, double finalTime, double dt);
   void resetTorsoPoseRuckig(double initTime, const vector_t& initState, bool rePlanning);
-  void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState, bool isServiceReset);
+  void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState);
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
   void applyTorsoVelDeltaCommands(scalar_t initTime);
@@ -281,9 +228,8 @@ protected:
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
-  void updateShoulderRefAnchor(int armIdx, const vector_t& initState, scalar_t alphaPrev);
-  void resetAllMpcTraj(scalar_t initTime, const vector_t& initState, bool isServiceReset);
-  void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState, bool isServiceReset);
+  void resetAllMpcTraj(scalar_t initTime, const vector_t& initState);
+  void resetAllMpcTrajAndTarget(scalar_t initTime, const vector_t& initState);
   void updateTimedSchedulerCurrentState(scalar_t initTime, const vector_t& initState);
   void updateTimedSchedulerTargetTraj(void);
   void updateTimedOfflineTraj(scalar_t initTime, scalar_t finalTime);
@@ -381,9 +327,6 @@ private:
   double resetTorsoInitTime_{0.0};
   bool isResetTorso_{false};
   bool isResetTorsoRePlanning_{false};
-  // #3973: service 调用起到复位窗口结束期间丢弃躯干开环指令，避免 VR 双击后紧跟的
-  // /cmd_lb_torso_pose 覆盖 cmdTorsoPose_（原先靠开环快照回避，见 #3991）
-  std::atomic<bool> torsoResetWindowActive_{false};
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 
@@ -398,10 +341,6 @@ private:
 
   // 声明多线程spinner
   ros::AsyncSpinner asyncSpinner_;
-
-  // 底盘运动模式相关
-  bool baseCmdVelStatus_{true};
-  ros::Subscriber base_cmd_vel_status_sub_;
 
   // 判断末端位姿运动后的误差
   ros::Subscriber sensors_data_sub_;
@@ -458,7 +397,6 @@ private:
   ros::Publisher targetTorsoPoseReachTimePub_;
   bool torsoModeFlag_{true}; // true: 笛卡尔控制模式, false: 关节控制模式
   ros::ServiceServer getLbTorsoInitialPoseServiceServer_;
-  ros::Publisher shoulderTightAlphaPub_;   // 发布肩部收紧 α [左臂, 右臂] 便于 rqt 监控
 
   // 躯干速度 / 相对位移指令（开环最终目标只在 cmdTorsoPose_）
   // Twist 布局与 /cmd_lb_torso_pose 一致: linear.x/z, angular.z=yaw, angular.y=pitch
@@ -484,11 +422,6 @@ private:
   vector_t cmd_arm_zyx_[2]; // [0]: 左臂, [1]: 右臂, 包含位置和欧拉角
   std::mutex armPose_mtx_[2]; // [0]: 左臂, [1]: 右臂
   bool isCmdDualArmPoseUpdated_[2]{false, false}; // [0]: 左臂, [1]: 右臂
-  // 3791: resetAllMpcToState（软暂停恢复）/ resetAllMpcTrajAndTarget（home 归位）后置位，
-  // 强制下一条 EE 指令走 isChange=true 重锚定（resetDualArmRuckig 用活状态+指令自身
-  // 坐标系），不消费可能滞留的 EE ruckig 旧状态。免疫 preMode static 滞留、reset 时序
-  // 异常、归位窗口内手臂被其他路径挪走导致的锚点帧混淆/位姿拉回（3791 甩飞、home+b 跳变）
-  bool forceEeReanchorOnNextCmd_[2]{false, false}; // [0]: 左臂, [1]: 右臂
   double cmdDualArmPoseDesiredTime_[2]{0.0, 0.0}; // [0]: 左臂, [1]: 右臂
   ros::Subscriber armEndEffectorSubscriber_;
   ros::Publisher armEndEffectorReachTimePub_[2]; // [0]: 左臂, [1]: 右臂
@@ -544,17 +477,16 @@ private:
   std::atomic<bool> use_vel_control_{true};
   ros::Subscriber vel_control_state_sub_;
 
-  // enable 状态（fail-safe：默认 false，未收到信号时不可控）。仅用于指令入口拒绝
-  // （disable 期间丢弃一切动作指令）；冻结输出语义由 controller 承担。
+  // enable 状态（fail-safe：默认 false，未收到信号时不可控）
   std::atomic<bool> enable_control_{false};
+  std::atomic<bool> prev_enable_control_{false};
+  vector_t frozen_state_;
+  bool frozen_state_valid_{false};
+  vector_t frozen_torso_pose6D_;        // frozen_state_ 对应的躯干位姿缓存
+  vector_t frozen_ee_state_;            // frozen_state_ 对应的双臂末端位姿缓存
   ros::Subscriber enable_control_state_sub_;
-
-  // 3791: 软暂停恢复的 reset-to-state 机制（话题写入 pending，modifyReferences 消费）
-  ros::Subscriber resetToStateSub_;
-  std::atomic<bool> is_reset_to_state_pending_{false};
-  std::mutex reset_to_state_mtx_;
-  vector_t reset_state_;
   bool isEnableControl() const { return enable_control_.load(std::memory_order_acquire); }
+  bool isPrevEnableControl() const { return prev_enable_control_.load(std::memory_order_acquire); }
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 
@@ -574,30 +506,6 @@ private:
   bool enableLegJointTrackFlag_{false};
   bool enableTorsoPoseFlag_{false};
   bool enableBaseTrackFlag_{true};
-  bool enableShoulderTightFlag_[2]{false, false};                 // 肩部关节的紧约束
-  ocs2::vector_t shoulderTightAlpha_{ocs2::vector_t::Constant(2, 1.0)};  // 肩部收紧松弛系数 [左臂, 右臂]
-  scalar_t shoulderTightAlphaStepUp_{0.02};                   // α 上升(锁肩)每周期最大变化量: 统一爬升速度
-  scalar_t shoulderTightAlphaStepDown_{0.05};                 // α 下降(释放)每周期最大变化量: 统一回落速度
-  // 肩部收紧 α 调度参数 (对应 mpc_cost.md 自动松弛)
-  scalar_t shoulderHThOn_{0.20};                                 // H_joint 锁肩阈值 (滞回): 余量高于此才锁肩
-  scalar_t shoulderHThOff_{0.15};                                // H_joint 解锁阈值 (滞回): 余量低于此才解锁
-  scalar_t shoulderTThOn_{0.25};                                 // H_task 锁肩阈值 (滞回): 位移低于此才锁肩
-  scalar_t shoulderTThOff_{0.30};                                // H_task 解锁阈值 (滞回): 位移高于此才解锁
-  scalar_t shoulderK1_{30.0};                                   // H_joint sigmoid 斜率
-  scalar_t shoulderK2_{30.0};                                   // H_task sigmoid 斜率
-  scalar_t shoulderDMax_{0.1};                                  // 典型大幅末端位移 [m] (旧 H_task 用, 已由 v_max 替代)
-  scalar_t shoulderVMax_{0.2};                                  // 方案B: 参考末端速度归一化尺度 [m/s], H_task=v/v_max
-  scalar_t shoulderAlphaW_{6.0};                                // 方案B: α 二阶低通自然频率 [rad/s] (临界阻尼)
-  scalar_t shoulderAlphaFilterY_[2]{1.0, 1.0};                  // 方案B: α 二阶低通状态 [左臂, 右臂]
-  scalar_t shoulderAlphaFilterYd_[2]{0.0, 0.0};                 // 方案B: α 二阶低通导数状态 [左臂, 右臂]
-  bool shoulderAlphaFilterInit_[2]{false, false};               // 方案B: α 滤波是否已初始化
-  std::vector<std::vector<size_t>> shoulderRelaxStateIndices_;  // 每臂肘腕关节的状态下标 [左臂, 右臂]
-
-  // 方案D: 肩部收紧参考锚定 —— 释放时跟踪当前肩部姿态, 收紧(α≥阈值)时冻结, 供成本作肩部参考
-  std::vector<std::vector<size_t>> shoulderStateIndicesForArm_{{}, {}};  // 每臂肩关节的状态下标 [左臂, 右臂]
-  vector_t shoulderRefAnchorState_;                            // 与 stateDim 等长的锚定参考 (仅肩部条目有效), 构造时初始化
-  bool shoulderRefAnchorInit_[2]{false, false};                // 每臂锚定是否已初始化 (避免 α 高时锚定为零猛拉)
-  scalar_t shoulderRefAnchorTh_{0.5};                          // 锚定冻结/跟踪阈值: α≥此值冻结, α<此值跟踪当前
 
   // 规划器周期
   double ruckigDt_{0.0};
@@ -617,7 +525,6 @@ private:
   double isofflineTrajUpdateStartTime_{0.0};
   bool offlineTrajDisable_{true};
   bool trajFrameUpdate_{false};
-  std::atomic<bool> mm_no_elbow_data_{false};
 
   // 多规划器时间同步相关
   ros::ServiceServer setLbTimedPosCmdServiceServer_;

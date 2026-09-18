@@ -258,8 +258,10 @@ sudo journalctl -u h12pro_node.service -f
 以下组合在 `KUAVO_CONTROL_SCHEME=multi` 下生效：
 
 * `E_MIDDLE + F_MIDDLE + A_PRESS`: `walk`
-* `E_MIDDLE + F_MIDDLE + B_PRESS`: `trot`
-* `E_MIDDLE + F_MIDDLE + C_PRESS`: 在 `mpc` 和 `amp_controller` 之间切换
+* `E_RIGHT + F_RIGHT + A_PRESS`: `switch_mpc`，在 stance 状态切换到 `mpc`
+* `E_RIGHT + F_RIGHT + B_PRESS`: `switch_amp`，在 stance 状态切换到 `amp_hand_controller`
+* `E_RIGHT + F_RIGHT + C_PRESS`: `switch_bianlitie`，切换到 `dance_bianlitie`
+* `E_RIGHT + F_RIGHT + D_PRESS`: `switch_waka`，切换到 `dance_waka`
 * `E_RIGHT + F_LEFT + C_LONG_PRESS`: 触发 `depth_loco_switch`
   它会在 `mpc` / `amp_controller` 和 `depth_loco_controller` 之间切换，用于走楼梯斜坡
 * `E_RIGHT + F_LEFT + A_LONG_PRESS`: 切换到 `vmp_controller`

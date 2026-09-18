@@ -148,11 +148,7 @@ bool readCsvData(const char *file_name, bool skip_header, std::vector<std::vecto
 
 int kbhit(void)
 {
-    //waao
-    if (!isatty(STDIN_FILENO))
-    {
-        return 0;
-    }
+
     fd_set rfds;
     struct timeval tv;
     int retval;

@@ -17,7 +17,6 @@ struct JointState {
 struct ClawState {
     JointState data;
     std::vector<int8_t> state = {0, 0};
-    bool is_high_freq = false;
 };
 
 struct lejuClawCommand {
@@ -37,14 +36,6 @@ struct ControlClawResponse {
 };
 
 using LejuClawDebugCallback = std::function<void(const std::string&)>;
-
-using LejuClawTargetCallback = std::function<void(const std::vector<std::string>& name,
-                                                  const std::vector<double>& position,
-                                                  const std::vector<double>& velocity,
-                                                  const std::vector<double>& effort,
-                                                  const std::vector<int>& kp,
-                                                  const std::vector<int>& kd,
-                                                  bool zero_kp)>;
 
 } // namespace eef_controller
 

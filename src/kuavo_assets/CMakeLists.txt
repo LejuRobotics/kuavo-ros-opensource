@@ -23,10 +23,12 @@ add_library(${PROJECT_NAME} SHARED src/package_path.cc)
 target_include_directories(${PROJECT_NAME} PUBLIC include  ${catkin_INCLUDE_DIRS})
 target_compile_definitions(${PROJECT_NAME} PRIVATE PROJECT_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${PROJECT_NAME} PUBLIC ${catkin_LIBRARIES})
-add_custom_target(check_ecmaster_config ALL
+add_custom_target(update_mass_config ALL
+    COMMAND chmod +x ${CMAKE_CURRENT_SOURCE_DIR}/scripts/update_mass.sh
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/update_mass.sh ${CMAKE_CURRENT_SOURCE_DIR}
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_ecmaster_type.sh
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Checking ec master configuration"
+    COMMENT "Updating mass configuration"
 )
 
 # Install deps

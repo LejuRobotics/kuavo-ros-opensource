@@ -82,9 +82,6 @@ public:
      */
     int disable() override;
 
-    // 非虚接口：Python 驱动沿用原有标定失能行为
-    int disableForCalibration() { return disable(); }
-
     bool disableMotor(int motorIndex) override;
     void close() override;
     void join();

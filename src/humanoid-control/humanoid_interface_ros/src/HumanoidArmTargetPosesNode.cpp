@@ -293,11 +293,7 @@ private:
             return true;
         }
 
-        if (!callSetArmModeSrv(control_mode)) {
-            res.result = false;
-            res.message = "Failed to request humanoid arm control mode";
-            return true;
-        }
+        callSetArmModeSrv(control_mode);
 
         if (control_mode == 2) {
             vector_t zeroState = observation_.state.segment(armJointStartIndex_, num_arm_joints_);
@@ -334,15 +330,7 @@ private:
             initstate_ = zeroState;
             hasLastTargetState_ = false;
             stopRlTrajectory();
-            if (!is_mode_change_success) {
-                ROS_ERROR("[ArmTrajNode]: External control mode change timeout (RL=%s)",
-                          isRlController() ? "true" : "false");
-                res.result = false;
-                res.message = "Arm control mode change timeout";
-            } else {
-                ROS_INFO("[ArmTrajNode]: External control mode change done (RL=%s)",
-                         isRlController() ? "true" : "false");
-            }
+            ROS_INFO("[ArmTrajNode]: External control mode change done (RL=%s)", isRlController() ? "true" : "false");
         } else {
             stopRlTrajectory();
         }
@@ -350,23 +338,16 @@ private:
         return true;
     }
 
-    bool callSetArmModeSrv(int32_t mode) {
+    void callSetArmModeSrv(int32_t mode) {
         kuavo_msgs::changeArmCtrlMode srv;
         srv.request.control_mode = mode;
         auto change_arm_mode_service_client_ =
             nh_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/humanoid_change_arm_ctrl_mode");
 
         if (change_arm_mode_service_client_.call(srv)) {
-            if (!srv.response.result) {
-                ROS_WARN("[ArmTrajNode]: SetArmModeSrv rejected mode %d: %s",
-                         mode, srv.response.message.c_str());
-                return false;
-            }
             ROS_INFO("[ArmTrajNode]: SetArmModeSrv call successful");
-            return true;
         } else {
             ROS_ERROR("[ArmTrajNode]: Failed to call SetArmModeSrv");
-            return false;
         }
     }
 

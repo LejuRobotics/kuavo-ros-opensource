@@ -37,25 +37,11 @@ else
     echo "服务 ocs2_h12pro_monitor.service 未开启。"
 fi
 
-while true; do
-    echo "请选择控制方案 (1: ocs2, 2: rl, 3: multi)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
-    read -r user_input
-    if [ "$user_input" = "1" ]; then
-        KUAVO_CONTROL_SCHEME=ocs2
-        echo "已选择: ocs2"
-        break
-    elif [ "$user_input" = "2" ]; then
-        KUAVO_CONTROL_SCHEME=rl
-        echo "已选择: rl"
-        break
-    elif [ "$user_input" = "3" ]; then
-        KUAVO_CONTROL_SCHEME=multi
-        echo "已选择: multi"
-        break
-    else
-        echo "输入无效，请输入1、2或3。"
-    fi
-done
+# Roban H12 部署固定使用 multi 模式及 v17 配置，无需交互选择。
+KUAVO_CONTROL_SCHEME=multi
+ROBOT_VERSION=17
+echo "已固定控制方案: $KUAVO_CONTROL_SCHEME"
+echo "已固定 ROBOT_VERSION: $ROBOT_VERSION"
 
 KUAVO_RL_WS_PATH="/home/lab/kuavo-RL/kuavo-robot-deploy" # 在没合并到 kuavo-ros-control 的之前，先固定路径或手动修改
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -67,7 +53,7 @@ MONITOR_OCS2_H12PRO=$SCRIPT_DIR/monitor_ocs2_h12pro.sh
 KUAVO_ROS_CONTROL_WS_PATH=$(dirname $(dirname $(dirname $(dirname $SCRIPT_DIR))))
 NOITOM_HI5_HAND_UDP_PYTHON=$KUAVO_ROS_CONTROL_WS_PATH/src/manipulation_nodes/noitom_hi5_hand_udp_python
 KUAVO_REMOTE_PATH=$(dirname $SCRIPT_DIR)/lib/kuavo_remote
-ROBOT_VERSION=$ROBOT_VERSION
+ROBOT_VERSION=${ROBOT_VERSION:-40}
 INSTALLED_DIR=$KUAVO_ROS_CONTROL_WS_PATH/installed
 RL_INSTALLED_DIR=$KUAVO_RL_WS_PATH/installed
 cd $H12PRO_CONTROLLER_NODE_DIR
@@ -153,62 +139,6 @@ echo "Current ROS_MASTER_URI: $ROS_MASTER_URI"
 echo "Current ROS_IP: $ROS_IP"
 echo "Current ROS_HOSTNAME:$ROS_HOSTNAME"
 
-# 询问用户选择楼梯建图相机类型
-echo "请问机器人楼梯建图的相机类型为："
-echo "1. 奥比中光"
-echo "2. D435"
-echo -n "请选择 (默认为奥比中光，直接回车选择默认): "
-read -r camera_choice
-
-case $camera_choice in
-    2)
-        STAIR_DETECTION_CAMERA="d435"
-        echo "已选择: D435"
-        ;;
-    1|""|*)
-        STAIR_DETECTION_CAMERA="orbbec"
-        echo "已选择: 奥比中光"
-        ;;
-esac
-
-echo "楼梯建图相机类型: $STAIR_DETECTION_CAMERA"
-
-# 询问用户选择 VR 拉起方式
-echo "请选择 VR 拉起方式："
-echo "1. 仅 VR 控制"
-echo "2. VR 控制 + Orbbec 视频回传"
-echo -n "请选择 (默认为仅 VR 控制，直接回车选择默认): "
-read -r vr_launch_choice
-
-case $vr_launch_choice in
-    2)
-        LAUNCH_VR_REMOTE_CONTROL_CMD="roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_orbbec.launch"
-        echo -n "请输入 Quest3 IP (可选，直接回车不指定): "
-        read -r quest3_ip_address
-        if [ -n "$quest3_ip_address" ]; then
-            # 写入用户配置 yaml，运行时统一读取该文件，避免硬编码进 systemd 环境变量
-            USER_VR_CONFIG="$HOME/.config/lejuconfig/h12_vr_launch.yaml"
-            if [ -f "$USER_VR_CONFIG" ]; then
-                if grep -q '^ip_address:' "$USER_VR_CONFIG"; then
-                    sed -i "s|^ip_address:.*|ip_address: \"$quest3_ip_address\"|" "$USER_VR_CONFIG"
-                else
-                    echo "ip_address: \"$quest3_ip_address\"" >> "$USER_VR_CONFIG"
-                fi
-            else
-                mkdir -p "$HOME/.config/lejuconfig"
-                echo "ip_address: \"$quest3_ip_address\"" > "$USER_VR_CONFIG"
-            fi
-            echo "已写入 $USER_VR_CONFIG"
-        fi
-        echo "已选择: VR 控制 + Orbbec 视频回传"
-        ;;
-    1|""|*)
-        LAUNCH_VR_REMOTE_CONTROL_CMD="roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
-        echo "已选择: 仅 VR 控制"
-        ;;
-esac
-
-echo "VR 拉起命令: $LAUNCH_VR_REMOTE_CONTROL_CMD"
 
 sed -i "s|^Environment=ROS_MASTER_URI=.*|Environment=ROS_MASTER_URI=$ROS_MASTER_URI|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=ROS_IP=.*|Environment=ROS_IP=$ROS_IP|" $OCS2_H12PRO_MONITOR_SERVICE
@@ -218,12 +148,6 @@ sed -i "s|^Environment=KUAVO_ROS_CONTROL_WS_PATH=.*|Environment=KUAVO_ROS_CONTRO
 sed -i "s|^Environment=KUAVO_RL_WS_PATH=.*|Environment=KUAVO_RL_WS_PATH=$KUAVO_RL_WS_PATH|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=ROBOT_VERSION=.*|Environment=ROBOT_VERSION=$ROBOT_VERSION|" $OCS2_H12PRO_MONITOR_SERVICE
 sed -i "s|^Environment=NODE_SCRIPT=.*|Environment=NODE_SCRIPT=$START_OCS2_H12PRO_NODE|" $OCS2_H12PRO_MONITOR_SERVICE
-sed -i "s|^Environment=STAIR_DETECTION_CAMERA=.*|Environment=STAIR_DETECTION_CAMERA=$STAIR_DETECTION_CAMERA|" $OCS2_H12PRO_MONITOR_SERVICE
-if grep -q '^Environment="*LAUNCH_VR_REMOTE_CONTROL_CMD=' $OCS2_H12PRO_MONITOR_SERVICE; then
-    sed -i "s|^Environment=\"*LAUNCH_VR_REMOTE_CONTROL_CMD=.*|Environment=\"LAUNCH_VR_REMOTE_CONTROL_CMD=$LAUNCH_VR_REMOTE_CONTROL_CMD\"|" $OCS2_H12PRO_MONITOR_SERVICE
-else
-    sed -i "/^Environment=STAIR_DETECTION_CAMERA=.*/a Environment=\"LAUNCH_VR_REMOTE_CONTROL_CMD=$LAUNCH_VR_REMOTE_CONTROL_CMD\"" $OCS2_H12PRO_MONITOR_SERVICE
-fi
 sed -i "s|^ExecStart=.*|ExecStart=$MONITOR_OCS2_H12PRO|" $OCS2_H12PRO_MONITOR_SERVICE
 
 sudo cp $OCS2_H12PRO_MONITOR_SERVICE /etc/systemd/system/
@@ -236,6 +160,15 @@ else
     echo "export KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME" >> ~/.bashrc
 fi
 echo "已将 KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME 写入 ~/.bashrc"
+
+# multi 模式固定使用 Roban v17 配置；同时写入 bashrc，确保随后启动的
+# roslaunch 和终端与 systemd 服务使用相同的机器人版本。
+if grep -q "^export ROBOT_VERSION=" ~/.bashrc; then
+    sed -i "s|^export ROBOT_VERSION=.*|export ROBOT_VERSION=$ROBOT_VERSION|" ~/.bashrc
+else
+    echo "export ROBOT_VERSION=$ROBOT_VERSION" >> ~/.bashrc
+fi
+echo "已将 ROBOT_VERSION=$ROBOT_VERSION 写入 ~/.bashrc"
 
 sudo apt-get install tmux
 

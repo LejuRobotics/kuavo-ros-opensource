@@ -3,7 +3,6 @@
 #include "ros/ros.h"
 #include "std_msgs/Float64MultiArray.h"
 #include "std_msgs/Float64.h"
-#include "std_msgs/String.h" //waao
 #include <unordered_map>
 #include <string>
 #include <ros/master.h>
@@ -48,7 +47,6 @@ namespace ocs2
 
       void publishVector(const std::string &topic_name, const std::vector<double> &data, const std::string &label = "");
       void publishValue(const std::string &topic_name, const double &data);
-      void publishText(const std::string &topic_name, const std::string &data); //waao
       // asynchronous callback
       void publishVectorCallback(const std::string &topic_name, const ocs2::vector_t &data)
       {
@@ -86,11 +84,9 @@ namespace ocs2
       ros::NodeHandle nh_;
       std::unordered_map<std::string, ros::Publisher> publishedTopics_;
       std::unordered_map<std::string, ros::Publisher> publishedValueTopics_;
-      std::unordered_map<std::string, ros::Publisher> publishedTextTopics_; //waao
       std::queue<std::pair<std::string, std::vector<double>>> queue_;
       std::thread worker_thread_;
       std::mutex mutex_;
-      std::mutex publish_mutex_;
       std::condition_variable cv_;
 
       bool thread_running_ = false;

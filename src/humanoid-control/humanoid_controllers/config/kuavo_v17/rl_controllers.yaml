@@ -34,20 +34,15 @@ controllers:
     config_file: "rl/dance_param_xinjiang.info"
     enabled: true
 
-  - name: "dance_aiqingniao"     # 爱情鸟
+  - name: "dance_waka"    # waka
     class: "DANCE_CONTROLLER"
     type: "DANCE_CONTROLLER"
-    config_file: "rl/dance_param_aiqingniao.info"
+    config_file: "rl/dance_param_wakawaka_V03.info"
     enabled: true
 
-  # - name: "dance_parapara"       # 芭啦芭啦樱之舞
-  #   class: "DANCE_CONTROLLER"
-  #   type: "DANCE_CONTROLLER"
-  #   config_file: "rl/dance_param_parapara.info"
-  #   enabled: true
-
-  - name: "dance_lonelydance"    # lonelydance
+  - name: "dance_bianlitie"    # bianlitie
     class: "DANCE_CONTROLLER"
     type: "DANCE_CONTROLLER"
-    config_file: "rl/dance_param_lonelydance.info"
+    config_file: "rl/dance_param_bianlitie_V03.info"
     enabled: true
+    
