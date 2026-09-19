@@ -1,1 +1,2 @@
-KERNEL=="ttyUSB*", ACTION=="add", ATTRS{product}=="USB Serial", MODE:="0777",ATTR{latency_timer}="1",SYMLINK+="usb_remote"
+# H12 接收机：FT232R，序列号用于避免匹配到其他 FTDI 串口设备。
+KERNEL=="ttyUSB*", ACTION=="add", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{serial}=="A10R4T42", MODE:="0777", ATTR{latency_timer}="1", SYMLINK+="usb_remote"

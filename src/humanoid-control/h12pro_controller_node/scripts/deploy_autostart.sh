@@ -86,14 +86,12 @@ catkin build h12pro_controller_node
 catkin build humanoid_plan_arm_trajectory
 catkin build kuavo_ros_interfaces
 
-if ls /dev | grep usb_remote; then
-  echo "Device file exists."
-else
-  echo "Device file does not exist."
-  cd $KUAVO_REMOTE_PATH
-  sudo chmod +x creat_remote_udev_rule.sh
-  sudo ./creat_remote_udev_rule.sh
-fi
+# 每次部署均覆盖安装仓库中的 H12 udev 规则。不能仅根据设备节点是否存在来
+# 判断，否则旧机器中残留的错误规则不会被修复。
+echo "正在覆盖安装 H12 接收机 udev 规则..."
+cd "$KUAVO_REMOTE_PATH"
+sudo chmod +x creat_remote_udev_rule.sh
+sudo ./creat_remote_udev_rule.sh
 
 while true; do
     echo "是否需要加载遥控器查看 log 使用串口的 udev 规则？确认有接线才可以使用。(y/n): "
