@@ -118,10 +118,7 @@ void WheelQuest3IkIncrementalROS::publishLockWaitTimingMs(const ros::Publisher& 
 }
 
 void WheelQuest3IkIncrementalROS::logArmTrajPublishStampPeriod(const ros::Time& stamp) {
-  if (!enableLockWaitTimingLog_) {
-    return;
-  }
-  if (hasLastArmTrajPublishStamp_) {
+  if (enableLockWaitTimingLog_ && hasLastArmTrajPublishStamp_) {
     publishLockWaitTimingMs(pubArmTrajStampPeriodMsPublisher_,
                             (stamp - lastArmTrajPublishStamp_).toSec() * 1000.0);
   }

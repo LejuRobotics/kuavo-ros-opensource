@@ -1762,6 +1762,33 @@ void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
   }
 }
 
+Eigen::VectorXd WheelQuest3IkIncrementalROS::velocityFromPublishedArmPosition(
+    const Eigen::VectorXd& previousQ, const Eigen::VectorXd& currentQ, const ros::Time& now) const {
+  Eigen::VectorXd vel = Eigen::VectorXd::Zero(currentQ.size());
+  if (previousQ.size() != currentQ.size() || currentQ.size() == 0) {
+    return vel;
+  }
+
+  double dt = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
+  if (hasLastArmTrajPublishStamp_ && !lastArmTrajPublishStamp_.isZero()) {
+    const double measuredDt = (now - lastArmTrajPublishStamp_).toSec();
+    if (std::isfinite(measuredDt) && measuredDt >= 1e-4 && measuredDt <= 0.1) {
+      dt = measuredDt;
+    }
+  }
+
+  vel = (currentQ - previousQ) / dt;
+  const double vmax = std::max(maxJointVelocity_, 0.0);
+  for (int i = 0; i < vel.size(); ++i) {
+    if (!std::isfinite(vel(i))) {
+      vel(i) = 0.0;
+    } else if (vmax > 0.0) {
+      vel(i) = std::clamp(vel(i), -vmax, vmax);
+    }
+  }
+  return vel;
+}
+
 void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg) {
   armJintStateMsg.header.stamp = ros::Time::now();
   logArmTrajPublishStampPeriod(armJintStateMsg.header.stamp);
@@ -1863,6 +1890,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
 
   Eigen::VectorXd armPositionForPublish;
   Eigen::VectorXd armVelocityForPublish;
+  Eigen::VectorXd previousPublishedQ;
   {
     const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
@@ -1870,6 +1898,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
                                 .count());
     const auto holdStart = std::chrono::steady_clock::now();
+    previousPublishedQ = latest_q_;
     if (armJointRuckigFilterPtr_) {
       const Eigen::VectorXd filteredArmQ = armJointRuckigFilterPtr_->update(finalArmAngles);
       if (filteredArmQ.size() == q_.size()) {
@@ -1904,12 +1933,12 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     }
 
     armPositionForPublish = latest_q_;
-    armVelocityForPublish = lowpass_dq_;
 
     // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
-    // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
-    // 区间 2: [0.3s, 5.0s)      — 从 q_init_cmd_ 线性平滑到 q_（若 q_init_cmd_ 有效），速度清零
-    // 区间 3: [5.0s, +infty)    — 不在此处改写
+    // 区间 1: [0, 0.3s)          — 传感器同步
+    // 区间 2: [0.3s, 2.0s)      — 从 q_init_cmd_ 线性平滑到目标（若 q_init_cmd_ 有效）
+    // 区间 3: [2.0s, +infty)    — 不在此处改写
+    // 速度一律由最终发布位置差分得到，不再单独清零，避免 q/v 不一致。
     if (inMode2) {
       constexpr double kMode2SensorSyncDurationSec = 0.3;
       constexpr double kMode2SmoothDurationSec = 2.0;
@@ -1923,10 +1952,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
         }
         q_init_cmd_ = sensorArmQ;
         armPositionForPublish = sensorArmQ;
-        armVelocityForPublish.setZero();
         latest_q_ = sensorArmQ;
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
       } else if (mode2Elapsed < kMode2SmoothDurationSec) {
         if (q_init_cmd_.size() == 14) {
           const double alpha = std::min(
@@ -1944,11 +1970,13 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
           }
           latest_q_ = armPositionForPublish;
         }
-        armVelocityForPublish.setZero();
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
       }
     }
+
+    armVelocityForPublish =
+        velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
+    latest_dq_ = armVelocityForPublish;
+    lowpass_dq_ = armVelocityForPublish;
 
     publishLockWaitTimingMs(lockHoldPubJointStateMsPublisher_,
                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - holdStart)
@@ -1989,16 +2017,18 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
 
+    const Eigen::VectorXd previousPublishedQ = latest_q_;
     q_ = defaultArmAngles;
     dq_.setZero();
 
     const double alpha = 0.00;
     latest_q_ = (1.0 - alpha) * latest_q_ + alpha * q_;
-    latest_dq_.setZero();
-    lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
 
     armPositionForPublish = latest_q_;
-    armVelocityForPublish = lowpass_dq_;
+    armVelocityForPublish =
+        velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, ros::Time::now());
+    latest_dq_ = armVelocityForPublish;
+    lowpass_dq_ = armVelocityForPublish;
   }
 
   sensor_msgs::JointState armJintStateMsg;

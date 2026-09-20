@@ -95,6 +95,8 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void solveIkHandElbowThreadFunction();
   void applyWorkerThreadScheduling(const char* threadName, int priority) const;
   bool requestWbcArmTrajectoryControl(int controlMode, bool requireIncrementalMode, const char* context);
+  bool requestArmTrajInterpolator(bool enable, bool requireIncrementalMode, const char* context);
+  bool isInMode2EnterTimeout();
 
   static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
   static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 50;
@@ -104,6 +106,10 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   ros::Subscriber arm_ctrl_mode_vr_sub_;
   std::mutex wbcArmTrajectoryControlMutex_;
+  ros::ServiceClient enableArmTrajInterpolatorClient_;
+  int lastRequestedWbcArmTrajMode_{-1};
+  bool lastArmTrajInterpolatorEnable_{false};
+  bool hasLastArmTrajInterpolatorEnable_{false};
 
   // FK 辅助函数：计算左手末端执行器姿态
   void computeLeftEndEffectorFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);
@@ -149,6 +155,11 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   // 发布函数
   void publishJointStates();
+  // 用上一帧已发布位置的差分作为本帧速度，保证 /kuavo_arm_traj 的 q/v 运动学一致。
+  Eigen::VectorXd velocityFromPublishedArmPosition(const Eigen::VectorXd& previousQ,
+                                                   const Eigen::VectorXd& currentQ,
+                                                   const ros::Time& now) const;
+  void invalidateLastPublishedArmTraj();
   void publishSensorDataArmJoints();        // 发布传感器数据的手臂关节角
   void publishHandPosOptimizationPoints();  // 发布优化前后的手部位置点
   void publishHandPoseFromTransformer();    // 发布来自Transformer的手部pose
@@ -248,6 +259,10 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   Eigen::VectorXd latest_q_;    // 最新的关节角度（弧度）
   Eigen::VectorXd latest_dq_;   // 最新的关节角速度（弧度/秒）
   Eigen::VectorXd lowpass_dq_;  // 低通滤波后的关节角速度（弧度/秒）
+  ros::Time lastArmTrajPublishStamp_;
+  bool hasLastArmTrajPublishStamp_ = false;
+  Eigen::VectorXd lastPublishedArmPosition_;  // 上一帧真正发出去的 q，不受 fsmEnter 清零 latest_q_ 影响
+  bool hasLastPublishedArmPosition_ = false;
   Eigen::VectorXd jointMidValues_;  // TEST: 关节限制中间值（用于测试），存储每个关节的(limit_lower+limit_upper)/2
 
   // 传感器数据关节角（14维，rad）：用于保存 sensorData 对应的机器人双臂关节数据（指数均值滤波后）

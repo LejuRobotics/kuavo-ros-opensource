@@ -1,5 +1,8 @@
 <launch>
     <!-- PICO teleop -->
+    <!-- 限制 OpenBLAS/OMP 线程数，避免多节点争抢 CPU 导致实时性抖动 -->
+    <env name="OPENBLAS_NUM_THREADS" value="1"/>
+    <env name="OMP_NUM_THREADS" value="1"/>
     <arg name="host" default="0.0.0.0"/>
     <arg name="port" default="12345"/>
     <arg name="control_mode" default="LowerBody"/>

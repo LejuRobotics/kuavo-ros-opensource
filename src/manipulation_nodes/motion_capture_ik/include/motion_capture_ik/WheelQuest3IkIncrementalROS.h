@@ -81,6 +81,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const;
   void publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const;
   void logArmTrajPublishStampPeriod(const ros::Time& stamp);
+  // 用上一帧已发布位置的差分作为本帧速度，保证 /kuavo_arm_traj 的 q/v 运动学一致。
+  Eigen::VectorXd velocityFromPublishedArmPosition(const Eigen::VectorXd& previousQ,
+                                                   const Eigen::VectorXd& currentQ,
+                                                   const ros::Time& now) const;
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew

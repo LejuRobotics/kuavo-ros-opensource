@@ -37,6 +37,7 @@
 #include "kuavo_msgs/TransportModeCommand.h"
 
 #include "humanoid_controllers/ArmTrajReceiver.h"
+#include "humanoid_controllers/ArmTrajectoryInterpolator.h"
 
 #include "std_srvs/Trigger.h"
 #include "std_srvs/SetBool.h"
@@ -436,6 +437,10 @@ namespace humanoid_controller
     bool tryApplyPendingExternalArmControllerMode();
     bool shouldBlockWalkingCommandForExternalArmTarget() const;
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
+    bool enableArmTrajInterpCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
+    bool applyArmTrajInterpolator(const ros::Time& time, double actual_dt, vector_t& qOut, vector_t& vOut);
+    void resetArmTrajInterpolator();
+    void seedArmCommandFiltersFromCurrentCmd();
     bool enableMmArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool getMmArmCtrlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     void real_init_wait();
@@ -690,6 +695,7 @@ namespace humanoid_controller
     ros::Subscriber enable_wbc_sub_;
 
     ros::ServiceServer enableArmCtrlSrv_;
+    ros::ServiceServer enableArmTrajInterpSrv_;
     ros::ServiceServer enableMmArmCtrlSrv_;
     ros::ServiceServer getMmArmCtrlSrv_;
     ros::ServiceServer currentGaitNameSrv_;
@@ -865,6 +871,13 @@ namespace humanoid_controller
     // 最终目标重建，不再经过独立低通；该状态在模式切换或异常控制周期时复位。
     vector_t absolute_arm_prev_filtered_pos_;
     bool absolute_arm_velocity_initialized_{false};
+
+    bool enable_arm_traj_interpolator_{false};
+    humanoidController_wheel_wbc::ArmTrajectoryInterpolator armTrajectoryInterpolator_;
+    vector_t arm_traj_interp_prev_q_;
+    vector_t last_wbc_arm_cmd_q_;
+    vector_t last_wbc_arm_cmd_v_;
+    bool was_interpolator_path_{false};
 
     double sensor_frequency_{1000.0};   // 传感器数据频率
     double sensor_dt_{0.001};           // 传感器数据采样周期，用于滤波器和数据缓冲区

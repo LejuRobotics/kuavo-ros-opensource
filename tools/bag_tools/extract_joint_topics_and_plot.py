@@ -24,9 +24,12 @@ Pico 绝对式:
     1. VR 数据处理
     层间 VR→IK 通信
     2. IK 解算
-  后半段 (关节角最小二乘, delay>0 表示下游滞后上游):
-    3. 控制器  /joint_cmd 滞后 IK轨迹
+  后半段 (最小二乘, delay>0 表示下游滞后上游):
+    3. 控制器  /joint_cmd.q 滞后 IK轨迹 (插补/滤波群延迟, 可为数十 ms)
     4. 电机+反馈  传感器滞后 /joint_cmd
+       位置相位若为负, 不是电机先于指令执行: q_cmd 被插补滞后时,
+       CSP 的 v_cmd 仍接近 IK, 电机会被速度项拉向 IK, 位置波形看起来超前 q_cmd.
+       此时改用 joint_v 估计执行延迟 (约束为因果, >=0).
   端到端:
     四段相加; 以及传感器滞后 IK轨迹; 绝对式若有 published_end_to_end 一并列出。
   --fine: 额外打印绝对 IK 细分话题 (ik_solve 等)。
@@ -154,6 +157,7 @@ CTRL_STOPWATCH_TOPIC = "/vr_incremental/wbc_processing_latency_ms"
 # 最小二乘顶到 ±max_lag 附近视为搜索失败, 回退互相关; 两者都顶边界则不进总平均.
 LAG_BOUND_FRAC = 0.95
 LAG_DISAGREE_SEC = 0.15
+MIN_LAG_R = 0.50
 
 # 端到端 / IK 细分 (有则进报告)
 E2E_STOPWATCH_TOPICS = [
@@ -235,6 +239,19 @@ def load_layout(robot_version: Optional[int] = None, assets_root: Optional[str] 
     }
 
 
+def peek_joint_cmd_dim(bag_path: str) -> Optional[int]:
+    """读一条 /joint_cmd, 返回 joint_q 维数。"""
+    with rosbag.Bag(bag_path, "r") as bag:
+        info = bag.get_type_and_topic_info().topics
+        if TOPIC_JOINT_CMD not in info:
+            return None
+        for _topic, msg, _t in bag.read_messages(topics=[TOPIC_JOINT_CMD]):
+            jq = getattr(msg, "joint_q", None)
+            if jq:
+                return int(len(jq))
+    return None
+
+
 # ==============================================================================
 # 数据容器
 # ==============================================================================
@@ -259,6 +276,16 @@ def _stamp_to_sec(t) -> float:
         return t.to_sec()
     except AttributeError:
         return float(t)
+
+
+def _topic_data(name: str, times: List[float], values: List[float],
+                unit_label: str) -> TopicData:
+    return TopicData(
+        name=name,
+        times=np.array(times, dtype=float),
+        values=np.array(values, dtype=float),
+        unit_label=unit_label,
+    )
 
 
 def extract_arm_traj(bag_path: str, joint_index: int, single_arm: int, topic: str) -> TopicData:
@@ -294,11 +321,12 @@ def extract_arm_traj(bag_path: str, joint_index: int, single_arm: int, topic: st
     )
 
 
-def extract_joint_cmd(bag_path: str, joint_index: int, layout: dict) -> TopicData:
-    """从 /joint_cmd (kuavo_msgs/jointCmd) 提取指定手臂关节。
+def extract_joint_cmd(bag_path: str, joint_index: int, layout: dict
+                      ) -> Tuple[TopicData, TopicData]:
+    """从 /joint_cmd (kuavo_msgs/jointCmd) 提取指定手臂关节位置与速度。
 
     joint_index: 1-based, 范围 [1, 2*single_arm] (手臂关节序号, 与 /vr_incremental/kuavo_arm_traj_shm 对齐)
-    返回数据为 deg (从 rad 转换)。
+    返回 (q_deg, v_deg_s)。
     """
     single_arm = layout["single_arm"]
     if not (1 <= joint_index <= 2 * single_arm):
@@ -308,30 +336,37 @@ def extract_joint_cmd(bag_path: str, joint_index: int, layout: dict) -> TopicDat
     arm_offset = layout["arm_offset"]
     idx = arm_offset + (joint_index - 1)  # 0-based 在 joint_q 中的位置
 
-    times: List[float] = []
-    values: List[float] = []
+    q_times: List[float] = []
+    q_values: List[float] = []
+    v_times: List[float] = []
+    v_values: List[float] = []
 
     with rosbag.Bag(bag_path, "r") as bag:
         for topic, msg, t in bag.read_messages(topics=[TOPIC_JOINT_CMD]):
             jq = msg.joint_q
             if jq is None or len(jq) <= idx:
                 continue
-            times.append(_stamp_to_sec(t))
-            values.append(float(jq[idx]) * RAD2DEG)
+            ts = _stamp_to_sec(t)
+            q_times.append(ts)
+            q_values.append(float(jq[idx]) * RAD2DEG)
+            jv = getattr(msg, "joint_v", None)
+            if jv is not None and len(jv) > idx:
+                v_times.append(ts)
+                v_values.append(float(jv[idx]) * RAD2DEG)
 
-    return TopicData(
-        name=TOPIC_JOINT_CMD,
-        times=np.array(times, dtype=float),
-        values=np.array(values, dtype=float),
-        unit_label="deg",
+    return (
+        _topic_data(TOPIC_JOINT_CMD, q_times, q_values, "deg"),
+        _topic_data(TOPIC_JOINT_CMD + "/v", v_times, v_values, "deg/s"),
     )
 
 
-def extract_sensors(bag_path: str, joint_index: int, layout: dict) -> TopicData:
-    """从 /sensors_data_raw (kuavo_msgs/sensorsData) 提取指定手臂关节。
+def extract_sensors(bag_path: str, joint_index: int, layout: dict
+                    ) -> Tuple[TopicData, TopicData]:
+    """从 /sensors_data_raw (kuavo_msgs/sensorsData) 提取指定手臂关节位置与速度。
 
     joint_index: 1-based, 范围 [1, 2*single_arm] (手臂关节序号, 与 /vr_incremental/kuavo_arm_traj_shm 对齐)
-    返回数据为 deg (从 rad 转换)。
+    返回 (q_deg, v_deg_s)。时间戳用 bag 接收时间, 不用 sensor_time
+    (sensor_time 常与 ROS 时钟不在同一纪元)。
     """
     single_arm = layout["single_arm"]
     if not (1 <= joint_index <= 2 * single_arm):
@@ -341,22 +376,27 @@ def extract_sensors(bag_path: str, joint_index: int, layout: dict) -> TopicData:
     arm_offset = layout["arm_offset"]
     idx = arm_offset + (joint_index - 1)
 
-    times: List[float] = []
-    values: List[float] = []
+    q_times: List[float] = []
+    q_values: List[float] = []
+    v_times: List[float] = []
+    v_values: List[float] = []
 
     with rosbag.Bag(bag_path, "r") as bag:
         for topic, msg, t in bag.read_messages(topics=[TOPIC_SENSORS]):
             jq = msg.joint_data.joint_q
             if jq is None or len(jq) <= idx:
                 continue
-            times.append(_stamp_to_sec(t))
-            values.append(float(jq[idx]) * RAD2DEG)
+            ts = _stamp_to_sec(t)
+            q_times.append(ts)
+            q_values.append(float(jq[idx]) * RAD2DEG)
+            jv = getattr(msg.joint_data, "joint_v", None)
+            if jv is not None and len(jv) > idx:
+                v_times.append(ts)
+                v_values.append(float(jv[idx]) * RAD2DEG)
 
-    return TopicData(
-        name=TOPIC_SENSORS,
-        times=np.array(times, dtype=float),
-        values=np.array(values, dtype=float),
-        unit_label="deg",
+    return (
+        _topic_data(TOPIC_SENSORS, q_times, q_values, "deg"),
+        _topic_data(TOPIC_SENSORS + "/v", v_times, v_values, "deg/s"),
     )
 
 
@@ -390,13 +430,16 @@ def extract_arm_traj_all(bag_path: str, single_arm: int, topic: str) -> List[Top
     ]
 
 
-def extract_joint_cmd_all(bag_path: str, layout: dict) -> List[TopicData]:
-    """一次遍历 rosbag 提取 /joint_cmd 所有手臂关节。"""
+def extract_joint_cmd_all(bag_path: str, layout: dict
+                         ) -> Tuple[List[TopicData], List[TopicData]]:
+    """一次遍历 rosbag 提取 /joint_cmd 所有手臂关节位置与速度。"""
     single_arm = layout["single_arm"]
     n_joints = 2 * single_arm
     arm_offset = layout["arm_offset"]
-    times_list: List[List[float]] = [[] for _ in range(n_joints)]
-    values_list: List[List[float]] = [[] for _ in range(n_joints)]
+    q_times: List[List[float]] = [[] for _ in range(n_joints)]
+    q_values: List[List[float]] = [[] for _ in range(n_joints)]
+    v_times: List[List[float]] = [[] for _ in range(n_joints)]
+    v_values: List[List[float]] = [[] for _ in range(n_joints)]
 
     with rosbag.Bag(bag_path, "r") as bag:
         for _topic, msg, t in bag.read_messages(topics=[TOPIC_JOINT_CMD]):
@@ -404,28 +447,32 @@ def extract_joint_cmd_all(bag_path: str, layout: dict) -> List[TopicData]:
             if jq is None or len(jq) < arm_offset + n_joints:
                 continue
             ts = _stamp_to_sec(t)
+            jv = getattr(msg, "joint_v", None)
+            has_v = jv is not None and len(jv) >= arm_offset + n_joints
             for i in range(n_joints):
-                times_list[i].append(ts)
-                values_list[i].append(float(jq[arm_offset + i]) * RAD2DEG)
+                q_times[i].append(ts)
+                q_values[i].append(float(jq[arm_offset + i]) * RAD2DEG)
+                if has_v:
+                    v_times[i].append(ts)
+                    v_values[i].append(float(jv[arm_offset + i]) * RAD2DEG)
 
-    return [
-        TopicData(
-            name=TOPIC_JOINT_CMD,
-            times=np.array(times_list[i], dtype=float),
-            values=np.array(values_list[i], dtype=float),
-            unit_label="deg",
-        )
-        for i in range(n_joints)
-    ]
+    qs = [_topic_data(TOPIC_JOINT_CMD, q_times[i], q_values[i], "deg")
+          for i in range(n_joints)]
+    vs = [_topic_data(TOPIC_JOINT_CMD + "/v", v_times[i], v_values[i], "deg/s")
+          for i in range(n_joints)]
+    return qs, vs
 
 
-def extract_sensors_all(bag_path: str, layout: dict) -> List[TopicData]:
-    """一次遍历 rosbag 提取 /sensors_data_raw 所有手臂关节。"""
+def extract_sensors_all(bag_path: str, layout: dict
+                       ) -> Tuple[List[TopicData], List[TopicData]]:
+    """一次遍历 rosbag 提取 /sensors_data_raw 所有手臂关节位置与速度。"""
     single_arm = layout["single_arm"]
     n_joints = 2 * single_arm
     arm_offset = layout["arm_offset"]
-    times_list: List[List[float]] = [[] for _ in range(n_joints)]
-    values_list: List[List[float]] = [[] for _ in range(n_joints)]
+    q_times: List[List[float]] = [[] for _ in range(n_joints)]
+    q_values: List[List[float]] = [[] for _ in range(n_joints)]
+    v_times: List[List[float]] = [[] for _ in range(n_joints)]
+    v_values: List[List[float]] = [[] for _ in range(n_joints)]
 
     with rosbag.Bag(bag_path, "r") as bag:
         for _topic, msg, t in bag.read_messages(topics=[TOPIC_SENSORS]):
@@ -433,19 +480,20 @@ def extract_sensors_all(bag_path: str, layout: dict) -> List[TopicData]:
             if jq is None or len(jq) < arm_offset + n_joints:
                 continue
             ts = _stamp_to_sec(t)
+            jv = getattr(msg.joint_data, "joint_v", None)
+            has_v = jv is not None and len(jv) >= arm_offset + n_joints
             for i in range(n_joints):
-                times_list[i].append(ts)
-                values_list[i].append(float(jq[arm_offset + i]) * RAD2DEG)
+                q_times[i].append(ts)
+                q_values[i].append(float(jq[arm_offset + i]) * RAD2DEG)
+                if has_v:
+                    v_times[i].append(ts)
+                    v_values[i].append(float(jv[arm_offset + i]) * RAD2DEG)
 
-    return [
-        TopicData(
-            name=TOPIC_SENSORS,
-            times=np.array(times_list[i], dtype=float),
-            values=np.array(values_list[i], dtype=float),
-            unit_label="deg",
-        )
-        for i in range(n_joints)
-    ]
+    qs = [_topic_data(TOPIC_SENSORS, q_times[i], q_values[i], "deg")
+          for i in range(n_joints)]
+    vs = [_topic_data(TOPIC_SENSORS + "/v", v_times[i], v_values[i], "deg/s")
+          for i in range(n_joints)]
+    return qs, vs
 
 
 def extract_float64_topic_stats(bag_path: str, topics: List[str]) -> dict:
@@ -614,7 +662,7 @@ def build_and_print_report(
                 f"  ({CTRL_STOPWATCH_TOPIC})"
             )
         if motor_st is not None:
-            _print_joint_stage_stats("4.电机+反馈 传感器滞后cmd", motor_st)
+            _print_joint_stage_stats("4.电机+反馈 执行滞后", motor_st)
         else:
             print("  4.电机+反馈                     缺失  (无可靠关节)")
         if mode == "incremental" and filt_st is not None:
@@ -714,7 +762,8 @@ def save_latency_report_csv(report: dict, stats: dict, all_delays: List[dict],
             ("front", "2.IK解算", report.get("ik_ms"), "Float64"),
             ("back", "3.控制器 cmd滞后traj", report.get("controller_xcorr_ms"), "最小二乘 下游滞后"),
             ("back", "控制器 stopwatch", report.get("controller_stopwatch_ms"), "Float64"),
-            ("back", "4.电机+反馈 sens滞后cmd", report.get("motor_xcorr_ms"), "最小二乘 下游滞后"),
+            ("back", "4.电机+反馈 执行滞后", report.get("motor_xcorr_ms"),
+             "位置相位>=0 用 q; 超前则用 v (因果执行延迟)"),
             ("e2e", "链路相加", report.get("e2e_four_stage_ms"), "前半段+控制+电机"),
             ("e2e", "软件前半段", report.get("e2e_front_ms"), "VR+中间节点+IK"),
             ("e2e", "IK输出→传感器", report.get("traj_sens_xcorr_ms"), "最小二乘"),
@@ -735,7 +784,7 @@ def save_latency_report_csv(report: dict, stats: dict, all_delays: List[dict],
         w.writerow([])
         w.writerow(["# 跨关节统计 (ms)"])
         _write_stage_stats("back_stats", "3.控制器 cmd滞后traj", report.get("controller_stats"))
-        _write_stage_stats("back_stats", "4.电机+反馈 sens滞后cmd", report.get("motor_stats"))
+        _write_stage_stats("back_stats", "4.电机+反馈 执行滞后", report.get("motor_stats"))
         _write_stage_stats("e2e_stats", "IK输出→传感器", report.get("traj_sens_stats"))
         if report.get("filter_stats"):
             _write_stage_stats("back_stats", "控制器滤波相位", report.get("filter_stats"))
@@ -748,15 +797,21 @@ def save_latency_report_csv(report: dict, stats: dict, all_delays: List[dict],
         if all_delays:
             w.writerow([])
             w.writerow(["# per-joint delay (ms)"])
-            w.writerow(["joint", "side", "traj_cmd", "cmd_sens", "traj_sens",
+            w.writerow(["joint", "side", "traj_cmd", "cmd_sens_exec",
+                        "cmd_sens_q_phase", "cmd_sens_v", "traj_sens",
                         "traj_filtered"])
             for d in all_delays:
+                def _fmt(key):
+                    val = d.get(key, float("nan"))
+                    return "" if val is None or not np.isfinite(val) else f"{val:.4f}"
                 w.writerow([
                     d["joint"], d["side"],
-                    f"{d['traj_cmd_delay']:.4f}",
-                    f"{d['cmd_sens_delay']:.4f}",
-                    f"{d['traj_sens_delay']:.4f}",
-                    f"{d['traj_filtered_delay']:.4f}",
+                    _fmt("traj_cmd_delay"),
+                    _fmt("cmd_sens_delay"),
+                    _fmt("cmd_sens_q_phase"),
+                    _fmt("cmd_sens_v_delay"),
+                    _fmt("traj_sens_delay"),
+                    _fmt("traj_filtered_delay"),
                 ])
     print(f"[INFO] 延迟诊断报告已保存: {out_path}")
 
@@ -891,7 +946,8 @@ def estimate_delay_cross_corr(a: TopicData, b: TopicData, max_lag: float = 2.0
     search = corr[lo:hi]
     if len(search) == 0:
         return 0.0, 0.0
-    peak = int(np.argmax(np.abs(search)))
+    # 用相关峰本身, 不用 |corr|: 反相关峰会把延迟符号估反, 看起来像下游超前
+    peak = int(np.argmax(search))
     peak_idx = lo + peak
     lag_samples = peak_idx - center
     delay = lag_samples * dt
@@ -972,6 +1028,63 @@ def estimate_downstream_lag(
     return xcorr, ls
 
 
+# 位置相位超前超过该阈值才改用速度估计电机执行延迟 (秒)
+MOTOR_Q_LEAD_SEC = 0.002
+MOTOR_V_CORR_MIN = 0.50
+
+
+def select_motor_execution_lag(
+    pos_xcorr: Tuple[float, float],
+    pos_ls: Tuple[float, float],
+    vel_xcorr: Optional[Tuple[float, float]],
+    vel_ls: Optional[Tuple[float, float]],
+    max_lag: float,
+) -> Tuple[Tuple[float, float], bool, str, float, Optional[float]]:
+    """电机执行延迟: 位置相位若超前 cmd, 改用速度滞后。
+
+    返回 ((delay_sec, r), ok, note, q_phase_ms, v_delay_ms).
+    q_phase_ms 是位置最小二乘相位 (可为负); v_delay_ms 无速度数据时为 None.
+    """
+    pos_sel, pos_ok, pos_note = select_reliable_lag(pos_xcorr, pos_ls, max_lag)
+    q_phase_ms = float(pos_sel[0]) * 1000.0
+    v_delay_ms: Optional[float] = None
+    vel_sel = None
+    vel_ok = False
+    vel_note = ""
+    if vel_xcorr is not None and vel_ls is not None:
+        vel_sel, vel_ok, vel_note = select_reliable_lag(vel_xcorr, vel_ls, max_lag)
+        v_delay_ms = float(vel_sel[0]) * 1000.0
+
+    if float(pos_sel[0]) >= -MOTOR_Q_LEAD_SEC:
+        return pos_sel, pos_ok, pos_note, q_phase_ms, v_delay_ms
+
+    notes: List[str] = []
+    if pos_note:
+        notes.append(pos_note)
+    notes.append(
+        f"位置相位 {q_phase_ms:+.1f}ms 超前 cmd "
+        "(插补 q 滞后 + 速度前馈, 不是电机先于指令执行)"
+    )
+    use_vel = (
+        vel_sel is not None
+        and vel_ok
+        and vel_ls is not None
+        and vel_xcorr is not None
+        and max(float(vel_ls[1]), float(vel_xcorr[1])) >= MOTOR_V_CORR_MIN
+    )
+    if use_vel:
+        if vel_note:
+            notes.append(vel_note)
+        if float(vel_sel[0]) < 0.0:
+            notes.append(f"速度滞后亦为负 {v_delay_ms:+.1f}ms, 执行延迟记 0")
+            return (0.0, vel_sel[1]), True, "; ".join(notes), q_phase_ms, v_delay_ms
+        notes.append(f"改用速度滞后 {v_delay_ms:+.1f}ms")
+        return vel_sel, vel_ok, "; ".join(notes), q_phase_ms, v_delay_ms
+
+    notes.append("速度相关过低或缺失, 位置超前记执行延迟 0")
+    return (0.0, pos_sel[1]), True, "; ".join(notes), q_phase_ms, v_delay_ms
+
+
 def _at_search_bound(delay_sec: float, max_lag: float) -> bool:
     return abs(float(delay_sec)) >= float(max_lag) * LAG_BOUND_FRAC
 
@@ -983,21 +1096,23 @@ def select_reliable_lag(
 ) -> Tuple[Tuple[float, float], bool, str]:
     """选用最小二乘延迟写入总报告, 互相关仅作对照与回退.
 
-    最小二乘顶到搜索边界且互相关未顶边界时改用互相关.
-    两者都顶到边界则不参与总平均.
+    最小二乘顶到搜索边界或相关过低时改用互相关.
+    两者都不可靠则不参与总平均.
     返回 ((delay_sec, r), ok, note).
     """
     xd, xr = xcorr
     ld, lr = ls
     x_bound = _at_search_bound(xd, max_lag)
     l_bound = _at_search_bound(ld, max_lag)
-    if x_bound and l_bound:
-        return (ld, lr), False, "最小二乘与互相关均顶到搜索边界, 不参与总平均"
-    if l_bound and not x_bound:
-        return (xd, xr), True, "最小二乘顶到搜索边界, 改用互相关"
-    if (not l_bound) and abs(float(xd) - float(ld)) > LAG_DISAGREE_SEC:
-        return (ld, lr), True, "与互相关相差过大, 仍用最小二乘"
-    return (ld, lr), True, ""
+    x_ok = (not x_bound) and abs(float(xr)) >= MIN_LAG_R
+    l_ok = (not l_bound) and abs(float(lr)) >= MIN_LAG_R
+    if l_ok:
+        if x_ok and abs(float(xd) - float(ld)) > LAG_DISAGREE_SEC:
+            return (ld, lr), True, "与互相关相差过大, 仍用最小二乘"
+        return (ld, lr), True, ""
+    if x_ok:
+        return (xd, xr), True, "最小二乘不可靠, 改用互相关"
+    return (ld, lr), False, "相关过低或顶到搜索边界, 不参与总平均"
 
 
 # ==============================================================================
@@ -1247,6 +1362,19 @@ def main() -> int:
 
     # 加载布局
     layout = load_layout(args.robot_version, args.assets_root)
+    n_cmd = peek_joint_cmd_dim(args.bag)
+    if n_cmd is not None and n_cmd != layout["n_tot"]:
+        new_offset = n_cmd - layout["n_head"] - layout["n_arm"]
+        print(
+            f"[WARN] bag /joint_cmd 维数={n_cmd}, 配置 NUM_JOINT={layout['n_tot']}. "
+            f"按 bag 校正 arm_offset {layout['arm_offset']} -> {new_offset}"
+        )
+        if new_offset < 0:
+            print(f"[FATAL] 无法从 joint_cmd 维数推断手臂偏移")
+            return 1
+        layout["n_tot"] = n_cmd
+        layout["arm_offset"] = new_offset
+        layout["n_waist"] = max(0, new_offset - 12)
     single_arm = layout["single_arm"]
     n_total_arm = 2 * single_arm
     topic_arm_traj = ARM_TRAJ_TOPICS[args.mode]
@@ -1275,21 +1403,24 @@ def main() -> int:
     if args.joint is not None:
         # 单关节模式: 用原有逐关节提取, 保持兼容
         trajs = [extract_arm_traj(args.bag, args.joint, single_arm, topic_arm_traj)]
-        cmds = [extract_joint_cmd(args.bag, args.joint, layout)]
-        senses = [extract_sensors(args.bag, args.joint, layout)]
+        cmd_q, cmd_v = extract_joint_cmd(args.bag, args.joint, layout)
+        sens_q, sens_v = extract_sensors(args.bag, args.joint, layout)
+        cmds, cmd_vs = [cmd_q], [cmd_v]
+        senses, sens_vs = [sens_q], [sens_v]
         filtereds = [extract_arm_traj(args.bag, args.joint, single_arm, TOPIC_ARM_TRAJ_FILTERED)]
     else:
         # 全关节模式: 批量一次遍历提取
         trajs = extract_arm_traj_all(args.bag, single_arm, topic_arm_traj)
-        cmds = extract_joint_cmd_all(args.bag, layout)
-        senses = extract_sensors_all(args.bag, layout)
+        cmds, cmd_vs = extract_joint_cmd_all(args.bag, layout)
+        senses, sens_vs = extract_sensors_all(args.bag, layout)
         filtereds = extract_arm_traj_all(args.bag, single_arm, TOPIC_ARM_TRAJ_FILTERED)
 
     # 打印数据量概览
     for i, (traj, cmd, sens, filtered) in enumerate(zip(trajs, cmds, senses, filtereds)):
         jidx = joint_list[i]
         print(f"[INFO] 关节 #{jidx}: traj={len(traj)}f, cmd={len(cmd)}f, "
-              f"sens={len(sens)}f, filtered={len(filtered)}f")
+              f"sens={len(sens)}f, cmd_v={len(cmd_vs[i])}f, sens_v={len(sens_vs[i])}f, "
+              f"filtered={len(filtered)}f")
 
     # ---- 逐关节计算延迟 & 绘图 ----
     all_delays: List[dict] = []  # 汇总用
@@ -1298,6 +1429,8 @@ def main() -> int:
         traj = trajs[i]
         cmd = cmds[i]
         sens = senses[i]
+        cmd_v = cmd_vs[i]
+        sens_v = sens_vs[i]
         filtered = filtereds[i]
 
         side = "左臂" if jidx <= single_arm else "右臂"
@@ -1314,6 +1447,8 @@ def main() -> int:
         delay_traj_sens = (0.0, 0.0)
         delay_traj_filtered = (0.0, 0.0)
         traj_cmd_ok = cmd_sens_ok = traj_sens_ok = filt_ok = True
+        q_phase_ms = float("nan")
+        v_delay_ms = None
 
         if len(traj) >= 2 and len(cmd) >= 2:
             xcorr, ls = estimate_downstream_lag(traj, cmd, args.max_lag)
@@ -1326,12 +1461,24 @@ def main() -> int:
 
         if len(cmd) >= 2 and len(sens) >= 2:
             xcorr, ls = estimate_downstream_lag(cmd, sens, args.max_lag)
-            delay_cmd_sens, cmd_sens_ok, cmd_sens_note = select_reliable_lag(
-                xcorr, ls, args.max_lag)
-            print(f"  电机   sens滞后cmd 最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f} | "
+            vel_xcorr = vel_ls = None
+            if len(cmd_v) >= 2 and len(sens_v) >= 2:
+                vel_xcorr, vel_ls = estimate_downstream_lag(cmd_v, sens_v, args.max_lag)
+            delay_cmd_sens, cmd_sens_ok, cmd_sens_note, q_phase_ms, v_delay_ms = (
+                select_motor_execution_lag(
+                    xcorr, ls, vel_xcorr, vel_ls, args.max_lag)
+            )
+            print(f"  电机   位置相位 sens相对cmd 最小二乘: delay={ls[0]*1000:+.1f}ms, r={ls[1]:.3f} | "
                   f"互相关: delay={xcorr[0]*1000:+.1f}ms, r={xcorr[1]:.3f}")
+            if vel_ls is not None:
+                print(f"  电机   速度滞后 sens_v相对cmd_v 最小二乘: delay={vel_ls[0]*1000:+.1f}ms, r={vel_ls[1]:.3f} | "
+                      f"互相关: delay={vel_xcorr[0]*1000:+.1f}ms, r={vel_xcorr[1]:.3f}")
+            print(f"  电机   执行延迟: {delay_cmd_sens[0]*1000:+.1f}ms")
             if cmd_sens_note:
-                print(f"    选用 {delay_cmd_sens[0]*1000:+.1f}ms  ({cmd_sens_note})")
+                print(f"    {cmd_sens_note}")
+        else:
+            q_phase_ms = float("nan")
+            v_delay_ms = None
 
         if len(traj) >= 2 and len(sens) >= 2:
             xcorr, ls = estimate_downstream_lag(traj, sens, args.max_lag)
@@ -1367,6 +1514,8 @@ def main() -> int:
             "cmd_sens_delay": _ms_or_nan(cmd_sens_ok, delay_cmd_sens),
             "cmd_sens_r": delay_cmd_sens[1],
             "cmd_sens_ok": cmd_sens_ok,
+            "cmd_sens_q_phase": q_phase_ms,
+            "cmd_sens_v_delay": float("nan") if v_delay_ms is None else v_delay_ms,
             "traj_sens_delay": _ms_or_nan(traj_sens_ok, delay_traj_sens),
             "traj_sens_r": delay_traj_sens[1],
             "traj_sens_ok": traj_sens_ok,
@@ -1398,19 +1547,21 @@ def main() -> int:
         def _fmt_ms(val):
             return "     跳过" if not np.isfinite(val) else f"{val:+9.1f}ms"
 
-        print(f"{'关节':>6}  {'侧':>4}  {'cmd滞后':>10}  {'r':>6}  {'sens滞后cmd':>12}  {'r':>6}  {'sens滞后traj':>12}  {'r':>6}  {'filt滞后':>10}")
-        print("-" * 70)
+        print(f"{'关节':>6}  {'侧':>4}  {'cmd滞后':>10}  {'r':>6}  {'执行滞后':>10}  {'q相位':>10}  {'v滞后':>10}  {'sens滞后traj':>12}  {'r':>6}  {'filt滞后':>10}")
+        print("-" * 90)
         for d in all_delays:
             print(f"#{d['joint']:>4}  {d['side']:>4}  {_fmt_ms(d['traj_cmd_delay'])}  {d['traj_cmd_r']:.3f}  "
-                  f"{_fmt_ms(d['cmd_sens_delay'])}  {d['cmd_sens_r']:.3f}  "
+                  f"{_fmt_ms(d['cmd_sens_delay'])}  {_fmt_ms(d['cmd_sens_q_phase'])}  "
+                  f"{_fmt_ms(d.get('cmd_sens_v_delay', float('nan')))}  "
                   f"{_fmt_ms(d['traj_sens_delay'])}  {d['traj_sens_r']:.3f}  "
                   f"{_fmt_ms(d['traj_filtered_delay'])}")
-        print("-" * 70)
+        print("-" * 90)
 
         print("=" * 70)
         print("跨关节统计 (样本标准差/方差 ddof=1)")
         _print_joint_stage_stats("cmd滞后traj", summarize_joint_stage(all_delays, "traj_cmd_delay"), indent="")
-        _print_joint_stage_stats("sens滞后cmd", summarize_joint_stage(all_delays, "cmd_sens_delay"), indent="")
+        _print_joint_stage_stats("电机执行滞后", summarize_joint_stage(all_delays, "cmd_sens_delay"), indent="")
+        _print_joint_stage_stats("位置相位(可为负)", summarize_joint_stage(all_delays, "cmd_sens_q_phase"), indent="")
         _print_joint_stage_stats("sens滞后traj", summarize_joint_stage(all_delays, "traj_sens_delay"), indent="")
         filt_all = summarize_joint_stage(all_delays, "traj_filtered_delay")
         if filt_all is not None and filt_all["n"] > 0 and np.isfinite(filt_all["mean"]) and abs(filt_all["mean"]) > 1e-9:
@@ -1429,7 +1580,7 @@ def main() -> int:
                 continue
             print(f"{side_name}")
             _print_joint_stage_stats("  cmd滞后traj", summarize_joint_stage(side_data, "traj_cmd_delay"), indent="")
-            _print_joint_stage_stats("  sens滞后cmd", summarize_joint_stage(side_data, "cmd_sens_delay"), indent="")
+            _print_joint_stage_stats("  电机执行滞后", summarize_joint_stage(side_data, "cmd_sens_delay"), indent="")
             _print_joint_stage_stats("  sens滞后traj", summarize_joint_stage(side_data, "traj_sens_delay"), indent="")
         print("=" * 70)
         print()

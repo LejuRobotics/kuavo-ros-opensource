@@ -55,6 +55,7 @@
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 
 // RL相关头文件
+#include <ocs2_core/misc/LoadData.h>
 #include <ocs2_core/misc/LinearInterpolation.h>
 #include <ocs2_robotic_tools/common/RotationDerivativesTransforms.h>
 #include <ocs2_robotic_tools/common/RotationTransforms.h>
@@ -106,6 +107,50 @@ namespace humanoid_controller
         out[i] = (i < field.size()) ? static_cast<double>(field[i]) : 0.0;
       }
       return out;
+    }
+
+    template <typename T>
+    void loadOptionalTaskParam(const std::string& taskFile, const std::string& key, T& value)
+    {
+      try
+      {
+        loadData::loadCppDataType(taskFile, key, value);
+      }
+      catch (const std::exception&)
+      {
+      }
+    }
+
+    void loadArmTrajInterpConfig(const std::string& taskFile, double controlCycleSec,
+                                 humanoidController_wheel_wbc::ArmTrajectoryInterpolator::Config& config,
+                                 bool& enableInterpolator)
+    {
+      config.kalmanVLimit = 30.0;
+      config.targetVAlpha = 1.0;
+      config.immediateUpdateOnNewTarget = true;
+      config.referenceUpdatePeriodSec = 0.010;
+      config.controlCycleSec = controlCycleSec;
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_v_limit", config.kalmanVLimit);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_pos", config.kalmanInitialPosVar);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_vel", config.kalmanInitialVelVar);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.fast_update_r_scale", config.fastUpdateRScale);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.target_v_alpha", config.targetVAlpha);
+      int immediate = config.immediateUpdateOnNewTarget ? 1 : 0;
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.immediate_update_on_new_target", immediate);
+      config.immediateUpdateOnNewTarget = (immediate != 0);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.timeout_sec", config.timeoutSec);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.reference_update_period",
+                            config.referenceUpdatePeriodSec);
+      try
+      {
+        loadData::loadCppDataType(taskFile, "armTrajInterpKinematicLimit.enable", enableInterpolator);
+      }
+      catch (const std::exception&)
+      {
+        enableInterpolator = false;
+      }
     }
 
     double computeRlToRlVelocityDipScale(double alpha, double min_scale, double midpoint)
@@ -388,6 +433,15 @@ namespace humanoid_controller
     if(controllerNh_.hasParam("/visualize_humanoid"))
       controllerNh_.getParam("/visualize_humanoid", visualizeHumanoid_);
     dt_ = 1.0 / controlFrequency;
+    {
+      humanoidController_wheel_wbc::ArmTrajectoryInterpolator::Config interpConfig;
+      loadArmTrajInterpConfig(taskFile, dt_, interpConfig, enable_arm_traj_interpolator_);
+      armTrajectoryInterpolator_.configure(interpConfig);
+      ROS_INFO_STREAM("[humanoidController] arm trajectory interpolator enable="
+                      << (enable_arm_traj_interpolator_ ? "true" : "false")
+                      << " kalman_v_limit=" << interpConfig.kalmanVLimit
+                      << " target_v_alpha=" << interpConfig.targetVAlpha);
+    }
 
     // 存储并初始化 WBC 控制频率
     wbc_frequency_ = controlFrequency;
@@ -975,6 +1029,7 @@ namespace humanoid_controller
       );
       armJointSynchronizationSrv_ = controllerNh_.advertiseService("/arm_joint_synchronization", &humanoidController::armJointSynchronizationCallback, this); 
       enableArmCtrlSrv_ = controllerNh_.advertiseService("/enable_wbc_arm_trajectory_control", &humanoidController::enableArmTrajectoryControlCallback, this);
+      enableArmTrajInterpSrv_ = controllerNh_.advertiseService("/enable_arm_traj_interpolator", &humanoidController::enableArmTrajInterpCallback, this);
       enableMmArmCtrlSrv_ = controllerNh_.advertiseService("/enable_mm_wbc_arm_trajectory_control", &humanoidController::enableMmArmTrajectoryControlCallback, this);
       getMmArmCtrlSrv_ = controllerNh_.advertiseService("/get_mm_wbc_arm_trajectory_control", &humanoidController::getMmArmCtrlCallback, this);
       jointCmdPub_ = controllerNh_.advertise<kuavo_msgs::jointCmd>("/joint_cmd", 10);
@@ -2542,23 +2597,51 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
         }
       }
 
+      const bool want_ultra_fast =
+          (req.control_mode == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
+      const bool already_ultra_fast =
+          static_cast<bool>(use_ros_arm_joint_trajectory_) &&
+          (ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
+      if (want_ultra_fast && already_ultra_fast)
+      {
+        res.result = true;
+        return true;
+      }
+
+      // 退出 ultra_fast 时把 10Hz 滤波接到当前插补指令。真正避免跳变的交接
+      // 在 WBC 插补路径下降沿完成（MPC desired 往往比这个服务更早离开 EXTERN）。
+      if (!want_ultra_fast && last_ultra_fast_mode_)
+      {
+        seedArmCommandFiltersFromCurrentCmd();
+      }
+
       bool old_mode = use_ros_arm_joint_trajectory_;
       use_ros_arm_joint_trajectory_ = req.control_mode;
 
       ultra_fast_mode_ = req.control_mode;
-      if(req.control_mode == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode)
+      if(want_ultra_fast)
       {
         last_ultra_fast_mode_ = true;
+        last_wbc_arm_cmd_q_.resize(0);
+        last_wbc_arm_cmd_v_.resize(0);
+        ultra_fast_mode_ = kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode;
         ROS_INFO_STREAM("[humanoidController] ultra fast mode");
+        if (!enable_arm_traj_interpolator_)
+        {
+          std_srvs::SetBool::Request interpReq;
+          std_srvs::SetBool::Response interpRes;
+          interpReq.data = true;
+          enableArmTrajInterpCallback(interpReq, interpRes);
+        }
       }
-      else      {
+      else
+      {
         last_ultra_fast_mode_ = false;
         ROS_INFO_STREAM("[humanoidController] normal arm control mode");
       }
 
-      if(last_ultra_fast_mode_ && use_ros_arm_joint_trajectory_){
-        ultra_fast_mode_ = kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode;
-        ROS_INFO_STREAM("[humanoidController] ultra fast mode Enter Again");
+      if (ultra_fast_mode_ != kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode) {
+        resetArmTrajInterpolator();
       }
       
       // 记录模式切换
@@ -3389,6 +3472,158 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     }
   }
 
+  bool humanoidController::enableArmTrajInterpCallback(std_srvs::SetBool::Request& req,
+                                                       std_srvs::SetBool::Response& res)
+  {
+    if (enable_arm_traj_interpolator_ == req.data)
+    {
+      res.success = true;
+      res.message = std::string("enable_arm_traj_interpolator already ") + (req.data ? "true" : "false");
+      return true;
+    }
+
+    enable_arm_traj_interpolator_ = req.data;
+    if (enable_arm_traj_interpolator_)
+    {
+      vector_t current_arm_q = vector_t::Zero(armNumReal_);
+      if (jointPosWBC_.size() >= jointNumReal_ + waistNum_ + armNumReal_)
+      {
+        current_arm_q = jointPosWBC_.segment(jointNumReal_ + waistNum_, armNumReal_);
+      }
+      else if (arm_joint_trajectory_.pos.size() == armNumReal_)
+      {
+        current_arm_q = arm_joint_trajectory_.pos;
+      }
+      armTrajectoryInterpolator_.reset(current_arm_q, ros::Time::now());
+      arm_traj_interp_prev_q_ = current_arm_q;
+    }
+    else
+    {
+      resetArmTrajInterpolator();
+    }
+    ROS_INFO("[humanoidController] enable_arm_traj_interpolator set to %s", req.data ? "true" : "false");
+    res.success = true;
+    res.message = std::string("enable_arm_traj_interpolator set to ") + (req.data ? "true" : "false");
+    return true;
+  }
+
+  void humanoidController::resetArmTrajInterpolator()
+  {
+    if (arm_traj_interp_prev_q_.size() > 0)
+    {
+      armTrajectoryInterpolator_.reset(arm_traj_interp_prev_q_, ros::Time::now());
+    }
+    arm_traj_interp_prev_q_.resize(0);
+  }
+
+  void humanoidController::seedArmCommandFiltersFromCurrentCmd()
+  {
+    const int n = static_cast<int>(armNumReal_);
+    if (n <= 0)
+    {
+      return;
+    }
+
+    vector_t q = vector_t::Zero(n);
+    bool have_q = false;
+    if (last_wbc_arm_cmd_q_.size() == n)
+    {
+      q = last_wbc_arm_cmd_q_;
+      have_q = true;
+    }
+    else if (arm_traj_interp_prev_q_.size() == n)
+    {
+      q = arm_traj_interp_prev_q_;
+      have_q = true;
+    }
+    else if (optimizedState2WBC_mrt_.size() >= n)
+    {
+      q = optimizedState2WBC_mrt_.tail(n);
+      have_q = true;
+    }
+    else if (jointPosWBC_.size() >= static_cast<int>(jointNumReal_ + waistNum_ + n))
+    {
+      q = jointPosWBC_.segment(jointNumReal_ + waistNum_, n);
+      have_q = true;
+    }
+    else if (arm_joint_trajectory_.pos.size() == n)
+    {
+      q = arm_joint_trajectory_.pos;
+      have_q = true;
+    }
+    if (!have_q)
+    {
+      return;
+    }
+
+    vector_t v = vector_t::Zero(n);
+    if (last_wbc_arm_cmd_v_.size() == n)
+    {
+      v = last_wbc_arm_cmd_v_;
+    }
+    else if (optimizedInput2WBC_mrt_.size() >= n)
+    {
+      v = optimizedInput2WBC_mrt_.tail(n);
+    }
+    else if (arm_joint_trajectory_.vel.size() == n)
+    {
+      v = arm_joint_trajectory_.vel;
+    }
+
+    arm_joint_pos_filter_.reset(q);
+    arm_joint_vel_filter_.reset(v);
+    if (arm_joint_pos_cmd_prev_.size() == n)
+    {
+      arm_joint_pos_cmd_prev_ = q;
+    }
+    absolute_arm_prev_filtered_pos_ = q;
+    absolute_arm_velocity_initialized_ = false;
+    ROS_INFO("[humanoidController] seeded arm command filters from current cmd (avoid 2->1 twitch)");
+  }
+
+  bool humanoidController::applyArmTrajInterpolator(const ros::Time& time, double actual_dt,
+                                                    vector_t& qOut, vector_t& vOut)
+  {
+    (void)actual_dt;
+    const int n = static_cast<int>(armNumReal_);
+    qOut = vector_t::Zero(n);
+    vOut = vector_t::Zero(n);
+    if (n <= 0 || arm_joint_trajectory_.pos.size() != n)
+    {
+      return false;
+    }
+
+    vector_t targetV = vector_t::Zero(n);
+    if (arm_joint_trajectory_.vel.size() == n)
+    {
+      targetV = arm_joint_trajectory_.vel;
+    }
+    armTrajectoryInterpolator_.ingestRawTarget(time, arm_joint_trajectory_.pos, targetV);
+
+    humanoidController_wheel_wbc::ArmTrajectoryInterpolator::ModeFlags modeFlags;
+    modeFlags.useArmTrajectoryControl = true;
+    const vector_t currentArmQ =
+        (arm_traj_interp_prev_q_.size() == n) ? arm_traj_interp_prev_q_ : arm_joint_trajectory_.pos;
+    const auto output = armTrajectoryInterpolator_.compute(time, modeFlags, currentArmQ);
+    if (!output.valid || output.smoothQ.size() != n)
+    {
+      return false;
+    }
+
+    qOut = output.smoothQ;
+    // 与轮臂相同：q/v 都用插补器同一对 PV，不要透传 100Hz IK v，也不要在控制器对 q 再差分。
+    if (output.smoothV.size() == n)
+    {
+      vOut = output.smoothV;
+    }
+    else
+    {
+      vOut = targetV;
+    }
+    arm_traj_interp_prev_q_ = qOut;
+    return true;
+  }
+
   void humanoidController::update(const ros::Time &time, const ros::Duration &dfd)
   {
     // 正常：仅看 isPreUpdateComplete。座椅段0：SitUp 专属 ownsPreUpdate，与开机蹲起路径隔离。
@@ -3989,19 +4224,63 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             optimizedState2WBC_mrt_.tail(armNumReal_) = mm_arm_joint_trajectory_.pos;
         }
       }
-      if (use_ros_arm_joint_trajectory_ && resetting_mpc_state_ == ResettingMpcState::NORMAL)
+      const bool interpolator_path =
+          use_ros_arm_joint_trajectory_ &&
+          resetting_mpc_state_ == ResettingMpcState::NORMAL &&
+          mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL &&
+          mpcArmControlMode_ == ArmControlMode::EXTERN_CONTROL &&
+          ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode;
+      // 只在插补路径下降沿交接：1→2 等待 EXTERN 时 interpolator_path 也是 false，
+      // 若在那里 seed/hold 会把上一轮 mode2 的指令灌进 joint_cmd。
+      const bool hold_last_interp_cmd =
+          was_interpolator_path_ && !interpolator_path &&
+          last_wbc_arm_cmd_q_.size() == armNumReal_;
+      if (was_interpolator_path_ && !interpolator_path)
+      {
+        seedArmCommandFiltersFromCurrentCmd();
+      }
+      was_interpolator_path_ = interpolator_path;
+
+      if (hold_last_interp_cmd)
+      {
+        // 退出插补的当拍继续发上一拍指令，避免 filter.update(MPC 复位姿态) 漏出一帧跳变。
+        optimizedState2WBC_mrt_.tail(armNumReal_) = last_wbc_arm_cmd_q_;
+        if (last_wbc_arm_cmd_v_.size() == armNumReal_)
+        {
+          optimizedInput2WBC_mrt_.tail(armNumReal_) = last_wbc_arm_cmd_v_;
+        }
+        else
+        {
+          optimizedInput2WBC_mrt_.tail(armNumReal_).setZero();
+        }
+      }
+      else if (use_ros_arm_joint_trajectory_ && resetting_mpc_state_ == ResettingMpcState::NORMAL)
       {
         if (mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL && mpcArmControlMode_ == ArmControlMode::EXTERN_CONTROL)
         {
           if(ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode)
           {
-            // 超低延时模式沿用上游直接提供的位置、速度参考。
-            optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.pos;
-            optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.vel;
+            // 增量 ultra-fast：q/v 都走插补器（与轮臂 applyArmTrajectoryInterpolation 一致）。
+            vector_t interp_q;
+            vector_t interp_v;
+            if (enable_arm_traj_interpolator_ &&
+                applyArmTrajInterpolator(time, dfd.toSec(), interp_q, interp_v))
+            {
+              optimizedState2WBC_mrt_.tail(armNumReal_) = interp_q;
+              optimizedInput2WBC_mrt_.tail(armNumReal_) = interp_v;
+            }
+            else
+            {
+              optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.pos;
+              optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_trajectory_.vel;
+            }
+            last_wbc_arm_cmd_q_ = optimizedState2WBC_mrt_.tail(armNumReal_);
+            last_wbc_arm_cmd_v_ = optimizedInput2WBC_mrt_.tail(armNumReal_);
             absolute_arm_velocity_initialized_ = false;
           }
           else
           {
+            resetArmTrajInterpolator();
             // 普通绝对式轨迹通常不提供有效速度。先得到最终位置参考，再直接对该
             // 位置做差分，保证发送给驱动的 q/dq 运动学一致。这里不能再叠加独立
             // 的速度低通，否则 dq 会相对 q 的导数产生额外相位延迟。
@@ -4057,6 +4336,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         else if(only_half_up_body_ && mpcArmControlMode_desired_ == ArmControlMode::EXTERN_CONTROL)
         {
           absolute_arm_velocity_initialized_ = false;
+          resetArmTrajInterpolator();
           optimizedState2WBC_mrt_.segment<7>(24) = arm_joint_trajectory_.pos.segment<7>(0);
           optimizedState2WBC_mrt_.segment<7>(24+7) = arm_joint_trajectory_.pos.segment<7>(7);
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_pos_filter_.update(optimizedState2WBC_mrt_.tail(armNumReal_));
@@ -4065,6 +4345,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         else
         {
           absolute_arm_velocity_initialized_ = false;
+          resetArmTrajInterpolator();
           // use filter output
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_joint_pos_filter_.update(optimizedState2WBC_mrt_.tail(armNumReal_));
           optimizedInput2WBC_mrt_.tail(armNumReal_) = arm_joint_vel_filter_.update(optimizedInput2WBC_mrt_.tail(armNumReal_));
@@ -4074,6 +4355,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       else
       {
         absolute_arm_velocity_initialized_ = false;
+        resetArmTrajInterpolator();
         if (resetting_mpc_state_ != ResettingMpcState::NORMAL)
         {
           optimizedState2WBC_mrt_.tail(armNumReal_) = arm_interpolation_result_;
@@ -4090,6 +4372,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       else
       {
         absolute_arm_velocity_initialized_ = false;
+        resetArmTrajInterpolator();
       }
 
       // *************************** arm joint trajectory **********************************
@@ -4275,6 +4558,16 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             {
               posDes = posDes + 0.5 * wbc_planned_joint_acc * dt * dt;
               velDes = velDes + wbc_planned_joint_acc * dt;
+              if (ultra_fast_mode_ == kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode &&
+                  armNumReal_ > 0 && posDes.size() >= armNumReal_ && velDes.size() >= armNumReal_)
+              {
+                const vector_t armPosKeep =
+                    centroidal_model::getJointAngles(optimizedState2WBC_mrt_, infoWBC).tail(armNumReal_);
+                const vector_t armVelKeep =
+                    centroidal_model::getJointVelocities(optimizedInput2WBC_mrt_, infoWBC).tail(armNumReal_);
+                posDes.tail(armNumReal_) = armPosKeep;
+                velDes.tail(armNumReal_) = armVelKeep;
+              }
             }
           }
 

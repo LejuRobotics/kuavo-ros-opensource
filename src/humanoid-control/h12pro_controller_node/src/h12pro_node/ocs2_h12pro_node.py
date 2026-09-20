@@ -278,10 +278,6 @@ class H12ToJoyControllerNode:
         # 394/402 选躯干组(锁存 GUIDE 或 M1 持续按下, 使摇杆持续产该组指令)。
         self.g11_torso_group = None       # None/xz(394)/yawpitch(402)
         self.g11_leg_pulse = {}           # {btn_idx: 截止时间} 一次性边沿脉冲(切模式/复位)
-        # 组锁存看门狗: 最近一次收到下肢页(CH12=1178)的时间戳。
-        # 屏幕在下肢页期间会持续逐帧上报 1178; 若长时间收不到(屏幕卡死/协议失联),
-        # 说明锁存来源已不可信, 需自动释放, 否则 GUIDE/M1 会被永久按住。
-        self._g11_leg_page_at = 0.0
 
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
@@ -409,21 +405,13 @@ class H12ToJoyControllerNode:
     # 保证下游 C++ 边沿检测可靠收到(50Hz 限频下不丢帧)
     G11_LEG_PULSE_DURATION = 0.2
 
-    # 组锁存看门狗超时(秒): 超过该时长未再收到下肢页(1178)则自动释放组锁存。
-    # 屏幕在下肢页会持续上报 CH12=1178, 正常操作不会触发该兜底。
-    G11_LEG_LATCH_TIMEOUT = 2.0
-
-    def note_g11_leg_page(self) -> None:
-        """下肢页(1178)每帧调用, 刷新组锁存看门狗时间戳。"""
-        self._g11_leg_page_at = time.time()
-
     def release_g11_leg_latch(self, reason: str = "") -> None:
         """释放轮臂下肢桥锁存(躯干组选择 + 未过期的边沿脉冲)。
 
-        离开下肢页 / 遥控器断连 / 下肢页失联超时时调用。否则 g11_torso_group
-        会一直被锁存按压 GUIDE/M1: 在 C++ 侧 current_mode_==TORSO_CONTROL 时,
-        摇杆将只产躯干速度而不下发底盘速度(gh_combo_active 需 GUIDE+M1 同按,
-        单锁存不会屏蔽), 底盘将无法驾驶。
+        由两个事件触发: 离开下肢页(1178) / 遥控器断连。
+        否则 g11_torso_group 会一直被锁存按压 GUIDE/M1: 在 C++ 侧
+        current_mode_==TORSO_CONTROL 时, 摇杆将只产躯干速度而不下发底盘速度
+        (gh_combo_active 需 GUIDE+M1 同按, 单锁存不会屏蔽), 底盘将无法驾驶。
         """
         if self.g11_torso_group is not None or self.g11_leg_pulse:
             rospy.logwarn(
@@ -441,11 +429,6 @@ class H12ToJoyControllerNode:
         - g11_leg_pulse 内的一次性边沿(切模式 GUIDE+A/B/C、复位 M2)也在此写
         """
         now = time.time()
-        # 0) 看门狗兜底: 下肢页失联/屏幕卡死 -> 自动释放锁存
-        if (self.g11_torso_group is not None
-                and now - self._g11_leg_page_at > self.G11_LEG_LATCH_TIMEOUT):
-            self.release_g11_leg_latch(
-                f"下肢页 {self.G11_LEG_LATCH_TIMEOUT:.1f}s 无上报")
         # 1) 锁存修饰键(躯干组选择)
         if self.g11_torso_group == "xz":
             self.joy_msg.buttons[self.G12_BTN_GUIDE] = 1
@@ -729,7 +712,9 @@ class H12PROControllerNode:
         self.screen_cmd_enabled = (_controller_type == "g11" and _G11_SCREEN_AVAILABLE)
         self.screen_parser = g11proto.ScreenCmdParser() if (g11proto is not None) else None
         self.screen_prev_page = -1
-        self._g11_parser_counters = None   # (noise, unknown, hidden) 上次上报值
+        # 上次已上报的计数 (cmd_drops, state_holds, unknown_cmds, hidden_cmds)
+        self._g11_parser_counters = None
+        self._g11_parser_counters_at = 0.0   # 上次上报时间(自管节流, 见上报方法)
         # ================================================================
 
         # ===== G11 末端(夹爪)跟随桥状态 =====
@@ -882,7 +867,7 @@ class H12PROControllerNode:
 
         G11 遥控器使用独立的 g11_* 映射表(实体键 SW1/SW2/H/B1/B2 + AUX 旋钮,
         通道布局/按键语义与 G12 完全不同); H12/G12 使用默认表, 零改动。
-        屏幕通道(CH12/CH13)不在此表内, 由 _handle_g11_screen 单独解析。
+        屏幕通道(CH14/CH15/CH16)不在此表内, 由 _handle_g11_screen 单独解析。
 
         Returns:
             Dict containing validated configuration.
@@ -997,35 +982,53 @@ class H12PROControllerNode:
             rospy.logerr(f"Error processing channel message: {e}")
 
     # ==================== G11 屏幕指令(薄引用 g11_screen_protocol) ====================
-    def _report_g11_parser_counters(self) -> None:
-        """上报协议库诊断计数(越界丢帧/未知码/未启用码), 有变化时节流打印。
+    # 协议计数上报周期(秒)
+    G11_COUNTER_REPORT_PERIOD = 5.0
 
-        越界帧(如固件偶发写 2100 -> 收 1962)会被整帧丢弃: 只丢不报时现场
-        "偶尔不响应"没有任何线索; 842~882 这 6 个"已知但未启用"的码同样如此。
+    def _report_g11_parser_counters(self) -> None:
+        """上报协议库诊断计数(三路通道异常/未知码/未启用码), 有变化时打印。
+
+        按通道分开报, 便于直接看出是哪条通道读到异常值:
+          - CH14 异常 -> 沿用最后有效值(无害)
+          - CH15 异常 -> 整帧丢弃(命令可能丢失)
+          - CH16 异常 -> 沿用最后有效值(无害)
         """
         p = self.screen_parser
         if p is None:
             return
-        cur = (getattr(p, "noise_frames", 0),
+        cur = (getattr(p, "cmd_drops", 0),
+               getattr(p, "state_holds", 0),
                getattr(p, "unknown_cmds", 0),
                getattr(p, "hidden_cmds", 0))
         if cur == getattr(self, "_g11_parser_counters", None):
             return
-        old = getattr(self, "_g11_parser_counters", None) or (0, 0, 0)
+        # 未到周期先攒着(不改基线), 下次进来再一起报
+        now = time.time()
+        if now - getattr(self, "_g11_parser_counters_at", 0.0) < self.G11_COUNTER_REPORT_PERIOD:
+            return
+        old = getattr(self, "_g11_parser_counters", None) or (0, 0, 0, 0)
         self._g11_parser_counters = cur
-        rospy.logwarn_throttle(5.0,
-            f"[G11Screen] 协议计数: 越界丢帧={cur[0]}(+{cur[0] - old[0]}) "
-            f"未知码={cur[1]}(+{cur[1] - old[1]}) "
-            f"未启用码(842~882)={cur[2]}(+{cur[2] - old[2]})")
+        self._g11_parser_counters_at = now
+        # 三路通道异常次数
+        abn = getattr(p, "ch_abnormal", None) or {}
+        abn_str = " ".join(f"CH{ch}={n}" for ch, n in sorted(abn.items()))
+        last = getattr(p, "last_abnormal", None)
+        rospy.logwarn(
+            f"[G11Screen] 协议计数: 通道异常[{abn_str or 'CH14=0 CH15=0 CH16=0'}] "
+            f"CH15越界丢帧={cur[0]}(+{cur[0] - old[0]}) "
+            f"状态沿用={cur[1]}(+{cur[1] - old[1]}) "
+            f"未知码={cur[2]}(+{cur[2] - old[2]}) "
+            f"未启用码(842~882)={cur[3]}(+{cur[3] - old[3]})"
+            + (f" 最近异常=CH{last[0]}读到{last[1]}" if last else ""))
 
     def _handle_g11_screen(self, msg: h12proRemoteControllerChannel) -> None:
-        """解析 G11 屏幕虚拟通道指令: CH12 页面码 + CH13 功能码脉冲。
+        """解析 G11 屏幕虚拟通道指令: CH14 页面码 + CH15 功能码脉冲 + CH16 设置位。
         协议表/上升沿/页面校验全部由 g11_controller_node 包的协议库实现,
         本方法只负责: 取通道值喂解析器, 命中后映射到本进程的状态机/头部控制执行。
         """
         if not self.screen_cmd_enabled or self.screen_parser is None:
             return
-        # 通道数保护: 屏幕虚拟通道在 CH12~CH14, 需要 16 通道。若 REMOTE_CONTROLLER_TYPE
+        # 通道数保护: 屏幕虚拟载荷在 CH14~CH16, 需要 16 通道。若 REMOTE_CONTROLLER_TYPE
         # 只在一侧生效(publisher 发 12 / joy 节点按 16 解析), 下面取下标会 IndexError,
         # 被外层 except 吞成每帧一条日志(50Hz 刷屏)且屏幕指令静默失效。
         if len(msg.channels) < 16:
@@ -1034,47 +1037,47 @@ class H12PROControllerNode:
                 f"REMOTE_CONTROLLER_TYPE=g11 在 h12pro_channel_publisher 与 joy_node 上均已生效")
             return
         try:
-            ch12_page = int(msg.channels[11])   # CH12 页面码(接收值)
-            ch13_cmd = int(msg.channels[12])    # CH13 功能码(接收值)
-            ch14_val = int(msg.channels[13])    # CH14 扩展状态(接收值)
+            # 屏幕载荷在 CH14/CH15/CH16 (msg.channels 是 0-based), CH12/CH13 不读取
+            page_val = int(msg.channels[13])    # CH14 页面码(接收值)
+            cmd_val = int(msg.channels[14])     # CH15 功能码(接收值)
+            cfg_val = int(msg.channels[15])     # CH16 设置位(接收值)
 
-            hit = self.screen_parser.update(ch12_page, ch13_cmd, ch14=ch14_val)
+            hit = self.screen_parser.update(page_val, cmd_val, cfg=cfg_val)
             self._report_g11_parser_counters()
             try:
                 set_g11_boot_force(self.screen_parser.boot_force)
             except Exception as _e:
                 rospy.logwarn_throttle(5.0, f"[G11Screen] sync boot_force failed: {_e}")
 
-            # 下肢页(1178)逐帧刷新看门狗时间戳(供组锁存失联自动释放)
-            if ch12_page == g11proto.PAGE_LEG_RECV:
-                self.h12_to_joy_node.note_g11_leg_page()
+            # 页面码用协议库解析出的最后有效值(越界时沿用)
+            eff_page = getattr(self.screen_parser, "effective_page", page_val)
 
             # 页面变化日志(节流)
-            if self.screen_prev_page != ch12_page:
+            if self.screen_prev_page != eff_page:
                 prev_page = self.screen_prev_page
                 page_name = g11proto.SCREEN_PAGE_RECV.get(
-                    ch12_page, f"UNKNOWN({ch12_page})")
-                rospy.loginfo(f"[G11Screen] CH12 page -> {ch12_page} ({page_name})")
-                self.screen_prev_page = ch12_page
+                    eff_page, f"UNKNOWN({eff_page})")
+                rospy.loginfo(f"[G11Screen] CH14 page -> {eff_page} ({page_name})")
+                self.screen_prev_page = eff_page
 
                 # 离开下肢页 -> 释放轮臂下肢锁存(躯干组选择/未过期边沿脉冲)。
                 # 否则 g11_torso_group 常驻, C++ 躯干控制模式下 GUIDE/M1 一直被
                 # 按住, 摇杆只产躯干速度、底盘无法驾驶。
                 if (prev_page == g11proto.PAGE_LEG_RECV
-                        and ch12_page != g11proto.PAGE_LEG_RECV):
+                        and eff_page != g11proto.PAGE_LEG_RECV):
                     self.h12_to_joy_node.release_g11_leg_latch(
-                        f"离开下肢页 {prev_page} -> {ch12_page}")
+                        f"离开下肢页 {prev_page} -> {eff_page}")
 
                 # 屏幕选型绑定: 进入人型/轮臂二级菜单 -> 记录; 回到首页/空闲 -> 清除
                 # (三级页 1162+ 不改变绑定; 未选择时首页直接实体H启动走旧推断逻辑)
                 try:
-                    if ch12_page == g11proto.PAGE_HUMANOID_RECV:
+                    if eff_page == g11proto.PAGE_HUMANOID_RECV:
                         set_g11_robot_kind("humanoid")
                         rospy.loginfo("[G11Screen] 绑定机器人类型: humanoid (人型)")
-                    elif ch12_page == g11proto.PAGE_WHEEL_RECV:
+                    elif eff_page == g11proto.PAGE_WHEEL_RECV:
                         set_g11_robot_kind("wheel")
                         rospy.loginfo("[G11Screen] 绑定机器人类型: wheel (轮臂)")
-                    elif ch12_page == g11proto.PAGE_IDLE_RECV:
+                    elif eff_page == g11proto.PAGE_IDLE_RECV:
                         set_g11_robot_kind("")
                         rospy.loginfo("[G11Screen] 回到首页, 已清除机器人类型绑定")
                 except Exception as e:
@@ -1085,12 +1088,12 @@ class H12PROControllerNode:
 
             if hit.get("rejected"):
                 rospy.logwarn(
-                    f"[G11Screen] {hit['func_name']} (CH13={hit['cmd']}) rejected: "
-                    f"page mismatch (CH12={hit['page']}, expect {hit['expect_page']})")
+                    f"[G11Screen] {hit['func_name']} (CH15={hit['cmd']}) rejected: "
+                    f"page mismatch (CH14={hit['page']}, expect {hit['expect_page']})")
                 return
 
             rospy.logwarn(
-                f"[G11Screen] TRIGGER: {hit['func_name']} (CH13={hit['cmd']}, CH12={hit['page']})")
+                f"[G11Screen] TRIGGER: {hit['func_name']} (CH15={hit['cmd']}, CH14={hit['page']})")
             self._g11_screen_exec(hit["func_name"], hit["type"], hit["target"])
         except Exception as e:
             rospy.logerr(f"[G11Screen] error: {e}")
@@ -1200,7 +1203,7 @@ class H12PROControllerNode:
         return int(round(max(0.0, min(100.0, pct))))
 
     def _update_g11_claw_follow(self, msg: h12proRemoteControllerChannel) -> None:
-        """按 CH14 claw 位与 AUX 开度向夹爪发布目标位置(仅 g11 遥控器)。"""
+        """按 CH16 claw 位与 AUX 开度向夹爪发布目标位置(仅 g11 遥控器)。"""
         if _controller_type != "g11" or self.screen_parser is None:
             return
         try:

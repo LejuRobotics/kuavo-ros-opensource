@@ -1445,6 +1445,8 @@ namespace humanoidController_wheel_wbc
       const bool quickArmModeActive =
           (quickMode_ == 2 || quickMode_ == 3) && (lbMpcMode == 1 || lbMpcMode == 3);
       vector_t requestedArmV;
+      // 插补/快模式沿用上游速度。500Hz 对 joint_q 差分会把位置台阶放大成速度毛刺，
+      // 手臂抖动。q/v 一致性改由增量 IK 用发布位置差分填 /kuavo_arm_traj.velocity。
       if (enable_arm_traj_interpolator_ || quickArmModeActive) {
         requestedArmV = qvelLimit.tail(armNum_);
       } else {

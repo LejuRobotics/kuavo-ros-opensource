@@ -20,6 +20,7 @@
 #include <std_msgs/Int32.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <std_srvs/SetBool.h>
 #include <iomanip>
 #include <cmath>
 #include <chrono>
@@ -612,6 +613,17 @@ void Quest3IkIncrementalROS::fsmEnter() {
 
 void Quest3IkIncrementalROS::fsmChange() {
   if (!incrementalController_->isIncrementalMode()) return;
+
+  // fsmEnter 在 1s 进入窗口里每周期 forceDeactivate + reset。这里如果再处理
+  // 模式边沿 / forceActivate / 打 WBC 服务，会和 fsmEnter 对着干。
+  if (isInMode2EnterTimeout()) {
+    if (joyStickHandlerPtr_) {
+      joyStickHandlerPtr_->hasLeftArmCtrlModeChanged();
+      joyStickHandlerPtr_->hasRightArmCtrlModeChanged();
+    }
+    return;
+  }
+
   bool leftHandCtrlModeChanged = joyStickHandlerPtr_->hasLeftArmCtrlModeChanged();
   bool rightHandCtrlModeChanged = joyStickHandlerPtr_->hasRightArmCtrlModeChanged();
 
@@ -621,13 +633,13 @@ void Quest3IkIncrementalROS::fsmChange() {
       rightHandSmoother_->updateModeChangingStateIfNeeded(rightHandCtrlModeChanged);
 
   if (!leftChangingMaintainUpdated && !rightChangingMaintainUpdated) {
-    // fsmChange 结束后，调用 forceActivateAllArmCtrlMode（执行指定次数，增强鲁棒性）
     if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
       forceActivateAllArmCtrlMode();
       requestWbcArmTrajectoryControl(
           static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode),
           true,
           "enable incremental arm trajectory control");
+      requestArmTrajInterpolator(true, true, "enable arm trajectory interpolator");
       activateAllArmCtrlModeCounter_++;
     }
     return;  // 没有模式切换，直接返回
@@ -1635,13 +1647,58 @@ bool Quest3IkIncrementalROS::requestWbcArmTrajectoryControl(int controlMode,
     return true;
   }
 
+  if (lastRequestedWbcArmTrajMode_ == controlMode) {
+    return true;
+  }
+
   kuavo_msgs::changeArmCtrlMode srv;
   srv.request.control_mode = controlMode;
   if (!enableWbcArmTrajectoryControlClient_.call(srv) || !srv.response.result) {
     ROS_ERROR("[Quest3IkIncrementalROS] Failed to %s", context);
     return false;
   }
+  lastRequestedWbcArmTrajMode_ = controlMode;
   return true;
+}
+
+bool Quest3IkIncrementalROS::requestArmTrajInterpolator(bool enable,
+                                                        bool requireIncrementalMode,
+                                                        const char* context) {
+  std::lock_guard<std::mutex> lock(wbcArmTrajectoryControlMutex_);
+
+  if (requireIncrementalMode && armControlMode_.load() != 2) {
+    ROS_DEBUG("[Quest3IkIncrementalROS] Skip %s: arm control mode is no longer incremental", context);
+    return true;
+  }
+
+  if (hasLastArmTrajInterpolatorEnable_ && lastArmTrajInterpolatorEnable_ == enable) {
+    return true;
+  }
+
+  if (!ros::service::exists("/enable_arm_traj_interpolator", false)) {
+    ROS_WARN_THROTTLE(2.0, "[Quest3IkIncrementalROS] Service /enable_arm_traj_interpolator not available (%s)",
+                      context);
+    return false;
+  }
+
+  std_srvs::SetBool srv;
+  srv.request.data = enable;
+  if (!enableArmTrajInterpolatorClient_.call(srv) || !srv.response.success) {
+    ROS_ERROR("[Quest3IkIncrementalROS] Failed to %s", context);
+    return false;
+  }
+  lastArmTrajInterpolatorEnable_ = enable;
+  hasLastArmTrajInterpolatorEnable_ = true;
+  return true;
+}
+
+bool Quest3IkIncrementalROS::isInMode2EnterTimeout() {
+  std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+  if (mode2EnterTime_.isZero()) {
+    return false;
+  }
+  const double elapsed = (ros::Time::now() - mode2EnterTime_).toSec();
+  return std::isfinite(elapsed) && elapsed >= 0.0 && elapsed <= MODE_2_TIMEOUT_DURATION;
 }
 
 void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
@@ -1655,17 +1712,27 @@ void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
 
     using Request = kuavo_msgs::SetIncrementalArmTrajLink::Request;
     if ((oldMode == 0 || oldMode == 1) && newMode == 2) {
-      std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
-      mode2EnterTime_ = ros::Time::now();
+      ros::Time enterTime;
+      {
+        std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
+        mode2EnterTime_ = ros::Time::now();
+        enterTime = mode2EnterTime_;
+      }
       ROS_INFO("[Quest3IkIncrementalROS] Mode 2 entered at time: %.3f, timeout duration: %.1f seconds",
-               mode2EnterTime_.toSec(),
+               enterTime.toSec(),
                MODE_2_TIMEOUT_DURATION);
       if (!arm_traj_writer_.setTransport(Request::TRANSPORT_SHM)) {
         ROS_ERROR("[Quest3IkIncrementalROS] Failed to enable SHM on mode 2 enter");
       }
+      requestWbcArmTrajectoryControl(
+          static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode),
+          false,
+          "enable incremental arm trajectory control");
+      requestArmTrajInterpolator(true, false, "enable arm trajectory interpolator");
     } else if (oldMode == 2 && newMode != 2) {
       requestWbcArmTrajectoryControl(
           static_cast<int>(MpcRefUpdateMode::DISABLED_ARM), false, "disable WBC ROS arm trajectory control");
+      requestArmTrajInterpolator(false, false, "disable arm trajectory interpolator");
 
       if (!arm_traj_writer_.setTransport(Request::TRANSPORT_NONE)) {
         ROS_ERROR("[Quest3IkIncrementalROS] Failed to disable SHM on mode 2 exit");
@@ -1676,18 +1743,63 @@ void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
   }
 }
 
+void Quest3IkIncrementalROS::invalidateLastPublishedArmTraj() {
+  hasLastArmTrajPublishStamp_ = false;
+  lastArmTrajPublishStamp_ = ros::Time(0);
+  hasLastPublishedArmPosition_ = false;
+}
+
+Eigen::VectorXd Quest3IkIncrementalROS::velocityFromPublishedArmPosition(
+    const Eigen::VectorXd& previousQ, const Eigen::VectorXd& currentQ, const ros::Time& now) const {
+  Eigen::VectorXd vel = Eigen::VectorXd::Zero(currentQ.size());
+  // 尚无已发布位置时速度置零，避免把内部 latest_q_ 清零当成一次真实跳变。
+  if (!hasLastPublishedArmPosition_ || previousQ.size() != currentQ.size() || currentQ.size() == 0) {
+    return vel;
+  }
+
+  double dt = 1.0 / std::max(publishRate_, 1.0);
+  if (hasLastArmTrajPublishStamp_ && !lastArmTrajPublishStamp_.isZero()) {
+    const double measuredDt = (now - lastArmTrajPublishStamp_).toSec();
+    if (std::isfinite(measuredDt) && measuredDt >= 1e-4 && measuredDt <= 0.1) {
+      dt = measuredDt;
+    }
+  }
+
+  vel = (currentQ - previousQ) / dt;
+  const double vmax = std::max(maxJointVelocity_, 0.0);
+  for (int i = 0; i < vel.size(); ++i) {
+    if (!std::isfinite(vel(i))) {
+      vel(i) = 0.0;
+    } else if (vmax > 0.0) {
+      vel(i) = std::clamp(vel(i), -vmax, vmax);
+    }
+  }
+  return vel;
+}
+
 void Quest3IkIncrementalROS::publishJointStates() {
+  const bool mode2EnterRamp = isInMode2EnterTimeout();
   Eigen::VectorXd armAngleLimited;
   {
     std::lock_guard<std::mutex> lock(ikResultMutex_);
-    if (!hasValidIkSolution_) return;
+    // 进入 mode2 的准备位平滑（0.3~1.0s 收到零位）不依赖 IK 解。
+    // fsmEnter 会把 hasValidIkSolution_ 置 false，这里若直接 return，手臂就不会伸直。
+    if (!hasValidIkSolution_ && !mode2EnterRamp) return;
     if (latestIkSolution_.size() != jointStateSize_) {
       latestIkSolution_ = Eigen::VectorXd::Zero(jointStateSize_);
-      ROS_WARN(
-          "Joint positions size (%zu) does not match expected size (%d)", latestIkSolution_.size(), jointStateSize_);
-      return;
+      if (!mode2EnterRamp) {
+        ROS_WARN(
+            "Joint positions size (%zu) does not match expected size (%d)", latestIkSolution_.size(), jointStateSize_);
+        return;
+      }
     }
-    armAngleLimited = latestIkSolution_;  // 假设已经限制过角度
+    if (hasValidIkSolution_ && latestIkSolution_.size() == jointStateSize_) {
+      armAngleLimited = latestIkSolution_;
+    } else if (sensorArmJointQ_.size() == jointStateSize_) {
+      armAngleLimited = sensorArmJointQ_;
+    } else {
+      armAngleLimited = Eigen::VectorXd::Zero(jointStateSize_);
+    }
   }
 
   // 使用armAngleLimited进行FK,获得左右手的ee_pose
@@ -2035,14 +2147,14 @@ void Quest3IkIncrementalROS::publishJointStates() {
     }
   }
 
-  // 使用局部变量保存本帧要发送的关节位置/速度，避免填充消息时读到被其他线程改写的 latest_q_/lowpass_dq_
+  // 使用局部变量保存本帧要发送的关节位置，避免填充消息时读到被其他线程改写的 latest_q_
   Eigen::VectorXd armPositionForPublish = latest_q_;
-  Eigen::VectorXd armVelocityForPublish = lowpass_dq_;
 
   // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
-  // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
+  // 区间 1: [0, 0.3s)          — 传感器同步
   // 区间 2: [0.3s, 1.0s)          — 从 q_init_cmd_ 线性平滑（resetJointToDefault_=true 时平滑到零位，false 时保持当前位置）
   // 区间 3: [1.0s, +infty)        — 不在此处改写
+  // 速度一律由最终发布位置差分得到，不再单独清零，避免 q/v 不一致。
   {
     ros::Time mode2EnterTime;
     {
@@ -2064,10 +2176,7 @@ void Quest3IkIncrementalROS::publishJointStates() {
         }
         q_init_cmd_ = sensorArmQ;
         armPositionForPublish = sensorArmQ;
-        armVelocityForPublish.setZero();
         latest_q_ = sensorArmQ;
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
       } else if (elapsed < kMode2SmoothDurationSec) {
         // 区间 2: [0.3s, 1.0s) — 平滑过渡
         if (q_init_cmd_.size() == jointStateSize_) {
@@ -2085,18 +2194,40 @@ void Quest3IkIncrementalROS::publishJointStates() {
           }
           latest_q_ = armPositionForPublish;
         }
-        armVelocityForPublish.setZero();
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
       }
-      // 区间 3: elapsed >= 1.0s 时不做处理，armPositionForPublish/armVelocityForPublish 保持本帧初的拷贝
+      // 区间 3: elapsed >= 1.0s 时不做处理，armPositionForPublish 保持本帧初的拷贝
     }
   }
+
+  if (armPositionForPublish.size() == jointStateSize_ && mode2EnterRamp) {
+    std::lock_guard<std::mutex> lock(ikResultMutex_);
+    latestIkSolution_ = armPositionForPublish;
+    hasValidIkSolution_ = true;
+  }
+
+  // 差分必须相对上一帧已发布 q。fsmEnter 在 mode2 超时窗口内会反复 latest_q_.setZero()，
+  // 若用 latest_q_ 做 previous，会把「0 → 传感器站立角」当成真实运动，速度达到数千 deg/s。
+  const Eigen::VectorXd previousQForVel =
+      hasLastPublishedArmPosition_ ? lastPublishedArmPosition_ : armPositionForPublish;
+  const Eigen::VectorXd armVelocityForPublish =
+      velocityFromPublishedArmPosition(previousQForVel, armPositionForPublish, jointStateMsg.header.stamp);
+  latest_dq_ = armVelocityForPublish;
+  lowpass_dq_ = armVelocityForPublish;
+  lastPublishedArmPosition_ = armPositionForPublish;
+  hasLastPublishedArmPosition_ = true;
+  lastArmTrajPublishStamp_ = jointStateMsg.header.stamp;
+  hasLastArmTrajPublishStamp_ = true;
 
   for (int i = 0; i < jointStateSize_; ++i) {
     jointStateMsg.position[i] = armPositionForPublish(i) * 180.0 / M_PI;
     jointStateMsg.velocity[i] = armVelocityForPublish(i) * 180.0 / M_PI;
     jointStateMsg.effort[i] = 0.0;
+  }
+
+  if (armPositionForPublish.size() == jointStateSize_ && mode2EnterRamp) {
+    std::lock_guard<std::mutex> lock(ikResultMutex_);
+    latestIkSolution_ = armPositionForPublish;
+    hasValidIkSolution_ = true;
   }
 
   // 在此处fk并计算filter后的fk结果
@@ -2216,8 +2347,8 @@ void Quest3IkIncrementalROS::publishJointStates() {
     std::vector<double> vel_rad(static_cast<size_t>(jointStateSize_));
     std::vector<double> effort(static_cast<size_t>(jointStateSize_), 0.0);
     for (int i = 0; i < jointStateSize_; ++i) {
-      pos_rad[static_cast<size_t>(i)] = latest_q_(i);
-      vel_rad[static_cast<size_t>(i)] = lowpass_dq_(i);
+      pos_rad[static_cast<size_t>(i)] = armPositionForPublish(i);
+      vel_rad[static_cast<size_t>(i)] = armVelocityForPublish(i);
     }
     arm_traj_writer_.writeIfActive(static_cast<uint32_t>(jointStateSize_), pos_rad.data(),
                                    vel_rad.data(), effort.data(), stamp_nsec);
@@ -2490,6 +2621,7 @@ void Quest3IkIncrementalROS::publishHandPoseFromTransformer() {
 
 void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
+  enableArmTrajInterpolatorClient_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/enable_arm_traj_interpolator");
 
   // SG100 heiman 手指：仅当本机型末端为 heiman 时加载手势库
   // （6 个 /sg100/* service 与 /sg100_hand_command publisher 均在该函数内注册），
@@ -2576,9 +2708,12 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   latest_q_.resize(jointStateSize_);
   latest_dq_.resize(jointStateSize_);
   lowpass_dq_.resize(jointStateSize_);
+  lastPublishedArmPosition_.resize(jointStateSize_);
   latest_q_.setZero();
   latest_dq_.setZero();
   lowpass_dq_.setZero();
+  lastPublishedArmPosition_.setZero();
+  invalidateLastPublishedArmTraj();
 
   // 从JSON配置读取lowpass_dq_滤波因子
   if (configJson.contains("lowpass_dq_filter")) {
@@ -3280,6 +3415,7 @@ void Quest3IkIncrementalROS::reset() {
     std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
     mode2EnterTime_ = ros::Time(0);
   }
+  invalidateLastPublishedArmTraj();
   // 重置跳变检测时间戳
   leftHandSpikeStartTime_ = ros::Time(0);
   rightHandSpikeStartTime_ = ros::Time(0);
