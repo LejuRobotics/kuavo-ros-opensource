@@ -45,6 +45,16 @@
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
+namespace {
+// /kuavo_arm_traj 顺序：左臂 7 + 右臂 7，与 NUM_ARM_JOINT=14 对齐
+constexpr std::array<const char*, 14> kIncrementalArmJointNames = {
+    "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint",
+    "zarm_l5_joint", "zarm_l6_joint", "zarm_l7_joint",
+    "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint",
+    "zarm_r5_joint", "zarm_r6_joint", "zarm_r7_joint",
+};
+}  // namespace
+
 void Quest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName, int priority) const {
   if (priority > 0) {
     ocs2::setThisThreadPriority(priority);
@@ -80,6 +90,73 @@ void Quest3IkIncrementalROS::applyWorkerThreadScheduling(const char* threadName,
 
   ocs2::setThreadAffinity(cpuset);
   ROS_INFO("[Quest3IkIncrementalROS] %s: CPU affinity -> [%s]", threadName, cpuList.str().c_str());
+}
+
+void Quest3IkIncrementalROS::loadArmJointLimitsFromPlant(const drake::multibody::MultibodyPlant<double>& plant) {
+  armJointLimits_.assign(static_cast<size_t>(std::max(jointStateSize_, 0)), {});
+  mec_limit_lower_ = Eigen::VectorXd::Zero(jointStateSize_);
+  mec_limit_upper_ = Eigen::VectorXd::Zero(jointStateSize_);
+
+  const int namedCount = static_cast<int>(kIncrementalArmJointNames.size());
+  if (jointStateSize_ != namedCount) {
+    ROS_WARN("[Quest3IkIncrementalROS] NUM_ARM_JOINT=%d, named URDF arm joints=%d; filling min(size)",
+             jointStateSize_, namedCount);
+  }
+
+  const double softScale = std::min(std::max(armJointSoftLimitScale_, 0.5), 1.0);
+  std::cout << "\nArm joint URDF limits with soft margin scale=" << std::fixed << std::setprecision(3)
+            << softScale << " (q order = /kuavo_arm_traj):" << std::endl;
+  std::cout << std::left << std::setw(8) << "q_idx" << std::setw(22) << "Joint Name" << std::setw(14) << "URDF_lo"
+            << std::setw(14) << "URDF_hi" << std::setw(14) << "Soft_lo" << std::setw(14) << "Soft_hi" << std::endl;
+  std::cout << std::string(86, '-') << std::endl;
+
+  int loaded = 0;
+  const int fillCount = std::min(jointStateSize_, namedCount);
+  for (int i = 0; i < fillCount; ++i) {
+    const char* jointName = kIncrementalArmJointNames[static_cast<size_t>(i)];
+    try {
+      const auto& joint = plant.GetJointByName(jointName);
+      if (joint.num_positions() <= 0) {
+        ROS_WARN("[Quest3IkIncrementalROS] %s has no position DOF, skip limit", jointName);
+        continue;
+      }
+      const double lower = joint.position_lower_limits()(0);
+      const double upper = joint.position_upper_limits()(0);
+      if (!std::isfinite(lower) || !std::isfinite(upper) || !(upper > lower)) {
+        ROS_WARN("[Quest3IkIncrementalROS] invalid URDF limit for %s: [%.4f, %.4f]", jointName, lower, upper);
+        continue;
+      }
+      const double softLower = softScale * lower;
+      const double softUpper = softScale * upper;
+      armJointLimits_[static_cast<size_t>(i)].lower = softLower;
+      armJointLimits_[static_cast<size_t>(i)].upper = softUpper;
+      armJointLimits_[static_cast<size_t>(i)].valid = true;
+      mec_limit_lower_(i) = lower;
+      mec_limit_upper_(i) = upper;
+      ++loaded;
+      std::cout << std::left << std::setw(8) << i << std::setw(22) << jointName << std::fixed << std::setprecision(4)
+                << std::setw(14) << lower << std::setw(14) << upper << std::setw(14) << softLower << std::setw(14)
+                << softUpper << std::endl;
+    } catch (const std::exception& e) {
+      ROS_WARN("[Quest3IkIncrementalROS] failed to read URDF limit for %s: %s", jointName, e.what());
+    }
+  }
+  ROS_INFO("[Quest3IkIncrementalROS] Loaded URDF arm joint limits with soft scale=%.3f for %d/%d published joints",
+           softScale, loaded, jointStateSize_);
+}
+
+void Quest3IkIncrementalROS::clampArmJointCommand(int index, double& position, double* velocity) const {
+  if (index < 0 || index >= static_cast<int>(armJointLimits_.size()) || !armJointLimits_[static_cast<size_t>(index)].valid) {
+    return;
+  }
+  const ArmJointLimit& limit = armJointLimits_[static_cast<size_t>(index)];
+  position = std::min(std::max(position, limit.lower), limit.upper);
+  if (velocity == nullptr) {
+    return;
+  }
+  if ((position <= limit.lower && *velocity < 0.0) || (position >= limit.upper && *velocity > 0.0)) {
+    *velocity = 0.0;
+  }
 }
 
 Quest3IkIncrementalROS::Quest3IkIncrementalROS(ros::NodeHandle& nodeHandle,
@@ -1766,32 +1843,9 @@ void Quest3IkIncrementalROS::publishJointStates() {
   const Eigen::VectorXd previousPublishedQ = latest_q_;
   const Eigen::VectorXd previousPublishedDq = lowpass_dq_;
 
-  // 腕部关节软限位（由 URDF 限位按原有比例缩放得到）。保证目标角度、fhan 状态和滤波速度在限位处一致，
-  // 避免位置指令已经到达限位时仍然下发朝限位外运动的速度指令
-  struct JointSoftLimit {
-    int index;
-    double lower;
-    double upper;
-  };
-  static constexpr std::array<JointSoftLimit, 6> kWristJointSoftLimits{{
-      {4, 0.95 * -1.5707963267949, 0.95 * 1.5707963267949},          // 左臂第 5 关节：[-85.5°, 85.5°]
-      {5, 0.85 * -1.30899693899575, 0.85 * 0.698131700797732},      // 左臂第 6 关节：[-63.75°, 34°]
-      {6, 0.85 * -0.698131700797732, 0.85 * 0.698131700797732},     // 左臂第 7 关节：[-34°, 34°]
-      {11, 0.95 * -1.5707963267949, 0.95 * 1.5707963267949},       // 右臂第 5 关节：[-85.5°, 85.5°]
-      {12, 0.85 * -0.698131700797732, 0.85 * 1.30899693899575},    // 右臂第 6 关节：[-34°, 63.75°]
-      {13, 0.85 * -0.698131700797732, 0.85 * 0.698131700797732},   // 右臂第 7 关节：[-34°, 34°]
-  }};
-
-  const auto clampPosition = [](double position, const JointSoftLimit& limit) {
-    return std::min(std::max(position, limit.lower), limit.upper);
-  };
-  const auto stopOutwardVelocity = [](double position, double& velocity, const JointSoftLimit& limit) {
-    if ((position <= limit.lower && velocity < 0.0) || (position >= limit.upper && velocity > 0.0)) {
-      velocity = 0.0;
-    }
-  };
-
-  Eigen::VectorXd finalArmAngles = armAngleLimited;  // 默认使用目标角度
+  // 全部 14 个臂关节使用 URDF 软限位：目标角、fhan 状态和速度在边界处保持一致，
+  // 避免位置已到软边仍下发朝限位外的速度
+  Eigen::VectorXd finalArmAngles = armAngleLimited;
 
   double fhanH = 1.0 / publishRate_;
   double fhanH0 = fhanH * fhanKh0Joint_;
@@ -1801,12 +1855,7 @@ void Quest3IkIncrementalROS::publishJointStates() {
     if (i == 5 || i == 6 || i == 12 || i == 13) {
       targetAngle = targetAngle * deltaScaleRPY_(1);
     }
-    for (const auto& limit : kWristJointSoftLimits) {
-      if (limit.index == i) {
-        targetAngle = clampPosition(targetAngle, limit);
-        break;
-      }
-    }
+    clampArmJointCommand(i, targetAngle, nullptr);
     if (i <= 6 && joyStickHandlerPtr_->isLeftGrip()) {
       leju_utils::fhanStepForwardWithVelLimit(q_(i),               // 滤波后的关节角度（输出）
                                               dq_(i),              // 滤波后的关节角速度（输出）
@@ -1827,10 +1876,7 @@ void Quest3IkIncrementalROS::publishJointStates() {
     }
     dq_(i) = dq_(i) > 18.0 ? 18.0 : dq_(i);
     dq_(i) = dq_(i) < -18.0 ? -18.0 : dq_(i);
-  }
-  for (const auto& limit : kWristJointSoftLimits) {
-    q_(limit.index) = clampPosition(q_(limit.index), limit);
-    stopOutwardVelocity(q_(limit.index), dq_(limit.index), limit);
+    clampArmJointCommand(i, q_(i), &dq_(i));
   }
 
   // 处理左手平滑过渡：根据超时时间进度逐步增大 alpha 值（仅在检测到移动时计算）
@@ -1904,20 +1950,24 @@ void Quest3IkIncrementalROS::publishJointStates() {
   if (wristJointLimitVelocityDamperEnabled_ &&
       previousPublishedQ.size() == jointStateSize_ && previousPublishedDq.size() == jointStateSize_) {
     const double cycle = std::min(std::max(fhanH, 1e-4), 0.02);
-    for (const auto& limit : kWristJointSoftLimits) {
-      if (limit.index < 0 || limit.index >= jointStateSize_) {
+    for (int i = 0; i < jointStateSize_; ++i) {
+      if (i >= static_cast<int>(armJointLimits_.size()) || !armJointLimits_[static_cast<size_t>(i)].valid) {
         continue;
       }
 
+      const ArmJointLimit& limit = armJointLimits_[static_cast<size_t>(i)];
       const double lower = limit.lower + wristJointLimitHardEpsilon_;
       const double upper = limit.upper - wristJointLimitHardEpsilon_;
-      const double previousQ = std::min(std::max(previousPublishedQ(limit.index), lower), upper);
-      const double requestedQ = std::min(std::max(latest_q_(limit.index), lower), upper);
+      if (!(upper > lower)) {
+        continue;
+      }
+      const double previousQ = std::min(std::max(previousPublishedQ(i), lower), upper);
+      const double requestedQ = std::min(std::max(latest_q_(i), lower), upper);
       const double rawRequestedV = (requestedQ - previousQ) / cycle;
       const double requestedV = std::min(std::max(rawRequestedV, -wristJointLimitMaxVelocity_),
                                          wristJointLimitMaxVelocity_);
-      const double previousV = std::isfinite(previousPublishedDq(limit.index))
-                                   ? previousPublishedDq(limit.index)
+      const double previousV = std::isfinite(previousPublishedDq(i))
+                                   ? previousPublishedDq(i)
                                    : 0.0;
 
       const double upperDistance = std::max(0.0, upper - previousQ);
@@ -1979,9 +2029,9 @@ void Quest3IkIncrementalROS::publishJointStates() {
       boundedV = (boundedQ - previousQ) / cycle;
 
       // 同步更新三层状态，避免下一帧的 EMA/低通重新带回朝边界外的历史速度
-      latest_q_(limit.index) = boundedQ;
-      latest_dq_(limit.index) = boundedV;
-      lowpass_dq_(limit.index) = boundedV;
+      latest_q_(i) = boundedQ;
+      latest_dq_(i) = boundedV;
+      lowpass_dq_(i) = boundedV;
     }
   }
 
@@ -2044,6 +2094,10 @@ void Quest3IkIncrementalROS::publishJointStates() {
   }
 
   for (int i = 0; i < jointStateSize_; ++i) {
+    clampArmJointCommand(i, armPositionForPublish(i), &armVelocityForPublish(i));
+    latest_q_(i) = armPositionForPublish(i);
+    latest_dq_(i) = armVelocityForPublish(i);
+    lowpass_dq_(i) = armVelocityForPublish(i);
     jointStateMsg.position[i] = armPositionForPublish(i) * 180.0 / M_PI;
     jointStateMsg.velocity[i] = armVelocityForPublish(i) * 180.0 / M_PI;
     jointStateMsg.effort[i] = 0.0;
@@ -2537,32 +2591,12 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   }
 
   ROS_INFO(
-      "[Quest3IkIncrementalROS] Wrist joint-limit velocity damper: enable=%s, soft_zone=%.4f, "
+      "[Quest3IkIncrementalROS] Arm joint-limit velocity damper: enable=%s, soft_scale=%.3f, soft_zone=%.4f, "
       "stop_acceleration=%.3f, max_velocity=%.3f, max_acceleration=%.3f, settle_velocity=%.6f, "
       "hard_epsilon=%.6f",
-      wristJointLimitVelocityDamperEnabled_ ? "true" : "false", wristJointLimitSoftZone_,
+      wristJointLimitVelocityDamperEnabled_ ? "true" : "false", armJointSoftLimitScale_, wristJointLimitSoftZone_,
       wristJointLimitStopAcceleration_, wristJointLimitMaxVelocity_, wristJointLimitMaxAcceleration_,
       wristJointLimitSettleVelocity_, wristJointLimitHardEpsilon_);
-
-  // TEST: 初始化关节限制中间值（硬编码，从URDF中提取）
-  // 关节顺序：左臂7个(zarm_l1~l7) + 右臂7个(zarm_r1~r7) = 14个
-  jointMidValues_.resize(jointStateSize_);
-
-  jointMidValues_(0) = 0;                                               // zarm_l1_joint
-  jointMidValues_(1) = (-0.349065850398866 + 2.0943951023932) / 2.0;    // zarm_l2_joint
-  jointMidValues_(2) = (-1.5707963267949 + 1.5707963267949) / 2.0;      // zarm_l3_joint
-  jointMidValues_(3) = (-2.61799387799149 + 0.0) / 2.0;                 // zarm_l4_joint
-  jointMidValues_(4) = (-1.5707963267949 + 1.5707963267949) / 2.0;      // zarm_l5_joint
-  jointMidValues_(5) = (-1.30899693899575 + 0.698131700797732) / 2.0;   // zarm_l6_joint
-  jointMidValues_(6) = (-0.698131700797732 + 0.698131700797732) / 2.0;  // zarm_l7_joint
-  // 右臂关节中间值
-  jointMidValues_(7) = 0;                                                // zarm_r1_joint
-  jointMidValues_(8) = (-2.0943951023932 + 0.349065850398866) / 2.0;     // zarm_r2_joint
-  jointMidValues_(9) = (-1.5707963267949 + 1.5707963267949) / 2.0;       // zarm_r3_joint
-  jointMidValues_(10) = (-2.61799387799149 + 0.0) / 2.0;                 // zarm_r4_joint
-  jointMidValues_(11) = (-1.5707963267949 + 1.5707963267949) / 2.0;      // zarm_r5_joint
-  jointMidValues_(12) = (-0.698131700797732 + 1.30899693899575) / 2.0;   // zarm_r6_joint
-  jointMidValues_(13) = (-0.698131700797732 + 0.698131700797732) / 2.0;  // zarm_r7_joint
 
   // 从JSON配置构建URDF路径
   // 优先使用 "arm_only_urdf"（v62 半身 IK 用，14 DOF 纯双臂，不含 chest 4 关节），
@@ -2642,6 +2676,16 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       std::cout << std::left << std::setw(10) << i << std::setw(30) << joint.name() << std::fixed
                 << std::setprecision(4) << std::setw(20) << joint.position_lower_limits()(0) << std::setw(20)
                 << joint.position_upper_limits()(0) << std::endl;
+    }
+  }
+
+  loadArmJointLimitsFromPlant(plant);
+  jointMidValues_.resize(jointStateSize_);
+  jointMidValues_.setZero();
+  for (int i = 0; i < jointStateSize_; ++i) {
+    if (static_cast<size_t>(i) < armJointLimits_.size() && armJointLimits_[static_cast<size_t>(i)].valid) {
+      jointMidValues_(i) =
+          0.5 * (armJointLimits_[static_cast<size_t>(i)].lower + armJointLimits_[static_cast<size_t>(i)].upper);
     }
   }
 
