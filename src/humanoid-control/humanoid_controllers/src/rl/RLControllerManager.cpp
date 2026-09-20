@@ -2127,8 +2127,11 @@ namespace humanoid_controller
 
   void RLControllerManager::processAutoControllerSwitch()
   {
+    // 外部自动切换入口（cmd_vel、步态名、手臂和腰部控制回调）在收到事件时
+    // 已经立即执行 evaluateAutoControllerSwitch()。控制主循环无需每周期
+    // 重复扫描 ROS 时间戳和控制器状态；这里只处理必须在控制循环完成的
+    // AMP 手臂归位 pending switch，避免占用实时控制周期。
     processPendingArmPreparedSwitch();
-    evaluateAutoControllerSwitch("control loop");
   }
 
   bool RLControllerManager::hasRecentExternalControlActivityLocked(const ros::Time& now) const

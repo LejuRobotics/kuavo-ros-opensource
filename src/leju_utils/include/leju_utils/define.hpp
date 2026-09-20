@@ -520,6 +520,34 @@ inline Eigen::Quaterniond limitQuaternionAngleEulerZYX(const Eigen::Quaterniond&
   return (yawAngle * pitchAngle * rollAngle).normalized();
 }
 
+// Clip a commanded hand quaternion relative to a reference pose, but skip
+// Euler reconstruction when the relative motion is tiny or pitch is near the
+// ZYX gimbal.  Per-frame clip around a lagged measured EE with pitch=90deg
+// otherwise rebuilds yaw and the ~19cm EE lever turns that into a path kink.
+inline Eigen::Quaterniond limitIncrementalTargetQuatSafe(const Eigen::Quaterniond& qTarget,
+                                                         const Eigen::Quaterniond& qReference,
+                                                         const Eigen::Vector3d& zyxLimits) {
+  const Eigen::Quaterniond qT = qTarget.normalized();
+  const Eigen::Quaterniond qR = qReference.normalized();
+  Eigen::Quaterniond qRel = (qR.conjugate() * qT).normalized();
+  if (qRel.w() < 0.0) {
+    qRel.coeffs() = -qRel.coeffs();
+  }
+
+  const double angle = 2.0 * std::acos(std::min(1.0, std::abs(qRel.w())));
+  if (angle < 1.0e-3) {
+    return qT;
+  }
+
+  const double sinp = 2.0 * (qRel.w() * qRel.y() - qRel.z() * qRel.x());
+  constexpr double kGimbalSinP = 0.94;  // ~70 deg
+  if (std::abs(sinp) >= kGimbalSinP) {
+    return qT;
+  }
+
+  return (qR * limitQuaternionAngleEulerZYX(qRel, zyxLimits)).normalized();
+}
+
 /**
  * @brief 四元数转欧拉角 (Z-Y-X 顺序)，不做限幅/clip
  * @param q_input 输入四元数

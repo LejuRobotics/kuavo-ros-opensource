@@ -439,7 +439,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 手部位置约束参数
   double sphereRadiusLimit_ = 0.5;                                  // 手部位置约束球体半径
   double minReachableDistance_ = 0.20;                              // 最小可达距离
-  Eigen::Vector3d boxMinBound_ = Eigen::Vector3d(0.25, -0.5, 0.1);  // 手部位置约束边界框最小值 [x, y, z]
+  Eigen::Vector3d boxMinBound_ = Eigen::Vector3d(0.12, -0.5, 0.1);  // 手部位置约束边界框最小值 [x, y, z]
   Eigen::Vector3d boxMaxBound_ = Eigen::Vector3d(1.0, 0.5, 1.0);    // 手部位置约束边界框最大值 [x, y, z]
   double chestOffsetY_ = 0.0;                                 // 胸部中线偏移量，用于防止左右手过中线
   Eigen::Vector3d leftCenter_ = Eigen::Vector3d(0, 0.02, 0);  // 左手圆柱体约束中心

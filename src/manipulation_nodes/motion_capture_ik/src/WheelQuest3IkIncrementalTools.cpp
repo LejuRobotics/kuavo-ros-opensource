@@ -1514,6 +1514,13 @@ DrakeChestElbowHandBoundsConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
       if (b.contains("p2_xy_norm_y_weight")) config.p2XyNormYWeight = b["p2_xy_norm_y_weight"].get<double>();
       if (b.contains("min_p1_xy_norm")) config.minP1XyNorm = b["min_p1_xy_norm"].get<double>();
       if (b.contains("p1_xy_norm_y_weight")) config.p1XyNormYWeight = b["p1_xy_norm_y_weight"].get<double>();
+      // Hard 0.22m elbow keep-out folds near-torso circles. Cap it so hand tracking wins.
+      if (config.minP1XyNorm > 0.12) {
+        ROS_INFO(
+            "[WheelQuest3IkIncrementalROS] softening min_p1_xy_norm from %.3f to 0.12 m",
+            config.minP1XyNorm);
+        config.minP1XyNorm = 0.12;
+      }
     }
   } catch (const std::exception& e) {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] loadDrakeChestElbowHandBoundsFromJson exception: %s", e.what());
@@ -2840,10 +2847,10 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
                     true);
   nodeHandle_.param(naturalElbowParam + "waist_soft_clearance",
                     wheelNaturalElbowGuideConfig_.waistSoftClearance,
-                    0.260);
+                    0.180);
   nodeHandle_.param(naturalElbowParam + "waist_full_activation_clearance",
                     wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
-                    0.200);
+                    0.100);
   wheelNaturalElbowSoftTrackingScale_ =
       std::clamp(wheelNaturalElbowSoftTrackingScale_, 0.0, 1.0);
   wheelNaturalElbowGuideConfig_.waistSoftClearance =

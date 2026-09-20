@@ -2337,9 +2337,12 @@ class ArmTrajectoryBezierDemo:
 
         current_ctrl = self.get_current_controller_name()
 
-        # multi 模式下无法确认当前控制器时，不能猜测为 MPC/其他控制器。
-        # 否则可能绕过 MoRE VR 占用门禁，或对 Depth 误切手臂模式。
-        if self.kuavo_control_scheme == "multi" and current_ctrl is None:
+        # 双足 multi 模式下无法确认当前控制器时，不能猜测为 MPC/其他控制器。
+        # 否则可能绕过 MoRE VR 占用门禁，或对 Depth 误切手臂模式。轮臂不提供
+        # /humanoid_controller/get_controller_list，延续既有 OCS2 动作路径。
+        if (self.kuavo_control_scheme == "multi"
+                and not self.is_wheeled
+                and current_ctrl is None):
             msg = "无法确认当前控制器，拒绝执行上肢动作"
             rospy.logwarn("Action '%s' rejected: %s", action_name, msg)
             return ExecuteArmActionResponse(success=False, message=msg)

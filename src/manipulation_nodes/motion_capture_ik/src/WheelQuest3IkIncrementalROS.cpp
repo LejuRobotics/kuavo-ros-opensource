@@ -687,6 +687,14 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       guideInput.torsoFrameValid = true;
       const WheelNaturalElbowGuideOutput output = guide->update(guideInput);
       trackingActivation = wheelNaturalElbowSoftTrackingScale_ * output.elbowTrackingActivation;
+      // Near the torso the elbow/waist keep-out starts fighting the hand
+      // target and folds the circle. Fade the soft elbow cost so the hand wins.
+      const double handFromTorso = (handTarget - torsoPosition).norm();
+      constexpr double kNearBodyFadeStart = 0.45;
+      constexpr double kNearBodyFadeFull = 0.22;
+      const double t = std::clamp(
+          (handFromTorso - kNearBodyFadeFull) / (kNearBodyFadeStart - kNearBodyFadeFull), 0.0, 1.0);
+      trackingActivation *= t * t * (3.0 - 2.0 * t);
       ROS_INFO_THROTTLE(
           1.0,
           "[WheelNaturalElbow] %s radius=%.4f m, gravity_valid=%s, human_valid=%s, "
@@ -922,6 +930,15 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     // 因此必须在最终写入 whole-body input 前再次做连续性检查。
     stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
     stabilizeGripQuaternion(false, joyStickHandlerPtr_->isRightGrip(), rightHandQuat);
+
+    // Incremental position is the commanded end-effector. Shoulder-elbow
+    // geometry and point-opt still operate on link6 / wrist.
+    if (input.leftRefActive) {
+      leftHandPos = leftHandPos - leftHandQuat.normalized() * leftEE2Link6Offset_;
+    }
+    if (input.rightRefActive) {
+      rightHandPos = rightHandPos - rightHandQuat.normalized() * rightEE2Link6Offset_;
+    }
 
     // Active elbow references come from the current robot FK.  Map that point
     // from the current robot chest frame into the commanded chest frame before
@@ -1403,8 +1420,9 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         // 松开期间一直使用同一个约束快照。这里同时写回约束列表，保证
         // updateLeftArmPoseAnchor() 读取到的也是该连续值，而不是松开期间
         // 被 whole-body IK 逐步推移的旧优化结果。
-        leftGripTransferHandPos_ = leftGripReleaseHandPos_;
         leftGripTransferHandQuat_ = leftGripReleaseHandQuat_;
+        leftGripTransferHandPos_ =
+            leftGripReleaseHandPos_ + leftGripTransferHandQuat_ * leftEE2Link6Offset_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position =
             leftGripReleaseHandPos_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix =
@@ -1415,8 +1433,8 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         }
       } else {
         const auto& pose = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND];
-        leftGripTransferHandPos_ = pose.position;
         leftGripTransferHandQuat_ = Eigen::Quaterniond(pose.rotation_matrix).normalized();
+        leftGripTransferHandPos_ = pose.position + leftGripTransferHandQuat_ * leftEE2Link6Offset_;
       }
       leftGripTransferPending_ = true;
       leftGripOrientationHoldFrames_ = kGripOrientationHoldFrames;
@@ -1428,8 +1446,9 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
       latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
     if (!rightGripTransferAccepted_ && rightGripTransferLockFrames_ <= 0) {
       if (hasRightGripReleaseSnapshot_) {
-        rightGripTransferHandPos_ = rightGripReleaseHandPos_;
         rightGripTransferHandQuat_ = rightGripReleaseHandQuat_;
+        rightGripTransferHandPos_ =
+            rightGripReleaseHandPos_ + rightGripTransferHandQuat_ * rightEE2Link6Offset_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position =
             rightGripReleaseHandPos_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix =
@@ -1440,8 +1459,8 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         }
       } else {
         const auto& pose = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND];
-        rightGripTransferHandPos_ = pose.position;
         rightGripTransferHandQuat_ = Eigen::Quaterniond(pose.rotation_matrix).normalized();
+        rightGripTransferHandPos_ = pose.position + rightGripTransferHandQuat_ * rightEE2Link6Offset_;
       }
       rightGripTransferPending_ = true;
       rightGripOrientationHoldFrames_ = kGripOrientationHoldFrames;

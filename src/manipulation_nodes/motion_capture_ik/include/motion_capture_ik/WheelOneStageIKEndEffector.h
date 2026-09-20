@@ -45,7 +45,7 @@ struct WheelPointTrackIKSolverConfig : public IKSolverConfig {
   // the elbow origin may not cross into the waist-side keep-out band.  The
   // bound is expressed laterally in waist_yaw_link, so it follows torso yaw.
   bool enableWaistElbowClearanceConstraint = true;
-  double waistElbowLateralClearance = 0.20;  // [m]
+  double waistElbowLateralClearance = 0.10;  // [m]
 
   // joint smoothness weights (7 joints per arm, symmetric for left and right)
   double jointSmoothWeightDefault = 5e1;  // Default weight for all joints

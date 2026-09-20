@@ -255,8 +255,14 @@ void RlGaitReceiver::update(const ros::Time& time, const vector_t& torsostate, c
       geometry_msgs::Twist zero_cmd;
       smoothed_cmd_vel_ = smoothVelocityCommand(zero_cmd, time);
     }
-
-    command_buffer_callback = command_buffer_callback_;
+    
+    // command_buffer_callback_ 只用于延迟处理 pending_gait_name_。
+    // 正常行走时没有待处理 gait 切换，不要每个控制周期复制并调用回调，
+    // 避免额外的 RLControllerManager 互斥锁竞争。
+    if (!pending_gait_name_.empty())
+    {
+      command_buffer_callback = command_buffer_callback_;
+    }
   }
   const bool command_blocked = command_buffer_callback && command_buffer_callback();
 
