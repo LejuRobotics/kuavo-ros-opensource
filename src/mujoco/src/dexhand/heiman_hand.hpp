@@ -22,8 +22,15 @@ namespace mujoco_node {
 class HeimanHand : public MujocoHandBase {
 public:
     static constexpr int JOINT_COUNT = 11;
+    // 与真机 sg100_hand_driver.cpp loadSg100HardcodedDefaults() rest 一致（弧度）
+    static constexpr std::array<double, JOINT_COUNT> kLeftRestPose{
+        0.00, -1.0, 1.57, 0.0, 1.57, 1.57, 1.57, 1.57, 0.0, 1.57, 1.57};
+    static constexpr std::array<double, JOINT_COUNT> kRightRestPose{
+        0.00, -1.0, 1.57, 0.0, 1.57, 1.57, 1.57, 1.57, 0.0, 1.57, 1.57};
 
-    HeimanHand(const mjModel* model, const JointGroupAddress& jga) : jga_(jga) {
+    HeimanHand(const mjModel* model, const JointGroupAddress& jga,
+               const std::array<double, JOINT_COUNT>& rest = kLeftRestPose)
+        : jga_(jga), target_positions_(rest) {
         if (!jga_.ctrladr().invalid()) {
             for (auto iter = jga_.ctrladr().begin(); iter != jga_.ctrladr().end(); ++iter) {
                 auto actuator_id = *iter;
@@ -50,12 +57,35 @@ public:
         }
     }
 
-    // 把 11 个目标弧度写入 ctrl
+    // 与真机 sg100_hand_driver 一致：先用当前 qpos 做滤波初值，再以 50 Hz、alpha=0.2
+    // 低通插值到 target（启动时为 rest）。仿真步长是 1 ms，不能每步都滤，否则会瞬间到位。
     void writeCallback(mjData *d) override {
-        if (jga_.ctrladr().invalid()) return;
+        if (jga_.ctrladr().invalid() || jga_.qposadr().invalid()) return;
+
+        constexpr double kFilterPeriod = 0.02;
+        constexpr double kAlpha = 0.2;
+        const bool reset = !filter_initialized_ || d->time + 1e-9 < last_filter_time_;
+        if (reset) {
+            int i = 0;
+            for (auto iter = jga_.qposadr().begin();
+                 iter != jga_.qposadr().end() && i < JOINT_COUNT; ++iter, ++i) {
+                filtered_positions_[i] = d->qpos[*iter];
+            }
+            filter_initialized_ = true;
+            last_filter_time_ = d->time - kFilterPeriod;
+        }
+
+        if (d->time - last_filter_time_ >= kFilterPeriod - 1e-9) {
+            for (int i = 0; i < JOINT_COUNT; ++i) {
+                filtered_positions_[i] = kAlpha * target_positions_[i]
+                    + (1.0 - kAlpha) * filtered_positions_[i];
+            }
+            last_filter_time_ = d->time;
+        }
+
         int i = 0;
         for (auto iter = jga_.ctrladr().begin(); iter != jga_.ctrladr().end() && i < JOINT_COUNT; ++iter, ++i) {
-            d->ctrl[*iter] = target_positions_[i];
+            d->ctrl[*iter] = filtered_positions_[i];
         }
     }
 
@@ -89,6 +119,9 @@ private:
     FingerStatus finger_status_;   // 未使用，仅为满足基类接口
     std::atomic<bool> ctrl_updated_{false};
     std::array<double, JOINT_COUNT> target_positions_{};
+    std::array<double, JOINT_COUNT> filtered_positions_{};
+    bool filter_initialized_{false};
+    double last_filter_time_{0.0};
     std::array<double, JOINT_COUNT> joint_positions_{};
     std::array<double, JOINT_COUNT> joint_velocities_{};
     std::array<double, JOINT_COUNT> joint_torques_{};

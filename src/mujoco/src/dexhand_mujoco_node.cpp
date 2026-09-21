@@ -86,8 +86,8 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
         l_dexhand_ = std::make_shared<LinkerO6Hand>(model, l_hand_address);
         r_dexhand_ = std::make_shared<LinkerO6Hand>(model, r_hand_address);
     } else if (hand_type_ == HandType::HEIMAN) {
-        l_dexhand_ = std::make_shared<HeimanHand>(model, l_hand_address);
-        r_dexhand_ = std::make_shared<HeimanHand>(model, r_hand_address);
+        l_dexhand_ = std::make_shared<HeimanHand>(model, l_hand_address, HeimanHand::kLeftRestPose);
+        r_dexhand_ = std::make_shared<HeimanHand>(model, r_hand_address, HeimanHand::kRightRestPose);
     }
 
     auto kuavo_assets_path = ocs2::kuavo_assets::getPath();

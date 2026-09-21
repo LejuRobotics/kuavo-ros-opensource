@@ -61,6 +61,8 @@
         <mesh name="r_little_link1" file="r_little_link1.STL"/>
         <mesh name="r_little_link2" file="r_little_link2.STL"/>
         <mesh name="r_little_link3" file="r_little_link3.STL"/>
+        <mesh name="camera_l_base" file="camera_l_base.STL"/>
+        <mesh name="camera_r_base" file="camera_r_base.STL"/>
     </asset>
 
   <worldbody>
@@ -155,6 +157,12 @@
                             <joint name="zarm_l7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-14.1 14.1" damping="0.0"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_pitch"/>
                             <geom size="0.005" pos="0 0 -0.17"/>
+                            <body name="camera_l_base" pos="0.093563 -0.015735 0.021967" quat="0.599516 -0.137763 0.781296 -0.105723">
+                              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 0.941176 0.678431 1" mesh="camera_l_base"/>
+                              <body name="camera_l_color_link" pos="0.0109 0.009 0.021"/>
+                              <body name="camera_l_depth_link" pos="0.0109 -0.009 0.021"/>
+                              <body name="cam_l_link" pos="0.0146 0 0.021"/>
+                            </body>
                             <body name="l_hand_base" pos="0 0 -0.053" quat="0 0 1 0">
                               <inertial pos="-0.0041481 -0.021938 0.067528" quat="1 0 0 0" mass="0.373" diaginertia="0.00018466 0.00026432 0.00014072"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_base"/>
@@ -256,6 +264,12 @@
                             <joint name="zarm_r7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-14.1 14.1" damping="0.0"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_pitch"/>
                             <geom size="0.005" pos="0 0 -0.17"/>
+                            <body name="camera_r_base" pos="0.134 0.015735 0.0111" quat="0.599516 0.137763 0.781296 0.105723">
+                              <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" quat="0 1 0 0" rgba="1 0.941176 0.678431 1" mesh="camera_r_base"/>
+                              <body name="camera_r_color_link" pos="0.0109 0.009 -0.021" quat="0 1 0 0"/>
+                              <body name="camera_r_depth_link" pos="0.0109 -0.009 -0.021" quat="0 1 0 0"/>
+                              <body name="cam_r_link" pos="0.0146 0 -0.021" quat="0 1 0 0"/>
+                            </body>
                             <!-- 右手末端执行器 -->
                             <body name="r_hand_base" pos="0 0 -0.053" quat="0 1 0 0">
                               <inertial pos="0.0039726 -0.021926 0.067524" quat="1 0 0 0" mass="0.373" diaginertia="0.00018484 0.00026468 0.00014092"/>
@@ -376,8 +390,8 @@
     <motor gear="1" joint="zarm_r5_joint" name="zarm_r5_joint_motor" ctrllimited="true" ctrlrange="-14.1 14.1" />
     <motor gear="1" joint="zarm_r6_joint" name="zarm_r6_joint_motor" ctrllimited="true" ctrlrange="-14.1 14.1" />
     <motor gear="1" joint="zarm_r7_joint" name="zarm_r7_joint_motor" ctrllimited="true" ctrlrange="-14.1 14.1" />
-    <motor gear="1" joint="zhead_1_joint" name="zhead_1_joint_motor" ctrllimited="true" ctrlrange="-14.1 14.1" />
-    <motor gear="1" joint="zhead_2_joint" name="zhead_2_joint_motor" ctrllimited="true" ctrlrange="-14.1 14.1" />
+    <motor gear="1" joint="zhead_1_joint" name="zhead_1_joint_motor" ctrllimited="true" ctrlrange="-15.5 15.5" />
+    <motor gear="1" joint="zhead_2_joint" name="zhead_2_joint_motor" ctrllimited="true" ctrlrange="-14.5 14.5" />
           <position joint="l_thumb_j1" name="l_thumb_j1_motor" kp="10" ctrllimited="true" ctrlrange="0 2.182"/>
         <position joint="l_thumb_j2" name="l_thumb_j2_motor" kp="10" ctrllimited="true" ctrlrange="-2.62 0"/>
         <position joint="l_thumb_j3" name="l_thumb_j3_motor" kp="10" ctrllimited="true" ctrlrange="-1.05 1.57"/>

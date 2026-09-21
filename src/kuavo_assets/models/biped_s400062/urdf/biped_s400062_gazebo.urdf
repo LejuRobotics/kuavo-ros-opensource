@@ -1526,17 +1526,17 @@
     <parent link="zhead_2_link" />
     <child link="head_camera_base" />
   </joint>
-  <link name="head_camera_depth">
+  <link name="cam_h_link">
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <mass value="0.001" />
       <inertia ixx="0.00001" ixy="0.0" ixz="0.0" iyy="0.00001" iyz="0.0" izz="0.00001" />
     </inertial>
   </link>
-  <joint name="head_camera_depth_joint" type="fixed">
+  <joint name="cam_h_link_joint" type="fixed">
     <origin xyz="0.011715 0.0475 0.014311" rpy="0 0 0" />
     <parent link="head_camera_base" />
-    <child link="head_camera_depth" />
+    <child link="cam_h_link" />
   </joint>
   <link name="radar">
     <inertial>
