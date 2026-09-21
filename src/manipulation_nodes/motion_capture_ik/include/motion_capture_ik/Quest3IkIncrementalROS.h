@@ -23,6 +23,7 @@
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "motion_capture_ik/ArmTrajWriter.h"
 #include "motion_capture_ik/SG100HandBridge.h"
+#include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 
 namespace HighlyDynamic {
 
@@ -164,6 +165,12 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   Eigen::VectorXd velocityFromPublishedArmPosition(const Eigen::VectorXd& previousQ,
                                                    const Eigen::VectorXd& currentQ,
                                                    const ros::Time& now) const;
+  void resetPublishedArmSmoother(const Eigen::VectorXd& q, const ros::Time& now);
+  void seedPublishedArmSmoother(const Eigen::VectorXd& q, const Eigen::VectorXd& v);
+  void smoothPublishedArmCommand(const Eigen::VectorXd& desiredQ, const ros::Time& now,
+                                 Eigen::VectorXd& qOut, Eigen::VectorXd& vOut);
+  void initializeArmJointRuckigFilter();
+  void resetArmJointRuckig(const Eigen::VectorXd& q);
   void invalidateLastPublishedArmTraj();
   void publishSensorDataArmJoints();        // 发布传感器数据的手臂关节角
   void publishHandPosOptimizationPoints();  // 发布优化前后的手部位置点
@@ -268,6 +275,14 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   bool hasLastArmTrajPublishStamp_ = false;
   Eigen::VectorXd lastPublishedArmPosition_;  // 上一帧真正发出去的 q，不受 fsmEnter 清零 latest_q_ 影响
   bool hasLastPublishedArmPosition_ = false;
+  Eigen::VectorXd publishedArmQ_;
+  Eigen::VectorXd publishedArmV_;
+  bool hasPublishedArmSmoother_{false};
+  std::atomic<bool> reseedPublishedArmSmoother_{false};
+  bool enableArmTrajSmooth_{true};
+  double armTrajSmoothWn_{40.0};
+  double armTrajSmoothZeta_{1.0};
+  double armTrajSmoothAccLimit_{60.0};
   Eigen::VectorXd jointMidValues_;  // TEST: 关节限制中间值（用于测试），存储每个关节的(limit_lower+limit_upper)/2
 
   // 传感器数据关节角（14维，rad）：用于保存 sensorData 对应的机器人双臂关节数据（指数均值滤波后）
@@ -279,6 +294,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   double fhanKh0Joint_ = 6.0;      // 关节角度fhan滤波平滑系数
   double maxJointVelocity_ = 1.0;  // 关节最大角速度限制（弧度/秒）
   double lowpassDqAlpha_ = 0.9;    // lowpass_dq_低通滤波因子（历史值权重，新值权重为1-alpha）
+  double jointSpaceAccLimit_ = 100.0;   // 与轮臂相同：关节 Ruckig 加速度约束
+  double jointSpaceJerkLimit_ = 600.0;  // 与轮臂相同：关节 Ruckig 加加速度约束
+  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> armJointRuckigFilterPtr_;
 
   // 手臂关节限位：软边 = scale * URDF [low, high]，再做边界速度阻尼
   bool wristJointLimitVelocityDamperEnabled_ = true;

@@ -85,6 +85,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::VectorXd velocityFromPublishedArmPosition(const Eigen::VectorXd& previousQ,
                                                    const Eigen::VectorXd& currentQ,
                                                    const ros::Time& now) const;
+  void resetPublishedArmSmoother(const Eigen::VectorXd& q, const ros::Time& now);
+  void seedPublishedArmSmoother(const Eigen::VectorXd& q, const Eigen::VectorXd& v);
+  void smoothPublishedArmCommand(const Eigen::VectorXd& desiredQ, const ros::Time& now,
+                                 Eigen::VectorXd& qOut, Eigen::VectorXd& vOut);
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
@@ -315,6 +319,14 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLastPubArmTrajWallStart_ = false;
   ros::Time lastArmTrajPublishStamp_;
   bool hasLastArmTrajPublishStamp_ = false;
+  Eigen::VectorXd publishedArmQ_;
+  Eigen::VectorXd publishedArmV_;
+  bool hasPublishedArmSmoother_{false};
+  std::atomic<bool> reseedPublishedArmSmoother_{false};
+  bool enableArmTrajSmooth_{true};
+  double armTrajSmoothWn_{40.0};
+  double armTrajSmoothZeta_{1.0};
+  double armTrajSmoothAccLimit_{60.0};
 
   std::thread ikSolveThread_;
   std::thread jointStatePublishThread_;
@@ -439,7 +451,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 手部位置约束参数
   double sphereRadiusLimit_ = 0.5;                                  // 手部位置约束球体半径
   double minReachableDistance_ = 0.20;                              // 最小可达距离
-  Eigen::Vector3d boxMinBound_ = Eigen::Vector3d(0.12, -0.5, 0.1);  // 手部位置约束边界框最小值 [x, y, z]
+  Eigen::Vector3d boxMinBound_ = Eigen::Vector3d(0.25, -0.5, 0.1);  // 手部位置约束边界框最小值 [x, y, z]
   Eigen::Vector3d boxMaxBound_ = Eigen::Vector3d(1.0, 0.5, 1.0);    // 手部位置约束边界框最大值 [x, y, z]
   double chestOffsetY_ = 0.0;                                 // 胸部中线偏移量，用于防止左右手过中线
   Eigen::Vector3d leftCenter_ = Eigen::Vector3d(0, 0.02, 0);  // 左手圆柱体约束中心

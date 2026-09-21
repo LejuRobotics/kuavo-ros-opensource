@@ -378,6 +378,9 @@ namespace humanoidController_wheel_wbc
     vector_t init_arm_target_qpos_;
     bool enable_arm_traj_interpolator_{false};  // 手臂轨迹插补增强开关（默认关闭，保持旧行为）
     ArmTrajectoryInterpolator armTrajectoryInterpolator_;
+    int armInterpSeenMode_{-1};
+    bool armInterpWaitFreshTraj_{false};
+    ros::Time armInterpStampAtModeChange_;
     vector_t wbc_arm_raw_q_;
     vector_t wbc_arm_raw_v_;
 

@@ -2453,11 +2453,33 @@ namespace humanoidController_wheel_wbc
 
     const vector_t currentArmQ = observation_wheel_.state.tail(armNum_);
 
+    if (arm_trajectory_mode_ != armInterpSeenMode_) {
+      if (arm_trajectory_mode_ == 2 && armInterpSeenMode_ != 2) {
+        armInterpWaitFreshTraj_ = true;
+        armInterpStampAtModeChange_ = control_data_manager_->getArmExternalControlStateTimestamp();
+      } else {
+        armInterpWaitFreshTraj_ = false;
+      }
+      armInterpSeenMode_ = arm_trajectory_mode_;
+    }
+
     vector_t armTargetRawQ = currentArmQ;
     vector_t armTargetRawV = vector_t::Zero(armNum_);
     bool hasArmTargetRaw = false;
     ArmJointTrajectory armTrajRaw = control_data_manager_->getArmExternalControlState();
-    if (armTrajRaw.pos.size() == static_cast<Eigen::Index>(armNum_)) {
+    if (armInterpWaitFreshTraj_) {
+      const ros::Time trajStamp = control_data_manager_->getArmExternalControlStateTimestamp();
+      if (!trajStamp.isZero() && trajStamp != armInterpStampAtModeChange_) {
+        armInterpWaitFreshTraj_ = false;
+      }
+    }
+    if (armInterpWaitFreshTraj_) {
+      // 切入 mode2 后先钉在当前关节，丢掉缓存里上一轮增量姿态。
+      armTargetRawQ = currentArmQ;
+      armTargetRawV = vector_t::Zero(armNum_);
+      hasArmTargetRaw = true;
+      armTrajectoryInterpolator_.ingestRawTarget(time, currentArmQ, armTargetRawV);
+    } else if (armTrajRaw.pos.size() == static_cast<Eigen::Index>(armNum_)) {
       armTargetRawQ = armTrajRaw.pos;
       hasArmTargetRaw = true;
       if (armTrajRaw.vel.size() == static_cast<Eigen::Index>(armNum_)) {

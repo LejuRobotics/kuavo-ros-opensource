@@ -125,6 +125,7 @@ void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPt
     if ((oldMode == 0 || oldMode == 1) && newMode == 2) {
       std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
       mode2EnterTime_ = ros::Time::now();
+      reseedPublishedArmSmoother_.store(true);
       ROS_INFO("[WheelQuest3IkIncrementalROS] Mode 2 entered at time: %.3f, timeout duration: %.1f seconds",
                mode2EnterTime_.toSec(),
                MODE_2_TIMEOUT_DURATION);
@@ -132,6 +133,7 @@ void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPt
         ROS_ERROR("[WheelQuest3IkIncrementalROS] Failed to enable SHM on mode 2 enter");
       }
     } else if (oldMode == 2 && newMode != 2) {
+      reseedPublishedArmSmoother_.store(true);
       if (!arm_traj_writer_.setTransport(Request::TRANSPORT_NONE)) {
         ROS_ERROR("[WheelQuest3IkIncrementalROS] Failed to disable SHM on mode 2 exit");
       }
@@ -1514,13 +1516,6 @@ DrakeChestElbowHandBoundsConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
       if (b.contains("p2_xy_norm_y_weight")) config.p2XyNormYWeight = b["p2_xy_norm_y_weight"].get<double>();
       if (b.contains("min_p1_xy_norm")) config.minP1XyNorm = b["min_p1_xy_norm"].get<double>();
       if (b.contains("p1_xy_norm_y_weight")) config.p1XyNormYWeight = b["p1_xy_norm_y_weight"].get<double>();
-      // Hard 0.22m elbow keep-out folds near-torso circles. Cap it so hand tracking wins.
-      if (config.minP1XyNorm > 0.12) {
-        ROS_INFO(
-            "[WheelQuest3IkIncrementalROS] softening min_p1_xy_norm from %.3f to 0.12 m",
-            config.minP1XyNorm);
-        config.minP1XyNorm = 0.12;
-      }
     }
   } catch (const std::exception& e) {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] loadDrakeChestElbowHandBoundsFromJson exception: %s", e.what());
@@ -1796,8 +1791,83 @@ Eigen::VectorXd WheelQuest3IkIncrementalROS::velocityFromPublishedArmPosition(
   return vel;
 }
 
+void WheelQuest3IkIncrementalROS::resetPublishedArmSmoother(const Eigen::VectorXd& q, const ros::Time& now) {
+  seedPublishedArmSmoother(q, Eigen::VectorXd::Zero(q.size()));
+  (void)now;
+}
+
+void WheelQuest3IkIncrementalROS::seedPublishedArmSmoother(const Eigen::VectorXd& q, const Eigen::VectorXd& v) {
+  publishedArmQ_ = q;
+  publishedArmV_ = (v.size() == q.size()) ? v : Eigen::VectorXd::Zero(q.size());
+  hasPublishedArmSmoother_ = q.size() > 0;
+}
+
+void WheelQuest3IkIncrementalROS::smoothPublishedArmCommand(const Eigen::VectorXd& desiredQ, const ros::Time& now,
+                                                            Eigen::VectorXd& qOut, Eigen::VectorXd& vOut) {
+  const Eigen::Index n = desiredQ.size();
+  qOut = desiredQ;
+  vOut = Eigen::VectorXd::Zero(n);
+  if (n == 0) {
+    return;
+  }
+  for (Eigen::Index i = 0; i < n; ++i) {
+    if (!std::isfinite(desiredQ(i))) {
+      if (hasPublishedArmSmoother_ && publishedArmQ_.size() == n) {
+        qOut = publishedArmQ_;
+        vOut = publishedArmV_;
+      }
+      return;
+    }
+  }
+
+  if (!hasPublishedArmSmoother_ || publishedArmQ_.size() != n || publishedArmV_.size() != n) {
+    resetPublishedArmSmoother(desiredQ, now);
+    qOut = publishedArmQ_;
+    vOut = publishedArmV_;
+    return;
+  }
+
+  double dt = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
+  if (hasLastArmTrajPublishStamp_ && !lastArmTrajPublishStamp_.isZero()) {
+    const double measuredDt = (now - lastArmTrajPublishStamp_).toSec();
+    if (std::isfinite(measuredDt) && measuredDt > 1e-4) {
+      dt = measuredDt;
+    }
+  }
+  if (dt > 0.05) {
+    resetPublishedArmSmoother(desiredQ, now);
+    qOut = publishedArmQ_;
+    vOut = publishedArmV_;
+    return;
+  }
+
+  dt = std::clamp(dt, 0.006, 0.018);
+  const double wn = std::clamp(armTrajSmoothWn_, 1.0, 0.45 / dt);
+  const double zeta = std::clamp(armTrajSmoothZeta_, 0.7, 1.5);
+  const double amax = std::max(armTrajSmoothAccLimit_, 1.0);
+  const double vmax = std::max(maxJointVelocity_, 0.0);
+
+  Eigen::VectorXd q = publishedArmQ_;
+  Eigen::VectorXd v = publishedArmV_;
+  for (Eigen::Index i = 0; i < n; ++i) {
+    double acc = wn * wn * (desiredQ(i) - q(i)) - 2.0 * zeta * wn * v(i);
+    acc = std::clamp(acc, -amax, amax);
+    v(i) += acc * dt;
+    if (vmax > 0.0) {
+      v(i) = std::clamp(v(i), -vmax, vmax);
+    }
+    q(i) += v(i) * dt;
+  }
+  publishedArmQ_ = q;
+  publishedArmV_ = v;
+  qOut = q;
+  vOut = v;
+}
+
 void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg) {
-  armJintStateMsg.header.stamp = ros::Time::now();
+  if (armJintStateMsg.header.stamp.isZero()) {
+    armJintStateMsg.header.stamp = ros::Time::now();
+  }
   logArmTrajPublishStampPeriod(armJintStateMsg.header.stamp);
 
   sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;
@@ -1892,8 +1962,10 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
     mode2EnterTime = mode2EnterTime_;
   }
-  const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
-  const double mode2Elapsed = inMode2 ? (now - mode2EnterTime).toSec() : 0.0;
+  const bool inMode2 = (armControlMode_.load() == 2);
+  // 回调尚未写入 mode2EnterTime_ 时也按 0s 处理，避免先发出上一轮增量姿态。
+  const double mode2Elapsed =
+      (inMode2 && !mode2EnterTime.isZero()) ? (now - mode2EnterTime).toSec() : 0.0;
 
   Eigen::VectorXd armPositionForPublish;
   Eigen::VectorXd armVelocityForPublish;
@@ -1946,10 +2018,9 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     // 区间 2: [0.3s, 2.0s)      — 从 q_init_cmd_ 线性平滑到目标（若 q_init_cmd_ 有效）
     // 区间 3: [2.0s, +infty)    — 不在此处改写
     // 速度一律由最终发布位置差分得到，不再单独清零，避免 q/v 不一致。
+    constexpr double kMode2SensorSyncDurationSec = 0.3;
+    constexpr double kMode2SmoothDurationSec = 2.0;
     if (inMode2) {
-      constexpr double kMode2SensorSyncDurationSec = 0.3;
-      constexpr double kMode2SmoothDurationSec = 2.0;
-
       if (mode2Elapsed < kMode2SensorSyncDurationSec) {
         Eigen::VectorXd sensorArmQ = q_;
         if (jointDataForDrakeFK_.size() >= sensorDataArmOffset_ + 14) {
@@ -1980,8 +2051,25 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       }
     }
 
-    armVelocityForPublish =
-        velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
+    const bool mode2Warmup = inMode2 && mode2Elapsed < kMode2SmoothDurationSec;
+    const bool mode2SensorHold = inMode2 && mode2Elapsed < kMode2SensorSyncDurationSec;
+    const bool reseedSmoother = reseedPublishedArmSmoother_.exchange(false);
+    if (mode2SensorHold || reseedSmoother) {
+      // 切入时从当前关节/传感器起步，禁止二阶平滑从上一轮增量姿态往回追。
+      resetPublishedArmSmoother(armPositionForPublish, now);
+      armVelocityForPublish = Eigen::VectorXd::Zero(armPositionForPublish.size());
+    } else if (mode2Warmup) {
+      armVelocityForPublish =
+          velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
+      seedPublishedArmSmoother(armPositionForPublish, armVelocityForPublish);
+    } else if (enableArmTrajSmooth_) {
+      const Eigen::VectorXd desiredQ = armPositionForPublish;
+      smoothPublishedArmCommand(desiredQ, now, armPositionForPublish, armVelocityForPublish);
+    } else {
+      armVelocityForPublish =
+          velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
+    }
+    latest_q_ = armPositionForPublish;
     latest_dq_ = armVelocityForPublish;
     lowpass_dq_ = armVelocityForPublish;
 
@@ -1991,6 +2079,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
   }
 
   sensor_msgs::JointState armJintStateMsg;
+  armJintStateMsg.header.stamp = now;
   armJintStateMsg.position.resize(14);
   armJintStateMsg.velocity.resize(14);
   armJintStateMsg.effort.resize(14);
@@ -2021,24 +2110,23 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
 
   Eigen::VectorXd armPositionForPublish;
   Eigen::VectorXd armVelocityForPublish;
+  const ros::Time stamp = ros::Time::now();
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
 
-    const Eigen::VectorXd previousPublishedQ = latest_q_;
     q_ = defaultArmAngles;
     dq_.setZero();
-
-    const double alpha = 0.00;
-    latest_q_ = (1.0 - alpha) * latest_q_ + alpha * q_;
-
-    armPositionForPublish = latest_q_;
-    armVelocityForPublish =
-        velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, ros::Time::now());
+    latest_q_ = defaultArmAngles;
+    armPositionForPublish = defaultArmAngles;
+    reseedPublishedArmSmoother_.store(false);
+    resetPublishedArmSmoother(armPositionForPublish, stamp);
+    armVelocityForPublish = Eigen::VectorXd::Zero(armPositionForPublish.size());
     latest_dq_ = armVelocityForPublish;
     lowpass_dq_ = armVelocityForPublish;
   }
 
   sensor_msgs::JointState armJintStateMsg;
+  armJintStateMsg.header.stamp = stamp;
   armJintStateMsg.position.resize(14);
   armJintStateMsg.velocity.resize(14);
   armJintStateMsg.effort.resize(14);
@@ -2402,6 +2490,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   latest_q_ = standArmAngles_;
   latest_dq_ = Eigen::VectorXd::Zero(14);
   lowpass_dq_ = Eigen::VectorXd::Zero(14);
+  resetPublishedArmSmoother(latest_q_, ros::Time(0));
 
   ikLowerBodyJointCommand_ = Eigen::VectorXd::Zero(4);
   ikUpperBodyJointCommand_ = Eigen::VectorXd::Zero(14);
@@ -2785,6 +2874,15 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   PARAM_AND_PRINT_FLOAT(
       nodeHandle_, "/ik_ros_uni_cpp_node/quest3/joint_space_jerk_limit", jointSpaceJerkLimit_, 600.0, 1);
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 10.0, 3);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_enable", enableArmTrajSmooth_, true);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_wn", armTrajSmoothWn_, 40.0);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_zeta", armTrajSmoothZeta_, 1.0);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_acc_limit", armTrajSmoothAccLimit_, 60.0);
+  ROS_INFO("[WheelQuest3IkIncrementalROS] arm traj publish smoother enable=%s wn=%.1f zeta=%.2f acc_limit=%.1f",
+           enableArmTrajSmooth_ ? "true" : "false",
+           armTrajSmoothWn_,
+           armTrajSmoothZeta_,
+           armTrajSmoothAccLimit_);
   {
     const double armRuckigDt = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
     const double lbRuckigDt = lbLegPublishRateMultiplier_ / std::max(jointStatePublishRateHz_, 1.0);
@@ -2847,10 +2945,10 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
                     true);
   nodeHandle_.param(naturalElbowParam + "waist_soft_clearance",
                     wheelNaturalElbowGuideConfig_.waistSoftClearance,
-                    0.180);
+                    0.260);
   nodeHandle_.param(naturalElbowParam + "waist_full_activation_clearance",
                     wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
-                    0.100);
+                    0.200);
   wheelNaturalElbowSoftTrackingScale_ =
       std::clamp(wheelNaturalElbowSoftTrackingScale_, 0.0, 1.0);
   wheelNaturalElbowGuideConfig_.waistSoftClearance =

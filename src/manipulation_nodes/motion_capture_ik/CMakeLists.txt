@@ -208,8 +208,9 @@ add_executable(ik_ros_uni_cpp_node
 )
 target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
+  ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
-target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake yaml-cpp)
+target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake yaml-cpp)
 target_compile_features(ik_ros_uni_cpp_node PUBLIC cxx_std_17)
 
 # wheel_ik_ros_uni_cpp_node
@@ -262,8 +263,9 @@ add_executable(wheel_arm_only_ik_ros_uni_cpp_node
 )
 target_include_directories(wheel_arm_only_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
+  ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
-target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake yaml-cpp)
+target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake yaml-cpp)
 
 install(TARGETS ik_ros_uni_cpp_node wheel_ik_ros_uni_cpp_node wheel_arm_only_ik_ros_uni_cpp_node topic_logger
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
