@@ -889,19 +889,19 @@ MonitorParams
   printWarning              false
 }
 
-; 手臂轨迹插补 Kalman（与轮臂 armTrajInterpKinematicLimit 相同，避免走代码默认 R_q=1e-4）
+; 手臂轨迹插补 Kalman。人形挥臂带加速，r_dq/scale 比轮臂更松，否则群延迟约 20ms。
 armTrajInterpKinematicLimit
 {
   enable                         false  ; 增量 ultra_fast 由服务打开；此处只提供 Kalman 参数
-  reference_update_period        0.010  ; [s], should match arm trajectory source period
+  reference_update_period        0.010  ; [s], 对齐人形增量 100Hz 发布
   kalman_r_q                     3e-7    ; PV模型: 全14DoF共享 position measurement noise
-  kalman_r_dq                    5e-4    ; PV模型: 全14DoF共享 velocity measurement noise
+  kalman_r_dq                    5e-2    ; 降低对 v 量测的信任，避免恒速模型在加速挥臂上把 q 拖慢
   kalman_p0_pos                  1e-2    ; PV模型: 全14DoF共享 initial covariance (position)
   kalman_p0_vel                  5e-1    ; PV模型: 全14DoF共享 initial covariance (velocity)
   kalman_v_limit                 30.0    ; PV模型: 全14DoF共享 velocity limit [rad/s]
-  fast_update_r_scale            1.0     ; 量测噪声缩放（1.0=常规更新）
+  fast_update_r_scale            0.1     ; 更信任位置量测，减少恒速模型在加速段的群延迟
   immediate_update_on_new_target true    ; 新目标到达后立即更新，不受周期门控阻塞
-  target_v_alpha                 0.80    ; targetV去毛刺系数，1.0表示关闭；无新rawV时预测保持v常值
+  target_v_alpha                 1.0     ; 关闭 targetV 去毛刺，避免再给斜坡加一层速度滞后
 }
 
 contact_cst_st            0.06;
