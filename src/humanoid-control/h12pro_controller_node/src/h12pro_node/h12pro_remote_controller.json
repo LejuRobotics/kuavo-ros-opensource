@@ -233,6 +233,8 @@
       "switch_amp":["E_RIGHT", "F_RIGHT", "B_PRESS"],
       "switch_bianlitie":["E_RIGHT", "F_RIGHT", "C_PRESS"],
       "switch_waka":["E_RIGHT", "F_RIGHT", "D_PRESS"],
+      "switch_fcyx":["E_LEFT", "F_LEFT", "A_PRESS"],
+      "switch_daowu":["E_LEFT", "F_LEFT", "B_PRESS"],
      "stop":["C_LONG_PRESS","D_LONG_PRESS"]
     },
     "walk":{

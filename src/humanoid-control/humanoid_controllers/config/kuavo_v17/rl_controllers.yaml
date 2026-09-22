@@ -46,3 +46,14 @@ controllers:
     config_file: "rl/dance_param_bianlitie_V03.info"
     enabled: true
     
+  - name: "dance_daowu"    
+    class: "DANCE_CONTROLLER"
+    type: "DANCE_CONTROLLER"
+    config_file: "rl/dance_param_daowu.info"
+    enabled: true
+
+  - name: "dance_fcyx"    # bianlfcyxitie
+    class: "DANCE_CONTROLLER"
+    type: "DANCE_CONTROLLER"
+    config_file: "rl/dance_param_fcyx.info"
+    enabled: true

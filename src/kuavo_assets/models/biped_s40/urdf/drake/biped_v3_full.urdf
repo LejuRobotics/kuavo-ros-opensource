@@ -7,7 +7,7 @@
   <link name="torso">
     <inertial>
       <origin xyz="-0.00505 0.0014 0.18077" rpy="0 0 0" />
-      <mass value="24.1969" />
+      <mass value="24.2139" />
       <inertia ixx="0.28214" ixy="3e-05" ixz="0.01114" iyy="0.20534" iyz="0.00044" izz="0.13735" />
     </inertial>
     <visual>

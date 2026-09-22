@@ -684,6 +684,18 @@
         "before": "switch_waka_callback"
       },
       {
+        "trigger": "switch_fcyx",
+        "source": "stance",
+        "dest": "stance",
+        "before": "switch_fcyx_callback"
+      },
+      {
+        "trigger": "switch_daowu",
+        "source": "stance",
+        "dest": "stance",
+        "before": "switch_daowu_callback"
+      },
+      {
         "trigger": "arm_pose1",
         "source": "stance",
         "dest": "stance",

@@ -1448,6 +1448,16 @@ def switch_waka_callback(event):
     """H12 ``switch_waka``：切换到 Waka mimic 舞蹈。"""
     _switch_to_mimic_callback(event, "dance_waka", "SwitchWaka")
 
+
+def switch_fcyx_callback(event):
+    """H12 ``switch_fcyx``：切换到风吹月下 mimic 舞蹈。"""
+    _switch_to_mimic_callback(event, "dance_fcyx", "SwitchFcyx")
+
+
+def switch_daowu_callback(event):
+    """H12 ``switch_daowu``：切换到刀舞 mimic 舞蹈。"""
+    _switch_to_mimic_callback(event, "dance_daowu", "SwitchDaowu")
+
 def vmp_action_callback(event):
     """VMP动作回调函数（统一处理vmp_action_RL_A/B/C/D）
     从配置文件中读取action_name并发布到话题，同时支持音乐播放
