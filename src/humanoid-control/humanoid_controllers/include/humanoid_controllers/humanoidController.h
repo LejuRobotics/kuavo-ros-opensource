@@ -867,11 +867,6 @@ namespace humanoid_controller
     LowPassFilter2ndOrder arm_joint_pos_filter_;
     LowPassFilter2ndOrder arm_joint_vel_filter_;
 
-    // 绝对式手臂外控的位置/速度参考必须保持差分一致。速度由已经过位置滤波的
-    // 最终目标重建，不再经过独立低通；该状态在模式切换或异常控制周期时复位。
-    vector_t absolute_arm_prev_filtered_pos_;
-    bool absolute_arm_velocity_initialized_{false};
-
     bool enable_arm_traj_interpolator_{false};
     humanoidController_wheel_wbc::ArmTrajectoryInterpolator armTrajectoryInterpolator_;
     vector_t arm_traj_interp_prev_q_;

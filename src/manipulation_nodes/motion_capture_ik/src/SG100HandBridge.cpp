@@ -246,8 +246,20 @@ bool SG100HandBridge::onGetGestures(
     kuavo_msgs::SG100GetGestures::Request& req,
     kuavo_msgs::SG100GetGestures::Response& res) {
   std::lock_guard<std::mutex> lock(mutex_);
-  const auto& lib = left_lib_;  // 左右库同源，取左手库即可
-  res.total_count = static_cast<int32_t>(lib.modeCount());
+  const SG100GestureLibrary* lib = nullptr;
+  switch (req.hand_side) {
+    case kuavo_msgs::SG100GetGestures::Request::LEFT_HAND:
+      lib = &left_lib_;
+      break;
+    case kuavo_msgs::SG100GetGestures::Request::RIGHT_HAND:
+      lib = &right_lib_;
+      break;
+    default:
+      res.success = false;
+      res.message = "invalid hand_side";
+      return true;
+  }
+  res.total_count = static_cast<int32_t>(lib->modeCount());
 
   if (req.id == kuavo_msgs::SG100GetGestures::Request::QUERY_ALL) {
     // 仅返回总数
@@ -260,14 +272,14 @@ bool SG100HandBridge::onGetGestures(
   if (query_id == kuavo_msgs::SG100GetGestures::Request::QUERY_CURRENT) {
     query_id = key_mode_.load();  // 当前激活手势
   }
-  if (query_id < 0 || query_id >= static_cast<int32_t>(lib.modeCount())) {
+  if (query_id < 0 || query_id >= static_cast<int32_t>(lib->modeCount())) {
     res.success = false;
     res.message = "id out of range";
     return true;
   }
 
   HighlyDynamic::CurveGesture g;
-  lib.getGesture(query_id, g);
+  lib->getGesture(query_id, g);
   res.name = g.name;
   const int n = static_cast<int>(g.joints.size());
   res.position.resize(n);

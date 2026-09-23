@@ -295,6 +295,13 @@ class IkRos:
         self._ik_solution_lock = threading.Lock()
         self._latest_ik_solution = None
         self._last_published_arm_q = None
+        # Keep the velocity reference tied to the command that was actually
+        # published.  This state is shared by the normal 100 Hz publisher and
+        # the half-body hold/mode-transition publishers.
+        self._arm_velocity_lock = threading.Lock()
+        self._last_arm_position_deg = None
+        self._last_arm_publish_stamp = None
+        self._last_arm_mode_for_velocity = None
         self._ik_stale_solution_drop_count = 0
         self._ik_publish_timeout_count = 0
         self.ik_solution_timeout_s = max(
@@ -870,6 +877,38 @@ class IkRos:
             self._latest_ik_solution = None
             if clear_published_command:
                 self._last_published_arm_q = None
+
+    def _reset_arm_velocity_history(self):
+        """Make the next arm command start with zero velocity."""
+        with self._arm_velocity_lock:
+            self._last_arm_position_deg = None
+            self._last_arm_publish_stamp = None
+
+    def _fill_arm_velocity(self, msg):
+        """Derive velocity from consecutive positions sent on the trajectory topic."""
+        position_deg = np.asarray(msg.position, dtype=float)
+        velocity_deg_s = np.zeros(position_deg.shape, dtype=float)
+        stamp = msg.header.stamp
+
+        with self._arm_velocity_lock:
+            if (self._last_arm_position_deg is not None
+                    and self._last_arm_position_deg.shape == position_deg.shape
+                    and self._last_arm_publish_stamp is not None):
+                dt = (stamp - self._last_arm_publish_stamp).to_sec()
+                max_valid_dt = 3.0 * self.controller_dt
+                if (np.isfinite(dt) and self.controller_dt * 0.1 <= dt <= max_valid_dt):
+                    velocity_deg_s = (
+                        position_deg - self._last_arm_position_deg
+                    ) / dt
+
+            # Always advance the baseline.  After a scheduling gap this makes
+            # only the delayed sample zero instead of carrying its displacement
+            # into the following sample.
+            self._last_arm_position_deg = position_deg.copy()
+            self._last_arm_publish_stamp = stamp
+
+        velocity_deg_s[~np.isfinite(velocity_deg_s)] = 0.0
+        msg.velocity = velocity_deg_s.tolist()
 
     def _wait_for_latest_ik_target(self, last_generation):
         """Wait for and atomically copy the newest committed IK target."""
@@ -1530,6 +1569,7 @@ class IkRos:
         
         # 只有在没有hold_arm_timer激活时才发布（避免与保持位置定时器冲突）
         if self.hold_arm_timer is None:
+            self._fill_arm_velocity(msg)
             self.pub.publish(msg)
             return True
         return False
@@ -2240,6 +2280,9 @@ class IkRos:
     # 添加手臂模式回调函数
     def arm_mode_callback(self, msg):
         new_mode = msg.data
+        if new_mode != self._last_arm_mode_for_velocity:
+            self._reset_arm_velocity_history()
+            self._last_arm_mode_for_velocity = new_mode
         if new_mode == 0:  # 当模式不是2时
             # 重置所有姿态
             print(f"\033[91m[IK]Reset arm mode.\033[0m")
@@ -2311,6 +2354,7 @@ class IkRos:
                 self.__first_change_arm_mode = False
                 self.__need_reset_ik_guess = True
                 self.arm_mode_changing = True
+                self._reset_arm_velocity_history()
             elif current_mode == new_mode and not self.__first_change_arm_mode:
                 # 模式切换完成，关闭arm_mode_changing标志
                 if not self.only_half_up_body:
@@ -2361,6 +2405,7 @@ class IkRos:
         msg.name = ["arm_joint_" + str(i) for i in range(1, 15)]
         msg.header.stamp = rospy.Time.now()
         msg.position = 180.0 / np.pi * arm_agl_interpolated
+        self._fill_arm_velocity(msg)
         self.pub.publish(msg)
 
     def stop_robot_callback(self, msg):
@@ -2398,6 +2443,7 @@ class IkRos:
         """服务回调函数，设置arm_mode_changing为True"""
 
         self.arm_mode_changing = True
+        self._reset_arm_velocity_history()
         
         if self.only_half_up_body:
             # 发送当前手臂的关节状态到kuavo_arm_traj来清空mpc节点话题接收队列
@@ -2417,6 +2463,8 @@ class IkRos:
                 msg.header.stamp = rospy.Time.now()
                 msg.position = 180.0 / np.pi * np.array(arm_current_state)
                 for i in range(5):  # 减少发送次数从20到5，避免过长卡顿
+                    msg.header.stamp = rospy.Time.now()
+                    self._fill_arm_velocity(msg)
                     self.pub.publish(msg)
                     rate.sleep()
 
