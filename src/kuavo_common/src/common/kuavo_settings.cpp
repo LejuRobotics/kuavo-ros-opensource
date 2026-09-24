@@ -1,5 +1,7 @@
 #include "kuavo_common/common/kuavo_settings.h"
 #include "kuavo_common/common/utils.h"
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 
 namespace HighlyDynamic
@@ -231,35 +233,36 @@ namespace HighlyDynamic
     {
         std::map<std::string, motor_config>
             motor_name_map = {
-                {"PA100", {BIT_17_10, PA100_MC, PA100_C2T, EC_MASTER}},
-                {"PA81", {BIT_17_10, PA81_MC, PA81_C2T, EC_MASTER}},
+                {"PA100_10", {BIT_17_10, PA100_10_MC, PA100_10_C2T, EC_MASTER}},
+                {"PA81_10", {BIT_17_10, PA81_10_MC, PA81_10_C2T, EC_MASTER}},
                 {"AK10_9", {BIT_17_9, AK10_9_MC, AK10_9_C2T, EC_MASTER}},
                 {"CK", {BIT_17_36, CK_MC, CK_C2T, EC_MASTER}},
-                {"dynamixel", {BIT_17_36, CK_MC, CK_C2T, DYNAMIXEL}},
-                {"realman", {BIT_17_36, CK_MC, CK_C2T, REALMAN}},
-                {"ruiwo", {BIT_17_36, CK_MC, CK_C2T, RUIWO}},
-                {"ruiwoPA81", {BIT_17_25, CK_MC, PA81_C2T, RUIWO}},
-                {"ruiwoPA72", {BIT_17_36, CK_MC, PA72_C2T, RUIWO}},
-                {"ruiwoPA60", {BIT_17_36, CK_MC, PA60_C2T, RUIWO}},
-                {"ruiwoPA43", {BIT_17_10, CK_MC, PA43_C2T, RUIWO}},
-                {"ruiwoPA4310_25", {BIT_17_25, CK_MC, PA4310_25_C2T, RUIWO}},
-                {"ruiwoPA4310_25_New", {BIT_17_25, CK_MC, PA4310_25_C2T, RUIWO}},
-                {"ruiwoPA4315_36", {BIT_17_36, CK_MC, PA4315_36_C2T, RUIWO}},
-                {"ruiwoPA60_16", {BIT_17_16, CK_MC, PA60_16_C2T, RUIWO}},
-                {"PA100_18", {BIT_17_18, PA100_MC, PA100_18_C2T, EC_MASTER}},
-                {"PA100_20", {BIT_17_20, PA100_MC, PA100_20_C2T, EC_MASTER}},
-                {"PA115", {BIT_17_120, PA115_MC, PA115_C2T, EC_MASTER}},
-                {"PA4310_25", {BIT_17_25, PA4310_25_MC, PA4310_25_C2T, EC_MASTER}},
-                {"PA60", {BIT_17_36, PA100_MC, PA60_C2T, EC_MASTER}},
-                {"PA72_36", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
-                {"PA72_36_L", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
-                {"PA72_36_R", {BIT_17_36, PA72_36_MC, PA72_36_C2T, EC_MASTER}},
-                {"PA76_25", {BIT_17_25, PA76_25_MC, PA76_25_C2T, EC_MASTER}},
-                {"PA76_18", {BIT_17_18, PA76_18_MC, PA76_18_C2T, EC_MASTER}},
-                {"PA81_18_25", {BIT_17_25, PA81_18_25_MC, PA81_18_25_C2T, EC_MASTER}},
-                {"PA105_18", {BIT_17_18, PA105_18_MC, PA105_18_C2T, EC_MASTER}},
+                {"dynamixel", {BIT_17_36, dynamixel_MC, dynamixel_C2T, DYNAMIXEL}},
+                {"realman", {BIT_17_36, realman_MC, realman_C2T, REALMAN}},
+                {"ruiwo", {BIT_17_36, ruiwo_MC, ruiwo_C2T, RUIWO}},
+                {"ruiwoPA81_18_25_KV60_ZHK", {BIT_17_25, ruiwoPA81_18_25_KV60_ZHK_MC, ruiwoPA81_18_25_KV60_ZHK_C2T, RUIWO}},
+                {"ruiwoPA72_10_36_KV50", {BIT_17_36, ruiwoPA72_10_36_KV50_MC, ruiwoPA72_10_36_KV50_C2T, RUIWO}},
+                {"ruiwoPA60_13_36_KV50", {BIT_17_36, ruiwoPA60_13_36_KV50_MC, ruiwoPA60_13_36_KV50_C2T, RUIWO}},
+                {"ruiwoPA43_10_25_KV70", {BIT_17_25, ruiwoPA43_10_25_KV70_MC, ruiwoPA43_10_25_KV70_C2T, RUIWO}},
+                {"ruiwoPA43_10_25_KV70_PREV", {BIT_17_25, ruiwoPA43_10_25_KV70_PREV_MC, ruiwoPA43_10_25_KV70_PREV_C2T, RUIWO}},
+                {"ruiwoPA4315_36", {BIT_17_36, ruiwoPA4315_36_MC, ruiwoPA4315_36_C2T, RUIWO}},
+                {"ruiwoPA60_10_16_ZHK_KV35", {BIT_17_16, ruiwoPA60_10_16_ZHK_KV35_MC, ruiwoPA60_10_16_ZHK_KV35_C2T, RUIWO}},
+                {"PA100_20_18_KV60", {BIT_17_18, PA100_20_18_KV60_MC, PA100_20_18_KV60_C2T, EC_MASTER}},
+                {"PA100_20", {BIT_17_20, PA100_20_MC, PA100_20_C2T, EC_MASTER}},
+                {"HA115_20_120", {BIT_17_120, HA115_20_120_MC, HA115_20_120_C2T, EC_MASTER}},
+                {"HA115_10_120_ZHK", {BIT_17_120, HA115_10_120_ZHK_MC, HA115_10_120_ZHK_C2T, EC_MASTER}},
+                {"PA43_10_25_KV70", {BIT_17_25, PA43_10_25_KV70_MC, PA43_10_25_KV70_C2T, EC_MASTER}},
+                {"PA60_36", {BIT_17_36, PA60_36_MC, PA60_36_C2T, EC_MASTER}},
+                {"PA72_10_36_KV100", {BIT_17_36, PA72_10_36_KV100_MC, PA72_10_36_KV100_C2T, EC_MASTER}},
+                {"PA72_10_36_KV100_L", {BIT_17_36, PA72_10_36_KV100_L_MC, PA72_10_36_KV100_L_C2T, EC_MASTER}},
+                {"PA72_10_36_KV100_R", {BIT_17_36, PA72_10_36_KV100_R_MC, PA72_10_36_KV100_R_C2T, EC_MASTER}},
+                {"PA76_15_25_KV45_ZHK", {BIT_17_25, PA76_15_25_KV45_ZHK_MC, PA76_15_25_KV45_ZHK_C2T, EC_MASTER}},
+                {"PA76_15_18_KV45", {BIT_17_18, PA76_15_18_KV45_MC, PA76_15_18_KV45_C2T, EC_MASTER}},
+                {"PA76_15_18_KV70", {BIT_17_18, PA76_15_18_KV70_MC, PA76_15_18_KV70_C2T, EC_MASTER}},
+                {"PA81_18_25_KV60_ZHK", {BIT_17_25, PA81_18_25_KV60_ZHK_MC, PA81_18_25_KV60_ZHK_C2T, EC_MASTER}},
+                {"PA105_27_18_KV35", {BIT_17_18, PA105_27_18_KV35_MC, PA105_27_18_KV35_C2T, EC_MASTER}},
                 {"PA105_18_DS", {BIT_17_18, PA105_18_DS_MC, PA105_18_DS_C2T, EC_MASTER}},
-                {"PA81_25", {BIT_17_251, PA81_25_MC, PA81_25_C2T, EC_MASTER}},
+                {"PA81_25_KV60_ZHK", {BIT_17_251, PA81_25_KV60_ZHK_MC, PA81_25_KV60_ZHK_C2T, EC_MASTER}},
                 {"PA4315_36", {BIT_17_36, PA4315_36_MC, PA4315_36_C2T, EC_MASTER}}};
         hardware_settings.num_joints = robot_config.getValue<uint8_t>("NUM_JOINT");
         hardware_settings.num_arm_joints = robot_config.getValue<uint8_t>("NUM_ARM_JOINT");
@@ -353,7 +356,14 @@ namespace HighlyDynamic
         for (auto &name : end_effector_type)
         {
             // std::cout << "EndEffectorType: " << name << std::endl;
-            hardware_settings.end_effector_type.push_back(end_effector_type_map[name]);
+            // 统一转为小写，兼容 config 中误写成 "None" 等的大写形式
+            std::string key = name;
+            std::transform(key.begin(), key.end(), key.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            // 用 at() 而非 operator[]：operator[] 对未知键会默认构造一个值并插入 map，
+            // 而 enum EndEffectorType 的默认值 0 恰好是 none，会静默映射成错误类型。
+            // at() 在键不存在时抛出 std::out_of_range，避免静默失败。
+            hardware_settings.end_effector_type.push_back(end_effector_type_map.at(key));
         }
     }
     void KuavoSettings::loadFilterSettings(JSONConfigReader &robot_config)

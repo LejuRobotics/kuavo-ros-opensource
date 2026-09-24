@@ -21,30 +21,82 @@ namespace HighlyDynamic
 #define BIT_17_20 (BIT_17 * 20)
 #define BIT_17_36 (BIT_17 * 36)
 
+// ---------------- 电流 MC 宏（命名规则：MOTORS_TYPE 中的电机全名 + _MC） ----------------
+// 说明：电流（A），命名与 MOTORS_TYPE 电机全名一一对应
 #define AK10_9_MC (40)
 #define AK70_10_MC (26.1) // 手册是 23.2
-#define PA81_MC (60)
-#define PA100_MC (110)
 #define CK_MC (18)
-#define PA81_18_25_MC (18)
+#define PA100_10_MC (110)
+#define PA100_20_MC (110)
+#define PA100_20_18_KV60_MC (110)
+#define PA43_10_25_KV70_MC (8)
+#define PA60_36_MC (110)
+#define PA72_10_36_KV100_MC (15)
+#define PA76_15_25_KV45_ZHK_MC (18)
+#define PA76_15_18_KV45_MC (31.5)     // PA76-15-18-KV45（v51）
+#define PA76_15_18_KV70_MC (31.5)     // PA76-15-18-KV70（v52+）
+#define PA81_10_MC (60)
+#define PA81_18_25_KV60_ZHK_MC (18)
+#define PA81_25_KV60_ZHK_MC (40)
+#define PA105_18_DS_MC (70)
+#define PA105_27_18_KV35_MC (70)
+#define HA115_20_120_MC (40)
+#define HA115_10_120_ZHK_MC (40)
+#define PA4315_36_MC (22.5)
 
+// ruiwo 系列（驱动器为 RUIWO，型号名带 ruiwo 前缀）
+#define ruiwoPA81_18_25_KV60_ZHK_MC (18)
+#define ruiwoPA72_10_36_KV50_MC (18)
+#define ruiwoPA60_13_36_KV50_MC (18)
+#define ruiwoPA43_10_25_KV70_MC (18)
+#define ruiwoPA43_10_25_KV70_PREV_MC (18)
+#define ruiwoPA4315_36_MC (18)
+#define ruiwoPA60_10_16_ZHK_KV35_MC (18)
+
+// 占位/方位变体
+#define dynamixel_MC CK_MC
+#define realman_MC CK_MC
+#define ruiwo_MC CK_MC
+#define PA72_10_36_KV100_L_MC PA72_10_36_KV100_MC
+#define PA72_10_36_KV100_R_MC PA72_10_36_KV100_MC
+
+// ---------------- C2T 标定宏（命名规则：MOTORS_TYPE 中的电机全名 + _C2T） ----------------
 #define AK10_9_C2T (1.26)
 #define AK70_10_C2T (1.23)
-#define PA81_C2T (1.25)
-#define PA100_C2T (1.2) // 1.2
-#define PA100_18_C2T (2.0)
-#define PA100_20_C2T (2.4)
 #define CK_C2T (2.1) // 1.4
-#define PA72_C2T (2.0)
-#define PA60_C2T (2.0)
-#define PA43_C2T (4.7)
-#define PA105_18_C2T (4.1)
-#define PA81_18_25_C2T (2.9)
-
-#define PA60_16_C2T (2.0)
-#define PA4310_25_C2T (4.7)
-#define PA4310_25_New_C2T (2.0)
+#define PA100_10_C2T (1.2) // 1.2
+#define PA100_20_C2T (2.4)
+#define PA100_20_18_KV60_C2T (2.08)
+#define PA43_10_25_KV70_C2T (4.7)
+#define PA60_36_C2T (2.0)
+#define PA72_10_36_KV100_C2T (4.8)
+#define PA76_15_25_KV45_ZHK_C2T (4.2)
+#define PA76_15_18_KV45_C2T (3.2)      // PA76-15-18-KV45（v51）
+#define PA76_15_18_KV70_C2T (2.19)     // PA76-15-18-KV70（v52+）
+#define PA81_10_C2T (2.55)
+#define PA81_18_25_KV60_ZHK_C2T (3.13)
+#define PA81_25_KV60_ZHK_C2T (2.9)
+#define PA105_18_DS_C2T (2.8)
+#define PA105_27_18_KV35_C2T (4.13)
+#define HA115_20_120_C2T (15.76)
+#define HA115_10_120_ZHK_C2T (14.58)
 #define PA4315_36_C2T (4.7)
+
+// ruiwo 系列（驱动器为 RUIWO，型号名带 ruiwo 前缀）
+#define ruiwoPA81_18_25_KV60_ZHK_C2T (2.55)
+#define ruiwoPA72_10_36_KV50_C2T (2.0)
+#define ruiwoPA60_13_36_KV50_C2T (2.0)
+#define ruiwoPA43_10_25_KV70_C2T (2.189438) // 当前规范标定：PA4310-25 实测扭矩系数均值
+#define ruiwoPA43_10_25_KV70_PREV_C2T (4.7)  // 旧标定（仅 ruiwoPA43_10_25_KV70_PREV 使用）
+#define ruiwoPA4315_36_C2T (4.7)
+#define ruiwoPA60_10_16_ZHK_KV35_C2T (2.0)
+
+// 占位/方位变体
+#define dynamixel_C2T CK_C2T
+#define realman_C2T CK_C2T
+#define ruiwo_C2T CK_C2T
+#define PA72_10_36_KV100_L_C2T PA72_10_36_KV100_C2T
+#define PA72_10_36_KV100_R_C2T PA72_10_36_KV100_C2T
 #define LEG_DOF 6
 #define LEGS_TOTEL_JOINT 12
     inline auto vectorToEigen(std::vector<double> v) -> Eigen::VectorXd
