@@ -5,6 +5,7 @@
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float32.h>
 #include <atomic>
+#include <chrono>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
 #include <std_msgs/Int8MultiArray.h>
@@ -235,12 +236,34 @@ protected:
   void updateTimedOfflineTraj(scalar_t initTime, scalar_t finalTime);
   void updateIndexRuckigPlanner(int plannerIndex, double desireTime, const Eigen::VectorXd& cmd_vec);
 
+  // 收包与超时判定共用单调时钟, 禁止混用 ROS Time / MPC initTime
+  static double lbLegSteadyNow()
+  {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+
+  // 先按上一拍时间戳判定断流, 再写入本次时间; 断流则置位待对齐
+  void markLbLegTrajReceived()
+  {
+    const double now = lbLegSteadyNow();
+    const double lastRecv = lastLbLegTrajRecvTime_.load(std::memory_order_acquire);
+    if(lastRecv > 0.0 && (now - lastRecv) > lbLegTrajHeartbeatTimeout_)
+    {
+      if(!isLbLegTrajResetPending_.exchange(true, std::memory_order_acq_rel))
+      {
+        ROS_WARN_STREAM("[下肢心跳] 超过 " << lbLegTrajHeartbeatTimeout_
+                        << "s 未收到下肢指令(/lb_leg_traj 或 timed 服务), 置位重置标志, 待本次/下次指令对齐实测一次");
+      }
+    }
+    lastLbLegTrajRecvTime_.store(now, std::memory_order_release);
+  }
+
   // 距最近一次下肢指令(话题或 timed 服务)不超过阈值
-  bool isLbLegTrajFresh(scalar_t initTime) const
+  bool isLbLegTrajFresh() const
   {
     const double lastRecv = lastLbLegTrajRecvTime_.load(std::memory_order_acquire);
     if(lastRecv <= 0.0) return false;   // 从未收到
-    return (initTime - lastRecv) <= lbLegTrajHeartbeatTimeout_;
+    return (lbLegSteadyNow() - lastRecv) <= lbLegTrajHeartbeatTimeout_;
   }
   
   // 辅助函数
@@ -445,17 +468,18 @@ private:
 
   // 躯干下肢的关节轨迹指令
   vector_t initialJointTarget_;
-  bool isCmdLegJointUpdated_{false};
+  // 由 ROS 回调线程(/lb_leg_traj 与 timed 服务)置位, 规划线程读取并清零, 必须原子
+  std::atomic<bool> isCmdLegJointUpdated_{false};
   double cmdLegJointDesiredTime_{0.0};
   vector_t lb_leg_traj_;
   std::mutex lbLegJoint_mtx_;
   ros::Subscriber lb_leg_joint_traj_sub_;
   ros::Publisher targetLegJointReachTimePub_;
 
-  // 心跳检测相关
-  std::atomic<double> lastLbLegTrajRecvTime_{0.0};   // 最近一次下肢指令的 ROS 时间 [s], <=0 表示从未收到
+  // 心跳检测相关 (steady_clock 秒, <=0 表示从未收到)
+  std::atomic<double> lastLbLegTrajRecvTime_{0.0};
   double lbLegTrajHeartbeatTimeout_{0.1};            // 超时阈值 [s]
-  bool isLbLegTrajResetPending_{false};              // 超时后置位, 待下次收到指令时对齐实测一次
+  std::atomic<bool> isLbLegTrajResetPending_{false}; // 超时后置位, 待下次收到指令时对齐实测一次
 
   // 用于记录末端笛卡尔模式的 focus 对象, true 为末端, false 为躯干
   bool isFocusEe_{true};

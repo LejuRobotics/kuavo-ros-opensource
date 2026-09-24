@@ -986,10 +986,10 @@ namespace mobile_manipulator {
       cmdLegJointDesiredTime_ = 0.0;
       lbLegJoint_mtx_.unlock();
 
-      // 记录下肢命令流时间戳
-      lastLbLegTrajRecvTime_.store(ros::Time::now().toSec(), std::memory_order_release);
+      markLbLegTrajReceived();
 
-      isCmdLegJointUpdated_ = true;
+      // release: 保证上面的 lb_leg_traj_ / cmdLegJointDesiredTime_ 写入先于本标志对规划线程可见
+      isCmdLegJointUpdated_.store(true, std::memory_order_release);
     };
     lb_leg_joint_traj_sub_ = nodeHandle_.subscribe<sensor_msgs::JointState>("/lb_leg_traj", 10, lbLegJointTrajCallback);
 
@@ -4095,7 +4095,7 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::resetTorsoControlPoseWithRuckig(scalar_t initTime, const vector_t& initState)
   {
     setEnableLegJointTrack(false); // 关闭下肢关节跟踪
-    isCmdLegJointUpdated_ = false;  // 关闭关节控制标志位
+    isCmdLegJointUpdated_.store(false, std::memory_order_release);  // 关闭关节控制标志位
     setEnableTorsoPoseTargetTrajectories(true); // 开启躯干
 
     vector_t resetPose = vector_t::Zero(4);
@@ -4227,46 +4227,46 @@ namespace mobile_manipulator {
       setIsFocusEeStatus(desiredFocusEe_);
     }
 
+    // 静默超时先置位, 再消费本拍指令; 断流后的第一包已在 markLbLegTrajReceived() 按上一拍间隔置位,
+    // 避免"先刷新时间戳再判定"导致本拍漏对齐。
+    if(getEnableLegJointTrack() && isTorsoOfflineTrajUpdate_ != true &&
+       !isLbLegTrajFresh())
+    {
+      if(!isLbLegTrajResetPending_.exchange(true, std::memory_order_acq_rel))
+      {
+        ROS_WARN_STREAM("[下肢心跳] 超过 " << lbLegTrajHeartbeatTimeout_
+                        << "s 未收到下肢指令(/lb_leg_traj 或 timed 服务), 置位重置标志, 待下次收到指令时对齐实测一次");
+      }
+    }
+
     const bool legJointTrackWasEnabled = getEnableLegJointTrack();
 
-    if(isCmdLegJointUpdated_ && isTorsoOfflineTrajUpdate_ != true)
+    if(isCmdLegJointUpdated_.load(std::memory_order_acquire) && isTorsoOfflineTrajUpdate_ != true)
     {
       setEnableLegJointTrack(true); // 开启下肢关节跟踪
       setEnableTorsoPoseTargetTrajectories(false); // 关闭躯干
 
       static vector_t legJointTarget = vector_t::Zero(4); // 下肢关节轨迹
+      double legJointDesiredTime = 0.0;                   // 与 lb_leg_traj_ 同锁快照
 
       lbLegJoint_mtx_.lock();
       legJointTarget = lb_leg_traj_;
+      legJointDesiredTime = cmdLegJointDesiredTime_;
       lbLegJoint_mtx_.unlock();
 
       // 关节空间首点对齐到实测 —— 两个时机各执行一次, 均只锚定一次(清零速度/加速度)
-      if(!legJointTrackWasEnabled || isLbLegTrajResetPending_)
+      if(!legJointTrackWasEnabled || isLbLegTrajResetPending_.load(std::memory_order_acquire))
       {
         legJoint_prevTargetPose_ = initState.segment(baseDim_, 4);
         legJoint_prevTargetVel_.setZero(4);
         legJoint_prevTargetAcc_.setZero(4);
-        isLbLegTrajResetPending_ = false;   // 已消费该次重置, 清除标志
+        isLbLegTrajResetPending_.store(false, std::memory_order_release);
       }
 
-      calcRuckigTrajWithLegJoint(initTime, legJointTarget, cmdLegJointDesiredTime_);
+      calcRuckigTrajWithLegJoint(initTime, legJointTarget, legJointDesiredTime);
 
-      isCmdLegJointUpdated_ = false;
+      isCmdLegJointUpdated_.store(false, std::memory_order_release);
       torsoModeFlag_ = false;
-    }
-
-    //  **注意**：下肢命令流(/lb_leg_traj 及经 timed 服务的下肢指令) 超过阈值未收到:
-    //   仅置位"待重置"标志并记录一次日志, 不在此处改动规划器 —— 真正的对齐放在下一次
-    //   收到指令的那一拍(见上方 isCmdLegJointUpdated_ 分支消费该标志)。
-    if(getEnableLegJointTrack() && isTorsoOfflineTrajUpdate_ != true &&
-       !isLbLegTrajFresh(initTime))
-    {
-      if(!isLbLegTrajResetPending_)
-      {
-        ROS_WARN_STREAM("[下肢心跳] 超过 " << lbLegTrajHeartbeatTimeout_
-                        << "s 未收到下肢指令(/lb_leg_traj 或 timed 服务), 置位重置标志, 待下次收到指令时对齐实测一次");
-        isLbLegTrajResetPending_ = true;
-      }
     }
     
     if(torsoModeFlag_)
@@ -4564,11 +4564,17 @@ namespace mobile_manipulator {
       }
       case LbTimedPosCmdType::LEG_JOINT_CMD:
       {
-        isCmdLegJointUpdated_ = true;
-        cmdLegJointDesiredTime_ = desireTime;
-        lb_leg_traj_ = cmd_vec.head(desiredSize);
+        // 与 /lb_leg_traj 回调共用同一把锁: 服务回调线程与规划线程并发读写 lb_leg_traj_,
+        // 无锁赋值会让规划线程读到半写状态(Eigen 尺寸不同时还会重分配)
+        {
+          std::lock_guard<std::mutex> lock(lbLegJoint_mtx_);
+          cmdLegJointDesiredTime_ = desireTime;
+          lb_leg_traj_ = cmd_vec.head(desiredSize);
+        }
         // [心跳] 经 timed 服务下发的下肢指令同样计入命令流, 避免被误判为超时
-        lastLbLegTrajRecvTime_.store(ros::Time::now().toSec(), std::memory_order_release);
+        markLbLegTrajReceived();
+        // release: 上面的数据写入先于本标志对规划线程可见(顺序与 /lb_leg_traj 回调一致)
+        isCmdLegJointUpdated_.store(true, std::memory_order_release);
         break;
       }
       case LbTimedPosCmdType::LEFT_ARM_WORLD_CMD:
@@ -4848,7 +4854,7 @@ namespace mobile_manipulator {
     {
       std::lock_guard<std::mutex> lock(lbLegJoint_mtx_);
       lb_leg_traj_ = s.segment(baseDim_, 4);
-      isCmdLegJointUpdated_ = false;
+      isCmdLegJointUpdated_.store(false, std::memory_order_release);
     }
 
     // 清除定时指令更新标志
