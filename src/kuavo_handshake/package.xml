@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>kuavo_handshake</name>
+  <version>0.1.0</version>
+  <description>Robot handshake node (standalone, zero SDK dependency)</description>
+  <maintainer email="lab@leju.com">lab</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>kuavo_msgs</depend>
+
+  <export>
+  </export>
+</package>

@@ -15,6 +15,13 @@
     <arg name="control_torso" default="false" /> <!-- false: do NOT control, true: control torso  -->
     <arg name="control_finger_type" default="0" /> <!-- 0: control all fingers by upper-gripper, 1: control thumb and index fingers by upper-gripper, control other fingers by lower-gripper  -->
     <arg name="predict_gesture" default="false" /> <!-- True or False -->
+    <arg name="enable_vr_visualization" default="false" /> <!-- 仅调试时发布VR Marker -->
+    <arg name="enable_vr_latency_diagnostics" default="false" /> <!-- 延迟话题发布开关，默认关闭 -->
+    <arg name="enable_vr_transform_diagnostics" default="false" /> <!-- 绝对式VR坐标转换细分计时 -->
+    <arg name="enable_vr_transform_debug_topics" default="false" /> <!-- 肩部/胸部等调试话题 -->
+    <arg name="vr_transform_debug_publish_hz" default="10.0" /> <!-- 调试话题与Marker发布频率 -->
+    <arg name="finger_processing_hz" default="30.0" /> <!-- 手指异步处理频率 -->
+    <arg name="ik_solution_timeout_s" default="0.2" /> <!-- VR无新解时暂停重复轨迹发布的超时 -->
     <arg name="ee_type" default="qiangnao"/>
     <arg name="enable_head_control" default="true"/>
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
@@ -38,6 +45,8 @@
          true 时启动 wheel_arm_only_ik_ros_uni_cpp_node 替代 wheel_ik_ros_uni_cpp_node。
          chest 控制交给 5W 平台原生方案 (lb_ctrl_api → MPC)。 -->
     <arg name="use_arm_only_ik" default="false"/>
+    <!-- 锁定下肢前两个关节(knee/leg)，只留 waist_pitch/waist_yaw 随动；false: 不锁定, true: 锁定 -->
+    <arg name="lock_knee_leg" default="false"/>
     <!-- 全局 single_hand_mode：让 wheel_ik_ros_uni_cpp_node 在 wheel_ik=true 时跳过 chest 增量，
          让位 torso_joystick_node 独占躯干控制（避免 chest 关节命令覆盖 /cmd_lb_torso_pose 链路） -->
     <param name="/single_hand_mode" value="$(arg single_hand_mode)" type="bool"/>
@@ -53,6 +62,10 @@
     <arg name="joint_space_acc_limit" default="500.0" />
     <arg name="joint_space_jerk_limit" default="3000.0" />
     <arg name="max_joint_velocity" default="30.0" />
+    <arg name="arm_traj_smooth_enable" default="true" />
+    <arg name="arm_traj_smooth_wn" default="30.0" />
+    <arg name="arm_traj_smooth_zeta" default="1.0" />
+    <arg name="arm_traj_smooth_acc_limit" default="60.0" />
     <arg name="delta_scale_x" default="1.26" />
     <arg name="delta_scale_y" default="1.26" />
     <arg name="delta_scale_z" default="1.26" />
@@ -112,11 +125,19 @@
     <param name="/reset_joint_to_default" value="$(arg reset_joint_to_default)" type="bool"/>
 
     <param name="/use_pico" value="$(arg use_pico)" type="bool"/>
+    <param name="/enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
 
     <!-- motion_capture_ik -->
     <!-- Python IK Node (启动当 use_cpp_incremental_ik=false 时) -->
     <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni" args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type=$(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)" output="screen" unless="$(arg use_cpp_incremental_ik)">
         <param name="use_arm_collision" value="$(arg use_arm_collision)"/>
+        <param name="enable_vr_visualization" value="$(arg enable_vr_visualization)" type="bool"/>
+        <param name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
+        <param name="enable_vr_transform_diagnostics" value="$(arg enable_vr_transform_diagnostics)" type="bool"/>
+        <param name="enable_vr_transform_debug_topics" value="$(arg enable_vr_transform_debug_topics)" type="bool"/>
+        <param name="vr_transform_debug_publish_hz" value="$(arg vr_transform_debug_publish_hz)" type="double"/>
+        <param name="finger_processing_hz" value="$(arg finger_processing_hz)" type="double"/>
+        <param name="ik_solution_timeout_s" value="$(arg ik_solution_timeout_s)" type="double"/>
         <param name="/quest3/limit_shoulder_pitch_upper" value="$(arg limit_shoulder_pitch_upper)" type="bool"/>
         <param name="/quest3/shoulder_pitch_upper_limit" value="$(arg shoulder_pitch_upper_limit)" type="double"/>
     </node>
@@ -133,6 +154,10 @@
         <param name="/quest3/fhan_r_joint" value="$(arg ik_ros_fhan_r_joint)" />
         <param name="/quest3/fhan_kh0_joint" value="$(arg ik_ros_fhan_kh0_joint)" />
         <param name="/quest3/max_joint_velocity" value="$(arg ik_ros_max_joint_velocity)" />
+        <param name="/quest3/arm_traj_smooth_enable" value="$(arg arm_traj_smooth_enable)" />
+        <param name="/quest3/arm_traj_smooth_wn" value="$(arg arm_traj_smooth_wn)" />
+        <param name="/quest3/arm_traj_smooth_zeta" value="$(arg arm_traj_smooth_zeta)" />
+        <param name="/quest3/arm_traj_smooth_acc_limit" value="$(arg arm_traj_smooth_acc_limit)" />
         <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
         <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
         <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
@@ -191,11 +216,16 @@
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
         <param name="/end_effector_type" value="$(arg ee_type)"/>
+        <param name="/quest3/lock_knee_leg" value="$(arg lock_knee_leg)" type="bool"/>
         <param name="/quest3/task_space_acc_limit" value="$(arg task_space_acc_limit)" />
         <param name="/quest3/task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
         <param name="/quest3/joint_space_acc_limit" value="$(arg joint_space_acc_limit)" />
         <param name="/quest3/joint_space_jerk_limit" value="$(arg joint_space_jerk_limit)" />
         <param name="/quest3/max_joint_velocity" value="$(arg max_joint_velocity)" />
+        <param name="/quest3/arm_traj_smooth_enable" value="$(arg arm_traj_smooth_enable)" />
+        <param name="/quest3/arm_traj_smooth_wn" value="$(arg arm_traj_smooth_wn)" />
+        <param name="/quest3/arm_traj_smooth_zeta" value="$(arg arm_traj_smooth_zeta)" />
+        <param name="/quest3/arm_traj_smooth_acc_limit" value="$(arg arm_traj_smooth_acc_limit)" />
         <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
         <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
         <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
@@ -248,6 +278,10 @@
         <param name="/quest3/fhan_r_joint" value="$(arg ik_ros_fhan_r_joint)" />
         <param name="/quest3/fhan_kh0_joint" value="$(arg ik_ros_fhan_kh0_joint)" />
         <param name="/quest3/max_joint_velocity" value="$(arg ik_ros_max_joint_velocity)" />
+        <param name="/quest3/arm_traj_smooth_enable" value="$(arg arm_traj_smooth_enable)" />
+        <param name="/quest3/arm_traj_smooth_wn" value="$(arg arm_traj_smooth_wn)" />
+        <param name="/quest3/arm_traj_smooth_zeta" value="$(arg arm_traj_smooth_zeta)" />
+        <param name="/quest3/arm_traj_smooth_acc_limit" value="$(arg arm_traj_smooth_acc_limit)" />
         <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
         <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
         <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
@@ -296,6 +330,7 @@
     <!-- Python implementation (default) -->
     <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen" unless="$(arg use_cpp_monitor)">
         <param name="enable_head_control" value="$(arg enable_head_control)" />
+        <param name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
     </node>
 
     <!-- C++ implementation -->
@@ -316,4 +351,14 @@
           name="webrtc_videostream" output="screen"
           args="$(arg camera_publisher_name) $(arg ip_address)"
           if="$(arg enable_videostream)" />
+
+    <!-- ABSOLUTE_QUICK_COMBO_BETA_FDB60BBC_V1: absolute Python IK only; left trigger + X toggles quickMode 0/2. -->
+    <node pkg="motion_capture_ik"
+          type="absolute_quick_mode_combo_node.py"
+          name="absolute_quick_mode_combo"
+          output="screen"
+          unless="$(arg use_cpp_incremental_ik)">
+      <param name="left_trigger_threshold" value="0.8"/>
+      <param name="debounce_sec" value="0.35"/>
+    </node>
 </launch>

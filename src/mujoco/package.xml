@@ -51,6 +51,10 @@
   <buildtool_depend>catkin</buildtool_depend>
     <depend>roscpp</depend>
     <depend>realtime_tools</depend>
+    <depend>image_transport</depend>
+    <depend>sensor_msgs</depend>
+    <exec_depend>compressed_image_transport</exec_depend>
+    <exec_depend>compressed_depth_image_transport</exec_depend>
     <depend>lcm_msg</depend>
     <depend>kuavo_msgs</depend>
     <depend>nodelet</depend>

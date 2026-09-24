@@ -449,6 +449,17 @@ optimizedTrajKinematicLimit
   }
 }
 
+; 最终关节命令层的模式无关边界速度阻尼，不依赖 quick mode/armTrajInterpFilter
+armJointLimitVelocityDamper
+{
+  enable             true
+  soft_zone          0.14    ; [rad] 距离硬限位约 8 度开始平滑降速
+  stop_acceleration  80.0    ; [rad/s^2] 动态制动距离使用的减速度
+  max_velocity       4.0     ; [rad/s] 最终手臂速度上限
+  settle_velocity    0.001   ; [rad/s] 软区内低于该速度时消除渐近爬行
+  hard_epsilon       0.0001  ; [rad] 硬边界数值安全余量
+}
+
 ; 手臂轨迹插补限制（仅用于上层 armTrajInterpFilter），与 optimizedTrajKinematicLimit 解耦
 armTrajInterpKinematicLimit
 {

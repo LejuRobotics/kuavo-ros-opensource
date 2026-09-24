@@ -1,0 +1,17 @@
+<launch>
+  <!-- External-model entry for Task 3. initial_base_x/y come from model_entry.py's
+       per-round seed, exactly like the collection entry's launch args. -->
+  <arg name="initial_base_x" default="0.0"/>
+  <arg name="initial_base_y" default="0.0"/>
+  <arg name="task_light_seed" default="-1"/>
+  <include file="$(find data_challenge_simulator)/launch/load_kuavo_mujoco_sim3.launch">
+    <arg name="initial_base_x" value="$(arg initial_base_x)"/>
+    <arg name="initial_base_y" value="$(arg initial_base_y)"/>
+    <arg name="task_light_seed" value="$(arg task_light_seed)"/>
+    <arg name="require_model_command_gate" value="true"/>
+    <arg name="publish_cmd_vel_fallback" value="false"/>
+  </include>
+  <!-- model_entry.py requires both hand poses before running seed placement.
+       Keep this override model-only so the accepted Task 3 entry is unchanged. -->
+  <rosparam param="task_body_names">[task3_hollow_cylinder, task3_hollow_cylinder_2, task3_hollow_cylinder_3, task3_destination_table, base_link, l_hand_base, r_hand_base]</rosparam>
+</launch>

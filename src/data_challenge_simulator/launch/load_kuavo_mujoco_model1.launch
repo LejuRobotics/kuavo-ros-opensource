@@ -1,0 +1,18 @@
+<launch>
+  <!-- External-model entry for Task 1. initial_base_x/y come from model_entry.py's
+       per-round seed, exactly like the collection entry's launch args. -->
+  <arg name="initial_base_x" default="0.0"/>
+  <arg name="initial_base_y" default="0.0"/>
+  <arg name="task_light_seed" default="-1"/>
+  <include file="$(find data_challenge_simulator)/launch/load_kuavo_mujoco_sim1.launch">
+    <arg name="initial_base_x" value="$(arg initial_base_x)"/>
+    <arg name="initial_base_y" value="$(arg initial_base_y)"/>
+    <arg name="task_light_seed" value="$(arg task_light_seed)"/>
+    <arg name="require_model_command_gate" value="true"/>
+    <arg name="publish_cmd_vel_fallback" value="false"/>
+  </include>
+  <!-- The shared model-entry readiness barrier and Task 1 segment observer
+       require both live hand poses.  The accepted task launch does not need
+       them, so extend the body-pose list only in this model wrapper. -->
+  <rosparam param="task_body_names">[cylinder_1, cylinder_2, cylinder_3, target_bin, source_bin, lever, base_link, waist_yaw_link, l_hand_base, r_hand_base]</rosparam>
+</launch>

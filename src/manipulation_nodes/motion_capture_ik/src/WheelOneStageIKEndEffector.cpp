@@ -10,6 +10,24 @@
 
 namespace HighlyDynamic {
 namespace {
+
+const drake::multibody::Frame<double>& GetFrameByNameWithFallback(
+    const drake::multibody::MultibodyPlant<double>& plant,
+    const std::string& frameName) {
+  if (plant.HasFrameNamed(frameName)) {
+    return plant.GetFrameByName(frameName);
+  }
+  if (frameName == "zarm_l2_joint_parent" && plant.HasFrameNamed("zarm_l1_link")) {
+    ROS_WARN_STREAM_ONCE("Drake frame " << frameName << " is unavailable; using zarm_l1_link fallback");
+    return plant.GetFrameByName("zarm_l1_link");
+  }
+  if (frameName == "zarm_r2_joint_parent" && plant.HasFrameNamed("zarm_r1_link")) {
+    ROS_WARN_STREAM_ONCE("Drake frame " << frameName << " is unavailable; using zarm_r1_link fallback");
+    return plant.GetFrameByName("zarm_r1_link");
+  }
+  return plant.GetFrameByName(frameName);
+}
+
 inline bool isValidSolution(const Eigen::VectorXd& q, int nq) {
   return q.size() == nq && q.allFinite() && q.norm() > 1e-9;
 }
@@ -443,17 +461,26 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     }
   }
 
+  // 锁下肢前两个关节（knee=q[0], leg=q[1]）——硬等式约束，保证电机不动，
+  // 只保留 waist_pitch(q[2]) / waist_yaw(q[3]) 随动
+  if (lockKneeLegEnabled_) {
+    auto* prog = ik.get_mutable_prog();
+    prog->AddBoundingBoxConstraint(lockKneeQ_, lockKneeQ_, ik.q()[0]);
+    prog->AddBoundingBoxConstraint(lockLegQ_, lockLegQ_, ik.q()[1]);
+  }
+
+
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_SHOULDER) {
     ik.AddPositionCost(plant_->world_frame(),
                        PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position,
-                       plant_->GetFrameByName("zarm_l2_joint_parent"),
+                       GetFrameByNameWithFallback(*plant_, "zarm_l2_joint_parent"),
                        Eigen::Vector3d::Zero(),
                        shoulderWeight * Eigen::Matrix3d::Identity());
   }
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_SHOULDER) {
     ik.AddPositionCost(plant_->world_frame(),
                        PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position,
-                       plant_->GetFrameByName("zarm_r2_joint_parent"),
+                       GetFrameByNameWithFallback(*plant_, "zarm_r2_joint_parent"),
                        Eigen::Vector3d::Zero(),
                        shoulderWeight * Eigen::Matrix3d::Identity());
   }
@@ -474,7 +501,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position,
-                         plant_->GetFrameByName("zarm_l7_end_effector"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l7_end_effector"),
                          Eigen::Vector3d::Zero(),
                          eeWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -487,7 +514,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_ELBOW) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position,
-                         plant_->GetFrameByName("zarm_l4_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l4_link"),
                          Eigen::Vector3d::Zero(),
                          leftElbowWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -499,7 +526,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_LINK6) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_LINK6].position,
-                         plant_->GetFrameByName("zarm_l6_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l6_link"),
                          Eigen::Vector3d::Zero(),
                          link6Weight * Eigen::Matrix3d::Identity());
     } else {
@@ -511,7 +538,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position,
-                         plant_->GetFrameByName("zarm_l7_virtual_thumb_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l7_virtual_thumb_link"),
                          Eigen::Vector3d::Zero(),
                          virtualThumbWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -537,7 +564,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR].position,
-                         plant_->GetFrameByName("zarm_r7_end_effector"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r7_end_effector"),
                          Eigen::Vector3d::Zero(),
                          eeWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -550,7 +577,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_ELBOW) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position,
-                         plant_->GetFrameByName("zarm_r4_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r4_link"),
                          Eigen::Vector3d::Zero(),
                          rightElbowWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -562,7 +589,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_LINK6) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position,
-                         plant_->GetFrameByName("zarm_r6_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r6_link"),
                          Eigen::Vector3d::Zero(),
                          link6Weight * Eigen::Matrix3d::Identity());
     } else {
@@ -574,7 +601,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position,
-                         plant_->GetFrameByName("zarm_r7_virtual_thumb_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r7_virtual_thumb_link"),
                          Eigen::Vector3d::Zero(),
                          virtualThumbWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -659,7 +686,7 @@ std::pair<Eigen::Vector3d, Eigen::Quaterniond> WheelOneStageIKEndEffector::FK(co
   plant_->SetPositions(plant_context_.get(), q);
 
   try {
-    const drake::multibody::Frame<double>& target_frame = plant_->GetFrameByName(frameName);
+    const drake::multibody::Frame<double>& target_frame = GetFrameByNameWithFallback(*plant_, frameName);
     const drake::multibody::Frame<double>& reference_frame =
         (ConstraintFrames_.size() > 0) ? *ConstraintFrames_[0] : plant_->world_frame();
 

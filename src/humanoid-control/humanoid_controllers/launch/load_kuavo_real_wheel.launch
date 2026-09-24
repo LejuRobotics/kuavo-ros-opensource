@@ -118,6 +118,18 @@
     <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>
     <param name="ruiwo_cxx_sdk" value="$(arg ruiwo_cxx_sdk)"/>
 
+    <!-- SG100 hand params -->
+    <param name="sg100_left_port" value="/dev/lefthand" />
+    <param name="sg100_right_port" value="/dev/righthand" />
+    <param name="sg100_baudrate" value="1000000" />
+    <param name="sg100_control_rate" value="50.0" />
+    <param name="sg100_publish_joint_states" value="true" />
+    <param name="sg100_cmd_filter_alpha" value="0.2" />
+    <param name="sg100_debug_state" value="false" />
+    <param name="sg100_kp" value="10" />
+    <param name="sg100_kd" value="0.02" />
+    <param name="sg100_output_limit" value="0.5" />
+
     <!-- make the files into global parameters -->
     <param name="taskFile"   value="$(arg taskFile)" />
     <param name="urdfFile"   value="$(arg urdfFile)" />

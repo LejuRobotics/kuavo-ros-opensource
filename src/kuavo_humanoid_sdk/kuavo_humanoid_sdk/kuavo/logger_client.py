@@ -1,5 +1,6 @@
 # logger_client.py
 import asyncio
+import os
 import websockets
 import json
 import threading
@@ -20,11 +21,19 @@ class LoggerClient:
     def __init__(self, uri: str = None, timeout=3):
         # 强制使用 localhost
         self.uri = "ws://localhost:8889"
-        print(f"[LoggerClient] 使用 localhost 构造连接地址: {self.uri}")
-        
+
         self._loop = None
         self._ws = None
         self._connected_event = threading.Event()
+
+        # 日志服务器是可选的单向日志镜像（SDK → 服务器 → 桌面前端），对任务功能无影响。
+        # KUAVO_LOG_SERVER=0 时整个连接步骤都不做：不建线程、不等待、不打印，
+        # send_log 走 _loop/_ws 为 None 的既有分支，直接退回终端打印。
+        if os.environ.get('KUAVO_LOG_SERVER', '1') == '0':
+            return
+
+        print(f"[LoggerClient] 使用 localhost 构造连接地址: {self.uri}")
+
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
 
@@ -45,6 +54,10 @@ class LoggerClient:
             await self._listen()
         except Exception as e:
             print(f"[LoggerClient] 连接失败: {e}")
+            # 失败也必须立刻放行 __init__ 的等待：_connected_event 原本只在
+            # 连接成功时 set，导致没有日志服务器时每次 KuavoRobotCore 构造
+            # 都要白等 timeout+2 秒。
+            self._connected_event.set()
 
     async def _listen(self):
         try:

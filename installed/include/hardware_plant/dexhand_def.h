@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <array>
+#include <mutex>
+#include <iostream>
 
 namespace eef_controller {
 

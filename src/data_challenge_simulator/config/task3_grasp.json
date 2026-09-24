@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "descent_distance_m": 0.027,
+  "descent_trajectory_points": 80,
+  "descent_settle_seconds": 0.8,
+  "max_ring_motion_during_descent_m": 0.002,
+  "finger_expansion_step": 0.002,
+  "finger_expansion_limits": [1.0, 1.0, 1.0],
+  "finger_command_period_s": 0.02,
+  "armed_timeout_s": 2.0,
+  "latch_timeout_s": 15.0,
+  "held_timeout_s": 2.0,
+  "lift_distance_m": 0.270,
+  "lift_trajectory_points": 200,
+  "lift_settle_seconds": 1.0,
+  "base_motion_timeout_s": 45.0,
+  "hand_motion_duration_s": 1.5,
+  "release_timeout_s": 2.0
+}

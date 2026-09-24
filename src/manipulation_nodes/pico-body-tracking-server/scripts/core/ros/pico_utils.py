@@ -1295,7 +1295,8 @@ class KuavoPicoInfoTransformer():
         pelvis_inv = np.linalg.inv(pelvis_matrix)
         
         pose_info_list = picoPoseInfoList()
-        pose_info_list.timestamp_ms = int(current_time.to_sec() * 1000)  # Convert Time to milliseconds
+        # 与 Quest3 monitor 一致: 本机 Unix 毫秒, 供下游与 ros::Time::now() 同钟算延迟.
+        pose_info_list.timestamp_ms = int(time.time() * 1000)
         pose_info_list.is_high_confidence = True
         pose_info_list.is_hand_tracking = True
         

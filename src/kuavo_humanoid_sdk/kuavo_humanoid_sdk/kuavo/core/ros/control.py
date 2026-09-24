@@ -1066,7 +1066,7 @@ class KuavoRobotArmIKFK:
         eef_pose_msg.hand_poses.right_pose.quat_xyzw = right_pose.orientation
         eef_pose_msg.hand_poses.right_pose.elbow_pos_xyz = right_elbow_pos_xyz
 
-        if  6 != params.constraint_mode:
+        if params is None or 6 != params.constraint_mode:
             return self._srv_arm_ik(eef_pose_msg)
         else:
             return self._srv_arm_ik_high_position_accuracy(eef_pose_msg)
@@ -1871,6 +1871,15 @@ class WheelArmROSControl:
     
     def _init_ros_interfaces(self):
         """初始化ROS接口"""
+        # /lb_leg_control_srv 只由 manipulation_nodes/motion_capture_ik 的
+        # leg_ik_service_node 提供；仿真流程里没有这个节点，等待必然等满 5 秒。
+        # KUAVO_LEG_SERVICE=0 表示“已知该服务不存在”，直接按超时后的结果处理
+        # （_is_initialized=False），省掉这次空等。默认（不带这个变量）行为不变。
+        if os.environ.get('KUAVO_LEG_SERVICE', '1') == '0':
+            SDKLogger.info("[WheelArmROSControl] KUAVO_LEG_SERVICE=0，跳过 /lb_leg_control_srv 等待")
+            self._is_initialized = False
+            return
+
         try:
             # 等待轮臂控制服务
             rospy.wait_for_service('/lb_leg_control_srv', timeout=5.0)

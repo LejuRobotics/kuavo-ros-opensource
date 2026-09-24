@@ -82,6 +82,7 @@ void WheelArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
   questJoystickDataPublisher_ =
       nodeHandle_.advertise<noitom_hi5_hand_udp_python::JoySticks>("/quest_joystick_data", 10);
+  commLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/comm_latency_ms", 10);
 
   // Load parameters from ROS parameter server
   loadParameters();
@@ -352,6 +353,22 @@ void WheelArmControlBaseROS::bonePosesCallback(const noitom_hi5_hand_udp_python:
   {
     std::lock_guard<std::mutex> lock(bonePosesMutex_);
     *latestBonePosesPtr_ = *msg;
+  }
+  // 记录骨骼数据到达时刻，用于跨线程全链路延迟测量
+  {
+    std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+    boneRecvTime_ = std::chrono::steady_clock::now();
+    ++boneDataSeq_;
+    boneVrTimestampMs_ = msg->timestamp_ms;
+  }
+  // 测量通信延迟：VR节点发布时刻(timestamp_ms) → IK节点回调接收时刻
+  if (commLatencyPublisher_ && msg->timestamp_ms > 0) {
+    const double nowSec = ros::Time::now().toSec();
+    const double vrSec = static_cast<double>(msg->timestamp_ms) / 1000.0;
+    const double commLatencyMs = (nowSec - vrSec) * 1000.0;
+    std_msgs::Float64 commMsg;
+    commMsg.data = commLatencyMs;
+    commLatencyPublisher_.publish(commMsg);
   }
   processBonePoses(msg);
 

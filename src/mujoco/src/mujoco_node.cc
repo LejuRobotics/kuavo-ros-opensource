@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -40,14 +41,22 @@
 #include "std_msgs/Float64.h"
 #include "std_msgs/Float64MultiArray.h"
 #include "std_msgs/Bool.h"
+#include "std_msgs/UInt8.h"
 #include "geometry_msgs/Vector3.h"
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Core>
 #include <csignal>
 #include <atomic>
 #include <queue>
+#include <random>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include "kuavo_msgs/lejuClawCommand.h"
+#include "kuavo_msgs/SetObjectPosition.h"
+#include "kuavo_msgs/SetJointPosition.h"
 #include "sensor_msgs/JointState.h"
+#include "geometry_msgs/PoseStamped.h"
 #include <kuavo_common/common/common.h>
 
 #include "mujoco_cpp/depth_camera_config.h"
@@ -63,8 +72,11 @@
 //  ******************* raycaster camera *********************
 
 #include "RayCasterCamera.h"
+#include "OffscreenCameraRenderer.h"
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/CameraInfo.h"
+#include "sensor_msgs/image_encodings.h"
+#include <image_transport/image_transport.h>
 #include <opencv2/opencv.hpp>
 #include <cmath>
 
@@ -108,6 +120,197 @@ namespace
   ros::Publisher pubTimeDiff;
   ros::Publisher pubLeftArmFT;   // 左手臂末端力/扭矩
   ros::Publisher pubRightArmFT;  // 右手臂末端力/扭矩
+  std::vector<std::string> task_body_names;
+  std::unordered_map<std::string, ros::Publisher> task_body_pose_publishers;
+  std::mt19937 object_random_generator(std::random_device{}());
+
+  // Scene 1 task grasp latch.  Two distinct fingertip contacts capture the
+  // object's full SE(3) pose relative to the right hand.  The object then
+  // follows that rigid transform until the fingers open.  Collision is
+  // disabled as soon as the object is latched so the kinematically followed
+  // object cannot feed penetration forces back into the hand.  Release clears
+  // all velocity once.  Gravity supplies only the vertical fall; a geometric
+  // floor test then performs a fast upright settle without a solver impulse.
+  struct ContactFollowerState {
+    std::string name;
+    int body_id = -1;
+    int joint_id = -1;
+    int qpos_addr = -1;
+    int dof_addr = -1;
+    bool held = false;
+    bool settling = false;
+    bool on_target_floor = false;
+    bool upright = false;
+    int target_floor_geom_id = -1;
+    std::vector<int> collision_geom_ids;
+    std::vector<int> collision_contype;
+    std::vector<int> collision_conaffinity;
+    mjtNum radius = 0;
+    mjtNum half_height = 0;
+    mjtNum object_offset_hand[3] = {0, 0, 0};
+    mjtNum object_quat_hand[4] = {1, 0, 0, 0};
+    mjtNum release_xy_world[2] = {0, 0};
+  };
+  std::vector<ContactFollowerState> contact_followers;
+  std::unordered_set<int> right_fingertip_geom_ids;
+  int contact_follower_hand_body_id = -1;
+
+  // Task 1 cylinder grasp: thumb and index stop independently as soon as
+  // each fingertip establishes a stable contact with the same cylinder.  The
+  // large close command may continue, but a latched finger owns its complete
+  // joint state so it cannot keep squeezing and feed reaction torque into the
+  // compliant wrist.  A scene numeric opts this behavior in; Tasks 2 and 3
+  // never initialize it.
+  struct Task1GraspFingerLatchState {
+    bool enabled = false;
+    int object_body_id = -1;
+    mjtNum contact_depth = 0;
+    std::array<int, 2> fingertip_geom_ids{{-1, -1}};
+    std::array<bool, 2> finger_latched{{false, false}};
+    std::array<std::vector<int>, 2> qpos_addresses;
+    std::array<std::vector<int>, 2> dof_addresses;
+    std::array<std::vector<int>, 2> ctrl_addresses;
+    std::array<std::vector<mjtNum>, 2> latched_qpos;
+  } task1_grasp_latch;
+
+  // Task 1 V2 lever hook and scene-owned lock state.  The named equalities in
+  // task1.xml opt this logic in; no task command or ROS topic can arm it.
+  // Actual handle contact freezes all joints of the contacting index, middle,
+  // or little finger.  Thumb and ordinary task objects are never mapped.
+  struct Task1LeverFingerLatchState {
+    int handle_geom_id = -1;
+    int lever_lock_equality_id = -1;
+    int source_bin_lock_equality_id = -1;
+    int source_bin_slide_joint_id = -1;
+    std::array<int, 3> fingertip_geom_ids{{-1, -1, -1}};
+    std::array<bool, 3> finger_latched{{false, false, false}};
+    std::array<std::vector<int>, 3> qpos_addresses;
+    std::array<std::vector<int>, 3> dof_addresses;
+    std::array<std::vector<int>, 3> ctrl_addresses;
+    std::array<std::vector<mjtNum>, 3> latched_qpos;
+    mjtNum lever_contact_duration = 0;
+    bool lever_unlocked = false;
+  } task1_lever_latch;
+
+  // Scene 2 keeps fingertip collision during arm approach and descent.  Once
+  // the explicit grasp phase starts, the selected box and fingertip collision
+  // are disabled.  The four moving fingertips then use geometry only: each
+  // finger stops independently, and any three stops latch the box to the
+  // bimanual midpoint without ever feeding grasp contact into the solver.
+  // Both latches release only when the task explicitly disables them.  This
+  // is a task animation rule; it deliberately does not model friction.
+  struct BimanualContactFollowerState {
+    std::string name;
+    int body_id = -1;
+    int joint_id = -1;
+    int qpos_addr = -1;
+    int dof_addr = -1;
+    int left_wall_geom_id = -1;
+    int right_wall_geom_id = -1;
+    std::array<bool, 4> finger_stopped{{false, false, false, false}};
+    std::array<mjtNum, 4> latched_active_qpos{{0, 0, 0, 0}};
+    bool pending_object_pose_captured = false;
+    mjtNum pending_object_qpos[7] = {0, 0, 0, 1, 0, 0, 0};
+    bool held = false;
+    std::vector<int> collision_geom_ids;
+    std::vector<int> collision_contype;
+    std::vector<int> collision_conaffinity;
+    std::vector<mjtNum> latched_hand_qpos;
+    std::vector<mjtNum> latched_arm_qpos;
+    bool reposition_held = false;
+    mjtNum object_offset_base[3] = {0, 0, 0};
+    mjtNum object_quat_base[4] = {1, 0, 0, 0};
+    mjtNum object_offset_grasp[3] = {0, 0, 0};
+    mjtNum object_quat_grasp[4] = {1, 0, 0, 0};
+  };
+  std::vector<BimanualContactFollowerState> bimanual_contact_followers;
+  std::unordered_set<int> left_fingertip_geom_ids;
+  std::unordered_set<int> left_grasp_trigger_geom_ids;
+  std::unordered_set<int> right_grasp_trigger_geom_ids;
+  std::array<int, 4> bimanual_active_fingertip_geom_ids{{-1, -1, -1, -1}};
+  std::unordered_map<int, int> bimanual_fingertip_contype;
+  std::unordered_map<int, int> bimanual_fingertip_conaffinity;
+  std::vector<int> bimanual_hand_qpos_addresses;
+  std::vector<int> bimanual_hand_dof_addresses;
+  std::vector<int> bimanual_hand_ctrl_addresses;
+  std::vector<int> bimanual_arm_qpos_addresses;
+  std::vector<int> bimanual_arm_dof_addresses;
+  std::vector<int> bimanual_arm_ctrl_addresses;
+  std::unordered_map<std::string, ros::Publisher>
+      bimanual_contact_state_publishers;
+  std::unordered_map<std::string, ros::Publisher>
+      task2_reposition_state_publishers;
+  int contact_follower_base_body_id = -1;
+  int bimanual_left_hand_body_id = -1;
+  int bimanual_right_hand_body_id = -1;
+  int task2_conveyor_body_id = -1;
+  int task2_conveyor_belt_geom_id = -1;
+  bool task2_conveyor_started = false;
+  bool task2_conveyor_completed = false;
+  std::atomic<bool> task2_grasp_enabled{false};
+  std::atomic<bool> task2_reposition_enabled{false};
+  std::atomic<bool> task2_conveyor_enabled{false};
+
+  // Scene 3 uses collision only during approach.  Once the explicit grasp
+  // phase starts, the three active fingertip collisions are disabled and a
+  // geometric inner-wall gap test latches each finger independently without
+  // applying a contact impulse.  The object latch is finalized separately
+  // after finger motion completes.  The first measured inward finger motion
+  // releases the object, whose collision-free fall is stopped by a geometric
+  // destination-table test rather than a solver contact.
+  struct InternalContactFollowerState {
+    std::string name;
+    int body_id = -1;
+    int joint_id = -1;
+    int qpos_addr = -1;
+    int dof_addr = -1;
+    int destination_table_geom_id = -1;
+    bool held = false;
+    bool falling = false;
+    bool settled = false;
+    bool upright = false;
+    bool collision_suppressed = false;
+    std::array<bool, 3> finger_latched{{false, false, false}};
+    std::array<std::vector<mjtNum>, 3> latched_finger_qpos;
+    std::array<mjtNum, 3> release_reference_qpos{{0, 0, 0}};
+    bool release_reference_valid = false;
+    std::uint8_t last_published_latch_mask = 0;
+    std::vector<int> collision_geom_ids;
+    std::vector<int> collision_contype;
+    std::vector<int> collision_conaffinity;
+    mjtNum inner_radius = 0;
+    mjtNum outer_radius = 0;
+    mjtNum contact_tolerance = 0;
+    mjtNum ring_height = 0;
+    mjtNum destination_table_height = 0;
+    mjtNum table_settle_angular_speed = 0;
+    mjtNum object_offset_hand[3] = {0, 0, 0};
+    mjtNum object_quat_hand[4] = {1, 0, 0, 0};
+  };
+  std::vector<InternalContactFollowerState> internal_contact_followers;
+  std::array<int, 3> internal_expansion_fingertip_geom_ids{{-1, -1, -1}};
+  std::array<std::vector<int>, 3> internal_finger_qpos_addresses;
+  std::array<std::vector<int>, 3> internal_finger_dof_addresses;
+  std::array<std::vector<int>, 3> internal_finger_ctrl_addresses;
+  std::unordered_map<int, int> internal_fingertip_contype;
+  std::unordered_map<int, int> internal_fingertip_conaffinity;
+  std::unordered_map<std::string, ros::Publisher>
+      internal_contact_state_publishers;
+  std::unordered_map<std::string, ros::Publisher>
+      internal_finger_latch_publishers;
+  ros::Publisher internal_grasp_armed_publisher;
+  bool internal_grasp_armed_published = false;
+  ros::Publisher internal_fingertip_collision_suppressed_publisher;
+  bool internal_fingertip_collision_suppressed_published = false;
+  std::atomic<bool> task3_grasp_enabled{false};
+  std::atomic<bool> task3_grasp_finalize_enabled{false};
+  std::atomic<bool> task3_fingertip_collision_suppression_enabled{false};
+  bool updateContactFollowers();
+  void applyBimanualLatchControls();
+  void applyInternalLatchControls();
+  void applyTask1GraspLatchControls();
+  void applyTask1LeverLatchControls();
+  mjtNum numericScalarOrDefault(const char *name, mjtNum fallback);
   bool pure_sim = false;
 
   // raycaster camera
@@ -130,6 +333,44 @@ namespace
   constexpr double kDefaultDepthFrequency = 30.0;
   double depth_frequency = kDefaultDepthFrequency;  // Hz
   bool isRunCamera_{false};
+
+  // Data-challenge RGB cameras.  The upstream simulator already provides
+  // RayCasterCamera for a single waist depth stream.  Keep that path intact
+  // and add three opt-in named cameras for rosbag collection.  Only the color
+  // image is published: depth is still rendered every frame by
+  // OffscreenCameraRenderer (the render call fills both buffers in one pass),
+  // but nothing subscribes to or publishes it.
+  struct TaskRgbdCamera {
+    std::string model_name;
+    std::string color_frame_id;
+    std::string color_topic;
+    int camera_id = -1;
+    image_transport::Publisher color_publisher;
+  };
+  std::unique_ptr<image_transport::ImageTransport> task_camera_transport;
+  std::vector<TaskRgbdCamera> task_rgbd_cameras;
+  mjData *task_camera_data = nullptr;
+  // recursive: the model-reload path holds this across ConfigureTaskRgbdCameras...
+  // while the camera thread may already hold it for the current frame.
+  std::recursive_mutex task_camera_mutex;
+  std::thread task_camera_thread;
+  std::atomic<bool> task_camera_thread_running{false};
+  // Owned and used exclusively by task_camera_thread: GL contexts are thread
+  // private, so this must never be touched from the physics thread.
+  std::unique_ptr<mujoco_cpp::OffscreenCameraRenderer> task_offscreen_renderer;
+  // 渲染目标缓冲，同样只由 task_camera_thread 使用；放在成员上是为了每帧复用，
+  // 不在 30 Hz 的热路径上反复分配。
+  std::vector<std::uint8_t> task_rgbd_camera_rgb;
+  // 深度缓冲仍在渲染时按帧填充（见 Render 的签名），只是不再发给任何人。
+  std::vector<float> task_rgbd_camera_depth;
+  // Bumped on every model (re)load; the camera thread rebuilds the GL context
+  // when it sees a new value, because mjrContext holds display lists and
+  // textures bound to the old mjModel.
+  std::atomic<int> task_camera_model_epoch{0};
+  constexpr int kTaskCameraWidth = 640;
+  constexpr int kTaskCameraHeight = 480;
+  constexpr double kTaskCameraFrequency = 30.0;
+  constexpr mjtNum kTaskCameraHorizontalAperture = 4.24;
 
   // Depth image history buffer (3*7+1=22 frames)
   struct DepthImageFrame {
@@ -289,6 +530,86 @@ namespace
     }
   }
 
+  bool ConfigureTaskRgbdCamerasForCurrentModel()
+  {
+    const std::unique_lock<std::recursive_mutex> camera_lock(task_camera_mutex);
+    task_rgbd_cameras.clear();
+    if (task_camera_data != nullptr)
+    {
+      mj_deleteData(task_camera_data);
+      task_camera_data = nullptr;
+    }
+    if (!isRunCamera_ || !task_camera_transport || m == nullptr || d == nullptr)
+    {
+      return false;
+    }
+    task_camera_data = mj_makeData(m);
+    if (task_camera_data == nullptr)
+    {
+      ROS_ERROR("[TaskCamera] Failed to allocate MuJoCo data snapshot");
+      return false;
+    }
+    mj_copyData(task_camera_data, m, d);
+
+    struct CameraSpec {
+      const char *model_name;
+      const char *color_frame_id;
+      const char *color_topic;
+    };
+    static constexpr CameraSpec kCameraSpecs[] = {
+        {"cam_h", "cam_h_color_optical_frame", "/cam_h/color/image_raw"},
+        {"cam_l", "cam_l_color_optical_frame", "/cam_l/color/image_raw"},
+        {"cam_r", "cam_r_color_optical_frame", "/cam_r/color/image_raw"},
+    };
+
+    for (const CameraSpec &spec : kCameraSpecs)
+    {
+      const int camera_id = mj_name2id(m, mjOBJ_CAMERA, spec.model_name);
+      if (camera_id < 0)
+      {
+        ROS_WARN("[TaskCamera] Named camera '%s' is absent", spec.model_name);
+        continue;
+      }
+      TaskRgbdCamera camera;
+      camera.model_name = spec.model_name;
+      camera.color_frame_id = spec.color_frame_id;
+      camera.color_topic = spec.color_topic;
+      camera.camera_id = camera_id;
+      camera.color_publisher = task_camera_transport->advertise(camera.color_topic, 2);
+      task_rgbd_cameras.emplace_back(std::move(camera));
+    }
+
+    // 模型换了，GL 侧的一切（显示列表、纹理、离屏 FBO 尺寸）都要重建。
+    // 真正重建发生在 task_camera_thread 里，因为 GL context 是线程私有的。
+    task_camera_model_epoch.fetch_add(1);
+
+    ROS_INFO("[TaskCamera] Configured %zu RGB cameras at %dx%d, %.1f Hz",
+             task_rgbd_cameras.size(), kTaskCameraWidth, kTaskCameraHeight,
+             kTaskCameraFrequency);
+    return task_rgbd_cameras.size() == 3;
+  }
+
+  // 从光栅化的颜色缓冲直接拷成 RGB8。不再按 geom 上色：颜色、光照、材质、
+  // 阴影都由 mjr_render 给出。
+  sensor_msgs::Image BuildTaskColorImage(
+      const TaskRgbdCamera &camera, const ros::Time &stamp,
+      const std::uint8_t *rgb)
+  {
+    sensor_msgs::Image msg;
+    msg.header.stamp = stamp;
+    msg.header.frame_id = camera.color_frame_id;
+    msg.height = kTaskCameraHeight;
+    msg.width = kTaskCameraWidth;
+    msg.encoding = sensor_msgs::image_encodings::RGB8;
+    msg.is_bigendian = 0;
+    msg.step = kTaskCameraWidth * 3;
+    const std::size_t size =
+        static_cast<std::size_t>(kTaskCameraWidth) * kTaskCameraHeight * 3;
+    msg.data.assign(rgb, rgb + size);
+    return msg;
+  }
+
+
   // control noise variables
   // mjtNum* ctrlnoise = nullptr;
 
@@ -360,7 +681,7 @@ namespace
   JointGroupAddress LLegJointsAddr("l_leg_joints");
   JointGroupAddress RLegJointsAddr("r_leg_joints");
   JointGroupAddress WaistJointsAddr("waist_yaw_joint");
-  JointGroupAddress LArmJointsAddr("r_arm_joints");
+  JointGroupAddress LArmJointsAddr("l_arm_joints");
   JointGroupAddress RArmJointsAddr("r_arm_joints");
   JointGroupAddress HeadJointsAddr("head_joints");
   JointGroupAddress LHandJointsAddr("l_hand_joints");
@@ -663,6 +984,10 @@ namespace
               std::cout << "[mujoco_node]: Initialize LinkerO6 dexhand joint addresses" << std::endl;
               init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
               init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          } else if (hand_type_value == 3) {
+              std::cout << "[mujoco_node]: Initialize Heiman SG100 joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_j1", "l_little_j3");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_j1", "r_little_j3");
           }
       } else {
           // 旧版无hand_type元数据时，默认使用强脑手关节命名
@@ -933,6 +1258,26 @@ namespace
     pubGroundTruth.publish(bodyOdom);  // 发布到/ground_truth/state
     pubOdom.publish(bodyOdom);         // 发布到/odom
 
+    for (const std::string &name : task_body_names) {
+      const int body_id = mj_name2id(m, mjOBJ_BODY, name.c_str());
+      if (body_id < 0) {
+        continue;
+      }
+      const mjtNum *body_pos = d->xpos + 3 * body_id;
+      const mjtNum *body_quat = d->xquat + 4 * body_id;
+      geometry_msgs::PoseStamped pose;
+      pose.header.stamp = sim_time;
+      pose.header.frame_id = "world";
+      pose.pose.position.x = body_pos[0];
+      pose.pose.position.y = body_pos[1];
+      pose.pose.position.z = body_pos[2];
+      pose.pose.orientation.w = body_quat[0];
+      pose.pose.orientation.x = body_quat[1];
+      pose.pose.orientation.y = body_quat[2];
+      pose.pose.orientation.z = body_quat[3];
+      task_body_pose_publishers.at(name).publish(pose);
+    }
+
     // 读取并发布手臂末端力/扭矩传感器数据
     int l_arm_force_id = mj_name2id(m, mjOBJ_SENSOR, "l_arm_force");
     int l_arm_torque_id = mj_name2id(m, mjOBJ_SENSOR, "l_arm_torque");
@@ -1105,6 +1450,11 @@ namespace
         mjData *dnew = nullptr;
         if (mnew)
           dnew = mj_makeData(mnew);
+        // 相机线程在 task_camera_mutex 之外读 m 做离屏渲染，所以整个换模型窗口
+        // （删旧、赋新、重建相机列表）都必须把它挡住，否则会读到已释放的 mjModel，
+        // 或者拿着旧模型的 camera_id 去渲染新模型。
+        // ConfigureTaskRgbdCamerasForCurrentModel 内部也拿这把锁，故用 recursive_mutex。
+        std::unique_lock<std::recursive_mutex> camera_reload_lock(task_camera_mutex);
         if (dnew)
         {
           sim.Load(mnew, dnew, sim.filename);
@@ -1143,6 +1493,10 @@ namespace
         else
         {
           ResetDepthBufferState();
+        }
+        if (task_camera_thread.joinable() && mnew && dnew)
+        {
+          ConfigureTaskRgbdCamerasForCurrentModel();
         }
 
         claw_cmd_updated = false;
@@ -1202,7 +1556,10 @@ namespace
           bool updated = false;
           bool claw_updated = false;
           queueMutex.lock();
-          if (cmd_updated || is_chassic_cmd_changed || is_chassic_cmd_vel_changed || claw_cmd_updated || pure_sim)
+          const bool dexhand_cmd_updated =
+              g_dexhand_node && g_dexhand_node->consumeCommandUpdate();
+          if (cmd_updated || is_chassic_cmd_changed || is_chassic_cmd_vel_changed ||
+              claw_cmd_updated || dexhand_cmd_updated || pure_sim)
           {
             updated = true;
           }
@@ -1250,7 +1607,7 @@ namespace
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
+                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062 || robotVersion_ == 400062)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -1434,7 +1791,17 @@ namespace
               d->xfrc_applied[6 * right_arm_link_id_ + 4] = right_hand_wrench_.torque.y;
               d->xfrc_applied[6 * right_arm_link_id_ + 5] = right_hand_wrench_.torque.z;
             }
+            // A geometric finger latch must also own the position-actuator
+            // target.  Otherwise the dexhand command keeps pushing past the
+            // captured qpos and injects joint reaction forces on every step.
+            applyBimanualLatchControls();
+            applyInternalLatchControls();
+            applyTask1GraspLatchControls();
+            applyTask1LeverLatchControls();
             mj_step(m, d);
+            if (updateContactFollowers()) {
+              mj_forward(m, d);
+            }
             step_count++;
             sim_time += ros::Duration(1 / frequency);
             sim.AddToHistory();
@@ -1533,11 +1900,2370 @@ namespace
       } // release std::lock_guard<std::mutex>
     }
     std::cout << "Physics thread exited." << std::endl;
-    // ****************************
-    // mujocolcm.joinLCMThread();
-    // ****************************
+    // Reap the LCM worker before this scope ends and ~MujocoLcm() destroys
+    // lcm_.  Without this the worker keeps calling lcm_.handle() on a freed
+    // LCM instance and corrupts the heap (malloc(): mismatching next->prev_size).
+    mujocolcm.joinLCMThread();
   }
 } // namespace
+
+namespace
+{
+void initializeContactFollowers(const std::vector<std::string> &body_names)
+{
+  contact_followers.clear();
+  right_fingertip_geom_ids.clear();
+  contact_follower_hand_body_id =
+      mj_name2id(m, mjOBJ_BODY, "r_hand_base");
+  const std::array<const char *, 4> fingertip_names = {
+      "r_thumb_fingertip_collision",
+      "r_index_fingertip_collision",
+      "r_middle_fingertip_collision",
+      "r_little_fingertip_collision",
+  };
+  for (const char *name : fingertip_names) {
+    const int geom_id = mj_name2id(m, mjOBJ_GEOM, name);
+    if (geom_id >= 0) {
+      right_fingertip_geom_ids.insert(geom_id);
+    }
+  }
+
+  if (right_fingertip_geom_ids.empty() ||
+      contact_follower_hand_body_id < 0) {
+    ROS_WARN("[ContactFollower] hand or fingertip geom is absent; disabled");
+    return;
+  }
+
+  const int target_floor_geom_id =
+      mj_name2id(m, mjOBJ_GEOM, "target_bin_floor");
+
+  for (const std::string &name : body_names) {
+    const int body_id = mj_name2id(m, mjOBJ_BODY, name.c_str());
+    if (body_id < 0 || m->body_jntnum[body_id] != 1) {
+      ROS_WARN("[ContactFollower] body '%s' is absent or does not have one joint",
+               name.c_str());
+      continue;
+    }
+    const int joint_id = m->body_jntadr[body_id];
+    if (m->jnt_type[joint_id] != mjJNT_FREE) {
+      ROS_WARN("[ContactFollower] body '%s' does not have a free joint",
+               name.c_str());
+      continue;
+    }
+    ContactFollowerState state;
+    state.name = name;
+    state.body_id = body_id;
+    state.joint_id = joint_id;
+    state.qpos_addr = m->jnt_qposadr[joint_id];
+    state.dof_addr = m->jnt_dofadr[joint_id];
+    state.target_floor_geom_id = target_floor_geom_id;
+    const int geom_begin = m->body_geomadr[body_id];
+    const int geom_end = geom_begin + m->body_geomnum[body_id];
+    for (int geom_id = geom_begin; geom_id < geom_end; ++geom_id) {
+      if (m->geom_contype[geom_id] != 0) {
+        state.collision_geom_ids.push_back(geom_id);
+        state.collision_contype.push_back(m->geom_contype[geom_id]);
+        state.collision_conaffinity.push_back(m->geom_conaffinity[geom_id]);
+        if (m->geom_type[geom_id] == mjGEOM_CYLINDER) {
+          state.radius = m->geom_size[3 * geom_id];
+          state.half_height = m->geom_size[3 * geom_id + 1];
+        }
+      }
+    }
+    contact_followers.push_back(state);
+  }
+  ROS_INFO("[ContactFollower] enabled for %zu task objects with %zu right fingertip geoms",
+           contact_followers.size(), right_fingertip_geom_ids.size());
+}
+
+void initializeTask1GraspFingerLatch()
+{
+  task1_grasp_latch = Task1GraspFingerLatchState{};
+  task1_grasp_latch.enabled =
+      numericScalarOrDefault(
+          "task1_grasp_independent_finger_latch_enabled", 0) > 0.5;
+  if (!task1_grasp_latch.enabled) {
+    return;
+  }
+
+  task1_grasp_latch.contact_depth = std::max<mjtNum>(
+      0, numericScalarOrDefault(
+             "task1_grasp_finger_latch_contact_depth", 0.0005));
+  const std::array<const char *, 2> fingertip_names{{
+      "r_thumb_fingertip_collision",
+      "r_index_fingertip_collision",
+  }};
+  const std::array<std::vector<std::string>, 2> finger_joint_names{{
+      {"r_thumb_j1", "r_thumb_j2", "r_thumb_j3"},
+      {"r_index_j1", "r_index_j2", "r_index_j3"},
+  }};
+  bool valid = !contact_followers.empty();
+  for (std::size_t finger = 0; finger < fingertip_names.size(); ++finger) {
+    task1_grasp_latch.fingertip_geom_ids[finger] =
+        mj_name2id(m, mjOBJ_GEOM, fingertip_names[finger]);
+    valid = valid && task1_grasp_latch.fingertip_geom_ids[finger] >= 0;
+    for (const std::string &joint_name : finger_joint_names[finger]) {
+      const int joint_id =
+          mj_name2id(m, mjOBJ_JOINT, joint_name.c_str());
+      const int actuator_id = mj_name2id(
+          m, mjOBJ_ACTUATOR, (joint_name + "_motor").c_str());
+      if (joint_id < 0 || m->jnt_type[joint_id] != mjJNT_HINGE ||
+          actuator_id < 0) {
+        valid = false;
+        continue;
+      }
+      task1_grasp_latch.qpos_addresses[finger].push_back(
+          m->jnt_qposadr[joint_id]);
+      task1_grasp_latch.dof_addresses[finger].push_back(
+          m->jnt_dofadr[joint_id]);
+      task1_grasp_latch.ctrl_addresses[finger].push_back(actuator_id);
+    }
+  }
+  if (!valid) {
+    ROS_WARN("[Task1GraspLatch] scene opted in but cylinder/finger mapping is incomplete; disabled");
+    task1_grasp_latch = Task1GraspFingerLatchState{};
+    return;
+  }
+  ROS_INFO("[Task1GraspLatch] independent thumb/index contact latch enabled at %.2f mm penetration",
+           1000.0 * task1_grasp_latch.contact_depth);
+}
+
+std::uint8_t task1GraspLatchMask()
+{
+  std::uint8_t mask = 0;
+  for (std::size_t finger = 0;
+       finger < task1_grasp_latch.finger_latched.size(); ++finger) {
+    if (task1_grasp_latch.finger_latched[finger]) {
+      mask |= static_cast<std::uint8_t>(1u << finger);
+    }
+  }
+  return mask;
+}
+
+void clearTask1GraspFingerLatch(const char *reason)
+{
+  const std::uint8_t old_mask = task1GraspLatchMask();
+  task1_grasp_latch.object_body_id = -1;
+  task1_grasp_latch.finger_latched.fill(false);
+  for (std::vector<mjtNum> &positions : task1_grasp_latch.latched_qpos) {
+    positions.clear();
+  }
+  if (old_mask != 0) {
+    ROS_INFO("[Task1GraspLatch] cleared mask=0x%02x (%s)",
+             old_mask, reason);
+  }
+}
+
+void captureTask1GraspFinger(int object_body_id, std::size_t finger,
+                             mjtNum contact_distance)
+{
+  if (task1_grasp_latch.object_body_id < 0) {
+    task1_grasp_latch.object_body_id = object_body_id;
+  }
+  if (task1_grasp_latch.object_body_id != object_body_id ||
+      task1_grasp_latch.finger_latched[finger]) {
+    return;
+  }
+  std::vector<mjtNum> &positions =
+      task1_grasp_latch.latched_qpos[finger];
+  positions.clear();
+  for (std::size_t joint = 0;
+       joint < task1_grasp_latch.qpos_addresses[finger].size(); ++joint) {
+    positions.push_back(
+        d->qpos[task1_grasp_latch.qpos_addresses[finger][joint]]);
+    d->qvel[task1_grasp_latch.dof_addresses[finger][joint]] = 0;
+  }
+  task1_grasp_latch.finger_latched[finger] = true;
+  ROS_INFO("[Task1GraspLatch] froze complete finger '%s' on '%s' at %.2f mm penetration; mask=0x%02x",
+           mj_id2name(m, mjOBJ_GEOM,
+                      task1_grasp_latch.fingertip_geom_ids[finger]),
+           mj_id2name(m, mjOBJ_BODY, object_body_id),
+           -1000.0 * contact_distance, task1GraspLatchMask());
+}
+
+void applyTask1GraspLatchControls()
+{
+  if (!task1_grasp_latch.enabled) {
+    return;
+  }
+  for (std::size_t finger = 0;
+       finger < task1_grasp_latch.finger_latched.size(); ++finger) {
+    if (!task1_grasp_latch.finger_latched[finger] ||
+        task1_grasp_latch.latched_qpos[finger].size() !=
+            task1_grasp_latch.qpos_addresses[finger].size()) {
+      continue;
+    }
+    for (std::size_t joint = 0;
+         joint < task1_grasp_latch.qpos_addresses[finger].size(); ++joint) {
+      const mjtNum position = task1_grasp_latch.latched_qpos[finger][joint];
+      d->qpos[task1_grasp_latch.qpos_addresses[finger][joint]] = position;
+      d->qvel[task1_grasp_latch.dof_addresses[finger][joint]] = 0;
+      d->ctrl[task1_grasp_latch.ctrl_addresses[finger][joint]] = position;
+    }
+  }
+}
+
+void initializeBimanualContactFollowers(
+    const std::vector<std::string> &body_names)
+{
+  bimanual_contact_followers.clear();
+  bimanual_contact_state_publishers.clear();
+  task2_reposition_state_publishers.clear();
+  left_fingertip_geom_ids.clear();
+  left_grasp_trigger_geom_ids.clear();
+  right_grasp_trigger_geom_ids.clear();
+  bimanual_active_fingertip_geom_ids.fill(-1);
+  bimanual_fingertip_contype.clear();
+  bimanual_fingertip_conaffinity.clear();
+  bimanual_hand_qpos_addresses.clear();
+  bimanual_hand_dof_addresses.clear();
+  bimanual_hand_ctrl_addresses.clear();
+  bimanual_arm_qpos_addresses.clear();
+  bimanual_arm_dof_addresses.clear();
+  bimanual_arm_ctrl_addresses.clear();
+  const std::array<const char *, 4> left_fingertip_names = {
+      "l_thumb_fingertip_collision",
+      "l_index_fingertip_collision",
+      "l_middle_fingertip_collision",
+      "l_little_fingertip_collision",
+  };
+  for (const char *name : left_fingertip_names) {
+    const int geom_id = mj_name2id(m, mjOBJ_GEOM, name);
+    if (geom_id >= 0) {
+      left_fingertip_geom_ids.insert(geom_id);
+    }
+  }
+  std::size_t active_fingertip_index = 0;
+  for (const char *side : {"l", "r"}) {
+    std::unordered_set<int> &trigger_ids =
+        side[0] == 'l' ? left_grasp_trigger_geom_ids
+                       : right_grasp_trigger_geom_ids;
+    for (const char *finger : {"thumb", "index"}) {
+      const std::string geom_name =
+          std::string(side) + "_" + finger + "_fingertip_collision";
+      const int geom_id = mj_name2id(m, mjOBJ_GEOM, geom_name.c_str());
+      if (geom_id >= 0) {
+        trigger_ids.insert(geom_id);
+        bimanual_active_fingertip_geom_ids[active_fingertip_index] = geom_id;
+      }
+      ++active_fingertip_index;
+    }
+  }
+
+  for (const char *side : {"l", "r"}) {
+    for (int index = 1; index <= 7; ++index) {
+      const std::string joint_name =
+          "zarm_" + std::string(side) + std::to_string(index) + "_joint";
+      const int joint_id =
+          mj_name2id(m, mjOBJ_JOINT, joint_name.c_str());
+      const int actuator_id = mj_name2id(
+          m, mjOBJ_ACTUATOR, (joint_name + "_motor").c_str());
+      if (joint_id < 0 || m->jnt_type[joint_id] != mjJNT_HINGE ||
+          actuator_id < 0) {
+        ROS_WARN("[BimanualContactFollower] arm joint or actuator '%s' is absent; reposition latch disabled",
+                 joint_name.c_str());
+        bimanual_arm_qpos_addresses.clear();
+        bimanual_arm_dof_addresses.clear();
+        bimanual_arm_ctrl_addresses.clear();
+        break;
+      }
+      bimanual_arm_qpos_addresses.push_back(m->jnt_qposadr[joint_id]);
+      bimanual_arm_dof_addresses.push_back(m->jnt_dofadr[joint_id]);
+      bimanual_arm_ctrl_addresses.push_back(actuator_id);
+    }
+    if (bimanual_arm_qpos_addresses.empty()) {
+      break;
+    }
+  }
+  for (int geom_id : left_fingertip_geom_ids) {
+    bimanual_fingertip_contype.emplace(
+        geom_id, m->geom_contype[geom_id]);
+    bimanual_fingertip_conaffinity.emplace(
+        geom_id, m->geom_conaffinity[geom_id]);
+  }
+  for (int geom_id : right_fingertip_geom_ids) {
+    bimanual_fingertip_contype.emplace(
+        geom_id, m->geom_contype[geom_id]);
+    bimanual_fingertip_conaffinity.emplace(
+        geom_id, m->geom_conaffinity[geom_id]);
+  }
+
+  const std::array<const char *, 11> hand_joint_suffixes = {
+      "thumb_j1", "thumb_j2", "thumb_j3",
+      "index_j1", "index_j2", "index_j3",
+      "middle_j1", "middle_j2",
+      "little_j1", "little_j2", "little_j3",
+  };
+  for (const char *side : {"l", "r"}) {
+    for (const char *suffix : hand_joint_suffixes) {
+      const std::string joint_name =
+          std::string(side) + "_" + suffix;
+      const int joint_id =
+          mj_name2id(m, mjOBJ_JOINT, joint_name.c_str());
+      const std::string actuator_name = joint_name + "_motor";
+      const int actuator_id =
+          mj_name2id(m, mjOBJ_ACTUATOR, actuator_name.c_str());
+      if (joint_id < 0 || m->jnt_type[joint_id] != mjJNT_HINGE ||
+          actuator_id < 0) {
+        ROS_WARN("[BimanualContactFollower] hand joint or actuator '%s' is absent; hand latch disabled",
+                 joint_name.c_str());
+        bimanual_hand_qpos_addresses.clear();
+        bimanual_hand_dof_addresses.clear();
+        bimanual_hand_ctrl_addresses.clear();
+        break;
+      }
+      bimanual_hand_qpos_addresses.push_back(m->jnt_qposadr[joint_id]);
+      bimanual_hand_dof_addresses.push_back(m->jnt_dofadr[joint_id]);
+      bimanual_hand_ctrl_addresses.push_back(actuator_id);
+    }
+    if (bimanual_hand_qpos_addresses.empty()) {
+      break;
+    }
+  }
+
+  contact_follower_base_body_id = mj_name2id(m, mjOBJ_BODY, "base_link");
+  bimanual_left_hand_body_id =
+      mj_name2id(m, mjOBJ_BODY, "l_hand_base");
+  bimanual_right_hand_body_id =
+      mj_name2id(m, mjOBJ_BODY, "r_hand_base");
+  task2_conveyor_body_id =
+      mj_name2id(m, mjOBJ_BODY, "destination_conveyor");
+  task2_conveyor_belt_geom_id =
+      mj_name2id(m, mjOBJ_GEOM, "destination_conveyor_belt");
+  task2_conveyor_started = false;
+  task2_conveyor_completed = false;
+  if (body_names.empty()) {
+    return;
+  }
+  if (contact_follower_base_body_id < 0 ||
+      bimanual_left_hand_body_id < 0 ||
+      bimanual_right_hand_body_id < 0 ||
+      left_fingertip_geom_ids.empty() ||
+      right_fingertip_geom_ids.empty() ||
+      left_grasp_trigger_geom_ids.size() != 2 ||
+      right_grasp_trigger_geom_ids.size() != 2 ||
+      bimanual_hand_qpos_addresses.size() != 22 ||
+      bimanual_hand_ctrl_addresses.size() != 22 ||
+      bimanual_arm_qpos_addresses.size() != 14 ||
+      bimanual_arm_dof_addresses.size() != 14 ||
+      bimanual_arm_ctrl_addresses.size() != 14) {
+    ROS_WARN("[BimanualContactFollower] required Task2 bodies/geoms/joints are absent: hand_qpos=%zu hand_ctrl=%zu arm_qpos=%zu arm_dof=%zu arm_ctrl=%zu; disabled",
+             bimanual_hand_qpos_addresses.size(),
+             bimanual_hand_ctrl_addresses.size(),
+             bimanual_arm_qpos_addresses.size(),
+             bimanual_arm_dof_addresses.size(),
+             bimanual_arm_ctrl_addresses.size());
+    return;
+  }
+
+  for (const std::string &name : body_names) {
+    const int body_id = mj_name2id(m, mjOBJ_BODY, name.c_str());
+    if (body_id < 0 || m->body_jntnum[body_id] != 1) {
+      ROS_WARN("[BimanualContactFollower] body '%s' is absent or does not have one joint",
+               name.c_str());
+      continue;
+    }
+    const int joint_id = m->body_jntadr[body_id];
+    if (m->jnt_type[joint_id] != mjJNT_FREE) {
+      ROS_WARN("[BimanualContactFollower] body '%s' does not have a free joint",
+               name.c_str());
+      continue;
+    }
+    BimanualContactFollowerState state;
+    state.name = name;
+    state.body_id = body_id;
+    state.joint_id = joint_id;
+    state.qpos_addr = m->jnt_qposadr[joint_id];
+    state.dof_addr = m->jnt_dofadr[joint_id];
+    const int geom_begin = m->body_geomadr[body_id];
+    const int geom_end = geom_begin + m->body_geomnum[body_id];
+    for (int geom_id = geom_begin; geom_id < geom_end; ++geom_id) {
+      state.collision_geom_ids.push_back(geom_id);
+      state.collision_contype.push_back(m->geom_contype[geom_id]);
+      state.collision_conaffinity.push_back(m->geom_conaffinity[geom_id]);
+    }
+    state.left_wall_geom_id = mj_name2id(
+        m, mjOBJ_GEOM, (name + "_left_wall").c_str());
+    state.right_wall_geom_id = mj_name2id(
+        m, mjOBJ_GEOM, (name + "_right_wall").c_str());
+    if (state.left_wall_geom_id < 0 || state.right_wall_geom_id < 0) {
+      ROS_WARN("[BimanualContactFollower] box '%s' is missing a side wall",
+               name.c_str());
+      continue;
+    }
+    bimanual_contact_followers.push_back(state);
+    ros::Publisher publisher = g_nh_ptr->advertise<std_msgs::Bool>(
+        "/mujoco/" + name + "/bimanual_grasped", 1, true);
+    std_msgs::Bool initial_state;
+    initial_state.data = false;
+    publisher.publish(initial_state);
+    bimanual_contact_state_publishers.emplace(name, publisher);
+    ros::Publisher reposition_publisher = g_nh_ptr->advertise<std_msgs::Bool>(
+        "/mujoco/" + name + "/reposition_grasped", 1, true);
+    reposition_publisher.publish(initial_state);
+    task2_reposition_state_publishers.emplace(name, reposition_publisher);
+  }
+  ROS_INFO("[BimanualContactFollower] enabled for %zu task objects with four independent force-free fingertip stops",
+           bimanual_contact_followers.size());
+}
+
+void publishBimanualContactState(
+    const BimanualContactFollowerState &state)
+{
+  const auto publisher = bimanual_contact_state_publishers.find(state.name);
+  if (publisher == bimanual_contact_state_publishers.end()) {
+    return;
+  }
+  std_msgs::Bool message;
+  message.data = state.held;
+  publisher->second.publish(message);
+}
+
+void task2GraspEnabledCallback(const std_msgs::Bool::ConstPtr &message)
+{
+  task2_grasp_enabled.store(message->data, std::memory_order_release);
+}
+
+void task2RepositionEnabledCallback(const std_msgs::Bool::ConstPtr &message)
+{
+  task2_reposition_enabled.store(message->data, std::memory_order_release);
+}
+
+void task2ConveyorEnabledCallback(const std_msgs::Bool::ConstPtr &message)
+{
+  task2_conveyor_enabled.store(message->data, std::memory_order_release);
+}
+
+void task3GraspEnabledCallback(const std_msgs::Bool::ConstPtr &message)
+{
+  task3_grasp_enabled.store(message->data, std::memory_order_release);
+}
+
+void task3GraspFinalizeEnabledCallback(
+    const std_msgs::Bool::ConstPtr &message)
+{
+  task3_grasp_finalize_enabled.store(
+      message->data, std::memory_order_release);
+}
+
+void task3FingertipCollisionSuppressionEnabledCallback(
+    const std_msgs::Bool::ConstPtr &message)
+{
+  task3_fingertip_collision_suppression_enabled.store(
+      message->data, std::memory_order_release);
+}
+
+void setBimanualFingertipCollisionEnabled(bool enabled)
+{
+  for (const auto &entry : bimanual_fingertip_contype) {
+    m->geom_contype[entry.first] = enabled ? entry.second : 0;
+  }
+  for (const auto &entry : bimanual_fingertip_conaffinity) {
+    m->geom_conaffinity[entry.first] = enabled ? entry.second : 0;
+  }
+}
+
+void setBimanualHandFingertipCollisionEnabled(
+    const std::unordered_set<int> &geom_ids, bool enabled)
+{
+  for (int geom_id : geom_ids) {
+    const auto contype = bimanual_fingertip_contype.find(geom_id);
+    const auto conaffinity = bimanual_fingertip_conaffinity.find(geom_id);
+    if (contype != bimanual_fingertip_contype.end()) {
+      m->geom_contype[geom_id] = enabled ? contype->second : 0;
+    }
+    if (conaffinity != bimanual_fingertip_conaffinity.end()) {
+      m->geom_conaffinity[geom_id] = enabled ? conaffinity->second : 0;
+    }
+  }
+}
+
+void setBimanualObjectCollisionEnabled(
+    const BimanualContactFollowerState &state, bool enabled)
+{
+  for (std::size_t index = 0;
+       index < state.collision_geom_ids.size(); ++index) {
+    const int geom_id = state.collision_geom_ids[index];
+    m->geom_contype[geom_id] =
+        enabled ? state.collision_contype[index] : 0;
+    m->geom_conaffinity[geom_id] =
+        enabled ? state.collision_conaffinity[index] : 0;
+  }
+}
+
+void setInternalFingertipCollisionEnabled(bool enabled)
+{
+  for (const auto &entry : internal_fingertip_contype) {
+    m->geom_contype[entry.first] = enabled ? entry.second : 0;
+  }
+  for (const auto &entry : internal_fingertip_conaffinity) {
+    m->geom_conaffinity[entry.first] = enabled ? entry.second : 0;
+  }
+}
+
+void setInternalObjectCollisionEnabled(
+    const InternalContactFollowerState &state, bool enabled)
+{
+  for (std::size_t index = 0;
+       index < state.collision_geom_ids.size(); ++index) {
+    const int geom_id = state.collision_geom_ids[index];
+    m->geom_contype[geom_id] =
+        enabled ? state.collision_contype[index] : 0;
+    m->geom_conaffinity[geom_id] =
+        enabled ? state.collision_conaffinity[index] : 0;
+  }
+}
+
+std::uint8_t task1LeverLatchMask()
+{
+  std::uint8_t mask = 0;
+  for (std::size_t finger = 0;
+       finger < task1_lever_latch.finger_latched.size(); ++finger) {
+    if (task1_lever_latch.finger_latched[finger]) {
+      mask |= static_cast<std::uint8_t>(1u << finger);
+    }
+  }
+  return mask;
+}
+
+void initializeTask1LeverFingerLatch()
+{
+  task1_lever_latch = Task1LeverFingerLatchState{};
+  task1_lever_latch.handle_geom_id =
+      mj_name2id(m, mjOBJ_GEOM, "lever_handle_collision");
+  task1_lever_latch.lever_lock_equality_id =
+      mj_name2id(m, mjOBJ_EQUALITY, "task1_lever_lock");
+  task1_lever_latch.source_bin_lock_equality_id =
+      mj_name2id(m, mjOBJ_EQUALITY, "task1_source_bin_lock");
+  task1_lever_latch.source_bin_slide_joint_id =
+      mj_name2id(m, mjOBJ_JOINT, "source_bin_slide");
+  const std::array<const char *, 3> fingertip_names{{
+      "r_index_fingertip_collision",
+      "r_middle_fingertip_collision",
+      "r_little_fingertip_collision",
+  }};
+  const std::array<std::vector<std::string>, 3> finger_joint_names{{
+      {"r_index_j1", "r_index_j2", "r_index_j3"},
+      {"r_middle_j1", "r_middle_j2"},
+      {"r_little_j1", "r_little_j2", "r_little_j3"},
+  }};
+  bool valid = task1_lever_latch.handle_geom_id >= 0 &&
+      task1_lever_latch.lever_lock_equality_id >= 0 &&
+      task1_lever_latch.source_bin_lock_equality_id >= 0 &&
+      task1_lever_latch.source_bin_slide_joint_id >= 0;
+  const int lever_joint_id = mj_name2id(m, mjOBJ_JOINT, "lever_hinge");
+  if (valid) {
+    valid = lever_joint_id >= 0 &&
+        m->eq_type[task1_lever_latch.lever_lock_equality_id] == mjEQ_JOINT &&
+        m->eq_obj1id[task1_lever_latch.lever_lock_equality_id] ==
+            lever_joint_id &&
+        m->eq_type[task1_lever_latch.source_bin_lock_equality_id] ==
+            mjEQ_JOINT &&
+        m->eq_obj1id[task1_lever_latch.source_bin_lock_equality_id] ==
+            task1_lever_latch.source_bin_slide_joint_id;
+  }
+  for (std::size_t finger = 0; finger < fingertip_names.size(); ++finger) {
+    task1_lever_latch.fingertip_geom_ids[finger] =
+        mj_name2id(m, mjOBJ_GEOM, fingertip_names[finger]);
+    valid = valid && task1_lever_latch.fingertip_geom_ids[finger] >= 0;
+    for (const std::string &joint_name : finger_joint_names[finger]) {
+      const int joint_id =
+          mj_name2id(m, mjOBJ_JOINT, joint_name.c_str());
+      const int actuator_id = mj_name2id(
+          m, mjOBJ_ACTUATOR, (joint_name + "_motor").c_str());
+      if (joint_id < 0 || m->jnt_type[joint_id] != mjJNT_HINGE ||
+          actuator_id < 0) {
+        valid = false;
+        continue;
+      }
+      task1_lever_latch.qpos_addresses[finger].push_back(
+          m->jnt_qposadr[joint_id]);
+      task1_lever_latch.dof_addresses[finger].push_back(
+          m->jnt_dofadr[joint_id]);
+      task1_lever_latch.ctrl_addresses[finger].push_back(actuator_id);
+    }
+  }
+  if (!valid) {
+    ROS_INFO("[Task1LeverLatch] Scene1 lock declarations are absent; state machine disabled");
+    task1_lever_latch.handle_geom_id = -1;
+    task1_lever_latch.lever_lock_equality_id = -1;
+    task1_lever_latch.source_bin_lock_equality_id = -1;
+    task1_lever_latch.source_bin_slide_joint_id = -1;
+    return;
+  }
+  m->eq_data[mjNEQDATA * task1_lever_latch.lever_lock_equality_id] =
+      d->qpos[m->jnt_qposadr[lever_joint_id]];
+  m->eq_data[mjNEQDATA * task1_lever_latch.source_bin_lock_equality_id] =
+      d->qpos[m->jnt_qposadr[task1_lever_latch.source_bin_slide_joint_id]];
+  d->eq_active[task1_lever_latch.lever_lock_equality_id] = 1;
+  d->eq_active[task1_lever_latch.source_bin_lock_equality_id] = 1;
+  task1_lever_latch.lever_unlocked = false;
+  ROS_INFO("[Task1LeverLatch] scene-owned lever and source-bin locks initialized");
+}
+
+void captureTask1LeverFinger(std::size_t finger)
+{
+  std::vector<mjtNum> &positions = task1_lever_latch.latched_qpos[finger];
+  positions.clear();
+  for (std::size_t joint = 0;
+       joint < task1_lever_latch.qpos_addresses[finger].size(); ++joint) {
+    positions.push_back(
+        d->qpos[task1_lever_latch.qpos_addresses[finger][joint]]);
+    d->qvel[task1_lever_latch.dof_addresses[finger][joint]] = 0;
+  }
+  task1_lever_latch.finger_latched[finger] = true;
+}
+
+void applyTask1LeverLatchControls()
+{
+  if (task1_lever_latch.lever_lock_equality_id < 0) {
+    return;
+  }
+  for (std::size_t finger = 0;
+       finger < task1_lever_latch.finger_latched.size(); ++finger) {
+    if (!task1_lever_latch.finger_latched[finger] ||
+        task1_lever_latch.latched_qpos[finger].size() !=
+            task1_lever_latch.qpos_addresses[finger].size()) {
+      continue;
+    }
+    for (std::size_t joint = 0;
+         joint < task1_lever_latch.qpos_addresses[finger].size(); ++joint) {
+      const mjtNum position = task1_lever_latch.latched_qpos[finger][joint];
+      d->qpos[task1_lever_latch.qpos_addresses[finger][joint]] = position;
+      d->qvel[task1_lever_latch.dof_addresses[finger][joint]] = 0;
+      d->ctrl[task1_lever_latch.ctrl_addresses[finger][joint]] = position;
+    }
+  }
+}
+
+bool updateTask1LeverFingerLatch()
+{
+  if (task1_lever_latch.handle_geom_id < 0 ||
+      task1_lever_latch.lever_lock_equality_id < 0) {
+    return false;
+  }
+  // Require real penetration, not mere grazing contact.  A pad that only
+  // touches the handle surface is still mid-curl, and freezing there leaves a
+  // half-formed hook that slips off the bar once the arm starts pulling.  The
+  // finger keeps closing until it is pressed this far into the handle, which
+  // forms the hook before the latch takes the joints away from the actuator.
+  constexpr mjtNum kFingerLatchPenetrationDepth = 0.002;  // m
+  const mjtNum unlock_contact_depth = std::max<mjtNum>(
+      0, numericScalarOrDefault("task1_lever_unlock_contact_depth", 0));
+  std::uint8_t contacting_fingers = 0;
+  bool changed = false;
+  for (int contact_index = 0; contact_index < d->ncon; ++contact_index) {
+    const mjContact &contact = d->contact[contact_index];
+    int other_geom = -1;
+    if (contact.geom1 == task1_lever_latch.handle_geom_id) {
+      other_geom = contact.geom2;
+    } else if (contact.geom2 == task1_lever_latch.handle_geom_id) {
+      other_geom = contact.geom1;
+    } else {
+      continue;
+    }
+    for (std::size_t finger = 0;
+         finger < task1_lever_latch.fingertip_geom_ids.size(); ++finger) {
+      if (other_geom != task1_lever_latch.fingertip_geom_ids[finger]) {
+        continue;
+      }
+      if (contact.dist <= -unlock_contact_depth) {
+        contacting_fingers |= static_cast<std::uint8_t>(1u << finger);
+      }
+      if (contact.dist > -kFingerLatchPenetrationDepth) {
+        continue;
+      }
+      if (task1_lever_latch.finger_latched[finger]) {
+        continue;
+      }
+      captureTask1LeverFinger(finger);
+      ROS_INFO("[Task1LeverLatch] froze complete finger '%s' at handle penetration %.2f mm; mask=0x%02x",
+               mj_id2name(m, mjOBJ_GEOM, other_geom),
+               -1000.0 * contact.dist, task1LeverLatchMask());
+      changed = true;
+    }
+  }
+  int contacting_finger_count = 0;
+  for (std::size_t finger = 0;
+       finger < task1_lever_latch.fingertip_geom_ids.size(); ++finger) {
+    if (contacting_fingers & static_cast<std::uint8_t>(1u << finger)) {
+      ++contacting_finger_count;
+    }
+  }
+  const int required_fingers = std::clamp(
+      static_cast<int>(std::llround(numericScalarOrDefault(
+          "task1_lever_unlock_required_fingers", 2))), 1,
+      static_cast<int>(task1_lever_latch.fingertip_geom_ids.size()));
+  const mjtNum required_duration = std::max<mjtNum>(
+      0, numericScalarOrDefault(
+             "task1_lever_unlock_contact_duration", 0.05));
+  if (!task1_lever_latch.lever_unlocked &&
+      contacting_finger_count >= required_fingers) {
+    task1_lever_latch.lever_contact_duration += m->opt.timestep;
+    if (task1_lever_latch.lever_contact_duration >= required_duration) {
+      d->eq_active[task1_lever_latch.lever_lock_equality_id] = 0;
+      task1_lever_latch.lever_unlocked = true;
+      changed = true;
+      ROS_INFO("[Task1LeverLatch] released lever lock after %d fingertips maintained handle contact for %.1f ms",
+               contacting_finger_count,
+               1000.0 * task1_lever_latch.lever_contact_duration);
+    }
+  } else if (!task1_lever_latch.lever_unlocked) {
+    task1_lever_latch.lever_contact_duration = 0;
+  }
+  applyTask1LeverLatchControls();
+  return changed;
+}
+
+Eigen::Vector3d bimanualHandMidpoint()
+{
+  const mjtNum *left_hand = d->xpos + 3 * bimanual_left_hand_body_id;
+  const mjtNum *right_hand = d->xpos + 3 * bimanual_right_hand_body_id;
+  return Eigen::Vector3d(
+      0.5 * (left_hand[0] + right_hand[0]),
+      0.5 * (left_hand[1] + right_hand[1]),
+      0.5 * (left_hand[2] + right_hand[2]));
+}
+
+mjtNum numericScalarOrDefault(const char *name, mjtNum fallback)
+{
+  const int numeric_id = mj_name2id(m, mjOBJ_NUMERIC, name);
+  if (numeric_id < 0 || m->numeric_size[numeric_id] < 1) {
+    return fallback;
+  }
+  return m->numeric_data[m->numeric_adr[numeric_id]];
+}
+
+void initializeInternalContactFollowers(
+    const std::vector<std::string> &body_names)
+{
+  internal_contact_followers.clear();
+  internal_expansion_fingertip_geom_ids.fill(-1);
+  for (std::vector<int> &addresses : internal_finger_qpos_addresses) {
+    addresses.clear();
+  }
+  for (std::vector<int> &addresses : internal_finger_dof_addresses) {
+    addresses.clear();
+  }
+  for (std::vector<int> &addresses : internal_finger_ctrl_addresses) {
+    addresses.clear();
+  }
+  internal_fingertip_contype.clear();
+  internal_fingertip_conaffinity.clear();
+  internal_contact_state_publishers.clear();
+  internal_finger_latch_publishers.clear();
+  task3_grasp_enabled.store(false, std::memory_order_release);
+  task3_grasp_finalize_enabled.store(false, std::memory_order_release);
+  task3_fingertip_collision_suppression_enabled.store(
+      false, std::memory_order_release);
+  const std::array<const char *, 3> fingertip_names = {
+      "r_index_fingertip_collision",
+      "r_middle_fingertip_collision",
+      "r_little_fingertip_collision",
+  };
+  for (std::size_t index = 0; index < fingertip_names.size(); ++index) {
+    const char *name = fingertip_names[index];
+    const int geom_id = mj_name2id(m, mjOBJ_GEOM, name);
+    if (geom_id >= 0) {
+      internal_expansion_fingertip_geom_ids[index] = geom_id;
+      internal_fingertip_contype.emplace(
+          geom_id, m->geom_contype[geom_id]);
+      internal_fingertip_conaffinity.emplace(
+          geom_id, m->geom_conaffinity[geom_id]);
+    }
+  }
+  if (body_names.empty()) {
+    return;
+  }
+  const std::array<std::vector<std::string>, 3> finger_joint_names{{
+      {"r_index_j1", "r_index_j2", "r_index_j3"},
+      {"r_middle_j1", "r_middle_j2"},
+      {"r_little_j1", "r_little_j2", "r_little_j3"},
+  }};
+  bool finger_mapping_valid = true;
+  for (std::size_t finger = 0; finger < finger_joint_names.size(); ++finger) {
+    for (const std::string &joint_name : finger_joint_names[finger]) {
+      const int joint_id =
+          mj_name2id(m, mjOBJ_JOINT, joint_name.c_str());
+      const int actuator_id = mj_name2id(
+          m, mjOBJ_ACTUATOR, (joint_name + "_motor").c_str());
+      if (joint_id < 0 || m->jnt_type[joint_id] != mjJNT_HINGE ||
+          actuator_id < 0) {
+        ROS_WARN("[InternalContactFollower] joint or actuator '%s' is absent; disabled",
+                 joint_name.c_str());
+        finger_mapping_valid = false;
+        break;
+      }
+      internal_finger_qpos_addresses[finger].push_back(
+          m->jnt_qposadr[joint_id]);
+      internal_finger_dof_addresses[finger].push_back(
+          m->jnt_dofadr[joint_id]);
+      internal_finger_ctrl_addresses[finger].push_back(actuator_id);
+    }
+  }
+  const bool all_fingertips_present = std::all_of(
+      internal_expansion_fingertip_geom_ids.begin(),
+      internal_expansion_fingertip_geom_ids.end(),
+      [](int geom_id) { return geom_id >= 0; });
+  if (contact_follower_hand_body_id < 0 ||
+      !all_fingertips_present || !finger_mapping_valid) {
+    ROS_WARN("[InternalContactFollower] right hand or one of the three fingertip geoms is absent; disabled");
+    return;
+  }
+
+  const mjtNum inner_radius =
+      numericScalarOrDefault("task3_inner_radius", 0.033);
+  const mjtNum outer_radius =
+      numericScalarOrDefault("task3_outer_radius", 0.045);
+  const mjtNum contact_tolerance =
+      numericScalarOrDefault("task3_inner_contact_tolerance", 0.004);
+  const mjtNum ring_height =
+      numericScalarOrDefault("task3_ring_height", 0.060);
+  const mjtNum destination_table_height =
+      numericScalarOrDefault("task3_destination_table_height", 0.800);
+  const mjtNum table_settle_angular_speed = numericScalarOrDefault(
+      "task3_table_settle_angular_speed", 2 * mjPI);
+  const int destination_table_geom_id =
+      mj_name2id(m, mjOBJ_GEOM, "task3_destination_table_top");
+  for (const std::string &name : body_names) {
+    const int body_id = mj_name2id(m, mjOBJ_BODY, name.c_str());
+    if (body_id < 0 || m->body_jntnum[body_id] != 1) {
+      ROS_WARN("[InternalContactFollower] body '%s' is absent or does not have one joint",
+               name.c_str());
+      continue;
+    }
+    const int joint_id = m->body_jntadr[body_id];
+    if (m->jnt_type[joint_id] != mjJNT_FREE) {
+      ROS_WARN("[InternalContactFollower] body '%s' does not have a free joint",
+               name.c_str());
+      continue;
+    }
+    InternalContactFollowerState state;
+    state.name = name;
+    state.body_id = body_id;
+    state.joint_id = joint_id;
+    state.qpos_addr = m->jnt_qposadr[joint_id];
+    state.dof_addr = m->jnt_dofadr[joint_id];
+    state.destination_table_geom_id = destination_table_geom_id;
+    state.inner_radius = inner_radius;
+    state.outer_radius = outer_radius;
+    state.contact_tolerance = contact_tolerance;
+    state.ring_height = ring_height;
+    state.destination_table_height = destination_table_height;
+    state.table_settle_angular_speed = std::max<mjtNum>(
+        0, table_settle_angular_speed);
+    const int first_geom = m->body_geomadr[body_id];
+    const int geom_count = m->body_geomnum[body_id];
+    for (int offset = 0; offset < geom_count; ++offset) {
+      const int geom_id = first_geom + offset;
+      state.collision_geom_ids.push_back(geom_id);
+      state.collision_contype.push_back(m->geom_contype[geom_id]);
+      state.collision_conaffinity.push_back(m->geom_conaffinity[geom_id]);
+    }
+    internal_contact_followers.push_back(state);
+    ros::Publisher publisher = g_nh_ptr->advertise<std_msgs::Bool>(
+        "/mujoco/" + name + "/internal_grasped", 1, true);
+    ros::Publisher latch_publisher = g_nh_ptr->advertise<std_msgs::UInt8>(
+        "/mujoco/" + name + "/internal_finger_latch_mask", 1, true);
+    std_msgs::Bool initial_state;
+    initial_state.data = false;
+    publisher.publish(initial_state);
+    std_msgs::UInt8 initial_mask;
+    initial_mask.data = 0;
+    latch_publisher.publish(initial_mask);
+    internal_contact_state_publishers.emplace(name, publisher);
+    internal_finger_latch_publishers.emplace(name, latch_publisher);
+  }
+  internal_grasp_armed_publisher =
+      g_nh_ptr->advertise<std_msgs::Bool>(
+          "/mujoco/task3_grasp_armed", 1, true);
+  std_msgs::Bool initial_armed;
+  initial_armed.data = false;
+  internal_grasp_armed_publisher.publish(initial_armed);
+  internal_grasp_armed_published = false;
+  internal_fingertip_collision_suppressed_publisher =
+      g_nh_ptr->advertise<std_msgs::Bool>(
+          "/mujoco/task3_fingertip_collision_suppressed", 1, true);
+  std_msgs::Bool initial_collision_suppressed;
+  initial_collision_suppressed.data = false;
+  internal_fingertip_collision_suppressed_publisher.publish(
+      initial_collision_suppressed);
+  internal_fingertip_collision_suppressed_published = false;
+  ROS_INFO("[InternalContactFollower] enabled for %zu task objects; bore radius=%.3f m, force-free two-finger latch",
+           internal_contact_followers.size(), inner_radius);
+}
+
+void publishInternalContactState(
+    const InternalContactFollowerState &state)
+{
+  const auto publisher = internal_contact_state_publishers.find(state.name);
+  if (publisher == internal_contact_state_publishers.end()) {
+    return;
+  }
+  std_msgs::Bool message;
+  message.data = state.held;
+  publisher->second.publish(message);
+}
+
+std::uint8_t internalFingerLatchMask(
+    const InternalContactFollowerState &state)
+{
+  std::uint8_t mask = 0;
+  for (std::size_t finger = 0; finger < state.finger_latched.size(); ++finger) {
+    if (state.finger_latched[finger]) {
+      mask |= static_cast<std::uint8_t>(1u << finger);
+    }
+  }
+  return mask;
+}
+
+void publishInternalFingerLatchMask(InternalContactFollowerState &state)
+{
+  const auto publisher = internal_finger_latch_publishers.find(state.name);
+  if (publisher == internal_finger_latch_publishers.end()) {
+    return;
+  }
+  state.last_published_latch_mask = internalFingerLatchMask(state);
+  std_msgs::UInt8 message;
+  message.data = state.last_published_latch_mask;
+  publisher->second.publish(message);
+}
+
+void setInternalGraspArmedPublished(bool armed)
+{
+  if (armed == internal_grasp_armed_published ||
+      !internal_grasp_armed_publisher) {
+    return;
+  }
+  internal_grasp_armed_published = armed;
+  std_msgs::Bool message;
+  message.data = armed;
+  internal_grasp_armed_publisher.publish(message);
+}
+
+void setInternalFingertipCollisionSuppressedPublished(bool suppressed)
+{
+  if (suppressed == internal_fingertip_collision_suppressed_published ||
+      !internal_fingertip_collision_suppressed_publisher) {
+    return;
+  }
+  internal_fingertip_collision_suppressed_published = suppressed;
+  std_msgs::Bool message;
+  message.data = suppressed;
+  internal_fingertip_collision_suppressed_publisher.publish(message);
+}
+
+void captureInternalFingerLatch(
+    InternalContactFollowerState &state, std::size_t finger)
+{
+  state.latched_finger_qpos[finger].clear();
+  for (std::size_t joint = 0;
+       joint < internal_finger_qpos_addresses[finger].size(); ++joint) {
+    const int qpos_address = internal_finger_qpos_addresses[finger][joint];
+    const int dof_address = internal_finger_dof_addresses[finger][joint];
+    state.latched_finger_qpos[finger].push_back(d->qpos[qpos_address]);
+    d->qvel[dof_address] = 0;
+  }
+  state.finger_latched[finger] = true;
+}
+
+void applyInternalFingerLatches(InternalContactFollowerState &state)
+{
+  for (std::size_t finger = 0; finger < state.finger_latched.size(); ++finger) {
+    if (!state.finger_latched[finger] ||
+        state.latched_finger_qpos[finger].size() !=
+            internal_finger_qpos_addresses[finger].size()) {
+      continue;
+    }
+    for (std::size_t joint = 0;
+         joint < internal_finger_qpos_addresses[finger].size(); ++joint) {
+      const mjtNum position = state.latched_finger_qpos[finger][joint];
+      d->qpos[internal_finger_qpos_addresses[finger][joint]] = position;
+      d->qvel[internal_finger_dof_addresses[finger][joint]] = 0;
+      d->ctrl[internal_finger_ctrl_addresses[finger][joint]] = position;
+    }
+  }
+}
+
+bool internalFingerContractionStarted(
+    const InternalContactFollowerState &state)
+{
+  if (!state.release_reference_valid) {
+    return false;
+  }
+  const std::array<std::size_t, 3> active_joint_indices{{1, 0, 1}};
+  constexpr mjtNum kContractionThreshold = 1e-4;
+  for (std::size_t finger = 0; finger < active_joint_indices.size(); ++finger) {
+    const std::size_t joint = active_joint_indices[finger];
+    if (joint >= internal_finger_qpos_addresses[finger].size()) {
+      continue;
+    }
+    const mjtNum position =
+        d->qpos[internal_finger_qpos_addresses[finger][joint]];
+    if (position > state.release_reference_qpos[finger] +
+            kContractionThreshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void applyInternalLatchControls()
+{
+  if (!task3_grasp_enabled.load(std::memory_order_acquire)) {
+    return;
+  }
+  for (InternalContactFollowerState &state : internal_contact_followers) {
+    applyInternalFingerLatches(state);
+  }
+}
+
+void resetContactFollower(const std::string &body_name)
+{
+  for (ContactFollowerState &state : contact_followers) {
+    if (state.name != body_name) {
+      continue;
+    }
+    state.held = false;
+    state.settling = false;
+    state.on_target_floor = false;
+    state.upright = false;
+    for (std::size_t index = 0; index < state.collision_geom_ids.size(); ++index) {
+      const int geom_id = state.collision_geom_ids[index];
+      m->geom_contype[geom_id] = state.collision_contype[index];
+      m->geom_conaffinity[geom_id] = state.collision_conaffinity[index];
+    }
+    if (task1_grasp_latch.object_body_id == state.body_id) {
+      clearTask1GraspFingerLatch("object reset");
+    }
+    break;
+  }
+  for (BimanualContactFollowerState &state : bimanual_contact_followers) {
+    if (state.name != body_name) {
+      continue;
+    }
+    state.finger_stopped.fill(false);
+    state.pending_object_pose_captured = false;
+    state.held = false;
+    state.reposition_held = false;
+    state.latched_hand_qpos.clear();
+    state.latched_arm_qpos.clear();
+    setBimanualFingertipCollisionEnabled(true);
+    setBimanualObjectCollisionEnabled(state, true);
+    publishBimanualContactState(state);
+    const auto reposition_publisher =
+        task2_reposition_state_publishers.find(state.name);
+    if (reposition_publisher != task2_reposition_state_publishers.end()) {
+      std_msgs::Bool message;
+      message.data = false;
+      reposition_publisher->second.publish(message);
+    }
+    break;
+  }
+  for (InternalContactFollowerState &state : internal_contact_followers) {
+    if (state.name != body_name) {
+      continue;
+    }
+    state.held = false;
+    state.falling = false;
+    state.settled = false;
+    state.upright = false;
+    state.collision_suppressed = false;
+    state.release_reference_valid = false;
+    state.finger_latched.fill(false);
+    for (std::vector<mjtNum> &positions : state.latched_finger_qpos) {
+      positions.clear();
+    }
+    setInternalFingertipCollisionEnabled(true);
+    setInternalObjectCollisionEnabled(state, true);
+    mju_zero(d->qvel + state.dof_addr, 6);
+    publishInternalContactState(state);
+    publishInternalFingerLatchMask(state);
+    setInternalGraspArmedPublished(false);
+    break;
+  }
+}
+
+Eigen::Matrix3d contactFollowerBodyRotation(int body_id)
+{
+  Eigen::Matrix3d rotation;
+  const mjtNum *raw = d->xmat + 9 * body_id;
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      rotation(row, col) = raw[3 * row + col];
+    }
+  }
+  return rotation;
+}
+
+mjtNum legacyObjectLowestWorldZ(const ContactFollowerState &state)
+{
+  Eigen::Quaterniond object_quaternion(
+      d->qpos[state.qpos_addr + 3], d->qpos[state.qpos_addr + 4],
+      d->qpos[state.qpos_addr + 5], d->qpos[state.qpos_addr + 6]);
+  object_quaternion.normalize();
+  const mjtNum axis_z = std::abs(
+      (object_quaternion * Eigen::Vector3d::UnitZ()).z());
+  const mjtNum vertical_extent = state.half_height * axis_z +
+      state.radius * std::sqrt(std::max<mjtNum>(0, 1 - axis_z * axis_z));
+  return d->qpos[state.qpos_addr + 2] - vertical_extent;
+}
+
+mjtNum legacyTargetFloorHeight(const ContactFollowerState &state)
+{
+  const int geom_id = state.target_floor_geom_id;
+  const mjtNum *rotation = d->geom_xmat + 9 * geom_id;
+  const mjtNum vertical_extent =
+      std::abs(rotation[6]) * m->geom_size[3 * geom_id] +
+      std::abs(rotation[7]) * m->geom_size[3 * geom_id + 1] +
+      std::abs(rotation[8]) * m->geom_size[3 * geom_id + 2];
+  return d->geom_xpos[3 * geom_id + 2] + vertical_extent;
+}
+
+bool legacyObjectOverTargetFloor(const ContactFollowerState &state)
+{
+  if (state.target_floor_geom_id < 0) {
+    return false;
+  }
+  const int geom_id = state.target_floor_geom_id;
+  const mjtNum *floor_position = d->geom_xpos + 3 * geom_id;
+  const mjtNum *raw_rotation = d->geom_xmat + 9 * geom_id;
+  Eigen::Matrix3d rotation;
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      rotation(row, col) = raw_rotation[3 * row + col];
+    }
+  }
+  const Eigen::Vector3d local_position = rotation.transpose() *
+      Eigen::Vector3d(
+          d->qpos[state.qpos_addr] - floor_position[0],
+          d->qpos[state.qpos_addr + 1] - floor_position[1],
+          d->qpos[state.qpos_addr + 2] - floor_position[2]);
+  return std::abs(local_position.x()) + state.radius <=
+             m->geom_size[3 * geom_id] &&
+      std::abs(local_position.y()) + state.radius <=
+             m->geom_size[3 * geom_id + 1];
+}
+
+bool settleLegacyObjectOnTargetFloor(ContactFollowerState &state)
+{
+  Eigen::Quaterniond object_quaternion(
+      d->qpos[state.qpos_addr + 3], d->qpos[state.qpos_addr + 4],
+      d->qpos[state.qpos_addr + 5], d->qpos[state.qpos_addr + 6]);
+  object_quaternion.normalize();
+  const Eigen::Vector3d object_axis =
+      object_quaternion * Eigen::Vector3d::UnitZ();
+  Eigen::Quaterniond target_quaternion =
+      Eigen::Quaterniond::FromTwoVectors(
+          object_axis, Eigen::Vector3d::UnitZ()) * object_quaternion;
+  target_quaternion.normalize();
+
+  const mjtNum angular_speed = std::max<mjtNum>(
+      0, numericScalarOrDefault("task1_target_settle_angular_speed", 2 * mjPI));
+  const mjtNum angle = object_quaternion.angularDistance(target_quaternion);
+  const mjtNum maximum_step = angular_speed * m->opt.timestep;
+  const bool upright = angle <= std::max<mjtNum>(maximum_step, 1e-9);
+  if (upright) {
+    object_quaternion = target_quaternion;
+  } else if (maximum_step > 0) {
+    object_quaternion = object_quaternion.slerp(
+        maximum_step / angle, target_quaternion);
+    object_quaternion.normalize();
+  }
+  d->qpos[state.qpos_addr + 3] = object_quaternion.w();
+  d->qpos[state.qpos_addr + 4] = object_quaternion.x();
+  d->qpos[state.qpos_addr + 5] = object_quaternion.y();
+  d->qpos[state.qpos_addr + 6] = object_quaternion.z();
+  d->qpos[state.qpos_addr + 2] +=
+      legacyTargetFloorHeight(state) - legacyObjectLowestWorldZ(state);
+  mju_zero(d->qvel + state.dof_addr, 6);
+  return upright;
+}
+
+bool updateLegacyContactFollowers()
+{
+  if (contact_followers.empty()) {
+    return false;
+  }
+
+  bool pose_changed = false;
+  const bool opening_command =
+      g_dexhand_node && g_dexhand_node->rightHandOpeningCommand();
+  if (task1_grasp_latch.enabled && opening_command) {
+    clearTask1GraspFingerLatch("right hand opening");
+  }
+  for (ContactFollowerState &state : contact_followers) {
+    std::unordered_set<int> contacting_fingertips;
+    for (int contact_index = 0; contact_index < d->ncon; ++contact_index) {
+      const mjContact &contact = d->contact[contact_index];
+      const int body_1 = m->geom_bodyid[contact.geom1];
+      const int body_2 = m->geom_bodyid[contact.geom2];
+      int other_geom = -1;
+      if (body_1 == state.body_id) {
+        other_geom = contact.geom2;
+      } else if (body_2 == state.body_id) {
+        other_geom = contact.geom1;
+      }
+      if (right_fingertip_geom_ids.count(other_geom) != 0) {
+        contacting_fingertips.insert(other_geom);
+      }
+      if (task1_grasp_latch.enabled && !opening_command &&
+          contact.dist <= -task1_grasp_latch.contact_depth &&
+          (task1_grasp_latch.object_body_id < 0 ||
+           task1_grasp_latch.object_body_id == state.body_id)) {
+        for (std::size_t finger = 0;
+             finger < task1_grasp_latch.fingertip_geom_ids.size(); ++finger) {
+          if (other_geom == task1_grasp_latch.fingertip_geom_ids[finger]) {
+            captureTask1GraspFinger(
+                state.body_id, finger, contact.dist);
+          }
+        }
+      }
+    }
+
+    // Scene 1 is an animation task: after release, preserve world XY and let
+    // gravity change only Z with collision disabled.  When the cylinder's
+    // geometric lowest point reaches the target floor, rotate it upright at a
+    // configured visual speed while keeping that lowest point on the floor.
+    if (state.settling) {
+      d->qpos[state.qpos_addr] = state.release_xy_world[0];
+      d->qpos[state.qpos_addr + 1] = state.release_xy_world[1];
+      d->qvel[state.dof_addr] = 0;
+      d->qvel[state.dof_addr + 1] = 0;
+      d->qvel[state.dof_addr + 3] = 0;
+      d->qvel[state.dof_addr + 4] = 0;
+      d->qvel[state.dof_addr + 5] = 0;
+      if (state.on_target_floor) {
+        const bool was_upright = state.upright;
+        state.upright = settleLegacyObjectOnTargetFloor(state);
+        if (!was_upright && state.upright) {
+          ROS_INFO("[ContactFollower] completed collision-free upright settle for '%s'",
+                   state.name.c_str());
+        }
+      } else if (legacyObjectOverTargetFloor(state) &&
+                 legacyObjectLowestWorldZ(state) <=
+                     legacyTargetFloorHeight(state)) {
+        state.on_target_floor = true;
+        state.upright = settleLegacyObjectOnTargetFloor(state);
+        ROS_INFO("[ContactFollower] '%s' reached target floor; collision-free upright settle started at %.1f deg/s",
+                 state.name.c_str(),
+                 numericScalarOrDefault(
+                     "task1_target_settle_angular_speed", 2 * mjPI) *
+                     180.0 / mjPI);
+      }
+      pose_changed = true;
+      continue;
+    }
+
+    if (state.held) {
+      if (opening_command) {
+        state.held = false;
+        state.settling = true;
+        state.on_target_floor = false;
+        state.upright = false;
+        state.release_xy_world[0] = d->qpos[state.qpos_addr];
+        state.release_xy_world[1] = d->qpos[state.qpos_addr + 1];
+        mju_zero(d->qvel + state.dof_addr, 6);
+        for (int geom_id : state.collision_geom_ids) {
+          m->geom_contype[geom_id] = 0;
+          m->geom_conaffinity[geom_id] = 0;
+        }
+        pose_changed = true;
+        ROS_INFO("[ContactFollower] released '%s' at zero velocity; object "
+                 "collision disabled for vertical fall", state.name.c_str());
+        continue;
+      }
+
+      const Eigen::Matrix3d hand_rotation =
+          contactFollowerBodyRotation(contact_follower_hand_body_id);
+      const mjtNum *hand_position =
+          d->xpos + 3 * contact_follower_hand_body_id;
+      const Eigen::Vector3d offset_hand(
+          state.object_offset_hand[0],
+          state.object_offset_hand[1],
+          state.object_offset_hand[2]);
+      const Eigen::Vector3d object_position =
+          Eigen::Vector3d(hand_position[0], hand_position[1], hand_position[2])
+          + hand_rotation * offset_hand;
+      for (int axis = 0; axis < 3; ++axis) {
+        d->qpos[state.qpos_addr + axis] = object_position[axis];
+      }
+      const Eigen::Quaterniond hand_quaternion(hand_rotation);
+      const Eigen::Quaterniond object_quaternion_hand(
+          state.object_quat_hand[0], state.object_quat_hand[1],
+          state.object_quat_hand[2], state.object_quat_hand[3]);
+      Eigen::Quaterniond object_quaternion =
+          hand_quaternion * object_quaternion_hand;
+      object_quaternion.normalize();
+      d->qpos[state.qpos_addr + 3] = object_quaternion.w();
+      d->qpos[state.qpos_addr + 4] = object_quaternion.x();
+      d->qpos[state.qpos_addr + 5] = object_quaternion.y();
+      d->qpos[state.qpos_addr + 6] = object_quaternion.z();
+      mju_zero(d->qvel + state.dof_addr, 6);
+      pose_changed = true;
+      continue;
+    }
+
+    const bool grasp_latch_complete =
+        task1_grasp_latch.enabled &&
+        task1_grasp_latch.object_body_id == state.body_id &&
+        task1GraspLatchMask() == 0x03;
+    const bool legacy_contact_complete =
+        !task1_grasp_latch.enabled && contacting_fingertips.size() >= 2;
+    if (grasp_latch_complete || legacy_contact_complete) {
+      const Eigen::Matrix3d hand_rotation =
+          contactFollowerBodyRotation(contact_follower_hand_body_id);
+      const mjtNum *hand_position =
+          d->xpos + 3 * contact_follower_hand_body_id;
+      const Eigen::Vector3d object_position(
+          d->qpos[state.qpos_addr],
+          d->qpos[state.qpos_addr + 1],
+          d->qpos[state.qpos_addr + 2]);
+      const Eigen::Vector3d object_offset_hand =
+          hand_rotation.transpose() *
+          (object_position - Eigen::Vector3d(
+              hand_position[0], hand_position[1], hand_position[2]));
+      for (int axis = 0; axis < 3; ++axis) {
+        state.object_offset_hand[axis] = object_offset_hand[axis];
+      }
+
+      const Eigen::Quaterniond hand_quaternion(hand_rotation);
+      Eigen::Quaterniond object_quaternion(
+          d->qpos[state.qpos_addr + 3], d->qpos[state.qpos_addr + 4],
+          d->qpos[state.qpos_addr + 5], d->qpos[state.qpos_addr + 6]);
+      object_quaternion.normalize();
+      Eigen::Quaterniond object_quaternion_hand =
+          hand_quaternion.conjugate() * object_quaternion;
+      object_quaternion_hand.normalize();
+      state.object_quat_hand[0] = object_quaternion_hand.w();
+      state.object_quat_hand[1] = object_quaternion_hand.x();
+      state.object_quat_hand[2] = object_quaternion_hand.y();
+      state.object_quat_hand[3] = object_quaternion_hand.z();
+      state.held = true;
+      state.settling = false;
+      state.on_target_floor = false;
+      state.upright = false;
+      for (int geom_id : state.collision_geom_ids) {
+        m->geom_contype[geom_id] = 0;
+        m->geom_conaffinity[geom_id] = 0;
+      }
+      ROS_INFO("[ContactFollower] latched '%s' with %zu fingertip contacts "
+               "(independent_mask=0x%02x); object collision disabled while held",
+               state.name.c_str(), contacting_fingertips.size(),
+               task1_grasp_latch.enabled ? task1GraspLatchMask() : 0);
+      continue;
+    }
+  }
+  return pose_changed;
+}
+
+Eigen::Matrix3d contactFollowerBaseRotation()
+{
+  return contactFollowerBodyRotation(contact_follower_base_body_id);
+}
+
+Eigen::Matrix3d bimanualGraspFrameRotation()
+{
+  const Eigen::Matrix3d left_rotation =
+      contactFollowerBodyRotation(bimanual_left_hand_body_id);
+  const Eigen::Matrix3d right_rotation =
+      contactFollowerBodyRotation(bimanual_right_hand_body_id);
+  const mjtNum *left_position =
+      d->xpos + 3 * bimanual_left_hand_body_id;
+  const mjtNum *right_position =
+      d->xpos + 3 * bimanual_right_hand_body_id;
+
+  // hand_base local +Z points along the fingers on both mirrored hands.
+  // Average those directions for grasp-frame forward, while the line from
+  // right palm to left palm defines grasp-frame lateral.  Re-orthogonalize
+  // the axes so the box can be latched to a proper rigid rotation.
+  Eigen::Vector3d forward =
+      left_rotation.col(2) + right_rotation.col(2);
+  Eigen::Vector3d lateral(
+      left_position[0] - right_position[0],
+      left_position[1] - right_position[1],
+      left_position[2] - right_position[2]);
+  lateral.normalize();
+  forward -= lateral * forward.dot(lateral);
+  forward.normalize();
+  Eigen::Vector3d up = forward.cross(lateral).normalized();
+  lateral = up.cross(forward).normalized();
+
+  Eigen::Matrix3d rotation;
+  rotation.col(0) = forward;
+  rotation.col(1) = lateral;
+  rotation.col(2) = up;
+  return rotation;
+}
+
+Eigen::Vector3d geomAxis(int geom_id, int axis)
+{
+  const mjtNum *rotation = d->geom_xmat + 9 * geom_id;
+  return Eigen::Vector3d(
+      rotation[axis], rotation[3 + axis], rotation[6 + axis]);
+}
+
+mjtNum geomProjectedRadius(int geom_id, const Eigen::Vector3d &axis)
+{
+  const mjtNum *size = m->geom_size + 3 * geom_id;
+  mjtNum radius = 0;
+  for (int geom_axis = 0; geom_axis < 3; ++geom_axis) {
+    radius += size[geom_axis] *
+        std::abs(axis.dot(geomAxis(geom_id, geom_axis)));
+  }
+  return radius;
+}
+
+bool fingertipNearWall(
+    int fingertip_geom_id, int wall_geom_id, mjtNum maximum_surface_gap)
+{
+  const Eigen::Vector3d tangent = geomAxis(wall_geom_id, 0);
+  const Eigen::Vector3d normal = geomAxis(wall_geom_id, 1);
+  const Eigen::Vector3d vertical = geomAxis(wall_geom_id, 2);
+  const Eigen::Vector3d wall_position(
+      d->geom_xpos[3 * wall_geom_id],
+      d->geom_xpos[3 * wall_geom_id + 1],
+      d->geom_xpos[3 * wall_geom_id + 2]);
+  const mjtNum *wall_size = m->geom_size + 3 * wall_geom_id;
+  const Eigen::Vector3d fingertip_position(
+      d->geom_xpos[3 * fingertip_geom_id],
+      d->geom_xpos[3 * fingertip_geom_id + 1],
+      d->geom_xpos[3 * fingertip_geom_id + 2]);
+  const Eigen::Vector3d delta = fingertip_position - wall_position;
+  const mjtNum tangent_radius =
+      geomProjectedRadius(fingertip_geom_id, tangent);
+  const mjtNum normal_radius =
+      geomProjectedRadius(fingertip_geom_id, normal);
+  const mjtNum vertical_radius =
+      geomProjectedRadius(fingertip_geom_id, vertical);
+  const bool overlaps_wall_face =
+      std::abs(delta.dot(tangent)) <= wall_size[0] + tangent_radius &&
+      std::abs(delta.dot(vertical)) <= wall_size[2] + vertical_radius;
+  const mjtNum surface_gap =
+      std::abs(delta.dot(normal)) - wall_size[1] - normal_radius;
+  return overlaps_wall_face &&
+      surface_gap >= -maximum_surface_gap &&
+      surface_gap <= maximum_surface_gap;
+}
+
+void freezeBimanualHandRange(
+    BimanualContactFollowerState &state, std::size_t begin,
+    std::size_t end)
+{
+  if (state.latched_hand_qpos.size() !=
+      bimanual_hand_qpos_addresses.size()) {
+    state.latched_hand_qpos.resize(
+        bimanual_hand_qpos_addresses.size(), 0);
+  }
+  for (std::size_t index = begin; index < end; ++index) {
+    d->qpos[bimanual_hand_qpos_addresses[index]] =
+        state.latched_hand_qpos[index];
+    d->qvel[bimanual_hand_dof_addresses[index]] = 0;
+  }
+}
+
+void captureBimanualHandRange(
+    BimanualContactFollowerState &state, std::size_t begin,
+    std::size_t end)
+{
+  if (state.latched_hand_qpos.size() !=
+      bimanual_hand_qpos_addresses.size()) {
+    state.latched_hand_qpos.resize(
+        bimanual_hand_qpos_addresses.size(), 0);
+  }
+  for (std::size_t index = begin; index < end; ++index) {
+    state.latched_hand_qpos[index] =
+        d->qpos[bimanual_hand_qpos_addresses[index]];
+    d->qvel[bimanual_hand_dof_addresses[index]] = 0;
+  }
+}
+
+void publishTask2RepositionState(
+    const BimanualContactFollowerState &state)
+{
+  const auto publisher = task2_reposition_state_publishers.find(state.name);
+  if (publisher == task2_reposition_state_publishers.end()) {
+    return;
+  }
+  std_msgs::Bool message;
+  message.data = state.reposition_held;
+  publisher->second.publish(message);
+}
+
+void captureTask2RepositionLatch(BimanualContactFollowerState &state)
+{
+  captureBimanualHandRange(
+      state, 0, bimanual_hand_qpos_addresses.size());
+  state.latched_arm_qpos.resize(bimanual_arm_qpos_addresses.size());
+  for (std::size_t index = 0;
+       index < bimanual_arm_qpos_addresses.size(); ++index) {
+    state.latched_arm_qpos[index] =
+        d->qpos[bimanual_arm_qpos_addresses[index]];
+    d->qvel[bimanual_arm_dof_addresses[index]] = 0;
+  }
+
+  const Eigen::Matrix3d base_rotation = contactFollowerBaseRotation();
+  const mjtNum *base_position = d->xpos + 3 * contact_follower_base_body_id;
+  const Eigen::Vector3d object_position(
+      d->qpos[state.qpos_addr],
+      d->qpos[state.qpos_addr + 1],
+      d->qpos[state.qpos_addr + 2]);
+  const Eigen::Vector3d object_offset_base =
+      base_rotation.transpose() *
+      (object_position - Eigen::Vector3d(
+          base_position[0], base_position[1], base_position[2]));
+  for (int axis = 0; axis < 3; ++axis) {
+    state.object_offset_base[axis] = object_offset_base[axis];
+  }
+  const Eigen::Quaterniond base_quaternion(base_rotation);
+  Eigen::Quaterniond object_quaternion(
+      d->qpos[state.qpos_addr + 3],
+      d->qpos[state.qpos_addr + 4],
+      d->qpos[state.qpos_addr + 5],
+      d->qpos[state.qpos_addr + 6]);
+  object_quaternion.normalize();
+  Eigen::Quaterniond object_quaternion_base =
+      base_quaternion.conjugate() * object_quaternion;
+  object_quaternion_base.normalize();
+  state.object_quat_base[0] = object_quaternion_base.w();
+  state.object_quat_base[1] = object_quaternion_base.x();
+  state.object_quat_base[2] = object_quaternion_base.y();
+  state.object_quat_base[3] = object_quaternion_base.z();
+  state.reposition_held = true;
+  publishTask2RepositionState(state);
+}
+
+void holdTask2RepositionLatch(BimanualContactFollowerState &state)
+{
+  for (std::size_t index = 0;
+       index < state.latched_hand_qpos.size(); ++index) {
+    d->qpos[bimanual_hand_qpos_addresses[index]] =
+        state.latched_hand_qpos[index];
+    d->qvel[bimanual_hand_dof_addresses[index]] = 0;
+  }
+  for (std::size_t index = 0;
+       index < state.latched_arm_qpos.size(); ++index) {
+    d->qpos[bimanual_arm_qpos_addresses[index]] =
+        state.latched_arm_qpos[index];
+    d->qvel[bimanual_arm_dof_addresses[index]] = 0;
+  }
+
+  const Eigen::Matrix3d base_rotation = contactFollowerBaseRotation();
+  const mjtNum *base_position = d->xpos + 3 * contact_follower_base_body_id;
+  const Eigen::Vector3d object_offset_base(
+      state.object_offset_base[0],
+      state.object_offset_base[1],
+      state.object_offset_base[2]);
+  const Eigen::Vector3d object_position =
+      Eigen::Vector3d(base_position[0], base_position[1], base_position[2]) +
+      base_rotation * object_offset_base;
+  for (int axis = 0; axis < 3; ++axis) {
+    d->qpos[state.qpos_addr + axis] = object_position[axis];
+  }
+  const Eigen::Quaterniond base_quaternion(base_rotation);
+  const Eigen::Quaterniond object_quaternion_base(
+      state.object_quat_base[0], state.object_quat_base[1],
+      state.object_quat_base[2], state.object_quat_base[3]);
+  Eigen::Quaterniond object_quaternion =
+      base_quaternion * object_quaternion_base;
+  object_quaternion.normalize();
+  d->qpos[state.qpos_addr + 3] = object_quaternion.w();
+  d->qpos[state.qpos_addr + 4] = object_quaternion.x();
+  d->qpos[state.qpos_addr + 5] = object_quaternion.y();
+  d->qpos[state.qpos_addr + 6] = object_quaternion.z();
+  mju_zero(d->qvel + state.dof_addr, 6);
+}
+
+void applyBimanualLatchControls()
+{
+  if (bimanual_hand_ctrl_addresses.size() != 22) {
+    return;
+  }
+  const std::array<std::size_t, 4> active_joint_indices{{0, 3, 11, 14}};
+  for (const BimanualContactFollowerState &state :
+       bimanual_contact_followers) {
+    if (state.reposition_held &&
+        state.latched_hand_qpos.size() == 22 &&
+        state.latched_arm_qpos.size() == 14) {
+      for (std::size_t index = 0; index < 22; ++index) {
+        d->qpos[bimanual_hand_qpos_addresses[index]] =
+            state.latched_hand_qpos[index];
+        d->qvel[bimanual_hand_dof_addresses[index]] = 0;
+        d->ctrl[bimanual_hand_ctrl_addresses[index]] =
+            state.latched_hand_qpos[index];
+      }
+      for (std::size_t index = 0; index < 14; ++index) {
+        d->qpos[bimanual_arm_qpos_addresses[index]] =
+            state.latched_arm_qpos[index];
+        d->qvel[bimanual_arm_dof_addresses[index]] = 0;
+        d->ctrl[bimanual_arm_ctrl_addresses[index]] = 0;
+      }
+      continue;
+    }
+    if (state.held && state.latched_hand_qpos.size() == 22) {
+      for (std::size_t index = 0; index < 22; ++index) {
+        d->ctrl[bimanual_hand_ctrl_addresses[index]] =
+            state.latched_hand_qpos[index];
+      }
+      continue;
+    }
+    for (std::size_t finger = 0; finger < 4; ++finger) {
+      if (!state.finger_stopped[finger]) {
+        continue;
+      }
+      const std::size_t joint_index = active_joint_indices[finger];
+      d->ctrl[bimanual_hand_ctrl_addresses[joint_index]] =
+          state.latched_active_qpos[finger];
+    }
+  }
+}
+
+bool updateTask2RepositionFollowers()
+{
+  if (bimanual_contact_followers.empty()) {
+    return false;
+  }
+  bool pose_changed = false;
+  for (BimanualContactFollowerState &state :
+       bimanual_contact_followers) {
+    if (state.reposition_held) {
+      if (!task2_reposition_enabled.load(std::memory_order_acquire)) {
+        state.reposition_held = false;
+        state.latched_hand_qpos.clear();
+        state.latched_arm_qpos.clear();
+        state.finger_stopped.fill(false);
+        state.pending_object_pose_captured = false;
+        mju_zero(d->qvel + state.dof_addr, 6);
+        setBimanualFingertipCollisionEnabled(true);
+        setBimanualObjectCollisionEnabled(state, true);
+        publishTask2RepositionState(state);
+        ROS_INFO("[Task2Reposition] explicitly released '%s'",
+                 state.name.c_str());
+      } else {
+        holdTask2RepositionLatch(state);
+      }
+      pose_changed = true;
+      continue;
+    }
+    if (!task2_reposition_enabled.load(std::memory_order_acquire)) {
+      continue;
+    }
+    std::string selected_box;
+    if (!g_nh_ptr->getParam("/task2_selected_box", selected_box) ||
+        selected_box != state.name) {
+      continue;
+    }
+
+    setBimanualHandFingertipCollisionEnabled(
+        left_grasp_trigger_geom_ids, false);
+    setBimanualObjectCollisionEnabled(state, false);
+    if (!state.pending_object_pose_captured) {
+      for (int index = 0; index < 7; ++index) {
+        state.pending_object_qpos[index] = d->qpos[state.qpos_addr + index];
+      }
+      state.pending_object_pose_captured = true;
+    }
+    for (int index = 0; index < 7; ++index) {
+      d->qpos[state.qpos_addr + index] = state.pending_object_qpos[index];
+    }
+    mju_zero(d->qvel + state.dof_addr, 6);
+    pose_changed = true;
+
+    const mjtNum maximum_surface_gap = numericScalarOrDefault(
+        "task2_grasp_detection_gap", 0.008);
+    const std::array<std::size_t, 2> left_joint_indices{{0, 3}};
+    int stopped_left_fingers = 0;
+    for (std::size_t finger = 0; finger < 2; ++finger) {
+      const std::size_t joint_index = left_joint_indices[finger];
+      if (state.finger_stopped[finger]) {
+        d->qpos[bimanual_hand_qpos_addresses[joint_index]] =
+            state.latched_active_qpos[finger];
+        d->qvel[bimanual_hand_dof_addresses[joint_index]] = 0;
+        d->ctrl[bimanual_hand_ctrl_addresses[joint_index]] =
+            state.latched_active_qpos[finger];
+        ++stopped_left_fingers;
+        continue;
+      }
+      const int fingertip_geom_id =
+          bimanual_active_fingertip_geom_ids[finger];
+      if (fingertipNearWall(
+              fingertip_geom_id, state.left_wall_geom_id,
+              maximum_surface_gap)) {
+        state.latched_active_qpos[finger] =
+            d->qpos[bimanual_hand_qpos_addresses[joint_index]];
+        state.finger_stopped[finger] = true;
+        ++stopped_left_fingers;
+      }
+    }
+    if (stopped_left_fingers == 2) {
+      captureTask2RepositionLatch(state);
+      ROS_INFO("[Task2Reposition] latched box '%s' to the complete robot arm/hand posture after the unchanged left-hand grasp",
+               state.name.c_str());
+    }
+  }
+  return pose_changed;
+}
+
+bool updateBimanualContactFollowers()
+{
+  if (bimanual_contact_followers.empty()) {
+    return false;
+  }
+  if (task2_reposition_enabled.load(std::memory_order_acquire)) {
+    return false;
+  }
+
+  bool pose_changed = false;
+  for (BimanualContactFollowerState &state : bimanual_contact_followers) {
+    if (state.held) {
+      if (!task2_grasp_enabled.load(std::memory_order_acquire)) {
+        state.held = false;
+        state.latched_hand_qpos.clear();
+        state.finger_stopped.fill(false);
+        state.pending_object_pose_captured = false;
+        mju_zero(d->qvel + state.dof_addr, 6);
+        setBimanualFingertipCollisionEnabled(true);
+        setBimanualObjectCollisionEnabled(state, true);
+        publishBimanualContactState(state);
+        ROS_INFO("[BimanualContactFollower] explicitly released '%s'",
+                 state.name.c_str());
+        pose_changed = true;
+        continue;
+      } else {
+        for (std::size_t index = 0;
+             index < state.latched_hand_qpos.size(); ++index) {
+          d->qpos[bimanual_hand_qpos_addresses[index]] =
+              state.latched_hand_qpos[index];
+          d->qvel[bimanual_hand_dof_addresses[index]] = 0;
+        }
+        const Eigen::Vector3d midpoint = bimanualHandMidpoint();
+        const Eigen::Matrix3d grasp_rotation =
+            bimanualGraspFrameRotation();
+        const Eigen::Vector3d offset_grasp(
+            state.object_offset_grasp[0],
+            state.object_offset_grasp[1],
+            state.object_offset_grasp[2]);
+        const Eigen::Vector3d object_position =
+            midpoint + grasp_rotation * offset_grasp;
+        for (int axis = 0; axis < 3; ++axis) {
+          d->qpos[state.qpos_addr + axis] = object_position[axis];
+        }
+
+        const Eigen::Quaterniond grasp_quaternion(grasp_rotation);
+        const Eigen::Quaterniond object_quaternion_grasp(
+            state.object_quat_grasp[0], state.object_quat_grasp[1],
+            state.object_quat_grasp[2], state.object_quat_grasp[3]);
+        Eigen::Quaterniond object_quaternion =
+            grasp_quaternion * object_quaternion_grasp;
+        object_quaternion.normalize();
+        d->qpos[state.qpos_addr + 3] = object_quaternion.w();
+        d->qpos[state.qpos_addr + 4] = object_quaternion.x();
+        d->qpos[state.qpos_addr + 5] = object_quaternion.y();
+        d->qpos[state.qpos_addr + 6] = object_quaternion.z();
+      }
+      mju_zero(d->qvel + state.dof_addr, 6);
+      pose_changed = true;
+      continue;
+    }
+
+    if (!task2_grasp_enabled.load(std::memory_order_acquire)) {
+      if (state.pending_object_pose_captured) {
+        state.latched_hand_qpos.clear();
+        state.finger_stopped.fill(false);
+        state.pending_object_pose_captured = false;
+        setBimanualFingertipCollisionEnabled(true);
+        setBimanualObjectCollisionEnabled(state, true);
+      }
+      continue;
+    }
+
+    std::string selected_box;
+    if (!g_nh_ptr->getParam("/task2_selected_box", selected_box) ||
+        selected_box != state.name) {
+      continue;
+    }
+
+    // The grasp command is published before finger motion and followed by a
+    // short synchronization delay.  Remove the selected box and fingertips
+    // from physical contact before closure.  The box pose is held fixed while
+    // geometric fingertip sensors close, so neither gravity nor a contact
+    // impulse can move it during this phase.
+    setBimanualFingertipCollisionEnabled(false);
+    setBimanualObjectCollisionEnabled(state, false);
+    if (!state.pending_object_pose_captured) {
+      for (int index = 0; index < 7; ++index) {
+        state.pending_object_qpos[index] = d->qpos[state.qpos_addr + index];
+      }
+      state.pending_object_pose_captured = true;
+    }
+    for (int index = 0; index < 7; ++index) {
+      d->qpos[state.qpos_addr + index] = state.pending_object_qpos[index];
+    }
+    mju_zero(d->qvel + state.dof_addr, 6);
+    pose_changed = true;
+
+    const mjtNum maximum_surface_gap = numericScalarOrDefault(
+        "task2_grasp_detection_gap", 0.008);
+    const std::array<std::size_t, 4> active_joint_indices{{0, 3, 11, 14}};
+    int stopped_finger_count = 0;
+    for (std::size_t finger = 0; finger < 4; ++finger) {
+      const std::size_t joint_index = active_joint_indices[finger];
+      if (state.finger_stopped[finger]) {
+        d->qpos[bimanual_hand_qpos_addresses[joint_index]] =
+            state.latched_active_qpos[finger];
+        d->qvel[bimanual_hand_dof_addresses[joint_index]] = 0;
+        d->ctrl[bimanual_hand_ctrl_addresses[joint_index]] =
+            state.latched_active_qpos[finger];
+        ++stopped_finger_count;
+        continue;
+      }
+      const int wall_geom_id =
+          finger < 2 ? state.left_wall_geom_id : state.right_wall_geom_id;
+      const int fingertip_geom_id =
+          bimanual_active_fingertip_geom_ids[finger];
+      if (fingertipNearWall(
+              fingertip_geom_id, wall_geom_id, maximum_surface_gap)) {
+        state.latched_active_qpos[finger] =
+            d->qpos[bimanual_hand_qpos_addresses[joint_index]];
+        d->qvel[bimanual_hand_dof_addresses[joint_index]] = 0;
+        d->ctrl[bimanual_hand_ctrl_addresses[joint_index]] =
+            state.latched_active_qpos[finger];
+        state.finger_stopped[finger] = true;
+        ++stopped_finger_count;
+        ROS_INFO("[BimanualContactFollower] geometrically stopped fingertip '%s' on '%s' wall (%d/4)",
+                 mj_id2name(m, mjOBJ_GEOM, fingertip_geom_id),
+                 state.name.c_str(), stopped_finger_count);
+      }
+    }
+
+    if (stopped_finger_count >= 3) {
+      // The complete hand posture, including the fourth finger at its current
+      // position, becomes immutable at the three-of-four grasp decision.
+      captureBimanualHandRange(
+          state, 0, bimanual_hand_qpos_addresses.size());
+      for (std::size_t index = 0;
+           index < state.latched_hand_qpos.size(); ++index) {
+        d->ctrl[bimanual_hand_ctrl_addresses[index]] =
+            state.latched_hand_qpos[index];
+      }
+      const Eigen::Vector3d midpoint = bimanualHandMidpoint();
+      Eigen::Vector3d object_position;
+      for (int axis = 0; axis < 3; ++axis) {
+        object_position[axis] = d->qpos[state.qpos_addr + axis];
+      }
+      const Eigen::Matrix3d grasp_rotation =
+          bimanualGraspFrameRotation();
+      const Eigen::Vector3d object_offset_grasp =
+          grasp_rotation.transpose() * (object_position - midpoint);
+      for (int axis = 0; axis < 3; ++axis) {
+        state.object_offset_grasp[axis] = object_offset_grasp[axis];
+      }
+
+      const Eigen::Quaterniond grasp_quaternion(grasp_rotation);
+      Eigen::Quaterniond object_quaternion(
+          d->qpos[state.qpos_addr + 3],
+          d->qpos[state.qpos_addr + 4],
+          d->qpos[state.qpos_addr + 5],
+          d->qpos[state.qpos_addr + 6]);
+      object_quaternion.normalize();
+      Eigen::Quaterniond object_quaternion_grasp =
+          grasp_quaternion.conjugate() * object_quaternion;
+      object_quaternion_grasp.normalize();
+      state.object_quat_grasp[0] = object_quaternion_grasp.w();
+      state.object_quat_grasp[1] = object_quaternion_grasp.x();
+      state.object_quat_grasp[2] = object_quaternion_grasp.y();
+      state.object_quat_grasp[3] = object_quaternion_grasp.z();
+      state.held = true;
+      publishBimanualContactState(state);
+      ROS_INFO("[BimanualContactFollower] latched box '%s' after %d/4 independent force-free fingertip stops: l_thumb_j1=%.4f l_index_j1=%.4f r_thumb_j1=%.4f r_index_j1=%.4f",
+               state.name.c_str(), stopped_finger_count,
+               state.latched_hand_qpos[0], state.latched_hand_qpos[3],
+               state.latched_hand_qpos[11], state.latched_hand_qpos[14]);
+    }
+  }
+  return pose_changed;
+}
+
+bool updateTask2Conveyor()
+{
+  if (!task2_conveyor_enabled.load(std::memory_order_acquire) ||
+      task2_conveyor_body_id < 0 || task2_conveyor_belt_geom_id < 0 ||
+      task2_conveyor_completed || bimanual_contact_followers.empty()) {
+    return false;
+  }
+  std::string conveyor_box;
+  if (!g_nh_ptr->getParam("/task2_conveyor_box", conveyor_box) ||
+      conveyor_box.empty()) {
+    return false;
+  }
+  const mjtNum speed = numericScalarOrDefault(
+      "task2_conveyor_speed", 0.10);
+  const mjtNum stop_local_x = numericScalarOrDefault(
+      "task2_conveyor_stop_local_x", 0.45);
+  const mjtNum *conveyor_position =
+      d->xpos + 3 * task2_conveyor_body_id;
+  const Eigen::Matrix3d conveyor_rotation =
+      contactFollowerBodyRotation(task2_conveyor_body_id);
+  const Eigen::Vector3d belt_direction = conveyor_rotation.col(0);
+  for (BimanualContactFollowerState &state : bimanual_contact_followers) {
+    if (state.name != conveyor_box || state.held) {
+      continue;
+    }
+    if (!task2_conveyor_started) {
+      bool touching_belt = false;
+      for (int contact_index = 0;
+           contact_index < d->ncon && !touching_belt; ++contact_index) {
+        const mjContact &contact = d->contact[contact_index];
+        const int other_geom =
+            contact.geom1 == task2_conveyor_belt_geom_id ? contact.geom2 :
+            contact.geom2 == task2_conveyor_belt_geom_id ? contact.geom1 : -1;
+        touching_belt = other_geom >= 0 &&
+            std::find(state.collision_geom_ids.begin(),
+                      state.collision_geom_ids.end(), other_geom) !=
+                state.collision_geom_ids.end();
+      }
+      if (!touching_belt) {
+        return false;
+      }
+      task2_conveyor_started = true;
+      ROS_INFO("[Task2Conveyor] first box '%s' touched the belt; motion started",
+               state.name.c_str());
+    }
+    Eigen::Vector3d object_position;
+    for (int axis = 0; axis < 3; ++axis) {
+      object_position[axis] = d->qpos[state.qpos_addr + axis];
+    }
+    const Eigen::Vector3d local_position =
+        conveyor_rotation.transpose() *
+        (object_position - Eigen::Vector3d(
+            conveyor_position[0], conveyor_position[1],
+            conveyor_position[2]));
+    if (local_position.x() >= stop_local_x) {
+      task2_conveyor_completed = true;
+      task2_conveyor_enabled.store(false, std::memory_order_release);
+      g_nh_ptr->setParam("/task2_conveyor_complete", true);
+      ROS_INFO("[Task2Conveyor] first box '%s' reached the stop; conveyor disabled",
+               state.name.c_str());
+      return false;
+    }
+    const mjtNum step = std::min(
+        speed * m->opt.timestep,
+        stop_local_x - local_position.x());
+    object_position += step * belt_direction;
+    for (int axis = 0; axis < 3; ++axis) {
+      d->qpos[state.qpos_addr + axis] = object_position[axis];
+    }
+    mju_zero(d->qvel + state.dof_addr, 6);
+    if (local_position.x() + step >= stop_local_x - 1e-9) {
+      task2_conveyor_completed = true;
+      task2_conveyor_enabled.store(false, std::memory_order_release);
+      g_nh_ptr->setParam("/task2_conveyor_complete", true);
+      ROS_INFO("[Task2Conveyor] first box '%s' reached the stop; conveyor disabled",
+               state.name.c_str());
+    }
+    return true;
+  }
+  return false;
+}
+
+std::uint8_t nearbyInternalFingertipMask(
+    const InternalContactFollowerState &state, mjtNum maximum_surface_gap)
+{
+  std::uint8_t nearby_mask = 0;
+  const Eigen::Matrix3d object_rotation =
+      contactFollowerBodyRotation(state.body_id);
+  const mjtNum *object_world = d->xpos + 3 * state.body_id;
+  const Eigen::Vector3d object_position(
+      object_world[0], object_world[1], object_world[2]);
+  const Eigen::Vector3d object_axis = object_rotation.col(2);
+  for (std::size_t finger = 0;
+       finger < internal_expansion_fingertip_geom_ids.size(); ++finger) {
+    const int fingertip_geom = internal_expansion_fingertip_geom_ids[finger];
+    const mjtNum *raw_fingertip = d->geom_xpos + 3 * fingertip_geom;
+    const Eigen::Vector3d fingertip_world(
+        raw_fingertip[0], raw_fingertip[1], raw_fingertip[2]);
+    const Eigen::Vector3d fingertip_object =
+        object_rotation.transpose() *
+        (fingertip_world - object_position);
+    const mjtNum center_radius = std::hypot(
+        fingertip_object.x(), fingertip_object.y());
+    if (center_radius < 1e-9 ||
+        center_radius > state.inner_radius + state.contact_tolerance) {
+      continue;
+    }
+    const Eigen::Vector3d radial_object(
+        fingertip_object.x() / center_radius,
+        fingertip_object.y() / center_radius, 0);
+    const Eigen::Vector3d radial_world =
+        object_rotation * radial_object;
+    const mjtNum radial_extent =
+        geomProjectedRadius(fingertip_geom, radial_world);
+    const mjtNum axial_extent =
+        geomProjectedRadius(fingertip_geom, object_axis);
+    const mjtNum surface_gap =
+        state.inner_radius - (center_radius + radial_extent);
+    const bool overlaps_valid_height =
+        fingertip_object.z() + axial_extent >= state.contact_tolerance &&
+        fingertip_object.z() - axial_extent <=
+            state.ring_height - state.contact_tolerance;
+    if (surface_gap < maximum_surface_gap && overlaps_valid_height) {
+      nearby_mask |= static_cast<std::uint8_t>(1u << finger);
+    }
+  }
+  return nearby_mask;
+}
+
+bool anyInternalFingertipNearObject(
+    const InternalContactFollowerState &state, mjtNum clearance)
+{
+  const Eigen::Matrix3d object_rotation =
+      contactFollowerBodyRotation(state.body_id);
+  const mjtNum *raw_object = d->xpos + 3 * state.body_id;
+  const Eigen::Vector3d object_position(
+      raw_object[0], raw_object[1], raw_object[2]);
+  const Eigen::Vector3d object_axis = object_rotation.col(2);
+  for (int fingertip_geom : internal_expansion_fingertip_geom_ids) {
+    if (fingertip_geom < 0) {
+      continue;
+    }
+    const mjtNum *raw_fingertip = d->geom_xpos + 3 * fingertip_geom;
+    const Eigen::Vector3d fingertip_world(
+        raw_fingertip[0], raw_fingertip[1], raw_fingertip[2]);
+    const Eigen::Vector3d fingertip_object =
+        object_rotation.transpose() *
+        (fingertip_world - object_position);
+    const mjtNum center_radius = std::hypot(
+        fingertip_object.x(), fingertip_object.y());
+    Eigen::Vector3d radial_world = object_rotation.col(0);
+    if (center_radius >= 1e-9) {
+      radial_world = object_rotation * Eigen::Vector3d(
+          fingertip_object.x() / center_radius,
+          fingertip_object.y() / center_radius, 0);
+    }
+    const mjtNum radial_extent =
+        geomProjectedRadius(fingertip_geom, radial_world);
+    const mjtNum axial_extent =
+        geomProjectedRadius(fingertip_geom, object_axis);
+    const bool overlaps_height =
+        fingertip_object.z() + axial_extent >= -clearance &&
+        fingertip_object.z() - axial_extent <=
+            state.ring_height + clearance;
+    const bool overlaps_annulus =
+        center_radius + radial_extent >=
+            state.inner_radius - clearance &&
+        center_radius - radial_extent <=
+            state.outer_radius + clearance;
+    if (overlaps_height && overlaps_annulus) {
+      return true;
+    }
+  }
+  return false;
+}
+
+mjtNum internalObjectLowestWorldZ(
+    const InternalContactFollowerState &state)
+{
+  Eigen::Quaterniond object_quaternion(
+      d->qpos[state.qpos_addr + 3], d->qpos[state.qpos_addr + 4],
+      d->qpos[state.qpos_addr + 5], d->qpos[state.qpos_addr + 6]);
+  object_quaternion.normalize();
+  const mjtNum axis_z =
+      (object_quaternion * Eigen::Vector3d::UnitZ()).z();
+  const mjtNum radial_vertical_extent = state.outer_radius * std::sqrt(
+      std::max<mjtNum>(0, 1 - axis_z * axis_z));
+  const mjtNum axial_lowest_offset =
+      std::min<mjtNum>(0, axis_z * state.ring_height);
+  return d->qpos[state.qpos_addr + 2] + axial_lowest_offset -
+      radial_vertical_extent;
+}
+
+bool internalObjectOverDestinationTable(
+    const InternalContactFollowerState &state)
+{
+  if (state.destination_table_geom_id < 0) {
+    return false;
+  }
+  const int geom_id = state.destination_table_geom_id;
+  const mjtNum *table_position = d->geom_xpos + 3 * geom_id;
+  const mjtNum *table_rotation = d->geom_xmat + 9 * geom_id;
+  const Eigen::Vector3d world_offset(
+      d->qpos[state.qpos_addr] - table_position[0],
+      d->qpos[state.qpos_addr + 1] - table_position[1],
+      d->qpos[state.qpos_addr + 2] - table_position[2]);
+  Eigen::Matrix3d rotation;
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      rotation(row, col) = table_rotation[3 * row + col];
+    }
+  }
+  const Eigen::Vector3d table_local = rotation.transpose() * world_offset;
+  return std::abs(table_local.x()) + state.outer_radius <=
+             m->geom_size[3 * geom_id] &&
+      std::abs(table_local.y()) + state.outer_radius <=
+             m->geom_size[3 * geom_id + 1];
+}
+
+bool settleInternalObjectOnDestinationTable(
+    const InternalContactFollowerState &state)
+{
+  Eigen::Quaterniond object_quaternion(
+      d->qpos[state.qpos_addr + 3], d->qpos[state.qpos_addr + 4],
+      d->qpos[state.qpos_addr + 5], d->qpos[state.qpos_addr + 6]);
+  object_quaternion.normalize();
+  const Eigen::Vector3d object_axis =
+      object_quaternion * Eigen::Vector3d::UnitZ();
+  Eigen::Quaterniond target_quaternion =
+      Eigen::Quaterniond::FromTwoVectors(
+          object_axis, Eigen::Vector3d::UnitZ()) * object_quaternion;
+  target_quaternion.normalize();
+
+  const mjtNum angle = object_quaternion.angularDistance(target_quaternion);
+  const mjtNum maximum_step =
+      state.table_settle_angular_speed * m->opt.timestep;
+  const bool upright = angle <= std::max<mjtNum>(maximum_step, 1e-9);
+  if (upright) {
+    object_quaternion = target_quaternion;
+  } else if (maximum_step > 0) {
+    object_quaternion = object_quaternion.slerp(
+        maximum_step / angle, target_quaternion);
+    object_quaternion.normalize();
+  }
+  d->qpos[state.qpos_addr + 3] = object_quaternion.w();
+  d->qpos[state.qpos_addr + 4] = object_quaternion.x();
+  d->qpos[state.qpos_addr + 5] = object_quaternion.y();
+  d->qpos[state.qpos_addr + 6] = object_quaternion.z();
+
+  // Keep the lowest point on the tabletop while the collision-free visual
+  // correction removes the release tilt.  XY never changes.
+  d->qpos[state.qpos_addr + 2] +=
+      state.destination_table_height - internalObjectLowestWorldZ(state);
+  mju_zero(d->qvel + state.dof_addr, 6);
+  return upright;
+}
+
+bool updateInternalContactFollowers()
+{
+  if (internal_contact_followers.empty()) {
+    return false;
+  }
+
+  const bool grasp_enabled =
+      task3_grasp_enabled.load(std::memory_order_acquire);
+  const bool approach_collision_suppression_enabled =
+      task3_fingertip_collision_suppression_enabled.load(
+          std::memory_order_acquire);
+  const bool collision_suppression_requested =
+      approach_collision_suppression_enabled || grasp_enabled;
+  const mjtNum maximum_surface_gap = numericScalarOrDefault(
+      "task3_grasp_detection_gap", 0.001);
+  const mjtNum release_clearance = numericScalarOrDefault(
+      "task3_collision_restore_clearance", 0.003);
+  const int required_fingers = std::max(
+      1, std::min(3, static_cast<int>(std::lround(
+          numericScalarOrDefault("task3_required_inner_fingers", 2)))));
+  const bool grasp_finalize_enabled =
+      task3_grasp_finalize_enabled.load(std::memory_order_acquire);
+
+  if (!grasp_enabled) {
+    setInternalGraspArmedPublished(false);
+  }
+  bool pose_changed = false;
+  for (InternalContactFollowerState &state : internal_contact_followers) {
+    if (!collision_suppression_requested && state.collision_suppressed &&
+        !state.held &&
+        !anyInternalFingertipNearObject(state, release_clearance)) {
+      setInternalFingertipCollisionEnabled(true);
+      state.collision_suppressed = false;
+      ROS_INFO("[InternalContactFollower] restored Task 3 fingertip collision after release clearance");
+      pose_changed = true;
+    }
+    if (collision_suppression_requested && !state.collision_suppressed) {
+      setInternalFingertipCollisionEnabled(false);
+      state.collision_suppressed = true;
+      ROS_INFO("[InternalContactFollower] suppressed Task 3 fingertip collision before insertion");
+      pose_changed = true;
+    }
+
+    if (state.settled) {
+      const bool was_upright = state.upright;
+      state.upright = settleInternalObjectOnDestinationTable(state);
+      if (!was_upright && state.upright) {
+        ROS_INFO("[InternalContactFollower] completed collision-free upright settle for '%s'",
+                 state.name.c_str());
+      }
+      pose_changed = true;
+      continue;
+    }
+
+    if (state.falling) {
+      if (internalObjectOverDestinationTable(state) &&
+          internalObjectLowestWorldZ(state) <=
+              state.destination_table_height) {
+        state.upright = settleInternalObjectOnDestinationTable(state);
+        state.falling = false;
+        state.settled = true;
+        ROS_INFO("[InternalContactFollower] '%s' reached the destination table; collision-free upright settle started at %.1f deg/s",
+                 state.name.c_str(),
+                 state.table_settle_angular_speed * 180.0 / mjPI);
+        pose_changed = true;
+      }
+      continue;
+    }
+
+    if (state.held) {
+      if (!grasp_enabled && internalFingerContractionStarted(state)) {
+        state.held = false;
+        state.falling = true;
+        state.release_reference_valid = false;
+        state.finger_latched.fill(false);
+        for (std::vector<mjtNum> &positions : state.latched_finger_qpos) {
+          positions.clear();
+        }
+        setInternalObjectCollisionEnabled(state, false);
+        mju_zero(d->qvel + state.dof_addr, 6);
+        publishInternalContactState(state);
+        publishInternalFingerLatchMask(state);
+        ROS_INFO("[InternalContactFollower] released '%s' on first inward finger motion; collision-free fall started",
+                 state.name.c_str());
+        pose_changed = true;
+        continue;
+      } else {
+        if (grasp_enabled) {
+          applyInternalFingerLatches(state);
+        }
+      }
+
+      const Eigen::Matrix3d hand_rotation =
+          contactFollowerBodyRotation(contact_follower_hand_body_id);
+      const mjtNum *hand_position =
+          d->xpos + 3 * contact_follower_hand_body_id;
+      const Eigen::Vector3d offset_hand(
+          state.object_offset_hand[0],
+          state.object_offset_hand[1],
+          state.object_offset_hand[2]);
+      const Eigen::Vector3d object_position =
+          Eigen::Vector3d(
+              hand_position[0], hand_position[1], hand_position[2])
+          + hand_rotation * offset_hand;
+      for (int axis = 0; axis < 3; ++axis) {
+        d->qpos[state.qpos_addr + axis] = object_position[axis];
+      }
+      const Eigen::Quaterniond hand_quaternion(hand_rotation);
+      const Eigen::Quaterniond object_quaternion_hand(
+          state.object_quat_hand[0], state.object_quat_hand[1],
+          state.object_quat_hand[2], state.object_quat_hand[3]);
+      Eigen::Quaterniond object_quaternion =
+          hand_quaternion * object_quaternion_hand;
+      object_quaternion.normalize();
+      d->qpos[state.qpos_addr + 3] = object_quaternion.w();
+      d->qpos[state.qpos_addr + 4] = object_quaternion.x();
+      d->qpos[state.qpos_addr + 5] = object_quaternion.y();
+      d->qpos[state.qpos_addr + 6] = object_quaternion.z();
+      mju_zero(d->qvel + state.dof_addr, 6);
+      pose_changed = true;
+      continue;
+    }
+
+    if (!grasp_enabled) {
+      continue;
+    }
+
+    // Collision suppression is confirmed independently before insertion.
+    // Grasp enable only starts the geometric per-finger latch detector.
+    setInternalGraspArmedPublished(true);
+    const std::uint8_t nearby_mask =
+        nearbyInternalFingertipMask(state, maximum_surface_gap);
+    for (std::size_t finger = 0; finger < state.finger_latched.size(); ++finger) {
+      if (state.finger_latched[finger] ||
+          !(nearby_mask & static_cast<std::uint8_t>(1u << finger))) {
+        continue;
+      }
+      captureInternalFingerLatch(state, finger);
+      publishInternalFingerLatchMask(state);
+      ROS_INFO("[InternalContactFollower] latched inner finger '%s' on '%s'; mask=0x%02x",
+               mj_id2name(m, mjOBJ_GEOM,
+                          internal_expansion_fingertip_geom_ids[finger]),
+               state.name.c_str(), internalFingerLatchMask(state));
+    }
+    applyInternalFingerLatches(state);
+    const std::uint8_t latch_mask = internalFingerLatchMask(state);
+    const int latched_count = __builtin_popcount(
+        static_cast<unsigned int>(latch_mask));
+    if (!grasp_finalize_enabled || latched_count < required_fingers) {
+      continue;
+    }
+
+    const Eigen::Matrix3d hand_rotation =
+        contactFollowerBodyRotation(contact_follower_hand_body_id);
+    const mjtNum *hand_position =
+        d->xpos + 3 * contact_follower_hand_body_id;
+    const Eigen::Vector3d object_position(
+        d->qpos[state.qpos_addr],
+        d->qpos[state.qpos_addr + 1],
+        d->qpos[state.qpos_addr + 2]);
+    const Eigen::Vector3d object_offset_hand =
+        hand_rotation.transpose() *
+        (object_position - Eigen::Vector3d(
+            hand_position[0], hand_position[1], hand_position[2]));
+    for (int axis = 0; axis < 3; ++axis) {
+      state.object_offset_hand[axis] = object_offset_hand[axis];
+    }
+
+    const Eigen::Quaterniond hand_quaternion(hand_rotation);
+    Eigen::Quaterniond object_quaternion(
+        d->qpos[state.qpos_addr + 3], d->qpos[state.qpos_addr + 4],
+        d->qpos[state.qpos_addr + 5], d->qpos[state.qpos_addr + 6]);
+    object_quaternion.normalize();
+    Eigen::Quaterniond object_quaternion_hand =
+        hand_quaternion.conjugate() * object_quaternion;
+    object_quaternion_hand.normalize();
+    state.object_quat_hand[0] = object_quaternion_hand.w();
+    state.object_quat_hand[1] = object_quaternion_hand.x();
+    state.object_quat_hand[2] = object_quaternion_hand.y();
+    state.object_quat_hand[3] = object_quaternion_hand.z();
+    const std::array<std::size_t, 3> active_joint_indices{{1, 0, 1}};
+    for (std::size_t finger = 0; finger < active_joint_indices.size(); ++finger) {
+      state.release_reference_qpos[finger] = d->qpos[
+          internal_finger_qpos_addresses[finger][
+              active_joint_indices[finger]]];
+    }
+    state.release_reference_valid = true;
+    state.held = true;
+    state.falling = false;
+    state.settled = false;
+    state.upright = false;
+    mju_zero(d->qvel + state.dof_addr, 6);
+    publishInternalContactState(state);
+    ROS_INFO("[InternalContactFollower] force-free latched '%s' with %d/%zu persistent inner fingers (required=%d, mask=0x%02x)",
+             state.name.c_str(), latched_count,
+             internal_expansion_fingertip_geom_ids.size(),
+             required_fingers, latch_mask);
+    pose_changed = true;
+  }
+  const bool collision_suppressed =
+      !internal_contact_followers.empty() && std::all_of(
+          internal_contact_followers.begin(),
+          internal_contact_followers.end(),
+          [](const InternalContactFollowerState &state) {
+            return state.collision_suppressed;
+          });
+  setInternalFingertipCollisionSuppressedPublished(collision_suppressed);
+  return pose_changed;
+}
+
+bool updateContactFollowers()
+{
+  const bool task1_lever_changed = updateTask1LeverFingerLatch();
+  const bool legacy_changed = updateLegacyContactFollowers();
+  const bool reposition_changed = updateTask2RepositionFollowers();
+  const bool bimanual_changed = updateBimanualContactFollowers();
+  const bool conveyor_changed = updateTask2Conveyor();
+  const bool internal_changed = updateInternalContactFollowers();
+  return task1_lever_changed || legacy_changed || reposition_changed || bimanual_changed ||
+      conveyor_changed || internal_changed;
+}
+} // namespace
+
 bool handleSimStart(std_srvs::SetBool::Request &req,
                     std_srvs::SetBool::Response &res)
 {
@@ -1552,6 +4278,153 @@ bool handleSimStart(std_srvs::SetBool::Request &req,
   res.success = true;
   res.message = "Received sim_start request";
   sim->run = req.data;
+  return true;
+}
+
+bool setObjectPositionCallback(kuavo_msgs::SetObjectPosition::Request &req,
+                               kuavo_msgs::SetObjectPosition::Response &res)
+{
+  if (!m || !d || !sim) {
+    res.success = false;
+    res.message = "MuJoCo model is not initialized";
+    return true;
+  }
+
+  const int body_id = mj_name2id(m, mjOBJ_BODY, req.object_name.c_str());
+  if (body_id < 0 || m->body_jntnum[body_id] != 1) {
+    res.success = false;
+    res.message = "Object '" + req.object_name + "' must have exactly one joint";
+    return true;
+  }
+  const int joint_id = m->body_jntadr[body_id];
+  if (m->jnt_type[joint_id] != mjJNT_FREE) {
+    res.success = false;
+    res.message = "Object '" + req.object_name + "' does not have a free joint";
+    return true;
+  }
+  if (req.randomize &&
+      (req.x_min > req.x_max || req.y_min > req.y_max || req.z_min > req.z_max)) {
+    res.success = false;
+    res.message = "Invalid randomization bounds";
+    return true;
+  }
+
+  const std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+  const int qpos_addr = m->jnt_qposadr[joint_id];
+  const int dof_addr = m->jnt_dofadr[joint_id];
+  double x = req.position.x;
+  double y = req.position.y;
+  double z = req.position.z;
+  if (req.randomize) {
+    x = std::uniform_real_distribution<double>(req.x_min, req.x_max)(object_random_generator);
+    y = std::uniform_real_distribution<double>(req.y_min, req.y_max)(object_random_generator);
+    z = std::uniform_real_distribution<double>(req.z_min, req.z_max)(object_random_generator);
+  }
+
+  const double quat_norm = std::sqrt(
+      req.orientation.w * req.orientation.w + req.orientation.x * req.orientation.x +
+      req.orientation.y * req.orientation.y + req.orientation.z * req.orientation.z);
+  int base_weld_id = -1;
+  if (req.object_name == "base_link") {
+    const double qw = quat_norm > 1e-12
+        ? req.orientation.w / quat_norm : d->qpos[qpos_addr + 3];
+    const double qx = quat_norm > 1e-12
+        ? req.orientation.x / quat_norm : d->qpos[qpos_addr + 4];
+    const double qy = quat_norm > 1e-12
+        ? req.orientation.y / quat_norm : d->qpos[qpos_addr + 5];
+    const double qz = quat_norm > 1e-12
+        ? req.orientation.z / quat_norm : d->qpos[qpos_addr + 6];
+    if (std::abs(std::abs(qw) - 1.0) > 1e-9 ||
+        std::abs(qx) > 1e-9 || std::abs(qy) > 1e-9 ||
+        std::abs(qz) > 1e-9) {
+      res.success = false;
+      res.message = "Task base randomization supports translation only";
+      return true;
+    }
+
+    base_weld_id = mj_name2id(m, mjOBJ_EQUALITY, "scene_base_lock");
+    if (base_weld_id < 0 || m->eq_type[base_weld_id] != mjEQ_WELD) {
+      res.success = false;
+      res.message = "scene_base_lock weld is unavailable";
+      return true;
+    }
+  }
+
+  d->qpos[qpos_addr] = x;
+  d->qpos[qpos_addr + 1] = y;
+  d->qpos[qpos_addr + 2] = z;
+  if (quat_norm > 1e-12) {
+    d->qpos[qpos_addr + 3] = req.orientation.w / quat_norm;
+    d->qpos[qpos_addr + 4] = req.orientation.x / quat_norm;
+    d->qpos[qpos_addr + 5] = req.orientation.y / quat_norm;
+    d->qpos[qpos_addr + 6] = req.orientation.z / quat_norm;
+  }
+
+  if (req.object_name == "base_link") {
+    mjtNum *weld_data = m->eq_data + mjNEQDATA * base_weld_id;
+    weld_data[3] = -x;
+    weld_data[4] = -y;
+    weld_data[5] = -z;
+    weld_data[6] = 1.0;
+    weld_data[7] = 0.0;
+    weld_data[8] = 0.0;
+    weld_data[9] = 0.0;
+
+    if (qpos_init.size() >= static_cast<size_t>(qpos_addr + 7)) {
+      std::copy(d->qpos + qpos_addr, d->qpos + qpos_addr + 7,
+                qpos_init.begin() + qpos_addr);
+    }
+  }
+  mju_zero(d->qvel + dof_addr, 6);
+  resetContactFollower(req.object_name);
+  mj_forward(m, d);
+
+  res.success = true;
+  res.message = "Object '" + req.object_name + "' pose updated";
+  res.final_position.x = x;
+  res.final_position.y = y;
+  res.final_position.z = z;
+  return true;
+}
+
+bool setJointPositionCallback(kuavo_msgs::SetJointPosition::Request &req,
+                              kuavo_msgs::SetJointPosition::Response &res)
+{
+  if (!m || !d || !sim) {
+    res.success = false;
+    res.message = "MuJoCo model is not initialized";
+    return true;
+  }
+  const int joint_id = mj_name2id(m, mjOBJ_JOINT, req.joint_name.c_str());
+  if (joint_id < 0 || (m->jnt_type[joint_id] != mjJNT_HINGE &&
+                       m->jnt_type[joint_id] != mjJNT_SLIDE)) {
+    res.success = false;
+    res.message = "Joint '" + req.joint_name + "' must be a hinge or slide joint";
+    return true;
+  }
+
+  double position = req.position;
+  if (m->jnt_limited[joint_id]) {
+    position = std::clamp(position, m->jnt_range[2 * joint_id],
+                          m->jnt_range[2 * joint_id + 1]);
+  }
+  const std::unique_lock<std::recursive_mutex> lock(sim->mtx);
+  const int source_bin_lock_id =
+      mj_name2id(m, mjOBJ_EQUALITY, "task1_source_bin_lock");
+  if (source_bin_lock_id >= 0 &&
+      m->eq_type[source_bin_lock_id] == mjEQ_JOINT &&
+      m->eq_obj1id[source_bin_lock_id] == joint_id) {
+    // A one-joint equality constrains qpos to polycoef[0].  Keep the scene
+    // lock active while moving its target so only this explicit service can
+    // advance the source bin along the rail.
+    m->eq_data[mjNEQDATA * source_bin_lock_id] = position;
+    d->eq_active[source_bin_lock_id] = 1;
+  }
+  d->qpos[m->jnt_qposadr[joint_id]] = position;
+  d->qvel[m->jnt_dofadr[joint_id]] = 0.0;
+  mj_forward(m, d);
+  res.success = true;
+  res.message = "Joint '" + req.joint_name + "' position updated";
   return true;
 }
 #ifdef USE_DDS
@@ -1770,6 +4643,49 @@ void chassicPoseForceCallback(const geometry_msgs::Pose::ConstPtr &msg)
 
 //-----------------------m--------------- physics_thread --------------------------------------------
 
+void randomizeTaskLighting(mjModel *model)
+{
+  int seed = -1;
+  if (!g_nh_ptr->getParam("task_light_seed", seed) || seed < 0) {
+    return;
+  }
+
+  int profile = 0;
+  if (!g_nh_ptr->getParam("task_light_profile", profile) ||
+      profile < 1 || profile > 3) {
+    ROS_WARN("[TaskLighting] invalid or missing task_light_profile; "
+             "keeping scene lighting unchanged");
+    return;
+  }
+
+  // Match the upstream per-task headlight ranges without rewriting the MJCF.
+  // Combining task and round makes each task's lighting deterministic for a
+  // given seed while avoiding identical Task 1/2 samples for the same round.
+  std::seed_seq seed_sequence{seed, profile};
+  std::mt19937 generator(seed_sequence);
+  const bool wide_range = profile == 3;
+  std::uniform_real_distribution<float> head_diffuse(
+      wide_range ? 0.1f : 0.2f, wide_range ? 0.8f : 0.6f);
+  std::uniform_real_distribution<float> head_ambient(
+      0.0f, wide_range ? 0.5f : 0.3f);
+  std::uniform_real_distribution<float> head_specular(
+      0.0f, wide_range ? 0.4f : 0.2f);
+  for (int channel = 0; channel < 3; ++channel) {
+    model->vis.headlight.diffuse[channel] = head_diffuse(generator);
+    model->vis.headlight.ambient[channel] = head_ambient(generator);
+    model->vis.headlight.specular[channel] = head_specular(generator);
+  }
+  ROS_INFO("[TaskLighting] task=%d seed=%d diffuse=(%.3f, %.3f, %.3f) "
+           "ambient=(%.3f, %.3f, %.3f) specular=(%.3f, %.3f, %.3f)",
+           profile, seed,
+           model->vis.headlight.diffuse[0], model->vis.headlight.diffuse[1],
+           model->vis.headlight.diffuse[2],
+           model->vis.headlight.ambient[0], model->vis.headlight.ambient[1],
+           model->vis.headlight.ambient[2],
+           model->vis.headlight.specular[0], model->vis.headlight.specular[1],
+           model->vis.headlight.specular[2]);
+}
+
 void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_body = false)
 {
   // request loadmodel if file given (otherwise drag-and-drop)
@@ -1777,8 +4693,10 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   {
     sim->LoadMessage(filename);
     m = LoadModel(filename, *sim);
-    if (m)
+    if (m) {
+      randomizeTaskLighting(m);
       d = mj_makeData(m);
+    }
     m->opt.timestep = 1 / frequency;
   
     if (robot_type == 2) 
@@ -1810,8 +4728,11 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
     {
       // ********************************
       init_cmd(d);
-      qpos_init.resize(m->nq);
-      std::fill(qpos_init.begin(), qpos_init.end(), 0);
+      // Preserve the MJCF qpos0 for every joint that is not part of the robot
+      // initialization message.  In particular, task objects use free joints;
+      // zero-filling those seven qpos values moves every object to the world
+      // origin and leaves it with an invalid zero quaternion.
+      qpos_init.assign(m->qpos0, m->qpos0 + m->nq);
       if (robot_type == 1)
       {
         qpos_init[2] = 0.0;// 初始化轮臂位置 - 设置在地面
@@ -1896,7 +4817,36 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   pubTimeDiff = g_nh_ptr->advertise<std_msgs::Float64>("/monitor/time_cost/mujoco_loop_time", 10);
   pubLeftArmFT = g_nh_ptr->advertise<geometry_msgs::WrenchStamped>("/arm_force_torque/left", 10);
   pubRightArmFT = g_nh_ptr->advertise<geometry_msgs::WrenchStamped>("/arm_force_torque/right", 10);
+  g_nh_ptr->getParam("task_body_names", task_body_names);
+  for (const std::string &name : task_body_names) {
+    if (mj_name2id(m, mjOBJ_BODY, name.c_str()) < 0) {
+      ROS_WARN("[TaskBodyPose] body '%s' is not present in the loaded model", name.c_str());
+      continue;
+    }
+    task_body_pose_publishers.emplace(
+        name, g_nh_ptr->advertise<geometry_msgs::PoseStamped>("/mujoco/" + name + "/pose", 10));
+  }
+  std::vector<std::string> contact_follow_body_names;
+  g_nh_ptr->getParam("contact_follow_body_names", contact_follow_body_names);
+  initializeContactFollowers(contact_follow_body_names);
+  initializeTask1GraspFingerLatch();
+  initializeTask1LeverFingerLatch();
+  std::vector<std::string> bimanual_contact_follow_body_names;
+  g_nh_ptr->getParam(
+      "bimanual_contact_follow_body_names",
+      bimanual_contact_follow_body_names);
+  initializeBimanualContactFollowers(
+      bimanual_contact_follow_body_names);
+  std::vector<std::string> internal_contact_follow_body_names;
+  g_nh_ptr->getParam(
+      "internal_contact_follow_body_names",
+      internal_contact_follow_body_names);
+  initializeInternalContactFollowers(
+      internal_contact_follow_body_names);
+  task_camera_transport =
+      std::make_unique<image_transport::ImageTransport>(*g_nh_ptr);
   bool camera_available = ConfigureDepthCameraForCurrentModel();
+  bool task_cameras_available = ConfigureTaskRgbdCamerasForCurrentModel();
   if (camera_available) {
     depthImagePub = g_nh_ptr->advertise<sensor_msgs::Image>(mujoco_cpp::kDepthImageTopic, 10);
     depthImageArrayPub = g_nh_ptr->advertise<std_msgs::Float64MultiArray>(mujoco_cpp::kDepthImageArrayTopic, 10);
@@ -1905,6 +4855,10 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
 
   // // 创建服务
   ros::ServiceServer service = g_nh_ptr->advertiseService("sim_start", handleSimStart);
+  ros::ServiceServer setObjectPositionService =
+      g_nh_ptr->advertiseService("set_object_position", setObjectPositionCallback);
+  ros::ServiceServer setJointPositionService =
+      g_nh_ptr->advertiseService("set_joint_position", setJointPositionCallback);
 
   // // 创建订阅器
   ros::Subscriber clawCmdSub = g_nh_ptr->subscribe("/leju_claw_command", 10, clawCmdCallback);
@@ -1912,6 +4866,24 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
 #endif
   ros::Subscriber extWrenchSub = g_nh_ptr->subscribe("/external_wrench", 10, extWrenchCallback);
+  ros::Subscriber task2GraspEnabledSub = g_nh_ptr->subscribe<std_msgs::Bool>(
+      "/mujoco/task2_grasp_enabled", 1, task2GraspEnabledCallback);
+  ros::Subscriber task2RepositionEnabledSub =
+      g_nh_ptr->subscribe<std_msgs::Bool>(
+          "/mujoco/task2_reposition_enabled", 1,
+          task2RepositionEnabledCallback);
+  ros::Subscriber task2ConveyorEnabledSub = g_nh_ptr->subscribe<std_msgs::Bool>(
+      "/mujoco/task2_conveyor_enabled", 1, task2ConveyorEnabledCallback);
+  ros::Subscriber task3GraspEnabledSub = g_nh_ptr->subscribe<std_msgs::Bool>(
+      "/mujoco/task3_grasp_enabled", 1, task3GraspEnabledCallback);
+  ros::Subscriber task3GraspFinalizeEnabledSub =
+      g_nh_ptr->subscribe<std_msgs::Bool>(
+          "/mujoco/task3_grasp_finalize_enabled", 1,
+          task3GraspFinalizeEnabledCallback);
+  ros::Subscriber task3FingertipCollisionSuppressionEnabledSub =
+      g_nh_ptr->subscribe<std_msgs::Bool>(
+          "/mujoco/task3_fingertip_collision_suppression_enabled", 1,
+          task3FingertipCollisionSuppressionEnabledCallback);
 
   if (camera_available) {
     depth_thread_running.store(true);
@@ -2035,6 +5007,84 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
     });
   }
 
+  if (task_cameras_available) {
+    task_camera_thread_running.store(true);
+    task_camera_thread = std::thread([sim]() {
+      // GL context 是本线程私有的，所以渲染器在这里创建、也只在这里用。
+      task_offscreen_renderer = std::make_unique<mujoco_cpp::OffscreenCameraRenderer>();
+      task_rgbd_camera_rgb.assign(
+          static_cast<std::size_t>(kTaskCameraWidth) * kTaskCameraHeight * 3, 0);
+      task_rgbd_camera_depth.assign(
+          static_cast<std::size_t>(kTaskCameraWidth) * kTaskCameraHeight, 0.0f);
+      int built_epoch = -1;
+      std::string offscreen_failure;
+      ros::Rate camera_rate(kTaskCameraFrequency);
+      while (task_camera_thread_running.load() && ros::ok()) {
+        std::unique_lock<std::recursive_mutex> camera_lock(task_camera_mutex);
+        if (task_camera_data == nullptr || m == nullptr) {
+          camera_lock.unlock();
+          camera_rate.sleep();
+          continue;
+        }
+
+        // 模型换过就重建 GL 侧的一切：mjrContext 的显示列表和纹理都绑在旧模型上。
+        const int epoch = task_camera_model_epoch.load();
+        if (epoch != built_epoch) {
+          if (task_offscreen_renderer->Initialize(
+                  m, kTaskCameraWidth, kTaskCameraHeight, &offscreen_failure)) {
+            built_epoch = epoch;
+            ROS_INFO("[TaskCamera] Offscreen renderer ready: %dx%d, %zu cameras",
+                     kTaskCameraWidth, kTaskCameraHeight,
+                     task_rgbd_cameras.size());
+          } else {
+            // 只报一次，避免 30 Hz 刷屏；每帧都会重试，X 恢复后自动接上。
+            if (built_epoch != -2) {
+              ROS_ERROR("[TaskCamera] Offscreen renderer unavailable: %s",
+                        offscreen_failure.c_str());
+              built_epoch = -2;
+            }
+            camera_lock.unlock();
+            camera_rate.sleep();
+            continue;
+          }
+        }
+
+        // 物理线程此刻可能正在写 m/d，快照必须在锁内拷。
+        {
+          std::unique_lock<std::recursive_mutex> simulation_lock(sim->mtx);
+          mj_copyData(task_camera_data, m, d);
+        }
+
+        // 渲染刻意放在 sim.mtx 之外：三路 640×480 约 6 ms，若持锁渲染会把
+        // 1000 Hz 的物理步进拖停。m 本身由 task_camera_mutex 保护 —— 模型重载
+        // 路径在 mj_deleteModel 之前也要拿这把锁，所以这里读 m 是安全的。
+        const ros::Time stamp = ros::Time::now();
+        std::vector<sensor_msgs::Image> color_messages;
+        color_messages.reserve(task_rgbd_cameras.size());
+        for (TaskRgbdCamera &camera : task_rgbd_cameras) {
+          // 深度缓冲仍按原样传进去：Render 一次渲染同时填两个缓冲，去掉深度输出
+          // 不改这条路径。要一并省掉渲染开销得改 Render 的签名，那是另一件事。
+          if (!task_offscreen_renderer->Render(m, task_camera_data, camera.camera_id,
+                                         task_rgbd_camera_rgb.data(),
+                                         task_rgbd_camera_depth.data())) {
+            continue;
+          }
+          color_messages.emplace_back(BuildTaskColorImage(
+              camera, stamp, task_rgbd_camera_rgb.data()));
+        }
+
+        for (std::size_t index = 0; index < color_messages.size(); ++index) {
+          task_rgbd_cameras[index].color_publisher.publish(color_messages[index]);
+        }
+        camera_lock.unlock();
+        camera_rate.sleep();
+      }
+      // 必须在本线程析构：GL context 的释放要求当前线程持有它。
+      task_offscreen_renderer.reset();
+      ROS_INFO("[TaskCamera] RGB publisher thread exited");
+    });
+  }
+
 #ifdef USE_DDS
       // 初始化DDS通信
     std::cout << "\033[33m[MuJoCo DDS] Initializing DDS communication...\033[0m" << std::endl;
@@ -2064,13 +5114,17 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       int hand_type_id = mj_name2id(m, mjOBJ_NUMERIC, "hand_type");
       
       if (hand_type_id != -1) {
-          int hand_type_value = static_cast<int>(m->numeric_data[hand_type_id]);
+          const int data_adr = m->numeric_adr[hand_type_id];
+          int hand_type_value = static_cast<int>(m->numeric_data[data_adr]);
           if (hand_type_value == 1) {
               hand_type = mujoco_node::HandType::LINKER_L6;
               std::cout << "[mujoco_node]: Detected LinkerL6 dexhand from URDF custom metadata" << std::endl;
           } else if (hand_type_value == 2) {
               hand_type = mujoco_node::HandType::LINKER_O6;
               std::cout << "[mujoco_node]: Detected LinkerO6 dexhand from URDF custom metadata" << std::endl;
+          } else if (hand_type_value == 3) {
+              hand_type = mujoco_node::HandType::HEIMAN;
+              std::cout << "[mujoco_node]: Detected Heiman hand from MJCF custom metadata" << std::endl;
           } else {
               hand_type = mujoco_node::HandType::QIANGNAO;
               std::cout << "[mujoco_node]: Detected Qiangnao hand from URDF custom metadata" << std::endl;
@@ -2081,7 +5135,12 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
           std::cout << "[mujoco_node]: No hand_type metadata in URDF, default to use Qiangnao hand" << std::endl;
       }
 
-      g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr, hand_type);
+      if (!g_dexhand_node->init(*g_nh_ptr, m, RHandJointsAddr, LHandJointsAddr, hand_type)) {
+          ROS_FATAL("[mujoco_node] Failed to initialize dexhand node");
+          sim->exitrequest.store(1);
+          g_nh_ptr->setParam("end_effector_joints_num", 0);
+          return;
+      }
 
       int hand_joints_num = g_dexhand_node->get_hand_joints_num();
       g_nh_ptr->setParam("end_effector_joints_num", hand_joints_num);
@@ -2157,11 +5216,14 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
       else
       {
         ROS_INFO("[mujoco_node]Failed to get init qpos, use default qpos");
-        qpos_init = {-0.00505, 0.00000, 0.84414, 0.99864, 0.00000, 0.05215, -0.00000,
-                     -0.01825, -0.00190, -0.52421, 0.73860, -0.31872, 0.01835, 
-                     0.01825, 0.00190, -0.52421, 0.73860, -0.31872, -0.01835, 
-                     0, 0, 0, 0, 0, 0, 0, 
-                     0, 0, 0, 0, 0, 0, 0};
+        const std::vector<double> default_robot_qpos = {
+            -0.00505, 0.00000, 0.84414, 0.99864, 0.00000, 0.05215, -0.00000,
+            -0.01825, -0.00190, -0.52421, 0.73860, -0.31872, 0.01835,
+            0.01825, 0.00190, -0.52421, 0.73860, -0.31872, -0.01835,
+            0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0};
+        std::copy(default_robot_qpos.begin(), default_robot_qpos.end(),
+                  qpos_init.begin());
         break;
       }
     }
@@ -2249,6 +5311,16 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
           depth_thread.join();
       }
   }
+  if (task_camera_thread.joinable()) {
+      task_camera_thread_running.store(false);
+      task_camera_thread.join();
+  }
+  task_rgbd_cameras.clear();
+  if (task_camera_data != nullptr) {
+      mj_deleteData(task_camera_data);
+      task_camera_data = nullptr;
+  }
+  task_camera_transport.reset();
 
   // delete everything we allocated
 
@@ -2307,7 +5379,8 @@ int simulate_loop(ros::NodeHandle &nh, bool spin_thread = false)
     nh.getParam("/run_mujoco_camera", isRunCamera_);
   }
   ROS_INFO("run_mujoco_camera: %d", isRunCamera_);
-  
+
+
   // 获取only_half_up_body参数
   bool only_half_up_body = false;
   if (nh.hasParam("/only_half_up_body"))

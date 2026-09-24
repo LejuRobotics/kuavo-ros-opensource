@@ -118,6 +118,10 @@ namespace humanoidController_wheel_wbc
     void updateUserJointCmd(const ros::Time &time, vector_t& target_qpos, vector_t& target_qvel);
     void applyArmTrajectoryInterpolation(const ros::Time& time, int8_t lbMpcMode, const SensorData& sensorData,
                                          vector_t& target_qpos, vector_t& target_qvel);
+    int applyFinalArmJointLimitVelocityDamper(const vector_t& previousArmQ,
+                                              const vector_t& requestedArmV,
+                                              vector_t& nextArmQ,
+                                              vector_t& nextArmV);
     vector_t smoothTransition(const vector_t& current_pos, const vector_t& target_pos, double transition_duration = 1.0);
     vector_t interpolateArmTarget(scalar_t currentTime, const vector_t& currentArmState, const vector_t& newDesiredArmState, scalar_t maxSpeed);
     vector_t processArmControlModeSwitch(const ros::Time& time, const vector_t& current_qpos, const vector_t& target_qpos);
@@ -143,10 +147,6 @@ namespace humanoidController_wheel_wbc
 
     // ======= 硬件相关处理函数 =========
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);    // 替换EC_MASTER电机的kp/kd（从running_settings）
-
-    // ======= 机器人初始动作相关函数 ========
-    void performSimpleActions(const ros::Time &time);
-    void initialPreTargetActions(const vector_t& startActions, const vector_t& preTargetActions, double desiredTime);
 
     // ======= 更新期望位姿的误差分析 ========
     void computeErrorMultiEeFromTargetAndData(const vector_t& targetState, 
@@ -182,11 +182,6 @@ namespace humanoidController_wheel_wbc
         }
         return filtered_data;
     }
-    // ========== 机器人启动初始动作 ==========
-    vector_t preTargetActions_;
-    vector_t startActions_;
-    double robotPreActionDesiredTime_ = 0.0;
-
     // ========== 坐标变换相关 ==========
     Eigen::Vector3d cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw);
     Eigen::Vector3d cmdVelBodyToWorld(const Eigen::Vector3d& cmd_vel_body, double yaw);
@@ -215,6 +210,7 @@ namespace humanoidController_wheel_wbc
     ros::Publisher waistYawKinematicPublisher_;  // waist_yaw_link运动学计算位置发布器
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
     ros::Publisher stopRobotPub_;  // /stop_robot 话题发布者，用于底盘急停保护
+    ros::Publisher armTrajFilteredPub_;  // 滤波后手臂轨迹发布者（用于互相关测量相位延迟）
     ros::Publisher resetToStatePub_;  // /mobile_manipulator_reset_to_state 发布者（3791 软暂停恢复时把冻结姿态发给 RM）
     // 双手末端 FK 的 PoseStamped 发布者，对应 /sensors_data_raw/ee_fk/<末端帧名>（与 eeFrames 同序）
     std::vector<ros::Publisher> handFkPubs_;
@@ -270,6 +266,8 @@ namespace humanoidController_wheel_wbc
     Eigen::Vector3d base_cmd_vel_max_{1.2, 1.2, 1.2};   // vx, vy, wz 上限 [m/s, m/s, rad/s]
     Eigen::Vector3d base_cmd_vel_min_{-1.2, -1.2, -1.2};  // vx, vy, wz 下限
     bool base_cmd_vel_limit_enable_{false};  // 是否启用 base_cmd_vel 速度限幅
+    double base_cmd_vel_publish_rate_{50.0};  // /move_base/base_cmd_vel 发布频率上限 [Hz]，避免 500Hz 灌满底盘节点
+    ros::Time last_cmd_vel_pub_time_;  // 上次发布 /move_base/base_cmd_vel 的时间，用于限频
 
     // ========== 期望力管理器 ==========
     std::unique_ptr<DesiredForceManager> desired_force_manager_;
@@ -342,6 +340,16 @@ namespace humanoidController_wheel_wbc
     vector_t last_filtered_low_joint_pos_ = vector_t::Zero(4);
     vector_t arm_start_pos_ = vector_t::Zero(14);
 
+    // ========== 下肢 1/2 号电机（knee/leg）锁定 ==========
+    // 与增量 IK 复用同一 rosparam（/ik_ros_uni_cpp_node/quest3/lock_knee_leg）：
+    // 锁定开启后在最终输出处（optimizedState_mrt_limit_）硬覆盖 1、2 号关节，
+    // 无论 MPC / 快速模式 / 主控回发哪条路都被钉死，waist_pitch/waist_yaw 不受影响。
+    std::atomic<bool> lockKneeLegEnabled_{false};  // 锁定开关（跟随 rosparam）
+    bool lockKneeLegCaptured_{false};              // 是否已捕获锁定快照
+    double lockKneeQ_{0.0};                        // 锁定的 knee 目标角 [rad]
+    double lockLegQ_{0.0};                         // 锁定的 leg 目标角 [rad]
+    ros::Time lastLockParamCheckTime_{0.0};        // 上次实时查询 lock rosparam 的时刻（节流用）
+
     // ========== 运动学计算 ==========
     std::shared_ptr<humanoid_controller::WaistKinematics> waistKinematics_;
 
@@ -361,8 +369,24 @@ namespace humanoidController_wheel_wbc
     vector_t init_arm_target_qpos_;
     bool enable_arm_traj_interpolator_{false};  // 手臂轨迹插补增强开关（默认关闭，保持旧行为）
     ArmTrajectoryInterpolator armTrajectoryInterpolator_;
+    int armInterpSeenMode_{-1};
+    bool armInterpWaitFreshTraj_{false};
+    ros::Time armInterpStampAtModeChange_;
     vector_t wbc_arm_raw_q_;
     vector_t wbc_arm_raw_v_;
+
+    // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
+    // ABSOLUTE_QUICK_JOINT3_SHAPER_BETA_FDB60BBC_V2
+    // 仅在绝对式上肢快速直通路径使用；普通 MPC、增量式和插补路径均不经过该状态。
+    bool absolute_quick_q_lowpass_initialized_{false};
+    vector_t absolute_quick_q_lowpass_q_;       // 500 Hz first-order LPF internal state
+    vector_t absolute_quick_q_shaped_q_;        // final coherent q command
+    vector_t absolute_quick_q_shaped_v_;        // final coherent dq command
+    double absolute_quick_q_lowpass_cutoff_hz_{3.5};
+    double absolute_quick_joint3_cutoff_hz_{2.0};
+    double absolute_quick_joint3_max_velocity_{2.5};
+    double absolute_quick_joint3_soft_limit_rad_{1.25};
+    double absolute_quick_joint3_hard_limit_rad_{1.484};
 
     // ========== 运动学限制滤波相关 ==========
     std::shared_ptr<mobile_manipulator::KinemicLimitFilter>  obsStateLimitFilterPtr_;    // observation.state 限制滤波
@@ -374,6 +398,18 @@ namespace humanoidController_wheel_wbc
     vector_t optimizedTrajMaxVel_, optimizedTrajMaxAcc_, optimizedTrajMaxJerk_;
 
     std::shared_ptr<mobile_manipulator::jointCmdLimiter> jointCmdLimiterPtr_;
+    // Mode-independent final arm command guard, shared by normal and quick paths.
+    bool arm_joint_limit_velocity_damper_enabled_{true};
+    bool arm_joint_limits_valid_{false};
+    double arm_joint_limit_soft_zone_{0.14};
+    double arm_joint_limit_stop_acceleration_{80.0};
+    double arm_joint_limit_max_velocity_{4.0};
+    double arm_joint_limit_settle_velocity_{1e-3};
+    double arm_joint_limit_hard_epsilon_{1e-4};
+    vector_t arm_joint_lower_limits_;
+    vector_t arm_joint_upper_limits_;
+    // Per-joint latch: keep q integrated until a limited command can rejoin upstream q continuously.
+    std::vector<unsigned char> arm_joint_limit_integration_active_;
 
     // ========== 手臂末端力估计器 ==========
     std::unique_ptr<ArmContactForceEstimatorWheel> arm_force_estimator_;

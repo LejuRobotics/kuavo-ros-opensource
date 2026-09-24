@@ -17,9 +17,13 @@
 #include "motion_capture_ik/IncrementalControlModule.h"
 #include "motion_capture_ik/HandSmoother.h"
 #include "DrakeElbowHandPointOpt.hpp"
+#include <drake/multibody/plant/multibody_plant.h>
 #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/Float64.h>
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "motion_capture_ik/ArmTrajWriter.h"
+#include "motion_capture_ik/SG100HandBridge.h"
+#include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 
 namespace HighlyDynamic {
 
@@ -93,6 +97,8 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void solveIkHandElbowThreadFunction();
   void applyWorkerThreadScheduling(const char* threadName, int priority) const;
   bool requestWbcArmTrajectoryControl(int controlMode, bool requireIncrementalMode, const char* context);
+  bool requestArmTrajInterpolator(bool enable, bool requireIncrementalMode, const char* context);
+  bool isInMode2EnterTimeout();
 
   static constexpr int DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY = 50;
   static constexpr int DEFAULT_IK_SOLVE_THREAD_PRIORITY = 50;
@@ -100,8 +106,16 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
   void updateSensorArmJointMeanFromSensorData();
 
+  // 将位置裁到 URDF 限位；若提供速度，贴边时清掉朝限位外的速度
+  void clampArmJointCommand(int index, double& position, double* velocity) const;
+  void loadArmJointLimitsFromPlant(const drake::multibody::MultibodyPlant<double>& plant);
+
   ros::Subscriber arm_ctrl_mode_vr_sub_;
   std::mutex wbcArmTrajectoryControlMutex_;
+  ros::ServiceClient enableArmTrajInterpolatorClient_;
+  int lastRequestedWbcArmTrajMode_{-1};
+  bool lastArmTrajInterpolatorEnable_{false};
+  bool hasLastArmTrajInterpolatorEnable_{false};
 
   // FK 辅助函数：计算左手末端执行器姿态
   void computeLeftEndEffectorFK(Eigen::Vector3d& pOut, Eigen::Quaterniond& qOut);
@@ -124,6 +138,10 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void solveIk();
   void processVisual();
 
+  // 重写基类 processBonePoses，在VR数据到达时记录接收时刻、序列号、VR时间戳，
+  // 并测量 VR数据处理层→人形增量IK节点 的通信延迟
+  void processBonePoses(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg) override;
+
   bool detectLeftArmMove();
   bool detectRightArmMove();
 
@@ -143,6 +161,17 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   // 发布函数
   void publishJointStates();
+  // 用上一帧已发布位置的差分作为本帧速度，保证 /kuavo_arm_traj 的 q/v 运动学一致。
+  Eigen::VectorXd velocityFromPublishedArmPosition(const Eigen::VectorXd& previousQ,
+                                                   const Eigen::VectorXd& currentQ,
+                                                   const ros::Time& now) const;
+  void resetPublishedArmSmoother(const Eigen::VectorXd& q, const ros::Time& now);
+  void seedPublishedArmSmoother(const Eigen::VectorXd& q, const Eigen::VectorXd& v);
+  void smoothPublishedArmCommand(const Eigen::VectorXd& desiredQ, const ros::Time& now,
+                                 Eigen::VectorXd& qOut, Eigen::VectorXd& vOut);
+  void initializeArmJointRuckigFilter();
+  void resetArmJointRuckig(const Eigen::VectorXd& q);
+  void invalidateLastPublishedArmTraj();
   void publishSensorDataArmJoints();        // 发布传感器数据的手臂关节角
   void publishHandPosOptimizationPoints();  // 发布优化前后的手部位置点
   void publishHandPoseFromTransformer();    // 发布来自Transformer的手部pose
@@ -150,6 +179,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   void reset();                          // 重置所有运行时状态，确保进入系统时正常
   void forceDeactivateAllArmCtrlMode();  // 强制停用所有手臂控制模式
   void forceActivateAllArmCtrlMode();    // 强制激活所有手臂控制模式
+
+  // SG100 heiman 手:VR 输入注入(服务注册与发布线程由 SG100HandBridge 负责)
+  HighlyDynamic::SG100VrInput makeSg100VrInput();
 
   ros::Publisher kuavoArmTrajCppPublisher_;  // 发布kuavo_arm_traj_cpp；launch中通过remap话题方式来接入当前系统
   ArmTrajWriter arm_traj_writer_;           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
@@ -182,6 +214,18 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   ros::Publisher rightHandPoseFromTransformerPublisher_;  // 发布来自Transformer的右手pose
   ros::Publisher ikSolvedEefPosePublisher_;  // 发布IK求解后的末端执行器位姿（与Python版/drake_ik/eef_pose一致）
   ros::Publisher ikInputPosPublisher_;  // 发布IK输入的目标位姿（与Python版/drake_ik/input_pos一致）
+
+  // 跨线程延迟测量：VR数据处理层→人形增量IK节点通信延迟 + IK线程计算延迟
+  ros::Publisher commLatencyPublisher_;   // /vr_incremental/comm_latency_ms，VR节点→IK节点通信延迟(ms)
+  ros::Publisher armTrajLatencyPublisher_;  // /vr_incremental/arm_traj_latency_ms，骨骼接收→IK求解延迟(ms)
+  std::mutex boneRecvTimeMutex_;            // 保护 boneRecvTime_ / boneDataSeq_ / boneVrTimestampMs_
+  std::chrono::steady_clock::time_point boneRecvTime_;  // 骨骼数据到达回调的时刻
+  uint64_t boneDataSeq_ = 0;                // 骨骼数据序列号，每次回调递增
+  int64_t boneVrTimestampMs_ = 0;           // VR端时间戳（Unix毫秒），来自PoseInfoList.timestamp_ms
+  // IK线程中捕获的骨骼接收时刻和序列号，随IK结果传播
+  std::chrono::steady_clock::time_point ikResultBoneRecvTime_;
+  uint64_t currentBoneSeq_ = 0;
+  uint64_t lastProcessedBoneSeq_ = 0;        // 上一轮IK处理过的骨骼数据序列号
 
   std::thread ikSolveThread_;
   int armTrajPublishThreadPriority_ = DEFAULT_ARM_TRAJ_PUBLISH_THREAD_PRIORITY;
@@ -227,6 +271,18 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   Eigen::VectorXd latest_q_;    // 最新的关节角度（弧度）
   Eigen::VectorXd latest_dq_;   // 最新的关节角速度（弧度/秒）
   Eigen::VectorXd lowpass_dq_;  // 低通滤波后的关节角速度（弧度/秒）
+  ros::Time lastArmTrajPublishStamp_;
+  bool hasLastArmTrajPublishStamp_ = false;
+  Eigen::VectorXd lastPublishedArmPosition_;  // 上一帧真正发出去的 q，不受 fsmEnter 清零 latest_q_ 影响
+  bool hasLastPublishedArmPosition_ = false;
+  Eigen::VectorXd publishedArmQ_;
+  Eigen::VectorXd publishedArmV_;
+  bool hasPublishedArmSmoother_{false};
+  std::atomic<bool> reseedPublishedArmSmoother_{false};
+  bool enableArmTrajSmooth_{true};
+  double armTrajSmoothWn_{40.0};
+  double armTrajSmoothZeta_{1.0};
+  double armTrajSmoothAccLimit_{60.0};
   Eigen::VectorXd jointMidValues_;  // TEST: 关节限制中间值（用于测试），存储每个关节的(limit_lower+limit_upper)/2
 
   // 传感器数据关节角（14维，rad）：用于保存 sensorData 对应的机器人双臂关节数据（指数均值滤波后）
@@ -238,9 +294,13 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   double fhanKh0Joint_ = 6.0;      // 关节角度fhan滤波平滑系数
   double maxJointVelocity_ = 1.0;  // 关节最大角速度限制（弧度/秒）
   double lowpassDqAlpha_ = 0.9;    // lowpass_dq_低通滤波因子（历史值权重，新值权重为1-alpha）
+  double jointSpaceAccLimit_ = 100.0;   // 与轮臂相同：关节 Ruckig 加速度约束
+  double jointSpaceJerkLimit_ = 600.0;  // 与轮臂相同：关节 Ruckig 加加速度约束
+  std::unique_ptr<ocs2::mobile_manipulator::KinemicLimitFilter> armJointRuckigFilterPtr_;
 
-  // 腕部软限位速度阻尼参数：在 Quest3 最终 q/v 状态形成后平滑制动，并保持位置、速度一致
+  // 手臂关节限位：软边 = scale * URDF [low, high]，再做边界速度阻尼
   bool wristJointLimitVelocityDamperEnabled_ = true;
+  double armJointSoftLimitScale_ = 0.99;           // 软限位 = scale * URDF 上下限，0.99 ≈ 只留约 1% 边
   double wristJointLimitSoftZone_ = 0.14;          // [rad] 距离软限位多远开始减速
   double wristJointLimitStopAcceleration_ = 80.0; // [rad/s^2] 动态制动距离使用的减速度
   double wristJointLimitMaxVelocity_ = 4.0;        // [rad/s] 阻尼层允许的最大速度
@@ -292,6 +352,14 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   Eigen::VectorXd mec_limit_lower_;
   Eigen::VectorXd mec_limit_upper_;
+
+  // 与 /kuavo_arm_traj 14 维顺序一致：l1..l7, r1..r7，数值来自手臂 URDF
+  struct ArmJointLimit {
+    double lower{0.0};
+    double upper{0.0};
+    bool valid{false};
+  };
+  std::vector<ArmJointLimit> armJointLimits_;
   Eigen::Vector3d deltaScaleRPY_ = Eigen::Vector3d(1.0, 1.0, 1.0);
 
   // Grip 状态跟踪（用于检测上升沿并更新锚点，避免频繁切换 grip 时位置跳变）
@@ -347,6 +415,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   int rightHandSpikeCount_ = 0;        // 右手连续跳变计数
   ros::Time leftHandSpikeStartTime_;   // 左手跳变开始时间
   ros::Time rightHandSpikeStartTime_;  // 右手跳变开始时间
+
+  // SG100 heiman 手 ROS 桥接(手势库 + /sg100/* service + /sg100_hand_command 发布线程)
+  std::unique_ptr<HighlyDynamic::SG100HandBridge> sg100_bridge_;
 };
 
 }  // namespace HighlyDynamic

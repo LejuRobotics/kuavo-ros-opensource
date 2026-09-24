@@ -33,7 +33,7 @@ from kuavo_msgs.msg import (
 from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode, changeTorsoCtrlModeRequest, changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.srv import fkSrv
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeRequest
-from std_msgs.msg import Float32MultiArray, Int32, Bool, Empty
+from std_msgs.msg import Float32MultiArray, Int32, Bool, Empty, Float64
 from std_srvs.srv import Trigger, TriggerResponse, SetBool
 from geometry_msgs.msg import Twist
 from .pico_utils import KuavoPicoInfoTransformer
@@ -290,6 +290,7 @@ class KuavoPicoNode:
             self._pico_bone_trace_limit = 512
             # Initialize publishers
             self._init_publishers()
+            self._init_latency_diagnostics()
             # Initialize subscribers
             self._init_subscribers()
             # Initialize joy handler
@@ -604,6 +605,84 @@ class KuavoPicoNode:
         self.pub_cmd_pose = rospy.Publisher('/cmd_pose', Twist, queue_size=10)
         self.pub_switch_gait = rospy.Publisher('/humanoid_switch_gait_by_name', switchGaitByName, queue_size=10)
         self.pub_stop_robot = rospy.Publisher('/stop_robot', Bool, queue_size=10)
+
+    def _init_latency_diagnostics(self) -> None:
+        """对齐 Quest3: VR 节点处理延迟默认关闭, 由 /enable_vr_latency_diagnostics 打开."""
+        self.enable_vr_latency_diagnostics = bool(
+            rospy.get_param(
+                "~enable_vr_latency_diagnostics",
+                rospy.get_param("/enable_vr_latency_diagnostics", False),
+            )
+        )
+        self.processing_latency_pub = None
+        self.bone_comm_latency_pub = None
+        self.eef_processing_latency_pub = None
+        self._processing_latency_samples = []
+        self._processing_latency_log_every = 100
+        self._bone_callback_recv_ns = 0
+        if self.enable_vr_latency_diagnostics:
+            self.processing_latency_pub = rospy.Publisher(
+                "/pico/node_processing_latency_ms", Float64, queue_size=10
+            )
+            # /leju_pico_bone_poses 发布 → 本节点回调收到
+            self.bone_comm_latency_pub = rospy.Publisher(
+                "/pico/comm_latency_ms", Float64, queue_size=10
+            )
+            # 回调入口 → 发布 /mm/two_arm_hand_pose_cmd (或 /ik/two_arm_hand_pose_cmd)
+            self.eef_processing_latency_pub = rospy.Publisher(
+                "/pico/node_latency_ms", Float64, queue_size=10
+            )
+        SDKLogger.info(
+            "Pico VR latency diagnostics: %s",
+            "enabled" if self.enable_vr_latency_diagnostics else "disabled",
+        )
+
+    @staticmethod
+    def _unix_timestamp_ms() -> int:
+        # 与 Quest3 monitor 一致: 本机 Unix 毫秒, 供 IK 用 ros::Time::now() 同钟算通信延迟.
+        return int(time.time() * 1000)
+
+    def _on_bone_poses_received(self, pico_hands_poses_msg: picoPoseInfoList) -> None:
+        """骨骼话题通信: 发布时刻 timestamp_ms → 本回调收到."""
+        self._bone_callback_recv_ns = monotonic_ns()
+        if self.bone_comm_latency_pub is None:
+            return
+        ts_ms = int(getattr(pico_hands_poses_msg, "timestamp_ms", 0) or 0)
+        if ts_ms <= 0:
+            return
+        delay_ms = time.time() * 1000.0 - ts_ms
+        if delay_ms < 0:
+            return
+        self.bone_comm_latency_pub.publish(Float64(data=delay_ms))
+
+    def _stamp_ik_cmd(self, eef_pose_msg: twoArmHandPoseCmd) -> twoArmHandPoseCmd:
+        if self.eef_processing_latency_pub is not None and self._bone_callback_recv_ns > 0:
+            delay_ms = (monotonic_ns() - self._bone_callback_recv_ns) / 1e6
+            if delay_ms >= 0:
+                self.eef_processing_latency_pub.publish(Float64(data=delay_ms))
+        eef_pose_msg.timestamp_ms = self._unix_timestamp_ms()
+        return eef_pose_msg
+
+    def publish_node_processing_latency(self, recv_monotonic_ns: int) -> None:
+        """UDP 收到 → 骨骼话题即将发布, 对齐 Quest3 /quest3/node_processing_latency_ms."""
+        if self.processing_latency_pub is None or recv_monotonic_ns <= 0:
+            return
+        delay_ms = (monotonic_ns() - recv_monotonic_ns) / 1e6
+        if delay_ms < 0:
+            return
+        self.processing_latency_pub.publish(Float64(data=delay_ms))
+        self._processing_latency_samples.append(delay_ms)
+        if len(self._processing_latency_samples) >= self._processing_latency_log_every:
+            samples = self._processing_latency_samples
+            avg = sum(samples) / len(samples)
+            SDKLogger.info(
+                "Pico node processing latency: n=%d avg=%.2f ms min=%.2f max=%.2f",
+                len(samples),
+                avg,
+                min(samples),
+                max(samples),
+            )
+            self._processing_latency_samples = []
 
     def _init_subscribers(self) -> None:
         """Initialize ROS subscribers."""
@@ -1407,7 +1486,7 @@ class KuavoPicoNode:
             return
             
         if self.pico_info_transformer.is_running:
-            self.pub.publish(eef_pose_msg)
+            self.pub.publish(self._stamp_ik_cmd(eef_pose_msg))
         else:
             SDKLogger.warn("Not publishing to /mm/two_arm_hand_pose_cmd because is_running is False")
         
@@ -1452,7 +1531,7 @@ class KuavoPicoNode:
         if self.pico_info_transformer.is_running:
             if self.control_mode_changing:
                 eef_pose_msg = self.interpolate_eef_pose(eef_pose_msg)
-            self.pub_ik.publish(eef_pose_msg)
+            self.pub_ik.publish(self._stamp_ik_cmd(eef_pose_msg))
         else:
             SDKLogger.warn("Not publishing to /ik/two_arm_hand_pose_cmd because is_running is False")
             # Handle service mode changes
@@ -1707,7 +1786,7 @@ class KuavoPicoNode:
             elif self.pico_info_transformer.is_running:
                 if self.control_mode_changing:
                     eef_pose_msg = self.interpolate_eef_pose(eef_pose_msg)
-                self.pub.publish(eef_pose_msg)
+                self.pub.publish(self._stamp_ik_cmd(eef_pose_msg))
         
         # Handle service mode changes
         if self.send_srv and (self.last_pico_running_state != self.pico_info_transformer.is_running):
@@ -1722,6 +1801,7 @@ class KuavoPicoNode:
 
     def pico_hands_poses_callback_choose(self, pico_hands_poses_msg: picoPoseInfoList) -> None:
         """Callback for Pico hands poses."""
+        self._on_bone_poses_received(pico_hands_poses_msg)
         if self.diagnostic_logger is not None:
             callback_monotonic_ns = monotonic_ns()
             trace = self._take_pico_bone_trace(int(getattr(pico_hands_poses_msg, "timestamp_ms", 0) or 0))

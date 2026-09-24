@@ -18,6 +18,7 @@ import random
 import string
 import pwd
 import grp
+import getpass
 
 if sys.version_info[0] == 2:
     print("你正在使用 Python 2.x , 请更换运行指令为：$ sudo python3 tools/check_tool/Hardware_tool.py ")
@@ -25,6 +26,13 @@ if sys.version_info[0] == 2:
 
 
 folder_path = os.path.dirname(os.path.abspath(__file__))    # check_tool/
+
+CURRENT_USER = os.getenv("SUDO_USER") or getpass.getuser()
+try:
+    USER_HOME = pwd.getpwnam(CURRENT_USER).pw_dir
+except KeyError:
+    USER_HOME = os.path.expanduser('~{}'.format(CURRENT_USER))
+LAB_CONFIG_DIR = os.path.join(USER_HOME, '.config', 'lejuconfig')
 
 # 导入 robot_version 模块
 robot_version_path = os.path.join(os.path.dirname(os.path.dirname(folder_path)), 'src/kuavo_common/python')
@@ -35,7 +43,7 @@ except ImportError:
     RobotVersion = None
     # 只在需要时打印警告，避免在导入时就打印
 
-sys.path.append('/home/lab/.local/lib/python3.8/site-packages/')
+sys.path.append(os.path.join(USER_HOME, '.local/lib/python3.8/site-packages/'))
 sys.path.append(os.path.join(folder_path,"Ruierman"))
 
 import yaml
@@ -76,8 +84,7 @@ class bcolors:
 
 def get_robot_version():
     # 获取用户的主目录
-    home_dir = os.path.expanduser('/home/lab/')
-    bashrc_path = os.path.join(home_dir, '.bashrc')
+    bashrc_path = os.path.join(USER_HOME, '.bashrc')
 
     # 初始化变量
     robot_version = None
@@ -160,8 +167,7 @@ def usb_port():
 
 def imu_software():
     # 定义要运行的命令
-    command = "/home/lab/mtmanager/linux-x64/bin/mtmanager" 
-
+    command = os.path.join(USER_HOME, "mtmanager/linux-x64/bin/mtmanager")
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
 
@@ -224,10 +230,10 @@ def leju_claw_test():
     """
     主菜单使用的简单测试函数
     """
-    uid = pwd.getpwnam('lab').pw_uid
-    gid = grp.getgrnam('lab').gr_gid
+    uid = pwd.getpwnam(CURRENT_USER).pw_uid
+    gid = grp.getgrnam(CURRENT_USER).gr_gid
     source_file = folder_path + '/config.yaml'
-    target_file = '/home/lab/.config/lejuconfig/config.yaml'
+    target_file = os.path.join(LAB_CONFIG_DIR, 'config.yaml')
     if not os.path.exists(source_file):
         print("kuavo_opensource 手臂电机 config.yaml 文件丢失")
     elif not os.path.exists(target_file):
@@ -289,10 +295,10 @@ def leju_claw_test_with_menu():
     """
     开发者工具菜单使用的带子菜单的测试函数
     """
-    uid = pwd.getpwnam('lab').pw_uid
-    gid = grp.getgrnam('lab').gr_gid
+    uid = pwd.getpwnam(CURRENT_USER).pw_uid
+    gid = grp.getgrnam(CURRENT_USER).gr_gid
     source_file = folder_path + '/config.yaml'
-    target_file = '/home/lab/.config/lejuconfig/config.yaml'
+    target_file = os.path.join(LAB_CONFIG_DIR, 'config.yaml')
     if not os.path.exists(source_file):
         print("kuavo_opensource 手臂电机 config.yaml 文件丢失")
     elif not os.path.exists(target_file):
@@ -446,8 +452,8 @@ def leju_claw_send_position():
 
 def dxl_zero():
     # 定义要运行的命令
-    if(folder_path.startswith("/home/lab/kuavo_opensource/")):
-        command = "sudo bash /home/lab/kuavo_opensource/bin/start_tools.sh /home/lab/kuavo_opensource/bin/dynamixel_calibrate_servos  --record"
+    if(folder_path.startswith(os.path.join(USER_HOME, "kuavo_opensource/"))):
+        command = "sudo bash " + os.path.join(USER_HOME, "kuavo_opensource/bin/start_tools.sh") + " " + os.path.join(USER_HOME, "kuavo_opensource/bin/dynamixel_calibrate_servos") + "  --record"
     else:
         command =  folder_path +"/../../build/lib/DynamixelSDK/dynamixel_calibrate_servos --record" 
 
@@ -516,7 +522,7 @@ def elmo_position_read():
     almoZR_path = folder_path + "/elmoZeroRead.py"
     print("1.复制运行该行命令修改内容进行零点数据转换：code " + almoZR_path)
     print("2.复制运行指令，将运行结果复制粘贴到零点文件中保存：python3 " + almoZR_path)
-    print("3.复制运行该行命令打开零点文件进行修改：code /home/lab/.config/lejuconfig/offset.csv")
+    print("3.复制运行该行命令打开零点文件进行修改：code " + os.path.join(LAB_CONFIG_DIR, "offset.csv"))
 
 def claw_usb(choice):
 
@@ -1093,7 +1099,7 @@ def isolate_cores():
     subprocess.run(command, shell=True)
 
 def license_sign():
-    FILE = "/home/lab/.config/lejuconfig/ec_master.key"
+    FILE = os.path.join(LAB_CONFIG_DIR, "ec_master.key")
     # 检查文件是否存在
     if os.path.exists(FILE):
         # 打开文件并读取内容
@@ -1171,7 +1177,7 @@ def reset_folder():
     }
 
     # 指定目标路径
-    target_path = "/home/lab/"
+    target_path = USER_HOME + "/"
 
     license_str = input("请谨慎，此操作将会删除文件和文件夹内容不可恢复！！！（回车继续）：")
 
@@ -1182,7 +1188,7 @@ def reset_folder():
     # 检查用户输入是否正确（区分大小写）
     if user_input == random_char:
         delete_except_preserved(target_path, preserve)
-        delete_except_preserved("/home/lab/.ssh/", {})
+        delete_except_preserved(os.path.join(USER_HOME, ".ssh/"), {})
         print("文件夹清除成功。")
     else:
         print("您输入的字符不符，请重试。")
@@ -1277,12 +1283,55 @@ def robot_login():
     
 
     # 定义要运行的命令
-    command = "bash "+ folder_path +"/report_robot_network_info_service/setup.sh"  
+    command = "bash "+ folder_path +"/report_robot_network_info_service/setup.sh"
 
     # 使用 subprocess.run() 运行命令
     subprocess.run(command, shell=True)
-    
+
     # sudo systemctl start report_robot_network_info.service
+
+def is_hotspot_installed():
+    """检测热点是否已安装（依据 dpkg 中 linux-wifi-hotspot 软件包状态）"""
+    try:
+        result = subprocess.run(
+            ["dpkg", "-s", "linux-wifi-hotspot"],
+            capture_output=True, text=True
+        )
+        # 仅在状态为 install ok installed 时判定为已安装
+        return result.returncode == 0 and "install ok installed" in result.stdout
+    except Exception as e:
+        print("Error checking hotspot install state: {}".format(e))
+        return False
+
+
+def hotspot_toggle():
+    """一键安装/卸载热点，按当前状态自动切换（已安装→卸载，未安装→安装）"""
+    hotspot_dir = os.path.normpath(os.path.join(folder_path, "..", "linux_wifi_hotspot"))
+    install_script = os.path.join(hotspot_dir, "kuavo_hotspot_install.sh")
+    uninstall_script = os.path.join(hotspot_dir, "uninstall.sh")
+
+    if is_hotspot_installed():
+        print(bcolors.OKGREEN + "检测到热点已安装，当前可执行【卸载】操作" + bcolors.ENDC)
+        print("提示：卸载后开机不再自动开启热点，如需恢复请重新安装")
+        if not os.path.exists(uninstall_script):
+            print(bcolors.FAIL + "错误：未找到卸载脚本: {}".format(uninstall_script) + bcolors.ENDC)
+            return
+        confirm = input("确定要卸载热点吗？(yes/no)：").strip().lower()
+        if confirm == "yes":
+            subprocess.run("sudo bash " + uninstall_script, shell=True)
+        else:
+            print("操作已取消")
+    else:
+        print(bcolors.OKCYAN + "检测到热点未安装，当前可执行【安装】操作" + bcolors.ENDC)
+        print("提示：安装过程需要联网下载依赖包，请保持网络畅通")
+        if not os.path.exists(install_script):
+            print(bcolors.FAIL + "错误：未找到安装脚本: {}".format(install_script) + bcolors.ENDC)
+            return
+        confirm = input("确定要安装热点吗？(yes/no)：").strip().lower()
+        if confirm == "yes":
+            subprocess.run("sudo bash " + install_script, shell=True)
+        else:
+            print("操作已取消")
 
 def get_git_info():
     """
@@ -1378,6 +1427,7 @@ def secondary_menu():
         print("p. 国产IMU测试")
         print("r. 隔离CPU核心 ")
         print("u. 配置robot上线提醒")
+        print("s. 一键安装/卸载WiFi热点")
         print("t. 恢复出厂文件夹")
         print("v. 执行CPU压力测试，检查散热")
 
@@ -1387,7 +1437,7 @@ def secondary_menu():
             break
         if option == "0":
             print(bcolors.HEADER + "###开始，打开零点文件###" + bcolors.ENDC)
-            print("复制运行该行命令打开：code /home/lab/.config/lejuconfig/offset.csv")
+            print("复制运行该行命令打开：code " + os.path.join(LAB_CONFIG_DIR, "offset.csv"))
             print(bcolors.HEADER + "###结束，打开零点文件###" + bcolors.ENDC)
             break
         elif option == "1":
@@ -1625,10 +1675,15 @@ def secondary_menu():
             print("运行指令将触发提示：sudo systemctl start report_robot_network_info.service")
             print(bcolors.HEADER + "###结束，robot上线提醒配置###" + bcolors.ENDC)   
             break
+        elif option == "s":
+            print(bcolors.HEADER + "###开始，一键安装/卸载WiFi热点###" + bcolors.ENDC)
+            hotspot_toggle()
+            print(bcolors.HEADER + "###结束，一键安装/卸载WiFi热点###" + bcolors.ENDC)
+            break
         elif option == "t":
             print(bcolors.HEADER + "###开始，恢复出厂文件夹###" + bcolors.ENDC)
             reset_folder()
-            print(bcolors.HEADER + "###结束，恢复出厂文件夹###" + bcolors.ENDC) 
+            print(bcolors.HEADER + "###结束，恢复出厂文件夹###" + bcolors.ENDC)
             break
         elif option == "v":
             print(bcolors.HEADER + "###开始，执行CPU压力测试，检查散热###" + bcolors.ENDC)
@@ -1720,7 +1775,7 @@ if __name__ == '__main__':
             break
         elif option == "0":
             print(bcolors.HEADER + "###开始，打开零点文件###" + bcolors.ENDC)
-            print("复制运行该行命令打开：code /home/lab/.config/lejuconfig/offset.csv")
+            print("复制运行该行命令打开：code " + os.path.join(LAB_CONFIG_DIR, "offset.csv"))
             print(bcolors.HEADER + "###结束，打开零点文件###" + bcolors.ENDC)
             break
         elif option == "1":

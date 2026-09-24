@@ -101,6 +101,8 @@ ArmController::~ArmController()
 
 void ArmController::reset()
 {
+  // Keep reset atomic with respect to both external trajectory producers.
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
   requested_arm_mode_.store(kNoRequestedArmMode, std::memory_order_release);
   default_pose_return_for_switch_state_.store(DefaultPoseReturnState::kIdle,
                                                std::memory_order_release);
@@ -136,6 +138,8 @@ void ArmController::reset()
     external_target_q_ = current_arm_pos_;
     external_target_v_.setZero();
     external_target_received_ = false;
+    buffered_mode2_target_q_ = current_arm_pos_;
+    buffered_mode2_target_v_.setZero();
     buffered_mode2_target_received_ = false;
     last_external_input_time_valid_ = false;
   }
@@ -151,6 +155,8 @@ void ArmController::reset()
   
   // 重置缓存的模式切换指令
   pending_arm_mode_.reset();
+  offline_action_input_active_.store(false, std::memory_order_release);
+  external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
 
   ROS_INFO("[ArmController] Reset: cleared interpolation states and cached command positions");
 }
@@ -192,12 +198,11 @@ bool ArmController::initialize(const std::string& urdf_path,
     ROS_DEBUG("[ArmController] URDF path provided but kp/kd not provided, torque controller not initialized");
   }
   
-  // Subscribe to VR input topic
+  // Generic external input (VR / SDK). Offline actions use a dedicated topic;
+  // ArmController arbitrates the two sources before either can write a target.
   joint_sub_ = nh_.subscribe<sensor_msgs::JointState>(
     "/kuavo_arm_traj", 3,
     boost::bind(&ArmController::jointStateCallback, this, _1));
-
-  // Subscribe to action trajectory topic（不受 external_target_locked_ 控制）
   action_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
     "/kuavo_action_traj", 3,
     boost::bind(&ArmController::actionTrajectoryCallback, this, _1));
@@ -276,13 +281,53 @@ void ArmController::setExternalControlPaused(bool paused)
 
 void ArmController::clearExternalTarget()
 {
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  // Invalidate a generic callback that may currently be evaluating the
+  // controller-routing callback without holding the owner mutex.
+  external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  clearExternalTargetStateForOwnerSwitch();
+}
+
+void ArmController::setOfflineActionInputActive(bool active)
+{
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  const bool was_active = offline_action_input_active_.load(std::memory_order_relaxed);
+  if (was_active == active)
+  {
+    return;
+  }
+
+  // When handing ownership to the action source, publish the new owner first so
+  // the WBC-side generic-buffer check cannot apply an old generic target while
+  // it is being cleared. On hand-back, clear first and expose generic ownership
+  // only after the old action target has gone.
+  if (active)
+  {
+    offline_action_input_active_.store(true, std::memory_order_release);
+  }
+  external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  clearExternalTargetStateForOwnerSwitch();
+  if (!active)
+  {
+    offline_action_input_active_.store(false, std::memory_order_release);
+  }
+
+  ROS_INFO("[ArmController] External input owner -> %s",
+           active ? "offline action (/kuavo_action_traj)" : "generic (/kuavo_arm_traj)");
+}
+
+void ArmController::clearExternalTargetStateForOwnerSwitch()
+{
   std::lock_guard<std::mutex> lock(external_target_mutex_);
   external_target_received_ = false;
   raw_external_target_q_ = desire_arm_q_;
   raw_external_target_v_.setZero();
   external_target_q_ = desire_arm_q_;
   external_target_v_.setZero();
+  buffered_mode2_target_q_ = desire_arm_q_;
+  buffered_mode2_target_v_.setZero();
   buffered_mode2_target_received_ = false;
+  last_external_input_time_valid_ = false;
 }
 
 void ArmController::updateInternalState(const Eigen::VectorXd& joint_pos,
@@ -883,13 +928,41 @@ void ArmController::applyRateLimitedInterpolation(double dt,
 
 void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
-  if (external_target_locked_ || external_control_pause_requested_.load()) return;
+  if (external_control_pause_requested_.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  std::uint64_t owner_epoch = 0;
+  {
+    std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+    if (offline_action_input_active_.load(std::memory_order_acquire))
+    {
+      return;
+    }
+    owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
+  }
+
+  // The routing callback can take RLControllerManager's mutex. Do not hold the
+  // owner mutex across it: controller switching reaches this object in the
+  // opposite direction. The epoch check below drops this message if ownership
+  // changed while routing was evaluated (including action->generic ABA).
   std::function<bool()> external_command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     external_command_buffer_callback = external_command_buffer_callback_;
   }
-  if (external_command_buffer_callback && external_command_buffer_callback())
+  const bool should_buffer =
+      external_command_buffer_callback && external_command_buffer_callback();
+
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  if (offline_action_input_active_.load(std::memory_order_acquire) ||
+      external_input_owner_epoch_.load(std::memory_order_acquire) != owner_epoch ||
+      external_control_pause_requested_.load(std::memory_order_acquire))
+  {
+    return;
+  }
+  if (should_buffer)
   {
     std::lock_guard<std::mutex> lock(external_target_mutex_);
     if (external_control_pause_requested_.load()) return;
@@ -911,9 +984,16 @@ void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& 
 
 void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
-  // 动作轨迹回调：不受 external_target_locked_ 控制，专用于离线动作播放
-  if (!external_control_pause_requested_.load() &&
-      arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  if (!offline_action_input_active_.load(std::memory_order_acquire) ||
+      external_control_pause_requested_.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  // Offline actions are only meaningful for the already-active manipulation
+  // controller. They intentionally never enter the generic auto-switch buffer.
+  if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
   {
     std::lock_guard<std::mutex> lock(external_target_mutex_);
     if (external_control_pause_requested_.load() ||
@@ -925,6 +1005,17 @@ void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::Cons
 
 void ArmController::applyBufferedMode2TargetIfReady()
 {
+  // Only generic input participates in automatic controller-switch buffering.
+  std::uint64_t owner_epoch = 0;
+  {
+    std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+    if (offline_action_input_active_.load(std::memory_order_acquire))
+    {
+      return;
+    }
+    owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
+  }
+
   {
     std::lock_guard<std::mutex> lock(external_target_mutex_);
     if (!buffered_mode2_target_received_ || external_control_pause_requested_.load())
@@ -943,6 +1034,13 @@ void ArmController::applyBufferedMode2TargetIfReady()
     return;
   }
   if (arm_control_mode_ != ControlMode::kExternal || !arm_vr_enabled_)
+  {
+    return;
+  }
+
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  if (offline_action_input_active_.load(std::memory_order_acquire) ||
+      external_input_owner_epoch_.load(std::memory_order_acquire) != owner_epoch)
   {
     return;
   }

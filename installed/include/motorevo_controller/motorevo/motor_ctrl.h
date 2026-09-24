@@ -118,6 +118,14 @@ public:
     bool controlTorque(float torque);
 
     ///////////////////////////////////////////////////////////////
+    /*** RT 实时直发 ***/
+    /** @brief 设置是否走 RT 直发路径（绕过 ring 队列）
+     *  @param enable true=RT 直发（sendMessageRt），false=入队（sendMessage）
+     *  @note 由 RevoMotorControl 在初始化/注册 RT 源时统一设置
+     */
+    void setRtSend(bool enable);
+
+    ///////////////////////////////////////////////////////////////
     /*** Motor Helper ***/
 
     bool receiveFeedback(const FeedbackFrame& frame);
@@ -130,6 +138,7 @@ private:
     data_t*             data_;             // 电机原始数据
     uint8_t             canbus_id_;        // CAN总线ID
     MotorId             id_;               // 电机ID
+    std::atomic<bool>   rt_send_{false};   // RT 直发模式标志（绕过 ring 队列）
 };
 
 
@@ -264,6 +273,32 @@ public:
      */
     void write();
 
+    ///////////////////////////////////////////////////////////////
+    /*** RT 实时直发 ***/
+
+    /** @brief 设置所有电机是否走 RT 直发路径（绕过 ring 队列）
+     *  @param enable true=RT 直发（sendMessageRt），false=入队（sendMessage）
+     *  @note 必须在注册 RT 源之前调用
+     */
+    void setRtSend(bool enable);
+
+    /** @brief 将本控制器的电机编码注册为 RT 源
+     *
+     * 注册后，sender 线程每轮会先调用本回调（取最新 cmd → 编码所有使能电机 PTM 帧 → 直写 CAN），
+     * 再处理 ring 队列。适用于电机控制帧这种 "latest-wins" 语义的高实时性消息。
+     *
+     * @return 注册是否成功
+     */
+    bool registerRtSource();
+
+    /** @brief 注销 RT 源（析构时自动调用） */
+    void unregisterRtSource();
+
+    /** @brief RT 源回调：取最新 cmd → 编码所有使能电机 PTM 帧 → 直发
+     *  @note 在 sender 线程内执行
+     */
+    void rtWrite();
+
     /** @brief 析构函数，清理资源 */
     ~RevoMotorControl();
 
@@ -331,12 +366,11 @@ private:
         RevoMotorConfig_t config;         // 电机配置
         RevoMotorCmd_t cmd;               // 电机控制命令
         std::atomic<MotorErrCode> fault_code;  // 故障代码
-        mutable std::mutex cmd_mutex;     // 保护cmd字段的互斥锁
 
         MotorCtrlData(bool fr, RevoMotor&& m, const RevoMotorConfig_t& c)
             : operation(Operation::IDLE), operation_status(OperationStatus::SUCCESS),
               feedback_received(fr), motor(std::move(m)), config(c),
-              cmd{0.0, 0.0, 0.0, 0.0, 0.0}, fault_code{MotorErrCode::NO_FAULT}, cmd_mutex() {}
+              cmd{0.0, 0.0, 0.0, 0.0, 0.0}, fault_code{MotorErrCode::NO_FAULT} {}
 
         bool isEnabled() const {
             if(fault_code != MotorErrCode::NO_FAULT) return false;  // 有故障码
@@ -345,15 +379,13 @@ private:
                 && (operation_status.load() == OperationStatus::SUCCESS || operation_status.load() == OperationStatus::PENDING) ;
         }
 
-        // 线程安全地获取电机命令
+        // 获取电机命令（调用方需持 RevoMotorControl::batch_mutex_ 保护，避免每电机一把锁）
         RevoMotorCmd_t getCmd() const {
-            std::lock_guard<std::mutex> lock(cmd_mutex);
             return cmd;
         }
 
-        // 线程安全地设置电机命令
+        // 设置电机命令（调用方需持 RevoMotorControl::batch_mutex_ 保护）
         void setCmd(const RevoMotorCmd_t& new_cmd) {
-            std::lock_guard<std::mutex> lock(cmd_mutex);
             cmd = new_cmd;
         }
 
@@ -377,9 +409,11 @@ private:
     std::atomic<bool> zero_torque_mode_{false};  // 0-torque模式标志
 
     std::string canbus_name_;  // CAN总线名称
+    canbus_sdk::BusId bus_id_{static_cast<canbus_sdk::BusId>(-1)};  // 本控制器所属总线 ID（registerRtSource 时获取）
     std::map<MotorId, MotorCtrlData> motor_ctrl_datas_;
     std::map<MotorId, float> initial_target_positions_;  // 电机回零时的目标初始位置(rad)，如果某个电机ID不在map中，则默认回零到0
     mutable std::mutex initial_target_positions_mutex_;  // 保护initial_target_positions_的互斥锁
+    mutable std::mutex batch_mutex_;   // 整组锁：保护所有电机的 cmd 字段（替代 per-motor cmd_mutex）
 
 };
 

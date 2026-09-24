@@ -1097,7 +1097,7 @@ RuiWoActuator::MotorStateDataVec RuiWoActuator::get_motor_state()
                             PyObject *motor_id = PyList_GetItem(motors, i);
                             int id = PyLong_AsUnsignedLongMask(motor_id);
                             if (!PyErr_Occurred()) 
-                                motor_states.push_back(MotorStateData{id ,state});
+                                motor_states.push_back(MotorStateData{static_cast<uint8_t>(id), state});
                             else 
                                 PyErr_Print();
                         }

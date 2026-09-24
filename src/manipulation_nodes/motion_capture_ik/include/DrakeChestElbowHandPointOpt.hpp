@@ -71,7 +71,7 @@ struct DrakeChestElbowHandBoundsConfig {
 
   // Lower bound on p1 (elbow) XY-plane projection norm: ||p1_xy|| >= minP1XyNorm
   // Constraint: p1_x^2 + p1XyNormYWeight * p1_y^2 >= minP1XyNorm^2
-  double minP1XyNorm = 0.22;      // [m] minimum XY-plane projection norm for elbow position
+  double minP1XyNorm = 0.12;      // [m] minimum body-Y keep-out for elbow; keep below ~0.12 so near-body circles are not folded
   double p1XyNormYWeight = 0.81;  // weight coefficient for p1_y in the XY norm constraint
 };
 

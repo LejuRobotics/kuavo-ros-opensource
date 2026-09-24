@@ -8,6 +8,8 @@
 #include "humanoid_interface/common/TopicLogger.h"
 #include "humanoid_controllers/LowPassFilter.h"
 #include <Eigen/Dense>
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <functional>
@@ -99,12 +101,24 @@ public:
      */
     bool changeMode(int target_mode);
     void setExternalCommandBufferCallback(std::function<bool()> callback);
+
+    /**
+     * @brief Select the exclusive producer for mode-2 waist targets.
+     * @param active false accepts /robot_waist_motion_data; true accepts
+     *        /robot_action_waist_motion_data.
+     *
+     * Switching ownership discards targets buffered by the previous producer,
+     * so a stale generic/VR command cannot leak into an offline action (or vice
+     * versa).
+     */
+    void setOfflineActionInputActive(bool active);
     
     /**
      * @brief 获取当前控制模式
      * @return 当前模式：1 或 2
      */
     int getMode() const { return waist_control_mode_; }
+    bool isEnabled() const { return waist_control_enabled_; }
 
     /**
      * @brief 检查是否已收到外部腰部目标输入
@@ -177,6 +191,11 @@ private:
      * @brief 腰部轨迹回调函数（处理/robot_waist_motion_data话题）
      */
     void waistTrajectoryCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg);
+    /**
+     * @brief 离线动作腰部轨迹回调（处理/robot_action_waist_motion_data）
+     */
+    void offlineActionWaistTrajectoryCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg);
+    void clearExternalInputTargetsLocked();
     void applyBufferedExternalCommandIfReady();
     bool storeMode2WaistTarget(const kuavo_msgs::robotWaistControl& msg,
                                Eigen::VectorXd& target_q) const;
@@ -207,6 +226,7 @@ private:
     // ROS相关
     ros::NodeHandle nh_;
     ros::Subscriber waist_traj_sub_;  // 订阅/robot_waist_motion_data话题
+    ros::Subscriber action_waist_traj_sub_;  // 订阅/robot_action_waist_motion_data话题
     ros::Subscriber enable_waist_control_sub_;  // 订阅/humanoid_controller/enable_waist_control话题
     ocs2::humanoid::TopicLogger* ros_logger_;  // ROS日志发布器（可选）
     
@@ -253,6 +273,10 @@ private:
     
     // 线程安全
     mutable std::mutex state_mutex_;    // 状态访问互斥锁
+    // 只串行化 generic/action producer 回调与 owner 切换；WBC update 不在此锁范围。
+    std::mutex input_owner_mutex_;
+    std::atomic_bool offline_action_input_active_{false};
+    std::atomic<std::uint64_t> external_input_owner_epoch_{0};
 };
 
 } // namespace humanoid_controller

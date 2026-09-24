@@ -1,8 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
 <robot name="biped_s200049">
-  <mujoco>
-    <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
-  </mujoco>
   <link name="dummy_link" />
   <link name="base_link">
     <inertial>
@@ -687,187 +684,319 @@
     <child link="zarm_l7_end_effector" />
   </joint>
   
-  <link name="l_f_bar-1">
-    <inertial>
-      <origin xyz="0.00725 1e-05 -0.01052" rpy="0 0 0" />
-      <mass value="0.045" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar-1.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
- 
-  <joint name="l_f_bar-1_joint" type="revolute">
-    <origin xyz="0.0220000003906073 0 -0.111399999999999" rpy="0 0 0" />
-    <parent link="zarm_l7_link" />
-    <child link="l_f_bar-1" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
-  <link name="l_f_bar-2">
-    <inertial>
-      <origin xyz="-0.00783 0.0 -0.01475" rpy="0 0 0" />
-      <mass value="0.009" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar-2.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="l_f_bar-2" type="fixed">
-    <origin xyz="0.025438097941138 0 -0.0464962705293307" rpy="0 0 0" />
-  <parent link="l_f_bar-1" />
-  <child link="l_f_bar-2" />
-    <axis xyz="0 1 0" />
-  </joint>
+  <link name="l_f_bar_1">
+      <inertial>
+        <origin xyz="0.00322753116319567 0.000854250125364265 0.00181672083638126" rpy="0 0 0" />
+        <mass value="0.00325066797251089" />
+        <inertia ixx="5.89274550959275E-08" ixy="-3.8555494700508E-17" ixz="1.8319693150317E-08" iyy="6.20572809906661E-08" iyz="-2.25674209225906E-16" izz="8.11618209303928E-08" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_1.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_1.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_f_bar_1_joint" type="revolute">
+      <origin xyz="0.0125 -0.0004996970768135975 -0.10413702837623" rpy="0 0 0" />
+      <parent link="zarm_l7_link" />
+      <child link="l_f_bar_1" />
+      <axis xyz="0 1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
+  <link name="l_f_bar_2">
+      <inertial>
+        <origin xyz="0.00572824694862739 0.000485137795486076 -0.00660962990672727" rpy="0 0 0" />
+        <mass value="0.00572390622451971" />
+        <inertia ixx="2.50119562505792E-07" ixy="-5.56749512952193E-15" ixz="-1.22212457770198E-07" iyy="3.03179337986276E-07" iyz="4.09546461462654E-15" izz="2.74242949160618E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_2.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_2.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_f_bar_2" type="revolute">
+      <origin xyz="0.011329 0 0.0063767" rpy="0 0 0" />
+      <parent link="l_f_bar_1" />
+      <child link="l_f_bar_2" />
+      <axis xyz="0 1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
+  <link name="l_f_bar_3">
+      <inertial>
+        <origin xyz="-0.00113844924727485 0.000243210094878313 -0.0219184644074809" rpy="0 0 0" />
+        <mass value="0.0114171723913655" />
+        <inertia ixx="2.64606588101444E-06" ixy="-5.58751745150286E-13" ixz="3.78867923441828E-07" iyy="2.35910688649942E-06" iyz="-4.04927102911966E-13" izz="5.84666852575467E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_3.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_3.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_f_bar_3" type="revolute">
+      <origin xyz="0.016204 0 -0.014934" rpy="0 0 0" />
+      <parent link="l_f_bar_2" />
+      <child link="l_f_bar_3" />
+      <axis xyz="0 1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
   <link name="l_f_fingers">
-    <inertial>
-      <origin xyz="-0.01551 -1e-05 -0.01331" rpy="0 0 0" />
-      <mass value="0.014" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_fingers.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="l_f_fingers" type="fixed">
-    <origin xyz="-0.0191548518271909 0 -0.0292932014550821" rpy="0 0 0" />
-  <parent link="l_f_bar-2" />
-  <child link="l_f_fingers" />
-    <axis xyz="0 1 0" />
-  </joint>
-  <link name="l_f_bar-3">
-    <inertial>
-      <origin xyz="-0.00169 -6e-05 -0.02723" rpy="0 0 0" />
-      <mass value="0.013" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar-3.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="l_f_bar-3" type="revolute">
-    <origin xyz="0.0239578932739072 0 -0.135271672920607" rpy="0 0 0" />
-  <parent link="zarm_l7_link" />
-  <child link="l_f_bar-3" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
-  <link name="l_b_bar-1">
-    <inertial>
-      <origin xyz="0.00725 1e-05 -0.01052" rpy="0 0 0" />
-      <mass value="0.045" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar-1.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="l_b_bar-1" type="revolute">
-    <origin xyz="-0.0219999996097237 0 -0.1114" rpy="0 0 0" />
-  <parent link="zarm_l7_link" />
-  <child link="l_b_bar-1" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
-  <link name="l_b_bar-2">
-    <inertial>
-      <origin xyz="-0.00783 0.0 -0.01475" rpy="0 0 0" />
-      <mass value="0.009" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar-2.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="l_b_bar-2" type="fixed">
-    <origin xyz="-0.0254380979411351 0 -0.0464962705293328" rpy="0 0 0" />
-  <parent link="l_b_bar-1" />
-  <child link="l_b_bar-2" />
-    <axis xyz="0 1 0" />
-  </joint>
+      <inertial>
+        <origin xyz="-0.0120457851758796 -0.000214037829549115 -0.0248655884420065" rpy="0 0 0" />
+        <mass value="0.0289369127094329" />
+        <inertia ixx="4.40626903870174E-06" ixy="2.40461472093415E-09" ixz="1.67484759036967E-06" iyy="4.62893748347613E-06" iyz="8.65289435343626E-09" izz="2.10330097212732E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_fingers.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_fingers.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_f_fingers" type="continuous">
+      <origin xyz="-0.0081591 0 -0.047301" rpy="0 0 0" />
+      <parent link="l_f_bar_3" />
+      <child link="l_f_fingers" />
+      <axis xyz="0 1 0" />
+      <!-- <limit lower="-0.698" upper="0.698" effort="5" velocity="5" /> -->
+    </joint>
+
+  <link name="l_f_bar_4">
+      <inertial>
+        <origin xyz="0.000941928697455279 0.000162334793774313 -0.0258056161424709" rpy="0 0 0" />
+        <mass value="0.0220699391132454" />
+        <inertia ixx="4.96258669807029E-06" ixy="-1.15687475394944E-09" ixz="3.79443742262683E-08" iyy="3.5736421848895E-06" iyz="4.67765423759653E-10" izz="1.67844285434695E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_4.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_f_bar_4.STL" />
+        </geometry>
+      </collision>
+    </link>
+
+  <joint name="l_f_bar_4_joint" type="fixed">
+      <origin xyz="0.02 -0.0004996970768135975 -0.13100002837623" rpy="0 0 0" />
+      <parent link="zarm_l7_link" />
+      <child link="l_f_bar_4" />
+    </joint>
+
+  <link name="l_b_bar_1">
+      <inertial>
+        <origin xyz="-0.0032275268053409 0.00085425095521142 0.00181672202702901" rpy="0 0 0" />
+        <mass value="0.00325066797251089" />
+        <inertia ixx="5.89274807702478E-08" ixy="6.39607016289632E-16" ixz="-1.83197087305815E-08" iyy="6.20572809906661E-08" iyz="-1.31646975789071E-16" izz="8.11617952560725E-08" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_1.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_1.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_b_bar_1" type="revolute">
+      <origin xyz="-0.0125 -0.0004996970768135975 -0.10413702837623" rpy="0 0 0" />
+      <parent link="zarm_l7_link" />
+      <child link="l_b_bar_1" />
+      <axis xyz="0 -1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
+  <link name="l_b_bar_2">
+      <inertial>
+        <origin xyz="-0.00572824416399977 0.00048513783690582 -0.00660961996845635" rpy="0 0 0" />
+        <mass value="0.00572390622451953" />
+        <inertia ixx="2.50119462550808E-07" ixy="-5.56749483427293E-15" ixz="1.22212447905154E-07" iyy="3.03179337986275E-07" iyz="-4.09545491306794E-15" izz="2.74243049115597E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_2.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_2.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_b_bar_2" type="revolute">
+      <origin xyz="-0.011329 0 0.0063767" rpy="0 0 0" />
+      <parent link="l_b_bar_1" />
+      <child link="l_b_bar_2" />
+      <axis xyz="0 -1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
+  <link name="l_b_bar_3">
+      <inertial>
+        <origin xyz="0.00113844122779587 0.000243228567261555 -0.0219184628171379" rpy="0 0 0" />
+        <mass value="0.0114171723913586" />
+        <inertia ixx="2.64606619088142E-06" ixy="-5.58751554098413E-13" ixz="-3.78867080454408E-07" iyy="2.35910688649872E-06" iyz="4.04927235207831E-13" izz="5.84666542707361E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_3.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_3.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_b_bar_3" type="revolute">
+      <origin xyz="-0.016204 0 -0.014934" rpy="0 0 0" />
+      <parent link="l_b_bar_2" />
+      <child link="l_b_bar_3" />
+      <axis xyz="0 -1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
   <link name="l_b_fingers">
-    <inertial>
-      <origin xyz="0.01551 1e-05 -0.01331" rpy="0 0 0" />
-      <mass value="0.014" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_fingers.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="l_b_fingers" type="fixed">
-    <origin xyz="0.0191548518271917 0 -0.0292932014550803" rpy="0 0 0" />
-  <parent link="l_b_bar-2" />
-  <child link="l_b_fingers" />
-    <axis xyz="0 1 0" />
-  </joint>
-  <link name="l_b_bar-3">
-    <inertial>
-      <origin xyz="-0.00169 -6e-05 -0.02723" rpy="0 0 0" />
-      <mass value="0.013" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-  <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar-3.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="l_b_bar-3" type="revolute">
-    <origin xyz="-0.0239578924930216 0 -0.135271672920607" rpy="0 0 0" />
-  <parent link="zarm_l7_link" />
-  <child link="l_b_bar-3" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
+      <inertial>
+        <origin xyz="0.0120236228518645 -0.000270720657840369 -0.0248024059320865" rpy="0 0 0" />
+        <mass value="0.0289368376678058" />
+        <inertia ixx="4.40789494843607E-06" ixy="3.19100138473366E-09" ixz="-1.67280783472122E-06" iyy="4.62893447898312E-06" iyz="-8.37626054305403E-09" izz="2.10166940290556E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_fingers.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_fingers.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="l_b_fingers" type="continuous">
+      <origin xyz="0.0081591 0 -0.047301" rpy="0 0 0" />
+      <parent link="l_b_bar_3" />
+      <child link="l_b_fingers" />
+      <axis xyz="0 -1 0" />
+      <!-- <limit lower="-0.698" upper="0.698" effort="5" velocity="5" /> -->
+    </joint>
+
+  <link name="l_b_bar_4">
+      <inertial>
+        <origin xyz="-0.000941654695572548 0.000121760866425799 -0.0258054441781944" rpy="0 0 0" />
+        <mass value="0.0220699509082454" />
+        <inertia ixx="4.96262234575268E-06" ixy="1.01709394993788E-09" ixz="-3.78979772753437E-08" iyy="3.57364227712254E-06" iyz="-1.7577695971514E-08" izz="1.67840749786428E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_4.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/l_b_bar_4.STL" />
+        </geometry>
+      </collision>
+    </link>
+
+  <joint name="l_b_bar_4_joint" type="continuous">
+      <origin xyz="-0.02 -0.0004996970768135975 -0.13100002837623" rpy="0 0 0" />
+      <parent link="zarm_l7_link" />
+      <child link="l_b_bar_4" />
+    </joint>
 
   <link name="zarm_r1_link">
     <inertial>
@@ -1069,190 +1198,319 @@
     <child link="zarm_r7_end_effector" />
   </joint>
 
-  <link name="r_f_bar-1">
-    <inertial>
-      <origin xyz="0.00725 1e-05 -0.01052" rpy="0 0 0" />
-      <mass value="0.045" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_1.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  
-  <joint name="r_f_bar-1_joint" type="revolute">
-    <origin xyz="0.0220000003906073 0 -0.111399999999999" rpy="0 0 0" />
-    <parent link="zarm_r7_link" />
-    <child link="r_f_bar-1" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
-  <link name="r_f_bar-2">
-    <inertial>
-      <origin xyz="-0.00783 0.0 -0.01475" rpy="0 0 0" />
-      <mass value="0.009" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar-2.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
+  <link name="r_f_bar_1">
+      <inertial>
+        <origin xyz="0.00322753116319567 0.000854250125364265 0.00181672083638126" rpy="0 0 0" />
+        <mass value="0.00325066797251089" />
+        <inertia ixx="5.89274550959275E-08" ixy="-3.8555494700508E-17" ixz="1.8319693150317E-08" iyy="6.20572809906661E-08" iyz="-2.25674209225906E-16" izz="8.11618209303928E-08" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_1.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_1.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
 
-  <joint name="r_f_bar-2" type="fixed">
-    <origin xyz="0.025438097941138 0 -0.0464962705293307" rpy="0 0 0" />
-    <parent link="r_f_bar-1" />
-    <child link="r_f_bar-2" />
-    <axis xyz="0 1 0" />
-  </joint>
+  <joint name="r_f_bar_1_joint" type="revolute">
+      <origin xyz="0.0125 0.0004996970768142983 -0.10413702837623" rpy="0 0 0" />
+      <parent link="zarm_r7_link" />
+      <child link="r_f_bar_1" />
+      <axis xyz="0 1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
+  <link name="r_f_bar_2">
+      <inertial>
+        <origin xyz="0.00572824694862739 0.000485137795486076 -0.00660962990672727" rpy="0 0 0" />
+        <mass value="0.00572390622451971" />
+        <inertia ixx="2.50119562505792E-07" ixy="-5.56749512952193E-15" ixz="-1.22212457770198E-07" iyy="3.03179337986276E-07" iyz="4.09546461462654E-15" izz="2.74242949160618E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_2.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_2.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="r_f_bar_2" type="revolute">
+      <origin xyz="0.011329 0 0.0063767" rpy="0 0 0" />
+      <parent link="r_f_bar_1" />
+      <child link="r_f_bar_2" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+      <axis xyz="0 1 0" />
+    </joint>
+
+  <link name="r_f_bar_3">
+      <inertial>
+        <origin xyz="-0.00113844924727485 0.000243210094878313 -0.0219184644074809" rpy="0 0 0" />
+        <mass value="0.0114171723913655" />
+        <inertia ixx="2.64606588101444E-06" ixy="-5.58751745150286E-13" ixz="3.78867923441828E-07" iyy="2.35910688649942E-06" iyz="-4.04927102911966E-13" izz="5.84666852575467E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_3.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_3.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="r_f_bar_3" type="revolute">
+      <origin xyz="0.016204 0 -0.014934" rpy="0 0 0" />
+      <parent link="r_f_bar_2" />
+      <child link="r_f_bar_3" />
+      <axis xyz="0 1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
   <link name="r_f_fingers">
-    <inertial>
-      <origin xyz="-0.01551 -1e-05 -0.01331" rpy="0 0 0" />
-      <mass value="0.014" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_finger.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  
-  <joint name="r_f_fingers" type="fixed">
-    <origin xyz="-0.0191548518271909 0 -0.0292932014550821" rpy="0 0 0" />
-    <parent link="r_f_bar-2" />
-    <child link="r_f_fingers" />
-    <axis xyz="0 1 0" />
-  </joint>
-  <link name="r_f_bar-3">
-    <inertial>
-      <origin xyz="-0.00169 -6e-05 -0.02723" rpy="0 0 0" />
-      <mass value="0.013" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar-3.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
+      <inertial>
+        <origin xyz="-0.0120457851758796 -0.000214037829549115 -0.0248655884420065" rpy="0 0 0" />
+        <mass value="0.0289369127094329" />
+        <inertia ixx="4.40626903870174E-06" ixy="2.40461472093415E-09" ixz="1.67484759036967E-06" iyy="4.62893748347613E-06" iyz="8.65289435343626E-09" izz="2.10330097212732E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_fingers.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_fingers.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
 
-  <joint name="r_f_bar-3" type="revolute">
-    <origin xyz="0.0239578932739072 0 -0.135271672920607" rpy="0 0 0" />
-    <parent link="zarm_r7_link" />
-    <child link="r_f_bar-3" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
-  <link name="r_b_bar-1">
-    <inertial>
-      <origin xyz="0.00725 1e-05 -0.01052" rpy="0 0 0" />
-      <mass value="0.045" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar-1.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="r_b_bar-1" type="revolute">
-    <origin xyz="-0.0219999996097237 0 -0.1114" rpy="0 0 0" />
-    <parent link="zarm_r7_link" />
-    <child link="r_b_bar-1" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
-  <link name="r_b_bar-2">
-    <inertial>
-      <origin xyz="-0.00783 0.0 -0.01475" rpy="0 0 0" />
-      <mass value="0.009" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar-2.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="r_b_bar-2" type="fixed">
-    <origin xyz="-0.0254380979411353 0 -0.0464962705293326" rpy="0 0 0" />
-    <parent link="r_b_bar-1" />
-    <child link="r_b_bar-2" />
-    <axis xyz="0 1 0" />
-  </joint>
+  <joint name="r_f_fingers" type="continuous">
+      <origin xyz="-0.0081591 0 -0.047301" rpy="0 0 0" />
+      <parent link="r_f_bar_3" />
+      <child link="r_f_fingers" />
+      <!-- <limit lower="-0.698" upper="0.698" effort="5" velocity="5" /> -->
+      <axis xyz="0 1 0" />
+    </joint>
+
+  <link name="r_f_bar_4">
+      <inertial>
+        <origin xyz="0.000941928697455279 0.000162334793774313 -0.0258056161424709" rpy="0 0 0" />
+        <mass value="0.0220699391132454" />
+        <inertia ixx="4.96258669807029E-06" ixy="-1.15687475394944E-09" ixz="3.79443742262683E-08" iyy="3.5736421848895E-06" iyz="4.67765423759653E-10" izz="1.67844285434695E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_4.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_f_bar_4.STL" />
+        </geometry>
+      </collision>
+    </link>
+
+  <joint name="r_f_bar_4_joint" type="fixed">
+      <origin xyz="0.02 0.0004996970768142983 -0.13100002837623" rpy="0 0 0" />
+      <parent link="zarm_r7_link" />
+      <child link="r_f_bar_4" />
+    </joint>
+
+  <link name="r_b_bar_1">
+      <inertial>
+        <origin xyz="-0.0032275268053409 0.00085425095521142 0.00181672202702901" rpy="0 0 0" />
+        <mass value="0.00325066797251089" />
+        <inertia ixx="5.89274807702478E-08" ixy="6.39607016289632E-16" ixz="-1.83197087305815E-08" iyy="6.20572809906661E-08" iyz="-1.31646975789071E-16" izz="8.11617952560725E-08" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_1.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_1.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="r_b_bar_1" type="revolute">
+      <origin xyz="-0.0125 0.0004996970768142983 -0.10413702837623" rpy="0 0 0" />
+      <parent link="zarm_r7_link" />
+      <child link="r_b_bar_1" />
+      <axis xyz="0 -1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
+  <link name="r_b_bar_2">
+      <inertial>
+        <origin xyz="-0.00572824416399977 0.00048513783690582 -0.00660961996845635" rpy="0 0 0" />
+        <mass value="0.00572390622451953" />
+        <inertia ixx="2.50119462550808E-07" ixy="-5.56749483427293E-15" ixz="1.22212447905154E-07" iyy="3.03179337986275E-07" iyz="-4.09545491306794E-15" izz="2.74243049115597E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_2.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_2.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="r_b_bar_2" type="revolute">
+      <origin xyz="-0.011329 0 0.0063767" rpy="0 0 0" />
+      <parent link="r_b_bar_1" />
+      <child link="r_b_bar_2" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+      <axis xyz="0 -1 0" />
+    </joint>
+
+  <link name="r_b_bar_3">
+      <inertial>
+        <origin xyz="0.00113844122779587 0.000243228567261555 -0.0219184628171379" rpy="0 0 0" />
+        <mass value="0.0114171723913586" />
+        <inertia ixx="2.64606619088142E-06" ixy="-5.58751554098413E-13" ixz="-3.78867080454408E-07" iyy="2.35910688649872E-06" iyz="4.04927235207831E-13" izz="5.84666542707361E-07" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_3.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_3.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="r_b_bar_3" type="revolute">
+      <origin xyz="-0.016204 0 -0.014934" rpy="0 0 0" />
+      <parent link="r_b_bar_2" />
+      <child link="r_b_bar_3" />
+      <axis xyz="0 -1 0" />
+      <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
+    </joint>
+
   <link name="r_b_fingers">
-    <inertial>
-      <origin xyz="0.01551 1e-05 -0.01331" rpy="0 0 0" />
-      <mass value="0.014" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_fingers.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="r_b_fingers" type="fixed">
-    <origin xyz="0.0191548518271923 0 -0.0292932014550809" rpy="0 0 0" />
-    <parent link="r_b_bar-2" />
-    <child link="r_b_fingers" />
-    <axis xyz="0 1 0" />
-  </joint>
-  <link name="r_b_bar-3">
-    <inertial>
-      <origin xyz="-0.00169 -6e-05 -0.02723" rpy="0 0 0" />
-      <mass value="0.013" />
-      <inertia ixx="1e-05" ixy="0.0" ixz="0.0" iyy="1e-05" iyz="0.0" izz="1e-05" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar-3.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="r_b_bar-3" type="revolute">
-    <origin xyz="-0.0239578932738948 0 -0.135271672920607" rpy="0 0 0" />
-    <parent link="zarm_r7_link" />
-    <child link="r_b_bar-3" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.698" upper="0.698" effort="5" velocity="5" />
-  </joint>
+      <inertial>
+        <origin xyz="0.0120236228518645 -0.000270720657840369 -0.0248024059320865" rpy="0 0 0" />
+        <mass value="0.0289368376678058" />
+        <inertia ixx="4.40789494843607E-06" ixy="3.19100138473366E-09" ixz="-1.67280783472122E-06" iyy="4.62893447898312E-06" iyz="-8.37626054305403E-09" izz="2.10166940290556E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_fingers.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_fingers.STL" />
+        </geometry>
+      </collision>
+    </link>
+    
+
+  <joint name="r_b_fingers" type="continuous">
+      <origin xyz="0.0081591 0 -0.047301" rpy="0 0 0" />
+      <parent link="r_b_bar_3" />
+      <child link="r_b_fingers" />
+      <axis xyz="0 -1 0" />
+      <!-- <limit lower="-0.698" upper="0.698" effort="5" velocity="5" /> -->
+    </joint>
+
+  <link name="r_b_bar_4">
+      <inertial>
+        <origin xyz="-0.000941654695572548 0.000121760866425799 -0.0258054441781944" rpy="0 0 0" />
+        <mass value="0.0220699509082454" />
+        <inertia ixx="4.96262234575268E-06" ixy="1.01709394993788E-09" ixz="-3.78979772753437E-08" iyy="3.57364227712254E-06" iyz="-1.7577695971514E-08" izz="1.67840749786428E-06" />
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_4.STL" />
+        </geometry>
+        <material name="">
+          <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0" />
+        <geometry>
+          <mesh filename="package://kuavo_assets/models/biped_s200049/meshes/r_b_bar_4.STL" />
+        </geometry>
+      </collision>
+    </link>
+
+  <joint name="r_b_bar_4_joint" type="continuous">
+      <origin xyz="-0.02 0.0004996970768142983 -0.13100002837623" rpy="0 0 0" />
+      <parent link="zarm_r7_link" />
+      <child link="r_b_bar_4" />
+    </joint>
 
   <link name="zhead_1_link">
     <inertial>
@@ -1416,7 +1674,7 @@
 
 
   <link
-    name="l_hand_camera">
+    name="camera_l_base">
     <inertial>
       <origin
         xyz="-0.485692161168303 0.000199999609570049 -0.448332556771029"
@@ -1437,7 +1695,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s200049/meshes/l_hand_camera.STL" />
+          filename="package://kuavo_assets/models/biped_s200049/meshes/camera_l_base.STL" />
       </geometry>
       <material
         name="">
@@ -1464,14 +1722,14 @@
     <parent
       link="zarm_l7_link" />
     <child
-      link="l_hand_camera" />
+      link="camera_l_base" />
     <axis
       xyz="0 0 0" />
   </joint>
 
 
    <link
-    name="r_hand_camera">
+    name="camera_r_base">
     <inertial>
       <origin
         xyz="-0.485692161168328 -3.9043611389566E-10 -0.448332556771001"
@@ -1492,7 +1750,7 @@
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s200049/meshes/r_hand_camera.STL" />
+          filename="package://kuavo_assets/models/biped_s200049/meshes/camera_r_base.STL" />
       </geometry>
       <material
         name="">
@@ -1519,8 +1777,68 @@
     <parent
       link="zarm_r7_link" />
     <child
-      link="r_hand_camera" />
+      link="camera_r_base" />
     <axis
       xyz="0 0 0" />
+  </joint>
+
+
+  <!-- Projection left wrist-camera frame: copied from file A -->
+  <link name="camera_l_color_link" />
+  <joint name="camera_l_color_frame" type="fixed">
+    <origin xyz="0.0109 0.009 0.021"
+            rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="camera_l_color_link" />
+  </joint>
+
+  <link name="camera_l_depth_link" />
+  <joint name="camera_l_depth_frame" type="fixed">
+    <origin xyz="0.0109 -0.009 0.021"
+            rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="camera_l_depth_link" />
+  </joint>
+
+  <link name="cam_l_link" />
+  <joint name="camera_to_realcam_l_frame" type="fixed">
+    <origin xyz="0.0146 0.00 0.021"
+            rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="cam_l_link" />
+  </joint>
+
+
+
+  <link name="camera_r_color_link" />
+  <joint name="camera_r_color_frame" type="fixed">
+    <origin xyz="0.0109 0.009 0.021"
+            rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="camera_r_color_link" />
+  </joint>
+
+  <link name="camera_r_depth_link" />
+  <joint name="camera_r_depth_frame" type="fixed">
+    <origin xyz="0.0109 -0.009 0.021"
+            rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="camera_r_depth_link" />
+  </joint>
+
+  <link name="cam_r_link" />
+  <joint name="camera_to_realcam_r_frame" type="fixed">
+    <origin xyz="0.0146 0.00 0.021"
+            rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="cam_r_link" />
+  </joint>
+  
+  <link name="cam_h_link" />
+  <joint name="camera_to_realcam_h_frame" type="fixed">
+    <origin xyz="0.00 0.00 0.0"
+            rpy="0 0 0" />
+    <parent link="camera" />
+    <child link="cam_h_link" />
   </joint>
 </robot>

@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "status": "requires_runtime_validation",
+  "docking": {
+    "front_standoff_m": 0.650,
+    "comfortable_longitudinal_tolerance_m": 0.015,
+    "comfortable_yaw_tolerance_deg": 1.0,
+    "yaw_cost_weight_m_per_rad": 0.20
+  },
+  "transport": {
+    "clearance_retreat_m": 0.20,
+    "turn_deg": 90.0,
+    "destination_base_pose": [-0.20, 0.30, 1.5707963267948966],
+    "place_settle_time_s": 1.5,
+    "release_ready_trajectory_points": 120
+  },
+  "reposition": {
+    "source_table_left_edge_y_m": 0.52,
+    "box_half_width_y_m": 0.22
+  },
+  "grasp": {
+    "contact_z_local_m": 0.055,
+    "tangent_offset_m": -0.10,
+    "fixed_jaw_y_local_m": 0.237,
+    "outward_angle_deg": 12.0,
+    "above_height_m": 0.10,
+    "lift_waypoint_count": 9,
+    "lift_target_hand_poses_in_grasp_box": {
+      "l": {
+        "position_m": [-0.163962007971, 0.200015163668, 0.206562410000],
+        "orientation_xyzw": [0.444996881727, 0.549525759998, 0.549524489393, 0.444996685280]
+      },
+      "r": {
+        "position_m": [-0.163962036464, -0.200015345734, 0.206562310000],
+        "orientation_xyzw": [0.549525760001, 0.444996881730, 0.444996685272, 0.549524489394]
+      }
+    },
+    "open_closure": 0.0,
+    "grasp_closure": 0.85,
+    "above_trajectory_points": 100,
+    "descent_trajectory_points": 100,
+    "lift_trajectory_points": 200,
+    "gripper_duration_s": 1.5,
+    "latch_confirmation_timeout_s": 1.0,
+    "settle_time_s": 1.5
+  },
+  "ik": {
+    "maximum_position_error_m": 0.025,
+    "position_weight": 100.0,
+    "orientation_weight": 30.0,
+    "joint_regularization": 0.03,
+    "maximum_function_evaluations": 600
+  }
+}

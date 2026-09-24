@@ -175,24 +175,17 @@ class WheelIncrementalPoseResult {
  public:
   std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotLeftHandQuatInc(bool smoothRotation = true) const {
     (void)smoothRotation;
-
-    Eigen::Quaterniond qRobotTarget = robotLeftHandQuatTarget_;
-
-    qRobotTarget = robotLeftHandQuatMeasEERealTime_.conjugate() * qRobotTarget;
-    qRobotTarget = robotLeftHandQuatMeasEERealTime_ * limitQuaternionAngleEulerZYX(qRobotTarget, zyxLimitsFinal_);
-
-    return std::make_pair(qRobotTarget, leftHandDeltaQuatLast_);
+    return std::make_pair(limitIncrementalTargetQuatSafe(robotLeftHandQuatTarget_,
+                                                         robotLeftHandQuatMeasEERealTime_,
+                                                         zyxLimitsFinal_),
+                          leftHandDeltaQuatLast_);
   }
 
   std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotRightHandQuatInc(bool smoothRotation = true) const {
-    Eigen::Quaterniond qRobotTarget = robotRightHandQuatTarget_;
-
-    qRobotTarget = robotRightHandQuatMeasEERealTime_.conjugate() * qRobotTarget;
-    // Keep symmetric with left hand in python-incremental mode:
-    // clip relative rotation in end-effector frame with the same limits to avoid right-hand under-tracking.
-    qRobotTarget = robotRightHandQuatMeasEERealTime_ * limitQuaternionAngleEulerZYX(qRobotTarget, zyxLimitsFinal_);
-
-    return std::make_pair(qRobotTarget, rightHandDeltaQuatLast_);
+    return std::make_pair(limitIncrementalTargetQuatSafe(robotRightHandQuatTarget_,
+                                                         robotRightHandQuatMeasEERealTime_,
+                                                         zyxLimitsFinal_),
+                          rightHandDeltaQuatLast_);
   }
 
   std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Vector3d, Eigen::Vector3d> getLatestIncrementalHandPose(

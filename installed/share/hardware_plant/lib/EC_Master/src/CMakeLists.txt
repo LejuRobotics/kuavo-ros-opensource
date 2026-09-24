@@ -28,19 +28,30 @@ set(SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Sharelib/EcMasterDemo/EcDemoApp.cpp
 )
 
-set(LINK_LIB
-${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/
-${CMAKE_CURRENT_SOURCE_DIR}/../lib
-)
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  set(SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64)
+  set(SDK_RAS_LIB  ${SDK_LIB_DIR}/libEcMasterRasServer.a)
+  set(SDK_MASTER_LIB ${SDK_LIB_DIR}/libEcMaster.a)
+  set(LINKLAYER_SO ${CMAKE_CURRENT_SOURCE_DIR}/../lib_aarch64/libemllIntelGbe.so)
+else()
+  set(SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64)
+  set(SDK_RAS_LIB  ${SDK_LIB_DIR}/libAtemRasSrv.a)
+  set(SDK_MASTER_LIB ${SDK_LIB_DIR}/libEcMaster.a)
+  set(LINKLAYER_SO ${CMAKE_CURRENT_SOURCE_DIR}/../lib/libemllI8254x.so)
+endif()
 
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+  list(APPEND SRCS ${CMAKE_CURRENT_SOURCE_DIR}/Common/OsAuxClkArm64.cpp)
+endif()
 
-## EcDemoMain
+## EcDemoMain (x86 only; arm64 SDK lacks OsAuxClkInit/OsAuxClkDeinit)
+if(NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
 add_executable(${PROJECT_NAME} ${SRCS} ${CMAKE_CURRENT_SOURCE_DIR}/Examples/Linux/EcDemoMain.cpp)
-target_include_directories(${PROJECT_NAME} PUBLIC ${EcDemo_INCLUDE_DIRS})  
-target_link_libraries(${PROJECT_NAME} 
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libAtemRasSrv.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libEcMaster.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../lib/libemllI8254x.so>
+target_include_directories(${PROJECT_NAME} PUBLIC ${EcDemo_INCLUDE_DIRS})
+target_link_libraries(${PROJECT_NAME}
+  $<BUILD_INTERFACE:${SDK_RAS_LIB}>
+  $<BUILD_INTERFACE:${SDK_MASTER_LIB}>
+  $<BUILD_INTERFACE:${LINKLAYER_SO}>
   $<INSTALL_INTERFACE:libAtemRasSrv.a>
   $<INSTALL_INTERFACE:libEcMaster.a>
   $<INSTALL_INTERFACE:libemllI8254x.so>
@@ -49,14 +60,15 @@ target_link_libraries(${PROJECT_NAME}
   # lcm
   # lcm-types-cpp
 )
+endif()
 
 ## ec_master_main
 add_library(ec_master_main STATIC ${SRCS} ${CMAKE_CURRENT_SOURCE_DIR}/Sharelib/Linux/EcDemoMain.cpp)
-target_include_directories(ec_master_main PUBLIC ${EcDemo_INCLUDE_DIRS})  
+target_include_directories(ec_master_main PUBLIC ${EcDemo_INCLUDE_DIRS})
 target_link_libraries(ec_master_main
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libAtemRasSrv.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libEcMaster.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../lib/libemllI8254x.so>
+  $<BUILD_INTERFACE:${SDK_RAS_LIB}>
+  $<BUILD_INTERFACE:${SDK_MASTER_LIB}>
+  $<BUILD_INTERFACE:${LINKLAYER_SO}>
   $<INSTALL_INTERFACE:libAtemRasSrv.a>
   $<INSTALL_INTERFACE:libEcMaster.a>
   $<INSTALL_INTERFACE:libemllI8254x.so>
@@ -68,11 +80,11 @@ target_link_libraries(ec_master_main
 
 ## ec_app
 add_library(ec_app STATIC ${CMAKE_CURRENT_SOURCE_DIR}/Sharelib/EcMasterDemo/EcDemoApp.cpp )
-target_include_directories(ec_app PUBLIC ${EcDemo_INCLUDE_DIRS})  
-target_link_libraries(ec_app 
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libAtemRasSrv.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libEcMaster.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../lib/libemllI8254x.so>
+target_include_directories(ec_app PUBLIC ${EcDemo_INCLUDE_DIRS})
+target_link_libraries(ec_app
+  $<BUILD_INTERFACE:${SDK_RAS_LIB}>
+  $<BUILD_INTERFACE:${SDK_MASTER_LIB}>
+  $<BUILD_INTERFACE:${LINKLAYER_SO}>
   $<INSTALL_INTERFACE:libAtemRasSrv.a>
   $<INSTALL_INTERFACE:libEcMaster.a>
   $<INSTALL_INTERFACE:libemllI8254x.so>
@@ -90,7 +102,7 @@ install(TARGETS ec_master_main ec_app
 )
 
 # Install dependent library
-install(FILES 
+install(FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/../lib/libemllI8254x.so
   ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libAtemRasSrv.a
   ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/x64/libEcMaster.a

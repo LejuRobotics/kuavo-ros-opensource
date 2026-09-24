@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mujoco model="kuavo task 1 pick place overhead lever">
+  <!-- Canonical Task 1 scene. -->
+  <include file="biped_s400062_icra.xml"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"/>
+
+  <statistic center="0.70 -0.20 0.75" extent="1.8"/>
+
+  <visual>
+    <headlight diffuse="0.5977223534 0.2912211958 0.477416135"
+               ambient="0.1912172595 0.02058794022 0.299304179"
+               specular="0.1446382052 0.02717409582 0.1078251392"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="145" elevation="-22" offwidth="1280" offheight="720"/>
+  </visual>
+
+  <asset>
+    <texture name="skybox" type="skybox" builtin="gradient"
+             rgb1="0.55 0.65 0.75" rgb2="0.08 0.10 0.14" width="512" height="3072"/>
+    <texture name="room_wall_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/belt2.png"/>
+    <texture name="room_floor_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/ground2.png"/>
+    <texture name="room_ceiling_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/roof1.png"/>
+    <material name="floor_mat" texture="room_floor_tex" texuniform="true" reflectance="0"/>
+    <material name="room_wall_mat" texture="room_wall_tex" texuniform="true"
+              reflectance="0.1" shininess="0.1"/>
+    <material name="room_ceiling_mat" texture="room_ceiling_tex" texuniform="true"
+              reflectance="0.1" shininess="0.1"/>
+    <material name="source_bin_mat" rgba="0.20 0.48 0.78 1"/>
+    <material name="target_bin_mat" rgba="0.23 0.68 0.42 1"/>
+    <material name="lever_mat" rgba="0.95 0.62 0.12 1"/>
+    <material name="lever_mount_mat" rgba="0.24 0.27 0.30 1"/>
+    <material name="source_support_mat" rgba="0.72 0.75 0.78 1"/>
+    <material name="table_top_mat" rgba="0.62 0.46 0.30 1"/>
+    <material name="table_leg_mat" rgba="0.24 0.25 0.27 1"/>
+    <material name="conveyor_frame_mat" rgba="0.42 0.46 0.50 1"/>
+  </asset>
+
+  <default>
+    <default class="task_static">
+      <geom contype="1" conaffinity="3" friction="1.2 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001"/>
+    </default>
+    <default class="task_object">
+      <!-- Use a six-dimensional contact so the small torsional and rolling
+           coefficients below are active.  With MuJoCo's default condim=3,
+           an upright cylinder can spin about the contact normal forever even
+           though all three friction values are present in the XML. -->
+      <geom contype="1" conaffinity="3" condim="6"
+            friction="1.0 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001" density="600"/>
+      <joint damping="0.001"/>
+    </default>
+  </default>
+
+  <custom>
+    <!-- Collision-free visual correction after a released cylinder reaches
+         the target-bin floor.  2*pi rad/s = 360 deg/s. -->
+    <numeric name="task1_target_settle_angular_speed" data="6.283185307"/>
+    <!-- During the large close command, independently freeze the complete
+         thumb or index finger after stable contact with the same cylinder.
+         This prevents a contacted finger from continuing to load the wrist. -->
+    <numeric name="task1_grasp_independent_finger_latch_enabled" data="1"/>
+    <numeric name="task1_grasp_finger_latch_contact_depth" data="0.0001"/>
+    <!-- Scene-owned lever unlock rule.  The simulator only releases the
+         equality after this many distinct right fingertips maintain real
+         handle contact for the configured duration. -->
+    <numeric name="task1_lever_unlock_required_fingers" data="2"/>
+    <numeric name="task1_lever_unlock_contact_depth" data="0"/>
+    <numeric name="task1_lever_unlock_contact_duration" data="0.05"/>
+  </custom>
+
+  <equality>
+    <!-- Physical contacts cannot move the source bin along its rail.  The
+         existing set_joint_position service advances the equality target
+         together with qpos during the explicit conveyor animation. -->
+    <joint name="task1_source_bin_lock" joint1="source_bin_slide"
+           polycoef="0 0 0 0 0"
+           solref="0.002 1" solimp="0.999 0.9999 0.0001"/>
+    <!-- The complete lever/cradle/bin assembly starts locked.  Contact with
+         ordinary task objects is ignored; only the named robot fingertips
+         can make the simulator clear this equality's active bool. -->
+    <joint name="task1_lever_lock" joint1="lever_hinge"
+           polycoef="0 0 0 0 0"
+           solref="0.002 1" solimp="0.999 0.9999 0.0001"/>
+  </equality>
+
+  <contact>
+    <exclude name="lever_bearing_clearance" body1="lever_station" body2="lever"/>
+    <exclude name="source_support_bearing_clearance" body1="lever_station" body2="source_support"/>
+  </contact>
+
+  <worldbody>
+    <light pos="5 0.5 5" dir="-1 0 -1" directional="false"/>
+    <geom name="floor" class="task_static" type="plane" size="0 0 0.05" material="floor_mat"/>
+
+    <!-- Visual-only indoor shell.  It must not change task collision or dynamics. -->
+    <geom name="room_wall_front" type="box" size="10 5 2" pos="0 10 2.5"
+          euler="-1.57079633 0 3.14159265" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_wall_back" type="box" size="10 5 2" pos="0 -10 2.5"
+          euler="-1.57079633 0 0" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_wall_right" type="box" size="10 5 2" pos="10 0 2.5"
+          euler="0 1.57079633 1.57" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_wall_left" type="box" size="10 5 2" pos="-10 0 2.5"
+          euler="0 -1.57079633 1.57" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_ceiling" type="plane" size="10 10 5" pos="0 0 5"
+          euler="3.14159265 0 0" material="room_ceiling_mat"
+          contype="0" conaffinity="0" group="1"/>
+
+    <!--
+      A transverse conveyor-shaped frame crosses in front of the robot along
+      world Y.  It is only a visual support: the center stays open and there
+      are no moving belts, joints, or actuators.
+    -->
+    <body name="target_conveyor" pos="0.25 0 0">
+      <!-- Move the robot-side rail 115 mm forward (+world X / user +Y)
+           so the transverse conveyor no longer intersects the robot. -->
+      <geom name="target_conveyor_front_support" class="task_static" type="box"
+            pos="0.020 0 0.48" size="0.018 0.85 0.02" material="conveyor_frame_mat"/>
+      <geom name="target_conveyor_rear_support" class="task_static" type="box"
+            pos="0.095 0 0.48" size="0.018 0.85 0.02" material="conveyor_frame_mat"/>
+
+      <geom name="target_conveyor_leg_left_front" class="task_static" type="box"
+            pos="0.020 0.80 0.23" size="0.025 0.025 0.23" material="conveyor_frame_mat"/>
+      <geom name="target_conveyor_leg_left_rear" class="task_static" type="box"
+            pos="0.095 0.80 0.23" size="0.025 0.025 0.23" material="conveyor_frame_mat"/>
+      <geom name="target_conveyor_leg_right_front" class="task_static" type="box"
+            pos="0.020 -0.80 0.23" size="0.025 0.025 0.23" material="conveyor_frame_mat"/>
+      <geom name="target_conveyor_leg_right_rear" class="task_static" type="box"
+            pos="0.095 -0.80 0.23" size="0.025 0.025 0.23" material="conveyor_frame_mat"/>
+    </body>
+
+    <!--
+      Transfer conveyor: a single 30-degree decline, coplanar with the
+      tilted cradle slide path.  With the cradle rigid at the 30-degree
+      lever pose the bin floor bottom plane passes through
+      (0.635, -0.196, 0.64598) with normal (0.5, 0, 0.866), and the slide
+      runs inside that plane along (0.866, 0, -0.5).  The two belt rails'
+      top faces lie in that plane, and the rail head starts exactly at the
+      cradle's last support point (0.816865, -0.196, 0.540981): the bin is
+      handed over with no unsupported gap.  The bin's trailing bottom edge
+      reaches the cradle end at slide 0.41 m, and at the 0.45 m stop its
+      bottom spans x=[0.8515, 1.1979], fully on the belt.  Both rollers are
+      recessed ~9 mm below the belt plane, as in the previous layout.
+      Vertical legs with diagonal braces, like a real decline conveyor
+      frame.
+    -->
+    <body name="source_transfer_conveyor">
+      <geom name="source_transfer_head_roller" class="task_static" type="cylinder"
+            pos="0.8042 -0.196 0.4790" size="0.06 0.125"
+            quat="0.707107 0.707107 0 0" material="lever_mount_mat"/>
+      <geom name="source_transfer_tail_roller" class="task_static" type="cylinder"
+            pos="1.2909 -0.196 0.1980" size="0.06 0.125"
+            quat="0.707107 0.707107 0 0" material="lever_mount_mat"/>
+      <body name="source_transfer_decline_rails"
+            pos="1.0775 -0.196 0.3905" quat="0.9659258 0 0.258819 0">
+        <geom name="source_transfer_decline_rail_left" class="task_static" type="box"
+              pos="0 0.10 -0.02" size="0.3010 0.025 0.02" material="conveyor_frame_mat"/>
+        <geom name="source_transfer_decline_rail_right" class="task_static" type="box"
+              pos="0 -0.10 -0.02" size="0.3010 0.025 0.02" material="conveyor_frame_mat"/>
+      </body>
+      <geom name="source_transfer_decline_leg_upper_left" class="task_static" type="box"
+            pos="0.9595 -0.296 0.2145" size="0.022 0.022 0.2145" material="conveyor_frame_mat"/>
+      <geom name="source_transfer_decline_leg_upper_right" class="task_static" type="box"
+            pos="0.9595 -0.096 0.2145" size="0.022 0.022 0.2145" material="conveyor_frame_mat"/>
+      <geom name="source_transfer_decline_leg_lower_left" class="task_static" type="box"
+            pos="1.2095 -0.296 0.1424" size="0.022 0.022 0.1424" material="conveyor_frame_mat"/>
+      <geom name="source_transfer_decline_leg_lower_right" class="task_static" type="box"
+            pos="1.2095 -0.096 0.1424" size="0.022 0.022 0.1424" material="conveyor_frame_mat"/>
+      <geom name="source_transfer_decline_brace_upper_left" class="task_static" type="capsule"
+            fromto="0.8695 -0.296 0.4780 0.9595 -0.296 0.012" size="0.008" material="conveyor_frame_mat"/>
+      <geom name="source_transfer_decline_brace_upper_right" class="task_static" type="capsule"
+            fromto="0.8695 -0.096 0.4780 0.9595 -0.096 0.012" size="0.008" material="conveyor_frame_mat"/>
+      <geom name="source_transfer_decline_brace_lower_left" class="task_static" type="capsule"
+            fromto="1.1195 -0.296 0.3338 1.2095 -0.296 0.012" size="0.008" material="conveyor_frame_mat"/>
+      <geom name="source_transfer_decline_brace_lower_right" class="task_static" type="capsule"
+            fromto="1.1195 -0.096 0.3338 1.2095 -0.096 0.012" size="0.008" material="conveyor_frame_mat"/>
+    </body>
+
+    <!--
+      The hinge runs below the center of the large bin and remains independent
+      of it.  Its axle protrudes beyond both Y sides.  At q=0 the two moving
+      sides rise from the exposed axle ends, extend toward the robot (-X),
+      then turn down to the cross-handle near the bin's front edge.
+    -->
+    <body name="lever_station" pos="0.62 -0.196 0">
+      <geom name="lever_station_base" class="task_static" type="box"
+            pos="0 0 0.025" size="0.08 0.32 0.025" material="lever_mount_mat"/>
+      <geom name="lever_support_left" class="task_static" type="box"
+            pos="0 0.27 0.31" size="0.025 0.025 0.285" material="lever_mount_mat"/>
+      <geom name="lever_support_right" class="task_static" type="box"
+            pos="0 -0.27 0.31" size="0.025 0.025 0.285" material="lever_mount_mat"/>
+      <geom name="lever_mount_left" class="task_static" type="cylinder"
+            pos="0 0.27 0.62" size="0.022 0.025"
+            quat="0.707107 0.707107 0 0" material="lever_mount_mat"/>
+      <geom name="lever_mount_right" class="task_static" type="cylinder"
+            pos="0 -0.27 0.62" size="0.022 0.025"
+            quat="0.707107 0.707107 0 0" material="lever_mount_mat"/>
+
+      <body name="lever" pos="0 0 0.62" gravcomp="1">
+        <joint name="lever_hinge" type="hinge" axis="0 1 0"
+               limited="true" range="0 3.141593"
+               damping="0.025" frictionloss="0.02"/>
+        <geom name="lever_pivot_left" type="cylinder"
+              pos="0 0.27 0" size="0.013 0.03"
+              quat="0.707107 0.707107 0 0" density="700"
+              material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+        <geom name="lever_pivot_right" type="cylinder"
+              pos="0 -0.27 0" size="0.013 0.03"
+              quat="0.707107 0.707107 0 0" density="700"
+              material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+
+        <geom name="lever_arm_left" type="capsule"
+              fromto="0 0.27 0 0 0.27 0.11" size="0.011"
+              density="500" material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+        <geom name="lever_arm_right" type="capsule"
+              fromto="0 -0.27 0 0 -0.27 0.11" size="0.011"
+              density="500" material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+        <geom name="lever_upper_joint_left" type="cylinder"
+              pos="0 0.27 0.11" size="0.018 0.018"
+              quat="0.707107 0.707107 0 0" density="700"
+              material="lever_mat" contype="0" conaffinity="0"/>
+        <geom name="lever_upper_joint_right" type="cylinder"
+              pos="0 -0.27 0.11" size="0.018 0.018"
+              quat="0.707107 0.707107 0 0" density="700"
+              material="lever_mat" contype="0" conaffinity="0"/>
+        <geom name="lever_reach_left" type="capsule"
+              fromto="0 0.27 0.11 -0.32 0.27 0.11" size="0.011"
+              density="500" material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+        <geom name="lever_reach_right" type="capsule"
+              fromto="0 -0.27 0.11 -0.32 -0.27 0.11" size="0.011"
+              density="500" material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+        <geom name="lever_drop_left" type="capsule"
+              fromto="-0.32 0.27 0.11 -0.32 0.27 0.08" size="0.011"
+              density="500" material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+        <geom name="lever_drop_right" type="capsule"
+              fromto="-0.32 -0.27 0.11 -0.32 -0.27 0.08" size="0.011"
+              density="500" material="lever_mat" contype="1" conaffinity="3"
+              friction="1.5 0.02 0.002"/>
+        <geom name="lever_handle" type="capsule"
+              fromto="-0.32 -0.27 0.08 -0.32 0.27 0.08" size="0.014"
+              density="500" material="lever_mat" contype="0" conaffinity="0"/>
+        <geom name="lever_handle_collision" type="capsule"
+              fromto="-0.32 -0.27 0.08 -0.32 0.27 0.08" size="0.018"
+              density="0" rgba="0 0 0 0" contype="1" conaffinity="3"
+              friction="2.0 0.02 0.002"
+              solref="0.004 1" solimp="0.99 0.999 0.0001"/>
+        <site name="lever_handle_center" pos="-0.32 0 0.08"
+              size="0.005" rgba="1 0.2 0.1 0"/>
+
+        <!--
+          Rigid cradle for the large bin, fixed to the lever with no relative
+          motion: it tilts 1:1 with the yellow lever instead of staying
+          horizontal, which is what lets the transfer conveyor decline at
+          the same 30 degrees.  User coordinates: +Y is robot-forward
+          (world +X), +X is robot-right (world -Y).  The layout at lever
+          q=0 still matches the original source-bin world pose exactly.
+        -->
+        <body name="source_support" pos="0 0 0.13" gravcomp="1">
+          <geom name="source_support_pivot_left" type="cylinder"
+                pos="0 0.2435 -0.02" size="0.012 0.0085"
+                quat="0.707107 0.707107 0 0" density="700"
+                material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_support_pivot_right" type="cylinder"
+                pos="0 -0.2435 -0.02" size="0.012 0.0085"
+                quat="0.707107 0.707107 0 0" density="700"
+                material="source_support_mat" contype="0" conaffinity="0"/>
+
+          <!--
+            Links descend just outside the bin side walls, then turn inward
+            below the floor to meet the two robot-forward cradle rails.
+          -->
+          <geom name="source_support_link_left" type="capsule"
+                fromto="0 0.235 -0.02 0 0.235 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_support_link_right" type="capsule"
+                fromto="0 -0.235 -0.02 0 -0.235 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_support_bottom_inlet_left" type="capsule"
+                fromto="0 0.235 -0.11 0 0.20 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_support_bottom_inlet_right" type="capsule"
+                fromto="0 -0.235 -0.11 0 -0.20 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+
+          <!-- Two robot-forward (world-X) rails sit directly beneath the bin. -->
+          <geom name="source_cradle_bottom_left" type="capsule"
+                fromto="-0.21 0.20 -0.11 0.21 0.20 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_bottom_right" type="capsule"
+                fromto="-0.21 -0.20 -0.11 0.21 -0.20 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+
+          <!-- Near and far ends turn upward along the bin, then join across it. -->
+          <geom name="source_cradle_near_left" type="capsule"
+                fromto="-0.21 0.20 -0.11 -0.21 0.20 -0.02" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_near_right" type="capsule"
+                fromto="-0.21 -0.20 -0.11 -0.21 -0.20 -0.02" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_far_left_offset" type="capsule"
+                fromto="0.21 0.20 -0.11 0.21 0.235 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_far_left_riser" type="capsule"
+                fromto="0.21 0.235 -0.11 0.21 0.235 0.01" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_far_right_offset" type="capsule"
+                fromto="0.21 -0.20 -0.11 0.21 -0.235 -0.11" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_far_right_riser" type="capsule"
+                fromto="0.21 -0.235 -0.11 0.21 -0.235 0.01" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_near_crossbar" type="capsule"
+                fromto="-0.21 -0.20 -0.02 -0.21 0.20 -0.02" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+          <geom name="source_cradle_far_crossbar" type="capsule"
+                fromto="0.21 -0.235 0.01 0.21 0.235 0.01" size="0.010"
+                density="500" material="source_support_mat" contype="0" conaffinity="0"/>
+
+          <body name="source_bin" pos="0 0 -0.10" gravcomp="1">
+            <joint name="source_bin_slide" type="slide" axis="1 0 0"
+                   limited="true" range="0 0.60" damping="0.10" frictionloss="0.05"/>
+            <geom name="source_bin_floor" class="task_static" type="box"
+                  pos="0 0 0.0075" size="0.20 0.22 0.0075" material="source_bin_mat"
+                  conaffinity="7"/>
+            <geom name="source_bin_front_wall" class="task_static" type="box"
+                  pos="-0.19 0 0.0525" size="0.01 0.22 0.0375" material="source_bin_mat"
+                  conaffinity="7"/>
+            <geom name="source_bin_back_wall" class="task_static" type="box"
+                  pos="0.19 0 0.0525" size="0.01 0.22 0.0375" material="source_bin_mat"
+                  conaffinity="7"/>
+            <geom name="source_bin_left_wall" class="task_static" type="box"
+                  pos="0 0.21 0.0525" size="0.18 0.01 0.0375" material="source_bin_mat"
+                  conaffinity="7"/>
+            <geom name="source_bin_right_wall" class="task_static" type="box"
+                  pos="0 -0.21 0.0525" size="0.18 0.01 0.0375" material="source_bin_mat"
+                  conaffinity="7"/>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <body name="cylinder_1" pos="0.620 -0.236 0.685">
+      <joint name="cylinder_1_freejoint" class="task_object" type="free"/>
+      <geom name="block_1_visual" class="task_object" type="cylinder"
+            size="0.025 0.020" contype="0" conaffinity="0" rgba="0.92 0.25 0.20 1"/>
+      <geom name="block_1_geom" class="task_object" type="cylinder"
+            size="0.026 0.021" density="0" rgba="0 0 0 0" contype="4" conaffinity="2"/>
+    </body>
+    <body name="cylinder_2" pos="0.620 -0.156 0.685">
+      <joint name="cylinder_2_freejoint" class="task_object" type="free"/>
+      <geom name="block_2_visual" class="task_object" type="cylinder"
+            size="0.025 0.020" contype="0" conaffinity="0" rgba="0.95 0.50 0.12 1"/>
+      <geom name="block_2_geom" class="task_object" type="cylinder"
+            size="0.026 0.021" density="0" rgba="0 0 0 0" contype="4" conaffinity="2"/>
+    </body>
+    <body name="cylinder_3" pos="0.620 -0.076 0.685">
+      <joint name="cylinder_3_freejoint" class="task_object" type="free"/>
+      <geom name="block_3_visual" class="task_object" type="cylinder"
+            size="0.025 0.020" contype="0" conaffinity="0" rgba="0.20 0.55 0.92 1"/>
+      <geom name="block_3_geom" class="task_object" type="cylinder"
+            size="0.026 0.021" density="0" rgba="0 0 0 0" contype="4" conaffinity="2"/>
+    </body>
+
+    <!--
+      The target bin moves toward the robot while retaining its outer XY
+      footprint.  Its side walls are twice as high and half as thick.
+    -->
+    <!-- Centre the target bin at world X=0.3075, exactly midway between the
+         transverse conveyor rails at world X=0.270 and 0.345. -->
+    <body name="target_bin" pos="0.3075 -0.528 0.50" quat="0.707107 0 0 0.707107">
+      <geom name="target_bin_floor" class="task_static" type="box"
+            pos="0 0 0.0075" size="0.0672 0.11 0.0075" material="target_bin_mat"
+            conaffinity="7"/>
+      <geom name="target_bin_front_wall" class="task_static" type="box"
+            pos="-0.0622 0 0.0525" size="0.005 0.11 0.0375" material="target_bin_mat"/>
+      <geom name="target_bin_back_wall" class="task_static" type="box"
+            pos="0.0622 0 0.0525" size="0.005 0.11 0.0375" material="target_bin_mat"/>
+      <geom name="target_bin_left_wall" class="task_static" type="box"
+            pos="0 0.105 0.0525" size="0.0572 0.005 0.0375" material="target_bin_mat"/>
+      <geom name="target_bin_right_wall" class="task_static" type="box"
+            pos="0 -0.105 0.0525" size="0.0572 0.005 0.0375" material="target_bin_mat"/>
+      <site name="target_bin_center" pos="0 0 0.0525" size="0.005" rgba="0 1 0 0"/>
+    </body>
+  </worldbody>
+</mujoco>

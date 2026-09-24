@@ -1,0 +1,14 @@
+string object_name
+geometry_msgs/Point position
+geometry_msgs/Quaternion orientation
+bool randomize
+float64 x_min
+float64 x_max
+float64 y_min
+float64 y_max
+float64 z_min
+float64 z_max
+---
+bool success
+string message
+geometry_msgs/Point final_position

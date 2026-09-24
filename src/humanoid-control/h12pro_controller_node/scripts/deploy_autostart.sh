@@ -37,6 +37,26 @@ else
     echo "服务 ocs2_h12pro_monitor.service 未开启。"
 fi
 
+# 询问遥控器类型 (写入 REMOTE_CONTROLLER_TYPE, 供节点运行时区分 G11 / H12)
+while true; do
+    echo "请问遥控器类型："
+    echo "1. G11"
+    echo "2. H12/G12"
+    echo -n "请选择 (默认为 H12/G12，直接回车选择默认): "
+    read -r remote_type_input
+    if [ -z "$remote_type_input" ] || [ "$remote_type_input" = "2" ]; then
+        REMOTE_CONTROLLER_TYPE=h12
+        echo "已选择: H12/G12 遥控器"
+        break
+    elif [ "$remote_type_input" = "1" ]; then
+        REMOTE_CONTROLLER_TYPE=g11
+        echo "已选择: G11 遥控器"
+        break
+    else
+        echo "输入无效，请输入 1 (G11) 或 2 (H12/G12)，直接回车默认 H12/G12。"
+    fi
+done
+
 while true; do
     echo "请选择控制方案 (1: ocs2, 2: rl, 3: multi)。若为 rl，请先修改 ROBOT_VERSION=46，并将正确的仓库路径修改在脚本中，再运行该脚本:"
     read -r user_input
@@ -57,6 +77,17 @@ while true; do
     fi
 done
 
+# G11 遥控器目前只提供了 g11_multi_* 映射表: ocs2/rl 方案下按键表(产生
+# SW1_LEFT/H_PRESS/B1_PRESS)与状态转换表(只认 E_LEFT/F_RIGHT/C_PRESS)永不相交,
+# 现场表现为"实体键全部没反应、屏幕能用", 易被误判成硬件故障。此处直接拦截。
+if [ "$REMOTE_CONTROLLER_TYPE" = "g11" ] && [ "$KUAVO_CONTROL_SCHEME" != "multi" ]; then
+    echo ""
+    echo "[错误] G11 遥控器目前仅支持 multi 控制方案。"
+    echo "       已选控制方案: $KUAVO_CONTROL_SCHEME —— 该方案下 G11 实体按键将全部失效。"
+    echo "       请重新运行本脚本, 遥控器类型选 1 (G11), 控制方案选 3 (multi)。"
+    exit 1
+fi
+
 KUAVO_RL_WS_PATH="/home/lab/kuavo-RL/kuavo-robot-deploy" # 在没合并到 kuavo-ros-control 的之前，先固定路径或手动修改
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 H12PRO_CONTROLLER_NODE_DIR=$(dirname $SCRIPT_DIR)
@@ -70,9 +101,70 @@ KUAVO_REMOTE_PATH=$(dirname $SCRIPT_DIR)/lib/kuavo_remote
 ROBOT_VERSION=$ROBOT_VERSION
 INSTALLED_DIR=$KUAVO_ROS_CONTROL_WS_PATH/installed
 RL_INSTALLED_DIR=$KUAVO_RL_WS_PATH/installed
+
+# 系统版本：Ubuntu >= 24.04 使用 requirements.noble.txt + PEP 668 兼容安装
+UBUNTU_VERSION_ID=""
+if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    UBUNTU_VERSION_ID="${VERSION_ID:-}"
+fi
+IS_UBUNTU_24_04_OR_NEWER=0
+if [ -n "$UBUNTU_VERSION_ID" ]; then
+    if dpkg --compare-versions "$UBUNTU_VERSION_ID" ge "24.04"; then
+        IS_UBUNTU_24_04_OR_NEWER=1
+    fi
+fi
+echo "Current architecture: $ARCH"
+echo "Ubuntu VERSION_ID: ${UBUNTU_VERSION_ID:-unknown} (IS_UBUNTU_24_04_OR_NEWER=$IS_UBUNTU_24_04_OR_NEWER)"
+
+# 解析要安装的 requirements 文件：
+# - Ubuntu 24.04+：优先同目录 requirements.noble.txt
+# - 其他系统（含传统 x86/20.04）：使用传入的原 requirements.txt
+resolve_requirements_file() {
+    local req_file="$1"
+    local req_dir
+    local noble_file
+
+    if [ "$IS_UBUNTU_24_04_OR_NEWER" -eq 1 ]; then
+        req_dir="$(dirname "$req_file")"
+        if [ "$req_dir" = "." ]; then
+            noble_file="requirements.noble.txt"
+        else
+            noble_file="${req_dir}/requirements.noble.txt"
+        fi
+        if [ -f "$noble_file" ]; then
+            echo "$noble_file"
+            return 0
+        fi
+        echo "warning: Ubuntu ${UBUNTU_VERSION_ID} 未找到 $noble_file，回退到 $req_file" >&2
+    fi
+    echo "$req_file"
+}
+
+pip_install_requirements() {
+    local req_file="$1"
+    local resolved_req
+
+    resolved_req="$(resolve_requirements_file "$req_file")"
+    if [ ! -f "$resolved_req" ]; then
+        echo "requirements 文件不存在，跳过: $resolved_req"
+        return 0
+    fi
+
+    echo "Installing Python deps from: $resolved_req"
+    if [ "$IS_UBUNTU_24_04_OR_NEWER" -eq 1 ]; then
+        # PEP 668: 系统 Python 需显式允许（部署脚本场景）
+        python3 -m pip install -r "$resolved_req" --break-system-packages
+    else
+        # 传统环境（如 x86 + Ubuntu 20.04）保持原行为
+        pip3 install -r "$resolved_req"
+    fi
+}
+
 cd $H12PRO_CONTROLLER_NODE_DIR
-pip3 install -r requirements.txt
-pip3 install -r $NOITOM_HI5_HAND_UDP_PYTHON/requirements.txt
+pip_install_requirements "requirements.txt"
+pip_install_requirements "$NOITOM_HI5_HAND_UDP_PYTHON/requirements.txt"
 
 echo "KUAVO_ROS_CONTROL_WS_PATH: $KUAVO_ROS_CONTROL_WS_PATH"
 echo "SERVICE_DIR: $SERVICE_DIR"
@@ -87,6 +179,7 @@ if [ "$KUAVO_CONTROL_SCHEME" = "rl" ]; then
         source $RL_INSTALLED_DIR/setup.bash
     fi
     catkin build humanoid_controllers
+
 fi
 
 cd $KUAVO_ROS_CONTROL_WS_PATH
@@ -97,6 +190,21 @@ if [ -d "$INSTALLED_DIR" ] && [ -f "$INSTALLED_DIR/setup.bash" ]; then
 fi
 catkin build humanoid_controllers
 catkin build h12pro_controller_node
+# G11 遥控器需编译 g11_controller_node：其 g11_screen_protocol 协议库由
+# ocs2_h12pro_node.py 运行时 import（屏幕端指令），不编译则屏幕端指令降级禁用。
+if [ "$REMOTE_CONTROLLER_TYPE" = "g11" ]; then
+    echo "已选择 G11 遥控器, 编译 g11_controller_node (屏幕指令协议层)..."
+    catkin build g11_controller_node
+    G11_SCREEN_PROTOCOL_SRC="$KUAVO_ROS_CONTROL_WS_PATH/src/humanoid-control/g11_controller_node/scripts/g11_screen_protocol.py"
+    G11_DIST_DIR="$KUAVO_ROS_CONTROL_WS_PATH/devel/lib/python3/dist-packages"
+    if [ -f "$G11_SCREEN_PROTOCOL_SRC" ]; then
+        mkdir -p "$G11_DIST_DIR"
+        ln -sf "$G11_SCREEN_PROTOCOL_SRC" "$G11_DIST_DIR/g11_screen_protocol.py"
+        echo "g11_screen_protocol 已挂载到 devel python 路径: $G11_DIST_DIR/g11_screen_protocol.py"
+    else
+        echo "警告: 未找到 $G11_SCREEN_PROTOCOL_SRC, 屏幕端指令将不可用"
+    fi
+fi
 catkin build humanoid_plan_arm_trajectory
 catkin build kuavo_ros_interfaces
 
@@ -226,6 +334,14 @@ else
 fi
 sed -i "s|^ExecStart=.*|ExecStart=$MONITOR_OCS2_H12PRO|" $OCS2_H12PRO_MONITOR_SERVICE
 
+# 写入遥控器类型到 systemd 服务 (REMOTE_CONTROLLER_TYPE 环境变量)
+# 供 monitor -> start 脚本 -> roslaunch -> ocs2_h12pro_node 链路读取
+if grep -q "^Environment=REMOTE_CONTROLLER_TYPE=" $OCS2_H12PRO_MONITOR_SERVICE; then
+    sed -i "s|^Environment=REMOTE_CONTROLLER_TYPE=.*|Environment=REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE|" $OCS2_H12PRO_MONITOR_SERVICE
+else
+    sed -i "/^Environment=STAIR_DETECTION_CAMERA=.*/a Environment=REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE" $OCS2_H12PRO_MONITOR_SERVICE
+fi
+
 sudo cp $OCS2_H12PRO_MONITOR_SERVICE /etc/systemd/system/
 sudo systemctl daemon-reload
 
@@ -236,6 +352,14 @@ else
     echo "export KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME" >> ~/.bashrc
 fi
 echo "已将 KUAVO_CONTROL_SCHEME=$KUAVO_CONTROL_SCHEME 写入 ~/.bashrc"
+
+# 同步写入 bashrc，确保终端 roslaunch 也能读取 REMOTE_CONTROLLER_TYPE
+if grep -q "^export REMOTE_CONTROLLER_TYPE=" ~/.bashrc; then
+    sed -i "s|^export REMOTE_CONTROLLER_TYPE=.*|export REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE|" ~/.bashrc
+else
+    echo "export REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE" >> ~/.bashrc
+fi
+echo "已将 REMOTE_CONTROLLER_TYPE=$REMOTE_CONTROLLER_TYPE 写入 ~/.bashrc"
 
 sudo apt-get install tmux
 

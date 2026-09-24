@@ -21,6 +21,8 @@ list(APPEND OCS2_CXX_FLAGS
   ${OpenMP_CXX_FLAGS}
   )
 
-# Cpp standard version
-set(CMAKE_CXX_STANDARD 14)
+# Cpp standard version (Jammy log4cxx needs C++17)
+if(NOT CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 17)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

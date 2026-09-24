@@ -180,6 +180,10 @@ namespace humanoidController_wheel_wbc
                base_cmd_vel_limit_enable_ ? "true" : "false",
                base_cmd_vel_min_[0], base_cmd_vel_min_[1], base_cmd_vel_min_[2],
                base_cmd_vel_max_[0], base_cmd_vel_max_[1], base_cmd_vel_max_[2]);
+      // 限频发布：urobot 按 50Hz 消费底盘命令，500Hz 灌入会使其内部队列堆积（见 底盘命令执行延迟分析记录.md）
+      loadOptionalTaskParam(taskFile, "baseCmdVelLimit.publish_rate", base_cmd_vel_publish_rate_);
+      base_cmd_vel_publish_rate_ = std::max(1.0, base_cmd_vel_publish_rate_);
+      ROS_INFO("[humanoidControllerWheelWbc] base_cmd_vel publish rate=%.1f Hz", base_cmd_vel_publish_rate_);
     }
     optimizedState_mrt_.setZero(manipulatorModelInfo_.stateDim);
     optimizedInput_mrt_.setZero(manipulatorModelInfo_.inputDim);
@@ -325,6 +329,71 @@ namespace humanoidController_wheel_wbc
       mrtInputLimitFilterPtr_->setSecondOrderDerivativeLimit(optimizedTrajMaxJerk_);
     }
 
+    // Final arm q/v consistency guard. This is intentionally independent of
+    // armTrajInterpKinematicLimit and quick mode so every upstream path uses
+    // the same joint-boundary behavior.
+    {
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.enable",
+                            arm_joint_limit_velocity_damper_enabled_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.soft_zone",
+                            arm_joint_limit_soft_zone_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.stop_acceleration",
+                            arm_joint_limit_stop_acceleration_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.max_velocity",
+                            arm_joint_limit_max_velocity_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.settle_velocity",
+                            arm_joint_limit_settle_velocity_);
+      loadOptionalTaskParam(taskFile, "armJointLimitVelocityDamper.hard_epsilon",
+                            arm_joint_limit_hard_epsilon_);
+
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/enable",
+                          arm_joint_limit_velocity_damper_enabled_,
+                          arm_joint_limit_velocity_damper_enabled_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/soft_zone",
+                          arm_joint_limit_soft_zone_, arm_joint_limit_soft_zone_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/stop_acceleration",
+                          arm_joint_limit_stop_acceleration_, arm_joint_limit_stop_acceleration_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/max_velocity",
+                          arm_joint_limit_max_velocity_, arm_joint_limit_max_velocity_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/settle_velocity",
+                          arm_joint_limit_settle_velocity_, arm_joint_limit_settle_velocity_);
+      controllerNh_.param("/joint_cmd/arm_limit_velocity_damper/hard_epsilon",
+                          arm_joint_limit_hard_epsilon_, arm_joint_limit_hard_epsilon_);
+
+      const auto& model = pinocchioInterface_ptr_->getModel();
+      arm_joint_limits_valid_ = armNum_ > 0 &&
+          model.lowerPositionLimit.size() >= armNum_ &&
+          model.upperPositionLimit.size() >= armNum_;
+      if (arm_joint_limits_valid_) {
+        arm_joint_lower_limits_ = model.lowerPositionLimit.tail(armNum_);
+        arm_joint_upper_limits_ = model.upperPositionLimit.tail(armNum_);
+        arm_joint_limits_valid_ = arm_joint_lower_limits_.allFinite() &&
+            arm_joint_upper_limits_.allFinite() &&
+            (arm_joint_lower_limits_.array() < arm_joint_upper_limits_.array()).all();
+      }
+      const bool numericConfigValid = std::isfinite(arm_joint_limit_soft_zone_) &&
+          arm_joint_limit_soft_zone_ > 0.0 &&
+          std::isfinite(arm_joint_limit_stop_acceleration_) &&
+          arm_joint_limit_stop_acceleration_ > 0.0 &&
+          std::isfinite(arm_joint_limit_max_velocity_) &&
+          arm_joint_limit_max_velocity_ > 0.0 &&
+          std::isfinite(arm_joint_limit_settle_velocity_) &&
+          arm_joint_limit_settle_velocity_ >= 0.0 &&
+          std::isfinite(arm_joint_limit_hard_epsilon_) &&
+          arm_joint_limit_hard_epsilon_ >= 0.0;
+      if (!arm_joint_limits_valid_ || !numericConfigValid) {
+        ROS_ERROR("[humanoidControllerWheelWbc] invalid final arm joint-limit damper configuration; disabled");
+        arm_joint_limit_velocity_damper_enabled_ = false;
+      }
+      ROS_INFO_STREAM("[humanoidControllerWheelWbc] final arm joint-limit velocity damper enable="
+                      << (arm_joint_limit_velocity_damper_enabled_ ? "true" : "false")
+                      << ", soft_zone=" << arm_joint_limit_soft_zone_
+                      << ", stop_acceleration=" << arm_joint_limit_stop_acceleration_
+                      << ", max_velocity=" << arm_joint_limit_max_velocity_
+                      << ", settle_velocity=" << arm_joint_limit_settle_velocity_
+                      << ", hard_epsilon=" << arm_joint_limit_hard_epsilon_);
+    }
+
     // 关节输出限制
     jointCmdLimiterPtr_ = std::make_shared<mobile_manipulator::jointCmdLimiter>(manipulatorModelInfo_.armDim, 
                                                             *pinocchioInterface_ptr_,
@@ -337,16 +406,29 @@ namespace humanoidController_wheel_wbc
     ros::param::set("/headRealDof",  2);
     ros::param::set("/waistRealDof",  0);
     vector_t mujoco_q = vector_t::Zero(7 + 4 + 7*2 + 2);
-    if(robotVersion_ == 60)
-    {
-      mujoco_q[2] = 0.0;
-    }
-    else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
+    // 轮臂（major==6）统一初始化：mujoco_q[2] 置 0（60/61/62/63/200062/300062/400062/400063 等价）
+    if (rb_version.major() == 6)
     {
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    if ((robotVersion_ == 62 || robotVersion_ == 63) && hasQibeng)
+    if (!is_real_)
+    {
+      double task_initial_base_x = 0.0;
+      double task_initial_base_y = 0.0;
+      controllerNh_.param(
+          "/task_initial_base_x", task_initial_base_x, 0.0);
+      controllerNh_.param(
+          "/task_initial_base_y", task_initial_base_y, 0.0);
+      mujoco_q[0] = task_initial_base_x;
+      mujoco_q[1] = task_initial_base_y;
+      ROS_INFO(
+          "Simulation initial base translation: x=%.4f y=%.4f",
+          task_initial_base_x, task_initial_base_y);
+    }
+    // 62/63 夹爪气泵版（短版本 patch==0）的特殊初始臂姿
+    if ((rb_version.major() == 6 && rb_version.patch() == 0 &&
+         (rb_version.minor() == 2 || rb_version.minor() == 3)) && hasQibeng)
     {
       mujoco_q[11] = 0.5236;
       mujoco_q[14] = -1.57;
@@ -361,6 +443,14 @@ namespace humanoidController_wheel_wbc
       mujoco_q[21] = -0.5236;
     }
 
+    // MuJoCo loads the scene with both arms at zero.  Keep that same posture
+    // during simulation initialization so the controller does not rewrite the
+    // arm joints to a second pose immediately after the viewer opens.
+    if (!is_real_)
+    {
+      mujoco_q.segment(7 + lowJointNum_, armNum_).setZero();
+    }
+
     std::vector<double> robot_init_state_param;
     for (int i = 0; i < mujoco_q.size(); i++)
     {
@@ -373,15 +463,6 @@ namespace humanoidController_wheel_wbc
     {
       stand_arm_joint_state_vector.push_back(mujoco_q(armStartIndex + i));
     }
-
-    /******************************** 双臂初始动作 ****************************************/
-    vector_t startAction = mujoco_q.tail(manipulatorModelInfo_.armDim + headNum_).head(manipulatorModelInfo_.armDim);
-    vector_t targetAction = startAction;
-    targetAction.tail(armNum_)[4] = startAction.tail(armNum_)[4] - 0.5236;
-    targetAction.tail(armNum_/2)[4] = startAction.tail(armNum_/2)[4] + 0.5236;
-    double preActionDesiredTime = 1.5;
-    initialPreTargetActions(startAction, targetAction, preActionDesiredTime); // 设置机器人启动初始动作
-    /************************************************************************************/
 
     controllerNh_.setParam("/robot_init_state_param", robot_init_state_param);
     controllerNh_.setParam("/standJointState", stand_arm_joint_state_vector);
@@ -415,6 +496,7 @@ namespace humanoidController_wheel_wbc
     waistYawKinematicPublisher_ = controllerNh_.advertise<nav_msgs::Odometry>("/waist_yaw_link_kinematic", 10);
     lbLegTrajPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/lb_leg_traj", 10);
     stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
+    armTrajFilteredPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_filtered", 10);
     resetToStatePub_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/mobile_manipulator_reset_to_state", 1);
 
     // 双手末端 FK 话题：/sensors_data_raw/ee_fk/<末端帧名>
@@ -881,16 +963,10 @@ namespace humanoidController_wheel_wbc
     vector6_t odomData_new = vector6_t::Zero();
     computeObservationFromSensorData(sensors_data_new, odomData_new);
 
-    static double endTime = time.toSec() + robotPreActionDesiredTime_ + 0.5;
-    performSimpleActions(time);   // 执行预设动作
-    
-    if(time.toSec() > endTime || !is_real_)
-    {
-      setupMrt();
-      initMPC();
-      isPreUpdateComplete = true;
-      ROS_INFO_THROTTLE(1.0, "[preUpdate] preUpdate is done.");
-    }
+    setupMrt();
+    initMPC();
+    isPreUpdateComplete = true;
+    ROS_INFO_THROTTLE(1.0, "[preUpdate] preUpdate is done.");
 
     return true;
   }
@@ -1122,6 +1198,18 @@ namespace humanoidController_wheel_wbc
     }
     else  // 轮臂MPC模式下的特殊处理
     {
+      // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
+      // 只跟踪“上肢快速 + 直接位置通路”的有效期。离开该通路立即清除状态，
+      // 保证下次进入时从进入前控制目标重新初始化，避免沿用旧滤波状态。
+      const bool absoluteQuickQLowPassActive =
+          (quickMode_ == 2 || quickMode_ == 3) &&
+          (lbMpcMode == 1 || lbMpcMode == 3) &&
+          !enable_arm_traj_interpolator_;
+      if (!absoluteQuickQLowPassActive)
+      {
+        absolute_quick_q_lowpass_initialized_ = false;
+      }
+
       // 手臂跟踪快模式: 直接从 kuavo_arm_traj 话题获取手臂关节指令
       if (quickMode_ != 0 && (lbMpcMode == 1 || lbMpcMode == 3))  // 设置仅在armOnly和baseArm模式下生效
       {
@@ -1145,9 +1233,176 @@ namespace humanoidController_wheel_wbc
             vector_t arm_target_qvel = vector_t::Zero(armNum_);
             arm_target_qpos = control_data_manager_->getArmExternalControlState().pos;
             arm_target_qvel = control_data_manager_->getArmExternalControlState().vel;
-            optimizedState_mrt_.tail(armNum_) = arm_target_qpos;
-            optimizedInput_mrt_.tail(armNum_) = arm_target_qvel;
-            ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_quick_mode", arm_target_qpos);
+
+            // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
+            // ABSOLUTE_QUICK_JOINT3_SHAPER_BETA_FDB60BBC_V2
+            // 首帧从本周期尚未被快速目标覆盖的控制目标起步，避免切入瞬间跳到 VR 目标。
+            if (!absolute_quick_q_lowpass_initialized_ ||
+                absolute_quick_q_lowpass_q_.size() != armNum_ ||
+                absolute_quick_q_shaped_q_.size() != armNum_ ||
+                absolute_quick_q_shaped_v_.size() != armNum_)
+            {
+              const vector_t seed = optimizedState_mrt_.tail(armNum_);
+              absolute_quick_q_lowpass_q_ = seed;
+              absolute_quick_q_shaped_q_ = seed;
+              absolute_quick_q_shaped_v_ = vector_t::Zero(armNum_);
+
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/cutoff_hz",
+                  absolute_quick_q_lowpass_cutoff_hz_,
+                  3.5);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_cutoff_hz",
+                  absolute_quick_joint3_cutoff_hz_,
+                  2.0);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_max_velocity",
+                  absolute_quick_joint3_max_velocity_,
+                  2.5);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_soft_limit_rad",
+                  absolute_quick_joint3_soft_limit_rad_,
+                  1.25);
+              ros::param::param<double>(
+                  "/wheel_arm_latency/absolute_lowpass/joint3_hard_limit_rad",
+                  absolute_quick_joint3_hard_limit_rad_,
+                  1.484);
+
+              if (!(absolute_quick_q_lowpass_cutoff_hz_ >= 0.5 &&
+                    absolute_quick_q_lowpass_cutoff_hz_ <= 20.0))
+              {
+                ROS_WARN("[absolute quick shaper] invalid general cutoff %.3f Hz; use 3.5 Hz",
+                         absolute_quick_q_lowpass_cutoff_hz_);
+                absolute_quick_q_lowpass_cutoff_hz_ = 3.5;
+              }
+              if (!(absolute_quick_joint3_cutoff_hz_ >= 0.5 &&
+                    absolute_quick_joint3_cutoff_hz_ <=
+                        absolute_quick_q_lowpass_cutoff_hz_))
+              {
+                ROS_WARN("[absolute quick shaper] invalid joint3 cutoff %.3f Hz; use 2.0 Hz",
+                         absolute_quick_joint3_cutoff_hz_);
+                absolute_quick_joint3_cutoff_hz_ = 2.0;
+              }
+              if (!(absolute_quick_joint3_max_velocity_ >= 0.2 &&
+                    absolute_quick_joint3_max_velocity_ <= 7.5))
+              {
+                ROS_WARN("[absolute quick shaper] invalid joint3 max velocity %.3f; use 2.5 rad/s",
+                         absolute_quick_joint3_max_velocity_);
+                absolute_quick_joint3_max_velocity_ = 2.5;
+              }
+              if (!(absolute_quick_joint3_soft_limit_rad_ >= 0.5 &&
+                    absolute_quick_joint3_hard_limit_rad_ <= 1.55 &&
+                    absolute_quick_joint3_hard_limit_rad_ -
+                            absolute_quick_joint3_soft_limit_rad_ >=
+                        0.05))
+              {
+                ROS_WARN("[absolute quick shaper] invalid joint3 limits soft=%.3f hard=%.3f; use 1.25/1.484 rad",
+                         absolute_quick_joint3_soft_limit_rad_,
+                         absolute_quick_joint3_hard_limit_rad_);
+                absolute_quick_joint3_soft_limit_rad_ = 1.25;
+                absolute_quick_joint3_hard_limit_rad_ = 1.484;
+              }
+
+              absolute_quick_q_lowpass_initialized_ = true;
+              ROS_INFO("[absolute quick shaper] entered: general_fc=%.3f joint3_fc=%.3f vmax=%.3f soft=%.3f hard=%.3f",
+                       absolute_quick_q_lowpass_cutoff_hz_,
+                       absolute_quick_joint3_cutoff_hz_,
+                       absolute_quick_joint3_max_velocity_,
+                       absolute_quick_joint3_soft_limit_rad_,
+                       absolute_quick_joint3_hard_limit_rad_);
+            }
+
+            const double safeDt = std::max(0.0005, std::min(0.010, dt_));
+            const vector_t previousShapedQ = absolute_quick_q_shaped_q_;
+
+            // 500 Hz exact-discrete first-order LPF. The two third joints use a
+            // lower cutoff; all other joints retain the general cutoff.
+            for (int i = 0; i < armNum_; ++i)
+            {
+              const bool isJoint3 = (i == 2 || i == 9);
+              const double cutoffHz =
+                  isJoint3 ? absolute_quick_joint3_cutoff_hz_
+                           : absolute_quick_q_lowpass_cutoff_hz_;
+              const double alpha =
+                  1.0 - std::exp(-2.0 * 3.14159265358979323846 *
+                                 cutoffHz * safeDt);
+              absolute_quick_q_lowpass_q_(i) +=
+                  alpha * (arm_target_qpos(i) -
+                           absolute_quick_q_lowpass_q_(i));
+
+              if (!isJoint3)
+              {
+                absolute_quick_q_shaped_q_(i) =
+                    absolute_quick_q_lowpass_q_(i);
+                absolute_quick_q_shaped_v_(i) =
+                    (absolute_quick_q_shaped_q_(i) - previousShapedQ(i)) /
+                    safeDt;
+                continue;
+              }
+
+              // The physical controller already has a hard joint limit. Clamp
+              // the shaper target slightly before handing it downstream, then
+              // reduce admissible velocity continuously inside the soft zone.
+              const double hard = absolute_quick_joint3_hard_limit_rad_;
+              const double soft = absolute_quick_joint3_soft_limit_rad_;
+              const double boundedTarget =
+                  std::max(-hard,
+                           std::min(hard, absolute_quick_q_lowpass_q_(i)));
+              const double error =
+                  boundedTarget - absolute_quick_q_shaped_q_(i);
+              const double direction =
+                  error > 0.0 ? 1.0 : (error < 0.0 ? -1.0 : 0.0);
+
+              double softScale = 1.0;
+              if (direction > 0.0 && absolute_quick_q_shaped_q_(i) > soft)
+              {
+                softScale =
+                    (hard - absolute_quick_q_shaped_q_(i)) / (hard - soft);
+              }
+              else if (direction < 0.0 &&
+                       absolute_quick_q_shaped_q_(i) < -soft)
+              {
+                softScale =
+                    (hard + absolute_quick_q_shaped_q_(i)) / (hard - soft);
+              }
+              softScale = std::max(0.0, std::min(1.0, softScale));
+
+              // A memoryless slew limit is deliberate here. It never carries
+              // an old acceleration/velocity state through a hand reversal,
+              // and the clamped delta cannot pass the current filtered target.
+              const double maxPositionStep =
+                  absolute_quick_joint3_max_velocity_ * softScale * safeDt;
+              const double positionStep =
+                  std::max(-maxPositionStep,
+                           std::min(maxPositionStep, error));
+              absolute_quick_q_shaped_q_(i) += positionStep;
+              absolute_quick_q_shaped_q_(i) =
+                  std::max(-hard,
+                           std::min(hard, absolute_quick_q_shaped_q_(i)));
+              absolute_quick_q_shaped_v_(i) = positionStep / safeDt;
+            }
+
+            optimizedState_mrt_.tail(armNum_) = absolute_quick_q_shaped_q_;
+            // q and dq are now generated by the same 500 Hz shaper state.
+            optimizedInput_mrt_.tail(armNum_) = absolute_quick_q_shaped_v_;
+            ros_logger_->publishVector(
+                "/humanoid_wheel/arm_target_qpos_quick_mode",
+                absolute_quick_q_shaped_q_);
+
+            if (armNum_ > 9)
+            {
+              vector_t joint3ShaperState(8);
+              joint3ShaperState <<
+                  arm_target_qpos(2), absolute_quick_q_lowpass_q_(2),
+                  absolute_quick_q_shaped_q_(2),
+                  absolute_quick_q_shaped_v_(2),
+                  arm_target_qpos(9), absolute_quick_q_lowpass_q_(9),
+                  absolute_quick_q_shaped_q_(9),
+                  absolute_quick_q_shaped_v_(9);
+              ros_logger_->publishVector(
+                  "/wheel_arm_latency/absolute_joint3_shaper_state",
+                  joint3ShaperState);
+            }
           }
         }
       }
@@ -1191,19 +1446,31 @@ namespace humanoidController_wheel_wbc
       qposLimit = optimizedState_mrt_limit_.tail(info.armDim);
       qvelLimit = optimizedInput_mrt_limit_.tail(info.armDim);
       jointCmdLimiterPtr_->update(qposLimit, qvelLimit);
-      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
       static vector_t jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
       const vector_t jointPosDelta =
-          (optimizedState_mrt_limit_.tail(info.armDim) - jointPosTarget_last) / dt_;
-      if (enable_arm_traj_interpolator_) {
-        // 手臂轨迹插补仅应覆盖手臂段速度；下肢仍用位置差分，与 state 同向。
-        // 若对全 armDim 使用 MPC optimizedInput（躯干笛卡尔模式下常为 0 或与 state 不同步），
-        // WBC 下肢 PD 的 vel_error 会被 kd 放大，例如 data[3](knee_pitch) 出现大幅负值。
-        optimizedInput_mrt_limit_.segment(baseDim_, lowJointNum_) = jointPosDelta.head(lowJointNum_);
-        optimizedInput_mrt_limit_.tail(armNum_) = qvelLimit.tail(armNum_);
+          (qposLimit - jointPosTarget_last) / dt_;
+
+      const bool quickArmModeActive =
+          (quickMode_ == 2 || quickMode_ == 3) && (lbMpcMode == 1 || lbMpcMode == 3);
+      vector_t requestedArmV;
+      // 插补/快模式沿用上游速度。500Hz 对 joint_q 差分会把位置台阶放大成速度毛刺，
+      // 手臂抖动。q/v 一致性改由增量 IK 用发布位置差分填 /kuavo_arm_traj.velocity。
+      if (enable_arm_traj_interpolator_ || quickArmModeActive) {
+        requestedArmV = qvelLimit.tail(armNum_);
       } else {
-        optimizedInput_mrt_limit_.tail(info.armDim) = jointPosDelta;
+        requestedArmV = jointPosDelta.tail(armNum_);
       }
+
+      vector_t finalArmQ = qposLimit.tail(armNum_);
+      vector_t finalArmV;
+      applyFinalArmJointLimitVelocityDamper(
+          jointPosTarget_last.tail(armNum_), requestedArmV, finalArmQ, finalArmV);
+      qposLimit.tail(armNum_) = finalArmQ;
+
+      optimizedState_mrt_limit_.tail(info.armDim) = qposLimit;
+      // 下肢保持位置差分；手臂统一使用最终边界阻尼后的速度。
+      optimizedInput_mrt_limit_.segment(baseDim_, lowJointNum_) = jointPosDelta.head(lowJointNum_);
+      optimizedInput_mrt_limit_.tail(armNum_) = finalArmV;
       jointPosTarget_last = optimizedState_mrt_limit_.tail(info.armDim);
     }
 
@@ -1382,6 +1649,47 @@ namespace humanoidController_wheel_wbc
       }
     }
 
+    // ===== 下肢 1/2 号电机（knee/leg）锁定：最终输出处硬覆盖 =====
+    // 与增量 IK 复用同一 rosparam，锁定语义 = 钉死到开启瞬间捕获的快照（弧度）。
+    // 无论 MPC / 快速模式 / 主控回发哪条路，1、2 号都被硬覆盖，waist 关节不受影响。
+    {
+      // 每 100ms 实时查询一次 rosparam。必须用 get()（无缓存）而非 getCached()：
+      // getCached() 带本地缓存，首次读到"参数不存在"后缓存不会随 IK 节点/终端 set 而刷新，
+      // 会一直读到旧的 false，导致锁定永远不生效。
+      ros::Time now = ros::Time::now();
+      if ((now - lastLockParamCheckTime_).toSec() >= 0.1) {
+        lastLockParamCheckTime_ = now;
+        bool lockParam = false;
+        // 参数可能是 bool(true/false) 也可能是 int(1/0)，两种都要兼容：
+        // ros::param::get(name, bool&) 只认 XmlRpc boolean 类型，遇到 int(1) 会返回 false，
+        // 导致锁定失效。因此 bool 读取失败时再尝试按 int 读取。
+        if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParam)) {
+          lockKneeLegEnabled_.store(lockParam);
+        } else {
+          int lockParamInt = 0;
+          if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParamInt)) {
+            lockKneeLegEnabled_.store(lockParamInt != 0);
+          }
+        }
+      }
+    }
+    if (lockKneeLegEnabled_.load()) {
+      if (!lockKneeLegCaptured_) {
+        // 开启首拍：捕获当前实际关节角作为固定目标（knee=idx0, leg=idx1）
+        lockKneeQ_ = observation_wheel_.state[baseDim_ + 0];
+        lockLegQ_  = observation_wheel_.state[baseDim_ + 1];
+        lockKneeLegCaptured_ = true;
+        ROS_INFO("[humanoidController_wheel_wbc] knee/leg lock: captured knee=%.4f leg=%.4f",
+                 lockKneeQ_, lockLegQ_);
+      }
+      optimizedState_mrt_limit_[baseDim_ + 0] = lockKneeQ_;
+      optimizedState_mrt_limit_[baseDim_ + 1] = lockLegQ_;
+      optimizedInput_mrt_limit_[baseDim_ + 0] = 0.0;
+      optimizedInput_mrt_limit_[baseDim_ + 1] = 0.0;
+    } else {
+      lockKneeLegCaptured_ = false;  // 解锁后，下次锁定重新捕获快照
+    }
+
     // WBC 目标：optimizedState_wbc=期望位姿/关节角，optimizedInput_wbc=对应速度，维度见头文件注释
     vector_t optimizedState_wbc = optimizedState_mrt_limit_;
     vector_t optimizedInput_wbc = optimizedInput_mrt_limit_;
@@ -1463,6 +1771,32 @@ namespace humanoidController_wheel_wbc
       robotVisualizer_->updateHeadJointPositions(sensors_data_new.jointPos_.tail(headNum_));
     }
     replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
+
+    // 测量 WBC 处理延迟：从共享内存读取手臂轨迹数据到发布 /joint_cmd 的时间
+    {
+      const ros::Time armTrajRecvTime = control_data_manager_->getArmExternalControlStateTimestamp();
+      if (armTrajRecvTime.isValid()) {
+        const double wbcProcessingLatencyMs = (ros::Time::now() - armTrajRecvTime).toSec() * 1000.0;
+        ros_logger_->publishValue("/vr_incremental/wbc_processing_latency_ms", wbcProcessingLatencyMs);
+      }
+    }
+
+    // 发布滤波后手臂轨迹（JointState 格式, deg），用于互相关测量相位延迟
+    // 对比 /vr_incremental/kuavo_arm_traj_shm（滤波前）与此话题（滤波后）即可得到纯相位延迟
+    if (armTrajFilteredPub_) {
+        sensor_msgs::JointState filteredMsg;
+        filteredMsg.header.stamp = time;
+        filteredMsg.position.resize(armNum_);
+        filteredMsg.velocity.resize(armNum_);
+        filteredMsg.name.resize(armNum_);
+        for (int i = 0; i < armNum_; ++i) {
+            filteredMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+            filteredMsg.position[i] = optimizedState_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
+            filteredMsg.velocity[i] = optimizedInput_mrt_limit_.tail(armNum_)[i] * 180.0 / M_PI;
+        }
+        armTrajFilteredPub_.publish(filteredMsg);
+    }
+
     jointCmdPub_.publish(jointCmdMsg);
 
     //更新共享内存中的关节命令
@@ -1512,7 +1846,14 @@ namespace humanoidController_wheel_wbc
       {
         clampBaseCmdVel(velCmdMsg);
       }
-      cmdVelPub_.publish(velCmdMsg);
+      // 限频发布：控制循环 500Hz，但底盘节点按 50Hz 消费，直接满频发布会导致命令
+      // 在其内部队列堆积数秒（见 底盘命令执行延迟分析记录.md），这里按 publish_rate 节流
+      if (last_cmd_vel_pub_time_.isZero() ||
+          (time - last_cmd_vel_pub_time_).toSec() >= 1.0 / base_cmd_vel_publish_rate_)
+      {
+        cmdVelPub_.publish(velCmdMsg);
+        last_cmd_vel_pub_time_ = time;
+      }
     }else{
         ros::Time current_time = ros::Time::now();
         bool should_reset = false;
@@ -1681,16 +2022,33 @@ namespace humanoidController_wheel_wbc
         }
       }
       if (!ruiwo_isolated_core_) {  // 7 号核心未隔离，不允许启动
+#if !defined(__aarch64__)
         std::cout << "7 号核心未隔离，跳过CPU亲和性设置" << std::endl;
         return false;
+#endif
       }
     } else {
       std::cout << "隔离的核心列表为空，跳过CPU亲和性设置" << std::endl;
       return false;
     }
 
+#if defined(__aarch64__)
+    // Orin 降本版：WBC 仅绑定隔离核心 2
+    constexpr int kWbcCpuAarch64 = 2;
+    if (std::find(actually_isolated_cpus.begin(), actually_isolated_cpus.end(), kWbcCpuAarch64) ==
+        actually_isolated_cpus.end()) {
+      std::cout << "CPU " << kWbcCpuAarch64 << " 未隔离，跳过CPU亲和性设置" << std::endl;
+      return false;
+    }
+    actually_isolated_cpus.assign(1, kWbcCpuAarch64);
+#endif
+
     // 只有在有真正隔离的CPU时才设置亲和性
-    if (actually_isolated_cpus.size() >= 2) {  // 至少需要两个核心绑定 WBC
+#if defined(__aarch64__)
+    if (actually_isolated_cpus.size() >= 1) {  // aarch64 WBC 单核
+#else
+    if (actually_isolated_cpus.size() >= 2) {  // x86 至少需要两个核心绑定 WBC
+#endif
       cpu_set_t cpuset;
       CPU_ZERO(&cpuset);
 
@@ -1715,8 +2073,12 @@ namespace humanoidController_wheel_wbc
         return true;
       }
     } else {
+#if defined(__aarch64__)
+      std::cout << "没有真正隔离的 CPU 核心（aarch64 需核心 2），跳过CPU亲和性设置"
+#else
       std::cout << "没有真正隔离的CPU核心或隔离的CPU核心数不足（至少需要2个核心，2个核心绑定WBC控制线程），"
                    "跳过CPU亲和性设置"
+#endif
                 << std::endl;
       return false;
     }
@@ -2099,11 +2461,33 @@ namespace humanoidController_wheel_wbc
 
     const vector_t currentArmQ = observation_wheel_.state.tail(armNum_);
 
+    if (arm_trajectory_mode_ != armInterpSeenMode_) {
+      if (arm_trajectory_mode_ == 2 && armInterpSeenMode_ != 2) {
+        armInterpWaitFreshTraj_ = true;
+        armInterpStampAtModeChange_ = control_data_manager_->getArmExternalControlStateTimestamp();
+      } else {
+        armInterpWaitFreshTraj_ = false;
+      }
+      armInterpSeenMode_ = arm_trajectory_mode_;
+    }
+
     vector_t armTargetRawQ = currentArmQ;
     vector_t armTargetRawV = vector_t::Zero(armNum_);
     bool hasArmTargetRaw = false;
     ArmJointTrajectory armTrajRaw = control_data_manager_->getArmExternalControlState();
-    if (armTrajRaw.pos.size() == static_cast<Eigen::Index>(armNum_)) {
+    if (armInterpWaitFreshTraj_) {
+      const ros::Time trajStamp = control_data_manager_->getArmExternalControlStateTimestamp();
+      if (!trajStamp.isZero() && trajStamp != armInterpStampAtModeChange_) {
+        armInterpWaitFreshTraj_ = false;
+      }
+    }
+    if (armInterpWaitFreshTraj_) {
+      // 切入 mode2 后先钉在当前关节，丢掉缓存里上一轮增量姿态。
+      armTargetRawQ = currentArmQ;
+      armTargetRawV = vector_t::Zero(armNum_);
+      hasArmTargetRaw = true;
+      armTrajectoryInterpolator_.ingestRawTarget(time, currentArmQ, armTargetRawV);
+    } else if (armTrajRaw.pos.size() == static_cast<Eigen::Index>(armNum_)) {
       armTargetRawQ = armTrajRaw.pos;
       hasArmTargetRaw = true;
       if (armTrajRaw.vel.size() == static_cast<Eigen::Index>(armNum_)) {
@@ -2137,6 +2521,177 @@ namespace humanoidController_wheel_wbc
     }
     ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_interp", output.smoothQ);
     ros_logger_->publishVector("/humanoid_wheel/arm_target_qvel_interp", output.smoothV);
+  }
+
+  int humanoidControllerWheelWbc::applyFinalArmJointLimitVelocityDamper(
+      const vector_t& previousArmQ, const vector_t& requestedArmV,
+      vector_t& nextArmQ, vector_t& nextArmV)
+  {
+    nextArmV = requestedArmV;
+    if (!arm_joint_limit_velocity_damper_enabled_ || !arm_joint_limits_valid_ ||
+        previousArmQ.size() != armNum_ || requestedArmV.size() != armNum_ ||
+        nextArmQ.size() != armNum_ || arm_joint_lower_limits_.size() != armNum_ ||
+        arm_joint_upper_limits_.size() != armNum_) {
+      return 0;
+    }
+
+    const double cycle = std::clamp(dt_, 1e-4, 0.02);
+    if (arm_joint_limit_integration_active_.size() !=
+        static_cast<std::size_t>(armNum_)) {
+      arm_joint_limit_integration_active_.assign(armNum_, 0);
+    }
+
+    // This correction is used only after limiting has created a q tracking
+    // error.  Normal joints remain a zero-delay upstream q/v pass-through.
+    constexpr double kResyncGain = 20.0;          // [1/s]
+    constexpr double kResyncPositionTolerance = 1e-4;  // [rad]
+    constexpr double kCompareTolerance = 1e-12;
+
+    int dampedCount = 0;
+    for (int i = 0; i < armNum_; ++i) {
+      const double lower = arm_joint_lower_limits_[i] +
+                           arm_joint_limit_hard_epsilon_;
+      const double upper = arm_joint_upper_limits_[i] -
+                           arm_joint_limit_hard_epsilon_;
+      const double requestedQRaw = std::isfinite(nextArmQ[i])
+                                       ? nextArmQ[i]
+                                       : previousArmQ[i];
+      const double requestedQ = std::clamp(requestedQRaw, lower, upper);
+      const double previousQRaw = std::isfinite(previousArmQ[i])
+                                      ? previousArmQ[i]
+                                      : requestedQ;
+      const double previousQ = std::clamp(previousQRaw, lower, upper);
+      const double rawRequestedV = std::isfinite(requestedArmV[i])
+                                       ? requestedArmV[i]
+                                       : 0.0;
+      const double cappedRequestedV = std::clamp(
+          rawRequestedV, -arm_joint_limit_max_velocity_,
+          arm_joint_limit_max_velocity_);
+
+      auto applyBoundaryDamper = [&](double desiredV,
+                                     bool& boundaryDamperActive) {
+        double boundedV = desiredV;
+        boundaryDamperActive = false;
+
+        if (desiredV > 0.0) {
+          const double distance = std::max(0.0, upper - previousQ);
+          const double brakingDistance = desiredV * desiredV /
+              (2.0 * arm_joint_limit_stop_acceleration_);
+          const double activationDistance = std::max(
+              arm_joint_limit_soft_zone_, brakingDistance);
+          if (distance < activationDistance) {
+            const double ratio = std::clamp(
+                distance / activationDistance, 0.0, 1.0);
+            const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+            const double softLimit = desiredV * smoothScale;
+            const double brakeLimit = std::sqrt(
+                2.0 * arm_joint_limit_stop_acceleration_ * distance);
+            boundedV = std::min(
+                {desiredV, softLimit, brakeLimit, distance / cycle});
+            boundaryDamperActive =
+                boundedV < desiredV - kCompareTolerance;
+          }
+        } else if (desiredV < 0.0) {
+          const double distance = std::max(0.0, previousQ - lower);
+          const double speed = std::abs(desiredV);
+          const double brakingDistance = speed * speed /
+              (2.0 * arm_joint_limit_stop_acceleration_);
+          const double activationDistance = std::max(
+              arm_joint_limit_soft_zone_, brakingDistance);
+          if (distance < activationDistance) {
+            const double ratio = std::clamp(
+                distance / activationDistance, 0.0, 1.0);
+            const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+            const double softLimit = speed * smoothScale;
+            const double brakeLimit = std::sqrt(
+                2.0 * arm_joint_limit_stop_acceleration_ * distance);
+            boundedV = -std::min(
+                {speed, softLimit, brakeLimit, distance / cycle});
+            boundaryDamperActive =
+                boundedV > desiredV + kCompareTolerance;
+          }
+        }
+
+        const bool insideSoftZone =
+            (boundedV > 0.0 && upper - previousQ <
+                                   arm_joint_limit_soft_zone_) ||
+            (boundedV < 0.0 && previousQ - lower <
+                                   arm_joint_limit_soft_zone_);
+        if (insideSoftZone &&
+            std::abs(boundedV) < arm_joint_limit_settle_velocity_) {
+          boundaryDamperActive = boundaryDamperActive ||
+              std::abs(boundedV) > kCompareTolerance;
+          boundedV = 0.0;
+        }
+        return boundedV;
+      };
+
+      bool baseBoundaryDamperActive = false;
+      const double baseBoundedV = applyBoundaryDamper(
+          cappedRequestedV, baseBoundaryDamperActive);
+      const bool velocityCapActive =
+          std::abs(cappedRequestedV - rawRequestedV) > kCompareTolerance;
+      const bool positionClampActive =
+          std::abs(requestedQ - requestedQRaw) > kCompareTolerance;
+      const bool limiterActs = velocityCapActive ||
+          baseBoundaryDamperActive || positionClampActive;
+      const bool wasIntegrating =
+          arm_joint_limit_integration_active_[i] != 0;
+
+      // With no current or historical limiting, preserve the low-latency
+      // path exactly: do not integrate and do not add a tracking filter.
+      if (!wasIntegrating && !limiterActs) {
+        nextArmQ[i] = requestedQ;
+        nextArmV[i] = rawRequestedV;
+        continue;
+      }
+
+      arm_joint_limit_integration_active_[i] = 1;
+
+      // Once q has fallen behind because of a limiter, add a bounded catch-up
+      // term.  This prevents a direct q snap when the requested velocity drops
+      // back below max_velocity.  Boundary damping is applied after catch-up.
+      const double positionError = requestedQ - previousQ;
+      double trackingV = cappedRequestedV + kResyncGain * positionError;
+      trackingV = std::clamp(trackingV,
+                             -arm_joint_limit_max_velocity_,
+                             arm_joint_limit_max_velocity_);
+      bool trackingBoundaryDamperActive = false;
+      double finalV = applyBoundaryDamper(
+          trackingV, trackingBoundaryDamperActive);
+
+      double finalQ = std::clamp(previousQ + finalV * cycle,
+                                 lower, upper);
+      finalV = (finalQ - previousQ) / cycle;
+
+      // Close only a tiny residual in a q/v-consistent way.  Do not release
+      // while an outward boundary damper or velocity cap is still required.
+      const double remainingError = requestedQ - finalQ;
+      if (!limiterActs && !trackingBoundaryDamperActive &&
+          std::abs(remainingError) <= kResyncPositionTolerance) {
+        const double syncV = (requestedQ - previousQ) / cycle;
+        if (std::abs(syncV) <=
+            arm_joint_limit_max_velocity_ + kCompareTolerance) {
+          bool syncBoundaryDamperActive = false;
+          const double safeSyncV = applyBoundaryDamper(
+              syncV, syncBoundaryDamperActive);
+          if (!syncBoundaryDamperActive &&
+              std::abs(safeSyncV - syncV) <= kCompareTolerance) {
+            finalQ = requestedQ;
+            finalV = syncV;
+            arm_joint_limit_integration_active_[i] = 0;
+          }
+        }
+      }
+
+      if (std::abs(finalV - rawRequestedV) > kCompareTolerance ||
+          std::abs(finalQ - requestedQRaw) > kCompareTolerance) {
+        ++dampedCount;
+      }
+      nextArmQ[i] = finalQ;
+      nextArmV[i] = finalV;
+    }
+    return dampedCount;
   }
 
   void humanoidControllerWheelWbc::updateUserJointCmd(const ros::Time &time, vector_t& target_qpos, vector_t& target_qvel)
@@ -2675,107 +3230,6 @@ namespace humanoidController_wheel_wbc
     return desired_force;
   }
 
-  void humanoidControllerWheelWbc::initialPreTargetActions(const vector_t& startActions, const vector_t& preTargetActions, double desiredTime)
-  {
-    // Check if startActions has the correct dimension
-    if (startActions.size() != manipulatorModelInfo_.armDim)
-    {
-      throw std::invalid_argument("startActions dimension mismatch: expected " + 
-                                   std::to_string(manipulatorModelInfo_.armDim) + 
-                                   ", got " + std::to_string(startActions.size()));
-    }
-    // Check if preTargetActions has the correct dimension
-    if (preTargetActions.size() != manipulatorModelInfo_.armDim)
-    {
-      throw std::invalid_argument("preTargetActions dimension mismatch: expected " + 
-                                   std::to_string(manipulatorModelInfo_.armDim) + 
-                                   ", got " + std::to_string(preTargetActions.size()));
-    }
-
-    startActions_ = vector_t::Zero(manipulatorModelInfo_.stateDim);
-    startActions_.tail(manipulatorModelInfo_.armDim) = startActions;
-    preTargetActions_ = vector_t::Zero(manipulatorModelInfo_.stateDim);
-    preTargetActions_.tail(manipulatorModelInfo_.armDim) = preTargetActions;
-    robotPreActionDesiredTime_ = desiredTime;
-  }
-
-  void humanoidControllerWheelWbc::performSimpleActions(const ros::Time &time)
-  {
-    static vector_t startState = startActions_;
-    static vector_t startInput = vector_t::Zero(manipulatorModelInfo_.stateDim);
-    static vector_t targetState = preTargetActions_;
-    static double startTime = time.toSec();
-    static double midTargetTime = startTime + robotPreActionDesiredTime_/2;
-    static double endTime = startTime + robotPreActionDesiredTime_;
-
-    scalar_array_t timeTrajectory;
-    timeTrajectory.push_back(startTime);
-    timeTrajectory.push_back(midTargetTime);
-    timeTrajectory.push_back(endTime);
-    vector_array_t stateTrajectory;
-    stateTrajectory.push_back(startState);
-    stateTrajectory.push_back(targetState);
-    stateTrajectory.push_back(startState);
-
-    vector_t curTargetState_wbc = LinearInterpolation::interpolate(time.toSec(), timeTrajectory, stateTrajectory);
-    static vector_t lastTargetState_wbc = curTargetState_wbc;
-    ros_logger_->publishVector("/humanoid_wheel/curTargetState_wbc", curTargetState_wbc);
-
-    vector_t inputVelocity = (curTargetState_wbc - lastTargetState_wbc) / dt_;
-
-    vector_t x = wheel_wbc_->update(curTargetState_wbc, inputVelocity, observation_wheel_);
-    vector_t torque = x.tail(manipulatorModelInfo_.armDim); // 力矩在决策变量的最后部分
-
-    lastTargetState_wbc = curTargetState_wbc;
-
-    kuavo_msgs::jointCmd jointCmdMsg;
-    jointCmdMsg.header.stamp = time;
-    for (int i1 = 0; i1 < lowJointNum_; ++i1)
-    {
-      jointCmdMsg.joint_q.push_back(curTargetState_wbc.tail(manipulatorModelInfo_.armDim)[i1]);
-      jointCmdMsg.joint_v.push_back(0.0);
-      jointCmdMsg.tau.push_back(torque.head(lowJointNum_)[i1]);
-      jointCmdMsg.tau_ratio.push_back(1);
-      jointCmdMsg.joint_kp.push_back(0);
-      jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[i1]);
-      jointCmdMsg.control_modes.push_back(2);
-    }
-    for (int i2 = 0; i2 < armNum_; ++i2)
-    {
-      jointCmdMsg.joint_q.push_back(curTargetState_wbc.tail(armNum_)[i2]);
-      jointCmdMsg.joint_v.push_back(0.0);
-      jointCmdMsg.tau.push_back(torque.tail(armNum_)[i2]);
-      jointCmdMsg.tau_ratio.push_back(1);
-      jointCmdMsg.joint_kp.push_back(0);
-      jointCmdMsg.joint_kd.push_back(0);
-      jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + i2]);
-      jointCmdMsg.control_modes.push_back(2);
-    }
-
-    // 从控制数据管理器计算头部控制（内部自动获取传感器数据）
-    if (headNum_ > 0)
-    {
-      vector_t target_pos = control_data_manager_->getHeadExternalControlState();
-      vector_t feedback_tau = control_data_manager_->computeHeadControl(target_pos);
-      
-      for (int i3 = 0; i3 < headNum_; ++i3)
-      {
-        jointCmdMsg.joint_q.push_back(target_pos[i3]);
-        jointCmdMsg.joint_v.push_back(0);
-        jointCmdMsg.tau.push_back(feedback_tau[i3]);
-        jointCmdMsg.tau_ratio.push_back(1);
-        jointCmdMsg.tau_max.push_back(kuavo_settings_.hardware_settings.max_current[lowJointNum_ + armNum_ + i3]);
-        jointCmdMsg.control_modes.push_back(2);
-        jointCmdMsg.joint_kp.push_back(0);
-        jointCmdMsg.joint_kd.push_back(0);
-      }
-    }
-
-    replaceDefaultEcMotorPdoGait(jointCmdMsg);  // 统一修改pdo写入的kpkd
-    jointCmdPub_.publish(jointCmdMsg);
-  }
-
   // 用于更新指令和反馈的关键笛卡尔位姿的误差
   void humanoidControllerWheelWbc::computeErrorMultiEeFromTargetAndData(const vector_t& targetState, 
                                                                         const vector_t& currentState)
@@ -2918,4 +3372,3 @@ namespace humanoidController_wheel_wbc
   }
 
 } // namespace humanoidController_wheel_wbc
-

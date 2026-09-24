@@ -1,0 +1,52 @@
+<launch>
+  <!-- Canonical Task 1 simulator entry. -->
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION 400062)"/>
+  <arg name="rviz" default="false"/>
+  <arg name="use_joystick" default="false"/>
+  <arg name="use_vr_control" default="false"/>
+  <arg name="output_system_info" default="false"/>
+  <arg name="initial_base_x" default="0.0"/>
+  <arg name="initial_base_y" default="0.0"/>
+  <arg name="task_light_seed" default="-1"/>
+  <arg name="require_model_command_gate" default="false"/>
+  <arg name="publish_cmd_vel_fallback" default="true"/>
+  <arg name="legged_robot_scene"
+       default="$(find data_challenge_simulator)/models/biped_s$(arg robot_version)/xml/task1.xml"/>
+
+  <rosparam param="task_body_names">[cylinder_1, cylinder_2, cylinder_3, target_bin, source_bin, lever, base_link, waist_yaw_link]</rosparam>
+  <rosparam param="contact_follow_body_names">[cylinder_1, cylinder_2, cylinder_3]</rosparam>
+  <param name="task_light_seed" value="$(arg task_light_seed)"/>
+  <param name="task_light_profile" value="1"/>
+  <param name="/sg100_require_model_command_gate"
+         value="$(arg require_model_command_gate)"/>
+  <param name="/run_mujoco_camera" value="true"/>
+
+  <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim_wheel.launch">
+    <arg name="robot_version" value="$(arg robot_version)"/>
+    <arg name="rviz" value="$(arg rviz)"/>
+    <arg name="use_joystick" value="$(arg use_joystick)"/>
+    <arg name="use_vr_control" value="$(arg use_vr_control)"/>
+    <arg name="output_system_info" value="$(arg output_system_info)"/>
+    <arg name="initial_base_x" value="$(arg initial_base_x)"/>
+    <arg name="initial_base_y" value="$(arg initial_base_y)"/>
+    <arg name="legged_robot_scene" value="$(arg legged_robot_scene)"/>
+  </include>
+
+  <!-- Keep the large bin latched to the white cradle until its bottom first
+       reaches the source conveyor.  The latch then releases once per run. -->
+  <node pkg="data_challenge_simulator" type="source_bin_latch_v2.py"
+        name="source_bin_latch_v2" output="screen"/>
+  <node pkg="data_challenge_simulator" type="rosbag_compat_publisher.py"
+        name="rosbag_compat_publisher" output="screen">
+    <param name="robot_urdf"
+           value="$(find kuavo_assets)/models/biped_s400062/urdf/biped_s400062.urdf"/>
+    <param name="publish_rate" value="30"/>
+    <param name="publish_cmd_vel_fallback"
+           value="$(arg publish_cmd_vel_fallback)"/>
+    <param name="cmd_vel_publish_rate" value="100"/>
+  </node>
+  <node pkg="data_challenge_simulator" type="topic_repeater.py"
+        name="topic_relay_node" output="screen">
+    <param name="publish_rate" value="30"/>
+  </node>
+</launch>

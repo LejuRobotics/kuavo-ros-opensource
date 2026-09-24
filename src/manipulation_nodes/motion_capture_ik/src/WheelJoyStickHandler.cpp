@@ -47,6 +47,7 @@ void WheelJoyStickHandler::initialize() {
   leftFirstButtonTouched_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
+  rightSecondButtonTouched_ = false;
   rightFirstButtonTouched_ = false;
   rightFirstButtonPressed_ = false;
 
@@ -107,6 +108,7 @@ void WheelJoyStickHandler::reset() {
   leftFirstButtonTouched_ = false;
   leftFirstButtonPressed_ = false;
   rightSecondButtonPressed_ = false;
+  rightSecondButtonTouched_ = false;
   rightFirstButtonTouched_ = false;
   rightFirstButtonPressed_ = false;
 
@@ -166,6 +168,22 @@ bool WheelJoyStickHandler::getRightJoyStickYHold() const {
 bool WheelJoyStickHandler::getRightJoyStickYHoldWithX() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return rightJoyStickYHoldWithX_;
+}
+
+double WheelJoyStickHandler::getLeftTrigger() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  if (leftJoystick_.empty()) {
+    return 0.0;
+  }
+  return leftJoystick_[0];
+}
+
+double WheelJoyStickHandler::getRightTrigger() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  if (rightJoystick_.empty()) {
+    return 0.0;
+  }
+  return rightJoystick_[0];
 }
 
 void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
@@ -293,6 +311,7 @@ void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::
   leftFirstButtonTouched_ = msg->left_first_button_touched;
   leftFirstButtonPressed_ = msg->left_first_button_pressed;
   rightSecondButtonPressed_ = msg->right_second_button_pressed;
+  rightSecondButtonTouched_ = msg->right_second_button_touched;
   rightFirstButtonTouched_ = msg->right_first_button_touched;
   rightFirstButtonPressed_ = msg->right_first_button_pressed;
 
@@ -462,7 +481,7 @@ void WheelJoyStickHandler::loadHandControlParameters() {
     nh.getParam("/end_effector_type", endEffectorTypeStr);
 
     if (endEffectorTypeStr != "qiangnao" && endEffectorTypeStr != "qiangnao_touch" && endEffectorTypeStr != "revo2" &&
-        endEffectorTypeStr != "lejuclaw" && endEffectorTypeStr != "linker_hand") {
+        endEffectorTypeStr != "lejuclaw" && endEffectorTypeStr != "linker_hand" && endEffectorTypeStr != "heiman") {
       throw std::invalid_argument("Unknown end_effector_type: " + endEffectorTypeStr);
     }
     endEffectorType_ = stringToEndEffectorType(endEffectorTypeStr);
@@ -655,6 +674,21 @@ bool WheelJoyStickHandler::isLeftSecondButtonPressed() const {
 bool WheelJoyStickHandler::isRightSecondButtonPressed() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return rightSecondButtonPressed_;
+}
+
+bool WheelJoyStickHandler::isLeftFirstButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return leftFirstButtonTouched_;
+}
+
+bool WheelJoyStickHandler::isRightFirstButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return rightFirstButtonTouched_;
+}
+
+bool WheelJoyStickHandler::isRightSecondButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return rightSecondButtonTouched_;
 }
 
 bool WheelJoyStickHandler::isLeftRightFirstButtonTouched() const {

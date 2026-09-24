@@ -34,7 +34,7 @@ except ImportError:
     print("pyserial 库未安装，正在尝试安装...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
     import serial
-from h12pro_controller_node.srv import playmusic, playmusicRequest, playmusicResponse
+from kuavo_msgs.srv import playmusic, playmusicRequest, playmusicResponse
 from h12pro_controller_node.srv import ExecuteArmAction, ExecuteArmActionRequest, ExecuteArmActionResponse
 from h12pro_controller_node.msg import RobotActionState
 from kuavo_msgs.msg import ControllerSwitchEvent
@@ -314,6 +314,37 @@ LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoc
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
+
+# ===== G11 屏幕选型(joy_node 进程内共享, 模块级变量) =====
+#   ""         = 未选择(首页直接实体H启动) -> launch_humanoid_robot 走 kuavo.json 推断
+#   "humanoid" = 屏幕选了人型二级菜单 -> 双校验后强制 load_kuavo_real.launch
+#   "wheel"    = 屏幕选了轮臂二级菜单 -> 双校验后强制 load_kuavo_real_wheel.launch
+_g11_robot_kind = ""
+
+def set_g11_robot_kind(kind: str) -> None:
+    """由 joy_node(ocs2_h12pro_node.py) 在 G11 屏幕页面变化时调用: 绑定/清除选型。"""
+    global _g11_robot_kind
+    kind = (kind or "").lower()
+    if kind not in ("", "humanoid", "wheel"):
+        raise ValueError(f"invalid g11 robot kind: {kind}")
+    _g11_robot_kind = kind
+
+def get_g11_robot_kind() -> str:
+    return _g11_robot_kind
+
+# ===== G11 CH14 单 bit 状态(屏幕遥控设置, 持续保持上报) =====
+# CH14 四档组合: 1162(都关)/1170(force)/1178(claw)/1186(都开)
+#   force = 启动前必须选择机器人类型(首页未选按H拒绝启动)
+_g11_boot_force = False
+
+def set_g11_boot_force(force: bool) -> None:
+    """由 joy_node(ocs2_h12pro_node.py) 读取屏幕 CH14 force 位后调用。"""
+    global _g11_boot_force
+    _g11_boot_force = bool(force)
+
+def get_g11_boot_force() -> bool:
+    return _g11_boot_force
+
 LAUNCH_VR_REMOTE_CONTROL_CMD = os.getenv("LAUNCH_VR_REMOTE_CONTROL_CMD")
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
@@ -624,16 +655,105 @@ def is_not_wheel_robot(event):
     rospy.loginfo(f"[Condition] 当前为非轮臂机器人（version={robot_version}），允许切换walk/trot步态。")
     return True
 
+# 机型归类: 优先按 ROBOT_VERSION 的 major 判定(人型 50-59 / 轮臂 60-69);
+# major 判不出来时(如 4x/7x 等型号)再回退按 kuavo.json 的 ROBOT_MODULE 推断 ——
+# 与下方 launch 选择同一真源。否则屏幕端「启动前必须选类型」默认开启时,
+# 4x/7x 机型一选类型就会被判"无法识别"而拒绝启动(屏幕无回读, 表现为点启动没反应)。
+_ROBOT_MODULE_KIND = {
+    "KUAVO": "humanoid",
+    "KUAVO5": "humanoid",
+    "ROBAN2": "humanoid",
+    "LUNBI": "wheel",
+    "LUNBI_V62": "wheel",
+}
+
+def _robot_module_of_version(robot_version: str) -> str:
+    """读 kuavo_v<version>/kuavo.json 的 ROBOT_MODULE; 读取失败返回 ''。"""
+    try:
+        kuavo_json = os.path.join(
+            kuavo_ros_control_ws_path, "src", "kuavo_assets", "config",
+            f"kuavo_v{robot_version}", "kuavo.json")
+        with open(kuavo_json, "r") as f:
+            return str(json.load(f).get("ROBOT_MODULE", ""))
+    except Exception:
+        return ""
+
+def _robot_kind_from_version(robot_version: str) -> str:
+    try:
+        rv = RobotVersion.create(int(robot_version))
+    except (ValueError, TypeError):
+        rv = None
+    if rv is not None:
+        if rv.start_with(major=5):   # 50-59 人型
+            return "humanoid"
+        if rv.start_with(major=6):   # 60-69 轮臂
+            return "wheel"
+    # major 判不出来: 回退 ROBOT_MODULE(与 launch 选择同一真源)
+    module = _robot_module_of_version(robot_version).strip().upper()
+    return _ROBOT_MODULE_KIND.get(module)
+
 def print_state_transition(trigger, source, target) -> None:
     console.print(
         f"Trigger: [bold blue]{trigger}[/bold blue] From [bold green]{source}[/bold green] to [bold green]{target}[/bold green]"
     )
 
 
+def print_mode_transition(source, target, title="模式切换", details=None) -> None:
+    print(f"========== {title} ==========", flush=True)
+    if details:
+        for label, value in details:
+            print(f"{label}: {value}", flush=True)
+    print(f"上一个模式: {source}", flush=True)
+    print(f"当前模式: {target}", flush=True)
+    print("==================================", flush=True)
+
+
 def launch_humanoid_robot(real_robot=True,calibrate=False,use_sit_init=False):
     
     robot_version = os.getenv('ROBOT_VERSION')
     print(f"current robot version: {robot_version}")
+
+    # ===== G11 屏幕选型优先(双校验): 屏幕二级菜单选了人型/轮臂时, 以此为准 =====
+    # 未选择(首页直接实体H启动) -> robot_kind 为空, 走下方 kuavo.json 推断(旧逻辑)
+    g11_robot_kind = get_g11_robot_kind()
+
+    # ===== G11 强制先选类型闸门(屏幕 CH14): 开启时未选类型(首页按H)拒绝启动 =====
+    # 关闭(默认) 则维持旧用法: 未选类型也能按原推断启动, 不干扰 H12/G12 与老部署
+    if get_g11_boot_force() and g11_robot_kind not in ("humanoid", "wheel"):
+        print(f"[G11Boot] 强制开关开启且未选择机器人类型, 拒绝启动: "
+              f"请在屏幕人型/轮臂二级菜单选对类型后再启动")
+        raise Exception(
+            "启动被强制开关拦截: 未选择机器人类型。请在遥控器屏幕进入对应 "
+            "『人型』或『轮臂』二级菜单后再启动(或关闭该开关以兼容旧用法)。")
+
+    if g11_robot_kind in ("humanoid", "wheel"):
+        # 双校验: 屏幕选型必须与硬件 ROBOT_VERSION 匹配
+        #   机型只有两种: 人型 50-59 (major=5) / 轮臂 60-69 (major=6)
+        hw_kind = _robot_kind_from_version(robot_version)
+        if hw_kind is None:
+            print(f"[G11Boot] 无法识别的 ROBOT_VERSION={robot_version} "
+                  f"(仅支持 人型50-59 / 轮臂60-69), 拒绝启动")
+            raise Exception(
+                f"机器人类型无法识别: ROBOT_VERSION={robot_version} 不在 "
+                f"人型(50-59)/轮臂(60-69)范围内。")
+        if hw_kind != g11_robot_kind:
+            hw_kind_name = "轮臂" if hw_kind == "wheel" else "人型"
+            print_mode_transition(
+                f"屏幕选择 {g11_robot_kind}",
+                "拒绝启动",
+                "G11启动校验失败",
+                [("硬件类型", f"{hw_kind_name} (ROBOT_VERSION={robot_version})"),
+                 ("失败原因", "屏幕选型与硬件机器人类型不匹配")],
+            )
+            print(f"[G11Boot] 屏幕选型 {g11_robot_kind} 与硬件 ROBOT_VERSION={robot_version} "
+                  f"({'轮臂' if hw_kind == 'wheel' else '人型'}) 不匹配, 拒绝启动")
+            raise Exception(
+                f"机器人类型不匹配: 屏幕选择 {g11_robot_kind}, 但硬件为 "
+                f"{'轮臂' if hw_kind == 'wheel' else '人型'}(ROBOT_VERSION={robot_version})。"
+                f"请返回首页重新选择正确的机器人类型。")
+        print(f"[G11Boot] 屏幕选型 {g11_robot_kind} 与硬件匹配, 使用 "
+              f"{'load_kuavo_real_wheel.launch' if hw_kind == 'wheel' else 'load_kuavo_real.launch'}")
+
     subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
                     stderr=subprocess.DEVNULL) 
     
@@ -649,10 +769,15 @@ def launch_humanoid_robot(real_robot=True,calibrate=False,use_sit_init=False):
     robot_module = kuavo_json_data.get("ROBOT_MODULE", "")
     only_half_up_body = kuavo_json_data["only_half_up_body"]
     
-    # 根据机器人模块类型选择启动命令
+    # 根据机器人模块类型选择启动命令(无屏幕选型时按 kuavo.json 推断)
     if real_robot:
-        # 如果是LUNBI或LUNBI_V62，使用轮臂启动命令
-        if robot_module == "LUNBI" or robot_module == "LUNBI_V62":
+        # G11 屏幕选型优先: 已通过双校验, 选对应 launch
+        if g11_robot_kind == "humanoid":
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
+        elif g11_robot_kind == "wheel":
+            launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD
+        # 未选型(旧逻辑): 按 ROBOT_MODULE 推断
+        elif robot_module == "LUNBI" or robot_module == "LUNBI_V62":
             launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD
         else:
             launch_cmd = LAUNCH_HUMANOID_ROBOT_REAL_CMD
@@ -957,6 +1082,18 @@ def customize_action_callback(event):
     source = event.kwargs.get("source")
     trigger = event.kwargs.get("trigger")
     print_state_transition(trigger, source, "stance")
+    action_index = {
+        "customize_action_RR_A": 1,
+        "customize_action_RR_B": 2,
+        "customize_action_RR_C": 3,
+        "customize_action_RR_D": 4,
+        "customize_action_LL_A": 5,
+        "customize_action_LL_B": 6,
+        "customize_action_LL_C": 7,
+        "customize_action_LL_D": 8,
+    }.get(trigger)
+    if action_index is not None:
+        print_mode_transition(source, "stance", f"调用自定义动作{action_index}")
     try:
         # 根据 trigger 查找对应的配置
         if trigger in customize_config_data:
@@ -1115,6 +1252,7 @@ def call_switch_controller_service(controller_name):
                 f"[ControllerSwitch] Switch success: {response.message}. "
                 f"Current controller is now '{current_controller_after}'"
             )
+            print_mode_transition(current_controller_before, current_controller_after)
         else:
             current_controller_after = get_current_controller_name()
             rospy.logwarn(
@@ -1493,6 +1631,7 @@ def vmp_controller_callback(event):
             return
         
         rospy.loginfo("[VMPController] Successfully entered VMP controller mode")
+        print_mode_transition("amp_controller", "vmp_controller")
         print_state_transition(trigger, source, "vmp_controller")
     except Exception as e:
         rospy.logerr(f"Error in vmp_controller_callback: {e}")
@@ -1514,6 +1653,7 @@ def exit_vmp_controller_callback(event):
             return
         
         rospy.loginfo("[VMPController] Successfully switched back to amp_controller")
+        print_mode_transition("vmp_controller", "amp_controller")
         print_state_transition(trigger, source, "stance")
     except Exception as e:
         rospy.logerr(f"Error in exit_vmp_controller_callback: {e}")
@@ -1533,6 +1673,7 @@ def dance_controller_callback(event):
             return
 
         rospy.loginfo("[DanceController] Successfully entered Dance controller mode")
+        print_mode_transition("amp_controller", "dance_controller")
         print_state_transition(trigger, source, "dance_controller")
     except Exception as e:
         rospy.logerr(f"Error in dance_controller_callback: {e}")
@@ -1554,6 +1695,7 @@ def exit_dance_controller_callback(event):
             return
 
         rospy.loginfo("[DanceController] Successfully switched back to amp_controller")
+        print_mode_transition("dance_controller", "amp_controller")
         print_state_transition(trigger, source, "stance")
     except Exception as e:
         rospy.logerr(f"Error in exit_dance_controller_callback: {e}")

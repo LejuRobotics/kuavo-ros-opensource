@@ -42,6 +42,7 @@ namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
 namespace {
+
 void updateHandConstraintUnlocked(std::vector<PoseData>& poseList,
                                   int handIndex,
                                   const Eigen::Vector3d& handPos,
@@ -117,10 +118,7 @@ void WheelQuest3IkIncrementalROS::publishLockWaitTimingMs(const ros::Publisher& 
 }
 
 void WheelQuest3IkIncrementalROS::logArmTrajPublishStampPeriod(const ros::Time& stamp) {
-  if (!enableLockWaitTimingLog_) {
-    return;
-  }
-  if (hasLastArmTrajPublishStamp_) {
+  if (enableLockWaitTimingLog_ && hasLastArmTrajPublishStamp_) {
     publishLockWaitTimingMs(pubArmTrajStampPeriodMsPublisher_,
                             (stamp - lastArmTrajPublishStamp_).toSec() * 1000.0);
   }
@@ -242,6 +240,12 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
           quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
       latestHumanRightElbowPos_ =
           quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
+    }
+    // 捕获当前骨骼数据接收时刻和序列号，随IK结果一起传播
+    {
+      std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+      ikResultBoneRecvTime_ = boneRecvTime_;
+      currentBoneSeq_ = boneDataSeq_;
     }
 
     // 【三点跳变检测】验证并过滤 VR 数据中的异常跳变
@@ -683,6 +687,14 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       guideInput.torsoFrameValid = true;
       const WheelNaturalElbowGuideOutput output = guide->update(guideInput);
       trackingActivation = wheelNaturalElbowSoftTrackingScale_ * output.elbowTrackingActivation;
+      // Near the torso the elbow/waist keep-out starts fighting the hand
+      // target and folds the circle. Fade the soft elbow cost so the hand wins.
+      const double handFromTorso = (handTarget - torsoPosition).norm();
+      constexpr double kNearBodyFadeStart = 0.45;
+      constexpr double kNearBodyFadeFull = 0.22;
+      const double t = std::clamp(
+          (handFromTorso - kNearBodyFadeFull) / (kNearBodyFadeStart - kNearBodyFadeFull), 0.0, 1.0);
+      trackingActivation *= t * t * (3.0 - 2.0 * t);
       ROS_INFO_THROTTLE(
           1.0,
           "[WheelNaturalElbow] %s radius=%.4f m, gravity_valid=%s, human_valid=%s, "
@@ -918,6 +930,15 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     // 因此必须在最终写入 whole-body input 前再次做连续性检查。
     stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
     stabilizeGripQuaternion(false, joyStickHandlerPtr_->isRightGrip(), rightHandQuat);
+
+    // Incremental position is the commanded end-effector. Shoulder-elbow
+    // geometry and point-opt still operate on link6 / wrist.
+    if (input.leftRefActive) {
+      leftHandPos = leftHandPos - leftHandQuat.normalized() * leftEE2Link6Offset_;
+    }
+    if (input.rightRefActive) {
+      rightHandPos = rightHandPos - rightHandQuat.normalized() * rightEE2Link6Offset_;
+    }
 
     // Active elbow references come from the current robot FK.  Map that point
     // from the current robot chest frame into the commanded chest frame before
@@ -1399,8 +1420,9 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         // 松开期间一直使用同一个约束快照。这里同时写回约束列表，保证
         // updateLeftArmPoseAnchor() 读取到的也是该连续值，而不是松开期间
         // 被 whole-body IK 逐步推移的旧优化结果。
-        leftGripTransferHandPos_ = leftGripReleaseHandPos_;
         leftGripTransferHandQuat_ = leftGripReleaseHandQuat_;
+        leftGripTransferHandPos_ =
+            leftGripReleaseHandPos_ + leftGripTransferHandQuat_ * leftEE2Link6Offset_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position =
             leftGripReleaseHandPos_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix =
@@ -1411,8 +1433,8 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         }
       } else {
         const auto& pose = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND];
-        leftGripTransferHandPos_ = pose.position;
         leftGripTransferHandQuat_ = Eigen::Quaterniond(pose.rotation_matrix).normalized();
+        leftGripTransferHandPos_ = pose.position + leftGripTransferHandQuat_ * leftEE2Link6Offset_;
       }
       leftGripTransferPending_ = true;
       leftGripOrientationHoldFrames_ = kGripOrientationHoldFrames;
@@ -1424,8 +1446,9 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
       latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
     if (!rightGripTransferAccepted_ && rightGripTransferLockFrames_ <= 0) {
       if (hasRightGripReleaseSnapshot_) {
-        rightGripTransferHandPos_ = rightGripReleaseHandPos_;
         rightGripTransferHandQuat_ = rightGripReleaseHandQuat_;
+        rightGripTransferHandPos_ =
+            rightGripReleaseHandPos_ + rightGripTransferHandQuat_ * rightEE2Link6Offset_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position =
             rightGripReleaseHandPos_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix =
@@ -1436,8 +1459,8 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         }
       } else {
         const auto& pose = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND];
-        rightGripTransferHandPos_ = pose.position;
         rightGripTransferHandQuat_ = Eigen::Quaterniond(pose.rotation_matrix).normalized();
+        rightGripTransferHandPos_ = pose.position + rightGripTransferHandQuat_ * rightEE2Link6Offset_;
       }
       rightGripTransferPending_ = true;
       rightGripOrientationHoldFrames_ = kGripOrientationHoldFrames;
@@ -1644,6 +1667,29 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   std::vector<PoseData> poseConstraintListCopy;
   poseConstraintListCopy = latestPoseConstraintList_;
 
+  // 支持 rosparam 动态切换（getCached 自动感知参数服务器更新）
+  {
+    bool lockKneeLegParam = lockKneeLegEnabled_.load();
+    if (ros::param::getCached("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockKneeLegParam)) {
+      lockKneeLegEnabled_.store(lockKneeLegParam);
+    }
+  }
+
+  // 锁下肢前两关节（knee=q[0], leg=q[1]）到当前滤波值，只留 waist_pitch/waist_yaw 随动。
+  // reset_joint_to_default:=false 时胸部增量关闭，solve 会冻结 q0-q2；若此处再用
+  // 实时滤波值锁 q0/q1，会和冻结快照冲突（快照常在全零初值上捕获），SNOPT 无解、手臂失控。
+  // 胸部冻结生效时必须把 lock 钉在同一组 q0/q1 上。
+  if (lockKneeLegEnabled_.load()) {
+    Eigen::Vector3d freezeAnchor;
+    if (copyChestPositionFreezeAnchor(freezeAnchor)) {
+      oneStageIkEndEffectorPtr_->setKneeLegLock(freezeAnchor(0), freezeAnchor(1));
+    } else if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ && drakeJointStateSize_ == 18) {
+      oneStageIkEndEffectorPtr_->setKneeLegLock(filterJointDataForDrakeFK_(0), filterJointDataForDrakeFK_(1));
+    }
+  } else {
+    oneStageIkEndEffectorPtr_->disableKneeLegLock();
+  }
+
   auto startTime = std::chrono::high_resolution_clock::now();
   oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
       latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);
@@ -1667,6 +1713,8 @@ void WheelQuest3IkIncrementalROS::solveIk() {
       std::lock_guard<std::mutex> lock(ikResultMutex_);
       latestIkSolution_ = ikResult.solution;
       hasValidIkSolution_ = true;
+      // 同步骨骼接收时刻到IK结果，供发布线程计算全链路延迟
+      ikResultBoneRecvTime_ = ikResultBoneRecvTime_;
 
       // 当IK成功且size == 18时，保存前4个关节角度到ikLowerBodyJointCommand_
       if (latestIkSolution_.size() == 18) {
@@ -1675,6 +1723,16 @@ void WheelQuest3IkIncrementalROS::solveIk() {
         ikLowerBodyJointCommand_ = latestIkSolution_.head(4);
         ikUpperBodyJointCommand_ = latestIkSolution_.tail(14);
       }
+    }
+    // 在IK线程内直接测量并发布延迟：骨骼接收 → FSM处理 → IK求解
+    // 只在收到新VR数据的那一轮测量，避免无数据时延迟虚增（锯齿现象）
+    if (armTrajLatencyPublisher_ && currentBoneSeq_ != lastProcessedBoneSeq_) {
+      lastProcessedBoneSeq_ = currentBoneSeq_;
+      const auto latencyMs = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - ikResultBoneRecvTime_).count();
+      std_msgs::Float64 latencyMsg;
+      latencyMsg.data = latencyMs;
+      armTrajLatencyPublisher_.publish(latencyMsg);
     }
   } else {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] solveIk failed: %s", ikResult.solverLog.c_str());
@@ -1804,6 +1862,37 @@ bool WheelQuest3IkIncrementalROS::validateVrPose(const ::ArmPose& currentPose, :
   *prev1 = validatedPose.position;
   
   return !isSpike;
+}
+
+
+
+HighlyDynamic::SG100VrInput WheelQuest3IkIncrementalROS::makeSg100VrInput() {
+  HighlyDynamic::SG100VrInput in;
+  in.left_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getLeftTrigger()) : 0.0f;
+  };
+  in.right_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getRightTrigger()) : 0.0f;
+  };
+  in.left_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonTouched();
+  };
+  in.left_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonPressed();
+  };
+  in.right_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonTouched();
+  };
+  in.right_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonPressed();
+  };
+  in.right_second_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonTouched();
+  };
+  in.right_second_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonPressed();
+  };
+  return in;
 }
 
 }  // namespace HighlyDynamic

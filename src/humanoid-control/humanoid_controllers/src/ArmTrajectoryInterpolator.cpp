@@ -281,8 +281,10 @@ void ArmTrajectoryInterpolator::ensureBackend(size_t dof) {
 
   const double refDt = std::max(config_.referenceUpdatePeriodSec, config_.controlCycleSec);
   const double derivedAcc = (refDt > 1e-6) ? (config_.kalmanVLimit / refDt) : config_.kalmanVLimit;
-  const double nominalAcc = (std::isfinite(derivedAcc) && derivedAcc > 0.0) ? std::clamp(derivedAcc, 5.0, 80.0) : 10.0;
-  const double processNoise = std::clamp(0.1 * nominalAcc * nominalAcc, 1e-9, 400.0);
+  // 人形挥臂带加速。原 cap acc=80/Q=400 把 CV Kalman 钉在 ~20ms 群延迟；
+  // 轮臂输入更接近匀速，同一 cap 也能到 7ms。放宽后仍输出与 Δq 一致的 v。
+  const double nominalAcc = (std::isfinite(derivedAcc) && derivedAcc > 0.0) ? std::clamp(derivedAcc, 5.0, 400.0) : 10.0;
+  const double processNoise = std::clamp(0.1 * nominalAcc * nominalAcc, 1e-9, 1.6e4);
 
   backend_->setKinematicLimits(maxVel.cwiseAbs());
   backend_->setKalmanParameters(processNoise,

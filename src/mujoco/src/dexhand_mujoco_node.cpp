@@ -2,11 +2,13 @@
 #include "dexhand/mujoco_dexhand.hpp"
 #include "dexhand/linkerl6_hand.hpp"
 #include "dexhand/linkero6_hand.hpp"
+#include "dexhand/heiman_hand.hpp"
 #include "sensor_msgs/JointState.h"
 #include "std_msgs/Bool.h"
 #include <tuple>
 #include <string>
 #include <array>
+#include <cmath>
 #include <iostream>
 #include "kuavo_assets/include/package_path.h"
 
@@ -56,6 +58,24 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
         hand_sub_ = nh_.subscribe("control_robot_hand_position", 10, &DexHandMujocoRosNode::linkerO6ControlHandCallback, this);
         ROS_INFO("[DexHandMujoco] ✅ LinkerO6 hand compatible topics subscribed! Listening to control_robot_hand_position");
         ROS_INFO("[DexHandMujoco] ✅ LinkerO6 hand compatible state topic advertised! Publishing to dexhand/state");
+    } else if (hand_type_ == HandType::HEIMAN) {
+        // heiman SG100手：订阅 11 维弧度命令话题，发布 11 维状态话题
+        heiman_command_sub_ = nh_.subscribe(
+            "/sg100_hand_command", 10,
+            &DexHandMujocoRosNode::heimanCommandCallback, this);
+        heiman_state_pub_ = nh_.advertise<kuavo_msgs::SG100HandState>(
+            "/sg100_hand_state", 10);
+        nh_.param("/sg100_require_model_command_gate",
+                  require_model_command_gate_, false);
+        model_commands_enabled_.store(
+            !require_model_command_gate_, std::memory_order_release);
+        if (require_model_command_gate_) {
+            model_command_gate_sub_ = nh_.subscribe<std_msgs::Bool>(
+                "/model_simulator/accept_commands", 1,
+                &DexHandMujocoRosNode::modelCommandGateCallback, this);
+        }
+        ROS_INFO("[DexHandMujoco] Heiman hand subscribed to /sg100_hand_command");
+        ROS_INFO("[DexHandMujoco] Heiman hand publishes /sg100_hand_state");
     } else {
         // 强脑手：兼容旧的所有控制话题和状态发布
         status_pub_ = nh_.advertise<sensor_msgs::JointState>("dexhand/state", 10);
@@ -78,6 +98,9 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
     } else if (hand_type_ == HandType::LINKER_O6) {
         l_dexhand_ = std::make_shared<LinkerO6Hand>(model, l_hand_address);
         r_dexhand_ = std::make_shared<LinkerO6Hand>(model, r_hand_address);
+    } else if (hand_type_ == HandType::HEIMAN) {
+        l_dexhand_ = std::make_shared<HeimanHand>(model, l_hand_address);
+        r_dexhand_ = std::make_shared<HeimanHand>(model, r_hand_address);
     }
 
     auto kuavo_assets_path = ocs2::kuavo_assets::getPath();
@@ -111,6 +134,7 @@ void DexHandMujocoRosNode::enableControlCallback(const std_msgs::Bool::ConstPtr&
     if (prev && !msg->data) {
         // Disable: abort gesture + hold current position
         enable_control_.store(false, std::memory_order_release);
+        if (!controller_) return;
         controller_->abort_gesture();
         auto status = controller_->get_finger_status();
         UnsignedDualHandsArray cur;
@@ -133,6 +157,11 @@ void DexHandMujocoRosNode::enableControlCallback(const std_msgs::Bool::ConstPtr&
     }
 }
 
+void DexHandMujocoRosNode::modelCommandGateCallback(
+    const std_msgs::Bool::ConstPtr& msg) {
+    model_commands_enabled_.store(msg->data, std::memory_order_release);
+}
+
 void DexHandMujocoRosNode::readCallback(const mjData *d)
 {
     if(l_dexhand_) l_dexhand_->readCallback(d);
@@ -148,6 +177,28 @@ void DexHandMujocoRosNode::writeCallback(mjData *d)
 void DexHandMujocoRosNode::publish_loop()
 {
     while (running_)  {
+        // heiman：发布 11 维弧度状态到 /sg100_hand_state
+        if (hand_type_ == HandType::HEIMAN) {
+            auto l_heiman = std::static_pointer_cast<HeimanHand>(l_dexhand_);
+            auto r_heiman = std::static_pointer_cast<HeimanHand>(r_dexhand_);
+            if (l_heiman && r_heiman) {
+                kuavo_msgs::SG100HandState state;
+                state.header.stamp = ros::Time::now();
+                state.left_hand_connected = true;
+                state.right_hand_connected = true;
+                auto lp = l_heiman->getJointPositions();
+                auto rp = r_heiman->getJointPositions();
+                for (int i = 0; i < HeimanHand::JOINT_COUNT; ++i) {
+                    state.left_hand_positions.push_back(lp[i]);
+                    state.right_hand_positions.push_back(rp[i]);
+                }
+                heiman_state_pub_.publish(state);
+            }
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(static_cast<int>(1000.0/frequency_)));
+            continue;
+        }
+
         auto finger_status = controller_->get_finger_status();
 
         // 强脑手发布旧状态话题dexhand/state
@@ -223,7 +274,78 @@ void DexHandMujocoRosNode::publish_loop()
 }
 
 int DexHandMujocoRosNode::get_hand_joints_num() {
+    if (hand_type_ == HandType::HEIMAN) {
+        return 2 * HeimanHand::JOINT_COUNT;
+    }
     return finger_count_ * hand_count_;
+}
+
+bool DexHandMujocoRosNode::consumeCommandUpdate() {
+    return command_updated_.exchange(false, std::memory_order_acq_rel);
+}
+
+bool DexHandMujocoRosNode::rightHandOpeningCommand() const {
+    return right_hand_opening_command_.load(std::memory_order_acquire);
+}
+
+void DexHandMujocoRosNode::heimanCommandCallback(
+    const kuavo_msgs::SG100HandCommand::ConstPtr& msg) {
+    if (!enable_control_.load(std::memory_order_acquire) || !running_) return;
+    if (require_model_command_gate_ &&
+        !model_commands_enabled_.load(std::memory_order_acquire)) {
+        ROS_WARN_THROTTLE(
+            2.0, "[DexHandMujoco] Ignoring SG100 command before model handoff");
+        return;
+    }
+    if (msg->control_mode != kuavo_msgs::SG100HandCommand::MODE_JOINT_POSITION) {
+        ROS_WARN_THROTTLE(2.0, "[DexHandMujoco] SG100 requires joint-position mode");
+        return;
+    }
+    if (msg->left_hand_positions.size() != HeimanHand::JOINT_COUNT ||
+        msg->right_hand_positions.size() != HeimanHand::JOINT_COUNT) {
+        ROS_WARN_THROTTLE(2.0, "[DexHandMujoco] SG100 requires 11 positions per hand");
+        return;
+    }
+    if (msg->left_enable_mask != 0 && msg->left_enable_mask != 0x07FF) {
+        ROS_WARN_THROTTLE(2.0, "[DexHandMujoco] SG100 left mask must enable the full hand");
+        return;
+    }
+    if (msg->right_enable_mask != 0 && msg->right_enable_mask != 0x07FF) {
+        ROS_WARN_THROTTLE(2.0, "[DexHandMujoco] SG100 right mask must enable the full hand");
+        return;
+    }
+
+    std::array<double, HeimanHand::JOINT_COUNT> left{};
+    std::array<double, HeimanHand::JOINT_COUNT> right{};
+    for (int i = 0; i < HeimanHand::JOINT_COUNT; ++i) {
+        left[i] = msg->left_hand_positions[i];
+        right[i] = msg->right_hand_positions[i];
+        if (!std::isfinite(left[i]) || !std::isfinite(right[i])) {
+            ROS_WARN_THROTTLE(2.0, "[DexHandMujoco] SG100 positions must be finite");
+            return;
+        }
+    }
+
+    auto l = std::static_pointer_cast<HeimanHand>(l_dexhand_);
+    auto r = std::static_pointer_cast<HeimanHand>(r_dexhand_);
+    l->setJointPositionsRadians(left);
+    r->setJointPositionsRadians(right);
+
+    constexpr int kRightIndexJ2 = 4;
+    const double next_command = right[kRightIndexJ2];
+    {
+        const double previous_command =
+            right_index_j2_command_.exchange(next_command, std::memory_order_acq_rel);
+        if (right_index_j2_command_seen_.exchange(true, std::memory_order_acq_rel)) {
+            constexpr double kDirectionTolerance = 1e-5;
+            if (next_command < previous_command - kDirectionTolerance) {
+                right_hand_opening_command_.store(true, std::memory_order_release);
+            } else if (next_command > previous_command + kDirectionTolerance) {
+                right_hand_opening_command_.store(false, std::memory_order_release);
+            }
+        }
+    }
+    command_updated_.store(true, std::memory_order_release);
 }
 
 void DexHandMujocoRosNode::dualHandCommandCallback(const kuavo_msgs::dexhandCommand::ConstPtr& msg) {

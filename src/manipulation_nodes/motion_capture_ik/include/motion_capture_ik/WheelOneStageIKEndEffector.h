@@ -45,7 +45,7 @@ struct WheelPointTrackIKSolverConfig : public IKSolverConfig {
   // the elbow origin may not cross into the waist-side keep-out band.  The
   // bound is expressed laterally in waist_yaw_link, so it follows torso yaw.
   bool enableWaistElbowClearanceConstraint = true;
-  double waistElbowLateralClearance = 0.20;  // [m]
+  double waistElbowLateralClearance = 0.10;  // [m]
 
   // joint smoothness weights (7 joints per arm, symmetric for left and right)
   double jointSmoothWeightDefault = 5e1;  // Default weight for all joints
@@ -187,6 +187,16 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
     rightElbowTrackingActivation_ = std::clamp(rightActivation, 0.0, 1.0);
   }
 
+  // 锁下肢前两个关节（knee=q[0], leg=q[1]），只留 waist_pitch(q[2])/waist_yaw(q[3]) 随动。
+  // 通过硬等式约束钉死 knee/leg，保证对应电机不动作。锁定值应取当前滤波关节角，避免跳变。
+  void setKneeLegLock(double kneeQ, double legQ) {
+    lockKneeLegEnabled_ = true;
+    lockKneeQ_ = kneeQ;
+    lockLegQ_ = legQ;
+  }
+
+  void disableKneeLegLock() { lockKneeLegEnabled_ = false; }
+
   // Freeze q0/knee, q1/leg and q2/waist_pitch at one fixed command snapshot.
   // Calls must be serialized with solveIK() by the owner of this solver.
   bool activateChestPositionFreeze(const Eigen::Vector3d& frozenLowerBodyPitchJoints);
@@ -235,6 +245,10 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   std::unique_ptr<WheelPointTrackIKSolverConfig> pointTrackConfig_;
   double leftElbowTrackingActivation_{1.0};
   double rightElbowTrackingActivation_{1.0};
+  // 锁下肢前两个关节（knee/leg）的硬约束状态（setConstraints 为 const，故用 mutable）
+  mutable bool lockKneeLegEnabled_{false};
+  mutable double lockKneeQ_{0.0};
+  mutable double lockLegQ_{0.0};
   bool freezeChestPosition_{false};
   bool hasFrozenLowerBodyPitchJoints_{false};
   Eigen::Vector3d frozenLowerBodyPitchJoints_{Eigen::Vector3d::Zero()};

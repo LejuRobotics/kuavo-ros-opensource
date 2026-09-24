@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mujoco model="kuavo pick place lever scene">
+  <!-- Keep the supplied Kuavo + dexterous-hand model as the single robot source. -->
+  <include file="biped_s400062_icra.xml"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"/>
+
+  <statistic center="0.75 -0.15 0.75" extent="1.8"/>
+
+  <visual>
+    <headlight diffuse="0.7 0.7 0.7" ambient="0.35 0.35 0.35" specular="0.15 0.15 0.15"/>
+    <rgba haze="0.15 0.20 0.25 1"/>
+    <global azimuth="145" elevation="-22" offwidth="1280" offheight="720"/>
+  </visual>
+
+  <asset>
+    <texture name="skybox" type="skybox" builtin="gradient"
+             rgb1="0.55 0.65 0.75" rgb2="0.08 0.10 0.14" width="512" height="3072"/>
+    <texture name="floor_grid" type="2d" builtin="checker" mark="edge"
+             rgb1="0.24 0.27 0.30" rgb2="0.16 0.18 0.20" markrgb="0.7 0.7 0.7"
+             width="300" height="300"/>
+    <material name="floor_mat" texture="floor_grid" texuniform="true" texrepeat="6 6" reflectance="0.12"/>
+    <material name="source_bin_mat" rgba="0.20 0.48 0.78 1"/>
+    <material name="target_bin_mat" rgba="0.23 0.68 0.42 1"/>
+    <material name="lever_mat" rgba="0.95 0.62 0.12 1"/>
+    <material name="lever_mount_mat" rgba="0.24 0.27 0.30 1"/>
+    <material name="table_top_mat" rgba="0.62 0.46 0.30 1"/>
+    <material name="table_leg_mat" rgba="0.24 0.25 0.27 1"/>
+  </asset>
+
+  <default>
+    <default class="task_static">
+      <geom contype="1" conaffinity="3" friction="1.2 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001"/>
+    </default>
+    <default class="task_object">
+      <geom contype="1" conaffinity="3" friction="1.0 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001" density="600"/>
+      <joint damping="0.001"/>
+    </default>
+  </default>
+
+  <contact>
+    <!-- The rotating collars intentionally overlap their two fixed bearing mounts. -->
+    <exclude name="source_bin_lever_assembly" body1="source_bin" body2="lever"/>
+  </contact>
+
+  <equality>
+    <!-- Scene 1 is a stationary manipulation task: suppress whole-base reaction motion. -->
+    <weld name="scene_base_lock" body1="base_link"
+          solref="0.004 1" solimp="0.99 0.999 0.0001"/>
+  </equality>
+
+  <worldbody>
+    <light pos="0.4 -0.3 3.5" dir="0 0 -1" directional="true" castshadow="true"/>
+    <light pos="-1.5 -1.0 2.2" dir="1 0.5 -1" diffuse="0.35 0.35 0.35"/>
+    <geom name="floor" class="task_static" type="plane" size="0 0 0.05" material="floor_mat"/>
+
+    <!-- Table surface is 0.72 m above the floor, roughly half the robot height. -->
+    <body name="work_table" pos="0.90 -0.16 0">
+      <geom name="table_top" class="task_static" type="box"
+            pos="0 0 0.69" size="0.48 0.48 0.03" material="table_top_mat"/>
+      <geom name="table_leg_front_left" class="task_static" type="box"
+            pos="-0.40 0.40 0.33" size="0.035 0.035 0.33" material="table_leg_mat"/>
+      <geom name="table_leg_front_right" class="task_static" type="box"
+            pos="-0.40 -0.40 0.33" size="0.035 0.035 0.33" material="table_leg_mat"/>
+      <geom name="table_leg_back_left" class="task_static" type="box"
+            pos="0.40 0.40 0.33" size="0.035 0.035 0.33" material="table_leg_mat"/>
+      <geom name="table_leg_back_right" class="task_static" type="box"
+            pos="0.40 -0.40 0.33" size="0.035 0.035 0.33" material="table_leg_mat"/>
+    </body>
+
+    <!--
+      Source bin: outer footprint 0.64 x 0.44 m, inner footprint 0.60 x 0.40 m,
+      total height 0.15 m. Only vertical dimensions are scaled by 1/2.
+    -->
+    <body name="source_bin" pos="0.88 0 0.72">
+      <geom name="source_bin_floor" class="task_static" type="box"
+            pos="0 0 0.0075" size="0.32 0.22 0.0075" material="source_bin_mat"/>
+      <geom name="source_bin_front_wall" class="task_static" type="box"
+            pos="-0.31 0 0.0825" size="0.01 0.22 0.0675" material="source_bin_mat"/>
+      <geom name="source_bin_back_wall" class="task_static" type="box"
+            pos="0.31 0 0.0825" size="0.01 0.22 0.0675" material="source_bin_mat"/>
+      <geom name="source_bin_left_wall" class="task_static" type="box"
+            pos="0 0.21 0.0825" size="0.30 0.01 0.0675" material="source_bin_mat"/>
+      <geom name="source_bin_right_wall" class="task_static" type="box"
+            pos="0 -0.21 0.0825" size="0.30 0.01 0.0675" material="source_bin_mat"/>
+
+      <!-- Two coaxial mounts on the near wall support one rigid U-shaped pull handle. -->
+      <geom name="lever_mount_left" class="task_static" type="cylinder"
+            pos="-0.3175 0.08 0.135" size="0.016 0.0125"
+            quat="0.707107 0.707107 0 0" material="lever_mount_mat"/>
+      <geom name="lever_mount_right" class="task_static" type="cylinder"
+            pos="-0.3175 -0.08 0.135" size="0.016 0.0125"
+            quat="0.707107 0.707107 0 0" material="lever_mount_mat"/>
+
+      <!-- At qpos=0 the crossbar hangs at the bottom of its semicircular path. -->
+      <body name="lever" pos="-0.3275 0 0.135">
+        <joint name="lever_hinge" type="hinge" axis="0 1 0" limited="true"
+               range="-1.570796 1.570796" damping="0.08" frictionloss="0.03"/>
+        <geom name="lever_pivot_left" type="cylinder" pos="0 0.08 0" size="0.011 0.015"
+              quat="0.707107 0.707107 0 0" density="900" material="lever_mat"
+              contype="1" conaffinity="3" friction="0.8 0.01 0.001"/>
+        <geom name="lever_pivot_right" type="cylinder" pos="0 -0.08 0" size="0.011 0.015"
+              quat="0.707107 0.707107 0 0" density="900" material="lever_mat"
+              contype="1" conaffinity="3" friction="0.8 0.01 0.001"/>
+        <geom name="lever_arm_left" type="capsule" fromto="0 0.08 0 0 0.08 -0.11"
+              size="0.009" density="650" material="lever_mat"
+              contype="1" conaffinity="3" friction="0.8 0.01 0.001"/>
+        <geom name="lever_arm_right" type="capsule" fromto="0 -0.08 0 0 -0.08 -0.11"
+              size="0.009" density="650" material="lever_mat"
+              contype="1" conaffinity="3" friction="0.8 0.01 0.001"/>
+        <geom name="lever_handle" type="capsule" fromto="0 -0.08 -0.11 0 0.08 -0.11"
+              size="0.012" density="650" material="lever_mat" contype="1" conaffinity="3"
+              friction="1.0 0.01 0.001"/>
+        <site name="lever_handle_center" pos="0 0 -0.11" size="0.005" rgba="1 0.2 0.1 0"/>
+      </body>
+    </body>
+
+    <!-- Keep body names stable for ROS compatibility; collision shapes are 40 mm
+         diameter x 40 mm tall cylinders. -->
+    <body name="cylinder_1" pos="0.79 -0.07 0.755">
+      <joint name="cylinder_1_freejoint" class="task_object" type="free"/>
+      <geom name="block_1_geom" class="task_object" type="cylinder" size="0.025 0.020" rgba="0.92 0.25 0.20 1"/>
+    </body>
+    <body name="cylinder_2" pos="0.79 0.07 0.755">
+      <joint name="cylinder_2_freejoint" class="task_object" type="free"/>
+      <geom name="block_2_geom" class="task_object" type="cylinder" size="0.025 0.020" rgba="0.95 0.50 0.12 1"/>
+    </body>
+    <body name="cylinder_3" pos="0.97 -0.07 0.755">
+      <joint name="cylinder_3_freejoint" class="task_object" type="free"/>
+      <geom name="block_3_geom" class="task_object" type="cylinder" size="0.025 0.020" rgba="0.75 0.20 0.72 1"/>
+    </body>
+    <body name="cylinder_4" pos="0.97 0.07 0.755">
+      <joint name="cylinder_4_freejoint" class="task_object" type="free"/>
+      <geom name="block_4_geom" class="task_object" type="cylinder" size="0.025 0.020" rgba="0.94 0.82 0.15 1"/>
+    </body>
+
+    <!--
+      Target bin at the near table edge (-X), kept on the robot's right-front side:
+      outer footprint 0.32 x 0.22 m before a 90-degree Z rotation, open toward +Z.
+    -->
+    <body name="target_bin" pos="0.53 -0.40 0.72" quat="0.707107 0 0 0.707107">
+      <geom name="target_bin_floor" class="task_static" type="box"
+            pos="0 0 0.0075" size="0.16 0.11 0.0075" material="target_bin_mat"/>
+      <geom name="target_bin_front_wall" class="task_static" type="box"
+            pos="-0.15 0 0.045" size="0.01 0.11 0.030" material="target_bin_mat"/>
+      <geom name="target_bin_back_wall" class="task_static" type="box"
+            pos="0.15 0 0.045" size="0.01 0.11 0.030" material="target_bin_mat"/>
+      <geom name="target_bin_left_wall" class="task_static" type="box"
+            pos="0 0.10 0.045" size="0.14 0.01 0.030" material="target_bin_mat"/>
+      <geom name="target_bin_right_wall" class="task_static" type="box"
+            pos="0 -0.10 0.045" size="0.14 0.01 0.030" material="target_bin_mat"/>
+      <site name="target_bin_center" pos="0 0 0.025" size="0.005" rgba="0 1 0 0"/>
+    </body>
+  </worldbody>
+
+</mujoco>

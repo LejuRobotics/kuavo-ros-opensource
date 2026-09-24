@@ -1,12 +1,42 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(motion_capture_ik)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_common/cmake/kuavo_arch.cmake)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
-# 可重现构建：固定调试信息中的时间戳，使 .so 内容仅取决于源码内容而非文件 mtime
+# 可重现构建：固定调试信息中的时间戳与编译目录路径，使 .so 字节内容仅取决于源码
+# 而非构建机器的工作区路径 / 文件 mtime / 编译时刻。
+# - SOURCE_DATE_EPOCH=0：固定 .debug_line 文件表里的 mtime 列与 __DATE__/__TIME__ 宏
+# - -ffile-prefix-map / -fdebug-prefix-map / -fmacro-prefix-map：把源码目录和构建目录
+#   在调试信息 (__FILE__ / DW_AT_comp_dir / .debug_line 路径) 与宏里映射为固定占位串，
+#   消除跨机器(开发者 / CI runner / arm runner)的绝对路径 diff。
+# 这三者叠加后，同一份源码在不同路径下编出的 plantIK.so 逐字节一致。
 set(ENV{SOURCE_DATE_EPOCH} "0")
+set(REPRODUCIBLE_PREFIX_MAP_FLAGS
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+    "-fdebug-prefix-map=${CMAKE_SOURCE_DIR}=."
+    "-fmacro-prefix-map=${CMAKE_SOURCE_DIR}=."
+    "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
+    "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=."
+    "-fmacro-prefix-map=${CMAKE_BINARY_DIR}=."
+)
+string(REPLACE ";" " " REPRODUCIBLE_PREFIX_MAP_FLAGS_STR "${REPRODUCIBLE_PREFIX_MAP_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${REPRODUCIBLE_PREFIX_MAP_FLAGS_STR}")
+
+# VR incremental C++ nodes (wheel_ik / ik_ros_uni_cpp); enabled on aarch64 when Drake is available.
+option(MOTION_CAPTURE_IK_BUILD_VR_CPP_NODES "Build ik_ros_uni_cpp_node / wheel_ik / topic_logger" ON)
+if(KUAVO_BUILD_FOR_AARCH64)
+  set(CATKIN_MESSAGE_GENERATORS "gencpp;genlisp;gennodejs;genpy")
+endif()
 find_package(drake CONFIG REQUIRED)
+if(drake_VERSION)
+  message(STATUS "[motion_capture_ik] drake_VERSION=${drake_VERSION}")
+endif()
 find_package(Eigen3 REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 # catkin_package(DEPENDS Eigen3) expects Eigen3_INCLUDE_DIRS/Eigen3_LIBRARIES.
 # FindEigen3.cmake typically defines EIGEN3_INCLUDE_DIRS instead (note the case).
@@ -35,6 +65,7 @@ find_package(catkin REQUIRED COMPONENTS
   kuavo_common
   ocs2_core
   ocs2_msgs
+  urdf
 )
 find_package(BZip2 REQUIRED)
 
@@ -91,11 +122,6 @@ if(EXISTS "${PLANT_IK_FILE}")
   message(STATUS "Found plantIK.cc")
     add_library(plantIK SHARED src/plantIK.cc include/plantIK.h)
     target_link_libraries(plantIK drake::drake)
-
-    # 指定输出目录
-    set_target_properties(plantIK PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib
-    )
 else()
     # 当 src/plantIK.cc 不存在时，加载动态库
     find_library(PLANTIK_LIBRARY NAMES plantIK PATHS ${CMAKE_CURRENT_SOURCE_DIR}/lib)
@@ -112,7 +138,9 @@ include_directories(
   ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
 
-add_subdirectory(test)
+if(MOTION_CAPTURE_IK_BUILD_VR_CPP_NODES)
+  add_subdirectory(test)
+endif()
 
 add_executable(arms_ik_node src/arms_ik_node.cpp)
 add_dependencies(arms_ik_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -124,13 +152,21 @@ endif()
 target_include_directories(arms_ik_node PUBLIC
   ${PROJECT_BINARY_DIR}/include
 )
+target_compile_features(arms_ik_node PUBLIC cxx_std_17)
 
 #############
 ## Install ##
 #############
+install(TARGETS arms_ik_node
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 if(EXISTS "${PLANT_IK_FILE}")
 install(TARGETS plantIK
     LIBRARY DESTINATION lib
+)
+else()
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/lib/libplantIK.so
+    DESTINATION lib
 )
 endif()
 
@@ -138,6 +174,7 @@ install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
 )
 
+if(MOTION_CAPTURE_IK_BUILD_VR_CPP_NODES)
 # topic_logger
 add_executable(topic_logger src/topic_logger.cpp)
 target_include_directories(topic_logger PRIVATE
@@ -165,17 +202,22 @@ add_executable(ik_ros_uni_cpp_node
   src/JoyStickHandler.cpp
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
+  src/SG100GestureLibrary.cpp
+  src/SG100JointLimits.cpp
+  src/SG100HandBridge.cpp
 )
 target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
+  ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
-target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
+target_link_libraries(ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake yaml-cpp)
+target_compile_features(ik_ros_uni_cpp_node PUBLIC cxx_std_17)
 
 # wheel_ik_ros_uni_cpp_node
-add_executable(wheel_ik_ros_uni_cpp_node 
-  src/wheel_ik_ros_uni_cpp_node.cpp 
+add_executable(wheel_ik_ros_uni_cpp_node
+  src/wheel_ik_ros_uni_cpp_node.cpp
   src/WheelArmControlBaseROS.cpp
-  src/WheelQuest3IkIncrementalROS.cpp 
+  src/WheelQuest3IkIncrementalROS.cpp
   src/WheelQuest3IkIncrementalTools.cpp
   src/ArmTrajWriter.cpp
   src/WheelIncrementalControlModule.cpp
@@ -186,13 +228,16 @@ add_executable(wheel_ik_ros_uni_cpp_node
   src/ArmLengthMeasurement.cpp
   src/WheelJoyStickHandler.cpp
   src/WheelHandSmoother.cpp
+  src/SG100GestureLibrary.cpp
+  src/SG100JointLimits.cpp
+  src/SG100HandBridge.cpp
 )
 add_dependencies(wheel_ik_ros_uni_cpp_node ${catkin_EXPORTED_TARGETS})
 target_include_directories(wheel_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
   ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
-target_link_libraries(wheel_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake)
+target_link_libraries(wheel_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake yaml-cpp)
 target_compile_features(wheel_ik_ros_uni_cpp_node PUBLIC cxx_std_17)
 
 # wheel_arm_only_ik_ros_uni_cpp_node — v62 (5W) 平台半身 IK 入口
@@ -212,8 +257,17 @@ add_executable(wheel_arm_only_ik_ros_uni_cpp_node
   src/JoyStickHandler.cpp
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
+  src/SG100GestureLibrary.cpp
+  src/SG100JointLimits.cpp
+  src/SG100HandBridge.cpp
 )
 target_include_directories(wheel_arm_only_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
+  ${humanoid_wheel_interface_INCLUDE_DIRS}
 )
-target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} drake::drake)
+target_link_libraries(wheel_arm_only_ik_ros_uni_cpp_node ${catkin_LIBRARIES} ${humanoid_wheel_interface_LIBRARIES} drake::drake yaml-cpp)
+
+install(TARGETS ik_ros_uni_cpp_node wheel_ik_ros_uni_cpp_node wheel_arm_only_ik_ros_uni_cpp_node topic_logger
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+endif()

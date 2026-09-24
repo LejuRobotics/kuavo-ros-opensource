@@ -805,14 +805,13 @@ namespace ocs2
                 res.message = "MPC observation not ready";
                 return true;
             }
-            int bootstrapArmMode = (resetJointToDefault_) ? 1 : 0;
-            callSetArmModeSrv(bootstrapArmMode);
+            callSetArmModeSrv(1);
             callWheelMpcControlMode(3);
-            arm_ctrl_mode_ = bootstrapArmMode;
-            arm_ctrl_mode_current_ = bootstrapArmMode;
+            arm_ctrl_mode_ = 1;
+            arm_ctrl_mode_current_ = 1;
             res.success = true;
-            res.message = "wheel arm mode initialized to " + std::to_string(bootstrapArmMode);
-            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode %d", bootstrapArmMode);
+            res.message = "wheel arm mode initialized to 1";
+            ROS_INFO("[QuestControlFSM] bootstrap_wheel_arm_mode -> mode 1");
             return true;
         }
 

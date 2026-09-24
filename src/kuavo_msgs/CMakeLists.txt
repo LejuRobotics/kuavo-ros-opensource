@@ -103,6 +103,7 @@ add_message_files(
   robotArmQVVD.msg
   ikSolveError.msg
   handPose.msg
+  HandshakeTarget.msg
   armHandPose.msg
   twoArmHandPose.msg
   headBodyPose.msg
@@ -171,6 +172,11 @@ add_message_files(
   timedPoint.msg
   lbTimedOfflineTraj.msg
   Float32MultiArrayStamped.msg
+  SG100HandCommand.msg
+  SG100HandState.msg
+  SG100HandFilteredCommand.msg
+  SG100Keypoint.msg
+  SG100Curve.msg
 )
 
 ## Generate services in the 'srv' folder
@@ -283,6 +289,16 @@ add_service_files(
 
   # Transport mode
   TransportModeCommand.srv
+  SetObjectPosition.srv
+  SetJointPosition.srv
+
+  # SG100 heiman 手势管理（增删改查 + 切换）
+  SG100GetGestures.srv
+  SG100AddGestures.srv
+  SG100DeleteGesture.srv
+  SG100UpdateGesture.srv
+  SG100SwitchGesture.srv
+  SG100StepGesture.srv
 )
 
 ## Generate actions in the 'action' folder

@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mujoco model="kuavo internal cylinder transfer scene">
+  <include file="biped_s400062_icra.xml"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"/>
+  <statistic center="0.62 0.42 0.72" extent="1.8"/>
+
+  <visual>
+    <headlight diffuse="0.434974212 0.5682367769 0.4259229307"
+               ambient="0.2203179034 0.1396497255 0.3808722549"
+               specular="0.310577517 0.06737692053 0.251500172"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="145" elevation="-22" offwidth="1280" offheight="720"/>
+  </visual>
+
+  <asset>
+    <texture name="task3_skybox" type="skybox" builtin="gradient"
+             rgb1="0.55 0.65 0.75" rgb2="0.08 0.10 0.14" width="512" height="3072"/>
+    <texture name="task3_room_wall_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/wall3.png"/>
+    <texture name="task3_room_floor_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/ground2.png"/>
+    <texture name="task3_room_ceiling_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/roof1.png"/>
+    <material name="task3_floor_mat" texture="task3_room_floor_tex"
+              texuniform="true" reflectance="0"/>
+    <material name="task3_room_wall_mat" texture="task3_room_wall_tex"
+              texuniform="true" reflectance="0.1" shininess="0.1"/>
+    <material name="task3_room_ceiling_mat" texture="task3_room_ceiling_tex"
+              texuniform="true" reflectance="0.1" shininess="0.1"/>
+    <material name="task3_source_top_mat" rgba="0.58 0.43 0.29 1"/>
+    <material name="task3_target_top_mat" rgba="0.67 0.51 0.34 1"/>
+    <material name="task3_table_leg_mat" rgba="0.24 0.25 0.27 1"/>
+    <material name="task3_ring_mat" rgba="0.22 0.58 0.82 1"/>
+    <material name="task3_ring_collision_mat" rgba="0.22 0.58 0.82 0.001"/>
+
+    <mesh name="task3_smooth_ring" file="task3_smooth_ring.obj"/>
+
+    <!--
+      One convex 15-degree annulus wedge.  Twenty-four rotated copies form a
+      single free rigid body.  This decomposition preserves the open bore in
+      collision; a cylinder primitive or one non-convex mesh would close it.
+      Inner radius = 43 mm, outer radius = 55 mm, height = 60 mm.
+    -->
+    <mesh name="task3_ring_wedge"
+          vertex="0.054529 -0.007179 0.000  0.054529 0.007179 0.000
+                  0.042632 0.005613 0.000  0.042632 -0.005613 0.000
+                  0.054529 -0.007179 0.060  0.054529 0.007179 0.060
+                  0.042632 0.005613 0.060  0.042632 -0.005613 0.060"
+          face="0 1 2  0 2 3  4 7 6  4 6 5
+                0 4 5  0 5 1  1 5 6  1 6 2
+                2 6 7  2 7 3  3 7 4  3 4 0"/>
+  </asset>
+
+  <default>
+    <default class="task3_static">
+      <geom contype="1" conaffinity="3" friction="1.2 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001"/>
+    </default>
+    <default class="task3_object">
+      <geom contype="1" conaffinity="3" friction="1.3 0.01 0.001"
+            solref="0.008 1" solimp="0.96 0.995 0.001" density="650" group="3"/>
+      <joint damping="0.002"/>
+    </default>
+  </default>
+
+  <!-- Read by the Task 3 internal-contact follower. -->
+  <custom>
+    <numeric name="task3_inner_radius" data="0.043"/>
+    <numeric name="task3_outer_radius" data="0.055"/>
+    <numeric name="task3_inner_contact_tolerance" data="0.004"/>
+    <numeric name="task3_ring_height" data="0.060"/>
+    <numeric name="task3_grasp_detection_gap" data="0.001"/>
+    <numeric name="task3_required_inner_fingers" data="2"/>
+    <numeric name="task3_release_lost_fingers" data="2"/>
+    <numeric name="task3_collision_restore_clearance" data="0.003"/>
+    <numeric name="task3_source_table_height" data="0.650"/>
+    <numeric name="task3_destination_table_height" data="0.850"/>
+    <!-- Collision-free visual correction after the ring first reaches the table. -->
+    <numeric name="task3_table_settle_angular_speed" data="6.283185307"/>
+  </custom>
+
+  <worldbody>
+    <light pos="1 0 3.5" dir="-0.2 0 -1" directional="false"/>
+    <geom name="task3_floor" class="task3_static" type="plane" size="0 0 0.05"
+          material="task3_floor_mat"/>
+
+    <!-- Visual-only indoor shell.  It must not change task collision or dynamics. -->
+    <geom name="task3_room_wall_front" type="box" size="10 5 2" pos="0 10 2.5"
+          euler="-1.57079633 0 3.14159265" material="task3_room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="task3_room_wall_back" type="box" size="10 5 2" pos="0 -10 2.5"
+          euler="-1.57079633 0 0" material="task3_room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="task3_room_wall_right" type="box" size="10 5 2" pos="10 0 2.5"
+          euler="0 1.57079633 1.57" material="task3_room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="task3_room_wall_left" type="box" size="10 5 2" pos="-10 0 2.5"
+          euler="0 -1.57079633 1.57" material="task3_room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="task3_room_ceiling" type="plane" size="10 10 5" pos="0 0 5"
+          euler="3.14159265 0 0" material="task3_room_ceiling_mat"
+          contype="0" conaffinity="0" group="1"/>
+
+    <!-- Source tabletop height: 0.65 m. -->
+    <body name="task3_source_table" pos="0.62 0 0">
+      <geom name="task3_source_table_top" class="task3_static" type="box"
+            pos="0 0 0.62" size="0.20 0.36 0.03" material="task3_source_top_mat"/>
+      <geom name="task3_source_leg_1" class="task3_static" type="box"
+            pos="-0.14 -0.29 0.295" size="0.035 0.035 0.295" material="task3_table_leg_mat"/>
+      <geom name="task3_source_leg_2" class="task3_static" type="box"
+            pos="-0.14 0.29 0.295" size="0.035 0.035 0.295" material="task3_table_leg_mat"/>
+      <geom name="task3_source_leg_3" class="task3_static" type="box"
+            pos="0.14 -0.29 0.295" size="0.035 0.035 0.295" material="task3_table_leg_mat"/>
+      <geom name="task3_source_leg_4" class="task3_static" type="box"
+            pos="0.14 0.29 0.295" size="0.035 0.035 0.295" material="task3_table_leg_mat"/>
+    </body>
+
+    <!-- The robot translates left (+world Y) by 0.85 m; tabletop height is 0.85 m. -->
+    <body name="task3_destination_table" pos="0.62 0.85 0">
+      <geom name="task3_destination_table_top" class="task3_static" type="box"
+            pos="0 0 0.82" size="0.20 0.36 0.03" material="task3_target_top_mat"/>
+      <geom name="task3_destination_leg_1" class="task3_static" type="box"
+            pos="-0.14 -0.29 0.395" size="0.035 0.035 0.395" material="task3_table_leg_mat"/>
+      <geom name="task3_destination_leg_2" class="task3_static" type="box"
+            pos="-0.14 0.29 0.395" size="0.035 0.035 0.395" material="task3_table_leg_mat"/>
+      <geom name="task3_destination_leg_3" class="task3_static" type="box"
+            pos="0.14 -0.29 0.395" size="0.035 0.035 0.395" material="task3_table_leg_mat"/>
+      <geom name="task3_destination_leg_4" class="task3_static" type="box"
+            pos="0.14 0.29 0.395" size="0.035 0.035 0.395" material="task3_table_leg_mat"/>
+    </body>
+
+    <body name="task3_hollow_cylinder" pos="0.62 -0.23 0.65">
+      <joint name="task3_hollow_cylinder_freejoint" class="task3_object" type="free"/>
+      <geom name="task3_ring_visual" type="mesh" mesh="task3_smooth_ring"
+            contype="0" conaffinity="0" density="0" group="1" material="task3_ring_mat"/>
+      <geom name="task3_ring_segment_00" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0"/>
+      <geom name="task3_ring_segment_01" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.261799"/>
+      <geom name="task3_ring_segment_02" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.523599"/>
+      <geom name="task3_ring_segment_03" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.785398"/>
+      <geom name="task3_ring_segment_04" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.047198"/>
+      <geom name="task3_ring_segment_05" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.308997"/>
+      <geom name="task3_ring_segment_06" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.570796"/>
+      <geom name="task3_ring_segment_07" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.832596"/>
+      <geom name="task3_ring_segment_08" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.094395"/>
+      <geom name="task3_ring_segment_09" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.356194"/>
+      <geom name="task3_ring_segment_10" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.617994"/>
+      <geom name="task3_ring_segment_11" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.879793"/>
+      <geom name="task3_ring_segment_12" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.141593"/>
+      <geom name="task3_ring_segment_13" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.403392"/>
+      <geom name="task3_ring_segment_14" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.665191"/>
+      <geom name="task3_ring_segment_15" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.926991"/>
+      <geom name="task3_ring_segment_16" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.188790"/>
+      <geom name="task3_ring_segment_17" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.450590"/>
+      <geom name="task3_ring_segment_18" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.712389"/>
+      <geom name="task3_ring_segment_19" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.974188"/>
+      <geom name="task3_ring_segment_20" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.235988"/>
+      <geom name="task3_ring_segment_21" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.497787"/>
+      <geom name="task3_ring_segment_22" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.759587"/>
+      <geom name="task3_ring_segment_23" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 6.021386"/>
+    </body>
+
+    <body name="task3_hollow_cylinder_2" pos="0.62 0.00 0.65">
+      <joint name="task3_hollow_cylinder_2_freejoint" class="task3_object" type="free"/>
+      <geom name="task3_hollow_cylinder_2_visual" type="mesh" mesh="task3_smooth_ring" contype="0" conaffinity="0" density="0" group="1" material="task3_ring_mat"/>
+      <geom name="task3_hollow_cylinder_2_segment_00" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0"/>
+      <geom name="task3_hollow_cylinder_2_segment_01" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.261799"/>
+      <geom name="task3_hollow_cylinder_2_segment_02" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.523599"/>
+      <geom name="task3_hollow_cylinder_2_segment_03" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.785398"/>
+      <geom name="task3_hollow_cylinder_2_segment_04" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.047198"/>
+      <geom name="task3_hollow_cylinder_2_segment_05" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.308997"/>
+      <geom name="task3_hollow_cylinder_2_segment_06" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.570796"/>
+      <geom name="task3_hollow_cylinder_2_segment_07" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.832596"/>
+      <geom name="task3_hollow_cylinder_2_segment_08" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.094395"/>
+      <geom name="task3_hollow_cylinder_2_segment_09" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.356194"/>
+      <geom name="task3_hollow_cylinder_2_segment_10" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.617994"/>
+      <geom name="task3_hollow_cylinder_2_segment_11" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.879793"/>
+      <geom name="task3_hollow_cylinder_2_segment_12" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.141593"/>
+      <geom name="task3_hollow_cylinder_2_segment_13" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.403392"/>
+      <geom name="task3_hollow_cylinder_2_segment_14" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.665191"/>
+      <geom name="task3_hollow_cylinder_2_segment_15" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.926991"/>
+      <geom name="task3_hollow_cylinder_2_segment_16" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.188790"/>
+      <geom name="task3_hollow_cylinder_2_segment_17" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.450590"/>
+      <geom name="task3_hollow_cylinder_2_segment_18" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.712389"/>
+      <geom name="task3_hollow_cylinder_2_segment_19" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.974188"/>
+      <geom name="task3_hollow_cylinder_2_segment_20" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.235988"/>
+      <geom name="task3_hollow_cylinder_2_segment_21" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.497787"/>
+      <geom name="task3_hollow_cylinder_2_segment_22" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.759587"/>
+      <geom name="task3_hollow_cylinder_2_segment_23" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 6.021386"/>
+    </body>
+
+    <body name="task3_hollow_cylinder_3" pos="0.62 0.23 0.65">
+      <joint name="task3_hollow_cylinder_3_freejoint" class="task3_object" type="free"/>
+      <geom name="task3_hollow_cylinder_3_visual" type="mesh" mesh="task3_smooth_ring" contype="0" conaffinity="0" density="0" group="1" material="task3_ring_mat"/>
+      <geom name="task3_hollow_cylinder_3_segment_00" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0"/>
+      <geom name="task3_hollow_cylinder_3_segment_01" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.261799"/>
+      <geom name="task3_hollow_cylinder_3_segment_02" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.523599"/>
+      <geom name="task3_hollow_cylinder_3_segment_03" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 0.785398"/>
+      <geom name="task3_hollow_cylinder_3_segment_04" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.047198"/>
+      <geom name="task3_hollow_cylinder_3_segment_05" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.308997"/>
+      <geom name="task3_hollow_cylinder_3_segment_06" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.570796"/>
+      <geom name="task3_hollow_cylinder_3_segment_07" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 1.832596"/>
+      <geom name="task3_hollow_cylinder_3_segment_08" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.094395"/>
+      <geom name="task3_hollow_cylinder_3_segment_09" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.356194"/>
+      <geom name="task3_hollow_cylinder_3_segment_10" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.617994"/>
+      <geom name="task3_hollow_cylinder_3_segment_11" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 2.879793"/>
+      <geom name="task3_hollow_cylinder_3_segment_12" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.141593"/>
+      <geom name="task3_hollow_cylinder_3_segment_13" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.403392"/>
+      <geom name="task3_hollow_cylinder_3_segment_14" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.665191"/>
+      <geom name="task3_hollow_cylinder_3_segment_15" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 3.926991"/>
+      <geom name="task3_hollow_cylinder_3_segment_16" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.188790"/>
+      <geom name="task3_hollow_cylinder_3_segment_17" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.450590"/>
+      <geom name="task3_hollow_cylinder_3_segment_18" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.712389"/>
+      <geom name="task3_hollow_cylinder_3_segment_19" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 4.974188"/>
+      <geom name="task3_hollow_cylinder_3_segment_20" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.235988"/>
+      <geom name="task3_hollow_cylinder_3_segment_21" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.497787"/>
+      <geom name="task3_hollow_cylinder_3_segment_22" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 5.759587"/>
+      <geom name="task3_hollow_cylinder_3_segment_23" class="task3_object" type="mesh" mesh="task3_ring_wedge" material="task3_ring_collision_mat" euler="0 0 6.021386"/>
+    </body>
+  </worldbody>
+</mujoco>

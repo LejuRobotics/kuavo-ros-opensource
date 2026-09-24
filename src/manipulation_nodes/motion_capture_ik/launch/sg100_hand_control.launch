@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<!--
+  Launch file for SG100 11-DOF dexterous hand control
+
+  This launch file starts:
+  1. sg100_hand_test: standalone test using embedded Sg100Controller + Sg100RosBridge
+
+  Topics:
+  - Subscribes to: /sg100_hand_command (SG100HandCommand)
+  - Publishes to: /sg100_hand_state (SG100HandState)
+-->
+
+<launch>
+    <!-- Arguments -->
+    <arg name="sg100_left_port" default="/dev/lefthand" />
+    <arg name="sg100_right_port" default="/dev/righthand" />
+    <arg name="sg100_baudrate" default="1000000" />
+    <arg name="sg100_control_rate" default="50.0" />
+    <arg name="sg100_cmd_filter_alpha" default="0.2" />
+    <arg name="sg100_debug_state" default="true" />
+    <arg name="sg100_kp" default="10" />
+    <arg name="sg100_kd" default="0.02" />
+    <arg name="sg100_output_limit" default="0.5" />
+
+    <!-- SG100 Hand ROS Node (C++ hardware driver) -->
+    <node name="sg100_hand_test" pkg="hardware_node" type="sg100_hand_test" output="screen" respawn="true" respawn_delay="5.0">
+        <!-- Serial port configuration -->
+        <param name="sg100_left_port" value="$(arg sg100_left_port)" />
+        <param name="sg100_right_port" value="$(arg sg100_right_port)" />
+        <param name="sg100_baudrate" value="$(arg sg100_baudrate)" />
+
+        <!-- Control configuration -->
+        <param name="sg100_control_rate" value="$(arg sg100_control_rate)" />
+        <!-- Low-pass filter coefficient: 1=no filtering, 0→heavy smoothing -->
+        <param name="sg100_cmd_filter_alpha" value="$(arg sg100_cmd_filter_alpha)" />
+        <param name="sg100_debug_state" value="$(arg sg100_debug_state)" />
+        <!-- Parameters consumed by sg100_hand_driver.cpp -->
+        <param name="sg100_kp" value="$(arg sg100_kp)" />
+        <param name="sg100_kd" value="$(arg sg100_kd)" />
+        <param name="sg100_output_limit" value="$(arg sg100_output_limit)" />
+    </node>
+
+    <!-- RViz configuration (optional) -->
+    <!--
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find motion_capture_ik)/config/sg100_hands.rviz" if="false"/>
+    -->
+
+    <!-- Static TF publishers for hand base frames (optional, for visualization) -->
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="sg100_left_hand_tf"
+          args="0.0 0.293 -0.16 0 0 0 torso sg100_left_hand_base"/>
+    <node pkg="tf2_ros" type="static_transform_publisher" name="sg100_right_hand_tf"
+          args="0.0 -0.293 -0.16 0 0 0 torso sg100_right_hand_base"/> -->
+</launch>

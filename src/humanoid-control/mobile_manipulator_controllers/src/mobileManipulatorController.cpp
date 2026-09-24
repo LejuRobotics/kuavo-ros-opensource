@@ -1,5 +1,6 @@
 #include "mobile_manipulator_controllers/mobileManipulatorController.h"
 #include <std_msgs/Float64MultiArray.h>
+#include <std_msgs/Float64.h>
 #include <kuavo_msgs/robotWaistControl.h>
 #include <ocs2_ros_interfaces/synchronized_module/RosReferenceManager.h>
 #include <sensor_msgs/JointState.h>
@@ -48,6 +49,7 @@ namespace mobile_manipulator_controller
     humanoidCmdPosPublisher_ = nh.advertise<geometry_msgs::Twist>("/cmd_pose", 10, true);
     armTrajPublisher_ = nh.advertise<sensor_msgs::JointState>("/mm_kuavo_arm_traj", 10);
     waistTrajPublisher_ = nh.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 10);
+    ocs2IkLatencyPublisher_ = nh.advertise<std_msgs::Float64>("/ocs2_ik/processing_latency_ms", 10);
 
     yaml_cfg_ = YAML::LoadFile(mobile_manipulator_controller::getPath() + "/cfg/cfg.yaml");
     arm_min_ = yaml_cfg_["arm_min"].as<std::vector<double>>();
@@ -293,6 +295,14 @@ namespace mobile_manipulator_controller
     auto goalTorsoTargetTrajectories = generateTargetTrajectories(currentTorsoState, desiredTorsoState, currentHumanoidObservation);
     auto goalArmTargetTrajectories = generateTargetTrajectories(currentArmState, desiredArmState, currentHumanoidObservation);
     
+    // IK端到端管线延迟: 从 ikCmdCallback 接收 → IK解算 → MPC更新 → arm_traj发布
+    // 在 controlHumanoid 入口处消费 getTargetTrajectories 中记录的新数据标记
+    std::chrono::steady_clock::time_point recvTime;
+    ikPipelineHasNewData_ = ikTargetManager_->consumeNewIkData(recvTime);
+    if (ikPipelineHasNewData_) {
+      ikPipelineRecvTime_ = recvTime;
+    }
+
     auto getJointStatesMsg = [&](const vector_t& q_arm, const vector_t& dq_arm)
     {
       if(q_arm.size() != dq_arm.size()) // 关节数不一致
@@ -333,6 +343,13 @@ namespace mobile_manipulator_controller
         humanoidArmTargetTrajectoriesPublisher_.publish(ros_msg_conversions::createTargetTrajectoriesMsg(goalArmTargetTrajectories));
         armTrajPublisher_.publish(getJointStatesMsg(desiredArmState, desiredArmInput));
         waistTrajPublisher_.publish(getWaistStatesMsg(desiredWaistState));
+        if (ikPipelineHasNewData_) {
+          double latencyMs = std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - ikPipelineRecvTime_).count();
+          std_msgs::Float64 latencyMsg;
+          latencyMsg.data = latencyMs;
+          ocs2IkLatencyPublisher_.publish(latencyMsg);
+        }
         break;
       case ControlType::BaseOnly:
         // controlBasePos(mmState, mmInput);只控制base没有意义
@@ -342,6 +359,13 @@ namespace mobile_manipulator_controller
         humanoidArmTargetTrajectoriesPublisher_.publish(ros_msg_conversions::createTargetTrajectoriesMsg(goalArmTargetTrajectories));
         armTrajPublisher_.publish(getJointStatesMsg(desiredArmState, desiredArmInput));
         waistTrajPublisher_.publish(getWaistStatesMsg(desiredWaistState));
+        if (ikPipelineHasNewData_) {
+          double latencyMs = std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - ikPipelineRecvTime_).count();
+          std_msgs::Float64 latencyMsg;
+          latencyMsg.data = latencyMs;
+          ocs2IkLatencyPublisher_.publish(latencyMsg);
+        }
         break;
       default:
         break;

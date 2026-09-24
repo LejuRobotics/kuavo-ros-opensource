@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mujoco model="kuavo two boxes scene">
+  <!-- Keep the supplied Kuavo + dexterous-hand model as the single robot source. -->
+  <include file="biped_s400062_icra.xml"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"/>
+
+  <statistic center="0.75 -0.15 0.75" extent="1.8"/>
+
+  <visual>
+    <headlight diffuse="0.27313864 0.5029271401 0.5647221719"
+               ambient="0.0340657909 0.1242173227 0.2041809178"
+               specular="0.01609219503 0.1866048532 0.1915234098"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="145" elevation="-22" offwidth="1280" offheight="720"/>
+  </visual>
+
+  <asset>
+    <texture name="skybox" type="skybox" builtin="gradient"
+             rgb1="0.55 0.65 0.75" rgb2="0.08 0.10 0.14" width="512" height="3072"/>
+    <texture name="room_wall_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/wall3.png"/>
+    <texture name="room_floor_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/ground2.png"/>
+    <texture name="room_ceiling_tex" type="2d"
+             file="../../../../kuavo_assets/models/biped_s400062/textures/roof1.png"/>
+    <material name="floor_mat" texture="room_floor_tex" texuniform="true" reflectance="0"/>
+    <material name="room_wall_mat" texture="room_wall_tex" texuniform="true"
+              reflectance="0.1" shininess="0.1"/>
+    <material name="room_ceiling_mat" texture="room_ceiling_tex" texuniform="true"
+              reflectance="0.1" shininess="0.1"/>
+    <!-- Two distinct materials so the two otherwise identical boxes are separable in the viewer. -->
+    <material name="box_1_mat" rgba="0.20 0.48 0.78 1"/>
+    <material name="box_2_mat" rgba="0.23 0.68 0.42 1"/>
+    <material name="table_top_mat" rgba="0.62 0.46 0.30 1"/>
+    <material name="conveyor_belt_mat" rgba="0.08 0.27 0.17 1"/>
+    <material name="conveyor_edge_mat" rgba="0.91 0.91 0.91 1"/>
+    <material name="table_leg_mat" rgba="0.24 0.25 0.27 1"/>
+  </asset>
+
+  <default>
+    <default class="task_static">
+      <geom contype="1" conaffinity="3" friction="1.2 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001"/>
+    </default>
+    <default class="task_object">
+      <geom contype="1" conaffinity="3" friction="1.0 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001" density="600"/>
+      <joint damping="0.001"/>
+    </default>
+  </default>
+
+  <custom>
+    <numeric name="task2_conveyor_speed" data="0.10"/>
+    <numeric name="task2_conveyor_stop_local_x" data="0.65"/>
+    <numeric name="task2_grasp_detection_gap" data="0.008"/>
+  </custom>
+
+  <worldbody>
+    <light pos="1 0 3.5" dir="-0.3 0 -1" directional="false"/>
+    <geom name="floor" class="task_static" type="plane" size="0 0 0.05" material="floor_mat"/>
+
+    <!-- Visual-only indoor shell.  It must not change task collision or dynamics. -->
+    <geom name="room_wall_front" type="box" size="10 5 2" pos="0 10 2.5"
+          euler="-1.57079633 0 3.14159265" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_wall_back" type="box" size="10 5 2" pos="0 -10 2.5"
+          euler="-1.57079633 0 0" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_wall_right" type="box" size="10 5 2" pos="10 0 2.5"
+          euler="0 1.57079633 1.57" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_wall_left" type="box" size="10 5 2" pos="-10 0 2.5"
+          euler="0 -1.57079633 1.57" material="room_wall_mat"
+          contype="0" conaffinity="0" group="1"/>
+    <geom name="room_ceiling" type="plane" size="10 10 5" pos="0 0 5"
+          euler="3.14159265 0 0" material="room_ceiling_mat"
+          contype="0" conaffinity="0" group="1"/>
+
+    <!-- Keep the 0.60 m table below the 0.667 m default wrist height so arm initialization stays clear. -->
+    <body name="work_table" pos="0.90 -0.16 0">
+      <geom name="table_top" class="task_static" type="box"
+            pos="0 0.10 0.57" size="0.48 0.58 0.03" material="table_top_mat"/>
+      <geom name="table_leg_front_left" class="task_static" type="box"
+            pos="-0.40 0.60 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+      <geom name="table_leg_front_right" class="task_static" type="box"
+            pos="-0.40 -0.40 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+      <geom name="table_leg_back_left" class="task_static" type="box"
+            pos="0.40 0.60 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+      <geom name="table_leg_back_right" class="task_static" type="box"
+            pos="0.40 -0.40 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+    </body>
+
+    <!--
+      Destination conveyor for the validated nominal route.  The destination
+      base pose is 0.10 m closer than the table-center-matched pose so a held
+      box is released just inside the preserved near edge of the belt.
+    -->
+    <body name="destination_conveyor" pos="-0.04 1.10 0" quat="0.707107 0 0 0.707107">
+      <!--
+        Green belt with white raised side edges, styled after the reference
+        photo.  Every solid below lies strictly inside the previous belt
+        volume (y +-0.48, z [0.54, 0.60]), so the reachable solution set can
+        only grow: the deck shrinks to half-width 0.44 with its top at 0.56
+        and its bottom resting flush on the leg tops at 0.54, while the white
+        edge rails exactly refill the old outer side bands (y [0.44, 0.48],
+        full old height), standing 0.04 m proud of the deck like curbs.
+      -->
+      <geom name="destination_conveyor_belt" class="task_static" type="box"
+            pos="0.42 0 0.55" size="0.90 0.44 0.01" material="conveyor_belt_mat"/>
+      <geom name="destination_conveyor_edge_left" class="task_static" type="box"
+            pos="0.42 0.46 0.57" size="0.90 0.02 0.03" material="conveyor_edge_mat"/>
+      <geom name="destination_conveyor_edge_right" class="task_static" type="box"
+            pos="0.42 -0.46 0.57" size="0.90 0.02 0.03" material="conveyor_edge_mat"/>
+      <geom name="destination_conveyor_leg_front_left" class="task_static" type="box"
+            pos="-0.40 0.40 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+      <geom name="destination_conveyor_leg_front_right" class="task_static" type="box"
+            pos="-0.40 -0.40 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+      <geom name="destination_conveyor_leg_back_left" class="task_static" type="box"
+            pos="1.24 0.40 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+      <geom name="destination_conveyor_leg_back_right" class="task_static" type="box"
+            pos="1.24 -0.40 0.27" size="0.035 0.035 0.27" material="table_leg_mat"/>
+    </body>
+
+    <!--
+      Two identical empty boxes on the table, parked at the near-robot end.
+
+      Box geometry is copied verbatim from scene 1's source bin: outer footprint
+      0.64 x 0.44 m, inner footprint 0.60 x 0.40 m, total height 0.12 m, open top.
+      The lower wall center aligns with the robot's default wrist height.
+
+      Placement: the table top spans X in [0.42, 1.38] and Y in [-0.64, 0.32].
+      Both boxes sit at the near-robot end, their -X face flush with the table's
+      near edge X = 0.42 (center X = 0.42 + 0.32 = 0.74), and are then pushed out
+      sideways, one to each Y edge: box_1 to the -Y (robot right) edge, center
+      Y = -0.64 + 0.22 = -0.42; box_2 to the +Y (robot left) edge, center
+      Y = 0.32 - 0.22 = 0.10.  The two 0.44 m wide boxes need 0.88 m of the 0.96 m
+      span, so 8 cm of clear table remains between them.
+    -->
+    <body name="box_1" pos="0.74 -0.42 0.60">
+      <joint name="box_1_freejoint" class="task_object" type="free"/>
+      <geom name="box_1_floor" class="task_object" type="box"
+            pos="0 0 0.0075" size="0.32 0.22 0.0075" material="box_1_mat"/>
+      <geom name="box_1_front_wall" class="task_object" type="box"
+            pos="-0.31 0 0.0675" size="0.01 0.22 0.0525" material="box_1_mat"/>
+      <geom name="box_1_back_wall" class="task_object" type="box"
+            pos="0.31 0 0.0675" size="0.01 0.22 0.0525" material="box_1_mat"/>
+      <geom name="box_1_left_wall" class="task_object" type="box"
+            pos="0 0.21 0.0675" size="0.30 0.01 0.0525" material="box_1_mat"/>
+      <geom name="box_1_right_wall" class="task_object" type="box"
+            pos="0 -0.21 0.0675" size="0.30 0.01 0.0525" material="box_1_mat"/>
+    </body>
+
+    <body name="box_2" pos="0.74 0.10 0.60">
+      <joint name="box_2_freejoint" class="task_object" type="free"/>
+      <geom name="box_2_floor" class="task_object" type="box"
+            pos="0 0 0.0075" size="0.32 0.22 0.0075" material="box_2_mat"/>
+      <geom name="box_2_front_wall" class="task_object" type="box"
+            pos="-0.31 0 0.0675" size="0.01 0.22 0.0525" material="box_2_mat"/>
+      <geom name="box_2_back_wall" class="task_object" type="box"
+            pos="0.31 0 0.0675" size="0.01 0.22 0.0525" material="box_2_mat"/>
+      <geom name="box_2_left_wall" class="task_object" type="box"
+            pos="0 0.21 0.0675" size="0.30 0.01 0.0525" material="box_2_mat"/>
+      <geom name="box_2_right_wall" class="task_object" type="box"
+            pos="0 -0.21 0.0675" size="0.30 0.01 0.0525" material="box_2_mat"/>
+    </body>
+  </worldbody>
+
+</mujoco>

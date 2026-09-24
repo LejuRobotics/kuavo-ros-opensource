@@ -116,6 +116,11 @@ target_compile_definitions(hardware_plant_wheel_arm_test
 )
 
 # Install
-install(TARGETS kuavo_imu_test hardware_plant_wheel_arm_test
+install(TARGETS hardware_plant_wheel_arm_test
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+# Install IMU test
+install(TARGETS kuavo_imu_test
     RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 ) 

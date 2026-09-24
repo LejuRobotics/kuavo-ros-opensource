@@ -16,8 +16,14 @@ MujocoLcm::MujocoLcm(/* args */)
 
 MujocoLcm::~MujocoLcm()
 {
-    pthread_mutex_destroy(&recvMutex_); 
-    pthread_mutex_destroy(&sendMutex_); 
+    // Stop and reap the worker before anything it touches is torn down:
+    // lcmThreadFunc calls into lcm_, which the member destructor frees after
+    // this body returns.  Leaving the thread alive past that point makes it
+    // write into freed heap memory and corrupts the allocator.
+    joinLCMThread();
+
+    pthread_mutex_destroy(&recvMutex_);
+    pthread_mutex_destroy(&sendMutex_);
 }
 
 void MujocoLcm::HandleLowCmd(const lcm::ReceiveBuffer* rbuf, const std::string& chan, const low_cmd_t* msg) {

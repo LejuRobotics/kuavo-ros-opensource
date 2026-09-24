@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "status": "requires_runtime_validation",
+  "safe_retreat_m": 0.47,
+  "shoulder_pitch_rad": -1.30,
+  "lift_trajectory_points": 160,
+  "ready_trajectory_points": 120,
+  "collision_margin_m": 0.001,
+  "collision_report_limit_m": 0.02,
+  "path_samples": 40
+}

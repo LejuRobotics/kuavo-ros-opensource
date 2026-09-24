@@ -116,7 +116,7 @@ if(NOT "include;/usr/include/eigen3;/usr/include;/opt/ros/noetic/lib/pkgconfig/.
   endforeach()
 endif()
 
-set(libraries "humanoid_interface;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;pinocchio;boost_filesystem;boost_serialization;boost_system;urdfdom_sensor;urdfdom_model_state;urdfdom_model;urdfdom_world;console_bridge;hpp-fcl;octomap;octomath;/opt/drake/lib/libdrake.so")
+set(libraries "humanoid_interface;/usr/lib/x86_64-linux-gnu/libboost_system.so.1.71.0;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so.1.71.0;pinocchio;boost_filesystem;boost_serialization;boost_system;urdfdom_sensor;urdfdom_model_state;urdfdom_model;urdfdom_world;console_bridge;hpp-fcl;octomap;octomath")
 foreach(library ${libraries})
   # keep build configuration keywords, target names and absolute libraries as-is
   if("${library}" MATCHES "^(debug|optimized|general)$")

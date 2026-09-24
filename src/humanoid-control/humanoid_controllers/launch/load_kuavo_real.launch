@@ -5,10 +5,17 @@
     <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
 
     <arg name="vr_remote_control" default="false"/>
+    <!-- 默认关闭，开启后才发布并录制VR链路延迟诊断话题。 -->
+    <arg name="enable_vr_latency_diagnostics" default="false"/>
+    <arg name="enable_vr_transform_diagnostics" default="false"/>
+    <arg name="ik_solution_timeout_s" default="0.2"/>
     <arg name="robot_type"         default="2"/>
     <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics.yaml"/>
+    <arg name="vr_latency_rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics_vr_latency.yaml"/>
+    <param name="/enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
     <!-- load the robot version manager -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
       <arg name="robot_version" value="$(arg robot_version)"/>
@@ -31,6 +38,8 @@
     <arg name="only_half_up_body" default="false"/>
     <arg name="stand_up_protect" default="true"/>
     <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
+    <!-- 是否启用 rosbag 录制 -->
+    <arg name="record_bag" default="true" doc="If true, start rosbag recording nodelet"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -129,6 +138,18 @@
     <param name="/mpc/schedule/start_time" value="-1.0"/>
     <param name="/timeout_warning_ms" value="20"/>
 
+    <!-- SG100 hand params -->
+    <param name="sg100_left_port" value="/dev/lefthand" />
+    <param name="sg100_right_port" value="/dev/righthand" />
+    <param name="sg100_baudrate" value="1000000" />
+    <param name="sg100_control_rate" value="50.0" />
+    <param name="sg100_publish_joint_states" value="true" />
+    <param name="sg100_cmd_filter_alpha" value="0.2" />
+    <param name="sg100_debug_state" value="false" />
+    <param name="sg100_kp" value="10" />
+    <param name="sg100_kd" value="0.02" />
+    <param name="sg100_output_limit" value="0.5" />
+
     <!-- 自动清理 .ros 文件夹参数 -->
     <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
     <param name="/nodelet_manager/max_log_size_gb" value="34.0"/>
@@ -223,7 +244,11 @@
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodeletCXX nodelet_manager" respawn="false" output="screen" required="true"  />
     </group>
 
-    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    <group if="$(arg record_bag)">
+      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch">
+        <arg name="topic_config" value="$(eval arg('vr_latency_rosbag_topic_config') if arg('enable_vr_latency_diagnostics') else arg('rosbag_topic_config'))"/>
+      </include>
+    </group>
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
 
@@ -291,7 +316,11 @@
     </group>
 
     <group if="$(arg vr_remote_control)">
-      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
+        <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
+        <arg name="enable_vr_transform_diagnostics" value="$(arg enable_vr_transform_diagnostics)"/>
+        <arg name="ik_solution_timeout_s" value="$(arg ik_solution_timeout_s)"/>
+      </include>
     </group>
 
     <!-- 添加播放音乐参数 -->
@@ -450,5 +479,11 @@
 
     <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
     <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+
+    <!-- 握手功能 -->
+    <arg name="with_handshake" default="false" doc="Enable handshake node"/>
+    <group if="$(arg with_handshake)">
+      <include file="$(find kuavo_handshake)/launch/handshake_standalone.launch"/>
+    </group>
 
 </launch>

@@ -1,0 +1,14 @@
+<launch>
+  <!-- External-model entry for Task 2. initial_base_x/y come from model_entry.py; Task 2
+       currently pins seed 1 because its boxes are not randomized yet. -->
+  <arg name="initial_base_x" default="0.0"/>
+  <arg name="initial_base_y" default="0.0"/>
+  <arg name="task_light_seed" default="-1"/>
+  <include file="$(find data_challenge_simulator)/launch/load_kuavo_mujoco_sim2.launch">
+    <arg name="initial_base_x" value="$(arg initial_base_x)"/>
+    <arg name="initial_base_y" value="$(arg initial_base_y)"/>
+    <arg name="task_light_seed" value="$(arg task_light_seed)"/>
+    <arg name="require_model_command_gate" value="true"/>
+    <arg name="publish_cmd_vel_fallback" value="false"/>
+  </include>
+</launch>

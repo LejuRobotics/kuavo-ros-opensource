@@ -7,7 +7,7 @@ cmake_args:
 - -DCMAKE_BUILD_TYPE=Release
 devel_layout: merged
 devel_space: devel
-extend_path: null
+extend_path: /opt/ros/noetic
 extends: null
 install: false
 install_space: install
@@ -19,6 +19,6 @@ log_space: logs
 maintainers: []
 make_args: []
 source_space: src
-use_env_cache: false
+use_env_cache: true
 use_internal_make_jobserver: true
 whitelist: []

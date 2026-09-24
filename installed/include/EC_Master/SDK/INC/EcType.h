@@ -142,9 +142,9 @@ typedef enum
 
 
 /*-MACROS--------------------------------------------------------------------*/
-#define EC_FALSE            0
-#define EC_TRUE             1
-#define EC_NULL             0
+#define EC_FALSE            0   /**< Boolean value: False */
+#define EC_TRUE             1   /**< Boolean value: True */
+#define EC_NULL             0   /**< Null pointer constant */
 
 #define EC_NOWAIT           ((EC_T_DWORD)0x00000000)
 #define EC_WAITINFINITE     ((EC_T_DWORD)0xFFFFFFFF)
