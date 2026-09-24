@@ -173,28 +173,45 @@ class WheelIncrementalPoseResult {
   }
 
  public:
-  std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotLeftHandQuatInc(bool smoothRotation = true) const {
+  std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotLeftHandQuatInc(
+      bool smoothRotation = true, bool clipAroundMeasured = true) const {
     (void)smoothRotation;
+    if (!clipAroundMeasured) {
+      return std::make_pair(robotLeftHandQuatTarget_.normalized(), leftHandDeltaQuatLast_);
+    }
     return std::make_pair(limitIncrementalTargetQuatSafe(robotLeftHandQuatTarget_,
                                                          robotLeftHandQuatMeasEERealTime_,
                                                          zyxLimitsFinal_),
                           leftHandDeltaQuatLast_);
   }
 
-  std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotRightHandQuatInc(bool smoothRotation = true) const {
+  std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotRightHandQuatInc(
+      bool smoothRotation = true, bool clipAroundMeasured = true) const {
+    if (!clipAroundMeasured) {
+      return std::make_pair(robotRightHandQuatTarget_.normalized(), rightHandDeltaQuatLast_);
+    }
     return std::make_pair(limitIncrementalTargetQuatSafe(robotRightHandQuatTarget_,
                                                          robotRightHandQuatMeasEERealTime_,
                                                          zyxLimitsFinal_),
                           rightHandDeltaQuatLast_);
   }
 
+  // Clip a chest-remapped command around the current measured EE.  Used after
+  // followChest so waist yaw is not inside the Euler relative pose.
+  Eigen::Quaterniond clipHandQuatAroundMeasuredEE(bool leftArm, const Eigen::Quaterniond& qCmd) const {
+    const Eigen::Quaterniond& qMeas =
+        leftArm ? robotLeftHandQuatMeasEERealTime_ : robotRightHandQuatMeasEERealTime_;
+    return limitIncrementalTargetQuatSafe(qCmd, qMeas, zyxLimitsFinal_);
+  }
+
   std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Vector3d, Eigen::Vector3d> getLatestIncrementalHandPose(
       bool incrementalPos = true,
       bool incrementalQuat = false,
-      bool smoothRotation = true) const {
+      bool smoothRotation = true,
+      bool clipAroundMeasured = true) const {
     if (incrementalQuat) {
-      return std::make_tuple(getLatestRobotLeftHandQuatInc(smoothRotation).first,
-                             getLatestRobotRightHandQuatInc(smoothRotation).first,
+      return std::make_tuple(getLatestRobotLeftHandQuatInc(smoothRotation, clipAroundMeasured).first,
+                             getLatestRobotRightHandQuatInc(smoothRotation, clipAroundMeasured).first,
                              getLatestRobotLeftHandPos(),
                              getLatestRobotRightHandPos());
     } else {

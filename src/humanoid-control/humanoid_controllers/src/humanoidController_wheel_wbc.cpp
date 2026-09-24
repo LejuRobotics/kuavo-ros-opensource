@@ -57,12 +57,18 @@ namespace humanoidController_wheel_wbc
       hasKalmanLimitConfig = false;
     }
 
+    config.kalmanProcessAccCap = 80.0;
+    config.kalmanProcessQCap = 400.0;
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_pos", config.kalmanInitialPosVar);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_vel", config.kalmanInitialVelVar);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.fast_update_r_scale", config.fastUpdateRScale);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.target_v_alpha", config.targetVAlpha);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_process_acc_cap",
+                          config.kalmanProcessAccCap);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_process_q_cap",
+                          config.kalmanProcessQCap);
 
     int immediate = config.immediateUpdateOnNewTarget ? 1 : 0;
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.immediate_update_on_new_target", immediate);
@@ -305,7 +311,11 @@ namespace humanoidController_wheel_wbc
       wbc_arm_raw_q_ = vector_t::Zero(armNum_);
       wbc_arm_raw_v_ = vector_t::Zero(armNum_);
       ROS_INFO_STREAM("[humanoidControllerWheelWbc] arm trajectory interpolator enable="
-                      << (enable_arm_traj_interpolator_ ? "true" : "false"));
+                      << (enable_arm_traj_interpolator_ ? "true" : "false")
+                      << " kalman_v_limit=" << config.kalmanVLimit
+                      << " r_dq=" << config.kalmanMeasurementDqNoise
+                      << " process_acc_cap=" << config.kalmanProcessAccCap
+                      << " process_q_cap=" << config.kalmanProcessQCap);
     }
 
     if(obsLimitEnable)

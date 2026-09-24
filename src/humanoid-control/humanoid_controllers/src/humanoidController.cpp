@@ -130,6 +130,10 @@ namespace humanoid_controller
       config.immediateUpdateOnNewTarget = true;
       config.referenceUpdatePeriodSec = 0.010;
       config.controlCycleSec = controlCycleSec;
+      // Humanoid startup defaults: 9/21 loose process-noise caps. Wheeled
+      // controller loads 80/400 from its own task.info instead.
+      config.kalmanProcessAccCap = 400.0;
+      config.kalmanProcessQCap = 1.6e4;
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_v_limit", config.kalmanVLimit);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
@@ -137,6 +141,10 @@ namespace humanoid_controller
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_vel", config.kalmanInitialVelVar);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.fast_update_r_scale", config.fastUpdateRScale);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.target_v_alpha", config.targetVAlpha);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_process_acc_cap",
+                            config.kalmanProcessAccCap);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_process_q_cap",
+                            config.kalmanProcessQCap);
       int immediate = config.immediateUpdateOnNewTarget ? 1 : 0;
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.immediate_update_on_new_target", immediate);
       config.immediateUpdateOnNewTarget = (immediate != 0);
@@ -440,7 +448,10 @@ namespace humanoid_controller
       ROS_INFO_STREAM("[humanoidController] arm trajectory interpolator enable="
                       << (enable_arm_traj_interpolator_ ? "true" : "false")
                       << " kalman_v_limit=" << interpConfig.kalmanVLimit
-                      << " target_v_alpha=" << interpConfig.targetVAlpha);
+                      << " target_v_alpha=" << interpConfig.targetVAlpha
+                      << " r_dq=" << interpConfig.kalmanMeasurementDqNoise
+                      << " process_acc_cap=" << interpConfig.kalmanProcessAccCap
+                      << " process_q_cap=" << interpConfig.kalmanProcessQCap);
     }
 
     // 存储并初始化 WBC 控制频率

@@ -213,6 +213,7 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
     ROS_ERROR("[WheelQuest3IkIncrementalROS] chestElbowHandPointOptSolverPtr_ is not initialized");
     return false;
   }
+  applyLivePathKeepOutRelax();
   latestLeftElbowTrackingActivation_ =
       std::clamp(input.leftElbowTrackingActivation, 0.0, 1.0);
   latestRightElbowTrackingActivation_ =
@@ -716,6 +717,8 @@ void WheelQuest3IkIncrementalROS::reset() {
   hasRightElbowPosInChest_ = false;
   hasLeftActiveChestAnchor_ = false;
   hasRightActiveChestAnchor_ = false;
+  resetLivePathElbowFade(true);
+  resetLivePathElbowFade(false);
   leftHandPosInChest_.setZero();
   rightHandPosInChest_.setZero();
   leftElbowPosInChest_.setZero();
@@ -2508,6 +2511,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   std::vector<std::string> frameNames = loadFrameNamesFromConfig(configJson);
   auto pointTrackConfig = loadPointTrackIKSolverConfigFromJson(configJson);
+  livePathElbowKeepOutClearanceNom_ = std::max(0.0, pointTrackConfig.waistElbowLateralClearance);
   oneStageIkEndEffectorPtr_ =
       std::make_unique<HighlyDynamic::WheelOneStageIKEndEffector>(&plant, frameNames, pointTrackConfig);
 
@@ -2957,6 +2961,15 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       std::clamp(wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
                  0.0,
                  wheelNaturalElbowGuideConfig_.waistSoftClearance);
+  nodeHandle_.param(naturalElbowParam + "live_path_fade_enable", livePathElbowFadeEnable_, true);
+  nodeHandle_.param(naturalElbowParam + "live_path_fade_vmin", livePathElbowFadeVMin_, 0.18);
+  nodeHandle_.param(naturalElbowParam + "live_path_fade_vmax", livePathElbowFadeVMax_, 0.55);
+  nodeHandle_.param(naturalElbowParam + "live_path_keepout_min_p1", livePathElbowKeepOutMinP1_, 0.04);
+  nodeHandle_.param(naturalElbowParam + "live_path_keepout_clearance", livePathElbowKeepOutClearance_, 0.03);
+  livePathElbowFadeVMin_ = std::max(0.0, livePathElbowFadeVMin_);
+  livePathElbowFadeVMax_ = std::max(livePathElbowFadeVMin_ + 1.0e-3, livePathElbowFadeVMax_);
+  livePathElbowKeepOutMinP1_ = std::max(0.0, livePathElbowKeepOutMinP1_);
+  livePathElbowKeepOutClearance_ = std::max(0.0, livePathElbowKeepOutClearance_);
   leftNaturalElbowGuide_ =
       std::make_unique<WheelNaturalElbowGuide>(l1_, l2_, wheelNaturalElbowGuideConfig_);
   rightNaturalElbowGuide_ =
@@ -2965,7 +2978,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       "[WheelQuest3IkIncrementalROS] Natural elbow circle: enabled=%s, "
       "gravity=%.2f, human=%.2f, soft_tracking_scale=%.2f, "
       "reach_margin=%.3f m, extension_fade_retraction=[%.3f, %.3f] m, "
-      "waist_avoidance=%s, waist_clearance=[full %.3f, soft %.3f] m",
+      "waist_avoidance=%s, waist_clearance=[full %.3f, soft %.3f] m, "
+      "live_path_fade=%s vmin=%.2f vmax=%.2f keep_tracking=true keepout minP1=%.3f clearance=%.3f",
       enableWheelNaturalElbowGuide_ ? "true" : "false",
       std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
       1.0 - std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
@@ -2975,7 +2989,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       wheelNaturalElbowGuideConfig_.extensionFadeFullDistance,
       wheelNaturalElbowGuideConfig_.waistAvoidanceEnabled ? "true" : "false",
       wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
-      wheelNaturalElbowGuideConfig_.waistSoftClearance);
+      wheelNaturalElbowGuideConfig_.waistSoftClearance,
+      livePathElbowFadeEnable_ ? "true" : "false",
+      livePathElbowFadeVMin_,
+      livePathElbowFadeVMax_,
+      livePathElbowKeepOutMinP1_,
+      livePathElbowKeepOutClearance_);
 
   // 读取进入增量控制时是否重置到默认位置
   nodeHandle_.param(
@@ -3159,6 +3178,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         std::make_unique<DrakeChestElbowHandPointOptSolver>(vClsInChest, vCrsInChest, l1_, l2_, &initFkResult);
     chestElbowHandPointOptSolverPtr_->setWeights(chestElbowHandWeightConfig_);
     chestElbowHandPointOptSolverPtr_->setBounds(chestElbowHandBoundsConfig_);
+    livePathElbowKeepOutMinP1Nom_ = std::max(0.0, chestElbowHandBoundsConfig_.minP1XyNorm);
 
     ROS_INFO("[WheelQuest3IkIncrementalROS] DrakeChestElbowHandPointOptSolver initialized with FK result (l1=%.4f, l2=%.4f)",
              l1_,

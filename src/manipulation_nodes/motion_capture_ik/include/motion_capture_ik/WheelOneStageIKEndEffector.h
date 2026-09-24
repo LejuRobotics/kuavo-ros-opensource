@@ -187,6 +187,12 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
     rightElbowTrackingActivation_ = std::clamp(rightActivation, 0.0, 1.0);
   }
 
+  void setWaistElbowLateralClearance(double clearance) {
+    if (pointTrackConfig_) {
+      pointTrackConfig_->waistElbowLateralClearance = std::max(0.0, clearance);
+    }
+  }
+
   // 锁下肢前两个关节（knee=q[0], leg=q[1]），只留 waist_pitch(q[2])/waist_yaw(q[3]) 随动。
   // 通过硬等式约束钉死 knee/leg，保证对应电机不动作。锁定值应取当前滤波关节角，避免跳变。
   void setKneeLegLock(double kneeQ, double legQ) {

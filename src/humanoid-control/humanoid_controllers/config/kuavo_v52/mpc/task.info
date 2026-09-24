@@ -905,6 +905,8 @@ armTrajInterpKinematicLimit
   fast_update_r_scale            0.1     ; 更信任位置量测，减少恒速模型在加速段的群延迟
   immediate_update_on_new_target true    ; 新目标到达后立即更新，不受周期门控阻塞
   target_v_alpha                 1.0     ; 关闭 targetV 去毛刺，避免再给斜坡加一层速度滞后
+  kalman_process_acc_cap         400.0   ; 人形独立：9/21 放宽后的过程噪声加速度上限
+  kalman_process_q_cap           1.6e4   ; 人形独立：过程噪声 Q 上限，降加速挥臂群延迟
 }
 
 contact_cst_st            0.06;

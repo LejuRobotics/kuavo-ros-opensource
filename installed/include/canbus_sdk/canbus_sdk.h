@@ -221,12 +221,11 @@ public:
     /**
      * @brief 注册一个实时发送源（RT slot）
      *
-     * 注册后，sender 线程每轮循环会**先**执行所有 RT 源回调（直写 CAN，绕过 ring 队列），
-     * 然后才从 ring 队列 pop 常规消息。RT 源回调在 sender 线程内执行，天然与 ring 消费串行，
-     * 不受 blocks_mutex_ 阻塞，也无需额外加锁。
+     * 注册后，sender 每条总线先跑 RT 源，立刻排几帧 ring，再扫下一条总线，
+     * 本轮最多再补排到 32 帧。与 ring 消费串行。
      *
-     * @note 用途：电机控制帧等 "latest-wins" 语义的高实时性消息，走 RT 直发路径；
-     *       灵巧手/使能/配置等请求-响应型消息继续走 ring，保证不丢帧。
+     * @note 用途：电机控制帧走 RT；灵巧手/使能走 ring。按总线交错，避免
+     *       canbus0 左手等完整电机 burst 才出队。
      * @param bus_id 目标总线 ID（由 openCanBus 返回）
      * @param callback RT 源回调：在 sender 线程内，负责取最新 cmd → 编码 CAN 帧 → 直写。
      *                 回调内必须调用 sendMessageRt()（或 bus 级直发），不得调用 sendMessage()（会入队，形成环）。

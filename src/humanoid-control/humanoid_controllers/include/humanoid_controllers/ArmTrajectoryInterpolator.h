@@ -29,6 +29,10 @@ public:
     double fastUpdateRScale{0.1};
     bool immediateUpdateOnNewTarget{true};
     double targetVAlpha{1.0};
+    // Process-noise caps. Humanoid and wheeled load different values from
+    // their own task.info; these defaults match the pre-2026-09-21 wheeled set.
+    double kalmanProcessAccCap{80.0};
+    double kalmanProcessQCap{400.0};
   };
 
   struct TargetSample {

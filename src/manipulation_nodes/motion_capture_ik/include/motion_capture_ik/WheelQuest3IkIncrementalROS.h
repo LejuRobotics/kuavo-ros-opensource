@@ -142,6 +142,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 防止 Quest 姿态在 grip 跟随期间单帧翻转，旋转 EE offset 后形成 Z 尖峰。
   void stabilizeGripQuaternion(bool leftArm, bool gripPressed, Eigen::Quaterniond& quat);
 
+  // 画圆/身侧快动时把自然肘目标收到当前肘在肩手圆上的相位（防翻面），
+  // 跟踪权保持，让肩肘跟着走；同时放松腰肘避让。
+  void updateLivePathElbowFade(bool active, bool leftArm, const Eigen::Vector3d& handPos);
+  void resetLivePathElbowFade(bool leftArm);
+  void applyLivePathKeepOutRelax();
+
   void captureGripReleaseSnapshot(bool leftGripFallingEdge,
                                   bool rightGripFallingEdge);
 
@@ -371,6 +377,24 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   double latestRightElbowTrackingActivation_ = 1.0;
   std::unique_ptr<WheelNaturalElbowGuide> leftNaturalElbowGuide_;
   std::unique_ptr<WheelNaturalElbowGuide> rightNaturalElbowGuide_;
+  bool livePathElbowFadeEnable_ = true;
+  double livePathElbowFadeVMin_ = 0.18;
+  double livePathElbowFadeVMax_ = 0.55;
+  double livePathElbowKeepOutMinP1_ = 0.04;
+  double livePathElbowKeepOutClearance_ = 0.03;
+  double livePathElbowKeepOutMinP1Nom_ = 0.12;
+  double livePathElbowKeepOutClearanceNom_ = 0.10;
+  struct LivePathElbowState {
+    bool hasPos = false;
+    Eigen::Vector3d lastPos = Eigen::Vector3d::Zero();
+    Eigen::Vector3d vel = Eigen::Vector3d::Zero();
+    Eigen::Vector3d handDelta = Eigen::Vector3d::Zero();
+    ros::Time lastStamp;
+    double speedFade = 0.0;
+    double fade = 0.0;
+  };
+  LivePathElbowState leftLivePathElbow_;
+  LivePathElbowState rightLivePathElbow_;
   bool drakeSolveUpdateChestOrientation_ = true;
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;

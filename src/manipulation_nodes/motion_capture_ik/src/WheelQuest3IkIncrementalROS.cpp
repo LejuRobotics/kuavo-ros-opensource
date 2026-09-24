@@ -695,11 +695,45 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       const double t = std::clamp(
           (handFromTorso - kNearBodyFadeFull) / (kNearBodyFadeStart - kNearBodyFadeFull), 0.0, 1.0);
       trackingActivation *= t * t * (3.0 - 2.0 * t);
+
+      LivePathElbowState& liveState = (side[0] == 'l') ? leftLivePathElbow_ : rightLivePathElbow_;
+      double liveFade = livePathElbowFadeEnable_ ? liveState.speedFade : 0.0;
+      const double lateral = (handTarget - torsoPosition).dot(torsoOutwardDirection);
+      constexpr double kLateralFadeStart = 0.28;
+      constexpr double kLateralFadeFull = 0.48;
+      if (livePathElbowFadeEnable_) {
+        double lateralFade = 0.0;
+        if (lateral >= kLateralFadeFull) {
+          lateralFade = 1.0;
+        } else if (lateral > kLateralFadeStart) {
+          lateralFade = (lateral - kLateralFadeStart) / (kLateralFadeFull - kLateralFadeStart);
+        }
+        liveFade = std::max(liveFade, lateralFade);
+      }
+      if (liveFade >= liveState.fade) {
+        liveState.fade = liveFade;
+      } else {
+        liveState.fade = std::max(liveFade, liveState.fade - 0.05);
+      }
+      const Eigen::Vector3d onCircleElbow = WheelNaturalElbowGuide::projectElbowToCircle(
+          shoulderPos, handTarget, currentElbow, l1_, l2_);
+      // Add the hand step after projection so a vertical circle can lift the
+      // elbow. Projecting first used to wipe that Z carry at the top.
+      const Eigen::Vector3d continuityElbow =
+          onCircleElbow + liveState.fade * liveState.handDelta;
+      const Eigen::Vector3d blendedElbow =
+          (1.0 - liveState.fade) * output.elbowPosition + liveState.fade * continuityElbow;
+      // Keep a tracking floor on the live path. Extension fade otherwise hits
+      // zero at the far/top of the circle and the elbow stops following.
+      trackingActivation = std::max(
+          trackingActivation, wheelNaturalElbowSoftTrackingScale_ * liveState.fade);
+
       ROS_INFO_THROTTLE(
           1.0,
           "[WheelNaturalElbow] %s radius=%.4f m, gravity_valid=%s, human_valid=%s, "
           "human_activation=%.2f, elbow_tracking_activation=%.3f, "
-          "waist_safety_activation=%.3f, waist_clearance=%.3f m, hand_reachable=%s",
+          "waist_safety_activation=%.3f, waist_clearance=%.3f m, live_path_fade=%.2f, "
+          "hand_reachable=%s",
           side,
           output.circleRadius,
           output.gravityDirectionValid ? "true" : "false",
@@ -708,8 +742,9 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
           trackingActivation,
           output.waistSafetyActivation,
           output.waistSignedClearance,
+          liveState.fade,
           output.handTargetReachable ? "true" : "false");
-      return output.elbowPosition;
+      return blendedElbow;
     }
 
     // Compatibility fallback when the new guide is explicitly disabled.
@@ -926,6 +961,19 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                              rightHandPos,
                              rightHandQuat);
 
+    // Waist/chest follow rotates the grip-world incremental target into the
+    // current commanded chest.  Clip relative to measured EE only after that
+    // remap; doing it beforehand puts the full waist yaw into Euler ZYX and
+    // rebuilds a discontinuous command (wrist twitch at ~28 deg/frame).
+    if (chestIncrementalUpdateEnabled_) {
+      if (input.leftRefActive) {
+        leftHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(true, leftHandQuat);
+      }
+      if (input.rightRefActive) {
+        rightHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(false, rightHandQuat);
+      }
+    }
+
     // 上面的 active/inactive 分支和胸部重映射都可能重新生成 handQuat，
     // 因此必须在最终写入 whole-body input 前再次做连续性检查。
     stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
@@ -939,6 +987,9 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (input.rightRefActive) {
       rightHandPos = rightHandPos - rightHandQuat.normalized() * rightEE2Link6Offset_;
     }
+
+    updateLivePathElbowFade(input.leftRefActive, true, leftHandPos);
+    updateLivePathElbowFade(input.rightRefActive, false, rightHandPos);
 
     // Active elbow references come from the current robot FK.  Map that point
     // from the current robot chest frame into the commanded chest frame before
@@ -1065,7 +1116,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
         modeChangeCycle_.leftChangingMaintainUpdated, modeChangeCycle_.rightChangingMaintainUpdated, frozen);
 
     auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-        latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
+        latestIncrementalResult_.getLatestIncrementalHandPose(
+            true, useIncrementalHandOrientation_, true, !chestIncrementalUpdateEnabled_);
 
     // 增量模块在 grip 上升沿可能已经把姿态滤波器推进到新的 VR 姿态。
     // 首帧仍使用切换前的参考，保证最终 EE 位置（尤其是旋转后的 offset）连续。
@@ -1081,8 +1133,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (rightGripTransferPending_ || rightGripOrientationHoldFrames_ > 0) {
       incrementalRightQuat = rightGripTransferHandQuat_;
     }
-    stabilizeGripQuaternion(true, currentLeftGripForTransfer, incrementalLeftQuat);
-    stabilizeGripQuaternion(false, currentRightGripForTransfer, incrementalRightQuat);
+    // Chest-on: incremental quat is still grip-world; previousGripQuat is the
+    // already-followed command.  Stabilizing here mixes those frames and
+    // rejects ~28 deg of waist yaw.  Continuity is checked after followChest.
+    if (!chestIncrementalUpdateEnabled_) {
+      stabilizeGripQuaternion(true, currentLeftGripForTransfer, incrementalLeftQuat);
+      stabilizeGripQuaternion(false, currentRightGripForTransfer, incrementalRightQuat);
+    }
 
     // Apply hand smoother in mode-changing cycle (it updates the position by reference).
     if (input.leftRefActive && modeChangeCycle_.leftHandCtrlModeChanged) {
@@ -1315,7 +1372,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   WholeBodyRefInput input = buildWholeBodyInput(leftGripReady, rightGripReady, frozen);
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
+      latestIncrementalResult_.getLatestIncrementalHandPose(
+          true, useIncrementalHandOrientation_, true, !chestIncrementalUpdateEnabled_);
 
   if (leftGripTransferPending_) {
     scaledLeftHandPos = leftGripTransferHandPos_;
@@ -1329,8 +1387,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   if (rightGripTransferPending_ || rightGripOrientationHoldFrames_ > 0) {
     incrementalRightQuat = rightGripTransferHandQuat_;
   }
-  stabilizeGripQuaternion(true, currentLeftGripPressed, incrementalLeftQuat);
-  stabilizeGripQuaternion(false, currentRightGripPressed, incrementalRightQuat);
+  // Chest-on: incremental quat is still grip-world; previousGripQuat is the
+  // already-followed command.  Stabilizing here mixes those frames and
+  // rejects ~28 deg of waist yaw.  Continuity is checked after followChest.
+  if (!chestIncrementalUpdateEnabled_) {
+    stabilizeGripQuaternion(true, currentLeftGripPressed, incrementalLeftQuat);
+    stabilizeGripQuaternion(false, currentRightGripPressed, incrementalRightQuat);
+  }
 
   recordTimestamp("applyWholeBodyAndSolveStart", loopSyncCount_);
   applyWholeBodyAndSolve(
@@ -1390,6 +1453,7 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
     leftActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
     hasLeftActiveChestAnchor_ = true;
     leftGripTransferAccepted_ = false;
+    resetLivePathElbowFade(true);
   }
 
   if (rightGripRisingEdge && rightGripTransferAccepted_ && !rightMaintainProcess) {
@@ -1406,6 +1470,7 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
     rightActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
     hasRightActiveChestAnchor_ = true;
     rightGripTransferAccepted_ = false;
+    resetLivePathElbowFade(false);
   }
 }
 
@@ -1544,6 +1609,87 @@ void WheelQuest3IkIncrementalROS::stabilizeGripQuaternion(bool leftArm,
     return;
   }
   previousQuat = quat;
+}
+
+void WheelQuest3IkIncrementalROS::resetLivePathElbowFade(bool leftArm) {
+  LivePathElbowState& state = leftArm ? leftLivePathElbow_ : rightLivePathElbow_;
+  state.hasPos = false;
+  state.lastPos.setZero();
+  state.vel.setZero();
+  state.handDelta.setZero();
+  state.lastStamp = ros::Time();
+  state.speedFade = 0.0;
+  state.fade = 0.0;
+}
+
+void WheelQuest3IkIncrementalROS::updateLivePathElbowFade(bool active, bool leftArm,
+                                                         const Eigen::Vector3d& handPos) {
+  LivePathElbowState& state = leftArm ? leftLivePathElbow_ : rightLivePathElbow_;
+  if (!livePathElbowFadeEnable_ || !active) {
+    resetLivePathElbowFade(leftArm);
+    return;
+  }
+
+  const ros::Time now = ros::Time::now();
+  if (!state.hasPos) {
+    state.lastPos = handPos;
+    state.lastStamp = now;
+    state.vel.setZero();
+    state.handDelta.setZero();
+    state.hasPos = true;
+    state.speedFade = 0.0;
+    return;
+  }
+
+  const double dt = (now - state.lastStamp).toSec();
+  if (dt < 1.0e-4 || dt > 0.05) {
+    state.lastPos = handPos;
+    state.lastStamp = now;
+    state.vel.setZero();
+    state.handDelta.setZero();
+    state.speedFade = 0.0;
+    return;
+  }
+
+  Eigen::Vector3d handDelta = handPos - state.lastPos;
+  const double deltaNorm = handDelta.norm();
+  constexpr double kMaxHandDeltaM = 0.04;
+  if (deltaNorm > kMaxHandDeltaM && deltaNorm > 1.0e-9) {
+    handDelta *= kMaxHandDeltaM / deltaNorm;
+  }
+  state.handDelta = handDelta;
+  const Eigen::Vector3d rawVel = handDelta / dt;
+  constexpr double kVelAlpha = 0.40;
+  state.vel = (1.0 - kVelAlpha) * state.vel + kVelAlpha * rawVel;
+  state.lastPos = handPos;
+  state.lastStamp = now;
+
+  const double speed = state.vel.norm();
+  const double vmin = livePathElbowFadeVMin_;
+  const double vmax = std::max(vmin + 1.0e-3, livePathElbowFadeVMax_);
+  if (speed >= vmax) {
+    state.speedFade = 1.0;
+  } else if (speed <= vmin) {
+    state.speedFade = 0.0;
+  } else {
+    state.speedFade = (speed - vmin) / (vmax - vmin);
+  }
+}
+
+void WheelQuest3IkIncrementalROS::applyLivePathKeepOutRelax() {
+  const double fade = std::max(leftLivePathElbow_.fade, rightLivePathElbow_.fade);
+  const double minP1 =
+      livePathElbowKeepOutMinP1Nom_ * (1.0 - fade) + livePathElbowKeepOutMinP1_ * fade;
+  const double clearance =
+      livePathElbowKeepOutClearanceNom_ * (1.0 - fade) + livePathElbowKeepOutClearance_ * fade;
+  if (chestElbowHandPointOptSolverPtr_) {
+    DrakeChestElbowHandBoundsConfig bounds = chestElbowHandBoundsConfig_;
+    bounds.minP1XyNorm = std::max(0.0, minP1);
+    chestElbowHandPointOptSolverPtr_->setBounds(bounds);
+  }
+  if (oneStageIkEndEffectorPtr_) {
+    oneStageIkEndEffectorPtr_->setWaistElbowLateralClearance(std::max(0.0, clearance));
+  }
 }
 
 void WheelQuest3IkIncrementalROS::fsmExit() {

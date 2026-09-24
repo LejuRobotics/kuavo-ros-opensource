@@ -482,6 +482,8 @@ armTrajInterpKinematicLimit
   fast_update_r_scale            1.0     ; 量测噪声缩放（1.0=常规更新）
   immediate_update_on_new_target true    ; 新目标到达后立即更新，不受周期门控阻塞
   target_v_alpha                 0.80    ; targetV去毛刺系数，1.0表示关闭；无新rawV时预测保持v常值
+  kalman_process_acc_cap         80.0    ; 轮臂独立：9/21 前过程噪声加速度上限，不跟人形放宽
+  kalman_process_q_cap           400.0   ; 轮臂独立：过程噪声 Q 上限，避免咬住 100Hz 速度台阶
 
   ; fhan 跟踪微分器参数（动力学约束 q/dq 平滑层）
   ; fhan_r: 等效加速度阈值 [rad/s^2]，越大跟踪越快但响应越硬
