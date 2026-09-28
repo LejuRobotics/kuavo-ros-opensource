@@ -7,10 +7,15 @@
             "yaw": [-85, 85],
             "pitch": [-25, 25]
         },
-        "smoothing_factor_comment": "平滑滤波系数，范围0-1，越大越平滑",
-        "smoothing_factor": 0.2,
-        "active_hand_threshold_comment": "主动手阈值(cm)，超过该阈值则认为手部在移动，越小越敏感",
-        "active_hand_threshold": 0.001
+        "smoothing_factor_comment": "低通系数，范围0-1。越小越平滑，越大越跟手",
+        "smoothing_factor": 0.5,
+        "active_hand_threshold_comment": "单帧位移超过该值(米)才算在动。双手同时动时要另一只手达到 switch_ratio 倍并持续 switch_confirm_sec 才换手",
+        "active_hand_threshold": 0.015,
+        "switch_ratio": 1.5,
+        "switch_confirm_sec": 0.15,
+        "release_sec": 0.40,
+        "max_yaw_rate_deg_s": 100.0,
+        "max_pitch_rate_deg_s": 50.0
     },
     "head_motion_range": {
         "yaw": [-90, 90],

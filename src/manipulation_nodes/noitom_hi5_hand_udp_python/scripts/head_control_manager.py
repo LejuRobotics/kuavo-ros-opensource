@@ -91,6 +91,21 @@ class HeadControlManager:
         self.right_hand_moving = False
         self.last_left_hand_pos = None
         self.last_right_hand_pos = None
+        # 双手同时动时保持当前手，另一只手要明显更快并持续一段时间才切换
+        self.switch_ratio = 2.0
+        self.switch_confirm_sec = 0.30
+        self.release_sec = 0.40
+        self.locked_hand = None
+        self.switch_candidate = None
+        self.switch_candidate_since = None
+        self.last_motion_time = None
+        self.last_detect_time = None
+        # 限制头的角速度，避免目标角跳变时一帧甩到位
+        self.max_yaw_rate_deg_s = 100.0
+        self.max_pitch_rate_deg_s = 50.0
+        self.last_smooth_time = None
+        # 手在头的正下方时方位角不稳定，低于该水平距离就保持当前头角
+        self.min_track_distance_xy = 0.08
         
         # 头部关节限制（度）（将从配置读取，这里只是占位符）
         self.yaw_limit = None
@@ -146,6 +161,17 @@ class HeadControlManager:
             threshold: 手部移动阈值（米）
         """
         self.active_hand_threshold = threshold
+
+    def set_switch_policy(self, switch_ratio, switch_confirm_sec, release_sec):
+        """双手同时移动时的切换策略。另一只手位移需达到 switch_ratio 倍并持续 switch_confirm_sec 才换手。"""
+        self.switch_ratio = max(1.0, float(switch_ratio))
+        self.switch_confirm_sec = max(0.0, float(switch_confirm_sec))
+        self.release_sec = max(0.0, float(release_sec))
+
+    def set_slew_rates(self, max_yaw_rate_deg_s, max_pitch_rate_deg_s):
+        """头部指令角速度上限，单位度/秒。"""
+        self.max_yaw_rate_deg_s = max(1.0, float(max_yaw_rate_deg_s))
+        self.max_pitch_rate_deg_s = max(1.0, float(max_pitch_rate_deg_s))
     
     def calculate_head_pose_from_hand(self, hand_tcp_pos, head_pos):
         """
@@ -166,9 +192,13 @@ class HeadControlManager:
         dy = hand_tcp_pos[1] - head_pos[1]
         dz = hand_tcp_pos[2] - head_pos[2]
         
+        distance_xy = math.sqrt(dx*dx + dy*dy)
+        # 手靠近头的正下方时 atan2 会在左右之间跳，保持上一帧头角
+        if distance_xy < self.min_track_distance_xy:
+            return self.target_yaw, self.target_pitch
+
         # 计算yaw和pitch（度）
         yaw = math.degrees(math.atan2(dy, dx))
-        distance_xy = math.sqrt(dx*dx + dy*dy)
         pitch = -math.degrees(math.atan2(dz, distance_xy))
         
         # 限制范围
@@ -220,17 +250,50 @@ class HeadControlManager:
             self.last_left_hand_pos = left_hand_pos
         if right_hand_pos is not None:
             self.last_right_hand_pos = right_hand_pos
-        
-        # 确定主动手（优先选择移动的手）
+
+        now = rospy.Time.now().to_sec()
+        # monitor 每帧会用同一位置再调用一次，第二次位移为 0，不能当成手停了
+        if self.last_detect_time is not None and (now - self.last_detect_time) < 0.005:
+            return self.locked_hand
+        self.last_detect_time = now
+
+        instant = None
         if self.left_hand_moving and not self.right_hand_moving:
-            return "left"
+            instant = "left"
         elif self.right_hand_moving and not self.left_hand_moving:
-            return "right"
+            instant = "right"
         elif self.left_hand_moving and self.right_hand_moving:
-            # 两只手都在移动，选择移动距离更大的
-            return "left" if left_movement > right_movement else "right"
-        else:
-            return None  # 没有主动手
+            if self.locked_hand == "left" and left_movement * self.switch_ratio >= right_movement:
+                instant = "left"
+            elif self.locked_hand == "right" and right_movement * self.switch_ratio >= left_movement:
+                instant = "right"
+            else:
+                instant = "left" if left_movement > right_movement else "right"
+
+        if instant is None:
+            if (self.locked_hand is not None and self.last_motion_time is not None
+                    and (now - self.last_motion_time) < self.release_sec):
+                return self.locked_hand
+            self.locked_hand = None
+            self.switch_candidate = None
+            return None
+
+        self.last_motion_time = now
+        if self.locked_hand is None or instant == self.locked_hand:
+            self.locked_hand = instant
+            self.switch_candidate = None
+            return self.locked_hand
+
+        if self.switch_candidate != instant:
+            self.switch_candidate = instant
+            self.switch_candidate_since = now
+            return self.locked_hand
+        if now - self.switch_candidate_since >= self.switch_confirm_sec:
+            self.locked_hand = instant
+            self.switch_candidate = None
+            rospy.loginfo("Active hand switched to %s", instant)
+            return self.locked_hand
+        return self.locked_hand
     
     def smooth_update(self, target_yaw, target_pitch):
         """
@@ -240,21 +303,37 @@ class HeadControlManager:
             target_yaw: 目标yaw（度）
             target_pitch: 目标pitch（度）
         """
-        # 模式切换时，重置滤波器状态以实现平滑过渡
+        # 模式切换不再把当前角直接赋成目标角，否则抬手第一帧会从 0 跳到几十度
         if self.mode_changed:
-            self.current_yaw = target_yaw
-            self.current_pitch = target_pitch
             self.mode_changed = False
-            rospy.loginfo("Head control mode transition: resetting filter state")
-        
-        # 一阶低通滤波
-        self.current_yaw = (1 - self.smoothing_factor) * self.current_yaw + \
-                          self.smoothing_factor * target_yaw
-        self.current_pitch = (1 - self.smoothing_factor) * self.current_pitch + \
-                            self.smoothing_factor * target_pitch
+            rospy.loginfo("Head control mode transition: slewing from current head angles")
+
+        now = rospy.Time.now().to_sec()
+        if self.last_smooth_time is None:
+            dt = 1.0 / 60.0
+        else:
+            dt = min(0.1, max(0.0, now - self.last_smooth_time))
+        self.last_smooth_time = now
+
+        # 一阶低通后再限速，双手切换或目标跳变时头不会一帧甩过去
+        filtered_yaw = (1 - self.smoothing_factor) * self.current_yaw + \
+                       self.smoothing_factor * target_yaw
+        filtered_pitch = (1 - self.smoothing_factor) * self.current_pitch + \
+                         self.smoothing_factor * target_pitch
+        self.current_yaw = self._slew(self.current_yaw, filtered_yaw, self.max_yaw_rate_deg_s * dt)
+        self.current_pitch = self._slew(self.current_pitch, filtered_pitch, self.max_pitch_rate_deg_s * dt)
         
         self.target_yaw = self.current_yaw
         self.target_pitch = self.current_pitch
+
+    @staticmethod
+    def _slew(current, target, max_step):
+        delta = target - current
+        if delta > max_step:
+            return current + max_step
+        if delta < -max_step:
+            return current - max_step
+        return target
     
     def update(self, left_hand_tcp_pos=None, right_hand_tcp_pos=None, head_pos=None):
         """
@@ -357,5 +436,11 @@ class HeadControlManager:
         self.last_right_hand_pos = None
         self.left_hand_moving = False
         self.right_hand_moving = False
+        self.locked_hand = None
+        self.switch_candidate = None
+        self.switch_candidate_since = None
+        self.last_motion_time = None
+        self.last_detect_time = None
+        self.last_smooth_time = None
         self.mode_changed = False
         rospy.loginfo("Head control manager reset")

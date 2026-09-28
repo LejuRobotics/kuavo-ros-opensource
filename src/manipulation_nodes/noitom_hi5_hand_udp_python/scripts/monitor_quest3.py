@@ -277,9 +277,18 @@ class Quest3BoneFramePublisher:
         smoothing_factor = head_control_config.get("smoothing_factor", 0.15)
         self.head_control_manager.set_smoothing_factor(smoothing_factor)
         
-        # 设置主动手检测阈值（从配置读取，默认0.02）
-        active_hand_threshold = head_control_config.get("active_hand_threshold", 0.02)
+        # 设置主动手检测阈值（米/帧，默认 1.5cm。旧配置 0.001 约 1mm，噪声就会换手）
+        active_hand_threshold = head_control_config.get("active_hand_threshold", 0.015)
         self.head_control_manager.set_active_hand_threshold(active_hand_threshold)
+        self.head_control_manager.set_switch_policy(
+            head_control_config.get("switch_ratio", 2.0),
+            head_control_config.get("switch_confirm_sec", 0.30),
+            head_control_config.get("release_sec", 0.40),
+        )
+        self.head_control_manager.set_slew_rates(
+            head_control_config.get("max_yaw_rate_deg_s", 100.0),
+            head_control_config.get("max_pitch_rate_deg_s", 50.0),
+        )
         
         rospy.loginfo(f"Head control manager initialized: mode={mode_str}, fixed_hand={fixed_hand}, "
                      f"yaw_limit={yaw_limit}, pitch_limit={pitch_limit}")
