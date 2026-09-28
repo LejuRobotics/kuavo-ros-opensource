@@ -68,6 +68,8 @@
     <arg name="use_external_odom_tf" default="$(arg real)"/>
     <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
     <arg name="enable_base_emergency_stop" default="true"/>
+    <!-- true: 电机启动回零和准备阶段都使用 config/arm_prepare_pose.yaml；false: 先回零，再走原有写死臂姿 -->
+    <arg name="use_custom_arm_prepare" default="false"/>
     <!-- modbus io bridge -->
     <arg name="with_modbus_io_bridge" default="true"/>
     <arg name="relay_port" default="/dev/kuavo_relay"/>
@@ -113,6 +115,10 @@
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
     <param name="enable_base_emergency_stop" value="$(arg enable_base_emergency_stop)"/>
+    <param name="use_custom_arm_prepare" type="bool" value="$(arg use_custom_arm_prepare)"/>
+    <group if="$(arg use_custom_arm_prepare)">
+      <rosparam command="load" file="$(find humanoid_controllers)/config/arm_prepare_pose.yaml" ns="arm_prepare"/>
+    </group>
     <param name="robot_type"      value="$(arg robot_type)"/>
     <param name="nodelet_robot_type"      value="$(arg nodelet_robot_type)"/>
     <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>

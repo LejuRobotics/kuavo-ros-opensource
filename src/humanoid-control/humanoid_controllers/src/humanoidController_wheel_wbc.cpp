@@ -438,6 +438,51 @@ namespace humanoidController_wheel_wbc
       mujoco_q[21] = -0.5236;
     }
 
+    // use_custom_arm_prepare:=true 时用 arm_prepare_pose.yaml 覆盖双臂，并按配置做往返摆动。
+    // false 或缺参时保持上面的写死臂姿，以及 l5/r5 在 1.5s 内 ±0.5236 的往返。
+    const int armStartIndex = 7 + lowJointNum_;
+    bool useCustomArmPrepare = false;
+    int swingJointIndex = 4;
+    double swingRad = 0.5236;
+    double preActionDesiredTime = 1.5;
+    controllerNh_.getParam("/use_custom_arm_prepare", useCustomArmPrepare);
+    if (useCustomArmPrepare)
+    {
+      std::vector<double> customArmPos;
+      const bool hasPose = controllerNh_.getParam("/arm_prepare/joint_pos", customArmPos);
+      if (!hasPose || static_cast<int>(customArmPos.size()) != armNum_)
+      {
+        ROS_ERROR("[humanoidControllerWheelWbc] use_custom_arm_prepare is true, but /arm_prepare/joint_pos is missing or size %zu != %d. Fallback to built-in pose.",
+                  customArmPos.size(), armNum_);
+        useCustomArmPrepare = false;
+      }
+      else
+      {
+        controllerNh_.param("/arm_prepare/swing_joint_index", swingJointIndex, 4);
+        controllerNh_.param("/arm_prepare/swing_rad", swingRad, 0.5236);
+        controllerNh_.param("/arm_prepare/duration", preActionDesiredTime, 1.5);
+        const int armDofPerSide = armNum_ / 2;
+        if (swingJointIndex < 0 || swingJointIndex >= armDofPerSide)
+        {
+          ROS_ERROR("[humanoidControllerWheelWbc] /arm_prepare/swing_joint_index=%d out of range [0, %d). Fallback to 4 (zarm_*5).",
+                    swingJointIndex, armDofPerSide);
+          swingJointIndex = 4;
+        }
+        if (!(preActionDesiredTime > 0.0) || !std::isfinite(preActionDesiredTime) || !std::isfinite(swingRad))
+        {
+          ROS_ERROR("[humanoidControllerWheelWbc] invalid /arm_prepare duration or swing_rad. Fallback to 1.5s and 0.5236 rad.");
+          preActionDesiredTime = 1.5;
+          swingRad = 0.5236;
+        }
+        for (int i = 0; i < armNum_; ++i)
+        {
+          mujoco_q[armStartIndex + i] = customArmPos[i];
+        }
+        ROS_INFO("[humanoidControllerWheelWbc] custom arm prepare enabled: swing_joint_index=%d, swing_rad=%.4f, duration=%.2f",
+                 swingJointIndex, swingRad, preActionDesiredTime);
+      }
+    }
+
     std::vector<double> robot_init_state_param;
     for (int i = 0; i < mujoco_q.size(); i++)
     {
@@ -445,7 +490,6 @@ namespace humanoidController_wheel_wbc
     }
 
     std::vector<double> stand_arm_joint_state_vector;
-    int armStartIndex = 7 + lowJointNum_;
     for (int i = 0; i < armNum_; i++)
     {
       stand_arm_joint_state_vector.push_back(mujoco_q(armStartIndex + i));
@@ -454,9 +498,20 @@ namespace humanoidController_wheel_wbc
     /******************************** 双臂初始动作 ****************************************/
     vector_t startAction = mujoco_q.tail(manipulatorModelInfo_.armDim + headNum_).head(manipulatorModelInfo_.armDim);
     vector_t targetAction = startAction;
-    targetAction.tail(armNum_)[4] = startAction.tail(armNum_)[4] - 0.5236;
-    targetAction.tail(armNum_/2)[4] = startAction.tail(armNum_/2)[4] + 0.5236;
-    double preActionDesiredTime = 1.5;
+    if (useCustomArmPrepare)
+    {
+      // 左臂减去 swing_rad，右臂加上 swing_rad，0.5*duration 到达中点，duration 回到起点。
+      targetAction.tail(armNum_)[swingJointIndex] =
+          startAction.tail(armNum_)[swingJointIndex] - swingRad;
+      targetAction.tail(armNum_ / 2)[swingJointIndex] =
+          startAction.tail(armNum_ / 2)[swingJointIndex] + swingRad;
+    }
+    else
+    {
+      targetAction.tail(armNum_)[4] = startAction.tail(armNum_)[4] - 0.5236;
+      targetAction.tail(armNum_/2)[4] = startAction.tail(armNum_/2)[4] + 0.5236;
+      preActionDesiredTime = 1.5;
+    }
     initialPreTargetActions(startAction, targetAction, preActionDesiredTime); // 设置机器人启动初始动作
     /************************************************************************************/
 
