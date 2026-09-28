@@ -1,4 +1,4 @@
-prefix=/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed
+prefix=/media/data_old/gitlab-runner/builds/8rHoW4Dt/0/highlydynamic/kuavo-ros-control/installed
 
 Name: kuavo_common
 Description: Description of kuavo_common
