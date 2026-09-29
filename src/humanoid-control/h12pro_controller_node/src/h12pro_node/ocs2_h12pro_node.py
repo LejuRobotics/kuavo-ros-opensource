@@ -279,6 +279,9 @@ class H12ToJoyControllerNode:
         self.g11_torso_group = None       # None/xz(394)/yawpitch(402)
         self.g11_leg_pulse = {}           # {btn_idx: 截止时间} 一次性边沿脉冲(切模式/复位)
 
+        # ===== G11 步态切换桥(屏幕 → /joy → C++ 双足控制栈) =====
+        self.g11_gait_pulse = {}
+
         if self.is_wheel:
             rospy.set_param('/joystick_type', 'h12')
             rospy.loginfo("[G12] Wheel mode enabled, ROBOT_VERSION=%s, joystick_type=h12", robot_version)
@@ -353,6 +356,9 @@ class H12ToJoyControllerNode:
         # 状态机 g11_* 表; /joy 仅透传摇杆 axes, 不执行 G12 轮臂按钮/急停逻辑。
         if _controller_type == "g11":
             self._process_default_channels()
+            # G11 步态切换桥: 屏幕切模式后补发按钮脉冲
+            if self.g11_gait_pulse:
+                self._apply_g11_gait_buttons()
             # G11 轮臂下肢桥: 屏幕选躯干组后锁存 GUIDE/M1(模拟 G/H 按住), 驱动
             # C++ MobileManipulatorJoyCommandNode 的躯干控制; 一次性边沿也在此打。
             if self.is_wheel:
@@ -400,6 +406,39 @@ class H12ToJoyControllerNode:
     G12_BTN_C = 2       # 切 TORSO_CONTROL 用的按键(X)
     G12_BTN_B = 1       # 切 CMD_VEL_WORLD 用的按键(B)
     G12_BTN_A = 3       # 切 CMD_VEL 用的按键(Y)
+
+    # ===== G11 步态切换桥(屏幕 → /joy → C++ humanoid_joy_control_auto_gait_with_vel) =====
+    G11_GAIT_BUTTON_MAP = {
+        "stance": 0,      # BUTTON_STANCE -> publishGaitTemplate("stance")
+        "trot": 1,        # BUTTON_TROT   -> publishGaitTemplate("trot")
+        "rl_control": 2,  # BUTTON_RL     -> switchToNextController()
+        "walk": 3,        # BUTTON_WALK   -> publishGaitTemplate("walk")
+    }
+    G11_GAIT_PULSE = G12_BUTTON_PULSE
+
+    def queue_g11_gait_pulse(self, trigger: str) -> bool:
+        """登记一次步态切换按钮脉冲(由屏幕状态机路径调用)。"""
+        btn_idx = self.G11_GAIT_BUTTON_MAP.get(trigger)
+        if btn_idx is None:
+            return False
+        self.g11_gait_pulse[btn_idx] = time.time() + self.G11_GAIT_PULSE
+        rospy.loginfo(
+            f"[G11Gait] trigger '{trigger}' -> /joy buttons[{btn_idx}] "
+            f"脉冲 {self.G11_GAIT_PULSE:.2f}s")
+        return True
+
+    def _apply_g11_gait_buttons(self) -> None:
+        """把未过期的步态切换脉冲写进 /joy buttons, 并把摇杆轴清零。"""
+        now = time.time()
+        active = False
+        for btn_idx, deadline in list(self.g11_gait_pulse.items()):
+            if now < deadline:
+                self.joy_msg.buttons[btn_idx] = 1
+                active = True
+            else:
+                del self.g11_gait_pulse[btn_idx]
+        if active:
+            self.joy_msg.axes = [0.0] * 8
 
     # 一次性边沿脉冲保持时长(秒): 与 G12 _button_pulse_until 同策略,
     # 保证下游 C++ 边沿检测可靠收到(50Hz 限频下不丢帧)
@@ -712,6 +751,8 @@ class H12PROControllerNode:
         self.screen_cmd_enabled = (_controller_type == "g11" and _G11_SCREEN_AVAILABLE)
         self.screen_parser = g11proto.ScreenCmdParser() if (g11proto is not None) else None
         self.screen_prev_page = -1
+        # 屏幕指令“占用窗口”截止时间(见 _handle_g11_screen / _handle_normal_transitions)
+        self._screen_cmd_hold_until = 0.0
         # 上次已上报的计数 (cmd_drops, state_holds, unknown_cmds, hidden_cmds)
         self._g11_parser_counters = None
         self._g11_parser_counters_at = 0.0   # 上次上报时间(自管节流, 见上报方法)
@@ -985,6 +1026,10 @@ class H12PROControllerNode:
     # 协议计数上报周期(秒)
     G11_COUNTER_REPORT_PERIOD = 5.0
 
+    # 屏幕指令“占用窗口”(秒): CH15 非空闲起算, 屏幕端脉冲保持 600ms + 回空闲间隙
+    # 80ms, 再留余量给 H 松开沿到达。窗口内状态机侧的 H 系组合一律跳过。
+    SCREEN_H_SUPPRESS_S = 1.0
+
     def _report_g11_parser_counters(self) -> None:
         """上报协议库诊断计数(三路通道异常/未知码/未启用码), 有变化时打印。
 
@@ -1041,6 +1086,18 @@ class H12PROControllerNode:
             page_val = int(msg.channels[13])    # CH14 页面码(接收值)
             cmd_val = int(msg.channels[14])     # CH15 功能码(接收值)
             cfg_val = int(msg.channels[15])     # CH16 设置位(接收值)
+
+            # CH15 非空闲 = 屏幕正在下发一条指令 -> 开启“屏幕占用窗口”。
+            # 为什么: 实体 H 有两个消费者 —— 屏幕端(弹窗确认, 在 H **按下沿**即发
+            # CH15)与机器人状态机(SW1+SW2+H 组合, 在 H **松开**时才产出 H_PRESS)。
+            # 两条通路互不知情: 拨杆位置恰好处于切换瞬间时, 一次按 H 会既执行屏幕
+            # 动作又触发状态转换。屏幕端的拨杆判定受采样周期限制, 无法从根上排除;
+            # 这里以“屏幕命令正在下发”为准绳把状态机侧的 H 系组合屏蔽掉, 保证
+            # 一次 H 只有一个消费者。
+            # 注: 急停(emergency_stop)在 _handle_state_transitions 里先于本闸门判定,
+            #     不受影响。
+            if cmd_val != g11proto.PAGE_IDLE_RECV:
+                self._screen_cmd_hold_until = time.time() + self.SCREEN_H_SUPPRESS_S
 
             hit = self.screen_parser.update(page_val, cmd_val, cfg=cfg_val)
             self._report_g11_parser_counters()
@@ -1159,10 +1216,11 @@ class H12PROControllerNode:
 
             avail = self.robot_state_machine.machine.get_triggers(cur_state)
             if trigger not in avail:
-                rospy.logwarn(
-                    f"[G11Screen] trigger '{trigger}' not available from '{cur_state}' "
-                    f"({func_name})")
-                return
+                if self._g11_autostep_mode(cur_state, trigger) is None:
+                    rospy.logwarn(
+                        f"[G11Screen] trigger '{trigger}' not available from '{cur_state}' "
+                        f"({func_name})")
+                    return
 
             kwargs = {
                 "trigger": trigger,
@@ -1304,6 +1362,52 @@ class H12PROControllerNode:
         except Exception as e:
             rospy.logerr_throttle(5.0, f"[G11Claw] publish failed: {e}")
 
+    def _g11_publish_gait_feedback(self, trigger: str) -> None:
+        """屏幕切模式后补发步态切换脉冲(对齐实体键路径的状态反馈通道)。"""
+        try:
+            if not self.h12_to_joy_node.queue_g11_gait_pulse(trigger):
+                return
+            neutral_msg = h12proRemoteControllerChannel()
+            neutral_msg.channels = tuple(Config.get_default_channels())
+            self.h12_to_joy_node.update_channels_msg(msg=neutral_msg)
+            self.h12_to_joy_node.process_channels(publish_immediately=True)
+        except Exception as e:
+            rospy.logerr(f"[G11Gait] publish gait pulse failed: {e}")
+
+    def _g11_autostep_mode(self, cur_state: str, trigger: str) -> Optional[str]:
+        """屏幕「ready_stance 补步」决策(纯查询, 不迁移状态)。"""
+        machine = self.robot_state_machine.machine
+        if cur_state != "ready_stance":
+            return None
+        if trigger in machine.get_triggers(cur_state):
+            return None
+        if "stance" not in machine.states:
+            return None
+        if "ready_stance" not in machine.get_triggers(cur_state):
+            return None
+        if trigger == "stance":
+            return "satisfied"
+        return "step" if trigger in machine.get_triggers("stance") else None
+
+    def _g11_autostep_to_stance(self, trigger: str,
+                                kwargs: Dict[str, Any]) -> bool:
+        state = self.robot_state_machine.state
+        mode = self._g11_autostep_mode(state, trigger)
+        if mode is None:
+            return False
+        rospy.logwarn(
+            f"[G11Screen] FSM 处于 {state}(终端启动初态), 自动补一步进入 stance "
+            f"后{'直接满足' if mode == 'satisfied' else '再'}执行 '{trigger}'")
+        self.robot_state_machine.ready_stance(
+            trigger="ready_stance", source=state, real_robot=self.real_robot)
+        if self.robot_state_machine.state == state:
+            raise RuntimeError(
+                f"补步未生效(condition is_real_launch_in_ready_stance 未通过), "
+                f"仍停留在 {state}")
+        # 补步后源状态变了, 否则回调里 print_state_transition 的 source 是错的
+        kwargs["source"] = self.robot_state_machine.state
+        return mode == "satisfied"
+
     def _g11_state_transition_task(self, trigger: str, kwargs: Dict[str, Any],
                                    func_name: str = "") -> None:
         """带锁线程池执行状态机 trigger + 状态持久化(不构造实体按键反馈消息)。"""
@@ -1311,9 +1415,24 @@ class H12PROControllerNode:
             with self._state_transition_lock:
                 before = "<unknown>"
                 try:
-                    before = self.robot_state_machine.state
                     self._state_transition_executing = True
-                    getattr(self.robot_state_machine, trigger)(**kwargs)
+                    step_satisfied = False
+                    try:
+                        step_satisfied = self._g11_autostep_to_stance(trigger, kwargs)
+                    except Exception as e:
+                        print("========== 状态切换失败 ==========", flush=True)
+                        print(f"调用功能: {func_name or trigger}", flush=True)
+                        print(f"上一个模式: {self.robot_state_machine.state}", flush=True)
+                        print("当前模式: 执行失败", flush=True)
+                        print(f"失败原因: {e}", flush=True)
+                        print("==================================", flush=True)
+                        rospy.logerr(
+                            f"[G11Screen] ready_stance 补步失败 '{trigger}': {e}; "
+                            f"终端启动需先按 o 使能硬件")
+                        return
+                    before = self.robot_state_machine.state
+                    if not step_satisfied:
+                        getattr(self.robot_state_machine, trigger)(**kwargs)
                     after = self.robot_state_machine.state
                     print("========== 模式切换 ==========", flush=True)
                     print(f"调用功能: {func_name or trigger}", flush=True)
@@ -1331,6 +1450,8 @@ class H12PROControllerNode:
                         rospy.set_param(LAST_STATE_PARAM, self.robot_state_machine.state)
                     except Exception:
                         pass
+                    if trigger in Config.VALID_STATES:
+                        self._g11_publish_gait_feedback(trigger)
                     # 离开 stance 自动关闭头部控制并清 latch(与实体键路径口径一致;
                     # 否则屏幕切到 walk 等状态后 head_control_mode 会残留为 True)
                     if self.robot_state_machine.state != "stance" and self.head_control_mode:
@@ -1597,11 +1718,23 @@ class H12PROControllerNode:
                 return
 
         triggers = self.robot_state_machine.machine.get_triggers(current_state)
-        
+
+        # 屏幕正在下发指令(见 _handle_g11_screen 里 _screen_cmd_hold_until 的说明):
+        # 本帧含 H 系键状态的组合跳过 —— 一次按 H 只允许一个消费者。
+        # 屏幕端在 H 按下沿发 CH15, 机器人状态机的 H_PRESS 在 H 松开时才产出,
+        # 两者时间上差一个“按压时长”, 所以这个窗口能稳定盖住松开沿。
+        # 只跳 H 系组合(不是 return): 其它不含 H 的组合本帧照常处理。
+        screen_holding_h = time.time() < self._screen_cmd_hold_until
+
         for trigger in self._config["state_transitions"].get(current_state, {}):
             trigger_keys = set(self._config["state_transitions"][current_state][trigger])
             
             if not trigger_keys.issubset(key_combination):
+                continue
+
+            if screen_holding_h and any(k.startswith("H_") for k in trigger_keys):
+                rospy.logdebug(
+                    f"[StateTransition] '{trigger}' skipped: screen cmd is holding H")
                 continue
 
             if trigger == "toggle_head_control":

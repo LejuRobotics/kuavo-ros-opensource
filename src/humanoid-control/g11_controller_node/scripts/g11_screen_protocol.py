@@ -11,8 +11,10 @@
       常用功能页(人型) / 动作相关页(轮臂) 1162 (COMMON)
       特殊功能页(人型) 1170 (SPECIAL)
       下肢三级页 1178 (LEG) / VR 三级页 1186 (VR)
-  - CH15 功能码(脉冲, 屏幕 ~800ms 后自动复位 1002): 按页分区
-      下肢 362~402 / VR 522~546 / 常用功能 682~722 / 特殊功能 842~898 / 硬件启动 282
+  - CH15 功能码(脉冲, 屏幕保持 ~600ms 后自动回空闲 1002): 按页分区
+      下肢 362~402 / VR 522~546 / 常用功能 682~762 / 特殊功能 842~906 / 硬件启动 282
+      注: 屏幕端发新命令前会先把 CH15 拉回空闲并等接收端看到, 保证每次都有干净的
+          上升沿(否则快速连点两条命令时后一条会被静默丢弃)。
 
 解析策略:
   - CH15 上升沿(空闲1002 -> 非空闲码)触发一次
@@ -71,7 +73,7 @@ def decode_cfg(cfg: int):
 # ---------- 功能码(接收值) -> (功能名, 类型, 目标) ----------
 #   type: "trigger" = 调状态机 trigger(getattr robot_state_machine)
 #         "head"    = 翻转头部控制模式(特殊处理)
-#         "action"  = 自定义动作(常用功能页 1~3 -> customize_action_*)
+#         "action"  = 自定义动作(常用功能页 1~8 -> customize_action_*)
 #         "boot"    = 硬件启动(人型/轮臂二级菜单下发, 目标 initial_pre)
 #         "skip"    = 暂不处理(仅日志)
 #
@@ -89,8 +91,16 @@ SCREEN_CMD_MAP = {
     706: ("自定义动作1",   "action",  "customize_action_RR_A"),
     714: ("自定义动作2",   "action",  "customize_action_RR_B"),
     722: ("自定义动作3",   "action",  "customize_action_RR_C"),
+    # 自定义动作 4~8: 屏幕端「更多自定义动作」下拉框(遥控设置开关默认关)。
+    # 延续 1~3 的槽位顺序, 对应官方 8 组自定义动作(右臂 RR_A~D + 左臂 LL_A~D)。
+    # 默认在 customize_config.json 里留空, 需用户自行配置动作/语音。
+    730: ("自定义动作4",   "action",  "customize_action_RR_D"),
+    738: ("自定义动作5",   "action",  "customize_action_LL_A"),
+    746: ("自定义动作6",   "action",  "customize_action_LL_B"),
+    754: ("自定义动作7",   "action",  "customize_action_LL_C"),
+    762: ("自定义动作8",   "action",  "customize_action_LL_D"),
     # --- 特殊功能页 (CH14=1170, 仅人型) ---
-    # 屏幕端 SPECIAL_SHOW_ALL=0, 页内只创建「航空箱起身/坐下」2 个按钮,
+    # 屏幕端 SPECIAL_SHOW_ALL=0, 页内只创建「航空箱起身/坐下/打太极」3 个按钮,
     # 前 6 项不发码 → 机器人端注释保留(不删), 恢复时屏幕端置 1、此处取消注释即可。
     # 842: ("进入VMP",      "trigger", "vmp_controller"),
     # 850: ("退出VMP",      "trigger", "exit_vmp_controller"),
@@ -100,6 +110,11 @@ SCREEN_CMD_MAP = {
     # 882: ("头部控制",     "head",    "toggle_head_control"),
     890: ("航空箱起身",   "trigger", "sit_to_stand"),
     898: ("航空箱坐下",   "trigger", "sit_down"),
+    # 打太极: 与「自定义动作4」(730) **同一槽位 RR_D** —— 打太极是常用动作,
+    # 特殊功能页给个显眼按钮, 两个入口做同一件事。
+    # 需在 customize_config.json 的 customize_action_RR_D 里配置太极动作文件
+    # (或 "type":"shell" 调太极播放脚本)。
+    906: ("打太极",       "action",  "customize_action_RR_D"),
     # --- VR 页 (CH14=1186) ---
     522: ("进入VR",      "trigger", "start_vr_remote_control"),
     530: ("退出VR",      "trigger", "stop_vr_remote_control"),
@@ -116,10 +131,14 @@ SCREEN_CMD_MAP = {
     402: ("躯干组2-旋转俯仰", "wheel_leg", "torso_group_yawpitch"),  # 右杆左右vyaw/左杆上下vpitch
 }
 
-# 常用功能页自定义动作(1~3): 抱拳 / 打招呼(挥手) / 点赞
+# 8 组自定义动作(常用功能页 1~8): 对应官方 customize_action_RR_A~D / LL_A~D。
+# 屏幕端动作 1~3 已预置为抱拳/打招呼/点赞; 4~8 留空待用户配置。
+# 注: 本常量当前**无人引用**(状态机按 trigger 名直接驱动), 保留作参考/校验用。
 ACTION_TRIGGERS = [
     "customize_action_RR_A", "customize_action_RR_B",
-    "customize_action_RR_C",
+    "customize_action_RR_C", "customize_action_RR_D",
+    "customize_action_LL_A", "customize_action_LL_B",
+    "customize_action_LL_C", "customize_action_LL_D",
 ]
 
 # 屏幕端 SPECIAL_SHOW_ALL=0 时不会发出的"已知但未启用"功能码(特殊功能页前 6 项:
@@ -139,11 +158,13 @@ def page_of_cmd(cmd: int):
         return PAGE_LEG_RECV       # 下肢 1178 (362本地系/370世界系/378躯干/386复位/394组1/402组2)
     if 522 <= cmd <= 546:
         return PAGE_VR_RECV        # VR 1186
-    if 682 <= cmd <= 722:
-        return PAGE_COMMON_RECV    # 常用功能 1162 (682踏步/690站立/698切换MPCAMP/706~722自定义动作1~3)
-    if 890 <= cmd <= 898:
-        return PAGE_SPECIAL_RECV   # 特殊功能 1170 (890航空箱起身/898航空箱坐下;
-                                   #   842~882 前6项屏幕已隐藏, 暂不注册/不校验)
+    if 682 <= cmd <= 762:
+        return PAGE_COMMON_RECV    # 常用功能 1162 (682踏步/690站立/698切换MPCAMP
+                                   #   /706~762 自定义动作1~8)
+    if 842 <= cmd <= 906:
+        return PAGE_SPECIAL_RECV   # 特殊功能 1170 (890航空箱起身/898航空箱坐下/
+                                   #   906打太极; 842~882 前6项屏幕已隐藏,
+                                   #   暂不注册/不校验, 恢复时取消注释即可)
     return None
 
 

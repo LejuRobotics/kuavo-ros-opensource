@@ -53,7 +53,31 @@ int main(int argc, char **argv) {
     // （同一帧重复发布 5 次），高频空发持续占用订阅方（joy_node / nodelet_manager）
     // 的 CPU 与网络带宽。50Hz（20ms 一帧）对手柄控制无感知。
     ros::Rate rate(50);
-    
+
+    /* ===== 断链后的"停发"策略 =====
+     * 遥控器断链后驱动会把通道复位为默认值并置 sbus_state=0，但本节点会**一直**
+     * 以 50Hz 继续发这批复位帧。若此时话题上还存在外部虚拟手柄(测试/联调)的
+     * sbus_state=1 帧，订阅方就会在"复位帧/正常帧"之间交替 -> 机器人走停走停。
+     *
+     * 这里改成：断链后先继续发布 disconnect_publish_frames 帧(默认 50 帧 = 1s)，
+     * 让订阅方有机会收到 sbus_state=0 并触发各自的断连保护
+     * （ocs2_h12pro_node 收到 state=0 会立即补一帧中性通道让摇杆回中），
+     * 之后停止发布，把 /h12pro_channel 让给虚拟手柄独占。
+     *
+     * 关键：只"停发"、**不退出进程**。monitor_ocs2_h12pro.py 的 PING_NODES 含
+     * /h12pro_channel_publisher，进程一旦退出会被判定异常 -> stop_tree 后重新拉起，
+     * 又回到"持续发布"的状态（这正是手动杀本节点清不干净的原因）。
+     *
+     * 遥控器重新连上(sbus_state 回到 1)后自动恢复发布。
+     */
+    int disconnect_publish_frames = 50;
+    nh.param<int>("disconnect_publish_frames", disconnect_publish_frames, 50);
+    if (disconnect_publish_frames < 1) {
+        disconnect_publish_frames = 1;
+    }
+    int disconnected_frames = 0;   // 连续收到的断链帧数(仅在发布态累计)
+    bool publishing = true;        // 当前是否在往话题上发帧
+
     while (ros::ok()) {
         recSbusData();
         // 遥控器断连/关机检测: 驱动内 setitimer 50ms 累计, checkSbusTimeOut
@@ -79,7 +103,31 @@ int main(int argc, char **argv) {
             channel_msg.channels[15] = SbusRxData.channel_16;
         }
         channel_msg.sbus_state = SbusRxData.sbus_state;
-        pub_channel.publish(channel_msg);
+
+        // 断链: 先补发若干帧(让订阅方收到 sbus_state=0 并回中), 之后停发让出话题
+        if (SbusRxData.sbus_state == 0) {
+            if (publishing) {
+                ++disconnected_frames;
+                if (disconnected_frames > disconnect_publish_frames) {
+                    publishing = false;
+                    ROS_WARN("Remote controller disconnected: sent %d reset frames, "
+                             "stop publishing /h12pro_channel to leave the topic to "
+                             "an external/virtual joystick. (node stays alive)",
+                             disconnected_frames - 1);
+                }
+            }
+        } else {
+            // 重新连上: 恢复发布
+            if (!publishing) {
+                publishing = true;
+                ROS_INFO("Remote controller reconnected: resume publishing /h12pro_channel");
+            }
+            disconnected_frames = 0;
+        }
+
+        if (publishing) {
+            pub_channel.publish(channel_msg);
+        }
         rate.sleep();
     }
 

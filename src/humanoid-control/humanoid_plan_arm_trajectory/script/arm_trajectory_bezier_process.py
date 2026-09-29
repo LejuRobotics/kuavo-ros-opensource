@@ -7,6 +7,7 @@ import math
 import re
 import time
 import threading
+import xmlrpc.client
 import numpy as np
 import os
 import sys
@@ -98,6 +99,8 @@ class ArmTrajectoryBezierDemo:
         # preflight 阶段失败的请求误改其他控制器现有的手臂模式。
         self._action_owns_phase2 = False
         self._action_owns_external_arm_mode = False
+        # nodelet_manager 存活探测的成功缓存截止时间(见 check_nodelet_manager_alive)
+        self._nodelet_alive_until = 0.0
         self.interrupt_flag  = False
         self.enable_control_state_ = True  # 软暂停状态，默认 enable=1
         self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印
@@ -1945,99 +1948,129 @@ class ArmTrajectoryBezierDemo:
             rospy.logerr("Planner service call failed: %s", e)
             return False
 
+    # ===== nodelet_manager 存活探测(预检) =====
+    # 原来用两个 rosnode 子进程(rosnode list + rosnode ping -c 1), 实测各约 0.28s,
+    # 合计 ~0.55s, 且 ping 失败要重试并 sleep 0.5s(最坏让一次动作迟迟不开始)。
+    # 这里改为进程内等价实现: rosnode ping 内部做的就是 get_api_uri + node.getPid,
+    # 因此 lookupNode + getPid 与它语义一致(已实测: 在线节点 ~2ms, 且能识别"已注册但
+    # 已崩溃"的节点 —— getPid 会连接失败)。
+    NODELET_NODE_NAME = '/nodelet_manager'
+    # 成功结果的缓存时长(秒)。只缓存成功: 失败结果不缓存, 否则 nodelet_manager
+    # 重启后会在 TTL 内继续被拒。置 0 即完全关闭缓存(每次探测约 1~3ms, 代价可忽略)。
+    NODELET_ALIVE_TTL = 5.0
+    # 节点 XMLRPC 连接超时(秒)。旧实现 rosnode ping 是 3s 且会重试。
+    NODELET_PING_TIMEOUT = 1.0
+
+    class _TimeoutTransport(xmlrpc.client.Transport):
+        """给 XMLRPC 调用加连接级超时。
+
+        py3.8 的 Transport 不接受 timeout 参数, 只能覆写 make_connection;
+        也不能用 socket.setdefaulttimeout —— 本进程还有轨迹发布线程与其它
+        服务调用, 进程级超时会波及它们。
+        """
+
+        def __init__(self, timeout):
+            super().__init__()
+            self._timeout = timeout
+
+        def make_connection(self, host):
+            conn = super().make_connection(host)
+            conn.timeout = self._timeout
+            return conn
+
+    def _nodelet_liveness_check(self, uri):
+        """按 URI 真正连接节点并取 pid(rosnode ping 的核心动作)。"""
+        try:
+            resp = xmlrpc.client.ServerProxy(
+                uri, transport=self._TimeoutTransport(self.NODELET_PING_TIMEOUT)
+            ).getPid(rospy.get_name())
+        except Exception as e:
+            rospy.logwarn(f"nodelet_manager 无法通信(可能已崩溃): {e}")
+            return False
+        if resp[0] == 1:
+            rospy.loginfo("nodelet_manager 节点正常运行")
+            self._nodelet_alive_until = time.time() + self.NODELET_ALIVE_TTL
+            return True
+        rospy.logwarn(f"nodelet_manager getPid 失败: {resp}")
+        return False
+
     def check_nodelet_manager_alive(self):
-        """检查 nodelet_manager 节点是否真正在线且可通信
-        
+        """检查 nodelet_manager 节点是否真正在线且可通信(进程内实现, 无子进程)。
+
+        等价替换: rosnode list -> master.lookupNode(); rosnode ping -> 节点 getPid()。
+        两者正是 rosnode ping 的内部步骤(get_api_uri + getPid), "已注册但已崩溃"
+        的节点同样会被 getPid 连接失败判定为不可用。
+
         Returns:
-            bool: True 如果节点在线且可通信，False 否则
+            bool: True 如果节点在线且可通信, False 否则
         """
         # 先快速检查：使用 get_num_connections 检查是否有订阅者
-        # 这是最快的检查方法，可以避免不必要的子进程调用
+        # 这是最快的检查方法，可以避免不必要的探测
         num_subscribers = self.kuavo_arm_traj_pub.get_num_connections()
         if num_subscribers == 0:
             rospy.logwarn("话题 /kuavo_arm_traj 没有订阅者")
             return False
-        
-        # 有订阅者，进一步验证 nodelet_manager 节点是否真正可通信
-        # 方法1: 先检查节点是否在节点列表中
+
+        now = time.time()
+        if now < self._nodelet_alive_until:
+            return True
+
+        # 1) master 注册表查询(旧 rosnode list 的等价物)
         try:
-            node_result = subprocess.run(
-                ['rosnode', 'list'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=2
-            )
-            if node_result.returncode == 0:
-                node_list = node_result.stdout.decode('utf-8', errors='ignore')
-                # 检查 nodelet_manager 是否在节点列表中
-                if '/nodelet_manager' not in node_list:
-                    # 检查是否有包含 nodelet_manager 的节点名
-                    found_nodelet = False
-                    for line in node_list.split('\n'):
-                        if 'nodelet_manager' in line.strip():
-                            found_nodelet = True
-                            break
-                    if not found_nodelet:
-                        rospy.logwarn("nodelet_manager 节点不在节点列表中")
-                        return False
-            else:
-                # rosnode list 失败，继续尝试 ping
-                stderr_output = node_result.stderr.decode('utf-8', errors='ignore')
-                rospy.logwarn(f"rosnode list 命令失败: {stderr_output.strip()}")
+            code, msg, uri = rospy.get_master().lookupNode(self.NODELET_NODE_NAME)
         except Exception as e:
-            rospy.logwarn(f"检查节点列表时出错: {e}，继续尝试 ping")
-        
-        # 方法2: 使用 rosnode ping 验证节点是否真正可通信（最可靠）
-        # 这会真正尝试与节点建立连接，即使节点在 master 中注册但已崩溃也会返回 False
-        # 注意：rosnode ping 即使失败也可能返回 0，需要检查输出内容
-        max_retries = 2
-        for attempt in range(max_retries):
+            # 不同 ROS 实现下"未知节点"可能是异常(rosgraph.MasterError)而非
+            # 返回 code=-1; 这种情况不是 master 故障, 不应误走慢兜底。
+            if 'unknown node' in str(e).lower():
+                code, msg, uri = -1, str(e), None
+            else:
+                # master 查询本身异常: 退回子进程兜底(它另起进程, 不依赖本进程环境)
+                rospy.logwarn(f"查询 nodelet_manager 注册信息失败: {e}, 退回 rosnode ping 兜底")
+                return self._nodelet_alive_check_by_subprocess()
+
+        if code == 1 and uri:
+            return self._nodelet_liveness_check(uri)
+
+        # 精确名未注册: 兼容旧实现的宽松匹配(任何名字含 nodelet_manager 的节点)
+        try:
+            _, _, state = rospy.get_master().getSystemState()
+            candidates = sorted({
+                n for section in state for _, l in section for n in l
+                if 'nodelet_manager' in n
+            })
+        except Exception as e:
+            rospy.logwarn(f"获取节点列表失败: {e}")
+            candidates = []
+        for name in candidates:
             try:
-                result = subprocess.run(
-                    ['rosnode', 'ping', '/nodelet_manager', '-c', '1'],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,  # 将 stderr 合并到 stdout，因为错误信息可能在这里
-                    timeout=3,  # 增加超时时间，匹配 rosnode ping 的默认超时
-                    text=True  # 直接返回字符串而不是 bytes
-                )
-                
-                # 当 stderr=subprocess.STDOUT 时，所有输出都在 stdout 中
-                output = result.stdout or ""
-                
-                # 检查输出中是否包含错误信息
-                output_lower = output.lower()
-                has_error = 'error' in output_lower or 'connection refused' in output_lower or 'failed' in output_lower
-                has_success = 'xmlrpc reply from' in output_lower
-                
-                # rosnode ping 成功时会显示 "xmlrpc reply from" 或类似的成功信息
-                # 失败时会显示 "ERROR" 或 "connection refused"
-                if not has_error and (has_success or result.returncode == 0):
-                    # ping 成功，节点真正在线
-                    rospy.loginfo("nodelet_manager 节点正常运行")
-                    return True
-                else:
-                    # ping 失败，节点在 master 中注册但无法通信（可能已崩溃）
-                    error_msg = output.strip() if output.strip() else "未知错误"
-                    if attempt < max_retries - 1:
-                        # 不是最后一次尝试，稍等再试（可能是节点刚启动）
-                        rospy.logwarn(f"节点 nodelet_manager ping 失败（尝试 {attempt + 1}/{max_retries}），稍后重试: {error_msg}")
-                        time.sleep(0.5)
-                    else:
-                        # 最后一次尝试也失败
-                        rospy.logwarn(f"节点 nodelet_manager 无法通信（可能已崩溃）: {error_msg}")
-                        return False
-                        
-            except subprocess.TimeoutExpired:
-                if attempt < max_retries - 1:
-                    rospy.logwarn(f"检查 nodelet_manager 节点状态超时（尝试 {attempt + 1}/{max_retries}），稍后重试")
-                    time.sleep(0.5)
-                else:
-                    rospy.logwarn("检查 nodelet_manager 节点状态超时（最终失败）")
-                    return False
-            except Exception as e:
-                rospy.logwarn(f"检查 nodelet_manager 节点状态时出错: {e}")
-                return False
-        
+                c_code, _, c_uri = rospy.get_master().lookupNode(name)
+            except Exception:
+                continue
+            if c_code == 1 and c_uri:
+                rospy.logwarn(
+                    f"未找到 {self.NODELET_NODE_NAME}, 改用 {name} 做存活探测")
+                return self._nodelet_liveness_check(c_uri)
+        rospy.logwarn(f"nodelet_manager 未注册: {msg}")
+        return False
+
+    def _nodelet_alive_check_by_subprocess(self):
+        """兜底: 保留原有的子进程 ping(慢, 但另起进程、不受本进程环境异常影响)。"""
+        try:
+            result = subprocess.run(
+                ['rosnode', 'ping', self.NODELET_NODE_NAME, '-c', '1'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=3,
+                text=True,
+            )
+            output = (result.stdout or "").lower()
+            if 'xmlrpc reply from' in output and 'error' not in output:
+                rospy.loginfo("nodelet_manager 节点正常运行(子进程兜底)")
+                self._nodelet_alive_until = time.time() + self.NODELET_ALIVE_TTL
+                return True
+            rospy.logwarn(f"rosnode ping 兜底失败: {result.stdout}")
+        except Exception as e:
+            rospy.logwarn(f"rosnode ping 兜底异常: {e}")
         return False
 
     def handle_interrupt(self, req):
