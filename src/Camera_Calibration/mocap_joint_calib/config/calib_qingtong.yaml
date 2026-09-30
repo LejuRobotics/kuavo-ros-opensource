@@ -1,0 +1,116 @@
+# 纯动捕关节零位标定（wheel62 轮臂）——青瞳相机版本
+# ====================================================
+# 数据源：青瞳光学动捕（Avatar 软件）刚体 6DOF，经 vrpn_client_ros 直接发布为
+#         /vrpn_client_node/<name>/pose（PoseStamped，位置 mm，四元数 xyzw）。
+# 与 Motive 版的唯一区别：mocap_bodies 话题指向 /vrpn_client_node/*；其余（工装 offset、
+# relative_pairs、关节布局、标定链）与 calib.yaml 完全一致。
+#
+# 使用流程：
+#   1) 起 vrpn_client_ros（青瞳上位机 Avatar 开 VRPN，IP 以实际为准）
+#        roslaunch vrpn_client_ros sample.launch server:=10.10.30.252
+#   2) 采集（显式指定本配置）
+#        python3 record_joint_poses.py --config config/calib_qingtong.yaml
+#   3) 优化（自动按 capture meta 选机型，无需额外参数）
+#        bash mocap_optimize.sh <capture_*.json>
+
+robot:
+  robot_layout: wheel62
+  sensor_topic: /sensors_data_raw
+  arm_traj_topic: /kuavo_arm_traj
+  # S62/S63 wheel62 的 joint_q 布局；一键流程仍会以对应 kuavo.json 自动校验并覆盖。
+  joint_q_length: 20
+  joint_indices:
+    left_arm: [4, 11]     # zarm_l1..l7
+    right_arm: [11, 18]   # zarm_r1..r7
+    head: [18, 20]        # 仅用于完整 joint_q 布局说明，不参与本次标定
+  left_start_index: 4
+  right_start_index: 11
+  capture_head: false     # 纯双臂零点标定，不下发头部轨迹
+  dt: 0.01
+  move_duration: 2.0
+  hold_sec: 3.0           # 到位后静止时长，再采集
+  collect_sec: 1.0        # 静止后动捕+关节采集窗口
+  startup_align_sec: 2.0
+  return_to_zero_sec: 2.0
+  wait_sensors_timeout: 30.0
+  set_external_control_mode: true
+  enable_arm_quick_mode: true
+  enable_arm_traj_interpolator: true
+
+# 手臂末程工装：默认 legacy，交互流程可选 new。
+fixtures:
+  legacy:
+    l_hand: [-3.0, -0.5, -120.0]
+    r_hand: [-3.0, 0.5, -120.0]
+  new:
+    l_hand: [-3.0, 68.0, -95.0]
+    r_hand: [-3.0, -68.0, -95.0]
+
+# 青瞳刚体配置：l_hand / r_hand（每臂 1 刚体）+ torso（FK 根参考）+ l_shoulder（仅记录）。
+# 刚体名必须与 Avatar 软件里的刚体名一致（vrpn_client_node 自动发现，话题即
+# /vrpn_client_node/<刚体名>/pose）。
+# link_offset_mm：工装原点在对应 link 系下的位置 (mm)，处理时从动捕位姿反推 link 位姿。
+#                 ⚠️ 与 Motive 同一套工装时沿用；换过工装须重测。
+mocap_bodies:
+  - name: l_hand
+    topic: /vrpn_client_node/l_hand/pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l7_link
+    link_offset_mm: [-3.0, -0.5, -120.0]  # legacy 工装
+  - name: r_hand
+    topic: /vrpn_client_node/r_hand/pose
+    msg_type: PoseStamped
+    urdf_link: zarm_r7_link
+    link_offset_mm: [-3.0, 0.5, -120.0]
+  - name: torso
+    topic: /vrpn_client_node/torso/pose
+    msg_type: PoseStamped
+    urdf_link: waist_yaw_link
+    link_offset_mm: [120.02, -50.82, 6.0]
+  - name: l_shoulder          # 左肩位置输出（仅记录，不参与优化）
+    topic: /vrpn_client_node/l_shoulder/pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l1_ref_link
+    link_offset_mm: [0.0, -53.50, 105.00]   # 复用 mocap_checkerboard_pose bodies.yaml 现成值
+    record_only: true
+
+# 相对位姿计算对（child, parent）。默认保留 hand_in_torso（优化用），
+# 额外加 hand_in_l_shoulder（左肩参考系，输出验证用）。
+relative_pairs:
+  - [l_hand, torso]
+  - [r_hand, torso]
+  - [l_hand, l_shoulder]
+  - [r_hand, l_shoulder]
+
+# ⚠️ 初始值沿用 Motive 的 [1,-1,1]，青瞳 torso 刚体轴是否与 URDF 反向须现场验证。
+# 判断方法：跑一版看优化残差 / 若报告 dy≈±500mm 且 dx/dz 正常，多为 Y 轴反向（用 [1,-1,1]）；
+# 若差的是完整旋转（不只符号翻转），改用 rpy_rad 表达。
+# 根治：在 Avatar 里把 torso 刚体坐标轴对齐 URDF waist_yaw_link 约定后设 enabled: false。
+mocap_frame_align:
+  enabled: true
+  axis_flip: [1, 1, 1]
+
+calibration:
+  urdf: ../biped_v3_arm_s62.urdf
+  fk_root: waist_yaw_link
+  # 14 维双臂 bias；实际 Ceres 参数以 mocap_calibration.yaml 为准。
+  free_joints:
+    - zarm_l1_joint
+    - zarm_l2_joint
+    - zarm_l3_joint
+    - zarm_l4_joint
+    - zarm_l5_joint
+    - zarm_l6_joint
+    - zarm_l7_joint
+    - zarm_r1_joint
+    - zarm_r2_joint
+    - zarm_r3_joint
+    - zarm_r4_joint
+    - zarm_r5_joint
+    - zarm_r6_joint
+    - zarm_r7_joint
+  teach_left: ../teach_capture_output/teach_left_joint.json
+  teach_right: ../teach_capture_output/teach_right_joint.json
+  teach_head: ../teach_capture_output/teach_head_joint.json
+  sigma: 3.0              # 3σ 滤波/离群剔除
+  skip_first_last: true   # 跳过首尾零位重复帧

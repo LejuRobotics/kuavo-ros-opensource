@@ -1,0 +1,38 @@
+<launch>
+  <!-- 纯动捕关节零位标定：optimize_mocap 入口
+       前置：采集 capture_*.json（record_joint_poses.py 输出）
+       机型：robot_layout 参数 biped45 / biped52 / biped56 / wheel62
+         biped45 → biped_v3_arm_s45.urdf + mocap_calibration_s45.yaml（base_link=base_link）
+         其余布局使用各自 URDF + mocap_calibration.yaml（base_link=waist_yaw_link） -->
+  <arg name="camera_calib_root" default="$(eval dirname())" />
+  <arg name="cc_parent" default="$(eval dirname() + '/..')" />
+  <arg name="robot_layout" default="wheel62" />
+  <arg name="capture" default="$(arg camera_calib_root)/capture_YYYYMMDD_HHMMSS.json" />
+  <arg name="output_dir" default="$(arg camera_calib_root)/output" />
+  <arg name="calib_yaml" default="$(eval 'mocap_calibration_s45.yaml' if arg('robot_layout') == 'biped45' else 'mocap_calibration.yaml')" />
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s45.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm.urdf' if arg('robot_layout') == 'biped52' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_s62.urdf')" />
+  <arg name="calibrated_urdf" default="$(eval 'biped_v3_arm_s45_calibrated.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_calibrated.urdf' if arg('robot_layout') == 'biped52' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_s62_calibrated.urdf')" />
+
+  <!-- 标定用 URDF（含 zarm_l7_end_effector / zarm_r7_end_effector） -->
+  <param name="robot_description"
+         textfile="$(arg cc_parent)/$(arg urdf_file)" />
+
+  <node pkg="robot_calibration"
+        type="optimize_mocap"
+        name="optimize_mocap"
+        clear_params="true"
+        output="screen"
+        required="true">
+    <param name="capture" value="$(arg capture)" />
+    <param name="verbose" value="true" />
+    <!-- 加载 models / error_blocks / free_params / base_link -->
+    <rosparam
+        file="$(arg camera_calib_root)/$(arg calib_yaml)"
+        command="load" />
+    <!-- 输出：calibration.yaml（格式与棋盘标定一致，写零使用 write_zero.py） -->
+    <param name="output_dir" value="$(arg output_dir)" />
+    <param name="fixed_output_names" value="true" />
+    <param name="urdf_output_path" value="$(arg cc_parent)/$(arg calibrated_urdf)" />
+    <param name="calibration_yaml_path" value="$(arg output_dir)/calibration.yaml" />
+  </node>
+</launch>

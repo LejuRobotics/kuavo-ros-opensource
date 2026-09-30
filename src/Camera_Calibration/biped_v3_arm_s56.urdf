@@ -385,7 +385,7 @@
         xyz="0 0 0"
         rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/head_yaw.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s56/meshes/head_yaw.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -399,7 +399,7 @@
     </collision>
   </link>
   <joint name="zhead_1_joint" type="revolute">
-    <origin xyz="-0.003 0.0 0.3715" rpy="0 0 0" />
+    <origin xyz="-0.003 0.0 0.49535" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
@@ -416,7 +416,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/head_pitch.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s56/meshes/head_pitch.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -424,7 +424,7 @@
     </visual>
   </link>
   <joint name="zhead_2_joint" type="revolute">
-    <origin xyz="0 0 0.137954074182872" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zhead_1_link" />
     <child link="zhead_2_link" />
     <axis xyz="0 1 0" />
@@ -432,7 +432,7 @@
     <dynamics damping="0.2" friction="0.0" />
   </joint>
 
-  <!-- s52 里的 head camera：camera_base 掛在 zhead_2_link 下 -->
+  <!-- s56 里的 head camera：camera_base 掛在 zhead_2_link 下 -->
   <link name="camera_base">
     <inertial>
       <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
@@ -442,7 +442,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s52/meshes/head_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s56/meshes/head_camera_base.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
@@ -450,31 +450,12 @@
     </visual>
   </link>
   <joint name="camera_base" type="fixed">
-    <origin xyz="0.129717018973535 0.0237514612535074 0.0262044145991832" rpy="0 0.480224871300295 0" />
+    <origin xyz="0.099619 0 0.032844" rpy="0 0.340224871300295 0" />
     <parent link="zhead_2_link" />
     <child link="camera_base" />
   </joint>
 
-  <!-- 相机光学坐标系：采用标准光学坐标 (z 前, x 右, y 下)，直接以 camera_base 为父节点 -->
-  <link name="head_camera_color_optical_frame_0">
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <sphere radius="0.001" />
-      </geometry>
-      <material name="camera_optical_material">
-        <color rgba="0 1 0 0" />
-      </material>
-    </visual>
-  </link>
-  <joint name="head_camera_color_optical_frame_joint_0" type="fixed">
-    <!-- 经典光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
-    <parent link="camera_base" />
-    <child link="head_camera_color_optical_frame_0" />
-  </joint>
-
-  <!-- 相机rgb坐标系：相对于depth坐标系有偏移 -->
+  <!-- RGB 光学坐标系：相对 camera_base 沿光学 X 轴偏移 +23.75 mm -->
   <link name="head_camera_color_optical_frame">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
@@ -487,9 +468,9 @@
     </visual>
   </link>
   <joint name="head_camera_color_optical_frame_joint" type="fixed">
-    <!-- 经典光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
-    <origin xyz="0.02375 0 0" rpy="0 0 0" />
-    <parent link="head_camera_color_optical_frame_0" />
+    <!-- 光学 X = camera_base 的 -Y；保留标准光学坐标旋转 -->
+    <origin xyz="0.011715 0.02375 0.014312" rpy="-1.57079632679 0 -1.57079632679" />
+    <parent link="camera_base" />
     <child link="head_camera_color_optical_frame" />
   </joint>
 
@@ -506,8 +487,8 @@
     </visual>
   </link>
   <joint name="checkerboard_joint" type="fixed">
-    <origin xyz="1.01327467669963 -0.176934723317098 -0.17142623754583"
-            rpy="-2.1510713166199 -0.0125236852930088 -1.57002984265249" />
+    <origin xyz="1.1885083 -0.26639257 -0.23387741"
+            rpy="-2.0934448 0.025182935 -1.5475454" />
     <!-- <origin xyz="1.00327467669963 -0.176934723317098 -0.17142623754583"
     rpy="-2.2010713166199 -0.0125236852930088 -1.57002984265249" /> -->
     <parent link="zarm_l1_ref_link" />

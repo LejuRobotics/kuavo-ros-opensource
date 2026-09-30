@@ -1,0 +1,46 @@
+# 纯动捕关节零位标定（biped45 / 4pro s45）——仅标定双臂 14 关节 bias
+# =====================================================
+# - 观测：动捕手腕刚体相对 torso（对应 base_link）的 6DOF 位姿
+# - 链：base_link -> zarm_l7_link / zarm_r7_end_link
+# - 误差块：chain3d_to_mocap（单链 FK vs 动捕实测，6DOF 残差）
+# - s45 无腰部关节：FK 根用 base_link，臂索引 left=[12,19) right=[19,26)
+
+base_link: base_link
+verbose: true
+
+models:
+  - name: l_hand_to_base
+    type: chain
+    frame: zarm_l7_link
+  - name: r_hand_to_base
+    type: chain
+    frame: zarm_r7_link
+
+# 14 维双臂 bias（rad，标量）
+free_params:
+  - zarm_l1_joint
+  - zarm_l2_joint
+  - zarm_l3_joint
+  - zarm_l4_joint
+  - zarm_l5_joint
+  - zarm_l6_joint
+  - zarm_l7_joint
+  - zarm_r1_joint
+  - zarm_r2_joint
+  - zarm_r3_joint
+  - zarm_r4_joint
+  - zarm_r5_joint
+  - zarm_r6_joint
+  - zarm_r7_joint
+
+error_blocks:
+  - name: l_hand_mocap
+    type: chain3d_to_mocap
+    model_a: l_hand_to_base
+    position_weight: 3.0
+    rotation_weight: 1.0
+  - name: r_hand_mocap
+    type: chain3d_to_mocap
+    model_a: r_hand_to_base
+    position_weight: 3.0
+    rotation_weight: 1.0
