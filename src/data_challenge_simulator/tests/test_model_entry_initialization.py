@@ -150,31 +150,18 @@ def test_task1_model_initializer_is_independent_of_full_task_policy():
     assert "from task1_v2 import" not in task1_initialize
 
 
-def test_task1_model_shared_initialization_values_match_the_task_entry():
+def test_task1_model_ready_values_match_the_accepted_task():
     model_values = _literal_assignments(INIT)
-    task_values = _literal_assignments(TASK1)
+    accepted_values = _literal_assignments(TASK1)
     for name in (
             "ARM_JOINT_COUNT", "CYLINDERS", "TARGET_BIN",
             "INITIALIZATION_SAFE_RETREAT_M", "SHOULDER_LIFT_DEG",
+            "RIGHT_ARM_READY_RAD", "RIGHT_ARM_READY_FULL_RAD",
             "TRAJECTORY_POINTS", "CHASSIS_LINEAR_SPEED",
             "CHASSIS_ANGULAR_SPEED", "CHASSIS_MIN_LINEAR_SPEED",
             "CHASSIS_MIN_ANGULAR_SPEED", "CHASSIS_POSITION_TOLERANCE",
             "CHASSIS_YAW_TOLERANCE_DEG"):
-        assert model_values[name] == task_values[name], name
-
-
-def test_task1_task_entry_staging_does_not_change_model_initialization():
-    model_values = _literal_assignments(INIT)
-    task_values = _literal_assignments(TASK1)
-    assert model_values["RIGHT_ARM_READY_RAD"] == (-1.0, -0.5, 1.0, -1.4)
-    assert model_values["RIGHT_ARM_READY_FULL_RAD"] == (
-        -0.9, -0.265, 1.0, -0.8, 0.58, -0.4, 0.35)
-    assert task_values["RIGHT_ARM_STAGING_RAD"] == (
-        -0.569927, -0.301512, 0.658253, -0.488704,
-        0.698827, -0.653404, -0.289423)
-    assert task_values["RIGHT_ARM_STAGING_ABOVE_RAD"] == (
-        -0.466591, -0.579416, 0.652630, -1.211603,
-        0.699260, -0.286390, 0.045867)
+        assert model_values[name] == accepted_values[name], name
 
 
 def test_task1_model_base_initializer_has_no_episode_route():
@@ -226,7 +213,7 @@ def test_task1_v2_is_not_modified_by_the_model_entry():
     """The accepted task entry must keep performing its own initialization."""
     source = TASK1.read_text()
     assert "measured_safe_base = _move_base_with_wheels(" in source
-    assert 'latch_achieved_right_target("v2_staging_after_return_to_b0")' in source
+    assert 'latch_achieved_right_target("v2_ready_after_return_to_b0")' in source
 
 
 def test_task1_waits_for_a_real_sensor_message_before_arm_publishing():

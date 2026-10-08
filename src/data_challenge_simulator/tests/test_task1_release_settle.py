@@ -21,8 +21,7 @@ def test_task1_release_disables_object_collision_for_vertical_fall():
 
 def test_task1_latch_disables_collision_and_release_uses_open_command():
     source = MUJOCO_NODE.read_text(encoding="utf-8")
-    latch = source[source.index(
-        "if (grasp_latch_complete || legacy_contact_complete)"):]
+    latch = source[source.index("if (contacting_fingertips.size() >= 2)"):]
     latch_end = latch.index("continue;")
     latch = latch[:latch_end]
 

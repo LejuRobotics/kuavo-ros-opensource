@@ -16,8 +16,6 @@ PACKAGE_DIR="${CONTAINER_WORKSPACE}/src/data_challenge_simulator"
 COLLECT_LAYOUT_HOST_FILE=""
 COLLECT_LAYOUT_CONTAINER_FILE=""
 COLLECT_LAYOUT_ENV_NAME=""
-ENTRY_LOCK_FD=""
-ENTRY_PREPARED="0"
 
 die() { echo "[ERROR] $*" >&2; exit 1; }
 
@@ -92,8 +90,7 @@ generate_collect_layouts() {
   container_install="${PACKAGE_DIR}/config/${config_name}.collect.$$.json"
 
   echo "[INFO] Generating ${rounds} fresh independently seeded Task ${TASK_ID} layouts"
-  local generator_status container_state
-  if docker exec -i -e ROBOT_VERSION=400062 "${CONTAINER_NAME}" \
+  if ! docker exec -i -e ROBOT_VERSION=400062 "${CONTAINER_NAME}" \
       bash -lc '
         set -e
         source /opt/ros/noetic/setup.bash
@@ -102,14 +99,8 @@ generate_collect_layouts() {
         exec python3 "tools/$1" \
           --output "$2" --count "$3" --random-seeds
       ' bash "${generator_name}" "${container_generated}" "${rounds}"; then
-    generator_status=0
-  else
-    generator_status=$?
     rm -f -- "${host_generated}"
-    container_state="$(docker inspect -f \
-      'status={{.State.Status}}, exit={{.State.ExitCode}}, oom={{.State.OOMKilled}}, error={{json .State.Error}}' \
-      "${CONTAINER_NAME}" 2>/dev/null || echo 'unavailable')"
-    die "Task ${TASK_ID} layout generator command exited with status ${generator_status}; container ${CONTAINER_NAME}: ${container_state}"
+    die "failed to generate Task ${TASK_ID} collect layouts"
   fi
 
   if ! mv -- "${host_generated}" "${host_install}"; then
@@ -135,7 +126,7 @@ run_task() {
   local record="$1" rounds="$2" seed="$3" headless="$4"
   [[ "${rounds}" =~ ^[1-9][0-9]*$ ]] || die "ROUNDS must be a positive integer"
   [[ "${seed}" =~ ^[0-9]+$ ]] || die "SEED must be a non-negative integer"
-  prepare_entry_start
+  ensure_container_running
   local -a display_args=()
   local -a exec_args=(-i)
   local -a layout_args=()
@@ -177,7 +168,7 @@ run_task() {
 
 run_model() {
   local model_name="${1:-anonymous}"
-  prepare_entry_start
+  ensure_container_running
   allow_gui
   docker exec -it -e "DISPLAY=${DISPLAY}" -e ROBOT_VERSION=400062 "${CONTAINER_NAME}" \
     bash -lc '
@@ -236,25 +227,6 @@ stop_task() {
   "
 }
 
-prepare_entry_start() {
-  [[ "${ENTRY_PREPARED}" == "0" ]] || return 0
-  ensure_container_running
-
-  # Stop the old supervisor before the new one exists.  The previous order
-  # let a retiring model's cleanup discover and kill the newly started helper.
-  stop_task
-
-  command -v flock >/dev/null 2>&1 || die "flock is required to serialize simulator entry points"
-  exec {ENTRY_LOCK_FD}>"/tmp/${CONTAINER_NAME}.simulator-entry.lock"
-  flock -w 15 "${ENTRY_LOCK_FD}" || die \
-    "another simulator entry is still active for container ${CONTAINER_NAME}"
-
-  # Two launchers can both reach the first stop before either acquires the
-  # lock.  Sweep once more after winning the lock, then launch exactly one.
-  stop_task
-  ENTRY_PREPARED="1"
-}
-
 show_status() {
   command -v docker >/dev/null 2>&1 || die "docker is not installed"
   if ! container_exists; then echo "[INFO] container ${CONTAINER_NAME}: absent"; return; fi
@@ -279,7 +251,6 @@ case "${mode}" in
   collect)
     [[ -n "${2:-}" ]] || die "collect requires ROUNDS"
     [[ "$#" == "2" ]] || die "collect accepts only ROUNDS; layout seeds are generated automatically"
-    prepare_entry_start
     generate_collect_layouts "$2"
     trap cleanup_collect_layout EXIT
     run_task 1 "$2" 1 1

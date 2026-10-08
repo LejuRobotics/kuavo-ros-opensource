@@ -133,6 +133,9 @@ build_workspace() {
       set -e
       source /opt/ros/noetic/setup.bash
       cd /root/kuavo_ws
+      # kuavo_assets writes ImuType.ini here during a first-time build.
+      mkdir -p /root/.config/lejuconfig
+      source scripts/prepare_opensource_build.sh
       catkin build kuavo_msgs mujoco_cpp humanoid_controllers \
         data_challenge_simulator --no-status -j2 \
         --cmake-args -Dpybind11_DIR=/opt/drake/lib/cmake/pybind11

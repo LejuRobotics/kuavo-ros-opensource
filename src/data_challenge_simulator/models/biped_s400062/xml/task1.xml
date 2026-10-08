@@ -60,11 +60,6 @@
     <!-- Collision-free visual correction after a released cylinder reaches
          the target-bin floor.  2*pi rad/s = 360 deg/s. -->
     <numeric name="task1_target_settle_angular_speed" data="6.283185307"/>
-    <!-- During the large close command, independently freeze the complete
-         thumb or index finger after stable contact with the same cylinder.
-         This prevents a contacted finger from continuing to load the wrist. -->
-    <numeric name="task1_grasp_independent_finger_latch_enabled" data="1"/>
-    <numeric name="task1_grasp_finger_latch_contact_depth" data="0.0001"/>
     <!-- Scene-owned lever unlock rule.  The simulator only releases the
          equality after this many distinct right fingertips maintain real
          handle contact for the configured duration. -->
