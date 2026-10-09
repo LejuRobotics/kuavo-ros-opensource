@@ -46,7 +46,7 @@ def wait_for_arm_state(robot_state, timeout=30.0):
     return wait_for_first_arm_state(timeout=timeout)
 
 
-def make_chassis(args):
+def make_chassis(args, config=None):
     """Build the chassis for the Task 2 initialization path.
 
     The initialization path is open loop and does not consult
@@ -54,10 +54,16 @@ def make_chassis(args):
     because ``ChassisMotion`` requires them, and they keep the values Task 2
     used before so the shared constructor stays comparable.
     """
+    linear_speed = args.linear_speed
+    if linear_speed is None:
+        if config is None:
+            raise ValueError(
+                "linear speed requires either an argument or Task2 config")
+        linear_speed = float(config["open_loop_linear_speed_mps"])
     return ChassisMotion(
-        linear_speed=args.linear_speed,
+        linear_speed=linear_speed,
         angular_speed=0.20,
-        minimum_linear_speed=min(args.minimum_linear_speed, args.linear_speed),
+        minimum_linear_speed=min(args.minimum_linear_speed, linear_speed),
         minimum_angular_speed=0.06,
         position_tolerance=0.03,
         yaw_tolerance_deg=3.0,
@@ -302,7 +308,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--scene", type=Path, default=DEFAULT_SCENE)
-    parser.add_argument("--linear-speed", type=float, default=0.08)
+    parser.add_argument("--linear-speed", type=float, default=None)
     parser.add_argument("--minimum-linear-speed", type=float, default=0.06)
     parser.add_argument(
         "--stop-speed-threshold", type=float,
@@ -311,7 +317,8 @@ def main():
         "--settle-timeout", type=float, default=DEFAULT_SETTLE_TIMEOUT)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if args.linear_speed <= 0.0 or args.minimum_linear_speed <= 0.0:
+    if ((args.linear_speed is not None and args.linear_speed <= 0.0) or
+            args.minimum_linear_speed <= 0.0):
         parser.error("speeds must be positive")
     if args.stop_speed_threshold <= 0.0:
         parser.error("stop speed threshold must be positive")
@@ -327,10 +334,10 @@ def main():
 
     robot = KuavoRobot()
     robot_state = KuavoRobotState()
-    chassis = make_chassis(args)
     with (PACKAGE_DIR / "config/task2_pick.json").open(
             "r", encoding="utf-8") as stream:
         pick_config = json.load(stream)
+    chassis = make_chassis(args, config)
     ready_planner = Task2PickPlanner(
         args.scene, ik_config=pick_config["ik"])
     run_initialization(

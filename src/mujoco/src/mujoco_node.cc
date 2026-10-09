@@ -155,12 +155,34 @@ namespace
   std::unordered_set<int> right_fingertip_geom_ids;
   int contact_follower_hand_body_id = -1;
 
+  // Task 1 cylinder grasp: thumb and index stop independently as soon as
+  // each fingertip establishes a stable contact with the same cylinder.  The
+  // large close command may continue, but a latched finger owns its complete
+  // joint state so it cannot keep squeezing and feed reaction torque into the
+  // compliant wrist.  A scene numeric opts this behavior in; Tasks 2 and 3
+  // never initialize it.
+  struct Task1GraspFingerLatchState {
+    bool enabled = false;
+    int object_body_id = -1;
+    mjtNum contact_depth = 0;
+    std::array<int, 2> fingertip_geom_ids{{-1, -1}};
+    std::array<bool, 2> finger_latched{{false, false}};
+    std::array<std::vector<int>, 2> qpos_addresses;
+    std::array<std::vector<int>, 2> dof_addresses;
+    std::array<std::vector<int>, 2> ctrl_addresses;
+    std::array<std::vector<mjtNum>, 2> latched_qpos;
+  } task1_grasp_latch;
+
   // Task 1 V2 lever hook and scene-owned lock state.  The named equalities in
   // task1.xml opt this logic in; no task command or ROS topic can arm it.
   // Actual handle contact freezes all joints of the contacting index, middle,
   // or little finger.  Thumb and ordinary task objects are never mapped.
   struct Task1LeverFingerLatchState {
     int handle_geom_id = -1;
+    int lever_joint_id = -1;
+    int lever_body_id = -1;
+    int lever_qpos_addr = -1;
+    int lever_dof_addr = -1;
     int lever_lock_equality_id = -1;
     int source_bin_lock_equality_id = -1;
     int source_bin_slide_joint_id = -1;
@@ -171,7 +193,11 @@ namespace
     std::array<std::vector<int>, 3> ctrl_addresses;
     std::array<std::vector<mjtNum>, 3> latched_qpos;
     mjtNum lever_contact_duration = 0;
+    mjtNum follower_reference_lever_angle = 0;
+    mjtNum follower_reference_hand_phase = 0;
+    std::uint8_t follower_finger_mask = 0;
     bool lever_unlocked = false;
+    bool force_free_following = false;
   } task1_lever_latch;
 
   // Scene 2 keeps fingertip collision during arm approach and descent.  Once
@@ -290,6 +316,7 @@ namespace
   bool updateContactFollowers();
   void applyBimanualLatchControls();
   void applyInternalLatchControls();
+  void applyTask1GraspLatchControls();
   void applyTask1LeverLatchControls();
   mjtNum numericScalarOrDefault(const char *name, mjtNum fallback);
   bool pure_sim = false;
@@ -1777,6 +1804,7 @@ namespace
             // captured qpos and injects joint reaction forces on every step.
             applyBimanualLatchControls();
             applyInternalLatchControls();
+            applyTask1GraspLatchControls();
             applyTask1LeverLatchControls();
             mj_step(m, d);
             if (updateContactFollowers()) {
@@ -1954,6 +1982,133 @@ void initializeContactFollowers(const std::vector<std::string> &body_names)
   }
   ROS_INFO("[ContactFollower] enabled for %zu task objects with %zu right fingertip geoms",
            contact_followers.size(), right_fingertip_geom_ids.size());
+}
+
+void initializeTask1GraspFingerLatch()
+{
+  task1_grasp_latch = Task1GraspFingerLatchState{};
+  task1_grasp_latch.enabled =
+      numericScalarOrDefault(
+          "task1_grasp_independent_finger_latch_enabled", 0) > 0.5;
+  if (!task1_grasp_latch.enabled) {
+    return;
+  }
+
+  task1_grasp_latch.contact_depth = std::max<mjtNum>(
+      0, numericScalarOrDefault(
+             "task1_grasp_finger_latch_contact_depth", 0.0005));
+  const std::array<const char *, 2> fingertip_names{{
+      "r_thumb_fingertip_collision",
+      "r_index_fingertip_collision",
+  }};
+  const std::array<std::vector<std::string>, 2> finger_joint_names{{
+      {"r_thumb_j1", "r_thumb_j2", "r_thumb_j3"},
+      {"r_index_j1", "r_index_j2", "r_index_j3"},
+  }};
+  bool valid = !contact_followers.empty();
+  for (std::size_t finger = 0; finger < fingertip_names.size(); ++finger) {
+    task1_grasp_latch.fingertip_geom_ids[finger] =
+        mj_name2id(m, mjOBJ_GEOM, fingertip_names[finger]);
+    valid = valid && task1_grasp_latch.fingertip_geom_ids[finger] >= 0;
+    for (const std::string &joint_name : finger_joint_names[finger]) {
+      const int joint_id =
+          mj_name2id(m, mjOBJ_JOINT, joint_name.c_str());
+      const int actuator_id = mj_name2id(
+          m, mjOBJ_ACTUATOR, (joint_name + "_motor").c_str());
+      if (joint_id < 0 || m->jnt_type[joint_id] != mjJNT_HINGE ||
+          actuator_id < 0) {
+        valid = false;
+        continue;
+      }
+      task1_grasp_latch.qpos_addresses[finger].push_back(
+          m->jnt_qposadr[joint_id]);
+      task1_grasp_latch.dof_addresses[finger].push_back(
+          m->jnt_dofadr[joint_id]);
+      task1_grasp_latch.ctrl_addresses[finger].push_back(actuator_id);
+    }
+  }
+  if (!valid) {
+    ROS_WARN("[Task1GraspLatch] scene opted in but cylinder/finger mapping is incomplete; disabled");
+    task1_grasp_latch = Task1GraspFingerLatchState{};
+    return;
+  }
+  ROS_INFO("[Task1GraspLatch] independent thumb/index contact latch enabled at %.2f mm penetration",
+           1000.0 * task1_grasp_latch.contact_depth);
+}
+
+std::uint8_t task1GraspLatchMask()
+{
+  std::uint8_t mask = 0;
+  for (std::size_t finger = 0;
+       finger < task1_grasp_latch.finger_latched.size(); ++finger) {
+    if (task1_grasp_latch.finger_latched[finger]) {
+      mask |= static_cast<std::uint8_t>(1u << finger);
+    }
+  }
+  return mask;
+}
+
+void clearTask1GraspFingerLatch(const char *reason)
+{
+  const std::uint8_t old_mask = task1GraspLatchMask();
+  task1_grasp_latch.object_body_id = -1;
+  task1_grasp_latch.finger_latched.fill(false);
+  for (std::vector<mjtNum> &positions : task1_grasp_latch.latched_qpos) {
+    positions.clear();
+  }
+  if (old_mask != 0) {
+    ROS_INFO("[Task1GraspLatch] cleared mask=0x%02x (%s)",
+             old_mask, reason);
+  }
+}
+
+void captureTask1GraspFinger(int object_body_id, std::size_t finger,
+                             mjtNum contact_distance)
+{
+  if (task1_grasp_latch.object_body_id < 0) {
+    task1_grasp_latch.object_body_id = object_body_id;
+  }
+  if (task1_grasp_latch.object_body_id != object_body_id ||
+      task1_grasp_latch.finger_latched[finger]) {
+    return;
+  }
+  std::vector<mjtNum> &positions =
+      task1_grasp_latch.latched_qpos[finger];
+  positions.clear();
+  for (std::size_t joint = 0;
+       joint < task1_grasp_latch.qpos_addresses[finger].size(); ++joint) {
+    positions.push_back(
+        d->qpos[task1_grasp_latch.qpos_addresses[finger][joint]]);
+    d->qvel[task1_grasp_latch.dof_addresses[finger][joint]] = 0;
+  }
+  task1_grasp_latch.finger_latched[finger] = true;
+  ROS_INFO("[Task1GraspLatch] froze complete finger '%s' on '%s' at %.2f mm penetration; mask=0x%02x",
+           mj_id2name(m, mjOBJ_GEOM,
+                      task1_grasp_latch.fingertip_geom_ids[finger]),
+           mj_id2name(m, mjOBJ_BODY, object_body_id),
+           -1000.0 * contact_distance, task1GraspLatchMask());
+}
+
+void applyTask1GraspLatchControls()
+{
+  if (!task1_grasp_latch.enabled) {
+    return;
+  }
+  for (std::size_t finger = 0;
+       finger < task1_grasp_latch.finger_latched.size(); ++finger) {
+    if (!task1_grasp_latch.finger_latched[finger] ||
+        task1_grasp_latch.latched_qpos[finger].size() !=
+            task1_grasp_latch.qpos_addresses[finger].size()) {
+      continue;
+    }
+    for (std::size_t joint = 0;
+         joint < task1_grasp_latch.qpos_addresses[finger].size(); ++joint) {
+      const mjtNum position = task1_grasp_latch.latched_qpos[finger][joint];
+      d->qpos[task1_grasp_latch.qpos_addresses[finger][joint]] = position;
+      d->qvel[task1_grasp_latch.dof_addresses[finger][joint]] = 0;
+      d->ctrl[task1_grasp_latch.ctrl_addresses[finger][joint]] = position;
+    }
+  }
 }
 
 void initializeBimanualContactFollowers(
@@ -2279,6 +2434,63 @@ std::uint8_t task1LeverLatchMask()
   return mask;
 }
 
+bool task1LeverFollowerHandPhase(
+    std::uint8_t finger_mask, mjtNum &phase)
+{
+  if (task1_lever_latch.lever_body_id < 0 || finger_mask == 0) {
+    return false;
+  }
+  Eigen::Vector3d fingertip_centroid = Eigen::Vector3d::Zero();
+  int finger_count = 0;
+  for (std::size_t finger = 0;
+       finger < task1_lever_latch.fingertip_geom_ids.size(); ++finger) {
+    if (!(finger_mask & static_cast<std::uint8_t>(1u << finger))) {
+      continue;
+    }
+    const int geom_id = task1_lever_latch.fingertip_geom_ids[finger];
+    if (geom_id < 0) {
+      return false;
+    }
+    const mjtNum *position = d->geom_xpos + 3 * geom_id;
+    fingertip_centroid += Eigen::Vector3d(
+        position[0], position[1], position[2]);
+    ++finger_count;
+  }
+  if (finger_count == 0) {
+    return false;
+  }
+  fingertip_centroid /= static_cast<mjtNum>(finger_count);
+  const mjtNum *pivot =
+      d->xpos + 3 * task1_lever_latch.lever_body_id;
+  phase = std::atan2(
+      fingertip_centroid.z() - pivot[2],
+      fingertip_centroid.x() - pivot[0]);
+  return true;
+}
+
+bool updateTask1ForceFreeLeverFollower()
+{
+  if (!task1_lever_latch.force_free_following) {
+    return false;
+  }
+  mjtNum hand_phase = 0;
+  if (!task1LeverFollowerHandPhase(
+          task1_lever_latch.follower_finger_mask, hand_phase)) {
+    return false;
+  }
+  const mjtNum phase_delta = std::remainder(
+      task1_lever_latch.follower_reference_hand_phase - hand_phase,
+      2 * mjPI);
+  const mjtNum target_angle = std::clamp(
+      task1_lever_latch.follower_reference_lever_angle + phase_delta,
+      m->jnt_range[2 * task1_lever_latch.lever_joint_id],
+      m->jnt_range[2 * task1_lever_latch.lever_joint_id + 1]);
+  d->qpos[task1_lever_latch.lever_qpos_addr] = target_angle;
+  d->qvel[task1_lever_latch.lever_dof_addr] = 0;
+  applyTask1LeverLatchControls();
+  return true;
+}
+
 void initializeTask1LeverFingerLatch()
 {
   task1_lever_latch = Task1LeverFingerLatchState{};
@@ -2304,12 +2516,13 @@ void initializeTask1LeverFingerLatch()
       task1_lever_latch.lever_lock_equality_id >= 0 &&
       task1_lever_latch.source_bin_lock_equality_id >= 0 &&
       task1_lever_latch.source_bin_slide_joint_id >= 0;
-  const int lever_joint_id = mj_name2id(m, mjOBJ_JOINT, "lever_hinge");
+  task1_lever_latch.lever_joint_id =
+      mj_name2id(m, mjOBJ_JOINT, "lever_hinge");
   if (valid) {
-    valid = lever_joint_id >= 0 &&
+    valid = task1_lever_latch.lever_joint_id >= 0 &&
         m->eq_type[task1_lever_latch.lever_lock_equality_id] == mjEQ_JOINT &&
         m->eq_obj1id[task1_lever_latch.lever_lock_equality_id] ==
-            lever_joint_id &&
+            task1_lever_latch.lever_joint_id &&
         m->eq_type[task1_lever_latch.source_bin_lock_equality_id] ==
             mjEQ_JOINT &&
         m->eq_obj1id[task1_lever_latch.source_bin_lock_equality_id] ==
@@ -2344,8 +2557,14 @@ void initializeTask1LeverFingerLatch()
     task1_lever_latch.source_bin_slide_joint_id = -1;
     return;
   }
+  task1_lever_latch.lever_body_id =
+      m->jnt_bodyid[task1_lever_latch.lever_joint_id];
+  task1_lever_latch.lever_qpos_addr =
+      m->jnt_qposadr[task1_lever_latch.lever_joint_id];
+  task1_lever_latch.lever_dof_addr =
+      m->jnt_dofadr[task1_lever_latch.lever_joint_id];
   m->eq_data[mjNEQDATA * task1_lever_latch.lever_lock_equality_id] =
-      d->qpos[m->jnt_qposadr[lever_joint_id]];
+      d->qpos[task1_lever_latch.lever_qpos_addr];
   m->eq_data[mjNEQDATA * task1_lever_latch.source_bin_lock_equality_id] =
       d->qpos[m->jnt_qposadr[task1_lever_latch.source_bin_slide_joint_id]];
   d->eq_active[task1_lever_latch.lever_lock_equality_id] = 1;
@@ -2394,6 +2613,9 @@ bool updateTask1LeverFingerLatch()
   if (task1_lever_latch.handle_geom_id < 0 ||
       task1_lever_latch.lever_lock_equality_id < 0) {
     return false;
+  }
+  if (task1_lever_latch.force_free_following) {
+    return updateTask1ForceFreeLeverFollower();
   }
   // Require real penetration, not mere grazing contact.  A pad that only
   // touches the handle surface is still mid-curl, and freezing there leaves a
@@ -2454,10 +2676,28 @@ bool updateTask1LeverFingerLatch()
       contacting_finger_count >= required_fingers) {
     task1_lever_latch.lever_contact_duration += m->opt.timestep;
     if (task1_lever_latch.lever_contact_duration >= required_duration) {
+      const std::uint8_t follower_mask = contacting_fingers;
+      mjtNum hand_phase = 0;
+      if (!task1LeverFollowerHandPhase(follower_mask, hand_phase)) {
+        return changed;
+      }
       d->eq_active[task1_lever_latch.lever_lock_equality_id] = 0;
+      d->qvel[task1_lever_latch.lever_dof_addr] = 0;
+      task1_lever_latch.follower_reference_lever_angle =
+          d->qpos[task1_lever_latch.lever_qpos_addr];
+      task1_lever_latch.follower_reference_hand_phase = hand_phase;
+      task1_lever_latch.follower_finger_mask = follower_mask;
+      // Once the real two-finger contact has established the hook, the lever
+      // becomes a force-free kinematic follower.  Removing this collision is
+      // essential: otherwise the directly-updated lever feeds penetration
+      // impulses back into the arm and recreates the wrist jitter this mode
+      // is intended to eliminate.
+      m->geom_contype[task1_lever_latch.handle_geom_id] = 0;
+      m->geom_conaffinity[task1_lever_latch.handle_geom_id] = 0;
       task1_lever_latch.lever_unlocked = true;
+      task1_lever_latch.force_free_following = true;
       changed = true;
-      ROS_INFO("[Task1LeverLatch] released lever lock after %d fingertips maintained handle contact for %.1f ms",
+      ROS_INFO("[Task1LeverLatch] started force-free lever following after %d fingertips maintained handle contact for %.1f ms",
                contacting_finger_count,
                1000.0 * task1_lever_latch.lever_contact_duration);
     }
@@ -2786,6 +3026,9 @@ void resetContactFollower(const std::string &body_name)
       m->geom_contype[geom_id] = state.collision_contype[index];
       m->geom_conaffinity[geom_id] = state.collision_conaffinity[index];
     }
+    if (task1_grasp_latch.object_body_id == state.body_id) {
+      clearTask1GraspFingerLatch("object reset");
+    }
     break;
   }
   for (BimanualContactFollowerState &state : bimanual_contact_followers) {
@@ -2937,6 +3180,11 @@ bool updateLegacyContactFollowers()
   }
 
   bool pose_changed = false;
+  const bool opening_command =
+      g_dexhand_node && g_dexhand_node->rightHandOpeningCommand();
+  if (task1_grasp_latch.enabled && opening_command) {
+    clearTask1GraspFingerLatch("right hand opening");
+  }
   for (ContactFollowerState &state : contact_followers) {
     std::unordered_set<int> contacting_fingertips;
     for (int contact_index = 0; contact_index < d->ncon; ++contact_index) {
@@ -2951,6 +3199,18 @@ bool updateLegacyContactFollowers()
       }
       if (right_fingertip_geom_ids.count(other_geom) != 0) {
         contacting_fingertips.insert(other_geom);
+      }
+      if (task1_grasp_latch.enabled && !opening_command &&
+          contact.dist <= -task1_grasp_latch.contact_depth &&
+          (task1_grasp_latch.object_body_id < 0 ||
+           task1_grasp_latch.object_body_id == state.body_id)) {
+        for (std::size_t finger = 0;
+             finger < task1_grasp_latch.fingertip_geom_ids.size(); ++finger) {
+          if (other_geom == task1_grasp_latch.fingertip_geom_ids[finger]) {
+            captureTask1GraspFinger(
+                state.body_id, finger, contact.dist);
+          }
+        }
       }
     }
 
@@ -2989,8 +3249,6 @@ bool updateLegacyContactFollowers()
     }
 
     if (state.held) {
-      const bool opening_command =
-          g_dexhand_node && g_dexhand_node->rightHandOpeningCommand();
       if (opening_command) {
         state.held = false;
         state.settling = true;
@@ -3039,7 +3297,13 @@ bool updateLegacyContactFollowers()
       continue;
     }
 
-    if (contacting_fingertips.size() >= 2) {
+    const bool grasp_latch_complete =
+        task1_grasp_latch.enabled &&
+        task1_grasp_latch.object_body_id == state.body_id &&
+        task1GraspLatchMask() == 0x03;
+    const bool legacy_contact_complete =
+        !task1_grasp_latch.enabled && contacting_fingertips.size() >= 2;
+    if (grasp_latch_complete || legacy_contact_complete) {
       const Eigen::Matrix3d hand_rotation =
           contactFollowerBodyRotation(contact_follower_hand_body_id);
       const mjtNum *hand_position =
@@ -3076,9 +3340,10 @@ bool updateLegacyContactFollowers()
         m->geom_contype[geom_id] = 0;
         m->geom_conaffinity[geom_id] = 0;
       }
-      ROS_INFO("[ContactFollower] latched '%s' with %zu fingertip contacts; "
-               "object collision disabled while held",
-               state.name.c_str(), contacting_fingertips.size());
+      ROS_INFO("[ContactFollower] latched '%s' with %zu fingertip contacts "
+               "(independent_mask=0x%02x); object collision disabled while held",
+               state.name.c_str(), contacting_fingertips.size(),
+               task1_grasp_latch.enabled ? task1GraspLatchMask() : 0);
       continue;
     }
   }
@@ -4657,6 +4922,7 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
   std::vector<std::string> contact_follow_body_names;
   g_nh_ptr->getParam("contact_follow_body_names", contact_follow_body_names);
   initializeContactFollowers(contact_follow_body_names);
+  initializeTask1GraspFingerLatch();
   initializeTask1LeverFingerLatch();
   std::vector<std::string> bimanual_contact_follow_body_names;
   g_nh_ptr->getParam(

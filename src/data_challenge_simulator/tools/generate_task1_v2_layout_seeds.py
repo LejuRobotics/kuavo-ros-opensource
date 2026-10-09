@@ -12,6 +12,7 @@ import secrets
 import sys
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 
 PACKAGE_DIR = Path(__file__).resolve().parents[1]
@@ -28,9 +29,9 @@ DEFAULT_TEMPLATE = PACKAGE_DIR / "config/task1_v2_layout_seeds.json"
 # Task1 initialization rotates l_thumb_j1 to 1.75 rad before advancing to the
 # independently sampled working pose.  The final working range retains the
 # accepted +0.015 m forward cap.
-FORWARD_CAP_X = 0.015
 OBJECT_Z = 0.685
 MAX_POSITION_ERROR = 0.001
+MAX_SOURCE_ORIENTATION_ERROR_DEG = 8.0
 SOURCE_WALL_TOP_Z = 0.740
 LIFT_CLEARANCE = 0.010
 OBJECT_HALF_HEIGHT = 0.020
@@ -41,8 +42,16 @@ DROP_CENTER_OFFSETS = (
     (0.000, 0.022),
     (0.060, -0.012),
 )
-GRASP_TRACKING_BIAS_WORLD = np.array((0.008, 0.015, 0.018))
+GRASP_TRACKING_BIASES_WORLD = (
+    np.array((0.002, 0.014, 0.010)),
+    np.array((0.002, 0.010, 0.010)),
+    np.array((0.002, 0.005, 0.010)),
+)
 RIGHT_ARM_READY = np.array((-0.9, -0.265, 1.0, -0.8, 0.58, -0.4, 0.35))
+RIGHT_ARM_STAGING = np.array((
+    -0.569927, -0.301512, 0.658253, -0.488704,
+    0.698827, -0.653404, -0.289423,
+))
 GRASP_YAW_ADJUSTMENT_RAD = math.radians(14.0)
 GRASP_LIFT_SCALE = 1.65
 FIXED_GRASP_LIFTS_RIGHT_RAD = (
@@ -78,13 +87,15 @@ class OfflineLayoutGenerator:
             rng.uniform(*self.generation["robot_initial_y_range"]),
             0.0,
         )
+        profiles = self.generation["object_region_profiles"]
+        profile = profiles[rng.randrange(len(profiles))]
         positions = tuple(
             (
                 rng.uniform(*region["x"]),
                 rng.uniform(*region["y"]),
                 OBJECT_Z,
             )
-            for region in self.generation["object_regions"]
+            for region in profile["regions"]
         )
         cylinders = tuple({
             "position": position,
@@ -102,28 +113,9 @@ class OfflineLayoutGenerator:
                         - cylinders[second]["position"][1]
                 ) < minimum_transverse:
                     return None
-        # Keep the object stream stable when only the spawn-safety range is
-        # revised.  A separate deterministic stream selects the working X.
-        task_rng = random.Random(int(seed) ^ 0x5441534B)
-        sampled_task_base = (
-            task_rng.uniform(*self.generation["robot_task_x_range"]),
-            initial_base[1],
-            0.0,
-        )
-        return initial_base, sampled_task_base, cylinders
-
-    @staticmethod
-    def preferred_base(initial_base, cylinders):
-        mean_y = sum(item["position"][1] for item in cylinders) / len(cylinders)
-        # Do not let object reachability move the base beyond the left-hand
-        # clearance limit at the transverse conveyor.  The sampled object
-        # world-X range is already the verified arm-reachable range, so do not
-        # derive another fore/aft stance from its maximum coordinate.
-        return (
-            FORWARD_CAP_X,
-            min(0.160, max(-0.160, mean_y + 0.196)),
-            0.0,
-        )
+        task_base = tuple(
+            float(value) for value in self.generation["direct_task_base"])
+        return initial_base, task_base, cylinders, profile["name"]
 
     def solve(self, target, seed):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -135,7 +127,16 @@ class OfflineLayoutGenerator:
             ))
         achieved = np.asarray(
             self.scene_ik.closed_grasp_center_world(solution))
-        return solution, float(np.linalg.norm(achieved - target))
+        target_rotation = R.from_quat(self.orientation)
+        achieved_rotation = R.from_matrix(
+            self.scene_ik.eef_rotation_world(solution))
+        orientation_error_deg = math.degrees(np.linalg.norm(
+            (target_rotation.inv() * achieved_rotation).as_rotvec()))
+        return (
+            solution,
+            float(np.linalg.norm(achieved - target)),
+            orientation_error_deg,
+        )
 
     def path_clear(self, start, target, hand):
         for phase in np.linspace(0.0, 1.0, 21):
@@ -165,91 +166,162 @@ class OfflineLayoutGenerator:
                 safe_base, task_base, RIGHT_ARM_READY, OPEN_HAND)
         )
 
-    def task_clear(self, base, cylinders):
+    def source_plan(self, base, cylinder, index):
         self.scene_ik.set_base_translation_world(base)
+        grasp_target = (
+            np.asarray(cylinder["position"])
+            - GRASP_TRACKING_BIASES_WORLD[index])
+        grasp, error, orientation_error_deg = self.solve(
+            grasp_target, RIGHT_ARM_STAGING)
+        if (error > MAX_POSITION_ERROR or
+                orientation_error_deg > MAX_SOURCE_ORIENTATION_ERROR_DEG or
+                not self.path_clear(
+                    RIGHT_ARM_STAGING, grasp, OPEN_HAND)):
+            return None
+        lifted = (
+            grasp + GRASP_LIFT_SCALE * FIXED_GRASP_LIFTS_RIGHT_RAD[index])
+        if np.any(lifted < self.scene_ik.lower) or np.any(
+                lifted > self.scene_ik.upper):
+            return None
+        grasp_z = self.scene_ik.closed_grasp_center_world(grasp)[2]
+        lifted_z = self.scene_ik.closed_grasp_center_world(lifted)[2]
+        object_bottom = (
+            cylinder["position"][2] + lifted_z - grasp_z
+            - OBJECT_HALF_HEIGHT)
+        if object_bottom < SOURCE_WALL_TOP_Z + LIFT_CLEARANCE:
+            return None
+        if not self.path_clear(grasp, lifted, CLOSED_HAND):
+            return None
+        return grasp, lifted, error, orientation_error_deg
+
+    def drop_clear(self, base, lifted, index):
+        self.scene_ik.set_base_translation_world(base)
+        drop_target = np.array((
+            TARGET_BIN_CENTER_XY[0] + DROP_CENTER_OFFSETS[index][0],
+            TARGET_BIN_CENTER_XY[1] + DROP_CENTER_OFFSETS[index][1],
+            DROP_GRASP_CENTER_Z,
+        ))
+        drop, error, _ = self.solve(drop_target, lifted)
+        if (error > MAX_POSITION_ERROR or
+                not self.path_clear(lifted, drop, CLOSED_HAND)):
+            return None
+        return error
+
+    def blue_plan_at_base(self, task_base, cylinder, blue_base):
+        if not self.base_path_clear(
+                task_base, blue_base, RIGHT_ARM_STAGING, OPEN_HAND):
+            return None
+        source = self.source_plan(blue_base, cylinder, 2)
+        if source is None:
+            return None
+        _, lifted, error, orientation_error_deg = source
+        if not self.base_path_clear(
+                blue_base, task_base, lifted, CLOSED_HAND):
+            return None
+        drop_error = self.drop_clear(task_base, lifted, 2)
+        if drop_error is None:
+            return None
+        return {
+            "base": blue_base,
+            "source_error": error,
+            "source_orientation_error_deg": orientation_error_deg,
+            "drop_error": drop_error,
+        }
+
+    def blue_plan_at_shift(self, task_base, cylinder, shift):
+        blue_base = (
+            task_base[0], task_base[1] + shift, task_base[2])
+        return self.blue_plan_at_base(task_base, cylinder, blue_base)
+
+    def layout_plan(self, task_base, cylinders):
+        grasp_bases = [task_base, task_base, None]
         maximum_error = 0.0
-        for index, cylinder in enumerate(cylinders):
-            grasp_target = (
-                np.asarray(cylinder["position"])
-                - GRASP_TRACKING_BIAS_WORLD)
-            grasp, error = self.solve(grasp_target, RIGHT_ARM_READY)
-            maximum_error = max(maximum_error, error)
-            if (error > MAX_POSITION_ERROR or
-                    not self.path_clear(RIGHT_ARM_READY, grasp, OPEN_HAND)):
+        maximum_orientation_error_deg = 0.0
+
+        for index in (0, 1):
+            source = self.source_plan(task_base, cylinders[index], index)
+            if source is None:
                 return None
-            lifted = (
-                grasp
-                + GRASP_LIFT_SCALE * FIXED_GRASP_LIFTS_RIGHT_RAD[index])
-            if np.any(lifted < self.scene_ik.lower) or np.any(
-                    lifted > self.scene_ik.upper):
+            _, lifted, error, orientation_error_deg = source
+            drop_error = self.drop_clear(task_base, lifted, index)
+            if drop_error is None:
                 return None
-            grasp_z = self.scene_ik.closed_grasp_center_world(grasp)[2]
-            lifted_z = self.scene_ik.closed_grasp_center_world(lifted)[2]
-            object_bottom = (
-                cylinder["position"][2] + lifted_z - grasp_z
-                - OBJECT_HALF_HEIGHT)
-            if object_bottom < SOURCE_WALL_TOP_Z + LIFT_CLEARANCE:
-                return None
-            if not self.path_clear(grasp, lifted, CLOSED_HAND):
-                return None
-            drop_target = np.array((
-                TARGET_BIN_CENTER_XY[0] + DROP_CENTER_OFFSETS[index][0],
-                TARGET_BIN_CENTER_XY[1] + DROP_CENTER_OFFSETS[index][1],
-                DROP_GRASP_CENTER_Z,
-            ))
-            drop, error = self.solve(drop_target, lifted)
-            maximum_error = max(maximum_error, error)
-            if (error > MAX_POSITION_ERROR or
-                    not self.path_clear(lifted, drop, CLOSED_HAND)):
-                return None
-        return maximum_error
+            maximum_error = max(maximum_error, error, drop_error)
+            maximum_orientation_error_deg = max(
+                maximum_orientation_error_deg, orientation_error_deg)
+
+        # Blue samples are intentionally outside the direct-grasp set.
+        if self.source_plan(task_base, cylinders[2], 2) is not None:
+            return None
+
+        shift_min, shift_max = self.generation["blue_left_shift_range"]
+        shift_step = float(self.generation["blue_left_shift_step"])
+        shift_margin = float(self.generation["blue_left_shift_margin"])
+        shift_count = int(round((shift_max - shift_min) / shift_step)) + 1
+        minimum_feasible_shift = None
+        for step in range(shift_count):
+            shift = shift_min + step * shift_step
+            if self.blue_plan_at_shift(task_base, cylinders[2], shift):
+                minimum_feasible_shift = shift
+                break
+
+        if minimum_feasible_shift is None:
+            return None
+
+        # Do not command the first just-feasible grid point. Move farther
+        # left to absorb chassis undershoot and execution/model mismatch, then
+        # validate the final commanded pose through the same complete plan.
+        commanded_shift = minimum_feasible_shift + shift_margin
+        blue_plan = self.blue_plan_at_shift(
+            task_base, cylinders[2], commanded_shift)
+        if blue_plan is None:
+            return None
+        grasp_bases[2] = blue_plan["base"]
+        maximum_error = max(
+            maximum_error,
+            blue_plan["source_error"],
+            blue_plan["drop_error"],
+        )
+        maximum_orientation_error_deg = max(
+            maximum_orientation_error_deg,
+            blue_plan["source_orientation_error_deg"],
+        )
+        return {
+            "grasp_bases": grasp_bases,
+            "blue_minimum_feasible_shift_m": minimum_feasible_shift,
+            "blue_shift_margin_m": shift_margin,
+            "maximum_error": maximum_error,
+            "maximum_orientation_error_deg": (
+                maximum_orientation_error_deg),
+        }
 
     def generate(self, seed):
         sampled = self.sample(seed)
         if sampled is None:
             return None
-        initial_base, sampled_task_base, cylinders = sampled
-        def evaluate(task_base):
-            maximum_error = self.task_clear(task_base, cylinders)
-            if (maximum_error is None or
-                    not self.initialization_clear(initial_base, task_base)):
-                return None
-            return maximum_error
-
-        task_base = sampled_task_base
-        maximum_error = evaluate(task_base)
-        if maximum_error is None:
-            preferred = self.preferred_base(initial_base, cylinders)
-            maximum_error = evaluate(preferred)
-            if maximum_error is None:
-                return None
-            lower = 0.0
-            upper = 1.0
-            task_base = preferred
-            for _ in range(4):
-                phase = 0.5 * (lower + upper)
-                candidate = tuple(
-                    sampled_task_base[index]
-                    + phase * (preferred[index] - sampled_task_base[index])
-                    for index in range(3)
-                )
-                candidate_error = evaluate(candidate)
-                if candidate_error is None:
-                    lower = phase
-                else:
-                    upper = phase
-                    task_base = candidate
-                    maximum_error = candidate_error
+        initial_base, task_base, cylinders, profile_name = sampled
+        if not self.initialization_clear(initial_base, task_base):
+            return None
+        plan = self.layout_plan(task_base, cylinders)
+        if plan is None:
+            return None
 
         return {
             "seed": int(seed),
             "initial_base": list(initial_base),
             "task_base": list(task_base),
+            "profile": profile_name,
+            "grasp_bases": [list(base) for base in plan["grasp_bases"]],
+            "blue_minimum_feasible_shift_m": (
+                plan["blue_minimum_feasible_shift_m"]),
+            "blue_shift_margin_m": plan["blue_shift_margin_m"],
             "cylinders": [{
                 "position": list(item["position"]),
                 "yaw": item["yaw"],
             } for item in cylinders],
-            "offline_maximum_ik_error_m": maximum_error,
+            "offline_maximum_ik_error_m": plan["maximum_error"],
+            "offline_maximum_source_orientation_error_deg": (
+                plan["maximum_orientation_error_deg"]),
         }
 
 

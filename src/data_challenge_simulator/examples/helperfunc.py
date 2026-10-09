@@ -286,6 +286,8 @@ def ensure_clean_simulator_graph(task_id, timeout=10.0):
         print("[INFO] Cleared stale simulator initial state")
     except KeyError:
         pass
+    except ConnectionRefusedError:
+        print("[INFO] ROS master unavailable; skipping stale parameter cleanup")
 
 def record_topics(task_id):
     if task_id == 2:
@@ -617,21 +619,8 @@ def _run_once(
     finally:
         recording_service.shutdown('round complete')
         if task_completed:
-            # Only a naturally completed task needs its final compatibility
-            # sample and score.  On interruption, stop command publishers first.
-            try:
-                rospy.wait_for_service(
-                    '/rosbag_compat/publish_current_base_command', timeout=2.0)
-                response = rospy.ServiceProxy(
-                    '/rosbag_compat/publish_current_base_command', Trigger)()
-                if response.success:
-                    print("[INFO] Recorded final /cmd_pose_world compatibility sample")
-                    time.sleep(0.5)
-                else:
-                    print(f"[WARNING] Failed to publish /cmd_pose_world: {response.message}")
-            except (rospy.ROSException, rospy.ServiceException) as error:
-                print(f"[WARNING] Failed to call cmd-pose compatibility service: {error}")
-
+            # Finalize the score without issuing any new motion target.
+            # On interruption, stop command publishers first.
             stop_scorer(task_id, round_id, scorer_process, score_file)
 
         # 停止 rosbag 和 simulation。放在 finally 里：Ctrl+C 打断等待时

@@ -13,7 +13,7 @@ Scene 1 delivery entry point (run every command on the Docker host)
 
 One-time setup:
   ./scene1.sh setup
-  ./scene1.sh build
+  ./scene1.sh build [-j N]
 
 Run and collect:
   ./scene1.sh task [SEED]                  Run once with a MuJoCo window, no bag
@@ -124,6 +124,20 @@ allow_container_gui() {
 }
 
 build_workspace() {
+  local jobs=8
+  case "$#" in
+    0) ;;
+    1)
+      [[ "$1" == -j* ]] || die "Usage: ./scene1.sh build [-j N]"
+      jobs="${1#-j}"
+      ;;
+    2)
+      [[ "$1" == "-j" ]] || die "Usage: ./scene1.sh build [-j N]"
+      jobs="$2"
+      ;;
+    *) die "Usage: ./scene1.sh build [-j N]" ;;
+  esac
+  require_positive_int "${jobs}" "build jobs"
   ensure_container_running
   stop_task
   docker exec -i \
@@ -133,13 +147,12 @@ build_workspace() {
       set -e
       source /opt/ros/noetic/setup.bash
       cd /root/kuavo_ws
-      # kuavo_assets writes ImuType.ini here during a first-time build.
       mkdir -p /root/.config/lejuconfig
       source scripts/prepare_opensource_build.sh
       catkin build kuavo_msgs mujoco_cpp humanoid_controllers \
-        data_challenge_simulator --no-status -j2 \
+        data_challenge_simulator --no-status -j"$1" \
         --cmake-args -Dpybind11_DIR=/opt/drake/lib/cmake/pybind11
-    '
+    ' bash "${jobs}"
 }
 
 require_built_workspace() {
@@ -306,7 +319,7 @@ case "${mode}" in
     setup_container
     ;;
   build)
-    build_workspace
+    build_workspace "${@:2}"
     ;;
   task)
     run_task 0 "${2:-1}"

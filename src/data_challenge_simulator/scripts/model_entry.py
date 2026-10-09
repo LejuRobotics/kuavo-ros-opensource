@@ -40,6 +40,7 @@ from utils.shutdown_guard import (
     clear_simulator_nodes,
     clear_stale_processes,
 )
+from utils.model_master import ModelMaster
 
 
 MODEL_LAUNCH_FILES = {
@@ -138,10 +139,18 @@ def ensure_clean_graph(task_id, timeout=10.0):
 
     An interrupted round leaves its nodelets registered with the master.  They
     used to make the next round refuse to start; clearing them here means a
-    round always gets a clean graph, exactly as helperfunc.py does.
+    round always gets a clean graph, exactly as helperfunc.py does.  The ROS
+    master also outlives each roslaunch, so remove the old qpos-ready parameter
+    only after its writer is gone.  Otherwise the next controller consumes the
+    previous round's base spawn before the new MuJoCo node can publish its own.
     """
     clear_stale_processes(task_id)
     clear_simulator_nodes(timeout=timeout)
+    try:
+        rospy.delete_param("/robot_init_state_param")
+        print("[INFO] Cleared stale simulator initial state", flush=True)
+    except KeyError:
+        pass
 
 
 def wait_for_topic(topic, timeout):
@@ -221,9 +230,12 @@ def initialize_task2(robot, robot_state, seed, trajectory):
     config = load_config(DEFAULT_CONFIG)
     pick_config = load_config(
         os.path.join(PACKAGE_DIR, "config/task2_pick.json"))
-    chassis = make_chassis(SimpleNamespace(
-        linear_speed=0.08, minimum_linear_speed=0.06,
-        position_tolerance=0.03))
+    chassis = make_chassis(
+        SimpleNamespace(
+            linear_speed=None,
+            minimum_linear_speed=0.06,
+            position_tolerance=0.03),
+        config)
     try:
         return run_initialization(
             robot, robot_state, chassis, config, DEFAULT_SCENE,
@@ -264,7 +276,7 @@ def initialize_task3(robot, robot_state, seed, trajectory):
 
     wait_for_controller_initialization()
     chassis = ChassisMotion(
-        linear_speed=0.08, angular_speed=0.20, minimum_linear_speed=0.06,
+        linear_speed=0.20, angular_speed=0.20, minimum_linear_speed=0.08,
         minimum_angular_speed=0.06, position_tolerance=0.03,
         yaw_tolerance_deg=3.0)
     chassis.wait_until_ready(timeout=30.0)
@@ -341,6 +353,9 @@ class EvaluationProtocol:
         self.score_file = None
         self.score_finish_reason = None
         self.round_complete = False
+        self.evaluation_started = False
+        self.infrastructure_failure = None
+        self.invalid_round = False
         self._reset_running = False
         self.observer = None
         self.observer_thread = None
@@ -387,22 +402,11 @@ class EvaluationProtocol:
             initialization_trajectory.stop()
 
         # control_arm_joint_positions() switches to ExternalControl as a side
-        # effect. Close that input before any task-specific base preparation.
+        # effect. Close that input before handing control to the model.
         self._close_external_arm_input()
-        from utils.model_base_motion import make_model_base_initializer
-        base_initializer = make_model_base_initializer(
-            self.task_id, self.seed)
-        # Task 1/2 are already at their table-front initialization pose. Task 3
-        # additionally docks at its first saved ring before model handoff.
-        try:
-            base_initializer.prepare()
-        finally:
-            # If the task opened a chassis endpoint, publish its final zero
-            # command and unregister it before the external model is admitted.
-            base_initializer.close()
 
-        # Completion means fixed preprocessing and any task-specific base
-        # preparation are done.
+        # Completion means the fixed task initialization is done. Episode-time
+        # navigation, including Task 3 ring docking, belongs to the model.
         # Open the arm/hand command path before ready: a model that uses ready
         # as its only barrier must never observe True while initialization
         # still owns either control path.
@@ -431,7 +435,7 @@ class EvaluationProtocol:
             "model entry: controller ready; starting fixed initialization")
 
     def _close_external_arm_input(self):
-        """Hold initialized arms while moving to the seed docking pose."""
+        """Hold the initialized arm pose until model handover."""
         try:
             closed = self.robot.set_fixed_arm_mode()
         except Exception as error:
@@ -619,7 +623,15 @@ class EvaluationProtocol:
         harness calls ``/simulator/start`` from inside its episode, after this
         handler has already returned.
         """
-        self._finalize_score("reset")
+        try:
+            self._finalize_score("reset")
+        except Exception as error:
+            self._invalidate_active_round(
+                "score finalization failed during reset: {}".format(error))
+            return TriggerResponse(
+                success=False,
+                message="score finalization failed; operator action is "
+                        "required")
         with self.lock:
             if self._reset_running:
                 return TriggerResponse(
@@ -664,9 +676,14 @@ class EvaluationProtocol:
                     ROUND_READY_TIMEOUT))
         with self.lock:
             self.episode_started = True
+            self.evaluation_started = True
             self.round_complete = False
         self.publish_success(False)
-        self._ensure_observer()
+        if not self._ensure_observer():
+            return TriggerResponse(
+                success=False,
+                message="scoring infrastructure failed; operator action "
+                        "is required")
         return TriggerResponse(success=True, message="episode started")
 
     def _ensure_observer(self):
@@ -686,13 +703,38 @@ class EvaluationProtocol:
             except Exception as error:
                 rospy.logerr(
                     "model entry: success observer unavailable, "
-                    "/simulator/success will never report True: %s", error)
-                return
+                    "the round is invalid and requires operator action: %s",
+                    error)
+                self._invalidate_active_round(
+                    "success observer unavailable: {}".format(error))
+                return False
         if self.observer_thread is not None and self.observer_thread.is_alive():
-            return
+            return True
         self.observer_thread = threading.Thread(target=self._watch_success)
         self.observer_thread.daemon = True
         self.observer_thread.start()
+        return True
+
+    def _invalidate_active_round(self, reason):
+        """Stop a broken scored round and leave recovery to the operator.
+
+        Startup and initialization failures are safe to retry internally before
+        an episode is accepted.  Once /simulator/start succeeds, silently
+        relaunching would leave the external harness running the retired
+        episode.  Mark the score invalid, close command admission, and wake the
+        main supervisor so it can exit loudly instead.
+        """
+        with self.lock:
+            if self.infrastructure_failure is None:
+                self.infrastructure_failure = str(reason)
+            self.invalid_round = True
+            self.episode_started = False
+        # Wake the supervisor even if ROS is already degraded enough that one
+        # of the diagnostic/gating publishes below raises.
+        self.relaunch.set()
+        self.publish_success(False)
+        self.ready_publisher.publish(Bool(data=False))
+        self.command_accept_publisher.publish(Bool(data=False))
 
     def _drop_observer(self):
         """Release the previous round's observer, if any."""
@@ -708,7 +750,12 @@ class EvaluationProtocol:
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
         self.observer_thread = None
-        self._finalize_score("shutdown")
+        if self.invalid_round:
+            rospy.logerr(
+                "model entry: discarding invalid task %d seed %d round: %s",
+                self.task_id, self.round_seed, self.infrastructure_failure)
+        else:
+            self._finalize_score("shutdown")
         self._drop_observer()
         # rospy.init_node is reused across roslaunch rounds, so these services
         # outlive the child process group unless they are explicitly removed.
@@ -720,18 +767,17 @@ class EvaluationProtocol:
         observer = self.observer
         if observer is None:
             return None
+        # A successful episode is finalized by the watcher before the harness
+        # asks for reset.  Do not run the scorer or session accumulator again
+        # on that later reset/shutdown path.
+        if self.score_finish_reason is not None:
+            return None
         result = observer.finish()
         if result is None:
             return None
         total, components = result
-        if self.score_finish_reason is None:
-            self.score_finish_reason = reason
-            try:
-                self.score_store.annotate(self.score_file, reason)
-            except Exception as error:
-                rospy.logwarn(
-                    "model entry: score was written but metadata annotation "
-                    "failed for %s: %s", self.score_file, error)
+        self.score_store.annotate(self.score_file, reason)
+        self.score_finish_reason = reason
         rospy.loginfo(
             "model entry: task %d seed %d score=%d reason=%s components=%s "
             "file=%s",
@@ -753,13 +799,18 @@ class EvaluationProtocol:
                 continue
             try:
                 _state, complete = self.observer.sample()
-            except Exception as error:
-                rospy.logwarn_throttle(
-                    10.0, "model entry: success sample failed: %s", error)
-            else:
                 if complete:
                     self.round_complete = True
                     self._finalize_score("success")
+            except Exception as error:
+                rospy.logerr(
+                    "model entry: scoring failed; the round is "
+                    "invalid and requires operator action: %s", error)
+                self._invalidate_active_round(
+                    "scoring failed: {}".format(error))
+                return
+            else:
+                if complete:
                     rospy.loginfo(
                         "model entry: task %d success, publishing "
                         "/simulator/success=True", self.task_id)
@@ -782,8 +833,11 @@ def main():
         score_store = ModelScoreStore(args.task_id, args.model_name)
     except ValueError as error:
         parser.error(str(error))
-    print("[INFO] model entry: latest task score will overwrite {}".format(
-        score_store.score_file), flush=True)
+    print(
+        "[INFO] model entry: started a fresh score session; latest score={} "
+        "average={}".format(
+            score_store.score_file, score_store.average_file),
+        flush=True)
 
     # The seed is drawn here, not supplied by the model: it selects this
     # round's layout, exactly as helperfunc.py's --start-seed does.  It is
@@ -805,13 +859,16 @@ def main():
     # and that spawn is a roslaunch argument.  So each round owns a fresh
     # simulator process, and /simulator/reset starts the next one instead of
     # re-placing objects in place.
-    with ShutdownGuard(args.task_id) as guard:
+    with ModelMaster() as master, ShutdownGuard(args.task_id) as guard:
         while True:
+            # The master belongs to the session, never to a disposable round.
+            master.check()
             seed = round_seed
             process = None
             protocol = None
             round_error = None
             relaunching = False
+            manual_intervention = False
             try:
                 ensure_clean_graph(args.task_id)
                 base_x, base_y = initial_base_for(args.task_id, seed)
@@ -898,6 +955,8 @@ def main():
                 while (not rospy.is_shutdown() and process.poll() is None
                        and not protocol.relaunch.is_set()):
                     time.sleep(0.2)
+                if protocol.infrastructure_failure is not None:
+                    raise RuntimeError(protocol.infrastructure_failure)
                 if process.poll() is not None:
                     raise RuntimeError(
                         "model roslaunch exited with code {}".format(
@@ -906,15 +965,22 @@ def main():
                 print("[INFO] model entry: /simulator/reset -> starting round with "
                       "seed {}".format(round_seed), flush=True)
             except Exception as error:
-                # A broken topic, SDK/init failure, failed init callback, or
-                # dead roslaunch invalidates only this round.  Keep the outer
-                # model process alive so all three tasks can advance instead
-                # of requiring an operator restart.
+                # Before /simulator/start, a broken topic, SDK/init failure or
+                # failed init callback invalidates only the disposable startup
+                # attempt.  After scoring starts, an automatic relaunch would
+                # desynchronise the external harness from its active episode;
+                # make that failure loud and require operator intervention.
                 round_error = error
+                manual_intervention = bool(
+                    protocol is not None and protocol.evaluation_started)
+                if manual_intervention:
+                    protocol._invalidate_active_round(error)
                 print(
                     "[ERROR] model entry: task {} seed {} failed before "
-                    "teardown: {}; the round will be skipped".format(
-                        args.task_id, seed, error),
+                    "teardown: {}; {}".format(
+                        args.task_id, seed, error,
+                        "operator action is required" if manual_intervention
+                        else "the startup attempt will be skipped"),
                     file=sys.stderr, flush=True)
             finally:
                 # Read the relaunch request *before* shutdown(), which sets it.
@@ -930,6 +996,8 @@ def main():
                             file=sys.stderr, flush=True)
                         if round_error is None:
                             round_error = cleanup_error
+                            manual_intervention = bool(
+                                protocol.evaluation_started)
                 # Ctrl+C during the topic waits or the initialization above
                 # unwinds through here with the simulator still up, so this
                 # teardown has to be the one that runs -- the guard keeps a
@@ -948,6 +1016,11 @@ def main():
                             pass
 
             if round_error is not None:
+                # A lost master invalidates the evaluation session, not just
+                # one layout. Do not silently recreate its registration graph.
+                master.check()
+                if manual_intervention:
+                    raise round_error
                 if rospy.is_shutdown():
                     break
                 # Honour a harness reset that raced the failed initialization.

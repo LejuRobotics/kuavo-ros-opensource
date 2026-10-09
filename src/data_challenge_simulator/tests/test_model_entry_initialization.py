@@ -60,21 +60,19 @@ def test_model_entry_waits_for_controller_before_fixed_initialization():
         "INITIALIZERS[self.task_id](")
 
 
-def test_external_commands_open_only_after_initialization_and_seed_docking():
+def test_external_commands_open_only_after_fixed_initialization():
     source = ENTRY.read_text()
     initialize = source.index("def _initialize(self):")
     body = source[initialize:source.index("def publish_success(self, value):")]
     fixed = body.index("INITIALIZERS[self.task_id](")
     close_gate = body.index("self._close_external_arm_input()")
-    dock = body.index("base_initializer.prepare()")
-    release = body.index("base_initializer.close()")
     complete = body.index("self.ready_publisher.publish(Bool(data=True))")
     handover = body.index("self._hand_over_arm_control()")
     accept = body.index(
         "self.command_accept_publisher.publish(Bool(data=bool(handed_over)))")
     failure_gate = body.index('if not handed_over:')
-    assert (fixed < close_gate < dock < release < handover < accept
-            < failure_gate < complete)
+    assert (fixed < close_gate < handover < accept < failure_gate < complete)
+    assert "base_initializer" not in body
     assert '"/model_simulator/accept_commands"' in source
 
 
@@ -83,6 +81,21 @@ def test_model_entry_passes_seed_derived_initial_base_to_roslaunch():
     assert "initial_base_for(args.task_id, seed)" in source
     assert '"initial_base_x:={:.9f}".format(base_x)' in source
     assert '"initial_base_y:={:.9f}".format(base_y)' in source
+
+
+def test_model_entry_clears_stale_initial_state_before_each_roslaunch():
+    source = ENTRY.read_text()
+    cleanup = source[source.index("def ensure_clean_graph("):
+                     source.index("def wait_for_topic(")]
+    main = source[source.index("def main():"):
+                  source.index('if __name__ == "__main__":')]
+
+    assert 'rospy.delete_param("/robot_init_state_param")' in cleanup
+    assert cleanup.index("clear_stale_processes(task_id)") < cleanup.index(
+        "clear_simulator_nodes(timeout=timeout)") < cleanup.index(
+            'rospy.delete_param("/robot_init_state_param")')
+    assert main.index("ensure_clean_graph(args.task_id)") < main.index(
+        "subprocess.Popen(")
 
 
 def test_model_entry_waits_for_post_reset_mpc_observation():
@@ -150,24 +163,38 @@ def test_task1_model_initializer_is_independent_of_full_task_policy():
     assert "from task1_v2 import" not in task1_initialize
 
 
-def test_task1_model_ready_values_match_the_accepted_task():
+def test_task1_model_shared_initialization_values_match_the_task_entry():
     model_values = _literal_assignments(INIT)
-    accepted_values = _literal_assignments(TASK1)
+    task_values = _literal_assignments(TASK1)
     for name in (
             "ARM_JOINT_COUNT", "CYLINDERS", "TARGET_BIN",
             "INITIALIZATION_SAFE_RETREAT_M", "SHOULDER_LIFT_DEG",
-            "RIGHT_ARM_READY_RAD", "RIGHT_ARM_READY_FULL_RAD",
-            "TRAJECTORY_POINTS", "CHASSIS_LINEAR_SPEED",
+            "RIGHT_ARM_STAGING_RAD", "RIGHT_ARM_STAGING_ABOVE_RAD",
+            "TRAJECTORY_POINTS", "STAGING_DESCENT_TRAJECTORY_POINTS",
+            "CHASSIS_LINEAR_SPEED",
             "CHASSIS_ANGULAR_SPEED", "CHASSIS_MIN_LINEAR_SPEED",
             "CHASSIS_MIN_ANGULAR_SPEED", "CHASSIS_POSITION_TOLERANCE",
             "CHASSIS_YAW_TOLERANCE_DEG"):
-        assert model_values[name] == accepted_values[name], name
+        assert model_values[name] == task_values[name], name
 
 
-def test_task1_model_base_initializer_has_no_episode_route():
+def test_task1_model_uses_the_task_entry_staging_postures():
+    model_values = _literal_assignments(INIT)
+    task_values = _literal_assignments(TASK1)
+    assert model_values["RIGHT_ARM_STAGING_RAD"] == \
+        task_values["RIGHT_ARM_STAGING_RAD"]
+    assert model_values["RIGHT_ARM_STAGING_ABOVE_RAD"] == \
+        task_values["RIGHT_ARM_STAGING_ABOVE_RAD"]
+    assert "RIGHT_ARM_READY_RAD" not in model_values
+    assert "RIGHT_ARM_READY_FULL_RAD" not in model_values
+
+
+def test_model_base_helper_has_no_task_specific_route():
     source = MODEL_BASE.read_text()
     assert "from task1_v2 import" not in source
-    assert "class Task1ModelBaseInitializer" in source
+    assert "Task3ModelBaseInitializer" not in source
+    assert "Task3RandomizationPlanner" not in source
+    assert "docking_base" not in source
     assert "TASK1_LEVER_BASE_WORLD" not in source
 
 
@@ -192,10 +219,10 @@ def test_task1_initialize_sequence_matches_the_accepted_order():
         "place_scene(randomizer, seed, chassis)",
         'move_base_open_loop(chassis, safe_base_world, "safe retreat")',
         "shoulder_only_deg[8] = -SHOULDER_LIFT_DEG",
-        "ready_deg[7:11] = [",
-        "full_ready_deg[7:14] = [",
+        "staging_above_deg[7:14] = [",
         "move_base_open_loop(\n            chassis, base_translation_world, "
         '"return to B0")',
+        "staging_deg[7:14] = [",
     ]
     positions = [source.index(token) for token in order]
     assert positions == sorted(positions), "initialization order changed"
@@ -213,7 +240,7 @@ def test_task1_v2_is_not_modified_by_the_model_entry():
     """The accepted task entry must keep performing its own initialization."""
     source = TASK1.read_text()
     assert "measured_safe_base = _move_base_with_wheels(" in source
-    assert 'latch_achieved_right_target("v2_ready_after_return_to_b0")' in source
+    assert 'latch_achieved_right_target("v2_staging_after_return_to_b0")' in source
 
 
 def test_task1_waits_for_a_real_sensor_message_before_arm_publishing():

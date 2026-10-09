@@ -33,6 +33,8 @@ class RandomizationPlan:
     initial_base: tuple
     task_base: tuple
     cylinders: tuple
+    grasp_bases: tuple
+    profile: str
 
     @property
     def requires_base_motion(self):
@@ -75,4 +77,9 @@ class Task1V2RandomizationPlanner:
                 )
                 for cylinder in layout["cylinders"]
             ),
+            grasp_bases=tuple(
+                tuple(base) for base in layout.get(
+                    "grasp_bases",
+                    [layout["task_base"]] * OBJECT_COUNT)),
+            profile=str(layout.get("profile", "legacy_direct")),
         )

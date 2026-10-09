@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Run the canonical Task 1 right-arm pick/place and lever workflow."""
 
+import json
 import math
 import os
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import rospy
@@ -24,6 +26,7 @@ from utils.scene1_v2_right_arm_ik import Scene1V2RightArmIK
 from utils.scorer_clock import start_score_clock
 from utils.arm_state import wait_for_first_arm_state
 from utils.task1_v2_randomization import Task1V2RandomizationPlanner
+from utils.task1_grasp_diagnostics import Task1GraspDiagnosticRecorder
 from utils.trajectory_controller import TrajectoryController
 from utils.utils import Utils
 
@@ -49,12 +52,16 @@ TARGET_MAX = (0.4075, -0.4708, 0.590)
 # about 2--4 mm below the cylinder centre.  Y is pose-dependent: each source
 # region needs the closing fingers to approach from the same safe side.
 GRASP_TRACKING_BIASES_WORLD = (
-    (0.002, 0.014, 0.010),
+    (0.002, 0.010, 0.010),
     (0.002, 0.010, 0.010),
     (0.002, 0.005, 0.010),
 )
 GRASP_CLOSURE_CMD = 255
 GRASP_YAW_ADJUSTMENT_RAD = math.radians(14.0)
+# The offline layout already stores its validated minimum plus 4 cm.  Add the
+# user's extra leftward allowance only at execution time so this does not
+# regenerate or reclassify any accepted layout.
+BLUE_RUNTIME_LEFT_SHIFT_MARGIN_M = 0.02
 
 # Current-URDF source-grasp calibration from three settled Task1 poses.  Only
 # r5/r7 showed material tracking error; invert their measured affine response
@@ -87,11 +94,30 @@ FIXED_GRASP_LIFTS_RIGHT_RAD = (
 ARM_JOINT_COUNT = 14
 HEAD_SCAN_PITCH_RAD = math.radians(20.0)
 SHOULDER_LIFT_DEG = 60.0
-RIGHT_ARM_READY_RAD = (-1.0, -0.5, 1.0, -1.4)
+# Keep the accepted grasp/lever orientation reference independent from the
+# lower task-only staging posture used before each source grasp.
 RIGHT_ARM_READY_FULL_RAD = (-0.9, -0.265, 1.0, -0.8, 0.58, -0.4, 0.35)
-TRAJECTORY_POINTS = 80
-IK_TRAJECTORY_POINTS = 200
-GRASP_LIFT_TRAJECTORY_POINTS = 80
+RIGHT_ARM_STAGING_RAD = (
+    -0.569927, -0.301512, 0.658253, -0.488704,
+    0.698827, -0.653404, -0.289423,
+)
+# Same nearby workspace and wrist attitude as staging, with the closed-grasp
+# centre 0.10 m higher.  This waypoint keeps the joint-space route from the
+# shoulder-clearance pose above the source-bin and lever obstacles.
+RIGHT_ARM_STAGING_ABOVE_RAD = (
+    -0.466591, -0.579416, 0.652630, -1.211603,
+    0.699260, -0.286390, 0.045867,
+)
+TRAJECTORY_POINTS = 40
+# Once Task1 has latched a cylinder, its collision is disabled and it follows
+# the hand kinematically.  Keep this low-risk loaded transport short; source
+# approach and near-bin lift use their own, slower point counts below.
+TARGET_TRANSPORT_TRAJECTORY_POINTS = 30
+SOURCE_GRASP_TRAJECTORY_POINTS = 80
+SOURCE_GRASP_SETTLE_SECONDS = 0.3
+STAGING_RETURN_TRAJECTORY_POINTS = 40
+STAGING_DESCENT_TRAJECTORY_POINTS = 40
+GRASP_LIFT_TRAJECTORY_POINTS = 30
 # Scaling the accepted fixed-joint lift from 1.20 to 1.65 raises the measured
 # grasp centre by about 53--55 mm for both source objects.
 GRASP_LIFT_SCALE = 1.65
@@ -100,13 +126,13 @@ GRASP_LIFT_SCALE = 1.65
 # scene: world -X and +Y.  Reducing world Y from 0.30 m to 0.20 m makes the
 # complete handle-relative wrist rotation reachable through 30 degrees.
 LEVER_BASE_WORLD = (-0.20, 0.20, 0.0)
-# Closed-loop wheel-drive base motion (same contract as Task 2/3): the
-# physical wheels roll and the returned pose is the MEASURED one, never the
-# nominal target.  Speeds/tolerances mirror the accepted Task 2 values.
-CHASSIS_LINEAR_SPEED = 0.08
-CHASSIS_ANGULAR_SPEED = 0.20
-CHASSIS_MIN_LINEAR_SPEED = 0.06
-CHASSIS_MIN_ANGULAR_SPEED = 0.06
+# Closed-loop wheel-drive base motion: the physical wheels roll and the
+# returned pose is the MEASURED one, never the nominal target.  Task 1 uses
+# faster task-local limits while retaining the accepted settle tolerances.
+CHASSIS_LINEAR_SPEED = 0.12
+CHASSIS_ANGULAR_SPEED = 0.30
+CHASSIS_MIN_LINEAR_SPEED = 0.08
+CHASSIS_MIN_ANGULAR_SPEED = 0.08
 CHASSIS_POSITION_TOLERANCE = 0.03
 CHASSIS_YAW_TOLERANCE_DEG = 3.0
 CHASSIS_MOVE_TIMEOUT_S = 30.0
@@ -123,6 +149,10 @@ LEVER_PATH_FINE_STEP_RAD = math.radians(0.2)
 # The last coarse target is capped here, then only 0.2-degree increments are
 # allowed while waiting for the source-bin handoff event.
 LEVER_PATH_FINE_START_RAD = math.radians(29.8)
+# Measured angles are noisy and logged to only 0.1 degree.  Without a small
+# switch tolerance, a settled 29.79-degree lever repeatedly receives the same
+# capped 29.8-degree target and is falsely classified as stalled.
+LEVER_PATH_FINE_START_TOLERANCE_RAD = math.radians(0.1)
 LEVER_PATH_SAFETY_MAX_RAD = math.radians(35.0)
 LEVER_PATH_MAX_ATTEMPTS = 60
 LEVER_PATH_MIN_PROGRESS_RAD = math.radians(0.2)
@@ -131,15 +161,17 @@ LEVER_PATH_MAX_STALLS = 5
 # continuation to use the extra physical joint travel it needs.
 LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION = 0.10
 LEVER_PATH_JOINT_LIMIT_MARGIN_FRACTION = 0.02
-LEVER_IK_PREPARE_TRAJECTORY_POINTS = 200
-LEVER_APPROACH_TRAJECTORY_POINTS = 200
-LEVER_CONTACT_TRAJECTORY_POINTS = 80
-LEVER_PATH_TRAJECTORY_POINTS = 30
-# One-time pre-IK posture measured immediately before the successful seed-2
-# lever solve.  It is only a physical preparation target: after reaching it,
-# the live achieved joints are read back and the normal lever IK still solves
-# the current world target for the current measured base pose.
-LEVER_IK_PREPARE_RIGHT_RAD = (
+LEVER_APPROACH_TRAJECTORY_POINTS = 30
+LEVER_CONTACT_TRAJECTORY_POINTS = 40
+LEVER_PATH_TRAJECTORY_POINTS = 8
+# Preserve approximately the same angular speed after the 29.8-degree
+# handoff edge.  Reusing the coarse point count for a 0.2-degree correction
+# would make each fine step take as long as a 2.5-degree pull.
+LEVER_PATH_FINE_TRAJECTORY_POINTS = 2
+# Successful lever-approach branch seed.  It is solver input only: the arm no
+# longer visits this old r7-limit posture before moving to the live-base IK
+# solution.
+LEVER_IK_BRANCH_SEED_RIGHT_RAD = (
     0.715789,
     -1.078706,
     -0.254394,
@@ -157,6 +189,62 @@ SOURCE_CONVEYOR_COMPLETE_TOPIC = (
 SOURCE_BIN_LATCH_RELEASED_TOPIC = (
     "/mujoco/source_bin_latch_released")
 SOURCE_CONVEYOR_TIMEOUT_S = 10.0
+
+
+class TaskTimingRecorder:
+    """Emit machine-readable Task 1 timings without changing control flow."""
+
+    def __init__(self):
+        self.task_started = time.monotonic()
+        self.score_started = None
+        self.segment_count = 0
+
+    @contextmanager
+    def segment(self, label, **details):
+        started = time.monotonic()
+        status = "ok"
+        try:
+            yield
+        except BaseException:
+            status = "error"
+            raise
+        finally:
+            ended = time.monotonic()
+            self.segment_count += 1
+            payload = {
+                "event": "segment",
+                "label": label,
+                "duration_s": round(ended - started, 6),
+                "task_elapsed_s": round(ended - self.task_started, 6),
+                "score_elapsed_s": (
+                    None if self.score_started is None
+                    else round(ended - self.score_started, 6)),
+                "status": status,
+            }
+            payload.update(details)
+            print("[TASK1_TIMING] {}".format(
+                json.dumps(payload, sort_keys=True)))
+
+    def mark_score_start(self, scorer_started):
+        self.score_started = time.monotonic()
+        print("[TASK1_TIMING] {}".format(json.dumps({
+            "event": "score_start",
+            "scorer_started": bool(scorer_started),
+            "task_elapsed_s": round(
+                self.score_started - self.task_started, 6),
+        }, sort_keys=True)))
+
+    def print_summary(self, success):
+        ended = time.monotonic()
+        print("[TASK1_TIMING_SUMMARY] {}".format(json.dumps({
+            "event": "summary",
+            "segment_count": self.segment_count,
+            "success": bool(success),
+            "task_elapsed_s": round(ended - self.task_started, 6),
+            "score_elapsed_s": (
+                None if self.score_started is None
+                else round(ended - self.score_started, 6)),
+        }, sort_keys=True)))
 
 
 class SourceBinReleaseMonitor:
@@ -183,6 +271,19 @@ def _compensate_source_grasp_joints(right_ik_rad):
         commanded[6] - GRASP_R7_ACTUAL_OFFSET_RAD
     ) / GRASP_R7_ACTUAL_PER_COMMAND
     return commanded
+
+
+def _quaternion_error_degrees(target_xyzw, actual_xyzw):
+    """Return the shortest angular distance between two quaternions."""
+    target_norm = math.sqrt(sum(value * value for value in target_xyzw))
+    actual_norm = math.sqrt(sum(value * value for value in actual_xyzw))
+    if target_norm == 0.0 or actual_norm == 0.0:
+        raise ValueError("orientation quaternion must be non-zero")
+    dot = sum(
+        target * actual
+        for target, actual in zip(target_xyzw, actual_xyzw)
+    ) / (target_norm * actual_norm)
+    return math.degrees(2.0 * math.acos(min(1.0, abs(dot))))
 
 
 def _initialize_left_thumb(gripper):
@@ -256,11 +357,14 @@ def _randomize_scene(randomizer, seed, chassis):
             raise RuntimeError(result["message"])
     print(
         "V2 seed {} selected precomputed layout {}: initial_base={} "
-        "task_base={} objects={}".format(
+        "task_base={} grasp_bases={} profile={} objects={}".format(
             seed,
             plan.catalogue_seed,
             [round(value, 6) for value in plan.initial_base],
             [round(value, 6) for value in plan.task_base],
+            [[round(value, 6) for value in base]
+             for base in plan.grasp_bases],
+            plan.profile,
             [[round(value, 6) for value in spawn.position]
              for spawn in plan.cylinders],
         ))
@@ -269,7 +373,7 @@ def _randomize_scene(randomizer, seed, chassis):
     if chassis.pose() is not None:
         print("V2 seed {} launch-time measured base pose: {}".format(
             seed, [round(value, 6) for value in chassis.pose()]))
-    return plan.task_base
+    return plan
 
 
 def _fully_in_target(position):
@@ -390,15 +494,20 @@ def _move_base_with_wheels(chassis, target_world):
 
 
 def main():
+    timing = TaskTimingRecorder()
+    diagnostics = None
     experiment_mode = os.environ.get("TASK_EXPERIMENT_MODE", "1") == "1"
-    if not KuavoSDK().Init(options=KuavoSDK.Options.WithIK):
+    with timing.segment("setup.sdk_init"):
+        sdk_initialized = KuavoSDK().Init(options=KuavoSDK.Options.WithIK)
+    if not sdk_initialized:
         raise RuntimeError("KuavoSDK initialization with IK failed")
 
-    robot = KuavoRobot()
-    robot_state = KuavoRobotState()
-    gripper = GripperController()
-    source_bin_release = SourceBinReleaseMonitor()
-    chassis = _make_chassis()
+    with timing.segment("setup.controllers"):
+        robot = KuavoRobot()
+        robot_state = KuavoRobotState()
+        gripper = GripperController()
+        source_bin_release = SourceBinReleaseMonitor()
+        chassis = _make_chassis()
     success = False
     trajectory = None
 
@@ -410,18 +519,31 @@ def main():
 
     try:
         seed = int(os.environ.get("TASK_SEED", "1"))
+        diagnostics = Task1GraspDiagnosticRecorder(seed)
+        diagnostics.write(
+            "round_start",
+            diagnostics_path=str(diagnostics.path.resolve()),
+            experiment_mode=experiment_mode,
+        )
+        print("[TASK1_DIAGNOSTICS] writing {}".format(
+            diagnostics.path.resolve()))
         randomizer = ObjectRandomizer(timeout=60.0)
-        base_translation_world = _randomize_scene(randomizer, seed, chassis)
+        with timing.segment("initialization.randomize_scene", seed=seed):
+            randomization_plan = _randomize_scene(
+                randomizer, seed, chassis)
+            base_translation_world = randomization_plan.task_base
 
         scene_ik = Scene1V2RightArmIK()
         scene_ik.set_base_translation_world(base_translation_world)
         print("V2 seed {} robot base translation: {}".format(
             seed, [round(value, 6) for value in base_translation_world]))
-        time.sleep(1.0)
+        with timing.segment("initialization.scene_settle_wait"):
+            time.sleep(1.0)
 
         poses = ObjectPose()
-        for name in CYLINDERS + (TARGET_BIN,):
-            poses.wait_for_position(name, timeout=60.0)
+        with timing.segment("initialization.object_pose_wait"):
+            for name in CYLINDERS + (TARGET_BIN,):
+                poses.wait_for_position(name, timeout=60.0)
         target_bin_position = poses.get_position(TARGET_BIN)
         print("V2 target bin live position: {}".format(
             [round(value, 6) for value in target_bin_position]))
@@ -439,8 +561,9 @@ def main():
                  for value in initialization_safe_base_world],
                 INITIALIZATION_SAFE_RETREAT_M,
             ))
-        measured_safe_base = _move_base_with_wheels(
-            chassis, initialization_safe_base_world)
+        with timing.segment("initialization.base_retreat"):
+            measured_safe_base = _move_base_with_wheels(
+                chassis, initialization_safe_base_world)
         scene_ik.set_base_translation_world(
             (measured_safe_base[0], measured_safe_base[1],
              initialization_safe_base_world[2]))
@@ -448,7 +571,8 @@ def main():
         # Recording starts only after fixed initialization.  Delay the first
         # arm command and ExternalControl handoff until the safe retreat has
         # finished, then seed it from the arm pose measured at that location.
-        initial_arm_rad = wait_for_first_arm_state()
+        with timing.segment("initialization.first_arm_state_wait"):
+            initial_arm_rad = wait_for_first_arm_state()
         trajectory = TrajectoryController(
             robot, initial_positions=initial_arm_rad)
         left_hold_rad = list(initial_arm_rad[:7])
@@ -457,7 +581,8 @@ def main():
         # The left arm remains fixed for the entire task.  At the temporary
         # safe base, rotate only the thumb opposition joint so the thumb no
         # longer points along user +Y when the chassis returns to final B0.
-        _initialize_left_thumb(gripper)
+        with timing.segment("initialization.left_thumb"):
+            _initialize_left_thumb(gripper)
 
         def latch_achieved_right_target(label):
             nonlocal current_target_deg
@@ -476,23 +601,30 @@ def main():
             ))
             return live_arm_rad
 
+        last_right_seed_rad = None
         last_right_ik_rad = None
         last_right_command_rad = None
+        last_tcp_target_world = None
+        last_tcp_quaternion_world = None
 
         def move_right_tcp(
                 label, tcp_position_world, tcp_quaternion_world,
-                point_in_r7=None, compensate_source_grasp=False):
+                point_in_r7=None, compensate_source_grasp=False,
+                trajectory_points=TARGET_TRANSPORT_TRAJECTORY_POINTS):
             nonlocal current_target_deg
+            nonlocal last_right_seed_rad
             nonlocal last_right_ik_rad, last_right_command_rad
+            nonlocal last_tcp_target_world, last_tcp_quaternion_world
             print("Moving V2 right task TCP to {}: {}".format(
                 label, tcp_position_world))
             live_arm_rad = list(robot_state.arm_joint_state().position)
-            right_joints = scene_ik.solve(
-                tcp_position_world,
-                tcp_quaternion_world,
-                live_arm_rad[7:14],
-                point_in_r7=point_in_r7,
-            )
+            with timing.segment("{}.ik_solve".format(label)):
+                right_joints = scene_ik.solve(
+                    tcp_position_world,
+                    tcp_quaternion_world,
+                    live_arm_rad[7:14],
+                    point_in_r7=point_in_r7,
+                )
             print("{} right-arm IK solution: {}".format(
                 label, [round(value, 6) for value in right_joints]))
             commanded_right = (
@@ -506,14 +638,22 @@ def main():
             next_target_deg = list(current_target_deg)
             next_target_deg[7:14] = [
                 math.degrees(value) for value in commanded_right]
-            trajectory.execute_trajectory(
-                _right_only_trajectory(
-                    next_target_deg, live_start_deg, left_hold_rad,
-                    num=IK_TRAJECTORY_POINTS),
-                sleep_time=0.02)
+            with timing.segment(
+                    "{}.arm_motion".format(label),
+                    trajectory_points=trajectory_points):
+                trajectory.execute_trajectory(
+                    _right_only_trajectory(
+                        next_target_deg, live_start_deg, left_hold_rad,
+                        num=trajectory_points),
+                    sleep_time=0.02)
             current_target_deg = next_target_deg
+            last_right_seed_rad = list(live_arm_rad[7:14])
             last_right_ik_rad = list(right_joints)
-            last_right_command_rad = commanded_right
+            last_right_command_rad = list(commanded_right)
+            last_tcp_target_world = [
+                float(value) for value in tcp_position_world]
+            last_tcp_quaternion_world = [
+                float(value) for value in tcp_quaternion_world]
 
         def move_right_by_fixed_delta(label, right_delta_rad):
             nonlocal current_target_deg
@@ -523,30 +663,55 @@ def main():
                 for index, delta in enumerate(right_delta_rad)
             ]
             live_arm_rad = list(robot_state.arm_joint_state().position)
-            trajectory.execute_trajectory(
-                _right_only_trajectory(
-                    target_deg,
-                    [math.degrees(value) for value in live_arm_rad],
-                    left_hold_rad,
-                    num=GRASP_LIFT_TRAJECTORY_POINTS),
-                sleep_time=0.02)
+            with timing.segment(
+                    "{}.arm_motion".format(label),
+                    trajectory_points=GRASP_LIFT_TRAJECTORY_POINTS):
+                trajectory.execute_trajectory(
+                    _right_only_trajectory(
+                        target_deg,
+                        [math.degrees(value) for value in live_arm_rad],
+                        left_hold_rad,
+                        num=GRASP_LIFT_TRAJECTORY_POINTS),
+                    sleep_time=0.02)
             current_target_deg = target_deg
             print("Executed fixed V2 right-arm motion: {}".format(label))
 
-        def return_right_to_ready(label):
+        def return_right_to_staging(label):
             nonlocal current_target_deg
+            live_start_deg = [
+                math.degrees(value)
+                for value in robot_state.arm_joint_state().position]
+            above_target_deg = list(current_target_deg)
+            above_target_deg[7:14] = [
+                math.degrees(value)
+                for value in RIGHT_ARM_STAGING_ABOVE_RAD]
+            with timing.segment(
+                    "{}.above_motion".format(label),
+                    trajectory_points=STAGING_RETURN_TRAJECTORY_POINTS):
+                trajectory.execute_trajectory(
+                    _right_only_trajectory(
+                        above_target_deg,
+                        live_start_deg,
+                        left_hold_rad,
+                        num=STAGING_RETURN_TRAJECTORY_POINTS),
+                    sleep_time=0.02)
+            current_target_deg = above_target_deg
+
             live_arm_rad = list(robot_state.arm_joint_state().position)
-            ready_target_deg = list(current_target_deg)
-            ready_target_deg[7:14] = [
-                math.degrees(value) for value in RIGHT_ARM_READY_FULL_RAD]
-            trajectory.execute_trajectory(
-                _right_only_trajectory(
-                    ready_target_deg,
-                    [math.degrees(value) for value in live_arm_rad],
-                    left_hold_rad,
-                    num=IK_TRAJECTORY_POINTS),
-                sleep_time=0.02)
-            current_target_deg = ready_target_deg
+            staging_target_deg = list(current_target_deg)
+            staging_target_deg[7:14] = [
+                math.degrees(value) for value in RIGHT_ARM_STAGING_RAD]
+            with timing.segment(
+                    "{}.descent_motion".format(label),
+                    trajectory_points=STAGING_DESCENT_TRAJECTORY_POINTS):
+                trajectory.execute_trajectory(
+                    _right_only_trajectory(
+                        staging_target_deg,
+                        [math.degrees(value) for value in live_arm_rad],
+                        left_hold_rad,
+                        num=STAGING_DESCENT_TRAJECTORY_POINTS),
+                    sleep_time=0.02)
+            current_target_deg = staging_target_deg
             latch_achieved_right_target(label)
 
         def print_measured_grasp_center(label):
@@ -588,13 +753,95 @@ def main():
                     [round(value, 6) for value in object_position],
                 ))
 
+        def record_grasp_snapshot(phase, cylinder, target_world,
+                                  object_reference_world):
+            arm_state = robot_state.arm_joint_state()
+            arm_position = [float(value) for value in arm_state.position]
+            if len(arm_position) != ARM_JOINT_COUNT:
+                raise RuntimeError(
+                    "Expected 14 arm joints for Task1 diagnostics, got {}"
+                    .format(len(arm_position)))
+            velocity = getattr(arm_state, "velocity", None)
+            arm_velocity = None
+            if velocity is not None and len(velocity) == ARM_JOINT_COUNT:
+                arm_velocity = [float(value) for value in velocity]
+
+            actual_right = arm_position[7:14]
+            actual_center = scene_ik.closed_grasp_center_world(actual_right)
+            actual_quaternion = scene_ik.eef_quaternion_world(actual_right)
+            target = [float(value) for value in target_world]
+            object_position = poses.get_position(cylinder)
+            object_orientation = poses.get_orientation(cylinder)
+            hand_position = gripper.measured_positions("right")
+            geometry = None
+            if hand_position is not None:
+                geometry = scene_ik.measured_pad_geometry(
+                    actual_right, hand_position)
+
+            reference = (
+                None if object_reference_world is None
+                else [float(value) for value in object_reference_world])
+            object_delta = None
+            if object_position is not None and reference is not None:
+                object_delta = [
+                    float(object_position[axis] - reference[axis])
+                    for axis in range(3)
+                ]
+
+            diagnostics.write(
+                phase,
+                cylinder=cylinder,
+                base_pose_world=(
+                    None if chassis.pose() is None
+                    else [float(value) for value in chassis.pose()]),
+                object_position_world=(
+                    None if object_position is None
+                    else [float(value) for value in object_position]),
+                object_orientation_xyzw=(
+                    None if object_orientation is None
+                    else [float(value) for value in object_orientation]),
+                object_reference_world=reference,
+                object_delta_world=object_delta,
+                grasp_target_world=target,
+                actual_closed_grasp_center_world=[
+                    float(value) for value in actual_center],
+                target_minus_actual_world=[
+                    float(target[axis] - actual_center[axis])
+                    for axis in range(3)],
+                ik_seed_right_rad=last_right_seed_rad,
+                ik_nominal_right_rad=last_right_ik_rad,
+                command_right_rad=last_right_command_rad,
+                actual_right_rad=actual_right,
+                command_minus_actual_right_rad=(
+                    None if last_right_command_rad is None else [
+                        float(command - actual)
+                        for command, actual in zip(
+                            last_right_command_rad, actual_right)]),
+                actual_right_velocity_rad_s=(
+                    None if arm_velocity is None else arm_velocity[7:14]),
+                tcp_quaternion_target_xyzw=last_tcp_quaternion_world,
+                tcp_quaternion_actual_xyzw=[
+                    float(value) for value in actual_quaternion],
+                orientation_error_deg=(
+                    None if last_tcp_quaternion_world is None else
+                    _quaternion_error_degrees(
+                        last_tcp_quaternion_world, actual_quaternion)),
+                measured_hand_right_rad=(
+                    None if hand_position is None else [
+                        float(value) for value in hand_position]),
+                pad_geometry_world=geometry,
+                fully_in_target=_fully_in_target(object_position),
+            )
+
         def run_right_lever_stage():
             """Move lower-left, reshape the raised right hand, then pull."""
             nonlocal current_target_deg
-            poses.wait_for_position("lever", timeout=5.0)
+            with timing.segment("lever.pose_wait"):
+                poses.wait_for_position("lever", timeout=5.0)
 
-            measured_lever_base = _move_base_with_wheels(
-                chassis, LEVER_BASE_WORLD)
+            with timing.segment("lever.base_motion"):
+                measured_lever_base = _move_base_with_wheels(
+                    chassis, LEVER_BASE_WORLD)
             scene_ik.set_base_translation_world(
                 (measured_lever_base[0], measured_lever_base[1],
                  LEVER_BASE_WORLD[2]))
@@ -610,7 +857,7 @@ def main():
 
             def move_right_joint_target(
                     label, right_target_rad, point_count, smooth=False,
-                    r5_command_rad=None):
+                    r5_command_rad=None, continuous=False):
                 nonlocal current_target_deg
                 live = list(robot_state.arm_joint_state().position)
                 nominal_r5 = right_target_rad[4]
@@ -626,22 +873,32 @@ def main():
                 print(
                     "{} nominal_r5={:.9f} rad commanded_r5={:.9f} rad".format(
                         label, nominal_r5, commanded_right[4]))
+                # The lever pull is a stream of adjacent waypoints.  Start
+                # those segments at the preceding command endpoint instead
+                # of snapping the command back to the lagging measured pose.
+                start_deg = (
+                    list(current_target_deg)
+                    if continuous else
+                    [math.degrees(value) for value in live])
                 trajectory_points = (
                     _right_only_smooth_trajectory(
                         target_deg,
-                        [math.degrees(value) for value in live],
+                        start_deg,
                         left_hold_rad,
                         num=point_count)
                     if smooth else
                     _right_only_trajectory(
                         target_deg,
-                        [math.degrees(value) for value in live],
+                        start_deg,
                         left_hold_rad,
                         num=point_count)
                 )
-                trajectory.execute_trajectory(
-                    trajectory_points,
-                    sleep_time=0.02)
+                with timing.segment(
+                        "{}.arm_motion".format(label),
+                        trajectory_points=point_count):
+                    trajectory.execute_trajectory(
+                        trajectory_points,
+                        sleep_time=0.02)
                 actual = list(robot_state.arm_joint_state().position)
                 print("{} actual_r5={:.9f} rad".format(label, actual[11]))
                 current_target_deg = target_deg
@@ -731,40 +988,35 @@ def main():
                     settled[little_j3]
                     if settled is not None else float("nan")))
 
-            move_right_joint_target(
-                "lever_ik_prepare",
-                LEVER_IK_PREPARE_RIGHT_RAD,
-                LEVER_IK_PREPARE_TRAJECTORY_POINTS,
-                r5_command_rad=LEVER_IK_PREPARE_RIGHT_RAD[4])
-            live_arm_rad = latch_achieved_lever_target(
-                "v2_lever_ik_prepare")
             contact_target = _lever_hand_target_world(0.0)
             approach_target = (
                 contact_target[0], contact_target[1],
                 contact_target[2] + LEVER_APPROACH_HEIGHT)
-            right_seed = live_arm_rad[7:14]
             # Derive one deterministic zero-angle wrist frame from the fixed
             # ready seed.  The live post-place seed can otherwise select a
             # different free roll about the handle axis whose 40-degree
             # continuation is not reachable from this base stance.
-            canonical_contact_solution = scene_ik.solve_lever(
-                _lever_command_target_world(contact_target),
-                RIGHT_ARM_READY_FULL_RAD,
-                joint_limit_margin_fraction=(
-                    LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
+            with timing.segment("lever.canonical_contact.ik_solve"):
+                canonical_contact_solution = scene_ik.solve_lever(
+                    _lever_command_target_world(contact_target),
+                    RIGHT_ARM_READY_FULL_RAD,
+                    joint_limit_margin_fraction=(
+                        LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
             contact_rotation_world = scene_ik.eef_rotation_world(
                 canonical_contact_solution)
-            approach_solution = scene_ik.solve_lever(
-                approach_target,
-                right_seed,
-                joint_limit_margin_fraction=(
-                    LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
-            contact_solution = scene_ik.solve_lever(
-                _lever_command_target_world(contact_target),
-                approach_solution,
-                target_rotation_world=contact_rotation_world,
-                joint_limit_margin_fraction=(
-                    LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
+            with timing.segment("lever.approach.ik_solve"):
+                approach_solution = scene_ik.solve_lever(
+                    approach_target,
+                    LEVER_IK_BRANCH_SEED_RIGHT_RAD,
+                    joint_limit_margin_fraction=(
+                        LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
+            with timing.segment("lever.contact.ik_solve"):
+                contact_solution = scene_ik.solve_lever(
+                    _lever_command_target_world(contact_target),
+                    approach_solution,
+                    target_rotation_world=contact_rotation_world,
+                    joint_limit_margin_fraction=(
+                        LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
 
             def print_lever_state(label):
                 measured_arm = list(robot_state.arm_joint_state().position)
@@ -790,7 +1042,8 @@ def main():
             # Flatten only the thumb base and straighten the leftover bent
             # index in one motion above the handle.  Preserve the measured
             # bent thumb tip, then descend holding that posture.
-            initialize_right_lever_hand_before_descent()
+            with timing.segment("lever.hand_initialize"):
+                initialize_right_lever_hand_before_descent()
             move_right_joint_target(
                 "lever_contact", contact_solution,
                 LEVER_CONTACT_TRAJECTORY_POINTS)
@@ -799,8 +1052,10 @@ def main():
             # Curl the three distal fingers only after the arm has descended;
             # the V2 little finger bends less so its pad aligns with the other
             # two instead of visibly cutting through the yellow handle.
-            form_right_lever_hook()
-            time.sleep(0.5)
+            with timing.segment("lever.form_hook"):
+                form_right_lever_hook()
+            with timing.segment("lever.post_hook_wait"):
+                time.sleep(0.5)
             print_lever_state("v2_lever_hook_formed")
 
             # Capture the achieved hook-to-handle transform after finger
@@ -833,19 +1088,30 @@ def main():
                     [round(value, 6) for value in hook_anchor_offset]))
             stalls = 0
             attempts = 0
+            # Advance the hand command monotonically.  The force-free lever
+            # follower intentionally has no inertial overshoot, and its
+            # fingertip-centroid mapping can trail the commanded hand angle
+            # by a small fixed geometric offset.  Rebuilding every command as
+            # ``measured lever angle + step`` would therefore resend the same
+            # 29.8-degree hand pose forever instead of crossing the physical
+            # 30-degree handoff edge.
+            commanded_angle = hook_anchor_angle
             while (not source_bin_release.released
                    and attempts < LEVER_PATH_MAX_ATTEMPTS
                    and lever_angle < LEVER_PATH_SAFETY_MAX_RAD):
-                fine_pull = lever_angle >= LEVER_PATH_FINE_START_RAD
+                fine_pull = (
+                    commanded_angle + LEVER_PATH_FINE_START_TOLERANCE_RAD
+                    >= LEVER_PATH_FINE_START_RAD)
                 step_rad = (
                     LEVER_PATH_FINE_STEP_RAD
                     if fine_pull else LEVER_PATH_STEP_RAD)
                 target_angle = min(
-                    lever_angle + step_rad,
+                    commanded_angle + step_rad,
                     LEVER_PATH_SAFETY_MAX_RAD)
                 if not fine_pull:
                     target_angle = min(
                         target_angle, LEVER_PATH_FINE_START_RAD)
+                commanded_angle = target_angle
                 anchor_delta_angle = target_angle - hook_anchor_angle
                 path_fraction = (
                     anchor_delta_angle
@@ -868,20 +1134,29 @@ def main():
                     canonical_rotation_world,
                     canonical_blend)
                 live_arm_rad = list(robot_state.arm_joint_state().position)
-                path_target = scene_ik.solve_lever(
-                    anchored_target,
-                    live_arm_rad[7:14],
-                    target_rotation_world=target_rotation_world,
-                    joint_limit_margin_fraction=(
-                        LEVER_PATH_JOINT_LIMIT_MARGIN_FRACTION))
                 label = "v2_lever_closed_loop_{:02d}".format(attempts)
+                with timing.segment("{}.ik_solve".format(label)):
+                    path_target = scene_ik.solve_lever(
+                        anchored_target,
+                        live_arm_rad[7:14],
+                        target_rotation_world=target_rotation_world,
+                        joint_limit_margin_fraction=(
+                            LEVER_PATH_JOINT_LIMIT_MARGIN_FRACTION))
                 # The current URDF tracks the requested r5 closely.  Use the
                 # live step's IK value from the first pull step onward instead
                 # of carrying over a fixed compensation from an older model.
                 r5_command = path_target[4]
+                point_count = (
+                    LEVER_PATH_FINE_TRAJECTORY_POINTS
+                    if fine_pull else LEVER_PATH_TRAJECTORY_POINTS)
+                # Do not use the zero-velocity smootherstep here.  Applying
+                # it independently to every 2.5-degree waypoint forces the
+                # wrist to brake to a stop and restart at every boundary.
+                # Linear command interpolation keeps the pull moving while
+                # retaining the measured-angle/release check between steps.
                 move_right_joint_target(
-                    label, path_target, LEVER_PATH_TRAJECTORY_POINTS,
-                    smooth=True, r5_command_rad=r5_command)
+                    label, path_target, point_count,
+                    r5_command_rad=r5_command, continuous=True)
                 new_angle = _lever_angle_from_orientation(
                     poses.get_orientation("lever"))
                 if new_angle is None:
@@ -907,74 +1182,126 @@ def main():
             latch_achieved_lever_target("v2_lever_handoff_hold")
             print("V2 source bin handoff triggered at lever {:.1f} deg".format(
                 math.degrees(lever_angle)))
-            conveyor_complete = rospy.wait_for_message(
-                SOURCE_CONVEYOR_COMPLETE_TOPIC, Bool,
-                timeout=SOURCE_CONVEYOR_TIMEOUT_S)
+            with timing.segment("lever.conveyor_wait"):
+                conveyor_complete = rospy.wait_for_message(
+                    SOURCE_CONVEYOR_COMPLETE_TOPIC, Bool,
+                    timeout=SOURCE_CONVEYOR_TIMEOUT_S)
             if not conveyor_complete.data:
                 raise RuntimeError(
                     "V2 source conveyor reported an incomplete move")
             print("V2 source bin conveyor motion complete")
 
-        # Copy the accepted Task 1 right-arm initialization exactly: shoulder
-        # clearance, four-joint ready, then the complete seven-joint ready.
+        # Raise the shoulder first to clear the chassis, move to a waypoint
+        # directly above the task-only staging posture, carry that safe height
+        # back to B0, and only then descend.  Do not route through the old
+        # distant high ready posture: staging remains the intended endpoint.
         # V2 still holds the measured left arm at every trajectory point.
         shoulder_only_deg = list(current_target_deg)
         shoulder_only_deg[8] = -SHOULDER_LIFT_DEG
         shoulder_only_deg[12] = math.degrees(-0.5)
-        trajectory.execute_trajectory(
-            _right_only_trajectory(
-                shoulder_only_deg, current_target_deg, left_hold_rad,
-                num=TRAJECTORY_POINTS),
-            sleep_time=0.02)
+        with timing.segment(
+                "initialization.shoulder_clearance",
+                trajectory_points=TRAJECTORY_POINTS):
+            trajectory.execute_trajectory(
+                _right_only_trajectory(
+                    shoulder_only_deg, current_target_deg, left_hold_rad,
+                    num=TRAJECTORY_POINTS),
+                sleep_time=0.02)
         current_target_deg = shoulder_only_deg
 
-        ready_deg = list(current_target_deg)
-        ready_deg[7:11] = [
-            math.degrees(value) for value in RIGHT_ARM_READY_RAD]
-        trajectory.execute_trajectory(
-            _right_only_trajectory(
-                ready_deg, current_target_deg, left_hold_rad,
-                num=TRAJECTORY_POINTS),
-            sleep_time=0.02)
-        current_target_deg = ready_deg
+        staging_above_deg = list(current_target_deg)
+        staging_above_deg[7:14] = [
+            math.degrees(value) for value in RIGHT_ARM_STAGING_ABOVE_RAD]
+        with timing.segment(
+                "initialization.staging_above",
+                trajectory_points=TRAJECTORY_POINTS):
+            trajectory.execute_trajectory(
+                _right_only_trajectory(
+                    staging_above_deg, current_target_deg, left_hold_rad,
+                    num=TRAJECTORY_POINTS),
+                sleep_time=0.02)
+        current_target_deg = staging_above_deg
 
-        full_ready_deg = list(current_target_deg)
-        full_ready_deg[7:14] = [
-            math.degrees(value) for value in RIGHT_ARM_READY_FULL_RAD]
-        trajectory.execute_trajectory(
-            _right_only_trajectory(
-                full_ready_deg, current_target_deg, left_hold_rad,
-                num=TRAJECTORY_POINTS),
-            sleep_time=0.02)
-        current_target_deg = full_ready_deg
-
-        time.sleep(0.2)
-        latch_achieved_right_target("v2_ready_at_safe_base")
+        latch_achieved_right_target("v2_staging_above_at_safe_base")
 
         # Return once to this run's saved random B0 before computing any task
-        # IK.  The arm remains in the completed ready posture throughout the
-        # translation.
-        measured_b0 = _move_base_with_wheels(
-            chassis, base_translation_world)
+        # IK.  Keep the arm at the high nearby waypoint throughout the base
+        # translation so the hand cannot sweep through the source bin.
+        with timing.segment("initialization.base_return_b0"):
+            measured_b0 = _move_base_with_wheels(
+                chassis, base_translation_world)
+        common_task_base_measured = tuple(measured_b0)
         scene_ik.set_base_translation_world(
             (measured_b0[0], measured_b0[1], base_translation_world[2]))
-        latch_achieved_right_target("v2_ready_after_return_to_b0")
-        start_score_clock()
+
+        # Only descend after the base has reached B0.  This final short motion
+        # establishes the low staging point used by the first source IK.
+        staging_deg = list(current_target_deg)
+        staging_deg[7:14] = [
+            math.degrees(value) for value in RIGHT_ARM_STAGING_RAD]
+        with timing.segment(
+                "initialization.staging_descent",
+                trajectory_points=STAGING_DESCENT_TRAJECTORY_POINTS):
+            trajectory.execute_trajectory(
+                _right_only_trajectory(
+                    staging_deg, current_target_deg, left_hold_rad,
+                    num=STAGING_DESCENT_TRAJECTORY_POINTS),
+                sleep_time=0.02)
+        current_target_deg = staging_deg
+
+        with timing.segment("initialization.staging_settle_wait"):
+            time.sleep(0.2)
+        latch_achieved_right_target("v2_staging_after_return_to_b0")
+        scorer_started = start_score_clock()
+        timing.mark_score_start(scorer_started)
         task_tcp_quaternion_world = scene_ik.eef_quaternion_world_with_yaw(
             RIGHT_ARM_READY_FULL_RAD, GRASP_YAW_ADJUSTMENT_RAD)
 
+        # Form the open source-grasp posture at the safe staging pose.  Start
+        # the first source IK immediately afterward so the thumb cannot sweep
+        # through the cylinder while the arm is already at the grasp point.
+        with timing.segment("source_grasp.hand_prepare"):
+            gripper.control_right_gripper(0)
+
         for index, name in enumerate(CYLINDERS):
-            object_position = poses.get_position(name)
-            grasp_bias_world = GRASP_TRACKING_BIASES_WORLD[index]
-            grasp_center_world = [
-                object_position[axis] - grasp_bias_world[axis]
-                for axis in range(3)
-            ]
-            drop_center_world = [
-                target_bin_position[0] + DROP_CENTER_OFFSETS[index][0],
-                target_bin_position[1] + DROP_CENTER_OFFSETS[index][1],
-                DROP_GRASP_CENTER_Z,
-            ]
+            with timing.segment("{}.target_prepare".format(name)):
+                object_position = poses.get_position(name)
+                grasp_bias_world = GRASP_TRACKING_BIASES_WORLD[index]
+                grasp_center_world = [
+                    object_position[axis] - grasp_bias_world[axis]
+                    for axis in range(3)
+                ]
+                drop_center_world = [
+                    target_bin_position[0] + DROP_CENTER_OFFSETS[index][0],
+                    target_bin_position[1] + DROP_CENTER_OFFSETS[index][1],
+                    DROP_GRASP_CENTER_Z,
+                ]
+
+            planned_grasp_base = randomization_plan.grasp_bases[index]
+            grasp_base_delta = tuple(
+                planned_grasp_base[axis]
+                - randomization_plan.task_base[axis]
+                for axis in range(3))
+            if index == 2 and grasp_base_delta[1] > 1e-6:
+                grasp_base_delta = (
+                    grasp_base_delta[0],
+                    grasp_base_delta[1] + BLUE_RUNTIME_LEFT_SHIFT_MARGIN_M,
+                    grasp_base_delta[2],
+                )
+            grasp_base_target = tuple(
+                common_task_base_measured[axis] + grasp_base_delta[axis]
+                for axis in range(3))
+            requires_grasp_base_move = any(
+                abs(value) > 1e-6 for value in grasp_base_delta[:2])
+            if requires_grasp_base_move:
+                with timing.segment(
+                        "{}.grasp_base_move".format(name),
+                        planned_delta=list(grasp_base_delta)):
+                    measured_grasp_base = _move_base_with_wheels(
+                        chassis, grasp_base_target)
+                scene_ik.set_base_translation_world((
+                    measured_grasp_base[0], measured_grasp_base[1],
+                    base_translation_world[2]))
 
             move_right_tcp(
                 "{}_above".format(name),
@@ -982,12 +1309,20 @@ def main():
                 task_tcp_quaternion_world,
                 point_in_r7=scene_ik.CLOSED_GRASP_CENTER_IN_R7,
                 compensate_source_grasp=True,
+                trajectory_points=SOURCE_GRASP_TRAJECTORY_POINTS,
             )
-            gripper.control_right_gripper(0)
-            time.sleep(0.5)
             print_measured_grasp_center("{}_open".format(name))
-            gripper.control_right_gripper(GRASP_CLOSURE_CMD)
-            time.sleep(0.5)
+            with timing.segment("{}.pre_close_wait".format(name)):
+                time.sleep(SOURCE_GRASP_SETTLE_SECONDS)
+            pre_close_object_position = poses.get_position(name)
+            record_grasp_snapshot(
+                "pre_close", name, grasp_center_world,
+                pre_close_object_position)
+            with timing.segment("{}.gripper_close".format(name)):
+                gripper.control_right_gripper(GRASP_CLOSURE_CMD)
+            record_grasp_snapshot(
+                "post_close", name, grasp_center_world,
+                pre_close_object_position)
             print_measured_grasp_geometry(
                 "{}_closed".format(name), poses.get_position(name))
             move_right_by_fixed_delta(
@@ -996,6 +1331,18 @@ def main():
                     GRASP_LIFT_SCALE * delta
                     for delta in FIXED_GRASP_LIFTS_RIGHT_RAD[index]),
             )
+            record_grasp_snapshot(
+                "post_lift", name, grasp_center_world,
+                pre_close_object_position)
+            if requires_grasp_base_move:
+                with timing.segment(
+                        "{}.loaded_base_return".format(name),
+                        planned_delta=list(grasp_base_delta)):
+                    measured_return_base = _move_base_with_wheels(
+                        chassis, common_task_base_measured)
+                scene_ik.set_base_translation_world((
+                    measured_return_base[0], measured_return_base[1],
+                    base_translation_world[2]))
             print_measured_grasp_center("{}_lifted".format(name))
             print("{}_after_lift object: {}".format(
                 name,
@@ -1005,15 +1352,22 @@ def main():
                 drop_center_world,
                 task_tcp_quaternion_world,
                 point_in_r7=scene_ik.CLOSED_GRASP_CENTER_IN_R7,
+                trajectory_points=TARGET_TRANSPORT_TRAJECTORY_POINTS,
             )
-            time.sleep(1.0)
+            with timing.segment("{}.pre_release_wait".format(name)):
+                time.sleep(1.0)
             print("{}_above_target object: {}".format(
                 name,
                 [round(value, 6) for value in poses.get_position(name)]))
-            gripper.control_right_gripper(0)
-            time.sleep(1.0)
+            with timing.segment("{}.gripper_release".format(name)):
+                gripper.control_right_gripper(0)
+            with timing.segment("{}.object_settle_wait".format(name)):
+                time.sleep(1.0)
 
             final_position = poses.get_position(name)
+            record_grasp_snapshot(
+                "post_release", name, drop_center_world,
+                pre_close_object_position)
             print("{}_settled object: {}".format(
                 name, [round(value, 6) for value in final_position]))
             if not _fully_in_target(final_position):
@@ -1025,7 +1379,7 @@ def main():
                     raise RuntimeError(message)
 
             if index + 1 < len(CYLINDERS):
-                return_right_to_ready("v2_between_objects_ready")
+                return_right_to_staging("v2_between_objects_staging")
 
         right_task_success = all(
             _fully_in_target(poses.get_position(name)) for name in CYLINDERS)
@@ -1034,14 +1388,25 @@ def main():
             for name in CYLINDERS
         }))
         latch_achieved_right_target("v2_right_task_complete")
-        run_right_lever_stage()
+        with timing.segment("lever.total"):
+            run_right_lever_stage()
         success = right_task_success
     finally:
-        RESULT_PATH.write_text("success" if success else "fail")
-        gripper.stop()
-        chassis.stop()
+        if diagnostics is not None:
+            diagnostics.write(
+                "round_end",
+                success=bool(success),
+            )
+        with timing.segment("cleanup.result_write"):
+            RESULT_PATH.write_text("success" if success else "fail")
+        with timing.segment("cleanup.gripper_stop"):
+            gripper.stop()
+        with timing.segment("cleanup.chassis_stop"):
+            chassis.stop()
         if trajectory is not None:
-            trajectory.stop()
+            with timing.segment("cleanup.trajectory_stop"):
+                trajectory.stop()
+        timing.print_summary(success)
 
 
 if __name__ == "__main__":

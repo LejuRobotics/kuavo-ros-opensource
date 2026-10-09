@@ -37,16 +37,23 @@ INITIALIZATION_SAFE_RETREAT_M = 0.20
 LEFT_THUMB_SAFE_J1_RAD = 1.75
 LEFT_THUMB_INITIALIZATION_DURATION_S = 1.2
 SHOULDER_LIFT_DEG = 60.0
-RIGHT_ARM_READY_RAD = (-1.0, -0.5, 1.0, -1.4)
-RIGHT_ARM_READY_FULL_RAD = (-0.9, -0.265, 1.0, -0.8, 0.58, -0.4, 0.35)
-TRAJECTORY_POINTS = 80
+RIGHT_ARM_STAGING_RAD = (
+    -0.569927, -0.301512, 0.658253, -0.488704,
+    0.698827, -0.653404, -0.289423,
+)
+RIGHT_ARM_STAGING_ABOVE_RAD = (
+    -0.466591, -0.579416, 0.652630, -1.211603,
+    0.699260, -0.286390, 0.045867,
+)
+TRAJECTORY_POINTS = 40
+STAGING_DESCENT_TRAJECTORY_POINTS = 40
 TRAJECTORY_SLEEP = 0.02
 STOP_SPEED_THRESHOLD = 0.01
 STOP_WATCHDOG_S = 10.0
-CHASSIS_LINEAR_SPEED = 0.08
-CHASSIS_ANGULAR_SPEED = 0.20
-CHASSIS_MIN_LINEAR_SPEED = 0.06
-CHASSIS_MIN_ANGULAR_SPEED = 0.06
+CHASSIS_LINEAR_SPEED = 0.12
+CHASSIS_ANGULAR_SPEED = 0.30
+CHASSIS_MIN_LINEAR_SPEED = 0.08
+CHASSIS_MIN_ANGULAR_SPEED = 0.08
 CHASSIS_POSITION_TOLERANCE = 0.03
 CHASSIS_YAW_TOLERANCE_DEG = 3.0
 
@@ -163,9 +170,9 @@ def place_scene(randomizer, seed, chassis):
 
 
 def run_initialization(robot, robot_state, seed, trajectory):
-    """Randomize the scene, retreat, raise the right arm, and return to B0.
+    """Randomize, retreat, follow Task 1 staging, and return to B0.
 
-    Returns the measured random base pose ``B0`` and the measured ready joints.
+    Returns the measured random base pose ``B0`` and staging joints.
     """
     chassis = make_chassis()
     gripper = GripperController()
@@ -201,9 +208,10 @@ def run_initialization(robot, robot_state, seed, trajectory):
         move_base_open_loop(chassis, safe_base_world, "safe retreat")
         initialize_left_thumb(gripper)
 
-        # Shoulder clearance, four-joint ready, then the complete seven-joint
-        # ready.  Identical to the accepted task1 sequence; the measured
-        # left arm is held at every trajectory point.
+        # Match the accepted Task 1 initialization waypoints: shoulder
+        # clearance, the nearby high staging waypoint, return to B0 at that
+        # safe height, and only then descend to the task staging posture.  The
+        # model path keeps its dedicated open-loop chassis implementation.
         shoulder_only_deg = list(current_target_deg)
         shoulder_only_deg[8] = -SHOULDER_LIFT_DEG
         shoulder_only_deg[12] = math.degrees(-0.5)
@@ -212,34 +220,35 @@ def run_initialization(robot, robot_state, seed, trajectory):
             num=TRAJECTORY_POINTS))
         current_target_deg = shoulder_only_deg
 
-        ready_deg = list(current_target_deg)
-        ready_deg[7:11] = [
-            math.degrees(value) for value in RIGHT_ARM_READY_RAD]
+        staging_above_deg = list(current_target_deg)
+        staging_above_deg[7:14] = [
+            math.degrees(value) for value in RIGHT_ARM_STAGING_ABOVE_RAD]
         publish_trajectory(trajectory, right_only_trajectory(
-            ready_deg, current_target_deg, left_hold_rad,
+            staging_above_deg, current_target_deg, left_hold_rad,
             num=TRAJECTORY_POINTS))
-        current_target_deg = ready_deg
+        current_target_deg = staging_above_deg
 
-        full_ready_deg = list(current_target_deg)
-        full_ready_deg[7:14] = [
-            math.degrees(value) for value in RIGHT_ARM_READY_FULL_RAD]
-        publish_trajectory(trajectory, right_only_trajectory(
-            full_ready_deg, current_target_deg, left_hold_rad,
-            num=TRAJECTORY_POINTS))
-        current_target_deg = full_ready_deg
-        time.sleep(0.2)
-
-        # Return once to this run's random B0.  The arm holds the completed
-        # ready posture throughout the translation.
+        # Return once to this run's random B0 while holding the same safe high
+        # waypoint as the accepted entry.
         measured_b0 = move_base_open_loop(
             chassis, base_translation_world, "return to B0")
-        ready_arm_rad = wait_for_arm_state(robot_state)
+
+        staging_deg = list(current_target_deg)
+        staging_deg[7:14] = [
+            math.degrees(value) for value in RIGHT_ARM_STAGING_RAD]
+        publish_trajectory(trajectory, right_only_trajectory(
+            staging_deg, current_target_deg, left_hold_rad,
+            num=STAGING_DESCENT_TRAJECTORY_POINTS))
+        current_target_deg = staging_deg
+        time.sleep(0.2)
+
+        staging_arm_rad = wait_for_arm_state(robot_state)
         print(
-            "V2 model initialization complete: measured B0={} ready={}"
+            "V2 model initialization complete: measured B0={} staging={}"
             .format(
                 [round(value, 6) for value in measured_b0],
-                [round(value, 6) for value in ready_arm_rad[7:14]]))
-        return measured_b0, ready_arm_rad
+                [round(value, 6) for value in staging_arm_rad[7:14]]))
+        return measured_b0, staging_arm_rad
     finally:
         gripper.stop()
         # This file is model-entry-only. Release its ROS endpoints before the

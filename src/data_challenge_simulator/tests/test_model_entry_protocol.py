@@ -111,7 +111,7 @@ def test_reset_response_gate_survives_the_protocol_relaunch():
     assert "return self._seed == int(seed)" in handoff
 
 
-def test_any_round_failure_restarts_with_a_fresh_seed():
+def test_pre_episode_failure_restarts_but_active_episode_failure_stops():
     source = ENTRY.read_text()
     handler = source[source.index("except Exception as error:",
                                   source.index("def main():")):
@@ -120,11 +120,49 @@ def test_any_round_failure_restarts_with_a_fresh_seed():
                       source.index("if not relaunching:")]
 
     assert "round_error = error" in handler
-    assert "raise" not in handler
+    assert "protocol.evaluation_started" in handler
+    assert "protocol._invalidate_active_round(error)" in handler
+    assert "if manual_intervention:" in recovery
+    assert "raise round_error" in recovery
     assert "random.SystemRandom().randint(1, 10 ** 6)" in recovery
     assert "reset_handoff.retarget(round_seed)" in recovery
     assert "time.sleep(ROUND_RETRY_DELAY)" in recovery
     assert "continue" in recovery
+
+
+def test_scoring_infrastructure_failure_invalidates_instead_of_hanging():
+    source = ENTRY.read_text()
+    start = source[source.index("def _start(self, _request):"):
+                   source.index("def _ensure_observer(self):")]
+    ensure = source[source.index("def _ensure_observer(self):"):
+                    source.index("def _invalidate_active_round(self, reason):")]
+    watcher = source[source.index("def _watch_success(self):"):
+                     source.index("def main():")]
+    shutdown = source[source.index("def shutdown(self):"):
+                      source.index("def _finalize_score(self, reason):")]
+
+    assert "if not self._ensure_observer():" in start
+    assert "success=False" in start
+    assert "self._invalidate_active_round(" in ensure
+    assert "self._invalidate_active_round(" in watcher
+    assert "return" in watcher
+    assert "if self.invalid_round:" in shutdown
+    invalid_branch = shutdown[shutdown.index("if self.invalid_round:"):
+                              shutdown.index("else:")]
+    assert "_finalize_score" not in invalid_branch
+
+
+def test_score_write_or_annotation_failure_requires_operator_action():
+    source = ENTRY.read_text()
+    finalize = source[source.index("def _finalize_score(self, reason):"):
+                      source.index("def _watch_success(self):")]
+    reset = source[source.index("def _reset(self, _request):"):
+                   source.index("def _start(self, _request):")]
+
+    assert "self.score_store.annotate(self.score_file, reason)" in finalize
+    assert "metadata annotation failed" not in finalize
+    assert "score finalization failed during reset" in reset
+    assert "success=False" in reset
 
 
 def test_every_required_topic_timeout_uses_round_recovery():
@@ -218,6 +256,16 @@ def test_model_score_clock_and_finalization_follow_episode_lifecycle():
     assert 'self._finalize_score("reset")' in entry_source
     assert 'self._finalize_score("shutdown")' in entry_source
 
+    # Success can be followed by reset and then shutdown.  The scorer and
+    # average accumulator must commit that episode only once.
+    finalize_start = entry_source.index(
+        "def _finalize_score(self, reason):")
+    finalize = entry_source[
+        finalize_start:entry_source.index("def _watch_success(self):")]
+    guard = "if self.score_finish_reason is not None:"
+    assert guard in finalize
+    assert finalize.index(guard) < finalize.index("observer.finish()")
+
 
 def test_scorer_module_is_unchanged_by_the_handshake():
     """The accepted score baseline is shared; this feature only reads it."""
@@ -234,7 +282,7 @@ def test_ready_is_published_only_after_arm_handover():
     ``KuavoBaseRosEnv.reset()`` (called by ``run_single_episode`` at the start
     of every episode) switches the arm to external control and resets the head
     to ``head_init``.  The simulator mirrors both, but only after fixed
-    initialization and seed docking. The latched completion signal comes last,
+    initialization. The latched completion signal comes last,
     so model commands cannot race simulator-owned preprocessing or arm mode
     handoff.
     """

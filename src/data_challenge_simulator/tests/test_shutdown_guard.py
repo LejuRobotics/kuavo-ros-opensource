@@ -93,3 +93,43 @@ def test_next_run_removes_a_stale_task_process():
         if stale.poll() is None:
             stale.kill()
             stale.wait(timeout=2.0)
+
+
+def test_stale_round_cleanup_does_not_kill_another_supervisor():
+    helper = subprocess.Popen([
+        sys.executable,
+        "-c",
+        SLEEP_CODE,
+        "helperfunc.py",
+    ])
+    model = subprocess.Popen([
+        sys.executable,
+        "-c",
+        SLEEP_CODE,
+        "model_entry.py",
+    ])
+    try:
+        clear_stale_processes(9, grace=0.1, log=lambda _message: None)
+        assert helper.poll() is None
+        assert model.poll() is None
+    finally:
+        for process in (helper, model):
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=2.0)
+
+
+def test_guard_does_not_kill_unowned_processes_by_name():
+    unrelated = subprocess.Popen([
+        sys.executable,
+        "-c",
+        SLEEP_CODE,
+        "task9_unrelated.py",
+    ])
+    try:
+        guard = ShutdownGuard(9, log=lambda _message: None)
+        guard.sweep(grace=0.1)
+        assert unrelated.poll() is None
+    finally:
+        unrelated.terminate()
+        unrelated.wait(timeout=2.0)

@@ -272,6 +272,27 @@ def wait_for_b1_parameters():
     return returned_pose, initialized_seed
 
 
+def wait_for_conveyor_contact(poses, box_name, maximum_z_m, timeout_s):
+    """Wait until the released box reaches the conveyor contact height."""
+    deadline = time.time() + float(timeout_s)
+    rate = rospy.Rate(50)
+    last_position = None
+    while time.time() < deadline and not rospy.is_shutdown():
+        last_position = poses.get_position(box_name)
+        if (last_position is not None and
+                float(last_position[2]) <= float(maximum_z_m)):
+            rospy.loginfo(
+                "Task2 conveyor contact: box=%s position=(%.3f, %.3f, %.3f)",
+                box_name, last_position[0], last_position[1],
+                last_position[2])
+            return tuple(float(value) for value in last_position)
+        rate.sleep()
+    raise RuntimeError(
+        "Task2 box {} did not reach conveyor contact height {:.3f} m "
+        "within {:.1f} s; last_position={}".format(
+            box_name, float(maximum_z_m), float(timeout_s), last_position))
+
+
 def main(
         runtime=None, transport_and_return=None,
         reposition_before_right=True):
@@ -280,8 +301,10 @@ def main(
             "Continue from stored Task2 B1, select and dock in front of one "
             "box, then execute live-pose bimanual IK grasp and lift probe."))
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
-    parser.add_argument("--linear-speed", type=positive, default=0.08)
-    parser.add_argument("--minimum-linear-speed", type=positive, default=0.06)
+    parser.add_argument("--linear-speed", type=positive, default=None)
+    parser.add_argument("--minimum-linear-speed", type=positive, default=None)
+    parser.add_argument("--angular-speed", type=positive, default=None)
+    parser.add_argument("--minimum-angular-speed", type=positive, default=None)
     parser.add_argument("--position-tolerance", type=positive, default=0.03)
     parser.add_argument("--motion-timeout", type=positive, default=40.0)
     parser.add_argument("--transport-and-return", action="store_true")
@@ -289,10 +312,22 @@ def main(
     args = parser.parse_args()
     if transport_and_return is not None:
         args.transport_and_return = bool(transport_and_return)
-    if args.minimum_linear_speed > args.linear_speed:
-        parser.error("minimum linear speed cannot exceed linear speed")
 
     config = load_config(args.config)
+    if args.linear_speed is None:
+        args.linear_speed = float(config["chassis"]["linear_speed_mps"])
+    if args.minimum_linear_speed is None:
+        args.minimum_linear_speed = float(
+            config["chassis"]["minimum_linear_speed_mps"])
+    if args.angular_speed is None:
+        args.angular_speed = float(config["chassis"]["angular_speed_radps"])
+    if args.minimum_angular_speed is None:
+        args.minimum_angular_speed = float(
+            config["chassis"]["minimum_angular_speed_radps"])
+    if args.minimum_linear_speed > args.linear_speed:
+        parser.error("minimum linear speed cannot exceed linear speed")
+    if args.minimum_angular_speed > args.angular_speed:
+        parser.error("minimum angular speed cannot exceed angular speed")
     # Same seed the workflow entry used to place both boxes; this stage only
     # reads the saved docking base poses out of it.
     saved_layout = Task2RandomizationPlanner().plan(
@@ -312,9 +347,9 @@ def main(
         conveyor_command = ConveyorCommand()
         chassis = ChassisMotion(
             linear_speed=args.linear_speed,
-            angular_speed=0.20,
+            angular_speed=args.angular_speed,
             minimum_linear_speed=args.minimum_linear_speed,
-            minimum_angular_speed=0.06,
+            minimum_angular_speed=args.minimum_angular_speed,
             position_tolerance=args.position_tolerance,
             yaw_tolerance_deg=3.0,
         )
@@ -596,18 +631,25 @@ def main(
                 raise RuntimeError(
                     "Task2 explicit release was not acknowledged for {}".format(
                         docking.box_name))
-            rospy.sleep(float(transport["place_settle_time_s"]))
-            rospy.loginfo(
-                "Task2 release settled; returning both arms to the stored "
-                "ready posture before chassis motion")
-            execute_arm_waypoint(
-                trajectory, robot_state, "post_release_ready",
-                initialized_seed,
-                transport["release_ready_trajectory_points"])
+            wait_for_conveyor_contact(
+                poses, docking.box_name,
+                transport["place_contact_max_z_m"],
+                transport["place_contact_timeout_s"])
             if is_first_box:
+                rospy.loginfo(
+                    "Task2 first release settled; returning both arms to "
+                    "the stored ready posture for the second pick")
+                execute_arm_waypoint(
+                    trajectory, robot_state, "post_release_ready",
+                    initialized_seed,
+                    transport["release_ready_trajectory_points"])
                 rospy.set_param("/task2_conveyor_box", docking.box_name)
                 rospy.set_param("/task2_conveyor_complete", False)
                 conveyor_command.set_enabled(True)
+            else:
+                rospy.loginfo(
+                    "Task2 final box contacted conveyor; ending task without "
+                    "arm reset or chassis return")
             rospy.set_param(
                 "/task2_placed_box_count", placed_count + 1)
             rospy.loginfo(
@@ -615,11 +657,13 @@ def main(
                 docking.box_name,
                 "armed-after-contact" if is_first_box else "unchanged")
 
-            rospy.loginfo("Task2 returning to the source start")
             if not is_first_box:
-                chassis.translate_relative(
-                    -float(transport["clearance_retreat_m"]),
-                    timeout=args.motion_timeout)
+                rospy.loginfo(
+                    "TASK2 FINAL BOX CONTACTED CONVEYOR: box=%s",
+                    docking.box_name)
+                return
+
+            rospy.loginfo("Task2 returning to the source start")
             chassis.rotate_relative(
                 -math.radians(float(transport["turn_deg"])),
                 timeout=args.motion_timeout)

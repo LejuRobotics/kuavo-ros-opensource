@@ -2,6 +2,6 @@
   "schema_version": 1,
   "status": "flat_palm_ready_runtime_pending",
   "safe_retreat_m": 0.375,
-  "right_arm_ready_rad": [-0.8751849357, -0.2704269669, 0.9024588635, -0.8733760613, 0.7739729815, -0.1353952552, 0.4245654578],
-  "ready_trajectory_points": 160
+  "right_arm_ready_rad": [-0.6532691077, -0.3536740637, 0.9456247179, -0.8545239696, 0.7958061471, -0.2649966058, 0.3835316702],
+  "ready_trajectory_points": 80
 }

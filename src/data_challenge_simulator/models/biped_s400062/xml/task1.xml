@@ -60,6 +60,11 @@
     <!-- Collision-free visual correction after a released cylinder reaches
          the target-bin floor.  2*pi rad/s = 360 deg/s. -->
     <numeric name="task1_target_settle_angular_speed" data="6.283185307"/>
+    <!-- During the large close command, independently freeze the complete
+         thumb or index finger after stable contact with the same cylinder.
+         This prevents a contacted finger from continuing to load the wrist. -->
+    <numeric name="task1_grasp_independent_finger_latch_enabled" data="1"/>
+    <numeric name="task1_grasp_finger_latch_contact_depth" data="0.0001"/>
     <!-- Scene-owned lever unlock rule.  The simulator only releases the
          equality after this many distinct right fingertips maintain real
          handle contact for the configured duration. -->
@@ -352,21 +357,21 @@
     <body name="cylinder_1" pos="0.620 -0.236 0.685">
       <joint name="cylinder_1_freejoint" class="task_object" type="free"/>
       <geom name="block_1_visual" class="task_object" type="cylinder"
-            size="0.025 0.020" contype="0" conaffinity="0" rgba="0.92 0.25 0.20 1"/>
+            size="0.026 0.021" contype="0" conaffinity="0" rgba="0.92 0.25 0.20 1"/>
       <geom name="block_1_geom" class="task_object" type="cylinder"
             size="0.026 0.021" density="0" rgba="0 0 0 0" contype="4" conaffinity="2"/>
     </body>
     <body name="cylinder_2" pos="0.620 -0.156 0.685">
       <joint name="cylinder_2_freejoint" class="task_object" type="free"/>
       <geom name="block_2_visual" class="task_object" type="cylinder"
-            size="0.025 0.020" contype="0" conaffinity="0" rgba="0.95 0.50 0.12 1"/>
+            size="0.026 0.021" contype="0" conaffinity="0" rgba="0.95 0.50 0.12 1"/>
       <geom name="block_2_geom" class="task_object" type="cylinder"
             size="0.026 0.021" density="0" rgba="0 0 0 0" contype="4" conaffinity="2"/>
     </body>
     <body name="cylinder_3" pos="0.620 -0.076 0.685">
       <joint name="cylinder_3_freejoint" class="task_object" type="free"/>
       <geom name="block_3_visual" class="task_object" type="cylinder"
-            size="0.025 0.020" contype="0" conaffinity="0" rgba="0.20 0.55 0.92 1"/>
+            size="0.026 0.021" contype="0" conaffinity="0" rgba="0.20 0.55 0.92 1"/>
       <geom name="block_3_geom" class="task_object" type="cylinder"
             size="0.026 0.021" density="0" rgba="0 0 0 0" contype="4" conaffinity="2"/>
     </body>

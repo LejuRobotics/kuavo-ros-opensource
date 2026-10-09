@@ -162,6 +162,8 @@ def load_config(path):
         raise ValueError("finger_expansion_step must be positive")
     if float(config["max_ring_motion_during_descent_m"]) <= 0.0:
         raise ValueError("max_ring_motion_during_descent_m must be positive")
+    if float(config["loaded_base_linear_speed_mps"]) <= 0.0:
+        raise ValueError("loaded_base_linear_speed_mps must be positive")
     return config, limits
 
 
@@ -234,9 +236,9 @@ def init_runtime(args, gripper=None, trajectory=None):
     robot = KuavoRobot()
     robot_state = KuavoRobotState()
     chassis = ChassisMotion(
-        linear_speed=0.08,
+        linear_speed=0.20,
         angular_speed=0.20,
-        minimum_linear_speed=0.06,
+        minimum_linear_speed=0.08,
         minimum_angular_speed=0.06,
         position_tolerance=0.03,
         yaw_tolerance_deg=3.0,
@@ -389,9 +391,14 @@ def run_grasp(
         "Task3 chassis transfer left: target=(%.3f, %.3f, %.1f deg)",
         destination_base[0], destination_base[1],
         np.degrees(destination_base[2]))
-    chassis.move_to_pose(
-        destination_base[0], destination_base[1], destination_base[2],
-        timeout=float(config["base_motion_timeout_s"]))
+    unloaded_linear_speed = chassis.linear_speed
+    chassis.linear_speed = float(config["loaded_base_linear_speed_mps"])
+    try:
+        chassis.move_to_pose(
+            destination_base[0], destination_base[1], destination_base[2],
+            timeout=float(config["base_motion_timeout_s"]))
+    finally:
+        chassis.linear_speed = unloaded_linear_speed
 
     grasp_succeeded = False
     command.set_finalize_enabled(False)

@@ -45,6 +45,7 @@ DEFAULT_SCENE = PACKAGE_DIR / (
     "models/biped_s400062/xml/task3.xml")
 ARM_JOINTS = 14
 HEAD_SCAN_PITCH_RAD = math.radians(20.0)
+TASK3_UNLOADED_LINEAR_SPEED = 0.20
 
 
 def apply_plan(plan):
@@ -101,9 +102,9 @@ def build_runtime(robot, robot_state, gripper, feedback, command):
         robot=robot,
         robot_state=robot_state,
         chassis=ChassisMotion(
-            linear_speed=0.08,
+            linear_speed=TASK3_UNLOADED_LINEAR_SPEED,
             angular_speed=0.20,
-            minimum_linear_speed=0.06,
+            minimum_linear_speed=0.08,
             minimum_angular_speed=0.06,
             position_tolerance=0.03,
             yaw_tolerance_deg=3.0,

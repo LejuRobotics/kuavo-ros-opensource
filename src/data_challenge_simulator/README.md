@@ -88,12 +88,12 @@ accepted task entries perform before their first task motion:
 2. pass that seed's `initial_base_x/y` to the task launch file;
 3. place the task objects from the same saved layout catalogue the collection
    entry uses;
-4. retreat the base, raise the arm to the fixed ready posture, and return once
-   to the measured random base pose;
-5. for Task 3, drive to the first seed-derived object docking pose, publish a
-   final zero velocity, and unregister the simulator-side `/cmd_vel`
-   publisher. Task 1 and Task 2 finish initialization at the returned
-   table-front pose and perform no additional model-entry base motion.
+4. retreat the base and follow the task entry's initialization arm waypoints;
+   Task 1 holds its high staging waypoint while returning to the measured
+   random base pose, then descends to the same task staging posture;
+5. finish at the initialized base pose and release the simulator-side
+   `/cmd_vel` publisher. All episode-time navigation, including Task 3 ring
+   docking, belongs to the external model.
 
 Only then does it publish a latched `/model_simulator/ready=true`, meaning the
 scene is initialized, the arm is at the ready posture, and the observation
@@ -143,14 +143,23 @@ evaluation protocol; see the next section.
   the task is complete, which is what ends the harness episode; `False` on
   reset and when an episode is rejected.
 
-The model supervisor is shared by all three tasks and treats one round's
+The model supervisor is shared by all three tasks and treats pre-episode
 startup as disposable.  A required-topic timeout, roslaunch exit, SDK or task
 initialization error, arm handoff error, or failed `/simulator/init` callback
-tears down only that simulator round and starts a fresh seed after a short
-delay.  If the harness has already returned from `/simulator/reset`, that open
-handshake is carried across retries and the first successfully initialized
-replacement sends `/simulator/init`; failed attempts are never published as
-task success.  A standalone model session still runs without an init service.
+before `/simulator/start` tears down only that startup attempt and starts a
+fresh seed after a short delay.  If the harness has already returned from
+`/simulator/reset`, that open handshake is carried across retries and the first
+successfully initialized replacement sends `/simulator/init`; failed startup
+attempts are never scored or published as task success.  A standalone model
+session still runs without an init service.
+
+After `/simulator/start` accepts an episode, the supervisor does not silently
+relaunch on an infrastructure failure because the harness would still be
+running the retired episode.  Observer creation, score sampling/finalization,
+or roslaunch failures mark that episode invalid, close model command admission,
+discard shutdown scoring, and exit non-zero with an operator-action message.
+Normal task failure or timeout remains an evaluated episode and is not treated
+as infrastructure failure.
 
 Success is judged by the task's own scoring rules, not a second definition:
 `utils/episode_success.py` drives the accepted `utils/task_scorer.py` scorer
@@ -176,11 +185,22 @@ Start a named model session with:
 ./run-scene1.sh model policy_name
 ```
 
-Each task keeps only two model-score files under
-`examples/model_scores/taskN/`: `score.txt` and `score.json`.  Every completed
-episode overwrites the previous pair.  The JSON result still records the model
-name, task, session, round, seed and finish reason.  Omitting `MODEL_NAME` uses
-`anonymous`.
+Each model command starts a fresh score session for its task and removes that
+task's four known outputs from the previous session.  Under
+`examples/model_scores/taskN/`, `score.txt` and `score.json` remain the latest
+valid completed episode, while `average.txt` and `average.json` are updated
+after every valid completed episode with the current process's running
+average and auditable round list.  Startup/initialization attempts and active
+episodes invalidated by scoring or simulator infrastructure do not enter the
+count; normal model failures, timeouts and zero scores do.  A round is
+committed at most once even when success is followed by reset and shutdown.
+The JSON results record the model name, task, session, round, seed and finish
+reason.  Omitting `MODEL_NAME` uses `anonymous`.
+
+Before every model roslaunch, the supervisor removes the previous simulator's
+`/robot_init_state_param` after its old writers have stopped.  This forces the
+new controller to wait for the current seed's launch-time base pose instead of
+consuming a parameter retained by the process-wide ROS master.
 
 `examples/task1_v2_initialize.py` holds the model-only Task 1 initialization
 stage; the internal `v2` name is retained to identify that implementation

@@ -10,10 +10,14 @@ That teardown has two weaknesses this module closes:
   whatever had not been signalled yet is simply left running.  ``ShutdownGuard``
   turns repeated Ctrl+C into a no-op while the teardown runs, so the teardown
   always finishes.
-* The teardown only knows the children this process started.  Anything whose
-  handle is already gone -- or that a previous round left behind -- is invisible
-  to it.  ``sweep`` re-signals by command line, the same way
-  ``run-sceneN.sh stop`` does from outside the container.
+* A process-group leader can exit before its descendants.  ``ShutdownGuard``
+  therefore saves every owned PGID when the child is registered and signals
+  that saved group during teardown.
+
+Name-based cleanup is deliberately limited to stale *round children* before a
+new round starts.  A supervisor must never kill another supervisor by name:
+the host wrapper serializes entry-point replacement before launching the next
+one.
 """
 
 import os
@@ -30,17 +34,18 @@ SWEEP_GRACE = 3.0
 
 
 def sweep_patterns(task_id):
-    """Command-line patterns for the processes one task round can leave behind.
+    """Command-line patterns for stale children of one task round.
 
     The leading character of each match is bracketed so the pattern cannot
     match the ``ps``/``pkill`` command line that is looking for it.
+
+    Top-level supervisors are intentionally absent.  Killing ``model_entry``
+    from a newly started ``helperfunc`` used to make the retiring model's own
+    cleanup kill the new helper in return.
     """
     return (
         r"[t]ask{}\w*\.py".format(task_id),
-        r"[h]elperfunc\.py",
-        r"[m]odel_entry\.py",
         r"[t]ask_scorer\.py",
-        r"[s]cene1_bag\.py",
         r"[r]osbag\s+(?:record|play)\b",
         r"[r]oslaunch\s+data_challenge_simulator",
         r"[s]ource_bin_latch_v2\.py",
@@ -152,14 +157,14 @@ def clear_simulator_nodes(timeout=10.0, log=print):
 
 
 class ShutdownGuard(object):
-    """Make Ctrl+C teardown finish, and re-sweep by name as a backstop.
+    """Make Ctrl+C teardown finish and stop only owned children.
 
     Use it as a context manager around the whole run and register every child
     process group with :meth:`add`.  The first Ctrl+C raises
     ``KeyboardInterrupt`` as usual, so the entry point's own ``finally`` blocks
     still run their graceful shutdown; any further Ctrl+C is ignored so that
-    teardown cannot be interrupted half way.  :meth:`sweep` then signals the
-    registered groups and re-scans the process table by command line.
+    teardown cannot be interrupted half way.  :meth:`sweep` signals only the
+    child PIDs and process groups registered by this guard.
     """
 
     def __init__(self, task_id, log=print):
@@ -230,23 +235,18 @@ class ShutdownGuard(object):
         return process
 
     def sweep(self, grace=SWEEP_GRACE):
-        """Signal everything this round started, then anything still matching.
+        """Signal everything this guard owns.
 
         Registered independent groups are signalled directly.  Ordinary child
         processes are signalled by PID, so the supervisor's own process group
-        is never a teardown target.  The name pass then catches whatever has
-        no handle left, including an orphan from an earlier round.
+        is never a teardown target.  Stale processes from an older run are the
+        host wrapper's responsibility and must not be guessed by name here.
         """
         self.log("[INFO] 清理本轮遗留的进程 ...")
         self._swept = True
         self._signal_children(signal.SIGTERM, graceful_signal=signal.SIGINT)
         self._wait_for_children(grace)
         self._signal_children(signal.SIGKILL)
-
-        found = self._signal_by_name(signal.SIGTERM)
-        if found:
-            time.sleep(grace)
-            self._signal_by_name(signal.SIGKILL)
 
     # -- internals -------------------------------------------------------
 
@@ -296,7 +296,3 @@ class ShutdownGuard(object):
                        for process in self._children):
                 return
             time.sleep(0.1)
-
-    def _signal_by_name(self, signum):
-        return _signal_matching_processes(
-            self.task_id, signum, self.log)

@@ -8,6 +8,100 @@ LAUNCH = PACKAGE / "launch/load_kuavo_mujoco_sim1.launch"
 SCENE = PACKAGE / "models/biped_s400062/xml/task1.xml"
 
 
+def test_task1_emits_segmented_monotonic_timings():
+    source = TASK.read_text()
+    assert "class TaskTimingRecorder:" in source
+    assert "time.monotonic()" in source
+    assert 'print("[TASK1_TIMING] {}"' in source
+    assert 'print("[TASK1_TIMING_SUMMARY] {}"' in source
+    for label in (
+            "initialization.base_retreat",
+            "initialization.staging_above",
+            "initialization.staging_descent",
+            "initialization.base_return_b0",
+            "{}.ik_solve",
+            "{}.arm_motion",
+            "source_grasp.hand_prepare",
+            "{}.gripper_close",
+            "{}.object_settle_wait",
+            "lever.base_motion",
+            "lever.conveyor_wait",
+            "cleanup.trajectory_stop"):
+        assert label in source
+    assert source.index("start_score_clock()") < source.index(
+        "timing.mark_score_start(scorer_started)")
+
+
+def test_task1_uses_short_staging_approaches_without_changing_ik_targets():
+    source = TASK.read_text()
+    expected_staging = (
+        "RIGHT_ARM_STAGING_RAD = (\n"
+        "    -0.569927, -0.301512, 0.658253, -0.488704,\n"
+        "    0.698827, -0.653404, -0.289423,\n"
+        ")"
+    )
+    assert expected_staging in source
+    expected_staging_above = (
+        "RIGHT_ARM_STAGING_ABOVE_RAD = (\n"
+        "    -0.466591, -0.579416, 0.652630, -1.211603,\n"
+        "    0.699260, -0.286390, 0.045867,\n"
+        ")"
+    )
+    assert expected_staging_above in source
+    assert "TRAJECTORY_POINTS = 40" in source
+    assert "SOURCE_GRASP_TRAJECTORY_POINTS = 80" in source
+    assert "STAGING_RETURN_TRAJECTORY_POINTS = 40" in source
+    assert "STAGING_DESCENT_TRAJECTORY_POINTS = 40" in source
+    assert "TARGET_TRANSPORT_TRAJECTORY_POINTS = 30" in source
+    assert "GRASP_LIFT_TRAJECTORY_POINTS = 30" in source
+    assert "CHASSIS_LINEAR_SPEED = 0.12" in source
+    assert "CHASSIS_ANGULAR_SPEED = 0.30" in source
+
+    initialization = source[
+        source.index("shoulder_only_deg = list(current_target_deg)"):
+        source.index("scorer_started = start_score_clock()")]
+    assert "staging_above_deg[7:14] = [" in initialization
+    assert "staging_deg[7:14] = [" in initialization
+    assert "ready_deg[7:11] = [" not in initialization
+    assert "full_ready_deg[7:14] = [" not in initialization
+    assert initialization.index("shoulder_only_deg[8]") < initialization.index(
+        "staging_above_deg[7:14]") < initialization.index(
+            "initialization.base_return_b0") < initialization.index(
+                "staging_deg[7:14]")
+
+    source_grasp = source[
+        source.index('"{}_above".format(name)'):
+        source.index('"{}_above_target_bin".format(name)')]
+    assert "compensate_source_grasp=True" in source_grasp
+    assert "trajectory_points=SOURCE_GRASP_TRAJECTORY_POINTS" in source_grasp
+    assert "open_gripper_during_motion" not in source
+    assert '"{}.gripper_open".format(name)' not in source
+    assert '"{}.post_open_wait".format(name)' not in source
+    initialization = source[:source.index("scorer_started = start_score_clock()")]
+    assert "control_right_gripper(0)" not in initialization
+    hand_prepare = source[
+        source.index('with timing.segment("source_grasp.hand_prepare")'):
+        source.index("for index, name in enumerate(CYLINDERS)")]
+    assert "gripper.control_right_gripper(0)" in hand_prepare
+
+    drop = source[
+        source.index('"{}_above_target_bin".format(name)'):
+        source.index('with timing.segment("{}.pre_release_wait"')]
+    assert "trajectory_points=TARGET_TRANSPORT_TRAJECTORY_POINTS" in drop
+    assert '"{}.post_close_wait".format(name)' not in source
+    assert "return_right_to_staging" in source
+    assert 'return_right_to_staging("v2_between_objects_staging")' in source
+    return_helper = source[
+        source.index("def return_right_to_staging"):
+        source.index("def print_measured_grasp_center")]
+    assert return_helper.index("RIGHT_ARM_STAGING_ABOVE_RAD") < (
+        return_helper.index("RIGHT_ARM_STAGING_RAD"))
+    assert (
+        "scene_ik.eef_quaternion_world_with_yaw(\n"
+        "            RIGHT_ARM_READY_FULL_RAD, GRASP_YAW_ADJUSTMENT_RAD)"
+    ) in source
+
+
 def test_task1_v2_lever_uses_fixed_r5_command():
     source = TASK.read_text()
     assert "TASK1_LEVER_INITIAL_R5_COMMAND_RAD = 1.0" in source
@@ -24,8 +118,7 @@ def test_task1_v2_lever_uses_fixed_r5_command():
 def test_task1_v2_source_grasp_uses_current_urdf_compensation():
     source = TASK.read_text()
     assert "GRASP_TRACKING_BIASES_WORLD = (" in source
-    assert "(0.002, 0.014, 0.010)" in source
-    assert "(0.002, 0.010, 0.010)" in source
+    assert source.count("(0.002, 0.010, 0.010)") == 2
     assert "(0.002, 0.005, 0.010)" in source
     assert "grasp_bias_world = GRASP_TRACKING_BIASES_WORLD[index]" in source
     assert "def _compensate_source_grasp_joints" in source
@@ -42,28 +135,57 @@ def test_task1_v2_lever_stops_raising_on_source_bin_handoff():
     assert "LEVER_NOMINAL_HANDOFF_RAD = math.radians(30.0)" in source
     assert "LEVER_PATH_FINE_STEP_RAD = math.radians(0.2)" in source
     assert "LEVER_PATH_FINE_START_RAD = math.radians(29.8)" in source
+    assert "LEVER_PATH_FINE_START_TOLERANCE_RAD = math.radians(0.1)" in source
     assert '"/mujoco/source_bin_latch_released"' in source
     assert "while (not source_bin_release.released" in source
     assert 'latch_achieved_lever_target("v2_lever_handoff_hold")' in source
     assert "expected 30.0 deg" not in source
 
 
+def test_task1_v2_lever_pull_keeps_velocity_across_segment_boundaries():
+    source = TASK.read_text()
+    assert "LEVER_PATH_TRAJECTORY_POINTS = 8" in source
+    assert "LEVER_PATH_FINE_TRAJECTORY_POINTS = 2" in source
+
+    helper = source[
+        source.index("def move_right_joint_target"):
+        source.index("def latch_achieved_lever_target")]
+    assert "if continuous else" in helper
+    assert "list(current_target_deg)" in helper
+
+    pull = source[
+        source.index("while (not source_bin_release.released"):
+        source.index("if not source_bin_release.released:",
+                     source.index("while (not source_bin_release.released"))]
+    assert "LEVER_PATH_FINE_TRAJECTORY_POINTS" in pull
+    assert "commanded_angle + LEVER_PATH_FINE_START_TOLERANCE_RAD" in pull
+    assert "commanded_angle + step_rad" in pull
+    assert "lever_angle + step_rad" not in pull
+    assert "commanded_angle = target_angle" in pull
+    assert "continuous=True" in pull
+    assert "smooth=True" not in pull
+
+
 def test_task1_v2_lever_sequence_is_hand_init_descent_three_finger():
     source = TASK.read_text()
-    prepare = source.index('"lever_ik_prepare"')
-    prepare_latch = source.index(
-        '"v2_lever_ik_prepare"', prepare)
     solve = source.index("approach_solution = scene_ik.solve_lever(")
     approach = source.index('"lever_approach", approach_solution')
     initialize = source.index(
         "initialize_right_lever_hand_before_descent()", approach)
     descent = source.index('"lever_contact", contact_solution', initialize)
     hook = source.index("form_right_lever_hook()", descent)
-    assert prepare < prepare_latch < solve < approach
+    assert solve < approach
     assert approach < initialize < descent < hook
     assert "task1_lever_latch_enabled" not in source
-    assert "LEVER_IK_PREPARE_RIGHT_RAD" in source
-    assert "r5_command_rad=LEVER_IK_PREPARE_RIGHT_RAD[4]" in source
+    assert "LEVER_IK_BRANCH_SEED_RIGHT_RAD" in source
+    assert "LEVER_APPROACH_TRAJECTORY_POINTS = 30" in source
+    assert '"lever_ik_prepare"' not in source
+    assert '"v2_lever_ik_prepare"' not in source
+    assert "LEVER_CONTACT_TRAJECTORY_POINTS = 40" in source
+    approach_solve = source[
+        source.rindex('with timing.segment("lever.approach.ik_solve")'):
+        source.index('with timing.segment("lever.contact.ik_solve")')]
+    assert "LEVER_IK_BRANCH_SEED_RIGHT_RAD" in approach_solve
 
     initialization_body = source[
         source.index("def initialize_right_lever_hand_before_descent"):
@@ -108,6 +230,37 @@ def test_task1_latch_is_isolated_from_task3_and_excludes_thumb():
     assert "r_index_fingertip_collision" in source
     assert "r_middle_fingertip_collision" in source
     assert "r_little_fingertip_collision" in source
+    assert "force_free_following" in task1_section
+    lever_impl = source[source.index("std::uint8_t task1LeverLatchMask()"):
+                        source.index("Eigen::Vector3d bimanualHandMidpoint()")]
+    assert "task1LeverFollowerHandPhase" in lever_impl
+    assert "updateTask1ForceFreeLeverFollower" in lever_impl
+    assert "std::remainder(" in lever_impl
+    assert "d->qpos[task1_lever_latch.lever_qpos_addr] = target_angle" in lever_impl
+    assert "d->qvel[task1_lever_latch.lever_dof_addr] = 0" in lever_impl
+    assert "m->geom_contype[task1_lever_latch.handle_geom_id] = 0" in lever_impl
+    assert "m->geom_conaffinity[task1_lever_latch.handle_geom_id] = 0" in lever_impl
+    assert "started force-free lever following" in lever_impl
+
+
+def test_task1_cylinder_grasp_latches_thumb_and_index_independently():
+    source = NODE.read_text()
+    scene = SCENE.read_text()
+    task1_grasp = source[
+        source.index("Task1GraspFingerLatchState"):
+        source.index("// Task 1 V2 lever hook")]
+
+    assert 'name="task1_grasp_independent_finger_latch_enabled" data="1"' in scene
+    assert 'name="task1_grasp_finger_latch_contact_depth" data="0.0001"' in scene
+    assert '"r_thumb_fingertip_collision"' in source
+    assert '"r_index_fingertip_collision"' in source
+    assert '"r_thumb_j1", "r_thumb_j2", "r_thumb_j3"' in source
+    assert '"r_index_j1", "r_index_j2", "r_index_j3"' in source
+    assert "task1_grasp_latch.object_body_id == state.body_id" in source
+    assert "task1GraspLatchMask() == 0x03" in source
+    assert 'clearTask1GraspFingerLatch("right hand opening")' in source
+    assert "applyTask1GraspLatchControls();" in source
+    assert "task3_" not in task1_grasp
 
 
 def test_source_bin_lock_target_only_moves_through_joint_service():

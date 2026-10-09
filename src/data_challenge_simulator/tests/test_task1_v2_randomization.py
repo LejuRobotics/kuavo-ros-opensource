@@ -57,22 +57,32 @@ def test_collect_layout_override_does_not_replace_saved_catalogue(
     assert saved.plan(1).catalogue_seed == saved_first_catalogue_seed
 
 
-def test_generation_ranges_allow_forward_spread():
+def test_generation_ranges_encode_direct_red_yellow_and_moving_blue():
     planner = Task1V2RandomizationPlanner()
     with planner.layout_file.open("r", encoding="utf-8") as stream:
         generation = json.load(stream)["generation"]
 
     assert generation["robot_initial_x_range"] == [-0.133, -0.088165]
-    assert generation["robot_task_x_range"] == [-0.03, 0.015]
-    assert generation["object_regions"][0]["x"] == [0.54, 0.65]
-    assert generation["object_regions"][1]["x"] == [0.54, 0.65]
-    assert generation["object_regions"][2]["x"] == [0.55, 0.63]
+    assert generation["direct_task_base"] == [0.015, 0.0, 0.0]
+    assert generation["blue_left_shift_range"] == [0.01, 0.10]
+    assert generation["blue_left_shift_margin"] == 0.04
 
     for layout in planner.layouts:
         assert -0.133 <= layout["initial_base"][0] <= -0.088165
-        assert -0.03 <= layout["task_base"][0] <= 0.015
+        assert layout["task_base"] == generation["direct_task_base"]
+        red_x = layout["cylinders"][0]["position"][0]
+        yellow_x = layout["cylinders"][1]["position"][0]
         blue_x = layout["cylinders"][2]["position"][0]
-        assert 0.55 <= blue_x <= 0.63
+        assert 0.54 <= red_x <= 0.64
+        assert 0.54 <= yellow_x <= 0.64
+        assert 0.625 <= blue_x <= 0.64
+        assert layout["grasp_bases"][0] == layout["task_base"]
+        assert layout["grasp_bases"][1] == layout["task_base"]
+        blue_shift = (
+            layout["grasp_bases"][2][1] - layout["task_base"][1])
+        assert 0.05 <= blue_shift <= 0.14
+        assert blue_shift == (
+            layout["blue_minimum_feasible_shift_m"] + 0.04)
 
 
 def test_saved_catalogue_is_not_forced_into_one_forward_line():

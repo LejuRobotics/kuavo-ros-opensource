@@ -99,7 +99,8 @@ def main():
         raise RuntimeError("Failed to command the 20-degree head scan pose")
 
     initialization_chassis = ChassisMotion(
-        linear_speed=0.08,
+        linear_speed=float(
+            initialization_config["open_loop_linear_speed_mps"]),
         angular_speed=0.20,
         minimum_linear_speed=0.06,
         minimum_angular_speed=0.06,
@@ -107,10 +108,12 @@ def main():
         yaw_tolerance_deg=3.0,
     )
     pick_chassis = ChassisMotion(
-        linear_speed=0.08,
-        angular_speed=0.20,
-        minimum_linear_speed=0.06,
-        minimum_angular_speed=0.06,
+        linear_speed=float(pick_config["chassis"]["linear_speed_mps"]),
+        angular_speed=float(pick_config["chassis"]["angular_speed_radps"]),
+        minimum_linear_speed=float(
+            pick_config["chassis"]["minimum_linear_speed_mps"]),
+        minimum_angular_speed=float(
+            pick_config["chassis"]["minimum_angular_speed_radps"]),
         position_tolerance=0.03,
         yaw_tolerance_deg=3.0,
     )

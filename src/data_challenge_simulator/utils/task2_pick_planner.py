@@ -394,12 +394,15 @@ class Task2PickPlanner:
             np.clip(np.asarray(value, dtype=float),
                     self.arm_lower[side], self.arm_upper[side])
             for value in alternate_seeds)
+        solver_tolerance = float(self.config["solver_tolerance"])
         for start in starts:
             result = least_squares(
                 residual, start,
                 bounds=(self.arm_lower[side], self.arm_upper[side]),
                 max_nfev=int(self.config["maximum_function_evaluations"]),
-                xtol=1e-9, ftol=1e-9, gtol=1e-9)
+                xtol=solver_tolerance,
+                ftol=solver_tolerance,
+                gtol=solver_tolerance)
             point_position, r7_position, rotation = forward(result.x)
             position_error = float(np.linalg.norm(
                 point_position - target_position))

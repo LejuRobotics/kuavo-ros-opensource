@@ -73,9 +73,9 @@ def init_runtime(args, gripper=None, trajectory=None):
     robot = KuavoRobot()
     robot_state = KuavoRobotState()
     chassis = ChassisMotion(
-        linear_speed=0.08,
+        linear_speed=0.20,
         angular_speed=0.20,
-        minimum_linear_speed=0.06,
+        minimum_linear_speed=0.08,
         minimum_angular_speed=0.06,
         position_tolerance=0.03,
         yaw_tolerance_deg=3.0,
@@ -197,8 +197,8 @@ def main(runtime=None, argv=None, ring_name=None, docking_base=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--scene", type=Path, default=DEFAULT_SCENE)
-    parser.add_argument("--trajectory-points", type=int, default=200)
-    parser.add_argument("--settle-seconds", type=float, default=1.0)
+    parser.add_argument("--trajectory-points", type=int)
+    parser.add_argument("--settle-seconds", type=float)
     parser.add_argument("--ring-name", default=RING_NAME)
     parser.add_argument("--docking-base", type=float, nargs=3,
                         metavar=("X", "Y", "YAW"))
@@ -212,6 +212,12 @@ def main(runtime=None, argv=None, ring_name=None, docking_base=None):
         args.docking_base = tuple(docking_base)
     with args.config.open("r", encoding="utf-8") as stream:
         config = json.load(stream)
+    trajectory_points = (
+        int(config["approach_trajectory_points"])
+        if args.trajectory_points is None else args.trajectory_points)
+    settle_seconds = (
+        float(config["approach_settle_seconds"])
+        if args.settle_seconds is None else args.settle_seconds)
 
     owns_runtime = runtime is None
     if owns_runtime:
@@ -223,7 +229,7 @@ def main(runtime=None, argv=None, ring_name=None, docking_base=None):
         trajectory = run_descend(
             runtime.robot, runtime.robot_state, runtime.chassis,
             runtime.poses, runtime.planner, runtime.gripper,
-            config, args.trajectory_points, args.settle_seconds,
+            config, trajectory_points, settle_seconds,
             args.ring_name, docking_base=args.docking_base,
             trajectory=trajectory)
     finally:
