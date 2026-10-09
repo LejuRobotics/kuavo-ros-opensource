@@ -139,8 +139,6 @@ class DepthImageInpainter:
                 if self.debug:
                     rospy.logdebug(f"Encoding failure: {e}")
             
-            input_header = msg.header
-
             # encoding / unit convertion
             cv_image = cv_image.astype(np.float32) / 1000.0  # mm -> m
             orig_h, orig_w = cv_image.shape[:2]
@@ -212,7 +210,7 @@ class DepthImageInpainter:
                
 
                 mask_msg = self.bridge.cv2_to_imgmsg(mask, encoding='mono8')
-                mask_msg.header = input_header
+                mask_msg.header = msg.header
                 self.mask_pub.publish(mask_msg)
 
             img_cropped = self.apply_crop(cv_image)
@@ -253,7 +251,7 @@ class DepthImageInpainter:
                         )
                     cv2.imshow('Inpainted Depth Histogram', hist_image)
                 inpainted_msg = self.bridge.cv2_to_imgmsg(img_inpainted, encoding='32FC1')
-                inpainted_msg.header = input_header
+                inpainted_msg.header = msg.header
                 self.inpainted_pub.publish(inpainted_msg)
 
                 pos_diff = (img_inpainted - raw_resized).clip(min=0)
@@ -271,7 +269,7 @@ class DepthImageInpainter:
             
             img_normalized = np.clip(img_blurred, 0, self.max_depth) / self.max_depth
             processed_msg = self.bridge.cv2_to_imgmsg(img_normalized, encoding='32FC1')
-            processed_msg.header = input_header
+            processed_msg.header = msg.header
             self.nomalized_pub.publish(processed_msg)
 
             # if self.output_encoding == 'same_as_input':
@@ -451,8 +449,8 @@ class DepthImageInpainter:
     def apply_resize(self, image, interpolation=cv2.INTER_NEAREST):
         if self.resize_scale != 1.0 and self.resize_scale > 0:
             orig_h, orig_w = image.shape[:2]
-            new_h = int(36)
-            new_w = int(64)
+            new_h = int(orig_h * self.resize_scale*2)
+            new_w = int(orig_w * self.resize_scale*2)
             image = cv2.resize(image, (new_w, new_h), interpolation=interpolation)
             if self.debug:
                 rospy.loginfo(f"Resized image to scale {self.resize_scale} ({new_h}x{new_w})")

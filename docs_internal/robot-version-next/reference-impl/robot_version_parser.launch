@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<!--
+  ROBOT_VERSION_NEXT 解析示例 Launch 文件
+  最终实现以 robot_version_manager.launch 中对 robot_version 包的调用为准，本文件供参考
+
+  展示如何在 roslaunch 中通过 robot_version 包解析 ROBOT_VERSION
+
+  支持格式: <brand>-<product>-<locomotion>[-<end_effector>[-<camera>]][+tags...]
+  示例: kuavo-4pro-biped-revo1hand-Gemini330_none_none_none+upper_nuci7
+
+  兼容旧格式: 45, 60, 14 等数字自动通过映射表转换
+-->
+
+<launch>
+  <!-- ============================================================ -->
+  <!-- 步骤1: 通过 robot_version 包获取语义字段 -->
+  <!-- ============================================================ -->
+
+  <!-- 路径字段 -->
+  <arg name="model_name"  default="$(eval __import__('robot_version').model_name())"/>
+  <arg name="config_name" default="$(eval __import__('robot_version').config_name())"/>
+  <arg name="urdf_name"   default="$(eval __import__('robot_version').urdf_name())"/>
+
+  <!-- 布尔判断 -->
+  <arg name="is_kuavo"   default="$(eval __import__('robot_version').is_kuavo())"/>
+  <arg name="is_roban"   default="$(eval __import__('robot_version').is_roban())"/>
+  <arg name="is_kuavo5"  default="$(eval __import__('robot_version').is_kuavo5())"/>
+  <arg name="is_biped"   default="$(eval __import__('robot_version').is_biped())"/>
+  <arg name="is_wheeled" default="$(eval __import__('robot_version').is_wheeled())"/>
+
+  <!-- ============================================================ -->
+  <!-- 步骤2: 发布参数到参数服务器 -->
+  <!-- ============================================================ -->
+
+  <!-- /robot_version 保持 int，旧代码零改动 -->
+  <param name="robot_version" value="$(eval __import__('robot_version').legacy_int())"/>
+
+  <!-- /robot_version_next 新增 string，新代码读这个 -->
+  <param name="robot_version_next" type="string"
+         value="$(eval __import__('robot_version').robot_id())"/>
+
+  <!-- 语义参数 -->
+  <param name="rv/brand"       type="string"
+         value="$(eval __import__('robot_version').RobotVersion.from_env().brand.value)"/>
+  <param name="rv/product"     type="string"
+         value="$(eval __import__('robot_version').RobotVersion.from_env().product)"/>
+  <param name="rv/locomotion"  type="string"
+         value="$(eval __import__('robot_version').RobotVersion.from_env().locomotion.value)"/>
+
+  <!-- ============================================================ -->
+  <!-- 步骤3: 路径拼接示例 -->
+  <!-- ============================================================ -->
+
+  <arg name="urdfFile"
+       default="$(find kuavo_assets)/models/$(arg model_name)/urdf/$(arg urdf_name).urdf"/>
+  <arg name="gazeboUrdfFile"
+       default="$(find kuavo_assets)/models/$(arg model_name)/urdf/$(arg urdf_name)_gazebo.urdf"/>
+  <arg name="taskFile"
+       default="$(find humanoid_controllers)/config/$(arg config_name)/mpc/task.info"/>
+  <arg name="kuavoConfigFile"
+       default="$(find kuavo_assets)/config/$(arg config_name)/kuavo.json"/>
+
+  <!-- ============================================================ -->
+  <!-- 步骤4: 条件加载示例 -->
+  <!-- ============================================================ -->
+
+  <!-- Kuavo 系列配置 -->
+  <group if="$(arg is_kuavo)">
+    <rosparam param="rv/series">kuavo</rosparam>
+  </group>
+
+  <!-- Roban 系列配置 -->
+  <group if="$(arg is_roban)">
+    <rosparam param="rv/series">roban</rosparam>
+  </group>
+
+  <!-- 双足机器人配置 -->
+  <group if="$(arg is_biped)">
+    <rosparam param="rv/locomotion_type">biped</rosparam>
+  </group>
+
+  <!-- 轮式机器人配置 -->
+  <group if="$(arg is_wheeled)">
+    <rosparam param="rv/locomotion_type">wheeled</rosparam>
+  </group>
+
+</launch>

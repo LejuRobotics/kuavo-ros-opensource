@@ -14,7 +14,7 @@ class CameraROSInterface:
 
         self.cameras = {
             'head': {
-                'topic': '/camera/color/image_raw/compressed',
+                'topic': '/camera/color/image_raw',
                 'pub_topic': '/model_output_data',
                 'publisher': None
             },
@@ -41,8 +41,7 @@ class CameraROSInterface:
 
         try:
             websocket = WebSocketKuavoSDK()
-            msg_type = 'sensor_msgs/CompressedImage' if camera == 'head' else 'sensor_msgs/Image'
-            topic = roslibpy.Topic(websocket.client, self.cameras[camera]['topic'], msg_type)
+            topic = roslibpy.Topic(websocket.client, self.cameras[camera]['topic'], 'sensor_msgs/Image')
             result = {}
             event = threading.Event()
 
@@ -54,7 +53,7 @@ class CameraROSInterface:
             if event.wait(timeout=1.0):
                 msg = result['msg']
                 topic.unsubscribe()
-                cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8") if camera == 'head' else self.bridge.imgmsg_to_cv2(msg, "bgr8")
+                cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
                 self.cv_image_shape = cv_image.shape
                 return cv_image
             else:

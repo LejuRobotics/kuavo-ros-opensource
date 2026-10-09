@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # coding: utf-8
 import rospy
-from std_msgs.msg import Int16MultiArray
-from std_srvs.srv import Trigger
+from std_msgs.msg import Bool, Int16MultiArray
 from kuavo_humanoid_sdk.common.logger import SDKLogger
 from kuavo_humanoid_sdk.kuavo.core.core import KuavoRobotCore
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import  playmusic, playmusicRequest
@@ -15,6 +14,7 @@ class Audio:
     
     def __init__(self):
         """Initialize the audio system."""
+        self._audio_stop_publisher = rospy.Publisher('stop_music', Bool, queue_size=10)
         self.audio_data_publisher = rospy.Publisher('audio_data', Int16MultiArray, queue_size=10)
         rospy.sleep(0.5)  # Wait for publisher initialization
     def play_audio(self, file_name: str, volume: int = 100, speed: float = 1.0) -> bool:
@@ -49,17 +49,14 @@ class Audio:
     def stop_audio(self):
         """Stop the currently playing audio."""
         try:
-            rospy.wait_for_service('stop_music', timeout=2.0)
-            stop_music_service = rospy.ServiceProxy('stop_music', Trigger)
-            stop_music_service()
+            msg = Bool()
+            msg.data = True
+            self._audio_stop_publisher.publish(msg)
             SDKLogger.info("[Robot Audio] Requested to stop audio playback")
-            return True
-        except rospy.ROSException as e:
-            SDKLogger.error(f"[Robot Audio] Stop audio service unavailable: {str(e)}")
-            return False
+            return True 
         except Exception as e:
             SDKLogger.error(f"[Robot Audio] Failed to stop audio playback: {str(e)}")
-            return False
+            return False    
     
     def text_to_speech(self, text: str,volume: float = 0.5) -> bool:
         """Synthesize and play the specified text.
