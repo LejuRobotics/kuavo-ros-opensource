@@ -1,10 +1,10 @@
 
 "use strict";
 
-let robotHeadMotionData = require('./robotHeadMotionData.js');
 let horizontalMotionByStep = require('./horizontalMotionByStep.js');
+let robotHeadMotionData = require('./robotHeadMotionData.js');
 
 module.exports = {
-  robotHeadMotionData: robotHeadMotionData,
   horizontalMotionByStep: horizontalMotionByStep,
+  robotHeadMotionData: robotHeadMotionData,
 };
