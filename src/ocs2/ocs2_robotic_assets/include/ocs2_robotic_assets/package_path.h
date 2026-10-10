@@ -37,7 +37,7 @@ namespace robotic_assets {
 
 /** Gets the path to the package source directory. */
 inline std::string getPath() {
-  return "/tmp/acs-work-276600/github/git_repo/src/ocs2/ocs2_robotic_assets";
+  return "/tmp/acs-work-276703/github/git_repo/src/ocs2/ocs2_robotic_assets";
 }
 
 }  // namespace robotic_assets
