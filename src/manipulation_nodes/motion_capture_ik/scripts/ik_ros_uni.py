@@ -116,6 +116,7 @@ LEJUCLAW = "lejuclaw"
 QIANGNAO_TOUCH = "qiangnao_touch"
 REVO2 = "revo2"
 LINKER_HAND = "linker_hand"
+HEIMAN = "heiman"
 
 control_finger_type = 0
 control_torso = 0
@@ -590,7 +591,8 @@ class IkRos:
                 LEJUCLAW: LEJUCLAW,
                 QIANGNAO_TOUCH:QIANGNAO_TOUCH,
                 REVO2: REVO2,
-                LINKER_HAND: LINKER_HAND
+                LINKER_HAND: LINKER_HAND,
+                HEIMAN: HEIMAN,
             }
             if end_effector_type in end_effector_mapping:
                 self.end_effector_type = end_effector_mapping[end_effector_type]
@@ -601,7 +603,39 @@ class IkRos:
             self.end_effector_type = QIANGNAO
         print(f"\033[93m--------------------------------------------------\033[0m")        
         print(f"\033[93m- End effector type: {self.end_effector_type} \033[0m")
-        print(f"\033[93m--------------------------------------------------\033[0m")        
+        print(f"\033[93m--------------------------------------------------\033[0m")
+
+        # 轮臂绝对式：黑漫手势库在手节点上，这里只转发扳机并调用切手势。
+        self._sg100_abs_vr = False
+        self._sg100_trigger_pub = None
+        self._sg100_step = None
+        self._sg100_pending_dir = 0
+        self._sg100_pending_start = 0.0
+        self._sg100_debounce = False
+        self._sg100_confirm_sec = 0.3
+        self._sg100_step_warn_time = 0.0
+        wheel_absolute = self.robot_type == 1 or bool(rospy.get_param("/wheel_ik", False))
+        if self.end_effector_type == HEIMAN and wheel_absolute:
+            try:
+                from kuavo_msgs.srv import SG100StepGesture
+            except ImportError as exc:
+                rospy.logerr(
+                    "[IkRos] SG100StepGesture unavailable (%s); "
+                    "wheel absolute heiman VR hand control disabled",
+                    exc,
+                )
+            else:
+                self._sg100_abs_vr = True
+                self._sg100_trigger_pub = rospy.Publisher(
+                    "/sg100/trigger", Float32MultiArray, queue_size=10
+                )
+                self._sg100_step = rospy.ServiceProxy(
+                    "/sg100/step_gesture", SG100StepGesture
+                )
+                rospy.loginfo(
+                    "[IkRos] wheel absolute heiman: publishing /sg100/trigger, "
+                    "stepping via /sg100/step_gesture (X+A next, X+B prev, hold 300ms)"
+                )
 
         # All callback-visible state must be initialized before subscriptions
         # are registered. This also removes the startup race seen in rosout.
@@ -2167,7 +2201,74 @@ class IkRos:
             self.pub_robot_end_hand(hand_finger_data=hand_finger_data)
 
 
+    def _publish_sg100_from_joystick(self, joy):
+        """轮臂绝对式黑漫：扳机 0~1 发到 /sg100/trigger，摸 X+A / X+B 满 300ms 切手势。"""
+        if joy is None or self._sg100_trigger_pub is None:
+            return
+        trigger = Float32MultiArray()
+        trigger.data = [
+            max(0.0, min(1.0, float(joy.left_trigger))),
+            max(0.0, min(1.0, float(joy.right_trigger))),
+        ]
+        self._sg100_trigger_pub.publish(trigger)
+        self._check_sg100_gesture_switch(joy)
+
+    def _check_sg100_gesture_switch(self, joy):
+        now = time.time()
+        if not joy.left_first_button_touched:
+            self._sg100_pending_dir = 0
+            self._sg100_debounce = False
+            return
+
+        if joy.right_first_button_touched:
+            direction = 1
+            btn_pressed = bool(joy.right_first_button_pressed)
+        elif joy.right_second_button_touched:
+            direction = -1
+            btn_pressed = bool(joy.right_second_button_pressed)
+        else:
+            self._sg100_pending_dir = 0
+            self._sg100_debounce = False
+            return
+
+        if joy.left_first_button_pressed and btn_pressed:
+            self._sg100_pending_dir = 0
+            return
+        if self._sg100_debounce:
+            return
+        if self._sg100_pending_dir != direction:
+            self._sg100_pending_dir = direction
+            self._sg100_pending_start = now
+            return
+        if (now - self._sg100_pending_start) < self._sg100_confirm_sec:
+            return
+
+        try:
+            res = self._sg100_step(direction, 2)
+        except rospy.ServiceException as exc:
+            if now - self._sg100_step_warn_time >= 2.0:
+                rospy.logwarn("[IkRos] step_gesture failed: %s", exc)
+                self._sg100_step_warn_time = now
+            self._sg100_pending_dir = 0
+            return
+        if not res.success:
+            if now - self._sg100_step_warn_time >= 2.0:
+                rospy.logwarn("[IkRos] step_gesture failed: %s", res.message)
+                self._sg100_step_warn_time = now
+            self._sg100_pending_dir = 0
+            return
+
+        self._sg100_debounce = True
+        rospy.loginfo(
+            "[IkRos] VR gesture switch %s -> id %d",
+            "next" if direction > 0 else "prev",
+            res.current_id,
+        )
+
     def pub_robot_end_hand(self, joyStick_data=None, hand_finger_data = None):
+        if self._sg100_abs_vr:
+            self._publish_sg100_from_joystick(joyStick_data)
+            return
         # hand tracking 时判断保护
         if hand_finger_data is not None and len(hand_finger_data) < 2:
             return

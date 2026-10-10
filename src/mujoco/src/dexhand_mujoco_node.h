@@ -19,6 +19,11 @@
 #include "kuavo_msgs/gestureExecuteState.h"
 #include "std_msgs/Bool.h"
 #include <atomic>
+#include <memory>
+
+namespace HighlyDynamic {
+class SG100HandBridge;
+}
 
 namespace mujoco_node {
 using namespace eef_controller;
@@ -32,7 +37,7 @@ enum class HandType {
 
 class DexHandMujocoRosNode {
 public:
-    DexHandMujocoRosNode() = default;
+    DexHandMujocoRosNode();
     ~DexHandMujocoRosNode();
 
     /**
@@ -104,6 +109,8 @@ private:
     ros::Subscriber heiman_command_sub_;
     // heiman SG100 手的状态发布者
     ros::Publisher heiman_state_pub_;
+    // 手势库与 /sg100/*。跟仿真手节点一起起来,不依赖 VR。
+    std::unique_ptr<HighlyDynamic::SG100HandBridge> sg100_gesture_;
     // Linker系列灵巧手的状态发布者
     ros::Publisher l_hand_state_pub_;
     ros::Publisher r_hand_state_pub_;

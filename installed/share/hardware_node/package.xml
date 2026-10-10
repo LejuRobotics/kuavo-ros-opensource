@@ -49,6 +49,8 @@
   <!-- Use doc_depend for packages you need only for building documentation: -->
   <!--   <doc_depend>doxygen</doc_depend> -->
   <depend>kuavo_msgs</depend>
+  <depend>urdf</depend>
+  <depend>roslib</depend>
   <depend>kuavo_common</depend>
   <depend>kuavo_assets</depend>
   <depend>kuavo_solver</depend>

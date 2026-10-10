@@ -1,13 +1,18 @@
 #pragma once
 
 #include <ros/ros.h>
+#include <ros/callback_queue.h>
+#include <ros/spinner.h>
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <std_msgs/Float32MultiArray.h>
 
 #include <kuavo_msgs/SG100AddGestures.h>
 #include <kuavo_msgs/SG100DeleteGesture.h>
@@ -22,42 +27,36 @@
 
 namespace HighlyDynamic {
 
-/// VR(Quest3)输入注入:人形与轮臂各自持有不同的 joystick 类,用回调组解耦
-struct SG100VrInput {
-  std::function<float()> left_trigger;
-  std::function<float()> right_trigger;
-  std::function<bool()> left_first_touched;
-  std::function<bool()> left_first_pressed;
-  std::function<bool()> right_first_touched;
-  std::function<bool()> right_first_pressed;
-  std::function<bool()> right_second_touched;
-  std::function<bool()> right_second_pressed;
-};
+/// 扳机话题:/sg100/trigger,Float32MultiArray data[0]=左手 data[1]=右手,范围 0~1。
+/// 没有发布者时按 0 解算(手势起点)。
+inline constexpr const char* kSg100TriggerTopic = "/sg100/trigger";
 
 /**
  * @brief SG100(黑漫)手 ROS 桥接:手势库 + /sg100/* service + /sg100_hand_command 发布线程
  *
- * 人形 Quest3IkIncrementalROS 与轮臂 WheelQuest3IkIncrementalROS 共用本实现,
- * 避免两侧各维护一份约 500 行重复代码。
- * 调用方在门控 end_effector_type == heiman 后构造并 start(),析构时自动停线程。
+ * 挂在跟机器人一起起来的手节点上(真机 SG100HandROSNode、仿真 DexHandMujocoRosNode)。
+ * service / trigger 走独立 CallbackQueue + AsyncSpinner,避免被 nodelet_manager
+ * 公共回调队列堵十几秒。同进程内还可 setCommandHandler 直送驱动,不绕订阅。
  */
 class SG100HandBridge {
  public:
-  SG100HandBridge(ros::NodeHandle& nh, SG100VrInput vr);
+  using CommandHandler = std::function<void(const kuavo_msgs::SG100HandCommand&)>;
+
+  explicit SG100HandBridge(ros::NodeHandle& nh);
   ~SG100HandBridge();
+
+  /// 同进程直送手驱动/仿真(在 start 前设置)。仍会发布 /sg100_hand_command 给外部。
+  void setCommandHandler(CommandHandler handler);
 
   /// 加载手势库与 URDF 限位、注册 6 个 service、advertise 命令并启动 30Hz 发布线程
   void start();
 
-  /// 停止发布线程(幂等;析构时自动调用)
+  /// 停止发布线程与专用 spinner(幂等;析构时自动调用)
   void stop();
 
  private:
-  /// VR 输入回调是否已注入
-  bool vrInputReady() const;
-
   void publishLoop();
-  void checkVrGestureSwitch();
+  void onTrigger(const std_msgs::Float32MultiArray::ConstPtr& msg);
   void clampKeyModeLocked(std::size_t mode_count);
 
   /// hand_side 解析:0→left, 1→right, 2→both;其余返回 false
@@ -76,11 +75,10 @@ class SG100HandBridge {
   bool onStepGesture(kuavo_msgs::SG100StepGesture::Request& req,
                      kuavo_msgs::SG100StepGesture::Response& res);
 
-  /// VR 手势切换确认延迟(秒):摸 X+A/B 后需持续按住超过该时长才切换
-  static constexpr double SG100_VR_SWITCH_CONFIRM_DELAY = 0.3;
-
   ros::NodeHandle nh_;
-  SG100VrInput vr_;
+  ros::NodeHandle gesture_nh_;
+  ros::CallbackQueue callback_queue_;
+  std::unique_ptr<ros::AsyncSpinner> spinner_;
 
   SG100GestureLibrary left_lib_;
   SG100GestureLibrary right_lib_;
@@ -88,6 +86,7 @@ class SG100HandBridge {
   SG100JointLimits right_limits_;
 
   ros::Publisher cmd_pub_;
+  ros::Subscriber trigger_sub_;
   ros::ServiceServer srv_get_;
   ros::ServiceServer srv_add_;
   ros::ServiceServer srv_delete_;
@@ -97,6 +96,8 @@ class SG100HandBridge {
 
   std::thread thread_;
   std::mutex mutex_;
+  std::mutex handler_mutex_;
+  CommandHandler command_handler_;
   std::atomic<int> key_mode_{0};
   std::atomic<bool> ready_{false};
   std::atomic<bool> stop_{false};
@@ -104,9 +105,8 @@ class SG100HandBridge {
   std::string left_yaml_path_;
   std::string right_yaml_path_;
 
-  int vr_switch_pending_dir_ = 0;
-  bool vr_switch_debounce_ = false;
-  ros::Time vr_switch_pending_start_;
+  std::atomic<float> left_trigger_{0.0f};
+  std::atomic<float> right_trigger_{0.0f};
 };
 
 }  // namespace HighlyDynamic

@@ -1,4 +1,5 @@
 #include "dexhand_mujoco_node.h"
+#include "motion_capture_ik/SG100HandBridge.h"
 #include "dexhand/mujoco_dexhand.hpp"
 #include "dexhand/linkerl6_hand.hpp"
 #include "dexhand/linkero6_hand.hpp"
@@ -16,6 +17,8 @@ namespace mujoco_node {
 using namespace eef_controller;
 
 
+
+DexHandMujocoRosNode::DexHandMujocoRosNode() = default;
 
 DexHandMujocoRosNode::~DexHandMujocoRosNode() {
     stop();
@@ -105,11 +108,21 @@ bool DexHandMujocoRosNode::init(ros::NodeHandle& nh,
     /* subscribe to enable control state (latched topic) */
     enable_control_state_sub_ = nh_.subscribe<std_msgs::Bool>("/enable_control_state", 1, &DexHandMujocoRosNode::enableControlCallback, this);
 
+    if (hand_type_ == HandType::HEIMAN) {
+        sg100_gesture_ = std::make_unique<HighlyDynamic::SG100HandBridge>(nh_);
+        sg100_gesture_->setCommandHandler(
+            [this](const kuavo_msgs::SG100HandCommand& cmd) {
+                heimanCommandCallback(
+                    boost::make_shared<kuavo_msgs::SG100HandCommand>(cmd));
+            });
+        sg100_gesture_->start();
+    }
+
     return true;
 }
 
 void DexHandMujocoRosNode::stop() {
-    
+    sg100_gesture_.reset();
     running_ = false;
     if (publish_thread_.joinable()) {
         publish_thread_.join();

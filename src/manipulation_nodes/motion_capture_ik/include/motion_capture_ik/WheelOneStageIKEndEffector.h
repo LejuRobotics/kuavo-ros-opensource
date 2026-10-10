@@ -203,6 +203,8 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
 
   void disableKneeLegLock() { lockKneeLegEnabled_ = false; }
 
+  Eigen::VectorXd clampToJointLimits(const Eigen::VectorXd& q) const;
+
   // Freeze q0/knee, q1/leg and q2/waist_pitch at one fixed command snapshot.
   // Calls must be serialized with solveIK() by the owner of this solver.
   bool activateChestPositionFreeze(const Eigen::Vector3d& frozenLowerBodyPitchJoints);

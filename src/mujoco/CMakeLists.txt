@@ -60,6 +60,8 @@ find_package(catkin REQUIRED
         kuavo_msgs
         kuavo_assets
         kuavo_common
+        urdf
+        roslib
         )
 
 # find_package(PkgConfig REQUIRED)
@@ -282,14 +284,23 @@ aux_source_directory(./src/lcm_interface LCM_SRCS)
 
 file(GLOB DEXHAND_SOURCES "src/dexhand/*.cpp" "src/dexhand/*.hpp")
 
+set(SG100_GESTURE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../manipulation_nodes/motion_capture_ik)
+set(SG100_GESTURE_SOURCES
+  ${SG100_GESTURE_ROOT}/src/SG100HandBridge.cpp
+  ${SG100_GESTURE_ROOT}/src/SG100GestureLibrary.cpp
+  ${SG100_GESTURE_ROOT}/src/SG100JointLimits.cpp
+)
+
 # Base library sources
 add_library(${PROJECT_NAME} SHARED
     src/mujoco_node.cc
     ${DEXHAND_SOURCES}
     src/joint_address.hpp
     src/dexhand_mujoco_node.cpp
+    ${SG100_GESTURE_SOURCES}
     ${SIMULATE_SRCS} ${LCM_SRCS} ${ray_caster}
 )
+target_include_directories(${PROJECT_NAME} PRIVATE ${SG100_GESTURE_ROOT}/include)
 
 # Conditionally add DDS sources
 if(USE_DDS OR USE_LEJU_DDS)

@@ -217,9 +217,13 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
     ROS_ERROR("WheelOneStageIKEndEffector::activateChestPositionFreeze: expected three finite joints and nq=18");
     return false;
   }
+  Eigen::VectorXd freezeQ = Eigen::VectorXd::Zero(nq_);
+  freezeQ.head<3>() = frozenLowerBodyPitchJoints;
+  freezeQ = clampToJointLimits(freezeQ);
+  const Eigen::Vector3d frozenLowerBodyPitchJointsClamped = freezeQ.head<3>();
 
   if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ &&
-      frozenLowerBodyPitchJoints_.isApprox(frozenLowerBodyPitchJoints, 1.0e-12)) {
+      frozenLowerBodyPitchJoints_.isApprox(frozenLowerBodyPitchJointsClamped, 1.0e-12)) {
     return true;
   }
 
@@ -237,9 +241,10 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
   if (fallback.size() != nq_ || !fallback.allFinite()) {
     fallback = Eigen::VectorXd::Zero(nq_);
   }
-  fallback.head<3>() = frozenLowerBodyPitchJoints;
+  fallback.head<3>() = frozenLowerBodyPitchJointsClamped;
+  fallback = clampToJointLimits(fallback);
 
-  frozenLowerBodyPitchJoints_ = frozenLowerBodyPitchJoints;
+  frozenLowerBodyPitchJoints_ = frozenLowerBodyPitchJointsClamped;
   hasFrozenLowerBodyPitchJoints_ = true;
   freezeChestPosition_ = true;
 
@@ -274,6 +279,29 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
     historyBuffer_.resyncSegment(0, frozenLowerBodyPitchJoints_);
   }
   return true;
+}
+
+Eigen::VectorXd WheelOneStageIKEndEffector::clampToJointLimits(const Eigen::VectorXd& q) const {
+  if (!plant_ || q.size() != nq_ || !q.allFinite()) {
+    return q;
+  }
+  const Eigen::VectorXd lower = plant_->GetPositionLowerLimits();
+  const Eigen::VectorXd upper = plant_->GetPositionUpperLimits();
+  if (lower.size() != nq_ || upper.size() != nq_) {
+    return q;
+  }
+  constexpr double kEps = 1.0e-4;
+  Eigen::VectorXd clamped = q;
+  for (int i = 0; i < nq_; ++i) {
+    const double lo = lower[i] + kEps;
+    const double hi = upper[i] - kEps;
+    if (lo <= hi) {
+      clamped[i] = std::clamp(q[i], lo, hi);
+    } else {
+      clamped[i] = 0.5 * (lower[i] + upper[i]);
+    }
+  }
+  return clamped;
 }
 
 void WheelOneStageIKEndEffector::deactivateChestPositionFreeze() {
@@ -322,6 +350,7 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
       }
     }
   }
+  referenceSolution = clampToJointLimits(referenceSolution);
 
   setConstraints(endEffectorIK, PoseConstraintList, controlArmIndex, Eigen::VectorXd::Zero(nq_), referenceSolution);
 
@@ -464,9 +493,13 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   // 锁下肢前两个关节（knee=q[0], leg=q[1]）——硬等式约束，保证电机不动，
   // 只保留 waist_pitch(q[2]) / waist_yaw(q[3]) 随动
   if (lockKneeLegEnabled_) {
+    Eigen::VectorXd lockQ = Eigen::VectorXd::Zero(nq_);
+    lockQ[0] = lockKneeQ_;
+    lockQ[1] = lockLegQ_;
+    lockQ = clampToJointLimits(lockQ);
     auto* prog = ik.get_mutable_prog();
-    prog->AddBoundingBoxConstraint(lockKneeQ_, lockKneeQ_, ik.q()[0]);
-    prog->AddBoundingBoxConstraint(lockLegQ_, lockLegQ_, ik.q()[1]);
+    prog->AddBoundingBoxConstraint(lockQ[0], lockQ[0], ik.q()[0]);
+    prog->AddBoundingBoxConstraint(lockQ[1], lockQ[1], ik.q()[1]);
   }
 
 

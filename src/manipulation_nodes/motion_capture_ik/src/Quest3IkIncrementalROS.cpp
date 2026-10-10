@@ -2800,19 +2800,17 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
   enableArmTrajInterpolatorClient_ = nodeHandle_.serviceClient<std_srvs::SetBool>("/enable_arm_traj_interpolator");
 
-  // SG100 heiman 手指：仅当本机型末端为 heiman 时加载手势库
-  // （6 个 /sg100/* service 与 /sg100_hand_command publisher 均在该函数内注册），
-  // 避免非黑漫机型凭空多出 SG100 话题与服务
+  // 黑漫手势库和 /sg100/* 在手节点上。这里只在 heiman 机型转发扳机、调用切手势。
   const bool enableSg100Hand =
       (joyStickHandlerPtr_ != nullptr &&
        joyStickHandlerPtr_->getEndEffectorType() == EndEffectorType::HEIMAN);
   if (enableSg100Hand) {
-    sg100_bridge_ = std::make_unique<HighlyDynamic::SG100HandBridge>(
+    sg100_vr_client_ = std::make_unique<HighlyDynamic::SG100VrGestureClient>(
         nodeHandle_, makeSg100VrInput());
-    sg100_bridge_->start();
+    sg100_vr_client_->start();
   } else {
     ROS_INFO("[Quest3IkIncrementalROS] end_effector_type is not heiman; "
-             "SG100 hand disabled (no /sg100/* service, no /sg100_hand_command)");
+             "SG100 VR trigger/gesture client disabled");
   }
 
   // 初始化pose约束列表

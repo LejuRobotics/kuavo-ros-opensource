@@ -1,9 +1,9 @@
 /**
  * @brief SG100(黑漫)手 ROS 桥接实现
  *
- * 手势库加载、/sg100/* service、/sg100_hand_command 30Hz 发布线程;
- * 人形与轮臂共用(原两侧各一份的重复实现见 git 历史)。
- * 函数体自 Quest3IkIncrementalROS.cpp 平移,仅做类名/成员名与 VR 输入注入替换。
+ * 手势库加载、/sg100/* service、/sg100_hand_command 30Hz 发布线程。
+ * 由真机 SG100HandROSNode 与仿真 DexHandMujocoRosNode 启动,不在 VR IK 进程里。
+ * 扳机来自 /sg100/trigger;没有该话题时按 0 解算。
  */
 #include "motion_capture_ik/SG100HandBridge.h"
 
@@ -11,10 +11,10 @@
 
 #include <kuavo_msgs/SG100Curve.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace HighlyDynamic {
@@ -45,17 +45,31 @@ kuavo_msgs::SG100Curve fromCurve(const std::vector<CurvePoint>& curve) {
 
 }  // namespace
 
-SG100HandBridge::SG100HandBridge(ros::NodeHandle& nh, SG100VrInput vr)
-    : nh_(nh), vr_(std::move(vr)) {}
+SG100HandBridge::SG100HandBridge(ros::NodeHandle& nh) : nh_(nh), gesture_nh_(nh) {
+  gesture_nh_.setCallbackQueue(&callback_queue_);
+}
 
 SG100HandBridge::~SG100HandBridge() { stop(); }
 
-bool SG100HandBridge::vrInputReady() const {
-  return static_cast<bool>(vr_.left_trigger) && static_cast<bool>(vr_.right_trigger);
+void SG100HandBridge::setCommandHandler(CommandHandler handler) {
+  std::lock_guard<std::mutex> lock(handler_mutex_);
+  command_handler_ = std::move(handler);
+}
+
+void SG100HandBridge::onTrigger(const std_msgs::Float32MultiArray::ConstPtr& msg) {
+  if (msg->data.size() < 2) {
+    return;
+  }
+  left_trigger_.store(msg->data[0]);
+  right_trigger_.store(msg->data[1]);
 }
 
 void SG100HandBridge::stop() {
   stop_.store(true);
+  if (spinner_) {
+    spinner_->stop();
+    spinner_.reset();
+  }
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -101,22 +115,29 @@ void SG100HandBridge::start() {
   right_yaml_path_ = right_path;
 
 
-  // 注册 /sg100/* 手势管理 service（增删改查 + 切换）
-  srv_get_ = nh_.advertiseService(
+  // service / trigger 用独立队列,不跟 nodelet_manager 抢公共 spinner。
+  srv_get_ = gesture_nh_.advertiseService(
       "/sg100/get_gestures", &SG100HandBridge::onGetGestures, this);
-  srv_add_ = nh_.advertiseService(
+  srv_add_ = gesture_nh_.advertiseService(
       "/sg100/add_gestures", &SG100HandBridge::onAddGestures, this);
-  srv_delete_ = nh_.advertiseService(
+  srv_delete_ = gesture_nh_.advertiseService(
       "/sg100/delete_gesture", &SG100HandBridge::onDeleteGesture, this);
-  srv_update_ = nh_.advertiseService(
+  srv_update_ = gesture_nh_.advertiseService(
       "/sg100/update_gesture", &SG100HandBridge::onUpdateGesture, this);
-  srv_switch_ = nh_.advertiseService(
+  srv_switch_ = gesture_nh_.advertiseService(
       "/sg100/switch_gesture", &SG100HandBridge::onSwitchGesture, this);
-  srv_step_ = nh_.advertiseService(
+  srv_step_ = gesture_nh_.advertiseService(
       "/sg100/step_gesture", &SG100HandBridge::onStepGesture, this);
 
   cmd_pub_ =
       nh_.advertise<kuavo_msgs::SG100HandCommand>("/sg100_hand_command", 10);
+  trigger_sub_ = gesture_nh_.subscribe(
+      kSg100TriggerTopic, 10, &SG100HandBridge::onTrigger, this);
+
+  spinner_ = std::make_unique<ros::AsyncSpinner>(1, &callback_queue_);
+  spinner_->start();
+  ROS_INFO("[SG100HandBridge] dedicated AsyncSpinner started for /sg100/* and %s",
+           kSg100TriggerTopic);
 
   ready_ = ok_left && ok_right;
   if (ready_) {
@@ -136,8 +157,9 @@ void SG100HandBridge::start() {
 }
 
 void SG100HandBridge::publishLoop() {
-  // 30 Hz，与 launch 默认 finger_processing_hz 一致。
-  ros::Rate rate(30.0);
+  // 用 WallRate:手势发布不跟 /use_sim_time 绑死。仿真时钟一顿,
+  // ros::Rate::sleep 会把 mutex 和下一帧命令一起拖到十几秒。
+  ros::WallRate rate(30.0);
 
   while (!stop_.load() && ros::ok()) {
     if (!ready_) {
@@ -145,30 +167,39 @@ void SG100HandBridge::publishLoop() {
       continue;
     }
 
-    checkVrGestureSwitch();
-
     const float left_trigger =
-        vr_.left_trigger ? static_cast<float>(vr_.left_trigger()) : 0.0f;
+        std::max(0.0f, std::min(1.0f, left_trigger_.load()));
     const float right_trigger =
-        vr_.right_trigger ? static_cast<float>(vr_.right_trigger()) : 0.0f;
+        std::max(0.0f, std::min(1.0f, right_trigger_.load()));
 
     const int key_mode = key_mode_.load();
 
     HighlyDynamic::SG100HandPose left_pose;
     HighlyDynamic::SG100HandPose right_pose;
-    std::lock_guard<std::mutex> gesture_lock(mutex_);
-    const bool ok_left = left_lib_.buildTarget(key_mode, left_trigger, left_pose);
-    const bool ok_right = right_lib_.buildTarget(key_mode, right_trigger, right_pose);
-    if (!ok_left || !ok_right ||
-        left_pose.positions.size() != static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF) ||
-        right_pose.positions.size() != static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF)) {
+    bool ok_left = false;
+    bool ok_right = false;
+    {
+      // 只在读手势库时持锁。sleep / publish / 直送驱动绝不能握着,
+      // 否则 /sg100/step_gesture 会等整拍 sleep(仿真卡顿时可达十几秒)。
+      std::lock_guard<std::mutex> gesture_lock(mutex_);
+      ok_left = left_lib_.buildTarget(key_mode, left_trigger, left_pose);
+      ok_right = right_lib_.buildTarget(key_mode, right_trigger, right_pose);
+      if (ok_left && ok_right &&
+          left_pose.positions.size() ==
+              static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF) &&
+          right_pose.positions.size() ==
+              static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF)) {
+        left_limits_.clamp(left_pose.positions);
+        right_limits_.clamp(right_pose.positions);
+      } else {
+        ok_left = false;
+        ok_right = false;
+      }
+    }
+    if (!ok_left || !ok_right) {
       rate.sleep();
       continue;
     }
-
-    // 安全 clamp：左右手分别夹回各自 URDF 物理限位。
-    left_limits_.clamp(left_pose.positions);
-    right_limits_.clamp(right_pose.positions);
 
     kuavo_msgs::SG100HandCommand cmd;
     cmd.header.stamp = ros::Time::now();
@@ -201,6 +232,16 @@ void SG100HandBridge::publishLoop() {
       }
     }
 
+    // 同进程直送驱动/仿真,避免 nodelet 公共队列把订阅回调拖到十几秒。
+    // 话题仍发布,给外部监控用。
+    CommandHandler handler;
+    {
+      std::lock_guard<std::mutex> lock(handler_mutex_);
+      handler = command_handler_;
+    }
+    if (handler) {
+      handler(cmd);
+    }
     cmd_pub_.publish(cmd);
     rate.sleep();
   }
@@ -540,76 +581,6 @@ bool SG100HandBridge::onStepGesture(
   res.success = true;
   res.message = "ok";
   return true;
-}
-
-void SG100HandBridge::checkVrGestureSwitch() {
-  if (!ready_) {
-    return;
-  }
-  const ros::Time now = ros::Time::now();
-
-  // 摸左手 X 键（left_first_button_touched）作为修饰键；未摸则复位
-  const bool x_touched =
-      vrInputReady() && vr_.left_first_touched();
-  if (!x_touched) {
-    vr_switch_pending_dir_ = 0;
-    vr_switch_debounce_ = false;
-    return;
-  }
-
-  // 确定方向：摸右手 A → +1，摸右手 B → -1
-  int direction = 0;
-  bool btn_pressed = false;
-  if (vr_.right_first_touched()) {          // A 键
-    direction = 1;
-    btn_pressed = vr_.right_first_pressed();
-  } else if (vr_.right_second_touched()) {  // B 键
-    direction = -1;
-    btn_pressed = vr_.right_second_pressed();
-  } else {
-    // 只摸 X 未摸 A/B：复位等待与防抖
-    vr_switch_pending_dir_ = 0;
-    vr_switch_debounce_ = false;
-    return;
-  }
-
-  // 按下 X + A/B（回正/组合键操作）：取消本次手势切换
-  if (vr_.left_first_pressed() && btn_pressed) {
-    vr_switch_pending_dir_ = 0;
-    return;
-  }
-
-  // 本次触摸会话已切换过，需松开重摸后才能再次切换
-  if (vr_switch_debounce_) {
-    return;
-  }
-
-  // 触摸边沿：开始延迟确认
-  if (vr_switch_pending_dir_ != direction) {
-    vr_switch_pending_dir_ = direction;
-    vr_switch_pending_start_ = now;
-    return;
-  }
-
-  // 延迟未满 300ms：继续等待，观察是否会变成「按下」
-  if ((now - vr_switch_pending_start_).toSec() < SG100_VR_SWITCH_CONFIRM_DELAY) {
-    return;
-  }
-
-  // 延迟结束且仍未按下：执行手势切换
-  vr_switch_debounce_ = true;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const std::size_t mode_count = left_lib_.modeCount();
-    if (mode_count == 0) {
-      return;
-    }
-    const int n = static_cast<int>(mode_count);
-    const int next = ((key_mode_.load() + direction) % n + n) % n;
-    key_mode_.store(next);
-    ROS_INFO("[SG100HandBridge] VR gesture switch %s -> mode %d/%zu",
-             direction > 0 ? "next" : "prev", next, mode_count);
-  }
 }
 
 }  // namespace HighlyDynamic

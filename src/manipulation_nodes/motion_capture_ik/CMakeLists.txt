@@ -202,9 +202,7 @@ add_executable(ik_ros_uni_cpp_node
   src/JoyStickHandler.cpp
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
-  src/SG100GestureLibrary.cpp
-  src/SG100JointLimits.cpp
-  src/SG100HandBridge.cpp
+  src/SG100VrGestureClient.cpp
 )
 target_include_directories(ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include
@@ -228,9 +226,7 @@ add_executable(wheel_ik_ros_uni_cpp_node
   src/ArmLengthMeasurement.cpp
   src/WheelJoyStickHandler.cpp
   src/WheelHandSmoother.cpp
-  src/SG100GestureLibrary.cpp
-  src/SG100JointLimits.cpp
-  src/SG100HandBridge.cpp
+  src/SG100VrGestureClient.cpp
 )
 add_dependencies(wheel_ik_ros_uni_cpp_node ${catkin_EXPORTED_TARGETS})
 target_include_directories(wheel_ik_ros_uni_cpp_node PRIVATE
@@ -257,9 +253,7 @@ add_executable(wheel_arm_only_ik_ros_uni_cpp_node
   src/JoyStickHandler.cpp
   src/Quest3Debugger.cpp
   src/HandSmoother.cpp
-  src/SG100GestureLibrary.cpp
-  src/SG100JointLimits.cpp
-  src/SG100HandBridge.cpp
+  src/SG100VrGestureClient.cpp
 )
 target_include_directories(wheel_arm_only_ik_ros_uni_cpp_node PRIVATE
   ${PROJECT_BINARY_DIR}/include

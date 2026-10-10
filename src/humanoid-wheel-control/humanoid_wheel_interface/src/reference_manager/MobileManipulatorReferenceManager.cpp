@@ -1979,7 +1979,7 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::calcRuckigTrajWithCmdVel(double initTime, const vector_t &targetBaseVel)
   {
-    assert(targetBasePose.size() == baseDim_ && "cmdPose dimension must be baseDim_!");
+    assert(targetBaseVel.size() == baseDim_ && "cmdVel dimension must be baseDim_!");
 
     cmdVel_plannerInitialTime_ = initTime;
     cmdVelPlannerRuckigPtr_->setCurrentPose(cmdVel_prevTargetPose_);
