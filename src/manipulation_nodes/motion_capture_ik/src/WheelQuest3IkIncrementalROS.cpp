@@ -914,6 +914,20 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                              rightHandPos,
                              rightHandQuat);
 
+    // Waist/chest follow rotates the grip-world incremental target into the
+    // current commanded chest. Clip relative to measured EE only after that
+    // remap; doing it beforehand puts the full waist yaw into Euler ZYX and
+    // rebuilds a discontinuous command. Near pitch gimbal the safe clip keeps
+    // the command instead of reconstructing yaw/roll.
+    if (chestIncrementalUpdateEnabled_) {
+      if (input.leftRefActive) {
+        leftHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(true, leftHandQuat);
+      }
+      if (input.rightRefActive) {
+        rightHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(false, rightHandQuat);
+      }
+    }
+
     // 上面的 active/inactive 分支和胸部重映射都可能重新生成 handQuat，
     // 因此必须在最终写入 whole-body input 前再次做连续性检查。
     stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
@@ -1044,7 +1058,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
         modeChangeCycle_.leftChangingMaintainUpdated, modeChangeCycle_.rightChangingMaintainUpdated, frozen);
 
     auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-        latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
+        latestIncrementalResult_.getLatestIncrementalHandPose(
+            true, useIncrementalHandOrientation_, true, !chestIncrementalUpdateEnabled_);
 
     // 增量模块在 grip 上升沿可能已经把姿态滤波器推进到新的 VR 姿态。
     // 首帧仍使用切换前的参考，保证最终 EE 位置（尤其是旋转后的 offset）连续。
@@ -1060,8 +1075,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (rightGripTransferPending_ || rightGripOrientationHoldFrames_ > 0) {
       incrementalRightQuat = rightGripTransferHandQuat_;
     }
-    stabilizeGripQuaternion(true, currentLeftGripForTransfer, incrementalLeftQuat);
-    stabilizeGripQuaternion(false, currentRightGripForTransfer, incrementalRightQuat);
+    // Chest-on: incremental quat is still grip-world; previousGripQuat is the
+    // already-followed command. Stabilizing here mixes those frames and
+    // rejects waist yaw. Continuity is checked after followChest.
+    if (!chestIncrementalUpdateEnabled_) {
+      stabilizeGripQuaternion(true, currentLeftGripForTransfer, incrementalLeftQuat);
+      stabilizeGripQuaternion(false, currentRightGripForTransfer, incrementalRightQuat);
+    }
 
     // Apply hand smoother in mode-changing cycle (it updates the position by reference).
     if (input.leftRefActive && modeChangeCycle_.leftHandCtrlModeChanged) {
@@ -1294,7 +1314,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   WholeBodyRefInput input = buildWholeBodyInput(leftGripReady, rightGripReady, frozen);
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
-      latestIncrementalResult_.getLatestIncrementalHandPose(true, useIncrementalHandOrientation_, true);
+      latestIncrementalResult_.getLatestIncrementalHandPose(
+          true, useIncrementalHandOrientation_, true, !chestIncrementalUpdateEnabled_);
 
   if (leftGripTransferPending_) {
     scaledLeftHandPos = leftGripTransferHandPos_;
@@ -1308,8 +1329,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   if (rightGripTransferPending_ || rightGripOrientationHoldFrames_ > 0) {
     incrementalRightQuat = rightGripTransferHandQuat_;
   }
-  stabilizeGripQuaternion(true, currentLeftGripPressed, incrementalLeftQuat);
-  stabilizeGripQuaternion(false, currentRightGripPressed, incrementalRightQuat);
+  // Chest-on: incremental quat is still grip-world; previousGripQuat is the
+  // already-followed command. Stabilizing here mixes those frames and
+  // rejects waist yaw. Continuity is checked after followChest.
+  if (!chestIncrementalUpdateEnabled_) {
+    stabilizeGripQuaternion(true, currentLeftGripPressed, incrementalLeftQuat);
+    stabilizeGripQuaternion(false, currentRightGripPressed, incrementalRightQuat);
+  }
 
   recordTimestamp("applyWholeBodyAndSolveStart", loopSyncCount_);
   applyWholeBodyAndSolve(
