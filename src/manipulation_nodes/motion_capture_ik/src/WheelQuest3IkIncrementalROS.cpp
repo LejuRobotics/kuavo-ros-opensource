@@ -965,6 +965,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     // current commanded chest.  Clip relative to measured EE only after that
     // remap; doing it beforehand puts the full waist yaw into Euler ZYX and
     // rebuilds a discontinuous command (wrist twitch at ~28 deg/frame).
+    // Near pitch gimbal the safe clip keeps the command instead of reconstructing yaw/roll.
     if (chestIncrementalUpdateEnabled_) {
       if (input.leftRefActive) {
         leftHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(true, leftHandQuat);

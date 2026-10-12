@@ -187,6 +187,7 @@ class WheelIncrementalPoseResult {
 
   std::pair<Eigen::Quaterniond, Eigen::Quaterniond> getLatestRobotRightHandQuatInc(
       bool smoothRotation = true, bool clipAroundMeasured = true) const {
+    (void)smoothRotation;
     if (!clipAroundMeasured) {
       return std::make_pair(robotRightHandQuatTarget_.normalized(), rightHandDeltaQuatLast_);
     }
