@@ -17,6 +17,12 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(pinocchio REQUIRED pinocchio)
 pkg_check_modules(hpp-fcl REQUIRED hpp-fcl)
+# 4c972c465e: tinyxml.h 在就走 TiXmlDocument（老 urdfdom），tinyxml2.h 在就走
+# XMLDocument（Ubuntu 24.04）。XMLPrinter 的构造函数在 libtinyxml2 里，只包含头文件会留下未定义符号。
+pkg_check_modules(tinyxml2 QUIET tinyxml2)
+if(NOT tinyxml2_FOUND)
+  find_library(tinyxml2_LIBRARIES NAMES tinyxml2)
+endif()
 # requires liboctomap-dev and libassimp-dev
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
@@ -76,6 +82,9 @@ target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
   ${pinocchio_LIBRARIES}
 )
+if(tinyxml2_LIBRARIES)
+  target_link_libraries(${PROJECT_NAME} ${tinyxml2_LIBRARIES})
+endif()
 target_compile_options(${PROJECT_NAME} PUBLIC ${FLAGS})
 
 ####################
