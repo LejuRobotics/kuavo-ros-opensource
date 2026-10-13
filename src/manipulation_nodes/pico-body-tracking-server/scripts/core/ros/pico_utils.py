@@ -222,9 +222,10 @@ class HeadBodyPose:
 class KuavoPicoInfoTransformer():
     """Class for transforming Pico VR device information to robot coordinates."""
     
-    def __init__(self, model_path: str, tf_broadcaster=None, bone_frame_publisher=None):
+    def __init__(self, model_path: str, tf_broadcaster=None, bone_frame_publisher=None, is_wheel_robot=False):
         """Initialize the KuavoPicoInfoTransformer."""
         self.model_path = model_path
+        self.is_wheel_robot = is_wheel_robot
         
         # Store external dependencies
         self.tf_broadcaster = tf_broadcaster
@@ -386,7 +387,8 @@ class KuavoPicoInfoTransformer():
         self.control_torso_mode = mode and self.control_mode not in ("WholeBody", "LowerBody")
         self.reset_pelvis_offset()
         SDKLogger.info(f"===============set_control_torso_mode:{self.control_torso_mode}===============")
-        if self.control_torso_mode:
+        # 轮臂坐标系由手臂模式选择；躯干开关不能改变follow/增量的坐标契约。
+        if self.control_torso_mode and not self.is_wheel_robot:
             self.is_mobile_mpc = True
 
     def stop_arm_length_measurement(self) -> None:
@@ -944,8 +946,19 @@ class KuavoPicoInfoTransformer():
 
     def read_msg_hand(self, msg):
         """Read hand pose data from message without additional transformations."""
-        if not msg.poses:
-            return
+        if len(msg.poses) < 24:
+            return False
+
+        # 轮臂base_link位于底盘，不是人体骨盆；实际肩部原点必须与输入手臂位姿处于同一坐标系。
+        # 无法获取机器人坐标变换时跳过本帧，不复用旧目标。
+        robot_shoulders = None
+        if self.is_wheel_robot:
+            frame = "odom" if self.is_mobile_mpc else "base_link"
+            robot_shoulders = [self.tools.try_get_tf_transform(frame, link) for link in
+                               ("zarm_l1_link", "zarm_r1_link")]
+            if any(pose is None for pose in robot_shoulders):
+                rospy.logwarn_throttle(2.0, "PICO wheel: waiting for shoulder TF; skipping arm target")
+                return False
         
         pelvis_idx = self.bone_name_to_index["Pelvis"]
         pelvis_pose = msg.poses[pelvis_idx]
@@ -1015,13 +1028,23 @@ class KuavoPicoInfoTransformer():
         ]
 
         left_human_shoulder_pos = self.left_shoulder_pos.copy()
-        left_human_shoulder_pos[1] = pelvis_pose.position.y + self.shoulder_width
-
         right_human_shoulder_pos = self.right_shoulder_pos.copy()
-        right_human_shoulder_pos[1] = pelvis_pose.position.y - self.shoulder_width
+        if not self.is_wheel_robot:
+            left_human_shoulder_pos[1] = pelvis_pose.position.y + self.shoulder_width
+            right_human_shoulder_pos[1] = pelvis_pose.position.y - self.shoulder_width
         
         self.left_elbow_pos, self.left_hand_pos = self.scale_arm_positions(self.left_shoulder_pos, self.left_elbow_pos, self.left_hand_pose[0], left_human_shoulder_pos, "Left", self.left_wrist_pose[0])
         self.right_elbow_pos, self.right_hand_pos = self.scale_arm_positions(self.right_shoulder_pos, self.right_elbow_pos, self.right_hand_pose[0], right_human_shoulder_pos, "Right", self.right_wrist_pose[0])
+
+        if robot_shoulders is not None:
+            for side, robot_shoulder in zip(("left", "right"), robot_shoulders):
+                shoulder = np.asarray(getattr(self, side + "_shoulder_pos"))
+                offset = np.asarray(robot_shoulder.position) - shoulder
+                for part in ("hand_pos", "elbow_pos"):
+                    attr = side + "_" + part
+                    setattr(self, attr, np.asarray(getattr(self, attr)) + offset)
+                getattr(self, side + "_wrist_pose")[0] = np.asarray(getattr(self, side + "_wrist_pose")[0]) + offset
+                setattr(self, side + "_shoulder_pos", np.asarray(robot_shoulder.position))
 
         self.left_hand_pose[0] = self.left_hand_pos
         self.right_hand_pose[0] = self.right_hand_pos
@@ -1043,6 +1066,8 @@ class KuavoPicoInfoTransformer():
             self.marker_pub_right.publish(right_marker)
             self.marker_pub_elbow_right.publish(right_elbow_marker)
             self.marker_pub_shoulder_right.publish(right_shoulder_marker)
+
+        return True
 
     def construct_point_marker(self, point, scale=0.05, alpha=0.3, color=[0, 0, 1]):
         if len(point) != 3:
@@ -1303,7 +1328,10 @@ class KuavoPicoInfoTransformer():
         for i, matrix in enumerate(robot_urdf_matrices):
             try:
                 bone_name = BODY_TRACKER_ROLES[i]
-                if self.control_torso_mode:
+                if self.is_wheel_robot and not self.is_mobile_mpc:
+                    # follow/增量始终使用底盘局部坐标，与肩部TF和输出frame一致。
+                    joint_pose = self.make_base_pose_from_matrix(matrix, pelvis_inv)
+                elif self.control_torso_mode:
                     joint_pose = self.get_world_pose(matrix, pelvis_matrix)
                     # joint_pose = self.get_local_pose(matrix, pelvis_matrix)
                 else:

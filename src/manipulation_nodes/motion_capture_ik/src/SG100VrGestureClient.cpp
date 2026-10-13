@@ -1,6 +1,7 @@
 #include "motion_capture_ik/SG100VrGestureClient.h"
 
 #include <utility>
+#include <cmath>
 
 #include <std_msgs/Float32MultiArray.h>
 #include <kuavo_msgs/SG100StepGesture.h>
@@ -15,7 +16,7 @@ SG100VrGestureClient::SG100VrGestureClient(ros::NodeHandle& nh, SG100VrInput vr)
 SG100VrGestureClient::~SG100VrGestureClient() { stop(); }
 
 bool SG100VrGestureClient::vrInputReady() const {
-  return static_cast<bool>(vr_.left_trigger) && static_cast<bool>(vr_.right_trigger);
+  return vr_.fresh && vr_.fresh() && vr_.left_trigger && vr_.right_trigger;
 }
 
 void SG100VrGestureClient::stop() {
@@ -36,14 +37,39 @@ void SG100VrGestureClient::start() {
 
 void SG100VrGestureClient::loop() {
   ros::WallRate rate(30.0);
+  bool had_fresh_input = false;
   while (!stop_.load() && ros::ok()) {
+    if (!vrInputReady()) {
+      if (had_fresh_input) {
+        trigger_pub_.publish(std_msgs::Float32MultiArray{});
+        ROS_WARN("[SG100VrGestureClient] VR input stale; pausing commands, last target held");
+      }
+      had_fresh_input = false;
+      pending_dir_ = 0;
+      debounce_ = false;
+      rate.sleep();
+      continue;
+    }
     std_msgs::Float32MultiArray trigger;
     trigger.data.resize(2);
-    trigger.data[0] = vr_.left_trigger ? vr_.left_trigger() : 0.0f;
-    trigger.data[1] = vr_.right_trigger ? vr_.right_trigger() : 0.0f;
+    trigger.data[0] = vr_.left_trigger();
+    trigger.data[1] = vr_.right_trigger();
+    if (!std::isfinite(trigger.data[0]) || !std::isfinite(trigger.data[1])) {
+      trigger_pub_.publish(std_msgs::Float32MultiArray{});
+      had_fresh_input = false;
+      pending_dir_ = 0;
+      debounce_ = false;
+      ROS_WARN_THROTTLE(1.0, "[SG100VrGestureClient] invalid trigger; pausing commands");
+      rate.sleep();
+      continue;
+    }
     trigger_pub_.publish(trigger);
+    had_fresh_input = true;
     checkVrGestureSwitch();
     rate.sleep();
+  }
+  if (had_fresh_input && ros::ok()) {
+    trigger_pub_.publish(std_msgs::Float32MultiArray{});
   }
 }
 

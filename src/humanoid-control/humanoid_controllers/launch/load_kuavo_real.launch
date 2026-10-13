@@ -49,6 +49,8 @@
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <arg name="arm_move_spd"      default="2.0"/>
     <arg name="waist_move_spd"      default="1.8"/>
+    <!-- SG100 optional command filter parameter. -->
+    <arg name="sg100_cmd_filter_alpha" default="0.2"/>
 
     <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->
     <arg name="joy_execute_action" default="true"/>
@@ -142,12 +144,10 @@
     <param name="sg100_left_port" value="/dev/lefthand" />
     <param name="sg100_right_port" value="/dev/righthand" />
     <param name="sg100_baudrate" value="1000000" />
-    <param name="sg100_control_rate" value="50.0" />
+    <param name="sg100_control_rate" value="100.0" />
     <param name="sg100_publish_joint_states" value="true" />
-    <param name="sg100_cmd_filter_alpha" value="0.2" />
+    <param name="sg100_cmd_filter_alpha" value="$(arg sg100_cmd_filter_alpha)" />
     <param name="sg100_debug_state" value="false" />
-    <param name="sg100_kp" value="10" />
-    <param name="sg100_kd" value="0.02" />
     <param name="sg100_output_limit" value="0.5" />
 
     <!-- 自动清理 .ros 文件夹参数 -->
@@ -249,6 +249,9 @@
         <arg name="topic_config" value="$(eval arg('vr_latency_rosbag_topic_config') if arg('enable_vr_latency_diagnostics') else arg('rosbag_topic_config'))"/>
       </include>
     </group>
+
+    <!-- 物理急停桥接：电源板 stop_int 置位即发布 /stop_robot，停控制器/硬件/rosbag -->
+    <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen"/>
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
 
@@ -340,7 +343,9 @@
 
 
     <group if="$(arg with_ik)">
-      <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+      <include file="$(find motion_capture_ik)/launch/ik_node.launch">
+          <arg name="robot_version" value="$(arg robot_version)"/>
+      </include>
     </group>
 
     <group if="$(arg with_mm_ik)">

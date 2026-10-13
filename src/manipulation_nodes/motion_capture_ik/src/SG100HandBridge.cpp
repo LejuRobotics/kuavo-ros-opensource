@@ -1,9 +1,9 @@
 /**
  * @brief SG100(黑漫)手 ROS 桥接实现
  *
- * 手势库加载、/sg100/* service、/sg100_hand_command 30Hz 发布线程。
+ * 手势库加载、/sg100/ service、/sg100_hand_command 100Hz 发布线程。
  * 由真机 SG100HandROSNode 与仿真 DexHandMujocoRosNode 启动,不在 VR IK 进程里。
- * 扳机来自 /sg100/trigger;没有该话题时按 0 解算。
+ * 扳机来自 /sg100/trigger;没有新鲜输入时停止发布命令。
  */
 #include "motion_capture_ik/SG100HandBridge.h"
 
@@ -12,6 +12,9 @@
 #include <kuavo_msgs/SG100Curve.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <utility>
 #include <cstddef>
 #include <cstdio>
 #include <string>
@@ -56,12 +59,49 @@ void SG100HandBridge::setCommandHandler(CommandHandler handler) {
   command_handler_ = std::move(handler);
 }
 
+void SG100HandBridge::setConfiguredHands(bool left, bool right) {
+  left_enabled_ = left;
+  right_enabled_ = right;
+}
+
+void SG100HandBridge::setInputResumeHandler(std::function<void()> handler) {
+  std::lock_guard<std::mutex> lock(handler_mutex_);
+  input_resume_handler_ = std::move(handler);
+}
+
+void SG100HandBridge::requestFilterReseed() {
+  std::function<void()> handler;
+  {
+    std::lock_guard<std::mutex> lock(handler_mutex_);
+    handler = input_resume_handler_;
+  }
+  if (handler) handler();
+}
+
 void SG100HandBridge::onTrigger(const std_msgs::Float32MultiArray::ConstPtr& msg) {
-  if (msg->data.size() < 2) {
+  if (msg->data.size() < 2 || !std::isfinite(msg->data[0]) ||
+      !std::isfinite(msg->data[1])) {
+    // The VR client sends an empty frame once on raw-input loss. Invalidate
+    // immediately rather than waiting another 0.5 s on the bridge heartbeat.
+    last_trigger_received_.store(0.0);
     return;
   }
+  const bool resuming = !vrInputReady();
   left_trigger_.store(msg->data[0]);
   right_trigger_.store(msg->data[1]);
+  if (resuming) requestFilterReseed();
+  last_trigger_received_.store(
+      std::chrono::duration<double>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+bool SG100HandBridge::vrInputReady() const {
+  const double received = last_trigger_received_.load();
+  const double now = std::chrono::duration<double>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+
+  return received > 0.0 &&
+         now >= received &&
+         now - received < 0.5;
 }
 
 void SG100HandBridge::stop() {
@@ -75,33 +115,71 @@ void SG100HandBridge::stop() {
   }
 }
 
+bool SG100HandBridge::onSetEnabled(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res) {
+  std::lock_guard<std::mutex> lock(gate_mutex_);
+  res.success = gate_.enable(req.data, ready_.load() && vrInputReady() && (left_enabled_ || right_enabled_));
+  if (res.success && req.data) requestFilterReseed();
+  res.message = res.success ? (req.data ? "SG100 VR enabled" : "SG100 VR disabled; last target held")
+                            : "SG100 VR requires configured hands and fresh valid input";
+  return true;
+}
+
 void SG100HandBridge::start() {
+  { std::lock_guard<std::mutex> lock(gate_mutex_); gate_ = SG100BridgeGate{}; }
+  last_trigger_received_.store(0.0);
   // 第一件事:确认关节限位可用 —— 限位不可用就不启动。
   // 没有正确的限位,clamp() 无法保护硬件(曾用 [0, 1.57] 兜底,而 thumb_j2 真实限位是
   // [-2.62, 0],方向相反)。
-  // 手部片段 heiman_sg100/urdf/*.urdf 无 <robot> 根元素,urdf 库无法解析;
-  // 完整 biped_s{version}.urdf 含 revolute 手关节 + <limit>,左右手共用。
+  // 优先从整机 URDF 读取手指限位；URDF 中没有 SG100 手指关节时，
+  // 按左右手分别回退到 hardware_node 的 joint_angle_map.json。
   int robot_version = 0;
-  if (!nh_.getParam("/robot_version", robot_version)) {
-    ROS_ERROR("[SG100HandBridge] failed to read /robot_version, "
-              "aborting SG100 start");
-    return;
+  bool left_requested = true;
+  bool right_requested = true;
+  nh_.param("/sg100/left_enabled", left_requested, left_requested);
+  nh_.param("/sg100/right_enabled", right_requested, right_requested);
+  left_enabled_ = left_enabled_ && left_requested;
+  right_enabled_ = right_enabled_ && right_requested;
+  std::string robot_urdf;
+  if (nh_.getParam("/robot_version", robot_version)) {
+    robot_urdf =
+        ros::package::getPath("kuavo_assets") +
+        "/models/biped_s" + std::to_string(robot_version) +
+        "/urdf/biped_s" + std::to_string(robot_version) + ".urdf";
+  } else {
+    ROS_WARN("[SG100HandBridge] /robot_version unavailable; "
+             "using joint_angle_map.json for SG100 limits");
   }
-  const std::string robot_urdf =
-      ros::package::getPath("kuavo_assets") +
-      "/models/biped_s" + std::to_string(robot_version) +
-      "/urdf/biped_s" + std::to_string(robot_version) + ".urdf";
-  const bool ok_left_limits = left_limits_.load(robot_urdf, "l_");
-  const bool ok_right_limits = right_limits_.load(robot_urdf, "r_");
+
+  const std::string sg100_config_dir =
+      ros::package::getPath("hardware_node") + "/config/sg100";
+  const auto loadLimits = [&](bool left) {
+    SG100JointLimits& limits = left ? left_limits_ : right_limits_;
+    const char* side_name = left ? "left" : "right";
+    const std::string prefix = left ? "l_" : "r_";
+    if (!robot_urdf.empty() && limits.load(robot_urdf, prefix)) {
+      ROS_INFO("[SG100HandBridge] %s SG100 limits loaded from URDF: %s",
+               side_name, robot_urdf.c_str());
+      return true;
+    }
+
+    const std::string json_path =
+        sg100_config_dir + "/" + side_name + "/joint_angle_map.json";
+    if (limits.loadJson(json_path)) {
+      ROS_WARN("[SG100HandBridge] %s SG100 limits loaded from JSON fallback: %s",
+               side_name, json_path.c_str());
+      return true;
+    }
+    return false;
+  };
+
+  const bool ok_left_limits = !left_enabled_ || loadLimits(true);
+  const bool ok_right_limits = !right_enabled_ || loadLimits(false);
   if (!ok_left_limits || !ok_right_limits) {
     ROS_FATAL("[SG100HandBridge] SG100 joint limits unavailable "
-              "(left=%d right=%d) from %s; refusing to start",
-              ok_left_limits ? 1 : 0, ok_right_limits ? 1 : 0,
-              robot_urdf.c_str());
+              "(left=%d right=%d); refusing to start",
+              ok_left_limits ? 1 : 0, ok_right_limits ? 1 : 0);
     return;
   }
-  ROS_INFO("[SG100HandBridge] SG100 joint limits loaded from %s",
-           robot_urdf.c_str());
 
   // 限位就绪后再加载手势库(避免为一次注定失败的启动做无用功)
   const std::string gesture_dir =
@@ -116,6 +194,8 @@ void SG100HandBridge::start() {
 
 
   // service / trigger 用独立队列,不跟 nodelet_manager 抢公共 spinner。
+  srv_enable_ = gesture_nh_.advertiseService(
+      "/sg100/set_enabled", &SG100HandBridge::onSetEnabled, this);
   srv_get_ = gesture_nh_.advertiseService(
       "/sg100/get_gestures", &SG100HandBridge::onGetGestures, this);
   srv_add_ = gesture_nh_.advertiseService(
@@ -152,17 +232,26 @@ void SG100HandBridge::start() {
   if (ready_) {
     stop_.store(false);
     thread_ = std::thread(&SG100HandBridge::publishLoop, this);
-    ROS_INFO("[SG100HandBridge] publish thread started (30 Hz /sg100_hand_command)");
+    ROS_INFO("[SG100HandBridge] publish thread started (100 Hz /sg100_hand_command)");
   }
 }
 
 void SG100HandBridge::publishLoop() {
-  // 用 WallRate:手势发布不跟 /use_sim_time 绑死。仿真时钟一顿,
-  // ros::Rate::sleep 会把 mutex 和下一帧命令一起拖到十几秒。
-  ros::WallRate rate(30.0);
+  // SG100 command contract: 100 Hz, independent of other finger publishers.
+  ros::WallRate rate(100.0);
 
   while (!stop_.load() && ros::ok()) {
-    if (!ready_) {
+    if (!ready_ || (!left_enabled_ && !right_enabled_)) {
+      rate.sleep();
+      continue;
+    }
+
+    bool allowed;
+    {
+      std::lock_guard<std::mutex> gate_lock(gate_mutex_);
+      allowed = gate_.allow(vrInputReady());
+    }
+    if (!allowed) {
       rate.sleep();
       continue;
     }
@@ -189,8 +278,8 @@ void SG100HandBridge::publishLoop() {
               static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF) &&
           right_pose.positions.size() ==
               static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF)) {
-        left_limits_.clamp(left_pose.positions);
-        right_limits_.clamp(right_pose.positions);
+        if (left_enabled_) left_limits_.clamp(left_pose.positions);
+        if (right_enabled_) right_limits_.clamp(right_pose.positions);
       } else {
         ok_left = false;
         ok_right = false;
@@ -205,8 +294,10 @@ void SG100HandBridge::publishLoop() {
     cmd.header.stamp = ros::Time::now();
     cmd.left_hand_positions = left_pose.positions;
     cmd.right_hand_positions = right_pose.positions;
-    cmd.left_enable_mask = 0x07FF;
-    cmd.right_enable_mask = 0x07FF;
+    cmd.left_enable_mask = left_enabled_ ? 0x07FF : 0;
+    cmd.right_enable_mask = right_enabled_ ? 0x07FF : 0;
+    cmd.source_id = kVrSourceId;
+    cmd.skip_filter = false;
     cmd.control_mode = kuavo_msgs::SG100HandCommand::MODE_JOINT_POSITION;
 
     // 力控/阻抗 per-joint 字段仅在 hybrid 手势时填充；否则留空走全局位置控制。
@@ -239,10 +330,15 @@ void SG100HandBridge::publishLoop() {
       std::lock_guard<std::mutex> lock(handler_mutex_);
       handler = command_handler_;
     }
-    if (handler) {
-      handler(cmd);
+    {
+      std::lock_guard<std::mutex> gate_lock(gate_mutex_);
+      if (gate_.allow(vrInputReady())) {
+        if (handler) {
+          handler(cmd);
+        }
+        cmd_pub_.publish(cmd);
+      }
     }
-    cmd_pub_.publish(cmd);
     rate.sleep();
   }
 }

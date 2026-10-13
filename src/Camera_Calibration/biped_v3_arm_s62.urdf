@@ -96,7 +96,7 @@
   </link>
   <joint name="zarm_l1_ref_joint" type="fixed">
     <!-- 位置与 zarm_l1_joint 的 origin 完全一致 -->
-    <origin xyz="0.0 0.2527 0.242" rpy="0 0 0" />
+    <origin xyz="0.0 0.2527 0.227" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zarm_l1_ref_link" />
   </joint>
@@ -629,7 +629,7 @@
     name="zhead_1_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.45435" 
+      xyz="0 0 0.43935" 
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -787,7 +787,7 @@
     name="zarm_r1_joint"
     type="revolute">
     <origin
-      xyz="0.0 -0.2527 0.242"
+      xyz="0.0 -0.2527 0.227"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />

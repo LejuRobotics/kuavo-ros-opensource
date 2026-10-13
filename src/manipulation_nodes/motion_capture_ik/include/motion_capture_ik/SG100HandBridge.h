@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ros/ros.h>
+#include <std_srvs/SetBool.h>
+#include "motion_capture_ik/SG100BridgeGate.h"
 #include <ros/callback_queue.h>
 #include <ros/spinner.h>
 
@@ -27,12 +29,12 @@
 
 namespace HighlyDynamic {
 
-/// 扳机话题:/sg100/trigger,Float32MultiArray data[0]=左手 data[1]=右手,范围 0~1。
-/// 没有发布者时按 0 解算(手势起点)。
+/// /sg100/trigger：data[0] 为左手，data[1] 为右手，范围 0~1。
+/// 空 data 表示输入断流。有效输入默认自动开始/恢复；人工禁用后不自动启用。
 inline constexpr const char* kSg100TriggerTopic = "/sg100/trigger";
 
 /**
- * @brief SG100(黑漫)手 ROS 桥接:手势库 + /sg100/* service + /sg100_hand_command 发布线程
+ * @brief SG100(黑漫)手 ROS 桥接:手势库 + /sg100/ services + /sg100_hand_command 发布线程
  *
  * 挂在跟机器人一起起来的手节点上(真机 SG100HandROSNode、仿真 DexHandMujocoRosNode)。
  * service / trigger 走独立 CallbackQueue + AsyncSpinner,避免被 nodelet_manager
@@ -45,17 +47,28 @@ class SG100HandBridge {
   explicit SG100HandBridge(ros::NodeHandle& nh);
   ~SG100HandBridge();
 
-  /// 同进程直送手驱动/仿真(在 start 前设置)。仍会发布 /sg100_hand_command 给外部。
+  /// 在 start 前设置；直送驱动的同时仍发布命令话题。
   void setCommandHandler(CommandHandler handler);
 
-  /// 加载手势库与 URDF 限位、注册 6 个 service、advertise 命令并启动 30Hz 发布线程
+  /// 在 start 前设置；输入恢复/人工重新启用时通知驱动从反馈位置重置滤波。
+  void setInputResumeHandler(std::function<void()> handler);
+
+  /// 真机在 start 前传入端口配置；未配置的手不生成使能掩码。
+  void setConfiguredHands(bool left, bool right);
+
+  /// 加载手势库和 URDF/JSON 限位，注册服务并启动 100Hz 发布线程。
   void start();
 
   /// 停止发布线程与专用 spinner(幂等;析构时自动调用)
   void stop();
 
  private:
+  /// 最近的有效 trigger 是否仍然新鲜
+  bool vrInputReady() const;
+
+  bool onSetEnabled(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
   void publishLoop();
+  void requestFilterReseed();
   void onTrigger(const std_msgs::Float32MultiArray::ConstPtr& msg);
   void clampKeyModeLocked(std::size_t mode_count);
 
@@ -75,6 +88,9 @@ class SG100HandBridge {
   bool onStepGesture(kuavo_msgs::SG100StepGesture::Request& req,
                      kuavo_msgs::SG100StepGesture::Response& res);
 
+  static constexpr uint32_t kVrSourceId = 1;
+  bool left_enabled_ = true;
+  bool right_enabled_ = true;
   ros::NodeHandle nh_;
   ros::NodeHandle gesture_nh_;
   ros::CallbackQueue callback_queue_;
@@ -86,6 +102,7 @@ class SG100HandBridge {
   SG100JointLimits right_limits_;
 
   ros::Publisher cmd_pub_;
+  ros::ServiceServer srv_enable_;
   ros::Subscriber trigger_sub_;
   ros::ServiceServer srv_get_;
   ros::ServiceServer srv_add_;
@@ -96,8 +113,11 @@ class SG100HandBridge {
 
   std::thread thread_;
   std::mutex mutex_;
+  std::mutex gate_mutex_;
+  SG100BridgeGate gate_;
   std::mutex handler_mutex_;
   CommandHandler command_handler_;
+  std::function<void()> input_resume_handler_;
   std::atomic<int> key_mode_{0};
   std::atomic<bool> ready_{false};
   std::atomic<bool> stop_{false};
@@ -107,6 +127,8 @@ class SG100HandBridge {
 
   std::atomic<float> left_trigger_{0.0f};
   std::atomic<float> right_trigger_{0.0f};
+
+  std::atomic<double> last_trigger_received_{0.0};
 };
 
 }  // namespace HighlyDynamic

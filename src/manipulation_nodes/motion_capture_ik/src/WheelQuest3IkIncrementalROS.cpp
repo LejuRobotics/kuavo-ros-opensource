@@ -2015,6 +2015,9 @@ bool WheelQuest3IkIncrementalROS::validateVrPose(const ::ArmPose& currentPose, :
 
 HighlyDynamic::SG100VrInput WheelQuest3IkIncrementalROS::makeSg100VrInput() {
   HighlyDynamic::SG100VrInput in;
+  in.fresh = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->hasFreshSg100Input();
+  };
   in.left_trigger = [this] {
     return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getLeftTrigger()) : 0.0f;
   };

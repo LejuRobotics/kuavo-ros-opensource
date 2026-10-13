@@ -1,10 +1,16 @@
 #include "motion_capture_ik/SG100JointLimits.h"
 
+#include "motion_capture_ik/json.hpp"
+
 #include <urdf/model.h>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <exception>
+#include <fstream>
+#include <string>
 
 namespace HighlyDynamic {
 
@@ -56,7 +62,8 @@ bool SG100JointLimits::load(const std::string& urdf_path,
   for (std::size_t i = 0; i < kDof; ++i) {
     const std::string joint_name = joint_prefix + kUrdfJoints[i];
     urdf::JointConstSharedPtr joint = model.getJoint(joint_name);
-    if (!joint || !joint->limits) {
+    if (!joint || !joint->limits || !std::isfinite(joint->limits->lower) ||
+        !std::isfinite(joint->limits->upper) || joint->limits->lower > joint->limits->upper) {
       // 关节缺失或无 <limit>：不再套用 [0, 1.57] 默认区间 —— 该区间与真实限位
       // （例如 thumb_j2 实为 [-2.62, 0]）方向相反，套用会把指令推向反方向。
       // 直接判定加载失败，由调用方拒绝启动。
@@ -70,6 +77,63 @@ bool SG100JointLimits::load(const std::string& urdf_path,
     }
     lower_.push_back(joint->limits->lower);
     upper_.push_back(joint->limits->upper);
+  }
+
+  loaded_ = true;
+  return true;
+}
+
+bool SG100JointLimits::loadJson(const std::string& json_path) {
+  loaded_ = false;
+  lower_.clear();
+  upper_.clear();
+
+  std::ifstream input(json_path);
+  if (!input) {
+    std::fprintf(stderr, "[SG100JointLimits] cannot open JSON: %s\n",
+                 json_path.c_str());
+    return false;
+  }
+
+  try {
+    nlohmann::json root;
+    input >> root;
+    const auto& joints = root.at("joint_angle_map");
+    if (!joints.is_array() || joints.size() != kDof) {
+      std::fprintf(stderr,
+                   "[SG100JointLimits] JSON '%s' must contain exactly %d joints\n",
+                   json_path.c_str(), kDof);
+      return false;
+    }
+
+    constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+    lower_.reserve(kDof);
+    upper_.reserve(kDof);
+    for (std::size_t i = 0; i < kDof; ++i) {
+      const auto& joint = joints.at(i);
+      const double a = joint.at("a").get<double>();
+      const double b = joint.at("b").get<double>();
+      const double min_angle = joint.at("min_angle").get<double>();
+      const double max_angle = joint.at("max_angle").get<double>();
+      if (!std::isfinite(a) || !std::isfinite(b) ||
+          !std::isfinite(min_angle) || !std::isfinite(max_angle) ||
+          a == 0.0 || min_angle > max_angle) {
+        std::fprintf(stderr,
+                     "[SG100JointLimits] invalid JSON joint %zu in '%s'\n",
+                     i, json_path.c_str());
+        lower_.clear();
+        upper_.clear();
+        return false;
+      }
+      lower_.push_back(min_angle * kDegToRad);
+      upper_.push_back(max_angle * kDegToRad);
+    }
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "[SG100JointLimits] JSON parse failed: %s (%s)\n",
+                 json_path.c_str(), e.what());
+    lower_.clear();
+    upper_.clear();
+    return false;
   }
 
   loaded_ = true;

@@ -3,6 +3,7 @@
 #include <noitom_hi5_hand_udp_python/JoySticks.h>
 
 #include <atomic>
+#include <chrono>
 #include <leju_utils/define.hpp>
 #include <vector>
 #include <mutex>
@@ -40,6 +41,7 @@ class WheelJoyStickHandler {
   bool getRightJoyStickYHoldWithX() const;
 
   // SG100 heiman 手指驱动：读取最新 VR 扳机值 (0~1)。
+  bool hasFreshSg100Input(double timeout = 0.5) const;
   double getLeftTrigger() const;
   double getRightTrigger() const;
 
@@ -85,6 +87,7 @@ class WheelJoyStickHandler {
   void processClawDataWithJoystick();
   void processClawDataWithHandTracking();
 
+  std::atomic<double> sg100_input_received_{0.0};
   std::atomic<bool> isInitialized_;
 
   // 按钮状态

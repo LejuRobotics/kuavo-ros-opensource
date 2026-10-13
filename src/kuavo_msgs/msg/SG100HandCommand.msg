@@ -18,7 +18,7 @@ int8 MODE_JOINT_POSITION=7
 int8 MODE_IMPEDANCE=8
 int8 MODE_JOINT_IMPEDANCE=9
 
-int8 control_mode  # Default: MODE_JOINT_POSITION (global fallback)
+int8 control_mode  # Explicitly set 7 for position; ROS default 0 stops all joints
 
 # Left hand joint positions (11 joints; unit: radians, rad)
 # Order: [TH_CMC_ABD, TH_MCP_FLEX, TH_IP_FLEX,
@@ -37,7 +37,7 @@ float32[] left_hand_velocities
 float32[] right_hand_velocities
 
 # Enable flags (bitmask for which joints to control)
-# 0x07FF = control all 11 joints (bits 0-10)
+# 0x07FF = control all 11 joints (bits 0-10); zero disables the whole hand
 uint16 left_enable_mask
 uint16 right_enable_mask
 
@@ -48,7 +48,7 @@ uint16 right_enable_mask
 
 # Per-joint control mode (MODE_JOINT_POSITION=7, MODE_JOINT_IMPEDANCE=9, etc.)
 # SDK Hand_Control_t supports: 7 (position fields), 9 (impedance fields), 0 (NULL).
-# Other modes have no frame fields and are rejected (joint falls back to MODE_NULL).
+# Any unsupported mode rejects the entire message.
 int8[] left_hand_control_mode
 int8[] right_hand_control_mode
 
@@ -62,6 +62,14 @@ float32[] right_hand_kd
 float32[] left_hand_torque_ff
 float32[] right_hand_torque_ff
 
-# Per-joint output limit (0.0 ~ 1.0, encoded by SDK)
+# Per-joint normalized output limit (0.0 ~ 1.0); driver maps it to SDK 0.0 ~ 10.0
 float32[] left_hand_output_limit
 float32[] right_hand_output_limit
+
+# 0 debug (ROS default; may preempt any owner), 1 VR, 2 remote, 3 script.
+# Ownership is per hand. VR releases ownership after 2 s without an accepted
+# command, retaining the last target. Debug/script one-shot commands retain
+# ownership until explicitly stopped (mode=0 or mask=0) or debug takeover.
+uint32 source_id
+# false (the ROS default) applies command filtering; true bypasses filtering.
+bool skip_filter

@@ -291,6 +291,8 @@ class KuavoPicoNode:
             # Initialize publishers
             self._init_publishers()
             self._init_latency_diagnostics()
+            self._wheel_incremental_hold_cmd = None
+            self._wheel_need_rebase = True
             # Initialize subscribers
             self._init_subscribers()
             # Initialize joy handler
@@ -482,6 +484,10 @@ class KuavoPicoNode:
         # teleop unlock
         def on_teleop_unlock_changed(event: ToggleEvent):
             SDKLogger.info(f"遥操作锁定状态变化: {event.old_state} -> {event.new_state}")
+            if self._is_wheel_robot and self.control_mode == ControlMode.INCREMENTAL_MODE:
+                # 锁定期间上游不交付骨骼帧，增量回调无法感知这一段中断。
+                # 保留已发目标；重新解锁后以当前人的位姿重建参考，不补算锁定期间的变化。
+                self._wheel_need_rebase = True
             if event.new_state:
                 if self.pico_info_transformer.control_mode == "UpperBody":
                     self.toggle_auto_swing_arm.turn_off() # 手臂关闭自动摆手模式
@@ -550,12 +556,22 @@ class KuavoPicoNode:
     def _init_model_and_transformers(self) -> None:
         """Initialize model and transformers."""
         model_path = self.set_robot_model_params()
+        # 轮臂读取统一VR限速；初始化时缓存，避免摇杆回调反复查询参数服务器。
+        # 双足保留原来的速度限制。
+        self.max_linear_x_speed = 0.4
+        self.max_linear_y_speed = 0.2
+        self.max_angular_z_speed = 0.4
+        if self._is_wheel_robot:
+            self.max_linear_x_speed = rospy.get_param('/vr_cmd_vel/linear_scale_x', 0.4)
+            self.max_linear_y_speed = rospy.get_param('/vr_cmd_vel/linear_scale_y', 0.4)
+            self.max_angular_z_speed = rospy.get_param('/vr_cmd_vel/angular_scale_z', 0.25)
         self.bone_frame_publisher = KuavoPicoBoneFramePublisher()
         self.tf_broadcaster = tf.TransformBroadcaster()
         self.pico_info_transformer = KuavoPicoInfoTransformer(
             model_path, 
             tf_broadcaster=self.tf_broadcaster,
-            bone_frame_publisher=self.bone_frame_publisher
+            bone_frame_publisher=self.bone_frame_publisher,
+            is_wheel_robot=self._is_wheel_robot
         )
 
     def _init_publishers(self) -> None:
@@ -781,8 +797,13 @@ class KuavoPicoNode:
         eef_freeze = (callback_triggered and has_rg_lg_keys) or self.toggle_freeze_finger
         self.publish_end_effector_control(joy, eef_freeze)
         
-        # 全身遥操不处理左右摇杆控制
-        if self.pico_info_transformer.control_mode == "UpperBody":
+        # 轮臂底盘使用摇杆控制，不受双足踏步或躯干控制范围开关限制。
+        # 保持双足原有处理逻辑不变。
+        if self._is_wheel_robot:
+            if self.toggle_teleop_unlock:
+                self.handle_joystick_movement(joy)
+            # 锁定时停止PICO速度输出；底层沿用现有超时处理，不把发零当作刹停。
+        elif self.pico_info_transformer.control_mode == "UpperBody":
             if self.toggle_torso_change_debug:
                 # SDKLogger.warning("\033[93m躯干模式开启中，无法切换左右摇杆控制\033[0m")
                 return
@@ -1118,7 +1139,14 @@ class KuavoPicoNode:
         """Set robot model parameters."""
         SDKLogger.info("Setting robot model parameters...")
         kuavo_assests_path = self._get_package_path("kuavo_assets")
-        robot_version = os.environ.get('ROBOT_VERSION', '45')
+        # 使用公共版本解析器，兼容包含补丁编码的5W版本号。
+        common_python = os.path.join(self._get_package_path("kuavo_common"), "python")
+        if common_python not in sys.path:
+            sys.path.insert(0, common_python)
+        from robot_version import RobotVersion, get_version_internal
+
+        robot_version = str(get_version_internal(os.environ.get('ROBOT_VERSION', '45')))
+        self._is_wheel_robot = RobotVersion.create(int(robot_version)).major() == 6
         model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
         
         with open(model_config_file, 'r') as f:
@@ -1172,7 +1200,8 @@ class KuavoPicoNode:
             SDKLogger.error(f"\033[31m服务 /change_arm_ctrl_mode 连接超时或连接失败, 请检查服务是否启动: {e}\033[0m")
         except Exception as e:
             SDKLogger.error(f"服务 /change_arm_ctrl_mode 调用失败: {e}")
-    
+
+
     def _handle_head_mode_on_arm_mode_change(self, arm_mode: int) -> None:
         """根据手臂控制模式切换头部控制模式.
         
@@ -1282,6 +1311,9 @@ class KuavoPicoNode:
 
     def change_mm_wbc_arm_ctrl_mode(self, mode: int) -> None:
         """Change MM WBC arm control mode via /enable_mm_wbc_arm_trajectory_control."""
+        # 轮臂不使用双足MM-WBC手臂轨迹开关。
+        if self._is_wheel_robot:
+            return
         try:
             rospy.wait_for_service("/enable_mm_wbc_arm_trajectory_control", timeout=3.0)
             changeHandTrackingMode_srv = rospy.ServiceProxy("/enable_mm_wbc_arm_trajectory_control", changeArmCtrlMode)
@@ -1427,30 +1459,26 @@ class KuavoPicoNode:
     def handle_joystick_movement(self, joy: JoySticks) -> None:
         """Handle all joystick movement controls for cmd_vel."""
         try:
-            # 定义速度限制常量
-            MAX_LINEAR_X_SPEED = 0.4    # 前后方向
-            MAX_LINEAR_Y_SPEED = 0.2    # 左右横移
-            MAX_ANGULAR_Z_SPEED = 0.4   # 旋转速度
             
             # 创建 Twist 消息
             cmd_vel_msg = Twist()
             
             # 左侧摇杆控制
-            # joy.left_y 控制 linear.x (前后方向 -0.4~0.4)
+            # joy.left_y 控制 linear.x (前后方向)
             joy_y = apply_deadzone(joy.left_y, CmdVelConstants.LINEAR_DEADZONE)
-            cmd_vel_msg.linear.x = clamp(joy_y * MAX_LINEAR_X_SPEED, -MAX_LINEAR_X_SPEED, MAX_LINEAR_X_SPEED)
+            cmd_vel_msg.linear.x = clamp(joy_y * self.max_linear_x_speed, -self.max_linear_x_speed, self.max_linear_x_speed)
             
-            # joy.left_x 控制 linear.y (左右横移 -0.2~0.2)
+            # joy.left_x 控制 linear.y (左右横移)
             joy_x = apply_deadzone(joy.left_x, CmdVelConstants.LINEAR_DEADZONE)
             # PICO的X方向: https://developer-cn.picoxr.com/document/unreal/input-mappings/
             # cmd_vel 控制左右横移，左是正值，右是负值
-            cmd_vel_msg.linear.y = clamp(-joy_x * MAX_LINEAR_Y_SPEED, -MAX_LINEAR_Y_SPEED, MAX_LINEAR_Y_SPEED)
+            cmd_vel_msg.linear.y = clamp(-joy_x * self.max_linear_y_speed, -self.max_linear_y_speed, self.max_linear_y_speed)
             
             # 右侧摇杆控制
-            # joy.right_x 控制 angular.z (旋转速度 -0.4~0.4)
+            # joy.right_x 控制 angular.z (旋转速度)
             joy_right_x = apply_deadzone(joy.right_x, CmdVelConstants.LINEAR_DEADZONE)
             # PICO的X方向: https://developer-cn.picoxr.com/document/unreal/input-mappings/
-            cmd_vel_msg.angular.z = clamp(-joy_right_x * MAX_ANGULAR_Z_SPEED, -MAX_ANGULAR_Z_SPEED, MAX_ANGULAR_Z_SPEED)
+            cmd_vel_msg.angular.z = clamp(-joy_right_x * self.max_angular_z_speed, -self.max_angular_z_speed, self.max_angular_z_speed)
             
             # 发布 cmd_vel 消息
             self.pub_cmd_vel.publish(cmd_vel_msg)
@@ -1459,9 +1487,12 @@ class KuavoPicoNode:
             SDKLogger.error(f"Error publishing cmd_vel: {e}")
         
 
+
+
     def pico_hands_poses_callback(self, pico_hands_poses_msg: picoPoseInfoList) -> None:
         """Callback for Pico hands poses."""
-        self.pico_info_transformer.read_msg_hand(pico_hands_poses_msg)
+        if not self.pico_info_transformer.read_msg_hand(pico_hands_poses_msg):
+            return
 
         left_pose, left_elbow_pos = self.pico_info_transformer.get_hand_pose("Left")
         right_pose, right_elbow_pos = self.pico_info_transformer.get_hand_pose("Right")
@@ -1506,7 +1537,9 @@ class KuavoPicoNode:
 
     def pico_hands_poses_callback_ik(self, pico_hands_poses_msg: picoPoseInfoList) -> None:
         """Callback for Pico hands poses."""
-        self.pico_info_transformer.read_msg_hand(pico_hands_poses_msg)
+        pose_ready = self.pico_info_transformer.read_msg_hand(pico_hands_poses_msg)
+        if self._is_wheel_robot and not pose_ready:
+            return
 
         left_pose, left_elbow_pos = self.pico_info_transformer.get_hand_pose("Left")
         right_pose, right_elbow_pos = self.pico_info_transformer.get_hand_pose("Right")
@@ -1531,7 +1564,10 @@ class KuavoPicoNode:
         if self.pico_info_transformer.is_running:
             if self.control_mode_changing:
                 eef_pose_msg = self.interpolate_eef_pose(eef_pose_msg)
-            self.pub_ik.publish(self._stamp_ik_cmd(eef_pose_msg))
+            if eef_pose_msg is not None and self._is_wheel_robot:
+                eef_pose_msg = self._wheel_target_to_ik_model(eef_pose_msg)
+            if eef_pose_msg is not None:
+                self.pub_ik.publish(self._stamp_ik_cmd(eef_pose_msg))
         else:
             SDKLogger.warn("Not publishing to /ik/two_arm_hand_pose_cmd because is_running is False")
             # Handle service mode changes
@@ -1544,6 +1580,35 @@ class KuavoPicoNode:
             self.change_arm_ctrl_mode(mode)
             self.change_mm_wbc_arm_ctrl_mode(wbc_mode)
             self.last_pico_running_state = self.pico_info_transformer.is_running
+    def _wheel_target_to_ik_model(self, command):
+        """将底盘坐标系下的目标转换到裁剪上半身IK模型的根坐标系。
+
+        轮臂上半身URDF将肩部直接连接到base_link，
+        使用的是完整模型中相对于waist_yaw_link的原点。
+        因此该base_link并非/mm使用的底盘base_link。
+        此变换仅应用于/ik输出路径。
+        """
+        if not rospy.get_param('/use_upper_body_urdf', False):
+            return command
+        transform = self.pico_info_transformer.tools.try_get_tf_transform(
+            'waist_yaw_link', 'base_link', return_type='homogeneous')
+        if transform is None:
+            rospy.logwarn_throttle(2.0, 'PICO wheel: waiting for chassis-to-IK-root TF')
+            return None
+        matrix = transform.matrix
+        result = deepcopy(command)
+        for pose in (result.hand_poses.left_pose, result.hand_poses.right_pose):
+            target = tf.transformations.quaternion_matrix(pose.quat_xyzw)
+            target[:3, 3] = pose.pos_xyz
+            target = matrix @ target
+            pose.pos_xyz = target[:3, 3].tolist()
+            pose.quat_xyzw = tf.transformations.quaternion_from_matrix(target).tolist()
+            # 肘部坐标全零是原有的“无肘部约束”标记，保持不变。
+            if np.linalg.norm(pose.elbow_pos_xyz) > 1e-8:
+                pose.elbow_pos_xyz = (matrix[:3, :3] @ np.asarray(pose.elbow_pos_xyz)
+                                      + matrix[:3, 3]).tolist()
+        return result
+
     def set_item_mass_force(self, case_name:str, hand_wrench_config:HandWrenchConfig)->None:
         """Set item mass force."""
         self.hand_wrench_config = hand_wrench_config
@@ -1602,13 +1667,23 @@ class KuavoPicoNode:
 
     def set_in_incremental_mode(self, incremental_mode: bool) -> None:
         """Set incremental mode."""
+        if self._is_wheel_robot and self.is_in_incremental_mode != incremental_mode:
+            # 即使暂停和恢复之间没有骨骼帧，下一帧也必须重新记录人的参考位姿。
+            self._wheel_need_rebase = True
         self.is_in_incremental_mode = incremental_mode
 
     def set_control_mode(self, control_mode: str) -> None:
         """Set control mode."""
+        previous_mode = self.control_mode
+        previous_incremental_state = self.last_control_mode
+        if self._is_wheel_robot:
+            # ROS与protobuf模式请求必须使用一致的位姿坐标系：
+            # mobile_mpc使用odom，follow和incremental使用base_link。
+            self.pico_info_transformer.is_mobile_mpc = control_mode == "mobile_mpc"
         if self.last_control_mode == ControlMode.INCREMENTAL_MODE and control_mode != "incremental":
             print("\033[93m--------------------退出增量模式-----------------\033[0m")
-            self.change_mobile_ctrl_mode(IncrementalMpcCtrlMode.ArmOnly.value)
+            if not self._is_wheel_robot:
+                self.change_mobile_ctrl_mode(IncrementalMpcCtrlMode.ArmOnly.value)
             self._left_target_pose = (None, None)
             self._right_target_pose = (None, None)  ## 清空上一次目标位姿
         self.last_control_mode = self.control_mode
@@ -1623,9 +1698,22 @@ class KuavoPicoNode:
         else:
             SDKLogger.error(f"Invalid control mode: {control_mode}")
 
+        if self._is_wheel_robot:
+            if self.control_mode != previous_mode:
+                self._wheel_incremental_hold_cmd = None
+                self._wheel_need_rebase = True
+            else:
+                # 同模式重复通知保留模式历史；是否重建参考由独立标志记录。
+                self.last_control_mode = previous_incremental_state
+
+        if self.control_mode != previous_mode:
+            SDKLogger.info(f"PICO arm mode changed: {previous_mode.name} -> {self.control_mode.name} "
+                           f"(requested={control_mode})")
+
     def sensors_data_raw_callback(self, msg):
-        if len(msg.joint_data.joint_q) >= 26:
-            self.arm_joint_angles = msg.joint_data.joint_q[12:26]
+        arm_start = 4 if self._is_wheel_robot else 12
+        if len(msg.joint_data.joint_q) >= arm_start + 14:
+            self.arm_joint_angles = msg.joint_data.joint_q[arm_start:arm_start + 14]
     
     def ik_error_norm_callback(self, msg):
         """
@@ -1649,7 +1737,20 @@ class KuavoPicoNode:
 
     def pico_hands_poses_callback_incremental(self, pico_hands_poses_msg: picoPoseInfoList) -> None:
         """Callback for Pico hands poses."""
-        self.pico_info_transformer.read_msg_hand(pico_hands_poses_msg)
+        if self._is_wheel_robot:
+            if not self.is_in_incremental_mode:
+                # 暂停保持最后完整目标（含肘部），不回落绝对目标，也不切NoControl。
+                self._wheel_need_rebase = True
+                if (self._wheel_incremental_hold_cmd is not None
+                        and not any(error > 75.0 for error in self.ik_error_norm)
+                        and self.pico_info_transformer.is_running):
+                    self.pub.publish(self._stamp_ik_cmd(deepcopy(self._wheel_incremental_hold_cmd)))
+                return
+        if not self.pico_info_transformer.read_msg_hand(pico_hands_poses_msg):
+            if self._is_wheel_robot:
+                self._wheel_need_rebase = True
+            return
+        resume_hold = None
 
         left_pose, left_elbow_pos = self.pico_info_transformer.get_hand_pose("Left")
         right_pose, right_elbow_pos = self.pico_info_transformer.get_hand_pose("Right")
@@ -1668,13 +1769,14 @@ class KuavoPicoNode:
         eef_pose_msg.frame = 3
 
         if self.is_in_incremental_mode:
-            if self.last_control_mode != ControlMode.INCREMENTAL_MODE:
-                print("\033[93m++++++++++++++++++++开始增量模式+++++++++++++++++\033[0m")
-                # 刚开始切换到增量控制模式
+            need_rebase = (self._wheel_need_rebase if self._is_wheel_robot
+                           else self.last_control_mode != ControlMode.INCREMENTAL_MODE)
+            if need_rebase:
+                # 轮臂重建参考不切控制模式；模式服务由末尾的运行状态变化处理。
                 self.control_mode = ControlMode.INCREMENTAL_MODE
-                
-                
-                self.change_mobile_ctrl_mode(IncrementalMpcCtrlMode.ArmOnly.value)
+                if not self._is_wheel_robot:
+                    print("\033[93m++++++++++++++++++++开始增量模式+++++++++++++++++\033[0m")
+                    self.change_mobile_ctrl_mode(IncrementalMpcCtrlMode.ArmOnly.value)
                 # 设置当前VR的末端位姿为锚点
                 self._left_anchor_pose = left_pose
                 self._right_anchor_pose = right_pose
@@ -1683,7 +1785,25 @@ class KuavoPicoNode:
                 def is_pose_empty(pose):
                     return pose[0] is None or pose[1] is None
                 
-                if is_pose_empty(self._left_target_pose) or is_pose_empty(self._right_target_pose):
+                if self._is_wheel_robot:
+                    if self._wheel_incremental_hold_cmd is not None:
+                        # 恢复沿用暂停前目标；人的参考已更新，暂停期间的位移/旋转不计入。
+                        resume_hold = deepcopy(self._wheel_incremental_hold_cmd)
+                        left = resume_hold.hand_poses.left_pose
+                        right = resume_hold.hand_poses.right_pose
+                        self._left_target_pose = (np.asarray(left.pos_xyz), np.asarray(left.quat_xyzw))
+                        self._right_target_pose = (np.asarray(right.pos_xyz), np.asarray(right.quat_xyzw))
+                    else:
+                        # 首次进入才取机器人实际末端；TF缺失时本帧不发目标。
+                        tools = self.pico_info_transformer.tools
+                        left_current = tools.try_get_tf_transform("base_link", "zarm_l7_end_effector")
+                        right_current = tools.try_get_tf_transform("base_link", "zarm_r7_end_effector")
+                        if left_current is None or right_current is None:
+                            rospy.logwarn_throttle(2.0, "PICO wheel: waiting for end-effector TF")
+                            return
+                        self._left_target_pose = (np.asarray(left_current.position), np.asarray(left_current.orientation))
+                        self._right_target_pose = (np.asarray(right_current.position), np.asarray(right_current.orientation))
+                elif is_pose_empty(self._left_target_pose) or is_pose_empty(self._right_target_pose):
                     self._left_target_pose = left_pose
                     self._right_target_pose = right_pose
                 else:
@@ -1693,6 +1813,8 @@ class KuavoPicoNode:
                     print("\033[92m右手保持目标位置: {}\033[0m".format(self._right_target_pose[0]))
                     print("\033[92m右手保持目标姿态(四元数): {}\033[0m".format(self._right_target_pose[1]))
                 self.last_control_mode = ControlMode.INCREMENTAL_MODE
+                if self._is_wheel_robot:
+                    self._wheel_need_rebase = False
             # 计算位置增量
             l_xyz_delta = np.subtract(left_pose[0], self._left_anchor_pose[0])
             r_xyz_delta = np.subtract(right_pose[0], self._right_anchor_pose[0])
@@ -1775,18 +1897,26 @@ class KuavoPicoNode:
             self.last_control_mode = ControlMode.NONE_MODE
 
         
+        if resume_hold is not None:
+            # 恢复首帧完整保持，肘部约束也不因暂停期间移动而跳变。
+            eef_pose_msg = resume_hold
         if eef_pose_msg is not None:
             eef_pose_msg.ik_param = self.ik_solve_param
             # eef_pose_msg.use_custom_ik_param = self.use_custom_ik_param
             eef_pose_msg.use_custom_ik_param = False
-            eef_pose_msg.frame = 3
+            # 轮臂/mm使用2表示base_link局部坐标，不支持双足使用的3。
+            eef_pose_msg.frame = 2 if self._is_wheel_robot else 3
 
             if any(error > 75.0 for error in self.ik_error_norm):
+                if self._is_wheel_robot:
+                    self._wheel_need_rebase = True
                 rospy.logwarn(f"Hand error norm too large: {self.ik_error_norm}, skipping arm trajectory publication")
             elif self.pico_info_transformer.is_running:
-                if self.control_mode_changing:
+                if self.control_mode_changing and not self._is_wheel_robot:
                     eef_pose_msg = self.interpolate_eef_pose(eef_pose_msg)
                 self.pub.publish(self._stamp_ik_cmd(eef_pose_msg))
+                if self._is_wheel_robot:
+                    self._wheel_incremental_hold_cmd = deepcopy(eef_pose_msg)
         
         # Handle service mode changes
         if self.send_srv and (self.last_pico_running_state != self.pico_info_transformer.is_running):
@@ -1847,7 +1977,9 @@ class KuavoPicoNode:
         if self.control_mode == ControlMode.INCREMENTAL_MODE:
             self.pico_hands_poses_callback_incremental(pico_hands_poses_msg)
         elif self.control_mode == ControlMode.FOLLOW_MODE:
-            self.change_mobile_ctrl_mode(IncrementalMpcCtrlMode.NoControl.value)
+            # 轮臂由IK回调按运行/模式状态变化切服务，不在每帧重复请求NoControl。
+            if not self._is_wheel_robot:
+                self.change_mobile_ctrl_mode(IncrementalMpcCtrlMode.NoControl.value)
             self.pico_hands_poses_callback_ik(pico_hands_poses_msg)
         elif self.control_mode == ControlMode.MOBILE_MPC_MODE:
             self.pico_hands_poses_callback(pico_hands_poses_msg)
@@ -1858,7 +1990,7 @@ class KuavoPicoNode:
 ) -> 'twoArmHandPoseCmd':
         """对双手末端位姿进行线性插值，返回插值后的消息。"""
 
-        if self.arm_joint_angles is None:
+        if self.arm_joint_angles is None and not self._is_wheel_robot:
             return None
 
         # 拷贝原始消息，避免副作用
@@ -1869,6 +2001,25 @@ class KuavoPicoNode:
         r_target_pos = np.array(eef_pose_msg.hand_poses.right_pose.pos_xyz)
 
         # 获取当前实际末端（通过FK服务）
+        if self._is_wheel_robot:
+            # 使用包含四个躯干关节影响的轮臂实际末端位姿；
+            # 仅含手臂关节的FK请求无法反映当前躯干配置。
+            tools = self.pico_info_transformer.tools
+            left_current = tools.try_get_tf_transform("base_link", "zarm_l7_end_effector")
+            right_current = tools.try_get_tf_transform("base_link", "zarm_r7_end_effector")
+            if left_current is None or right_current is None:
+                return None
+            for pose, current in ((interp_msg.hand_poses.left_pose, left_current),
+                                  (interp_msg.hand_poses.right_pose, right_current)):
+                current_pos = np.asarray(current.position)
+                target_pos = np.asarray(pose.pos_xyz)
+                if np.linalg.norm(target_pos - current_pos) > max_dist_threshold:
+                    pose.pos_xyz = (current_pos + interp_alpha * (target_pos - current_pos)).tolist()
+            self.control_mode_changing = (
+                np.linalg.norm(l_target_pos - left_current.position) > max_dist_threshold or
+                np.linalg.norm(r_target_pos - right_current.position) > max_dist_threshold
+            )
+            return interp_msg
         hand_poses = self.fk_srv_client(self.arm_joint_angles)
         if hand_poses is not None:
             l_current_pos = np.array(hand_poses.left_pose.pos_xyz)

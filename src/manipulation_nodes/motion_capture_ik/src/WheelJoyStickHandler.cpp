@@ -80,6 +80,7 @@ void WheelJoyStickHandler::initialize() {
 
 void WheelJoyStickHandler::reset() {
   std::lock_guard<std::mutex> lock(dataMutex_);
+  sg100_input_received_.store(0.0);
 
   handPositionData_.hasValidData = false;
   clawCommandData_.hasValidData = false;
@@ -184,6 +185,12 @@ double WheelJoyStickHandler::getRightTrigger() const {
     return 0.0;
   }
   return rightJoystick_[0];
+}
+
+bool WheelJoyStickHandler::hasFreshSg100Input(double timeout) const {
+  const double received = sg100_input_received_.load();
+  const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  return received > 0 && now - received < timeout;
 }
 
 void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
@@ -298,6 +305,10 @@ void WheelJoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::
       rightJoyStickY_ = 0.0;
     }
   }
+  const bool sg100_valid = std::isfinite(msg->left_trigger) && std::isfinite(msg->right_trigger) &&
+      msg->left_trigger >= 0 && msg->left_trigger <= 1 && msg->right_trigger >= 0 && msg->right_trigger <= 1;
+  sg100_input_received_.store(sg100_valid ? std::chrono::duration<double>(
+      std::chrono::steady_clock::now().time_since_epoch()).count() : 0.0);
   leftJoystick_[0] = msg->left_trigger;
   leftJoystick_[1] = msg->left_grip;
   rightJoystick_[0] = msg->right_trigger;

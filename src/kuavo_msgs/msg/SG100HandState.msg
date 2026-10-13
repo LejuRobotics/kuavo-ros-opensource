@@ -1,5 +1,5 @@
 # SG100 Hand State Message
-# Published by sg100_hand_ros_node at fixed frequency (e.g., 50Hz)
+# Published by sg100_hand_ros_node at fixed frequency (default 100 Hz)
 # Feedback layout: 11 joints per hand (same order as SG100HandCommand)
 
 std_msgs/Header header
@@ -20,7 +20,7 @@ int8 MODE_JOINT_IMPEDANCE=9
 bool left_hand_connected
 bool right_hand_connected
 
-# Error codes (0 = OK)
+# Error codes: 0 OK; 1 feedback stale/missing; 2 disconnected; 3 joint stall latched
 uint8 left_error_code
 uint8 right_error_code
 
@@ -46,3 +46,9 @@ uint8[] right_hand_modes
 # Communication statistics
 uint32 left_frame_count    # Number of frames received from left hand
 uint32 right_frame_count   # Number of frames received from right hand
+
+# Independent freshness; age is seconds since last new SDK frame (infinity if never received).
+bool left_feedback_valid
+bool right_feedback_valid
+float32 left_feedback_age
+float32 right_feedback_age
