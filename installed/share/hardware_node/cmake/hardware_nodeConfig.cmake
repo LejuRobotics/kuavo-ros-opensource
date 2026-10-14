@@ -67,14 +67,14 @@ set(hardware_node_CONFIG_INCLUDED TRUE)
 
 # set variables for source/devel/install prefixes
 if("FALSE" STREQUAL "TRUE")
-  set(hardware_node_SOURCE_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_node)
-  set(hardware_node_DEVEL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/devel)
+  set(hardware_node_SOURCE_PREFIX /builds/highlydynamic/kuavo-ros-control/src/kuavo-ros-control-lejulib/hardware_node)
+  set(hardware_node_DEVEL_PREFIX /builds/highlydynamic/kuavo-ros-control/devel)
   set(hardware_node_INSTALL_PREFIX "")
   set(hardware_node_PREFIX ${hardware_node_DEVEL_PREFIX})
 else()
   set(hardware_node_SOURCE_PREFIX "")
   set(hardware_node_DEVEL_PREFIX "")
-  set(hardware_node_INSTALL_PREFIX /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed)
+  set(hardware_node_INSTALL_PREFIX /builds/highlydynamic/kuavo-ros-control/installed)
   set(hardware_node_PREFIX ${hardware_node_INSTALL_PREFIX})
 endif()
 
@@ -154,7 +154,7 @@ foreach(library ${libraries})
     set(lib_path "")
     set(lib "${library}-NOTFOUND")
     # since the path where the library is found is returned we have to iterate over the paths manually
-    foreach(path /home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed/lib;/home/gitlab-runner/builds/ag16SrJsJ/0/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
+    foreach(path /builds/highlydynamic/kuavo-ros-control/installed/lib;/builds/highlydynamic/kuavo-ros-control/installed/lib;/opt/ros/noetic/lib)
       find_library(lib ${library}
         PATHS ${path}
         NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
