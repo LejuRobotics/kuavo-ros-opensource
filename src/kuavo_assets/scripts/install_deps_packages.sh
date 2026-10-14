@@ -3,6 +3,11 @@
 SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 PACKAGE_FILE=$SCRIPT_DIR/packages_with_versions.txt
 WS_PATH="$(realpath "${SCRIPT_DIR}/../../../")"
+KUAVO_RUNTIME_DEPS_SH="$WS_PATH/ci_scripts/acs/kuavo_runtime_deps.sh"
+if [[ -f "$KUAVO_RUNTIME_DEPS_SH" ]]; then
+    # shellcheck disable=SC1090
+    source "$KUAVO_RUNTIME_DEPS_SH"
+fi
 
 ECHO_WARN() {
     local msg="$1"
@@ -207,6 +212,17 @@ function install_openvino() {
 }
 
 ### Start
+if declare -F kuavo_ci_skip_apt_install_deps >/dev/null 2>&1 && kuavo_ci_skip_apt_install_deps "$PACKAGE_FILE"; then
+    ECHO_WARN "CI: runtime apt deps already in image, skipping apt install_deps steps"
+    install_dexhand_deps
+    if [ $? -eq 0 ]; then
+        ECHO_WARN "DexHand Protobuf SDK 安装成功"
+    else
+        ECHO_WARN "DexHand Protobuf SDK 安装失败"
+    fi
+    exit 0
+fi
+
 ECHO_WARN "Install dexhand_sdk ..."
 install_dexhand_deps
 if [ $? -eq 0 ]; then

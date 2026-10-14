@@ -1,4 +1,7 @@
 #!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
 wget -O GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
 sudo gpg --yes --output /etc/apt/trusted.gpg.d/intel.gpg --dearmor GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
 
