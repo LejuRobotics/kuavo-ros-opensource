@@ -1013,6 +1013,8 @@ class H12PROControllerNode:
             return
 
         try:
+            # 先更新本帧屏幕占用窗口，避免 CH15 首次发码与 H 松开同帧时穿透。
+            self._update_g11_screen_hold(msg)
             key_combination = self._process_channels(msg.channels)
             self._handle_state_transitions(key_combination, msg)
             # G11 屏幕指令解析(仅 g11 生效, 协议库在 g11_controller_node 包)
@@ -1066,6 +1068,17 @@ class H12PROControllerNode:
             f"未启用码(842~882)={cur[3]}(+{cur[3] - old[3]})"
             + (f" 最近异常=CH{last[0]}读到{last[1]}" if last else ""))
 
+    def _update_g11_screen_hold(self, msg: h12proRemoteControllerChannel) -> None:
+        """在实体按键决策前，按本帧 CH15 续期现有 H 屏蔽窗口。"""
+        if not self.screen_cmd_enabled or self.screen_parser is None:
+            return
+        if len(msg.channels) < 16:
+            return
+        # CH15 非空闲时沿用原有通用屏蔽策略；不执行屏幕命令。
+        # 只能覆盖本帧或此前已收到的命令，无法撤销命令到达前已提交的切换。
+        if int(msg.channels[14]) != g11proto.PAGE_IDLE_RECV:
+            self._screen_cmd_hold_until = time.time() + self.SCREEN_H_SUPPRESS_S
+
     def _handle_g11_screen(self, msg: h12proRemoteControllerChannel) -> None:
         """解析 G11 屏幕虚拟通道指令: CH14 页面码 + CH15 功能码脉冲 + CH16 设置位。
         协议表/上升沿/页面校验全部由 g11_controller_node 包的协议库实现,
@@ -1086,18 +1099,6 @@ class H12PROControllerNode:
             page_val = int(msg.channels[13])    # CH14 页面码(接收值)
             cmd_val = int(msg.channels[14])     # CH15 功能码(接收值)
             cfg_val = int(msg.channels[15])     # CH16 设置位(接收值)
-
-            # CH15 非空闲 = 屏幕正在下发一条指令 -> 开启“屏幕占用窗口”。
-            # 为什么: 实体 H 有两个消费者 —— 屏幕端(弹窗确认, 在 H **按下沿**即发
-            # CH15)与机器人状态机(SW1+SW2+H 组合, 在 H **松开**时才产出 H_PRESS)。
-            # 两条通路互不知情: 拨杆位置恰好处于切换瞬间时, 一次按 H 会既执行屏幕
-            # 动作又触发状态转换。屏幕端的拨杆判定受采样周期限制, 无法从根上排除;
-            # 这里以“屏幕命令正在下发”为准绳把状态机侧的 H 系组合屏蔽掉, 保证
-            # 一次 H 只有一个消费者。
-            # 注: 急停(emergency_stop)在 _handle_state_transitions 里先于本闸门判定,
-            #     不受影响。
-            if cmd_val != g11proto.PAGE_IDLE_RECV:
-                self._screen_cmd_hold_until = time.time() + self.SCREEN_H_SUPPRESS_S
 
             hit = self.screen_parser.update(page_val, cmd_val, cfg=cfg_val)
             self._report_g11_parser_counters()
@@ -1719,11 +1720,8 @@ class H12PROControllerNode:
 
         triggers = self.robot_state_machine.machine.get_triggers(current_state)
 
-        # 屏幕正在下发指令(见 _handle_g11_screen 里 _screen_cmd_hold_until 的说明):
-        # 本帧含 H 系键状态的组合跳过 —— 一次按 H 只允许一个消费者。
-        # 屏幕端在 H 按下沿发 CH15, 机器人状态机的 H_PRESS 在 H 松开时才产出,
-        # 两者时间上差一个“按压时长”, 所以这个窗口能稳定盖住松开沿。
-        # 只跳 H 系组合(不是 return): 其它不含 H 的组合本帧照常处理。
+        # 本帧 CH15 已在回调入口续期窗口；窗口内跳过含 H 的普通组合。
+        # 急停先于此处判断，不受屏蔽影响；其它组合保持原有处理。
         screen_holding_h = time.time() < self._screen_cmd_hold_until
 
         for trigger in self._config["state_transitions"].get(current_state, {}):

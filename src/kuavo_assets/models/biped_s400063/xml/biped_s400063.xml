@@ -156,7 +156,7 @@
                             <inertial pos="0.00186 0.01014 -0.09044" quat="1 0 0 0" mass="0.0542110173081966" diaginertia="0.00071 0.0007 0.00012"/>
                             <joint name="zarm_l7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-14.1 14.1" damping="0.0"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_pitch"/>
-                            <geom size="0.005" pos="0 0 -0.17"/>
+                            <geom size="0.005" pos="0 0 -0.17" group="3"/>
                             <body name="camera_l_base" pos="0.093563 -0.015735 0.021967" quat="0.599516 -0.137763 0.781296 -0.105723">
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 0.941176 0.678431 1" mesh="camera_l_base"/>
                               <body name="camera_l_color_link" pos="0.0109 0.009 0.021"/>
@@ -166,8 +166,8 @@
                             <body name="l_hand_base" pos="0 0 -0.053" quat="0 0 1 0">
                               <inertial pos="-0.0041481 -0.021938 0.067528" quat="1 0 0 0" mass="0.373" diaginertia="0.00018466 0.00026432 0.00014072"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_base"/>
-                              <geom size="0.04 0.025 0.08" pos="0 0 -0.158" quat="4.63268e-05 0 0 -1" type="box" contype="1" conaffinity="1"/>
-                              <geom size="0.01 0.04" pos="0.0505 -0.0292 -0.116372" quat="0.991915 0 -0.126907 0" type="cylinder" contype="1" conaffinity="1"/>
+                              <geom size="0.04 0.025 0.08" pos="0 0 -0.158" quat="4.63268e-05 0 0 -1" type="box" contype="1" conaffinity="1" group="3"/>
+                              <geom size="0.01 0.04" pos="0.0505 -0.0292 -0.116372" quat="0.991915 0 -0.126907 0" type="cylinder" contype="1" conaffinity="1" group="3"/>
                               <body name="l_thumb_link1" pos="-0.031492 -0.031853 0.0384">
                                 <inertial pos="-0.012037 -0.00088697 0.01722" quat="1 0 0 0" mass="0.020283" diaginertia="1.5364E-06 1.5999E-06 1.5673E-06"/>
                                 <joint name="l_thumb_j1" pos="0 0 0" axis="0 0 1" range="0.0 2.182" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
@@ -226,7 +226,7 @@
                             </body>
                             <body name="zarm_l7_end_effector" pos="0 0 -0.17">
                               <site name="l_arm_ft_frame" pos="0 0 0" size="0.01 0.005 0.01" rgba="1 0 0 1" type="box" group="1"/>
-                              <geom type="box" size="0.01 0.005 0.02" contype="1" conaffinity="1"/>
+                              <geom type="box" size="0.01 0.005 0.02" contype="1" conaffinity="1" group="3"/>
                             </body>
                           </body>
                         </body>
@@ -263,19 +263,19 @@
                             <inertial pos="0.00000000 -0.01153440 -0.03004157" quat="1 0 0 0" mass="0.11660000" diaginertia="0.00013730 0.00008156 0.00010541"/>
                             <joint name="zarm_r7_joint" pos="0 0 0" axis="0 1 0" range="-0.698132 0.698132" actuatorfrcrange="-14.1 14.1" damping="0.0"/>
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_pitch"/>
-                            <geom size="0.005" pos="0 0 -0.17"/>
+                            <geom size="0.005" pos="0 0 -0.17" group="3"/>
                             <body name="camera_r_base" pos="0.134 0.015735 0.0111" quat="0.599516 0.137763 0.781296 0.105723">
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" quat="0 1 0 0" rgba="1 0.941176 0.678431 1" mesh="camera_r_base"/>
-                              <body name="camera_r_color_link" pos="0.0109 0.009 -0.021" quat="0 1 0 0"/>
-                              <body name="camera_r_depth_link" pos="0.0109 -0.009 -0.021" quat="0 1 0 0"/>
+                              <body name="camera_r_color_link" pos="0.0109 -0.009 -0.021" quat="0 1 0 0"/>
+                              <body name="camera_r_depth_link" pos="0.0109 0.009 -0.021" quat="0 1 0 0"/>
                               <body name="cam_r_link" pos="0.0146 0 -0.021" quat="0 1 0 0"/>
                             </body>
                             <!-- 右手末端执行器 -->
                             <body name="r_hand_base" pos="0 0 -0.053" quat="0 1 0 0">
                               <inertial pos="0.0039726 -0.021926 0.067524" quat="1 0 0 0" mass="0.373" diaginertia="0.00018484 0.00026468 0.00014092"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_base"/>
-                              <geom size="0.04 0.025 0.08" pos="0 0 -0.158" quat="4.63268e-05 0 0 -1" type="box" contype="1" conaffinity="1"/>
-                              <geom size="0.01 0.04" pos="0.0505 0.0292 -0.116372" quat="0.991915 0 -0.126907 0" type="cylinder" contype="1" conaffinity="1"/>
+                              <geom size="0.04 0.025 0.08" pos="0 0 -0.158" quat="4.63268e-05 0 0 -1" type="box" contype="1" conaffinity="1" group="3"/>
+                              <geom size="0.01 0.04" pos="0.0505 0.0292 -0.116372" quat="0.991915 0 -0.126907 0" type="cylinder" contype="1" conaffinity="1" group="3"/>
                               <body name="r_thumb_link1" pos="0.0315 -0.031858 0.0384">
                                 <inertial pos="0.012043 -0.00088035 0.017161" quat="1 0 0 0" mass="0.020436" diaginertia="1.5424E-06 1.605E-06 1.5682E-06"/>
                                 <joint name="r_thumb_j1" pos="0 0 0" axis="0 0 -1" range="0.0 2.182" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
@@ -334,7 +334,7 @@
                             </body>
                             <body name="zarm_r7_end_effector" pos="0 0 -0.17">
                               <site name="r_arm_ft_frame" pos="0 0 0" size="0.01 0.005 0.01" rgba="0 0 1 1" type="box" group="1"/>
-                              <geom type="box" size="0.01 0.005 0.02" contype="1" conaffinity="1"/>
+                              <geom type="box" size="0.01 0.005 0.02" contype="1" conaffinity="1" group="3"/>
                             </body>
                           </body>
                         </body>

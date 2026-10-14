@@ -283,7 +283,7 @@
     </visual>
   </link>
   <joint name="zarm_l1_joint" type="revolute">
-    <origin xyz="0 0.2527 0.242" rpy="0 0 0" />
+    <origin xyz="0 0.2527 0.227" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
@@ -856,7 +856,7 @@
     </visual>
   </link>
   <joint name="zarm_r1_joint" type="revolute">
-    <origin xyz="0 -0.2527 0.242" rpy="0 0 0" />
+    <origin xyz="0 -0.2527 0.227" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
@@ -1419,7 +1419,7 @@
       <inertia ixx="0.00191700" ixy="0.0" ixz="0.0" iyy="0.00184689" iyz="0.0" izz="0.00059064" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 -0.140473" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://kuavo_assets/models/biped_s400062/meshes/head_yaw.STL" />
       </geometry>
@@ -1435,7 +1435,7 @@
     </collision>
   </link>
   <joint name="zhead_1_joint" type="revolute">
-    <origin xyz="0 0 0.3164" rpy="0 0 0" />
+    <origin xyz="0 0 0.43935" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />
@@ -1459,14 +1459,14 @@
     </visual>
   </link>
   <joint name="zhead_2_joint" type="revolute">
-    <origin xyz="0 0 0.13795" rpy="0 0 0" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
     <parent link="zhead_1_link" />
     <child link="zhead_2_link" />
     <axis xyz="0 1 0" />
     <limit lower="-0.526" upper="0.526" effort="14.5" velocity="2.198" />
     <dynamics damping="0.0" friction="0.0" />
   </joint>
-  <link name="head_camera_base">
+  <link name="camera_base">
     <inertial>
       <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
       <mass value="0.0482361371130408" />
@@ -1482,21 +1482,28 @@
       </material>
     </visual>
   </link>
-  <joint name="head_camera_base_joint" type="fixed">
-    <origin xyz="0.099619 0 0.032844" rpy="0 0.3406 0" />
+  <joint name="camera_base_joint" type="fixed">
+    <origin xyz="0.099478 0 0.032897" rpy="0 0.3406 0" />
     <parent link="zhead_2_link" />
-    <child link="head_camera_base" />
+    <child link="camera_base" />
   </joint>
-  <link name="cam_h_link">
+  <link name="camera">
     <inertial>
       <origin xyz="-0.0109467295615343 -0.00025332024893314 0.000333522154238597" rpy="0 0 0" />
       <mass value="0.0482361371130408" />
       <inertia ixx="5.97804649866973E-05" ixy="0" ixz="0" iyy="5.8e-05" iyz="0" izz="5.92932584785117E-05" />
     </inertial>
   </link>
-  <joint name="cam_h_link_joint" type="fixed">
-    <origin xyz="0.011715 0.0475 0.014311" rpy="0 0 0" />
-    <parent link="head_camera_base" />
+  <joint name="camera" type="fixed">
+    <origin xyz="0.115300652811 0.0475 0.042472468866" rpy="0 0.3406 0" />
+    <parent link="zhead_2_link" />
+    <child link="camera" />
+  </joint>
+  <link name="cam_h_link"/>
+
+  <joint name="camera_to_realcam_h_frame" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="camera" />
     <child link="cam_h_link" />
   </joint>
   <link name="radar">
@@ -1562,7 +1569,7 @@
     </collision>
   </link>
   <joint
-    name="camera_l_base_joint"
+    name="l_hand_camera_joint"
     type="fixed">
     <origin
       xyz="0.093563 -0.015735 0.021967"
@@ -1639,7 +1646,7 @@
     </collision>
   </link>
   <joint
-    name="camera_r_base_joint"
+    name="r_hand_camera_joint"
     type="fixed">
     <origin
       xyz="0.134 0.015735 0.0111"
@@ -1653,7 +1660,7 @@
   </joint>
   <link name="camera_r_color_link" />
   <joint name="camera_r_color_frame" type="fixed">
-    <origin xyz="0.0109 0.009 -0.021"
+    <origin xyz="0.0109 -0.009 -0.021"
             rpy="3.14159265358979 0 0" />
     <parent link="camera_r_base" />
     <child link="camera_r_color_link" />
@@ -1661,7 +1668,7 @@
 
   <link name="camera_r_depth_link" />
   <joint name="camera_r_depth_frame" type="fixed">
-    <origin xyz="0.0109 -0.009 -0.021"
+    <origin xyz="0.0109 0.009 -0.021"
             rpy="3.14159265358979 0 0" />
     <parent link="camera_r_base" />
     <child link="camera_r_depth_link" />

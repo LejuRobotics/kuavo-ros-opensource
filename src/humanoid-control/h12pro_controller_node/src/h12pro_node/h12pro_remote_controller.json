@@ -316,7 +316,6 @@
     },
     "stance": {
       "walk": ["SW1_MIDDLE", "SW2_MIDDLE", "B1_PRESS"],
-      "switch_controller": ["SW1_MIDDLE", "SW2_MIDDLE", "H_PRESS"],
       "stop": ["B1_LONG_PRESS", "B2_LONG_PRESS"]
     },
     "walk": {

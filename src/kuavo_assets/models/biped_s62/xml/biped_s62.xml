@@ -97,7 +97,7 @@
               <inertial pos="0.00159298 -0.00027078 0.131874" mass="11.5609" diaginertia="0.246636 0.159377 0.158813"/>
               <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" actuatorfrcrange="-618.48 618.48" damping="0.0"/>
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso"/>
-              <body name="zarm_l1_link" pos="0 0.2527 0.242">
+              <body name="zarm_l1_link" pos="0 0.2527 0.227">
                 <inertial pos="0.00166796 -0.008241 0.00012987" quat="0.707107 0.707107 0 0" mass="0.916533" diaginertia="0.00126587 0.00124337 0.00086921"/>
                 <joint name="zarm_l1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-85 85" damping="0.0"/>
                 <geom pos="0 -0.081 0" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_arm_pitch"/>
@@ -137,7 +137,7 @@
                   </body>
                 </body>
               </body>
-              <body name="zarm_r1_link" pos="0 -0.2527 0.242">
+              <body name="zarm_r1_link" pos="0 -0.2527 0.227">
                 <inertial pos="-0.00166796 0.00839971 0.00012987" quat="0.707107 0.707107 0 0" mass="0.916533" diaginertia="0.00126587 0.00124337 0.00086921"/>
                 <joint name="zarm_r1_joint" pos="0 0 0" axis="0 1 0" range="-3.14159 1.5708" actuatorfrcrange="-85 85" damping="0.0"/>
                 <geom pos="0 0.081 0" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_arm_pitch"/>
@@ -178,16 +178,16 @@
                   </body>
                 </body>
               </body>
-              <body name="zhead_1_link" pos="0 0 0.3164">
+              <body name="zhead_1_link" pos="0 0 0.43935">
                 <inertial pos="0.00173082 -0.0033509 0.0948508" quat="1 4.68903e-05 2.29385e-05 4.13671e-05" mass="0.836974" diaginertia="0.00192825 0.00185813 0.000600654"/>
                 <joint name="zhead_1_joint" pos="0 0 0" axis="0 0 1" range="-1.57 1.57" actuatorfrcrange="-15.5 15.5" damping="0.0"/>
-                <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_yaw"/>
+                <geom pos="0 0 -0.140473" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_yaw"/>
                 <geom pos="0 0 0.059701" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.611765 0.658824 0.670588 1" mesh="head_radar"/>
-                <body name="zhead_2_link" pos="0 0 0.13795">
+                <body name="zhead_2_link" pos="0 0 0">
                   <inertial pos="0.030745 -0.00383958 0.0356665" quat="0.0350967 0.715721 -0.0948585 0.691023" mass="0.851207" diaginertia="0.00556572 0.00531893 0.00393134"/>
                   <joint name="zhead_2_joint" pos="0 0 0" axis="0 1 0" range="-0.526 0.526" actuatorfrcrange="-14.5 14.5" damping="0.0"/>
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_pitch"/>
-                  <geom pos="0.099478 0 0.032897" quat="0.984018 0 0.17807 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_camera"/>
+                  <geom pos="0.099478 0 0.032897" quat="0.985534 0 0.169478 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="head_camera"/>
                 </body>
               </body>
             </body>

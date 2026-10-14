@@ -1232,7 +1232,7 @@
     </inertial>
     <visual>
       <origin
-        xyz="0 0 0"
+        xyz="0 0 -0.140473"
         rpy="0 0 0" />
       <geometry>
         <mesh

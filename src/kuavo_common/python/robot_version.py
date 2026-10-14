@@ -294,6 +294,8 @@ VERSION_REGISTRY = {
     "55.4":  {"internal": 400055, "series": "kuavo5",  "desc": "55 黑漫(heiman)灵巧手双足版"},
     "62.4":  {"internal": 400062, "series": "kuavo5w", "desc": "62 黑漫(heiman)灵巧手轮臂"},
     "63.4":  {"internal": 400063, "series": "kuavo5w", "desc": "63 黑漫(heiman)灵巧手轮臂"},
+    "62.5":  {"internal": 500062, "series": "kuavo5w", "desc": "62 O6灵巧手轮臂"},
+    "63.5":  {"internal": 500063, "series": "kuavo5w", "desc": "63 O6灵巧手轮臂"},
     "13":   {"internal": 13,     "series": "roban",   "desc": "roban2.0版本"},
     "14":   {"internal": 14,     "series": "roban",   "desc": "roban2.1版本"},
     "15":   {"internal": 15,     "series": "roban",   "desc": "roban2.2版本"},

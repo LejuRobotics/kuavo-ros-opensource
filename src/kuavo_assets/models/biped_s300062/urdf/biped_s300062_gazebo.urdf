@@ -725,7 +725,7 @@
     name="zarm_l1_joint"
     type="revolute">
     <origin
-      xyz="0 0.2527 0.242"
+      xyz="0 0.2527 0.227"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -1060,7 +1060,7 @@
     name="zarm_r1_joint"
     type="revolute">
     <origin
-      xyz="0 -0.2527 0.242"
+      xyz="0 -0.2527 0.227"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -1378,7 +1378,7 @@
     </inertial>
     <visual>
       <origin
-        xyz="0 0 0"
+        xyz="0 0 -0.140473"
         rpy="0 0 0" />
       <geometry>
         <mesh
@@ -1395,7 +1395,7 @@
     name="zhead_1_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.3164"
+      xyz="0 0 0.43935"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -1441,7 +1441,7 @@
     name="zhead_2_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.13795"
+      xyz="0 0 0"
       rpy="0 0 0" />
     <parent
       link="zhead_1_link" />
@@ -1488,7 +1488,7 @@
     type="fixed">
     <origin
       xyz="0.099478 0 0.032897"
-      rpy="0 0.35805 0" />
+      rpy="0 0.3406 0" />
     <parent
       link="zhead_2_link" />
     <child
@@ -1617,4 +1617,58 @@
       </plugin>
   </gazebo>
 
+  <link name="camera_l_base" />
+  <joint name="l_hand_camera_joint" type="fixed">
+    <origin xyz="0.12576 -0.033035 -0.092883" rpy="1.933 0.75188 -2.8883" />
+    <parent link="zarm_l7_link" />
+    <child link="camera_l_base" />
+  </joint>
+  <link name="camera_l_color_link" />
+  <joint name="camera_l_color_frame" type="fixed">
+    <origin xyz="0.0109 0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="camera_l_color_link" />
+  </joint>
+  <link name="camera_l_depth_link" />
+  <joint name="camera_l_depth_frame" type="fixed">
+    <origin xyz="0.0109 -0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="camera_l_depth_link" />
+  </joint>
+  <link name="cam_l_link" />
+  <joint name="camera_to_realcam_l_frame" type="fixed">
+    <origin xyz="0.0146 0.00 0.021" rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="cam_l_link" />
+  </joint>
+  <link name="camera_r_base" />
+  <joint name="r_hand_camera_joint" type="fixed">
+    <origin xyz="0.12576 0.033035 -0.092883" rpy="-1.933 0.75188 2.8883" />
+    <parent link="zarm_r7_link" />
+    <child link="camera_r_base" />
+  </joint>
+  <link name="camera_r_color_link" />
+  <joint name="camera_r_color_frame" type="fixed">
+    <origin xyz="0.0109 0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="camera_r_color_link" />
+  </joint>
+  <link name="camera_r_depth_link" />
+  <joint name="camera_r_depth_frame" type="fixed">
+    <origin xyz="0.0109 -0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="camera_r_depth_link" />
+  </joint>
+  <link name="cam_r_link" />
+  <joint name="camera_to_realcam_r_frame" type="fixed">
+    <origin xyz="0.0146 0.00 0.021" rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="cam_r_link" />
+  </joint>
+  <link name="cam_h_link" />
+  <joint name="camera_to_realcam_h_frame" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="camera" />
+    <child link="cam_h_link" />
+  </joint>
 </robot>

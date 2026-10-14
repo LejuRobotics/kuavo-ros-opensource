@@ -35,6 +35,8 @@ _VERSION_REGISTRY=(
     "55.4|400055|kuavo5|55 黑漫(heiman)灵巧手双足版"
     "62.4|400062|kuavo5w|62 黑漫(heiman)灵巧手轮臂"
     "63.4|400063|kuavo5w|63 黑漫(heiman)灵巧手轮臂"
+    "62.5|500062|kuavo5w|62 O6灵巧手轮臂"
+    "63.5|500063|kuavo5w|63 O6灵巧手轮臂"
     "13|13|roban|roban2.0版本"
     "14|14|roban|roban2.1版本"
     "15|15|roban|roban2.2版本"
