@@ -151,7 +151,7 @@ def capitalize_first_letter(directory):
     
     renames = []
     
-    for filename in os.listdir(directory):
+    for filename in sorted(os.listdir(directory)):
         if not (filename.endswith('.msg') or filename.endswith('.srv')):
             continue
             

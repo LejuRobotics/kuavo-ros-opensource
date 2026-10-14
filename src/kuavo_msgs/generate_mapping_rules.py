@@ -88,7 +88,7 @@ def find_message_files(package_path: str) -> List[str]:
     msg_files = []
     msg_dir = os.path.join(package_path, 'msg')
     if os.path.exists(msg_dir):
-        for file in os.listdir(msg_dir):
+        for file in sorted(os.listdir(msg_dir)):
             if file.endswith('.msg'):
                 msg_files.append(os.path.join(msg_dir, file))
     return msg_files
@@ -164,7 +164,7 @@ def find_service_files(package_path: str) -> List[str]:
     srv_files = []
     srv_dir = os.path.join(package_path, 'srv')
     if os.path.exists(srv_dir):
-        for file in os.listdir(srv_dir):
+        for file in sorted(os.listdir(srv_dir)):
             if file.endswith('.srv'):
                 srv_files.append(os.path.join(srv_dir, file))
     return srv_files
