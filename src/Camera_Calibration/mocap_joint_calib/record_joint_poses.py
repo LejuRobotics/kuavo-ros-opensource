@@ -254,6 +254,7 @@ class RigidBodySampler:
         pos = np.array([p.x, p.y, p.z], dtype=float)
         quat = np.array([o.x, o.y, o.z, o.w], dtype=float)
         if not is_valid_pose(pos, quat):
+            self._cache[name] = None
             return
         prev = self._prev_quats.get(name)
         quat = ensure_quat_continuity(quat, prev)
@@ -266,13 +267,20 @@ class RigidBodySampler:
     def _on_pose(self, msg: Pose, name: str) -> None:
         self._extract_pose(msg, name)
 
-    def _snapshot_ready(self) -> bool:
-        return all(self._cache[n] is not None for n in self._cache)
+    def _snapshot(self) -> Optional[Dict[str, Dict[str, np.ndarray]]]:
+        # Fix the entry mapping before validating and copying independent arrays.
+        snapshot = self._cache.copy()
+        if any(pose is None for pose in snapshot.values()):
+            return None
+        return {
+            name: {"pos": pose["pos"].copy(), "quat": pose["quat"].copy()}
+            for name, pose in snapshot.items()
+        }
 
     def _frame_relative_poses(self) -> Optional[Dict[str, Dict[str, np.ndarray]]]:
-        if not self._snapshot_ready():
+        raw = self._snapshot()
+        if raw is None:
             return None
-        raw = {n: self._cache[n].copy() for n in self._cache}  # type: ignore
         corrected = apply_link_offsets_to_poses(raw, self._link_offsets)
         out: Dict[str, Dict[str, np.ndarray]] = {}
         for child, parent in self._pairs:
@@ -310,11 +318,12 @@ class RigidBodySampler:
         t_end = time.time() + max(0.0, duration_sec)
         rate = rospy.Rate(100)
         while time.time() < t_end and not rospy.is_shutdown():
-            if self._snapshot_ready():
+            cached = self._snapshot()
+            if cached is not None:
                 snapshot = {
-                    n: {"pos": self._cache[n]["pos"].copy(),  # type: ignore
-                        "quat": self._cache[n]["quat"].copy()}  # type: ignore
-                    for n in self._cache
+                    n: {"pos": pose["pos"].copy(),
+                        "quat": pose["quat"].copy()}
+                    for n, pose in cached.items()
                 }
                 frames.append(snapshot)
             rate.sleep()

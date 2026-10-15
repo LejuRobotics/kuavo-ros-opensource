@@ -60,6 +60,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Time mode2EnterTime_;                              // 记录进入 mode 2 的时间戳
   std::mutex mode2EnterTimeMutex_;                        // 保护时间戳的互斥锁
   static constexpr double MODE_2_TIMEOUT_DURATION = 2.0;  // 超时时间：5秒
+  // dual_vr 躯干 owner 侧骨骼数据超时阈值（毫秒）。语义与基类的 kJoystickStaleTimeoutMs
+  // （按侧摇杆 0.5s 超时）保持一致：两侧都是 monitor_quest3.py 的同一个 100Hz 发布流
+  // （周期 10ms），500ms 相当于连续丢 50 帧，足以区分"偶发丢帧"与"Quest 断连"，
+  // 又不会把正常抖动误判为失效。不新增用户侧启动参数。
+  static constexpr int64_t kChestStaleTimeoutMs = 500;
 
   void fsmEnter() override;
   void fsmChange() override;
@@ -352,6 +357,30 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::mutex chestPoseMutex_;  // 保护最新 chest pose（position）
   Eigen::Vector3d latestChestPositionInRobot_ = Eigen::Vector3d::Zero();
   bool hasChestPose_ = false;
+  // 躯干 owner 侧 Chest 朝向的本帧缓存（由求解循环按 torso_control_side 刷新）：
+  //   single_vr      -> /robot_chest_pose 路径的 chestRotationQuaternion_（历史行为）
+  //   dual_vr        -> owner 侧 Transformer（left=A / right=B）的 Chest 四元数
+  // 只在该侧尚无有效 Chest 帧时保留上一帧值，绝不隐式回退到 Left Chest。
+  Eigen::Quaterniond latestTorsoOwnerChestQuat_ = Eigen::Quaterniond::Identity();
+  // 本求解周期 owner Chest 朝向是否新鲜（求解循环开头按 getFreshSideChestPose + kChestStaleTimeoutMs
+  // 判定后写入；single_vr 下恒为 true）。只用于本周期收紧 Drake chest orientation 更新权限，
+  // 每周期重新计算，不做跨周期的永久关闭。
+  bool torsoOwnerChestFreshThisCycle_{true};
+  // owner Chest 朝向上一周期是否有效（仅 dual + 躯干朝向跟随开启时维护）。
+  // 用于区分"启动/未跟随状态下首次拿到数据"与"失效→恢复"：只有后者才重建恢复锚点，
+  // 保证正常连续有效期间退化为原来的绝对跟随，行为不变。
+  bool torsoOwnerChestFreshPrevCycle_{true};
+  // owner Chest 朝向恢复有效首帧建立的锚点偏移：目标 = offset * ownerChestQuat。
+  // 恢复首帧令 offset = 当前机器人姿态参考 * 人体四元数⁻¹，使该帧目标恰为机器人当前姿态
+  // （不跳变，例如 Quest 重新定位导致世界系突变时），之后按人体朝向增量正常跟随。
+  // 未发生"失效→恢复"时恒为单位四元数，等价于原来的绝对跟随，行为不变。
+  Eigen::Quaterniond torsoOwnerChestQuatRecoveryOffset_ = Eigen::Quaterniond::Identity();
+  // 躯干 chest 增量的人体锚点是否需要重建（dual owner Chest / single /robot_chest_pose 都适用）。
+  // true 表示"当前 humanChestPosAnchor_ 不是来自有效的人体 Chest 样本"（例如进入 mode2 时
+  // owner Chest 还没数据，或用的是占位值），此时下一帧拿到有效 Chest 必须先重建锚点，
+  // 使该帧增量为 0，避免把失效期间累计的人体运动一次性施加到腰部。
+  // 只在求解线程内读写；reset() / 退出 mode2 时复位为 true。
+  bool chestAnchorNeedsRefresh_{true};
   Eigen::Vector3d frozenRobotChestPos_ = Eigen::Vector3d::Zero();
   Eigen::Quaterniond frozenChestQuat_ = Eigen::Quaterniond::Identity();
   double frozenLeftHandHeightOffset_ = 0.0;
@@ -396,8 +425,68 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   LivePathElbowState leftLivePathElbow_;
   LivePathElbowState rightLivePathElbow_;
   bool drakeSolveUpdateChestOrientation_ = true;
+  bool drakeSolveUpdateChestOrientationConfig_ = true;  // 配置文件中的 orientation 总开关（每帧基准）
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;
+
+  // ---------------------------------------------------------------------------
+  // Dual VR 躯干 ownership（launch arg: torso_control_side = left | right）
+  // ---------------------------------------------------------------------------
+  // 只决定"机器人躯干（chest position + chest orientation / waist yaw & pitch）
+  // 跟随哪一侧 Quest"；手臂 ownership、Primary/Secondary 全局资源 ownership、
+  // 头部控制、X+A 模式切换语义全部不受影响。
+  // 仅在 input_mode=dual_vr 下生效；single_vr 下 torsoSideRight() 恒为 false，
+  // 所有派生量退化为改造前的历史行为。
+  enum class TorsoControlSide { LEFT, RIGHT };
+  TorsoControlSide torsoControlSide_{TorsoControlSide::LEFT};
+  bool torsoControlSideParsed_{false};
+
+  // 解析 launch 参数 /quest3/torso_control_side（等价于 /ik_ros_uni_cpp_node/quest3/torso_control_side）。
+  // 只在启动阶段调用一次；非法值直接 ROS_FATAL 并终止节点，不做静默回退。
+  void parseTorsoControlSideParam();
+
+  // Dual 下躯干 ownership 归 Right（即 torso_control_side=right）。
+  // single_vr 恒为 false —— 这是"single_vr 行为完全不变"的单点保证。
+  bool torsoSideRight() const { return isDualVrMode() && torsoControlSide_ == TorsoControlSide::RIGHT; }
+
+  // 躯干 owner 侧的握把按下状态（dual 下取 owner 那侧的 Grip，single 下取左右任一）。
+  bool torsoOwnerGripPressed(bool leftGripPressed, bool rightGripPressed) const {
+    if (!isDualVrMode()) return leftGripPressed || rightGripPressed;
+    return torsoSideRight() ? rightGripPressed : leftGripPressed;
+  }
+
+  // 躯干 owner 侧的 Grip 就绪状态（dual 下取 owner 那侧，single 下取左右任一）。
+  bool torsoOwnerGripReady(bool leftGripReady, bool rightGripReady) const {
+    if (!isDualVrMode()) return leftGripReady || rightGripReady;
+    return torsoSideRight() ? rightGripReady : leftGripReady;
+  }
+
+  // 读取躯干 owner 侧 Quest 上报的 Chest 位置（dual 下为 A 或 B 实例自己的 Chest）。
+  // 返回 false 表示该侧还没有有效 Chest 帧，调用方必须保持原值不变，
+  // 绝不可用零向量/占位值建立 chest 增量锚点。
+  bool getTorsoOwnerHumanChestPos(Eigen::Vector3d& humanChestPos);
+
+  // 推进躯干 owner 侧 Chest 位置增量（求解循环内的唯一推进入口）。
+  // owner Chest 本帧无效时不推进（机器人 chest 位置/朝向参考保持上一帧值，
+  // 机械臂与 Wheel IK 照常执行）；首次有效/失效后恢复的首帧会先重建锚点，
+  // 使该帧增量为 0，避免腰部目标跳变。返回值表示本帧是否推进了增量。
+  bool advanceOwnerChestIncremental();
+
+  // 激活 chest 增量模式并建立锚点。owner Chest 无效时用 robotChestPosForPlaceholder
+  // （调用方传入的机器人当前 chest 目标）做占位锚点，使增量为 0，并标记锚点待重建；
+  // 绝不使用 Eigen::Vector3d::Zero() 当作有效人体 Chest 位置。
+  // 返回 owner Chest 本帧是否有效。
+  bool enterOwnerChestIncrementalMode(const Eigen::Vector3d& robotChestPosForPlaceholder);
+
+  // 读取当前躯干朝向参考（dual 下为 owner 侧 Chest；single 下保持历史 /robot_chest_pose 行为）。
+  Eigen::Quaterniond getTorsoOwnerChestQuat();
+
+  // 当前躯干 owner 侧是否处于"活跃驱动"状态（dual 下 = owner 侧 Grip 按下；single 恒 true）。
+  bool torsoOwnerActiveNow() const;
+
+  // 低频诊断日志（1Hz）：真机确认躯干 ownership 实际跟随哪一侧、Drake 位置/朝向权限状态。
+  void logDualTorsoOwnerDiagnostics(bool leftGripReady, bool rightGripReady) const;
+
   // 锁下肢前两个关节（knee/leg），只留 waist_pitch/waist_yaw 随动。
   // 动态切换：rosservice /quest3/set_lock_knee_leg 或 rosparam set /ik_ros_uni_cpp_node/quest3/lock_knee_leg
   std::atomic<bool> lockKneeLegEnabled_{false};

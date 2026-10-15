@@ -43,6 +43,30 @@ class Quest3BoneFramePublisher:
     UDP_RECEIVER_POLL_INTERVAL_SEC = 0.1
 
     def __init__(self):
+        rospy.init_node('Quest3_bone_frame_publisher', anonymous=True)
+        # Dual-VR support: every resource this node owns is selectable, so a second
+        # monitor instance can run beside this one without colliding on a name.
+        # Defaults keep the single-VR behaviour byte-for-byte identical.
+        self.tf_prefix = str(rospy.get_param("~tf_prefix", "") or "")
+        self.publish_quest3_globals = bool(rospy.get_param("~publish_quest3_globals", True))
+        self.start_state_server = bool(rospy.get_param("~start_state_server", True))
+        self.bone_poses_topic = str(
+            rospy.get_param("~bone_poses_topic", "/leju_quest_bone_poses")
+        )
+        self.joystick_topic = str(rospy.get_param("~joystick_topic", "quest_joystick_data"))
+        # Dual-VR: which side of the JoySticks message this monitor is allowed to
+        # fill. "both" (default) reproduces the single-VR behaviour exactly.
+        self.joystick_side = str(rospy.get_param("~joystick_side", "both")).lower()
+        if self.joystick_side not in ("both", "left", "right"):
+            rospy.logwarn(
+                "Unknown ~joystick_side='%s', falling back to 'both'", self.joystick_side
+            )
+            self.joystick_side = "both"
+        # Dual-VR: 按侧连接状态参数（如 /vr_left/connected、/vr_right/connected）。
+        # 默认空字符串 = 不写任何按侧参数，单 VR 行为逐字不变。
+        # 全局 /quest3/connected 仍只由主 Quest（publish_quest3_globals=true）写入。
+        self.connected_param = str(rospy.get_param("~connected_param", "") or "").strip()
+
         self.bone_names = [
             "LeftArmUpper", "LeftArmLower", "RightArmUpper", "RightArmLower",
             "LeftHandPalm", "RightHandPalm", "LeftHandThumbMetacarpal",
@@ -87,9 +111,12 @@ class Quest3BoneFramePublisher:
         self.shutdown_started = False
 
         self.listening_udp_ports_cnt = 0
-        
-        rospy.init_node('Quest3_bone_frame_publisher', anonymous=True)
-        self.reset_vr_torso_state = rospy.ServiceProxy('/quest3/reset_vr_torso_state', Trigger)
+
+        # 全局 torso 状态属于全局单例资源：只有主 Quest 创建该代理并允许调用，
+        # 次级 Quest 连代理都不创建，退出时也就不会重置全局 torso 状态。
+        self.reset_vr_torso_state = None
+        if self.publish_quest3_globals:
+            self.reset_vr_torso_state = rospy.ServiceProxy('/quest3/reset_vr_torso_state', Trigger)
         self.vr_torso_state_reset = False
         self.joystick_timeout_sec = max(
             0.05,
@@ -106,10 +133,13 @@ class Quest3BoneFramePublisher:
         )
         self.rate = rospy.Rate(100.0)
         
-        self.br = tf.TransformBroadcaster()
+        # /tf 属于全局单例资源：次级 Quest 不注册该发布器，避免 ROS graph 上出现两个 /tf 发布者
+        self.br = None
+        if self.publish_quest3_globals:
+            self.br = tf.TransformBroadcaster()
         # Bone targets are real-time commands: never retain more than the newest
         # unsent frame for a slow subscriber connection.
-        self.pose_pub = rospy.Publisher('/leju_quest_bone_poses', PoseInfoList, queue_size=1)
+        self.pose_pub = rospy.Publisher(self.bone_poses_topic, PoseInfoList, queue_size=1)
         # 延迟诊断默认关闭，避免常规遥操作时的统计、ROS发布和日志开销。
         self.enable_vr_latency_diagnostics = rospy.get_param(
             '~enable_vr_latency_diagnostics', False
@@ -125,24 +155,49 @@ class Quest3BoneFramePublisher:
             "Quest3 VR latency diagnostics: %s",
             "enabled" if self.enable_vr_latency_diagnostics else "disabled",
         )
-        self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
-        self.chest_data_pub = rospy.Publisher('/robot_chest_motion_data', Float64MultiArray, queue_size=10)
-        self.head_pose_pub = rospy.Publisher('/robot_head_pose', PoseStamped, queue_size=10)
-        self.chest_pose_pub = rospy.Publisher('/robot_chest_pose', PoseStamped, queue_size=10)
+        # Global (non-per-side) resources: only the primary Quest owns these, so a
+        # secondary monitor must not advertise them at all.
+        self.head_data_pub = None
+        self.chest_data_pub = None
+        self.head_pose_pub = None
+        self.chest_pose_pub = None
+        if self.publish_quest3_globals:
+            self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
+            self.chest_data_pub = rospy.Publisher('/robot_chest_motion_data', Float64MultiArray, queue_size=10)
+            self.head_pose_pub = rospy.Publisher('/robot_head_pose', PoseStamped, queue_size=10)
+            self.chest_pose_pub = rospy.Publisher('/robot_chest_pose', PoseStamped, queue_size=10)
         # JoySticks is a current-state command. Keep only the newest outbound snapshot
         # so a slow subscriber cannot make the robot replay stale stick positions.
-        self.joysticks_pub = rospy.Publisher('quest_joystick_data', JoySticks, queue_size=1)
-        
-        # 末端力配置发布器
-        self.hand_wrench_config_pub = rospy.Publisher('/quest3/hand_wrench_config', Float64MultiArray, queue_size=1)
-        
-        self.listener = tf.TransformListener()
-        self.hand_finger_tf_pub = rospy.Publisher('/quest_hand_finger_tf', TFMessage, queue_size=10)
-        # 批量发布所有骨骼TF的发布器
-        self.bone_tf_pub = rospy.Publisher('/tf', TFMessage, queue_size=10)
+        self.joysticks_pub = rospy.Publisher(self.joystick_topic, JoySticks, queue_size=1)
+
+        # 末端力配置发布器（全局资源，仅主 Quest 发布）
+        self.hand_wrench_config_pub = None
+        if self.publish_quest3_globals:
+            self.hand_wrench_config_pub = rospy.Publisher('/quest3/hand_wrench_config', Float64MultiArray, queue_size=1)
+
+        # TransformListener 内部会注册 /tf 与 /tf_static 订阅；次级 Quest 不需要它
+        # （它只在手指 TF 与头部/胸部相对位姿计算里用到，这些在次级 Quest 上都不会执行）
+        self.listener = None
+        if self.publish_quest3_globals:
+            self.listener = tf.TransformListener()
+        self.hand_finger_tf_pub = None
+        if self.publish_quest3_globals:
+            self.hand_finger_tf_pub = rospy.Publisher('/quest_hand_finger_tf', TFMessage, queue_size=10)
+        # 批量发布所有骨骼TF的发布器（骨骼 TF 属于全局 TF 树，仅主 Quest 发布）
+        self.bone_tf_pub = None
+        if self.publish_quest3_globals:
+            self.bone_tf_pub = rospy.Publisher('/tf', TFMessage, queue_size=10)
 
         self.enable_head_control = rospy.get_param("~enable_head_control", True)
-        rospy.loginfo(f"enable_head_control: {self.enable_head_control}")
+        # 头部控制与 /quest3/* 一样是全局单例资源：次级 Quest 不参与头部控制，
+        # 否则两个实例会同时向 /robot_head_motion_data 写命令。
+        if not self.publish_quest3_globals:
+            self.enable_head_control = False
+        rospy.loginfo(
+            "enable_head_control: %s (tf_prefix='%s', publish_quest3_globals=%s, connected_param='%s')",
+            self.enable_head_control, self.tf_prefix, self.publish_quest3_globals,
+            self.connected_param if self.connected_param else "(none)",
+        )
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGHUP, self.signal_handler)
@@ -155,31 +210,36 @@ class Quest3BoneFramePublisher:
         self.robot_state_server = None
         
         # 配置管理器
-        self.config_manager = Quest3VrConfig()
-        
+        self.config_manager = Quest3VrConfig(rospy.get_param("~vr_config_path", None))
+
         # 头部控制管理器
         self.head_control_manager = HeadControlManager(self.config_manager)
         self._init_head_control_manager()
-        
-        # 创建头部控制模式设置服务
-        self.head_control_mode_service = rospy.Service(
-            '/quest3/set_head_control_mode',
-            SetHeadControlMode,
-            self._handle_set_head_control_mode
-        )
-        rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
 
-        # 创建头部控制模式发布节点
-        self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', headCtrlMode, queue_size=10)
-        # 每次 set_head_control_mode 成功设为 fixed 时发布，供 QuestControlFSM 在手臂复位窗口内更新「解锁后恢复」快照（含重复 fixed）
-        self._pub_head_fixed_user_intent = rospy.Publisher(
-            '/quest3/head_fixed_forward_user_intent', Empty, queue_size=1, latch=False
-        )
+        # 创建头部控制模式设置服务（全局单例资源：头部控制只有一套，
+        # 次级 Quest 不得争抢同一个 service/topic 名）
+        self.head_control_mode_service = None
+        self.head_ctrl_mode_pub = None
+        self._pub_head_fixed_user_intent = None
+        if self.publish_quest3_globals:
+            self.head_control_mode_service = rospy.Service(
+                '/quest3/set_head_control_mode',
+                SetHeadControlMode,
+                self._handle_set_head_control_mode
+            )
+            rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
 
-        rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
+            # 创建头部控制模式发布节点
+            self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', headCtrlMode, queue_size=10)
+            # 每次 set_head_control_mode 成功设为 fixed 时发布，供 QuestControlFSM 在手臂复位窗口内更新「解锁后恢复」快照（含重复 fixed）
+            self._pub_head_fixed_user_intent = rospy.Publisher(
+                '/quest3/head_fixed_forward_user_intent', Empty, queue_size=1, latch=False
+            )
 
-        # 初始化VR连接状态参数
-        rospy.set_param('/quest3/connected', False)
+            rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
+
+        # 初始化VR连接状态参数：按侧参数（若配置）+ 全局 /quest3/connected（仅主 Quest）
+        self._set_connected_state(False)
 
     def set_robot_state_server(self, robot_state_server):
         """设置 RobotStateServer 引用
@@ -301,6 +361,8 @@ class Quest3BoneFramePublisher:
             self.receiver_condition.notify_all()
         # Neutralize motion commands before ROS publishers and services begin shutdown.
         self.publish_neutral_joystick("termination signal received")
+        # 连接状态清零需在 ROS 标记为 shutdown 之前写入
+        self._set_connected_state(False)
         # 在 ROS 标记为 shutdown 前完成服务调用，保证仍可连接到常驻 Quest FSM
         self.reset_vr_torso_state_on_shutdown()
         rospy.signal_shutdown('Quest3 monitor received a termination signal')
@@ -314,10 +376,37 @@ class Quest3BoneFramePublisher:
 
         self.exit_listen_thread_for_quest3_broadcast = True
         self.publish_neutral_joystick("Quest3 monitor shutting down")
+        self._set_connected_state(False)
         self.reset_vr_torso_state_on_shutdown()
         self.stop_udp_receiver()
 
+    def _set_connected_state(self, connected):
+        """连接状态统一写入口：按侧参数（若配置）+ 全局 /quest3/connected（仅主 Quest）。
+
+        - 按侧参数由各实例自己的 ~connected_param 决定（双 Quest 下 A=/vr_left/connected，
+          B=/vr_right/connected）；未配置时不写，单 VR 行为保持不变。
+        - /quest3/connected 语义不变，仍只由 publish_quest3_globals=true 的主 Quest 维护。
+        """
+        connected = bool(connected)
+        target_params = []
+        if self.connected_param:
+            target_params.append(self.connected_param)
+        if self.publish_quest3_globals:
+            target_params.append('/quest3/connected')
+        for param_name in target_params:
+            try:
+                rospy.set_param(param_name, connected)
+            except Exception as error:
+                # 关闭阶段参数服务器可能已不可写，诊断参数写失败不能中断既有关闭流程
+                rospy.logwarn_throttle(
+                    1.0, "Could not set connection state param %s: %s", param_name, error
+                )
+
     def reset_vr_torso_state_on_shutdown(self):
+        # 全局 torso 状态只有主 Quest 有权重置：次级 Quest 退出时不得触发全局 reset
+        if not self.publish_quest3_globals or self.reset_vr_torso_state is None:
+            return
+
         if self.vr_torso_state_reset:
             return
 
@@ -359,9 +448,14 @@ class Quest3BoneFramePublisher:
                 handshake_socket.sendto(message, self.server_address)
                 handshake_socket.recvfrom(1024)
                 print(f"\033[92mAcknowledgment From Quest3 received on attempt {attempt + 1}, start to receiving data...\033[0m")
-                # 连接成功后设置参数服务器参数
-                rospy.set_param('/quest3/connected', True)
-                rospy.loginfo("VR连接成功！已设置参数: /quest3/connected=True")
+                # 只有收到 Quest3 的 Acknowledgment 之后才算连接成功。
+                # 按侧参数（若配置）恒写；/quest3/connected 仅主 Quest 写。
+                self._set_connected_state(True)
+                rospy.loginfo(
+                    "VR连接成功！connected=True（按侧参数: %s，/quest3/connected: %s）",
+                    self.connected_param if self.connected_param else "未配置",
+                    "已设置" if self.publish_quest3_globals else "非主 Quest，不设置",
+                )
                 return True
             except socket.timeout:
                 print(f"\033[91mQuest3_timeout: Attempt {attempt + 1} timed out. Retrying...\033[0m")
@@ -397,6 +491,8 @@ class Quest3BoneFramePublisher:
                               frame_rotation_quat, time_now, frame_name, "torso")
         
     def update_quest_hand_finger_tf(self):
+        if self.hand_finger_tf_pub is None:
+            return
         tf_msg = TFMessage()
         for frame_name in [
                 "LeftHandPalm", "RightHandPalm","LeftHandThumbMetacarpal",
@@ -407,14 +503,15 @@ class Quest3BoneFramePublisher:
                 "RightHandMiddleTip", "RightHandRingTip", "RightHandLittleTip"
             ]:
                 try:
+                    palm_frame = self._tf_frame("LeftHandPalm" if "Left" in frame_name else "RightHandPalm")
                     if "Left" in frame_name:
-                        relative_position, relative_rotation = self.listener.lookupTransform("LeftHandPalm", frame_name, rospy.Time(0))
-                    else:   
-                        relative_position, relative_rotation = self.listener.lookupTransform("RightHandPalm", frame_name, rospy.Time(0))
+                        relative_position, relative_rotation = self.listener.lookupTransform(palm_frame, self._tf_frame(frame_name), rospy.Time(0))
+                    else:
+                        relative_position, relative_rotation = self.listener.lookupTransform(palm_frame, self._tf_frame(frame_name), rospy.Time(0))
                     transform = TransformStamped()
                     transform.header.stamp = rospy.Time.now()
-                    transform.header.frame_id = "LeftHandPalm" if "Left" in frame_name else "RightHandPalm"
-                    transform.child_frame_id = frame_name
+                    transform.header.frame_id = palm_frame
+                    transform.child_frame_id = self._tf_frame(frame_name)
                     transform.transform.translation.x = relative_position[0]
                     transform.transform.translation.y = relative_position[1]
                     transform.transform.translation.z = relative_position[2]
@@ -435,6 +532,12 @@ class Quest3BoneFramePublisher:
             degree += 180
         return degree
 
+    def _tf_frame(self, name):
+        """给 TF frame 名加实例前缀；默认空前缀时与原有 frame 名完全一致。"""
+        if not self.tf_prefix:
+            return name
+        return "{}{}".format(self.tf_prefix, name)
+
     def pub_head_motion_data(self, cur_quat):
         """发布头部运动数据（根据控制模式）"""
         if not self.enable_head_control:
@@ -444,7 +547,9 @@ class Quest3BoneFramePublisher:
         if self.head_control_manager.mode == HeadControlMode.VR_FOLLOW:
             try:
                 # Get the transform from Chest to Head using TF listener
-                (trans, rot) = self.listener.lookupTransform("Chest", "Head", rospy.Time(0))
+                (trans, rot) = self.listener.lookupTransform(
+                    self._tf_frame("Chest"), self._tf_frame("Head"), rospy.Time(0)
+                )
                 
                 # Convert quaternion to euler angles (roll, pitch, yaw)
                 rpy = tf.transformations.euler_from_quaternion(rot)
@@ -461,7 +566,7 @@ class Quest3BoneFramePublisher:
                 # Publish head pose (position set to zero)
                 head_pose_msg = PoseStamped()
                 head_pose_msg.header.stamp = rospy.Time.now()
-                head_pose_msg.header.frame_id = "Chest"
+                head_pose_msg.header.frame_id = self._tf_frame("Chest")
                 head_pose_msg.pose.position.x = 0.0
                 head_pose_msg.pose.position.y = 0.0
                 head_pose_msg.pose.position.z = 0.0
@@ -477,9 +582,13 @@ class Quest3BoneFramePublisher:
         # 其他模式：由_update_head_control_from_hands()处理
     
     def pub_chest_motion_data(self, cur_quat):
+        if self.chest_data_pub is None:
+            return
         try:
             # Get the transform from torso to Chest using TF listener
-            (trans, rot) = self.listener.lookupTransform("torso", "Chest", rospy.Time(0))
+            (trans, rot) = self.listener.lookupTransform(
+                self._tf_frame("torso"), self._tf_frame("Chest"), rospy.Time(0)
+            )
             
             # Convert quaternion to euler angles (roll, pitch, yaw)
             rpy = tf.transformations.euler_from_quaternion(rot)
@@ -512,7 +621,7 @@ class Quest3BoneFramePublisher:
             # Publish chest pose (position set to zero)
             chest_pose_msg = PoseStamped()
             chest_pose_msg.header.stamp = rospy.Time.now()
-            chest_pose_msg.header.frame_id = "torso"
+            chest_pose_msg.header.frame_id = self._tf_frame("torso")
             chest_pose_msg.pose.position.x = 0.0
             chest_pose_msg.pose.position.y = 0.0
             chest_pose_msg.pose.position.z = 0.0
@@ -521,15 +630,17 @@ class Quest3BoneFramePublisher:
             chest_pose_msg.pose.orientation.z = rot[2]
             chest_pose_msg.pose.orientation.w = rot[3]
             self.chest_pose_pub.publish(chest_pose_msg)
-            
+
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
             rospy.logerr(f"TF lookup failed for torso->Chest transform: {e}")
             return
-    
+
     def pub_chest_pose_in_torso_frame(self, chest_position, chest_quat, root_offset, time_now):
+        if self.chest_pose_pub is None:
+            return
         chest_pose_msg = PoseStamped()
         chest_pose_msg.header.stamp = time_now
-        chest_pose_msg.header.frame_id = "torso"
+        chest_pose_msg.header.frame_id = self._tf_frame("torso")
         chest_pose_msg.pose.position.x = chest_position["x"] - root_offset["x"]
         chest_pose_msg.pose.position.y = chest_position["y"] - root_offset["y"]
         chest_pose_msg.pose.position.z = chest_position["z"]
@@ -754,7 +865,8 @@ class Quest3BoneFramePublisher:
                         -request.data.lforce_y,      # [5] 右手 Y 方向力 (取反)
                         request.data.lforce_z        # [6] 右手 Z 方向力 (与左手相同)
                     ]
-                    self.hand_wrench_config_pub.publish(config_msg)
+                    if self.hand_wrench_config_pub is not None:
+                        self.hand_wrench_config_pub.publish(config_msg)
                     rospy.loginfo(f"✓ Published hand wrench config to /quest3/hand_wrench_config: "
                                  f"mass={request.data.item_mass:.2f}kg, "
                                  f"left_force=({request.data.lforce_x:.2f}, {request.data.lforce_y:.2f}, {request.data.lforce_z:.2f})N, "
@@ -1050,16 +1162,21 @@ class Quest3BoneFramePublisher:
                             if len(self._latency_samples) >= self._latency_log_every:
                                 self._log_latency_stats(pose_event.timestamp)
 
-                    self.head_control_manager.publish_head_control_mode(
-                        self.head_ctrl_mode_pub,
-                        HeadControlMode.to_string(self.head_control_manager.mode),
-                        self.head_control_manager.fixed_main_hand,
-                    )
+                    # 头部控制模式话题是全局单例资源，次级 Quest 不发布
+                    if self.head_ctrl_mode_pub is not None:
+                        self.head_control_manager.publish_head_control_mode(
+                            self.head_ctrl_mode_pub,
+                            HeadControlMode.to_string(self.head_control_manager.mode),
+                            self.head_control_manager.fixed_main_hand,
+                        )
                     self.rate.sleep()
                 except socket.timeout:
                     print('Timeout occurred, no data received. Restarting socket...')
-                    rospy.set_param('/quest3/connected', False)
-                    rospy.logwarn("VR连接断开！已设置参数: /quest3/connected=False")
+                    self._set_connected_state(False)
+                    rospy.logwarn(
+                        "VR连接断开！connected=False（按侧参数: %s）",
+                        self.connected_param if self.connected_param else "未配置",
+                    )
                     if not self.stop_udp_receiver():
                         break
                     if not self.restart_socket():
@@ -1067,8 +1184,11 @@ class Quest3BoneFramePublisher:
                     self.start_udp_receiver()
                 except Exception as e:
                     print(f'An error occurred: {e}')
-                    rospy.set_param('/quest3/connected', False)
-                    rospy.logwarn("VR连接异常！已设置参数: /quest3/connected=False")
+                    self._set_connected_state(False)
+                    rospy.logwarn(
+                        "VR连接异常！connected=False（按侧参数: %s）",
+                        self.connected_param if self.connected_param else "未配置",
+                    )
                     if not self.stop_udp_receiver():
                         break
                     if not self.restart_socket():
@@ -1078,22 +1198,27 @@ class Quest3BoneFramePublisher:
             self.stop_udp_receiver()
 
     def process_joystick_data(self, event, joysticks_msg, stop_event=None):
-        joysticks_msg.left_x = event.left_joystick.x
-        joysticks_msg.left_y = event.left_joystick.y
-        joysticks_msg.left_trigger = event.left_joystick.trigger
-        joysticks_msg.left_grip = event.left_joystick.grip
-        joysticks_msg.left_first_button_pressed = event.left_joystick.firstButtonPressed
-        joysticks_msg.left_second_button_pressed = event.left_joystick.secondButtonPressed
-        joysticks_msg.left_first_button_touched = event.left_joystick.firstButtonTouched
-        joysticks_msg.left_second_button_touched = event.left_joystick.secondButtonTouched
-        joysticks_msg.right_x = event.right_joystick.x
-        joysticks_msg.right_y = event.right_joystick.y
-        joysticks_msg.right_trigger = event.right_joystick.trigger
-        joysticks_msg.right_grip = event.right_joystick.grip
-        joysticks_msg.right_first_button_pressed = event.right_joystick.firstButtonPressed
-        joysticks_msg.right_second_button_pressed = event.right_joystick.secondButtonPressed
-        joysticks_msg.right_first_button_touched = event.right_joystick.firstButtonTouched
-        joysticks_msg.right_second_button_touched = event.right_joystick.secondButtonTouched
+        # Dual-VR: each monitor only fills the side it owns, so the single merged
+        # JoySticks carries left_* from Quest-A and right_* from Quest-B.
+        # Default "both" keeps the single-VR behaviour unchanged.
+        if self.joystick_side != "right":
+            joysticks_msg.left_x = event.left_joystick.x
+            joysticks_msg.left_y = event.left_joystick.y
+            joysticks_msg.left_trigger = event.left_joystick.trigger
+            joysticks_msg.left_grip = event.left_joystick.grip
+            joysticks_msg.left_first_button_pressed = event.left_joystick.firstButtonPressed
+            joysticks_msg.left_second_button_pressed = event.left_joystick.secondButtonPressed
+            joysticks_msg.left_first_button_touched = event.left_joystick.firstButtonTouched
+            joysticks_msg.left_second_button_touched = event.left_joystick.secondButtonTouched
+        if self.joystick_side != "left":
+            joysticks_msg.right_x = event.right_joystick.x
+            joysticks_msg.right_y = event.right_joystick.y
+            joysticks_msg.right_trigger = event.right_joystick.trigger
+            joysticks_msg.right_grip = event.right_joystick.grip
+            joysticks_msg.right_first_button_pressed = event.right_joystick.firstButtonPressed
+            joysticks_msg.right_second_button_pressed = event.right_joystick.secondButtonPressed
+            joysticks_msg.right_first_button_touched = event.right_joystick.firstButtonTouched
+            joysticks_msg.right_second_button_touched = event.right_joystick.secondButtonTouched
         with self.joystick_publish_lock:
             if stop_event is not None and stop_event.is_set():
                 return False
@@ -1114,8 +1239,8 @@ class Quest3BoneFramePublisher:
         """
         transform = TransformStamped()
         transform.header.stamp = time_now
-        transform.header.frame_id = "torso"
-        transform.child_frame_id = bone_name
+        transform.header.frame_id = self._tf_frame("torso")
+        transform.child_frame_id = self._tf_frame(bone_name)
         transform.transform.translation.x = scaled_position["x"]
         transform.transform.translation.y = scaled_position["y"]
         transform.transform.translation.z = scaled_position["z"]
@@ -1164,7 +1289,8 @@ class Quest3BoneFramePublisher:
                 self.pub_chest_pose_in_torso_frame(right_hand_position, right_hand_quat, root_offset, time_now)
         
         # 批量发布所有骨骼的TF变换（一次性发布，而不是循环中逐个发布）
-        if len(tf_msg.transforms) > 0:
+        # 次级 Quest 不发布骨骼 TF，避免 torso -> LeftHandPalm 等同名 child frame 冲突
+        if len(tf_msg.transforms) > 0 and self.bone_tf_pub is not None:
             self.bone_tf_pub.publish(tf_msg)
         
         # 非VR模式：更新头部控制（在TF发布后，确保可以查询到手部位置）
@@ -1195,7 +1321,8 @@ class Quest3BoneFramePublisher:
                 failed_socket.close()
             return False
         print("Socket connection restarted successfully.")
-        # send_initial_message() 成功时已设置 /quest3/connected=True
+        # 连接状态不在 restart_socket 里提前置位：只有 send_initial_message()
+        # 收到 Quest3 Acknowledgment 后，才由 _set_connected_state(True) 置为已连接
         return True
 
     def _periodic_robot_info_broadcaster(self):
@@ -1318,14 +1445,21 @@ if __name__ == "__main__":
             ee_type = config.get("EndEffectorType", ["qiangnao", "qiangnao"])[0]
         print("\033[91mend_effector_type not found in rosparm, using from kuavo.json\033[0m")
     # RobotStateServer to Vr App
-    subscribe_sensor_data = True # 订阅sensors_data_raw
-    robot_state_server = RobotStateServer(ee_type=ee_type, udp_port=15170, publish_rate=20, subscribe_sensor_data=subscribe_sensor_data)
-    if not robot_state_server.start():
-        print("\033[91mRobotStateServer 启动失败\033[0m")
-        sys.exit(1)
-    
-    # 设置 robot_state_server 引用到 publisher，用于处理 hand wrench 请求
-    publisher.set_robot_state_server(robot_state_server)
+    # Dual-VR：全系统只允许一个 UDP 15170 RobotStateServer。主 Quest（A 侧）启动它，
+    # 次级 Quest（B 侧）必须通过 ~start_state_server:=false 关闭，否则 UDPServer 的
+    # force_port 逻辑会让第二个实例杀掉第一个实例。
+    robot_state_server = None
+    if publisher.start_state_server:
+        subscribe_sensor_data = True # 订阅sensors_data_raw
+        robot_state_server = RobotStateServer(ee_type=ee_type, udp_port=15170, publish_rate=20, subscribe_sensor_data=subscribe_sensor_data)
+        if not robot_state_server.start():
+            print("\033[91mRobotStateServer 启动失败\033[0m")
+            sys.exit(1)
+
+        # 设置 robot_state_server 引用到 publisher，用于处理 hand wrench 请求
+        publisher.set_robot_state_server(robot_state_server)
+    else:
+        print("start_state_server=false: 本实例不启动 RobotStateServer（复用主 Quest 的 UDP 15170）")
     #######################################################
 
     broadcast_ips = get_local_broadcast_ips()
@@ -1358,4 +1492,5 @@ if __name__ == "__main__":
         print("Failed to establish initial connection.")
 
     # Close the socket
-    robot_state_server.stop()    
+    if robot_state_server is not None:
+        robot_state_server.stop()

@@ -66,6 +66,31 @@ SCHED_FIFO = 1
 SCHED_RR = 2
 num_arm_joints_var = 14
 
+# Dual-VR joystick merge. JoySticks.msg has no shared field: every field is
+# owned by exactly one side, so a merged message is always "the newest left_*
+# from Quest-A plus the newest right_* from Quest-B". These are the real field
+# names of kuavo_msgs/JoySticks.msg, derived so they cannot drift out of sync.
+DUAL_VR_JOYSTICK_SIDE_FIELDS = {
+    side: tuple(
+        "%s_%s" % (side, suffix)
+        for suffix in (
+            "x", "y", "trigger", "grip",
+            "first_button_pressed", "second_button_pressed",
+            "first_button_touched", "second_button_touched",
+        )
+    )
+    for side in ("left", "right")
+}
+# A silent side produces no callback at all, so its timeout can only be noticed
+# by a clock. The watch timer is edge triggered (it does nothing unless a side
+# actually crossed its timeout), so a low rate is enough.
+DUAL_VR_JOYSTICK_WATCH_HZ = 10.0
+# Dual-VR: finger result used for a side that has not produced one yet. One entry
+# per `hand_finger_data[i]` joint (6), all-open, which is also what an untouched
+# joystick trigger/grip maps to. A side that never arrives therefore keeps the
+# same values it would keep in single_vr, instead of None reaching the publisher.
+DUAL_VR_NEUTRAL_FINGER_JOINTS = (0.0,) * 6
+
 def str2bool(v):
     if isinstance(v, bool):
         return v
@@ -150,6 +175,30 @@ class ProcessedBoneFrame:
     right_finger_joints: object
     left_shoulder_rpy: object
     right_shoulder_rpy: object
+    is_running: bool
+    is_hand_tracking: bool
+    vr_error: bool
+
+
+@dataclass(frozen=True)
+class SideBoneSnapshot:
+    """Dual-VR: newest partial result produced from one Quest's bone frames.
+
+    Each Quest only owns one side, so the two sides arrive independently. This
+    carries exactly what the IK thread consumes from a side; the merged
+    ProcessedBoneFrame is assembled from both when either side is refreshed.
+    """
+
+    sequence: int
+    receive_time: float
+    source_timestamp_ms: int
+    transform_done_time: float
+    transform_done_monotonic: float
+    side: str
+    pose: object
+    elbow_pos: object
+    shoulder_rpy: object
+    finger_joints: object
     is_running: bool
     is_hand_tracking: bool
     vr_error: bool
@@ -282,6 +331,12 @@ class IkRos:
         self._bone_input_seq = 0
         self._bone_overwrite_count = 0
         self._last_reported_bone_overwrite_count = 0
+        # Dual-VR: the secondary Quest has its own latest-frame mailbox. Both
+        # mailboxes share _bone_condition, so a single worker can wait on either
+        # and _stop_threads only has to notify once. Unused in single_vr.
+        self._pending_bone_frame_right = None
+        self._bone_input_seq_right = 0
+        self._bone_overwrite_count_right = 0
         self._target_lock = threading.Lock()
         # Coordinate conversion notifies this condition after atomically
         # committing a new target. IK solving is event driven; it no longer
@@ -312,10 +367,51 @@ class IkRos:
         # the arm transformer, so a joystick burst cannot block bone transforms.
         self._joystick_lock = threading.Lock()
         self._joystick_snapshot = None
+        # Dual-VR: one Quest per side. Each monitor fills only its own side and
+        # publishes a full JoySticks whose other side stays at the message
+        # default, so the two messages are merged into one complete JoySticks
+        # before the rest of the node sees it. The per-side cache is also the
+        # per-Quest joystick source Phase 8 needs (left cache = Quest-A,
+        # right cache = Quest-B). Unused in single_vr.
+        self._joystick_msg_left = None
+        self._joystick_msg_right = None
+        # Per-side freshness. A silent Quest produces no callback, so the timeout
+        # is evaluated against these stamps instead of a per-side timer.
+        self._joystick_left_last_time = None
+        self._joystick_right_last_time = None
+        self._joystick_left_timed_out = False
+        self._joystick_right_timed_out = False
+        self.dual_vr_joystick_timeout_s = max(
+            0.1, float(rospy.get_param("~dual_vr_joystick_timeout", 0.5))
+        )
+        # dual_vr only: the merged JoySticks is republished on the standard topic
+        # for the downstream consumers that never learn about the per-side
+        # topics. In single_vr the monitor already owns that topic, so this
+        # publisher stays None and single_vr keeps exactly one publisher.
+        self.merged_joystick_pub = None
+        self._merged_joystick_watch_timer = None
         # Finger work has its own latest-frame mailbox and lower-rate worker.
         self._finger_condition = threading.Condition()
         self._pending_finger_input = None
+        # Dual-VR: the second Quest's finger frames use their own mailbox so the
+        # single-VR tuple shape stays untouched.
+        self._pending_finger_input_right = None
+        # Dual-VR: newest finger result of each side. Only the owning Quest's
+        # frame refreshes its own cache; `hand_finger_data` is re-assembled from
+        # both caches and stays None until the first side produces a result, so
+        # the pre-first-frame state is identical to single_vr.
+        self._latest_left_finger_data = list(DUAL_VR_NEUTRAL_FINGER_JOINTS)
+        self._latest_right_finger_data = list(DUAL_VR_NEUTRAL_FINGER_JOINTS)
+        # Dual-VR: each Quest runs its own gesture state machine for the side it
+        # owns, so running is tracked per side and combined with OR, exactly like
+        # the Phase 6 bone merge. The finger worker stays the only writer.
+        self._vr_is_running_left = False
+        self._vr_is_running_right = False
         self._latest_processed_bone = None
+        # Dual-VR: newest partial result of each side. A frame from one Quest
+        # only ever refreshes its own side; the merged ProcessedBoneFrame that is
+        # committed to _latest_processed_bone is rebuilt from both sides.
+        self._dual_side_snapshots = {"left": None, "right": None}
         self._vr_is_running = False
         self._vr_is_hand_tracking = False
         self._vr_error = False
@@ -379,6 +475,18 @@ class IkRos:
         self.finger_processing_hz = max(
             1.0, float(rospy.get_param("~finger_processing_hz", 30.0))
         )
+        # Dual-VR: "single_vr" keeps one Quest driving both arms exactly as
+        # before. "dual_vr" feeds two bone topics into two transformer instances,
+        # each owning one side, and both merge into the original IK solver.
+        self.input_mode = str(rospy.get_param("~input_mode", "single_vr")).strip().lower()
+        if self.input_mode not in ("single_vr", "dual_vr"):
+            rospy.logwarn(
+                "[IkRos] Unknown ~input_mode '%s', falling back to single_vr",
+                self.input_mode,
+            )
+            self.input_mode = "single_vr"
+        self.dual_vr = self.input_mode == "dual_vr"
+        rospy.loginfo("[IkRos] VR input mode: %s", self.input_mode)
         self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(
             model_path,
             vis_pub=self.enable_vr_visualization,
@@ -386,7 +494,23 @@ class IkRos:
             hand_reference_mode=hand_reference_mode,
             debug_pub=self.enable_vr_transform_debug_topics,
             debug_publish_hz=self.vr_transform_debug_publish_hz,
+            arm_sides=("Left",) if self.dual_vr else None,
         )
+        # The secondary instance must not re-register the process-global ROS
+        # resources (joint_states / head_body / tf listener / debug topics); it
+        # only transforms the right side from the second Quest's own frames.
+        self.quest3_arm_info_transformer_right = None
+        if self.dual_vr:
+            self.quest3_arm_info_transformer_right = Quest3ArmInfoTransformer(
+                model_path,
+                vis_pub=False,
+                predict_gesture=predict_gesture,
+                hand_reference_mode=hand_reference_mode,
+                debug_pub=False,
+                debug_publish_hz=self.vr_transform_debug_publish_hz,
+                arm_sides=("Right",),
+                publish_globals=False,
+            )
         rospy.loginfo(
             "[IkRos] VR visualization publishers: %s",
             "enabled" if self.enable_vr_visualization else "disabled",
@@ -406,6 +530,8 @@ class IkRos:
             self.finger_processing_hz,
         )
         self.quest3_arm_info_transformer.control_torso = control_torso
+        if self.quest3_arm_info_transformer_right is not None:
+            self.quest3_arm_info_transformer_right.control_torso = control_torso
         initial_state = np.array([0, 0, 0, 0, 0, 0])  # 初始状态 [x, y, z, vx, vy, vz]
         initial_covariance = np.eye(6)  # 初始协方差矩阵
         process_noise = np.eye(6) * 0.001  # 过程噪声协方差矩阵
@@ -696,16 +822,54 @@ class IkRos:
             "/robot_arm_q_v_tau", robotArmQVVD, self.kuavo_joint_states_callback, queue_size=10
         )
         self.quest_bone_poses_sub = rospy.Subscriber(
-            "/leju_quest_bone_poses",
+            "/leju_quest_bone_poses" if not self.dual_vr else "/vr_left/leju_quest_bone_poses",
             PoseInfoList,
             self.quest_bone_poses_callback,
             queue_size=1,
             # Read a possible burst in one pass, then rospy keeps only the newest message.
             buff_size=1024 * 1024,
         )
+        # Dual-VR: the second Quest feeds its own mailbox; the single bone worker
+        # drains both, so there is still exactly one transformer writer per side.
+        self.quest_bone_poses_sub_right = None
+        if self.dual_vr:
+            self.quest_bone_poses_sub_right = rospy.Subscriber(
+                "/vr_right/leju_quest_bone_poses",
+                PoseInfoList,
+                self.quest_bone_poses_callback_right,
+                queue_size=1,
+                buff_size=1024 * 1024,
+            )
+        # Dual-VR: each Quest owns one side of the joystick. The two per-side
+        # topics are merged into one JoySticks message and that merged state is
+        # republished on the standard topic for downstream consumers. The node
+        # never subscribes to the topic it publishes here, so no self-loop.
+        self.merged_joystick_pub = None
+        if self.dual_vr:
+            self.merged_joystick_pub = rospy.Publisher(
+                "/quest_joystick_data", JoySticks, queue_size=1
+            )
         self.joySticks_sub = rospy.Subscriber(
-            "/quest_joystick_data", JoySticks, self.joySticks_data_callback, queue_size=3
+            "/quest_joystick_data" if not self.dual_vr else "/vr_left/quest_joystick_data",
+            JoySticks,
+            self.joySticks_data_callback,
+            queue_size=3,
         )
+        self.joySticks_sub_right = None
+        if self.dual_vr:
+            self.joySticks_sub_right = rospy.Subscriber(
+                "/vr_right/quest_joystick_data",
+                JoySticks,
+                self.joySticks_data_callback_right,
+                queue_size=3,
+            )
+            # A Quest that goes silent stops producing callbacks, so only a clock
+            # can notice that one side went stale. The callback covers the normal
+            # case; this low-rate edge-triggered watch covers the silent case.
+            self._merged_joystick_watch_timer = rospy.Timer(
+                rospy.Duration(1.0 / DUAL_VR_JOYSTICK_WATCH_HZ),
+                self._dual_joystick_watch_callback,
+            )
         self.ik_cmd_sub = rospy.Subscriber(
             "/ik/two_arm_hand_pose_cmd", twoArmHandPoseCmd,
             self.two_arm_hand_pose_target_callback, queue_size=10
@@ -771,6 +935,9 @@ class IkRos:
             self._finger_condition.notify_all()
         with self._ik_condition:
             self._ik_condition.notify_all()
+        # Dual-VR only; None in single_vr, so single_vr shutdown is unchanged.
+        if self._merged_joystick_watch_timer is not None:
+            self._merged_joystick_watch_timer.shutdown()
 
     def shutdown(self, signal, frame):
         rospy.loginfo("Shutting down...")
@@ -1698,13 +1865,177 @@ class IkRos:
             self._pending_bone_frame = None
             return frame
 
+    def quest_bone_poses_callback_right(self, quest_bone_poses_msg):
+        """Dual-VR only: newest frame of the right-hand Quest, same contract."""
+        recv_time = time.time()
+        recv_monotonic = time.perf_counter()
+        vr_ts_ms = int(quest_bone_poses_msg.timestamp_ms)
+
+        with self._bone_condition:
+            self._bone_input_seq_right += 1
+            frame = BoneInputFrame(
+                sequence=self._bone_input_seq_right,
+                message=quest_bone_poses_msg,
+                receive_time=recv_time,
+                receive_monotonic=recv_monotonic,
+                source_timestamp_ms=vr_ts_ms,
+            )
+            if self._pending_bone_frame_right is not None:
+                self._bone_overwrite_count_right += 1
+            self._pending_bone_frame_right = frame
+            self._bone_condition.notify()
+
+        if self.enable_vr_latency_diagnostics and vr_ts_ms > 0:
+            comm_latency_ms = (recv_time - vr_ts_ms / 1000.0) * 1000.0
+            self.comm_latency_pub.publish(Float64(comm_latency_ms))
+
+    def _take_latest_bone_frame_right(self):
+        with self._bone_condition:
+            frame = self._pending_bone_frame_right
+            self._pending_bone_frame_right = None
+            return frame
+
+    def _wait_for_any_bone_frame(self):
+        """Wait until at least one mailbox holds a frame, then drain both."""
+        with self._bone_condition:
+            self._bone_condition.wait_for(
+                lambda: (
+                    self._pending_bone_frame is not None
+                    or self._pending_bone_frame_right is not None
+                    or self.stop_event.is_set()
+                ),
+                timeout=0.1,
+            )
+            if self.stop_event.is_set():
+                return None, None
+            left_frame = self._pending_bone_frame
+            right_frame = self._pending_bone_frame_right
+            self._pending_bone_frame = None
+            self._pending_bone_frame_right = None
+            return left_frame, right_frame
+
     def _get_joystick_snapshot(self):
         with self._joystick_lock:
             return self._joystick_snapshot
 
+    def _merge_dual_joystick_locked(self, now):
+        """Build the merged JoySticks from both per-side caches.
+
+        Caller holds ``_joystick_lock``. Each side contributes only its own
+        fields, so a new message from one Quest can never reset the other side's
+        cached trigger/grip — that reset would otherwise make
+        ``joy_shot_gesture_check`` (trigger < 0.5 and grip > 0.8) fire on the
+        other hand. A side that has never been heard from, or that has been
+        silent for longer than ``~dual_vr_joystick_timeout``, contributes an
+        all-neutral side instead of a stale one.
+        """
+        merged = JoySticks()
+        for side, cached, last_time, timed_out in (
+            ("left", self._joystick_msg_left, self._joystick_left_last_time,
+             self._joystick_left_timed_out),
+            ("right", self._joystick_msg_right, self._joystick_right_last_time,
+             self._joystick_right_timed_out),
+        ):
+            if cached is None:
+                # Never heard from: JoySticks() is already all-neutral.
+                continue
+            stale = timed_out
+            if not stale and last_time is not None:
+                stale = (now - last_time) > self.dual_vr_joystick_timeout_s
+            if stale:
+                continue
+            for field in DUAL_VR_JOYSTICK_SIDE_FIELDS[side]:
+                setattr(merged, field, getattr(cached, field))
+        return merged
+
+    def _commit_dual_joystick_locked(self, merged):
+        """Publish and hand the merged joystick to the shared consumers.
+
+        Caller holds ``_joystick_lock``. The snapshot the bone/finger workers read
+        keeps the original per-side shape, so single_vr semantics are untouched.
+        """
+        self._joystick_snapshot = (
+            (float(merged.left_trigger), float(merged.left_grip)),
+            (float(merged.right_trigger), float(merged.right_grip)),
+        )
+        self.joySticks_data = merged
+        if self.merged_joystick_pub is not None:
+            self.merged_joystick_pub.publish(merged)
+
+    def _dual_joystick_side_callback(self, side, msg):
+        """Cache one Quest's own side and re-merge both sides."""
+        now = time.monotonic()
+        with self._joystick_lock:
+            if side == "left":
+                self._joystick_msg_left = msg
+                self._joystick_left_last_time = now
+                self._joystick_left_timed_out = False
+            else:
+                self._joystick_msg_right = msg
+                self._joystick_right_last_time = now
+                self._joystick_right_timed_out = False
+            merged = self._merge_dual_joystick_locked(now)
+            self._commit_dual_joystick_locked(merged)
+        self._dual_joystick_claw_fallback(merged)
+
+    def _dual_joystick_watch_callback(self, event):
+        """Neutralize only the side that actually went stale, then re-merge.
+
+        The watch is edge triggered: it does nothing while both sides are fresh
+        or already marked stale, so it stays cheap and never fights the
+        callbacks that keep refreshing a healthy side.
+        """
+        now = time.monotonic()
+        changed = False
+        with self._joystick_lock:
+            for side, last_time, timed_out in (
+                ("left", self._joystick_left_last_time, self._joystick_left_timed_out),
+                ("right", self._joystick_right_last_time, self._joystick_right_timed_out),
+            ):
+                if timed_out or last_time is None:
+                    continue
+                if (now - last_time) <= self.dual_vr_joystick_timeout_s:
+                    continue
+                if side == "left":
+                    self._joystick_left_timed_out = True
+                else:
+                    self._joystick_right_timed_out = True
+                changed = True
+                rospy.logwarn_throttle(
+                    1.0,
+                    "[IkRos] Dual-VR %s joystick timed out after %.2fs without a "
+                    "new frame; that side is neutralized while the other side "
+                    "keeps its own state.",
+                    side,
+                    self.dual_vr_joystick_timeout_s,
+                )
+            if not changed:
+                return
+            merged = self._merge_dual_joystick_locked(now)
+            self._commit_dual_joystick_locked(merged)
+        self._dual_joystick_claw_fallback(merged)
+
+    def _dual_joystick_claw_fallback(self, merged):
+        """LEJUCLAW pre-ready resend, identical to the single_vr callback path."""
+        # 准备姿态下 IK 线程可能卡在等待首帧姿态/MPC 就绪，此时由回调补发夹爪指令。
+        # 遥操主循环启动后改由 hand_finger_data_process 单路发布，避免双路重复下发。
+        # qa: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/3505
+        with self._target_lock:
+            is_hand_tracking = self._vr_is_hand_tracking
+        if (self.end_effector_type == LEJUCLAW
+                and not is_hand_tracking
+                and not self.__ik_claw_publish_active):
+            self.pub_robot_end_hand(joyStick_data=merged)
+
     def _queue_latest_finger_input(self, frame, joystick_snapshot):
         with self._finger_condition:
             self._pending_finger_input = (frame, joystick_snapshot)
+            self._finger_condition.notify()
+
+    def _queue_latest_finger_input_right(self, frame, joystick_snapshot):
+        """Dual-VR only: same mailbox contract for the right-hand Quest."""
+        with self._finger_condition:
+            self._pending_finger_input_right = (frame, joystick_snapshot)
             self._finger_condition.notify()
 
     def _take_latest_finger_input(self):
@@ -1720,8 +2051,127 @@ class IkRos:
             self._pending_finger_input = None
             return value
 
+    def _take_latest_finger_inputs(self):
+        """Dual-VR only: drain both finger mailboxes with a single wait.
+
+        Mirrors `_wait_for_any_bone_frame`: either side waking the worker is
+        enough, and whatever each side has pending at that moment is taken.
+        """
+        with self._finger_condition:
+            self._finger_condition.wait_for(
+                lambda: (
+                    self._pending_finger_input is not None
+                    or self._pending_finger_input_right is not None
+                    or self.stop_event.is_set()
+                ),
+                timeout=0.1,
+            )
+            if self.stop_event.is_set():
+                return None, None
+            left_input = self._pending_finger_input
+            right_input = self._pending_finger_input_right
+            self._pending_finger_input = None
+            self._pending_finger_input_right = None
+            return left_input, right_input
+
+    def _dual_finger_side_result(self, side, pending_input):
+        """Run one Quest's finger frame through the transformer owning ``side``.
+
+        Returns ``(finger_joints, is_running)`` of that side only, or None when
+        the frame is rejected. The joystick snapshot is the merged Phase 7
+        snapshot: its left slot is sourced from Quest-A alone and its right slot
+        from Quest-B alone, and the owning transformer only ever reads its own
+        slot, so a side is always judged against its own Quest's trigger/grip.
+        """
+        frame, joystick_snapshot = pending_input
+        if side == "left":
+            transformer = self.quest3_arm_info_transformer
+            key = "left_finger_joints"
+        else:
+            transformer = self.quest3_arm_info_transformer_right
+            key = "right_finger_joints"
+        result = transformer.process_finger_frame(frame.message, joystick_snapshot)
+        if result is None:
+            return None
+        joints = result[key]
+        if joints is None:
+            return None
+        return list(joints), result["is_running"]
+
+    def _dual_finger_processing_loop(self):
+        """Dual-VR finger worker: one mailbox per Quest, one owner per side.
+
+        A single worker drains both mailboxes, so there is still exactly one
+        writer of ``hand_finger_data`` / ``_vr_is_running`` and no per-side
+        thread is needed. Each frame is handed to its own side's transformer and
+        only ever refreshes that side's cache: a left frame cannot reset the
+        right cache and vice versa, so both sides keep their last valid finger
+        data exactly like the Phase 7 joystick merge keeps its per-side state.
+        """
+        min_period = 1.0 / self.finger_processing_hz
+        last_started = 0.0
+        while not self.stop_event.is_set() and not rospy.is_shutdown():
+            left_input, right_input = self._take_latest_finger_inputs()
+            if left_input is None and right_input is None:
+                continue
+
+            remaining = min_period - (time.monotonic() - last_started)
+            if remaining > 0.0:
+                with self._finger_condition:
+                    self._finger_condition.wait(timeout=remaining)
+                    if self.stop_event.is_set():
+                        return
+                    if self._pending_finger_input is not None:
+                        left_input = self._pending_finger_input
+                        self._pending_finger_input = None
+                    if self._pending_finger_input_right is not None:
+                        right_input = self._pending_finger_input_right
+                        self._pending_finger_input_right = None
+
+            process_start = time.perf_counter()
+            try:
+                updated = False
+                if left_input is not None:
+                    left_result = self._dual_finger_side_result("left", left_input)
+                    if left_result is not None:
+                        self._latest_left_finger_data = left_result[0]
+                        self._vr_is_running_left = left_result[1]
+                        updated = True
+                if right_input is not None:
+                    right_result = self._dual_finger_side_result("right", right_input)
+                    if right_result is not None:
+                        self._latest_right_finger_data = right_result[0]
+                        self._vr_is_running_right = right_result[1]
+                        updated = True
+                if updated:
+                    with self._target_lock:
+                        # Re-assemble the single hand command from both caches,
+                        # like the bone merge does for the arm target. Only the
+                        # side that produced a result changed; the other keeps
+                        # its own last value.
+                        self.hand_finger_data = [
+                            list(self._latest_left_finger_data),
+                            list(self._latest_right_finger_data),
+                        ]
+                        self._vr_is_running = (
+                            self._vr_is_running_left or self._vr_is_running_right
+                        )
+                if updated and self.enable_vr_latency_diagnostics:
+                    self.finger_processing_latency_pub.publish(
+                        Float64((time.perf_counter() - process_start) * 1000.0)
+                    )
+            except Exception as exc:
+                rospy.logerr_throttle(
+                    1.0, "Failed to process latest VR finger frame: %s", exc
+                )
+            finally:
+                last_started = time.monotonic()
+
     def _finger_processing_loop(self):
         """Process only the newest finger frame at a bounded lower rate."""
+        if self.dual_vr:
+            self._dual_finger_processing_loop()
+            return
         min_period = 1.0 / self.finger_processing_hz
         last_started = 0.0
         while not self.stop_event.is_set() and not rospy.is_shutdown():
@@ -1766,6 +2216,9 @@ class IkRos:
 
     def _bone_processing_loop(self):
         """Transform only the newest pending bone frame and publish an atomic snapshot."""
+        if self.dual_vr:
+            self._dual_bone_processing_loop()
+            return
         while not self.stop_event.is_set() and not rospy.is_shutdown():
             frame = self._take_latest_bone_frame()
             if frame is None:
@@ -1914,6 +2367,257 @@ class IkRos:
             except Exception as exc:
                 rospy.logerr_throttle(1.0, "Failed to process latest VR bone frame: %s", exc)
 
+    def _dual_transform_side(self, side, frame, joystick_snapshot):
+        """Transform one Quest's frame with the transformer instance owning ``side``.
+
+        Each instance only computes its own side from its own Chest frame, so the
+        returned snapshot carries exactly the data the IK thread consumes for that
+        side. Returns ``(snapshot, read_msg_timings)`` or ``(None, None)`` when the
+        frame is rejected.
+        """
+        if side == "left":
+            transformer = self.quest3_arm_info_transformer
+            side_name = "Left"
+        else:
+            transformer = self.quest3_arm_info_transformer_right
+            side_name = "Right"
+
+        read_msg_timings = transformer.read_msg(
+            frame.message,
+            collect_timing=self.transform_stage_latency_pub is not None,
+            joystick_snapshot=joystick_snapshot,
+            defer_finger_processing=True,
+        )
+        if read_msg_timings is False:
+            return None, None
+
+        pose, elbow_pos = transformer.get_hand_pose(side_name)
+        finger_state = transformer.get_finger_state()
+        shoulder_rpy = (
+            transformer.left_shoulder_rpy_in_robot
+            if side == "left"
+            else transformer.right_shoulder_rpy_in_robot
+        )
+        snapshot = SideBoneSnapshot(
+            sequence=frame.sequence,
+            receive_time=frame.receive_time,
+            source_timestamp_ms=frame.source_timestamp_ms,
+            transform_done_time=time.time(),
+            transform_done_monotonic=time.perf_counter(),
+            side=side,
+            pose=self._copy_pose(pose),
+            elbow_pos=self._copy_optional_array(elbow_pos),
+            shoulder_rpy=np.asarray(shoulder_rpy).copy(),
+            finger_joints=(
+                finger_state["left_finger_joints"]
+                if side == "left"
+                else finger_state["right_finger_joints"]
+            ),
+            is_running=bool(finger_state["is_running"]),
+            is_hand_tracking=bool(transformer.is_hand_tracking),
+            vr_error=bool(transformer.check_if_vr_error()),
+        )
+        return snapshot, read_msg_timings
+
+    def _build_merged_bone_snapshot(self, triggered_frame):
+        """Assemble the newest partial result of both sides into one IK target.
+
+        The 4-element target the solver consumes is
+        ``[LeftHand(A), LeftElbow(A), RightHand(B), RightElbow(B)]``: every field
+        of the merged frame comes from the transformer that owns that side. A side
+        that has not produced a result yet stays ``None`` and simply keeps the IK
+        loop from solving, exactly as an absent VR frame does in single_vr.
+        """
+        left = self._dual_side_snapshots["left"]
+        right = self._dual_side_snapshots["right"]
+        return ProcessedBoneFrame(
+            sequence=triggered_frame.sequence,
+            receive_time=triggered_frame.receive_time,
+            source_timestamp_ms=triggered_frame.source_timestamp_ms,
+            transform_done_time=time.time(),
+            transform_done_monotonic=time.perf_counter(),
+            left_pose=(None, None) if left is None else left.pose,
+            right_pose=(None, None) if right is None else right.pose,
+            left_elbow_pos=None if left is None else left.elbow_pos,
+            right_elbow_pos=None if right is None else right.elbow_pos,
+            left_finger_joints=None if left is None else left.finger_joints,
+            right_finger_joints=None if right is None else right.finger_joints,
+            left_shoulder_rpy=(
+                np.zeros(3) if left is None else left.shoulder_rpy
+            ),
+            right_shoulder_rpy=(
+                np.zeros(3) if right is None else right.shoulder_rpy
+            ),
+            # Each Quest runs its own gesture state machine for the side it owns,
+            # so a single connected Quest can still start teleoperation.
+            is_running=bool(
+                (left is not None and left.is_running)
+                or (right is not None and right.is_running)
+            ),
+            is_hand_tracking=bool(
+                (left is not None and left.is_hand_tracking)
+                or (right is not None and right.is_hand_tracking)
+            ),
+            vr_error=bool(
+                (left is not None and left.vr_error)
+                or (right is not None and right.vr_error)
+            ),
+        )
+
+    def _dual_bone_processing_loop(self):
+        """Dual-VR bone worker: merge two independent Quest frames into one target.
+
+        The two Quests arrive on separate topics at independent times, so instead
+        of one frame producing both sides, the newest partial result of each side
+        is kept and re-assembled into a single ProcessedBoneFrame before it is
+        committed. Downstream (IK solve, wheel target, diagnostics) still sees one
+        atomic target, so there is exactly one IK writer and one /kuavo_arm_traj
+        publisher.
+        """
+        while not self.stop_event.is_set() and not rospy.is_shutdown():
+            left_frame, right_frame = self._wait_for_any_bone_frame()
+            if left_frame is None and right_frame is None:
+                continue
+            worker_start = time.perf_counter()
+
+            with self._bone_condition:
+                combined_overwrite = (
+                    self._bone_overwrite_count + self._bone_overwrite_count_right
+                )
+            if (self.enable_vr_latency_diagnostics
+                    and combined_overwrite
+                    != self._last_reported_bone_overwrite_count):
+                self._last_reported_bone_overwrite_count = combined_overwrite
+                self.bone_overwrite_count_pub.publish(UInt64(combined_overwrite))
+
+            triggered_frame = left_frame if left_frame is not None else right_frame
+            joystick_snapshot = self._get_joystick_snapshot()
+            processing_start = time.perf_counter()
+            try:
+                # side -> (snapshot, read_msg_timings, transform_start, transform_done)
+                side_results = {}
+                for side, frame in (("left", left_frame), ("right", right_frame)):
+                    if frame is None:
+                        continue
+                    transform_start = time.perf_counter()
+                    snapshot, read_msg_timings = self._dual_transform_side(
+                        side, frame, joystick_snapshot
+                    )
+                    transform_done = time.perf_counter()
+                    if snapshot is None:
+                        continue
+                    self._dual_side_snapshots[side] = snapshot
+                    side_results[side] = (
+                        snapshot, read_msg_timings, transform_start, transform_done
+                    )
+
+                if not side_results:
+                    continue
+
+                merged = self._build_merged_bone_snapshot(triggered_frame)
+                # Each transformer owns one side, so a frame is only ever handed
+                # to the finger worker of its own side.
+                if left_frame is not None:
+                    self._queue_latest_finger_input(left_frame, joystick_snapshot)
+                if right_frame is not None:
+                    self._queue_latest_finger_input_right(
+                        right_frame, joystick_snapshot
+                    )
+
+                target_lock_request = time.perf_counter()
+                with self._ik_condition:
+                    target_lock_acquired = time.perf_counter()
+                    self._latest_processed_bone = merged
+                    self.__target_pose = merged.left_pose
+                    self.__target_pose_right = merged.right_pose
+                    self.__left_elbow_pos = merged.left_elbow_pos
+                    self.__right_elbow_pos = merged.right_elbow_pos
+                    # Finger data and gesture state have a single writer: the
+                    # asynchronous finger worker. Do not overwrite a newer
+                    # result with the snapshot observed by this arm frame.
+                    self._vr_is_hand_tracking = merged.is_hand_tracking
+                    self._vr_error = merged.vr_error
+                    # Each side arrives on its own; a fresh valid side is enough
+                    # to unblock the IK thread.
+                    if ((merged.left_pose[0] is not None
+                         and self._dual_side_snapshots["left"] is not None)
+                            or (merged.right_pose[0] is not None
+                                and self._dual_side_snapshots["right"] is not None)):
+                        self.__recieved_new_target_pose = True
+                    target_ready_time = time.time()
+                    target_ready_monotonic = time.perf_counter()
+                    self._ik_target_generation += 1
+                    self._ik_target_ready_time = target_ready_time
+                    self._ik_target_ready_monotonic = target_ready_monotonic
+                    self._ik_condition.notify()
+                target_update_done = time.perf_counter()
+
+                if self.enable_vr_latency_diagnostics:
+                    processing_ms = (
+                        target_update_done - processing_start
+                    ) * 1000.0
+                    pipeline_ms = (
+                        merged.transform_done_time - triggered_frame.receive_time
+                    ) * 1000.0
+                    self.transform_processing_latency_pub.publish(
+                        Float64(processing_ms)
+                    )
+                    self.transform_pipeline_latency_pub.publish(
+                        Float64(pipeline_ms)
+                    )
+                    self.ik_target_commit_latency_pub.publish(
+                        Float64(
+                            max(
+                                0.0,
+                                (target_ready_monotonic
+                                 - merged.transform_done_monotonic) * 1000.0,
+                            )
+                        )
+                    )
+                self._publish_wheel_target_from_snapshot(merged)
+
+                if self.transform_stage_latency_pub is not None:
+                    # One sample per worker iteration, describing the frame that
+                    # triggered it; the other side is reported on its own turn.
+                    triggered_side = "left" if left_frame is not None else "right"
+                    result = side_results.get(triggered_side)
+                    if result is not None:
+                        snapshot, read_msg_timings, transform_start, transform_done = result
+                        stage_timings = {
+                            "callback_to_worker_ms": (
+                                worker_start - triggered_frame.receive_monotonic
+                            ) * 1000.0,
+                            "worker_housekeeping_ms": (
+                                transform_start - worker_start
+                            ) * 1000.0,
+                            # No transformer lock is taken on this path.
+                            "transformer_lock_wait_ms": 0.0,
+                            "snapshot_build_ms": (
+                                transform_done - transform_start
+                            ) * 1000.0,
+                            "target_lock_wait_ms": (
+                                target_lock_acquired - target_lock_request
+                            ) * 1000.0,
+                            "target_update_ms": (
+                                target_update_done - target_lock_acquired
+                            ) * 1000.0,
+                            "worker_total_ms": (
+                                target_update_done - worker_start
+                            ) * 1000.0,
+                            "callback_to_transform_done_ms": (
+                                snapshot.transform_done_monotonic
+                                - triggered_frame.receive_monotonic
+                            ) * 1000.0,
+                        }
+                        stage_timings.update(read_msg_timings or {})
+                        self._publish_transform_stage_diagnostics(
+                            triggered_frame, stage_timings
+                        )
+            except Exception as exc:
+                rospy.logerr_throttle(
+                    1.0, "Failed to process latest dual VR bone frame: %s", exc
+                )
+
     def _publish_wheel_target_from_snapshot(self, snapshot):
         # 轮臂需 mpc_observation.time > 阈值，避免 #3009。
         if (self.robot_type == 1 and snapshot.is_running
@@ -1970,6 +2674,13 @@ class IkRos:
             self._ik_condition.notify()
 
     def joySticks_data_callback(self, msg):
+        # Dual-VR: this subscriber is bound to the left Quest's topic, so only
+        # the left fields of the message are trustworthy. The full joystick
+        # state is rebuilt from both per-side caches instead. single_vr keeps
+        # the original path below byte-for-byte unchanged.
+        if self.dual_vr:
+            self._dual_joystick_side_callback("left", msg)
+            return
         joystick_snapshot = (
             (float(msg.left_trigger), float(msg.left_grip)),
             (float(msg.right_trigger), float(msg.right_grip)),
@@ -1986,6 +2697,12 @@ class IkRos:
                 and not is_hand_tracking
                 and not self.__ik_claw_publish_active):
             self.pub_robot_end_hand(joyStick_data=msg)
+
+    def joySticks_data_callback_right(self, msg):
+        # Dual-VR: this subscriber is bound to the right Quest's topic, so only
+        # the right fields are trustworthy; the left fields are the message
+        # default and must never overwrite the left cache.
+        self._dual_joystick_side_callback("right", msg)
 
     @staticmethod
     def vector3_to_milliseconds(x, y, z):
