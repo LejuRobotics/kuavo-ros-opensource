@@ -152,6 +152,8 @@ class Config:
 
     SCALE_RIGHT_STICK_Z = 0.2  # 右摇杆上下（上站下蹲）缩放比例
     SCALE_LEFT_STICK_Y = 1.0  # 左摇杆左右（左右平移）缩放比例
+
+    G11_MOVE_DEAD_ZONE = 0.05  # 与 C++ JoyControl 的 DEAD_ZONE 一致
     
     @staticmethod
     def get_default_channels() -> List[int]:
@@ -763,6 +765,8 @@ class H12PROControllerNode:
         self._g11_claw_last_aux = None         # (left_pct, right_pct)
         self._g11_ee_type = None               # /end_effector_type 缓存
         self._g11_ee_checked_at = 0.0
+        self._g11_linker_move_requested = False
+        self._g11_linker_was_moving = False
         # 默认 AUX 值越大开度越大; 实机旋钮方向相反时置 True (~claw_aux_reverse)
         self._claw_aux_reverse = rospy.get_param("~claw_aux_reverse", False)
         # ================================================================
@@ -987,6 +991,7 @@ class H12PROControllerNode:
         Args:
             msg: Channel message containing control data.
         """
+        self._g11_linker_move_requested = False
         if msg.sbus_state == 0:
             rospy.logwarn_throttle(5.0, "No receive h12pro channel message. Please check device `/dev/usb_remote` exist or not and re-plug the h12pro signal receiver.")
             # 断连保护: 驱动在 ≥100ms 无新帧时会把通道复位为默认值并置 sbus_state=0
@@ -1271,6 +1276,7 @@ class H12PROControllerNode:
             return
 
         if not enable:
+            self._g11_linker_was_moving = False
             if self._g11_claw_was_enabled:
                 self._g11_claw_was_enabled = False
                 self._g11_claw_last_aux = None
@@ -1305,11 +1311,27 @@ class H12PROControllerNode:
             right = self._aux_raw_to_pct(right_raw)
             if left is None or right is None:
                 return
-            # 任何开度变化立即发; 仅左右都完全未变化时跳过
-            now = time.time()
+            if ee == "linker_hand" and not self.h12_to_joy_node.is_wheel:
+                moving = self._g11_linker_move_requested
+                if moving and not self._g11_linker_was_moving and self._g11_claw_last_aux is not None:
+                    try:
+                        cmd = _G11DexhandCmdMsg()
+                        cmd.control_mode = 0
+                        cmd.data = [100, 0, 0, 0, 0, 0] * 2
+                        self.g11_dexhand_pub.publish(cmd)
+                    except Exception as e:
+                        rospy.logerr_throttle(5.0, f"[G11Claw] reset publish failed: {e}")
+                        return  # 不消费起步沿，下一帧重试
+                    # 保留当前旋钮基准：不动旋钮就不重发旧目标。
+                    self._g11_claw_last_aux = (left, right)
+                    self._g11_linker_was_moving = moving
+                    return
+                self._g11_linker_was_moving = moving
             if self._g11_claw_last_aux is not None:
-                if (left == self._g11_claw_last_aux[0]
-                        and right == self._g11_claw_last_aux[1]):
+                # 灵心巧手过滤 ±1% 抖动，避免旧目标因噪声覆盖复位。
+                threshold = 2 if ee == "linker_hand" and not self.h12_to_joy_node.is_wheel else 1
+                if (abs(left - self._g11_claw_last_aux[0]) < threshold
+                        and abs(right - self._g11_claw_last_aux[1]) < threshold):
                     return
             self._g11_claw_last_aux = (left, right)
             try:
@@ -1901,6 +1923,15 @@ class H12PROControllerNode:
                 stick_msg.channels = tuple(stick_channels)
                 self.h12_to_joy_node.update_channels_msg(msg=stick_msg)
             self.h12_to_joy_node.process_channels()
+            if (_controller_type == "g11" and not self.h12_to_joy_node.is_wheel
+                    and self.robot_state_machine.state in ("stance", "walk", "trot")
+                    and len(msg.channels) >= 4
+                    and all(Config.H12_AXIS_RANGE_MIN <= value <= Config.H12_AXIS_RANGE_MAX
+                            for value in msg.channels[:4])):
+                axes = self.h12_to_joy_node.joy_msg.axes
+                self._g11_linker_move_requested = any(
+                    abs(axes[Config.AXIS_MAPPING[key]]) > Config.G11_MOVE_DEAD_ZONE
+                    for key in ('LEFT_STICK_X', 'LEFT_STICK_Y', 'RIGHT_STICK_YAW'))
 #zsh
     def _handle_button(self, key: str, channel: int) -> Optional[str]:
         """Handle button press logic."""
