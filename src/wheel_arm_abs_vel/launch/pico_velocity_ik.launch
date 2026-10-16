@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='utf-8'?>
+<launch>
+  <arg name="reference_transport" default="shm" />
+  <arg name="reference_shm_key" default="344421" />
+  <arg name="owner_shm_key" default="344422" />
+  <!-- Source/devel workspace shortcut to the package-local velocity IK input. -->
+  <arg name="ip_address" default="192.168.5.240" />
+  <arg name="robot_ip" default="192.168.5.242" />
+  <arg name="broadcast_ip" default="192.168.5.255" />
+  <include file="$(find wheel_arm_abs_vel)/launch/quest_velocity_ik.launch">
+    <arg name="input_source" value="pico" />
+    <arg name="hand_position_cutoff_hz" value="10.0" />
+    <arg name="hand_orientation_cutoff_hz" value="8.0" />
+    <arg name="enable_head_control" value="false" />
+    <arg name="pico_peer_ip" value="$(arg ip_address)" />
+    <arg name="pico_advertise_ip" value="$(arg robot_ip)" />
+    <arg name="pico_broadcast_ip" value="$(arg broadcast_ip)" />
+    <arg name="reference_transport" value="$(arg reference_transport)" />
+    <arg name="reference_shm_key" value="$(arg reference_shm_key)" />
+    <arg name="owner_shm_key" value="$(arg owner_shm_key)" />
+  </include>
+</launch>

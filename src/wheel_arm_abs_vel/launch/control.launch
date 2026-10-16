@@ -1,0 +1,42 @@
+<?xml version='1.0' encoding='utf-8'?>
+<launch>
+  <arg name="reference_transport" default="shm" />
+  <arg name="reference_shm_key" default="344421" />
+  <arg name="owner_shm_key" default="344422" />
+  <arg name="controller_type" default="legacy" />
+  <arg name="real" default="true" />
+  <arg name="robot_version" default="$(eval optenv('ROBOT_VERSION', '62' if arg('controller_type') == 'wheel_arm_abs_vel' else '40'))" />
+  <arg name="dynamics_backend" default="$(eval 'rnea' if arg('real') else 'wbc')" />
+  <group if="$(eval arg('controller_type') == 'wheel_arm_abs_vel')">
+    <group if="$(arg real)">
+      <include file="$(find wheel_arm_abs_vel)/launch/load_kuavo_real_velocity_ik.launch">
+        <arg name="robot_version" value="$(arg robot_version)" />
+        <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
+        <arg name="reference_transport" value="$(arg reference_transport)" />
+        <arg name="reference_shm_key" value="$(arg reference_shm_key)" />
+        <arg name="owner_shm_key" value="$(arg owner_shm_key)" />
+      </include>
+    </group>
+    <group unless="$(arg real)">
+      <include file="$(find wheel_arm_abs_vel)/launch/load_kuavo_mujoco_velocity_ik.launch">
+        <arg name="robot_version" value="$(arg robot_version)" />
+        <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
+        <arg name="reference_transport" value="$(arg reference_transport)" />
+        <arg name="reference_shm_key" value="$(arg reference_shm_key)" />
+        <arg name="owner_shm_key" value="$(arg owner_shm_key)" />
+      </include>
+    </group>
+  </group>
+  <group unless="$(eval arg('controller_type') == 'wheel_arm_abs_vel')">
+    <group if="$(arg real)">
+      <include file="$(find humanoid_controllers)/launch/load_kuavo_real_wheel.launch">
+        <arg name="robot_version" value="$(arg robot_version)" />
+      </include>
+    </group>
+    <group unless="$(arg real)">
+      <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim_wheel.launch">
+        <arg name="robot_version" value="$(arg robot_version)" />
+      </include>
+    </group>
+  </group>
+</launch>

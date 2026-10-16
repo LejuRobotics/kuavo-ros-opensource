@@ -1,0 +1,107 @@
+# Shared by manual Quest and real-packet MuJoCo replay. Simulation validation
+# only; this profile is NOT approval to use the controller on hardware.
+enable_base_motion: false
+enable_root_translation_intent: false
+enable_root_yaw_intent: false
+enable_continuous_recruitment: false
+enable_natural_hang_bootstrap: false
+enable_body_mirroring: true
+body_tracking_frame: quest_tracking_robot_axes
+
+# Legacy publishers retain differentiated FF. Estimated Quest packets use
+# causal skeleton filtering plus consistent continuous task references.
+continuous_reference_enabled: true
+# Fixed -3dB hand cutoffs; innovation/direct_task remain explicit rollback modes.
+orientation_reference_mode: fixed_bandwidth
+hand_position_cutoff_hz: 10.0
+hand_orientation_cutoff_hz: 8.0
+hand_reference_frequency: 12.0
+torso_reference_frequency: 2.5
+# Rotation only; position and elbow retain hand_reference_frequency.
+hand_orientation_reference_frequency: 6.0
+# New continuous reference: fast motion plus bounded observation correction.
+# Set enabled:false to recover the previous (46373205) reference generator.
+innovation_reference:
+  enabled: true
+  position_frequency: 12.0
+  position_damping: 1.0
+  position_speed: 3.0
+  position_acceleration: 36.0
+  position_jerk: 3600.0
+  orientation_frequency: 3.0 # independent correction ceiling; not a speed cap
+  orientation_damping: 1.0
+  orientation_speed: 9.0
+  orientation_acceleration: 108.0
+  orientation_jerk: 10800.0
+# Latency alignment and time WITHOUT a new valid observation are separate.
+reference_prediction:
+  min_hold: 0.040
+  max_hold: 0.060
+  decay: 0.030
+  max_alignment_age: 0.060
+# Task-space bandwidth scheduling, not a deadband or joint speed limit.
+# Position/elbow scales: m, m/s; orientation scales: rad, rad/s.
+adaptive_reference:
+  enabled: true
+  min_frequency: 1.0
+  speed_time_constant: 0.020
+  attack_time_constant: 0.010
+  release_time_constant: 0.200
+  bumpless_enabled: true
+  # Only acceleration changes induced by frequency/guide modulation;
+  # not global Cartesian jerk limits or joint speed limits.
+  position_parameter_jerk: 300.0
+  orientation_parameter_jerk: 300.0
+  active_parameter_jerk_multiplier: 8.0
+  position_error_start: 0.004
+  position_error_full: 0.012
+  position_speed_start: 0.030
+  position_speed_full: 0.120
+  orientation_error_start: 0.00872664625997165
+  orientation_error_full: 0.026179938779915
+  orientation_speed_start: 0.05235987755983
+  orientation_speed_full: 0.261799387799149
+hand_position_gain: 12.0
+hand_orientation_gain: 8.0
+feedforward_filter_time_constant: 0.010
+hand_position_weight: 12.0
+hand_orientation_weight: 6.0
+elbow_position_weight: 0.15
+primary_regularization_weight: 0.0001
+primary_regularization_max_weight: 0.002
+torso_height_gain: 0.50
+torso_pitch_gain: 1.0
+torso_yaw_gain: 0.7
+torso_height_tracking_gain: 4.0
+torso_pitch_tracking_gain: 5.0
+torso_yaw_tracking_gain: 8.0
+torso_intent_weight: 5.0
+
+# Separate operating ability, fixed drive cost and explicit low ready pose.
+# A constrained human target remains visible as a residual, never redefined.
+# Waist order: knee, leg, waist_pitch, waist_yaw.
+lower_joint_effort_multiplier: [6.0, 3.0, 2.0, 1.0]
+lower_joint_cost_velocity_scale: [1.0, 1.0, 1.0, 1.0]
+lower_joint_velocity_cap: [0.30, 0.45, 0.80, 2.00]
+lower_joint_acceleration_cap: [1.00, 1.50, 3.00, 8.00]
+preparation_lower_position: [0.0, 0.0, 0.0, 0.0]
+preparation_lower_position_tolerance: 0.008
+preparation_lower_measured_position_tolerance: 0.015
+preparation_velocity_tolerance: 0.030
+preparation_settle_cycles: 50
+# First acquisition only: independent of PREPARE completion and fault recovery.
+startup_readiness:
+  window: 0.080
+  median_window: 0.010
+  arm_position: 0.002
+  lower_position: 0.001
+  arm_speed: 0.050
+  lower_speed: 0.030
+  arm_raw_speed: 0.150
+  lower_raw_speed: 0.100
+  raw_dwell: 0.010
+  extreme_speed: 0.300
+# [x,z,pitch,yaw] offsets from FK of low ready q; m,m,rad,rad.
+# Bending may lower Chest below ready height. Not a certified hardware envelope.
+torso_workspace_lower_offset: [-0.18, -0.22, -0.5235987755982988, -1.5707963267948966]
+torso_workspace_upper_offset: [0.40, 0.34, 0.8726646259971648, 1.5707963267948966]

@@ -1,0 +1,17 @@
+<launch>
+  <arg name="left_port" default="/dev/lefthand" />
+  <arg name="right_port" default="/dev/righthand" />
+  <arg name="baudrate" default="1000000" />
+  <arg name="start_driver" default="true" />
+  <!-- quest_velocity_ik starts the adapter when ee_type:=heiman. -->
+  <arg name="start_mapper_bridge" default="false" />
+  <group if="$(arg start_driver)">
+    <!-- Unmodified launch from official dev; its driver/main are also reused. -->
+    <include file="$(find motion_capture_ik)/launch/sg100_hand_control.launch">
+      <arg name="sg100_left_port" value="$(arg left_port)" />
+      <arg name="sg100_right_port" value="$(arg right_port)" />
+      <arg name="sg100_baudrate" value="$(arg baudrate)" />
+    </include>
+  </group>
+  <node pkg="wheel_arm_abs_vel" type="sg100_mapper_bridge" name="sg100_mapper_bridge" if="$(arg start_mapper_bridge)" output="screen" required="true" />
+</launch>

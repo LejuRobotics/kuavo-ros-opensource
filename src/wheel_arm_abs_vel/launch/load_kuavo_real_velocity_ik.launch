@@ -1,0 +1,243 @@
+<?xml version='1.0' encoding='utf-8'?>
+<launch>
+  <param name="/controller_type" value="wheel_arm_abs_vel" />
+  <param name="/cmd_truncation_enable" value="true" />
+  <arg name="j3_overshoot_profile" default="true" />
+  <arg name="j3_kd" default="18.0" />
+  <arg name="communication_full_rate_audit" default="false" />
+  <arg name="communication_second_round_enabled" default="true" />
+  <!-- Transport only; shared memory is the default. -->
+  <arg name="reference_transport" default="shm" />
+  <arg name="reference_shm_key" default="344421" />
+  <arg name="owner_shm_key" default="344422" />
+  <param name="/whole_body_velocity_ik/reference/transport" value="$(arg reference_transport)" />
+  <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
+  <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
+  <!-- Final wheel command lock, startup-only and independent of WBC/RNEA. -->
+  <arg name="base_locked" default="true" />
+  <arg name="arm_inertia_feedforward_scale" default="1.0" />
+  <param name="/vr_ik/arm_inertia_feedforward_scale" value="$(arg arm_inertia_feedforward_scale)" type="double" />
+  <param name="/base_locked" value="$(arg base_locked)" type="bool" />
+  <arg name="dynamics_backend" default="rnea" />
+  <arg name="rnea_mode" default="full" />
+  <arg name="rnea_shadow" default="false" />
+  <include file="$(find wheel_arm_abs_vel)/launch/dynamics_backend.launch">
+    <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
+    <arg name="rnea_mode" value="$(arg rnea_mode)" />
+    <arg name="rnea_shadow" value="$(arg rnea_shadow)" />
+  </include>
+  <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}" />
+  <arg name="real" default="true" />
+  <arg name="cali" default="false" />
+  <arg name="cali_arm" default="false" />
+  <arg name="cali_leg" default="false" />
+  <arg name="output_system_info" default="true" />
+  <arg name="vr_remote_control" default="true" />
+  <arg name="robot_type" default="1" />
+  <arg name="nodelet_robot_type" default="1" />
+  <arg name="wheel_control_type" default="1" />
+  <arg name="use_sqp" default="true" doc="Compatibility argument; this fixed IK entry starts no MPC optimizer" />
+  <arg name="rviz" default="false" />
+  <arg name="multiplot" default="false" />
+  <arg name="robot_version" default="62" />
+  <arg name="use_vr_control" default="true" />
+  <param name="use_vr_control" value="$(arg use_vr_control)" />
+  <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
+    <arg name="robot_version" value="$(arg robot_version)" />
+    <arg name="rviz" value="$(arg rviz)" />
+  </include>
+  <arg name="urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <arg name="taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
+  <arg name="libFolder" value="/var/ocs2/kuavo_s$(arg robot_version)" />
+  <arg name="rvizconfig" default="$(find humanoid_wheel_interface_ros)/rviz/mobile_manipulator.rviz" />
+  <arg name="use_external_mpc" default="false" />
+  <arg name="wbc_frequency" default="500" />
+  <arg name="sensor_frequency" default="500" />
+  <arg name="use_joystick" default="false" />
+  <arg name="with_estimation" default="true" />
+  <arg name="use_joint_filter" default="false" />
+  <arg name="estimator_type" default="1" />
+  <arg name="wbc_only" default="false" />
+  <arg name="play_back" default="false" />
+  <arg name="joystick_type" default="bt2" />
+  <arg name="sim_input_mode" default="keyboard" />
+  <arg name="arm_move_spd" default="1.2" />
+  <arg name="start_way" default="manual" />
+  <arg name="use_estimator_contact" default="false" />
+  <arg name="visualize_humanoid" default="true" />
+  <arg name="ruiwo_cxx_sdk" default="true" />
+  <arg name="only_half_up_body" default="false" if="$(eval arg('robot_type') == 1)" />
+  <arg name="only_half_up_body" default="false" unless="$(eval arg('robot_type') == 1)" />
+  <arg name="coredump" default="false" />
+  <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)" />
+  <arg name="with_coredump" value="" unless="$(arg coredump)" />
+  <arg name="with_ik" default="true" />
+  <arg name="with_mm_ik" default="false" />
+  <arg name="with_led" default="true" />
+  <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）" />
+  <arg name="use_external_odom_tf" default="$(arg real)" />
+  <arg name="enable_base_emergency_stop" default="true" />
+  <arg name="with_modbus_io_bridge" default="true" />
+  <arg name="relay_port" default="/dev/kuavo_relay" />
+  <arg name="pressure_port" default="/dev/kuavo_pressure" />
+  <arg name="pressure_publish_rate" default="1.0" />
+  <arg name="teach_pendant" default="0" />
+  <arg name="lejuclaw_high_freq_switch" default="false" doc="Use high-frequency continuous claw control by default; a live /quest_joystick_data stream also enables it." />
+  <arg name="lejuclaw_vr_stream_timeout_ms" default="1000" doc="Timeout in ms before the Quest joystick stream is considered inactive." />
+  <arg name="use_wheel_bridge" default="true" if="$(eval arg('robot_version') == 60)" />
+  <arg name="use_wheel_bridge" default="false" unless="$(eval arg('robot_version') == 60)" />
+  <group if="$(arg multiplot)">
+    <include file="$(find humanoid_interface_ros)/launch/multiplot.launch" />
+  </group>
+  <param name="real" type="bool" value="$(arg real)" />
+  <param name="cali" type="bool" value="$(arg cali)" />
+  <param name="cali_arm" type="bool" value="$(arg cali_arm)" />
+  <param name="cali_leg" type="bool" value="$(arg cali_leg)" />
+  <param name="multiplot" value="$(arg multiplot)" />
+  <param name="wbc_only" value="$(arg wbc_only)" />
+  <param name="use_external_mpc" value="$(arg use_external_mpc)" />
+  <param name="wbc_frequency" value="$(arg wbc_frequency)" />
+  <param name="sensor_frequency" value="$(arg sensor_frequency)" />
+  <param name="with_estimation" value="$(arg with_estimation)" />
+  <param name="use_joint_filter" value="$(arg use_joint_filter)" />
+  <param name="estimator_type" value="$(arg estimator_type)" />
+  <param name="play_back" value="$(arg play_back)" />
+  <param name="joystick_type" value="$(arg joystick_type)" />
+  <param name="arm_move_spd" value="$(arg arm_move_spd)" />
+  <param name="start_way" value="$(arg start_way)" />
+  <param name="use_estimator_contact" value="$(arg use_estimator_contact)" />
+  <param name="only_half_up_body" value="$(arg only_half_up_body)" />
+  <param name="build_cppad_state" value="0" />
+  <param name="visualize_humanoid" value="$(arg visualize_humanoid)" />
+  <rosparam param="isolated_cpus">[2, 3]</rosparam>
+  <param name="enable_pull_up_protect" value="true" />
+  <param name="pull_up_force_threshold" value="0.70" />
+  <param name="enable_base_emergency_stop" value="$(arg enable_base_emergency_stop)" />
+  <param name="robot_type" value="$(arg robot_type)" />
+  <param name="nodelet_robot_type" value="$(arg nodelet_robot_type)" />
+  <param name="wheel_control_type" value="$(arg wheel_control_type)" />
+  <param name="ruiwo_cxx_sdk" value="$(arg ruiwo_cxx_sdk)" />
+  <param name="taskFile" value="$(arg taskFile)" />
+  <param name="urdfFile" value="$(arg urdfFile)" />
+  <param name="use_external_odom_tf" value="$(arg use_external_odom_tf)" />
+  <param name="libFolder" value="$(arg libFolder)" />
+  <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info" />
+  <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" />
+  <param name="robot_description" textfile="$(arg urdfFile)" />
+  <param name="teach_pendant" value="$(arg teach_pendant)" />
+  <param name="/mpc/schedule/enable" value="false" />
+  <param name="/mpc/schedule/start_time" value="-1.0" />
+  <param name="/timeout_warning_ms" value="20" />
+  <param name="/nodelet_manager/max_log_size_gb" value="34.0" />
+  <param name="/nodelet_manager/log_delete_limit_gb" value="34.0" />
+  <!-- The fixed velocity-IK controller does not consume MPC policies.
+         Keep the original mode services and interactive target, without an optimizer. -->
+  <node pkg="wheel_arm_abs_vel" type="fixed_ik_reference_services_node" name="fixed_ik_reference_services" output="screen" required="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh reference_services" />
+  <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background" />
+  <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" output="screen" required="true" clear_params="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh controller $(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+    <param name="num_worker_threads" type="int" value="10" />
+  </node>
+  <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load WheelAbsoluteControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background">
+      </node>
+  <param name="hardware/is_ready" value="0" />
+  <param name="hardware/ready_to_start" value="0" />
+  <!-- Shared dev HardwareNodelet owns hardware initialization and protection. -->
+  <param name="lejuclaw_high_freq_switch" value="$(arg lejuclaw_high_freq_switch)" />
+  <param name="lejuclaw_vr_stream_timeout_ms" value="$(arg lejuclaw_vr_stream_timeout_ms)" type="int" />
+  <group if="$(arg ruiwo_cxx_sdk)">
+    <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background" />
+  </group>
+  <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch" />
+  <group if="$(arg use_joystick)">
+    <group if="$(eval arg('joystick_type') == 'h12')">
+      <param name="joystick_type" value="h12" />
+      <param name="start_way" value="auto" />
+      <include file="$(find humanoid_controllers)/launch/joy/joy_control_h12.launch">
+        <arg name="start_way" value="auto" />
+      </include>
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background $(find humanoid_controllers)/scripts/start_node.sh" />
+    </group>
+    <group if="$(eval arg('joystick_type') == 'sim')">
+      <include file="$(find humanoid_controllers)/launch/joy/joy_control_sim_lb.launch">
+        <arg name="joystick_type" value="$(arg joystick_type)" />
+        <arg name="sim_input_mode" value="$(arg sim_input_mode)" />
+      </include>
+    </group>
+    <group if="$(eval arg('joystick_type') == 'bt2' or arg('joystick_type') == 'bt2pro')">
+      <include file="$(find humanoid_controllers)/launch/joy/joy_control_bt.launch">
+        <arg name="joystick_type" value="$(arg joystick_type)" />
+        <arg name="real" value="$(arg real)" />
+      </include>
+      <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_joy_command_node" name="mobile_manipulator_joy_command_node" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background $(find humanoid_controllers)/scripts/start_node.sh" />
+    </group>
+  </group>
+  <group if="$(arg output_system_info)">
+    <node pkg="humanoid_controllers" type="system_info_publisher.py" name="system_info_publisher" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background" />
+  </group>
+  <group if="$(arg with_modbus_io_bridge)">
+    <node pkg="humanoid_controllers" type="start_modbus_io_bridge.sh" args="$(arg pressure_port)" name="modbus_io_bridge_node" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background">
+      <param name="relay_port" value="$(arg relay_port)" />
+      <param name="pressure_port" value="$(arg pressure_port)" />
+      <param name="pressure_publish_rate" value="$(arg pressure_publish_rate)" />
+    </node>
+  </group>
+  <node pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background $(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)" />
+  <arg name="music" default="enable" />
+  <group unless="$(eval arg('music') == 'disable')">
+    <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string" />
+    <include file="$(find kuavo_audio_player)/launch/play_music.launch" />
+  </group>
+  <group if="$(arg use_wheel_bridge)">
+    <node pkg="humanoid_controllers" type="auto_wheel_bridge.py" name="auto_wheel_bridge_node" output="screen" required="false" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background" />
+  </group>
+  <group if="$(arg with_led)">
+    <include file="$(find kuavo_led_controller)/launch/set_led_mode.launch">
+      <arg name="LED" value="enable" />
+      <arg name="led_for_state" value="$(arg led_for_state)" />
+    </include>
+  </group>
+  <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62)">
+    <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service" output="screen" required="false" />
+  </group>
+  <param name="/vr_ik/use_velocity_ik_reference" value="true" type="bool" />
+  <param name="/vr_ik/velocity_ik_reference_topic" value="/whole_body_velocity_ik/reference" type="string" />
+  <param name="/vr_ik/velocity_ik_reference_timeout_sec" value="0.05" type="double" />
+  <param name="/vr_ik/wbc_arm_ddq_feedforward_gain" value="0.25" type="double" />
+  <param name="/pinocchio_deployment/BASE_CONTROL" value="$(eval 'LOCKED' if arg('base_locked') else 'UPSTREAM_COMMANDS_ALLOWED')" type="str" />
+  <param name="/pinocchio_deployment/LEGACY_NORMAL_QUICK_SWITCH" value="DISABLED" type="str" />
+  <param name="/pinocchio_deployment/IK_PIPELINE" value="PINOCCHIO_VELOCITY" type="str" />
+  <arg name="sg100_cmd_filter_alpha" default="0.2" />
+  <arg name="use_custom_arm_prepare" default="false" />
+  <param name="use_custom_arm_prepare" type="bool" value="$(arg use_custom_arm_prepare)" />
+  <group if="$(arg use_custom_arm_prepare)">
+    <rosparam command="load" file="$(find humanoid_controllers)/config/arm_prepare_pose.yaml" ns="arm_prepare" />
+  </group>
+  <param name="sg100_left_port" value="/dev/lefthand" />
+  <param name="sg100_right_port" value="/dev/righthand" />
+  <param name="sg100_baudrate" value="1000000" />
+  <param name="sg100_control_rate" value="100.0" />
+  <param name="sg100_publish_joint_states" value="true" />
+  <param name="sg100_cmd_filter_alpha" value="$(arg sg100_cmd_filter_alpha)" />
+  <param name="sg100_debug_state" value="false" />
+  <param name="sg100_output_limit" value="0.5" />
+  <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
+  <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" />
+  <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch">
+    <arg name="robot_version" value="$(arg robot_version)" />
+  </include>
+  <!-- Read at node startup; load last so included YAML cannot override audit rates. -->
+  <include file="$(find wheel_arm_abs_vel)/launch/bypass_communication_profile.launch">
+    <arg name="full_rate_audit" value="$(arg communication_full_rate_audit)" />
+    <arg name="second_round_enabled" value="$(arg communication_second_round_enabled)" />
+  </include>
+  <include file="$(find wheel_arm_abs_vel)/launch/j3_overshoot_profile.launch">
+    <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) == 62)" />
+    <arg name="kd" value="$(arg j3_kd)" />
+  </include>
+  <group if="$(arg with_ik)">
+    <include file="$(find motion_capture_ik)/launch/ik_node.launch">
+      <arg name="robot_version" value="$(arg robot_version)" />
+    </include>
+  </group>
+  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) == 62 and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires S62 wheel mode, measured estimator and no external MPC'])" />
+</launch>

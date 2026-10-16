@@ -1,0 +1,9 @@
+<launch>
+  <arg name="dynamics_backend" default="wbc"/>
+  <arg name="rnea_mode" default="full"/>
+  <arg name="rnea_shadow" default="false"/>
+  <param name="/dynamics_backend" value="$(arg dynamics_backend)" type="str"/>
+  <param name="/dynamics/rnea_shadow" value="$(arg rnea_shadow)" type="bool"/>
+  <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/rnea.yaml" ns="/dynamics/rnea"/>
+  <param name="/dynamics/rnea/mode" value="$(arg rnea_mode)" type="str"/>
+</launch>
