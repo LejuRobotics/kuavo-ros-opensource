@@ -391,6 +391,17 @@ def robot_action_state_callback(msg):
     # rospy.loginfo(f" ---------- ROBOT_ACTION_STATUS ---------- : {ROBOT_ACTION_STATUS}")
 rospy.Subscriber('/robot_action_state', RobotActionState, robot_action_state_callback)
 
+# 保留原有两份缓存，仅在机器人启停边界同时清理。
+_action_state_reset_callback = None
+
+def reset_robot_action_state():
+    global ROBOT_ACTION_STATUS, robot_action_executing
+    ROBOT_ACTION_STATUS = 0
+    robot_action_executing = False
+    if _action_state_reset_callback is not None:
+        _action_state_reset_callback()
+
+
 # 全局话题发布
 joy_pub = rospy.Publisher('/joy', Joy, queue_size=10)
 com_pose_pub = rospy.Publisher('/cmd_pose', Twist, queue_size=10)
@@ -756,6 +767,7 @@ def launch_humanoid_robot(real_robot=True,calibrate=False,use_sit_init=False):
 
     subprocess.run(["tmux", "kill-session", "-t", HUMANOID_ROBOT_SESSION_NAME], 
                     stderr=subprocess.DEVNULL) 
+    reset_robot_action_state()
     
     # 通过读取kuavo.json文件，获取ROBOT_MODULE和only_half_up_body参数
     kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
@@ -981,6 +993,8 @@ def stop_callback(event):
 
         subprocess.run(["rosnode", "kill", "/nodelet_manager"],
                     stderr=subprocess.DEVNULL)
+
+    reset_robot_action_state()
 
 def arm_pose_callback(event):
     source = event.kwargs.get("source")

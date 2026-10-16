@@ -748,6 +748,9 @@ class H12PROControllerNode:
         
         # 动作执行状态跟踪（用于屏蔽摇杆输入）
         self.robot_action_executing = False  # True表示有tact动作正在执行
+        if kuavo_control_scheme == "multi":
+            from robot_state import multi_before_callback
+            multi_before_callback._action_state_reset_callback = self._reset_robot_action_state
 
         # ===== G11 屏幕指令解析器(协议库来自 g11_controller_node 包) =====
         self.screen_cmd_enabled = (_controller_type == "g11" and _G11_SCREEN_AVAILABLE)
@@ -898,6 +901,9 @@ class H12PROControllerNode:
         self.current_arm_joint_state = [round(pos, 2) for pos in self.current_arm_joint_state]
         self.current_arm_joint_state.extend([0] * 14)
     
+    def _reset_robot_action_state(self) -> None:
+        self.robot_action_executing = False
+
     def _robot_action_state_callback(self, msg: RobotActionState) -> None:
         """处理手臂动作状态回调
         state: 0=失败, 1=执行中, 2=成功
