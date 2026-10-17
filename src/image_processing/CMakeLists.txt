@@ -46,5 +46,6 @@ include_directories(
 catkin_install_python(
   PROGRAMS
   scripts/depth_inpainter.py
+  scripts/depth_history_buffer.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -17,6 +17,7 @@
 #include "motion_capture_ik/IncrementalControlModule.h"
 #include "motion_capture_ik/HandSmoother.h"
 #include "DrakeElbowHandPointOpt.hpp"
+#include <drake/multibody/plant/multibody_plant.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include "motion_capture_ik/ArmTrajWriter.h"
@@ -99,6 +100,10 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
   void updateSensorArmJointMeanFromSensorData();
+
+  // 将位置裁到 URDF 限位；若提供速度，贴边时清掉朝限位外的速度
+  void clampArmJointCommand(int index, double& position, double* velocity) const;
+  void loadArmJointLimitsFromPlant(const drake::multibody::MultibodyPlant<double>& plant);
 
   ros::Subscriber arm_ctrl_mode_vr_sub_;
   std::mutex wbcArmTrajectoryControlMutex_;
@@ -239,8 +244,9 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   double maxJointVelocity_ = 1.0;  // 关节最大角速度限制（弧度/秒）
   double lowpassDqAlpha_ = 0.9;    // lowpass_dq_低通滤波因子（历史值权重，新值权重为1-alpha）
 
-  // 腕部软限位速度阻尼参数：在 Quest3 最终 q/v 状态形成后平滑制动，并保持位置、速度一致
+  // 手臂关节限位：软边 = scale * URDF [low, high]，再做边界速度阻尼
   bool wristJointLimitVelocityDamperEnabled_ = true;
+  double armJointSoftLimitScale_ = 0.99;           // 软限位 = scale * URDF 上下限，0.99 ≈ 只留约 1% 边
   double wristJointLimitSoftZone_ = 0.14;          // [rad] 距离软限位多远开始减速
   double wristJointLimitStopAcceleration_ = 80.0; // [rad/s^2] 动态制动距离使用的减速度
   double wristJointLimitMaxVelocity_ = 4.0;        // [rad/s] 阻尼层允许的最大速度
@@ -292,6 +298,14 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   Eigen::VectorXd mec_limit_lower_;
   Eigen::VectorXd mec_limit_upper_;
+
+  // 与 /kuavo_arm_traj 14 维顺序一致：l1..l7, r1..r7，数值来自手臂 URDF
+  struct ArmJointLimit {
+    double lower{0.0};
+    double upper{0.0};
+    bool valid{false};
+  };
+  std::vector<ArmJointLimit> armJointLimits_;
   Eigen::Vector3d deltaScaleRPY_ = Eigen::Vector3d(1.0, 1.0, 1.0);
 
   // Grip 状态跟踪（用于检测上升沿并更新锚点，避免频繁切换 grip 时位置跳变）

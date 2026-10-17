@@ -37,7 +37,7 @@ controllers:
   - name: "depth_loco_controller"
     class: "BASE_CONTROLLER"  # 基础行走控制器
     type: "DEPTH_LOCO_CONTROLLER"    # 具体控制器类型
-    config_file: "rl/depth_loco_param.info" 
+    config_file: "rl/depth_loco_param_lingbo_sdk.info" 
     enabled: true  
 
   # - name: "more_controller"

@@ -157,6 +157,8 @@ namespace humanoid_controller
     // 观测相关
     int frameStack_{1};
     int numSingleObs_{0};
+    Eigen::VectorXd hidden_r;
+    int numHidden_{0};
     std::vector<std::string> singleInputDataKeys_;
     std::deque<Eigen::VectorXd> inputDeque_; // 用于多个历史的存储输入
     // key -> {startIdx, numIdx, obsScale}

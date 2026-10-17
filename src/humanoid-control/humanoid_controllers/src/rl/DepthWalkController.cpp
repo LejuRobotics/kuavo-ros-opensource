@@ -220,6 +220,7 @@ namespace humanoid_controller
     loadData::loadCppDataType(rlParamFile, "actionScale", actionScale_);
     loadData::loadCppDataType(rlParamFile, "frameStack", frameStack_);
     loadData::loadCppDataType(rlParamFile, "leg_bias", leg_bias);
+    loadData::loadCppDataType(rlParamFile, "numHidden", numHidden_);
     loadData::loadCppDataType(rlParamFile, "stance_ratio", stance_ratio);
     loadData::loadCppDataType(rlParamFile, "numSingleObs", numSingleObs_);
     loadData::loadCppDataType(rlParamFile, "cycleTime", cycleTime_);
@@ -368,6 +369,8 @@ namespace humanoid_controller
     singleInputData_.resize(numSingleObs_);
     singleInputData_.setZero();
     commandPhase_.resize(5);
+    hidden_r.resize(numHidden_);
+    hidden_r.setZero();
     frePhase_.resize(3);
     frePhase_.setZero(); 
     networkInputDataRL_.resize(numSingleObs_ * frameStack_);
@@ -693,7 +696,7 @@ void DepthWalkController::updatePhase(const CommandDataRL &cmd,const SensorData 
       if(stand_flag>0 and(gait_phase>0.99999 or gait_phase<delta_time+1e-6)){
         if((par<0.08 and par>-0.08)or turns>=2){
           gait_phase=0;
-          // gait_fre=0;
+          if (numHidden_>0) gait_fre=0;
           stand_flag=2;}
           else{turns+=1;}
         }
@@ -911,7 +914,8 @@ void DepthWalkController::updatePhase(const CommandDataRL &cmd,const SensorData 
         {"command", tempCommand_},
         {"action", local_action},
         {"depth_image", depth_image},
-        {"frePhase", frePhase_}
+        {"frePhase", frePhase_},
+        {"hiddenr", hidden_r}
     };
 
     // Fill singleInputData（与humanoidController一致）
@@ -1009,6 +1013,10 @@ void DepthWalkController::updatePhase(const CommandDataRL &cmd,const SensorData 
       gait_fre = std::tanh(output_buf[output_buf_length]/4.0)*0.2+1.0;
       for (int i = 0; i < 3; ++i) {
         net_linvel(i) = output_buf[output_buf_length+ i+1];
+      }
+      for (int i = 0; i < numHidden_; ++i)
+      {
+        hidden_r(i) = output_buf[output_buf_length + i + 4];
       }
 
       const size_t depth_latent_offset = output_buf_length +aux_output_length;

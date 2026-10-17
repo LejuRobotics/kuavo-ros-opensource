@@ -43,6 +43,22 @@
             "pkill -f '[r]oslaunch orbbec_camera' || true; pkill -f '[o]rbbec_camera_node' || true; sleep 3",
             "bash -c 'export ROS_MASTER_URI=http://kuavo_master:11311 && export ROS_IP=192.168.26.12 && source /home/leju_kuavo/.bashrc && cd /home/leju_kuavo/kuavo_ros_application && source devel/setup.bash && roslaunch orbbec_camera gemini_330_series.launch enable_hardware_reset:=true' > ~/camera.log"
         ],
+        "launch_lingbot_depth_camera_compact_legacy": [
+            "pkill -f '[l]ingbot_depth_ros_bridge' || true",
+            "pkill -f '[o]rbbec_camera_node' || true",
+            "pkill -f '[d]epth_inpainter.py.*image_enhanced_compact' || true",
+            "sleep 2",
+            "nohup bash -lc 'export ROS_MASTER_URI=http://192.168.26.1:11311; export ROS_IP=192.168.26.12; source /opt/ros/noetic/setup.bash; exec python3 /home/leju_kuavo/lingbot_depth/runtime/depth_inpainter.py _input_topic:=/waist_camera/depth/image_enhanced_raw _output_topic:=/waist_camera/depth/image_enhanced_compact _sdk_minimal_mode:=false _use_gaussian:=__USE_GAUSSIAN__ _conditional_inpaint:=true _conditional_inpaint_invalid_ratio:=0.01 _history_topic:=/upper_local/depth_history_array _history_stamps_topic:=/upper_local/depth_history_stamps _history_ready_topic:=/upper_local/history_ready _diagnostics_topic:=/upper_local/postprocess_diagnostics' >> /home/leju_kuavo/lingbot_depth/runtime/compact-preprocess.log 2>&1 </dev/null &",
+            "bash -lc 'export ROS_MASTER_URI=http://192.168.26.1:11311; export ROS_IP=192.168.26.12; source /opt/ros/noetic/setup.bash; SDK=/home/leju_kuavo/lingbot_depth/releases/OrbbecSDK_v2.9.3_202607151523_2f6561c_linux_arm64; export LD_LIBRARY_PATH=\"$SDK/lib:${LD_LIBRARY_PATH:-}\"; exec /home/leju_kuavo/lingbot_depth/bin/lingbot_depth_ros_bridge _serial:=CP21453000VD _model_path:=/home/leju_kuavo/lingbot_depth/models/model.sm4 _output_topic:=/waist_camera/depth/image_enhanced_raw >> /home/leju_kuavo/lingbot_depth/runtime/ros-bridge.log 2>&1'"
+        ],
+        "launch_lingbot_depth_camera_compact_minimal": [
+            "pkill -f '[l]ingbot_depth_ros_bridge' || true",
+            "pkill -f '[o]rbbec_camera_node' || true",
+            "pkill -f '[d]epth_inpainter.py.*image_enhanced_compact' || true",
+            "sleep 2",
+            "nohup bash -lc 'export ROS_MASTER_URI=http://192.168.26.1:11311; export ROS_IP=192.168.26.12; source /opt/ros/noetic/setup.bash; exec python3 /home/leju_kuavo/lingbot_depth/runtime/depth_inpainter.py _input_topic:=/waist_camera/depth/image_enhanced_raw _output_topic:=/waist_camera/depth/image_enhanced_compact _sdk_minimal_mode:=true _use_gaussian:=__USE_GAUSSIAN__ _conditional_inpaint:=true _conditional_inpaint_invalid_ratio:=0.01 _history_topic:=/upper_local/depth_history_array _history_stamps_topic:=/upper_local/depth_history_stamps _history_ready_topic:=/upper_local/history_ready _diagnostics_topic:=/upper_local/postprocess_diagnostics' >> /home/leju_kuavo/lingbot_depth/runtime/compact-preprocess.log 2>&1 </dev/null &",
+            "bash -lc 'export ROS_MASTER_URI=http://192.168.26.1:11311; export ROS_IP=192.168.26.12; source /opt/ros/noetic/setup.bash; SDK=/home/leju_kuavo/lingbot_depth/releases/OrbbecSDK_v2.9.3_202607151523_2f6561c_linux_arm64; export LD_LIBRARY_PATH=\"$SDK/lib:${LD_LIBRARY_PATH:-}\"; exec /home/leju_kuavo/lingbot_depth/bin/lingbot_depth_ros_bridge _serial:=CP21453000VD _model_path:=/home/leju_kuavo/lingbot_depth/models/model.sm4 _output_topic:=/waist_camera/depth/image_enhanced_raw >> /home/leju_kuavo/lingbot_depth/runtime/ros-bridge.log 2>&1'"
+        ],
         "check_system_status": [
             "ps aux | grep ros",
             "top -n 1 | head -10"
