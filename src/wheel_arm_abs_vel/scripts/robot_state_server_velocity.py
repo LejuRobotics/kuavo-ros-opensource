@@ -251,6 +251,10 @@ class RobotStateServer:
             return None
     def _publish_loop(self):
         """发布循环"""
+        # Also cover the publisher embedded in the Python Quest monitor. Only
+        # this observation thread moves; the monitor's input threads do not.
+        from tools.background_fence import apply_background_fence
+        apply_background_fence()
         rate = rospy.Rate(self.publish_rate)
 
         while self.running and not rospy.is_shutdown():

@@ -23,8 +23,8 @@ class GeometryTest(unittest.TestCase):
         return neutral_retarget_geometry(path,'base_link',self.config['shoulder_frame_names'],self.config['end_frames_name_ik'][3:5])
     def test_main_shoulder_and_legacy_height(self):
         new,old=self.geometry(self.canonical),self.geometry(self.legacy)
-        # dev 8445d0d lowers each S62 shoulder origin by 15 mm.
-        np.testing.assert_allclose(new['left_shoulder'],[.11575,.2527,1.19016],rtol=0,atol=1e-12)
+        # dev 8dbb05646 aligns the S62/400062 waist-yaw origin to 0.250 m.
+        np.testing.assert_allclose(new['left_shoulder'],[.11575,.2527,1.20516],rtol=0,atol=1e-12)
         # Current dev also aligns the legacy arm-only base_to_joint origin to 0.31 m.
         self.assertAlmostEqual(new['base_height_offset'],old['base_height_offset'],12)
         self.assertAlmostEqual(new['upper_arm_length'],old['upper_arm_length'],12)

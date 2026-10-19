@@ -1,5 +1,9 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
+  <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
+  <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
+  <env name="KUAVO_ARM_DRIVER_RESERVED_CPUS" value="$(arg arm_driver_reserved_cpus)" />
   <arg name="j3_overshoot_profile" default="true" />
   <arg name="j3_kd" default="18.0" />
   <arg name="communication_full_rate_audit" default="false" />
@@ -13,7 +17,7 @@
   <param name="/whole_body_velocity_ik/reference/transport" value="$(arg reference_transport)" />
   <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
   <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
-  <arg name="robot_version" default="62" />
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <!-- Pico adapts to Quest input semantics; keep legacy use_pico=false. -->
   <arg name="input_source" default="quest" />
   <arg name="hold_on_input_timeout" default="$(eval arg('input_source') != 'pico')" />
@@ -71,9 +75,9 @@
   <arg name="dexhand_front_trigger" default="true" doc="Both front triggers independently command six dexhand channels, 0=open and 100=closed." />
   <arg name="control_finger_type" default="0" />
   <arg name="predict_gesture" default="false" />
-  <arg name="ee_type" default="$(eval 'heiman' if int(arg('robot_version')) == 400062 else 'qiangnao')" />
-  <arg name="sg100_enabled" default="$(eval arg('ee_type') == 'heiman')" />
-  <node pkg="wheel_arm_abs_vel" type="sg100_mapper_bridge" name="sg100_mapper_bridge" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
+  <arg name="ee_type" default="auto" doc="Read EndEffectorType from this robot version kuavo.json; optional explicit override" />
+  <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
+  <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <arg name="enable_head_control" default="true" />
   <arg name="hand_reference_mode" default="thumb_index" />
   <arg name="use_arm_collision" default="false" />
@@ -110,7 +114,7 @@
   <group if="$(eval int(arg('robot_version')) == 61 or int(arg('robot_version')) == 62 or int(arg('robot_version')) == 63 or int(arg('robot_version')) == 400062)">
     <param name="/vr_cmd_vel/linear_scale_x" value="0.4" />
     <param name="/vr_cmd_vel/linear_scale_y" value="0.4" />
-    <param name="/vr_cmd_vel/angular_scale_z" value="0.25" />
+    <param name="/vr_cmd_vel/angular_scale_z" value="0.45" />
   </group>
   <arg name="single_hand_mode" default="false" />
   <arg name="use_arm_only_ik" default="false" />
@@ -304,10 +308,14 @@
     <param name="absolute_execution_min_joint_limit_margin" value="$(arg absolute_execution_min_joint_limit_margin)" type="double" />
     <param name="tracking_rearm_stable_frames" value="$(arg tracking_rearm_stable_frames)" type="int" />
     <param name="velocity_tcp_forearm_length" value="0.45" type="double" />
-    <param name="velocity_tcp_geometry_id" value="V62_CONFIGURED_FULL_FOREARM_0450_UNCALIBRATED_V1" type="str" />
+    <param name="velocity_tcp_geometry_id" value="V$(arg robot_version)_CONFIGURED_FULL_FOREARM_0450_UNCALIBRATED_V1" type="str" />
     <env name="ROBOT_VERSION" value="$(arg robot_version)" />
   </node>
-  <node pkg="wheel_arm_abs_vel" type="humanoid_quest_absolute_control" name="humanoid_quest_control_with_arm" output="screen" if="$(eval wheel_ik or arg('use_arm_only_ik'))" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background $(find humanoid_controllers)/scripts/start_node.sh" respawn="false" required="true">
+  <node pkg="wheel_arm_abs_vel" type="humanoid_quest_absolute_control" name="humanoid_quest_control_with_arm" output="screen" if="$(eval wheel_ik or arg('use_arm_only_ik'))" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background bash -o pipefail $(find humanoid_controllers)/scripts/start_node.sh" respawn="false" required="true">
+    <param name="robot_version" value="$(arg robot_version)" type="int" />
+    <param name="robot_type" value="1" type="int" />
+    <param name="referenceFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" type="str" />
+    <param name="gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info" type="str" />
     <remap from="/cmd_vel" to="$(eval '/whole_body_velocity_ik/disabled_base_cmd_vel' if arg('enable_velocity_ik_takeover') else '/cmd_vel')" />
   </node>
   <param name="wheel_ik" value="$(arg wheel_ik)" />
@@ -319,7 +327,7 @@
   <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3_cpp" args="$(arg ip_address)" name="monitor_quest3_cpp" output="screen" if="$(eval arg('input_source') == 'quest' and arg('use_cpp_monitor'))" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')">
     <param name="enable_head_control" value="$(arg enable_head_control)" />
   </node>
-  <node pkg="wheel_arm_abs_vel" type="robot_state_server_velocity.py" name="robot_state_server" output="screen" if="$(eval arg('input_source') == 'quest' and arg('use_cpp_monitor'))" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
+  <node pkg="wheel_arm_abs_vel" type="robot_state_server_velocity.py" name="robot_state_server" output="screen" if="$(eval arg('input_source') == 'quest' and arg('use_cpp_monitor'))" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background /usr/bin/python3 $(find wheel_arm_abs_vel)/scripts/sidecar_runtime.py" />
   <include file="$(find wheel_arm_abs_vel)/launch/pico_input.launch" if="$(eval arg('input_source') == 'pico')">
     <arg name="port" value="$(arg pico_port)" />
     <arg name="peer_ip" value="$(arg pico_peer_ip)" />
@@ -337,8 +345,8 @@
     <arg name="second_round_enabled" value="$(arg communication_second_round_enabled)" />
   </include>
   <include file="$(find wheel_arm_abs_vel)/launch/j3_overshoot_profile.launch">
-    <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) == 62 and arg('wheel_ik') and not arg('use_cpp_incremental_ik') and arg('enable_velocity_ik_takeover'))" />
+    <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) in (62, 63) and arg('wheel_ik') and not arg('use_cpp_incremental_ik') and arg('enable_velocity_ik_takeover'))" />
     <arg name="kd" value="$(arg j3_kd)" />
   </include>
-  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in [62, 400062] and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires S62/400062 wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
+  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in (62, 63, 400062) and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires S62/S63/400062 wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
 </launch>

@@ -27,7 +27,9 @@
 #include <std_srvs/SetBool.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Empty.h>
-#include "humanoid_interface_drake/humanoid_interface_drake.h"
+#include <kuavo_common/kuavo_common.h>
+#include <fstream>
+#include <stdexcept>
 
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
@@ -86,26 +88,25 @@ namespace ocs2
             cmdVel_.angular.x = 0;
             cmdVel_.angular.y = 0;
             cmdVel_.angular.z = 0;
-            // Get node parameters
+            // The input launch owns its configuration, even before the controller
+            // has populated global parameters. Never guess a robot version.
+            ros::NodeHandle privateHandle("~");
+            if (!privateHandle.getParam("robot_version", robot_version_int_) ||
+                (robot_version_int_ != 62 && robot_version_int_ != 63 && robot_version_int_ != 400062))
+                throw std::runtime_error("Quest FSM requires explicit ~robot_version=62, 63 or 400062; no fallback");
+            if (!privateHandle.getParam("robot_type", robot_type_) || robot_type_ != 1)
+                throw std::runtime_error("Quest FSM requires explicit ~robot_type=1");
             std::string referenceFile;
-            nodeHandle.getParam("/referenceFile", referenceFile);
-            std::cout << "get referenceFile: " << referenceFile << std::endl;
+            if (!privateHandle.getParam("referenceFile", referenceFile) || referenceFile.empty())
+                throw std::runtime_error("Quest FSM requires explicit ~referenceFile; no global fallback");
+            const std::string expectedReference = ros::package::getPath("humanoid_controllers") +
+                "/config/kuavo_v" + std::to_string(robot_version_int_) + "/command/reference.info";
+            if (referenceFile != expectedReference || !std::ifstream(referenceFile).good())
+                throw std::runtime_error("Quest FSM referenceFile must be the readable matching S" +
+                                         std::to_string(robot_version_int_) + " configuration: " + expectedReference);
+            reference_file_ = referenceFile;
+            const RobotVersion rb_version = RobotVersion::create(robot_version_int_);
 
-            RobotVersion rb_version(3, 4);
-            if (nodeHandle.hasParam("/robot_version"))
-            {
-                int rb_version_int;
-                nodeHandle.getParam("/robot_version", rb_version_int);
-                rb_version = RobotVersion::create(rb_version_int);
-                robot_version_int_ = rb_version_int;  // 保存版本号
-            }
-
-            // 获取机器人类型
-            if (nodeHandle.hasParam("/robot_type"))
-            {
-                nodeHandle.getParam("/robot_type", robot_type_);
-                std::cout << "Robot type: " << robot_type_ << " (1 for wheel robot, 0 for biped)" << std::endl;
-            }
             nodeHandle.param("/wheel_ik", wheel_ik_, false);
             ROS_INFO_STREAM("[QuestAbsoluteControlFSM] wheel_ik: " << (wheel_ik_ ? "true" : "false"));
             nodeHandle.param("/use_cpp_incremental_ik", use_cpp_incremental_ik_, false);
@@ -115,8 +116,12 @@ namespace ocs2
                 throw std::runtime_error("Absolute FSM requires wheel absolute mode");
             ROS_INFO_STREAM("[QuestAbsoluteControlFSM] use_cpp_incremental_ik: " << (use_cpp_incremental_ik_ ? "true" : "false"));
 
-            auto drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
-            auto kuavo_settings = drake_interface_->getKuavoSettings();
+            // This node needs settings only, not a legacy Drake robot model.
+            auto& common = HighlyDynamic::KuavoCommon::getInstance(
+                rb_version, ros::package::getPath("kuavo_assets"));
+            if (common.getRobotVersion().to_string() != std::to_string(robot_version_int_))
+                throw std::runtime_error("Quest FSM/common robot version mismatch");
+            const auto kuavo_settings = common.getKuavoSettings();
             const auto& hw = kuavo_settings.hardware_settings;
             int leg_dof = static_cast<int>(
                 hw.num_joints - hw.num_arm_joints - hw.num_head_joints - hw.num_waist_joints);
@@ -128,12 +133,8 @@ namespace ocs2
                 waist_sensor_start_index_ = leg_dof;
                 waist_joint_pos_rad_.assign(waist_dof_, 0.0);
             }
-            only_half_up_body_ = drake_interface_->getKuavoSettings().running_settings.only_half_up_body;
+            only_half_up_body_ = kuavo_settings.running_settings.only_half_up_body;
             std::cout << "only_half_up_body: " << only_half_up_body_ << std::endl;
-            if(nodeHandle.hasParam("/only_half_up_body"))
-            {
-                nodeHandle.getParam("/only_half_up_body", only_half_up_body_);
-            }
 
             loadData::loadCppDataType(referenceFile, "cmdvelLinearXLimit", c_relative_base_limit_[0]);
             loadData::loadCppDataType(referenceFile, "cmdvelLinearYLimit", c_relative_base_limit_[1]);
@@ -170,7 +171,13 @@ namespace ocs2
 
             // gait
             std::string gaitCommandFile;
-            nodeHandle.getParam("/gaitCommandFile", gaitCommandFile);
+            if (!privateHandle.getParam("gaitCommandFile", gaitCommandFile) || gaitCommandFile.empty())
+                throw std::runtime_error("Quest FSM requires explicit ~gaitCommandFile; no global fallback");
+            const std::string expectedGait = ros::package::getPath("humanoid_controllers") +
+                "/config/kuavo_v" + std::to_string(robot_version_int_) + "/command/gait.info";
+            if (gaitCommandFile != expectedGait || !std::ifstream(gaitCommandFile).good())
+                throw std::runtime_error("Quest FSM gaitCommandFile must be the readable matching S" +
+                                         std::to_string(robot_version_int_) + " configuration: " + expectedGait);
             ROS_INFO_STREAM(robotName + "_mpc_mode_schedule node is setting up ...");
             std::vector<std::string> gaitList;
             loadData::loadStdVector(gaitCommandFile, "list", gaitList, verbose);
@@ -303,11 +310,42 @@ namespace ocs2
             }
         }
 
+        bool controllerConfigurationReady()
+        {
+            int version = 0;
+            std::string reference;
+            const bool hasVersion = nodeHandle_.getParamCached("/robot_version", version);
+            const bool hasReference = nodeHandle_.getParamCached("/referenceFile", reference);
+            if (hasVersion && version != robot_version_int_)
+                throw std::runtime_error("Quest FSM/controller /robot_version mismatch");
+            if (hasReference && reference != reference_file_)
+                throw std::runtime_error("Quest FSM/controller /referenceFile mismatch");
+            if (!hasVersion || !hasReference) {
+                ROS_WARN_THROTTLE(5.0, "[QuestStartup] S%d configuration loaded; waiting for matching controller /robot_version and /referenceFile",
+                                  robot_version_int_);
+                return false;
+            }
+            ROS_INFO_ONCE("[QuestStartup] matching S%d controller configuration available; input callbacks enabled",
+                          robot_version_int_);
+            nodeHandle_.getParamCached("/only_half_up_body", only_half_up_body_);
+            return true;
+        }
+
         void run()
         {
+            ROS_INFO("[QuestStartup] S%d configuration ready: %s", robot_version_int_, reference_file_.c_str());
+            ros::NodeHandle privateHandle("~");
+            privateHandle.setParam("resolved_robot_version", robot_version_int_);
+            privateHandle.setParam("resolved_reference_file", reference_file_);
             ros::Rate rate(100);
             while (ros::ok())
             {
+                // Do not consume joystick requests until the matching controller
+                // configuration exists; cached reads also catch a later mismatch.
+                if (!controllerConfigurationReady()) {
+                    rate.sleep();
+                    continue;
+                }
                 ros::spinOnce();
                 rate.sleep();
                 if (!get_observation_)
@@ -2250,6 +2288,7 @@ namespace ocs2
         bool last_cmd_close_to_zero_{true};
         bool only_half_up_body_{false};
         int robot_type_{0};  // 0: biped, 1: wheel robot
+        std::string reference_file_;
         int robot_version_int_{0};  // 机器人版本号
         bool wheel_ik_{false}; // 轮臂增量VR兼容模式开关
         bool use_cpp_incremental_ik_{false}; // 是否使用 C++ 增量式 IK（ik_ros_uni_cpp_node）
@@ -2345,7 +2384,12 @@ int main(int argc, char** argv) {
     // Initialize ros node
     ::ros::init(argc, argv, robotName + "_quest_command_node");
     ::ros::NodeHandle nodeHandle;
-    ocs2::QuestAbsoluteControlFSM quest_control_fsm(nodeHandle, robotName);
-    quest_control_fsm.run();
-    return 0;
+    try {
+        ocs2::QuestAbsoluteControlFSM quest_control_fsm(nodeHandle, robotName);
+        quest_control_fsm.run();
+        return 0;
+    } catch (const std::exception& e) {
+        ROS_FATAL("[QuestStartup] %s", e.what());
+        return 1;
+    }
 }

@@ -38,6 +38,11 @@ def identities(pid):
     return dict(version=1,pid=pid,monotonic_ns=time.monotonic_ns(),threads=rows,thread_count=len(rows),truncated=False,wall_ns=0,cpu_ns=0,identity_source='external_proc_current_threads',probe_process=os.getpid(),marker_processes=[],noncontrol_processes=[])
 
 def worker(fd,parent_pid):
+    try:
+        from .background_fence import apply_background_fence
+    except ImportError:
+        from background_fence import apply_background_fence
+    apply_background_fence()
     import select,rospy
     from std_msgs.msg import Float64MultiArray,String
     os.nice(10)

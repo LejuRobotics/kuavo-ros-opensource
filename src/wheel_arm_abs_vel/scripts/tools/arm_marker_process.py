@@ -157,6 +157,11 @@ def publish_jobs(publishers, jobs):
         publishers["marker_pub_chest"].publish(point_marker(jobs[0][4], .1, .8))
 
 def worker(fd, topics, rate):
+    try:
+        from .background_fence import apply_background_fence
+    except ImportError:
+        from background_fence import apply_background_fence
+    apply_background_fence()
     import select
     import rospy
     from visualization_msgs.msg import Marker

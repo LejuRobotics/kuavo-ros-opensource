@@ -14,6 +14,7 @@ int main(int argc,char** argv){
   check(argc==3 || argc==4,"usage: model_alignment_test assets_directory private_contract [robot_version]");
   const std::string assets=argv[1];
   const std::string version=argc==4 ? argv[3] : "62";
+  check(version=="62" || version=="63" || version=="400062","unsupported model version");
   json cfg;std::ifstream(assets+"/config/kuavo_v"+version+"/kuavo.json")>>cfg;
   json overlay;std::ifstream(argv[2])>>overlay;cfg.update(overlay);
   const std::string path=assets+"/models/"+cfg.at("velocity_ik_urdf").get<std::string>();
@@ -25,9 +26,14 @@ int main(int argc,char** argv){
       std::string("zarm_")+side+"7_end_effector",offset,rotation);
   model.Finalize();check(model.num_positions()==21&&model.num_velocities()==21,"21D reduction");
   auto context=model.CreateDefaultContext();
-  velocity_ik::ModelPinocchio legacy(assets+"/models/"+cfg.at("arm_urdf").get<std::string>(),"base_link");
-  legacy.Finalize();auto legacy_context=legacy.CreateDefaultContext();
-  check(legacy.num_positions()==21&&legacy.num_velocities()==21,"legacy construction compatibility");
+  std::unique_ptr<velocity_ik::ModelPinocchio> legacy;
+  std::unique_ptr<velocity_ik::ModelContext> legacy_context;
+  if(version=="62") {
+    legacy=std::make_unique<velocity_ik::ModelPinocchio>(
+        assets+"/models/"+cfg.at("arm_urdf").get<std::string>(),"base_link");
+    legacy->Finalize();legacy_context=legacy->CreateDefaultContext();
+    check(legacy->num_positions()==21&&legacy->num_velocities()==21,"legacy construction compatibility");
+  }
   // Independent full URDF parse: continuous wheel and head coordinates remain
   // present and neutral here. Map every controlled joint by name, not index.
   pinocchio::Model full;pinocchio::urdf::buildModel(path,full);pinocchio::Data data(full);
@@ -46,9 +52,11 @@ int main(int argc,char** argv){
     if(full.existJointName(names[i]))qf[full.joints[full.getJointId(names[i])].idx_q()]=value;
    }
    model.SetPositions(context.get(),q);pinocchio::framesForwardKinematics(full,data,qf);
-   auto qold=legacy.GetPositions(*legacy_context);
-   for(const auto& name:names)qold[legacy.GetJointByName(name).position_start()]=q[model.GetJointByName(name).position_start()];
-   legacy.SetPositions(legacy_context.get(),qold);
+   if(legacy) {
+   auto qold=legacy->GetPositions(*legacy_context);
+   for(const auto& name:names)qold[legacy->GetJointByName(name).position_start()]=q[model.GetJointByName(name).position_start()];
+   legacy->SetPositions(legacy_context.get(),qold);
+   }
    Eigen::Isometry3d world=Eigen::Isometry3d::Identity();
    world.translation()<<q[model.GetJointByName(names[0]).position_start()],q[model.GetJointByName(names[1]).position_start()],0;
    world.linear()=Eigen::AngleAxisd(q[model.GetJointByName(names[2]).position_start()],Eigen::Vector3d::UnitZ()).toRotationMatrix();
@@ -57,9 +65,9 @@ int main(int argc,char** argv){
     const auto expected=data.oMf[full.getFrameId(frame)];auto actual=model.GetFrameByName(frame).CalcPoseInWorld(*context);
     max_pose=std::max(max_pose,(actual.p-world*expected.translation()).norm());
     max_rot=std::max(max_rot,(actual.R.matrix()-world.linear()*expected.rotation()).norm());
-    if(std::string(frame)!="base_link"){
+    if(legacy && std::string(frame)!="base_link"){
       // Current dev already aligns both S62 base heights at 0.31 m.
-      auto before=legacy.GetFrameByName(frame).CalcPoseInWorld(*legacy_context);
+      auto before=legacy->GetFrameByName(frame).CalcPoseInWorld(*legacy_context);
       max_alignment_residual=std::max(max_alignment_residual,
           (actual.p-before.p).norm());
     }
@@ -83,6 +91,6 @@ int main(int argc,char** argv){
   try{auto twice=fixed;twice.push_back(fixed[0]);velocity_ik::ModelPinocchio bad(path,"base_link",twice);}catch(const std::runtime_error&){duplicate=true;}
   check(missing&&duplicate,"invalid reduction must fail");
   check(max_pose<1e-12&&max_rot<1e-12&&max_jac<2e-8&&max_alignment_residual<1e-12,"FK/Jacobian mismatch");
-  std::cout<<json({{"legacy_to_main_height_m",0.0},{"max_height_alignment_residual_m",max_alignment_residual},{"samples",128},{"nq",21},{"nv",21},{"max_position_m",max_pose},{"max_rotation_matrix_error",max_rot},{"max_jacobian_error",max_jac},{"invalid_reduction_rejected",true},{"status","PASS"}}).dump(2)<<"\n";
+  std::cout<<json({{"robot_version",version},{"legacy_comparison",version=="62"},{"legacy_to_main_height_m",0.0},{"max_height_alignment_residual_m",max_alignment_residual},{"samples",128},{"nq",21},{"nv",21},{"max_position_m",max_pose},{"max_rotation_matrix_error",max_rot},{"max_jacobian_error",max_jac},{"invalid_reduction_rejected",true},{"status","PASS"}}).dump(2)<<"\n";
  }catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}
 }

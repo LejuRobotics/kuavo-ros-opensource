@@ -20,7 +20,8 @@ tree=ast.parse(source.read_text())
 methods={'_fixed_operation_mode','_fixed_arm_operation','_fixed_capture_input_error_locked',
     '_authorize_fixed_follow_locked','_queue_absolute_capture_locked','_handle_absolute_target_and_gesture',
     'whole_body_velocity_ik_status_callback','_queue_fixed_request_locked','_advance_fixed_request',
-    '_fixed_consumer_ack_locked','_fixed_owner_callback','_fixed_enable_callback'}
+    '_fixed_consumer_ack_locked','_fixed_owner_callback','_fixed_enable_callback',
+    '_publish_wheel_base_command'}
 selected=[]
 for item in tree.body:
     if not isinstance(item,ast.ClassDef):continue

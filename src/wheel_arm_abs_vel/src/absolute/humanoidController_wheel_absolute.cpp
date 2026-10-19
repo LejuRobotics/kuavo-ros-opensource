@@ -1,3 +1,6 @@
+#include "wheel_arm_abs_vel/model/FullModelContract.h"
+#include <ros/package.h>
+#include <kuavo_common/kuavo_common.h>
 #include <wheel_arm_abs_vel/humanoid_controllers/arm_inertia_feedforward.h>
 #include "wheel_arm_abs_vel/motion_capture_ik/runtime/E2eTrace.h"
 namespace { kuavo_e2e::Trace<64> commandAudit("command"); }
@@ -139,6 +142,16 @@ namespace wheel_absolute_control
     controllerNh_.param<bool>("/vr_ik/use_velocity_ik_reference", fixed_velocity_ik_pipeline_, false);
     if (!fixed_velocity_ik_pipeline_) { ROS_ERROR("Absolute controller requires explicit absolute mode"); return false; }
     controllerNh_.param<bool>("/base_locked", base_locked_, fixed_velocity_ik_pipeline_);
+    controllerNh_.param<bool>("/vr_ik/enable_base_control", velocity_ik_base_control_, false);
+    if (velocity_ik_base_control_ && !base_locked_) {
+      velocity_ik_base_sub_ = controllerNh_.subscribe<geometry_msgs::Twist>(
+          "/whole_body_velocity_ik/base_cmd_vel", 1,
+          [this](const geometry_msgs::Twist::ConstPtr& command) {
+            const double now = std::chrono::duration<double>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            velocity_ik_base_command_.update(*command, now);
+          });
+    }
     ROS_INFO("[MobileBaseLock] base_locked=%s (startup-only, final command boundary)",
              base_locked_ ? "true" : "false");
     controllerNh_.param<std::string>("/dynamics_backend", dynamics_backend_name_, "wbc");
@@ -156,6 +169,11 @@ namespace wheel_absolute_control
     controllerNh_.getParam("/taskFile", taskFile);
     controllerNh_.getParam("/libFolder", libFolder);
     controllerNh_.getParam("/urdfFile", urdfFile);
+    int model_version = 62;
+    controllerNh_.param("/robot_version", model_version, 62);
+    wheel_arm_abs_vel::requireFullModel(
+        model_version, ros::package::getPath("kuavo_assets"), urdfFile);
+    controllerNh_.setParam("/wheel_absolute_controller/resolved_model_urdf", urdfFile);
 
     if (controllerNh_.hasParam("/real"))
     {
@@ -237,9 +255,20 @@ namespace wheel_absolute_control
         controllerNh_.getParam("/robot_version", rb_version_int);
         rb_version = RobotVersion::create(rb_version_int);
     }
-    drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
-    robot_config_ = drake_interface_->getRobotConfig();
-    kuavo_settings_ = drake_interface_->getKuavoSettings();
+    if (model_version == 63) {
+      // Only configuration is needed here. Constructing HumanoidInterfaceDrake
+      // would also parse legacy Drake URDFs unrelated to the full S63 WBC model.
+      auto& common = HighlyDynamic::KuavoCommon::getInstance(
+          rb_version, ros::package::getPath("kuavo_assets"));
+      if (common.getRobotVersion().to_string() != "63")
+        throw std::runtime_error("S63 controller/common configuration version mismatch");
+      robot_config_ = common.getRobotConfig();
+      kuavo_settings_ = common.getKuavoSettings();
+    } else {
+      drake_interface_ = HighlyDynamic::HumanoidInterfaceDrake::getInstancePtr(rb_version, true, 2e-3);
+      robot_config_ = drake_interface_->getRobotConfig();
+      kuavo_settings_ = drake_interface_->getKuavoSettings();
+    }
 
     const auto& endEffectorTypes = kuavo_settings_.hardware_settings.end_effector_type;
     const bool hasQibeng = std::any_of(endEffectorTypes.begin(), endEffectorTypes.end(),
@@ -332,12 +361,12 @@ namespace wheel_absolute_control
       double kp = 250., kd = 18.;
       controllerNh_.param("/j3_overshoot_profile/kp", kp, 250.);
       controllerNh_.param("/j3_overshoot_profile/j3_kd", kd, 18.);
-      if (robotVersion_ != 62 || !std::isfinite(kp) || kp <= 0. || kp > 250. ||
+      if ((robotVersion_ != 62 && robotVersion_ != 63) || !std::isfinite(kp) || kp <= 0. || kp > 250. ||
           !std::isfinite(kd) || kd <= 0. || kd > 50.)
-        throw std::runtime_error("Invalid S62 J3 gain profile");
+        throw std::runtime_error("Invalid S62/S63 J3 gain profile");
       auto apply = [&](auto& p, auto& d) {
         if (p.size() < 14 || p.size() != d.size())
-          throw std::runtime_error("S62 J3 profile requires 14 ordered arm gains");
+          throw std::runtime_error("S62/S63 J3 profile requires 14 ordered arm gains");
         for (int offset : {0, 7}) {
           p[offset] = kp; p[offset + 2] = kp; d[offset + 2] = kd;
         }
@@ -386,6 +415,9 @@ namespace wheel_absolute_control
     max_deceleration << 1.2, 1.2, 1.2;  // 减速度
     velLimiter_->setAccelerationLimits(max_acceleration, max_deceleration);
     velLimiter_->setAccelerationDt(dt_);
+    // Preserve configured zero state without changing the shared dev limiter.
+    base_velocity_limiter_zero_ =
+        std::make_unique<const mobile_manipulator::VelocityLimiter>(*velLimiter_);
     /****************************************************/
 
     /*****************载入运动学限制相关********************/
@@ -1829,11 +1861,34 @@ namespace wheel_absolute_control
       last_ros_time = time.toSec();
     }
 
-    // The formal owner is the only base command source in absolute mode.
-    // Before first acquisition and after release, zero stays zero even if a
-    // legacy /cmd_vel publisher is active. Owned braking tuples remain intact.
+    // Joystick wheels are gated by the same fresh formal owner as the arms.
+    // They never modify the fixed-base IK tuple or accept legacy /cmd_vel.
     geometry_msgs::Twist velCmdMsg;
-    if (wholeBodyIkAuthorityOwned && wholeBodyIkReferenceApplied && baseCmdVelStatus_) {
+    if (fixed_velocity_ik_pipeline_ && velocity_ik_base_control_)
+    {
+      // Fixed-base IK controls the torso/arms; wheel input retains the legacy
+      // body-frame joystick mapping and acceleration limits in its own channel.
+      const bool enabled = !base_locked_ && !enable_mpc_ && baseCmdVelStatus_ &&
+          soft_pause_state_.load() == SoftPauseState::IDLE &&
+          wholeBodyIkReferenceApplied && wholeBodyIkReferenceFresh &&
+          !wholeBodyIkReference.safety_braking &&
+          wholeBodyIkReference.authority_state ==
+              wheel_arm_abs_vel::WholeBodyIkReference::AUTHORITY_ACTIVE;
+      geometry_msgs::Twist baseCommand;
+      const double now = std::chrono::duration<double>(
+          std::chrono::steady_clock::now().time_since_epoch()).count();
+      if (velocity_ik_base_command_.sample(enabled, now, baseCommand)) {
+        const Eigen::Vector3d desired(baseCommand.linear.x, baseCommand.linear.y,
+                                      baseCommand.angular.z);
+        const Eigen::Vector3d limited = velLimiter_->limitAcceleration(desired);
+        velCmdMsg.linear.x = limited[0];
+        velCmdMsg.linear.y = limited[1];
+        velCmdMsg.angular.z = limited[2];
+      } else {
+        *velLimiter_ = *base_velocity_limiter_zero_;
+      }
+    }
+    else if (wholeBodyIkAuthorityOwned && wholeBodyIkReferenceApplied && baseCmdVelStatus_) {
       const Eigen::Vector3d desiredVelBody = cmdVelWorldToBody(
           wholeBodyIkReference.dq.head(3), observation_wheel_.state[2]);
       velCmdMsg.linear.x = desiredVelBody[0];

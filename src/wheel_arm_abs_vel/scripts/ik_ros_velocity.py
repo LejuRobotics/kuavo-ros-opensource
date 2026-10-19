@@ -18,7 +18,9 @@ from kuavo_msgs.msg import robotHandPosition
 from kuavo_msgs.srv import controlLejuClaw, controlLejuClawRequest
 from kuavo_msgs.msg import lejuClawCommand
 from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point, Quaternion, Vector3
+from geometry_msgs.msg import Point, Quaternion, Vector3, Twist
+from tools.wheel_base_command import WheelBaseCommandMapper
+from absolute_end_effector import checked, resolve
 import time
 import math
 import sys
@@ -170,7 +172,7 @@ control_finger_type = 0
 control_torso = 0
 
 class IkRos:
-    def __init__(self, ik, ctrl_arm_idx=ArmIdx.LEFT, q_limit=None, publish_err=True, use_original_pose=False, end_effector_type="", send_srv=True, predict_gesture=False, hand_reference_mode="thumb_index", use_two_stage_ik=False):
+    def __init__(self, ik, ctrl_arm_idx=ArmIdx.LEFT, q_limit=None, publish_err=True, use_original_pose=False, end_effector_type="", send_srv=True, predict_gesture=False, hand_reference_mode="thumb_index", use_two_stage_ik=False, wheel_joystick_config=None):
         # Sequence counters and callback handles must exist before any ROS
         # subscription can dispatch.  The Quest subscriber is intentionally
         # created only after the complete object has been initialized below.
@@ -559,7 +561,8 @@ class IkRos:
         self.use_arm_collision = rospy.get_param('~use_arm_collision', False)
         # Opt-in for wheel Quest/Pico launches; other users retain legacy gestures.
         self.dexhand_front_trigger = rospy.get_param("~dexhand_front_trigger", False)
-        self.sg100_enabled = rospy.get_param("~sg100_enabled", False)
+        self.sg100_enabled = (rospy.get_param("~sg100_enabled", False)
+                              and end_effector_type == "heiman")
         if self.sg100_enabled:
             self.sg100_gesture_client = Sg100VrGestureClient()
             self.sg100_trigger_pub = rospy.Publisher(
@@ -567,25 +570,7 @@ class IkRos:
 
         # Callbacks may run immediately after Subscriber construction.  Resolve
         # the end-effector type before registering any callback that reads it.
-        try:
-            end_effector_mapping = {
-                QIANGNAO: QIANGNAO,
-                JODELL: JODELL,
-                LEJUCLAW: LEJUCLAW,
-                QIANGNAO_TOUCH: QIANGNAO_TOUCH,
-                REVO2: REVO2,
-                LINKER_HAND: LINKER_HAND,
-            }
-            self.end_effector_type = end_effector_mapping.get(
-                end_effector_type, QIANGNAO
-            )
-        except Exception as error:
-            print(
-                "get end effector type error: {}, use default qiangnao".format(
-                    error
-                )
-            )
-            self.end_effector_type = QIANGNAO
+        self.end_effector_type = checked(end_effector_type)
         print("\033[93m--------------------------------------------------\033[0m")
         print(
             "\033[93m- End effector type: {} \033[0m".format(
@@ -856,6 +841,14 @@ class IkRos:
         self._fixed_operation_service = rospy.Service(
             '/quest3/pinocchio_arm_operation', changeArmCtrlMode, self.fixed_arm_operation_callback)
         self._publish_fixed_operation_state()
+        self._wheel_base_pub = None
+        if self.robot_type == 1 and self.enable_velocity_ik_takeover:
+            self._wheel_base_mapper = WheelBaseCommandMapper(
+                wheel_joystick_config,
+                [rospy.get_param('/vr_cmd_vel/' + key, default) for key, default in
+                 (('linear_scale_x', 0.4), ('linear_scale_y', 0.4), ('angular_scale_z', 0.25))])
+            self._wheel_base_pub = rospy.Publisher(
+                '/whole_body_velocity_ik/base_cmd_vel', Twist, queue_size=1)
         self.ik_thread = threading.Thread(target=self.ik_controller_thread)
         self.ik_thread.start()
         if not (self.enable_velocity_ik_takeover and os.environ.get("KUAVO_RUNTIME_PARTITION_JSON")):
@@ -1971,6 +1964,7 @@ class IkRos:
             return 2 if self._absolute_state == AbsoluteEnableState.ACTIVE else 0
 
     def _publish_fixed_operation_state(self):
+        self._publish_wheel_base_command()
         if hasattr(self, '_fixed_operation_state_pub'):
             mode = self._fixed_operation_mode()
             self._fixed_operation_state_pub.publish(Float64MultiArray(data=[float(mode), float(mode)]))
@@ -2112,6 +2106,7 @@ class IkRos:
                                  or self._fixed_pending_operation is not None):
                 self._fixed_stop_epoch += 1
             self._fixed_control_enabled = bool(msg.data)
+        self._publish_wheel_base_command()
 
     def _fixed_owner_callback(self, msg):
         now = time.monotonic()
@@ -4354,11 +4349,36 @@ class IkRos:
             self.__as_mc_ik = False
             self.arm_ik.set_as_mc_ik(self.__as_mc_ik)
 
+    def _publish_wheel_base_command(self, msg=None):
+        if getattr(self, '_wheel_base_pub', None) is None:
+            return
+        with self._absolute_lock:
+            active = (self._absolute_state == AbsoluteEnableState.ACTIVE
+                      and self._fixed_control_enabled is True
+                      and self._absolute_mode_status == (2, 2, 0)
+                      and self._fixed_pending_operation is None
+                      and not self._fixed_operation_error
+                      and not self._fixed_operation_block
+                      and not self._absolute_stop_pending
+                      and not self._tracking_source_hold_latched
+                      and not self._absolute_fault_hold_pending)
+            if msg is None:
+                if active:
+                    return  # Never replay cached joystick input as a new command.
+                self._wheel_base_mapper.reset()
+                velocity = (0.0, 0.0, 0.0)
+            else:
+                velocity = self._wheel_base_mapper.sample(msg, active, time.monotonic())
+            command = Twist()
+            command.linear.x, command.linear.y, command.angular.z = velocity
+            self._wheel_base_pub.publish(command)
+
     def joySticks_data_callback(self, msg):
         with self._absolute_lock:
             self._joystick_receive_monotonic = time.monotonic()
         self.quest3_arm_info_transformer.read_joySticks_msg(msg)
         self.joySticks_data = msg
+        self._publish_wheel_base_command(msg)
         if self._uses_front_trigger_dexhand():
             self._publish_front_trigger_dexhand(msg)
         # 准备姿态下 IK 线程可能卡在等待首帧姿态/MPC 就绪，此时由回调补发夹爪指令。
@@ -5190,17 +5210,11 @@ if __name__ == "__main__":
     kuavo_assests_path = get_package_path("kuavo_assets")
     robot_version = os.environ.get('ROBOT_VERSION', '40')
 
-    # Handle version 15 special case: use version 14 assets
-    if robot_version == '15':
-        robot_version = '14'
-
-    model_file = kuavo_assests_path + f"/models/biped_s{robot_version}/urdf/drake/biped_v3_arm.urdf"
-    model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
-    # model_file = current_pkg_path + "/models/biped_gen4.0/urdf/biped_v3_arm.urdf"
-
+    from tools.full_model_contract import full_model_relative_path, require_full_model
+    full_model_relative_path(robot_version)  # Reject unsupported versions before config lookup.
     if not velocity_ik_takeover_requested:
-        assert os.path.exists(model_file), f"Model file {model_file} does not exist."
-    assert os.path.exists(model_config_file), f"Model config file {model_config_file} does not exist."
+        raise ValueError("Absolute Mapper requires velocity IK takeover")
+    model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
 
     # end_frames_name = ["torso", "l_hand_roll", "r_hand_roll", "l_forearm_pitch", "r_forearm_pitch"]
     import json
@@ -5213,6 +5227,13 @@ if __name__ == "__main__":
     if any(not key.startswith("velocity_ik_") for key in overlay):
         raise ValueError("Non-absolute key in model contract")
     model_config.update(overlay)
+    model_file = str(require_full_model(robot_version, kuavo_assests_path, overlay))
+    if int(rospy.get_param("/robot_version", int(robot_version))) != int(robot_version):
+        raise ValueError("Absolute Mapper/controller robot_version mismatch")
+    if rospy.has_param("/urdfFile"):
+        require_full_model(robot_version, kuavo_assests_path,
+                           {"velocity_ik_urdf": rospy.get_param("/urdfFile")})
+    rospy.set_param("~resolved_model_urdf", model_file)
     end_frames_name = model_config["end_frames_name_ik"]
     shoulder_frame_names = model_config["shoulder_frame_names"]
     upper_arm_length = model_config["upper_arm_length"]
@@ -5223,9 +5244,6 @@ if __name__ == "__main__":
     hand_ref_length = model_config.get("hand_ref_length", 0.193)
     neutral_robot_geometry = None
     if velocity_ik_takeover_requested:
-        model_file = os.path.join(kuavo_assests_path, "models", model_config.get(
-            "velocity_ik_urdf", model_config.get("arm_urdf",
-                f"biped_s{robot_version}/urdf/drake/biped_v3_arm.urdf")))
         if "velocity_ik_urdf" in model_config:
             from tools.target_geometry_contract import neutral_retarget_geometry
             neutral_robot_geometry = neutral_retarget_geometry(
@@ -5236,17 +5254,13 @@ if __name__ == "__main__":
         lower_arm_length -= hand_ref_length
         print(f"using two-stage IK, adjust lower_arm_length: {lower_arm_length} m")
 
-    # ee_type
-    end_effector_type=""
-    try:
-        if rospy.has_param("/end_effector_type"):
-            end_effector_type = rospy.get_param("/end_effector_type")
-            print(f"\033[92mend_effector_type from rosparm: {end_effector_type}\033[0m")
-        else:
-            end_effector_type = model_config.get("EndEffectorType", ["qiangnao", "qiangnao"])[0]
-            print(f"\033[92mend_effector_type from model_config: {end_effector_type}\033[0m")
-    except Exception as e:
-        print(e)
+    # Use the same kuavo.json as dev's controller/joystick chain, with an
+    # intentional CLI override. Do not let an old ROS master parameter silently
+    # disagree with the launch-time SG100 process selection.
+    end_effector_type = resolve(model_config, args.end_effector_type)
+    rospy.set_param("~resolved_end_effector_type", end_effector_type)
+    rospy.loginfo("Absolute end effector: %s (config=%s, override=%s)",
+                  end_effector_type, model_config_file, args.end_effector_type)
 
     print(f"num_arm_joints_var: {num_arm_joints_var}")
     print(f"upper_arm_length: {upper_arm_length}, lower_arm_length: {lower_arm_length}")
@@ -5395,4 +5409,4 @@ if __name__ == "__main__":
     # print(f"\033[92mLeft Arm Length: {arm_length_left:.3f} m, Right Arm Length:{arm_length_right:.3f} m.\033[0m")
     print("*"*10 + "IK/MAPPER INFO END" + "*"*10 + "\n")
 
-    ik_ros = IkRos(arm_ik, ctrl_arm_idx=ctrl_arm_idx, q_limit=q_limit, end_effector_type=end_effector_type, send_srv=send_srv, predict_gesture=predict_gesture, hand_reference_mode=hand_reference_mode, use_two_stage_ik=use_two_stage_ik)
+    ik_ros = IkRos(arm_ik, ctrl_arm_idx=ctrl_arm_idx, q_limit=q_limit, end_effector_type=end_effector_type, send_srv=send_srv, predict_gesture=predict_gesture, hand_reference_mode=hand_reference_mode, use_two_stage_ik=use_two_stage_ik, wheel_joystick_config=model_config.get("joystick_filter"))

@@ -1,15 +1,21 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
+  <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
+  <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
+  <env name="KUAVO_ARM_DRIVER_RESERVED_CPUS" value="$(arg arm_driver_reserved_cpus)" />
   <arg name="reference_transport" default="shm" />
   <arg name="reference_shm_key" default="344421" />
   <arg name="owner_shm_key" default="344422" />
   <!-- Source/devel workspace shortcut to the package-local velocity IK input. -->
-  <arg name="robot_version" default="62" />
-  <arg name="ee_type" default="$(eval 'heiman' if int(arg('robot_version')) == 400062 else 'qiangnao')" />
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <arg name="ee_type" default="auto" doc="Read EndEffectorType from this robot version kuavo.json; optional explicit override" />
   <arg name="ip_address" default="192.168.5.240" />
   <arg name="robot_ip" default="192.168.5.242" />
   <arg name="broadcast_ip" default="192.168.5.255" />
   <include file="$(find wheel_arm_abs_vel)/launch/quest_velocity_ik.launch">
+    <arg name="require_ik_hard_isolation" value="$(arg require_ik_hard_isolation)" />
+    <arg name="arm_driver_reserved_cpus" value="$(arg arm_driver_reserved_cpus)" />
     <arg name="robot_version" value="$(arg robot_version)" />
     <arg name="ee_type" value="$(arg ee_type)" />
     <arg name="input_source" value="pico" />

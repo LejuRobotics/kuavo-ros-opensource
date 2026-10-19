@@ -4,8 +4,6 @@
   <arg name="second_round_enabled" default="true"/>
   <param name="/vr_ik/visualization_rate_hz" value="$(eval 0.0 if arg('full_rate_audit') else 30.0)" type="double"/>
   <param name="/vr_ik/execution_owner_mirror_stride" value="$(eval 1 if arg('full_rate_audit') else 5)" type="int"/>
-  <param name="/hardware/diagnostic_rate_hz" value="$(eval 0.0 if arg('full_rate_audit') else 100.0)" type="double"/>
-  <param name="/hardware/status_diagnostic_rate_hz" value="$(eval 0.0 if arg('full_rate_audit') else 10.0)" type="double"/>
   <param name="/absolute_velocity_ik/diagnostic_rate_hz" value="$(eval 0.0 if arg('full_rate_audit') else 100.0)" type="double"/>
   <param name="/absolute_velocity_ik/formal_reference_mirror_rate_hz" value="$(eval 0.0 if arg('full_rate_audit') else 100.0)" type="double"/>
   <param name="/monitor_quest3/observation_tf_rate_hz" value="$(eval 0.0 if arg('full_rate_audit') else 30.0)" type="double"/>
@@ -14,5 +12,4 @@
   <param name="/absolute_velocity_ik/communication_full_rate_audit" value="$(arg full_rate_audit)" type="bool"/>
   <param name="/absolute_velocity_ik/operating_diagnostics/stride" value="$(eval 1 if (arg('full_rate_audit') or not arg('second_round_enabled')) else 5)" type="int"/>
   <param name="/absolute_velocity_ik/runtime_probe_detail_stride" value="$(eval 1 if (arg('full_rate_audit') or not arg('second_round_enabled')) else 10)" type="int"/>
-  <param name="/hardware/igbt_publish_gate/enabled" value="$(eval not arg('full_rate_audit') and arg('second_round_enabled'))" type="bool"/>
 </launch>

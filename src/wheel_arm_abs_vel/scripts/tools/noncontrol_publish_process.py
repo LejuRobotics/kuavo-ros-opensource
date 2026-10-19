@@ -172,6 +172,11 @@ def diagnostics():
                  closed=d.closed, failed=d.failed)]
 
 def worker(fd, topics, coalesce=True):
+    try:
+        from .background_fence import apply_background_fence
+    except ImportError:
+        from background_fence import apply_background_fence
+    apply_background_fence()
     import select
     import rospy
     from roslib.message import get_message_class

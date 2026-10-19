@@ -1,5 +1,13 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <!-- UCore must resolve the advertised controller address, not a local hostname. -->
+  <arg name="ros_ip" default="192.168.26.1" doc="ROS address reachable by chassis; auto preserves caller environment" />
+  <env name="ROS_IP" value="$(arg ros_ip)" if="$(eval arg('ros_ip') not in ['', 'auto'])" />
+  <env name="ROS_HOSTNAME" value="$(arg ros_ip)" if="$(eval arg('ros_ip') not in ['', 'auto'])" />
+  <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
+  <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
+  <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
+  <env name="KUAVO_ARM_DRIVER_RESERVED_CPUS" value="$(arg arm_driver_reserved_cpus)" />
   <param name="/controller_type" value="wheel_arm_abs_vel" />
   <param name="/cmd_truncation_enable" value="true" />
   <arg name="j3_overshoot_profile" default="true" />
@@ -14,7 +22,8 @@
   <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
   <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
   <!-- Final wheel command lock, startup-only and independent of WBC/RNEA. -->
-  <arg name="base_locked" default="true" />
+  <arg name="base_locked" default="true" doc="False enables joystick chassis commands only during active absolute follow" />
+  <param name="/vr_ik/enable_base_control" value="true" type="bool" />
   <arg name="arm_inertia_feedforward_scale" default="1.0" />
   <param name="/vr_ik/arm_inertia_feedforward_scale" value="$(arg arm_inertia_feedforward_scale)" type="double" />
   <param name="/base_locked" value="$(arg base_locked)" type="bool" />
@@ -39,7 +48,7 @@
   <arg name="use_sqp" default="true" doc="Compatibility argument; this fixed IK entry starts no MPC optimizer" />
   <arg name="rviz" default="false" />
   <arg name="multiplot" default="false" />
-  <arg name="robot_version" default="62" />
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <arg name="use_vr_control" default="true" />
   <param name="use_vr_control" value="$(arg use_vr_control)" />
   <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
@@ -71,7 +80,7 @@
   <arg name="coredump" default="false" />
   <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)" />
   <arg name="with_coredump" value="" unless="$(arg coredump)" />
-  <arg name="with_ik" default="true" />
+  <arg name="with_ik" default="$(eval int(arg('robot_version')) != 63)" />
   <arg name="with_mm_ik" default="false" />
   <arg name="with_led" default="true" />
   <arg name="led_for_state" default="true" doc="是否启动启动状态灯光监控（启动中绿灯闪烁→准备站立绿灯常亮→站立完成白灯常亮→跌倒红灯闪烁）" />
@@ -135,6 +144,8 @@
   <node pkg="wheel_arm_abs_vel" type="fixed_ik_reference_services_node" name="fixed_ik_reference_services" output="screen" required="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh reference_services" />
   <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" output="screen" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background" />
   <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" output="screen" required="true" clear_params="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh controller $(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+    <!-- Shared hardware reads this environment inside the manager process. -->
+    <env name="ROBOT_VERSION" value="$(arg robot_version)" />
     <param name="num_worker_threads" type="int" value="10" />
   </node>
   <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load WheelAbsoluteControllerNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background">
@@ -196,14 +207,14 @@
       <arg name="led_for_state" value="$(arg led_for_state)" />
     </include>
   </group>
-  <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62)">
+  <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62 or arg('robot_version') == 400062)">
     <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service" output="screen" required="false" />
   </group>
   <param name="/vr_ik/use_velocity_ik_reference" value="true" type="bool" />
   <param name="/vr_ik/velocity_ik_reference_topic" value="/whole_body_velocity_ik/reference" type="string" />
   <param name="/vr_ik/velocity_ik_reference_timeout_sec" value="0.05" type="double" />
   <param name="/vr_ik/wbc_arm_ddq_feedforward_gain" value="0.25" type="double" />
-  <param name="/pinocchio_deployment/BASE_CONTROL" value="$(eval 'LOCKED' if arg('base_locked') else 'UPSTREAM_COMMANDS_ALLOWED')" type="str" />
+  <param name="/pinocchio_deployment/BASE_CONTROL" value="$(eval 'LOCKED' if arg('base_locked') else 'VR_INCREMENTAL_JOYSTICK')" type="str" />
   <param name="/pinocchio_deployment/LEGACY_NORMAL_QUICK_SWITCH" value="DISABLED" type="str" />
   <param name="/pinocchio_deployment/IK_PIPELINE" value="PINOCCHIO_VELOCITY" type="str" />
   <arg name="sg100_cmd_filter_alpha" default="0.2" />
@@ -231,7 +242,7 @@
     <arg name="second_round_enabled" value="$(arg communication_second_round_enabled)" />
   </include>
   <include file="$(find wheel_arm_abs_vel)/launch/j3_overshoot_profile.launch">
-    <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) == 62)" />
+    <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) in (62, 63))" />
     <arg name="kd" value="$(arg j3_kd)" />
   </include>
   <group if="$(arg with_ik)">
@@ -239,5 +250,5 @@
       <arg name="robot_version" value="$(arg robot_version)" />
     </include>
   </group>
-  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in [62, 400062] and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires S62/400062 wheel mode, measured estimator and no external MPC'])" />
+  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in (62, 63, 400062) and (int(arg('robot_version')) != 63 or not arg('with_ik')) and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires S62/S63/400062 (S63 with_ik=false) wheel mode, measured estimator and no external MPC'])" />
 </launch>

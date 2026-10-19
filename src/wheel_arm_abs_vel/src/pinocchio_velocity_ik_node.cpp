@@ -1,3 +1,4 @@
+#include "wheel_arm_abs_vel/model/FullModelContract.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/ExecutionProducerLease.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/ClockedReferenceFreshness.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/ExecutionClockIdentity.h"
@@ -1846,7 +1847,8 @@ class PinocchioVelocityIk {
       throw std::runtime_error("kuavo_assets package is not available");
     }
 
-    const std::string version = std::to_string(robot_version_ == 15 ? 14 : robot_version_);
+    wheel_arm_abs_vel::fullModelRelativePath(robot_version_);  // reject unsupported versions
+    const std::string version = std::to_string(robot_version_);
     const std::string config_path = assets_path + "/config/kuavo_v" + version + "/kuavo.json";
     std::ifstream config_file(config_path);
     if (!config_file.is_open()) {
@@ -1893,15 +1895,18 @@ class PinocchioVelocityIk {
     }
     const double eef_z_offset = config.value("eef_z_offset", 0.0);
 
-    std::string model_relative;
-    if (config.contains("velocity_ik_urdf")) {
-      model_relative = config.at("velocity_ik_urdf").get<std::string>();
-    } else if (config.contains("arm_urdf")) {
-      model_relative = config.at("arm_urdf").get<std::string>();
-    } else {
-      model_relative = "biped_s" + version + "/urdf/drake/biped_v3_arm.urdf";
-    }
+    if (!overlay.contains("velocity_ik_urdf") || !overlay.at("velocity_ik_urdf").is_string())
+      throw std::runtime_error("Absolute velocity IK requires an explicit full-model contract: " + private_config);
+    const std::string model_relative = overlay.at("velocity_ik_urdf").get<std::string>();
     const std::string model_path = assets_path + "/models/" + model_relative;
+    wheel_arm_abs_vel::requireFullModel(robot_version_, assets_path, model_path);
+    int controller_version = robot_version_;
+    nh_.param("/robot_version", controller_version, robot_version_);
+    if (controller_version != robot_version_)
+      throw std::runtime_error("Absolute IK/controller robot_version mismatch");
+    std::string controller_urdf;
+    if (nh_.getParam("/urdfFile", controller_urdf))
+      wheel_arm_abs_vel::requireFullModel(robot_version_, assets_path, controller_urdf);
 
     const auto fixed_joints = config.value(
         "velocity_ik_fixed_joints", std::vector<std::string>{});

@@ -1,14 +1,20 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
+  <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
+  <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
+  <env name="KUAVO_ARM_DRIVER_RESERVED_CPUS" value="$(arg arm_driver_reserved_cpus)" />
   <arg name="reference_transport" default="shm" />
   <arg name="reference_shm_key" default="344421" />
   <arg name="owner_shm_key" default="344422" />
   <!-- Standard package entry for the validated fixed-base velocity IK pipeline. -->
-  <arg name="robot_version" default="62" />
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <arg name="dynamics_backend" default="wbc" />
   <arg name="rnea_mode" default="full" />
   <arg name="visualize_humanoid" default="false" />
   <include file="$(find wheel_arm_abs_vel)/launch/load_kuavo_absolute_sim_base.launch">
+    <arg name="require_ik_hard_isolation" value="$(arg require_ik_hard_isolation)" />
+    <arg name="arm_driver_reserved_cpus" value="$(arg arm_driver_reserved_cpus)" />
     <arg name="robot_version" value="$(arg robot_version)" />
     <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
     <arg name="rnea_mode" value="$(arg rnea_mode)" />

@@ -1,3 +1,5 @@
+#include "../velocity_ik/model_pinocchio.h"
+#include <pinocchio/algorithm/frames.hpp>
 #include "wheel_arm_abs_vel/humanoid_wheel_wbc/RneaBackend.h"
 #include <humanoid_wheel_interface/FactoryFunctions.h>
 #include <ocs2_core/misc/LoadData.h>
@@ -30,16 +32,42 @@ template<class F> void rejects(F f,const char* name) {
 
 int main(int argc,char** argv) {
  try {
-  if(argc!=2) throw std::invalid_argument("usage: rnea_backend_test REPOSITORY_ROOT");
+  if(argc!=2 && argc!=3) throw std::invalid_argument("usage: rnea_backend_test REPOSITORY_ROOT [62|63|400062]");
   const std::string root=argv[1];
-  const std::string task=root+"/src/humanoid-wheel-control/humanoid_wheel_interface/config/kuavo_s62/task.info";
+  const std::string version=argc==3?argv[2]:"62";
+  require(version=="62" || version=="63" || version=="400062", "supported model version");
+  const std::string task=root+"/src/humanoid-wheel-control/humanoid_wheel_interface/config/kuavo_s"+version+"/task.info";
   std::vector<std::string> removed;
   loadData::loadStdVector<std::string>(task,"model_information.removeJoints",removed,false);
   const auto type=ManipulatorModelType::WheelWorldBasedMobileManipulator;
-  auto interface=createPinocchioInterface(root+"/src/kuavo_assets/models/biped_s62/urdf/biped_s62.urdf",type,removed);
+  auto interface=createPinocchioInterface(root+"/src/kuavo_assets/models/biped_s"+version+"/urdf/biped_s"+version+".urdf",type,removed);
   auto info=createManipulatorModelInfo(interface,type,"base_link","waist_yaw_link",{});
   const auto& model=interface.getModel(); auto& data=interface.getData();
-  require(model.nq==21 && model.nv==21 && info.armDim==18,"actual s62 dimensions");
+  require(model.nq==21 && model.nv==21 && info.armDim==18,"actual model dimensions");
+  {
+    velocity_ik::ModelPinocchio ik(root+"/src/kuavo_assets/models/biped_s"+version+"/urdf/biped_s"+version+".urdf",
+                                   "base_link", removed);
+    ik.Finalize();auto context=ik.CreateDefaultContext();
+    require(ik.num_positions()==21 && ik.num_velocities()==21,"IK dimensions match WBC");
+    for(size_t k=0;k<info.dofNames.size();++k)
+      require(ik.GetJointByName(info.dofNames[k]).position_start()==static_cast<int>(k+3),
+              "IK/WBC controlled joint order");
+    for(int sample=0;sample<128;++sample) {
+      auto q=ik.GetPositions(*context);q.setZero();
+      q.head(3)<<.1*sample,-.05*sample,.01*sample;
+      for(size_t k=0;k<info.dofNames.size();++k) q[k+3]=.2*std::sin(.17*sample+.37*k);
+      ik.SetPositions(context.get(),q);
+      pinocchio::framesForwardKinematics(model,data,q);
+      for(const auto* frame:{"base_link","waist_yaw_link","zarm_l1_link","zarm_r1_link",
+                            "zarm_l4_link","zarm_r4_link","zarm_l7_end_effector","zarm_r7_end_effector"}) {
+        require(model.existFrame(frame),"WBC frame exists");
+        const auto actual=ik.GetFrameByName(frame).CalcPoseInWorld(*context);
+        const auto& expected=data.oMf[model.getFrameId(frame)];
+        require((actual.p-expected.translation()).norm()<1e-12,"IK/WBC FK position");
+        require((actual.R.matrix()-expected.rotation()).norm()<1e-12,"IK/WBC FK rotation");
+      }
+    }
+  }
   RneaSettings s;
   s.torqueLimit=vector_t::Constant(18,1e6);
   s.torqueRateLimit=vector_t::Constant(18,1e12);
@@ -148,7 +176,7 @@ int main(int argc,char** argv) {
     times.push_back(std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count());
   }
   std::sort(times.begin(),times.end());
-  std::cout<<"PASS "<<checks<<" checks, actual s62 model, 12000 cycles; wall us median="
+  std::cout<<"PASS "<<checks<<" checks, actual s"<<version<<" model, 12000 cycles; wall us median="
            <<times[6000]<<" p99="<<times[11880]<<" max="<<times.back()<<" (container, not robot RT guarantee)\n";
   return 0;
  } catch(const std::exception& e) {std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}

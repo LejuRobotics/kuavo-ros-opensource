@@ -1,4 +1,4 @@
-# Startup-only S62 candidate. Disable via j3_overshoot_profile:=false on BOTH launches.
+# Startup-only S62/S63 candidate. Disable via j3_overshoot_profile:=false on BOTH launches.
 # Braking is transmitted in WholeBodyIkReference; no independent owner constant.
 kp: 250.0
 j3_kd: 18.0

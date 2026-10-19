@@ -54,6 +54,8 @@
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
 #include "kuavo_common/common/json_config_reader.hpp"
 
+#include "wheel_arm_abs_vel/humanoid_controllers/VelocityIkBaseCommand.h"
+
 namespace wheel_absolute_control
 {
   using humanoidController_wheel_wbc::ArmTrajectoryInterpolator;
@@ -214,6 +216,10 @@ namespace wheel_absolute_control
     // 发布者
     ros::Publisher cmdVelPub_;
     ros::Publisher baseLockStatePub_;
+    humanoidController_wheel_wbc::VelocityIkBaseCommand<geometry_msgs::Twist> velocity_ik_base_command_;
+    ros::Subscriber velocity_ik_base_sub_;
+    bool velocity_ik_base_control_{false};
+    std::unique_ptr<const mobile_manipulator::VelocityLimiter> base_velocity_limiter_zero_;
     bool base_locked_{true};  // Startup-only final wheel command interlock; not torso locking.
     ros::Publisher velControlStatePub_;
     ros::Publisher enableControlStatePub_;  // latched topic，同步 CDM 和 RM 的 enable 状态
