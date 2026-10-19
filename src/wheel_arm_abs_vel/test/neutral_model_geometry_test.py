@@ -12,10 +12,11 @@ sys.path.insert(0,str(PACKAGE/'scripts'))
 from tools.target_geometry_contract import neutral_retarget_geometry, model_geometry
 ASSETS=PACKAGE.parent/'kuavo_assets'
 class GeometryTest(unittest.TestCase):
+    version = '62'
     @classmethod
     def setUpClass(cls):
-        cls.config=json.loads((ASSETS/'config/kuavo_v62/kuavo.json').read_text())
-        cls.config.update(json.loads((PACKAGE/'config/model_s62.json').read_text()))
+        cls.config=json.loads((ASSETS/f'config/kuavo_v{cls.version}/kuavo.json').read_text())
+        cls.config.update(json.loads((PACKAGE/f'config/model_s{cls.version}.json').read_text()))
         cls.canonical=ASSETS/'models'/cls.config['velocity_ik_urdf']
         cls.legacy=ASSETS/'models'/cls.config['arm_urdf']
     def geometry(self,path):
@@ -51,4 +52,7 @@ class GeometryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'asymmetric.urdf';tree.write(path)
             with self.assertRaises(ValueError):self.geometry(path)
+class Geometry400062Test(GeometryTest):
+    version = '400062'
+
 if __name__=='__main__':unittest.main()

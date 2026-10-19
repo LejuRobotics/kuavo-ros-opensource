@@ -26,7 +26,7 @@ struct SG100VrInput {
  *
  * 不持有手势库,也不注册 /sg100/ 服务。仅在原始输入新鲜时 30Hz 发布 /sg100/trigger,
  * 断流时发送一次空 data 通知暂停,不会重复发送缓存的扳机值。
- * 摸 X+A / X+B 满 300ms 后调用 /sg100/step_gesture。
+ * 摸 X+A / X+B 满 300ms 后调用 /sg100/vr_step_gesture。
  * 服务由真机或仿真的手节点提供。
  */
 class SG100VrGestureClient {

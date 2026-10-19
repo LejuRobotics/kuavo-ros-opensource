@@ -3,7 +3,7 @@
  *
  * 手势库加载、/sg100/ service、/sg100_hand_command 100Hz 发布线程。
  * 由真机 SG100HandROSNode 与仿真 DexHandMujocoRosNode 启动,不在 VR IK 进程里。
- * 扳机来自 /sg100/trigger;没有新鲜输入时停止发布命令。
+ * 服务控制独立执行手势；VR 控制的扳机来自 /sg100/trigger，断流时停止发布。
  */
 #include "motion_capture_ik/SG100HandBridge.h"
 
@@ -119,14 +119,39 @@ bool SG100HandBridge::onSetEnabled(std_srvs::SetBool::Request& req, std_srvs::Se
   std::lock_guard<std::mutex> lock(gate_mutex_);
   res.success = gate_.enable(req.data, ready_.load() && vrInputReady() && (left_enabled_ || right_enabled_));
   if (res.success && req.data) requestFilterReseed();
-  res.message = res.success ? (req.data ? "SG100 VR enabled" : "SG100 VR disabled; last target held")
-                            : "SG100 VR requires configured hands and fresh valid input";
+  res.message = res.success ? (req.data ? "SG100 control enabled" : "SG100 control disabled; last target held")
+                            : "SG100 control requires configured hands and fresh input in VR mode";
+  return true;
+}
+
+bool SG100HandBridge::onUseVrControl(std_srvs::SetBool::Request& req,
+                                      std_srvs::SetBool::Response& res) {
+  std::lock_guard<std::mutex> lock(gate_mutex_);
+  std::lock_guard<std::mutex> gesture_lock(mutex_);
+  if (req.data) {
+    if (!ready_ || !vrInputReady()) {
+      res.success = false;
+      res.message = "VR control requires fresh valid trigger input";
+      return true;
+    }
+    selectVrLocked();
+    requestFilterReseed();
+  } else {
+    gate_.selectService();
+  }
+  res.success = true;
+  res.message = req.data ? "VR trigger control selected" : "Service control selected";
   return true;
 }
 
 void SG100HandBridge::start() {
   { std::lock_guard<std::mutex> lock(gate_mutex_); gate_ = SG100BridgeGate{}; }
   last_trigger_received_.store(0.0);
+  nh_.param("/sg100/service_progress", service_progress_, 0.0);
+  if (!std::isfinite(service_progress_) || service_progress_ < 0.0 || service_progress_ > 1.0) {
+    ROS_FATAL("[SG100HandBridge] service_progress must be in [0, 1]");
+    return;
+  }
   // 第一件事:确认关节限位可用 —— 限位不可用就不启动。
   // 没有正确的限位,clamp() 无法保护硬件(曾用 [0, 1.57] 兜底,而 thumb_j2 真实限位是
   // [-2.62, 0],方向相反)。
@@ -196,6 +221,8 @@ void SG100HandBridge::start() {
   // service / trigger 用独立队列,不跟 nodelet_manager 抢公共 spinner。
   srv_enable_ = gesture_nh_.advertiseService(
       "/sg100/set_enabled", &SG100HandBridge::onSetEnabled, this);
+  srv_use_vr_ = gesture_nh_.advertiseService(
+      "/sg100/use_vr_control", &SG100HandBridge::onUseVrControl, this);
   srv_get_ = gesture_nh_.advertiseService(
       "/sg100/get_gestures", &SG100HandBridge::onGetGestures, this);
   srv_add_ = gesture_nh_.advertiseService(
@@ -208,6 +235,9 @@ void SG100HandBridge::start() {
       "/sg100/switch_gesture", &SG100HandBridge::onSwitchGesture, this);
   srv_step_ = gesture_nh_.advertiseService(
       "/sg100/step_gesture", &SG100HandBridge::onStepGesture, this);
+
+  srv_vr_step_ = gesture_nh_.advertiseService(
+      "/sg100/vr_step_gesture", &SG100HandBridge::onVrStepGesture, this);
 
   cmd_pub_ =
       nh_.advertise<kuavo_msgs::SG100HandCommand>("/sg100_hand_command", 10);
@@ -246,12 +276,11 @@ void SG100HandBridge::publishLoop() {
       continue;
     }
 
-    bool allowed;
-    {
-      std::lock_guard<std::mutex> gate_lock(gate_mutex_);
-      allowed = gate_.allow(vrInputReady());
-    }
+    std::unique_lock<std::mutex> gate_lock(gate_mutex_);
+    const bool allowed = gate_.allow(vrInputReady());
+    const bool service_control = gate_.serviceControl();
     if (!allowed) {
+      gate_lock.unlock();
       rate.sleep();
       continue;
     }
@@ -262,6 +291,7 @@ void SG100HandBridge::publishLoop() {
         std::max(0.0f, std::min(1.0f, right_trigger_.load()));
 
     const int key_mode = key_mode_.load();
+    bool command_left = left_enabled_, command_right = right_enabled_;
 
     HighlyDynamic::SG100HandPose left_pose;
     HighlyDynamic::SG100HandPose right_pose;
@@ -271,21 +301,31 @@ void SG100HandBridge::publishLoop() {
       // 只在读手势库时持锁。sleep / publish / 直送驱动绝不能握着,
       // 否则 /sg100/step_gesture 会等整拍 sleep(仿真卡顿时可达十几秒)。
       std::lock_guard<std::mutex> gesture_lock(mutex_);
-      ok_left = left_lib_.buildTarget(key_mode, left_trigger, left_pose);
-      ok_right = right_lib_.buildTarget(key_mode, right_trigger, right_pose);
+      if (service_control) {
+        command_left &= service_left_active_;
+        command_right &= service_right_active_;
+      }
+
+      ok_left = !command_left || left_lib_.buildTarget(
+          service_control ? service_left_mode_ : key_mode,
+          service_control ? service_progress_ : left_trigger, left_pose);
+      ok_right = !command_right || right_lib_.buildTarget(
+          service_control ? service_right_mode_ : key_mode,
+          service_control ? service_progress_ : right_trigger, right_pose);
       if (ok_left && ok_right &&
-          left_pose.positions.size() ==
-              static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF) &&
-          right_pose.positions.size() ==
-              static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF)) {
-        if (left_enabled_) left_limits_.clamp(left_pose.positions);
-        if (right_enabled_) right_limits_.clamp(right_pose.positions);
+          (!command_left || left_pose.positions.size() ==
+              static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF)) &&
+          (!command_right || right_pose.positions.size() ==
+              static_cast<std::size_t>(HighlyDynamic::SG100_HAND_CMD_DOF))) {
+        if (command_left) left_limits_.clamp(left_pose.positions);
+        if (command_right) right_limits_.clamp(right_pose.positions);
       } else {
         ok_left = false;
         ok_right = false;
       }
     }
-    if (!ok_left || !ok_right) {
+    if (!ok_left || !ok_right || (!command_left && !command_right)) {
+      gate_lock.unlock();
       rate.sleep();
       continue;
     }
@@ -294,8 +334,8 @@ void SG100HandBridge::publishLoop() {
     cmd.header.stamp = ros::Time::now();
     cmd.left_hand_positions = left_pose.positions;
     cmd.right_hand_positions = right_pose.positions;
-    cmd.left_enable_mask = left_enabled_ ? 0x07FF : 0;
-    cmd.right_enable_mask = right_enabled_ ? 0x07FF : 0;
+    cmd.left_enable_mask = command_left ? 0x07FF : 0;
+    cmd.right_enable_mask = command_right ? 0x07FF : 0;
     cmd.source_id = kVrSourceId;
     cmd.skip_filter = false;
     cmd.control_mode = kuavo_msgs::SG100HandCommand::MODE_JOINT_POSITION;
@@ -331,7 +371,6 @@ void SG100HandBridge::publishLoop() {
       handler = command_handler_;
     }
     {
-      std::lock_guard<std::mutex> gate_lock(gate_mutex_);
       if (gate_.allow(vrInputReady())) {
         if (handler) {
           handler(cmd);
@@ -339,6 +378,7 @@ void SG100HandBridge::publishLoop() {
         cmd_pub_.publish(cmd);
       }
     }
+    gate_lock.unlock();
     rate.sleep();
   }
 }
@@ -366,22 +406,18 @@ bool SG100HandBridge::applyHandSide(int hand_side, bool& do_left,
 }
 
 void SG100HandBridge::clampKeyModeLocked(std::size_t mode_count) {
-  if (mode_count == 0) {
-    key_mode_.store(0);
-    return;
-  }
-  const int current = key_mode_.load();
-  const int max_id = static_cast<int>(mode_count) - 1;
-  if (current < 0) {
-    key_mode_.store(0);
-  } else if (current > max_id) {
-    key_mode_.store(max_id);
-  }
+  const auto clamp = [](int mode, std::size_t count) {
+    return count == 0 ? 0 : std::max(0, std::min(mode, static_cast<int>(count) - 1));
+  };
+  key_mode_.store(clamp(key_mode_.load(), mode_count));
+  service_left_mode_ = clamp(service_left_mode_, left_lib_.modeCount());
+  service_right_mode_ = clamp(service_right_mode_, right_lib_.modeCount());
 }
 
 bool SG100HandBridge::onGetGestures(
     kuavo_msgs::SG100GetGestures::Request& req,
     kuavo_msgs::SG100GetGestures::Response& res) {
+  std::lock_guard<std::mutex> gate_lock(gate_mutex_);
   std::lock_guard<std::mutex> lock(mutex_);
   const SG100GestureLibrary* lib = nullptr;
   switch (req.hand_side) {
@@ -407,7 +443,10 @@ bool SG100HandBridge::onGetGestures(
 
   int query_id = req.id;
   if (query_id == kuavo_msgs::SG100GetGestures::Request::QUERY_CURRENT) {
-    query_id = key_mode_.load();  // 当前激活手势
+    query_id = gate_.serviceControl()
+        ? (req.hand_side == kuavo_msgs::SG100GetGestures::Request::LEFT_HAND
+               ? service_left_mode_ : service_right_mode_)
+        : key_mode_.load();  // 当前激活手势
   }
   if (query_id < 0 || query_id >= static_cast<int32_t>(lib->modeCount())) {
     res.success = false;
@@ -626,6 +665,25 @@ bool SG100HandBridge::onUpdateGesture(
   return true;
 }
 
+void SG100HandBridge::selectVrLocked() {
+  service_left_active_ = false;
+  service_right_active_ = false;
+  // A later service step starts from the current VR gesture, not an old target.
+  service_left_mode_ = key_mode_.load();
+  service_right_mode_ = key_mode_.load();
+  gate_.selectVr();
+}
+
+void SG100HandBridge::logGestureLocked(bool left, int id, bool vr_control) const {
+  CurveGesture gesture;
+  const auto& library = left ? left_lib_ : right_lib_;
+  if (library.getGesture(id, gesture)) {
+    ROS_INFO("[SG100HandBridge] %s gesture switched: hand=%s id=%d name=%s",
+             vr_control ? "VR" : "service", left ? "left" : "right",
+             id, gesture.name.c_str());
+  }
+}
+
 bool SG100HandBridge::onSwitchGesture(
     kuavo_msgs::SG100SwitchGesture::Request& req,
     kuavo_msgs::SG100SwitchGesture::Response& res) {
@@ -636,14 +694,27 @@ bool SG100HandBridge::onSwitchGesture(
     return true;
   }
   {
+    std::lock_guard<std::mutex> gate_lock(gate_mutex_);
     std::lock_guard<std::mutex> lock(mutex_);
-    const std::size_t mode_count = left_lib_.modeCount();
-    if (req.id < 0 || req.id >= static_cast<int32_t>(mode_count)) {
+    if (!ready_ || (do_left && !left_enabled_) || (do_right && !right_enabled_)) {
+      res.success = false;
+      res.message = "Requested hand is unavailable";
+      return true;
+    }
+    const std::size_t mode_count = do_left ? left_lib_.modeCount() : right_lib_.modeCount();
+    if (req.id < 0 || req.id >= static_cast<int32_t>(mode_count) ||
+        (do_right && req.id >= static_cast<int32_t>(right_lib_.modeCount()))) {
       res.success = false;
       res.message = "id out of range";
       return true;
     }
+    if (do_left) { service_left_mode_ = req.id; service_left_active_ = true; }
+    if (do_right) { service_right_mode_ = req.id; service_right_active_ = true; }
     key_mode_.store(req.id);
+    gate_.selectService();
+    requestFilterReseed();
+    if (do_left) logGestureLocked(true, service_left_mode_, false);
+    if (do_right) logGestureLocked(false, service_right_mode_, false);
   }
   res.success = true;
   res.message = "ok";
@@ -653,6 +724,23 @@ bool SG100HandBridge::onSwitchGesture(
 bool SG100HandBridge::onStepGesture(
     kuavo_msgs::SG100StepGesture::Request& req,
     kuavo_msgs::SG100StepGesture::Response& res) {
+  return stepGesture(req, res, false);
+}
+
+bool SG100HandBridge::onVrStepGesture(
+    kuavo_msgs::SG100StepGesture::Request& req,
+    kuavo_msgs::SG100StepGesture::Response& res) {
+  return stepGesture(req, res, true);
+}
+
+bool SG100HandBridge::stepGesture(
+    kuavo_msgs::SG100StepGesture::Request& req,
+    kuavo_msgs::SG100StepGesture::Response& res, bool vr_control) {
+  if (vr_control && req.hand_side != 2) {
+    res.success = false;
+    res.message = "VR gesture switch requires both hands";
+    return true;
+  }
   bool do_left = false, do_right = false;
   if (!applyHandSide(req.hand_side, do_left, do_right)) {
     res.success = false;
@@ -660,19 +748,55 @@ bool SG100HandBridge::onStepGesture(
     return true;
   }
   {
+    std::lock_guard<std::mutex> gate_lock(gate_mutex_);
     std::lock_guard<std::mutex> lock(mutex_);
-    const std::size_t mode_count = left_lib_.modeCount();
+    if (!ready_ || (do_left && !left_enabled_) || (do_right && !right_enabled_)) {
+      res.success = false;
+      res.message = "Requested hand is unavailable";
+      return true;
+    }
+    if (vr_control && !vrInputReady()) {
+      res.success = false;
+      res.message = "VR gesture switch requires fresh trigger input";
+      return true;
+    }
+    const std::size_t mode_count = do_left ? left_lib_.modeCount() : right_lib_.modeCount();
     if (mode_count == 0) {
       res.success = false;
       res.message = "no gestures";
       return true;
     }
     const int dir = (req.direction >= 0) ? 1 : -1;
-    const int n = static_cast<int>(mode_count);
     // 负数安全取模：C++ 里 (-1) % n == -1，需 +n 再取模
-    const int next = ((key_mode_.load() + dir) % n + n) % n;
-    key_mode_.store(next);
-    res.current_id = next;
+    const auto step = [dir](int mode, std::size_t count) {
+      const int size = static_cast<int>(count);
+      return ((mode + dir) % size + size) % size;
+    };
+    if (do_right && right_lib_.modeCount() == 0) {
+      res.success = false;
+      res.message = "no right gestures";
+      return true;
+    }
+    if (vr_control) {
+      const auto count = std::min(left_lib_.modeCount(), right_lib_.modeCount());
+      if (count == 0) {
+        res.success = false;
+        res.message = "no VR gestures";
+        return true;
+      }
+      key_mode_.store(step(key_mode_.load(), count));
+      res.current_id = key_mode_.load();
+      selectVrLocked();
+    } else {
+      if (do_left) { service_left_mode_ = step(service_left_mode_, left_lib_.modeCount()); service_left_active_ = true; }
+      if (do_right) { service_right_mode_ = step(service_right_mode_, right_lib_.modeCount()); service_right_active_ = true; }
+      res.current_id = do_left ? service_left_mode_ : service_right_mode_;
+      key_mode_.store(res.current_id);
+      gate_.selectService();
+    }
+    requestFilterReseed();
+    if (do_left) logGestureLocked(true, vr_control ? key_mode_.load() : service_left_mode_, vr_control);
+    if (do_right) logGestureLocked(false, vr_control ? key_mode_.load() : service_right_mode_, vr_control);
   }
   res.success = true;
   res.message = "ok";

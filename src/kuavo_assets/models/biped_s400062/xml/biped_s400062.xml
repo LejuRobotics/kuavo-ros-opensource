@@ -156,6 +156,7 @@
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="l_hand_pitch"/>
                             <geom size="0.005" pos="0 0 -0.17" group="3"/>
                             <body name="camera_l_base" pos="0.093563 -0.015735 0.021967" quat="0.599516 -0.137763 0.781296 -0.105723">
+                              <inertial pos="0.00328553537028964 -7.89800552725151E-05 0.0210850361368638" mass="1.07678764383011" fullinertia="0.00030136650431297 0.000197188357500368 0.000197432969996236 4.16950913681036E-07 -2.96525332759412E-07 1.13089282183731E-08"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 0.941176 0.678431 1" mesh="camera_l_base"/>
                               <body name="camera_l_color_link" pos="0.0109 0.009 0.021"/>
                               <body name="camera_l_depth_link" pos="0.0109 -0.009 0.021"/>
@@ -263,6 +264,7 @@
                             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_hand_pitch"/>
                             <geom size="0.005" pos="0 0 -0.17" group="3"/>
                             <body name="camera_r_base" pos="0.134 0.015735 0.0111" quat="0.599516 0.137763 0.781296 0.105723">
+                              <inertial pos="0.00328553537028964 7.89800552725151E-05 0.0210850361368638" mass="1.07678764383011" fullinertia="0.00030136650431297 0.000197188357500368 0.000197432969996236 -4.16950913681036E-07 -2.96525332759412E-07 -1.13089282183731E-08"/>
                               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" quat="0 1 0 0" rgba="1 0.941176 0.678431 1" mesh="camera_r_base"/>
                               <body name="camera_r_color_link" pos="0.0109 -0.009 -0.021" quat="0 1 0 0"/>
                               <body name="camera_r_depth_link" pos="0.0109 0.009 -0.021" quat="0 1 0 0"/>

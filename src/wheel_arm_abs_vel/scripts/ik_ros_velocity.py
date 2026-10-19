@@ -53,6 +53,7 @@ from geometry_msgs.msg import Vector3Stamped
 from kuavo_msgs.msg import JoySticks
 from tools.quest3_utils_velocity import Quest3ArmInfoTransformer
 from tools.mapper_input_scheduling import MapperInputScheduler
+from tools.sg100_vr_gesture import Sg100VrGestureClient
 from tools.noncontrol_publish_process import publisher as diagnostic_publisher
 from tools.absolute_ik_safety import AbsoluteIkExecutionSafety
 from kuavo_msgs.msg import (
@@ -560,6 +561,7 @@ class IkRos:
         self.dexhand_front_trigger = rospy.get_param("~dexhand_front_trigger", False)
         self.sg100_enabled = rospy.get_param("~sg100_enabled", False)
         if self.sg100_enabled:
+            self.sg100_gesture_client = Sg100VrGestureClient()
             self.sg100_trigger_pub = rospy.Publisher(
                 "/sg100/mapper_triggers", Vector3Stamped, queue_size=1, tcp_nodelay=True)
 
@@ -4618,6 +4620,8 @@ class IkRos:
             command.vector.z = 1.0
         # Publish revocation as well, so an explicit stop need not await timeout.
         self.sg100_trigger_pub.publish(command)
+        if hasattr(self, "sg100_gesture_client"):
+            self.sg100_gesture_client.update(msg, command.vector.z == 1.0)
 
     def hand_finger_data_process(self, event):
         if self._uses_front_trigger_dexhand():

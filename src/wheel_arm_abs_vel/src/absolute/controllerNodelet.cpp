@@ -47,7 +47,7 @@ public:
         nh.param("/nodelet_robot_type", robot_type, 0);
         nh.param("/wheel_control_type", wheel_type, 0);
         nh.param("/estimator_type", estimator, 1);
-        if (!absolute_mode || robot_type != 1 || wheel_type == 0 || estimator != 1 || external_mpc || robot_version != 62)
+        if (!absolute_mode || robot_type != 1 || wheel_type == 0 || estimator != 1 || external_mpc || (robot_version != 62 && robot_version != 400062))
         {
             NODELET_ERROR("WheelAbsoluteControllerNodelet requires explicit wheel absolute mode");
             throw std::runtime_error("WheelAbsoluteControllerNodelet requires explicit wheel absolute mode");

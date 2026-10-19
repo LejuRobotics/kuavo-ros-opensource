@@ -28,10 +28,10 @@ void SG100VrGestureClient::stop() {
 
 void SG100VrGestureClient::start() {
   trigger_pub_ = nh_.advertise<std_msgs::Float32MultiArray>(kSg100TriggerTopic, 10);
-  step_client_ = nh_.serviceClient<kuavo_msgs::SG100StepGesture>("/sg100/step_gesture");
+  step_client_ = nh_.serviceClient<kuavo_msgs::SG100StepGesture>("/sg100/vr_step_gesture");
   stop_.store(false);
   thread_ = std::thread(&SG100VrGestureClient::loop, this);
-  ROS_INFO("[SG100VrGestureClient] publishing %s, stepping via /sg100/step_gesture",
+  ROS_INFO("[SG100VrGestureClient] publishing %s, stepping via /sg100/vr_step_gesture",
            kSg100TriggerTopic);
 }
 
@@ -121,7 +121,7 @@ void SG100VrGestureClient::checkVrGestureSwitch() {
 
   if (!step_client_.exists()) {
     ROS_WARN_THROTTLE(5.0,
-                      "[SG100VrGestureClient] /sg100/step_gesture not available "
+                      "[SG100VrGestureClient] /sg100/vr_step_gesture not available "
                       "(hand node not up); gesture switch skipped");
     pending_dir_ = 0;
     return;

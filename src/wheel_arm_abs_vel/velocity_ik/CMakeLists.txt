@@ -136,6 +136,8 @@ add_executable(velocity_ik_model_alignment_test model_alignment_test.cpp)
 target_link_libraries(velocity_ik_model_alignment_test PRIVATE velocity_ik_model)
 add_test(NAME velocity_ik_model_alignment_test COMMAND velocity_ik_model_alignment_test
   ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s62.json)
+add_test(NAME velocity_ik_model_alignment_400062_test COMMAND velocity_ik_model_alignment_test
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s400062.json 400062)
 add_test(NAME velocity_ik_neutral_model_geometry_test
   COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../test/neutral_model_geometry_test.py)
 

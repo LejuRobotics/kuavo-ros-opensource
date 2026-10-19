@@ -37,6 +37,8 @@ inline constexpr const char* kSg100TriggerTopic = "/sg100/trigger";
  * @brief SG100(黑漫)手 ROS 桥接:手势库 + /sg100/ services + /sg100_hand_command 发布线程
  *
  * 挂在跟机器人一起起来的手节点上(真机 SG100HandROSNode、仿真 DexHandMujocoRosNode)。
+ * switch/step 服务显式选择服务控制，默认执行曲线进度 0（松开扳机），无需 VR 心跳。
+ * use_vr_control=true 显式切回 VR；VR 超时与人工禁用仍停止发布。
  * service / trigger 走独立 CallbackQueue + AsyncSpinner,避免被 nodelet_manager
  * 公共回调队列堵十几秒。同进程内还可 setCommandHandler 直送驱动,不绕订阅。
  */
@@ -66,11 +68,15 @@ class SG100HandBridge {
   /// 最近的有效 trigger 是否仍然新鲜
   bool vrInputReady() const;
 
+  bool onUseVrControl(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
   bool onSetEnabled(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
   void publishLoop();
   void requestFilterReseed();
   void onTrigger(const std_msgs::Float32MultiArray::ConstPtr& msg);
   void clampKeyModeLocked(std::size_t mode_count);
+  void logGestureLocked(bool left, int id, bool vr_control) const;
+  // Caller holds gate_mutex_ and mutex_. End the previous service session.
+  void selectVrLocked();
 
   /// hand_side 解析:0→left, 1→right, 2→both;其余返回 false
   bool applyHandSide(int hand_side, bool& do_left, bool& do_right);
@@ -88,6 +94,11 @@ class SG100HandBridge {
   bool onStepGesture(kuavo_msgs::SG100StepGesture::Request& req,
                      kuavo_msgs::SG100StepGesture::Response& res);
 
+  bool onVrStepGesture(kuavo_msgs::SG100StepGesture::Request& req,
+                       kuavo_msgs::SG100StepGesture::Response& res);
+  bool stepGesture(kuavo_msgs::SG100StepGesture::Request& req,
+                   kuavo_msgs::SG100StepGesture::Response& res, bool vr_control);
+
   static constexpr uint32_t kVrSourceId = 1;
   bool left_enabled_ = true;
   bool right_enabled_ = true;
@@ -103,6 +114,7 @@ class SG100HandBridge {
 
   ros::Publisher cmd_pub_;
   ros::ServiceServer srv_enable_;
+  ros::ServiceServer srv_use_vr_;
   ros::Subscriber trigger_sub_;
   ros::ServiceServer srv_get_;
   ros::ServiceServer srv_add_;
@@ -110,6 +122,7 @@ class SG100HandBridge {
   ros::ServiceServer srv_update_;
   ros::ServiceServer srv_switch_;
   ros::ServiceServer srv_step_;
+  ros::ServiceServer srv_vr_step_;
 
   std::thread thread_;
   std::mutex mutex_;
@@ -119,6 +132,9 @@ class SG100HandBridge {
   CommandHandler command_handler_;
   std::function<void()> input_resume_handler_;
   std::atomic<int> key_mode_{0};
+  int service_left_mode_{0}, service_right_mode_{0};
+  bool service_left_active_{false}, service_right_active_{false};
+  double service_progress_{0.0};
   std::atomic<bool> ready_{false};
   std::atomic<bool> stop_{false};
 

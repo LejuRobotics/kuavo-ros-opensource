@@ -11,9 +11,10 @@ using json=nlohmann::json;
 void check(bool ok,const std::string& reason){if(!ok)throw std::runtime_error(reason);}
 int main(int argc,char** argv){
  try{
-  check(argc==3,"usage: model_alignment_test assets_directory private_contract");
+  check(argc==3 || argc==4,"usage: model_alignment_test assets_directory private_contract [robot_version]");
   const std::string assets=argv[1];
-  json cfg;std::ifstream(assets+"/config/kuavo_v62/kuavo.json")>>cfg;
+  const std::string version=argc==4 ? argv[3] : "62";
+  json cfg;std::ifstream(assets+"/config/kuavo_v"+version+"/kuavo.json")>>cfg;
   json overlay;std::ifstream(argv[2])>>overlay;cfg.update(overlay);
   const std::string path=assets+"/models/"+cfg.at("velocity_ik_urdf").get<std::string>();
   auto fixed=cfg.at("velocity_ik_fixed_joints").get<std::vector<std::string>>();

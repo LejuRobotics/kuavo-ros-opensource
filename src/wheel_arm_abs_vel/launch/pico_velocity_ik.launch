@@ -4,10 +4,14 @@
   <arg name="reference_shm_key" default="344421" />
   <arg name="owner_shm_key" default="344422" />
   <!-- Source/devel workspace shortcut to the package-local velocity IK input. -->
+  <arg name="robot_version" default="62" />
+  <arg name="ee_type" default="$(eval 'heiman' if int(arg('robot_version')) == 400062 else 'qiangnao')" />
   <arg name="ip_address" default="192.168.5.240" />
   <arg name="robot_ip" default="192.168.5.242" />
   <arg name="broadcast_ip" default="192.168.5.255" />
   <include file="$(find wheel_arm_abs_vel)/launch/quest_velocity_ik.launch">
+    <arg name="robot_version" value="$(arg robot_version)" />
+    <arg name="ee_type" value="$(arg ee_type)" />
     <arg name="input_source" value="pico" />
     <arg name="hand_position_cutoff_hz" value="10.0" />
     <arg name="hand_orientation_cutoff_hz" value="8.0" />

@@ -1,6 +1,6 @@
 # Wheel-arm absolute velocity IK
 
-This additive package contains the S62 absolute teleoperation mode. Its source
+This additive package contains the S62 and 400062 absolute teleoperation mode. Its source
 was extracted from a145c974e3b475d0740acd24cd36346b1723573b onto official dev
 9ca0b7b880188faa1b686b48e906c032c36124d7. No existing repository file is changed.
 
@@ -18,7 +18,7 @@ Select the new controller explicitly:
 The direct load_kuavo_real_velocity_ik.launch and load_kuavo_mujoco_velocity_ik.launch
 entries also explicitly select this mode. The new plugin rejects a missing
 selector, a non-wheel controller, an incompatible estimator, or external MPC.
-Only S62 has a private model contract.
+Only versions 62 and 400062 have private model contracts.
 
 The controller and VR input are separate processes. Input entries are
 wheel_arm_abs_vel/quest_velocity_ik.launch and wheel_arm_abs_vel/pico_velocity_ik.launch.
@@ -50,8 +50,8 @@ existing torque-only MuJoCo actuator model. Backend selection is startup-only.
   the stopped endpoint, without re-entering a legacy trajectory writer.
 - Stop and controller teardown notify the existing hardware lifecycle. This
   package adds no motor driver or copy of the hardware safety layer.
-- The S62 full-model reduction and guarded IK intervals are in
-  config/model_s62.json; baseline assets and URDFs are unchanged.
+- The version-specific full-model reductions and guarded IK intervals are in
+  config/model_s62.json and config/model_s400062.json; baseline assets and URDFs are unchanged.
 
 The raw donor's shared RT changes and copied AbsoluteHardwareNode are excluded.
 Consequently deferred hardware initialization and donor-only hardware telemetry
@@ -78,3 +78,61 @@ and offline smoke results do not qualify real actuators or a physical closed loo
 Runtime CPU partitioning is in config/runtime_partition.json and must match
 the host's online/isolated topology. Offline tests may set
 KUAVO_RUNTIME_PARTITION=0; deployment must validate its own topology.
+
+## 400062 startup
+
+After building and sourcing this workspace, start the controller:
+
+    roslaunch wheel_arm_abs_vel control.launch controller_type:=wheel_arm_abs_vel robot_version:=400062
+
+In a separate terminal, select one input source with the deployment IP settings:
+
+    roslaunch wheel_arm_abs_vel quest_velocity_ik.launch robot_version:=400062
+    roslaunch wheel_arm_abs_vel pico_velocity_ik.launch robot_version:=400062
+
+Use only one input entry. For MuJoCo, add real:=false to the controller command.
+Both controller and input must use the same full robot version. Version 400062
+loads its own URDF/configuration and defaults to the configured heiman end
+effector. Its 22 finger joints are fixed in the IK model, matching the existing
+400062 dynamics task file; fingers are controlled separately through SG100.
+The physical IK remains fixed-base 18-axis with a 21-D reference interface.
+The S62-only J3 gain override stays disabled for 400062; existing 400062 gains
+and hardware protection remain authoritative.
+
+Model alignment and launch parsing are offline checks. Physical teleoperation,
+hand-driver connectivity and actuator stability require deployment validation.
+
+## 黑漫手独立服务控制
+
+400062 机器端启动后，仿真和实物的 SG100HandBridge 都提供独立手势控制，
+无需启动 Quest/Pico 节点。仿真需已开始运行，整机控制不得处于禁用状态。
+
+    rosservice call /sg100/switch_gesture "id: 1
+    hand_side: 2"
+    rosservice call /sg100/step_gesture "direction: 1
+    hand_side: 0"
+
+hand_side 为 0=左手、1=右手、2=双手。服务会选择服务控制并执行目标手势，
+默认使用曲线进度 0.0，对应 YAML 第一列 `[0, value]` 的松开扳机姿态；
+第二列 `[100, value]` 对应完全捏住扳机。
+可在机器启动前设置 /sg100/service_progress（范围 0～1，默认 0）。
+单手请求不会给另一只尚未通过服务控制的手发送新目标。
+查询当前手势仍使用 /sg100/get_gestures。
+
+服务控制下，VR 扳机和断流事件不会覆盖服务目标。恢复 VR 扳机控制需显式调用：
+
+    rosservice call /sg100/use_vr_control "data: true"
+
+此时要求有效扳机输入，恢复原有 500 ms 断流保护。
+/sg100/set_enabled 的人工禁用对两种控制方式都有效；切换手势不自动解除禁用。
+服务接收成功表示目标已接受，实际到位请查看 /sg100_hand_state。
+
+全身 IK 的 `quest_velocity_ik.launch` / `pico_velocity_ik.launch` 在 heiman 机型默认启用摸键切换：
+摸 X+A 持续 300 ms 切下一个，摸 X+B 持续 300 ms 切上一个；松开后才能再次切换。
+同时按下组合键不触发手势切换，避免与手臂解锁冲突。
+VR 使用 `/sg100/vr_step_gesture`（同 SG100StepGesture 类型），要求新鲜扳机输入，
+切换双手手势并接管 VR 控制；松开扳机使用 YAML 第一列，捏住扳机向第二列插值。
+普通 `/sg100/step_gesture` 和 `/sg100/switch_gesture` 仍独立执行服务目标。
+切入 VR 会结束上一轮服务控制，清除左右手的服务激活状态，并以当前 VR 手势
+作为后续服务步进的起点。再切回服务时，只有新请求指定的手会激活；
+`/sg100/use_vr_control false` 本身不会恢复历史服务目标。

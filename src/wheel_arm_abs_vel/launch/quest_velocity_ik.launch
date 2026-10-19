@@ -71,7 +71,7 @@
   <arg name="dexhand_front_trigger" default="true" doc="Both front triggers independently command six dexhand channels, 0=open and 100=closed." />
   <arg name="control_finger_type" default="0" />
   <arg name="predict_gesture" default="false" />
-  <arg name="ee_type" default="qiangnao" />
+  <arg name="ee_type" default="$(eval 'heiman' if int(arg('robot_version')) == 400062 else 'qiangnao')" />
   <arg name="sg100_enabled" default="$(eval arg('ee_type') == 'heiman')" />
   <node pkg="wheel_arm_abs_vel" type="sg100_mapper_bridge" name="sg100_mapper_bridge" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <arg name="enable_head_control" default="true" />
@@ -107,7 +107,7 @@
   <arg name="absolute_execution_max_joint_acceleration" default="6.0" />
   <arg name="absolute_execution_min_joint_limit_margin" default="0.03" />
   <arg name="tracking_rearm_stable_frames" default="3" />
-  <group if="$(eval int(arg('robot_version')) == 61 or int(arg('robot_version')) == 62 or int(arg('robot_version')) == 63)">
+  <group if="$(eval int(arg('robot_version')) == 61 or int(arg('robot_version')) == 62 or int(arg('robot_version')) == 63 or int(arg('robot_version')) == 400062)">
     <param name="/vr_cmd_vel/linear_scale_x" value="0.4" />
     <param name="/vr_cmd_vel/linear_scale_y" value="0.4" />
     <param name="/vr_cmd_vel/angular_scale_z" value="0.25" />
@@ -340,5 +340,5 @@
     <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) == 62 and arg('wheel_ik') and not arg('use_cpp_incremental_ik') and arg('enable_velocity_ik_takeover'))" />
     <arg name="kd" value="$(arg j3_kd)" />
   </include>
-  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) == 62 and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires S62 wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
+  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in [62, 400062] and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires S62/400062 wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
 </launch>
