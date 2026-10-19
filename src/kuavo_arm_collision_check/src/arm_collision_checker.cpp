@@ -77,8 +77,8 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
                         << ", enable_link_list size: " << enable_link_list.size());
     }
 
-    // 黑漫(heiman) SG100 四指灵巧手版本补齐手部碰撞 link(400055/400062/400063)。
-    const std::set<std::string> heiman_hand_versions = {"400055", "400062", "400063"};
+    // 黑漫(heiman) SG100 四指灵巧手版本补齐手部碰撞 link(400053/400055/400062/400063)。
+    const std::set<std::string> heiman_hand_versions = {"400053", "400055", "400062", "400063"};
     if(heiman_hand_versions.count(robot_version) > 0) {
         std::vector<std::string> extra_links_heiman = {
             "l_hand_base", "l_thumb_link1", "l_thumb_link2", "l_thumb_link3",

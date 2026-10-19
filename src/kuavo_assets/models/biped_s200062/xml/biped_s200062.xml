@@ -121,7 +121,7 @@
             <inertial pos="-0.00148154 0 0.0584625" quat="0.707107 0.707107 0 0" mass="4.65998" diaginertia="0.047446 0.0387095 0.0364961"/>
             <joint name="waist_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.15708 2.98451" actuatorfrcrange="-618.48 618.48" damping="0.0"/>
             <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="waist_yaw_Link"/>
-            <body name="waist_yaw_link" pos="0 0 0.235">
+            <body name="waist_yaw_link" pos="0 0 0.250">
               <inertial pos="0.00159298 -0.00027078 0.131874" mass="11.5609" diaginertia="0.246636 0.159377 0.158813"/>
               <joint name="waist_yaw_joint" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" actuatorfrcrange="-618.48 618.48" damping="0.0"/>
               <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="torso"/>

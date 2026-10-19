@@ -331,9 +331,9 @@
 
     <!-- 音频服务跳过条件：
          1. music == 'disable' 时禁用
-         2. robot_version == 53 时禁用（与上位机服务冲突）
+         2. version%100 == 53 时禁用（53/200053/300053/400053/500053，与上位机服务冲突）
     -->
-    <group if="$(eval arg('music') != 'disable' and arg('robot_version') != 53)">
+    <group if="$(eval arg('music') != 'disable' and int(arg('robot_version')) % 100 != 53)">
         <!-- 设置音频文件路径参数 -->
         <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
 
@@ -351,6 +351,7 @@
     <group if="$(arg with_mm_ik)">
       <group if="$(eval arg('robot_version') >= 30)">
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+        <arg name="robot_version" value="$(arg robot_version)"/>
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
         <arg name="visualize_mm"   value="false"/>

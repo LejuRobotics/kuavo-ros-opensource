@@ -679,7 +679,7 @@
     name="waist_yaw_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.235"
+      xyz="0 0 0.250"
       rpy="0 0 0" />
     <parent
       link="waist_pitch_link" />

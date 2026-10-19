@@ -25,6 +25,8 @@ _VERSION_REGISTRY=(
     "49.1|100049|kuavo4|展厅版"
     "52|52|kuavo5|普通kuavo5"
     "53|53|kuavo5|手臂pitch电机改ruiwo"
+    "53.4|400053|kuavo5|53 黑漫(heiman)灵巧手双足版"
+    "53.5|500053|kuavo5|53 O6灵巧手双足版"
     "55|55|kuavo5|手臂部分电机改ruiwoPA4310"
     "60|60|kuavo5w|悟时底盘轮臂"
     "61|61|kuavo5w|玖物底盘轮臂"

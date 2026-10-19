@@ -49,7 +49,13 @@
 | biped55 | 强脑手 | 否 | 否 | 有 | 无 | |
 | biped56 | 强脑手 | 否 | 否 | 有 | 无 | |
 | biped_s200053 | 二指夹爪 | 否 | 是 | 有 | 有 | |
-| biped_s300053 | 强脑手 | 是 | 是 | 有 | 有 | |
+| biped_s300053 | 强脑手 | 否 | 是 | 有 | 有 | |
+| biped_s400053 | 黑漫 SG100 | 是 | 是 | 有 | 有 | 53 机身，末端为 heiman |
+| biped_s500053 | 灵心巧手 O6 | 是 | 是 | 有 | 有 | 53 机身，末端为 linker_hand |
+| biped_s200055 | 二指夹爪 | 否 | 是 | 有 | 有 | 55 机身，末端为 lejuclaw |
+| biped_s300055 | 强脑手 | 否 | 是 | 有 | 有 | 55 机身，强脑手可动 |
+| biped_s400055 | 黑漫 SG100 | 是 | 是 | 有 | 有 | 55 机身，末端为 heiman |
+| biped_s500055 | 灵心巧手 O6 | 是 | 是 | 有 | 有 | 55 机身，末端为 linker_hand |
 
 ### #5W
 
@@ -60,7 +66,13 @@
 | biped62 | 强脑手 | 否 | 否 | 有 | 无 | 底盘不同 |
 | biped63 | 强脑手 | 否 | 否 | 有 | 无 | 底盘不同 |
 | biped_s200062 | 二指夹爪 | 否 | 是 | 有 | 有 | |
-| biped_s300062 | 强脑手 | 是 | 是 | 有 | 有 | |
+| biped_s300062 | 强脑手 | 否 | 是 | 有 | 有 | |
+| biped_s400062 | 黑漫 SG100 | 否 | 是 | 有 | 有 | 62 底盘，末端为 heiman |
+| biped_s500062 | 灵心巧手 O6 | 否 | 是 | 有 | 有 | 62 底盘，末端为 linker_hand |
+| biped_s200063 | 二指夹爪 | 否 | 是 | 有 | 有 | 63 底盘，末端为 lejuclaw |
+| biped_s300063 | 强脑手 | 否 | 是 | 有 | 有 | 63 底盘，强脑手可动 |
+| biped_s400063 | 黑漫 SG100 | 否 | 是 | 有 | 有 | 63 底盘，末端为 heiman |
+| biped_s500063 | 灵心巧手 O6 | 否 | 是 | 有 | 有 | 63 底盘，末端为 linker_hand |
 
 ### 遗留
 
@@ -76,6 +88,7 @@
 |---|---|---|---|---|
 | 强脑手 | `qiangnao` | `DexhandController` | 12（6 关节 × 2 手） | 灵巧手，逐关节位置控制 |
 | 灵心巧手 | `linker_hand` | `DexhandController`（`is_linker_hand=true`） | 12 | 复用同一控制器，仅映射表不同 |
+| 黑漫 SG100 | `heiman` | `HeimanHand` | 22（11 关节 × 2 手） | 五指灵巧手，仿真里每个手指关节一个 position motor |
 | 二指夹爪 | `lejuclaw` | `LejuClawController` | 2 | 自研夹爪，**不走 `endEffectorCommand()`** |
 | 触觉灵巧手 | `qiangnao_touch` | `DexhandController`（touch 模式） | 12 | 固定 485 协议 |
 | 气泵 | `qibeng` | — | — | |
@@ -144,15 +157,15 @@ models/biped_s${N}/urdf/biped_s${N}.urdf
 
 | 值 | 版本 |
 |---|---|
-| `0 -0.03 -0.17` → **是** | s40, s41, s42, s43, s45, s46, s47, s48, s49, s50, s51, s100045, s100049, s300049, s400049 |
+| `0 -0.03 -0.17` → **是** | s40, s41, s42, s43, s45, s46, s47, s48, s49, s50, s51, s100045, s100049, s300049, s400049, s400053, s400055, s500053, s500055 |
 | `0 -0.0 -0.17` → **否** | s200049 |
-| `0 0.0 -0.17` → **否** | s52, s53, s54, s55, s56, s200053, s200062, s300053, s300062 |
-| `0 0.0 -0.17` → **否** | s60, s61, s62, s63 |
+| `0 0.0 -0.17` → **否** | s52, s53, s54, s55, s56, s200053, s200055, s300053, s300055, s200062, s300062 |
+| `0 0.0 -0.17` → **否** | s60, s61, s62, s63, s200063, s300063, s400062, s400063, s500062, s500063 |
 
 > **`kuavo.json` 里没有任何"末端 y 偏移"的键。** 容易混淆的键有两类，都不是这一列：
 >
 > - `eef_z_offset` —— 是 **z** 方向（所有在用版本均为 `-0.0`；仅遗留版本 v13/v14/v16 为 `-0.17`、v17 为 `-0.2175`）
-> - `drake_velocity_ik_bounds` 块下的 `left_y_upper_offset` / `right_y_lower_offset` —— 是 **Drake 速度 IK 的关节空间限位**，与末端安装偏置无关。在用版本（v45/v47–v49/v52–v56/v100045/v100049/v200049/v200053/v300049/v300053/v400049）一律为 `0.5 / -0.5`；v40–v43、v46、v50、v51、v60–v63、v200062、v300062、v70 **无此块**。
+> - `drake_velocity_ik_bounds` 块下的 `left_y_upper_offset` / `right_y_lower_offset` —— 是 **Drake 速度 IK 的关节空间限位**，与末端安装偏置无关。在用版本（v45/v47–v49/v52–v56/v100045/v100049/v200049/v200053/v200055/v300049/v300053/v300055/v400049/v400053/v400055/v500053/v500055）一律为 `0.5 / -0.5`；v40–v43、v46、v50、v51、v60–v63、v200062、v200063、v300062、v300063、v400062、v400063、v500062、v500063、v70 **无此块**。
 
 ### 3.2 末端执行器关节运动
 
@@ -185,7 +198,8 @@ models/biped_s${N}/urdf/biped_s${N}.urdf
 | 头部相机 | `camera` / `camera_base` / `head_camera` / `head_camera_base` | `zhead_2_link` |
 | 手腕相机 | `l/r_hand_camera` | `l/r_hand_tripod`，或 `zarm_l7_link` / `zarm_r7_link` |
 | 手腕相机（二指夹爪） | `l/r_d405_camera_connect` | `l/r_twofinger_base` |
-| 手腕相机（s300053/s300062） | `l_camera_link` / `r_camera_link_connect` | `zarm_l7_link` / `zarm_r7_link` |
+| 手腕相机（s300053/s300055/s300062/s300063、s500053/s500055/s500062/s500063） | `l_camera_link` / `r_camera_link_connect` | `zarm_l7_link` / `zarm_r7_link` |
+| 手腕相机（黑漫 SG100） | `camera_l_base` / `camera_r_base` | `zarm_l7_link` / `zarm_r7_link` |
 | 腰部相机 | `waist_camera` / `waist_camera_base` | `base_link` 或 `waist_yaw_link` |
 
 > 手腕相机**只存在于 urdf**，mujoco xml 中没有对应 link。
@@ -209,11 +223,23 @@ models/biped_s${N}/urdf/biped_s${N}.urdf
 | s100045 / s100049 | 0 | 0 | 0 | 无 | 无 |
 | s200049 | **2** | 16 | 18 | 腱驱动夹爪 | 无 |
 | s200053 | **2** | 20 | 22 | 腱驱动夹爪 | **有**（`waist_camera` ← `waist_yaw_link`） |
+| s200055 | **2** | 20 | 22 | 腱驱动夹爪 | **有**（`waist_camera` ← `waist_yaw_link`） |
 | s200062 | **2** | 20 | 22 | 腱驱动夹爪 | 无 |
+| s200063 | **2** | 20 | 22 | 腱驱动夹爪 | 无 |
 | s300049 | **22** | 42 | 44 | 灵心巧手（3-DOF 拇指） | 无 |
 | s300053 | **20** | 20 | 22 | 强脑灵巧手 10/手 | **有**（`waist_camera` ← `waist_yaw_link`） |
+| s300055 | **20** | 20 | 22 | 强脑灵巧手 10/手 | **有**（`waist_camera` ← `waist_yaw_link`） |
 | s300062 | **20** | 20 | 22 | 强脑灵巧手 10/手 | 无 |
+| s300063 | **20** | 20 | 22 | 强脑灵巧手 10/手 | 无 |
 | s400049 | **42** | 42 | 28 | 两套并存（20 强脑 + 22 灵心） | 无 |
+| s400053 | **22** | 22 | 24 | 黑漫 SG100（11/手） | **有**（`waist_camera` ← `waist_yaw_link`） |
+| s400055 | **22** | 22 | 24 | 黑漫 SG100（11/手） | **有**（`waist_camera` ← `waist_yaw_link`） |
+| s400062 | **22** | 22 | 24 | 黑漫 SG100（11/手） | 无 |
+| s400063 | **22** | 22 | 24 | 黑漫 SG100（11/手） | 无 |
+| s500053 | **22** | 22 | 22 | 灵心巧手 O6（11/手） | **有**（`waist_camera` ← `waist_yaw_link`） |
+| s500055 | **22** | 22 | 22 | 灵心巧手 O6（11/手） | **有**（`waist_camera` ← `waist_yaw_link`） |
+| s500062 | **22** | 22 | 22 | 灵心巧手 O6（11/手） | 无 |
+| s500063 | **22** | 22 | 22 | 灵心巧手 O6（11/手） | 无 |
 | s70 | — | — | — | 无 urdf/xml，仅 65 个 STL | — |
 
 补充说明：
@@ -222,7 +248,7 @@ models/biped_s${N}/urdf/biped_s${N}.urdf
 - **`s300049` 的 xml 含两套命名并存的手部关节**（共 42 个，如 `l_thumbCMC` 与 `l_thumb_cmc_yaw` / `l_thumb_cmc_pitch` / `l_thumb_ip` 同时存在），但只有 **22** 个 actuator（灵心风格），强脑风格的那批关节在仿真中**不可驱动**。
 - **`s400049` 的 42 个手部关节全部有 actuator**（20 强脑风格 + 22 灵心风格，两套并存）。
 - **`s200062` 的 urdf 与 xml 对末端形态的表述不一致**：urdf 有 22 个手部关节（与 s300062 相同），xml 却只有 2 个腱驱动 actuator。实机末端须以 2.1 节的运行时链路为准。
-- **`s200053` / `s200062` 的 xml 是腱驱动二指夹爪**，但对应 `kuavo.json` 的 `EndEffectorType` 写的是 `["qiangnao","qiangnao"]`。
+- **`s200053` / `s200062` 的 xml 是腱驱动二指夹爪**，但对应 `kuavo.json` 的 `EndEffectorType` 写的是 `["qiangnao","qiangnao"]`。`s200055` / `s200063` 的 `EndEffectorType` 已是 `["lejuclaw","lejuclaw"]`，与 xml 一致。
 - **`v51` / `v60` / `v61` 的 `EndEffectorType` 是大写 `["None","None"]`。** `kuavo_settings.cpp` 的映射表只有小写 `"none"`，`std::map::operator[]` 对未命中键会**静默插入默认值**（枚举值 0 = `none`），因此大写形式等价于 `none` 且**不报错**。
 - **s47 与 s200049 的二指夹爪直接挂在 `zarm_l7_link` 上**（经 `l_f_bar-1_joint` → `l_f_bar-2` → `l_f_fingers`），**不经过** `zarm_l7_end_effector`。因此这两个机型的 `zarm_l7_end_effector_joint` y 偏移可以不同（`-0.03` vs `-0.0`）而不影响夹爪实际安装位置。
 - **s49 起头部相机朝向翻转**：s40–s48 的 `camera` rpy 为 `0 0.4887 0`，s49 及之后为 `3.14159 0.3840 0`（roll 翻转 π，pitch 改为 0.3840）。

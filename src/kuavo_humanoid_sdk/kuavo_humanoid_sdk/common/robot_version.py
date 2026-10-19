@@ -284,6 +284,8 @@ VERSION_REGISTRY = {
     "49.1": {"internal": 100049, "series": "kuavo4",  "desc": "展厅版"},
     "52":   {"internal": 52,     "series": "kuavo5",  "desc": "普通kuavo5"},
     "53":   {"internal": 53,     "series": "kuavo5",  "desc": "手臂pitch电机改ruiwo"},
+    "53.4": {"internal": 400053, "series": "kuavo5",  "desc": "53 黑漫(heiman)灵巧手双足版"},
+    "53.5": {"internal": 500053, "series": "kuavo5",  "desc": "53 O6灵巧手双足版"},
     "55":   {"internal": 55,     "series": "kuavo5",  "desc": "手臂部分电机改ruiwoPA4310"},
     "60":   {"internal": 60,     "series": "kuavo5w", "desc": "悟时底盘轮臂"},
     "61":   {"internal": 61,     "series": "kuavo5w", "desc": "玖物底盘轮臂"},

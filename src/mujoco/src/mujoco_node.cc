@@ -1033,9 +1033,10 @@ namespace
   void updateWheelVel_VectorContorl_omniWheel(Eigen::Vector3d& cmd_vel)
   {
     const double wheel_radius = 0.13035;  // 底盘轮子半径
-    // s63 底盘轮距更大
-    const double robot_x_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
-    const double robot_y_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
+    // s63 底盘轮距更大。version_number 形如 63 / 200063 / 400063，个位和十位是 63
+    const bool is_s63 = (robotVersion_ % 100) == 63;
+    const double robot_x_dis = is_s63 ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
+    const double robot_y_dis = is_s63 ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
 
     // cmd_vel: [vx, vy, omega] - 机器人本体系速度和角速度
     // 四个轮子的位置（相对于底盘中心）
@@ -1250,12 +1251,13 @@ namespace
               }
               else if (robot_type == 1)
               {
+                const bool omni_wheel = robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 200063 || robotVersion_ == 300062 || robotVersion_ == 300063 || robotVersion_ == 400062 || robotVersion_ == 400063 || robotVersion_ == 500062 || robotVersion_ == 500063;
                 if(robotVersion_ == 60)
                 {
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062 || robotVersion_ == 400062 || robotVersion_ == 400063 || robotVersion_ == 500062 || robotVersion_ == 500063)
+                else if(omni_wheel)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
