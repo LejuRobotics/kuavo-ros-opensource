@@ -2202,7 +2202,9 @@ class IkRos:
                         result["left_finger_joints"],
                         result["right_finger_joints"],
                     ]
-                    self._vr_is_running = result["is_running"]
+                    # Read current state: a joystick callback may have confirmed
+                    # a gesture since this finger frame finished processing.
+                    self._vr_is_running = self.quest3_arm_info_transformer.get_finger_state()["is_running"]
                 if self.enable_vr_latency_diagnostics:
                     self.finger_processing_latency_pub.publish(
                         Float64((time.perf_counter() - process_start) * 1000.0)
@@ -2689,6 +2691,11 @@ class IkRos:
             self._joystick_snapshot = joystick_snapshot
         with self._target_lock:
             is_hand_tracking = self._vr_is_hand_tracking
+        self.quest3_arm_info_transformer.update_joystick_running_state(
+            joystick_snapshot, is_hand_tracking
+        )
+        with self._target_lock:
+            self._vr_is_running = self.quest3_arm_info_transformer.get_finger_state()["is_running"]
         self.joySticks_data = msg
         # 准备姿态下 IK 线程可能卡在等待首帧姿态/MPC 就绪，此时由回调补发夹爪指令。
         # 遥操主循环启动后改由 hand_finger_data_process 单路发布，避免双路重复下发。

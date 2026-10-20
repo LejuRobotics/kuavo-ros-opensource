@@ -121,6 +121,10 @@ class Quest3ArmInfoTransformer:
         self.is_hand_tracking = False
         self.ok_gesture_counts = 0
         self.shot_gesture_counts = 0
+        self._joystick_confirmation_active = False
+        self._joystick_gesture = None
+        self._joystick_gesture_started = None
+        self._joystick_last_received = None
         self.is_runing = False     
         self.control_torso = False   
         self.init_R_wC = rpy_to_matrix([np.pi/2, 0, np.pi/2]) # rotation matrix from world to chest
@@ -791,7 +795,45 @@ class Quest3ArmInfoTransformer:
                 "is_hand_tracking": bool(msg.is_hand_tracking),
             }
 
+    def update_joystick_running_state(self, joystick_snapshot, is_hand_tracking):
+        """Confirm controller gestures for 1s, independent of finger frame rate.
+
+        A receive gap over 0.5s breaks confirmation; a release also resets it.
+        Hand tracking keeps the existing finger gesture confirmation.
+        """
+        now = time.monotonic()
+        with self._finger_state_lock:
+            self._joystick_confirmation_active = not is_hand_tracking
+            if (is_hand_tracking or self._joystick_last_received is None
+                    or now - self._joystick_last_received > 0.5):
+                self._joystick_gesture = None
+                self._joystick_gesture_started = None
+            self._joystick_last_received = now
+            if is_hand_tracking:
+                return bool(self.is_runing)
+            sticks = [stick for enabled, stick in zip(self.arm_sides, joystick_snapshot)
+                      if enabled]
+            gesture = None
+            if all(self.joy_ok_gesture_check(stick) for stick in sticks):
+                gesture = "run"
+            elif all(self.joy_shot_gesture_check(stick) for stick in sticks):
+                gesture = "stop"
+            if gesture != self._joystick_gesture:
+                self._joystick_gesture = gesture
+                self._joystick_gesture_started = now if gesture else None
+            if (gesture is not None
+                    and now - self._joystick_gesture_started >= 1.0):
+                running = gesture == "run"
+                if running != self.is_runing:
+                    rospy.loginfo("[Quest3] Controller gesture confirmed: %s", gesture)
+                self.is_runing = running
+                if not running:
+                    self.measure_arm_length = True
+            return bool(self.is_runing)
+
     def _update_gesture_state_locked(self):
+        if self._joystick_confirmation_active:
+            return
         max_counts = 50
         if self.is_runing_gesture():
             self.ok_gesture_counts += 1
