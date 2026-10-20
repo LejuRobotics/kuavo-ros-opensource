@@ -452,6 +452,11 @@ class PinocchioVelocityIk {
     uint64_t session_id{0};
     uint64_t generation{0};
     uint64_t coordinate_epoch{0};
+    uint64_t base_coordinate_epoch{0};
+    uint8_t source{wheel_arm_abs_vel::TeleopTcpTarget::SOURCE_UNKNOWN};
+    // A control-session restart is not a new human/robot calibration. Only a
+    // previously ACTIVE map may survive X+B; PREPARE explicitly ends reuse.
+    bool resume_mapping_valid{false};
     bool valid{false};
   };
 
@@ -3306,6 +3311,8 @@ class PinocchioVelocityIk {
     next.session_id = target.session_id;
     next.generation = target.generation;
     next.coordinate_epoch = target.body.coordinate_epoch;
+    next.base_coordinate_epoch = session_anchor_.base_coordinate_epoch;
+    next.source = target.source;
     next.robot_torso_feature =
         preserve_resolved_intent && previous.valid
             ? previous.robot_torso_feature
@@ -5631,6 +5638,10 @@ class PinocchioVelocityIk {
         stopped_for_recovery && contract_active && mode_ok &&
         !dynamic_fault_latched_ && !reference_tracking_fault_latched_;
 
+    if (contract_prepare || dynamic_fault_latched_ ||
+        reference_tracking_fault_latched_) {
+      session_body_anchor_.resume_mapping_valid = false;
+    }
     const bool new_coordinate_contract = source_target_fresh &&
         (!session_anchor_.valid ||
          session_anchor_.session_id != target.session_id ||
@@ -5646,6 +5657,15 @@ class PinocchioVelocityIk {
           mode_ok && session_anchor_.valid &&
           session_anchor_.base_coordinate_epoch == base_coordinate_epoch &&
           !dynamic_fault_latched_ && !reference_tracking_fault_latched_;
+      const bool retain_body_mapping = session_anchor_.valid &&
+          session_body_anchor_.valid && session_body_anchor_.resume_mapping_valid &&
+          enable_body_mirroring_ && target.body.torsoValid() &&
+          target.body.frame_id == body_tracking_frame_name_ &&
+          target.body.frame_id == session_body_anchor_.human.frame_id &&
+          target.source != wheel_arm_abs_vel::TeleopTcpTarget::SOURCE_UNKNOWN &&
+          target.source == session_body_anchor_.source &&
+          target.body.coordinate_epoch == session_body_anchor_.coordinate_epoch &&
+          base_coordinate_epoch == session_body_anchor_.base_coordinate_epoch;
       const DecisionVector& base_anchor_q = retain_owned_reference ? reference_q_ : measured_q;
       session_anchor_.translation = Eigen::Vector2d(
           base_anchor_q(baseDecisionIndex(0)),
@@ -5655,9 +5675,17 @@ class PinocchioVelocityIk {
       session_anchor_.generation = target.generation;
       session_anchor_.base_coordinate_epoch = base_coordinate_epoch;
       session_anchor_.valid = true;
-      session_body_anchor_ = SessionBodyAnchor{};
-      last_body_intent_ = BodyIntent{};
-      captureSessionBodyAnchor(target, measured_q, false);
+      if (retain_body_mapping) {
+        // Rebind transaction identity only. Recapturing human pose here (even
+        // with preserve_resolved_intent=true) clutches the body map at resume
+        // and discards absolute human displacement during HOLD.
+        session_body_anchor_.session_id = target.session_id;
+        session_body_anchor_.generation = target.generation;
+      } else {
+        session_body_anchor_ = SessionBodyAnchor{};
+        last_body_intent_ = BodyIntent{};
+        captureSessionBodyAnchor(target, measured_q, false);
+      }
       if (!captureSessionTargetAlignment(
               target, measured_q, base_coordinate_epoch)) {
         session_anchor_.valid = false;
@@ -5736,6 +5764,7 @@ class PinocchioVelocityIk {
           << session_anchor_.yaw << "] in " << world_frame_name_
           << "; direct Cartesian alignment="
           << (session_target_alignment_.valid ? "ready" : "invalid")
+          << ", body mapping=" << (retain_body_mapping ? "retained" : "recaptured")
           << ", natural-hang bootstrap="
           << (startup_bootstrap_active_ ? "pending" : "not-required"));
     }
@@ -5757,6 +5786,10 @@ class PinocchioVelocityIk {
       }
     }
     BodyIntent body_intent = calculateBodyIntent(target);
+    if (body_intent.torso_valid && source_target_fresh && contract_active &&
+        !dynamic_fault_latched_ && !reference_tracking_fault_latched_) {
+      session_body_anchor_.resume_mapping_valid = true;
+    }
     if (body_intent.torso_valid) {
       last_body_intent_ = body_intent;
     }
