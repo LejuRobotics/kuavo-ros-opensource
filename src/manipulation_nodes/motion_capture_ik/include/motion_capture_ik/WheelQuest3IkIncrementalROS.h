@@ -287,6 +287,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher ikInputPosPublisher_;       // 发布IK输入位置（/ik_fk_result/input_pos）
   ros::Publisher lbLegTrajPublisher_;
   ros::Timer lbLegTrajPublishTimer_;
+  // Serialize final leg publication with the master-switch falling edge.
+  std::mutex lbLegCommandMutex_;
+  Eigen::Vector4d lastPublishedLbCommand_{Eigen::Vector4d::Zero()};
+  bool hasPublishedLbCommand_{false};
+  bool lbLegMasterPublishEnabled_{true};
   std::mutex lbLegTargetMutex_;
   Eigen::VectorXd latestLbTargetAngles_;
   bool hasLatestLbTargetAngles_ = false;
@@ -383,6 +388,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool chestAnchorNeedsRefresh_{true};
   Eigen::Vector3d frozenRobotChestPos_ = Eigen::Vector3d::Zero();
   Eigen::Quaterniond frozenChestQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond chestFollowRecoveryOffset_ = Eigen::Quaterniond::Identity();
   double frozenLeftHandHeightOffset_ = 0.0;
   double frozenRightHandHeightOffset_ = 0.0;
   double frozenLeftElbowHeightOffset_ = 0.0;
@@ -695,6 +701,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::mutex chestPositionFreezeMutex_;
   Eigen::Vector3d chestPositionFreezeAnchor_{Eigen::Vector3d::Zero()};
   bool chestPositionFreezeActive_{false};
+  bool lowerBodyMasterFreezeActive_{false};
+  Eigen::Vector4d lowerBodyMasterFreezeAnchor_{Eigen::Vector4d::Zero()};
 
   struct ModeChangeCycleCache {
     bool leftHandCtrlModeChanged = false;

@@ -106,6 +106,7 @@ class HeadControlManager:
         self.last_smooth_time = None
         # 手在头的正下方时方位角不稳定，低于该水平距离就保持当前头角
         self.min_track_distance_xy = 0.08
+        self.track_target = "auto_track_active"
         
         # 头部关节限制（度）（将从配置读取，这里只是占位符）
         self.yaw_limit = None
@@ -115,6 +116,14 @@ class HeadControlManager:
         self.mode_changed = False
         self.last_mode = None
         
+    def set_track_target(self, target):
+        target = str(target or "auto_track_active").strip().lower()
+        aliases = {"active_hand": "auto_track_active"}
+        target = aliases.get(target, target)
+        if target not in ("auto_track_active", "fixed_left_hand", "fixed_right_hand", "both_hands_midpoint"):
+            raise ValueError("Invalid head track_target: " + target)
+        self.track_target = target
+
     def set_mode(self, mode, fixed_hand="right"):
         """
         设置头部控制模式
@@ -191,6 +200,16 @@ class HeadControlManager:
         dx = hand_tcp_pos[0] - head_pos[0]
         dy = hand_tcp_pos[1] - head_pos[1]
         dz = hand_tcp_pos[2] - head_pos[2]
+
+        # Opt-in for the independent robot-TF tracker. Behind the head,
+        # atan2(dy, dx) crosses +/-180 degrees and clamping flips its sign.
+        if getattr(self, "hold_rear_targets", False):
+            if dx <= 0.0:
+                self.rear_target_held = True
+            elif dx >= 0.03:
+                self.rear_target_held = False
+            if getattr(self, "rear_target_held", False):
+                return None, None
         
         distance_xy = math.sqrt(dx*dx + dy*dy)
         # 手靠近头的正下方时 atan2 会在左右之间跳，保持上一帧头角
@@ -356,6 +375,18 @@ class HeadControlManager:
             self.smooth_update(target_yaw, target_pitch)
             
         elif self.mode == HeadControlMode.AUTO_TRACK_ACTIVE:
+            target = self.track_target
+            if target != "auto_track_active":
+                if target == "both_hands_midpoint":
+                    if left_hand_tcp_pos is None or right_hand_tcp_pos is None:
+                        return
+                    position = [(l+r)*0.5 for l, r in zip(left_hand_tcp_pos, right_hand_tcp_pos)]
+                else:
+                    position = left_hand_tcp_pos if target == "fixed_left_hand" else right_hand_tcp_pos
+                yaw, pitch = self.calculate_head_pose_from_hand(position, head_pos)
+                if yaw is not None and pitch is not None:
+                    self.smooth_update(yaw, pitch)
+                return
             # 自动跟踪主动手模式
             if left_hand_tcp_pos is not None and right_hand_tcp_pos is not None:
                 active_hand = self.detect_active_hand(left_hand_tcp_pos, right_hand_tcp_pos)

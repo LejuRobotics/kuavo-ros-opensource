@@ -239,6 +239,17 @@ void Quest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     }
 
     fsmEnter();
+    // X+A 的准备位窗口会停用双臂；窗口结束后仅首次解锁一次。
+    // 不依赖 grip 或增量模块已激活，后续双击关闭不会被自动覆盖。
+    if (armOnlyIk_ && armControlMode_.load() == 2 &&
+        !isInMode2EnterTimeout() && armOnlyInitialUnlockPending_) {
+      forceActivateAllArmCtrlMode();
+      joyStickHandlerPtr_->hasLeftArmCtrlModeChanged();
+      joyStickHandlerPtr_->hasRightArmCtrlModeChanged();
+      leftHandSmoother_->setModeChangingState(false, false);
+      rightHandSmoother_->setModeChangingState(false, false);
+      armOnlyInitialUnlockPending_ = false;
+    }
     fsmChange();
     fsmProcess();
     fsmExit();
@@ -586,7 +597,7 @@ void Quest3IkIncrementalROS::fsmEnter() {
     const double mode2TimeoutDuration = MODE_2_TIMEOUT_DURATION;//1.0s
     if (elapsedTime <= mode2TimeoutDuration) {
       // print mode2 timeout duration
-      std::cout << "[Quest3IkIncrementalROS] Mode 2 timeout duration: " << elapsedTime << "s" << std::endl;
+      ROS_DEBUG_THROTTLE(0.5, "[Quest3IkIncrementalROS] Mode 2 warmup: %.2fs", elapsedTime);
       // 在超时时间内，强制停用所有手臂控制模式，确保可以进入 fsmChange 流程
       forceDeactivateAllArmCtrlMode();
 
@@ -699,6 +710,9 @@ void Quest3IkIncrementalROS::fsmChange() {
 
   bool leftHandCtrlModeChanged = joyStickHandlerPtr_->hasLeftArmCtrlModeChanged();
   bool rightHandCtrlModeChanged = joyStickHandlerPtr_->hasRightArmCtrlModeChanged();
+  // 明确的手臂模式切换接管该臂，解除上一轮 grip 保持。
+  if (leftHandCtrlModeChanged) leftGripHoldActive_ = false;
+  if (rightHandCtrlModeChanged) rightGripHoldActive_ = false;
 
   auto [leftChangingMaintainUpdated, leftChangingInstantUpdated] =
       leftHandSmoother_->updateModeChangingStateIfNeeded(leftHandCtrlModeChanged);
@@ -707,7 +721,7 @@ void Quest3IkIncrementalROS::fsmChange() {
 
   if (!leftChangingMaintainUpdated && !rightChangingMaintainUpdated) {
     if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
-      forceActivateAllArmCtrlMode();
+      if (!armOnlyIk_) forceActivateAllArmCtrlMode();
       requestWbcArmTrajectoryControl(
           static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode),
           true,
@@ -718,9 +732,8 @@ void Quest3IkIncrementalROS::fsmChange() {
     return;  // 没有模式切换，直接返回
   }
   // print leftHandCtrlModeChanged and rightHandCtrlModeChanged
-  std::cout << "[fsmChange]:"
-            << "leftChangingMaintainUpdated: " << leftChangingMaintainUpdated << ", "
-            << ", rightChangingMaintainUpdated: " << rightChangingMaintainUpdated << std::endl;
+  ROS_DEBUG_THROTTLE(1.0, "[fsmChange] left=%d right=%d",
+                     leftChangingMaintainUpdated, rightChangingMaintainUpdated);
 
   if (!updateLatestIncrementalResult()) return;  // check update success
 
@@ -872,6 +885,8 @@ void Quest3IkIncrementalROS::fsmProcess() {
   bool rightGripRisingEdge = currentRightGripPressed && !lastRightGripPressed_;
 
   // 更新上一帧的 grip 状态（必须在使用完之后更新）
+  leftGripReleasePending_ = lastLeftGripPressed_ && !currentLeftGripPressed;
+  rightGripReleasePending_ = lastRightGripPressed_ && !currentRightGripPressed;
   lastLeftGripPressed_ = currentLeftGripPressed;
   lastRightGripPressed_ = currentRightGripPressed;
 
@@ -955,13 +970,15 @@ void Quest3IkIncrementalROS::fsmProcess() {
                                                      qLink4);
   }
 
-  bool leftCanProcess = !leftMaintainProcess && currentLeftGripPressed;
+  bool leftCanProcess = !leftMaintainProcess && currentLeftGripPressed &&
+                        (!armOnlyIk_ || joyStickHandlerPtr_->isLeftArmCtrlModeActive());
 
   if (leftCanProcess) {
     leftCanProcess = detectLeftArmMove() && currentLeftGripPressed;
   }
 
-  bool rightCanProcess = !rightMaintainProcess && currentRightGripPressed;
+  bool rightCanProcess = !rightMaintainProcess && currentRightGripPressed &&
+                         (!armOnlyIk_ || joyStickHandlerPtr_->isRightArmCtrlModeActive());
 
   if (rightCanProcess) {
     rightCanProcess = detectRightArmMove() && currentRightGripPressed;
@@ -1033,6 +1050,13 @@ void Quest3IkIncrementalROS::fsmExit() {
       incrementalController_->shouldExitIncrementalModeRightArm(joyStickHandlerPtr_->isRightGrip());
 
   if (shouldExitIncrementalLeftArm) {
+    if (armControlMode_.load() == 2 && leftGripReleasePending_ &&
+        joyStickHandlerPtr_->isLeftArmCtrlModeActive() &&
+        !isInMode2EnterTimeout() && hasLastPublishedArmPosition_) {
+      if (gripHoldPosition_.size() != jointStateSize_) gripHoldPosition_ = lastPublishedArmPosition_;
+      gripHoldPosition_.head(7) = lastPublishedArmPosition_.head(7);
+      leftGripHoldActive_ = true;
+    }
     Eigen::Vector3d pEndEffector;
     Eigen::Quaterniond qEndEffector;
     computeLeftEndEffectorFK(pEndEffector, qEndEffector);
@@ -1047,6 +1071,13 @@ void Quest3IkIncrementalROS::fsmExit() {
   }
 
   if (shouldExitIncrementalRightArm) {
+    if (armControlMode_.load() == 2 && rightGripReleasePending_ &&
+        joyStickHandlerPtr_->isRightArmCtrlModeActive() &&
+        !isInMode2EnterTimeout() && hasLastPublishedArmPosition_) {
+      if (gripHoldPosition_.size() != jointStateSize_) gripHoldPosition_ = lastPublishedArmPosition_;
+      gripHoldPosition_.tail(7) = lastPublishedArmPosition_.tail(7);
+      rightGripHoldActive_ = true;
+    }
     Eigen::Vector3d pEndEffector;
     Eigen::Quaterniond qEndEffector;
     computeRightEndEffectorFK(pEndEffector, qEndEffector);
@@ -1062,6 +1093,8 @@ void Quest3IkIncrementalROS::fsmExit() {
     latest_dq_.tail(7).setZero();
     lowpass_dq_.tail(7).setZero();
   }
+  leftGripReleasePending_ = false;
+  rightGripReleasePending_ = false;
   if (!shouldExitIncrementalLeftArm && !shouldExitIncrementalRightArm) return;
 
   deactivateController();
@@ -1134,9 +1167,16 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
     }
 
     bool leftInstantCopy = leftInstant;
-    leftHandSmoother_->processActiveModeInterpolation(
-        scaledLeftHandPos, leftInstantCopy, leftHandSmoother_->getDefaultPosOnExit(), "左臂");
-    leftHandSmoother_->setModeChangingState(leftMaintain, leftInstantCopy);
+    if (armOnlyIk_) {
+      // 重新解锁直接使用刚建立的当前 FK 锚点，不等待回默认位。
+      scaledLeftHandPos = incrementalController_->getLatestIncrementalResult().getRobotLeftHandAnchorPos();
+      leftHandSmoother_->resetSmoothState(scaledLeftHandPos);
+      leftHandSmoother_->setModeChangingState(false, false);
+    } else {
+      leftHandSmoother_->processActiveModeInterpolation(
+          scaledLeftHandPos, leftInstantCopy, leftHandSmoother_->getDefaultPosOnExit(), "左臂");
+      leftHandSmoother_->setModeChangingState(leftMaintain, leftInstantCopy);
+    }
   }
 
   if (leftHandCtrlModeChanged && !isLeftArmCtrlModeActive) {
@@ -1285,9 +1325,15 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
     }
 
     bool rightInstantCopy = rightInstant;
-    rightHandSmoother_->processActiveModeInterpolation(
-        scaledRightHandPos, rightInstantCopy, rightHandSmoother_->getDefaultPosOnExit(), "右臂");
-    rightHandSmoother_->setModeChangingState(rightMaintain, rightInstantCopy);
+    if (armOnlyIk_) {
+      scaledRightHandPos = incrementalController_->getLatestIncrementalResult().getRobotRightHandAnchorPos();
+      rightHandSmoother_->resetSmoothState(scaledRightHandPos);
+      rightHandSmoother_->setModeChangingState(false, false);
+    } else {
+      rightHandSmoother_->processActiveModeInterpolation(
+          scaledRightHandPos, rightInstantCopy, rightHandSmoother_->getDefaultPosOnExit(), "右臂");
+      rightHandSmoother_->setModeChangingState(rightMaintain, rightInstantCopy);
+    }
   }
 
   if (rightHandCtrlModeChanged && !isRightArmCtrlModeActive) {
@@ -1819,6 +1865,12 @@ void Quest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
 }
 
 void Quest3IkIncrementalROS::invalidateLastPublishedArmTraj() {
+  armOnlyInitialUnlockPending_ = true;
+  leftGripHoldActive_ = false;
+  rightGripHoldActive_ = false;
+  gripHoldPosition_.resize(0);
+  leftGripReleasePending_ = false;
+  rightGripReleasePending_ = false;
   hasLastArmTrajPublishStamp_ = false;
   lastArmTrajPublishStamp_ = ros::Time(0);
   hasLastPublishedArmPosition_ = false;
@@ -2384,6 +2436,32 @@ void Quest3IkIncrementalROS::publishJointStates() {
     armVelocityForPublish =
         velocityFromPublishedArmPosition(previousQForVel, armPositionForPublish, jointStateMsg.header.stamp);
   }
+  // 仅保持本次增量遥操释放 grip 时建立的快照，不覆盖其他状态的目标。
+  // 在所有平滑之后执行，并只清理该臂的状态，避免另一臂遥操被重置。
+  if (!inMode2 || mode2Warmup) {
+    leftGripHoldActive_ = false;
+    rightGripHoldActive_ = false;
+  }
+  if (joyStickHandlerPtr_->isLeftGrip()) leftGripHoldActive_ = false;
+  if (joyStickHandlerPtr_->isRightGrip()) rightGripHoldActive_ = false;
+  if (inMode2 && !mode2Warmup && gripHoldPosition_.size() == jointStateSize_) {
+    for (int i = 0; i < jointStateSize_; ++i) {
+      if (!(i < 7 ? leftGripHoldActive_ : rightGripHoldActive_)) continue;
+      const double holdQ = gripHoldPosition_(i);
+      armPositionForPublish(i) = holdQ;
+      armVelocityForPublish(i) = 0.0;
+      q_(i) = holdQ;
+      dq_(i) = 0.0;
+      latest_q_(i) = holdQ;
+      if (hasPublishedArmSmoother_) {
+        publishedArmQ_(i) = holdQ;
+        publishedArmV_(i) = 0.0;
+      }
+      if (armJointRuckigFilterPtr_) {
+        armJointRuckigFilterPtr_->resetDof(i, holdQ);
+      }
+    }
+  }
   latest_dq_ = armVelocityForPublish;
   lowpass_dq_ = armVelocityForPublish;
   lastPublishedArmPosition_ = armPositionForPublish;
@@ -2925,6 +3003,7 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   std::string urdfFilePath;
   std::string kuavo_assets_path = ros::package::getPath("kuavo_assets");
   if (configJson.contains("arm_only_urdf")) {
+    armOnlyIk_ = true;
     std::string arm_urdf_relative = configJson["arm_only_urdf"].get<std::string>();
     urdfFilePath = kuavo_assets_path + "/models/" + arm_urdf_relative;
     ROS_INFO("✅ [Quest3IkIncrementalROS] Using arm_only_urdf from JSON: %s", urdfFilePath.c_str());
@@ -3251,12 +3330,16 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
                            Eigen::Vector3d(1.0, 1.0, 1.0),
                            2,
                            "[Quest3IkIncrementalROS]");
+
+  // 半身模型的根坐标在底盘，回位目标直接由同一 URDF 的零位 FK 定义。
+  if (armOnlyIk_) defaultLeftHandPosOnExit_ = initZeroLeftLink6Position_;
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,
                            "/quest3/default_right_hand_pos_on_exit",
                            defaultRightHandPosOnExit_,
                            Eigen::Vector3d(1.0, -1.0, 1.0),
                            2,
                            "[Quest3IkIncrementalROS]");
+  if (armOnlyIk_) defaultRightHandPosOnExit_ = initZeroRightLink6Position_;
 
   // 读取zyx限制参数
   PARAM_AND_PRINT_VECTOR3D(nodeHandle_,

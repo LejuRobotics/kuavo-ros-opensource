@@ -233,4 +233,55 @@ VR 使用 `/sg100/vr_step_gesture`（同 SG100StepGesture 类型），要求新�
 作为后续服务步进的起点。再切回服务时，只有新请求指定的手会激活；
 `/sg100/use_vr_control false` 本身不会恢复历史服务目标。
 
-末端类型默认自动读取当前工作区 `kuavo_assets/config/kuavo_v<robot_version>/kuavo.json` 的 `EndEffectorType: [左, 右]`，无需填写 `ee_type`。与 dev 控制器使用同一配置；不再按机型硬编码强脑或黑漫。Quest/Pico 均支持强脑 `qiangnao`、黑漫 `heiman`、夹爪 `lejuclaw`；仅黑漫启动 SG100 转发。可选 `ee_type:=...` 显式覆盖输入映射，不改写硬件配置。缺失、未知或左右不同类型会明确报错，不能静默按强脑启动。
+## 头部控制
+
+轮臂机器启动时默认拉起 `head_control_node`。它发布 `/robot_head_motion_data`，Quest 节点不再发头部指令。仿真轮臂、实机轮臂和全身 IK 的入口参数相同：
+
+| 参数 | 默认 | 取值 |
+| --- | --- | --- |
+| head_control_mode | vr_follow | vr_follow / track_hand / fixed |
+| head_track_target | both_hands_midpoint | 仅 track_hand：both_hands_midpoint / left_hand / right_hand / active_hand |
+
+`vr_follow` 跟随 Quest 骨骼 `Chest` 相对 `Head` 的姿态。只启动机器、不启动 VR 时没有这组 TF，节点不发布头角，头保持不动。`fixed` 平滑回到正前方（yaw = 0，pitch = 0）。这两个模式不使用 `head_track_target`。
+
+`track_hand` 看机器人自己的手，不依赖 VR。手和头都在 `waist_yaw_link` 下取值：
+
+| head_track_target | 行为 |
+| --- | --- |
+| both_hands_midpoint | 跟踪双手连线。`config.json` 的 `hand_bias` 默认 0.5，即正中间；0 看左手，1 看右手。一只手更活跃时再按 `velocity_bias` 偏向它 |
+| left_hand | 固定跟踪左手 |
+| right_hand | 固定跟踪右手 |
+| active_hand | 跟踪正在移动的手 |
+
+目标在头部后方时保持当前头角，回到前方至少 0.03 m 后继续跟随。
+
+```bash
+roslaunch wheel_arm_abs_vel load_kuavo_mujoco_velocity_ik.launch robot_version:=400062 head_control_mode:=track_hand head_track_target:=both_hands_midpoint
+```
+
+实机把入口换成 `load_kuavo_real_velocity_ik.launch`。普通轮臂仿真、实机分别是 `load_kuavo_mujoco_sim_wheel.launch`、`load_kuavo_real_wheel.launch`。不需要这个节点时传 `with_head_control_node:=false`。PICO 轮臂启动会关掉它，头改由 `pico_head_control_node` 发布。
+
+运行中切换：
+
+```bash
+rosservice call /head_control_node/set_head_control_mode "{mode: track_hand, fixed_hand: both_hands_midpoint}"
+rosservice call /head_control_node/set_head_control_mode "{mode: track_hand, fixed_hand: right_hand}"
+rosservice call /head_control_node/set_head_control_mode "{mode: left_hand, fixed_hand: ''}"
+rosservice call /head_control_node/set_head_control_mode "{mode: fixed, fixed_hand: ''}"
+rosservice call /head_control_node/set_head_control_mode "{mode: vr_follow, fixed_hand: ''}"
+```
+
+`mode` 可以是 `vr_follow`、`fixed`、`track_hand`，也可以直接写注视目标。`mode` 为 `track_hand` 时，`fixed_hand` 才是注视目标；留空则保持当前目标。`vr_follow` 和 `fixed` 忽略 `fixed_hand`。非空但无法识别的 `fixed_hand` 会让这次调用失败。返回的 `current_mode` 是实际生效的名字：`vr_follow`、`fixed`、`both_hands_midpoint`、`left_hand`、`right_hand`、`active_hand`。
+
+跟手模式下按 X+A 把胳膊收回时，头会先切到 `fixed`；再按一次恢复刚才的跟手目标。
+
+不启动 VR、只看头跟双手中点时，机器用上面的 `track_hand` 起来之后再跑：
+
+```bash
+roslaunch wheel_arm_abs_vel quest_velocity_ik.launch robot_version:=400062
+roslaunch noitom_hi5_hand_udp_python test_head_midpoint_arm_traj.launch
+```
+
+全身 IK 需要 `quest_velocity_ik.launch` 里的 `absolute_velocity_ik` 才会动手。普通轮臂不用这条，测试会改发 `/kuavo_arm_traj`。
+
+角度限制、平滑和换手阈值在 `src/manipulation_nodes/noitom_hi5_hand_udp_python/scripts/config.json` 的 `head_control`。launch 传入的模式优先于配置文件。

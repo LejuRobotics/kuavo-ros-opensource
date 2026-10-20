@@ -249,5 +249,6 @@ endif()
 # catkin_add_nosetests(test)
 install(PROGRAMS
   scripts/monitor_quest3.py
+  scripts/head_control_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

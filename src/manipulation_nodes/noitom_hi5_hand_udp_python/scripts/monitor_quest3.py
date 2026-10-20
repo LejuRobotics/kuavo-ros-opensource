@@ -157,14 +157,10 @@ class Quest3BoneFramePublisher:
         )
         # Global (non-per-side) resources: only the primary Quest owns these, so a
         # secondary monitor must not advertise them at all.
-        self.head_data_pub = None
         self.chest_data_pub = None
-        self.head_pose_pub = None
         self.chest_pose_pub = None
         if self.publish_quest3_globals:
-            self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
             self.chest_data_pub = rospy.Publisher('/robot_chest_motion_data', Float64MultiArray, queue_size=10)
-            self.head_pose_pub = rospy.Publisher('/robot_head_pose', PoseStamped, queue_size=10)
             self.chest_pose_pub = rospy.Publisher('/robot_chest_pose', PoseStamped, queue_size=10)
         # JoySticks is a current-state command. Keep only the newest outbound snapshot
         # so a slow subscriber cannot make the robot replay stale stick positions.
@@ -188,15 +184,14 @@ class Quest3BoneFramePublisher:
         if self.publish_quest3_globals:
             self.bone_tf_pub = rospy.Publisher('/tf', TFMessage, queue_size=10)
 
-        self.enable_head_control = rospy.get_param("~enable_head_control", True)
-        # 头部控制与 /quest3/* 一样是全局单例资源：次级 Quest 不参与头部控制，
-        # 否则两个实例会同时向 /robot_head_motion_data 写命令。
-        if not self.publish_quest3_globals:
-            self.enable_head_control = False
+        # 头部指令由 head_control_node 发布。这里保持关闭，避免旧路径在首次查独立节点时读到未初始化字段。
+        self.enable_head_control = False
+        self._standalone_head_check_time = 0.0
+        self._standalone_head_active = False
         rospy.loginfo(
-            "enable_head_control: %s (tf_prefix='%s', publish_quest3_globals=%s, connected_param='%s')",
-            self.enable_head_control, self.tf_prefix, self.publish_quest3_globals,
-            self.connected_param if self.connected_param else "(none)",
+            "Quest head command disabled (tf_prefix='%s', publish_quest3_globals=%s). "
+            "head_control_node owns /robot_head_motion_data.",
+            self.tf_prefix, self.publish_quest3_globals,
         )
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -211,32 +206,6 @@ class Quest3BoneFramePublisher:
         
         # 配置管理器
         self.config_manager = Quest3VrConfig(rospy.get_param("~vr_config_path", None))
-
-        # 头部控制管理器
-        self.head_control_manager = HeadControlManager(self.config_manager)
-        self._init_head_control_manager()
-
-        # 创建头部控制模式设置服务（全局单例资源：头部控制只有一套，
-        # 次级 Quest 不得争抢同一个 service/topic 名）
-        self.head_control_mode_service = None
-        self.head_ctrl_mode_pub = None
-        self._pub_head_fixed_user_intent = None
-        if self.publish_quest3_globals:
-            self.head_control_mode_service = rospy.Service(
-                '/quest3/set_head_control_mode',
-                SetHeadControlMode,
-                self._handle_set_head_control_mode
-            )
-            rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
-
-            # 创建头部控制模式发布节点
-            self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', headCtrlMode, queue_size=10)
-            # 每次 set_head_control_mode 成功设为 fixed 时发布，供 QuestControlFSM 在手臂复位窗口内更新「解锁后恢复」快照（含重复 fixed）
-            self._pub_head_fixed_user_intent = rospy.Publisher(
-                '/quest3/head_fixed_forward_user_intent', Empty, queue_size=1, latch=False
-            )
-
-            rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
 
         # 初始化VR连接状态参数：按侧参数（若配置）+ 全局 /quest3/connected（仅主 Quest）
         self._set_connected_state(False)
@@ -538,9 +507,28 @@ class Quest3BoneFramePublisher:
             return name
         return "{}{}".format(self.tf_prefix, name)
 
+    def _standalone_head_track_active(self):
+        """独立 head_track_hand 节点在跑时返回 True。最多每 0.5 秒查一次参数。"""
+        now = rospy.Time.now().to_sec()
+        if now - self._standalone_head_check_time < 0.5:
+            return self._standalone_head_active
+        self._standalone_head_check_time = now
+        try:
+            active = bool(rospy.get_param("/head_control_node/active", False))
+        except Exception:
+            active = False
+        if active != self._standalone_head_active:
+            rospy.loginfo(
+                "Quest head command %s because /head_control_node/active=%s",
+                "paused" if active else "resumed",
+                active,
+            )
+        self._standalone_head_active = active
+        return active
+
     def pub_head_motion_data(self, cur_quat):
         """发布头部运动数据（根据控制模式）"""
-        if not self.enable_head_control:
+        if not self.enable_head_control or self._standalone_head_track_active():
             return
         
         # VR随动模式：使用原有逻辑
@@ -1162,13 +1150,6 @@ class Quest3BoneFramePublisher:
                             if len(self._latency_samples) >= self._latency_log_every:
                                 self._log_latency_stats(pose_event.timestamp)
 
-                    # 头部控制模式话题是全局单例资源，次级 Quest 不发布
-                    if self.head_ctrl_mode_pub is not None:
-                        self.head_control_manager.publish_head_control_mode(
-                            self.head_ctrl_mode_pub,
-                            HeadControlMode.to_string(self.head_control_manager.mode),
-                            self.head_control_manager.fixed_main_hand,
-                        )
                     self.rate.sleep()
                 except socket.timeout:
                     print('Timeout occurred, no data received. Restarting socket...')
@@ -1282,9 +1263,6 @@ class Quest3BoneFramePublisher:
             # 创建TransformStamped并添加到TFMessage中，而不是立即发布
             self.add_transform_to_tf_message(tf_msg, time_now, bone_name, scaled_position, right_hand_quat)
 
-            if bone_name == "Head" and self.enable_head_control:
-                self.pub_head_motion_data(right_hand_quat)
-            
             if bone_name == "Chest":
                 self.pub_chest_pose_in_torso_frame(right_hand_position, right_hand_quat, root_offset, time_now)
         
@@ -1292,10 +1270,6 @@ class Quest3BoneFramePublisher:
         # 次级 Quest 不发布骨骼 TF，避免 torso -> LeftHandPalm 等同名 child frame 冲突
         if len(tf_msg.transforms) > 0 and self.bone_tf_pub is not None:
             self.bone_tf_pub.publish(tf_msg)
-        
-        # 非VR模式：更新头部控制（在TF发布后，确保可以查询到手部位置）
-        if self.enable_head_control and self.head_control_manager.mode != HeadControlMode.VR_FOLLOW:
-            self._update_head_control_from_hands()
 
     def restart_socket(self):
         print("Restarting socket connection...")

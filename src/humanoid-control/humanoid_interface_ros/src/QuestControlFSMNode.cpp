@@ -201,7 +201,7 @@ namespace ocs2
 
             std::string change_arm_mode_service_name = robot_type_ == 1 ? "/wheel_arm_change_arm_ctrl_mode" : "/humanoid_change_arm_ctrl_mode";
             change_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(change_arm_mode_service_name);
-            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>("/quest3/set_head_control_mode");
+            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>("/head_control_node/set_head_control_mode");
 
             change_arm_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
 
@@ -1000,10 +1000,24 @@ namespace ocs2
 
         void headCtrlModeCallback(const kuavo_msgs::headCtrlMode::ConstPtr &mode_msg)
         {
-            if (mode_msg->mode == "auto_track_active" || mode_msg->mode == "fixed_main_hand")
+            const bool hand_tracking_mode =
+                mode_msg->mode == "track_hand" || mode_msg->mode == "both_hands_midpoint" ||
+                mode_msg->mode == "left_hand" || mode_msg->mode == "right_hand" ||
+                mode_msg->mode == "active_hand" || mode_msg->mode == "auto_track_active" ||
+                mode_msg->mode == "fixed_main_hand" || mode_msg->mode == "fixed_left_hand" ||
+                mode_msg->mode == "fixed_right_hand";
+            if (hand_tracking_mode)
             {
                 use_auto_track_ = true;
-                if (mode_msg->mode == "fixed_main_hand")
+                if (mode_msg->mode == "left_hand" || mode_msg->mode == "fixed_left_hand")
+                {
+                    fixed_hand_ = "left";
+                }
+                else if (mode_msg->mode == "right_hand" || mode_msg->mode == "fixed_right_hand")
+                {
+                    fixed_hand_ = "right";
+                }
+                else if (mode_msg->mode == "fixed_main_hand" && !mode_msg->fixed_main_hand.empty())
                 {
                     fixed_hand_ = mode_msg->fixed_main_hand;
                 }

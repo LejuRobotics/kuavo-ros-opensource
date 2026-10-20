@@ -1,0 +1,19 @@
+<launch>
+    <!-- 轮臂独立头跟手。机器人 TF 起来之后即可启动，不需要 VR 遥操作节点。 -->
+    <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed"/>
+    <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时有效：both_hands_midpoint / left_hand / right_hand / active_hand"/>
+    <arg name="rate" default="50.0" doc="头控更新频率 Hz"/>
+    <arg name="base_frame" default="waist_yaw_link" doc="头部指令的参考坐标系，轮臂为腰 yaw"/>
+
+    <node pkg="humanoid_controllers"
+          type="start_node.sh"
+          name="head_control_node"
+          output="screen"
+          args="python3 $(find noitom_hi5_hand_udp_python)/scripts/head_control_node.py">
+        <param name="head_control_mode" value="$(arg head_control_mode)"/>
+        <param name="head_track_target" value="$(arg head_track_target)"/>
+        <param name="rate" value="$(arg rate)"/>
+        <param name="base_frame" value="$(arg base_frame)"/>
+        <rosparam param="head_frames">["head_camera_base", "camera_base", "zhead_2_link"]</rosparam>
+    </node>
+</launch>

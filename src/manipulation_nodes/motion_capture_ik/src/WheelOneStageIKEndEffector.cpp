@@ -222,7 +222,7 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
   freezeQ = clampToJointLimits(freezeQ);
   const Eigen::Vector3d frozenLowerBodyPitchJointsClamped = freezeQ.head<3>();
 
-  if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ &&
+  if (!freezeLowerBody_ && freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ &&
       frozenLowerBodyPitchJoints_.isApprox(frozenLowerBodyPitchJointsClamped, 1.0e-12)) {
     return true;
   }
@@ -244,6 +244,7 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
   fallback.head<3>() = frozenLowerBodyPitchJointsClamped;
   fallback = clampToJointLimits(fallback);
 
+  freezeLowerBody_ = false;
   frozenLowerBodyPitchJoints_ = frozenLowerBodyPitchJointsClamped;
   hasFrozenLowerBodyPitchJoints_ = true;
   freezeChestPosition_ = true;
@@ -304,7 +305,33 @@ Eigen::VectorXd WheelOneStageIKEndEffector::clampToJointLimits(const Eigen::Vect
   return clamped;
 }
 
+bool WheelOneStageIKEndEffector::activateLowerBodyFreeze(const Eigen::Vector4d& joints) {
+  if (nq_ != 18 || !joints.allFinite()) {
+    return false;
+  }
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(nq_);
+  q.head<4>() = joints;
+  q = clampToJointLimits(q);
+  if (freezeLowerBody_ && frozenLowerBodyPitchJoints_.isApprox(q.head<3>(), 1e-12) &&
+      std::abs(frozenWaistYaw_ - q[3]) < 1e-12) {
+    return true;
+  }
+  if (!activateChestPositionFreeze(q.head<3>())) {
+    return false;
+  }
+  freezeLowerBody_ = true;
+  frozenWaistYaw_ = q[3];
+  // All warm starts and filter/history states must use the same held yaw.
+  for (auto* state : {&initialGuessSeed_, &refLpX1_, &refLpX2_, &refLpY1_,
+                      &refLpY2_, &refLowpassLatest_, &latestSolution_}) {
+    forceFrozenLowerBodyPitchState(*state);
+  }
+  historyBuffer_.resyncSegment(0, q.head<4>());
+  return true;
+}
+
 void WheelOneStageIKEndEffector::deactivateChestPositionFreeze() {
+  freezeLowerBody_ = false;
   freezeChestPosition_ = false;
   hasFrozenLowerBodyPitchJoints_ = false;
 }
@@ -312,6 +339,9 @@ void WheelOneStageIKEndEffector::deactivateChestPositionFreeze() {
 void WheelOneStageIKEndEffector::forceFrozenLowerBodyPitchState(Eigen::VectorXd& state) const {
   if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ && state.size() >= 3) {
     state.head<3>() = frozenLowerBodyPitchJoints_;
+    if (freezeLowerBody_ && state.size() >= 4) {
+      state[3] = frozenWaistYaw_;
+    }
   }
 }
 
@@ -351,6 +381,7 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
     }
   }
   referenceSolution = clampToJointLimits(referenceSolution);
+  forceFrozenLowerBodyPitchState(referenceSolution);
 
   setConstraints(endEffectorIK, PoseConstraintList, controlArmIndex, Eigen::VectorXd::Zero(nq_), referenceSolution);
 
@@ -431,7 +462,13 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
 
   // add chest position constraint
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_CHEST) {
-    if (freezeChestPosition_) {
+    if (freezeLowerBody_) {
+      // The master switch stops leg commands. Match that complete held chain;
+      // a chest position/yaw tracking cost would compete with an immutable FK.
+      Eigen::Vector4d held;
+      held << frozenLowerBodyPitchJoints_, frozenWaistYaw_;
+      ik.get_mutable_prog()->AddBoundingBoxConstraint(held, held, ik.q().head(4));
+    } else if (freezeChestPosition_) {
       // 位置跟随细分关闭：更改为高权重软约束
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,

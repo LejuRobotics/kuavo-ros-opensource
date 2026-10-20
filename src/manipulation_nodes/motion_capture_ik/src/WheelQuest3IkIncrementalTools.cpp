@@ -405,8 +405,9 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
   Eigen::Vector3d rightShoulderPosRel =
       hasLatestRightShoulderFk_ ? (latestRightShoulderFkPos_ - offset) : (robotRightFixedShoulderPos_ - offset);
 
-  if (!chestIncrementalUpdateEnabled_) {
-    remapUpperBodyRefPoints(chestPos,
+  // 总开关只改变躯干跟随权限，不改变手臂可达域和肘部投影规则。
+  // 两侧始终使用同一肩部 FK 参考，避免关闭时突然裁剪、开启时又恢复原始手部目标。
+  remapUpperBodyRefPoints(chestPos,
                             chestQuatRef,
                             leftShoulderPosRel,
                             rightShoulderPosRel,
@@ -414,7 +415,6 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                             rightHandRefRel,
                             leftElbowRefRel,
                             rightElbowRefRel);
-  }
   const DrakeChestElbowHandSolution sol =
       chestElbowHandPointOptSolverPtr_->solve(chestPos,
                                               chestQuatRef,
@@ -801,6 +801,12 @@ void WheelQuest3IkIncrementalROS::updateChestPositionFreezeState(bool freezeRequ
 }
 
 void WheelQuest3IkIncrementalROS::reset() {
+  {
+    std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
+    lbLegMasterPublishEnabled_ = chestIncrementalUpdateEnabled_;
+    lowerBodyMasterFreezeActive_ = !chestIncrementalUpdateEnabled_ && hasPublishedLbCommand_;
+    lowerBodyMasterFreezeAnchor_ = lastPublishedLbCommand_;
+  }
   // 持续重置各类状态，确保进入系统时正常
   // chest 人体锚点需要重建：下次推进 chest 增量前先按当时的人体 Chest 复位锚点
   chestAnchorNeedsRefresh_ = true;
@@ -889,6 +895,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   // 避免 mode 1 中的躯干位置/高度被带入下一次 mode 2。
   frozenRobotChestPos_ = robotFixedWaistYawPos_;
   frozenChestQuat_.setIdentity();
+  chestFollowRecoveryOffset_.setIdentity();
   frozenLeftHandHeightOffset_ = 0.0;
   frozenRightHandHeightOffset_ = 0.0;
   frozenLeftElbowHeightOffset_ = 0.0;
@@ -2279,6 +2286,10 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
 }
 
 void WheelQuest3IkIncrementalROS::publishLegJointStates() {
+  std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
+  if (!lbLegMasterPublishEnabled_) {
+    return;
+  }
   // 从 latestLbTargetAngles_ 读取 IK 解的下肢目标角度
   Eigen::VectorXd targetLbAngles;
   bool shouldPublish = false;
@@ -2374,9 +2385,15 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
   }
 
   lbLegTrajPublisher_.publish(lbLegTrajMsg);
+  // Record exactly the post-filter, post-clamp message accepted by publish().
+  for (int i = 0; i < 4; ++i) {
+    lastPublishedLbCommand_(i) = lbLegTrajMsg.position[i] * M_PI / 180.0;
+  }
+  hasPublishedLbCommand_ = true;
 }
 
 void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
+  std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
   // 下肢默认角度：[0, 0, 0, 0] 度
   Eigen::VectorXd defaultLbAngles = Eigen::VectorXd::Zero(4);
 
@@ -2419,6 +2436,11 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
   }
 
   lbLegTrajPublisher_.publish(lbLegTrajMsg);
+  // Record exactly the post-filter, post-clamp message accepted by publish().
+  for (int i = 0; i < 4; ++i) {
+    lastPublishedLbCommand_(i) = lbLegTrajMsg.position[i] * M_PI / 180.0;
+  }
+  hasPublishedLbCommand_ = true;
 }
 // ========================================================================================
 // [AUTO-MOVED][stage 5] moved from WheelQuest3IkIncrementalROS.cpp

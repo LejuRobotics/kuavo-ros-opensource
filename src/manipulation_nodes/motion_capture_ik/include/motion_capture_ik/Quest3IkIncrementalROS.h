@@ -364,7 +364,14 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
 
   // Grip 状态跟踪（用于检测上升沿并更新锚点，避免频繁切换 grip 时位置跳变）
   bool lastLeftGripPressed_ = false;
+  bool armOnlyIk_ = false;
+  bool armOnlyInitialUnlockPending_ = true;
   bool lastRightGripPressed_ = false;
+  bool leftGripHoldActive_ = false;
+  bool rightGripHoldActive_ = false;
+  bool leftGripReleasePending_ = false;
+  bool rightGripReleasePending_ = false;
+  Eigen::VectorXd gripHoldPosition_;  // grip 释放时的最后发布位置（rad）
 
   // Grip 超时机制：当连续 grip 1 秒时，布尔值为 true
   static constexpr double GRIP_TIMEOUT_DURATION = 2.0;  // 超时时间：1秒

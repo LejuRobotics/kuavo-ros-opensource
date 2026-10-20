@@ -208,6 +208,7 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   // Freeze q0/knee, q1/leg and q2/waist_pitch at one fixed command snapshot.
   // Calls must be serialized with solveIK() by the owner of this solver.
   bool activateChestPositionFreeze(const Eigen::Vector3d& frozenLowerBodyPitchJoints);
+  bool activateLowerBodyFreeze(const Eigen::Vector4d& joints);
   void deactivateChestPositionFreeze();
 
  private:
@@ -257,6 +258,8 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   mutable bool lockKneeLegEnabled_{false};
   mutable double lockKneeQ_{0.0};
   mutable double lockLegQ_{0.0};
+  bool freezeLowerBody_{false};
+  double frozenWaistYaw_{0.0};
   bool freezeChestPosition_{false};
   bool hasFrozenLowerBodyPitchJoints_{false};
   Eigen::Vector3d frozenLowerBodyPitchJoints_{Eigen::Vector3d::Zero()};

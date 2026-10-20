@@ -50,18 +50,22 @@
     </group>
 
     <!-- 启动轮臂整套机器人控制组件（含底盘、躯干和手臂），仿真分支同时启动仿真器。
-         不启动Quest输入链路；实机和仿真均保留默认遥控器入口，VR输入由PICO提供。 -->
+         不启动Quest输入链路；实机和仿真均保留默认遥控器入口，VR输入由PICO提供。
+         轮臂头角不走 head_control_node。下方 launch_pico_teleop 在 enable_head_control 为真时
+         启动 pico_head_control_node，由它单独发布 /robot_head_motion_data。 -->
     <group if="$(eval arg('start_robot') and arg('wheel_robot') and arg('sim_mode'))">
         <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim_wheel.launch">
             <arg name="robot_version" value="$(arg robot_version)"/>
             <arg name="use_joystick" value="true"/>
             <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
+            <arg name="with_head_control_node" value="false"/>
         </include>
     </group>
     <group if="$(eval arg('start_robot') and arg('wheel_robot') and not arg('sim_mode'))">
         <include file="$(find humanoid_controllers)/launch/load_kuavo_real_wheel.launch">
             <arg name="robot_version" value="$(arg robot_version)"/>
             <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
+            <arg name="with_head_control_node" value="false"/>
         </include>
     </group>
 
