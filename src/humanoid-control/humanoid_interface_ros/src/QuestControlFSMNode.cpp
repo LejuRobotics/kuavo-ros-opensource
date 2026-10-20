@@ -1266,23 +1266,32 @@ namespace ocs2
 
             if (joystick_data_.left_first_button_pressed) // 左边第一个按钮按下了，切换模式
             {
+                // 参数可能在控制器节点启动后由 VR launch 设置，按键时刷新一次。
+                ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // X+B：固定↔恢复跟随
                 {
-                    // MoRE 自己在 MoREController 内处理 X+B 手臂冻结/解冻，
-                    // 其他控制器继续由 FSM 切换 arm_mode。
-                    if (isMoreControllerActive())
+                    if (use_cpp_incremental_ik_)
                     {
+                        ROS_INFO_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in incremental VR mode.");
+                    }
+                    else if (isMoreControllerActive())
+                    {
+                        // MoRE 自己在 MoREController 内处理 X+B 手臂冻结/解冻，
+                        // 其他控制器继续由 FSM 切换 arm_mode。
                         ROS_INFO_THROTTLE(1.0, "[QuestControlFSM] MoRE controller active, X+B arm toggle handled by MoRE controller.");
                         return;
                     }
-                    const int new_arm_mode = resolveVrArmModeForXb(arm_ctrl_mode_);
-                    if (new_arm_mode < 0)
+                    else
                     {
-                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in arm mode %d (only allowed in follow/fix).", arm_ctrl_mode_);
-                        return;
+                        const int new_arm_mode = resolveVrArmModeForXb(arm_ctrl_mode_);
+                        if (new_arm_mode < 0)
+                        {
+                            ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in arm mode %d (only allowed in follow/fix).", arm_ctrl_mode_);
+                            return;
+                        }
+                        std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
+                        callSetArmModeSrv(new_arm_mode);
                     }
-                    std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_mode << std::endl;
-                    callSetArmModeSrv(new_arm_mode);
                 }
                 else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed) // X+A：复位↔恢复跟随
                 {
@@ -1291,7 +1300,6 @@ namespace ocs2
                         arm_collision_control_ = false;
                         return;
                     }
-                    ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
                     if (use_cpp_incremental_ik_ && arm_ctrl_mode_dual_feed_
                         && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
                         ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
@@ -1503,16 +1511,25 @@ namespace ocs2
 
             if (joystick_data_.left_first_button_pressed)
             {
+                // 参数可能在控制器节点启动后由 VR launch 设置，按键时刷新一次。
+                ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)  // X+B：固定↔恢复跟随
                 {
-                    const int new_arm_ctrl_mode_wheel_ = resolveVrArmModeForXb(arm_ctrl_mode_);
-                    if (new_arm_ctrl_mode_wheel_ < 0)
+                    if (use_cpp_incremental_ik_)
                     {
-                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in arm mode %d (only allowed in follow/fix).", arm_ctrl_mode_);
-                        return;
+                        ROS_INFO_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in incremental VR mode.");
                     }
-                    callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
-                    std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
+                    else
+                    {
+                        const int new_arm_ctrl_mode_wheel_ = resolveVrArmModeForXb(arm_ctrl_mode_);
+                        if (new_arm_ctrl_mode_wheel_ < 0)
+                        {
+                            ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in arm mode %d (only allowed in follow/fix).", arm_ctrl_mode_);
+                            return;
+                        }
+                        callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
+                        std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
+                    }
                 }
                 else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)  // X+A：复位↔恢复跟随
                 {
@@ -1520,7 +1537,6 @@ namespace ocs2
                         arm_collision_control_ = false;
                         return;
                     }
-                    ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
                     if (use_cpp_incremental_ik_ && arm_ctrl_mode_dual_feed_
                         && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
                         ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
