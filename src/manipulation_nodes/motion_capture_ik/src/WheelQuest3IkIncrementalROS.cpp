@@ -412,6 +412,15 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     measureStage(solveLoopFsmChangeMsPublisher_, [&]() { fsmChange(); });
     measureStage(solveLoopFsmProcessMsPublisher_, [&]() { fsmProcess(); });
     measureStage(solveLoopFsmExitMsPublisher_, [&]() { fsmExit(); });
+    // 跟随中双手松开且未开躯干增量时：若实测 chest FK 相对冻结锚点已漂（例如外部 TUI 改过躯干），
+    // 再按 FK 重锚一次，避免映射目标继续钉在旧胸位上。
+    if (armControlMode_.load() == 2 && hasLatestWaistYawFk_ && !chestIncrementalUpdateEnabled_ &&
+        joyStickHandlerPtr_ && !joyStickHandlerPtr_->isLeftGrip() && !joyStickHandlerPtr_->isRightGrip()) {
+      const double chestDrift = (latestWaistYawFkPos_ - frozenRobotChestPos_).norm();
+      if (chestDrift > kExternalTorsoReanchorPosTol) {
+        reanchorMappedUpperBodyFromMeasuredFk("external_torso_fk_drift");
+      }
+    }
     measureStage(solveLoopPublishEeMsPublisher_, [&]() { publishEndEffectorControlData(); });
     measureStage(solveLoopPublishAuxMsPublisher_, [&]() { publishAuxiliaryStates(); });
     measureStage(solveLoopPublishMarkersMsPublisher_, [&]() { publishWholeBodyRefMarkers(); });
@@ -488,6 +497,85 @@ void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
   }
 }
 
+void WheelQuest3IkIncrementalROS::reanchorMappedUpperBodyFromMeasuredFk(const char* reason) {
+  const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+  const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
+  const Eigen::Vector3d leftShoulderPos =
+      hasLatestLeftShoulderFk_ ? latestLeftShoulderFkPos_ : robotLeftFixedShoulderPos_;
+  const Eigen::Vector3d rightShoulderPos =
+      hasLatestRightShoulderFk_ ? latestRightShoulderFkPos_ : robotRightFixedShoulderPos_;
+  const Eigen::Vector3d leftElbowPos = computeElbow(leftLink6Position_, leftEndEffectorPosition_, l2_);
+  const Eigen::Vector3d rightElbowPos = computeElbow(rightLink6Position_, rightEndEffectorPosition_, l2_);
+
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
+  }
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_LEFT_SHOULDER) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position = leftShoulderPos;
+  }
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_SHOULDER) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = rightShoulderPos;
+  }
+  updateHandConstraintUnlocked(
+      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
+  updateHandConstraintUnlocked(
+      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
+  updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, leftElbowPos);
+  updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, rightElbowPos);
+
+  frozenRobotChestPos_ = chestPos;
+  frozenChestQuat_ = chestQuat;
+  frozenLeftHandHeightOffset_ = leftLink6Position_.z() - frozenRobotChestPos_.z();
+  frozenRightHandHeightOffset_ = rightLink6Position_.z() - frozenRobotChestPos_.z();
+  frozenLeftElbowHeightOffset_ = leftElbowPos.z() - frozenRobotChestPos_.z();
+  frozenRightElbowHeightOffset_ = rightElbowPos.z() - frozenRobotChestPos_.z();
+
+  // 人体 chest 锚点下次推进前按当前人体 Chest 重建，避免把暂停前的 VR 位移一次性打进恢复后的增量。
+  chestAnchorNeedsRefresh_ = true;
+  chestFollowRecoveryOffset_.setIdentity();
+  hasLeftActiveChestAnchor_ = false;
+  hasRightActiveChestAnchor_ = false;
+  hasLeftHandPoseInChest_ = false;
+  hasRightHandPoseInChest_ = false;
+  hasLeftElbowPosInChest_ = false;
+  hasRightElbowPosInChest_ = false;
+  hasLeftGripReleaseSnapshot_ = false;
+  hasRightGripReleaseSnapshot_ = false;
+
+  latestChestPosBeforeOpt_ = chestPos;
+  latestChestPosAfterOpt_ = chestPos;
+  latestLeftShoulderPosBeforeOpt_ = leftShoulderPos;
+  latestLeftShoulderPosAfterOpt_ = leftShoulderPos;
+  latestRightShoulderPosBeforeOpt_ = rightShoulderPos;
+  latestRightShoulderPosAfterOpt_ = rightShoulderPos;
+  latestLeftHandPosBeforeOpt_ = leftLink6Position_;
+  latestLeftHandPosAfterOpt_ = leftLink6Position_;
+  latestRightHandPosBeforeOpt_ = rightLink6Position_;
+  latestRightHandPosAfterOpt_ = rightLink6Position_;
+  latestLeftElbowPosBeforeOpt_ = leftElbowPos;
+  latestLeftElbowPosAfterOpt_ = leftElbowPos;
+  latestRightElbowPosBeforeOpt_ = rightElbowPos;
+  latestRightElbowPosAfterOpt_ = rightElbowPos;
+
+  if (chestIncrementalUpdateEnabled_) {
+    enterOwnerChestIncrementalMode(chestPos);
+  }
+
+  ROS_WARN("[WheelQuest3IkIncrementalROS] Re-anchored upper-body map from measured FK (%s): "
+           "chest=[%.3f, %.3f, %.3f] Lhand=[%.3f, %.3f, %.3f] Rhand=[%.3f, %.3f, %.3f]",
+           reason ? reason : "unspecified",
+           chestPos.x(),
+           chestPos.y(),
+           chestPos.z(),
+           leftLink6Position_.x(),
+           leftLink6Position_.y(),
+           leftLink6Position_.z(),
+           rightLink6Position_.x(),
+           rightLink6Position_.y(),
+           rightLink6Position_.z());
+}
+
 void WheelQuest3IkIncrementalROS::fsmEnter() {
   auto updateChestConstraintFromFk = [&]() {
     // 进入准备动作时保持机器人当前胸部 FK 位姿，不跟随 VR 人体躯干
@@ -508,6 +596,10 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
       justEnteredMode2_ = true;  // 只在第一次进入mode 2时标记
       mode2Initialized_ = true;  // 标记mode 2已初始化
       mode2EnterTime_ = ros::Time::now();  // 记录进入mode 2的时间戳
+    }
+    // X+B 恢复 / 从复位进跟随：按当前实测 FK 重锚胸肩手肘，覆盖暂停期间 TUI 改躯干造成的旧锚点。
+    if (pendingResumeUpperBodyReanchor_.exchange(false)) {
+      reanchorMappedUpperBodyFromMeasuredFk("mode_resume_0_or_1_to_2");
     }
     auto resetMode2State = [&](bool resetIkSolution) {
       {

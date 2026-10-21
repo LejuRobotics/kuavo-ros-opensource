@@ -1529,21 +1529,14 @@ namespace ocs2
                 ros::param::getCached("/use_cpp_incremental_ik", use_cpp_incremental_ik_);
                 if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)  // X+B：固定↔恢复跟随
                 {
-                    if (use_cpp_incremental_ik_)
+                    const int new_arm_ctrl_mode_wheel_ = resolveVrArmModeForXb(arm_ctrl_mode_);
+                    if (new_arm_ctrl_mode_wheel_ < 0)
                     {
-                        ROS_INFO_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in incremental VR mode.");
+                        ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in arm mode %d (only allowed in follow/fix).", arm_ctrl_mode_);
+                        return;
                     }
-                    else
-                    {
-                        const int new_arm_ctrl_mode_wheel_ = resolveVrArmModeForXb(arm_ctrl_mode_);
-                        if (new_arm_ctrl_mode_wheel_ < 0)
-                        {
-                            ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] X+B ignored in arm mode %d (only allowed in follow/fix).", arm_ctrl_mode_);
-                            return;
-                        }
-                        callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
-                        std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
-                    }
+                    callSetArmModeSrv(new_arm_ctrl_mode_wheel_);
+                    std::cout << "[QuestControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
                 }
                 else if (!joystick_data_prev_.right_first_button_pressed && joystick_data_.right_first_button_pressed)  // X+A：复位↔恢复跟随
                 {

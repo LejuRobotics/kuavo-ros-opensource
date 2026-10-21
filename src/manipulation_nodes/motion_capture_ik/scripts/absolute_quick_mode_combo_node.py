@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Quest3 absolute-mode quick-control combo bridge.
 
-Left front trigger + X uses a rising-edge toggle:
-  normal (quickMode=0) -> upper-arm quick (quickMode=2)
-  upper-arm quick (quickMode=2) -> normal (quickMode=0)
+Left front trigger + X enables upper-arm quick (quickMode=2).
+Left grip + X disables quick mode (quickMode=0).
 
 The node is only launched for Python absolute IK.  It never changes IK, PD,
 MPC parameters, arm targets, interpolation, or low-pass parameters.
@@ -25,13 +24,17 @@ class AbsoluteQuickComboBridge:
         self._trigger_threshold = float(
             rospy.get_param("~left_trigger_threshold", 0.8)
         )
+        self._grip_threshold = float(
+            rospy.get_param("~left_grip_threshold", 0.8)
+        )
         self._debounce_sec = max(0.05, float(rospy.get_param("~debounce_sec", 0.35)))
         self._service_name = rospy.get_param(
             "~service_name", "/enable_lb_arm_quick_mode"
         )
 
         self._lock = threading.Lock()
-        self._combo_last = False
+        self._enable_combo_last = False
+        self._disable_combo_last = False
         self._quick_enabled = False
         self._last_edge_time = rospy.Time(0)
         self._shutting_down = False
@@ -56,9 +59,11 @@ class AbsoluteQuickComboBridge:
         )
         rospy.on_shutdown(self._on_shutdown)
         rospy.loginfo(
-            "[%s] ready: left_trigger>%.2f + X toggles quickMode 0/2",
+            "[%s] ready: left_trigger>%.2f + X enables quickMode=2; "
+            "left_grip>%.2f + X disables quickMode=0",
             MARKER,
             self._trigger_threshold,
+            self._grip_threshold,
         )
 
     def _request_mode(self, target_mode, quiet=False):
@@ -91,26 +96,45 @@ class AbsoluteQuickComboBridge:
             return False
         return True
 
+    def _accept_edge(self):
+        if self._shutting_down:
+            return False
+        now = rospy.Time.now()
+        if (
+            not self._last_edge_time.is_zero()
+            and (now - self._last_edge_time).to_sec() < self._debounce_sec
+        ):
+            return False
+        self._last_edge_time = now
+        return True
+
     def _joystick_callback(self, msg):
-        combo = (
-            msg.left_trigger > self._trigger_threshold
-            and bool(msg.left_first_button_pressed)  # Quest left controller X
+        x_pressed = bool(msg.left_first_button_pressed)  # Quest left controller X
+        enable_combo = (
+            msg.left_trigger > self._trigger_threshold and x_pressed
+        )
+        disable_combo = (
+            msg.left_grip > self._grip_threshold and x_pressed
         )
 
         with self._lock:
-            rising_edge = combo and not self._combo_last
-            self._combo_last = combo
-            if not rising_edge or self._shutting_down:
-                return
+            enable_edge = enable_combo and not self._enable_combo_last
+            disable_edge = disable_combo and not self._disable_combo_last
+            self._enable_combo_last = enable_combo
+            self._disable_combo_last = disable_combo
 
-            now = rospy.Time.now()
-            if (
-                not self._last_edge_time.is_zero()
-                and (now - self._last_edge_time).to_sec() < self._debounce_sec
-            ):
-                return
-            self._last_edge_time = now
-            target_mode = 0 if self._quick_enabled else 2
+            # Prefer disable when both edges fire in the same sample.
+            target_mode = None
+            combo_label = None
+            if disable_edge and self._quick_enabled and self._accept_edge():
+                target_mode = 0
+                combo_label = "left grip + X"
+            elif enable_edge and not self._quick_enabled and self._accept_edge():
+                target_mode = 2
+                combo_label = "left trigger + X"
+
+        if target_mode is None:
+            return
 
         # Service calls are made outside the state lock.
         if not self._request_mode(target_mode):
@@ -122,8 +146,9 @@ class AbsoluteQuickComboBridge:
 
         self._state_pub.publish(Int8(data=state))
         rospy.logwarn(
-            "[%s] left trigger + X: quickMode=%d (%s)",
+            "[%s] %s: quickMode=%d (%s)",
             MARKER,
+            combo_label,
             state,
             "ABSOLUTE QUICK" if state == 2 else "NORMAL",
         )

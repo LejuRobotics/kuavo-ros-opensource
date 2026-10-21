@@ -116,6 +116,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void computeWaistYawFK(Eigen::Vector3d& pOut);
   // 当前机器人胸部(waist_yaw_link) yaw/pitch 朝向，用于未开启躯干控制时保持当前姿态
   Eigen::Quaterniond getRobotChestQuatRef() const;
+  // X+B 暂停期间 TUI 挪躯干后，按当前实测关节 FK 重锚胸/肩/手/肘映射，避免恢复跟随仍用旧零位锚点。
+  void reanchorMappedUpperBodyFromMeasuredFk(const char* reason);
   // 启发式计算肘部参考位置
   Eigen::Vector3d computeElbow(const Eigen::Vector3d& link6Pos,
                                const Eigen::Vector3d& endEffectorPos,
@@ -584,6 +586,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool resetJointToDefaultWheel_ = true;                        // 进入增量控制时是否重置关节到默认位置
   bool justEnteredMode2_ = false;                               // mode 0 -> mode 2 切换瞬间标志（约2秒内为true）
   bool mode2Initialized_ = false;                               // mode 2 是否已初始化（避免fsmEnter重复进入）
+  // 0/1→2 上升沿：下一拍 fsmEnter 强制按实测 FK 重锚上半身映射（覆盖 X+B 暂停后 TUI 改躯干）。
+  std::atomic<bool> pendingResumeUpperBodyReanchor_{false};
+  // 跟随中若实测 chest FK 相对冻结锚点漂移超过该阈值，再重锚一次（米）。
+  static constexpr double kExternalTorsoReanchorPosTol = 0.04;
 
   // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
   Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};

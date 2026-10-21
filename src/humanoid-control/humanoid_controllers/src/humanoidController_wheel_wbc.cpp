@@ -1272,8 +1272,12 @@ namespace humanoidController_wheel_wbc
       // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
       // 只跟踪“上肢快速 + 直接位置通路”的有效期。离开该通路立即清除状态，
       // 保证下次进入时从进入前控制目标重新初始化，避免沿用旧滤波状态。
+      // X+A 1→2 解锁期间保持 isArmControlModeChanged_，必须走与 mode1 复位相同的
+      // processArmControlModeSwitch 插值；此时禁止 quick 直通，否则会瞬间冲向 VR 目标。
+      const bool modeSwitchArmInterpActive = isArmControlModeChanged_;
       const bool absoluteQuickQLowPassActive =
           !externalArmReset &&
+          !modeSwitchArmInterpActive &&
           (quickMode_ == 2 || quickMode_ == 3) &&
           (lbMpcMode == 1 || lbMpcMode == 3) &&
           !enable_arm_traj_interpolator_;
@@ -1298,8 +1302,19 @@ namespace humanoidController_wheel_wbc
         }
         if(!externalArmReset && (quickMode_ == 2 || quickMode_ == 3))
         {
+          if (modeSwitchArmInterpActive)
+          {
+            // Reuse the mode-1 reset interpolateArmTarget output already written
+            // into target_qpos by processArmControlModeSwitch (0.001 rad/step).
+            optimizedState_mrt_.tail(armNum_) =
+                target_qpos.segment(lowJointNum_, armNum_);
+            optimizedInput_mrt_.tail(armNum_).setZero();
+            ros_logger_->publishVector(
+                "/humanoid_wheel/arm_target_qpos_quick_mode",
+                optimizedState_mrt_.tail(armNum_));
+          }
           // 兼容旧版：默认直通外部手臂目标；开启插补开关时由插补路径覆盖。
-          if (!enable_arm_traj_interpolator_)
+          else if (!enable_arm_traj_interpolator_)
           {
             vector_t arm_target_qpos = vector_t::Zero(armNum_);
             vector_t arm_target_qvel = vector_t::Zero(armNum_);

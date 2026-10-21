@@ -251,6 +251,8 @@ void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPt
       std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
       mode2EnterTime_ = ros::Time::now();
       reseedPublishedArmSmoother_.store(true);
+      // X+B 固定期间 TUI 可能已改躯干：恢复跟随时必须按当前 FK 重锚映射。
+      pendingResumeUpperBodyReanchor_.store(true);
       ROS_INFO("[WheelQuest3IkIncrementalROS] Mode 2 entered at time: %.3f, timeout duration: %.1f seconds",
                mode2EnterTime_.toSec(),
                MODE_2_TIMEOUT_DURATION);
