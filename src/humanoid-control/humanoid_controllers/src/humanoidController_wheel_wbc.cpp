@@ -1241,6 +1241,20 @@ namespace humanoidController_wheel_wbc
     target_qpos.setZero(info.armDim);
     target_qvel.setZero(info.armDim);
 
+    // 4216: 2->1 立即撤销 VR 的控制权，不等待异步 quickMode 服务归零。
+    // 交接锚定上一拍最终执行目标，避免实测跟踪误差造成首拍台阶。
+    const bool externalArmReset = isExternalArmReset();
+    const bool startArmResetHandoff = externalArmReset && !arm_reset_handoff_active_;
+    arm_reset_handoff_active_ = externalArmReset;
+    vector_t armResetStartQ;
+    if (startArmResetHandoff && armNum_ > 0) {
+      armResetStartQ = optimizedState_mrt_limit_.tail(armNum_);
+      for (int i = 0; i < armNum_; ++i) {
+        mrtStateLimitFilterPtr_->resetDof(baseDim_ + lowJointNum_ + i, armResetStartQ[i]);
+        mrtInputLimitFilterPtr_->resetDof(baseDim_ + lowJointNum_ + i, 0.0);
+      }
+    }
+
     updateUserJointCmd(time, target_qpos, target_qvel);
 
     int8_t lbMpcMode = control_data_manager_->getLbMpcControlMode(); // 获取当前轮臂MPC控制模式
@@ -1259,6 +1273,7 @@ namespace humanoidController_wheel_wbc
       // 只跟踪“上肢快速 + 直接位置通路”的有效期。离开该通路立即清除状态，
       // 保证下次进入时从进入前控制目标重新初始化，避免沿用旧滤波状态。
       const bool absoluteQuickQLowPassActive =
+          !externalArmReset &&
           (quickMode_ == 2 || quickMode_ == 3) &&
           (lbMpcMode == 1 || lbMpcMode == 3) &&
           !enable_arm_traj_interpolator_;
@@ -1281,7 +1296,7 @@ namespace humanoidController_wheel_wbc
           optimizedInput_mrt_.segment(baseDim_, lowJointNum_) = leg_target_qvel;
           ros_logger_->publishVector("/humanoid_wheel/leg_target_qpos_quick_mode", leg_target_qpos);
         }
-        if(quickMode_ == 2 || quickMode_ == 3)
+        if(!externalArmReset && (quickMode_ == 2 || quickMode_ == 3))
         {
           // 兼容旧版：默认直通外部手臂目标；开启插补开关时由插补路径覆盖。
           if (!enable_arm_traj_interpolator_)
@@ -1465,6 +1480,10 @@ namespace humanoidController_wheel_wbc
       }
     }
     /*******************************************************/
+    if (startArmResetHandoff && armNum_ > 0) {
+      optimizedState_mrt_.tail(armNum_) = armResetStartQ;
+      optimizedInput_mrt_.tail(armNum_).setZero();
+    }
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_mrt", optimizedState_mrt_);
     ros_logger_->publishVector("/humanoid_wheel/optimizedInput_mrt", optimizedInput_mrt_);
 
@@ -2466,7 +2485,8 @@ namespace humanoidController_wheel_wbc
     {
       arm_mode_switch_hold_phase_ = true;
       arm_mode_switch_start_time_ = time.toSec();
-      arm_start_pos_ = current_qpos;
+      arm_start_pos_ = isExternalArmReset()
+          ? vector_t(optimizedState_mrt_limit_.tail(armNum_)) : current_qpos;
       std::cout << "[ArmControl] 开始模式切换，进入200ms保持阶段" << std::endl;
     }
 
@@ -2475,7 +2495,7 @@ namespace humanoidController_wheel_wbc
     if (elapsed_time < ARM_MODE_SWITCH_HOLD_DURATION) 
     {
       std::cout << "[ArmControl] 保持阶段中，剩余时间: " << (ARM_MODE_SWITCH_HOLD_DURATION - elapsed_time) * 1000 << "ms" << std::endl;
-      return current_qpos;  // 返回当前关节位置
+      return isExternalArmReset() ? arm_start_pos_ : current_qpos;
     }
 
     // 处理模式切换插值 - 此函数只在isArmControlModeChanged_为true时调用
@@ -2487,7 +2507,8 @@ namespace humanoidController_wheel_wbc
     scalar_t error = (interpolated_target - target_arm_state).norm();
     
     // 对于外部控制模式(模式2)，由于目标位置可能持续变化，使用更宽松的收敛条件
-    scalar_t convergence_threshold = (arm_trajectory_mode_ == 2) ? 0.1 : 0.05;
+    scalar_t convergence_threshold = isExternalArmReset()
+        ? 1e-6 : ((arm_trajectory_mode_ == 2) ? 0.1 : 0.05);
     if(error < convergence_threshold)
     {
       isArmControlModeChanged_ = false;
@@ -2507,6 +2528,22 @@ namespace humanoidController_wheel_wbc
   {
     (void)sensorData;
     if (armNum_ == 0) {
+      return;
+    }
+
+    // 复位期间禁止 ingest 默认姿态：Kalman 的 raw fallback 会将大偏差
+    // 直接透传为位置阶跃。也禁止 quickMode 尚未归零时覆盖复位保持目标。
+    if (isExternalArmReset()) {
+      // 记录禁用状态，使下次进入 mode2 时 compute 从当时实测位置 reset，
+      // 而不是沿用复位前的 Kalman 状态。
+      ArmTrajectoryInterpolator::ModeFlags resetFlags;
+      resetFlags.useArmTrajectoryControl = false;
+      resetFlags.quickMode = 0;
+      resetFlags.lbMpcMode = lbMpcMode;
+      resetFlags.armCtrlMode = arm_trajectory_mode_;
+      armTrajectoryInterpolator_.compute(time, resetFlags, observation_wheel_.state.tail(armNum_));
+      armInterpSeenMode_ = arm_trajectory_mode_;
+      armInterpWaitFreshTraj_ = false;
       return;
     }
 

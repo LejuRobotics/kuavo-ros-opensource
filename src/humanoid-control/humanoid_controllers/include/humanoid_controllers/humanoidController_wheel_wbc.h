@@ -381,6 +381,10 @@ namespace humanoidController_wheel_wbc
     int armInterpSeenMode_{-1};
     bool armInterpWaitFreshTraj_{false};
     ros::Time armInterpStampAtModeChange_;
+    bool arm_reset_handoff_active_{false};
+    bool isExternalArmReset() const {
+      return prev_arm_trajectory_mode_ == 2 && arm_trajectory_mode_ == 1;
+    }
     vector_t wbc_arm_raw_q_;
     vector_t wbc_arm_raw_v_;
 
