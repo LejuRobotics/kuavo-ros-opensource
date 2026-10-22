@@ -290,7 +290,7 @@ read -r vr_launch_choice
 
 case $vr_launch_choice in
     2)
-        LAUNCH_VR_REMOTE_CONTROL_CMD="roslaunch noitom_hi5_hand_udp_python launch_quest3_ik_videostream_orbbec.launch"
+        LAUNCH_VR_REMOTE_CONTROL_CMD="bash $KUAVO_ROS_CONTROL_WS_PATH/src/wheel_arm_abs_vel/scripts/platform_roslaunch.sh noitom_hi5_hand_udp_python launch_quest3_ik_videostream_orbbec.launch"
         echo -n "请输入 Quest3 IP (可选，直接回车不指定): "
         read -r quest3_ip_address
         if [ -n "$quest3_ip_address" ]; then
@@ -311,7 +311,7 @@ case $vr_launch_choice in
         echo "已选择: VR 控制 + Orbbec 视频回传"
         ;;
     1|""|*)
-        LAUNCH_VR_REMOTE_CONTROL_CMD="roslaunch noitom_hi5_hand_udp_python launch_quest3_ik.launch"
+        LAUNCH_VR_REMOTE_CONTROL_CMD="bash $KUAVO_ROS_CONTROL_WS_PATH/src/wheel_arm_abs_vel/scripts/platform_roslaunch.sh noitom_hi5_hand_udp_python launch_quest3_ik.launch"
         echo "已选择: 仅 VR 控制"
         ;;
 esac

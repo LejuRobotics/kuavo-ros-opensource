@@ -188,12 +188,18 @@ void WheelQuest3IkIncrementalROS::run() {
     }
   });
 
+  // 主回调线程承担 bone poses / sensors_data_raw / 摇杆回调与 lbLeg Timer，
+  // 不绑核时同样会与相机抢非隔离核。只绑核，不改调度策略。
+  applyWorkerThreadScheduling("ik_callback", 0);
+
   std::cout << "\033[32m[WheelQuest3IkIncrementalROS] spinning start\033[0m" << std::endl;
   ros::spin();
 }
 
 void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
-  // applyWorkerThreadScheduling("ik_solve_thread", ikSolveThreadPriority_);
+  // 只绑核、不提 SCHED_FIFO：46c093e192 曾因提升求解线程优先级导致实机抖动而回退，
+  // 这里沿用“亲和性优先、调度策略保守”的结论。priority=0 即保持 SCHED_OTHER。
+  applyWorkerThreadScheduling("ik_solve_thread", 0);
   ros::Rate rate(publishRate_);
   // 用于统计时间差的静态变量
   static int loopCount = 0;

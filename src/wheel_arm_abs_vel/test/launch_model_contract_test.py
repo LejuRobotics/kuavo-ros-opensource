@@ -15,6 +15,11 @@ class LaunchModelTest(unittest.TestCase):
             [(str(PACKAGE / "launch" / file), args)], None, verbose=False)
 
 
+    def load_at(self, path, args):
+        return roslaunch.config.load_config_default(
+            [(str(path), list(args))], None, verbose=False)
+
+
     def test_automatic_end_effector_uses_config_resolver(self):
         import json
         import shlex
@@ -174,6 +179,26 @@ class LaunchModelTest(unittest.TestCase):
             def nodes(cfg):
                 return [tuple(getattr(n, field) for field in fields) for n in cfg.nodes]
             self.assertEqual(nodes(direct), nodes(selected))
+
+    def test_quest3_launches_publish_ik_thread_cpus_only_from_partition(self):
+        """绑核核列表只能来自分区策略，未经包装入口启动时不得凭空写参数。"""
+        vr = (PACKAGE.parent / "manipulation_nodes/noitom_hi5_hand_udp_python"
+              / "launch")
+        entries = ["launch_quest3_ik.launch",
+                   "launch_quest3_ik_videostream_orbbec.launch",
+                   "launch_dual_quest3_ik.launch"]
+        extra = ["left_ip_address:=127.0.0.1", "right_ip_address:=127.0.0.2"]
+        for name in entries:
+            with self.subTest(launch=name, env="unset"), patch.dict(os.environ):
+                os.environ.pop("KUAVO_IK_CPUS", None)
+                cfg = self.load_at(vr / name, extra)
+                self.assertNotIn("/vr_ik/thread_cpus", cfg.params)
+            for exported, expected in (("3", [3]), ("3,5", [3, 5])):
+                with self.subTest(launch=name, env=exported), \
+                        patch.dict(os.environ, KUAVO_IK_CPUS=exported):
+                    cfg = self.load_at(vr / name, extra)
+                    self.assertEqual(cfg.params["/vr_ik/thread_cpus"].value, expected)
+
 
     def test_unsupported_versions_and_modes_rejected(self):
         for version in (61, 64):

@@ -45,6 +45,13 @@
     <!-- ===================================================================================
          二、通用参数（与 launch_quest3_ik.launch 同名同义，供后续 IK 节点复用）
          =================================================================================== -->
+    <!-- IK 绑核核列表由分区策略导出（platform_roslaunch.sh -> runtime_partition.py
+         的 KUAVO_IK_CPUS）。未经包装入口启动时该变量为空，不写参数，节点退化为
+         原有的“只设优先级、不绑核”行为，单 VR / dual VR 语义不变。 -->
+    <arg name="vr_ik_thread_cpus" default="$(optenv KUAVO_IK_CPUS)"/>
+    <group if="$(eval arg('vr_ik_thread_cpus') != '')">
+        <rosparam param="/vr_ik/thread_cpus" subst_value="true">[$(arg vr_ik_thread_cpus)]</rosparam>
+    </group>
     <arg name="version" default="4" />
     <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
     <arg name="ctrl_arm_idx" default="2" />

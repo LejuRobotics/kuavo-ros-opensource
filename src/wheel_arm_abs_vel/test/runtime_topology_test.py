@@ -220,6 +220,79 @@ class Topology(unittest.TestCase):
             env=dict(os.environ, PATH=str(self.root)+":"+os.environ["PATH"]), text=True)
         self.assertEqual(result.splitlines(), ["pkg", "file.launch"])
 
+    def test_quest3_entries_join_the_fence_without_version_resolution(self):
+        """Quest3 遥控入口要进分区，但不做绝对链路的 ROBOT_VERSION 解析。"""
+        scripts = self.root/'scripts'
+        scripts.mkdir()
+        (scripts/'absolute_robot_version.py').write_text(
+            "import sys\nsys.exit('must not be called for quest3 entries')\n")
+        (scripts/'runtime_partition.py').write_text(
+            "import os,sys,json\nprint(json.dumps([sys.argv[1:], "
+            "os.environ.get('ROBOT_VERSION')]))\n")
+        for name, script in (("uname", "echo aarch64"),
+                             ("rospack", 'printf "%s\\n" "' + str(self.root) + '"'),
+                             ("roslaunch", 'printf "PLAIN %s\\n" "$@"')):
+            path = self.root/name
+            path.write_text("#!/bin/sh\n" + script + "\n")
+            path.chmod(0o755)
+        env = dict(os.environ, PATH=str(self.root)+":"+os.environ["PATH"],
+                   KUAVO_RUNTIME_PARTITION='1')
+        env.pop('ROBOT_VERSION', None)
+        for launch in ("launch_quest3_ik.launch",
+                       "launch_quest3_ik_videostream_orbbec.launch",
+                       "launch_dual_quest3_ik.launch"):
+            with self.subTest(launch=launch):
+                args = ["noitom_hi5_hand_udp_python", launch]
+                result = subprocess.check_output(
+                    ["bash", str(ROOT/"scripts/platform_roslaunch.sh")] + args,
+                    env=env, text=True)
+                argv, robot_version = json.loads(result)
+                self.assertEqual(argv, ['--launch', '/usr/bin/env', 'roslaunch'] + args)
+                self.assertIsNone(robot_version)
+
+    def test_wrapper_self_locates_when_package_is_not_built(self):
+        """wheel_arm_abs_vel 未进 devel 空间时 rospack 返回非零，包装脚本要能自定位。
+
+        本机只构建运行需要的包，wheel_arm_abs_vel 不在构建列表里。若包装脚本死守
+        `rospack find`，`set -e` 会让 Quest3 入口永远拉不起来，绑核通道也就永远
+        拿不到 KUAVO_IK_CPUS。
+        """
+        scripts = self.root/'scripts'
+        scripts.mkdir()
+        (scripts/'platform_roslaunch.sh').write_text(
+            (ROOT/'scripts/platform_roslaunch.sh').read_text())
+        (scripts/'runtime_partition.py').write_text(
+            "import json,sys\nprint(json.dumps(sys.argv[1:]))\n")
+        for name, script in (("rospack", "exit 99"),
+                             ("roslaunch", 'printf "PLAIN %s\\n" "$@"')):
+            path = self.root/name
+            path.write_text("#!/bin/sh\n" + script + "\n")
+            path.chmod(0o755)
+        args = ["noitom_hi5_hand_udp_python", "launch_quest3_ik.launch"]
+        result = subprocess.check_output(
+            ["bash", str(scripts/"platform_roslaunch.sh")] + args,
+            env=dict(os.environ, PATH=str(self.root)+":"+os.environ["PATH"],
+                     KUAVO_RUNTIME_PARTITION='1'), text=True)
+        self.assertEqual(json.loads(result),
+                         ['--launch', '/usr/bin/env', 'roslaunch'] + args)
+
+    def test_control_tree_stays_out_of_the_fence(self):
+        """运控树是独立 roslaunch，套围栏只会缩小 nodelet 的核池，故保持直通。"""
+        for name, script in (("uname", "echo aarch64"),
+                             ("roslaunch", 'printf "%s\\n" "$@"'),
+                             ("rospack", "exit 99")):
+            path = self.root/name
+            path.write_text("#!/bin/sh\n" + script + "\n")
+            path.chmod(0o755)
+        args = ["humanoid_controllers", "load_kuavo_real_wheel.launch",
+                "joystick_type:=h12", "start_way:=auto"]
+        result = subprocess.check_output(
+            ["bash", str(ROOT/"scripts/platform_roslaunch.sh")] + args,
+            env=dict(os.environ, PATH=str(self.root)+":"+os.environ["PATH"],
+                     KUAVO_RUNTIME_PARTITION='1', ROBOT_VERSION='62'), text=True)
+        self.assertEqual(result.splitlines(), args)
+
+
     def test_arm_parent_launcher_leaves_legacy_and_unrelated_commands_untouched(self):
         for name, script in (("uname", "echo aarch64"),
                              ("roslaunch", "printf '%s\\n' \"$@\""),
