@@ -1222,10 +1222,21 @@ namespace
 
           if (claw_updated)
           {
-            for (size_t i = 0; i < numClawJoints; i++)
+            // 二指夹爪 tendon 在执行器列表末尾，NUM_JOINT 对不上这个下标。
+            // 按名字写入，避免命令打到右臂电机上。
+            const int left_claw_ctrl = mj_name2id(m, mjOBJ_ACTUATOR, "l_fingers_actuator");
+            const int right_claw_ctrl = mj_name2id(m, mjOBJ_ACTUATOR, "r_fingers_actuator");
+            if (left_claw_ctrl >= 0 && right_claw_ctrl >= 0 && numClawJoints >= 2)
             {
-              d->ctrl[i + numJoints] = claw_cmd[i];
-              // std::cout << "claw_cmd: " << claw_cmd[i] << std::endl;
+              d->ctrl[left_claw_ctrl] = claw_cmd[0];
+              d->ctrl[right_claw_ctrl] = claw_cmd[1];
+            }
+            else
+            {
+              for (size_t i = 0; i < numClawJoints; i++)
+              {
+                d->ctrl[i + numJoints] = claw_cmd[i];
+              }
             }
           }
 
@@ -1251,7 +1262,7 @@ namespace
               }
               else if (robot_type == 1)
               {
-                const bool omni_wheel = robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 200063 || robotVersion_ == 300062 || robotVersion_ == 300063 || robotVersion_ == 400062 || robotVersion_ == 400063 || robotVersion_ == 500062 || robotVersion_ == 500063;
+                const bool omni_wheel = robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 200063 || robotVersion_ == 300062 || robotVersion_ == 300063 || robotVersion_ == 400062 || robotVersion_ == 400063 || robotVersion_ == 500062 || robotVersion_ == 500063 || robotVersion_ == 600062;
                 if(robotVersion_ == 60)
                 {
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
