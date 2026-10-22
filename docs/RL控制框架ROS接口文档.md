@@ -99,10 +99,33 @@ rosservice call /humanoid_controller/get_controller_list
 - 按顺序循环切换：`mpc → 第一个RL → ... → 最后一个RL → mpc`
 - 适合作为手柄或键盘的"一键切换模式"接口
 - 切换逻辑与 `switch_controller` 相同，包含相同的保护机制
+- **PICO（`kuavo_pico_gmr` / `pico_comm_minimal`）**：**RG + A**（右手握把边键 + A 上升沿）触发本服务；详见 `kuavo_pico_gmr/launch/README.md`
 
 **示例**:
 ```bash
 rosservice call /humanoid_controller/switch_to_next_controller
+```
+
+---
+
+### 1.3.1 `/humanoid_controller/switch_to_previous_controller`
+
+**服务类型**: `kuavo_msgs/switchToNextController`
+
+**功能**: 在控制器列表中循环切换到上一个控制器
+
+**请求参数**: 无
+
+**响应参数**: 与 `switch_to_next_controller` 相同（`success`、`message`、`current_controller`、`next_controller`、`current_index`、`next_index`）
+
+**使用说明**:
+- 按顺序反向循环：`mpc ← 最后一个RL ← … ← 第一个RL ← mpc`
+- 保护机制与 `switch_to_next_controller` 相同
+- **PICO（`pico_comm_minimal`）**：**RG + B**（右手握把边键 + B 上升沿，且未按 RT）触发本服务
+
+**示例**:
+```bash
+rosservice call /humanoid_controller/switch_to_previous_controller
 ```
 
 ---

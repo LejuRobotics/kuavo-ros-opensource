@@ -125,7 +125,10 @@ if(EXISTS "${PLANT_IK_FILE}")
     target_link_libraries(plantIK drake::drake)
 else()
     # 当 src/plantIK.cc 不存在时，加载动态库
-    find_library(PLANTIK_LIBRARY NAMES plantIK PATHS ${CMAKE_CURRENT_SOURCE_DIR}/lib)
+    find_library(PLANTIK_LIBRARY NAMES plantIK
+      PATHS "${CMAKE_CURRENT_SOURCE_DIR}/lib/${KUAVO_ARCH}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/lib"
+      NO_DEFAULT_PATH)
     if(NOT PLANTIK_LIBRARY)
         message(FATAL_ERROR "Could not find the plantIK library in lib/")
     endif()
@@ -166,7 +169,7 @@ install(TARGETS plantIK
     LIBRARY DESTINATION lib
 )
 else()
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/lib/libplantIK.so
+install(FILES ${PLANTIK_LIBRARY}
     DESTINATION lib
 )
 endif()

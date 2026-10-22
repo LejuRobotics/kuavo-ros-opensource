@@ -218,7 +218,7 @@ source devel/setup.bash
 ```bash
 sudo su
 source devel/setup.bash
-roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
+roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true record_bag:=false
 ```
 
 **终端 4（下位机）— SDK WebSocket 服务：**
@@ -341,7 +341,7 @@ roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch
 **终端 2 — TF 转发：**
 
 ```bash
-cd ~/kuavo-ros-control
+cd ~/kuavo_ros_application
 source devel/setup.bash
 roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 ```

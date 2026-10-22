@@ -1,0 +1,94 @@
+# Actuator Dynamics Parameters Configuration
+# 执行器动力学参数配置文件
+#
+# 参数说明:
+#   armature: 电机转子惯量 (kg·m²)
+#   damping: 粘滞阻尼系数 (N·m·s/rad)
+#   frictionLoss: 库伦摩擦损失 (N·m)
+#   frictionThreshold: 摩擦速度阈值 (rad/s)
+#   frictionAlpha: 摩擦平滑系数
+#
+actuator_params:
+  - armature: 0.0 # 关节 1 (zarm_l1_joint) PA100, 暂用PA72均值; 原始armature=0.044418
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.731805
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 2 (zarm_l2_joint) PA72; 原始armature=0.044418
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.731805
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 3 (zarm_l3_joint) PA60; 原始armature=0.011858
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.132700
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 4 (zarm_l4_joint) PA72; 原始armature=0.044418
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.731805
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 5 (zarm_l5_joint) PA43; 原始armature=0.025797
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=0.456934
+    frictionThreshold: 0.085
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 6 (zarm_l6_joint) PA43; 原始armature=0.025797
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=0.456934
+    frictionThreshold: 0.085
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 7 (zarm_l7_joint) PA43; 原始armature=0.025797
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=0.456934
+    frictionThreshold: 0.085
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 8 (zarm_r1_joint) PA100, 暂用PA72均值; 原始armature=0.044418
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.731805
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 9 (zarm_r2_joint) PA72; 原始armature=0.044418
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.731805
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 10 (zarm_r3_joint) PA60; 原始armature=0.011858
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.132700
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 11 (zarm_r4_joint) PA72; 原始armature=0.044418
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=1.731805
+    frictionThreshold: 0.85
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 12 (zarm_r5_joint) PA43; 原始armature=0.025797
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=0.456934
+    frictionThreshold: 0.085
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 13 (zarm_r6_joint) PA43; 原始armature=0.025797
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=0.456934
+    frictionThreshold: 0.085
+    frictionAlpha: 100.0
+
+  - armature: 0.0 # 关节 14 (zarm_r7_joint) PA43; 原始armature=0.025797
+    damping: 0.0 # 原始damping=0.0
+    frictionLoss: 0.0 # 原始frictionLoss=0.456934
+    frictionThreshold: 0.085  # 与左臂 L7 对称
+    frictionAlpha: 100.0
