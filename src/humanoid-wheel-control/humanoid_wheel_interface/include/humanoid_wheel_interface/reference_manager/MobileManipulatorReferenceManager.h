@@ -6,6 +6,7 @@
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float32.h>
 #include <atomic>
+#include <mutex>
 #include <algorithm>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
@@ -380,11 +381,17 @@ private:
   // 下肢重置相关
   double resetTorsoTime_{0.0};
   double resetTorsoInitTime_{0.0};
-  bool isResetTorso_{false};
+  // service 线程读取的时间快照；控制线程更新，避免直接读取普通 double。
+  std::atomic<double> currentMpcTime_{0.0};
+  std::atomic<double> resetTorsoWindowEnd_{0.0};
+  std::atomic<bool> isResetTorso_{false};
   bool isResetTorsoRePlanning_{false};
   // #3973: service 调用起到复位窗口结束期间丢弃躯干开环指令，避免 VR 双击后紧跟的
   // /cmd_lb_torso_pose 覆盖 cmdTorsoPose_（原先靠开环快照回避，见 #3991）
   std::atomic<bool> torsoResetWindowActive_{false};
+  // request 与 window 必须作为一组状态迁移，避免 service 线程与控制线程交错写入。
+  std::mutex resetTorsoStateMtx_;
+  ros::Publisher torsoResetWindowActivePub_;
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 

@@ -692,6 +692,12 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::setupSubscriptions(std::string nodeHandleName)
   {
+    torsoResetWindowActivePub_ = nodeHandle_.advertise<std_msgs::Bool>(
+        "/mobile_manipulator_torso_reset_window_active", 1, true);
+    std_msgs::Bool resetWindowMsg;
+    resetWindowMsg.data = false;
+    torsoResetWindowActivePub_.publish(resetWindowMsg);
+
     asyncSpinner_.start();  // 启动异步spinner处理回调
 
     // 从参数服务器中更新初始期望
@@ -1375,6 +1381,7 @@ namespace mobile_manipulator {
 
     // 更新形参作为全局变量
     initTime_ = initTime;
+    currentMpcTime_.store(initTime, std::memory_order_release);
     finalTime_ = finalTime;
     initState_ = initState;
 
@@ -1446,10 +1453,15 @@ namespace mobile_manipulator {
 
     {
       // 确认是否需要重置
-      if(isResetTorso_)
+      bool reset_requested = isResetTorso_.load(std::memory_order_acquire);
+      if (reset_requested)
+      {
+        std::lock_guard<std::mutex> lock(resetTorsoStateMtx_);
+        reset_requested = isResetTorso_.exchange(false, std::memory_order_acq_rel);
+      }
+      if(reset_requested)
       {
         resetAllMpcTrajAndTarget(initTime, initState_, true);
-        isResetTorso_ = false;
       }
       // 软暂停恢复的干净重启 —— storage + 全部 Ruckig 锚定到控制器传来的冻结姿态，
       // 之后再走 updateBaseArmControl 从重置后的 storage 生成目标（= 冻结姿态），与 MPC 起点一致。
@@ -1748,6 +1760,7 @@ namespace mobile_manipulator {
     if(isResetTorsoRePlanning_)
     {
       resetTorsoTime_ = durationTime;
+      resetTorsoWindowEnd_.store(resetTorsoTime_ + resetTorsoInitTime_, std::memory_order_release);
       isResetTorsoRePlanning_ = false;
     }
 
@@ -3258,19 +3271,37 @@ namespace mobile_manipulator {
 
     if(req.data)
     {
-      // 复位进行中时忽略重复请求，避免轨迹被反复 resetAllMpcTrajAndTarget 打断产生震荡
-      if (isResetTorso_ || (initTime_ < resetTorsoTime_ + resetTorsoInitTime_))
-      {
-        const double remain = std::max(0.0, resetTorsoTime_ + resetTorsoInitTime_ - initTime_);
+      auto publishCurrentWindowState = [&]() {
+        std_msgs::Bool resetWindowMsg;
+        resetWindowMsg.data = torsoResetWindowActive_.load(std::memory_order_acquire);
+        torsoResetWindowActivePub_.publish(resetWindowMsg);
+      };
+
+      auto resetIsInProgress = [&]() {
+        const double currentMpcTime = currentMpcTime_.load(std::memory_order_acquire);
+        const double resetWindowEnd = resetTorsoWindowEnd_.load(std::memory_order_acquire);
+        if (!isResetTorso_.load(std::memory_order_acquire) &&
+            !torsoResetWindowActive_.load(std::memory_order_acquire) &&
+            !(currentMpcTime < resetWindowEnd)) {
+          return false;
+        }
+
+        const double remain = std::max(0.0, resetWindowEnd - currentMpcTime);
         res.success = true;
         res.message = std::to_string(remain);
         ROS_WARN_STREAM_THROTTLE(1.0,
             "[setLbResetTorsoService] torso reset already in progress, ignore duplicate request. remain="
             << remain << "s");
         return true;
+      };
+
+      // 复位进行中时忽略重复请求，避免轨迹被反复 resetAllMpcTrajAndTarget 打断产生震荡
+      if (resetIsInProgress()) {
+        std::lock_guard<std::mutex> lock(resetTorsoStateMtx_);
+        publishCurrentWindowState();
+        return true;
       }
 
-      offlineTrajDisable_ = true;
       /***********************根据期望速度, 设置切换时间************************/
       vector_t torsoPose = vector_t::Zero(6);
       getCurrentTorsoPoseInBasePitchYaw(torsoPose, initState_);
@@ -3282,12 +3313,25 @@ namespace mobile_manipulator {
       Eigen::ArrayXd validTimes = err.array() / torsoResetMaxVel_.array();
       double actualTime = validTimes.maxCoeff() + 0.3; // 加上0.3s的缓冲时间, 以确保在实际执行中有足够的时间完成躯干重置
       /*********************************************************************/
+
+      std::lock_guard<std::mutex> lock(resetTorsoStateMtx_);
+      // 计算期间可能有另一个 service 接受请求，进入临界区后必须重新判断。
+      if (resetIsInProgress()) {
+        publishCurrentWindowState();
+        return true;
+      }
+
+      offlineTrajDisable_ = true;
       res.success = true;
       res.message = std::to_string(actualTime);  // 直接转换
       // #3973: 从这一刻起到复位窗口结束，丢弃躯干开环指令。VR 双击复位后会紧跟着发
       // /cmd_lb_torso_pose，若被接收则会在复位途中/窗口结束时把躯干拽走。
-      torsoResetWindowActive_ = true;
-      isResetTorso_ = true;
+      // 先登记请求，避免控制线程在窗口状态置位后、请求置位前按旧终点提前发布 false。
+      isResetTorso_.store(true, std::memory_order_release);
+      torsoResetWindowActive_.store(true, std::memory_order_release);
+      std_msgs::Bool resetWindowMsg;
+      resetWindowMsg.data = true;
+      torsoResetWindowActivePub_.publish(resetWindowMsg);
       return true;
     }
 
@@ -3764,8 +3808,14 @@ namespace mobile_manipulator {
     {
       // #3973: 窗口结束后恢复接收躯干开环指令。isResetTorso_ 为真说明 service 已请求但
       // 本轮还没执行到，此时窗口终点还是上一次的旧值，不能提前放行。
-      if (!isResetTorso_) {
-        torsoResetWindowActive_.store(false, std::memory_order_release);
+      if (torsoResetWindowActive_.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(resetTorsoStateMtx_);
+        if (!isResetTorso_.load(std::memory_order_acquire) &&
+            torsoResetWindowActive_.exchange(false, std::memory_order_acq_rel)) {
+          std_msgs::Bool resetWindowMsg;
+          resetWindowMsg.data = false;
+          torsoResetWindowActivePub_.publish(resetWindowMsg);
+        }
       }
       if(isTriggerSetTorsoFirst == true)
       {
@@ -4459,6 +4509,7 @@ namespace mobile_manipulator {
     Eigen::ArrayXd validTimes = (err.array() + startVel.array() * kResetRampTime) / torsoResetMaxVel_.array();
     resetTorsoTime_ = validTimes.maxCoeff() + kResetRampTime;
     resetTorsoInitTime_ = initTime;
+    resetTorsoWindowEnd_.store(resetTorsoTime_ + resetTorsoInitTime_, std::memory_order_release);
     ROS_INFO_STREAM("[MobileManipulatorReferenceManager] reset torso require time: " << resetTorsoTime_
                     << " s, err: " << err.transpose() << ", startVel: " << torsoPose_prevTargetVel_.transpose());
     /*****************************************************************************/
