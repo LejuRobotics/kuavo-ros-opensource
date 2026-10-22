@@ -144,11 +144,12 @@ roslaunch ar_control robot_strategies.launch
 
 - 下位机：打开终端三，运行搬箱子示例：
 
-**注意**：搬箱子有两个案例case_new.py和case_boxes.py，两个案例都支持搬多层箱子，运行前请确认配置文件中已正确修改参数：
+**注意**：搬箱子有两个案例case_new.py和case_boxes.py，两个案例都支持搬多层箱子。案例会根据环境变量 `KUAVO_REAL` 自动选择仿真/实机配置，**无需手动修改代码**。
+
+> - **仿真运行**（默认）：`roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch`（real 默认为 false）
+> - **实机运行**：`roslaunch humanoid_controllers load_kuavo_gazebo_manipulate.launch real:=true`
 
 案例一："case_new.py"，机器人初始站立姿态面向搬运箱子位置:
-- **仿真运行**：在该文件中第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config`
-- **实机运行**：在该文件中第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_real import config`
 
 ```bash
 cd ~/kuavo-ros-control
@@ -156,8 +157,6 @@ source devel/setup.zsh
 python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py
 ```
 案例二："case_boxes.py"，机器人初始站立姿态面向放置箱子位置:
-- **仿真运行**：在该文件中第七行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_sim import config`
-- **实机运行**：在该文件中第七行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_real import config`
 ```bash
 cd ~/kuavo-ros-control
 source devel/setup.zsh
@@ -226,10 +225,11 @@ roslaunch kuavo_tf2_web_republisher start_websocket_server.launch
 
 - 6.下位机打开终端三，运行搬箱子示例：
 
-**注意**：搬箱子有两个案例case_new.py和case_boxes.py，两个案例都支持搬多层箱子，运行前请确认配置文件中已正确修改参数：
+**注意**：搬箱子有两个案例case_new.py和case_boxes.py，两个案例都支持搬多层箱子。案例会根据环境变量 `KUAVO_REAL` 自动选择仿真/实机配置，**无需手动修改代码**。
+
+> 实机运行前务必设置环境变量：`export KUAVO_REAL=true`
+
 案例一："case_new.py"，机器人初始站立姿态面向搬运箱子位置:
-- **仿真**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_sim import config`
-- **实机**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_real import config`
 
 ```bash
 cd ~/kuavo-ros-control
@@ -237,8 +237,6 @@ source devel/setup.zsh
 python3 ./src/kuavo_humanoid_sdk/kuavo_humanoid_sdk/kuavo_strategy_pytree/pick_place_box/case_new.py
 ```
 案例二："case_boxes.py"，机器人初始站立姿态面向放置箱子位置:
-- **仿真**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_sim import config`
-- **实机**：在文件第六行修改为： `from kuavo_humanoid_sdk.kuavo_strategy_pytree.configs.config_boxes_real import config`
 ```bash
 cd ~/kuavo-ros-control
 source devel/setup.zsh

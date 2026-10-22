@@ -1,0 +1,39 @@
+<?xml version='1.0' encoding='utf-8'?>
+<launch>
+  <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
+  <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
+  <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
+  <env name="KUAVO_ARM_DRIVER_RESERVED_CPUS" value="$(arg arm_driver_reserved_cpus)" />
+  <arg name="reference_transport" default="shm" />
+  <arg name="reference_shm_key" default="344421" />
+  <arg name="owner_shm_key" default="344422" />
+  <!-- Standard package entry for the validated fixed-base velocity IK pipeline. -->
+  <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed" />
+  <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <arg name="dynamics_backend" default="wbc" />
+  <arg name="rnea_mode" default="full" />
+  <arg name="visualize_humanoid" default="false" />
+  <include file="$(find wheel_arm_abs_vel)/launch/load_kuavo_absolute_sim_base.launch">
+    <arg name="require_ik_hard_isolation" value="$(arg require_ik_hard_isolation)" />
+    <arg name="arm_driver_reserved_cpus" value="$(arg arm_driver_reserved_cpus)" />
+    <arg name="head_control_mode" value="$(arg head_control_mode)" />
+    <arg name="head_track_target" value="$(arg head_track_target)" />
+    <arg name="robot_version" value="$(arg robot_version)" />
+    <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
+    <arg name="rnea_mode" value="$(arg rnea_mode)" />
+    <arg name="use_whole_body_ik_reference" value="true" />
+    <arg name="use_external_mpc" value="false" />
+    <arg name="use_joystick" value="false" />
+    <arg name="with_ik" value="false" />
+    <arg name="with_mm_ik" value="false" />
+    <arg name="with_monitor" value="false" />
+    <arg name="with_arm_trajectory" value="false" />
+    <arg name="rviz" value="false" />
+    <arg name="visualize_humanoid" value="$(arg visualize_humanoid)" />
+    <arg name="output_system_info" value="false" />
+    <arg name="reference_transport" value="$(arg reference_transport)" />
+    <arg name="reference_shm_key" value="$(arg reference_shm_key)" />
+    <arg name="owner_shm_key" value="$(arg owner_shm_key)" />
+  </include>
+</launch>

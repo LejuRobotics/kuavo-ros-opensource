@@ -20,46 +20,42 @@ md5 c287aeb8a1df0f152fdc164d29ceb2fe https://kuavo.lejurobot.com/Quest_apks/leju
 已经打包好：
 [使用方法](https://www.lejuhub.com/highlydynamic/motion_capture_ik_packaged/-/blob/develop/README.md)
 
-# VR头部控制系统
+# 头部控制
 
-- 配置文件位置：`src/manipulation_nodes/noitom_hi5_hand_udp_python/scripts/config.json`
-- 支持四种控制模式：
-  - `fixed`：固定模式，将头部yaw和pitch设置为0（正前方），平滑移动到目标位置
-  - `auto_track_active`：自动跟踪主动手模式，自动检测并跟踪移动的手
-  - `fixed_main_hand`：固定主手模式，跟踪指定的手（left/right）
-  - `vr_follow`：VR随动模式，由VR设备直接控制
-- 可配置参数：
-  - `joint_limits`：头部关节角度限制（yaw/pitch，单位：度）
-  - `smoothing_factor`：平滑滤波系数（0-1，越大越平滑）
-  - `active_hand_threshold`：主动手检测阈值（单位：米，越小越敏感）
-- 系统会自动从TF树获取头部和手部的实时位置进行计算，确保坐标系一致性
-- **运行时动态切换模式（ROS服务）**：
-  - 服务名称：`/quest3/set_head_control_mode`
-  - 服务类型：`kuavo_msgs/SetHeadControlMode`
-  - 调用方式：
-    ```bash
-    # 固定模式（将头部移动到正前方）
-    rosservice call /quest3/set_head_control_mode "{mode: 'fixed', fixed_hand: ''}"
-    
-    # 自动跟踪主动手模式
-    rosservice call /quest3/set_head_control_mode "{mode: 'auto_track_active', fixed_hand: ''}"
-    
-    # 固定主手模式（跟踪左手）- fixed_hand参数必需
-    rosservice call /quest3/set_head_control_mode "{mode: 'fixed_main_hand', fixed_hand: 'left'}"
-    
-    # 固定主手模式（跟踪右手）- fixed_hand参数必需
-    rosservice call /quest3/set_head_control_mode "{mode: 'fixed_main_hand', fixed_hand: 'right'}"
-    
-    # VR随动模式
-    rosservice call /quest3/set_head_control_mode "{mode: 'vr_follow', fixed_hand: ''}"
-    ```
-  - 参数说明：
-    - `mode`：控制模式字符串，必需参数
-    - `fixed_hand`：固定主手模式时的手（"left" 或 "right"），仅在 `mode` 为 `"fixed_main_hand"` 时必需，其他模式可传入空字符串 `""`
-  - 响应说明：
-    - `success`：是否成功设置模式
-    - `message`：操作结果消息
-    - `current_mode`：当前生效的模式
+头部指令由 `head_control_node` 发布到 `/robot_head_motion_data`。轮臂机器启动时默认拉起这个节点，Quest 节点不再发头角。
+
+启动参数：
+
+- `head_control_mode`，默认 `vr_follow`
+  - `vr_follow`：跟随 Quest 骨骼 `Chest` 相对 `Head`。没有这组 TF 时不发布头角，头保持不动
+  - `track_hand`：跟踪机器人自己的手，再由 `head_track_target` 指定目标
+  - `fixed`：平滑回到正前方（yaw = 0，pitch = 0）
+- `head_track_target`，仅 `track_hand` 使用，默认 `both_hands_midpoint`
+  - `both_hands_midpoint`：双手连线。`scripts/config.json` 的 `hand_bias` 默认 0.5，即正中间；0 始终看左手，1 始终看右手。一只手更活跃时再按 `velocity_bias` 偏向它
+  - `left_hand` / `right_hand`：固定跟踪指定手
+  - `active_hand`：跟踪正在移动的手
+
+手和头都在 `waist_yaw_link` 下取值。目标在头部后方时保持当前头角，回到前方至少 0.03 m 后继续跟随。
+
+```bash
+roslaunch humanoid_controllers load_kuavo_mujoco_sim_wheel.launch head_control_mode:=track_hand head_track_target:=both_hands_midpoint
+```
+
+不需要这个节点时传 `with_head_control_node:=false`。PICO 轮臂启动会关掉它，头改由 PICO 自己的节点发布。
+
+运行时切换服务是 `/head_control_node/set_head_control_mode`（`kuavo_msgs/SetHeadControlMode`）：
+
+```bash
+rosservice call /head_control_node/set_head_control_mode "{mode: track_hand, fixed_hand: both_hands_midpoint}"
+rosservice call /head_control_node/set_head_control_mode "{mode: track_hand, fixed_hand: right_hand}"
+rosservice call /head_control_node/set_head_control_mode "{mode: left_hand, fixed_hand: ''}"
+rosservice call /head_control_node/set_head_control_mode "{mode: fixed, fixed_hand: ''}"
+rosservice call /head_control_node/set_head_control_mode "{mode: vr_follow, fixed_hand: ''}"
+```
+
+`mode` 为 `track_hand` 时，`fixed_hand` 是注视目标；留空保持当前目标。`vr_follow` 和 `fixed` 忽略 `fixed_hand`。返回的 `current_mode` 是实际生效的名字，例如 `both_hands_midpoint`，而不是笼统的 `track_hand`。
+
+角度限制、平滑和换手阈值在 `scripts/config.json` 的 `head_control`。`smoothing_factor` 越小越平滑，越大越跟手。launch 传入的模式优先于配置文件。
 
 
 # ROSBAG 工具

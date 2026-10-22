@@ -1,0 +1,13 @@
+# 重定义单个手势(折线图格式)
+int32 id
+string name
+SG100Curve[] position
+SG100Curve[] torque_ff
+SG100Curve[] kp
+SG100Curve[] kd
+SG100Curve[] output_limit
+SG100Curve[] mode
+int8 hand_side
+---
+bool success
+string message

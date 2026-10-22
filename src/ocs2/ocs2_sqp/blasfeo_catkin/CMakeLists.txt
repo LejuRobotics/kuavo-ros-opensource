@@ -20,7 +20,18 @@ file(MAKE_DIRECTORY ${BLASFEO_BUILD_DIR})
 
 # BLASFEO Settings
 set(BUILD_SHARED_LIBS ON CACHE STRING "Build shared libraries" FORCE)
-set(TARGET X64_AUTOMATIC CACHE STRING "Target architecture" FORCE)
+# Select BLASFEO TARGET per host architecture.
+# X64_AUTOMATIC selects best ISA at runtime on x86_64 only; on aarch64 we must
+# pick an ARMV8A target (or GENERIC) explicitly.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    # GENERIC: full symbol set on AGX Orin (Cortex-A78); tuned A57 kernels miss dgetrf_pivot_8_*).
+    set(TARGET GENERIC CACHE STRING "Target architecture" FORCE)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "armv7")
+    set(TARGET ARMV7A_ARM_CORTEX_A15 CACHE STRING "Target architecture" FORCE)
+else()
+    set(TARGET X64_AUTOMATIC CACHE STRING "Target architecture" FORCE)
+endif()
+message(STATUS "[blasfeo_catkin] CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR} -> TARGET=${TARGET}")
 set(BLASFEO_EXAMPLES OFF CACHE BOOL "Examples enabled")
 
 # Download & build source

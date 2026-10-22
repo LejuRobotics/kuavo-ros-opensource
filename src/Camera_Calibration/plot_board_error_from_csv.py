@@ -112,23 +112,50 @@ def fk_base_to_tip(joints, chain, q_by_joint):
     return T
 
 
+def find_tree_root_link(joints):
+    """Return the single root link of the URDF joint tree."""
+    parent_links = set()
+    child_links = set()
+    for jel in joints.values():
+        parent = jel.find("parent")
+        child = jel.find("child")
+        if parent is None or child is None:
+            continue
+        parent_link = parent.get("link")
+        child_link = child.get("link")
+        if parent_link:
+            parent_links.add(parent_link)
+        if child_link:
+            child_links.add(child_link)
+    roots = sorted(parent_links - child_links)
+    if len(roots) != 1:
+        raise RuntimeError(f"expected one URDF root link, found: {roots}")
+    return roots[0]
+
+
+def relative_chain_joint_names(joints, root_link, tip_link):
+    """Collect joints needed to evaluate T_root_tip, including sibling branches."""
+    tree_root = find_tree_root_link(joints)
+    return list(
+        dict.fromkeys(
+            find_chain_joint_names(joints, tree_root, root_link)
+            + find_chain_joint_names(joints, tree_root, tip_link)
+        )
+    )
+
+
 def fk_root_to_tip_transform(joints, fk_root: str, tip_link: str, q_by_joint: dict):
     """FK: p_fk_root = T @ p_tip（与 fk_base_to_tip 一致）。
 
-    当 fk_root 为 zarm_l1_ref_link 而相机在头部/右臂分支时，URDF 上二者无父子链，
-    find_chain_joint_names 会失败；此时经 waist_yaw_link 桥接（与标定里 fk_base=zarm_l1_ref_link 的几何一致）。
+    支持 fk_root 与 tip_link 位于 URDF 的不同分支：先分别计算树根到两者的
+    完整 FK，再通过 inv(T_tree_root_fk_root) @ T_tree_root_tip 得到相对变换。
     """
-    try:
-        chain = find_chain_joint_names(joints, fk_root, tip_link)
-        return fk_base_to_tip(joints, chain, q_by_joint)
-    except RuntimeError:
-        if fk_root != "zarm_l1_ref_link":
-            raise
-        chain_w_t = find_chain_joint_names(joints, "waist_yaw_link", tip_link)
-        chain_w_z = find_chain_joint_names(joints, "waist_yaw_link", "zarm_l1_ref_link")
-        t_w_t = fk_base_to_tip(joints, chain_w_t, q_by_joint)
-        t_w_z = fk_base_to_tip(joints, chain_w_z, q_by_joint)
-        return np.linalg.inv(t_w_z) @ t_w_t
+    tree_root = find_tree_root_link(joints)
+    chain_to_fk_root = find_chain_joint_names(joints, tree_root, fk_root)
+    chain_to_tip = find_chain_joint_names(joints, tree_root, tip_link)
+    t_tree_fk_root = fk_base_to_tip(joints, chain_to_fk_root, q_by_joint)
+    t_tree_tip = fk_base_to_tip(joints, chain_to_tip, q_by_joint)
+    return np.linalg.inv(t_tree_fk_root) @ t_tree_tip
 
 
 def load_offsets_yaml(path: Path):
@@ -214,18 +241,18 @@ def rotation_angle_deg(R_est, R_ref):
     return math.degrees(math.acos(c))
 
 
-def parse_checkerboard_joint(urdf_path: Path):
-    root = ET.parse(str(urdf_path)).getroot()
-    for j in root.findall("joint"):
-        if j.get("name") != "checkerboard_joint":
-            continue
-        origin = j.find("origin")
-        if origin is None:
-            break
-        xyz = [float(x) for x in origin.get("xyz", "0 0 0").split()]
-        rpy = [float(x) for x in origin.get("rpy", "0 0 0").split()]
-        return np.array(xyz, dtype=float), np.array(rpy, dtype=float)
-    raise RuntimeError(f"checkerboard_joint not found in {urdf_path}")
+def compute_T_urdf_reference(
+    urdf: Path,
+    csv_dir: Path,
+    sample: int,
+    fk_root: str,
+    tip_link: str = "checkerboard_link",
+):
+    """Compute the nominal URDF reference pose in the requested FK frame."""
+    joints = load_urdf_joints(urdf)
+    jcsv = load_joints_csv(csv_dir / "joints.csv")
+    q_by_joint = jcsv[int(sample)]
+    return fk_root_to_tip_transform(joints, fk_root, tip_link, q_by_joint)
 
 
 def latest_glob(directory: Path, pattern: str):
@@ -262,18 +289,8 @@ def compute_T_base_board(
     offsets = load_offsets_yaml(offsets_yaml)
     jcsv = load_joints_csv(csv_dir / "joints.csv")
     js = jcsv[int(sample)]
-    # 需要整条链上的关节名以收集 q；桥接时用 waist 两段链的并集
-    try:
-        chain = find_chain_joint_names(joints, fk_root, camera_tip_link)
-    except RuntimeError:
-        if fk_root != "zarm_l1_ref_link":
-            raise
-        chain = list(
-            dict.fromkeys(
-                find_chain_joint_names(joints, "waist_yaw_link", camera_tip_link)
-                + find_chain_joint_names(joints, "waist_yaw_link", "zarm_l1_ref_link")
-            )
-        )
+    # 收集树根到 fk_root、树根到相机两条路径上的关节值，兼容兄弟分支。
+    chain = relative_chain_joint_names(joints, fk_root, camera_tip_link)
     q_by_joint = {jn: float(js.get(jn, 0.0)) + float(offsets.get(jn, 0.0)) for jn in chain}
     T_base_cam = fk_root_to_tip_transform(joints, fk_root, camera_tip_link, q_by_joint)
 
@@ -422,10 +439,6 @@ def main():
     out_err = args.out_err_png or (args.output_dir / "board_pose_error_pre_post_vs_urdf.png")
     out_abs = args.out_abs_png or (args.output_dir / "board_pose_bars_vs_urdf.png")
 
-    xyz_ref, rpy_ref = parse_checkerboard_joint(args.nominal_urdf)
-    R_ref = rpy_to_R(float(rpy_ref[0]), float(rpy_ref[1]), float(rpy_ref[2]))
-    p_ref = xyz_ref.copy()
-
     n = len(sids)
     P_pre = np.zeros((n, 3))
     P_post = np.zeros((n, 3))
@@ -440,6 +453,14 @@ def main():
 
     try:
         for i, sid in enumerate(sids):
+            # checkerboard_joint 的 origin 位于其 parent 坐标系；通过完整 URDF FK
+            # 将参考位姿转换到与相机观测相同的 fk_root 后再比较。
+            T_ref = compute_T_urdf_reference(
+                args.nominal_urdf,
+                csv_dir,
+                sid,
+                args.fk_root,
+            )
             T_pre = compute_T_base_board(
                 args.nominal_urdf,
                 zero_yaml,
@@ -472,6 +493,8 @@ def main():
             rr, pp, yy = T_to_rpy(T_post[:3, :3])
             RPY_post[i] = [math.degrees(rr), math.degrees(pp), math.degrees(yy)]
 
+            p_ref = T_ref[:3, 3]
+            R_ref = T_ref[:3, :3]
             e_pos_pre[i] = np.linalg.norm(P_pre[i] - p_ref)
             e_pos_post[i] = np.linalg.norm(P_post[i] - p_ref)
             e_rot_pre[i] = rotation_angle_deg(T_pre[:3, :3], R_ref)
@@ -552,6 +575,7 @@ def main():
     pos_drop_pct = (pos_drop / pos_pre_mean * 100.0) if (n > 0 and abs(pos_pre_mean) > 1e-12) else float("nan")
     rot_drop_pct = (rot_drop / rot_pre_mean * 100.0) if (n > 0 and abs(rot_pre_mean) > 1e-12) else float("nan")
 
+    # 绝对位姿柱状图使用最后一个样本对应的 URDF 参考；静态棋盘时各样本相同。
     r_ref, p_ref_ang, y_ref = T_to_rpy(R_ref)
     rpy_ref_deg = np.array([math.degrees(r_ref), math.degrees(p_ref_ang), math.degrees(y_ref)])
     labels = [f"S{sid}" for sid in sids] + ["URDF\nmodel"]
@@ -594,4 +618,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

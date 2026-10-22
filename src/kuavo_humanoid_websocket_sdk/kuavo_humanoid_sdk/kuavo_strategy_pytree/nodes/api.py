@@ -15,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor, Future
 from typing import List, Tuple
 import time
 import numpy as np
-import copy
 from kuavo_humanoid_sdk.kuavo_strategy_pytree.common import ros_env
 
 # --- ROS msg/srv imports (conditional: WS mode uses stubs) ---
@@ -1086,7 +1085,7 @@ class TorsoAPI:
         target = None
         with self._target_lock:
             if self._current_target is not None:
-                target = copy.deepcopy(self._current_target)
+                target = self._current_target
                 self._current_target = None  # 取走目标
         
         if target is None:
@@ -1127,7 +1126,7 @@ class TorsoAPI:
         target = None
         with self._target_lock:
             if self._current_target is not None:
-                target = copy.deepcopy(self._current_target)
+                target = self._current_target
                 self._current_target = None  # 取走目标
         
         if target is None:
@@ -1214,11 +1213,9 @@ class TorsoAPI:
 
             with self._target_lock:
                 if self._current_target is not None:
-                    target = copy.deepcopy(self._current_target)
-                    is_target_new = True  # 目标更新了
-
-            with self._target_lock:
-                self._current_target = None  # 取走目标
+                    target = self._current_target
+                    self._current_target = None
+                    is_target_new = True
 
             # assert target is not None, "目标位姿不能为空"
 
@@ -1382,7 +1379,7 @@ class TorsoAPI:
                         angular_z=vel_yaw  # 不转动
                     )
 
-            time.sleep(0.01)    # 控制频率,不能太低，太低的話行走會出現行走站立來回切換的現象
+            time.sleep(0.02)
 
             success = self._check_success_walk(
                 target_in_odom, yaw_threshold=np.deg2rad(10), pos_threshold=pos_threshold)
@@ -1476,11 +1473,9 @@ class TorsoAPI:
             # 0. 获取并处理target
             with self._target_lock:
                 if self._current_target is not None:
-                    target = copy.deepcopy(self._current_target)
-                    is_target_new = True  # 目标更新了
-
-            with self._target_lock:
-                self._current_target = None  # 取走目标
+                    target = self._current_target
+                    self._current_target = None
+                    is_target_new = True
 
             if is_target_new:
                 if target.frame not in [Frame.ODOM, Frame.BASE]:

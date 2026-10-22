@@ -17,22 +17,21 @@ echo ""
 project_root=""
 current_path="$PWD"
 
-# 检查当前目录及向上3层目录
+# 检查当前目录及向上3层目录，找到包含 src/ 子目录的项目根目录
 for i in {0..3}; do
     check_path="$current_path"
     for ((j=0; j<i; j++)); do
         check_path=$(dirname "$check_path")
     done
     
-    dir_name=$(basename "$check_path")
-    if [ "$dir_name" = "kuavo-ros-opensource" ] || [ "$dir_name" = "kuavo-ros-control" ]; then
+    if [ -d "$check_path/src" ]; then
         project_root="$check_path"
         break
     fi
 done
 
 if [ -z "$project_root" ]; then
-    echo -e "${RED}错误: 在当前目录向上3层内未找到 'kuavo-ros-opensource' 或 'kuavo-ros-control'${NC}"
+    echo -e "${RED}错误: 在当前目录向上3层内未找到包含 src/ 子目录的项目根目录${NC}"
     echo "当前目录: $current_path"
     echo "请确保在正确的项目目录下运行此脚本"
     exit 1

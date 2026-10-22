@@ -1,0 +1,7 @@
+# 按方向切换手势：direction = +1 下一个，-1 上一个（循环）
+int32 direction              # +1=next, -1=prev
+int8 hand_side               # 0=left, 1=right, 2=both
+---
+bool success
+int32 current_id             # 切换后的手势 id
+string message

@@ -1,25 +1,34 @@
-# Motive 刚体配置：名称、ROS 话题、消息类型
+# 动捕刚体配置：名称、工装偏移
+# =============================
+# mocap_source 指定动捕源，脚本据此自动解析 topic（无需手动改每个话题）：
+#   motive   -> /checkerboard_pose、/torso_pose、/l_shoulder_pose（OptiTrack/Nokov 桥）
+#   qingtong -> /vrpn_client_node/<name>/pose（vrpn_client_ros）
+# 无参启动默认 Motive；青瞳现场请在 start_record.sh 中显式传 qingtong。
+#
 # link_offset_mm：工装原点在对应 link 坐标系下的位置 (mm)；处理时从动捕位姿反推 link 位姿
+
+mocap_source: motive
+
+# 左肩工装按机型固定；process_mocap_poses.py 通过 --robot-version 选择。
+left_shoulder_fixtures:
+  default: [0.0, -53.5, 105.0]
+  s45: [0.0, -68.5, 105.0]
+
 bodies:
   - name: checkerboard
-    topic: /checkerboard_pose
     msg_type: PoseStamped
     link_offset_mm: [-203.93, -153.93, 11.50]
   - name: torso
-    topic: /torso_pose
     msg_type: PoseStamped
-    link_offset_mm: [122.02, -45.82, 2.50]
+    link_offset_mm: [120.02, -50.82, 6.0]
   - name: l_shoulder
-    topic: /l_shoulder_pose
     msg_type: PoseStamped
     link_offset_mm: [0.0, -53.50, 105.00]
 
   # - name: l_hand
-  #   topic: /l_hand_pose
   #   msg_type: PoseStamped
   #   link_offset_mm: [0.0, -0.50, 55.4]  # z = 170 - 114.6=55.4
   # - name: r_hand
-  #   topic: /r_hand_pose
   #   msg_type: PoseStamped
   #   link_offset_mm: [0.0, 0.50, 55.4]
 

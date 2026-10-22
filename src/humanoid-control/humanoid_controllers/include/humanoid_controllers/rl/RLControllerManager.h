@@ -119,6 +119,11 @@ namespace humanoid_controller
      */
     RLControllerBase* getCurrentController();
 
+    /**
+     * @brief 当前 RL 控制器是否允许手臂动作期间继续行走
+     */
+    bool currentControllerAllowsWalkingDuringArmAction() const;
+
     RLControllerBase* getLastController()
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);

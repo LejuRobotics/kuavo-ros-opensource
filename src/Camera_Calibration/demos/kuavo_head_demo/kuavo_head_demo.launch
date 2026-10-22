@@ -3,20 +3,27 @@
 
   <!-- 不依赖 ROS 包查找；优先 CAMERA_CALIB_ROOT，否则相对 launch 文件定位到 Camera_Calibration 根目录 -->
   <arg name="camera_calib_root" default="$(eval optenv('CAMERA_CALIB_ROOT', dirname() + '/../..'))" />
-  <!-- robot_layout：默认读 ROBOT_VERSION（52→biped52，56→biped56，62/63→wheel62）；可显式覆盖 -->
-  <arg name="robot_layout" default="$(eval 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped56' if optenv('ROBOT_VERSION', '52') == '56' else 'biped52')" />
-  <arg name="use_wheel62" default="$(eval arg('robot_layout') == 'wheel62')" />
-  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm.urdf')" />
-  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_calibrated.urdf')" />
+  <!-- robot_layout：默认读 ROBOT_VERSION（45→biped45，52→biped52，56→biped56，62/63→wheel62）；可显式覆盖 -->
+  <arg name="robot_layout" default="$(eval 'biped45' if optenv('ROBOT_VERSION', '52') == '45' else 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped56' if optenv('ROBOT_VERSION', '52') == '56' else 'biped52')" />
+  <arg name="use_no_waist" default="$(eval arg('robot_layout') in ['biped45', 'wheel62'])" />
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s45.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm.urdf')" />
+  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s45_calibrated.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_calibrated.urdf')" />
+  <!-- S45 物理倒装相机使用旋转图像及其虚拟 optical frame；其他布局保持原始话题。 -->
+  <arg name="head_image_topic" default="$(eval '/head_camera/color/image_raw_rotate_180' if arg('robot_layout') == 'biped45' else '/head_camera/color/image_raw')" />
+  <arg name="head_camera_info_topic" default="$(eval '/head_camera/color/camera_info_rotate_180' if arg('robot_layout') == 'biped45' else '/head_camera/color/camera_info')" />
+  <arg name="head_camera_frame" default="$(eval 'head_camera_color_optical_frame_rot180' if arg('robot_layout') == 'biped45' else 'head_camera_color_optical_frame')" />
   <arg name="csv_dir" default="$(arg camera_calib_root)/output_csv/kuavo_head"/>
 
   <!-- 选择流程（默认只开 capture_to_csv 手动采样） -->
   <arg name="do_capture_to_csv" default="true" />
   <arg name="do_calibrate_manual" default="false" />
   <arg name="do_optimize_from_csv" default="false" />
+  <!-- 离线 CSV 优化不需要实时 joint_states/TF；关闭后可避免与正在运行的运控同名或重复发布 TF。 -->
+  <arg name="start_state_publishers" default="true" />
 
   <!-- 并行多路 roslaunch 时必须区分节点名，否则 ROS 会注销同名节点（见 run_chessboard_calibration.sh all_parallel） -->
   <arg name="rsp_name" default="robot_state_publisher" />
+  <arg name="joint_state_bridge_name" default="head_joint_state_bridge" />
   <arg name="capture_name" default="robot_calibration_capture" />
   <arg name="optimize_name" default="robot_calibration_optimize" />
 
@@ -24,38 +31,40 @@
   <param name="robot_description"
          textfile="$(arg camera_calib_root)/$(arg urdf_file)" />
 
-  <node pkg="robot_state_publisher"
-        type="robot_state_publisher"
-        name="$(arg rsp_name)"
-        output="screen" />
+  <group if="$(arg start_state_publishers)">
+    <node pkg="robot_state_publisher"
+          type="robot_state_publisher"
+          name="$(arg rsp_name)"
+          output="screen" />
 
-  <!-- /sensors_data_raw -> /joint_states（头部 yaw/pitch；按布局切换是否发布腰关节） -->
-  <group unless="$(arg use_wheel62)">
-    <node pkg="robot_calibration"
-         type="head_joint_state_bridge.py"
-         name="head_joint_state_bridge"
-         output="screen">
-      <param name="input" value="/sensors_data_raw" />
-      <param name="output" value="/joint_states" />
-      <param name="yaw_joint" value="zhead_1_joint" />
-      <param name="pitch_joint" value="zhead_2_joint" />
-      <param name="publish_waist_joint" value="true" />
-      <param name="waist_joint" value="waist_yaw_joint" />
-      <param name="waist_joint_index" value="12" />
-    </node>
-  </group>
+    <!-- /sensors_data_raw -> /joint_states（头部 yaw/pitch；按布局切换是否发布腰关节） -->
+    <group unless="$(arg use_no_waist)">
+      <node pkg="robot_calibration"
+           type="head_joint_state_bridge.py"
+           name="$(arg joint_state_bridge_name)"
+           output="screen">
+        <param name="input" value="/sensors_data_raw" />
+        <param name="output" value="/joint_states" />
+        <param name="yaw_joint" value="zhead_1_joint" />
+        <param name="pitch_joint" value="zhead_2_joint" />
+        <param name="publish_waist_joint" value="true" />
+        <param name="waist_joint" value="waist_yaw_joint" />
+        <param name="waist_joint_index" value="12" />
+      </node>
+    </group>
 
-  <group if="$(arg use_wheel62)">
-    <node pkg="robot_calibration"
-         type="head_joint_state_bridge.py"
-         name="head_joint_state_bridge"
-         output="screen">
-      <param name="input" value="/sensors_data_raw" />
-      <param name="output" value="/joint_states" />
-      <param name="yaw_joint" value="zhead_1_joint" />
-      <param name="pitch_joint" value="zhead_2_joint" />
-      <param name="publish_waist_joint" value="false" />
-    </node>
+    <group if="$(arg use_no_waist)">
+      <node pkg="robot_calibration"
+           type="head_joint_state_bridge.py"
+           name="$(arg joint_state_bridge_name)"
+           output="screen">
+        <param name="input" value="/sensors_data_raw" />
+        <param name="output" value="/joint_states" />
+        <param name="yaw_joint" value="zhead_1_joint" />
+        <param name="pitch_joint" value="zhead_2_joint" />
+        <param name="publish_waist_joint" value="false" />
+      </node>
+    </group>
   </group>
 
   <!-- Capture -> CSV（手动触发 keyframe flag） -->
@@ -70,11 +79,12 @@
       <!-- capture_to_csv 使用私有 NodeHandle("~") 读取 features/chains，所以必须加载到该节点的私有命名空间 -->
       <rosparam
           file="$(arg camera_calib_root)/demos/kuavo_head_demo/kuavo_head_capture.yaml"
-          command="load" />
+          command="load"
+          subst_value="true" />
       <param name="out_dir" value="$(arg csv_dir)" />
       <param name="print_fk" value="true" />
       <param name="fk_base" value="base_link" />
-      <param name="fk_tip_camera" value="head_camera_color_optical_frame" />
+      <param name="fk_tip_camera" value="$(arg head_camera_frame)" />
       <param name="fk_tip_board" value="checkerboard_link" />
       <!-- 默认 keyframe_flag_topic/keyframe_done_topic 即 /head_keyframe_flag /head_keyframe_done -->
     </node>
@@ -101,13 +111,14 @@
       <!-- optimize_from_csv 使用私有 NodeHandle("~") 读取 models/error_blocks/free_*（以及可选 cal_steps） -->
       <rosparam
           file="$(arg camera_calib_root)/demos/kuavo_head_demo/kuavo_head_chessboard_calibration.yaml"
-          command="load" />
+          command="load"
+          subst_value="true" />
       <!-- 额外调试：打印 base<-board(obs) 与 delta(urdf^-1*obs) -->
       <param name="print_board_obs_pose" value="true" />
       <!-- 离群点剔除：阈值 pos=0.1m, rot=10deg -->
       <param name="outlier_reject_enable" value="true" />
-      <param name="outlier_reject_pos_m" value="1" />
-      <param name="outlier_reject_rot_deg" value="200.0" />
+      <param name="outlier_reject_pos_m" value="0.6" />
+      <param name="outlier_reject_rot_deg" value="40.0" />
       <param name="output_dir" value="$(arg camera_calib_root)/output/kuavo_head" />
       <!-- 固定输出文件名 + 输出共享 calibrated URDF 到 src/Camera_Calibration -->
       <param name="fixed_output_names" value="true" />
@@ -117,7 +128,7 @@
       <param name="print_fk" value="true" />
       <!-- 与同节点加载的 kuavo_head_chessboard_calibration.yaml 中 base_link 一致，供 FK 日志与离群点剔除 -->
       <param name="fk_base" value="zarm_l1_ref_link" />
-      <param name="fk_tip_camera" value="head_camera_color_optical_frame" />
+      <param name="fk_tip_camera" value="$(arg head_camera_frame)" />
       <param name="fk_tip_board" value="checkerboard_link" />
       <param name="obs_camera_sensor" value="camera_to_base" />
       <param name="print_obs_cam_board" value="true" />

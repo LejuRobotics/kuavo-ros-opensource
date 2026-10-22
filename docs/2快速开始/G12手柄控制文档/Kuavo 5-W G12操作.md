@@ -61,3 +61,26 @@ sudo systemctl restart urobot.service
 ![img](img/CD.png)
 
 ![img](img/fangshou.png)
+
+### 4. 航空箱坐/站控制
+
+#### 4.1 核心快捷键
+
+| 操作 | 组合键 | 源状态 → 目标 |
+|------|--------|--------------|
+| 首次开机起身 | E_LEFT + F_RIGHT + **A 长按** | initial → stance |
+| 坐回航空箱 | E_LEFT + F_RIGHT + **B 长按** | stance → sit |
+| 坐姿起身 | E_LEFT + F_RIGHT + **A 长按** | sit → stance |
+| 紧急停止 | **C+D 长按** | 任意 → initial |
+
+#### 4.2 操作流程
+
+**首次开机起身**：机器人双脚放置着地 → 确认上半身急停已恢复 → E 左拨 + F 右拨 → 长按 A → 自动 launch 机器人 → 等硬件 prep → 自动起身站立。
+![首次开机起身姿态](img/stance_front.png)  
+**站立坐回**：航空箱放在机器人正后方，站姿时机器人面朝前、背对箱子，机器人头部接触到航空箱的顶部边缘中心。确认控制器为 mpc 且无 tact 动作 → E 左拨 + F 右拨 → 长按 B → 等待坐下完成。
+![站立坐回姿态](img/sit_front.png)
+![站立坐回姿态](img/sit_side.png)
+**坐姿起身**：确认坐下已完成 → E 左拨 + F 右拨 → 长按 A → 等起身完成。
+
+**紧急停止**：任意状态 → C+D 长按 → 回 initial。
+

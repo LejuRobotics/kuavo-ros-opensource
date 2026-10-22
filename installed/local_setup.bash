@@ -1,8 +1,5 @@
-#!/usr/bin/env bash
-# generated from catkin/cmake/templates/local_setup.bash.in
-
+#!/bin/bash
 CATKIN_SHELL=bash
-
-# source setup.sh from same directory as this file
-_CATKIN_SETUP_DIR=$(builtin cd "`dirname "${BASH_SOURCE[0]}"`" > /dev/null && pwd)
-. "$_CATKIN_SETUP_DIR/setup.sh" --extend --local
+export _KUAVO_MULTIARCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${_KUAVO_MULTIARCH_ROOT}/local_setup.sh"

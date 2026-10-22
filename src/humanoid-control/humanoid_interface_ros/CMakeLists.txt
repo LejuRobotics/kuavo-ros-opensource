@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(humanoid_interface_ros)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_common/cmake/kuavo_arch.cmake)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_BUILD_TYPE=RelWithDebInfo)
 
 # Generate compile_commands.json for clang tools
@@ -48,7 +52,12 @@ find_package(Boost REQUIRED COMPONENTS
   filesystem
 )
 
-find_package(drake CONFIG REQUIRED)
+find_package(drake CONFIG QUIET)
+if(drake_FOUND)
+  set(KUAVO_HAS_DRAKE TRUE)
+else()
+  set(KUAVO_HAS_DRAKE FALSE)
+endif()
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
@@ -104,10 +113,14 @@ add_dependencies(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
   ${Boost_LIBRARIES}
-  drake::drake
 )
+if(drake_FOUND)
+  target_link_libraries(${PROJECT_NAME} drake::drake)
+endif()
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 target_compile_options(${PROJECT_NAME} PUBLIC ${OCS2_CXX_FLAGS})
 
+if(NOT KUAVO_BUILD_FOR_AARCH64)
 # DDP-MPC node for biped robot
 add_executable(humanoid_ddp_mpc
   src/HumanoidDdpMpcNode.cpp
@@ -346,7 +359,9 @@ target_link_libraries(humanoid_gait_command
 )
 target_compile_options(humanoid_gait_command PRIVATE ${OCS2_CXX_FLAGS})
 
-# Quest joystick command node for mpc with arm
+endif() # NOT KUAVO_BUILD_FOR_AARCH64 (biped executables)
+
+# Quest joystick command node for wheel-arm VR (built on x86_64 and aarch64)
 add_executable(humanoid_quest_control_with_arm
   src/QuestControlFSMNode.cpp
 )
@@ -362,6 +377,7 @@ target_link_libraries(humanoid_quest_control_with_arm
 )
 target_compile_options(humanoid_quest_control_with_arm PRIVATE ${OCS2_CXX_FLAGS})
 
+if(NOT KUAVO_BUILD_FOR_AARCH64)
 
 # Gait switch by name node for switching between different gaits
 add_executable(humanoid_gait_switch_by_name
@@ -379,11 +395,13 @@ target_link_libraries(humanoid_gait_switch_by_name
 )
 target_compile_options(humanoid_gait_switch_by_name PRIVATE ${OCS2_CXX_FLAGS})
 
+endif() # NOT KUAVO_BUILD_FOR_AARCH64
+
 #########################
 ###   CLANG TOOLING   ###
 #########################
 find_package(cmake_clang_tools QUIET)
-if(cmake_clang_tools_FOUND)
+if(cmake_clang_tools_FOUND AND NOT KUAVO_BUILD_FOR_AARCH64)
    message(STATUS "Run clang tooling for target ocs2_humanoid_ros")
    add_clang_tooling(
      TARGETS
@@ -418,6 +436,13 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+if(KUAVO_BUILD_FOR_AARCH64)
+  message(STATUS "[humanoid_interface_ros] aarch64: install wheel VR quest node only")
+  install(
+    TARGETS humanoid_quest_control_with_arm
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  )
+else()
 install(
   TARGETS
     humanoid_ddp_mpc
@@ -435,6 +460,7 @@ install(
     humanoid_gait_switch_by_name
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+endif()
 
 install(DIRECTORY launch rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}

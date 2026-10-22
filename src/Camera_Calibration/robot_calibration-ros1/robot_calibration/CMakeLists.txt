@@ -161,6 +161,20 @@ target_link_libraries(optimize_from_csv
 )
 add_dependencies(optimize_from_csv robot_calibration)
 
+# Mocap joint-zero calibration: reads capture_*.json, builds CalibrationData,
+# runs Ceres with chain3d_to_mocap error block.
+add_executable(optimize_mocap src/optimize_mocap.cpp)
+target_link_libraries(optimize_mocap
+  robot_calibration
+  ${Boost_LIBRARIES}
+  ${catkin_LIBRARIES}
+  ${CERES_LIBRARIES}
+  ${tinyxml_LIBRARIES}
+  ${orocos_kdl_LIBRARIES}
+  jsoncpp
+)
+add_dependencies(optimize_mocap robot_calibration)
+
 add_executable(base_calibration_node src/base_calibration_node.cpp)
 target_link_libraries(base_calibration_node
   robot_calibration
@@ -211,6 +225,7 @@ install(TARGETS
   calibrate
   capture_to_csv
   optimize_from_csv
+  optimize_mocap
   magnetometer_calibration
   robot_calibration
   robot_calibration_feature_finders

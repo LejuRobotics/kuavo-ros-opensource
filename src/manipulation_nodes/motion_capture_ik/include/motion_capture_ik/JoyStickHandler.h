@@ -3,6 +3,7 @@
 #include <noitom_hi5_hand_udp_python/JoySticks.h>
 
 #include <atomic>
+#include <chrono>
 #include <leju_utils/define.hpp>
 #include <vector>
 #include <mutex>
@@ -38,6 +39,11 @@ class JoyStickHandler {
   double getRightJoyStickY() const;
   bool getRightJoyStickYHold() const;
 
+  // SG100 heiman 手指驱动：读取最新 VR 扳机值 (0~1)。
+  bool hasFreshSg100Input(double timeout = 0.5) const;
+  double getLeftTrigger() const;
+  double getRightTrigger() const;
+
   void updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
   void processHandEndEffectorData();
   void processHandEndEffectorDataWithFingerTracking();
@@ -52,6 +58,8 @@ class JoyStickHandler {
   bool isRightSecondButtonPressed() const;
   bool isLeftFirstButtonTouched() const;
   bool isLeftSecondButtonTouched() const;
+  bool isRightFirstButtonTouched() const;
+  bool isRightSecondButtonTouched() const;
 
   bool isLeftRightFirstButtonTouched() const;
   bool isLeftRightFirstButtonPressed() const;
@@ -82,6 +90,7 @@ class JoyStickHandler {
   void processClawDataWithJoystick();
   void processClawDataWithHandTracking();
 
+  std::atomic<double> sg100_input_received_{0.0};
   std::atomic<bool> isInitialized_;
 
   // 按钮状态
@@ -92,6 +101,7 @@ class JoyStickHandler {
   bool rightSecondButtonPressed_;
   bool rightFirstButtonTouched_;
   bool rightFirstButtonPressed_;  // 右手第一个按键按下状态
+  bool rightSecondButtonTouched_;  // 右手第二个按键(B键)触摸状态
 
   bool leftGrip_;
   bool rightGrip_;

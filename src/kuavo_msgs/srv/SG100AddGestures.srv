@@ -1,0 +1,13 @@
+# 新增单个手势(折线图格式)
+string name
+SG100Curve[] position        # 位置折线(必须非空)
+SG100Curve[] torque_ff       # 力矩折线(可空[]=默认0)
+SG100Curve[] kp              # 刚度折线(可空[]=默认 launch kp)
+SG100Curve[] kd              # 阻尼折线(可空[]=默认 launch kd)
+SG100Curve[] output_limit    # 输出限制折线(可空[]=默认 launch limit)
+SG100Curve[] mode            # 模式阶跃折线(可空[]=默认7)
+int8 hand_side               # 0=left, 1=right, 2=both
+---
+bool success
+int32 total_count
+string message

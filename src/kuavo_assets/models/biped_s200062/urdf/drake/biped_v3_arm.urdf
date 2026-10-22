@@ -61,7 +61,7 @@
   </link>
   <joint name="base_to_joint"
          type="fixed">
-    <origin xyz="0.098 0 0.27064321"
+    <origin xyz="0.098 0 0.31064321"
             rpy="0 0 0" />
     <parent link="base_link" />
     <child link="base_to_joint" />
@@ -210,7 +210,7 @@
   </link>
   <joint name="waist_yaw_joint"
          type="revolute">
-    <origin xyz="0 0 0.235"
+    <origin xyz="0 0 0.250"
             rpy="0 0 0" />
     <parent link="waist_link" />
     <child link="waist_yaw_link" />
@@ -235,7 +235,7 @@
                izz="0.00124337" />
     </inertial>
     <visual>
-      <origin xyz="0 -0.081 0"
+      <origin xyz="0 0 0"
               rpy="0 0 0" />
       <geometry>
         <mesh filename="../../meshes/l_arm_pitch.STL" />
@@ -247,7 +247,7 @@
   </link>
   <joint name="zarm_l1_joint"
          type="revolute">
-    <origin xyz="0 0.2527 0.242"
+    <origin xyz="0 0.2527 0.227"
             rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zarm_l1_link" />
@@ -544,7 +544,7 @@
                izz="0.00124337" />
     </inertial>
     <visual>
-      <origin xyz="0 0.081 0"
+      <origin xyz="0 0 0"
               rpy="0 0 0" />
       <geometry>
         <mesh filename="../../meshes/r_arm_pitch.STL" />
@@ -556,7 +556,7 @@
   </link>
   <joint name="zarm_r1_joint"
          type="revolute">
-    <origin xyz="0 -0.2527 0.242"
+    <origin xyz="0 -0.2527 0.227"
             rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zarm_r1_link" />

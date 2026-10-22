@@ -1,0 +1,8 @@
+prefix=/builds/highlydynamic/kuavo-ros-control/installed/x86_64
+
+Name: kuavo_estimation
+Description: Description of kuavo_estimation
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -lkuavo_estimation
+Requires: kuavo_common

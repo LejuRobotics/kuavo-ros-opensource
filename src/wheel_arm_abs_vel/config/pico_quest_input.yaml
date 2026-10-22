@@ -1,0 +1,7 @@
+# PICO SDK full_body only. Feet, legs and appended contact-state item are ignored.
+# Input contract: controller / LEGACY_PALM_6D. No hold or confidence gating.
+# Local hand correction [x,y,z metres, roll,pitch,yaw radians], applied before
+# inverse Quest palm axes. Zero is beta's hand-frame convention, not a measured
+# Pico controller-to-Quest physical calibration.
+left_hand_offset: [0, 0, 0, 0, 0, 0]
+right_hand_offset: [0, 0, 0, 0, 0, 0]

@@ -71,7 +71,8 @@ class NodeHead(Behaviour):
                  head_search_yaws: List[float],
                  head_search_pitchs: List[float],
                  tag_id: int = None,  # 用于检查是否识别到tag
-                 check_interval: float = 0.1  # 转头后等待的时间，给视觉识别时间
+                 check_interval: float = 0.1,  # 转头后等待的时间，给视觉识别时间
+                 initial_settle_time: float = 1.0,
                  ):
         super(NodeHead, self).__init__(name)
         self.head_api = head_api
@@ -79,11 +80,13 @@ class NodeHead(Behaviour):
         self.head_search_pitchs = head_search_pitchs
         self.tag_id = tag_id
         self.check_interval = check_interval
-        
+        self.initial_settle_time = initial_settle_time
+
         self.head_traj = []
         self.current_index = 0
         self.last_move_time = 0
-        
+        self._node_start_time = 0
+
         # 如果需要检查tag，注册黑板访问
         if self.tag_id is not None:
             self.bb = py_trees.blackboard.Client(name=self.name)
@@ -112,13 +115,29 @@ class NodeHead(Behaviour):
         
         self.current_index = 0
         self.last_move_time = 0
+        self._node_start_time = 0
 
     def update(self):
         if len(self.head_traj) == 0:
             return Status.FAILURE
-        
+
         current_time = time.time()
-        
+
+        if self.last_move_time == 0:
+            if self._node_start_time == 0:
+                self._node_start_time = current_time
+            elapsed = current_time - self._node_start_time
+            if elapsed < self.initial_settle_time:
+                if self.tag_id is not None:
+                    try:
+                        tag = getattr(self.bb, f"latest_tag_{self.tag_id}", None)
+                        if tag is not None:
+                            return Status.SUCCESS
+                    except KeyError:
+                        pass
+                time.sleep(0.05)
+                return Status.RUNNING
+
         # 如果刚转完头，等待一段时间让视觉识别
         if self.last_move_time > 0 and (current_time - self.last_move_time) < self.check_interval:
             time.sleep(0.01)
@@ -140,14 +159,14 @@ class NodeHead(Behaviour):
                 try:
                     tag = getattr(self.bb, f"latest_tag_{self.tag_id}", None)
                     if tag is None:
-                        self.logger.error(f"tag {self.tag_id} NOT detected!")
+                        self.logger.error(f"tag {self.tag_id} NOT detected! scan complete.")
                         return Status.FAILURE
                     else:
                         return Status.SUCCESS
                 except KeyError:
-                    self.logger.error(f"tag {self.tag_id} NOT detected!")
+                    self.logger.error(f"tag {self.tag_id} NOT detected! scan complete.")
                     return Status.FAILURE
-        
+
         # 转到下一个位置
         yaw, pitch = self.head_traj[self.current_index]
         
@@ -736,9 +755,6 @@ class NodePercep(Behaviour):
         # 每个 tag 最近若干帧的姿态（四元数）缓冲，用于稳定姿态的平均
         self._tag_quat_buffers = {tid: [] for tid in tag_ids}
 
-        # 创建ROS发布器，用于发布识别到的tag数据
-        self.tag_publisher = ros_env.Publisher('/detected_tags', AprilTagDetectionArray, queue_size=10)
-
     def initialise(self):
         self.logger.debug(f"NodePercep::initialise {self.name}")
         for tag_id in self.tag_ids:
@@ -753,6 +769,7 @@ class NodePercep(Behaviour):
                     pass
             # 初始化黑板中的 key，确保其他 client 访问时不会因为 key 不存在而抛异常
             setattr(self.bb, f"latest_tag_{tag_id}_version", 0)
+            setattr(self.bb, f"latest_tag_{tag_id}", None)
             self._tag_pos_buffers[tag_id] = []
             self._tag_quat_buffers[tag_id] = []
 
@@ -770,16 +787,7 @@ class NodePercep(Behaviour):
 
     def update(self):
         self.logger.debug(f"NodePercep::update {self.name}")
-        # DIAG: 测量 PERCEP 每次 tick 耗时
-        _t0 = time.time()
 
-        # 创建AprilTagDetectionArray消息
-        tag_array_msg = AprilTagDetectionArray()
-        tag_array_msg.detections = []  # 显式初始化为list，防止_AutoStub代理导致len()失败
-        tag_array_msg.header = Header()
-        tag_array_msg.header.stamp = ros_env.now()
-        tag_array_msg.header.frame_id = "odom"
-        
         for tag_id in self.tag_ids:
             target_data = self.robot_sdk.vision.get_data_by_id_from_odom(tag_id)
             if target_data is not None:
@@ -832,43 +840,9 @@ class NodePercep(Behaviour):
                     setattr(self.bb, f"latest_tag_{tag_id}_version", current_version + 1)
                     self._tag_pos_buffers[tag_id].clear()
                     self._tag_quat_buffers[tag_id].clear()
-
-
-                # 构造AprilTagDetection消息
-                detection = AprilTagDetection()
-                detection.id = [tag_id]
-                detection.size = [tag_size if tag_size is not None else 0.0]
-                
-                # 构造PoseWithCovarianceStamped
-                pose_msg = PoseWithCovarianceStamped()
-                pose_msg.header = tag_array_msg.header
-                pose_msg.pose.pose.position.x = tag_pose.position.x
-                pose_msg.pose.pose.position.y = tag_pose.position.y
-                pose_msg.pose.pose.position.z = tag_pose.position.z
-                pose_msg.pose.pose.orientation.x = tag_pose.orientation.x
-                pose_msg.pose.pose.orientation.y = tag_pose.orientation.y
-                pose_msg.pose.pose.orientation.z = tag_pose.orientation.z
-                pose_msg.pose.pose.orientation.w = tag_pose.orientation.w
-                
-                detection.pose = pose_msg
-                tag_array_msg.detections.append(detection)
             else:
-                # 本帧未检测到该 tag，清空缓冲，要求重新积累连续稳定帧
                 self._tag_pos_buffers[tag_id] = []
                 self._tag_quat_buffers[tag_id] = []
-        
-        # 发布tag数据（即使为空也发布，表示当前没有检测到）
-        if len(tag_array_msg.detections) > 0:
-            self.tag_publisher.publish(tag_array_msg)
-
-        # DIAG: 每 20 tick 报告 PERCEP 耗时
-        if is_diag_enabled():
-            _dt = (time.time() - _t0) * 1000
-            if not hasattr(self, '_percep_tick_cnt'): self._percep_tick_cnt = 0; self._percep_times = []
-            self._percep_tick_cnt += 1; self._percep_times.append(_dt)
-            if self._percep_tick_cnt % 20 == 0:
-                arr = self._percep_times[-20:]
-                print(f"[DIAG-PERCEP] tick#{self._percep_tick_cnt} now={_dt:.1f}ms avg20={np.mean(arr):.1f}ms max20={np.max(arr):.1f}ms n_det={len(tag_array_msg.detections)}")
 
         return Status.RUNNING
 

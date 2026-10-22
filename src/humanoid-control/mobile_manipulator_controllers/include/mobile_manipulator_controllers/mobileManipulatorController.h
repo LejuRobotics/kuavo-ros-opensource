@@ -17,6 +17,7 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <std_msgs/Int8.h>
 #include <mutex>
+#include <chrono>
 
 #include <ocs2_mobile_manipulator/MobileManipulatorInterface.h>
 #include <mobile_manipulator_controllers/mobileManipulatorControllerBase.h>
@@ -72,6 +73,7 @@ namespace mobile_manipulator_controller
     ros::Publisher waistTrajPublisher_;
     ros::Publisher mmStatePublisher_;
     ros::Publisher mmControlTypePublisher_;
+    ros::Publisher ocs2IkLatencyPublisher_;  // OCS2 IK端到端管线延迟发布器
     ros::ServiceServer kinematicMpcControlSrv_;
     ros::ServiceServer getKinematicMpcControlModeSrv_;
     tf2_ros::StaticTransformBroadcaster staticBroadcaster_;
@@ -103,6 +105,10 @@ namespace mobile_manipulator_controller
     bool is_play_back_mode_ = false;
     ros::Subscriber mmControlTypeSubscriber_;
     uint32_t observation_count_ = 0;
+    
+    // 延迟测量: IK端到端管线延迟
+    std::chrono::steady_clock::time_point ikPipelineRecvTime_;  // 本周期处理的IK数据接收时刻
+    bool ikPipelineHasNewData_ = false;  // 本周期是否有新IK数据
   };
 
 } // namespace mobile_manipulator_controller

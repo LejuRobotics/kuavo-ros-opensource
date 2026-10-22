@@ -19,7 +19,17 @@ MID_VALUE = 1002
 MAX_VALUE = 1722
 
 # 默认通道值（摇杆在中间，其他为最小值）
-DEFAULT_CHANNELS = [MID_VALUE] * 4 + [MIN_VALUE] * 8
+# 通道数与真实发布器 h12pro_channel_publisher 保持一致:
+#   REMOTE_CONTROLLER_TYPE=g11 -> 16 通道; 其他/未配置(H12/G12/旧部署) -> 12 通道
+def _total_channels():
+    return 16 if os.getenv("REMOTE_CONTROLLER_TYPE", "").lower() == "g11" else 12
+
+_n = _total_channels()
+DEFAULT_CHANNELS = [MID_VALUE] * 4 + [MIN_VALUE] * (_n - 4)
+# G11 的 CH13~CH16 是屏幕虚拟通道, 空闲值为 1002(与驱动 initializeSbusRxData 一致);
+# 留 282 会被当成一次"硬件启动"脉冲且页面不匹配, 产生日志噪声。
+if _n == 16:
+    DEFAULT_CHANNELS[12:16] = [MID_VALUE] * 4
 
 # 状态到channel值的映射
 STATE_TO_CHANNEL = {

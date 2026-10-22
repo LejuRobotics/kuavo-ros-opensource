@@ -1,0 +1,310 @@
+#ifndef _DEXHAND_TOUCH_CONTROLLER_H_
+#define _DEXHAND_TOUCH_CONTROLLER_H_
+#include "dexhand_base.h"
+#include "dexhand_def.h"
+
+#include <memory>
+#include <array>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <condition_variable>
+#include <optional>
+#include <functional>
+#include <vector>
+#include <string>
+#include <unordered_map>
+
+namespace eef_controller {  
+using namespace dexhand;
+using DualHandsArray = std::array<FingerArray, 2>;
+using UnsignedDualHandsArray = std::array<UnsignedFingerArray, 2>;
+using FingerStatusArray = std::array<dexhand::FingerStatus, 2>;
+using FingerTouchStatusArray = std::array<dexhand::TouchSensorStatusArray, 2>;
+
+/**
+ * @brief 触觉灵巧手控制器
+ * 
+ */
+class DexhandController;
+using TouchDexhandControllerPtr = std::unique_ptr<DexhandController>;
+class DexhandController {
+public:    
+    static TouchDexhandControllerPtr Create(const std::string &action_sequences_path, bool is_touch_dexhand, bool is_can_protocol) {
+        return std::unique_ptr<DexhandController>(new DexhandController(action_sequences_path, is_touch_dexhand, is_can_protocol));
+    }
+
+    ~DexhandController();
+
+    /**
+     * @brief Initialize the controller
+     * 
+     * @return true if initialization successful
+     * @return false if initialization failed
+     */
+    bool init();
+
+    /**
+     * @brief Close the controller and release resources
+     * 
+     * @return true if close successful
+     * @return false if close failed
+     */
+    bool close();
+
+    /**
+     * @brief Send position command to left hand
+     * 
+     * @param position range: 0~100, 0 for open, 100 for close
+     */
+    void send_left_position(const UnsignedFingerArray & position);
+
+    /**
+     * @brief Send position command to right hand
+     * 
+     * @param position range: 0~100, 0 for open, 100 for close
+     */
+    void send_right_position(const UnsignedFingerArray & position);
+
+    /**
+     * @brief Send position commands to both hands
+     * 
+     * @param finger_positions array[2] containing positions for left and right hands
+     */
+    void send_position(const UnsignedDualHandsArray & finger_positions);
+
+    /**
+     * @brief Send speed command to left hand
+     * 
+     * @param speeds range: -100~100, positive for flexion, negative for extension
+     */
+    void send_left_speed(const FingerArray & speeds);
+
+    /**
+     * @brief Send speed command to right hand
+     * 
+     * @param speeds range: -100~100, positive for flexion, negative for extension
+     */
+    void send_right_speed(const FingerArray & speeds);
+
+    /**
+     * @brief Send speed commands to both hands
+     * 
+     * @param speeds array[2] containing speeds for left and right hands
+     */
+    void send_speed(const DualHandsArray & speeds);
+    
+    /**
+     * @brief Set the force level for both hands
+     * 
+     * @param level Force level to set
+     * @return true if successful for at least one hand
+     * @return false if failed for both hands
+     */
+    bool set_hand_force_level(GripForce level);
+
+    /**
+     * @brief Set the force level for right hand
+     * 
+     * @param level Force level to set
+     * @return true if successful
+     * @return false if failed or right hand not connected
+     */
+    bool set_right_hand_force_level(GripForce level);
+
+    /**
+     * @brief Set the force level for left hand
+     * 
+     * @param level Force level to set
+     * @return true if successful
+     * @return false if failed or left hand not connected
+     */
+    bool set_left_hand_force_level(GripForce level);
+
+    /**
+     * @brief Get the finger status of both hands
+     * 
+     * @return FingerStatusArray array[2] containing status for left and right hands
+     */
+    FingerStatusArray get_finger_status();
+
+    /**
+     * @brief Get the touch sensor status of both hands
+     * 
+     * @return FingerTouchStatusArray array[2] containing touch status for left and right hands
+     */
+    FingerTouchStatusArray get_touch_status();
+
+    /**
+     * @brief Enable the touch sensor for left hand
+     * 
+     * @param mask mask to enable touch sensor
+     * @return true if successful
+     * @return false if failed or left hand not connected
+     */
+    bool enable_left_hand_touch_sensor(uint8_t mask);
+    
+    /**
+     * @brief Enable the touch sensor for right hand
+     * 
+     * @param mask mask to enable touch sensor
+     * @return true if successful
+     * @return false if failed or right hand not connected
+     */
+    bool enable_right_hand_touch_sensor(uint8_t mask);
+
+    /**
+     * @brief List all gestures
+     * 
+     * @return std::vector<GestureInfoPtr> vector of gesture info pointers
+     */
+    std::vector<GestureInfoPtr> list_gestures();
+    
+    /**
+     * @brief  execute a list of gestures
+     * 
+     * @param gesture_tasks  the list of gestures to execute
+     * @param err_msg        the error message
+     * @return true if success, false otherwise 
+     */
+    bool execute_gestures(const GestureExecuteInfoVec& gesture_tasks, std::string &err_msg);
+
+    /**
+     * @brief check if a gesture is currently executing.
+     *
+     * @return true if a gesture is currently executing, false otherwise
+     */
+    bool is_gesture_executing();
+
+    /**
+     * @brief Abort the currently executing gesture
+     */
+    void abort_gesture();
+
+    /**
+     * @brief 设置双手的turbo模式开关
+     *
+     * @param enabled true为开启turbo模式，false为关闭
+     * @return true 至少有一只手设置成功
+     * @return false 两只手都设置失败
+     */
+    bool set_turbo_mode_enabled(bool enabled);
+
+    /**
+     * @brief 设置右手的turbo模式开关
+     *
+     * @param enabled true为开启turbo模式，false为关闭
+     * @return true 设置成功
+     * @return false 设置失败或右手未连接
+     */
+    bool set_right_hand_turbo_mode_enabled(bool enabled);
+
+    /**
+     * @brief 设置左手的turbo模式开关
+     *
+     * @param enabled true为开启turbo模式，false为关闭
+     * @return true 设置成功
+     * @return false 设置失败或左手未连接
+     */
+    bool set_left_hand_turbo_mode_enabled(bool enabled);
+
+    /**
+     * @brief 查询左手是否开启了turbo模式
+     *
+     * @return true 左手已开启turbo模式
+     * @return false 左手未开启turbo模式或左手未连接
+     */
+    bool is_left_hand_turbo_mode_enabled();
+
+    /**
+     * @brief 查询右手是否开启了turbo模式
+     *
+     * @return true 右手已开启turbo模式
+     * @return false 右手未开启turbo模式或右手未连接
+     */
+    bool is_right_hand_turbo_mode_enabled();
+
+    /**
+     * @brief 查询双手是否都开启了turbo模式
+     *
+     * @return true 双手都已开启turbo模式
+     * @return false 至少有一只手未开启turbo模式或未连接
+     */
+    bool is_turbo_mode_enabled();
+
+    void set_linker_hand(bool is_linker);
+
+private:
+    DexhandController(const std::string &action_sequences_path,
+                      bool is_touch_dexhand,
+                      bool is_can_protocol);
+    DexhandController(DexhandController&&) = delete;
+    DexhandController(const DexhandController&) = delete;
+
+    bool init_touch_dexhand();
+    bool init_normal_dexhand();
+    bool init_revo1_normal_can_customed();
+
+
+    /**
+     * @brief 解析手势配置文件
+     * 
+     * @param gesture_file_path 手势配置文件路径
+     * @param gesture_infos 输出的手势信息列表
+     * @return true 解析成功
+     * @return false 解析失败
+     */
+    bool ParseActionSequenceFile(const std::string & gesture_file_path, std::vector<GestureInfoPtr> &gesture_infos);
+
+    void control_thread_func();
+    void gesture_thread_func();
+    bool sleep_for_100ms(int ms_count);
+
+    /* data */
+    bool is_can_protocol_{false};
+    bool is_touch_dexhand_{false};
+    bool is_linker_hand_{false};
+    std::atomic<bool> l_position_updated_{false};
+    std::atomic<bool> r_position_updated_{false};
+    UnsignedFingerArray right_position_;
+    UnsignedFingerArray left_position_;
+
+    std::atomic<bool> l_speed_updated_{false};
+    std::atomic<bool> r_speed_updated_{false};
+    FingerArray right_speed_;
+    FingerArray left_speed_;
+
+    FingerStatusArray finger_status_;
+    FingerTouchStatusArray finger_touch_status_;
+    
+    // 线程安全保护
+    mutable std::mutex finger_status_mutex_;
+    mutable std::mutex touch_status_mutex_;
+
+    std::unique_ptr<dexhand::DexHandBase> left_dexhand_ = nullptr;
+    std::unique_ptr<dexhand::DexHandBase> right_dexhand_ = nullptr;
+
+    std::thread control_thread_;
+    std::atomic<bool> running_{false};
+    
+    // gesture related
+    std::string action_sequences_path_;
+    std::unordered_map<std::string, GestureInfoPtr> gesture_map_;
+    struct GestureExecuteTask {
+        HandSide        hand_side;  /* which hand */
+        GestureInfoPtr  gesture;    /* gesture */
+    };
+    using BatchGestureTask = std::vector<GestureExecuteTask>;
+
+    using TaskFunc = std::function<void()>;
+    std::optional<TaskFunc> current_task_;
+    std::mutex task_mutex_;
+    std::condition_variable task_cv_;
+    std::atomic<bool> gesture_executing_{false};
+    std::atomic_bool abort_running_task_flag_ = false;  /* abort task execute! */
+    std::thread gesture_thread_;
+
+    static constexpr int control_frequency_ = 200; // Hz
+};
+} // namespace eef_controller
+#endif

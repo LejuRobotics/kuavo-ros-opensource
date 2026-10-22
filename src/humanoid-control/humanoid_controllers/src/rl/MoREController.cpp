@@ -119,12 +119,7 @@ namespace humanoid_controller
 
     // gait 指令来源：使用 RL gait receiver，等价于原来的 CommandData + joystick/cmd_vel
     initial_cmd_.cmdStance_ = 1;
-    // 动作播放期间不走 stance 保护：设 timeout=0 让 robot_action_active 立即过期，仅影响 MoRE 实例
-    double saved_timeout = 0.5;
-    ros::param::param<double>("/rl_gait_receiver/robot_action_active_timeout", saved_timeout, 0.5);
-    ros::param::set("/rl_gait_receiver/robot_action_active_timeout", 0.001);
     gait_receiver_ = std::make_unique<RlGaitReceiver>(nh_, &initial_cmd_);
-    ros::param::set("/rl_gait_receiver/robot_action_active_timeout", saved_timeout);
     // Manager 初始化控制器时只会置 PAUSED，不一定调用派生 pause()；
     // 因此在第一次 resume 前显式禁用，避免非活跃 MoRE 接受复位请求。
     gait_receiver_->setEnabled(false);
@@ -191,9 +186,17 @@ namespace humanoid_controller
     // MoRE 模式切换服务：允许外部设置 0/1/2 三种模式
     change_more_mode_srv_ = nh_.advertiseService("/humanoid_controller/change_more_mode",
                                                  &MoREController::changeMoreModeCallback, this);
-    // 离线动作播放服务：仅在 pose 风格下执行手臂动作
+    // 兼容入口：转发到系统 /execute_arm_action。
     execute_arm_action_srv_ = nh_.advertiseService("/humanoid_controller/more_execute_arm_action",
                                                     &MoREController::executeArmActionCallback, this);
+    // Python 公共动作入口在开始 MoRE 动作前调用该服务做原子校验和模式准备。
+    prepare_arm_action_srv_ = nh_.advertiseService("/humanoid_controller/more_prepare_arm_action",
+                                                    &MoREController::prepareArmActionCallback, this);
+    // Safety exits must also stop the Python trajectory producer.  This is
+    // independent of the eventual controller-switch event because a guarded
+    // switch may still fail after the local MoRE session has been cancelled.
+    arm_action_abort_pub_ = nh_.advertise<std_msgs::Empty>(
+        "/humanoid_controller/more_arm_action_abort", 1, false);
     // 系统级手臂动作服务客户端（委托给 humanoid_plan_arm_trajectory 执行）
     system_arm_action_client_ =
         nh_.serviceClient<kuavo_msgs::ExecuteArmAction>("/execute_arm_action");
@@ -227,7 +230,18 @@ namespace humanoid_controller
   bool MoREController::changeMoreModeCallback(kuavo_msgs::changeArmCtrlMode::Request& req,
                                               kuavo_msgs::changeArmCtrlMode::Response& res)
   {
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
     const int requested_mode = req.control_mode;
+
+    if (action_pending_restore_.load(std::memory_order_acquire) ||
+        arm_mode_restore_in_progress_.load(std::memory_order_acquire))
+    {
+      res.result = false;
+      res.mode = more_mode_;
+      res.message = "Cannot change MoRE mode while an offline arm action is active or restoring";
+      ROS_WARN_THROTTLE(1.0, "[%s] Reject MoRE mode change during offline arm action/restore", name_.c_str());
+      return true;
+    }
 
     if (requested_mode < 0 || requested_mode > 2)
     {
@@ -266,185 +280,287 @@ namespace humanoid_controller
   bool MoREController::executeArmActionCallback(kuavo_msgs::ExecuteArmAction::Request& req,
                                                  kuavo_msgs::ExecuteArmAction::Response& res)
   {
+    // 保留旧 MoRE 入口的兼容性。不能在该回调中同步等待
+    // /execute_arm_action：Python 公共入口会反向调用本进程的
+    // /more_prepare_arm_action，单线程 spinner 下会形成循环等待。
+    if (!isActive())
+    {
+      res.success = false;
+      res.message = "MoRE controller is not active";
+      return true;
+    }
+    if (!system_arm_action_client_.exists())
+    {
+      res.success = false;
+      res.message = "/execute_arm_action service is unavailable";
+      return true;
+    }
+
+    ros::ServiceClient client = system_arm_action_client_;
+    const std::string action_name = req.action_name;
+    std::thread([client, action_name]() mutable {
+      kuavo_msgs::ExecuteArmAction srv;
+      srv.request.action_name = action_name;
+      if (!client.call(srv))
+      {
+        ROS_ERROR("[MoRE] Failed to forward legacy arm action '%s' to /execute_arm_action",
+                  action_name.c_str());
+      }
+      else if (!srv.response.success)
+      {
+        ROS_WARN("[MoRE] Legacy arm action '%s' was rejected: %s",
+                 action_name.c_str(), srv.response.message.c_str());
+      }
+    }).detach();
+
+    res.success = true;
+    res.message = "Arm action request forwarded asynchronously to /execute_arm_action";
+    return true;
+  }
+
+  bool MoREController::prepareArmActionCallback(kuavo_msgs::ExecuteArmAction::Request& req,
+                                                 kuavo_msgs::ExecuteArmAction::Response& res)
+  {
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
+
+    if (!isActive())
+    {
+      res.success = false;
+      res.message = "MoRE controller is not active";
+      return true;
+    }
+    if (requestToExit())
+    {
+      res.success = false;
+      res.message = "MoRE controller is requesting a safety exit";
+      ROS_WARN("[%s] Reject arm action '%s' while a safety exit is pending",
+               name_.c_str(), req.action_name.c_str());
+      return true;
+    }
     if (!arm_controller_ || !arm_command_replacement_enabled_)
     {
       res.success = false;
       res.message = "Arm controller not available or disabled";
       return true;
     }
+    if (action_pending_restore_.load(std::memory_order_acquire) ||
+        arm_mode_restore_in_progress_.load(std::memory_order_acquire))
+    {
+      res.success = false;
+      res.message = "Another MoRE arm action is already active";
+      return true;
+    }
 
     const int current_style = getCurrentGaitStyleIndex();
     const int current_arm_mode = arm_controller_->getMode();
+    const int current_waist_mode = waist_controller_ ? waist_controller_->getMode() : -1;
 
-    // 记录状态 + 启动计时器
-    pre_action_style_ = current_style;
-    pre_action_arm_mode_ = current_arm_mode;
-    last_robot_action_state_ = -1;  // 重置旧状态，防止 checkAndRestoreAfterAction 误触发立即恢复
-    robot_action_state_stable_count_ = 0;
-    restore_time_ = ros::Time(0);
-    action_pending_restore_ = true;
-    action_start_time_ = ros::Time::now();
-
-    // 设 walking 标志 + 锁 VR（gap 期间 VR 干扰，等 action_active 首次触发时解锁）
-    ros::param::set("/allow_walking_during_arm_action", true);
-    if (gait_receiver_) gait_receiver_->setAllowWalkingDuringAction(true);
-    if (arm_controller_) arm_controller_->lockExternalTarget(true);
-
-    // if (current_style == 0 && current_arm_mode == 1)  // deprecated: mode1 废弃，style 0 arm 恒为 2
-    // {
-    //   ROS_INFO("[%s] execute_arm_action '%s': style0/mode1 deprecated",
-    //            name_.c_str(), req.action_name.c_str());
-    // }
-    if (current_style == 0 || current_style == 2)
+    // 产品约束：只允许 pose/style0 或 policy-walk/style1 且手臂已在 mode1 时开始。
+    // style2 和 style0+mode2 均表示 VR 正在拥有外部手臂输入。
+    if ((current_style != 0 && current_style != 1) || current_arm_mode != 1)
     {
-      // style 0 mode 2 或 style 2: 已在 mode 2，直接播，不恢复
-      if (current_arm_mode != 2)
-      {
-        arm_controller_->changeMode(2);
-      }
-      ROS_INFO("[%s] execute_arm_action '%s': style%d/mode%d, no restore",
+      res.success = false;
+      res.message = "Offline action requires style0/style1 with arm mode1 (VR arm control released)";
+      ROS_WARN("[%s] Reject arm action '%s': style=%d arm_mode=%d",
                name_.c_str(), req.action_name.c_str(), current_style, current_arm_mode);
+      return true;
     }
-    else if (current_style == 1)
+
+    // Offline action ownership supersedes a pending Quest posture-reset
+    // session.  Clear it before publishing action_pending_restore_ so the WBC
+    // thread cannot later toggle the waist mode while the action owns mode2.
     {
-      // style 1 (摆臂走): 切 style 2 → 手臂平滑过渡到动作 → 播 → 恢复 style 1
-      style_command_index_ = 2;
-      syncArmControllerMode(2);
-      ROS_INFO("[%s] execute_arm_action '%s': style1 → style2 (keep walking) → will restore style1",
-               name_.c_str(), req.action_name.c_str());
+      std::lock_guard<std::mutex> posture_lock(posture_reset_mutex_);
+      posture_reset_pending_ = false;
+      posture_reset_owned_ = false;
+      if (gait_receiver_)
+        gait_receiver_->clearPostureTargetOverride();
+    }
+
+    // 所有校验通过后再公布 session，被拒绝的请求不修改任何控制状态。
+    pre_action_style_.store(current_style, std::memory_order_relaxed);
+    pre_action_arm_mode_.store(current_arm_mode, std::memory_order_relaxed);
+    pre_action_waist_mode_.store(current_waist_mode, std::memory_order_relaxed);
+    pre_action_waist_enabled_.store(
+        waist_controller_ && waist_controller_->isEnabled(), std::memory_order_relaxed);
+    last_robot_action_state_.store(-1, std::memory_order_release);
+    action_active_observed_.store(false, std::memory_order_release);
+    const double now_sec = ros::Time::now().toSec();
+    action_start_time_sec_.store(now_sec, std::memory_order_relaxed);
+    last_action_state_time_sec_.store(now_sec, std::memory_order_relaxed);
+    // 只有 style1 是“走不停腿”场景；style0 动作期仍保持站立保护。
+    setArmActionWalkingPermit(current_style == 1);
+    // 先把外部命令所有权交给离线动作。Quest/SDK 可以继续发布
+    // generic 话题，但在 session 内会被 Arm/WaistController 直接丢弃。
+    arm_controller_->setOfflineActionInputActive(true);
+    if (waist_controller_)
+      waist_controller_->setOfflineActionInputActive(true);
+    // 先公布 session，让 WBC 立即停止普通 style 同步，再切换 mode2。
+    // 即使 WBC 在两者之间插入，也只会幂等地再请求一次 mode2，
+    // 不会把刚切好的 mode2 拉回 mode1。
+    action_pending_restore_.store(true, std::memory_order_release);
+    arm_controller_->changeMode(2);
+    if (waist_controller_)
+    {
+      // Generic VR/SDK may have disabled waist replacement just before the
+      // action acquired ownership.  The action session must explicitly enable
+      // its dedicated waist input and restore the previous state at terminal.
+      waist_controller_->enable(true);
+      waist_controller_->changeMode(2);
     }
 
     res.success = true;
-    res.message = "Ready for arm action. Auto-triggering /execute_arm_action for '" + req.action_name + "'";
-
-    // 异步触发 Python 端 /execute_arm_action，消除手动两步调用间隙
-    // detach 线程不阻塞控制循环，与两步调用设计的"非阻塞"初衷一致
-    std::thread([this, action_name = req.action_name]() {
-      if (!system_arm_action_client_.waitForExistence(ros::Duration(3.0)))
-      {
-        ROS_WARN("[%s] /execute_arm_action service not available for auto-trigger of '%s'",
-                 name_.c_str(), action_name.c_str());
-        return;
-      }
-      kuavo_msgs::ExecuteArmAction srv;
-      srv.request.action_name = action_name;
-      if (system_arm_action_client_.call(srv))
-      {
-        ROS_INFO("[%s] Auto-trigger /execute_arm_action '%s': success=%d",
-                 name_.c_str(), action_name.c_str(), srv.response.success);
-      }
-      else
-      {
-        ROS_ERROR("[%s] Auto-trigger /execute_arm_action '%s' service call failed",
-                  name_.c_str(), action_name.c_str());
-      }
-    }).detach();
-
+    res.message = "MoRE arm action prepared";
+    ROS_INFO("[%s] Prepared arm action '%s': pre_style=%d execution_style=%d arm=%d->2 waist=%d->2",
+             name_.c_str(), req.action_name.c_str(), current_style,
+             getActionExecutionStyleIndex(), current_arm_mode, current_waist_mode);
     return true;
   }
 
   void MoREController::robotActionStateCallback(
       const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg)
   {
-    last_robot_action_state_ = msg->state;
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
+    if (!msg || !action_pending_restore_.load(std::memory_order_acquire))
+      return;
+    last_robot_action_state_.store(msg->state, std::memory_order_release);
+    last_action_state_time_sec_.store(ros::Time::now().toSec(), std::memory_order_release);
+    if (msg->state == 1)
+      action_active_observed_.store(true, std::memory_order_release);
+  }
+
+  bool MoREController::allowsWalkingDuringArmAction() const noexcept
+  {
+    return action_pending_restore_.load(std::memory_order_acquire) && gait_receiver_ &&
+           gait_receiver_->allowsWalkingDuringAction();
+  }
+
+  bool MoREController::hasActiveArmActionSession() const noexcept
+  {
+    return action_pending_restore_.load(std::memory_order_acquire) ||
+           arm_mode_restore_in_progress_.load(std::memory_order_acquire);
+  }
+
+  void MoREController::abortActiveArmActionSessionForSafety()
+  {
+    const bool had_python_session =
+        action_pending_restore_.load(std::memory_order_acquire);
+    // 先在当前控制器内启动一次 mode1 恢复并保留恢复门禁。即使 Manager
+    // 后续因为姿态/目标控制器条件拒绝切换，WBC 也不会逐帧重置归位插值；
+    // 若切换成功，pause() 会清理由旧控制器持有的恢复状态。
+    finishArmActionSession(true, "safety controller switch");
+    // restoration-only 状态已经没有 Python producer；避免安全切换重试时
+    // 每个控制周期重复发布取消通知。
+    if (had_python_session && arm_action_abort_pub_)
+      arm_action_abort_pub_.publish(std_msgs::Empty{});
+  }
+
+  void MoREController::setArmActionWalkingPermit(bool allow) noexcept
+  {
+    if (gait_receiver_)
+      gait_receiver_->setAllowWalkingDuringAction(allow);
+  }
+
+  void MoREController::finishArmActionSession(bool restore_mode, const std::string& reason)
+  {
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
+    if (!action_pending_restore_.load(std::memory_order_acquire))
+      return;
+
+    const int saved_style = pre_action_style_.load(std::memory_order_relaxed);
+    const int saved_arm_mode = pre_action_arm_mode_.load(std::memory_order_relaxed);
+    const int saved_waist_mode = pre_action_waist_mode_.load(std::memory_order_relaxed);
+    const bool saved_waist_enabled =
+        pre_action_waist_enabled_.load(std::memory_order_relaxed);
+    const int restore_arm_mode = saved_arm_mode >= 0 ? saved_arm_mode : 1;
+    const int restore_waist_mode = saved_waist_mode >= 0 ? saved_waist_mode : 1;
+    setArmActionWalkingPermit(false);
+
+    // 先恢复 style 快照，再向 WBC 公布 pending=false。
+    // Even a safety exit must restore the saved preference.  restore_mode only
+    // controls whether this controller starts the physical mode interpolation;
+    // the manager owns that operation during a safety switch.
+    if (saved_style == 0)
+    {
+      pose_arm_control_mode_ = restore_arm_mode;
+    }
+    else if (saved_style == 1)
+    {
+      std::lock_guard<std::mutex> style_lock(style_command_mutex_);
+      style_command_index_ = 1;
+      stand_origin_style_ = 1;
+      pose_arm_control_mode_ = 1;
+    }
+
+    // 正常 terminal 只在 Python 停止唯一轨迹发布者后产生；
+    // safety 路径则先撤销本地 ownership，再用专用通知让 Python 停止。
+    // 先立起 restore 门禁、再清 pending，防止 WBC 在 changeMode(1)
+    // 之后仍把动作 session 当作 active 而重新拉回 mode2。
+    const bool needs_arm_restore =
+        restore_mode && arm_controller_ && arm_controller_->getMode() != restore_arm_mode;
+    arm_mode_restore_in_progress_.store(needs_arm_restore, std::memory_order_release);
+    last_robot_action_state_.store(-1, std::memory_order_release);
+    action_active_observed_.store(false, std::memory_order_release);
+    action_pending_restore_.store(false, std::memory_order_release);
+    last_synced_gait_style_index_ = -1;
+
+    if (arm_controller_)
+    {
+      arm_controller_->clearExternalTarget();
+      if (needs_arm_restore)
+      {
+        arm_controller_->changeMode(restore_arm_mode);
+        if (arm_controller_->getMode() == restore_arm_mode)
+          arm_mode_restore_in_progress_.store(false, std::memory_order_release);
+      }
+      arm_controller_->setOfflineActionInputActive(false);
+    }
+    if (waist_controller_)
+    {
+      waist_controller_->setOfflineActionInputActive(false);
+      waist_controller_->enable(saved_waist_enabled);
+      if (waist_controller_->getMode() != restore_waist_mode)
+        waist_controller_->changeMode(restore_waist_mode);
+    }
+    ROS_INFO("[%s] Arm action session finished: style=%d arm=%d waist=%d restore=%d reason=%s",
+             name_.c_str(), saved_style, saved_arm_mode, saved_waist_mode,
+             static_cast<int>(restore_mode), reason.c_str());
   }
 
   void MoREController::checkAndRestoreAfterAction()
   {
-    if (!action_pending_restore_)
+    if (!action_pending_restore_.load(std::memory_order_acquire))
       return;
 
-    // 双触发：动作结束信号 或 超时兜底
-    const double elapsed = (ros::Time::now() - action_start_time_).toSec();
-    const bool action_just_ended = (last_robot_action_state_ >= 0 && last_robot_action_state_ != 1);
-    if (!action_just_ended && elapsed < kActionTimeoutSec_)
-      return;
+    const int state = last_robot_action_state_.load(std::memory_order_acquire);
+    const bool active_seen = action_active_observed_.load(std::memory_order_acquire);
+    const double now_sec = ros::Time::now().toSec();
+    const double elapsed = std::max(0.0, now_sec - action_start_time_sec_.load(std::memory_order_relaxed));
+    const double heartbeat_age =
+        std::max(0.0, now_sec - last_action_state_time_sec_.load(std::memory_order_acquire));
 
-    // style0/style2 不需要恢复风格，但需要恢复 arm mode
-    const bool needs_style_restore = (pre_action_style_ == 1);
-    if (!needs_style_restore)
+    if (state == 0)
     {
-      // 第一步：动作刚结束，立即恢复手臂模式至动作前状态
-      if (restore_time_.isZero())
-      {
-        const int saved_arm_mode = pre_action_arm_mode_;
-        if (arm_controller_)
-          arm_controller_->lockExternalTarget(false);
-        // style0: 恢复 pose_arm_control_mode_，sync 在 updateInternalState 后用传感器值切 mode
-        if (pre_action_style_ == 0 && (saved_arm_mode == 1 || saved_arm_mode == 2))
-          pose_arm_control_mode_ = saved_arm_mode;
-        restore_time_ = ros::Time::now();  // 释放 resolveMotionStyleIndex / getCurrentGaitStyleIndex 风格锁
-        skip_sync_after_restore_ = 0;
-        ROS_INFO("[%s] execute_arm_action: arm mode restored (style%d, mode=%d)",
-                 name_.c_str(), pre_action_style_, saved_arm_mode);
+      finishArmActionSession(true, "action failed or aborted");
+      return;
+    }
+    if (state == 2 && active_seen)
+    {
+      // MoRE and RlGaitReceiver are separate ROS subscribers.  Keep the local
+      // walking permit until the Receiver has consumed the same terminal frame;
+      // otherwise callback ordering can create a one-cycle stance pulse.
+      if (gait_receiver_ && gait_receiver_->isRobotActionActive())
         return;
-      }
-
-      // 第二步：等 Python reset 完成后清理 walking 标志
-      if (last_robot_action_state_ == 2)
-      {
-        robot_action_state_stable_count_++;
-        if (robot_action_state_stable_count_ < 5)
-          return;
-      }
-      else if (elapsed < 2.0)
-      {
-        robot_action_state_stable_count_ = 0;
-        return;
-      }
-
-      const int saved_pre_action_style = pre_action_style_;
-      ros::param::set("/allow_walking_during_arm_action", false);
-      if (gait_receiver_)
-        gait_receiver_->setAllowWalkingDuringAction(false);
-      action_pending_restore_ = false;
-      pre_action_style_ = -1;
-      pre_action_arm_mode_ = -1;
-      restore_time_ = ros::Time(0);
-      robot_action_state_stable_count_ = 0;
-      ROS_INFO("[%s] execute_arm_action cleanup (style%d): walking flags cleared",
-               name_.c_str(), saved_pre_action_style);
+      finishArmActionSession(true, "action completed");
       return;
     }
-
-    // style1 需要恢复：先恢复风格/手臂模式，walking 标志延迟清
-    if (!restore_time_.isValid() || restore_time_.isZero())
+    if ((!active_seen && elapsed >= kActionStartTimeoutSec_) ||
+        (active_seen && heartbeat_age >= kActionHeartbeatTimeoutSec_))
     {
-      style_command_index_ = 1;
-      syncArmControllerMode(1);
-      ROS_INFO("[%s] execute_arm_action done: restored style1", name_.c_str());
-      restore_time_ = ros::Time::now();
-      skip_sync_after_restore_ = 5;  // 冷却几帧防止 auto 模式立刻又被 VR 数据切回 mode 2
-      robot_action_state_stable_count_ = 0;
-      return;
+      ROS_ERROR("[%s] Arm action state timeout (started=%d, elapsed=%.1fs, heartbeat_age=%.1fs)",
+                name_.c_str(), static_cast<int>(active_seen), elapsed, heartbeat_age);
+      finishArmActionSession(true, active_seen ? "action heartbeat timeout" : "action start timeout");
     }
-
-    // 等 Python reset 真正结束：state==2 且持续 10 帧 或 超时 3 秒兜底
-    if ((ros::Time::now() - restore_time_).toSec() > 3.0)
-    {
-      ROS_WARN("[%s] action cleanup timeout, force clear walking flags", name_.c_str());
-    }
-    else if (last_robot_action_state_ == 2)
-    {
-      robot_action_state_stable_count_++;
-      if (robot_action_state_stable_count_ < 10) return;
-    }
-    else
-    {
-      robot_action_state_stable_count_ = 0;
-      return;
-    }
-
-    ros::param::set("/allow_walking_during_arm_action", false);
-    if (gait_receiver_)
-      gait_receiver_->setAllowWalkingDuringAction(false);
-    if (arm_controller_)
-      arm_controller_->lockExternalTarget(false);
-    action_pending_restore_ = false;
-    pre_action_style_ = -1;
-    pre_action_arm_mode_ = -1;
-    restore_time_ = ros::Time(0);
-    ROS_INFO("[%s] execute_arm_action cleanup: walking flags cleared", name_.c_str());
   }
 
   bool MoREController::loadConfig(const std::string& rlParamFile)
@@ -838,6 +954,13 @@ namespace humanoid_controller
     {
       return;
     }
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
+    if (action_pending_restore_.load(std::memory_order_acquire) ||
+        arm_mode_restore_in_progress_.load(std::memory_order_acquire))
+    {
+      ROS_WARN_THROTTLE(1.0, "[%s] Ignore motion style command during offline arm action", name_.c_str());
+      return;
+    }
     const int idx = std::max(0, std::min(static_cast<int>(msg->data), num_gait_ - 1));
     bool style_changed = false;
     {
@@ -857,6 +980,18 @@ namespace humanoid_controller
   {
     if (!msg)
     {
+      return;
+    }
+
+    // Serialize with prepare/pause.  A Quest posture-reset must never change
+    // the waist sub-mode after an offline action has acquired arm/waist mode2.
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
+    if (msg->data &&
+        (action_pending_restore_.load(std::memory_order_acquire) ||
+         arm_mode_restore_in_progress_.load(std::memory_order_acquire)))
+    {
+      ROS_WARN_THROTTLE(1.0, "[%s] Ignore Quest posture reset during offline arm action/restore",
+                        name_.c_str());
       return;
     }
 
@@ -892,12 +1027,16 @@ namespace humanoid_controller
 
   int MoREController::getCurrentGaitStyleIndex() const
   {
-    // 动作播放期间锁定风格，避免 auto 模式被 Python reset 阶段 state=1 误导返回 0
-    // （包括 style0 也需要锁，否则 cmdStance 变化会导致 style 漂移）
-    // restore_time_ 非零表示已执行风格恢复，应立即解锁
-    if (action_pending_restore_ && restore_time_.isZero())
+    // 动作期返回实际执行风格：style1 行走需使用 style2
+    // external-upper-body expert。pre_action_style_ 只保留给终态恢复，
+    // 不能再用它决定当前 policy 输出是否清零。
+    if (action_pending_restore_.load(std::memory_order_acquire))
     {
-      return pre_action_style_;
+      return getActionExecutionStyleIndex();
+    }
+    if (arm_mode_restore_in_progress_.load(std::memory_order_acquire))
+    {
+      return pre_action_style_.load(std::memory_order_relaxed);
     }
     if (!gait_receiver_)
     {
@@ -913,6 +1052,14 @@ namespace humanoid_controller
       }
     }
     return default_gait_style_index_;
+  }
+
+  int MoREController::getActionExecutionStyleIndex() const
+  {
+    const int pre_style = pre_action_style_.load(std::memory_order_relaxed);
+    if (pre_style == 1 && usesThreeGaitExperts())
+      return 2;
+    return std::max(0, std::min(pre_style, num_gait_ - 1));
   }
 
   bool MoREController::hasExternalArmCommand() const
@@ -964,14 +1111,22 @@ namespace humanoid_controller
 
   bool MoREController::requestArmControlMode(int target_mode)
   {
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
     if (!arm_controller_)
     {
       return false;
     }
 
+    if (action_pending_restore_.load(std::memory_order_acquire) ||
+        arm_mode_restore_in_progress_.load(std::memory_order_acquire))
+    {
+      ROS_WARN_THROTTLE(1.0, "[%s] Reject global arm mode request during offline arm action/restore",
+                        name_.c_str());
+      return false;
+    }
+
     // mode0 仍按原有全局语义直接处理；它不能反写为 pose/style 的长期偏好。
-    // 动作播放期间的临时模式也由原动作状态机保存和恢复，不污染用户偏好。
-    if ((target_mode != 1 && target_mode != 2) || action_pending_restore_)
+    if (target_mode != 1 && target_mode != 2)
     {
       return arm_controller_->changeMode(target_mode);
     }
@@ -1006,10 +1161,17 @@ namespace humanoid_controller
 
   void MoREController::handleQuestArmControlButtons(const kuavo_msgs::JoySticks& joy)
   {
+    std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
     const bool arm_active = arm_controller_ && arm_command_replacement_enabled_;
     const bool waist_active = waist_controller_ && waist_command_replacement_enabled_;
     if (!arm_active && !waist_active)
     {
+      return;
+    }
+    if (action_pending_restore_.load(std::memory_order_acquire) ||
+        arm_mode_restore_in_progress_.load(std::memory_order_acquire))
+    {
+      // 动作期冻结 Quest 手臂按键，不允许抢占 mode2。
       return;
     }
     // X+A 由 QuestControlFSM 作为唯一入口，通过全局 mode 请求进入
@@ -1145,21 +1307,10 @@ namespace humanoid_controller
 
   int MoREController::resolveMotionStyleIndex(const CommandDataRL& cmd) const
   {
-    // 动作期间锁定行走风格，避免 auto 模式被 Python reset 阶段 state=1 误导
-    // 包括 style0 也需要锁，否则 cmdStance 变化会导致 policy one-hot 漂移
-    // restore_time_ 非零表示已执行风格恢复，应立即解锁让正常逻辑接管风格判定
-    if (action_pending_restore_ && restore_time_.isZero())
+    // style0 保持 pose expert；style1 动作期临时使用 external-arm expert。
+    if (action_pending_restore_.load(std::memory_order_acquire))
     {
-      // command 模式：尊重 callback 显式设置的 style_command_index_（style1→2 等）
-      // auto 模式：锁定到 pre_action_style_，防止 cmdStance 变化导致风格漂移
-      if (gait_style_mode_ == "command")
-      {
-        std::lock_guard<std::mutex> lock(style_command_mutex_);
-        return style_command_index_;
-      }
-      // style 1 (walk_policy_arm) 训练时有摆臂，动作期间手臂轨迹与训练分布不一致；
-      // 映射到 style 2 (walk_external_arm) 让策略走外部手臂 expert，保持步态稳定
-      return (pre_action_style_ == 1) ? 2 : pre_action_style_;
+      return getActionExecutionStyleIndex();
     }
 
     int style_idx = default_gait_style_index_;
@@ -1281,6 +1432,7 @@ namespace humanoid_controller
 
   void MoREController::reset()
   {
+    finishArmActionSession(true, "controller reset");
     actions_.setZero();
     singleInputData_.setZero();
     policy_obs_.setZero();
@@ -1302,6 +1454,7 @@ namespace humanoid_controller
     {
       arm_controller_->reset();
     }
+    arm_mode_restore_in_progress_.store(false, std::memory_order_release);
     arm_takeover_blender_.reset();
     last_stance_state_for_blend_ = false;
     smoothed_squat_ = 0.0;
@@ -1327,9 +1480,30 @@ namespace humanoid_controller
 
   void MoREController::pause()
   {
+    // Close the prepare admission gate first.  Manager may have observed
+    // hasActiveArmActionSession()==false just before a concurrent prepare
+    // committed; after PAUSED no further prepare can pass isActive().
+    {
+      std::lock_guard<std::mutex> action_lock(action_prepare_mutex_);
+      RLControllerBase::pause();
+    }
+    if (hasActiveArmActionSession())
+    {
+      // This is the last line of defence for the check->pause race: revoke the
+      // local session and explicitly stop the Python producer as well.
+      abortActiveArmActionSessionForSafety();
+      // The switch has reached pause(), so it can no longer be rejected by a
+      // later manager guard.  It is now safe to discard a restoration-only
+      // gate that otherwise needs WBC updates to complete.
+      arm_mode_restore_in_progress_.store(false, std::memory_order_release);
+      setArmActionWalkingPermit(false);
+      last_synced_gait_style_index_ = -1;
+      if (arm_controller_)
+        arm_controller_->clearExternalTarget();
+    }
+
     {
       std::lock_guard<std::mutex> lock(posture_reset_mutex_);
-      RLControllerBase::pause();
       posture_reset_accepting_ = false;
       posture_reset_pending_ = false;
       posture_reset_owned_ = false;
@@ -1403,6 +1577,11 @@ namespace humanoid_controller
 
   bool MoREController::isAllowToExit() const
   {
+    if (action_pending_restore_.load(std::memory_order_acquire) ||
+        arm_mode_restore_in_progress_.load(std::memory_order_acquire))
+    {
+      return false;
+    }
     if (!gait_receiver_)
     {
       return true;
@@ -1904,7 +2083,7 @@ namespace humanoid_controller
     gait_receiver_->update(time, baseStateRL_, feetPositionsRL_);
     // 这里只做「用当前 actions_ 计算 actuation，再映射到 joint_cmd」
     // 动作期间手臂值由 updateArmCommand 中 arm_controller_->update() 写入（
-    //   Python 轨迹通过 /kuavo_arm_traj → ArmController 处理，最后写入 joint_cmd）
+    //   Python 轨迹通过 /kuavo_action_traj → ArmController 处理，最后写入 joint_cmd）
     const Eigen::VectorXd actuation = updateRLcmd(measuredRbdState);
     actionToJointCmd(actuation, measuredRbdState, joint_cmd);
     joint_cmd.header.stamp = time;
@@ -2035,28 +2214,22 @@ namespace humanoid_controller
     const size_t arm_start = jointNum_ + waistNum_;
     arm_controller_->updateInternalState(full_joint_pos, full_joint_vel, arm_start);
 
-    // 动作活跃期（state==1, 恢复未启动）：锁定手臂为 mode 2，抵御外部干扰
-    // 恢复已启动（restore_time_ 非零）：不再视作活跃，避免 Python reset 的 state=1 重新触发
-    // 清理期：让 checkAndRestoreAfterAction 处理
-    const bool action_active = (action_pending_restore_ && last_robot_action_state_ == 1
-                                && restore_time_.isZero());
+    // prepare 到最终 terminal 期间始终保持 mode2，包括主动作与 reset 轨迹。
+    const bool action_active = action_pending_restore_.load(std::memory_order_acquire);
     const int arm_mode_before_sync = arm_controller_->getMode();
     if (action_active)
     {
-      syncArmControllerMode(2);  // 活跃期所有 style 的动作都需要手臂 mode 2
-      // VR 全程上锁，Python 轨迹通过 /kuavo_action_traj 独立通道进入 ArmController
+      if (arm_controller_->getMode() != 2 || !arm_controller_->isVREnabled())
+      {
+        // 只纠正手臂 ownership，不借 gait style 去改腰部模式。
+        arm_controller_->changeMode(2);
+        ROS_WARN_THROTTLE(1.0, "[%s] Restore arm mode2 ownership for active offline action", name_.c_str());
+      }
     }
-    else if (action_pending_restore_ && restore_time_.isZero())
-    {
-      // 清理期（arm mode 尚未恢复）：checkAndRestoreAfterAction 处理中，此处不干预
-      // restore_time_ 非零时 arm mode 已恢复，应放行让正常 sync 逻辑接管
-    }
-    else if (skip_sync_after_restore_ <= 0)
+    else if (!arm_mode_restore_in_progress_.load(std::memory_order_acquire))
     {
       syncArmControllerMode(getCurrentGaitStyleIndex());
     }
-    const bool arm_mode_switched_to_1 = (arm_mode_before_sync != 1 && arm_controller_->getMode() == 1);
-    if (skip_sync_after_restore_ > 0) skip_sync_after_restore_--;
 
     double dt = dt_;
     if (dt <= 0.0 || dt > 0.1)
@@ -2071,16 +2244,23 @@ namespace humanoid_controller
     }
 
     // mode 2：VR/离线动作接管，调用完整 update 处理轨迹输入
-    //   动作期间 Python 轨迹通过 /kuavo_arm_traj → ArmController 正常进入，
+    //   动作期间 Python 轨迹通过 /kuavo_action_traj → ArmController 正常进入，
     //   arm_controller_->update() 处理后写入 joint_cmd（在 actionToJointCmd 之后，不会被覆盖）
     // mode 1：调 update() 而非 updateInternalState()，让 smoothstep 在切 style 时跑完
-    if (arm_controller_->getMode() == 2)
+    arm_controller_->update(time, dt, full_joint_pos, full_joint_vel,
+                            static_cast<int>(cmdData.cmdStance_), joint_cmd);
+    const bool arm_mode_switched_to_1 =
+        (arm_mode_before_sync != 1 && arm_controller_->getMode() == 1);
+    if (arm_mode_restore_in_progress_.load(std::memory_order_acquire) &&
+        arm_controller_->getMode() == 1)
     {
-      arm_controller_->update(time, dt, full_joint_pos, full_joint_vel, static_cast<int>(cmdData.cmdStance_), joint_cmd);
+      arm_mode_restore_in_progress_.store(false, std::memory_order_release);
+      last_synced_gait_style_index_ = -1;
+      ROS_INFO("[%s] Arm action restore interpolation completed", name_.c_str());
     }
-    else
+
+    if (arm_controller_->getMode() != 2)
     {
-      arm_controller_->update(time, dt, full_joint_pos, full_joint_vel, static_cast<int>(cmdData.cmdStance_), joint_cmd);
       // 仅当 style 2→1 切换（arm mode 从 2 切到 1 的首帧）才触发 armRlTakeoverBlend
       // isActive() 检查防止与 standing→walking 触发重复启动
       if (arm_mode_switched_to_1 && static_cast<int>(cmdData.cmdStance_) == 0
@@ -2170,12 +2350,22 @@ namespace humanoid_controller
       return false;
     }
 
-    // 动作期间不让 auto style 覆盖 callback 设的 style 2
-    if (!action_pending_restore_ && skip_sync_after_restore_ <= 0)
+    const bool action_active = action_pending_restore_.load(std::memory_order_acquire);
+    // 动作期的 policy execution style 可能是 style2，但恢复快照仍是
+    // pre_action_style=1。不能再用恢复风格把腰部拉回 policy mode。
+    if (action_active)
+    {
+      if (waist_controller_->getMode() != 2)
+      {
+        waist_controller_->changeMode(2);
+        ROS_WARN_THROTTLE(1.0, "[%s] Restore waist mode2 ownership for active offline action",
+                          name_.c_str());
+      }
+    }
+    else if (!arm_mode_restore_in_progress_.load(std::memory_order_acquire))
     {
       syncArmControllerMode(getCurrentGaitStyleIndex());
     }
-    if (skip_sync_after_restore_ > 0) skip_sync_after_restore_--;
 
     double dt = dt_;
     if (dt <= 0.0 || dt > 0.1)
@@ -2209,7 +2399,11 @@ namespace humanoid_controller
       full_joint_vel = sensor_data.jointVel_.head(jointNum_ + waistNum_ + jointArmNum_);
     }
 
-    waist_controller_->update(time, dt, full_joint_pos, full_joint_vel, static_cast<int>(cmdData.cmdStance_),
+    // WaistController 历史上会按 cmd_stance 自动切 mode；动作 session
+    // 必须将这个子状态固定在 external/mode2，否则起步边界会把
+    // 刚获得的腰部所有权又切回 mode1。
+    const int waist_cmd_stance = action_active ? 1 : static_cast<int>(cmdData.cmdStance_);
+    waist_controller_->update(time, dt, full_joint_pos, full_joint_vel, waist_cmd_stance,
                               joint_cmd, jointNum_);
 
     if (getCurrentGaitStyleIndex() == 0 && waist_controller_->getMode() == 2)

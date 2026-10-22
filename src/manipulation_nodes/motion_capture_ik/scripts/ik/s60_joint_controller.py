@@ -284,7 +284,11 @@ class S60JointController:
                 parser = Parser(self.drake_plant)
                 package_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..')
                 parser.package_map().Add("kuavo_assets", package_path)
-                parser.AddModelFromFile(urdf_path)
+                _tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'tools'))
+                if _tools_dir not in sys.path:
+                    sys.path.append(_tools_dir)
+                from drake_parser_compat import add_urdf_model
+                add_urdf_model(parser, urdf_path)
                 
                 self.drake_plant.Finalize()
                 self.drake_context = self.drake_plant.CreateDefaultContext()

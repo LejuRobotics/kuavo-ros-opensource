@@ -6,12 +6,25 @@
     <arg name="predict_gesture" default="false"/>
     <arg name="ee_type" default="qiangnao"/>
     <arg name="enable_head_control" default="true"/>
-    <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch"/>
+    <arg name="enable_vr_visualization" default="false"/>
+    <!-- 默认关闭，测试延迟时通过 enable_vr_latency_diagnostics:=true 显式开启。 -->
+    <arg name="enable_vr_latency_diagnostics" default="false"/>
+    <arg name="enable_vr_transform_diagnostics" default="false"/>
+    <arg name="ik_solution_timeout_s" default="0.2"/>
+    <arg name="rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics.yaml"/>
+    <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
+      <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
+      <arg name="rosbag_topic_config" value="$(arg rosbag_topic_config)"/>
+    </include>
 
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
       <arg name="control_torso" value="$(arg control_torso)"/>
       <arg name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)"/>
       <arg name="predict_gesture" value="$(arg predict_gesture)"/>
+      <arg name="enable_vr_visualization" value="$(arg enable_vr_visualization)"/>
+      <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
+      <arg name="enable_vr_transform_diagnostics" value="$(arg enable_vr_transform_diagnostics)"/>
+      <arg name="ik_solution_timeout_s" value="$(arg ik_solution_timeout_s)"/>
       <arg name="ee_type" default="$(arg ee_type)"/>
       <arg name="enable_head_control" value="true"/>
     </include>

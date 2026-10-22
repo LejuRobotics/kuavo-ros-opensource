@@ -1,0 +1,7 @@
+# Ubuntu 24.04 (noble) / Python 3.12 已验证版本
+# 对应原 requirements.txt，供 deploy_autostart.sh 在 VERSION_ID>=24.04 时使用
+transitions==0.9.3
+rich==13.7.1
+psutil==5.9.8
+graphviz==0.21
+pyserial==3.5

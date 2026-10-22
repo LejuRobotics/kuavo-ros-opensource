@@ -49,7 +49,7 @@ std::pair<bool, bool> HandSmoother::getModeChangingState() const {
 }
 
 std::pair<bool, bool> HandSmoother::updateModeChangingStateIfNeeded(bool ctrlModeChanged) {
-  if (!ctrlModeChangingMaintain_) {
+  if (ctrlModeChanged || !ctrlModeChangingMaintain_) {
     setModeChangingState(ctrlModeChanged, ctrlModeChanged);
   }
   return getModeChangingState();

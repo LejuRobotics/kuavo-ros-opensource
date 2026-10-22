@@ -10,6 +10,7 @@
 #include "humanoid_controllers/LowPassFilter.h"
 #include <Eigen/Dense>
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -179,6 +180,19 @@ public:
     void setExternalCommandBufferCallback(std::function<bool()> callback);
 
     /**
+     * @brief Select the only external trajectory source accepted in mode 2.
+     *
+     * false: accept generic/VR/SDK input from /kuavo_arm_traj.
+     * true:  accept offline actions from /kuavo_action_traj.
+     * Switching ownership clears targets left by the previous source.
+     */
+    void setOfflineActionInputActive(bool active);
+    bool isOfflineActionInputActive() const noexcept
+    {
+      return offline_action_input_active_.load(std::memory_order_acquire);
+    }
+
+    /**
      * @brief Start an arm-only return to the configured default pose before a controller switch.
      *
      * The request stays latched so the default-pose PD/gravity command is still emitted while
@@ -274,11 +288,6 @@ public:
      */
     void clearExternalTarget();
     /**
-     * @brief 锁定外部轨迹接收（动作期间屏蔽 VR 干扰，只让 Python action 通过）
-     */
-    void lockExternalTarget(bool lock) { external_target_locked_ = lock; }
-
-    /**
      * @brief 检查是否已收到外部目标输入（VR/外部轨迹）
      * @return true表示已收到外部输入，false表示无外部输入
      */
@@ -352,13 +361,14 @@ private:
                                   const Eigen::VectorXd& target_pos,
                                   const Eigen::VectorXd& target_vel);
     
-    /**
-     * @brief VR输入回调函数（处理/kuavo_arm_traj话题）
-     */
+    /** @brief Generic VR/SDK input callback for /kuavo_arm_traj. */
     void jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg);
+    /** @brief Offline-action-only input callback for /kuavo_action_traj. */
     void actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg);
 
     void applyBufferedMode2TargetIfReady();
+    /** @pre external_input_owner_mutex_ is held. Acquires external_target_mutex_. */
+    void clearExternalTargetStateForOwnerSwitch();
     void storeMode2Target(const sensor_msgs::JointState& msg,
                           Eigen::VectorXd& target_q,
                           Eigen::VectorXd& target_v) const;
@@ -477,18 +487,22 @@ private:
     int default_pose_return_settled_cycles_{0};
     
     // 外部控制相关
-    Eigen::VectorXd raw_external_target_q_; // 外部控制原始目标位置（从/kuavo_arm_traj获取）
+    Eigen::VectorXd raw_external_target_q_; // 当前 owner 的外部控制原始目标位置
     Eigen::VectorXd raw_external_target_v_; // 外部控制原始目标速度
     Eigen::VectorXd external_target_q_;  // 外部控制目标位置（滤波或插值后）
     Eigen::VectorXd external_target_v_;  // 外部控制目标速度
     bool external_target_received_;      // 是否已收到外部输入
-    bool external_target_locked_{false}; ///< 锁定外部轨迹，动作期间屏蔽 VR 信号
     Eigen::VectorXd buffered_mode2_target_q_; // 自动切换缓冲期缓存的最新外部目标
     Eigen::VectorXd buffered_mode2_target_v_;
     bool buffered_mode2_target_received_{false};
     std::function<bool()> external_command_buffer_callback_;
     ros::Time last_external_input_time_; // 上一次外部输入的时间戳
     bool last_external_input_time_valid_; // 上一次时间戳是否有效
+    // Producer arbitration. The owner mutex is always acquired before the
+    // external-target mutex when both are needed.
+    std::atomic_bool offline_action_input_active_{false};
+    std::atomic<std::uint64_t> external_input_owner_epoch_{0};
+    mutable std::mutex external_input_owner_mutex_;
     std::atomic<bool> external_control_pause_requested_{false};
     bool external_control_pause_active_{false};
     bool external_pause_resume_reacquiring_{false};

@@ -1,0 +1,21 @@
+# Phase 1. Candidate defaults, NOT a validated hardware stability envelope.
+# No change to maximum speed/acceleration or normal target feedforward.
+# Left/right shoulders are resolved by joint NAME, not wire-array offsets.
+execution_governor:
+  enabled: true
+  zarm_l3_joint:
+    error_deadband: 0.20
+    error_full: 0.50
+    prediction_time: 0.04
+    penalty_ratio: 4.0
+    smoothing_ratio: 0.25
+    attack_time: 0.01
+    release_time: 0.04
+  zarm_r3_joint:
+    error_deadband: 0.20
+    error_full: 0.50
+    prediction_time: 0.04
+    penalty_ratio: 4.0
+    smoothing_ratio: 0.25
+    attack_time: 0.01
+    release_time: 0.04

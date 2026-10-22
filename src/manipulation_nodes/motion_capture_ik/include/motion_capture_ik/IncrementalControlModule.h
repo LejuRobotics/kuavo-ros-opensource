@@ -228,7 +228,7 @@ struct IncrementalControlConfig {
 struct HandStatus {
   bool activated = false;                                               // 手臂是否激活
   bool moving = false;                                                  // 手臂是否已移动
-  Eigen::Vector3d lastPosition = Eigen::Vector3d::Zero();               // 上一帧手部位置
+  Eigen::Vector3d lastPosition = Eigen::Vector3d::Zero();               // 本次激活后首帧的移动检测参考位置
   Eigen::Quaterniond lastOrientation = Eigen::Quaterniond::Identity();  // 上一帧手部姿态
   bool isFirstFrame = true;           // 是否为第一帧数据（用于移动检测）
   double lastMovementDistance = 0.0;  // 最后一次检测到的移动距离
@@ -260,12 +260,9 @@ struct HandStatus {
       return false;
     }
 
-    // 计算手部位置的norm误差
+    // 相对本次激活后的固定参考位置检测，避免逐帧更新参考点吞掉慢速位移。
     double normError = (currentPosition - lastPosition).norm();
     lastMovementDistance = normError;  // 保存移动距离，供外部使用
-
-    // 更新上一帧位置
-    lastPosition = currentPosition;
 
     // 检查是否超过阈值
     if (normError > threshold) {

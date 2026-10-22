@@ -5,7 +5,7 @@ chmod +x "$0" 2>/dev/null || true
 
 usage() {
   cat <<'EOF'
-用法: run_chessboard_calibration.sh [capture|optimize|test|move] [--build] [--loops N] [--out_dir DIR] [--robot_layout biped52|biped56|wheel62]
+用法: run_chessboard_calibration.sh [capture|optimize|test|move] [--demo head|right_wrist|left_wrist|all] [--build] [--loops N] [--out_dir DIR] [--robot_layout biped45|biped52|biped56|wheel62]
 
 说明:
   - 运行后可选择：头部标定 / 右手标定 / 左手标定 / 全部串行
@@ -13,13 +13,14 @@ usage() {
   - optimize: 启动对应 demo 的 optimize_from_csv（从 CSV 读取）
   - test: 读取 teach_*_joint_test.json 下发测试姿态并采数到带 _test 后缀目录，采数完自动画图输出测试图片
   - move: 仅下发 teach JSON 中的多姿态关节轨迹（不采数、不写 CSV），适用于“内参标定只需运动覆盖”的场景
-  - 机型：默认读 ROBOT_VERSION（52→biped52，56→biped56，62/63→wheel62）；可用 --robot_layout 覆盖
+  - 机型：默认读 ROBOT_VERSION（45→biped45，52→biped52，56→biped56，62/63→wheel62）；可用 --robot_layout 覆盖
 
 选项:
   --build       先编译 robot_calibration、robot_calibration_msgs 和 kuavo_msgs
   --loops N     仅头部有效：关键帧轨迹循环次数（默认 1）
   --out_dir DIR 覆盖 CSV 输出目录（不填则使用默认输出目录）
-  --robot_layout biped52|biped56|wheel62  覆盖 ROBOT_VERSION 自动识别
+  --robot_layout biped45|biped52|biped56|wheel62  覆盖 ROBOT_VERSION 自动识别
+  --demo NAME   非交互选择 demo：head|right_wrist|left_wrist|all
 EOF
 }
 
@@ -28,6 +29,7 @@ BUILD=false
 LOOPS=1
 OUT_DIR=""
 ROBOT_LAYOUT_ARG=""
+DEMO_ARG=""
 CONTROL_TOPIC="/rgb_calib/control"
 
 if [[ $# -gt 0 ]]; then
@@ -45,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --loops) LOOPS="${2:-}"; shift 2 ;;
     --out_dir) OUT_DIR="${2:-}"; shift 2 ;;
     --robot_layout) ROBOT_LAYOUT_ARG="${2:-}"; shift 2 ;;
+    --demo) DEMO_ARG="${2:-}"; shift 2 ;;
     --control_topic) CONTROL_TOPIC="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "未知参数: $1" >&2; usage; exit 1 ;;
@@ -66,12 +69,13 @@ die() {
 resolve_robot_layout() {
   if [[ -n "${ROBOT_LAYOUT_ARG}" ]]; then
     case "${ROBOT_LAYOUT_ARG}" in
-      biped52|biped56|wheel62) echo "${ROBOT_LAYOUT_ARG}"; return 0 ;;
-      *) die "无效的 --robot_layout: ${ROBOT_LAYOUT_ARG}（仅 biped52|biped56|wheel62）" ;;
+      biped45|biped52|biped56|wheel62) echo "${ROBOT_LAYOUT_ARG}"; return 0 ;;
+      *) die "无效的 --robot_layout: ${ROBOT_LAYOUT_ARG}（仅 biped45|biped52|biped56|wheel62）" ;;
     esac
   fi
   local rv="${ROBOT_VERSION:-}"
   case "${rv}" in
+    45) echo "biped45" ;;
     52) echo "biped52" ;;
     56) echo "biped56" ;;
     62|63) echo "wheel62" ;;
@@ -86,7 +90,10 @@ resolve_robot_layout() {
 }
 
 ROBOT_LAYOUT="$(resolve_robot_layout)"
-if [[ "${ROBOT_LAYOUT}" == "wheel62" ]]; then
+if [[ "${ROBOT_LAYOUT}" == "biped45" ]]; then
+  NOMINAL_URDF="${CC_DIR}/biped_v3_arm_s45.urdf"
+  CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_s45_calibrated.urdf"
+elif [[ "${ROBOT_LAYOUT}" == "wheel62" ]]; then
   NOMINAL_URDF="${CC_DIR}/biped_v3_arm_s62.urdf"
   CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_s62_calibrated.urdf"
 elif [[ "${ROBOT_LAYOUT}" == "biped56" ]]; then
@@ -95,6 +102,16 @@ elif [[ "${ROBOT_LAYOUT}" == "biped56" ]]; then
 else
   NOMINAL_URDF="${CC_DIR}/biped_v3_arm.urdf"
   CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_calibrated.urdf"
+fi
+
+if [[ "${ROBOT_LAYOUT}" == "biped45" ]]; then
+  HEAD_IMAGE_TOPIC="/head_camera/color/image_raw_rotate_180"
+  HEAD_INFO_TOPIC="/head_camera/color/camera_info_rotate_180"
+  HEAD_CAMERA_FRAME="head_camera_color_optical_frame_rot180"
+else
+  HEAD_IMAGE_TOPIC="/head_camera/color/image_raw"
+  HEAD_INFO_TOPIC="/head_camera/color/camera_info"
+  HEAD_CAMERA_FRAME="head_camera_color_optical_frame"
 fi
 
 banner() {
@@ -176,6 +193,82 @@ count_csv_files() {
   ls -1 "$d"/*.csv 2>/dev/null | wc -l | tr -d ' '
 }
 
+# 打印 test 模式的结果验证：解析 test_metrics.txt 的平均 FK 误差并按阈值判定。
+# test 使用 --use_nominal_only（pre/post 同为 nominal URDF，drop 恒为 0%），
+# 因此这里打印的是写零后重新采集的绝对误差（平均位置 m / 平均旋转 deg）。
+# 阈值环境变量：TEST_POS_ERR_OK_M / TEST_POS_ERR_WARN_M / TEST_ROT_ERR_OK_DEG / TEST_ROT_ERR_WARN_DEG
+print_test_verification() {
+  local tag="$1"
+  local metrics="$2"
+  local csv_dir="$3"
+  [[ -f "${metrics}" ]] || { echo "[WARN] (${tag}) 未找到测试指标: ${metrics}" >&2; return 0; }
+  python3 - "${tag}" "${metrics}" "${csv_dir}" \
+    "${TEST_POS_ERR_OK_M:-0.05}" "${TEST_POS_ERR_WARN_M:-0.10}" \
+    "${TEST_ROT_ERR_OK_DEG:-3.0}" "${TEST_ROT_ERR_WARN_DEG:-10.0}" <<'PY'
+import pathlib
+import re
+import sys
+
+tag, metrics, csv_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+pos_ok, pos_warn = float(sys.argv[4]), float(sys.argv[5])
+rot_ok, rot_warn = float(sys.argv[6]), float(sys.argv[7])
+
+text = pathlib.Path(metrics).read_text(encoding="utf-8")
+mean_row = re.search(
+    r"^\| mean \| ([0-9.eE+-]+) \| ([0-9.eE+-]+) \| ([0-9.eE+-]+) \| ([0-9.eE+-]+) \|$",
+    text,
+    re.M,
+)
+sample_count = len(re.findall(r"^\| \d+ \| [0-9.eE+-]+ \|", text, re.M))
+
+print()
+print("=" * 52)
+print(f"  {tag} 测试结果验证")
+print("=" * 52)
+print(f"  测试 CSV 目录: {csv_dir}")
+if mean_row is None:
+    print(f"  未找到误差表 mean 行（画图可能失败），请查看 {metrics}")
+    print("-" * 52)
+    print("  整体判定: FAIL（缺少验证依据）")
+else:
+    _pos_pre, pos_err, _rot_pre, rot_err = (float(g) for g in mean_row.groups())
+    print(f"  样本数: {sample_count}")
+    print(f"  平均位置误差: {pos_err:.4f} m")
+    print(f"  平均旋转误差: {rot_err:.4f} deg")
+
+    def grade(value, ok, warn_thr):
+        if value <= ok:
+            return "OK"
+        if value <= warn_thr:
+            return "WARN"
+        return "FAIL"
+
+    pos_grade = grade(pos_err, pos_ok, pos_warn)
+    rot_grade = grade(rot_err, rot_ok, rot_warn)
+    print(f"  [{pos_grade}] 位置误差 {pos_err:.4f} m  (OK<={pos_ok:g}, WARN<={pos_warn:g})")
+    print(f"  [{rot_grade}] 旋转误差 {rot_err:.4f} deg  (OK<={rot_ok:g}, WARN<={rot_warn:g})")
+
+    fails = 0
+    warns = 0
+    if pos_grade == "FAIL":
+        fails += 1
+    elif pos_grade == "WARN":
+        warns += 1
+    if rot_grade == "FAIL":
+        fails += 1
+    elif rot_grade == "WARN":
+        warns += 1
+    print("-" * 52)
+    if fails > 0:
+        print(f"  整体判定: FAIL（{fails} 项不达标，{warns} 项警告）——零点可能未写入/未生效，或标定不理想")
+    elif warns > 0:
+        print(f"  整体判定: PASS（{warns} 项警告，建议人工复核测试误差图）")
+    else:
+        print("  整体判定: PASS")
+print()
+PY
+}
+
 # 检查话题已注册且存在发布者。不用 rostopic echo 收图：在部分环境（如 root + 大图像）会段错误。
 check_topic_once() {
   local topic="$1"
@@ -216,8 +309,8 @@ precheck_ros_and_topics() {
 
   case "${demo_choice}" in
     1)
-      image_topic="/head_camera/color/image_raw"
-      info_topic="/head_camera/color/camera_info"
+      image_topic="${HEAD_IMAGE_TOPIC}"
+      info_topic="${HEAD_INFO_TOPIC}"
       ;;
     2)
       image_topic="/right_wrist_camera/color/image_raw"
@@ -229,12 +322,12 @@ precheck_ros_and_topics() {
       ;;
     4)
       # 全部：逐个检查三套相机话题
-      if ! check_topic_once "/head_camera/color/image_raw" "${topic_timeout_sec}"; then
-        echo "[ERROR] 预检失败：/head_camera/color/image_raw 在 ${topic_timeout_sec}s 内无消息。" >&2
+      if ! check_topic_once "${HEAD_IMAGE_TOPIC}" "${topic_timeout_sec}"; then
+        echo "[ERROR] 预检失败：${HEAD_IMAGE_TOPIC} 在 ${topic_timeout_sec}s 内无消息。" >&2
         return 1
       fi
-      if ! check_topic_once "/head_camera/color/camera_info" "${topic_timeout_sec}"; then
-        echo "[ERROR] 预检失败：/head_camera/color/camera_info 在 ${topic_timeout_sec}s 内无消息。" >&2
+      if ! check_topic_once "${HEAD_INFO_TOPIC}" "${topic_timeout_sec}"; then
+        echo "[ERROR] 预检失败：${HEAD_INFO_TOPIC} 在 ${topic_timeout_sec}s 内无消息。" >&2
         return 1
       fi
       if ! check_topic_once "/right_wrist_camera/color/image_raw" "${topic_timeout_sec}"; then
@@ -270,13 +363,23 @@ precheck_ros_and_topics() {
   echo "[INFO] 预检通过：ROS 连接正常，关键话题可读。"
 }
 
-echo ""
-echo "请选择标定 demo："
-echo "  1) 头部（kuavo_head_demo）"
-echo "  2) 右手（kuavo_right_wrist）"
-echo "  3) 左手（kuavo_left_wrist）"
-echo "  4) 全部同时（头部 + 左右手并行；左右手合并下发避免 /kuavo_arm_traj 打架）"
-read -r -p "输入 1/2/3/4 并回车: " CHOICE
+if [[ -n "${DEMO_ARG}" ]]; then
+  case "${DEMO_ARG}" in
+    head) CHOICE="1" ;;
+    right_wrist) CHOICE="2" ;;
+    left_wrist) CHOICE="3" ;;
+    all) CHOICE="4" ;;
+    *) die "无效的 --demo: ${DEMO_ARG}（仅 head|right_wrist|left_wrist|all）" ;;
+  esac
+else
+  echo ""
+  echo "请选择标定 demo："
+  echo "  1) 头部（kuavo_head_demo）"
+  echo "  2) 右手（kuavo_right_wrist）"
+  echo "  3) 左手（kuavo_left_wrist）"
+  echo "  4) 全部同时（头部 + 左右手并行；左右手合并下发避免 /kuavo_arm_traj 打架）"
+  read -r -p "输入 1/2/3/4 并回车: " CHOICE
+fi
 
 case "${CHOICE}" in
   1)
@@ -285,7 +388,7 @@ case "${CHOICE}" in
     DEFAULT_CSV_DIR="${CC_DIR}/output_csv/kuavo_head"
     DEFAULT_TEST_CSV_DIR="${CC_DIR}/output_csv/kuavo_head_test"
     PLOT_OUT_DIR="${CC_DIR}/output/kuavo_head"
-    CAMERA_TIP_LINK="head_camera_color_optical_frame"
+    CAMERA_TIP_LINK="${HEAD_CAMERA_FRAME}"
     SENSOR_NAME="camera_to_base"
     FK_ROOT="zarm_l1_ref_link"
     REMAP_TO_CENTER="--remap_to_center"
@@ -437,17 +540,14 @@ if [[ "${CHOICE}" == "4" ]]; then
 
   # 旧版「并行 optimize」已弃用：多 roslaunch 同时写参数服务器会导致 /robot_description 与优化结果互相干扰。
 
-  start_motion_head_then_arms() {
+  start_motion_head_and_arms() {
     local head_json="$1"
     local left_json="$2"
     local right_json="$3"
+    local arm_pid head_pid arm_rc head_rc
 
-    echo "[INFO] (all) 顺序执行：先头部，再左右手（合并下发）"
-    python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
-      _play_loop_count:="${LOOPS}" \
-      _robot_layout:="${ROBOT_LAYOUT}" \
-      _teach_json_path:="${head_json}"
-
+    echo "[INFO] (all) 并行下发：先启动手臂（切外控/quick mode），再启动头部，头臂同时运动。"
+    echo "[INFO]       头 /robot_head_motion_data 与手臂 /kuavo_arm_traj 话题独立，互不冲突。"
     python3 "${CC_DIR}/demos/kuavo_both_arms/both_arms_table_publisher.py" \
       _play_loop_count:="${LOOPS}" \
       _set_external_control_mode:=true \
@@ -455,7 +555,27 @@ if [[ "${CHOICE}" == "4" ]]; then
       _robot_layout:="${ROBOT_LAYOUT}" \
       _hold_sec:=5.0 \
       _teach_left_json:="${left_json}" \
-      _teach_right_json:="${right_json}"
+      _teach_right_json:="${right_json}" &
+    arm_pid=$!
+    PIDS+=( "${arm_pid}" )
+
+    # 手臂 publisher 启动时会切外控/quick mode + 预热（pre/post_mode_hold 0.6s×2 + warmup 0.8s ≈ 2s）。
+    # 错开头部 2s 启动，避免头部在手臂切模式期间运动；之后两者轨迹基本并行，省掉 min(头,臂) 那一段。
+    sleep 2.0
+    python3 "${CC_DIR}/demos/kuavo_head_demo/head_table_publisher.py" \
+      _play_loop_count:="${LOOPS}" \
+      _robot_layout:="${ROBOT_LAYOUT}" \
+      _teach_json_path:="${head_json}" &
+    head_pid=$!
+    PIDS+=( "${head_pid}" )
+
+    set +e
+    wait "${arm_pid}"; arm_rc=$?
+    wait "${head_pid}"; head_rc=$?
+    set -e
+    if [[ "${arm_rc}" -ne 0 || "${head_rc}" -ne 0 ]]; then
+      die "(all) 并行运动失败: arm_rc=${arm_rc}, head_rc=${head_rc}（请查看上方 ROS 日志）"
+    fi
   }
 
   start_capture_launches_parallel() {
@@ -501,7 +621,7 @@ if [[ "${CHOICE}" == "4" ]]; then
 
       # 先一次性声明三路相机，再执行运动；结束后统一 SESSION_DONE
       select_cams_and_wait "head_camera" "right_wrist_camera" "left_wrist_camera"
-      start_motion_head_then_arms \
+      start_motion_head_and_arms \
         "${TEACH_DIR}/teach_head_joint.json" \
         "${TEACH_DIR}/teach_left_joint.json" \
         "${TEACH_DIR}/teach_right_joint.json"
@@ -518,9 +638,9 @@ if [[ "${CHOICE}" == "4" ]]; then
       start_capture_launches_parallel "${out_head}" "${out_right}" "${out_left}"
       ensure_running_or_die "capture"
 
-      # 顺序触发采样：先头部，再合并左右臂（避免一起动导致不好观察）
+      # 并行触发采样：头部与左右臂同时运动（不同话题，互不冲突）
       select_cam_and_wait "head_camera"
-      start_motion_head_then_arms \
+      start_motion_head_and_arms \
         "${TEACH_DIR}/teach_head_joint.json" \
         "${TEACH_DIR}/teach_left_joint.json" \
         "${TEACH_DIR}/teach_right_joint.json"
@@ -554,7 +674,7 @@ if [[ "${CHOICE}" == "4" ]]; then
       ensure_running_or_die "test"
 
       select_cam_and_wait "head_camera"
-      start_motion_head_then_arms \
+      start_motion_head_and_arms \
         "${TEACH_DIR}/teach_head_joint_test.json" \
         "${TEACH_DIR}/teach_left_joint_test.json" \
         "${TEACH_DIR}/teach_right_joint_test.json"
@@ -624,11 +744,12 @@ if [[ "${CHOICE}" == "4" ]]; then
           echo "[WARN] ${tag} 测试自动画图失败（不影响测试 CSV 输出），请查看 ${metrics}" >&2
         else
           echo "[INFO] ${tag} 测试图与指标已输出: ${plot_dir}"
+          print_test_verification "${tag}" "${metrics}" "${csv_d}"
         fi
       }
 
       plot_test_nominal_only "head" "${out_head}" "${CC_DIR}/output/kuavo_head_test" \
-        "head_camera_color_optical_frame" "camera_to_base"
+        "${HEAD_CAMERA_FRAME}" "camera_to_base"
       plot_test_nominal_only "right_wrist" "${out_right}" "${CC_DIR}/output/kuavo_right_wrist_test" \
         "right_wrist_camera_color_optical_frame" "right_wrist_camera_to_base"
       plot_test_nominal_only "left_wrist" "${out_left}" "${CC_DIR}/output/kuavo_left_wrist_test" \
@@ -737,7 +858,7 @@ if [[ "${CHOICE}" == "4" ]]; then
 
       run_sequential_optimize "head" "${HEAD_LAUNCH}" "${out_head}" "rsp_head" "cap_optimize_head"
       plot_after_sequential_optimize "head" "${HEAD_LAUNCH}" "${out_head}" "${CC_DIR}/output/kuavo_head" \
-        "head_camera_color_optical_frame" "camera_to_base"
+        "${HEAD_CAMERA_FRAME}" "camera_to_base"
 
       run_sequential_optimize "right_wrist" "${RIGHT_LAUNCH}" "${out_right}" "rsp_right" "cap_optimize_right"
       plot_after_sequential_optimize "right_wrist" "${RIGHT_LAUNCH}" "${out_right}" "${CC_DIR}/output/kuavo_right_wrist" \
@@ -957,6 +1078,7 @@ if [[ "${MODE}" == "test" ]]; then
   TEST_PLOT_OUT_DIR="${PLOT_OUT_DIR}_test"
   mkdir -p "${TEST_PLOT_OUT_DIR}"
   TEST_METRICS_FILE="${TEST_PLOT_OUT_DIR}/test_metrics.txt"
+  TEST_PLOT_RC=0
   echo "[INFO] 自动画图与指标输出到: ${TEST_METRICS_FILE}"
 
   {
@@ -984,9 +1106,17 @@ if [[ "${MODE}" == "test" ]]; then
       ${REMAP_TO_CENTER}
     echo ""
     echo "---------- 结束 ----------"
-  } > "${TEST_METRICS_FILE}" 2>&1 || echo "[WARN] 测试自动画图失败（不影响测试 CSV 输出），请查看 ${TEST_METRICS_FILE}"
+  } > "${TEST_METRICS_FILE}" 2>&1 || TEST_PLOT_RC=$?
+
+  if [[ "${TEST_PLOT_RC}" -ne 0 ]]; then
+    echo "[WARN] 测试自动画图失败（CSV 已保留），请查看 ${TEST_METRICS_FILE}" >&2
+  fi
 
   echo "[INFO] 测试阶段结束；测试指标与图已输出到: ${TEST_PLOT_OUT_DIR}"
+  print_test_verification "${DEMO_NAME}" "${TEST_METRICS_FILE}" "${OUT_DIR}"
+  if [[ "${TEST_PLOT_RC}" -ne 0 ]]; then
+    exit "${TEST_PLOT_RC}"
+  fi
 fi
 
 if [[ "${MODE}" == "optimize" ]]; then
@@ -1005,6 +1135,12 @@ if [[ "${MODE}" == "optimize" ]]; then
   rm -f "${PLOT_OUT_DIR}/optimization_metrics.txt" 2>/dev/null || true
   echo "[INFO] 优化过程与指标性评价（终端少刷屏）写入: ${OPTIMIZE_METRICS_FILE}"
 
+  OPTIMIZE_LAUNCH_EXTRA_ARGS=()
+  if [[ "${CHOICE}" == "1" ]]; then
+    # 头部离线优化只读取 CSV；不再启动实时状态/TF 发布节点，避免影响正在运行的运控。
+    OPTIMIZE_LAUNCH_EXTRA_ARGS+=("start_state_publishers:=false")
+  fi
+
   {
     echo "============================================================"
     echo "相机标定优化指标报告"
@@ -1016,7 +1152,7 @@ if [[ "${MODE}" == "optimize" ]]; then
     echo ""
     echo "---------- optimize_from_csv / roslaunch ----------"
     roslaunch "${DEMO_LAUNCH}" "csv_dir:=${OUT_DIR}" "do_capture_to_csv:=false" "do_optimize_from_csv:=true" "do_calibrate_manual:=false" \
-      "robot_layout:=${ROBOT_LAYOUT}"
+      "robot_layout:=${ROBOT_LAYOUT}" "${OPTIMIZE_LAUNCH_EXTRA_ARGS[@]}"
     echo ""
     echo "---------- plot_board_error_from_csv（标定前后 FK 误差表与 summary）----------"
     python3 "${CC_DIR}/plot_board_error_from_csv.py" \

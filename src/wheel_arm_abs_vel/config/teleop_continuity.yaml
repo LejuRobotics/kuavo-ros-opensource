@@ -1,0 +1,16 @@
+# Stop robot before changing. No runtime parameter switching.
+continuity:
+  grace: 0.060
+  brake: 0.150
+  lost: 0.500
+  recovery: 0.100
+  recovery_frames: 3
+acquisition:
+  joint_speed: 0.80           # initial rad/s budget, released smoothly in 1 s
+  linear_speed: 0.40         # m/s, catch-up FEEDBACK task request, NOT world TCP cap
+  angular_speed: 1.20        # rad/s, catch-up FEEDBACK task request; live FF stays independent
+  acceleration: 3.00        # initial rad/s^2 budget; hard-domain braking has priority
+  position_tolerance: 0.03   # m; both reference and measured FK
+  rotation_tolerance: 0.15   # rad
+  settle: 0.10              # diagnostic initial convergence; does NOT gate release or remove feedback cap
+  release: 1.0

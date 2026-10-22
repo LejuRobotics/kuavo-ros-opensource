@@ -2,8 +2,11 @@
 <launch>
     <arg name="joystick_type" default="sim"/>
     <arg name="sim_input_mode" default="keyboard"/>
-    <node if="$(eval arg('sim_input_mode') == 'keyboard')" pkg="humanoid_interface_ros" type="joystickSimulator.py" name="joystickSimulator" output="screen" launch-prefix="gnome-terminal --disable-factory --"/>
-    <node if="$(eval arg('sim_input_mode') == 'gui')" pkg="humanoid_interface_ros" type="joystickSimulator_gui.py" name="joystickSimulator" output="screen" launch-prefix="gnome-terminal --disable-factory --"/>
+    <!-- Docker/VNC: 默认不用 gnome-terminal；桌面环境可传 use_gnome_terminal:=true -->
+    <arg name="use_gnome_terminal" default="false"/>
+    <arg name="joy_launch_prefix" value="$(eval 'gnome-terminal --disable-factory --' if arg('use_gnome_terminal') else '')"/>
+    <node if="$(eval arg('sim_input_mode') == 'keyboard')" pkg="humanoid_interface_ros" type="joystickSimulator.py" name="joystickSimulator" output="screen" launch-prefix="$(arg joy_launch_prefix)"/>
+    <node if="$(eval arg('sim_input_mode') == 'gui')" pkg="humanoid_interface_ros" type="joystickSimulator_gui.py" name="joystickSimulator" output="screen" launch-prefix="$(arg joy_launch_prefix)"/>
     
     <param name="channel_map_path" value="$(find humanoid_controllers)/launch/joy/$(arg joystick_type).json"/>
     <param name="joystick_sensitivity" value="40"/>

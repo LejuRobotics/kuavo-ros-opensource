@@ -53,6 +53,18 @@ topics:
   - /ik.*
   - /ik_debug/.*
   - /vr_incremental/.*
+  # Quest3 四段延迟打点 (显式列出, 避免只靠通配符漏录)
+  - /quest3/node_processing_latency_ms
+  - /vr_incremental/comm_latency_ms
+  - /vr_incremental/arm_traj_latency_ms
+  - /vr_incremental/wbc_processing_latency_ms
+  - /vr_absolute/comm_latency_ms
+  - /vr_absolute/arm_traj_latency_ms
+  - /pico/node_processing_latency_ms
+  - /pico/comm_latency_ms
+  - /pico/node_latency_ms
+  - /ocs2_ik/comm_latency_ms
+  - /ocs2_ik/processing_latency_ms
   - /mm/two_arm_hand_pose_cmd
   - /lb_shoulder_tight_alpha
   - /mm_kuavo_arm_traj
@@ -60,6 +72,8 @@ topics:
   - /dexhand/.*                # qiangnao/Linker O6手状态话题
   - /control_robot_hand_position  # Linker O6手控制话题
   - /cb_.*_hand_.*             # Linker L6手所有话题（状态/控制）
+  - /sg100_hand_command          # SG100 灵巧手控制话题
+  - /sg100_hand_state            # SG100 灵巧手状态话题
   - /tag_world_pose
   - /leju_quest_bone_poses
   - /robot_head_motion_data

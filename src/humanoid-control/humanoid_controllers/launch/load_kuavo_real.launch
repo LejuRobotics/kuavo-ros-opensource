@@ -5,10 +5,17 @@
     <env name="ROSCONSOLE_FORMAT" value="[${severity} ][${time:%Y-%m-%d-%H:%M:%S}][${node}]: ${message}"/>
 
     <arg name="vr_remote_control" default="false"/>
+    <!-- 默认关闭，开启后才发布并录制VR链路延迟诊断话题。 -->
+    <arg name="enable_vr_latency_diagnostics" default="false"/>
+    <arg name="enable_vr_transform_diagnostics" default="false"/>
+    <arg name="ik_solution_timeout_s" default="0.2"/>
     <arg name="robot_type"         default="2"/>
     <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics.yaml"/>
+    <arg name="vr_latency_rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics_vr_latency.yaml"/>
+    <param name="/enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
     <!-- load the robot version manager -->
     <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
       <arg name="robot_version" value="$(arg robot_version)"/>
@@ -31,6 +38,8 @@
     <arg name="only_half_up_body" default="false"/>
     <arg name="stand_up_protect" default="true"/>
     <arg name="use_sit_init" default="false" doc="If true, robot will move to sit pose instead of squat pose on startup"/>
+    <!-- 是否启用 rosbag 录制 -->
+    <arg name="record_bag" default="true" doc="If true, start rosbag recording nodelet"/>
     <arg name="redundant_imu" default="false"/>
     <arg name="joint_protect_enable" default="false" />
     <arg name="cmd_truncation_enable" default="false" />
@@ -40,6 +49,8 @@
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <arg name="arm_move_spd"      default="2.0"/>
     <arg name="waist_move_spd"      default="1.8"/>
+    <!-- SG100 optional command filter parameter. -->
+    <arg name="sg100_cmd_filter_alpha" default="0.2"/>
 
     <!-- 如需使用手柄搬箱子和走楼梯，需要设置为 false -->
     <arg name="joy_execute_action" default="true"/>
@@ -128,6 +139,16 @@
     <param name="/mpc/schedule/enable" value="false"/>
     <param name="/mpc/schedule/start_time" value="-1.0"/>
     <param name="/timeout_warning_ms" value="20"/>
+
+    <!-- SG100 hand params -->
+    <param name="sg100_left_port" value="/dev/lefthand" />
+    <param name="sg100_right_port" value="/dev/righthand" />
+    <param name="sg100_baudrate" value="1000000" />
+    <param name="sg100_control_rate" value="100.0" />
+    <param name="sg100_publish_joint_states" value="true" />
+    <param name="sg100_cmd_filter_alpha" value="$(arg sg100_cmd_filter_alpha)" />
+    <param name="sg100_debug_state" value="false" />
+    <param name="sg100_output_limit" value="0.5" />
 
     <!-- 自动清理 .ros 文件夹参数 -->
     <!-- 最大日志大小为 34GB，日志大小大于 34GB 时删除日志 -->
@@ -223,7 +244,14 @@
       <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodeletCXX nodelet_manager" respawn="false" output="screen" required="true"  />
     </group>
 
-    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+    <group if="$(arg record_bag)">
+      <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch">
+        <arg name="topic_config" value="$(eval arg('vr_latency_rosbag_topic_config') if arg('enable_vr_latency_diagnostics') else arg('rosbag_topic_config'))"/>
+      </include>
+    </group>
+
+    <!-- 物理急停桥接：电源板 stop_int 置位即发布 /stop_robot，停控制器/硬件/rosbag -->
+    <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen"/>
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
 
@@ -291,7 +319,11 @@
     </group>
 
     <group if="$(arg vr_remote_control)">
-      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch"/>
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
+        <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
+        <arg name="enable_vr_transform_diagnostics" value="$(arg enable_vr_transform_diagnostics)"/>
+        <arg name="ik_solution_timeout_s" value="$(arg ik_solution_timeout_s)"/>
+      </include>
     </group>
 
     <!-- 添加播放音乐参数 -->
@@ -299,9 +331,9 @@
 
     <!-- 音频服务跳过条件：
          1. music == 'disable' 时禁用
-         2. robot_version == 53 时禁用（与上位机服务冲突）
+         2. version%100 == 53 时禁用（53/200053/300053/400053/500053，与上位机服务冲突）
     -->
-    <group if="$(eval arg('music') != 'disable' and arg('robot_version') != 53)">
+    <group if="$(eval arg('music') != 'disable' and int(arg('robot_version')) % 100 != 53)">
         <!-- 设置音频文件路径参数 -->
         <param name="audio_path" value="/home/lab/.config/lejuconfig/music" type="string"/>
 
@@ -311,12 +343,15 @@
 
 
     <group if="$(arg with_ik)">
-      <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+      <include file="$(find motion_capture_ik)/launch/ik_node.launch">
+          <arg name="robot_version" value="$(arg robot_version)"/>
+      </include>
     </group>
 
     <group if="$(arg with_mm_ik)">
       <group if="$(eval arg('robot_version') >= 30)">
       <include file="$(find mobile_manipulator_controllers)/launch/mobile_manipulator_controller.launch">
+        <arg name="robot_version" value="$(arg robot_version)"/>
         <arg name="sqp_mpc" value="1"/>
         <arg name="rviz"    value="false"/>
         <arg name="visualize_mm"   value="false"/>
@@ -450,5 +485,11 @@
 
     <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
     <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
+
+    <!-- 握手功能 -->
+    <arg name="with_handshake" default="false" doc="Enable handshake node"/>
+    <group if="$(arg with_handshake)">
+      <include file="$(find kuavo_handshake)/launch/handshake_standalone.launch"/>
+    </group>
 
 </launch>

@@ -118,7 +118,7 @@ class ArmsIKNode
             
             drake::systems::DiagramBuilder<double> builder;
             plant_ptr_ = builder.AddSystem<drake::multibody::MultibodyPlant>(dt);
-            drake::multibody::Parser(plant_ptr_).AddModelFromFile(model_path);
+            drake::multibody::Parser(plant_ptr_).AddModels(model_path);
             std::cout << "original frame_name: " << std::endl;
             for(auto& frame_name : end_frames_name)
             {
