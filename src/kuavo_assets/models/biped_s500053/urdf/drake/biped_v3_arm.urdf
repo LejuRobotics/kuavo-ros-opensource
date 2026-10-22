@@ -477,7 +477,7 @@
   </link>
   <joint
     name="l_thumb_cmc_yaw"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.011508 -0.022975 0.037794"
       rpy="0 0 0" />
@@ -485,13 +485,6 @@
       link="l_hand_base_link" />
     <child
       link="l_thumb_metacarpals_base2" />
-    <axis
-      xyz="0 0 1" />
-    <limit
-      lower="0"
-      upper="1.3"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="l_thumb_metacarpals">
@@ -531,7 +524,7 @@
   </link>
   <joint
     name="l_thumb_cmc_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0061649 -0.010678 -0.004891"
       rpy="0 -1.1529 2.0944" />
@@ -539,13 +532,6 @@
       link="l_thumb_metacarpals_base2" />
     <child
       link="l_thumb_metacarpals" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="0.58"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="l_thumb_distal">
@@ -585,7 +571,7 @@
   </link>
   <joint
     name="l_thumb_ip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0037776 0 0.045368"
       rpy="0 0 0" />
@@ -593,17 +579,6 @@
       link="l_thumb_metacarpals" />
     <child
       link="l_thumb_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.08"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="l_thumb_cmc_pitch"
-      multiplier="2.29"
-      offset="0" />
   </joint>
   <link
     name="l_index_proximal">
@@ -643,7 +618,7 @@
   </link>
   <joint
     name="l_index_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0024758 -0.02419 0.103779"
       rpy="0.05236 0 0" />
@@ -651,13 +626,6 @@
       link="l_hand_base_link" />
     <child
       link="l_index_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="l_index_distal">
@@ -697,7 +665,7 @@
   </link>
   <joint
     name="l_index_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -705,17 +673,6 @@
       link="l_index_proximal" />
     <child
       link="l_index_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="l_index_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
   <link
     name="l_middle_proximal">
@@ -755,7 +712,7 @@
   </link>
   <joint
     name="l_middle_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.00052576 -0.00634 0.1077"
       rpy="0 0 0" />
@@ -763,13 +720,6 @@
       link="l_hand_base_link" />
     <child
       link="l_middle_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="l_middle_distal">
@@ -809,7 +759,7 @@
   </link>
   <joint
     name="l_middle_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -817,17 +767,6 @@
       link="l_middle_proximal" />
     <child
       link="l_middle_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="l_middle_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
   <link
     name="l_ring_proximal">
@@ -867,7 +806,7 @@
   </link>
   <joint
     name="l_ring_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0010258 0.011135 0.103767"
       rpy="-0.05236 0 0" />
@@ -875,13 +814,6 @@
       link="l_hand_base_link" />
     <child
       link="l_ring_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="l_ring_distal">
@@ -921,7 +853,7 @@
   </link>
   <joint
     name="l_ring_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -929,17 +861,6 @@
       link="l_ring_proximal" />
     <child
       link="l_ring_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="l_ring_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
   <link
     name="l_pinky_proximal">
@@ -979,7 +900,7 @@
   </link>
   <joint
     name="l_pinky_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0024758 0.028372 0.097741"
       rpy="-0.087266 0 0" />
@@ -987,13 +908,6 @@
       link="l_hand_base_link" />
     <child
       link="l_pinky_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
 
   </joint>
   <link
@@ -1034,7 +948,7 @@
   </link>
   <joint
     name="l_pinky_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -1042,17 +956,6 @@
       link="l_pinky_proximal" />
     <child
       link="l_pinky_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="l_pinky_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
 
 
@@ -1487,7 +1390,7 @@
   </link>
   <joint
     name="r_thumb_cmc_yaw"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.011508 0.022975 0.037794"
       rpy="0 0 0" />
@@ -1495,13 +1398,6 @@
       link="r_hand_base_link" />
     <child
       link="r_thumb_metacarpals_base2" />
-    <axis
-      xyz="0 0 -1" />
-    <limit
-      lower="0"
-      upper="1.36"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="r_thumb_metacarpals">
@@ -1541,7 +1437,7 @@
   </link>
   <joint
     name="r_thumb_cmc_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0061649 0.010678 -0.004891"
       rpy="0 -1.1529 -2.0944" />
@@ -1549,13 +1445,6 @@
       link="r_thumb_metacarpals_base2" />
     <child
       link="r_thumb_metacarpals" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="0.58"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="r_thumb_distal">
@@ -1595,7 +1484,7 @@
   </link>
   <joint
     name="r_thumb_ip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0037776 0 0.045368"
       rpy="0 0 0" />
@@ -1603,17 +1492,6 @@
       link="r_thumb_metacarpals" />
     <child
       link="r_thumb_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.08"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="r_thumb_cmc_pitch"
-      multiplier="1.86"
-      offset="0" />
   </joint>
   <link
     name="r_index_proximal">
@@ -1653,7 +1531,7 @@
   </link>
   <joint
     name="r_index_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0024758 0.02419 0.103779"
       rpy="-0.05236 0 0" />
@@ -1661,13 +1539,6 @@
       link="r_hand_base_link" />
     <child
       link="r_index_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="r_index_distal">
@@ -1707,7 +1578,7 @@
   </link>
   <joint
     name="r_index_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -1715,17 +1586,6 @@
       link="r_index_proximal" />
     <child
       link="r_index_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="r_index_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
   <link
     name="r_middle_proximal">
@@ -1765,7 +1625,7 @@
   </link>
   <joint
     name="r_middle_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.00052576 0.00634 0.1077"
       rpy="0 0 0" />
@@ -1773,13 +1633,6 @@
       link="r_hand_base_link" />
     <child
       link="r_middle_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="r_middle_distal">
@@ -1819,7 +1672,7 @@
   </link>
   <joint
     name="r_middle_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -1827,17 +1680,6 @@
       link="r_middle_proximal" />
     <child
       link="r_middle_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="r_middle_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
   <link
     name="r_ring_proximal">
@@ -1877,7 +1719,7 @@
   </link>
   <joint
     name="r_ring_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0010258 -0.011135 0.103767"
       rpy="0.05236 0 0" />
@@ -1885,13 +1727,6 @@
       link="r_hand_base_link" />
     <child
       link="r_ring_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="r_ring_distal">
@@ -1931,7 +1766,7 @@
   </link>
   <joint
     name="r_ring_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -1939,17 +1774,6 @@
       link="r_ring_proximal" />
     <child
       link="r_ring_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="r_ring_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
   <link
     name="r_pinky_proximal">
@@ -1989,7 +1813,7 @@
   </link>
   <joint
     name="r_pinky_mcp_pitch"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="0.0024758 -0.028372 0.097741"
       rpy="0.087266 0 0" />
@@ -1997,13 +1821,6 @@
       link="r_hand_base_link" />
     <child
       link="r_pinky_proximal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.60"
-      effort="100"
-      velocity="1" />
   </joint>
   <link
     name="r_pinky_distal">
@@ -2043,7 +1860,7 @@
   </link>
   <joint
     name="r_pinky_dip"
-    type="revolute">
+    type="fixed">
     <origin
       xyz="-0.0052516 0 0.036625"
       rpy="0 0 0" />
@@ -2051,17 +1868,6 @@
       link="r_pinky_proximal" />
     <child
       link="r_pinky_distal" />
-    <axis
-      xyz="0 1 0" />
-    <limit
-      lower="0"
-      upper="1.43"
-      effort="100"
-      velocity="1" />
-    <mimic
-      joint="r_pinky_mcp_pitch"
-      multiplier="0.89"
-      offset="0" />
   </joint>
 
 
