@@ -1,6 +1,7 @@
 #ifndef _REVOMOTOR_CTRL_H_
 #define _REVOMOTOR_CTRL_H_
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <map>
 #include <vector>
@@ -407,6 +408,7 @@ private:
     };
     std::atomic<bool> target_updated_{false};
     std::atomic<bool> zero_torque_mode_{false};  // 0-torque模式标志
+    std::chrono::steady_clock::time_point last_rt_send_time_{};
 
     std::string canbus_name_;  // CAN总线名称
     canbus_sdk::BusId bus_id_{static_cast<canbus_sdk::BusId>(-1)};  // 本控制器所属总线 ID（registerRtSource 时获取）
