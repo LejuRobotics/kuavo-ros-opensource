@@ -13,6 +13,7 @@ at www.bridgedp.com.
 
 #include <qpOASES.hpp>
 #include <fstream>
+#include <stdexcept>
 
 namespace ocs2
 {
@@ -53,19 +54,15 @@ namespace ocs2
       qpProblem.setOptions(options);
       int nWsr = 200;
       qpOASES::real_t cpu_time = 0.002;
-      qpProblem.init(H.data(), g.data(), A.data(), nullptr, nullptr, lbA.data(), ubA.data(), nWsr, &cpu_time);
+      const auto solve_status = qpProblem.init(H.data(), g.data(), A.data(), nullptr, nullptr, lbA.data(), ubA.data(), nWsr, &cpu_time);
+      if (solve_status != qpOASES::SUCCESSFUL_RETURN)
+        throw std::runtime_error("Absolute WBC QP solve failed: " + std::to_string(solve_status));
       vector_t qpSol(getNumDecisionVars());
 
       int ret = qpProblem.getPrimalSolution(qpSol.data());
 
-      if (ret != qpOASES::SUCCESSFUL_RETURN)
-      {
-        ROS_ERROR_STREAM("WeightWBC Not Solved!!!");
-        if (last_qpSol.size() > 0)
-          qpSol = last_qpSol;
-        else
-          qpSol.setZero();
-      }
+      if (ret != qpOASES::SUCCESSFUL_RETURN || !qpSol.allFinite())
+        throw std::runtime_error("Absolute WBC solution unavailable/nonfinite");
 
       last_qpSol = qpSol;
       writeE2eAudit(qpSol, ret, nWsr, cpu_time);

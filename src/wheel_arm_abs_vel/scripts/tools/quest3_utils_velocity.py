@@ -92,6 +92,9 @@ class HeadBodyPose:
 class Quest3ArmInfoTransformer:
     def __init__(self, model_path, vis_pub=True, predict_gesture=False, eef_visual_stl_files=None, hand_reference_mode="thumb_index"):
         self.predict_gesture = predict_gesture
+        # Preserve the original double-front-trigger entry. Formal Mapper
+        # routes it through the same bounded readiness transaction as X+A.
+        self.controller_trigger_start_enabled = True
         self.model_path = model_path
         self.vis_pub = vis_pub
         self.hand_reference_mode = hand_reference_mode  # "fingertips", "middle_finger", "thumb_index"
@@ -112,12 +115,19 @@ class Quest3ArmInfoTransformer:
         self.pose_info_list = None # PoseInfoList message
         self.timestamp_ms = 0.0
         self.skeleton_filter_enabled = bool(rospy.get_param("~vr_kalman_enabled", True)) and bool(rospy.get_param("~enable_velocity_ik_takeover", False))
+        flatten = bool(rospy.get_param("~vr_kalman_flattening/enabled", False))
+        def cv_param(name, default):
+            base = rospy.get_param("~vr_kalman_" + name, default)
+            return rospy.get_param("~vr_kalman_flattening/" + name, base) if flatten else base
         self.skeleton_filter = SkeletonCV(
             rospy.get_param("~vr_kalman_position_sigma", .001),
-            rospy.get_param("~vr_kalman_position_q", .2),
+            cv_param("position_q", .2),
             rospy.get_param("~vr_kalman_rotation_sigma", .003),
-            rospy.get_param("~vr_kalman_rotation_q", 1.8),
-            hand_q_r=rospy.get_param("~vr_kalman_hand_rotation_q", .45))
+            cv_param("rotation_q", 1.8),
+            hand_q_r=cv_param("hand_rotation_q", .45),
+            position_velocity_gain=cv_param("position_velocity_gain", 1.),
+            rotation_velocity_gain=cv_param("rotation_velocity_gain", 1.),
+            hand_velocity_gain=cv_param("hand_velocity_gain", 1.))
         self.skeleton_contract = None
         self.estimated_bones = {}
         self.tcp_estimated_rates = {}
@@ -673,6 +683,8 @@ class Quest3ArmInfoTransformer:
         """
         self._defer_arm_markers = bool(defer_visuals)
         self._pending_arm_markers = []
+        self._pending_observations = []
+        self._pending_head_body = None
         self._marker_wall_ns = 0
         self._marker_cpu_ns = 0
         # A rejected frame must never make the parallel TCP contract look
@@ -759,7 +771,10 @@ class Quest3ArmInfoTransformer:
                 self.is_runing = False
         runtime_probe.point(107)
         if self.is_runing:
-            self.pub_head_body_pose_msg(self.head_body_pose)
+            if self._defer_arm_markers:
+                self._pending_head_body = self.head_body_pose
+            else:
+                self.pub_head_body_pose_msg(self.head_body_pose)
         runtime_probe.point(109)
         return True
 
@@ -1094,7 +1109,9 @@ class Quest3ArmInfoTransformer:
             print(f"Arm length measurement completed. Left upper: {self.avg_left_upper_arm_length:.2f}, lower: {self.avg_left_lower_arm_length:.2f}, "
                   f"Right upper: {self.avg_right_upper_arm_length:.2f}, lower: {self.avg_right_lower_arm_length:.2f}")
 
-        return is_runing or is_joyRun
+        # Preserve the existing arm-length measurement above; gate only the
+        # authority to start following, not geometry or end-effector handling.
+        return is_runing or (is_joyRun and self.controller_trigger_start_enabled)
 
     def is_stop_gesture(self):
         """
@@ -1324,9 +1341,8 @@ class Quest3ArmInfoTransformer:
             self.right_shoulder_rpy_in_robot[0] = -shoulder_rpy[2]
             self.right_shoulder_rpy_in_robot[1] = -shoulder_rpy[0]
             self.right_shoulder_rpy_in_robot[2] = shoulder_rpy[1]
-        msg = Float32MultiArray()
-        msg.data = np.append(self.left_shoulder_rpy_in_robot, self.right_shoulder_rpy_in_robot)
-        self.shoulder_angle_puber.publish(msg)
+        self._publish_or_defer_observation(self.shoulder_angle_puber,
+            np.append(self.left_shoulder_rpy_in_robot, self.right_shoulder_rpy_in_robot))
 
     def scale_arm_positions(self, shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, chest_pos, side, adapt_width_gamma):
         """
@@ -1577,9 +1593,7 @@ class Quest3ArmInfoTransformer:
         hand_mat_cH = axis_angle_to_matrix(self.chest_axis_agl).T @ quaternion_to_matrix(hand_quat_in_w)
         hand_quat = matrix_to_quaternion(hand_mat_cH)
         if not getattr(self, "_chest_axis_published", False):
-            chest_axis_msg = Float32MultiArray()
-            chest_axis_msg.data = axis
-            self.chest_axis_puber.publish(chest_axis_msg)
+            self._publish_or_defer_observation(self.chest_axis_puber, axis)
             self._chest_axis_published = True
         if side == "Left" and self.init_R_wLS is None:
             self.init_R_wLS = T_wS[:3, :3]
@@ -1678,7 +1692,23 @@ class Quest3ArmInfoTransformer:
             self.right_hand_pose = (hand_pos, hand_quat)
             self.right_elbow_pos = elbow_pos
 
+    def _publish_or_defer_observation(self, publisher, values):
+        if getattr(self, "_defer_arm_markers", False):
+            self._pending_observations.append((publisher, tuple(float(x) for x in values)))
+        else:
+            publisher.publish(Float32MultiArray(data=values))
+
     def flush_pending_arm_markers(self):
+        # Called only after TeleopTcpTarget publication (or rejection). Keep
+        # synchronous fallback diagnostics and auxiliary commands behind it too.
+        observations = getattr(self, "_pending_observations", [])
+        self._pending_observations = []
+        for publisher, values in observations:
+            publisher.publish(Float32MultiArray(data=values))
+        head_body = getattr(self, "_pending_head_body", None)
+        self._pending_head_body = None
+        if head_body is not None:
+            self.pub_head_body_pose_msg(head_body)
         pending = getattr(self, "_pending_arm_markers", [])
         self._pending_arm_markers = []
         if self._marker_async_enabled:

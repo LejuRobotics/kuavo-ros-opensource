@@ -49,6 +49,19 @@ template<std::size_t N> inline bool copyString(char (&to)[N],const std::string& 
 template<std::size_t N> inline bool readString(std::string& to,const char (&from)[N]){
  const void* end=std::memchr(from,0,N);if(!end)return false;to.assign(from,static_cast<const char*>(end)-from);return true;
 }
+// Fixed-size validation also protects callers that bypass the ROS adapter.
+inline bool validPayload(const Payload& p) {
+  if (p.schema != 1 || !std::isfinite(p.task_scale)) return false;
+  for (const auto* values : {p.q, p.dq, p.ddq, p.stopping_acceleration, p.position_lower, p.position_upper})
+    for (int i=0; i<21; ++i) if (!std::isfinite(values[i])) return false;
+  for (const auto* value : {p.header_frame, p.world_frame, p.session_frame,
+       p.execution_clock_domain, p.producer_instance, p.execution_owner_instance})
+    if (!std::memchr(value, 0, 128)) return false;
+  for (const auto& name : p.dof_names) if (!std::memchr(name, 0, 48)) return false;
+  return p.valid <= 1 && p.takeover_requested <= 1 && p.takeover_active <= 1 &&
+      p.session_anchor_valid <= 1 && p.base_feedback_valid <= 1 &&
+      p.safety_braking <= 1 && p.emergency_dynamics_used <= 1;
+}
 inline bool encode(const wheel_arm_abs_vel::WholeBodyIkReference& m,Payload& p){
 p=Payload{};p.header_seq=m.header.seq;p.header_stamp_ns=m.header.stamp.toNSec();
 if(!copyString(p.header_frame,m.header.frame_id))return false;
@@ -156,6 +169,9 @@ class RosTransport {
   bool shm()const{return mode_=="shm";}
   bool writeReference(const wheel_arm_abs_vel::WholeBodyIkReference& msg){
    Payload p{};return encode(msg,p)&&reference_.write(p);
+  }
+  bool writeReference(const Payload& payload) {
+   return validPayload(payload) && reference_.write(payload);
   }
   bool readReference(wheel_arm_abs_vel::WholeBodyIkReference::ConstPtr& msg){
    Payload p{};return reference_.readIfUpdated(p)&&decodePool(p,reference_pool_,msg);

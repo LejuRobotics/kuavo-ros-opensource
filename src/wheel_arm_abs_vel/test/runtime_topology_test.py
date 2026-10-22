@@ -228,7 +228,8 @@ class Topology(unittest.TestCase):
             "import sys\nsys.exit('must not be called for quest3 entries')\n")
         (scripts/'runtime_partition.py').write_text(
             "import os,sys,json\nprint(json.dumps([sys.argv[1:], "
-            "os.environ.get('ROBOT_VERSION')]))\n")
+            "os.environ.get('ROBOT_VERSION'), os.environ.get('LD_LIBRARY_PATH'), "
+            "os.environ.get('PYTHONPATH'), os.environ.get('KUAVO_RUNTIME_ENTRY')]))\n")
         for name, script in (("uname", "echo aarch64"),
                              ("rospack", 'printf "%s\\n" "' + str(self.root) + '"'),
                              ("roslaunch", 'printf "PLAIN %s\\n" "$@"')):
@@ -236,7 +237,8 @@ class Topology(unittest.TestCase):
             path.write_text("#!/bin/sh\n" + script + "\n")
             path.chmod(0o755)
         env = dict(os.environ, PATH=str(self.root)+":"+os.environ["PATH"],
-                   KUAVO_RUNTIME_PARTITION='1')
+                   KUAVO_RUNTIME_PARTITION='1', LD_LIBRARY_PATH='/unchanged/lib',
+                   PYTHONPATH='/unchanged/python', KUAVO_RUNTIME_ENTRY='absolute')
         env.pop('ROBOT_VERSION', None)
         for launch in ("launch_quest3_ik.launch",
                        "launch_quest3_ik_videostream_orbbec.launch",
@@ -246,9 +248,31 @@ class Topology(unittest.TestCase):
                 result = subprocess.check_output(
                     ["bash", str(ROOT/"scripts/platform_roslaunch.sh")] + args,
                     env=env, text=True)
-                argv, robot_version = json.loads(result)
+                argv, robot_version, ld_path, py_path, entry = json.loads(result)
                 self.assertEqual(argv, ['--launch', '/usr/bin/env', 'roslaunch'] + args)
                 self.assertIsNone(robot_version)
+                self.assertEqual((ld_path, py_path, entry),
+                                 ('/unchanged/lib', '/unchanged/python', 'quest3'))
+
+    def test_shared_quest_defaults_do_not_inherit_absolute_tuning(self):
+        self.fixture('0-11', '2,3,7')
+        absolute, _ = partition.select_profile(environ={'KUAVO_RUNTIME_ENTRY':'absolute'},
+                                              machine='aarch64', sysroot=self.root)
+        quest, _ = partition.select_profile(environ={'KUAVO_RUNTIME_ENTRY':'quest3'},
+                                           machine='aarch64', sysroot=self.root)
+        self.assertEqual((absolute['ik_fifo_priority'], absolute['mapper_fifo_priority'],
+                          absolute['mapper_nice']), (70, 35, -10))
+        expected = dict(absolute, ik_fifo_priority=40, mapper_nice=-5)
+        expected.pop('mapper_fifo_priority')
+        self.assertEqual(quest, expected)
+        path = self.root/'explicit.json'
+        explicit = dict(absolute, ik_fifo_priority=55, mapper_nice=-3)
+        path.write_text(json.dumps(explicit))
+        for entry in ('absolute', 'quest3'):
+            selected, _ = partition.select_profile(
+                environ={'KUAVO_RUNTIME_ENTRY':entry, 'KUAVO_RUNTIME_PROFILE':str(path)},
+                machine='aarch64', sysroot=self.root)
+            self.assertEqual(selected, explicit)
 
     def test_wrapper_self_locates_when_package_is_not_built(self):
         """wheel_arm_abs_vel 未进 devel 空间时 rospack 返回非零，包装脚本要能自定位。

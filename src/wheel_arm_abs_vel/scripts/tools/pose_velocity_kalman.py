@@ -46,11 +46,19 @@ def positive(value, name):
     return value
 
 
+def velocity_gain(value):
+    value = positive(value, 'velocity correction gain')
+    if value > 1.:
+        raise ValueError('velocity correction gain must be in (0,1]')
+    return value
+
+
 class PositionCV:
     """Identical independent axes: share one 2x2 covariance, not state."""
-    def __init__(self, sigma=.001, q=.2):
+    def __init__(self, sigma=.001, q=.2, velocity_correction_gain=1.):
         self.r = positive(sigma, 'position sigma')**2
         self.q = positive(q, 'position q')
+        self.velocity_correction_gain = velocity_gain(velocity_correction_gain)
         self.x = None
 
     def update(self, z, dt=None):
@@ -66,6 +74,9 @@ class PositionCV:
             self.x = F@self.x
             self.P = F@self.P@F.T+Q
             K = self.P[:, 0]/(self.P[0, 0]+self.r)
+            K[1] *= self.velocity_correction_gain
+            # Joseph covariance below uses the ACTUAL regularized gain.
+            # Constant velocity remains an equilibrium; no velocity clipping.
             self.x += K[:, None]*(z-self.x[0])
             A = np.eye(2); A[:, 0] -= K
             self.P = A@self.P@A.T+self.r*np.outer(K, K)
@@ -74,9 +85,10 @@ class PositionCV:
 
 
 class RotationCV:
-    def __init__(self, sigma=.003, q=1.8):
+    def __init__(self, sigma=.003, q=1.8, velocity_correction_gain=1.):
         self.r = positive(sigma, 'rotation sigma')**2
         self.q = positive(q, 'rotation q')
+        self.velocity_correction_gain = velocity_gain(velocity_correction_gain)
         self.R = None
 
     def update(self, measured, dt=None):
@@ -101,6 +113,7 @@ class RotationCV:
             self.P = F@self.P@F.T+Q
             residual = log_so3(measured@self.R.T)
             K = np.linalg.solve(self.P[:3, :3]+self.r*np.eye(3), self.P[:3, :]).T
+            K[3:, :] *= self.velocity_correction_gain
             correction = K@residual
             self.R = exp_so3(correction[:3])@self.R
             self.w += correction[3:]
@@ -122,12 +135,16 @@ class SkeletonCV:
     rotating = (4, 5, 23)
 
     def __init__(self, sigma_p=.001, q_p=.2, sigma_r=.003, q_r=1.8, max_gap=.1,
-                 hand_q_r=None):
+                 hand_q_r=None, position_velocity_gain=1., rotation_velocity_gain=1.,
+                 hand_velocity_gain=1.):
         self.parameters = (positive(sigma_p, 'sigma_p'), positive(q_p, 'q_p'),
                            positive(sigma_r, 'sigma_r'), positive(q_r, 'q_r'))
         # None preserves the legacy API; the ROS mapper explicitly selects
         # the palm noise. Chest and both palms share the same timestamp.
         self.hand_q_r = None if hand_q_r is None else positive(hand_q_r, 'hand_q_r')
+        self.position_velocity_gain = velocity_gain(position_velocity_gain)
+        self.rotation_velocity_gain = velocity_gain(rotation_velocity_gain)
+        self.hand_velocity_gain = velocity_gain(hand_velocity_gain)
         self.max_gap = positive(max_gap, 'max_gap')
         self.reset()
 
@@ -147,12 +164,12 @@ class SkeletonCV:
         for i in self.indices:
             if not np.isfinite(transforms[i]).all(): raise ValueError('invalid skeleton')
         for i in self.indices:
-            if i not in self.positions: self.positions[i] = PositionCV(sp, qp)
+            if i not in self.positions: self.positions[i] = PositionCV(sp, qp, self.position_velocity_gain)
             p, v = self.positions[i].update(transforms[i][:3, 3], dt)
             R = transforms[i][:3, :3]; w = np.zeros(3)
             if i in self.rotating:
                 rotation_q = self.hand_q_r if i in (4, 5) and self.hand_q_r is not None else qr
-                if i not in self.rotations: self.rotations[i] = RotationCV(sr, rotation_q)
+                if i not in self.rotations: self.rotations[i] = RotationCV(sr, rotation_q, self.hand_velocity_gain if i in (4,5) else self.rotation_velocity_gain)
                 R, w = self.rotations[i].update(R, dt)
             T = np.eye(4); T[:3, :3] = R; T[:3, 3] = p
             self.states[i] = (T, v, w)

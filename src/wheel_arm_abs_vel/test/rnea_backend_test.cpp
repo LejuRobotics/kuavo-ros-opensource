@@ -165,6 +165,34 @@ int main(int argc,char** argv) {
     previousA=recovered;
   }
 
+  // Replay direction reversals at each tuned IK jerk * 0.25. Recover the
+  // applied acceleration from real model torque to detect additional FF lag.
+  auto alignedSettings=smoothSettings;
+  alignedSettings.dynamicRampSeconds=.001;
+  alignedSettings.accelerationLimit.setConstant(100.);
+  alignedSettings.jerkLimit << 200,200,200,200,6250,6250,500,6250,1000,1500,1500,
+                                             6250,6250,500,6250,1000,1500,1500;
+  RneaBackend aligned(interface,info,alignedSettings);
+  auto legacySettings=alignedSettings;legacySettings.jerkLimit.tail(14).setConstant(500.);
+  RneaBackend legacy(interface,info,legacySettings);
+  auto reversal=r;reversal.accelerationValid=true;reversal.acceleration.setZero();
+  double legacyError=0.,alignedError=0.;
+  for(int tick=0;tick<1000;++tick) {
+    const double sign=((tick/20)%2) ? -1. : 1.;
+    for(int j=0;j<18;++j) reversal.acceleration[j]=std::clamp(
+        reversal.acceleration[j]+sign*alignedSettings.jerkLimit[j]*.002,-10.,10.);
+    const auto tuned=aligned.update(reversal,still,.002,0.);
+    const auto old=legacy.update(reversal,still,.002,0.);
+    require(tuned.valid && old.valid,"aligned reversal valid");
+    const vector_t aTuned=jointM.ldlt().solve(tuned.rawTorque-g.tail(18));
+    const vector_t aOld=jointM.ldlt().solve(old.rawTorque-g.tail(18));
+    alignedError=std::max(alignedError,(aTuned-reversal.acceleration).cwiseAbs().maxCoeff());
+    legacyError=std::max(legacyError,(aOld-reversal.acceleration).cwiseAbs().maxCoeff());
+  }
+  require(alignedError<1e-8,"per-joint jerk adds no second acceleration delay");
+  require(legacyError>1.,"baseline reversal fixture must expose old lag");
+  std::cout<<"PASS 1000 reversal cycles, acceleration error aligned="<<alignedError<<" baseline="<<legacyError<<'\n';
+
   // Model Data must be private to the backend.
   data.tau.setConstant(123.0);
   limited.update(r,m,0.002,0);

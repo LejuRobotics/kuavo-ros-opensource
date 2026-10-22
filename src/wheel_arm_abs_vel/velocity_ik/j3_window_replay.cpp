@@ -33,7 +33,7 @@ struct VelocityIkOfflineTest {
   for(size_t k=0;k<ticks.size();++k) {
    const auto& row=ticks[k];
    N::SolverRequest r;r.reference_q=q;r.reference_dq=v;r.reference_ddq=a;
-   r.tracking=true;r.cycle_dt=dt;r.base_reference_seq=k;
+   r.tracking=true;r.cycle_dt=dt;r.base_reference_seq=k;r.diagnostic_tick=k;
    r.feedforward_age=r.body_feedforward_age=0.;
    r.lower_body_recruitment=1.;r.lower_joint_recruitment.fill(1.);
    r.measured_q=recorded_feedback?Eigen::VectorXd(Eigen::Map<const Eigen::VectorXd>(row.data()+22,21)):q;
@@ -77,11 +77,20 @@ struct VelocityIkOfflineTest {
    const auto nq=(q+.5*dt*(v+c.task_dq)).eval();
    need((nq.array()>=n.position_lower_.array()-1e-7).all() &&
         (nq.array()<=n.position_upper_.array()+1e-7).all(),"position violation");
-   need(c.diagnostics_due==(k%size_t(n.envelope_diagnostics_stride_)==0),"candidate identity gate mismatch");
+   need(c.diagnostics_due==velocity_ik::diagnosticPhaseDue(k,n.envelope_diagnostics_stride_,1),"candidate identity gate mismatch");
    if(c.diagnostics_due) {
     ++diag_count;need(c.operating_diagnostics.size()==700,"missing full diagnostic");
-    for(int j=0;j<14;++j)jerk_relaxed+=c.joint_jerk_diagnostics[9*j+6]>0.;
+
    } else need(c.operating_diagnostics.empty(),"diagnostic constructed on skipped cycle");
+   if(c.jerk_diagnostics_due)for(int j=0;j<14;++j)jerk_relaxed+=c.joint_jerk_diagnostics[9*j+6]>0.;
+   for(int arm=0;arm<2;++arm)for(int joint=4;joint<7;++joint) {
+    const int i=n.armDecisionIndex(arm,joint);
+    need(std::abs(c.task_dq(i))<=n.velocity_limit_(i)+2e-8,"wrist speed violation");
+    need(std::abs(na(i))<=n.acceleration_limit_(i)+2e-6,"wrist acceleration violation");
+    const auto interval=velocity_ik::jointJerkInterval(hard.lower(i),hard.upper(i),v(i),a(i),dt,n.joint_jerk_limits_(i));
+    need(interval.valid,"invalid wrist jerk interval");
+    if(!interval.safety_relaxed)need(std::abs((na(i)-a(i))/dt)<=n.joint_jerk_limits_(i)+.03,"unreported wrist jerk violation");
+   }
    ReplayReference ref;ref.q=nq;ref.dq=c.task_dq;ref.ddq=na;
    ref.stopping_acceleration=n.braking_limit_;ref.position_lower=n.position_lower_;ref.position_upper=n.position_upper_;
    need(ref.stopping_acceleration.allFinite() && (ref.stopping_acceleration.array()>0.).all(),"CDM stopping contract");
@@ -120,7 +129,7 @@ struct VelocityIkOfflineTest {
       {"j3_velocity_max",vmax},{"j3_acceleration_max",amax},{"j3_jerk_max",jmax},{"j3_jerk_unrelaxed_max",jmax_unrelaxed},{"j3_jerk_safety_relaxed_axis_ticks",j3_jerk_relaxed},
       {"diagnostic_rows",diag_count},{"diagnosed_jerk_relaxations",jerk_relaxed},
       {"owner_rejections",0},{"unexpected_safety_braking",0},{"qp_failures",0},{"emergency_dynamics_ticks",emergency_count},
-      {"initial_velocity","zero; one second recorded pre-window lead-in"},
+      {"initial_velocity","zero at first supplied snapshot; no excluded warm-up"},
       {"body_intent","reconstructed from recorded lower-body reference FK; not full lifecycle replay"}};
   std::ofstream(std::string(output)+".summary.json")<<result.dump(2)<<'\n';std::cout<<result.dump(2)<<'\n';
  }

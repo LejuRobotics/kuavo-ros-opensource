@@ -9,8 +9,9 @@ uint8 CONTROL_INACTIVE=0
 uint8 CONTROL_ARMED=1
 uint8 CONTROL_ACTIVE=2
 uint8 CONTROL_HOLD=3
-# The whole-body velocity-IK owner keeps mode 2 and drives a bounded joint-space
-# return to its configured ready pose.  This is deliberately not legacy mode 1.
+# The velocity-IK owner keeps mode 2 and drives a bounded joint-space return
+# of the arms to ready pose. Locked folding joints hold their current pose.
+# This is deliberately not legacy mode 1.
 uint8 CONTROL_PREPARE=4
 
 # header.frame_id describes hand TCP poses and elbow hints. The fixed-base
@@ -72,6 +73,16 @@ uint8 control_state
 # Consumers must admit the fixed transaction with valid pose once before
 # continuing it on fresh control_valid packets with left/right_valid=false.
 bool control_valid
+
+# Explicit folding/torso permission, atomic with the input session and pose.
+# False requires lower-joint braking/hold; hand tracking cannot recruit them.
+bool torso_control_enabled
+
+# Arm-only pause within an ACTIVE torso session; does not release the owner.
+# Both arm joint groups brake/hold, while torso permission remains independent.
+# Sequence orders pause/resume commands even when they share a skeleton stamp.
+bool arm_hold
+uint64 arm_operation_seq
 
 # Version 1: causal skeleton CV estimates, expressed in each pose's frame.
 # False retains compatibility with synthetic/legacy publishers. When true,

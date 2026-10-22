@@ -155,6 +155,19 @@ class PinocchioVelocityIk {
     initializeDecisionStorage();
     loadParameters();
     buildModel();
+    {
+      wheel_arm_abs_vel::WholeBodyIkReference layout;
+      populateDecisionLayout(&layout);
+      layout.header.frame_id = layout.world_frame = world_frame_name_;
+      layout.session_frame = session_frame_name_;
+      layout.execution_clock_domain = execution_clock_domain_;
+      layout.producer_instance = execution_instance_;
+      layout.q.resize(21); layout.dq.resize(21); layout.ddq.resize(21);
+      layout.stopping_acceleration.resize(21);
+      layout.position_lower.resize(21); layout.position_upper.resize(21);
+      if (!kuavo_reference_shm::encode(layout, formal_payload_template_))
+        throw std::runtime_error("Formal reference metadata exceeds fixed SHM layout");
+    }
     // Verified reachable families: physical 18-D tracking plus four torso
     // rows; 4-D lower-body supervisor plus the same four row identities.
     weighted_qp_.prepareWorkspaces({{18, kTorsoConstraintCount},
@@ -283,6 +296,13 @@ class PinocchioVelocityIk {
           nh_.advertise<wheel_arm_abs_vel::WholeBodyIkReference>(
               reference_transport_.shm()?formal_reference_topic_+"/shm_mirror":formal_reference_topic_, 2);
     }
+    if (enable_takeover_ && reference_transport_.shm()) {
+      const auto publisher = formal_reference_pub_;
+      formal_mirror_.start([publisher](const kuavo_reference_shm::Payload& payload) {
+        wheel_arm_abs_vel::WholeBodyIkReference message;
+        if (kuavo_reference_shm::decode(payload, message)) publisher.publish(message);
+      });
+    }
     ROS_INFO_STREAM("[VelocityIkShadow] ready: " << solver_rate_hz_ << " Hz reference supervisor, target=" << target_topic_
                                                   << ", robot_state=" << robot_state_topic_
                                                   << "[" << sensor_arm_start_index_ << ":"
@@ -312,6 +332,7 @@ class PinocchioVelocityIk {
   ~PinocchioVelocityIk() {
     stopFeasibilityWorker();
     runtime_probe_.stop();
+    formal_mirror_.stop();
     diagnostics_.stop();
   }
 
@@ -431,6 +452,9 @@ class PinocchioVelocityIk {
     uint8_t absolute_state{0};
     uint8_t control_state{wheel_arm_abs_vel::TeleopTcpTarget::CONTROL_INACTIVE};
     bool valid{false};
+    bool torso_control_enabled{false};  // explicit operator permission, default locked
+    bool arm_hold{false};
+    uint64_t arm_operation_seq{0};
     bool arm_target_torso_relative{false};
     bool feedforward_sample_valid{false};
     bool body_feedforward_sample_valid{false};
@@ -461,6 +485,7 @@ class PinocchioVelocityIk {
   };
 
   struct SolverRequest {
+    uint64_t diagnostic_tick{0};
     bool catchup_correction=false;
     double acquisition_blend=1.;
     double input_budget=1.;
@@ -527,6 +552,7 @@ class PinocchioVelocityIk {
   struct SolverCandidate {
     bool joint_jerk_active=false, joint_jerk_retry=false;
     bool diagnostics_due=false;
+    bool jerk_diagnostics_due=false;
     int joint_jerk_first_code=0;
     // Per arm row: decision index, requested J, previous/next a, actual J,
     // excess, safety-relaxed flag, accepted lower/upper velocity.
@@ -1414,6 +1440,28 @@ class PinocchioVelocityIk {
           throw std::runtime_error("J3 acceleration/braking/outward contract must agree");
       }
     }
+    bool wrist_envelope_enabled = true;
+    pnh_.param("wrist_envelope/enabled", wrist_envelope_enabled, true);
+    if (wrist_envelope_enabled) {
+      for (int arm=0; arm<kArmCount; ++arm) for (int joint=4; joint<7; ++joint) {
+        const std::string key = "wrist_envelope/j" + std::to_string(joint+1) + "/";
+        auto read = [&](const std::string& field, double fallback) {
+          double value = fallback;
+          pnh_.param(key+field, value, fallback);
+          if (!std::isfinite(value) || value <= 0.)
+            throw std::runtime_error("Invalid wrist envelope: " + key + field);
+          return value;
+        };
+        const int i = dof_layout_.decisionIndexByName("zarm_" + std::string(arm==0?"l":"r") +
+                                                     std::to_string(joint+1) + "_joint");
+        if (i != armDecisionIndex(arm,joint)) throw std::runtime_error("Wrist layout mismatch");
+        velocity_limit_(i) = read("velocity", joint==4 ? 4.5 : 5.5);
+        acceleration_limit_(i) = read("acceleration", joint==4 ? 45. : 55.);
+        // Stopping certificates and command bounds must use the SAME limit.
+        braking_limit_(i) = outward_acceleration_limit_(i) = acceleration_limit_(i);
+        joint_jerk_limits_(i) = read("jerk", joint==4 ? 4000. : 6000.);
+      }
+    }
     pnh_.param("separate_stopping_contract", separate_stopping_contract_, false);
     pnh_.param("operating_envelope/enabled", operating_envelope_enabled_, false);
     pnh_.param("temporal_cost/enabled", temporal_cost_enabled_, false);
@@ -2266,6 +2314,9 @@ class PinocchioVelocityIk {
     next.generation = message->generation;
     next.absolute_state = message->absolute_state;
     next.control_state = message->control_state;
+    next.torso_control_enabled = message->torso_control_enabled;
+    next.arm_hold = message->arm_hold;
+    next.arm_operation_seq = message->arm_operation_seq;
 
     const std::array<const geometry_msgs::Pose*, kArmCount> pose_input{
         &message->left_tcp_pose, &message->right_tcp_pose};
@@ -2369,6 +2420,13 @@ class PinocchioVelocityIk {
         std::isfinite(next.source_relative_age) && next.source_relative_age <= target_timeout_;
     const bool source_allowed = sourceAllowed(message->source);
     std::unique_lock<std::mutex> lock(data_mutex_);
+    // Within one mapper session, an old operation cannot restore authority,
+    // even if it repeats the last pose stamp (lifecycle-only publication).
+    if (source_allowed && next.source == target_.source &&
+        next.session_id <= target_.session_id && next.generation < target_.generation) {
+      ++rejected_invalid_count_;
+      return;
+    }
     // A transaction identity change does not make an older source observation
     // new. Reject it before resetting channel histories or PREPARE admission.
     // Same-stamp lifecycle commands remain admissible; /stop_robot is separate.
@@ -2386,6 +2444,15 @@ class PinocchioVelocityIk {
     const bool same_contract = target_.valid && next.source==target_.source &&
         next.session_id==target_.session_id && next.generation==target_.generation &&
         next.frame_id==target_.frame_id && next.body.coordinate_epoch==target_.body.coordinate_epoch;
+    const bool same_arm_contract = next.source==target_.source &&
+        next.session_id==target_.session_id && next.generation==target_.generation;
+    if (same_arm_contract && (next.arm_operation_seq < target_.arm_operation_seq ||
+        (next.arm_operation_seq == target_.arm_operation_seq && next.arm_hold != target_.arm_hold))) {
+      ++rejected_invalid_count_;
+      return;  // Delayed metadata must not undo a newer arm-only pause/resume.
+    }
+    const bool new_arm_operation = same_contract &&
+        next.arm_operation_seq > target_.arm_operation_seq;
     const bool new_observation = !next.source_stamp.isZero() &&
         (!same_contract || next.source_stamp>target_.source_stamp);
     if (same_contract) next.observation_ns=target_.observation_ns;
@@ -2395,7 +2462,7 @@ class PinocchioVelocityIk {
       source_interrupted_=true;
       return; // A delayed/bad-timing packet cannot destroy a recent good pose.
     }
-    if (same_contract && contract_valid && next.control_state==target_.control_state &&
+    if (same_contract && !new_arm_operation && contract_valid && next.control_state==target_.control_state &&
         (!new_observation || !std::isfinite(next.source_relative_age))) {
       ++duplicate_input_count_;
       return; // Reordered/replayed packets cannot renew observations or FF.
@@ -3370,7 +3437,7 @@ class PinocchioVelocityIk {
 
   BodyIntent calculateBodyIntent(const TargetSnapshot& target) const {
     BodyIntent intent;
-    if (!enable_body_mirroring_ || !session_body_anchor_.valid ||
+    if (!target.torso_control_enabled || !enable_body_mirroring_ || !session_body_anchor_.valid ||
         !target.body.torsoValid() ||
         target.session_id != session_body_anchor_.session_id ||
         target.generation != session_body_anchor_.generation ||
@@ -4099,6 +4166,8 @@ class PinocchioVelocityIk {
     for (int i = 0; i < decisionDofCount(); ++i) {
       const bool base = isDecisionGroup(i, DofGroup::kBase);
       const bool lower_body = isDecisionGroup(i, DofGroup::kLowerBody);
+      const bool held_arm = request.target.arm_hold &&
+          dof_layout_.armForDecisionIndex(i) >= 0;
       if (base && !enable_base_motion_) {
         // Fixed-base operation is an equality in every task/braking QP.
         // Root intent, recruitment and nullspace tasks cannot override it.
@@ -4123,6 +4192,8 @@ class PinocchioVelocityIk {
             request.lower_joint_recruitment.at(
                 lowerBodyJointForDecisionIndex(i)),
             0.0, 1.0);
+      } else if (held_arm) {
+        recruitment = 0.0;
       }
       if (recruitment >= 0.5) {
         (*lower)(i) = -velocity_limit_(i);
@@ -4161,6 +4232,18 @@ class PinocchioVelocityIk {
             ? request.base_position_upper.at(
                   baseDofForDecisionIndex(i))
             : position_upper_(i);
+      }
+      if ((lower_body || held_arm) && recruitment < 0.5) {
+        // A certified QP can leave a boundary joint a few floating-point ulps
+        // outside its endpoint. Do not turn that roundoff into an impossible
+        // intersection with the exact brake/hold equality. Admit only a 1e-9
+        // rad endpoint seam; material position violations still fail closed.
+        const double endpoint = request.reference_q(i) + 0.5 * request.cycle_dt *
+            (request.reference_dq(i) + (*lower)(i));
+        if (safe_lower(i) > endpoint && safe_lower(i) - endpoint <= 1.0e-9)
+          safe_lower(i) = endpoint;
+        if (safe_upper(i) < endpoint && endpoint - safe_upper(i) <= 1.0e-9)
+          safe_upper(i) = endpoint;
       }
       const double position_dq_lower =
           2.0 * (safe_lower(i) - request.reference_q(i)) / request.cycle_dt - request.reference_dq(i);
@@ -4485,6 +4568,11 @@ class PinocchioVelocityIk {
     const bool valid = weighted_qp_.solve(task_hessian, task_gradient, lower, upper,
                               constraint_matrix, constraint_lower, constraint_upper,
                               solution, return_code, &stats);
+    last_qp_finish_ns_=stats.end_ns;
+#ifndef VELOCITY_IK_OFFLINE_TEST
+    if (velocity_ik::diagnosticPhaseDue(diagnostic_tick_.load(std::memory_order_relaxed),
+                                       envelope_diagnostics_stride_, 1) &&
+        qp_stats_pub_.getNumSubscribers() > 0) {
     std_msgs::Float64MultiArray message;
     message.data={ros::Time::now().toSec(), double(task_gradient.size()), double(constraint_matrix.rows()),
                   double(*return_code), double(stats.native_status), double(stats.iterations),
@@ -4493,10 +4581,9 @@ class PinocchioVelocityIk {
     message.data.insert(message.data.end(),{stats.update_us,stats.check_us,stats.total_us,stats.begin_ns,stats.end_ns,double(stats.acceptance_status),stats.accepted?1.0:0.0});
     message.data.insert(message.data.end(),{stats.lock_wait_us,stats.prepare_us,
                                             stats.workspace_created?1.0:0.0});
-    last_qp_finish_ns_=stats.end_ns;
-#ifndef VELOCITY_IK_OFFLINE_TEST
     const auto publisher=qp_stats_pub_;
     diagnostics_.submit([publisher,message]{publisher.publish(message);});
+    }
 #endif
     return valid;
   }
@@ -4715,12 +4802,13 @@ class PinocchioVelocityIk {
     candidate.task_dq = candidate.primary_dq = candidate.secondary_dq = DecisionVector::Zero(n);
     candidate.base_reference_seq = request.base_reference_seq;
     // This candidate identity is also used at publication after adoption.
-    candidate.diagnostics_due = request.base_reference_seq % envelope_diagnostics_stride_ == 0;
+    candidate.diagnostics_due = velocity_ik::diagnosticPhaseDue(request.diagnostic_tick, envelope_diagnostics_stride_, 1);
+    candidate.jerk_diagnostics_due = velocity_ik::diagnosticPhaseDue(request.diagnostic_tick, envelope_diagnostics_stride_, 2);
     candidate.session_id = request.target.session_id;
     candidate.generation = request.target.generation;
     candidate.target_seq = request.target.sequence;
-    candidate.solver_lower_joint_recruitment.fill(1.0);
-    candidate.solver_lower_body_recruitment = 1.0;
+    candidate.solver_lower_joint_recruitment = request.lower_joint_recruitment;
+    candidate.solver_lower_body_recruitment = request.lower_body_recruitment;
     candidate.solver_base_recruitment = 0.0;
     candidate.position_task_weight_scale.fill(1.0);
     candidate.orientation_task_scale.fill(0.0);
@@ -4911,7 +4999,7 @@ class PinocchioVelocityIk {
           std::array<int,14> jerk_indices{};
           if(candidate.joint_jerk_active) {
             // Inactive rows carry no measurements; row index -1 distinguishes them.
-            if (candidate.diagnostics_due) {
+            if (candidate.jerk_diagnostics_due) {
               candidate.joint_jerk_diagnostics.fill(std::numeric_limits<double>::quiet_NaN());
               for(int row=0;row<14;++row)candidate.joint_jerk_diagnostics[9*row]=-1.;
             }
@@ -4922,7 +5010,7 @@ class PinocchioVelocityIk {
               if(!armIsControlled(arm)||jerk_indices[row]<0)continue;
               // Relaxation reports a conflict with the original physical
               // box only. Later behavioral budgets cannot cause jerk excess.
-              if (candidate.diagnostics_due) candidate.joint_jerk_diagnostics[9*row+6]=hard_jerk[i].safety_relaxed;
+              if (candidate.jerk_diagnostics_due) candidate.joint_jerk_diagnostics[9*row+6]=hard_jerk[i].safety_relaxed;
             }
           }
           if(jerk_valid)candidate.solver_valid=solveGeneralQp(
@@ -4945,7 +5033,7 @@ class PinocchioVelocityIk {
             for(int arm=0;arm<kArmCount;++arm)for(int joint=0;joint<kJointsPerArm;++joint) {
               const int row=arm*kJointsPerArm+joint,i=armDecisionIndex(arm,joint),ai=jerk_indices[row];
               if(!armIsControlled(arm)||ai<0)continue;
-              if (candidate.diagnostics_due) {
+              if (candidate.jerk_diagnostics_due) {
               const double a=(va(ai)-request.reference_dq(i))/request.cycle_dt;
               const double j=(a-request.reference_ddq(i))/request.cycle_dt;
               auto& d=candidate.joint_jerk_diagnostics;const int b=9*row;
@@ -4957,6 +5045,7 @@ class PinocchioVelocityIk {
               effective_lower(i)=lo(ai);effective_upper(i)=hi(ai);
             }
           }
+          if (velocity_ik::diagnosticPhaseDue(request.diagnostic_tick, envelope_diagnostics_stride_, 3))
           for (std::size_t j=0;j<governor_rows.size();++j) {
             const auto& r=governor_rows[j]; const int arm=governor_arms[j];
             const double u=candidate.solver_valid ? va(r.index) : std::numeric_limits<double>::quiet_NaN();
@@ -5477,6 +5566,7 @@ class PinocchioVelocityIk {
   }
 
   void publishOnce() {
+    ++diagnostic_tick_;
     velocity_ik::runtime_probe::point(10);
     if(reference_transport_.shm()){
       wheel_arm_abs_vel::WholeBodyIkReference::ConstPtr feedback;
@@ -5785,7 +5875,19 @@ class PinocchioVelocityIk {
                     : " after body tracking became valid"));
       }
     }
-    BodyIntent body_intent = calculateBodyIntent(target);
+    // A new torso permission captures the CURRENT robot reference and human
+    // pose, so movement accumulated while locked cannot cause a target jump.
+    if (!target.torso_control_enabled) {
+      if (torso_control_requested_) torso_reference_.valid = false;
+      torso_control_requested_ = false;
+    } else if (!torso_control_requested_ && source_target_fresh && robot_fresh && mode_ok && contract_active) {
+      const DecisionVector& anchor_q = reference_initialized_ ? reference_q_ : measured_q;
+      torso_control_requested_ = captureSessionBodyAnchor(target, anchor_q, false);
+      torso_reference_.valid = false;
+      last_body_intent_ = BodyIntent{};
+    }
+    const bool torso_control_allowed = target.torso_control_enabled && torso_control_requested_;
+    BodyIntent body_intent = torso_control_allowed ? calculateBodyIntent(target) : BodyIntent{};
     if (body_intent.torso_valid && source_target_fresh && contract_active &&
         !dynamic_fault_latched_ && !reference_tracking_fault_latched_) {
       session_body_anchor_.resume_mapping_valid = true;
@@ -6147,14 +6249,15 @@ class PinocchioVelocityIk {
       request.arm_tracking_error = arm_reference_tracking_error_by_arm_;
       request.measured_state_valid = robot_fresh;
       request.governor_risk = governor_risk_;
+      request.diagnostic_tick = diagnostic_tick_;
       request.base_reference_seq = reference_sequence_;
       request.cycle_dt = cycle_dt;
       request.target_age = target_age;
       request.feedforward_age = 0.0;  // per-channel decay already applied
       request.body_feedforward_age = reconstructed ? 0.0 :
           std::max(0.0, body_feedforward_age);
-      request.lower_body_recruitment = 1.0;
-      request.lower_joint_recruitment = {1.0, 1.0, 1.0, 1.0};
+      request.lower_body_recruitment = torso_control_allowed ? 1.0 : 0.0;
+      request.lower_joint_recruitment.fill(request.lower_body_recruitment);
       request.base_recruitment = 0.0;
       populateBaseSessionBounds(&request);
       request.tracking = true;
@@ -6230,13 +6333,14 @@ class PinocchioVelocityIk {
 
     // Waist tasks are explicit, not recruited by TCP error or pressure.
     active_reach_assist_demand_ = 0.0;
-    active_lower_body_recruitment_ = tracking ? 1.0 : 0.0;
+    active_lower_body_recruitment_ = tracking && torso_control_allowed ? 1.0 : 0.0;
     active_lower_joint_recruitment_.fill(active_lower_body_recruitment_);
     active_base_recruitment_ = 0.0;
-    const double supervisor_lower_body_recruitment = 1.0;
+    const double supervisor_lower_body_recruitment = torso_control_allowed ? 1.0 : 0.0;
     const double supervisor_base_recruitment = 1.0;
 
     SolverRequest safety_request;
+    safety_request.target.arm_hold = contract_active && target.arm_hold;
     // Braking starts from exactly the same command state as the normal solve.
     safety_request.reference_q = reference_q_;
     safety_request.reference_dq = reference_dq_;
@@ -6248,7 +6352,7 @@ class PinocchioVelocityIk {
     safety_request.cycle_dt = cycle_dt;
     safety_request.lower_body_recruitment =
         supervisor_lower_body_recruitment;
-    safety_request.lower_joint_recruitment = {1.0, 1.0, 1.0, 1.0};
+    safety_request.lower_joint_recruitment.fill(supervisor_lower_body_recruitment);
     safety_request.base_recruitment =
         supervisor_base_recruitment;
     populateBaseSessionBounds(&safety_request);
@@ -6271,7 +6375,7 @@ class PinocchioVelocityIk {
         preparation_initial_error_ = 0.0;
         for (int index :
              dof_layout_.decisionIndices(DofGroup::kLowerBody)) {
-          preparation_initial_error_ = std::max(
+          if (torso_control_allowed) preparation_initial_error_ = std::max(
               preparation_initial_error_,
               std::abs(preparation_target(index) - reference_q_(index)));
         }
@@ -6317,9 +6421,15 @@ class PinocchioVelocityIk {
       };
       for (int joint = 0; joint < kLowerBodyDof; ++joint) {
         const int index = lowerBodyDecisionIndex(joint);
-        set_preparation_joint(
-            index, std::min(velocity_limit_(index),
-                            lower_joint_velocity_cap_.at(joint)));
+        if (torso_control_allowed) {
+          set_preparation_joint(index, std::min(velocity_limit_(index),
+                                               lower_joint_velocity_cap_.at(joint)));
+        } else {
+          // X+A prepares the arms without moving a locked folding mechanism.
+          // The shared hard bounds still decelerate any existing lower motion.
+          selected_velocity = std::max(selected_velocity, std::abs(reference_dq_(index)));
+          selected_velocity = std::max(selected_velocity, std::abs(measured_dq(index)));
+        }
       }
       for (int arm = 0; arm < kArmCount; ++arm) {
         for (int joint = 0; joint < kJointsPerArm; ++joint) {
@@ -6743,8 +6853,7 @@ class PinocchioVelocityIk {
             reference_tracking_fault_latched_,
         task_scale, output_ddq);
     const double formal_end_ns=monotonicNs();
-    diagnostic_publish_due_ = ++diagnostic_counter_ >= diagnostic_stride_;
-    if (diagnostic_publish_due_) diagnostic_counter_ = 0;
+    diagnostic_publish_due_ = velocity_ik::diagnosticPhaseDue(diagnostic_tick_, diagnostic_stride_, 4);
     publishVector(q_pub_, reference_q_);
     publishVector(dq_pub_, reference_dq_);
     publishVector(ddq_pub_, output_ddq);
@@ -6947,7 +7056,7 @@ class PinocchioVelocityIk {
       }
     }
 
-    if (reference_sequence_ % envelope_diagnostics_stride_ == 0) {
+    if (velocity_ik::diagnosticPhaseDue(diagnostic_tick_, envelope_diagnostics_stride_, 3)) {
       std_msgs::Float64MultiArray d;
       d.data={1.,double(output_sequence_-1),double(reference_sequence_),
           double(target.session_id),double(target.generation),double(state),
@@ -6959,7 +7068,7 @@ class PinocchioVelocityIk {
       diagnostics_.submit([publisher,d]{publisher.publish(d);});
     }
     if (envelope_diagnostics_enabled_ && (!candidate.operating_diagnostics.empty() ||
-        (!tracking && reference_sequence_ % envelope_diagnostics_stride_ == 0))) {
+        (!tracking && velocity_ik::diagnosticPhaseDue(diagnostic_tick_, envelope_diagnostics_stride_, 1)))) {
       std_msgs::Float64MultiArray diagnostic;
       diagnostic.data = std::move(candidate.operating_diagnostics);
       if (diagnostic.data.empty()) {
@@ -6978,7 +7087,7 @@ class PinocchioVelocityIk {
       const auto publisher = envelope_diagnostics_pub_;
       diagnostics_.submit([publisher, diagnostic]{ publisher.publish(diagnostic); });
     }
-    if(joint_jerk_enabled_ && candidate.diagnostics_due) {
+    if(joint_jerk_enabled_ && candidate.jerk_diagnostics_due) {
       std_msgs::Float64MultiArray d;
       d.data={1.,double(output_sequence_-1),double(reference_sequence_),double(target.session_id),
           double(target.generation),double(applied_command_mode),double(candidate_accepted),
@@ -7054,24 +7163,20 @@ class PinocchioVelocityIk {
         !enable_takeover_ || !formal_reference_pub_) {
       return;
     }
-    wheel_arm_abs_vel::WholeBodyIkReference message;
-    populateDecisionLayout(&message);
-    message.header.seq = formal_output_sequence_++;
-    message.header.stamp = ros::Time::now();
-    message.header.frame_id = world_frame_name_;
+    auto message = formal_payload_template_;
+    message.header_seq = formal_output_sequence_++;
+    message.header_stamp_ns = ros::Time::now().toNSec();
     message.session_id = target.session_id;
     message.generation = target.generation;
     message.reference_seq = reference_sequence_;
-    message.execution_clock_domain = execution_clock_domain_;
-    message.producer_instance = execution_instance_;
     message.producer_lease_deadline_ns = execution_lease_.leaseUntil();
-    message.execution_owner_instance = execution_lease_.owner();
+    if (!kuavo_reference_shm::copyString(message.execution_owner_instance, execution_lease_.owner())) return;
     message.generated_monotonic_ns = velocity_ik_execution::executionSteadyNs();
     message.execution_epoch = execution_epoch_;
     message.recovery_anchor_seq = execution_anchor_seq_;
-    message.stopping_acceleration.assign(braking_limit_.data(), braking_limit_.data() + braking_limit_.size());
-    message.position_lower.assign(position_lower_.data(), position_lower_.data() + position_lower_.size());
-    message.position_upper.assign(position_upper_.data(), position_upper_.data() + position_upper_.size());
+    std::copy_n(braking_limit_.data(), 21, message.stopping_acceleration);
+    std::copy_n(position_lower_.data(), 21, message.position_lower);
+    std::copy_n(position_upper_.data(), 21, message.position_upper);
     message.takeover_requested = true;
     const bool base_feedback_fresh =
         !enable_base_motion_ ||
@@ -7099,17 +7204,12 @@ class PinocchioVelocityIk {
       message.authority_state =
           wheel_arm_abs_vel::WholeBodyIkReference::AUTHORITY_BRAKING;
     }
-    message.world_frame = world_frame_name_;
-    message.session_frame = session_frame_name_;
     message.session_anchor_valid = session_anchor_.valid;
     message.base_feedback_valid = base_feedback_fresh;
-    message.q.resize(static_cast<std::size_t>(decisionDofCount()));
-    message.dq.resize(static_cast<std::size_t>(decisionDofCount()));
-    message.ddq.resize(static_cast<std::size_t>(decisionDofCount()));
     for (int i = 0; i < decisionDofCount(); ++i) {
-      message.q.at(static_cast<std::size_t>(i)) = reference_q_(i);
-      message.dq.at(static_cast<std::size_t>(i)) = reference_dq_(i);
-      message.ddq.at(static_cast<std::size_t>(i)) = ddq(i);
+      message.q[i] = reference_q_(i);
+      message.dq[i] = reference_dq_(i);
+      message.ddq[i] = ddq(i);
     }
     message.task_scale = task_scale;
     message.safety_braking =
@@ -7122,16 +7222,20 @@ class PinocchioVelocityIk {
     last_formal_publish_begin_ns_=monotonicNs();
     if(reference_transport_.shm()){
       if(!reference_transport_.writeReference(message)){
-        ROS_ERROR_THROTTLE(1.,"[WholeBodyReferenceTransport] reference SHM write rejected");
+        ++formal_write_failures_; // no logging/formatting in the failed RT commit
         return; // no ROS fallback; existing owner's freshness/stop contract applies
       }
       // Recording mirror is asynchronous and is never an execution input.
-      if (message.header.seq % formal_reference_mirror_stride_ == 0 &&
+      if (velocity_ik::diagnosticPhaseDue(diagnostic_tick_, formal_reference_mirror_stride_, 0) &&
           formal_reference_pub_.getNumSubscribers() > 0) {
-        const auto publisher=formal_reference_pub_;
-        diagnostics_.submit([publisher,message]{publisher.publish(message);});
+        formal_mirror_.submit(message);
       }
-    }else formal_reference_pub_.publish(message);
+    } else {
+      // Explicit legacy ROS transport: dynamic encoding is confined to this
+      // branch. SHM (the production default) never constructs a ROS message.
+      wheel_arm_abs_vel::WholeBodyIkReference ros_message;
+      if (kuavo_reference_shm::decode(message, ros_message)) formal_reference_pub_.publish(ros_message);
+    }
     last_formal_publish_end_ns_=monotonicNs();
     velocity_ik::runtime_probe::point(81);
   }
@@ -7887,6 +7991,7 @@ class PinocchioVelocityIk {
   double ff_decay_time_constant_{0.050};
   double ff_hold_time_{0.025};
   bool enable_body_mirroring_{true};
+  bool torso_control_requested_{false};
   bool enable_base_motion_{false};
   bool enable_root_translation_intent_{true};
   bool enable_root_yaw_intent_{false};
@@ -8036,7 +8141,10 @@ class PinocchioVelocityIk {
   bool diagnostic_publish_due_{false};
   double diagnostic_rate_hz_{100.0};
   int diagnostic_stride_{5};
-  int diagnostic_counter_{0};
+  uint64_t formal_write_failures_{0};
+  std::atomic<uint64_t> diagnostic_tick_{0};
+  kuavo_reference_shm::Payload formal_payload_template_{};
+  velocity_ik::AsyncPodDiagnostics<kuavo_reference_shm::Payload> formal_mirror_;
 };
 
 #ifndef VELOCITY_IK_OFFLINE_TEST

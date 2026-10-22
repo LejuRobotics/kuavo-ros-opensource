@@ -105,3 +105,11 @@ startup_readiness:
 # Bending may lower Chest below ready height. Not a certified hardware envelope.
 torso_workspace_lower_offset: [-0.18, -0.22, -0.5235987755982988, -1.5707963267948966]
 torso_workspace_upper_offset: [0.40, 0.34, 0.8726646259971648, 1.5707963267948966]
+
+# Optional absolute-only wrist commissioning profile. Disabling restores the
+# joint_* limits loaded above; stopping and outward bounds stay consistent.
+wrist_envelope:
+  enabled: true
+  j5: {velocity: 4.5, acceleration: 45.0, jerk: 4000.0}
+  j6: {velocity: 5.5, acceleration: 55.0, jerk: 6000.0}
+  j7: {velocity: 5.5, acceleration: 55.0, jerk: 6000.0}

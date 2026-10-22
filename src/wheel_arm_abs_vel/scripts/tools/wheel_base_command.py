@@ -1,7 +1,7 @@
 """Wheel incremental joystick mapping for the absolute-mode input supervisor.
 
 Matches WheelJoyStickHandler and publishAuxiliaryStates: left Y / -left X /
--right X, model JSON deadzone and alpha, right-Y torso gesture suppression.
+-right X, model JSON deadzone and alpha. Torso gestures have their own explicit chord.
 """
 import math
 
@@ -22,21 +22,26 @@ class WheelBaseCommandMapper:
     def reset(self):
         self.filtered = [0.0, 0.0, 0.0]
         self.received = None
+        self.neutral_seen = False
+        self.reason = "WAIT_NEUTRAL"
 
     def sample(self, msg, active, now):
         values = (msg.left_y, -msg.left_x, -msg.right_x)
         if (not active or not math.isfinite(now)
                 or not all(math.isfinite(x) for x in (*values, msg.right_y))):
             self.reset()
+            self.reason = "NOT_READY" if not active else "INVALID_JOY"
             return (0.0, 0.0, 0.0)
         if self.received is not None and not 0 <= now - self.received < 0.2:
             self.reset()
         self.received = now
-        if abs(msg.right_y) > 0.8:
-            self.filtered = [0.0, 0.0, 0.0]
-        else:
-            self.filtered = [self.alpha * old + (1 - self.alpha) * value
-                             if abs(value) > self.threshold else 0.0
-                             for old, value in zip(self.filtered, values)]
+        if not self.neutral_seen:
+            self.neutral_seen = all(abs(v) <= self.threshold for v in (*values, msg.right_y))
+            self.reason = "READY" if self.neutral_seen else "WAIT_NEUTRAL"
+            return (0.0, 0.0, 0.0)
+        self.reason = "READY"
+        self.filtered = [self.alpha * old + (1 - self.alpha) * value
+                         if abs(value) > self.threshold else 0.0
+                         for old, value in zip(self.filtered, values)]
         return tuple(max(-1.0, min(1.0, value)) * limit
                      for value, limit in zip(self.filtered, self.limits))

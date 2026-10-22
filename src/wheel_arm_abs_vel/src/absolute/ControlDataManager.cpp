@@ -46,6 +46,14 @@ ControlDataManager::ControlDataManager(ros::NodeHandle& nh, bool is_real, int ar
         loadData::loadEigenMatrix(referenceFile, "head_kd_", head_kd_);
     }
 
+    // Native MuJoCo servo owns head PD too; never add delayed host-side PD.
+    bool simulation_motor_servo = false;
+    nh_.param("/absolute_simulation/motor_servo", simulation_motor_servo, false);
+    if (!is_real_ && simulation_motor_servo) {
+        head_kp_.setZero();
+        head_kd_.setZero();
+    }
+
     // 初始化VR躯干位姿（7维：位置xyz + 四元数wxyz）
     vr_torso_pose_.data = makeIdentityPose7D();
     vr_torso_pose_.valid = true;  // 使用零位作为默认值

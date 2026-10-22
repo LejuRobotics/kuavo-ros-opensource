@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <arg name="filter_tuning_enabled" default="$(optenv KUAVO_ABS_FILTER_TUNING true)" />
   <!-- UCore must resolve the advertised controller address, not a local hostname. -->
   <arg name="ros_ip" default="192.168.26.1" doc="ROS address reachable by chassis; auto preserves caller environment" />
   <env name="ROS_IP" value="$(arg ros_ip)" if="$(eval arg('ros_ip') not in ['', 'auto'])" />
@@ -22,7 +23,7 @@
   <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
   <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
   <!-- Final wheel command lock, startup-only and independent of WBC/RNEA. -->
-  <arg name="base_locked" default="true" doc="False enables joystick chassis commands only during active absolute follow" />
+  <arg name="base_locked" default="true" doc="False enables joystick chassis commands in initialized idle hold or with a healthy active absolute owner" />
   <param name="/vr_ik/enable_base_control" value="true" type="bool" />
   <arg name="arm_inertia_feedforward_scale" default="1.0" />
   <param name="/vr_ik/arm_inertia_feedforward_scale" value="$(arg arm_inertia_feedforward_scale)" type="double" />
@@ -31,6 +32,7 @@
   <arg name="rnea_mode" default="full" />
   <arg name="rnea_shadow" default="false" />
   <include file="$(find wheel_arm_abs_vel)/launch/dynamics_backend.launch">
+    <arg name="filter_tuning_enabled" value="$(arg filter_tuning_enabled)" />
     <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
     <arg name="rnea_mode" value="$(arg rnea_mode)" />
     <arg name="rnea_shadow" value="$(arg rnea_shadow)" />

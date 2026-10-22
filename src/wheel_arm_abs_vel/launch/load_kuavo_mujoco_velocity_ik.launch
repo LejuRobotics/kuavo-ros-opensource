@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <arg name="filter_tuning_enabled" default="$(optenv KUAVO_ABS_FILTER_TUNING true)" />
   <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
   <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
   <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
@@ -11,15 +12,18 @@
   <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
-  <arg name="dynamics_backend" default="wbc" />
+  <arg name="simulation_motor_servo" default="true" />
+  <arg name="dynamics_backend" default="rnea" />
   <arg name="rnea_mode" default="full" />
   <arg name="visualize_humanoid" default="false" />
   <include file="$(find wheel_arm_abs_vel)/launch/load_kuavo_absolute_sim_base.launch">
+    <arg name="filter_tuning_enabled" value="$(arg filter_tuning_enabled)" />
     <arg name="require_ik_hard_isolation" value="$(arg require_ik_hard_isolation)" />
     <arg name="arm_driver_reserved_cpus" value="$(arg arm_driver_reserved_cpus)" />
     <arg name="head_control_mode" value="$(arg head_control_mode)" />
     <arg name="head_track_target" value="$(arg head_track_target)" />
     <arg name="robot_version" value="$(arg robot_version)" />
+    <arg name="simulation_motor_servo" value="$(arg simulation_motor_servo)" />
     <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
     <arg name="rnea_mode" value="$(arg rnea_mode)" />
     <arg name="use_whole_body_ik_reference" value="true" />

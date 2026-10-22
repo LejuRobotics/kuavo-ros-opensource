@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <arg name="filter_tuning_enabled" default="$(optenv KUAVO_ABS_FILTER_TUNING true)" />
   <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
   <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
   <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
@@ -12,10 +13,14 @@
   <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
   <param name="/controller_type" value="wheel_arm_abs_vel" />
   <param name="/cmd_truncation_enable" value="true" />
+  <arg name="simulation_motor_servo" default="true" />
+  <param name="/absolute_simulation/motor_servo" value="$(arg simulation_motor_servo)" />
+  <rosparam command="load" ns="/absolute_simulation" file="$(find wheel_arm_abs_vel)/config/simulation_servo.yaml" />
   <arg name="dynamics_backend" default="wbc" />
   <arg name="rnea_mode" default="full" />
   <arg name="rnea_shadow" default="false" />
   <include file="$(find wheel_arm_abs_vel)/launch/dynamics_backend.launch">
+    <arg name="filter_tuning_enabled" value="$(arg filter_tuning_enabled)" />
     <arg name="dynamics_backend" value="$(arg dynamics_backend)" />
     <arg name="rnea_mode" value="$(arg rnea_mode)" />
     <arg name="rnea_shadow" value="$(arg rnea_shadow)" />
@@ -151,16 +156,21 @@
   <node pkg="humanoid_wheel_interface_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" output="screen" launch-prefix="" />
   <!-- nodelet manager -->
   <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" output="screen" required="true" clear_params="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)">
+    <env name="ROBOT_VERSION" value="$(arg robot_version)" />
     <param name="num_worker_threads" type="int" value="10" />
   </node>
   <node pkg="nodelet" type="nodelet" name="nodelet_controller" args="load WheelAbsoluteControllerNodelet nodelet_manager" respawn="false" output="screen" required="true">
       </node>
   <!-- 根据机器人类型启动mujoco仿真 -->
   <group unless="$(arg play_back)">
-    <include file="$(find mujoco_cpp)/launch/nodelet_with_arm.launch">
-      <arg name="robot_version" value="$(arg robot_version)" />
-      <arg name="robot_type" value="$(arg robot_type)" />
-    </include>
+    <!-- Private process owns render/physics shutdown; shared MujocoNodelet is unchanged. -->
+    <param name="depth_frequency" value="60.0" />
+    <param name="legged_robot_scene_param" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/xml/scene.xml" />
+    <node pkg="wheel_arm_abs_vel" type="absolute_mujoco_sim" name="absolute_mujoco"
+          output="screen" required="true">
+      <env name="ROBOT_VERSION" value="$(arg robot_version)" />
+      <env name="KUAVO_SIM_X11_NO_SHM" value="$(optenv KUAVO_SIM_X11_NO_SHM 1)" />
+    </node>
   </group>
   <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch" />
   <group if="$(arg use_joystick)">
@@ -191,13 +201,15 @@
   </group>
   <!-- monitor node -->
   <node if="$(arg with_monitor)" pkg="kuavo_monitor" type="kuavo_monitor_node" name="kuavo_monitor_node" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)" />
-  <include if="$(arg with_arm_trajectory)" file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch" />
+  <include if="$(arg with_arm_trajectory)" file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch">
+    <arg name="robot_version" value="$(arg robot_version)" />
+  </include>
   <group if="$(arg with_ik)">
     <include file="$(find motion_capture_ik)/launch/ik_node.launch">
       <arg name="robot_version" value="$(arg robot_version)" />
     </include>
   </group>
-  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in [62, 400062] and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and arg('use_whole_body_ik_reference') and not arg('use_external_mpc') and not arg('real')) else 'Private absolute sim requires S62/400062 wheel mode, measured estimator, formal reference and no external MPC'])" />
+  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in (62, 63, 400062) and (int(arg('robot_version')) != 63 or not arg('with_ik')) and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and arg('use_whole_body_ik_reference') and not arg('use_external_mpc') and not arg('real')) else 'Private absolute sim requires S62/S63/400062 (S63 with_ik=false) wheel mode, measured estimator, formal reference and no external MPC'])" />
   <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
   <include file="$(find noitom_hi5_hand_udp_python)/launch/head_control_node.launch">

@@ -50,8 +50,24 @@ if [[ -z "$scripts_dir" ]]; then
   exit 1
 fi
 if [[ "$absolute_entry" == true ]]; then
+  # The project installer places Drake here. Keep the fallback inside the
+  # absolute entry only; legacy launch paths above retain their environment.
+  if [[ -d /opt/drake/lib ]]; then
+    export LD_LIBRARY_PATH="/opt/drake/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+  if ! /usr/bin/python3 -c 'import pydrake' >/dev/null 2>&1; then
+    if [[ -d /opt/drake/lib/python3.8/site-packages ]]; then
+      export PYTHONPATH="/opt/drake/lib/python3.8/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+    fi
+  fi
   resolved_version="$(/usr/bin/python3 "$scripts_dir/absolute_robot_version.py" "$@")"
   export ROBOT_VERSION="$resolved_version"
+fi
+# Scope built-in scheduler defaults to the invoking control pipeline.
+if [[ "$absolute_entry" == true ]]; then
+  export KUAVO_RUNTIME_ENTRY=absolute
+else
+  export KUAVO_RUNTIME_ENTRY=quest3
 fi
 for arg in "$@"; do
   case "$arg" in

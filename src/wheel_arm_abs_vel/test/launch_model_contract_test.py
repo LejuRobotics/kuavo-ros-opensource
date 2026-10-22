@@ -10,10 +10,31 @@ PACKAGE = Path(__file__).resolve().parents[1]
 
 
 class LaunchModelTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # ROS resolves resource suffixes through CMAKE_PREFIX_PATH before rospack.
+        # Do not accidentally validate a same-named package in an older underlay.
+        from roslaunch.substitution_args import resolve_args
+        for name in ('load_kuavo_absolute_sim_base.launch', 'load_kuavo_real_velocity_ik.launch'):
+            resolved = Path(resolve_args('$(find wheel_arm_abs_vel)/launch/' + name)).resolve()
+            if resolved != (PACKAGE/'launch'/name).resolve():
+                raise RuntimeError('Launch test resolved another checkout: %s; source the candidate overlay first' % resolved)
+
     def load(self, file, args):
         return roslaunch.config.load_config_default(
             [(str(PACKAGE / "launch" / file), args)], None, verbose=False)
 
+
+    def test_private_sim_motor_servo_and_rollback(self):
+        cfg = self.load("load_kuavo_mujoco_velocity_ik.launch", ["robot_version:=62"])
+        self.assertEqual(cfg.params["/dynamics_backend"].value, "rnea")
+        self.assertTrue(cfg.params["/absolute_simulation/motor_servo"].value)
+        self.assertEqual(len(cfg.params["/absolute_simulation/kp"].value), 20)
+        cfg = self.load("load_kuavo_mujoco_velocity_ik.launch",
+                        ["robot_version:=62", "simulation_motor_servo:=false", "dynamics_backend:=wbc"])
+        self.assertFalse(cfg.params["/absolute_simulation/motor_servo"].value)
+        real = self.load("load_kuavo_real_velocity_ik.launch", ["robot_version:=62"])
+        self.assertNotIn("/absolute_simulation/motor_servo", real.params)
 
     def load_at(self, path, args):
         return roslaunch.config.load_config_default(
@@ -69,6 +90,43 @@ class LaunchModelTest(unittest.TestCase):
             os.environ.pop("ROBOT_VERSION", None)
             with self.assertRaises(Exception):
                 self.load("load_kuavo_real_velocity_ik.launch", [])
+
+    def test_simulation_identity_and_assets_follow_environment_or_override(self):
+        import json
+        for version in (62, 63, 400062):
+            for inherited in (str(version), None, 'invalid', '40'):
+                for entry, extra in (
+                    ('load_kuavo_mujoco_velocity_ik.launch', []),
+                    ('load_kuavo_absolute_sim_base.launch', ['with_ik:=false']),
+                    ('control.launch', ['controller_type:=wheel_arm_abs_vel', 'real:=false']),
+                ):
+                    with self.subTest(version=version, inherited=inherited, entry=entry), \
+                            patch.dict(os.environ):
+                        os.environ.pop('ROBOT_VERSION', None)
+                        if inherited is not None:
+                            os.environ['ROBOT_VERSION'] = inherited
+                        args = extra if inherited == str(version) else extra + ['robot_version:=' + str(version)]
+                        cfg = self.load(entry, args)
+                        params = {k: p.value for k, p in cfg.params.items()}
+                        self.assertEqual(int(params['/robot_version']), version)
+                        self.assertTrue(params['/urdfFile'].endswith('/biped_s{0}/urdf/biped_s{0}.urdf'.format(version)))
+                        self.assertTrue(params['/taskFile'].endswith('/kuavo_s%d/task.info' % version))
+                        self.assertTrue(params['/legged_robot_scene_param'].endswith('/biped_s%d/xml/scene.xml' % version))
+                        for key in ('/urdfFile', '/taskFile', '/legged_robot_scene_param'):
+                            self.assertTrue(Path(params[key]).is_file(), params[key])
+                        expected = json.loads((PACKAGE.parent / 'kuavo_assets/config' /
+                                               ('kuavo_v%d' % version) / 'kuavo.json').read_text())
+                        self.assertEqual(json.loads(params['/kuavo_configuration']), expected)
+                        for name in ('nodelet_manager', 'absolute_mujoco'):
+                            nodes = [n for n in cfg.nodes if n.name == name]
+                            self.assertEqual(len(nodes), 1)
+                            self.assertEqual(dict(nodes[0].env_args)['ROBOT_VERSION'], str(version))
+                        if version == 63:
+                            self.assertFalse(any(n.type == 'arms_ik_node' for n in cfg.nodes))
+        with patch.dict(os.environ):
+            os.environ.pop('ROBOT_VERSION', None)
+            with self.assertRaises(Exception):
+                self.load('load_kuavo_mujoco_velocity_ik.launch', [])
 
     def test_real_manager_version_overrides_missing_or_stale_environment(self):
         for version in (62, 63, 400062):
@@ -179,6 +237,17 @@ class LaunchModelTest(unittest.TestCase):
             def nodes(cfg):
                 return [tuple(getattr(n, field) for field in fields) for n in cfg.nodes]
             self.assertEqual(nodes(direct), nodes(selected))
+
+    def test_filter_tuning_and_baseline_are_explicit(self):
+        for tuned in (True, False):
+            args = ["robot_version:=62", "filter_tuning_enabled:=" + str(tuned).lower()]
+            dynamics = self.load("dynamics_backend.launch", args[1:])
+            self.assertEqual(dynamics.params["/dynamics/rnea/velocity_cutoff_hz"].value, 60. if tuned else 120.)
+            self.assertEqual(dynamics.params["/dynamics/rnea/jerk_limit"].value[8], 1000. if tuned else 500.)
+            for name in ("quest_velocity_ik.launch", "pico_velocity_ik.launch"):
+                cfg = self.load(name, args + ["vr_kalman_flattening_enabled:=true"])
+                self.assertEqual(cfg.params["/absolute_velocity_ik/wrist_envelope/enabled"].value, tuned)
+                self.assertEqual(cfg.params["/ik_ros_uni/vr_kalman_flattening/enabled"].value, tuned)
 
     def test_quest3_launches_publish_ik_thread_cpus_only_from_partition(self):
         """绑核核列表只能来自分区策略，未经包装入口启动时不得凭空写参数。"""

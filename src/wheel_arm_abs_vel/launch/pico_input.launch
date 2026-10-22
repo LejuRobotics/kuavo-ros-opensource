@@ -6,8 +6,10 @@
   <arg name="advertise_ip" default=""/>
   <arg name="broadcast_ip" default=""/>
   <arg name="calibration_file" default="$(find wheel_arm_abs_vel)/config/pico_quest_input.yaml"/>
-  <node pkg="wheel_arm_abs_vel" type="monitor_pico.py" name="monitor_pico" output="screen" required="true">
+  <arg name="enable_head_control" default="false"/>
+  <node pkg="wheel_arm_abs_vel" type="monitor_pico.py" name="monitor_pico" output="screen" required="true" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')">
     <rosparam command="load" file="$(arg calibration_file)"/>
+    <param name="enable_head_control" value="$(arg enable_head_control)"/>
     <param name="port" value="$(arg port)"/>
     <param name="peer_ip" value="$(arg peer_ip)"/>
     <param name="advertise_ip" value="$(arg advertise_ip)"/>

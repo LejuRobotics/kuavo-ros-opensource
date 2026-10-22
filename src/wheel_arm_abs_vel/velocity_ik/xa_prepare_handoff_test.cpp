@@ -27,6 +27,8 @@ static void run(PinocchioVelocityIk& n,const J& seed,std::ostream& out,const std
  m->source=Msg::SOURCE_QUEST_CONTROLLER;m->session_id=2;m->generation=3;
  m->body_tracking_frame=n.body_tracking_frame_name_;m->body_high_confidence=true;
  m->chest_valid=true;m->chest_pose.orientation.w=1.;m->body_coordinate_epoch=1;
+ const int interrupt_cycle = scenario=="interrupt_early" ? 20 :
+     scenario=="interrupt_mid" ? 200 : scenario=="interrupt_late" ? 800 : -1;
  for(int k=0;k<2500;++k) {
    n.measured_q_=n.reference_q_;n.measured_dq_=n.reference_dq_;
    auto now=ros::Time::now();n.robot_measurement_freshness_.observe(now.toNSec(),now.toNSec(),n.monotonicNs(),n.robot_state_timeout_);
@@ -35,7 +37,17 @@ static void run(PinocchioVelocityIk& n,const J& seed,std::ostream& out,const std
    if (scenario=="reenter" && k==10) {m->control_state=Msg::CONTROL_HOLD;m->control_valid=false;}
    if (scenario=="reenter" && k==20) {m->control_state=Msg::CONTROL_PREPARE;m->control_valid=true;m->generation=4;}
    if (scenario=="resume" && k>=2000) {m->control_state=Msg::CONTROL_ACTIVE;m->control_valid=true;m->session_id=3;m->generation=4;}
+   if (interrupt_cycle>=0 && k>=interrupt_cycle) {
+     m->control_state=k<interrupt_cycle+10 ? Msg::CONTROL_ARMED : Msg::CONTROL_ACTIVE;
+     m->session_id=3;m->generation=4;
+   }
    n.targetCallback(m);
+   if (interrupt_cycle>=0 && k==interrupt_cycle+1) {
+     auto old=boost::make_shared<Msg>(*m);old->session_id=2;old->generation=3;
+     old->control_state=Msg::CONTROL_PREPARE;old->mapper_publish_stamp=now;
+     n.targetCallback(old);
+     if(n.target_.generation!=4) throw std::runtime_error("late PREPARE replaced interruption");
+   }
    if (scenario=="stale" && k==12) {
      auto old=boost::make_shared<Msg>(*m);old->generation=2;old->header.stamp.fromSec(99.);old->mapper_publish_stamp=now;
      n.targetCallback(old);
@@ -44,11 +56,15 @@ static void run(PinocchioVelocityIk& n,const J& seed,std::ostream& out,const std
    if (scenario=="terminal" && k==10) n.terminal_stop_requested_=true;
    auto q=n.reference_q_,v=n.reference_dq_,a=n.reference_ddq_;
    n.publishOnce();
-   if (scenario=="resume" && k>=1990) ros::WallDuration(.002).sleep();
+   if ((scenario=="resume" && k>=1990) || (interrupt_cycle>=0 && k>=interrupt_cycle)) ros::WallDuration(.002).sleep();
    if (maxAbs(n.reference_q_-q-.001*(v+n.reference_dq_))>1e-9 &&
        !(scenario=="terminal" && k>=10)) throw std::runtime_error("q/v integral mismatch");
    if (scenario=="terminal" && k>=10 && maxAbs(n.reference_q_-q)>0.)
      throw std::runtime_error("terminal stop allowed integration");
+   if (interrupt_cycle>=0 && k>=interrupt_cycle && n.preparation_active_)
+     throw std::runtime_error("interrupted PREPARE kept running");
+   if (interrupt_cycle>=0 && k==2499 && n.tracking_ramp_scale_<0.5)
+     throw std::runtime_error("interruption never reacquired tracking");
    if (scenario=="cancel" && k>=10 && n.preparation_active_)
      throw std::runtime_error("cancel left PREPARE active");
    if (scenario=="recorded" && k==0 && maxAbs(n.reference_ddq_-a)>25.)

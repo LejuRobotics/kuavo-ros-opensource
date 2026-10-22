@@ -17,41 +17,32 @@ spec.loader.exec_module(identity)
 class IdentityTest(unittest.TestCase):
     def test_all_models_explicit_and_environment(self):
         for version in ('62', '63', '400062'):
-            self.assertEqual(identity.resolve([], {'ROBOT_VERSION': version}, [])[0], version)
+            self.assertEqual(identity.resolve([], {'ROBOT_VERSION': version})[0], version)
             self.assertEqual(identity.resolve(['robot_version:=' + version],
-                             {'ROBOT_VERSION': 'bad'}, [])[0], version)
+                             {'ROBOT_VERSION': 'bad'})[0], version)
 
-    def test_literal_persistent_configuration(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            f = Path(tmp)/'.bashrc'
-            for text, version in [('export ROBOT_VERSION=62', '62'),
-                                  (' export ROBOT_VERSION="63" # machine', '63'),
-                                  ("ROBOT_VERSION='400062'", '400062')]:
-                f.write_text(text)
-                self.assertEqual(identity.resolve([], {}, [f]), (version, str(f)))
-            f.write_text('export ROBOT_VERSION=62')
-            self.assertEqual(identity.resolve([], {'ROBOT_VERSION': '63'}, [f])[0], '63')
-
-    def test_unknown_invalid_or_conflicting_configuration_fails(self):
+    def test_missing_invalid_or_conflicting_environment_fails(self):
         for args, env in [([], {}), ([], {'ROBOT_VERSION': ''}),
                           ([], {'ROBOT_VERSION': '40'}),
                           (['robot_version:=62', 'robot_version:=63'], {}),
                           (['robot_version:=bad'], {'ROBOT_VERSION': '62'})]:
             with self.subTest(args=args, env=env), self.assertRaises(ValueError):
-                identity.resolve(args, env, [])
+                identity.resolve(args, env)
+
+    def test_saved_shell_files_do_not_override_or_supply_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
-            f = Path(tmp)/'.bashrc'
-            g = Path(tmp)/'environment'
-            f.write_text('export ROBOT_VERSION=62')
-            g.write_text('ROBOT_VERSION=63')
-            with self.assertRaisesRegex(ValueError, 'conflicting'):
-                identity.resolve([], {}, [f, g])
-            for text in ['export ROBOT_VERSION=$(touch /tmp/never)',
-                         'export ROBOT_VERSION=$OTHER',
-                         'export ROBOT_VERSION=62; echo unsafe']:
-                f.write_text(text)
-                with self.assertRaisesRegex(ValueError, 'nonliteral'):
-                    identity.resolve([], {}, [f])
+            (Path(tmp)/'.bashrc').write_text('export ROBOT_VERSION=63')
+            env = dict(os.environ, HOME=tmp)
+            env.pop('ROBOT_VERSION', None)
+            result = subprocess.run(['python3', str(ROOT/'scripts/absolute_robot_version.py')],
+                                    env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, '')
+            env['ROBOT_VERSION'] = '62'
+            result = subprocess.run(['python3', str(ROOT/'scripts/absolute_robot_version.py')],
+                                    env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.strip(), '62')
 
     def wrapper(self, args, version):
         with tempfile.TemporaryDirectory() as tmp:
@@ -69,13 +60,19 @@ class IdentityTest(unittest.TestCase):
 
     def test_wrapper_autodetect_and_explicit_override(self):
         for version in ('62', '63', '400062'):
-            args = ['wheel_arm_abs_vel', 'quest_velocity_ik.launch']
-            result = self.wrapper(args, version)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout), [version, args])
-            result = self.wrapper(args + ['robot_version:=' + version], 'bad')
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout)[0], version)
+            for entry in ('quest_velocity_ik.launch', 'load_kuavo_real_velocity_ik.launch',
+                          'load_kuavo_mujoco_velocity_ik.launch',
+                          'load_kuavo_absolute_sim_base.launch', 'control.launch'):
+                args = ['wheel_arm_abs_vel', entry]
+                if entry == 'control.launch':
+                    args += ['controller_type:=wheel_arm_abs_vel', 'real:=false']
+                with self.subTest(version=version, entry=entry):
+                    result = self.wrapper(args, version)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout), [version, args])
+                    result = self.wrapper(args + ['robot_version:=' + version], 'bad')
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)[0], version)
 
     def test_wrapper_failure_cannot_fall_through_to_roslaunch(self):
         result = self.wrapper(['wheel_arm_abs_vel', 'load_kuavo_real_velocity_ik.launch'], 'bad')

@@ -2,7 +2,7 @@
 # not motor current limits or permission to run a new robot without validation.
 mode: full
 acceleration_gain: 0.25
-velocity_cutoff_hz: 120.0
+velocity_cutoff_hz: 60.0
 sensor_timeout: 0.05
 max_period: 0.05
 dynamic_ramp_seconds: 0.2
@@ -14,3 +14,11 @@ acceleration_limit_arm: 100.0
 jerk_limit_lower: 200.0  # rad/s^3, dynamic feedforward only
 jerk_limit_arm: 500.0
 # Optional 18-element overrides: torque_rate, acceleration_limit, jerk_limit.
+
+# Canonical driven order: knee, leg, waist_pitch, waist_yaw,
+# L1..L7, R1..R7. Values are AFTER acceleration_gain (0.25).
+# Match IK 25000/25000/2000/25000/4000/6000/6000 times gain;
+# J3 assumes the default j3_overshoot_profile. Explicit overrides remain allowed.
+jerk_limit: [200.0, 200.0, 200.0, 200.0,
+             6250.0, 6250.0, 500.0, 6250.0, 1000.0, 1500.0, 1500.0,
+             6250.0, 6250.0, 500.0, 6250.0, 1000.0, 1500.0, 1500.0]

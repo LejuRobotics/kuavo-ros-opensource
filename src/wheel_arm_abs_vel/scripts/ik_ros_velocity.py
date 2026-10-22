@@ -54,6 +54,7 @@ from wheel_arm_abs_vel.msg import (
 from geometry_msgs.msg import Vector3Stamped
 from kuavo_msgs.msg import JoySticks
 from tools.quest3_utils_velocity import Quest3ArmInfoTransformer
+from tools.torso_controls import TorsoControls
 from tools.mapper_input_scheduling import MapperInputScheduler
 from tools.sg100_vr_gesture import Sg100VrGestureClient
 from tools.noncontrol_publish_process import publisher as diagnostic_publisher
@@ -461,6 +462,8 @@ class IkRos:
         self._fixed_operation_block = False
         self._fixed_operation_error = False
         self._fixed_prepare_bootstrap = False
+        self._fixed_arm_hold = False
+        self._fixed_arm_operation_seq = 0
         self._fixed_pending_operation = None
         self._fixed_consumer_status = None
         self._fixed_owner_status = None
@@ -553,6 +556,7 @@ class IkRos:
 
         # 轮臂：用 /mobile_manipulator_mpc_observation 的 time（MPC 内部时间）判断是否已运行足够久（#3009）
         self._wheel_mpc_obs_time = None
+        self._wheel_mpc_obs_receive_monotonic = None
         self._wheel_mm_mpc_min_internal_time = rospy.get_param("~wheel_mm_mpc_min_internal_time", 3.0)
         self._wheel_mm_mpc_observation_topic = rospy.get_param(
             "~wheel_mm_mpc_observation_topic", "/mobile_manipulator_mpc_observation"
@@ -615,6 +619,15 @@ class IkRos:
         self.joint_sub = rospy.Subscriber(
             "/robot_arm_q_v_tau", robotArmQVVD, self.kuavo_joint_states_callback, queue_size=1, tcp_nodelay=True
         )
+        # Pico uses long X/A for thumb touch only. Keep raw arm/FSM input unchanged.
+        self._torso_controls = TorsoControls(rospy.get_param('/vr_input_source', 'quest'))
+        self._torso_state_pub = rospy.Publisher('/quest3/torso_control_enabled', Bool, queue_size=1, latch=True)
+        self._torso_last_published = None
+        self._publish_torso_control_state()
+        self._pico_thumb_input = None
+        if rospy.get_param('/vr_input_source', 'quest') == 'pico':
+            from pico_input.thumb_buttons import ThumbButtons
+            self._pico_thumb_input = ThumbButtons()
         self.joySticks_sub = rospy.Subscriber(
             "/quest_joystick_data",
             JoySticks,
@@ -900,6 +913,8 @@ class IkRos:
         self._tracking_session_source = configured_source
 
     def _bump_absolute_generation_locked(self):
+        # A subsystem pause never survives a stopped/faulted/new session.
+        self._fixed_arm_hold = False
         self._absolute_generation = (self._absolute_generation + 1) & 0xFFFFFFFFFFFFFFFF
         return self._absolute_generation
 
@@ -940,6 +955,8 @@ class IkRos:
 
     def _latch_tracking_fault_locked(self, reason, request_hold):
         """Invalidate all in-flight IK work and make mode-0 hold an IK-thread event."""
+        if hasattr(self, '_torso_controls'):
+            self._torso_controls.reset()
         if self._tracking_source_hold_latched:
             return False
         self._bump_absolute_generation_locked()
@@ -1739,10 +1756,14 @@ class IkRos:
                     return None
                 # 启用沿只采样最近一帧完整有效目标；当前手势帧无效时保留此前的
                 # 有效缓存，随后由统一的新鲜度检查决定是否允许接管。
-                self._queue_absolute_capture_locked(
-                    AbsoluteEnableReason.ENABLE_EDGE,
-                    AbsoluteEnableState.WAIT_RELEASE,
-                )
+                if self.enable_velocity_ik_takeover:
+                    self._fixed_operation_block = True
+                    self._queue_fixed_request_locked(2, 'dependencies')
+                else:
+                    self._queue_absolute_capture_locked(
+                        AbsoluteEnableReason.ENABLE_EDGE,
+                        AbsoluteEnableState.WAIT_RELEASE,
+                    )
                 publish_status = True
                 rospy.loginfo(
                     "[IkRos][AbsoluteEnable] Session %d captured on enable edge",
@@ -1957,13 +1978,17 @@ class IkRos:
             if self._fixed_operation_error:
                 return -1  # explicit fault/pending hold, not a fake completed mode
             if self._fixed_pending_operation is not None:
-                return self._fixed_pending_operation['mode']  # accepted intent, NOT completion
+                return (2 if self._fixed_pending_operation['resume'] else
+                        self._fixed_pending_operation['mode'])  # intent, NOT completion
             if self._fixed_prepare_bootstrap or self._absolute_state in (
                     AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                 return 1
-            return 2 if self._absolute_state == AbsoluteEnableState.ACTIVE else 0
+            return (2 if self._absolute_state == AbsoluteEnableState.ACTIVE
+                    and not getattr(self, '_fixed_arm_hold', False) else 0)
 
     def _publish_fixed_operation_state(self):
+        if hasattr(self, '_torso_controls'):
+            self._publish_torso_control_state()
         self._publish_wheel_base_command()
         if hasattr(self, '_fixed_operation_state_pub'):
             mode = self._fixed_operation_mode()
@@ -2009,6 +2034,8 @@ class IkRos:
         # mode=2 is an explicit operator follow request (X+A or X+B), not a
         # pose-confidence inference. Use the SAME latch as gesture control so
         # subsequent real stop gestures still revoke it normally.
+        if hasattr(self, '_torso_controls'):
+            self._torso_controls.wait_for_follow()
         transformer = self.quest3_arm_info_transformer
         transformer.ok_gesture_counts = 0
         transformer.shot_gesture_counts = 0
@@ -2018,6 +2045,37 @@ class IkRos:
         self._absolute_pause_pending = False
         self._absolute_external_mode_reset_pending = False
 
+    def _interrupt_fixed_prepare_locked(self):
+        """Recapture a live PREPARE transaction; solver retains owned q/dq/ddq."""
+        now = time.monotonic()
+        p = self._fixed_pending_operation
+        error = self._fixed_capture_input_error_locked()
+        if (error or self._fixed_control_enabled is not True
+                or self._absolute_mode_status != (2, 2, False)
+                or not self._fixed_consumer_ack_locked(now)
+                or self._absolute_stop_pending or self._absolute_fault_hold_pending
+                or self._tracking_source_hold_latched or self._absolute_external_mode_reset_pending
+                or self.quest3_arm_info_transformer.is_stop_gesture()
+                or (p is not None and (p['generation'] != self._absolute_generation
+                    or p['stop_epoch'] != self._fixed_stop_epoch
+                    or p['epoch'] != self._body_coordinate_epoch
+                    or p['source'] != self._configured_tracking_source()
+                    or now >= p['deadline']))):
+            reason = error or 'stop, stale execution owner, disabled control or changed transaction'
+            rospy.logwarn('[FixedStart] PREPARE interruption rejected: %s', reason)
+            return False, reason
+        self._authorize_fixed_follow_locked()
+        self._fixed_prepare_bootstrap = False
+        self._fixed_operation_block = False
+        self._queue_absolute_capture_locked(AbsoluteEnableReason.RESUME_REQUEST,
+                                            AbsoluteEnableState.WAIT_RELEASE)
+        self._queue_fixed_request_locked(2, 'acquisition')
+        self._fixed_pending_operation['deadline'] = now + self._fixed_acquisition_timeout
+        self._fixed_operation_phase = 2
+        rospy.loginfo('[FixedStart] PREPARE interrupted; recapturing follow generation %d',
+                      self._absolute_generation)
+        return True, 'PREPARE interrupted; continuous reference retained while follow reacquires'
+
     def _fixed_arm_operation(self, mode):
         def result(ok, message):
             return changeArmCtrlModeResponse(ok, self._fixed_operation_mode(), message)
@@ -2025,6 +2083,34 @@ class IkRos:
             return result(False, "Fixed Pinocchio operation requires the formal pipeline")
         if mode not in (0, 1, 2):
             return result(False, "Invalid operation mode")
+        with self._absolute_lock:
+            held = getattr(self, '_fixed_arm_hold', False)
+            torso = getattr(self, '_torso_controls', None)
+            # Keep the existing execution owner while pausing only the arms,
+            # whether or not torso control has been enabled. A real stop/fault still ends the complete session.
+            if mode in (0, 2) and (held or (mode == 0 and self._absolute_state == AbsoluteEnableState.ACTIVE)):
+                now = time.monotonic()
+                ready = (self._torso_input_ready_locked(now)
+                         and not self.quest3_arm_info_transformer.is_stop_gesture()
+                         and self._fixed_capture_input_error_locked() is None
+                         and self._fixed_consumer_ack_locked(now))
+                if ready:
+                    requested_hold = mode == 0
+                    if requested_hold != held:
+                        self._fixed_arm_operation_seq = getattr(self, '_fixed_arm_operation_seq', 0) + 1
+                        self._fixed_arm_hold = requested_hold
+                    return result(True, "Arm-only brake/hold requested; torso session retained"
+                                  if requested_hold else "Arm follow resumed; torso session retained")
+                if held and mode == 2:
+                    return result(False, "Arm resume requires fresh input and a healthy execution owner; arms remain held")
+                # A pause request with unavailable dependencies falls back to
+                # the existing whole-session hold below, never silent motion.
+            self._fixed_arm_hold = False
+            if hasattr(self, '_torso_controls'):
+                if mode == 2:
+                    self._torso_controls.wait_for_follow()
+                else:
+                    self._torso_controls.reset()
         if mode == 0:
             # End the input generation before the existing stopped-owner/hold
             # handshake. Partial service failures remain faults, never success.
@@ -2061,9 +2147,35 @@ class IkRos:
             if self.quest3_arm_info_transformer.is_stop_gesture():
                 return result(False, "Release the stop gesture before requesting an operation")
             if self._fixed_pending_operation is not None:
-                # Repeated requests never restart deadlines or recapture q.
-                # PREPARE is a latched operation, not a toggle or a queued
-                # follow authorization. Require a new edge after completion.
+                pending = self._fixed_pending_operation
+                if pending['mode'] == 1:
+                    if mode == 2:
+                        error = self._fixed_capture_input_error_locked()
+                        if error:
+                            return result(False, error)
+                        if state == AbsoluteEnableState.RETURNING_TO_PREP:
+                            return result(*self._interrupt_fixed_prepare_locked())
+                        # PREPARE has not acquired execution yet: change intent,
+                        # keeping the original bounded dependency/acquisition wait.
+                        pending.update(mode=2, resume=False)
+                        self._fixed_prepare_bootstrap = False
+                        self._fixed_operation_block = False
+                        self._authorize_fixed_follow_locked()
+                        return result(True, "Follow replaces pending PREPARE before execution")
+                    pending['resume'] = False
+                    self._absolute_resume_after_prepare = False
+                    return result(True, "PREPARE retained; queued follow cancelled")
+                if mode == 1 and pending['mode'] == 2:
+                    # A third X+A cancels in-flight follow acquisition. Do not
+                    # silently swallow it merely because the owner ack is late.
+                    pending.update(mode=1, resume=False)
+                    self._fixed_operation_block = True
+                    if state == AbsoluteEnableState.ACTIVE:
+                        self._pause_absolute_session()
+                        pending.update(phase='prepare', generation=self._absolute_generation)
+                    else:
+                        self._fixed_prepare_bootstrap = True
+                    return result(True, "Follow acquisition replaced by PREPARE")
                 return result(True, "Request already pending; deadline unchanged (not completed)")
             if mode == 1 and self._absolute_mode_status == (2, 2, False) and state in (AbsoluteEnableState.ACTIVE, AbsoluteEnableState.PAUSED,
                                       AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
@@ -2080,13 +2192,7 @@ class IkRos:
             if not 0 <= age <= self.absolute_enable_max_vr_age:
                 return result(False, "Fresh joystick input is required")
             if mode == 2 and state == AbsoluteEnableState.RETURNING_TO_PREP:
-                self._authorize_fixed_follow_locked()
-                self._absolute_resume_after_prepare = True
-                self._absolute_reason = AbsoluteEnableReason.RESUME_REQUEST
-                self._fixed_operation_block = False
-                self._queue_fixed_request_locked(1, 'prepare')
-                self._fixed_pending_operation['resume'] = True
-                return result(True, "Resume queued until current PREPARE completion")
+                return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
             self._fixed_operation_block = True
             self._queue_fixed_request_locked(mode, 'dependencies')
@@ -2612,6 +2718,8 @@ class IkRos:
         """Start the velocity-IK-owned return to the ready arm posture."""
         source_fault_cleared = False
         with self._absolute_lock:
+            if hasattr(self, '_torso_controls'):
+                self._torso_controls.reset()
             self._bump_absolute_generation_locked()
             if (self._tracking_source_hold_latched
                     and self._tracking_can_rearm_locked()):
@@ -2641,6 +2749,8 @@ class IkRos:
 
     def _finish_absolute_session(self, reason, request_hold, message):
         with self._absolute_lock:
+            if hasattr(self, '_torso_controls'):
+                self._torso_controls.reset()
             if self._fixed_pending_operation is not None:
                 self._fixed_pending_operation = None
                 self._fixed_operation_phase = 5
@@ -4189,6 +4299,8 @@ class IkRos:
                 else:
                     contract_state = TeleopTcpTarget.CONTROL_INACTIVE
                 tcp_msg.control_state = int(contract_state)
+                now = time.monotonic()
+                self._fill_subsystem_permissions_locked(tcp_msg, now)
                 # ARMED is a valid, deliberately frozen reference contract.
                 # The velocity IK uses it to capture measured FK and construct
                 # the per-session bumpless target alignment before ACTIVE is
@@ -4259,6 +4371,8 @@ class IkRos:
             if tcp_msg.mapper_processing_time + gate.relative_age <= gate.max_age:
                 runtime_probe.point(50)
                 mapper_publish_begin_ns = time.monotonic_ns()
+                # Critical publish precedes deferred chest/shoulder observations,
+                # auxiliary head/body output, markers and all timing diagnostics.
                 self.pub_mm_teleop_tcp_target.publish(tcp_msg)
                 mapper_publish_end_ns = time.monotonic_ns()
                 runtime_probe.point(51)
@@ -4353,41 +4467,135 @@ class IkRos:
         if getattr(self, '_wheel_base_pub', None) is None:
             return
         with self._absolute_lock:
-            active = (self._absolute_state == AbsoluteEnableState.ACTIVE
-                      and self._fixed_control_enabled is True
-                      and self._absolute_mode_status == (2, 2, 0)
-                      and self._fixed_pending_operation is None
-                      and not self._fixed_operation_error
-                      and not self._fixed_operation_block
-                      and not self._absolute_stop_pending
-                      and not self._tracking_source_hold_latched
-                      and not self._absolute_fault_hold_pending)
+            now = time.monotonic()
+            active = self._base_input_ready_locked(now)
             if msg is None:
                 if active:
                     return  # Never replay cached joystick input as a new command.
                 self._wheel_base_mapper.reset()
                 velocity = (0.0, 0.0, 0.0)
             else:
-                velocity = self._wheel_base_mapper.sample(msg, active, time.monotonic())
+                velocity = self._wheel_base_mapper.sample(msg, active, now)
+            reason = self._wheel_base_mapper.reason if active else self._base_gate_reason
+            if reason != getattr(self, '_base_last_logged_reason', None):
+                rospy.loginfo('[BaseGate][Mapper] %s', reason)
+                self._base_last_logged_reason = reason
             command = Twist()
             command.linear.x, command.linear.y, command.angular.z = velocity
             self._wheel_base_pub.publish(command)
+
+    def _base_input_ready_locked(self, now):
+        # Independent wheel channel: neither arm lifecycle nor body freshness
+        # participates. Global control/stop and live robot feedback still do.
+        observed = getattr(self, '_wheel_mpc_obs_receive_monotonic', None)
+        measured = self._absolute_latest_measured_q_time
+        reason = 'READY'
+        if self._fixed_control_enabled is not True or self.stop_event.is_set():
+            reason = 'GLOBAL_STOP'
+        elif (not self._wheel_mpc_stable_for_mm_cmd() or observed is None
+                or not 0 <= now-observed <= .2 or measured is None
+                or not 0 <= now-measured <= self.absolute_enable_max_joint_state_age):
+            reason = 'NOT_READY'
+        elif (self._joystick_receive_monotonic is None
+                or not 0 <= now-self._joystick_receive_monotonic < .2):
+            reason = 'JOY_STALE'
+        self._base_gate_reason = reason
+        return reason == 'READY'
+
+    def _torso_input_ready_locked(self, now):
+        target = self._absolute_latest_target
+        return (self.enable_velocity_ik_takeover
+                and self._absolute_state == AbsoluteEnableState.ACTIVE
+                and self._fixed_control_enabled is True
+                and self._absolute_mode_status == (2, 2, False)
+                and self._fixed_pending_operation is None
+                and not self._fixed_operation_error and not self._fixed_operation_block
+                and not self._absolute_stop_pending and not self._absolute_fault_hold_pending
+                and not self._tracking_source_hold_latched
+                and not self._absolute_external_mode_reset_pending
+                and target is not None and 0 <= now-target['receive_time'] <= self.absolute_enable_max_vr_age)
+
+    def _fill_subsystem_permissions_locked(self, msg, now):
+        msg.torso_control_enabled = self._torso_controls.authorized(
+            now, self._torso_input_ready_locked(now))
+        msg.arm_hold = (self._absolute_state == AbsoluteEnableState.ACTIVE
+                        and getattr(self, '_fixed_arm_hold', False))
+        msg.arm_operation_seq = getattr(self, '_fixed_arm_operation_seq', 0)
+
+    def _publish_torso_control_state(self):
+        with self._absolute_lock:
+            now = time.monotonic()
+            enabled = self._torso_controls.authorized(now, self._torso_input_ready_locked(now))
+            if enabled == self._torso_last_published:
+                return
+            self._torso_last_published = enabled
+        self._torso_state_pub.publish(Bool(data=enabled))
+        rospy.loginfo('[AbsoluteTorso] torso control %s', 'enabled' if enabled else 'disabled (brake and hold)')
+
+    def _consume_torso_end_effector_edges(self, hand_msg):
+        # Pico Y is resolved on release. Consume this event in the input callback
+        # so a slower hand timer cannot miss it, then suppress duplicate handling.
+        if self._torso_controls.source != 'pico':
+            return
+        if (hand_msg.left_second_button_pressed and not self.sg100_enabled
+                and self.end_effector_type in (QIANGNAO, QIANGNAO_TOUCH, REVO2, LINKER_HAND, LEJUCLAW)):
+            self.__freeze_finger = not self.__freeze_finger
+        hand_msg.left_second_button_pressed = False
+
+    def _controller_start_request(self, msg):
+        """Latch an entire double-trigger press, including staggered first frames."""
+        if not self.enable_velocity_ik_takeover:
+            return
+        down = (math.isfinite(msg.left_trigger) and math.isfinite(msg.right_trigger)
+                and msg.left_trigger > .5 and msg.right_trigger > .5)
+        with self._absolute_lock:
+            edge = down and not getattr(self, '_controller_start_down', False)
+            self._controller_start_down = down
+            # Active triggers retain their existing end-effector meaning.
+            eligible = (self._absolute_state in (AbsoluteEnableState.WAITING,
+                        AbsoluteEnableState.WAIT_RELEASE, AbsoluteEnableState.PREPARED)
+                        and self._fixed_pending_operation is None)
+        if edge and eligible:
+            if not self._fixed_operation_mutex.acquire(False):
+                # Retry a still-held press on the next fresh joy packet, never
+                # lose the first edge to a simultaneous service operation.
+                with self._absolute_lock:
+                    self._controller_start_down = False
+                return
+            try:
+                response = self._fixed_arm_operation(2)
+                rospy.loginfo('[FixedStart] double front trigger: %s', response.message)
+            finally:
+                self._publish_fixed_operation_state()
+                self._fixed_operation_mutex.release()
 
     def joySticks_data_callback(self, msg):
         with self._absolute_lock:
             self._joystick_receive_monotonic = time.monotonic()
         self.quest3_arm_info_transformer.read_joySticks_msg(msg)
-        self.joySticks_data = msg
+        self._controller_start_request(msg)
+        hand_msg = msg
+        if getattr(self, '_pico_thumb_input', None) is not None:
+            hand_msg = self._pico_thumb_input.update(
+                msg, time.monotonic(), enabled=self._wheel_mpc_obs_time is not None)
+        if self.enable_velocity_ik_takeover:
+            with self._absolute_lock:
+                now = time.monotonic()
+                hand_msg = self._torso_controls.update(
+                    msg, hand_msg, now, self._torso_input_ready_locked(now))
+            self._consume_torso_end_effector_edges(hand_msg)
+            self._publish_torso_control_state()
+        self.joySticks_data = hand_msg
         self._publish_wheel_base_command(msg)
         if self._uses_front_trigger_dexhand():
-            self._publish_front_trigger_dexhand(msg)
+            self._publish_front_trigger_dexhand(hand_msg)
         # 准备姿态下 IK 线程可能卡在等待首帧姿态/MPC 就绪，此时由回调补发夹爪指令。
         # 遥操主循环启动后改由 hand_finger_data_process 单路发布，避免双路重复下发。
         # qa: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/3505
         if (not self.sg100_enabled and self.end_effector_type == LEJUCLAW
                 and not self.quest3_arm_info_transformer.is_hand_tracking
                 and not self.__ik_claw_publish_active):
-            self.pub_robot_end_hand(joyStick_data=msg)
+            self.pub_robot_end_hand(joyStick_data=hand_msg)
 
     @staticmethod
     def vector3_to_milliseconds(x, y, z):
@@ -4641,7 +4849,8 @@ class IkRos:
         # Publish revocation as well, so an explicit stop need not await timeout.
         self.sg100_trigger_pub.publish(command)
         if hasattr(self, "sg100_gesture_client"):
-            self.sg100_gesture_client.update(msg, command.vector.z == 1.0)
+            torso_modifier = getattr(getattr(self, '_torso_controls', None), 'quest_consumed', False)
+            self.sg100_gesture_client.update(msg, command.vector.z == 1.0 and not torso_modifier)
 
     def hand_finger_data_process(self, event):
         if self._uses_front_trigger_dexhand():
@@ -4704,11 +4913,13 @@ class IkRos:
                     left_hand_position[1] = 100 if joyStick_data.left_first_button_touched else 0
                     right_hand_position[1] = 100 if joyStick_data.right_first_button_touched else 0
 
-                    if joyStick_data.left_first_button_touched and joyStick_data.right_first_button_pressed:
+                    if (getattr(self, '_pico_thumb_input', None) is None
+                            and joyStick_data.left_first_button_touched and joyStick_data.right_first_button_pressed):
                         for i in range(0, 6):
                             left_hand_position[i] = 100
                         left_hand_position[2] = 0
-                    if joyStick_data.left_first_button_touched and joyStick_data.right_second_button_pressed:
+                    if (getattr(self, '_pico_thumb_input', None) is None
+                            and joyStick_data.left_first_button_touched and joyStick_data.right_second_button_pressed):
                         for i in range(0, 6):
                             right_hand_position[i] = 100
                         right_hand_position[2] = 0
@@ -4820,11 +5031,7 @@ class IkRos:
                         else:
                             fault_rearm_blocked = True
                     elif state == AbsoluteEnableState.RETURNING_TO_PREP:
-                        # Do not interrupt the bounded ready-pose trajectory.
-                        # The diagnostic callback atomically recaptures as
-                        # soon as both reference and measured joints settle.
-                        self._absolute_resume_after_prepare = True
-                        self._absolute_reason = AbsoluteEnableReason.RESUME_REQUEST
+                        self._interrupt_fixed_prepare_locked()
                         publish_absolute_status = True
                     elif state == AbsoluteEnableState.PREPARED:
                         self._queue_absolute_capture_locked(
@@ -5004,6 +5211,28 @@ class IkRos:
                 prepared_session = self._absolute_session_id
                 publish_status = True
                 if self._absolute_resume_after_prepare:
+                    pending = self._fixed_pending_operation
+                    error = self._fixed_capture_input_error_locked()
+                    if (error or self._fixed_control_enabled is not True
+                            or self._absolute_stop_pending or self._absolute_fault_hold_pending
+                            or self._tracking_source_hold_latched
+                            or self._absolute_external_mode_reset_pending
+                            or self.quest3_arm_info_transformer.is_stop_gesture()
+                            or pending is None
+                            or pending['generation'] != self._absolute_generation
+                            or pending['stop_epoch'] != self._fixed_stop_epoch
+                            or pending['epoch'] != self._body_coordinate_epoch
+                            or pending['source'] != self._configured_tracking_source()
+                            or time.monotonic() >= pending['deadline']):
+                        self._absolute_resume_after_prepare = False
+                        if pending is not None:
+                            pending['resume'] = False
+                        rospy.logwarn('[FixedStart] Queued follow cancelled at PREPARE completion: %s',
+                                      error or 'stop, fault, disabled control or changed request')
+                    else:
+                        self._authorize_fixed_follow_locked()
+                        self._fixed_operation_block = False
+                if self._absolute_resume_after_prepare:
                     self._queue_absolute_capture_locked(
                         AbsoluteEnableReason.RESUME_REQUEST,
                         AbsoluteEnableState.PREPARED,
@@ -5040,6 +5269,7 @@ class IkRos:
     def wheel_mpc_observation_callback(self, msg):
         """轮臂 MPC 观测：time 为 MPC 模块内部时间，从 0 递增"""
         self._wheel_mpc_obs_time = float(msg.time)
+        self._wheel_mpc_obs_receive_monotonic = time.monotonic()
 
     def _wheel_mpc_stable_for_mm_cmd(self):
         """轮臂：仅当 mobile_manipulator_mpc_observation.time 大于阈值时才允许发 mm / 切手臂模式（kuavodevlab#3009）。"""

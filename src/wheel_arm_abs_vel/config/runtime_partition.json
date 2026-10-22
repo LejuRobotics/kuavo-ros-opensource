@@ -25,7 +25,8 @@
     12,
     13
   ],
-  "ik_fifo_priority": 40,
-  "mapper_nice": -5,
+  "ik_fifo_priority": 70,
+  "mapper_fifo_priority": 35,
+  "mapper_nice": -10,
   "python_switch_interval_sec": 0.001
 }

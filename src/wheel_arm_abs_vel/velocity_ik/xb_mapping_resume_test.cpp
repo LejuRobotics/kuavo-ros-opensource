@@ -30,7 +30,11 @@ struct VelocityIkOfflineTest {
     n.measured_dq_.setZero();
     n.reference_q_ = n.measured_q_;
     n.reference_dq_.setZero(); n.reference_ddq_.setZero();
+    // This fixture tests coordinate-map retention independently of operation
+    // admission. torso_permission_test covers default-off/resume authorization.
+    n.torso_control_requested_ = true;
     Target t;
+    t.torso_control_enabled = true;
     t.valid = true; t.source = Msg::SOURCE_QUEST_CONTROLLER;
     t.session_id = 2; t.generation = 2; t.control_state = Msg::CONTROL_ACTIVE;
     t.frame_id = "quest_chest_robot_axes";

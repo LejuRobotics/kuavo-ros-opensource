@@ -40,7 +40,7 @@ class ModelPlatformMatrix(unittest.TestCase):
             self.assertEqual(profile['mapper_cpus'], [4])
             self.assertEqual(profile['sidecar_cpus'], [8, 9, 10, 11, 12, 13] if online == '0-13' else [14, 15])
             self.assertEqual(profile['background_cpus'], [0, 1, 8, 9, 10, 11, 12, 13])
-            self.assertEqual(profile['ik_fifo_priority'], 40)
+            self.assertEqual(profile['ik_fifo_priority'], 70)
             self.assertEqual(bool(partition.profile_warnings(profile)), mode == 'soft')
         else:
             self.assertEqual(profile['ik_isolation_mode'], mode)
@@ -50,7 +50,7 @@ class ModelPlatformMatrix(unittest.TestCase):
             self.assertEqual(profile['mapper_cpus'], [4])
             self.assertEqual(profile['sidecar_cpus'], [10, 11])
             self.assertEqual(profile['background_cpus'], [0, 1, 5, 6, 8, 9, 10, 11])
-            self.assertEqual(profile['ik_fifo_priority'], 40)
+            self.assertEqual(profile['ik_fifo_priority'], 70)
             self.assertEqual(bool(partition.profile_warnings(profile)), mode == 'soft')
         cfg = json.loads((ROOT/f'config/model_s{version}.json').read_text())
         full = require_full_model(version, str(ASSETS), cfg)
@@ -89,6 +89,20 @@ class ModelPlatformMatrix(unittest.TestCase):
                           real=launch.startswith('load_kuavo_real'))
             expression = args['absolute_launch_contract'].get('value')[7:-1]
             self.assertEqual(eval(expression, {'__builtins__': {}, 'int': int, 'arg': values.__getitem__}), 'wheel_arm_abs_vel_s62')
+
+    def test_simulation_rejects_unsupported_modes(self):
+        tree = ET.parse(ROOT/'launch/load_kuavo_absolute_sim_base.launch').getroot()
+        args = {arg.get('name'): arg for arg in tree.findall('arg')}
+        expression = args['absolute_launch_contract'].get('value')[7:-1]
+        base = dict(robot_version=63, robot_type=1, nodelet_robot_type=1,
+                    wheel_control_type=1, estimator_type=1, with_ik=False,
+                    use_whole_body_ik_reference=True, use_external_mpc=False, real=False)
+        for invalid in ({'with_ik': True}, {'robot_version': 64}, {'real': True},
+                        {'use_external_mpc': True}, {'use_whole_body_ik_reference': False},
+                        {'estimator_type': 0}, {'wheel_control_type': 0}):
+            values = dict(base, **invalid)
+            with self.subTest(invalid=invalid), self.assertRaises(KeyError):
+                eval(expression, {'__builtins__': {}, 'int': int, 'arg': values.__getitem__})
 
     def test_all_versions_reject_missing_contract_wrong_model_and_drake_fallback(self):
         for version in (62, 63, 400062):

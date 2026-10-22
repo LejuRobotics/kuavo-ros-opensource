@@ -15,6 +15,7 @@ from . import body_tracking_extended_pb2 as proto
 HEADER = struct.Struct("!4sHHHHI16sQQQQIIQ")
 # Quest slot -> PICO BodyTrackerRole. Finger slots remain identity in controller mode.
 BONES = {0: 16, 1: 18, 2: 17, 3: 19, 4: 22, 5: 23, 22: 0, 23: 9}
+HEAD_BONES = {24: 12, 25: 15}
 REQUIRED = (0, 1, 2, 3, 4, 5, 23)
 A = np.array([[0., 0., -1.], [-1., 0., 0.], [0., 1., 0.]])
 B = np.array([[0., -1., 0.], [0., 0., 1.], [-1., 0., 0.]])
@@ -98,12 +99,22 @@ class PoseAdapter:
                     matrices[target] = np.eye(4)
             else:
                 matrices[target] = raw_to_robot(poses[source], source)
+        # Missing head tracking must not discard otherwise valid arm input.
+        try:
+            head = {target: raw_to_robot(poses[source], source)
+                    for target, source in HEAD_BONES.items()}
+        except ValueError:
+            head = {}
+        matrices.update(head)
         return self.from_robot_matrices(matrices)
 
     def from_robot_matrices(self, matrices):
         """Also usable for offline beta /robot_body_matrices evidence."""
-        out = np.tile(np.eye(4), (24, 1, 1))
-        for slot in BONES:
+        slots = dict(BONES)
+        if all(slot in matrices for slot in HEAD_BONES):
+            slots.update(HEAD_BONES)
+        out = np.tile(np.eye(4), (26 if 25 in slots else 24, 1, 1))
+        for slot in slots:
             if slot not in matrices:
                 raise ValueError("missing upper-body matrix")
             T = np.asarray(matrices[slot], dtype=float)
@@ -113,7 +124,9 @@ class PoseAdapter:
                     or not np.isclose(np.linalg.det(T[:3, :3]), 1., atol=1e-5)):
                 raise ValueError("invalid rigid body matrix")
             out[slot] = T
-        out[23, :3, :3] = out[23, :3, :3] @ PICO_CHEST_REFERENCE.T @ QUEST_CHEST_REFERENCE
+        for slot in (23, 24, 25):
+            if slot < len(out):
+                out[slot, :3, :3] = out[slot, :3, :3] @ PICO_CHEST_REFERENCE.T @ QUEST_CHEST_REFERENCE
         for side, slot in (("Left", 4), ("Right", 5)):
             out[slot] = out[slot] @ self.offsets[side]
             # Inverse of lightweight_transforms.vr_quat2robot_quat(..., bias=0).

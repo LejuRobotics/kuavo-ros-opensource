@@ -6,6 +6,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <thread>
+#include <condition_variable>
 
 // ROS
 #include <ros/ros.h>
@@ -192,6 +194,9 @@ namespace wheel_absolute_control
     vector_t preTargetActions_;
     vector_t startActions_;
     double robotPreActionDesiredTime_ = 0.0;
+    bool startup_action_started_{false};
+    double startup_action_start_time_{0.0};
+    double startup_action_last_time_{0.0};
 
     // ========== 坐标变换相关 ==========
     Eigen::Vector3d cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw);
@@ -219,6 +224,7 @@ namespace wheel_absolute_control
     humanoidController_wheel_wbc::VelocityIkBaseCommand<geometry_msgs::Twist> velocity_ik_base_command_;
     ros::Subscriber velocity_ik_base_sub_;
     bool velocity_ik_base_control_{false};
+    std::string velocity_ik_base_gate_reason_;
     std::unique_ptr<const mobile_manipulator::VelocityLimiter> base_velocity_limiter_zero_;
     bool base_locked_{true};  // Startup-only final wheel command interlock; not torso locking.
     ros::Publisher velControlStatePub_;
@@ -380,7 +386,11 @@ namespace wheel_absolute_control
     bool lockKneeLegCaptured_{false};              // 是否已捕获锁定快照
     double lockKneeQ_{0.0};                        // 锁定的 knee 目标角 [rad]
     double lockLegQ_{0.0};                         // 锁定的 leg 目标角 [rad]
-    ros::Time lastLockParamCheckTime_{0.0};        // 上次实时查询 lock rosparam 的时刻（节流用）
+    void refreshLockKneeLegParameter();  // init/background only, never update()
+    std::thread lockParameterWorker_;
+    std::mutex lockParameterWaitMutex_;
+    std::condition_variable lockParameterWake_;
+    bool stopLockParameterWorker_{false};  // protected by wait mutex
 
     // ========== 运动学计算 ==========
     std::shared_ptr<humanoid_controller::WaistKinematics> waistKinematics_;

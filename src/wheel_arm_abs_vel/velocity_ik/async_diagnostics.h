@@ -6,7 +6,66 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <type_traits>
+#include <stdexcept>
 namespace velocity_ik {
+// Tick identity belongs to the supervisor, never a reference/session counter.
+inline bool diagnosticPhaseDue(uint64_t tick, int stride, unsigned phase) {
+  return stride > 0 && tick % static_cast<unsigned>(stride) == phase % static_cast<unsigned>(stride);
+}
+
+// Single RT producer, single background consumer. No std::function creation,
+// allocation, producer mutex, or CAS retry in submit(). Full queue drops mirrors
+// only; the authoritative SHM commit has already completed.
+template<class T, size_t Capacity = 16> class AsyncPodDiagnostics {
+  static_assert(std::is_trivially_copyable<T>::value, "POD snapshot required");
+ public:
+  ~AsyncPodDiagnostics() { stop(); }
+  void start(std::function<void(const T&)> handler) {
+    if (worker_.joinable()) throw std::logic_error("POD worker already started");
+    handler_ = std::move(handler);
+    stopping_.store(false, std::memory_order_release);
+    worker_ = std::thread([this] {
+      for (;;) {
+        const size_t read = read_.load(std::memory_order_relaxed);
+        if (read != write_.load(std::memory_order_acquire)) {
+          // Release the slot before invoking potentially slow ROS publication.
+          const T snapshot = slots_[read % Capacity];
+          read_.store(read + 1, std::memory_order_release);
+          handler_(snapshot);
+        } else {
+          if (stopping_.load(std::memory_order_acquire)) return;
+          std::unique_lock<std::mutex> lock(wait_mutex_);
+          wake_.wait_for(lock, std::chrono::milliseconds(2));
+        }
+      }
+    });
+  }
+  bool submit(const T& snapshot) {
+    if (stopping_.load(std::memory_order_acquire)) { ++dropped_; return false; }
+    const size_t write = write_.load(std::memory_order_relaxed);
+    if (write - read_.load(std::memory_order_acquire) >= Capacity) { ++dropped_; return false; }
+    slots_[write % Capacity] = snapshot;
+    write_.store(write + 1, std::memory_order_release);
+    wake_.notify_one();
+    return true;
+  }
+  uint64_t dropped() const { return dropped_.load(std::memory_order_relaxed); }
+  void stop() {
+    stopping_.store(true, std::memory_order_release); wake_.notify_one();
+    if (worker_.joinable()) worker_.join();
+  }
+ private:
+  std::array<T, Capacity> slots_{};
+  alignas(64) std::atomic<size_t> write_{0};
+  alignas(64) std::atomic<size_t> read_{0};
+  std::atomic<uint64_t> dropped_{0};
+  std::atomic<bool> stopping_{true};
+  std::function<void(const T&)> handler_;
+  std::thread worker_;
+  std::condition_variable wake_; std::mutex wait_mutex_;
+};
+
 // Bounded multi-producer, single-consumer ring. Producers never wait for the
 // logger or its wakeup mutex. Per-slot sequence numbers publish immutable jobs.
 class AsyncDiagnostics {

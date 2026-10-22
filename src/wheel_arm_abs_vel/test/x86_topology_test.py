@@ -88,7 +88,7 @@ class X86Topology(unittest.TestCase):
             affinity.assert_called_once_with(0, set(BASELINE['background_cpus']))
             self.assertEqual(json.loads(os.environ['KUAVO_RUNTIME_PARTITION_JSON']), BASELINE)
             self.assertEqual(os.environ['KUAVO_IK_CPUS'], '14')
-            self.assertEqual(os.environ['KUAVO_IK_PRIORITY'], '40')
+            self.assertEqual(os.environ['KUAVO_IK_PRIORITY'], '70')
             self.assertEqual(os.environ['KUAVO_SCHED_APPLIED'], '1')
             execute.assert_called_once_with('/wrapper', ['/wrapper', 'ik', '/node'])
 
@@ -119,7 +119,7 @@ class Aaeon255h(unittest.TestCase):
                 self.assertEqual(source, str(partition.AAEON_PROFILE))
                 self.assertEqual(p['wbc_cpus'], [2, 3])
                 self.assertEqual(p['ik_cpus'], [5])
-                self.assertEqual(p['ik_fifo_priority'], 40)
+                self.assertEqual(p['ik_fifo_priority'], 70)
                 self.assertEqual(p['mapper_cpus'], [4])
                 self.assertEqual(p['driver_reserved_cpus'], [6, 7])
                 self.assertEqual(p['background_cpus'], [0, 1, 8, 9, 10, 11, 12, 13])

@@ -24,6 +24,8 @@ bash src/wheel_arm_abs_vel/scripts/platform_roslaunch.sh wheel_arm_abs_vel quest
 
 底盘默认锁定；上述 `base_locked:=false` 仅在ACTIVE跟随时启用左摇杆平移（各轴0.40 m/s）和右摇杆转向（0.45 rad/s）。暂停、失去正式参考或指令超时0.20秒即清零；详细操作和底盘网段说明见完整指南。
 
+新版输入操作说明见 [Quest / Pico 按键、头控与终端 o](docs/pico_quest_controls.md)。
+
 ## Selection
 
 Existing launch commands keep their existing behavior. The new selector defaults
@@ -225,6 +227,8 @@ hand_side 为 0=左手、1=右手、2=双手。服务会选择服务控制并执
 
 全身 IK 的 `quest_velocity_ik.launch` / `pico_velocity_ik.launch` 在 heiman 机型默认启用摸键切换：
 摸 X+A 持续 300 ms 切下一个，摸 X+B 持续 300 ms 切上一个；松开后才能再次切换。
+Quest 触摸 X+Y 再按 B 属于躯干组合，期间不执行末端手势步进。
+X+A 解锁默认保持折叠臂；Quest 用上述组合、Pico 用 Y+RT 开关躯干。Pico 建议先按 Y 再捏 RT，避免先单独捏 RT 控制夹爪。操作、松开后的夹爪接管及复位行为见 [Quest/Pico 操作说明](docs/pico_quest_controls.md)。
 同时按下组合键不触发手势切换，避免与手臂解锁冲突。
 VR 使用 `/sg100/vr_step_gesture`（同 SG100StepGesture 类型），要求新鲜扳机输入，
 切换双手手势并接管 VR 控制；松开扳机使用 YAML 第一列，捏住扳机向第二列插值。

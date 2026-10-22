@@ -1707,6 +1707,10 @@ namespace ocs2
                 return;
             }
 
+            // Formal absolute IK handles torso permission and end-effector
+            // arbitration together in the mapper; never run legacy torso writers.
+            if (enable_velocity_ik_takeover_) return;
+
             const bool legacy_torso_toggle_modifier =
                 joystick_data_.left_first_button_touched && joystick_data_.left_second_button_touched;
 

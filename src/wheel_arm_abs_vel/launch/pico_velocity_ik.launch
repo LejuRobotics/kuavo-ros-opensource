@@ -1,32 +1,304 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0"?>
 <launch>
+  <arg name="filter_tuning_enabled" default="$(optenv KUAVO_ABS_FILTER_TUNING true)" />
+  <!--Pico transport entry; all control defaults and overrides are shared with Quest.-->
+  <arg name="ip_address" default="" />
+  <arg name="robot_ip" default="" />
+  <arg name="broadcast_ip" default="" />
   <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
   <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
-  <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
-  <env name="KUAVO_ARM_DRIVER_RESERVED_CPUS" value="$(arg arm_driver_reserved_cpus)" />
+  <arg name="j3_overshoot_profile" default="true" />
+  <arg name="j3_kd" default="18.0" />
+  <arg name="communication_full_rate_audit" default="false" />
+  <arg name="communication_second_round_enabled" default="true" />
+  <arg name="legacy_pico_profile" default="false" />
   <arg name="reference_transport" default="shm" />
   <arg name="reference_shm_key" default="344421" />
   <arg name="owner_shm_key" default="344422" />
-  <!-- Source/devel workspace shortcut to the package-local velocity IK input. -->
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <arg name="input_source" value="pico" />
+  <arg name="hold_on_input_timeout" default="true" />
+  <arg name="pico_port" default="12345" />
+  <arg name="pico_peer_ip" default="$(arg ip_address)" />
+  <arg name="pico_advertise_ip" default="$(arg robot_ip)" />
+  <arg name="pico_broadcast_ip" default="$(arg broadcast_ip)" />
+  <arg name="pico_calibration_file" default="$(find wheel_arm_abs_vel)/config/pico_quest_input.yaml" />
+  <arg name="execution_governor_enabled" default="true" />
+  <arg name="wrist_envelope_enabled" default="$(arg filter_tuning_enabled)" />
+  <arg name="vr_kalman_flattening_enabled" default="false" />
+  <arg name="vr_kalman_enabled" default="true" />
+  <arg name="continuous_reference_enabled" default="true" />
+  <arg name="hand_reference_frequency" default="12.0" />
+  <arg name="orientation_reference_mode" default="fixed_bandwidth" />
+  <arg name="hand_position_cutoff_hz" default="10.0" />
+  <arg name="hand_orientation_cutoff_hz" default="8.0" />
+  <arg name="joint_jerk_enabled" default="true" />
+  <arg name="adaptive_reference_enabled" default="true" />
+  <arg name="innovation_reference_enabled" default="true" />
+  <arg name="torso_reference_frequency" default="2.5" />
+  <arg name="operating_temporal_config" default="$(find wheel_arm_abs_vel)/config/operating_temporal_experiment.yaml" />
+  <arg name="operating_envelope_enabled" default="true" />
+  <arg name="temporal_cost_enabled" default="true" />
+  <arg name="operating_diagnostics_enabled" default="true" />
+  <arg name="velocity_tcp_geometry_file" default="" />
+  <arg name="enable_vr_ik_debug" default="false" />
+  <arg name="wheel_ik" default="true" />
+  <arg name="enable_ik_velocity_limit" default="false" />
+  <arg name="enable_velocity_ik_takeover" default="true" />
+  <arg name="whole_body_shadow_isolate_position_ik" default="false" />
+  <arg name="enable_position_ik_status_log" default="false" />
+  <arg name="velocity_ik_feasibility_mode" default="active" />
+  <arg name="velocity_ik_nominal_arm_reach" default="0.70937088" />
+  <arg name="velocity_ik_selected_reach_reserve" default="0.03" />
+  <arg name="velocity_ik_joint_safe_range_ratios" default="[0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8]" />
+  <arg name="velocity_ik_joint_safe_center" default="[0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0, 0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0]" />
+  <arg name="tracking_source_mode" default="controller" />
+  <arg name="publish_tracking_mapping_debug" default="$(arg enable_vr_ik_debug)" />
+  <arg name="record_task07_debug_bag" default="false" />
+  <arg name="task07_debug_bag_dir" default="$(env HOME)/.ros/task07" />
+  <arg name="version" default="4" />
+  <arg name="ctrl_arm_idx" default="2" />
+  <arg name="ik_type_idx" default="0" />
+  <arg name="control_torso" default="true" />
+  <arg name="dexhand_front_trigger" default="true" doc="Both front triggers independently command six dexhand channels, 0=open and 100=closed." />
+  <arg name="control_finger_type" default="0" />
+  <arg name="predict_gesture" default="false" />
   <arg name="ee_type" default="auto" doc="Read EndEffectorType from this robot version kuavo.json; optional explicit override" />
-  <arg name="ip_address" default="192.168.5.240" />
-  <arg name="robot_ip" default="192.168.5.242" />
-  <arg name="broadcast_ip" default="192.168.5.255" />
+  <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
+  <arg name="enable_head_control" default="false" />
+  <arg name="enable_terminal_start" default="false" />
+  <arg name="hand_reference_mode" default="thumb_index" />
+  <arg name="use_arm_collision" default="false" />
+  <arg name="use_two_stage_ik" default="false" />
+  <arg name="use_step_turning" default="false" />
+  <arg name="use_cpp_monitor" default="false" />
+  <arg name="use_cpp_incremental_ik" default="false" />
+  <arg name="enable_vr_stop_robot" default="true" />
+  <arg name="enable_absolute_target_alignment" default="$(arg wheel_ik)" />
+  <arg name="enable_absolute_start_gap_check" default="false" />
+  <arg name="absolute_enable_max_position_error" default="0.30" />
+  <arg name="absolute_enable_max_orientation_error" default="0.35" />
+  <arg name="absolute_enable_max_vr_age" default="0.25" />
+  <arg name="absolute_enable_max_joint_state_age" default="0.10" />
+  <arg name="absolute_enable_mode_timeout" default="3.0" />
+  <arg name="absolute_enable_service_timeout" default="2.0" />
+  <arg name="absolute_enable_exit_mode" default="0" />
+  <arg name="enable_absolute_discontinuity_guard" default="true" />
+  <arg name="absolute_max_tcp_position_step" default="0.15" />
+  <arg name="absolute_max_tcp_orientation_step" default="1.0472" />
+  <arg name="absolute_max_joint_step" default="0.25" />
+  <arg name="absolute_ik_trust_region_step" default="0.25" />
+  <arg name="absolute_hard_recovery_successes" default="3" />
+  <arg name="absolute_hard_target_max_step" default="0.25" />
+  <arg name="absolute_hard_recovery_max_offset" default="0.25" />
+  <arg name="absolute_hard_recovery_stability_step" default="0.05" />
+  <arg name="absolute_execution_max_joint_velocity" default="1.5" />
+  <arg name="absolute_execution_max_joint_acceleration" default="6.0" />
+  <arg name="absolute_execution_min_joint_limit_margin" default="0.03" />
+  <arg name="tracking_rearm_stable_frames" default="3" />
+  <arg name="single_hand_mode" default="false" />
+  <arg name="use_arm_only_ik" default="false" />
+  <arg name="init_control_waist_enable" default="true" />
+  <arg name="enable_timestamp_log" default="false" />
+  <arg name="use_pico" default="false" />
+  <arg name="enable_videostream" default="false" />
+  <arg name="camera_publisher_name" default="/camera/color" />
+  <arg name="task_space_acc_limit" default="500.0" />
+  <arg name="task_space_jerk_limit" default="3000.0" />
+  <arg name="joint_space_acc_limit" default="500.0" />
+  <arg name="joint_space_jerk_limit" default="3000.0" />
+  <arg name="max_joint_velocity" default="30.0" />
+  <arg name="delta_scale_x" default="1.26" />
+  <arg name="delta_scale_y" default="1.26" />
+  <arg name="delta_scale_z" default="1.26" />
+  <arg name="delta_scale_roll" default="1.0" />
+  <arg name="delta_scale_pitch" default="1.0" />
+  <arg name="delta_scale_yaw" default="1.0" />
+  <arg name="max_pos_diff" default="0.45" />
+  <arg name="arm_move_threshold" default="0.002" />
+  <arg name="reset_joint_to_default" default="true" />
+  <arg name="pos_vel_limit" default="30.0" />
+  <arg name="fhan_r" default="3000.0" />
+  <arg name="fhan_kh0" default="3.0" />
+  <arg name="fhan_r_joint" default="6000.0" />
+  <arg name="fhan_kh0_joint" default="3.0" />
+  <arg name="ik_ros_fhan_r" default="3000.0" />
+  <arg name="ik_ros_fhan_kh0" default="4.0" />
+  <arg name="ik_ros_fhan_r_joint" default="3000.0" />
+  <arg name="ik_ros_fhan_kh0_joint" default="4.0" />
+  <arg name="ik_ros_max_joint_velocity" default="300.0" />
+  <arg name="left_hand_quat_offset_roll" default="0.0" />
+  <arg name="left_hand_quat_offset_pitch" default="0.0" />
+  <arg name="left_hand_quat_offset_yaw" default="0.0" />
+  <arg name="right_hand_quat_offset_roll" default="0.0" />
+  <arg name="right_hand_quat_offset_pitch" default="0.0" />
+  <arg name="right_hand_quat_offset_yaw" default="0.0" />
+  <arg name="sphere_radius_limit" default="0.6" />
+  <arg name="min_reachable_distance" default="0.08" />
+  <arg name="elbow_min_distance" default="0.16" />
+  <arg name="elbow_max_distance" default="0.24" />
+  <arg name="use_incremental_hand_orientation" default="false" />
+  <arg name="limit_shoulder_pitch_upper" default="false" />
+  <arg name="shoulder_pitch_upper_limit" default="0.3" />
+  <arg name="box_min_bound" default="[0.00, -0.6, -0.19]" />
+  <arg name="box_max_bound" default="[0.4, 0.6, 0.4]" />
+  <arg name="chest_offset_y_ax" default="0.05" />
+  <arg name="left_center" default="[0, 0.02, 0]" />
+  <arg name="right_center" default="[0, -0.02, 0]" />
+  <arg name="default_left_hand_pos_on_exit" default="[0.00, 0.293, -0.16]" />
+  <arg name="default_right_hand_pos_on_exit" default="[0.00, -0.293, -0.16]" />
+  <arg name="hand_changing_mode_threshold" default="1.20" />
+  <arg name="zyx_limits_final" default="[1.4923, 1.4923, 1.4923]" />
+  <arg name="zyx_limits_ee" default="[1.4923, 1.4923, 1.4923]" />
+  <arg name="zyx_limits_link4" default="[1.5708, 0.6, 0.6]" />
   <include file="$(find wheel_arm_abs_vel)/launch/quest_velocity_ik.launch">
+    <arg name="filter_tuning_enabled" value="$(arg filter_tuning_enabled)" />
+    <arg name="wrist_envelope_enabled" value="$(arg wrist_envelope_enabled)" />
     <arg name="require_ik_hard_isolation" value="$(arg require_ik_hard_isolation)" />
     <arg name="arm_driver_reserved_cpus" value="$(arg arm_driver_reserved_cpus)" />
-    <arg name="robot_version" value="$(arg robot_version)" />
-    <arg name="ee_type" value="$(arg ee_type)" />
-    <arg name="input_source" value="pico" />
-    <arg name="hand_position_cutoff_hz" value="10.0" />
-    <arg name="hand_orientation_cutoff_hz" value="8.0" />
-    <arg name="enable_head_control" value="false" />
-    <arg name="pico_peer_ip" value="$(arg ip_address)" />
-    <arg name="pico_advertise_ip" value="$(arg robot_ip)" />
-    <arg name="pico_broadcast_ip" value="$(arg broadcast_ip)" />
+    <arg name="j3_overshoot_profile" value="$(arg j3_overshoot_profile)" />
+    <arg name="j3_kd" value="$(arg j3_kd)" />
+    <arg name="communication_full_rate_audit" value="$(arg communication_full_rate_audit)" />
+    <arg name="communication_second_round_enabled" value="$(arg communication_second_round_enabled)" />
+    <arg name="legacy_pico_profile" value="$(arg legacy_pico_profile)" />
     <arg name="reference_transport" value="$(arg reference_transport)" />
     <arg name="reference_shm_key" value="$(arg reference_shm_key)" />
     <arg name="owner_shm_key" value="$(arg owner_shm_key)" />
+    <arg name="robot_version" value="$(arg robot_version)" />
+    <arg name="input_source" value="pico" />
+    <arg name="hold_on_input_timeout" value="$(arg hold_on_input_timeout)" />
+    <arg name="pico_port" value="$(arg pico_port)" />
+    <arg name="pico_peer_ip" value="$(arg pico_peer_ip)" />
+    <arg name="pico_advertise_ip" value="$(arg pico_advertise_ip)" />
+    <arg name="pico_broadcast_ip" value="$(arg pico_broadcast_ip)" />
+    <arg name="pico_calibration_file" value="$(arg pico_calibration_file)" />
+    <arg name="execution_governor_enabled" value="$(arg execution_governor_enabled)" />
+    <arg name="vr_kalman_flattening_enabled" value="$(arg vr_kalman_flattening_enabled)" />
+    <arg name="vr_kalman_enabled" value="$(arg vr_kalman_enabled)" />
+    <arg name="continuous_reference_enabled" value="$(arg continuous_reference_enabled)" />
+    <arg name="hand_reference_frequency" value="$(arg hand_reference_frequency)" />
+    <arg name="orientation_reference_mode" value="$(arg orientation_reference_mode)" />
+    <arg name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" />
+    <arg name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" />
+    <arg name="joint_jerk_enabled" value="$(arg joint_jerk_enabled)" />
+    <arg name="adaptive_reference_enabled" value="$(arg adaptive_reference_enabled)" />
+    <arg name="innovation_reference_enabled" value="$(arg innovation_reference_enabled)" />
+    <arg name="torso_reference_frequency" value="$(arg torso_reference_frequency)" />
+    <arg name="operating_temporal_config" value="$(arg operating_temporal_config)" />
+    <arg name="operating_envelope_enabled" value="$(arg operating_envelope_enabled)" />
+    <arg name="temporal_cost_enabled" value="$(arg temporal_cost_enabled)" />
+    <arg name="operating_diagnostics_enabled" value="$(arg operating_diagnostics_enabled)" />
+    <arg name="velocity_tcp_geometry_file" value="$(arg velocity_tcp_geometry_file)" />
+    <arg name="enable_vr_ik_debug" value="$(arg enable_vr_ik_debug)" />
+    <arg name="wheel_ik" value="$(arg wheel_ik)" />
+    <arg name="enable_ik_velocity_limit" value="$(arg enable_ik_velocity_limit)" />
+    <arg name="enable_velocity_ik_takeover" value="$(arg enable_velocity_ik_takeover)" />
+    <arg name="whole_body_shadow_isolate_position_ik" value="$(arg whole_body_shadow_isolate_position_ik)" />
+    <arg name="enable_position_ik_status_log" value="$(arg enable_position_ik_status_log)" />
+    <arg name="velocity_ik_feasibility_mode" value="$(arg velocity_ik_feasibility_mode)" />
+    <arg name="velocity_ik_nominal_arm_reach" value="$(arg velocity_ik_nominal_arm_reach)" />
+    <arg name="velocity_ik_selected_reach_reserve" value="$(arg velocity_ik_selected_reach_reserve)" />
+    <arg name="velocity_ik_joint_safe_range_ratios" value="$(arg velocity_ik_joint_safe_range_ratios)" />
+    <arg name="velocity_ik_joint_safe_center" value="$(arg velocity_ik_joint_safe_center)" />
+    <arg name="tracking_source_mode" value="$(arg tracking_source_mode)" />
+    <arg name="publish_tracking_mapping_debug" value="$(arg publish_tracking_mapping_debug)" />
+    <arg name="record_task07_debug_bag" value="$(arg record_task07_debug_bag)" />
+    <arg name="task07_debug_bag_dir" value="$(arg task07_debug_bag_dir)" />
+    <arg name="version" value="$(arg version)" />
+    <arg name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
+    <arg name="ik_type_idx" value="$(arg ik_type_idx)" />
+    <arg name="ip_address" value="$(arg ip_address)" />
+    <arg name="control_torso" value="$(arg control_torso)" />
+    <arg name="dexhand_front_trigger" value="$(arg dexhand_front_trigger)" />
+    <arg name="control_finger_type" value="$(arg control_finger_type)" />
+    <arg name="predict_gesture" value="$(arg predict_gesture)" />
+    <arg name="ee_type" value="$(arg ee_type)" />
+    <arg name="sg100_enabled" value="$(arg sg100_enabled)" />
+    <arg name="enable_head_control" value="$(arg enable_head_control)" />
+    <arg name="enable_terminal_start" value="$(arg enable_terminal_start)" />
+    <arg name="hand_reference_mode" value="$(arg hand_reference_mode)" />
+    <arg name="use_arm_collision" value="$(arg use_arm_collision)" />
+    <arg name="use_two_stage_ik" value="$(arg use_two_stage_ik)" />
+    <arg name="use_step_turning" value="$(arg use_step_turning)" />
+    <arg name="use_cpp_monitor" value="$(arg use_cpp_monitor)" />
+    <arg name="use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)" />
+    <arg name="enable_vr_stop_robot" value="$(arg enable_vr_stop_robot)" />
+    <arg name="enable_absolute_target_alignment" value="$(arg enable_absolute_target_alignment)" />
+    <arg name="enable_absolute_start_gap_check" value="$(arg enable_absolute_start_gap_check)" />
+    <arg name="absolute_enable_max_position_error" value="$(arg absolute_enable_max_position_error)" />
+    <arg name="absolute_enable_max_orientation_error" value="$(arg absolute_enable_max_orientation_error)" />
+    <arg name="absolute_enable_max_vr_age" value="$(arg absolute_enable_max_vr_age)" />
+    <arg name="absolute_enable_max_joint_state_age" value="$(arg absolute_enable_max_joint_state_age)" />
+    <arg name="absolute_enable_mode_timeout" value="$(arg absolute_enable_mode_timeout)" />
+    <arg name="absolute_enable_service_timeout" value="$(arg absolute_enable_service_timeout)" />
+    <arg name="absolute_enable_exit_mode" value="$(arg absolute_enable_exit_mode)" />
+    <arg name="enable_absolute_discontinuity_guard" value="$(arg enable_absolute_discontinuity_guard)" />
+    <arg name="absolute_max_tcp_position_step" value="$(arg absolute_max_tcp_position_step)" />
+    <arg name="absolute_max_tcp_orientation_step" value="$(arg absolute_max_tcp_orientation_step)" />
+    <arg name="absolute_max_joint_step" value="$(arg absolute_max_joint_step)" />
+    <arg name="absolute_ik_trust_region_step" value="$(arg absolute_ik_trust_region_step)" />
+    <arg name="absolute_hard_recovery_successes" value="$(arg absolute_hard_recovery_successes)" />
+    <arg name="absolute_hard_target_max_step" value="$(arg absolute_hard_target_max_step)" />
+    <arg name="absolute_hard_recovery_max_offset" value="$(arg absolute_hard_recovery_max_offset)" />
+    <arg name="absolute_hard_recovery_stability_step" value="$(arg absolute_hard_recovery_stability_step)" />
+    <arg name="absolute_execution_max_joint_velocity" value="$(arg absolute_execution_max_joint_velocity)" />
+    <arg name="absolute_execution_max_joint_acceleration" value="$(arg absolute_execution_max_joint_acceleration)" />
+    <arg name="absolute_execution_min_joint_limit_margin" value="$(arg absolute_execution_min_joint_limit_margin)" />
+    <arg name="tracking_rearm_stable_frames" value="$(arg tracking_rearm_stable_frames)" />
+    <arg name="single_hand_mode" value="$(arg single_hand_mode)" />
+    <arg name="use_arm_only_ik" value="$(arg use_arm_only_ik)" />
+    <arg name="init_control_waist_enable" value="$(arg init_control_waist_enable)" />
+    <arg name="enable_timestamp_log" value="$(arg enable_timestamp_log)" />
+    <arg name="use_pico" value="$(arg use_pico)" />
+    <arg name="enable_videostream" value="$(arg enable_videostream)" />
+    <arg name="camera_publisher_name" value="$(arg camera_publisher_name)" />
+    <arg name="task_space_acc_limit" value="$(arg task_space_acc_limit)" />
+    <arg name="task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
+    <arg name="joint_space_acc_limit" value="$(arg joint_space_acc_limit)" />
+    <arg name="joint_space_jerk_limit" value="$(arg joint_space_jerk_limit)" />
+    <arg name="max_joint_velocity" value="$(arg max_joint_velocity)" />
+    <arg name="delta_scale_x" value="$(arg delta_scale_x)" />
+    <arg name="delta_scale_y" value="$(arg delta_scale_y)" />
+    <arg name="delta_scale_z" value="$(arg delta_scale_z)" />
+    <arg name="delta_scale_roll" value="$(arg delta_scale_roll)" />
+    <arg name="delta_scale_pitch" value="$(arg delta_scale_pitch)" />
+    <arg name="delta_scale_yaw" value="$(arg delta_scale_yaw)" />
+    <arg name="max_pos_diff" value="$(arg max_pos_diff)" />
+    <arg name="arm_move_threshold" value="$(arg arm_move_threshold)" />
+    <arg name="reset_joint_to_default" value="$(arg reset_joint_to_default)" />
+    <arg name="pos_vel_limit" value="$(arg pos_vel_limit)" />
+    <arg name="fhan_r" value="$(arg fhan_r)" />
+    <arg name="fhan_kh0" value="$(arg fhan_kh0)" />
+    <arg name="fhan_r_joint" value="$(arg fhan_r_joint)" />
+    <arg name="fhan_kh0_joint" value="$(arg fhan_kh0_joint)" />
+    <arg name="ik_ros_fhan_r" value="$(arg ik_ros_fhan_r)" />
+    <arg name="ik_ros_fhan_kh0" value="$(arg ik_ros_fhan_kh0)" />
+    <arg name="ik_ros_fhan_r_joint" value="$(arg ik_ros_fhan_r_joint)" />
+    <arg name="ik_ros_fhan_kh0_joint" value="$(arg ik_ros_fhan_kh0_joint)" />
+    <arg name="ik_ros_max_joint_velocity" value="$(arg ik_ros_max_joint_velocity)" />
+    <arg name="left_hand_quat_offset_roll" value="$(arg left_hand_quat_offset_roll)" />
+    <arg name="left_hand_quat_offset_pitch" value="$(arg left_hand_quat_offset_pitch)" />
+    <arg name="left_hand_quat_offset_yaw" value="$(arg left_hand_quat_offset_yaw)" />
+    <arg name="right_hand_quat_offset_roll" value="$(arg right_hand_quat_offset_roll)" />
+    <arg name="right_hand_quat_offset_pitch" value="$(arg right_hand_quat_offset_pitch)" />
+    <arg name="right_hand_quat_offset_yaw" value="$(arg right_hand_quat_offset_yaw)" />
+    <arg name="sphere_radius_limit" value="$(arg sphere_radius_limit)" />
+    <arg name="min_reachable_distance" value="$(arg min_reachable_distance)" />
+    <arg name="elbow_min_distance" value="$(arg elbow_min_distance)" />
+    <arg name="elbow_max_distance" value="$(arg elbow_max_distance)" />
+    <arg name="use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)" />
+    <arg name="limit_shoulder_pitch_upper" value="$(arg limit_shoulder_pitch_upper)" />
+    <arg name="shoulder_pitch_upper_limit" value="$(arg shoulder_pitch_upper_limit)" />
+    <arg name="box_min_bound" value="$(arg box_min_bound)" />
+    <arg name="box_max_bound" value="$(arg box_max_bound)" />
+    <arg name="chest_offset_y_ax" value="$(arg chest_offset_y_ax)" />
+    <arg name="left_center" value="$(arg left_center)" />
+    <arg name="right_center" value="$(arg right_center)" />
+    <arg name="default_left_hand_pos_on_exit" value="$(arg default_left_hand_pos_on_exit)" />
+    <arg name="default_right_hand_pos_on_exit" value="$(arg default_right_hand_pos_on_exit)" />
+    <arg name="hand_changing_mode_threshold" value="$(arg hand_changing_mode_threshold)" />
+    <arg name="zyx_limits_final" value="$(arg zyx_limits_final)" />
+    <arg name="zyx_limits_ee" value="$(arg zyx_limits_ee)" />
+    <arg name="zyx_limits_link4" value="$(arg zyx_limits_link4)" />
   </include>
 </launch>

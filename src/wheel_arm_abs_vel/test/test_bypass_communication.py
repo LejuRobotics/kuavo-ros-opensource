@@ -137,25 +137,54 @@ class BypassTest(unittest.TestCase):
         proc.gate_lock = threading.Lock()
         packets, conversions = [], []
         proc.socket = types.SimpleNamespace(send=lambda data, flags: packets.append(data) or len(data))
-        message = types.SimpleNamespace(serialize=lambda out: conversions.append(1) or out.write(b"x"))
+        class RawMessage:
+            __slots__ = ("data",)
+            _slot_types = ("float64[]",)
+            def __init__(self): self.data = [1., 2.]
+            def serialize(self, out): raise AssertionError("ROS serialization in parent")
+        message = RawMessage()
         with patch.object(noncontrol.time, "monotonic", side_effect=[1., 1.002, 1.002, 1.011]):
             self.assertTrue(proc.submit(0, message))
             self.assertFalse(proc.submit(0, message))
             self.assertTrue(proc.submit(1, message))
             self.assertTrue(proc.submit(0, message))
-        self.assertEqual(len(conversions), 3)
+        self.assertEqual(len(packets), 3)
+        message.data[0] = 99.
+        self.assertEqual(noncontrol.marshal.loads(packets[0][noncontrol._HEADER.size:]), ((1., 2.),))
         proc.period = 0.
         with patch.object(noncontrol.time, "monotonic", return_value=2.):
             for _ in range(10):
                 self.assertTrue(proc.submit(0, message))
 
+    def test_primitive_snapshot_roundtrip_all_allowed_ros_types(self):
+        import numpy as np
+        from roslib.message import get_message_class
+        from visualization_msgs.msg import Marker
+        for _, name, _ in noncontrol.CHANNELS:
+            message = get_message_class(name)()
+            if name == "visualization_msgs/MarkerArray":
+                marker = Marker(); marker.pose.position.x = np.float64(.123)
+                marker.header.stamp.secs = 12; marker.header.stamp.nsecs = 34
+                marker.ns = "immutable nested marker"
+                message.markers = [marker]
+            if name in ("std_msgs/Float64MultiArray", "std_msgs/Float32MultiArray"):
+                message.data = [np.float64(.25), np.float64(-.5)]
+            if name == "sensor_msgs/JointState":
+                message.name = ["left", "right"]
+                message.position = np.array([.1, .2])
+            frozen = noncontrol.marshal.loads(noncontrol.marshal.dumps(noncontrol.message_snapshot(message)))
+            restored = noncontrol.restore_message(get_message_class(name)(), frozen, get_message_class)
+            before, after = io.BytesIO(), io.BytesIO()
+            message.serialize(before); restored.serialize(after)
+            self.assertEqual(before.getvalue(), after.getvalue(), name)
+
     def worker_output(self, coalesce):
         left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         output = {}
         class Message:
-            def deserialize(self, payload):
-                self.payload = payload
-                return self
+            __slots__ = ("payload",)
+            _slot_types = ("uint8[]",)
+            def __init__(self): self.payload = b""
         def publisher(topic, *args, **kwargs):
             output[topic] = []
             return types.SimpleNamespace(
@@ -163,7 +192,7 @@ class BypassTest(unittest.TestCase):
         topics = [spec[0] for spec in noncontrol.CHANNELS]
         now = noncontrol.time.monotonic_ns()
         for index, payload in [(0, b"old"), (1, b"other"), (0, b"new")]:
-            left.send(noncontrol._HEADER.pack(noncontrol._MAGIC, index, now) + payload)
+            left.send(noncontrol._HEADER.pack(noncontrol._MAGIC, index, now) + noncontrol.marshal.dumps((payload,)))
         with patch("rospy.init_node"), patch("rospy.signal_shutdown"), patch(
                 "rospy.is_shutdown", side_effect=[False, True]), patch(
                 "rospy.Publisher", side_effect=publisher), patch(

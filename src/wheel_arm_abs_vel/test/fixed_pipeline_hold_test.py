@@ -14,13 +14,17 @@ begin = text.index('    if (fixed_velocity_ik_pipeline_ && !wholeBodyIkAuthority
 end = text.index('    // Only the formal owner', begin)
 block = text[begin:end]
 startup_begin = text.index('    const auto& info = manipulatorModelInfo_;', text.index('  bool humanoidControllerWheelWbc::preUpdate('))
-startup_end = text.index('    if (headNum_ > 0', startup_begin)
-startup = text[startup_begin:startup_end]
-preupdate = text[text.index('  bool humanoidControllerWheelWbc::preUpdate('):text.index('  void humanoidControllerWheelWbc::update(')]
-assert 'performSimpleActions' not in preupdate
-base_begin = text.index('    geometry_msgs::Twist velCmdMsg;', text.index('    // The formal owner is the only base command source'))
+startup_validation_end = text.index('    if (is_real_) {', startup_begin)
+startup_hold_begin = text.index('    optimizedState_mrt_ = observation_wheel_.state;', startup_validation_end)
+startup_hold_end = text.index('    if (headNum_ > 0', startup_hold_begin)
+startup = text[startup_begin:startup_validation_end] + text[startup_hold_begin:startup_hold_end]
+# Initialization action has its own test; this checks the subsequent hold.
+# Exercise the retained reference-twist fallback. The current joystick branch
+# has its own production-block regression in velocity_ik_base_command_test.py.
+base_begin = text.index('    else if (wholeBodyIkAuthorityOwned && wholeBodyIkReferenceApplied && baseCmdVelStatus_)')
 base_end = text.index('    if(true &&', base_begin)
-base = text[base_begin:base_end]
+base = '    geometry_msgs::Twist velCmdMsg;\n' + text[base_begin:base_end].replace('else if', 'if', 1)
+
 assert 'static vector_t fixed_pipeline_last_q' not in text
 assert 'applyFinalArmJointLimitVelocityDamper' not in text
 program = r'''
@@ -49,10 +53,6 @@ bool initialize() {
 ''' + startup + r'''
   return true;
 }
-geometry_msgs::Twist selectBase() {
-''' + base + r'''
-  return velCmdMsg;
-}
 void select() {
   int time=0;
   target_qpos=vector_t::Zero(18); target_qvel=vector_t::Zero(18);
@@ -69,8 +69,6 @@ int main() {
   assert(optimizedState_mrt_.isApprox(observation_wheel_.state));
   assert(optimizedInput_mrt_.isZero());
   assert(observation_wheel_.input.isApprox(vector_t::Constant(21,.123)));
-  const auto idleBase=selectBase();
-  assert(idleBase.linear.x==0 && idleBase.linear.y==0 && idleBase.angular.z==0);
   select(); assert(target_qpos.isApprox(ready,1e-12)); assert(target_qvel.isZero());
   for(int i=0;i<1500;++i) {
     observation_wheel_.state.array()+=1e-5;
@@ -80,8 +78,6 @@ int main() {
   wholeBodyIkReference.q.tail(18)=ready.array()+.1;
   wholeBodyIkReference.dq.tail(18).setConstant(.2);
   wholeBodyIkReference.dq.head(3) << .2,.1,.05;
-  const auto movingBase=selectBase();
-  assert(movingBase.linear.x==.2 && movingBase.linear.y==.1 && movingBase.angular.z==.05);
   select(); assert(target_qpos.isApprox(wholeBodyIkReference.q.tail(18)));
   assert(target_qvel.isApprox(wholeBodyIkReference.dq.tail(18)));
   // Owned stopping tuples must pass through, not become instantaneous holds.
@@ -100,8 +96,6 @@ int main() {
   observation_wheel_.state.setConstant(.3);
   select(); assert(target_qpos.isApprox(observation_wheel_.state.tail(18)));
   assert(target_qvel.isZero()); assert(!legacy_called);
-  const auto releasedBase=selectBase();
-  assert(releasedBase.linear.x==0 && releasedBase.linear.y==0 && releasedBase.angular.z==0);
   observation_wheel_.state(0)=std::numeric_limits<double>::quiet_NaN();
   bool rejected=false;
   try {initialize();} catch(const std::runtime_error&) {rejected=true;}

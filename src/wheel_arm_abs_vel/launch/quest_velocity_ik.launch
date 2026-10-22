@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <launch>
+  <arg name="filter_tuning_enabled" default="$(optenv KUAVO_ABS_FILTER_TUNING true)" />
   <arg name="require_ik_hard_isolation" default="$(optenv KUAVO_REQUIRE_IK_HARD_ISOLATION false)" />
   <arg name="arm_driver_reserved_cpus" default="$(optenv KUAVO_ARM_DRIVER_RESERVED_CPUS 7)" />
   <env name="KUAVO_REQUIRE_IK_HARD_ISOLATION" value="$(arg require_ik_hard_isolation)" />
@@ -20,7 +21,7 @@
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <!-- Pico adapts to Quest input semantics; keep legacy use_pico=false. -->
   <arg name="input_source" default="quest" />
-  <arg name="hold_on_input_timeout" default="$(eval arg('input_source') != 'pico')" />
+  <arg name="hold_on_input_timeout" default="true" />
   <arg name="pico_port" default="12345" />
   <arg name="pico_peer_ip" default="" />
   <arg name="pico_advertise_ip" default="" />
@@ -28,6 +29,8 @@
   <arg name="pico_calibration_file" default="$(find wheel_arm_abs_vel)/config/pico_quest_input.yaml" />
   <param name="/vr_input_source" value="$(eval {'quest': 'quest', 'pico': 'pico'}[arg('input_source')])" />
   <arg name="execution_governor_enabled" default="true" />
+  <arg name="wrist_envelope_enabled" default="$(arg filter_tuning_enabled)" />
+  <arg name="vr_kalman_flattening_enabled" default="false" />
   <arg name="vr_kalman_enabled" default="true" />
   <arg name="continuous_reference_enabled" default="true" />
   <arg name="hand_reference_frequency" default="12.0" />
@@ -80,6 +83,11 @@
   <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- 头部指令由机器端 head_control_node 发布。 -->
   <arg name="enable_head_control" default="false" />
+  <arg name="enable_terminal_start" default="false" />
+  <!-- Input-terminal alternative to long A; controller-terminal keyboard remains unchanged. -->
+  <node pkg="wheel_arm_abs_vel" type="terminal_initial_start.py" name="absolute_terminal_start"
+        output="screen" if="$(arg enable_terminal_start)"
+        launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <arg name="hand_reference_mode" default="thumb_index" />
   <arg name="use_arm_collision" default="false" />
   <arg name="use_two_stage_ik" default="false" />
@@ -249,6 +257,7 @@
     <param name="use_legacy_shoulder_pitch_cap" value="$(arg limit_shoulder_pitch_upper)" type="bool" />
     <param name="legacy_shoulder_pitch_upper" value="$(arg shoulder_pitch_upper_limit)" type="double" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/fixed_base_18d.yaml" />
+    <param name="wrist_envelope/enabled" value="$(arg wrist_envelope_enabled)" type="bool" />
     <param name="continuous_reference_enabled" value="$(arg continuous_reference_enabled)" />
     <param name="adaptive_reference/enabled" value="$(arg adaptive_reference_enabled)" />
     <param name="innovation_reference/enabled" value="$(arg innovation_reference_enabled)" />
@@ -275,6 +284,7 @@
     <remap from="/whole_body_velocity_ik/reference/execution_owner" to="$(eval '/whole_body_velocity_ik/reference/execution_owner' + ('/shm_mirror' if arg('reference_transport') == 'shm' else ''))" />
     <param name="dexhand_front_trigger" value="$(arg dexhand_front_trigger)" type="bool" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/vr_kalman.yaml" />
+    <param name="vr_kalman_flattening/enabled" value="$(eval arg('filter_tuning_enabled') and arg('vr_kalman_flattening_enabled'))" type="bool" />
     <param name="vr_kalman_enabled" value="$(arg vr_kalman_enabled)" />
     <!-- Tiny covariance solves must not create a BLAS thread pool. -->
     <env name="OPENBLAS_NUM_THREADS" value="1" />
@@ -337,6 +347,7 @@
     <arg name="advertise_ip" value="$(arg pico_advertise_ip)" />
     <arg name="broadcast_ip" value="$(arg pico_broadcast_ip)" />
     <arg name="calibration_file" value="$(arg pico_calibration_file)" />
+    <arg name="enable_head_control" value="$(arg enable_head_control)" />
   </include>
   <node pkg="motion_capture_ik" type="torso_joystick_node.py" name="torso_joystick_node" output="screen" if="$(arg single_hand_mode)" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py" name="webrtc_videostream" output="screen" args="$(arg camera_publisher_name) $(arg ip_address)" if="$(arg enable_videostream)" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />

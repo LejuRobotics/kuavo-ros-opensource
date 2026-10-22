@@ -3,7 +3,7 @@
 Only immutable serialized snapshots cross bounded nonblocking IPC. No target,
 hand, head/body command, or lifecycle acknowledgement topic is accepted here.
 """
-import io
+import marshal
 import json
 import os
 from pathlib import Path
@@ -31,9 +31,45 @@ CHANNELS = [
     ("/joint_states", "sensor_msgs/JointState", 10),
 ]
 _HEADER = struct.Struct("<4sHQ")
-_MAGIC = b"KDP1"
+_MAGIC = b"KDP2"
 _MAX_PAYLOAD = 65536
 _dispatcher = None
+
+def message_snapshot(value):
+    """Plain immutable fields, no ROS wire serialization in the input thread."""
+    if hasattr(value, "_slot_types"):
+        return tuple(message_snapshot(getattr(value, name)) for name in value.__slots__)
+    if hasattr(value, "secs") and hasattr(value, "nsecs"):
+        return (int(value.secs), int(value.nsecs))
+    if isinstance(value, (tuple, list)):
+        return tuple(message_snapshot(item) for item in value)
+    if isinstance(value, bool): return bool(value)
+    if isinstance(value, int): return int(value)
+    if isinstance(value, float): return float(value)  # normalize numpy.float64 subclasses
+    if isinstance(value, (str, bytes)) or value is None: return value
+    if hasattr(value, "tolist"):  # numpy arrays/scalars in diagnostics
+        return message_snapshot(value.tolist())
+    raise TypeError("Unsupported diagnostic field: " + type(value).__name__)
+
+
+def restore_message(message, snapshot, get_message_class):
+    if not isinstance(snapshot, tuple) or len(snapshot) != len(message.__slots__):
+        raise ValueError("Diagnostic field count mismatch")
+    for name, kind, value in zip(message.__slots__, message._slot_types, snapshot):
+        if kind.endswith("]"):
+            base = kind[:kind.index("[")]
+            if "/" in base:
+                value = [restore_message(get_message_class(base)(), item, get_message_class) for item in value]
+            elif not isinstance(value, bytes):
+                value = list(value)
+        elif kind in ("time", "duration"):
+            current = getattr(message, name)
+            value = type(current)(*value)
+        elif "/" in kind:
+            value = restore_message(get_message_class(kind)(), value, get_message_class)
+        setattr(message, name, value)
+    return message
+
 
 class DiagnosticProcess:
     def __init__(self, topics, rate_hz=100.0, coalesce=True):
@@ -70,10 +106,12 @@ class DiagnosticProcess:
                 return False
             self.last_submit[channel] = now
         try:
-            # Gate before serialization/IPC. Subsequent mutation cannot leak.
-            data = io.BytesIO()
-            message.serialize(data)
-            payload = data.getvalue()
+            # The IPC packet contains only primitive tuples. ROS construction
+            # and wire serialization happen in the worker. Nonblocking send
+            # remains bounded; later parent mutations cannot alter the packet.
+            if not 0 <= channel < len(CHANNELS):
+                raise ValueError("Unknown diagnostic channel")
+            payload = marshal.dumps(message_snapshot(message))
             if len(payload) > _MAX_PAYLOAD:
                 self.dropped += 1
                 return False
@@ -234,7 +272,7 @@ def worker(fd, topics, coalesce=True):
                     if pubs[index].get_num_connections() == 0:
                         continue
                     try:
-                        message = classes[index]().deserialize(payload)
+                        message = restore_message(classes[index](), marshal.loads(payload), get_message_class)
                         pubs[index].publish(message)
                         published += 1
                     except Exception:

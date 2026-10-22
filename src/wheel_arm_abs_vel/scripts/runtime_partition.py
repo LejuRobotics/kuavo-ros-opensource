@@ -39,6 +39,11 @@ def validate(profile, sysroot=Path('/sys/devices/system/cpu'), require_ik_isolat
             if any(occupied.get(sibling) not in (None, 'background_cpus') for sibling in siblings):
                 raise ValueError('sidecar shares a physical core with a protected role')
     if not 1<=profile['ik_fifo_priority']<90: raise ValueError('IK priority must remain below WBC')
+    priority = profile.get('mapper_fifo_priority', 0)
+    if not 0 <= priority < profile['ik_fifo_priority']:
+        raise ValueError('Mapper priority must be below IK')
+    if not -10 <= profile.get('mapper_nice', 0) <= 19:
+        raise ValueError('Mapper nice must be within [-10,19]')
     return profile
 
 # These match the unchanged ARM controller and shared hardware drivers.
@@ -218,7 +223,7 @@ def arm_profile(sysroot=CPU_ROOT, allowed=None, require_ik_hard_isolation=False,
     profile = dict(version=1, wbc_cpus=[ARM_WBC_CPU],
                    driver_reserved_cpus=sorted(drivers), ik_cpus=[ik],
                    mapper_cpus=[mapper], background_cpus=sorted(background),
-                   ik_fifo_priority=40, mapper_nice=-5,
+                   ik_fifo_priority=70, mapper_fifo_priority=35, mapper_nice=-10,
                    python_switch_interval_sec=0.001, ik_isolation_mode=mode,
                    platform='agx_arm', launch_fence=True,
                    sidecar_cpus=sorted(background & {10, 11}) or sorted(background)[-2:])
@@ -228,6 +233,22 @@ def arm_profile(sysroot=CPU_ROOT, allowed=None, require_ik_hard_isolation=False,
 
 
 def select_profile(environ=None, machine=None, sysroot=CPU_ROOT, allowed=None, cpu_model=None):
+    """Keep the shared Quest3 launcher on its existing scheduling defaults.
+
+    Absolute tuning must not leak into the incremental/legacy input tree.
+    Explicit operator profiles retain their values on either entry.
+    """
+    env = os.environ if environ is None else environ
+    profile, source = _select_profile(env, machine, sysroot, allowed, cpu_model)
+    if env.get('KUAVO_RUNTIME_ENTRY') == 'quest3' and not env.get('KUAVO_RUNTIME_PROFILE'):
+        profile = dict(profile)
+        profile['ik_fifo_priority'] = 40
+        profile['mapper_nice'] = -5
+        profile.pop('mapper_fifo_priority', None)
+    return profile, source
+
+
+def _select_profile(environ=None, machine=None, sysroot=CPU_ROOT, allowed=None, cpu_model=None):
     """Select the audited 255H map or ARM topology; other x86 retains its profile."""
     environ = os.environ if environ is None else environ
     machine = platform.machine().lower() if machine is None else machine.lower()

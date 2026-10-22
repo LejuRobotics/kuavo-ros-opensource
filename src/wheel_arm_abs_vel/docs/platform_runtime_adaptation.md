@@ -60,19 +60,10 @@ bash src/wheel_arm_abs_vel/scripts/platform_roslaunch.sh \
 
 1. 显式 `robot_version:=62/63/400062`，用于有意覆盖当前机器配置。
 2. 当前进程的 `ROBOT_VERSION` 环境变量。
-3. 当前运行用户的 `~/.bashrc` 与 `/etc/environment` 中唯一一致的字面量赋值。
 
-没有前两项时，解析器只读取配置文本，不执行 shell 文件。多个不同的赋值、非法值或 `ROBOT_VERSION=$OTHER` 等非字面量写法会报错；不会默认为 62。仅当机器尚未配置或机型确实变更时，在**实际启动用户**的 `.bashrc` 中保留一条正确赋值，例如：
+未提供显式参数时直接读取进程环境ROBOT_VERSION，与humanoid-control的optenv语义一致。程序不再解析~/.bashrc或/etc/environment；由登录Shell或系统环境加载已有配置。缺少机型时报错，不默认使用40。该候选仍保留62、63、400062的控制兼容检查，不表示支持任意机型。
 
-```bash
-export ROBOT_VERSION=63
-```
-
-这是一条要保存到配置文件中的示例，不是每次启动都要输入的命令。实机使用 root 时，配置的是 `/root/.bashrc`；普通用户的配置不会自动替代 root 的配置。检查已有环境与持久配置是否一致；旧 shell 中的环境变量优先于文件，修改文件后可重新打开终端，或在确认后 `unset ROBOT_VERSION` 让入口重新读取文件。
-
-CPU 型号无法区分 62、63 与 400062。不要依据遗留的 TotalMass 文件、安装了哪些 URDF、主机 IP 或核数猜测机型。
-
-临时覆盖示例：在**两个终端**的对应启动命令末尾都增加 `robot_version:=400062`。只覆盖一端会造成模型不一致。400062 默认 `ee_type=heiman`；62、63 默认 `qiangnao`，实物末端不同才显式指定 `ee_type`。
+首次部署在实际启动用户的Shell配置中设置正确的export ROBOT_VERSION，重新打开终端后生效。通过sudo启动时使用sudo --preserve-env=ROBOT_VERSION，避免环境丢失。robot_version_manager.launch负责根据机型选择资产与kuavo.json；不复制另一套查找路径规则。
 
 ## 3. 启动前检查与日志判断
 
@@ -98,7 +89,7 @@ bash src/wheel_arm_abs_vel/scripts/platform_roslaunch.sh \
 5.19 正常日志应包含以下信息（实际路径可能不同）：
 
 ```text
-[absolute startup] robot_version=62 source=/root/.bashrc
+[absolute startup] robot_version=62 source=environment
 profile=.../runtime_partition_aaeon_255h.json IK isolation=soft sidecar=[14, 15]
 Soft-Isolation Fallback ... IK=[5] ... background=[0, 1, 8, 9, 10, 11, 12, 13]
 ```
@@ -178,7 +169,7 @@ bash src/wheel_arm_abs_vel/scripts/platform_roslaunch.sh \
 |---|---|
 |`robot model is not configured` / `UNCONFIGURED_ROBOT_VERSION`|检查实际启动用户的配置；使用专属 wrapper。直接 roslaunch 只读取环境，不能替代 wrapper 的持久配置回退和整链围栏。|
 |来源为 environment，但机型不是预期值|当前 shell 环境优先；核对保存值与实物，重开终端或清除旧环境后再启动。|
-|`conflicting saved ROBOT_VERSION`|检查当前用户 .bashrc 与 /etc/environment，保留一致的唯一机型，勿反复追加不同版本。|
+|ROBOT_VERSION缺失|确认启动Shell已加载机型，并通过sudo保留ROBOT_VERSION。|
 |`nonliteral ROBOT_VERSION`|配置使用62/63/400062字面量；入口不会执行变量展开、命令替换或脚本。|
 |`Soft-Isolation Fallback`|上表软隔离配置的正常提示，查看实际IK核与后台池是否符合预期。|
 |关键CPU不可用、cpuset不包含关键核|读取 --check 输出，核对online和cgroup限制；不要用关闭分区的方式直接启动实机。|

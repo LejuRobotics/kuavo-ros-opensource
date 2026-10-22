@@ -12,6 +12,8 @@ end = source.index('    else if (wholeBodyIkAuthorityOwned &&', begin)
 block = source[begin:end]
 program = r"""
 #include <cassert>
+#include <string>
+#define ROS_INFO_STREAM(...)
 #include <chrono>
 #include <atomic>
 #include <limits>
@@ -23,14 +25,18 @@ namespace geometry_msgs {
 struct Vector { double x=0, y=0, z=0; };
 struct Twist { Vector linear, angular; };
 }
-namespace wheel_arm_abs_vel { struct WholeBodyIkReference { enum { AUTHORITY_ACTIVE=2 }; }; }
+namespace wheel_arm_abs_vel { struct WholeBodyIkReference { enum { AUTHORITY_INACTIVE=0, AUTHORITY_ACTIVE=2 }; }; }
 using namespace humanoidController_wheel_wbc;
 using Twist=geometry_msgs::Twist;
 VelocityIkBaseCommand<Twist> velocity_ik_base_command_;
 struct { bool safety_braking=false; int authority_state=2; } wholeBodyIkReference;
+std::string velocity_ik_base_gate_reason_;
+Eigen::VectorXd fixed_pipeline_last_q=Eigen::VectorXd::Zero(18);
+struct { int armDim=18; } info;
 bool fixed_velocity_ik_pipeline_=true, velocity_ik_base_control_=true;
 bool base_locked_=false, enable_mpc_=false, baseCmdVelStatus_=true;
 bool wholeBodyIkReferenceApplied=true, wholeBodyIkReferenceFresh=true;
+bool wholeBodyIkAuthorityOwned=true, fixedPipelineIdleHold=false;
 enum class SoftPauseState { IDLE, PAUSED };
 std::atomic<SoftPauseState> soft_pause_state_{SoftPauseState::IDLE};
 auto velLimiter_=std::make_shared<ocs2::mobile_manipulator::VelocityLimiter>(3);
@@ -53,27 +59,25 @@ int main() {
  for(int i=0;i<20;++i) select();
  send(.3); assert(zero(select()));
  send(); assert(std::abs(select().linear.x-.0024)<1e-12); // reset on expiry
- for(int gate=0;gate<7;++gate) {
+ for(int gate=0;gate<5;++gate) {
    send();
    if(gate==0) base_locked_=true;
    if(gate==1) enable_mpc_=true;
    if(gate==2) baseCmdVelStatus_=false;
-   if(gate==3) wholeBodyIkReferenceApplied=false;
-   if(gate==4) wholeBodyIkReferenceFresh=false;
-   if(gate==5) wholeBodyIkReference.safety_braking=true;
-   if(gate==6) soft_pause_state_=SoftPauseState::PAUSED;
+   if(gate==3) fixed_pipeline_last_q.resize(0);
+   if(gate==4) soft_pause_state_=SoftPauseState::PAUSED;
    assert(zero(select()));
-   base_locked_=false; enable_mpc_=false; baseCmdVelStatus_=true;
-   wholeBodyIkReferenceApplied=true; wholeBodyIkReferenceFresh=true;
-   wholeBodyIkReference.safety_braking=false; soft_pause_state_=SoftPauseState::IDLE;
-   assert(zero(select())); // no replay when the gate reopens
-   send(); assert(std::abs(select().linear.x-.0024)<1e-12);
+   base_locked_=false;enable_mpc_=false;baseCmdVelStatus_=true;
+   fixed_pipeline_last_q=Eigen::VectorXd::Zero(18);soft_pause_state_=SoftPauseState::IDLE;
+   assert(zero(select()));send();assert(std::abs(select().linear.x-.0024)<1e-12);
  }
- for(int state : {0,1,3,4}) {
-   send(); wholeBodyIkReference.authority_state=state;
-   assert(zero(select()));
+ // Body reference loss and every arm lifecycle phase are independent of wheels.
+ wholeBodyIkReferenceApplied=false;wholeBodyIkReferenceFresh=false;
+ wholeBodyIkReference.safety_braking=true;
+ for(int state : {0,1,2,3,4}) {
+   wholeBodyIkReference.authority_state=state;
+   send();assert(!zero(select()));
  }
- wholeBodyIkReference.authority_state=2;
  Twist invalid; invalid.linear.x=std::numeric_limits<double>::quiet_NaN();
  velocity_ik_base_command_.update(invalid,now()); assert(zero(select()));
  invalid=Twist{}; invalid.linear.z=1;

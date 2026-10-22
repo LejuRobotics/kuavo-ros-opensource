@@ -15,6 +15,7 @@ namespace { kuavo_e2e::Trace<64> commandAudit("command"); }
 
 #include "wheel_arm_abs_vel/humanoid_controllers/absolute/humanoidController_wheel_absolute.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/MobileBaseLock.h"
+#include "wheel_arm_abs_vel/humanoid_controllers/StartupArmAction.h"
 #include "wheel_arm_abs_vel/humanoid_wheel_wbc/WbcBackend.h"
 #include "wheel_arm_abs_vel/humanoid_wheel_wbc/RneaBackend.h"
 #include "kuavo_msgs/setContactForceInterpParams.h"
@@ -137,6 +138,9 @@ namespace wheel_absolute_control
   {
     std::cout << "humanoidControllerWheelWbc init..." << std::endl;
     controllerNh_ = controller_nh;
+    cpu_set_t parameter_background_cpus{};
+    const bool have_background_mask = pthread_getaffinity_np(
+        pthread_self(), sizeof(parameter_background_cpus), &parameter_background_cpus) == 0;
     // Startup-only selection: live rosparam changes must never unexpectedly
     // release the base. Omitted/invalid configuration retains the lock.
     controllerNh_.param<bool>("/vr_ik/use_velocity_ik_reference", fixed_velocity_ik_pipeline_, false);
@@ -808,7 +812,35 @@ namespace wheel_absolute_control
       ROS_INFO("[humanoidControllerWheelWbc] Subscribed to /move_base/base_cmd_vel_status for base emergency stop protection");
     }
 
+    refreshLockKneeLegParameter();
+    double parameter_poll_hz = 10.;
+    controllerNh_.param("/absolute_controller/parameter_poll_hz", parameter_poll_hz, 10.);
+    if (!std::isfinite(parameter_poll_hz) || parameter_poll_hz <= 0. || parameter_poll_hz > 50.)
+      throw std::invalid_argument("absolute_controller/parameter_poll_hz must be in (0,50]");
+    lockParameterWorker_ = std::thread([this, parameter_poll_hz, parameter_background_cpus, have_background_mask] {
+      // Do not inherit a real-time policy from a caller of init().
+      sched_param policy{};
+      pthread_setschedparam(pthread_self(), SCHED_OTHER, &policy);
+      if (have_background_mask) pthread_setaffinity_np(pthread_self(),
+          sizeof(parameter_background_cpus), &parameter_background_cpus);
+      std::unique_lock<std::mutex> lock(lockParameterWaitMutex_);
+      while (!lockParameterWake_.wait_for(lock, std::chrono::duration<double>(1./parameter_poll_hz),
+                                          [this] { return stopLockParameterWorker_; })) {
+        lock.unlock();
+        refreshLockKneeLegParameter();
+        lock.lock();
+      }
+    });
     return true;
+  }
+
+  void humanoidControllerWheelWbc::refreshLockKneeLegParameter() {
+    XmlRpc::XmlRpcValue value;
+    if (!ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", value)) return;
+    if (value.getType() == XmlRpc::XmlRpcValue::TypeBoolean)
+      lockKneeLegEnabled_.store(static_cast<bool>(value), std::memory_order_relaxed);
+    else if (value.getType() == XmlRpc::XmlRpcValue::TypeInt)
+      lockKneeLegEnabled_.store(static_cast<int>(value) != 0, std::memory_order_relaxed);
   }
 
   //TODO 此设计over-engineered，后续看情况优化
@@ -1144,9 +1176,9 @@ namespace wheel_absolute_control
     control_data_manager_->getRealtimeOdomData(odom);
     computeObservationFromSensorData(sensors_data_new, odom);
 
-    // Absolute mode starts from this instance's measured state. No configured
-    // prepare pose or pre-owner trajectory is allowed to command the robot.
-    // Measured dq remains in the observation; desired dq starts at zero.
+    // starting() already waited for hardware/is_ready after o/long-A.
+    // Restore dev's configured startup action, anchored to measured joints.
+    // It completes before publishing the first normal control observation.
     const auto& info = manipulatorModelInfo_;
     if (observation_wheel_.state.size() != info.stateDim ||
         observation_wheel_.input.size() != info.inputDim ||
@@ -1154,6 +1186,34 @@ namespace wheel_absolute_control
         !observation_wheel_.input.allFinite()) {
       stopDynamics("Invalid measured startup state");
       return false;
+    }
+    if (is_real_) {
+      if (enable_base_emergency_stop_ && base_emergency_triggered_.load()) {
+        stopDynamics("Emergency stop during startup action"); return false;
+      }
+      if (!startup_action_started_) {
+        const vector_t delta = preTargetActions_ - startActions_;
+        startActions_ = observation_wheel_.state;
+        preTargetActions_ = startActions_ + delta;
+        // The existing action only moves the selected arm joints; keep base
+        // and folding joints exactly at this measured startup anchor.
+        preTargetActions_.head(info.stateDim-armNum_) = startActions_.head(info.stateDim-armNum_);
+        startup_action_start_time_ = startup_action_last_time_ = time.toSec();
+        startup_action_started_ = true;
+        if (headNum_ > 0 && !control_data_manager_->initializeHeadFromMeasured(
+              sensors_data_new.jointPos_.tail(headNum_))) {
+          stopDynamics("Invalid measured startup head state"); return false;
+        }
+        ROS_INFO("[FixedVelocityIK] hardware ready: starting configured arm preparation");
+      }
+      if (time.toSec() < startup_action_last_time_) {
+        stopDynamics("Startup action clock moved backwards"); return false;
+      }
+      startup_action_last_time_ = time.toSec();
+      performSimpleActions(time);
+      if (dynamics_fault_) return false;
+      if (time.toSec()-startup_action_start_time_ < robotPreActionDesiredTime_+.5) return true;
+      ROS_INFO("[FixedVelocityIK] Configured arm preparation completed; entering measured hold");
     }
     optimizedState_mrt_ = observation_wheel_.state;
     optimizedInput_mrt_ = vector_t::Zero(info.inputDim);
@@ -1649,28 +1709,9 @@ namespace wheel_absolute_control
     // ===== 下肢 1/2 号电机（knee/leg）锁定：最终输出处硬覆盖 =====
     // 与增量 IK 复用同一 rosparam，锁定语义 = 钉死到开启瞬间捕获的快照（弧度）。
     // 无论 MPC / 快速模式 / 主控回发哪条路，1、2 号都被硬覆盖，waist 关节不受影响。
-    {
-      // 每 100ms 实时查询一次 rosparam。必须用 get()（无缓存）而非 getCached()：
-      // getCached() 带本地缓存，首次读到"参数不存在"后缓存不会随 IK 节点/终端 set 而刷新，
-      // 会一直读到旧的 false，导致锁定永远不生效。
-      ros::Time now = ros::Time::now();
-      if ((now - lastLockParamCheckTime_).toSec() >= 0.1) {
-        lastLockParamCheckTime_ = now;
-        bool lockParam = false;
-        // 参数可能是 bool(true/false) 也可能是 int(1/0)，两种都要兼容：
-        // ros::param::get(name, bool&) 只认 XmlRpc boolean 类型，遇到 int(1) 会返回 false，
-        // 导致锁定失效。因此 bool 读取失败时再尝试按 int 读取。
-        if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParam)) {
-          lockKneeLegEnabled_.store(lockParam);
-        } else {
-          int lockParamInt = 0;
-          if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParamInt)) {
-            lockKneeLegEnabled_.store(lockParamInt != 0);
-          }
-        }
-      }
-    }
-    if (!wholeBodyIkAuthorityOwned && !fixedPipelineIdleHold && lockKneeLegEnabled_.load()) {
+    // Parameter server access runs exclusively in init/background. A missing
+    // or wrongly typed parameter retains the last valid value, as before.
+    if (!wholeBodyIkAuthorityOwned && !fixedPipelineIdleHold && lockKneeLegEnabled_.load(std::memory_order_relaxed)) {
       if (!lockKneeLegCaptured_) {
         // 开启首拍：捕获当前实际关节角作为固定目标（knee=idx0, leg=idx1）
         lockKneeQ_ = observation_wheel_.state[baseDim_ + 0];
@@ -1861,19 +1902,21 @@ namespace wheel_absolute_control
       last_ros_time = time.toSec();
     }
 
-    // Joystick wheels are gated by the same fresh formal owner as the arms.
-    // They never modify the fixed-base IK tuple or accept legacy /cmd_vel.
+    // Wheels have their own initialized command channel, independent of arm
+    // lifecycle and body pose freshness; global controller stops still gate it.
+    // This channel never modifies the fixed-base IK tuple or accepts /cmd_vel.
     geometry_msgs::Twist velCmdMsg;
     if (fixed_velocity_ik_pipeline_ && velocity_ik_base_control_)
     {
       // Fixed-base IK controls the torso/arms; wheel input retains the legacy
       // body-frame joystick mapping and acceleration limits in its own channel.
-      const bool enabled = !base_locked_ && !enable_mpc_ && baseCmdVelStatus_ &&
-          soft_pause_state_.load() == SoftPauseState::IDLE &&
-          wholeBodyIkReferenceApplied && wholeBodyIkReferenceFresh &&
-          !wholeBodyIkReference.safety_braking &&
-          wholeBodyIkReference.authority_state ==
-              wheel_arm_abs_vel::WholeBodyIkReference::AUTHORITY_ACTIVE;
+      // starting() has passed hardware/data readiness before update() runs.
+      // Arm reference acquisition, body loss and arm braking do not own wheels.
+      const bool initialized = fixed_pipeline_last_q.size() == info.armDim;
+      const char* gate = base_locked_ ? "BASE_LOCKED" : enable_mpc_ ? "MPC_CONFLICT" :
+          !baseCmdVelStatus_ || soft_pause_state_.load() != SoftPauseState::IDLE ? "GLOBAL_STOP" :
+          !initialized ? "NOT_READY" : "READY";
+      const bool enabled = std::string(gate) == "READY";
       geometry_msgs::Twist baseCommand;
       const double now = std::chrono::duration<double>(
           std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -1886,6 +1929,11 @@ namespace wheel_absolute_control
         velCmdMsg.angular.z = limited[2];
       } else {
         *velLimiter_ = *base_velocity_limiter_zero_;
+        if (enabled) gate = "CMD_AGE_EXCEEDED_OR_INVALID";
+      }
+      if (velocity_ik_base_gate_reason_ != gate) {
+        ROS_INFO_STREAM("[BaseGate][Controller] " << gate);
+        velocity_ik_base_gate_reason_ = gate;
       }
     }
     else if (wholeBodyIkAuthorityOwned && wholeBodyIkReferenceApplied && baseCmdVelStatus_) {
@@ -1954,6 +2002,12 @@ namespace wheel_absolute_control
 
   humanoidControllerWheelWbc::~humanoidControllerWheelWbc()
   {
+    {
+      std::lock_guard<std::mutex> lock(lockParameterWaitMutex_);
+      stopLockParameterWorker_ = true;
+    }
+    lockParameterWake_.notify_one();
+    if (lockParameterWorker_.joinable()) lockParameterWorker_.join();
     // The nodelet has joined the control loop. Drop subscriptions and worker
     // publishers while their nodelet callback queues still exist.
     control_data_manager_.reset();
@@ -2928,39 +2982,21 @@ namespace wheel_absolute_control
 
   void humanoidControllerWheelWbc::performSimpleActions(const ros::Time &time)
   {
-    static vector_t startState = startActions_;
-    static vector_t startInput = vector_t::Zero(manipulatorModelInfo_.stateDim);
-    static vector_t targetState = preTargetActions_;
-    static double startTime = time.toSec();
-    static double midTargetTime = startTime + robotPreActionDesiredTime_/2;
-    static double endTime = startTime + robotPreActionDesiredTime_;
-
-    scalar_array_t timeTrajectory;
-    timeTrajectory.push_back(startTime);
-    timeTrajectory.push_back(midTargetTime);
-    timeTrajectory.push_back(endTime);
-    vector_array_t stateTrajectory;
-    stateTrajectory.push_back(startState);
-    stateTrajectory.push_back(targetState);
-    stateTrajectory.push_back(startState);
-
-    vector_t curTargetState_wbc = LinearInterpolation::interpolate(time.toSec(), timeTrajectory, stateTrajectory);
-    static vector_t lastTargetState_wbc = curTargetState_wbc;
+    const auto sample = wheel_absolute_control::sampleStartupArmAction(
+        startActions_, preTargetActions_-startActions_,
+        time.toSec()-startup_action_start_time_, robotPreActionDesiredTime_);
+    const vector_t& curTargetState_wbc = sample.q;
+    const vector_t& inputVelocity = sample.v;
     ros_logger_->publishVector("/humanoid_wheel/curTargetState_wbc", curTargetState_wbc);
-
-    vector_t inputVelocity = (curTargetState_wbc - lastTargetState_wbc) / dt_;
 
     mobile_manipulator::DynamicsReference reference;
     reference.q=curTargetState_wbc;
     reference.v=inputVelocity;
-    // Legacy preparation is piecewise linear, with no trustworthy ddq.
-    // Do not differentiate its corner or invent acceleration feedforward.
+    // Preserve the existing preparation torque contract: no ddq feedforward.
     reference.acceleration=vector_t::Zero(manipulatorModelInfo_.armDim);
     reference.accelerationGain=arm_ddq_feedforward_gain_;
     vector_t torque;
     if (!computeDynamics(reference, dt_, torque)) return;
-
-    lastTargetState_wbc = curTargetState_wbc;
 
     kuavo_msgs::jointCmd jointCmdMsg;
     jointCmdMsg.header.stamp = time;

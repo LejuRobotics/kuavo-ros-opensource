@@ -82,6 +82,8 @@ DynamicsResult RneaBackend::update(const DynamicsReference& r, const SystemObser
     // Ramp the target BEFORE slew limiting: multiplying the already limited
     // acceleration by a changing ramp would add an unbounded extra jerk term.
     desired*=ramp;
+    // Per-driven-joint limit is applied to the already gain-scaled reference.
+    // The absolute profile matches IK jerk * acceleration_gain, including wrists.
     const double step=settings_.jerkLimit[j]*dt;
     filteredA_[j] += clamp(desired-filteredA_[j],-step,step);
     a_[velocityIndices_[j]]=filteredA_[j];
