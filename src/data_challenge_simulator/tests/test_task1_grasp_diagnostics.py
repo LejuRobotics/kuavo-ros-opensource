@@ -34,7 +34,7 @@ def test_task1_records_grasp_data_before_and_after_failure_points():
     assert '"post_release", name, drop_center_world' in loop
     assert "orientation_error_deg=" in source
     assert loop.index('"pre_close", name, grasp_center_world') < loop.index(
-        "gripper.control_right_gripper(GRASP_CLOSURE_CMD)")
+        "close_on_cylinder(gripper, name)")
     assert loop.index('"post_release", name, drop_center_world') < loop.index(
-        "if not _fully_in_target(final_position)")
+        "if not _fully_in_target(final_position, target_bin_position)")
     assert "diagnostics.write(\n                \"round_end\"" in source

@@ -14,8 +14,10 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import time
 
 import rospy
+from std_msgs.msg import Float64MultiArray
 
 
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -33,7 +35,6 @@ from utils.task3_randomization import Task3RandomizationPlanner
 from task2_base_motion import ChassisMotion
 from task3_descend import make_planner, main as run_descend
 from task3_grasp import (
-    Task3GraspCommand,
     Task3GraspFeedback,
     main as run_grasp,
 )
@@ -41,11 +42,15 @@ from task3_initialize import main as run_initialize
 
 
 RESULT_PATH = Path("task_result.txt")
-DEFAULT_SCENE = PACKAGE_DIR / (
-    "models/biped_s400062/xml/task3.xml")
+from utils.task2_randomization import active_scene
+DEFAULT_SCENE = active_scene(3)
 ARM_JOINTS = 14
 HEAD_SCAN_PITCH_RAD = math.radians(20.0)
-TASK3_UNLOADED_LINEAR_SPEED = 0.20
+TASK3_UNLOADED_LINEAR_SPEED = 0.60
+# Near-edge slots keep the chassis clear of the destination table legs.
+# These are action targets; saved initial object layouts remain unchanged.
+# Fill far to near so later transfers never pass through an earlier ring.
+TASK3_DESTINATION_SLOTS = ((0.50, 0.90), (0.50, 0.76), (0.50, 0.62))
 
 
 def apply_plan(plan):
@@ -86,19 +91,19 @@ def stage_plan(plan):
             SimpleNamespace(
                 kind="grasp",
                 ring_name=ring.name,
-                destination_xy=tuple(ring.destination_xy),
+                destination_xy=ring.destination_xy,
             )))
     return tuple(stages)
 
 
-def build_runtime(robot, robot_state, gripper, feedback, command):
+def build_runtime(robot, robot_state, gripper, feedback):
     """Create the objects every accepted stage used to build for itself.
 
     ``robot`` and ``robot_state`` are passed in rather than built here because
     the shared publisher must be created from them before the scene work
     starts, exactly where the upstream entry point creates its publisher.
     """
-    return SimpleNamespace(
+    runtime = SimpleNamespace(
         robot=robot,
         robot_state=robot_state,
         chassis=ChassisMotion(
@@ -114,8 +119,9 @@ def build_runtime(robot, robot_state, gripper, feedback, command):
         gripper=gripper,
         trajectory=None,
         feedback=feedback,
-        command=command,
     )
+    runtime.chassis.settle_on_velocity = True
+    return runtime
 
 
 def main():
@@ -129,6 +135,11 @@ def main():
     os.environ.setdefault("KUAVO_LEG_SERVICE", "0")
 
     rospy.init_node("task3", anonymous=False)
+    # Sensor/joint messages can arrive before controller command subscribers.
+    # Match Task 2: wait for a real control iteration before SDK connections.
+    rospy.wait_for_message(
+        "/mobile_manipulator_wbc_observation/state",
+        Float64MultiArray, timeout=60.0)
     if not KuavoSDK().Init(options=KuavoSDK.Options.WithIK):
         raise RuntimeError("KuavoSDK initialization failed")
 
@@ -141,7 +152,7 @@ def main():
     seed = int(os.environ.get("TASK_SEED", "1"))
     plan = Task3RandomizationPlanner().plan(seed)
     print(
-        "TASK3 seed {} saved layout {}: initial_base={} rings={}".format(
+        "TASK3 seed {} generated scene {}: initial_base={} rings={}".format(
             seed,
             plan.catalogue_seed,
             tuple(round(value, 4) for value in plan.initial_base),
@@ -149,14 +160,14 @@ def main():
                 "name": ring.name,
                 "position": tuple(round(value, 4) for value in ring.position),
                 "docking": tuple(round(value, 4) for value in ring.docking_base),
-                "margin_rad": round(ring.joint_margin_rad, 3),
             } for ring in plan.rings]), flush=True)
     apply_plan(plan)
 
     scene_path = args.scene.resolve()
     runtime = build_runtime(
-        robot, robot_state, gripper, Task3GraspFeedback(), Task3GraspCommand())
+        robot, robot_state, gripper, Task3GraspFeedback())
     success = False
+    motion_started = None
     try:
         for label, stage in stage_plan(plan):
             print("[TASK3] Starting accepted stage: {}".format(label),
@@ -168,7 +179,10 @@ def main():
                 # let initialization snapshot a missing pose.
                 runtime.chassis.wait_until_ready(timeout=30.0)
                 run_initialize(runtime=runtime, retain_trajectory=True)
+                runtime.chassis.linear_gain = 1.5
                 start_score_clock()
+                motion_started = time.monotonic()
+                rospy.loginfo("TASK3 MOTION START")
             elif stage.kind == "descend":
                 # The IK planner is bound to one ring, exactly as it was when
                 # each stage ran in its own process.
@@ -177,16 +191,14 @@ def main():
                     runtime=runtime, ring_name=stage.ring_name,
                     docking_base=stage.docking_base)
             else:
-                # Same one-shot construction Task 2 uses: the grasp command
-                # and follower state live for the whole workflow and are never
-                # rebuilt per object.
-                runtime.planner = make_planner(scene_path, stage.ring_name)
+                # Reuse the planner for the ring approached in the prior stage.
                 run_grasp(
                     runtime=runtime, ring_name=stage.ring_name,
                     destination_xy=stage.destination_xy)
             print("[TASK3] Completed accepted stage: {}".format(label),
                   flush=True)
         success = True
+        rospy.loginfo("TASK3 MOTION COMPLETE: %.3f seconds", time.monotonic() - motion_started)
         print("TASK3 FULL WORKFLOW PASSED", flush=True)
     finally:
         runtime.chassis.stop()

@@ -70,8 +70,10 @@ class RosParameter:
             return None
         return rospy.get_param('/initial_state')
     def init_stand_height(self)->float:
+        """Standing height is optional on wheels; retain the legacy fallback."""
         if not rospy.has_param('/com_height'):
-            rospy.logerr("com_height parameter not found")
+            if not self.is_wheel_arm_robot():
+                rospy.logerr("com_height parameter not found")
             # KUAVO-4PRO
             return 0.8328437523948975
         return rospy.get_param('/com_height')

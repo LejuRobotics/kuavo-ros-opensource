@@ -127,11 +127,12 @@ class Scene1RightArmIK:
 
     def solve(
             self, target_world, orientation_world, seed_right_q,
-            point_in_r7=None):
+            point_in_r7=None, seed_only=False, joint_bounds=None):
         target = np.asarray(target_world, dtype=float)
         target_rotation = R.from_quat(orientation_world)
+        lower, upper = (self.lower, self.upper) if joint_bounds is None else joint_bounds
         seed = np.clip(
-            np.asarray(seed_right_q, dtype=float), self.lower, self.upper)
+            np.asarray(seed_right_q, dtype=float), lower, upper)
         if point_in_r7 is None:
             point_in_r7 = self.OPEN_GRASP_CENTER_IN_R7
         point_in_r7 = np.asarray(point_in_r7, dtype=float)
@@ -143,16 +144,16 @@ class Scene1RightArmIK:
             return np.concatenate((
                 100.0 * (grasp_center - target),
                 0.5 * orientation_error,
-                0.05 * (right_q - seed),
+                (0.2 if seed_only else 0.05) * (right_q - seed),
             ))
 
-        starts = (seed, self.READY, self.USER_GRASP)
+        starts = (seed,) if seed_only else (seed, self.READY, self.USER_GRASP)
         candidates = []
         for start in starts:
             result = least_squares(
                 residual,
-                np.clip(start, self.lower, self.upper),
-                bounds=(self.lower, self.upper),
+                np.clip(start, lower, upper),
+                bounds=(lower, upper),
                 max_nfev=600,
                 xtol=1e-10,
                 ftol=1e-10,

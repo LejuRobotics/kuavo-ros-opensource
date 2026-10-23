@@ -3,7 +3,8 @@
   <!-- Keep the supplied Kuavo + dexterous-hand model as the single robot source. -->
   <include file="biped_s400062_icra.xml"/>
 
-  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"
+          impratio="10" noslip_iterations="10"/>
 
   <statistic center="0.75 -0.15 0.75" extent="1.8"/>
 
@@ -40,12 +41,13 @@
 
   <default>
     <default class="task_static">
-      <geom contype="1" conaffinity="3" friction="1.2 0.01 0.001"
+      <geom contype="1" conaffinity="11" friction="1.2 0.01 0.001"
             solref="0.01 1" solimp="0.95 0.99 0.001"/>
     </default>
+    <!-- Density gives each complete empty crate a total mass of 1.0 kg. -->
     <default class="task_object">
-      <geom contype="1" conaffinity="3" friction="1.0 0.01 0.001"
-            solref="0.01 1" solimp="0.95 0.99 0.001" density="600"/>
+      <geom contype="1" conaffinity="11" friction="1.0 0.01 0.001"
+            solref="0.01 1" solimp="0.95 0.99 0.001" density="116.387337057728"/>
       <joint damping="0.001"/>
     </default>
   </default>
@@ -53,7 +55,6 @@
   <custom>
     <numeric name="task2_conveyor_speed" data="0.10"/>
     <numeric name="task2_conveyor_stop_local_x" data="0.65"/>
-    <numeric name="task2_grasp_detection_gap" data="0.008"/>
   </custom>
 
   <worldbody>

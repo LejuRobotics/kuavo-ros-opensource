@@ -1,48 +1,29 @@
-import json
 import math
+from utils.task3_randomization import RING_NAMES, Task3RandomizationPlanner
 
-from utils.task3_randomization import (
-    MIN_DOCKED_JOINT_MARGIN_RAD,
-    MIN_RING_SEPARATION_M,
-    RING_NAMES,
-    Task3RandomizationPlanner,
-)
-
-
-def test_saved_layouts_have_three_verified_separated_rings():
-    planner = Task3RandomizationPlanner()
-    for seed in range(1, len(planner.layouts) + 1):
-        plan = planner.plan(seed)
-        assert tuple(ring.name for ring in plan.rings) == RING_NAMES
-        for index, ring in enumerate(plan.rings):
-            assert ring.joint_margin_rad >= MIN_DOCKED_JOINT_MARGIN_RAD
-            for other in plan.rings[index + 1:]:
-                assert math.dist(
-                    ring.position[:2], other.position[:2]
-                ) >= MIN_RING_SEPARATION_M
+def test_generated_rings_do_not_wrap_and_are_separated():
+    planner=Task3RandomizationPlanner()
+    assert planner.plan(28)==planner.plan(28)
+    assert planner.plan(28).rings!=planner.plan(38).rings
+    for seed in range(100):
+        plan=planner.plan(seed)
+        assert tuple(r.name for r in plan.rings)==RING_NAMES
+        assert plan.initial_base==(0,0,0)
+        for i,a in enumerate(plan.rings):
+            assert .50<=a.position[0]<=.74
+            assert -.29<=a.position[1]<=.29
+            assert a.position[2]==.65
+            for b in plan.rings[i+1:]:
+                assert math.dist(a.position[:2],b.position[:2])>=.16
 
 
-def test_seed_selection_is_reproducible_and_wraps_catalogue():
-    planner = Task3RandomizationPlanner()
-    first = planner.plan(1)
-    repeated = planner.plan(1)
-    wrapped = planner.plan(1 + len(planner.layouts))
-    assert first == repeated
-    assert first.catalogue_seed == wrapped.catalogue_seed
-    assert first.initial_base == wrapped.initial_base
-    assert first.rings == wrapped.rings
-
-
-def test_collect_layout_override_does_not_replace_saved_catalogue(
-        tmp_path, monkeypatch):
-    saved = Task3RandomizationPlanner()
-    layout = dict(saved.layouts[0])
-    layout["seed"] = 999
-    collect_file = tmp_path / "collect.json"
-    collect_file.write_text(
-        json.dumps({"layouts": [layout]}), encoding="utf-8")
-    monkeypatch.setenv("TASK3_LAYOUT_FILE", str(collect_file))
-
-    collect = Task3RandomizationPlanner()
-    assert collect.plan(1).catalogue_seed == 999
-    assert saved.plan(1).catalogue_seed == 1
+def test_target_table_shift_does_not_block_pickup_docking():
+    from utils.task3_randomization import docking_is_clear
+    # Previously the left front wheel hit the nearer target table leg.
+    assert not docking_is_clear((.047757, .369057, 0), (.522456, .85, 0))
+    for seed in range(28, 33):
+        plan = Task3RandomizationPlanner().plan(seed)
+        assert plan.destination_position[0] == .62
+        assert abs(plan.destination_position[1]-.85) <= .1
+        assert all(docking_is_clear(r.docking_base, plan.destination_position)
+                   for r in plan.rings)

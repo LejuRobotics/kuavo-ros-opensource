@@ -47,8 +47,10 @@ class ChassisMotion:
     def __init__(
             self, linear_speed, angular_speed,
             minimum_linear_speed, minimum_angular_speed,
-            position_tolerance, yaw_tolerance_deg, publish_rate=100.0):
+            position_tolerance, yaw_tolerance_deg, publish_rate=100.0,
+            linear_gain=1.0):
         self.linear_speed = float(linear_speed)
+        self.linear_gain = float(linear_gain)
         self.angular_speed = float(angular_speed)
         self.minimum_linear_speed = float(minimum_linear_speed)
         self.minimum_angular_speed = float(minimum_angular_speed)
@@ -58,6 +60,8 @@ class ChassisMotion:
         self._lock = threading.Lock()
         self._pose = None
         self._velocity = None
+        self._state_sequence = 0
+        self.settle_on_velocity = False
         self._publisher = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
         self._subscriber = rospy.Subscriber(
             "/ground_truth/state", Odometry, self._odom_callback,
@@ -83,6 +87,7 @@ class ChassisMotion:
         with self._lock:
             self._pose = pose
             self._velocity = velocity
+            self._state_sequence += 1
 
     def pose(self):
         """Latest measured pose from ``/ground_truth/state``.
@@ -124,13 +129,32 @@ class ChassisMotion:
         self._publisher.publish(command)
 
     def stop(self, settle_time=0.6):
-        deadline = time.time() + float(settle_time)
+        started = time.monotonic()
+        deadline = started + float(settle_time)
         rate = rospy.Rate(self.publish_rate)
-        while not rospy.is_shutdown() and time.time() < deadline:
+        with self._lock:
+            last_sequence = self._state_sequence
+        stopped_samples = 0
+        while not rospy.is_shutdown() and time.monotonic() < deadline:
             self.publish()
             rate.sleep()
+            if not self.settle_on_velocity:
+                continue
+            with self._lock:
+                velocity, sequence = self._velocity, self._state_sequence
+            if sequence == last_sequence or velocity is None:
+                continue
+            last_sequence = sequence
+            stopped = (math.hypot(velocity[0], velocity[1]) < 0.015 and
+                       abs(velocity[5]) < 0.015)
+            stopped_samples = stopped_samples + 1 if stopped else 0
+            if stopped_samples >= 3 and time.monotonic() - started >= 0.1:
+                rospy.loginfo("Task2 chassis settled after %.3f s",
+                              time.monotonic() - started)
+                return
 
-    def move_to_pose(self, target_x, target_y, target_yaw, timeout):
+    def move_to_pose(self, target_x, target_y, target_yaw, timeout,
+                     straight_line=False):
         start = time.time()
         last_log = 0.0
         rate = rospy.Rate(self.publish_rate)
@@ -187,11 +211,19 @@ class ChassisMotion:
 
             axis_tolerance = min(0.01, self.position_tolerance)
             vx = planned_speed(
-                error_body_x, 1.0, self.linear_speed,
+                error_body_x, self.linear_gain, self.linear_speed,
                 self.minimum_linear_speed, axis_tolerance)
             vy = planned_speed(
-                error_body_y, 1.0, self.linear_speed,
+                error_body_y, self.linear_gain, self.linear_speed,
                 self.minimum_linear_speed, axis_tolerance)
+            if straight_line and distance > self.position_tolerance:
+                # Preserve the direction to the destination when limiting
+                # speed, rather than clipping the two axes independently.
+                speed = planned_speed(
+                    distance, self.linear_gain, self.linear_speed,
+                    self.minimum_linear_speed, self.position_tolerance)
+                vx = speed * error_body_x / distance
+                vy = speed * error_body_y / distance
             wz = planned_speed(
                 yaw_error, 1.5, self.angular_speed,
                 self.minimum_angular_speed, self.yaw_tolerance)

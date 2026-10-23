@@ -15,7 +15,7 @@ def test_collect_passes_round_seed_to_lighting():
     source = HELPER.read_text()
     launch_builder = source[source.index("def simulator_launch_command"):
                             source.index("def ensure_clean_simulator_graph")]
-    assert "'task_light_seed:={}'.format(round_id)" in launch_builder
+    assert "'task_light_seed:={}'.format(round_seed(task_id, round_id))" in launch_builder
 
 
 def test_model_passes_round_seed_to_lighting():
@@ -51,11 +51,37 @@ def test_mujoco_uses_upstream_headlight_ranges_only():
 
     assert 'getParam("task_light_seed", seed)' in body
     assert 'getParam("task_light_profile", profile)' in body
-    assert "wide_range ? 0.1f : 0.2f" in body
-    assert "wide_range ? 0.8f : 0.6f" in body
-    assert "wide_range ? 0.5f : 0.3f" in body
-    assert "wide_range ? 0.4f : 0.2f" in body
+    assert "channel == tint ? 0.9f : 0.7f" in body
+    assert "ambient[channel] = 0.25f" in body
+    assert "specular[channel] = 0.0f" in body
+    assert "std::seed_seq seed_sequence{seed, profile}" in body
+    assert "model->light_diffuse[channel] =" not in body
     assert "model->vis.headlight.diffuse[channel]" in body
     assert "model->vis.headlight.ambient[channel]" in body
     assert "model->vis.headlight.specular[channel]" in body
-    assert "model->light_diffuse" not in body
+    assert "source=scene_xml" in body
+    assert "task2_scene_seed" in body
+
+
+def test_all_tasks_use_identical_task2_lights():
+    import xml.etree.ElementTree as ET
+    import mujoco
+    import numpy as np
+    from utils.task2_randomization import task_scene, DEFAULT_SCENE
+
+    for seed in (1, 2, 28):
+        expected = None
+        for task_id in (2, 1, 3):
+            original = ET.parse(DEFAULT_SCENE.with_name('task%d.xml' % task_id))
+            with task_scene(task_id, seed) as filename:
+                generated = ET.parse(filename)
+                lights = (generated.find('visual/headlight').attrib,
+                          [light.attrib for light in generated.findall('.//worldbody//light')])
+                if expected is None:
+                    expected = lights
+                assert lights == expected
+                model = mujoco.MjModel.from_xml_path(filename)
+                assert model.nlight == 1
+                assert np.allclose(model.light_diffuse, [[0.7, 0.7, 0.7]])
+
+        assert not Path(filename).exists()

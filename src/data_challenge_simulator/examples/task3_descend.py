@@ -22,6 +22,7 @@ from kuavo_humanoid_sdk import KuavoRobot, KuavoRobotState, KuavoSDK
 from utils.gripper_controller import GripperController
 from utils.object_pos import ObjectPose
 from utils.task3_second_ik import Task3SecondIKPlanner
+from utils.task3_randomization import docking_is_clear
 from utils.trajectory_controller import TrajectoryController
 
 from task2_base_motion import ChassisMotion
@@ -97,6 +98,39 @@ def make_planner(scene, ring_name):
     return Task3SecondIKPlanner(scene, ring_name=ring_name)
 
 
+def table_transfer_waypoints(current, target, model, tolerance):
+    """Cross between tables in the front corridor, then approach the target."""
+    source = model.body("task3_source_table").pos
+    destination = model.body("task3_destination_table").pos
+    # Prefer one continuous move if the inflated chassis/table collision
+    # geometry clears the entire segment, including wheel steering envelopes.
+    samples = max(1, math.ceil(math.dist(current[:2], target[:2]) / .02))
+    if all(docking_is_clear(
+            tuple(a + (b - a) * i / samples for a, b in zip(current, target)),
+            tuple(destination)) for i in range(samples + 1)):
+        return [tuple(target)]
+    # A 0.42 m forward envelope includes chassis/body clearance. Use the
+    # generated table geometry, not a baseline world-X parking coordinate.
+    front = min(
+        source[0] - model.geom("task3_source_table_top").size[0],
+        destination[0] - model.geom("task3_destination_table_top").size[0])
+    corridor = min(current[0], target[0], front - .42)
+    # Short moves on the source side need no detour around the other table.
+    source_edge_y = source[1] + model.geom("task3_source_table_top").size[1]
+    if max(current[1], target[1]) <= source_edge_y + .15:
+        return [tuple(target)]
+    points = []
+    if current[0] > corridor + tolerance:
+        points.append((corridor, current[1], target[2]))
+    if abs(current[1] - target[1]) > tolerance:
+        points.append((corridor, target[1], target[2]))
+    if not points or math.dist(points[-1][:2], target[:2]) > tolerance:
+        points.append(tuple(target))
+    else:
+        points[-1] = tuple(target)
+    return points
+
+
 def run_descend(
         robot, robot_state, chassis, object_pose, planner, gripper,
         config, trajectory_points, settle_seconds,
@@ -120,9 +154,9 @@ def run_descend(
             "before solving for %s",
             docking_base[0], docking_base[1],
             math.degrees(docking_base[2]), ring_name)
-        chassis.move_to_pose(
-            docking_base[0], docking_base[1],
-            docking_base[2], timeout=45.0)
+        for waypoint in table_transfer_waypoints(
+                chassis.pose(), docking_base, planner.model, chassis.position_tolerance):
+            chassis.move_to_pose(*waypoint, timeout=45.0, straight_line=True)
     ring_position = object_pose.wait_for_position(
         ring_name, timeout=30.0)
     measured = tuple(wait_for_arm_state(robot_state))

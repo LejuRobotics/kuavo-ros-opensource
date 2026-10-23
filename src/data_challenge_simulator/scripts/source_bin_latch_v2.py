@@ -19,9 +19,9 @@ SOURCE_BIN_SLIDE_JOINT = "source_bin_slide"
 SOURCE_CONVEYOR_TOP_Z = 0.62 + 0.03 * math.cos(math.radians(30.0))
 # The rigid-support bin origin is its floor reference.  Release when that
 # reference reaches its designed height at the 30-degree handoff pose.
-CONTACT_TOLERANCE = 0.00002
+CONTACT_TOLERANCE = 0.001
 LATCH_RATE_HZ = 50.0
-CONVEYOR_SPEED_MPS = 0.10
+CONVEYOR_SPEED_MPS = 0.20
 # The white cradle ends at local X=0.21 m and the bin half-length is 0.20 m.
 # Moving the bin centre to 0.45 m puts its complete footprint beyond the
 # cradle while staying inside the declared 0.60 m slide range.

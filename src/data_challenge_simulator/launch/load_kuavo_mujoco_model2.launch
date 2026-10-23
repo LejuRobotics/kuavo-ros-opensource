@@ -1,10 +1,11 @@
 <launch>
-  <!-- External-model entry for Task 2. initial_base_x/y come from model_entry.py; Task 2
-       currently pins seed 1 because its boxes are not randomized yet. -->
+  <!-- External-model entry uses the same generated Task2 scene as task/collect. -->
+  <arg name="legged_robot_scene" default="$(find data_challenge_simulator)/models/biped_s400062/xml/task2.xml"/>
   <arg name="initial_base_x" default="0.0"/>
   <arg name="initial_base_y" default="0.0"/>
   <arg name="task_light_seed" default="-1"/>
   <include file="$(find data_challenge_simulator)/launch/load_kuavo_mujoco_sim2.launch">
+    <arg name="legged_robot_scene" value="$(arg legged_robot_scene)"/>
     <arg name="initial_base_x" value="$(arg initial_base_x)"/>
     <arg name="initial_base_y" value="$(arg initial_base_y)"/>
     <arg name="task_light_seed" value="$(arg task_light_seed)"/>

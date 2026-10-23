@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import sys
 
 import rospy
+from std_msgs.msg import Float64MultiArray
 
 
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -31,11 +32,8 @@ from task2_initialize import (
     run_initialization,
 )
 from task2_pick import (
-    BimanualGraspCommand,
     BimanualGraspState,
     ConveyorCommand,
-    RepositionGraspCommand,
-    RepositionGraspState,
     DEFAULT_CONFIG as PICK_CONFIG,
     main as run_pick,
 )
@@ -62,6 +60,11 @@ def main():
     initialization_config = load_json(INITIALIZATION_CONFIG)
     pick_config = load_json(PICK_CONFIG)
     rospy.init_node("task2", anonymous=False)
+    # Sensor publication starts before the controller finishes its setup.
+    # Wait for a real controller iteration before initializing command clients.
+    rospy.wait_for_message(
+        "/mobile_manipulator_wbc_observation/state",
+        Float64MultiArray, timeout=60.0)
     # All Task 2 IK is local MuJoCo/SciPy optimization.  The SDK IK service is
     # neither called nor a valid reason to repeat communication setup.
     if not KuavoSDK().Init(options=KuavoSDK.Options.Normal):
@@ -70,12 +73,12 @@ def main():
     robot = KuavoRobot()
     robot_state = KuavoRobotState()
 
-    # Scene 2 places both boxes from the saved layout before any arm motion,
+    # Scene 2 places both boxes from the seeded scene before any arm motion,
     # the same position Task 1 V2 and Task 3 randomize their objects.  The
     # boxes are free joints, so the service is the right write; the base
     # translation still comes from the launch arguments, which the controller
     # needs before it builds its origin reference.
-    seed = int(os.environ.get("TASK_SEED", "1"))
+    seed = int(os.environ.get("TASK_SEED", "28"))
     layout = Task2RandomizationPlanner().plan(seed)
     randomizer = ObjectRandomizer(timeout=60.0)
     for box in layout.boxes:
@@ -88,8 +91,8 @@ def main():
             raise RuntimeError(
                 "failed to place {}: {}".format(box.name, result["message"]))
     rospy.loginfo(
-        "Task2 seed %d selected saved layout %d: initial_base=%s boxes=%s",
-        seed, layout.catalogue_seed,
+        "Task2 seed %d generated scene: initial_base=%s boxes=%s",
+        seed,
         [round(value, 6) for value in layout.initial_base],
         [[box.name, [round(value, 6) for value in box.position]]
          for box in layout.boxes])
@@ -123,19 +126,12 @@ def main():
         robot_state=robot_state,
         poses=ObjectPose(),
         grasp_state=BimanualGraspState(),
-        grasp_command=BimanualGraspCommand(),
-        reposition_state=RepositionGraspState(),
-        reposition_command=RepositionGraspCommand(),
         conveyor_command=ConveyorCommand(),
         chassis=pick_chassis,
         planner=Task2PickPlanner(ik_config=pick_config["ik"]),
         gripper=gripper,
         trajectory=None,
     )
-    # Clear a latch left armed by an interrupted earlier Task 2 run once, at
-    # workflow startup.  Do not reset it by recreating the controller per box.
-    runtime.grasp_command.set_enabled(False)
-    runtime.reposition_command.set_enabled(False)
 
     try:
         rospy.loginfo("TASK2 WORKFLOW START: one-time initialization")
@@ -156,8 +152,7 @@ def main():
                 "TASK2 WORKFLOW START: pick_transport_release_%d/2",
                 index + 1)
             run_pick(
-                runtime=runtime, transport_and_return=True,
-                reposition_before_right=(index == 0))
+                runtime=runtime, transport_and_return=True)
             rospy.loginfo(
                 "TASK2 WORKFLOW COMPLETE: pick_transport_release_%d/2",
                 index + 1)
@@ -170,8 +165,6 @@ def main():
         success = True
         rospy.loginfo("TASK2 FULL WORKFLOW PASSED: placed_box_count=2")
     finally:
-        runtime.grasp_command.set_enabled(False)
-        runtime.reposition_command.set_enabled(False)
         initialization_chassis.stop()
         pick_chassis.stop()
         runtime.gripper.stop()

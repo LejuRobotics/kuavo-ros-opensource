@@ -47,7 +47,7 @@ def test_model_score_json_gets_run_identity(tmp_path):
     score_file = Path(store.allocate(314))
     json_file = score_file.with_suffix(".json")
     json_file.write_text(
-        json.dumps({"total": 88, "components": {"grasp": 30}}),
+        json.dumps(dict(store.metadata(str(score_file)), total=88, components={"grasp":30}, status="completed")),
         encoding="utf-8")
 
     assert Path(store.annotate(str(score_file), "success")) == json_file
@@ -75,8 +75,9 @@ def test_model_session_clears_only_known_outputs_for_its_task(tmp_path):
 
     ModelScoreStore(2, "policy_a", root=str(tmp_path))
 
-    for name in ("score.txt", "score.json", "average.txt", "average.json"):
-        assert not task_dir.joinpath(name).exists()
+    assert task_dir.joinpath("score.txt").read_text() == "0\n"
+    assert json.loads(task_dir.joinpath("score.json").read_text())["status"] == "preparing"
+    assert json.loads(task_dir.joinpath("average.json").read_text())["valid_rounds"] == 0
     assert task_dir.joinpath("operator_note.txt").read_text() == "keep"
     assert other_task.joinpath("score.txt").read_text() == "keep"
 
@@ -87,18 +88,18 @@ def test_only_finalized_rounds_contribute_to_session_average(tmp_path):
     # Allocating means /simulator/start was accepted.  An infrastructure
     # failure before successful finalization still must not enter the average.
     store.allocate(10)
-    assert not Path(store.average_file).exists()
+    assert Path(store.average_file).read_text() == "0.00\n"
 
     first_score = Path(store.allocate(20))
     first_score.write_text("80\n", encoding="utf-8")
     first_score.with_suffix(".json").write_text(
-        json.dumps({"total": 80, "components": {}}), encoding="utf-8")
+        json.dumps(dict(store.metadata(str(first_score)), total=80, components={}, status="completed")), encoding="utf-8")
     store.annotate(str(first_score), "reset")
 
     second_score = Path(store.allocate(30))
     second_score.write_text("40\n", encoding="utf-8")
     second_score.with_suffix(".json").write_text(
-        json.dumps({"total": 40, "components": {}}), encoding="utf-8")
+        json.dumps(dict(store.metadata(str(second_score)), total=40, components={}, status="completed")), encoding="utf-8")
     store.annotate(str(second_score), "shutdown")
 
     assert Path(store.average_file).read_text(encoding="utf-8") == "60.00\n"
@@ -136,7 +137,7 @@ def test_one_round_cannot_be_added_to_the_average_twice(tmp_path):
     score_file = Path(store.allocate(42))
     score_file.write_text("25\n", encoding="utf-8")
     score_file.with_suffix(".json").write_text(
-        json.dumps({"total": 25, "components": {}}), encoding="utf-8")
+        json.dumps(dict(store.metadata(str(score_file)), total=25, components={}, status="completed")), encoding="utf-8")
 
     store.annotate(str(score_file), "success")
     with pytest.raises(ValueError, match="already finalized"):

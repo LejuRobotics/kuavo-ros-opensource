@@ -1,0 +1,39 @@
+{
+  "seed_base": 27,
+  "initial_base": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "conveyor_x_offset_range_m": [
+    -0.1,
+    0.1
+  ],
+  "box_front_inset_m": 0.01,
+  "box_side_margin_m": 0.02,
+  "minimum_box_gap_m": 0.12,
+  "lighting": {
+    "headlight_colors": {
+      "light_red": [
+        0.9,
+        0.7,
+        0.7
+      ],
+      "light_green": [
+        0.7,
+        0.9,
+        0.7
+      ],
+      "light_blue": [
+        0.7,
+        0.7,
+        0.9
+      ]
+    },
+    "headlight_ambient": [
+      0.25,
+      0.25,
+      0.25
+    ]
+  }
+}

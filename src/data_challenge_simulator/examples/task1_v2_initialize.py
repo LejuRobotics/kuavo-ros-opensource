@@ -1,31 +1,20 @@
 #!/usr/bin/env python3
-"""Task 1 V2 one-time initialization for the external model entry.
+"""Task 1 model initialization: place the layout and prepare above its first object.
 
-The accepted ``task1.py`` performs this action sequence inline before its
-first task motion: place the saved layout, retreat to a safe base, raise the
-right arm through shoulder clearance / four-joint ready / full seven-joint
-ready, then return once to the measured random base B0.  The model entry needs
-that prefix and none of the task policy.  Its small fixed initialization values
-are regression-checked against Task 1, without importing the full Task 1 IK and
-policy module at runtime.  Its base legs are timed open-loop commands with no
-arrival decision.  ``task1.py`` itself is not modified.
-
-The model entry passes the same continuously publishing ``TrajectoryController``
-shape used by the accepted task entry.  This helper never owns or stops that
-publisher; the caller closes it after the complete fixed initialization.
+The base stays at its fixed launch pose. The caller owns the arm publisher
+and hands control to the external policy after this one smooth motion.
 """
 
 import math
 import time
 
-import rospy
 
 from utils.gripper_controller import GripperController
 from utils.object_pos import ObjectPose
 from utils.object_randomizer import ObjectRandomizer
 from utils.task1_v2_randomization import Task1V2RandomizationPlanner
 from utils.arm_state import wait_for_first_arm_state
-from utils.utils import Utils
+from utils.scene1_v2_right_arm_ik import Scene1V2RightArmIK
 
 from task2_base_motion import ChassisMotion
 
@@ -33,24 +22,10 @@ from task2_base_motion import ChassisMotion
 ARM_JOINT_COUNT = 14
 CYLINDERS = ("cylinder_1", "cylinder_2", "cylinder_3")
 TARGET_BIN = "target_bin"
-INITIALIZATION_SAFE_RETREAT_M = 0.20
 LEFT_THUMB_SAFE_J1_RAD = 1.75
 LEFT_THUMB_INITIALIZATION_DURATION_S = 1.2
-SHOULDER_LIFT_DEG = 60.0
-RIGHT_ARM_STAGING_RAD = (
-    -0.569927, -0.301512, 0.658253, -0.488704,
-    0.698827, -0.653404, -0.289423,
-)
-RIGHT_ARM_STAGING_ABOVE_RAD = (
-    -0.466591, -0.579416, 0.652630, -1.211603,
-    0.699260, -0.286390, 0.045867,
-)
-TRAJECTORY_POINTS = 40
-STAGING_DESCENT_TRAJECTORY_POINTS = 40
 TRAJECTORY_SLEEP = 0.02
-STOP_SPEED_THRESHOLD = 0.01
-STOP_WATCHDOG_S = 10.0
-CHASSIS_LINEAR_SPEED = 0.12
+CHASSIS_LINEAR_SPEED = 0.40
 CHASSIS_ANGULAR_SPEED = 0.30
 CHASSIS_MIN_LINEAR_SPEED = 0.08
 CHASSIS_MIN_ANGULAR_SPEED = 0.08
@@ -68,15 +43,6 @@ def make_chassis():
         position_tolerance=CHASSIS_POSITION_TOLERANCE,
         yaw_tolerance_deg=CHASSIS_YAW_TOLERANCE_DEG,
     )
-
-
-def right_only_trajectory(target_deg, start_deg, left_hold_rad, num):
-    """Interpolate the right arm while holding the measured left arm."""
-    points = Utils.interpolate_joint_trajectory(
-        target_deg, start_deg, num=num)
-    for point in points:
-        point[:7] = left_hold_rad
-    return points
 
 
 def wait_for_arm_state(robot_state, timeout=30.0):
@@ -107,25 +73,6 @@ def initialize_left_thumb(gripper):
             gripper.current_left_positions = positions
             gripper.command_initialized.set()
         time.sleep(1.0 / gripper.publish_frequency)
-
-
-def move_base_open_loop(chassis, target_world, phase):
-    """Drive once by elapsed time and continue without an arrival decision."""
-    chassis.wait_until_ready()
-    plan = chassis.move_open_loop(target_world[0], target_world[1])
-    chassis.wait_until_stopped(STOP_SPEED_THRESHOLD, STOP_WATCHDOG_S)
-    measured = tuple(chassis.pose())
-    position_error = math.hypot(
-        float(target_world[0]) - measured[0],
-        float(target_world[1]) - measured[1],
-    )
-    rospy.loginfo(
-        "Task1 model %s open-loop move finished: target=(%.3f, %.3f) "
-        "measured=(%.3f, %.3f, %.1f deg) duration=%.3f s "
-        "error=%.4f m; continuing without an arrival decision",
-        phase, target_world[0], target_world[1], measured[0], measured[1],
-        math.degrees(measured[2]), plan["duration"], position_error)
-    return measured
 
 
 def place_scene(randomizer, seed, chassis):
@@ -162,21 +109,17 @@ def place_scene(randomizer, seed, chassis):
     if measured is not None:
         print("V2 model seed {} launch-time measured base pose: {}".format(
             seed, [round(value, 6) for value in measured]))
-    # ``initial_base`` is deliberately behind the transverse conveyor so the
-    # default open thumb cannot spawn inside it.  Keep the robot there until
-    # the safe-retreat step closes the thumb and prepares the right arm; the
-    # existing final return then advances to ``task_base``.
     return plan.task_base
 
 
 def run_initialization(robot, robot_state, seed, trajectory):
-    """Randomize, retreat, follow Task 1 staging, and return to B0.
-
-    Returns the measured random base pose ``B0`` and staging joints.
-    """
+    """Place objects, hold the base, and return the measured ready joints."""
     chassis = make_chassis()
     gripper = GripperController()
     try:
+        chassis.stop()
+
+        initialize_left_thumb(gripper)
         randomizer = ObjectRandomizer(timeout=60.0)
         base_translation_world = place_scene(randomizer, seed, chassis)
         print("V2 seed {} robot base translation: {}".format(
@@ -189,59 +132,12 @@ def run_initialization(robot, robot_state, seed, trajectory):
             [round(value, 6)
              for value in poses.get_position(TARGET_BIN)]))
 
-        initial_arm_rad = wait_for_arm_state(robot_state)
-        left_hold_rad = list(initial_arm_rad[:7])
-        current_target_deg = [
-            math.degrees(value) for value in initial_arm_rad]
-
-        safe_base_world = (
-            base_translation_world[0] - INITIALIZATION_SAFE_RETREAT_M,
-            base_translation_world[1],
-            base_translation_world[2],
-        )
-        print(
-            "V2 initialization retreat: B0={} safe={} distance={:.3f} m"
-            .format(
-                [round(value, 6) for value in base_translation_world],
-                [round(value, 6) for value in safe_base_world],
-                INITIALIZATION_SAFE_RETREAT_M))
-        move_base_open_loop(chassis, safe_base_world, "safe retreat")
-        initialize_left_thumb(gripper)
-
-        # Match the accepted Task 1 initialization waypoints: shoulder
-        # clearance, the nearby high staging waypoint, return to B0 at that
-        # safe height, and only then descend to the task staging posture.  The
-        # model path keeps its dedicated open-loop chassis implementation.
-        shoulder_only_deg = list(current_target_deg)
-        shoulder_only_deg[8] = -SHOULDER_LIFT_DEG
-        shoulder_only_deg[12] = math.degrees(-0.5)
-        publish_trajectory(trajectory, right_only_trajectory(
-            shoulder_only_deg, current_target_deg, left_hold_rad,
-            num=TRAJECTORY_POINTS))
-        current_target_deg = shoulder_only_deg
-
-        staging_above_deg = list(current_target_deg)
-        staging_above_deg[7:14] = [
-            math.degrees(value) for value in RIGHT_ARM_STAGING_ABOVE_RAD]
-        publish_trajectory(trajectory, right_only_trajectory(
-            staging_above_deg, current_target_deg, left_hold_rad,
-            num=TRAJECTORY_POINTS))
-        current_target_deg = staging_above_deg
-
-        # Return once to this run's random B0 while holding the same safe high
-        # waypoint as the accepted entry.
-        measured_b0 = move_base_open_loop(
-            chassis, base_translation_world, "return to B0")
-
-        staging_deg = list(current_target_deg)
-        staging_deg[7:14] = [
-            math.degrees(value) for value in RIGHT_ARM_STAGING_RAD]
-        publish_trajectory(trajectory, right_only_trajectory(
-            staging_deg, current_target_deg, left_hold_rad,
-            num=STAGING_DESCENT_TRAJECTORY_POINTS))
-        current_target_deg = staging_deg
-        time.sleep(0.2)
-
+        measured_b0 = tuple(chassis.pose())
+        scene_ik = Scene1V2RightArmIK()
+        scene_ik.set_base_translation_world((measured_b0[0], measured_b0[1], 0.0))
+        points = scene_ik.preparation_trajectory(
+            wait_for_arm_state(robot_state), poses.get_position(CYLINDERS[0]))
+        publish_trajectory(trajectory, points, sleep_time=0.01)
         staging_arm_rad = wait_for_arm_state(robot_state)
         print(
             "V2 model initialization complete: measured B0={} staging={}"

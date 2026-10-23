@@ -42,6 +42,8 @@ class TopicRelay:
             self.timer_callback
         )
         
+        rospy.on_shutdown(self.timer.shutdown)
+
         rospy.loginfo("Topic relay node started at {} Hz".format(self.publish_rate))
         rospy.loginfo("Subscribing to: /cmd_pose_world (Twist) and /kuavo_arm_traj (JointState)")
         rospy.loginfo("Publishing to: /cmd_pose_world_synced (TwistStamped) and /kuavo_arm_traj_synced (JointState)")
@@ -59,28 +61,35 @@ class TopicRelay:
     
     def timer_callback(self, event):
         """定时发布消息,保持数据连续性"""
-        current_time = rospy.Time.now()
-        
-        # 发布 cmd_pose_world_synced (添加时间戳)
-        if self.last_cmd_twist is not None:
-            stamped_msg = TwistStamped()
-            stamped_msg.header.stamp = current_time
-            stamped_msg.header.frame_id = "world"
-            stamped_msg.twist = self.last_cmd_twist
-            self.cmd_twist_pub.publish(stamped_msg)
-        
-        # 发布 kuavo_arm_traj_synced (更新时间戳)
-        if self.last_joint_state is not None:
-            # 创建副本并更新时间戳
-            joint_msg = JointState()
-            joint_msg.header = self.last_joint_state.header
-            joint_msg.header.stamp = current_time
-            joint_msg.name = self.last_joint_state.name
-            joint_msg.position = self.last_joint_state.position
-            joint_msg.velocity = self.last_joint_state.velocity
-            joint_msg.effort = self.last_joint_state.effort
-            self.joint_state_pub.publish(joint_msg)
-    
+        if rospy.core.is_shutdown_requested():
+            return
+        try:
+            current_time = rospy.Time.now()
+
+            # 发布 cmd_pose_world_synced (添加时间戳)
+            if self.last_cmd_twist is not None:
+                stamped_msg = TwistStamped()
+                stamped_msg.header.stamp = current_time
+                stamped_msg.header.frame_id = "world"
+                stamped_msg.twist = self.last_cmd_twist
+                self.cmd_twist_pub.publish(stamped_msg)
+
+            # 发布 kuavo_arm_traj_synced (更新时间戳)
+            if self.last_joint_state is not None:
+                # 创建副本并更新时间戳
+                joint_msg = JointState()
+                joint_msg.header = self.last_joint_state.header
+                joint_msg.header.stamp = current_time
+                joint_msg.name = self.last_joint_state.name
+                joint_msg.position = self.last_joint_state.position
+                joint_msg.velocity = self.last_joint_state.velocity
+                joint_msg.effort = self.last_joint_state.effort
+                self.joint_state_pub.publish(joint_msg)
+        except rospy.ROSException:
+            # Shutdown can close a publisher after this callback has started.
+            if not rospy.core.is_shutdown_requested():
+                raise
+
     def run(self):
         rospy.spin()
 

@@ -1,12 +1,11 @@
-"""Keep one ROS master alive across all rounds of a model session."""
+"""Keep one ROS master alive across all rounds of a simulator session."""
 
-import os
-import signal
 import subprocess
 import time
 from xmlrpc.client import ServerProxy, Transport
 
 import rosgraph
+from utils.shutdown_guard import ShutdownGuard
 from rosgraph.network import is_local_address, parse_http_host_and_port
 
 
@@ -25,6 +24,7 @@ class ModelMaster:
         self.timeout = timeout
         self.process = None
         self.pid = None
+        self.guard = ShutdownGuard(0)
 
     def _probe(self):
         try:
@@ -38,15 +38,16 @@ class ModelMaster:
         try:
             self.pid = self._probe()
             if self.pid is not None:
-                print('[INFO] model entry: reusing ROS master {} pid {}'.format(
+                print('[INFO] simulator session: reusing ROS master {} pid {}'.format(
                     self.uri, self.pid), flush=True)
                 return self
             host, port = parse_http_host_and_port(self.uri)
             if not is_local_address(host):
                 raise RuntimeError('ROS master {} is unavailable; refusing to '
                                    'replace a remote master'.format(self.uri))
-            self.process = subprocess.Popen(
-                ['roscore', '-p', str(port)], start_new_session=True)
+            self.process = self.guard.add(subprocess.Popen(
+                ['roscore', '-p', str(port)], start_new_session=True),
+                graceful=True, process_group=True)
             deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
                 if self.process.poll() is not None:
@@ -54,7 +55,7 @@ class ModelMaster:
                         self.process.returncode))
                 self.pid = self._probe()
                 if self.pid is not None:
-                    print('[INFO] model entry: session ROS master {} pid {}; '
+                    print('[INFO] simulator session: session ROS master {} pid {}; '
                           'preserved across resets'.format(self.uri, self.pid),
                           flush=True)
                     return self
@@ -73,19 +74,9 @@ class ModelMaster:
     def close(self):
         if self.process is None:
             return
-        # Only this session's roscore group is ours. Never kill by process name.
-        process, self.process = self.process, None
-        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(process.pid, signum)
-            except ProcessLookupError:
-                break
-            try:
-                process.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                continue
-            # Also remove descendants if their parent exited before them.
-        process.wait(timeout=1.0)
+        # Close only the master we created, including separately grouped ROS children.
+        self.guard.sweep()
+        self.process = None
 
     def __exit__(self, *_exc):
         self.close()

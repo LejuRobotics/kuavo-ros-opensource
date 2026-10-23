@@ -168,10 +168,22 @@ class RosbagCompatPublisher:
             self.cmd_vel_timer = rospy.Timer(
                 rospy.Duration(1.0 / self.cmd_vel_publish_rate),
                 self._publish_cmd_vel)
+        rospy.on_shutdown(self._stop_timers)
         rospy.loginfo(
             "Rosbag compatibility publisher started: IK/FK topics "
             "at %.1f Hz; cmd_vel fallback at %.1f Hz",
             self.publish_rate, self.cmd_vel_publish_rate)
+
+    def _stop_timers(self):
+        # Client shutdown hooks run before rospy closes publisher topics.
+        # Stop new callbacks and finish any in-flight publish first.
+        timers = [timer for timer in (self.timer, self.cmd_vel_timer)
+                  if timer is not None]
+        for timer in timers:
+            timer.shutdown()
+        for timer in timers:
+            if timer is not threading.current_thread():
+                timer.join()
 
     def _sensor_callback(self, message):
         joints = list(message.joint_data.joint_q)

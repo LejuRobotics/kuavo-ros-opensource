@@ -6,6 +6,8 @@ import os
 import re
 from datetime import datetime
 
+from utils.score_output import atomic_write, write_score, reset_score, invalidate_score
+
 
 PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_MODEL_SCORES_DIR = os.path.join(
@@ -50,14 +52,25 @@ class ModelScoreStore(object):
         self._clear_previous_session()
 
     def _clear_previous_session(self):
-        """Remove only the known outputs left by an earlier model process."""
-        score_json_file = os.path.splitext(self.score_file)[0] + ".json"
-        for path in (self.score_file, score_json_file,
-                     self.average_file, self.average_json_file):
-            try:
-                os.remove(path)
-            except FileNotFoundError:
-                pass
+        """Replace old outputs with an explicit empty, preparing session."""
+        self.prepare(None)
+        atomic_write(self.average_file, "0.00\n")
+        atomic_write(self.average_json_file, json.dumps({
+            "model_name": self.model_name, "session_id": self.session_id,
+            "task_id": self.task_id, "valid_rounds": 0,
+            "score_sum": 0, "average": 0, "rounds": []}, indent=2) + "\n")
+
+    def prepare(self, seed):
+        """Expose the next round immediately, without committing an average."""
+        reset_score(self.score_file, {
+            "model_name": self.model_name, "session_id": self.session_id,
+            "task_id": self.task_id, "round": self._round + 1, "seed": seed})
+
+    def metadata(self, score_file):
+        return dict(self._records[score_file])
+
+    def invalidate(self, reason):
+        invalidate_score(self.score_file, reason)
 
     def allocate(self, seed):
         """Return the fixed score path; each completed round overwrites it."""
@@ -70,6 +83,7 @@ class ModelScoreStore(object):
             "round": self._round,
             "seed": int(seed),
         }
+        reset_score(score_file, self._records[score_file])
         return score_file
 
     def annotate(self, score_file, finish_reason):
@@ -85,14 +99,17 @@ class ModelScoreStore(object):
         json_file = base + ".json"
         with open(json_file, "r", encoding="utf-8") as stream:
             payload = json.load(stream)
+        if payload.get("status") != "completed":
+            raise ValueError("cannot average an unfinished or invalid round")
+        if any(payload.get(key) != value for key, value in metadata.items()):
+            raise ValueError("score metadata does not match the active round")
         total = payload.get("total")
         if isinstance(total, bool) or not isinstance(total, (int, float)):
             raise ValueError("model score JSON has no numeric total")
         model_run = dict(metadata)
         model_run["finish_reason"] = str(finish_reason)
         payload["model_run"] = model_run
-        with open(json_file, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, ensure_ascii=False, indent=2)
+        write_score(score_file, payload)
 
         round_result = dict(model_run)
         round_result["score"] = total
@@ -108,11 +125,9 @@ class ModelScoreStore(object):
             "average": average,
             "rounds": results,
         }
-        with open(self.average_file, "w", encoding="utf-8") as stream:
-            stream.write("{:.2f}\n".format(average))
-        with open(self.average_json_file, "w", encoding="utf-8") as stream:
-            json.dump(
-                average_payload, stream, ensure_ascii=False, indent=2)
+        atomic_write(self.average_file, "{:.2f}\n".format(average))
+        atomic_write(self.average_json_file,
+                     json.dumps(average_payload, ensure_ascii=False, indent=2) + "\n")
         self._round_results = results
         self._committed_rounds.add(round_id)
         return json_file

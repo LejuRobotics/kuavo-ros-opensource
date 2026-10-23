@@ -18,10 +18,14 @@ if PACKAGE_DIR not in sys.path:
 
 from utils.shutdown_guard import (
     ShutdownGuard,
+    clear_dead_simulator_nodes,
     clear_simulator_nodes,
     clear_stale_processes,
 )
 from utils.collect_score_store import allocate_collect_score_file
+from utils.model_master import ModelMaster
+from utils.score_output import reset_score, invalidate_score
+from utils.task2_randomization import seed_for_round, task_scene, active_scene
 
 TASK_SCRIPTS = {
     1: 'task1.py',
@@ -80,17 +84,24 @@ def read_task_result(round_id):
     return result == "success"
 
 
+def current_score_file(task_id):
+    return os.path.join(SCORES_DIR, "task{}".format(task_id), "score.txt")
+
+
+def round_seed(task_id, round_id):
+    return seed_for_round(round_id)
+
+
+def score_metadata(task_id, round_id):
+    return {"task_id": task_id, "round": round_id, "seed": round_seed(task_id, round_id)}
+
+
 def clear_score_result(task_id, round_id):
-    """Remove score artifacts so a failed startup cannot reuse an old score."""
+    """Publish this round's zero immediately, replacing any stale score."""
     score_file = os.path.join(
         SCORES_DIR, 'score_task{}_round{}.txt'.format(task_id, round_id))
-    try:
-        os.makedirs(SCORES_DIR, exist_ok=True)
-        for path in (score_file, os.path.splitext(score_file)[0] + '.json'):
-            if os.path.exists(path):
-                os.remove(path)
-    except OSError as error:
-        print('[WARNING] 评分文件清理失败: {}'.format(error))
+    reset_score(score_file, score_metadata(task_id, round_id),
+                current_score_file(task_id))
     return score_file
 
 
@@ -100,7 +111,11 @@ def start_scorer(task_id, round_id, score_file=None):
         # Non-recording task runs keep their accepted replace-in-place path.
         score_file = clear_score_result(task_id, round_id)
     environment = os.environ.copy()
+    reset_score(score_file, score_metadata(task_id, round_id),
+                current_score_file(task_id))
     environment['SCORE_FILE'] = score_file
+    environment['SCORE_LATEST_FILE'] = current_score_file(task_id)
+    environment['SCORE_METADATA'] = json.dumps(score_metadata(task_id, round_id))
     environment.setdefault('KUAVO_LOG_SERVER', '0')
     environment.setdefault('KUAVO_LEG_SERVICE', '0')
     process = subprocess.Popen(
@@ -118,6 +133,11 @@ def read_score(task_id, round_id, score_file=None):
         score_file = os.path.join(
             SCORES_DIR, 'score_task{}_round{}.txt'.format(task_id, round_id))
     try:
+        detail = os.path.splitext(score_file)[0] + '.json'
+        if os.path.exists(detail):
+            with open(detail) as stream:
+                if json.load(stream).get("status", "completed") != "completed":
+                    return None
         with open(score_file, 'r') as stream:
             value = stream.read().strip()
         return float(value) if value else None
@@ -160,7 +180,12 @@ def stop_scorer(task_id, round_id, scorer_process, score_file):
             detail = os.path.splitext(score_file)[0] + '.json'
             if os.path.exists(detail):
                 with open(detail, 'r') as stream:
-                    components = json.load(stream).get('components')
+                    payload = json.load(stream)
+                    components = payload.get('components')
+                    if payload.get('status', 'completed') != 'completed':
+                        total = None
+                        invalidate_score(score_file, "scorer did not finalize",
+                                         current_score_file(task_id))
         except (OSError, ValueError):
             total = None
     if total is None:
@@ -218,7 +243,7 @@ TASK3_ROS_TOPICS = list(ROS_TOPICS)
 
 
 def task2_initial_base_translation(round_id):
-    """Read Scene 2's launch-time base pose from the saved layout."""
+    """Read Scene 2's fixed launch-time base pose from the shared generator."""
     from utils.task2_randomization import Task2RandomizationPlanner
 
     return Task2RandomizationPlanner().plan(round_id).initial_base[:2]
@@ -239,11 +264,12 @@ def simulator_launch_command(task_id, round_id):
     command = [
         'roslaunch', 'data_challenge_simulator',
         launch_file,
-        'task_light_seed:={}'.format(round_id),
+        'task_light_seed:={}'.format(round_seed(task_id, round_id)),
     ]
+    command.append("legged_robot_scene:={}".format(active_scene(task_id)))
     if task_id == 1:
         from utils.task1_v2_randomization import Task1V2RandomizationPlanner
-        initial_base = Task1V2RandomizationPlanner().plan(round_id).initial_base
+        initial_base = Task1V2RandomizationPlanner().plan(round_seed(task_id, round_id)).initial_base
         command.extend([
             f'initial_base_x:={initial_base[0]:.9f}',
             f'initial_base_y:={initial_base[1]:.9f}',
@@ -252,7 +278,7 @@ def simulator_launch_command(task_id, round_id):
             f"[INFO] Round {round_id}: Task 1 initial base "
             f"x={initial_base[0]:.4f}, y={initial_base[1]:.4f}")
     if task_id == 2:
-        base_x, base_y = task2_initial_base_translation(round_id)
+        base_x, base_y = task2_initial_base_translation(round_seed(task_id, round_id))
         command.extend([
             f'initial_base_x:={base_x:.9f}',
             f'initial_base_y:={base_y:.9f}',
@@ -261,7 +287,7 @@ def simulator_launch_command(task_id, round_id):
             f"[INFO] Round {round_id}: Task 2 initial base "
             f"x={base_x:.4f}, y={base_y:.4f}")
     if task_id == 3:
-        base_x, base_y = task3_initial_base_translation(round_id)
+        base_x, base_y = task3_initial_base_translation(round_seed(task_id, round_id))
         command.extend([
             f'initial_base_x:={base_x:.9f}',
             f'initial_base_y:={base_y:.9f}',
@@ -438,12 +464,14 @@ def run_only_task(
         task_env = os.environ.copy()  # 不改变 DISPLAY
 
     try:
-        with ShutdownGuard(task_id) as guard:
+        with task_scene(task_id, round_seed(task_id, round_id)), ShutdownGuard(task_id) as guard:
+            task_env["TASK{}_SCENE_FILE".format(task_id)] = str(active_scene(task_id))
             return _run_only_task(
                 round_id, task_id, headless, keep_sim_on_failure, task_script,
                 task_env, start_time, guard)
     except RoundStartupError as error:
         print(f"[ERROR] Round {round_id}: {error}")
+        invalidate_score(current_score_file(task_id), str(error))
         return report_startup_failure(round_id, start_time)
 
 
@@ -470,11 +498,9 @@ def _run_only_task(
     # 在后台启动任务脚本但不等待完成
     print(f"[INFO] Round {round_id}: Starting {task_script} in background")
     task_process_env = os.environ.copy()
-    task_process_env['TASK_SEED'] = str(round_id)
-    # No-record runs are action experiments: task-level acceptance failures
-    # are reported, but must not prevent later independent action stages from
-    # running. Recorded collection keeps fail-fast acceptance semantics.
-    task_process_env['TASK_EXPERIMENT_MODE'] = '1'
+    task_process_env['TASK_SEED'] = str(round_seed(task_id, round_id))
+    # Both task and collect stop when a physical action fails.
+    task_process_env['TASK_EXPERIMENT_MODE'] = '0'
     # 仿真流程里没有 8889 日志服务器（它只在上位机 plan_arm_action_websocket_server
     # 里起），也没有 /lb_leg_control_srv（只在 motion_capture_ik 的
     # leg_ik_service_node 里提供）：整步跳过这两处连接/等待，避免每次启动白等。
@@ -492,32 +518,30 @@ def _run_only_task(
         start_new_session=True), process_group=True)
 
     task_completed = False
+    is_success = False
     try:
-        # 等待任务脚本完成
         print(f"[INFO] Round {round_id}: Waiting for task completion")
         task_process.wait()
         task_completed = True
     finally:
-        # An interrupted task must stop publishing before optional scorer
-        # finalization consumes its timeout budget.
-        if task_completed:
-            stop_scorer(task_id, round_id, scorer_process, score_file)
-        print(f"[INFO] Round {round_id}: Stopping simulation...")
-        guard.sweep()
-
-    # 结果文件由这里读走并删掉，不在 finally 里删：finally 先于这里执行，
-    # 在那里删会把本轮结果抹掉，让每轮都变成"未生成结果文件，默认失败"。
-    is_success = read_task_result(round_id)
-
-    if not is_success:
-        print(f"[INFO] Round {round_id}: ❌ 任务失败")
-        if keep_sim_on_failure:
-            try:
-                input("[INFO] 仿真窗口已保留，检查现场后按回车关闭：")
-            except (EOFError, KeyboardInterrupt):
-                pass
-    else:
+        try:
+            if task_completed:
+                stop_scorer(task_id, round_id, scorer_process, score_file)
+                is_success = read_task_result(round_id)
+                if not is_success and keep_sim_on_failure:
+                    try:
+                        input("[INFO] 任务失败，仿真窗口已保留，检查现场后按回车关闭：")
+                    except (EOFError, KeyboardInterrupt):
+                        pass
+        finally:
+            print(f"[INFO] Round {round_id}: Stopping simulation...")
+            guard.sweep()
+            if not task_completed:
+                invalidate_score(score_file, "task interrupted", current_score_file(task_id))
+    if is_success:
         print(f"[INFO] Round {round_id}: ✅ 任务成功")
+    else:
+        print(f"[INFO] Round {round_id}: ❌ 任务失败")
 
     end_time = time.time()
     duration = end_time - start_time
@@ -530,8 +554,9 @@ def run_once(round_id: int, task_id: int,headless: bool):
     start_time = time.time()
     ensure_clean_simulator_graph(task_id)
     bag_filename = f"data_round_{round_id:07d}.bag"
-    # The task result is transient, but collect score files are persistent and
-    # allocated only after simulator startup; never delete an earlier score.
+    # The fixed current snapshot exists during startup; historical collect
+    # results remain reserved under distinct names once the scorer starts.
+    reset_score(current_score_file(task_id), score_metadata(task_id, round_id))
     clear_task_result()
 
     task_script = os.path.join(SCRIPT_DIR, TASK_SCRIPTS[task_id])
@@ -545,12 +570,14 @@ def run_once(round_id: int, task_id: int,headless: bool):
         task_env = os.environ.copy()  # 不改变 DISPLAY
 
     try:
-        with ShutdownGuard(task_id) as guard:
+        with task_scene(task_id, round_seed(task_id, round_id)), ShutdownGuard(task_id) as guard:
+            task_env["TASK{}_SCENE_FILE".format(task_id)] = str(active_scene(task_id))
             return _run_once(
                 round_id, task_id, bag_filename, task_script,
                 task_env, start_time, guard)
     except RoundStartupError as error:
         print(f"[ERROR] Round {round_id}: {error}")
+        invalidate_score(current_score_file(task_id), str(error))
         duration, is_success = report_startup_failure(
             round_id, start_time, bag_filename)
         return duration, is_success, None
@@ -589,7 +616,7 @@ def _run_once(
         round_id, task_id, bag_filename, guard)
     print(f"[INFO] Round {round_id}: Starting {task_script} in background")
     task_process_env = os.environ.copy()
-    task_process_env['TASK_SEED'] = str(round_id)
+    task_process_env['TASK_SEED'] = str(round_seed(task_id, round_id))
     task_process_env['TASK_EXPERIMENT_MODE'] = '0'
     # 仿真流程里没有 8889 日志服务器（它只在上位机 plan_arm_action_websocket_server
     # 里起），也没有 /lb_leg_control_srv（只在 motion_capture_ik 的
@@ -626,9 +653,11 @@ def _run_once(
         # 停止 rosbag 和 simulation。放在 finally 里：Ctrl+C 打断等待时
         # 也必须把这两个进程组收掉，否则残留会让下一轮起不来。
         # ShutdownGuard 保证第二次 Ctrl+C 不会把这段清理打断，
-        # 并按名字兜底扫掉句柄已失效的残留（rosbag 先收 SIGINT 以便写完文件）。
+        # 并核验本轮进程树无残留（rosbag 先收 SIGINT 以便写完文件）。
         print(f"[INFO] Round {round_id}: Stopping rosbag and simulation...")
         guard.sweep()
+        if not task_completed:
+            invalidate_score(score_file, "collect interrupted", current_score_file(task_id))
 
     # 结果文件由这里读走并删掉，不在 finally 里删：finally 先于这里执行，
     # 在那里删会把本轮结果抹掉，让每轮都变成"未生成结果文件，默认失败"。
@@ -660,10 +689,13 @@ def main(
     # The prompts below block on input().  Without a guard, Ctrl+C during a
     # prompt kills the process outright -- there is nothing to tear down yet,
     # but the traceback is noise the acceptance run does not need.
-    with ShutdownGuard(task_id if task_id in (1, 2, 3) else 1):
-        return _main(
-            headless, task_id, record_choice, repeat_times,
-            keep_sim_on_failure, start_seed)
+    with ShutdownGuard(task_id if task_id in (1, 2, 3) else 1), ModelMaster():
+        try:
+            return _main(
+                headless, task_id, record_choice, repeat_times,
+                keep_sim_on_failure, start_seed)
+        finally:
+            clear_dead_simulator_nodes()
 
 
 def _main(
@@ -762,7 +794,7 @@ if __name__ == '__main__':
     parser.add_argument("--repeat", type=int)
     parser.add_argument(
         "--start-seed", type=int, default=1,
-        help="首轮 TASK_SEED，默认 1")
+        help="首轮编号，默认 1；Task2 seed=配置基数+编号，其他任务 seed=编号")
     parser.add_argument(
         "--keep-sim-on-failure", action="store_true",
         help="不录包调试失败时保留仿真窗口，按回车后关闭")

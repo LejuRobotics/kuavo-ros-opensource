@@ -14,7 +14,6 @@ point on.
 import argparse
 import json
 import os
-import random
 import signal
 import subprocess
 import sys
@@ -37,10 +36,12 @@ for path in (PACKAGE_DIR, EXAMPLES_DIR):
 
 from utils.shutdown_guard import (
     ShutdownGuard,
+    clear_dead_simulator_nodes,
     clear_simulator_nodes,
     clear_stale_processes,
 )
 from utils.model_master import ModelMaster
+from utils.init_notification import notify_init
 
 
 MODEL_LAUNCH_FILES = {
@@ -72,10 +73,9 @@ OBJECT_TOPICS = {
 # Task 2 entry and do not make SDK IK startup a prerequisite for seed placement.
 SDK_OPTIONS = {1: "Normal", 2: "Normal", 3: "Normal"}
 
-# Automatic-evaluation handshake.  The upstream harness waits on
-# /simulator/init right after each reset, so the notification must be given a
-# generous budget: the scene initialization it follows can take a while.
-INIT_SERVICE_TIMEOUT = 30.0
+# Retry the init notification without restarting the prepared simulator.
+# Each RPC is bounded; the overall wait for the external peer is unlimited.
+INIT_RETRY_INTERVAL = 1.0
 SUCCESS_POLL_INTERVAL = 0.1
 ROUND_READY_TIMEOUT = 120.0
 CONTROLLER_READY_TIMEOUT = 45.0
@@ -90,17 +90,112 @@ UPSTREAM_HEAD_INIT = (0.0, 0.209)
 
 
 class ResetHandoff(object):
-    """Carry one reset response from the retiring round to its replacement."""
+    """Keep ROS services and start waiters alive across simulator replacements."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self._response_sent = threading.Event()
         self._seed = None
+        self._condition = threading.Condition(self._lock)
+        self._protocol = None
+        self._generation = 0
+        self._ready = False
+        self._closed = False
+        self._services = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def serve(self):
+        if not self._services:
+            self._services = [
+                rospy.Service("/simulator/reset", Trigger, self.reset),
+                rospy.Service("/simulator/start", Trigger, self.start)]
+            rospy.on_shutdown(self.close)
+
+    def close(self):
+        with self._condition:
+            self._closed = True
+            self._ready = False
+            self._condition.notify_all()
+        for service in self._services:
+            service.shutdown("model evaluation session ended")
+        self._services = []
+
+    def attach(self, protocol):
+        with self._condition:
+            self._generation += 1
+            protocol.generation = self._generation
+            self._protocol = protocol
+            self._ready = False
+            self._condition.notify_all()
+
+    def detach(self, protocol):
+        with self._condition:
+            if self._protocol is protocol:
+                self._protocol = None
+                self._ready = False
+                self._condition.notify_all()
+
+    def is_current(self, protocol, ready=False):
+        with self._condition:
+            return (not self._closed and self._protocol is protocol
+                    and protocol.generation == self._generation
+                    and (not ready or self._ready))
+
+    def mark_ready(self, protocol):
+        with self._condition:
+            if (self._closed or self._protocol is not protocol
+                    or protocol.generation != self._generation
+                    or protocol.relaunch.is_set()):
+                return False
+            self._ready = True
+            self._condition.notify_all()
+            return True
+
+    def reset(self, request):
+        with self._condition:
+            protocol = self._protocol
+            closed = self._closed
+        if closed or protocol is None:
+            return TriggerResponse(success=False, message="simulator is not available")
+        return protocol._reset(request)
+
+    def start(self, request):
+        deadline = time.monotonic() + ROUND_READY_TIMEOUT
+        while True:
+            with self._condition:
+                if self._closed or rospy.is_shutdown():
+                    return TriggerResponse(success=False, message="evaluation is stopping")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return TriggerResponse(
+                        success=False, message="scene is still initializing after {:.0f}s".format(
+                            ROUND_READY_TIMEOUT))
+                protocol = self._protocol
+                if (not self._ready or protocol is None
+                        or protocol.generation != self._generation
+                        or protocol.relaunch.is_set()):
+                    self._condition.wait(timeout=min(.1, remaining))
+                    continue
+            # Never hold the handoff lock while waiting for physical observations.
+            # The round rechecks admission under its lifecycle lock, since reset
+            # can retire it after the condition above has released the lock.
+            response = protocol._start(request)
+            if response is not None:
+                return response
 
     def prepare(self, seed):
         with self._lock:
             self._seed = int(seed)
             self._response_sent.clear()
+            # A replacement may reuse the seed; identity must still change.
+            self._generation += 1
+            self._ready = False
+            self._condition.notify_all()
 
     def mark_response_sent(self):
         self._response_sent.set()
@@ -201,7 +296,7 @@ def load_config(path):
 
 
 def initialize_task2(robot, robot_state, seed, trajectory):
-    """Initialize Task 2 after placing both boxes from the saved layout."""
+    """Initialize Task 2 from the same seeded scene as task/collect."""
     from task2_initialize import (
         DEFAULT_CONFIG, DEFAULT_SCENE, make_chassis, run_initialization)
     from utils.object_randomizer import ObjectRandomizer
@@ -224,8 +319,7 @@ def initialize_task2(robot, robot_state, seed, trajectory):
             raise RuntimeError(
                 "failed to place {}: {}".format(box.name, result["message"]))
     rospy.sleep(1.0)
-    print("TASK2 model seed {} placed boxes from layout {}".format(
-        seed, layout.catalogue_seed))
+    print("TASK2 model seed {} placed generated boxes".format(seed))
 
     config = load_config(DEFAULT_CONFIG)
     pick_config = load_config(
@@ -335,6 +429,9 @@ class EvaluationProtocol:
         self.success_publisher = rospy.Publisher(
             "/simulator/success", Bool, queue_size=1)
         self.lock = threading.Lock()
+        # Serialize score startup, reset and teardown without holding the
+        # readiness/state lock during ROS observation waits.
+        self._lifecycle_lock = threading.Lock()
         self.episode_started = False
         # Reset bookkeeping.  One reset runs at a time; main() watches
         # ``relaunch``/``reset_seed`` and restarts the node with that round's
@@ -345,8 +442,8 @@ class EvaluationProtocol:
         self.initialized_evt = threading.Event()
         # /simulator/reset is served by the old protocol, while
         # /simulator/init is sent by the fresh one after roslaunch is rebuilt.
-        # Include the seed in that process-wide handoff so an old round cannot
-        # consume the new round's response if reset arrives during startup.
+        # The process-wide handoff routes start to the current ready generation,
+        # including replacements that reuse the same scene seed.
         self.reset_handoff = (
             reset_handoff if reset_handoff is not None else ResetHandoff())
         self.score_store = score_store
@@ -357,12 +454,10 @@ class EvaluationProtocol:
         self.infrastructure_failure = None
         self.invalid_round = False
         self._reset_running = False
+        self._init_wait_logged = False
         self.observer = None
         self.observer_thread = None
-        self.reset_service = rospy.Service(
-            "/simulator/reset", Trigger, self._reset)
-        self.start_service = rospy.Service(
-            "/simulator/start", Trigger, self._start)
+        self.reset_handoff.attach(self)
 
     # -- initialization and the /simulator/init callback ------------------
     def _initialize(self):
@@ -401,6 +496,11 @@ class EvaluationProtocol:
             # alive would immediately reopen the input.
             initialization_trajectory.stop()
 
+        # A reset received during initialization retires this whole simulator.
+        # Finishing its fixed trajectory must not reopen readiness or commands.
+        if self.relaunch.is_set() or not self.reset_handoff.is_current(self):
+            return
+
         # control_arm_joint_positions() switches to ExternalControl as a side
         # effect. Close that input before handing control to the model.
         self._close_external_arm_input()
@@ -411,19 +511,22 @@ class EvaluationProtocol:
         # as its only barrier must never observe True while initialization
         # still owns either control path.
         handed_over = self._hand_over_arm_control()
-        self.command_accept_publisher.publish(Bool(data=bool(handed_over)))
-        if not handed_over:
-            raise RuntimeError(
-                "external arm-control handoff failed; model remains not ready")
-        self.ready_publisher.publish(Bool(data=True))
-        self.publish_success(False)
-        # Re-arm /simulator/start and release any waiter before notifying, so
-        # the harness's episode can be accepted the moment it asks.
-        self.round_complete = False
-        self.initialized_evt.set()
-        self._notify_initialized()
+        with self.lock:
+            if self.relaunch.is_set() or not self.reset_handoff.is_current(self):
+                return
+            self.command_accept_publisher.publish(Bool(data=bool(handed_over)))
+            if not handed_over:
+                raise RuntimeError(
+                    "external arm-control handoff failed; model remains not ready")
+            self.ready_publisher.publish(Bool(data=True))
+            self.publish_success(False)
+            self.round_complete = False
+            self.initialized_evt.set()
+            self.reset_handoff.mark_ready(self)
+        # main() retries notification while also monitoring reset and roslaunch.
 
-    def _wait_for_controller_ready(self):
+    @staticmethod
+    def _wait_for_controller_ready():
         """Wait until the fixed initialization commands can be consumed."""
         services = (
             "/wheel_arm_change_arm_ctrl_mode",
@@ -552,61 +655,36 @@ class EvaluationProtocol:
             "(commanded %s)", positions, list(UPSTREAM_HEAD_INIT))
 
     def _notify_initialized(self):
-        """Tell the harness this environment is ready for an episode.
-
-        Waiting on the matching reset handoff first is what makes the ordering
-        the harness requires: it clears ``init_evt`` the moment a reset
-        returns, so a notification sent while that handler is still running
-        is wiped and the harness waits forever.  Matching the seed also stops
-        a retiring round from consuming its replacement's response.
-        """
-        matched_reset = self.reset_handoff.wait_for(
-            self.round_seed, timeout=INIT_SERVICE_TIMEOUT)
-        if not matched_reset:
-            pending_seed = self.reset_handoff.pending_seed()
-            if pending_seed is not None:
-                raise RuntimeError(
-                    "round seed {} was superseded by reset seed {} during "
-                    "initialization".format(self.round_seed, pending_seed))
-            rospy.logwarn(
-                "model entry: no matching "
-                "/simulator/reset response is available for seed %d within "
-                "%.1fs; probing /simulator/init once in case the harness's "
-                "first reset ran before this simulator advertised its reset "
-                "service.", self.round_seed,
-                INIT_SERVICE_TIMEOUT)
-        try:
-            rospy.wait_for_service(
-                "/simulator/init",
-                timeout=INIT_SERVICE_TIMEOUT if matched_reset else 1.0)
-        except Exception as error:
-            if not matched_reset:
-                # Plain `run-sceneN.sh model`: no harness is expected, and the
-                # latched ready signal remains the complete standalone API.
-                rospy.logwarn(
-                    "model entry: /simulator/init is absent (%s); continuing "
-                    "as a standalone model session", error)
-                return False
-            raise RuntimeError(
-                "/simulator/init did not appear after reset: {}".format(error))
-        try:
-            response = rospy.ServiceProxy("/simulator/init", Trigger)()
-        except Exception as error:
-            raise RuntimeError(
-                "/simulator/init is advertised but the call failed: {}"
-                .format(error))
-        if not response.success:
-            raise RuntimeError(
-                "/simulator/init rejected this round: {}".format(
-                    response.message))
-        rospy.loginfo(
-            "model entry: /simulator/init acknowledged for seed %d",
-            self.round_seed)
-        return True
+        """Try once; a missing, stalled or rejecting peer never resets the scene."""
+        if self._reset_running or self.relaunch.is_set() or rospy.is_shutdown():
+            return False
+        # A ready-only client may start without implementing /simulator/init.
+        if self.evaluation_started:
+            return True
+        # Keep reset-response ordering, but do not block the main control loop.
+        matched_reset = self.reset_handoff.wait_for(self.round_seed, timeout=0.0)
+        if not matched_reset and self.reset_handoff.pending_seed() is not None:
+            return False
+        acknowledged = notify_init(
+            lambda: self._reset_running or self.relaunch.is_set() or rospy.is_shutdown())
+        if self._reset_running or self.relaunch.is_set() or rospy.is_shutdown():
+            return False
+        if acknowledged:
+            rospy.loginfo(
+                "model entry: /simulator/init acknowledged for seed %d",
+                self.round_seed)
+            return True
+        if not self._init_wait_logged:
+            rospy.loginfo(
+                "model entry: waiting for /simulator/init acknowledgement; "
+                "keeping task %d seed %d and the prepared scene; no timeout restart",
+                self.task_id, self.round_seed)
+            self._init_wait_logged = True
+        return False
 
     def _next_reset_seed(self):
-        """Draw the next round's seed, mirroring helperfunc's round seeding."""
-        return random.SystemRandom().randint(1, 10 ** 6)
+        """Advance after a scored episode; startup retries reuse its seed."""
+        return self.round_seed + (1 if self.score_file is not None else 0)
 
     def _reset(self, _request):
         """Start a fresh round and answer immediately.
@@ -623,68 +701,68 @@ class EvaluationProtocol:
         harness calls ``/simulator/start`` from inside its episode, after this
         handler has already returned.
         """
-        try:
-            self._finalize_score("reset")
-        except Exception as error:
-            self._invalidate_active_round(
-                "score finalization failed during reset: {}".format(error))
-            return TriggerResponse(
-                success=False,
-                message="score finalization failed; operator action is "
-                        "required")
-        with self.lock:
-            if self._reset_running:
+        with self._lifecycle_lock:
+            with self.lock:
+                if (self._reset_running or self.relaunch.is_set()
+                        or not self.reset_handoff.is_current(self)):
+                    return TriggerResponse(success=False, message="a reset is already running")
+            try:
+                self._finalize_score("reset")
+            except Exception as error:
+                self._invalidate_active_round(
+                    "score finalization failed during reset: {}".format(error))
                 return TriggerResponse(
-                    success=False, message="a reset is already running")
-            # Left True for good: this round's simulator is torn down and
-            # rebuilt by main(), so this protocol object never serves a second
-            # reset.  Keeping the guard set rejects a reset that races the
-            # relaunch instead of silently starting a round nobody will run.
-            self._reset_running = True
-            self.reset_seed = self._next_reset_seed()
-            seed = self.reset_seed
-            self.initialized_evt.clear()
-            self.reset_handoff.prepare(seed)
-            self.episode_started = False
+                    success=False,
+                    message="score finalization failed; operator action is "
+                            "required")
+            with self.lock:
+                if self._reset_running:
+                    return TriggerResponse(
+                        success=False, message="a reset is already running")
+                # Left True for good: this round's simulator is torn down and
+                # rebuilt by main(), so this protocol object never serves a second
+                # reset.  Keeping the guard set rejects a reset that races the
+                # relaunch instead of silently starting a round nobody will run.
+                self._reset_running = True
+                self.reset_seed = self._next_reset_seed()
+                seed = self.reset_seed
+                self.initialized_evt.clear()
+                self.ready_publisher.publish(Bool(data=False))
+                self.command_accept_publisher.publish(Bool(data=False))
+                self.reset_handoff.prepare(seed)
+                self.episode_started = False
+                if self.score_store is not None:
+                    self.score_store.prepare(seed)
 
-        response = TriggerResponse(
-            success=True,
-            message="round seed {}: re-initializing the scene".format(seed))
-        # main() may tear down this protocol as soon as it observes relaunch,
-        # so construct the response and open the cross-round gate first.
-        self.reset_handoff.mark_response_sent()
-        self.relaunch.set()
-        return response
+            response = TriggerResponse(
+                success=True,
+                message="round seed {}: re-initializing the scene".format(seed))
+            # main() may tear down this protocol as soon as it observes relaunch,
+            # so construct the response and open the cross-round gate first.
+            self.reset_handoff.mark_response_sent()
+            self.relaunch.set()
+            return response
 
     # -- episode start and success judging --------------------------------
     def _start(self, _request):
-        """Accept the episode the harness just reset its environment into.
-
-        Waiting for the scene here is deliberate.  A reset answers as soon as
-        it has *begun* re-initializing, so the harness can reach this call
-        while the new layout is still being placed; the episode must not be
-        judged against a half-initialized scene.  Blocking is safe because the
-        reset call that started this round has already returned -- the harness
-        makes this call from inside ``run_single_episode``, not nested in it.
-        The one-second granularity the harness waits with means this usually
-        blocks for a while.
-        """
-        if not self.initialized_evt.wait(timeout=ROUND_READY_TIMEOUT):
-            return TriggerResponse(
-                success=False,
-                message="scene is still initializing after {:.0f}s".format(
-                    ROUND_READY_TIMEOUT))
-        with self.lock:
-            self.episode_started = True
-            self.evaluation_started = True
-            self.round_complete = False
-        self.publish_success(False)
-        if not self._ensure_observer():
-            return TriggerResponse(
-                success=False,
-                message="scoring infrastructure failed; operator action "
-                        "is required")
-        return TriggerResponse(success=True, message="episode started")
+        """Accept only this generation; the session handoff owns readiness waits."""
+        with self._lifecycle_lock:
+            with self.lock:
+                if (self.relaunch.is_set() or self._reset_running
+                        or not self.reset_handoff.is_current(self, ready=True)):
+                    return None  # Reset won admission; wait for its replacement.
+                if self.episode_started or self.round_complete:
+                    return TriggerResponse(success=True, message="episode already started")
+                self.evaluation_started = True
+            self.publish_success(False)
+            if not self._ensure_observer():
+                return TriggerResponse(
+                    success=False,
+                    message="scoring infrastructure failed; operator action is required")
+            with self.lock:
+                self.episode_started = True
+                self.round_complete = False
+            return TriggerResponse(success=True, message="episode started")
 
     def _ensure_observer(self):
         """Start the success watcher on first use."""
@@ -695,7 +773,8 @@ class EvaluationProtocol:
                     raise RuntimeError("model score store is not configured")
                 self.score_file = self.score_store.allocate(self.round_seed)
                 self.observer = EpisodeSuccessObserver(
-                    self.task_id, score_file=self.score_file)
+                    self.task_id, score_file=self.score_file,
+                    metadata=self.score_store.metadata(self.score_file))
                 self.observer.start()
                 rospy.loginfo(
                     "model entry: %s; score file %s",
@@ -732,6 +811,10 @@ class EvaluationProtocol:
         # Wake the supervisor even if ROS is already degraded enough that one
         # of the diagnostic/gating publishes below raises.
         self.relaunch.set()
+        if self.observer is not None:
+            self.observer.invalidate(reason)
+        if self.score_store is not None:
+            self.score_store.invalidate(reason)
         self.publish_success(False)
         self.ready_publisher.publish(Bool(data=False))
         self.command_accept_publisher.publish(Bool(data=False))
@@ -745,46 +828,45 @@ class EvaluationProtocol:
 
     def shutdown(self):
         """Stop the watcher before the simulator this round owns goes away."""
-        self.relaunch.set()
-        thread = self.observer_thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=5.0)
-        self.observer_thread = None
-        if self.invalid_round:
-            rospy.logerr(
-                "model entry: discarding invalid task %d seed %d round: %s",
-                self.task_id, self.round_seed, self.infrastructure_failure)
-        else:
-            self._finalize_score("shutdown")
-        self._drop_observer()
-        # rospy.init_node is reused across roslaunch rounds, so these services
-        # outlive the child process group unless they are explicitly removed.
-        self.reset_service.shutdown("model simulator round ended")
-        self.start_service.shutdown("model simulator round ended")
+        with self._lifecycle_lock:
+            self.reset_handoff.detach(self)
+            self.relaunch.set()
+            thread = self.observer_thread
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=5.0)
+            self.observer_thread = None
+            if self.invalid_round:
+                rospy.logerr(
+                    "model entry: discarding invalid task %d seed %d round: %s",
+                    self.task_id, self.round_seed, self.infrastructure_failure)
+            else:
+                self._finalize_score("shutdown")
+            self._drop_observer()
 
     def _finalize_score(self, reason):
         """Write one numeric result for a started model episode."""
-        observer = self.observer
-        if observer is None:
-            return None
-        # A successful episode is finalized by the watcher before the harness
-        # asks for reset.  Do not run the scorer or session accumulator again
-        # on that later reset/shutdown path.
-        if self.score_finish_reason is not None:
-            return None
-        result = observer.finish()
-        if result is None:
-            return None
-        total, components = result
-        self.score_store.annotate(self.score_file, reason)
-        self.score_finish_reason = reason
-        rospy.loginfo(
-            "model entry: task %d seed %d score=%d reason=%s components=%s "
-            "file=%s",
-            self.task_id, self.round_seed, int(round(total)),
-            self.score_finish_reason,
-            components, self.score_file)
-        return result
+        with self.lock:
+            observer = self.observer
+            if observer is None:
+                return None
+            # A successful episode is finalized by the watcher before the harness
+            # asks for reset.  Do not run the scorer or session accumulator again
+            # on that later reset/shutdown path.
+            if self.score_finish_reason is not None:
+                return None
+            result = observer.finish()
+            if result is None:
+                return None
+            total, components = result
+            self.score_store.annotate(self.score_file, reason)
+            self.score_finish_reason = reason
+            rospy.loginfo(
+                "model entry: task %d seed %d score=%d reason=%s components=%s "
+                "file=%s",
+                self.task_id, self.round_seed, int(round(total)),
+                self.score_finish_reason,
+                components, self.score_file)
+            return result
 
     def _watch_success(self):
         """Judge the running episode and end it through /simulator/success.
@@ -829,6 +911,7 @@ def main():
     args = parser.parse_args()
 
     from utils.model_score_store import ModelScoreStore
+    from utils.task2_randomization import seed_for_round, task_scene
     try:
         score_store = ModelScoreStore(args.task_id, args.model_name)
     except ValueError as error:
@@ -839,12 +922,8 @@ def main():
             score_store.score_file, score_store.average_file),
         flush=True)
 
-    # The seed is drawn here, not supplied by the model: it selects this
-    # round's layout, exactly as helperfunc.py's --start-seed does.  It is
-    # printed so a specific round can be reproduced with --seed.  Later
-    # rounds draw a fresh seed in _next_reset_seed; this one is the start.
-    round_seed = args.seed if args.seed is not None else (
-        random.SystemRandom().randint(1, 10 ** 6))
+    # All entries share the same per-round seed; startup retries reuse it.
+    round_seed = args.seed if args.seed is not None else seed_for_round(1)
     # The old protocol answers reset and the replacement protocol sends init.
     # Their ordering gate must therefore outlive each round-local object.
     reset_handoff = ResetHandoff()
@@ -859,18 +938,22 @@ def main():
     # and that spawn is a roslaunch argument.  So each round owns a fresh
     # simulator process, and /simulator/reset starts the next one instead of
     # re-placing objects in place.
-    with ModelMaster() as master, ShutdownGuard(args.task_id) as guard:
+    with reset_handoff, ShutdownGuard(args.task_id) as guard, ModelMaster() as master:
         while True:
             # The master belongs to the session, never to a disposable round.
             master.check()
             seed = round_seed
+            score_store.prepare(seed)
             process = None
             protocol = None
             round_error = None
             relaunching = False
             manual_intervention = False
+            scene_context = None
             try:
                 ensure_clean_graph(args.task_id)
+                scene_context = task_scene(args.task_id, seed)
+                scene_file = scene_context.__enter__()
                 base_x, base_y = initial_base_for(args.task_id, seed)
                 print(
                     "[INFO] model entry: task {} seed {} initial_base="
@@ -885,7 +968,8 @@ def main():
                      MODEL_LAUNCH_FILES[args.task_id],
                      "initial_base_x:={:.9f}".format(base_x),
                      "initial_base_y:={:.9f}".format(base_y),
-                     "task_light_seed:={}".format(seed)],
+                     "task_light_seed:={}".format(seed)] + (
+                         ["legged_robot_scene:={}".format(scene_file)] if scene_file else []),
                     env=environment, start_new_session=True),
                     process_group=True)
 
@@ -926,6 +1010,9 @@ def main():
                 # module-level core, so a cached KuavoRobot/KuavoRobotState would
                 # keep reading the dead one.  Both objects are therefore made
                 # fresh after every Init.
+                # SDK initialization queries the arm mode immediately.
+                # Live observation topics alone do not imply these services exist.
+                EvaluationProtocol._wait_for_controller_ready()
                 sdk = KuavoSDK()
                 if not sdk.Init(
                         options=getattr(KuavoSDK.Options, SDK_OPTIONS[args.task_id])):
@@ -944,17 +1031,23 @@ def main():
                     args.task_id, robot, robot_state, seed, ready_publisher,
                     command_accept_publisher,
                     reset_handoff=reset_handoff, score_store=score_store)
+                reset_handoff.serve()
                 protocol._initialize()
-                print("[INFO] model entry: initialization complete", flush=True)
-
-                rospy.loginfo(
-                    "Task %d model simulator ready at seed %d; scene initialized "
-                    "and the arm is at the fixed ready posture. No task policy and "
-                    "no rosbag were started. Waiting for external inference.",
-                    args.task_id, seed)
+                if not protocol.relaunch.is_set():
+                    print("[INFO] model entry: initialization complete", flush=True)
+                    rospy.loginfo(
+                        "Task %d model simulator ready at seed %d; scene initialized "
+                        "and the arm is at the fixed ready posture. No task policy and "
+                        "no rosbag were started. Waiting for external inference.",
+                        args.task_id, seed)
+                init_acknowledged = False
+                next_init_attempt = 0.0
                 while (not rospy.is_shutdown() and process.poll() is None
                        and not protocol.relaunch.is_set()):
-                    time.sleep(0.2)
+                    if not init_acknowledged and time.monotonic() >= next_init_attempt:
+                        init_acknowledged = protocol._notify_initialized()
+                        next_init_attempt = time.monotonic() + INIT_RETRY_INTERVAL
+                    protocol.relaunch.wait(0.1)
                 if protocol.infrastructure_failure is not None:
                     raise RuntimeError(protocol.infrastructure_failure)
                 if process.poll() is not None:
@@ -975,6 +1068,8 @@ def main():
                     protocol is not None and protocol.evaluation_started)
                 if manual_intervention:
                     protocol._invalidate_active_round(error)
+                else:
+                    score_store.invalidate(error)
                 print(
                     "[ERROR] model entry: task {} seed {} failed before "
                     "teardown: {}; {}".format(
@@ -1002,18 +1097,12 @@ def main():
                 # unwinds through here with the simulator still up, so this
                 # teardown has to be the one that runs -- the guard keeps a
                 # second Ctrl+C from aborting it half way.
-                if process is not None:
-                    try:
-                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-                    except (ProcessLookupError, PermissionError):
-                        pass
-                    try:
-                        process.wait(timeout=5.0)
-                    except subprocess.TimeoutExpired:
-                        try:
-                            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                        except (ProcessLookupError, PermissionError):
-                            pass
+                try:
+                    guard.sweep()
+                    clear_dead_simulator_nodes()
+                finally:
+                    if scene_context is not None:
+                        scene_context.__exit__(None, None, None)
 
             if round_error is not None:
                 # A lost master invalidates the evaluation session, not just
@@ -1030,7 +1119,7 @@ def main():
                 if relaunching:
                     round_seed = protocol.reset_seed
                 else:
-                    round_seed = random.SystemRandom().randint(1, 10 ** 6)
+                    round_seed = seed
                     reset_handoff.retarget(round_seed)
                 print(
                     "[WARN] model entry: continuing after failed task {} "
@@ -1050,3 +1139,8 @@ if __name__ == "__main__":
     except Exception as error:
         print("[ERROR] {}".format(error), file=sys.stderr)
         sys.exit(1)
+    finally:
+        # The supervisor is finished; repeated stop requests must let rospy's
+        # atexit handlers finish releasing their remaining threads.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)

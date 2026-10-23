@@ -19,7 +19,7 @@ def test_release_does_not_gate_progress_on_ring_height():
 
     assert "wait_for_ring_height" not in source
     assert "position[2]" not in release
-    assert "release acknowledged" in release
+    assert "feedback.supported" in release
 
 
 def test_grasp_config_has_no_post_release_height_gate():
@@ -30,12 +30,9 @@ def test_grasp_config_has_no_post_release_height_gate():
     assert "settle_timeout_s" not in config
 
 
-def test_collision_free_table_settle_has_configurable_fast_upright_speed():
+def test_release_uses_real_table_contact_without_forced_settling():
     source = MUJOCO_NODE.read_text(encoding="utf-8")
-    scene = SCENE.read_text(encoding="utf-8")
-
-    assert 'numericScalarOrDefault(\n      "task3_table_settle_angular_speed"' in source
-    assert "Eigen::Quaterniond::FromTwoVectors" in source
-    assert "maximum_step / angle" in source
-    assert "destination_table_height - internalObjectLowestWorldZ(state)" in source
-    assert '<numeric name="task3_table_settle_angular_speed" data="6.283185307"/>' in scene
+    assert "internalObjectLowestWorldZ" not in source
+    assert "settleInternalObjectOnDestinationTable" not in source
+    assert "upward_normal > 0.5" in source
+    assert "other == state.support_geom" in source

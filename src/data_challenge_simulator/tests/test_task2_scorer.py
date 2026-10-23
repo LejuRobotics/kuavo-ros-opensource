@@ -1,56 +1,89 @@
-#!/usr/bin/env python3
-"""Regression tests for Task 2 pose-based scoring thresholds."""
-
+"""Task 2 consumes real geometry/contact observations, not fixed XYZ gates."""
+import json
+from types import SimpleNamespace
+import pytest
 from utils.task_scorer import Task2Scorer
 
 
-class FakePoseTap(object):
+class FakePoseTap:
     def __init__(self):
-        self.positions = {
-            "box_1": (0.74, -0.42, 0.60),
-            "box_2": (0.74, 0.10, 0.60),
-            "base_link": (0.0, 0.0, 0.0),
-        }
-
-    def position(self, name):
-        return self.positions.get(name)
+        self.task2_state = {"box_1": 8, "box_2": 8}
+        self.last_message_time = 0
 
 
-def test_task2_short_confirmed_lift_awards_grasp_once():
+def scorer_at_start(tmp_path):
     tap = FakePoseTap()
-    scorer = Task2Scorer(tap, "/tmp/unused-task2-score.txt")
-
-    assert scorer._evaluate()["lifted"] == []
-
-    tap.positions["box_1"] = (0.74, -0.42, 0.611)
-    assert scorer._evaluate()["lifted"] == ["box_1"]
-
-    # Grasp credit is historical and remains after the box is placed/released.
-    tap.positions["box_1"] = (-0.04, 1.52, 0.60)
-    state = scorer._evaluate()
-    assert state["lifted"] == ["box_1"]
-    assert state["placed"] == ["box_1"]
-    assert scorer.final_score(state, 0.0)[1]["grasp"] == 10
+    scorer = Task2Scorer(tap, str(tmp_path / "score.txt"))
+    scorer.sample()  # Observe the initial tabletop support.
+    scorer.start_time = 100.0
+    return scorer, tap
 
 
-def test_task2_resting_box_does_not_award_grasp():
+def test_contacts_record_each_milestone_once_and_keep_earned_points(tmp_path):
+    scorer, tap = scorer_at_start(tmp_path)
+    tap.task2_state["box_1"] = 1
+    assert scorer.sample()["lifted"] == ["box_1"]
+    tap.task2_state["box_1"] = 2
+    assert scorer.sample()["base_visits"] == 1
+    assert scorer.sample()["placed"] == []
+    tap.task2_state["box_1"] = 4
+    assert scorer.sample()["placed"] == ["box_1"]
+    tap.task2_state["box_1"] = 0
+    state = scorer.sample()
+    assert scorer.final_score(state, 101)[0] == 45
+    assert state["base_visits"] == 1
+
+
+def test_no_grasp_credit_before_start_or_without_initial_table_support(tmp_path):
     tap = FakePoseTap()
-    scorer = Task2Scorer(tap, "/tmp/unused-task2-score.txt")
+    tap.task2_state = {"box_1": 1}
+    scorer = Task2Scorer(tap, str(tmp_path / "score.txt"))
+    assert scorer.sample()["lifted"] == []
+    scorer.start_time = 100
+    assert scorer.sample()["lifted"] == []
+    tap.task2_state["box_1"] = 8
+    scorer.sample()
+    tap.task2_state["box_1"] = 1
+    assert scorer.sample()["lifted"] == ["box_1"]
 
-    tap.positions["box_1"] = (0.74, -0.42, 0.609)
-    assert scorer._evaluate()["lifted"] == []
+
+def test_completed_round_and_forty_five_second_penalty_boundary(tmp_path):
+    scorer, tap = scorer_at_start(tmp_path)
+    for box in tap.task2_state:
+        tap.task2_state[box] = 1
+    scorer.sample()
+    for box in tap.task2_state:
+        tap.task2_state[box] = 2 | 4
+    state = scorer.sample()
+    for elapsed, expected in [(44.5,100), (45,100), (45.5,99.5), (50,95), (100,80)]:
+        total, components = scorer.final_score(state, 100 + elapsed)
+        assert total == expected
+        assert components["bonus"] == 10
+    assert scorer.final_score({}, 200)[0] == 0
 
 
-def test_task2_completed_round_can_receive_full_score():
-    scorer = Task2Scorer(FakePoseTap(), "/tmp/unused-task2-score.txt")
-    state = {
-        "lifted": ["box_1", "box_2"],
-        "placed": ["box_1", "box_2"],
-        "base_visits": 2,
-    }
+def test_scorer_finishes_cleanly_when_ros_sleep_is_interrupted(monkeypatch, tmp_path):
+    import json
+    import time
+    from types import SimpleNamespace
+    from utils import task_scorer
 
-    total, components = scorer.final_score(state, 0.0)
+    class Interrupted(Exception):
+        pass
 
-    assert total == 100
-    assert components["grasp"] == 20
-    assert components["bonus"] == 10
+    def interrupted_sleep():
+        raise Interrupted()
+
+    monkeypatch.setattr(task_scorer, "rospy", SimpleNamespace(
+        Service=lambda *args: None,
+        Rate=lambda hz: SimpleNamespace(sleep=interrupted_sleep),
+        ROSInterruptException=Interrupted,
+        is_shutdown=lambda: False,
+        signal_shutdown=lambda reason: None,
+        loginfo=lambda *args: None,
+    ))
+    tap = FakePoseTap()
+    tap.last_message_time = time.time()
+    scorer = Task2Scorer(tap, str(tmp_path / "score.txt"))
+    assert scorer.run() == 0
+    assert json.loads((tmp_path / "score.json").read_text())["total"] == 0

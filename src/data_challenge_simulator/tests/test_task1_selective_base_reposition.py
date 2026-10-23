@@ -49,13 +49,9 @@ def test_generator_requires_red_yellow_direct_and_blue_move():
     assert "MAX_SOURCE_ORIENTATION_ERROR_DEG = 8.0" in source
 
 
-def test_runtime_moves_only_for_layout_marked_grasp_base():
-    source = TASK.read_text()
-
-    assert "planned_grasp_base = randomization_plan.grasp_bases[index]" in source
-    assert "common_task_base_measured[axis] + grasp_base_delta[axis]" in source
-    assert "requires_grasp_base_move = any(" in source
-    assert '"{}.grasp_base_move".format(name)' in source
-    assert '"{}.loaded_base_return".format(name)' in source
-    assert "BLUE_RUNTIME_LEFT_SHIFT_MARGIN_M = 0.02" in source
-    assert "grasp_base_delta[1] + BLUE_RUNTIME_LEFT_SHIFT_MARGIN_M" in source
+def test_runtime_keeps_base_stationary_with_generated_objects():
+    from utils.task1_v2_randomization import Task1V2RandomizationPlanner
+    for seed in (28,29):
+        plan=Task1V2RandomizationPlanner().plan(seed)
+        assert plan.initial_base==plan.task_base==(.015,0,0)
+        assert not plan.requires_base_motion

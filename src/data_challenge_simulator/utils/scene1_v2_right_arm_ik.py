@@ -19,10 +19,10 @@ class Scene1V2RightArmIK(Scene1RightArmIK):
     HOOK_FINGER_ROW_CENTER_IN_R7 = np.array(
         [-0.003000, 0.095481, -0.233601])
 
-    def __init__(self):
+    def __init__(self, scene_path=None):
         package_dir = Path(__file__).resolve().parents[1]
-        xml_path = package_dir / (
-            "models/biped_s400062/xml/task1.xml")
+        from utils.task2_randomization import active_scene
+        xml_path = scene_path or active_scene(1)
         self.model = mujoco.MjModel.from_xml_path(str(xml_path))
         self.data = mujoco.MjData(self.model)
 
@@ -42,8 +42,8 @@ class Scene1V2RightArmIK(Scene1RightArmIK):
             self.model.jnt_qposadr[joint_id]
             for joint_id in self.joint_ids
         ])
-        self.lower = self.model.jnt_range[self.joint_ids, 0].copy() + 1e-5
-        self.upper = self.model.jnt_range[self.joint_ids, 1].copy() - 1e-5
+        self.lower = self.model.jnt_range[self.joint_ids, 0].copy() + 0.001
+        self.upper = self.model.jnt_range[self.joint_ids, 1].copy() - 0.001
 
         self.r7_body_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_BODY, "zarm_r7_link")
@@ -83,6 +83,34 @@ class Scene1V2RightArmIK(Scene1RightArmIK):
             "block_2_visual",
             "block_2_geom",
         }
+
+    def preparation_trajectory(self, initial_arm, object_position, points=400):
+        """One smooth collision-clear curve ending above the first cylinder."""
+        orientation = (
+            R.from_euler("y", 15.0, degrees=True)
+            * R.from_quat(self.eef_quaternion_world_with_yaw(
+                self.READY, np.radians(-15.0)))).as_quat()
+        target = [object_position[0] - 0.015,
+                  object_position[1] - 0.010, 0.85]
+        lower = self.lower.copy()
+        lower[1] = -1.6
+        end = np.asarray(self.solve(
+            target, orientation, self.READY,
+            point_in_r7=self.CLOSED_GRASP_CENTER_IN_R7,
+            joint_bounds=(lower, self.upper)))
+        start = np.asarray(initial_arm[7:14])
+        # This is a Bezier control point, never a commanded waypoint.
+        # It clears the near bin before the elbow moves forward.
+        control = np.array([0.7, -1.5, 0.0, -0.001, 0.0, 0.0, 0.0])
+        result = []
+        for step in range(1, points + 1):
+            t = step / float(points)
+            phase = t ** 3 * (10.0 + t * (-15.0 + 6.0 * t))
+            q = ((1.0 - phase) ** 3 * start
+                 + 3.0 * (1.0 - phase) ** 2 * phase * control
+                 + (3.0 * (1.0 - phase) * phase ** 2 + phase ** 3) * end)
+            result.append(list(initial_arm[:7]) + q.tolist())
+        return result
 
     def closed_grasp_center_world(self, right_q):
         centre, _, _ = self._forward(

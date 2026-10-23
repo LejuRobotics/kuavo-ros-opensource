@@ -116,7 +116,7 @@ def test_model_entry_reports_startup_failure_before_teardown():
 
 def test_model_entry_draws_its_own_seed():
     source = ENTRY.read_text()
-    assert "random.SystemRandom().randint(" in source
+    assert "seed_for_round(1)" in source
     assert 'parser.add_argument("--seed"' in source
 
 
@@ -168,9 +168,8 @@ def test_task1_model_shared_initialization_values_match_the_task_entry():
     task_values = _literal_assignments(TASK1)
     for name in (
             "ARM_JOINT_COUNT", "CYLINDERS", "TARGET_BIN",
-            "INITIALIZATION_SAFE_RETREAT_M", "SHOULDER_LIFT_DEG",
-            "RIGHT_ARM_STAGING_RAD", "RIGHT_ARM_STAGING_ABOVE_RAD",
-            "TRAJECTORY_POINTS", "STAGING_DESCENT_TRAJECTORY_POINTS",
+            "LEFT_THUMB_SAFE_J1_RAD",
+            "LEFT_THUMB_INITIALIZATION_DURATION_S",
             "CHASSIS_LINEAR_SPEED",
             "CHASSIS_ANGULAR_SPEED", "CHASSIS_MIN_LINEAR_SPEED",
             "CHASSIS_MIN_ANGULAR_SPEED", "CHASSIS_POSITION_TOLERANCE",
@@ -178,15 +177,10 @@ def test_task1_model_shared_initialization_values_match_the_task_entry():
         assert model_values[name] == task_values[name], name
 
 
-def test_task1_model_uses_the_task_entry_staging_postures():
-    model_values = _literal_assignments(INIT)
-    task_values = _literal_assignments(TASK1)
-    assert model_values["RIGHT_ARM_STAGING_RAD"] == \
-        task_values["RIGHT_ARM_STAGING_RAD"]
-    assert model_values["RIGHT_ARM_STAGING_ABOVE_RAD"] == \
-        task_values["RIGHT_ARM_STAGING_ABOVE_RAD"]
-    assert "RIGHT_ARM_READY_RAD" not in model_values
-    assert "RIGHT_ARM_READY_FULL_RAD" not in model_values
+def test_task1_model_and_task_use_the_shared_overhead_preparation():
+    for path in (INIT, TASK1):
+        assert "scene_ik.preparation_trajectory(" in path.read_text()
+        assert "poses.get_position(CYLINDERS[0])" in path.read_text()
 
 
 def test_model_base_helper_has_no_task_specific_route():
@@ -215,17 +209,14 @@ def test_task1_model_initializer_has_no_removed_lever_latch_publisher():
 
 def test_task1_initialize_sequence_matches_the_accepted_order():
     source = INIT.read_text()
-    order = [
-        "place_scene(randomizer, seed, chassis)",
-        'move_base_open_loop(chassis, safe_base_world, "safe retreat")',
-        "shoulder_only_deg[8] = -SHOULDER_LIFT_DEG",
-        "staging_above_deg[7:14] = [",
-        "move_base_open_loop(\n            chassis, base_translation_world, "
-        '"return to B0")',
-        "staging_deg[7:14] = [",
-    ]
-    positions = [source.index(token) for token in order]
-    assert positions == sorted(positions), "initialization order changed"
+    stages = ["chassis.stop()", "initialize_left_thumb(gripper)",
+              "place_scene(randomizer, seed, chassis)",
+              "scene_ik.preparation_trajectory(",
+              "publish_trajectory(trajectory, points, sleep_time=0.01)"]
+    positions = [source.index(stage, source.index("def run_initialization"))
+                 for stage in stages]
+    assert positions == sorted(positions)
+    assert "move_open_loop(" not in source
 
 
 def test_task1_model_initialization_has_no_closed_loop_arrival_gate():
@@ -236,11 +227,12 @@ def test_task1_model_initialization_has_no_closed_loop_arrival_gate():
         assert forbidden not in source
 
 
-def test_task1_v2_is_not_modified_by_the_model_entry():
-    """The accepted task entry must keep performing its own initialization."""
+def test_task1_performs_its_own_stationary_initialization():
     source = TASK1.read_text()
-    assert "measured_safe_base = _move_base_with_wheels(" in source
-    assert 'latch_achieved_right_target("v2_staging_after_return_to_b0")' in source
+    assert "chassis.stop()" in source
+    assert 'timing.segment("initialization.above_first_object"' in source
+    assert source.index("scene_ik = Scene1V2RightArmIK()") < source.index(
+        'timing.segment("initialization.above_first_object"')
 
 
 def test_task1_waits_for_a_real_sensor_message_before_arm_publishing():
@@ -263,7 +255,7 @@ def test_every_model_waits_for_the_first_real_arm_state():
         "initialization_trajectory = TrajectoryController(")
 
 
-def test_tasks_start_arm_publishers_only_after_safe_base_motion():
+def test_tasks_start_arm_publishers_after_required_sensor_or_base_gates():
     task1 = TASK1.read_text()
     task2 = TASK2.read_text()
     task3 = TASK3_SINGLE.read_text()
@@ -272,7 +264,7 @@ def test_tasks_start_arm_publishers_only_after_safe_base_motion():
 
     task1_main = task1[task1.index("def main():"):]
     assert task1_main.index(
-        "measured_safe_base = _move_base_with_wheels(") < task1_main.index(
+        "initial_arm_rad = wait_for_first_arm_state()") < task1_main.index(
             "trajectory = TrajectoryController(")
     assert "TrajectoryController(" not in task2
     assert task2_init.index(

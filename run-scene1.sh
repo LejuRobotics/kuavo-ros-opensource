@@ -13,9 +13,6 @@ CONTAINER_NAME="${SCENE1_CONTAINER:-kuavo-mpc-wbc}"
 CONTAINER_WORKSPACE="/root/kuavo_ws"
 EXAMPLES_DIR="${CONTAINER_WORKSPACE}/src/data_challenge_simulator/examples"
 PACKAGE_DIR="${CONTAINER_WORKSPACE}/src/data_challenge_simulator"
-COLLECT_LAYOUT_HOST_FILE=""
-COLLECT_LAYOUT_CONTAINER_FILE=""
-COLLECT_LAYOUT_ENV_NAME=""
 ENTRY_LOCK_FD=""
 ENTRY_PREPARED="0"
 
@@ -26,12 +23,14 @@ usage() {
 Usage:
   ./run-scene${TASK_ID}.sh setup                    Create or validate the delivery container
   ./run-scene${TASK_ID}.sh build [-j N]             Build the shared ROS workspace (default: 8 jobs)
-  ./run-scene${TASK_ID}.sh task [SEED]              Run one task episode without rosbag
-  ./run-scene${TASK_ID}.sh collect ROUNDS           Generate fresh layouts, then run and record episodes
+  ./run-scene${TASK_ID}.sh task [ROUND] [--keep-sim-on-failure]  Run one task episode without rosbag
+  ./run-scene${TASK_ID}.sh collect ROUNDS           Generate seeded scenes, then run and record episodes
   ./run-scene${TASK_ID}.sh model [MODEL_NAME]       Start simulator for external model inference
   ./run-scene${TASK_ID}.sh stop                     Stop this task's simulator processes
   ./run-scene${TASK_ID}.sh status                   Show this task's process status
 
+All tasks: task [ROUND] defaults to 1; seed = config/task2_randomization.json seed_base + ROUND.
+All tasks generate the same per-round scenes in task, collect and model.
 Task 1 also supports waypoint, verify, replay and replay-headless through scene1.sh.
 EOF
 }
@@ -59,90 +58,14 @@ allow_gui() {
   xhost +SI:localuser:root >/dev/null
 }
 
-generate_collect_layouts() {
-  local rounds="$1"
-  [[ "${rounds}" =~ ^[1-9][0-9]*$ ]] || die "ROUNDS must be a positive integer"
-  ensure_container_running
-
-  local generator_name config_name layout_env_name
-  case "${TASK_ID}" in
-    1)
-      generator_name="generate_task1_v2_layout_seeds.py"
-      config_name="task1_v2_layout_seeds.json"
-      layout_env_name="TASK1_V2_LAYOUT_FILE"
-      ;;
-    2)
-      generator_name="generate_task2_layout_seeds.py"
-      config_name="task2_layout_seeds.json"
-      layout_env_name="TASK2_LAYOUT_FILE"
-      ;;
-    3)
-      generator_name="generate_task3_layout_seeds.py"
-      config_name="task3_layout_seeds.json"
-      layout_env_name="TASK3_LAYOUT_FILE"
-      ;;
-  esac
-
-  local host_config host_generated host_install
-  local container_generated container_install
-  host_config="${SCRIPT_DIR}/src/data_challenge_simulator/config/${config_name}"
-  host_generated="${host_config}.collect.$$.tmp"
-  container_generated="${PACKAGE_DIR}/config/${config_name}.collect.$$.tmp"
-  host_install="${host_config}.collect.$$.json"
-  container_install="${PACKAGE_DIR}/config/${config_name}.collect.$$.json"
-
-  echo "[INFO] Generating ${rounds} fresh independently seeded Task ${TASK_ID} layouts"
-  local generator_status container_state
-  if docker exec -i -e ROBOT_VERSION=400062 "${CONTAINER_NAME}" \
-      bash -lc '
-        set -e
-        source /opt/ros/noetic/setup.bash
-        source /root/kuavo_ws/devel/setup.bash
-        cd /root/kuavo_ws/src/data_challenge_simulator
-        exec python3 "tools/$1" \
-          --output "$2" --count "$3" --random-seeds
-      ' bash "${generator_name}" "${container_generated}" "${rounds}"; then
-    generator_status=0
-  else
-    generator_status=$?
-    rm -f -- "${host_generated}"
-    container_state="$(docker inspect -f \
-      'status={{.State.Status}}, exit={{.State.ExitCode}}, oom={{.State.OOMKilled}}, error={{json .State.Error}}' \
-      "${CONTAINER_NAME}" 2>/dev/null || echo 'unavailable')"
-    die "Task ${TASK_ID} layout generator command exited with status ${generator_status}; container ${CONTAINER_NAME}: ${container_state}"
-  fi
-
-  if ! mv -- "${host_generated}" "${host_install}"; then
-    rm -f -- "${host_generated}" "${host_install}"
-    die "failed to install generated Task ${TASK_ID} collect layouts"
-  fi
-  COLLECT_LAYOUT_HOST_FILE="${host_install}"
-  COLLECT_LAYOUT_CONTAINER_FILE="${container_install}"
-  COLLECT_LAYOUT_ENV_NAME="${layout_env_name}"
-  echo "[INFO] Installed ${rounds} fresh collect-only layouts in ${host_install}"
-}
-
-cleanup_collect_layout() {
-  if [[ -n "${COLLECT_LAYOUT_HOST_FILE}" ]]; then
-    rm -f -- "${COLLECT_LAYOUT_HOST_FILE}"
-    COLLECT_LAYOUT_HOST_FILE=""
-    COLLECT_LAYOUT_CONTAINER_FILE=""
-    COLLECT_LAYOUT_ENV_NAME=""
-  fi
-}
-
 run_task() {
-  local record="$1" rounds="$2" seed="$3" headless="$4"
+  local record="$1" rounds="$2" seed="$3" headless="$4" keep="${5:-0}"
   [[ "${rounds}" =~ ^[1-9][0-9]*$ ]] || die "ROUNDS must be a positive integer"
   [[ "${seed}" =~ ^[0-9]+$ ]] || die "SEED must be a non-negative integer"
   prepare_entry_start
   local -a display_args=()
   local -a exec_args=(-i)
-  local -a layout_args=()
   local -a helper_args=(--task-id "${TASK_ID}" --record "${record}" --repeat "${rounds}" --start-seed "${seed}")
-  if [[ -n "${COLLECT_LAYOUT_CONTAINER_FILE}" ]]; then
-    layout_args=(-e "${COLLECT_LAYOUT_ENV_NAME}=${COLLECT_LAYOUT_CONTAINER_FILE}")
-  fi
   # With a terminal, allocate a container PTY so Ctrl+C reaches helperfunc.py
   # and its ShutdownGuard.  Without a terminal (CI/redirected execution), the
   # host-side traps below run the same stop sweep if docker exec is signalled.
@@ -152,34 +75,30 @@ run_task() {
   else
     allow_gui
     display_args=(-e "DISPLAY=${DISPLAY}")
-    [[ -t 0 && -t 1 ]] && helper_args+=(--keep-sim-on-failure)
+    if [[ "$keep" == "1" ]]; then
+      [[ -t 0 && -t 1 ]] || die "--keep-sim-on-failure requires an interactive terminal"
+      helper_args+=(--keep-sim-on-failure)
+    fi
   fi
 
-  trap 'trap "" INT TERM; stop_task; exit 130' INT
-  trap 'trap "" INT TERM; stop_task; exit 143' TERM
-  local docker_status
-  if docker exec "${exec_args[@]}" "${display_args[@]}" "${layout_args[@]}" \
-      -e ROBOT_VERSION=400062 "${CONTAINER_NAME}" \
+  run_container_entry "${exec_args[@]}" "${display_args[@]}" \
+      -e ROBOT_VERSION=400062 "$CONTAINER_NAME" \
       bash -lc '
         set -e
         source /opt/ros/noetic/setup.bash
         source /root/kuavo_ws/devel/setup.bash
         cd /root/kuavo_ws/src/data_challenge_simulator/examples
         exec python3 helperfunc.py "$@"
-      ' bash "${helper_args[@]}"; then
-    docker_status=0
-  else
-    docker_status=$?
-  fi
-  trap - INT TERM
-  return "${docker_status}"
+      ' bash "${helper_args[@]}"
 }
 
 run_model() {
   local model_name="${1:-anonymous}"
   prepare_entry_start
   allow_gui
-  docker exec -it -e "DISPLAY=${DISPLAY}" -e ROBOT_VERSION=400062 "${CONTAINER_NAME}" \
+  local -a exec_args=(-i)
+  [[ -t 0 && -t 1 ]] && exec_args=(-it)
+  run_container_entry "${exec_args[@]}" -e "DISPLAY=$DISPLAY" -e ROBOT_VERSION=400062 "$CONTAINER_NAME" \
     bash -lc '
       set -e
       source /opt/ros/noetic/setup.bash
@@ -187,6 +106,24 @@ run_model() {
       cd /root/kuavo_ws/src/data_challenge_simulator/examples
       exec rosrun data_challenge_simulator model_entry.py --task-id "$1" --model-name "$2"
     ' bash "${TASK_ID}" "${model_name}"
+}
+
+# Waiting on an asynchronous client lets bash handle disconnect/stop signals
+# immediately. Keep stdin connected for explicit interactive failure inspection.
+run_container_entry() {
+  local client status
+  trap 'trap "" INT TERM HUP; stop_task; exit 130' INT
+  trap 'trap "" INT TERM HUP; stop_task; exit 143' TERM
+  trap 'trap "" INT TERM HUP; stop_task; exit 129' HUP
+  docker exec "$@" <&0 &
+  client=$!
+  if wait "$client"; then status=0; else status=$?; fi
+  if (( status != 0 )); then
+    trap "" INT TERM HUP
+    stop_task || status=1
+  fi
+  trap - INT TERM HUP
+  return "$status"
 }
 
 # Patterns for every process one task round can leave behind.  Kept in one
@@ -221,19 +158,35 @@ stop_task() {
   [[ "$(docker inspect -f '{{.State.Status}}' "${CONTAINER_NAME}")" == "running" ]] || return 0
   local pattern
   pattern="$(task_process_patterns)"
-  # rosbag takes SIGINT first: SIGTERM does not give it time to finish writing
-  # the bag.  A signalled process can take a few seconds to actually exit, so
-  # sweep twice with a pause, then SIGKILL whatever is still holding on.
-  docker exec "${CONTAINER_NAME}" bash -lc "
-    pkill -INT -f '[r]osbag (record|play)' || true
-    pkill -TERM -f '${pattern}' || true
-    sleep 2
-    pkill -TERM -f '${pattern}' || true
-    sleep 2
-    pkill -KILL -f '${pattern}' || true
-    sleep 1
-    pgrep -af '${pattern}' || true
-  "
+  # Let the supervisor finalize scores, flush rosbag and reap its owned
+  # tree. Name-based sweeping is only a fallback for abandoned children.
+  docker exec -i "$CONTAINER_NAME" bash -s -- "$pattern" <<'CLEANUP'
+set -eu
+pattern="$1"
+supervisors='[h]elperfunc\.py|[m]odel_entry\.py'
+pkill -TERM -f "$supervisors" || true
+for ((i=0; i<30; i++)); do
+  pgrep -f "$pattern" >/dev/null || exit 0
+  pgrep -f "$supervisors" >/dev/null || break
+  sleep 1
+done
+pkill -INT -f '[r]osbag (record|play)' || true
+for ((i=0; i<10; i++)); do
+  pgrep -f '[r]osbag (record|play)' >/dev/null || break
+  sleep 1
+done
+pkill -TERM -f "$pattern" || true
+for ((i=0; i<5; i++)); do
+  pgrep -f "$pattern" >/dev/null || exit 0
+  sleep 1
+done
+pkill -KILL -f "$pattern" || true
+sleep 1
+if pgrep -af "$pattern"; then
+  echo "[ERROR] Simulator cleanup left running processes" >&2
+  exit 1
+fi
+CLEANUP
 }
 
 prepare_entry_start() {
@@ -274,14 +227,18 @@ case "${mode}" in
     exec "${SCRIPT_DIR}/scene1.sh" "$@"
     ;;
   task)
-    run_task 0 1 "${2:-1}" 0
+    shift
+    round=1
+    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then round="$1"; shift; fi
+    keep=0
+    if [[ "${1:-}" == "--keep-sim-on-failure" ]]; then keep=1; shift; fi
+    [[ "$#" == "0" ]] || die "task accepts ROUND and --keep-sim-on-failure"
+    run_task 0 1 "$round" 0 "$keep"
     ;;
   collect)
     [[ -n "${2:-}" ]] || die "collect requires ROUNDS"
     [[ "$#" == "2" ]] || die "collect accepts only ROUNDS; layout seeds are generated automatically"
     prepare_entry_start
-    generate_collect_layouts "$2"
-    trap cleanup_collect_layout EXIT
     # Collection uses the same GLFW/GLX display setup as task mode.
     run_task 1 "$2" 1 0
     ;;

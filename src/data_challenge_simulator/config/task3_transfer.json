@@ -16,7 +16,7 @@
   "latch_timeout_s": 2.0,
   "release_timeout_s": 2.0,
   "arm_segment_points": 35,
-  "approach_trajectory_points": 60,
+  "approach_trajectory_points": 40,
   "approach_settle_seconds": 0.3,
   "motion_timeout_s": 45.0,
   "vertical_waypoints": [

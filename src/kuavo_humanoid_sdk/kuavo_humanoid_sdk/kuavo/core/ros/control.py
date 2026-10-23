@@ -277,9 +277,11 @@ class ControlRobotArm:
         for pub, name, required in publishers:
             while pub.get_num_connections() == 0:
                 if (rospy.Time.now() - start_time).to_sec() > timeout:
-                    SDKLogger.error(f"Timeout waiting for {name} connection, '{pub.name}'")
                     if required:
+                        SDKLogger.error(f"Timeout waiting for {name} connection, '{pub.name}'")
                         success = False
+                    else:
+                        SDKLogger.warning(f"Optional {name} is not connected yet, '{pub.name}'")
                     break
                 rospy.sleep(0.1)
         return success
@@ -834,7 +836,11 @@ class ControlRobotMotion:
             (self._pub_switch_gait, "switch_gait publisher", False),
             (self._pub_cmd_pose_world, "cmd_pose_world publisher", False),
         ]
-        
+        if kuavo_ros_param.is_wheel_arm_robot():
+            # Wheels use cmd_vel, not biped footstep/gait/COM-pose topics.
+            # A missing wheel command subscriber is still a real failure.
+            publishers = [(self._pub_cmd_vel, "cmd_vel publisher", True)]
+
         success = True
         for pub, name, required in publishers:
             while pub.get_num_connections() == 0:

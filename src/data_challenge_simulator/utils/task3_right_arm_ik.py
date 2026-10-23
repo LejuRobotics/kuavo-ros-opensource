@@ -41,8 +41,9 @@ class Task3RightArmIK:
             self.model.jnt_qposadr[joint_id]
             for joint_id in joint_ids
         ], dtype=int)
-        self.lower = self.model.jnt_range[joint_ids, 0].copy()
-        self.upper = self.model.jnt_range[joint_ids, 1].copy()
+        # Stay inside joint stops, including SDK limits rounded to milliradians.
+        self.lower = self.model.jnt_range[joint_ids, 0].copy() + 0.001
+        self.upper = self.model.jnt_range[joint_ids, 1].copy() - 0.001
         self.compact_finger_center_in_hand = (
             self._measure_compact_finger_center_in_hand())
         ring_height_id = self._required_id(
@@ -85,7 +86,7 @@ class Task3RightArmIK:
             math.cos(0.5 * base_yaw), 0.0, 0.0,
             math.sin(0.5 * base_yaw))
         self.data.qpos[self.arm_qpos] = right_joints
-        mujoco.mj_forward(self.model, self.data)
+        mujoco.mj_kinematics(self.model, self.data)
         return (
             self.data.xpos[self.hand_body].copy(),
             Rotation.from_matrix(

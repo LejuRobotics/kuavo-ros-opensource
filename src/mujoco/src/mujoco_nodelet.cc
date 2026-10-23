@@ -19,6 +19,13 @@ public:
     NODELET_INFO("HumanoidControllerNodelet nodelet initialized.");
   }
 
+  ~MujocoNodelet() override
+  {
+    request_simulation_stop();
+    if (control_thread.joinable())
+      control_thread.join();
+  }
+
 private:
   ros::NodeHandle nh;
   std::thread control_thread;

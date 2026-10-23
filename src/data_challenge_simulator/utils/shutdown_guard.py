@@ -11,8 +11,8 @@ That teardown has two weaknesses this module closes:
   turns repeated Ctrl+C into a no-op while the teardown runs, so the teardown
   always finishes.
 * A process-group leader can exit before its descendants.  ``ShutdownGuard``
-  therefore saves every owned PGID when the child is registered and signals
-  that saved group during teardown.
+  therefore saves owned PGIDs, snapshots their descendants before shutdown,
+  and checks process birth times before signalling individual PIDs.
 
 Name-based cleanup is deliberately limited to stale *round children* before a
 new round starts.  A supervisor must never kill another supervisor by name:
@@ -130,6 +130,34 @@ def clear_stale_processes(task_id, grace=SWEEP_GRACE, log=print):
         _signal_matching_processes(task_id, signal.SIGKILL, log)
 
 
+
+def clear_dead_simulator_nodes(log=print):
+    """Remove only known simulator registrations whose local API has closed."""
+    import rosgraph
+    import rosnode
+    from xmlrpc.client import ServerProxy, Transport, Error
+
+    class ProbeTransport(Transport):
+        def make_connection(self, host):
+            connection = super().make_connection(host)
+            connection.timeout = 1.0
+            return connection
+
+    master = rosgraph.Master('/simulator_cleanup')
+    for name in NODELET_NODES:
+        try:
+            uri = master.lookupNode(name)
+            try:
+                with ServerProxy(uri, transport=ProbeTransport()) as api:
+                    api.getPid('/simulator_cleanup')
+            except ConnectionRefusedError:
+                # Never erase a replacement node or a merely slow live node.
+                if master.lookupNode(name) == uri:
+                    rosnode.cleanup_master_blacklist(master, [name])
+                    log("[INFO] 已移除退出节点的失效注册: {}".format(name))
+        except (OSError, Error, rosgraph.MasterError, rosgraph.MasterFailure):
+            continue
+
 def clear_simulator_nodes(timeout=10.0, log=print):
     """Kill simulator nodes left over from an interrupted round, then return.
 
@@ -142,6 +170,7 @@ def clear_simulator_nodes(timeout=10.0, log=print):
 
     deadline = time.time() + timeout
     while time.time() < deadline:
+        clear_dead_simulator_nodes(log=log)
         try:
             active = set(rosnode.get_node_names())
         except Exception:
@@ -157,15 +186,9 @@ def clear_simulator_nodes(timeout=10.0, log=print):
 
 
 class ShutdownGuard(object):
-    """Make Ctrl+C teardown finish and stop only owned children.
+    """Reap owned process trees on normal exit and on INT/TERM/HUP."""
 
-    Use it as a context manager around the whole run and register every child
-    process group with :meth:`add`.  The first Ctrl+C raises
-    ``KeyboardInterrupt`` as usual, so the entry point's own ``finally`` blocks
-    still run their graceful shutdown; any further Ctrl+C is ignored so that
-    teardown cannot be interrupted half way.  :meth:`sweep` signals only the
-    child PIDs and process groups registered by this guard.
-    """
+    SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
     def __init__(self, task_id, log=print):
         self.task_id = task_id
@@ -173,126 +196,154 @@ class ShutdownGuard(object):
         self._children = []
         self._process_groups = {}
         self._graceful = set()
+        self._tracked = {}
         self._interrupts = 0
+        self._cleaning = False
         self._swept = False
-        self._previous_handler = None
+        self._previous_handlers = {}
 
     def __enter__(self):
-        self._previous_handler = signal.getsignal(signal.SIGINT)
-        signal.signal(signal.SIGINT, self._on_interrupt)
+        self._previous_handlers = {
+            sig: signal.signal(sig, self._on_interrupt) for sig in self.SIGNALS}
         return self
 
-    def __exit__(self, exc_type, _exc_value, _traceback):
-        # An interrupt that lands *before* the run reaches its own teardown --
-        # during topic waits, or between rounds -- unwinds straight through
-        # here, with the simulator still up.  Sweep on the way out so no path
-        # out of the run leaves a live process group behind.
-        if exc_type is not None and not self._swept:
+    def __exit__(self, *_exc):
+        try:
             self.sweep()
-        signal.signal(signal.SIGINT, self._previous_handler)
+        finally:
+            for sig, handler in self._previous_handlers.items():
+                signal.signal(sig, handler)
         return False
 
-    def _on_interrupt(self, _signum, _frame):
+    def _on_interrupt(self, signum, _frame):
+        if self._cleaning or self._interrupts:
+            self.log("[INFO] 正在清理本次资源，忽略重复退出信号。")
+            return
         self._interrupts += 1
-        if self._interrupts == 1:
-            raise KeyboardInterrupt
-        self.log(
-            "[INFO] 正在退出，忽略后续 Ctrl+C。"
-            "若长时间没有反应，用 Ctrl+\\ 强制结束。")
+        self.log("[INFO] 收到退出信号 {}，开始清理。".format(signum))
+        raise KeyboardInterrupt
 
     def add(self, process, graceful=False, process_group=False):
-        """Register a child for :meth:`sweep` to signal.
-
-        ``graceful`` sends SIGINT first, which is how rosbag finishes writing
-        its file; plain SIGTERM would leave the bag unfinalized.
-
-        Set ``process_group`` only for a process created with
-        ``start_new_session=True``.  Its PGID is captured now, while the group
-        leader is known to exist, so descendants can still be terminated if
-        the leader exits before teardown.  A child which shares our process
-        group is rejected: signalling that group would kill the supervisor
-        that is responsible for completing teardown.
-        """
         if process is not None:
+            if process_group:
+                try:
+                    pgid = os.getpgid(process.pid)
+                except ProcessLookupError:
+                    pgid = None
+                if pgid == os.getpgrp():
+                    raise ValueError(
+                        "refusing to manage the supervisor's own process group")
+                self._process_groups[process] = process.pid
             self._children.append(process)
             if graceful:
                 self._graceful.add(process)
-            if process_group:
-                # start_new_session=True makes the child a session and process
-                # group leader, so PGID == PID by contract.  Do not look it up
-                # to derive the stored value: a short-lived child may exit
-                # before add() runs, but its descendants can still retain this
-                # process group.  A best-effort lookup is only a misuse check.
-                pgid = process.pid
-                try:
-                    actual_pgid = os.getpgid(process.pid)
-                except ProcessLookupError:
-                    actual_pgid = None
-                if actual_pgid == os.getpgrp():
-                    raise ValueError(
-                        "refusing to manage the supervisor's own process group")
-                self._process_groups[process] = pgid
+            self._swept = False
         return process
 
-    def sweep(self, grace=SWEEP_GRACE):
-        """Signal everything this guard owns.
-
-        Registered independent groups are signalled directly.  Ordinary child
-        processes are signalled by PID, so the supervisor's own process group
-        is never a teardown target.  Stale processes from an older run are the
-        host wrapper's responsibility and must not be guessed by name here.
-        """
-        self.log("[INFO] 清理本轮遗留的进程 ...")
-        self._swept = True
-        self._signal_children(signal.SIGTERM, graceful_signal=signal.SIGINT)
-        self._wait_for_children(grace)
-        self._signal_children(signal.SIGKILL)
-
-    # -- internals -------------------------------------------------------
-
-    def _signal_children(self, signum, graceful_signal=None):
-        for process in self._children:
-            if graceful_signal is not None and process in self._graceful:
-                signum_for_process = graceful_signal
-            else:
-                signum_for_process = signum
-            pgid = self._process_groups.get(process)
-            if pgid is not None:
-                # Do not skip a group merely because its leader exited.  The
-                # descendants retain the original PGID and are the processes
-                # teardown most needs to catch.
-                try:
-                    os.killpg(pgid, signum_for_process)
-                except OSError:
-                    pass
-            elif process.poll() is None:
-                try:
-                    process.send_signal(signum_for_process)
-                except OSError:
-                    pass
-
     @staticmethod
-    def _group_is_alive(pgid):
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        return True
+    def _process_snapshot():
+        result = {}
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            try:
+                with open("/proc/{}/stat".format(name), "rb") as stream:
+                    raw = stream.read()
+                fields = raw[raw.rindex(b")") + 2:].split()
+                # State, PPID, PGID, start time; birth time prevents PID reuse.
+                if fields[0] != b"Z":
+                    result[int(name)] = (
+                        int(fields[1]), int(fields[2]), int(fields[19]))
+            except (OSError, ValueError, IndexError):
+                pass
+        return result
 
-    def _child_is_alive(self, process):
-        # poll() also reaps a direct child which has exited.
-        process_alive = process.poll() is None
-        pgid = self._process_groups.get(process)
-        if pgid is None:
-            return process_alive
-        return self._group_is_alive(pgid)
+    def _alive_children(self):
+        """Snapshot descendants before signalling parents, including setsid children."""
+        snapshot = self._process_snapshot()
+        protected = _protected_pids()
+        owners = {
+            pid: owner for pid, (birth, owner) in self._tracked.items()
+            if pid in snapshot and snapshot[pid][2] == birth}
+        groups = {pgid: process for process, pgid in self._process_groups.items()}
+        for process in self._children:
+            # poll() also reaps exited direct children.
+            if process.poll() is None and process.pid in snapshot:
+                owners[process.pid] = process
+        for pid, (_, pgid, _) in snapshot.items():
+            if pgid in groups and pid not in protected:
+                owners.setdefault(pid, groups[pgid])
+        while True:
+            found = {pid: owners[ppid] for pid, (ppid, _, _) in snapshot.items()
+                     if ppid in owners and pid not in owners and pid not in protected}
+            if not found:
+                break
+            owners.update(found)
+        for pid, owner in owners.items():
+            self._tracked[pid] = (snapshot[pid][2], owner)
+        return owners
 
-    def _wait_for_children(self, seconds):
-        deadline = time.time() + seconds
-        while time.time() < deadline:
-            if not any(self._child_is_alive(process)
-                       for process in self._children):
-                return
+    def _signal_children(self, signum, graceful_only=False, roots_only=False):
+        for pid, owner in self._alive_children().items():
+            if graceful_only and owner not in self._graceful:
+                continue
+            if roots_only and pid != owner.pid:
+                continue
+            # Check again immediately before signalling a saved PID.
+            try:
+                with open("/proc/{}/stat".format(pid), "rb") as stream:
+                    raw = stream.read()
+                birth = int(raw[raw.rindex(b")") + 2:].split()[19])
+                if birth == self._tracked[pid][0]:
+                    os.kill(pid, signum)
+            except (OSError, ValueError, IndexError):
+                pass
+
+    def _wait_for_children(self, seconds, graceful_only=False):
+        deadline = time.monotonic() + seconds
+        while True:
+            alive = self._alive_children()
+            if graceful_only:
+                alive = {pid: owner for pid, owner in alive.items()
+                         if owner in self._graceful}
+            if not alive or time.monotonic() >= deadline:
+                return alive
             time.sleep(0.1)
+
+    def sweep(self, grace=10.0):
+        if self._swept:
+            return
+        if not self._children:
+            self._swept = True
+            return
+        self._cleaning = True
+        handlers = {sig: signal.signal(sig, self._on_interrupt) for sig in self.SIGNALS}
+        try:
+            self.log("[INFO] 清理本次资源：先完成录包，再关闭仿真与辅助进程。")
+            self._alive_children()
+            if self._graceful:
+                self._signal_children(signal.SIGINT, graceful_only=True, roots_only=True)
+                self._wait_for_children(grace, graceful_only=True)
+            # Let roslaunch send ROS-aware shutdown signals and unregister
+            # nodes before escalating to descendants that failed to follow it.
+            self._signal_children(signal.SIGTERM, roots_only=True)
+            remaining = self._wait_for_children(grace)
+            if remaining:
+                self._signal_children(signal.SIGTERM)
+                remaining = self._wait_for_children(2.0)
+            if remaining:
+                self.log("[WARNING] 退出超时，强制回收本次进程：{}".format(sorted(remaining)))
+                self._signal_children(signal.SIGKILL)
+                remaining = self._wait_for_children(2.0)
+            if remaining:
+                raise RuntimeError("本次资源清理未完成，残留 PID：{}".format(sorted(remaining)))
+            self._children.clear()
+            self._process_groups.clear()
+            self._graceful.clear()
+            self._tracked.clear()
+            self._swept = True
+            self.log("[INFO] 本次资源清理完成：已核验进程树无运行残留。")
+        finally:
+            self._cleaning = False
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)

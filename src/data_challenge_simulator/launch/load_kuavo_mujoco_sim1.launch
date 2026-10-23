@@ -14,7 +14,7 @@
        default="$(find data_challenge_simulator)/models/biped_s$(arg robot_version)/xml/task1.xml"/>
 
   <rosparam param="task_body_names">[cylinder_1, cylinder_2, cylinder_3, target_bin, source_bin, lever, base_link, waist_yaw_link]</rosparam>
-  <rosparam param="contact_follow_body_names">[cylinder_1, cylinder_2, cylinder_3]</rosparam>
+  <rosparam param="contact_follow_body_names">[cylinder_1, cylinder_2, cylinder_3, lever]</rosparam>
   <param name="task_light_seed" value="$(arg task_light_seed)"/>
   <param name="task_light_profile" value="1"/>
   <param name="/sg100_require_model_command_gate"

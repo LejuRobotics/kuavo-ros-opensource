@@ -182,7 +182,7 @@ class Task3SecondIKPlanner:
     def solve_target(
             self, base_pose, ring_position, measured_arm,
             target_hand_position, target_hand_rotation,
-            validate_insertion=True):
+            validate_clearance=True):
         """Solve one exact target pose from the latest measured arm."""
         measured = np.asarray(measured_arm, dtype=float)
         if measured.shape != (14,) or not np.all(np.isfinite(measured)):
@@ -219,7 +219,7 @@ class Task3SecondIKPlanner:
         if (position_error > self.MAX_POSITION_ERROR_M or
                 rotation_error > self.MAX_ROTATION_ERROR_RAD):
             return None
-        if (validate_insertion and not self._direct_path_is_free(
+        if (validate_clearance and not self._direct_path_is_free(
                 base_pose, ring, seed, joints)):
             return None
 
@@ -227,9 +227,12 @@ class Task3SecondIKPlanner:
         tips = self._tip_geometry()
         radii = np.linalg.norm(tips[:, :2] - ring[:2], axis=1)
         depths = ring[2] + self.ring_height - tips[:, 2]
-        if (validate_insertion and (
+        # This is the approach pose: compact fingertips may remain above
+        # the rim. Require radial clearance and no bottom penetration; the
+        # separate descent supplies the insertion depth.
+        if (validate_clearance and (
                 np.any(radii >= self.inner_radius) or
-                np.any(depths <= 0.0) or self._ring_contacts())):
+                np.any(depths >= self.ring_height) or self._ring_contacts())):
             return None
         margin = np.minimum(
             joints - self.ik.lower, self.ik.upper - joints)
@@ -267,5 +270,5 @@ class Task3SecondIKPlanner:
         return self.solve_target(
             base_pose, ring_position, measured_arm,
             command_position, command_rotation,
-            validate_insertion=False,
+            validate_clearance=False,
         )

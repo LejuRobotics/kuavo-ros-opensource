@@ -4,6 +4,7 @@
   "safe_retreat_m": 0.47,
   "open_loop_linear_speed_mps": 0.16,
   "shoulder_pitch_rad": -1.00,
+  "ready_hand_position_base_m": [0.54, 0.20, 0.98],
   "lift_trajectory_points": 80,
   "ready_trajectory_points": 60,
   "collision_margin_m": 0.001,

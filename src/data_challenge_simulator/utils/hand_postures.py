@@ -74,11 +74,11 @@ def box_gripper_pose(closure, side):
 
     The shaped hand keeps all flexion joints fixed around the box. Closure
     couples only the index abduction joint and thumb opposition joint:
-    index_j1 moves -1.0 -> 0.0 while thumb_j1 moves 1.0 -> 1.8.
+    index_j1 moves -1.0 -> 0.0 while thumb_j1 moves 1.0 -> 2.1 (within the SG100 2.182 rad limit).
     """
     closure = _validate(side, closure)
     bare = {
-        "thumb_j1": 1.0 + 0.8 * closure,
+        "thumb_j1": 1.0 + 1.1 * closure,
         "thumb_j2": -1.0,
         "thumb_j3": 0.0,
         "index_j1": -1.0 + closure,
@@ -116,12 +116,12 @@ def internal_independent_expansion_pose(
         "thumb_j2": 0.0,
         "thumb_j3": 0.0,
         "index_j1": 0.0,
-        "index_j2": 1.55 - 0.55 * index_expansion,
+        "index_j2": 1.70 - 0.70 * index_expansion,
         "index_j3": 0.0,
-        "middle_j1": 1.65 - 0.55 * middle_expansion,
+        "middle_j1": 1.75 - 0.65 * middle_expansion,
         "middle_j2": 0.0,
         "little_j1": 3.0,
-        "little_j2": 1.8 - 0.8 * little_expansion,
+        "little_j2": 1.95 - 0.95 * little_expansion,
         "little_j3": (
             little_j3_compact
             + (little_j3_expanded - little_j3_compact) * little_expansion),

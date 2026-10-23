@@ -1,0 +1,31 @@
+{
+  "initial_base": [
+    0.015,
+    0,
+    0
+  ],
+  "object_x_range": [
+    0.55,
+    0.61
+  ],
+  "object_y_ranges": [
+    [
+      -0.31,
+      -0.27
+    ],
+    [
+      -0.21,
+      -0.17
+    ],
+    [
+      -0.11,
+      -0.07
+    ]
+  ],
+  "object_z": 0.685,
+  "minimum_object_separation_m": 0.075,
+  "target_y_offset_range_m": [
+    -0.1,
+    0.1
+  ]
+}

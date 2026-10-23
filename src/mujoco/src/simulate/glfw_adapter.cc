@@ -53,8 +53,14 @@ GlfwAdapter::GlfwAdapter() {
   Glfw().glfwWindowHint(GLFW_SAMPLES, 4);
   Glfw().glfwWindowHint(GLFW_VISIBLE, 1);
 
-  // get video mode and save
-  vidmode_ = *Glfw().glfwGetVideoMode(Glfw().glfwGetPrimaryMonitor());
+  // A remote desktop can retain its X framebuffer with no physical monitor.
+  // Keep a visible 1280x720 window available in that case.
+  vidmode_ = {1920, 1080, 8, 8, 8, 60};
+  if (auto* monitor = Glfw().glfwGetPrimaryMonitor()) {
+    if (const auto* mode = Glfw().glfwGetVideoMode(monitor)) {
+      vidmode_ = *mode;
+    }
+  }
 
   // create window
   window_ = Glfw().glfwCreateWindow((2 * vidmode_.width) / 3,
@@ -122,10 +128,11 @@ std::pair<double, double> GlfwAdapter::GetCursorPosition() const {
 }
 
 double GlfwAdapter::GetDisplayPixelsPerInch() const {
+  auto* monitor = Glfw().glfwGetPrimaryMonitor();
+  if (!monitor) return 96.0;
   int width_mm, height_mm;
-  Glfw().glfwGetMonitorPhysicalSize(
-      Glfw().glfwGetPrimaryMonitor(), &width_mm, &height_mm);
-  return 25.4 * vidmode_.width / width_mm;
+  Glfw().glfwGetMonitorPhysicalSize(monitor, &width_mm, &height_mm);
+  return width_mm > 0 ? 25.4 * vidmode_.width / width_mm : 96.0;
 }
 
 std::pair<int, int> GlfwAdapter::GetFramebufferSize() const {
@@ -192,13 +199,15 @@ void GlfwAdapter::ToggleFullscreen() {
 
   // currently windowed: switch to full screen
   else {
+    auto* monitor = Glfw().glfwGetPrimaryMonitor();
+    if (!monitor) return;
     // save window data
     Glfw().glfwGetWindowPos(window_, &window_pos_.first, &window_pos_.second);
     Glfw().glfwGetWindowSize(window_, &window_size_.first,
                              &window_size_.second);
 
     // switch
-    Glfw().glfwSetWindowMonitor(window_, Glfw().glfwGetPrimaryMonitor(), 0,
+    Glfw().glfwSetWindowMonitor(window_, monitor, 0,
                                 0, vidmode_.width, vidmode_.height,
                                 vidmode_.refreshRate);
   }

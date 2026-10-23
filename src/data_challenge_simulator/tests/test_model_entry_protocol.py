@@ -20,10 +20,11 @@ SCORER = PACKAGE / "utils/task_scorer.py"
 
 def test_model_entry_provides_the_harness_services_and_topic():
     source = ENTRY.read_text()
-    assert '"/simulator/reset", Trigger, self._reset' in source
-    assert '"/simulator/start", Trigger, self._start' in source
+    assert '"/simulator/reset", Trigger, self.reset' in source
+    assert '"/simulator/start", Trigger, self.start' in source
     assert '"/simulator/success", Bool, queue_size=1' in source
-    assert '"/simulator/init", Trigger' in source
+    worker = (PACKAGE / "utils/init_notification.py").read_text()
+    assert "rospy.ServiceProxy('/simulator/init', Trigger)" in worker
 
 
 def test_reset_answers_before_notifying_init():
@@ -62,8 +63,11 @@ def test_start_waits_for_the_scene_but_not_for_the_reset_call():
     source = ENTRY.read_text()
     start = source.index("def _start(self, _request):")
     body = source[start:source.index("def _ensure_observer(self):")]
-    assert "self.initialized_evt.wait(" in body
-    assert "self.relaunch" not in body
+    assert "self.reset_handoff.is_current(self, ready=True)" in body
+    assert "self.relaunch.is_set()" in body
+    handoff = source[source.index("class ResetHandoff(object):"):source.index("class EvaluationProtocol:")]
+    assert "self._condition.wait(" in handoff
+    assert "response = protocol._start(request)" in handoff
     # The reset handler only requests a relaunch.  main() initializes the
     # replacement round after this handler has returned.
     reset = source[source.index("def _reset(self, _request):"):start]
@@ -92,9 +96,9 @@ def test_a_reset_restarts_the_node_with_the_new_rounds_spawn():
     assert "while True:" in source
     assert "round_seed = protocol.reset_seed" in source
     assert "self.reset_seed = self._next_reset_seed()" in source
-    assert "random.SystemRandom().randint(1, 10 ** 6)" in source
+    assert "round_seed = args.seed if args.seed is not None else seed_for_round(1)" in source
     # The seed picked at launch is only the first round's.
-    assert "round_seed = args.seed if args.seed is not None else (" in source
+    assert "return self.round_seed + (1 if self.score_file is not None else 0)" in source
 
 
 def test_reset_response_gate_survives_the_protocol_relaunch():
@@ -124,7 +128,7 @@ def test_pre_episode_failure_restarts_but_active_episode_failure_stops():
     assert "protocol._invalidate_active_round(error)" in handler
     assert "if manual_intervention:" in recovery
     assert "raise round_error" in recovery
-    assert "random.SystemRandom().randint(1, 10 ** 6)" in recovery
+    assert "round_seed = seed" in recovery
     assert "reset_handoff.retarget(round_seed)" in recovery
     assert "time.sleep(ROUND_RETRY_DELAY)" in recovery
     assert "continue" in recovery
@@ -175,15 +179,19 @@ def test_every_required_topic_timeout_uses_round_recovery():
     assert "except Exception as error:" in main
 
 
-def test_init_handshake_failure_is_a_recoverable_round_failure():
+def test_init_notification_retries_in_the_live_round():
     source = ENTRY.read_text()
-    notify = source[source.index("def _notify_initialized(self):"):
-                    source.index("def _next_reset_seed(self):")]
-    assert "/simulator/init did not appear after reset" in notify
-    assert "/simulator/init is advertised but the call failed" in notify
-    assert "/simulator/init rejected this round" in notify
-    assert '"model entry: /simulator/init is absent' in notify
-    assert 'return False' in notify
+    initialize = source[source.index("def _initialize(self):"):
+                        source.index("def _wait_for_controller_ready")]
+    assert "self._notify_initialized()" not in initialize
+    main = source[source.index("def main():"):]
+    loop = main[main.index("init_acknowledged = False"):
+                main.index("if protocol.infrastructure_failure")]
+    assert "process.poll() is None" in loop
+    assert "not protocol.relaunch.is_set()" in loop
+    assert "init_acknowledged = protocol._notify_initialized()" in loop
+    assert "not init_acknowledged" in loop
+    assert "INIT_RETRY_INTERVAL" in loop
 
 
 def test_reset_handoff_releases_only_the_replacement_seed():
@@ -215,12 +223,15 @@ def test_reset_handoff_releases_only_the_replacement_seed():
     assert not handoff.wait_for(44, timeout=0.0)
 
 
-def test_round_services_are_unregistered_before_their_names_are_reused():
+def test_round_services_survive_replacements_and_close_with_session():
     source = ENTRY.read_text()
     shutdown = source[source.index("def shutdown(self):"):source.index(
         "def _watch_success(self):")]
-    assert 'self.reset_service.shutdown("model simulator round ended")' in shutdown
-    assert 'self.start_service.shutdown("model simulator round ended")' in shutdown
+    assert "self.reset_handoff.detach(self)" in shutdown
+    assert "service.shutdown" not in shutdown
+    handoff = source[source.index("class ResetHandoff(object):"):source.index("class EvaluationProtocol:")]
+    assert 'service.shutdown("model evaluation session ended")' in handoff
+    assert "with reset_handoff, ShutdownGuard" in source
 
 
 def test_observer_reuses_the_accepted_scorer_rules():
@@ -310,3 +321,9 @@ def test_ready_is_published_only_after_arm_handover():
     # The helper reports failure through its return value; _initialize turns
     # that into a hard readiness gate after cleanup.
     assert "raise" not in handover_body
+
+
+def test_controller_services_are_ready_before_sdk_initialization():
+    source = ENTRY.read_text()
+    main = source[source.index("def main():"):]
+    assert main.index("EvaluationProtocol._wait_for_controller_ready()") < main.index("sdk.Init(")

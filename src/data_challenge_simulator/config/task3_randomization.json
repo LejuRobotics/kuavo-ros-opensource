@@ -1,0 +1,39 @@
+{
+  "initial_base": [
+    0,
+    0,
+    0
+  ],
+  "source_x_range": [
+    0.5,
+    0.74
+  ],
+  "source_y_range": [
+    -0.29,
+    0.29
+  ],
+  "source_z": 0.65,
+  "minimum_ring_separation_m": 0.16,
+  "preferred_ring_in_base_xy": [
+    0.63,
+    -0.275
+  ],
+  "destination_slots": [
+    [
+      0.5,
+      0.9
+    ],
+    [
+      0.5,
+      0.76
+    ],
+    [
+      0.5,
+      0.62
+    ]
+  ],
+  "destination_y_offset_range_m": [
+    -0.1,
+    0.1
+  ]
+}

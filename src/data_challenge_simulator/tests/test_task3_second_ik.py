@@ -33,8 +33,10 @@ class Task3SecondIKTest(unittest.TestCase):
             (0.521805, -0.231697, 0.860822),
             atol=5e-4,
         )
-        self.assertTrue(all(depth > 0.0
+        self.assertTrue(all(depth < planner.ring_height
                             for depth in result.fingertip_depths_m))
+        self.assertTrue(all(radius < planner.inner_radius
+                            for radius in result.fingertip_radii_m))
         self.assertEqual(len(result.right_waypoints), 2)
 
     def test_target_translates_with_ring_position(self):
@@ -81,3 +83,26 @@ class Task3SecondIKTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_live_descent_remains_reachable_at_recorded_parking_error():
+    """Regression: collect layout 457576801 failed at the first insertion."""
+    import json
+    from scipy.spatial.transform import Rotation
+    planner = Task3SecondIKPlanner(SCENE)
+    ring = np.asarray((0.604299, -0.155438, 0.649998))
+    measured = (0.0,) * 7 + (
+        -0.637447, -0.364747, 0.999605, -0.698163,
+        0.697585, -0.555188, 0.276539)
+    config = json.loads((SCENE.parents[3] / "config/task3_grasp.json").read_text())
+    desired_position, desired_rotation = planner.reference_pose(ring)
+    target, rotation = planner.feedforward_command_pose(ring)
+    target += np.asarray((-0.00023, 0.00027, 0.00036))
+    target[2] -= config["descent_distance_m"]
+    rotation = desired_rotation * Rotation.from_quat(
+        (0.49759645, 0.49969572, 0.50109182, 0.50160637)).inv() * rotation
+    result = planner.solve_target(
+        (-0.059, 0.138, 0.0), ring, measured, target, rotation,
+        validate_clearance=False)
+    assert result is not None
+    assert all(0 < depth < planner.ring_height for depth in result.fingertip_depths_m)

@@ -1,4 +1,4 @@
-"""Regression checks for Task 1's collision-free post-release settle."""
+"""Regression checks for Task 1's physical grasp and release."""
 
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -9,44 +9,27 @@ MUJOCO_NODE = PACKAGE.parent / "mujoco/src/mujoco_node.cc"
 SCENE = PACKAGE / "models/biped_s400062/xml/task1.xml"
 
 
-def test_task1_release_disables_object_collision_for_vertical_fall():
+def test_grasp_feedback_cannot_move_objects_or_disable_collisions():
     source = MUJOCO_NODE.read_text(encoding="utf-8")
-
-    assert 'm->geom_contype[geom_id] = 0;' in source
-    assert 'm->geom_conaffinity[geom_id] = 0;' in source
-    assert "state.release_xy_world[0]" in source
-    assert "legacyObjectLowestWorldZ" in source
-    assert "legacyObjectOverTargetFloor" in source
-
-
-def test_task1_latch_disables_collision_and_release_uses_open_command():
-    source = MUJOCO_NODE.read_text(encoding="utf-8")
-    latch = source[source.index(
-        "if (grasp_latch_complete || legacy_contact_complete)"):]
-    latch_end = latch.index("continue;")
-    latch = latch[:latch_end]
-
-    held = source[source.index("if (state.held)"):]
-    held_end = held.index("const Eigen::Matrix3d hand_rotation")
-    held = held[:held_end]
-
-    assert "state.held = true;" in latch
-    assert latch.index("state.held = true;") < latch.index(
-        "m->geom_contype[geom_id] = 0;")
-    assert "m->geom_conaffinity[geom_id] = 0;" in latch
-    assert "if (opening_command)" in held
-    assert "contacting_fingertips.size() < 2" not in held
+    body = source.split("bool updateInternalContactFollowers()", 1)[1].split(
+        "bool updateContactFollowers", 1)[0]
+    assert "mj_contactForce" in body
+    assert "destination_supported" in source
+    for mutation in ("d->qpos[", "d->qvel[", "m->geom_contype[",
+                     "m->geom_conaffinity[", "d->qfrc_applied["):
+        assert mutation not in body
+    assert "settleLegacyObjectOnTargetFloor" not in source
+    assert "legacyObjectLowestWorldZ" not in source
 
 
-def test_task1_target_floor_settle_has_configurable_fast_upright_speed():
-    source = MUJOCO_NODE.read_text(encoding="utf-8")
-    scene = SCENE.read_text(encoding="utf-8")
-
-    assert 'numericScalarOrDefault("task1_target_settle_angular_speed"' in source
-    assert "settleLegacyObjectOnTargetFloor" in source
-    assert "maximum_step / angle" in source
-    assert "legacyTargetFloorHeight(state) - legacyObjectLowestWorldZ(state)" in source
-    assert '<numeric name="task1_target_settle_angular_speed" data="6.283185307"/>' in scene
+def test_cylinders_collide_with_static_surfaces_and_hand_shells():
+    root = ET.parse(SCENE).getroot()
+    geoms = {geom.get("name"): geom for geom in root.findall(".//geom")}
+    for index in range(1, 4):
+        cylinder = geoms[f"block_{index}_geom"]
+        assert int(cylinder.get("conaffinity")) & 1
+        assert int(cylinder.get("conaffinity")) & 8
+    assert int(geoms["target_bin_floor"].get("conaffinity")) & 4
 
 
 def test_source_bin_walls_block_task1_cylinders():
@@ -60,3 +43,36 @@ def test_source_bin_walls_block_task1_cylinders():
     for index in range(1, 4):
         cylinder = geoms[f"block_{index}_geom"]
         assert int(cylinder.get("contype")) & 4
+
+
+def test_partial_release_uses_the_public_gripper_command_units():
+    import ast
+    source = ast.parse((PACKAGE / "examples/task1.py").read_text())
+    release = next(node for node in ast.walk(source)
+                   if isinstance(node, ast.With)
+                   and any(isinstance(child, ast.Constant)
+                           and child.value == "{}.gripper_release"
+                           for child in ast.walk(node.items[0].context_expr)))
+    command = release.body[0].value.args[0]
+    value = eval(compile(ast.Expression(command), "<release>", "eval"),
+                 {"__builtins__": {}})
+    assert abs(value / 255.0 - 0.65) < 1e-9
+
+
+def test_release_opens_hand_without_waiting_for_rest_or_support():
+    import ast
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    tree = ast.parse((PACKAGE / "examples/task1.py").read_text())
+    release = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                   and node.name == "release_cylinder")
+    # No ROS feedback or time.sleep is available: release must finish once
+    # the hand opens, leaving target-region validation to the caller.
+    namespace = {}
+    exec(compile(ast.Module(body=[release], type_ignores=[]), "<release>", "exec"), namespace)
+    commands = []
+    gripper = SimpleNamespace(control_right_gripper=lambda command, duration:
+                              commands.append((command, duration)))
+    timing = SimpleNamespace(segment=lambda label: nullcontext())
+    namespace["release_cylinder"](gripper, "cylinder_1", timing)
+    assert commands == [(0.65 * 255, 0.5), (0, 0.3)]

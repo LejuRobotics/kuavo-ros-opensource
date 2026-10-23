@@ -20,6 +20,7 @@ from kuavo_humanoid_sdk import KuavoRobot, KuavoRobotState, KuavoSDK
 from utils.trajectory_controller import TrajectoryController
 from utils.arm_state import wait_for_first_arm_state
 from utils.task2_initialization import Task2InitializationPlanner
+from utils.task2_randomization import active_scene
 from utils.task2_pick_planner import Task2PickPlanner
 from utils.utils import Utils
 
@@ -102,7 +103,7 @@ def execute_lift(trajectory, robot_state, target_rad, points):
 def execute_ready(trajectory, robot_state, target_rad, points):
     measured = wait_for_arm_state(robot_state)
     rospy.loginfo(
-        "Turning both palms toward the table at unchanged hand height in "
+        "Aligning both palms at the configured raised ready pose in "
         "one %d-point trajectory", points)
     trajectory.execute_trajectory(
         Utils.interpolate_joint_trajectory(
@@ -181,7 +182,7 @@ def run_initialization(
 
     measured_arm = wait_for_arm_state(robot_state)
     collision_planner = Task2InitializationPlanner(
-        scene,
+        active_scene() if Path(scene) == DEFAULT_SCENE else scene,
         collision_margin_m=float(config["collision_margin_m"]),
         report_limit_m=float(config["collision_report_limit_m"]))
     target_lift = shoulder_only_target(
@@ -211,7 +212,8 @@ def run_initialization(
         execute_lift(trajectory, robot_state, target_lift, lift_points)
         measured_lift = wait_for_arm_state(robot_state)
         target_ready = ready_planner.solve_palm_down_ready(
-            safe_base_pose, measured_lift, ready_outward_angle_deg)
+            safe_base_pose, measured_lift, ready_outward_angle_deg,
+            hand_position_base_m=config.get("ready_hand_position_base_m"))
         ready_clearance = collision_planner.path_clearance(
             safe_base_pose, measured_lift, [target_ready],
             samples_per_segment=int(config["path_samples"]))

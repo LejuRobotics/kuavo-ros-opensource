@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Descend slightly, then independently latch Task 3's internal fingers."""
+"""Insert, physically expand the fingers, and transfer Task 3 rings."""
 
 import argparse
 import json
@@ -26,7 +26,7 @@ from utils.task3_second_ik import Task3SecondIKPlanner
 from utils.trajectory_controller import TrajectoryController
 
 from task2_base_motion import ChassisMotion
-from task3_descend import execute_right_target, wait_for_held_arm_command
+from task3_descend import execute_right_target, wait_for_held_arm_command, table_transfer_waypoints
 from task3_initialize import (
     DEFAULT_SCENE,
     wait_for_arm_state,
@@ -46,7 +46,7 @@ FINGER_JOINTS = (
 
 
 class Task3GraspFeedback:
-    """Collect the follower's latched state without guessing its timing."""
+    """Observe current finger contacts and destination support."""
 
     def __init__(self, ring_name=RING_NAME):
         self.ring_name = ring_name
@@ -54,11 +54,15 @@ class Task3GraspFeedback:
         self.collision_suppressed = False
         self.latch_mask = 0
         self.held = False
+        self.supported = False
         self.armed_received = False
         self.collision_suppressed_received = False
         self.mask_received = False
         self.held_received = False
         self.subscribers = []
+        self.subscribers.append(rospy.Subscriber(
+            "/mujoco/{}/destination_supported".format(ring_name),
+            Bool, lambda msg: setattr(self, "supported", bool(msg.data)), queue_size=1))
         self.subscribers.append(rospy.Subscriber(
             "/mujoco/task3_grasp_armed", Bool,
             self._armed_callback, queue_size=1))
@@ -124,29 +128,6 @@ class Task3GraspFeedback:
         return self._wait(lambda: self.held, timeout)
 
 
-class Task3GraspCommand:
-    def __init__(self):
-        self.grasp_publisher = rospy.Publisher(
-            "/mujoco/task3_grasp_enabled", Bool,
-            queue_size=1, latch=True)
-        self.grasp_finalize_publisher = rospy.Publisher(
-            "/mujoco/task3_grasp_finalize_enabled", Bool,
-            queue_size=1, latch=True)
-        self.collision_suppression_publisher = rospy.Publisher(
-            "/mujoco/task3_fingertip_collision_suppression_enabled", Bool,
-            queue_size=1, latch=True)
-
-    def set_enabled(self, enabled):
-        self.grasp_publisher.publish(Bool(data=bool(enabled)))
-
-    def set_finalize_enabled(self, enabled):
-        self.grasp_finalize_publisher.publish(Bool(data=bool(enabled)))
-
-    def set_collision_suppression_enabled(self, enabled):
-        self.collision_suppression_publisher.publish(
-            Bool(data=bool(enabled)))
-
-
 def load_config(path):
     with Path(path).open("r", encoding="utf-8") as stream:
         config = json.load(stream)
@@ -160,8 +141,6 @@ def load_config(path):
         raise ValueError("finger_expansion_limits must contain three values in (0, 1]")
     if float(config["finger_expansion_step"]) <= 0.0:
         raise ValueError("finger_expansion_step must be positive")
-    if float(config["max_ring_motion_during_descent_m"]) <= 0.0:
-        raise ValueError("max_ring_motion_during_descent_m must be positive")
     if float(config["loaded_base_linear_speed_mps"]) <= 0.0:
         raise ValueError("loaded_base_linear_speed_mps must be positive")
     return config, limits
@@ -206,6 +185,15 @@ def expand_until_search_complete(gripper, feedback, config, limits):
             current_mask & (1 << index) or
             expansions[index] >= limits[index]
             for index in range(3))
+        if bin(current_mask).count("1") >= 2:
+            # Touching alone cannot carry the ring. Add a small commanded
+            # expansion while leaving actual joints/contact forces physical.
+            expansions = tuple(min(limit, value + 0.08)
+                               for value, limit in zip(expansions, limits))
+            gripper.command_right_internal_fingers(*expansions)
+            rospy.sleep(0.25)
+            if feedback.held:
+                return expansions, int(feedback.latch_mask)
         if complete:
             gripper.command_right_internal_fingers(*expansions)
             if bin(current_mask).count("1") < 2:
@@ -253,7 +241,6 @@ def init_runtime(args, gripper=None, trajectory=None):
         gripper=GripperController() if gripper is None else gripper,
         trajectory=trajectory,
         feedback=None,
-        command=None,
     )
 
 
@@ -264,10 +251,9 @@ def make_planner(scene, ring_name):
 
 def run_grasp(
         robot, robot_state, chassis, object_pose, planner, gripper,
-        feedback, command, config, limits, ring_name, destination_xy,
+        feedback, config, limits, ring_name, destination_xy,
         trajectory=None):
     """Run the accepted descend/latch/lift/transfer in an existing node."""
-    grasp_succeeded = False
 
     if getattr(feedback, "ring_name", None) != ring_name:
         feedback.rebind(ring_name)
@@ -277,17 +263,7 @@ def run_grasp(
         raise RuntimeError(
             "Task 3 grasp stage requires an unlatched start: held={}, mask=0x{:02x}".format(
                 feedback.held, feedback.latch_mask))
-    command.set_enabled(False)
-    command.set_finalize_enabled(False)
-    command.set_collision_suppression_enabled(True)
-    if not feedback.wait_for_collision_suppressed(
-            config["armed_timeout_s"]):
-        raise RuntimeError(
-            "Task 3 follower did not suppress fingertip collision")
-    rospy.loginfo(
-        "Task3 fingertip collision suppressed before insertion; "
-        "geometric latch remains disabled")
-
+    # Fingertips and rings remain collidable throughout insertion and release.
     measured = tuple(wait_for_arm_state(robot_state))
     trajectory_start = wait_for_held_arm_command()
     if trajectory is None:
@@ -303,13 +279,20 @@ def run_grasp(
     desired_position, desired_rotation = planner.reference_pose(ring_position)
     command_position, command_rotation = planner.feedforward_command_pose(
         ring_position)
+    # Correct the measured approach error before the short insertion. Wrist
+    # tracking varies with the arm pose, so a fixed calibration alone is not
+    # accurate enough to clear the ring rim.
+    actual_position, actual_rotation = planner.measured_pose(
+        base_pose, ring_position, measured[7:14])
+    command_position += desired_position - actual_position
+    command_rotation = desired_rotation * actual_rotation.inv() * command_rotation
     descent = float(config["descent_distance_m"])
     desired_position = desired_position + np.asarray((0.0, 0.0, -descent))
     command_position = command_position + np.asarray((0.0, 0.0, -descent))
     result = planner.solve_target(
         base_pose, ring_position, measured,
         command_position, command_rotation,
-        validate_insertion=False)
+        validate_clearance=False)
     if result is None:
         raise RuntimeError("Task 3 small-descent IK did not solve")
     rospy.loginfo(
@@ -329,30 +312,15 @@ def run_grasp(
         "Task3 insertion ring motion_mm=%s norm=%.2f",
         np.round(1000.0 * ring_motion, 2),
         1000.0 * np.linalg.norm(ring_motion))
-    if np.linalg.norm(ring_motion) > float(
-            config["max_ring_motion_during_descent_m"]):
-        raise RuntimeError(
-            "Task 3 insertion moved the ring before latch")
+    # Contact can briefly tilt an unrestrained ring during insertion. The
+    # physical lift and destination-support checks below determine success.
 
-    command.set_enabled(True)
-    if not feedback.wait_for_armed(config["armed_timeout_s"]):
-        raise RuntimeError(
-            "Task 3 follower did not confirm collision suppression")
-    rospy.loginfo(
-        "Task3 force-free grasp armed; expanding fingers independently")
-    expansions, latch_mask = expand_until_search_complete(
+    expansions, contact_mask = expand_until_search_complete(
         gripper, feedback, config, limits)
-    rospy.loginfo(
-        "Task3 finger motion complete; finalizing object latch with mask=0x%02x",
-        latch_mask)
-    command.set_finalize_enabled(True)
     if not feedback.wait_for_held(config["held_timeout_s"]):
-        raise RuntimeError(
-            "Task 3 has two finger latches but object did not latch")
-    grasp_succeeded = True
-    rospy.loginfo(
-        "TASK3 INTERNAL GRASP COMPLETE: expansions=%s, mask=0x%02x, held=true",
-        tuple(round(value, 4) for value in expansions), latch_mask)
+        raise RuntimeError("Task 3 did not establish two physical finger contacts")
+    rospy.loginfo("TASK3 PHYSICAL GRASP: expansions=%s, contacts=0x%02x",
+                  expansions, contact_mask)
 
     measured_lift = tuple(wait_for_arm_state(robot_state))
     base_lift = tuple(chassis.pose())
@@ -370,7 +338,7 @@ def run_grasp(
     lift_result = planner.solve_target(
         base_lift, ring_lift, measured_lift,
         lift_command_position, lift_command_rotation,
-        validate_insertion=False)
+        validate_clearance=False)
     if lift_result is None:
         raise RuntimeError("Task 3 loaded lift IK did not solve")
     rospy.loginfo("Task3 loaded lift: distance=%.1f mm", 1000.0 * lift_distance)
@@ -381,6 +349,9 @@ def run_grasp(
 
     held_position = object_pose.wait_for_position(
         ring_name, timeout=30.0)
+    if held_position[2] - ring_lift[2] < 0.15 or not feedback.wait_for_held(0.3):
+        raise RuntimeError("Task 3 physical lift failed: height=%.3f, contacts=0x%02x" %
+                           (held_position[2] - ring_lift[2], feedback.latch_mask))
     stopped_base = tuple(chassis.pose())
     destination_base = (
         stopped_base[0] + destination_xy[0] - held_position[0],
@@ -394,25 +365,48 @@ def run_grasp(
     unloaded_linear_speed = chassis.linear_speed
     chassis.linear_speed = float(config["loaded_base_linear_speed_mps"])
     try:
-        chassis.move_to_pose(
-            destination_base[0], destination_base[1], destination_base[2],
-            timeout=float(config["base_motion_timeout_s"]))
+        for waypoint in table_transfer_waypoints(
+                stopped_base, destination_base, planner.model, chassis.position_tolerance):
+            chassis.move_to_pose(
+                *waypoint, timeout=float(config["base_motion_timeout_s"]),
+                straight_line=True)
     finally:
         chassis.linear_speed = unloaded_linear_speed
 
-    grasp_succeeded = False
-    command.set_finalize_enabled(False)
-    command.set_enabled(False)
     gripper.control_right_internal_expansion(
         0.0, duration=float(config["hand_motion_duration_s"]))
+    # Withdraw vertically before returning the base, so the open fingers
+    # cannot sweep through a ring left on the destination table.
+    measured_release = tuple(wait_for_arm_state(robot_state))
+    released_ring = object_pose.wait_for_position(ring_name, timeout=2.0)
+    hand_position, hand_rotation = planner.measured_pose(
+        tuple(chassis.pose()), released_ring, measured_release[7:14])
+    retreat = planner.solve_target(
+        tuple(chassis.pose()), released_ring, measured_release,
+        hand_position + np.asarray((0.0, 0.0, 0.06))
+        - planner.TRACKING_POSITION_BIAS_WORLD_M,
+        hand_rotation * planner.tracking_rotation.inv(),
+        validate_clearance=False)
+    if retreat is None:
+        raise RuntimeError("Task 3 release withdrawal IK did not solve")
+    execute_right_target(trajectory, measured_release, retreat.right_joints, 20)
     if not feedback._wait(
             lambda: not feedback.held, config["release_timeout_s"]):
-        raise RuntimeError(
-            "Task 3 object did not release on inward finger motion")
-    rospy.loginfo(
-        "TASK3 TRANSFER COMPLETE: release acknowledged for ring=%s",
-        ring_name)
-    return trajectory
+        raise RuntimeError("Task 3 object remained attached after finger withdrawal")
+    deadline = time.monotonic() + 2.0
+    stable_since = None
+    previous = None
+    while not rospy.is_shutdown() and time.monotonic() < deadline:
+        position = np.asarray(object_pose.wait_for_position(ring_name, timeout=1.0))
+        on_table = feedback.supported
+        stable = previous is not None and np.linalg.norm(position - previous) < 0.002
+        stable_since = (stable_since or time.monotonic()) if on_table and stable else None
+        if stable_since is not None and time.monotonic() - stable_since >= 0.2:
+            rospy.loginfo("TASK3 TRANSFER COMPLETE: physically placed ring=%s", ring_name)
+            return trajectory
+        previous = position
+        rospy.sleep(0.05)
+    raise RuntimeError("Task 3 ring did not settle on destination table: %s" % position)
 
 
 def main(runtime=None, argv=None, ring_name=None, destination_xy=None):
@@ -438,8 +432,6 @@ def main(runtime=None, argv=None, ring_name=None, destination_xy=None):
         runtime = init_runtime(args)
     if runtime.feedback is None:
         runtime.feedback = Task3GraspFeedback(args.ring_name)
-    if runtime.command is None:
-        runtime.command = Task3GraspCommand()
     if runtime.planner is None:
         runtime.planner = make_planner(args.scene, args.ring_name)
     trajectory = runtime.trajectory
@@ -447,14 +439,10 @@ def main(runtime=None, argv=None, ring_name=None, destination_xy=None):
         trajectory = run_grasp(
             runtime.robot, runtime.robot_state, runtime.chassis,
             runtime.poses, runtime.planner, runtime.gripper,
-            runtime.feedback, runtime.command, config, limits,
+            runtime.feedback, config, limits,
             args.ring_name, args.destination_xy, trajectory=trajectory)
     finally:
         if owns_runtime:
-            if not getattr(runtime, "grasp_succeeded", True):
-                runtime.command.set_finalize_enabled(False)
-                runtime.command.set_enabled(False)
-                runtime.command.set_collision_suppression_enabled(False)
             if trajectory is not None:
                 trajectory.stop()
             runtime.gripper.stop()

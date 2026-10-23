@@ -3,6 +3,7 @@
 
 from dataclasses import dataclass
 import math
+from utils.task2_randomization import active_scene
 from pathlib import Path
 
 import mujoco
@@ -49,6 +50,7 @@ class PickPlan:
     box_name: str
     above_joints: tuple
     contact_joints: tuple
+    descent_waypoints: tuple
     lift_waypoints: tuple
 
 
@@ -87,6 +89,7 @@ def select_front_docking_target(base_pose, box_poses, config, docking_bases=None
         yaw_error = normalize_angle(base_yaw - box_yaw)
         comfortable = (
             abs(delta_box[0]) <= longitudinal_tolerance and
+            abs(delta_box[1]) <= longitudinal_tolerance and
             abs(yaw_error) <= yaw_tolerance
         )
         cost = float(
@@ -121,9 +124,7 @@ class Task2PickPlanner:
 
     def __init__(self, scene_path=None, ik_config=None):
         if scene_path is None:
-            package_dir = Path(__file__).resolve().parents[1]
-            scene_path = package_dir / (
-                "models/biped_s400062/xml/task2.xml")
+            scene_path = active_scene()
         self.model = mujoco.MjModel.from_xml_path(str(scene_path))
         self.data = mujoco.MjData(self.model)
         self.config = dict(ik_config or {})
@@ -433,8 +434,9 @@ class Task2PickPlanner:
         )
 
     def solve_palm_down_ready(
-            self, base_pose, arm_seed, outward_angle_deg):
-        """Keep both hand origins in place while matching grasp orientation."""
+            self, base_pose, arm_seed, outward_angle_deg,
+            hand_position_base_m=None):
+        """Align palms for grasping at the requested symmetric ready pose."""
         arm_seed = np.asarray(arm_seed, dtype=float)
         if arm_seed.shape != (14,) or not np.all(np.isfinite(arm_seed)):
             raise ValueError("arm_seed must contain 14 finite joints")
@@ -444,7 +446,18 @@ class Task2PickPlanner:
             side: self.data.xpos[self.hand_body_ids[side]].copy()
             for side in ("l", "r")
         }
+        orientation_positions = target_positions.copy()
         base_yaw = float(base_pose[2])
+        if hand_position_base_m is not None:
+            target = np.asarray(hand_position_base_m, dtype=float)
+            if target.shape != (3,) or not np.all(np.isfinite(target)):
+                raise ValueError("ready hand position must contain three finite values")
+            for side, sign in (("l", 1.0), ("r", -1.0)):
+                x, y, z = target
+                target_positions[side] = np.array((
+                    base_pose[0] + x * math.cos(base_yaw) - sign * y * math.sin(base_yaw),
+                    base_pose[1] + x * math.sin(base_yaw) + sign * y * math.cos(base_yaw),
+                    z))
         forward = np.array((math.cos(base_yaw), math.sin(base_yaw), 0.0))
         up = np.array((0.0, 0.0, 1.0))
         solved = []
@@ -455,9 +468,17 @@ class Task2PickPlanner:
                 Rotation.from_rotvec(
                     sign * math.radians(float(outward_angle_deg)) * up
                 ).as_matrix() @ orientation)
+            seed = arms[side]
+            if hand_position_base_m is not None:
+                # Use the established palm-orientation solution as an IK seed
+                # only; the robot executes just the final raised ready pose.
+                seed = self._solve_arm(
+                    side, orientation_positions[side], orientation,
+                    seed, base_pose, {},
+                    self._hand_base_origin_in_r7[side]).joints
             result = self._solve_arm(
                 side, target_positions[side], orientation,
-                arms[side], base_pose, {},
+                seed, base_pose, {},
                 self._hand_base_origin_in_r7[side])
             solved.extend(result.joints)
         return tuple(float(value) for value in solved)
@@ -561,10 +582,18 @@ class Task2PickPlanner:
                     math.degrees(maximum_orientation_error), result.message))
         return np.asarray(result.x, dtype=float)
 
+    def hand_positions(self, joints, base_pose, box_poses):
+        """World hand origins for an already solved arm waypoint."""
+        self._set_configuration(
+            base_pose, box_poses, {"l": joints[:7], "r": joints[7:]},
+            closure=0.0)
+        return np.asarray([self.data.xpos[self.hand_body_ids[side]].copy()
+                           for side in ("l", "r")])
+
     def solve_lift_path(
             self, contact_joints, base_pose, box_poses, selected_box,
             grasp_config):
-        """Solve one terminal-pose IK and interpolate to it in joint space."""
+        """Lift both hands together without changing the grasp geometry."""
         contact_joints = np.asarray(contact_joints, dtype=float)
         if (contact_joints.shape != (14,) or
                 not np.all(np.isfinite(contact_joints))):
@@ -574,19 +603,38 @@ class Task2PickPlanner:
             grasp_config.get("lift_waypoint_count", 9))
         if waypoint_count < 2:
             raise ValueError("lift_waypoint_count must be at least 2")
-        terminal_joints = self._solve_bimanual_lift_target(
-            {
-                "l": contact_joints[:7],
-                "r": contact_joints[7:],
-            },
-            base_pose, box_poses, selected_box,
-            grasp_config["lift_target_hand_poses_in_grasp_box"])
-        return tuple(
-            tuple(float(value) for value in (
-                contact_joints +
-                float(index) / float(waypoint_count - 1) *
-                (terminal_joints - contact_joints)))
-            for index in range(waypoint_count))
+        # Preserve the grasp transform throughout the lift. A terminal-only
+        # joint interpolation can spread/rotate the hands and lose contact.
+        arms = {"l": contact_joints[:7], "r": contact_joints[7:]}
+        self._set_configuration(base_pose, box_poses, arms, closure=0.0)
+        box_position, box_quaternion = box_poses[selected_box]
+        box_rotation = Rotation.from_quat(box_quaternion)
+        origins = {}
+        orientations = {}
+        for side in ("l", "r"):
+            body = self.hand_body_ids[side]
+            origins[side] = box_rotation.inv().apply(
+                self.data.xpos[body].copy() - np.asarray(box_position))
+            orientations[side] = (
+                box_rotation.inv() * Rotation.from_matrix(
+                    self.data.xmat[body].reshape(3, 3).copy())).as_quat()
+        height = float(grasp_config["lift_height_m"])
+        if not math.isfinite(height) or height <= 0:
+            raise ValueError("lift_height_m must be positive and finite")
+        waypoints = [tuple(contact_joints)]
+        for index in range(1, waypoint_count):
+            offset = np.array((0.0, 0.0, height * index / (waypoint_count - 1)))
+            targets = {
+                side: {"position_m": origins[side] + offset,
+                       "orientation_xyzw": orientations[side]}
+                for side in ("l", "r")
+            }
+            joints = self._solve_bimanual_lift_target(
+                {"l": np.asarray(waypoints[-1][:7]),
+                 "r": np.asarray(waypoints[-1][7:])},
+                base_pose, box_poses, selected_box, targets)
+            waypoints.append(tuple(float(value) for value in joints))
+        return tuple(waypoints)
 
     def _minimum_path_clearance(
             self, base_pose, box_poses, start, end, closure_start,
@@ -703,14 +751,20 @@ class Task2PickPlanner:
                 base_pose, box_poses, grasp_tcp,
                 alternate_seeds=(seeds[side],))
 
-        above_group = {side: above[side].joints for side in ("l", "r")}
         contact_group = {side: contact[side].joints for side in ("l", "r")}
+        # Reverse the existing Cartesian lift solver to descend without
+        # the backward arc produced by one joint-space endpoint blend.
+        descent_waypoints = tuple(reversed(self.solve_lift_path(
+            tuple(contact_group["l"] + contact_group["r"]),
+            base_pose, box_poses, selected_box,
+            dict(grasp_config, lift_height_m=above_height))))
         lift_waypoints = self.solve_lift_path(
             tuple(contact_group["l"] + contact_group["r"]),
             base_pose, box_poses, selected_box, grasp_config)
         return PickPlan(
             box_name=selected_box,
-            above_joints=tuple(above_group["l"] + above_group["r"]),
+            above_joints=descent_waypoints[0],
             contact_joints=tuple(contact_group["l"] + contact_group["r"]),
+            descent_waypoints=descent_waypoints,
             lift_waypoints=lift_waypoints,
         )

@@ -2018,7 +2018,6 @@ void Simulate::Sync() {
     } else {
       selmode = 2;
     }
-    opt.flags[mjVIS_CONTACTFORCE] = 1;
     // find geom and 3D click point, get corresponding body
     mjrRect r = pending_.select_state.rect[3];
     mjtNum selpnt[3];
@@ -2593,7 +2592,7 @@ void Simulate::RenderLoop() {
   mjv_defaultOption(&this->opt);
   InitializeProfiler(this);
   InitializeSensor(this);
-  this->opt.flags[mjVIS_CONTACTFORCE] = 1;
+  this->opt.flags[mjVIS_CONTACTFORCE] = 0;
   // make empty scene
   if (!is_passive_) {
     mjv_defaultScene(&this->scn);

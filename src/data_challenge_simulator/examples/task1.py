@@ -10,7 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import rospy
-from std_msgs.msg import Bool
+from scipy.spatial.transform import Rotation, Slerp
+from std_msgs.msg import Bool, UInt8
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_DIR = os.path.dirname(CURRENT_DIR)
@@ -20,6 +21,7 @@ if PACKAGE_DIR not in sys.path:
 from kuavo_humanoid_sdk import KuavoRobot, KuavoRobotState, KuavoSDK
 from task2_base_motion import ChassisMotion
 from utils.gripper_controller import GripperController
+from utils.hand_postures import single_gripper_targets
 from utils.object_pos import ObjectPose
 from utils.object_randomizer import ObjectRandomizer
 from utils.scene1_v2_right_arm_ik import Scene1V2RightArmIK
@@ -35,7 +37,6 @@ CYLINDERS = ("cylinder_1", "cylinder_2", "cylinder_3")
 TARGET_BIN = "target_bin"
 RESULT_PATH = Path("task_result.txt")
 
-INITIALIZATION_SAFE_RETREAT_M = 0.20
 LEFT_THUMB_SAFE_J1_RAD = 1.75
 LEFT_THUMB_INITIALIZATION_DURATION_S = 1.2
 
@@ -45,104 +46,46 @@ LEFT_THUMB_INITIALIZATION_DURATION_S = 1.2
 TARGET_MIN = (0.2075, -0.5852, 0.515)
 TARGET_MAX = (0.4075, -0.4708, 0.590)
 
-# Current-URDF calibration for the closed thumb/index pad midpoint.  The old
-# (8, 15, 18) mm world bias already included the former wrist tracking error;
-# retaining it together with the joint-space correction below overcompensates
-# the grasp.  Keep a common 10 mm Z bias so the achieved pad midpoint remains
-# about 2--4 mm below the cylinder centre.  Y is pose-dependent: each source
-# region needs the closing fingers to approach from the same safe side.
+# Initial approach bias; measured pose correction removes the residual
+# before the fingers close.
 GRASP_TRACKING_BIASES_WORLD = (
-    (0.002, 0.010, 0.010),
-    (0.002, 0.010, 0.010),
-    (0.002, 0.005, 0.010),
+    (0.015, 0.010, 0.010),
+    (0.015, 0.010, 0.010),
+    (0.015, 0.010, 0.010),
 )
-GRASP_CLOSURE_CMD = 255
-GRASP_YAW_ADJUSTMENT_RAD = math.radians(14.0)
-# The offline layout already stores its validated minimum plus 4 cm.  Add the
-# user's extra leftward allowance only at execution time so this does not
-# regenerate or reclassify any accepted layout.
-BLUE_RUNTIME_LEFT_SHIFT_MARGIN_M = 0.02
-
-# Current-URDF source-grasp calibration from three settled Task1 poses.  Only
-# r5/r7 showed material tracking error; invert their measured affine response
-# so the achieved joints, rather than merely the commands, match the IK pose.
-GRASP_R5_ACTUAL_PER_COMMAND = 1.14754746
-GRASP_R5_ACTUAL_OFFSET_RAD = -0.16735713
-GRASP_R7_ACTUAL_PER_COMMAND = 0.97868007
-GRASP_R7_ACTUAL_OFFSET_RAD = -0.04604092
-
-# V2 has taller obstacles around both bins.  Raise the release centre by
-# 60 mm while retaining the accepted X/Y offsets and live target-bin centre.
-DROP_GRASP_CENTER_Z = 0.82
+GRASP_YAW_ADJUSTMENT_RAD = math.radians(-15.0)
+# Carry above the rod and bin walls, then release directly over the target.
+DROP_GRASP_CENTER_Z = 0.81
 # Keep the first release slot 10 mm farther inside the narrow Y boundary.
 # Wide source randomization can preserve about 13 mm of object/hand tracking
 # offset during transport, so the former -22 mm slot had only nominal margin.
 DROP_CENTER_OFFSETS = (
-    (-0.060, -0.012),
-    (0.000, 0.022),
-    (0.060, -0.012),
-)
-FIXED_GRASP_LIFTS_RIGHT_RAD = (
-    (0.210334, -0.338870, -0.036279, -0.850745,
-     -0.089775, 0.299690, 0.193743),
-    (0.189635, -0.314196, -0.020128, -0.875594,
-     -0.022019, 0.340597, 0.248531),
-    (0.210334, -0.338870, -0.036279, -0.850745,
-     -0.089775, 0.299690, 0.193743),
+    (-0.045, -0.015),
+    (0.000, 0.015),
+    (0.045, -0.015),
 )
 
 ARM_JOINT_COUNT = 14
 HEAD_SCAN_PITCH_RAD = math.radians(20.0)
-SHOULDER_LIFT_DEG = 60.0
-# Keep the accepted grasp/lever orientation reference independent from the
-# lower task-only staging posture used before each source grasp.
+# Fixed wrist reference for the cylinder grasp, independent of the outward
+# initialization pose.
 RIGHT_ARM_READY_FULL_RAD = (-0.9, -0.265, 1.0, -0.8, 0.58, -0.4, 0.35)
-RIGHT_ARM_STAGING_RAD = (
-    -0.569927, -0.301512, 0.658253, -0.488704,
-    0.698827, -0.653404, -0.289423,
-)
-# Same nearby workspace and wrist attitude as staging, with the closed-grasp
-# centre 0.10 m higher.  This waypoint keeps the joint-space route from the
-# shoulder-clearance pose above the source-bin and lever obstacles.
-RIGHT_ARM_STAGING_ABOVE_RAD = (
-    -0.466591, -0.579416, 0.652630, -1.211603,
-    0.699260, -0.286390, 0.045867,
-)
-TRAJECTORY_POINTS = 40
-# Once Task1 has latched a cylinder, its collision is disabled and it follows
-# the hand kinematically.  Keep this low-risk loaded transport short; source
-# approach and near-bin lift use their own, slower point counts below.
-TARGET_TRANSPORT_TRAJECTORY_POINTS = 30
-SOURCE_GRASP_TRAJECTORY_POINTS = 80
-SOURCE_GRASP_SETTLE_SECONDS = 0.3
-STAGING_RETURN_TRAJECTORY_POINTS = 40
-STAGING_DESCENT_TRAJECTORY_POINTS = 40
-GRASP_LIFT_TRAJECTORY_POINTS = 30
-# Scaling the accepted fixed-joint lift from 1.20 to 1.65 raises the measured
-# grasp centre by about 53--55 mm for both source objects.
-GRASP_LIFT_SCALE = 1.65
+# Loaded transport retains physical contacts; allow the wrist to track
+# without throwing the cylinder during a large change in arm configuration.
+TARGET_TRANSPORT_TRAJECTORY_POINTS = 55
+SOURCE_GRASP_SETTLE_SECONDS = 0.10
 
-# The V2 right-arm lever stance is the user's lower-left direction in the
-# scene: world -X and +Y.  Reducing world Y from 0.30 m to 0.20 m makes the
-# complete handle-relative wrist rotation reachable through 30 degrees.
-LEVER_BASE_WORLD = (-0.20, 0.20, 0.0)
-# Closed-loop wheel-drive base motion: the physical wheels roll and the
-# returned pose is the MEASURED one, never the nominal target.  Task 1 uses
-# faster task-local limits while retaining the accepted settle tolerances.
-CHASSIS_LINEAR_SPEED = 0.12
+# Keep the existing chassis publisher and stop lifecycle. Task 1 does not
+# issue any base-motion command.
+CHASSIS_LINEAR_SPEED = 0.40
 CHASSIS_ANGULAR_SPEED = 0.30
 CHASSIS_MIN_LINEAR_SPEED = 0.08
 CHASSIS_MIN_ANGULAR_SPEED = 0.08
 CHASSIS_POSITION_TOLERANCE = 0.03
 CHASSIS_YAW_TOLERANCE_DEG = 3.0
-CHASSIS_MOVE_TIMEOUT_S = 30.0
 
 LEVER_PIVOT_WORLD = (0.62, -0.196, 0.62)
-LEVER_HANDLE_LOCAL = (-0.32, 0.0, 0.08)
-LEVER_HOOK_TANGENT_OFFSET = 0.026
-LEVER_TRACKING_BIAS_WORLD = (0.0, 0.0, 0.010)
-LEVER_APPROACH_HEIGHT = 0.08
-LEVER_NOMINAL_HANDOFF_RAD = math.radians(30.0)
+LEVER_GRIP_CENTER_IN_R7 = (0.0, 0.074, -0.150)
 LEVER_PATH_STEP_RAD = math.radians(2.5)
 LEVER_PATH_FINE_STEP_RAD = math.radians(0.2)
 # Keep the accepted coarse pull until the old 29.8-degree acceptance edge.
@@ -159,31 +102,11 @@ LEVER_PATH_MIN_PROGRESS_RAD = math.radians(0.2)
 LEVER_PATH_MAX_STALLS = 5
 # Preserve the accepted zero-angle hand pose while allowing the high-angle
 # continuation to use the extra physical joint travel it needs.
-LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION = 0.10
-LEVER_PATH_JOINT_LIMIT_MARGIN_FRACTION = 0.02
-LEVER_APPROACH_TRAJECTORY_POINTS = 30
-LEVER_CONTACT_TRAJECTORY_POINTS = 40
-LEVER_PATH_TRAJECTORY_POINTS = 8
+LEVER_PATH_TRAJECTORY_POINTS = 12
 # Preserve approximately the same angular speed after the 29.8-degree
 # handoff edge.  Reusing the coarse point count for a 0.2-degree correction
 # would make each fine step take as long as a 2.5-degree pull.
 LEVER_PATH_FINE_TRAJECTORY_POINTS = 2
-# Successful lever-approach branch seed.  It is solver input only: the arm no
-# longer visits this old r7-limit posture before moving to the live-base IK
-# solution.
-LEVER_IK_BRANCH_SEED_RIGHT_RAD = (
-    0.715789,
-    -1.078706,
-    -0.254394,
-    -1.257083,
-    0.034689,
-    -0.591775,
-    -0.698122,
-)
-# Task1 lever initial r5 command calibrated for the current URDF.  The current
-# contact response is nearly one-to-one, so only a small offset above the
-# nominal contact IK value (about 0.98 rad) is required.
-TASK1_LEVER_INITIAL_R5_COMMAND_RAD = 1.0
 SOURCE_CONVEYOR_COMPLETE_TOPIC = (
     "/mujoco/source_bin_conveyor_complete")
 SOURCE_BIN_LATCH_RELEASED_TOPIC = (
@@ -261,18 +184,6 @@ class SourceBinReleaseMonitor:
             self.released = True
 
 
-def _compensate_source_grasp_joints(right_ik_rad):
-    """Return the current-URDF command that achieves the nominal grasp IK."""
-    commanded = list(right_ik_rad)
-    commanded[4] = (
-        commanded[4] - GRASP_R5_ACTUAL_OFFSET_RAD
-    ) / GRASP_R5_ACTUAL_PER_COMMAND
-    commanded[6] = (
-        commanded[6] - GRASP_R7_ACTUAL_OFFSET_RAD
-    ) / GRASP_R7_ACTUAL_PER_COMMAND
-    return commanded
-
-
 def _quaternion_error_degrees(target_xyzw, actual_xyzw):
     """Return the shortest angular distance between two quaternions."""
     target_norm = math.sqrt(sum(value * value for value in target_xyzw))
@@ -324,14 +235,9 @@ def _initialize_left_thumb(gripper):
 
 
 def _randomize_scene(randomizer, seed, chassis):
-    """Apply one reproducible scene sampled from the verified feasible set.
+    """Place the selected layout while retaining the fixed launch-time base.
 
-    The base spawn itself comes from the launch ``initial_base_x/y`` args
-    (same mechanism as Task 2/3); this function only places the task
-    objects.  ``initial_base`` is a thumb-safe spawn while ``task_base`` is
-    the final working pose.  Do not drive to the working pose here: fixed
-    initialization first moves backward to its safe arm-clearance pose,
-    closes the left thumb, raises the right arm, and only then drives forward.
+    Preparation then raises the right hand above the first cylinder.
     """
     planner = Task1V2RandomizationPlanner()
     plan = planner.plan(seed)
@@ -356,7 +262,7 @@ def _randomize_scene(randomizer, seed, chassis):
         if not result["success"]:
             raise RuntimeError(result["message"])
     print(
-        "V2 seed {} selected precomputed layout {}: initial_base={} "
+        "V2 seed {} generated scene {}: initial_base={} "
         "task_base={} grasp_bases={} profile={} objects={}".format(
             seed,
             plan.catalogue_seed,
@@ -376,11 +282,11 @@ def _randomize_scene(randomizer, seed, chassis):
     return plan
 
 
-def _fully_in_target(position):
+def _fully_in_target(position, target_position=(0.3075, -0.528, 0.50)):
     if position is None:
         return False
     return all(
-        TARGET_MIN[index] <= position[index] <= TARGET_MAX[index]
+        TARGET_MIN[index] + target_position[index] - (0.3075, -0.528)[index] <= position[index] <= TARGET_MAX[index] + target_position[index] - (0.3075, -0.528)[index]
         for index in range(2)
     )
 
@@ -418,6 +324,40 @@ def _right_only_smooth_trajectory(
     return points
 
 
+def _clearance_point(start, target, fraction, clearance_height):
+    height = max(clearance_height, start[2], target[2])
+    if fraction < 0.2:
+        return [start[0], start[1], start[2] + fraction / 0.2 * (height - start[2])]
+    if fraction <= 0.8:
+        alpha = (fraction - 0.2) / 0.6
+        return [start[0] + alpha * (target[0] - start[0]),
+                start[1] + alpha * (target[1] - start[1]), height]
+    return [target[0], target[1], height + (fraction - 0.8) / 0.2 * (target[2] - height)]
+
+
+def _rounded_waypoint_point(start, via, target, fraction):
+    """Join two straight moves with a 15 mm quadratic corner, without a stop."""
+    incoming = [b - a for a, b in zip(start, via)]
+    outgoing = [b - a for a, b in zip(via, target)]
+    first = math.sqrt(sum(v * v for v in incoming))
+    second = math.sqrt(sum(v * v for v in outgoing))
+    if min(first, second) < 1e-6:
+        return [a + fraction * (b - a) for a, b in zip(start, target)]
+    radius = min(0.015, first / 2.0, second / 2.0)
+    enter = [v - radius * d / first for v, d in zip(via, incoming)]
+    leave = [v + radius * d / second for v, d in zip(via, outgoing)]
+    distance = fraction * (first + second)
+    if distance < first - radius:
+        alpha = distance / (first - radius)
+        return [a + alpha * (b - a) for a, b in zip(start, enter)]
+    if distance <= first + radius:
+        alpha = (distance - first + radius) / (2.0 * radius)
+        return [(1 - alpha) ** 2 * a + 2 * alpha * (1 - alpha) * v + alpha ** 2 * b
+                for a, v, b in zip(enter, via, leave)]
+    alpha = (distance - first - radius) / (second - radius)
+    return [a + alpha * (b - a) for a, b in zip(leave, target)]
+
+
 def _lever_angle_from_orientation(quaternion_xyzw):
     if quaternion_xyzw is None:
         return None
@@ -425,31 +365,6 @@ def _lever_angle_from_orientation(quaternion_xyzw):
     vector_norm = math.sqrt(x * x + y * y + z * z)
     angle = 2.0 * math.atan2(vector_norm, w)
     return 2.0 * math.pi - angle if angle > math.pi else angle
-
-
-def _lever_hand_target_world(angle):
-    """Return the hook row behind the extended handle's circular motion."""
-    cosine = math.cos(angle)
-    sine = math.sin(angle)
-    local_x, _, local_z = LEVER_HANDLE_LOCAL
-    handle_x = (
-        LEVER_PIVOT_WORLD[0] + cosine * local_x + sine * local_z)
-    handle_z = (
-        LEVER_PIVOT_WORLD[2] - sine * local_x + cosine * local_z)
-    tangent_x = -sine * local_x + cosine * local_z
-    tangent_z = -cosine * local_x - sine * local_z
-    tangent_norm = math.hypot(tangent_x, tangent_z)
-    return (
-        handle_x - LEVER_HOOK_TANGENT_OFFSET * tangent_x / tangent_norm,
-        LEVER_PIVOT_WORLD[1],
-        handle_z - LEVER_HOOK_TANGENT_OFFSET * tangent_z / tangent_norm,
-    )
-
-
-def _lever_command_target_world(target_world):
-    return tuple(
-        value - bias
-        for value, bias in zip(target_world, LEVER_TRACKING_BIAS_WORLD))
 
 
 def _rotate_vector_about_world_y(vector, angle):
@@ -476,31 +391,52 @@ def _make_chassis():
     )
 
 
-def _move_base_with_wheels(chassis, target_world):
-    """Drive the base on physical wheels to a world XY target.
+def close_on_cylinder(gripper, name):
+    mask = [0]
+    subscriber = rospy.Subscriber(
+        "/mujoco/{}/internal_finger_latch_mask".format(name), UInt8,
+        lambda msg: mask.__setitem__(0, msg.data), queue_size=1)
+    closure = 0.0
+    preload_target = None
+    deadline = time.monotonic() + 6.0
+    try:
+        while not rospy.is_shutdown() and time.monotonic() < deadline:
+            if preload_target is None and mask[0] & 3 == 3:
+                preload_target = min(1.0, closure + 0.02)
+            limit = 1.0 if preload_target is None else preload_target
+            closure = min(limit, closure + (0.001 if mask[0] & 3 else 0.009))
+            with gripper.command_lock:
+                gripper.current_right_positions = single_gripper_targets("r", closure)
+                gripper.command_initialized.set()
+            if preload_target is not None and closure >= preload_target:
+                time.sleep(0.2)
+                if mask[0] & 3 == 3:
+                    return
+                preload_target = None
+            time.sleep(0.01)
+        raise RuntimeError("{} did not establish two physical finger contacts: mask={}, closure={}, hand={}".format(name, mask[0], closure, gripper.measured_positions("right")))
+    finally:
+        subscriber.unregister()
 
-    Returns the MEASURED settled pose (x, y, yaw) — the task IK must be
-    seeded from this, never from the nominal target, because wheel slip
-    and closed-loop tolerances replace the old weld teleport's exactness.
-    """
-    chassis.wait_until_ready()
-    settled = chassis.move_to_pose(
-        target_world[0], target_world[1], 0.0,
-        timeout=CHASSIS_MOVE_TIMEOUT_S)
-    print("V2 base wheel-drive reached: measured={} nominal={}".format(
-        [round(value, 6) for value in settled],
-        [round(value, 6) for value in target_world]))
-    return settled
+
+def release_cylinder(gripper, name, timing):
+    with timing.segment("{}.gripper_release".format(name)):
+        # Keep the verified gentle release speed and public 0..255 units.
+        gripper.control_right_gripper(0.65 * 255, duration=0.5)
+    with timing.segment("{}.gripper_open".format(name)):
+        gripper.control_right_gripper(0, duration=0.3)
+    # The caller checks that the released object is inside the target region.
+    # Do not wait for rest or sustained floor support before the next motion.
 
 
 def main():
     timing = TaskTimingRecorder()
     diagnostics = None
-    experiment_mode = os.environ.get("TASK_EXPERIMENT_MODE", "1") == "1"
+    experiment_mode = os.environ.get("TASK_EXPERIMENT_MODE", "0") == "1"
     with timing.segment("setup.sdk_init"):
-        sdk_initialized = KuavoSDK().Init(options=KuavoSDK.Options.WithIK)
+        sdk_initialized = KuavoSDK().Init(options=KuavoSDK.Options.Normal)
     if not sdk_initialized:
-        raise RuntimeError("KuavoSDK initialization with IK failed")
+        raise RuntimeError("KuavoSDK initialization failed")
 
     with timing.segment("setup.controllers"):
         robot = KuavoRobot()
@@ -511,13 +447,20 @@ def main():
     success = False
     trajectory = None
 
-    # Head motion is independent of arm ownership.  Let it start before the
-    # chassis retreat; the arm stays in its controller-owned startup mode
-    # until the robot has reached the safe initialization base.
-    if not robot.control_head(yaw=0.0, pitch=HEAD_SCAN_PITCH_RAD):
-        raise RuntimeError("Failed to command the 20-degree head scan pose")
-
     try:
+        with timing.segment("initialization.first_arm_state_wait"):
+            initial_arm_rad = wait_for_first_arm_state()
+        trajectory = TrajectoryController(
+            robot, initial_positions=initial_arm_rad)
+        left_hold_rad = list(initial_arm_rad[:7])
+        current_target_deg = [math.degrees(value) for value in initial_arm_rad]
+
+        with timing.segment("initialization.left_thumb"):
+            _initialize_left_thumb(gripper)
+
+        if not robot.control_head(yaw=0.0, pitch=HEAD_SCAN_PITCH_RAD):
+            raise RuntimeError("Failed to command the 20-degree head scan pose")
+        scene_ik = Scene1V2RightArmIK()
         seed = int(os.environ.get("TASK_SEED", "1"))
         diagnostics = Task1GraspDiagnosticRecorder(seed)
         diagnostics.write(
@@ -533,7 +476,6 @@ def main():
                 randomizer, seed, chassis)
             base_translation_world = randomization_plan.task_base
 
-        scene_ik = Scene1V2RightArmIK()
         scene_ik.set_base_translation_world(base_translation_world)
         print("V2 seed {} robot base translation: {}".format(
             seed, [round(value, 6) for value in base_translation_world]))
@@ -548,41 +490,16 @@ def main():
         print("V2 target bin live position: {}".format(
             [round(value, 6) for value in target_bin_position]))
 
-        initialization_safe_base_world = (
-            base_translation_world[0] - INITIALIZATION_SAFE_RETREAT_M,
-            base_translation_world[1],
-            base_translation_world[2],
-        )
-        print(
-            "V2 initialization retreat: B0={} safe={} distance={:.3f} m"
-            .format(
-                [round(value, 6) for value in base_translation_world],
-                [round(value, 6)
-                 for value in initialization_safe_base_world],
-                INITIALIZATION_SAFE_RETREAT_M,
-            ))
-        with timing.segment("initialization.base_retreat"):
-            measured_safe_base = _move_base_with_wheels(
-                chassis, initialization_safe_base_world)
-        scene_ik.set_base_translation_world(
-            (measured_safe_base[0], measured_safe_base[1],
-             initialization_safe_base_world[2]))
-
-        # Recording starts only after fixed initialization.  Delay the first
-        # arm command and ExternalControl handoff until the safe retreat has
-        # finished, then seed it from the arm pose measured at that location.
-        with timing.segment("initialization.first_arm_state_wait"):
-            initial_arm_rad = wait_for_first_arm_state()
-        trajectory = TrajectoryController(
-            robot, initial_positions=initial_arm_rad)
-        left_hold_rad = list(initial_arm_rad[:7])
-        current_target_deg = [math.degrees(value) for value in initial_arm_rad]
-
-        # The left arm remains fixed for the entire task.  At the temporary
-        # safe base, rotate only the thumb opposition joint so the thumb no
-        # longer points along user +Y when the chassis returns to final B0.
-        with timing.segment("initialization.left_thumb"):
-            _initialize_left_thumb(gripper)
+        chassis.wait_until_ready()
+        chassis.stop()
+        fixed_base = chassis.pose()
+        scene_ik.set_base_translation_world((fixed_base[0], fixed_base[1], 0.0))
+        initial_arm_rad = list(robot_state.arm_joint_state().position)
+        preparation = scene_ik.preparation_trajectory(
+            initial_arm_rad, poses.get_position(CYLINDERS[0]))
+        with timing.segment("initialization.above_first_object", trajectory_points=len(preparation)):
+            trajectory.execute_trajectory(preparation, sleep_time=0.01)
+        current_target_deg = [math.degrees(value) for value in preparation[-1]]
 
         def latch_achieved_right_target(label):
             nonlocal current_target_deg
@@ -591,6 +508,9 @@ def main():
                 raise RuntimeError(
                     "Expected 14 live arm joints after {}, got {}".format(
                         label, len(live_arm_rad)))
+            live_arm_rad[7:14] = [max(lower, min(upper, value))
+                                 for value, lower, upper in zip(
+                                     live_arm_rad[7:14], scene_ik.lower, scene_ik.upper)]
             achieved_deg = [math.degrees(value) for value in live_arm_rad]
             current_target_deg[7:14] = achieved_deg[7:14]
             trajectory.set_target_positions(
@@ -607,10 +527,20 @@ def main():
         last_tcp_target_world = None
         last_tcp_quaternion_world = None
 
+        def execute_right_trajectory(points, sleep_time=0.02):
+            for point in points:
+                point[7:14] = [max(lower, min(upper, value))
+                               for value, lower, upper in zip(
+                                   point[7:14], scene_ik.lower, scene_ik.upper)]
+            trajectory.execute_trajectory(points, sleep_time=sleep_time)
+
         def move_right_tcp(
                 label, tcp_position_world, tcp_quaternion_world,
-                point_in_r7=None, compensate_source_grasp=False,
-                trajectory_points=TARGET_TRANSPORT_TRAJECTORY_POINTS):
+                point_in_r7=None,
+                trajectory_points=TARGET_TRANSPORT_TRAJECTORY_POINTS,
+                arc_height=None, joint_bounds=None, clearance_height=None,
+                via_position_world=None, via_quaternion_world=None,
+                on_clearance=None):
             nonlocal current_target_deg
             nonlocal last_right_seed_rad
             nonlocal last_right_ik_rad, last_right_command_rad
@@ -618,22 +548,87 @@ def main():
             print("Moving V2 right task TCP to {}: {}".format(
                 label, tcp_position_world))
             live_arm_rad = list(robot_state.arm_joint_state().position)
+            if arc_height is not None:
+                start = scene_ik._forward(live_arm_rad[7:14], point_in_r7)[0]
+                rotations = Slerp([0.0, 1.0], Rotation.from_quat([
+                    scene_ik.eef_quaternion_world(live_arm_rad[7:14]),
+                    tcp_quaternion_world]))
+                via_fraction = None
+                clearance_fraction = None
+                if via_position_world is not None:
+                    first = math.dist(start, via_position_world)
+                    second = math.dist(via_position_world, tcp_position_world)
+                    via_fraction = first / (first + second)
+                    clearance_fraction = (first - min(0.015, first / 2, second / 2)) / (first + second)
+                    rotations = Slerp([0.0, via_fraction, 1.0], Rotation.from_quat([
+                        scene_ik.eef_quaternion_world(live_arm_rad[7:14]),
+                        via_quaternion_world, tcp_quaternion_world]))
+                knots = [list(live_arm_rad)]
+                right_joints = live_arm_rad[7:14]
+                knot_count = (60 if via_position_world is not None else
+                              30 if point_in_r7 is scene_ik.CLOSED_GRASP_CENTER_IN_R7 else 20)
+                with timing.segment("{}.ik_solve".format(label)):
+                    for index in range(1, knot_count + 1):
+                        fraction = index / float(knot_count)
+                        target = [a + fraction * (b - a)
+                                  for a, b in zip(start, tcp_position_world)]
+                        if via_position_world is not None:
+                            target = _rounded_waypoint_point(
+                                start, via_position_world, tcp_position_world, fraction)
+                        elif clearance_height is not None:
+                            target = _clearance_point(
+                                start, tcp_position_world, fraction, clearance_height)
+                        else:
+                            target[2] += 4.0 * fraction * (1.0 - fraction) * arc_height
+                        right_joints = scene_ik.solve(
+                            target, rotations(min(1.0, fraction / 0.6) if clearance_height is not None else fraction).as_quat(), right_joints,
+                            point_in_r7=point_in_r7, seed_only=True,
+                            joint_bounds=joint_bounds)
+                        if max(abs(a - b) for a, b in zip(right_joints, knots[-1][7:14])) > 0.5:
+                            raise RuntimeError("{} IK path changes joint branch at {}: {} -> {}".format(label, index, knots[-1][7:14], right_joints))
+                        knots.append(left_hold_rad + right_joints)
+                points = []
+                clearance_index = None
+                # One smooth time law for the whole Cartesian curve, without
+                # stopping at the internal IK samples.
+                for index in range(1, trajectory_points + 1):
+                    fraction = _smootherstep(index / float(trajectory_points))
+                    if (clearance_fraction is not None and clearance_index is None
+                            and fraction >= clearance_fraction):
+                        clearance_index = index
+                    phase = fraction * knot_count
+                    lower = min(knot_count - 1, int(phase))
+                    alpha = phase - lower
+                    points.append([a + alpha * (b - a)
+                                   for a, b in zip(knots[lower], knots[lower + 1])])
+                with timing.segment("{}.arm_motion".format(label),
+                                    trajectory_points=trajectory_points):
+                    if on_clearance is not None:
+                        execute_right_trajectory(points[:clearance_index])
+                        current_target_deg = [math.degrees(value)
+                                              for value in points[clearance_index - 1]]
+                        on_clearance()
+                        execute_right_trajectory(points[clearance_index:])
+                    else:
+                        execute_right_trajectory(points)
+                current_target_deg = [math.degrees(value) for value in knots[-1]]
+                last_right_seed_rad = list(live_arm_rad[7:14])
+                last_right_ik_rad = list(right_joints)
+                last_right_command_rad = list(right_joints)
+                last_tcp_target_world = list(tcp_position_world)
+                last_tcp_quaternion_world = list(tcp_quaternion_world)
+                return
             with timing.segment("{}.ik_solve".format(label)):
                 right_joints = scene_ik.solve(
                     tcp_position_world,
                     tcp_quaternion_world,
                     live_arm_rad[7:14],
                     point_in_r7=point_in_r7,
+                    seed_only=True, joint_bounds=joint_bounds,
                 )
             print("{} right-arm IK solution: {}".format(
                 label, [round(value, 6) for value in right_joints]))
-            commanded_right = (
-                _compensate_source_grasp_joints(right_joints)
-                if compensate_source_grasp else list(right_joints))
-            if compensate_source_grasp:
-                print("{} compensated right-arm command: {}".format(
-                    label,
-                    [round(value, 6) for value in commanded_right]))
+            commanded_right = list(right_joints)
             live_start_deg = [math.degrees(value) for value in live_arm_rad]
             next_target_deg = list(current_target_deg)
             next_target_deg[7:14] = [
@@ -641,8 +636,8 @@ def main():
             with timing.segment(
                     "{}.arm_motion".format(label),
                     trajectory_points=trajectory_points):
-                trajectory.execute_trajectory(
-                    _right_only_trajectory(
+                execute_right_trajectory(
+                    _right_only_smooth_trajectory(
                         next_target_deg, live_start_deg, left_hold_rad,
                         num=trajectory_points),
                     sleep_time=0.02)
@@ -654,65 +649,6 @@ def main():
                 float(value) for value in tcp_position_world]
             last_tcp_quaternion_world = [
                 float(value) for value in tcp_quaternion_world]
-
-        def move_right_by_fixed_delta(label, right_delta_rad):
-            nonlocal current_target_deg
-            target_deg = list(current_target_deg)
-            target_deg[7:14] = [
-                target_deg[7 + index] + math.degrees(delta)
-                for index, delta in enumerate(right_delta_rad)
-            ]
-            live_arm_rad = list(robot_state.arm_joint_state().position)
-            with timing.segment(
-                    "{}.arm_motion".format(label),
-                    trajectory_points=GRASP_LIFT_TRAJECTORY_POINTS):
-                trajectory.execute_trajectory(
-                    _right_only_trajectory(
-                        target_deg,
-                        [math.degrees(value) for value in live_arm_rad],
-                        left_hold_rad,
-                        num=GRASP_LIFT_TRAJECTORY_POINTS),
-                    sleep_time=0.02)
-            current_target_deg = target_deg
-            print("Executed fixed V2 right-arm motion: {}".format(label))
-
-        def return_right_to_staging(label):
-            nonlocal current_target_deg
-            live_start_deg = [
-                math.degrees(value)
-                for value in robot_state.arm_joint_state().position]
-            above_target_deg = list(current_target_deg)
-            above_target_deg[7:14] = [
-                math.degrees(value)
-                for value in RIGHT_ARM_STAGING_ABOVE_RAD]
-            with timing.segment(
-                    "{}.above_motion".format(label),
-                    trajectory_points=STAGING_RETURN_TRAJECTORY_POINTS):
-                trajectory.execute_trajectory(
-                    _right_only_trajectory(
-                        above_target_deg,
-                        live_start_deg,
-                        left_hold_rad,
-                        num=STAGING_RETURN_TRAJECTORY_POINTS),
-                    sleep_time=0.02)
-            current_target_deg = above_target_deg
-
-            live_arm_rad = list(robot_state.arm_joint_state().position)
-            staging_target_deg = list(current_target_deg)
-            staging_target_deg[7:14] = [
-                math.degrees(value) for value in RIGHT_ARM_STAGING_RAD]
-            with timing.segment(
-                    "{}.descent_motion".format(label),
-                    trajectory_points=STAGING_DESCENT_TRAJECTORY_POINTS):
-                trajectory.execute_trajectory(
-                    _right_only_trajectory(
-                        staging_target_deg,
-                        [math.degrees(value) for value in live_arm_rad],
-                        left_hold_rad,
-                        num=STAGING_DESCENT_TRAJECTORY_POINTS),
-                    sleep_time=0.02)
-            current_target_deg = staging_target_deg
-            latch_achieved_right_target(label)
 
         def print_measured_grasp_center(label):
             live_arm_rad = list(robot_state.arm_joint_state().position)
@@ -830,21 +766,32 @@ def main():
                     None if hand_position is None else [
                         float(value) for value in hand_position]),
                 pad_geometry_world=geometry,
-                fully_in_target=_fully_in_target(object_position),
+                fully_in_target=_fully_in_target(object_position, target_bin_position),
             )
 
         def run_right_lever_stage():
-            """Move lower-left, reshape the raised right hand, then pull."""
+            """Close the hand around the rod, confirm a grip, then follow its arc."""
             nonlocal current_target_deg
+            palm_seated = [False]
+            palm_subscriber = rospy.Subscriber(
+                "/mujoco/lever/palm_seated", Bool,
+                lambda msg: palm_seated.__setitem__(0, msg.data), queue_size=1)
+            grasp_confirmed = [False]
+            contact_subscriber = rospy.Subscriber(
+                "/mujoco/lever/grasp_confirmed", Bool,
+                lambda msg: grasp_confirmed.__setitem__(0, msg.data), queue_size=1)
+            grip_contacts = [0, time.monotonic()]
+            palm_contact_changed = [time.monotonic()]
+            def observe_grip(msg):
+                if msg.data & 1 or grip_contacts[0] & 1:
+                    palm_contact_changed[0] = time.monotonic()
+                if msg.data & 16 or grip_contacts[0] & 16:
+                    grip_contacts[1] = time.monotonic()
+                grip_contacts[0] = msg.data
+            grip_subscriber = rospy.Subscriber(
+                "/mujoco/lever/grasp_contacts", UInt8, observe_grip, queue_size=1)
             with timing.segment("lever.pose_wait"):
                 poses.wait_for_position("lever", timeout=5.0)
-
-            with timing.segment("lever.base_motion"):
-                measured_lever_base = _move_base_with_wheels(
-                    chassis, LEVER_BASE_WORLD)
-            scene_ik.set_base_translation_world(
-                (measured_lever_base[0], measured_lever_base[1],
-                 LEVER_BASE_WORLD[2]))
 
             live_arm_rad = list(robot_state.arm_joint_state().position)
             if len(live_arm_rad) != ARM_JOINT_COUNT:
@@ -863,7 +810,7 @@ def main():
                 nominal_r5 = right_target_rad[4]
                 commanded_right = list(right_target_rad)
                 commanded_right[4] = (
-                    TASK1_LEVER_INITIAL_R5_COMMAND_RAD
+                    nominal_r5
                     if r5_command_rad is None
                     else r5_command_rad)
                 target_deg = list(current_target_deg)
@@ -896,7 +843,7 @@ def main():
                 with timing.segment(
                         "{}.arm_motion".format(label),
                         trajectory_points=point_count):
-                    trajectory.execute_trajectory(
+                    execute_right_trajectory(
                         trajectory_points,
                         sleep_time=0.02)
                 actual = list(robot_state.arm_joint_state().position)
@@ -906,6 +853,9 @@ def main():
             def latch_achieved_lever_target(label):
                 nonlocal current_target_deg
                 live = list(robot_state.arm_joint_state().position)
+                live[7:14] = [max(lower, min(upper, value))
+                             for value, lower, upper in zip(
+                                 live[7:14], scene_ik.lower, scene_ik.upper)]
                 achieved_deg = [math.degrees(value) for value in live]
                 current_target_deg[7:14] = achieved_deg[7:14]
                 trajectory.set_target_positions(left_hold_rad + live[7:14])
@@ -913,189 +863,147 @@ def main():
                     label, [round(value, 6) for value in live[7:14]]))
                 return live
 
-            def initialize_right_lever_hand_before_descent():
-                """Flatten the thumb base while preserving its measured bent tip."""
-                measured = gripper.measured_positions("right")
-                if measured is None:
-                    raise RuntimeError(
-                        "Right-hand state is unavailable before lever descent")
-                initialization_targets = {
-                    "r_thumb_j1": 0.0,
-                    "r_thumb_j2": 0.0,
-                    "r_index_j3": 0.0,
-                }
-                steps = max(1, int(round(
-                    gripper.motion_duration * gripper.publish_frequency)))
-                for step in range(1, steps + 1):
-                    alpha = float(step) / steps
-                    positions = list(measured)
-                    for name, end in initialization_targets.items():
-                        joint = gripper.right_names.index(name)
-                        positions[joint] = (
-                            measured[joint]
-                            + alpha * (end - measured[joint]))
-                    with gripper.command_lock:
-                        gripper.current_right_positions = positions
-                        gripper.command_initialized.set()
-                    time.sleep(1.0 / gripper.publish_frequency)
-                settled = gripper.measured_positions("right")
-                print("v2_lever_hand_initialized {}".format({
-                    name: round(settled[gripper.right_names.index(name)], 3)
-                    if settled is not None else float("nan")
-                    for name in initialization_targets
-                }))
+            def lever_hand_targets(flexions):
+                index, middle, little = flexions
+                return [0.0, 0.0, 1.28, 0.0, index, min(index, 1.57),
+                        middle, min(middle, 1.57), 0.0, little, min(little, 1.57)]
 
-            def form_right_lever_hook():
-                """Form the Task1 V2 hook with a less-curled little finger."""
-                measured = gripper.measured_positions("right")
-                if measured is None:
-                    raise RuntimeError(
-                        "Right-hand state is unavailable at lever contact")
-                target_by_name = {
-                    "r_index_j1": 0.0,
-                    "r_index_j2": 0.0,
-                    "r_index_j3": 1.5,
-                    "r_middle_j1": 0.0,
-                    "r_middle_j2": 1.5,
-                    "r_little_j1": 0.0,
-                    "r_little_j2": 0.0,
-                    "r_little_j3": 1.3,
-                }
-                # Preserve the already-set thumb exactly; only the three hook
-                # fingers transform after descent.  Their unspecified joints
-                # retain the current measured values rather than being zeroed.
-                target = list(measured)
-                for index, name in enumerate(gripper.right_names):
-                    if name.startswith("r_thumb_"):
-                        continue
-                    if name in target_by_name:
-                        target[index] = target_by_name[name]
-                steps = max(1, int(round(
-                    gripper.motion_duration * gripper.publish_frequency)))
-                for step in range(1, steps + 1):
-                    alpha = float(step) / steps
-                    positions = [
-                        start + alpha * (end - start)
-                        for start, end in zip(measured, target)
-                    ]
-                    with gripper.command_lock:
-                        gripper.current_right_positions = positions
-                        gripper.command_initialized.set()
-                    time.sleep(1.0 / gripper.publish_frequency)
-                settled = gripper.measured_positions("right")
-                little_j3 = gripper.right_names.index("r_little_j3")
-                print("v2_lever_hook_formed r_little_j3={:.3f} rad".format(
-                    settled[little_j3]
-                    if settled is not None else float("nan")))
-
-            contact_target = _lever_hand_target_world(0.0)
-            approach_target = (
-                contact_target[0], contact_target[1],
-                contact_target[2] + LEVER_APPROACH_HEIGHT)
-            # Derive one deterministic zero-angle wrist frame from the fixed
-            # ready seed.  The live post-place seed can otherwise select a
-            # different free roll about the handle axis whose 40-degree
-            # continuation is not reachable from this base stance.
-            with timing.segment("lever.canonical_contact.ik_solve"):
-                canonical_contact_solution = scene_ik.solve_lever(
-                    _lever_command_target_world(contact_target),
-                    RIGHT_ARM_READY_FULL_RAD,
-                    joint_limit_margin_fraction=(
-                        LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
-            contact_rotation_world = scene_ik.eef_rotation_world(
-                canonical_contact_solution)
-            with timing.segment("lever.approach.ik_solve"):
-                approach_solution = scene_ik.solve_lever(
-                    approach_target,
-                    LEVER_IK_BRANCH_SEED_RIGHT_RAD,
-                    joint_limit_margin_fraction=(
-                        LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
-            with timing.segment("lever.contact.ik_solve"):
-                contact_solution = scene_ik.solve_lever(
-                    _lever_command_target_world(contact_target),
-                    approach_solution,
-                    target_rotation_world=contact_rotation_world,
-                    joint_limit_margin_fraction=(
-                        LEVER_INITIAL_JOINT_LIMIT_MARGIN_FRACTION))
+            contact_target = (0.30, -0.30, 0.70)
+            approach_target = (0.30, -0.30, 0.84)
+            contact_rotation_world = (
+                Rotation.from_euler("z", 90.0, degrees=True)
+                * Rotation.from_euler("x", -60.0, degrees=True)).as_matrix()
+            lever_lower = scene_ik.lower.copy()
+            lever_lower[1] = -1.6
+            lever_lower[4] = 0.0
+            lever_bounds = (lever_lower, scene_ik.upper)
 
             def print_lever_state(label):
                 measured_arm = list(robot_state.arm_joint_state().position)
-                measured_tcp = scene_ik.hook_tcp_world(
-                    measured_arm[7:14])
+                measured_tcp = scene_ik._forward(
+                    measured_arm[7:14], LEVER_GRIP_CENTER_IN_R7)[0]
                 measured_angle = _lever_angle_from_orientation(
                     poses.get_orientation("lever"))
                 angle_deg = (
                     float("nan") if measured_angle is None
                     else math.degrees(measured_angle))
                 print(
-                    "{} measured right finger row={} lever={:.1f} deg".format(
+                    "{} measured right grip={} lever={:.1f} deg".format(
                         label,
                         [round(value, 6) for value in measured_tcp],
                         angle_deg))
 
-            move_right_joint_target(
-                "lever_approach", approach_solution,
-                LEVER_APPROACH_TRAJECTORY_POINTS)
-            latch_achieved_lever_target("v2_lever_approach")
-            print_lever_state("v2_lever_approach")
-
-            # Flatten only the thumb base and straighten the leftover bent
-            # index in one motion above the handle.  Preserve the measured
-            # bent thumb tip, then descend holding that posture.
             with timing.segment("lever.hand_initialize"):
-                initialize_right_lever_hand_before_descent()
-            move_right_joint_target(
-                "lever_contact", contact_solution,
-                LEVER_CONTACT_TRAJECTORY_POINTS)
-            print_lever_state("v2_lever_contact")
+                measured = gripper.measured_positions("right")
+                target = lever_hand_targets((0.6, 0.6, 0.6))
+                for step in range(1, 51):
+                    alpha = step / 50.0
+                    with gripper.command_lock:
+                        gripper.current_right_positions = [a + alpha * (b - a)
+                            for a, b in zip(measured, target)]
+                        gripper.command_initialized.set()
+                    time.sleep(0.01)
+            move_right_tcp(
+                "lever_approach_contact", contact_target,
+                Rotation.from_matrix(contact_rotation_world).as_quat(),
+                point_in_r7=LEVER_GRIP_CENTER_IN_R7,
+                trajectory_points=155, arc_height=0.0, joint_bounds=lever_bounds,
+                via_position_world=approach_target,
+                via_quaternion_world=Rotation.from_matrix(contact_rotation_world).as_quat())
+            time.sleep(0.15)
+            grip_command = list(contact_target)
+            for alignment in range(3):
+                live_right = list(robot_state.arm_joint_state().position)[7:14]
+                actual_grip = scene_ik._forward(live_right, LEVER_GRIP_CENTER_IN_R7)[0]
+                error = [goal - actual for goal, actual in zip(contact_target, actual_grip)]
+                if max(abs(v) for v in error) < 0.003:
+                    break
+                grip_command = [command + max(-0.025, min(0.025, delta))
+                                for command, delta in zip(grip_command, error)]
+                move_right_tcp(
+                    "lever_grip_align_{}".format(alignment), grip_command,
+                    Rotation.from_matrix(contact_rotation_world).as_quat(),
+                    point_in_r7=LEVER_GRIP_CENTER_IN_R7,
+                    trajectory_points=25, arc_height=0.0, joint_bounds=lever_bounds)
+                time.sleep(0.15)
+            # First seat the palm face. The hinge remains locked while the
+            # open fingers surround the rod; palm contact alone cannot lift it.
+            normal = contact_rotation_world[:, 1]
+            for seating in range(16):
+                if palm_seated[0]:
+                    break
+                grip_command = [v + 0.0015 * n for v, n in zip(grip_command, normal)]
+                joints = scene_ik.solve(
+                    grip_command, Rotation.from_matrix(contact_rotation_world).as_quat(),
+                    [math.radians(v) for v in current_target_deg[7:14]],
+                    point_in_r7=LEVER_GRIP_CENTER_IN_R7,
+                    seed_only=True, joint_bounds=lever_bounds)
+                move_right_joint_target("lever_palm_contact_{}".format(seating),
+                                        joints, 10, continuous=True)
+                time.sleep(0.06)
+            palm_subscriber.unregister()
+            if not palm_seated[0]:
+                raise RuntimeError("lever palm face contact not established")
+            print("V2 lever palm face seated; closing fingers")
+            print_lever_state("v2_lever_before_close")
+            with timing.segment("lever.grasp_close"):
+                flexions = [0.6, 0.6, 0.6]
+                contact_limits = [None, None, None]
+                deadline = time.monotonic() + 10.0
+                palm_corrections = 0
+                while not grasp_confirmed[0] and time.monotonic() < deadline:
+                    # Closing fingers can push the compliant wrist away from
+                    # the rod. Restore palm contact before closing further.
+                    if not grip_contacts[0] & 1 and time.monotonic() - palm_contact_changed[0] > 0.12:
+                        if palm_corrections >= 24:
+                            raise RuntimeError("lever palm contact lost while closing fingers")
+                        grip_command = [v + 0.0015 * n
+                                        for v, n in zip(grip_command, normal)]
+                        joints = scene_ik.solve(
+                            grip_command, Rotation.from_matrix(contact_rotation_world).as_quat(),
+                            [math.radians(v) for v in current_target_deg[7:14]],
+                            point_in_r7=LEVER_GRIP_CENTER_IN_R7,
+                            seed_only=True, joint_bounds=lever_bounds)
+                        move_right_joint_target("lever_palm_hold_{}".format(palm_corrections),
+                                                joints, 5, continuous=True)
+                        palm_corrections += 1
+                        time.sleep(0.04)
+                        continue
+                    for finger in range(3):
+                        touching = grip_contacts[0] & (1 << (finger + 1))
+                        if touching and contact_limits[finger] is None:
+                            contact_limits[finger] = flexions[finger] + 0.03
+                        limit = contact_limits[finger]
+                        if limit is None:
+                            limit = 1.7
+                        flexions[finger] = min(limit, flexions[finger] +
+                                              (0.001 if touching else 0.006))
+                    with gripper.command_lock:
+                        gripper.current_right_positions = lever_hand_targets(flexions)
+                        gripper.command_initialized.set()
+                    time.sleep(0.01)
+                time.sleep(0.10)
+            contact_subscriber.unregister()
+            if not grasp_confirmed[0]:
+                raise RuntimeError("lever palm/finger grip not established: contacts={}".format(grip_contacts[0]))
+            print("V2 lever palm/finger physical grip confirmed: flexions={}".format(flexions))
 
-            # Curl the three distal fingers only after the arm has descended;
-            # the V2 little finger bends less so its pad aligns with the other
-            # two instead of visibly cutting through the yellow handle.
-            with timing.segment("lever.form_hook"):
-                form_right_lever_hook()
-            with timing.segment("lever.post_hook_wait"):
-                time.sleep(0.5)
-            print_lever_state("v2_lever_hook_formed")
-
-            # Capture the achieved hook-to-handle transform after finger
-            # closure.  Finger contact already moves the lever several
-            # degrees, so continuing from the nominal zero-angle contact pose
-            # creates a large catch-up command and visible penetration.
             lever_angle = _lever_angle_from_orientation(
                 poses.get_orientation("lever"))
             if lever_angle is None:
                 raise RuntimeError("lever orientation is unavailable")
-            hook_anchor_angle = lever_angle
-            live_arm_rad = list(robot_state.arm_joint_state().position)
-            if len(live_arm_rad) != ARM_JOINT_COUNT:
-                raise RuntimeError(
-                    "Expected 14 live arm joints at lever hook, got {}".format(
-                        len(live_arm_rad)))
-            hook_anchor_q = live_arm_rad[7:14]
-            hook_anchor_tcp = scene_ik.hook_tcp_world(hook_anchor_q)
-            hook_anchor_rotation_world = scene_ik.eef_rotation_world(
-                hook_anchor_q)
-            nominal_anchor_target = _lever_command_target_world(
-                _lever_hand_target_world(hook_anchor_angle))
-            hook_anchor_offset = tuple(
-                measured - nominal
-                for measured, nominal in zip(
-                    hook_anchor_tcp, nominal_anchor_target))
-            print(
-                "V2 lever hook anchor: angle={:.1f} deg offset={} m".format(
-                    math.degrees(hook_anchor_angle),
-                    [round(value, 6) for value in hook_anchor_offset]))
+            grip_anchor_angle = lever_angle
+            # Keep the command endpoint so confirming contact cannot unload
+            # the grip by resetting the target to lagging measured joints.
+            grip_anchor_q = [math.radians(v) for v in current_target_deg[7:14]]
+            grip_anchor_tcp = scene_ik._forward(
+                grip_anchor_q, LEVER_GRIP_CENTER_IN_R7)[0]
+            grip_anchor_rotation_world = scene_ik.eef_rotation_world(grip_anchor_q)
             stalls = 0
             attempts = 0
-            # Advance the hand command monotonically.  The force-free lever
-            # follower intentionally has no inertial overshoot, and its
-            # fingertip-centroid mapping can trail the commanded hand angle
-            # by a small fixed geometric offset.  Rebuilding every command as
-            # ``measured lever angle + step`` would therefore resend the same
-            # 29.8-degree hand pose forever instead of crossing the physical
-            # 30-degree handoff edge.
-            commanded_angle = hook_anchor_angle
+            # Advance the hand along the lever arc while checking the real
+            # hinge angle and the scene's conveyor handoff event.
+            commanded_angle = grip_anchor_angle
             while (not source_bin_release.released
                    and attempts < LEVER_PATH_MAX_ATTEMPTS
                    and lever_angle < LEVER_PATH_SAFETY_MAX_RAD):
@@ -1112,36 +1020,24 @@ def main():
                     target_angle = min(
                         target_angle, LEVER_PATH_FINE_START_RAD)
                 commanded_angle = target_angle
-                anchor_delta_angle = target_angle - hook_anchor_angle
-                path_fraction = (
-                    anchor_delta_angle
-                    / (LEVER_NOMINAL_HANDOFF_RAD - hook_anchor_angle))
-                canonical_blend = _smootherstep(path_fraction)
-                rotated_anchor_offset = _rotate_vector_about_world_y(
-                    hook_anchor_offset, anchor_delta_angle)
-                nominal_target = _lever_command_target_world(
-                    _lever_hand_target_world(target_angle))
-                anchored_target = tuple(
-                    nominal + (1.0 - canonical_blend) * offset
-                    for nominal, offset in zip(
-                        nominal_target, rotated_anchor_offset))
-                anchored_rotation_world = scene_ik.rotate_about_world_y(
-                    hook_anchor_rotation_world, anchor_delta_angle)
-                canonical_rotation_world = scene_ik.rotate_about_world_y(
-                    contact_rotation_world, target_angle)
-                target_rotation_world = scene_ik.interpolate_rotation_world(
-                    anchored_rotation_world,
-                    canonical_rotation_world,
-                    canonical_blend)
+                anchor_delta_angle = target_angle - grip_anchor_angle
+                rotated_grip = _rotate_vector_about_world_y(
+                    tuple(value - pivot for value, pivot in
+                          zip(grip_anchor_tcp, LEVER_PIVOT_WORLD)),
+                    anchor_delta_angle)
+                anchored_target = tuple(pivot + value for pivot, value in
+                                        zip(LEVER_PIVOT_WORLD, rotated_grip))
+                target_rotation_world = scene_ik.rotate_about_world_y(
+                    grip_anchor_rotation_world, anchor_delta_angle)
                 live_arm_rad = list(robot_state.arm_joint_state().position)
                 label = "v2_lever_closed_loop_{:02d}".format(attempts)
                 with timing.segment("{}.ik_solve".format(label)):
-                    path_target = scene_ik.solve_lever(
+                    path_target = scene_ik.solve(
                         anchored_target,
-                        live_arm_rad[7:14],
-                        target_rotation_world=target_rotation_world,
-                        joint_limit_margin_fraction=(
-                            LEVER_PATH_JOINT_LIMIT_MARGIN_FRACTION))
+                        Rotation.from_matrix(target_rotation_world).as_quat(),
+                        [math.radians(value) for value in current_target_deg[7:14]],
+                        point_in_r7=LEVER_GRIP_CENTER_IN_R7,
+                        seed_only=True, joint_bounds=lever_bounds)
                 # The current URDF tracks the requested r5 closely.  Use the
                 # live step's IK value from the first pull step onward instead
                 # of carrying over a fixed compensation from an older model.
@@ -1149,6 +1045,9 @@ def main():
                 point_count = (
                     LEVER_PATH_FINE_TRAJECTORY_POINTS
                     if fine_pull else LEVER_PATH_TRAJECTORY_POINTS)
+                # Allow the newly loaded finger grip to settle at lift-off.
+                if lever_angle < math.radians(1.0):
+                    point_count = max(point_count, 25)
                 # Do not use the zero-velocity smootherstep here.  Applying
                 # it independently to every 2.5-degree waypoint forces the
                 # wrist to brake to a stop and restart at every boundary.
@@ -1157,6 +1056,8 @@ def main():
                 move_right_joint_target(
                     label, path_target, point_count,
                     r5_command_rad=r5_command, continuous=True)
+                if not grip_contacts[0] & 16 and time.monotonic() - grip_contacts[1] > 0.35:
+                    raise RuntimeError("lever grip lost during lift: contacts={}".format(grip_contacts[0]))
                 new_angle = _lever_angle_from_orientation(
                     poses.get_orientation("lever"))
                 if new_angle is None:
@@ -1189,80 +1090,30 @@ def main():
             if not conveyor_complete.data:
                 raise RuntimeError(
                     "V2 source conveyor reported an incomplete move")
-            print("V2 source bin conveyor motion complete")
+            grip_subscriber.unregister()
+            deadline = time.monotonic() + SOURCE_CONVEYOR_TIMEOUT_S
+            while time.monotonic() < deadline:
+                state = rospy.wait_for_message("/mujoco/source_bin/scoring_state", UInt8, timeout=2.0)
+                if state.data & 16:
+                    break
+            else:
+                raise RuntimeError("V2 source bin reached conveyor end but did not settle")
+            print("V2 source bin conveyor motion complete and settled")
 
-        # Raise the shoulder first to clear the chassis, move to a waypoint
-        # directly above the task-only staging posture, carry that safe height
-        # back to B0, and only then descend.  Do not route through the old
-        # distant high ready posture: staging remains the intended endpoint.
-        # V2 still holds the measured left arm at every trajectory point.
-        shoulder_only_deg = list(current_target_deg)
-        shoulder_only_deg[8] = -SHOULDER_LIFT_DEG
-        shoulder_only_deg[12] = math.degrees(-0.5)
-        with timing.segment(
-                "initialization.shoulder_clearance",
-                trajectory_points=TRAJECTORY_POINTS):
-            trajectory.execute_trajectory(
-                _right_only_trajectory(
-                    shoulder_only_deg, current_target_deg, left_hold_rad,
-                    num=TRAJECTORY_POINTS),
-                sleep_time=0.02)
-        current_target_deg = shoulder_only_deg
-
-        staging_above_deg = list(current_target_deg)
-        staging_above_deg[7:14] = [
-            math.degrees(value) for value in RIGHT_ARM_STAGING_ABOVE_RAD]
-        with timing.segment(
-                "initialization.staging_above",
-                trajectory_points=TRAJECTORY_POINTS):
-            trajectory.execute_trajectory(
-                _right_only_trajectory(
-                    staging_above_deg, current_target_deg, left_hold_rad,
-                    num=TRAJECTORY_POINTS),
-                sleep_time=0.02)
-        current_target_deg = staging_above_deg
-
-        latch_achieved_right_target("v2_staging_above_at_safe_base")
-
-        # Return once to this run's saved random B0 before computing any task
-        # IK.  Keep the arm at the high nearby waypoint throughout the base
-        # translation so the hand cannot sweep through the source bin.
-        with timing.segment("initialization.base_return_b0"):
-            measured_b0 = _move_base_with_wheels(
-                chassis, base_translation_world)
-        common_task_base_measured = tuple(measured_b0)
-        scene_ik.set_base_translation_world(
-            (measured_b0[0], measured_b0[1], base_translation_world[2]))
-
-        # Only descend after the base has reached B0.  This final short motion
-        # establishes the low staging point used by the first source IK.
-        staging_deg = list(current_target_deg)
-        staging_deg[7:14] = [
-            math.degrees(value) for value in RIGHT_ARM_STAGING_RAD]
-        with timing.segment(
-                "initialization.staging_descent",
-                trajectory_points=STAGING_DESCENT_TRAJECTORY_POINTS):
-            trajectory.execute_trajectory(
-                _right_only_trajectory(
-                    staging_deg, current_target_deg, left_hold_rad,
-                    num=STAGING_DESCENT_TRAJECTORY_POINTS),
-                sleep_time=0.02)
-        current_target_deg = staging_deg
-
-        with timing.segment("initialization.staging_settle_wait"):
-            time.sleep(0.2)
-        latch_achieved_right_target("v2_staging_after_return_to_b0")
         scorer_started = start_score_clock()
         timing.mark_score_start(scorer_started)
-        task_tcp_quaternion_world = scene_ik.eef_quaternion_world_with_yaw(
-            RIGHT_ARM_READY_FULL_RAD, GRASP_YAW_ADJUSTMENT_RAD)
+        task_tcp_quaternion_world = (
+            Rotation.from_euler("y", 15.0, degrees=True)
+            * Rotation.from_quat(scene_ik.eef_quaternion_world_with_yaw(
+                RIGHT_ARM_READY_FULL_RAD, GRASP_YAW_ADJUSTMENT_RAD))).as_quat()
 
-        # Form the open source-grasp posture at the safe staging pose.  Start
-        # the first source IK immediately afterward so the thumb cannot sweep
-        # through the cylinder while the arm is already at the grasp point.
+        # Form the source-grasp posture above the first cylinder, keeping
+        # the moving fingers clear before the direct downward approach.
         with timing.segment("source_grasp.hand_prepare"):
-            gripper.control_right_gripper(0)
+            gripper.control_right_gripper(0, duration=0.5)
 
+        grasp_lower = scene_ik.lower.copy()
+        grasp_lower[1] = -1.6
         for index, name in enumerate(CYLINDERS):
             with timing.segment("{}.target_prepare".format(name)):
                 object_position = poses.get_position(name)
@@ -1277,100 +1128,94 @@ def main():
                     DROP_GRASP_CENTER_Z,
                 ]
 
-            planned_grasp_base = randomization_plan.grasp_bases[index]
-            grasp_base_delta = tuple(
-                planned_grasp_base[axis]
-                - randomization_plan.task_base[axis]
-                for axis in range(3))
-            if index == 2 and grasp_base_delta[1] > 1e-6:
-                grasp_base_delta = (
-                    grasp_base_delta[0],
-                    grasp_base_delta[1] + BLUE_RUNTIME_LEFT_SHIFT_MARGIN_M,
-                    grasp_base_delta[2],
-                )
-            grasp_base_target = tuple(
-                common_task_base_measured[axis] + grasp_base_delta[axis]
-                for axis in range(3))
-            requires_grasp_base_move = any(
-                abs(value) > 1e-6 for value in grasp_base_delta[:2])
-            if requires_grasp_base_move:
-                with timing.segment(
-                        "{}.grasp_base_move".format(name),
-                        planned_delta=list(grasp_base_delta)):
-                    measured_grasp_base = _move_base_with_wheels(
-                        chassis, grasp_base_target)
-                scene_ik.set_base_translation_world((
-                    measured_grasp_base[0], measured_grasp_base[1],
-                    base_translation_world[2]))
-
             move_right_tcp(
                 "{}_above".format(name),
                 grasp_center_world,
                 task_tcp_quaternion_world,
                 point_in_r7=scene_ik.CLOSED_GRASP_CENTER_IN_R7,
-                compensate_source_grasp=True,
-                trajectory_points=SOURCE_GRASP_TRAJECTORY_POINTS,
+                joint_bounds=(grasp_lower, scene_ik.upper),
+                trajectory_points=60 if index == 0 else 120,
+                arc_height=0.0,
+                clearance_height=None if index == 0 else DROP_GRASP_CENTER_Z,
             )
             print_measured_grasp_center("{}_open".format(name))
             with timing.segment("{}.pre_close_wait".format(name)):
                 time.sleep(SOURCE_GRASP_SETTLE_SECONDS)
+            # Correct the measured approach error before closing. A fixed
+            # feedforward bias alone cannot account for wrist load/settling.
+            measured_right = list(robot_state.arm_joint_state().position)[7:14]
+            actual_center = scene_ik.closed_grasp_center_world(measured_right)
+            object_center = poses.get_position(name)
+            corrected_center = [command + target - actual for command, target, actual
+                                in zip(grasp_center_world, object_center, actual_center)]
+            actual_rotation = Rotation.from_quat(
+                scene_ik.eef_quaternion_world(measured_right))
+            desired_rotation = Rotation.from_quat(task_tcp_quaternion_world)
+            corrected_rotation = (desired_rotation * actual_rotation.inv()
+                                  * desired_rotation).as_quat()
+            move_right_tcp(
+                "{}_align".format(name), corrected_center, corrected_rotation,
+                point_in_r7=scene_ik.CLOSED_GRASP_CENTER_IN_R7,
+                joint_bounds=(grasp_lower, scene_ik.upper),
+                trajectory_points=15)
+            time.sleep(0.05)
             pre_close_object_position = poses.get_position(name)
             record_grasp_snapshot(
                 "pre_close", name, grasp_center_world,
                 pre_close_object_position)
-            with timing.segment("{}.gripper_close".format(name)):
-                gripper.control_right_gripper(GRASP_CLOSURE_CMD)
-            record_grasp_snapshot(
-                "post_close", name, grasp_center_world,
-                pre_close_object_position)
+            try:
+                with timing.segment("{}.gripper_close".format(name)):
+                    close_on_cylinder(gripper, name)
+            finally:
+                record_grasp_snapshot(
+                    "post_close", name, grasp_center_world,
+                    pre_close_object_position)
             print_measured_grasp_geometry(
                 "{}_closed".format(name), poses.get_position(name))
-            move_right_by_fixed_delta(
-                "{}_fixed_grasp_lift".format(name),
-                tuple(
-                    GRASP_LIFT_SCALE * delta
-                    for delta in FIXED_GRASP_LIFTS_RIGHT_RAD[index]),
-            )
-            record_grasp_snapshot(
-                "post_lift", name, grasp_center_world,
-                pre_close_object_position)
-            if requires_grasp_base_move:
-                with timing.segment(
-                        "{}.loaded_base_return".format(name),
-                        planned_delta=list(grasp_base_delta)):
-                    measured_return_base = _move_base_with_wheels(
-                        chassis, common_task_base_measured)
-                scene_ik.set_base_translation_world((
-                    measured_return_base[0], measured_return_base[1],
-                    base_translation_world[2]))
-            print_measured_grasp_center("{}_lifted".format(name))
-            print("{}_after_lift object: {}".format(
-                name,
-                [round(value, 6) for value in poses.get_position(name)]))
+            live_right = list(robot_state.arm_joint_state().position)[7:14]
+            held_center = scene_ik.closed_grasp_center_world(live_right)
+            held_quaternion = scene_ik.eef_quaternion_world(live_right)
+            lift_center = list(held_center)
+            lift_center[2] = DROP_GRASP_CENTER_Z
+            drop_center_world[2] = DROP_GRASP_CENTER_Z
+            drop_rotation = (Rotation.from_euler("z", 75.0, degrees=True)
+                             * Rotation.from_euler("x", -90.0, degrees=True))
+            object_offset = [obj - hand for obj, hand in
+                             zip(poses.get_position(name), held_center)]
+            drop_offset = drop_rotation.apply(
+                Rotation.from_quat(held_quaternion).inv().apply(object_offset))
+            for axis in (0, 1):
+                drop_center_world[axis] -= drop_offset[axis]
+
+            def check_physical_lift():
+                if poses.get_position(name)[2] - pre_close_object_position[2] < 0.08:
+                    raise RuntimeError("{} did not lift off the source bin: before={}, after={}".format(
+                        name, pre_close_object_position, poses.get_position(name)))
+                record_grasp_snapshot(
+                    "post_lift", name, grasp_center_world, pre_close_object_position)
+
+            # Plan once before moving. The height checkpoint does not replan
+            # or restart a zero-velocity profile at the lift/transfer join.
             move_right_tcp(
-                "{}_above_target_bin".format(name),
-                drop_center_world,
-                task_tcp_quaternion_world,
+                "{}_lift_and_transfer".format(name), drop_center_world,
+                drop_rotation.as_quat(),
                 point_in_r7=scene_ik.CLOSED_GRASP_CENTER_IN_R7,
-                trajectory_points=TARGET_TRANSPORT_TRAJECTORY_POINTS,
-            )
-            with timing.segment("{}.pre_release_wait".format(name)):
-                time.sleep(1.0)
+                joint_bounds=(grasp_lower, scene_ik.upper),
+                trajectory_points=130, arc_height=0.0,
+                via_position_world=lift_center,
+                via_quaternion_world=held_quaternion,
+                on_clearance=check_physical_lift)
             print("{}_above_target object: {}".format(
                 name,
                 [round(value, 6) for value in poses.get_position(name)]))
-            with timing.segment("{}.gripper_release".format(name)):
-                gripper.control_right_gripper(0)
-            with timing.segment("{}.object_settle_wait".format(name)):
-                time.sleep(1.0)
-
+            release_cylinder(gripper, name, timing)
             final_position = poses.get_position(name)
             record_grasp_snapshot(
                 "post_release", name, drop_center_world,
                 pre_close_object_position)
             print("{}_settled object: {}".format(
                 name, [round(value, 6) for value in final_position]))
-            if not _fully_in_target(final_position):
+            if not _fully_in_target(final_position, target_bin_position):
                 message = "{} is not fully inside the V2 target bin: {}".format(
                     name, final_position)
                 if experiment_mode:
@@ -1378,11 +1223,9 @@ def main():
                 else:
                     raise RuntimeError(message)
 
-            if index + 1 < len(CYLINDERS):
-                return_right_to_staging("v2_between_objects_staging")
 
         right_task_success = all(
-            _fully_in_target(poses.get_position(name)) for name in CYLINDERS)
+            _fully_in_target(poses.get_position(name), target_bin_position) for name in CYLINDERS)
         print("v2_right_task_final objects: {}".format({
             name: [round(value, 6) for value in poses.get_position(name)]
             for name in CYLINDERS
@@ -1418,3 +1261,4 @@ if __name__ == "__main__":
         print("Task 1 V2 failed: {}".format(error))
         import traceback
         traceback.print_exc()
+        sys.exit(1)

@@ -115,12 +115,17 @@ class GripperController:
                 right = (
                     None if self.current_right_positions is None
                     else list(self.current_right_positions))
-            if left is not None and right is not None:
-                self.command_pub.publish(self._message(left, right))
             try:
+                if left is not None and right is not None:
+                    self.command_pub.publish(self._message(left, right))
                 rate.sleep()
             except rospy.ROSInterruptException:
                 break
+            except rospy.ROSException:
+                # ROS may close the publisher after the loop's shutdown check.
+                if rospy.is_shutdown():
+                    break
+                raise
 
     def _measured_positions(self, side):
         with self.state_lock:

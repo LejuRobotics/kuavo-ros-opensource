@@ -75,7 +75,7 @@ class EpisodeSuccessObserver(object):
     score baseline the accepted entries depend on -- unmodified.
     """
 
-    def __init__(self, task_id, score_file=None):
+    def __init__(self, task_id, score_file=None, metadata=None):
         try:
             scorer_class = SCORERS[task_id]
         except KeyError:
@@ -89,20 +89,32 @@ class EpisodeSuccessObserver(object):
         self.tap = PoseTap(scorer_class.BODIES)
         self.scorer = scorer_class(
             self.tap,
-            score_file or os.environ.get("SCORE_FILE", DEFAULT_SCORE_FILE))
+            score_file or os.environ.get("SCORE_FILE", DEFAULT_SCORE_FILE),
+            metadata=metadata)
 
     def start(self):
         """Start the score clock at the post-initialization episode boundary."""
         with self._lock:
             if self.scorer.start_time is None:
+                if self.task_id in (1, 3):
+                    names = (self.scorer.CYLINDERS if self.task_id == 1
+                             else self.scorer.RINGS)
+                    deadline = time.monotonic() + 5.0
+                    while not all(name in self.tap.task2_state for name in names):
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError("physical scoring observations unavailable")
+                        time.sleep(.01)
+                    # Record initial source support before returning start to
+                    # the model; a fast first action must not race observation.
+                    self.scorer.sample()
                 self.scorer.start_time = time.time()
+                self.scorer.publish_score(force=True)
                 rospy.loginfo("model score clock started")
 
     def sample(self):
         """Return ``(state, complete)`` for the current simulation state."""
         with self._lock:
-            state = self.scorer._evaluate()
-            self.scorer.state = state
+            state = self.scorer.sample()
             return state, bool(self.rule(self.scorer, state))
 
     def finish(self):
@@ -117,6 +129,10 @@ class EpisodeSuccessObserver(object):
             self.scorer.state = self.scorer._evaluate()
             self._finished_result = self.scorer.finish(write_only=True)
             return self._finished_result
+
+    def invalidate(self, reason):
+        with self._lock:
+            self.scorer.invalidate(reason)
 
     def close(self):
         """Drop the pose subscriptions.
