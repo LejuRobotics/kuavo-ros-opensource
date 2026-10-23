@@ -115,6 +115,14 @@ namespace humanoid_controller
   {
     if (pending_arm_prepared_switch_)
     {
+      auto source_it = controllers_.find(pending_arm_switch_source_name_);
+      if (source_it != controllers_.end() && source_it->second)
+      {
+        if (auto* arm_controller = source_it->second->getArmController())
+        {
+          arm_controller->cancelDefaultPoseReturnForSwitch();
+        }
+      }
       ROS_INFO("[RLControllerManager] Clear pending arm-prepared switch: %s -> %s%s%s",
                pending_arm_switch_source_name_.c_str(),
                pending_arm_switch_target_name_.c_str(),
@@ -153,10 +161,11 @@ namespace humanoid_controller
     }
 
     const bool arm_is_locked = arm_controller->getMode() == 0;
+    const bool arm_is_external = arm_controller->getMode() == 2;
     const bool auto_swing_is_preparing =
         arm_controller->getRequestedMode() == 1 &&
         arm_controller->isRateLimitedTracking();
-    if (!arm_is_locked && !auto_swing_is_preparing)
+    if (!arm_is_locked && !arm_is_external && !auto_swing_is_preparing)
     {
       return false;
     }
@@ -169,13 +178,14 @@ namespace humanoid_controller
     // 保持源 AMP 站立，让大幅手臂归位始终由熟悉当前状态的源策略维持平衡
     source_controller->resetGaitCommandState(true);
 
-    // 只在当前 AMP 本地启动归位
-    // 全局模式由切换完成后的既有逻辑同步
-    if (arm_is_locked && !source_controller->requestArmControlMode(1))
+    // 在控制线程从实际关节状态启动归位，并等待实际位置/速度收敛。
+    // 归位期间锁住 mode1 意图，避免外部轨迹或重复模式请求打断/重启曲线。
+    // 全局模式由切换完成后的既有逻辑同步。
+    if (!arm_controller->requestDefaultPoseReturnForSwitch())
     {
-      clearPendingArmPreparedSwitchLocked("source arm rejected AUTO_SWING request");
+      clearPendingArmPreparedSwitchLocked("source arm rejected default-pose return request");
       // 安全优先：本次不继续执行原切换，自动路径可由下一条新命令重试
-      // 手动路径会保持在当前 AMP，避免 mode0 直接交给 AMP_Wild
+      // 手动路径会保持在当前 AMP，避免 mode0/mode2 直接交给 AMP_Wild
       return true;
     }
 
@@ -615,7 +625,7 @@ namespace humanoid_controller
     const bool desired_switch_to_falldown =
         requested_target_it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
 
-    // AMP 的本地手臂为 mode0 时，不能直接把全身控制权交给 AMP_Wild
+    // AMP 的本地手臂为 mode0/mode2 或仍在归位时，先归位再交给 AMP_Wild
     // 归位在当前 AMP 中非阻塞执行，完成后由控制循环补做真正的切换
     if (deferWalkingSwitchUntilArmReadyLocked(name))
     {
@@ -2651,7 +2661,7 @@ namespace humanoid_controller
       return;
     }
 
-    // 用户在准备阶段重新锁臂或进入外部控制，视为撤销这次行走切换
+    // 归位锁存期间只接受 mode1；若锁存被其他路径释放并改变模式，则取消等待。
     if (arm_controller->getRequestedMode() != 1)
     {
       source_controller->resetGaitCommandState(true);
@@ -2659,7 +2669,7 @@ namespace humanoid_controller
       return;
     }
 
-    if (arm_controller->getMode() != 1 || arm_controller->isRateLimitedTracking())
+    if (!arm_controller->isDefaultPoseReturnForSwitchComplete() || !isTorsoVelocityStable())
     {
       if (pending_arm_switch_start_time_.isValid() &&
           (ros::Time::now() - pending_arm_switch_start_time_).toSec() > pending_arm_switch_timeout_)
@@ -2674,7 +2684,7 @@ namespace humanoid_controller
 
     const std::string source_name = pending_arm_switch_source_name_;
     const std::string target_name = pending_arm_switch_target_name_;
-    clearPendingArmPreparedSwitchLocked("arm AUTO_SWING homing completed");
+    clearPendingArmPreparedSwitchLocked("arm settled at default pose and torso velocity stable");
 
     const bool switched = switchController(target_name);
     if (!switched)
@@ -2942,16 +2952,24 @@ namespace humanoid_controller
     res.next_controller = target_name.empty() ? "mpc" : target_name;
     res.next_index = target_index;
     res.success = true;
-    if (isVmpToAmpSwitchPending())
     {
-      res.message = "VMP->AMP switch accepted; arm return to zero is in progress before activating " +
-                    res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
-    }
-    else
-    {
-      res.message = "Successfully switched from " + res.current_controller + " (index: " +
-                    std::to_string(res.current_index) + ") to " + res.next_controller + " (index: " +
-                    std::to_string(res.next_index) + ")";
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (pending_arm_prepared_switch_)
+      {
+        res.message = "Controller switch accepted; waiting for arms and torso to settle before activating " +
+                      res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+      }
+      else if (isVmpToAmpSwitchPending())
+      {
+        res.message = "VMP->AMP switch accepted; arm return to zero is in progress before activating " +
+                      res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+      }
+      else
+      {
+        res.message = "Successfully switched from " + res.current_controller + " (index: " +
+                      std::to_string(res.current_index) + ") to " + res.next_controller + " (index: " +
+                      std::to_string(res.next_index) + ")";
+      }
     }
     
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
@@ -3104,16 +3122,24 @@ namespace humanoid_controller
     res.next_controller = target_name.empty() ? "mpc" : target_name;
     res.next_index = target_index;
     res.success = true;
-    if (isVmpToAmpSwitchPending())
     {
-      res.message = "VMP->AMP switch accepted; arm return to zero is in progress before activating " +
-                    res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
-    }
-    else
-    {
-      res.message = "Successfully switched from " + res.current_controller + " (index: " +
-                    std::to_string(res.current_index) + ") to " + res.next_controller + " (index: " +
-                    std::to_string(res.next_index) + ")";
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (pending_arm_prepared_switch_)
+      {
+        res.message = "Controller switch accepted; waiting for arms and torso to settle before activating " +
+                      res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+      }
+      else if (isVmpToAmpSwitchPending())
+      {
+        res.message = "VMP->AMP switch accepted; arm return to zero is in progress before activating " +
+                      res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+      }
+      else
+      {
+        res.message = "Successfully switched from " + res.current_controller + " (index: " +
+                      std::to_string(res.current_index) + ") to " + res.next_controller + " (index: " +
+                      std::to_string(res.next_index) + ")";
+      }
     }
     
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());

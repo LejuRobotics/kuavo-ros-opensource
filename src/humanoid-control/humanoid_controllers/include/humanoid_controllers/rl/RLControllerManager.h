@@ -694,7 +694,7 @@ namespace humanoid_controller
     std::string pending_walking_switch_source_name_;
     std::string pending_walking_switch_target_name_;
     std::string pending_walking_switch_reason_;
-    bool pending_arm_prepared_switch_ = false;       ///< AMP mode0 归位后再切 AMP_Wild
+    bool pending_arm_prepared_switch_ = false;       ///< AMP mode0/mode2 实际归位稳定后再切 AMP_Wild
     std::string pending_arm_switch_source_name_;
     std::string pending_arm_switch_target_name_;
     ros::Time pending_arm_switch_start_time_;

@@ -27,6 +27,7 @@
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
+#include "motion_capture_ik/GripQuaternionRecovery.h"
 #include "motion_capture_ik/SG100VrGestureClient.h"
 #include "motion_capture_ik/WheelNaturalElbowGuide.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
@@ -687,6 +688,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasPreviousRightGripQuat_ = false;
   Eigen::Quaterniond previousLeftGripQuat_ = Eigen::Quaterniond::Identity();
   Eigen::Quaterniond previousRightGripQuat_ = Eigen::Quaterniond::Identity();
+  GripQuaternionRecovery leftGripQuatRecovery_;
+  GripQuaternionRecovery rightGripQuatRecovery_;
 
   // 松开 grip 后保持的整臂约束快照，避免每次释放/重新按下都从新的 IK
   // 优化结果递推 anchor，形成逐次下沉。

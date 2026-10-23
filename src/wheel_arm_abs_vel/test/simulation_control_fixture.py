@@ -82,8 +82,8 @@ with (root/'observations.jsonl').open('a',buffering=1) as log:
         joy=JoySticks()
         for k,v in c.get('joy',{}).items():setattr(joy,k,v)
         joypub.publish(joy)
-        stamp=rospy.Time.now();chest=(0,0,1.2)
-        yaw=c.get('torso',0.)*math.sin(t)
+        stamp=rospy.Time.now();chest=(0,0,1.2+float(c.get('chest_height_offset',0.)))
+        yaw=c.get('torso',0.)*math.sin(t)+float(c.get('torso_offset',0.))
         q=tf.transformations.quaternion_from_euler(0,0,yaw)
         arms,rotations=synthetic_arms(float(c.get('arm',0)),t)
         points=[arms[0][0],arms[0][1],arms[1][0],arms[1][1],arms[0][2],arms[1][2]]

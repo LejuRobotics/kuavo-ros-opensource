@@ -1782,10 +1782,12 @@ void WheelQuest3IkIncrementalROS::stabilizeGripQuaternion(bool leftArm,
                                                           Eigen::Quaterniond& quat) {
   Eigen::Quaterniond& previousQuat = leftArm ? previousLeftGripQuat_ : previousRightGripQuat_;
   bool& hasPreviousQuat = leftArm ? hasPreviousLeftGripQuat_ : hasPreviousRightGripQuat_;
+  auto& recovery = leftArm ? leftGripQuatRecovery_ : rightGripQuatRecovery_;
 
   // 松开 grip 后下一次重新按下应从新的冻结姿态重新建立基准。
   if (!gripPressed) {
     hasPreviousQuat = false;
+    recovery.reset();
     return;
   }
 
@@ -1803,26 +1805,21 @@ void WheelQuest3IkIncrementalROS::stabilizeGripQuaternion(bool leftArm,
   const int holdFrames = leftArm ? leftGripOrientationHoldFrames_ : rightGripOrientationHoldFrames_;
   const bool transferActive = leftArm ? leftGripTransferPending_ : rightGripTransferPending_;
   if (!useIncrementalHandOrientation_ && !transferActive && holdFrames <= 0) {
+    recovery.reset();
     previousQuat = quat;
     hasPreviousQuat = true;
     return;
   }
 
   if (!hasPreviousQuat) {
+    recovery.reset();
     previousQuat = quat;
     hasPreviousQuat = true;
     return;
   }
 
-  const double dot = std::min(1.0, std::abs(previousQuat.dot(quat)));
-  const double angle = 2.0 * std::acos(dot);
-  // 正常 50Hz 手部运动不会在一帧内旋转几十度；Quest 丢跟踪/姿态翻转时
-  // 会出现接近 180 度的跳变。保留上一帧，等待输入回到连续范围。
-  constexpr double kMaxSingleFrameRotationRad = 0.5;
-  if (angle > kMaxSingleFrameRotationRad) {
-    quat = previousQuat;
-    return;
-  }
+  // 单帧跳变仍保持旧输出；连续有效候选则限步恢复，避免姿态永久冻结。
+  quat = recovery.update(previousQuat, quat);
   previousQuat = quat;
 }
 

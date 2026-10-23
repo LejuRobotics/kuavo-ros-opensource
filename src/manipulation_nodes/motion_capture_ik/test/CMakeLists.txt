@@ -8,6 +8,10 @@ endif()
 add_executable(wheel_natural_elbow_guide_test wheel_natural_elbow_guide_test.cpp)
 target_compile_features(wheel_natural_elbow_guide_test PUBLIC cxx_std_17)
 
+add_executable(grip_quaternion_recovery_test grip_quaternion_recovery_test.cpp)
+target_compile_features(grip_quaternion_recovery_test PUBLIC cxx_std_17)
+add_test(NAME grip_quaternion_recovery_test COMMAND $<TARGET_FILE:grip_quaternion_recovery_test>)
+
 ## SG100 heiman 手:手势库与关节限位单测(纯逻辑,无需 ROS master / 硬件)
 add_executable(
   sg100_joint_limits_test

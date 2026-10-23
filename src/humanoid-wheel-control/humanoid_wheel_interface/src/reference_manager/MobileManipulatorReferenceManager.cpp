@@ -4621,6 +4621,8 @@ namespace mobile_manipulator {
 
       // std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
 
+      clampCmdTorsoPoseToWorkspace();
+
       cmdTorsoPose_mtx_.lock();
       torsoTargetPose = cmdTorsoPose_;
       cmdTorsoPose_mtx_.unlock();
@@ -4634,6 +4636,19 @@ namespace mobile_manipulator {
       calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, cmdTorsoPoseDesiredTime_);
 
       isCmdTorsoPoseUpdated_ = false;
+      torsoModeFlag_ = true;
+    }
+
+    // 松杆后若仍因“先伸后降”卡在包络外，继续收回 x，避免残留前倾目标
+    if (isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true &&
+        clampCmdTorsoPoseToWorkspace())
+    {
+      vector_t torsoPose4Dof = vector_t::Zero(4);
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+        torsoPose4Dof << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
+      }
+      calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, 0.0);
       torsoModeFlag_ = true;
     }
 
@@ -5501,8 +5516,69 @@ namespace mobile_manipulator {
       // Do not set isCmdTorsoPoseUpdated_: absolute path in same tick can still override.
     }
 
+    // 降 z 后若 x 仍停在高位包络外，收回 x（删掉“降到底再前倾”）
+    clampCmdTorsoPoseToWorkspace();
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+      cmd4 << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
+    }
+
     calcRuckigTrajWithTorsoPose(initTime, cmd4, 0.0);
     torsoModeFlag_ = true;
+  }
+
+  double MobileManipulatorReferenceManager::getTorsoWorkspaceMaxX(double z_increment) const
+  {
+    // 与 MobileManipulatorJoyCommandNode::getTorsoMaxX 保持一致
+    if (z_increment <= 0.0) {
+      return 0.05;
+    } else if (z_increment <= 0.3) {
+      return 0.05 + (z_increment / 0.3) * 0.1;  // 0.05 → 0.15
+    } else if (z_increment <= 0.5) {
+      return 0.15 + ((z_increment - 0.3) / 0.2) * 0.1;  // 0.15 → 0.25
+    }
+    return torsoWsMaxX_;
+  }
+
+  bool MobileManipulatorReferenceManager::clampCmdTorsoPoseToWorkspace()
+  {
+    std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+    if (cmdTorsoPose_.size() < 5) {
+      return false;
+    }
+
+    const double z_inc = cmdTorsoPose_[2] - initialTorsoPos_[2];
+    const double x_max = initialTorsoPos_[0] + getTorsoWorkspaceMaxX(z_inc);
+    const double x_min = initialTorsoPos_[0] + torsoWsMinX_;
+    const double z_min = initialTorsoPos_[2] + torsoWsMinZ_;
+    const double z_max = initialTorsoPos_[2] + torsoWsMaxZ_;
+
+    bool changed = false;
+    auto clampAxis = [&](double& v, double lo, double hi) {
+      if (v < lo) {
+        v = lo;
+        changed = true;
+      } else if (v > hi) {
+        v = hi;
+        changed = true;
+      }
+    };
+
+    clampAxis(cmdTorsoPose_[0], x_min, x_max);
+    clampAxis(cmdTorsoPose_[2], z_min, z_max);
+    // 低高度禁止转腰（与 Joy kWaistYawMinZIncrement=0.05 对齐）
+    if (z_inc < 0.05) {
+      if (std::abs(cmdTorsoPose_[3]) > 1e-9) {
+        cmdTorsoPose_[3] = 0.0;
+        changed = true;
+      }
+    } else {
+      clampAxis(cmdTorsoPose_[3], torsoWsMinYaw_, torsoWsMaxYaw_);
+    }
+    clampAxis(cmdTorsoPose_[4], torsoWsMinPitch_, torsoWsMaxPitch_);
+    cmdTorsoPose_[1] = initialTorsoPos_[1];
+    cmdTorsoPose_[5] = 0.0;
+    return changed;
   }
 
 }  // namespace mobile_manipulator

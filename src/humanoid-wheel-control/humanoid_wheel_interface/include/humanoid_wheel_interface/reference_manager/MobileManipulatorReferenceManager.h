@@ -271,6 +271,10 @@ protected:
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
   void applyTorsoVelDeltaCommands(scalar_t initTime);
+  // z-coupled x envelope（与 mobile_manipulator_joy getTorsoMaxX 一致）：降 z 时收回超限 x，避免 pitch=0 不可达而前倾
+  double getTorsoWorkspaceMaxX(double z_increment) const;
+  // 钳制 cmdTorsoPose_ 到工作空间；若有修改返回 true（调用方需重规划 Ruckig）
+  bool clampCmdTorsoPoseToWorkspace();
   // cmdLegJoint
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
@@ -460,6 +464,15 @@ private:
   Eigen::Vector4d initialTorsoQuat_;
   Eigen::VectorXd cmdTorsoPose_;
   std::mutex cmdTorsoPose_mtx_;
+  // 躯干开环工作空间（相对 initialTorsoPos_；与 Joy 侧 clamp 对齐）
+  double torsoWsMinX_{0.0};
+  double torsoWsMaxX_{0.25};
+  double torsoWsMinZ_{0.0};
+  double torsoWsMaxZ_{0.32};
+  double torsoWsMinPitch_{0.0};
+  double torsoWsMaxPitch_{0.5235};
+  double torsoWsMinYaw_{-0.5235};
+  double torsoWsMaxYaw_{0.5235};
   bool isCmdTorsoPoseUpdated_{false};
   double cmdTorsoPoseDesiredTime_{0.0};
   ros::Subscriber targetTorsoPoseSubscriber_;

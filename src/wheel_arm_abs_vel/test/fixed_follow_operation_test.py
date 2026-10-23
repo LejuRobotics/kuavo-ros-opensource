@@ -108,7 +108,7 @@ class FixedFollowTest(unittest.TestCase):
         self.assertEqual(self.n._fixed_operation_phase,2)
         self.ack();self.n._advance_fixed_request();self.assertEqual(self.n._fixed_operation_phase,4)
 
-    def test_startup_follow_preserves_default_but_revocations_cancel_it(self):
+    def test_explicit_follow_restores_default_after_revocation(self):
         for source_name in ('quest', 'pico'):
             for event in ('initial_follow', 'prepare', 'hold', 'fault', 'session_stop', 'session_prepare'):
                 with self.subTest(source=source_name, event=event):
@@ -123,15 +123,32 @@ class FixedFollowTest(unittest.TestCase):
                         n._reset_tracking_session_source_locked=lambda:None
                         Mapper._finish_absolute_session(n, ns['AbsoluteEnableReason'].NONE, False, 'test stop')
                     elif event == 'session_prepare': Mapper._pause_absolute_session(n)
-                    # Exercise both production first-follow request and its
-                    # later authorization; neither may rearm a cancelled default.
+                    # Revocation alone cannot restore permission. The admitted
+                    # explicit follow request restores the selected mode.
+                    if event != 'initial_follow':
+                        self.assertFalse(p.enabled)
+                        self.assertFalse(p.startup_enable_pending)
                     if event == 'initial_follow': self.assertTrue(self.start().result)
                     n._authorize_fixed_follow_locked()
                     raw=NS(**{side+'_'+key:False for side in ('left','right') for key in
                               ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')},
                            left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
                     p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
-                    self.assertEqual(p.enabled,event=='initial_follow')
+                    self.assertTrue(p.enabled)
+    def test_prepare_resume_keeps_explicit_arm_mode(self):
+        for source_name in ('quest', 'pico'):
+            self.setUp();n=self.n
+            p=n._torso_controls=torso_module.TorsoControls(source_name)
+            p.selected_enabled=False  # operator selected arm mode
+            n._fixed_arm_operation(1)
+            n._authorize_fixed_follow_locked()
+            raw=NS(**{side+'_'+key:False for side in ('left','right') for key in
+                      ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')},
+                   left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
+            p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
+            self.assertFalse(p.enabled)
+            self.assertFalse(p.selected_enabled)
+
     def test_missing_joint_and_mpc_wait_then_automatically_start(self):
         n=self.n;n._absolute_latest_measured_q=None;n._wheel_mpc_stable_for_mm_cmd=lambda:False
         self.assertTrue(self.start().result);self.assertEqual(n._absolute_state,State.WAITING)

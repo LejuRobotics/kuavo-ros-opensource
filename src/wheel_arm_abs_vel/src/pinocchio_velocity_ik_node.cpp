@@ -6336,7 +6336,11 @@ class PinocchioVelocityIk {
     active_lower_body_recruitment_ = tracking && torso_control_allowed ? 1.0 : 0.0;
     active_lower_joint_recruitment_.fill(active_lower_body_recruitment_);
     active_base_recruitment_ = 0.0;
-    const double supervisor_lower_body_recruitment = torso_control_allowed ? 1.0 : 0.0;
+    // An admitted ready-pose operation owns all lower joints independently
+    // of human torso-follow permission. The preparing predicate retains the
+    // execution lease, freshness, mode and fault gates above.
+    const double supervisor_lower_body_recruitment =
+        (preparing || torso_control_allowed) ? 1.0 : 0.0;
     const double supervisor_base_recruitment = 1.0;
 
     SolverRequest safety_request;
@@ -6375,7 +6379,7 @@ class PinocchioVelocityIk {
         preparation_initial_error_ = 0.0;
         for (int index :
              dof_layout_.decisionIndices(DofGroup::kLowerBody)) {
-          if (torso_control_allowed) preparation_initial_error_ = std::max(
+          preparation_initial_error_ = std::max(
               preparation_initial_error_,
               std::abs(preparation_target(index) - reference_q_(index)));
         }
@@ -6421,15 +6425,8 @@ class PinocchioVelocityIk {
       };
       for (int joint = 0; joint < kLowerBodyDof; ++joint) {
         const int index = lowerBodyDecisionIndex(joint);
-        if (torso_control_allowed) {
-          set_preparation_joint(index, std::min(velocity_limit_(index),
-                                               lower_joint_velocity_cap_.at(joint)));
-        } else {
-          // X+A prepares the arms without moving a locked folding mechanism.
-          // The shared hard bounds still decelerate any existing lower motion.
-          selected_velocity = std::max(selected_velocity, std::abs(reference_dq_(index)));
-          selected_velocity = std::max(selected_velocity, std::abs(measured_dq(index)));
-        }
+        set_preparation_joint(index, std::min(velocity_limit_(index),
+                                             lower_joint_velocity_cap_.at(joint)));
       }
       for (int arm = 0; arm < kArmCount; ++arm) {
         for (int joint = 0; joint < kJointsPerArm; ++joint) {

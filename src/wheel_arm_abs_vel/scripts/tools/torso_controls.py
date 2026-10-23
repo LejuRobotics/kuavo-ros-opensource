@@ -12,9 +12,10 @@ class TorsoControls:
             raise ValueError('unsupported torso input source: ' + source)
         self.source = source
         self.enabled = False
-        # Startup preference is consumed once, only after the production
-        # readiness and freshness gates admit following. Reset must not rearm
-        # this preference or override a later explicit operator toggle.
+        # Mode selection survives PREPARE and safety revocation; execution
+        # permission does not. Only an admitted explicit follow request or a
+        # fresh torso chord may restore permission after a revocation.
+        self.selected_enabled = bool(enable_on_first_follow)
         self.startup_enable_pending = bool(enable_on_first_follow)
         self.follow_ready_seen = False
         self.last_time = None
@@ -43,6 +44,12 @@ class TorsoControls:
         self.enabled = False
         self.require_release = True
 
+    def request_follow(self):
+        """Restore the selected mode after an explicit, admitted follow request."""
+        self.wait_for_follow()
+        self.startup_enable_pending = self.selected_enabled
+        self.follow_ready_seen = False
+
     def _check_readiness(self, now, ready):
         fresh = self.last_time is not None and 0 <= now-self.last_time <= self.MAX_AGE
         if ((self.last_time is not None and not fresh)
@@ -67,10 +74,13 @@ class TorsoControls:
         stop = raw.left_first_button_pressed and raw.left_second_button_pressed
         arm = raw.left_first_button_pressed and (raw.right_first_button_pressed or raw.right_second_button_pressed)
         prepare = raw.left_first_button_pressed and raw.right_first_button_pressed
-        # X+B pauses arms independently when torso control owns a live session.
-        # X+A still revokes torso permission for the ready-pose operation.
-        if not valid or stop or prepare:
+        # Raw X+A is shared by PREPARE and explicit resume. Inhibit motion
+        # while held, without cancelling the admitted follow request. The
+        # mapper revokes permission when it actually enters PREPARE.
+        if not valid or stop:
             self.reset()
+        elif prepare:
+            self.wait_for_follow()
         self.last_time = now
         if self.source == 'quest':
             modifier = raw.left_first_button_touched and raw.left_second_button_touched
@@ -151,6 +161,7 @@ class TorsoControls:
         elif (toggle_edge and not self.require_release and ready and fresh
               and valid and not stop and not arm):
             self.enabled = not self.enabled
+            self.selected_enabled = self.enabled
         self.chord_down = chord
         if valid:
             self.last_hand = copy.copy(result)

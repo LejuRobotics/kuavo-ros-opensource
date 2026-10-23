@@ -2035,7 +2035,7 @@ class IkRos:
         # pose-confidence inference. Use the SAME latch as gesture control so
         # subsequent real stop gestures still revoke it normally.
         if hasattr(self, '_torso_controls'):
-            self._torso_controls.wait_for_follow()
+            self._torso_controls.request_follow()
         transformer = self.quest3_arm_info_transformer
         transformer.ok_gesture_counts = 0
         transformer.shot_gesture_counts = 0

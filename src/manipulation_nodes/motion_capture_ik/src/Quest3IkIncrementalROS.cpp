@@ -884,12 +884,6 @@ void Quest3IkIncrementalROS::fsmProcess() {
   bool leftGripRisingEdge = currentLeftGripPressed && !lastLeftGripPressed_;
   bool rightGripRisingEdge = currentRightGripPressed && !lastRightGripPressed_;
 
-  // 更新上一帧的 grip 状态（必须在使用完之后更新）
-  leftGripReleasePending_ = lastLeftGripPressed_ && !currentLeftGripPressed;
-  rightGripReleasePending_ = lastRightGripPressed_ && !currentRightGripPressed;
-  lastLeftGripPressed_ = currentLeftGripPressed;
-  lastRightGripPressed_ = currentRightGripPressed;
-
   // 处理左臂 grip 上升沿：更新锚点，使增量归零
   if (leftGripRisingEdge && !leftMaintainProcess) {
     // 【核心修复】在grip激活瞬间，先通过FK计算当前真实位置，然后通过速度IK求解器优化，
@@ -907,11 +901,20 @@ void Quest3IkIncrementalROS::fsmProcess() {
     computeLeftLink4FK(pLink4, qLink4);
 
     // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+    if (!leftVelocityIkSolverPtr_->seedFromMeasured(pLink4, pLeftLink6)) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm invalid measured FK; keep previous target");
+      return;
+    }
+    bool pointSolveSucceeded = false;
     const auto [p1Optimized, p2Optimized] =
         leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
                                         leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                        pLeftLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+                                        pLeftLink6, &pointSolveSucceeded  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
         );
+    if (!pointSolveSucceeded) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm point optimization failed; keep previous target and anchor");
+      return;
+    }
 
     // 保存优化后的结果
     latestRobotLeftElbowPos_ = p1Optimized;
@@ -945,11 +948,20 @@ void Quest3IkIncrementalROS::fsmProcess() {
     computeRightLink4FK(pLink4, qLink4);
 
     // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+    if (!rightVelocityIkSolverPtr_->seedFromMeasured(pLink4, pRightLink6)) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm invalid measured FK; keep previous target");
+      return;
+    }
+    bool pointSolveSucceeded = false;
     const auto [p1Optimized, p2Optimized] =
         rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
                                          rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                         pRightLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+                                         pRightLink6, &pointSolveSucceeded  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
         );
+    if (!pointSolveSucceeded) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm point optimization failed; keep previous target and anchor");
+      return;
+    }
 
     // 保存优化后的结果
     latestRobotRightElbowPos_ = p1Optimized;
@@ -969,6 +981,12 @@ void Quest3IkIncrementalROS::fsmProcess() {
                                                      qEndEffector,
                                                      qLink4);
   }
+
+  // 建锚成功后再消耗 grip 上升沿；失败时保留上一帧状态，下一帧重试。
+  leftGripReleasePending_ = lastLeftGripPressed_ && !currentLeftGripPressed;
+  rightGripReleasePending_ = lastRightGripPressed_ && !currentRightGripPressed;
+  lastLeftGripPressed_ = currentLeftGripPressed;
+  lastRightGripPressed_ = currentRightGripPressed;
 
   bool leftCanProcess = !leftMaintainProcess && currentLeftGripPressed &&
                         (!armOnlyIk_ || joyStickHandlerPtr_->isLeftArmCtrlModeActive());
@@ -1142,11 +1160,20 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
       computeLeftLink4FK(pLink4, qLink4);
 
       // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+      if (!leftVelocityIkSolverPtr_->seedFromMeasured(pLink4, pLeftLink6)) {
+        ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm invalid measured FK; keep previous target");
+        return false;
+      }
+      bool pointSolveSucceeded = false;
       const auto [p1Optimized, p2Optimized] =
           leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
                                           leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                          pLeftLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+                                          pLeftLink6, &pointSolveSucceeded  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
           );
+      if (!pointSolveSucceeded) {
+        ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm point optimization failed; keep previous target and anchor");
+        return false;
+      }
 
       // 保存优化后的结果
       latestRobotLeftElbowPos_ = p1Optimized;
@@ -1236,11 +1263,25 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
     }
   }
 
+  if (!leftVelocityIkSolverPtr_->hasMeasuredSeed()) {
+    Eigen::Vector3d measuredLeftLink6;
+    Eigen::Quaterniond measuredLeftLink6Quat;
+    computeLeftLink6FK(measuredLeftLink6, measuredLeftLink6Quat);
+    if (!leftVelocityIkSolverPtr_->seedFromMeasured(currentLeftElbowPos, measuredLeftLink6)) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm invalid measured FK; keep previous target");
+      return false;
+    }
+  }
+  bool pointSolveSucceeded = false;
   const auto [p1Optimized, p2Optimized] =
       leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
                                       leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                      scaledLeftHandPos          // p2Ref: 手部参考位置
+                                      scaledLeftHandPos, &pointSolveSucceeded  // p2Ref: 手部参考位置
       );
+  if (!pointSolveSucceeded) {
+    ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm point optimization failed; keep previous target and anchor");
+    return false;
+  }
   // 保存优化后的结果
   latestRobotLeftElbowPos_ = p1Optimized;
   latestLeftHandPosAfterOpt_ = p2Optimized;
@@ -1300,11 +1341,20 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
       computeRightLink4FK(pLink4, qLink4);
 
       // 调用速度IK求解器优化手部和肘部位置，确保位置一致性
+      if (!rightVelocityIkSolverPtr_->seedFromMeasured(pLink4, pRightLink6)) {
+        ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm invalid measured FK; keep previous target");
+        return false;
+      }
+      bool pointSolveSucceeded = false;
       const auto [p1Optimized, p2Optimized] =
           rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
                                            rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                           pRightLink6  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
+                                           pRightLink6, &pointSolveSucceeded  // p2Ref: 手部参考位置（当前FK计算的Link6位置）
           );
+      if (!pointSolveSucceeded) {
+        ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm point optimization failed; keep previous target and anchor");
+        return false;
+      }
 
       // 保存优化后的结果
       latestRobotRightElbowPos_ = p1Optimized;
@@ -1393,11 +1443,25 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
     }
   }
 
+  if (!rightVelocityIkSolverPtr_->hasMeasuredSeed()) {
+    Eigen::Vector3d measuredRightLink6;
+    Eigen::Quaterniond measuredRightLink6Quat;
+    computeRightLink6FK(measuredRightLink6, measuredRightLink6Quat);
+    if (!rightVelocityIkSolverPtr_->seedFromMeasured(currentRightElbowPos, measuredRightLink6)) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm invalid measured FK; keep previous target");
+      return false;
+    }
+  }
+  bool pointSolveSucceeded = false;
   const auto [p1Optimized, p2Optimized] =
       rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
                                        rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                       scaledRightHandPos          // p2Ref: 手部参考位置
+                                       scaledRightHandPos, &pointSolveSucceeded  // p2Ref: 手部参考位置
       );
+  if (!pointSolveSucceeded) {
+    ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm point optimization failed; keep previous target and anchor");
+    return false;
+  }
   // 保存优化后的结果
   latestRobotRightElbowPos_ = p1Optimized;
   latestRightHandPosAfterOpt_ = p2Optimized;
@@ -1462,11 +1526,25 @@ bool Quest3IkIncrementalROS::processDataLeftArm() {
   // 保存优化前的手部位置（用于可视化对比）
   latestLeftHandPosBeforeOpt_ = scaledLeftHandPos;
 
+  if (!leftVelocityIkSolverPtr_->hasMeasuredSeed()) {
+    Eigen::Vector3d measuredLeftLink6;
+    Eigen::Quaterniond measuredLeftLink6Quat;
+    computeLeftLink6FK(measuredLeftLink6, measuredLeftLink6Quat);
+    if (!leftVelocityIkSolverPtr_->seedFromMeasured(currentLeftElbowPos, measuredLeftLink6)) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm invalid measured FK; keep previous target");
+      return false;
+    }
+  }
+  bool pointSolveSucceeded = false;
   const auto [p1Optimized, p2Optimized] =
       leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
                                       leftElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                      scaledLeftHandPos          // p2Ref: 手部参考位置
+                                      scaledLeftHandPos, &pointSolveSucceeded  // p2Ref: 手部参考位置
       );
+  if (!pointSolveSucceeded) {
+    ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm point optimization failed; keep previous target and anchor");
+    return false;
+  }
   // 保存优化后的结果
   latestRobotLeftElbowPos_ = p1Optimized;
   latestLeftHandPosAfterOpt_ = p2Optimized;
@@ -1533,11 +1611,25 @@ bool Quest3IkIncrementalROS::processDataRightArm() {
   // 保存优化前的手部位置（用于可视化对比）
   latestRightHandPosBeforeOpt_ = scaledRightHandPos;
 
+  if (!rightVelocityIkSolverPtr_->hasMeasuredSeed()) {
+    Eigen::Vector3d measuredRightLink6;
+    Eigen::Quaterniond measuredRightLink6Quat;
+    computeRightLink6FK(measuredRightLink6, measuredRightLink6Quat);
+    if (!rightVelocityIkSolverPtr_->seedFromMeasured(currentRightElbowPos, measuredRightLink6)) {
+      ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm invalid measured FK; keep previous target");
+      return false;
+    }
+  }
+  bool pointSolveSucceeded = false;
   const auto [p1Optimized, p2Optimized] =
       rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
                                        rightElbowFixedPoint_,      // p1Fixed: 肘部固定点
-                                       scaledRightHandPos          // p2Ref: 手部参考位置
+                                       scaledRightHandPos, &pointSolveSucceeded  // p2Ref: 手部参考位置
       );
+  if (!pointSolveSucceeded) {
+    ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm point optimization failed; keep previous target and anchor");
+    return false;
+  }
   // 保存优化后的结果
   latestRobotRightElbowPos_ = p1Optimized;
   latestRightHandPosAfterOpt_ = p2Optimized;
@@ -2212,7 +2304,7 @@ void Quest3IkIncrementalROS::publishJointStates() {
       startTime = leftGripStartTime_;
     }
 
-    double alpha = 0.01;  // 默认 alpha 值（未超时时的平滑系数）
+    double alpha = 0.00;  // 默认 alpha 值（未超时时的平滑系数）
     // 只有在检测到移动且已开始计时时才计算 alpha
     if (leftArmMoved && !startTime.isZero()) {
       double elapsedTime = (currentTime - startTime).toSec();
@@ -2244,7 +2336,7 @@ void Quest3IkIncrementalROS::publishJointStates() {
       startTime = rightGripStartTime_;
     }
 
-    double alpha = 0.01;  // 默认 alpha 值（未超时时的平滑系数）
+    double alpha = 0.00;  // 默认 alpha 值（未超时时的平滑系数）
     // 只有在检测到移动且已开始计时时才计算 alpha
     if (rightArmMoved && !startTime.isZero()) {
       double elapsedTime = (currentTime - startTime).toSec();

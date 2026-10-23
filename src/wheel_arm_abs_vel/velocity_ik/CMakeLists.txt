@@ -141,6 +141,16 @@ if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
   if(VELOCITY_IK_CATKIN_BUILD)
     add_dependencies(velocity_ik_torso_permission_test ${VELOCITY_IK_MESSAGE_TARGETS})
   endif()
+  foreach(model 62 63 400062)
+    foreach(scenario normal reset_complete reset_hold reset_stale)
+      add_test(NAME velocity_ik_torso_${model}_${scenario}
+        COMMAND ${PYTHON_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
+          $<TARGET_FILE:velocity_ik_torso_permission_test> ${model} ${scenario})
+      set_tests_properties(velocity_ik_torso_${model}_${scenario}
+        PROPERTIES TIMEOUT 110)
+    endforeach()
+  endforeach()
   foreach(name joint_jerk_integration_test fixed_bandwidth_integration_test formal_reference_hotpath_test)
     add_executable(velocity_ik_${name} ${name}.cpp)
     target_include_directories(velocity_ik_${name} PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})

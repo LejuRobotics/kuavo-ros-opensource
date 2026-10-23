@@ -34,6 +34,17 @@ struct VelocityIkOfflineTest {
   // Locked means current pose, not the configured ready pose.
   const int knee=n.lowerBodyDecisionIndex(1);
   n.reference_q_(knee)=std::clamp(n.reference_q_(knee)+.03,n.joint_safe_lower_(knee),n.joint_safe_upper_(knee));
+  const bool full_reset=scenario.rfind("reset_",0)==0;
+  if(full_reset) {
+   for(int i:n.dof_layout_.decisionIndices(DofGroup::kLowerBody)) {
+    const double direction=n.preparation_position_(i)+.04<n.joint_safe_upper_(i)?1.:-1.;
+    n.reference_q_(i)=n.preparation_position_(i)+direction*.04;
+   }
+   for(int arm=0;arm<2;++arm) {
+    const int i=n.armDecisionIndex(arm,1);
+    n.reference_q_(i)=std::clamp(n.reference_q_(i)+.08,n.joint_safe_lower_(i),n.joint_safe_upper_(i));
+   }
+  }
   n.reference_initialized_=n.takeover_started_=n.enable_takeover_=true;
   n.robot_state_valid_=n.arm_mode_known_=true;n.current_arm_mode_=n.target_arm_mode_=2;n.arm_mode_transitioning_=false;
   n.session_anchor_.valid=true;n.session_anchor_.session_id=1;n.session_anchor_.generation=1;n.session_anchor_.base_coordinate_epoch=0;
@@ -59,12 +70,13 @@ struct VelocityIkOfflineTest {
    const Eigen::Quaterniond q(pose.rotation().matrix());p.orientation.x=q.x();p.orientation.y=q.y();p.orientation.z=q.z();p.orientation.w=q.w();
   }
   int tick=0;
+  bool publish_target=true;
   auto step=[&]{
    ros::WallDuration(.002).sleep();
    n.measured_q_=n.reference_q_;n.measured_dq_=n.reference_dq_;
    const auto now=ros::Time::now();n.robot_measurement_freshness_.observe(now.toNSec(),now.toNSec(),n.monotonicNs(),n.robot_state_timeout_);
    m->header.seq=++tick;m->header.stamp.fromSec(100.+tick*.002);m->mapper_publish_stamp=now;
-   n.targetCallback(m);const auto q=n.reference_q_.eval(),v=n.reference_dq_.eval();n.publishOnce();
+   if(publish_target)n.targetCallback(m);const auto q=n.reference_q_.eval(),v=n.reference_dq_.eval();n.publishOnce();
    if(n.dynamic_fault_latched_) {
     Node::SolverRequest probe;probe.reference_q=q;probe.reference_dq=v;probe.reference_ddq=n.reference_ddq_;
     probe.cycle_dt=.002;probe.lower_joint_recruitment.fill(m->torso_control_enabled?1.:0.);probe.lower_body_recruitment=m->torso_control_enabled?1.:0.;
@@ -76,6 +88,34 @@ struct VelocityIkOfflineTest {
    require(!n.dynamic_fault_latched_,"dynamic fault");require(!n.reference_tracking_fault_latched_,"tracking fault");
    require(maxAbs(n.reference_q_-q-.001*(v+n.reference_dq_))<1e-8,"integration mismatch");
   };
+  if(full_reset) {
+   m->control_state=Msg::CONTROL_PREPARE;
+   const auto initial=n.reference_q_.eval();
+   for(int k=0;k<6000 && !n.preparation_complete_;++k) {
+    if(k==80 && scenario=="reset_hold")m->control_state=Msg::CONTROL_HOLD;
+    if(k==80 && scenario=="reset_stale")publish_target=false;
+    step();
+    require(n.reference_q_.allFinite() && n.reference_dq_.allFinite(),"nonfinite reset trajectory");
+    if(k>=700 && scenario!="reset_complete")break;
+   }
+   require(!n.target_.torso_control_enabled,"reset enabled human torso following");
+   if(scenario=="reset_complete") {
+    require(n.preparation_complete_,"full reset did not complete");
+    for(int i:n.dof_layout_.decisionIndices(DofGroup::kLowerBody)) {
+     require(std::abs(n.reference_q_(i)-n.preparation_position_(i))<=n.preparation_lower_position_tolerance_,"lower joint not reset");
+     require(std::abs(n.reference_q_(i)-initial(i))>.02,"lower joint skipped");
+    }
+    require(armMax(n,n.reference_q_-n.preparation_position_)<=n.preparation_position_tolerance_,"arms not reset");
+   } else {
+    require(!n.preparation_complete_,"cancelled reset falsely completed");
+    require(maxAbs(n.reference_dq_)<1e-8,"cancelled reset failed to brake");
+    const auto held=n.reference_q_.eval();
+    for(int k=0;k<100;++k)step();
+    require(maxAbs(n.reference_q_-held)<1e-8,"cancelled reset drifted");
+   }
+   std::cout<<"PASS "<<scenario<<" all four lower joints and both arms, ticks="<<tick<<'\n';
+   return;
+  }
   step();const auto locked=n.reference_q_.eval();
   m->left_tcp_pose.position.x+=.10;m->right_tcp_pose.position.x+=.10;m->chest_pose.position.z+=.15;
   for(int k=0;k<600;++k)step();
@@ -155,9 +195,18 @@ struct VelocityIkOfflineTest {
   require(armMax(n,n.reference_q_-paused_again)<1e-8,"disabling torso resumed paused arms");
   m->arm_hold=false;++m->arm_operation_seq;
   m->control_state=Msg::CONTROL_PREPARE;++m->generation;
-  for(int k=0;k<1200;++k)step();
-  require(lowerMax(n,n.reference_q_-stopped)<1e-8,"PREPARE moved locked folding joints");
-  std::cout<<"PASS disable brakes and holds; X+A PREPARE preserves folding pose\n";
+  const double initial_lower_error=lowerMax(n,n.reference_q_-n.preparation_position_);
+  require(initial_lower_error>.015,"PREPARE fixture did not displace folding joints");
+  for(int k=0;k<6000 && !n.preparation_complete_;++k)step();
+  require(n.preparation_complete_,"whole-body PREPARE did not complete");
+  const double lower_error=lowerMax(n,n.reference_q_-n.preparation_position_);
+  require(lower_error<=n.preparation_lower_position_tolerance_,"PREPARE skipped lower ready pose");
+  require(armMax(n,n.reference_q_-n.preparation_position_)<=n.preparation_position_tolerance_,
+          "PREPARE skipped arm ready pose");
+  require(lowerMax(n,n.reference_q_-stopped)>.005,"PREPARE did not move folding joints");
+  require(!n.target_.torso_control_enabled,"PREPARE required torso follow permission");
+  std::cout<<"PASS X+A full-body PREPARE with torso disabled: initial lower error="
+           <<initial_lower_error<<" final="<<lower_error<<'\n';
   // Reordered permission from an old operation cannot re-enable the live one.
   auto old=boost::make_shared<Msg>(*m);old->generation=2;old->torso_control_enabled=true;
   n.targetCallback(old);require(!n.target_.torso_control_enabled,"old generation enabled torso");

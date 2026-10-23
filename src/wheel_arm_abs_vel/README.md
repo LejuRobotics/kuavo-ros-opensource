@@ -228,7 +228,7 @@ hand_side 为 0=左手、1=右手、2=双手。服务会选择服务控制并执
 全身 IK 的 `quest_velocity_ik.launch` / `pico_velocity_ik.launch` 在 heiman 机型默认启用摸键切换：
 摸 X+A 持续 300 ms 切下一个，摸 X+B 持续 300 ms 切上一个；松开后才能再次切换。
 Quest 触摸 X+Y 再按 B 属于躯干组合，期间不执行末端手势步进。
-X+A 解锁默认保持折叠臂；Quest 用上述组合、Pico 用 Y+RT 开关躯干。Pico 建议先按 Y 再捏 RT，避免先单独捏 RT 控制夹爪。操作、松开后的夹爪接管及复位行为见 [Quest/Pico 操作说明](docs/pico_quest_controls.md)。
+首次有效遥操默认进入躯干模式；Quest 用上述组合、Pico 用 Y+RT 切换躯干／手臂模式。X+A 在两种模式下均执行腰部、折叠臂与双臂全身复位，恢复跟随后保留所选模式。Pico 建议先按 Y 再捏 RT，避免先单独捏 RT 控制夹爪。操作、松开后的夹爪接管及复位行为见 [Quest/Pico 操作说明](docs/pico_quest_controls.md)。
 同时按下组合键不触发手势切换，避免与手臂解锁冲突。
 VR 使用 `/sg100/vr_step_gesture`（同 SG100StepGesture 类型），要求新鲜扳机输入，
 切换双手手势并接管 VR 控制；松开扳机使用 YAML 第一列，捏住扳机向第二列插值。

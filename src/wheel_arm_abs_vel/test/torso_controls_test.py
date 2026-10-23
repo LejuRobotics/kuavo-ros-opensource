@@ -239,7 +239,7 @@ class StartupTorsoControlsTest(unittest.TestCase):
 
     def test_revoke_before_first_follow_cancels_pending_default(self):
         for source in ('quest', 'pico'):
-            for event in ('reset', 'prepare', 'stop', 'invalid', 'stale_update', 'stale_poll'):
+            for event in ('reset', 'stop', 'invalid', 'stale_update', 'stale_poll'):
                 with self.subTest(source=source, event=event):
                     p = TorsoControls(source)
                     self.sample(p, ready=False)
@@ -257,6 +257,52 @@ class StartupTorsoControlsTest(unittest.TestCase):
                     for _ in range(5):
                         self.sample(p); self.assertFalse(p.enabled)
                     self.sample(p, **self.chord(p)); self.assertTrue(p.enabled)
+
+    def test_explicit_follow_after_prepare_restores_selected_mode(self):
+        for source in ('quest', 'pico'):
+            for manual_off in (False, True):
+                with self.subTest(source=source, manual_off=manual_off):
+                    p = TorsoControls(source)
+                    self.sample(p, ready=False); self.sample(p)
+                    if manual_off:
+                        self.sample(p, **self.chord(p)); self.sample(p)
+                    p.reset()  # production mapper enters PREPARE
+                    self.sample(p, ready=False)
+                    p.request_follow()  # admitted X+A resume, not readiness alone
+                    for _ in range(3):
+                        self.sample(p, ready=False, left_first_button_pressed=True,
+                                    right_first_button_pressed=True)
+                        self.assertFalse(p.enabled)
+                    self.sample(p, ready=False); self.sample(p)
+                    self.assertEqual(p.enabled, not manual_off)
+                    self.sample(p, **self.chord(p))
+                    self.assertEqual(p.enabled, manual_off)
+
+    def test_cold_prepare_then_first_follow_uses_default_torso(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            p.reset()
+            self.sample(p, ready=False, left_first_button_pressed=True,
+                        right_first_button_pressed=True)
+            self.assertFalse(p.enabled)
+            p.request_follow()
+            self.sample(p, ready=False)
+            self.sample(p)
+            self.assertTrue(p.enabled)
+
+    def test_fault_after_follow_request_cancels_pending_permission(self):
+        for source in ('quest', 'pico'):
+            for event in ('stop', 'stale', 'invalid'):
+                p = TorsoControls(source)
+                self.sample(p, ready=False); p.request_follow()
+                if event == 'stop':
+                    self.sample(p, ready=False, left_first_button_pressed=True,
+                                left_second_button_pressed=True)
+                elif event == 'invalid': self.sample(p, right_trigger=float('nan'))
+                else: self.now += 1.; p.authorized(self.now, False)
+                self.sample(p); self.sample(p)
+                self.assertFalse(p.enabled, (source, event))
 
     def test_initial_wait_without_packets_preserves_default(self):
         for source in ('quest', 'pico'):
