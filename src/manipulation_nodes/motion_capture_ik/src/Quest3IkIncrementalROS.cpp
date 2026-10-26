@@ -3109,10 +3109,14 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   }
 
   // drake initialization
+  // IK 只使用运动学，不注册 SceneGraph：URDF 中的 STL 碰撞网格不能被 Drake 的
+  // proximity 引擎接受（非 .obj），注册几何会直接抛异常导致节点退出。
   auto diagramBuilder = std::make_unique<drake::systems::DiagramBuilder<double>>();
-  auto [plant, sceneGraph] = drake::multibody::AddMultibodyPlantSceneGraph(diagramBuilder.get(), 0.0);
+  auto& plant = *diagramBuilder->AddSystem<drake::multibody::MultibodyPlant<double>>(0.0);
 
   drake::multibody::Parser parser(&plant);
+  // Drake 的 PackageMap 独立于 rospack，需显式注册 URDF 中 package:// 引用的 ROS 包
+  parser.package_map().Add("kuavo_assets", kuavo_assets_path);
   (void)motion_capture_ik::drake_parser_compat::AddUrdfModel(parser, urdfFilePath);
 
   const auto& baseFrame = plant.GetFrameByName("base_link");

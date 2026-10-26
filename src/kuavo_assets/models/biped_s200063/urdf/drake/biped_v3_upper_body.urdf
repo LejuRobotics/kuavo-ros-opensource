@@ -36,192 +36,16 @@
       </geometry>
     </collision>
   </link>
-  <link name="base_to_joint">
-    <inertial>
-      <origin xyz="-0.00314715 -0.01111045 0.08162744"
-              rpy="0 0 0" />
-      <mass value="7.27493629" />
-      <inertia ixx="0.02821438"
-               ixy="0.0"
-               ixz="0.0"
-               iyy="0.02725740"
-               iyz="0.0"
-               izz="0.02049767" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0"
-              rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/knee_link.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="base_to_joint"
-         type="fixed">
-    <origin xyz="0.093 0 0.30085"
-            rpy="0 0 0" />
-    <parent link="base_link" />
-    <child link="base_to_joint" />
-  </joint>
-  <link name="knee_link">
-    <inertial>
-      <origin xyz="-0.22895411 0.00062518 0.08817449"
-              rpy="0 0 0" />
-      <mass value="13.41361777" />
-      <inertia ixx="0.14019856"
-               ixy="-0.00700530"
-               ixz="0.13323445"
-               iyy="0.44977434"
-               iyz="0.00328676"
-               izz="0.43766820" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0"
-              rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/leg_Link.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="knee_joint"
-         type="revolute">
-    <origin xyz="0 0 0.1055"
-            rpy="0 0 0" />
-    <parent link="base_to_joint" />
-    <child link="knee_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="0"
-           upper="1.448"
-           effort="668.53"
-           velocity="25.33" />
-    <dynamics damping="0.2"
-              friction="0.0" />
-  </joint>
-  <link name="leg_link">
-    <inertial>
-      <origin xyz="0.24706164 0.01130291 0.06772512"
-              rpy="0 0 0" />
-      <mass value="9.78118294" />
-      <inertia ixx="0.05688620"
-               ixy="0.01296222"
-               ixz="-0.08521923"
-               iyy="0.39041344"
-               iyz="0.00341900"
-               izz="0.35048179" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0"
-              rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/waist_pitch_Link.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="leg_joint"
-         type="revolute">
-    <origin xyz="-0.46521 0 0.18325"
-            rpy="0 0 0" />
-    <parent link="knee_link" />
-    <child link="leg_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-2.81"
-           upper="0.0"
-           effort="668.53"
-           velocity="25.33" />
-    <dynamics damping="0.2"
-              friction="0.0" />
-  </joint>
-  <link name="waist_link">
-    <inertial>
-      <origin xyz="-0.00148154 0.0 0.05846250"
-              rpy="0 0 0" />
-      <mass value="4.65997944" />
-      <inertia ixx="0.04744596"
-               ixy="0.0"
-               ixz="0.0"
-               iyy="0.03649612"
-               iyz="0.0"
-               izz="0.03870953" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0"
-              rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/waist_yaw_Link.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="waist_pitch_joint"
-         type="revolute">
-    <origin xyz="0.48296 0 0.12941"
-            rpy="0 0 0" />
-    <parent link="leg_link" />
-    <child link="waist_link" />
-    <axis xyz="0 1 0" />
-    <limit lower="-0.15707963267949"
-           upper="2.9845130209103"
-           effort="618.48"
-           velocity="25.33" />
-    <dynamics damping="0.2"
-              friction="0.0" />
-  </joint>
-  <link name="waist_yaw_link">
-    <inertial>
-      <origin xyz="0.00159298 -0.00027078 0.13187420"
-              rpy="0 0 0" />
-      <mass value="11.56094002" />
-      <inertia ixx="0.24663556"
-               ixy="0.0"
-               ixz="0.0"
-               iyy="0.15937676"
-               iyz="0.0"
-               izz="0.15881326" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0"
-              rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/torso.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0"
-              rpy="0 0 0" />
-      <geometry>
-        <cylinder radius="0.15"
-                  length="0.6" />
-      </geometry>
-    </collision>
-  </link>
-  <joint name="waist_yaw_joint"
-         type="revolute">
-    <origin xyz="0 0 0.250"
-            rpy="0 0 0" />
-    <parent link="waist_link" />
-    <child link="waist_yaw_link" />
-    <axis xyz="0 0 1" />
-    <limit lower="-3.14159265358979"
-           upper="3.14159265358979"
-           effort="618.48"
-           velocity="25.33" />
-    <dynamics damping="0.2"
-              friction="0.0" />
-  </joint>
+
+
+
+
+
+
+
+
+
+
   <link name="zarm_l1_link">
     <inertial>
       <origin xyz="0.00166796 -0.008241 0.00012987"
@@ -247,9 +71,9 @@
   </link>
   <joint name="zarm_l1_joint"
          type="revolute">
-    <origin xyz="0 0.2527 0.227"
+    <origin xyz="0 0.253 0.227"
             rpy="0 0 0" />
-    <parent link="waist_yaw_link" />
+    <parent link="base_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-2.4"
@@ -556,9 +380,9 @@
   </link>
   <joint name="zarm_r1_joint"
          type="revolute">
-    <origin xyz="0 -0.2527 0.227"
+    <origin xyz="0 -0.253 0.227"
             rpy="0 0 0" />
-    <parent link="waist_yaw_link" />
+    <parent link="base_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-2.4"

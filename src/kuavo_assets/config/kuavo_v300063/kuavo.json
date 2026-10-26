@@ -8,6 +8,13 @@
     "Larm_urdf": "biped_s49/urdf/drake/Larm.urdf",
     "Rarm_urdf": "biped_s49/urdf/drake/Rarm.urdf",
     "arm_urdf": "biped_s300063/urdf/drake/biped_v3_arm.urdf",
+    "_comment_drake_velocity_ik_geometry": "wheel s300063 (5W) 半身 IK 几何：对齐 biped_s63，shoulder 在 base_link 下 z=1.196。",
+    "drake_velocity_ik_geometry": {
+        "l1": 0.2844,
+        "l2": 0.2344,
+        "left_p0":  [0.1107,  0.253, 1.196],
+        "right_p0": [0.1107, -0.253, 1.196]
+    },
     "end_frames_name": ["torso", "l_foot_sole", "r_foot_sole"],
     "end_frames_name_full_body": ["torso", "l_foot_sole", "r_foot_sole", "l_hand_sole", "r_hand_sole"],
     "ankle_motor_offset_degree":[-15,-15,-15,-15],
@@ -44,6 +51,7 @@
     "peak_protection":0.1,
     "locked_rotor_protection":2,
     "speed_protection":0.05,             
+    "joint_limit_torque_ratio": 0.3,
     "joint_kp": [300, 300, 260, 160],
     "joint_kd": [2150, 2300, 2150, 2150],
     "vr_joint_kp": [300, 300, 260, 160],
@@ -55,14 +63,14 @@
     "ruiwo_kp": [270, 210, 256, 180, 120, 120, 120,
                 270, 210, 256, 180, 120, 120, 120,
                 10, 10],
-    "ruiwo_kd": [4, 5, 5, 5, 3, 3, 3, 
-                 4, 5, 5, 5, 3, 3, 3, 
+    "ruiwo_kd": [20, 10, 10, 10, 6, 6, 6, 
+                 20, 10, 10, 10, 6, 6, 6, 
                  4, 3],
     "vr_ruiwo_kp": [150, 200, 200, 200, 55, 55, 55, 
                     150, 200, 200, 200, 55, 55, 55, 
                     10, 10],
-    "vr_ruiwo_kd": [6, 5, 5, 5, 5, 5, 5, 
-                    6, 5, 5, 5, 5, 5, 5, 
+    "vr_ruiwo_kd": [20, 10, 30, 10, 5, 5, 5, 
+                    20, 10, 30, 10, 5, 5, 5, 
                     4, 3],
     "EndEffectorType": ["qiangnao", "qiangnao"],
     "min_joint_position_limits":[
@@ -157,11 +165,11 @@
     "eef_visual_stl_files" : ["l_hand_pitch.STL", "r_hand_pitch.STL"],
     "upper_arm_length": 0.2844,
     "lower_arm_length": 0.45,
-    "shoulder_width": 0.2527,
+    "shoulder_width": 0.253,
     "eef_z_offset": -0.0,
     "hand_ref_length": 0.193,
-    "base_height_offset": 1.19016,
-    "base_chest_offset_x": 0.1157,
+    "base_height_offset": 1.196,
+    "base_chest_offset_x": 0.1107,
     
     "motor_velocities_factor": 0.005,
     "joint_velocities_limit": {
@@ -275,6 +283,7 @@
         "pitch_range": [0.0, 30.0],
         "base_position": [0.0, 0.0, 0.74]
     },
+
 
     "point_track_ik_solver_config": {
         "historyBufferSize": 16,
