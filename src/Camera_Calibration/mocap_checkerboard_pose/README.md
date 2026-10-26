@@ -180,7 +180,7 @@ p_link = p_tooling - R @ link_offset_mm
 
 | 刚体 | link_offset_mm |
 |------|----------------|
-| checkerboard | [-203.93, -153.93, 11.50] |
+| checkerboard | [-203.93, -153.93, -11.50] |
 | l_shoulder (S45) | [0, -68.50, 105.00] |
 | l_shoulder (52/56/62/63) | [0, -53.50, 105.00] |
 | torso | [120.02, -50.82, 6.0] |

@@ -270,7 +270,8 @@ protected:
   void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState, bool isServiceReset);
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
-  void applyTorsoVelDeltaCommands(scalar_t initTime);
+  void applyTorsoVelDeltaCommands(scalar_t initTime, const vector_t& initState);
+  void releaseTorsoRotationControl();
   // z-coupled x envelope（与 mobile_manipulator_joy getTorsoMaxX 一致）：降 z 时收回超限 x，避免 pitch=0 不可达而前倾
   double getTorsoWorkspaceMaxX(double z_increment) const;
   // 钳制 cmdTorsoPose_ 到工作空间；若有修改返回 true（调用方需重规划 Ruckig）
@@ -498,6 +499,11 @@ private:
   bool hasTorsoVelIntegrateTime_{false};
   static constexpr scalar_t kTorsoVelTimeout_{0.3};
   ros::Subscriber targetTorsoVelSubscriber_;
+  ros::Subscriber targetTorsoRotationVelSubscriber_;
+  ros::Publisher torsoRotationLockPub_;
+  bool torsoRotationRequested_{false};  // cmdTorsoVel_mtx_ 保护
+  bool torsoRotationActive_{false};     // 仅规划线程访问
+  Eigen::Vector4d torsoRotationJointTarget_{Eigen::Vector4d::Zero()};
   ros::Subscriber targetTorsoDeltaSubscriber_;
   ros::Publisher torsoOpenLoopStatePub_;    // /torso_open_loop_state: 4D pose [x,z,yaw,pitch]
 
@@ -704,6 +710,7 @@ private:
 
   // 下肢关节规划器, 单位: rad
   std::shared_ptr<cmdPosePlannerWithRuckig> legJointPlannerRuckigPtr_;
+  std::shared_ptr<cmdPosePlannerWithRuckig> torsoRotationPlannerRuckigPtr_;
   double legJoint_plannerInitialTime_{0.0};
   Eigen::VectorXd legJoint_prevTargetPose_;
   Eigen::VectorXd legJoint_prevTargetVel_;

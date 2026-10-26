@@ -358,6 +358,11 @@ namespace humanoidController_wheel_wbc
     double lockKneeQ_{0.0};                        // 锁定的 knee 目标角 [rad]
     double lockLegQ_{0.0};                         // 锁定的 leg 目标角 [rad]
     ros::Time lastLockParamCheckTime_{0.0};        // 上次实时查询 lock rosparam 的时刻（节流用）
+    // 手柄旋转组使用 RM 捕获的同一快照，不改写增量 IK 的独立锁定开关。
+    ros::Subscriber torsoRotationLockSub_;
+    std::mutex torsoRotationLockMutex_;
+    bool torsoRotationLockActive_{false};
+    Eigen::Vector2d torsoRotationLockQ_{Eigen::Vector2d::Zero()};
 
     // ========== 运动学计算 ==========
     std::shared_ptr<humanoid_controller::WaistKinematics> waistKinematics_;

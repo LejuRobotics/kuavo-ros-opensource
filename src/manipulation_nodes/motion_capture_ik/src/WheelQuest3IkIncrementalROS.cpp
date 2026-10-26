@@ -1505,6 +1505,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (ikLowerBodyJointCommand_.size() == 4) {
       frozenLbJointCommand_ = ikLowerBodyJointCommand_;
       hasLbJointCommandFrozen_ = true;
+      // 同步请求清零下肢 Ruckig 速度（由 publishLegJointStates 消费），避免松手过冲抖一下
+      lbFreezeRuckigResetPending_.store(true, std::memory_order_release);
     }
   }
 
@@ -1888,19 +1890,20 @@ void WheelQuest3IkIncrementalROS::updateLivePathElbowFade(bool active, bool left
   }
 }
 
-void WheelQuest3IkIncrementalROS::applyLivePathKeepOutRelax() {
-  const double fade = std::max(leftLivePathElbow_.fade, rightLivePathElbow_.fade);
-  const double minP1 =
-      livePathElbowKeepOutMinP1Nom_ * (1.0 - fade) + livePathElbowKeepOutMinP1_ * fade;
-  const double clearance =
-      livePathElbowKeepOutClearanceNom_ * (1.0 - fade) + livePathElbowKeepOutClearance_ * fade;
+void WheelQuest3IkIncrementalROS::applyElbowSafetyClearance() {
+  // 运动混合只改变肘部姿态偏好。不能因为任意一只手运动就同时
+  // 放宽双肘的隔离距离，否则起始抬手时点位优化和 IK 都会允许内夹。
+  // 两级使用同一下限，避免最终关节解越过前级的肘部隔离面。
+  const double clearance = std::max(
+      elbowSafetyMinLateralDistance_,
+      std::max(livePathElbowKeepOutMinP1Nom_, livePathElbowKeepOutClearanceNom_));
   if (chestElbowHandPointOptSolverPtr_) {
     DrakeChestElbowHandBoundsConfig bounds = chestElbowHandBoundsConfig_;
-    bounds.minP1XyNorm = std::max(0.0, minP1);
+    bounds.minP1XyNorm = clearance;
     chestElbowHandPointOptSolverPtr_->setBounds(bounds);
   }
   if (oneStageIkEndEffectorPtr_) {
-    oneStageIkEndEffectorPtr_->setWaistElbowLateralClearance(std::max(0.0, clearance));
+    oneStageIkEndEffectorPtr_->setWaistElbowLateralClearance(clearance);
   }
 }
 

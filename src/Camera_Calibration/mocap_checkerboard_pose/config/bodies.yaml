@@ -17,7 +17,7 @@ left_shoulder_fixtures:
 bodies:
   - name: checkerboard
     msg_type: PoseStamped
-    link_offset_mm: [-203.93, -153.93, 11.50]
+    link_offset_mm: [-203.93, -153.93, -11.50]
   - name: torso
     msg_type: PoseStamped
     link_offset_mm: [120.02, -50.82, 6.0]

@@ -340,7 +340,7 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
     ROS_ERROR("[WheelQuest3IkIncrementalROS] chestElbowHandPointOptSolverPtr_ is not initialized");
     return false;
   }
-  applyLivePathKeepOutRelax();
+  applyElbowSafetyClearance();
   latestLeftElbowTrackingActivation_ =
       std::clamp(input.leftElbowTrackingActivation, 0.0, 1.0);
   latestRightElbowTrackingActivation_ =
@@ -938,6 +938,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   }
   frozenLbJointCommand_ = Eigen::VectorXd::Zero(4);
   hasLbJointCommandFrozen_ = false;
+  lbFreezeRuckigResetPending_.store(false, std::memory_order_relaxed);
   // 重置pose约束列表，使用默认手部位置初始化，确保进入增量模式时能正确初始化到默认位置
   latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
   Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
@@ -2308,8 +2309,41 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
   }
 
   sensor_msgs::JointState lbLegTrajMsg;
+  Eigen::Vector3d lbFreezeAlignHead = Eigen::Vector3d::Zero();
+  bool lbFreezeAlignReady = false;
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    // 双手 grip 刚松开并冻结 knee/leg/waist_pitch：以当前滤波输出对齐冻结目标，并清零这三轴
+    // Ruckig/EMA 速度。否则目标骤停时滤波器仍带着旧速度过冲再回摆 → 下肢折叠臂肉眼「抽一下」。
+    if (lbFreezeRuckigResetPending_.exchange(false, std::memory_order_acq_rel) && lb_q_.size() == 4 &&
+        targetLbAngles.size() == 4) {
+      for (int i = 0; i < 3; ++i) {
+        const double qFreeze = lb_q_(i);
+        lbFreezeAlignHead(i) = qFreeze;
+        targetLbAngles(i) = qFreeze;
+        if (lbJointRuckigFilterPtr_) {
+          lbJointRuckigFilterPtr_->resetDof(static_cast<size_t>(i), qFreeze);
+        }
+      }
+      if (lb_dq_.size() >= 3) {
+        lb_dq_.head(3).setZero();
+      }
+      if (latest_lb_q_.size() >= 3) {
+        latest_lb_q_.head(3) = lb_q_.head(3);
+      }
+      if (latest_lb_dq_.size() >= 3) {
+        latest_lb_dq_.head(3).setZero();
+      }
+      if (lowpass_lb_dq_.size() >= 3) {
+        lowpass_lb_dq_.head(3).setZero();
+      }
+      lbFreezeAlignReady = true;
+      {
+        std::lock_guard<std::mutex> moveLock(lbLegMoveTimeMutex_);
+        lbLegMoveStartTime_ = ros::Time(0);
+      }
+    }
+
     // 1) ruckig 限速度/加速度平滑
     if (lbJointRuckigFilterPtr_) {
       const Eigen::VectorXd filteredLbQ = lbJointRuckigFilterPtr_->update(targetLbAngles);
@@ -2383,6 +2417,23 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
       lbLegTrajMsg.position[i] = latest_lb_q_(i) * 180.0 / M_PI;
       lbLegTrajMsg.velocity[i] = lowpass_lb_dq_(i) * 180.0 / M_PI;
       lbLegTrajMsg.effort[i] = 0.0;
+    }
+  }
+
+  // 在已释放 jointStateMutex_ 后再写冻结快照，避免与 publishJointStates 的锁序死锁；
+  // 用当前滤波位置覆盖 IK 瞬时快照，防止下一拍目标又跳回松手前的 IK 值。
+  if (lbFreezeAlignReady) {
+    {
+      std::lock_guard<std::mutex> lock(ikResultMutex_);
+      if (frozenLbJointCommand_.size() == 4) {
+        frozenLbJointCommand_.head(3) = lbFreezeAlignHead;
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(lbLegTargetMutex_);
+      if (hasLatestLbTargetAngles_ && latestLbTargetAngles_.size() == 4) {
+        latestLbTargetAngles_.head(3) = lbFreezeAlignHead;
+      }
     }
   }
 
@@ -2670,7 +2721,17 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   }
 
   std::vector<std::string> frameNames = loadFrameNamesFromConfig(configJson);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/natural_elbow/safety_min_lateral_distance",
+                    elbowSafetyMinLateralDistance_, 0.22);
+  if (!std::isfinite(elbowSafetyMinLateralDistance_) || elbowSafetyMinLateralDistance_ < 0.0) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] Invalid safety_min_lateral_distance, using 0.22 m");
+    elbowSafetyMinLateralDistance_ = 0.22;
+  }
   auto pointTrackConfig = loadPointTrackIKSolverConfigFromJson(configJson);
+  if (elbowSafetyMinLateralDistance_ > 0.0) {
+    // 安全下限开启时，最终 IK 必须启用硬约束，不能只有前级点位隔离。
+    pointTrackConfig.enableWaistElbowClearanceConstraint = true;
+  }
   livePathElbowKeepOutClearanceNom_ = std::max(0.0, pointTrackConfig.waistElbowLateralClearance);
   oneStageIkEndEffectorPtr_ =
       std::make_unique<HighlyDynamic::WheelOneStageIKEndEffector>(&plant, frameNames, pointTrackConfig);
@@ -3139,7 +3200,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       "gravity=%.2f, human=%.2f, soft_tracking_scale=%.2f, "
       "reach_margin=%.3f m, extension_fade_retraction=[%.3f, %.3f] m, "
       "waist_avoidance=%s, waist_clearance=[full %.3f, soft %.3f] m, "
-      "live_path_fade=%s vmin=%.2f vmax=%.2f keep_tracking=true keepout minP1=%.3f clearance=%.3f",
+      "live_path_fade=%s vmin=%.2f vmax=%.2f keep_tracking=true "
+      "legacy keepout relaxation ignored (minP1=%.3f clearance=%.3f)",
       enableWheelNaturalElbowGuide_ ? "true" : "false",
       std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
       1.0 - std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
@@ -3349,6 +3411,11 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
     chestElbowHandPointOptSolverPtr_->setWeights(chestElbowHandWeightConfig_);
     chestElbowHandPointOptSolverPtr_->setBounds(chestElbowHandBoundsConfig_);
     livePathElbowKeepOutMinP1Nom_ = std::max(0.0, chestElbowHandBoundsConfig_.minP1XyNorm);
+    applyElbowSafetyClearance();
+    ROS_INFO("[WheelQuest3IkIncrementalROS] Fixed elbow lateral clearance for point-opt and IK: %.3f m "
+             "(not relaxed by live_path_fade)",
+             std::max(elbowSafetyMinLateralDistance_,
+                      std::max(livePathElbowKeepOutMinP1Nom_, livePathElbowKeepOutClearanceNom_)));
 
     ROS_INFO("[WheelQuest3IkIncrementalROS] DrakeChestElbowHandPointOptSolver initialized with FK result (l1=%.4f, l2=%.4f)",
              l1_,

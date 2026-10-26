@@ -549,6 +549,21 @@ namespace humanoidController_wheel_wbc
     stopRobotPub_ = controllerNh_.advertise<std_msgs::Bool>("/stop_robot", 10);
     armTrajFilteredPub_ = controllerNh_.advertise<sensor_msgs::JointState>("/vr_incremental/kuavo_arm_traj_filtered", 10);
     resetToStatePub_ = controllerNh_.advertise<std_msgs::Float64MultiArray>("/mobile_manipulator_reset_to_state", 1);
+    torsoRotationLockSub_ = controllerNh_.subscribe<sensor_msgs::JointState>(
+        "/torso_rotation_joint_lock", 1,
+        [this](const sensor_msgs::JointState::ConstPtr& msg) {
+          if (!msg->position.empty() &&
+              (msg->position.size() != 2 || !std::isfinite(msg->position[0]) ||
+               !std::isfinite(msg->position[1]))) {
+            ROS_WARN_THROTTLE(1.0, "[TorsoRotation] ignoring invalid knee/leg lock snapshot");
+            return;
+          }
+          std::lock_guard<std::mutex> lock(torsoRotationLockMutex_);
+          torsoRotationLockActive_ = msg->position.size() == 2;
+          if (torsoRotationLockActive_) {
+            torsoRotationLockQ_ << msg->position[0], msg->position[1];
+          }
+        });
 
     // 双手末端 FK 话题：/sensors_data_raw/ee_fk/<末端帧名>
     handFkPubs_.resize(manipulatorModelInfo_.eeFrames.size());
@@ -1779,6 +1794,15 @@ namespace humanoidController_wheel_wbc
       optimizedInput_mrt_limit_[baseDim_ + 1] = 0.0;
     } else {
       lockKneeLegCaptured_ = false;  // 解锁后，下次锁定重新捕获快照
+    }
+
+    // 旋转组两级共用 q0/q1 快照。显式增量 IK 锁定优先，避免两种锁相互覆盖。
+    if (!lockKneeLegEnabled_.load() && soft_pause_state_.load() == SoftPauseState::IDLE) {
+      std::lock_guard<std::mutex> lock(torsoRotationLockMutex_);
+      if (torsoRotationLockActive_) {
+        optimizedState_mrt_limit_.segment<2>(baseDim_) = torsoRotationLockQ_;
+        optimizedInput_mrt_limit_.segment<2>(baseDim_).setZero();
+      }
     }
 
     // WBC 目标：optimizedState_wbc=期望位姿/关节角，optimizedInput_wbc=对应速度，维度见头文件注释

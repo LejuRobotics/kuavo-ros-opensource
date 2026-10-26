@@ -3,6 +3,7 @@
 #include <pinocchio/algorithm/kinematics.hpp>
 
 #include "humanoid_wheel_interface/reference_manager/MobileManipulatorReferenceManager.h"
+#include "humanoid_wheel_interface/motion_planner/TorsoRotationTarget.h"
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/TwistStamped.h>
 #include <angles/angles.h>
@@ -409,6 +410,20 @@ namespace mobile_manipulator {
       return plannerPtr;
     };
     legJointPlannerRuckigPtr_ = createLegJointPlanner();
+    torsoRotationPlannerRuckigPtr_ = createLegJointPlanner();
+    // 旋转组沿用较严格的躯干/关节速度、加速度和 jerk 限制，不提高动态阈值。
+    vector_t rotationVel = vector_t::Constant(4, std::abs(legJoint_move_spd_[0]));
+    vector_t rotationAcc = vector_t::Constant(4, std::abs(legJoint_move_acc_[0]));
+    vector_t rotationJerk = vector_t::Constant(4, std::abs(legJoint_move_jerk_[0]));
+    for (int joint = 2; joint < 4; ++joint) {
+      const int axis = joint == 2 ? 3 : 2;
+      rotationVel[joint] = std::min(rotationVel[joint], std::abs(torsoPose_move_spd_[axis]));
+      rotationAcc[joint] = std::min(rotationAcc[joint], std::abs(torsoPose_move_acc_[axis]));
+      rotationJerk[joint] = std::min(rotationJerk[joint], std::abs(torsoPose_move_jerk_[axis]));
+    }
+    torsoRotationPlannerRuckigPtr_->setVelocityLimits(rotationVel, -rotationVel);
+    torsoRotationPlannerRuckigPtr_->setAccelerationLimits(rotationAcc, -rotationAcc);
+    torsoRotationPlannerRuckigPtr_->setJerkLimits(rotationJerk);
     timedPlannerScheduler_.addTimedPlannerPosePtr(createLegJointPlanner());
     legJoint_prevTargetPose_.setZero(4);
     legJoint_prevTargetVel_.setZero(4);
@@ -865,12 +880,30 @@ namespace mobile_manipulator {
       if (!isEnableControl()) return;
       if (torsoResetWindowActive_.load(std::memory_order_acquire)) return;  // #3973: 复位窗口内丢弃
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      torsoRotationRequested_ = false;
       mapTorsoTwist4D(*msg, cmdTorsoVel_);
       isCmdTorsoVelUpdated_ = true;
       isCmdTorsoVelTimeUpdate_ = true;
     };
     targetTorsoVelSubscriber_ =
         nodeHandle_.subscribe<geometry_msgs::Twist>("/cmd_torso_vel", 1, targetTorsoVelCallback);
+
+    // G11/北通旋转组：与笛卡尔速度分流，零速度也携带分组语义。
+    targetTorsoRotationVelSubscriber_ = nodeHandle_.subscribe<geometry_msgs::Twist>(
+        "/cmd_torso_rotation_vel", 1,
+        [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr& msg) {
+          if (!isEnableControl() || torsoResetWindowActive_.load(std::memory_order_acquire)) return;
+          if (!std::isfinite(msg->angular.y) || !std::isfinite(msg->angular.z)) return;
+          std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+          torsoRotationRequested_ = true;
+          mapTorsoTwist4D(*msg, cmdTorsoVel_);
+          cmdTorsoVel_.head<2>().setZero();
+          isCmdTorsoVelUpdated_ = true;
+          isCmdTorsoVelTimeUpdate_ = true;
+        });
+    torsoRotationLockPub_ = nodeHandle_.advertise<sensor_msgs::JointState>(
+        "/torso_rotation_joint_lock", 1, true);
+    torsoRotationLockPub_.publish(sensor_msgs::JointState());
 
     // /cmd_torso_delta: oneshot relative displacement. Soft-pause discards.
     auto targetTorsoDeltaCallback = [this, mapTorsoTwist4D](const geometry_msgs::Twist::ConstPtr &msg)
@@ -1891,7 +1924,7 @@ namespace mobile_manipulator {
                                                     currentTargetPose, 
                                                     currentTargetVel, 
                                                     currentTargetAcc);
-      legJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_, 
+      (torsoRotationActive_ ? torsoRotationPlannerRuckigPtr_ : legJointPlannerRuckigPtr_)->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_,
                                                      currentTargetPose_legJoint, 
                                                      currentTargetVel_legJoint, 
                                                      currentTargetAcc_legJoint);
@@ -1932,7 +1965,7 @@ namespace mobile_manipulator {
                                                   prevTargetAcc_);
     if(getEnableLegJointTrack() == true)
     {
-      legJointPlannerRuckigPtr_->getTrajectoryAtTime(initTime - legJoint_plannerInitialTime_ + dt, 
+      (torsoRotationActive_ ? torsoRotationPlannerRuckigPtr_ : legJointPlannerRuckigPtr_)->getTrajectoryAtTime(initTime - legJoint_plannerInitialTime_ + dt,
                                                    legJoint_prevTargetPose_, 
                                                    legJoint_prevTargetVel_, 
                                                    legJoint_prevTargetAcc_);
@@ -2037,7 +2070,7 @@ namespace mobile_manipulator {
                                                    currentTargetPose, 
                                                    currentTargetVel, 
                                                    currentTargetAcc);
-      legJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_, 
+      (torsoRotationActive_ ? torsoRotationPlannerRuckigPtr_ : legJointPlannerRuckigPtr_)->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_,
                                                      currentTargetPose_legJoint, 
                                                      currentTargetVel_legJoint, 
                                                      currentTargetAcc_legJoint);
@@ -2103,7 +2136,7 @@ namespace mobile_manipulator {
                                                   cmdVel_prevTargetAcc_);
     if(getEnableLegJointTrack() == true)
     {
-      legJointPlannerRuckigPtr_->getTrajectoryAtTime(initTime - legJoint_plannerInitialTime_ + dt, 
+      (torsoRotationActive_ ? torsoRotationPlannerRuckigPtr_ : legJointPlannerRuckigPtr_)->getTrajectoryAtTime(initTime - legJoint_plannerInitialTime_ + dt,
                                                    legJoint_prevTargetPose_, 
                                                    legJoint_prevTargetVel_, 
                                                    legJoint_prevTargetAcc_);
@@ -2155,7 +2188,7 @@ namespace mobile_manipulator {
                                                    currentTargetPose, 
                                                    currentTargetVel, 
                                                    currentTargetAcc);
-      legJointPlannerRuckigPtr_->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_, 
+      (torsoRotationActive_ ? torsoRotationPlannerRuckigPtr_ : legJointPlannerRuckigPtr_)->getTrajectoryAtTime(currentTime - legJoint_plannerInitialTime_,
                                                      currentTargetPose_legJoint, 
                                                      currentTargetVel_legJoint, 
                                                      currentTargetAcc_legJoint);
@@ -2203,7 +2236,7 @@ namespace mobile_manipulator {
                                                   cmdVel_prevTargetAcc_);
     if(getEnableLegJointTrack() == true)
     {
-      legJointPlannerRuckigPtr_->getTrajectoryAtTime(initTime - legJoint_plannerInitialTime_ + dt, 
+      (torsoRotationActive_ ? torsoRotationPlannerRuckigPtr_ : legJointPlannerRuckigPtr_)->getTrajectoryAtTime(initTime - legJoint_plannerInitialTime_ + dt,
                                                    legJoint_prevTargetPose_, 
                                                    legJoint_prevTargetVel_, 
                                                    legJoint_prevTargetAcc_);
@@ -2266,12 +2299,13 @@ namespace mobile_manipulator {
     assert(targetLegJoint.size() == 4 && "armJoint dimension must be 4!");
 
     legJoint_plannerInitialTime_ = initTime;
-    legJointPlannerRuckigPtr_->setCurrentPose(legJoint_prevTargetPose_);
-    legJointPlannerRuckigPtr_->setCurrentVelocity(legJoint_prevTargetVel_);
-    legJointPlannerRuckigPtr_->setCurrentAcceleration(legJoint_prevTargetAcc_);
+    auto planner = torsoRotationActive_ ? torsoRotationPlannerRuckigPtr_ : legJointPlannerRuckigPtr_;
+    planner->setCurrentPose(legJoint_prevTargetPose_);
+    planner->setCurrentVelocity(legJoint_prevTargetVel_);
+    planner->setCurrentAcceleration(legJoint_prevTargetAcc_);
 
-    legJointPlannerRuckigPtr_->setTargetPose(targetLegJoint);
-    double durationTime = legJointPlannerRuckigPtr_->calcTrajectory(desiredTime);
+    planner->setTargetPose(targetLegJoint);
+    double durationTime = planner->calcTrajectory(desiredTime);
 
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
@@ -4469,6 +4503,7 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::resetTorsoControlPoseWithRuckig(scalar_t initTime, const vector_t& initState,
                                                                          bool isServiceReset)
   {
+    releaseTorsoRotationControl();
     setEnableLegJointTrack(false); // 关闭下肢关节跟踪
     isCmdLegJointUpdated_ = false;  // 关闭关节控制标志位
     setEnableTorsoPoseTargetTrajectories(true); // 开启躯干
@@ -4611,12 +4646,13 @@ namespace mobile_manipulator {
 
     // vel/delta first: integrate onto cmdTorsoPose_ (final open-loop target).
     // Absolute /cmd_lb_torso_pose in the same tick still wins (SDK/reset priority).
-    if (isTorsoOfflineTrajUpdate_ != true) {
-      applyTorsoVelDeltaCommands(initTime);
+    if (isTorsoOfflineTrajUpdate_ != true && !isCmdTorsoPoseUpdated_ && !isCmdLegJointUpdated_) {
+      applyTorsoVelDeltaCommands(initTime, initState);
     }
 
     if(isCmdTorsoPoseUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
+      releaseTorsoRotationControl();
       // resetTorsoPoseRuckig(initTime, initState, false);
 
       // std::cout << "[MobileManipulatorReferenceManager] 进入躯干笛卡尔控制 " << std::endl;
@@ -4660,6 +4696,7 @@ namespace mobile_manipulator {
 
     if(isCmdLegJointUpdated_ && isTorsoOfflineTrajUpdate_ != true)
     {
+      releaseTorsoRotationControl();
       setEnableLegJointTrack(true); // 开启下肢关节跟踪
       setEnableTorsoPoseTargetTrajectories(false); // 关闭躯干
 
@@ -5334,6 +5371,7 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::resetAllMpcToState(scalar_t initTime, const vector_t& state)
   {
+    releaseTorsoRotationControl();
     // 3791: 软暂停恢复时整体重置 RM —— command storage + 全部 Ruckig 锚定到指定状态（冻结姿态）。
     // 躯干/ee 位姿用 FK 现场计算（锚当前，而非复位到初始位）。
     // 之后 updateBaseArmControl 从重置后的 storage 生成目标 = 冻结姿态，与 MPC 起点一致。
@@ -5402,7 +5440,24 @@ namespace mobile_manipulator {
     ROS_INFO_STREAM("[resetAllMpcToState] RM reset to frozen state at t=" << initTime);
   }
 
-  void MobileManipulatorReferenceManager::applyTorsoVelDeltaCommands(scalar_t initTime)
+  void MobileManipulatorReferenceManager::releaseTorsoRotationControl()
+  {
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      torsoRotationRequested_ = false;
+      if (torsoRotationActive_) {
+        cmdTorsoVel_.setZero();
+        isCmdTorsoVelUpdated_ = false;
+      }
+    }
+    if (torsoRotationActive_) {
+      torsoRotationActive_ = false;
+      torsoRotationLockPub_.publish(sensor_msgs::JointState());
+      hasTorsoVelIntegrateTime_ = false;
+    }
+  }
+
+  void MobileManipulatorReferenceManager::applyTorsoVelDeltaCommands(scalar_t initTime, const vector_t& initState)
   {
     // Velocity hold aligned with setChassisControl(/cmd_vel):
     //   - isCmdTorsoVelUpdated_ sticky (not cleared while non-zero)
@@ -5412,11 +5467,13 @@ namespace mobile_manipulator {
     // Oneshot delta: consume once.
     bool integrateVel = false;
     bool hasDelta = false;
+    bool rotationRequested = false;
     vector_t vel4 = vector_t::Zero(4);
     vector_t delta4 = vector_t::Zero(4);
 
     {
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+      rotationRequested = torsoRotationRequested_;
       if (isCmdTorsoVelTimeUpdate_) {
         lastCmdTorsoVelTime_ = initTime;
         isCmdTorsoVelTimeUpdate_ = false;
@@ -5447,7 +5504,41 @@ namespace mobile_manipulator {
       }
     }
 
-    if (!integrateVel && !hasDelta) {
+    if (hasDelta) {
+      // SDK 笛卡尔 delta 接管后不再恢复旧旋转速度。
+      if (rotationRequested) {
+        integrateVel = false;
+        vel4.setZero();
+        std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+        torsoRotationRequested_ = false;
+        cmdTorsoVel_.setZero();
+        isCmdTorsoVelUpdated_ = false;
+      }
+      rotationRequested = false;
+    }
+    if (torsoRotationActive_ && !rotationRequested) {
+      // 转回平移组，以当前规划关节 FK 重建胸部目标，避免旧 x/z 把下肢拉回。
+      vector_t state = initState;
+      state.segment(baseDim_, 4) = legJoint_prevTargetPose_;
+      vector_t torsoPose = vector_t::Zero(6);
+      getCurrentTorsoPoseInBasePitchYaw(torsoPose, state);
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+        cmdTorsoPose_ = torsoPose;
+        torsoPose_prevTargetPose_ << torsoPose[0], torsoPose[2], torsoPose[3], torsoPose[4];
+        torsoPose_prevTargetVel_.setZero();
+        torsoPose_prevTargetAcc_.setZero();
+      }
+      // 保留本帧已取出的笛卡尔速度，不清除下一帧的输入。
+      torsoRotationActive_ = false;
+      torsoRotationLockPub_.publish(sensor_msgs::JointState());
+      hasTorsoVelIntegrateTime_ = false;
+      // 即使新组只发送零速度，也要初始化其规划器，不能读取旧关节轨迹。
+      calcRuckigTrajWithTorsoPose(initTime, torsoPose_prevTargetPose_, 0.0);
+      torsoModeFlag_ = true;
+    }
+
+    if (!integrateVel && !hasDelta && !rotationRequested) {
       // Next non-zero burst starts a fresh Δt base (avoid huge first step after idle).
       hasTorsoVelIntegrateTime_ = false;
       return;
@@ -5472,6 +5563,49 @@ namespace mobile_manipulator {
     }
     lastTorsoVelIntegrateTime_ = initTime;
     hasTorsoVelIntegrateTime_ = true;
+
+    if (rotationRequested) {
+      if (!torsoRotationActive_) {
+        if (!initState.segment<4>(baseDim_).allFinite()) {
+          ROS_WARN_THROTTLE(1.0, "[TorsoRotation] waiting for finite lower-body state");
+          return;
+        }
+        torsoRotationJointTarget_ = initState.segment<4>(baseDim_);
+        legJoint_prevTargetPose_ = torsoRotationJointTarget_;
+        legJoint_prevTargetVel_.setZero();
+        legJoint_prevTargetAcc_.setZero();
+        torsoRotationActive_ = true;
+        sensor_msgs::JointState lock;
+        lock.name = {"knee_joint", "leg_joint"};
+        lock.position = {torsoRotationJointTarget_[0], torsoRotationJointTarget_[1]};
+        torsoRotationLockPub_.publish(lock);
+        ROS_INFO("[TorsoRotation] captured knee=%.4f leg=%.4f rad; only waist pitch/yaw follow",
+                 lock.position[0], lock.position[1]);
+      }
+      const auto& model = pinocchioInterface_.getModel();
+      const double vpitch = std::max(-std::abs(torsoPose_move_spd_[3]),
+                                    std::min(vel4[3], std::abs(torsoPose_move_spd_[3])));
+      const double vyaw = std::max(-std::abs(torsoPose_move_spd_[2]),
+                                  std::min(vel4[2], std::abs(torsoPose_move_spd_[2])));
+      torsoRotationJointTarget_ = integrateTorsoRotationTarget(
+          torsoRotationJointTarget_, vpitch, vyaw, dt,
+          model.lowerPositionLimit.segment<4>(baseDim_), model.upperPositionLimit.segment<4>(baseDim_));
+      calcRuckigTrajWithLegJoint(initTime, torsoRotationJointTarget_, 0.0);
+      setEnableLegJointTrack(true);
+      setEnableTorsoPoseTargetTrajectories(false);
+      torsoModeFlag_ = false;
+
+      // 胸部位姿仅由关节 FK 派生，供限位反馈/后续切平移使用，不强求 x/z 不变。
+      vector_t state = initState;
+      state.segment<4>(baseDim_) = torsoRotationJointTarget_;
+      vector_t torsoPose = vector_t::Zero(6);
+      getCurrentTorsoPoseInBasePitchYaw(torsoPose, state);
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+        cmdTorsoPose_ = torsoPose;
+      }
+      return;
+    }
 
     // Read current open-loop final target (same store absolute teleop writes into)
     vector_t cmd6 = vector_t::Zero(6);

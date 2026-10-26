@@ -152,6 +152,7 @@ namespace mobile_manipulator
       cmd_vel_world_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel_world", 10, true);
       cmd_lb_torso_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_lb_torso_pose", 10, true);
       cmd_torso_vel_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_torso_vel", 10, false);
+      cmd_torso_rotation_vel_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_torso_rotation_vel", 10, false);
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       joy_sub_ = nodeHandle_.subscribe("/joy", 10, &MobileManipulatorJoyControl::joyCallback, this);
       torso_reset_window_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
@@ -271,6 +272,16 @@ namespace mobile_manipulator
     ros::Publisher cmd_vel_world_publisher_;
     ros::Publisher cmd_lb_torso_publisher_;
     ros::Publisher cmd_torso_vel_publisher_;
+    ros::Publisher cmd_torso_rotation_vel_publisher_;
+    bool torso_rotation_group_{false};
+
+    void publishTorsoGroupVelocity(const geometry_msgs::Twist& vel, bool rotation, bool translation) {
+      // 松开修饰键仍保持当前组，零速度负责刹停，不释放 q0/q1 快照。
+      if (translation) torso_rotation_group_ = false;
+      else if (rotation) torso_rotation_group_ = true;
+      if (torso_rotation_group_) cmd_torso_rotation_vel_publisher_.publish(vel);
+      else cmd_torso_vel_publisher_.publish(vel);
+    }
     ros::Publisher stop_pub_;
     ros::Subscriber joy_sub_;
     ros::Subscriber torso_reset_window_sub_;
@@ -843,6 +854,10 @@ namespace mobile_manipulator
     {
       if (new_mode != current_mode_)
       {
+        if (current_mode_ == ControlMode::TORSO_CONTROL) {
+          cmd_torso_vel_publisher_.publish(geometry_msgs::Twist());
+        }
+        torso_rotation_group_ = false;
         // 切换到躯干控制模式时，记录当前MPC模式并切换到ArmOnly
         if (new_mode == ControlMode::TORSO_CONTROL)
         {
@@ -1036,7 +1051,7 @@ namespace mobile_manipulator
           torso_vel.angular.y = ay * g12_torso_vel_scale_pitch_;
           torso_vel.angular.z = az * g12_torso_vel_scale_yaw_;
           clampTorsoVelAgainstOpenLoopState(torso_vel);
-          cmd_torso_vel_publisher_.publish(torso_vel);
+          publishTorsoGroupVelocity(torso_vel, m1_pressed && !guide_pressed, guide_pressed);
         }
         else
         {
@@ -1172,7 +1187,7 @@ namespace mobile_manipulator
         torso_vel.angular.y = ay * torso_vel_scale_pitch_;
         torso_vel.angular.z = az * torso_vel_scale_yaw_;
         clampTorsoVelAgainstOpenLoopState(torso_vel);
-        cmd_torso_vel_publisher_.publish(torso_vel);
+        publishTorsoGroupVelocity(torso_vel, rb_pressed && !lb_pressed, lb_pressed);
       }
       else
       {

@@ -151,10 +151,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void stabilizeGripQuaternion(bool leftArm, bool gripPressed, Eigen::Quaterniond& quat);
 
   // 画圆/身侧快动时把自然肘目标收到当前肘在肩手圆上的相位（防翻面），
-  // 跟踪权保持，让肩肘跟着走；同时放松腰肘避让。
+  // 跟踪权保持，让肩肘跟着走；腰肘隔离下限独立于运动混合。
   void updateLivePathElbowFade(bool active, bool leftArm, const Eigen::Vector3d& handPos);
   void resetLivePathElbowFade(bool leftArm);
-  void applyLivePathKeepOutRelax();
+  void applyElbowSafetyClearance();
 
   void captureGripReleaseSnapshot(bool leftGripFallingEdge,
                                   bool rightGripFallingEdge);
@@ -422,6 +422,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   double livePathElbowKeepOutClearance_ = 0.03;
   double livePathElbowKeepOutMinP1Nom_ = 0.12;
   double livePathElbowKeepOutClearanceNom_ = 0.10;
+  // 肘部原点到躯干中心面的横向下限（m），两级求解共用，不随运动放宽。
+  double elbowSafetyMinLateralDistance_ = 0.22;
   struct LivePathElbowState {
     bool hasPos = false;
     Eigen::Vector3d lastPos = Eigen::Vector3d::Zero();
@@ -520,6 +522,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 双扳机同时松开时捕获的lb关节命令快照（用于胸部增量模式激活时冻结knee/leg/waist_pitch，只允许waist_yaw跟随VR）
   Eigen::VectorXd frozenLbJointCommand_;
   bool hasLbJointCommandFrozen_ = false;
+  // 松手冻结下肢后，下一拍 publishLegJointStates 需清零 knee/leg/waist_pitch 的 Ruckig 速度，
+  // 否则限速滤波器带着旧速度过冲再拉回，表现为下肢折叠臂「抖一下」。
+  std::atomic<bool> lbFreezeRuckigResetPending_{false};
 
   // 姿态和位置偏置
   Eigen::Vector3d deltaScale_;  // delta_scale 参数（x, y, z三轴独立）
