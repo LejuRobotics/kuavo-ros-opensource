@@ -137,7 +137,22 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   // 夹爪订阅和发布
   clawCmdSubscriber_ = nodeHandle.subscribe<kuavo_msgs::lejuClawCommand>(
       "/leju_claw_command", 1, &MobileManipulatorDummyVisualization::lejuClawCmdCallback, this);
-  lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
+
+  // 真机不补发假 /leju_claw_state：真机由 hardware_node 发布真实反馈（标定行程百分比 +
+  // 真实状态机），此处补发会把指令弧度当成 kReached 混进同一话题，造成 bag 里两套口径
+  // 并存并让上层提前误判到位。与双足侧 HumanoidVisualizer 的 isReal 守卫保持一致：
+  // 优先读 /is_real（humanoidController 设置），回退 /real（轮臂 launch 设置）。
+  bool is_real_env = false;
+  if (!ros::param::getCached("/is_real", is_real_env)) {
+    if (!ros::param::getCached("/real", is_real_env)) {
+      ROS_WARN_ONCE("[leju_claw_state] 未找到 /is_real 或 /real，按仿真处理（会补发 state）");
+      is_real_env = false;
+    }
+  }
+  if (!is_real_env) {
+    // 仅仿真/回放路径 advertise 并补发，供 rosbag 录制
+    lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
+  }
 
   // 灵巧手订阅
   dexhand_joint_names_ = {"l_thumbCMC", "l_thumbMCP", "l_indexMCP", "l_indexPIP", "l_middleMCP",
@@ -334,16 +349,18 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
       }
     }
 
-    // publish /leju_claw_state
-    kuavo_msgs::lejuClawState claw_state_msg;
-    claw_state_msg.header.stamp = timeStamp;
-    claw_state_msg.header.frame_id = "leju_claw";
-    claw_state_msg.data.name = {"left_claw", "right_claw"};
-    claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
-    claw_state_msg.data.velocity.resize(2, 0.0);
-    claw_state_msg.data.effort.resize(2, 0.0);
-    claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
-    lejuClawStatePub_.publish(claw_state_msg);
+    // publish /leju_claw_state：仅仿真/回放路径补发（真机不 advertise，此分支不会进入）
+    if (lejuClawStatePub_) {
+      kuavo_msgs::lejuClawState claw_state_msg;
+      claw_state_msg.header.stamp = timeStamp;
+      claw_state_msg.header.frame_id = "leju_claw";
+      claw_state_msg.data.name = {"left_claw", "right_claw"};
+      claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
+      claw_state_msg.data.velocity.resize(2, 0.0);
+      claw_state_msg.data.effort.resize(2, 0.0);
+      claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
+      lejuClawStatePub_.publish(claw_state_msg);
+    }
   }
 
   // 添加灵巧手关节 (300062)
