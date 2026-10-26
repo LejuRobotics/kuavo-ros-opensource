@@ -51,7 +51,8 @@ public:
     LeJuClaw(std::string unused = "");
     ~LeJuClaw();
     int initialize(bool init_bmlib);
-    void enable();
+    // false：配置的夹爪都没有应答。调用方应跳过夹爪，不能因此中断运控启动。
+    bool enable();
     void disable();
     void set_zero();
     void go_to_zero();

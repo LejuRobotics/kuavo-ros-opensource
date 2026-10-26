@@ -53,6 +53,8 @@ typedef struct {
 
 int open_canbus(RUIWOTools* ruiwo, int init_bmlib, unsigned char *version);
 int close_canbus(RUIWOTools* ruiwo);
+/* Close this channel only. Do not BM_UnInit: the arm bus owns the shared BM library. */
+int close_canbus_channel(RUIWOTools* ruiwo);
 uint32_t float_to_int(float float_num, float min_num, float max_num, uint8_t bit_num);
 float int_to_float(uint32_t int_num, float min_num, float max_num, uint8_t bit_num);
 

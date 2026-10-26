@@ -894,29 +894,6 @@
     <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.23333333333333" />
     <dynamics damping="0.2" friction="0.0"/>
   </joint>
-  <link name="camera">
-    <inertial>
-      <origin xyz="-0.04257 -0.01736 -0.01161" rpy="0 0 0" />
-      <mass value="0.047" />
-      <inertia ixx="0.00065" ixy="0.0" ixz="0.00015" iyy="0.00091" iyz="0.0" izz="0.00105" />
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s100049/meshes/camera.STL" />
-      </geometry>
-      <material name="">
-        <color rgba="1 1 1 1" />
-      </material>
-    </visual>
-  </link>
-  <joint name="camera" type="fixed">
-    <origin xyz="0.0967509784707853 0.0175003248712456 0.125953265112721" rpy="0 0.488692190558413 0" />
-    <parent link="zhead_2_link" />
-    <child link="camera" />
-    <dynamics damping="0.2" friction="0.0"/>
-  </joint>
-
   <link
     name="camera_base">
     <inertial>
@@ -935,11 +912,11 @@
     </inertial>
     <visual>
       <origin
-        xyz="0 0 0"
+        xyz="0.015645 0.0475 0.01431109357346"
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s100049/meshes/camera_base.STL" />
+          filename="package://kuavo_assets/models/biped_s100049/meshes/camera.STL" />
       </geometry>
       <material
         name="">
@@ -947,22 +924,13 @@
           rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s100049/meshes/camera_base.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
     name="camera_base"
     type="fixed">
     <origin
-      xyz="0.0828919080642966 0 0.119165137551254"
-      rpy="0 0.488692190558416 0" />
+      xyz="0.0932759773834307 0 0.145322661773667"
+      rpy="3.14159265358979 0.383972435438723 0" />
     <parent
       link="zhead_2_link" />
     <child
@@ -1200,5 +1168,12 @@
       </contacts>
       </plugin>
   </gazebo>
-  
+
+  <link name="cam_h_link" />
+  <joint name="camera_to_realcam_h_frame" type="fixed">
+    <origin xyz="0.015645 0.0475 0.01431109357346"
+            rpy="0 0 0" />
+    <parent link="camera_base" />
+    <child link="cam_h_link" />
+  </joint>
 </robot>

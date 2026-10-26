@@ -1827,6 +1827,10 @@ class ArmTrajectoryBezierDemo:
                     rospy.loginfo("After the action playback is complete, keep arm pose at the last tact frame")
                     self.keep_arm_pose = False  # 一次性语义，用完即清，避免污染后续其他入口的动作
                     self._finish_action(2)
+                    # kuavodevlab#4415: 保持最后一帧时手臂停在 mode2(外部控制)，
+                    # 此后没有任何一方交还控制权，推摇杆走路时手臂被最后一帧指令冻结。
+                    # 动作终态已提交后立即把手臂交还自动摆臂(mode1)。
+                    self.call_change_arm_ctrl_mode_service(1)
                 else:
                     rospy.loginfo("After the action playback is complete, arm restore is disabled")
                     self._finish_action(2)
