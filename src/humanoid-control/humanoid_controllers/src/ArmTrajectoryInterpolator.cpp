@@ -131,10 +131,12 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
   }
 
   const bool modeChanged = !hasPrevModeFlags_ ||
+                           !isEnabled(prevModeFlags_) ||
                            modeFlags.useArmTrajectoryControl != prevModeFlags_.useArmTrajectoryControl ||
-                           modeFlags.quickMode != prevModeFlags_.quickMode ||
                            modeFlags.lbMpcMode != prevModeFlags_.lbMpcMode ||
                            modeFlags.armCtrlMode != prevModeFlags_.armCtrlMode;
+  // 同一遥操期间 quickMode 只改变执行通路，保留滤波位置、速度和协方差。
+  // 从禁用状态恢复及真正的控制模式变化仍按原逻辑重置。
   hasPrevModeFlags_ = true;
   prevModeFlags_ = modeFlags;
 

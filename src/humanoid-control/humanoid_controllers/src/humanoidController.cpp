@@ -912,10 +912,8 @@ namespace humanoid_controller
               arm_joint_trajectory_.tau[i] = (tau != nullptr) ? tau[i] : 0.0;
             }
           }
-          if (controller_manager_ && use_ros_arm_joint_trajectory_)
-          {
-            controller_manager_->notifyExternalArmControlActivity();
-          }
+          // 轨迹数据不代表新的 mode2 意图。自动切换由显式手臂模式请求触发，
+          // 避免归位后仍在发送的 VR 轨迹打断 AMP->AMP_Wild 交接并切回 AMP。
           // 记录SHM回调收到数据的时间戳
           {
             std::lock_guard<std::mutex> lk(armTrajRecvTimeMutex_);

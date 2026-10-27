@@ -386,9 +386,19 @@ namespace humanoidController_wheel_wbc
     int armInterpSeenMode_{-1};
     bool armInterpWaitFreshTraj_{false};
     ros::Time armInterpStampAtModeChange_;
+    bool arm_interp_quick_active_{false};
+    double arm_quick_handoff_start_time_{0.0};
+    vector_t arm_quick_handoff_q_offset_;
+    vector_t arm_quick_handoff_v_offset_;
     bool arm_reset_handoff_active_{false};
     bool isExternalArmReset() const {
       return prev_arm_trajectory_mode_ == 2 && arm_trajectory_mode_ == 1;
+    }
+    bool isQuickArmControlActive(int lbMpcMode) const {
+      // Quick transport must obey the same follow/hold mode as the MPC path.
+      return arm_trajectory_mode_ == 2 &&
+             (quickMode_ == 2 || quickMode_ == 3) &&
+             (lbMpcMode == 1 || lbMpcMode == 3);
     }
     vector_t wbc_arm_raw_q_;
     vector_t wbc_arm_raw_v_;
