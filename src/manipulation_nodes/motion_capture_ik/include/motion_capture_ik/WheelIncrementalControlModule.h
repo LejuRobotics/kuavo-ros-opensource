@@ -1,5 +1,7 @@
 #pragma once
 
+#include "motion_capture_ik/BoundedHandQuaternion.h"
+
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <memory>
@@ -205,6 +207,18 @@ class WheelIncrementalPoseResult {
     return limitIncrementalTargetQuatSafe(qCmd, qMeas, zyxLimitsFinal_);
   }
 
+  Eigen::Quaterniond boundIncrementalHandQuat(bool leftArm, const Eigen::Quaterniond& qCmd) const {
+    return boundHandQuaternion(qCmd, measuredHandQuat(leftArm), incrementalQuatRadius());
+  }
+  Eigen::Quaterniond measuredHandQuat(bool leftArm) const {
+    return leftArm ? robotLeftHandQuatMeasEERealTime_ : robotRightHandQuatMeasEERealTime_;
+  }
+  double incrementalQuatRadius() const {
+    // Below pi/2, each principal ZYX component is bounded by the rotation
+    // angle. This ball is conservatively inside the configured Euler box.
+    return std::max(0.0, std::min(zyxLimitsFinal_.minCoeff(), M_PI / 2.0 - 1e-6));
+  }
+
   std::tuple<Eigen::Quaterniond, Eigen::Quaterniond, Eigen::Vector3d, Eigen::Vector3d> getLatestIncrementalHandPose(
       bool incrementalPos = true,
       bool incrementalQuat = false,
@@ -381,6 +395,7 @@ class WheelIncrementalControlModule {
   WheelIncrementalPoseResult computeIncrementalChestPos(const Eigen::Vector3d& humanChestPos, bool isChestActive = true);
 
   WheelIncrementalPoseResult getLatestIncrementalResult() const;
+  void acceptHandQuatTarget(bool leftArm, const Eigen::Quaterniond& sourceTarget);
 
   // 读取最新 anchor 姿态的接口函数
   Eigen::Vector3d getRobotChestAnchorPos() const;
