@@ -189,7 +189,9 @@
     </group>
     
     <group if="$(arg with_ik)">
-        <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+        <include file="$(find motion_capture_ik)/launch/ik_node.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
+        </include>
     </group>
 
     <group if="$(arg with_mm_ik)">
@@ -381,6 +383,16 @@
         <arg name="diagnostic_log_enable" value="$(arg pico_diagnostic_log_enable)"/>
         <arg name="diagnostic_sync_max_valid_rtt_ms" value="$(arg pico_diagnostic_sync_max_valid_rtt_ms)"/>
         <arg name="diagnostic_sync_max_valid_residual_ms" value="$(arg pico_diagnostic_sync_max_valid_residual_ms)"/>
+      </include>
+    </group>
+    <!-- 头部控制。也可在机器起来后单独 roslaunch noitom_hi5_hand_udp_python head_control_node.launch -->
+    <arg name="with_head_control_node" default="true" doc="启动 head_control_node。PICO 自有头控时关掉"/>
+    <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed"/>
+    <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand"/>
+    <group if="$(arg with_head_control_node)">
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/head_control_node.launch">
+        <arg name="head_control_mode" value="$(arg head_control_mode)"/>
+        <arg name="head_track_target" value="$(arg head_track_target)"/>
       </include>
     </group>
 

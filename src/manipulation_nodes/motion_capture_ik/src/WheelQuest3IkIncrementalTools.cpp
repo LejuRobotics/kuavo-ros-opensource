@@ -22,6 +22,7 @@
 #include <iomanip>
 #include <sstream>
 #include <cmath>
+#include <cstdlib>
 #include <algorithm>
 #include <XmlRpcValue.h>
 
@@ -35,9 +36,134 @@
 #include "motion_capture_ik/json.hpp"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelJoyStickHandler.h"
+#include "motion_capture_ik/drake_parser_compat.hpp"
 
 namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
+
+// ========================================================================================
+// Dual VR 躯干 ownership（torso_control_side）
+// ========================================================================================
+
+void WheelQuest3IkIncrementalROS::parseTorsoControlSideParam() {
+  if (torsoControlSideParsed_) {
+    return;
+  }
+  torsoControlSideParsed_ = true;
+
+  std::string sideStr("left");
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/torso_control_side", sideStr, sideStr);
+  // 兼容非私有写法（launch 中写作 /quest3/torso_control_side 时落在 /ik_ros_uni_cpp_node/quest3/...，
+  // 与上面同 key；这里额外容忍直接设置 /quest3/torso_control_side 的情况）。
+  if (sideStr == "left" && !nodeHandle_.hasParam("/ik_ros_uni_cpp_node/quest3/torso_control_side")) {
+    nodeHandle_.param("/quest3/torso_control_side", sideStr, sideStr);
+  }
+
+  if (sideStr == "left") {
+    torsoControlSide_ = TorsoControlSide::LEFT;
+  } else if (sideStr == "right") {
+    torsoControlSide_ = TorsoControlSide::RIGHT;
+  } else {
+    ROS_FATAL("[DualVR] invalid torso_control_side='%s', expected 'left' or 'right'", sideStr.c_str());
+    ros::shutdown();
+    std::exit(EXIT_FAILURE);
+  }
+
+  ROS_INFO("[DualVR] torso_control_side=%s (input_mode=%s, effective=%s)",
+           sideStr.c_str(),
+           inputMode_.c_str(),
+           isDualVrMode() ? "dual_vr" : "single_vr(ignored)");
+}
+
+bool WheelQuest3IkIncrementalROS::getTorsoOwnerHumanChestPos(Eigen::Vector3d& humanChestPos) {
+  if (!isDualVrMode()) {
+    // single_vr：保持历史路径（/robot_chest_pose -> chestPoseCallback），不改动。
+    std::lock_guard<std::mutex> lock(chestPoseMutex_);
+    if (!hasChestPose_) return false;
+    humanChestPos = latestChestPositionInRobot_;
+    return true;
+  }
+  // dual_vr：真正取 owner 侧 Quest 的 Chest（left -> A 实例，right -> B 实例）。
+  // Transformer 的可变状态只由骨骼回调在 transformerDataMutex_ 内写入，所以
+  // "实例存在 + 数据新鲜 + Chest 有效 + 位置拷贝"必须在同一把锁内一次性完成，
+  // 不能再用 chestPoseMutex_（那把锁保护的是 /robot_chest_pose 的成员，与之无关）。
+  // 另外 hasValidChestPose() 的语义是"历史上曾经收到过"，断连/丢帧不会复位，
+  // 因此由 getFreshSideChestPose 叠加按侧骨骼接收时刻的新鲜度判定，
+  // 避免 Quest 断开后一直把过期 Chest 当成有效输入。
+  return getFreshSideChestPose(torsoSideRight() ? "Right" : "Left", kChestStaleTimeoutMs, humanChestPos);
+}
+
+bool WheelQuest3IkIncrementalROS::enterOwnerChestIncrementalMode(
+    const Eigen::Vector3d& robotChestPosForPlaceholder) {
+  Eigen::Vector3d humanChestPos;
+  const bool hasValidOwnerChest = getTorsoOwnerHumanChestPos(humanChestPos);
+  // owner Chest 尚无效时用机器人当前 chest 目标做占位锚点：本帧增量为 0，
+  // 机器人 chest 保持当前目标，且不用零向量污染人体锚点。
+  chestAnchorNeedsRefresh_ = !hasValidOwnerChest;
+  incrementalController_->enterIncrementalModeChest(hasValidOwnerChest ? humanChestPos : robotChestPosForPlaceholder,
+                                                    latestPoseConstraintList_);
+  return hasValidOwnerChest;
+}
+
+bool WheelQuest3IkIncrementalROS::advanceOwnerChestIncremental() {
+  if (!incrementalController_ || !incrementalController_->isIncrementalModeChest()) {
+    // chest 增量未激活：本帧没有锚点需要推进
+    return false;
+  }
+  Eigen::Vector3d humanChestPos;
+  const bool hasValidOwnerChest = getTorsoOwnerHumanChestPos(humanChestPos);
+  if (!hasValidOwnerChest) {
+    // owner Chest 本帧无效：不推进 chest 位置增量，机器人 chest 位置/朝向参考保持上一帧值。
+    // 机械臂增量（computeIncrementalPose*）、Wheel IK 与 Drake 求解都不受这里影响。
+    chestAnchorNeedsRefresh_ = true;
+    return false;
+  }
+  if (chestAnchorNeedsRefresh_) {
+    // 首次拿到有效 Chest / 失效后恢复：用当前机器人 chest 目标重建锚点，
+    // 使本帧增量为 0，避免腰部目标跳变（复用 exit 锚点刷新机制，不新增状态机）。
+    incrementalController_->updateChestAnchorOnExit(humanChestPos, latestPoseConstraintList_);
+    chestAnchorNeedsRefresh_ = false;
+  }
+  incrementalController_->computeIncrementalChestPos(humanChestPos, true);
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = incrementalController_->getLatestRobotChestPos();
+  }
+  return true;
+}
+
+Eigen::Quaterniond WheelQuest3IkIncrementalROS::getTorsoOwnerChestQuat() {
+  // 求解线程会写 latestTorsoOwnerChestQuat_，FSM 线程会读；Eigen::Quaterniond
+  // 是多分量的非原子对象，必须整份在 chestPoseMutex_ 下拷贝后再在锁外使用。
+  // 只覆盖四元数拷贝本身，锁内不做任何解算/变换。
+  std::lock_guard<std::mutex> lock(chestPoseMutex_);
+  if (!isDualVrMode()) {
+    return chestRotationQuaternion_;
+  }
+  return latestTorsoOwnerChestQuat_;
+}
+
+bool WheelQuest3IkIncrementalROS::torsoOwnerActiveNow() const {
+  if (!isDualVrMode()) return true;
+  const bool leftGrip = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
+  const bool rightGrip = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
+  return torsoSideRight() ? rightGrip : leftGrip;
+}
+
+void WheelQuest3IkIncrementalROS::logDualTorsoOwnerDiagnostics(bool leftGripReady, bool rightGripReady) const {
+  ROS_INFO_THROTTLE(1.0,
+                    "[DualTorsoOwner] side=%s source=%s dual=%d Lgrip=%d Rgrip=%d Lready=%d Rready=%d "
+                    "owner_active=%d chest_pos_update=%d chest_ori_update=%d",
+                    torsoControlSide_ == TorsoControlSide::RIGHT ? "right" : "left",
+                    torsoSideRight() ? "right/Chest-B" : "left/Chest-A",
+                    isDualVrMode() ? 1 : 0,
+                    (joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftGrip()) ? 1 : 0,
+                    (joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightGrip()) ? 1 : 0,
+                    leftGripReady ? 1 : 0,
+                    rightGripReady ? 1 : 0,
+                    torsoOwnerActiveNow() ? 1 : 0,
+                    drakeSolveUpdateChestPosition_ ? 1 : 0,
+                    drakeSolveUpdateChestOrientation_ ? 1 : 0);
+}
 
 bool WheelQuest3IkIncrementalROS::loadStandArmAnglesFromRosParam() {
   if (standArmAnglesLoaded_) {
@@ -124,6 +250,9 @@ void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPt
     if ((oldMode == 0 || oldMode == 1) && newMode == 2) {
       std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
       mode2EnterTime_ = ros::Time::now();
+      reseedPublishedArmSmoother_.store(true);
+      // X+B 固定期间 TUI 可能已改躯干：恢复跟随时必须按当前 FK 重锚映射。
+      pendingResumeUpperBodyReanchor_.store(true);
       ROS_INFO("[WheelQuest3IkIncrementalROS] Mode 2 entered at time: %.3f, timeout duration: %.1f seconds",
                mode2EnterTime_.toSec(),
                MODE_2_TIMEOUT_DURATION);
@@ -131,6 +260,7 @@ void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPt
         ROS_ERROR("[WheelQuest3IkIncrementalROS] Failed to enable SHM on mode 2 enter");
       }
     } else if (oldMode == 2 && newMode != 2) {
+      reseedPublishedArmSmoother_.store(true);
       if (!arm_traj_writer_.setTransport(Request::TRANSPORT_NONE)) {
         ROS_ERROR("[WheelQuest3IkIncrementalROS] Failed to disable SHM on mode 2 exit");
       }
@@ -138,6 +268,19 @@ void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPt
   } else {
     armControlMode_.store(newMode);
   }
+}
+
+bool WheelQuest3IkIncrementalROS::setLockKneeLegCallback(std_srvs::SetBool::Request& req,
+                                                         std_srvs::SetBool::Response& res) {
+  lockKneeLegEnabled_.store(req.data);
+  // 同步写 param，保证 rosparam get 与 service 调用结果一致
+  ros::param::set("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", req.data);
+  res.success = true;
+  res.message = req.data ? "Knee/leg joints LOCKED (waist_pitch/waist_yaw remain free)"
+                         : "Knee/leg joints UNLOCKED (all 4 lower-body joints follow VR)";
+  ROS_INFO("[WheelQuest3IkIncrementalROS] lock_knee_leg -> %s (via /quest3/set_lock_knee_leg)",
+           req.data ? "true" : "false");
+  return true;
 }
 
 void WheelQuest3IkIncrementalROS::updateLeftConstraintList(const Eigen::Vector3d& leftHandPos,
@@ -153,7 +296,7 @@ void WheelQuest3IkIncrementalROS::updateLeftConstraintList(const Eigen::Vector3d
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_LINK6].position = leftLink6Position_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position = leftVirtualThumbPosition_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix =
-      (chestIncrementalUpdateEnabled_ ? chestRotationQuaternion_ : getRobotChestQuatRef()).toRotationMatrix();
+      (chestIncrementalUpdateEnabled_ ? getTorsoOwnerChestQuat() : getRobotChestQuatRef()).toRotationMatrix();
 }
 
 void WheelQuest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3d& rightHandPos,
@@ -168,7 +311,7 @@ void WheelQuest3IkIncrementalROS::updateRightConstraintList(const Eigen::Vector3
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position = rightLink6Position_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position = rightVirtualThumbPosition_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix =
-      (chestIncrementalUpdateEnabled_ ? chestRotationQuaternion_ : getRobotChestQuatRef()).toRotationMatrix();
+      (chestIncrementalUpdateEnabled_ ? getTorsoOwnerChestQuat() : getRobotChestQuatRef()).toRotationMatrix();
 }
 
 Eigen::Quaterniond WheelQuest3IkIncrementalROS::getRobotChestQuatRef() const {
@@ -197,6 +340,7 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
     ROS_ERROR("[WheelQuest3IkIncrementalROS] chestElbowHandPointOptSolverPtr_ is not initialized");
     return false;
   }
+  applyElbowSafetyClearance();
   latestLeftElbowTrackingActivation_ =
       std::clamp(input.leftElbowTrackingActivation, 0.0, 1.0);
   latestRightElbowTrackingActivation_ =
@@ -263,8 +407,9 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
   Eigen::Vector3d rightShoulderPosRel =
       hasLatestRightShoulderFk_ ? (latestRightShoulderFkPos_ - offset) : (robotRightFixedShoulderPos_ - offset);
 
-  if (!chestIncrementalUpdateEnabled_) {
-    remapUpperBodyRefPoints(chestPos,
+  // 总开关只改变躯干跟随权限，不改变手臂可达域和肘部投影规则。
+  // 两侧始终使用同一肩部 FK 参考，避免关闭时突然裁剪、开启时又恢复原始手部目标。
+  remapUpperBodyRefPoints(chestPos,
                             chestQuatRef,
                             leftShoulderPosRel,
                             rightShoulderPosRel,
@@ -272,7 +417,6 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                             rightHandRefRel,
                             leftElbowRefRel,
                             rightElbowRefRel);
-  }
   const DrakeChestElbowHandSolution sol =
       chestElbowHandPointOptSolverPtr_->solve(chestPos,
                                               chestQuatRef,
@@ -624,7 +768,8 @@ void WheelQuest3IkIncrementalROS::updateChestPositionFreezeState(bool freezeRequ
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
     if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ &&
-        filterJointDataForDrakeFK_.size() >= 3 && filterJointDataForDrakeFK_.allFinite()) {
+        filterJointDataForDrakeFK_.size() >= 3 && filterJointDataForDrakeFK_.allFinite() &&
+        hasDrakeFkJointMeasurement_) {
       anchor = filterJointDataForDrakeFK_.head<3>();
       hasAnchor = true;
     } else if (latest_lb_q_.size() == 4 && latest_lb_q_.allFinite()) {
@@ -658,7 +803,20 @@ void WheelQuest3IkIncrementalROS::updateChestPositionFreezeState(bool freezeRequ
 }
 
 void WheelQuest3IkIncrementalROS::reset() {
+  {
+    std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
+    lbLegMasterPublishEnabled_ = chestIncrementalUpdateEnabled_;
+    lowerBodyMasterFreezeActive_ = !chestIncrementalUpdateEnabled_ && hasPublishedLbCommand_;
+    lowerBodyMasterFreezeAnchor_ = lastPublishedLbCommand_;
+  }
   // 持续重置各类状态，确保进入系统时正常
+  // chest 人体锚点需要重建：下次推进 chest 增量前先按当时的人体 Chest 复位锚点
+  chestAnchorNeedsRefresh_ = true;
+  // owner Chest 朝向的有效性/恢复锚点状态：回到"启动首帧"语义（不触发恢复偏移，
+  // 首次有效时仍按原来的绝对跟随），避免把上一段 mode 2 的恢复基准带入下一次。
+  torsoOwnerChestFreshThisCycle_ = true;
+  torsoOwnerChestFreshPrevCycle_ = true;
+  torsoOwnerChestQuatRecoveryOffset_.setIdentity();
   // 清除 chest 位置快照冻结状态；位置跟随再次关闭时在 solve 循环里重新捕获
   {
     std::lock_guard<std::mutex> lock(chestPositionFreezeMutex_);
@@ -699,6 +857,8 @@ void WheelQuest3IkIncrementalROS::reset() {
   hasRightElbowPosInChest_ = false;
   hasLeftActiveChestAnchor_ = false;
   hasRightActiveChestAnchor_ = false;
+  resetLivePathElbowFade(true);
+  resetLivePathElbowFade(false);
   leftHandPosInChest_.setZero();
   rightHandPosInChest_.setZero();
   leftElbowPosInChest_.setZero();
@@ -737,6 +897,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   // 避免 mode 1 中的躯干位置/高度被带入下一次 mode 2。
   frozenRobotChestPos_ = robotFixedWaistYawPos_;
   frozenChestQuat_.setIdentity();
+  chestFollowRecoveryOffset_.setIdentity();
   frozenLeftHandHeightOffset_ = 0.0;
   frozenRightHandHeightOffset_ = 0.0;
   frozenLeftElbowHeightOffset_ = 0.0;
@@ -777,6 +938,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   }
   frozenLbJointCommand_ = Eigen::VectorXd::Zero(4);
   hasLbJointCommandFrozen_ = false;
+  lbFreezeRuckigResetPending_.store(false, std::memory_order_relaxed);
   // 重置pose约束列表，使用默认手部位置初始化，确保进入增量模式时能正确初始化到默认位置
   latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
   Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
@@ -940,6 +1102,7 @@ void WheelQuest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
                                 .count());
     filterJointDataForDrakeFK_ = kKeep * filterJointDataForDrakeFK_ + kNew * qNew;
+    hasDrakeFkJointMeasurement_ = true;
   }
 }
 
@@ -971,6 +1134,11 @@ void WheelQuest3IkIncrementalROS::updateSensorArmJointFromSensorData() {
       for (int i = 0; i < drakeJointStateSize_; ++i) {
         jointDataForDrakeFK_(i) = currentSensorData->joint_data.joint_q[i];
       }
+    }
+    if (!hasDrakeFkJointMeasurement_ && jointDataForDrakeFK_.size() == drakeJointStateSize_ &&
+        jointDataForDrakeFK_.allFinite()) {
+      filterJointDataForDrakeFK_ = jointDataForDrakeFK_;
+      hasDrakeFkJointMeasurement_ = true;
     }
   }
 }
@@ -1741,8 +1909,110 @@ void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
   }
 }
 
+Eigen::VectorXd WheelQuest3IkIncrementalROS::velocityFromPublishedArmPosition(
+    const Eigen::VectorXd& previousQ, const Eigen::VectorXd& currentQ, const ros::Time& now) const {
+  Eigen::VectorXd vel = Eigen::VectorXd::Zero(currentQ.size());
+  if (previousQ.size() != currentQ.size() || currentQ.size() == 0) {
+    return vel;
+  }
+
+  double dt = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
+  if (hasLastArmTrajPublishStamp_ && !lastArmTrajPublishStamp_.isZero()) {
+    const double measuredDt = (now - lastArmTrajPublishStamp_).toSec();
+    if (std::isfinite(measuredDt) && measuredDt >= 1e-4 && measuredDt <= 0.1) {
+      dt = measuredDt;
+    }
+  }
+
+  vel = (currentQ - previousQ) / dt;
+  const double vmax = std::max(maxJointVelocity_, 0.0);
+  for (int i = 0; i < vel.size(); ++i) {
+    if (!std::isfinite(vel(i))) {
+      vel(i) = 0.0;
+    } else if (vmax > 0.0) {
+      vel(i) = std::clamp(vel(i), -vmax, vmax);
+    }
+  }
+  return vel;
+}
+
+void WheelQuest3IkIncrementalROS::resetPublishedArmSmoother(const Eigen::VectorXd& q, const ros::Time& now) {
+  seedPublishedArmSmoother(q, Eigen::VectorXd::Zero(q.size()));
+  (void)now;
+}
+
+void WheelQuest3IkIncrementalROS::seedPublishedArmSmoother(const Eigen::VectorXd& q, const Eigen::VectorXd& v) {
+  publishedArmQ_ = q;
+  publishedArmV_ = (v.size() == q.size()) ? v : Eigen::VectorXd::Zero(q.size());
+  hasPublishedArmSmoother_ = q.size() > 0;
+}
+
+void WheelQuest3IkIncrementalROS::smoothPublishedArmCommand(const Eigen::VectorXd& desiredQ, const ros::Time& now,
+                                                            Eigen::VectorXd& qOut, Eigen::VectorXd& vOut) {
+  const Eigen::Index n = desiredQ.size();
+  qOut = desiredQ;
+  vOut = Eigen::VectorXd::Zero(n);
+  if (n == 0) {
+    return;
+  }
+  for (Eigen::Index i = 0; i < n; ++i) {
+    if (!std::isfinite(desiredQ(i))) {
+      if (hasPublishedArmSmoother_ && publishedArmQ_.size() == n) {
+        qOut = publishedArmQ_;
+        vOut = publishedArmV_;
+      }
+      return;
+    }
+  }
+
+  if (!hasPublishedArmSmoother_ || publishedArmQ_.size() != n || publishedArmV_.size() != n) {
+    resetPublishedArmSmoother(desiredQ, now);
+    qOut = publishedArmQ_;
+    vOut = publishedArmV_;
+    return;
+  }
+
+  double dt = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
+  if (hasLastArmTrajPublishStamp_ && !lastArmTrajPublishStamp_.isZero()) {
+    const double measuredDt = (now - lastArmTrajPublishStamp_).toSec();
+    if (std::isfinite(measuredDt) && measuredDt > 1e-4) {
+      dt = measuredDt;
+    }
+  }
+  if (dt > 0.05) {
+    resetPublishedArmSmoother(desiredQ, now);
+    qOut = publishedArmQ_;
+    vOut = publishedArmV_;
+    return;
+  }
+
+  dt = std::clamp(dt, 0.006, 0.018);
+  const double wn = std::clamp(armTrajSmoothWn_, 1.0, 0.45 / dt);
+  const double zeta = std::clamp(armTrajSmoothZeta_, 0.7, 1.5);
+  const double amax = std::max(armTrajSmoothAccLimit_, 1.0);
+  const double vmax = std::max(maxJointVelocity_, 0.0);
+
+  Eigen::VectorXd q = publishedArmQ_;
+  Eigen::VectorXd v = publishedArmV_;
+  for (Eigen::Index i = 0; i < n; ++i) {
+    double acc = wn * wn * (desiredQ(i) - q(i)) - 2.0 * zeta * wn * v(i);
+    acc = std::clamp(acc, -amax, amax);
+    v(i) += acc * dt;
+    if (vmax > 0.0) {
+      v(i) = std::clamp(v(i), -vmax, vmax);
+    }
+    q(i) += v(i) * dt;
+  }
+  publishedArmQ_ = q;
+  publishedArmV_ = v;
+  qOut = q;
+  vOut = v;
+}
+
 void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg) {
-  armJintStateMsg.header.stamp = ros::Time::now();
+  if (armJintStateMsg.header.stamp.isZero()) {
+    armJintStateMsg.header.stamp = ros::Time::now();
+  }
   logArmTrajPublishStampPeriod(armJintStateMsg.header.stamp);
 
   sensor_msgs::JointState armJintStateMsgRad = armJintStateMsg;
@@ -1837,11 +2107,14 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     std::lock_guard<std::mutex> lock(mode2EnterTimeMutex_);
     mode2EnterTime = mode2EnterTime_;
   }
-  const bool inMode2 = (armControlMode_.load() == 2) && !mode2EnterTime.isZero();
-  const double mode2Elapsed = inMode2 ? (now - mode2EnterTime).toSec() : 0.0;
+  const bool inMode2 = (armControlMode_.load() == 2);
+  // 回调尚未写入 mode2EnterTime_ 时也按 0s 处理，避免先发出上一轮增量姿态。
+  const double mode2Elapsed =
+      (inMode2 && !mode2EnterTime.isZero()) ? (now - mode2EnterTime).toSec() : 0.0;
 
   Eigen::VectorXd armPositionForPublish;
   Eigen::VectorXd armVelocityForPublish;
+  Eigen::VectorXd previousPublishedQ;
   {
     const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
@@ -1849,6 +2122,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
                                 .count());
     const auto holdStart = std::chrono::steady_clock::now();
+    previousPublishedQ = latest_q_;
     if (armJointRuckigFilterPtr_) {
       const Eigen::VectorXd filteredArmQ = armJointRuckigFilterPtr_->update(finalArmAngles);
       if (filteredArmQ.size() == q_.size()) {
@@ -1883,16 +2157,15 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     }
 
     armPositionForPublish = latest_q_;
-    armVelocityForPublish = lowpass_dq_;
 
     // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
-    // 区间 1: [0, 0.3s)          — 传感器同步，速度清零
-    // 区间 2: [0.3s, 5.0s)      — 从 q_init_cmd_ 线性平滑到 q_（若 q_init_cmd_ 有效），速度清零
-    // 区间 3: [5.0s, +infty)    — 不在此处改写
+    // 区间 1: [0, 0.3s)          — 传感器同步
+    // 区间 2: [0.3s, 2.0s)      — 从 q_init_cmd_ 线性平滑到目标（若 q_init_cmd_ 有效）
+    // 区间 3: [2.0s, +infty)    — 不在此处改写
+    // 速度一律由最终发布位置差分得到，不再单独清零，避免 q/v 不一致。
+    constexpr double kMode2SensorSyncDurationSec = 0.3;
+    constexpr double kMode2SmoothDurationSec = 2.0;
     if (inMode2) {
-      constexpr double kMode2SensorSyncDurationSec = 0.3;
-      constexpr double kMode2SmoothDurationSec = 2.0;
-
       if (mode2Elapsed < kMode2SensorSyncDurationSec) {
         Eigen::VectorXd sensorArmQ = q_;
         if (jointDataForDrakeFK_.size() >= sensorDataArmOffset_ + 14) {
@@ -1902,10 +2175,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
         }
         q_init_cmd_ = sensorArmQ;
         armPositionForPublish = sensorArmQ;
-        armVelocityForPublish.setZero();
         latest_q_ = sensorArmQ;
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
       } else if (mode2Elapsed < kMode2SmoothDurationSec) {
         if (q_init_cmd_.size() == 14) {
           const double alpha = std::min(
@@ -1923,11 +2193,30 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
           }
           latest_q_ = armPositionForPublish;
         }
-        armVelocityForPublish.setZero();
-        latest_dq_.setZero();
-        lowpass_dq_.setZero();
       }
     }
+
+    const bool mode2Warmup = inMode2 && mode2Elapsed < kMode2SmoothDurationSec;
+    const bool mode2SensorHold = inMode2 && mode2Elapsed < kMode2SensorSyncDurationSec;
+    const bool reseedSmoother = reseedPublishedArmSmoother_.exchange(false);
+    if (mode2SensorHold || reseedSmoother) {
+      // 切入时从当前关节/传感器起步，禁止二阶平滑从上一轮增量姿态往回追。
+      resetPublishedArmSmoother(armPositionForPublish, now);
+      armVelocityForPublish = Eigen::VectorXd::Zero(armPositionForPublish.size());
+    } else if (mode2Warmup) {
+      armVelocityForPublish =
+          velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
+      seedPublishedArmSmoother(armPositionForPublish, armVelocityForPublish);
+    } else if (enableArmTrajSmooth_) {
+      const Eigen::VectorXd desiredQ = armPositionForPublish;
+      smoothPublishedArmCommand(desiredQ, now, armPositionForPublish, armVelocityForPublish);
+    } else {
+      armVelocityForPublish =
+          velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
+    }
+    latest_q_ = armPositionForPublish;
+    latest_dq_ = armVelocityForPublish;
+    lowpass_dq_ = armVelocityForPublish;
 
     publishLockWaitTimingMs(lockHoldPubJointStateMsPublisher_,
                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - holdStart)
@@ -1935,6 +2224,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
   }
 
   sensor_msgs::JointState armJintStateMsg;
+  armJintStateMsg.header.stamp = now;
   armJintStateMsg.position.resize(14);
   armJintStateMsg.velocity.resize(14);
   armJintStateMsg.effort.resize(14);
@@ -1965,22 +2255,23 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
 
   Eigen::VectorXd armPositionForPublish;
   Eigen::VectorXd armVelocityForPublish;
+  const ros::Time stamp = ros::Time::now();
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
 
     q_ = defaultArmAngles;
     dq_.setZero();
-
-    const double alpha = 0.00;
-    latest_q_ = (1.0 - alpha) * latest_q_ + alpha * q_;
-    latest_dq_.setZero();
-    lowpass_dq_ = lowpassDqAlpha_ * lowpass_dq_ + (1.0 - lowpassDqAlpha_) * latest_dq_;
-
-    armPositionForPublish = latest_q_;
-    armVelocityForPublish = lowpass_dq_;
+    latest_q_ = defaultArmAngles;
+    armPositionForPublish = defaultArmAngles;
+    reseedPublishedArmSmoother_.store(false);
+    resetPublishedArmSmoother(armPositionForPublish, stamp);
+    armVelocityForPublish = Eigen::VectorXd::Zero(armPositionForPublish.size());
+    latest_dq_ = armVelocityForPublish;
+    lowpass_dq_ = armVelocityForPublish;
   }
 
   sensor_msgs::JointState armJintStateMsg;
+  armJintStateMsg.header.stamp = stamp;
   armJintStateMsg.position.resize(14);
   armJintStateMsg.velocity.resize(14);
   armJintStateMsg.effort.resize(14);
@@ -1998,6 +2289,10 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
 }
 
 void WheelQuest3IkIncrementalROS::publishLegJointStates() {
+  std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
+  if (!lbLegMasterPublishEnabled_) {
+    return;
+  }
   // 从 latestLbTargetAngles_ 读取 IK 解的下肢目标角度
   Eigen::VectorXd targetLbAngles;
   bool shouldPublish = false;
@@ -2014,8 +2309,41 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
   }
 
   sensor_msgs::JointState lbLegTrajMsg;
+  Eigen::Vector3d lbFreezeAlignHead = Eigen::Vector3d::Zero();
+  bool lbFreezeAlignReady = false;
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    // 双手 grip 刚松开并冻结 knee/leg/waist_pitch：以当前滤波输出对齐冻结目标，并清零这三轴
+    // Ruckig/EMA 速度。否则目标骤停时滤波器仍带着旧速度过冲再回摆 → 下肢折叠臂肉眼「抽一下」。
+    if (lbFreezeRuckigResetPending_.exchange(false, std::memory_order_acq_rel) && lb_q_.size() == 4 &&
+        targetLbAngles.size() == 4) {
+      for (int i = 0; i < 3; ++i) {
+        const double qFreeze = lb_q_(i);
+        lbFreezeAlignHead(i) = qFreeze;
+        targetLbAngles(i) = qFreeze;
+        if (lbJointRuckigFilterPtr_) {
+          lbJointRuckigFilterPtr_->resetDof(static_cast<size_t>(i), qFreeze);
+        }
+      }
+      if (lb_dq_.size() >= 3) {
+        lb_dq_.head(3).setZero();
+      }
+      if (latest_lb_q_.size() >= 3) {
+        latest_lb_q_.head(3) = lb_q_.head(3);
+      }
+      if (latest_lb_dq_.size() >= 3) {
+        latest_lb_dq_.head(3).setZero();
+      }
+      if (lowpass_lb_dq_.size() >= 3) {
+        lowpass_lb_dq_.head(3).setZero();
+      }
+      lbFreezeAlignReady = true;
+      {
+        std::lock_guard<std::mutex> moveLock(lbLegMoveTimeMutex_);
+        lbLegMoveStartTime_ = ros::Time(0);
+      }
+    }
+
     // 1) ruckig 限速度/加速度平滑
     if (lbJointRuckigFilterPtr_) {
       const Eigen::VectorXd filteredLbQ = lbJointRuckigFilterPtr_->update(targetLbAngles);
@@ -2092,10 +2420,33 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
     }
   }
 
+  // 在已释放 jointStateMutex_ 后再写冻结快照，避免与 publishJointStates 的锁序死锁；
+  // 用当前滤波位置覆盖 IK 瞬时快照，防止下一拍目标又跳回松手前的 IK 值。
+  if (lbFreezeAlignReady) {
+    {
+      std::lock_guard<std::mutex> lock(ikResultMutex_);
+      if (frozenLbJointCommand_.size() == 4) {
+        frozenLbJointCommand_.head(3) = lbFreezeAlignHead;
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(lbLegTargetMutex_);
+      if (hasLatestLbTargetAngles_ && latestLbTargetAngles_.size() == 4) {
+        latestLbTargetAngles_.head(3) = lbFreezeAlignHead;
+      }
+    }
+  }
+
   lbLegTrajPublisher_.publish(lbLegTrajMsg);
+  // Record exactly the post-filter, post-clamp message accepted by publish().
+  for (int i = 0; i < 4; ++i) {
+    lastPublishedLbCommand_(i) = lbLegTrajMsg.position[i] * M_PI / 180.0;
+  }
+  hasPublishedLbCommand_ = true;
 }
 
 void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
+  std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
   // 下肢默认角度：[0, 0, 0, 0] 度
   Eigen::VectorXd defaultLbAngles = Eigen::VectorXd::Zero(4);
 
@@ -2138,6 +2489,11 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
   }
 
   lbLegTrajPublisher_.publish(lbLegTrajMsg);
+  // Record exactly the post-filter, post-clamp message accepted by publish().
+  for (int i = 0; i < 4; ++i) {
+    lastPublishedLbCommand_(i) = lbLegTrajMsg.position[i] * M_PI / 180.0;
+  }
+  hasPublishedLbCommand_ = true;
 }
 // ========================================================================================
 // [AUTO-MOVED][stage 5] moved from WheelQuest3IkIncrementalROS.cpp
@@ -2146,6 +2502,24 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
 
 void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
+
+  // Dual VR 躯干 ownership：启动阶段解析一次（高频解算循环内不再读参数）。
+  // 必须在 initializeBase 之后，此时 input_mode / useDualVr_ 已就绪。
+  parseTorsoControlSideParam();
+
+  // SG100 heiman 手指：仅当本机型末端为 heiman 时加载手势库
+  // （service 与 /sg100_hand_command publisher 均在该函数内注册）
+  const bool enableSg100Hand =
+      (joyStickHandlerPtr_ != nullptr &&
+       joyStickHandlerPtr_->getEndEffectorType() == EndEffectorType::HEIMAN);
+  if (enableSg100Hand) {
+    sg100_vr_client_ = std::make_unique<HighlyDynamic::SG100VrGestureClient>(
+        nodeHandle_, makeSg100VrInput());
+    sg100_vr_client_->start();
+  } else {
+    ROS_INFO("[WheelQuest3IkIncrementalROS] end_effector_type is not heiman; "
+             "SG100 VR trigger/gesture client disabled");
+  }
 
   {
     nodeHandle_.param("/vr_cmd_vel/linear_scale_x", chassisCmdVelLinearXLimit_, chassisCmdVelLinearXLimit_);
@@ -2267,7 +2641,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
 
   drake::multibody::Parser parser(&plant);
   parser.package_map().Add("kuavo_assets", ros::package::getPath("kuavo_assets"));
-  auto modelInstance = parser.AddModelFromFile(urdfFilePath);
+  (void)motion_capture_ik::drake_parser_compat::AddUrdfModel(parser, urdfFilePath);
 
   const auto& baseFrame = plant.GetFrameByName("base_link");
   plant.WeldFrames(plant.world_frame(), baseFrame);  // Weld base_link to world frame
@@ -2283,12 +2657,13 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   for (drake::multibody::JointIndex i(0); i < plant.num_joints(); ++i) {
     const auto& joint = plant.get_joint(i);
     if (joint.num_positions() > 0) {
-      mec_limit_lower_(i) = joint.position_lower_limits()(0);
-      mec_limit_upper_(i) = joint.position_upper_limits()(0);
+      const Eigen::Index ji = static_cast<Eigen::Index>(static_cast<int>(i));
+      mec_limit_lower_(ji) = joint.position_lower_limits()(0);
+      mec_limit_upper_(ji) = joint.position_upper_limits()(0);
 
       std::cout << std::left << std::setw(10) << i << std::setw(30) << joint.name() << std::fixed
-                << std::setprecision(4) << std::setw(20) << mec_limit_lower_(i) << std::setw(20) << mec_limit_upper_(i)
-                << std::endl;
+                << std::setprecision(4) << std::setw(20) << joint.position_lower_limits()(0) << std::setw(20)
+                << joint.position_upper_limits()(0) << std::endl;
     }
   }
 
@@ -2329,6 +2704,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   latest_q_ = standArmAngles_;
   latest_dq_ = Eigen::VectorXd::Zero(14);
   lowpass_dq_ = Eigen::VectorXd::Zero(14);
+  resetPublishedArmSmoother(latest_q_, ros::Time(0));
 
   ikLowerBodyJointCommand_ = Eigen::VectorXd::Zero(4);
   ikUpperBodyJointCommand_ = Eigen::VectorXd::Zero(14);
@@ -2345,7 +2721,18 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   }
 
   std::vector<std::string> frameNames = loadFrameNamesFromConfig(configJson);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/natural_elbow/safety_min_lateral_distance",
+                    elbowSafetyMinLateralDistance_, 0.22);
+  if (!std::isfinite(elbowSafetyMinLateralDistance_) || elbowSafetyMinLateralDistance_ < 0.0) {
+    ROS_WARN("[WheelQuest3IkIncrementalROS] Invalid safety_min_lateral_distance, using 0.22 m");
+    elbowSafetyMinLateralDistance_ = 0.22;
+  }
   auto pointTrackConfig = loadPointTrackIKSolverConfigFromJson(configJson);
+  if (elbowSafetyMinLateralDistance_ > 0.0) {
+    // 安全下限开启时，最终 IK 必须启用硬约束，不能只有前级点位隔离。
+    pointTrackConfig.enableWaistElbowClearanceConstraint = true;
+  }
+  livePathElbowKeepOutClearanceNom_ = std::max(0.0, pointTrackConfig.waistElbowLateralClearance);
   oneStageIkEndEffectorPtr_ =
       std::make_unique<HighlyDynamic::WheelOneStageIKEndEffector>(&plant, frameNames, pointTrackConfig);
 
@@ -2518,6 +2905,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   incrementalArmTrajRadRecordPublisher_ =
       nodeHandle_.advertise<sensor_msgs::JointState>("/vr_incremental/arm_traj_rad", 2);
   kuavoArmTrajControlPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 2);
+  armTrajLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/arm_traj_latency_ms", 10);
   arm_traj_writer_.init(nodeHandle_, "/humanoid_wheel/set_incremental_arm_traj_link",
                         "/wheel_ik/set_incremental_arm_traj_link");
   nodeHandle_.param("vr_ik/enable_arm_traj_shadow_publish", enableArmTrajShadowPublish_, false);
@@ -2711,6 +3099,15 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   PARAM_AND_PRINT_FLOAT(
       nodeHandle_, "/ik_ros_uni_cpp_node/quest3/joint_space_jerk_limit", jointSpaceJerkLimit_, 600.0, 1);
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 10.0, 3);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_enable", enableArmTrajSmooth_, true);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_wn", armTrajSmoothWn_, 40.0);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_zeta", armTrajSmoothZeta_, 1.0);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_acc_limit", armTrajSmoothAccLimit_, 60.0);
+  ROS_INFO("[WheelQuest3IkIncrementalROS] arm traj publish smoother enable=%s wn=%.1f zeta=%.2f acc_limit=%.1f",
+           enableArmTrajSmooth_ ? "true" : "false",
+           armTrajSmoothWn_,
+           armTrajSmoothZeta_,
+           armTrajSmoothAccLimit_);
   {
     const double armRuckigDt = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
     const double lbRuckigDt = lbLegPublishRateMultiplier_ / std::max(jointStatePublishRateHz_, 1.0);
@@ -2785,6 +3182,15 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       std::clamp(wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
                  0.0,
                  wheelNaturalElbowGuideConfig_.waistSoftClearance);
+  nodeHandle_.param(naturalElbowParam + "live_path_fade_enable", livePathElbowFadeEnable_, true);
+  nodeHandle_.param(naturalElbowParam + "live_path_fade_vmin", livePathElbowFadeVMin_, 0.18);
+  nodeHandle_.param(naturalElbowParam + "live_path_fade_vmax", livePathElbowFadeVMax_, 0.55);
+  nodeHandle_.param(naturalElbowParam + "live_path_keepout_min_p1", livePathElbowKeepOutMinP1_, 0.04);
+  nodeHandle_.param(naturalElbowParam + "live_path_keepout_clearance", livePathElbowKeepOutClearance_, 0.03);
+  livePathElbowFadeVMin_ = std::max(0.0, livePathElbowFadeVMin_);
+  livePathElbowFadeVMax_ = std::max(livePathElbowFadeVMin_ + 1.0e-3, livePathElbowFadeVMax_);
+  livePathElbowKeepOutMinP1_ = std::max(0.0, livePathElbowKeepOutMinP1_);
+  livePathElbowKeepOutClearance_ = std::max(0.0, livePathElbowKeepOutClearance_);
   leftNaturalElbowGuide_ =
       std::make_unique<WheelNaturalElbowGuide>(l1_, l2_, wheelNaturalElbowGuideConfig_);
   rightNaturalElbowGuide_ =
@@ -2793,7 +3199,9 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       "[WheelQuest3IkIncrementalROS] Natural elbow circle: enabled=%s, "
       "gravity=%.2f, human=%.2f, soft_tracking_scale=%.2f, "
       "reach_margin=%.3f m, extension_fade_retraction=[%.3f, %.3f] m, "
-      "waist_avoidance=%s, waist_clearance=[full %.3f, soft %.3f] m",
+      "waist_avoidance=%s, waist_clearance=[full %.3f, soft %.3f] m, "
+      "live_path_fade=%s vmin=%.2f vmax=%.2f keep_tracking=true "
+      "legacy keepout relaxation ignored (minP1=%.3f clearance=%.3f)",
       enableWheelNaturalElbowGuide_ ? "true" : "false",
       std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
       1.0 - std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
@@ -2803,7 +3211,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       wheelNaturalElbowGuideConfig_.extensionFadeFullDistance,
       wheelNaturalElbowGuideConfig_.waistAvoidanceEnabled ? "true" : "false",
       wheelNaturalElbowGuideConfig_.waistFullActivationClearance,
-      wheelNaturalElbowGuideConfig_.waistSoftClearance);
+      wheelNaturalElbowGuideConfig_.waistSoftClearance,
+      livePathElbowFadeEnable_ ? "true" : "false",
+      livePathElbowFadeVMin_,
+      livePathElbowFadeVMax_,
+      livePathElbowKeepOutMinP1_,
+      livePathElbowKeepOutClearance_);
 
   // 读取进入增量控制时是否重置到默认位置
   nodeHandle_.param(
@@ -2883,6 +3296,15 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   incrementalController_ = std::make_unique<WheelIncrementalControlModule>(incrementalConfig);
 
   quest3ArmInfoTransformerPtr_->setDeltaScale(deltaScale_);
+  // Dual VR（input_mode=dual_vr）：两个按侧实例必须使用同一 delta_scale，
+  // 否则左右臂增量映射尺度不一致。single_vr 下两侧指向同一实例，
+  // 重复设置同值是幂等的，行为与改造前完全一致。
+  if (auto* leftTransformer = getArmInfoTransformerForSide("Left")) {
+    leftTransformer->setDeltaScale(deltaScale_);
+  }
+  if (auto* rightTransformer = getArmInfoTransformerForSide("Right")) {
+    rightTransformer->setDeltaScale(deltaScale_);
+  }
 
   // print clip result
   {
@@ -2938,10 +3360,26 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         drakeSolveUpdateChestPositionConfig_ = alwaysUpdateChest;
       }
     }
+    drakeSolveUpdateChestOrientationConfig_ = drakeSolveUpdateChestOrientation_;
     drakeSolveUpdateChestPosition_ = drakeSolveUpdateChestPositionConfig_;
-    ROS_INFO("[WheelQuest3IkIncrementalROS] drake solve update flags: orientation=%s, position=%s",
+    if (configJson.contains("lock_knee_leg")) {
+      lockKneeLegEnabled_.store(configJson["lock_knee_leg"].get<bool>());
+    }
+    // launch 入参覆盖 json 默认值（/quest3/lock_knee_leg 由 launch arg 传入），并注册动态切换 service
+    {
+      bool lockKneeLegParam = lockKneeLegEnabled_.load();
+      nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockKneeLegParam, lockKneeLegParam);
+      lockKneeLegEnabled_.store(lockKneeLegParam);
+      setLockKneeLegServer_ = nodeHandle_.advertiseService(
+          "/quest3/set_lock_knee_leg", &WheelQuest3IkIncrementalROS::setLockKneeLegCallback, this);
+      ROS_INFO(
+          "[WheelQuest3IkIncrementalROS] lock_knee_leg switch ready: service=/quest3/set_lock_knee_leg, "
+          "param=/ik_ros_uni_cpp_node/quest3/lock_knee_leg");
+    }
+    ROS_INFO("[WheelQuest3IkIncrementalROS] drake solve update flags: orientation=%s, position=%s, lock_knee_leg=%s",
              drakeSolveUpdateChestOrientation_ ? "true" : "false",
-             drakeSolveUpdateChestPosition_ ? "true" : "false");
+             drakeSolveUpdateChestPosition_ ? "true" : "false",
+             lockKneeLegEnabled_.load() ? "true" : "false");
 
     chestElbowHandWeightConfig_ = loadDrakeChestElbowHandWeightsFromJson(configJson);
     chestElbowHandBoundsConfig_ = loadDrakeChestElbowHandBoundsFromJson(configJson);
@@ -2972,6 +3410,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
         std::make_unique<DrakeChestElbowHandPointOptSolver>(vClsInChest, vCrsInChest, l1_, l2_, &initFkResult);
     chestElbowHandPointOptSolverPtr_->setWeights(chestElbowHandWeightConfig_);
     chestElbowHandPointOptSolverPtr_->setBounds(chestElbowHandBoundsConfig_);
+    livePathElbowKeepOutMinP1Nom_ = std::max(0.0, chestElbowHandBoundsConfig_.minP1XyNorm);
+    applyElbowSafetyClearance();
+    ROS_INFO("[WheelQuest3IkIncrementalROS] Fixed elbow lateral clearance for point-opt and IK: %.3f m "
+             "(not relaxed by live_path_fade)",
+             std::max(elbowSafetyMinLateralDistance_,
+                      std::max(livePathElbowKeepOutMinP1Nom_, livePathElbowKeepOutClearanceNom_)));
 
     ROS_INFO("[WheelQuest3IkIncrementalROS] DrakeChestElbowHandPointOptSolver initialized with FK result (l1=%.4f, l2=%.4f)",
              l1_,

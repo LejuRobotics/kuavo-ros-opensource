@@ -1,0 +1,358 @@
+/*-----------------------------------------------------------------------------
+ * EcDemoApp.h
+ * Copyright                acontis technologies GmbH, Ravensburg, Germany
+ * Response                 Holger Oelhaf
+ * Description              Application specific settings for EC-Master demo
+ *---------------------------------------------------------------------------*/
+
+#ifndef INC_ECDEMOAPP_H
+#define INC_ECDEMOAPP_H 1
+
+/*-LOGGING-------------------------------------------------------------------*/
+#ifndef pEcLogParms
+#define pEcLogParms (&(pAppContext->LogParms))
+#endif
+
+#define INCLUDE_EC_MASTER
+
+/*-INCLUDES------------------------------------------------------------------*/
+#include "EcMaster.h"
+#include "EcDemoPlatform.h"
+#include "EcDemoParms.h"
+#include "EcLogging.h"
+#include "EcNotification.h"
+#include "EcSdoServices.h"
+#include "EcSelectLinkLayer.h"
+#include "EcSlaveInfo.h"
+#include <iostream>
+#include <math.h>
+#include <mutex>
+#include <functional>
+#include <vector>
+#include <atomic>
+/*-DEFINES-------------------------------------------------------------------*/
+#define EC_DEMO_APP_NAME (EC_T_CHAR *)"EcMasterDemoDc"
+
+/* the RAS server is necessary to support the EC-Engineer or other remote applications */
+#if (!defined INCLUDE_RAS_SERVER) && (defined EC_SOCKET_SUPPORTED)
+#define INCLUDE_RAS_SERVER
+#endif
+
+#if (defined INCLUDE_RAS_SERVER)
+#include "EcRasServer.h"
+#define ECMASTERRAS_MAX_WATCHDOG_TIMEOUT 10000
+#define ECMASTERRAS_CYCLE_TIME 2
+#endif
+
+#define MOTOR_STATUS_NO_ERROR 0
+#define MOTOR_STATUS_ERROR 1
+#define MOTOR_STATUS_REINIT 2
+
+/***********************************************/
+/* static EtherCAT master configuration values */
+/***********************************************/
+#define ETHERCAT_DC_TIMEOUT 12000          /* DC initialization timeout in ms */
+#define ETHERCAT_DC_ARMW_BURSTCYCLES 10000 /* DC burst cycles (static drift compensation) */
+#define ETHERCAT_DC_ARMW_BURSTSPP 12       /* DC burst bulk (static drift compensation) */
+#define ETHERCAT_DC_DEV_LIMIT 13           /* DC deviation limit (highest bit tolerate by the broadcast read) */
+#define ETHERCAT_DC_SETTLE_TIME 1500       /* DC settle time in ms */
+
+/*--------------------------------------------------------------------------*/
+/* Performance measurements of jobs                                         */
+/* This is only available on CPUs with TSC support                          */
+/*--------------------------------------------------------------------------*/
+#define PERF_MEASURE_JOBS_INIT(numJobs)                             \
+  ecatPerfMeasInit(&pAppContext->TscMeasDesc, 0, numJobs, EC_NULL); \
+  ecatPerfMeasEnable(&pAppContext->TscMeasDesc)
+#define PERF_MEASURE_JOBS_DEINIT() ecatPerfMeasDeinit(&pAppContext->TscMeasDesc)
+#define PERF_MEASURE_JOBS_RESET() ecatPerfMeasReset(&pAppContext->TscMeasDesc, 0xFFFFFFFF);
+#define PERF_MEASURE_JOBS_SHOW() ecatPerfMeasShow(&pAppContext->TscMeasDesc, 0xFFFFFFFF, S_aszMeasInfo)
+#define PERF_JOB_START(nJobIndex) ecatPerfMeasStart(&pAppContext->TscMeasDesc, (EC_T_DWORD)(nJobIndex))
+#define PERF_JOB_END(nJobIndex) ecatPerfMeasEnd(&pAppContext->TscMeasDesc, (EC_T_DWORD)(nJobIndex))
+
+#pragma pack(1)
+typedef struct
+{
+  int32_t position_actual_value;
+  int16_t torque_actual_value;
+  uint16_t status_word;
+  int16_t mode_of_opration_display;
+  // int32_t position_demand_raw;
+  // int32_t velocity_demand_raw;
+  int32_t velocity_actual_value;
+  int16_t torque_demand_raw;
+  uint16_t error_code;
+} ELMO_SlaveRead_t;
+
+typedef struct
+{
+  int32_t target_position;
+  int32_t target_velocity;
+  int16_t target_torque;
+  uint16_t max_torque;
+  uint16_t control_word;
+  int16_t mode_of_opration;
+  int32_t position_offset;
+  int32_t velocit_offset;
+  int16_t torque_offset;
+} ELMO_SlaveWrite_t;
+
+
+/* yd */
+enum RobotModel
+{
+  KUAVO = 0,         // kuavo
+  ROBAN2 = 1,        // roban2
+  KUAVO5 = 2,        // kuavo5
+  LUNBI = 3,         // lunbi
+  LUNBI_V62 = 4,     // lunbi_v62
+  ROBOT_MODEL_NUM    // 用于表示RobotModel的数量，以后有新的映射关系，需要在此加入对应的映射索引。
+};
+typedef struct
+{
+  uint16_t status_word;
+  int32_t position_actual_value;
+  int32_t velocity_actual_value;
+  int16_t torque_actual_value;
+  int32_t velocity_demand_raw;
+  int16_t torque_demand_raw;
+  uint16_t error_code;
+  uint16_t igbt_temperature;
+  int16_t ntc_temperature;
+  int8_t mode_of_opration_display;
+} YD_SlaveRead_t;
+
+typedef struct
+{
+  uint16_t control_word;
+  int32_t target_position;
+  int32_t target_velocity;
+  int16_t target_torque;
+  int32_t velocity_offset;
+  int16_t torque_offset;
+  uint16_t position_kp;  //位置环P增益
+  uint16_t velocity_kp;  //速度环P增益
+  int8_t mode_of_opration;//选模式，例：CSP、CSV等。。。
+} YD_SlaveWrite_t;
+
+/* selfd */
+typedef struct
+{
+  int32_t position_actual_value;
+  int16_t torque_actual_value;
+  uint16_t status_word;
+  int16_t mode_of_opration_display;
+  int32_t position_demand;
+  int32_t velocity_demand;
+  int32_t velocity_actual_value;
+  int16_t torque_demand_raw;
+  uint16_t error_code;
+} SELFD_SlaveRead_t;
+
+typedef struct
+{
+  int32_t target_position;
+  int32_t target_velocity;
+  int16_t target_torque;
+  uint16_t max_torque;
+  uint16_t control_word;
+  int16_t mode_of_opration;
+  int32_t position_offset;
+  int32_t velocity_offset;
+  int16_t torque_offset;
+} SELFD_SlaveWrite_t;
+
+#pragma pack()
+
+// 定义input区结构
+struct SlaveBuffersIn {
+    ELMO_SlaveRead_t* elmo_slave_input;
+    YD_SlaveRead_t* yd_slave_input;
+    SELFD_SlaveRead_t* selfd_slave_input;
+};
+
+// 定义out结构
+struct SlaveBuffersOut {
+    ELMO_SlaveWrite_t* elmo_slave_output;
+    YD_SlaveWrite_t* yd_slave_output;
+    SELFD_SlaveWrite_t* selfd_slave_output;
+};
+
+enum EcMasterType
+{
+  ELMO = 0,
+  YD = 1,
+  LEJU = 2
+};
+
+typedef struct
+{
+  uint8_t slave_id;   // EC从站ID,即真实的物理id 从1开始
+  uint8_t logical_id; // 逻辑id,即urdf的id 从0开始
+  uint8_t pdo_id;     // 用于PDO读写的索引 从0开始
+  uint8_t physical_id;// 除去分支器的motor连接顺序 从0开始
+  EcMasterType driver_type; // 驱动类型
+} MotorId_t;
+
+typedef struct
+{
+  double position = 0.0;
+  double velocity = 0.0;
+  double torque = 0.0;
+  double maxTorque = 0.0;
+  double positionOffset = 0.0;
+  double velocityOffset = 0.0;
+  double torqueOffset = 0.0;
+  double acceleration = 0.0;
+  double kp = 0.0;
+  double kd = 0.0;
+  uint8_t status = 0;
+  uint16_t status_word = 0;
+  uint16_t error_code = 0;
+  double torque_demand_trans = 0.0;
+  double velocity_demand_raw = 0.0;
+  double igbt_temperature = 0.0; 
+  double ntc_temperature = 0.0; 
+} MotorParam_t;
+
+extern enum EcMasterType driver_type[30];
+
+/*-FUNCTION DECLARATIONS-----------------------------------------------------*/
+EC_T_VOID ShowSyntaxAppUsage(T_EC_DEMO_APP_CONTEXT *pAppContext);
+EC_T_VOID ShowSyntaxApp(T_EC_DEMO_APP_CONTEXT *pAppContext);
+EC_T_VOID ShowSyntaxLinkLayer(EC_T_VOID);
+EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext);
+
+using logger_callback_stdvector = std::function<void(const std::string &name, const std::vector<double> &vec)>;
+void set_EClogger_callback(logger_callback_stdvector callback);
+
+extern bool isEcMasterExit();
+void setEcMasterExit();
+
+bool motorIsEnable(const uint16_t id);
+
+uint8_t motorStatus(const uint16_t id);
+
+extern void motorGetData(const uint16_t *ids, const EcMasterType* driver, uint32_t num, MotorParam_t *data);
+
+extern void setRobotMoudle(const int robot_module);
+
+extern void motorSetPosition(const uint16_t *ids, const EcMasterType* driver, uint32_t num, MotorParam_t *params);
+extern void motorSetVelocity(const uint16_t *ids, const EcMasterType* driver, uint32_t num, MotorParam_t *params);
+extern void motorSetTorque(const uint16_t *ids, const EcMasterType* driver, uint32_t num, MotorParam_t *params);
+extern void motorSetTorqueWithFeedback(const uint16_t *ids, const EcMasterType* driver, uint32_t num, MotorParam_t *params);
+
+extern void motorToPosition(T_EC_DEMO_APP_CONTEXT *pAppContext, const uint16_t *ids, uint32_t num_id, const double *q_d, double speed, double dt);
+extern void motorToPosition(const uint16_t *ids, uint32_t num_id, const double *q_d, double speed, double dt);
+
+
+extern void motorSetkp(const std::vector<int32_t>& joint_kp);
+extern void motorSetkd(const std::vector<int32_t>& joint_kd);
+
+/**
+ * @brief 读取电机Kp/Kd
+ * 
+ * @param ids 
+ * @param driver_type 
+ * @param joint_kp 
+ * @return int 0 表示成功，1 表示驱动类型不支持该操作，2 表示读取失败
+ */
+extern int motorReadKp(const std::vector<uint16_t> &ids, EcMasterType driver_type, std::vector<int32_t>& joint_kp);
+extern int motorReadKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, std::vector<int32_t>& joint_kd);
+
+/**
+ * @brief 写入电机Kp/Kd
+ * 
+ * @param ids 
+ * @param driver_type 
+ * @param joint_kp 
+ * @return int 0 表示成功，1 表示驱动类型不支持该操作，2 表示写入失败
+ */ 
+extern int motorWriteKp(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kp);
+extern int motorWriteKd(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& joint_kd);
+
+/**
+ * @brief 向YD驱动器写入温度限幅值（对象索引0x3F0D）
+ * @param ids EC从站ID列表（1-based）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limits 温度限幅值列表（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示写入失败，3表示参数尺寸不匹配
+ */
+extern int motorWriteTemperatureLimit(const std::vector<uint16_t> &ids, EcMasterType driver_type, const std::vector<int32_t>& temp_limits);
+
+/**
+ * @brief 向所有YD驱动器写入统一的温度限幅值（对象索引0x3F0D）
+ * @param driver_type 驱动器类型，必须为YD
+ * @param temp_limit 温度限幅值（单位：℃）
+ * @return int 0表示成功，1表示驱动类型不支持，2表示有写入失败
+ */
+extern int motorWriteTemperatureLimitAll(EcMasterType driver_type, int32_t temp_limit);
+
+extern bool isMotorEnable(void);
+extern uint32_t getNumMotorSlave(void);
+void setEcEncoderRange(uint32_t *encoder_range_set, uint16_t num);
+
+/**
+ * @brief 读取单个从站的 SDO 参数（子索引固定为 0）。
+ *
+ * 注意：当前实现将 SubIndex 参数透传给 emCoeSdoUpload（此前为硬编码 0），
+ * 但返回值**无脑按 32 位拼装**，不区分 emCoeSdoUpload 实际返回长度。
+ * 因此对 16 位对象会吞入未初始化的高位字节。
+ *
+ * 现仅由内部 motorGetConfig/motorReadKp 等读取 kp/kd 等场景使用。
+ * 固件/参数校验模块请改用 readSingleSdo（按 outdata_len 正确拼装）。
+ *
+ * @param SlaveId  从站物理 ID（0-based，与 emCoeSdoUpload 一致）
+ * @param ObIndex  对象字典索引（如 0x3020 固件版本、0x3507 工作模式）
+ * @param SubIndex 子索引
+ * @param read_data 输出：读取到的 int32 值
+ * @return true 读取成功；false 读取失败（超时/对象不存在等）
+ */
+bool ReadSingleSdo(const uint8_t SlaveId, const uint16_t ObIndex, const uint16_t SubIndex, int32_t &read_data);
+
+/**
+ * @brief 读取单个从站的 SDO 参数（支持任意子索引）。
+ *
+ * 与 ReadSingleSdo 不同，本函数按 emCoeSdoUpload 实际返回长度 outdata_len
+ * 拼装：16 位对象取 buf[0..1]，32 位对象取全 4 字节。对 16 位对象安全。
+ * 供固件/参数校验模块（EcFirmwareParamCheck）及 ec_master_tools 口径使用。
+ *
+ * @param SlaveId 从站物理 ID（0-based）
+ * @param ObIndex 对象字典索引
+ * @param SubIndex 子索引
+ * @param read_data 输出：读取到的 int32 值
+ * @return true 读取成功；false 读取失败
+ */
+bool readSingleSdo(const uint8_t SlaveId, const uint16_t ObIndex, const uint16_t SubIndex, int32_t *read_data);
+
+/**
+ * @brief 获取第 i 个 EC 电机从站的物理从站 ID（1-based，与驱动器枚举顺序一致）。
+ *
+ * 校验模块按 EC 从站枚举顺序遍历，调用此接口得到 slave_id 后
+ * （-1 转为 0-based）传给 readSingleSdo。
+ *
+ * @param index 电机在 g_motor_id 数组中的下标（0-based，< getNumMotorSlave()）
+ * @return 从站物理 ID（1-based）；index 越界时返回 0
+ */
+uint8_t getMotorSlaveId(uint32_t index);
+
+
+// void motorGetCurrent(double *current_actual);
+bool loadOffset();
+bool saveOffset();
+
+void getMotorPositionOffset(std::vector<double>& output);
+void setMotorPositionOffset(const std::vector<double>& offsets);
+
+/* function in EcNotification */
+void fixEmergencyRequest(const int slaveAddr, const int errorCode);
+
+// 忽略/屏蔽电机
+extern void disableMotor(const uint16_t *ids, uint32_t num_id);
+
+#define PRINT_PERF_MEAS() ((EC_NULL != pEcLogContext) ? ((CAtEmLogging *)pEcLogContext)->PrintPerfMeas(pAppContext->dwInstanceId, 0, pEcLogContext) : 0)
+#define PRINT_HISTOGRAM() ((EC_NULL != pEcLogContext) ? ((CAtEmLogging *)pEcLogContext)->PrintHistogramAsCsv(pAppContext->dwInstanceId, pAppContext->pvPerfMeas) : 0)
+
+#endif /* INC_ECDEMOAPP_H */
+
+/*-END OF SOURCE FILE--------------------------------------------------------*/

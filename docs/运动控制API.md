@@ -60,7 +60,7 @@
 
 #### `/humanoid_get_current_gait_name`
 
-**类型:** `kuavo_msgs::changeArmCtrlMode`
+**类型:** `kuavo_msgs::getCurrentGaitName`
 
 **功能说明:**
 
@@ -275,7 +275,7 @@
 
 #### `/humanoid_get_arm_ctrl_mode`
 
-**类型:** `kuavo_msgs::changeGaitMode`
+**类型:** `kuavo_msgs::changeArmCtrlMode`
 
 **功能说明:**
 
@@ -760,7 +760,7 @@ pub.publish(msg)
 
 #### `/leju_claw_command`
 
-**类型:** `kuavo_msgs::lejuCalwCommand`
+**类型:** `kuavo_msgs::lejuClawCommand`
 
 **设备支持:**
 

@@ -15,7 +15,9 @@
     <param name="urdfFile"         value="$(arg urdfFile)" />
     <!-- Version 15 uses version 14 config files -->
     <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v14/mpc/task.info" if="$(eval arg('robot_version') == 15)"/>
-    <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/task.info" unless="$(eval arg('robot_version') == 15)"/>
+    <!-- 轮臂(major==6, 即 60<=version%100<70)读 wheel 接口 task.info；双足读 controllers mpc/task.info -->
+    <param name="taskFile"         value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" if="$(eval 60 &lt;= int(arg('robot_version')) % 100 &lt; 70)"/>
+    <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/task.info" unless="$(eval 60 &lt;= int(arg('robot_version')) % 100 &lt; 70 or arg('robot_version') == 15)"/>
 
     <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v14/command/reference.info" if="$(eval arg('robot_version') == 15)"/>
     <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" unless="$(eval arg('robot_version') == 15)"/>
@@ -30,8 +32,8 @@
     <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json" unless="$(eval arg('robot_version') == 15)"/>
     <param name="kuavo_configuration" textfile="$(arg kuavoConfigFile)"/>
 
-    <!-- 座椅配置：Kuavo5 代际共享默认，各版本 kuavo.json 中 seat_/sit_ 字段覆盖 -->
-    <param name="seat_config" textfile="$(find kuavo_assets)/config/seat_config_v5.json" if="$(eval str(arg('robot_version'))[0] == '5')"/>
+    <!-- 座椅配置：双足 5 代。与上面轮臂 60<=version%100<70 同一折法，400053%100==53 也会命中。 -->
+    <param name="seat_config" textfile="$(find kuavo_assets)/config/seat_config_v5.json" if="$(eval 50 &lt;= int(arg('robot_version')) % 100 &lt; 60)"/>
 
     <param name="modelPath"        value="$(find kuavo_assets)/models" />
     <!-- rviz -->

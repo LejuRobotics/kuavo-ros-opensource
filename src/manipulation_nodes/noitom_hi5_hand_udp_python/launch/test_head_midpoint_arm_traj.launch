@@ -1,0 +1,22 @@
+<launch>
+    <!-- 不启动 VR。机器人已起来后让双手走出不同轨迹，观察头跟中点。
+         auto：全身 IK（/vr_ik/use_velocity_ik_reference）发 /mm/teleop_tcp_target，
+         否则发 /kuavo_arm_traj。全身 IK 还需要 absolute_velocity_ik 在跑。 -->
+    <arg name="pipeline" default="auto" doc="auto / velocity_ik / joint"/>
+    <arg name="rate" default="50.0" doc="发布频率 Hz"/>
+    <arg name="left_segment_sec" default="2.0" doc="左手每一段路点的时间，秒。更长则更慢"/>
+    <arg name="right_segment_sec" default="2.0" doc="右手每一段路点的时间，秒。更短则更快"/>
+    <arg name="loops" default="0" doc="左手走完路点列表的次数，0 表示一直循环直到 Ctrl-C"/>
+
+    <node pkg="humanoid_controllers"
+          type="start_node.sh"
+          name="test_head_midpoint_arm_traj"
+          output="screen"
+          args="python3 $(find noitom_hi5_hand_udp_python)/scripts/test_head_midpoint_arm_traj.py">
+        <param name="pipeline" value="$(arg pipeline)"/>
+        <param name="rate" value="$(arg rate)"/>
+        <param name="left_segment_sec" value="$(arg left_segment_sec)"/>
+        <param name="right_segment_sec" value="$(arg right_segment_sec)"/>
+        <param name="loops" value="$(arg loops)"/>
+    </node>
+</launch>

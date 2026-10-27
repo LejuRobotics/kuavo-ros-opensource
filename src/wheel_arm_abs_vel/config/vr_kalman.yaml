@@ -1,0 +1,25 @@
+# Fixed-noise, variable-dt skeleton CV. No static-intent detector.
+# q: continuous white-acceleration spectral density, NOT acceleration caps.
+# Light input profile: Q x approximately (1 / 0.75)^4. This shortens the
+# locally linear CV observer pole-decay time by about 25% at 72/120 Hz.
+# Pose and velocity remain one joint estimate; R, resets, and downstream
+# reference / feedforward filters and all control limits are unchanged.
+vr_kalman_enabled: true
+vr_kalman_position_sigma: 0.001  # m
+vr_kalman_position_q: 0.63      # m^2/s^3; previous 0.2
+vr_kalman_rotation_sigma: 0.003 # rad
+vr_kalman_rotation_q: 5.7       # rad^2/s^3; chest; previous 1.8
+vr_kalman_hand_rotation_q: 1.42 # palms only; both arms; previous 0.45
+
+# Optional candidate, NOT default: meets 10-Hz gain <=1.03 and <1-ms
+# additional phase delay over 0.1..5 Hz at 72/90/120 Hz. It passes MORE
+# 30-Hz noise (roughly 9..24% amplitude); it is not a broadband denoiser.
+# Keep disabled until input-noise replay/real-machine A/B supports the tradeoff.
+vr_kalman_flattening:
+  enabled: false
+  position_q: 0.7875
+  rotation_q: 7.125
+  hand_rotation_q: 1.775
+  position_velocity_gain: 0.425
+  rotation_velocity_gain: 0.425
+  hand_velocity_gain: 0.65

@@ -1,0 +1,18 @@
+# Free-space feedforward, frozen base. These are simulation commissioning defaults,
+# not motor current limits or permission to run a new robot without validation.
+mode: full
+acceleration_gain: 0.25
+velocity_cutoff_hz: 120.0
+sensor_timeout: 0.05
+max_period: 0.05
+dynamic_ramp_seconds: 0.2
+torque_limit_ratio: 0.8  # fraction of task.info torqueLimitsTask, reserve PD margin
+torque_rate_lower: 3000.0  # Nm/s (joint-side)
+torque_rate_arm: 1000.0
+acceleration_limit_lower: 20.0  # rad/s^2 AFTER acceleration_gain
+acceleration_limit_arm: 100.0
+jerk_limit_lower: 200.0  # rad/s^3, dynamic feedforward only
+jerk_limit_arm: 500.0
+# Optional 18-element overrides: torque_rate, acceleration_limit, jerk_limit.
+
+jerk_limit: [200.0, 200.0, 200.0, 200.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0]

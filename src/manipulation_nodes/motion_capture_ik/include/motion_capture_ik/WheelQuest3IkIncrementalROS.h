@@ -22,10 +22,13 @@
 
 #include <noitom_hi5_hand_udp_python/PoseInfoList.h>
 #include <leju_utils/define.hpp>
+#include <std_srvs/SetBool.h>
 #include "motion_capture_ik/WheelArmControlBaseROS.h"
 #include "motion_capture_ik/WheelOneStageIKEndEffector.h"
 #include "motion_capture_ik/WheelIncrementalControlModule.h"
 #include "motion_capture_ik/WheelHandSmoother.h"
+#include "motion_capture_ik/GripQuaternionRecovery.h"
+#include "motion_capture_ik/SG100VrGestureClient.h"
 #include "motion_capture_ik/WheelNaturalElbowGuide.h"
 #include "humanoid_wheel_interface/filters/KinemicLimitFilter.h"
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
@@ -58,6 +61,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Time mode2EnterTime_;                              // 记录进入 mode 2 的时间戳
   std::mutex mode2EnterTimeMutex_;                        // 保护时间戳的互斥锁
   static constexpr double MODE_2_TIMEOUT_DURATION = 2.0;  // 超时时间：5秒
+  // dual_vr 躯干 owner 侧骨骼数据超时阈值（毫秒）。语义与基类的 kJoystickStaleTimeoutMs
+  // （按侧摇杆 0.5s 超时）保持一致：两侧都是 monitor_quest3.py 的同一个 100Hz 发布流
+  // （周期 10ms），500ms 相当于连续丢 50 帧，足以区分"偶发丢帧"与"Quest 断连"，
+  // 又不会把正常抖动误判为失效。不新增用户侧启动参数。
+  static constexpr int64_t kChestStaleTimeoutMs = 500;
 
   void fsmEnter() override;
   void fsmChange() override;
@@ -70,6 +78,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
  private:
   void chestPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+  // SG100 heiman 手:只发布扳机并调用 /sg100/step_gesture,服务在手节点上
+  HighlyDynamic::SG100VrInput makeSg100VrInput();
 
   void solveIkHandElbowThreadFunction();
   void publishJointStatesThreadFunction();
@@ -77,6 +87,14 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void publishSolveLoopTimingMs(const ros::Publisher& publisher, double ms) const;
   void publishLockWaitTimingMs(const ros::Publisher& publisher, double ms) const;
   void logArmTrajPublishStampPeriod(const ros::Time& stamp);
+  // 用上一帧已发布位置的差分作为本帧速度，保证 /kuavo_arm_traj 的 q/v 运动学一致。
+  Eigen::VectorXd velocityFromPublishedArmPosition(const Eigen::VectorXd& previousQ,
+                                                   const Eigen::VectorXd& currentQ,
+                                                   const ros::Time& now) const;
+  void resetPublishedArmSmoother(const Eigen::VectorXd& q, const ros::Time& now);
+  void seedPublishedArmSmoother(const Eigen::VectorXd& q, const Eigen::VectorXd& v);
+  void smoothPublishedArmCommand(const Eigen::VectorXd& desiredQ, const ros::Time& now,
+                                 Eigen::VectorXd& qOut, Eigen::VectorXd& vOut);
   void updateFkCacheFromSensorData();
 
   // 从 sensorData 抽取 14 维双臂关节角（rad），并做指数均值滤波：q = 0.99*q + 0.01*qnew
@@ -99,6 +117,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void computeWaistYawFK(Eigen::Vector3d& pOut);
   // 当前机器人胸部(waist_yaw_link) yaw/pitch 朝向，用于未开启躯干控制时保持当前姿态
   Eigen::Quaterniond getRobotChestQuatRef() const;
+  // X+B 暂停期间 TUI 挪躯干后，按当前实测关节 FK 重锚胸/肩/手/肘映射，避免恢复跟随仍用旧零位锚点。
+  void reanchorMappedUpperBodyFromMeasuredFk(const char* reason);
   // 启发式计算肘部参考位置
   Eigen::Vector3d computeElbow(const Eigen::Vector3d& link6Pos,
                                const Eigen::Vector3d& endEffectorPos,
@@ -129,6 +149,12 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   // 防止 Quest 姿态在 grip 跟随期间单帧翻转，旋转 EE offset 后形成 Z 尖峰。
   void stabilizeGripQuaternion(bool leftArm, bool gripPressed, Eigen::Quaterniond& quat);
+
+  // 画圆/身侧快动时把自然肘目标收到当前肘在肩手圆上的相位（防翻面），
+  // 跟踪权保持，让肩肘跟着走；腰肘隔离下限独立于运动混合。
+  void updateLivePathElbowFade(bool active, bool leftArm, const Eigen::Vector3d& handPos);
+  void resetLivePathElbowFade(bool leftArm);
+  void applyElbowSafetyClearance();
 
   void captureGripReleaseSnapshot(bool leftGripFallingEdge,
                                   bool rightGripFallingEdge);
@@ -233,6 +259,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher incrementalArmTrajRecordPublisher_;       // /vr_incremental/arm_traj，录包/观测（度）
   ros::Publisher incrementalArmTrajRadRecordPublisher_;    // /vr_incremental/arm_traj_rad，录包/观测（弧度）
   ros::Publisher kuavoArmTrajControlPublisher_;              // /kuavo_arm_traj，始终发布供 MPC 同步；WBC 增量时走 SHM
+  ros::Publisher armTrajLatencyPublisher_;                   // /vr_incremental/arm_traj_latency_ms，骨骼数据到发布的全链路延迟(ms)
   ArmTrajWriter arm_traj_writer_;                           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
   bool enableArmTrajShadowPublish_{false};
   ros::Publisher kuavoArmTrajShadowPublisher_;  // /vr_incremental/arm_traj_shadow_rad
@@ -263,6 +290,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher ikInputPosPublisher_;       // 发布IK输入位置（/ik_fk_result/input_pos）
   ros::Publisher lbLegTrajPublisher_;
   ros::Timer lbLegTrajPublishTimer_;
+  // Serialize final leg publication with the master-switch falling edge.
+  std::mutex lbLegCommandMutex_;
+  Eigen::Vector4d lastPublishedLbCommand_{Eigen::Vector4d::Zero()};
+  bool hasPublishedLbCommand_{false};
+  bool lbLegMasterPublishEnabled_{true};
   std::mutex lbLegTargetMutex_;
   Eigen::VectorXd latestLbTargetAngles_;
   bool hasLatestLbTargetAngles_ = false;
@@ -306,9 +338,19 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasLastPubArmTrajWallStart_ = false;
   ros::Time lastArmTrajPublishStamp_;
   bool hasLastArmTrajPublishStamp_ = false;
+  Eigen::VectorXd publishedArmQ_;
+  Eigen::VectorXd publishedArmV_;
+  bool hasPublishedArmSmoother_{false};
+  std::atomic<bool> reseedPublishedArmSmoother_{false};
+  bool enableArmTrajSmooth_{true};
+  double armTrajSmoothWn_{40.0};
+  double armTrajSmoothZeta_{1.0};
+  double armTrajSmoothAccLimit_{60.0};
 
   std::thread ikSolveThread_;
   std::thread jointStatePublishThread_;
+  // SG100 heiman 手:VR 扳机与切手势客户端(库和 /sg100/* 在手节点上)
+  std::unique_ptr<HighlyDynamic::SG100VrGestureClient> sg100_vr_client_;
   std::mutex bonePoseHandElbowMutex_;
   std::mutex poseConstraintListMutex_;  // 保护 latestPoseConstraintList_ 的互斥锁
   std::mutex ikResultMutex_;
@@ -323,8 +365,33 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::mutex chestPoseMutex_;  // 保护最新 chest pose（position）
   Eigen::Vector3d latestChestPositionInRobot_ = Eigen::Vector3d::Zero();
   bool hasChestPose_ = false;
+  // 躯干 owner 侧 Chest 朝向的本帧缓存（由求解循环按 torso_control_side 刷新）：
+  //   single_vr      -> /robot_chest_pose 路径的 chestRotationQuaternion_（历史行为）
+  //   dual_vr        -> owner 侧 Transformer（left=A / right=B）的 Chest 四元数
+  // 只在该侧尚无有效 Chest 帧时保留上一帧值，绝不隐式回退到 Left Chest。
+  Eigen::Quaterniond latestTorsoOwnerChestQuat_ = Eigen::Quaterniond::Identity();
+  // 本求解周期 owner Chest 朝向是否新鲜（求解循环开头按 getFreshSideChestPose + kChestStaleTimeoutMs
+  // 判定后写入；single_vr 下恒为 true）。只用于本周期收紧 Drake chest orientation 更新权限，
+  // 每周期重新计算，不做跨周期的永久关闭。
+  bool torsoOwnerChestFreshThisCycle_{true};
+  // owner Chest 朝向上一周期是否有效（仅 dual + 躯干朝向跟随开启时维护）。
+  // 用于区分"启动/未跟随状态下首次拿到数据"与"失效→恢复"：只有后者才重建恢复锚点，
+  // 保证正常连续有效期间退化为原来的绝对跟随，行为不变。
+  bool torsoOwnerChestFreshPrevCycle_{true};
+  // owner Chest 朝向恢复有效首帧建立的锚点偏移：目标 = offset * ownerChestQuat。
+  // 恢复首帧令 offset = 当前机器人姿态参考 * 人体四元数⁻¹，使该帧目标恰为机器人当前姿态
+  // （不跳变，例如 Quest 重新定位导致世界系突变时），之后按人体朝向增量正常跟随。
+  // 未发生"失效→恢复"时恒为单位四元数，等价于原来的绝对跟随，行为不变。
+  Eigen::Quaterniond torsoOwnerChestQuatRecoveryOffset_ = Eigen::Quaterniond::Identity();
+  // 躯干 chest 增量的人体锚点是否需要重建（dual owner Chest / single /robot_chest_pose 都适用）。
+  // true 表示"当前 humanChestPosAnchor_ 不是来自有效的人体 Chest 样本"（例如进入 mode2 时
+  // owner Chest 还没数据，或用的是占位值），此时下一帧拿到有效 Chest 必须先重建锚点，
+  // 使该帧增量为 0，避免把失效期间累计的人体运动一次性施加到腰部。
+  // 只在求解线程内读写；reset() / 退出 mode2 时复位为 true。
+  bool chestAnchorNeedsRefresh_{true};
   Eigen::Vector3d frozenRobotChestPos_ = Eigen::Vector3d::Zero();
   Eigen::Quaterniond frozenChestQuat_ = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond chestFollowRecoveryOffset_ = Eigen::Quaterniond::Identity();
   double frozenLeftHandHeightOffset_ = 0.0;
   double frozenRightHandHeightOffset_ = 0.0;
   double frozenLeftElbowHeightOffset_ = 0.0;
@@ -348,9 +415,94 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   double latestRightElbowTrackingActivation_ = 1.0;
   std::unique_ptr<WheelNaturalElbowGuide> leftNaturalElbowGuide_;
   std::unique_ptr<WheelNaturalElbowGuide> rightNaturalElbowGuide_;
+  bool livePathElbowFadeEnable_ = true;
+  double livePathElbowFadeVMin_ = 0.18;
+  double livePathElbowFadeVMax_ = 0.55;
+  double livePathElbowKeepOutMinP1_ = 0.04;
+  double livePathElbowKeepOutClearance_ = 0.03;
+  double livePathElbowKeepOutMinP1Nom_ = 0.12;
+  double livePathElbowKeepOutClearanceNom_ = 0.10;
+  // 肘部原点到躯干中心面的横向下限（m），两级求解共用，不随运动放宽。
+  double elbowSafetyMinLateralDistance_ = 0.22;
+  struct LivePathElbowState {
+    bool hasPos = false;
+    Eigen::Vector3d lastPos = Eigen::Vector3d::Zero();
+    Eigen::Vector3d vel = Eigen::Vector3d::Zero();
+    Eigen::Vector3d handDelta = Eigen::Vector3d::Zero();
+    ros::Time lastStamp;
+    double speedFade = 0.0;
+    double fade = 0.0;
+  };
+  LivePathElbowState leftLivePathElbow_;
+  LivePathElbowState rightLivePathElbow_;
   bool drakeSolveUpdateChestOrientation_ = true;
+  bool drakeSolveUpdateChestOrientationConfig_ = true;  // 配置文件中的 orientation 总开关（每帧基准）
   bool drakeSolveUpdateChestPositionConfig_ = true;  // 配置文件中的 position 总开关
   bool drakeSolveUpdateChestPosition_ = true;
+
+  // ---------------------------------------------------------------------------
+  // Dual VR 躯干 ownership（launch arg: torso_control_side = left | right）
+  // ---------------------------------------------------------------------------
+  // 只决定"机器人躯干（chest position + chest orientation / waist yaw & pitch）
+  // 跟随哪一侧 Quest"；手臂 ownership、Primary/Secondary 全局资源 ownership、
+  // 头部控制、X+A 模式切换语义全部不受影响。
+  // 仅在 input_mode=dual_vr 下生效；single_vr 下 torsoSideRight() 恒为 false，
+  // 所有派生量退化为改造前的历史行为。
+  enum class TorsoControlSide { LEFT, RIGHT };
+  TorsoControlSide torsoControlSide_{TorsoControlSide::LEFT};
+  bool torsoControlSideParsed_{false};
+
+  // 解析 launch 参数 /quest3/torso_control_side（等价于 /ik_ros_uni_cpp_node/quest3/torso_control_side）。
+  // 只在启动阶段调用一次；非法值直接 ROS_FATAL 并终止节点，不做静默回退。
+  void parseTorsoControlSideParam();
+
+  // Dual 下躯干 ownership 归 Right（即 torso_control_side=right）。
+  // single_vr 恒为 false —— 这是"single_vr 行为完全不变"的单点保证。
+  bool torsoSideRight() const { return isDualVrMode() && torsoControlSide_ == TorsoControlSide::RIGHT; }
+
+  // 躯干 owner 侧的握把按下状态（dual 下取 owner 那侧的 Grip，single 下取左右任一）。
+  bool torsoOwnerGripPressed(bool leftGripPressed, bool rightGripPressed) const {
+    if (!isDualVrMode()) return leftGripPressed || rightGripPressed;
+    return torsoSideRight() ? rightGripPressed : leftGripPressed;
+  }
+
+  // 躯干 owner 侧的 Grip 就绪状态（dual 下取 owner 那侧，single 下取左右任一）。
+  bool torsoOwnerGripReady(bool leftGripReady, bool rightGripReady) const {
+    if (!isDualVrMode()) return leftGripReady || rightGripReady;
+    return torsoSideRight() ? rightGripReady : leftGripReady;
+  }
+
+  // 读取躯干 owner 侧 Quest 上报的 Chest 位置（dual 下为 A 或 B 实例自己的 Chest）。
+  // 返回 false 表示该侧还没有有效 Chest 帧，调用方必须保持原值不变，
+  // 绝不可用零向量/占位值建立 chest 增量锚点。
+  bool getTorsoOwnerHumanChestPos(Eigen::Vector3d& humanChestPos);
+
+  // 推进躯干 owner 侧 Chest 位置增量（求解循环内的唯一推进入口）。
+  // owner Chest 本帧无效时不推进（机器人 chest 位置/朝向参考保持上一帧值，
+  // 机械臂与 Wheel IK 照常执行）；首次有效/失效后恢复的首帧会先重建锚点，
+  // 使该帧增量为 0，避免腰部目标跳变。返回值表示本帧是否推进了增量。
+  bool advanceOwnerChestIncremental();
+
+  // 激活 chest 增量模式并建立锚点。owner Chest 无效时用 robotChestPosForPlaceholder
+  // （调用方传入的机器人当前 chest 目标）做占位锚点，使增量为 0，并标记锚点待重建；
+  // 绝不使用 Eigen::Vector3d::Zero() 当作有效人体 Chest 位置。
+  // 返回 owner Chest 本帧是否有效。
+  bool enterOwnerChestIncrementalMode(const Eigen::Vector3d& robotChestPosForPlaceholder);
+
+  // 读取当前躯干朝向参考（dual 下为 owner 侧 Chest；single 下保持历史 /robot_chest_pose 行为）。
+  Eigen::Quaterniond getTorsoOwnerChestQuat();
+
+  // 当前躯干 owner 侧是否处于"活跃驱动"状态（dual 下 = owner 侧 Grip 按下；single 恒 true）。
+  bool torsoOwnerActiveNow() const;
+
+  // 低频诊断日志（1Hz）：真机确认躯干 ownership 实际跟随哪一侧、Drake 位置/朝向权限状态。
+  void logDualTorsoOwnerDiagnostics(bool leftGripReady, bool rightGripReady) const;
+
+  // 锁下肢前两个关节（knee/leg），只留 waist_pitch/waist_yaw 随动。
+  // 动态切换：rosservice /quest3/set_lock_knee_leg 或 rosparam set /ik_ros_uni_cpp_node/quest3/lock_knee_leg
+  std::atomic<bool> lockKneeLegEnabled_{false};
+  ros::ServiceServer setLockKneeLegServer_;
+  bool setLockKneeLegCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
 
   // Drake diagram and context for plant
   std::unique_ptr<drake::systems::Diagram<double>> diagram_;
@@ -359,11 +511,20 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // IK求解结果
   Eigen::VectorXd latestIkSolution_;
   bool hasValidIkSolution_ = false;
+  // 跨线程延迟测量：IK线程读取骨骼数据时捕获的接收时刻，随IK结果一起在ikResultMutex_下传播到发布线程
+  std::chrono::steady_clock::time_point ikResultBoneRecvTime_;
+  // 上一轮IK处理过的骨骼数据序列号，用于判断当前轮是否有新VR数据到达
+  uint64_t lastProcessedBoneSeq_ = 0;
+  // 当前轮从boneRecvTimeMutex_下读取的骨骼数据序列号
+  uint64_t currentBoneSeq_ = 0;
   Eigen::VectorXd ikLowerBodyJointCommand_;  // 保存IK结果的前4个关节角度（size = 4）
   Eigen::VectorXd ikUpperBodyJointCommand_;  // 保存IK结果的前4个关节角度的指数均值滤波状态（size = 14）
   // 双扳机同时松开时捕获的lb关节命令快照（用于胸部增量模式激活时冻结knee/leg/waist_pitch，只允许waist_yaw跟随VR）
   Eigen::VectorXd frozenLbJointCommand_;
   bool hasLbJointCommandFrozen_ = false;
+  // 松手冻结下肢后，下一拍 publishLegJointStates 需清零 knee/leg/waist_pitch 的 Ruckig 速度，
+  // 否则限速滤波器带着旧速度过冲再拉回，表现为下肢折叠臂「抖一下」。
+  std::atomic<bool> lbFreezeRuckigResetPending_{false};
 
   // 姿态和位置偏置
   Eigen::Vector3d deltaScale_;  // delta_scale 参数（x, y, z三轴独立）
@@ -404,6 +565,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
 
   Eigen::VectorXd filterJointDataForDrakeFK_;
   Eigen::VectorXd jointDataForDrakeFK_;
+  bool hasDrakeFkJointMeasurement_{false};
 
   // 滤波参数
   double jointSpaceAccLimit_ = 100.0;   // 关节角度ruckig滤波加速度约束参数
@@ -430,6 +592,10 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool resetJointToDefaultWheel_ = true;                        // 进入增量控制时是否重置关节到默认位置
   bool justEnteredMode2_ = false;                               // mode 0 -> mode 2 切换瞬间标志（约2秒内为true）
   bool mode2Initialized_ = false;                               // mode 2 是否已初始化（避免fsmEnter重复进入）
+  // 0/1→2 上升沿：下一拍 fsmEnter 强制按实测 FK 重锚上半身映射（覆盖 X+B 暂停后 TUI 改躯干）。
+  std::atomic<bool> pendingResumeUpperBodyReanchor_{false};
+  // 跟随中若实测 chest FK 相对冻结锚点漂移超过该阈值，再重锚一次（米）。
+  static constexpr double kExternalTorsoReanchorPosTol = 0.04;
 
   // 与控制器 /standJointState 一致的手臂默认关节角（rad），仅用于替换原硬编码发布值
   Eigen::VectorXd standArmAngles_{Eigen::VectorXd::Zero(14)};
@@ -527,6 +693,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   bool hasPreviousRightGripQuat_ = false;
   Eigen::Quaterniond previousLeftGripQuat_ = Eigen::Quaterniond::Identity();
   Eigen::Quaterniond previousRightGripQuat_ = Eigen::Quaterniond::Identity();
+  GripQuaternionRecovery leftGripQuatRecovery_;
+  GripQuaternionRecovery rightGripQuatRecovery_;
 
   // 松开 grip 后保持的整臂约束快照，避免每次释放/重新按下都从新的 IK
   // 优化结果递推 anchor，形成逐次下沉。
@@ -547,6 +715,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::mutex chestPositionFreezeMutex_;
   Eigen::Vector3d chestPositionFreezeAnchor_{Eigen::Vector3d::Zero()};
   bool chestPositionFreezeActive_{false};
+  bool lowerBodyMasterFreezeActive_{false};
+  Eigen::Vector4d lowerBodyMasterFreezeAnchor_{Eigen::Vector4d::Zero()};
 
   struct ModeChangeCycleCache {
     bool leftHandCtrlModeChanged = false;

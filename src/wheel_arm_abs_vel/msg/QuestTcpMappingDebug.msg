@@ -1,0 +1,126 @@
+uint8 SOURCE_UNKNOWN=0
+uint8 SOURCE_QUEST_CONTROLLER=1
+uint8 SOURCE_QUEST_HAND_TRACKING=2
+
+uint8 REJECTED_MALFORMED=0
+uint8 OBSERVED_LOW_CONFIDENCE=1
+uint8 OBSERVED_TELEOP_INACTIVE=2
+uint8 PUBLISHED_INITIAL=3
+uint8 PUBLISHED_UNIQUE=4
+uint8 PUBLISHED_DUPLICATE=5
+uint8 REJECTED_SOURCE_MODE=6
+uint8 REJECTED_SOURCE_HOLD=7
+uint8 REJECTED_INPUT_DISCONTINUITY=8
+uint8 PUBLISHED_GOVERNED=9
+
+uint8 TRACKING_SOURCE_MODE_AUTO=0
+uint8 TRACKING_SOURCE_MODE_CONTROLLER=1
+uint8 TRACKING_SOURCE_MODE_HAND=2
+
+# Receive time is kept separate from the Quest device timestamp.  All mapped
+# poses use base_link; raw poses keep the Quest tracking-world semantics.
+std_msgs/Header header
+time source_stamp
+int64 source_timestamp_ms
+uint8 source
+uint8 previous_source
+uint8 decision
+uint8 configured_source_mode
+uint8 session_source
+
+bool source_changed
+bool source_matches_mode
+bool source_allowed
+bool source_hold_latched
+bool source_hold_triggered
+bool hard_discontinuity_detected
+bool fault_hold_pending
+bool reference_governed
+bool is_high_confidence
+bool message_accepted
+bool teleop_running
+bool target_available
+bool target_published
+bool source_stamp_changed
+bool raw_payload_duplicate
+bool mapped_target_duplicate
+uint32 pose_count
+
+float64 receive_dt
+float64 source_stamp_dt
+float64 unique_raw_sample_dt
+float64 unique_mapped_sample_dt
+float64 last_unique_raw_age
+float64 last_unique_mapped_age
+float64 hard_position_step_limit
+float64 hard_orientation_step_limit
+float64 hard_position_step
+float64 hard_orientation_step
+float64 governor_alpha
+float64 governor_position_error
+float64 governor_orientation_error
+float64 governor_position_step
+float64 governor_orientation_step
+
+# Raw Quest poses.  The same Palm field is currently overloaded by the Quest
+# sender for controller tracking and optical hand tracking; retaining the
+# surrounding arm/chest bones lets offline analysis identify that boundary.
+geometry_msgs/Pose raw_chest_pose
+geometry_msgs/Pose raw_left_upper_arm_pose
+geometry_msgs/Pose raw_left_lower_arm_pose
+geometry_msgs/Pose raw_left_palm_pose
+geometry_msgs/Pose raw_right_upper_arm_pose
+geometry_msgs/Pose raw_right_lower_arm_pose
+geometry_msgs/Pose raw_right_palm_pose
+
+# Retargeted Palm/source frames before the source-specific source->TCP
+# extrinsic, followed by the final common teleop TCP targets.
+geometry_msgs/Pose left_mapped_source_pose
+geometry_msgs/Pose right_mapped_source_pose
+geometry_msgs/Pose left_tcp_pose
+geometry_msgs/Pose right_tcp_pose
+geometry_msgs/Pose left_governed_tcp_pose
+geometry_msgs/Pose right_governed_tcp_pose
+geometry_msgs/Point left_elbow_hint
+geometry_msgs/Point right_elbow_hint
+geometry_msgs/Vector3 left_upper_arm_direction
+geometry_msgs/Vector3 left_forearm_direction
+geometry_msgs/Vector3 right_upper_arm_direction
+geometry_msgs/Vector3 right_forearm_direction
+geometry_msgs/Transform left_source_to_tcp
+geometry_msgs/Transform right_source_to_tcp
+
+# Largest raw-payload change includes all received bones.  Per-hand values
+# make source-switch and mirrored-frame failures immediately visible.
+float64 max_raw_position_delta
+float64 max_raw_orientation_delta
+float64 chest_position_delta
+float64 chest_orientation_delta
+float64 left_raw_palm_position_delta
+float64 left_raw_palm_orientation_delta
+float64 right_raw_palm_position_delta
+float64 right_raw_palm_orientation_delta
+float64 left_mapped_position_delta
+float64 left_mapped_orientation_delta
+float64 right_mapped_position_delta
+float64 right_mapped_orientation_delta
+float64 left_tcp_position_delta
+float64 left_tcp_orientation_delta
+float64 right_tcp_position_delta
+float64 right_tcp_orientation_delta
+
+uint64 received_count
+uint64 controller_count
+uint64 hand_tracking_count
+uint64 source_switch_count
+uint64 low_confidence_count
+uint64 malformed_count
+uint64 raw_duplicate_count
+uint64 mapped_duplicate_count
+uint64 target_published_count
+uint64 rejected_source_count
+uint64 source_hold_count
+uint64 hard_discontinuity_count
+uint64 governor_activation_count
+uint64 absolute_generation
+uint32 rearm_stable_count

@@ -42,6 +42,7 @@ namespace HighlyDynamic {
 using namespace leju_utils::ros_msg_convertor;
 
 namespace {
+
 void updateHandConstraintUnlocked(std::vector<PoseData>& poseList,
                                   int handIndex,
                                   const Eigen::Vector3d& handPos,
@@ -117,10 +118,7 @@ void WheelQuest3IkIncrementalROS::publishLockWaitTimingMs(const ros::Publisher& 
 }
 
 void WheelQuest3IkIncrementalROS::logArmTrajPublishStampPeriod(const ros::Time& stamp) {
-  if (!enableLockWaitTimingLog_) {
-    return;
-  }
-  if (hasLastArmTrajPublishStamp_) {
+  if (enableLockWaitTimingLog_ && hasLastArmTrajPublishStamp_) {
     publishLockWaitTimingMs(pubArmTrajStampPeriodMsPublisher_,
                             (stamp - lastArmTrajPublishStamp_).toSec() * 1000.0);
   }
@@ -152,7 +150,22 @@ void WheelQuest3IkIncrementalROS::run() {
 
   // 标定后调 FSM 初始化手臂 mode 1（等价于 X+A 到跟随态的主路径）
   std::thread bootstrapArmModeThread = std::thread([this]() {
-    while (ros::ok() && !quest3ArmInfoTransformerPtr_->isArmLengthMeasurementComplete()) {
+    // Dual VR（input_mode=dual_vr）：标定完成判定必须等左右两个按侧实例都完成，
+    // 否则单侧先完成就 bootstrap，另一侧尚未标定。single_vr 下两侧指向同一实例，
+    // 语义与改造前完全一致。
+    // 注意：按侧实例的“标定自动完成”由各自按侧回调触发（见
+    // WheelArmControlBaseROS::bonePosesLeft/RightCallback），此处只做只读判定，
+    // 但标定状态本身是 ×bone 回调线程在 transformerDataMutex_ 内写的可变状态，
+    // 读取必须持同一把锁（ArmLengthMeasurement 内部无锁）。
+    auto allSideTransformersReady = [this]() {
+      std::lock_guard<std::mutex> lock(transformerDataMutex_);
+      const auto* leftTransformer = getArmInfoTransformerForSide("Left");
+      const auto* rightTransformer = getArmInfoTransformerForSide("Right");
+      if (!leftTransformer || !rightTransformer) return false;
+      return leftTransformer->isArmLengthMeasurementComplete() &&
+             rightTransformer->isArmLengthMeasurementComplete();
+    };
+    while (ros::ok() && !allSideTransformersReady()) {
       ros::Duration(0.05).sleep();
     }
     ros::Duration(0.1).sleep();
@@ -175,12 +188,18 @@ void WheelQuest3IkIncrementalROS::run() {
     }
   });
 
+  // 主回调线程承担 bone poses / sensors_data_raw / 摇杆回调与 lbLeg Timer，
+  // 不绑核时同样会与相机抢非隔离核。只绑核，不改调度策略。
+  applyWorkerThreadScheduling("ik_callback", 0);
+
   std::cout << "\033[32m[WheelQuest3IkIncrementalROS] spinning start\033[0m" << std::endl;
   ros::spin();
 }
 
 void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
-  // applyWorkerThreadScheduling("ik_solve_thread", ikSolveThreadPriority_);
+  // 只绑核、不提 SCHED_FIFO：46c093e192 曾因提升求解线程优先级导致实机抖动而回退，
+  // 这里沿用“亲和性优先、调度策略保守”的结论。priority=0 即保持 SCHED_OTHER。
+  applyWorkerThreadScheduling("ik_solve_thread", 0);
   ros::Rate rate(publishRate_);
   // 用于统计时间差的静态变量
   static int loopCount = 0;
@@ -215,11 +234,31 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     }
     if (chestPoseUpdateEnabled != chestIncrementalUpdateEnabled_) {
       if (!chestPoseUpdateEnabled) {
-        frozenChestQuat_ = getRobotChestQuatRef();
+        frozenChestQuat_ = latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST
+                               ? Eigen::Quaterniond(latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix).normalized()
+                               : getRobotChestQuatRef();
         if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
           frozenRobotChestPos_ = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position;
         } else {
           frozenRobotChestPos_ = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+        }
+      } else {
+        // 恢复时从冻结期间最后的机器人目标重新建立人体胸部锚点。
+        // 不补执行总开关关闭期间的人体位移，首个有效采样的胸部增量归零。
+        chestAnchorNeedsRefresh_ = true;
+        // 保留关闭前最后的朝向；恢复后只跟随新的 VR 朝向变化。
+        const Eigen::Quaterniond rawChestQuat = getTorsoOwnerChestQuat();
+        const Eigen::Quaterniond rawChestYawPitch =
+            computeYawPitchOnlyQuatFromRotationMatrix(rawChestQuat.toRotationMatrix());
+        chestFollowRecoveryOffset_ =
+            (frozenChestQuat_ * rawChestYawPitch.conjugate()).normalized();
+      }
+      {
+        std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
+        lbLegMasterPublishEnabled_ = chestPoseUpdateEnabled;
+        lowerBodyMasterFreezeActive_ = !chestPoseUpdateEnabled && hasPublishedLbCommand_;
+        if (lowerBodyMasterFreezeActive_) {
+          lowerBodyMasterFreezeAnchor_ = lastPublishedLbCommand_;
         }
       }
       chestIncrementalUpdateEnabled_ = chestPoseUpdateEnabled;
@@ -227,21 +266,102 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     chestPositionUpdateEnable_ = chestPoseUpdateEnabled && chestPositionUpdateEnable;
     drakeSolveUpdateChestPosition_ =
         drakeSolveUpdateChestPositionConfig_ && chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_;
+    // Drake chest orientation 每帧基准恢复（上一帧的 ownership 收紧不能累积到本帧；
+    // dual 下 position 那行的写法同理，只是它写的是 _ 而不是 Config_）。
+    drakeSolveUpdateChestOrientation_ = drakeSolveUpdateChestOrientationConfig_;
 
+    // Transformer 的可变状态只由骨骼回调在 transformerDataMutex_ 内写入，
+    // 因此手部/肩肘快照在本临界区内完成拷贝，锁外不再触碰 Transformer。
+    // Dual VR 躯干 ownership：owner 侧 Chest 的"新鲜度判定 + Quaternion 快照"也必须在本临界区内完成，
+    // 使同一次解算的手部/肩肘/肘部、owner Chest 四元数、owner 数据有效性来自同一个受保护快照。
+    // 判定口径与 Chest Position 完全一致（同一侧实例 + 同一 kChestStaleTimeoutMs），不新增第二套超时。
+    bool ownerChestFreshSnapshot = false;
+    Eigen::Quaterniond ownerChestQuatSnapshot = Eigen::Quaterniond::Identity();
     {
-      std::lock_guard<std::mutex> lock(chestPoseMutex_);
-      latestLeftHandPose_vr_ =
-          quest3ArmInfoTransformerPtr_->getLeftHandPoseRelativeToChest();
-      latestRightHandPose_vr_ =
-          quest3ArmInfoTransformerPtr_->getRightHandPoseRelativeToChest();
-      latestHumanLeftShoulderPos_ =
-          quest3ArmInfoTransformerPtr_->getLeftShoulderPose().position;
-      latestHumanRightShoulderPos_ =
-          quest3ArmInfoTransformerPtr_->getRightShoulderPose().position;
-      latestHumanLeftElbowPos_ =
-          quest3ArmInfoTransformerPtr_->getLeftElbowPose().position;
-      latestHumanRightElbowPos_ =
-          quest3ArmInfoTransformerPtr_->getRightElbowPose().position;
+      std::lock_guard<std::mutex> lock(transformerDataMutex_);
+      // Dual VR（input_mode=dual_vr）：Left 的状态只允许来自 Quest-A 的实例，
+      // Right 的只允许来自 Quest-B 的实例，绝不允许某侧 Chest 参与对侧解算。
+      // single_vr 下 getArmInfoTransformerForSide 两侧都返回主实例，行为与改造前完全一致。
+      const auto* leftTransformer = getArmInfoTransformerForSide("Left");
+      const auto* rightTransformer = getArmInfoTransformerForSide("Right");
+      if (leftTransformer) {
+        latestLeftHandPose_vr_ =
+            leftTransformer->getLeftHandPoseRelativeToChest();
+        latestHumanLeftShoulderPos_ =
+            leftTransformer->getLeftShoulderPose().position;
+        latestHumanLeftElbowPos_ =
+            leftTransformer->getLeftElbowPose().position;
+      }
+      if (rightTransformer) {
+        latestRightHandPose_vr_ =
+            rightTransformer->getRightHandPoseRelativeToChest();
+        latestHumanRightShoulderPos_ =
+            rightTransformer->getRightShoulderPose().position;
+        latestHumanRightElbowPos_ =
+            rightTransformer->getRightElbowPose().position;
+      }
+      // dual_vr：owner 侧（left -> Quest-A，right -> Quest-B）Chest 的新鲜度判断与四元数快照。
+      // 绝不在锁外调用 getFreshSideChestPose()：该函数自身要取 transformerDataMutex_，会自锁死。
+      if (isDualVrMode()) {
+        Quest3ArmInfoTransformer* ownerTransformer =
+            getArmInfoTransformerForSide(torsoSideRight() ? "Right" : "Left");
+        const std::chrono::steady_clock::time_point& ownerRecvTime =
+            torsoSideRight() ? rightBoneRecvTime_ : leftBoneRecvTime_;
+        if (ownerTransformer && ownerRecvTime.time_since_epoch().count() != 0) {
+          // 时间戳只在骨骼帧被成功处理后才刷新（见 bonePosesLeft/RightCallback），
+          // 因此超过阈值即代表 owner 侧 Chest 已停止更新。
+          const int64_t ageMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - ownerRecvTime).count();
+          if (ageMs <= kChestStaleTimeoutMs && ownerTransformer->hasValidChestPose()) {
+            ownerChestQuatSnapshot = ownerTransformer->getChestQuaternion();
+            ownerChestFreshSnapshot = true;
+          }
+        }
+      }
+    }
+    // Dual VR 躯干 ownership：owner 侧 Chest 朝向的有效性直接取自上方的同一临界区快照，
+    // 与本周期的手部/肩肘快照严格对齐（不再单独取锁判定）。
+    //   left  -> Left 实例（Quest-A）的 Chest；right -> Right 实例（Quest-B）的 Chest；
+    // single_vr 恒视为新鲜，行为与改造前完全一致（该缓存只在 dual 下使用）。
+    torsoOwnerChestFreshThisCycle_ = !isDualVrMode() || ownerChestFreshSnapshot;
+    if (isDualVrMode()) {
+      const Eigen::Quaterniond& ownerChestQuat = ownerChestQuatSnapshot;
+      if (torsoOwnerChestFreshThisCycle_) {
+        if (!chestIncrementalUpdateEnabled_) {
+          // 躯干朝向跟随未开启：该缓存不参与任何控制（调用方一律走 getRobotChestQuatRef()），
+          // 因此这里只做透传，且必须把恢复锚点清零。否则启动阶段"第一次收到 owner Chest 数据"
+          // 会被当成"失效→恢复首帧"而把绝对跟随变成增量跟随，改变正常启动行为。
+          torsoOwnerChestQuatRecoveryOffset_.setIdentity();
+          torsoOwnerChestFreshPrevCycle_ = true;
+          std::lock_guard<std::mutex> lock(chestPoseMutex_);
+          latestTorsoOwnerChestQuat_ = ownerChestQuat.normalized();
+        } else {
+          // 失效→恢复的首帧必须与机器人当前姿态参考连续：以当帧机器人参考为基准重建锚点偏移，
+          // 令本帧目标恰等于当前机器人姿态（不跳变），后续按人体朝向增量正常跟随。
+          // 连续有效期间该偏移恒为单位阵，退化为原来的绝对跟随，行为不变。
+          if (!torsoOwnerChestFreshPrevCycle_) {
+            torsoOwnerChestQuatRecoveryOffset_ =
+                (getRobotChestQuatRef().normalized() * ownerChestQuat.normalized().conjugate()).normalized();
+            ROS_WARN("[WheelQuest3IkIncrementalROS] Torso owner chest orientation recovered: re-anchor to "
+                     "current robot chest reference to avoid waist jump");
+          }
+          torsoOwnerChestFreshPrevCycle_ = true;
+          std::lock_guard<std::mutex> lock(chestPoseMutex_);
+          latestTorsoOwnerChestQuat_ =
+              (torsoOwnerChestQuatRecoveryOffset_ * ownerChestQuat.normalized()).normalized();
+        }
+      } else {
+        // 无效时不刷新缓存：latestTorsoOwnerChestQuat_ 保持失效前已下发的参考（绝不用过期
+        // 四元数、也绝不用 Identity 顶替）；本周期 Drake 的 chest orientation 更新权限
+        // 由 torsoOwnerChestFreshThisCycle_ 收紧（见 fsmProcess）。
+        torsoOwnerChestFreshPrevCycle_ = false;
+      }
+    }
+    // 捕获当前骨骼数据接收时刻和序列号，随IK结果一起传播
+    {
+      std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+      ikResultBoneRecvTime_ = boneRecvTime_;
+      currentBoneSeq_ = boneDataSeq_;
     }
 
     // 【三点跳变检测】验证并过滤 VR 数据中的异常跳变
@@ -298,6 +418,15 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     measureStage(solveLoopFsmChangeMsPublisher_, [&]() { fsmChange(); });
     measureStage(solveLoopFsmProcessMsPublisher_, [&]() { fsmProcess(); });
     measureStage(solveLoopFsmExitMsPublisher_, [&]() { fsmExit(); });
+    // 跟随中双手松开且未开躯干增量时：若实测 chest FK 相对冻结锚点已漂（例如外部 TUI 改过躯干），
+    // 再按 FK 重锚一次，避免映射目标继续钉在旧胸位上。
+    if (armControlMode_.load() == 2 && hasLatestWaistYawFk_ && !chestIncrementalUpdateEnabled_ &&
+        joyStickHandlerPtr_ && !joyStickHandlerPtr_->isLeftGrip() && !joyStickHandlerPtr_->isRightGrip()) {
+      const double chestDrift = (latestWaistYawFkPos_ - frozenRobotChestPos_).norm();
+      if (chestDrift > kExternalTorsoReanchorPosTol) {
+        reanchorMappedUpperBodyFromMeasuredFk("external_torso_fk_drift");
+      }
+    }
     measureStage(solveLoopPublishEeMsPublisher_, [&]() { publishEndEffectorControlData(); });
     measureStage(solveLoopPublishAuxMsPublisher_, [&]() { publishAuxiliaryStates(); });
     measureStage(solveLoopPublishMarkersMsPublisher_, [&]() { publishWholeBodyRefMarkers(); });
@@ -374,6 +503,85 @@ void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
   }
 }
 
+void WheelQuest3IkIncrementalROS::reanchorMappedUpperBodyFromMeasuredFk(const char* reason) {
+  const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
+  const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
+  const Eigen::Vector3d leftShoulderPos =
+      hasLatestLeftShoulderFk_ ? latestLeftShoulderFkPos_ : robotLeftFixedShoulderPos_;
+  const Eigen::Vector3d rightShoulderPos =
+      hasLatestRightShoulderFk_ ? latestRightShoulderFkPos_ : robotRightFixedShoulderPos_;
+  const Eigen::Vector3d leftElbowPos = computeElbow(leftLink6Position_, leftEndEffectorPosition_, l2_);
+  const Eigen::Vector3d rightElbowPos = computeElbow(rightLink6Position_, rightEndEffectorPosition_, l2_);
+
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = chestPos;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = chestQuat.toRotationMatrix();
+  }
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_LEFT_SHOULDER) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position = leftShoulderPos;
+  }
+  if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_SHOULDER) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = rightShoulderPos;
+  }
+  updateHandConstraintUnlocked(
+      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
+  updateHandConstraintUnlocked(
+      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
+  updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, leftElbowPos);
+  updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, rightElbowPos);
+
+  frozenRobotChestPos_ = chestPos;
+  frozenChestQuat_ = chestQuat;
+  frozenLeftHandHeightOffset_ = leftLink6Position_.z() - frozenRobotChestPos_.z();
+  frozenRightHandHeightOffset_ = rightLink6Position_.z() - frozenRobotChestPos_.z();
+  frozenLeftElbowHeightOffset_ = leftElbowPos.z() - frozenRobotChestPos_.z();
+  frozenRightElbowHeightOffset_ = rightElbowPos.z() - frozenRobotChestPos_.z();
+
+  // 人体 chest 锚点下次推进前按当前人体 Chest 重建，避免把暂停前的 VR 位移一次性打进恢复后的增量。
+  chestAnchorNeedsRefresh_ = true;
+  chestFollowRecoveryOffset_.setIdentity();
+  hasLeftActiveChestAnchor_ = false;
+  hasRightActiveChestAnchor_ = false;
+  hasLeftHandPoseInChest_ = false;
+  hasRightHandPoseInChest_ = false;
+  hasLeftElbowPosInChest_ = false;
+  hasRightElbowPosInChest_ = false;
+  hasLeftGripReleaseSnapshot_ = false;
+  hasRightGripReleaseSnapshot_ = false;
+
+  latestChestPosBeforeOpt_ = chestPos;
+  latestChestPosAfterOpt_ = chestPos;
+  latestLeftShoulderPosBeforeOpt_ = leftShoulderPos;
+  latestLeftShoulderPosAfterOpt_ = leftShoulderPos;
+  latestRightShoulderPosBeforeOpt_ = rightShoulderPos;
+  latestRightShoulderPosAfterOpt_ = rightShoulderPos;
+  latestLeftHandPosBeforeOpt_ = leftLink6Position_;
+  latestLeftHandPosAfterOpt_ = leftLink6Position_;
+  latestRightHandPosBeforeOpt_ = rightLink6Position_;
+  latestRightHandPosAfterOpt_ = rightLink6Position_;
+  latestLeftElbowPosBeforeOpt_ = leftElbowPos;
+  latestLeftElbowPosAfterOpt_ = leftElbowPos;
+  latestRightElbowPosBeforeOpt_ = rightElbowPos;
+  latestRightElbowPosAfterOpt_ = rightElbowPos;
+
+  if (chestIncrementalUpdateEnabled_) {
+    enterOwnerChestIncrementalMode(chestPos);
+  }
+
+  ROS_WARN("[WheelQuest3IkIncrementalROS] Re-anchored upper-body map from measured FK (%s): "
+           "chest=[%.3f, %.3f, %.3f] Lhand=[%.3f, %.3f, %.3f] Rhand=[%.3f, %.3f, %.3f]",
+           reason ? reason : "unspecified",
+           chestPos.x(),
+           chestPos.y(),
+           chestPos.z(),
+           leftLink6Position_.x(),
+           leftLink6Position_.y(),
+           leftLink6Position_.z(),
+           rightLink6Position_.x(),
+           rightLink6Position_.y(),
+           rightLink6Position_.z());
+}
+
 void WheelQuest3IkIncrementalROS::fsmEnter() {
   auto updateChestConstraintFromFk = [&]() {
     // 进入准备动作时保持机器人当前胸部 FK 位姿，不跟随 VR 人体躯干
@@ -394,6 +602,10 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
       justEnteredMode2_ = true;  // 只在第一次进入mode 2时标记
       mode2Initialized_ = true;  // 标记mode 2已初始化
       mode2EnterTime_ = ros::Time::now();  // 记录进入mode 2的时间戳
+    }
+    // X+B 恢复 / 从复位进跟随：按当前实测 FK 重锚胸肩手肘，覆盖暂停期间 TUI 改躯干造成的旧锚点。
+    if (pendingResumeUpperBodyReanchor_.exchange(false)) {
+      reanchorMappedUpperBodyFromMeasuredFk("mode_resume_0_or_1_to_2");
     }
     auto resetMode2State = [&](bool resetIkSolution) {
       {
@@ -462,17 +674,17 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
         incrementalController_->shouldEnterIncrementalModeRightArm(joyStickHandlerPtr_->isRightGrip());
 
     if (shouldEnterLeft || shouldEnterRight) {
-      // 任意手进入增量模式时，同步激活 chest 增量（第二只手进入时不重复激活）
-      Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-      {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        if (hasChestPose_) {
-          humanChestPos = latestChestPositionInRobot_;
-        }
-      }
+      // 任意手进入增量模式时，同步激活 chest 增量（第二只手进入时不重复激活）。
+      // owner 侧 Chest 尚无有效帧时不用零向量建立锚点（否则首次有效 Chest 会被算成
+      // 巨大增量、导致腰部目标跳变），改用机器人当前 chest 目标做占位锚点（增量为 0），
+      // 之后 owner Chest 首次有效时由 advanceOwnerChestIncremental 重建锚点。
       updateChestConstraintFromFk();
       if (chestIncrementalUpdateEnabled_) {
-        incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+        const Eigen::Vector3d chestPosForAnchor =
+            (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST)
+                ? latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position
+                : (hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_);
+        enterOwnerChestIncrementalMode(chestPosForAnchor);
       }
 
       // 处理左臂：计算FK -> 更新约束列表 -> 进入增量模式
@@ -556,17 +768,15 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
           latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
       updateHandConstraintUnlocked(
           latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
-      // 进入增量模式前，同步激活 chest 增量（避免腰部目标跳变）
-      Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-      {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        if (hasChestPose_) {
-          humanChestPos = latestChestPositionInRobot_;
-        }
-      }
+      // 进入增量模式前，同步激活 chest 增量（避免腰部目标跳变）。
+      // owner 侧 Chest 无效时同 fsmEnter：不用零向量建锚点，改钉在当前机器人 chest 约束上。
       updateChestConstraintFromFk();
       if (chestIncrementalUpdateEnabled_) {
-        incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+        const Eigen::Vector3d chestPosForAnchor =
+            (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST)
+                ? latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position
+                : (hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_);
+        enterOwnerChestIncrementalMode(chestPosForAnchor);
       }
 
       incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
@@ -596,13 +806,10 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   activateController();
   // mode2 下仅在开启躯干控制时激活 chest 增量；进入准备动作时保持机器人当前胸部 FK 姿态
   if (chestIncrementalUpdateEnabled_ && !incrementalController_->isIncrementalModeChest()) {
-    Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-    {
-      std::lock_guard<std::mutex> lock(chestPoseMutex_);
-      if (hasChestPose_) {
-        humanChestPos = latestChestPositionInRobot_;
-      }
-    }
+    // 躯干 owner 侧 Chest：dual 下真正取 A/B 实例自己的 Chest；single 下仍是 /robot_chest_pose。
+    // owner Chest 无效时不用零向量建锚点，而是把锚点钉在当前机器人 chest FK 姿态上
+    // （增量为 0，机器人 chest 保持当前目标）；之后有效帧由
+    // advanceOwnerChestIncremental 用真实 Chest 重建锚点。
     const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
     const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
@@ -611,7 +818,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     }
     frozenRobotChestPos_ = chestPos;
     frozenChestQuat_ = chestQuat;
-    incrementalController_->enterIncrementalModeChest(humanChestPos, latestPoseConstraintList_);
+    enterOwnerChestIncrementalMode(chestPos);
   }
   // 0) 在 fsmProcess 统一更新 smoother 状态，确保后续 getModeChangingState() 是最新的
   {
@@ -638,6 +845,31 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   latchGripTransferPose(currentLeftGripForTransfer && !lastLeftGripPressed_,
                         currentRightGripForTransfer && !lastRightGripPressed_,
                         leftMaintainProcess, rightMaintainProcess);
+
+  // ---------------------------------------------------------------------------
+  // Dual VR 躯干 ownership（torso_control_side: left / right）
+  // ---------------------------------------------------------------------------
+  // Dual 下机器人躯干（chest position + chest orientation / waist yaw & pitch）的
+  // ownership 只属于 torso_control_side 指定的那一侧：
+  //   left （默认）→ Left Grip  允许驱动躯干；Right Grip 仍完整控制右臂，
+  //                  但禁止通过 Incremental chest 或 Drake whole-body optimization
+  //                  改变 pChest（腰部高度）与 waist yaw/pitch
+  //   right        → 对称地改为 Right Grip 驱动躯干，Left Grip 不再带动躯干
+  // single_vr 下 chestPositionOwnerActive 恒为 true，且 drake 朝向不收紧，
+  // 保持历史行为逐字不变。
+  const bool torsoOwnerGripForTransfer =
+      torsoSideRight() ? currentRightGripForTransfer : currentLeftGripForTransfer;
+  const bool chestPositionOwnerActive = isDualVrMode() ? torsoOwnerGripForTransfer : true;
+  // Drake chest-position 求解权限跟随 ownership：Dual 下非 owner 单独 Grip 必须关闭，
+  // 否则该侧手部目标仍会经 sol.pChest 带动腰部上下。single_vr 下不做任何收紧。
+  drakeSolveUpdateChestPosition_ = drakeSolveUpdateChestPosition_ && chestPositionOwnerActive;
+  // Drake chest-orientation 求解权限同样跟随 ownership：Dual 下非 owner 单独 Grip
+  // 不得经 sol.qChest 改变 waist yaw / waist pitch。single_vr 下保持配置值不变。
+  // Dual 下再叠加 owner Chest 朝向的新鲜度：owner Quest 断连/失效时本周期禁止 Drake
+  // 主动更新 Chest Orientation，保持失效前已下发的机器人 chest 朝向参考，避免拿过期
+  // 四元数当目标。该标志每周期在本函数内重新计算，不做永久关闭。
+  drakeSolveUpdateChestOrientation_ = drakeSolveUpdateChestOrientation_ && chestPositionOwnerActive &&
+                                      (isDualVrMode() ? torsoOwnerChestFreshThisCycle_ : true);
 
   struct FrozenRefs {
     Eigen::Vector3d leftHandPos = Eigen::Vector3d::Zero();
@@ -683,11 +915,53 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       guideInput.torsoFrameValid = true;
       const WheelNaturalElbowGuideOutput output = guide->update(guideInput);
       trackingActivation = wheelNaturalElbowSoftTrackingScale_ * output.elbowTrackingActivation;
+      // Near the torso the elbow/waist keep-out starts fighting the hand
+      // target and folds the circle. Fade the soft elbow cost so the hand wins.
+      const double handFromTorso = (handTarget - torsoPosition).norm();
+      constexpr double kNearBodyFadeStart = 0.45;
+      constexpr double kNearBodyFadeFull = 0.22;
+      const double t = std::clamp(
+          (handFromTorso - kNearBodyFadeFull) / (kNearBodyFadeStart - kNearBodyFadeFull), 0.0, 1.0);
+      trackingActivation *= t * t * (3.0 - 2.0 * t);
+
+      LivePathElbowState& liveState = (side[0] == 'l') ? leftLivePathElbow_ : rightLivePathElbow_;
+      double liveFade = livePathElbowFadeEnable_ ? liveState.speedFade : 0.0;
+      const double lateral = (handTarget - torsoPosition).dot(torsoOutwardDirection);
+      constexpr double kLateralFadeStart = 0.28;
+      constexpr double kLateralFadeFull = 0.48;
+      if (livePathElbowFadeEnable_) {
+        double lateralFade = 0.0;
+        if (lateral >= kLateralFadeFull) {
+          lateralFade = 1.0;
+        } else if (lateral > kLateralFadeStart) {
+          lateralFade = (lateral - kLateralFadeStart) / (kLateralFadeFull - kLateralFadeStart);
+        }
+        liveFade = std::max(liveFade, lateralFade);
+      }
+      if (liveFade >= liveState.fade) {
+        liveState.fade = liveFade;
+      } else {
+        liveState.fade = std::max(liveFade, liveState.fade - 0.05);
+      }
+      const Eigen::Vector3d onCircleElbow = WheelNaturalElbowGuide::projectElbowToCircle(
+          shoulderPos, handTarget, currentElbow, l1_, l2_);
+      // Add the hand step after projection so a vertical circle can lift the
+      // elbow. Projecting first used to wipe that Z carry at the top.
+      const Eigen::Vector3d continuityElbow =
+          onCircleElbow + liveState.fade * liveState.handDelta;
+      const Eigen::Vector3d blendedElbow =
+          (1.0 - liveState.fade) * output.elbowPosition + liveState.fade * continuityElbow;
+      // Keep a tracking floor on the live path. Extension fade otherwise hits
+      // zero at the far/top of the circle and the elbow stops following.
+      trackingActivation = std::max(
+          trackingActivation, wheelNaturalElbowSoftTrackingScale_ * liveState.fade);
+
       ROS_INFO_THROTTLE(
           1.0,
           "[WheelNaturalElbow] %s radius=%.4f m, gravity_valid=%s, human_valid=%s, "
           "human_activation=%.2f, elbow_tracking_activation=%.3f, "
-          "waist_safety_activation=%.3f, waist_clearance=%.3f m, hand_reachable=%s",
+          "waist_safety_activation=%.3f, waist_clearance=%.3f m, live_path_fade=%.2f, "
+          "hand_reachable=%s",
           side,
           output.circleRadius,
           output.gravityDirectionValid ? "true" : "false",
@@ -696,8 +970,9 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
           trackingActivation,
           output.waistSafetyActivation,
           output.waistSignedClearance,
+          liveState.fade,
           output.handTargetReachable ? "true" : "false");
-      return output.elbowPosition;
+      return blendedElbow;
     }
 
     // Compatibility fallback when the new guide is explicitly disabled.
@@ -752,10 +1027,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       }
     }
     {
-      Eigen::Matrix3d chestR = chestRotationQuaternion_.toRotationMatrix();
+      // 躯干朝向来源随 torso_control_side 切换：dual 下取 owner 侧 Chest（left=A / right=B），
+      // single_vr 下依旧是 /robot_chest_pose 写入的 chestRotationQuaternion_（历史行为）。
+      Eigen::Matrix3d chestR = getTorsoOwnerChestQuat().toRotationMatrix();
       input.chestQuatRef = computeYawPitchOnlyQuatFromRotationMatrix(chestR);
+      input.chestQuatRef = (chestFollowRecoveryOffset_ * input.chestQuatRef).normalized();
       if (!chestIncrementalUpdateEnabled_) {
-        input.chestQuatRef = getRobotChestQuatRef();
+        input.chestQuatRef = frozenChestQuat_;
       }
     }
     return input;
@@ -877,10 +1155,12 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                                         const Eigen::Quaterniond& chestAnchorQuat,
                                         Eigen::Vector3d& handPos,
                                         Eigen::Quaterniond& handQuat) {
-      if (!isActive || !chestIncrementalUpdateEnabled_ || !hasChestAnchor) return;
+      if (!isActive || !hasChestAnchor) return;
       const Eigen::Quaterniond chestFrameDelta =
           (input.chestQuatRef.normalized() * chestAnchorQuat.normalized().conjugate()).normalized();
-      handPos = input.chestPosRef + chestFrameDelta * (handPos - chestAnchorPos);
+      const Eigen::Vector3d chestPosition =
+          chestIncrementalUpdateEnabled_ ? input.chestPosRef : frozenRobotChestPos_;
+      handPos = chestPosition + chestFrameDelta * (handPos - chestAnchorPos);
       handQuat = (chestFrameDelta * handQuat).normalized();
     };
 
@@ -915,23 +1195,34 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                              rightHandQuat);
 
     // Waist/chest follow rotates the grip-world incremental target into the
-    // current commanded chest. Clip relative to measured EE only after that
+    // current commanded chest.  Clip relative to measured EE only after that
     // remap; doing it beforehand puts the full waist yaw into Euler ZYX and
-    // rebuilds a discontinuous command. Near pitch gimbal the safe clip keeps
-    // the command instead of reconstructing yaw/roll.
-    if (chestIncrementalUpdateEnabled_) {
-      if (input.leftRefActive) {
-        leftHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(true, leftHandQuat);
-      }
-      if (input.rightRefActive) {
-        rightHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(false, rightHandQuat);
-      }
+    // rebuilds a discontinuous command (wrist twitch at ~28 deg/frame).
+    // Near pitch gimbal the safe clip keeps the command instead of reconstructing yaw/roll.
+    // 总开关关闭后仍使用冻结的胸部变换，限幅必须同样放在变换之后。
+    if (input.leftRefActive) {
+      leftHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(true, leftHandQuat);
+    }
+    if (input.rightRefActive) {
+      rightHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(false, rightHandQuat);
     }
 
     // 上面的 active/inactive 分支和胸部重映射都可能重新生成 handQuat，
     // 因此必须在最终写入 whole-body input 前再次做连续性检查。
     stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
     stabilizeGripQuaternion(false, joyStickHandlerPtr_->isRightGrip(), rightHandQuat);
+
+    // Incremental position is the commanded end-effector. Shoulder-elbow
+    // geometry and point-opt still operate on link6 / wrist.
+    if (input.leftRefActive) {
+      leftHandPos = leftHandPos - leftHandQuat.normalized() * leftEE2Link6Offset_;
+    }
+    if (input.rightRefActive) {
+      rightHandPos = rightHandPos - rightHandQuat.normalized() * rightEE2Link6Offset_;
+    }
+
+    updateLivePathElbowFade(input.leftRefActive, true, leftHandPos);
+    updateLivePathElbowFade(input.rightRefActive, false, rightHandPos);
 
     // Active elbow references come from the current robot FK.  Map that point
     // from the current robot chest frame into the commanded chest frame before
@@ -940,11 +1231,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     // forcing the arm to articulate during a rigid torso movement.
     auto mapCurrentFkPointToChestTarget =
         [&](bool isActive, const Eigen::Vector3d& currentPoint) -> Eigen::Vector3d {
-      if (!isActive || !chestIncrementalUpdateEnabled_ || !hasLatestWaistYawFk_) return currentPoint;
+      if (!isActive || !hasLatestWaistYawFk_) return currentPoint;
       const Eigen::Quaterniond currentChestQuat = getRobotChestQuatRef().normalized();
       const Eigen::Quaterniond chestFrameDelta =
           (input.chestQuatRef.normalized() * currentChestQuat.conjugate()).normalized();
-      return input.chestPosRef + chestFrameDelta * (currentPoint - latestWaistYawFkPos_);
+      const Eigen::Vector3d chestPosition =
+          chestIncrementalUpdateEnabled_ ? input.chestPosRef : frozenRobotChestPos_;
+      return chestPosition + chestFrameDelta * (currentPoint - latestWaistYawFkPos_);
     };
 
     const Eigen::Matrix3d chestRRef = input.chestQuatRef.normalized().toRotationMatrix();
@@ -1033,20 +1326,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
     if (!updateLatestIncrementalResult()) return;  // check update success
 
-    // 任意手处于增量更新期时，同步更新 chest 位置增量（位置跟随细分关闭时不更新）
-    if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_) {
-      Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-      {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        if (hasChestPose_) {
-          humanChestPos = latestChestPositionInRobot_;
-        }
-      }
-      incrementalController_->computeIncrementalChestPos(humanChestPos, true);
-      if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
-        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position =
-            incrementalController_->getLatestRobotChestPos();
-      }
+    // 任意手处于增量更新期时，同步更新 chest 位置增量（位置跟随细分关闭时不更新）。
+    // Dual 下 chest position ownership 归 Left：Right-only mode change 不允许更新 chest position，
+    // 但整个 mode-changing 分支（含右臂 smoother）仍然照常执行。
+    if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_ && chestPositionOwnerActive) {
+      // owner 侧 Chest 本帧无效时不推进 chest 增量：机器人 chest 位置/朝向参考保持上一帧，
+      // 机械臂与 Drake 求解照常执行；恢复首帧由 advanceOwnerChestIncremental 重建锚点。
+      advanceOwnerChestIncremental();
     }
 
     // -----------------------------
@@ -1059,7 +1345,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
     auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
         latestIncrementalResult_.getLatestIncrementalHandPose(
-            true, useIncrementalHandOrientation_, true, !chestIncrementalUpdateEnabled_);
+            true, useIncrementalHandOrientation_, true, false);
 
     // 增量模块在 grip 上升沿可能已经把姿态滤波器推进到新的 VR 姿态。
     // 首帧仍使用切换前的参考，保证最终 EE 位置（尤其是旋转后的 offset）连续。
@@ -1075,13 +1361,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (rightGripTransferPending_ || rightGripOrientationHoldFrames_ > 0) {
       incrementalRightQuat = rightGripTransferHandQuat_;
     }
-    // Chest-on: incremental quat is still grip-world; previousGripQuat is the
-    // already-followed command. Stabilizing here mixes those frames and
-    // rejects waist yaw. Continuity is checked after followChest.
-    if (!chestIncrementalUpdateEnabled_) {
-      stabilizeGripQuaternion(true, currentLeftGripForTransfer, incrementalLeftQuat);
-      stabilizeGripQuaternion(false, currentRightGripForTransfer, incrementalRightQuat);
-    }
+    // grip-world 姿态只在胸部变换之后做限幅和连续性检查，与腰部总开关无关。
 
     // Apply hand smoother in mode-changing cycle (it updates the position by reference).
     if (input.leftRefActive && modeChangeCycle_.leftHandCtrlModeChanged) {
@@ -1225,6 +1505,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (ikLowerBodyJointCommand_.size() == 4) {
       frozenLbJointCommand_ = ikLowerBodyJointCommand_;
       hasLbJointCommandFrozen_ = true;
+      // 同步请求清零下肢 Ruckig 速度（由 publishLegJointStates 消费），避免松手过冲抖一下
+      lbFreezeRuckigResetPending_.store(true, std::memory_order_release);
     }
   }
 
@@ -1262,20 +1544,22 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                         leftMaintainProcess, rightMaintainProcess);
   handleGripRisingEdge(leftGripRisingEdge, rightGripRisingEdge, leftMaintainProcess, rightMaintainProcess);
 
-  // 由胸部更新开关控制增量更新（与 grip 解耦）；位置跟随细分关闭时冻结位置
-  if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_ &&
-      (lastLeftGripPressed_ || lastRightGripPressed_)) {
-    Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-    {
-      std::lock_guard<std::mutex> lock(transformerDataMutex_);
-      if (hasChestPose_) {
-        humanChestPos = latestChestPositionInRobot_;
-      }
-    }
-    incrementalController_->computeIncrementalChestPos(humanChestPos, true);
-    if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
-      latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = incrementalController_->getLatestRobotChestPos();
-    }
+  // 由胸部更新开关控制增量更新（与 grip 解耦）；位置跟随细分关闭时冻结位置。
+  // Dual：chest position 只由 torso_control_side 指定的那一侧 Grip 驱动，非 owner Grip
+  //       不会带动腰部上下（left 默认 = 原有 Left ownership，与真机验证行为一致）。
+  // Single：与历史行为完全一致（左右任一 Grip 均可驱动）。
+  // 同一求解周期内 chest 增量只允许推进一次：下面 gripPressed 与 gripReady 两个分支的
+  // 条件在同一帧可能同时成立（gripReady ⊆ gripPressed），重复调用会把 chest 位置低通
+  // 滤波器多推进一个采样步、并用错误的 dt 重算 dotChestDeltaPos_。这里只做去重，
+  // 两个分支各自的 gate 条件（owner 侧 / maintain / active）保持原样不变。
+  bool chestIncrementalAdvancedThisCycle = false;
+  const bool chestPositionGripPressed = torsoOwnerGripPressed(lastLeftGripPressed_, lastRightGripPressed_);
+  if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_ && chestPositionGripPressed) {
+    // owner 侧 Chest 本帧无效时不推进 chest 增量（保持上一帧机器人 chest 参考），
+    // 机械臂与 Drake 求解照常执行；恢复首帧由 advanceOwnerChestIncremental 重建锚点。
+    // 只有真正推进了才置位：本帧未推进时（owner Chest 无效）后面的 gripReady 分支
+    // 仍需照常尝试，否则会出现"首个有效 Chest 帧当周期不建锚点"的行为变化。
+    chestIncrementalAdvancedThisCycle = advanceOwnerChestIncremental();
   }
 
   const bool leftGripReady = !leftMaintainProcess && currentLeftGripPressed && isLeftActive;
@@ -1290,20 +1574,17 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
         latestRightHandPose_vr_, true, rightEndEffectorQuat_);
   }
 
-  // 任意手 grip 就绪时，同步更新 chest 位置增量，并写入约束列表（位置跟随细分关闭时不更新）
-  if (leftGripReady || rightGripReady) {
-    if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_) {
-      Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-      {
-        std::lock_guard<std::mutex> lock(chestPoseMutex_);
-        if (hasChestPose_) {
-          humanChestPos = latestChestPositionInRobot_;
-        }
-      }
-      incrementalController_->computeIncrementalChestPos(humanChestPos, true);
-      if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
-        latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = incrementalController_->getLatestRobotChestPos();
-      }
+  // 任意手 grip 就绪时，同步更新 chest 位置增量，并写入约束列表（位置跟随细分关闭时不更新）。
+  // Dual：只有 torso owner 侧 Grip 就绪才允许更新 chest position（另一侧仍完整控制自己的手臂，
+  //       只是不带腰）。Single：leftGripReady || rightGripReady，与历史行为一致。
+  const bool chestPositionGripReady = torsoOwnerGripReady(leftGripReady, rightGripReady);
+  // 低频诊断：真机确认 Dual 下躯干 ownership 实际跟随哪一侧、
+  // 以及 Drake 位置/朝向求解权限是否已随 ownership 收紧。
+  logDualTorsoOwnerDiagnostics(leftGripReady, rightGripReady);
+  if (chestPositionGripReady) {
+    if (chestIncrementalUpdateEnabled_ && chestPositionUpdateEnable_ && !chestIncrementalAdvancedThisCycle) {
+      // 同上：owner Chest 无效时整块跳过，arm 控制与 solveIk 不受影响。
+      advanceOwnerChestIncremental();
     }
   }
 
@@ -1315,7 +1596,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
   auto [incrementalLeftQuat, incrementalRightQuat, scaledLeftHandPos, scaledRightHandPos] =
       latestIncrementalResult_.getLatestIncrementalHandPose(
-          true, useIncrementalHandOrientation_, true, !chestIncrementalUpdateEnabled_);
+          true, useIncrementalHandOrientation_, true, false);
 
   if (leftGripTransferPending_) {
     scaledLeftHandPos = leftGripTransferHandPos_;
@@ -1329,13 +1610,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   if (rightGripTransferPending_ || rightGripOrientationHoldFrames_ > 0) {
     incrementalRightQuat = rightGripTransferHandQuat_;
   }
-  // Chest-on: incremental quat is still grip-world; previousGripQuat is the
-  // already-followed command. Stabilizing here mixes those frames and
-  // rejects waist yaw. Continuity is checked after followChest.
-  if (!chestIncrementalUpdateEnabled_) {
-    stabilizeGripQuaternion(true, currentLeftGripPressed, incrementalLeftQuat);
-    stabilizeGripQuaternion(false, currentRightGripPressed, incrementalRightQuat);
-  }
+  // grip-world 姿态只在胸部变换之后做限幅和连续性检查，与腰部总开关无关。
 
   recordTimestamp("applyWholeBodyAndSolveStart", loopSyncCount_);
   applyWholeBodyAndSolve(
@@ -1395,6 +1670,7 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
     leftActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
     hasLeftActiveChestAnchor_ = true;
     leftGripTransferAccepted_ = false;
+    resetLivePathElbowFade(true);
   }
 
   if (rightGripRisingEdge && rightGripTransferAccepted_ && !rightMaintainProcess) {
@@ -1411,6 +1687,7 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
     rightActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
     hasRightActiveChestAnchor_ = true;
     rightGripTransferAccepted_ = false;
+    resetLivePathElbowFade(false);
   }
 }
 
@@ -1425,8 +1702,9 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         // 松开期间一直使用同一个约束快照。这里同时写回约束列表，保证
         // updateLeftArmPoseAnchor() 读取到的也是该连续值，而不是松开期间
         // 被 whole-body IK 逐步推移的旧优化结果。
-        leftGripTransferHandPos_ = leftGripReleaseHandPos_;
         leftGripTransferHandQuat_ = leftGripReleaseHandQuat_;
+        leftGripTransferHandPos_ =
+            leftGripReleaseHandPos_ + leftGripTransferHandQuat_ * leftEE2Link6Offset_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].position =
             leftGripReleaseHandPos_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix =
@@ -1437,8 +1715,8 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         }
       } else {
         const auto& pose = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_HAND];
-        leftGripTransferHandPos_ = pose.position;
         leftGripTransferHandQuat_ = Eigen::Quaterniond(pose.rotation_matrix).normalized();
+        leftGripTransferHandPos_ = pose.position + leftGripTransferHandQuat_ * leftEE2Link6Offset_;
       }
       leftGripTransferPending_ = true;
       leftGripOrientationHoldFrames_ = kGripOrientationHoldFrames;
@@ -1450,8 +1728,9 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
       latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
     if (!rightGripTransferAccepted_ && rightGripTransferLockFrames_ <= 0) {
       if (hasRightGripReleaseSnapshot_) {
-        rightGripTransferHandPos_ = rightGripReleaseHandPos_;
         rightGripTransferHandQuat_ = rightGripReleaseHandQuat_;
+        rightGripTransferHandPos_ =
+            rightGripReleaseHandPos_ + rightGripTransferHandQuat_ * rightEE2Link6Offset_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position =
             rightGripReleaseHandPos_;
         latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix =
@@ -1462,8 +1741,8 @@ void WheelQuest3IkIncrementalROS::latchGripTransferPose(bool leftGripRisingEdge,
         }
       } else {
         const auto& pose = latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND];
-        rightGripTransferHandPos_ = pose.position;
         rightGripTransferHandQuat_ = Eigen::Quaterniond(pose.rotation_matrix).normalized();
+        rightGripTransferHandPos_ = pose.position + rightGripTransferHandQuat_ * rightEE2Link6Offset_;
       }
       rightGripTransferPending_ = true;
       rightGripOrientationHoldFrames_ = kGripOrientationHoldFrames;
@@ -1505,10 +1784,12 @@ void WheelQuest3IkIncrementalROS::stabilizeGripQuaternion(bool leftArm,
                                                           Eigen::Quaterniond& quat) {
   Eigen::Quaterniond& previousQuat = leftArm ? previousLeftGripQuat_ : previousRightGripQuat_;
   bool& hasPreviousQuat = leftArm ? hasPreviousLeftGripQuat_ : hasPreviousRightGripQuat_;
+  auto& recovery = leftArm ? leftGripQuatRecovery_ : rightGripQuatRecovery_;
 
   // 松开 grip 后下一次重新按下应从新的冻结姿态重新建立基准。
   if (!gripPressed) {
     hasPreviousQuat = false;
+    recovery.reset();
     return;
   }
 
@@ -1526,27 +1807,104 @@ void WheelQuest3IkIncrementalROS::stabilizeGripQuaternion(bool leftArm,
   const int holdFrames = leftArm ? leftGripOrientationHoldFrames_ : rightGripOrientationHoldFrames_;
   const bool transferActive = leftArm ? leftGripTransferPending_ : rightGripTransferPending_;
   if (!useIncrementalHandOrientation_ && !transferActive && holdFrames <= 0) {
+    recovery.reset();
     previousQuat = quat;
     hasPreviousQuat = true;
     return;
   }
 
   if (!hasPreviousQuat) {
+    recovery.reset();
     previousQuat = quat;
     hasPreviousQuat = true;
     return;
   }
 
-  const double dot = std::min(1.0, std::abs(previousQuat.dot(quat)));
-  const double angle = 2.0 * std::acos(dot);
-  // 正常 50Hz 手部运动不会在一帧内旋转几十度；Quest 丢跟踪/姿态翻转时
-  // 会出现接近 180 度的跳变。保留上一帧，等待输入回到连续范围。
-  constexpr double kMaxSingleFrameRotationRad = 0.5;
-  if (angle > kMaxSingleFrameRotationRad) {
-    quat = previousQuat;
+  // 单帧跳变仍保持旧输出；连续有效候选则限步恢复，避免姿态永久冻结。
+  quat = recovery.update(previousQuat, quat);
+  previousQuat = quat;
+}
+
+void WheelQuest3IkIncrementalROS::resetLivePathElbowFade(bool leftArm) {
+  LivePathElbowState& state = leftArm ? leftLivePathElbow_ : rightLivePathElbow_;
+  state.hasPos = false;
+  state.lastPos.setZero();
+  state.vel.setZero();
+  state.handDelta.setZero();
+  state.lastStamp = ros::Time();
+  state.speedFade = 0.0;
+  state.fade = 0.0;
+}
+
+void WheelQuest3IkIncrementalROS::updateLivePathElbowFade(bool active, bool leftArm,
+                                                         const Eigen::Vector3d& handPos) {
+  LivePathElbowState& state = leftArm ? leftLivePathElbow_ : rightLivePathElbow_;
+  if (!livePathElbowFadeEnable_ || !active) {
+    resetLivePathElbowFade(leftArm);
     return;
   }
-  previousQuat = quat;
+
+  const ros::Time now = ros::Time::now();
+  if (!state.hasPos) {
+    state.lastPos = handPos;
+    state.lastStamp = now;
+    state.vel.setZero();
+    state.handDelta.setZero();
+    state.hasPos = true;
+    state.speedFade = 0.0;
+    return;
+  }
+
+  const double dt = (now - state.lastStamp).toSec();
+  if (dt < 1.0e-4 || dt > 0.05) {
+    state.lastPos = handPos;
+    state.lastStamp = now;
+    state.vel.setZero();
+    state.handDelta.setZero();
+    state.speedFade = 0.0;
+    return;
+  }
+
+  Eigen::Vector3d handDelta = handPos - state.lastPos;
+  const double deltaNorm = handDelta.norm();
+  constexpr double kMaxHandDeltaM = 0.04;
+  if (deltaNorm > kMaxHandDeltaM && deltaNorm > 1.0e-9) {
+    handDelta *= kMaxHandDeltaM / deltaNorm;
+  }
+  state.handDelta = handDelta;
+  const Eigen::Vector3d rawVel = handDelta / dt;
+  constexpr double kVelAlpha = 0.40;
+  state.vel = (1.0 - kVelAlpha) * state.vel + kVelAlpha * rawVel;
+  state.lastPos = handPos;
+  state.lastStamp = now;
+
+  const double speed = state.vel.norm();
+  const double vmin = livePathElbowFadeVMin_;
+  const double vmax = std::max(vmin + 1.0e-3, livePathElbowFadeVMax_);
+  if (speed >= vmax) {
+    state.speedFade = 1.0;
+  } else if (speed <= vmin) {
+    state.speedFade = 0.0;
+  } else {
+    state.speedFade = (speed - vmin) / (vmax - vmin);
+  }
+}
+
+void WheelQuest3IkIncrementalROS::applyElbowSafetyClearance() {
+  // 运动混合只改变肘部姿态偏好。不能因为任意一只手运动就同时
+  // 放宽双肘的隔离距离，否则起始抬手时点位优化和 IK 都会允许内夹。
+  // 两级使用同一下限，避免最终关节解越过前级的肘部隔离面。
+  const double clearance = std::max(
+      elbowSafetyMinLateralDistance_,
+      std::max(livePathElbowKeepOutMinP1Nom_, livePathElbowKeepOutClearanceNom_));
+  if (chestElbowHandPointOptSolverPtr_) {
+    DrakeChestElbowHandBoundsConfig bounds = chestElbowHandBoundsConfig_;
+    bounds.minP1XyNorm = clearance;
+    chestElbowHandPointOptSolverPtr_->setBounds(bounds);
+  }
+  if (oneStageIkEndEffectorPtr_) {
+    oneStageIkEndEffectorPtr_->setWaistElbowLateralClearance(clearance);
+  }
 }
 
 void WheelQuest3IkIncrementalROS::fsmExit() {
@@ -1597,13 +1955,11 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
   const bool bothGripReleased = !leftGripPressed && !rightGripPressed;
 
   if (bothGripReleased && incrementalController_ && incrementalController_->isIncrementalModeChest()) {
-    Eigen::Vector3d humanChestPos = Eigen::Vector3d::Zero();
-    {
-      std::lock_guard<std::mutex> lock(chestPoseMutex_);
-      if (hasChestPose_) {
-        humanChestPos = latestChestPositionInRobot_;
-      }
-    }
+    Eigen::Vector3d humanChestPos;
+    // 躯干 owner 侧 Chest：dual 下真正取 A/B 实例自己的 Chest；single 下仍是 /robot_chest_pose。
+    // owner Chest 无效时不用零向量做人体锚点，改为与机器人 chest 当前值同值（增量为 0），
+    // 避免下次恢复时把失效期间的累计运动一次性算成增量。
+    const bool hasValidOwnerChest = getTorsoOwnerHumanChestPos(humanChestPos);
     const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
     const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
     if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_CHEST) {
@@ -1627,7 +1983,10 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
             latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position.z() - frozenRobotChestPos_.z();
       }
     }
-    incrementalController_->updateChestAnchorOnExit(humanChestPos, latestPoseConstraintList_);
+    incrementalController_->updateChestAnchorOnExit(hasValidOwnerChest ? humanChestPos : chestPos,
+                                                    latestPoseConstraintList_);
+    // 无效输入建立的只是占位锚点：下次拿到有效 Chest 时必须重建锚点再算增量
+    chestAnchorNeedsRefresh_ = !hasValidOwnerChest;
   }
 
   bool shouldExitIncrementalLeftArm = incrementalController_->shouldExitIncrementalModeLeftArm(leftGripPressed);
@@ -1670,14 +2029,41 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   std::vector<PoseData> poseConstraintListCopy;
   poseConstraintListCopy = latestPoseConstraintList_;
 
+  // 支持 rosparam 动态切换（getCached 自动感知参数服务器更新）
+  {
+    bool lockKneeLegParam = lockKneeLegEnabled_.load();
+    if (ros::param::getCached("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockKneeLegParam)) {
+      lockKneeLegEnabled_.store(lockKneeLegParam);
+    }
+  }
+
+  updateChestPositionFreezeState(!chestPositionUpdateEnable_);
+
+  // 锁下肢前两关节（knee=q[0], leg=q[1]）到当前滤波值，只留 waist_pitch/waist_yaw 随动。
+  // reset_joint_to_default:=false 时胸部增量关闭，solve 会冻结 q0-q2；若此处再用
+  // 实时滤波值锁 q0/q1，会和冻结快照冲突（快照常在全零初值上捕获），SNOPT 无解、手臂失控。
+  // 胸部冻结生效时必须把 lock 钉在同一组 q0/q1 上。
+  if (lockKneeLegEnabled_.load()) {
+    Eigen::Vector3d freezeAnchor;
+    if (lowerBodyMasterFreezeActive_) {
+      oneStageIkEndEffectorPtr_->setKneeLegLock(lowerBodyMasterFreezeAnchor_(0), lowerBodyMasterFreezeAnchor_(1));
+    } else if (copyChestPositionFreezeAnchor(freezeAnchor)) {
+      oneStageIkEndEffectorPtr_->setKneeLegLock(freezeAnchor(0), freezeAnchor(1));
+    } else if (filterJointDataForDrakeFK_.size() == drakeJointStateSize_ && drakeJointStateSize_ == 18) {
+      oneStageIkEndEffectorPtr_->setKneeLegLock(filterJointDataForDrakeFK_(0), filterJointDataForDrakeFK_(1));
+    }
+  } else {
+    oneStageIkEndEffectorPtr_->disableKneeLegLock();
+  }
+
   auto startTime = std::chrono::high_resolution_clock::now();
   oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
       latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);
-  // 腰部位置跟随细分关闭（或总开关关闭）时，把 q0-q2 俯仰链硬锁到切换瞬间的
-  // 快照（q3/waist_yaw 仍跟随 VR），chest 位置不再随手臂摆动而缓慢升高。
-  updateChestPositionFreezeState(!chestPositionUpdateEnable_);
+  // 总开关关闭冻结完整 q0-q3；仅位置子开关关闭冻结 q0-q2，保留 yaw 跟随。
   Eigen::Vector3d chestPositionFreezeAnchor;
-  if (copyChestPositionFreezeAnchor(chestPositionFreezeAnchor)) {
+  if (lowerBodyMasterFreezeActive_) {
+    oneStageIkEndEffectorPtr_->activateLowerBodyFreeze(lowerBodyMasterFreezeAnchor_);
+  } else if (copyChestPositionFreezeAnchor(chestPositionFreezeAnchor)) {
     oneStageIkEndEffectorPtr_->activateChestPositionFreeze(chestPositionFreezeAnchor);
   } else {
     oneStageIkEndEffectorPtr_->deactivateChestPositionFreeze();
@@ -1693,6 +2079,8 @@ void WheelQuest3IkIncrementalROS::solveIk() {
       std::lock_guard<std::mutex> lock(ikResultMutex_);
       latestIkSolution_ = ikResult.solution;
       hasValidIkSolution_ = true;
+      // 同步骨骼接收时刻到IK结果，供发布线程计算全链路延迟
+      ikResultBoneRecvTime_ = ikResultBoneRecvTime_;
 
       // 当IK成功且size == 18时，保存前4个关节角度到ikLowerBodyJointCommand_
       if (latestIkSolution_.size() == 18) {
@@ -1701,6 +2089,16 @@ void WheelQuest3IkIncrementalROS::solveIk() {
         ikLowerBodyJointCommand_ = latestIkSolution_.head(4);
         ikUpperBodyJointCommand_ = latestIkSolution_.tail(14);
       }
+    }
+    // 在IK线程内直接测量并发布延迟：骨骼接收 → FSM处理 → IK求解
+    // 只在收到新VR数据的那一轮测量，避免无数据时延迟虚增（锯齿现象）
+    if (armTrajLatencyPublisher_ && currentBoneSeq_ != lastProcessedBoneSeq_) {
+      lastProcessedBoneSeq_ = currentBoneSeq_;
+      const auto latencyMs = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - ikResultBoneRecvTime_).count();
+      std_msgs::Float64 latencyMsg;
+      latencyMsg.data = latencyMs;
+      armTrajLatencyPublisher_.publish(latencyMsg);
     }
   } else {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] solveIk failed: %s", ikResult.solverLog.c_str());
@@ -1830,6 +2228,40 @@ bool WheelQuest3IkIncrementalROS::validateVrPose(const ::ArmPose& currentPose, :
   *prev1 = validatedPose.position;
   
   return !isSpike;
+}
+
+
+
+HighlyDynamic::SG100VrInput WheelQuest3IkIncrementalROS::makeSg100VrInput() {
+  HighlyDynamic::SG100VrInput in;
+  in.fresh = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->hasFreshSg100Input();
+  };
+  in.left_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getLeftTrigger()) : 0.0f;
+  };
+  in.right_trigger = [this] {
+    return joyStickHandlerPtr_ ? static_cast<float>(joyStickHandlerPtr_->getRightTrigger()) : 0.0f;
+  };
+  in.left_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonTouched();
+  };
+  in.left_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isLeftFirstButtonPressed();
+  };
+  in.right_first_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonTouched();
+  };
+  in.right_first_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightFirstButtonPressed();
+  };
+  in.right_second_touched = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonTouched();
+  };
+  in.right_second_pressed = [this] {
+    return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonPressed();
+  };
+  return in;
 }
 
 }  // namespace HighlyDynamic

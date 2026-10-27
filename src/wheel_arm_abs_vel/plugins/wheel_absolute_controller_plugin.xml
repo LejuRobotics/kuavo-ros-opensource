@@ -1,0 +1,3 @@
+<library path="lib/libnodelet_wheel_absolute_controller">
+  <class name="WheelAbsoluteControllerNodelet" type="WheelAbsoluteControllerNodelet" base_class_type="nodelet::Nodelet"/>
+</library>

@@ -1,15 +1,25 @@
 <?xml version="1.0"?>
-<robot xmlns:xacro="http://ros.org/wiki/xacro" name="biped_s45_with_realsense">
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="biped_s200049_with_realsense">
 
-  <!-- 引入机器人主体 -->
+  <!-- 引入机器人主体（夹爪 / 相机与 URDF 对齐） -->
   <xacro:include filename="$(find kuavo_assets)/models/biped_s200049/urdf/biped_s200049_gazebo.urdf"/>
 
   <!-- depth cam 设置 -->
   <xacro:include filename="$(find realsense_ros_gazebo)/xacro/depthcam.xacro"/>
 
-  <!-- d435 声明 -->
+  <!-- 头部 d435 -->
   <xacro:realsense_d435 sensor_name="camera" parent_link="camera_base" rate="30">
-    <origin rpy="0 0 0 " xyz="0 0 0"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </xacro:realsense_d435>
+
+  <!-- 左手腕 d405：挂在 camera_l_base，原点与 URDF camera_to_realcam_l_frame 一致 -->
+  <xacro:realsense_d435 sensor_name="l_d405" parent_link="camera_l_base" rate="30">
+    <origin rpy="0 0 0" xyz="0.0146 0 0.021"/>
+  </xacro:realsense_d435>
+
+  <!-- 右手腕 d405：挂在 camera_r_base，原点与 URDF camera_to_realcam_r_frame 一致 -->
+  <xacro:realsense_d435 sensor_name="r_d405" parent_link="camera_r_base" rate="30">
+    <origin rpy="0 0 0" xyz="0.0146 0 0.021"/>
   </xacro:realsense_d435>
 
 </robot>

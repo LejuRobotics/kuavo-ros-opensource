@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+import threading
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
@@ -19,8 +20,6 @@ from tf.transformations import quaternion_from_matrix, quaternion_matrix
 from geometry_msgs.msg import TransformStamped,Twist
 from tf2_msgs.msg import TFMessage
 from constanst import gesture_corresponding_hand_position
-# to dev
-hand_thumb_pub = rospy.Publisher('/hand_thumb', Float32MultiArray, queue_size=10)
 
 # Array of bone names
 bone_names = [
@@ -86,11 +85,30 @@ class HeadBodyPose:
 
 
 class Quest3ArmInfoTransformer:
-    def __init__(self, model_path, vis_pub=True, predict_gesture=False, eef_visual_stl_files=None, hand_reference_mode="thumb_index"):
+    def __init__(self, model_path, vis_pub=True, predict_gesture=False,
+                 eef_visual_stl_files=None, hand_reference_mode="thumb_index",
+                 debug_pub=False, debug_publish_hz=10.0,
+                 arm_sides=None, publish_globals=True):
         self.predict_gesture = predict_gesture
         self.model_path = model_path
         self.vis_pub = vis_pub
+        # Dual-VR: each instance may be limited to one side so that Quest-A
+        # computes Left and Quest-B computes Right. None keeps the historical
+        # "both sides" behaviour used by every single-VR caller.
+        self.arm_sides = self._normalize_arm_sides(arm_sides)
+        # Dual-VR: only the primary instance owns the process-global ROS
+        # resources (/joint_states, /kuavo_head_body_orientation*,
+        # tf.TransformListener, controller switch event subscriber).
+        # Defaults to True so the existing callers are unaffected.
+        self.publish_globals = bool(publish_globals)
         self.hand_reference_mode = hand_reference_mode  # "fingertips", "middle_finger", "thumb_index"
+        self.debug_pub = bool(debug_pub)
+        self.debug_publish_hz = max(0.0, float(debug_publish_hz))
+        self._debug_publish_period = (
+            1.0 / self.debug_publish_hz if self.debug_publish_hz > 0.0 else 0.0
+        )
+        self._last_debug_publish_monotonic = float("-inf")
+        self._finger_state_lock = threading.RLock()
         self.left_finger_joints = None # down dom to 6 dof
         self.right_finger_joints = None
         self.left_hand_pose = None # pos + quaternion
@@ -103,6 +121,10 @@ class Quest3ArmInfoTransformer:
         self.is_hand_tracking = False
         self.ok_gesture_counts = 0
         self.shot_gesture_counts = 0
+        self._joystick_confirmation_active = False
+        self._joystick_gesture = None
+        self._joystick_gesture_started = None
+        self._joystick_last_received = None
         self.is_runing = False     
         self.control_torso = False   
         self.init_R_wC = rpy_to_matrix([np.pi/2, 0, np.pi/2]) # rotation matrix from world to chest
@@ -146,30 +168,62 @@ class Quest3ArmInfoTransformer:
         self.controller_switch_event_sub = None
         # 添加上臂向量空间约束参数
         self.upper_arm_cone_angle_forward = 140.0 * np.pi / 180.0  # 前方锥角（相对于前方x轴）
-        self.marker_pub = rospy.Publisher("visualization_marker", Marker, queue_size=10)
-        # self.marker_pub_human = rospy.Publisher("visualization_marker/result", Marker, queue_size=10)
-        self.marker_pub_right = rospy.Publisher("visualization_marker_right", Marker, queue_size=10)
-        # self.marker_pub_human_right = rospy.Publisher("visualization_marker_human_right", Marker, queue_size=10)
-        self.marker_pub_elbow = rospy.Publisher("visualization_marker/elbow", Marker, queue_size=10)
-        self.marker_pub_elbow_right = rospy.Publisher("visualization_marker_right/elbow", Marker, queue_size=10)
-        self.marker_pub_shoulder = rospy.Publisher("visualization_marker/shoulder", Marker, queue_size=10)
-       
-        # 新增：一次性发布human三个部位的MarkerArray
-        self.marker_pub_human_array_left = rospy.Publisher("visualization_marker/human_array_left", MarkerArray, queue_size=10)
-        self.marker_pub_human_array_right = rospy.Publisher("visualization_marker/human_array_right", MarkerArray, queue_size=10)
-        # self.marker_pub_shoulder_human = rospy.Publisher("visualization_marker/shoulder_human", Marker, queue_size=10)
-        self.marker_pub_shoulder_right = rospy.Publisher("visualization_marker_right/shoulder", Marker, queue_size=10)
-        # self.marker_pub_shoulder_human_right = rospy.Publisher("visualization_marker_right/shoulder_human", Marker, queue_size=10)
-        self.marker_pub_shoulder_quest3 = rospy.Publisher("visualization_marker/shoulder_quest3", Marker, queue_size=10)
-        self.marker_pub_shoulder_quest3_right = rospy.Publisher("visualization_marker_right/shoulder_quest3", Marker, queue_size=10)
-        self.marker_pub_chest = rospy.Publisher("visualization_marker_chest", Marker, queue_size=10)
-        self.marker_pub_upper_arm_constraint_left = rospy.Publisher("visualization_marker/upper_arm_constraint_left", Marker, queue_size=10)
-        self.marker_pub_upper_arm_constraint_right = rospy.Publisher("visualization_marker/upper_arm_constraint_right", Marker, queue_size=10)
-        self.joint_state_puber = rospy.Publisher('/joint_states', JointState, queue_size=10)
-        self.shoulder_angle_puber = rospy.Publisher('/quest3_debug/shoulder_angle', Float32MultiArray, queue_size=10)
-        self.chest_axis_puber = rospy.Publisher('/quest3_debug/chest_axis', Float32MultiArray, queue_size=10)
-        self.head_body_pose_puber = rospy.Publisher('/kuavo_head_body_orientation_data', headBodyPose, queue_size=10)
-        self.head_body_pose_control_puber = rospy.Publisher('/kuavo_head_body_orientation', headBodyPose, queue_size=10)    
+        # Marker publishers are debugging-only. Avoid registering them in the
+        # production path, otherwise a regex rosbag subscriber makes every VR
+        # callback construct and serialize eight extra messages.
+        self.marker_pub = None
+        self.marker_pub_right = None
+        self.marker_pub_elbow = None
+        self.marker_pub_elbow_right = None
+        self.marker_pub_shoulder = None
+        self.marker_pub_human_array_left = None
+        self.marker_pub_human_array_right = None
+        self.marker_pub_shoulder_right = None
+        self.marker_pub_shoulder_quest3 = None
+        self.marker_pub_shoulder_quest3_right = None
+        self.marker_pub_chest = None
+        self.marker_pub_upper_arm_constraint_left = None
+        self.marker_pub_upper_arm_constraint_right = None
+        if self.vis_pub:
+            self.marker_pub = rospy.Publisher("visualization_marker", Marker, queue_size=10)
+            self.marker_pub_right = rospy.Publisher("visualization_marker_right", Marker, queue_size=10)
+            self.marker_pub_elbow = rospy.Publisher("visualization_marker/elbow", Marker, queue_size=10)
+            self.marker_pub_elbow_right = rospy.Publisher("visualization_marker_right/elbow", Marker, queue_size=10)
+            self.marker_pub_shoulder = rospy.Publisher("visualization_marker/shoulder", Marker, queue_size=10)
+            self.marker_pub_human_array_left = rospy.Publisher("visualization_marker/human_array_left", MarkerArray, queue_size=10)
+            self.marker_pub_human_array_right = rospy.Publisher("visualization_marker/human_array_right", MarkerArray, queue_size=10)
+            self.marker_pub_shoulder_right = rospy.Publisher("visualization_marker_right/shoulder", Marker, queue_size=10)
+            self.marker_pub_shoulder_quest3 = rospy.Publisher("visualization_marker/shoulder_quest3", Marker, queue_size=10)
+            self.marker_pub_shoulder_quest3_right = rospy.Publisher("visualization_marker_right/shoulder_quest3", Marker, queue_size=10)
+            self.marker_pub_chest = rospy.Publisher("visualization_marker_chest", Marker, queue_size=10)
+            self.marker_pub_upper_arm_constraint_left = rospy.Publisher("visualization_marker/upper_arm_constraint_left", Marker, queue_size=10)
+            self.marker_pub_upper_arm_constraint_right = rospy.Publisher("visualization_marker/upper_arm_constraint_right", Marker, queue_size=10)
+        # Dual-VR: the secondary instance must not re-register the process-global
+        # ROS resources. publish_globals defaults to True, so every single-VR
+        # caller keeps exactly the original publishers/subscribers.
+        self.joint_state_puber = None
+        if self.publish_globals:
+            self.joint_state_puber = rospy.Publisher(
+                '/joint_states', JointState, queue_size=10
+            )
+        self.shoulder_angle_puber = None
+        self.chest_axis_puber = None
+        self.hand_thumb_pub = None
+        if self.debug_pub:
+            self.shoulder_angle_puber = rospy.Publisher(
+                '/quest3_debug/shoulder_angle', Float32MultiArray, queue_size=10
+            )
+            self.chest_axis_puber = rospy.Publisher(
+                '/quest3_debug/chest_axis', Float32MultiArray, queue_size=10
+            )
+            self.hand_thumb_pub = rospy.Publisher(
+                '/hand_thumb', Float32MultiArray, queue_size=10
+            )
+        self.head_body_pose_puber = None
+        self.head_body_pose_control_puber = None
+        if self.publish_globals:
+            self.head_body_pose_puber = rospy.Publisher('/kuavo_head_body_orientation_data', headBodyPose, queue_size=10)
+            self.head_body_pose_control_puber = rospy.Publisher('/kuavo_head_body_orientation', headBodyPose, queue_size=10)
 
 
         self.left_joystick = None
@@ -180,7 +234,10 @@ class Quest3ArmInfoTransformer:
             from hand_gesture_predictor import HandGesturePredictor
             hand_gesture_model_path = os.path.join(current_dir, "hand_gesture_model.onnx")
             self.hand_gesture_predictor = HandGesturePredictor(hand_gesture_model_path)
-        self.listener = tf.TransformListener()
+        # Dual-VR: only the primary instance owns the process-global /tf listener.
+        self.listener = None
+        if self.publish_globals:
+            self.listener = tf.TransformListener()
         if rospy.has_param("/quest3/upper_arm_length"):
             self.upper_arm_length = rospy.get_param("/quest3/upper_arm_length")
             print(f"get rosparams upper_arm_length: {self.upper_arm_length}")
@@ -217,12 +274,14 @@ class Quest3ArmInfoTransformer:
         else:
             print("/quest3/max_elbow_angular_velocity not found, using default 4.0 rad/s")
         self._load_motion_limit_profiles()
-        self.controller_switch_event_sub = rospy.Subscriber(
-            "/humanoid_controller/controller_switch_event",
-            ControllerSwitchEvent,
-            self._controller_switch_event_callback,
-            queue_size=1,
-        )
+        self.controller_switch_event_sub = None
+        if self.publish_globals:
+            self.controller_switch_event_sub = rospy.Subscriber(
+                "/humanoid_controller/controller_switch_event",
+                ControllerSwitchEvent,
+                self._controller_switch_event_callback,
+                queue_size=1,
+            )
         if rospy.has_param("/quest3/upper_arm_cone_angle_forward"):
             self.upper_arm_cone_angle_forward = rospy.get_param("/quest3/upper_arm_cone_angle_forward") * np.pi / 180.0
             print(f"get rosparams upper_arm_cone_angle_forward: {self.upper_arm_cone_angle_forward * 180.0 / np.pi} degrees")
@@ -331,6 +390,8 @@ class Quest3ArmInfoTransformer:
             shoulder_pos: 肩膀位置
             side: "Left" or "Right"
         """
+        if not self.vis_pub:
+            return
         marker = Marker()
         marker.header.frame_id = "base_link"
         marker.header.stamp = rospy.Time.now()
@@ -524,55 +585,280 @@ class Quest3ArmInfoTransformer:
         return current_vec
               
     def read_joySticks_msg(self, msg):
-        self.left_joystick = [msg.left_trigger, msg.left_grip]
-        self.right_joystick = [msg.right_trigger, msg.right_grip]
+        """Compatibility entry point; the absolute IK path passes snapshots instead."""
+        with self._finger_state_lock:
+            self.left_joystick = [msg.left_trigger, msg.left_grip]
+            self.right_joystick = [msg.right_trigger, msg.right_grip]
 
-    def read_msg(self, msg):
+    def _claim_debug_publish_slot(self):
+        """Return true at most ``debug_publish_hz`` times per second."""
+        if not (self.debug_pub or self.vis_pub):
+            return False
+        now = time.monotonic()
+        if (self._debug_publish_period > 0.0
+                and now - self._last_debug_publish_monotonic < self._debug_publish_period):
+            return False
+        self._last_debug_publish_monotonic = now
+        return True
+
+    @staticmethod
+    def _normalize_arm_sides(arm_sides):
+        """Normalize the ``arm_sides`` argument into a (left, right) bool pair.
+
+        None / omitted  -> (True, True), i.e. the original behaviour.
+        ("Left",)       -> (True, False)
+        ("Right",)      -> (False, True)
+        ("Left", "Right") / ("Both",) -> (True, True)
+        """
+        if arm_sides is None:
+            return (True, True)
+        if isinstance(arm_sides, str):
+            arm_sides = (arm_sides,)
+        wanted = {str(side).strip().lower() for side in arm_sides}
+        if not wanted or "both" in wanted or wanted == {"left", "right"}:
+            return (True, True)
+        return ("left" in wanted, "right" in wanted)
+
+    @staticmethod
+    def _validate_pose_message(msg, sides=None):
+        if len(msg.poses) < len(bone_names):
+            return False
+        # 镜像 C++ validateInput：关键 4 骨骼位姿须为有限值。
+        # Dual-VR 下每路输入只包含本侧数据，缺失侧由发送端填 NaN，
+        # 因此这里只校验本实例负责的骨骼（sides=None 时校验全部，保持原行为）。
+        if sides is None:
+            required_bones = ("LeftHandPalm", "LeftArmLower",
+                              "RightHandPalm", "RightArmLower")
+        else:
+            required_bones = tuple(
+                side + suffix
+                for side in sides
+                for suffix in ("HandPalm", "ArmLower"))
+        for bone_name in required_bones:
+            pose = msg.poses[bone_name_to_index[bone_name]]
+            if not (
+                    math.isfinite(pose.position.x)
+                    and math.isfinite(pose.position.y)
+                    and math.isfinite(pose.position.z)
+                    and math.isfinite(pose.orientation.x)
+                    and math.isfinite(pose.orientation.y)
+                    and math.isfinite(pose.orientation.z)
+                    and math.isfinite(pose.orientation.w)):
+                return False
+        return True
+
+    def _validate_frame_message(self, msg):
+        """Validate a frame against this instance's own ``arm_sides``."""
+        left_on, right_on = self.arm_sides
+        if left_on and right_on:
+            return self._validate_pose_message(msg)
+        sides = []
+        if left_on:
+            sides.append("Left")
+        if right_on:
+            sides.append("Right")
+        return self._validate_pose_message(msg, sides=sides)
+
+    def read_msg(self, msg, collect_timing=False, joystick_snapshot=None,
+                 defer_finger_processing=False):
         """
         Read the PoseInfoList message and extract the left and right finger joint angles.
+
+        Args:
+            msg: VR bone message.
+            collect_timing: Return a fine-grained timing breakdown for diagnostics.
+                This is disabled by default so normal VR paths do not pay for the
+                additional perf_counter calls.
+            defer_finger_processing: Leave finger/gesture work to an external
+                latest-frame worker. Defaults to false for compatibility with
+                the incremental and visualization nodes that share this class.
         """
-        if self.left_joystick is None:
-            print("No joystick message received yet")
-            return
-        # poses 为空或不足时跳过该帧，避免带载等空 poses 命令包导致按固定骨骼索引越界 (IndexError)
-        # 注：len < len(bone_names) 已涵盖 empty（0 < 24），等价 C++ :313 empty() + :318 size()<24
-        if len(msg.poses) < len(bone_names):
-            return
-        # 镜像 C++ validateInput(:326-344)：关键 4 骨骼（左右手/肘）位姿须为有限值，挡 NaN/Inf
-        for _idx in (bone_name_to_index["LeftHandPalm"], bone_name_to_index["LeftArmLower"],
-                     bone_name_to_index["RightHandPalm"], bone_name_to_index["RightArmLower"]):
-            _p = msg.poses[_idx]
-            if not (math.isfinite(_p.position.x) and math.isfinite(_p.position.y) and math.isfinite(_p.position.z)
-                    and math.isfinite(_p.orientation.x) and math.isfinite(_p.orientation.y)
-                    and math.isfinite(_p.orientation.z) and math.isfinite(_p.orientation.w)):
-                return
+        timing_start = time.perf_counter() if collect_timing else None
+        if joystick_snapshot is None:
+            with self._finger_state_lock:
+                if self.left_joystick is not None and self.right_joystick is not None:
+                    joystick_snapshot = (
+                        tuple(self.left_joystick), tuple(self.right_joystick)
+                    )
+        if joystick_snapshot is None:
+            rospy.logwarn_throttle(1.0, "No joystick message received yet")
+            return False
+        if not self._validate_frame_message(msg):
+            return False
+
         self.pose_info_list = msg.poses
         self.timestamp_ms = msg.timestamp_ms
         self.is_high_confidence = msg.is_high_confidence
         self.is_hand_tracking = msg.is_hand_tracking
-        # print("is_high_confidence: {}, is_hand_tracking: {}".format(self.is_high_confidence, self.is_hand_tracking))
-        if self.is_hand_tracking:
-            self.compute_finger_joints("Left")
-            self.compute_finger_joints("Right")
+        with self._finger_state_lock:
+            self.left_joystick = list(joystick_snapshot[0])
+            self.right_joystick = list(joystick_snapshot[1])
+        validation_done = time.perf_counter() if collect_timing else None
+
+        if defer_finger_processing:
+            fingers_done = validation_done
         else:
-            self.compute_finger_joints_joy("Left")
-            self.compute_finger_joints_joy("Right")
-        self.compute_hand_pose("Left")
-        self.compute_hand_pose("Right")
-        # gesture counts
+            left_on, right_on = self.arm_sides
+            if self.is_hand_tracking:
+                if left_on:
+                    self.compute_finger_joints("Left", pose_info_list=msg.poses)
+                if right_on:
+                    self.compute_finger_joints("Right", pose_info_list=msg.poses)
+            else:
+                if left_on:
+                    self.compute_finger_joints_joy("Left", pose_info_list=msg.poses)
+                if right_on:
+                    self.compute_finger_joints_joy("Right", pose_info_list=msg.poses)
+            fingers_done = time.perf_counter() if collect_timing else None
+
+        arm_timings = self.compute_arm_poses(
+            msg.poses, collect_timing=collect_timing, sides=self.arm_sides
+        )
+        arm_done = time.perf_counter() if collect_timing else None
+        with self._finger_state_lock:
+            if not defer_finger_processing:
+                self._update_gesture_state_locked()
+            is_running = bool(self.is_runing)
+        if is_running:
+            self.pub_head_body_pose_msg(self.head_body_pose)
+
+        if collect_timing:
+            timing_done = time.perf_counter()
+            result = {
+                "input_validation_ms": (validation_done - timing_start) * 1000.0,
+                "finger_compute_ms": (
+                    float("nan") if defer_finger_processing
+                    else (fingers_done - validation_done) * 1000.0
+                ),
+                "gesture_publish_ms": (timing_done - arm_done) * 1000.0,
+                "read_msg_total_ms": (timing_done - timing_start) * 1000.0,
+            }
+            result.update(arm_timings)
+            return result
+        return True
+
+    def process_finger_frame(self, msg, joystick_snapshot):
+        """Compute the owned hands from an immutable latest-frame input.
+
+        This method is intended for the lower-rate finger worker. It never
+        changes the arm pose input used by ``compute_arm_poses``.
+
+        Dual-VR: only ``self.arm_sides`` is computed; the other side keeps its
+        previous value and is left to the sibling transformer instance. With the
+        default arm_sides (both sides) this is the original behaviour.
+        """
+        left_on, right_on = self.arm_sides
+        if joystick_snapshot is None or not self._validate_frame_message(msg):
+            return None
+        poses = msg.poses
+        left = None
+        right = None
+        if msg.is_hand_tracking:
+            if left_on:
+                left = self.compute_finger_joints(
+                    "Left", pose_info_list=poses, update_state=False
+                )
+            if right_on:
+                right = self.compute_finger_joints(
+                    "Right", pose_info_list=poses, update_state=False
+                )
+        else:
+            if left_on:
+                left = self.compute_finger_joints_joy(
+                    "Left", pose_info_list=poses, update_state=False
+                )
+            if right_on:
+                right = self.compute_finger_joints_joy(
+                    "Right", pose_info_list=poses, update_state=False
+                )
+        if (left_on and left is None) or (right_on and right is None):
+            return None
+
+        with self._finger_state_lock:
+            if left is not None:
+                self.left_finger_joints = list(left)
+            if right is not None:
+                self.right_finger_joints = list(right)
+            self.left_joystick = list(joystick_snapshot[0])
+            self.right_joystick = list(joystick_snapshot[1])
+            self._update_gesture_state_locked()
+            return {
+                "left_finger_joints": (
+                    None if self.left_finger_joints is None
+                    else list(self.left_finger_joints)
+                ),
+                "right_finger_joints": (
+                    None if self.right_finger_joints is None
+                    else list(self.right_finger_joints)
+                ),
+                "is_running": bool(self.is_runing),
+                "is_hand_tracking": bool(msg.is_hand_tracking),
+            }
+
+    def update_joystick_running_state(self, joystick_snapshot, is_hand_tracking):
+        """Confirm controller gestures for 1s, independent of finger frame rate.
+
+        A receive gap over 0.5s breaks confirmation; a release also resets it.
+        Hand tracking keeps the existing finger gesture confirmation.
+        """
+        now = time.monotonic()
+        with self._finger_state_lock:
+            self._joystick_confirmation_active = not is_hand_tracking
+            if (is_hand_tracking or self._joystick_last_received is None
+                    or now - self._joystick_last_received > 0.5):
+                self._joystick_gesture = None
+                self._joystick_gesture_started = None
+            self._joystick_last_received = now
+            if is_hand_tracking:
+                return bool(self.is_runing)
+            sticks = [stick for enabled, stick in zip(self.arm_sides, joystick_snapshot)
+                      if enabled]
+            gesture = None
+            if all(self.joy_ok_gesture_check(stick) for stick in sticks):
+                gesture = "run"
+            elif all(self.joy_shot_gesture_check(stick) for stick in sticks):
+                gesture = "stop"
+            if gesture != self._joystick_gesture:
+                self._joystick_gesture = gesture
+                self._joystick_gesture_started = now if gesture else None
+            if (gesture is not None
+                    and now - self._joystick_gesture_started >= 1.0):
+                running = gesture == "run"
+                if running != self.is_runing:
+                    rospy.loginfo("[Quest3] Controller gesture confirmed: %s", gesture)
+                self.is_runing = running
+                if not running:
+                    self.measure_arm_length = True
+            return bool(self.is_runing)
+
+    def _update_gesture_state_locked(self):
+        if self._joystick_confirmation_active:
+            return
         max_counts = 50
-        if(self.is_runing_gesture()):
+        if self.is_runing_gesture():
             self.ok_gesture_counts += 1
             self.shot_gesture_counts = 0
-            if(self.ok_gesture_counts >= max_counts):
+            if self.ok_gesture_counts >= max_counts:
                 self.is_runing = True
-        elif(self.is_stop_gesture()):
+        elif self.is_stop_gesture():
             self.shot_gesture_counts += 1
             self.ok_gesture_counts = 0
-            if(self.shot_gesture_counts >= max_counts):
+            if self.shot_gesture_counts >= max_counts:
                 self.is_runing = False
-        if self.is_runing:
-            self.pub_head_body_pose_msg(self.head_body_pose)
+
+    def get_finger_state(self):
+        with self._finger_state_lock:
+            return {
+                "left_finger_joints": (
+                    None if self.left_finger_joints is None
+                    else list(self.left_finger_joints)
+                ),
+                "right_finger_joints": (
+                    None if self.right_finger_joints is None
+                    else list(self.right_finger_joints)
+                ),
+                "is_running": bool(self.is_runing),
+            }
 
 
     def get_relative_finger_poses(self, side):
@@ -585,8 +871,11 @@ class Quest3ArmInfoTransformer:
         """
         try:
             frame_poses = np.zeros(63)
+            if self.listener is None:
+                # Dual-VR secondary instance does not own the global /tf listener.
+                return frame_poses
             parent_frame = side + "HandPalm"
-            
+
             for i, part in enumerate(FINGER_PARTS):
                 try:
                     lookup_start = time.time()
@@ -614,48 +903,50 @@ class Quest3ArmInfoTransformer:
             rospy.logerr(f"Error in get_relative_finger_poses: {e}")
             return np.zeros(63)
 
-    def get_hand_transform(self, side):
+    def get_hand_transform(self, side, pose_info_list=None):
         """
         根据配置的hand_reference_mode获取手部变换矩阵
         """
-        if self.pose_info_list is None:
+        poses = self.pose_info_list if pose_info_list is None else pose_info_list
+        if poses is None:
             return None
             
         if self.hand_reference_mode == "palm":
-            return self.pose_info2_transform(self.pose_info_list[bone_name_to_index[side + "HandPalm"]])
+            return self.pose_info2_transform(poses[bone_name_to_index[side + "HandPalm"]])
         elif self.hand_reference_mode == "fingertips":
-            T_hand = self.compute_hand_center_from_fingertips(side)
+            T_hand = self.compute_hand_center_from_fingertips(side, poses)
             if T_hand is None:
-                T_hand = self.pose_info2_transform(self.pose_info_list[bone_name_to_index[side + "HandPalm"]])
+                T_hand = self.pose_info2_transform(poses[bone_name_to_index[side + "HandPalm"]])
             return T_hand
         elif self.hand_reference_mode == "middle_finger":
-            T_hand = self.compute_hand_center_from_middle_finger(side)
+            T_hand = self.compute_hand_center_from_middle_finger(side, poses)
             if T_hand is None:
-                T_hand = self.pose_info2_transform(self.pose_info_list[bone_name_to_index[side + "HandPalm"]])
+                T_hand = self.pose_info2_transform(poses[bone_name_to_index[side + "HandPalm"]])
             return T_hand
         elif self.hand_reference_mode == "thumb_index":
-            T_hand = self.compute_hand_center_from_thumb_index(side)
+            T_hand = self.compute_hand_center_from_thumb_index(side, poses)
             if T_hand is None:
-                T_hand = self.pose_info2_transform(self.pose_info_list[bone_name_to_index[side + "HandPalm"]])
+                T_hand = self.pose_info2_transform(poses[bone_name_to_index[side + "HandPalm"]])
             return T_hand
         else:
             # 默认使用手掌
-            return self.pose_info2_transform(self.pose_info_list[bone_name_to_index[side + "HandPalm"]])
+            return self.pose_info2_transform(poses[bone_name_to_index[side + "HandPalm"]])
 
-    def compute_hand_center_from_middle_finger(self, side):
+    def compute_hand_center_from_middle_finger(self, side, pose_info_list=None):
         """
         使用中指尖作为手的参考点
         """
-        if self.pose_info_list is None:
+        poses = self.pose_info_list if pose_info_list is None else pose_info_list
+        if poses is None:
             return None
             
         try:
             # 获取中指尖的位置
-            middle_finger_pose = self.pose_info_list[bone_name_to_index[side + "HandMiddleTip"]]
+            middle_finger_pose = poses[bone_name_to_index[side + "HandMiddleTip"]]
             middle_finger_pos = [middle_finger_pose.position.x, middle_finger_pose.position.y, middle_finger_pose.position.z]
             
             # 使用手掌的方向
-            hand_palm_pose = self.pose_info_list[bone_name_to_index[side + "HandPalm"]]
+            hand_palm_pose = poses[bone_name_to_index[side + "HandPalm"]]
             hand_orientation = hand_palm_pose.orientation
             
             # 构建变换矩阵
@@ -669,17 +960,18 @@ class Quest3ArmInfoTransformer:
         except (KeyError, IndexError):
             return None
 
-    def compute_hand_center_from_thumb_index(self, side):
+    def compute_hand_center_from_thumb_index(self, side, pose_info_list=None):
         """
         使用拇指和食指中点作为手的参考点
         """
-        if self.pose_info_list is None:
+        poses = self.pose_info_list if pose_info_list is None else pose_info_list
+        if poses is None:
             return None
             
         try:
             # 获取拇指尖和食指尖的位置
-            thumb_pose = self.pose_info_list[bone_name_to_index[side + "HandThumbTip"]]
-            index_pose = self.pose_info_list[bone_name_to_index[side + "HandIndexTip"]]
+            thumb_pose = poses[bone_name_to_index[side + "HandThumbTip"]]
+            index_pose = poses[bone_name_to_index[side + "HandIndexTip"]]
             
             thumb_pos = np.array([thumb_pose.position.x, thumb_pose.position.y, thumb_pose.position.z])
             index_pos = np.array([index_pose.position.x, index_pose.position.y, index_pose.position.z])
@@ -688,7 +980,7 @@ class Quest3ArmInfoTransformer:
             center_pos = (thumb_pos + index_pos) / 2.0
             
             # 使用手掌的方向
-            hand_palm_pose = self.pose_info_list[bone_name_to_index[side + "HandPalm"]]
+            hand_palm_pose = poses[bone_name_to_index[side + "HandPalm"]]
             hand_orientation = hand_palm_pose.orientation
             
             # 构建变换矩阵
@@ -702,11 +994,12 @@ class Quest3ArmInfoTransformer:
         except (KeyError, IndexError):
             return None
 
-    def compute_hand_center_from_fingertips(self, side):
+    def compute_hand_center_from_fingertips(self, side, pose_info_list=None):
         """
         计算手指尖的中心位置作为手的参考点
         """
-        if self.pose_info_list is None:
+        poses = self.pose_info_list if pose_info_list is None else pose_info_list
+        if poses is None:
             return None
             
         # 获取所有手指尖的位置
@@ -715,7 +1008,7 @@ class Quest3ArmInfoTransformer:
         
         for finger_tip in finger_tips:
             try:
-                pose_info = self.pose_info_list[bone_name_to_index[side + finger_tip]]
+                pose_info = poses[bone_name_to_index[side + finger_tip]]
                 finger_positions.append([pose_info.position.x, pose_info.position.y, pose_info.position.z])
             except (KeyError, IndexError):
                 continue
@@ -727,7 +1020,7 @@ class Quest3ArmInfoTransformer:
         center_pos = np.mean(finger_positions, axis=0)
         
         # 使用手掌的方向
-        hand_palm_pose = self.pose_info_list[bone_name_to_index[side + "HandPalm"]]
+        hand_palm_pose = poses[bone_name_to_index[side + "HandPalm"]]
         hand_orientation = hand_palm_pose.orientation
         
         # 构建变换矩阵
@@ -738,31 +1031,34 @@ class Quest3ArmInfoTransformer:
         
         return T_hand_center
 
-    def compute_finger_joints(self, side):
+    def compute_finger_joints(self, side, pose_info_list=None, update_state=True):
+        poses = self.pose_info_list if pose_info_list is None else pose_info_list
         if self.predict_gesture:
             gesture, confidence, inference_time = self.hand_gesture_predictor.predict(self.get_relative_finger_poses(side))
             if gesture in gesture_corresponding_hand_position:
                 hand_position = gesture_corresponding_hand_position[gesture]
                 finger_joints = [1.7*hand_position[i]/100.0 for i in range(6)]
-                if side == "Left":
-                    self.left_finger_joints = finger_joints
-                elif side == "Right":
-                    self.right_finger_joints = finger_joints
+                if update_state:
+                    with self._finger_state_lock:
+                        if side == "Left":
+                            self.left_finger_joints = finger_joints
+                        elif side == "Right":
+                            self.right_finger_joints = finger_joints
                 return finger_joints
         """
         y轴从手腕指向中指指尖, x轴从拇指位置指向无名指方向
         """
-        if self.pose_info_list is None:
+        if poses is None:
             return None
         
         # 根据配置的hand_reference_mode获取手部变换矩阵
-        T_hand = self.get_hand_transform(side)
+        T_hand = self.get_hand_transform(side, poses)
         
-        T_finger_thumb_tip = self.pose_info2_transform(self.pose_info_list[bone_name_to_index[side + "HandThumbTip"]])
-        finger_index_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandIndexTip"]].orientation
-        finger_middle_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandMiddleTip"]].orientation
-        finger_ring_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandRingTip"]].orientation
-        finger_little_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandLittleTip"]].orientation
+        T_finger_thumb_tip = self.pose_info2_transform(poses[bone_name_to_index[side + "HandThumbTip"]])
+        finger_index_tip_ori = poses[bone_name_to_index[side + "HandIndexTip"]].orientation
+        finger_middle_tip_ori = poses[bone_name_to_index[side + "HandMiddleTip"]].orientation
+        finger_ring_tip_ori = poses[bone_name_to_index[side + "HandRingTip"]].orientation
+        finger_little_tip_ori = poses[bone_name_to_index[side + "HandLittleTip"]].orientation
         R0_inv = T_hand[:3, :3].T
         finger_index_tip_rpy = matrix_to_rpy(R0_inv @ self.quaternion_msg_to_matrix(finger_index_tip_ori))
         finger_middle_tip_rpy = matrix_to_rpy(R0_inv @ self.quaternion_msg_to_matrix(finger_middle_tip_ori))
@@ -799,30 +1095,34 @@ class Quest3ArmInfoTransformer:
                 finger_index_tip_rpy[0], finger_middle_tip_rpy[0], finger_ring_tip_rpy[0], finger_little_tip_rpy[0]]
         for i in range(len(finger_joints)):
             finger_joints[i] = self.limit_finger_angle(finger_joints[i], back_agl=np.pi/2.0)
-        if side == "Left":
-            self.left_finger_joints = finger_joints        
+        if update_state:
+            with self._finger_state_lock:
+                if side == "Left":
+                    self.left_finger_joints = finger_joints
+                elif side == "Right":
+                    self.right_finger_joints = finger_joints
+        if side == "Left" and self.hand_thumb_pub is not None:
             thumb_msg = Float32MultiArray()
             thumb_msg.data = p_hf_h
-            hand_thumb_pub.publish(thumb_msg)
-        elif side == "Right":
-            self.right_finger_joints = finger_joints
+            self.hand_thumb_pub.publish(thumb_msg)
         return finger_joints
- 
-    def compute_finger_joints_joy(self, side):
+
+    def compute_finger_joints_joy(self, side, pose_info_list=None, update_state=True):
         """
         手柄版本的计算手指关节角度
         """
-        if self.pose_info_list is None:
+        poses = self.pose_info_list if pose_info_list is None else pose_info_list
+        if poses is None:
             return None
-        hand_ori = self.pose_info_list[bone_name_to_index[side + "HandPalm"]].orientation
-        finger_thumb_metacarpal_ori = self.pose_info_list[bone_name_to_index[side + "HandThumbMetacarpal"]].orientation
-        finger_thumb_proximal_ori = self.pose_info_list[bone_name_to_index[side + "HandThumbProximal"]].orientation
-        finger_thumb_distal_ori = self.pose_info_list[bone_name_to_index[side + "HandThumbDistal"]].orientation
-        finger_thumb_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandThumbTip"]].orientation
-        finger_index_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandIndexTip"]].orientation
-        finger_middle_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandMiddleTip"]].orientation
-        finger_ring_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandRingTip"]].orientation
-        finger_little_tip_ori = self.pose_info_list[bone_name_to_index[side + "HandLittleTip"]].orientation
+        hand_ori = poses[bone_name_to_index[side + "HandPalm"]].orientation
+        finger_thumb_metacarpal_ori = poses[bone_name_to_index[side + "HandThumbMetacarpal"]].orientation
+        finger_thumb_proximal_ori = poses[bone_name_to_index[side + "HandThumbProximal"]].orientation
+        finger_thumb_distal_ori = poses[bone_name_to_index[side + "HandThumbDistal"]].orientation
+        finger_thumb_tip_ori = poses[bone_name_to_index[side + "HandThumbTip"]].orientation
+        finger_index_tip_ori = poses[bone_name_to_index[side + "HandIndexTip"]].orientation
+        finger_middle_tip_ori = poses[bone_name_to_index[side + "HandMiddleTip"]].orientation
+        finger_ring_tip_ori = poses[bone_name_to_index[side + "HandRingTip"]].orientation
+        finger_little_tip_ori = poses[bone_name_to_index[side + "HandLittleTip"]].orientation
         R0_inv = self.quaternion_msg_to_matrix(hand_ori).T
         finger_thumb_metacarpal_rpy = matrix_to_rpy(R0_inv @ self.quaternion_msg_to_matrix(finger_thumb_metacarpal_ori))
         finger_thumb_proximal_rpy = matrix_to_rpy(R0_inv @ self.quaternion_msg_to_matrix(finger_thumb_proximal_ori))
@@ -843,20 +1143,23 @@ class Quest3ArmInfoTransformer:
         finger_joints[4] = 0.0 if finger_ring_tip_rpy[0] > 0.0 else 1.7
         finger_joints[5] = 0.0 if finger_little_tip_rpy[0] > 0.0 else 1.7
 
-        if side == "Left":
-            self.left_finger_joints = finger_joints
-        elif side == "Right":
-            self.right_finger_joints = finger_joints
+        if update_state:
+            with self._finger_state_lock:
+                if side == "Left":
+                    self.left_finger_joints = finger_joints
+                elif side == "Right":
+                    self.right_finger_joints = finger_joints
         return finger_joints
 
     def get_finger_joints(self, side):
-        if side == "Left":
-            return self.left_finger_joints
-        elif side == "Right":
-            return self.right_finger_joints
-        else:
-            print("Invalid side: {}".format(side))
-            return None
+        with self._finger_state_lock:
+            if side == "Left":
+                return self.left_finger_joints
+            elif side == "Right":
+                return self.right_finger_joints
+            else:
+                print("Invalid side: {}".format(side))
+                return None
 
     @staticmethod
     def limit_finger_angle(angle, min_angle=0.0, max_angle=1.7, back_agl=1/4*np.pi):
@@ -882,14 +1185,21 @@ class Quest3ArmInfoTransformer:
         """
         ok-ok:->Runing
         """
+        # Dual-VR: each instance only judges the side it owns. With the default
+        # arm_sides (both sides) this is byte-for-byte the original behaviour.
+        left_on, right_on = self.arm_sides
         is_runing = True
-        is_runing &= self.ok_gesture_check(self.left_finger_joints)
-        is_runing &= self.ok_gesture_check(self.right_finger_joints)
+        if left_on:
+            is_runing &= self.ok_gesture_check(self.left_finger_joints)
+        if right_on:
+            is_runing &= self.ok_gesture_check(self.right_finger_joints)
 
         # 兼容手柄的情况
         is_joyRun = True
-        is_joyRun &= self.joy_ok_gesture_check(self.left_joystick)
-        is_joyRun &= self.joy_ok_gesture_check(self.right_joystick)
+        if left_on:
+            is_joyRun &= self.joy_ok_gesture_check(self.left_joystick)
+        if right_on:
+            is_joyRun &= self.joy_ok_gesture_check(self.right_joystick)
 
         # Calculate average arm lengths when OK gesture is detected
         if (is_runing or is_joyRun) and self.measure_arm_length:
@@ -900,8 +1210,18 @@ class Quest3ArmInfoTransformer:
                 self.avg_right_upper_arm_length = sum(self.right_upper_arm_lengths) / len(self.right_upper_arm_lengths)
                 self.avg_right_lower_arm_length = sum(self.right_lower_arm_lengths) / len(self.right_lower_arm_lengths)
             self.measure_arm_length = False
-            print(f"Arm length measurement completed. Left upper: {self.avg_left_upper_arm_length:.2f}, lower: {self.avg_left_lower_arm_length:.2f}, "
-                  f"Right upper: {self.avg_right_upper_arm_length:.2f}, lower: {self.avg_right_lower_arm_length:.2f}")
+            # Dual-VR: an instance only collects the arm-length samples of the
+            # sides it owns, so the other side's averages stay None. Print only
+            # the sides that actually have a measurement; a side with no sample
+            # is skipped rather than formatted (and never faked as 0.0).
+            # With the default arm_sides (both sides) both parts are present and
+            # the line is byte-for-byte the original output.
+            measured = []
+            if self.avg_left_upper_arm_length is not None and self.avg_left_lower_arm_length is not None:
+                measured.append(f"Left upper: {self.avg_left_upper_arm_length:.2f}, lower: {self.avg_left_lower_arm_length:.2f}")
+            if self.avg_right_upper_arm_length is not None and self.avg_right_lower_arm_length is not None:
+                measured.append(f"Right upper: {self.avg_right_upper_arm_length:.2f}, lower: {self.avg_right_lower_arm_length:.2f}")
+            print("Arm length measurement completed. " + ", ".join(measured))
 
         return is_runing or is_joyRun
 
@@ -909,14 +1229,21 @@ class Quest3ArmInfoTransformer:
         """
         shot-shot:->Stop
         """
+        # Dual-VR: same per-side rule as is_runing_gesture. With the default
+        # arm_sides (both sides) this is byte-for-byte the original behaviour.
+        left_on, right_on = self.arm_sides
         is_stop = True
-        is_stop &= self.shot_gesture_check(self.left_finger_joints)
-        is_stop &= self.shot_gesture_check(self.right_finger_joints)
+        if left_on:
+            is_stop &= self.shot_gesture_check(self.left_finger_joints)
+        if right_on:
+            is_stop &= self.shot_gesture_check(self.right_finger_joints)
 
         # 兼容手柄的情况
         is_joyStop = True
-        is_joyStop &= self.joy_shot_gesture_check(self.left_joystick)
-        is_joyStop &= self.joy_shot_gesture_check(self.right_joystick)
+        if left_on:
+            is_joyStop &= self.joy_shot_gesture_check(self.left_joystick)
+        if right_on:
+            is_joyStop &= self.joy_shot_gesture_check(self.right_joystick)
 
         if is_stop or is_joyStop:
             self.measure_arm_length = True
@@ -998,19 +1325,18 @@ class Quest3ArmInfoTransformer:
         """
         if side == "Left":
             R_01 = self.init_R_wLS.T @ R_wS
+            shoulder_rpy = matrix_to_rpy(R_01)
             # align to urdf model, the shoulder angle is negative
-            self.left_shoulder_rpy_in_robot[0] = matrix_to_rpy(R_01)[2]
-            self.left_shoulder_rpy_in_robot[1] = -matrix_to_rpy(R_01)[0]
-            self.left_shoulder_rpy_in_robot[2] = -matrix_to_rpy(R_01)[1]
+            self.left_shoulder_rpy_in_robot[0] = shoulder_rpy[2]
+            self.left_shoulder_rpy_in_robot[1] = -shoulder_rpy[0]
+            self.left_shoulder_rpy_in_robot[2] = -shoulder_rpy[1]
         elif side == "Right":
             R_01 = self.init_R_wRS.T @ R_wS
+            shoulder_rpy = matrix_to_rpy(R_01)
             # align to urdf model, the shoulder angle is positive
-            self.right_shoulder_rpy_in_robot[0] = -matrix_to_rpy(R_01)[2]
-            self.right_shoulder_rpy_in_robot[1] = -matrix_to_rpy(R_01)[0]
-            self.right_shoulder_rpy_in_robot[2] = matrix_to_rpy(R_01)[1]
-        msg = Float32MultiArray()
-        msg.data = np.append(self.left_shoulder_rpy_in_robot, self.right_shoulder_rpy_in_robot)
-        self.shoulder_angle_puber.publish(msg)
+            self.right_shoulder_rpy_in_robot[0] = -shoulder_rpy[2]
+            self.right_shoulder_rpy_in_robot[1] = -shoulder_rpy[0]
+            self.right_shoulder_rpy_in_robot[2] = shoulder_rpy[1]
 
     def scale_arm_positions(self, shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, chest_pos, side, adapt_width_gamma):
         """
@@ -1180,80 +1506,159 @@ class Quest3ArmInfoTransformer:
 
         return scaled_elbow_pos, scaled_hand_pos
 
-    def compute_hand_pose(self, side):
-        chest_pose = self.pose_info_list[bone_name_to_index["Chest"]]
-        #打印chest对应的index
-        # print("Chest index: ✅", bone_name_to_index["Chest"])
-        elbow_pose = self.pose_info_list[bone_name_to_index[side + "ArmLower"]]
-        #打印elbow对应的index
-        # print(f"{side} ArmLower index: ✅", bone_name_to_index[side + "ArmLower"])
-        shoulder_pose = self.pose_info_list[bone_name_to_index[side + "ArmUpper"]]
-        #打印shoulder对应的index
-        # print(f"{side} ArmUpper index: ✅", bone_name_to_index[side + "ArmUpper"])
-        hand_pose = self.pose_info_list[bone_name_to_index[side + "HandPalm"]]
-        #打印hand对应的index
-        # print(f"{side} HandPalm index: ✅", bone_name_to_index[side + "HandPalm"])
-        #打印hand对应的位置
-        # print(f"{side} HandPalm y position: ✅", hand_pose.position.y)
+    @staticmethod
+    def _pose_position(pose):
+        return np.array(
+            [pose.position.x, pose.position.y, pose.position.z], dtype=float
+        )
+
+    @staticmethod
+    def _pose_rotation_matrix(pose):
+        return quaternion_to_matrix([
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        ])
+
+    def _build_chest_frame_context(self, pose_info_list):
+        """Compute the per-frame chest frame and yaw compensation once."""
+        chest_pose = pose_info_list[bone_name_to_index["Chest"]]
+        chest_position = self._pose_position(chest_pose)
+        R_w_chest = self._pose_rotation_matrix(chest_pose)
+        R_initial_chest = self.init_R_wC.T @ R_w_chest
+        chest_axis, _ = matrix_to_axis_angle(R_initial_chest)
+        chest_rpy = matrix_to_rpy(R_initial_chest)
+
+        self.chest_axis_agl = np.array([0.0, 0.0, chest_axis[1]])
+        compensation_rotation = axis_angle_to_matrix(self.chest_axis_agl).T
+        R_w_chest_without_yaw = compensation_rotation @ R_w_chest
+
+        self.head_body_pose.body_yaw = chest_axis[1]
+        self.head_body_pose.body_pitch = matrix_to_rpy(
+            self.init_R_wC.T @ R_w_chest_without_yaw
+        )[0]
+        self.head_body_pose.body_roll = chest_rpy[2]
+        self.head_body_pose.body_x = chest_position[0]
+        self.head_body_pose.body_y = chest_position[1]
+        self.head_body_pose.body_height = chest_position[2]
+
+        return {
+            "pose_info_list": pose_info_list,
+            "chest_pose": chest_pose,
+            "chest_position": chest_position,
+            "chest_axis": chest_axis,
+            "compensation_rotation": compensation_rotation,
+        }
+
+    def compute_arm_poses(self, pose_info_list=None, collect_timing=False, sides=None):
+        """Compute left and right arm targets from one shared frame context.
+
+        Args:
+            sides: (left_enabled, right_enabled) pair. Defaults to None, i.e.
+                both sides, which keeps the single-VR behaviour unchanged.
+        """
+        poses = self.pose_info_list if pose_info_list is None else pose_info_list
+        if poses is None:
+            return {} if collect_timing else False
+
+        left_on, right_on = (True, True) if sides is None else sides
+        pair_start = time.perf_counter() if collect_timing else None
+        publish_debug = self._claim_debug_publish_slot()
+        # Gesture processing may finalize arm-length calibration. Hold its
+        # short state lock across the pair so left/right never use different
+        # calibration modes within one frame.
+        with self._finger_state_lock:
+            frame_context = self._build_chest_frame_context(poses)
+            chest_done = time.perf_counter() if collect_timing else None
+            if left_on:
+                self.compute_hand_pose("Left", frame_context, publish_debug)
+            left_done = time.perf_counter() if collect_timing else None
+            if right_on:
+                self.compute_hand_pose("Right", frame_context, publish_debug)
+            right_done = time.perf_counter() if collect_timing else None
+        self._publish_frame_debug(frame_context, publish_debug)
+        debug_done = time.perf_counter() if collect_timing else None
+
+        if collect_timing:
+            return {
+                "chest_context_compute_ms": (chest_done - pair_start) * 1000.0,
+                "left_hand_compute_ms": (left_done - chest_done) * 1000.0,
+                "right_hand_compute_ms": (right_done - left_done) * 1000.0,
+                "arm_debug_publish_ms": (debug_done - right_done) * 1000.0,
+                "arm_pair_compute_ms": (debug_done - pair_start) * 1000.0,
+            }
+        return True
+
+    def _publish_frame_debug(self, frame_context, publish_debug):
+        if not publish_debug:
+            return
+        if self.shoulder_angle_puber is not None:
+            msg = Float32MultiArray()
+            msg.data = np.append(
+                self.left_shoulder_rpy_in_robot,
+                self.right_shoulder_rpy_in_robot,
+            )
+            self.shoulder_angle_puber.publish(msg)
+        if self.chest_axis_puber is not None:
+            msg = Float32MultiArray()
+            msg.data = frame_context["chest_axis"]
+            self.chest_axis_puber.publish(msg)
+        if self.vis_pub and self.marker_pub_chest is not None:
+            chest_marker = self.construct_point_marker(
+                frame_context["chest_position"], 0.1, 0.8
+            )
+            self.marker_pub_chest.publish(chest_marker)
+
+    def compute_hand_pose(self, side, frame_context=None, publish_debug=None):
+        if frame_context is None:
+            if self.pose_info_list is None:
+                return
+            frame_context = self._build_chest_frame_context(self.pose_info_list)
+            if publish_debug is None:
+                publish_debug = self._claim_debug_publish_slot()
+        if publish_debug is None:
+            publish_debug = False
+
+        poses = frame_context["pose_info_list"]
+        chest_pose = frame_context["chest_pose"]
+        chest_position = frame_context["chest_position"]
+        compensation_rotation = frame_context["compensation_rotation"]
+        elbow_pose = poses[bone_name_to_index[side + "ArmLower"]]
+        shoulder_pose = poses[bone_name_to_index[side + "ArmUpper"]]
+        hand_pose = poses[bone_name_to_index[side + "HandPalm"]]
 
         vr_quat = [hand_pose.orientation.x, hand_pose.orientation.y, hand_pose.orientation.z, hand_pose.orientation.w]
         hand_quat_in_w = vr_quat2robot_quat(vr_quat, side, 15*np.pi/180.0 if not self.is_hand_tracking else 0.0) # [x, y, z, w]
 
-        T_wChest = self.pose_info2_transform(chest_pose)
-        T_wElbow = self.pose_info2_transform(elbow_pose)
-        T_wHand = self.pose_info2_transform(hand_pose)
-        axis, angle = matrix_to_axis_angle(self.init_R_wC.T @ T_wChest[:3, :3])
-        chest_rpy = matrix_to_rpy(self.init_R_wC.T @ T_wChest[:3, :3])
-        self.chest_axis_agl = [0, 0, axis[1]]
-        self.head_body_pose.body_yaw = axis[1]
-        R_wChest_rm_yaw = axis_angle_to_matrix(self.chest_axis_agl).T @ T_wChest[:3, :3]
-        self.head_body_pose.body_pitch = matrix_to_rpy(self.init_R_wC.T @ R_wChest_rm_yaw)[0]
-        self.head_body_pose.body_roll = chest_rpy[2]  # Extract roll from chest RPY
-        self.head_body_pose.body_x = chest_pose.position.x
-        self.head_body_pose.body_y = chest_pose.position.y
-        self.head_body_pose.body_height = chest_pose.position.z
-
-        # 输出body_roll
-        # print(f"⚠️body_roll: {self.head_body_pose.body_roll}")
-
-        hand_mat_cH = axis_angle_to_matrix(self.chest_axis_agl).T @ quaternion_to_matrix(hand_quat_in_w)
+        hand_mat_cH = compensation_rotation @ quaternion_to_matrix(hand_quat_in_w)
         hand_quat = matrix_to_quaternion(hand_mat_cH)
-        chest_axis_msg = Float32MultiArray()
-        chest_axis_msg.data = axis
-        self.chest_axis_puber.publish(chest_axis_msg)
-        T_wS = self.pose_info2_transform(shoulder_pose)
+        R_wS = self._pose_rotation_matrix(shoulder_pose)
         if side == "Left" and self.init_R_wLS is None:
-            self.init_R_wLS = T_wS[:3, :3]
+            self.init_R_wLS = R_wS
         if side == "Right" and self.init_R_wRS is None:
-            self.init_R_wRS = T_wS[:3, :3]
-        self.compute_shoudler_pose(T_wS[:3, :3], side)
+            self.init_R_wRS = R_wS
+        self.compute_shoudler_pose(R_wS, side)
 
-        T_ChestElbow = T_wElbow
-        T_ChestHand = T_wHand
-
-        hand_pos, _ = transform_to_pos_rpy(T_ChestHand)
-        hand_pos[0] -= chest_pose.position.x
-        hand_pos[1] -= chest_pose.position.y
-        hand_pos[2] -= chest_pose.position.z
-        hand_pos = axis_angle_to_matrix(self.chest_axis_agl).T @ hand_pos
+        # Only positions are needed below; avoid constructing 4x4 transforms
+        # and converting their rotations to RPY.
+        hand_pos = compensation_rotation @ (
+            self._pose_position(hand_pose) - chest_position
+        )
         hand_pos[0] += bias_chest_to_base_link[0]
         hand_pos[1] += bias_chest_to_base_link[1]
         hand_pos[2] += bias_chest_to_base_link[2]
         hand_pos[0] = 0.1 if hand_pos[0] < 0.1 else hand_pos[0]
         
-        elbow_pos, _ = transform_to_pos_rpy(T_ChestElbow)
-        elbow_pos[0] -= chest_pose.position.x
-        elbow_pos[1] -= chest_pose.position.y
-        elbow_pos[2] -= chest_pose.position.z
-        elbow_pos = axis_angle_to_matrix(self.chest_axis_agl).T @ elbow_pos
+        elbow_pos = compensation_rotation @ (
+            self._pose_position(elbow_pose) - chest_position
+        )
         elbow_pos[0] += bias_chest_to_base_link[0]
         elbow_pos[2] += bias_chest_to_base_link[2]
 
-        shoulder_pos, _ = transform_to_pos_rpy(T_wS)
-        shoulder_pos[0] -= chest_pose.position.x
-        shoulder_pos[1] -= chest_pose.position.y
-        shoulder_pos[2] -= chest_pose.position.z
-        shoulder_pos = axis_angle_to_matrix(self.chest_axis_agl).T @ shoulder_pos
+        shoulder_pos = compensation_rotation @ (
+            self._pose_position(shoulder_pose) - chest_position
+        )
         shoulder_pos[0] = bias_chest_to_base_link[0]
         shoulder_pos[2] = bias_chest_to_base_link[2]
 
@@ -1302,7 +1707,7 @@ class Quest3ArmInfoTransformer:
         elbow_pos, hand_pos = self.scale_arm_positions(shoulder_pos, elbow_pos, hand_pos, human_shoulder_pos, chest_pose, side, adapt_width_gamma)
         
 
-        if self.vis_pub:
+        if self.vis_pub and publish_debug:
             marker = self.construct_point_marker(hand_pos, 0.08, 0.9, color=[1, 0, 0])
             elbow_marker = self.construct_point_marker(elbow_pos, 0.1, color=[0, 1, 0])
             shoulder_marker = self.construct_point_marker(shoulder_pos, 0.1, color=[0, 0, 1])
@@ -1339,10 +1744,6 @@ class Quest3ArmInfoTransformer:
                 # human_array.markers.append(human_elbow_marker)
                 # human_array.markers.append(human_hand_marker)
                 # self.marker_pub_human_array_right.publish(human_array)
-            chest_pos = [chest_pose.position.x, chest_pose.position.y, chest_pose.position.z]
-            chest_marker = self.construct_point_marker(chest_pos, 0.1, 0.8)
-            self.marker_pub_chest.publish(chest_marker)
-            
         if side == "Left":
             self.left_hand_pose = (hand_pos, hand_quat)
             self.left_elbow_pos = elbow_pos
@@ -1354,17 +1755,24 @@ class Quest3ArmInfoTransformer:
         """
         Check if the VR system is error.
         """
-        if self.left_hand_pose is None or self.right_hand_pose is None:
+        # Dual-VR: each instance only inspects the side it owns. With the default
+        # arm_sides (both sides) this is byte-for-byte the original behaviour.
+        left_on, right_on = self.arm_sides
+        if left_on and self.left_hand_pose is None:
             return False
-        left_hand_pos = self.left_hand_pose[0]
-        right_hand_pos = self.right_hand_pose[0]
+        if right_on and self.right_hand_pose is None:
+            return False
         error = True
-        error &= (-0.1 < left_hand_pos[0] < 0.15)
-        error &= (-0.05 < left_hand_pos[1] < 0.05)
-        error &= (0.15 < left_hand_pos[2] < 0.4)
-        error &= (-0.1 < right_hand_pos[0] < 0.15)
-        error &= (-0.05 < right_hand_pos[1] < 0.05)
-        error &= (0.15 < right_hand_pos[2] < 0.4)
+        if left_on:
+            left_hand_pos = self.left_hand_pose[0]
+            error &= (-0.1 < left_hand_pos[0] < 0.15)
+            error &= (-0.05 < left_hand_pos[1] < 0.05)
+            error &= (0.15 < left_hand_pos[2] < 0.4)
+        if right_on:
+            right_hand_pos = self.right_hand_pose[0]
+            error &= (-0.1 < right_hand_pos[0] < 0.15)
+            error &= (-0.05 < right_hand_pos[1] < 0.05)
+            error &= (0.15 < right_hand_pos[2] < 0.4)
         return error
 
     @staticmethod
@@ -1542,5 +1950,5 @@ class Quest3ArmInfoTransformer:
         # self.head_body_pose_puber.publish(msg)
         # 打印发送body pose的信息
         # print(f"✅Publish head and body pose: {msg.body_yaw}, {msg.body_pitch}, {msg.body_height}")  
-        if self.control_torso:
+        if self.control_torso and self.head_body_pose_puber is not None:
             self.head_body_pose_puber.publish(msg)

@@ -5,6 +5,7 @@
 
     <arg name="respawn" default="true"/>
     <param name="respawn" value="$(arg respawn)"/>
+    <arg name="use_joy_customize_config" default="true"/>
 
     <node pkg="joy" type="joy_node" name="joy_node" output="screen" respawn="$(arg respawn)" >
         <param name="dev" value="/dev/input/js0"/>
@@ -12,6 +13,6 @@
         <param name="deadzone" type="double" value="0.18"/>
     </node>
 
-    <node pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen" respawn="$(arg respawn)" />
+    <node if="$(arg use_joy_customize_config)" pkg="joy" type="joy_customize_config.py" name="joy_customize_config" output="screen" respawn="$(arg respawn)" />
 
 </launch>

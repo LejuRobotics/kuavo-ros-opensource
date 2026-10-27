@@ -197,7 +197,7 @@ class WheelIncrementalPoseResult {
                           rightHandDeltaQuatLast_);
   }
 
-  // Clip a chest-remapped command around the current measured EE. Used after
+  // Clip a chest-remapped command around the current measured EE.  Used after
   // followChest so waist yaw is not inside the Euler relative pose.
   Eigen::Quaterniond clipHandQuatAroundMeasuredEE(bool leftArm, const Eigen::Quaterniond& qCmd) const {
     const Eigen::Quaterniond& qMeas =

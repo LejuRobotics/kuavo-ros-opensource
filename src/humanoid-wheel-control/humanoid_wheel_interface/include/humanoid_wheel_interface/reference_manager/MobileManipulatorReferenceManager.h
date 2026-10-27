@@ -6,6 +6,7 @@
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float32.h>
 #include <atomic>
+#include <mutex>
 #include <algorithm>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
@@ -269,7 +270,12 @@ protected:
   void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState, bool isServiceReset);
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
-  void applyTorsoVelDeltaCommands(scalar_t initTime);
+  void applyTorsoVelDeltaCommands(scalar_t initTime, const vector_t& initState);
+  void releaseTorsoRotationControl();
+  // z-coupled x envelope（与 mobile_manipulator_joy getTorsoMaxX 一致）：降 z 时收回超限 x，避免 pitch=0 不可达而前倾
+  double getTorsoWorkspaceMaxX(double z_increment) const;
+  // 钳制 cmdTorsoPose_ 到工作空间；若有修改返回 true（调用方需重规划 Ruckig）
+  bool clampCmdTorsoPoseToWorkspace();
   // cmdLegJoint
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
@@ -279,6 +285,7 @@ protected:
   
   double targetYawPreProcess(double currentYaw, double targetYaw);
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
+  bool isBaseNearStationary() const;
   void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void updateShoulderRefAnchor(int armIdx, const vector_t& initState, scalar_t alphaPrev);
@@ -379,11 +386,17 @@ private:
   // 下肢重置相关
   double resetTorsoTime_{0.0};
   double resetTorsoInitTime_{0.0};
-  bool isResetTorso_{false};
+  // service 线程读取的时间快照；控制线程更新，避免直接读取普通 double。
+  std::atomic<double> currentMpcTime_{0.0};
+  std::atomic<double> resetTorsoWindowEnd_{0.0};
+  std::atomic<bool> isResetTorso_{false};
   bool isResetTorsoRePlanning_{false};
   // #3973: service 调用起到复位窗口结束期间丢弃躯干开环指令，避免 VR 双击后紧跟的
   // /cmd_lb_torso_pose 覆盖 cmdTorsoPose_（原先靠开环快照回避，见 #3991）
   std::atomic<bool> torsoResetWindowActive_{false};
+  // request 与 window 必须作为一组状态迁移，避免 service 线程与控制线程交错写入。
+  std::mutex resetTorsoStateMtx_;
+  ros::Publisher torsoResetWindowActivePub_;
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 
@@ -452,6 +465,15 @@ private:
   Eigen::Vector4d initialTorsoQuat_;
   Eigen::VectorXd cmdTorsoPose_;
   std::mutex cmdTorsoPose_mtx_;
+  // 躯干开环工作空间（相对 initialTorsoPos_；与 Joy 侧 clamp 对齐）
+  double torsoWsMinX_{0.0};
+  double torsoWsMaxX_{0.25};
+  double torsoWsMinZ_{0.0};
+  double torsoWsMaxZ_{0.32};
+  double torsoWsMinPitch_{0.0};
+  double torsoWsMaxPitch_{0.5235};
+  double torsoWsMinYaw_{-0.5235};
+  double torsoWsMaxYaw_{0.5235};
   bool isCmdTorsoPoseUpdated_{false};
   double cmdTorsoPoseDesiredTime_{0.0};
   ros::Subscriber targetTorsoPoseSubscriber_;
@@ -477,6 +499,11 @@ private:
   bool hasTorsoVelIntegrateTime_{false};
   static constexpr scalar_t kTorsoVelTimeout_{0.3};
   ros::Subscriber targetTorsoVelSubscriber_;
+  ros::Subscriber targetTorsoRotationVelSubscriber_;
+  ros::Publisher torsoRotationLockPub_;
+  bool torsoRotationRequested_{false};  // cmdTorsoVel_mtx_ 保护
+  bool torsoRotationActive_{false};     // 仅规划线程访问
+  Eigen::Vector4d torsoRotationJointTarget_{Eigen::Vector4d::Zero()};
   ros::Subscriber targetTorsoDeltaSubscriber_;
   ros::Publisher torsoOpenLoopStatePub_;    // /torso_open_loop_state: 4D pose [x,z,yaw,pitch]
 
@@ -643,6 +670,11 @@ private:
   Eigen::VectorXd cmdVel_prevTargetVel_;
   Eigen::VectorXd cmdVel_prevTargetAcc_;
 
+  // vel→pose hold 切换后：actual 未停稳前持续锚定 ref，避免过早锁定 (#3867)
+  bool chassisPoseHoldFollowActual_{false};
+  int chassisPoseHoldSettleCnt_{0};
+  vector_t actualBaseVel_{vector_t::Zero(3)};
+
   // 当前实际机器人状态
   vector_t currentActualState_;
   std::mutex currentActualState_mtx_;
@@ -678,6 +710,7 @@ private:
 
   // 下肢关节规划器, 单位: rad
   std::shared_ptr<cmdPosePlannerWithRuckig> legJointPlannerRuckigPtr_;
+  std::shared_ptr<cmdPosePlannerWithRuckig> torsoRotationPlannerRuckigPtr_;
   double legJoint_plannerInitialTime_{0.0};
   Eigen::VectorXd legJoint_prevTargetPose_;
   Eigen::VectorXd legJoint_prevTargetVel_;

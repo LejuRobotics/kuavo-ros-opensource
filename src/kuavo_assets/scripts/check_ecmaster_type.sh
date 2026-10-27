@@ -3,7 +3,8 @@
 # 获取环境变量 ROBOT_VERSION
 ROBOT_VERSION=${ROBOT_VERSION}
 
-# 定义文件路径
+# 定义文件路径。全新容器里这个目录还不存在，不先建目录后面的重定向会失败。
+mkdir -p "$HOME/.config/lejuconfig"
 FILE_PATH="$HOME/.config/lejuconfig/EcMasterType.ini"
 
 # 检查环境变量是否为 42版本才有ecmaster驱动器区别

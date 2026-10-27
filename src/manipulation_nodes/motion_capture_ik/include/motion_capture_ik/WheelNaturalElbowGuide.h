@@ -29,8 +29,8 @@ struct WheelNaturalElbowGuideConfig {
   // is inactive outside waistSoftClearance, so normal free-space motion keeps
   // the exact 90/10 blend.
   bool waistAvoidanceEnabled = true;
-  double waistSoftClearance = 0.260;
-  double waistFullActivationClearance = 0.200;
+  double waistSoftClearance = 0.180;
+  double waistFullActivationClearance = 0.100;
 
   double numericalEpsilon = 1.0e-8;
 };

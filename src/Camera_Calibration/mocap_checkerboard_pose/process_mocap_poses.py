@@ -36,6 +36,22 @@ def _default_config_path() -> str:
     return os.path.join(_script_dir, "config", "bodies.yaml")
 
 
+def _apply_left_shoulder_offset(cfg: Dict[str, Any], robot_version: str) -> Dict[str, Any]:
+    """从 bodies.yaml 的 left_shoulder_fixtures 选择当前机型偏移。"""
+    profile = "s45" if str(robot_version) == "45" else "default"
+    offset = (cfg.get("left_shoulder_fixtures") or {}).get(profile)
+    if not isinstance(offset, list) or len(offset) != 3:
+        raise ValueError(f"bodies.yaml 缺少 left_shoulder_fixtures.{profile}")
+    bodies = {body.get("name"): body for body in cfg.get("bodies", [])}
+    if "l_shoulder" not in bodies:
+        raise ValueError("bodies.yaml 缺少 l_shoulder")
+    bodies["l_shoulder"]["link_offset_mm"] = offset
+    return {
+        "profile": profile,
+        "link_offset_mm": list(offset),
+    }
+
+
 def _parse_row(
     row: Dict[str, str],
     body_names: List[str],
@@ -129,8 +145,10 @@ def build_output_json(
     csv_path: str,
     config_path: str,
     sigma: float,
+    robot_version: str,
 ) -> Dict[str, Any]:
     cfg = load_bodies_config(config_path)
+    shoulder_fixture = _apply_left_shoulder_offset(cfg, robot_version)
     body_names = [b["name"] for b in cfg["bodies"]]
     relative_pairs = cfg.get("relative_pairs", [])
     link_offsets = load_link_offsets_mm(cfg)
@@ -148,12 +166,14 @@ def build_output_json(
     result: Dict[str, Any] = {
         "source_csv": os.path.abspath(csv_path),
         "processed_at": datetime.now().isoformat(),
+        "robot_version": str(robot_version),
+        "left_shoulder_fixture": shoulder_fixture,
         "frame_id": "mocap_frame",
         "units": {"translation": "m", "rotation_rpy": "rad"},
         "link_offset_mm": {
             name: off.tolist() for name, off in link_offsets.items()
         },
-        "note": "相对位姿基于 link（已扣除 bodies.yaml 中 link_offset_mm 工装偏移）",
+        "note": "相对位姿基于 link（已扣除当前机型的有效 link_offset_mm 工装偏移）",
         "filter": {"sigma": sigma, "raw_frames": len(frames)},
         "statistics": {},
     }
@@ -201,14 +221,23 @@ def main() -> int:
         default=3.0,
         help="3σ 滤波倍数",
     )
+    parser.add_argument(
+        "--robot-version",
+        default=os.environ.get("ROBOT_VERSION", ""),
+        choices=("45", "52", "56", "62", "63"),
+        help="机器人版本（也可通过 ROBOT_VERSION 传入）",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.input):
         print(f"输入文件不存在: {args.input}", file=sys.stderr)
         return 1
+    if not args.robot_version:
+        print("未指定机器人版本：请使用 --robot-version 45|52|56|62|63", file=sys.stderr)
+        return 1
 
     try:
-        out = build_output_json(args.input, args.config, args.sigma)
+        out = build_output_json(args.input, args.config, args.sigma, args.robot_version)
     except Exception as e:
         print(f"[process] 失败: {e}", file=sys.stderr)
         return 1
@@ -218,6 +247,11 @@ def main() -> int:
         json.dump(out, f, indent=2, ensure_ascii=False)
 
     print(f"[process] 已写入 {args.output}")
+    shoulder = out["left_shoulder_fixture"]
+    print(
+        f"  left_shoulder: profile={shoulder['profile']}, "
+        f"offset_mm={shoulder['link_offset_mm']}"
+    )
     for pair_key in ["checkerboard_in_l_shoulder", "checkerboard_in_torso"]:
         if pair_key in out:
             xyz = out[pair_key]["xyz"]

@@ -39,6 +39,17 @@ namespace mobile_manipulator
     TORSO_CONTROL = 2   // 躯干控制模式
   };
 
+  inline const char* controlModeName(ControlMode mode)
+  {
+    switch (mode)
+    {
+      case ControlMode::CMD_VEL: return "CMD_VEL";
+      case ControlMode::CMD_VEL_WORLD: return "CMD_VEL_WORLD";
+      case ControlMode::TORSO_CONTROL: return "TORSO_CONTROL";
+    }
+    return "UNKNOWN";
+  }
+
   // 手柄按钮映射表
   std::map<std::string, int> joyButtonMap = {
       {"BUTTON_STANCE", 0},
@@ -141,8 +152,12 @@ namespace mobile_manipulator
       cmd_vel_world_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_vel_world", 10, true);
       cmd_lb_torso_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_lb_torso_pose", 10, true);
       cmd_torso_vel_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_torso_vel", 10, false);
+      cmd_torso_rotation_vel_publisher_ = nodeHandle_.advertise<geometry_msgs::Twist>("/cmd_torso_rotation_vel", 10, false);
       stop_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/stop_robot", 10);
       joy_sub_ = nodeHandle_.subscribe("/joy", 10, &MobileManipulatorJoyControl::joyCallback, this);
+      torso_reset_window_sub_ = nodeHandle_.subscribe<std_msgs::Bool>(
+          "/mobile_manipulator_torso_reset_window_active", 1,
+          &MobileManipulatorJoyControl::torsoResetWindowCallback, this);
 
       // 订阅MPC observation话题，用于判断是否已经完成初始化
       observation_sub_ = nodeHandle_.subscribe("/mobile_manipulator_mpc_observation", 10, &MobileManipulatorJoyControl::observationCallback, this);
@@ -257,8 +272,19 @@ namespace mobile_manipulator
     ros::Publisher cmd_vel_world_publisher_;
     ros::Publisher cmd_lb_torso_publisher_;
     ros::Publisher cmd_torso_vel_publisher_;
+    ros::Publisher cmd_torso_rotation_vel_publisher_;
+    bool torso_rotation_group_{false};
+
+    void publishTorsoGroupVelocity(const geometry_msgs::Twist& vel, bool rotation, bool translation) {
+      // 松开修饰键仍保持当前组，零速度负责刹停，不释放 q0/q1 快照。
+      if (translation) torso_rotation_group_ = false;
+      else if (rotation) torso_rotation_group_ = true;
+      if (torso_rotation_group_) cmd_torso_rotation_vel_publisher_.publish(vel);
+      else cmd_torso_vel_publisher_.publish(vel);
+    }
     ros::Publisher stop_pub_;
     ros::Subscriber joy_sub_;
+    ros::Subscriber torso_reset_window_sub_;
     ros::ServiceClient mpc_control_client_;
     ros::ServiceClient set_joy_topic_client_;
     ros::ServiceClient real_initialize_client_;
@@ -345,6 +371,10 @@ namespace mobile_manipulator
     // G+H 复位边沿保护：避免按住期间反复调用 reset 服务导致轨迹重规划震荡
     bool g12_torso_reset_latched_{false};
     ros::Time g12_torso_reset_cooldown_until_;
+    bool reset_request_pending_{false};
+    bool reset_window_active_{false};
+    bool pending_mode_valid_{false};
+    ControlMode pending_mode_{ControlMode::CMD_VEL};
 
     // MPC observation相关标志，用于判断是否已经完成初始化
     bool get_observation_ = false;
@@ -503,7 +533,7 @@ namespace mobile_manipulator
           initialTorsoPose_y_ = 0.0005;
           initialTorsoPose_z_ = 0.789919;
         }
-        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63 || robotVersion == 200062 || robotVersion == 300062)
+        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63 || robotVersion == 200062 || robotVersion == 200063 || robotVersion == 300062 || robotVersion == 400062 || robotVersion == 400063 || robotVersion == 300063 || robotVersion == 500062 || robotVersion == 500063 || robotVersion == 600062)
         {
           initialTorsoPose_x_ = 0.11575;
           initialTorsoPose_y_ = 0.0;
@@ -559,6 +589,7 @@ namespace mobile_manipulator
       {
         if (srv.response.success)
         {
+          reset_request_pending_ = true;
           ROS_INFO("Torso reset command sent successfully: %s", srv.response.message.c_str());
           return true;
         }
@@ -568,6 +599,57 @@ namespace mobile_manipulator
 
       ROS_ERROR("Failed to call torso reset service");
       return false;
+    }
+
+    void torsoResetWindowCallback(const std_msgs::Bool::ConstPtr& msg)
+    {
+      const bool was_active = reset_window_active_;
+      reset_window_active_ = msg->data;
+      reset_request_pending_ = false;
+      if (was_active != reset_window_active_)
+      {
+        ROS_INFO_STREAM("[mobile_manipulator_joy] torso reset window "
+                        << (reset_window_active_ ? "start" : "finish"));
+      }
+    }
+
+    bool areControlAxesInDeadzone(const sensor_msgs::Joy::ConstPtr& joy_msg) const
+    {
+      const int required_axes[] = {
+          linear_axis_index_x_,
+          linear_axis_index_y_,
+          angular_axis_index_,
+          linear_z_axis_index_,
+          angular_y_axis_index_};
+      for (const int axis_index : required_axes)
+      {
+        if (axis_index < 0 || static_cast<size_t>(axis_index) >= joy_msg->axes.size())
+        {
+          return false;
+        }
+      }
+
+      return axisWithDeadzone(joy_msg, linear_axis_index_x_) == 0.0 &&
+             axisWithDeadzone(joy_msg, linear_axis_index_y_) == 0.0 &&
+             axisWithDeadzone(joy_msg, angular_axis_index_) == 0.0 &&
+             axisWithDeadzone(joy_msg, linear_z_axis_index_) == 0.0 &&
+             axisWithDeadzone(joy_msg, angular_y_axis_index_) == 0.0;
+    }
+
+    void requestControlMode(ControlMode new_mode)
+    {
+      if (reset_request_pending_ || reset_window_active_)
+      {
+        pending_mode_ = new_mode;
+        pending_mode_valid_ = true;
+        ROS_INFO_STREAM("[mobile_manipulator_joy] cache pending mode: "
+                        << controlModeName(new_mode)
+                        << ", request_pending=" << reset_request_pending_
+                        << ", window_active=" << reset_window_active_);
+        return;
+      }
+      pending_mode_valid_ = false;
+      switchControlMode(new_mode);
     }
 
     // 限制数值在指定范围内
@@ -618,8 +700,24 @@ namespace mobile_manipulator
       const double x_increment = open_loop_torso_x_ - initialTorsoPose_x_;
       const double current_torso_max_x = getTorsoMaxX(z_increment);
 
-      if      (vel.linear.x > 0.0 && x_increment >= current_torso_max_x - kTorsoClampEps) vel.linear.x = 0.0;
-      else if (vel.linear.x < 0.0 && x_increment <= torsoMin_x_ + kTorsoClampEps)          vel.linear.x = 0.0;
+      // 降 z 后 x 仍超出当前高度允许包络：主动发回收速度，避免开环卡在大 x 上逼出前倾
+      if (x_increment > current_torso_max_x + kTorsoClampEps)
+      {
+        const double overshoot = x_increment - current_torso_max_x;
+        const double retract = -std::min(std::max(linear_scale_x_, 0.1), std::max(0.15, overshoot * 2.0));
+        if (vel.linear.x > retract)
+        {
+          vel.linear.x = retract;
+        }
+      }
+      else if (vel.linear.x > 0.0 && x_increment >= current_torso_max_x - kTorsoClampEps)
+      {
+        vel.linear.x = 0.0;
+      }
+      else if (vel.linear.x < 0.0 && x_increment <= torsoMin_x_ + kTorsoClampEps)
+      {
+        vel.linear.x = 0.0;
+      }
 
       // --- pitch ---
       if      (vel.angular.y > 0.0 && open_loop_torso_pitch_ >= torsoMax_pitch_ - kTorsoClampEps) vel.angular.y = 0.0;
@@ -756,6 +854,10 @@ namespace mobile_manipulator
     {
       if (new_mode != current_mode_)
       {
+        if (current_mode_ == ControlMode::TORSO_CONTROL) {
+          cmd_torso_vel_publisher_.publish(geometry_msgs::Twist());
+        }
+        torso_rotation_group_ = false;
         // 切换到躯干控制模式时，记录当前MPC模式并切换到ArmOnly
         if (new_mode == ControlMode::TORSO_CONTROL)
         {
@@ -870,7 +972,6 @@ namespace mobile_manipulator
           g12_torso_reset_latched_ = true;
           // 给底层 Ruckig 复位留出执行窗口，期间不再发 torso 速度指令
           g12_torso_reset_cooldown_until_ = now + ros::Duration(3.0);
-
           resetTorsoToInitialAsync(nodeHandle_);
           std::cout << "G+H torso reset triggered (edge)" << std::endl;
         }
@@ -881,8 +982,9 @@ namespace mobile_manipulator
 
         // G极值 + A/B/C 模式切换
         // Python层G12按钮映射: A->buttons[3](Y), B->buttons[1](B), C->buttons[2](X)
-        // 复位组合键期间禁止切模式，避免与 reset 冲突
-        if (guide_pressed && !gh_combo_active && !torso_reset_cooldown_active)
+        // 模式切换与 3 s 躯干速度冷却已解耦：冷却只抑制 TORSO_CONTROL 下的
+        // /cmd_torso_vel；若窗口结束立即切到躯干模式，剩余冷却时间内不会输出躯干速度。
+        if (guide_pressed && !gh_combo_active)
         {
           const int G12_BTN_A = 3;  // Python层: channel 7(A) -> BUTTON_Y(3)
           const int G12_BTN_B = 1;  // Python层: channel 8(B) -> BUTTON_B(1)
@@ -895,9 +997,12 @@ namespace mobile_manipulator
           bool c_just = (joy_msg->buttons.size() > (size_t)G12_BTN_C && joy_msg->buttons[G12_BTN_C] == 1 &&
                          old_joy_msg_.buttons.size() > (size_t)G12_BTN_C && old_joy_msg_.buttons[G12_BTN_C] == 0);
 
-          if (a_just) switchControlMode(ControlMode::CMD_VEL);
-          if (b_just) switchControlMode(ControlMode::CMD_VEL_WORLD);
-          if (c_just) switchControlMode(ControlMode::TORSO_CONTROL);
+          if (a_just || b_just || c_just)
+          {
+            if (a_just) requestControlMode(ControlMode::CMD_VEL);
+            if (b_just) requestControlMode(ControlMode::CMD_VEL_WORLD);
+            if (c_just) requestControlMode(ControlMode::TORSO_CONTROL);
+          }
         }
 
         // C+D长按急停
@@ -906,7 +1011,17 @@ namespace mobile_manipulator
                           old_joy_msg_.buttons.size() > (size_t)btn_back && old_joy_msg_.buttons[btn_back] == 0);
         if (back_just)
         {
+          pending_mode_valid_ = false;
           callTerminateSrv();
+        }
+
+        if (pending_mode_valid_ && !reset_request_pending_ && !reset_window_active_ &&
+            areControlAxesInDeadzone(joy_msg))
+        {
+          const ControlMode pending_mode = pending_mode_;
+          pending_mode_valid_ = false;
+          ROS_INFO_STREAM("[mobile_manipulator_joy] apply pending mode: " << controlModeName(pending_mode));
+          switchControlMode(pending_mode);
         }
 
         // 根据模式分发控制
@@ -936,7 +1051,7 @@ namespace mobile_manipulator
           torso_vel.angular.y = ay * g12_torso_vel_scale_pitch_;
           torso_vel.angular.z = az * g12_torso_vel_scale_yaw_;
           clampTorsoVelAgainstOpenLoopState(torso_vel);
-          cmd_torso_vel_publisher_.publish(torso_vel);
+          publishTorsoGroupVelocity(torso_vel, m1_pressed && !guide_pressed, guide_pressed);
         }
         else
         {
@@ -1072,7 +1187,7 @@ namespace mobile_manipulator
         torso_vel.angular.y = ay * torso_vel_scale_pitch_;
         torso_vel.angular.z = az * torso_vel_scale_yaw_;
         clampTorsoVelAgainstOpenLoopState(torso_vel);
-        cmd_torso_vel_publisher_.publish(torso_vel);
+        publishTorsoGroupVelocity(torso_vel, rb_pressed && !lb_pressed, lb_pressed);
       }
       else
       {

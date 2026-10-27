@@ -1,0 +1,157 @@
+# S62/S63 共用轮臂配置；采集用 S63 标定模型，优化用 S63 主 URDF。
+# 采集偏移沿用 mocap_joint_calib/config/calib.yaml。
+
+robot:
+  robot_version: "63"
+  robot_layout: wheel63
+  sensor_topic: /sensors_data_raw
+  arm_traj_topic: /kuavo_arm_traj
+  joint_q_length: 20
+  joint_indices:
+    left_arm: [4, 11]
+    right_arm: [11, 18]
+    head: [18, 20]
+  left_start_index: 4
+  right_start_index: 11
+  capture_head: false
+  dt: 0.01
+  move_duration: 2.0
+  hold_sec: 3.0
+  collect_sec: 1.0
+  startup_align_sec: 2.0
+  return_to_zero_sec: 2.0
+  wait_sensors_timeout: 30.0
+  set_external_control_mode: true
+  enable_arm_quick_mode: true
+  enable_arm_traj_interpolator: true
+
+# 旧采集器使用的工装偏移；与下方优化用的 kinematics.etk 分开。
+fixtures:
+  legacy:
+    l_hand: [-3.0, -0.5, -120.0]
+    r_hand: [-3.0, 0.5, -120.0]
+  new:
+    l_hand: [-3.0, 68.0, -95.0]
+    r_hand: [-3.0, -68.0, -95.0]
+
+mocap_bodies:
+  - name: l_hand
+    topic: /l_hand_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l7_link
+    link_offset_mm: [-3.0, -0.5, -120.0]
+  - name: r_hand
+    topic: /r_hand_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_r7_link
+    link_offset_mm: [-3.0, 0.5, -120.0]
+  - name: torso
+    topic: /torso_pose
+    msg_type: PoseStamped
+    urdf_link: waist_yaw_link
+    # 采集阶段的预处理偏移。
+    link_offset_mm: [120.02, -50.82, 6.0]
+  - name: l_shoulder
+    topic: /l_shoulder_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l1_ref_link
+    link_offset_mm: [0.0, -53.50, 105.00]
+    record_only: true
+
+relative_pairs:
+  - [l_hand, torso]
+  - [r_hand, torso]
+  - [l_hand, l_shoulder]
+  - [r_hand, l_shoulder]
+
+mocap_frame_align:
+  enabled: false
+  axis_flip: [1, 1, 1]
+
+calibration:
+  # 按 record_joint_poses.py 的脚本目录解析，与其 62/63 默认映射一致。
+  urdf: ../biped_v3_arm_s63.urdf
+  fk_root: waist_yaw_link
+  free_joints:
+    - zarm_l1_joint
+    - zarm_l2_joint
+    - zarm_l3_joint
+    - zarm_l4_joint
+    - zarm_l5_joint
+    - zarm_l6_joint
+    - zarm_l7_joint
+    - zarm_r1_joint
+    - zarm_r2_joint
+    - zarm_r3_joint
+    - zarm_r4_joint
+    - zarm_r5_joint
+    - zarm_r6_joint
+    - zarm_r7_joint
+  # 沿用现有 30 点拟合文件，与下方 25/5 分组对应。
+  teach_left: ../mocap_kin_calib/config/teach_left_joint_fit.json
+  teach_right: ../mocap_kin_calib/config/teach_right_joint_fit.json
+
+  # teach_left: ../mocap_kin_calib/config/teach_left_joint_validation.json
+  # teach_right: ../mocap_kin_calib/config/teach_right_joint_validation.json
+
+  # teach_left: ../mocap_kin_calib/config/cam_proj_vali_left.json
+  # teach_right: ../mocap_kin_calib/config/cam_proj_vali_right.json
+
+  teach_head: ../teach_capture_output/teach_head_joint.json
+  sigma: 3.0
+  skip_first_last: true
+
+kinematics:
+  # 按本 YAML 所在目录解析；S62/S63 优化均使用这份 S63 主 URDF。
+  source_urdf: ../../../kuavo_assets/models/biped_s63/urdf/biped_s63.urdf
+  root_link: waist_yaw_link
+  left_tip_link: zarm_l7_link
+  right_tip_link: zarm_r7_link
+
+  # CTB: C(原始 torso 刚体) -> B(waist_yaw_link)，单位 mm / deg。
+  ctb:
+    translation_mm: [122.02, -45.82, 2.5]
+    fit_translation: false
+    fit_rotation: true
+    initial_rotvec_deg: [0.0, 0.0, 0.0]
+  # ETK: 新手臂工装的光球刚体 K -> J7 link E，固定平移。
+  etk:
+    left:
+      translation_mm: [-0.25, 68.50, -88.5]
+      fit_translation: false
+      fit_rotation: true
+      initial_rotvec_deg: [0.0, 0.0, 0.0]
+    right:
+      translation_mm: [-0.25, -68.50, -88.5]
+      fit_translation: false
+      fit_rotation: true
+      initial_rotvec_deg: [0.0, 0.0, 0.0]
+
+  fit_indices: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17,
+                19, 20, 21, 22, 23, 25, 26, 27, 28, 29]
+  validation_indices: [6, 12, 18, 24, 30]
+
+  residual:
+    position: true
+    orientation: true
+    position_scale_mm: 1.0
+    orientation_scale_deg: 1.0
+
+  ei:
+    translation_bound_mm: null
+    rotation_bound_deg: null
+    translation_prior_mm: 0.0
+    rotation_prior_deg: 0.0
+  optimizer:
+    translation_scale_mm: 2.0
+    rotation_scale_deg: 1.0
+    max_nfev: 250
+    ftol: 1.0e-9
+    xtol: 1.0e-9
+    gtol: 1.0e-8
+
+  validation:
+    max_position_error_mm: 10.0
+
+  output_dir: ../output_s63
+  urdf_final_name: urdf_final.urdf

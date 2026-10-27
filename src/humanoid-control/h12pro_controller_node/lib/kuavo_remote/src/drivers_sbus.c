@@ -256,7 +256,6 @@ uint8_t recSbusData(void)
 
 #ifdef SBUS_MODE
     uint8_t buf[128];
-    uint8_t buf_index =0;
     int n = read(serial_port, buf, sizeof(buf));
     if (n > 0)
     {
@@ -286,53 +285,37 @@ uint8_t recSbusData(void)
         }
         printf("\n");
 #endif
-        if (g_sbus_rec_flag == 0) /*判断SBUS帧头*/
+        /* 逐字节状态机:不在帧内时只认 0x0F 帧头(噪声字节丢弃,自动重新对齐);
+           组帧写入以 sizeof(sbus_buf)=25 字节为界,写满一帧即解析,
+           一包多帧与跨 read 续传都由同一循环处理,不再有越界写入 */
+        for (int i = 0; i < n; i++)
         {
-            // Check if 0x0F exists in the received data
-            for (int i = 0; i < n; i++)
+            if (g_sbus_rec_flag == 0)
             {
-                if (buf[i] == 0x0F)
+                if (buf[i] != 0x0F)
                 {
-                    g_sbus_rec_flag = 1;  // Found SBUS frame header
-                    buf_index = i; // Find Start index of SBUS frame
-                    break;
+                    continue;
                 }
+                g_sbus_rec_flag = 1;  // Found SBUS frame header
+                g_sbus_rec_index = 0;
             }
-        }
 
-        if (g_sbus_rec_flag == 1)
-        {
-            // Append received data to sbus_buf starting from g_sbus_rec_index
-            for (int i = buf_index; i < n; i++)
+            // Append received data to sbus_buf; 解析后 index 立即复位,写入不会超出缓冲区
+            sbus_buf[g_sbus_rec_index++] = buf[i];
+            if (g_sbus_rec_index >= (int)sizeof(sbus_buf))
             {
-                sbus_buf[g_sbus_rec_index++] = buf[i];
-                if (g_sbus_rec_index >= 24 && sbus_buf[g_sbus_rec_index] == 0)
-                {
 #ifdef DEUG_SERIAL
-                    printf("SBUSReceive");
-                    for (int j = 0; j <= g_sbus_rec_index; j++)
-                    {
-                        printf(" %02X", sbus_buf[j]);
-                    }
-                    printf("\n");
-#endif
-                    parseSbusRxData();
-                    g_sbus_timeout = 0;
-                    memset(sbus_buf, 0, g_sbus_rec_index); // Clear sbus_buf
-                    g_sbus_rec_index = 0; // Reset index
-                    g_sbus_rec_flag = 0; // Reset flag
-                    buf_index = i;
-                    break; // Exit loop after processing one complete SBUS frame
-                }
-            }
-            if (g_sbus_rec_flag == 0 && buf_index < n-1 && buf[buf_index+1]==0x0F) /**/
-            {
-                // Check if 0x0F exists in the received data
-                for (int i = buf_index+1; i < n; i++)
+                printf("SBUSReceive");
+                for (int j = 0; j < g_sbus_rec_index; j++)
                 {
-                    sbus_buf[g_sbus_rec_index++] = buf[i];
-                    g_sbus_rec_flag = 1;
+                    printf(" %02X", sbus_buf[j]);
                 }
+                printf("\n");
+#endif
+                parseSbusRxData();
+                g_sbus_timeout = 0;
+                g_sbus_rec_index = 0; // Reset index
+                g_sbus_rec_flag = 0;  // Reset flag
             }
         }
     }

@@ -538,6 +538,8 @@ class PicoDiagnosticsRuntime:
         self._stop = threading.Event()
         self._thread = None
         self.peer_addr: Optional[Tuple[str, int]] = None
+        # 当前对端是否支持PDT1诊断封装；仅用于诊断/时钟同步回复，不代表连接或遥操解锁状态。
+        self.peer_supports_diagnostics = False
         self.session_uuid = b"\x00" * 16
         self.ubuntu_packet_sequence = 0
         self.sync_sequence = 0
@@ -594,6 +596,10 @@ class PicoDiagnosticsRuntime:
     def set_peer(self, addr: Tuple[str, int], session_uuid: Optional[bytes] = None):
         with self._lock:
             self.peer_addr = addr
+            # 按收到的报文判断协议能力，不读取APK版本号：解析有效PDT1固定头后传入session_uuid。
+            # 兼容路径不传session_uuid，此时关闭诊断回复，避免向裸protobuf客户端发送PDT1数据。
+            # 每次更新对端时重新判断，避免重连后沿用上一个客户端的能力标记。
+            self.peer_supports_diagnostics = session_uuid is not None and len(session_uuid) == 16
             if session_uuid and len(session_uuid) == 16 and session_uuid != self.session_uuid:
                 self.session_uuid = session_uuid
                 self.clock = self._new_clock_model()
@@ -844,12 +850,14 @@ class PicoDiagnosticsRuntime:
                 should_sync = (
                     self.sync_enabled
                     and self.udp_reply_enabled
+                    and self.peer_supports_diagnostics
                     and peer is not None
                     and now - self.last_sync_sent_at >= sync_interval
                 )
                 diag_interval = 1.0 / self.diagnostic_publish_hz if self.diagnostic_publish_hz > 0 else 0.0
                 should_diag = (
                     self.udp_reply_enabled
+                    and self.peer_supports_diagnostics
                     and peer is not None
                     and diag_interval > 0.0
                     and now - self.last_diag_sent_at >= diag_interval
@@ -867,6 +875,8 @@ class PicoDiagnosticsRuntime:
 
     def send_clock_sync_request(self):
         with self._lock:
+            if not self.peer_supports_diagnostics:
+                return
             peer = self.peer_addr
             session_uuid = self.session_uuid
             self.sync_sequence += 1
@@ -898,6 +908,8 @@ class PicoDiagnosticsRuntime:
     def send_diagnostic_result(self):
         outbound_results = []
         with self._lock:
+            if not self.peer_supports_diagnostics:
+                return
             peer = self.peer_addr
             session_uuid = self.session_uuid
             self.last_diag_sent_at = time.monotonic()

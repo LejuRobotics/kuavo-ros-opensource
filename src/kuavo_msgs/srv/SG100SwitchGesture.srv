@@ -1,0 +1,6 @@
+# 切换到指定 id 的手势（越界则失败）
+int32 id
+int8 hand_side              # 0=left, 1=right, 2=both
+---
+bool success
+string message

@@ -45,7 +45,12 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
 # Options
 
 # Target architecture
-set(TARGET AVX CACHE STRING "Set CPU architecture target")
+# Default to AVX on x86_64; aarch64/arm fall back to GENERIC (no AVX/SSE).
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|armv7|armv8")
+    set(TARGET GENERIC CACHE STRING "Set CPU architecture target")
+else()
+    set(TARGET AVX CACHE STRING "Set CPU architecture target")
+endif()
 #set(TARGET GENERIC CACHE STRING "Set CPU architecture target")
 
 # Populate a list of allowable targets and link it to the option

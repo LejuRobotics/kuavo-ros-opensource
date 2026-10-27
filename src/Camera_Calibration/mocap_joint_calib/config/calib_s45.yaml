@@ -1,0 +1,100 @@
+# 纯动捕关节零位标定（biped45 / 4pro s45）配置
+# =============================================
+# s45 无腰部关节：zarm_l1_ref_link / 左右臂 / 头均直接挂 base_link。
+# - 臂索引：left=[12,19) right=[19,26)（4pro_0803 权威定义，无 waist）
+# - FK 根：base_link（动捕 torso 对应 base_link）
+# - 零点：14 维 [zarm_l1..l7, zarm_r1..r7] + l1/r1 走 EC，apply_zero_deltas_to_arms_zero.py
+
+robot:
+  robot_layout: biped45
+  sensor_topic: /sensors_data_raw
+  arm_traj_topic: /kuavo_arm_traj
+  joint_q_length: 28 
+  # joint_q 索引（s45：12腿 + 14臂 + 2头，无 waist）
+  joint_indices:
+    left_arm: [12, 19]    # zarm_l1..l7
+    right_arm: [19, 26]   # zarm_r1..r7
+    head: [26, 28]        # zhead_1, zhead_2
+  left_start_index: 12     # 供 SensorsArmMonitor 下发参考
+  right_start_index: 19
+  capture_head: false       # s45 头部无工装、不参与双臂零位标定：默认不采集/不下发头部
+  dt: 0.01
+  move_duration: 2.0
+  hold_sec: 3.0           # 到位后静止时长，再采集
+  collect_sec: 1.0        # 静止后动捕+关节采集窗口
+  startup_align_sec: 2.0
+  return_to_zero_sec: 2.0
+  wait_sensors_timeout: 30.0
+  set_external_control_mode: true
+  enable_arm_quick_mode: true
+  enable_arm_traj_interpolator: true
+
+# 手臂末程工装：默认 legacy，交互流程可选 new。
+fixtures:
+  legacy:
+    l_hand: [-3.0, -0.5, -120.0]
+    r_hand: [-3.0, 0.5, -120.0]
+  new:
+    l_hand: [-3.0, 68.0, -95.0]
+    r_hand: [-3.0, -68.0, -95.0]
+
+# Motive 刚体配置：l_hand / r_hand（每臂 1 刚体）+ torso（FK 根参考，对应 base_link）。
+mocap_bodies:
+  - name: l_hand
+    topic: /l_hand_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l7_link
+    link_offset_mm: [-3.0, -0.5, -120.0]  # legacy 工装
+  - name: r_hand
+    topic: /r_hand_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_r7_link
+    link_offset_mm: [-3.0, 0.5, -120.0]
+  - name: torso
+    topic: /torso_pose
+    msg_type: PoseStamped
+    urdf_link: base_link                  # s45 无腰，torso 对应 base_link
+    link_offset_mm: [120.02, -50.82, 6.0]  # 两套手腕工装共用
+  - name: l_shoulder          # 左肩位置输出（仅记录，不参与优化）
+    topic: /l_shoulder_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l1_ref_link
+    link_offset_mm: [0.0, -68.50, 105.00]
+    record_only: true
+
+# 相对位姿计算对（child, parent）。默认保留 hand_in_torso（优化用），
+# 额外加 hand_in_l_shoulder（左肩参考系，输出验证用）。
+relative_pairs:
+  - [l_hand, torso]
+  - [r_hand, torso]
+  - [l_hand, l_shoulder]
+  - [r_hand, l_shoulder]
+
+mocap_frame_align:
+  enabled: true
+  axis_flip: [1, 1, 1]
+
+calibration:
+  urdf: ../biped_v3_arm_s45.urdf
+  fk_root: base_link                     # s45 无腰，FK 根用 base_link
+  # 14 维双臂 bias（s45 零点 14 维，不含头）
+  free_joints:
+    - zarm_l1_joint
+    - zarm_l2_joint
+    - zarm_l3_joint
+    - zarm_l4_joint
+    - zarm_l5_joint
+    - zarm_l6_joint
+    - zarm_l7_joint
+    - zarm_r1_joint
+    - zarm_r2_joint
+    - zarm_r3_joint
+    - zarm_r4_joint
+    - zarm_r5_joint
+    - zarm_r6_joint
+    - zarm_r7_joint
+  teach_left: ../teach_capture_output/teach_left_joint.json
+  teach_right: ../teach_capture_output/teach_right_joint.json
+  teach_head: ../teach_capture_output/teach_head_joint.json
+  sigma: 3.0
+  skip_first_last: true
