@@ -880,6 +880,16 @@ WheelIncrementalPoseResult WheelIncrementalControlModule::getLatestIncrementalRe
   return result_;
 }
 
+void WheelIncrementalControlModule::acceptHandQuatTarget(bool leftArm,
+                                                        const Eigen::Quaterniond& sourceTarget) {
+  std::lock_guard<std::mutex> lock(stateMutex_);
+  if (leftArm) {
+    result_.robotLeftHandQuatTarget_ = sourceTarget.normalized();
+  } else {
+    result_.robotRightHandQuatTarget_ = sourceTarget.normalized();
+  }
+}
+
 Eigen::Vector3d WheelIncrementalControlModule::getRobotLeftHandAnchorPos() const {
   std::lock_guard<std::mutex> lock(stateMutex_);
   return result_.getRobotLeftHandAnchorPos();

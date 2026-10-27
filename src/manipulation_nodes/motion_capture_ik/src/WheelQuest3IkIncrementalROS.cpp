@@ -504,6 +504,24 @@ void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
 }
 
 void WheelQuest3IkIncrementalROS::reanchorMappedUpperBodyFromMeasuredFk(const char* reason) {
+  // TUI can move the lower body while VR publication is paused. The master's
+  // held command still belongs to the previous VR session; arm IK must use the
+  // measured chain used for this FK snapshot, even with the master switch off.
+  Eigen::Vector4d measuredLowerBody;
+  bool hasMeasuredLowerBody = false;
+  {
+    std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    if (drakeJointStateSize_ == 18 && filterJointDataForDrakeFK_.size() == 18 &&
+        hasDrakeFkJointMeasurement_ && filterJointDataForDrakeFK_.allFinite()) {
+      measuredLowerBody = filterJointDataForDrakeFK_.head<4>();
+      hasMeasuredLowerBody = true;
+    }
+  }
+  if (hasMeasuredLowerBody) {
+    std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
+    lowerBodyMasterFreezeAnchor_ = measuredLowerBody;
+    lowerBodyMasterFreezeActive_ = !chestIncrementalUpdateEnabled_;
+  }
   const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
   const Eigen::Quaterniond chestQuat = getRobotChestQuatRef();
   const Eigen::Vector3d leftShoulderPos =
@@ -523,10 +541,13 @@ void WheelQuest3IkIncrementalROS::reanchorMappedUpperBodyFromMeasuredFk(const ch
   if (latestPoseConstraintList_.size() > POSE_DATA_LIST_INDEX_RIGHT_SHOULDER) {
     latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = rightShoulderPos;
   }
+  // Hand constraints store wrist/link6 position but EE/link7 orientation.
+  // Using link6 orientation here drops joint7: converting wrist back to EE
+  // then rotates the hand-length offset by the wrong quaternion on resume.
   updateHandConstraintUnlocked(
-      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
+      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftEndEffectorQuat_);
   updateHandConstraintUnlocked(
-      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
+      latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightEndEffectorQuat_);
   updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, leftElbowPos);
   updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, rightElbowPos);
 
@@ -536,6 +557,17 @@ void WheelQuest3IkIncrementalROS::reanchorMappedUpperBodyFromMeasuredFk(const ch
   frozenRightHandHeightOffset_ = rightLink6Position_.z() - frozenRobotChestPos_.z();
   frozenLeftElbowHeightOffset_ = leftElbowPos.z() - frozenRobotChestPos_.z();
   frozenRightElbowHeightOffset_ = rightElbowPos.z() - frozenRobotChestPos_.z();
+
+  if (chestElbowHandPointOptSolverPtr_) {
+    UpperBodyPoseList fkResult;
+    fkResult[BODY][WAIST].p = chestPos;
+    fkResult[BODY][WAIST].q = chestQuat;
+    fkResult[LEFT][ELBOW].p = leftLink4Position_;
+    fkResult[LEFT][HAND].p = leftLink6Position_;
+    fkResult[RIGHT][ELBOW].p = rightLink4Position_;
+    fkResult[RIGHT][HAND].p = rightLink6Position_;
+    chestElbowHandPointOptSolverPtr_->reanchorFromFkResult(fkResult);
+  }
 
   // 人体 chest 锚点下次推进前按当前人体 Chest 重建，避免把暂停前的 VR 位移一次性打进恢复后的增量。
   chestAnchorNeedsRefresh_ = true;
@@ -694,7 +726,7 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
         // 【核心修复】在进入增量模式前，先更新 latestPoseConstraintList_ 为当前 FK 计算的 Link6 位置
         // 避免使用上次退出时保存的旧位置，导致跳变
         updateHandConstraintUnlocked(
-            latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
+            latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftEndEffectorQuat_);
 
         incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
                                                             latestPoseConstraintList_,
@@ -710,7 +742,7 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
         // 【核心修复】在进入增量模式前，先更新 latestPoseConstraintList_ 为当前 FK 计算的 Link6 位置
         // 避免使用上次退出时保存的旧位置，导致跳变
         updateHandConstraintUnlocked(
-            latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
+            latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightEndEffectorQuat_);
 
         incrementalController_->enterIncrementalModeRightArm(latestRightHandPose_vr_,
                                                              latestPoseConstraintList_,
@@ -765,9 +797,9 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
 
       // 在超时时间内，执行进入增量模式（0→2 和 1→2 都需要）
       updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
+          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftEndEffectorQuat_);
       updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
+          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightEndEffectorQuat_);
       // 进入增量模式前，同步激活 chest 增量（避免腰部目标跳变）。
       // owner 侧 Chest 无效时同 fsmEnter：不用零向量建锚点，改钉在当前机器人 chest 约束上。
       updateChestConstraintFromFk();
@@ -1046,6 +1078,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
                                     Eigen::Quaterniond rightHandQuat,
                                     const FrozenRefs& frozen) -> bool {
     const Eigen::Vector3d chestPosForFk = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : input.chestPosRef;
+    const Eigen::Quaterniond leftSourceCandidate = leftHandQuat;
+    const Eigen::Quaterniond rightSourceCandidate = rightHandQuat;
     auto updateHandPoseInChest = [&](bool isActive,
                                      const Eigen::Vector3d& handFkPos,
                                      const Eigen::Quaterniond& handFkQuat,
@@ -1198,19 +1232,72 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     // current commanded chest.  Clip relative to measured EE only after that
     // remap; doing it beforehand puts the full waist yaw into Euler ZYX and
     // rebuilds a discontinuous command (wrist twitch at ~28 deg/frame).
-    // Near pitch gimbal the safe clip keeps the command instead of reconstructing yaw/roll.
+    // Incremental commands use one rotation-space bound, without an Euler
+    // branch or a pitch bypass. Absolute orientation keeps the legacy path.
     // 总开关关闭后仍使用冻结的胸部变换，限幅必须同样放在变换之后。
+    const Eigen::Quaterniond leftWorldCandidate = leftHandQuat;
+    const Eigen::Quaterniond rightWorldCandidate = rightHandQuat;
     if (input.leftRefActive) {
-      leftHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(true, leftHandQuat);
+      leftHandQuat = useIncrementalHandOrientation_
+          ? latestIncrementalResult_.boundIncrementalHandQuat(true, leftHandQuat)
+          : latestIncrementalResult_.clipHandQuatAroundMeasuredEE(true, leftHandQuat);
     }
     if (input.rightRefActive) {
-      rightHandQuat = latestIncrementalResult_.clipHandQuatAroundMeasuredEE(false, rightHandQuat);
+      rightHandQuat = useIncrementalHandOrientation_
+          ? latestIncrementalResult_.boundIncrementalHandQuat(false, rightHandQuat)
+          : latestIncrementalResult_.clipHandQuatAroundMeasuredEE(false, rightHandQuat);
     }
+    const Eigen::Quaterniond leftBoundedCandidate = leftHandQuat;
+    const Eigen::Quaterniond rightBoundedCandidate = rightHandQuat;
 
     // 上面的 active/inactive 分支和胸部重映射都可能重新生成 handQuat，
     // 因此必须在最终写入 whole-body input 前再次做连续性检查。
     stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
     stabilizeGripQuaternion(false, joyStickHandlerPtr_->isRightGrip(), rightHandQuat);
+
+    Eigen::Quaterniond leftAcceptedSource = leftSourceCandidate;
+    Eigen::Quaterniond rightAcceptedSource = rightSourceCandidate;
+    if (useIncrementalHandOrientation_) {
+      if (input.leftRefActive) {
+        leftHandQuat = latestIncrementalResult_.boundIncrementalHandQuat(true, leftHandQuat);
+        previousLeftGripQuat_ = leftHandQuat;
+        leftAcceptedSource = hasLeftActiveChestAnchor_
+            ? handCommandInSourceFrame(leftHandQuat, input.chestQuatRef, leftActiveChestAnchorQuat_)
+            : leftHandQuat;
+        incrementalController_->acceptHandQuatTarget(true, leftAcceptedSource);
+      }
+      if (input.rightRefActive) {
+        rightHandQuat = latestIncrementalResult_.boundIncrementalHandQuat(false, rightHandQuat);
+        previousRightGripQuat_ = rightHandQuat;
+        rightAcceptedSource = hasRightActiveChestAnchor_
+            ? handCommandInSourceFrame(rightHandQuat, input.chestQuatRef, rightActiveChestAnchorQuat_)
+            : rightHandQuat;
+        incrementalController_->acceptHandQuatTarget(false, rightAcceptedSource);
+      }
+      // One timestamp for both arms and every quaternion in this solve cycle.
+      // Layout: active[L,R], then per arm six xyzw quats (source, world,
+      // measured, bounded, final, accepted_source), followed by radius [rad].
+      // Source/accepted_source use the grip-entry world frame; the other
+      // quaternions use base_link. Final is an IK reference, not execution feedback.
+      kuavo_msgs::Float32MultiArrayStamped debug;
+      debug.header.stamp = ros::Time::now();
+      debug.header.frame_id = "base_link";
+      debug.data.data = {static_cast<float>(input.leftRefActive), static_cast<float>(input.rightRefActive)};
+      const auto append = [&](const Eigen::Quaterniond& q) {
+        debug.data.data.insert(debug.data.data.end(),
+                               {static_cast<float>(q.x()), static_cast<float>(q.y()),
+                                static_cast<float>(q.z()), static_cast<float>(q.w())});
+      };
+      for (const auto& q : {leftSourceCandidate, leftWorldCandidate,
+                            latestIncrementalResult_.measuredHandQuat(true), leftBoundedCandidate,
+                            leftHandQuat, leftAcceptedSource}) append(q);
+      debug.data.data.push_back(static_cast<float>(latestIncrementalResult_.incrementalQuatRadius()));
+      for (const auto& q : {rightSourceCandidate, rightWorldCandidate,
+                            latestIncrementalResult_.measuredHandQuat(false), rightBoundedCandidate,
+                            rightHandQuat, rightAcceptedSource}) append(q);
+      debug.data.data.push_back(static_cast<float>(latestIncrementalResult_.incrementalQuatRadius()));
+      incrementalQuatDebugPublisher_.publish(debug);
+    }
 
     // Incremental position is the commanded end-effector. Shoulder-elbow
     // geometry and point-opt still operate on link6 / wrist.
@@ -1931,9 +2018,9 @@ void WheelQuest3IkIncrementalROS::fsmExit() {
       }
 
       updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftLink6Quat_);
+          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND, leftLink6Position_, leftEndEffectorQuat_);
       updateHandConstraintUnlocked(
-          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightLink6Quat_);
+          latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND, rightLink6Position_, rightEndEffectorQuat_);
 
       incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_,
                                                           latestPoseConstraintList_,

@@ -417,6 +417,15 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                             rightHandRefRel,
                             leftElbowRefRel,
                             rightElbowRefRel);
+  auto activeBounds = chestElbowHandBoundsConfig_;
+  if (chestIncrementalUpdateEnabled && !isInMode2Warmup) {
+    // VR uses a tighter height limit. Preserve the frozen robot height when
+    // TUI has already raised it above that limit, without allowing further rise.
+    // Do not use live FK here: doing so would move the cap upwards every cycle.
+    activeBounds.chestUb.z() = std::min(activeBounds.chestUb.z(),
+                                      std::max(vrChestUpperBoundZ_, frozenRobotChestPos_.z()));
+  }
+  chestElbowHandPointOptSolverPtr_->setBounds(activeBounds);
   const DrakeChestElbowHandSolution sol =
       chestElbowHandPointOptSolverPtr_->solve(chestPos,
                                               chestQuatRef,
@@ -1646,6 +1655,17 @@ DrakeChestElbowHandBoundsConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
       };
       readVec3("chest_lower_bound", config.chestLb);
       readVec3("chest_upper_bound", config.chestUb);
+      // Missing VR limit preserves legacy behavior for other robot configs.
+      vrChestUpperBoundZ_ = config.chestUb.z();
+      if (b.contains("vr_chest_upper_bound_z")) {
+        const double z = b["vr_chest_upper_bound_z"].get<double>();
+        if (std::isfinite(z) && z >= config.chestLb.z() && z <= config.chestUb.z()) {
+          vrChestUpperBoundZ_ = z;
+        } else {
+          ROS_ERROR("[WheelQuest3IkIncrementalROS] vr_chest_upper_bound_z must be finite and within "
+                    "chest Z bounds; using chest_upper_bound[2]");
+        }
+      }
       readVec3("left_hand_lower_bound", config.leftHandLb);
       readVec3("left_hand_upper_bound", config.leftHandUb);
       readVec3("right_hand_lower_bound", config.rightHandLb);
@@ -2951,6 +2971,8 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_.advertise<geometry_msgs::PoseStamped>("/ik_debug/right_hand_pose_from_transformer", 2);
   ikSolvedEefPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::twoArmHandPose>("/ik_fk_result/eef_pose", 10);
   ikInputPosPublisher_ = nodeHandle_.advertise<kuavo_msgs::Float32MultiArrayStamped>("/ik_fk_result/input_pos", 10);
+  incrementalQuatDebugPublisher_ =
+      nodeHandle_.advertise<kuavo_msgs::Float32MultiArrayStamped>("/ik_debug/incremental_quat_pipeline", 2);
 
   wholeBodyRefMarkerArrayPublisher_ =
       nodeHandle_.advertise<visualization_msgs::MarkerArray>("/ik_debug/whole_body_ref_markers", 2);

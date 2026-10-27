@@ -149,6 +149,15 @@ class DrakeChestElbowHandPointOptSolver final {
 
   void setBounds(const DrakeChestElbowHandBoundsConfig& config) { boundsConfig_ = config; }
 
+  void reanchorFromFkResult(const UpperBodyPoseList& fkResult) {
+    initFromFkResult(fkResult);
+    // External torso motion is a new starting state, not a solver trajectory.
+    // Do not derive velocity/acceleration/jerk across the pause boundary.
+    historySample2_.clear();
+    // Keep successfulSolveCount_: re-anchoring must not restart the warmup
+    // that temporarily ignores the caller's chest position/orientation locks.
+  }
+
   DrakeChestElbowHandSolution solve(const Eigen::Vector3d& pChestRef,
                                     const Eigen::Quaterniond& qChestRef,  // unit quaternion, yaw/pitch-only; roll=0
                                     const Eigen::Vector3d& pLeftElbowRef,

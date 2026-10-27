@@ -288,6 +288,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher rightHandPoseFromTransformerPublisher_;  // 发布来自Transformer的右手pose
   ros::Publisher ikSolvedEefPosePublisher_;  // 发布IK求解后的末端执行器pose（/ik_fk_result/eef_pose）
   ros::Publisher ikInputPosPublisher_;       // 发布IK输入位置（/ik_fk_result/input_pos）
+  ros::Publisher incrementalQuatDebugPublisher_;  // 同周期的候选、限幅、输出及回写姿态
   ros::Publisher lbLegTrajPublisher_;
   ros::Timer lbLegTrajPublishTimer_;
   // Serialize final leg publication with the master-switch falling edge.
@@ -408,6 +409,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::unique_ptr<DrakeChestElbowHandPointOptSolver> chestElbowHandPointOptSolverPtr_;
   DrakeChestElbowHandWeightConfig chestElbowHandWeightConfig_;
   DrakeChestElbowHandBoundsConfig chestElbowHandBoundsConfig_;
+  double vrChestUpperBoundZ_{1e3};  // world-frame chest height (m); separate from external/TUI bounds
   bool enableWheelNaturalElbowGuide_ = true;
   WheelNaturalElbowGuideConfig wheelNaturalElbowGuideConfig_;
   double wheelNaturalElbowSoftTrackingScale_ = 0.10;
