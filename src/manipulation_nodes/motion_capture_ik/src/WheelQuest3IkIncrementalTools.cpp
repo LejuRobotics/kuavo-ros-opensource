@@ -949,6 +949,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   frozenLbJointCommand_ = Eigen::VectorXd::Zero(4);
   hasLbJointCommandFrozen_ = false;
   lbFreezeRuckigResetPending_.store(false, std::memory_order_relaxed);
+  lbGripResumePending_.store(false, std::memory_order_relaxed);
   // 重置pose约束列表，使用默认手部位置初始化，确保进入增量模式时能正确初始化到默认位置
   latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
   Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
@@ -986,6 +987,7 @@ void WheelQuest3IkIncrementalROS::reset() {
     if (lbJointRuckigFilterPtr_ && lb_q_.size() == 4) {
       lbJointRuckigFilterPtr_->reset(lb_q_);
     }
+    lbGripHandoff_.active = false;
   }
   {
     std::lock_guard<std::mutex> lock(lbLegMoveTimeMutex_);
@@ -2511,12 +2513,13 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
   bool lbFreezeAlignReady = false;
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
-    // 双手 grip 刚松开并冻结 knee/leg/waist_pitch：以当前滤波输出对齐冻结目标，并清零这三轴
+    // 双手 grip 刚松开并冻结 knee/leg/waist_pitch：以最终发布值对齐冻结目标，并清零这三轴
     // Ruckig/EMA 速度。否则目标骤停时滤波器仍带着旧速度过冲再回摆 → 下肢折叠臂肉眼「抽一下」。
     if (lbFreezeRuckigResetPending_.exchange(false, std::memory_order_acq_rel) && lb_q_.size() == 4 &&
         targetLbAngles.size() == 4) {
       for (int i = 0; i < 3; ++i) {
-        const double qFreeze = lb_q_(i);
+        const double qFreeze = hasPublishedLbCommand_ ? lastPublishedLbCommand_(i) : latest_lb_q_(i);
+        lb_q_(i) = qFreeze;
         lbFreezeAlignHead(i) = qFreeze;
         targetLbAngles(i) = qFreeze;
         if (lbJointRuckigFilterPtr_) {
@@ -2536,11 +2539,32 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
         lowpass_lb_dq_.head(3).setZero();
       }
       lbFreezeAlignReady = true;
+      lbGripHandoff_.freeze(lbFreezeAlignHead);
       {
         std::lock_guard<std::mutex> moveLock(lbLegMoveTimeMutex_);
         lbLegMoveStartTime_ = ros::Time(0);
       }
     }
+
+    // A new grip must start at the last emitted command, not the latent IK
+    // target or the pre-EMA Ruckig state. Only the first three axes are bridged.
+    if (lbGripResumePending_.exchange(false, std::memory_order_acq_rel)) {
+      const Eigen::Vector3d anchor = hasPublishedLbCommand_
+          ? lastPublishedLbCommand_.head<3>().eval() : latest_lb_q_.head<3>().eval();
+      lbGripHandoff_.resume(anchor, ros::Time::now().toSec());
+      for (int i = 0; i < 3; ++i) {
+        lb_q_(i) = anchor(i);
+        latest_lb_q_(i) = anchor(i);
+        if (lbJointRuckigFilterPtr_) lbJointRuckigFilterPtr_->resetDof(i, anchor(i));
+      }
+      lb_dq_.head(3).setZero();
+      latest_lb_dq_.head(3).setZero();
+      lowpass_lb_dq_.head(3).setZero();
+      std::lock_guard<std::mutex> moveLock(lbLegMoveTimeMutex_);
+      lbLegMoveStartTime_ = ros::Time(0);
+    }
+    targetLbAngles.head(3) = lbGripHandoff_.apply(
+        targetLbAngles.head(3), ros::Time::now().toSec(), lbGripResumeDuration_);
 
     // 1) ruckig 限速度/加速度平滑
     if (lbJointRuckigFilterPtr_) {
@@ -3303,6 +3327,11 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_, "/ik_ros_uni_cpp_node/quest3/joint_space_jerk_limit", jointSpaceJerkLimit_, 600.0, 1);
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 10.0, 3);
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_enable", enableArmTrajSmooth_, true);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/lb_grip_resume_duration", lbGripResumeDuration_, 1.0);
+  if (!std::isfinite(lbGripResumeDuration_) || lbGripResumeDuration_ < 0.2 || lbGripResumeDuration_ > 5.0) {
+    ROS_WARN("Invalid lb_grip_resume_duration; using 1.0 s (allowed 0.2..5.0 s)");
+    lbGripResumeDuration_ = 1.0;
+  }
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_wn", armTrajSmoothWn_, 40.0);
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_zeta", armTrajSmoothZeta_, 1.0);
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_acc_limit", armTrajSmoothAccLimit_, 60.0);

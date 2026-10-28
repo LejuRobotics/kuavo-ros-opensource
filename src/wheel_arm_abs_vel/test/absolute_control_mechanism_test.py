@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 class ControlsTest(unittest.TestCase):
-    def test_front_triggers_start_both_pipelines_and_stop_remains(self):
+    def test_formal_trigger_gesture_cannot_bypass_one_shot_and_stop_remains(self):
         tree = ast.parse((ROOT/'scripts/tools/quest3_utils_velocity.py').read_text())
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'Quest3ArmInfoTransformer')
         names = {'is_runing_gesture', 'is_stop_gesture', 'ok_gesture_check',
@@ -25,6 +25,14 @@ class ControlsTest(unittest.TestCase):
         counter = next(n for n in ast.walk(cls) if isinstance(n, ast.If)
                        and isinstance(n.test, ast.Call) and isinstance(n.test.func, ast.Attribute)
                        and n.test.func.attr == 'is_runing_gesture')
+        mapper_tree = ast.parse((ROOT/'scripts/ik_ros_velocity.py').read_text())
+        formal_gate = next(n for n in ast.walk(mapper_tree) if isinstance(n, ast.If)
+                          and isinstance(n.test, ast.Attribute)
+                          and n.test.attr == 'enable_velocity_ik_takeover'
+                          and any(isinstance(a, ast.Assign)
+                                  and isinstance(a.targets[0], ast.Attribute)
+                                  and a.targets[0].attr == 'controller_trigger_start_enabled'
+                                  for a in n.body))
         for formal in (True, False):
             t = scope['Transformer']()
             t.is_hand_tracking = False
@@ -40,9 +48,11 @@ class ControlsTest(unittest.TestCase):
             t.controller_trigger_start_enabled = True  # original gesture-only startup
             if flag is not None:
                 exec(compile(ast.Module(body=[flag], type_ignores=[]), '<production>', 'exec'), env)
+            exec(compile(ast.Module(body=[formal_gate], type_ignores=[]), '<mapper-init>', 'exec'),
+                 {'self': NS(enable_velocity_ik_takeover=formal, quest3_arm_info_transformer=t)})
             step = compile(ast.Module(body=[counter], type_ignores=[]), '<production>', 'exec')
             for _ in range(60): exec(step, env)
-            self.assertTrue(t.is_runing)
+            self.assertEqual(t.is_runing, not formal)
             self.assertFalse(t.measure_arm_length)
             self.assertEqual(t.avg_left_upper_arm_length, .3)
             t.is_runing = True  # explicit operation service has authorized follow
@@ -51,6 +61,16 @@ class ControlsTest(unittest.TestCase):
             t.left_joystick = t.right_joystick = [0., 1.]
             for _ in range(60): exec(step, env)
             self.assertFalse(t.is_runing)
+            # Stale grips from the put-down controllers cannot veto optical OK.
+            t.is_hand_tracking = True
+            t.left_finger_joints = t.right_finger_joints = [0., 0., 1.2, 0., 0., 0.]
+            self.assertTrue(t.is_runing_gesture())
+            self.assertFalse(t.is_stop_gesture())
+            t.left_joystick = t.right_joystick = None
+            self.assertTrue(t.is_runing_gesture())
+            self.assertFalse(t.is_stop_gesture())
+            t.left_finger_joints = t.right_finger_joints = [0., 0., 0., 1.2, 1.2, 0.]
+            self.assertTrue(t.is_stop_gesture())
 
     def test_production_xa_branch_does_not_switch_legacy_torso(self):
         source = (ROOT/'src/QuestAbsoluteControlFSMNode.cpp').read_text()

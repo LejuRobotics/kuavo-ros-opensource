@@ -13,17 +13,33 @@ def skew(v):
 
 
 def exp_so3(v):
-    a = float(np.linalg.norm(v)); V = skew(v)
+    # These fixed-size expressions are Rodrigues' formula with V@V expanded.
+    # Avoid allocating identity/skew/product temporaries for each observer.
+    x, y, z = v
+    xx, yy, zz = x*x, y*y, z*z
+    a2 = xx+yy+zz
+    a = math.sqrt(a2)
     if a < 1e-6:
-        return np.eye(3) + (1-a*a/6)*V + (.5-a*a/24)*(V@V)
-    return np.eye(3) + math.sin(a)/a*V + (1-math.cos(a))/(a*a)*(V@V)
+        s, c = 1-a2/6, .5-a2/24
+    else:
+        s, c = math.sin(a)/a, (1-math.cos(a))/a2
+    return np.array([[1-c*(yy+zz), c*x*y-s*z, c*x*z+s*y],
+                     [c*x*y+s*z, 1-c*(xx+zz), c*y*z-s*x],
+                     [c*x*z-s*y, c*y*z+s*x, 1-c*(xx+yy)]])
 
 
 def left_jacobian(v):
-    a = float(np.linalg.norm(v)); V = skew(v)
+    x, y, z = v
+    xx, yy, zz = x*x, y*y, z*z
+    a2 = xx+yy+zz
+    a = math.sqrt(a2)
     if a < 1e-6:
-        return np.eye(3) + (.5-a*a/24)*V + (1/6-a*a/120)*(V@V)
-    return np.eye(3)+(1-math.cos(a))/(a*a)*V+(a-math.sin(a))/(a*a*a)*(V@V)
+        s, c = .5-a2/24, 1/6-a2/120
+    else:
+        s, c = (1-math.cos(a))/a2, (a-math.sin(a))/(a2*a)
+    return np.array([[1-c*(yy+zz), c*x*y-s*z, c*x*z+s*y],
+                     [c*x*y+s*z, 1-c*(xx+zz), c*y*z-s*x],
+                     [c*x*z-s*y, c*y*z+s*x, 1-c*(xx+yy)]])
 
 
 def log_so3(R):
@@ -69,18 +85,25 @@ class PositionCV:
             self.x = np.array([z, np.zeros(3)])
             self.P = np.diag([self.r, .25])
         else:
-            F = np.array([[1., dt], [0., 1.]])
-            Q = self.q*np.array([[dt**3/3, dt*dt/2], [dt*dt/2, dt]])
-            self.x = F@self.x
-            self.P = F@self.P@F.T+Q
-            K = self.P[:, 0]/(self.P[0, 0]+self.r)
-            K[1] *= self.velocity_correction_gain
-            # Joseph covariance below uses the ACTUAL regularized gain.
-            # Constant velocity remains an equilibrium; no velocity clipping.
-            self.x += K[:, None]*(z-self.x[0])
-            A = np.eye(2); A[:, 0] -= K
-            self.P = A@self.P@A.T+self.r*np.outer(K, K)
-            self.P = .5*(self.P+self.P.T)
+            # Scalar expansion of F P F' + Q, followed by the same Joseph
+            # update. Preserve the actual regularized velocity gain and the
+            # public covariance; no steady-state gain or noise approximation.
+            p00, p01, p10, p11 = self.P.ravel()
+            dt2 = dt*dt
+            a = p00+dt*(p01+p10)+dt2*p11+self.q*dt2*dt/3
+            b = p01+dt*p11+self.q*dt2/2
+            c = p10+dt*p11+self.q*dt2/2
+            d = p11+self.q*dt
+            k0 = a/(a+self.r)
+            k1 = c/(a+self.r)*self.velocity_correction_gain
+            predicted = self.x[0]+dt*self.x[1]
+            residual = z-predicted
+            self.x = np.array([predicted+k0*residual,
+                               self.x[1]+k1*residual])
+            u = 1-k0
+            off_diagonal = u*(.5*(b+c)-k1*a)+self.r*k0*k1
+            self.P = np.array([[u*u*a+self.r*k0*k0, off_diagonal],
+                               [off_diagonal, d-k1*(b+c)+k1*k1*(a+self.r)]])
         return self.x[0].copy(), self.x[1].copy()
 
 
@@ -184,6 +207,13 @@ def direction_rate(d, dv):
     return (dv-n*(n@dv))/length
 
 
+def _cross3(a, b):
+    """Cross product for the fixed three-vector mapping contract."""
+    ax, ay, az = a
+    bx, by, bz = b
+    return np.array([ay*bz-az*by, az*bx-ax*bz, ax*by-ay*bx])
+
+
 def mapped_rates(chest, shoulder, elbow, palm, axes, upper_length,
                  lower_length, source_rotation, tool_offset,
                  source_wrist_offset=None, wrist_rotation=None):
@@ -194,16 +224,26 @@ def mapped_rates(chest, shoulder, elbow, palm, axes, upper_length,
     """
     C, _, wc = chest; S, vs, _ = shoulder; E, ve, _ = elbow; H, vh, wh = palm
     remove = axes@C[:3, :3].T
-    d = E[:3, 3]-S[:3, 3]
-    edot = upper_length*(remove@direction_rate(d, ve-vs)-np.cross(remove@wc, remove@(d/np.linalg.norm(d))))
-    end = H[:3, 3].copy(); vend = vh.copy()
+    removed_wc = remove@wc
+
+    def mapped_direction_rate(d, dv):
+        # Position normalization and its derivative must use the same length.
+        length = math.sqrt(float(d@d))
+        if length < 1e-6:
+            raise ValueError('unresolved bone direction')
+        n = d/length
+        return (remove@((dv-n*(n@dv))/length)
+                - _cross3(removed_wc, remove@n))
+
+    edot = upper_length*mapped_direction_rate(E[:3, 3]-S[:3, 3], ve-vs)
+    end = H[:3, 3]; vend = vh
     if source_wrist_offset is not None:
         offset = source_rotation@source_wrist_offset
-        end += offset; vend += np.cross(wh, offset)
+        end = end+offset; vend = vend+_cross3(wh, offset)
     d = end-E[:3, 3]
-    v = edot+lower_length*(remove@direction_rate(d, vend-ve)-np.cross(remove@wc, remove@(d/np.linalg.norm(d))))
+    v = edot+lower_length*mapped_direction_rate(d, vend-ve)
     omega = remove@(wh-wc)
     mapped_rotation = remove@source_rotation
     if wrist_rotation is not None: mapped_rotation = mapped_rotation@wrist_rotation
-    v += np.cross(omega, mapped_rotation@tool_offset)
+    v += _cross3(omega, mapped_rotation@tool_offset)
     return v, omega, edot

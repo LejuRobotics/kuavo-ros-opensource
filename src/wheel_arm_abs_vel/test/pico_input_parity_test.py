@@ -206,6 +206,7 @@ class PicoParityTest(unittest.TestCase):
     def test_launch_control_parameters_and_overrides_are_equal(self):
         for version in (62, 63, 400062):
             args = ['robot_version:='+str(version), 'ee_type:=none', 'enable_terminal_start:=false',
+                    'tracking_source_mode:=controller',
                     'hand_reference_frequency:=9.0', 'enable_head_control:=true',
                     'absolute_enable_mode_timeout:=4.0']
             configs = [roslaunch.config.load_config_default(
@@ -226,6 +227,18 @@ class PicoParityTest(unittest.TestCase):
         cfg = roslaunch.config.load_config_default([(str(PACKAGE/'launch/pico_velocity_ik.launch'),
               ['robot_version:=62','enable_terminal_start:=true'])],None,verbose=False)
         self.assertTrue(any(n.name=='absolute_terminal_start' for n in cfg.nodes))
+
+    def test_quest_optical_default_and_explicit_source_locks_reach_both_nodes(self):
+        for entry, default in (('quest_velocity_ik.launch', 'auto'),
+                               ('pico_velocity_ik.launch', 'controller')):
+            for override in (None, 'controller', 'hand', 'auto'):
+                args = ['robot_version:=62']
+                if override is not None: args.append('tracking_source_mode:='+override)
+                cfg = roslaunch.config.load_config_default(
+                    [(str(PACKAGE/'launch'/entry), args)], None, verbose=False)
+                for node in ('ik_ros_uni', 'absolute_velocity_ik'):
+                    self.assertEqual(cfg.params['/'+node+'/tracking_source_mode'].value,
+                                     override or default)
 
 
 if __name__ == '__main__':

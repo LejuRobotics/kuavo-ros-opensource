@@ -16,6 +16,10 @@ add_executable(bounded_hand_quaternion_test bounded_hand_quaternion_test.cpp)
 target_compile_features(bounded_hand_quaternion_test PUBLIC cxx_std_17)
 add_test(NAME bounded_hand_quaternion_test COMMAND $<TARGET_FILE:bounded_hand_quaternion_test>)
 
+add_executable(lower_body_grip_handoff_test lower_body_grip_handoff_test.cpp)
+target_compile_features(lower_body_grip_handoff_test PUBLIC cxx_std_17)
+add_test(NAME lower_body_grip_handoff_test COMMAND $<TARGET_FILE:lower_body_grip_handoff_test>)
+
 add_executable(chest_point_opt_reanchor_test chest_point_opt_reanchor_test.cpp)
 target_compile_features(chest_point_opt_reanchor_test PUBLIC cxx_std_17)
 target_link_libraries(chest_point_opt_reanchor_test drake::drake)

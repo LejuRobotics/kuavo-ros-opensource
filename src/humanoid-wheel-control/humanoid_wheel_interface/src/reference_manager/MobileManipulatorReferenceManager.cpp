@@ -4675,8 +4675,10 @@ namespace mobile_manipulator {
       torsoModeFlag_ = true;
     }
 
-    // 松杆后若仍因“先伸后降”卡在包络外，继续收回 x，避免残留前倾目标
-    if (isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true &&
+    // 旋转组的胸部 x/z 由锁定 knee/leg 后的 FK 派生，不是笛卡尔平移目标。
+    // 对它做平移包络钳制会切回躯干跟踪，与最终 knee/leg 锁定冲突。
+    // 平移组松杆后仍继续收回包络外的 x，避免残留前倾目标。
+    if (!torsoRotationActive_ && isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true &&
         clampCmdTorsoPoseToWorkspace())
     {
       vector_t torsoPose4Dof = vector_t::Zero(4);

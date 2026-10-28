@@ -25,7 +25,7 @@ def target(msg):
     latest['time'] = time.monotonic()
     latest['target'] = {k: getattr(msg, k) for k in
                         ('absolute_state', 'control_state', 'control_valid',
-                         'torso_control_enabled', 'arm_hold', 'generation')}
+                         'torso_control_enabled', 'arm_hold', 'generation', 'source')}
 
 def sensors(msg):
     latest['q'] = list(msg.joint_data.joint_q)
@@ -136,6 +136,13 @@ try:
         time.sleep(.4)
     displace('torso_displaced')
     reset('reset_from_torso_mode')
+    generation = latest['target']['generation']
+    command('post_reset_end_effector_triggers', dict(left_trigger=.9, right_trigger=.9))
+    time.sleep(1.5)
+    check('triggers_do_not_reopen_prepared', latest['target']['absolute_state'] == 8
+          and latest['target']['generation'] == generation)
+    command('release_end_effector_triggers')
+    time.sleep(.4)
     press('resume_torso_mode', XA)
     wait('selected_torso_restored', lambda t: active(t) and t.get('torso_control_enabled'))
     motion('after_reset_follow', True)
@@ -157,6 +164,18 @@ try:
     wait('interrupted_follow_restored', lambda t: active(t) and t.get('torso_control_enabled')
          and t.get('generation', 0) > generation)
     motion('interrupted_torso_follow', True)
+    if source == 'quest':
+        reset('before_optical_handoff')
+        command('optical_neutral_no_joy', hand_tracking=True, joy_enabled=False)
+        time.sleep(1.)
+        check('optical_neutral_does_not_start', not active(latest['target']))
+        command('optical_ok_no_joy', hand_tracking=True, joy_enabled=False, optical_gesture='ok')
+        wait('optical_follow_reacquired', lambda t: active(t) and t.get('source') == 2)
+        command('optical_follow_without_joystick', hand_tracking=True, joy_enabled=False, arm=.03)
+        time.sleep(3.)
+        check('optical_follow_survives_no_joystick', active(latest['target']) and latest['target']['source'] == 2)
+        command('optical_stop', hand_tracking=True, joy_enabled=False, optical_gesture='stop')
+        wait('optical_stop_revokes_follow', lambda t: not active(t) and t.get('absolute_state') in (0,4))
     check('finite_feedback_and_commands', all(np.isfinite(q).all() and np.isfinite(v).all() for t,q,v in rows)
           and all(np.isfinite(q).all() for t,q in commands))
 except Exception as exc:

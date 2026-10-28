@@ -696,7 +696,7 @@ class Quest3ArmInfoTransformer:
         self.tcp_mapping_diagnostics = {"Left": None, "Right": None}
         self.estimated_bones = {}
         self.tcp_estimated_rates = {}
-        if self.left_joystick is None:
+        if not msg.is_hand_tracking and self.left_joystick is None:
             print("No joystick message received yet")
             return False
         # poses 为空或不足时跳过该帧，避免带载等空 poses 命令包导致按固定骨骼索引越界 (IndexError)
@@ -722,6 +722,7 @@ class Quest3ArmInfoTransformer:
         self.is_hand_tracking = msg.is_hand_tracking
         # Confidence is diagnostic only; valid poses keep one continuous filter history.
         runtime_probe.point(100)
+        raw_transforms = None
         if self.skeleton_filter_enabled:
             try:
                 transforms = {i: self.pose_info2_transform(msg.poses[i])
@@ -739,6 +740,7 @@ class Quest3ArmInfoTransformer:
                 self.estimated_bones = self.skeleton_filter.update(
                     transforms, float(msg.timestamp_ms)*.001,
                     (self.skeleton_contract, bool(msg.is_hand_tracking)))
+                raw_transforms = transforms
             except (ValueError, np.linalg.LinAlgError):
                 self.skeleton_filter.reset()
                 return False
@@ -753,9 +755,15 @@ class Quest3ArmInfoTransformer:
         runtime_probe.point(104)
         self._chest_axis_published = False
         self._chest_marker_published = False
-        self.compute_hand_pose("Left")
+        # These are raw-frame transforms, not the filtered TCP geometry.
+        # Share them only within this invocation: equal/new stamps, rejected
+        # frames and source changes must never reuse geometry from an old frame.
+        chest_transform = (raw_transforms[23] if raw_transforms is not None
+                           else self.pose_info2_transform(msg.poses[23]))
+        chest_frame = self._chest_frame_geometry(chest_transform)
+        self.compute_hand_pose("Left", raw_transforms, chest_frame)
         runtime_probe.point(105)
-        self.compute_hand_pose("Right")
+        self.compute_hand_pose("Right", raw_transforms, chest_frame)
         runtime_probe.point(106)
         # gesture counts
         max_counts = 50
@@ -1093,9 +1101,10 @@ class Quest3ArmInfoTransformer:
         is_runing &= self.ok_gesture_check(self.right_finger_joints)
 
         # 兼容手柄的情况
-        is_joyRun = True
-        is_joyRun &= self.joy_ok_gesture_check(self.left_joystick)
-        is_joyRun &= self.joy_ok_gesture_check(self.right_joystick)
+        is_joyRun = (not self.is_hand_tracking
+                     and self.left_joystick is not None and self.right_joystick is not None
+                     and self.joy_ok_gesture_check(self.left_joystick)
+                     and self.joy_ok_gesture_check(self.right_joystick))
 
         # Calculate average arm lengths when OK gesture is detected
         if (is_runing or is_joyRun) and self.measure_arm_length:
@@ -1122,9 +1131,10 @@ class Quest3ArmInfoTransformer:
         is_stop &= self.shot_gesture_check(self.right_finger_joints)
 
         # 兼容手柄的情况
-        is_joyStop = True
-        is_joyStop &= self.joy_shot_gesture_check(self.left_joystick)
-        is_joyStop &= self.joy_shot_gesture_check(self.right_joystick)
+        is_joyStop = (not self.is_hand_tracking
+                      and self.left_joystick is not None and self.right_joystick is not None
+                      and self.joy_shot_gesture_check(self.left_joystick)
+                      and self.joy_shot_gesture_check(self.right_joystick))
 
         if is_stop or is_joyStop:
             self.measure_arm_length = True
@@ -1512,7 +1522,17 @@ class Quest3ArmInfoTransformer:
 
         return scaled_elbow_pos, scaled_hand_pos
 
-    def compute_hand_pose(self, side):
+    def _chest_frame_geometry(self, chest_transform):
+        """Raw chest geometry shared by both arms within one read_msg call."""
+        reference_chest = self.init_R_wC.T @ chest_transform[:3, :3]
+        axis, _ = matrix_to_axis_angle(reference_chest)
+        chest_rpy = matrix_to_rpy(reference_chest)
+        remove_yaw = axis_angle_to_matrix([0, 0, axis[1]]).T
+        pitch = matrix_to_rpy(
+            self.init_R_wC.T @ (remove_yaw @ chest_transform[:3, :3]))[0]
+        return chest_transform, axis, chest_rpy, remove_yaw, pitch
+
+    def compute_hand_pose(self, side, raw_transforms=None, chest_frame=None):
         chest_pose = self.pose_info_list[bone_name_to_index["Chest"]]
         #打印chest对应的index
         # print("Chest index: ✅", bone_name_to_index["Chest"])
@@ -1539,10 +1559,16 @@ class Quest3ArmInfoTransformer:
             palm_robot_rotation @ T_source_to_tcp[:3, :3]
         )
 
-        T_wChest = self.pose_info2_transform(chest_pose)
-        T_wElbow = self.pose_info2_transform(elbow_pose)
-        T_wHand = self.pose_info2_transform(hand_pose)
-        T_wS = self.pose_info2_transform(shoulder_pose)
+        if chest_frame is None:
+            chest_frame = self._chest_frame_geometry(self.pose_info2_transform(chest_pose))
+        T_wChest, axis, chest_rpy, remove_yaw, chest_pitch = chest_frame
+        if raw_transforms is None:
+            T_wElbow = self.pose_info2_transform(elbow_pose)
+            T_wHand = self.pose_info2_transform(hand_pose)
+            T_wS = self.pose_info2_transform(shoulder_pose)
+        else:
+            ids = (0, 1, 4) if side == "Left" else (2, 3, 5)
+            T_wS, T_wElbow, T_wHand = (raw_transforms[i] for i in ids)
 
         tcp_chest, tcp_shoulder, tcp_elbow, tcp_palm = T_wChest, T_wS, T_wElbow, T_wHand
         tcp_rotation = palm_robot_rotation
@@ -1576,12 +1602,9 @@ class Quest3ArmInfoTransformer:
             self.right_tcp_target = tcp_target
             self.right_tcp_elbow_hint = tcp_elbow_hint
 
-        axis, angle = matrix_to_axis_angle(self.init_R_wC.T @ T_wChest[:3, :3])
-        chest_rpy = matrix_to_rpy(self.init_R_wC.T @ T_wChest[:3, :3])
         self.chest_axis_agl = [0, 0, axis[1]]
         self.head_body_pose.body_yaw = axis[1]
-        R_wChest_rm_yaw = axis_angle_to_matrix(self.chest_axis_agl).T @ T_wChest[:3, :3]
-        self.head_body_pose.body_pitch = matrix_to_rpy(self.init_R_wC.T @ R_wChest_rm_yaw)[0]
+        self.head_body_pose.body_pitch = chest_pitch
         self.head_body_pose.body_roll = chest_rpy[2]  # Extract roll from chest RPY
         self.head_body_pose.body_x = chest_pose.position.x
         self.head_body_pose.body_y = chest_pose.position.y
@@ -1590,7 +1613,7 @@ class Quest3ArmInfoTransformer:
         # 输出body_roll
         # print(f"⚠️body_roll: {self.head_body_pose.body_roll}")
 
-        hand_mat_cH = axis_angle_to_matrix(self.chest_axis_agl).T @ quaternion_to_matrix(hand_quat_in_w)
+        hand_mat_cH = remove_yaw @ quaternion_to_matrix(hand_quat_in_w)
         hand_quat = matrix_to_quaternion(hand_mat_cH)
         if not getattr(self, "_chest_axis_published", False):
             self._publish_or_defer_observation(self.chest_axis_puber, axis)
@@ -1608,7 +1631,7 @@ class Quest3ArmInfoTransformer:
         hand_pos[0] -= chest_pose.position.x
         hand_pos[1] -= chest_pose.position.y
         hand_pos[2] -= chest_pose.position.z
-        hand_pos = axis_angle_to_matrix(self.chest_axis_agl).T @ hand_pos
+        hand_pos = remove_yaw @ hand_pos
         hand_pos[0] += bias_chest_to_base_link[0]
         hand_pos[1] += bias_chest_to_base_link[1]
         hand_pos[2] += bias_chest_to_base_link[2]
@@ -1618,7 +1641,7 @@ class Quest3ArmInfoTransformer:
         elbow_pos[0] -= chest_pose.position.x
         elbow_pos[1] -= chest_pose.position.y
         elbow_pos[2] -= chest_pose.position.z
-        elbow_pos = axis_angle_to_matrix(self.chest_axis_agl).T @ elbow_pos
+        elbow_pos = remove_yaw @ elbow_pos
         elbow_pos[0] += bias_chest_to_base_link[0]
         elbow_pos[2] += bias_chest_to_base_link[2]
 
@@ -1626,7 +1649,7 @@ class Quest3ArmInfoTransformer:
         shoulder_pos[0] -= chest_pose.position.x
         shoulder_pos[1] -= chest_pose.position.y
         shoulder_pos[2] -= chest_pose.position.z
-        shoulder_pos = axis_angle_to_matrix(self.chest_axis_agl).T @ shoulder_pos
+        shoulder_pos = remove_yaw @ shoulder_pos
         shoulder_pos[0] = bias_chest_to_base_link[0]
         shoulder_pos[2] = bias_chest_to_base_link[2]
 

@@ -1586,12 +1586,22 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   const bool bothGripsJustReleased = (lastLeftGripPressed_ || lastRightGripPressed_) &&
                                      !currentLeftGripPressed && !currentRightGripPressed;
   if (bothGripsJustReleased && chestIncrementalUpdateEnabled_) {
+    lbGripResumePending_.store(false, std::memory_order_release);
     std::lock_guard<std::mutex> lock(ikResultMutex_);
     if (ikLowerBodyJointCommand_.size() == 4) {
       frozenLbJointCommand_ = ikLowerBodyJointCommand_;
       hasLbJointCommandFrozen_ = true;
       // 同步请求清零下肢 Ruckig 速度（由 publishLegJointStates 消费），避免松手过冲抖一下
       lbFreezeRuckigResetPending_.store(true, std::memory_order_release);
+    }
+  }
+
+  const bool firstGripJustPressed = !lastLeftGripPressed_ && !lastRightGripPressed_ &&
+                                    (currentLeftGripPressed || currentRightGripPressed);
+  if (firstGripJustPressed && chestIncrementalUpdateEnabled_) {
+    std::lock_guard<std::mutex> lock(ikResultMutex_);
+    if (hasLbJointCommandFrozen_) {
+      lbGripResumePending_.store(true, std::memory_order_release);
     }
   }
 

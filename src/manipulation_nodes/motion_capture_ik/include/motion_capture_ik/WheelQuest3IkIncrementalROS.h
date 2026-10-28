@@ -1,4 +1,5 @@
 #pragma once
+#include "motion_capture_ik/LowerBodyGripHandoff.h"
 
 #include <atomic>
 #include <chrono>
@@ -564,6 +565,9 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Time lbLegMoveStartTime_;   // 下肢目标变化开始时间戳（用于 alpha 从 0.01->1.0 的超时插值）
   std::mutex lbLegMoveTimeMutex_;  // 保护 lbLegMoveStartTime_ 的互斥锁
   double lbLegMoveThresholdRad_ = 0.01;  // 下肢“发生明显变化”的角度阈值（弧度）
+  std::atomic<bool> lbGripResumePending_{false};
+  LowerBodyGripHandoff lbGripHandoff_;  // 发布线程使用，位置基准为最后发布值
+  double lbGripResumeDuration_ = 1.0;  // 再按 grip 时前三轴目标衔接时间，秒
 
   Eigen::VectorXd filterJointDataForDrakeFK_;
   Eigen::VectorXd jointDataForDrakeFK_;

@@ -40,6 +40,9 @@
   <arg name="rviz" default="true" />
   <arg name="multiplot" default="false" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <include file="$(find wheel_arm_abs_vel)/launch/velocity_model_contract.launch">
+    <arg name="robot_version" value="$(arg robot_version)" />
+  </include>
   <!-- 设置VR控制参数 -->
   <arg name="use_vr_control" default="true" />
   <arg name="use_whole_body_ik_reference" default="true" />

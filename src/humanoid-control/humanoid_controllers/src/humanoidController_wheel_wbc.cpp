@@ -1801,6 +1801,12 @@ namespace humanoidController_wheel_wbc
       if (torsoRotationLockActive_) {
         optimizedState_mrt_limit_.segment<2>(baseDim_) = torsoRotationLockQ_;
         optimizedInput_mrt_limit_.segment<2>(baseDim_).setZero();
+        // 上面的 MPC 反馈写回早于最终锁定；同步快照，确保下一拍求解起点
+        // 与实际下发的 knee/leg 一致，而不是锁定前的优化值。
+        if (enable_mpc_) {
+          optimizedState_mrt_.segment<2>(baseDim_) = torsoRotationLockQ_;
+          optimizedInput_mrt_.segment<2>(baseDim_).setZero();
+        }
       }
     }
 
