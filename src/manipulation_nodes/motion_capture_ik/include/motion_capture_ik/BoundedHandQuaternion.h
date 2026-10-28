@@ -7,8 +7,8 @@
 namespace HighlyDynamic {
 
 // A conservative rotation-space error ball replaces the Euler box and its
-// pitch bypass. The node feeds the emitted command back into the source target
-// accumulator, keeping the next small human delta away from the antipode.
+// pitch bypass. Apply it to emitted commands without overwriting the human
+// source accumulator, so clipped out-and-back motion remains reversible.
 inline Eigen::Quaterniond boundHandQuaternion(const Eigen::Quaterniond& target,
                                              const Eigen::Quaterniond& measured,
                                              double radius) {

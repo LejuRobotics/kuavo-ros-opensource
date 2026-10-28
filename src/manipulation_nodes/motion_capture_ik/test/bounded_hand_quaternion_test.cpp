@@ -78,5 +78,27 @@ int main() {
   auto flipped = inRange; flipped.coeffs() *= -1;
   check(boundHandQuaternion(flipped, identity, radius).angularDistance(inRange) < 1e-9,
         "Quaternion signs must not change the mapping");
+
+  // Issue 4601: preserve the input source through saturation, then retrace
+  // a multi-axis wrist motion while feedback is lagging. The command must
+  // remain bounded and return to its entry orientation without a grip reset.
+  source = pose(5, -10, 15);
+  const auto entry = source;
+  measured = entry;
+  const auto wristStep = pose(1, .7, -.4);
+  bool saturated = false;
+  for (int direction : {1, -1}) {
+    for (int i = 0; i < 100; ++i) {
+      source = ((direction > 0 ? wristStep : wristStep.conjugate()) * source).normalized();
+      const auto command = boundHandQuaternion(source, measured, radius);
+      saturated = saturated || command.angularDistance(source) > 1e-6;
+      check(command.angularDistance(measured) <= radius + 1e-8,
+            "Retained-source commands must preserve the measured error limit");
+    }
+  }
+  check(saturated, "Out-and-back regression must exercise saturation");
+  check(source.angularDistance(entry) < 1e-8 &&
+        boundHandQuaternion(source, measured, radius).angularDistance(entry) < 1e-8,
+        "Clipped multi-axis out-and-back motion must return without resetting grip");
   return ok ? 0 : 1;
 }

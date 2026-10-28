@@ -395,7 +395,6 @@ class WheelIncrementalControlModule {
   WheelIncrementalPoseResult computeIncrementalChestPos(const Eigen::Vector3d& humanChestPos, bool isChestActive = true);
 
   WheelIncrementalPoseResult getLatestIncrementalResult() const;
-  void acceptHandQuatTarget(bool leftArm, const Eigen::Quaterniond& sourceTarget);
 
   // 读取最新 anchor 姿态的接口函数
   Eigen::Vector3d getRobotChestAnchorPos() const;
