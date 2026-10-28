@@ -671,6 +671,33 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   Eigen::VectorXd mec_limit_upper_;
   Eigen::Vector3d deltaScaleRPY_ = Eigen::Vector3d(1.0, 1.0, 1.0);
 
+  // ===== 手臂关节限位保护（移植自人形 Quest3IkIncrementalROS）=====
+  // 软限位 = scale * URDF [low, high]；接近边界时按制动曲线降速，
+  // 到边界把朝边界外的速度归零，避免 VR 增量把目标一直顶在机械止挡上。
+  struct ArmJointLimit {
+    double lower{0.0};
+    double upper{0.0};
+    bool valid{false};
+  };
+  std::vector<ArmJointLimit> armJointLimits_;  // 长度 14，顺序同 /kuavo_arm_traj（l1..l7, r1..r7）
+
+  bool wristJointLimitVelocityDamperEnabled_{true};
+  double armJointSoftLimitScale_{0.99};           // 软限位 = scale * URDF 上下限，0.99 ≈ 只留约 1% 边
+  double wristJointLimitSoftZone_{0.14};          // [rad] 距离软限位多远开始减速
+  double wristJointLimitStopAcceleration_{80.0};  // [rad/s^2] 动态制动距离使用的减速度
+  double wristJointLimitMaxVelocity_{4.0};        // [rad/s] 阻尼层允许的最大速度
+  double wristJointLimitMaxAcceleration_{80.0};   // [rad/s^2] 相邻周期最大速度变化
+  double wristJointLimitSettleVelocity_{0.001};   // [rad/s] 软区内消除渐近爬行的阈值
+  double wristJointLimitHardEpsilon_{0.0001};     // [rad] 软限位内侧数值安全余量
+
+  void loadArmJointLimitsFromPlant(const drake::multibody::MultibodyPlant<double>& plant);
+  void clampArmJointCommand(int index, double& position, double* velocity) const;
+  void applyArmJointLimitVelocityDamper(const Eigen::VectorXd& previousQ,
+                                        const Eigen::VectorXd& previousDq,
+                                        double cycle,
+                                        Eigen::VectorXd& position,
+                                        Eigen::VectorXd& velocity) const;
+
   // Grip 状态跟踪（用于检测上升沿并更新锚点，避免频繁切换 grip 时位置跳变）
   bool lastLeftGripPressed_ = false;
   bool lastRightGripPressed_ = false;
