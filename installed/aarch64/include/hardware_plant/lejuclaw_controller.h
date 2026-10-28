@@ -70,7 +70,8 @@ public:
      * @brief ROS topic callback
      *
      * @param msg   ROS topic message
-     * @param is_high_freq  高频（连续流/允许覆盖）或低频（一次性定位/执行中拒绝）
+     * @param is_high_freq  高频（连续流/允许覆盖）或低频（一次性定位）
+     * @note 低频 Topic 在 CAN 运动过程中可替换同模式最新目标；Service 与串口路径保持原语义。
      */
     void command(const lejuClawCommand &msg, bool is_high_freq);
 
@@ -152,10 +153,12 @@ public:
      * @param torque     torque/current, better 1A ~ 2A
      * @return std::array<State, 2>     the state of the claws
      */
-    std::array<State, 2> move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,const std::vector<double> &torque, bool is_high_freq);
+    std::array<State, 2> move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,
+                                  const std::vector<double> &torque, bool is_high_freq, bool follow_topic = false);
 
 private:
-    bool execute(const lejuClawCommand &data, bool is_high_freq, std::string &err_msg);
+    bool execute(const lejuClawCommand &data, bool is_high_freq, std::string &err_msg,
+                 bool from_topic = false);
 
     /**
      * @brief 武装/刷新断流看门狗（高频命令到达时调用）
@@ -184,12 +187,21 @@ private:
     LeJuClaw *claw_ptr_ = nullptr;
     lejuclaw_can::LeJuClawCan *claw_can_ptr_ = nullptr;
 
-    using TaskFunc = std::function<void()>;
-    std::optional<TaskFunc> current_task_;
+    struct MotionTask {
+        std::vector<double> positions;
+        std::vector<double> velocity;
+        std::vector<double> torque;
+        bool is_high_freq;
+        bool from_topic;
+    };
+    std::optional<MotionTask> current_task_;
     std::mutex task_mutex_;
     std::condition_variable condition_;
     std::thread worker_;
     bool stop_worker_ = false;
+    bool worker_active_ = false;
+    bool active_from_topic_ = false;
+    bool active_high_freq_ = false;
 
     std::atomic_bool claw_is_executing_{false};
     std::atomic_bool recovery_in_progress_{false};

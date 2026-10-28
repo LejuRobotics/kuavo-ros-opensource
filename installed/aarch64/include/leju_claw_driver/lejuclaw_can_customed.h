@@ -99,12 +99,16 @@ public:
     bool disableAll();
 
     PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque);
-    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity, const std::vector<double> &torque, bool is_high_freq);
+    // 运动线程可选地消费同模式 Topic 最新目标；空回调保持原有一次性动作语义。
+    using TargetUpdate = std::function<bool(std::vector<double>&, std::vector<double>&, std::vector<double>&)>;
+    PawMoveState move_paw(const std::vector<double> &positions, const std::vector<double> &velocity,
+                          const std::vector<double> &torque, bool is_high_freq,
+                          TargetUpdate update = {});
     // 基于 unordered_map 的控制接口（百分比位置 → 物理映射并下发），键为 MotorId
     PawMoveState move_paw(const std::unordered_map<MotorId, double>& positions_percent,
                           const std::unordered_map<MotorId, double>& velocity,
                           const std::unordered_map<MotorId, double>& torque,
-                          bool is_high_freq);
+                          bool is_high_freq, TargetUpdate update = {});
     void set_joint_state(const std::unordered_map<MotorId, motorevo::RevoMotorCmd_t>& cmd);
     std::unordered_map<MotorId, motorevo::RevoMotorCmd_t> get_joint_state();
     std::vector<double> get_positions();
