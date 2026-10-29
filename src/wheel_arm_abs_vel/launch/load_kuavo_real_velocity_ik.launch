@@ -51,6 +51,9 @@
   <arg name="rviz" default="false" />
   <arg name="multiplot" default="false" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <include file="$(find wheel_arm_abs_vel)/launch/velocity_model_contract.launch">
+    <arg name="robot_version" value="$(arg robot_version)" />
+  </include>
   <arg name="use_vr_control" default="true" />
   <param name="use_vr_control" value="$(arg use_vr_control)" />
   <include file="$(find humanoid_controllers)/launch/robot_version_manager.launch">
@@ -158,7 +161,7 @@
   <param name="lejuclaw_high_freq_switch" value="$(arg lejuclaw_high_freq_switch)" />
   <param name="lejuclaw_vr_stream_timeout_ms" value="$(arg lejuclaw_vr_stream_timeout_ms)" type="int" />
   <group if="$(arg ruiwo_cxx_sdk)">
-    <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodelet nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background" />
+    <node pkg="nodelet" type="nodelet" name="nodelet_hardware" args="load HardwareNodeletCXX nodelet_manager" respawn="false" output="screen" required="true" launch-prefix="$(find wheel_arm_abs_vel)/scripts/whole_body_ik_runtime.sh background" />
   </group>
   <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch" />
   <group if="$(arg use_joystick)">

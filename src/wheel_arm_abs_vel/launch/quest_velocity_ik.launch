@@ -19,6 +19,9 @@
   <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
   <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <include file="$(find wheel_arm_abs_vel)/launch/velocity_model_contract.launch">
+    <arg name="robot_version" value="$(arg robot_version)" />
+  </include>
   <!-- Pico adapts to Quest input semantics; keep legacy use_pico=false. -->
   <arg name="input_source" default="quest" />
   <arg name="hold_on_input_timeout" default="true" />
@@ -58,7 +61,9 @@
   <arg name="velocity_ik_selected_reach_reserve" default="0.03" />
   <arg name="velocity_ik_joint_safe_range_ratios" default="[0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8]" />
   <arg name="velocity_ik_joint_safe_center" default="[0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0, 0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0]" />
-  <arg name="tracking_source_mode" default="controller" />
+  <!-- Auto permits an explicit optical OK after X+A has completed PREPARE;
+       the active session still locks its source until a fresh recapture. -->
+  <arg name="tracking_source_mode" default="auto" />
   <arg name="publish_tracking_mapping_debug" default="$(arg enable_vr_ik_debug)" />
   <arg name="record_task07_debug_bag" default="false" />
   <arg name="task07_debug_bag_dir" default="$(env HOME)/.ros/task07" />

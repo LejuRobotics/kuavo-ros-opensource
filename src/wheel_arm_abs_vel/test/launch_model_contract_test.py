@@ -25,6 +25,15 @@ class LaunchModelTest(unittest.TestCase):
             [(str(PACKAGE / "launch" / file), args)], None, verbose=False)
 
 
+    def test_shared_model_contract_matches_both_entries(self):
+        import json
+        for version in (62, 63, 400062):
+            real = self.load('load_kuavo_real_velocity_ik.launch', ['robot_version:=' + str(version)])
+            quest = self.load('quest_velocity_ik.launch', ['robot_version:=' + str(version)])
+            key = '/whole_body_velocity_ik/model_contract_json'
+            self.assertEqual(json.loads(real.params[key].value), json.loads(quest.params[key].value))
+            self.assertEqual(json.loads(real.params[key].value)['robot_version'], version)
+
     def test_private_sim_motor_servo_and_rollback(self):
         cfg = self.load("load_kuavo_mujoco_velocity_ik.launch", ["robot_version:=62"])
         self.assertEqual(cfg.params["/dynamics_backend"].value, "rnea")

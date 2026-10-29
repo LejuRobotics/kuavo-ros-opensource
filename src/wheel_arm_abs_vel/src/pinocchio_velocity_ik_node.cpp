@@ -1909,17 +1909,18 @@ class PinocchioVelocityIk {
     }
     nlohmann::json config;
     config_file >> config;
-    const std::string private_config = ros::package::getPath("wheel_arm_abs_vel") +
-        "/config/model_s" + version + ".json";
-    std::ifstream overlay_file(private_config);
-    if (!overlay_file.is_open())
-      throw std::runtime_error("Missing absolute model contract: " + private_config);
-    nlohmann::json overlay;
-    overlay_file >> overlay;
-    for (auto it = overlay.begin(); it != overlay.end(); ++it) {
-      if (it.key().rfind("velocity_ik_", 0) != 0)
-        throw std::runtime_error("Non-absolute key in model contract: " + it.key());
-      config[it.key()] = it.value();
+    std::string model_contract_json;
+    if (!nh_.getParam("/whole_body_velocity_ik/model_contract_json", model_contract_json))
+      throw std::runtime_error("Missing validated absolute model contract");
+    const auto contract = nlohmann::json::parse(model_contract_json);
+    if (contract.at("robot_version").get<int>() != robot_version_)
+      throw std::runtime_error("Absolute IK/model contract robot_version mismatch");
+    nlohmann::json overlay = nlohmann::json::object();
+    for (auto it = contract.begin(); it != contract.end(); ++it) {
+      if (it.key().rfind("velocity_ik_", 0) == 0) {
+        overlay[it.key()] = it.value();
+        config[it.key()] = it.value();
+      }
     }
 
     const int configured_arm_dof = config.at("NUM_ARM_JOINT").get<int>();
@@ -1949,7 +1950,7 @@ class PinocchioVelocityIk {
     const double eef_z_offset = config.value("eef_z_offset", 0.0);
 
     if (!overlay.contains("velocity_ik_urdf") || !overlay.at("velocity_ik_urdf").is_string())
-      throw std::runtime_error("Absolute velocity IK requires an explicit full-model contract: " + private_config);
+      throw std::runtime_error("Absolute velocity IK requires an explicit full-model contract");
     const std::string model_relative = overlay.at("velocity_ik_urdf").get<std::string>();
     const std::string model_path = assets_path + "/models/" + model_relative;
     wheel_arm_abs_vel::requireFullModel(robot_version_, assets_path, model_path);

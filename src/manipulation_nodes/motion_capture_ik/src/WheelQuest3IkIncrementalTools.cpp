@@ -20,6 +20,7 @@
 #include <std_msgs/Int32.h>
 #include <std_msgs/Float32MultiArray.h>
 #include <iomanip>
+#include <array>
 #include <sstream>
 #include <cmath>
 #include <cstdlib>
@@ -948,6 +949,7 @@ void WheelQuest3IkIncrementalROS::reset() {
   frozenLbJointCommand_ = Eigen::VectorXd::Zero(4);
   hasLbJointCommandFrozen_ = false;
   lbFreezeRuckigResetPending_.store(false, std::memory_order_relaxed);
+  lbGripResumePending_.store(false, std::memory_order_relaxed);
   // 重置pose约束列表，使用默认手部位置初始化，确保进入增量模式时能正确初始化到默认位置
   latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
   Eigen::Quaterniond defaultHandQuat = Eigen::Quaterniond::Identity();
@@ -985,6 +987,7 @@ void WheelQuest3IkIncrementalROS::reset() {
     if (lbJointRuckigFilterPtr_ && lb_q_.size() == 4) {
       lbJointRuckigFilterPtr_->reset(lb_q_);
     }
+    lbGripHandoff_.active = false;
   }
   {
     std::lock_guard<std::mutex> lock(lbLegMoveTimeMutex_);
@@ -1058,6 +1061,167 @@ void WheelQuest3IkIncrementalROS::initializeFilter(std::unique_ptr<ocs2::mobile_
     ROS_INFO("+-------------------------+----------+--------------+--------------+--------------+--------------+");
     filterCount = 0;  // 重置计数器，以便下次初始化时重新打印表头
     isFirstCall = true;
+  }
+}
+
+namespace {
+// /kuavo_arm_traj 顺序：左臂 7 + 右臂 7，与 NUM_ARM_JOINT=14 对齐
+constexpr std::array<const char*, 14> kArmLimitJointNames = {
+    "zarm_l1_joint", "zarm_l2_joint", "zarm_l3_joint", "zarm_l4_joint",
+    "zarm_l5_joint", "zarm_l6_joint", "zarm_l7_joint",
+    "zarm_r1_joint", "zarm_r2_joint", "zarm_r3_joint", "zarm_r4_joint",
+    "zarm_r5_joint", "zarm_r6_joint", "zarm_r7_joint",
+};
+}  // namespace
+
+// 从 URDF（drake plant）读取双臂关节限位，按 armJointSoftLimitScale_ 内收成软限位。
+// 与 Quest3IkIncrementalROS::loadArmJointLimitsFromPlant 保持一致。
+void WheelQuest3IkIncrementalROS::loadArmJointLimitsFromPlant(
+    const drake::multibody::MultibodyPlant<double>& plant) {
+  const int dim = static_cast<int>(kArmLimitJointNames.size());
+  armJointLimits_.assign(static_cast<size_t>(dim), ArmJointLimit{});
+
+  const double softScale = std::min(std::max(armJointSoftLimitScale_, 0.5), 1.0);
+  int loaded = 0;
+  for (int i = 0; i < dim; ++i) {
+    const char* jointName = kArmLimitJointNames[static_cast<size_t>(i)];
+    try {
+      const auto& joint = plant.GetJointByName(jointName);
+      if (joint.num_positions() <= 0) {
+        ROS_WARN("[WheelQuest3IkIncrementalROS] %s has no position DOF, skip limit", jointName);
+        continue;
+      }
+      const double lower = joint.position_lower_limits()(0);
+      const double upper = joint.position_upper_limits()(0);
+      if (!std::isfinite(lower) || !std::isfinite(upper) || !(upper > lower)) {
+        ROS_WARN("[WheelQuest3IkIncrementalROS] invalid URDF limit for %s: [%.4f, %.4f]",
+                 jointName, lower, upper);
+        continue;
+      }
+      armJointLimits_[static_cast<size_t>(i)].lower = softScale * lower;
+      armJointLimits_[static_cast<size_t>(i)].upper = softScale * upper;
+      armJointLimits_[static_cast<size_t>(i)].valid = true;
+      ++loaded;
+      ROS_INFO("[WheelQuest3IkIncrementalROS] arm limit %2d %-16s URDF[%+.4f, %+.4f] soft[%+.4f, %+.4f]",
+               i, jointName, lower, upper, softScale * lower, softScale * upper);
+    } catch (const std::exception& e) {
+      ROS_WARN("[WheelQuest3IkIncrementalROS] failed to read URDF limit for %s: %s",
+               jointName, e.what());
+    }
+  }
+  ROS_INFO("[WheelQuest3IkIncrementalROS] arm joint-limit protection: %d/%d joints, soft_scale=%.3f, "
+           "damper=%s",
+           loaded, dim, softScale, wristJointLimitVelocityDamperEnabled_ ? "true" : "false");
+}
+
+// 位置硬夹到软限位；若已贴边界且速度还朝边界外，则把该关节速度归零。
+void WheelQuest3IkIncrementalROS::clampArmJointCommand(int index, double& position,
+                                                       double* velocity) const {
+  if (index < 0 || index >= static_cast<int>(armJointLimits_.size()) ||
+      !armJointLimits_[static_cast<size_t>(index)].valid) {
+    return;
+  }
+  const ArmJointLimit& limit = armJointLimits_[static_cast<size_t>(index)];
+  position = std::min(std::max(position, limit.lower), limit.upper);
+  if (velocity == nullptr) {
+    return;
+  }
+  if ((position <= limit.lower && *velocity < 0.0) ||
+      (position >= limit.upper && *velocity > 0.0)) {
+    *velocity = 0.0;
+  }
+}
+
+// 软限位边界速度阻尼：仅在关节朝边界运动且进入制动区时接管该关节，
+// 其余区域保持原有位置平滑与速度低通行为不变。
+void WheelQuest3IkIncrementalROS::applyArmJointLimitVelocityDamper(
+    const Eigen::VectorXd& previousQ, const Eigen::VectorXd& previousDq, double cycle,
+    Eigen::VectorXd& position, Eigen::VectorXd& velocity) const {
+  const int dim = static_cast<int>(armJointLimits_.size());
+  if (dim <= 0 || previousQ.size() != dim || previousDq.size() != dim ||
+      position.size() != dim || velocity.size() != dim) {
+    return;
+  }
+  const double dt = std::min(std::max(cycle, 1e-4), 0.02);
+
+  for (int i = 0; i < dim; ++i) {
+    if (!armJointLimits_[static_cast<size_t>(i)].valid) {
+      continue;
+    }
+    const ArmJointLimit& limit = armJointLimits_[static_cast<size_t>(i)];
+    const double lower = limit.lower + wristJointLimitHardEpsilon_;
+    const double upper = limit.upper - wristJointLimitHardEpsilon_;
+    if (!(upper > lower)) {
+      continue;
+    }
+
+    const double previousQClamped = std::min(std::max(previousQ(i), lower), upper);
+    const double requestedQ = std::min(std::max(position(i), lower), upper);
+    const double rawRequestedV = (requestedQ - previousQClamped) / dt;
+    const double requestedV =
+        std::min(std::max(rawRequestedV, -wristJointLimitMaxVelocity_), wristJointLimitMaxVelocity_);
+    const double previousV = std::isfinite(previousDq(i)) ? previousDq(i) : 0.0;
+
+    const double upperDistance = std::max(0.0, upper - previousQClamped);
+    const double lowerDistance = std::max(0.0, previousQClamped - lower);
+    const double upperReferenceSpeed = std::max(std::max(requestedV, 0.0), std::max(previousV, 0.0));
+    const double lowerReferenceSpeed = std::max(std::max(-requestedV, 0.0), std::max(-previousV, 0.0));
+    const double upperActivationDistance =
+        std::max(wristJointLimitSoftZone_,
+                 upperReferenceSpeed * upperReferenceSpeed / (2.0 * wristJointLimitStopAcceleration_));
+    const double lowerActivationDistance =
+        std::max(wristJointLimitSoftZone_,
+                 lowerReferenceSpeed * lowerReferenceSpeed / (2.0 * wristJointLimitStopAcceleration_));
+    const bool upperDamperActive =
+        upperReferenceSpeed > 0.0 && upperDistance < upperActivationDistance;
+    const bool lowerDamperActive =
+        lowerReferenceSpeed > 0.0 && lowerDistance < lowerActivationDistance;
+    if (!upperDamperActive && !lowerDamperActive) {
+      continue;
+    }
+
+    double damperTargetV = requestedV;
+    if (requestedV > 0.0 && upperDamperActive) {
+      const double ratio = std::min(std::max(upperDistance / upperActivationDistance, 0.0), 1.0);
+      const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+      const double softLimit = requestedV * smoothScale;
+      const double brakeLimit = std::sqrt(2.0 * wristJointLimitStopAcceleration_ * upperDistance);
+      damperTargetV = std::min({requestedV, softLimit, brakeLimit, upperDistance / dt});
+    } else if (requestedV < 0.0 && lowerDamperActive) {
+      const double ratio = std::min(std::max(lowerDistance / lowerActivationDistance, 0.0), 1.0);
+      const double smoothScale = ratio * ratio * (3.0 - 2.0 * ratio);
+      const double softLimit = std::abs(requestedV) * smoothScale;
+      const double brakeLimit = std::sqrt(2.0 * wristJointLimitStopAcceleration_ * lowerDistance);
+      damperTargetV = -std::min({std::abs(requestedV), softLimit, brakeLimit, lowerDistance / dt});
+    }
+
+    const double maxDeltaV = wristJointLimitMaxAcceleration_ * dt;
+    double boundedV = std::min(std::max(damperTargetV, previousV - maxDeltaV), previousV + maxDeltaV);
+    if (boundedV > 0.0) {
+      const double discreteBrakeLimit =
+          -wristJointLimitStopAcceleration_ * dt +
+          std::sqrt(wristJointLimitStopAcceleration_ * wristJointLimitStopAcceleration_ * dt * dt +
+                    2.0 * wristJointLimitStopAcceleration_ * upperDistance);
+      boundedV = std::min({boundedV, upperDistance / dt, std::max(0.0, discreteBrakeLimit)});
+    } else if (boundedV < 0.0) {
+      const double discreteBrakeLimit =
+          -wristJointLimitStopAcceleration_ * dt +
+          std::sqrt(wristJointLimitStopAcceleration_ * wristJointLimitStopAcceleration_ * dt * dt +
+                    2.0 * wristJointLimitStopAcceleration_ * lowerDistance);
+      boundedV = -std::min({std::abs(boundedV), lowerDistance / dt, std::max(0.0, discreteBrakeLimit)});
+    }
+
+    const bool movingOutwardInSoftZone =
+        (boundedV > 0.0 && upperDistance < wristJointLimitSoftZone_) ||
+        (boundedV < 0.0 && lowerDistance < wristJointLimitSoftZone_);
+    if (movingOutwardInSoftZone && std::abs(boundedV) < wristJointLimitSettleVelocity_) {
+      boundedV = 0.0;
+    }
+
+    const double candidateQ = previousQClamped + boundedV * dt;
+    const double boundedQ = std::min(std::max(candidateQ, lower), upper);
+    position(i) = boundedQ;
+    velocity(i) = (boundedQ - previousQClamped) / dt;
   }
 }
 
@@ -2135,6 +2299,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
   Eigen::VectorXd armPositionForPublish;
   Eigen::VectorXd armVelocityForPublish;
   Eigen::VectorXd previousPublishedQ;
+  Eigen::VectorXd previousPublishedDq;
   {
     const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
@@ -2143,6 +2308,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
                                 .count());
     const auto holdStart = std::chrono::steady_clock::now();
     previousPublishedQ = latest_q_;
+    previousPublishedDq = lowpass_dq_;
     if (armJointRuckigFilterPtr_) {
       const Eigen::VectorXd filteredArmQ = armJointRuckigFilterPtr_->update(finalArmAngles);
       if (filteredArmQ.size() == q_.size()) {
@@ -2234,6 +2400,20 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       armVelocityForPublish =
           velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
     }
+    // ===== 手臂关节限位保护（移植自 Quest3IkIncrementalROS）=====
+    // 接近软限位时按制动曲线降速，到边界把朝边界外的速度归零，再做位置夹紧。
+    {
+      const double armLimitCycle = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
+      if (wristJointLimitVelocityDamperEnabled_) {
+        applyArmJointLimitVelocityDamper(previousPublishedQ, previousPublishedDq,
+                                         armLimitCycle, armPositionForPublish,
+                                         armVelocityForPublish);
+      }
+      for (int i = 0; i < static_cast<int>(armPositionForPublish.size()); ++i) {
+        clampArmJointCommand(i, armPositionForPublish(i), &armVelocityForPublish(i));
+      }
+    }
+
     latest_q_ = armPositionForPublish;
     latest_dq_ = armVelocityForPublish;
     lowpass_dq_ = armVelocityForPublish;
@@ -2333,12 +2513,13 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
   bool lbFreezeAlignReady = false;
   {
     std::lock_guard<std::mutex> jointLock(jointStateMutex_);
-    // 双手 grip 刚松开并冻结 knee/leg/waist_pitch：以当前滤波输出对齐冻结目标，并清零这三轴
+    // 双手 grip 刚松开并冻结 knee/leg/waist_pitch：以最终发布值对齐冻结目标，并清零这三轴
     // Ruckig/EMA 速度。否则目标骤停时滤波器仍带着旧速度过冲再回摆 → 下肢折叠臂肉眼「抽一下」。
     if (lbFreezeRuckigResetPending_.exchange(false, std::memory_order_acq_rel) && lb_q_.size() == 4 &&
         targetLbAngles.size() == 4) {
       for (int i = 0; i < 3; ++i) {
-        const double qFreeze = lb_q_(i);
+        const double qFreeze = hasPublishedLbCommand_ ? lastPublishedLbCommand_(i) : latest_lb_q_(i);
+        lb_q_(i) = qFreeze;
         lbFreezeAlignHead(i) = qFreeze;
         targetLbAngles(i) = qFreeze;
         if (lbJointRuckigFilterPtr_) {
@@ -2358,11 +2539,32 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
         lowpass_lb_dq_.head(3).setZero();
       }
       lbFreezeAlignReady = true;
+      lbGripHandoff_.freeze(lbFreezeAlignHead);
       {
         std::lock_guard<std::mutex> moveLock(lbLegMoveTimeMutex_);
         lbLegMoveStartTime_ = ros::Time(0);
       }
     }
+
+    // A new grip must start at the last emitted command, not the latent IK
+    // target or the pre-EMA Ruckig state. Only the first three axes are bridged.
+    if (lbGripResumePending_.exchange(false, std::memory_order_acq_rel)) {
+      const Eigen::Vector3d anchor = hasPublishedLbCommand_
+          ? lastPublishedLbCommand_.head<3>().eval() : latest_lb_q_.head<3>().eval();
+      lbGripHandoff_.resume(anchor, ros::Time::now().toSec());
+      for (int i = 0; i < 3; ++i) {
+        lb_q_(i) = anchor(i);
+        latest_lb_q_(i) = anchor(i);
+        if (lbJointRuckigFilterPtr_) lbJointRuckigFilterPtr_->resetDof(i, anchor(i));
+      }
+      lb_dq_.head(3).setZero();
+      latest_lb_dq_.head(3).setZero();
+      lowpass_lb_dq_.head(3).setZero();
+      std::lock_guard<std::mutex> moveLock(lbLegMoveTimeMutex_);
+      lbLegMoveStartTime_ = ros::Time(0);
+    }
+    targetLbAngles.head(3) = lbGripHandoff_.apply(
+        targetLbAngles.head(3), ros::Time::now().toSec(), lbGripResumeDuration_);
 
     // 1) ruckig 限速度/加速度平滑
     if (lbJointRuckigFilterPtr_) {
@@ -2712,6 +2914,9 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
            plant.num_velocities(),
            plant.num_multibody_states());
   drakeJointStateSize_ = plant.num_positions();
+
+  // 手臂关节限位保护：从同一份 URDF（plant）读取限位并内收成软限位
+  loadArmJointLimitsFromPlant(plant);
   jointMidValues_.resize(drakeJointStateSize_);
   // 初始化 sensorData 双臂关节角（维度从 JSON 加载，rad）指数均值滤波状态
   filterJointDataForDrakeFK_ = Eigen::VectorXd::Zero(drakeJointStateSize_);
@@ -3122,6 +3327,11 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_, "/ik_ros_uni_cpp_node/quest3/joint_space_jerk_limit", jointSpaceJerkLimit_, 600.0, 1);
   PARAM_AND_PRINT_FLOAT(nodeHandle_, "/ik_ros_uni_cpp_node/quest3/max_joint_velocity", maxJointVelocity_, 10.0, 3);
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_enable", enableArmTrajSmooth_, true);
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/lb_grip_resume_duration", lbGripResumeDuration_, 1.0);
+  if (!std::isfinite(lbGripResumeDuration_) || lbGripResumeDuration_ < 0.2 || lbGripResumeDuration_ > 5.0) {
+    ROS_WARN("Invalid lb_grip_resume_duration; using 1.0 s (allowed 0.2..5.0 s)");
+    lbGripResumeDuration_ = 1.0;
+  }
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_wn", armTrajSmoothWn_, 40.0);
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_zeta", armTrajSmoothZeta_, 1.0);
   nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/arm_traj_smooth_acc_limit", armTrajSmoothAccLimit_, 60.0);

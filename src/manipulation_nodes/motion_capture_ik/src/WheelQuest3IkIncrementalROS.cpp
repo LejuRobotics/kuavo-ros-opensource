@@ -1255,29 +1255,27 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
     stabilizeGripQuaternion(false, joyStickHandlerPtr_->isRightGrip(), rightHandQuat);
 
-    Eigen::Quaterniond leftAcceptedSource = leftSourceCandidate;
-    Eigen::Quaterniond rightAcceptedSource = rightSourceCandidate;
     if (useIncrementalHandOrientation_) {
+      // Keep human increments in their own source accumulator. Writing a
+      // bounded command back here loses the clipped rotation permanently,
+      // so an out-and-back wrist motion no longer returns to its entry pose.
+      // Safety bounds and recovery still apply to the emitted command only.
       if (input.leftRefActive) {
         leftHandQuat = latestIncrementalResult_.boundIncrementalHandQuat(true, leftHandQuat);
         previousLeftGripQuat_ = leftHandQuat;
-        leftAcceptedSource = hasLeftActiveChestAnchor_
-            ? handCommandInSourceFrame(leftHandQuat, input.chestQuatRef, leftActiveChestAnchorQuat_)
-            : leftHandQuat;
-        incrementalController_->acceptHandQuatTarget(true, leftAcceptedSource);
       }
       if (input.rightRefActive) {
         rightHandQuat = latestIncrementalResult_.boundIncrementalHandQuat(false, rightHandQuat);
         previousRightGripQuat_ = rightHandQuat;
-        rightAcceptedSource = hasRightActiveChestAnchor_
-            ? handCommandInSourceFrame(rightHandQuat, input.chestQuatRef, rightActiveChestAnchorQuat_)
-            : rightHandQuat;
-        incrementalController_->acceptHandQuatTarget(false, rightAcceptedSource);
       }
+      const Eigen::Quaterniond leftRetainedSource =
+          latestIncrementalResult_.getLatestRobotLeftHandQuatInc(true, false).first;
+      const Eigen::Quaterniond rightRetainedSource =
+          latestIncrementalResult_.getLatestRobotRightHandQuatInc(true, false).first;
       // One timestamp for both arms and every quaternion in this solve cycle.
       // Layout: active[L,R], then per arm six xyzw quats (source, world,
-      // measured, bounded, final, accepted_source), followed by radius [rad].
-      // Source/accepted_source use the grip-entry world frame; the other
+      // measured, bounded, final, retained_source), followed by radius [rad].
+      // Source/retained_source use the grip-entry world frame; the other
       // quaternions use base_link. Final is an IK reference, not execution feedback.
       kuavo_msgs::Float32MultiArrayStamped debug;
       debug.header.stamp = ros::Time::now();
@@ -1290,11 +1288,11 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
       };
       for (const auto& q : {leftSourceCandidate, leftWorldCandidate,
                             latestIncrementalResult_.measuredHandQuat(true), leftBoundedCandidate,
-                            leftHandQuat, leftAcceptedSource}) append(q);
+                            leftHandQuat, leftRetainedSource}) append(q);
       debug.data.data.push_back(static_cast<float>(latestIncrementalResult_.incrementalQuatRadius()));
       for (const auto& q : {rightSourceCandidate, rightWorldCandidate,
                             latestIncrementalResult_.measuredHandQuat(false), rightBoundedCandidate,
-                            rightHandQuat, rightAcceptedSource}) append(q);
+                            rightHandQuat, rightRetainedSource}) append(q);
       debug.data.data.push_back(static_cast<float>(latestIncrementalResult_.incrementalQuatRadius()));
       incrementalQuatDebugPublisher_.publish(debug);
     }
@@ -1588,12 +1586,22 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   const bool bothGripsJustReleased = (lastLeftGripPressed_ || lastRightGripPressed_) &&
                                      !currentLeftGripPressed && !currentRightGripPressed;
   if (bothGripsJustReleased && chestIncrementalUpdateEnabled_) {
+    lbGripResumePending_.store(false, std::memory_order_release);
     std::lock_guard<std::mutex> lock(ikResultMutex_);
     if (ikLowerBodyJointCommand_.size() == 4) {
       frozenLbJointCommand_ = ikLowerBodyJointCommand_;
       hasLbJointCommandFrozen_ = true;
       // 同步请求清零下肢 Ruckig 速度（由 publishLegJointStates 消费），避免松手过冲抖一下
       lbFreezeRuckigResetPending_.store(true, std::memory_order_release);
+    }
+  }
+
+  const bool firstGripJustPressed = !lastLeftGripPressed_ && !lastRightGripPressed_ &&
+                                    (currentLeftGripPressed || currentRightGripPressed);
+  if (firstGripJustPressed && chestIncrementalUpdateEnabled_) {
+    std::lock_guard<std::mutex> lock(ikResultMutex_);
+    if (hasLbJointCommandFrozen_) {
+      lbGripResumePending_.store(true, std::memory_order_release);
     }
   }
 

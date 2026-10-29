@@ -758,8 +758,6 @@
 - 示教功能文档补充说明示教模式启动机器人需要按‘o’后才开始记录，[文档链接](./src/manipulation_nodes/teach_pendant/readme.md)
 - 运动控制 API 文档新增电机Kp/Kd 参数 ROS 服务接口描述，[文档链接](./docs/运动控制API.md)
 - Kuavo Humanoid SDK 增加搬箱子策略模块使用文档，[文档链接](./src/kuavo_humanoid_sdk/README.md)
-- 增加日志上传 coScene 工具使用文档，[文档链接](./tools/upload_log/doc/readme.md)
-
 ## 新增功能
 - 新增适配Kuavo5类型机器人
 - 新增基于手臂 ruiwo-controll-cxx 库控制手臂电机的示例: [示例文档](./src/demo/motor_example/README.md)

@@ -1,6 +1,8 @@
 # 绝对式轮臂 IK：参数、控制逻辑与维护参考
 
-> 2026-10-22 更新：本文对应 Draft MR !4139 候选分支，源码基线 `b26d5d18e`（包含躯干启动授权撤销修复）。日常启动见[快速使用文档](usage_quickstart_zh.md)；历史 QA 记录见[QA 更新清单](qa_updates_20261022.md)。
+> 2026-10-28 补充：首次扳机只受理一次，Quest 支持复位后双手 OK 进入裸手跟随；见[本轮问题处理说明](dev_vr_issue_followup_20261028.md)。以下保留原参数说明与历史验证记录。
+
+> 2026-10-22 历史记录：本文对应 Draft MR !4139 候选分支，源码基线 `b26d5d18e`（包含躯干启动授权撤销修复）。日常启动见[快速使用文档](usage_quickstart_zh.md)；历史 QA 记录见[QA 更新清单](qa_updates_20261022.md)。
 
 ## 1. 版本与范围
 
@@ -510,7 +512,7 @@ Pico App 继续通过“查找机器人”发现 `KUAVO`：输入进程在未收
 | velocity_ik_selected_reach_reserve | default | 0.03 |  |
 | velocity_ik_joint_safe_range_ratios | default | [0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8] |  |
 | velocity_ik_joint_safe_center | default | [0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0, 0.2617993878, 0.0, 0.0, -0.5235987756, 0.0, 0.0, 0.0] |  |
-| tracking_source_mode | default | controller |  |
+| tracking_source_mode | default | auto | 活动会话锁定来源；完成复位后允许光学 OK 重新捕获 |
 | publish_tracking_mapping_debug | default | $(arg enable_vr_ik_debug) |  |
 | record_task07_debug_bag | default | false |  |
 | task07_debug_bag_dir | default | $(env HOME)/.ros/task07 |  |
@@ -1817,7 +1819,7 @@ KUAVO_SIM_X11_NO_SHM默认1，使本仿真使用普通X11图像传输，以兼�
 
 2026-10-22 本次权限修复后的源码 `b26d5d18e` 已通过 Release 构建及62/62 CTest；6种 CPU 拓扑下增量式调度配置与当时 dev 一致。本次权限修复已补测首次开启前撤销、首次开启后关闭/复位、恢复 ready 和显式重开，并验证正常首次跟随仍默认开启；Pico 另补测未收到姿态前发送发现包。上述属于软件回归，不能替代真实 App 无线发现和机器人动作验收。
 
-此前 #4486/#4452 候选完成 Quest 10 项、Pico 16 项合成输入仿真；底盘项验证指令通道，不等于硬件位移验收。AGX 卡顿改善、Pico 真头显和完整版本稳定性仍需现场复测。#4485/#4478 暂不处理；手臂偏斜及头部耦合不列为本次已修复。
+此前 #4486/#4452 候选完成 Quest 10 项、Pico 16 项合成输入仿真；底盘项验证指令通道，不等于硬件位移验收。AGX 卡顿改善、Pico 真头显和完整版本稳定性仍需现场复测。该轮未处理 #4485/#4478；#4485 的后续实现与验证见本轮问题处理说明；手臂偏斜及头部耦合不列为本次已修复。
 
 以下表格保留较早首装和仿真退出验证记录；49/49是历史版本结果，不是当前回归数量。
 

@@ -1290,11 +1290,11 @@ namespace humanoidController_wheel_wbc
       // X+A 1→2 解锁期间保持 isArmControlModeChanged_，必须走与 mode1 复位相同的
       // processArmControlModeSwitch 插值；此时禁止 quick 直通，否则会瞬间冲向 VR 目标。
       const bool modeSwitchArmInterpActive = isArmControlModeChanged_;
+      const bool quickArmControlActive = isQuickArmControlActive(lbMpcMode);
       const bool absoluteQuickQLowPassActive =
           !externalArmReset &&
           !modeSwitchArmInterpActive &&
-          (quickMode_ == 2 || quickMode_ == 3) &&
-          (lbMpcMode == 1 || lbMpcMode == 3) &&
+          quickArmControlActive &&
           !enable_arm_traj_interpolator_;
       if (!absoluteQuickQLowPassActive)
       {
@@ -1315,7 +1315,7 @@ namespace humanoidController_wheel_wbc
           optimizedInput_mrt_.segment(baseDim_, lowJointNum_) = leg_target_qvel;
           ros_logger_->publishVector("/humanoid_wheel/leg_target_qpos_quick_mode", leg_target_qpos);
         }
-        if(!externalArmReset && (quickMode_ == 2 || quickMode_ == 3))
+        if(!externalArmReset && quickArmControlActive)
         {
           if (modeSwitchArmInterpActive)
           {
@@ -1556,8 +1556,7 @@ namespace humanoidController_wheel_wbc
       const vector_t jointPosDelta =
           (qposLimit - jointPosTarget_last) / dt_;
 
-      const bool quickArmModeActive =
-          (quickMode_ == 2 || quickMode_ == 3) && (lbMpcMode == 1 || lbMpcMode == 3);
+      const bool quickArmModeActive = isQuickArmControlActive(lbMpcMode);
       vector_t requestedArmV;
       // 插补/快模式沿用上游速度。500Hz 对 joint_q 差分会把位置台阶放大成速度毛刺，
       // 手臂抖动。q/v 一致性改由增量 IK 用发布位置差分填 /kuavo_arm_traj.velocity。
@@ -1802,6 +1801,12 @@ namespace humanoidController_wheel_wbc
       if (torsoRotationLockActive_) {
         optimizedState_mrt_limit_.segment<2>(baseDim_) = torsoRotationLockQ_;
         optimizedInput_mrt_limit_.segment<2>(baseDim_).setZero();
+        // 上面的 MPC 反馈写回早于最终锁定；同步快照，确保下一拍求解起点
+        // 与实际下发的 knee/leg 一致，而不是锁定前的优化值。
+        if (enable_mpc_) {
+          optimizedState_mrt_.segment<2>(baseDim_) = torsoRotationLockQ_;
+          optimizedInput_mrt_.segment<2>(baseDim_).setZero();
+        }
       }
     }
 
@@ -2570,9 +2575,11 @@ namespace humanoidController_wheel_wbc
       return;
     }
 
+    // 保持期间禁止 quick/插补覆盖 MPC 冻结目标，且不 ingest 持续发布的 VR 轨迹。
     // 复位期间禁止 ingest 默认姿态：Kalman 的 raw fallback 会将大偏差
     // 直接透传为位置阶跃。也禁止 quickMode 尚未归零时覆盖复位保持目标。
-    if (isExternalArmReset()) {
+    if (arm_trajectory_mode_ == 0 || isExternalArmReset()) {
+      arm_interp_quick_active_ = false;
       // 记录禁用状态，使下次进入 mode2 时 compute 从当时实测位置 reset，
       // 而不是沿用复位前的 Kalman 状态。
       ArmTrajectoryInterpolator::ModeFlags resetFlags;
@@ -2588,7 +2595,7 @@ namespace humanoidController_wheel_wbc
 
     ArmTrajectoryInterpolator::ModeFlags modeFlags;
     modeFlags.useArmTrajectoryControl = use_arm_trajectory_control_;
-    modeFlags.quickMode = quickMode_;
+    modeFlags.quickMode = isQuickArmControlActive(lbMpcMode) ? quickMode_ : 0;
     modeFlags.lbMpcMode = lbMpcMode;
     modeFlags.armCtrlMode = arm_trajectory_mode_;
 
@@ -2633,14 +2640,46 @@ namespace humanoidController_wheel_wbc
       ros_logger_->publishVector("/humanoid_wheel/arm_target_qvel_raw", armTargetRawV);
     }
 
-    const auto output = armTrajectoryInterpolator_.compute(time, modeFlags, currentArmQ);
+    auto output = armTrajectoryInterpolator_.compute(time, modeFlags, currentArmQ);
     if (!output.valid || output.smoothQ.size() != static_cast<Eigen::Index>(armNum_)) {
       return;
     }
+    const bool quickArmModeActive = isQuickArmControlActive(lbMpcMode);
+    // MPC -> 快速通路：承接上一拍最终执行 q/v，避免 MPC 与 IK 的跟踪差
+    // 被一次性送给执行器。偏置在 0.5s 内以三次 Hermite 曲线消除，
+    // 起点/终点的位置和速度均连续；不修改原始 IK 目标或安全限值。
+    constexpr double kQuickArmHandoffDuration = 0.5;  // [s]
+    if (quickArmModeActive && !arm_interp_quick_active_ && enable_mpc_ &&
+        !isArmControlModeChanged_) {
+      arm_quick_handoff_start_time_ = time.toSec();
+      arm_quick_handoff_q_offset_ =
+          optimizedState_mrt_limit_.tail(armNum_) - output.smoothQ;
+      arm_quick_handoff_v_offset_ =
+          optimizedInput_mrt_limit_.tail(armNum_) - output.smoothV;
+    }
+    if (!quickArmModeActive || isArmControlModeChanged_) {
+      arm_quick_handoff_q_offset_.resize(0);
+      arm_quick_handoff_v_offset_.resize(0);
+    }
+    arm_interp_quick_active_ = quickArmModeActive && !isArmControlModeChanged_;
+    if (quickArmModeActive && arm_quick_handoff_q_offset_.size() == armNum_) {
+      const double u = std::clamp(
+          (time.toSec() - arm_quick_handoff_start_time_) / kQuickArmHandoffDuration,
+          0.0, 1.0);
+      const double u2 = u * u;
+      const double u3 = u2 * u;
+      output.smoothQ += (2.0 * u3 - 3.0 * u2 + 1.0) * arm_quick_handoff_q_offset_ +
+          (u3 - 2.0 * u2 + u) * kQuickArmHandoffDuration * arm_quick_handoff_v_offset_;
+      output.smoothV += (6.0 * u2 - 6.0 * u) / kQuickArmHandoffDuration *
+          arm_quick_handoff_q_offset_ + (3.0 * u2 - 4.0 * u + 1.0) *
+          arm_quick_handoff_v_offset_;
+      if (u >= 1.0) {
+        arm_quick_handoff_q_offset_.resize(0);
+        arm_quick_handoff_v_offset_.resize(0);
+      }
+    }
     ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_smooth", output.smoothQ);
     ros_logger_->publishVector("/humanoid_wheel/arm_target_qvel_smooth", output.smoothV);
-
-    const bool quickArmModeActive = (quickMode_ == 2 || quickMode_ == 3) && (lbMpcMode == 1 || lbMpcMode == 3);
     const bool shouldUseOutput = use_arm_trajectory_control_ || quickArmModeActive;
     if (!shouldUseOutput) {
       return;

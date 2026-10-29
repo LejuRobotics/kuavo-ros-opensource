@@ -81,14 +81,14 @@ with (root/'observations.jsonl').open('a',buffering=1) as log:
         except Exception:c={}
         joy=JoySticks()
         for k,v in c.get('joy',{}).items():setattr(joy,k,v)
-        joypub.publish(joy)
+        if c.get('joy_enabled', True): joypub.publish(joy)
         stamp=rospy.Time.now();chest=(0,0,1.2+float(c.get('chest_height_offset',0.)))
         yaw=c.get('torso',0.)*math.sin(t)+float(c.get('torso_offset',0.))
         q=tf.transformations.quaternion_from_euler(0,0,yaw)
         arms,rotations=synthetic_arms(float(c.get('arm',0)),t)
         points=[arms[0][0],arms[0][1],arms[1][0],arms[1][1],arms[0][2],arms[1][2]]
         points += [arms[0][2]]*8+[arms[1][2]]*8+[np.array((0,0,.9)),np.array(chest),np.array((0,0,1.4)),np.array((0,0,1.55))]
-        msg=PoseInfoList(timestamp_ms=int(time.time()*1000),is_high_confidence=True,is_hand_tracking=False)
+        msg=PoseInfoList(timestamp_ms=int(time.time()*1000),is_high_confidence=True,is_hand_tracking=bool(c.get('hand_tracking',False)))
         chest_q=tf.transformations.quaternion_multiply(q,tf.transformations.quaternion_from_euler(math.pi/2,0,math.pi/2))
         for i,(x,y,z) in enumerate(points):
             pose=PoseInfo();pose.position.x=math.cos(yaw)*x-math.sin(yaw)*y;pose.position.y=math.sin(yaw)*x+math.cos(yaw)*y;pose.position.z=z
@@ -96,6 +96,18 @@ with (root/'observations.jsonl').open('a',buffering=1) as log:
             if i in (4,5):rotation=tf.transformations.quaternion_multiply(q,rotations[i-4])
             pose.orientation.x,pose.orientation.y,pose.orientation.z,pose.orientation.w=rotation
             msg.poses.append(pose)
+        if msg.is_hand_tracking:
+            # Public optical finger encoding: roll relative to the palm.
+            gesture=c.get('optical_gesture','neutral')
+            for palm_index, first_finger in ((4,10),(5,18)):
+                palm=msg.poses[palm_index].orientation
+                palm_q=(palm.x,palm.y,palm.z,palm.w)
+                for finger in range(4):
+                    bent=(gesture=='ok' and finger==0) or (gesture=='stop' and finger in (1,2))
+                    qfinger=tf.transformations.quaternion_multiply(palm_q,
+                        tf.transformations.quaternion_from_euler(1.2 if bent else 0.,0.,0.))
+                    orientation=msg.poses[first_finger+finger].orientation
+                    orientation.x,orientation.y,orientation.z,orientation.w=qfinger
         if c.get('body',True):
             posepub.publish(msg)
             br.sendTransform(chest,q,stamp,'Chest','torso')

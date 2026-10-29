@@ -508,6 +508,9 @@ class IkRos:
         self._absolute_resume_after_prepare = False
         self._absolute_prepare_complete = False
         self._joystick_receive_monotonic = None
+        # One admission per Mapper lifetime; stop/reset/source changes never
+        # rearm triggers because they remain end-effector inputs afterwards.
+        self._controller_start_consumed = False
         self._absolute_fault_hold_pending = False
         self._absolute_fault_hold_reason = AbsoluteEnableReason.NONE
         self._absolute_alignment_errors = [float("nan")] * 4
@@ -593,6 +596,10 @@ class IkRos:
 
         model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))
         self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(model_path, predict_gesture=predict_gesture, hand_reference_mode=hand_reference_mode)
+        if self.enable_velocity_ik_takeover:
+            # Formal startup is admitted once by _controller_start_request.
+            # Do not let the legacy 50-frame gesture path bypass that latch.
+            self.quest3_arm_info_transformer.controller_trigger_start_enabled = False
         self.quest3_arm_info_transformer.control_torso = control_torso
         self.kf_left = None
         self.kf_right = None
@@ -991,7 +998,12 @@ class IkRos:
 
             expected_source = self._configured_tracking_source()
             if (expected_source == TeleopTcpTarget.SOURCE_UNKNOWN
-                    and self._tracking_session_source != TeleopTcpTarget.SOURCE_UNKNOWN):
+                    and self._tracking_session_source != TeleopTcpTarget.SOURCE_UNKNOWN
+                    and not (self._fixed_pending_operation is None
+                             and self._absolute_state in (
+                                 AbsoluteEnableState.WAITING,
+                                 AbsoluteEnableState.WAIT_RELEASE,
+                                 AbsoluteEnableState.PREPARED))):
                 expected_source = self._tracking_session_source
             source_matches_mode = (
                 expected_source == TeleopTcpTarget.SOURCE_UNKNOWN
@@ -2012,6 +2024,71 @@ class IkRos:
             self._publish_fixed_operation_state()
             self._fixed_operation_mutex.release()
 
+    def _follow_input_time_locked(self):
+        # Optical following has no controller heartbeat. Require its accepted
+        # pose stream instead; wheel commands keep their separate joystick gate.
+        target = self._absolute_latest_target
+        if (target is not None
+                and target.get('source') == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+                and self.tracking_source_mode != TrackingSourceMode.CONTROLLER):
+            return target['receive_time']
+        return self._joystick_receive_monotonic
+
+    def _maybe_start_optical_follow(self, source, message_accepted):
+        """Admit an optical OK from idle/PREPARED through fresh recapture.
+
+        Never hand off an ACTIVE source in place. In auto mode the operator
+        first returns to PREPARED with X+A, then holds both optical OK gestures.
+        """
+        if not self.enable_velocity_ik_takeover:
+            return
+        now = time.monotonic()
+        transformer = self.quest3_arm_info_transformer
+        with self._absolute_lock:
+            eligible = (
+                self.tracking_source_mode != TrackingSourceMode.CONTROLLER
+                and source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+                and message_accepted
+                and self._absolute_state in (AbsoluteEnableState.WAITING,
+                    AbsoluteEnableState.WAIT_RELEASE, AbsoluteEnableState.PREPARED)
+                and self._fixed_pending_operation is None
+                and not self._absolute_fault_hold_pending
+                and not self._tracking_source_hold_latched
+                and not self._absolute_stop_pending
+                and not self._absolute_external_mode_reset_pending
+                and not self._fixed_operation_error
+                and transformer.is_runing_gesture()
+                and not transformer.is_stop_gesture())
+            previous = getattr(self, '_optical_ok_time', None)
+            count = getattr(self, '_optical_ok_count', 0)
+            if previous is None or not 0 <= now-previous <= self.absolute_enable_max_vr_age:
+                count = 0
+            self._optical_ok_time = now
+            self._optical_ok_count = count+1 if eligible else 0
+            if (source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+                    and self._fixed_pending_operation is None
+                    and self._absolute_state in (AbsoluteEnableState.WAITING,
+                        AbsoluteEnableState.WAIT_RELEASE, AbsoluteEnableState.PREPARED)):
+                # A controller's running latch or nonconsecutive legacy OK
+                # counts must not grant a new optical session before this gate.
+                transformer.is_runing = False
+            if self._optical_ok_count < 50:
+                return
+            self._optical_ok_count = 0
+            # End PREPARE's epoch before accepting any optical pose. The normal
+            # lifecycle must capture measured joints, align and reacquire its
+            # execution owner; the old controller transform is never reused.
+            self._bump_absolute_generation_locked()
+            self._absolute_state = AbsoluteEnableState.WAITING
+            self._absolute_pending_capture = None
+            self._absolute_frozen_target = None
+            self._absolute_latest_target = None
+            self._absolute_gesture_running = False
+            self._fixed_operation_block = False
+            self._fixed_prepare_bootstrap = False
+            self._tracking_session_source = TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+            transformer.is_runing = True
+
     def _fixed_capture_input_error_locked(self):
         """Explicit button authority does not replace fresh pose/sensor input."""
         now = time.monotonic()
@@ -2020,8 +2097,8 @@ class IkRos:
         joint_age = (float("inf") if self._absolute_latest_measured_q is None
                      or self._absolute_latest_measured_q_time is None
                      else now - self._absolute_latest_measured_q_time)
-        joystick_age = (float("inf") if self._joystick_receive_monotonic is None
-                        else now - self._joystick_receive_monotonic)
+        input_time = self._follow_input_time_locked()
+        joystick_age = float("inf") if input_time is None else now - input_time
         if (not 0.0 <= target_age <= self.absolute_enable_max_vr_age
                 or not 0.0 <= joint_age <= self.absolute_enable_max_joint_state_age
                 or not 0.0 <= joystick_age <= self.absolute_enable_max_vr_age):
@@ -2031,6 +2108,9 @@ class IkRos:
         return None
 
     def _authorize_fixed_follow_locked(self):
+        # Includes X+A replacing a pending PREPARE before a mode-2 request
+        # reaches _queue_fixed_request_locked.
+        self._controller_start_consumed = True
         # mode=2 is an explicit operator follow request (X+A or X+B), not a
         # pose-confidence inference. Use the SAME latch as gesture control so
         # subsequent real stop gestures still revoke it normally.
@@ -2199,6 +2279,8 @@ class IkRos:
         return result(True, "Request accepted; waiting for readiness and real execution acknowledgement")
 
     def _queue_fixed_request_locked(self, mode, phase):
+        if mode == 2:
+            self._controller_start_consumed = True
         timeout = self._fixed_dependency_timeout if phase == 'dependencies' else self._fixed_prepare_timeout
         self._fixed_pending_operation = dict(mode=mode, phase=phase, resume=False,
             deadline=time.monotonic()+timeout, generation=self._absolute_generation,
@@ -2258,11 +2340,11 @@ class IkRos:
                 failure = 'Pending operation cancelled by stop/fault/session/source change'
             elif now >= p['deadline']:
                 failure = 'Operation timed out in ' + p['phase'] + '; press X+A again after checking readiness'
-            elif (self._joystick_receive_monotonic is None
-                    or not 0 <= now-self._joystick_receive_monotonic <= .5):
-                age = (float('inf') if self._joystick_receive_monotonic is None
-                       else now-self._joystick_receive_monotonic)
-                failure = ('Pending operation cancelled: joystick %s (age=%.6fs)' %
+            elif (self._follow_input_time_locked() is None
+                    or not 0 <= now-self._follow_input_time_locked() <= .5):
+                age = (float('inf') if self._follow_input_time_locked() is None
+                       else now-self._follow_input_time_locked())
+                failure = ('Pending operation cancelled: operator input %s (age=%.6fs)' %
                            ('timestamp invalid' if age < 0 else 'stream lost', age))
             elif (self._absolute_latest_target is not None
                     and not 0 <= now-self._absolute_latest_target['receive_time'] <= .5):
@@ -4114,6 +4196,8 @@ class IkRos:
             gate.reset()
             self._body_coordinate_epoch += 1
         if not gate.accept(quest_bone_poses_msg.timestamp_ms, received_monotonic):
+            with self._absolute_lock:
+                self._optical_ok_count = 0
             rospy.logwarn_throttle(1.0, "[IkRos] discarded delayed/reordered raw Quest sample")
             return
         self._last_fresh_source_receive = received_monotonic
@@ -4140,6 +4224,7 @@ class IkRos:
             if quest_bone_poses_msg.is_hand_tracking
             else TeleopTcpTarget.SOURCE_QUEST_CONTROLLER
         )
+        self._maybe_start_optical_follow(source, message_accepted)
         source_policy = self._tracking_source_policy(
             source, self.quest3_arm_info_transformer.is_runing
         )
@@ -4552,7 +4637,8 @@ class IkRos:
             edge = down and not getattr(self, '_controller_start_down', False)
             self._controller_start_down = down
             # Active triggers retain their existing end-effector meaning.
-            eligible = (self._absolute_state in (AbsoluteEnableState.WAITING,
+            eligible = (not getattr(self, '_controller_start_consumed', False)
+                        and self._absolute_state in (AbsoluteEnableState.WAITING,
                         AbsoluteEnableState.WAIT_RELEASE, AbsoluteEnableState.PREPARED)
                         and self._fixed_pending_operation is None)
         if edge and eligible:
@@ -4563,6 +4649,9 @@ class IkRos:
                     self._controller_start_down = False
                 return
             try:
+                with self._absolute_lock:
+                    if self._controller_start_consumed:
+                        return
                 response = self._fixed_arm_operation(2)
                 rospy.loginfo('[FixedStart] double front trigger: %s', response.message)
             finally:
@@ -5450,12 +5539,10 @@ if __name__ == "__main__":
     import json
     with open(model_config_file, 'r') as f:
         model_config = json.load(f)
-    overlay_path = os.path.join(get_package_path("wheel_arm_abs_vel"),
-                                "config", f"model_s{robot_version}.json")
-    with open(overlay_path, "r") as overlay_file:
-        overlay = json.load(overlay_file)
-    if any(not key.startswith("velocity_ik_") for key in overlay):
-        raise ValueError("Non-absolute key in model contract")
+    contract = json.loads(rospy.get_param('/whole_body_velocity_ik/model_contract_json'))
+    if contract.get('robot_version') != int(robot_version):
+        raise ValueError('Absolute Mapper/model contract robot_version mismatch')
+    overlay = {key: value for key, value in contract.items() if key.startswith('velocity_ik_')}
     model_config.update(overlay)
     model_file = str(require_full_model(robot_version, kuavo_assests_path, overlay))
     if int(rospy.get_param("/robot_version", int(robot_version))) != int(robot_version):
