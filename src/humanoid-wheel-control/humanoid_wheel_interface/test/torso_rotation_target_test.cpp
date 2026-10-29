@@ -89,6 +89,21 @@ bool testStopAndInvalidInputPreserveTarget() {
   return ok;
 }
 
+bool testResetKeepsRaisedKneeLegAndRestoresOnlyWaist() {
+  const Eigen::Vector4d held(0.12, -0.20, 0.6035, 0.4);
+  const Eigen::Vector4d initial(0.0, 0.0, 0.08, -0.02);
+  const auto reset = ocs2::makeTorsoRotationResetTarget(held, initial, kLower, kUpper);
+  bool ok = check(reset[0] == held[0] && reset[1] == held[1],
+                  "rotation reset must not restore initial knee/leg after torso translation");
+  ok &= check(reset[2] == initial[2] && reset[3] == initial[3],
+              "rotation reset must restore initial waist pitch/yaw");
+  Eigen::Vector4d upper = kUpper;
+  upper[2] = 0.05;
+  const auto limited = ocs2::makeTorsoRotationResetTarget(held, initial, kLower, upper);
+  ok &= check(limited[2] == upper[2], "rotation reset must respect model joint limits");
+  return ok;
+}
+
 }  // namespace
 
 int main() {
@@ -97,6 +112,7 @@ int main() {
   ok &= testModelLimitsTakePrecedence();
   ok &= testOutsideWorkspaceEntryDoesNotJumpAndOnlyMovesInward();
   ok &= testStopAndInvalidInputPreserveTarget();
+  ok &= testResetKeepsRaisedKneeLegAndRestoresOnlyWaist();
   if (!ok) {
     std::cerr << "torso_rotation_target_test failed\n";
     return 1;

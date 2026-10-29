@@ -15,6 +15,10 @@
 #include <string>
 #include <unordered_map>
 
+namespace dexhand {
+class ModbusDexhand;   // 仅用于缓存句柄指针，实现细节在 modbus.h
+}
+
 namespace eef_controller {  
 using namespace dexhand;
 using DualHandsArray = std::array<FingerArray, 2>;
@@ -257,6 +261,27 @@ private:
     bool ParseActionSequenceFile(const std::string & gesture_file_path, std::vector<GestureInfoPtr> &gesture_infos);
 
     void control_thread_func();
+    /// 提交一侧手待发的位置/速度命令。返回 false = 同手锁被占，命令保留到下一周期。
+    void flushHandCommands(int side);
+    /// CAN 下用 try 提交（回读线程会占锁），抢不到返回 false；485 下直接提交。
+    bool submitPositions(dexhand::DexHandBase* hand, const UnsignedFingerArray& positions);
+    bool submitSpeeds(dexhand::DexHandBase* hand, const FingerArray& speeds);
+    /// 485 专有：状态轮询（CAN 下不查，请求/应答会把控制循环卡住）。
+    void pollFingerStatus485();
+    /// 触觉手传感器状态（仅 V1_TOUCH 实现该接口）。
+    void pollTouchStatus();
+    void feedback_thread_func();
+    /// 查询并更新单侧快照：分类 Busy/Failed、按样本年龄告警、成功则写快照。
+    void pollFeedbackSide(int side);
+    /// 睡到本轮周期结束（扣掉本轮耗时），可被 close() 唤醒。
+    void waitFeedbackCycle(int64_t cycle_start_ms);
+    /// 线程退出时打印两侧累计计数（区分"抢不到锁"与"手不应答"）。
+    void logFeedbackSummary();
+    /// 解析 KUAVO_HAND_FEEDBACK_MS：0=关闭，kFeedbackPeriodMinMs~MaxMs 生效，
+    /// 未设置或非法值返回 fallback_ms（并告警）。
+    static int resolveFeedbackPeriodMs(int fallback_ms);
+    /// steady_clock 毫秒，用于算样本年龄与周期。
+    static int64_t monoNowMs();
     void gesture_thread_func();
     bool sleep_for_100ms(int ms_count);
 
@@ -276,7 +301,40 @@ private:
 
     FingerStatusArray finger_status_;
     FingerTouchStatusArray finger_touch_status_;
-    
+
+    // 真实反馈快照（CAN 模式，由 feedback_thread_ 定期刷新）
+    // positions 已换算为 0~100，与 /dexhand/command 同口径；速度/电流保留 SDK 原值
+    FingerStatusArray feedback_snapshot_;
+    bool feedback_valid_[2] = {false, false};
+    mutable std::mutex feedback_mutex_;
+    std::thread feedback_thread_;
+
+    /// 单侧反馈线程的运行时状态（按侧聚合，避免多个平行数组靠下标对齐）
+    struct FeedbackSideState {
+        const char* name = "";
+        int64_t last_ok_ms = 0;      // 上次成功查询的时刻，用于算样本年龄
+        int64_t last_warn_ms = 0;    // 上次陈旧告警的时刻，用于限流
+        bool first_logged = false;   // 只打印一次首样本
+        bool cast_warned = false;    // 非 ModbusDexhand 只告警一次
+        uint64_t ok = 0;
+        uint64_t busy = 0;           // 锁被占（正常让位）
+        uint64_t failed = 0;         // SDK 异常或无数据
+    };
+    static constexpr int kHandCount = 2;
+    FeedbackSideState feedback_sides_[kHandCount] = {{"left"}, {"right"}};
+    // 启动时缓存，避免每轮 dynamic_cast；close() 在 join 之后置空
+    dexhand::ModbusDexhand* feedback_hands_[kHandCount] = {nullptr, nullptr};
+    // 反馈线程的周期等待：条件变量让运行标志一变就立即退出（对应内核 wait_event_timeout）
+    std::mutex feedback_wait_mutex_;
+    std::condition_variable feedback_wait_cv_;
+    // 反馈线程参数（单位 ms）
+    static constexpr int kFeedbackPeriodDefaultMs = 200;   // 5Hz/手，验证过的上限
+    static constexpr int kFeedbackPeriodMinMs = 200;       // KUAVO_HAND_FEEDBACK_MS 下限
+    static constexpr int kFeedbackPeriodMaxMs = 60000;     // 上限（约 0.017Hz）
+    static constexpr int kFeedbackStaleWarnMs = 2000;      // 样本年龄超过此值才告警
+    static constexpr int kFeedbackWarnIntervalMs = 10000;  // 同侧告警限流间隔
+    int feedback_period_ms_{kFeedbackPeriodDefaultMs};
+
     // 线程安全保护
     mutable std::mutex finger_status_mutex_;
     mutable std::mutex touch_status_mutex_;
