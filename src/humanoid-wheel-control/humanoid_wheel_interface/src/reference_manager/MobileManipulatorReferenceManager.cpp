@@ -853,10 +853,13 @@ namespace mobile_manipulator {
       cmdTorsoPose_mtx_.lock();
       isCmdTorsoPoseUpdated_ = true;
       cmdTorsoPoseDesiredTime_ = 0.0;
+      const double yaw = applyTorsoYawRequest(
+          cmdTorsoPose_[3], msg->angular.z, cmdTorsoPose_[2] - initialTorsoPos_[2],
+          msg->linear.z - initialTorsoPos_[2]);
       cmdTorsoPose_[0] = msg->linear.x;
       cmdTorsoPose_[1] = msg->linear.y;
       cmdTorsoPose_[2] = msg->linear.z;
-      cmdTorsoPose_[3] = msg->angular.z;
+      cmdTorsoPose_[3] = yaw;
       cmdTorsoPose_[4] = msg->angular.y;
       cmdTorsoPose_[5] = msg->angular.x;
       // std::cout << "Received cmdTorsoPose: "<< cmdTorsoPose_.transpose() << std::endl;
@@ -5714,6 +5717,10 @@ namespace mobile_manipulator {
       }
     }
 
+    // 仅过滤本拍新增偏航；升降/前倾不能把已有的 A/B 转腰目标拉回。
+    cmd4[2] = applyTorsoYawRequest(
+        cmd6[3], cmd4[2], cmd6[2] - initialTorsoPos_[2], cmd4[1] - initialTorsoPos_[2]);
+
     // Write back sole open-loop final target; Ruckig tracks from prevTarget → cmd4
     {
       std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
@@ -5779,15 +5786,8 @@ namespace mobile_manipulator {
 
     clampAxis(cmdTorsoPose_[0], x_min, x_max);
     clampAxis(cmdTorsoPose_[2], z_min, z_max);
-    // 低高度禁止转腰（与 Joy kWaistYawMinZIncrement=0.05 对齐）
-    if (z_inc < 0.05) {
-      if (std::abs(cmdTorsoPose_[3]) > 1e-9) {
-        cmdTorsoPose_[3] = 0.0;
-        changed = true;
-      }
-    } else {
-      clampAxis(cmdTorsoPose_[3], torsoWsMinYaw_, torsoWsMaxYaw_);
-    }
+    // 这里仅限制偏航范围。低高度的新请求由输入路径过滤，已有目标保持。
+    clampAxis(cmdTorsoPose_[3], torsoWsMinYaw_, torsoWsMaxYaw_);
     clampAxis(cmdTorsoPose_[4], torsoWsMinPitch_, torsoWsMaxPitch_);
     cmdTorsoPose_[1] = initialTorsoPos_[1];
     cmdTorsoPose_[5] = 0.0;

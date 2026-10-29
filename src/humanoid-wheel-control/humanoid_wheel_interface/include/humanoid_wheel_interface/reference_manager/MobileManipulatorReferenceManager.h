@@ -28,6 +28,7 @@
 
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
+#include "humanoid_wheel_interface/motion_planner/TorsoYawTarget.h"
 #include "ocs2_robotic_tools/common/RotationTransforms.h"
 #include "ocs2_pinocchio_interface/PinocchioInterface.h"
 #include "humanoid_interface/common/TopicLogger.h"
@@ -472,8 +473,8 @@ private:
   double torsoWsMaxZ_{0.32};
   double torsoWsMinPitch_{0.0};
   double torsoWsMaxPitch_{0.5235};
-  double torsoWsMinYaw_{-0.5235};
-  double torsoWsMaxYaw_{0.5235};
+  double torsoWsMinYaw_{-kTorsoYawTargetLimit};
+  double torsoWsMaxYaw_{kTorsoYawTargetLimit};
   bool isCmdTorsoPoseUpdated_{false};
   double cmdTorsoPoseDesiredTime_{0.0};
   ros::Subscriber targetTorsoPoseSubscriber_;
