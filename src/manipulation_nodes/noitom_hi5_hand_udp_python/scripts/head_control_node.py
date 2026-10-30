@@ -3,8 +3,9 @@
 """独立的头部控制节点。
 
 head_control_mode:
-  vr_follow   跟随 Quest 骨骼 Chest 相对 Head 的姿态
-  fixed       保持当前头角
+  fixed       默认。不发布头部指令，把头留给其它控制（例如 tact）
+  vr_follow   跟随 Quest 骨骼 Chest 相对 Head 的姿态。由 VR 节点调用服务切入；
+              Chest→Head 超过 3 秒没有新 TF 时自动回到 fixed，不用缓存姿态继续发布
   track_hand  跟踪手，目标由 head_track_target 决定
 head_track_target（仅 track_hand）:
   both_hands_midpoint  双手连线，hand_bias 决定默认偏左还是偏右，再按近期速度偏向动得更勤的手
@@ -79,6 +80,9 @@ _TARGET_FROM_MODE = {
 
 TRACK_ACTIVE_HAND = "active_hand"
 TRACK_BOTH_HANDS_MIDPOINT = "both_hands_midpoint"
+# Chest→Head 超过该时间没有新的 TF 发布，vr_follow 回到 fixed。
+# lookupTransform(Time(0)) 在发布端退出后仍会返回缓冲区里的最后一帧。
+DEFAULT_VR_TF_TIMEOUT_SEC = 3.0
 # 单帧速度超过该值视为 TF 尖峰，不计入活动量
 _MAX_HAND_SPEED_M_S = 2.0
 # 两边活动量都低于该值时保持中点，避免静止噪声把头拉开
@@ -116,6 +120,14 @@ class _HandActivity:
         return self.activity
 
 
+def chest_head_tf_is_fresh(now_sec, stamp_sec, timeout_sec):
+    """TF 时间戳够新才算 VR 正在发布。过期缓存不算。"""
+    if stamp_sec is None or timeout_sec < 0.0:
+        return False
+    age = now_sec - stamp_sec
+    return 0.0 <= age <= timeout_sec
+
+
 def _load_head_config(config_path):
     config = dict(_DEFAULT_CONFIG)
     config["joint_limits"] = dict(_DEFAULT_CONFIG["joint_limits"])
@@ -145,7 +157,11 @@ class HeadTrackHandNode:
 
         mode_name = str(rospy.get_param("~head_control_mode", "")).strip().lower()
         if not mode_name:
-            mode_name = str(config.get("head_control_mode", "vr_follow")).strip().lower()
+            mode_name = str(config.get("head_control_mode", "fixed")).strip().lower()
+        self._vr_tf_timeout = float(rospy.get_param("~vr_tf_timeout", DEFAULT_VR_TF_TIMEOUT_SEC))
+        self._vr_tf_missing_since = None
+        # 默认 fixed 不抢 /robot_head_motion_data。服务主动切到 fixed 时再按原逻辑发正前方。
+        self._release_head_command = mode_name in ("", "fixed")
         track_target = str(rospy.get_param("~head_track_target", "")).strip().lower()
         if not track_target:
             track_target = str(config.get("head_track_target", TRACK_BOTH_HANDS_MIDPOINT)).strip().lower()
@@ -218,7 +234,7 @@ class HeadTrackHandNode:
         rospy.on_shutdown(self._on_shutdown)
         rospy.loginfo(
             "head_control_node started. head_control_mode=%s head_track_target=%s rate=%.1f Hz "
-            "hand_bias=%.2f velocity_bias=%.2f hold=%.2fs. "
+            "hand_bias=%.2f velocity_bias=%.2f hold=%.2fs vr_tf_timeout=%.2fs. "
             "This node is the only publisher of /robot_head_motion_data.",
             self.head_control_mode,
             self.head_track_target,
@@ -226,6 +242,7 @@ class HeadTrackHandNode:
             self.hand_bias,
             self.velocity_bias,
             self.velocity_bias_hold_sec,
+            self._vr_tf_timeout,
         )
 
     def _apply_mode(self, mode_name, fixed_hand):
@@ -327,6 +344,8 @@ class HeadTrackHandNode:
             response.current_mode = self._effective_mode_name()
             return response
         mode_name, _target_name = self._apply_public(mode_name, self.head_track_target, fixed_hand)
+        self._vr_tf_missing_since = None
+        self._release_head_command = False
         if mode_name == "fixed":
             self.fixed_intent_pub.publish(Empty())
         response.success = True
@@ -415,6 +434,40 @@ class HeadTrackHandNode:
             degree += 180
         return degree
 
+    def _vr_chest_head_is_fresh(self):
+        """Chest→Head 是否仍在发布。缓冲区里的最后一帧不算。"""
+        try:
+            latest = self.listener.getLatestCommonTime(self.vr_chest_frame, self.vr_head_frame)
+        except Exception:
+            return False
+        if latest is None:
+            return False
+        try:
+            stamp_sec = latest.to_sec()
+        except AttributeError:
+            stamp_sec = float(latest)
+        return chest_head_tf_is_fresh(rospy.Time.now().to_sec(), stamp_sec, self._vr_tf_timeout)
+
+    def _vr_follow_timed_out(self):
+        """vr_follow 下 Chest→Head 持续缺失达到超时，则回到 fixed 且不再发头部指令。"""
+        if self._vr_chest_head_is_fresh():
+            self._vr_tf_missing_since = None
+            return False
+        now = rospy.Time.now().to_sec()
+        if self._vr_tf_missing_since is None:
+            self._vr_tf_missing_since = now
+            return False
+        if now - self._vr_tf_missing_since < self._vr_tf_timeout:
+            return False
+        self._vr_tf_missing_since = None
+        self._release_head_command = True
+        self._apply_public("fixed", self.head_track_target)
+        rospy.logwarn(
+            "Chest->Head TF missing for %.1fs, head control switches to fixed and stops publishing",
+            self._vr_tf_timeout,
+        )
+        return True
+
     def _update_vr_follow(self):
         """头显随动：Quest 骨骼 Chest 到 Head 的姿态直接作为头部关节角。"""
         try:
@@ -457,7 +510,31 @@ class HeadTrackHandNode:
         rate = rospy.Rate(self.rate_hz if self.rate_hz > 0.0 else 50.0)
         missing_tf_logged = False
         while not rospy.is_shutdown():
+            if self.manager.mode == HeadControlMode.FIXED and self._release_head_command:
+                self._publish_head_mode()
+                try:
+                    rate.sleep()
+                except rospy.ROSInterruptException:
+                    break
+                continue
             if self.manager.mode == HeadControlMode.VR_FOLLOW:
+                if self._vr_follow_timed_out():
+                    self._publish_head_mode()
+                    try:
+                        rate.sleep()
+                    except rospy.ROSInterruptException:
+                        break
+                    continue
+                if not self._vr_chest_head_is_fresh():
+                    rospy.logwarn_throttle(
+                        2.0, "vr_follow waiting for fresh Chest -> Head TF, not publishing the cached pose"
+                    )
+                    self._publish_head_mode()
+                    try:
+                        rate.sleep()
+                    except rospy.ROSInterruptException:
+                        break
+                    continue
                 self._update_vr_follow()
                 self._publish_head_mode()
                 try:

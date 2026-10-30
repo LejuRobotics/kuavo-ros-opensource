@@ -349,6 +349,22 @@ class Quest3BoneFramePublisher:
         self.reset_vr_torso_state_on_shutdown()
         self.stop_udp_receiver()
 
+    def _request_vr_follow_head_mode(self):
+        """主 Quest 连上后请求独立头控进入 vr_follow。头控节点不在时不阻塞收数。"""
+        if not self.publish_quest3_globals:
+            return
+        service_name = "/head_control_node/set_head_control_mode"
+        try:
+            rospy.wait_for_service(service_name, timeout=1.0)
+            client = rospy.ServiceProxy(service_name, SetHeadControlMode)
+            response = client(mode="vr_follow", fixed_hand="")
+            if response.success:
+                rospy.loginfo("Head control switched to vr_follow: %s", response.message)
+            else:
+                rospy.logwarn("Head control rejected vr_follow: %s", response.message)
+        except Exception as error:
+            rospy.logwarn("Failed to switch head control to vr_follow: %s", error)
+
     def _set_connected_state(self, connected):
         """连接状态统一写入口：按侧参数（若配置）+ 全局 /quest3/connected（仅主 Quest）。
 
@@ -425,6 +441,7 @@ class Quest3BoneFramePublisher:
                     self.connected_param if self.connected_param else "未配置",
                     "已设置" if self.publish_quest3_globals else "非主 Quest，不设置",
                 )
+                self._request_vr_follow_head_mode()
                 return True
             except socket.timeout:
                 print(f"\033[91mQuest3_timeout: Attempt {attempt + 1} timed out. Retrying...\033[0m")

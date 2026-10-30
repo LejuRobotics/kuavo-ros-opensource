@@ -1050,8 +1050,12 @@ namespace mobile_manipulator
           torso_vel.linear.z = lz * g12_torso_vel_scale_z_;
           torso_vel.angular.y = ay * g12_torso_vel_scale_pitch_;
           torso_vel.angular.z = az * g12_torso_vel_scale_yaw_;
-          clampTorsoVelAgainstOpenLoopState(torso_vel);
-          publishTorsoGroupVelocity(torso_vel, m1_pressed && !guide_pressed, guide_pressed);
+          const bool translation_input = guide_pressed && (lx != 0.0 || lz != 0.0);
+          const bool rotation_input = m1_pressed && !guide_pressed && (ay != 0.0 || az != 0.0);
+          if (translation_input || rotation_input) {
+            clampTorsoVelAgainstOpenLoopState(torso_vel);
+          }
+          publishTorsoGroupVelocity(torso_vel, rotation_input, translation_input);
         }
         else
         {

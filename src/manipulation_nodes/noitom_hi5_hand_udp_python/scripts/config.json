@@ -1,7 +1,7 @@
 {
     "head_control": {
-        "_comment_head_control_mode": "未传 launch 参数时的默认模式：vr_follow / track_hand / fixed。launch 的 head_control_mode:= 优先",
-        "head_control_mode": "vr_follow",
+        "_comment_head_control_mode": "未传 launch 参数时的默认模式：fixed / vr_follow / track_hand。默认 fixed 不发头部指令。VR 连上后由 Quest 节点调用服务切到 vr_follow。launch 的 head_control_mode:= 优先",
+        "head_control_mode": "fixed",
         "_comment_head_track_target": "仅 head_control_mode 为 track_hand 时生效：both_hands_midpoint / left_hand / right_hand / active_hand。launch 的 head_track_target:= 优先",
         "head_track_target": "both_hands_midpoint",
         "joint_limits": {

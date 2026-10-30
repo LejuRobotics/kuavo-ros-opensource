@@ -9,7 +9,7 @@
   <arg name="reference_shm_key" default="344421" />
   <arg name="owner_shm_key" default="344422" />
   <!-- Standard package entry for the validated fixed-base velocity IK pipeline. -->
-  <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed" />
+  <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <arg name="simulation_motor_servo" default="true" />
