@@ -276,7 +276,7 @@ protected:
   // z-coupled x envelope（与 mobile_manipulator_joy getTorsoMaxX 一致）：降 z 时收回超限 x，避免 pitch=0 不可达而前倾
   double getTorsoWorkspaceMaxX(double z_increment) const;
   // 钳制 cmdTorsoPose_ 到工作空间；若有修改返回 true（调用方需重规划 Ruckig）
-  bool clampCmdTorsoPoseToWorkspace();
+  bool clampCmdTorsoPoseToWorkspace(const vector_t* previousPose = nullptr);
   // cmdLegJoint
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
@@ -504,6 +504,7 @@ private:
   ros::Publisher torsoRotationLockPub_;
   bool torsoRotationRequested_{false};  // cmdTorsoVel_mtx_ 保护
   bool torsoRotationActive_{false};     // 仅规划线程访问
+  bool torsoTranslationFromRotation_{false};  // FK 接续的平移目标只允许主动向包络内移动
   bool torsoTranslationNeedsReset_{false};  // 平移目标改变后，RT 还需恢复位置
   bool torsoTranslationResetPending_{false};  // 旋转复位完成后执行位置复位
   Eigen::Vector4d torsoRotationJointTarget_{Eigen::Vector4d::Zero()};

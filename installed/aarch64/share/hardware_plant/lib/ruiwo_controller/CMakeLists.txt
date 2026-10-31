@@ -5,16 +5,22 @@ project(ruiwoTest)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 查找 Python 库
-find_package(Python3 3.8 COMPONENTS Interpreter Development NumPy REQUIRED)
-# find_package(PythonInterp REQUIRED 3.8)
-if(Python3_FOUND)
-    message(STATUS "Found Python: ${Python3_EXECUTABLE}")
-    message(STATUS "Python version: ${Python3_VERSION}")
-    
-else()
-    message(FATAL_ERROR "Python not found")
+# Ruiwo C++ 内嵌 CPython；Focal 4PRO 优先 3.8，避免 CMake 选中 3.9 且缺配套 dev/numpy。
+# NumPy 仅 ruiwo_actuator.py 运行时需要，编译 C++ 不包含 numpy 头。
+if(NOT Python3_EXECUTABLE AND EXISTS "/usr/bin/python3.8")
+  set(Python3_EXECUTABLE "/usr/bin/python3.8" CACHE FILEPATH "Ruiwo embedded Python" FORCE)
 endif()
+find_package(Python3 3.8 COMPONENTS Interpreter Development REQUIRED)
+if(NOT Python3_FOUND)
+  message(FATAL_ERROR "Python3 >= 3.8 not found for ruiwo_controller")
+endif()
+if(NOT Python3_Development_FOUND)
+  message(FATAL_ERROR
+    "Python3 Development (headers/libpython) not found for: ${Python3_EXECUTABLE}\n"
+    "Ubuntu 20.04 (4PRO): sudo apt install python3.8-dev python3-numpy\n"
+    "Other: install python3-dev matching that interpreter, or pass -DPython3_EXECUTABLE=...")
+endif()
+message(STATUS "[ruiwo_controller] Python: ${Python3_EXECUTABLE} (${Python3_VERSION})")
 
 find_package(yaml-cpp REQUIRED)
 

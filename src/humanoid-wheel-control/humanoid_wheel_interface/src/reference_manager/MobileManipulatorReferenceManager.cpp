@@ -4751,8 +4751,9 @@ namespace mobile_manipulator {
 
     // 旋转组的胸部 x/z 由锁定 knee/leg 后的 FK 派生，不是笛卡尔平移目标。
     // 对它做平移包络钳制会切回躯干跟踪，与最终 knee/leg 锁定冲突。
-    // 平移组松杆后仍继续收回包络外的 x，避免残留前倾目标。
-    if (!torsoRotationActive_ && isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true &&
+    // 从旋转 FK 接续的目标不能在松杆时自动回收；普通平移仍沿用包络处理。
+    if (!torsoRotationActive_ && !torsoTranslationFromRotation_ &&
+        isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true &&
         clampCmdTorsoPoseToWorkspace())
     {
       vector_t torsoPose4Dof = vector_t::Zero(4);
@@ -5519,6 +5520,7 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::releaseTorsoRotationControl()
   {
+    torsoTranslationFromRotation_ = false;
     torsoTranslationResetPending_ = false;
     {
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
@@ -5594,6 +5596,10 @@ namespace mobile_manipulator {
       }
       rotationRequested = false;
     }
+    // 零速度只刹停，不能因切组或超时解除锁定、启用笛卡尔包络回收。
+    if (torsoRotationActive_ && !rotationRequested && !integrateVel && !hasDelta) {
+      rotationRequested = true;
+    }
     if (torsoRotationActive_ && !rotationRequested) {
       // 转回平移组，以当前规划关节 FK 重建胸部目标，避免旧 x/z 把下肢拉回。
       vector_t state = initState;
@@ -5609,9 +5615,10 @@ namespace mobile_manipulator {
       }
       // 保留本帧已取出的笛卡尔速度，不清除下一帧的输入。
       torsoRotationActive_ = false;
+      torsoTranslationFromRotation_ = true;
       torsoRotationLockPub_.publish(sensor_msgs::JointState());
       hasTorsoVelIntegrateTime_ = false;
-      // 即使新组只发送零速度，也要初始化其规划器，不能读取旧关节轨迹。
+      // 首个有效平移输入初始化规划器，不能读取旧关节轨迹。
       calcRuckigTrajWithTorsoPose(initTime, torsoPose_prevTargetPose_, 0.0);
       torsoModeFlag_ = true;
     }
@@ -5653,6 +5660,7 @@ namespace mobile_manipulator {
         legJoint_prevTargetVel_.setZero();
         legJoint_prevTargetAcc_.setZero();
         torsoRotationActive_ = true;
+        torsoTranslationFromRotation_ = false;
         sensor_msgs::JointState lock;
         lock.name = {"knee_joint", "leg_joint"};
         lock.position = {torsoRotationJointTarget_[0], torsoRotationJointTarget_[1]};
@@ -5734,7 +5742,7 @@ namespace mobile_manipulator {
     }
 
     // 降 z 后若 x 仍停在高位包络外，收回 x（删掉“降到底再前倾”）
-    clampCmdTorsoPoseToWorkspace();
+    clampCmdTorsoPoseToWorkspace(torsoTranslationFromRotation_ ? &cmd6 : nullptr);
     {
       std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
       cmd4 << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
@@ -5760,7 +5768,7 @@ namespace mobile_manipulator {
     return torsoWsMaxX_;
   }
 
-  bool MobileManipulatorReferenceManager::clampCmdTorsoPoseToWorkspace()
+  bool MobileManipulatorReferenceManager::clampCmdTorsoPoseToWorkspace(const vector_t* previousPose)
   {
     std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
     if (cmdTorsoPose_.size() < 5) {
@@ -5774,7 +5782,15 @@ namespace mobile_manipulator {
     const double z_max = initialTorsoPos_[2] + torsoWsMaxZ_;
 
     bool changed = false;
-    auto clampAxis = [&](double& v, double lo, double hi) {
+    auto clampAxis = [&](int axis, double lo, double hi) {
+      double& v = cmdTorsoPose_[axis];
+      // 继承旋转 FK 的超限姿态不直接投影到包络；只允许保持或按输入向内收敛。
+      if (previousPose) {
+        const double limited = clampTorsoTranslationFromRotation(v, (*previousPose)[axis], lo, hi);
+        changed = changed || limited != v;
+        v = limited;
+        return;
+      }
       if (v < lo) {
         v = lo;
         changed = true;
@@ -5784,13 +5800,20 @@ namespace mobile_manipulator {
       }
     };
 
-    clampAxis(cmdTorsoPose_[0], x_min, x_max);
-    clampAxis(cmdTorsoPose_[2], z_min, z_max);
+    clampAxis(0, x_min, x_max);
+    clampAxis(2, z_min, z_max);
     // 这里仅限制偏航范围。低高度的新请求由输入路径过滤，已有目标保持。
-    clampAxis(cmdTorsoPose_[3], torsoWsMinYaw_, torsoWsMaxYaw_);
-    clampAxis(cmdTorsoPose_[4], torsoWsMinPitch_, torsoWsMaxPitch_);
+    clampAxis(3, torsoWsMinYaw_, torsoWsMaxYaw_);
+    clampAxis(4, torsoWsMinPitch_, torsoWsMaxPitch_);
     cmdTorsoPose_[1] = initialTorsoPos_[1];
     cmdTorsoPose_[5] = 0.0;
+    if (previousPose && cmdTorsoPose_[0] >= x_min &&
+        cmdTorsoPose_[0] <= initialTorsoPos_[0] + getTorsoWorkspaceMaxX(cmdTorsoPose_[2] - initialTorsoPos_[2]) &&
+        cmdTorsoPose_[2] >= z_min && cmdTorsoPose_[2] <= z_max &&
+        cmdTorsoPose_[3] >= torsoWsMinYaw_ && cmdTorsoPose_[3] <= torsoWsMaxYaw_ &&
+        cmdTorsoPose_[4] >= torsoWsMinPitch_ && cmdTorsoPose_[4] <= torsoWsMaxPitch_) {
+      torsoTranslationFromRotation_ = false;  // 回到包络后恢复普通平移规则
+    }
     return changed;
   }
 

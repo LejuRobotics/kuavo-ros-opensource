@@ -6,6 +6,11 @@
 
 namespace ocs2 {
 
+// 从旋转 FK 接续平移：包络外的目标不跳变，也不能继续向外累计。
+inline double clampTorsoTranslationFromRotation(double requested, double previous, double lower, double upper) {
+  return std::max(std::min(lower, previous), std::min(std::max(upper, previous), requested));
+}
+
 // 旋转组复位保留 knee/leg 快照，仅恢复初始化时的腰部 pitch/yaw。
 inline Eigen::Vector4d makeTorsoRotationResetTarget(
     const Eigen::Vector4d& target, const Eigen::Vector4d& initial,

@@ -66,7 +66,7 @@ class HeadTest(unittest.TestCase):
             ['robot_version:=62','with_ik:=false'])],None,verbose=False)
         nodes=[n for n in cfg.nodes if n.name=='head_control_node' and 'head_control_node.py' in n.args]
         self.assertEqual(len(nodes),1)
-        self.assertEqual(cfg.params['/head_control_node/head_control_mode'].value,'vr_follow')
+        self.assertEqual(cfg.params['/head_control_node/head_control_mode'].value,'fixed')
         # Receiver explicitly disables its old head publisher.
         source=(ROOT/'scripts/monitor_quest3_velocity.py').read_text()
         init=next(n for n in ast.walk(ast.parse(source)) if isinstance(n,ast.FunctionDef) and n.name=='__init__')

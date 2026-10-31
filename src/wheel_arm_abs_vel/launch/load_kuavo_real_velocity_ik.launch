@@ -256,7 +256,7 @@
     </include>
   </group>
   <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in (62, 63, 400062) and (int(arg('robot_version')) != 63 or not arg('with_ik')) and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires S62/S63/400062 (S63 with_ik=false) wheel mode, measured estimator and no external MPC'])" />
-  <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed" />
+  <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
   <include file="$(find noitom_hi5_hand_udp_python)/launch/head_control_node.launch">
     <arg name="head_control_mode" value="$(arg head_control_mode)" />

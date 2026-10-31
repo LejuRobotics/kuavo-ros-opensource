@@ -6,7 +6,7 @@
     <arg name="ctrl_arm_idx" default="2"/>
     <arg name="predict_gesture" default="false"/>
     <arg name="ee_type" default="qiangnao"/>
-    <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed"/>
+    <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand。默认 fixed；VR 连上后由 Quest 节点调用服务切到 vr_follow"/>
     <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand"/>
     <!-- 头部指令由 head_control_node 发布 -->
     <arg name="enable_head_control" default="false"/>

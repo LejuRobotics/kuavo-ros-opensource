@@ -115,6 +115,17 @@ int main() {
   ok &= testStopAndInvalidInputPreserveTarget();
   ok &= testResetKeepsRaisedKneeLegAndRestoresOnlyWaist();
   for (double direction : {-1.0, 1.0}) {
+    const double previous = direction * 0.2;
+    ok &= check(near(ocs2::clampTorsoTranslationFromRotation(previous, previous, -0.1, 0.1), previous),
+                "rotation FK outside translation envelope must hold without jumping");
+    ok &= check(near(ocs2::clampTorsoTranslationFromRotation(direction * 0.19, previous, -0.1, 0.1),
+                     direction * 0.19), "inherited translation target must allow small inward steps");
+    ok &= check(near(ocs2::clampTorsoTranslationFromRotation(direction * 0.21, previous, -0.1, 0.1), previous),
+                "inherited translation target must reject outward steps");
+    ok &= check(near(ocs2::clampTorsoTranslationFromRotation(direction * 0.12, direction * 0.05, -0.1, 0.1),
+                     direction * 0.1), "translation target inside envelope must respect normal limits");
+  }
+  for (double direction : {-1.0, 1.0}) {
     const double target = direction * ocs2::kTorsoYawTargetLimit;
     const double yaw = ocs2::applyTorsoYawRequest(0.0, target, 0.10, 0.10);
     ok &= check(near(yaw, target), "raised torso A/B must reach pi minus margin, not 30 degrees");

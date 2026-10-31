@@ -1,6 +1,6 @@
 <launch>
     <!-- 轮臂独立头跟手。机器人 TF 起来之后即可启动，不需要 VR 遥操作节点。 -->
-    <arg name="head_control_mode" default="vr_follow" doc="vr_follow / track_hand / fixed"/>
+    <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand。默认 fixed 不发头部指令；vr_follow 由 VR 节点调用服务切入，Chest→Head 超时 3 秒后回到 fixed"/>
     <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时有效：both_hands_midpoint / left_hand / right_hand / active_hand"/>
     <arg name="rate" default="50.0" doc="头控更新频率 Hz"/>
     <arg name="base_frame" default="waist_yaw_link" doc="头部指令的参考坐标系，轮臂为腰 yaw"/>
