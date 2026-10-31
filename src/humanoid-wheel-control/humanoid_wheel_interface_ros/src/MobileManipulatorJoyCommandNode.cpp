@@ -1186,8 +1186,14 @@ namespace mobile_manipulator
         torso_vel.linear.z = lz * torso_vel_scale_z_;
         torso_vel.angular.y = ay * torso_vel_scale_pitch_;
         torso_vel.angular.z = az * torso_vel_scale_yaw_;
-        clampTorsoVelAgainstOpenLoopState(torso_vel);
-        publishTorsoGroupVelocity(torso_vel, rb_pressed && !lb_pressed, lb_pressed);
+        // 修饰键本身只选择操控轴，不触发分组切换或包络回收。
+        // 用死区后的原始输入判断，避免零摇杆被自动回收速度变成平移命令。
+        const bool translation_input = lb_pressed && (lx != 0.0 || lz != 0.0);
+        const bool rotation_input = rb_pressed && !lb_pressed && (ay != 0.0 || az != 0.0);
+        if (translation_input || rotation_input) {
+          clampTorsoVelAgainstOpenLoopState(torso_vel);
+        }
+        publishTorsoGroupVelocity(torso_vel, rotation_input, translation_input);
       }
       else
       {

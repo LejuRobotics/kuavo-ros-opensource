@@ -853,10 +853,13 @@ namespace mobile_manipulator {
       cmdTorsoPose_mtx_.lock();
       isCmdTorsoPoseUpdated_ = true;
       cmdTorsoPoseDesiredTime_ = 0.0;
+      const double yaw = applyTorsoYawRequest(
+          cmdTorsoPose_[3], msg->angular.z, cmdTorsoPose_[2] - initialTorsoPos_[2],
+          msg->linear.z - initialTorsoPos_[2]);
       cmdTorsoPose_[0] = msg->linear.x;
       cmdTorsoPose_[1] = msg->linear.y;
       cmdTorsoPose_[2] = msg->linear.z;
-      cmdTorsoPose_[3] = msg->angular.z;
+      cmdTorsoPose_[3] = yaw;
       cmdTorsoPose_[4] = msg->angular.y;
       cmdTorsoPose_[5] = msg->angular.x;
       // std::cout << "Received cmdTorsoPose: "<< cmdTorsoPose_.transpose() << std::endl;
@@ -2306,6 +2309,11 @@ namespace mobile_manipulator {
 
     planner->setTargetPose(targetLegJoint);
     double durationTime = planner->calcTrajectory(desiredTime);
+    if (isResetTorsoRePlanning_) {
+      resetTorsoTime_ = durationTime;
+      resetTorsoWindowEnd_.store(resetTorsoInitTime_ + durationTime, std::memory_order_release);
+      isResetTorsoRePlanning_ = false;
+    }
 
     std_msgs::Float32 time_msg;
     time_msg.data = durationTime;
@@ -3838,6 +3846,12 @@ namespace mobile_manipulator {
       // return;
     }
     static bool isTriggerSetTorsoFirst = false;
+    if (torsoTranslationResetPending_ && initTime >= resetTorsoTime_ + resetTorsoInitTime_) {
+      // 旋转阶段完成后再解锁 knee/leg；两阶段共用复位窗口，期间不接收手柄指令。
+      torsoTranslationResetPending_ = false;
+      releaseTorsoRotationControl();
+      resetTorsoControlPoseWithRuckig(initTime, initState, true);
+    }
     if(initTime >= resetTorsoTime_ + resetTorsoInitTime_)
     {
       // #3973: 窗口结束后恢复接收躯干开环指令。isResetTorso_ 为真说明 service 已请求但
@@ -4503,6 +4517,61 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::resetTorsoControlPoseWithRuckig(scalar_t initTime, const vector_t& initState,
                                                                          bool isServiceReset)
   {
+    if (isServiceReset && torsoRotationActive_) {
+      torsoTranslationResetPending_ = torsoTranslationNeedsReset_;
+      // 旋转组 RT 只归位腰部，沿用进入该组时的 knee/leg 锁定快照。
+      // 保留规划位置/速度/加速度作为起点，避免运动中复位产生指令阶跃。
+      const auto& model = pinocchioInterface_.getModel();
+      torsoRotationJointTarget_ = makeTorsoRotationResetTarget(
+          torsoRotationJointTarget_, initialJointTarget_.head<4>(),
+          model.lowerPositionLimit.segment<4>(baseDim_),
+          model.upperPositionLimit.segment<4>(baseDim_));
+      constexpr double kResetRampTime = 0.3;
+      resetTorsoTime_ = kResetRampTime;
+      for (int joint = 2; joint < 4; ++joint) {
+        const int poseAxis = joint == 2 ? 4 : 3;  // 6D pitch/yaw
+        const double duration =
+            (std::abs(torsoRotationJointTarget_[joint] - legJoint_prevTargetPose_[joint]) +
+             std::abs(legJoint_prevTargetVel_[joint]) * kResetRampTime) /
+            torsoResetMaxVel_[poseAxis] + kResetRampTime;
+        resetTorsoTime_ = std::max(resetTorsoTime_, duration);
+      }
+      resetTorsoInitTime_ = initTime;
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+        cmdTorsoVel_.setZero();
+        isCmdTorsoVelUpdated_ = false;
+        isCmdTorsoVelTimeUpdate_ = false;
+        lastCmdTorsoVelTime_ = 0.0;
+        hasTorsoVelIntegrateTime_ = false;
+      }
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoDelta_mtx_);
+        cmdTorsoDelta_.setZero();
+        isCmdTorsoDeltaUpdated_ = false;
+      }
+      isCmdLegJointUpdated_ = false;
+      isResetTorsoRePlanning_ = true;
+      setEnableLegJointTrack(true);
+      setEnableTorsoPoseTargetTrajectories(false);
+      torsoModeFlag_ = false;
+      calcRuckigTrajWithLegJoint(initTime, torsoRotationJointTarget_, resetTorsoTime_);
+      resetTorsoWindowEnd_.store(resetTorsoInitTime_ + resetTorsoTime_, std::memory_order_release);
+      vector_t state = initState;
+      state.segment<4>(baseDim_) = torsoRotationJointTarget_;
+      vector_t torsoPose = vector_t::Zero(6);
+      getCurrentTorsoPoseInBasePitchYaw(torsoPose, state);
+      {
+        std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+        cmdTorsoPose_ = torsoPose;
+        isCmdTorsoPoseUpdated_ = false;
+      }
+      ROS_INFO_STREAM("[TorsoRotation] reset waist only, target="
+                      << torsoRotationJointTarget_.transpose() << ", duration=" << resetTorsoTime_);
+      return;
+    }
+    torsoTranslationResetPending_ = false;
+    torsoTranslationNeedsReset_ = false;
     releaseTorsoRotationControl();
     setEnableLegJointTrack(false); // 关闭下肢关节跟踪
     isCmdLegJointUpdated_ = false;  // 关闭关节控制标志位
@@ -4616,7 +4685,7 @@ namespace mobile_manipulator {
 
     if(leftArmJointTrigger_ == true || rightArmJointTrigger_ == true)
     {
-      if(getEnableArmJointTrackForArm(0) == true &&     // 双臂都为关节模式，则触发躯干切换到focusTorso，且保持原位不动
+      if(!torsoRotationActive_ && getEnableArmJointTrackForArm(0) == true &&     // 旋转组复位结束后仍保持关节跟踪
          getEnableArmJointTrackForArm(1) == true)
       {
         setIsFocusEeStatus(false);
@@ -4668,6 +4737,11 @@ namespace mobile_manipulator {
                        torsoTargetPose[2], 
                        torsoTargetPose[3], 
                        torsoTargetPose[4];
+
+      if (std::abs(torsoTargetPose[0] - initialTorsoPos_[0]) > 1e-4 ||
+          std::abs(torsoTargetPose[2] - initialTorsoPos_[2]) > 1e-4) {
+        torsoTranslationNeedsReset_ = true;
+      }
 
       calcRuckigTrajWithTorsoPose(initTime, torsoPose4Dof, cmdTorsoPoseDesiredTime_);
 
@@ -4744,7 +4818,8 @@ namespace mobile_manipulator {
       resetTorsoControlPoseWithRuckig(initTime, initState, isServiceReset); // 重置躯干位置
 
       resetCmdPoseRuckig(initTime, initState, true);    // 重置底盘轨迹
-      resetLegJointRuckig(initTime, initState, true);   // 重置下肢关节轨迹
+      // 旋转组复位已经建立腰部轨迹，不能用通用下肢 reset 覆盖它的时间锚点。
+      if (!torsoRotationActive_) resetLegJointRuckig(initTime, initState, true);
       for(int i = 0; i < 2; ++i)
       {
         resetArmJointRuckig(i, initTime, initState, true);   // 重置上肢关节轨迹
@@ -5444,6 +5519,7 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::releaseTorsoRotationControl()
   {
+    torsoTranslationResetPending_ = false;
     {
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
       torsoRotationRequested_ = false;
@@ -5617,6 +5693,7 @@ namespace mobile_manipulator {
     }
     vector_t cmd4 = vector_t::Zero(4);
     cmd4 << cmd6[0], cmd6[2], cmd6[3], cmd6[4];  // x, z, yaw, pitch
+    const Eigen::Vector2d previousPosition = cmd4.head<2>();
 
     // velocity → Δp = sat(v) * dt  on final target (not on Ruckig step state)
     if (integrateVel) {
@@ -5640,6 +5717,10 @@ namespace mobile_manipulator {
       }
     }
 
+    // 仅过滤本拍新增偏航；升降/前倾不能把已有的 A/B 转腰目标拉回。
+    cmd4[2] = applyTorsoYawRequest(
+        cmd6[3], cmd4[2], cmd6[2] - initialTorsoPos_[2], cmd4[1] - initialTorsoPos_[2]);
+
     // Write back sole open-loop final target; Ruckig tracks from prevTarget → cmd4
     {
       std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
@@ -5657,6 +5738,9 @@ namespace mobile_manipulator {
     {
       std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
       cmd4 << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
+    }
+    if ((cmd4.head<2>() - previousPosition).norm() > 1e-6) {
+      torsoTranslationNeedsReset_ = true;
     }
 
     calcRuckigTrajWithTorsoPose(initTime, cmd4, 0.0);
@@ -5702,15 +5786,8 @@ namespace mobile_manipulator {
 
     clampAxis(cmdTorsoPose_[0], x_min, x_max);
     clampAxis(cmdTorsoPose_[2], z_min, z_max);
-    // 低高度禁止转腰（与 Joy kWaistYawMinZIncrement=0.05 对齐）
-    if (z_inc < 0.05) {
-      if (std::abs(cmdTorsoPose_[3]) > 1e-9) {
-        cmdTorsoPose_[3] = 0.0;
-        changed = true;
-      }
-    } else {
-      clampAxis(cmdTorsoPose_[3], torsoWsMinYaw_, torsoWsMaxYaw_);
-    }
+    // 这里仅限制偏航范围。低高度的新请求由输入路径过滤，已有目标保持。
+    clampAxis(cmdTorsoPose_[3], torsoWsMinYaw_, torsoWsMaxYaw_);
     clampAxis(cmdTorsoPose_[4], torsoWsMinPitch_, torsoWsMaxPitch_);
     cmdTorsoPose_[1] = initialTorsoPos_[1];
     cmdTorsoPose_[5] = 0.0;

@@ -28,6 +28,7 @@
 
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
+#include "humanoid_wheel_interface/motion_planner/TorsoYawTarget.h"
 #include "ocs2_robotic_tools/common/RotationTransforms.h"
 #include "ocs2_pinocchio_interface/PinocchioInterface.h"
 #include "humanoid_interface/common/TopicLogger.h"
@@ -472,8 +473,8 @@ private:
   double torsoWsMaxZ_{0.32};
   double torsoWsMinPitch_{0.0};
   double torsoWsMaxPitch_{0.5235};
-  double torsoWsMinYaw_{-0.5235};
-  double torsoWsMaxYaw_{0.5235};
+  double torsoWsMinYaw_{-kTorsoYawTargetLimit};
+  double torsoWsMaxYaw_{kTorsoYawTargetLimit};
   bool isCmdTorsoPoseUpdated_{false};
   double cmdTorsoPoseDesiredTime_{0.0};
   ros::Subscriber targetTorsoPoseSubscriber_;
@@ -503,6 +504,8 @@ private:
   ros::Publisher torsoRotationLockPub_;
   bool torsoRotationRequested_{false};  // cmdTorsoVel_mtx_ 保护
   bool torsoRotationActive_{false};     // 仅规划线程访问
+  bool torsoTranslationNeedsReset_{false};  // 平移目标改变后，RT 还需恢复位置
+  bool torsoTranslationResetPending_{false};  // 旋转复位完成后执行位置复位
   Eigen::Vector4d torsoRotationJointTarget_{Eigen::Vector4d::Zero()};
   ros::Subscriber targetTorsoDeltaSubscriber_;
   ros::Publisher torsoOpenLoopStatePub_;    // /torso_open_loop_state: 4D pose [x,z,yaw,pitch]

@@ -5,6 +5,7 @@
 #include <Eigen/Core>
 
 #include "humanoid_wheel_interface/motion_planner/TorsoRotationTarget.h"
+#include "humanoid_wheel_interface/motion_planner/TorsoYawTarget.h"
 
 namespace {
 
@@ -33,7 +34,7 @@ bool testForwardLimitThenReverseKeepsKneeAndLegSnapshot() {
       ok &= check(q.head<3>().sum() <= 0.5235 + 1e-12, "forward pitch workspace must not exceed limit");
     }
     ok &= check(near(q[2], 0.6035), "forward pitch must stop at workspace limit");
-    ok &= check(near(q[3], 0.5235), "forward yaw must stop at workspace limit");
+    ok &= check(near(q[3], kUpper[3]), "forward yaw must reach model limit beyond 30 degrees");
     // 在限位继续推不会累计越界目标，反向第一拍就离开限位。
     q = ocs2::integrateTorsoRotationTarget(q, -1.5, -1.5, 0.02, kLower, kUpper);
     ok &= check(near(q[2], 0.5735), "first reverse step must leave pitch limit");
@@ -41,7 +42,7 @@ bool testForwardLimitThenReverseKeepsKneeAndLegSnapshot() {
       q = ocs2::integrateTorsoRotationTarget(q, -1.5, -1.5, 0.02, kLower, kUpper);
     }
     ok &= check(near(q[2], 0.08), "reverse pitch must return to start");
-    ok &= check(near(q[3], -0.5235), "reverse yaw must stop at workspace limit");
+    ok &= check(near(q[3], kLower[3]), "reverse yaw must reach model limit beyond 30 degrees");
   }
   return ok;
 }
@@ -66,12 +67,12 @@ bool testModelLimitsTakePrecedence() {
 
 bool testOutsideWorkspaceEntryDoesNotJumpAndOnlyMovesInward() {
   bool ok = true;
-  const Eigen::Vector4d q(0.0, 0.0, 0.8, 0.7);
+  const Eigen::Vector4d q(0.0, 0.0, 0.8, 3.3);
   const auto held = ocs2::integrateTorsoRotationTarget(q, 1.5, 1.5, 0.02, kLower, kUpper);
   ok &= check(held.isApprox(q), "out-of-workspace hold must not jump");
   const auto inward = ocs2::integrateTorsoRotationTarget(q, -1.5, -1.5, 0.02, kLower, kUpper);
   ok &= check(near(inward[2], 0.77), "out-of-workspace pitch may only move inward");
-  ok &= check(near(inward[3], 0.67), "out-of-workspace yaw may only move inward");
+  ok &= check(near(inward[3], 3.27), "out-of-model-limit yaw may only move inward");
   return ok;
 }
 
@@ -89,6 +90,21 @@ bool testStopAndInvalidInputPreserveTarget() {
   return ok;
 }
 
+bool testResetKeepsRaisedKneeLegAndRestoresOnlyWaist() {
+  const Eigen::Vector4d held(0.12, -0.20, 0.6035, 0.4);
+  const Eigen::Vector4d initial(0.0, 0.0, 0.08, -0.02);
+  const auto reset = ocs2::makeTorsoRotationResetTarget(held, initial, kLower, kUpper);
+  bool ok = check(reset[0] == held[0] && reset[1] == held[1],
+                  "rotation reset must not restore initial knee/leg after torso translation");
+  ok &= check(reset[2] == initial[2] && reset[3] == initial[3],
+              "rotation reset must restore initial waist pitch/yaw");
+  Eigen::Vector4d upper = kUpper;
+  upper[2] = 0.05;
+  const auto limited = ocs2::makeTorsoRotationResetTarget(held, initial, kLower, upper);
+  ok &= check(limited[2] == upper[2], "rotation reset must respect model joint limits");
+  return ok;
+}
+
 }  // namespace
 
 int main() {
@@ -97,6 +113,35 @@ int main() {
   ok &= testModelLimitsTakePrecedence();
   ok &= testOutsideWorkspaceEntryDoesNotJumpAndOnlyMovesInward();
   ok &= testStopAndInvalidInputPreserveTarget();
+  ok &= testResetKeepsRaisedKneeLegAndRestoresOnlyWaist();
+  for (double direction : {-1.0, 1.0}) {
+    const double target = direction * ocs2::kTorsoYawTargetLimit;
+    const double yaw = ocs2::applyTorsoYawRequest(0.0, target, 0.10, 0.10);
+    ok &= check(near(yaw, target), "raised torso A/B must reach pi minus margin, not 30 degrees");
+    ok &= check(near(ocs2::applyTorsoYawRequest(yaw, yaw, 0.10, 0.0), yaw),
+                "lowering torso below 5cm must preserve the existing yaw target");
+    for (const auto& heights : {Eigen::Vector2d(0.0, 0.0), Eigen::Vector2d(0.0, 0.10),
+                               Eigen::Vector2d(0.10, 0.0)}) {
+      ok &= check(near(ocs2::applyTorsoYawRequest(yaw, 0.0, heights[0], heights[1]), 0.0),
+                  "low-height yaw must allow explicit recentering from either direction");
+      ok &= check(near(ocs2::applyTorsoYawRequest(yaw, yaw * 0.5, heights[0], heights[1]), yaw * 0.5),
+                  "low-height yaw must allow partial motion toward zero");
+      ok &= check(near(ocs2::applyTorsoYawRequest(yaw * 0.5, yaw, heights[0], heights[1]), yaw * 0.5),
+                  "low-height yaw must reject further outward motion");
+      ok &= check(near(ocs2::applyTorsoYawRequest(yaw, -yaw * 0.5, heights[0], heights[1]), 0.0),
+                  "low-height yaw crossing zero must stop at zero");
+      ok &= check(near(ocs2::applyTorsoYawRequest(0.0, -yaw, heights[0], heights[1]), 0.0),
+                  "low-height yaw at zero must reject rotation in either direction");
+      ok &= check(near(ocs2::applyTorsoYawRequest(yaw, yaw, heights[0], heights[1]), yaw),
+                  "height-only requests must preserve existing yaw");
+    }
+    ok &= check(near(ocs2::applyTorsoYawRequest(yaw, 0.0, 0.05, 0.05), 0.0),
+                "opposite A/B at sufficient height must return yaw to zero");
+    ok &= check(near(ocs2::clampTorsoYawTarget(direction * M_PI), target),
+                "yaw target must retain the pi boundary margin");
+  }
+  ok &= check(near(ocs2::applyTorsoYawRequest(0.0, 1.0, 0.0, 0.10), 0.0),
+              "raising and turning in one low-height request must not bypass the height gate");
   if (!ok) {
     std::cerr << "torso_rotation_target_test failed\n";
     return 1;
