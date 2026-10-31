@@ -61,6 +61,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "std_srvs/Trigger.h"
 #include <kuavo_common/common/common.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Empty.h>
 #include <ocs2_robotic_tools/common/RotationTransforms.h>
 
 #include "humanoid_interface_drake/humanoid_interface_drake.h"
@@ -456,16 +457,7 @@ namespace ocs2
           }
         }
       });
-      // 订阅控制器切换事件，在任意控制器切换（包括RL->RL）时更新速度限制
-      controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>(
-        "/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
-      ROS_INFO("[JoyControl] Controller switch event: %s -> %s, updating velocity limits",
-               msg->from_controller.c_str(), msg->to_controller.c_str());
-      updateVelocityLimitsFromParam(true);
-      });
-      
-
-      // 订阅控制器切换事件，更新AMP控制器状态
+      // 外层事件只维护外层名称；族内成员事件不能覆盖用于控制器循环的缓存。
       controller_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr &msg)
       {
         ROS_INFO("[JoyControl] Controller switch event: %s -> %s, updating velocity limits",
@@ -474,20 +466,24 @@ namespace ocs2
         cached_controller_time_ = ros::Time::now().toSec();
         updateVelocityLimitsFromParam(true);
 
-        // 检查是否切换到AMP控制器
-        bool old_is_amp = is_amp_controller_;
-        is_amp_controller_ = (msg->to_controller == "amp_controller");
-
-        // 只在状态切换时打印一次提示
-        if (!old_is_amp && is_amp_controller_)
-        {
-          ROS_INFO("[JoyControl] Entered AMP mode: right stick vertical control will be ignored");
-        }
-        else if (old_is_amp && !is_amp_controller_)
-        {
-          ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
-        }
+        updateAmpControllerState();
       });
+      amp_family_member_sub_ = nodeHandle_.subscribe<std_msgs::String>(
+          "/humanoid_controller/amp_family/active_member", 1,
+          [this](const std_msgs::String::ConstPtr& msg) {
+            cached_amp_member_name_ = msg->data;
+            updateAmpControllerState();
+            if (cached_controller_name_ == "amp_assemble_controller")
+              updateVelocityLimitsFromParam(true);
+          });
+      amp_family_switch_event_sub_ = nodeHandle_.subscribe<kuavo_msgs::ControllerSwitchEvent>(
+          "/humanoid_controller/amp_family/switch_event", 1,
+          [this](const kuavo_msgs::ControllerSwitchEvent::ConstPtr& msg) {
+            cached_amp_member_name_ = msg->to_controller;
+            updateAmpControllerState();
+            if (cached_controller_name_ == "amp_assemble_controller")
+              updateVelocityLimitsFromParam(true);
+          });
       amp_hand_mode_sub_ = nodeHandle_.subscribe<std_msgs::Int32>(
           "/humanoid_controller/amp_hand_controller/amp_mode", 1,
           [this](const std_msgs::Int32::ConstPtr &msg)
@@ -525,6 +521,8 @@ namespace ocs2
       waist_motion_pub_ = nodeHandle_.advertise<kuavo_msgs::robotWaistControl>("/robot_waist_motion_data", 10);
       enable_waist_control_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid_controller/enable_waist_control", 10);
       slope_planning_pub_ = nodeHandle_.advertise<std_msgs::Bool>("/humanoid/mpc/enable_slope_planning", 10);
+      amp_cycle_request_pub_ = nodeHandle_.advertise<std_msgs::Empty>(
+          "/humanoid_controller/amp_family/cycle_request", 1, false);
       hand_position_pub_ = nodeHandle_.advertise<kuavo_msgs::robotHandPosition>("/control_robot_hand_position", 10);
 
       // Service clients
@@ -1624,6 +1622,35 @@ namespace ocs2
         return;
       }
 
+      // AMP-only manual ring. Consume the chord before single-trigger head/waist
+      // commands, and publish only on its rising edge (holding never repeats).
+      if (!IS_ROBAN(rb_version_) && cached_controller_name_ == "amp_assemble_controller")
+      {
+        const auto chord_held = [this](const sensor_msgs::Joy& joy) {
+          const auto button = [&](const char* key) {
+            const auto it = joyButtonMap.find(key);
+            return it != joyButtonMap.end() && it->second >= 0 &&
+                   static_cast<size_t>(it->second) < joy.buttons.size() && joy.buttons[it->second] != 0;
+          };
+          const auto trigger = [&](const char* key) {
+            const auto it = joyAxisMap.find(key);
+            return it != joyAxisMap.end() && it->second >= 0 &&
+                   static_cast<size_t>(it->second) < joy.axes.size() && joy.axes[it->second] < -0.5;
+          };
+          return (trigger("AXIS_LEFT_LT") && trigger("AXIS_RIGHT_RT")) ||
+                 (button("BUTTON_LB") && button("BUTTON_RB"));
+        };
+        if (chord_held(*joy_msg)) {
+          if (!chord_held(old_joy_msg_)) {
+            amp_cycle_request_pub_.publish(std_msgs::Empty());
+            ROS_INFO("[JoyControl] RT+LT / LB+RB: requested next AMP manual member");
+          }
+          updateWalkAxisDuringLtRtHold(joy_msg);
+          old_joy_msg_ = *joy_msg;
+          return;
+        }
+      }
+
       if(joy_msg->axes[joyAxisMap["AXIS_RIGHT_RT"]] < -0.5)
       {
         head_control_active_ = true;  // 标记进入头部控制模式
@@ -1860,8 +1887,8 @@ namespace ocs2
       
       const bool lb_held = buttonPressed(joy_msg, "BUTTON_LB");
       const bool rb_held = buttonPressed(joy_msg, "BUTTON_RB");
-      // LB+RB 同时按下（仅 roban）：搬运/起身已全部前移至 Python，C++ 吞帧
-      if (IS_ROBAN(rb_version_) && lb_held && rb_held)
+      // Roban retains its original shoulder-chord handling.
+      if (lb_held && rb_held && IS_ROBAN(rb_version_))
       {
         old_joy_msg_ = *joy_msg;
         return;
@@ -2258,8 +2285,14 @@ namespace ocs2
         return false;
       }
 
+      const std::string active_controller = resolveAmpMemberName(current_controller);
+      if (active_controller.empty())
+      {
+        ROS_WARN("[JoyControl] change_amp_mode(%d) skipped: AMP family active member is unknown", mode);
+        return false;
+      }
       const std::string service_name =
-          "/humanoid_controller/" + current_controller + "/change_amp_mode";
+          "/humanoid_controller/" + active_controller + "/change_amp_mode";
       ros::ServiceClient amp_mode_client =
           nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(service_name);
 
@@ -2741,6 +2774,30 @@ namespace ocs2
       return false;
     }
 
+    // 只解析具体成员，不修改外层循环使用的名称缓存。
+    std::string resolveAmpMemberName(const std::string& controller_name) const
+    {
+      if (controller_name != "amp_assemble_controller")
+        return controller_name;
+      if (cached_amp_member_name_ == "amp_controller" ||
+          cached_amp_member_name_ == "amp_wild_controller" ||
+          cached_amp_member_name_ == "amp_run_controller" ||
+          cached_amp_member_name_ == "amp_wild_imp_controller" ||
+          cached_amp_member_name_ == "amp_walk_waq_controller")
+        return cached_amp_member_name_;
+      return "";
+    }
+
+    void updateAmpControllerState()
+    {
+      const bool old_is_amp = is_amp_controller_;
+      is_amp_controller_ = resolveAmpMemberName(cached_controller_name_) == "amp_controller";
+      if (!old_is_amp && is_amp_controller_)
+        ROS_INFO("[JoyControl] Entered AMP mode: right stick vertical control will be ignored");
+      else if (old_is_amp && !is_amp_controller_)
+        ROS_INFO("[JoyControl] Exited AMP mode: right stick vertical control restored");
+    }
+
     // 控制器名 TTL 缓存, 避免 100Hz 控制循环里高频调 service。
     // 缓存失败时保持上次结果, 启动初期未取到时按 false 处理(不误拦)。
     void refreshControllerCacheIfStale()
@@ -2752,6 +2809,7 @@ namespace ocs2
         if (getCurrentControllerName(name))
         {
           cached_controller_name_ = name;
+          updateAmpControllerState();
         }
         cached_controller_time_ = now;
       }
@@ -2760,7 +2818,7 @@ namespace ocs2
     bool isAmpControllerActive()
     {
       refreshControllerCacheIfStale();
-      return cached_controller_name_ == "amp_controller";
+      return is_amp_controller_;
     }
 
     bool isAmpHandControllerActive()
@@ -2864,6 +2922,8 @@ namespace ocs2
     ros::Subscriber gait_change_sub_;
     ros::Subscriber is_rl_controller_sub_;
     ros::Subscriber controller_switch_event_sub_;
+    ros::Subscriber amp_family_member_sub_;
+    ros::Subscriber amp_family_switch_event_sub_;
     ros::Subscriber amp_hand_mode_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
     ros::Subscriber dance_trajectory_state_sub_;
@@ -2871,10 +2931,11 @@ namespace ocs2
 
     // refreshControllerCacheIfStale() 的 TTL 缓存, 避免每帧 service call
     std::string cached_controller_name_;
+    std::string cached_amp_member_name_;
     double cached_controller_time_{0.0};
     static constexpr double kControllerCacheTtl_{0.3};
     bool is_rl_controller_{false};  // 当前是否为RL控制器
-    bool is_amp_controller_{false};  // 当前是否为AMP控制器
+    bool is_amp_controller_{false};  // 当前执行者是否为 MANIPULATE（amp_controller）
     ocs2::scalar_array_t mpc_default_velocity_limits_{0.4, 0.2, 0.3, 0.4};  // 保存MPC默认速度限制
     int amp_hand_cmd_vel_line_x_limit_level_{1};  // 0=low, 1=default, 2=up
     double amp_hand_cmd_vel_line_x_default_{0.4};
@@ -2916,6 +2977,7 @@ namespace ocs2
     ros::Publisher waist_motion_pub_;
     ros::Publisher enable_waist_control_pub_;
     ros::Publisher slope_planning_pub_;
+    ros::Publisher amp_cycle_request_pub_;
     float total_mode_scale_{1.0};
     bool button_start_released_{true};
     // TargetTrajectories current_target_traj_;

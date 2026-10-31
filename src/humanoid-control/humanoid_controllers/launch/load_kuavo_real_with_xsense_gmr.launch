@@ -65,7 +65,8 @@
     <arg name="allow_mismatch" default="false" doc="true=校验不一致时仅告警继续启动；false=严格模式，不一致即中止启动"/>
 
     <!-- RL相关参数 -->
-    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="rl_controllers_config" default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl_controllers.yaml"/>
+    <arg name="rl_param" default="" doc="Legacy fallback; set rl_controllers_config empty to use it"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="init_fall_down_state" default="false"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
@@ -86,6 +87,7 @@
     <param name="use_joint_filter"     value="$(arg use_joint_filter)"/>
     <param name="network_model_file"   value="$(arg network_model_file)"/>
     <param name="rl_param"             value="$(arg rl_param)"/>
+    <param name="rl_controllers_config" value="$(arg rl_controllers_config)"/>
     <param name="is_rl_start"           value="$(arg is_rl_start)"/>
     <param name="joystick_type"  value="$(arg joystick_type)"/>
     <param name="only_half_up_body"   value="$(arg only_half_up_body)"/>

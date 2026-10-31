@@ -51,7 +51,9 @@ public:
     {
         kLocked    = 0,  // 锁定：固定当前姿态
         kAutoSwing = 1,  // 自动摆臂：RL 策略持臂（站立时回家）
-        kExternal  = 2   // 外部控制：VR / tact 轨迹操控
+        kExternal  = 2,   // 外部控制：VR / tact 轨迹操控
+        kImpedance = 3,   // 关节空间阻抗控制（柔顺交互）
+        kCartesianImpedance = 4  // 笛卡尔空间阻抗控制（末端柔顺）
     };
 
     // === 构造/析构 ===
@@ -104,6 +106,118 @@ public:
      * @param default_arm_pos 默认手臂位置（手臂段）
      */
     void setDefaultArmPos(const Eigen::VectorXd& default_arm_pos);
+
+    // ==================== 阻抗控制配置（Phase 1/2） ====================
+
+    /**
+     * @brief 配置关节空间阻抗控制参数（模式3）
+     * @param enabled 是否启用
+     * @param kp 阻抗刚度（arm-sized，左臂在前右臂在后）
+     * @param kd 阻抗阻尼（arm-sized）
+     * @param target_source 阻抗目标来源：0=弹簧回默认位(default_arm_pos_)，1=保持进入时的当前位
+     * @param max_joint_vel 关节最大速度限制 (rad/s)，超限自动回退锁定
+     * @param force_limit 关节力矩上限 (N·m)，超限自动回退锁定
+     * @param use_cst 是否使用 CST 力矩模式（下位机直接力矩控制）；false 时退化为高增益位置控制
+     * @param lock_wrist 是否锁死手腕关节（每侧最后 3 个关节：arm_idx%7>=4 的 l5/l6/l7 与 r5/r6/r7）。
+     *                   为 true 时阻抗模式不控制手腕，手腕目标固定为默认位，且下发保持 CSP(2)+高增益位置锁定
+     */
+    void configureImpedance(bool enabled,
+                            const Eigen::VectorXd& kp,
+                            const Eigen::VectorXd& kd,
+                            int target_source = 0,
+                            double max_joint_vel = 1.5,
+                            double force_limit = 20.0,
+                            bool use_cst = true,
+                            bool lock_wrist = false);
+
+    /**
+     * @brief 配置笛卡尔空间阻抗控制参数（模式4）
+     * @param enabled 是否启用
+     * @param kx 笛卡尔平移刚度 (N/m)
+     * @param dx 笛卡尔平移阻尼 (N·s/m)
+     * @param ee_frame_mode 末端坐标系模式：0=zarm_l7_end_effector（左手），1=zarm_r7_end_effector（右手）
+     * @param force_est_gain 外力估计器增益（动量观测器），0=禁用外力估计
+     */
+    void configureCartesianImpedance(bool enabled,
+                                     double kx = 100.0,
+                                     double dx = 5.0,
+                                     int ee_frame_mode = 0,
+                                     double force_est_gain = 10.0);
+
+    /**
+     * @brief 设置实测关节力矩（用于笛卡尔阻抗外力估计，Phase 2）
+     * @param joint_torque 实测关节力矩（完整关节数组或手臂段均可，内部按手臂段提取）
+     */
+    void setMeasuredJointTorque(const Eigen::VectorXd& joint_torque);
+
+    /**
+     * @brief 设置手臂关节力矩限制（用于阻抗模式力矩钳位）
+     * @param torque_limits 手臂段力矩限制（arm-sized）
+     */
+    void setTorqueLimits(const Eigen::VectorXd& torque_limits);
+
+    /**
+     * @brief 配置“退出阻抗时的手臂过渡”（位置参考 + 增益 + 电机模式）
+     *
+     * 问题：阻抗模式下手臂的 joint_q 参考 = 阻抗目标位（默认位/进入时位姿）、kp/kd = 阻抗值、
+     *       电机模式 = CST(0)；切到其他控制器时这三项会同时阶跃（位置参考跳变 + 增益跳变 + 换律）
+     *       → 实测冲击/异响。
+     *
+     * 本功能：退出阻抗后先保持阻抗时的电机模式，在 handover_duration 内把**所有手臂关节**的：
+     *   - joint_q（默认关节位置参考）从阻抗目标平滑过渡到新控制器当前下发的值；
+     *   - kp/kd（非手腕关节）从阻抗值平滑过渡到切换后将使用的值（优先 motor_pdo_kp/kd）；
+     * 过渡完成后才放开电机模式切换 → 驱动器在“参考与增益已匹配”时换律，冲击最小。
+     *
+     * @param handover_duration 过渡时长（秒）；<=0 关闭本功能（保持原行为）
+     */
+    void configureImpedanceHandover(double handover_duration);
+
+    /**
+     * @brief 设置交接目标增益（= 退出阻抗后这些关节将使用的 kp/kd，通常来自 info 的 motor_pdo_kp/kd）
+     * @param kp/kd 全局关节索引的向量（与 joint_cmd 索引一致），尺寸不匹配时忽略
+     */
+    void setHandoverTargetGains(const Eigen::VectorXd& kp, const Eigen::VectorXd& kd);
+
+    /**
+     * @brief 配置阻抗模式切出时的“手臂回位门禁”
+     *
+     * 阻抗模式下手臂偏离目标位（默认位 / 进入时位姿）超过该角度阀值时，不允许切换控制器。
+     * 目的：让切出阻抗（EC 关节 CST→CSP 换律、RUIWO 关节增益切换）发生在
+     *       手臂已对位、不受力的姿态，减小冲击/异响与安全风险。
+     *
+     * @param guard_deg 允许切出的最大关节偏差（度）；<=0 关闭门禁（默认 10°）
+     */
+    void configureImpedanceSwitchGuard(double guard_deg);
+
+    /**
+     * @brief 配置“肘关节随肩部 pitch 负向随动”（仅模式3阻抗生效）
+     *
+     * 肘目标 = 肘参考位 + k · min(0, 肩pitch位移)：
+     *  - 肩 pitch 向负向偏移 Δ(<0) 时，肘同向跟随 k·|Δ|；
+     *  - 肩 pitch 正向偏移时，肘保持参考位不动。
+     * 随动期间肘关节以 CSP(2) 位置模式下发（不参与阻抗柔顺）。
+     *
+     * @param enabled        是否启用
+     * @param ratio          比例系数 k（>0；例如 0.5 = pitch 动 10° 肘跟 5°）
+     * @param max_offset_deg 随动角度上限（度，相对参考位；<=0 不限制）
+     */
+    void configureElbowFollow(bool enabled, double ratio, double max_offset_deg);
+
+    /**
+     * @brief 阻抗模式切出门禁：手臂是否已回到阻抗目标位附近
+     * @param reason 输出：不允许切出时的原因描述（含最大偏差与阈值，可直接日得得打印）
+     * @return true = 允许切出（非阻抗模式 / 偏差在阀值内 / 门禁已关闭）
+     */
+    bool isImpedanceSwitchAllowed(std::string& reason) const;
+    // Physical readiness, separate from completion of the commanded homing curve.
+    bool isMeasuredArmAtDefault() const;
+
+    /// Control-thread readiness for a SOFT controller exit.
+    bool isImpedanceHandoverActive() const { return impedance_handover_active_; }
+    bool isHomingToDefault() const
+    {
+      return auto_swing_state_ == AutoSwingState::kHoming || is_returning_from_external_;
+    }
 
     // ==================== 主要更新函数（核心接口）====================
     
@@ -214,6 +328,13 @@ public:
      */
     void setExternalControlPaused(bool paused);
     bool isExternalControlPaused() const { return external_control_pause_requested_.load(); }
+
+    /**
+     * @brief 注册模式变化回调（在 applyModeChange 末尾触发，含自动回退 Locked）
+     * @param callback 回调签名：void(int old_mode, int new_mode)
+     *                 模式枚举：0=Locked, 1=AutoSwing, 2=External, 3=JointImpedance, 4=CartesianImpedance
+     */
+    void setModeChangeCallback(std::function<void(int, int)> callback) { mode_change_callback_ = std::move(callback); }
     
     /**
      * @brief 获取当前控制模式
@@ -400,6 +521,18 @@ private:
     bool applyStrictRateLimitedInterpolation(double dt,
                                              const Eigen::VectorXd& target_pos,
                                              double max_velocity);
+
+    /**
+     * @brief 更新关节空间阻抗控制（模式3）
+     * @param dt 控制周期
+     */
+    void updateImpedanceControl(double dt);
+
+    /**
+     * @brief 更新笛卡尔空间阻抗控制（模式4）
+     * @param dt 控制周期
+     */
+    void updateCartesianImpedance(double dt);
     
     /**
      * @brief 限速插值函数（用于模式1和模式2）
@@ -546,6 +679,60 @@ private:
     Eigen::VectorXd joint_kp_;          // 位置增益（手臂部分）
     Eigen::VectorXd joint_kd_;          // 速度增益（手臂部分）
     Eigen::VectorXd torque_limits_;     // 力矩限制（手臂部分）
+
+    // ==================== 阻抗控制参数（Phase 1/2） ====================
+
+    // 关节空间阻抗（模式3）
+    bool impedance_enabled_{false};                  // 关节阻抗是否启用
+    Eigen::VectorXd impedance_kp_;                   // 关节阻抗刚度（arm-sized）
+    Eigen::VectorXd impedance_kd_;                   // 关节阻抗阻尼（arm-sized）
+    int impedance_target_source_{0};                 // 0=弹簧回默认位，1=保持进入时位姿
+    double impedance_max_joint_vel_{1.5};            // 关节最大速度限制 (rad/s)
+    double impedance_force_limit_{20.0};             // 关节力矩上限 (N·m)
+    bool impedance_use_cst_{true};                   // 是否使用 CST 力矩模式
+    bool impedance_lock_wrist_{false};               // 阻抗模式下锁死手腕关节（目标=默认位，CSP+高增益下发）
+    Eigen::VectorXd impedance_hold_pos_;             // 目标来源=1 时保持的进入位姿
+    bool impedance_hold_pos_set_{false};
+
+    // 笛卡尔空间阻抗（模式4）
+    bool cartesian_impedance_enabled_{false};         // 笛卡尔阻抗是否启用
+    double cartesian_kx_{100.0};                      // 笛卡尔平移刚度 (N/m)
+    double cartesian_dx_{5.0};                        // 笛卡尔平移阻尼 (N·s/m)
+    int cartesian_ee_frame_mode_{0};                  // 0=左手末端，1=右手末端
+    double cartesian_force_est_gain_{10.0};           // 外力估计器增益
+    // 实测关节力矩（Phase 2 外力估计输入，完整关节数组大小，内部按手臂段提取）
+    Eigen::VectorXd measured_joint_torque_;
+    bool measured_joint_torque_valid_{false};
+    // 笛卡尔阻抗目标位姿缓存（进入模式4时锁定）
+    Eigen::Isometry3d cartesian_hold_pose_;
+    bool cartesian_hold_pose_set_{false};
+    // 笛卡尔阻抗计算出的力矩（由 updateCartesianImpedance 填充，fillJointCmdMessage 直接使用）
+    Eigen::VectorXd cartesian_tau_override_;
+    bool cartesian_tau_override_valid_{false};
+
+    // 模式变化回调（applyModeChange 末尾触发，含自动回退 Locked）
+    std::function<void(int, int)> mode_change_callback_;
+
+    // ==================== 退出阻抗时的手臂过渡（位置参考 + 增益 + 模式） ====================
+    // 先平滑过渡 joint_q 与 kp/kd（保持阻抗时的电机模式），过渡完成后才放开模式切换
+    // → 避免“位置参考跳变 + 增益跳变 + 换律”同时发生导致的冲击/异响
+    double impedance_handover_duration_{0.0};   // 过渡时长（s）；<=0 = 关闭
+    bool impedance_handover_active_{false};     // 是否正在过渡
+    bool impedance_handover_from_cartesian_{false};
+    ros::Time impedance_handover_start_time_;   // 过渡开始时间
+    Eigen::VectorXd handover_from_q_;           // 过渡起点：阻抗时的位置参考（arm-sized）
+    Eigen::VectorXd handover_from_v_;           // 过渡起点：阻抗时的速度参考（arm-sized，通常为 0）
+    Eigen::VectorXd handover_from_kp_;          // 过渡起点 kp（arm-sized）
+    Eigen::VectorXd handover_from_kd_;          // 过渡起点 kd（arm-sized）
+    Eigen::VectorXd handover_target_kp_;        // 过渡目标 kp（全局关节索引，来自 motor_pdo）
+    Eigen::VectorXd handover_target_kd_;        // 过渡目标 kd（全局关节索引）
+    // 阻抗模式切出时的“手臂回位门禁”：关节偏差超过阈值（度）时不允许切换控制器
+    double impedance_switch_guard_deg_{10.0};   // <=0 关闭
+    bool elbow_follow_enabled_{false};          // 肘随肩pitch负向随动（仅模式3）
+    double elbow_follow_ratio_{0.5};            // 随动比例系数 k
+    double elbow_follow_max_offset_{30.0 * M_PI / 180.0};  // 随动角度上限 (rad)，<=0 不限制
+    Eigen::VectorXd cartesian_hold_joint_pos_;  // 模式4进入时的关节位姿（用于回位判定）
+    void applyImpedanceHandover(const ros::Time& time, kuavo_msgs::jointCmd& joint_cmd_msg);
 
     // 线程安全
     mutable std::mutex state_mutex_;    // 状态访问互斥锁

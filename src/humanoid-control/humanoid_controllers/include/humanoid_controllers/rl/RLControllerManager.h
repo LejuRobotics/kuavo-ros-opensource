@@ -26,12 +26,14 @@
 #include <memory>
 #include <mutex>
 #include <functional>
+#include <optional>
 #include <ros/ros.h>
 
 #include "humanoid_controllers/util/TopicMonitor.h"
 
 namespace humanoid_controller
 {
+  class AmpAssembleController;
   /**
    * @brief RL控制器管理类
    * 提供控制器的加载、切换、查询等功能
@@ -311,6 +313,9 @@ namespace humanoid_controller
      * @brief 注册躯干速度回调函数
      * @param callback 回调函数，返回12维躯干状态向量 [x, y, z, yaw, pitch, roll, vx, vy, vz, angularVx, angularVy, angularVz]
      */
+    // Called by the control loop after estimation; service threads read a locked snapshot.
+    void updateAmpMpcSafety(bool stationary, const ros::Time& sensor_stamp);
+
     void registerTorsoStabilityCallback(std::function<bool()> callback)
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -396,7 +401,7 @@ namespace humanoid_controller
     /**
      * @brief 控制周期中处理自动控制器切换。
      */
-    void processAutoControllerSwitch();
+    void processAutoControllerSwitch(bool outer_blend_active = false);
 
     /**
      * @brief 自动切换缓冲期间是否应暂缓行走速度命令执行。
@@ -432,6 +437,10 @@ namespace humanoid_controller
     bool isVmpToAmpSwitchPending() const;
 
   private:
+    bool ampMpcSwitchReadyLocked() const;
+    bool amp_mpc_stationary_ = false;
+    ros::Time amp_mpc_sensor_stamp_;
+    ros::WallTime amp_mpc_sample_wall_time_;
     enum class AutoSwitchCommandBufferType
     {
       NONE,
@@ -632,6 +641,18 @@ namespace humanoid_controller
 
     void updateSwitchMotionStateLocked();
 
+    // The family occupies one outer index; member names are request aliases only.
+    std::string resolveControllerNameLocked(const std::string& name) const;
+    AmpAssembleController* currentAmpFamilyLocked() const;
+    void clearPendingAmpFamilyExitLocked(bool cancel_exit);
+    // nullopt continues through the unchanged outer-controller lifecycle.
+    std::optional<bool> routeAmpFamilySwitchLocked(const std::string& name);
+    // Owns its lock boundary: child advance must run without mutex_.
+    bool processAmpFamilySwitch(bool outer_blend_active);
+    bool notifyAmpFamilyExternalControlLocked();
+    void applyPendingAmpMemberRequestLocked();
+    bool logAmpFamilyExitRetry(const std::string& message) const;
+
 
   private:
     std::map<std::string, std::unique_ptr<RLControllerBase>> controllers_;  ///< 控制器映射表
@@ -684,6 +705,13 @@ namespace humanoid_controller
 
     bool mpc_is_stance_mode_ = false;               ///< MPC控制器是否处于stance模式
     bool pending_mpc_switch_ = false;               ///< 手臂归位后自动触发MPC切换
+    bool pending_amp_family_exit_ = false;         ///< Includes an empty target for MPC.
+    bool completing_amp_family_exit_ = false;      ///< Only the control cycle commits a queued exit.
+    bool outer_blend_active_ = false;
+    std::string pending_amp_family_exit_source_name_;
+    std::string pending_amp_family_exit_target_name_;
+    std::string pending_amp_member_request_;       ///< Member requested during VMP arm return.
+    std::string pending_amp_member_target_name_;   ///< Family that owns the deferred member request.
     bool pending_vmp_to_amp_switch_ = false;        ///< VMP手臂归零后自动触发AMP切换
     bool pending_vmp_to_amp_switch_completing_ = false;
     std::string pending_vmp_to_amp_source_name_;

@@ -5,6 +5,9 @@
 #include "humanoid_controllers/rl/AutoControllerSwitchPolicy.h"
 #include "humanoid_controllers/rl/FallStandController.h"
 #include "humanoid_controllers/rl/AmpWalkController.h"
+#include "humanoid_controllers/rl/AmpAssembleController.h"
+#include "humanoid_controllers/rl/AmpWildImpController.h"
+#include "humanoid_controllers/rl/AmpWaqController.h"
 #include "humanoid_controllers/rl/DepthWalkController.h"
 #include "humanoid_controllers/rl/VMPController.h"
 #include "humanoid_controllers/rl/MoREController.h"
@@ -80,6 +83,10 @@ namespace humanoid_controller
     pending_walking_switch_target_name_ = target_name;
     pending_walking_switch_reason_ = reason;
 
+    if (logAmpFamilyExitRetry("[RLControllerManager] Queue pending walking RL->RL switch request: " +
+                              pending_walking_switch_source_name_ + " -> " +
+                              pending_walking_switch_target_name_ + ". reason: " + reason))
+      return;
     ROS_WARN("[RLControllerManager] Queue pending walking RL->RL switch request: %s -> %s. reason: %s",
              pending_walking_switch_source_name_.c_str(),
              pending_walking_switch_target_name_.c_str(),
@@ -263,7 +270,7 @@ namespace humanoid_controller
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
-    auto it = controllers_.find(name);
+    auto it = controllers_.find(resolveControllerNameLocked(name));
     if (it != controllers_.end())
     {
       return it->second.get();
@@ -302,7 +309,7 @@ namespace humanoid_controller
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
-    auto it = controllers_.find(name);
+    auto it = controllers_.find(resolveControllerNameLocked(name));
     if (it != controllers_.end())
     {
       return it->second->getType();
@@ -417,6 +424,8 @@ namespace humanoid_controller
   bool RLControllerManager::switchController(const std::string& name)
   {
     std::unique_lock<std::recursive_mutex> lock(mutex_);
+    if (const auto family_result = routeAmpFamilySwitchLocked(name))
+      return *family_result;
     const std::string current_before = current_controller_name_.empty() ? "mpc" : current_controller_name_;
 
     // A deferred handoff owns the switch slot until it commits. Repeated presses
@@ -534,6 +543,8 @@ namespace humanoid_controller
     // 切换到MPC控制器
     if (name.empty())
     {
+      // Recheck at commit, including deferred arm returns and stance shortcuts.
+      if (currentAmpFamilyLocked() && !ampMpcSwitchReadyLocked()) return false;
       // 保护逻辑：RL->MPC 切换时，如果 RL 控制器不在 stance 且躯干仍在运动，不允许切换
       // （对应 V1.1 SwitchMotionState：STANCE/STATIONARY 放行，WALKING 拒绝。
       //   HEAD 已移除 SwitchMotionState 基础设施，用 isTorsoVelocityStable 替代 STATIONARY 判断。）
@@ -578,6 +589,10 @@ namespace humanoid_controller
       }
       
       current_controller_name_ = "";
+      clearPendingAmpFamilyExitLocked(false);
+      pending_mpc_switch_ = false;
+      pending_amp_member_request_.clear();
+      pending_amp_member_target_name_.clear();
       last_switch_motion_state_ = source_motion_state;
       clearPendingWalkingSwitchRequest("switched to MPC");
 
@@ -668,8 +683,16 @@ namespace humanoid_controller
           return false;
         }
         clearPendingWalkingSwitchRequest("walking switch guard passed");
-        ROS_INFO("[RLControllerManager] Allow walking RL->RL switch without stance: %s -> %s",
-                 current_controller_name_.c_str(), name.c_str());
+        if (completing_amp_family_exit_)
+        {
+          ROS_INFO_THROTTLE(1.0, "[RLControllerManager] Allow walking RL->RL switch without stance: %s -> %s",
+                            current_controller_name_.c_str(), name.c_str());
+        }
+        else
+        {
+          ROS_INFO("[RLControllerManager] Allow walking RL->RL switch without stance: %s -> %s",
+                   current_controller_name_.c_str(), name.c_str());
+        }
       }
       else
       {
@@ -761,6 +784,7 @@ namespace humanoid_controller
     auto* new_controller = controllers_[name].get();
     if (new_controller)
     {
+      new_controller->prepareForActivation();
       if (new_controller->getType() == RLControllerType::VMP_CONTROLLER)
       {
         // This is a real VMP activation through the manager, not the temporary
@@ -789,7 +813,16 @@ namespace humanoid_controller
           source_controller_type == RLControllerType::DANCE_CONTROLLER &&
           new_controller->getType() == RLControllerType::AMP_CONTROLLER;
 
-      if (force_cold_reset_for_vmp_to_amp || force_cold_reset_for_dance_to_amp)
+      if (dynamic_cast<AmpAssembleController*>(new_controller))
+      {
+        // Real outer activation always starts at WALK. resumeWarm remains
+        // available to humanoidController for a live blend source only.
+        new_controller->resume();
+        if (!source_is_stance_or_stationary && has_source_gait_command &&
+            allow_walking_phase_sync_switch)
+          new_controller->setGaitCommandState(source_gait_command);
+      }
+      else if (force_cold_reset_for_vmp_to_amp || force_cold_reset_for_dance_to_amp)
       {
         // VMP/Dance->AMP：清 AMP action/观测历史并冷启动；Dance->AMP 随后直接接管。
         new_controller->resetGaitCommandState(true);
@@ -872,6 +905,9 @@ namespace humanoid_controller
     }
 
     current_controller_name_ = name;
+    clearPendingAmpFamilyExitLocked(false);
+    pending_mpc_switch_ = false;
+    applyPendingAmpMemberRequestLocked();
     last_switch_motion_state_ = source_motion_state;
     stationary_candidate_active_ = false;
     clearPendingWalkingSwitchRequest("switch completed");
@@ -1063,6 +1099,8 @@ namespace humanoid_controller
   void RLControllerManager::logSwitchBlocked(const std::string& reason) const
   {
     const std::string message = "[RLControllerManager] Controller switch blocked: " + reason;
+    if (logAmpFamilyExitRetry(message))
+      return;
     ROS_WARN("%s", message.c_str());
     std::cerr << message << std::endl;
   }
@@ -1314,7 +1352,7 @@ namespace humanoid_controller
   bool RLControllerManager::hasController(const std::string& name)
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
-    return controllers_.find(name) != controllers_.end();
+    return controllers_.find(resolveControllerNameLocked(name)) != controllers_.end();
   }
 
   bool RLControllerManager::hasController(RLControllerType type)
@@ -1423,6 +1461,7 @@ namespace humanoid_controller
         std::string type_str = controller_node["type"].as<std::string>();
         std::string config_file_rel = controller_node["config_file"].as<std::string>();
         bool enabled = controller_node["enabled"] ? controller_node["enabled"].as<bool>() : true;
+        const bool assembly = controller_node["assembly"] && controller_node["assembly"].as<bool>();
         
         // 解析控制器大类（可选字段，用于分类）
         ControllerClass controller_class = ControllerClass::BASE_CONTROLLER;
@@ -1471,7 +1510,10 @@ namespace humanoid_controller
           continue;
         }
 
-        loadAutoControllerSwitchConfig(config_file_abs);
+        // Family YAML owns its switching policy; read_info only accepts the
+        // legacy per-model .info format and must never consume family YAML.
+        if (!assembly)
+          loadAutoControllerSwitchConfig(config_file_abs);
 
         // 根据类型创建控制器
         std::unique_ptr<RLControllerBase> controller;
@@ -1481,8 +1523,18 @@ namespace humanoid_controller
         }
         else if (type == RLControllerType::AMP_CONTROLLER)
         {
-          // AMP 走路控制器
-          controller = std::make_unique<AmpWalkController>(name, config_file_abs, nh, ros_logger);
+          if (assembly)
+            controller = std::make_unique<AmpAssembleController>(name, config_file_abs, nh, ros_logger);
+          else
+            controller = std::make_unique<AmpWalkController>(name, config_file_abs, nh, ros_logger);
+        }
+        else if (type == RLControllerType::AMP_WAQ_CONTROLLER)
+        {
+          controller = std::make_unique<AmpWaqController>(name, config_file_abs, nh, ros_logger);
+        }
+        else if (type == RLControllerType::AMP_WILD_IMP_CONTROLLER)
+        {
+          controller = std::make_unique<AmpWildImpController>(name, config_file_abs, nh, ros_logger);
         }
         else if (type == RLControllerType::DEPTH_LOCO_CONTROLLER)
         {
@@ -1762,9 +1814,13 @@ namespace humanoid_controller
   {
     const std::string switch_name = (target_name == "mpc") ? "" : target_name;
     std::string current_name;
+    std::string resolved_switch_name;
+    bool current_is_family = false;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
       current_name = current_controller_name_;
+      resolved_switch_name = resolveControllerNameLocked(switch_name);
+      current_is_family = currentAmpFamilyLocked() != nullptr;
     }
 
     if (target_name.empty())
@@ -1800,8 +1856,8 @@ namespace humanoid_controller
       }
     }
 
-    const bool allow_walking_phase_sync_switch = allowWalkingPhaseSyncSwitchRequest(switch_name);
-    if (!isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
+    const bool allow_walking_phase_sync_switch = allowWalkingPhaseSyncSwitchRequest(resolved_switch_name);
+    if (!current_is_family && !isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
     {
       message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
       logSwitchBlocked(message);
@@ -1824,7 +1880,7 @@ namespace humanoid_controller
       bool found = false;
       for (const auto& controller_name : walk_list)
       {
-        if (controller_name == target_name)
+        if (controller_name == (resolved_switch_name.empty() ? "mpc" : resolved_switch_name))
         {
           found = true;
           break;
@@ -1855,10 +1911,20 @@ namespace humanoid_controller
       return false;
     }
 
-    if (isVmpToAmpSwitchPending())
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (pending_amp_family_exit_)
+    {
+      message = "AMP family exit accepted; waiting for member/arm readiness and outer switch gates before activating: " +
+                target_name;
+    }
+    else if (isVmpToAmpSwitchPending())
     {
       message = "VMP->AMP switch accepted; arm return to zero is in progress before activating: " +
                 target_name;
+    }
+    else if (resolved_switch_name != switch_name)
+    {
+      message = "AMP member request accepted: " + target_name + "; active family: " + resolved_switch_name;
     }
     else
     {
@@ -1873,10 +1939,19 @@ namespace humanoid_controller
   {
     ROS_INFO("[RLControllerManager] Received controller switch request: %s", req.controller_name.c_str());
 
-    // 手动切换冷却检查：防止快速连续切换导致机身跳动（对标 G12 的 SWITCH_CONTROLLER_COOLDOWN = 3.0s）
+    bool member_request = false;
+    std::string resolved_name;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      resolved_name = resolveControllerNameLocked(req.controller_name);
+      member_request = currentAmpFamilyLocked() && resolved_name == current_controller_name_ &&
+          (resolved_name != req.controller_name || pending_amp_family_exit_);
+    }
+    // Member requests use the family dwell rules and may explicitly cancel an
+    // outstanding outer exit, even during the outer manual-switch cooldown.
     {
       const ros::Time now = ros::Time::now();
-      if (!last_manual_switch_time_.isZero() &&
+      if (!member_request && !last_manual_switch_time_.isZero() &&
           (now - last_manual_switch_time_).toSec() < manual_switch_min_interval_)
       {
         res.success = false;
@@ -1896,7 +1971,7 @@ namespace humanoid_controller
     int new_index = -1;
     for (size_t i = 0; i < walk_list.size(); ++i)
     {
-      if (walk_list[i] == req.controller_name)
+      if (walk_list[i] == resolved_name)
       {
         new_index = static_cast<int>(i);
         break;
@@ -1949,6 +2024,8 @@ namespace humanoid_controller
   {
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (notifyAmpFamilyExternalControlLocked())
+        return;
       if (!auto_switch_config_.enabled)
       {
         return;
@@ -2092,6 +2169,8 @@ namespace humanoid_controller
 
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (notifyAmpFamilyExternalControlLocked())
+        return;
       if (!auto_switch_config_.enabled)
       {
         return;
@@ -2109,6 +2188,8 @@ namespace humanoid_controller
     }
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (notifyAmpFamilyExternalControlLocked())
+        return;
       if (!auto_switch_config_.enabled)
       {
         return;
@@ -2126,6 +2207,8 @@ namespace humanoid_controller
     }
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (notifyAmpFamilyExternalControlLocked())
+        return;
       if (!auto_switch_config_.enabled)
       {
         return;
@@ -2135,8 +2218,10 @@ namespace humanoid_controller
     evaluateAutoControllerSwitch("waist enable");
   }
 
-  void RLControllerManager::processAutoControllerSwitch()
+  void RLControllerManager::processAutoControllerSwitch(bool outer_blend_active)
   {
+    if (processAmpFamilySwitch(outer_blend_active))
+      return;
     // 外部自动切换入口（cmd_vel、步态名、手臂和腰部控制回调）在收到事件时
     // 已经立即执行 evaluateAutoControllerSwitch()。控制主循环无需每周期
     // 重复扫描 ROS 时间戳和控制器状态；这里只处理必须在控制循环完成的
@@ -2197,6 +2282,9 @@ namespace humanoid_controller
 
   bool RLControllerManager::shouldBufferCommandLocked(AutoSwitchCommandBufferType type, const ros::Time& now) const
   {
+    // An active family owns command admission and buffering for its members.
+    if (currentAmpFamilyLocked())
+      return false;
     if (!auto_switch_config_.enabled || type == AutoSwitchCommandBufferType::NONE)
     {
       return false;
@@ -2246,6 +2334,8 @@ namespace humanoid_controller
       // walking command invalidate that assumption while the arms settle.
       return false;
     }
+    if (auto* family = currentAmpFamilyLocked())
+      return family->walkingAllowed();
     if (!auto_switch_config_.enabled)
     {
       return true;
@@ -2258,6 +2348,8 @@ namespace humanoid_controller
   bool RLControllerManager::isExternalControlCommandExecutionAllowed() const
   {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (auto* family = currentAmpFamilyLocked())
+      return family->externalAllowed();
     if (!auto_switch_config_.enabled)
     {
       return true;
@@ -2275,13 +2367,15 @@ namespace humanoid_controller
     std::function<bool()> walking_command_block_callback;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
+      if (currentAmpFamilyLocked())
+        return;
       walking_command_block_callback = walking_command_block_callback_;
     }
     const bool walking_command_blocked =
         walking_command_block_callback && walking_command_block_callback();
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
-      if (!auto_switch_config_.enabled)
+      if (currentAmpFamilyLocked() || !auto_switch_config_.enabled)
       {
         return;
       }
@@ -2517,8 +2611,8 @@ namespace humanoid_controller
 
     return current_class_it->second == ControllerClass::BASE_CONTROLLER &&
            target_class_it->second == ControllerClass::BASE_CONTROLLER &&
-           current_controller->supportsWalkingPhaseSyncSwitch() &&
-           target_controller->supportsWalkingPhaseSyncSwitch();
+           current_controller->supportsWalkingSwitch() &&
+           target_controller->supportsWalkingSwitch();
   }
 
   void RLControllerManager::processPendingWalkingSwitchRequest()
@@ -2606,29 +2700,20 @@ namespace humanoid_controller
 
   bool RLControllerManager::tryPendingMpcSwitch()
   {
-    if (!pending_mpc_switch_)
-      return false;
-
-    ArmController* arm_ctrl = nullptr;
-    {
-      std::lock_guard<std::recursive_mutex> lock(mutex_);
-      if (current_controller_name_.empty())
-      {
-        pending_mpc_switch_ = false;  // 已经切到 MPC 了，清标记
-        return false;
-      }
-      auto it = controllers_.find(current_controller_name_);
-      if (it != controllers_.end() && it->second)
-        arm_ctrl = it->second->getArmController();
-    }
-
-    if (arm_ctrl && arm_ctrl->getMode() != 1)
-      return false;  // 还在归位中
-
-    ROS_INFO("[RLControllerManager] Arm returned to AUTO_SWING, triggering deferred MPC switch");
-    pending_mpc_switch_ = false;
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!pending_mpc_switch_) return false;
+    if (current_controller_name_.empty()) { pending_mpc_switch_ = false; return false; }
+    auto it = controllers_.find(current_controller_name_);
+    if (it == controllers_.end() || !it->second) return false;
+    auto* arm = it->second->getArmController();
+    if (arm && (arm->getMode() != 1 || arm->isHomingToDefault() || arm->isImpedanceHandoverActive())) return false;
+    if (currentAmpFamilyLocked() && !ampMpcSwitchReadyLocked()) return false;
+    // Family commit belongs to the control loop; a request receipt is not completion.
+    const bool completing_before = completing_amp_family_exit_;
+    if (currentAmpFamilyLocked()) completing_amp_family_exit_ = true;
     switchController("");
-    return true;
+    completing_amp_family_exit_ = completing_before;
+    return current_controller_name_.empty();
   }
 
   void RLControllerManager::processPendingArmPreparedSwitch()
@@ -2724,6 +2809,8 @@ namespace humanoid_controller
     pending_vmp_to_amp_source_name_.clear();
     pending_vmp_to_amp_target_name_.clear();
     pending_vmp_to_amp_start_time_ = ros::Time();
+    pending_amp_member_request_.clear();
+    pending_amp_member_target_name_.clear();
   }
 
   bool RLControllerManager::tryPendingVmpToAmpSwitch()
@@ -2835,10 +2922,12 @@ namespace humanoid_controller
     // 获取当前状态
     std::vector<std::string> walk_list;
     std::string current_name;
+    bool current_is_family = false;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
       walk_list = walk_controllers_;
       current_name = current_controller_name_;
+      current_is_family = currentAmpFamilyLocked() != nullptr;
     }
     
     if (walk_list.empty())
@@ -2910,7 +2999,7 @@ namespace humanoid_controller
       auto it = controllers_.find(current_controller_name_);
       if (!current_controller_name_.empty() && it != controllers_.end() && it->second){
         const bool current_is_fall_stand = it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
-        if (current_is_fall_stand || (!it->second->isAllowToExit() && !allow_walking_phase_sync_switch)){
+        if (current_is_fall_stand || (!current_is_family && !it->second->isAllowToExit() && !allow_walking_phase_sync_switch)){
           res.success = false;
           res.message = "Current controller is not allowed to exit.";
           res.next_controller = "";
@@ -2921,7 +3010,7 @@ namespace humanoid_controller
       }
     }
 
-    if (!isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
+    if (!current_is_family && !isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
     {
       res.success = false;
       res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
@@ -2954,7 +3043,12 @@ namespace humanoid_controller
     res.success = true;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
-      if (pending_arm_prepared_switch_)
+      if (current_is_family && current_controller_name_ == current_name)
+      {
+        res.message = "AMP family exit accepted; waiting for member/arm readiness and outer switch gates before activating " +
+                      res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+      }
+      else if (pending_arm_prepared_switch_)
       {
         res.message = "Controller switch accepted; waiting for arms and torso to settle before activating " +
                       res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
@@ -3003,10 +3097,12 @@ namespace humanoid_controller
     // 获取当前状态
     std::vector<std::string> walk_list;
     std::string current_name;
+    bool current_is_family = false;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
       walk_list = walk_controllers_;
       current_name = current_controller_name_;
+      current_is_family = currentAmpFamilyLocked() != nullptr;
     }
     
     if (walk_list.empty())
@@ -3080,7 +3176,7 @@ namespace humanoid_controller
         const bool current_is_fall_stand =
             it->second->getType() == RLControllerType::FALL_STAND_CONTROLLER;
         if (current_is_fall_stand ||
-            (!it->second->isAllowToExit() && !allow_walking_phase_sync_switch))
+            (!current_is_family && !it->second->isAllowToExit() && !allow_walking_phase_sync_switch))
         {
           res.success = false;
           res.message = "Current controller is not allowed to exit.";
@@ -3092,7 +3188,7 @@ namespace humanoid_controller
       }
     }
 
-    if (!isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
+    if (!current_is_family && !isTorsoVelocityStable() && !allow_walking_phase_sync_switch)
     {
       res.success = false;
       res.message = "Torso velocity is not stable. Please wait until the torso velocity is stable.";
@@ -3124,7 +3220,12 @@ namespace humanoid_controller
     res.success = true;
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
-      if (pending_arm_prepared_switch_)
+      if (current_is_family && current_controller_name_ == current_name)
+      {
+        res.message = "AMP family exit accepted; waiting for member/arm readiness and outer switch gates before activating " +
+                      res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
+      }
+      else if (pending_arm_prepared_switch_)
       {
         res.message = "Controller switch accepted; waiting for arms and torso to settle before activating " +
                       res.next_controller + " (index: " + std::to_string(res.next_index) + ")";
@@ -3248,7 +3349,12 @@ namespace humanoid_controller
     }
 
     res.success = true;
-    res.message = "Successfully switched to VMP controller: " + vmp_controller_name; 
+    {
+      std::lock_guard<std::recursive_mutex> lock(mutex_);
+      res.message = pending_amp_family_exit_
+          ? "AMP family exit accepted; waiting for member/arm readiness and outer switch gates before activating: " + vmp_controller_name
+          : "Successfully switched to VMP controller: " + vmp_controller_name;
+    }
     ROS_INFO("[RLControllerManager] %s", res.message.c_str());
 
     return true;
@@ -3268,7 +3374,7 @@ namespace humanoid_controller
         return true;
       }
       res.success = true;
-      res.message = "Switched to first dance in list (empty request = index 0)";
+      res.message = "Switch request accepted for first dance in list (empty request = index 0)";
       return true;
     }
     if (d[0] == '#')
@@ -3297,7 +3403,7 @@ namespace humanoid_controller
         return true;
       }
       res.success = true;
-      res.message = "Switched to dance index " + std::to_string(idx);
+      res.message = "Switch request accepted for dance index " + std::to_string(idx);
       return true;
     }
     if (!switchToDanceControllerByName(d))
@@ -3307,7 +3413,7 @@ namespace humanoid_controller
       return true;
     }
     res.success = true;
-    res.message = "Switched to dance: " + d;
+    res.message = "Switch request accepted for dance: " + d;
     return true;
   }
 

@@ -312,6 +312,10 @@ class JoyCustomizeConfigNode:
         self._cached_controller_name: Optional[str] = None
         self._cached_controller_time: float = 0.0
         self._controller_cache_ttl: float = 0.3  # 秒
+        self._cached_amp_member_name = ""
+        self.amp_family_member_sub = rospy.Subscriber(
+            "/humanoid_controller/amp_family/active_member", String,
+            lambda msg: setattr(self, '_cached_amp_member_name', msg.data), queue_size=1)
 
         # 最近一次触发的动作来源（"m1m2" / "ltrt" / "dance" / None）
         # 配合 robot_action_executing 决定是否发布 M1/M2 active 信号给 cpp
@@ -683,11 +687,14 @@ class JoyCustomizeConfigNode:
             self._publish_m1m2_action_active(False)
 
     # 允许做自定义动作(tact)的控制器白名单：MPC / AMP 均允许 tact；
-    # amp_wild_controller 放行到动作服务侧，服务侧只在 kuavo5 下切回 amp_controller；
+    # WALK/RUN 和装配体放行到动作服务侧，由管理器路由回 MANIPULATE；
     # AMP 走路时(步态非 stance) LT/RT 也会被单独拒(MPC 走路时 LT/RT 不受限,符合 PDF §4)；
     # M1/M2 任何走路状态下一律拒(不分控制器)；
     # 其它(dance_*、fall_stand_controller 等) 一律拒。
-    _ACTION_ALLOWED_CONTROLLERS = ("mpc", "amp_controller", "amp_wild_controller", "amp_hand_controller")
+    _ACTION_ALLOWED_CONTROLLERS = (
+        "mpc", "amp_controller", "amp_wild_controller", "amp_hand_controller",
+        "amp_run_controller", "amp_wild_imp_controller", "amp_assemble_controller",
+    )
 
     def _is_action_allowed_by_controller(self) -> bool:
         """按需查询当前控制器名是否在允许做动作的白名单内（带 TTL 缓存避免每帧调服务）。
@@ -1213,7 +1220,7 @@ class JoyCustomizeConfigNode:
                                 1.0,
                                 f"Skipping {action_key}: controller "
                                 f"'{self._cached_controller_name}' does not allow tact actions "
-                                f"(only mpc / amp_controller / amp_wild_controller)")
+                                f"(requires MPC or an AMP controller)")
                             continue
 
                         # 走路时的精细化拒绝(判据见 _has_motion_intent):
@@ -1230,7 +1237,9 @@ class JoyCustomizeConfigNode:
                                     f"gait={self._current_gait_name}), "
                                     f"M1/M2 disabled while walking/stepping")
                                 continue
-                            if self._cached_controller_name == "amp_controller":
+                            if (self._cached_controller_name == "amp_controller" or
+                                    (self._cached_controller_name == "amp_assemble_controller" and
+                                     self._cached_amp_member_name == "amp_controller")):
                                 rospy.loginfo_throttle(
                                     1.0,
                                     f"Skipping {action_key}: AMP 走路时禁触发 LT/RT "

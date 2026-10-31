@@ -1,0 +1,191 @@
+# AMP 族的唯一成员配置入口；修改后重启控制器节点，不支持运行中热增删。
+# WALK 是入口/族内中转锚点，必须保留且启用，用顶层 anchor 填写其 name。
+# RUN/涉及 RUN 的融合期间，普通族外切换直接拒绝且不缓存；需退跑完成后重新请求。
+# 其它成员的 allow_direct_rl_switch 决定去其它 RL 族是否可直接离开；false 时先回锚点。
+# 不免除手臂归位、混合互斥及宿主切换门禁；更不允许运动中切 MPC。
+# anchor 引用 members 中的 name，不是 walk 这样的角色键；当前仅支持 WALK 为锚点。
+# 其它成员：enabled: false 或移除整个角色块即可停用，不加载其 info/ONNX。
+# 恢复 enabled: true 并提供 name/config_file 即可加入；省略 enabled 的现有块默认启用。
+# 可替换同一角色的模型配置；支持 manipulate/walk/run/soft/walk_waq 五种角色。
+# 路径相对于本文件；成员名称可通过 switch_controller 服务请求。
+# controller_type 固定编码：1=manipulate，2=walk，3=run，4=soft，5=walk_waq；0=族未激活。
+# 编码不随成员启用/禁用或名称变化；编码话题为 /humanoid_controller/amp_family/controller_type。
+# 观察 /humanoid_controller/amp_family/status 可看到启用成员和切换等待原因。
+anchor: amp_wild_controller
+
+members:
+  manipulate:
+    enabled: true
+    allow_direct_rl_switch: true
+    name: amp_controller
+    config_file: skw_rl_param.info
+  walk:
+    enabled: true
+    allow_direct_rl_switch: true
+    name: amp_wild_controller
+    config_file: skw_rl_param_wild.info
+  run:
+    enabled: true
+    allow_direct_rl_switch: false  # RUN 禁止普通族外切换；先手动退跑，再重新请求。
+    name: amp_run_controller
+    config_file: skw_rl_param_run_waq.info
+  soft:
+    enabled: true
+    allow_direct_rl_switch: true
+    name: amp_wild_imp_controller
+    config_file: amp_wild_imp_rl_param.info
+  walk_waq:
+    enabled: true
+    allow_direct_rl_switch: true
+    name: amp_walk_waq_controller
+    config_file: amp_waq_param.info
+    # 显式选择：switch_controller 请求此 name，或调用 amp_family/switch_to_walk_waq。
+    # 不触发自动跑步；离开 WALK_WAQ 需显式请求成员，或外部操作意图路由到 MANIPULATE。
+
+# 切换规则独立于各模型 info；以下修改需重启控制器节点生效。
+# 自动路径：MANIPULATE --行走意图--> WALK <--> RUN。
+# SOFT 由显式请求进入并保持，不因推杆自动退出；非 WALK 成员之间经 WALK 中转。
+# 显式服务请求绕过自动速度触发阈值和 intentHold，但仍检查物理状态、手臂就绪、
+# 适用的 minDwellTime 和混合互斥（肘部门禁下普通 RUN->WALK 免驻留等待）；
+# 例如显式请求 RUN 仍要求非站立、相位有效、实测速度达标。
+# 指令门限使用当前模型遥控器量程的比例：0=中位，1=正向满杆。
+# 原始 /cmd_vel 除以当前模型 velocityLimits 对应轴；不乘 commandData.scale。
+# 对直接发布 /cmd_vel 的程序，这是指令占量程比例，不是读取物理摇杆。
+# body_speed 仍为三维实测线速度模长，单位 m/s。
+switching:
+  commandThresholdUnits: ratio    # ratio=量程比例；velocity=兼容旧配置的 m/s、rad/s
+
+  # WALK -> RUN
+  # 还需满足转向、实际速度/步态相位/持续意图等条件。必须 0 < walkTorun < 1。
+  walkTorun: 0.9
+
+  # 自动起跑时转向杆量绝对值必须小于此比例；1表示禁止满幅转向时自动起跑。
+  runMaxAng: 1.0
+
+  # 实测身体速度门禁仍为 m/s，不能按杆量填写；显式起跑同样检查。
+  runMinBodySpeed: 0.5
+
+  # RUN -> WALK：前进杆量严格低于75%即请求退跑；RUN上限2.0时相当于1.5。
+  # 双肘满足下方范围后才开始融合。0 <= runTowalk <= 1。
+  # 不强制两个阈值大小关系；建议退跑比例小于起跑比例以形成稳定迟滞区。
+  # 若退跑比例 >= 起跑比例：普通自动退跑时仍高于起跑比例，则需先回到起跑比例以内再自动起跑。
+  # 已收到低速/零速指令后静默，不额外要求回杆；显式请求和温度恢复不受重新起跑条件影响。
+  # 指令过期不撤回已成立的退跑请求；新的有效指令 >= runTowalk 可撤回。
+  runTowalk: 0.6
+
+  # 触发退跑后，限制 RUN 前向速度目标，帮助放臂进入肘部门禁范围。
+  # 单位 m/s（接收器指令、模型 commandData.scale 之前）；0/缺省关闭。
+  # 先限目标再沿用 runDecelTau 平滑，实际送入模型的速度不会瞬间降到此值。
+  # 原始杆量仍用于切换判断；取消退跑或融合完成后解除，WALK 不继承此上限。
+  runToWalkSpeedLimit: 0.9
+
+  # 只替换 RUN 左右肘的 RL 目标角（沿用门禁 jointIndices），保留原 KP/KD/力矩限幅。
+  # 从上一周期下发参考角平滑插值；目标需严格在肘部门禁范围内。单位 rad / s。
+  # 到位仍看实测角度；RUN->WALK 融合期间保持，取消退跑时平滑交回实时 RL 目标。
+  runToWalkElbowInterpolation:
+    enabled: true
+    targetPosition: [-0.5, -0.5]
+    duration: 1.2
+    # 仅取消退跑时平滑交回 RUN；正常退到 WALK 使用 blendDuration。
+    releaseDuration: 0.4
+
+  # RUN 正向速度下降的额外平滑时间常数(s)：越大减速越缓、停车距离越长。
+  # 0/缺省关闭；仅控制减速，加速由 runAccelTau 控制。按控制时间更新，不依赖消息频率。
+  # 等待切走期间已生效；WALK 继承剩余衰减，完成后恢复普通 WALK。
+  # 切换使用未平滑指令的量程比例；各模型原有倍率/限幅仍生效。
+  # 执行禁止/复位/反向命令优先；修改后需重启。0.35 为待实机调试初值。
+  runDecelTau: 0.5
+
+  # RUN 正向速度上升的额外平滑时间常数(s)：越大加速越缓，0/缺省关闭。
+  # 与 runDecelTau 独立；仅作用于 RUN 的前向 x，侧移、转向、反向沿用原逻辑。
+  # WALK -> RUN 从源控制器的指令值连续起步；冷启动/复位后从 0 起步。
+  # 按控制时间推进，单次速度指令也会持续收敛；此参数不传给普通 WALK。
+  # 切换门限仍使用原始指令。修改后需重启；0.35 为待仿真/实机调试初值。
+  runAccelTau: 0.35
+
+  # RUN -> WALK 的实测肘部范围门禁：放臂辅助由上方 runToWalkElbowInterpolation 单独控制。
+  # 门禁本身不改速度；退跑目标限速由 runToWalkSpeedLimit 单独控制，放行前不启动目标模型/融合。
+  # 自动、显式和经 WALK 中转的 RUN 退出均检查。
+  # 只约束融合开始前；放行后沿用正常融合，不在融合中途突然退回 RUN。
+  # 缺省不启用（兼容其它族配置）；本 v55 配置显式开启。修改后重启控制器节点。
+  runToWalkElbowGuard:
+    enabled: true
+    # 原始传感器 jointPos_ 的零基索引：[左肘, 右肘]，v55 为 zarm_l4/zarm_r4。
+    jointIndices: [16, 23]
+    # 单位 rad，闭区间，左右肘必须同时满足；v55 屈肘为负，约 -2 为明显收臂。
+    # 范围由下方 minPosition/maxPosition 指定，按低速 RUN/WALK 录包调整。
+    # minPosition 越接近 0，要求放臂越充分；过严会一直保持 RUN，而非超时强切。
+    minPosition: [-0.6, -0.6]
+    maxPosition: [0., 0.]
+    # 两肘连续在范围内的时间(s)；0 表示有效样本到位立即放行，不要求肘部静止。
+    # 普通 RUN->WALK 开启本门禁后不再等待 intentHold/minDwellTime。
+    # 任一肘越界、数据无效/过期/倒序、采样间断或切换意图撤回会重新计时。
+    holdTime: 0.
+    # 允许的最大接收年龄/连续样本间隔(s)；只有传感器时间戳更新才刷新接收时间。
+    # 不将仿真传感器时钟直接与 ROS 时钟相减；保持时间取两者各自累计时长的较小值。
+    # 重复读同一帧既不刷新接收时间，也不增加到位计时。
+    # 缺数据时保持 RUN 并发布等待原因；没有超时强制放行或自动切 MPC 的分支。
+    maxSampleAge: 0.1
+
+  # ── MANIPULATE -> WALK：恢复行走的意图 ──
+  # MANIPULATE 自动回 WALK 的杆量意图：hypot(x比例,y比例) 或 |yaw比例| > 此值。
+  # 每轴按当前模型对应量程归一化；0.05 表示5%（对角方向按向量模长）。
+  # 显式 walk/trot 步态请求也能触发，不受此门槛限制；外部操作意图优先。
+  # 减小更灵敏，但容易被摇杆微小噪声触发行走；不用于 SOFT 自动退出。
+  walkEnter: 0.05
+
+  # ── 进入 MANIPULATE / RUN 经 WALK 退出：停车条件与外部操作意图 ──
+  # 进入 MANIPULATE、或 RUN 为去 MANIPULATE/SOFT/退出族而回 WALK 时，
+  # 要求 body_speed <= 此值（m/s）并满足 stance。也用于族门禁判断何时可按站立处理。
+  # 这不是操作控制器的速度限幅；增大将允许在更大的残余速度下交接。
+  manipMax: 0.3
+
+  # 外部操作事件及 robot_action 活跃心跳的新鲜度窗口（s，>0）。
+  # 除 SOFT 锁存及显式成员/退出请求优先的情况，外部操作意图优先路由到
+  # MANIPULATE，可能先等待停车/手臂就绪。
+  # 一次性手臂/腰部请求会额外锁存到交接完成，因此不是“超过此值就取消切换”。
+  # 这也不是手臂归位、阻抗退出过渡或动作执行的超时时间。
+  externalHoldTime: 0.5
+
+  # ── 通用：意图确认、驻留、指令新鲜度和关节混合 ──
+  # 自动切换意图持续时间（s，>=0）：M->W、W->R 的目标需持续不变；
+  # R->W 仅在未启用肘部门禁时使用此计时。
+  # 意图消失/指令过期导致目标回到当前成员时清零；身体速度或相位暂未就绪不清零。
+  # 与 minDwellTime 并行计时，满足二者及物理门禁后才切换，不是简单相加。
+  # 显式成员请求、外部操作请求和退出族不等待此计时；增大可抑制短促推杆。
+  intentHold: 0.4
+
+  # 相邻切换的最短驻留（s，>=0）：从上一次混合完成/回退时刻开始计时。
+  # 首次激活从 reset 时刻开始；开启肘部门禁的普通 RUN->WALK 不额外等待驻留。
+  # 其它路径保留驻留要求，混合期间不接受重叠切换。
+  # 增大减少频繁切换，也会增加跨两跳（如 RUN->WALK->MANIPULATE）的等待时间。
+  minDwellTime: 1.0
+
+  # 原始 /cmd_vel 的新鲜度窗口（s，>0）：超过此时长未收消息即视为过期。
+  # 应大于正常发布周期及合理抖动；过小会反复丢失自动切换意图。
+  # 只影响族策略对速度意图的判断，不会替下层接收器清零速度，不等于停车超时。
+  # walk/trot 步态意图单独锁存至 stance 请求，不由此窗口清除。
+  commandTimeout: 0.5
+
+  # 族内源/目标控制器关节命令混合时长（s，>0），由宿主 RL 混合器执行。
+  # 增大延长双模型共同参与的过渡，减小更接近硬切；不改变各模型的速度缩放。
+  # WALK<->RUN 路径跳过额外速度凹陷，仍保留关节混合/适用的相位同步。
+  # SOFT 手臂退出阻抗的 handoverDuration 位于其 info 配置，与此时间不是同一参数。
+  blendDuration: 0.5
+
+# 跑步温度保护（仅四路NTC实测值）：修改后重启控制器生效；95℃是退跑触发点，不保证峰值不超过95℃。
+runThermalProtection:
+  enabled: true
+  # hardware_node 发布的原始电机温度数组，std_msgs/Float64MultiArray。
+  ntcTopic: /sensor_data_motor/motor_ntc_temperature
+  # 零基原始电机索引：左脚踝两路、右脚踝两路，非电机ID。
+  motorIndices: [4, 5, 10, 11]
+  entryTemperature: 80.0       # 起跑/冷却恢复共用门限；所有NTC不高于此值并持续recoveryHold。
+  exitTemperature: 95.0        # 任一路达到此值，自动请求RUN→WALK，℃。
+  recoveryHold: 3.0           # 低温条件持续时间，秒；自动恢复，无需回杆或行走。
+  sampleTimeout: 1.0          # NTC消息接收超时，秒；缺失禁止跑步并退跑。
+  maxSampleDrop: 2.0          # 相邻NTC消息最大允许降幅，℃；超出锁存异常。
+  # 仅温度保护退出RUN期间生效（含RUN融合）；完成切到WALK即解除。
+  # 冷却/等待温度就绪仅禁止跑步，不限制正常行走；与runTowalk门限独立。
+  walkSpeedLimit: 0.7         # 退跑前后向命令幅值上限，m/s，进入原有平滑器之前生效。
+  exitTimeout: 5.0            # 开始融合前的退跑等待超时则速度归零；融合后不再触发此超时。

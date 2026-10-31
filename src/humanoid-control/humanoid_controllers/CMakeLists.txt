@@ -318,7 +318,12 @@ if(OpenVINO_FOUND)
         src/rl/RLControllerBase.cpp
         src/rl/FallStandController.cpp
         src/rl/RLControllerManager.cpp
+        src/rl/AmpWaqController.cpp
         src/rl/AmpWalkController.cpp
+        src/rl/AmpWildImpController.cpp
+        src/rl/AmpFamilyMemberController.cpp
+        src/rl/AmpFamilyManagerIntegration.cpp
+        src/rl/AmpAssembleController.cpp
         src/rl/MoREController.cpp
         src/rl/VMPController.cpp
         src/rl/armController.cpp

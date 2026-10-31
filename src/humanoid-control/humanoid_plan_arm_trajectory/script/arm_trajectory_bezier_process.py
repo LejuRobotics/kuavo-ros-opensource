@@ -46,16 +46,20 @@ KUAVO = "kuavo"
 ROBAN = "roban"
 
 
-def is_tact_playback_controller_allowed(control_scheme, controller_name):
+def is_tact_playback_controller_allowed(control_scheme, controller_name, active_amp_member=None):
     return get_tact_playback_controller_action(
-        control_scheme, KUAVO, 5, controller_name
+        control_scheme, KUAVO, 5, controller_name, active_amp_member
     ) == "allowed"
 
 
-def get_tact_playback_controller_action(control_scheme, robot_class, robot_major, controller_name):
+def get_tact_playback_controller_action(control_scheme, robot_class, robot_major, controller_name,
+                                       active_amp_member=None):
     if control_scheme != "multi":
         return "allowed"
-    if robot_class == KUAVO and robot_major == 5 and controller_name == "amp_wild_controller":
+    if controller_name == "amp_assemble_controller":
+        return "allowed" if active_amp_member == "amp_controller" else "switch_to_amp_controller"
+    if (robot_class == KUAVO and robot_major == 5 and controller_name in
+            ("amp_wild_controller", "amp_run_controller", "amp_wild_imp_controller")):
         return "switch_to_amp_controller"
     return "allowed"
 
@@ -278,6 +282,21 @@ class ArmTrajectoryBezierDemo:
             self._controller_switch_event_callback,
             queue_size=1,
         )
+        self._amp_family_active_member = ""
+        self._amp_family_status_snapshot = ({}, float("-inf"))
+        # SOFT -> WALK -> MANIPULATE 包含退阻抗、归位及两段混合。
+        self.amp_family_action_switch_timeout = float(
+            rospy.get_param("~amp_family_action_switch_timeout", 10.0))
+        if not 0.0 < self.amp_family_action_switch_timeout < float("inf"):
+            raise ValueError("amp_family_action_switch_timeout must be finite and positive")
+        self._amp_family_status_sub = rospy.Subscriber(
+            '/humanoid_controller/amp_family/status', String,
+            self._amp_family_status_callback, queue_size=1,
+        )
+        self._amp_family_member_sub = rospy.Subscriber(
+            '/humanoid_controller/amp_family/active_member', String,
+            lambda msg: setattr(self, '_amp_family_active_member', msg.data), queue_size=1,
+        )
         self._more_action_abort_sub = rospy.Subscriber(
             '/humanoid_controller/more_arm_action_abort',
             Empty,
@@ -334,9 +353,10 @@ class ArmTrajectoryBezierDemo:
 
         robot_version_str = os.environ.get("ROBOT_VERSION", "45")
 
+        rl_config_subdir = "amp" if robot_version_str == "55" else "rl"
         rl_path = os.path.join(
             humanoid_controllers_path, "config",
-            f"kuavo_v{robot_version_str}", "rl", "skw_rl_param.info"
+            f"kuavo_v{robot_version_str}", rl_config_subdir, "skw_rl_param.info"
         )
         if os.path.exists(rl_path):
             try:
@@ -857,28 +877,56 @@ class ArmTrajectoryBezierDemo:
         except: pass
         return "amp_controller"
 
+    def _amp_family_status_callback(self, msg):
+        try:
+            status = json.loads(msg.data)
+            if not isinstance(status, dict):
+                status = {}
+        except (ValueError, TypeError):
+            status = {}
+        # 一次替换状态和接收时间，避免回调与服务线程读取到不匹配的快照。
+        self._amp_family_status_snapshot = (status, time.monotonic())
+
+    def _amp_action_ready(self):
+        status, received_at = self._amp_family_status_snapshot
+        return (
+            0.0 <= time.monotonic() - received_at <= 1.0
+            and status.get("family_active") is True
+            and status.get("active_member") == "amp_controller"
+            and status.get("blending") is False
+            and status.get("exiting") is False
+            and status.get("external_allowed") is True
+        )
+
     def ensure_tact_playback_controller(self, timeout=3.0):
         if self.kuavo_control_scheme != "multi":
             return True
 
         target_controller = "amp_controller"
-        start_time = rospy.Time.now()
+        deadline = time.monotonic() + timeout
         switch_requested = False
 
-        while (rospy.Time.now() - start_time).to_sec() < timeout and not rospy.is_shutdown():
+        while time.monotonic() < deadline and not rospy.is_shutdown():
+            if (self.interrupt_flag or not self.enable_control_state_
+                    or self._controller_switch_abort_event.is_set()):
+                return False
             current_controller = self.get_current_controller_name()
+            if current_controller is None:
+                time.sleep(0.05)
+                continue
             action = get_tact_playback_controller_action(
                 self.kuavo_control_scheme,
                 self.robot_class,
                 self.robot_version.major(),
-                current_controller
+                current_controller,
+                self._amp_family_active_member,
             )
-            if action == "allowed":
+            # active_member 在混合开始即变更，不能单凭名称提前播放。
+            if current_controller == "amp_assemble_controller":
+                if self._amp_action_ready():
+                    return True
+            elif action == "allowed":
                 return True
-
-            if current_controller is None:
-                rospy.sleep(0.05)
-                continue
 
             if not switch_requested:
                 rospy.loginfo(
@@ -891,15 +939,9 @@ class ArmTrajectoryBezierDemo:
                     return False
                 switch_requested = True
 
-            rospy.sleep(0.05)
+            time.sleep(0.05)
 
-        current_controller = self.get_current_controller_name()
-        return get_tact_playback_controller_action(
-            self.kuavo_control_scheme,
-            self.robot_class,
-            self.robot_version.major(),
-            current_controller
-        ) == "allowed"
+        return False
 
     def get_current_control_mode(self):
         """获取当前实际控制模式
@@ -907,7 +949,7 @@ class ArmTrajectoryBezierDemo:
         """
         # 控制模式到控制器名称集合的映射
         mode_controllers = {
-            "rl": {"amp_controller", "more_controller"},
+            "rl": {"amp_controller", "amp_assemble_controller", "more_controller"},
             "ocs2": {"mpc"},
         }
         
@@ -2453,11 +2495,15 @@ class ArmTrajectoryBezierDemo:
                 self._finish_action(0)
                 return ExecuteArmActionResponse(success=False, message=msg)
 
-        if not self.ensure_tact_playback_controller(timeout=3.0):
+        switch_timeout = (
+            self.amp_family_action_switch_timeout
+            if current_ctrl == "amp_assemble_controller" else 3.0
+        )
+        if not self.ensure_tact_playback_controller(timeout=switch_timeout):
             current_controller = self.get_current_controller_name()
             msg = (
-                f"当前控制器为 {current_controller}，不允许播放上肢动作，"
-                "请先切换到 amp_controller"
+                f"当前控制器为 {current_controller}，动作控制器交接未就绪"
+                "（切换失败、超时或被中断），已取消动作播放"
             )
             rospy.logwarn(msg)
             self._finish_action(0)

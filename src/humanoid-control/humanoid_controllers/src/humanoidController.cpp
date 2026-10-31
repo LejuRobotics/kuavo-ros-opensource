@@ -13,6 +13,7 @@
 
 #include "humanoid_controllers/humanoidController.h"
 #include "humanoid_controllers/rl/armController.h"
+#include "humanoid_controllers/rl/AmpAssembleController.h"
 #if defined(USE_DDS) || defined(USE_LEJU_DDS)
 #include "humanoid_controllers/CommonDDS.h"
 #endif
@@ -1101,7 +1102,7 @@ namespace humanoid_controller
         }
         else
         {
-          // 如果状态估计器未初始化，返回true（允许切换）
+          // 保留其它控制器的既有切换行为；AMP 的严格静止检查使用独立快照。
           return true;
         }
       });
@@ -1197,10 +1198,20 @@ namespace humanoid_controller
       
       // 只有在 RL 可用时才初始化控制器（需要配置文件）
       {
-        // 从 rlParamFile 路径推断版本配置目录
-        boost::filesystem::path rl_param_path(rlParamFile);
-        boost::filesystem::path version_config_dir = rl_param_path.parent_path().parent_path();
-        std::string controller_list_config = version_config_dir.string() + "/rl_controllers.yaml";
+        // 显式注册表优先；旧启动文件未提供时，兼容原 /rl_param 目录推导。
+        std::string controller_list_config;
+        controllerNh_.getParam("/rl_controllers_config", controller_list_config);
+        boost::filesystem::path version_config_dir;
+        if (!controller_list_config.empty())
+        {
+          version_config_dir = boost::filesystem::path(controller_list_config).parent_path();
+        }
+        else
+        {
+          const boost::filesystem::path rl_param_path(rlParamFile);
+          version_config_dir = rl_param_path.parent_path().parent_path();
+          controller_list_config = version_config_dir.string() + "/rl_controllers.yaml";
+        }
         
         // 尝试从配置文件加载控制器列表
         if (boost::filesystem::exists(controller_list_config))
@@ -1438,6 +1449,22 @@ namespace humanoid_controller
                 constexpr int kExternalArmControlMode = 2;
                 if (arm_controller_mode == kExternalArmControlMode)
                 {
+                  if (!current_controller->supportsExternalControlRequests())
+                  {
+                    pending_external_arm_controller_mode_ = false;
+                    ROS_WARN_THROTTLE(2.0, "[controller] Current family has no enabled manipulation member; mode 2 rejected");
+                    return;
+                  }
+                  // Queue the explicit AMP request before waiting on its execution
+                  // gate. Otherwise SOFT remains latched and the gate never opens.
+                  if (auto* family = dynamic_cast<humanoid_controller::AmpAssembleController*>(current_controller))
+                  {
+                    if (!family->requestArmControlMode(kExternalArmControlMode))
+                    {
+                      pending_external_arm_controller_mode_ = false;
+                      return;
+                    }
+                  }
                   controller_manager_->notifyExternalArmControlActivity();
                   if (!controller_manager_->isExternalControlCommandExecutionAllowed() ||
                       controller_manager_->shouldBufferExternalControlCommand())
@@ -2483,6 +2510,12 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return false;
     }
 
+    auto* current_controller = controller_manager_->getCurrentController();
+    if (current_controller && !current_controller->supportsExternalControlRequests())
+    {
+      pending_external_arm_controller_mode_ = false;
+      return false;
+    }
     controller_manager_->notifyExternalArmControlActivity();
     if (!controller_manager_->isExternalControlCommandExecutionAllowed() ||
         controller_manager_->shouldBufferExternalControlCommand())
@@ -2492,7 +2525,6 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
       return false;
     }
 
-    auto* current_controller = controller_manager_->getCurrentController();
     if (current_controller == nullptr)
     {
       return false;
@@ -2512,6 +2544,18 @@ void humanoidController::sensorsDataCallback(const kuavo_msgs::sensorsData::Cons
 
   bool humanoidController::shouldBlockWalkingCommandForExternalArmTarget() const
   {
+    if (controller_manager_)
+    {
+      auto* current = controller_manager_->getCurrentController();
+      if (current && !current->supportsExternalControlRequests())
+      {
+        // Ignore targets that this family cannot execute, but preserve protection
+        // for a real arm action, external mode, or unfinished return/handover.
+        const auto* arm = current->getArmController();
+        return current->hasActiveArmActionSession() ||
+               (arm && (arm->getMode() != 1 || arm->isHomingToDefault() || arm->isImpedanceHandoverActive()));
+      }
+    }
     if (controller_manager_ && controller_manager_->currentControllerAllowsWalkingDuringArmAction())
     {
       return false;
@@ -3653,6 +3697,22 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     ros_logger_->publishValue("/humanoid_controller/is_stance_mode_", static_cast<double>(is_stance_mode_));
     ros_logger_->publishValue("/humanoid_controller/fall_down_state_", fall_down_state_);
 
+    // Publish a finite, physically stopped snapshot before any AMP->MPC commit.
+    // A commanded stance alone never proves the body has stopped.
+    bool amp_mpc_stationary = false;
+    if (stateEstimate_ && contactForce_.size() > 8)
+    {
+      const auto torso = stateEstimate_->getTorsoState();
+      const double min_force = centroidalModelInfo_.robotMass * 9.8 *
+          RL_SWITCH_STATIONARY_FOOT_FORCE_WEIGHT_RATIO_DEFAULT;
+      amp_mpc_stationary = torso.size() >= 12 && torso.allFinite() &&
+          torso.segment<3>(6).norm() <= 0.05 && torso.segment<3>(9).norm() <= 0.05 &&
+          stateEstimate_->isTorsoVelocityStable() &&
+          std::isfinite(contactForce_(2)) && std::isfinite(contactForce_(8)) &&
+          contactForce_(2) >= min_force && contactForce_(8) >= min_force;
+    }
+    controller_manager_->updateAmpMpcSafety(amp_mpc_stationary, current_time_);
+
     // 检查待触发的 MPC 切换（手臂归位后自动补触发）
     controller_manager_->tryPendingMpcSwitch();
     // VMP->AMP：保持VMP运行并用PD+重力补偿将手臂归零，完成后再切换
@@ -3662,7 +3722,8 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     controller_manager_->setMpcStanceState(is_stance_mode_, current_gait_.name);
     controller_manager_->updateSwitchMotionState();
     controller_manager_->processPendingWalkingSwitchRequest();
-    controller_manager_->processAutoControllerSwitch();
+    controller_manager_->processAutoControllerSwitch(is_torso_interpolation_active_ ||
+                                                     is_rl_to_rl_interpolation_active_);
 
     // is_rl_controller_buffer_.updateFromBuffer();// 使用buffer中的值更新is_rl_controller_,避免多线程更新
     is_rl_controller_ = !controller_manager_->isBaseControllerActive();  //waao：判断当前是否为rl
@@ -3671,6 +3732,14 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
     RLControllerType current_controller_type = controller_manager_->getCurrentControllerType();
     bool is_fall_stand_controller_active = current_controller_type == RLControllerType::FALL_STAND_CONTROLLER;
+    // Both selected and outgoing policies can supply commands during a blend.
+    if ((current_controller_ptr_ && current_controller_ptr_->requiresEmergencyStop()) ||
+        (rl_to_rl_live_source_controller_ptr_ && rl_to_rl_live_source_controller_ptr_->requiresEmergencyStop()))
+    {
+      ROS_ERROR_THROTTLE(1.0, "[HumanoidController] RL policy fault, stopping robot");
+      std_msgs::Bool stop_msg; stop_msg.data = true; stop_pub_.publish(stop_msg);
+      return;
+    }
     if (is_rl_controller_)// 针对倒地起身控制器这种可以主动退出的控制器
     {
       if (current_controller_ptr_->requestToExit())
@@ -3710,6 +3779,7 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         }
         else if (current_controller_type == RLControllerType::AMP_CONTROLLER)
         {
+          fall_down_state_ = FallStandState::FALL_DOWN;
           // AMP 倒地：有 FallStand 直切（跳过 MPC 中转，避免倒地瞬间撞 isTorsoVelocityStable 阻塞）。
           if (controller_manager_->hasController(RLControllerType::FALL_STAND_CONTROLLER))
           {
@@ -3719,18 +3789,24 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
               current_controller_ptr_ = controller_manager_->getCurrentController();
               current_controller_ptr_->reset();
               mrtRosInterface_->pauseResumeMpcNode(true);
-              fall_down_state_ = FallStandState::FALL_DOWN;
             }
             else
             {
               ROS_ERROR("[HumanoidController] Failed to switch to FallStand after AMP fall detection");
+              std_msgs::Bool stop_msg;
+              stop_msg.data = true;
+              stop_pub_.publish(stop_msg);
+              return;
             }
           }
           else
           {
-            ROS_WARN("[HumanoidController] AMP requests exit (fall), no FallStand available, switching to BASE controller");
-            controller_manager_->switchToBaseController();
-            fall_down_state_ = FallStandState::FALL_DOWN;
+            // 普通 MPC 切换门禁可能拒绝倒地状态，不能依赖 MPC 安全检查兜底。
+            ROS_ERROR("[HumanoidController] AMP detected fall without FallStand, stopping robot");
+            std_msgs::Bool stop_msg;
+            stop_msg.data = true;
+            stop_pub_.publish(stop_msg);
+            return;
           }
         }
         else  // 其余 RL 控制器请求退出 → 切回 MPC，由 MPC safety check 分流
@@ -3869,11 +3945,21 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
 
     //waao
     const std::string active_rl_controller_name = controller_manager_->getCurrentControllerName();
-    const bool is_rl_to_rl_switch = last_is_rl_controller_ && is_rl_controller_ &&
+    const auto member_blend = is_rl_controller_ && current_controller_ptr_
+        ? current_controller_ptr_->takeSwitchBlendPair() : RLControllerBase::SwitchBlendPair{};
+    bool is_rl_to_rl_switch = member_blend.valid || (last_is_rl_controller_ && is_rl_controller_ &&
                                     !last_rl_controller_name_.empty() &&
                                     !active_rl_controller_name.empty() &&
-                                    last_rl_controller_name_ != active_rl_controller_name;  //waao：rl切换策略标志
-    RLControllerBase* last_rl_controller = controller_manager_->getLastController();
+                                    last_rl_controller_name_ != active_rl_controller_name);
+    RLControllerBase* last_rl_controller = member_blend.valid ? member_blend.source
+                                                           : controller_manager_->getLastController();
+    const std::string blend_source_name = member_blend.valid ? member_blend.source_name : last_rl_controller_name_;
+    const std::string blend_target_name = member_blend.valid ? member_blend.target_name : active_rl_controller_name;
+    if (member_blend.valid)
+    {
+      rl_to_rl_blend_owner_ = current_controller_ptr_;
+      rl_to_rl_skip_velocity_dip_for_pair_ = member_blend.skip_velocity_dip;
+    }
 
     kuavo_msgs::jointCmd jointCmdMsg;
     jointCmdMsg.header.stamp = time;
@@ -4790,8 +4876,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         if (is_rl_to_rl_switch)
         {
           refreshRLToRLSwitchParams();
-          if (controller_manager_->getLastSwitchMotionState() ==
-              RLControllerManager::SwitchMotionState::WALKING)
+          if (member_blend.valid) rl_to_rl_switch_duration_ = member_blend.duration;
+          if (member_blend.valid || controller_manager_->getLastSwitchMotionState() ==
+                                   RLControllerManager::SwitchMotionState::WALKING)
           {
             tryActivateRLToRLWalkingPhaseSync(last_rl_controller, current_controller_ptr_, currentObservation_.time);
           }
@@ -4804,7 +4891,15 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
         {
           updateRLToRLWalkingPhaseSync(currentObservation_.time);
         }
-        buildRLControllerJointCmd(current_controller_ptr_, time, jointCmdMsg);
+        if (!buildRLControllerJointCmd(current_controller_ptr_, time, jointCmdMsg))
+        {
+          ROS_ERROR_THROTTLE(1.0, "[RL] Target joint command unavailable; keeping the last valid command");
+          stopRLToRLInterpolation();
+          is_rl_to_rl_switch = false;
+          if (!has_last_rl_joint_cmd_) return;
+          jointCmdMsg = last_rl_joint_cmd_;
+          jointCmdMsg.header.stamp = time;
+        }
       }
 
       // 规范化jointCmd尺寸，确保与硬件/仿真期望一致（RL 和 搬运 都需要）
@@ -4857,14 +4952,14 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           if (is_vmp_to_amp_switch)
           {
             ROS_INFO("[RL->RL] Live dual interpolation for VMP->AMP (target warmup): %s -> %s",
-                     last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+                     blend_source_name.c_str(), blend_target_name.c_str());
           }
           activateRLToRLLiveSourceController(last_rl_controller,
-                                             last_rl_controller_name_,
-                                             active_rl_controller_name,
+                                             blend_source_name,
+                                             blend_target_name,
                                              currentObservation_.time,
                                              jointCmdMsg,
-                                             is_vmp_to_amp_switch);
+                                             is_vmp_to_amp_switch || !current_controller_ptr_->isReadyForInterpolation());
         }
         else
         {
@@ -4883,11 +4978,11 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
           if (is_vmp_to_amp_switch)
           {
             ROS_INFO("[RL->RL] Single-strategy joint_cmd interpolation for VMP->AMP: %s -> %s",
-                     last_rl_controller_name_.c_str(), active_rl_controller_name.c_str());
+                     blend_source_name.c_str(), blend_target_name.c_str());
           }
           startRLToRLInterpolation(currentObservation_.time,
-                                   last_rl_controller_name_,
-                                   active_rl_controller_name,
+                                   blend_source_name,
+                                   blend_target_name,
                                    last_rl_joint_reference_,
                                    current_controller_ptr_->getCurrentJointReference(),
                                    last_rl_controller->getJointKpVector(),
@@ -4933,7 +5028,9 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
             else
             {
               ROS_WARN("[Switch/RL->RL] stop: source joint_cmd unavailable");
+              const bool family_blend = rl_to_rl_blend_owner_ != nullptr;
               stopRLToRLInterpolation();
+              if (family_blend && has_last_rl_joint_cmd_) jointCmdMsg = last_rl_joint_cmd_;
             }
           }
         }
@@ -4949,9 +5046,10 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
       if (is_rl_to_rl_switch)
       {
         ROS_INFO("[Switch/RL->RL] hard %s -> %s",
-                 last_rl_controller_name_.c_str(),
-                 active_rl_controller_name.c_str());
+                 blend_source_name.c_str(),
+                 blend_target_name.c_str());
       }
+      finishRLToRLBlendOwner(true);
       stopRLToRLInterpolation();
 #endif
       if (current_controller_ptr_ != nullptr)
@@ -6709,8 +6807,8 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     if (controller->supportsWalkingPhaseSyncSwitch())
     {
       const bool use_phase_sync = rl_to_rl_walking_phase_sync_active_ &&
-                                  (controller == rl_to_rl_phase_sync_source_controller_ptr_ ||
-                                   controller == rl_to_rl_phase_sync_target_controller_ptr_);
+                                  (controller->getExecutionController() == rl_to_rl_phase_sync_source_controller_ptr_ ||
+                                   controller->getExecutionController() == rl_to_rl_phase_sync_target_controller_ptr_);
       controller->setExternalPhaseOverride(use_phase_sync,
                                            std::sin(rl_to_rl_phase_sync_phi_rad_),
                                            std::cos(rl_to_rl_phase_sync_phi_rad_),
@@ -6721,7 +6819,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     vector_t baseState = stateEstimate_->getTorsoState();
     controller->applyFeetPositions(feetPositions);
     controller->applyBaseState(baseState);
-    controller->update(time, getRobotSensorData(), getRobotState(), joint_cmd);
+    if (!controller->update(time, getRobotSensorData(), getRobotState(), joint_cmd)) return false;
 
     const size_t expected_size = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_ + headNum_);
 
@@ -6806,12 +6904,21 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       return false;
     }
 
+    source_controller = source_controller->getExecutionController();
+    target_controller = target_controller->getExecutionController();
+    const bool is_internal_amp_pair = rl_to_rl_blend_owner_ != nullptr;
+    ocs2::humanoid::CommandDataRL target_command;
+    const bool target_walking = target_controller->getGaitCommandState(target_command) &&
+                                target_command.cmdStance_ < 0.5;
     const bool is_amp_depth_pair =
         (source_controller->getType() == RLControllerType::AMP_CONTROLLER &&
          target_controller->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER) ||
         (source_controller->getType() == RLControllerType::DEPTH_LOCO_CONTROLLER &&
          target_controller->getType() == RLControllerType::AMP_CONTROLLER);
-    if (!is_amp_depth_pair ||
+    if ((!is_amp_depth_pair && !is_internal_amp_pair) ||
+        (is_internal_amp_pair && (!target_walking || !target_controller->hasValidWalkingPhase() ||
+         source_controller->getType() == RLControllerType::AMP_WILD_IMP_CONTROLLER ||
+         target_controller->getType() == RLControllerType::AMP_WILD_IMP_CONTROLLER)) ||
         !source_controller->supportsWalkingPhaseSyncSwitch() ||
         !target_controller->supportsWalkingPhaseSyncSwitch() ||
         !source_controller->hasValidWalkingPhase())
@@ -6897,7 +7004,8 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       }
     };
 
-    if (!rl_to_rl_velocity_dip_enabled_ || !is_rl_to_rl_interpolation_active_)
+    if (!rl_to_rl_velocity_dip_enabled_ || !is_rl_to_rl_interpolation_active_ ||
+        rl_to_rl_skip_velocity_dip_for_pair_)
     {
       apply_scale(rl_to_rl_live_source_controller_ptr_, 1.0);
       apply_scale(current_controller_ptr_, 1.0);
@@ -7064,7 +7172,9 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     {
       rl_to_rl_target_warmup_end_time_ = 0.0;
     }
-    if (!freeze_dance_source)
+    // A family source is already running and has completed its exit preparation.
+    // Resuming SOFT here would request impedance again after its handover to WALK.
+    if (!freeze_dance_source && !rl_to_rl_live_source_controller_ptr_->isActive())
     {
 #if RL_TO_RL_USE_WARM_RESUME
       rl_to_rl_live_source_controller_ptr_->resumeWarm();
@@ -7110,7 +7220,8 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     const size_t body_joint_count = static_cast<size_t>(jointNumReal_ + waistNum_ + armNumReal_);
     if (rl_to_rl_target_warmup_active_)
     {
-      if (current_time < rl_to_rl_target_warmup_end_time_)
+      if (current_time < rl_to_rl_target_warmup_end_time_ ||
+          !current_controller_ptr_ || !current_controller_ptr_->isReadyForInterpolation())
       {
         publishRLToRLSwitchDebugState(0.0, "warmup_live", current_time);
         const size_t valid_joint_count = std::min({body_joint_count,
@@ -7249,6 +7360,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       publishRLToRLSwitchDebugState(1.0,
                                     finished_frozen_dance ? "finished_frozen_dance" : "finished_live",
                                     current_time);
+      finishRLToRLBlendOwner(true);
     }
   }
 
@@ -7444,6 +7556,7 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
       ROS_INFO("[Switch/RL->RL] done %s -> %s",
                rl_to_rl_source_controller_name_.c_str(), rl_to_rl_target_controller_name_.c_str());
       publishRLToRLSwitchDebugState(1.0, "finished", current_time);
+      finishRLToRLBlendOwner(true);
     }
   }
 
@@ -7488,6 +7601,15 @@ Eigen::VectorXd humanoidController::getMotionAnchorOriB(const Eigen::Quaterniond
     rl_to_rl_frozen_dance_source_joint_cmd_ = kuavo_msgs::jointCmd();
     rl_to_rl_source_controller_name_.clear();
     rl_to_rl_target_controller_name_.clear();
+    finishRLToRLBlendOwner(false);
+  }
+
+  void humanoidController::finishRLToRLBlendOwner(bool success)
+  {
+    auto* owner = rl_to_rl_blend_owner_;
+    rl_to_rl_blend_owner_ = nullptr;
+    rl_to_rl_skip_velocity_dip_for_pair_ = false;
+    if (owner) owner->finishSwitchBlend(success);
   }
 
   void humanoidController::publishRLToRLSwitchDebugState(double progress,

@@ -18,7 +18,7 @@ use_interploate_from_mpc     true       ; 从MPC切换到这个模型时是使�
 use_default_motor_csp_kpkd       false  ; ECmaster的电机是否使用默认的kpkd(kuavo.json),还是当前info中定义的，motor_pdo_kp、motor_pdo_kd
 use_amp_ruiwo_kpkd          true  ; 是否在 AMP 控制器中使用并切换 AMP 专用 Ruiwo 手臂增益(true/false)
 
-networkModelFile          /ampllh260708_1.onnx; 
+networkModelFile          /ampllh260708_1.onnx;
 commandData 
 {
     inital
@@ -33,13 +33,13 @@ commandData
     }
     scale
     {
-        ; cmd_vel 的倍率
-        cmdVelLineX         1.6     ; 输入模型的最大 cmdVelLineX = scale[0] * velocityLimits[0]
-        cmdVelLineY         1.06    ; 输入模型的最大 cmdVelLineY = scale[1] * velocityLimits[1]
+        ; 接收器处理后的指令到模型输入的倍率；族切换阈值仍比较原始 /cmd_vel。
+        cmdVelLineX         1.    ; x 不额外缩放；正向限幅来源为下方 velocityLimits，当前满杆模型指令约 1.10
+        cmdVelLineY         1.    ; y 不额外缩放；当前量程 ±0.55 m/s
         cmdVelLineZ         1       ; 输入模型的最大 cmdVelLineZ = scale[2] * velocityLimits[2]
         cmdVelAngularX      1   ;
         cmdVelAngularY      1   ;
-        cmdVelAngularZ      2       ; 输入模型的最大 cmdVelAngularZ = scale[5] * velocityLimits[3]
+        cmdVelAngularZ      1       ; yaw 不额外缩放；当前量程 ±0.50 rad/s，与 RUN 的 yaw 倍率/量程一致
         cmdStance           1   ;
         cmdVelLineXNegScale 0.4    ; X 负向单独缩放系数（用于实现不对称速度限制：neg_limit = limit * this_scale）
     }
@@ -49,10 +49,10 @@ velocityLimits
 {
     ; 定义速度命令的限制（简化为单一上限，X 负向通过单独的缩放系数实现不对称限制）
     ; 格式：[linear_x, linear_y, linear_z, angular_z] （正向和负向使用相同的上限）
-    (0,0)  0.7      ; cmdVelLineX limit (positive)
-    (1,0)  0.5       ; cmdVelLineY limit (positive and negative)
+    (0,0)  1.15      ; 原始正向 x 指令量程；自动切跑需 amp_family.yaml 的 walkTorun 严格小于此上限
+    (1,0)  0.55       ; cmdVelLineY limit (positive and negative)
     (2,0)  0.3       ; cmdVelLineZ limit (positive and negative)
-    (3,0)  0.25       ; cmdVelAngularZ limit (positive and negative)
+    (3,0)  0.5       ; cmdVelAngularZ limit (positive and negative)
 }
 defaultBaseHeightControl    0.965 ; Actual standing height when using RL controller
 defaultBaseXOffsetControl     -0.0    ; Base offset when using RL controller
@@ -124,10 +124,10 @@ yDirectionCompensation
 mixedMotionLimits
 {
     enableMixedMode             true    ; 是否启用混合运动模式(true/false)
-    angularVelThreshold         0.25    ; 角速度阈值 (rad/s)
-    maxLinearVelWithAngular     0.1     ; 有角速度时最大线速度 (m/s)
+    angularVelThreshold         0.3    ; 角速度阈值 (rad/s)
+    maxLinearVelWithAngular     0.4     ; 有角速度时最大线速度 (m/s)
     linearVelThreshold          0.4     ; 线速度阈值 (m/s)
-    maxAngularVelWithLinear     0.2     ; 有线速度时最大角速度 (rad/s)
+    maxAngularVelWithLinear     0.3     ; 有线速度时最大角速度 (rad/s)
     smoothTransition            true    ; 是否启用平滑过渡(true/false)
     transitionFactor            0.9     ; 过渡因子
 }

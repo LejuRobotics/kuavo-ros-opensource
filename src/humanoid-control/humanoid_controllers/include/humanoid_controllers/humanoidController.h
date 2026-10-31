@@ -329,6 +329,7 @@ namespace humanoid_controller
                                       kuavo_msgs::jointCmd& target_joint_cmd);
     void applyRLToRLInterpolation(double current_time, kuavo_msgs::jointCmd& joint_cmd);
     void stopRLToRLInterpolation();
+    void finishRLToRLBlendOwner(bool success);
     void publishRLToRLSwitchDebugState(double progress, const std::string& phase, double current_time);
 
     sensor_msgs::Joy oldJoyMsg_;
@@ -990,6 +991,8 @@ namespace humanoid_controller
     //waao： RL-RL插值
     // ==================== RL-RL插值系统成员变量 ====================
     bool is_rl_to_rl_interpolation_active_ = false;
+    RLControllerBase* rl_to_rl_blend_owner_ = nullptr;
+    bool rl_to_rl_skip_velocity_dip_for_pair_ = false;
     bool has_last_rl_joint_reference_ = false;
     bool has_last_rl_joint_cmd_ = false;
     double rl_to_rl_switch_start_time_ = 0.0;

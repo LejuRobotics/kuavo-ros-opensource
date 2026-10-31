@@ -51,14 +51,21 @@ class MocapInstallTests(unittest.TestCase):
         candidate.write_bytes(self.calibrated)
         return target, source, candidate
 
-    def directory_files(self, root):
+    def directory_files(self, root, version="63"):
         runtime = root / "urdf"
-        shutil.copytree(limits.SOURCE.parent, runtime)
-        target = runtime / "biped_s63.urdf"
+        assets = limits.SOURCE.parents[2] / f"biped_s{version}" / "urdf"
+        shutil.copytree(assets, runtime)
+        target = runtime / f"biped_s{version}.urdf"
         source = root / "nominal_source.urdf"
-        source.write_bytes(self.original)
+        source.write_bytes(target.read_bytes())
         candidate = root / "candidate.urdf"
-        candidate.write_bytes(self.calibrated)
+        if version == "63":
+            candidate.write_bytes(self.calibrated)
+        else:
+            tree = self.optimizer._xml_tree(source)
+            tree.getroot().insert(0, ET.Comment(' mocap_kin_calib:{"schema_version":1} '))
+            tree.write(candidate, encoding="utf-8", xml_declaration=True)
+            self.move_arm_origin(candidate)
         return target, source, candidate
 
     @staticmethod
@@ -215,7 +222,32 @@ class MocapInstallTests(unittest.TestCase):
             joints = {joint.get("name"): joint for joint in ET.fromstring(actual).findall("joint")}
             for name, origin in origins.items():
                 self.assertEqual(joints[name].find("origin").attrib, origin, (relative, name))
-        self.assertEqual(len(changed), 7)
+        self.assertEqual(len(changed), sum(name.endswith(".urdf") for name in original_files))
+
+    def test_s62_confirmation_updates_its_model_family_only(self):
+        with tempfile.TemporaryDirectory() as temp, redirect_stdout(io.StringIO()):
+            root = Path(temp)
+            target, source, candidate = self.directory_files(root, "62")
+            other = root / "s63" / "urdf"
+            shutil.copytree(limits.SOURCE.parent, other)
+            other_before = self.snapshot(other)
+            before = self.snapshot(root)
+            for answer in ("no", "", EOFError()):
+                with patch("builtins.input", side_effect=[answer]):
+                    self.optimizer._confirm_apply_urdf(source, candidate, target)
+                self.assertEqual(self.snapshot(root), before)
+            original_models = self.snapshot(target.parent)
+            with patch("builtins.input", return_value="yes"):
+                self.optimizer._confirm_apply_urdf(source, candidate, target)
+            self.assert_directory_models_updated(target.parent, original_models, candidate)
+            nominal = installer.nominal_backup_path(target)
+            self.assertEqual(nominal.name, "biped_s62.nominal.urdf")
+            self.assertEqual(nominal.read_bytes(), source.read_bytes())
+            self.assertEqual(installer.resolve_fit_source(target), nominal)
+            backups = list(root.glob("urdf.bak.*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(self.snapshot(backups[0]), original_models)
+            self.assertEqual(self.snapshot(other), other_before)
 
     def test_directory_install_updates_all_models_and_preserves_original_baseline(self):
         with tempfile.TemporaryDirectory() as temp, redirect_stdout(io.StringIO()):
@@ -313,12 +345,19 @@ class MocapInstallTests(unittest.TestCase):
         config.write_text(yaml.safe_dump(cfg))
         return config, capture, output, target, source, cfg
 
+    @staticmethod
+    def main_parameters(legacy_parameters):
+        # Main fits this fixture's 30 samples with individual CTB rotations;
+        # the remaining ETK/Ei parameters retain the legacy layout/order.
+        return np.concatenate((np.tile(legacy_parameters[:3], 30), legacy_parameters[3:]))
+
     def test_main_success_then_yes_installs_only_temporary_runtime(self):
         with tempfile.TemporaryDirectory() as temp, redirect_stdout(io.StringIO()):
             root = Path(temp)
             config, capture, output, target, _, cfg = self.main_inputs(root)
             p = np.zeros(self.inputs.models[self.optimizer].parameter_count)
             p[9] = 1.
+            p = self.main_parameters(p)
             success = SimpleNamespace(success=True, message="test", nfev=1)
             args = [self.optimizer.__file__, str(capture), "--config", str(config), "--output-urdf", "--force-output"]
             with patch.dict(os.environ, ROBOT_VERSION="63"), patch.object(sys, "argv", args), \
@@ -339,7 +378,7 @@ class MocapInstallTests(unittest.TestCase):
                     redirect_stdout(io.StringIO()):
                 root = Path(temp)
                 config, capture, output, target, _, cfg = self.main_inputs(root)
-                p = np.zeros(self.inputs.models[self.optimizer].parameter_count)
+                p = self.main_parameters(np.zeros(self.inputs.models[self.optimizer].parameter_count))
                 success = SimpleNamespace(success=True, message="test", nfev=1)
                 failure = SimpleNamespace(success=False, message="max evaluations", nfev=250)
                 fits = [(p, failure)] if failed_stage == "fit" else [(p, success), (p, failure)]
@@ -365,7 +404,7 @@ class MocapInstallTests(unittest.TestCase):
             cfg["kinematics"]["urdf_final_name"] = "biped_v3_arm.urdf"
             config.write_text(yaml.safe_dump(cfg))
             before = self.snapshot(root)
-            p = np.zeros(self.inputs.models[self.optimizer].parameter_count)
+            p = self.main_parameters(np.zeros(self.inputs.models[self.optimizer].parameter_count))
             success = SimpleNamespace(success=True, message="test", nfev=1)
             args = [self.optimizer.__file__, str(capture), "--config", str(config), "--output-urdf", "--force-output"]
             with patch.dict(os.environ, ROBOT_VERSION="63"), patch.object(sys, "argv", args), \

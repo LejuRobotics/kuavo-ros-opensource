@@ -22,6 +22,7 @@ import time
 import xml.etree.ElementTree as ET
 
 import numpy as np
+from robot_variants import is_wheel_version, main_urdf
 
 HERE = Path(__file__).resolve().parent
 CALIB_ROOT = HERE.parent
@@ -143,7 +144,7 @@ class CameraExtrinsics:
             mount_driver = driver_tf.lookup(self.mount_frame, self.driver_frame)
             source = "published mount TF"
         except ValueError:
-            if self.version not in ("56", "62", "63") or self.mount_frame != "head_camera_depth":
+            if (self.version != "56" and not is_wheel_version(self.version)) or self.mount_frame != "head_camera_depth":
                 raise ValueError("No published camera mount TF; provide --optical-transform for this model")
             mount_driver = np.eye(4)
             source = f"S{self.version} nominal head_camera_depth = driver root (Kuavo camera bridge convention)"
@@ -653,9 +654,15 @@ class ProjectionViewer:
         from tf2_msgs.msg import TFMessage
         self.args, self.rospy, self.cv2 = args, rospy, cv2
         self.bridge = CvBridge()
+        if args.camera_link is None or args.mount_frame is None:
+            links = {link.get("name") for link in ET.parse(args.urdf).getroot().findall("link")}
+            if args.camera_link is None:
+                args.camera_link = "head_camera_base" if "head_camera_base" in links else "camera_base"
+            if args.mount_frame is None:
+                args.mount_frame = "head_camera_depth" if "head_camera_depth" in links else "camera"
         # Arm and camera poses share this wheel-arm waist frame. The chassis
         # chain cancels from their relative transform, so it needs no angles.
-        root_link = "waist_yaw_link" if args.robot_version in ("62", "63") else "base_link"
+        root_link = "waist_yaw_link" if is_wheel_version(args.robot_version) else "base_link"
         self.model = ProjectionModel(args.urdf, args.camera_link, args.arms, root_link=root_link)
         self.layout = JointLayout(args.robot_version, args.kuavo_json)
         self.extrinsics = CameraExtrinsics(self.model, args.robot_version, args.mount_frame, args.driver_frame)
@@ -972,7 +979,7 @@ class ProjectionViewer:
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--urdf", type=Path,
-                        help="Candidate URDF; default: biped_s63 for versions 62/63, output/urdf_final.urdf otherwise")
+                        help="Candidate URDF; default: own full-version main URDF for 62/63 variants, output/urdf_final.urdf otherwise")
     parser.add_argument("--robot-version", default=os.environ.get("ROBOT_VERSION", "56"))
     parser.add_argument("--kuavo-json", type=Path, help="Override joint layout config; otherwise use this checkout")
     parser.add_argument("--image-topic", default="/head_camera/color/image_raw", help="Raw, distorted colour stream")
@@ -981,10 +988,10 @@ def parse_args(argv=None):
     parser.add_argument("--compressed", action="store_true", help="image-topic is sensor_msgs/CompressedImage")
     parser.add_argument("--image-rotation", choices=("0", "180"), default="0",
                         help="Additional projected-pixel rotation; verified Gemini335L default is 0, even with driver color_rotation=180")
-    parser.add_argument("--camera-link", default="head_camera_base", help="Camera anchor link in the candidate URDF")
+    parser.add_argument("--camera-link", help="Camera anchor; default: head_camera_base or camera_base from the URDF")
     parser.add_argument("--optical-transform", type=float, nargs=7, metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
                         help="Explicit T_camera_link_image_optical, metres/xyzw; default: candidate mount + driver TF")
-    parser.add_argument("--mount-frame", default="head_camera_depth", help="Candidate URDF camera mount anchor")
+    parser.add_argument("--mount-frame", help="URDF mount; default: head_camera_depth or camera; camera requires published mount TF or --optical-transform")
     parser.add_argument("--driver-frame", default="head_camera_link", help="Root frame of the existing camera driver")
     parser.add_argument("--arms", choices=("left", "right", "both"), default="both")
     parser.add_argument("--fps", type=float, default=20.0, help="Maximum processing rate; older images are discarded")
@@ -1003,8 +1010,8 @@ def parse_args(argv=None):
     parser.add_argument("--save-dir", type=Path, default=HERE / "output/cam_proj_validation")
     args = parser.parse_args(argv)
     if args.urdf is None:
-        args.urdf = (CALIB_ROOT.parent / "kuavo_assets/models/biped_s63/urdf/biped_s63.urdf"
-                     if args.robot_version in ("62", "63") else HERE / "output/urdf_final.urdf")
+        args.urdf = (main_urdf(args.robot_version) if is_wheel_version(args.robot_version)
+                     else HERE / "output/urdf_final.urdf")
     if any(channel < 0 or channel > 255 for channel in args.mask_color):
         parser.error("mask-color RGB channels must be integers in [0,255]")
     if not np.isfinite([args.fps, args.alpha, args.max_skew, args.stale_after]).all():

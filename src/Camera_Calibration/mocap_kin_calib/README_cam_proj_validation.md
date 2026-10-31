@@ -1,11 +1,11 @@
-# 头部相机 URDF 投影验证（S56 / S62 / S63）
+# 头部相机 URDF 投影验证（S56 / S62 / S63 及轮臂小版本）
 
 `cam_proj_validation.py` 直接用 Python 运行，无需新增 catkin 编译。
 订阅实际关节反馈、头部相机图像/内参/静态 TF，使用指定 URDF 做 FK，显示双臂网格轮廓。
 它仅发布叠图，不发运动命令、不写零点、不替换运控模型。
 
 投影模型默认按 `--robot-version` 选择（未指定版本时读取 `ROBOT_VERSION`，再默认 `56`）：
-版本 `62`、`63` 均使用 `src/kuavo_assets/models/biped_s63/urdf/biped_s63.urdf`，
+`62/63` 系使用完整版本自身的 `src/kuavo_assets/models/biped_s${V}/urdf/biped_s${V}.urdf`，
 其他版本仍使用本目录的 `output/urdf_final.urdf`。显式传入 `--urdf` 时优先使用该候选模型。
 模型路径选择不会改变反馈版本：例如 `63` 仍读取 `kuavo_v63/kuavo.json` 的关节配置。
 
@@ -15,12 +15,18 @@
 | 投影参数 | 实际加载的模型 |
 | --- | --- |
 | `--robot-version 56` | 本目录 `output/urdf_final.urdf` |
-| `--robot-version 62` | `src/kuavo_assets/models/biped_s63/urdf/biped_s63.urdf` |
+| `--robot-version 62` | `src/kuavo_assets/models/biped_s62/urdf/biped_s62.urdf` |
 | `--robot-version 63` | `src/kuavo_assets/models/biped_s63/urdf/biped_s63.urdf` |
+| `--robot-version 500063` | `src/kuavo_assets/models/biped_s500063/urdf/biped_s500063.urdf` |
 | `--robot-version 63 --urdf /实际路径/候选.urdf` | 显式指定的候选文件 |
 
 因此，若保留旧命令中的 `--urdf .../output/urdf_final.urdf`，即使版本改成 `63`，
 程序也仍加载那个文件；它不会把文件内容自动换成 S63。验证某次优化输出时，应显式填写那次的完整候选 URDF。
+
+相机 anchor 默认选 URDF 中的 `head_camera_base` 或 `camera_base`，mount 默认选
+`head_camera_depth` 或 `camera`。小版本的 `camera` 到驱动根之间必须有真实固定 TF，
+或用 `--optical-transform` 明确给出从图像光学系到所选 anchor 的变换（平移米、四元数 xyzw）；
+不会仅凭小版本编号假设这段变换为单位阵。显式 `--camera-link`、`--mount-frame` 继续优先。
 
 
 | 角色  | 机内有线地址 | 用户 / 工作空间 |
@@ -112,9 +118,10 @@ python3 src/Camera_Calibration/mocap_kin_calib/cam_proj_validation.py \
   --mask-color 255 190 0
 ```
 
-62/63 使用默认 S63 模型时，将上面的 `--robot-version 56` 改成实际反馈版本 `--robot-version 62` 或 `--robot-version 63`，不加 `--urdf`。
+62/63 系使用自身模型时，将上面的 `--robot-version 56` 改成实际完整版本（如 `62`、`63`、`500063`），不加 `--urdf`。
 验证某轮优化结果时，再添加 `--urdf /那一轮实际的完整候选文件.urdf`。
-不需要手填外参，不需要先做 head 棋盘标定。`DISPLAY` 由 SSH 自动设置，别手动改成 `:0`。
+相机安装 TF 齐全时无需手填外参或先做 head 棋盘标定；小版本的 `camera` mount 要求见前文。
+`DISPLAY` 由 SSH 自动设置，别手动改成 `:0`。
 本机当前上下位机时钟未同步，因此上述命令显式使用接收时间匹配；请在每个 pose 停稳后观察和截图。
 画面会标注 `RECEIPT / static poses`。该模式不保证运动中的图像与关节采样时刻一致，详见下文。
 

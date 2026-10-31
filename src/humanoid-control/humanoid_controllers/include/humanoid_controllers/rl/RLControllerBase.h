@@ -107,6 +107,18 @@ namespace humanoid_controller
  */
 class RLControllerBase {
 public:
+  struct SwitchBlendPair {
+    RLControllerBase* source = nullptr;
+    RLControllerBase* target = nullptr;
+    std::string source_name, target_name;
+    double duration = 0.5;
+    bool skip_velocity_dip = false;
+    bool valid = false;
+  };
+  virtual RLControllerBase* getExecutionController() { return this; }
+  virtual SwitchBlendPair takeSwitchBlendPair() { return {}; }
+  virtual void finishSwitchBlend(bool success) { (void)success; }
+
   /**
    * @brief 构造函数
    * @param name 控制器名称
@@ -171,6 +183,11 @@ public:
    * @brief 是否请求退出当前 RL 模式（由 humanoidController 等每周期轮询）
    * @return 本周期希望上层自动退出/切换时返回 true
    */
+  virtual void prepareForActivation() {}
+  virtual bool isReadyForInterpolation() const { return true; }
+  virtual bool requiresEmergencyStop() const { return false; }
+  virtual bool supportsWalkingSwitch() const { return supportsWalkingPhaseSyncSwitch(); }
+
   virtual bool requestToExit() const { return false; }
 
   /**
@@ -207,6 +224,8 @@ public:
                                         double cos_phase,
                                         double gait_frequency_hz) {}
   virtual void resetGaitCommandState(bool stance_mode = true) {}
+  // Optional execution overlay used by an assembly while retaining buffered intent.
+  virtual void setGaitExecutionGate(bool blocked, bool stance) {}
   virtual bool getGaitCommandState(ocs2::humanoid::CommandDataRL& command) const { return false; }
   virtual void setGaitCommandState(const ocs2::humanoid::CommandDataRL& command) {}
   virtual void setSwitchVelocityScale(double scale) {}
@@ -227,30 +246,36 @@ public:
    */
   virtual const Eigen::VectorXd& getInitialState() const { return initialStateRL_; }
     
-  Eigen::VectorXd getDefaultJointPos() const { return defalutJointPosRL_; }
-  Eigen::VectorXd getDefaultBaseState() const { return defaultBaseStateRL_; }
-  double getDefaultBaseHeightControl() const { return defaultBaseHeightControl_; }
-  double getDefaultBaseXOffsetControl() const { return defaultBaseXOffsetControl_; }
+  virtual Eigen::VectorXd getDefaultJointPos() const { return defalutJointPosRL_; }
+  virtual Eigen::VectorXd getDefaultBaseState() const { return defaultBaseStateRL_; }
+  virtual double getDefaultBaseHeightControl() const { return defaultBaseHeightControl_; }
+  virtual double getDefaultBaseXOffsetControl() const { return defaultBaseXOffsetControl_; }
   
   //waao： RL-RL插值
   virtual Eigen::VectorXd getCurrentJointReference() const { return Eigen::VectorXd(); }
-  const Eigen::VectorXd& getJointKpVector() const { return jointKpRL_; }
-  const Eigen::VectorXd& getJointKdVector() const { return jointKdRL_; }
-  const Eigen::VectorXd& getJointTorqueLimits() const { return torqueLimitsRL_; }
-  const Eigen::VectorXd& getJointControlModes() const { return JointControlModeRL_; }
-  const Eigen::VectorXd& getJointPdModes() const { return JointPDModeRL_; }
+  virtual const Eigen::VectorXd& getJointKpVector() const { return jointKpRL_; }
+  virtual const Eigen::VectorXd& getJointKdVector() const { return jointKdRL_; }
+  virtual const Eigen::VectorXd& getJointTorqueLimits() const { return torqueLimitsRL_; }
+  virtual const Eigen::VectorXd& getJointControlModes() const { return JointControlModeRL_; }
+  virtual const Eigen::VectorXd& getJointPdModes() const { return JointPDModeRL_; }
 
   /**
    * @brief 获取是否从MPC切换时使用插值过渡
    * @return true表示使用插值过渡，false表示直接切换
    */
-  bool getUseInterpolateFromMPC() const { return use_interpolate_from_mpc_; }
+  virtual bool getUseInterpolateFromMPC() const { return use_interpolate_from_mpc_; }
 
   /**
    * @brief 获取是否使用默认的电机CSP kp/kd（从kuavo.json）
    * @return true表示使用默认的kp/kd，false表示使用info文件中定义的motor_kp/motor_kd
    */
-  bool getUseDefaultMotorCspKpkd() const { return use_default_motor_csp_kpkd_; }
+  virtual bool getUseDefaultMotorCspKpkd() const { return use_default_motor_csp_kpkd_; }
+
+  bool getMotorPdoGains(Eigen::VectorXd& kp, Eigen::VectorXd& kd) const {
+    if (use_default_motor_csp_kpkd_) return false;
+    kp = motorPdoKp_; kd = motorPdoKd_;
+    return kp.size() > 0 && kp.size() == kd.size();
+  }
 
   /**
    * @brief 更新速度限制到rosparam（虚函数，派生类可重写）
@@ -309,13 +334,16 @@ public:
    * @brief 获取控制器的控制频率
    * @return 控制频率（Hz）
    */
-  double getControlFrequency() const { return control_frequency_; }
+  virtual double getControlFrequency() const { return control_frequency_; }
 
   /**
    * @brief 请求当前 RL 控制器切换手臂模式。
    *
    * 默认投递给 ArmController 的控制线程处理；需要维护额外模式意图的控制器可重写
    */
+  // Capability, not readiness: false means no member can ever execute external targets.
+  virtual bool supportsExternalControlRequests() const { return true; }
+
   virtual bool requestArmControlMode(int target_mode)
   {
     return arm_controller_ && arm_controller_->requestModeChange(target_mode);
@@ -325,13 +353,13 @@ public:
    * @brief 获取手臂控制器（如果存在）
    * @return 手臂控制器指针，如果不存在则返回 nullptr
    */
-  ArmController* getArmController() { return arm_controller_.get(); }
+  virtual ArmController* getArmController() { return arm_controller_.get(); }
   
   /**
    * @brief 获取手臂控制器（const版本）
    * @return 手臂控制器指针，如果不存在则返回 nullptr
    */
-  const ArmController* getArmController() const { return arm_controller_.get(); }
+  virtual const ArmController* getArmController() const { return arm_controller_.get(); }
 
   /**
    * @brief 切换到本 RL 控制器时请求的手臂控制模式（0/1/2）
@@ -340,6 +368,7 @@ public:
   virtual int getArmControlModeOnControllerActivate() const { return 1; }
 
 protected:
+  virtual std::recursive_mutex* inferenceCycleMutex() { return nullptr; }
   /**
    * @brief 更新控制器实现（派生类需要重写）
    * @param time 当前时间

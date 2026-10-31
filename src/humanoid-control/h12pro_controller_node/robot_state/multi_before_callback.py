@@ -302,7 +302,11 @@ _switch_controller_cooling_until = 0.0  # 冷却期结束时间戳
 SWITCH_CONTROLLER_COOLDOWN = 3.0  # 冷却期时长（秒）
 # 可与 mpc 互相切换的 amp 侧控制器（switch_controller_callback 使用）
 # 当前控制器只要在此列表内即可切到 mpc；从 mpc 切回时固定切到 amp_controller
-SWITCHABLE_AMP_CONTROLLERS = ("amp_controller", "amp_wild_controller")
+AMP_FAMILY_CONTROLLER = "amp_assemble_controller"
+SWITCHABLE_AMP_CONTROLLERS = (
+    "amp_controller", "amp_wild_controller", "amp_run_controller",
+    "amp_wild_imp_controller", AMP_FAMILY_CONTROLLER,
+)
 _depth_loco_restore_controller_name = None  # 进入 depth_loco_controller 前的控制器名
 current_dir = os.path.dirname(os.path.abspath(__file__))
 config_dir = os.path.join(os.path.dirname(current_dir), "config")
@@ -1381,6 +1385,19 @@ def get_current_controller_name():
         rospy.logerr(f"Service '{service_name}' not available: {e}")
         return None
 
+def get_active_amp_member_name(controller_name):
+    """只有需要成员能力判定时读取成员状态，外层名称与循环索引保持不变。"""
+    if controller_name != AMP_FAMILY_CONTROLLER:
+        return controller_name
+    try:
+        return rospy.wait_for_message(
+            "/humanoid_controller/amp_family/active_member", String, timeout=0.3
+        ).data
+    except rospy.ROSException as exc:
+        rospy.logwarn(f"[AMPFamily] Active member is unavailable: {exc}")
+        return None
+
+
 def _set_depth_loco_restore_controller_name(controller_name):
     """记录进入 depth_loco_controller 之前的控制器名。"""
     global _depth_loco_restore_controller_name
@@ -1583,7 +1600,7 @@ def depth_loco_switch_callback(event):
 
 def check_can_switch_to_vmp(event):
     """检查是否可以切换到VMP控制器
-    条件：当前控制器必须是 amp_controller
+    条件：当前控制器或装配体的活动成员必须是 amp_controller
     :return: bool, True表示可以切换，False表示不能切换
     """
     try:
@@ -1595,8 +1612,8 @@ def check_can_switch_to_vmp(event):
         
         current_controller_lower = current_controller.lower()
         
-        if current_controller_lower != "amp_controller":
-            rospy.logwarn(f"[VMPController] Cannot switch to VMP controller mode from '{current_controller}'. Only amp_controller is allowed.")
+        if get_active_amp_member_name(current_controller_lower) != "amp_controller":
+            rospy.logwarn(f"[VMPController] Cannot switch to VMP controller mode from '{current_controller}'. The active AMP member must be amp_controller.")
             return False
         
         return True
@@ -1605,7 +1622,7 @@ def check_can_switch_to_vmp(event):
         return False
 
 def check_is_amp_controller(event):
-    """检查当前控制器是否为 amp 系列控制器（amp_controller / amp_wild_controller）
+    """检查当前控制器是否为 AMP 装配体或旧版平铺 AMP 控制器
     用于限制某些状态转换只能在 amp 控制器下执行（mpc 不支持）
     TODO：属于临时添加的回调函数，后续 mpc 支持 trot 之后删除此函数
     :return: bool, True表示当前是 amp 系列控制器，False表示不是
@@ -1622,7 +1639,7 @@ def check_is_amp_controller(event):
         if current_controller_lower in SWITCHABLE_AMP_CONTROLLERS:
             return True
         else:
-            rospy.logwarn(f"[StanceTransition] Cannot switch to stance from '{current_controller}'. Only amp_controller/amp_wild_controller are supported.")
+            rospy.logwarn(f"[StanceTransition] Cannot switch to stance from '{current_controller}'. An AMP controller is required.")
             return False
     except Exception as e:
         rospy.logerr(f"Error in check_is_amp_controller: {e}")

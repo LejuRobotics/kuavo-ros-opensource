@@ -1,10 +1,10 @@
-"""Build a consistent S63 model set without writing to the asset directory.
+"""Build a consistent S62/S63 variant model set without writing assets.
 
 The candidate contains final, absolute arm joint origins.  Copy those origins;
 never apply its Ei corrections to another model's (possibly older) geometry.
-Drake upper-body/full models call the local torso frame ``base_link``.  That
-frame is explicitly treated as the main model's ``waist_yaw_link`` here.  This
-does not change or equate the full model's upstream leg/waist kinematics.
+Drake upper-body/full models use either ``base_link`` for the local torso or
+retain ``waist_yaw_link`` (e.g. S600062).  Only the local arm origins are
+copied; each model keeps its own parent links and upstream leg/waist kinematics.
 """
 
 import copy
@@ -15,18 +15,17 @@ import re
 from typing import Dict
 import xml.etree.ElementTree as ET
 from xml.parsers import expat
+from robot_variants import is_wheel_urdf
 
 
-_MAIN = Path("biped_s63.urdf")
-_VARIANTS = {
-    Path("biped_s63_gazebo.urdf"): "waist_yaw_link",
-    Path("drake/biped_v3_arm.urdf"): "waist_yaw_link",
-    Path("drake/biped_v3_upper_body.urdf"): "base_link",
-    Path("drake/biped_v3_full.urdf"): "base_link",
+_DRAKE_VARIANTS = {
+    Path("drake/biped_v3_arm.urdf"): ("waist_yaw_link",),
+    Path("drake/biped_v3_arm_only.urdf"): ("waist_yaw_link",),
+    Path("drake/biped_v3_upper_body.urdf"): ("base_link", "waist_yaw_link"),
+    Path("drake/biped_v3_full.urdf"): ("base_link", "waist_yaw_link"),
 }
+_OPTIONAL_MODELS = {Path("drake/biped_v3_arm_only.urdf"), Path("drake/biped_v3_upper_body.urdf")}
 _SINGLE_ARMS = {Path("drake/Larm.urdf"): "l", Path("drake/Rarm.urdf"): "r"}
-_XACRO = Path("biped_s63_gazebo.xacro")
-_KNOWN_MODELS = {_MAIN, _XACRO, *_VARIANTS, *_SINGLE_ARMS}
 _JOINT_NAMES = tuple("zarm_%s%d_joint" % (side, i) for side in "lr" for i in range(1, 8))
 _AXES = ((0, 1, 0), (1, 0, 0), (0, 0, 1), (0, 1, 0),
          (0, 0, 1), (1, 0, 0), (0, 1, 0))
@@ -130,7 +129,7 @@ def _metadata_comment(data, label):
         metadata = json.loads(payload)
     except (ValueError, UnicodeDecodeError) as exc:
         raise ValueError("%s: invalid mocap calibration metadata" % label) from exc
-    if not isinstance(metadata, dict) or metadata.get("schema_version") != 1:
+    if not isinstance(metadata, dict) or metadata.get("schema_version") not in (1, 2):
         raise ValueError("%s: unsupported mocap calibration metadata" % label)
     return comment
 
@@ -205,8 +204,8 @@ def _copy_origins(data, candidate_joints, comment):
     return data[:end] + b"\n  " + comment + data[end:]
 
 
-def _single_arm(candidate_links, candidate_joints, side, comment):
-    root = ET.Element("robot", {"name": "S63_%sarm" % side})
+def _single_arm(candidate_links, candidate_joints, side, comment, robot_name):
+    root = ET.Element("robot", {"name": "%s_%sarm" % (robot_name, side)})
     root.append(ET.Comment(comment[4:-3].decode("utf-8")))
     ET.SubElement(root, "link", {"name": "waist_yaw_link"})
     for i in range(1, 8):
@@ -217,29 +216,40 @@ def _single_arm(candidate_links, candidate_joints, side, comment):
 
 
 def build_model_updates(target: Path, candidate: Path, *, rebuild_legacy_arms: bool = True) -> Dict[Path, bytes]:
-    """Return validated bytes for every existing S63 runtime URDF/Xacro.
+    """Return validated bytes for the selected wheel version's URDF/Xacro set.
 
-    ``target`` is the S63 ``urdf`` directory or its ``biped_s63.urdf`` file.
-    The stable ``biped_s63.nominal.urdf`` is a fitting input and never updated.
-    Legacy Larm/Rarm are rebuilt as complete standard S63 seven-joint models;
+    ``target`` is a main URDF or a directory containing exactly one main URDF.
+    The version's stable ``*.nominal.urdf`` is a fitting input, never updated.
+    Legacy Larm/Rarm are rebuilt from this version's seven-joint arm chains;
     explicitly disabling that option returns those two original fragments as-is.
     No directory or file is created, changed, or deleted by this function.
     """
     target = Path(target)
-    directory = (target if target.is_dir() else target.parent).resolve()
-    if not target.is_dir() and target.name != _MAIN.name:
-        raise ValueError("target must be the S63 urdf directory or biped_s63.urdf")
+    if target.is_dir():
+        mains = [path for path in target.glob("biped_s*.urdf") if is_wheel_urdf(path)]
+        if len(mains) != 1:
+            raise ValueError("expected exactly one S62/S63 variant main URDF in %s" % target)
+        target = mains[0]
+    if not is_wheel_urdf(target):
+        raise ValueError("target must be an S62/S63 variant main URDF")
+    directory = target.parent.resolve()
+    main = Path(target.name)
+    gazebo = Path(target.stem + "_gazebo.urdf")
+    xacro_name = Path(target.stem + "_gazebo.xacro")
+    variants = {gazebo: ("waist_yaw_link",), **_DRAKE_VARIANTS}
+    known_models = {main, xacro_name, *variants, *_SINGLE_ARMS}
     discovered = {path.relative_to(directory) for path in directory.rglob("*")
                   if path.is_file() and path.suffix.lower() in (".urdf", ".xacro")}
-    discovered.discard(Path("biped_s63.nominal.urdf"))
-    unexpected, missing = discovered - _KNOWN_MODELS, _KNOWN_MODELS - discovered
+    discovered.discard(Path(target.stem + ".nominal.urdf"))
+    unexpected = discovered - known_models
+    missing = known_models - _OPTIONAL_MODELS - discovered
     if unexpected or missing:
-        raise ValueError("S63 model set mismatch; unexpected=%s; missing=%s" %
+        raise ValueError("wheel model set mismatch; unexpected=%s; missing=%s" %
                          (sorted(map(str, unexpected)), sorted(map(str, missing))))
-    for relative in _KNOWN_MODELS:
+    for relative in discovered:
         path = directory / relative
         if path.is_symlink() or path.resolve().parent not in (directory, directory / "drake"):
-            raise ValueError("model must be a regular file inside the S63 urdf directory: %s" % path)
+            raise ValueError("model must be a regular file inside the selected urdf directory: %s" % path)
 
     candidate = Path(candidate)
     source_data = candidate.read_bytes()
@@ -247,12 +257,18 @@ def build_model_updates(target: Path, candidate: Path, *, rebuild_legacy_arms: b
     source_links, source_joints = _validate_tree(source_root, candidate)
     _check_arms(source_joints, "waist_yaw_link", candidate)
     comment = _metadata_comment(source_data, candidate)
-    updates = {directory / _MAIN: source_data}
-    for relative, torso in _VARIANTS.items():
+    updates = {directory / main: source_data}
+    for relative, allowed_roots in variants.items():
+        if relative not in discovered:
+            continue
         path = directory / relative
         data = path.read_bytes()
         root = _parse(data, path)
         _, joints = _validate_tree(root, path)
+        left = joints.get("zarm_l1_joint")
+        torso = left.find("parent").get("link") if left is not None else None
+        if torso not in allowed_roots:
+            raise ValueError("%s: incompatible arm root %r" % (path, torso))
         _check_arms(joints, torso, path)
         updates[path] = _copy_origins(data, source_joints, comment)
         updated_root = _parse(updates[path], path)
@@ -260,14 +276,14 @@ def build_model_updates(target: Path, candidate: Path, *, rebuild_legacy_arms: b
         _check_arms(updated_joints, torso, path)
     for relative, side in _SINGLE_ARMS.items():
         path = directory / relative
-        updates[path] = (_single_arm(source_links, source_joints, side, comment)
+        updates[path] = (_single_arm(source_links, source_joints, side, comment, source_root.get("name"))
                          if rebuild_legacy_arms else path.read_bytes())
 
-    xacro = directory / _XACRO
+    xacro = directory / xacro_name
     data = xacro.read_bytes()
     root = _parse(data, xacro)
     includes = [node.get("filename", "") for node in root.findall("{http://ros.org/wiki/xacro}include")]
-    if (not any(name.endswith("/biped_s63_gazebo.urdf") for name in includes)
+    if (not any(name.endswith("/" + str(gazebo)) for name in includes)
             or any(node.get("name") in _JOINT_NAMES for node in root.iter("joint"))):
         raise ValueError("%s: expected a wrapper including the updated Gazebo URDF, without arm joints" % xacro)
     updates[xacro] = data
