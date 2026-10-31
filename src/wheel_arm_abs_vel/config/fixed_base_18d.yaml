@@ -8,59 +8,11 @@ enable_natural_hang_bootstrap: false
 enable_body_mirroring: true
 body_tracking_frame: quest_tracking_robot_axes
 
-# Legacy publishers retain differentiated FF. Estimated Quest packets use
-# causal skeleton filtering plus consistent continuous task references.
-continuous_reference_enabled: true
-# Fixed -3dB hand cutoffs; innovation/direct_task remain explicit rollback modes.
-orientation_reference_mode: fixed_bandwidth
-hand_position_cutoff_hz: 10.0
-hand_orientation_cutoff_hz: 8.0
-hand_reference_frequency: 12.0
+# Sole production hand path: hand CV -> short prediction -> fixed bandwidth.
+hand_position_cutoff_hz: 20.0
+hand_orientation_cutoff_hz: 16.0
+hand_prediction_horizon: 0.060
 torso_reference_frequency: 2.5
-# Rotation only; position and elbow retain hand_reference_frequency.
-hand_orientation_reference_frequency: 6.0
-# New continuous reference: fast motion plus bounded observation correction.
-# Set enabled:false to recover the previous (46373205) reference generator.
-innovation_reference:
-  enabled: true
-  position_frequency: 12.0
-  position_damping: 1.0
-  position_speed: 3.0
-  position_acceleration: 36.0
-  position_jerk: 3600.0
-  orientation_frequency: 3.0 # independent correction ceiling; not a speed cap
-  orientation_damping: 1.0
-  orientation_speed: 9.0
-  orientation_acceleration: 108.0
-  orientation_jerk: 10800.0
-# Latency alignment and time WITHOUT a new valid observation are separate.
-reference_prediction:
-  min_hold: 0.040
-  max_hold: 0.060
-  decay: 0.030
-  max_alignment_age: 0.060
-# Task-space bandwidth scheduling, not a deadband or joint speed limit.
-# Position/elbow scales: m, m/s; orientation scales: rad, rad/s.
-adaptive_reference:
-  enabled: true
-  min_frequency: 1.0
-  speed_time_constant: 0.020
-  attack_time_constant: 0.010
-  release_time_constant: 0.200
-  bumpless_enabled: true
-  # Only acceleration changes induced by frequency/guide modulation;
-  # not global Cartesian jerk limits or joint speed limits.
-  position_parameter_jerk: 300.0
-  orientation_parameter_jerk: 300.0
-  active_parameter_jerk_multiplier: 8.0
-  position_error_start: 0.004
-  position_error_full: 0.012
-  position_speed_start: 0.030
-  position_speed_full: 0.120
-  orientation_error_start: 0.00872664625997165
-  orientation_error_full: 0.026179938779915
-  orientation_speed_start: 0.05235987755983
-  orientation_speed_full: 0.261799387799149
 hand_position_gain: 12.0
 hand_orientation_gain: 8.0
 feedforward_filter_time_constant: 0.010

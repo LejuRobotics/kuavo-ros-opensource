@@ -36,6 +36,7 @@ class ControlsTest(unittest.TestCase):
         for formal in (True, False):
             t = scope['Transformer']()
             t.is_hand_tracking = False
+            t.velocity_ik_takeover = formal
             t.measure_arm_length = True
             t.left_upper_arm_lengths = t.right_upper_arm_lengths = [.3]
             t.left_lower_arm_lengths = t.right_lower_arm_lengths = [.25]
@@ -97,9 +98,9 @@ struct FSM {
  bool use_auto_track_=false, only_half_up_body_=false;
  bool quest3_arm_reset_head_snapshot_active_=false, suppress_next_quest3_head_fixed_intent_=false;
  int arm_ctrl_mode_=1, arm_ctrl_mode_current_=1, robot_type_=1;
- int arm_calls=0, torso_calls=0; bool accepted=true;
+ int arm_calls=0, torso_calls=0; bool accepted=true, last_hold_only=false;
  std::string head_ctrl_mode_, last_head_ctrl_mode_;
- bool callSetArmModeSrv(int mode) { ++arm_calls; if(accepted) arm_ctrl_mode_=arm_ctrl_mode_current_=mode; return accepted; }
+ bool callSetArmModeSrv(int mode, bool holdOnly=false) { last_hold_only=holdOnly; ++arm_calls; if(accepted) arm_ctrl_mode_=arm_ctrl_mode_current_=mode; return accepted; }
  void callVRSetArmModeSrv(int mode) { callSetArmModeSrv(mode); }
  void callVRSetHeadModeSrv(const std::string&) {}
  void callWheelMpcControlMode(int mode) {
@@ -107,7 +108,8 @@ struct FSM {
  assert(mode==3); ++torso_calls; }
 ''' + resolve + '\nvoid update() {\n' + branch + r'''
  }
- void sample(bool x, bool a) {
+ void sample(bool x, bool a, bool b=false) {
+   joystick_data_.right_second_button_pressed=b;
    joystick_data_.left_first_button_pressed=x; joystick_data_.right_first_button_pressed=a;
    update(); joystick_data_prev_=joystick_data_;
  }
@@ -124,6 +126,12 @@ int main() {
    f.sample(false,false); f.sample(true,true);
    assert(f.arm_calls==3 && f.arm_ctrl_mode_==2 && f.torso_calls==0);
  }
+ FSM routed;
+ routed.sample(true,true); assert(!routed.last_hold_only);
+ routed.sample(false,false); routed.sample(true,false,true);
+ assert(routed.last_hold_only && routed.arm_ctrl_mode_==0);
+ routed.sample(false,false); routed.sample(true,false,true);
+ assert(routed.last_hold_only && routed.arm_ctrl_mode_==2);
  FSM rejected; rejected.accepted=false; rejected.sample(true,true);
  assert(rejected.torso_calls==0 && rejected.arm_ctrl_mode_==1);
  FSM legacy; legacy.enable_velocity_ik_takeover_=false; legacy.sample(true,true);

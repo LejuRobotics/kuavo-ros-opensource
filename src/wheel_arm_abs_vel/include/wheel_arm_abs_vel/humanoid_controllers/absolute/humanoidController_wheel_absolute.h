@@ -1,3 +1,4 @@
+#include <std_msgs/Float64MultiArray.h>
 #pragma once
 
 // C++ Standard Library
@@ -386,6 +387,9 @@ namespace wheel_absolute_control
     bool lockKneeLegCaptured_{false};              // 是否已捕获锁定快照
     double lockKneeQ_{0.0};                        // 锁定的 knee 目标角 [rad]
     double lockLegQ_{0.0};                         // 锁定的 leg 目标角 [rad]
+    std::atomic<double> lock_parameter_query_ms_{0.0}, lock_parameter_peak_ms_{0.0};
+    ros::Publisher cmd_prepare_timing_pub_;
+    std_msgs::Float64MultiArray cmd_prepare_timing_;
     void refreshLockKneeLegParameter();  // init/background only, never update()
     std::thread lockParameterWorker_;
     std::mutex lockParameterWaitMutex_;

@@ -38,8 +38,10 @@
   <arg name="continuous_reference_enabled" default="true" />
   <arg name="hand_reference_frequency" default="12.0" />
   <arg name="orientation_reference_mode" default="fixed_bandwidth" />
-  <arg name="hand_position_cutoff_hz" default="10.0" />
-  <arg name="hand_orientation_cutoff_hz" default="8.0" />
+  <arg name="hand_position_cutoff_hz" default="" />
+  <arg name="hand_orientation_cutoff_hz" default="" />
+  <arg name="hand_prediction_config" default="$(find wheel_arm_abs_vel)/config/layer2_causal_candidate.yaml" />
+  <arg name="s6_motion_profile" default="true" />
   <arg name="joint_jerk_enabled" default="true" />
   <arg name="adaptive_reference_enabled" default="true" />
   <arg name="innovation_reference_enabled" default="true" />
@@ -79,7 +81,9 @@
   <arg name="ctrl_arm_idx" default="2" />
   <arg name="ik_type_idx" default="0" />
   <arg name="ip_address" default="" />
-  <arg name="control_torso" default="true" />
+  <arg name="publish_legacy_arm_traj" default="true" />
+  <arg name="publish_absolute_bag_topics" default="true" />
+  <arg name="control_torso" default="true" doc="Initial torso following; false holds torso until manually enabled. PREPARE remains available." />
   <arg name="dexhand_front_trigger" default="true" doc="Both front triggers independently command six dexhand channels, 0=open and 100=closed." />
   <arg name="control_finger_type" default="0" />
   <arg name="predict_gesture" default="false" />
@@ -196,6 +200,8 @@
   <param name="/reset_joint_to_default" value="$(arg reset_joint_to_default)" type="bool" />
   <param name="/use_pico" value="$(arg use_pico)" type="bool" />
   <node pkg="wheel_arm_abs_vel" type="pinocchio_velocity_ik_node" name="absolute_velocity_ik" output="screen" if="$(eval arg('enable_velocity_ik_takeover') and arg('wheel_ik') and not arg('use_cpp_incremental_ik'))" respawn="false" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh ik')" required="true">
+    <param name="publish_legacy_arm_traj" value="$(arg publish_legacy_arm_traj)" />
+    <param name="publish_absolute_bag_topics" value="$(arg publish_absolute_bag_topics)" />
     <param name="continuity/hold_on_timeout" value="$(arg hold_on_input_timeout)" type="bool" />
     <param name="robot_version" value="$(arg robot_version)" type="int" />
     <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" type="int" />
@@ -263,18 +269,16 @@
     <param name="legacy_shoulder_pitch_upper" value="$(arg shoulder_pitch_upper_limit)" type="double" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/fixed_base_18d.yaml" />
     <param name="wrist_envelope/enabled" value="$(arg wrist_envelope_enabled)" type="bool" />
-    <param name="continuous_reference_enabled" value="$(arg continuous_reference_enabled)" />
-    <param name="adaptive_reference/enabled" value="$(arg adaptive_reference_enabled)" />
-    <param name="innovation_reference/enabled" value="$(arg innovation_reference_enabled)" />
-    <param name="hand_reference_frequency" value="$(arg hand_reference_frequency)" />
     <param name="torso_reference_frequency" value="$(arg torso_reference_frequency)" />
     <rosparam command="load" file="$(arg operating_temporal_config)" />
-    <param name="orientation_reference_mode" value="$(arg orientation_reference_mode)" />
-    <param name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" />
-    <param name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" />
     <param name="joint_jerk/enabled" value="$(arg joint_jerk_enabled)" type="bool" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/teleop_continuity.yaml" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/execution_governor.yaml" />
+    <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/s6_motion_profile.yaml" ns="s6_motion_profile" />
+    <param name="s6_motion_profile/enabled" value="$(arg s6_motion_profile)" type="bool" />
+    <rosparam command="load" file="$(arg hand_prediction_config)" />
+    <param name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" type="double" if="$(eval arg('hand_position_cutoff_hz') != '')" />
+    <param name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" type="double" if="$(eval arg('hand_orientation_cutoff_hz') != '')" />
     <param name="execution_governor/enabled" value="$(arg execution_governor_enabled)" type="bool" />
     <!-- Override YAML defaults AND stale parameter-server flags explicitly. -->
     <param name="operating_envelope/enabled" value="$(arg operating_envelope_enabled)" type="bool" />
@@ -290,8 +294,9 @@
     <param name="dexhand_front_trigger" value="$(arg dexhand_front_trigger)" type="bool" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/vr_kalman.yaml" />
     <param name="vr_kalman_flattening/enabled" value="$(eval arg('filter_tuning_enabled') and arg('vr_kalman_flattening_enabled'))" type="bool" />
-    <param name="vr_kalman_enabled" value="$(arg vr_kalman_enabled)" />
+
     <!-- Tiny covariance solves must not create a BLAS thread pool. -->
+    <env name="KUAVO_MAPPER_NUMERIC_BACKEND" value="native" />
     <env name="OPENBLAS_NUM_THREADS" value="1" />
     <env name="OMP_NUM_THREADS" value="1" />
     <rosparam command="load" file="$(arg velocity_tcp_geometry_file)" if="$(eval arg('velocity_tcp_geometry_file') != '')" />
@@ -367,5 +372,5 @@
     <arg name="enabled" value="$(eval arg('j3_overshoot_profile') and int(arg('robot_version')) in (62, 63) and arg('wheel_ik') and not arg('use_cpp_incremental_ik') and arg('enable_velocity_ik_takeover'))" />
     <arg name="kd" value="$(arg j3_kd)" />
   </include>
-  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in (62, 63, 400062) and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires S62/S63/400062 wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
+  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) > 0 and arg('wheel_ik') and arg('enable_velocity_ik_takeover') and not arg('use_cpp_incremental_ik') and not arg('use_arm_only_ik') and not arg('legacy_pico_profile')) else 'Private absolute input requires a validated full wheel model wheel_ik=true takeover=true; incremental/arm-only/legacy profiles are unsupported'])" />
 </launch>

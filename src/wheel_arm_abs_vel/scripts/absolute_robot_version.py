@@ -6,13 +6,13 @@ Asset paths and configuration loading remain in robot_version_manager.launch.
 """
 import os
 import sys
+import re
 
-SUPPORTED = {'62', '63', '400062'}
 
 
 def checked(value, source):
-    if value not in SUPPORTED:
-        raise ValueError('unsupported ROBOT_VERSION from %s: %r; expected 62, 63 or 400062' % (source, value))
+    if not re.fullmatch(r'[1-9][0-9]{0,8}', str(value)):
+        raise ValueError('invalid ROBOT_VERSION from %s: %r' % (source, value))
     return value, source
 
 

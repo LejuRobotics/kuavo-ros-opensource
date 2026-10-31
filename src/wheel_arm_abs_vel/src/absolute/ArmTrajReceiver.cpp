@@ -1,4 +1,5 @@
 #include "wheel_arm_abs_vel/humanoid_controllers/absolute/ArmTrajReceiver.h"
+#include "wheel_arm_abs_vel/motion_capture_ik/whole_body_arm_record.h"
 
 #include <algorithm>
 #include <cmath>
@@ -203,6 +204,9 @@ void ArmTrajReceiver::ingest(ArmTrajSourceType source, const double* pos_rad,
 }
 
 void ArmTrajReceiver::rosCallback(const sensor_msgs::JointState::ConstPtr& msg) {
+  if (msg && msg->header.frame_id == wheel_arm_abs_vel::arm_record::kFrameId) {
+    return;  // Recording mirror must never become a second control input.
+  }
   if (!msg || !shouldAcceptFrom(ArmTrajSourceType::kRosTopic)) {
     return;
   }

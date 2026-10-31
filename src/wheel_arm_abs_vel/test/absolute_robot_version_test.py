@@ -16,14 +16,14 @@ spec.loader.exec_module(identity)
 
 class IdentityTest(unittest.TestCase):
     def test_all_models_explicit_and_environment(self):
-        for version in ('62', '63', '400062'):
+        for version in ('60', '61', '62', '63', '200062', '300062', '400062', '400063'):
             self.assertEqual(identity.resolve([], {'ROBOT_VERSION': version})[0], version)
             self.assertEqual(identity.resolve(['robot_version:=' + version],
                              {'ROBOT_VERSION': 'bad'})[0], version)
 
     def test_missing_invalid_or_conflicting_environment_fails(self):
         for args, env in [([], {}), ([], {'ROBOT_VERSION': ''}),
-                          ([], {'ROBOT_VERSION': '40'}),
+                          ([], {'ROBOT_VERSION': '-40'}),
                           (['robot_version:=62', 'robot_version:=63'], {}),
                           (['robot_version:=bad'], {'ROBOT_VERSION': '62'})]:
             with self.subTest(args=args, env=env), self.assertRaises(ValueError):
@@ -59,7 +59,7 @@ class IdentityTest(unittest.TestCase):
                                   env=env, capture_output=True, text=True)
 
     def test_wrapper_autodetect_and_explicit_override(self):
-        for version in ('62', '63', '400062'):
+        for version in ('60', '61', '62', '63', '200062', '300062', '400062', '400063'):
             for entry in ('quest_velocity_ik.launch', 'load_kuavo_real_velocity_ik.launch',
                           'load_kuavo_mujoco_velocity_ik.launch',
                           'load_kuavo_absolute_sim_base.launch', 'control.launch'):
@@ -78,7 +78,7 @@ class IdentityTest(unittest.TestCase):
         result = self.wrapper(['wheel_arm_abs_vel', 'load_kuavo_real_velocity_ik.launch'], 'bad')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, '')
-        self.assertIn('unsupported ROBOT_VERSION', result.stderr)
+        self.assertIn('invalid ROBOT_VERSION', result.stderr)
 
     def test_legacy_dispatch_unchanged(self):
         for args in [['humanoid_controllers', 'control.launch'],

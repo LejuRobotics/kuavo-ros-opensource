@@ -21,7 +21,8 @@ def main():
     try:
         from tools.full_model_contract import version_string
         version = version_string(args.robot_version)
-        overlay = json.loads((Path(args.overlay_dir) / ('model_s' + version + '.json')).read_text())
+        overlay_path = Path(args.overlay_dir) / ('model_s' + version + '.json')
+        overlay = json.loads(overlay_path.read_text()) if overlay_path.is_file() else {}
         result = resolve_model(version, args.assets, args.wheel_interface, overlay)
     except (ValueError, TypeError, KeyError, OSError) as exc:
         print('[velocity model] ERROR: ' + str(exc), file=sys.stderr)

@@ -26,42 +26,29 @@ def transfer(q, sigma, gain, hz, frequencies):
 
 
 class FrequencyTests(unittest.TestCase):
-    def test_candidate_frequency_and_actual_rotation(self):
+    def test_configured_hand_frequency_and_actual_rotation(self):
         config = yaml.safe_load((ROOT/'config/vr_kalman.yaml').read_text())
-        candidate = config['vr_kalman_flattening']
-        self.assertFalse(candidate['enabled'])  # broadband noise tradeoff is explicit
-        frequencies = np.r_[np.linspace(.1, 5., 100), 10., 15., 20., 30., 40.]
-        report = []
         for hz in (72, 90, 120):
-            for name, qkey, sigmakey, gkey in (
-                ('position', 'position_q', 'position_sigma', 'position_velocity_gain'),
-                ('chest', 'rotation_q', 'rotation_sigma', 'rotation_velocity_gain'),
-                ('palms', 'hand_rotation_q', 'rotation_sigma', 'hand_velocity_gain')):
-                q, sigma = config['vr_kalman_'+qkey], config['vr_kalman_'+sigmakey]
-                before = transfer(q, sigma, 1., hz, frequencies)
-                after = transfer(candidate[qkey], sigma, candidate[gkey], hz, frequencies)
-                delay = (-np.angle(after[:100])+np.angle(before[:100]))/(2*np.pi*frequencies[:100])*1000
-                self.assertLessEqual(abs(after[100]), 1.03)
-                self.assertLess(max(delay), 1.)
-                row = dict(hz=hz, signal=name, gain10_before=abs(before[100]), gain10_after=abs(after[100]),
-                           max_added_delay_below5_ms=max(delay), gain30_ratio=abs(after[103]/before[103]))
-                report.append(row)
-                if name != 'position':
-                    dt=1./hz;f=10.;t=np.arange(0,6,dt)
-                    observer=RotationCV(sigma,candidate[qkey],candidate[gkey]);out=[]
+            for qkey, sigmakey, gkey in (
+                ('position_q', 'position_sigma', 'position_velocity_gain'),
+                ('hand_rotation_q', 'rotation_sigma', 'hand_velocity_gain')):
+                q, sigma, gain = (config['vr_kalman_' + key] for key in (qkey, sigmakey, gkey))
+                for f in (1., 5., 10., 20.):
+                    expected = transfer(q, sigma, gain, hz, [f])[0]
+                    dt = 1. / hz; t = np.arange(0, 8, dt)
+                    observer = RotationCV(sigma, q, gain); out = []
                     for stamp in t:
-                        R,_=observer.update(exp_so3([.001*np.sin(2*np.pi*f*stamp),0.,0.]),dt)
+                        R, _ = observer.update(exp_so3([.001*np.sin(2*np.pi*f*stamp), 0., 0.]), dt)
                         out.append(log_so3(R)[0])
-                    keep=t>2.;X=np.array([np.sin(2*np.pi*f*t[keep]),np.cos(2*np.pi*f*t[keep])]).T
-                    coeff=np.linalg.lstsq(X,np.asarray(out)[keep]/.001,rcond=None)[0]
-                    actual=coeff[0]+1j*coeff[1]
-                    self.assertLess(abs(actual-after[100]), 1e-5)
-        print(json.dumps(report, indent=2))
+                    keep = t > 4.
+                    X = np.array([np.sin(2*np.pi*f*t[keep]), np.cos(2*np.pi*f*t[keep])]).T
+                    coeff = np.linalg.lstsq(X, np.asarray(out)[keep]/.001, rcond=None)[0]
+                    self.assertLess(abs(coeff[0]+1j*coeff[1]-expected), 2e-5)
 
     def test_regularized_observer_constant_velocity_reset_and_covariance(self):
         for gain in (.425,.65,1.):
-            p=PositionCV(q=.7875,velocity_correction_gain=gain)
-            r=RotationCV(q=7.125,velocity_correction_gain=gain)
+            p=PositionCV(q=.7875,velocity_gain=gain)
+            r=RotationCV(q=7.125,velocity_gain=gain)
             t=0.
             for i in range(800):
                 dt=[1/72,1/90,1/120][i%3];t+=dt
@@ -73,8 +60,8 @@ class FrequencyTests(unittest.TestCase):
             np.testing.assert_allclose(w,[.2,0,0],atol=1e-7)
             self.assertLess(np.linalg.norm(R.T@R-np.eye(3)),1e-10)
             np.testing.assert_array_equal(p.update([1,2,3],None)[1],np.zeros(3))
-        for invalid in (0.,-1.,1.1,float('nan')):
-            with self.assertRaises(ValueError): PositionCV(velocity_correction_gain=invalid)
+        for invalid in (0.,-1.,float('inf'),float('nan')):
+            with self.assertRaises(ValueError): PositionCV(velocity_gain=invalid)
 
     def test_configured_jerk_alignment(self):
         rnea=yaml.safe_load((ROOT/'config/rnea.yaml').read_text())

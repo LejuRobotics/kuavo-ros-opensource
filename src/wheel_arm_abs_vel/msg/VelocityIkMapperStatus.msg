@@ -8,3 +8,6 @@ uint8 control_state
 bool valid
 bool takeover_active
 bool preparation_complete
+
+# Coordinate/session binding is available while ARMED, before execution ACTIVE.
+bool session_bound

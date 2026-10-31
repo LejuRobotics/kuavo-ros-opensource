@@ -77,6 +77,11 @@ bool control_valid
 # Explicit folding/torso permission, atomic with the input session and pose.
 # False requires lower-joint braking/hold; hand tracking cannot recruit them.
 bool torso_control_enabled
+# Position clutch: freeze knee/leg/pitch, retain yaw when torso is enabled.
+# False keeps the previous full-torso behavior for other publishers.
+bool torso_position_hold
+# Orders permission-only updates, including packets with an unchanged pose stamp.
+uint64 torso_operation_seq
 
 # Arm-only pause within an ACTIVE torso session; does not release the owner.
 # Both arm joint groups brake/hold, while torso permission remains independent.
@@ -84,9 +89,10 @@ bool torso_control_enabled
 bool arm_hold
 uint64 arm_operation_seq
 
-# Version 1: causal skeleton CV estimates, expressed in each pose's frame.
-# False retains compatibility with synthetic/legacy publishers. When true,
-# these twists replace (never supplement) finite-difference feedforward.
+# Hand-only Kalman estimates, expressed in each TCP pose frame.
+# When true, left/right TCP twists replace differentiated hand feedforward.
+# Elbow/root/chest velocities are retained in the wire schema; the current IK
+# derives those channels from their own poses.
 bool estimated_twists_valid
 geometry_msgs/Twist left_tcp_twist
 geometry_msgs/Twist right_tcp_twist

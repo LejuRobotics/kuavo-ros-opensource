@@ -20,7 +20,7 @@ class ArmHoldBaseTest(unittest.TestCase):
     sent=[];n._wheel_base_pub=NS(publish=sent.append);n._wheel_base_mapper=WheelBaseCommandMapper({'alpha':0.});n.stop_event=threading.Event();n._wheel_mpc_stable_for_mm_cmd=lambda:True
     def publish(y,x=False,b=False):
      now=fixed.clock.now;n._joystick_receive_monotonic=now;n._wheel_mpc_obs_receive_monotonic=now;n._absolute_latest_measured_q_time=now
-     n._absolute_latest_target['receive_time']=now;n._torso_controls.last_time=now;f.fixture.ack()
+     n._last_valid_tcp_receive=now;n._torso_controls.last_time=now;f.fixture.ack()
      n._publish_wheel_base_command(NS(left_y=y,left_x=0.,right_x=0.,right_y=0.,left_first_button_pressed=x,right_second_button_pressed=b))
     identity=(n._absolute_session_id,n._absolute_generation)
     publish(0.);publish(1.);self.assertEqual(sent[-1].linear.x,.4)

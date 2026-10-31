@@ -26,7 +26,8 @@ class BaseTests(unittest.TestCase):
         m.sample(joy(), True, .99)
         self.assertEqual(m.sample(joy(.5, 1., -.5), True, 1.), (.24, -.12, .075))
         self.assertEqual(m.sample(joy(), True, 1.01), (0., 0., 0.))
-        self.assertEqual(m.sample(joy(1, 1, 1, .81), True, 1.02), (.24, -.24, -.15))
+        self.assertEqual(m.sample(joy(1, 1, 1, .81), True, 1.02), (0., 0., 0.))
+        self.assertEqual(m.reason, 'TORSO_GESTURE')
         self.assertEqual(m.sample(joy(1, 1, 1), False, 1.03), (0., 0., 0.))
         self.assertEqual(m.sample(joy(1, math.nan, 1), True, 1.04), (0., 0., 0.))
         m.sample(joy(y=1), True, 2.)
@@ -42,7 +43,7 @@ class BaseTests(unittest.TestCase):
             self.assertEqual(m.sample(joy(y=1),True,now),(0.,0.,0.))
             self.assertEqual(m.reason,'WAIT_NEUTRAL')
         m.sample(joy(),True,1.03)
-        self.assertEqual(m.sample(joy(y=1,w=1,torso=1),True,1.04),(.4,0.,-.25))
+        self.assertEqual(m.sample(joy(y=1,w=1,torso=1),True,1.04),(0.,0.,0.))
         self.assertEqual(m.sample(joy(y=1),True,1.3),(0.,0.,0.))
         m.sample(joy(),True,1.31)
         self.assertEqual(m.sample(joy(y=1),True,1.32),(.4,0.,0.))
@@ -130,11 +131,10 @@ int main() {
  <<std::clamp(-rightJoyStickX_,-1.,1.)*.25<<'\n';
  }}
 """
-        # Compare the unchanged mapping on the legacy non-suppressed domain.
+        # Include torso-stick suppression as well as the ordinary drive domain.
         random.seed(73)
         packets = [joy(*(random.uniform(-1, 1) for _ in range(4))) for _ in range(200)]
         packets += [joy(.02, -.02, .02, .8), joy()]
-        packets=[p for p in packets if abs(p.right_y)<=.8]
         with tempfile.TemporaryDirectory() as d:
             cpp, binary = Path(d)/'legacy.cpp', Path(d)/'legacy'
             cpp.write_text(code)

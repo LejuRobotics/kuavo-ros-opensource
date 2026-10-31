@@ -7,20 +7,10 @@ namespace velocity_ik {
 inline double fixedNaturalHz(double cutoff) {
   return cutoff / std::sqrt(std::sqrt(2.) - 1.);
 }
-template<class Ref>
-inline void fixedReferenceDiagnostics(Ref& r, double cutoff, double error) {
-  r.innovation.valid=false;
-  r.gate.activity=0.; r.gate.frequency=fixedNaturalHz(cutoff);
-  r.gate.error=error; r.gate.speed=r.v.norm(); r.gate.guide=0.;
-  r.transition.frequency=fixedNaturalHz(cutoff); r.transition.guide=0.;
-  r.transition.acceleration_change=0.; r.transition.limited=false;
-  r.transition.valid=true;
-}
-inline void stepFixedVector(AdaptiveVectorReference& r,
+inline void stepFixedVector(ContinuousVector& r,
                             const Eigen::Vector3d& target, double dt, double cutoff) {
   // Exact ZOH solution. v is the derivative of this same trajectory.
   r.step(target,Eigen::Vector3d::Zero(),dt,fixedNaturalHz(cutoff));
-  fixedReferenceDiagnostics(r,cutoff,(target-r.p).norm());
 }
 inline Eigen::Vector3d fixedRotationError(const Eigen::Quaterniond& target,
                                         const Eigen::Quaterniond& q) {
@@ -35,7 +25,7 @@ inline Eigen::Quaterniond fixedRotationAdvance(const Eigen::Quaterniond& q,
   if(angle<1.e-14)return q;
   return (Eigen::Quaterniond(Eigen::AngleAxisd(angle,rotation/angle))*q).normalized();
 }
-inline void stepFixedRotation(AdaptiveRotationReference& r,
+inline void stepFixedRotation(ContinuousRotation& r,
                               const Eigen::Quaterniond& target, double dt, double cutoff) {
   if(!r.valid)r.reset(target);
   // World/spatial angular velocity; midpoint integration on SO(3).
@@ -51,6 +41,5 @@ inline void stepFixedRotation(AdaptiveRotationReference& r,
     r.q=fixedRotationAdvance(r.q,h*vm);
     r.v+=h*am;
   }
-  fixedReferenceDiagnostics(r,cutoff,fixedRotationError(target,r.q).norm());
 }
 } // namespace velocity_ik

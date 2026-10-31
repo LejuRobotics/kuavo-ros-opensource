@@ -1,3 +1,4 @@
+#include <wheel_arm_abs_vel/motion_capture_ik/S6MotionProfile.h>
 #include "wheel_arm_abs_vel/model/FullModelContract.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/ExecutionProducerLease.h"
 #include "wheel_arm_abs_vel/humanoid_controllers/ClockedReferenceFreshness.h"
@@ -8,20 +9,18 @@
 #include "../velocity_ik/hold_diagnostics.h"
 #include <iomanip>
 #include "wheel_arm_abs_vel/humanoid_controllers/WholeBodyReferenceShmRos.h"
-#include "../velocity_ik/elbow_feedforward.h"
 #include "../velocity_ik/channel_observation.h"
 #include "../velocity_ik/startup_readiness.h"
 #include "../velocity_ik/continuous_reference.h"
-#include "../velocity_ik/frame_prediction.h"
 #include "../velocity_ik/fixed_prepare_transaction.h"
 #include "../velocity_ik/sample_freshness.h"
-#include "../velocity_ik/bounded_prediction.h"
 #include "../velocity_ik/stop_reserve.h"
 #include "../velocity_ik/exact_stop.h"
 #include "../velocity_ik/operating_envelope.h"
 #include "../velocity_ik/temporal_cost.h"
 #include "../velocity_ik/joint_jerk.h"
 #include "../velocity_ik/fixed_bandwidth_reference.h"
+#include "../velocity_ik/source_consistent_hand_prediction.h"
 #include "../velocity_ik/execution_governor.h"
 #include "../velocity_ik/teleop_continuity.h"
 #include <nlohmann/json.hpp>
@@ -56,7 +55,10 @@
 #include <std_msgs/Bool.h>
 #include <std_srvs/Trigger.h>
 
+#include <geometry_msgs/PoseStamped.h>
 #include <kuavo_msgs/sensorsData.h>
+#include <kuavo_msgs/twoArmHandPose.h>
+#include <kuavo_msgs/Float32MultiArrayStamped.h>
 
 #include "wheel_arm_abs_vel/TeleopTcpTarget.h"
 #include "wheel_arm_abs_vel/VelocityIkFeasibilityDebug.h"
@@ -64,6 +66,7 @@
 #include "wheel_arm_abs_vel/VelocityIkShadow.h"
 #include "wheel_arm_abs_vel/motion_capture_ik/mapper_status.h"
 #include "wheel_arm_abs_vel/WholeBodyIkReference.h"
+#include "wheel_arm_abs_vel/motion_capture_ik/whole_body_arm_record.h"
 #include "motion_capture_ik/json.hpp"
 #include "wheel_arm_abs_vel/motion_capture_ik/whole_body_dof_layout.h"
 #include "wheel_arm_abs_vel/motion_capture_ik/whole_body_motion_policy.h"
@@ -147,6 +150,14 @@ double maxAbs(const Eigen::MatrixBase<Derived>& value) {
   return value.size() == 0 ? 0.0 : value.cwiseAbs().maxCoeff();
 }
 
+// Shared by the production constructor and the isolated recording test.
+void initializeAbsoluteRecording(ros::NodeHandle& nh, ros::Publisher& lower,
+                                 ros::Publisher& eef, ros::Publisher& input) {
+  lower = nh.advertise<sensor_msgs::JointState>("/whole_body_velocity_ik/record/lb_leg_traj", 2);
+  eef = nh.advertise<kuavo_msgs::twoArmHandPose>("/whole_body_velocity_ik/record/drake_ik/eef_pose", 2);
+  input = nh.advertise<kuavo_msgs::Float32MultiArrayStamped>("/whole_body_velocity_ik/record/drake_ik/input_pos", 2);
+}
+
 }  // namespace
 
 class PinocchioVelocityIk {
@@ -222,8 +233,8 @@ class PinocchioVelocityIk {
     mode_sub_ = nh_.subscribe(mode_topic_, 2, &PinocchioVelocityIk::modeCallback, this);
 
     cycle_timing_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(output_prefix_ + "/cycle_timing", 32);
-    bool runtime_probe_enabled=true;
-    pnh_.param("runtime_probe_enabled",runtime_probe_enabled,true);
+    bool runtime_probe_enabled=false;
+    pnh_.param("runtime_probe_enabled",runtime_probe_enabled,false);
     if(runtime_probe_enabled) {
       bool audit=false, detail_enabled=true;
       int stride=10;
@@ -274,11 +285,7 @@ class PinocchioVelocityIk {
     task_error_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(output_prefix_ + "/task_error", 2);
     channel_observation_pub_=nh_.advertise<std_msgs::Float64MultiArray>("/whole_body_velocity_ik/diagnostics/channel_observation",10);
     target_ff_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(output_prefix_ + "/target_twist_ff", 2);
-    adaptive_reference_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(output_prefix_ + "/adaptive_reference_v1", 2);
-    reference_dynamics_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(output_prefix_ + "/reference_dynamics_v1", 2);
-    innovation_reference_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(output_prefix_ + "/innovation_reference_v1", 2);
     startup_readiness_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(output_prefix_ + "/startup_readiness_v1", 2);
-    reconstructed_target_pub_ = nh_.advertise<std_msgs::Float64MultiArray>("/whole_body_velocity_ik/diagnostics/reconstructed_target", 10);
     if (publish_input_debug_) {
       input_debug_pub_ = nh_.advertise<wheel_arm_abs_vel::VelocityIkInputDebug>(
           output_prefix_ + "/input_debug", 10);
@@ -295,6 +302,14 @@ class PinocchioVelocityIk {
       formal_reference_pub_ =
           nh_.advertise<wheel_arm_abs_vel::WholeBodyIkReference>(
               reference_transport_.shm()?formal_reference_topic_+"/shm_mirror":formal_reference_topic_, 2);
+      if (pnh_.param("publish_legacy_arm_traj", true)) {
+        legacy_arm_record_pub_ = nh_.advertise<sensor_msgs::JointState>("/whole_body_velocity_ik/record/kuavo_arm_traj", 2);
+      }
+      if (pnh_.param("publish_absolute_bag_topics",
+                     pnh_.param("publish_incremental_bag_topics", true))) {
+        initializeAbsoluteRecording(nh_, legacy_lower_record_pub_,
+                                    legacy_eef_record_pub_, legacy_input_record_pub_);
+      }
     }
     if (enable_takeover_ && reference_transport_.shm()) {
       const auto publisher = formal_reference_pub_;
@@ -427,7 +442,7 @@ class PinocchioVelocityIk {
     std::array<double, 3> observation_ns{{0., 0., 0.}};
     uint64_t observation_sequence=0;
     std::array<ArmTarget, kArmCount> arm;
-    std::array<velocity_ik::ChannelObservation, kArmCount> hand_observation, elbow_observation;
+    std::array<velocity_ik::ChannelObservation, kArmCount> hand_observation;
     uint64_t body_observation_updates=0;
     double body_observation_host_ns=0, body_observation_dt=0;
     bool body_observation_changed=false;
@@ -453,6 +468,8 @@ class PinocchioVelocityIk {
     uint8_t control_state{wheel_arm_abs_vel::TeleopTcpTarget::CONTROL_INACTIVE};
     bool valid{false};
     bool torso_control_enabled{false};  // explicit operator permission, default locked
+    bool torso_position_hold{false};
+    uint64_t torso_operation_seq{0};
     bool arm_hold{false};
     uint64_t arm_operation_seq{0};
     bool arm_target_torso_relative{false};
@@ -473,6 +490,8 @@ class PinocchioVelocityIk {
     Eigen::Isometry3d robot_torso_pose_session{Eigen::Isometry3d::Identity()};
     Eigen::Vector2d accumulated_root_translation{Eigen::Vector2d::Zero()};
     Eigen::Vector4d accumulated_torso_delta{Eigen::Vector4d::Zero()};
+    // Independent height/pitch clutch; yaw and hand alignment keep their anchors.
+    Eigen::Vector2d position_resume_offset{Eigen::Vector2d::Zero()};
     uint64_t session_id{0};
     uint64_t generation{0};
     uint64_t coordinate_epoch{0};
@@ -1022,71 +1041,19 @@ class PinocchioVelocityIk {
                base_tracking_translation_limit_, 0.15);
     pnh_.param("base_tracking_yaw_limit", base_tracking_yaw_limit_, 0.20);
     pnh_.param("feedforward_filter_time_constant", ff_filter_time_constant_, 0.030);
-    pnh_.param("continuous_reference_enabled", continuous_reference_enabled_, true);
-    // Startup-only mode. The joint reference remains the only q/v/a owner.
-    pnh_.param<std::string>("orientation_reference_mode", orientation_reference_mode_, "innovation");
-    if (orientation_reference_mode_ != "innovation" && orientation_reference_mode_ != "direct_task" && orientation_reference_mode_ != "fixed_bandwidth")
-      throw std::runtime_error("orientation_reference_mode must be innovation, direct_task or fixed_bandwidth");
-    pnh_.param("hand_position_cutoff_hz", hand_position_cutoff_hz_, 4.);
-    pnh_.param("hand_orientation_cutoff_hz", hand_orientation_cutoff_hz_, 3.);
-    for(double hz : {hand_position_cutoff_hz_,hand_orientation_cutoff_hz_})
-      if(!std::isfinite(hz) || hz<.5 || hz>10.)
-        throw std::runtime_error("fixed hand cutoff must be finite and in [0.5,10] Hz");
-    if(orientation_reference_mode_=="fixed_bandwidth" && !continuous_reference_enabled_)
-      throw std::runtime_error("fixed_bandwidth requires continuous_reference_enabled");
-    ROS_INFO("[VelocityIk] fixed reference cutoffs (-3dB): position %.2f Hz, orientation %.2f Hz",hand_position_cutoff_hz_,hand_orientation_cutoff_hz_);
-    pnh_.param("hand_reference_frequency", hand_reference_frequency_, 12.0);
-    pnh_.param("hand_orientation_reference_frequency", hand_orientation_reference_frequency_, 6.0);
+    pnh_.param("hand_position_cutoff_hz", hand_position_cutoff_hz_, 20.);
+    pnh_.param("hand_orientation_cutoff_hz", hand_orientation_cutoff_hz_, 16.);
+    pnh_.param("hand_prediction_horizon", hand_prediction_horizon_, .060);
     pnh_.param("torso_reference_frequency", torso_reference_frequency_, 1.2);
-    ROS_INFO("[VelocityIk] orientation mode=%s; position %.2f Hz; innovation fallback orientation %.2f Hz",
-             orientation_reference_mode_.c_str(),hand_reference_frequency_,hand_orientation_reference_frequency_);
-    if (!std::isfinite(hand_reference_frequency_) || hand_reference_frequency_<4. || hand_reference_frequency_>20. ||
-        !std::isfinite(hand_orientation_reference_frequency_) || hand_orientation_reference_frequency_<1. || hand_orientation_reference_frequency_>20. ||
-        !std::isfinite(torso_reference_frequency_) || torso_reference_frequency_<.5 || torso_reference_frequency_>5.)
-      throw std::runtime_error("invalid continuous reference frequency");
-    pnh_.param("adaptive_reference/enabled", adaptive_reference_enabled_, true);
-    auto& adaptive=adaptive_reference_settings_;
-    pnh_.param("innovation_reference/enabled",adaptive.innovation.enabled,true);
-    const auto read_innovation=[&](const std::string& name,auto& limits) {
-      const std::string prefix="innovation_reference/"+name+"_";
-      pnh_.param(prefix+"frequency",limits.frequency,limits.frequency);
-      pnh_.param(prefix+"damping",limits.damping,limits.damping);
-      pnh_.param(prefix+"speed",limits.speed,limits.speed);
-      pnh_.param(prefix+"acceleration",limits.acceleration,limits.acceleration);
-      pnh_.param(prefix+"jerk",limits.jerk,limits.jerk);
-    };
-    read_innovation("position",adaptive.innovation.position);
-    adaptive.innovation.orientation.frequency=3.;
-    read_innovation("orientation",adaptive.innovation.orientation);
-    pnh_.param("adaptive_reference/min_frequency", adaptive.min_frequency, 1.0);
-    pnh_.param("adaptive_reference/speed_time_constant", adaptive.speed_time_constant, .020);
-    pnh_.param("adaptive_reference/attack_time_constant", adaptive.attack_time_constant, .010);
-    pnh_.param("adaptive_reference/release_time_constant", adaptive.release_time_constant, .200);
-    pnh_.param("adaptive_reference/position_error_start", adaptive.position.error_start, .004);
-    pnh_.param("adaptive_reference/position_error_full", adaptive.position.error_full, .012);
-    pnh_.param("adaptive_reference/position_speed_start", adaptive.position.speed_start, .030);
-    pnh_.param("adaptive_reference/position_speed_full", adaptive.position.speed_full, .120);
-    pnh_.param("adaptive_reference/orientation_error_start", adaptive.orientation.error_start, .00872664625997165);
-    pnh_.param("adaptive_reference/orientation_error_full", adaptive.orientation.error_full, .026179938779915);
-    pnh_.param("adaptive_reference/orientation_speed_start", adaptive.orientation.speed_start, .05235987755983);
-    pnh_.param("adaptive_reference/orientation_speed_full", adaptive.orientation.speed_full, .261799387799149);
-    pnh_.param("adaptive_reference/bumpless_enabled", adaptive.bumpless_enabled, true);
-    pnh_.param("adaptive_reference/position_parameter_jerk", adaptive.position_parameter_jerk, 300.);
-    pnh_.param("adaptive_reference/orientation_parameter_jerk", adaptive.orientation_parameter_jerk, 300.);
-    pnh_.param("adaptive_reference/active_parameter_jerk_multiplier", adaptive.active_parameter_jerk_multiplier, 8.);
-    auto& prediction=frame_prediction_settings_;
-    pnh_.param("reference_prediction/min_hold", prediction.min_hold, .040);
-    pnh_.param("reference_prediction/max_hold", prediction.max_hold, .060);
-    pnh_.param("reference_prediction/decay", prediction.decay, .030);
-    pnh_.param("reference_prediction/max_alignment_age", prediction.max_alignment_age, .060);
-    if (!prediction.valid()) throw std::runtime_error("invalid reference prediction settings");
-    if (!adaptive.valid(hand_reference_frequency_) || !adaptive.valid(hand_orientation_reference_frequency_))
-      throw std::runtime_error("invalid adaptive continuous reference settings");
-    ROS_INFO("[VelocityIk] continuous reference=%d adaptive=%d hand=%.2f..%.2f Hz torso=%.2f Hz",
-             continuous_reference_enabled_,adaptive_reference_enabled_,adaptive.min_frequency,
-             hand_reference_frequency_,torso_reference_frequency_);
-    ROS_INFO("[VelocityIk] innovation reference=%d: motion lag compensated; correction limits %.3f m/s %.3f rad/s (not total motion caps)",
-             adaptive.innovation.enabled,adaptive.innovation.position.speed,adaptive.innovation.orientation.speed);
+    for(double hz : {hand_position_cutoff_hz_,hand_orientation_cutoff_hz_})
+      if(!std::isfinite(hz) || hz<.5 || hz>30.)
+        throw std::runtime_error("fixed hand cutoff must be finite and in [0.5,30] Hz");
+    if(!std::isfinite(hand_prediction_horizon_) || hand_prediction_horizon_<0. || hand_prediction_horizon_>.1)
+      throw std::runtime_error("hand prediction horizon must be in [0,0.1] seconds");
+    if(!std::isfinite(torso_reference_frequency_) || torso_reference_frequency_<.5 || torso_reference_frequency_>5.)
+      throw std::runtime_error("invalid torso reference frequency");
+    ROS_INFO("[VelocityIk] CV observation -> single prediction -> fixed reference: hand %.2f/%.2f Hz, torso %.2f Hz",
+             hand_position_cutoff_hz_,hand_orientation_cutoff_hz_,torso_reference_frequency_);
     pnh_.param("feedforward_decay_time_constant", ff_decay_time_constant_, 0.050);
     pnh_.param("feedforward_hold_time", ff_hold_time_, 0.025);
 
@@ -1131,6 +1098,7 @@ class PinocchioVelocityIk {
     pnh_.param("body_torso_full_error", body_torso_full_error_, 0.15);
 
     pnh_.param("hand_position_gain", hand_position_gain_, 8.0);
+    pnh_.param("hand_prediction_velocity_time_constant",hand_prediction_velocity_time_constant_,.02);
     pnh_.param("hand_orientation_gain", hand_orientation_gain_, 6.0);
     pnh_.param("elbow_position_gain", elbow_position_gain_, 5.0);
     pnh_.param("hand_position_weight", hand_position_weight_, 12.0);
@@ -1329,8 +1297,6 @@ class PinocchioVelocityIk {
                reference_tracking_recovery_lower_limit_, 0.05);
     pnh_.param("reference_tracking_recovery_dwell",
                reference_tracking_recovery_dwell_, 0.40);
-    pnh_.param("kinematic_prediction_horizon",
-               kinematic_prediction_horizon_, 0.015);
     pnh_.param("orientation_tracking_full_error",
                orientation_tracking_full_error_, 0.06);
     pnh_.param("orientation_tracking_zero_error",
@@ -1462,13 +1428,31 @@ class PinocchioVelocityIk {
         joint_jerk_limits_(i) = read("jerk", joint==4 ? 4000. : 6000.);
       }
     }
+    bool s6_profile_enabled = false;
+    pnh_.param("s6_motion_profile/enabled", s6_profile_enabled, false);
+    if (s6_profile_enabled) {
+      const ros::NodeHandle profile_node(pnh_, "s6_motion_profile");
+      const auto profile = velocity_ik::readS6MotionProfile(profile_node, robot_version_);
+      profile.applyDynamics(velocity_limit_, acceleration_limit_, braking_limit_,
+                            outward_acceleration_limit_, joint_jerk_limits_,
+          [&](const std::string& name) { return dof_layout_.decisionIndexByName(name); });
+      ROS_INFO("[S6MotionProfile] IK robot_version=%d J3 v/a/j=%.3f/%.3f/%.3f; wrist a=%.3f/%.3f/%.3f; jerk=%s",
+               robot_version_, velocity_limit_(9), acceleration_limit_(9), joint_jerk_limits_(9),
+               acceleration_limit_(11), acceleration_limit_(12), acceleration_limit_(13),
+               joint_jerk_enabled_ ? "on" : "off");
+      pnh_.setParam("resolved_s6_motion_profile/enabled", true);
+      pnh_.setParam("resolved_s6_motion_profile/velocity", std::vector<double>(velocity_limit_.data(), velocity_limit_.data()+velocity_limit_.size()));
+      pnh_.setParam("resolved_s6_motion_profile/acceleration", std::vector<double>(acceleration_limit_.data(), acceleration_limit_.data()+acceleration_limit_.size()));
+      pnh_.setParam("resolved_s6_motion_profile/braking", std::vector<double>(braking_limit_.data(), braking_limit_.data()+braking_limit_.size()));
+      pnh_.setParam("resolved_s6_motion_profile/jerk", std::vector<double>(joint_jerk_limits_.data(), joint_jerk_limits_.data()+joint_jerk_limits_.size()));
+    } else pnh_.setParam("resolved_s6_motion_profile/enabled", false);
     pnh_.param("separate_stopping_contract", separate_stopping_contract_, false);
     pnh_.param("operating_envelope/enabled", operating_envelope_enabled_, false);
     pnh_.param("temporal_cost/enabled", temporal_cost_enabled_, false);
     pnh_.param("operating_diagnostics/enabled", envelope_diagnostics_enabled_, false);
     bool communication_audit = false;
     pnh_.param("communication_full_rate_audit", communication_audit, false);
-    pnh_.param("operating_diagnostics/stride", envelope_diagnostics_stride_, 5);
+    pnh_.param("operating_diagnostics/stride", envelope_diagnostics_stride_, 25);
     if (communication_audit) envelope_diagnostics_stride_ = 1;
     if (envelope_diagnostics_stride_ < 1)
       throw std::runtime_error("operating_diagnostics/stride must be positive");
@@ -1502,10 +1486,6 @@ class PinocchioVelocityIk {
         throw std::runtime_error("invalid execution governor config: " + governed_names[arm]);
     }
     pnh_.param("qp_snapshot_directory", qp_snapshot_directory_, std::string{});
-    pnh_.param("host_target_reconstruction", host_target_reconstruction_, false);
-    pnh_.param("target_adoption_lead", target_adoption_lead_, 0.001);
-    if (!std::isfinite(target_adoption_lead_) || target_adoption_lead_ < 0 || target_adoption_lead_ > .003)
-      throw std::runtime_error("target adoption lead must be in [0,3] ms");
     joint_safe_range_ratio_ = loadVectorParameter(
         "joint_safe_range_ratios", safe_ratio_default);
     joint_safe_center_requested_ = loadFiniteVectorParameter(
@@ -1794,8 +1774,6 @@ class PinocchioVelocityIk {
         lower_reference_tracking_qp_limit_);
     reference_tracking_recovery_dwell_ = std::max(
         0.0, reference_tracking_recovery_dwell_);
-    kinematic_prediction_horizon_ = std::clamp(
-        kinematic_prediction_horizon_, 0.0, 0.05);
     orientation_tracking_full_error_ = std::max(
         0.0, orientation_tracking_full_error_);
     orientation_tracking_zero_error_ = std::max(
@@ -1987,6 +1965,14 @@ class PinocchioVelocityIk {
       plant_->addTcp(shadow_tcp_names.at(arm), frame_names.at(arm + 1),
                      translation, rotationFromRpy(tcp_rpy.at(arm)));
       hand_frame_names_.at(arm) = shadow_tcp_names.at(arm);
+      absolute_record_frame_names_[arm] = "absolute_record_tcp_" + std::to_string(arm);
+      const Eigen::Vector3d legacy_translation(0.0, 0.0, eef_z_offset);
+      plant_->addTcp(absolute_record_frame_names_[arm], frame_names.at(arm + 1),
+                     legacy_translation, Eigen::Matrix3d::Identity());
+      auto& offset = absolute_record_tcp_offsets_[arm];
+      offset.setIdentity();
+      offset.linear() = rotationFromRpy(tcp_rpy.at(arm)).transpose();
+      offset.translation() = offset.linear() * (legacy_translation - translation);
       elbow_frame_names_.at(arm) = frame_names.at(arm + 3);
       shoulder_frame_names_.at(arm) =
           arm == 0 ? "zarm_l1_link" : "zarm_r1_link";
@@ -2256,7 +2242,7 @@ class PinocchioVelocityIk {
           c.angular.x(),c.angular.y(),c.angular.z(),0.});
     };
     for(int arm=0;arm<kArmCount;++arm) {
-      append(target_.hand_observation.at(arm));append(target_.elbow_observation.at(arm));
+      append(target_.hand_observation.at(arm));
     }
     velocity_ik::ChannelObservation body;
     body.valid=target_.body_feedforward_sample_valid;
@@ -2316,6 +2302,8 @@ class PinocchioVelocityIk {
     next.absolute_state = message->absolute_state;
     next.control_state = message->control_state;
     next.torso_control_enabled = message->torso_control_enabled;
+    next.torso_position_hold = message->torso_position_hold;
+    next.torso_operation_seq = message->torso_operation_seq;
     next.arm_hold = message->arm_hold;
     next.arm_operation_seq = message->arm_operation_seq;
 
@@ -2362,13 +2350,18 @@ class PinocchioVelocityIk {
       next.arm.at(arm).elbow_position = Eigen::Vector3d(elbow.x, elbow.y, elbow.z);
       next.arm.at(arm).elbow_valid = elbow_valid.at(arm) &&
           allFinite(next.arm.at(arm).elbow_position);
-      const bool this_pose_valid = pose_valid.at(arm) &&
+      const bool this_pose_valid = message->estimated_twists_valid && pose_valid.at(arm) &&
           allFinite(next.arm.at(arm).hand_position) &&
           next.arm.at(arm).hand_orientation.coeffs().array().isFinite().all() &&
           next.arm.at(arm).hand_orientation.norm() > 0.5;
-      hand_valid[arm]=this_pose_valid;
+      const auto& twist = arm == 0 ? message->left_tcp_twist : message->right_tcp_twist;
+      next.arm[arm].hand_linear_ff = Eigen::Vector3d(twist.linear.x,twist.linear.y,twist.linear.z);
+      next.arm[arm].hand_angular_ff = Eigen::Vector3d(twist.angular.x,twist.angular.y,twist.angular.z);
+      next.arm[arm].elbow_linear_ff.setZero();
+      hand_valid[arm]=this_pose_valid && next.arm[arm].hand_linear_ff.allFinite()
+          && next.arm[arm].hand_angular_ff.allFinite();
       if (armIsControlled(arm)) {
-        valid = valid && this_pose_valid;
+        valid = valid && hand_valid[arm];
       }
       if (next.arm.at(arm).hand_orientation.norm() > 1.0e-12) {
         next.arm.at(arm).hand_orientation.normalize();
@@ -2442,7 +2435,7 @@ class PinocchioVelocityIk {
         contract_valid && source_allowed && next.session_id==target_.session_id && next.generation==target_.generation &&
         (next.source!=target_.source || next.frame_id!=target_.frame_id ||
          next.body.coordinate_epoch!=target_.body.coordinate_epoch)) force_confirmation_=true;
-    const bool same_contract = target_.valid && next.source==target_.source &&
+    const bool same_contract = target_.session_id != 0 && next.source==target_.source &&
         next.session_id==target_.session_id && next.generation==target_.generation &&
         next.frame_id==target_.frame_id && next.body.coordinate_epoch==target_.body.coordinate_epoch;
     const bool same_arm_contract = next.source==target_.source &&
@@ -2454,8 +2447,17 @@ class PinocchioVelocityIk {
     }
     const bool new_arm_operation = same_contract &&
         next.arm_operation_seq > target_.arm_operation_seq;
+    if (same_arm_contract && (next.torso_operation_seq < target_.torso_operation_seq ||
+        (next.torso_operation_seq != 0 && next.torso_operation_seq == target_.torso_operation_seq &&
+         (next.torso_control_enabled != target_.torso_control_enabled ||
+          next.torso_position_hold != target_.torso_position_hold)))) {
+      ++rejected_invalid_count_;
+      return;  // A delayed permission packet cannot unlock a newer torso hold.
+    }
+    const bool new_torso_operation = same_contract &&
+        next.torso_operation_seq > target_.torso_operation_seq;
     const bool new_observation = !next.source_stamp.isZero() &&
-        (!same_contract || next.source_stamp>target_.source_stamp);
+        (next.source != target_.source || next.source_stamp > target_.source_stamp);
     if (same_contract) next.observation_ns=target_.observation_ns;
     if (contract_valid && source_allowed &&
         (!std::isfinite(next.source_relative_age) || next.source_relative_age>input_continuity_.config.brake)) {
@@ -2463,7 +2465,7 @@ class PinocchioVelocityIk {
       source_interrupted_=true;
       return; // A delayed/bad-timing packet cannot destroy a recent good pose.
     }
-    if (same_contract && !new_arm_operation && contract_valid && next.control_state==target_.control_state &&
+    if (same_contract && !new_arm_operation && !new_torso_operation && contract_valid && next.control_state==target_.control_state &&
         (!new_observation || !std::isfinite(next.source_relative_age))) {
       ++duplicate_input_count_;
       return; // Reordered/replayed packets cannot renew observations or FF.
@@ -2609,9 +2611,7 @@ class PinocchioVelocityIk {
         target_.feedforward_sample_valid && !source_interrupted_ &&
         !source_changed && !coordinate_contract_changed &&
         (next.receive_monotonic_ns-target_.receive_monotonic_ns)*1e-9<=input_continuity_.config.grace;
-    const bool duplicate = has_continuous_sample &&
-        max_position_delta <= duplicate_position_epsilon_ &&
-        max_orientation_delta <= duplicate_orientation_epsilon_;
+    const bool duplicate = !new_observation;
     double unique_sample_dt = 0.0;
     uint8_t decision = wheel_arm_abs_vel::VelocityIkInputDebug::ACCEPTED_INITIAL;
 
@@ -2637,23 +2637,17 @@ class PinocchioVelocityIk {
       ++unique_input_count_;
     }
     next.feedforward_sample_valid=true;
+    next.estimated_twists_valid = true;
     for (int arm=0;arm<kArmCount;++arm) {
-      auto& a=next.arm.at(arm);
-      const bool channel_new=next.observation_ns[arm]>target_.observation_ns[arm];
-      next.hand_observation.at(arm)=velocity_ik::observeChannel(
-          target_.hand_observation.at(arm),a.hand_position,a.hand_orientation,
-          true,has_continuous_sample &&
-          (next.observation_ns[arm]-target_.observation_ns[arm])*1e-9<=input_continuity_.config.grace,
-          next.source_stamp.toSec(),next.receive_monotonic_ns,
-          ff_filter_time_constant_,duplicate_position_epsilon_,duplicate_orientation_epsilon_);
-      if (!channel_new && same_contract) next.hand_observation[arm]=target_.hand_observation[arm];
-      next.elbow_observation.at(arm)=velocity_ik::observeChannel(
-          target_.elbow_observation.at(arm),a.elbow_position,Eigen::Quaterniond::Identity(),
-          a.elbow_valid,has_continuous_sample,next.source_stamp.toSec(),next.receive_monotonic_ns,
-          ff_filter_time_constant_,duplicate_position_epsilon_,duplicate_orientation_epsilon_);
-      a.hand_linear_ff=next.hand_observation.at(arm).linear;
-      a.hand_angular_ff=next.hand_observation.at(arm).angular;
-      a.elbow_linear_ff=next.elbow_observation.at(arm).linear;
+      const bool channel_new = next.observation_ns[arm] > target_.observation_ns[arm];
+      next.hand_observation[arm] = target_.hand_observation[arm];
+      if (!channel_new) continue;
+      const auto& a = next.arm[arm];
+      auto& h = next.hand_observation[arm];
+      h.position=a.hand_position; h.orientation=a.hand_orientation;
+      h.linear=a.hand_linear_ff; h.angular=a.hand_angular_ff;
+      h.valid=true; h.changed=true; h.updates=target_.hand_observation[arm].updates+1;
+      h.update_host_ns=next.observation_ns[arm]; h.source_time=next.source_stamp.toSec();
     }
 
     // Root/Chest have their own uniqueness and velocity observation.  A pure
@@ -2729,44 +2723,6 @@ class PinocchioVelocityIk {
       next.body_feedforward_sample_valid = next.body.torsoValid();
     }
 
-    // Explicit estimated twists have the same source stamp and pose frames.
-    // They REPLACE legacy differences, including equal-content NEW samples.
-    next.estimated_twists_valid=message->estimated_twists_valid;
-    if (same_contract && target_.estimated_twists_valid &&
-        next.observation_ns==target_.observation_ns)
-      next.estimated_twists_valid=true; // brief occlusion keeps the admitted path
-    if (message->estimated_twists_valid) {
-      const auto vector_components=[](const geometry_msgs::Vector3& v){return Eigen::Vector3d(v.x,v.y,v.z);};
-      const std::array<geometry_msgs::Twist,2> twists{message->left_tcp_twist,message->right_tcp_twist};
-      const std::array<geometry_msgs::Vector3,2> elbows{message->left_elbow_velocity,message->right_elbow_velocity};
-      bool finite=vector_components(message->chest_twist.linear).allFinite() && vector_components(message->chest_twist.angular).allFinite() && vector_components(message->root_velocity).allFinite();
-      for(int arm=0;arm<kArmCount;++arm)
-        finite=finite && vector_components(twists[arm].linear).allFinite() && vector_components(twists[arm].angular).allFinite() && vector_components(elbows[arm]).allFinite();
-      if(!finite) { ++rejected_invalid_count_; source_interrupted_=true; return; }
-      for(int arm=0;arm<kArmCount;++arm) {
-        if(next.observation_ns[arm]<=target_.observation_ns[arm] && same_contract) continue;
-        auto& a=next.arm[arm];
-        a.hand_linear_ff=vector_components(twists[arm].linear); a.hand_angular_ff=vector_components(twists[arm].angular);
-        a.elbow_linear_ff=vector_components(elbows[arm]);
-        auto& h=next.hand_observation[arm];
-        h.position=a.hand_position;h.orientation=a.hand_orientation;
-        h.linear=a.hand_linear_ff;h.angular=a.hand_angular_ff;h.valid=true;h.changed=true;
-        h.update_host_ns=next.observation_ns[arm];h.source_time=next.source_stamp.toSec();
-        h.updates=target_.hand_observation[arm].updates+1;
-        auto& e=next.elbow_observation[arm];
-        e.position=a.elbow_position;e.linear=a.elbow_linear_ff;e.valid=a.elbow_valid;
-        e.update_host_ns=h.update_host_ns;e.source_time=h.source_time;
-      }
-      if(next.observation_ns[2]>target_.observation_ns[2] || !same_contract) {
-        next.body.root_linear_ff=vector_components(message->root_velocity);
-        next.body.chest_linear_ff=vector_components(message->chest_twist.linear);
-        next.body.chest_angular_ff=vector_components(message->chest_twist.angular);
-        next.body_observation_host_ns=next.observation_ns[2];
-        next.body_observation_changed=true;
-        next.body_observation_updates=target_.body_observation_updates+1;
-        next.body_feedforward_sample_receive_time=next.receive_time;
-      }
-    }
     next.valid = true;
     target_source_active_ = true;
     source_interrupted_ = false;
@@ -3076,6 +3032,14 @@ class PinocchioVelocityIk {
         2.0 * weight * jacobian.transpose() * command;
   }
 
+  static std::array<double, kLowerBodyDof> torsoJointPermissions(
+      bool enabled, bool position_hold, bool preparing = false) {
+    // PREPARE is an explicit full-body operation, independent of follow clutches.
+    const double pitch = preparing || (enabled && !position_hold) ? 1.0 : 0.0;
+    const double yaw = preparing || enabled ? 1.0 : 0.0;
+    return {{pitch, pitch, pitch, yaw}};
+  }
+
   bool calculateBodyTaskTerms(
       const SolverRequest& request, const DecisionVector& kinematic_q,
       DecisionMatrix* task_jacobian, DecisionVector* task_velocity,
@@ -3110,11 +3074,7 @@ class PinocchioVelocityIk {
     (*task_jacobian)(2, lowerBodyDecisionIndex(3)) = 1.0;
     const Eigen::Vector3d error =
         (request.target.body_intent.desired_torso_feature - current).tail<3>();
-    double ff_scale = 1.0;
-    if (!(continuous_reference_enabled_ && request.target.estimated_twists_valid) && request.body_feedforward_age > ff_hold_time_) {
-      ff_scale = std::exp(-(request.body_feedforward_age - ff_hold_time_) /
-                          std::max(ff_decay_time_constant_, 1.0e-6));
-    }
+    const double ff_scale = 1.0;
     Eigen::Vector3d correction=torso_tracking_gain_.cwiseProduct(error);
     if (request.catchup_correction) {
       correction(0)=std::clamp(correction(0),-acquisition_linear_speed_,acquisition_linear_speed_);
@@ -3122,6 +3082,12 @@ class PinocchioVelocityIk {
         correction(axis)=std::clamp(correction(axis),-acquisition_angular_speed_,acquisition_angular_speed_);
     }
     *task_velocity = ff_scale * request.target.body_intent.desired_torso_velocity.tail<3>() + correction;
+    if (request.target.torso_position_hold) {
+      // The locked pitch chain must not compete with yaw or arm objectives.
+      // Its exact brake/hold equalities live in calculatePositionVelocityBounds.
+      task_jacobian->topRows(2).setZero();
+      task_velocity->head(2).setZero();
+    }
     for (int axis=0;axis<3;++axis) {
       const double normal=std::abs((*task_velocity)(axis));
       const double slow=axis==0 ? acquisition_linear_speed_ : acquisition_angular_speed_;
@@ -3467,6 +3433,7 @@ class PinocchioVelocityIk {
     delta(2) += torso_pitch_gain_ * (pitch(rotation) - pitch(anchor_rotation));
     delta(3) += torso_yaw_gain_ * shortestAngularDelta(anchor_yaw, yaw);
     intent.desired_torso_feature = session_body_anchor_.robot_torso_feature + delta;
+    intent.desired_torso_feature.segment<2>(1) += session_body_anchor_.position_resume_offset;
     const auto& omega = target.body.chest_angular_ff;
     const double pitch_rate = -std::sin(yaw) * omega.x() + std::cos(yaw) * omega.y();
     const double yaw_rate = omega.z() +
@@ -4352,6 +4319,21 @@ class PinocchioVelocityIk {
       const auto tighten_to_position_envelope =
           [&](double lower_position, double upper_position,
               double lower_guard, double upper_guard) {
+            // A held lower-body joint can retain a <=1e-9 rad endpoint
+            // roundoff. On release, every trapezoid includes that initial
+            // point, even when moving inward. Admit only the existing seam
+            // in the segment check; endpoint and stopping-distance bounds
+            // still require recovery and forbid any further outward motion.
+            double segment_lower = lower_position;
+            double segment_upper = upper_position;
+            if (isDecisionGroup(i, DofGroup::kLowerBody)) {
+              if (request.reference_q(i) < lower_position &&
+                  lower_position - request.reference_q(i) <= 1.0e-9)
+                segment_lower = request.reference_q(i);
+              if (request.reference_q(i) > upper_position &&
+                  request.reference_q(i) - upper_position <= 1.0e-9)
+                segment_upper = request.reference_q(i);
+            }
             const auto stopping_guard_for_velocity =
                 [&](double next_velocity, double fixed_stopping_guard) {
                   // The delay reserve belongs to dq[k+1], not dq[k]. If a
@@ -4375,7 +4357,7 @@ class PinocchioVelocityIk {
                 [&](double next_velocity) {
                   if (velocity_ik::trapezoidSegmentBounds(request.reference_q(i),
                           request.reference_dq(i), next_velocity,
-                          request.cycle_dt).second > upper_position + 1.0e-12)
+                          request.cycle_dt).second > segment_upper + 1.0e-12)
                     return false;
                   if (next_velocity <= 0.0) {
                     return true;
@@ -4415,7 +4397,7 @@ class PinocchioVelocityIk {
                 [&](double next_velocity) {
                   if (velocity_ik::trapezoidSegmentBounds(request.reference_q(i),
                           request.reference_dq(i), next_velocity,
-                          request.cycle_dt).first < lower_position - 1.0e-12)
+                          request.cycle_dt).first < segment_lower - 1.0e-12)
                     return false;
                   if (next_velocity >= 0.0) {
                     return true;
@@ -4558,6 +4540,7 @@ class PinocchioVelocityIk {
   }
 
   bool solveGeneralQp(
+      const SolverRequest& request,
       const DecisionMatrix& task_hessian,
       const DecisionVector& task_gradient,
       const DecisionVector& lower, const DecisionVector& upper,
@@ -4570,7 +4553,34 @@ class PinocchioVelocityIk {
                               constraint_matrix, constraint_lower, constraint_upper,
                               solution, return_code, &stats);
     last_qp_finish_ns_=stats.end_ns;
-#ifndef VELOCITY_IK_OFFLINE_TEST
+#ifdef VELOCITY_IK_OFFLINE_TEST
+    if (!valid && offline_first_qp_failure_.is_null()) {
+      const auto vector=[](const auto& v) {
+        return std::vector<double>(v.data(),v.data()+v.size());
+      };
+      const auto matrix=[](const auto& m) {
+        nlohmann::json rows=nlohmann::json::array();
+        for (int i=0;i<m.rows();++i) {
+          std::vector<double> row(m.cols());
+          for(int j=0;j<m.cols();++j) row[j]=m(i,j);
+          rows.push_back(row);
+        }
+        return rows;
+      };
+      offline_first_qp_failure_={
+        {"H",matrix(task_hessian)},{"g",vector(task_gradient)},
+        {"A",matrix(constraint_matrix)},{"lower",vector(lower)},{"upper",vector(upper)},
+        {"constraint_lower",vector(constraint_lower)},{"constraint_upper",vector(constraint_upper)},
+        {"q",vector(request.reference_q)},{"dq",vector(request.reference_dq)},
+        {"ddq",vector(request.reference_ddq)},{"dt",request.cycle_dt},
+        {"sequence",request.base_reference_seq},{"governor_risk",request.governor_risk},
+        {"return_code",*return_code},{"native_status",stats.native_status},
+        {"acceptance_status",stats.acceptance_status},{"primal",stats.primal},
+        {"dual",stats.dual},{"violation",stats.violation},
+        {"stationarity",stats.stationarity},{"complementarity",stats.complementarity},
+        {"iterations",stats.iterations},{"solution",vector(*solution)}};
+    }
+#else
     if (velocity_ik::diagnosticPhaseDue(diagnostic_tick_.load(std::memory_order_relaxed),
                                        envelope_diagnostics_stride_, 1) &&
         qp_stats_pub_.getNumSubscribers() > 0) {
@@ -4821,12 +4831,7 @@ class PinocchioVelocityIk {
       DecisionVector g = DecisionVector::Zero(n);
       DecisionMatrix hands_j, body_j;
       DecisionVector hands_v, body_v;
-      double ff_scale = 1.0;
-      if (!(continuous_reference_enabled_ && request.target.estimated_twists_valid) &&
-          request.feedforward_age > ff_hold_time_) {
-        ff_scale = std::exp(-(request.feedforward_age - ff_hold_time_) /
-                            std::max(ff_decay_time_constant_, 1.0e-6));
-      }
+      const double ff_scale = 1.0;
       // FK, constraints, integration and WBC all use ONE command trajectory.
       const bool tasks_valid = calculateFullPoseTaskTerms(
           request.target, request.reference_q, ff_scale,
@@ -5015,7 +5020,7 @@ class PinocchioVelocityIk {
             }
           }
           if(jerk_valid)candidate.solver_valid=solveGeneralQp(
-              ha,ga,lo,hi,aa,constraint_lower,constraint_upper,&va,&candidate.return_code);
+              request,ha,ga,lo,hi,aa,constraint_lower,constraint_upper,&va,&candidate.return_code);
           else candidate.return_code=-1012;
 #ifdef VELOCITY_IK_OFFLINE_TEST
           if(candidate.joint_jerk_active && offline_reject_jerk_solve_) {
@@ -5028,7 +5033,7 @@ class PinocchioVelocityIk {
             // the acceleration discontinuity this ordering prevents.
             candidate.joint_jerk_retry=true;candidate.joint_jerk_first_code=candidate.return_code;
             candidate.solver_valid=solveGeneralQp(
-                ha,ga,lo,hi,aa,constraint_lower,constraint_upper,&va,&candidate.return_code);
+                request,ha,ga,lo,hi,aa,constraint_lower,constraint_upper,&va,&candidate.return_code);
           }
           if(candidate.joint_jerk_active && candidate.solver_valid) {
             for(int arm=0;arm<kArmCount;++arm)for(int joint=0;joint<kJointsPerArm;++joint) {
@@ -5326,7 +5331,7 @@ class PinocchioVelocityIk {
       DecisionVector projected_lower_body;
       int projection_return_code = -1200;
       torso_projection_qp_valid = solveGeneralQp(
-          projection_hessian, projection_gradient, lower_bound, upper_bound,
+          request,projection_hessian, projection_gradient, lower_bound, upper_bound,
           lower_constraint_matrix, constraint_lower, constraint_upper,
           &projected_lower_body, &projection_return_code);
       if (torso_projection_qp_valid) {
@@ -5416,125 +5421,41 @@ class PinocchioVelocityIk {
         lower_reference_tracking_error_ > lower_reference_tracking_hard_limit_;
   }
 
-  bool prepareTargetForTracking(TargetSnapshot& world_target,const TargetSnapshot& target,
-      double tick_start_ns,double target_age,double body_feedforward_age,
-      bool contract_active,bool source_target_fresh) {
-    const bool estimated_reference=continuous_reference_enabled_ && target.estimated_twists_valid;
-    // Apply each channel's own finite hold/decay exactly once. This is
-    // required by independent histories; all constants and reconstruction
-    // horizons remain unchanged in F1.
-    for(int arm=0;arm<kArmCount;++arm) {
-      if (estimated_reference) continue; // The new-frame silence clock owns decay exactly once.
-      auto& a=world_target.arm.at(arm);
-      const double h=velocity_ik::channelDecay(target.hand_observation.at(arm),tick_start_ns,ff_hold_time_,ff_decay_time_constant_);
-      const double e=velocity_ik::channelDecay(target.elbow_observation.at(arm),tick_start_ns,ff_hold_time_,ff_decay_time_constant_);
-      a.hand_linear_ff*=h;a.hand_angular_ff*=h;a.elbow_linear_ff*=e;
-    }
-
-    // C2 changes only the prediction epoch to each channel content update.
-    // Packet receive time remains the latency endpoint. C1 independent caps,
-    // the lead, and all FF/hold/decay constants remain unchanged.
-    bool reconstructed = false;
-    const double reconstruction_age = (tick_start_ns-target.receive_monotonic_ns)*1.0e-9 + target_adoption_lead_;
-    if (target_age>input_continuity_.config.grace) {
-      if (!estimated_reference) for (auto& arm : world_target.arm) {
-          arm.hand_linear_ff.setZero(); arm.hand_angular_ff.setZero(); arm.elbow_linear_ff.setZero();
-        }
-      world_target.body_intent.desired_torso_velocity.setZero();
-    }
+  void prepareTargetForTracking(TargetSnapshot& world_target,double target_age) {
     const double ff_budget=acquisition_.blend()*input_continuity_.budget;
-    for (auto& arm : world_target.arm) {
-      // Estimated references keep one consistent p/v trajectory; acquisition
-      // and stale-input authority still constrain the task in budget_twist.
-      if (!estimated_reference) {
-        arm.hand_linear_ff*=ff_budget; arm.hand_angular_ff*=ff_budget; arm.elbow_linear_ff*=ff_budget;
-      }
-    }
-    world_target.body_intent.desired_torso_velocity*=ff_budget;
-    if (orientation_reference_mode_ != "fixed_bandwidth" && host_target_reconstruction_ && !(continuous_reference_enabled_ && target.estimated_twists_valid) && target_age<=input_continuity_.config.grace &&
-        contract_active && source_target_fresh &&
-        std::isfinite(reconstruction_age) && reconstruction_age >= 0.) {
-      for (int arm=0; arm<kArmCount; ++arm) {
-        auto& a=world_target.arm.at(arm);
-        const double hand_age=velocity_ik::channelPredictionAge(target.hand_observation.at(arm),tick_start_ns,target_adoption_lead_);
-        const double elbow_age=velocity_ik::channelPredictionAge(target.elbow_observation.at(arm),tick_start_ns,target_adoption_lead_);
-        a.hand_position += velocity_ik::boundedPredictionStep(a.hand_linear_ff, hand_age, .020);
-        // Also bypass legacy/non-estimated host orientation reconstruction.
-        if (orientation_reference_mode_ != "direct_task") {
-          const Eigen::Vector3d r = velocity_ik::boundedPredictionStep(a.hand_angular_ff, hand_age, .060);
-          if (r.norm()>1e-12) a.hand_orientation = Eigen::Quaterniond(Eigen::AngleAxisd(r.norm(),r.normalized()))*a.hand_orientation;
-        }
-        if (a.elbow_valid) a.elbow_position += velocity_ik::boundedPredictionStep(a.elbow_linear_ff, elbow_age, .020);
-      }
-      const double body_decay = body_feedforward_age <= ff_hold_time_ ? 1.0 :
-          std::exp(-(body_feedforward_age-ff_hold_time_)/std::max(ff_decay_time_constant_,1e-6));
-      world_target.body_intent.desired_torso_velocity *= body_decay;
-      world_target.body_intent.desired_torso_feature += velocity_ik::boundedBodyPredictionStep(
-          world_target.body_intent.desired_torso_velocity,
-          std::max(0.,(tick_start_ns-target.body_observation_host_ns)*1e-9)+target_adoption_lead_);
-      reconstructed = true;
-    }
-
-    return reconstructed;
+    world_target.body_intent.desired_torso_velocity *= ff_budget;
+    if(target_age>input_continuity_.config.grace)
+      world_target.body_intent.desired_torso_velocity.setZero();
   }
 
+  std::array<velocity_ik::SourceConsistentHandPrediction,2> hand_prediction_;
+  double hand_prediction_velocity_time_constant_{.02};
   void shapeContinuousTarget(TargetSnapshot& world_target,const TargetSnapshot& target,
       double tick_start_ns,double cycle_dt) {
-      if(continuous_reference_enabled_ && (target.estimated_twists_valid || orientation_reference_mode_=="fixed_bandwidth")) {
-        // Latency alignment is distinct from silence since a new observation.
-        // Normal 72Hz frames must not repeatedly brake a 500Hz reference.
+      {
         for(int arm=0;arm<kArmCount;++arm) {
           auto& a=world_target.arm[arm];
+          // world_target is rebuilt from this immutable observation each tick.
+          const double age=std::clamp((tick_start_ns-target.observation_ns[arm])*1.e-9,
+                                      0.,hand_prediction_horizon_);
           auto& prediction=hand_prediction_[arm];
-          prediction.update(target.hand_observation[arm].update_host_ns,
-              target.receive_monotonic_ns,target.hand_observation[arm].source_time,
-              tick_start_ns,frame_prediction_settings_);
-          const double prediction_rate=prediction.rate,age=prediction.age;
-          hand_innovation_audit_[arm].update(prediction,frame_prediction_settings_,tick_start_ns,
-              a.hand_position,a.hand_orientation,a.hand_linear_ff,a.hand_angular_ff);
-          if(orientation_reference_mode_=="fixed_bandwidth") {
-            velocity_ik::stepFixedVector(hand_reference_[arm],a.hand_position,cycle_dt,hand_position_cutoff_hz_);
-            velocity_ik::stepFixedRotation(hand_rotation_reference_[arm],a.hand_orientation,cycle_dt,hand_orientation_cutoff_hz_);
-            a.hand_position=hand_reference_[arm].p;
-            a.hand_linear_ff=hand_reference_[arm].v;
-            a.hand_orientation=hand_rotation_reference_[arm].q;
-            a.hand_angular_ff=hand_rotation_reference_[arm].v;
-          } else {
-          Eigen::Vector3d p=a.hand_position+age*a.hand_linear_ff;
-          hand_reference_[arm].stepAdaptive(p,prediction_rate*a.hand_linear_ff,cycle_dt,
-              hand_reference_frequency_,adaptive_reference_enabled_,adaptive_reference_settings_);
-          a.hand_position=hand_reference_[arm].p;a.hand_linear_ff=hand_reference_[arm].v;
-          if (orientation_reference_mode_ == "direct_task") {
-            // Keep the mapped/session-aligned observation. The existing task
-            // adds K_R*Log(R_obs*R(q_k)^T) once. No integrated R_ref or age lead.
-            a.hand_angular_ff *= prediction_rate;
-          } else {
-            Eigen::Quaterniond q=a.hand_orientation;
-            const Eigen::Vector3d r=age*a.hand_angular_ff;
-            if(r.norm()>1e-12) q=Eigen::Quaterniond(Eigen::AngleAxisd(r.norm(),r.normalized()))*q;
-            hand_rotation_reference_[arm].stepAdaptive(q,prediction_rate*a.hand_angular_ff,cycle_dt,
-                hand_orientation_reference_frequency_,adaptive_reference_enabled_,adaptive_reference_settings_);
-            a.hand_orientation=hand_rotation_reference_[arm].q;a.hand_angular_ff=hand_rotation_reference_[arm].v;
-          }
-          }
-          if(a.elbow_valid) {
-            auto& ep=elbow_prediction_[arm];
-            ep.update(target.elbow_observation[arm].update_host_ns,
-                target.receive_monotonic_ns,target.elbow_observation[arm].source_time,
-                tick_start_ns,frame_prediction_settings_);
-            elbow_innovation_audit_[arm].update(ep,frame_prediction_settings_,tick_start_ns,
-                a.elbow_position,Eigen::Quaterniond::Identity(),a.elbow_linear_ff,Eigen::Vector3d::Zero());
-            if(orientation_reference_mode_=="fixed_bandwidth")
-              velocity_ik::stepFixedVector(elbow_reference_[arm],a.elbow_position,cycle_dt,hand_position_cutoff_hz_);
-            else elbow_reference_[arm].stepAdaptive(a.elbow_position+ep.age*a.elbow_linear_ff,
-                ep.rate*a.elbow_linear_ff,cycle_dt,hand_reference_frequency_,
-                adaptive_reference_enabled_,adaptive_reference_settings_);
-            a.elbow_position=elbow_reference_[arm].p;a.elbow_linear_ff=elbow_reference_[arm].v;
-          } else {
-            elbow_reference_[arm].valid=false;
-            elbow_prediction_[arm].reset();
-            elbow_innovation_audit_[arm]=velocity_ik::ReferenceInnovationAudit{};
-          }
+          const double source_time=target.source_stamp.toSec();
+          if(!hand_reference_[arm].valid || !prediction.valid)
+            prediction.reset(source_time,a.hand_position,a.hand_orientation,
+                             a.hand_linear_ff,a.hand_angular_ff);
+          else
+            prediction.observe(source_time,a.hand_position,a.hand_orientation,
+                               hand_prediction_velocity_time_constant_);
+          const Eigen::Vector3d predicted=a.hand_position+age*prediction.linear;
+          const Eigen::Quaterniond rotation=velocity_ik::fixedRotationAdvance(
+              a.hand_orientation,age*prediction.angular);
+          velocity_ik::stepFixedVector(hand_reference_[arm],predicted,cycle_dt,hand_position_cutoff_hz_);
+          velocity_ik::stepFixedRotation(hand_rotation_reference_[arm],rotation,cycle_dt,hand_orientation_cutoff_hz_);
+          a.hand_position=hand_reference_[arm].p;
+          a.hand_linear_ff=hand_reference_[arm].v;
+          a.hand_orientation=hand_rotation_reference_[arm].q;
+          a.hand_angular_ff=hand_rotation_reference_[arm].v;
+          a.elbow_linear_ff.setZero();
         }
         if(world_target.body_intent.torso_valid) {
           auto& body=world_target.body_intent;
@@ -5545,6 +5466,11 @@ class PinocchioVelocityIk {
           // Deliberately low-bandwidth execution, NOT the chest measurement
           // used for hand geometry. Raw body FF must not bypass this shaper.
           torso_reference_.step(p,Eigen::Vector3d::Zero(),cycle_dt,torso_reference_frequency_);
+          if (world_target.torso_position_hold) {
+            torso_reference_.p.head<2>() =
+                torsoFeatureInContext(reference_q_,plant_context_.get(),&q_full_).segment<2>(1);
+            torso_reference_.v.head<2>().setZero();
+          }
           body.desired_torso_feature.tail<3>()=torso_reference_.p;
           body.desired_torso_velocity.tail<3>()=torso_reference_.v;
         }
@@ -5746,6 +5672,8 @@ class PinocchioVelocityIk {
       // injected the arm's static tracking error as a command step on resume.
       const bool retain_owned_reference = reference_initialized_ && enable_takeover_ &&
           mode_ok && session_anchor_.valid &&
+          execution_lease_.canAdvance(velocity_ik_execution::executionSteadyNs(),
+              static_cast<int64_t>(cycle_dt * 1e9)) &&
           session_anchor_.base_coordinate_epoch == base_coordinate_epoch &&
           !dynamic_fault_latched_ && !reference_tracking_fault_latched_;
       const bool retain_body_mapping = session_anchor_.valid &&
@@ -5788,6 +5716,11 @@ class PinocchioVelocityIk {
       {
         std::lock_guard<std::mutex> lock(data_mutex_);
         base_coordinate_jump_detected_ = false;
+      }
+      if (!retain_owned_reference) {
+        for (auto& r:hand_reference_) r.valid=false;
+        for (auto& r:hand_rotation_reference_) r.valid=false;
+        torso_reference_.valid=false;
       }
       reference_initialized_ = retain_owned_reference;
       fallback_active_ = true;
@@ -5878,6 +5811,7 @@ class PinocchioVelocityIk {
     }
     // A new torso permission captures the CURRENT robot reference and human
     // pose, so movement accumulated while locked cannot cause a target jump.
+    const bool torso_was_requested = torso_control_requested_;
     if (!target.torso_control_enabled) {
       if (torso_control_requested_) torso_reference_.valid = false;
       torso_control_requested_ = false;
@@ -5889,6 +5823,27 @@ class PinocchioVelocityIk {
     }
     const bool torso_control_allowed = target.torso_control_enabled && torso_control_requested_;
     BodyIntent body_intent = torso_control_allowed ? calculateBodyIntent(target) : BodyIntent{};
+    if (torso_control_allowed && body_intent.torso_valid && source_target_fresh && contract_active) {
+      const Eigen::Vector4d current_torso =
+          torsoFeatureInContext(reference_q_, capture_context_.get(), &capture_q_full_);
+      if (torso_was_requested && torso_position_hold_requested_ && !target.torso_position_hold) {
+        // Discard only height/pitch motion accumulated while locked. Reusing
+        // captureSessionBodyAnchor here would also clutch the live yaw channel.
+        session_body_anchor_.position_resume_offset +=
+            current_torso.segment<2>(1) - body_intent.desired_torso_feature.segment<2>(1);
+        body_intent.desired_torso_feature.segment<2>(1) = current_torso.segment<2>(1);
+        body_intent.desired_torso_velocity.segment<2>(1).setZero();
+        if (torso_reference_.valid) {
+          torso_reference_.p.head<2>() = current_torso.segment<2>(1);
+          torso_reference_.v.head<2>().setZero();
+        }
+      }
+      if (target.torso_position_hold) {
+        body_intent.desired_torso_feature.segment<2>(1) = current_torso.segment<2>(1);
+        body_intent.desired_torso_velocity.segment<2>(1).setZero();
+      }
+      torso_position_hold_requested_ = target.torso_position_hold;
+    }
     if (body_intent.torso_valid && source_target_fresh && contract_active &&
         !dynamic_fault_latched_ && !reference_tracking_fault_latched_) {
       session_body_anchor_.resume_mapping_valid = true;
@@ -6156,12 +6111,8 @@ class PinocchioVelocityIk {
       reference_tracking_recovery_elapsed_ = 0.0;
     }
 
-    // Legacy publishers retain the direct target path. Estimated packets use
-    // continuous references below, without a Cartesian speed cap or FIFO.
     TargetSnapshot world_target = aligned_torso_target;
-    const double reconstruction_age = (tick_start_ns-target.receive_monotonic_ns)*1.0e-9 + target_adoption_lead_;
-    const bool reconstructed = prepareTargetForTracking(world_target,target,tick_start_ns,
-        target_age,body_feedforward_age,contract_active,source_target_fresh);
+    prepareTargetForTracking(world_target,target_age);
 
     const Eigen::Vector2d reference_base_translation(
         reference_q_(baseDecisionIndex(0)),
@@ -6194,18 +6145,6 @@ class PinocchioVelocityIk {
         base_reference_tracking_ok &&
         !startup_bootstrap_active_ &&
         !reference_tracking_fault_latched_ && !dynamic_fault_latched_;
-    const std::array<uint64_t,4> reference_key{{target.session_id,target.generation,target.body.coordinate_epoch,static_cast<uint64_t>(target.source)}};
-    if (!tracking || !target.estimated_twists_valid || reference_key!=continuous_reference_key_) {
-      continuous_reference_key_=reference_key;
-      for(auto& r:hand_reference_) r.valid=false;
-      for(auto& r:hand_rotation_reference_) r.valid=false;
-      for(auto& r:elbow_reference_) r.valid=false;
-      for(auto& p:hand_prediction_) p.reset();
-      for(auto& p:elbow_prediction_) p.reset();
-      hand_innovation_audit_.fill(velocity_ik::ReferenceInnovationAudit{});
-      elbow_innovation_audit_.fill(velocity_ik::ReferenceInnovationAudit{});
-      torso_reference_.valid=false;
-    }
     if (!tracking) {
       acquisition_.reset(); governor_risk_.fill(0.);
     }
@@ -6255,10 +6194,11 @@ class PinocchioVelocityIk {
       request.cycle_dt = cycle_dt;
       request.target_age = target_age;
       request.feedforward_age = 0.0;  // per-channel decay already applied
-      request.body_feedforward_age = reconstructed ? 0.0 :
+      request.body_feedforward_age =
           std::max(0.0, body_feedforward_age);
       request.lower_body_recruitment = torso_control_allowed ? 1.0 : 0.0;
-      request.lower_joint_recruitment.fill(request.lower_body_recruitment);
+      request.lower_joint_recruitment = torsoJointPermissions(
+          torso_control_allowed, target.torso_position_hold);
       request.base_recruitment = 0.0;
       populateBaseSessionBounds(&request);
       request.tracking = true;
@@ -6335,7 +6275,8 @@ class PinocchioVelocityIk {
     // Waist tasks are explicit, not recruited by TCP error or pressure.
     active_reach_assist_demand_ = 0.0;
     active_lower_body_recruitment_ = tracking && torso_control_allowed ? 1.0 : 0.0;
-    active_lower_joint_recruitment_.fill(active_lower_body_recruitment_);
+    active_lower_joint_recruitment_ = torsoJointPermissions(
+        tracking && torso_control_allowed, target.torso_position_hold);
     active_base_recruitment_ = 0.0;
     // An admitted ready-pose operation owns all lower joints independently
     // of human torso-follow permission. The preparing predicate retains the
@@ -6357,7 +6298,8 @@ class PinocchioVelocityIk {
     safety_request.cycle_dt = cycle_dt;
     safety_request.lower_body_recruitment =
         supervisor_lower_body_recruitment;
-    safety_request.lower_joint_recruitment.fill(supervisor_lower_body_recruitment);
+    safety_request.lower_joint_recruitment = torsoJointPermissions(
+        torso_control_allowed, target.torso_position_hold, preparing);
     safety_request.base_recruitment =
         supervisor_base_recruitment;
     populateBaseSessionBounds(&safety_request);
@@ -6918,6 +6860,9 @@ class PinocchioVelocityIk {
                      nullspace_residual, primary_task_leakage,
                      secondary_return_code);
     recordReferenceHistory(now);
+#ifdef VELOCITY_IK_OFFLINE_TEST
+    if (offline_capture_messages_) return;
+#endif
 
     if (diagnostic_publish_due_) {
       std::vector<double> status{
@@ -6984,64 +6929,6 @@ class PinocchioVelocityIk {
         for (int i = 0; i < 3; ++i) target_ff.push_back(world_target.arm.at(arm).elbow_linear_ff(i));
       }
       publishStdVector(target_ff_pub_, target_ff);
-      if (host_target_reconstruction_ || (continuous_reference_enabled_ && target.estimated_twists_valid)) {
-        std::vector<double> p{double(target.session_id),double(target.generation),double(target.source_frame_seq),reconstruction_age,reconstructed?1.0:0.0};
-        for(const auto& a:world_target.arm){for(int i=0;i<3;++i)p.push_back(a.hand_position[i]);for(int i=0;i<4;++i)p.push_back(a.hand_orientation.coeffs()[i]);for(int i=0;i<3;++i)p.push_back(a.elbow_position[i]);}
-        publishStdVector(reconstructed_target_pub_,p);
-      }
-      // Schema 1: wall time, transaction and actual shaper state. See docs.
-      const bool reference_active=tracking && continuous_reference_enabled_ && (target.estimated_twists_valid || orientation_reference_mode_=="fixed_bandwidth");
-      std::vector<double> adaptive_diag{1.,now.toSec(),double(target.session_id),
-          double(target.generation),double(target.source_frame_seq),double(tracking),
-          double(reference_active),double(reference_active && adaptive_reference_enabled_ && orientation_reference_mode_!="fixed_bandwidth"),
-          hand_reference_frequency_,adaptive_reference_settings_.min_frequency};
-      for(int arm=0;arm<kArmCount;++arm) {
-        const auto append=[&adaptive_diag,reference_active](const auto& reference) {
-          const auto& g=reference.gate;
-          adaptive_diag.insert(adaptive_diag.end(),{g.activity,g.frequency,g.error,g.speed,
-              g.guide,double(reference_active && reference.valid)});
-        };
-        append(hand_reference_[arm]);append(hand_rotation_reference_[arm]);append(elbow_reference_[arm]);
-      }
-      publishStdVector(adaptive_reference_pub_,adaptive_diag);
-      // Schema1: header[version,time,session,generation,source_seq,active],
-      // per arm: hand and elbow [alignment,silence,prediction_age,rate,hold,valid],
-      // then hand-position/rotation/elbow [effective_hz,guide,delta_a,limited].
-      std::vector<double> dynamics{1.,now.toSec(),double(target.session_id),
-          double(target.generation),double(target.source_frame_seq),double(reference_active)};
-      for(int arm=0;arm<kArmCount;++arm) {
-        for(const auto* p:{&hand_prediction_[arm],&elbow_prediction_[arm]})
-          dynamics.insert(dynamics.end(),{p->alignment_age,p->silence,p->age,p->rate,p->hold,double(reference_active && p->valid)});
-        const auto append=[&](const auto& ref) {
-          const auto& tr=ref.transition;
-          dynamics.insert(dynamics.end(),{tr.frequency,tr.guide,tr.acceleration_change,double(tr.limited)});
-        };
-        append(hand_reference_[arm]);append(hand_rotation_reference_[arm]);append(elbow_reference_[arm]);
-      }
-      publishStdVector(reference_dynamics_pub_,dynamics);
-      // Schema documented in docs/innovation_reference_v1.md. Diagnostics
-      // never drive the control state. Legacy topics/layouts stay unchanged.
-      const bool split_active=reference_active && adaptive_reference_settings_.innovation.enabled && orientation_reference_mode_!="fixed_bandwidth";
-      std::vector<double> innovation_diag{1.,now.toSec(),double(target.session_id),double(target.generation),
-          double(target.source_frame_seq),double(split_active),cycle_dt};
-      const auto append_split=[&](const auto& ref) {
-        const auto& x=ref.innovation;
-        innovation_diag.push_back(double(split_active && ref.valid && x.valid));
-        for(const auto* vector_components:{&x.motion.v,&x.motion.a,&x.correction.v,&x.correction.a,&x.residual,&x.modeled_lag})
-          for(int i=0;i<3;++i)innovation_diag.push_back((*vector_components)[i]);
-        innovation_diag.push_back(double(x.correction.limited));
-      };
-      for(int arm=0;arm<kArmCount;++arm) {
-        append_split(hand_reference_[arm]);append_split(hand_rotation_reference_[arm]);append_split(elbow_reference_[arm]);
-        for(const auto* audit:{&hand_innovation_audit_[arm],&elbow_innovation_audit_[arm]}) {
-          innovation_diag.push_back(double(split_active && audit->valid));
-          innovation_diag.push_back(audit->update_ns);innovation_diag.push_back(audit->anchor.source_stamp);
-          for(const auto* vector_components:{&audit->dp,&audit->dr,&audit->dv,&audit->dw})
-            for(int i=0;i<3;++i)innovation_diag.push_back((*vector_components)[i]);
-        }
-      }
-      publishStdVector(innovation_reference_pub_,innovation_diag);
-
       if (feasibility_mode_ != FeasibilityMode::kOff &&
           reference_initialized_ && world_target.valid) {
         FeasibilityRequest feasibility_request;
@@ -7095,12 +6982,12 @@ class PinocchioVelocityIk {
       const auto publisher=joint_jerk_pub_;diagnostics_.submit([publisher,d]{publisher.publish(d);});
     }
     std_msgs::Float64MultiArray timing;
-    // schema=1; durations and *_ns use CLOCK_MONOTONIC, sensor/source stamps keep their own domains.
-    timing.data={1.0,double(output_sequence_-1),double(reference_sequence_),double(target.session_id),double(target.generation),double(target.sequence),double(target.source_frame_seq),target.source_stamp.toSec(),target.receive_monotonic_ns,tick_start_ns,target_read_ns,formal_end_ns,monotonicNs(),wall_cycle_dt,cycle_dt,sensor_stamp,double(sensor_seq),sensor_receive_ns,double(current_mode),double(target_mode),mode_transitioning?1.0:0.0,robot_fresh?1.0:0.0,source_target_fresh?1.0:0.0,mode_ok?1.0:0.0,double(applied_command_mode),last_task_us_,last_bounds_us_,double(diagnostics_.dropped()),last_qp_finish_ns_,last_formal_publish_begin_ns_,last_formal_publish_end_ns_,reconstructed?1.0:0.0,reconstruction_age};
-    // Append-only ownership diagnostics: 33 reason (0 shadow, 1 initial
+    // schema=2; removed obsolete reconstruction fields; durations and *_ns use CLOCK_MONOTONIC, sensor/source stamps keep their own domains.
+    timing.data={2.0,double(output_sequence_-1),double(reference_sequence_),double(target.session_id),double(target.generation),double(target.sequence),double(target.source_frame_seq),target.source_stamp.toSec(),target.receive_monotonic_ns,tick_start_ns,target_read_ns,formal_end_ns,monotonicNs(),wall_cycle_dt,cycle_dt,sensor_stamp,double(sensor_seq),sensor_receive_ns,double(current_mode),double(target_mode),mode_transitioning?1.0:0.0,robot_fresh?1.0:0.0,source_target_fresh?1.0:0.0,mode_ok?1.0:0.0,double(applied_command_mode),last_task_us_,last_bounds_us_,double(diagnostics_.dropped()),last_qp_finish_ns_,last_formal_publish_begin_ns_,last_formal_publish_end_ns_};
+    // Ownership diagnostics: 31 reason (0 shadow, 1 initial
     // grant pending, 2 granted, 3 stop-first, 4 owner restart required),
-    // 34 granted steady deadline, 35 accepted echo sequence, 36 epoch,
-    // 37 anchor, 38 waiting, 39 latest verified echo generation time.
+    // 32 granted steady deadline, 33 accepted echo sequence, 34 epoch,
+    // 35 anchor, 36 waiting, 37 latest verified echo generation time.
     const int execution_reason = !enable_takeover_ ? 0 :
         (execution_lease_.restartRequired() ? 4 :
         (execution_lease_.initialPending() ? 1 : (execution_waiting_ ? 3 : 2)));
@@ -7158,7 +7045,11 @@ class PinocchioVelocityIk {
       const DecisionVector& ddq) {
     std::lock_guard<std::mutex> terminal_lock(terminal_publication_mutex_);
     if (terminal_stop_requested_.load(std::memory_order_acquire) ||
-        !enable_takeover_ || !formal_reference_pub_) {
+        !enable_takeover_
+#ifndef VELOCITY_IK_OFFLINE_TEST
+        || !formal_reference_pub_
+#endif
+        ) {
       return;
     }
     auto message = formal_payload_template_;
@@ -7216,6 +7107,13 @@ class PinocchioVelocityIk {
         state == ShadowState::kModeBlocked ||
         state == ShadowState::kQpError;
     message.emergency_dynamics_used = emergency_dynamics_used;
+#ifdef VELOCITY_IK_OFFLINE_TEST
+    if (offline_capture_messages_) {
+      if (!kuavo_reference_shm::decode(message, offline_formal_reference_))
+        throw std::runtime_error("offline formal reference decode failed");
+      return;
+    }
+#endif
     velocity_ik::runtime_probe::point(80);
     last_formal_publish_begin_ns_=monotonicNs();
     if(reference_transport_.shm()){
@@ -7234,8 +7132,68 @@ class PinocchioVelocityIk {
       wheel_arm_abs_vel::WholeBodyIkReference ros_message;
       if (kuavo_reference_shm::decode(message, ros_message)) formal_reference_pub_.publish(ros_message);
     }
+    const bool record_arm = legacy_arm_record_pub_.getNumSubscribers() > 0;
+    const bool record_lower = legacy_lower_record_pub_.getNumSubscribers() > 0;
+    if ((record_arm || record_lower) && message.reference_seq % formal_reference_mirror_stride_ == 0) {
+      diagnostics_.submit([this, message, record_arm, record_lower] {
+        wheel_arm_abs_vel::WholeBodyIkReference ros_record;
+        if (!kuavo_reference_shm::decode(message, ros_record)) return;
+        sensor_msgs::JointState record;
+        if (record_arm && wheel_arm_abs_vel::arm_record::convert(ros_record, record))
+          legacy_arm_record_pub_.publish(record);
+        if (record_lower && wheel_arm_abs_vel::arm_record::convertLowerBody(ros_record, record))
+          legacy_lower_record_pub_.publish(record);
+      });
+    }
     last_formal_publish_end_ns_=monotonicNs();
     velocity_ik::runtime_probe::point(81);
+  }
+
+
+  bool absoluteRecordHasSubscribers() const {
+    return legacy_eef_record_pub_.getNumSubscribers() || legacy_input_record_pub_.getNumSubscribers();
+  }
+
+  // Diagnostic worker only: reuse its measured-state FK cache. The legacy absolute
+  // TCP is end_frames_name_ik[1/2] + eef_z_offset, without velocity-only TCP overrides.
+  void publishAbsoluteRecordInput(const std_msgs::Header& source_header,
+      const TargetSnapshot& world_target) {
+    if (!world_target.valid || !legacy_input_record_pub_.getNumSubscribers()) return;
+    const auto world_from_base = plant_->GetFrameByName(base_frame_name_).CalcPoseInWorld(*diagnostic_context_);
+    const auto base_from_world = world_from_base.rotation().matrix().transpose().eval();
+    kuavo_msgs::Float32MultiArrayStamped input;
+    input.header = source_header;
+    input.header.frame_id = base_frame_name_;
+    input.data.data.resize(14);
+    for (int arm = 0; arm < kArmCount; ++arm) {
+      const auto& offset = absolute_record_tcp_offsets_[arm];
+      const auto& target = world_target.arm[arm];
+      const auto rotation = target.hand_orientation.toRotationMatrix();
+      const Eigen::Vector3d position = base_from_world * (target.hand_position +
+          rotation * offset.translation() - world_from_base.translation());
+      const Eigen::Quaterniond orientation(base_from_world * rotation * offset.linear());
+      for (int j = 0; j < 3; ++j) input.data.data[arm * 7 + j] = position(j);
+      for (int j = 0; j < 4; ++j) input.data.data[arm * 7 + 3 + j] = orientation.coeffs()(j);
+    }
+    legacy_input_record_pub_.publish(input);
+  }
+
+  // Called after existing reference diagnostics set the reference-state context.
+  void publishAbsoluteRecordEef(const std_msgs::Header& header, const DecisionVector& reference_q) {
+    if (!legacy_eef_record_pub_.getNumSubscribers()) return;
+    kuavo_msgs::twoArmHandPose eef;
+    eef.header = header;
+    eef.header.frame_id = base_frame_name_;
+    const auto& base = plant_->GetFrameByName(base_frame_name_);
+    for (int arm = 0; arm < kArmCount; ++arm) {
+      const auto pose = plant_->GetFrameByName(absolute_record_frame_names_[arm]).CalcPose(*diagnostic_context_, base);
+      auto& hand = arm == 0 ? eef.left_pose : eef.right_pose;
+      const Eigen::Quaterniond orientation(pose.rotation().matrix());
+      for (int j = 0; j < 3; ++j) hand.pos_xyz[j] = pose.translation()(j);
+      for (int j = 0; j < 4; ++j) hand.quat_xyzw[j] = orientation.coeffs()(j);
+      for (int j = 0; j < kJointsPerArm; ++j) hand.joint_angles[j] = reference_q(armDecisionIndex(arm, j));
+    }
+    legacy_eef_record_pub_.publish(eef);
   }
 
   void publishVector(const ros::Publisher& publisher, const DecisionVector& value) const {
@@ -7329,8 +7287,12 @@ class PinocchioVelocityIk {
                         double nullspace_residual,
                         double primary_task_leakage,
                         int secondary_return_code) {
+#ifdef VELOCITY_IK_OFFLINE_TEST
+    if (!offline_capture_messages_)
+#endif
     if (!diagnostic_publish_due_ ||
-        (reference_pub_.getNumSubscribers() == 0 && mapper_status_pub_.getNumSubscribers() == 0)) return;
+        (reference_pub_.getNumSubscribers() == 0 && mapper_status_pub_.getNumSubscribers() == 0 &&
+         !absoluteRecordHasSubscribers())) return;
     wheel_arm_abs_vel::VelocityIkShadow message;
     populateDecisionLayout(&message);
     resizeReferenceDecisionFields(&message);
@@ -7365,7 +7327,8 @@ class PinocchioVelocityIk {
     message.world_frame = world_frame_name_;
     message.source_target_frame = source_target_frame;
     message.session_frame = session_frame_name_;
-    message.session_anchor_valid = session_anchor_.valid && target.valid;
+    message.session_anchor_valid = session_anchor_.valid && session_target_alignment_.valid &&
+        session_anchor_.session_id == target.session_id && session_anchor_.generation == target.generation;
     message.anchor_session_id = session_anchor_.session_id;
     message.anchor_generation = session_anchor_.generation;
     message.anchor_base_coordinate_epoch =
@@ -7609,9 +7572,13 @@ class PinocchioVelocityIk {
       message.task_error.at(i) = task_error.at(i);
     }
     const DecisionVector snapshot_q=reference_q_;
+#ifdef VELOCITY_IK_OFFLINE_TEST
+    if (offline_capture_messages_) {offline_mapper_status_=wheel_arm_abs_vel::makeMapperStatus(message);return;}
+#endif
     auto finish=[this,message=std::move(message),target,raw_world_target,measured_q,snapshot_q]() mutable {
     const Eigen::Vector4d measured_torso = torsoFeatureInContext(
         measured_q, diagnostic_context_.get(), &diagnostic_q_full_);
+    if (message.valid) publishAbsoluteRecordInput(message.header, raw_world_target);
     for (int arm = 0; arm < kArmCount; ++arm) {
       message.torso_relative_tcp_pose.at(arm) = toPose(
           target.arm.at(arm).hand_position, target.arm.at(arm).hand_orientation);
@@ -7651,6 +7618,7 @@ class PinocchioVelocityIk {
       message.reference_torso_relative_tcp_pose.at(arm) = toPose(
           pose.translation(), Eigen::Quaterniond(pose.rotation().matrix()));
     }
+    if (message.valid) publishAbsoluteRecordEef(message.header, snapshot_q);
     for (int k = 0; k < kTorsoConstraintCount; ++k) {
       message.measured_torso_feature.at(k) = measured_torso(k);
       message.reference_torso_feature.at(k) = reference_torso(k);
@@ -7664,6 +7632,9 @@ class PinocchioVelocityIk {
   }
 
   void publishStdVector(const ros::Publisher& publisher, const std::vector<double>& value) const {
+#ifdef VELOCITY_IK_OFFLINE_TEST
+    if (offline_capture_messages_) return;
+#endif
     std_msgs::Float64MultiArray message;
     message.data = value;
     diagnostics_.submit([publisher,message]{publisher.publish(message);});
@@ -7705,9 +7676,8 @@ class PinocchioVelocityIk {
   ros::Publisher task_dq_pub_;
   ros::Publisher status_pub_;
   ros::Publisher task_error_pub_;
-  ros::Publisher target_ff_pub_,channel_observation_pub_,adaptive_reference_pub_;
-  ros::Publisher reference_dynamics_pub_;
-  ros::Publisher innovation_reference_pub_;
+  mutable uint64_t qp_stats_sample_count_{0};
+  ros::Publisher target_ff_pub_,channel_observation_pub_;
   ros::Publisher startup_readiness_pub_;
   velocity_ik::StartupReadiness startup_readiness_;
   ros::Publisher input_debug_pub_;
@@ -7715,6 +7685,10 @@ class PinocchioVelocityIk {
   ros::Publisher reference_pub_;
   ros::Publisher mapper_status_pub_;
   ros::Publisher formal_reference_pub_;
+  ros::Publisher legacy_arm_record_pub_;
+  ros::Publisher legacy_lower_record_pub_, legacy_eef_record_pub_, legacy_input_record_pub_;
+  std::array<std::string, kArmCount> absolute_record_frame_names_;
+  std::array<Eigen::Isometry3d, kArmCount> absolute_record_tcp_offsets_;
 
   DofLayout dof_layout_{DofLayout::WholeBodyStage()};
   ros::Publisher qp_stats_pub_;
@@ -7736,6 +7710,10 @@ class PinocchioVelocityIk {
   bool offline_clock_valid_=false;
   double offline_receive_ros_=0.,offline_receive_ns_=0.;
   bool offline_reject_jerk_solve_=false;
+  mutable nlohmann::json offline_first_qp_failure_;
+  bool offline_capture_messages_=false;
+  wheel_arm_abs_vel::VelocityIkMapperStatus offline_mapper_status_;
+  wheel_arm_abs_vel::WholeBodyIkReference offline_formal_reference_;
 #endif
   mutable velocity_ik::WeightedQp weighted_qp_;
   std::unique_ptr<velocity_ik::ModelPinocchio> plant_;
@@ -7843,9 +7821,6 @@ class PinocchioVelocityIk {
       0.2617993878, 0.0, 0.0, -1.20, 0.0, 0.0, 0.0};
   DecisionVector velocity_limit_;
   DecisionVector acceleration_limit_;
-  bool host_target_reconstruction_{false};
-  double target_adoption_lead_{.001};
-  ros::Publisher reconstructed_target_pub_;
   DecisionVector braking_limit_, outward_acceleration_limit_;
   bool separate_stopping_contract_{false};
   std::string qp_snapshot_directory_;
@@ -7990,6 +7965,7 @@ class PinocchioVelocityIk {
   double ff_hold_time_{0.025};
   bool enable_body_mirroring_{true};
   bool torso_control_requested_{false};
+  bool torso_position_hold_requested_{false};
   bool enable_base_motion_{false};
   bool enable_root_translation_intent_{true};
   bool enable_root_yaw_intent_{false};
@@ -8084,18 +8060,10 @@ class PinocchioVelocityIk {
   double cascade_base_residual_full_{0.080};
   double cascade_base_tracking_error_start_{0.040};
   double cascade_base_tracking_error_full_{0.100};
-  bool continuous_reference_enabled_{true};
-  std::array<uint64_t,4> continuous_reference_key_{{0,0,0,0}};
-  std::string orientation_reference_mode_{"innovation"};
   double hand_position_cutoff_hz_{4.},hand_orientation_cutoff_hz_{3.};
-  double hand_reference_frequency_{12.},hand_orientation_reference_frequency_{6.},torso_reference_frequency_{1.2};
-  bool adaptive_reference_enabled_{true};
-  velocity_ik::AdaptiveReferenceSettings adaptive_reference_settings_;
-  velocity_ik::FramePredictionSettings frame_prediction_settings_;
-  std::array<velocity_ik::FramePrediction,kArmCount> hand_prediction_,elbow_prediction_;
-  std::array<velocity_ik::ReferenceInnovationAudit,kArmCount> hand_innovation_audit_,elbow_innovation_audit_;
-  std::array<velocity_ik::AdaptiveVectorReference,kArmCount> hand_reference_,elbow_reference_;
-  std::array<velocity_ik::AdaptiveRotationReference,kArmCount> hand_rotation_reference_;
+  double torso_reference_frequency_{1.2},hand_prediction_horizon_{.060};
+  std::array<velocity_ik::ContinuousVector,kArmCount> hand_reference_;
+  std::array<velocity_ik::ContinuousRotation,kArmCount> hand_rotation_reference_;
   velocity_ik::ContinuousVector torso_reference_;
   double lower_body_return_start_{0.015};
   double lower_body_return_full_{0.10};
@@ -8116,7 +8084,6 @@ class PinocchioVelocityIk {
   double reference_tracking_recovery_arm_limit_{0.08};
   double reference_tracking_recovery_lower_limit_{0.05};
   double reference_tracking_recovery_dwell_{0.40};
-  double kinematic_prediction_horizon_{0.015};
   double orientation_tracking_full_error_{0.06};
   double orientation_tracking_zero_error_{0.16};
   double orientation_joint_margin_zero_{0.02};

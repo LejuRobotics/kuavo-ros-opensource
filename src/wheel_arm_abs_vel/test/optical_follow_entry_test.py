@@ -28,6 +28,8 @@ class OpticalFollowEntryTest(unittest.TestCase):
         n._maybe_start_optical_follow(source, accepted)
         policy = n._tracking_source_policy(source, n.quest3_arm_info_transformer.is_runing)
         if accepted and policy['source_allowed']:
+            n._last_valid_tcp_receive = fixed.clock.now
+            n._tracking_last_accepted_source = source
             n._handle_absolute_target_and_gesture(
                 {'source': source, 'receive_time': fixed.clock.now},
                 n.quest3_arm_info_transformer.is_runing)
@@ -42,8 +44,8 @@ class OpticalFollowEntryTest(unittest.TestCase):
         self.assertEqual(n._fixed_pending_operation['phase'], 'dependencies')
         self.assertEqual(n._absolute_latest_target['source'], 2)
         n._advance_fixed_request()
-        self.assertEqual(n._absolute_state, fixed.State.CAPTURED)
-        self.assertEqual(n._absolute_pending_capture['target']['source'], 2)
+        self.assertEqual(n._absolute_state, fixed.State.SWITCHING)
+        self.assertEqual(n._tracking_session_source, 2)
         self.assertIsNone(n._joystick_receive_monotonic)
         n._absolute_state = fixed.State.ACTIVE
         n._advance_fixed_request()
@@ -97,12 +99,25 @@ class OpticalFollowEntryTest(unittest.TestCase):
         n._absolute_state = fixed.State.PREPARED
         self.assertTrue(n._tracking_source_policy(1, True)['source_allowed'])
         n._absolute_latest_target = {'source': 1, 'receive_time': fixed.clock.now}
+        n._tracking_last_accepted_source = 1
+        n._last_valid_tcp_receive = fixed.clock.now
         n._joystick_receive_monotonic = fixed.clock.now
         self.assertTrue(n._fixed_arm_operation(2).result)
         n._advance_fixed_request()
-        self.assertEqual(n._absolute_pending_capture['target']['source'], 1)
+        self.assertEqual(n._tracking_session_source, 1)
         self.assertEqual(n._tracking_session_source, 1)
 
+
+    def test_first_optical_ok_still_works_without_controller_start(self):
+        n=self.n; n._controller_start_completed=False
+        n._absolute_state=fixed.State.WAITING; n._fixed_operation_block=False
+        for _ in range(49): self.frame()
+        self.assertIsNone(n._fixed_pending_operation)
+        self.frame(); self.assertIsNotNone(n._fixed_pending_operation)
+        self.assertIsNone(n._optical_start_generation)  # one-shot consumed
+        n._advance_fixed_request(); n._absolute_state=fixed.State.ACTIVE
+        self.f.ack(); n._advance_fixed_request()
+        self.assertTrue(n._controller_start_completed)
 
 if __name__ == '__main__':
     unittest.main()

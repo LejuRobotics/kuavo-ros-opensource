@@ -31,6 +31,12 @@ class SharedModels(unittest.TestCase):
                 with self.subTest(version=version, change=change), self.assertRaises(ValueError):
                     resolve_model(version, ASSETS, WHEEL, dict(overlay, **change))
 
+    def test_shared_models_without_private_overlay(self):
+        for version in (60, 61, 200062, 300062, 400063):
+            contract = resolve_model(version, ASSETS, WHEEL)
+            self.assertEqual(contract['robot_version'], version)
+            self.assertTrue(contract['velocity_ik_urdf'])
+
     def test_shared_asset_validation_before_launch(self):
         original = json.loads((ASSETS/'config/kuavo_v63/kuavo.json').read_text())
         with tempfile.TemporaryDirectory() as tmp:
@@ -43,9 +49,13 @@ class SharedModels(unittest.TestCase):
                 path.write_text(json.dumps(dict(original, **update)))
                 with self.subTest(update=update), self.assertRaises(ValueError):
                     resolve_model(63, assets, WHEEL)
-        for value in ('../63', 0, '63.0', 400063):
+        for value in ('../63', 0, '63.0'):
             with self.subTest(version=value), self.assertRaises(ValueError):
                 resolve_model(value, ASSETS, WHEEL)
+
+    def test_missing_shared_assets_rejected(self):
+        with self.assertRaises(FileNotFoundError):
+            resolve_model(999999, ASSETS, WHEEL)
 
 if __name__ == '__main__':
     unittest.main()

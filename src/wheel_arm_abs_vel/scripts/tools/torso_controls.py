@@ -6,12 +6,20 @@ import math
 class TorsoControls:
     MAX_AGE = .25
     RT_CHORD_WINDOW = .15
+    STICK_HOLD_SAMPLES = 100
 
     def __init__(self, source, enable_on_first_follow=True):
         if source not in ('quest', 'pico'):
             raise ValueError('unsupported torso input source: ' + source)
         self.source = source
         self.enabled = False
+        self.position_enabled = True
+        self.operation_seq = 0
+        self._last_permissions = (False, False)
+        self.stick_consumed = False
+        self._stick_neutral_required = True
+        self._stick_key = None
+        self._stick_count = 0
         # Mode selection survives PREPARE and safety revocation; execution
         # permission does not. Only an admitted explicit follow request or a
         # fresh torso chord may restore permission after a revocation.
@@ -43,6 +51,9 @@ class TorsoControls:
         """Inhibit during initial acquisition; never create/rearm permission."""
         self.enabled = False
         self.require_release = True
+        self._stick_neutral_required = True
+        self._stick_key = None
+        self._stick_count = 0
 
     def request_follow(self):
         """Restore the selected mode after an explicit, admitted follow request."""
@@ -64,13 +75,56 @@ class TorsoControls:
 
     def authorized(self, now, ready):
         self._check_readiness(now, ready)
+        self._record_permissions()
         return self.enabled
+
+    def _record_permissions(self):
+        permissions = (self.enabled, not self.position_enabled)
+        if permissions != self._last_permissions:
+            self.operation_seq += 1
+            self._last_permissions = permissions
+
+    def _update_stick(self, raw, now, ready, fresh, valid, blocked):
+        """Dev controls: stick down/up locks/enables position; X adds yaw.
+
+        Require a neutral sample after startup, loss or a completed gesture.
+        A held stick cannot silently re-enable follow after a safety revocation.
+        """
+        y = getattr(raw, 'right_y', 0.)
+        finite = math.isfinite(y)
+        self.stick_consumed = finite and abs(y) > .8
+        if not finite or not ready or not fresh or not valid or blocked:
+            self._stick_neutral_required = True
+            self._stick_key = None
+            self._stick_count = 0
+            return
+        if abs(y) <= .5:
+            self._stick_neutral_required = False
+        if abs(y) <= .8 or self._stick_neutral_required:
+            self._stick_key = None
+            self._stick_count = 0
+            return
+        key = (bool(raw.left_first_button_pressed), y > .8)
+        if key != self._stick_key:
+            self._stick_key, self._stick_count = key, 0
+        self._stick_count += 1
+        if self._stick_count <= self.STICK_HOLD_SAMPLES:
+            return
+        master, enabled = key
+        if master:
+            self.enabled = self.selected_enabled = enabled
+            self.startup_enable_pending = False
+        else:
+            self.position_enabled = enabled
+        self._stick_neutral_required = True
+        self._stick_count = 0
 
     def update(self, raw, hand, now, ready):
         result = copy.copy(hand)
         fresh = self._check_readiness(now, ready)
         valid = all(math.isfinite(v) for v in
-                    (raw.left_trigger, raw.right_trigger, raw.left_grip, raw.right_grip))
+                    (raw.left_trigger, raw.right_trigger, raw.left_grip, raw.right_grip,
+                     getattr(raw, 'right_y', 0.)))
         stop = raw.left_first_button_pressed and raw.left_second_button_pressed
         arm = raw.left_first_button_pressed and (raw.right_first_button_pressed or raw.right_second_button_pressed)
         prepare = raw.left_first_button_pressed and raw.right_first_button_pressed
@@ -163,6 +217,9 @@ class TorsoControls:
             self.enabled = not self.enabled
             self.selected_enabled = self.enabled
         self.chord_down = chord
+        self._update_stick(raw, now, ready, fresh, valid,
+                           stop or arm or chord or raw.left_second_button_pressed)
+        self._record_permissions()
         if valid:
             self.last_hand = copy.copy(result)
         return result

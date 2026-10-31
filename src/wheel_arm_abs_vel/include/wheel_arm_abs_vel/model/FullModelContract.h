@@ -5,8 +5,8 @@
 
 namespace wheel_arm_abs_vel {
 inline std::string fullModelRelativePath(int version) {
-  if (version != 62 && version != 63 && version != 400062)
-    throw std::runtime_error("Absolute velocity IK supports only 62, 63 and 400062");
+  if (version <= 0)
+    throw std::runtime_error("Absolute velocity IK requires a positive resolved model version");
   const auto model = "biped_s" + std::to_string(version);
   return model + "/urdf/" + model + ".urdf";
 }

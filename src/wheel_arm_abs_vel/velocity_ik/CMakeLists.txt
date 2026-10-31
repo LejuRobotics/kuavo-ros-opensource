@@ -186,3 +186,37 @@ target_compile_options(velocity_ik_j3_window_replay PRIVATE -UNDEBUG)
 add_test(NAME velocity_ik_frozen_qp_test COMMAND velocity_ik_frozen_qp_test
   ${CMAKE_CURRENT_SOURCE_DIR}/frozen_qp_regression.json)
 endif()  # CATKIN_ENABLE_TESTING
+# Explicit isolated recording-contract test; does not start control or hardware transports.
+add_executable(velocity_ik_absolute_record_test EXCLUDE_FROM_ALL absolute_record_test.cpp)
+target_include_directories(velocity_ik_absolute_record_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
+target_link_libraries(velocity_ik_absolute_record_test PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
+if(VELOCITY_IK_MESSAGE_TARGETS)
+  add_dependencies(velocity_ik_absolute_record_test ${VELOCITY_IK_MESSAGE_TARGETS})
+endif()
+
+if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
+  add_executable(velocity_ik_mapper_lifecycle_bridge mapper_lifecycle_bridge.cpp)
+  target_include_directories(velocity_ik_mapper_lifecycle_bridge PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
+  target_link_libraries(velocity_ik_mapper_lifecycle_bridge PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
+  target_compile_options(velocity_ik_mapper_lifecycle_bridge PRIVATE -UNDEBUG)
+  if(VELOCITY_IK_MESSAGE_TARGETS)
+    add_dependencies(velocity_ik_mapper_lifecycle_bridge ${VELOCITY_IK_MESSAGE_TARGETS})
+  endif()
+endif()
+
+if(CATKIN_ENABLE_TESTING)
+# Causal hand prediction and independent QP acceptance gates.
+add_executable(velocity_ik_source_consistent_hand_prediction_test source_consistent_hand_prediction_test.cpp)
+target_link_libraries(velocity_ik_source_consistent_hand_prediction_test PRIVATE Eigen3::Eigen)
+add_executable(velocity_ik_qp_result_acceptance_test qp_result_acceptance_test.cpp)
+target_link_libraries(velocity_ik_qp_result_acceptance_test PRIVATE velocity_ik_qp)
+foreach(test_target velocity_ik_source_consistent_hand_prediction_test velocity_ik_qp_result_acceptance_test)
+  target_compile_options(${test_target} PRIVATE -UNDEBUG)
+  add_test(NAME ${test_target} COMMAND ${test_target})
+endforeach()
+foreach(test_name torso_stick_controls arm_torso_hold)
+  add_test(NAME velocity_ik_${test_name}_test
+    COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../test/${test_name}_test.py)
+endforeach()
+
+endif()

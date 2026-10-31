@@ -19,8 +19,6 @@ def version_string(version):
 
 def full_model_relative_path(version):
     version = version_string(version)
-    if int(version) not in (62, 63, 400062):
-        raise ValueError('Private absolute pipeline supports 62, 63 and 400062')
     model = 'biped_s' + version
     return f"{model}/urdf/{model}.urdf"
 
@@ -66,8 +64,6 @@ def bounds(joint):
 
 def resolve_model(version, assets, wheel_interface, overlay=None):
     version = version_string(version)
-    if int(version) not in (62, 63, 400062):
-        raise ValueError('Private absolute pipeline supports 62, 63 and 400062')
     assets = Path(assets)
     config_path = assets/f'config/kuavo_v{version}/kuavo.json'
     config = json.loads(config_path.read_text())
