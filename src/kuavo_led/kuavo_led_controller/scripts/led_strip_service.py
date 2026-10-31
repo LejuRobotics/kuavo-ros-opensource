@@ -271,7 +271,8 @@ class LEDStripServiceNode:
     def _build_power_board_status_msg(status):
         """按缓存字典填充 PowerBoardStatus 消息（字段一一对应）"""
         pb_msg = PowerBoardStatus()
-        pb_msg.timestamp = rospy.Time.now()
+        # 填采样时刻而非发布时刻，下游据此判断该帧是否仍新鲜
+        pb_msg.timestamp = rospy.Time.from_sec(status['_sample_time'])
         pb_msg.status_byte1 = status['status_byte1']
         pb_msg.status_byte2 = status['status_byte2']
         pb_msg.status_byte3 = status['status_byte3']

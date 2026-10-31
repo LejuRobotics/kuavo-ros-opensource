@@ -251,7 +251,7 @@
     </group>
 
     <!-- 物理急停桥接：电源板 stop_int 置位即发布 /stop_robot，停控制器/硬件/rosbag -->
-    <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen"/>
+    <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
     <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
 

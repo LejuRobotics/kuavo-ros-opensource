@@ -237,7 +237,7 @@
   <param name="sg100_debug_state" value="false" />
   <param name="sg100_output_limit" value="0.5" />
   <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
-  <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" />
+  <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)" />
   <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>

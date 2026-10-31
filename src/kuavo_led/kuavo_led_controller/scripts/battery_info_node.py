@@ -276,6 +276,8 @@ class BatteryInfoReaderProxy:
                 # 从 PowerBoardStatus 消息重新组装为字典，与 serial 模式返回结构对齐
                 m = resp.status
                 return {
+                    # 采样时刻由发布端透传，避免本节点每轮都把它刷新成"刚刚"
+                    '_sample_time': m.timestamp.to_sec(),
                     # 原始字节
                     'status_byte1': m.status_byte1,
                     'status_byte2': m.status_byte2,
@@ -398,7 +400,10 @@ class BatteryInfoNode:
     def _create_power_board_status_message(self, status):
         """从状态字典创建 PowerBoardStatus 消息"""
         msg = PowerBoardStatus()
-        msg.timestamp = rospy.Time.now()
+        # 统一填采样时刻：ros_service 路径是上游透传值，serial 路径读取即采样
+        sample_time = status.get('_sample_time')
+        msg.timestamp = (rospy.Time.from_sec(sample_time) if sample_time
+                         else rospy.Time.now())
         # 原始字节
         msg.status_byte1 = status['status_byte1']
         msg.status_byte2 = status['status_byte2']
