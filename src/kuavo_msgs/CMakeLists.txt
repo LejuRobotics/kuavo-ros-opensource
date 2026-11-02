@@ -161,6 +161,9 @@ add_message_files(
   timedPoint.msg
   lbTimedOfflineTraj.msg
   Float32MultiArrayStamped.msg
+
+  # 底盘接管状态 /odom/chassis_takeover_state
+  ChassisTakeoverState.msg
 )
 
 ## Generate services in the 'srv' folder

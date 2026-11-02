@@ -6,6 +6,7 @@
 #include <std_msgs/Float32.h>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
 #include <std_msgs/Int8MultiArray.h>
@@ -20,6 +21,7 @@
 #include <kuavo_msgs/accessIkSolve.h>
 #include <kuavo_msgs/eePoseReachError.h>
 #include <kuavo_msgs/sensorsData.h>
+#include <kuavo_msgs/ChassisTakeoverState.h>
 #include <std_srvs/SetBool.h>
 #include <std_srvs/Trigger.h>
 
@@ -151,6 +153,9 @@ public:
   const bool getEnableBaseTrack() const { return enableBaseTrackFlag_; }
   void setEnableBaseTrack(bool flag) { enableBaseTrackFlag_ = flag; }
 
+  // 底盘接管状态 (/odom/chassis_takeover_state): true 表示外部拥有底盘控制权
+  bool isChassisTakeover() const { return chassisTakeoverActive_.load(std::memory_order_acquire); }
+
   // 末端跟踪优先级调整的相关函数
   const bool getIsFocusEeStatus() const { return isFocusEe_; }
   void setIsFocusEeStatus(bool flag) { isFocusEe_ = flag; }
@@ -227,6 +232,13 @@ protected:
   
   double targetYawPreProcess(double currentYaw, double targetYaw);
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
+
+  // 底盘接管状态处理: 接管时停止底盘位置跟踪, 释放时把参考重锚到实测位姿
+  void chassisTakeoverStateCallback(const kuavo_msgs::ChassisTakeoverState::ConstPtr& msg);
+  void enterChassisTakeover(scalar_t initTime, const vector_t& initState);
+  void exitChassisTakeover(scalar_t initTime, const vector_t& initState);
+  void clearBaseCommandStorage(const vector_t& initState);
+  void holdBaseReferenceAtActual(const vector_t& initState);
   void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void resetAllMpcTraj(scalar_t initTime, const vector_t& initState);
@@ -524,6 +536,15 @@ private:
   ros::Subscriber enable_control_state_sub_;
   bool isEnableControl() const { return enable_control_.load(std::memory_order_acquire); }
   bool isPrevEnableControl() const { return prev_enable_control_.load(std::memory_order_acquire); }
+
+  // 底盘接管状态 (话题 /odom/chassis_takeover_state)
+  // 回调线程只更新原子状态; 参考切换统一在 modifyReferences 中按状态边沿处理
+  ros::Subscriber chassisTakeoverStateSub_;
+  std::atomic<bool> chassisTakeoverActive_{false};              // 当前是否处于接管
+  std::atomic<bool> chassisTakeoverStateReceived_{false};       // 是否收到过接管状态
+  std::atomic<uint64_t> chassisTakeoverEdgeCounter_{0};         // 状态边沿计数, 回调线程自增
+  uint64_t handledChassisTakeoverEdgeCounter_{0};               // MPC 线程已处理的边沿计数
+  bool baseTrackEnabledBeforeTakeover_{true};                   // 进入接管前的底盘跟踪使能, 释放时恢复
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 
