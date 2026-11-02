@@ -19,8 +19,6 @@ def version_string(version):
 
 def full_model_relative_path(version):
     version = version_string(version)
-    if int(version) not in (62, 63, 210062, 310062, 400062):
-        raise ValueError('Private absolute pipeline supports 62, 63, 210062, 310062 and 400062')
     model = 'biped_s' + version
     return f"{model}/urdf/{model}.urdf"
 
@@ -66,18 +64,15 @@ def bounds(joint):
 
 def resolve_model(version, assets, wheel_interface, overlay=None):
     version = version_string(version)
-    if int(version) not in (62, 63, 210062, 310062, 400062):
-        raise ValueError('Private absolute pipeline supports 62, 63, 210062, 310062 and 400062')
-    if not isinstance(overlay, dict) or any(not isinstance(key, str) or not key.startswith('velocity_ik_') for key in overlay):
-        raise ValueError('Non-absolute key in model contract')
-    if 'velocity_ik_urdf' not in overlay or not isinstance(overlay['velocity_ik_urdf'], str) or not overlay['velocity_ik_urdf']:
-        raise ValueError(f'robot {version}: overlay must explicitly select its complete URDF')
     assets = Path(assets)
     config_path = assets/f'config/kuavo_v{version}/kuavo.json'
     config = json.loads(config_path.read_text())
     if not isinstance(config, dict):
         raise ValueError(f'robot configuration must be an object: {config_path}')
-    config.update(overlay)
+    if overlay is not None:
+        if not isinstance(overlay, dict) or any(not key.startswith('velocity_ik_') for key in overlay):
+            raise ValueError('Non-absolute key in model contract')
+        config.update(overlay)
     if (config.get('NUM_ARM_JOINT') != 14 or
             config.get('NUM_JOINT', 0) - config.get('NUM_HEAD_JOINT', 0) - 14 != 4):
         raise ValueError(f'robot {version}: wheel IK requires 14 arm and 4 body sensor joints; '

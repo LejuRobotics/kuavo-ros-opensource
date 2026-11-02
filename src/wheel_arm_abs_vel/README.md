@@ -1,5 +1,7 @@
 # Wheel-arm absolute velocity IK
 
+> 2026-10-31 复核：本 MR 最终仅修改绝对式私有包，共享/增量改动已撤回。当前规则：手柄首次只用双前扳机，首次成功后只用 X+A 重新启动；首次失败仍用双前扳机重试。X+B 仅续接已有活动会话；裸手 OK 启动保留，初始躯干权限统一由 `control_torso` 控制。详见[功能迁移与验证说明](docs/test_beta_port_20261031.md)，下文旧入口描述以此为准。
+
 This additive package contains the S62, S63 and 400062 absolute teleoperation mode. Its source
 was extracted from a145c974e3b475d0740acd24cd36346b1723573b onto official dev
 9ca0b7b880188faa1b686b48e906c032c36124d7. The platform adaptation is confined to this package. Shared hardware and legacy

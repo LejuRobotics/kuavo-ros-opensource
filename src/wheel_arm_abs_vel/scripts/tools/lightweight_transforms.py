@@ -49,7 +49,14 @@ def matrix_to_quaternion(mat):
 
 
 def matrix_to_rpy(mat):
-    return np.asarray(tf.transformations.euler_from_matrix(mat), dtype=float)
+    # tf sxyz: identical non-repetition, parity=0 branch and epsilon.
+    m = mat
+    cy = math.sqrt(m[0, 0]*m[0, 0] + m[1, 0]*m[1, 0])
+    if cy > 8.881784197001252e-16:
+        return np.array((math.atan2(m[2, 1], m[2, 2]),
+                         math.atan2(-m[2, 0], cy), math.atan2(m[1, 0], m[0, 0])))
+    return np.array((math.atan2(-m[1, 2], m[1, 1]),
+                     math.atan2(-m[2, 0], cy), 0.0))
 
 
 def rpy_to_matrix(rpy):

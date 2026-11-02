@@ -14,6 +14,7 @@ inline VelocityIkMapperStatus makeMapperStatus(const VelocityIkShadow& source) {
   status.generation = source.generation;
   status.control_state = source.control_state;
   status.valid = source.valid;
+  status.session_bound = source.session_anchor_valid;
   status.takeover_active = source.takeover_active;
   status.preparation_complete = source.preparation_complete;
   return status;

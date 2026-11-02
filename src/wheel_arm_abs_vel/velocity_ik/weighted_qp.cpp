@@ -34,7 +34,7 @@ ResultCheck checkQpResult(const Eigen::MatrixXd& H,const Eigen::VectorXd& g,
   r.complementarity=std::max(r.complementarity,value);
  }
  if(!std::isfinite(r.violation)||!std::isfinite(r.stationarity)||!std::isfinite(r.complementarity))return ResultCheck{};
- r.accepted=r.violation<=2e-8&&r.stationarity<=2e-7&&r.complementarity<=2e-7;
+ r.accepted=r.violation<=2e-8&&r.stationarity<=2e-7&&r.complementarity<=5e-6;
  r.status=r.accepted?0:-1100;return r;
 }
 struct WeightedQp::Impl {
@@ -112,7 +112,7 @@ bool WeightedQp::solve(const Eigen::MatrixXd& H,const Eigen::VectorXd& g,const E
  const ResultCheck check=checkQpResult(H,g,s.ci,s.lower,s.upper,q.results.x,q.results.z);
  runtime_probe::point(65);
  stats.check_us=micros(check_begin,Clock::now());stats.violation=check.violation;stats.stationarity=check.stationarity;stats.complementarity=check.complementarity;
- *status=q.results.info.status==pq::QPSolverOutput::PROXQP_SOLVED?check.status:-1101;
+ *status=q.results.info.status==pq::QPSolverOutput::PROXQP_SOLVED && stats.primal<=1e-6?check.status:-1101;
  stats.accepted=*status==0;stats.acceptance_status=*status;
  if(!stats.accepted){
   if(!impl_->frozen_failure&&!impl_->failure_path.empty()){

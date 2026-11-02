@@ -184,12 +184,12 @@ class ControlsTest(unittest.TestCase):
                   _absolute_mode_status=(2,2,False),_fixed_pending_operation=None,_fixed_operation_error='',
                   _fixed_operation_block='',_absolute_stop_pending=False,_absolute_fault_hold_pending=False,
                   _tracking_source_hold_latched=False,_absolute_external_mode_reset_pending=False,
-                  _absolute_latest_target={'receive_time':10.},absolute_enable_max_vr_age=.2)
+                  _absolute_latest_target=None,_last_valid_tcp_receive=10.,absolute_enable_max_vr_age=.2)
         fn=env['_torso_input_ready_locked'];self.assertTrue(fn(NS(**good),10.1))
         for key,value in dict(enable_velocity_ik_takeover=False,_absolute_state=2,_fixed_control_enabled=False,
              _absolute_mode_status=(1,2,True),_fixed_pending_operation=2,_fixed_operation_error='fault',
              _fixed_operation_block='hold',_absolute_stop_pending=True,_absolute_fault_hold_pending=True,
-             _tracking_source_hold_latched=True,_absolute_external_mode_reset_pending=True,_absolute_latest_target=None).items():
+             _tracking_source_hold_latched=True,_absolute_external_mode_reset_pending=True,_last_valid_tcp_receive=None).items():
             self.assertFalse(fn(NS(**dict(good,**{key:value})),10.1),key)
         self.assertFalse(fn(NS(**good),10.3));self.assertFalse(fn(NS(**good),9.9))
 
@@ -198,6 +198,51 @@ class StartupTorsoControlsTest(unittest.TestCase):
     setUp = ControlsTest.setUp
     sample = ControlsTest.sample
     chord = ControlsTest.chord
+
+    def test_launch_parameter_reaches_mapper_and_survives_prepare(self):
+        import argparse
+        import xml.etree.ElementTree as ET
+        launch = ET.parse(ROOT/'launch/quest_velocity_ik.launch')
+        name = 'control_torso'
+        self.assertEqual(launch.find("arg[@name='%s']" % name).get('default'), 'true')
+        self.assertIn('--control_torso=$(arg control_torso)',
+                      launch.find("node[@name='ik_ros_uni']").get('args'))
+        tree = ast.parse((ROOT/'scripts/ik_ros_velocity.py').read_text())
+        converter = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'str2bool')
+        parser_call = next(n for n in ast.walk(tree) if isinstance(n, ast.Expr)
+                           and isinstance(n.value, ast.Call) and n.value.args
+                           and isinstance(n.value.args[0], ast.Constant)
+                           and n.value.args[0].value == '--control_torso')
+        parser_env = dict(argparse=argparse, parser=argparse.ArgumentParser())
+        exec(compile(ast.Module(body=[converter, parser_call], type_ignores=[]), '<mapper-cli>', 'exec'), parser_env)
+        init = next(n for c in tree.body if isinstance(c, ast.ClassDef) and c.name == 'IkRos'
+                    for n in c.body if isinstance(n, ast.FunctionDef) and n.name == '__init__')
+        assignment = next(n for n in ast.walk(init) if isinstance(n, ast.Assign)
+                          and any(isinstance(t, ast.Attribute) and t.attr == '_torso_controls'
+                                  for t in n.targets))
+        for source in ('quest', 'pico'):
+            for setting in (None, False, True):
+                with self.subTest(source=source, setting=setting):
+                    params = {'/vr_input_source': source}
+                    value = launch.find("arg[@name='%s']" % name).get('default') if setting is None else str(setting).lower()
+                    cli = parser_env['parser'].parse_args(['--control_torso='+value])
+                    obj = NS()
+                    env = dict(self=obj, TorsoControls=TorsoControls, control_torso=cli.control_torso,
+                               rospy=NS(get_param=lambda key, default: params.get(key, default)))
+                    exec(compile(ast.Module(body=[assignment], type_ignores=[]), '<mapper-init>', 'exec'), env)
+                    p = obj._torso_controls
+                    expected = setting is not False
+                    self.sample(p, ready=False)
+                    p.reset(); p.request_follow()
+                    self.sample(p, ready=False); self.sample(p)
+                    self.assertEqual(p.enabled, expected)
+                    for _ in range(30):
+                        self.sample(p); self.assertEqual(p.enabled, expected)
+                    self.sample(p, **self.chord(p)); self.sample(p)
+                    self.assertEqual(p.enabled, not expected)
+                    p.reset(); p.request_follow()
+                    self.sample(p, ready=False); self.sample(p)
+                    self.assertEqual(p.enabled, not expected)
 
     def test_default_waits_for_first_ready_fresh_input(self):
         for source in ('quest', 'pico'):

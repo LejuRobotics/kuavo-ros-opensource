@@ -35,6 +35,11 @@ class WheelBaseCommandMapper:
         if self.received is not None and not 0 <= now - self.received < 0.2:
             self.reset()
         self.received = now
+        if abs(msg.right_y) > .8:
+            # Match dev: a torso stick gesture cannot also drive the chassis.
+            self.filtered = [0.0, 0.0, 0.0]
+            self.reason = "TORSO_GESTURE"
+            return (0.0, 0.0, 0.0)
         if not self.neutral_seen:
             self.neutral_seen = all(abs(v) <= self.threshold for v in (*values, msg.right_y))
             self.reason = "READY" if self.neutral_seen else "WAIT_NEUTRAL"

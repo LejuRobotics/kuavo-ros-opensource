@@ -704,10 +704,15 @@ namespace humanoidController_wheel_wbc
     if (enable_base_emergency_stop_)
     {
       baseCmdVelStatusSub_ = controllerNh_.subscribe<leju_mobile_base_msgs::BaseCmdVelStatus>(
-          "/move_base/base_cmd_vel_status", 10, 
+          "/move_base/base_cmd_vel_status", 10,
           &humanoidControllerWheelWbc::baseCmdVelStatusCallback, this);
       ROS_INFO("[humanoidControllerWheelWbc] Subscribed to /move_base/base_cmd_vel_status for base emergency stop protection");
     }
+
+    // 订阅底盘接管状态: 接管期间外部拥有底盘控制权, WBC 不再向底盘发送速度指令
+    chassisTakeoverStateSub_ = controllerNh_.subscribe<kuavo_msgs::ChassisTakeoverState>(
+        "/odom/chassis_takeover_state", 10,
+        &humanoidControllerWheelWbc::chassisTakeoverStateCallback, this);
 
     return true;
   }
@@ -1961,19 +1966,48 @@ namespace humanoidController_wheel_wbc
       velCmdMsg.linear.y = desiredVelBody[1];
       velCmdMsg.angular.z = desiredVelBody[2];
     }
+    // 退出接管后允许下一次进入边沿再发一次零速度。接管期间保持已发送标记，避免持续发零覆盖外部控制。
+    const bool chassisTakeover = isChassisTakeover();
+    if (!chassisTakeover)
+    {
+      chassis_takeover_zero_sent_ = false;
+    }
+
+    // 接管边沿的一次性零速度发布必须独立于 use_vel_control_ / baseCmdVelStatus_：
+    // 关闭速度控制时 WBC 可能已向 latched 话题发布过非零速度，auto_wheel_bridge 会继续
+    // 转发缓存中的旧速度直到超时，因此进入接管的边沿无论速度控制开关如何都要清一次零。
+    if (chassisTakeover)
+    {
+      if (!chassis_takeover_zero_sent_)
+      {
+        geometry_msgs::Twist zeroCmd;
+        cmdVelPub_.publish(zeroCmd);
+        last_cmd_vel_pub_time_ = time;
+        chassis_takeover_zero_sent_ = true;
+        ROS_INFO("[chassis_takeover] 进入接管, 已向 /move_base/base_cmd_vel 发布一次零速度, 随后暂停运控速度发布");
+      }
+      else
+      {
+        ROS_INFO_THROTTLE(2.0, "[chassis_takeover] 底盘处于接管状态, WBC 暂停发布 /move_base/base_cmd_vel");
+      }
+    }
+
     if(use_vel_control_ && baseCmdVelStatus_ == true)
     {
-      if (base_cmd_vel_limit_enable_)
+      if (!chassisTakeover)
       {
-        clampBaseCmdVel(velCmdMsg);
-      }
-      // 限频发布：控制循环 500Hz，但底盘节点按 50Hz 消费，直接满频发布会导致命令
-      // 在其内部队列堆积数秒（见 底盘命令执行延迟分析记录.md），这里按 publish_rate 节流
-      if (last_cmd_vel_pub_time_.isZero() ||
-          (time - last_cmd_vel_pub_time_).toSec() >= 1.0 / base_cmd_vel_publish_rate_)
-      {
-        cmdVelPub_.publish(velCmdMsg);
-        last_cmd_vel_pub_time_ = time;
+        if (base_cmd_vel_limit_enable_)
+        {
+          clampBaseCmdVel(velCmdMsg);
+        }
+        // 限频发布：控制循环 500Hz，但底盘节点按 50Hz 消费，直接满频发布会导致命令
+        // 在其内部队列堆积数秒（见 底盘命令执行延迟分析记录.md），这里按 publish_rate 节流
+        if (last_cmd_vel_pub_time_.isZero() ||
+            (time - last_cmd_vel_pub_time_).toSec() >= 1.0 / base_cmd_vel_publish_rate_)
+        {
+          cmdVelPub_.publish(velCmdMsg);
+          last_cmd_vel_pub_time_ = time;
+        }
       }
     }else{
         ros::Time current_time = ros::Time::now();
@@ -3629,6 +3663,23 @@ namespace humanoidController_wheel_wbc
     {
       ROS_INFO_STREAM("[baseCmdVelStatusCallback] baseCmdVelStatus:  [ " << (msg->cmd_vel_effective ? "true" : "false") << " ]");
       baseCmdVelStatus_ = msg->cmd_vel_effective;
+    }
+  }
+
+  void humanoidControllerWheelWbc::chassisTakeoverStateCallback(const kuavo_msgs::ChassisTakeoverState::ConstPtr& msg)
+  {
+    const bool takeover = (msg->state == kuavo_msgs::ChassisTakeoverState::STATE_TAKEOVER);
+    const bool prev = chassis_takeover_.exchange(takeover, std::memory_order_acq_rel);
+    if (prev == takeover) return;
+
+    if (takeover)
+    {
+      ROS_WARN_STREAM("[chassis_takeover] 底盘进入接管(source=" << static_cast<int>(msg->source)
+                      << "), WBC 停止向底盘发送速度指令");
+    }
+    else
+    {
+      ROS_INFO_STREAM("[chassis_takeover] 底盘退出接管, WBC 恢复向底盘发送速度指令");
     }
   }
 

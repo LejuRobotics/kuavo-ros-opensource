@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Validate the test-branch resolver against private models and broken fixtures."""
-import copy
 import json
 from pathlib import Path
 import sys
@@ -12,9 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT.parent/'kuavo_assets'
 WHEEL = ROOT.parent/'humanoid-wheel-control/humanoid_wheel_interface'
 
+OVERLAY_VERSIONS = (62, 63, 210062, 310062, 400062)
+SHARED_WITHOUT_OVERLAY = (60, 61, 200062, 300062, 400063)
+
+
 class SharedModels(unittest.TestCase):
     def test_supported_full_models_and_private_limits(self):
-        for version in (62, 63, 210062, 310062, 400062):
+        for version in OVERLAY_VERSIONS:
             overlay = json.loads((ROOT/f'config/model_s{version}.json').read_text())
             contract = resolve_model(version, ASSETS, WHEEL, overlay)
             self.assertEqual(contract['robot_version'], version)
@@ -23,8 +26,7 @@ class SharedModels(unittest.TestCase):
                 self.assertEqual(set(contract['velocity_ik_fixed_joints']), set(overlay['velocity_ik_fixed_joints']))
             for joint, limits in overlay.get('velocity_ik_position_limits', {}).items():
                 self.assertEqual(contract['velocity_ik_position_limits'][joint], limits)
-            # The shared resolver must never produce a gain override.
-            self.assertFalse({'kp','kd','ruiwo_kp','ruiwo_kd'} & contract.keys())
+            self.assertFalse({'kp', 'kd', 'ruiwo_kp', 'ruiwo_kd'} & contract.keys())
             for change in ({'velocity_ik_urdf': 'biped_s63/urdf/biped_s63.urdf' if version != 63 else 'biped_s62/urdf/biped_s62.urdf'},
                            {'velocity_ik_fixed_joints': []},
                            {'velocity_ik_position_limits': {'zarm_l3_joint': [3, -3]}},
@@ -32,14 +34,11 @@ class SharedModels(unittest.TestCase):
                 with self.subTest(version=version, change=change), self.assertRaises(ValueError):
                     resolve_model(version, ASSETS, WHEEL, dict(overlay, **change))
 
-    def test_overlay_is_required_and_must_explicitly_select_model(self):
-        for version in (62, 63, 210062, 310062, 400062):
-            with self.subTest(version=version, overlay=None), self.assertRaises(ValueError):
-                resolve_model(version, ASSETS, WHEEL)
-            with self.subTest(version=version, overlay={}), self.assertRaises(ValueError):
-                resolve_model(version, ASSETS, WHEEL, {})
-            with self.subTest(version=version, overlay='invalid'), self.assertRaises(ValueError):
-                resolve_model(version, ASSETS, WHEEL, 'invalid')
+    def test_shared_models_without_private_overlay(self):
+        for version in SHARED_WITHOUT_OVERLAY:
+            contract = resolve_model(version, ASSETS, WHEEL)
+            self.assertEqual(contract['robot_version'], version)
+            self.assertTrue(contract['velocity_ik_urdf'])
 
     def test_shared_asset_validation_before_launch(self):
         original = json.loads((ASSETS/'config/kuavo_v63/kuavo.json').read_text())
@@ -52,10 +51,15 @@ class SharedModels(unittest.TestCase):
                            {'shoulder_frame_names': ['missing', 'missing']}):
                 path.write_text(json.dumps(dict(original, **update)))
                 with self.subTest(update=update), self.assertRaises(ValueError):
-                    resolve_model(63, assets, WHEEL, json.loads((ROOT/'config/model_s63.json').read_text()))
-        for value in ('../63', 0, '63.0', 400063):
+                    resolve_model(63, assets, WHEEL)
+        for value in ('../63', 0, '63.0'):
             with self.subTest(version=value), self.assertRaises(ValueError):
                 resolve_model(value, ASSETS, WHEEL)
+
+    def test_missing_shared_assets_rejected(self):
+        with self.assertRaises(FileNotFoundError):
+            resolve_model(999999, ASSETS, WHEEL)
+
 
 if __name__ == '__main__':
     unittest.main()

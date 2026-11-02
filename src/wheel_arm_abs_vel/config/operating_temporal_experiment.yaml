@@ -18,7 +18,7 @@ temporal_cost:
   delta_acceleration_scale: [1, 1, 1, 1, 1.5, 3, 8, 50, 50, 50, 50, 100, 100, 100, 50, 50, 50, 50, 100, 100, 100]
 operating_diagnostics:
   enabled: true
-  stride: 1  # 500 Hz needed for spectral analysis; monitor async drops.
+  stride: 25  # 20 Hz diagnostics at 500 Hz; joint constraints remain full rate.
 
 # QP-internal discrete jerk bound; original safety bounds have priority.
 joint_jerk:

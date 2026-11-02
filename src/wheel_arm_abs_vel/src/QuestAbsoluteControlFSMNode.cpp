@@ -414,14 +414,15 @@ namespace ocs2
             return -1;
         }
 
-        bool callSetArmModeSrv(int32_t mode)
+        bool callSetArmModeSrv(int32_t mode, bool armHoldOnly = false)
         {
             if (enable_velocity_ik_takeover_) {
                 // This candidate's operation modes never select a legacy writer.
                 kuavo_msgs::changeArmCtrlMode srv;
                 srv.request.control_mode = mode;
                 auto client = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(
-                    "/quest3/pinocchio_arm_operation");
+                    armHoldOnly ? "/quest3/pinocchio_arm_hold_operation"
+                                : "/quest3/pinocchio_arm_operation");
                 if (!client.call(srv) || !srv.response.result) {
                     ROS_ERROR_STREAM("[QuestAbsoluteControlFSM] Pinocchio operation rejected: "
                                      << srv.response.message);
@@ -1389,7 +1390,7 @@ namespace ocs2
                         return;
                     }
                     std::cout << "[QuestAbsoluteControlFSM] change arm mode to :" << new_arm_mode << std::endl;
-                    callSetArmModeSrv(new_arm_mode);
+                    callSetArmModeSrv(new_arm_mode, true);
                 }
                 else if (joystick_data_.right_first_button_pressed &&
                          !(joystick_data_prev_.right_first_button_pressed &&
@@ -1636,7 +1637,7 @@ namespace ocs2
                         ROS_WARN_THROTTLE(1.0, "[QuestAbsoluteControlFSM] X+B ignored in arm mode %d (only allowed in follow/fix).", arm_ctrl_mode_);
                         return;
                     }
-                    if (!callSetArmModeSrv(new_arm_ctrl_mode_wheel_)) return;
+                    if (!callSetArmModeSrv(new_arm_ctrl_mode_wheel_, true)) return;
                     std::cout << "[QuestAbsoluteControlFSM] change arm mode to :" << new_arm_ctrl_mode_wheel_ << std::endl;
                 }
                 else if (joystick_data_.right_first_button_pressed &&

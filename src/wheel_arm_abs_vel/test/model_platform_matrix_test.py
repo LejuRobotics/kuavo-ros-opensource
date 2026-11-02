@@ -111,7 +111,7 @@ class ModelPlatformMatrix(unittest.TestCase):
         base = dict(robot_version=63, robot_type=1, nodelet_robot_type=1,
                     wheel_control_type=1, estimator_type=1, with_ik=False,
                     use_whole_body_ik_reference=True, use_external_mpc=False, real=False)
-        for invalid in ({'with_ik': True}, {'robot_version': 64}, {'real': True},
+        for invalid in ({'with_ik': True}, {'robot_version': 0}, {'real': True},
                         {'use_external_mpc': True}, {'use_whole_body_ik_reference': False},
                         {'estimator_type': 0}, {'wheel_control_type': 0}):
             values = dict(base, **invalid)
@@ -128,7 +128,7 @@ class ModelPlatformMatrix(unittest.TestCase):
                     require_full_model(version, str(ASSETS), cfg)
 
     def test_unknown_version_rejected(self):
-        for version in (15, 60, 64, 0):
+        for version in (-15, -60, -64, 0):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 full_model_relative_path(version)
 

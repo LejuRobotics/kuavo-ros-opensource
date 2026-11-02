@@ -6,7 +6,6 @@ from __future__ import annotations
 import legacy_dependencies
 
 import signal
-from tools import runtime_timing_probe as runtime_probe
 import rospy
 import argparse
 import argparse
@@ -45,7 +44,6 @@ from noitom_hi5_hand_udp_python.msg import handRotationEular
 from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList
 from wheel_arm_abs_vel.msg import (
     AbsoluteIkCommitDebug,
-    QuestTcpMappingDebug,
     TeleopTcpTarget,
     VelocityIkShadow,
     VelocityIkMapperStatus,
@@ -320,29 +318,6 @@ class IkRos:
         self.enable_tracking_mapping_debug = rospy.get_param(
             "~publish_tracking_mapping_debug", False
         )
-        self._tracking_debug_seq = 0
-        self._tracking_debug_previous_source = QuestTcpMappingDebug.SOURCE_UNKNOWN
-        self._tracking_debug_previous_timestamp_ms = None
-        self._tracking_debug_previous_receive_time = None
-        self._tracking_debug_previous_raw = None
-        self._tracking_debug_previous_mapped = None
-        self._tracking_debug_last_unique_raw_time = None
-        self._tracking_debug_last_unique_mapped_time = None
-        self._tracking_debug_counts = {
-            "received": 0,
-            "controller": 0,
-            "hand_tracking": 0,
-            "source_switch": 0,
-            "low_confidence": 0,
-            "malformed": 0,
-            "raw_duplicate": 0,
-            "mapped_duplicate": 0,
-            "target_published": 0,
-            "rejected_source": 0,
-            "source_hold": 0,
-            "hard_discontinuity": 0,
-        }
-
         # 模式过渡状态只描述控制器生命周期；是否启用旧 IK 关节限速是独立策略。
         # 默认关闭限速，保持步骤 1 修改前的绝对式遥操作输出行为。
         self.wheel_arm_mode_transitioning = False
@@ -495,6 +470,7 @@ class IkRos:
         self._absolute_pause_pending = False
         self._absolute_external_mode_reset_pending = False
         self._absolute_latest_target = None
+        self._last_valid_tcp_receive = None
         self._absolute_pending_capture = None
         self._absolute_frozen_target = None
         self._absolute_latest_measured_q = None
@@ -511,6 +487,7 @@ class IkRos:
         # One admission per Mapper lifetime; stop/reset/source changes never
         # rearm triggers because they remain end-effector inputs afterwards.
         self._controller_start_consumed = False
+        self._controller_start_completed = False
         self._absolute_fault_hold_pending = False
         self._absolute_fault_hold_reason = AbsoluteEnableReason.NONE
         self._absolute_alignment_errors = [float("nan")] * 4
@@ -626,9 +603,13 @@ class IkRos:
         self.joint_sub = rospy.Subscriber(
             "/robot_arm_q_v_tau", robotArmQVVD, self.kuavo_joint_states_callback, queue_size=1, tcp_nodelay=True
         )
-        # Pico uses long X/A for thumb touch only. Keep raw arm/FSM input unchanged.
-        self._torso_controls = TorsoControls(rospy.get_param('/vr_input_source', 'quest'))
+        self.quest3_arm_info_transformer.controller_trigger_start_enabled = not self.enable_velocity_ik_takeover
+        self._torso_controls = TorsoControls(
+            rospy.get_param('/vr_input_source', 'quest'),
+            enable_on_first_follow=control_torso)
+        rospy.loginfo('control_torso (initial follow): %s', self._torso_controls.selected_enabled)
         self._torso_state_pub = rospy.Publisher('/quest3/torso_control_enabled', Bool, queue_size=1, latch=True)
+        self._torso_position_state_pub = rospy.Publisher('/quest3/torso_position_hold', Bool, queue_size=1, latch=True)
         self._torso_last_published = None
         self._publish_torso_control_state()
         self._pico_thumb_input = None
@@ -718,13 +699,6 @@ class IkRos:
         self.pub_absolute_enable_status = None
         self.pub_absolute_enable_captured_q = None
         self.pub_absolute_ik_commit_debug = None
-        self.pub_quest_tcp_mapping_debug = None
-        if self.robot_type == 1 and self.enable_tracking_mapping_debug:
-            self.pub_quest_tcp_mapping_debug = diagnostic_publisher(
-                "/ik_debug/quest_tcp_mapping",
-                QuestTcpMappingDebug,
-                queue_size=50,
-            )
         if self.enable_absolute_target_alignment:
             self.pub_absolute_enable_status = rospy.Publisher(
                 "/ik_debug/absolute_enable/status",
@@ -781,7 +755,6 @@ class IkRos:
                     "/mm/two_arm_hand_pose_cmd", twoArmHandPoseCmd, queue_size=10
                 )
             # Unified TCP target consumed by the 500 Hz velocity IK.
-            self.pub_velocity_timing = diagnostic_publisher("/whole_body_velocity_ik/diagnostics/mapper_timing", Float64MultiArray, queue_size=32)
             self.pub_mm_teleop_tcp_target = rospy.Publisher(
                 "/mm/teleop_tcp_target", TeleopTcpTarget, queue_size=1, tcp_nodelay=True
             )
@@ -799,7 +772,6 @@ class IkRos:
         self.initial_q_first = None
 
         # 订阅手臂模式topic
-        self._runtime_probe = runtime_probe.Recorder()
         self.arm_mode_sub = rospy.Subscriber('/quest3/triger_arm_mode', Int32, self.arm_mode_callback)
 
         # 订阅手臂控制模式变化话题，用于检测退出复位模式
@@ -838,9 +810,9 @@ class IkRos:
         # All publishers/state are now ready.  Creating this high-rate
         # subscriber earlier caused startup callbacks to observe missing
         # _tcp_target_seq/publisher members.
-        self._input_clock_gate = SourceClockGate(
-            float(rospy.get_param("~input_max_relative_age", 0.12)))
-        self._last_fresh_source_receive = time.monotonic()
+        self._input_clock_gates = {source: SourceClockGate(
+            float(rospy.get_param("~input_max_relative_age", 0.12))) for source in (1, 2)}
+        self._last_fresh_source_receive = {1: time.monotonic(), 2: time.monotonic()}
         # Scheduling belongs to the TCPROS receive thread, not ik_thread.
         scheduling = bool(rospy.get_param("~mapper_input_scheduling", False))
         self._mapper_input_scheduler = MapperInputScheduler(
@@ -860,6 +832,9 @@ class IkRos:
             Float64MultiArray, queue_size=1, latch=True)
         self._fixed_operation_service = rospy.Service(
             '/quest3/pinocchio_arm_operation', changeArmCtrlMode, self.fixed_arm_operation_callback)
+        self._fixed_hold_operation_service = rospy.Service(
+            '/quest3/pinocchio_arm_hold_operation', changeArmCtrlMode,
+            lambda req: self.fixed_arm_operation_callback(req, arm_hold_only=True))
         self._publish_fixed_operation_state()
         self._wheel_base_pub = None
         if self.robot_type == 1 and self.enable_velocity_ik_takeover:
@@ -947,6 +922,7 @@ class IkRos:
         self._tracking_safety_previous_source = TeleopTcpTarget.SOURCE_UNKNOWN
         self._tracking_source_interrupted = False
         self._absolute_latest_target = None
+        self._last_valid_tcp_receive = None
         self._absolute_pending_capture = None
         self._absolute_frozen_target = None
         self._absolute_stop_pending = False
@@ -973,6 +949,7 @@ class IkRos:
         self._absolute_state = AbsoluteEnableState.WAIT_RELEASE
         self._absolute_reason = reason
         self._absolute_latest_target = None
+        self._last_valid_tcp_receive = None
         self._absolute_pending_capture = None
         self._absolute_frozen_target = None
         self._absolute_stop_pending = False
@@ -987,45 +964,48 @@ class IkRos:
         return True
 
     def _tracking_source_policy(self, source, teleop_running):
-        """Keep the configured source contract without cancelling an active session."""
         with self._absolute_lock:
-            previous_source = self._tracking_last_observed_source
-            source_changed = (
-                previous_source != TeleopTcpTarget.SOURCE_UNKNOWN
-                and source != previous_source
-            )
-            self._tracking_last_observed_source = source
+            return self._tracking_source_policy_locked(source, teleop_running)
 
-            expected_source = self._configured_tracking_source()
-            if (expected_source == TeleopTcpTarget.SOURCE_UNKNOWN
-                    and self._tracking_session_source != TeleopTcpTarget.SOURCE_UNKNOWN
-                    and not (self._fixed_pending_operation is None
-                             and self._absolute_state in (
-                                 AbsoluteEnableState.WAITING,
-                                 AbsoluteEnableState.WAIT_RELEASE,
-                                 AbsoluteEnableState.PREPARED))):
-                expected_source = self._tracking_session_source
-            source_matches_mode = (
-                expected_source == TeleopTcpTarget.SOURCE_UNKNOWN
-                or source == expected_source
-            )
-            if source_matches_mode:
-                self._tracking_matching_source_streak += 1
-            else:
-                self._tracking_matching_source_streak = 0
+    def _tracking_source_policy_locked(self, source, teleop_running):
+        """Keep the configured source contract without cancelling an active session."""
+        previous_source = self._tracking_last_observed_source
+        source_changed = (
+            previous_source != TeleopTcpTarget.SOURCE_UNKNOWN
+            and source != previous_source
+        )
+        self._tracking_last_observed_source = source
 
-            was_interrupted = self._tracking_source_interrupted
-            self._tracking_source_interrupted = not source_matches_mode
-            source_hold_triggered = False
-            source_hold_released = was_interrupted and source_matches_mode
-            source_allowed = source_matches_mode
-            if not source_allowed:
-                self._tracking_rejected_source_count += 1
-            session_source = self._tracking_session_source
-            source_hold_latched = self._tracking_source_hold_latched
-            fault_hold_pending = self._absolute_fault_hold_pending
-            generation = self._absolute_generation
-            rearm_stable_count = self._tracking_matching_source_streak
+        expected_source = self._configured_tracking_source()
+        if (expected_source == TeleopTcpTarget.SOURCE_UNKNOWN
+                and self._tracking_session_source != TeleopTcpTarget.SOURCE_UNKNOWN
+                and not (self._fixed_pending_operation is None
+                         and self._absolute_state in (
+                             AbsoluteEnableState.WAITING,
+                             AbsoluteEnableState.WAIT_RELEASE,
+                             AbsoluteEnableState.PREPARED))):
+            expected_source = self._tracking_session_source
+        source_matches_mode = (
+            expected_source == TeleopTcpTarget.SOURCE_UNKNOWN
+            or source == expected_source
+        )
+        if source_matches_mode:
+            self._tracking_matching_source_streak += 1
+        else:
+            self._tracking_matching_source_streak = 0
+
+        was_interrupted = self._tracking_source_interrupted
+        self._tracking_source_interrupted = not source_matches_mode
+        source_hold_triggered = False
+        source_hold_released = was_interrupted and source_matches_mode
+        source_allowed = source_matches_mode
+        if not source_allowed:
+            self._tracking_rejected_source_count += 1
+        session_source = self._tracking_session_source
+        source_hold_latched = self._tracking_source_hold_latched
+        fault_hold_pending = self._absolute_fault_hold_pending
+        generation = self._absolute_generation
+        rearm_stable_count = self._tracking_matching_source_streak
 
         if not source_matches_mode:
             rospy.logwarn_throttle(
@@ -1068,542 +1048,6 @@ class IkRos:
             # Cartesian governor has been removed, so this is always zero.
             "governor_activation_count": 0,
         }
-
-    def _tracking_input_safety_policy(
-            self, source, teleop_running, message_accepted, target_available,
-            left_tcp_target, right_tcp_target, left_elbow_target,
-            right_elbow_target, source_policy):
-        """Record exceptional TCP/elbow steps without shaping valid motion.
-
-        Physical feasibility belongs to the robot-side dynamic IK.  A finite
-        high-speed controller sample is therefore diagnostic information, not
-        a reason to replace the latest target with an interpolated trajectory.
-        Coordinate/source discontinuities are handled by the session contract.
-        """
-        result = dict(source_policy)
-        current = None
-        if message_accepted and target_available:
-            try:
-                current = {
-                    "left": (
-                        np.asarray(left_tcp_target[0], dtype=float).reshape(3),
-                        np.asarray(left_tcp_target[1], dtype=float).reshape(4),
-                    ),
-                    "right": (
-                        np.asarray(right_tcp_target[0], dtype=float).reshape(3),
-                        np.asarray(right_tcp_target[1], dtype=float).reshape(4),
-                    ),
-                    "left_elbow": np.asarray(
-                        left_elbow_target, dtype=float
-                    ).reshape(3),
-                    "right_elbow": np.asarray(
-                        right_elbow_target, dtype=float
-                    ).reshape(3),
-                }
-                if not all(
-                        np.all(np.isfinite(value))
-                        for pose in (current["left"], current["right"])
-                        for value in pose):
-                    current = None
-                elif not all(
-                        np.all(np.isfinite(current[key]))
-                        for key in ("left_elbow", "right_elbow")):
-                    current = None
-            except (TypeError, ValueError):
-                current = None
-
-        hard_position_step = 0.0
-        hard_orientation_step = 0.0
-        hard_discontinuity = False
-        with self._absolute_lock:
-            session_active = self._absolute_state in (
-                AbsoluteEnableState.CAPTURED,
-                AbsoluteEnableState.SWITCHING,
-                AbsoluteEnableState.ACTIVE,
-            ) or self._tracking_control_running
-            previous = self._tracking_safety_previous_tcp
-            same_source = source == self._tracking_safety_previous_source
-            if current is not None and previous is not None and same_source:
-                deltas = [
-                    self._tracking_pose_delta(current[side], previous[side])
-                    for side in ("left", "right")
-                ]
-                values = [value for pair in deltas for value in pair]
-                if all(np.isfinite(value) for value in values):
-                    hard_position_step = max(pair[0] for pair in deltas)
-                    elbow_steps = [
-                        float(np.linalg.norm(
-                            current[side + "_elbow"] -
-                            previous[side + "_elbow"]
-                        ))
-                        for side in ("left", "right")
-                    ]
-                    hard_position_step = max(
-                        hard_position_step, max(elbow_steps)
-                    )
-                    hard_orientation_step = max(pair[1] for pair in deltas)
-                    unique_frame = (
-                        hard_position_step > 1.0e-9
-                        or hard_orientation_step > 1.0e-7
-                    )
-                    hard_discontinuity = (
-                        self.enable_absolute_discontinuity_guard
-                        and session_active
-                        and teleop_running
-                        and result["source_allowed"]
-                        and unique_frame
-                        and (
-                            hard_position_step > self.absolute_max_tcp_position_step
-                            or hard_orientation_step > self.absolute_max_tcp_orientation_step
-                        )
-                    )
-
-            if hard_discontinuity:
-                self._tracking_hard_discontinuity_count += 1
-            if (current is not None
-                    and message_accepted
-                    and result["source_allowed"]):
-                self._tracking_safety_previous_tcp = {
-                    "left": (
-                        current["left"][0].copy(), current["left"][1].copy()
-                    ),
-                    "right": (
-                        current["right"][0].copy(), current["right"][1].copy()
-                    ),
-                    "left_elbow": current["left_elbow"].copy(),
-                    "right_elbow": current["right_elbow"].copy(),
-                }
-                self._tracking_safety_previous_source = source
-
-            result["hard_discontinuity_detected"] = hard_discontinuity
-            result["hard_position_step"] = hard_position_step
-            result["hard_orientation_step"] = hard_orientation_step
-            result["fault_hold_pending"] = self._absolute_fault_hold_pending
-            result["generation"] = self._absolute_generation
-            result["rearm_stable_count"] = self._tracking_matching_source_streak
-
-        if hard_discontinuity:
-            rospy.logwarn(
-                "[IkRos][TrackingSafety] Exceptional TCP/elbow step detected: "
-                "position %.3fm (limit %.3fm), orientation %.3frad (limit %.3frad). "
-                "Recorded for diagnosis; the finite target remains direct and robot-side "
-                "joint constraints own motion safety.",
-                hard_position_step,
-                self.absolute_max_tcp_position_step,
-                hard_orientation_step,
-                self.absolute_max_tcp_orientation_step,
-            )
-        return result
-
-    @staticmethod
-    def _tracking_pose_arrays(pose):
-        position = np.array(
-            [pose.position.x, pose.position.y, pose.position.z], dtype=float
-        )
-        quaternion = np.array(
-            [
-                pose.orientation.x,
-                pose.orientation.y,
-                pose.orientation.z,
-                pose.orientation.w,
-            ],
-            dtype=float,
-        )
-        quaternion_norm = np.linalg.norm(quaternion)
-        if np.isfinite(quaternion_norm) and quaternion_norm > 1.0e-12:
-            quaternion /= quaternion_norm
-        return position, quaternion
-
-    @staticmethod
-    def _tracking_quaternion_delta(left, right):
-        if not (np.all(np.isfinite(left)) and np.all(np.isfinite(right))):
-            return float("nan")
-        left_norm = np.linalg.norm(left)
-        right_norm = np.linalg.norm(right)
-        if left_norm < 1.0e-12 or right_norm < 1.0e-12:
-            if left_norm < 1.0e-12 and right_norm < 1.0e-12:
-                return 0.0
-            return float("nan")
-        dot = abs(float(np.dot(left / left_norm, right / right_norm)))
-        return 2.0 * math.acos(np.clip(dot, -1.0, 1.0))
-
-    @classmethod
-    def _tracking_pose_delta(cls, current, previous):
-        if current is None or previous is None:
-            return -1.0, -1.0
-        current_position, current_quaternion = current
-        previous_position, previous_quaternion = previous
-        if not (
-            np.all(np.isfinite(current_position))
-            and np.all(np.isfinite(previous_position))
-        ):
-            return float("nan"), float("nan")
-        return (
-            float(np.linalg.norm(current_position - previous_position)),
-            cls._tracking_quaternion_delta(current_quaternion, previous_quaternion),
-        )
-
-    @staticmethod
-    def _fill_debug_pose(destination, value):
-        if value is None:
-            return
-        position, quaternion = value
-        destination.position.x = float(position[0])
-        destination.position.y = float(position[1])
-        destination.position.z = float(position[2])
-        destination.orientation.x = float(quaternion[0])
-        destination.orientation.y = float(quaternion[1])
-        destination.orientation.z = float(quaternion[2])
-        destination.orientation.w = float(quaternion[3])
-
-    @staticmethod
-    def _fill_debug_point(destination, value):
-        if value is None:
-            return
-        destination.x = float(value[0])
-        destination.y = float(value[1])
-        destination.z = float(value[2])
-
-    @staticmethod
-    def _fill_debug_transform(destination, transform):
-        if transform is None:
-            return
-        quaternion = np.asarray(
-            matrix_to_quaternion(transform[:3, :3]), dtype=float
-        )
-        destination.translation.x = float(transform[0, 3])
-        destination.translation.y = float(transform[1, 3])
-        destination.translation.z = float(transform[2, 3])
-        destination.rotation.x = float(quaternion[0])
-        destination.rotation.y = float(quaternion[1])
-        destination.rotation.z = float(quaternion[2])
-        destination.rotation.w = float(quaternion[3])
-
-    @staticmethod
-    def _tracking_unique_dt(last_unique, receive_time, timestamp_ms):
-        if last_unique is None:
-            return 0.0
-        last_receive_time, last_timestamp_ms = last_unique
-        if timestamp_ms > 0 and last_timestamp_ms is not None and timestamp_ms > last_timestamp_ms:
-            return (timestamp_ms - last_timestamp_ms) * 1.0e-3
-        return max(0.0, receive_time - last_receive_time)
-
-    def _publish_quest_tcp_mapping_debug(
-            self, quest_msg, message_accepted, target_available, target_published,
-            source_policy):
-        """Record raw-source, mapping and the control-side source contract."""
-        if self.pub_quest_tcp_mapping_debug is None:
-            return
-
-        receive_time = time.monotonic()
-        timestamp_ms = int(quest_msg.timestamp_ms)
-        source = (
-            QuestTcpMappingDebug.SOURCE_QUEST_HAND_TRACKING
-            if quest_msg.is_hand_tracking
-            else QuestTcpMappingDebug.SOURCE_QUEST_CONTROLLER
-        )
-        previous_source = self._tracking_debug_previous_source
-        source_changed = (
-            previous_source != QuestTcpMappingDebug.SOURCE_UNKNOWN
-            and source != previous_source
-        )
-
-        counts = self._tracking_debug_counts
-        counts["received"] += 1
-        if source == QuestTcpMappingDebug.SOURCE_QUEST_HAND_TRACKING:
-            counts["hand_tracking"] += 1
-        else:
-            counts["controller"] += 1
-        if source_changed:
-            counts["source_switch"] += 1
-        if not quest_msg.is_high_confidence:
-            counts["low_confidence"] += 1
-
-        raw = None
-        if len(quest_msg.poses) > 0:
-            raw = [self._tracking_pose_arrays(pose) for pose in quest_msg.poses]
-        previous_raw = self._tracking_debug_previous_raw
-        max_raw_position_delta = -1.0
-        max_raw_orientation_delta = -1.0
-        raw_payload_duplicate = False
-        if raw is not None and previous_raw is not None and len(raw) == len(previous_raw):
-            raw_deltas = [
-                self._tracking_pose_delta(current, previous)
-                for current, previous in zip(raw, previous_raw)
-            ]
-            raw_position_deltas = np.asarray([value[0] for value in raw_deltas], dtype=float)
-            raw_orientation_deltas = np.asarray([value[1] for value in raw_deltas], dtype=float)
-            if np.all(np.isfinite(raw_position_deltas)) and np.all(np.isfinite(raw_orientation_deltas)):
-                max_raw_position_delta = float(np.max(raw_position_deltas))
-                max_raw_orientation_delta = float(np.max(raw_orientation_deltas))
-                raw_payload_duplicate = (
-                    max_raw_position_delta <= 1.0e-12
-                    and max_raw_orientation_delta <= 1.0e-12
-                )
-        if raw_payload_duplicate:
-            counts["raw_duplicate"] += 1
-
-        left_mapping = self.quest3_arm_info_transformer.get_tcp_mapping_diagnostics("Left")
-        right_mapping = self.quest3_arm_info_transformer.get_tcp_mapping_diagnostics("Right")
-        mapped = None
-        if left_mapping is not None and right_mapping is not None:
-            mapped = {
-                "left_source": (
-                    left_mapping["mapped_source_position"],
-                    left_mapping["mapped_source_quaternion"],
-                ),
-                "right_source": (
-                    right_mapping["mapped_source_position"],
-                    right_mapping["mapped_source_quaternion"],
-                ),
-                "left_tcp": (
-                    left_mapping["tcp_position"], left_mapping["tcp_quaternion"]
-                ),
-                "right_tcp": (
-                    right_mapping["tcp_position"], right_mapping["tcp_quaternion"]
-                ),
-            }
-        previous_mapped = self._tracking_debug_previous_mapped
-        mapped_target_duplicate = False
-        if mapped is not None and previous_mapped is not None:
-            left_tcp_delta = self._tracking_pose_delta(
-                mapped["left_tcp"], previous_mapped["left_tcp"]
-            )
-            right_tcp_delta = self._tracking_pose_delta(
-                mapped["right_tcp"], previous_mapped["right_tcp"]
-            )
-            if all(np.isfinite(value) for value in left_tcp_delta + right_tcp_delta):
-                mapped_target_duplicate = (
-                    max(left_tcp_delta[0], right_tcp_delta[0]) <= 1.0e-12
-                    and max(left_tcp_delta[1], right_tcp_delta[1]) <= 1.0e-12
-                )
-        if mapped_target_duplicate:
-            counts["mapped_duplicate"] += 1
-        if not source_policy["source_allowed"]:
-            counts["rejected_source"] += 1
-        if source_policy["source_hold_triggered"]:
-            counts["source_hold"] += 1
-        if source_policy["hard_discontinuity_detected"]:
-            counts["hard_discontinuity"] += 1
-
-        is_malformed = not message_accepted or not target_available or mapped is None
-        if is_malformed:
-            counts["malformed"] += 1
-            decision = QuestTcpMappingDebug.REJECTED_MALFORMED
-        elif source_policy["source_hold_latched"]:
-            decision = QuestTcpMappingDebug.REJECTED_SOURCE_HOLD
-        elif not source_policy["source_matches_mode"]:
-            decision = QuestTcpMappingDebug.REJECTED_SOURCE_MODE
-        elif not self.quest3_arm_info_transformer.is_runing:
-            decision = QuestTcpMappingDebug.OBSERVED_TELEOP_INACTIVE
-        elif target_published:
-            if source_policy["reference_governed"]:
-                decision = QuestTcpMappingDebug.PUBLISHED_GOVERNED
-            elif previous_mapped is None:
-                decision = QuestTcpMappingDebug.PUBLISHED_INITIAL
-            elif mapped_target_duplicate:
-                decision = QuestTcpMappingDebug.PUBLISHED_DUPLICATE
-            else:
-                decision = QuestTcpMappingDebug.PUBLISHED_UNIQUE
-        else:
-            decision = QuestTcpMappingDebug.REJECTED_MALFORMED
-        if target_published:
-            counts["target_published"] += 1
-
-        message = QuestTcpMappingDebug()
-        message.header.seq = self._tracking_debug_seq
-        self._tracking_debug_seq = (self._tracking_debug_seq + 1) & 0xFFFFFFFF
-        message.header.stamp = rospy.Time.now()
-        message.header.frame_id = "base_link"
-        if timestamp_ms > 0:
-            message.source_stamp = rospy.Time.from_sec(timestamp_ms * 1.0e-3)
-        message.source_timestamp_ms = timestamp_ms
-        message.source = source
-        message.previous_source = previous_source
-        message.decision = decision
-        message.configured_source_mode = int(self.tracking_source_mode)
-        with self._absolute_lock:
-            message.session_source = self._tracking_session_source
-        message.source_changed = source_changed
-        message.source_matches_mode = source_policy["source_matches_mode"]
-        message.source_allowed = source_policy["source_allowed"]
-        message.source_hold_latched = source_policy["source_hold_latched"]
-        message.source_hold_triggered = source_policy["source_hold_triggered"]
-        message.hard_discontinuity_detected = source_policy["hard_discontinuity_detected"]
-        message.fault_hold_pending = source_policy["fault_hold_pending"]
-        message.reference_governed = source_policy["reference_governed"]
-        message.is_high_confidence = bool(quest_msg.is_high_confidence)
-        message.message_accepted = bool(message_accepted)
-        message.teleop_running = bool(self.quest3_arm_info_transformer.is_runing)
-        message.target_available = bool(target_available)
-        message.target_published = bool(target_published)
-        message.source_stamp_changed = (
-            self._tracking_debug_previous_timestamp_ms is None
-            or timestamp_ms != self._tracking_debug_previous_timestamp_ms
-        )
-        message.raw_payload_duplicate = raw_payload_duplicate
-        message.mapped_target_duplicate = mapped_target_duplicate
-        message.pose_count = len(quest_msg.poses)
-        if self._tracking_debug_previous_receive_time is not None:
-            message.receive_dt = max(
-                0.0, receive_time - self._tracking_debug_previous_receive_time
-            )
-        if self._tracking_debug_previous_timestamp_ms is not None:
-            message.source_stamp_dt = (
-                timestamp_ms - self._tracking_debug_previous_timestamp_ms
-            ) * 1.0e-3
-
-        raw_is_unique = raw is not None and not raw_payload_duplicate
-        mapped_is_unique = mapped is not None and not mapped_target_duplicate
-        if raw_is_unique:
-            message.unique_raw_sample_dt = self._tracking_unique_dt(
-                self._tracking_debug_last_unique_raw_time, receive_time, timestamp_ms
-            )
-            self._tracking_debug_last_unique_raw_time = (receive_time, timestamp_ms)
-        if mapped_is_unique:
-            message.unique_mapped_sample_dt = self._tracking_unique_dt(
-                self._tracking_debug_last_unique_mapped_time, receive_time, timestamp_ms
-            )
-            self._tracking_debug_last_unique_mapped_time = (receive_time, timestamp_ms)
-        if self._tracking_debug_last_unique_raw_time is not None:
-            message.last_unique_raw_age = max(
-                0.0, receive_time - self._tracking_debug_last_unique_raw_time[0]
-            )
-        if self._tracking_debug_last_unique_mapped_time is not None:
-            message.last_unique_mapped_age = max(
-                0.0, receive_time - self._tracking_debug_last_unique_mapped_time[0]
-            )
-        message.hard_position_step_limit = self.absolute_max_tcp_position_step
-        message.hard_orientation_step_limit = self.absolute_max_tcp_orientation_step
-        message.hard_position_step = source_policy["hard_position_step"]
-        message.hard_orientation_step = source_policy["hard_orientation_step"]
-        message.governor_alpha = source_policy["governor_alpha"]
-        message.governor_position_error = source_policy["governor_position_error"]
-        message.governor_orientation_error = source_policy["governor_orientation_error"]
-        message.governor_position_step = source_policy["governor_position_step"]
-        message.governor_orientation_step = source_policy["governor_orientation_step"]
-
-        raw_indices = {
-            "raw_left_upper_arm_pose": 0,
-            "raw_left_lower_arm_pose": 1,
-            "raw_right_upper_arm_pose": 2,
-            "raw_right_lower_arm_pose": 3,
-            "raw_left_palm_pose": 4,
-            "raw_right_palm_pose": 5,
-            "raw_chest_pose": 23,
-        }
-        if raw is not None:
-            for field_name, index in raw_indices.items():
-                if index < len(raw):
-                    self._fill_debug_pose(getattr(message, field_name), raw[index])
-
-        if mapped is not None:
-            self._fill_debug_pose(message.left_mapped_source_pose, mapped["left_source"])
-            self._fill_debug_pose(message.right_mapped_source_pose, mapped["right_source"])
-            self._fill_debug_pose(message.left_tcp_pose, mapped["left_tcp"])
-            self._fill_debug_pose(message.right_tcp_pose, mapped["right_tcp"])
-            self._fill_debug_point(message.left_elbow_hint, left_mapping["elbow_hint"])
-            self._fill_debug_point(message.right_elbow_hint, right_mapping["elbow_hint"])
-            self._fill_debug_point(
-                message.left_upper_arm_direction, left_mapping["upper_direction"]
-            )
-            self._fill_debug_point(
-                message.left_forearm_direction, left_mapping["forearm_direction"]
-            )
-            self._fill_debug_point(
-                message.right_upper_arm_direction, right_mapping["upper_direction"]
-            )
-            self._fill_debug_point(
-                message.right_forearm_direction, right_mapping["forearm_direction"]
-            )
-            self._fill_debug_transform(
-                message.left_source_to_tcp, left_mapping["source_to_tcp"]
-            )
-            self._fill_debug_transform(
-                message.right_source_to_tcp, right_mapping["source_to_tcp"]
-            )
-        self._fill_debug_pose(
-            message.left_governed_tcp_pose, source_policy["governed_left_tcp"]
-        )
-        self._fill_debug_pose(
-            message.right_governed_tcp_pose, source_policy["governed_right_tcp"]
-        )
-
-        def write_delta(prefix, current, previous):
-            position_delta, orientation_delta = self._tracking_pose_delta(current, previous)
-            setattr(message, prefix + "_position_delta", position_delta)
-            setattr(message, prefix + "_orientation_delta", orientation_delta)
-
-        message.max_raw_position_delta = max_raw_position_delta
-        message.max_raw_orientation_delta = max_raw_orientation_delta
-        write_delta(
-            "chest",
-            raw[23] if raw is not None and len(raw) > 23 else None,
-            previous_raw[23] if previous_raw is not None and len(previous_raw) > 23 else None,
-        )
-        write_delta(
-            "left_raw_palm",
-            raw[4] if raw is not None and len(raw) > 4 else None,
-            previous_raw[4] if previous_raw is not None and len(previous_raw) > 4 else None,
-        )
-        write_delta(
-            "right_raw_palm",
-            raw[5] if raw is not None and len(raw) > 5 else None,
-            previous_raw[5] if previous_raw is not None and len(previous_raw) > 5 else None,
-        )
-        for prefix, key in (
-                ("left_mapped", "left_source"),
-                ("right_mapped", "right_source"),
-                ("left_tcp", "left_tcp"),
-                ("right_tcp", "right_tcp")):
-            write_delta(
-                prefix,
-                mapped[key] if mapped is not None else None,
-                previous_mapped[key] if previous_mapped is not None else None,
-            )
-
-        message.received_count = counts["received"]
-        message.controller_count = counts["controller"]
-        message.hand_tracking_count = counts["hand_tracking"]
-        message.source_switch_count = counts["source_switch"]
-        message.low_confidence_count = counts["low_confidence"]
-        message.malformed_count = counts["malformed"]
-        message.raw_duplicate_count = counts["raw_duplicate"]
-        message.mapped_duplicate_count = counts["mapped_duplicate"]
-        message.target_published_count = counts["target_published"]
-        message.rejected_source_count = counts["rejected_source"]
-        message.source_hold_count = counts["source_hold"]
-        message.hard_discontinuity_count = counts["hard_discontinuity"]
-        message.governor_activation_count = source_policy["governor_activation_count"]
-        message.absolute_generation = source_policy["generation"]
-        message.rearm_stable_count = source_policy["rearm_stable_count"]
-        self.pub_quest_tcp_mapping_debug.publish(message)
-
-        if source_changed:
-            rospy.logwarn(
-                "[Quest3 TCP] source switch %d->%d: confidence=%s, raw_palm_delta="
-                "L %.4fm/%.3frad R %.4fm/%.3frad, tcp_delta="
-                "L %.4fm/%.3frad R %.4fm/%.3frad",
-                previous_source,
-                source,
-                "high" if quest_msg.is_high_confidence else "low",
-                message.left_raw_palm_position_delta,
-                message.left_raw_palm_orientation_delta,
-                message.right_raw_palm_position_delta,
-                message.right_raw_palm_orientation_delta,
-                message.left_tcp_position_delta,
-                message.left_tcp_orientation_delta,
-                message.right_tcp_position_delta,
-                message.right_tcp_orientation_delta,
-            )
-
-        self._tracking_debug_previous_source = source
-        self._tracking_debug_previous_timestamp_ms = timestamp_ms
-        self._tracking_debug_previous_receive_time = receive_time
-        if raw is not None:
-            self._tracking_debug_previous_raw = raw
-        if mapped is not None:
-            self._tracking_debug_previous_mapped = mapped
 
     @staticmethod
     def _absolute_vector(value, size):
@@ -1706,6 +1150,52 @@ class IkRos:
             self._absolute_latest_measured_q_time = time.monotonic()
             self._absolute_latest_measured_q_source = source
 
+    def _start_velocity_session_locked(self, reason):
+        """Bind operator intent; C++ binds geometry and owns the execution state."""
+        self._bump_absolute_generation_locked()
+        self._absolute_session_id += 1
+        self._tracking_session_source = self._tracking_last_accepted_source
+        self._absolute_state = AbsoluteEnableState.SWITCHING
+        self._absolute_reason = reason
+        self._absolute_switch_start_time = time.monotonic()
+        self._absolute_mode_request_time = None
+        self._absolute_resume_after_prepare = False
+        self._absolute_prepare_complete = False
+        self.arm_mode_changing = True
+
+    def _velocity_session_cycle(self, state, generation):
+        if state != AbsoluteEnableState.SWITCHING:
+            return None, None, None
+        with self._absolute_lock:
+            requested = self._absolute_mode_request_time
+            started = self._absolute_switch_start_time
+        if time.monotonic() - started > self.absolute_enable_mode_timeout:
+            self._finish_absolute_session(AbsoluteEnableReason.MODE_TIMEOUT, True,
+                                          "Timed out binding velocity session and mode 2")
+            return None, None, None
+        if requested is None:
+            if not self._request_absolute_external_mode(generation):
+                self._finish_absolute_session(AbsoluteEnableReason.MODE_SERVICE_FAILED, True,
+                                              "Velocity mode request failed")
+            return None, None, None
+        with self._absolute_lock:
+            feedback = self._fixed_consumer_status
+            bound = (feedback is not None and 0 <= time.monotonic()-feedback[0] <= .15
+                     and feedback[1].session_id == self._absolute_session_id
+                     and feedback[1].generation == generation and feedback[1].session_bound)
+            mode_ready = (self._absolute_mode_status == (2, 2, False)
+                          and self._absolute_mode_status_time is not None
+                          and self._absolute_mode_status_time >= requested)
+            if (bound and mode_ready and generation == self._absolute_generation
+                    and not self._absolute_stop_pending and not self._absolute_fault_hold_pending):
+                self._absolute_state = (AbsoluteEnableState.RETURNING_TO_PREP
+                    if self._fixed_prepare_bootstrap else AbsoluteEnableState.ACTIVE)
+                self._absolute_reason = AbsoluteEnableReason.MODE_READY
+                self._fixed_prepare_bootstrap = False
+                self.arm_mode_changing = False
+        self._publish_absolute_enable_status()
+        return None, None, None
+
     def _queue_absolute_capture_locked(self, reason, rejection_state):
         """Snapshot the latest target and measured joints while holding _absolute_lock."""
         generation = self._bump_absolute_generation_locked()
@@ -1753,6 +1243,8 @@ class IkRos:
             if latest_target is not None:
                 self._absolute_latest_target = latest_target
 
+            if not self._admit_velocity_gesture_locked(gesture_running):
+                return None
             previous_running = self._absolute_gesture_running
             self._absolute_gesture_running = bool(gesture_running)
             if self._fixed_operation_block or self._fixed_prepare_bootstrap:
@@ -1824,6 +1316,68 @@ class IkRos:
         if publish_status:
             self._publish_absolute_enable_status()
         return publish_target
+
+    def _handle_velocity_gesture_edge(self, gesture_running):
+        if bool(gesture_running) == self._absolute_gesture_running:
+            return
+        publish_status = False
+        with self._absolute_lock:
+            if not self._admit_velocity_gesture_locked(gesture_running):
+                return None
+            previous_running = self._absolute_gesture_running
+            self._absolute_gesture_running = bool(gesture_running)
+            if self._fixed_operation_block or self._fixed_prepare_bootstrap:
+                # Do not swallow receiver/head/finger callbacks; only suppress
+                # gesture-driven arm transactions while fixed or preparing.
+                return None
+            if gesture_running and not previous_running:
+                if self._absolute_state in (
+                        AbsoluteEnableState.RETURNING_TO_PREP,
+                        AbsoluteEnableState.PREPARED):
+                    # X+A, not a trigger re-press, authorizes resumption from
+                    # the explicit ready-pose lifecycle.
+                    return None
+                # 启用沿只采样最近一帧完整有效目标；当前手势帧无效时保留此前的
+                # 有效缓存，随后由统一的新鲜度检查决定是否允许接管。
+                self._fixed_operation_block = True
+                self._queue_fixed_request_locked(2, 'dependencies')
+                publish_status = True
+                rospy.loginfo(
+                    "[IkRos][AbsoluteEnable] Session %d captured on enable edge",
+                    self._absolute_session_id,
+                )
+            elif not gesture_running and previous_running:
+                if self._absolute_state in (
+                    AbsoluteEnableState.RETURNING_TO_PREP,
+                    AbsoluteEnableState.PREPARED,
+                ):
+                    # X+A ready-pose return is a self-contained safety
+                    # trajectory.  Releasing the controller trigger must not
+                    # revoke its 21-D authority halfway through the motion.
+                    self._tracking_control_running = False
+                else:
+                    self._bump_absolute_generation_locked()
+                if self._absolute_state in (
+                    AbsoluteEnableState.SWITCHING,
+                    AbsoluteEnableState.ACTIVE,
+                ):
+                    self._absolute_stop_pending = True
+                elif self._absolute_state not in (
+                    AbsoluteEnableState.RETURNING_TO_PREP,
+                    AbsoluteEnableState.PREPARED,
+                ):
+                    self._absolute_pending_capture = None
+                    self._absolute_frozen_target = None
+                    self._absolute_state = AbsoluteEnableState.WAITING
+                    self._absolute_reason = AbsoluteEnableReason.NONE
+                    self._absolute_pause_pending = False
+                    self._absolute_resume_request_time = None
+                    self._tracking_control_running = False
+                    self._reset_tracking_session_source_locked()
+                    publish_status = True
+
+        if publish_status:
+            self._publish_absolute_enable_status()
 
     def _compose_absolute_q_seed(self, measured_arm_q):
         if self.enable_velocity_ik_takeover:
@@ -2014,11 +1568,24 @@ class IkRos:
                     max(0., p['deadline'] - time.monotonic()) if p else 0.,
                     float(self._absolute_session_id), float(self._absolute_generation)]))
 
-    def fixed_arm_operation_callback(self, req):
+    def fixed_arm_operation_callback(self, req, arm_hold_only=False):
         """Operation adapter: real capture/consumer handshake, never a second writer."""
         if not self._fixed_operation_mutex.acquire(False):
             return changeArmCtrlModeResponse(False, self._fixed_operation_mode(), "Operation is still pending")
         try:
+            with self._absolute_lock:
+                if arm_hold_only and not (
+                        self._absolute_state == AbsoluteEnableState.ACTIVE
+                        and (req.control_mode == 0 or
+                             (req.control_mode == 2 and getattr(self, '_fixed_arm_hold', False)))):
+                    return changeArmCtrlModeResponse(False, self._fixed_operation_mode(),
+                        "X+B only holds/resumes an active arm session; use X+A to restart")
+                # The first controller follow must come from the trigger edge,
+                # never the X+A/X+B service path. Optical OK keeps its own entry.
+                if (req.control_mode in (1, 2)
+                        and not getattr(self, '_controller_start_completed', False)):
+                    return changeArmCtrlModeResponse(False, self._fixed_operation_mode(),
+                        "First controller start requires both front triggers; X+A is available after successful follow")
             return self._fixed_arm_operation(req.control_mode)
         finally:
             self._publish_fixed_operation_state()
@@ -2027,11 +1594,9 @@ class IkRos:
     def _follow_input_time_locked(self):
         # Optical following has no controller heartbeat. Require its accepted
         # pose stream instead; wheel commands keep their separate joystick gate.
-        target = self._absolute_latest_target
-        if (target is not None
-                and target.get('source') == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+        if (self._tracking_last_accepted_source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
                 and self.tracking_source_mode != TrackingSourceMode.CONTROLLER):
-            return target['receive_time']
+            return self._last_valid_tcp_receive
         return self._joystick_receive_monotonic
 
     def _maybe_start_optical_follow(self, source, message_accepted):
@@ -2087,13 +1652,32 @@ class IkRos:
             self._fixed_operation_block = False
             self._fixed_prepare_bootstrap = False
             self._tracking_session_source = TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+            self._optical_start_generation = self._absolute_generation
             transformer.is_runing = True
+
+    def _admit_velocity_gesture_locked(self, gesture_running):
+        """Only a fresh fifty-frame optical OK may create a gesture session.
+
+        Controller starts already have an explicit operation transaction.
+        A raw running latch (including stale controller state) grants nothing.
+        """
+        if (not self.enable_velocity_ik_takeover or not gesture_running
+                or self._absolute_gesture_running
+                or self._fixed_operation_block or self._fixed_prepare_bootstrap):
+            return True
+        allowed = (self.tracking_source_mode != TrackingSourceMode.CONTROLLER
+                   and self._tracking_last_accepted_source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+                   and getattr(self, '_optical_start_generation', None) == self._absolute_generation)
+        self._optical_start_generation = None
+        if not allowed:
+            self.quest3_arm_info_transformer.is_runing = False
+        return allowed
 
     def _fixed_capture_input_error_locked(self):
         """Explicit button authority does not replace fresh pose/sensor input."""
         now = time.monotonic()
-        target = self._absolute_latest_target
-        target_age = float("inf") if target is None else now - target["receive_time"]
+        target_age = (float("inf") if self._last_valid_tcp_receive is None
+                      else now - self._last_valid_tcp_receive)
         joint_age = (float("inf") if self._absolute_latest_measured_q is None
                      or self._absolute_latest_measured_q_time is None
                      else now - self._absolute_latest_measured_q_time)
@@ -2125,38 +1709,8 @@ class IkRos:
         self._absolute_pause_pending = False
         self._absolute_external_mode_reset_pending = False
 
-    def _interrupt_fixed_prepare_locked(self):
-        """Recapture a live PREPARE transaction; solver retains owned q/dq/ddq."""
-        now = time.monotonic()
-        p = self._fixed_pending_operation
-        error = self._fixed_capture_input_error_locked()
-        if (error or self._fixed_control_enabled is not True
-                or self._absolute_mode_status != (2, 2, False)
-                or not self._fixed_consumer_ack_locked(now)
-                or self._absolute_stop_pending or self._absolute_fault_hold_pending
-                or self._tracking_source_hold_latched or self._absolute_external_mode_reset_pending
-                or self.quest3_arm_info_transformer.is_stop_gesture()
-                or (p is not None and (p['generation'] != self._absolute_generation
-                    or p['stop_epoch'] != self._fixed_stop_epoch
-                    or p['epoch'] != self._body_coordinate_epoch
-                    or p['source'] != self._configured_tracking_source()
-                    or now >= p['deadline']))):
-            reason = error or 'stop, stale execution owner, disabled control or changed transaction'
-            rospy.logwarn('[FixedStart] PREPARE interruption rejected: %s', reason)
-            return False, reason
-        self._authorize_fixed_follow_locked()
-        self._fixed_prepare_bootstrap = False
-        self._fixed_operation_block = False
-        self._queue_absolute_capture_locked(AbsoluteEnableReason.RESUME_REQUEST,
-                                            AbsoluteEnableState.WAIT_RELEASE)
-        self._queue_fixed_request_locked(2, 'acquisition')
-        self._fixed_pending_operation['deadline'] = now + self._fixed_acquisition_timeout
-        self._fixed_operation_phase = 2
-        rospy.loginfo('[FixedStart] PREPARE interrupted; recapturing follow generation %d',
-                      self._absolute_generation)
-        return True, 'PREPARE interrupted; continuous reference retained while follow reacquires'
 
-    def _fixed_arm_operation(self, mode):
+    def _fixed_arm_operation(self, mode, origin="operation"):
         def result(ok, message):
             return changeArmCtrlModeResponse(ok, self._fixed_operation_mode(), message)
         if not (self.enable_absolute_target_alignment and self.enable_velocity_ik_takeover):
@@ -2164,6 +1718,16 @@ class IkRos:
         if mode not in (0, 1, 2):
             return result(False, "Invalid operation mode")
         with self._absolute_lock:
+            if mode in (1, 2):
+                completed = getattr(self, '_controller_start_completed', False)
+                if origin == "first_trigger":
+                    if (completed or mode != 2
+                            or not getattr(self, '_controller_start_down', False)
+                            or self.tracking_source_mode == TrackingSourceMode.HAND
+                            or self._tracking_last_accepted_source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING):
+                        return result(False, "First-trigger startup is not eligible")
+                elif not completed:
+                    return result(False, "First controller start requires both front triggers")
             held = getattr(self, '_fixed_arm_hold', False)
             torso = getattr(self, '_torso_controls', None)
             # Keep the existing execution owner while pausing only the arms,
@@ -2216,9 +1780,10 @@ class IkRos:
             if self._tracking_source_hold_latched:
                 # Preserve explicit source-fault rearm, including stability gates.
                 if mode == 2:
-                    self.arm_mode_callback(Int32(data=2))
+                    self.arm_mode_callback(Int32(data=2), _authorized_operation=True)
                     if not self._tracking_source_hold_latched:
-                        self._fixed_operation_block = False
+                        self._fixed_operation_block = True
+                        self._queue_fixed_request_locked(2, 'dependencies')
                     return result(not self._tracking_source_hold_latched,
                                   "Source rearm evaluated; a fresh allowed frame is still required")
                 if not self._tracking_can_rearm_locked():
@@ -2276,6 +1841,8 @@ class IkRos:
             self._fixed_operation_error = False
             self._fixed_operation_block = True
             self._queue_fixed_request_locked(mode, 'dependencies')
+            if origin == 'first_trigger':
+                self._fixed_pending_operation['admission_source'] = TeleopTcpTarget.SOURCE_QUEST_CONTROLLER
         return result(True, "Request accepted; waiting for readiness and real execution acknowledgement")
 
     def _queue_fixed_request_locked(self, mode, phase):
@@ -2338,17 +1905,24 @@ class IkRos:
                     or self._absolute_stop_pending or self._absolute_external_mode_reset_pending
                     or self.quest3_arm_info_transformer.is_stop_gesture()):
                 failure = 'Pending operation cancelled by stop/fault/session/source change'
+            elif (p.get('admission_source') is not None
+                    and self._tracking_last_accepted_source not in (
+                        TeleopTcpTarget.SOURCE_UNKNOWN, p['admission_source'])):
+                failure = 'Pending controller start cancelled by input-source change'
             elif now >= p['deadline']:
-                failure = 'Operation timed out in ' + p['phase'] + '; press X+A again after checking readiness'
+                failure = ('Operation timed out in ' + p['phase'] + '; check readiness and retry with ' +
+                           ('X+A' if getattr(self, '_controller_start_completed', False) else 'both front triggers'))
             elif (self._follow_input_time_locked() is None
                     or not 0 <= now-self._follow_input_time_locked() <= .5):
                 age = (float('inf') if self._follow_input_time_locked() is None
                        else now-self._follow_input_time_locked())
                 failure = ('Pending operation cancelled: operator input %s (age=%.6fs)' %
                            ('timestamp invalid' if age < 0 else 'stream lost', age))
-            elif (self._absolute_latest_target is not None
-                    and not 0 <= now-self._absolute_latest_target['receive_time'] <= .5):
-                age = now-self._absolute_latest_target['receive_time']
+            elif (self._last_valid_tcp_receive is not None
+                    and not (p['mode'] == 1 and self._absolute_state in (
+                        AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED))
+                    and not 0 <= now-self._last_valid_tcp_receive <= .5):
+                age = now-self._last_valid_tcp_receive
                 failure = ('Pending operation cancelled: pose %s (age=%.6fs)' %
                            ('timestamp invalid' if age < 0 else 'stream lost', age))
             elif p['phase'] == 'dependencies':
@@ -2362,14 +1936,14 @@ class IkRos:
                     self._authorize_fixed_follow_locked()
                 self._fixed_prepare_bootstrap = p['mode'] == 1
                 self._fixed_operation_block = p['mode'] == 1
-                self._queue_absolute_capture_locked(AbsoluteEnableReason.RESUME_REQUEST,
-                                                    AbsoluteEnableState.WAIT_RELEASE)
+                self._start_velocity_session_locked(AbsoluteEnableReason.RESUME_REQUEST)
                 self._absolute_resume_after_prepare = p['resume']
                 p.update(phase='acquisition', generation=self._absolute_generation,
                          deadline=now+self._fixed_acquisition_timeout)
                 self._fixed_operation_phase = 2
             elif self._fixed_consumer_ack_locked(now):
                 if p['mode'] == 2 and self._absolute_state == AbsoluteEnableState.ACTIVE:
+                    self._controller_start_completed = True
                     self._fixed_pending_operation = None
                     self._fixed_operation_phase = 4
                     rospy.loginfo('[FixedStart] Follow active: valid IK reference and execution lease confirmed')
@@ -3099,6 +2673,8 @@ class IkRos:
                 message="External arm-mode change ended the absolute VR session",
             )
             return None, None, None
+        if self.enable_velocity_ik_takeover:
+            return self._velocity_session_cycle(state, generation)
         if state == AbsoluteEnableState.RESUME_PENDING:
             now = time.monotonic()
             publish_status = False
@@ -4082,20 +3658,6 @@ class IkRos:
         # print(f"received joint_states: {self.__joint_states}")
 
     @staticmethod
-    def _finite_body_pose(pose_info):
-        if pose_info is None:
-            return False
-        values = (
-            pose_info.position.x, pose_info.position.y, pose_info.position.z,
-            pose_info.orientation.x, pose_info.orientation.y,
-            pose_info.orientation.z, pose_info.orientation.w,
-        )
-        if not all(math.isfinite(float(value)) for value in values):
-            return False
-        quat_norm = math.sqrt(sum(float(value) ** 2 for value in values[3:]))
-        return quat_norm > 0.5
-
-    @staticmethod
     def _copy_body_pose(destination, source):
         destination.position.x = float(source.position.x)
         destination.position.y = float(source.position.y)
@@ -4122,12 +3684,10 @@ class IkRos:
         samples = {}
         for name, index in indices.items():
             sample = quest_msg.poses[index] if len(quest_msg.poses) > index else None
-            samples[name] = sample if self._finite_body_pose(sample) else None
+            samples[name] = (sample if index in self.quest3_arm_info_transformer.valid_pose_indices else None)
 
         body_valid = (
             samples["chest"] is not None
-            and (not self.quest3_arm_info_transformer.skeleton_filter_enabled
-                 or bool(self.quest3_arm_info_transformer.estimated_bones))
         )
         # Fast coherent human motion is NOT evidence of tracking recentering.
         # Root is optional diagnostic data, not a torso validity dependency.
@@ -4147,31 +3707,19 @@ class IkRos:
             setattr(tcp_msg, valid_field, bool(valid))
             if valid:
                 self._copy_body_pose(destination, samples[name])
-                estimator = self.quest3_arm_info_transformer
-                state = estimator.estimated_bones.get(indices[name])
-                if state is not None:
-                    T = state[0]
-                    destination.position.x, destination.position.y, destination.position.z = T[:3, 3]
-                    q = matrix_to_quaternion(T[:3, :3])
-                    (destination.orientation.x, destination.orientation.y,
-                     destination.orientation.z, destination.orientation.w) = q
-
         estimator = self.quest3_arm_info_transformer
-        if (body_valid and estimator.estimated_bones and
-                all(side in estimator.tcp_estimated_rates for side in ("Left", "Right"))):
+        if estimator.hand_filter_enabled:
             def vector(out, value):
                 out.x, out.y, out.z = map(float, value)
             for side, twist, elbow in (
                     ("Left", tcp_msg.left_tcp_twist, tcp_msg.left_elbow_velocity),
                     ("Right", tcp_msg.right_tcp_twist, tcp_msg.right_elbow_velocity)):
-                linear, angular, hint = estimator.tcp_estimated_rates[side]
-                vector(twist.linear, linear); vector(twist.angular, angular); vector(elbow, hint)
-            vector(tcp_msg.chest_twist.linear, estimator.estimated_bones[23][1])
-            vector(tcp_msg.chest_twist.angular, estimator.estimated_bones[23][2])
-            vector(tcp_msg.root_velocity, estimator.estimated_bones[22][1])
+                if side not in estimator.tcp_estimated_rates:
+                    continue
+                linear, angular = estimator.tcp_estimated_rates[side]
+                vector(twist.linear, linear); vector(twist.angular, angular)
             tcp_msg.estimated_twists_valid = True
 
-    @runtime_probe.callback
     def _scheduled_quest_bone_poses_callback(self, msg):
         try:
             status = self._mapper_input_scheduler.apply_current_thread()
@@ -4180,54 +3728,52 @@ class IkRos:
         except Exception as exc:
             # Scheduling failure must never consume an input frame.
             rospy.logwarn("Mapper input scheduling unavailable: %s", exc)
-        runtime_probe.point(1)
         return self.quest_bone_poses_callback(msg)
 
     def quest_bone_poses_callback(self, quest_bone_poses_msg):
-        runtime_probe.point(2)
-        mapper_callback_cpu_ns = time.thread_time_ns()
         received_monotonic = time.monotonic()
         received_ros = rospy.Time.now()
         stamp = float(quest_bone_poses_msg.timestamp_ms) * 0.001
-        gate = self._input_clock_gate
+        source = (TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+                  if quest_bone_poses_msg.is_hand_tracking
+                  else TeleopTcpTarget.SOURCE_QUEST_CONTROLLER)
+        gate = self._input_clock_gates[source]
+        if stamp == gate.latest_source:
+            return
         if (gate.latest_source is not None and stamp < gate.latest_source
-                and received_monotonic - self._last_fresh_source_receive > 0.5):
-            # Sustained device-clock restart, never inferred from pose speed.
+                and received_monotonic - self._last_fresh_source_receive[source] > 0.5):
             gate.reset()
-            self._body_coordinate_epoch += 1
+            if source == self._configured_tracking_source():
+                self._body_coordinate_epoch += 1
         if not gate.accept(quest_bone_poses_msg.timestamp_ms, received_monotonic):
             with self._absolute_lock:
                 self._optical_ok_count = 0
             rospy.logwarn_throttle(1.0, "[IkRos] discarded delayed/reordered raw Quest sample")
             return
-        self._last_fresh_source_receive = received_monotonic
-        mapper_start_ns = time.monotonic_ns()
-        mapper_transform_cpu_ns = time.thread_time_ns()
-        runtime_probe.point(10)
+        self._last_fresh_source_receive[source] = received_monotonic
+        tcp_msg = TeleopTcpTarget()
         with self._absolute_lock:
-            runtime_probe.point(11)
-            self.quest3_arm_info_transformer.skeleton_contract = (
-                self._absolute_session_id, self._absolute_generation,
-                self._body_coordinate_epoch)
-        runtime_probe.point(30)
+            session_id, generation, coordinate_epoch = (
+                self._absolute_session_id, self._absolute_generation, self._body_coordinate_epoch)
+            absolute_state = self._absolute_state
+            hold_latched, fault_pending = self._tracking_source_hold_latched, self._absolute_fault_hold_pending
+            stop_pending = self._absolute_stop_pending
+            external_reset_pending = self._absolute_external_mode_reset_pending
+            joystick_receive = self._joystick_receive_monotonic
+            prepare_bootstrap = self._fixed_prepare_bootstrap
+            source_policy = self._tracking_source_policy_locked(
+                source, self.quest3_arm_info_transformer.is_runing)
+            self._fill_subsystem_permissions_locked(tcp_msg, received_monotonic)
+        self.quest3_arm_info_transformer.hand_filter_contract = (
+            session_id, generation, coordinate_epoch)
         read_accepted = self.quest3_arm_info_transformer.read_msg(
-            quest_bone_poses_msg, defer_visuals=self.enable_velocity_ik_takeover)
-        runtime_probe.point(31)
-        mapper_transform_end_ns = time.monotonic_ns()
-        mapper_transform_end_cpu_ns = time.thread_time_ns()
+            quest_bone_poses_msg, defer_visuals=self.enable_velocity_ik_takeover,
+            accept_hands=source_policy["source_allowed"])
         message_accepted = (
             bool(read_accepted)
             and self.quest3_arm_info_transformer.pose_info_list is quest_bone_poses_msg.poses
         )
-        source = (
-            TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
-            if quest_bone_poses_msg.is_hand_tracking
-            else TeleopTcpTarget.SOURCE_QUEST_CONTROLLER
-        )
         self._maybe_start_optical_follow(source, message_accepted)
-        source_policy = self._tracking_source_policy(
-            source, self.quest3_arm_info_transformer.is_runing
-        )
 
         left_pose, left_elbow_pos = self.quest3_arm_info_transformer.get_hand_pose("Left")
         right_pose, right_elbow_pos = self.quest3_arm_info_transformer.get_hand_pose("Right")
@@ -4239,26 +3785,12 @@ class IkRos:
         right_tcp_target, right_tcp_elbow_hint = (
             self.quest3_arm_info_transformer.get_tcp_target("Right")
         )
-        mapper_targets_end_ns = time.monotonic_ns()
-        runtime_probe.point(32)
         target_available = (
             left_tcp_target is not None
             and right_tcp_target is not None
             and (self.enable_velocity_ik_takeover or (
                 left_tcp_elbow_hint is not None and right_tcp_elbow_hint is not None))
         )
-        source_policy = self._tracking_input_safety_policy(
-            source,
-            self.quest3_arm_info_transformer.is_runing,
-            message_accepted,
-            target_available,
-            left_tcp_target,
-            right_tcp_target,
-            left_tcp_elbow_hint,
-            right_tcp_elbow_hint,
-            source_policy,
-        )
-
         # This is the common control gate.  Diagnostics may inspect every raw
         # frame. Confidence is diagnostic only; malformed or disallowed-source
         # frames must not overwrite the shared target consumed by q-only IK.
@@ -4267,18 +3799,15 @@ class IkRos:
             and source_policy["source_allowed"]
         )
         if control_frame_accepted:
+            if target_available:
+                self._last_valid_tcp_receive = received_monotonic
             self.__target_pose = left_pose
             self.__left_elbow_pos = left_elbow_pos
             self.__target_pose_right = right_pose
             self.__right_elbow_pos = right_elbow_pos
             self.hand_finger_data = [left_finger_joints, right_finger_joints]
-            runtime_probe.point(12)
-            with self._absolute_lock:
-                runtime_probe.point(13)
-                self._tracking_last_accepted_source = source
-                self._tracking_control_running = bool(
-                    self.quest3_arm_info_transformer.is_runing
-                )
+            self._tracking_last_accepted_source = source
+            self._tracking_control_running = bool(self.quest3_arm_info_transformer.is_runing)
             if (not self.__recieved_new_target_pose
                     and self.__target_pose is not None
                     and self.__target_pose_right is not None
@@ -4291,7 +3820,8 @@ class IkRos:
         effective_right_tcp_target = right_tcp_target
         effective_left_tcp_elbow_hint = left_tcp_elbow_hint
         effective_right_tcp_elbow_hint = right_tcp_elbow_hint
-        if self.enable_absolute_target_alignment and control_frame_accepted:
+        if (not self.enable_velocity_ik_takeover and
+                self.enable_absolute_target_alignment and control_frame_accepted):
             raw_absolute_target = self._build_absolute_target_snapshot(
                 quest_bone_poses_msg, control_frame_accepted
             )
@@ -4317,10 +3847,8 @@ class IkRos:
         tcp_contract_should_publish = (
             self.robot_type == 1
             and tcp_frame_is_current
-            and target_available
         )
         if tcp_contract_should_publish:
-            tcp_msg = TeleopTcpTarget()
             tcp_msg.header.seq = self._tcp_target_seq
             self._tcp_target_seq = (self._tcp_target_seq + 1) & 0xFFFFFFFF
             tcp_msg.header.stamp = rospy.Time.from_sec(
@@ -4332,20 +3860,11 @@ class IkRos:
             tcp_msg.left_controlled_frame = "left_teleop_tcp"
             tcp_msg.right_controlled_frame = "right_teleop_tcp"
 
-            tcp_msg.left_tcp_pose.position.x = float(effective_left_tcp_target[0][0])
-            tcp_msg.left_tcp_pose.position.y = float(effective_left_tcp_target[0][1])
-            tcp_msg.left_tcp_pose.position.z = float(effective_left_tcp_target[0][2])
-            tcp_msg.left_tcp_pose.orientation.x = float(effective_left_tcp_target[1][0])
-            tcp_msg.left_tcp_pose.orientation.y = float(effective_left_tcp_target[1][1])
-            tcp_msg.left_tcp_pose.orientation.z = float(effective_left_tcp_target[1][2])
-            tcp_msg.left_tcp_pose.orientation.w = float(effective_left_tcp_target[1][3])
-            tcp_msg.right_tcp_pose.position.x = float(effective_right_tcp_target[0][0])
-            tcp_msg.right_tcp_pose.position.y = float(effective_right_tcp_target[0][1])
-            tcp_msg.right_tcp_pose.position.z = float(effective_right_tcp_target[0][2])
-            tcp_msg.right_tcp_pose.orientation.x = float(effective_right_tcp_target[1][0])
-            tcp_msg.right_tcp_pose.orientation.y = float(effective_right_tcp_target[1][1])
-            tcp_msg.right_tcp_pose.orientation.z = float(effective_right_tcp_target[1][2])
-            tcp_msg.right_tcp_pose.orientation.w = float(effective_right_tcp_target[1][3])
+            for target, pose in ((effective_left_tcp_target, tcp_msg.left_tcp_pose),
+                                 (effective_right_tcp_target, tcp_msg.right_tcp_pose)):
+                if target is not None:
+                    pose.position.x, pose.position.y, pose.position.z = map(float, target[0])
+                    pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w = map(float, target[1])
 
             tcp_msg.left_elbow_hint_valid = effective_left_tcp_elbow_hint is not None
             tcp_msg.right_elbow_hint_valid = effective_right_tcp_elbow_hint is not None
@@ -4357,79 +3876,70 @@ class IkRos:
                 tcp_msg.right_elbow_hint.x = float(effective_right_tcp_elbow_hint[0])
                 tcp_msg.right_elbow_hint.y = float(effective_right_tcp_elbow_hint[1])
                 tcp_msg.right_elbow_hint.z = float(effective_right_tcp_elbow_hint[2])
-            runtime_probe.point(14)
-            with self._absolute_lock:
-                runtime_probe.point(15)
-                absolute_state = self._absolute_state
-                tcp_msg.session_id = int(self._absolute_session_id)
-                tcp_msg.generation = int(self._absolute_generation)
-                tcp_msg.absolute_state = int(absolute_state)
-                if not self.enable_absolute_target_alignment:
-                    contract_state = TeleopTcpTarget.CONTROL_ACTIVE
-                elif absolute_state == AbsoluteEnableState.SWITCHING:
-                    contract_state = TeleopTcpTarget.CONTROL_ARMED
-                elif absolute_state == AbsoluteEnableState.ACTIVE:
-                    contract_state = (
-                        TeleopTcpTarget.CONTROL_ACTIVE
-                        if ((source_policy["source_allowed"] or self.enable_velocity_ik_takeover)
-                            and not self._tracking_source_hold_latched
-                            and not self._absolute_fault_hold_pending
-                            and self.quest3_arm_info_transformer.is_runing)
-                        else TeleopTcpTarget.CONTROL_HOLD
-                    )
-                elif absolute_state in (
-                        AbsoluteEnableState.RETURNING_TO_PREP,
-                        AbsoluteEnableState.PREPARED):
-                    contract_state = TeleopTcpTarget.CONTROL_PREPARE
-                else:
-                    contract_state = TeleopTcpTarget.CONTROL_INACTIVE
-                tcp_msg.control_state = int(contract_state)
-                now = time.monotonic()
-                self._fill_subsystem_permissions_locked(tcp_msg, now)
-                # ARMED is a valid, deliberately frozen reference contract.
-                # The velocity IK uses it to capture measured FK and construct
-                # the per-session bumpless target alignment before ACTIVE is
-                # allowed to command motion.  Marking ARMED invalid made the
-                # manual Quest path skip that capture while the deterministic
-                # headless driver exercised it correctly.
-                absolute_tcp_control_valid = (
-                    not self.enable_absolute_target_alignment
-                    or contract_state in (
-                        TeleopTcpTarget.CONTROL_ARMED,
-                        TeleopTcpTarget.CONTROL_ACTIVE,
-                        TeleopTcpTarget.CONTROL_PREPARE,
-                    )
+            tcp_msg.session_id = int(session_id)
+            tcp_msg.generation = int(generation)
+            tcp_msg.absolute_state = int(absolute_state)
+            if not self.enable_absolute_target_alignment:
+                contract_state = TeleopTcpTarget.CONTROL_ACTIVE
+            elif absolute_state == AbsoluteEnableState.SWITCHING:
+                contract_state = TeleopTcpTarget.CONTROL_ARMED
+            elif absolute_state == AbsoluteEnableState.ACTIVE:
+                contract_state = (
+                    TeleopTcpTarget.CONTROL_ACTIVE
+                    if ((source_policy["source_allowed"] or self.enable_velocity_ik_takeover)
+                        and not hold_latched
+                        and not fault_pending
+                        and self.quest3_arm_info_transformer.is_runing)
+                    else TeleopTcpTarget.CONTROL_HOLD
                 )
+            elif absolute_state in (
+                    AbsoluteEnableState.RETURNING_TO_PREP,
+                    AbsoluteEnableState.PREPARED):
+                contract_state = TeleopTcpTarget.CONTROL_PREPARE
+            else:
+                contract_state = TeleopTcpTarget.CONTROL_INACTIVE
+            tcp_msg.control_state = int(contract_state)
+            # ARMED is a valid, deliberately frozen reference contract.
+            # The velocity IK uses it to capture measured FK and construct
+            # the per-session bumpless target alignment before ACTIVE is
+            # allowed to command motion.  Marking ARMED invalid made the
+            # manual Quest path skip that capture while the deterministic
+            # headless driver exercised it correctly.
+            absolute_tcp_control_valid = (
+                not self.enable_absolute_target_alignment
+                or contract_state in (
+                    TeleopTcpTarget.CONTROL_ARMED,
+                    TeleopTcpTarget.CONTROL_ACTIVE,
+                    TeleopTcpTarget.CONTROL_PREPARE,
+                )
+            )
             tcp_control_valid = (
                 control_frame_accepted
                 and (self.quest3_arm_info_transformer.is_runing
-                     or self._fixed_prepare_bootstrap
+                     or prepare_bootstrap
                      or contract_state == TeleopTcpTarget.CONTROL_PREPARE)
                 and absolute_tcp_control_valid
             )
             # Pose validity stays truthful. A previously accepted fixed PREPARE
             # may continue on fresh lifecycle traffic while pose validity
             # or pose source changes. It cannot bootstrap from an invalid pose.
-            runtime_probe.point(16)
-            with self._absolute_lock:
-                runtime_probe.point(17)
-                joystick_age = (
-                    float("inf") if self._joystick_receive_monotonic is None
-                    else time.monotonic() - self._joystick_receive_monotonic)
-                fixed_prepare_control_valid = (
-                    self.enable_velocity_ik_takeover
-                    and contract_state == TeleopTcpTarget.CONTROL_PREPARE
-                    and self._absolute_state in (
-                        AbsoluteEnableState.RETURNING_TO_PREP,
-                        AbsoluteEnableState.PREPARED)
-                    and tcp_msg.session_id == self._absolute_session_id
-                    and tcp_msg.generation == self._absolute_generation
-                    and 0.0 <= joystick_age <= self.absolute_enable_max_vr_age
-                    and not self._absolute_stop_pending
-                    and not self._absolute_external_mode_reset_pending
-                    and not self._absolute_fault_hold_pending)
-            tcp_msg.left_valid = tcp_control_valid
-            tcp_msg.right_valid = tcp_control_valid
+            joystick_age = (
+                float("inf") if joystick_receive is None
+                else time.monotonic() - joystick_receive)
+            fixed_prepare_control_valid = (
+                self.enable_velocity_ik_takeover
+                and contract_state == TeleopTcpTarget.CONTROL_PREPARE
+                and absolute_state in (
+                    AbsoluteEnableState.RETURNING_TO_PREP,
+                    AbsoluteEnableState.PREPARED)
+                and tcp_msg.session_id == session_id
+                and tcp_msg.generation == generation
+                and 0.0 <= joystick_age <= self.absolute_enable_max_vr_age
+                and not stop_pending
+                and not external_reset_pending
+                and not fault_pending)
+            tcp_msg.left_valid = control_frame_accepted and left_tcp_target is not None
+            tcp_msg.right_valid = control_frame_accepted and right_tcp_target is not None
             tcp_msg.control_valid = (
                 fixed_prepare_control_valid
                 if contract_state == TeleopTcpTarget.CONTROL_PREPARE
@@ -4441,37 +3951,31 @@ class IkRos:
                 tcp_msg.control_valid = bool(absolute_tcp_control_valid and (
                     self.quest3_arm_info_transformer.is_runing or
                     contract_state == TeleopTcpTarget.CONTROL_ARMED))
+            tcp_msg.control_valid = bool(tcp_msg.control_valid and source_policy["source_allowed"]
+                and not stop_pending and not external_reset_pending and not fault_pending
+                and 0.0 <= joystick_age <= self.absolute_enable_max_vr_age)
             tcp_msg.source = source
-            mapper_contract_end_ns = time.monotonic_ns()
-            runtime_probe.identity(tcp_msg.header.seq,tcp_msg.session_id,tcp_msg.generation)
-            runtime_probe.point(40)
             self._populate_whole_body_sample(
                 tcp_msg, quest_bone_poses_msg, source,
                 tcp_msg.session_id, tcp_msg.generation,
             )
+            tcp_msg.body_coordinate_epoch = coordinate_epoch
             tcp_msg.mapper_receive_stamp = received_ros
             tcp_msg.mapper_publish_stamp = rospy.Time.now()
             tcp_msg.mapper_processing_time = time.monotonic() - received_monotonic
             tcp_msg.source_relative_age = gate.relative_age
             if tcp_msg.mapper_processing_time + gate.relative_age <= gate.max_age:
-                runtime_probe.point(50)
-                mapper_publish_begin_ns = time.monotonic_ns()
-                # Critical publish precedes deferred chest/shoulder observations,
-                # auxiliary head/body output, markers and all timing diagnostics.
                 self.pub_mm_teleop_tcp_target.publish(tcp_msg)
-                mapper_publish_end_ns = time.monotonic_ns()
-                runtime_probe.point(51)
-                mapper_publish_end_cpu_ns = time.thread_time_ns()
-                runtime_probe.point(52)
                 self.quest3_arm_info_transformer.flush_pending_arm_markers()
-                runtime_probe.point(53)
-                self.pub_velocity_timing.publish(Float64MultiArray(data=[2.0,float(tcp_msg.header.seq),float(tcp_msg.session_id),float(tcp_msg.generation),tcp_msg.header.stamp.to_sec(),received_monotonic*1e9,float(mapper_publish_end_ns),float(quest_bone_poses_msg.timestamp_ms),float(mapper_start_ns),float(mapper_transform_end_ns),float(mapper_targets_end_ns),float(mapper_contract_end_ns),float(mapper_publish_begin_ns),float(tcp_msg.control_state),float(tcp_msg.control_valid),float(mapper_callback_cpu_ns),float(mapper_transform_cpu_ns),float(mapper_transform_end_cpu_ns),float(mapper_publish_end_cpu_ns),float(self.quest3_arm_info_transformer._marker_wall_ns),float(self.quest3_arm_info_transformer._marker_cpu_ns)]))
                 tcp_target_published = tcp_control_valid
 
         # Rejected/inactive TCP frames still keep their visual diagnostics.
         self.quest3_arm_info_transformer.flush_pending_arm_markers()
 
-        if self.enable_absolute_target_alignment and source_policy["source_allowed"]:
+        if self.enable_velocity_ik_takeover:
+            if self.enable_absolute_target_alignment and source_policy["source_allowed"]:
+                self._handle_velocity_gesture_edge(self.quest3_arm_info_transformer.is_runing)
+        elif self.enable_absolute_target_alignment and source_policy["source_allowed"]:
             publish_target = self._handle_absolute_target_and_gesture(
                 absolute_target, self.quest3_arm_info_transformer.is_runing
             )
@@ -4509,15 +4013,6 @@ class IkRos:
 
             self.pub_mm_two_arm_hand_pose_cmd.publish(eef_pose_msg)
 
-        runtime_probe.point(60)
-        self._publish_quest_tcp_mapping_debug(
-            quest_bone_poses_msg,
-            message_accepted,
-            target_available,
-            tcp_target_published,
-            source_policy,
-        )
-        runtime_probe.point(61)
         if source_policy["source_hold_triggered"] or source_policy["source_hold_released"]:
             self._publish_absolute_enable_status()
 
@@ -4569,6 +4064,39 @@ class IkRos:
             command.linear.x, command.linear.y, command.angular.z = velocity
             self._wheel_base_pub.publish(command)
 
+    def _interrupt_fixed_prepare_locked(self):
+        """Recapture a live PREPARE transaction; solver retains owned q/dq/ddq."""
+        now = time.monotonic()
+        p = self._fixed_pending_operation
+        error = self._fixed_capture_input_error_locked()
+        if (error or self._fixed_control_enabled is not True
+                or self._absolute_mode_status != (2, 2, False)
+                or not self._fixed_consumer_ack_locked(now)
+                or self._absolute_stop_pending or self._absolute_fault_hold_pending
+                or self._tracking_source_hold_latched or self._absolute_external_mode_reset_pending
+                or self.quest3_arm_info_transformer.is_stop_gesture()
+                or (p is not None and (p['generation'] != self._absolute_generation
+                    or p['stop_epoch'] != self._fixed_stop_epoch
+                    or p['epoch'] != self._body_coordinate_epoch
+                    or p['source'] != self._configured_tracking_source()
+                    or now >= p['deadline']))):
+            reason = error or 'stop, stale execution owner, disabled control or changed transaction'
+            rospy.logwarn('[FixedStart] PREPARE interruption rejected: %s', reason)
+            return False, reason
+        self._authorize_fixed_follow_locked()
+        self._fixed_prepare_bootstrap = False
+        self._fixed_operation_block = False
+        self._start_velocity_session_locked(AbsoluteEnableReason.RESUME_REQUEST)
+        self._queue_fixed_request_locked(2, 'acquisition')
+        self._fixed_pending_operation['deadline'] = now + self._fixed_acquisition_timeout
+        self._fixed_operation_phase = 2
+        rospy.loginfo('[FixedStart] PREPARE interrupted; recapturing follow generation %d',
+                      self._absolute_generation)
+        return True, 'PREPARE interrupted; continuous reference retained while follow reacquires'
+
+
+
+
     def _base_input_ready_locked(self, now):
         # Independent wheel channel: neither arm lifecycle nor body freshness
         # participates. Global control/stop and live robot feedback still do.
@@ -4588,7 +4116,7 @@ class IkRos:
         return reason == 'READY'
 
     def _torso_input_ready_locked(self, now):
-        target = self._absolute_latest_target
+        received = self._last_valid_tcp_receive
         return (self.enable_velocity_ik_takeover
                 and self._absolute_state == AbsoluteEnableState.ACTIVE
                 and self._fixed_control_enabled is True
@@ -4598,11 +4126,13 @@ class IkRos:
                 and not self._absolute_stop_pending and not self._absolute_fault_hold_pending
                 and not self._tracking_source_hold_latched
                 and not self._absolute_external_mode_reset_pending
-                and target is not None and 0 <= now-target['receive_time'] <= self.absolute_enable_max_vr_age)
+                and received is not None and 0 <= now-received <= self.absolute_enable_max_vr_age)
 
     def _fill_subsystem_permissions_locked(self, msg, now):
         msg.torso_control_enabled = self._torso_controls.authorized(
             now, self._torso_input_ready_locked(now))
+        msg.torso_position_hold = not self._torso_controls.position_enabled
+        msg.torso_operation_seq = self._torso_controls.operation_seq
         msg.arm_hold = (self._absolute_state == AbsoluteEnableState.ACTIVE
                         and getattr(self, '_fixed_arm_hold', False))
         msg.arm_operation_seq = getattr(self, '_fixed_arm_operation_seq', 0)
@@ -4611,11 +4141,15 @@ class IkRos:
         with self._absolute_lock:
             now = time.monotonic()
             enabled = self._torso_controls.authorized(now, self._torso_input_ready_locked(now))
-            if enabled == self._torso_last_published:
+            position_hold = not self._torso_controls.position_enabled
+            state = (enabled, position_hold)
+            if state == self._torso_last_published:
                 return
-            self._torso_last_published = enabled
+            self._torso_last_published = state
         self._torso_state_pub.publish(Bool(data=enabled))
-        rospy.loginfo('[AbsoluteTorso] torso control %s', 'enabled' if enabled else 'disabled (brake and hold)')
+        self._torso_position_state_pub.publish(Bool(data=position_hold))
+        rospy.loginfo('[AbsoluteTorso] %s', 'all locked (brake and hold)' if not enabled
+                      else 'height/pitch locked, yaw follows' if position_hold else 'full torso follows')
 
     def _consume_torso_end_effector_edges(self, hand_msg):
         # Pico Y is resolved on release. Consume this event in the input callback
@@ -4637,7 +4171,7 @@ class IkRos:
             edge = down and not getattr(self, '_controller_start_down', False)
             self._controller_start_down = down
             # Active triggers retain their existing end-effector meaning.
-            eligible = (not getattr(self, '_controller_start_consumed', False)
+            eligible = (not getattr(self, '_controller_start_completed', False)
                         and self._absolute_state in (AbsoluteEnableState.WAITING,
                         AbsoluteEnableState.WAIT_RELEASE, AbsoluteEnableState.PREPARED)
                         and self._fixed_pending_operation is None)
@@ -4650,9 +4184,9 @@ class IkRos:
                 return
             try:
                 with self._absolute_lock:
-                    if self._controller_start_consumed:
+                    if getattr(self, '_controller_start_completed', False):
                         return
-                response = self._fixed_arm_operation(2)
+                response = self._fixed_arm_operation(2, origin="first_trigger")
                 rospy.loginfo('[FixedStart] double front trigger: %s', response.message)
             finally:
                 self._publish_fixed_operation_state()
@@ -5080,7 +4614,13 @@ class IkRos:
                 return
 
     # 添加手臂模式回调函数
-    def arm_mode_callback(self, msg):
+    def arm_mode_callback(self, msg, _authorized_operation=False):
+        # The formal FSM uses pinocchio_arm_operation. Legacy mode topics are
+        # observations, never a second prepare/resume admission path.
+        if (self.enable_velocity_ik_takeover and msg.data in (1, 2)
+                and not _authorized_operation):
+            rospy.logwarn_throttle(1., '[FixedStart] legacy arm-mode start/resume ignored')
+            return
         new_mode = msg.data
         publish_absolute_status = False
         fault_rearm_authorized = False
@@ -5123,10 +4663,11 @@ class IkRos:
                         self._interrupt_fixed_prepare_locked()
                         publish_absolute_status = True
                     elif state == AbsoluteEnableState.PREPARED:
-                        self._queue_absolute_capture_locked(
-                            AbsoluteEnableReason.RESUME_REQUEST,
-                            AbsoluteEnableState.PREPARED,
-                        )
+                        if self.enable_velocity_ik_takeover:
+                            self._start_velocity_session_locked(AbsoluteEnableReason.RESUME_REQUEST)
+                        else:
+                            self._queue_absolute_capture_locked(
+                                AbsoluteEnableReason.RESUME_REQUEST, AbsoluteEnableState.PREPARED)
                         publish_absolute_status = True
                     elif (self._absolute_gesture_running
                             and (state == AbsoluteEnableState.PAUSED
@@ -5138,10 +4679,7 @@ class IkRos:
                             # ReferenceManager holds. Re-enable by atomically
                             # recapturing the current target/state; do not wait
                             # for a legacy mode-1 transition.
-                            self._queue_absolute_capture_locked(
-                                AbsoluteEnableReason.RESUME_REQUEST,
-                                AbsoluteEnableState.PAUSED,
-                            )
+                            self._start_velocity_session_locked(AbsoluteEnableReason.RESUME_REQUEST)
                         else:
                             self._absolute_state = AbsoluteEnableState.RESUME_PENDING
                             self._absolute_reason = AbsoluteEnableReason.RESUME_REQUEST
@@ -5322,10 +4860,7 @@ class IkRos:
                         self._authorize_fixed_follow_locked()
                         self._fixed_operation_block = False
                 if self._absolute_resume_after_prepare:
-                    self._queue_absolute_capture_locked(
-                        AbsoluteEnableReason.RESUME_REQUEST,
-                        AbsoluteEnableState.PREPARED,
-                    )
+                    self._start_velocity_session_locked(AbsoluteEnableReason.RESUME_REQUEST)
                     resume_session = self._absolute_session_id
                     if self._fixed_pending_operation is not None:
                         self._fixed_pending_operation.update(mode=2, phase='acquisition', resume=False,

@@ -465,6 +465,9 @@ private:
      */
     void applyModeChange(int target_mode, bool force_interpolation_to_default = false);
 
+    // 位置滤波器重置后，下一拍速度差分输出 0，避免用上一段外部控制的位置做差分。
+    void resetExternalVelocityDiff();
+
     /**
      * @brief 在控制线程中取出并执行外部模式请求
      */
@@ -624,6 +627,11 @@ private:
     Eigen::VectorXd raw_external_target_v_; // 外部控制原始目标速度
     Eigen::VectorXd external_target_q_;  // 外部控制目标位置（滤波或插值后）
     Eigen::VectorXd external_target_v_;  // 外部控制目标速度
+    Eigen::VectorXd filtered_pos_for_velocity_; // 上一拍滤波位置，用于速度差分
+    bool external_velocity_diff_valid_{false};  // false 时本拍速度差分输出 0
+    // 控制线程已用于速度差分的输入源 epoch。回调只递增 external_input_owner_epoch_，
+    // 由控制线程在新源的首个目标前比较并作废差分历史。
+    std::uint64_t external_velocity_diff_owner_epoch_{0};
     bool external_target_received_;      // 是否已收到外部输入
     Eigen::VectorXd buffered_mode2_target_q_; // 自动切换缓冲期缓存的最新外部目标
     Eigen::VectorXd buffered_mode2_target_v_;

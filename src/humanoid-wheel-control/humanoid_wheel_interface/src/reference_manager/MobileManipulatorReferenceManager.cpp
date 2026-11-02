@@ -794,11 +794,16 @@ namespace mobile_manipulator {
         ROS_INFO_STREAM("[resetToState] pending reset-to-state received (dim " << reset_state_.size() << ")");
       });
 
+    // 订阅底盘接管状态: 接管期间停止底盘位置跟踪, 释放后重锚参考
+    chassisTakeoverStateSub_ = nodeHandle_.subscribe<kuavo_msgs::ChassisTakeoverState>(
+      "/odom/chassis_takeover_state", 1,
+      &MobileManipulatorReferenceManager::chassisTakeoverStateCallback, this);
+
 
     auto targetVelocityCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
-      // disable 期间丢弃所有运动指令
-      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
+      // disable / 接管期间丢弃所有底盘运动指令
+      if (!isEnableControl() || baseCmdVelStatus_ == false || isChassisTakeover()) return;
 
       // 直接判断 msg 中的速度是否非零
       if(fabs(msg->linear.x) > 1e-6 || 
@@ -821,8 +826,8 @@ namespace mobile_manipulator {
     
     auto targetVelocityWorldCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
-      // disable 期间丢弃所有运动指令
-      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
+      // disable / 接管期间丢弃所有底盘运动指令
+      if (!isEnableControl() || baseCmdVelStatus_ == false || isChassisTakeover()) return;
 
       // 直接判断 msg 中的速度是否非零
       if(fabs(msg->linear.x) > 1e-6 || 
@@ -926,8 +931,8 @@ namespace mobile_manipulator {
     
     auto targetPoseCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
-      // disable 期间丢弃所有运动指令
-      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
+      // disable / 接管期间丢弃所有底盘运动指令
+      if (!isEnableControl() || baseCmdVelStatus_ == false || isChassisTakeover()) return;
 
       cmdPose_mtx_.lock();
       isCmdPoseUpdated_ = true;
@@ -943,8 +948,8 @@ namespace mobile_manipulator {
 
     auto targetPoseWorldCallback = [this](const geometry_msgs::Twist::ConstPtr &msg)
     {
-      // disable 期间丢弃所有运动指令
-      if (!isEnableControl() || baseCmdVelStatus_ == false) return;
+      // disable / 接管期间丢弃所有底盘运动指令
+      if (!isEnableControl() || baseCmdVelStatus_ == false || isChassisTakeover()) return;
 
       cmdPoseWorld_mtx_.lock();
       isCmdPoseWorldUpdated_ = true;
@@ -1467,7 +1472,26 @@ namespace mobile_manipulator {
     
     // 判断离线轨迹下发状态和给予对应期望赋值
     updateTimedOfflineTraj(initTime, finalTime);
-    
+
+    // 底盘接管状态边沿处理:
+    //   进入接管: 停止底盘位置跟踪, 清空并锚定底盘指令到实测位姿;
+    //   退出接管: 以实测位姿重新锚定参考, 之后恢复底盘位置跟踪。
+    // 放在 timed 指令更新之后, 保证释放当拍不会被接管期间残留的底盘指令覆盖。
+    const uint64_t takeoverEdgeCounter = chassisTakeoverEdgeCounter_.load(std::memory_order_acquire);
+    const bool chassisTakeover = isChassisTakeover();
+    if (takeoverEdgeCounter != handledChassisTakeoverEdgeCounter_)
+    {
+      handledChassisTakeoverEdgeCounter_ = takeoverEdgeCounter;
+      if (chassisTakeover)
+      {
+        enterChassisTakeover(initTime, initState);
+      }
+      else
+      {
+        exitChassisTakeover(initTime, initState);
+      }
+    }
+
     // 获取当前控制模式
     // controlMode_mtx_.lock();
     // int currentMode = currentMpcControlMode_;
@@ -1509,6 +1533,14 @@ namespace mobile_manipulator {
       }
       // case MpcControlMode::BaseArm:
       updateBaseArmControl(initTime, finalTime, initState_, isChange);   // 模式3: 必须控制底盘, 手臂支持局部系和世界系笛卡尔和关节两种轨迹
+
+      // 接管期间底盘参考跟随实测位姿, 不产生底盘位置跟踪期望
+      if (chassisTakeover)
+      {
+        // 防止 resetAllMpcTraj 等流程在接管期间重新使能底盘跟踪
+        setEnableBaseTrack(false);
+        holdBaseReferenceAtActual(initState_);
+      }
 
       // case MpcControlMode::ArmEeOnly:
       //   updateArmEeOnlyControl(initTime, finalTime, initState, isChange); break;             // 模式4: 底盘随末端移动, 不可控制, 手臂支持世界系笛卡尔轨迹
@@ -3998,6 +4030,105 @@ namespace mobile_manipulator {
     constexpr scalar_t kLinSpeedEps = 0.03;
     constexpr scalar_t kYawRateEps = 0.03;
     return actualBaseVel_.head(2).norm() < kLinSpeedEps && std::abs(actualBaseVel_[2]) < kYawRateEps;
+  }
+
+  void MobileManipulatorReferenceManager::chassisTakeoverStateCallback(
+      const kuavo_msgs::ChassisTakeoverState::ConstPtr& msg)
+  {
+    const bool takeover = (msg->state == kuavo_msgs::ChassisTakeoverState::STATE_TAKEOVER);
+    const bool firstMsg = !chassisTakeoverStateReceived_.exchange(true, std::memory_order_acq_rel);
+    // 仅按 state 字段判边沿: 心跳消息重复同一 state 不触发; 不依赖发布方刷新 state_change_time,
+    // 避免非严格实现每帧更新时间戳导致 AUTO 期间被反复重锚。
+    const bool prevActive = chassisTakeoverActive_.exchange(takeover, std::memory_order_acq_rel);
+    const bool newEdge = firstMsg ? takeover : (prevActive != takeover);
+
+    // 先更新状态, 再递进边沿计数(release), MPC 线程按 acquire 读取, 保证看到的状态与计数一致
+    if (!newEdge) return;
+
+    chassisTakeoverEdgeCounter_.fetch_add(1, std::memory_order_acq_rel);
+
+    if (takeover)
+    {
+      ROS_WARN_STREAM("[chassis_takeover] 收到底盘接管状态: TAKEOVER, source=" << static_cast<int>(msg->source)
+                      << ", state_change_time=" << msg->state_change_time.toSec()
+                      << " -> 停止底盘位置跟踪");
+    }
+    else if (!firstMsg)
+    {
+      ROS_INFO_STREAM("[chassis_takeover] 收到底盘接管状态: AUTO, state_change_time=" << msg->state_change_time.toSec()
+                      << " -> 重锚底盘参考后恢复位置跟踪");
+    }
+  }
+
+  void MobileManipulatorReferenceManager::clearBaseCommandStorage(const vector_t& initState)
+  {
+    const vector_t baseActual = initState.head(baseDim_);
+    {
+      std::lock_guard<std::mutex> lock(cmdvel_mtx_);
+      cmdVel_.setZero();
+      currentCmdVel_.setZero();
+      isCmdVelUpdated_ = false;
+      isCmdVelTimeUpdate_ = false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(cmdvelWorld_mtx_);
+      cmdVelWorld_.setZero();
+      currentCmdVelWorld_.setZero();
+      isCmdVelWorldUpdated_ = false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(cmdPose_mtx_);
+      cmdPose_ = baseActual;
+      currentCmdPose_ = baseActual;
+      isCmdPoseUpdated_ = false;
+      cmdPoseDesiredTime_ = 0.0;
+    }
+    {
+      std::lock_guard<std::mutex> lock(cmdPoseWorld_mtx_);
+      cmdPoseWorld_ = baseActual;
+      currentCmdPose_ = baseActual;
+      isCmdPoseWorldUpdated_ = false;
+    }
+  }
+
+  void MobileManipulatorReferenceManager::enterChassisTakeover(scalar_t initTime, const vector_t& initState)
+  {
+    // 接管期间外部拥有底盘控制权: 关闭底盘位置跟踪任务, 清空并锚定所有底盘指令到实测位姿
+    baseTrackEnabledBeforeTakeover_ = enableBaseTrackFlag_;
+    setEnableBaseTrack(false);
+
+    clearBaseCommandStorage(initState);
+    resetCmdPoseRuckigFromActualState(initTime, initState, true);
+    resetCmdVelRuckigFromActualState(initTime, initState, true);
+    lastCmdVelTime_ = initTime;
+
+    ROS_WARN_STREAM("[chassis_takeover] 底盘进入接管: 停止底盘位置跟踪, 参考锚定至实测位姿 ["
+                    << initState.head(baseDim_).transpose() << "]");
+  }
+
+  void MobileManipulatorReferenceManager::exitChassisTakeover(scalar_t initTime, const vector_t& initState)
+  {
+    // 接管结束: 以实测位姿为新参考坐标重新锚定, 之后重新开始底盘位置跟踪
+    clearBaseCommandStorage(initState);
+    resetCmdPoseRuckigFromActualState(initTime, initState, true);
+    resetCmdVelRuckigFromActualState(initTime, initState, true);
+    lastCmdVelTime_ = initTime;
+
+    setEnableBaseTrack(baseTrackEnabledBeforeTakeover_);
+
+    ROS_INFO_STREAM("[chassis_takeover] 底盘退出接管: 参考已重锚至实测位姿 ["
+                    << initState.head(baseDim_).transpose() << "], 恢复底盘位置跟踪");
+  }
+
+  void MobileManipulatorReferenceManager::holdBaseReferenceAtActual(const vector_t& initState)
+  {
+    // 接管期间底盘参考跟随实测位姿, 期望速度/加速度置零, 避免接管结束后参考与实车偏离
+    const vector_t baseActual = initState.head(baseDim_);
+    for (size_t i = 0; i < stateInputTargetTrajectories_.timeTrajectory.size(); ++i)
+    {
+      stateInputTargetTrajectories_.stateTrajectory[i].head(baseDim_) = baseActual;
+      stateInputTargetTrajectories_.inputTrajectory[i].head(baseDim_).setZero();
+    }
   }
 
   void MobileManipulatorReferenceManager::setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState)

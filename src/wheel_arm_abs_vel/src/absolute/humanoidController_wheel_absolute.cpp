@@ -1,3 +1,4 @@
+#include <wheel_arm_abs_vel/common/wheel_arm_gains.h>
 #include "wheel_arm_abs_vel/model/FullModelContract.h"
 #include <ros/package.h>
 #include <kuavo_common/kuavo_common.h>
@@ -273,6 +274,8 @@ namespace wheel_absolute_control
       robot_config_ = drake_interface_->getRobotConfig();
       kuavo_settings_ = drake_interface_->getKuavoSettings();
     }
+    HighlyDynamic::applyWheelArmGains(kuavo_settings_.running_settings,
+        kuavo_settings_.hardware_settings.driver, lowJointNum_, armNum_, EC_MASTER, RUIWO);
 
     const auto& endEffectorTypes = kuavo_settings_.hardware_settings.end_effector_type;
     const bool hasQibeng = std::any_of(endEffectorTypes.begin(), endEffectorTypes.end(),
@@ -813,6 +816,9 @@ namespace wheel_absolute_control
       ROS_INFO("[humanoidControllerWheelWbc] Subscribed to /move_base/base_cmd_vel_status for base emergency stop protection");
     }
 
+    cmd_prepare_timing_pub_ = controllerNh_.advertise<std_msgs::Float64MultiArray>(
+        "/monitor/wheel/cmd_prepare_timing_v1", 10);
+    cmd_prepare_timing_.data.resize(12, 0.);
     refreshLockKneeLegParameter();
     double parameter_poll_hz = 10.;
     controllerNh_.param("/absolute_controller/parameter_poll_hz", parameter_poll_hz, 10.);
@@ -836,8 +842,15 @@ namespace wheel_absolute_control
   }
 
   void humanoidControllerWheelWbc::refreshLockKneeLegParameter() {
+    const auto query_begin = std::chrono::steady_clock::now();
     XmlRpc::XmlRpcValue value;
-    if (!ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", value)) return;
+    const bool found = ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", value);
+    const double query_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - query_begin).count();
+    lock_parameter_query_ms_.store(query_ms, std::memory_order_relaxed);
+    lock_parameter_peak_ms_.store(std::max(query_ms,
+        lock_parameter_peak_ms_.load(std::memory_order_relaxed)), std::memory_order_relaxed);
+    if (!found) return;
     if (value.getType() == XmlRpc::XmlRpcValue::TypeBoolean)
       lockKneeLegEnabled_.store(static_cast<bool>(value), std::memory_order_relaxed);
     else if (value.getType() == XmlRpc::XmlRpcValue::TypeInt)
@@ -1447,6 +1460,14 @@ namespace wheel_absolute_control
     if (mpc_resume_requested_.exchange(false) && enable_mpc_ && mrtRosInterface_)
       mrtRosInterface_->pauseResumeMpcNode(false);
     markStageMs("mpc_mrt");
+    const auto cmd_begin = std::chrono::steady_clock::now();
+    auto cmd_stage = cmd_begin;
+    auto markCmdStage = [&](int index) {
+      const auto now = std::chrono::steady_clock::now();
+      cmd_prepare_timing_.data[2 + index] =
+          std::chrono::duration<double, std::milli>(now - cmd_stage).count();
+      cmd_stage = now;
+    };
 
     /******************  用户修改部分  ***********************/
     vector_t target_qpos, target_qvel;
@@ -1520,9 +1541,11 @@ namespace wheel_absolute_control
       optimizedInput_mrt_.tail(info.armDim) = target_qvel;
     }
     /*******************************************************/
+    markCmdStage(0);
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_mrt", optimizedState_mrt_);
     ros_logger_->publishVector("/humanoid_wheel/optimizedInput_mrt", optimizedInput_mrt_);
 
+    markCmdStage(1);
     // q/dq/ddq are one bounded trajectory transaction. The producer and
     // reference manager validate it before this point. Keep it atomic; original
     // WBC constraints and the original HAL remain downstream safety owners.
@@ -1668,6 +1691,7 @@ namespace wheel_absolute_control
       }
     }
 
+    markCmdStage(2);
     // 更新期望力插值
     if (desired_force_manager_) {
       desired_force_manager_->update(time);
@@ -1707,6 +1731,7 @@ namespace wheel_absolute_control
       }
     }
 
+    markCmdStage(3);
     // ===== 下肢 1/2 号电机（knee/leg）锁定：最终输出处硬覆盖 =====
     // 与增量 IK 复用同一 rosparam，锁定语义 = 钉死到开启瞬间捕获的快照（弧度）。
     // 无论 MPC / 快速模式 / 主控回发哪条路，1、2 号都被硬覆盖，waist 关节不受影响。
@@ -1729,6 +1754,7 @@ namespace wheel_absolute_control
       lockKneeLegCaptured_ = false;  // 解锁后，下次锁定重新捕获快照
     }
 
+    markCmdStage(4);
     // WBC 目标：optimizedState_wbc=期望位姿/关节角，optimizedInput_wbc=对应速度，维度见头文件注释
     vector_t optimizedState_wbc = optimizedState_mrt_limit_;
     vector_t optimizedInput_wbc = optimizedInput_mrt_limit_;
@@ -1740,6 +1766,7 @@ namespace wheel_absolute_control
     // }
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_wbc_in", optimizedState_wbc);
     ros_logger_->publishVector("/humanoid_wheel/optimizedInput_wbc_in", optimizedInput_wbc);
+    markCmdStage(5);
     markStageMs("cmd_prepare");
 
     // Apply ddq only for joints whose q/dq survived every controller-side
@@ -1784,7 +1811,15 @@ namespace wheel_absolute_control
     dynamicsReference.atomicReference=wholeBodyIkReferenceApplied;
     dynamicsReference.accelerationGain=arm_ddq_feedforward_gain_;
     vector_t torque;
-    if (!computeDynamics(dynamicsReference, dt, torque)) return;
+    const bool dynamics_ok = computeDynamics(dynamicsReference, dt, torque);
+    // Same v1 layout as test; retain beta's background poller and safety bounds.
+    cmd_prepare_timing_.data[0] = 1.; cmd_prepare_timing_.data[1] = time.toSec();
+    cmd_prepare_timing_.data[8] = std::chrono::duration<double, std::milli>(cmd_stage - cmd_begin).count();
+    cmd_prepare_timing_.data[9] = cmd_prepare_timing_.data[10] =
+        lock_parameter_query_ms_.load(std::memory_order_relaxed);
+    cmd_prepare_timing_.data[11] = lock_parameter_peak_ms_.load(std::memory_order_relaxed);
+    cmd_prepare_timing_pub_.publish(cmd_prepare_timing_);
+    if (!dynamics_ok) return;
     // Observation only, after the final atomic reference/soft-pause checks.
     vector_t ik_timing(13);
     const double qdiff=wholeBodyIkReference.q.size()==optimizedState_wbc.size()
@@ -3199,6 +3234,15 @@ namespace wheel_absolute_control
     ros_logger_->publishValue("/dynamics/backend_id",dynamics_backend_name_=="wbc"?0.0:1.0);
     ros_logger_->publishValue("/dynamics/compute_ms",milliseconds);
     if(!result.valid || result.torque.size()!=static_cast<Eigen::Index>(manipulatorModelInfo_.armDim) || !result.torque.allFinite()) {
+      ROS_ERROR("Dynamics timing: reason=%s dt_ms=%.6f measurement_age_ms=%.6f "
+                "sensor_timeout_ms=%.3f cmd_reference_ms=%.6f cmd_publish_ms=%.6f "
+                "cmd_pause_ms=%.6f cmd_force_ms=%.6f cmd_lock_ms=%.6f "
+                "cmd_wbc_input_ms=%.6f lock_query_ms=%.6f",
+                result.reason, dt * 1000., age * 1000., dynamics_sensor_timeout_ * 1000.,
+                cmd_prepare_timing_.data[2], cmd_prepare_timing_.data[3],
+                cmd_prepare_timing_.data[4], cmd_prepare_timing_.data[5],
+                cmd_prepare_timing_.data[6], cmd_prepare_timing_.data[7],
+                lock_parameter_query_ms_.load(std::memory_order_relaxed));
       stopDynamics(result.reason);return false;
     }
     torque=result.torque;

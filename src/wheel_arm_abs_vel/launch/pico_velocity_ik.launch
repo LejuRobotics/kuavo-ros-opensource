@@ -30,8 +30,12 @@
   <arg name="continuous_reference_enabled" default="true" />
   <arg name="hand_reference_frequency" default="12.0" />
   <arg name="orientation_reference_mode" default="fixed_bandwidth" />
-  <arg name="hand_position_cutoff_hz" default="10.0" />
-  <arg name="hand_orientation_cutoff_hz" default="8.0" />
+  <arg name="hand_prediction_config" default="$(find wheel_arm_abs_vel)/config/layer2_causal_candidate.yaml" />
+  <arg name="s6_motion_profile" default="true" />
+  <arg name="publish_legacy_arm_traj" default="true" />
+  <arg name="publish_absolute_bag_topics" default="true" />
+  <arg name="hand_position_cutoff_hz" default="" />
+  <arg name="hand_orientation_cutoff_hz" default="" />
   <arg name="joint_jerk_enabled" default="true" />
   <arg name="adaptive_reference_enabled" default="true" />
   <arg name="innovation_reference_enabled" default="true" />
@@ -178,6 +182,10 @@
     <arg name="continuous_reference_enabled" value="$(arg continuous_reference_enabled)" />
     <arg name="hand_reference_frequency" value="$(arg hand_reference_frequency)" />
     <arg name="orientation_reference_mode" value="$(arg orientation_reference_mode)" />
+    <arg name="hand_prediction_config" value="$(arg hand_prediction_config)" />
+    <arg name="s6_motion_profile" value="$(arg s6_motion_profile)" />
+    <arg name="publish_legacy_arm_traj" value="$(arg publish_legacy_arm_traj)" />
+    <arg name="publish_absolute_bag_topics" value="$(arg publish_absolute_bag_topics)" />
     <arg name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" />
     <arg name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" />
     <arg name="joint_jerk_enabled" value="$(arg joint_jerk_enabled)" />

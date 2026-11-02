@@ -34,6 +34,20 @@ class LaunchModelTest(unittest.TestCase):
             self.assertEqual(json.loads(real.params[key].value), json.loads(quest.params[key].value))
             self.assertEqual(json.loads(real.params[key].value)['robot_version'], version)
 
+    def test_port_parameters_are_shared_and_explicit(self):
+        for entry in ('quest_velocity_ik.launch', 'pico_velocity_ik.launch'):
+            cfg = self.load(entry, ['robot_version:=400062', 'control_torso:=false'])
+            self.assertNotIn('/sg100_kp', cfg.params)  # inherit controller
+            self.assertEqual(cfg.params['/absolute_velocity_ik/hand_position_cutoff_hz'].value, 10.)
+            self.assertTrue(cfg.params['/absolute_velocity_ik/publish_absolute_bag_topics'].value)
+            mapper = next(n for n in cfg.nodes if n.name == 'ik_ros_uni')
+            self.assertIn('--control_torso=false', mapper.args)
+            cfg = self.load(entry, ['robot_version:=400062', 'hand_position_cutoff_hz:=12', 'publish_absolute_bag_topics:=false',
+                's6_motion_profile:=false'])
+            self.assertEqual(cfg.params['/absolute_velocity_ik/hand_position_cutoff_hz'].value, 12.)
+            self.assertFalse(cfg.params['/absolute_velocity_ik/publish_absolute_bag_topics'].value)
+            self.assertFalse(cfg.params['/absolute_velocity_ik/s6_motion_profile/enabled'].value)
+
     def test_private_sim_motor_servo_and_rollback(self):
         cfg = self.load("load_kuavo_mujoco_velocity_ik.launch", ["robot_version:=62"])
         self.assertEqual(cfg.params["/dynamics_backend"].value, "rnea")
@@ -280,7 +294,7 @@ class LaunchModelTest(unittest.TestCase):
 
 
     def test_unsupported_versions_and_modes_rejected(self):
-        for version in (61, 64):
+        for version in (999999, 64):
             for file in ("load_kuavo_real_velocity_ik.launch",
                          "quest_velocity_ik.launch", "load_kuavo_mujoco_velocity_ik.launch"):
                 with self.subTest(version=version, file=file), self.assertRaises(Exception):

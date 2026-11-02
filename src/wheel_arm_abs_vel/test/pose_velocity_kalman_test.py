@@ -1,193 +1,123 @@
 #!/usr/bin/env python3
-"""Offline numeric contracts; no ROS/hardware required."""
-import pathlib
-import io
-import os
-import subprocess
-import sys
-import unittest
+"""Hand-only estimator contracts, source resets and geometric input smoothing."""
+from pathlib import Path
+import sys,unittest
 import numpy as np
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'scripts/tools'))
-from pose_velocity_kalman import (PositionCV, RotationCV, SkeletonCV,
-                                  exp_so3, log_so3, mapped_rates)
-
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts/tools'))
+from pose_velocity_kalman import PositionCV,RotationCV,HandTargetCV,exp_so3,log_so3
 
 class ObserverTests(unittest.TestCase):
-    def test_palm_noise_split_and_reset(self):
-        f = SkeletonCV(hand_q_r=.45)
-        T = {i: np.eye(4) for i in f.indices}
-        for stamp in (1., 1.014, 2.):
-            f.update(T, stamp, 'same')
-            self.assertEqual(f.rotations[4].q, .45)
-            self.assertEqual(f.rotations[5].q, .45)
-            self.assertEqual(f.rotations[23].q, 1.8)
-            np.testing.assert_array_equal(f.states[4][2], f.states[5][2])
-        with self.assertRaises(ValueError): SkeletonCV(hand_q_r=0.)
+    def test_constant_velocity_and_covariance(self):
+        f=PositionCV(); v=np.array([.3,-.2,.1]); t=0.
+        for i in range(1500):
+            dt=.006+(i%5)*.001;t+=dt
+            p,vel=f.update(v*t,None if i==0 else dt)
+        np.testing.assert_allclose(vel,v,atol=1e-8)
+        np.testing.assert_allclose(p,v*t,atol=1e-8)
+        self.assertGreater(np.linalg.eigvalsh(f.P).min(),0.)
 
-    def test_palm_rotation_noise_and_stop(self):
-        dt=1/72.; t=np.arange(0,10,dt)
-        outputs=[]
-        for process_q in (1.8, .45, .2):
-            f=RotationCV(q=process_q); out=[]
-            for i,stamp in enumerate(t):
-                angle=.35*np.sin(2*np.pi*stamp)+.006*np.sin(2*np.pi*15*stamp)
-                _,w=f.update(exp_so3([angle,0,0]),None if i==0 else dt)
-                out.append(w[0])
-            M=np.array([np.sin(2*np.pi*t),np.cos(2*np.pi*t),
-                        np.sin(2*np.pi*15*t),np.cos(2*np.pi*15*t)]).T
-            c=np.linalg.lstsq(M[144:],np.array(out)[144:],rcond=None)[0]
-            gain=np.linalg.norm(c[:2])/(.35*2*np.pi)
-            lag=-np.arctan2(-c[0],c[1])/(2*np.pi)
-            outputs.append(np.linalg.norm(c[2:]))
-            print('palm q=%.2f 1Hz velocity_gain=%.4f phase_s=%.4f 15Hz_velocity=%.4f'%
-                  (process_q,gain,lag,outputs[-1]))
-            self.assertGreater(gain,.9);self.assertLess(gain,1.1)
-            for _ in range(144): R,w=f.update(np.eye(3),dt)
-            self.assertLess(np.linalg.norm(w),1e-6)
-            self.assertLess(np.linalg.norm(log_so3(R)),1e-6)
-        self.assertLess(outputs[1],.75*outputs[0])
-        self.assertLess(outputs[2],outputs[1])
-
-    def test_constant_velocity_variable_dt(self):
-        f = PositionCV(); t = 0.
-        for i in range(500):
-            dt = .012+(i%5)*.001; t += dt
-            p, v = f.update(np.array([.3, -.2, .1])*t, None if i==0 else dt)
-        np.testing.assert_allclose(v, [.3, -.2, .1], atol=1e-8)
-        self.assertGreater(np.linalg.eigvalsh(f.P).min(), 0)
-
-    def test_rotation_and_wrap(self):
-        f = RotationCV(); w = np.array([.3, -.7, 1.2]); dt = 1/72
-        for i in range(600):
-            R, omega = f.update(exp_so3(w*i*dt), None if i==0 else dt)
-        np.testing.assert_allclose(omega, w, atol=1e-6)
-        np.testing.assert_allclose(R.T@R, np.eye(3), atol=1e-10)
-        self.assertGreater(np.linalg.eigvalsh(f.P).min(), 0)
+    def test_rotation_wrap_constant_velocity(self):
+        f=RotationCV();w=np.array([.3,-.7,1.2]);dt=1/120
+        for i in range(1500):R,v=f.update(exp_so3(w*i*dt),None if i==0 else dt)
+        np.testing.assert_allclose(v,w,atol=1e-6)
+        np.testing.assert_allclose(R.T@R,np.eye(3),atol=1e-10)
+        self.assertGreater(np.linalg.eigvalsh(f.P).min(),0.)
         for axis in np.eye(3):
-            v = np.pi*axis
-            np.testing.assert_allclose(exp_so3(log_so3(exp_so3(v))), exp_so3(v), atol=1e-8)
+            R=exp_so3(np.pi*axis);np.testing.assert_allclose(exp_so3(log_so3(R)),R,atol=1e-8)
 
-    def test_equal_new_observation_and_reset(self):
-        f = SkeletonCV(); T = {i: np.eye(4) for i in f.indices}
-        f.update(T, 1., 'a'); f.update(T, 1., 'a')
-        self.assertEqual(f.updates, 1)
-        f.update(T, 1.014, 'a'); self.assertEqual(f.updates, 2)
-        f.update(T, 1.028, 'b'); self.assertEqual(f.updates, 1)
-        f.update(T, 2., 'b'); self.assertEqual(f.updates, 1)
+    def test_two_hands_only_and_reset(self):
+        f=HandTargetCV()
+        for i in range(200):
+            f.bind(('session',1))
+            for side in ('Left','Right'):f.update(side,np.ones(3)*i*.001,np.eye(3),1.+i/120)
+        self.assertEqual(set(f.positions),{'Left','Right'})
+        self.assertEqual(set(f.rotations),{'Left','Right'})
+        for stamp,key in [(4.,('session',2)),(4.01,('session',3))]:
+            f.bind(key)
+            p,R,v,w=f.update('Right',np.zeros(3),np.eye(3),stamp)
+            np.testing.assert_array_equal(v,np.zeros(3));np.testing.assert_array_equal(w,np.zeros(3))
 
-    def test_low_frequency_and_noise(self):
-        dt=1/72; t=np.arange(0,12,dt); f=PositionCV()
-        raw=.10*np.sin(2*np.pi*t)+.001*np.sin(2*np.pi*20*t)
-        out=[]
-        for i,z in enumerate(raw): out.append(f.update([z,0,0],None if i==0 else dt)[0][0])
-        M=np.array([np.sin(2*np.pi*t),np.cos(2*np.pi*t),
-                    np.sin(2*np.pi*20*t),np.cos(2*np.pi*20*t)]).T
-        c=np.linalg.lstsq(M[144:],np.array(out)[144:],rcond=None)[0]
-        gain=np.linalg.norm(c[:2])/.1; lag=-np.arctan2(c[1],c[0])/(2*np.pi)
-        noise=np.linalg.norm(c[2:])/.001
-        print('position 1Hz gain=%.4f lag_ms=%.3f 20Hz_gain=%.4f'%(gain,lag*1000,noise))
-        self.assertGreater(gain,.95);self.assertLess(gain,1.15)
-        self.assertLess(abs(lag),.025);self.assertLess(noise,.70)
+    def test_elbow_step_has_no_overshoot(self):
+        f=HandTargetCV();out=[]
+        for i in range(120):
+            f.bind(1)
+            out.append(f.smooth_elbow('Right',np.ones(3)*(i>=10),1+i/120)[0])
+        out=np.array(out)
+        self.assertTrue(np.all(np.diff(out)>=0))
+        self.assertTrue(np.all((out>=0)&(out<=1)))
+        self.assertLess(out[10],.3)
+        self.assertEqual(f.positions,{})
 
-    def test_mapping_derivative_and_rigid_motion(self):
-        rng=np.random.RandomState(7)
-        states=[]
-        for i in range(4):
-            T=np.eye(4);T[:3,:3]=exp_so3(rng.randn(3)*.2);T[:3,3]=rng.randn(3)
-            states.append((T,rng.randn(3)*.2,rng.randn(3)*.3))
-        axes=exp_so3([.4,.2,-.3]);fixed=exp_so3([.1,.7,.2]);offset=np.array([.03,.02,-.04])
-        def evaluate(s):
-            c,sh,e,h=[a[0] for a in s];rem=axes@c[:3,:3].T
-            d=e[:3,3]-sh[:3,3];d2=h[:3,3]-e[:3,3]
-            hint=.28*rem@(d/np.linalg.norm(d))
-            R=rem@h[:3,:3]@fixed
-            return hint+.45*rem@(d2/np.linalg.norm(d2))+R@offset,R,hint
-        v,w,e=mapped_rates(*states,axes,.28,.45,states[3][0][:3,:3]@fixed,offset)
-        h=1e-6; shifted=[]
-        for T,vel,omega in states:
-            U=T.copy();U[:3,3]+=h*vel;U[:3,:3]=exp_so3(h*omega)@T[:3,:3]
-            shifted.append((U,vel,omega))
-        p0,R0,e0=evaluate(states);p1,R1,e1=evaluate(shifted)
-        np.testing.assert_allclose(v,(p1-p0)/h,atol=2e-6)
-        np.testing.assert_allclose(w,log_so3(R1@R0.T)/h,atol=2e-6)
-        np.testing.assert_allclose(e,(e1-e0)/h,atol=2e-6)
-        spin=np.array([.1,.2,.3]);vel=np.array([.3,.4,.5])
-        rigid=[(T,vel+np.cross(spin,T[:3,3]),spin) for T,_,_ in states]
-        for rate in mapped_rates(*rigid,axes,.28,.45,states[3][0][:3,:3]@fixed,offset):
-            np.testing.assert_allclose(rate,0,atol=1e-12)
+    def test_single_frame_impulse_and_settle(self):
+        for hz in (72,120):
+            f=PositionCV();out=[];vel=[]
+            for i in range(1200):
+                p,v=f.update(np.array([.00663 if i==200 else 0.,0.,0.]),None if i==0 else 1/hz)
+                out.append(p[0]);vel.append(v[0])
+            self.assertLess(out[200]/.00663,.40)  # Old 72/120Hz observer passes 80%/67%.
+            self.assertLess(abs(out[-1]),1e-8);self.assertLess(abs(vel[-1]),1e-8)
 
-    def test_wrist_mapping_derivative(self):
-        from target_geometry_contract import map_wrist_pose
-        rng=np.random.RandomState(11); states=[]
-        for i in range(4):
-            T=np.eye(4);T[:3,:3]=exp_so3(rng.randn(3)*.2);T[:3,3]=rng.randn(3)
-            states.append((T,rng.randn(3)*.2,rng.randn(3)*.3))
-        X=np.eye(4);X[:3,:3]=exp_so3([.1,.2,.3]);X[:3,3]=[.03,.01,-.02]
-        Y=np.eye(4);Y[:3,3]=[.02,-.01,.04];W=exp_so3([.2,-.1,.3])
-        arm=dict(source_to_wrist=X,joint7_to_tcp=Y,wrist_to_joint7_rotation=W,forearm_to_joint7_m=.3)
-        def evaluate(s):
-            return map_wrist_pose(s[0][0],s[1][0][:3,3],s[2][0][:3,3],s[3][0],np.eye(3),np.zeros(3),.28,arm)
-        v,w,e=mapped_rates(*states,np.eye(3),.28,.3,states[3][0][:3,:3],Y[:3,3],X[:3,3],X[:3,:3]@W)
-        h=1e-6; shifted=[]
-        for T,vel,omega in states:
-            U=T.copy();U[:3,3]+=h*vel;U[:3,:3]=exp_so3(h*omega)@T[:3,:3]
-            shifted.append((U,vel,omega))
-        T0,e0,_=evaluate(states);T1,e1,_=evaluate(shifted)
-        np.testing.assert_allclose(v,(T1[:3,3]-T0[:3,3])/h,atol=2e-6)
-        np.testing.assert_allclose(w,log_so3(T1[:3,:3]@T0[:3,:3].T)/h,atol=2e-6)
-        np.testing.assert_allclose(e,(e1-e0)/h,atol=2e-6)
+    def test_per_hand_observation_clock_and_duplicates(self):
+        f=HandTargetCV();f.bind((1,1,1))
+        z=np.zeros(3);I=np.eye(3)
+        for side in ('Left','Right'):f.update(side,z,I,1.)
+        x=f.positions['Left'].x.copy();P=f.positions['Left'].P.copy()
+        f.update('Left',np.ones(3),exp_so3(np.ones(3)),1.)
+        np.testing.assert_array_equal(x,f.positions['Left'].x)
+        np.testing.assert_array_equal(P,f.positions['Left'].P)
+        f.update('Right',z,I,1.01)
+        self.assertEqual(f.last_observation_stamp['Left'],1.)
+        before=f.positions['Left'].P.copy()
+        f.update('Left',z,I,1.03)
+        oracle=PositionCV();oracle.update(z);oracle.update(z,.03)
+        np.testing.assert_allclose(f.positions['Left'].P,oracle.P,atol=1e-14)
+        self.assertFalse(np.array_equal(before,f.positions['Left'].P))
+        self.assertEqual(f.last_observation_stamp['Right'],1.01)
+        f.smooth_elbow('Left',z,1.)
+        e=f.smooth_elbow('Left',np.ones(3),1.04)
+        np.testing.assert_allclose(e,np.ones(3)*(1-np.exp(-1.)))
+        f.bind((1,1,1));self.assertEqual(f.last_observation_stamp['Left'],1.03)
+        f.bind((1,2,1));self.assertEqual(f.last_observation_stamp,{})
 
-    def test_reconstructed_hand_chain(self):
-        # Numeric replay of the production exact CV-input reference step.
-        # No future frames: 72 Hz measurements evaluated at 500 Hz ticks.
-        dt=.002; times=np.arange(0,10,dt)
-        # Fixed high-activity/A-B baseline restored to 12Hz and <=1Hz fidelity.
-        for frequency in (.2,.5,1.,2.,4.,10.):
-            f=PositionCV();stamp=-1.;out=[];p=0.;v=0.;w=2*np.pi*12
-            for t in times:
-                source=np.floor((t+1e-10)*72)/72
-                if source>stamp:
-                    measurement=.1*np.sin(2*np.pi*frequency*source)+.001*np.sin(2*np.pi*20*source)
-                    pos,vel=f.update([measurement,0,0],None if stamp<0 else source-stamp)
-                    stamp=source
-                target=pos[0]+vel[0]*(t-stamp)
-                guide=.1*vel[0]
-                error=p-(target-guide*dt);d=v-guide;c=d+w*error
-                p=target+(error+c*dt)*np.exp(-w*dt)
-                v=guide+(d-w*c*dt)*np.exp(-w*dt)
-                out.append(p)
-            M=np.array([np.sin(2*np.pi*frequency*times),np.cos(2*np.pi*frequency*times)]).T
-            c=np.linalg.lstsq(M[1000:],np.array(out)[1000:],rcond=None)[0]
-            gain=np.linalg.norm(c)/.1;lag=-np.arctan2(c[1],c[0])/(2*np.pi*frequency)
-            print('hand chain %.1fHz gain=%.4f lag_ms=%.3f'%(frequency,gain,lag*1000))
-            if frequency<=1.:
-                self.assertGreater(gain,.95);self.assertLess(gain,1.05);self.assertLess(abs(lag),.025)
-            self.assertLess(gain,1.15)
+    def test_native_full_rotation_matches_oracle(self):
+        import importlib.util,os
+        import pose_velocity_kalman as native
+        self.assertIsNotNone(native._NATIVE)
+        os.environ['KUAVO_MAPPER_NUMERIC_BACKEND']='python'
+        spec=importlib.util.spec_from_file_location('kalman_oracle',Path(native.__file__))
+        oracle=importlib.util.module_from_spec(spec);spec.loader.exec_module(oracle)
+        os.environ['KUAVO_MAPPER_NUMERIC_BACKEND']='native'
+        for scenario in ('ordinary','fast','reverse','near_pi','sign'):
+            a,b=native.RotationCV(),oracle.RotationCV()
+            for i in range(400):
+                dt=.006+(i%9)*.001
+                angle=(.007 if scenario=='ordinary' else .25)*i
+                if scenario=='reverse' and i>200:angle=100.-.25*i
+                axis=np.array([.3,-.4,.5]);axis/=np.linalg.norm(axis)
+                measured=oracle.exp_so3(axis*angle)
+                if scenario=='sign':
+                    from scipy.spatial.transform import Rotation
+                    quat=Rotation.from_matrix(measured).as_quat()
+                    measured=Rotation.from_quat(quat if i%2 else -quat).as_matrix()
+                if scenario=='near_pi' and i==1:measured=oracle.exp_so3(axis*(np.pi-1e-7))
+                R,w=a.update(measured,None if i==0 else dt)
+                S,v=b.update(measured,None if i==0 else dt)
+                self.assertLess(np.linalg.norm(oracle.log_so3(R@S.T)),2e-7,scenario)
+                np.testing.assert_allclose(w,v,atol=2e-6,rtol=2e-6)
+                np.testing.assert_allclose(a.P,b.P,atol=2e-8,rtol=2e-6)
+                self.assertGreater(np.linalg.eigvalsh(a.P).min(),-1e-12)
+            for delta in (0.,1e-9,1e-6):
+                R=oracle.exp_so3(axis*(np.pi-delta))
+                np.testing.assert_allclose(native._NATIVE.rotation_exp(native._NATIVE.rotation_log(R)),R,atol=2e-8)
 
-    @unittest.skipUnless(os.environ.get('ADAPTIVE_REFERENCE_RUNNER'), 'C++ runner supplied by CTest')
-    def test_adaptive_reconstructed_hand_chain(self):
-        # Exercise the real C++ filter after 72Hz Kalman and causal prediction.
-        dt=.002;times=np.arange(0,12,dt)
-        for amplitude in (.001,.1):
-            f=PositionCV();stamp=-1.;rows=[]
-            for t in times:
-                source=np.floor((t+1e-10)*72)/72
-                if source>stamp:
-                    z=amplitude*np.sin(2*np.pi*source)
-                    pos,vel=f.update([z,0,0],None if stamp<0 else source-stamp);stamp=source
-                rows.append([dt,*(pos+vel*(t-stamp)),*vel,0,0,0,1,0,0,0])
-            data=io.StringIO();np.savetxt(data,rows,fmt='%.12g')
-            run=subprocess.run([os.environ['ADAPTIVE_REFERENCE_RUNNER'],'adaptive'],
-                               input=data.getvalue(),stdout=subprocess.PIPE,text=True,check=True)
-            out=np.loadtxt(io.StringIO(run.stdout))[:,0]
-            M=np.column_stack([np.sin(2*np.pi*times),np.cos(2*np.pi*times)])
-            coef=np.linalg.lstsq(M[2000:],out[2000:],rcond=None)[0]
-            gain=np.linalg.norm(coef)/amplitude;lag=-np.arctan2(coef[1],coef[0])/(2*np.pi)
-            print('adaptive 1Hz amplitude_mm=%.1f gain=%.4f lag_ms=%.3f'%(amplitude*1000,gain,lag*1000))
-            if amplitude>.01:
-                self.assertGreater(gain,.95);self.assertLess(gain,1.05);self.assertLess(abs(lag),.035)
-            else:
-                self.assertGreater(gain,.1);self.assertLess(gain,.6)
+    def test_missing_native_is_explicit_startup_failure(self):
+        import os,subprocess,tempfile,shutil
+        source=Path(__file__).resolve().parents[1]/'scripts/tools/pose_velocity_kalman.py'
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copy(source,Path(d)/source.name)
+            env=dict(os.environ,KUAVO_MAPPER_NUMERIC_BACKEND='native',PYTHONPATH=d)
+            result=subprocess.run([sys.executable,'-c','import pose_velocity_kalman'],cwd=d,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('Mapper native extension is required',result.stderr)
 
-
-if __name__=='__main__': unittest.main()
+if __name__=='__main__':unittest.main()

@@ -92,7 +92,7 @@ class ArmTorsoHoldTest(unittest.TestCase):
                    lambda n: setattr(n, '_absolute_mode_status', (0, 0, False)),
                    lambda n: setattr(n, '_joystick_receive_monotonic', 9.),
                    lambda n: setattr(n, '_absolute_latest_measured_q_time', 9.),
-                   lambda n: n._absolute_latest_target.update(receive_time=9.),
+                   lambda n: setattr(n, '_last_valid_tcp_receive', 9.),
                    lambda n: setattr(n.quest3_arm_info_transformer, 'is_stop_gesture', lambda: True)]
         for change in changes:
             self.setUp()
