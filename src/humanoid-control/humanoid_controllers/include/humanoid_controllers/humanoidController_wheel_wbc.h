@@ -25,6 +25,7 @@
 #include "kuavo_msgs/changeTorsoCtrlMode.h"
 #include "kuavo_msgs/changeLbQuickModeSrv.h"
 #include "kuavo_msgs/changeLbMpcObsUpdateModeSrv.h"
+#include "kuavo_msgs/ChassisTakeoverState.h"
 #include <leju_mobile_base_msgs/BaseCmdVelStatus.h>
 
 // Third Party
@@ -145,6 +146,10 @@ namespace humanoidController_wheel_wbc
     void baseCmdVelStatusCallback(const leju_mobile_base_msgs::BaseCmdVelStatus::ConstPtr& msg);
     void publishStopRobot();
 
+    // ======= 底盘接管状态相关 ========
+    void chassisTakeoverStateCallback(const kuavo_msgs::ChassisTakeoverState::ConstPtr& msg);
+    bool isChassisTakeover() const { return chassis_takeover_.load(std::memory_order_acquire); }
+
     // ======= 硬件相关处理函数 =========
     void replaceDefaultEcMotorPdoGait(kuavo_msgs::jointCmd& jointCmdMsg);    // 替换EC_MASTER电机的kp/kd（从running_settings）
 
@@ -231,6 +236,13 @@ namespace humanoidController_wheel_wbc
     ros::Subscriber baseCmdVelStatusSub_;  // 订阅 /move_base/base_cmd_vel_status 话题
     bool enable_base_emergency_stop_{true};  // 底盘急停保护开关，默认打开
     std::atomic<bool> base_emergency_triggered_{false};  // 底盘急停触发标志
+
+    // ========== 底盘接管状态 ==========
+    // 接管期间外部拥有底盘控制权，WBC 不再向 /move_base/base_cmd_vel 发布速度指令。
+    // 进入接管的边沿只发布一次零速度，清掉桥接节点缓存的最后一条运控速度；接管期间不持续发零。
+    ros::Subscriber chassisTakeoverStateSub_;  // 订阅 /odom/chassis_takeover_state 话题
+    std::atomic<bool> chassis_takeover_{false};
+    bool chassis_takeover_zero_sent_{false};  // 本轮接管是否已发布过一次零速度（仅 update 线程读写）
 
     // ========== 机器人参数 ==========
     size_t baseDim_{0};
