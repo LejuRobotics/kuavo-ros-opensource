@@ -27,7 +27,7 @@ import write_urdf as installer
 import cam_proj_validation as projection
 from test_urdf_model_sync import fk
 
-EXISTING = ('62', '63', '200062', '300062', '400062', '400063', '500062', '500063', '600062')
+EXISTING = ('62', '63', '200062', '210062', '300062', '310062', '400062', '400063', '500062', '500063', '600062')
 
 
 def without_origins(data):
@@ -50,7 +50,7 @@ class VariantTests(unittest.TestCase):
         with patch.dict(os.environ, ROBOT_VERSION='500063'):
             with self.assertRaisesRegex(ValueError, 'conflicts'):
                 optimizer._config_for_capture(cfg, {'robot_version': '63'})
-        for invalid in ('63.5', 'abc', '500056', '162', ''):
+        for invalid in ('63.5', 'abc', '500056', '120062', '210063', '162', ''):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 variants.default_config_name(invalid)
         biped = yaml.safe_load((HERE / 'config/calib_s56.yaml').read_text())
@@ -82,12 +82,14 @@ class VariantTests(unittest.TestCase):
             cfg['calibration']['fk_root'] = 'old_config_root'
             custom.write_text(yaml.safe_dump(cfg))
             custom_urdf = Path(temp) / 'custom.urdf'
-            shutil.copyfile(variants.main_urdf('200062'), custom_urdf)
             custom_json = Path(temp) / 'custom.json'
-            shutil.copyfile(variants.ASSETS / 'config/kuavo_v200062/kuavo.json', custom_json)
-            for explicit in ([], ['--config', str(custom), '--urdf', str(custom_urdf),
-                                  '--kuavo-json', str(custom_json), '--fk-root', 'custom_root']):
-                argv = [str(HERE / 'record_joint_poses.py'), '--robot-version', '200062',
+            for version, explicit in ((version, explicit)
+                                      for version in ('200062', '210062', '310062')
+                                      for explicit in ([], ['--config', str(custom), '--urdf', str(custom_urdf),
+                                                           '--kuavo-json', str(custom_json), '--fk-root', 'custom_root'])):
+                shutil.copyfile(variants.main_urdf(version), custom_urdf)
+                shutil.copyfile(variants.ASSETS / f'config/kuavo_v{version}/kuavo.json', custom_json)
+                argv = [str(HERE / 'record_joint_poses.py'), '--robot-version', version,
                         '--fixture', 'new', '--output', str(Path(temp) / 'capture.json'), *explicit]
                 def run_recorder():
                     self.assertEqual(os.environ['ROBOT_VERSION'], '500063')
@@ -96,23 +98,24 @@ class VariantTests(unittest.TestCase):
                     for flag in ('robot-version', 'config', 'kuavo-json', 'urdf', 'robot-layout', 'fk-root'):
                         parser.add_argument('--' + flag)
                     options, _ = parser.parse_known_args()
-                    self.assertEqual(options.robot_version, '200062')
+                    self.assertEqual(options.robot_version, version)
                     self.assertEqual(Path(options.config), custom if explicit else HERE / 'config/calib_s63.yaml')
-                    self.assertEqual(Path(options.urdf), custom_urdf if explicit else variants.main_urdf('200062'))
-                    self.assertEqual(Path(options.kuavo_json), custom_json if explicit else variants.ASSETS / 'config/kuavo_v200062/kuavo.json')
+                    self.assertEqual(Path(options.urdf), custom_urdf if explicit else variants.main_urdf(version))
+                    self.assertEqual(Path(options.kuavo_json), custom_json if explicit else variants.ASSETS / f'config/kuavo_v{version}/kuavo.json')
                     loaded = recorder._load_config('/colleague/changed/default.yaml')
                     self.assertEqual(loaded['robot']['collect_sec'], 9.25 if explicit else 1.0)
-                    self.assertEqual(loaded['robot']['robot_version'], '200062')
+                    self.assertEqual(loaded['robot']['robot_version'], version)
                     for key in ('teach_left', 'teach_right', 'teach_head'):
                         self.assertTrue(Path(loaded['calibration'][key]).is_absolute())
-                    model = recorder._apply_robot_calibration_defaults(loaded['robot'], loaded['calibration'], '200062')
+                    model = recorder._apply_robot_calibration_defaults(loaded['robot'], loaded['calibration'], version)
                     self.assertEqual(model, {'robot_layout': 'wheel62', 'urdf': options.urdf,
                                              'fk_root': 'custom_root' if explicit else 'waist_yaw_link'})
                     loaded['robot']['collect_sec'] = -1
                     self.assertGreater(recorder._load_config('ignored')['robot']['collect_sec'], 0)
                     return 7
                 recorder.main = run_recorder
-                with patch.dict(sys.modules, modules), patch.dict(os.environ, ROBOT_VERSION='500063'), patch.object(sys, 'argv', argv):
+                with self.subTest(version=version, explicit=bool(explicit)), patch.dict(sys.modules, modules), \
+                        patch.dict(os.environ, ROBOT_VERSION='500063'), patch.object(sys, 'argv', argv):
                     self.assertEqual(entry.main(), 7)
                     self.assertIs(recorder._load_config, original_loader)
                     self.assertIs(recorder._apply_robot_calibration_defaults, original_model)

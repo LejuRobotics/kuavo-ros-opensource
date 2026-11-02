@@ -177,7 +177,7 @@ class FpfWorkflowTests(unittest.TestCase):
 
     def test_requested_version_is_used_through_capture_fit_validation_and_install(self):
         self.args = self.args[2:]  # Exercise the default family-config selection.
-        for version in ("62", "63", "500062", "500063"):
+        for version in ("62", "63", "500062", "500063", "210062", "310062"):
             with self.subTest(version=version):
                 self.events.clear()
                 self.commands.clear()
@@ -196,7 +196,7 @@ class FpfWorkflowTests(unittest.TestCase):
                                  workflow.optimizer.write_urdf.resolve_fit_source(target))
 
     def test_default_model_and_output_paths_follow_requested_version(self):
-        for version in ("62", "63", "500062", "500063"):
+        for version in ("62", "63", "500062", "500063", "210062", "310062"):
             with self.subTest(version=version), patch.dict(os.environ, ROBOT_VERSION=version):
                 effective = workflow.optimizer._config_for_capture(self.cfg, {})
                 self.assertEqual(effective["robot"]["robot_version"], version)

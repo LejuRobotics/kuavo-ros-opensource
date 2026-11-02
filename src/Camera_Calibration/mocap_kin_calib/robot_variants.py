@@ -10,7 +10,10 @@ ASSETS = Path(__file__).resolve().parents[2] / "kuavo_assets"
 def is_wheel_version(version):
     value = str(version)
     # RobotVersion encodes patch * 100000 + major * 10 + minor.
-    return bool(re.fullmatch(r"[1-9][0-9]*", value)) and int(value) % 100000 in (62, 63)
+    # The version registry also maps special IDs 210062/310062 to wheel 62.7/62.8.
+    return bool(re.fullmatch(r"[1-9][0-9]*", value)) and (
+        int(value) % 100000 in (62, 63) or value in ("210062", "310062")
+    )
 
 
 def main_urdf(version):
