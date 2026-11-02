@@ -60,7 +60,7 @@
     <arg name="control_finger_type" default="0" />
     <arg name="predict_gesture" default="false" />
     <arg name="enable_vr_latency_diagnostics" default="false" />
-    <arg name="ee_type" default="qiangnao"/>
+    <arg name="ee_type" default="$(eval 'lejuclaw' if int(arg('robot_version')) == 210062 else 'qiangnao')"/>
     <arg name="enable_head_control" default="true"/>
     <arg name="hand_reference_mode" default="thumb_index"/>
     <arg name="use_arm_collision" default="false"/>
@@ -81,7 +81,7 @@
     <arg name="enable_vr_transform_debug_topics" default="false" />
     <arg name="vr_transform_debug_publish_hz" default="10.0" />
     <arg name="use_incremental_hand_orientation" default="false" />
-    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/>
+    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) in (60, 61, 62, 63, 200062, 300062, 210062, 310062, 400062, 400063, 500062, 600062))"/>
     <!-- 与 launch_quest3_ik.launch 同名同义：绝对式 IK 肩 pitch 上限软限制 -->
     <arg name="limit_shoulder_pitch_upper" default="true" />
     <arg name="shoulder_pitch_upper_limit" default="0.3" />

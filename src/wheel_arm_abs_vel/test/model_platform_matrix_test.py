@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 import runtime_topology_test as fixtures
 partition, BASELINE, ROOT = fixtures.partition, fixtures.BASELINE, fixtures.ROOT
 sys.path.insert(0, str(ROOT/'scripts'))
-from tools.full_model_contract import full_model_relative_path, require_full_model
+from tools.full_model_contract import full_model_relative_path, require_full_model, task_fixed_joints
 
 ASSETS = ROOT.parent/'kuavo_assets'
 PLATFORMS = {
@@ -56,13 +56,14 @@ class ModelPlatformMatrix(unittest.TestCase):
         full = require_full_model(version, str(ASSETS), cfg)
         self.assertEqual(full, ASSETS/'models'/full_model_relative_path(version))
         joints = {j.get('name'): j for j in ET.parse(full).getroot().findall('joint')}
-        fixed = cfg['velocity_ik_fixed_joints']
+        task = ROOT.parent/f'humanoid-wheel-control/humanoid_wheel_interface/config/kuavo_s{version}/task.info'
+        fixed = task_fixed_joints(task)
         self.assertTrue(set(fixed) <= joints.keys())
-        active = {name for name,j in joints.items() if j.get('type') != 'fixed' and name not in fixed}
+        active = {name for name, joint in joints.items()
+                  if joint.get('type') != 'fixed' and name not in fixed}
         expected = {'knee_joint', 'leg_joint', 'waist_yaw_joint', 'waist_pitch_joint'}
         expected |= {f'zarm_{side}{i}_joint' for side in ('l', 'r') for i in range(1, 8)}
         self.assertEqual(active, expected)
-        task = ROOT.parent/f'humanoid-wheel-control/humanoid_wheel_interface/config/kuavo_s{version}/task.info'
         removal = task.read_text().split('removeJoints {')[1].split('}')[0]
         self.assertEqual(set(re.findall(r'"([^"]+)"', removal)), set(fixed))
         for launch in ('load_kuavo_real_velocity_ik.launch', 'load_kuavo_absolute_sim_base.launch'):
@@ -90,6 +91,19 @@ class ModelPlatformMatrix(unittest.TestCase):
             expression = args['absolute_launch_contract'].get('value')[7:-1]
             self.assertEqual(eval(expression, {'__builtins__': {}, 'int': int, 'arg': values.__getitem__}), 'wheel_arm_abs_vel_s62')
 
+    def test_supported_real_and_sim_launch_gates(self):
+        for version in (62, 63, 210062, 310062, 400062):
+            for file, real in (('load_kuavo_absolute_sim_base.launch', False),
+                               ('load_kuavo_real_velocity_ik.launch', True)):
+                args = {arg.get('name'): arg for arg in ET.parse(ROOT/'launch'/file).getroot().findall('arg')}
+                expression = args['absolute_launch_contract'].get('value')[7:-1]
+                values = dict(robot_version=version, robot_type=1, nodelet_robot_type=1,
+                              wheel_control_type=1, estimator_type=1, with_ik=False,
+                              use_whole_body_ik_reference=True, use_external_mpc=False, real=real)
+                with self.subTest(version=version, file=file):
+                    self.assertEqual(eval(expression, {'__builtins__': {}, 'int': int, 'arg': values.__getitem__}),
+                                     'wheel_arm_abs_vel_s62')
+
     def test_simulation_rejects_unsupported_modes(self):
         tree = ET.parse(ROOT/'launch/load_kuavo_absolute_sim_base.launch').getroot()
         args = {arg.get('name'): arg for arg in tree.findall('arg')}
@@ -105,7 +119,7 @@ class ModelPlatformMatrix(unittest.TestCase):
                 eval(expression, {'__builtins__': {}, 'int': int, 'arg': values.__getitem__})
 
     def test_all_versions_reject_missing_contract_wrong_model_and_drake_fallback(self):
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             for cfg in ({}, {'velocity_ik_urdf': ''}, {'velocity_ik_urdf': None},
                         {'velocity_ik_urdf': 7}, {'arm_urdf': full_model_relative_path(version)},
                         {'velocity_ik_urdf': f'biped_s{version}/urdf/drake/biped_v3_arm.urdf'},
@@ -125,7 +139,7 @@ class ModelPlatformMatrix(unittest.TestCase):
         self.assertTrue(node.get('launch-prefix').endswith('/scripts/sidecar_runtime.py'))
 
 
-for version in (62, 63, 400062):
+for version in (62, 63, 210062, 310062, 400062):
     for platform in PLATFORMS:
         def case(self, version=version, platform=platform):
             self.check_combination(version, platform)

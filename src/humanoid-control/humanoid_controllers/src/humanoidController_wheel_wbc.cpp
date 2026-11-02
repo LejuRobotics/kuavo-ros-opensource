@@ -416,14 +416,15 @@ namespace humanoidController_wheel_wbc
     ros::param::set("/headRealDof",  2);
     ros::param::set("/waistRealDof",  0);
     vector_t mujoco_q = vector_t::Zero(7 + 4 + 7*2 + 2);
-    // 轮臂（major==6）统一初始化：mujoco_q[2] 置 0（60/61/62/63/200062/300062/400062/400063 等价）
-    if (rb_version.major() == 6)
+    // wheel arm family includes internal patch versions 210062 / 310062.
+    if (rb_version.major() == 6 || rb_version.version_number() == 210062 || rb_version.version_number() == 310062)
     {
       mujoco_q[2] = 0.0;
     }
     mujoco_q[3] = 1.0;
-    // 62/63 夹爪气泵版（短版本 patch==0）的特殊初始臂姿
-    if ((rb_version.major() == 6 && rb_version.patch() == 0 && (rb_version.minor() == 2 || rb_version.minor() == 3)) && hasQibeng)
+    // 62/63 气泵夹爪版（短版本 patch==0）且硬件标记 hasQibeng 时使用专用初始姿态。
+    if ((rb_version.major() == 6 && rb_version.patch() == 0 &&
+         (rb_version.minor() == 2 || rb_version.minor() == 3)) && hasQibeng)
     {
       mujoco_q[11] = 0.5236;
       mujoco_q[14] = -1.57;

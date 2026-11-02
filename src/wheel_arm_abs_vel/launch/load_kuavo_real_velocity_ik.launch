@@ -60,6 +60,10 @@
     <arg name="robot_version" value="$(arg robot_version)" />
     <arg name="rviz" value="$(arg rviz)" />
   </include>
+  <!-- Re-apply explicit contract parameters after version manager and nested configs. -->
+  <param name="/robot_version" value="$(arg robot_version)" />
+  <param name="/urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <param name="/taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
   <arg name="urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
   <arg name="taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
   <arg name="libFolder" value="/var/ocs2/kuavo_s$(arg robot_version)" />
@@ -212,7 +216,7 @@
       <arg name="led_for_state" value="$(arg led_for_state)" />
     </include>
   </group>
-  <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62 or arg('robot_version') == 400062)">
+  <group if="$(eval arg('robot_version') in [61, 62, 210062, 310062, 400062])">
     <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service" output="screen" required="false" />
   </group>
   <param name="/vr_ik/use_velocity_ik_reference" value="true" type="bool" />
@@ -255,11 +259,20 @@
       <arg name="robot_version" value="$(arg robot_version)" />
     </include>
   </group>
-  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in (62, 63, 400062) and (int(arg('robot_version')) != 63 or not arg('with_ik')) and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires S62/S63/400062 (S63 with_ik=false) wheel mode, measured estimator and no external MPC'])" />
+  <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) in (62, 63, 210062, 310062, 400062) and (int(arg('robot_version')) != 63 or not arg('with_ik')) and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires S62/S63/210062/310062/400062 (S63 with_ik=false) wheel mode, measured estimator and no external MPC'])" />
   <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
   <include file="$(find noitom_hi5_hand_udp_python)/launch/head_control_node.launch">
     <arg name="head_control_mode" value="$(arg head_control_mode)" />
     <arg name="head_track_target" value="$(arg head_track_target)" />
   </include>
+  <!-- Final version-scoped assets must win over parameters from nested legacy launches. -->
+  <param name="/robot_version" value="$(arg robot_version)" type="int" />
+  <param name="/urdfFile" value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <param name="/taskFile" value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" />
+  <param name="/robot_description" textfile="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <param name="/kuavo_configuration" textfile="$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json" />
+  <param name="/referenceFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" />
+  <param name="/gaitCommandFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info" />
+  <param name="/dynamicQrFile" value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/dynamic_qr.info" />
 </launch>

@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix="quest-config-test-") as tmp:
                 return False
         try:
             wait_until(master_ready)
-            for version in (62, 63, 400062):
+            for version in (62, 63, 210062, 310062, 400062):
                 cfg = roslaunch.config.load_config_default(
                     [(str(PACKAGE/"launch/quest_velocity_ik.launch"),
                       ["robot_version:=%d" % version, "ip_address:=127.0.0.1"])],
@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix="quest-config-test-") as tmp:
                         finally:
                             stop(proc)
             print(json.dumps(results, indent=2))
-            print("PASS: 20 isolated FSM startup/configuration cases; no hardware or input source started")
+            print("PASS: 50 isolated FSM startup/configuration cases; no hardware or input source started")
         finally:
             for child in reversed(children):
                 stop(child)

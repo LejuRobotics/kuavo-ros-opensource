@@ -141,7 +141,7 @@ if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
   if(VELOCITY_IK_CATKIN_BUILD)
     add_dependencies(velocity_ik_torso_permission_test ${VELOCITY_IK_MESSAGE_TARGETS})
   endif()
-  foreach(model 62 63 400062)
+  foreach(model 62 63 210062 310062 400062)
     foreach(scenario normal reset_complete reset_hold reset_stale)
       add_test(NAME velocity_ik_torso_${model}_${scenario}
         COMMAND ${PYTHON_EXECUTABLE}
@@ -162,11 +162,15 @@ if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
   endforeach()
 endif()
 
-# Canonical S62 reduction, named joint mapping, full-URDF FK and finite-difference Jacobians.
+# Canonical full-model reduction, named joint mapping, full-URDF FK and finite-difference Jacobians.
 add_executable(velocity_ik_model_alignment_test model_alignment_test.cpp)
 target_link_libraries(velocity_ik_model_alignment_test PRIVATE velocity_ik_model)
 add_test(NAME velocity_ik_model_alignment_test COMMAND velocity_ik_model_alignment_test
   ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s62.json)
+foreach(model 210062 310062)
+  add_test(NAME velocity_ik_model_alignment_s${model}_test COMMAND velocity_ik_model_alignment_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s${model}.json ${model})
+endforeach()
 add_test(NAME velocity_ik_model_alignment_s63_test COMMAND velocity_ik_model_alignment_test
   ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s63.json 63)
 add_test(NAME velocity_ik_model_alignment_400062_test COMMAND velocity_ik_model_alignment_test

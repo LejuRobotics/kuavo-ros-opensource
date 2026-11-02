@@ -29,7 +29,7 @@
     <arg name="vr_transform_debug_publish_hz" default="10.0" /> <!-- 调试话题与Marker发布频率 -->
     <arg name="finger_processing_hz" default="30.0" /> <!-- 手指异步处理频率 -->
     <arg name="ik_solution_timeout_s" default="0.2" /> <!-- VR无新解时暂停重复轨迹发布的超时 -->
-    <arg name="ee_type" default="qiangnao"/>
+    <arg name="ee_type" default="$(eval 'lejuclaw' if int(arg('robot_version')) == 210062 else 'qiangnao')"/>
     <arg name="enable_head_control" default="true"/>
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
     <arg name="use_arm_collision" default="false"/>
@@ -40,9 +40,9 @@
     <param name="/use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)" type="bool"/>
     <arg name="enable_vr_stop_robot" default="true"/> <!-- false: 禁用 VR 手柄 X+Y 触发 stop_robot，仅遥控器可关机 -->
     <param name="/enable_vr_stop_robot" value="$(arg enable_vr_stop_robot)" type="bool"/>
-    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/> <!-- tens digit is 6: true, else false -->
+    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) in (60, 61, 62, 63, 200062, 300062, 210062, 310062, 400062, 400063, 500062, 600062))"/> <!-- tens digit is 6: true, else false -->
     <!-- 轮臂 v61/v62/v63 VR 底盘限速（G12/北通遥控仍走 /mobile_manipulator_joy/* 默认 0.8/0.5） -->
-    <group if="$(eval int(arg('robot_version')) == 61 or int(arg('robot_version')) == 62 or int(arg('robot_version')) == 63)">
+    <group if="$(eval int(arg('robot_version')) in (61, 62, 63, 210062, 310062, 400062))">
       <param name="/vr_cmd_vel/linear_scale_x" value="0.4"/>
       <param name="/vr_cmd_vel/linear_scale_y" value="0.4"/>
       <param name="/vr_cmd_vel/angular_scale_z" value="0.25"/>

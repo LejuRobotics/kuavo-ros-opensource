@@ -32,10 +32,10 @@ template<class F> void rejects(F f,const char* name) {
 
 int main(int argc,char** argv) {
  try {
-  if(argc!=2 && argc!=3) throw std::invalid_argument("usage: rnea_backend_test REPOSITORY_ROOT [62|63|400062]");
+  if(argc!=2 && argc!=3) throw std::invalid_argument("usage: rnea_backend_test REPOSITORY_ROOT [62|63|210062|310062|400062]");
   const std::string root=argv[1];
   const std::string version=argc==3?argv[2]:"62";
-  require(version=="62" || version=="63" || version=="400062", "supported model version");
+  require(version=="62" || version=="63" || version=="210062" || version=="310062" || version=="400062", "supported model version");
   const std::string task=root+"/src/humanoid-wheel-control/humanoid_wheel_interface/config/kuavo_s"+version+"/task.info";
   std::vector<std::string> removed;
   loadData::loadStdVector<std::string>(task,"model_information.removeJoints",removed,false);
