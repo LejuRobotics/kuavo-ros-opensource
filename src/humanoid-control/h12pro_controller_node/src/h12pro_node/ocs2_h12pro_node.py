@@ -1857,6 +1857,15 @@ class H12PROControllerNode:
             if not trigger_keys.issubset(key_combination):
                 continue
 
+            # G11 起机仅允许屏幕发起(CH15=1050): 实体 SW1+SW2+H 不再能起机(2026-10-31 产品决定)。
+            # 屏幕起机走 _handle_g11_screen 直接调 initial_pre, 不经过本函数 -> 不受影响;
+            # H12/G12 的 _controller_type != "g11" -> 不进本判断, 行为不变。
+            # 放在 issubset 之后: 只有真的按下该组合才记日志, 不会每帧刷屏。
+            if (_controller_type == "g11" and current_state == "initial"
+                    and trigger == "initial_pre"):
+                rospy.loginfo("[StateTransition] G11 实体键起机已禁用(请用屏幕「启动机器人」+ H)")
+                continue
+
             if screen_holding_h and any(k.startswith("H_") for k in trigger_keys):
                 rospy.logdebug(
                     f"[StateTransition] '{trigger}' skipped: screen cmd is holding H")

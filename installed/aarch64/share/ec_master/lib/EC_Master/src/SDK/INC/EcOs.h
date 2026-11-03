@@ -1,8 +1,8 @@
-/*-----------------------------------------------------------------------------
- * EcOs.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description              EC-Master OS-Layer header
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       EC-Master OS-Layer header
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECOS
@@ -45,6 +45,32 @@
 #ifndef EC_API_FNCALL
 #define EC_API_FNCALL EC_FNCALL
 #endif
+
+#if (defined EC_OS_NAMESPACE)
+/* set EC_OS_... */
+#undef  EC_OS_API
+#define EC_OS_API
+#undef  EC_OS_API_FNCALL
+#define EC_OS_API_FNCALL
+#undef  EC_OS_FNNAME
+#define EC_OS_FNNAME
+#undef  EC_OS_FNCALL
+#define EC_OS_FNCALL
+#endif /* EC_OS_NAMESPACE */
+
+#ifndef EC_OS_API
+#define EC_OS_API EC_API
+#endif
+#ifndef EC_OS_API_FNCALL
+#define EC_OS_API_FNCALL EC_API_FNCALL
+#endif
+#ifndef EC_OS_FNNAME
+#define EC_OS_FNNAME EC_FNNAME_DEFAULT
+#endif
+#ifndef EC_OS_FNCALL
+#define EC_OS_FNCALL
+#endif
+
 #ifdef  EC_DLL
 #ifndef EC_APIENTRY
 #define EC_APIENTRY WINAPI
@@ -192,13 +218,10 @@ extern "C"
 #include <limits.h>
 
 /* TODO: remove */
-#if 1
-#ifdef __cplusplus
+#if (defined __cplusplus) && (!defined EC_OS_NAMESPACE)
 extern "C"
 {
 #endif
-#endif
-
 #ifndef INC_EC_COMMON
 #include "OsCommon.h"
 #endif
@@ -208,6 +231,10 @@ extern "C"
 /* -PACKED STRUCTURES------------------------------------------------------- */
 #ifndef EC_T_OS_PARMS
 #include EC_PACKED_API_INCLUDESTART
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_OS_PARMS
 {
 #define EC_OS_PARMS_SIGNATURE_PATTERN          (EC_T_DWORD)0x5BA00000      /* Mask 0xFFF00000 */
@@ -221,12 +248,15 @@ typedef struct _EC_T_OS_PARMS
     EC_T_DWORD                          dwSize;                       /**< [in] Set to sizeof(EC_T_OS_PARMS) */
     struct _EC_T_LOG_PARMS*             pLogParms;                    /**< [in] Pointer to logging parameters  */
     EC_PF_SYSTIME                       pfSystemTimeGet;              /**< [in] Function to get host time in nanoseconds since 1st January 2000. Used as time base for DC Initialization. */
-    EC_T_DWORD                          dwSupportedFeatures;          /**< [in/out] reserved */
-    EC_PF_QUERY_MSEC_COUNT              pfSystemQueryMsecCount;       /**< [in] Function to get system's msec count */
+    EC_T_DWORD                          dwSupportedFeatures;          /**< [in/out] Reserved */
+    EC_PF_QUERY_MSEC_COUNT              pfSystemQueryMsecCount;       /**< [in] Function to get system's ms count */
 #if (defined EC_T_OS_PLATFORM_PARMS)
     EC_T_OS_PLATFORM_PARMS              PlatformParms;                /**< [in] Platform specific parameters */
 #endif
 } EC_PACKED_API EC_T_OS_PARMS;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 #include EC_PACKED_INCLUDESTOP
 #define EC_T_OS_PARMS EC_T_OS_PARMS
 #endif
@@ -236,19 +266,24 @@ typedef struct _EC_T_OS_PARMS
 #define ATECAT_PLATFORMSTR ""
 #endif
 
-#define     SafeOsFree(p)        {if(EC_NULL!=(p)){OsFree(p);(p)=EC_NULL;}}
+#define     OsSafeFree(p)        {if(EC_NULL!=(p)){OsFree(p);(p)=EC_NULL;}}
 
-#define     SafeOsDeleteEvent(p) {if(EC_NULL!=(p)){OsDeleteEvent(p);(p)=EC_NULL;}}
+#define     OsSafeDeleteEvent(p) {if(EC_NULL!=(p)){OsDeleteEvent(p);(p)=EC_NULL;}}
 
-#define     SafeOsDeleteLock(p)  {if(EC_NULL!=(p)){OsDeleteLock(p);(p)=EC_NULL;}}
+#define     OsSafeDeleteLock(p)  {if(EC_NULL!=(p)){OsDeleteLock(p);(p)=EC_NULL;}}
 
 /*-FUNCTION DECLARATIONS-----------------------------------------------------*/
-EC_API EC_T_DWORD EC_API_FNCALL OsInit(EC_T_OS_PARMS* pOsParms);
-EC_API EC_T_DWORD EC_API_FNCALL OsDeinit(EC_T_VOID);
-EC_API EC_T_VOID EC_API_FNCALL OsSetLogParms(struct _EC_T_LOG_PARMS* pLogParms);
+#if (defined EC_OS_NAMESPACE) && (defined __cplusplus)
+namespace EC_OS_NAMESPACE
+{
+#endif
+
+EC_OS_API EC_T_DWORD EC_OS_API_FNCALL OsInit(EC_T_OS_PARMS* pOsParms);
+EC_OS_API EC_T_DWORD EC_OS_API_FNCALL OsDeinit(EC_T_VOID);
+EC_OS_API EC_T_VOID  EC_OS_API_FNCALL OsSetLogParms(const struct _EC_T_LOG_PARMS* pLogParms);
 
 #ifndef OsMemset
-#define OsMemset(pDest,nVal,nSize)              memset((void*)(pDest),(int)(nVal),(size_t)(nSize))
+#define OsMemset(pDest,nVal,nSize)              memset((EC_T_VOID*)(pDest), nVal, nSize)
 #endif
 
 #ifndef OsMemsetPdIn
@@ -260,7 +295,7 @@ EC_API EC_T_VOID EC_API_FNCALL OsSetLogParms(struct _EC_T_LOG_PARMS* pLogParms);
 #endif
 
 #ifndef OsMemcpy
-#define OsMemcpy(pDest,pSrc,nSize)              memcpy((void*)(pDest),(const void*)(pSrc),(size_t)(nSize))
+#define OsMemcpy(pDest,pSrc,nSize)              memcpy(pDest, pSrc, nSize)
 #endif
 
 #ifndef OsMemcpyPdIn
@@ -280,23 +315,15 @@ EC_API EC_T_VOID EC_API_FNCALL OsSetLogParms(struct _EC_T_LOG_PARMS* pLogParms);
 #endif
 
 #ifndef OsMemcmp
-#define OsMemcmp(pBuf1,pBuf2,nSize)             memcmp((void*)(pBuf1),(const void*)(pBuf2),(size_t)(nSize))
+#define OsMemcmp(pBuf1,pBuf2,nSize)             memcmp(pBuf1, pBuf2, nSize)
 #endif
 
 #ifndef OsMemmove
-#define OsMemmove(pDest,pSrc,nSize)             memmove((void*)(pDest),(const void*)(pSrc),(size_t)(nSize))
+#define OsMemmove(pDest,pSrc,nSize)             memmove(pDest, pSrc, nSize)
 #endif
 
 #ifndef OsStrlen
 #define OsStrlen(szString)                      strlen((const char*)(szString))
-#endif
-
-#ifndef OsStrcpy
-#define OsStrcpy(szDest,szSrc)                  strcpy((char*)(szDest),(const char*)(szSrc))
-#endif
-
-#ifndef OsStrncpy
-#define OsStrncpy(szDest,szSrc,nSize)           strncpy((char*)(szDest),(const char*)(szSrc),(size_t)(nSize))
 #endif
 
 #ifndef OsStrcmp
@@ -379,18 +406,31 @@ EC_T_INLINE(EC_T_DWORD OsGetFileSize(FILE* fp)) {long l;fseek((fp),0,SEEK_END);l
 #endif
 */
 
-#ifndef OsDbgAssert
-#ifdef INCLUDE_ASSERT_FUNC
-EC_FNNAME EC_T_VOID EC_FNCALL         OsDbgAssertFunc(EC_T_BOOL bAssertCondition, const EC_T_CHAR* szFile, EC_T_DWORD dwLine);
+#ifndef OsMkdir
+#if (defined WIN32)
+#define OsMkdir(szDir) _mkdir((szDir))
+#else
+#define OsMkdir(szDir) mkdir((szDir),S_IRWXU|S_IRWXG|S_IROTH|S_IXOTH)
+#endif
+#endif
+
+/********************************************************************************/
+/** \brief  OsDbgAssertFunc(): callback for checked code
+ *
+ * \return  N/A.
+ */
+EC_OS_FNNAME EC_T_VOID EC_OS_FNCALL OsDbgAssertFunc(EC_T_BOOL bAssertCondition, const EC_T_CHAR* szFile, EC_T_DWORD dwLine);
+EC_OS_FNNAME EC_T_VOID EC_OS_FNCALL OsDbgAssertFail(const EC_T_CHAR* szFile, EC_T_DWORD dwLine);
+
+#if (!defined OsDbgAssert)
+#if (defined INCLUDE_ASSERT_FUNC)
 #define OsDbgAssert(bAssertCondition) OsDbgAssertFunc((bAssertCondition),(__FILE__), (__LINE__))
-#else /* !INCLUDE_ASSERT_FUNC */
-#ifdef DEBUG
-#define OsDbgAssert                             assert
-#else /* !DEBUG */
+#elif (defined DEBUG)
+#define OsDbgAssert assert
+#else
 #define OsDbgAssert(x)
-#endif /* !DEBUG */
 #endif /* !INCLUDE_ASSERT_FUNC */
-#endif /* OsDbgAssert */
+#endif /* OsDbgAssert() */
 
 #ifndef OsSetLastError
 #define OsSetLastError(dwError)                 dwError
@@ -406,26 +446,26 @@ EC_FNNAME EC_T_VOID EC_FNCALL         OsDbgAssertFunc(EC_T_BOOL bAssertCondition
 #endif
 #endif /* __cplusplus */
 
-EC_FNNAME EC_T_VOID* EC_FNCALL OsCfgFileOpen(const EC_T_CHAR* szCfgFileName);
-EC_FNNAME EC_T_INT   EC_FNCALL OsCfgFileClose(EC_T_VOID* pvCfgFile);
-EC_FNNAME EC_T_INT   EC_FNCALL OsCfgFileRead(EC_T_VOID* pvCfgFile, EC_T_VOID* pvDst, EC_T_INT nLen);
-EC_FNNAME EC_T_INT   EC_FNCALL OsCfgFileError(EC_T_VOID* pvCfgFile);
-EC_FNNAME EC_T_INT   EC_FNCALL OsCfgFileEof(EC_T_VOID* pvCfgFile);
+EC_OS_FNNAME EC_T_VOID* EC_OS_FNCALL OsCfgFileOpen(const EC_T_CHAR* szCfgFileName);
+EC_OS_FNNAME EC_T_INT   EC_OS_FNCALL OsCfgFileClose(EC_T_VOID* pvCfgFile);
+EC_OS_FNNAME EC_T_INT   EC_OS_FNCALL OsCfgFileRead(EC_T_VOID* pvCfgFile, EC_T_VOID* pvDst, EC_T_INT nLen);
+EC_OS_FNNAME EC_T_INT   EC_OS_FNCALL OsCfgFileError(EC_T_VOID* pvCfgFile);
+EC_OS_FNNAME EC_T_INT   EC_OS_FNCALL OsCfgFileEof(EC_T_VOID* pvCfgFile);
 
 /* these functions are actually part of the master core */
-EC_API  EC_T_INT   EC_API_FNCALL EcVsnprintf(EC_T_CHAR* szDest, EC_T_INT nMaxSize, const EC_T_CHAR* szFormat, EC_T_VALIST vaList);
-EC_API  EC_T_INT   EC_API_FNCALL EcSnprintf(EC_T_CHAR* szDest, EC_T_INT nMaxSize, const EC_T_CHAR* szFormat, ...);
+EC_OS_API EC_T_INT   EC_OS_API_FNCALL EcVsnprintf(EC_T_CHAR* szDest, EC_T_INT nMaxSize, const EC_T_CHAR* szFormat, EC_T_VALIST vaList);
+EC_OS_API EC_T_INT   EC_OS_API_FNCALL EcSnprintf(EC_T_CHAR* szDest, EC_T_INT nMaxSize, const EC_T_CHAR* szFormat, ...);
 
 #ifndef OsQueryMsecCount
-EC_API  EC_T_DWORD EC_API_FNCALL OsQueryMsecCount(EC_T_VOID);
+EC_OS_API EC_T_DWORD EC_OS_API_FNCALL OsQueryMsecCount(EC_T_VOID);
 #endif
 
 #ifndef OsReplaceQueryMsecCount
-EC_API  EC_T_DWORD EC_API_FNCALL OsReplaceQueryMsecCount(EC_PF_QUERY_MSEC_COUNT pfQueryMsecCount);
+EC_OS_API EC_T_DWORD EC_OS_API_FNCALL OsReplaceQueryMsecCount(EC_PF_QUERY_MSEC_COUNT pfQueryMsecCount);
 #endif
 
 #ifndef EXCLUDE_OSSLEEP_PROTOTYPE
-EC_API  EC_T_VOID  EC_API_FNCALL OsPlatformImplSleep(EC_T_DWORD dwMsec);
+EC_OS_API EC_T_VOID  EC_OS_API_FNCALL OsPlatformImplSleep(EC_T_DWORD dwMsec);
 #endif
 
 /***************************/
@@ -435,7 +475,7 @@ EC_API  EC_T_VOID  EC_API_FNCALL OsPlatformImplSleep(EC_T_DWORD dwMsec);
 #ifndef INCLUDE_OS_PLATFORM_TSC_SUPPORT
 
 /* if platform does not have specific TSC support, check for defaults if it is yet available */
-#if (defined UNDER_CE && defined _M_IX86) || (defined RTOS_32) || (defined VXWORKS && defined CPU && ((CPU==PENTIUM) || (CPU==PENTIUM4))) || (defined EC_VERSION_QNX) || ((defined WIN32) && !(defined UNDER_CE)) || ((defined EC_VERSION_LINUX) && (defined __i386__)) || defined __INTIME__
+#if (defined UNDER_CE && defined _M_IX86) || (EC_OS == EC_OS_RTOS32) || ((EC_OS == EC_OS_VXWORKS) && (defined CPU) && ((CPU == PENTIUM) || (CPU == PENTIUM4))) || (EC_OS == EC_OS_QNX) || ((defined WIN32) && !(defined UNDER_CE)) || ((EC_OS == EC_OS_LINUX) && (defined __i386__)) || (EC_OS == EC_OS_INTIME)
 #define INCLUDE_OS_PLATFORM_TSC_SUPPORT
 #define INCLUDE_PENTIUM_TSC
 #endif
@@ -454,10 +494,10 @@ typedef struct _EC_T_TSC_TIME
 {
     EC_T_UINT64     qwStart;            /**< start time */
     EC_T_UINT64     qwEnd;              /**< end time */
-    EC_T_DWORD      dwCurr;             /**< [1/10   usec] */
-    EC_T_DWORD      dwMin;              /**< [1/10   usec] */
-    EC_T_DWORD      dwMax;              /**< [1/10   usec] */
-    EC_T_DWORD      dwAvg;              /**< [1/1600 usec] */
+    EC_T_DWORD      dwCurr;             /**< [1/10   us] */
+    EC_T_DWORD      dwMin;              /**< [1/10   us] */
+    EC_T_DWORD      dwMax;              /**< [1/10   us] */
+    EC_T_DWORD      dwAvg;              /**< [1/1600 us] */
     EC_T_BOOL       bMeasReset;         /**< EC_TRUE if measurement values shall be reset */
     EC_T_INT        nIntLevel;          /**< for interrupt lockout handling */
 } EC_PACKED_API EC_T_TSC_TIME;
@@ -481,9 +521,9 @@ typedef struct _EC_T_TSC_MEAS_DESC
 #define OsTscMeasEnableIrq(pTscMeasDesc,dwIndex)
 #endif
 
-EC_API EC_T_VOID   EC_API_FNCALL OsMeasCalibrate(EC_T_UINT64 dwlFreqSet);
-EC_API EC_T_DWORD  EC_API_FNCALL OsMeasGet100kHzFrequency(EC_T_VOID);
-EC_API EC_T_UINT64 EC_API_FNCALL OsMeasGetCounterTicks(EC_T_VOID);
+EC_OS_API EC_T_VOID   EC_OS_API_FNCALL OsMeasCalibrate(EC_T_UINT64 dwlFreqSet);
+EC_OS_API EC_T_DWORD  EC_OS_API_FNCALL OsMeasGet100kHzFrequency(EC_T_VOID);
+EC_OS_API EC_T_UINT64 EC_OS_API_FNCALL OsMeasGetCounterTicks(EC_T_VOID);
 
 /* optional: redirect trace messages into OS specific function, e.g. to store trace log into file
  * default: print trace log as debug message
@@ -492,45 +532,41 @@ EC_API EC_T_UINT64 EC_API_FNCALL OsMeasGetCounterTicks(EC_T_VOID);
 #define     OsTrcMsg    EC_DBGMSG
 #endif
 
-EC_API EC_T_VOID*  EC_API_FNCALL OsCreateLock(EC_T_VOID);
-EC_API EC_T_VOID*  EC_API_FNCALL OsCreateLockTyped(EC_T_OS_LOCK_TYPE   eLockType);
-EC_API EC_T_VOID   EC_API_FNCALL OsDeleteLock(EC_T_VOID* pvLock);
-EC_API EC_T_VOID   EC_API_FNCALL OsLock(EC_T_VOID* pvLock);
-EC_API EC_T_VOID   EC_API_FNCALL OsUnlock(EC_T_VOID* pvLock);
+EC_OS_API EC_T_VOID*  EC_OS_API_FNCALL OsCreateLock(EC_T_VOID);
+EC_OS_API EC_T_VOID*  EC_OS_API_FNCALL OsCreateLockTyped(EC_T_OS_LOCK_TYPE eLockType);
+EC_OS_API EC_T_VOID   EC_OS_API_FNCALL OsDeleteLock(EC_T_VOID* pvLock);
+EC_OS_API EC_T_VOID   EC_OS_API_FNCALL OsLock(EC_T_VOID* pvLock);
+EC_OS_API EC_T_VOID   EC_OS_API_FNCALL OsUnlock(EC_T_VOID* pvLock);
 
-EC_API EC_T_VOID*  EC_API_FNCALL OsCreateEvent(EC_T_VOID);
-EC_API EC_T_VOID   EC_API_FNCALL OsDeleteEvent(EC_T_VOID* pvEvent);
+EC_OS_API EC_T_VOID*  EC_OS_API_FNCALL OsCreateEvent(EC_T_VOID);
+EC_OS_API EC_T_VOID   EC_OS_API_FNCALL OsDeleteEvent(EC_T_VOID* pvEvent);
 #ifndef OsWaitForEvent
-EC_API EC_T_DWORD  EC_API_FNCALL OsWaitForEvent(EC_T_VOID* pvEvent, EC_T_DWORD dwTimeout);
+EC_OS_API EC_T_DWORD  EC_OS_API_FNCALL OsWaitForEvent(EC_T_VOID* pvEvent, EC_T_DWORD dwTimeout);
 #endif
-EC_API EC_T_VOID   EC_API_FNCALL OsPlatformImplSetEvent(EC_T_VOID* pvEvent);
-EC_API EC_T_VOID   EC_API_FNCALL OsPlatformImplResetEvent(EC_T_VOID* pvEvent);
+EC_OS_API EC_T_VOID   EC_OS_API_FNCALL OsPlatformImplSetEvent(EC_T_VOID* pvEvent);
+EC_OS_API EC_T_VOID   EC_OS_API_FNCALL OsPlatformImplResetEvent(EC_T_VOID* pvEvent);
 
-EC_API EC_T_VOID*  EC_API_FNCALL OsPlatformImplCreateThread(const EC_T_CHAR* szThreadName, EC_PF_THREADENTRY pfThreadEntry, EC_T_CPUSET cpuAffinityMask, EC_T_DWORD dwPrio, EC_T_DWORD dwStackSize, EC_T_VOID* pvParams);
-EC_API EC_T_DWORD  EC_API_FNCALL OsPlatformImplDeleteThreadHandle(EC_T_VOID* pvThreadObject);
+EC_OS_API EC_T_VOID* EC_OS_API_FNCALL OsPlatformImplCreateThread(const EC_T_CHAR* szThreadName, EC_PF_THREADENTRY pfThreadEntry, EC_T_CPUSET cpuAffinityMask, EC_T_DWORD dwPrio, EC_T_DWORD dwStackSize, EC_T_VOID* pvParams);
+EC_OS_API EC_T_DWORD  EC_OS_API_FNCALL OsPlatformImplDeleteThreadHandle(EC_T_VOID* pvThreadObject);
 
 #ifndef OsSetThreadPriority
-EC_API EC_T_DWORD  EC_API_FNCALL OsSetThreadPriority(EC_T_VOID* pvThreadObject, EC_T_DWORD dwPrio);
+EC_OS_API EC_T_DWORD  EC_OS_API_FNCALL OsSetThreadPriority(EC_T_VOID* pvThreadObject, EC_T_DWORD dwPrio);
 #endif
 #ifndef OsSetThreadAffinity
-EC_API EC_T_DWORD  EC_API_FNCALL OsSetThreadAffinity(EC_T_VOID* pvThreadObject, EC_T_CPUSET CpuSet);
+EC_OS_API EC_T_DWORD  EC_OS_API_FNCALL OsSetThreadAffinity(EC_T_VOID* pvThreadObject, EC_T_CPUSET CpuSet);
 #endif
 #ifndef OsGetThreadAffinity
-EC_API EC_T_DWORD  EC_API_FNCALL OsGetThreadAffinity(EC_T_VOID* pvThreadObject, EC_T_CPUSET* pCpuSet);
+EC_OS_API EC_T_DWORD  EC_OS_API_FNCALL OsGetThreadAffinity(EC_T_VOID* pvThreadObject, EC_T_CPUSET* pCpuSet);
 #endif
 
-typedef EC_PF_LLREGISTER(*EC_PF_GETLINKLAYERREGFUNC)(EC_T_CHAR* szDriverIdent, EC_T_CHAR* szLoadPath);
-EC_API EC_PF_LLREGISTER EC_API_FNCALL OsPlatformImplGetLinkLayerRegFunc(EC_T_CHAR* szDriverIdent, EC_T_CHAR* szLoadPath);
+typedef EC_PF_LLREGISTER(EC_FNCALL *EC_PF_GETLINKLAYERREGFUNC)(const EC_T_CHAR* szDriverIdent, const EC_T_CHAR* szLoadPath);
+EC_OS_API EC_PF_LLREGISTER EC_OS_API_FNCALL OsPlatformImplGetLinkLayerRegFunc(const EC_T_CHAR* szDriverIdent, const EC_T_CHAR* szLoadPath);
 
-EC_API EC_T_VOID OsPlatformImplReleaseLinkLayerRegFunc(EC_T_CHAR* szDriverIdent);
+EC_OS_API EC_T_VOID OsPlatformImplReleaseLinkLayerRegFunc(const EC_T_CHAR* szDriverIdent);
 
-EC_API EC_T_VOID OsPlatformImplReplaceGetLinkLayerRegFunc(EC_PF_GETLINKLAYERREGFUNC pfLinkLayerRegFunc);
+EC_OS_API EC_T_VOID OsPlatformImplReplaceGetLinkLayerRegFunc(EC_PF_GETLINKLAYERREGFUNC pfLinkLayerRegFunc);
 
-EC_API EC_T_DWORD EC_API_FNCALL OsSystemTimeGet(EC_T_UINT64* pqwSystemTime);
-
-#ifndef OsForceThreadPrioNormal
-EC_API EC_T_DWORD EC_API_FNCALL OsForceThreadPrioNormal(EC_T_VOID);
-#endif
+EC_OS_API EC_T_DWORD EC_OS_API_FNCALL OsSystemTimeGet(EC_T_UINT64* pqwSystemTime);
 
 
 #if (defined EC_SOCKET_IP_SUPPORTED)
@@ -551,11 +587,15 @@ EC_API EC_T_DWORD EC_API_FNCALL OsForceThreadPrioNormal(EC_T_VOID);
 #define EC_POLL_FD pollfd
 #endif
 
+#ifndef EC_EINPROGRESS
+#define EC_EINPROGRESS EINPROGRESS
+#endif
+
 #ifndef OsSocketInit
-EC_API EC_T_DWORD EC_API_FNCALL OsSocketInit(EC_T_VOID);
+EC_OS_API EC_T_DWORD EC_OS_API_FNCALL OsSocketInit(EC_T_VOID);
 #endif
 #ifndef OsSocketDeInit
-EC_API EC_T_DWORD EC_API_FNCALL OsSocketDeInit(EC_T_VOID);
+EC_OS_API EC_T_DWORD EC_OS_API_FNCALL OsSocketDeInit(EC_T_VOID);
 #endif
 
 #ifndef OsSocket
@@ -580,6 +620,13 @@ EC_API EC_T_DWORD EC_API_FNCALL OsSocketDeInit(EC_T_VOID);
 #define OsSocketSelect(nNfds, poReadFds, poWriteFds, poExceptFds, poTimeout) select(nNfds, poReadFds, poWriteFds, poExceptFds, poTimeout)
 #endif
 
+#ifndef OsSocketFcntl
+#define OsSocketFcntl fcntl
+#endif
+
+#ifndef OsSocketIoctlsocket
+#define OsSocketIoctlsocket ioctlsocket
+#endif
 
 #ifndef OsSocketAccept
 #define OsSocketAccept(hSockHandle, oSockAddr, nSockAddrLen) accept(hSockHandle, oSockAddr, nSockAddrLen)
@@ -619,6 +666,10 @@ EC_API EC_T_DWORD EC_API_FNCALL OsSocketDeInit(EC_T_VOID);
 
 #ifndef OsSocketSetSockOpt
 #define OsSocketSetSockOpt(hSockHandle, nLevel, nOptName, pOptValue, nOptLen ) setsockopt(hSockHandle, nLevel, nOptName, pOptValue, nOptLen)
+#endif
+
+#ifndef OsSocketGetSockOpt
+#define OsSocketGetSockOpt(hSockHandle, nLevel, nOptName, pOptValue, pnOptLen ) getsockopt(hSockHandle, nLevel, nOptName, pOptValue, pnOptLen)
 #endif
 
 #ifndef OsHTONS
@@ -680,20 +731,52 @@ EC_API EC_T_DWORD EC_API_FNCALL OsSocketDeInit(EC_T_VOID);
 #endif
 #endif
 
-static EC_INLINESTART EC_T_VOID OsSafeStrcpy(EC_T_CHAR* szTargetString, const EC_T_CHAR* szSourceString, EC_T_INT nMaxSize)
+/*****************************************************************************/
+/**
+ * \brief Copy zero terminated string from szSrc to szDest. 
+ *
+ * In contrast to strncpy() append a guaranteed '\0' at szDest[nMaxSize - 1].
+ *
+ * In contrast to OsSafeStrncpy2() read at most nLen = nMaxSize - 1 chars from szSrc.
+ *
+ * \return N/A
+ */
+static EC_INLINESTART EC_T_VOID OsSafeStrncpy(EC_T_CHAR* szDest, const EC_T_CHAR* szSrc, size_t nMaxSize)
 {
-    if (nMaxSize != 0)
+    if (nMaxSize > 0)
     {
-        OsMemset(szTargetString, 0, nMaxSize);
-        OsStrncpy(szTargetString, szSourceString, nMaxSize - 1);
-    }
-    else
-    {
-        szTargetString[0] = '\0';
+        strncpy(szDest, szSrc, nMaxSize - 1);
+        szDest[nMaxSize - 1] = '\0';
     }
 } EC_INLINESTOP
-#define SAFE_STRCPY OsSafeStrcpy /* deprecated */
 
+/*****************************************************************************/
+/**
+ * \brief Copy zero terminated string from szSrc to szDest. 
+ *
+ * In contrast to strncpy() append a guaranteed '\0' at szDest[nMaxSize - 1].
+ * 
+ * In contrast to OsSafeStrncpy() read at most nLen = nMaxSize chars from szSrc and overwrite the last character with the guaranteed '\0' in case of buffer overflow.
+ *
+ * Needed for OsSafeStrcpy2().
+ *
+ * \return N/A
+ */
+static EC_INLINESTART EC_T_VOID OsSafeStrncpy2(EC_T_CHAR* szDest, const EC_T_CHAR* szSrc, size_t nMaxSize)
+{
+    if (nMaxSize > 0)
+    {
+        strncpy(szDest, szSrc, nMaxSize);
+        szDest[nMaxSize - 1] = '\0';
+    }
+} EC_INLINESTOP
+
+/*****************************************************************************/
+/**
+ * \brief Search for szSubStr in szStr.
+ *
+ * \return First match of szSubStr within szStr.
+ */
 static EC_INLINESTART EC_T_CHAR* OsStrstr(EC_T_CHAR* szStr, const EC_T_CHAR* szSubStr)
 {
     EC_T_INT i;
@@ -712,11 +795,55 @@ static EC_INLINESTART EC_T_CHAR* OsStrstr(EC_T_CHAR* szStr, const EC_T_CHAR* szS
 } EC_INLINESTOP
 #define EC_STRSTR OsStrstr /* deprecated */
 
+#if (defined __cplusplus) && (defined EC_OS_NAMESPACE)
+} /* namespace EC_OS_NAMESPACE */
+using namespace EC_OS_NAMESPACE;
+#endif
+
 /* TODO: remove */
-#if 1
-#ifdef __cplusplus
+#if (defined __cplusplus) && (!defined EC_OS_NAMESPACE)
 } /* extern "C"*/
 #endif
+
+#if (defined __cplusplus) && ((EC_OS == EC_OS_WINDOWS) /* || __cplusplus >= 201103 */)
+#include <type_traits>
+template <typename T, typename R>
+static EC_INLINESTART EC_T_VOID OsSafeStrcpy2(T& szDest, R& szSrc) {
+    static_assert(std::is_array<T>::value, "OsSafeStrcpy2(): szDest must be an array, please use OsSafeStrncpy() instead!");
+    static_assert(std::is_array<R>::value, "OsSafeStrcpy2(): szSrc must be an array or EC_T_CHAR*!");
+    static_assert(sizeof(szDest) == sizeof(szSrc), "OsSafeStrcpy2: sizeof(szDest) != sizeof(szSrc)");
+    OsSafeStrncpy2(szDest, szSrc, sizeof(szDest));
+} EC_INLINESTOP
+
+template <typename T>
+static EC_INLINESTART EC_T_VOID OsSafeStrcpy2(T& szDest, const EC_T_CHAR* szSrc) {
+    static_assert(std::is_array<T>::value, "OsSafeStrcpy2(): szDest must be an array, please use OsSafeStrncpy() instead!");
+    OsSafeStrncpy2(szDest, szSrc, sizeof(szDest));
+} EC_INLINESTOP
+
+template <typename T>
+static EC_INLINESTART EC_T_VOID OsSafeStrcpy2(T& szDest, EC_T_CHAR* szSrc) {
+    OsSafeStrcpy2(szDest, (const EC_T_CHAR*)szSrc);
+} EC_INLINESTOP
+
+template <typename T>
+static EC_INLINESTART EC_T_VOID OsSafeStrcpy(T& szDest, const EC_T_CHAR* szSrc) {
+    OsSafeStrcpy2(szDest, szSrc);
+} EC_INLINESTOP
+template<typename T>
+EC_T_VOID OsMemcpyTyped(T* pDes, const T* pSrc)
+{
+   OsMemcpy(pDes, pSrc, sizeof(T));
+}
+template<typename T>
+EC_T_VOID OsMemcpyTyped(T& rDes, const T& rSrc)
+{
+    OsMemcpyTyped(&rDes, &rSrc);
+}
+#else
+#define OsSafeStrcpy(szDest, szSrc)  OsSafeStrncpy(szDest, szSrc, sizeof(szDest))
+#define OsSafeStrcpy2(szDest, szSrc) OsSafeStrncpy2(szDest, szSrc, sizeof(szDest))
+#define OsMemcpyTyped(rDes, rSrc) OsMemcpy(&rDes, &rSrc, EC_MIN(sizeof(rDes), sizeof(rSrc)))
 #endif
 
 #endif /* INC_ECOS */

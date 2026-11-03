@@ -34,12 +34,12 @@
 #define EC_DEMO_APP_NAME (EC_T_CHAR *)"EcMasterDemoDc"
 
 /* the RAS server is necessary to support the EC-Engineer or other remote applications */
-#if (!defined INCLUDE_RAS_SERVER) && (defined EC_SOCKET_SUPPORTED)
+#if (!defined INCLUDE_RAS_SERVER) && (defined EC_SOCKET_IP_SUPPORTED)
 #define INCLUDE_RAS_SERVER
 #endif
 
 #if (defined INCLUDE_RAS_SERVER)
-#include "EcRasServer.h"
+#include "EcMasterRasServer.h"
 #define ECMASTERRAS_MAX_WATCHDOG_TIMEOUT 10000
 #define ECMASTERRAS_CYCLE_TIME 2
 #endif

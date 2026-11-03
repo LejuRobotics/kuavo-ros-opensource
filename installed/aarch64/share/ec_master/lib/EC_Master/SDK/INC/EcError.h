@@ -1,8 +1,8 @@
-/*-----------------------------------------------------------------------------
- * EcError.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description              EtherCAT Master error definitions
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       EtherCAT Master error definitions
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECERROR
@@ -29,6 +29,8 @@
     -       |      -      | 0x0300  | 0x03FF |  0x100 | AL Status Codes
             |             |         |        |        |
 0x9813.0000 | 0x9813.FFFF | 0x0000  | 0xFFFF | 0xFFFF | EC_E_...: Master Error Code
+            |             |         |        |        |
+0x9814.0000 | 0x9814.FFFF | 0x0000  | 0xFFFF | 0xFFFF | EC_E_...: Motion Error Code
 
 *********************************************************************/
 
@@ -68,7 +70,7 @@
 #define       EC_E_INVALIDOFFSET                ((EC_T_DWORD)0x98110003) /**< 0x98110003: ISW: Invalid offset (e.g. invalid offset while accessing Process Data Image) */
 #define EC_SZTXT_E_INVALIDOFFSET                "ERROR: Invalid offset"
 
-#define       EC_E_CANCEL                       ((EC_T_DWORD)0x98110004) /**< 0x98110004: APP: Cancel (e.g. master should abort current mailbox transfer) */
+#define       EC_E_CANCEL                       ((EC_T_DWORD)0x98110004) /**< 0x98110004: APP: Cancel (e.g. EtherCAT stack should abort current mailbox transfer) */
 #define EC_SZTXT_E_CANCEL                       "ERROR: Cancel"
 
 #define       EC_E_INVALIDSIZE                  ((EC_T_DWORD)0x98110005) /**< 0x98110005: APP: Invalid size */
@@ -80,7 +82,7 @@
 #define       EC_E_NOTREADY                     ((EC_T_DWORD)0x98110007) /**< 0x98110007: ISW: Not ready (multiple error sources) */
 #define EC_SZTXT_E_NOTREADY                     "ERROR: Not ready"
 
-#define       EC_E_BUSY                         ((EC_T_DWORD)0x98110008) /**< 0x98110008: APP: Busy (e.g. stack is busy currently and not available to process the API request. The function may be called again later) */
+#define       EC_E_BUSY                         ((EC_T_DWORD)0x98110008) /**< 0x98110008: APP: Busy (e.g. EtherCAT stack is currently busy and not available to process the API request. The function may be called again later) */
 #define EC_SZTXT_E_BUSY                         "ERROR: Busy"
 
 #define       EC_E_ACYC_FRM_FREEQ_EMPTY         ((EC_T_DWORD)0x98110009) /**< 0x98110009: ISW: Cannot queue acyclic EtherCAT command (Acyclic command queue is full. Possible solution: Increase of configuration value dwMaxQueuedEthFrames) */
@@ -98,7 +100,7 @@
 #define       EC_E_DUPLICATE                    ((EC_T_DWORD)0x9811000D) /**< 0x9811000D: ISW: Duplicated fixed address detected (handled internally) */
 #define EC_SZTXT_E_DUPLICATE                    "ERROR: Duplicate"
 
-#define       EC_E_INVALIDSTATE                 ((EC_T_DWORD)0x9811000E) /**< 0x9811000E: ISW: Invalid state (master not initialized or not configured) */
+#define       EC_E_INVALIDSTATE                 ((EC_T_DWORD)0x9811000E) /**< 0x9811000E: ISW: Invalid state (EtherCAT stack not initialized or not configured) */
 #define EC_SZTXT_E_INVALIDSTATE                 "ERROR: Invalid state"
 
 #define       EC_E_TIMER_LIST_FULL              ((EC_T_DWORD)0x9811000F) /**< 0x9811000F: ISW: Cannot add slave to timer list (slave timer list full) */
@@ -130,6 +132,9 @@
 
 #define       EC_E_LOCK_CREATE_FAILED           ((EC_T_DWORD)0x98110018) /**< 0x98110018: SYS: Create lock failed (e.g. OsCreateLockTyped failed) */
 #define EC_SZTXT_E_LOCK_CREATE_FAILED           "ERROR: Create lock failed"
+
+#define       EC_E_VERSION_MISMATCH             ((EC_T_DWORD)0x98110019) /**< 0x98110019: APP: Version mismatch for loaded library */
+#define EC_SZTXT_E_VERSION_MISMATCH             "ERROR: Version mismatch for loaded library"
 
 #define       EC_E_PRODKEY_INVALID              ((EC_T_DWORD)0x9811001A) /**< 0x9811001A: CFG: Product Key Invalid (e.g. application using protected version of the stack, which stops operation after the evaluation time limit reached if a license is not provided) */
 #define EC_SZTXT_E_PRODKEY_INVALID              "ERROR: Invalid product key"
@@ -176,7 +181,7 @@
 #define       EC_E_INVALID_DCL_MODE             ((EC_T_DWORD)0x98110028) /**< 0x98110028: APP: IOCTL EC_IOCTL_DC_LATCH_REQ_LTIMVALS invalid in DCL auto read mode (this function cannot be used if DC Latching is running in mode "Auto Read") */
 #define EC_SZTXT_E_INVALID_DCL_MODE             "ERROR: IOCTL EC_IOCTL_DC_LATCH_REQ_LTIMVALS not possible in DC Latching auto read mode"
 
-#define       EC_E_AI_ADDRESS                   ((EC_T_DWORD)0x98110029) /**< 0x98110029: SLV: Auto increment address increment mismatch (e.g. Network information file and bus topology doesn't match any more. Error shows only, if a already recognized slave isn't present any more) */
+#define       EC_E_AI_ADDRESS                   ((EC_T_DWORD)0x98110029) /**< 0x98110029: SLV: Auto increment address increment mismatch (e.g. Network information file and bus topology doesn't match any more. Error shows only, if an already recognized slave isn't present any more) */
 #define EC_SZTXT_E_AI_ADDRESS                   "ERROR: Auto increment address - increment mismatch (slave missing)"
 
 #define       EC_E_INVALID_SLAVE_STATE          ((EC_T_DWORD)0x9811002A) /**< 0x9811002A: APP: Slave in invalid state, e.g. not in OP (API not callable in this state) (mailbox commands are not allowed in current slave state) */
@@ -290,8 +295,8 @@
 #define       EC_E_SDO_ABORTCODE_I_INCOMP       ((EC_T_DWORD)0x9811004E) /**< 0x9811004E: SLV: SDO: General internal incompatibility in the device (CoE abort code 0x06040047 of slave) */
 #define EC_SZTXT_E_SDO_ABORTCODE_I_INCOMP       "ERROR SDO: General internal incompatibility in device"
 
-#define       EC_E_SDO_ABORTCODE_HARDWARE       ((EC_T_DWORD)0x9811004F) /**< 0x9811004F: SLV: SDO: Access failed due to an hardware error (CoE abort code 0x06060000 of slave) */
-#define EC_SZTXT_E_SDO_ABORTCODE_HARDWARE       "ERROR SDO: Access failed due to an hardware error"
+#define       EC_E_SDO_ABORTCODE_HARDWARE       ((EC_T_DWORD)0x9811004F) /**< 0x9811004F: SLV: SDO: Access failed due to a hardware error (CoE abort code 0x06060000 of slave) */
+#define EC_SZTXT_E_SDO_ABORTCODE_HARDWARE       "ERROR SDO: Access failed due to a hardware error"
 
 #define       EC_E_SDO_ABORTCODE_DATA_LENGTH_NOT_MATCH      ((EC_T_DWORD)0x98110050) /**< 0x98110050: SLV: SDO: Data type does not match, length of service parameter does not match (CoE abort code 0x06070010 of slave) */
 #define EC_SZTXT_E_SDO_ABORTCODE_DATA_LENGTH_NOT_MATCH      "ERROR SDO: Data type does not match, length of service parameter does not match"
@@ -393,7 +398,7 @@
 /*********************************************************************/
 /** \defgroup EC_ERROR_CODES_GENERIC Generic Error Codes
 @{*/
-#define       EC_E_CFGFILENOTFOUND              ((EC_T_DWORD)0x98110070) /**< 0x98110070: CFG: Master configuration not found (e.g. path to master configuration file (XML) was wrong or the file is not available) */
+#define       EC_E_CFGFILENOTFOUND              ((EC_T_DWORD)0x98110070) /**< 0x98110070: CFG: Network configuration file not found (e.g. path to configuration file (XML) was wrong or the file is not available) */
 #define EC_SZTXT_E_CFGFILENOTFOUND              "ERROR: Configuration not found"
 
 #define       EC_E_EEPROMREADERROR              ((EC_T_DWORD)0x98110071) /**< 0x98110071: SLV: Command error while EEPROM upload (read slave EEPROM) */
@@ -402,7 +407,7 @@
 #define       EC_E_EEPROMWRITEERROR             ((EC_T_DWORD)0x98110072) /**< 0x98110072: SLV: Command error while EEPROM download (write slave EEPROM) */
 #define EC_SZTXT_E_EEPROMWRITEERROR             "ERROR: Command error while EEPROM download"
 
-#define       EC_E_XML_CYCCMDS_SIZEMISMATCH     ((EC_T_DWORD)0x98110073) /**< 0x98110073: ENI: Cyclic command wrong size (too long) (size in master configuration file (XML) does not match size of process data) */
+#define       EC_E_XML_CYCCMDS_SIZEMISMATCH     ((EC_T_DWORD)0x98110073) /**< 0x98110073: ENI: Cyclic command wrong size (too long) (size in network configuration file (XML) does not match size of process data) */
 #define EC_SZTXT_E_XML_CYCCMDS_SIZEMISMATCH     "ERROR: Cyclic command wrong size (too long)"
 
 #define       EC_E_XML_INVALID_INP_OFF          ((EC_T_DWORD)0x98110074) /**< 0x98110074: ENI: Invalid input offset in cyclic command, please check InputOffs */
@@ -634,7 +639,7 @@
 #define       EC_E_MBX_ERROR_TYPE               ((EC_T_DWORD)0x98110125) /**< 0x98110125: SLV: Unknown mailbox error code received in mailbox */
 #define EC_SZTXT_E_MBX_ERROR_TYPE               "ERROR: Error mailbox received"
 
-#define       EC_E_REDLINEBREAK                 ((EC_T_DWORD)0x98110126) /**< 0x98110126: SLV: Redundancy line break (e.g. cable break between slaves or between master and first slave) */
+#define       EC_E_REDLINEBREAK                 ((EC_T_DWORD)0x98110126) /**< 0x98110126: SLV: Redundancy line break (e.g. cable break between slaves or between EtherCAT network adapter and first slave) */
 #define EC_SZTXT_E_REDLINEBREAK                 "ERROR: Redundancy line break"
 
 #define       EC_E_XML_INVALID_CMD_WITH_RED     ((EC_T_DWORD)0x98110127) /**< 0x98110127: ENI: Invalid EtherCAT command in cyclic frame with redundancy (e.g. BRW commands are not allowed with redundancy) */
@@ -833,7 +838,7 @@
 #define       EC_E_XML_AOE_NETID_INVALID        ((EC_T_DWORD)0x9811016E) /**< 0x9811016E: ENI: AoE: Invalid NetID (e.g. Error from Configuration Tool) */
 #define EC_SZTXT_E_XML_AOE_NETID_INVALID        "ERROR AoE: Invalid NetID"
 
-#define       EC_E_MAX_BUS_SLAVES_EXCEEDED      ((EC_T_DWORD)0x9811016F) /**< 0x9811016F: CFG: Error: Maximum number of bus slave has been exceeded (The maximum number of preallocated bus slave objects are to small. The maximum number can be adjusted by the master initialization parameter EC_T_INITMASTERPARMS.dwMaxBusSlaves) */
+#define       EC_E_MAX_BUS_SLAVES_EXCEEDED      ((EC_T_DWORD)0x9811016F) /**< 0x9811016F: CFG: Error: Maximum number of bus slave has been exceeded (The maximum number of preallocated bus slave objects is too small. The maximum number can be adjusted by the master initialization parameter EC_T_INITMASTERPARMS.dwMaxBusSlaves) */
 #define EC_SZTXT_E_MAX_BUS_SLAVES_EXCEEDED      "ERROR: Maximum number of bus slave has been exceeded"
 
 #define       EC_E_MBXERR_SYNTAX                ((EC_T_DWORD)0x98110170) /**< 0x98110170: SLV: Mailbox error: Syntax of 6 octet Mailbox header is wrong (Slave error mailbox return value: 0x01) */
@@ -845,20 +850,20 @@
 #define       EC_E_MBXERR_INVALIDCHANNEL        ((EC_T_DWORD)0x98110172) /**< 0x98110172: SLV: Mailbox error: Field contains wrong value (Slave error mailbox return value: 0x03) */
 #define EC_SZTXT_E_MBXERR_INVALIDCHANNEL        "ERROR Mailbox: Field contains wrong value"
 
-#define       EC_E_MBXERR_SERVICENOTSUPPORTED   ((EC_T_DWORD)0x98110173) /**< 0x98110173: SLV: Mailbox error: The mailbox protocol header of the mailbox protocol is wrong (Slave error mailbox return value: 0x04) */
-#define EC_SZTXT_E_MBXERR_SERVICENOTSUPPORTED   "ERROR Mailbox: service in Mailbox protocol not supported"
+#define       EC_E_MBXERR_SERVICENOTSUPPORTED   ((EC_T_DWORD)0x98110173) /**< 0x98110173: SLV: Mailbox error: The addressed service in the mailbox protocol is not supported (Slave error mailbox return value: 0x04) */
+#define EC_SZTXT_E_MBXERR_SERVICENOTSUPPORTED   "ERROR Mailbox: The addressed service in the mailbox protocol is not supported"
 
 #define       EC_E_MBXERR_INVALIDHEADER         ((EC_T_DWORD)0x98110174) /**< 0x98110174: SLV: Mailbox error: The mailbox protocol header of the mailbox protocol is wrong (Slave error mailbox return value: 0x05) */
-#define EC_SZTXT_E_MBXERR_INVALIDHEADER         "ERROR Mailbox: mailbox protocol header of mailbox protocol wrong"
+#define EC_SZTXT_E_MBXERR_INVALIDHEADER         "ERROR Mailbox: Mailbox protocol header of mailbox protocol wrong"
 
 #define       EC_E_MBXERR_SIZETOOSHORT          ((EC_T_DWORD)0x98110175) /**< 0x98110175: SLV: Mailbox error: Length of received mailbox data is too short (Slave error mailbox return value: 0x06) */
 #define EC_SZTXT_E_MBXERR_SIZETOOSHORT          "ERROR Mailbox: Length of received mailbox data too short"
 
 #define       EC_E_MBXERR_NOMOREMEMORY          ((EC_T_DWORD)0x98110176) /**< 0x98110176: SLV: Mailbox error: Mailbox protocol can not be processed because of limited resources (Slave error mailbox return value: 0x07) */
-#define EC_SZTXT_E_MBXERR_NOMOREMEMORY          "ERROR Mailbox: Mailbox protocol can not be processed because of limited resources"
+#define EC_SZTXT_E_MBXERR_NOMOREMEMORY          "ERROR Mailbox: Mailbox protocol cannot be processed because of limited resources"
 
 #define       EC_E_MBXERR_INVALIDSIZE           ((EC_T_DWORD)0x98110177) /**< 0x98110177: SLV: Mailbox error: The length of data is inconsistent (Slave error mailbox return value: 0x08) */
-#define EC_SZTXT_E_MBXERR_INVALIDSIZE           "ERROR Mailbox: length of data inconsistent"
+#define EC_SZTXT_E_MBXERR_INVALIDSIZE           "ERROR Mailbox: Length of data inconsistent"
 
 #define       EC_E_DC_SLAVES_BEFORE_REF_CLOCK   ((EC_T_DWORD)0x98110178) /**< 0x98110178: ENI: Slaves with DC configured present on bus before reference clock (e.g. The first DC Slave was not configured as potential reference clock) */
 #define EC_SZTXT_E_DC_SLAVES_BEFORE_REF_CLOCK   "ERROR: Slaves with DC configured present on bus before reference clock"
@@ -934,8 +939,8 @@
 #define       DCM_E_INVALID_SYNC_PERIOD         ((EC_T_DWORD)0x981201C8)    /**< 0x981201C8: Invalid DC sync period length (invalid clock master?) */
 #define DCM_SZTXT_E_INVALID_SYNC_PERIOD         "ERROR: invalid DC sync period length (invalid clock master?)"
 
-#define       DCM_E_INVALID_SETVAL              ((EC_T_DWORD)0x981201C9)    /**< 0x981201C9: DCM controller SetVal to small */
-#define DCM_SZTXT_E_INVALID_SETVAL              "ERROR: Error DCM Controller SetVal to small"
+#define       DCM_E_INVALID_SETVAL              ((EC_T_DWORD)0x981201C9)    /**< 0x981201C9: DCM controller SetVal too small */
+#define DCM_SZTXT_E_INVALID_SETVAL              "ERROR: Error DCM Controller SetVal too small"
 
 #define       DCM_E_DRIFT_TO_HIGH               ((EC_T_DWORD)0x981201CA)    /**< 0x981201CA: DCM controller - Drift between local timer and ref clock to high */
 #define DCM_SZTXT_E_DRIFT_TO_HIGH               "ERROR: Error DCM Controller - Drift between local timer and ref clock to high"
@@ -1166,6 +1171,24 @@
 #define       EMRAS_E_ACCESS_NOT_FOUND                              ((EC_T_DWORD)0x98110198) /**< 0x98110198: RAS: Access not configured for this call (e.g. SPoC access configuration missing) */
 #define EMRAS_SZTXT_E_ACCESS_NOT_FOUND                              "Access level to this call not configured"
 
+#define       EMRAS_E_TOKEN_MISSING                                 ((EC_T_DWORD)0x98110199) /**< 0x98110199: RAS: Token missing */
+#define EMRAS_SZTXT_E_TOKEN_MISSING                                 "Token missing"
+
+#define       EMRAS_E_TOKEN_INVALID                                 ((EC_T_DWORD)0x9811019A) /**< 0x9811019A: RAS: Token invalid */
+#define EMRAS_SZTXT_E_TOKEN_INVALID                                 "Token invalid"
+
+#define       EMRAS_E_TOKEN_DENIED                                  ((EC_T_DWORD)0x9811019B) /**< 0x9811019B: RAS: Token denied */
+#define EMRAS_SZTXT_E_TOKEN_DENIED                                  "Token denied"
+
+#define       EMRAS_E_TLS_CERTIFICATE_ERROR                         ((EC_T_DWORD)0x9811019C) /**< 0x9811019C: RAS: TLS certificate error */
+#define EMRAS_SZTXT_E_TLS_CERTIFICATE_ERROR                         "TLS certificate missing"
+
+#define       EMRAS_E_TLS_PRIVATEKEY_ERROR                          ((EC_T_DWORD)0x9811019D) /**< 0x9811019D: RAS: TLS private key error */
+#define EMRAS_SZTXT_E_TLS_PRIVATEKEY_ERROR                          "TLS private key error"
+
+#define       EMRAS_E_TLS_HANDSHAKE_FAILED                          ((EC_T_DWORD)0x9811019E) /**< 0x9811019E: RAS: TLS handshake failed */
+#define EMRAS_SZTXT_E_TLS_HANDSHAKE_FAILED                          "TLS handshake failed"
+
 /**@}*/ /* EC_ERROR_CODES_RAS */
 
 #define       EMRAS_E_ERROR_LAST                                    ((EC_T_DWORD)0x981101BF)
@@ -1290,7 +1313,7 @@
 #define EC_SZTXT_TXT_CABLE_NOT_CONNECTED                            "Ethernet cable not connected"
 
 #define       EC_TXT_CYCCMD_TIMEOUT                                 ((EC_T_WORD)(EC_TEXTBASE+0x0027))
-#define EC_SZTXT_TXT_CYCCMD_TIMEOUT                                 "Cyclic command time-out: Time between sending cyclic commands too long"
+#define EC_SZTXT_TXT_CYCCMD_TIMEOUT                                 "Cyclic command timeout: Time between sending cyclic commands too long"
 
 #define       EC_TXT_REDLINEBREAK                                   ((EC_T_WORD)(EC_TEXTBASE+0x0028))
 #define EC_SZTXT_TXT_REDLINEBREAK                                   "ERROR: Redundancy Line break %d slaves on main and %d slaves on red"
@@ -1341,10 +1364,10 @@
 #define EC_SZTXT_TXT_SLAVE_STATECHANGED                             "Slave %d: state changed to <%s>"
 
 #define       EC_TXT_DCX_INSYNC                                     ((EC_T_WORD)(EC_TEXTBASE+0x0038))
-#define EC_SZTXT_TXT_DCX_INSYNC                                     "DCX in sync (cur/avg/max) [ns]: %7d/%7d/%7d, TimeStampDiff= 0x%08X%08X"
+#define EC_SZTXT_TXT_DCX_INSYNC                                     "DCX in sync (cur/avg/max) [ns]: %7d/%7d/%7d, TimeStampDiff= 0x%016llX"
 
 #define       EC_TXT_DCX_OUTOFSYNC                                  ((EC_T_WORD)(EC_TEXTBASE+0x0039))
-#define EC_SZTXT_TXT_DCX_OUTOFSYNC                                  "DCX out of sync (cur/avg/max) [ns]: %7d/%7d/%7d, TimeStampDiff= 0x%08X%08X"
+#define EC_SZTXT_TXT_DCX_OUTOFSYNC                                  "DCX out of sync (cur/avg/max) [ns]: %7d/%7d/%7d, TimeStampDiff= 0x%016llX"
 
 #define       EC_TXT_FRAME_TYPE_CYCLIC                              ((EC_T_WORD)(EC_TEXTBASE+0x003A))
 #define EC_SZTXT_TXT_FRAME_TYPE_CYCLIC                              "cyclic"
@@ -1517,7 +1540,7 @@
 #define EC_SZTXT_TXT_RELEASE_FORCED_PROCESSDATA                     "Release forced %s data with bit Offset %d"
 
 #define       EC_TXT_SB_EEPROM_ACCESS_DENIED                        ((EC_T_WORD)(EC_TEXTBASE+0x0086))
-#define EC_SZTXT_TXT_SB_EEPROM_ACCESS_DENIED                        "%s Slave with station address=%d and auto-increment address=%d denied the EEPROM access"
+#define EC_SZTXT_TXT_SB_EEPROM_ACCESS_DENIED                        "Slave %s, station address=%d, auto-increment address=%d connected to slave %s, station address=%d, port %d, denied the EEPROM access"
 
 #define       EC_TXT_FRAME_RESPONSE_ERRTYPE_FOREIGN_SRC_MAC         ((EC_T_WORD)(EC_TEXTBASE+0x0087))
 #define EC_SZTXT_TXT_FRAME_RESPONSE_ERRTYPE_FOREIGN_SRC_MAC         "Foreign source MAC detected"
@@ -1539,6 +1562,18 @@
 
 #define       EC_TXT_FOE_UPLD2_SEG_ERROR                            ((EC_T_WORD)(EC_TEXTBASE+0x0093))
 #define EC_SZTXT_TXT_FOE_UPLD2_SEG_ERROR                            "Foe upload segment received for slave %d, size: %d, status: %s\n"
+
+#define       EC_TXT_CONFIG_LOAD                                    ((EC_T_WORD)(EC_TEXTBASE+0x0094))
+#define EC_SZTXT_TXT_CONFIG_LOAD                                    "Configuration changed\n"
+
+#define       EC_TXT_SB_SLAVE_IDENT_TIMEOUT                         ((EC_T_WORD)(EC_TEXTBASE+0x0095))
+#define EC_SZTXT_TXT_SB_SLAVE_IDENT_TIMEOUT                         "Timeout identifying Slave %s, station address=%d, auto-increment address=%d connected to slave %s, station address=%d, port %d"
+
+#define       EC_TXT_AOEMBXSND_WKC_ERROR                            ((EC_T_WORD)(EC_TEXTBASE+0x0096))
+#define EC_SZTXT_TXT_AOEMBXSND_WKC_ERROR                            "AoE mbox send working counter error - Slave %s: - EtherCAT address=%d - Command: %s - Logical/Physical address: 0x%x, WKC act/set=%d/%d"
+
+#define       EC_TXT_FSOE_CONNECTION_STATECHANGED                   ((EC_T_WORD)(EC_TEXTBASE+0x0097))
+#define EC_SZTXT_TXT_FSOE_CONNECTION_STATECHANGED                   "FSoE Connection state changed at slave %d, FSoE slave safe address=%d, old state=%d, new state=%d"
 
 #define       EC_TEXTBASE_LAST                                      ((EC_T_WORD)0x02FF)
 
@@ -1716,6 +1751,18 @@
 
 #define       EC_TXT_STATUSCODE_MODULE_ID_LIST_NOT_MATCH            ((EC_T_WORD)(EC_ALSTATUSCODEBASE+0x0070)) /* DEVICE_STATUSCODE_MODULE_ID_LIST_NOT_MATCH */
 #define EC_SZTXT_TXT_STATUSCODE_MODULE_ID_LIST_NOT_MATCH            "Detected Module Ident List (0xF030) and Configured Module Ident List (0xF050) does not match"
+
+#define       EC_TXT_STATUSCODE_SUPPLY_VOLTAGE_TOO_LOW              ((EC_T_WORD)(EC_ALSTATUSCODEBASE+0x0080)) /* DEVICE_STATUSCODE_SUPPLY_VOLTAGE_TOO_LOW */
+#define EC_SZTXT_TXT_STATUSCODE_SUPPLY_VOLTAGE_TOO_LOW              "Supply Voltage Too Low"
+
+#define       EC_TXT_STATUSCODE_SUPPLY_VOLTAGE_TOO_HIGH             ((EC_T_WORD)(EC_ALSTATUSCODEBASE+0x0081)) /* DEVICE_STATUSCODE_SUPPLY_VOLTAGE_TOO_HIGH */
+#define EC_SZTXT_TXT_STATUSCODE_SUPPLY_VOLTAGE_TOO_HIGH             "Supply Voltage Too High"
+
+#define       EC_TXT_STATUSCODE_TEMPERATURE_TOO_LOW                 ((EC_T_WORD)(EC_ALSTATUSCODEBASE+0x0082)) /* DEVICE_STATUSCODE_TEMPERATURE_TOO_LOW */
+#define EC_SZTXT_TXT_STATUSCODE_TEMPERATURE_TOO_LOW                 "Temperature Too Low"
+
+#define       EC_TXT_STATUSCODE_TEMPERATURE_TOO_HIGH                ((EC_T_WORD)(EC_ALSTATUSCODEBASE+0x0083)) /* DEVICE_STATUSCODE_TEMPERATURE_TOO_HIGH */
+#define EC_SZTXT_TXT_STATUSCODE_TEMPERATURE_TOO_HIGH                "Temperature Too High"
 
 #define       EC_TXT_STATUSCODE_APPLICATION_CONTROLLER_AVAILABLE    ((EC_T_WORD)(EC_ALSTATUSCODEBASE+0x00F0)) /* DEVICE_STATUSCODE_APPLICATION_CONTROLLER_AVAILABLE */
 #define EC_SZTXT_TXT_STATUSCODE_APPLICATION_CONTROLLER_AVAILABLE    "Application controller available"

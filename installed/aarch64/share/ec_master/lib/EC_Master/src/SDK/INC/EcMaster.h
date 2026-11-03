@@ -1,15 +1,15 @@
-/*-----------------------------------------------------------------------------
- * EcMaster.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description              interface to the ethercat master
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       Interface to the ethercat master
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECMASTER
 #define INC_ECMASTER 1
 
 /*-INCLUDE-------------------------------------------------------------------*/
-#ifndef INSTANCE_MASTER_DEFAULT                     /* can be overridden in EcRasClient.h */
+#ifndef INSTANCE_MASTER_DEFAULT                     /* can be overridden in EcMasterRasClient.h */
 #define INSTANCE_MASTER_DEFAULT                     ((EC_T_DWORD)0)  /* default master instance to be used by emXXXXX API to access same instance as ecatXXXXX API */
 #endif
 
@@ -24,13 +24,9 @@
 #endif
 
 /*-DEFINES/MACROS------------------------------------------------------------*/
-#define ATECAT_SIGNATURE_PATTERN                    0xAEC00000
-#define ATECAT_SIGNATURE (  ATECAT_SIGNATURE_PATTERN       \
-                         | (EC_VERSION_MAJ         << 16) \
-                         | (EC_VERSION_MIN         << 12) \
-                         | (EC_VERSION_SERVICEPACK <<  8) \
-                         | (EC_VERSION_BUILD       <<  0) \
-                         )
+#define ATECAT_SIGNATURE_PATTERN 0xAEC00000
+#define ATECAT_SIGNATURE EC_SIGNATURE_MAKE(ATECAT_SIGNATURE_PATTERN, EC_VERSION_MAJ, EC_VERSION_MIN, EC_VERSION_SERVICEPACK, EC_VERSION_BUILD)
+
 
 /*-TYPEDEFS/ENUMS------------------------------------------------------------*/
 
@@ -40,13 +36,14 @@ typedef struct _EC_T_INIT_MASTER_PARMS
     EC_T_DWORD  dwSignature;                        /**< [in] Set to ATECAT_SIGNATURE */
     EC_T_DWORD  dwSize;                             /**< [in] Set to sizeof(EC_T_INIT_MASTER_PARMS) */
 
-    EC_T_LOG_PARMS EC_PACKED_API_MEMBER LogParms;   /**< [in] Logging parameters */
+    EC_PACKED_API_MEMBER \
+        EC_T_LOG_PARMS LogParms;   /**< [in] Logging parameters */
 
     struct _EC_T_OS_PARMS*      pOsParms;           /**< [in] OS layer parameters */
     struct _EC_T_LINK_PARMS*    pLinkParms;         /**< [in] Link layer parameters */
     struct _EC_T_LINK_PARMS*    pLinkParmsRed;      /**< [in] Link layer parameters for red device (cable redundancy) */
 
-    EC_T_DWORD  dwBusCycleTimeUsec;                 /**< [in] Bus cycle time [usec] */
+    EC_T_DWORD dwBusCycleTimeNsec;                  /**< [in] Bus cycle time [ns] */
 
     /* memory */
     EC_T_DWORD  dwMaxBusSlaves;                     /**< [in] Maximum pre-allocated bus slave objects \defaultparm{EC_DEFAULTPARM_dwMaxBusSlaves} */
@@ -65,10 +62,10 @@ typedef struct _EC_T_INIT_MASTER_PARMS
     EC_T_DWORD  dwEcatCmdMaxRetries;                /**< [in] Maximum retries to send pending EtherCAT command frames \defaultparm{EC_DEFAULTPARM_dwMaxAcycCmdRetries} */
     EC_T_DWORD  dwEcatCmdTimeout;                   /**< [in] Timeout [ms] to send pending EtherCAT command frames \defaultparm{EC_DEFAULTPARM_dwAcycCmdTimeout} */
 
-    /* VLAN */
-    EC_T_BOOL   bVLANEnable;                        /**< [in] Enable VLAN */
-    EC_T_WORD   wVLANId;                            /**< [in] VLAN ID (12Bit) */
-    EC_T_BYTE   byVLANPrio;                         /**< [in] VLAN Prio (3Bit) */
+    /* VLAN (obsolete) */
+    EC_T_BOOL   bReserved;                          /**< [in] bVLANEnable: obsolete */
+    EC_T_WORD   wReserved;                          /**< [in] wVLANId: obsolete */
+    EC_T_BYTE   byReserved;                         /**< [in] byVLANPrio: obsolete */
 
     EC_PACKED_API_MEMBER \
         EC_T_MASTER_RED_PARMS MasterRedParms;       /**< [in] Master Redundancy parameters */
@@ -78,13 +75,16 @@ typedef struct _EC_T_INIT_MASTER_PARMS
     EC_T_DWORD  dwMaxQueuedS2SMbxTfer;              /**< [in] S2S Fifo number of entries \defaultparm{EC_DEFAULTPARM_dwMaxQueuedS2SMbxTfer} */
 
     EC_T_WORD   wMaxSlavesProcessedPerBusScanStep;  /**< [in] Maximum slave-related calls per cycle during bus scans (default = all) */
-    EC_T_WORD   wReserved;
+    EC_T_WORD   wReserved2;
 
     EC_T_BOOL   bApiLockByApp;                      /**< [in] Lock pending API against emDeinitMaster(). EC_FALSE (default): locked internally. EC_TRUE: application is responsible for locking. */
 
     /* Performance Measurements */
     EC_PACKED_API_MEMBER \
         EC_T_PERF_MEAS_INTERNAL_PARMS PerfMeasInternalParms; /**< [in] Internal performance measurement parameters */
+
+
+    EC_T_BOOL  bNoConsecutiveAcycFrames;            /**< [in] EC_FALSE(default) : no restriction. EC_TRUE : Don't process and send acyclic frames in the same cycle to reduce CPU load. */
 } EC_PACKED_API EC_T_INIT_MASTER_PARMS;
 #include EC_PACKED_INCLUDESTOP
 
@@ -95,7 +95,7 @@ typedef struct _EC_T_LINKLAYER_DBG_MSG_DESC
     EC_T_BYTE   byEthTypeByte0;                     /**< [in] Ethernet type byte 0 */
     EC_T_BYTE   byEthTypeByte1;                     /**< [in] Ethernet type byte 0 */
     EC_T_WORD   wRes;
-    EC_T_CHAR*  szMsg;                              /**< [in] message to send to link layer */
+    EC_T_CHAR*  szMsg;                              /**< [in] Message to send to link layer */
 } EC_PACKED(1) EC_T_LINKLAYER_DBG_MSG_DESC;
 #include EC_PACKED_INCLUDESTOP
 
@@ -280,8 +280,8 @@ static EC_INLINESTART EC_T_DWORD ecatPerfMeasGetNumOf(EC_T_DWORD* pdwNumOf)
 /* Multi instance API functions */
 
 EC_API EC_T_DWORD EC_API_FNCALL emInitMaster(     EC_T_DWORD              dwInstanceID,
-                                                    EC_T_INIT_MASTER_PARMS* pParms          );
-static EC_INLINESTART  EC_T_DWORD ecatInitMaster(   EC_T_INIT_MASTER_PARMS* pParms          )
+                                                    const EC_T_INIT_MASTER_PARMS* pParms    );
+static EC_INLINESTART  EC_T_DWORD ecatInitMaster(   const EC_T_INIT_MASTER_PARMS* pParms    )
 {
     return emInitMaster(INSTANCE_MASTER_DEFAULT, pParms);
 } EC_INLINESTOP
@@ -300,8 +300,8 @@ static EC_INLINESTART  EC_T_DWORD ecatGetMasterParms(EC_T_INIT_MASTER_PARMS* pPa
     return emGetMasterParms(INSTANCE_MASTER_DEFAULT, pParms, dwParmsBufSize);
 } EC_INLINESTOP
 EC_API EC_T_DWORD EC_API_FNCALL emSetMasterParms( EC_T_DWORD              dwInstanceID,
-                                                    EC_T_INIT_MASTER_PARMS* pParms          );
-static EC_INLINESTART  EC_T_DWORD ecatSetMasterParms(EC_T_INIT_MASTER_PARMS* pParms         )
+                                                    const EC_T_INIT_MASTER_PARMS* pParms    );
+static EC_INLINESTART  EC_T_DWORD ecatSetMasterParms(const EC_T_INIT_MASTER_PARMS* pParms   )
 {
     return emSetMasterParms(INSTANCE_MASTER_DEFAULT, pParms);
 } EC_INLINESTOP
@@ -347,14 +347,23 @@ static EC_INLINESTART  EC_T_BYTE* ecatGetMasterRedProcessImageOutputPtr(EC_T_VOI
 } EC_INLINESTOP
 #endif
 
-EC_API EC_T_DWORD EC_API_FNCALL emIoControl(      EC_T_DWORD              dwInstanceID,
-                                                    EC_T_DWORD              dwCode,
-                                                    EC_T_IOCTLPARMS*        pParms          );
+EC_API EC_T_DWORD EC_API_FNCALL emIoCtl(     EC_T_DWORD             dwInstanceID,
+                                             EC_T_DWORD             dwCode,
+                                             const EC_T_VOID* const pbyInBuf,
+                                             EC_T_DWORD             dwInBufSize,
+                                             EC_T_VOID* const       pbyOutBuf,
+                                             EC_T_DWORD             dwOutBufSize,
+                                             EC_T_DWORD* const      pdwNumOutData );
+
 #ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatIoControl(    EC_T_DWORD              dwCode,
-                                                    EC_T_IOCTLPARMS*        pParms          )
+static EC_INLINESTART EC_T_DWORD ecatIoCtl(  EC_T_DWORD             dwCode,
+                                             const EC_T_VOID* const pbyInBuf,
+                                             EC_T_DWORD             dwInBufSize,
+                                             EC_T_VOID* const       pbyOutBuf,
+                                             EC_T_DWORD             dwOutBufSize,
+                                             EC_T_DWORD* const      pdwNumOutData )
 {
-    return emIoControl(INSTANCE_MASTER_DEFAULT, dwCode, pParms);
+    return emIoCtl(INSTANCE_MASTER_DEFAULT, dwCode, pbyInBuf, dwInBufSize, pbyOutBuf, dwOutBufSize, pdwNumOutData);
 } EC_INLINESTOP
 #endif
 
@@ -470,6 +479,19 @@ static EC_INLINESTART  EC_T_DWORD ecatConfigAddJunctionRedundancyConnection(
 } EC_INLINESTOP
 #endif
 
+EC_API EC_T_DWORD EC_API_FNCALL emConfigAddCableRedundancyConnection(
+    EC_T_DWORD              dwInstanceID,
+    EC_T_WORD               wStationAddress,
+    EC_T_WORD               wRedPort);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatConfigAddCableRedundancyConnection(
+    EC_T_WORD               wStationAddress,
+    EC_T_WORD               wRedPort)
+{
+    return emConfigAddCableRedundancyConnection(INSTANCE_MASTER_DEFAULT, wStationAddress, wRedPort);
+} EC_INLINESTOP
+#endif
+
 EC_API EC_T_DWORD EC_API_FNCALL emConfigApply(    EC_T_DWORD              dwInstanceID      );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatConfigApply(  EC_T_VOID                               )
@@ -498,14 +520,25 @@ static EC_INLINESTART  EC_T_DWORD ecatIsConfigured( EC_T_BOOL*              pbIs
 } EC_INLINESTOP
 #endif
 
-EC_API EC_T_DWORD EC_API_FNCALL emSetMasterState( EC_T_DWORD              dwInstanceID,
+EC_API EC_T_DWORD EC_API_FNCALL emSetMasterState(   EC_T_DWORD              dwInstanceID,
                                                     EC_T_DWORD              dwTimeout,
                                                     EC_T_STATE              eReqState       );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatSetMasterState(EC_T_DWORD             dwTimeout,
-                                                    EC_T_STATE              eReqState       )
+                                                     EC_T_STATE             eReqState       )
 {
     return emSetMasterState(INSTANCE_MASTER_DEFAULT, dwTimeout, eReqState);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emSetMasterStateReq(  EC_T_DWORD              dwInstanceID,
+                                                      EC_T_DWORD              dwTimeout,
+                                                      EC_T_STATE              eReqState     );
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatSetMasterStateReq(EC_T_DWORD             dwTimeout,
+                                                        EC_T_STATE             eReqState   )
+{
+    return emSetMasterStateReq(INSTANCE_MASTER_DEFAULT, dwTimeout, eReqState);
 } EC_INLINESTOP
 #endif
 
@@ -525,25 +558,6 @@ static EC_INLINESTART  EC_T_DWORD ecatGetMasterStateEx(EC_T_WORD*              p
                                                        EC_T_WORD*              pwReqState   )
 {
     return emGetMasterStateEx(INSTANCE_MASTER_DEFAULT, pwCurrState, pwReqState);
-} EC_INLINESTOP
-#endif
-
-
-EC_API EC_T_DWORD EC_API_FNCALL emStart(          EC_T_DWORD              dwInstanceID,
-                                                    EC_T_DWORD              dwTimeout       );
-#ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatStart(        EC_T_DWORD              dwTimeout       )
-{
-    return emStart(INSTANCE_MASTER_DEFAULT, dwTimeout);
-} EC_INLINESTOP
-#endif
-
-EC_API EC_T_DWORD EC_API_FNCALL emStop(           EC_T_DWORD              dwInstanceID,
-                                                    EC_T_DWORD              dwTimeout       );
-#ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatStop(         EC_T_DWORD              dwTimeout       )
-{
-    return emStop(INSTANCE_MASTER_DEFAULT, dwTimeout);
 } EC_INLINESTOP
 #endif
 
@@ -613,31 +627,84 @@ static EC_INLINESTART  EC_T_DWORD ecatGetSlaveState(EC_T_DWORD              dwSl
 
 EC_API EC_T_DWORD EC_API_FNCALL emSetSlaveState(    EC_T_DWORD              dwInstanceID,
                                                     EC_T_DWORD              dwSlaveId,
-                                                    EC_T_WORD               wNewReqDevState,
+                                                    EC_T_WORD               wDeviceState,
                                                     EC_T_DWORD              dwTimeout       );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatSetSlaveState(EC_T_DWORD              dwSlaveId,
-                                                    EC_T_WORD               wNewReqDevState,
+                                                    EC_T_WORD               wDeviceState,
                                                     EC_T_DWORD              dwTimeout       )
 {
-    return emSetSlaveState(INSTANCE_MASTER_DEFAULT, dwSlaveId, wNewReqDevState, dwTimeout);
+    return emSetSlaveState(INSTANCE_MASTER_DEFAULT, dwSlaveId, wDeviceState, dwTimeout);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emSetSlaveStateReq(EC_T_DWORD              dwInstanceID,
+                                                   EC_T_DWORD              dwSlaveId,
+                                                   EC_T_WORD               wDeviceState,
+                                                   EC_T_DWORD              dwTimeout );
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatSetSlaveStateReq( EC_T_DWORD             dwSlaveId,
+                                                        EC_T_WORD              wDeviceState,
+                                                        EC_T_DWORD             dwTimeout)
+{
+    return emSetSlaveStateReq(INSTANCE_MASTER_DEFAULT, dwSlaveId, wDeviceState, dwTimeout);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emGetProcessVarInfoNumOf(EC_T_DWORD         dwInstanceID,
+                                                    EC_T_VAR_DIRECTION      eVarDirection,
+                                                    EC_T_VAR_SOURCE         eVarSource,
+                                                    EC_T_BOOL               bFixedAddress,
+                                                    EC_T_WORD               wSlaveAddress,
+                                                    EC_T_DWORD*             pdwProcessVarInfoNumOf);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatGetProcessVarInfoNumOf(
+                                                    EC_T_VAR_DIRECTION      eVarDirection,
+                                                    EC_T_VAR_SOURCE         eVarSource,
+                                                    EC_T_BOOL               bFixedAddress,
+                                                    EC_T_WORD               wSlaveAddress,
+                                                    EC_T_DWORD*             pdwProcessVarInfoNumOf)
+{
+    return emGetProcessVarInfoNumOf(INSTANCE_MASTER_DEFAULT, eVarDirection, eVarSource, bFixedAddress, wSlaveAddress, pdwProcessVarInfoNumOf);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emGetProcessVarInfoEx(EC_T_DWORD            dwInstanceID,
+                                                    EC_T_VAR_DIRECTION      eVarDirection,
+                                                    EC_T_VAR_SOURCE         eVarSource,
+                                                    EC_T_BOOL               bFixedAddress,
+                                                    EC_T_WORD               wSlaveAddress,
+                                                    EC_T_PROCESS_VAR_INFO_EX* aoVarInfo,
+                                                    EC_T_DWORD              dwMaxProcessVarInfoNumOf,
+                                                    EC_T_DWORD*             pdwProcessVarInfoNumOf);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatGetProcessVarInfoEx(
+                                                    EC_T_VAR_DIRECTION      eVarDirection,
+                                                    EC_T_VAR_SOURCE         eVarSource,
+                                                    EC_T_BOOL               bFixedAddress,
+                                                    EC_T_WORD               wSlaveAddress,
+                                                    EC_T_PROCESS_VAR_INFO_EX* aoVarInfo,
+                                                    EC_T_DWORD              dwMaxProcessVarInfoNumOf,
+                                                    EC_T_DWORD*             pdwProcessVarInfoNumOf)
+{
+    return emGetProcessVarInfoEx(INSTANCE_MASTER_DEFAULT, eVarDirection, eVarSource, bFixedAddress, wSlaveAddress, aoVarInfo, dwMaxProcessVarInfoNumOf, pdwProcessVarInfoNumOf);
 } EC_INLINESTOP
 #endif
 
 EC_API EC_T_DWORD EC_API_FNCALL emTferSingleRawCmd( EC_T_DWORD              dwInstanceID,
-                                                    EC_T_BYTE               byCmd,
+                                                    EC_T_CMD                eCmd,
                                                     EC_T_DWORD              dwMemoryAddress,
                                                     EC_T_BYTE*              pbyData,
                                                     EC_T_WORD               wLen,
                                                     EC_T_DWORD              dwTimeout       );
 #ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatTferSingleRawCmd(EC_T_BYTE            byCmd,
+static EC_INLINESTART  EC_T_DWORD ecatTferSingleRawCmd(EC_T_CMD             eCmd,
                                                     EC_T_DWORD              dwMemoryAddress,
                                                     EC_T_BYTE*              pbyData,
                                                     EC_T_WORD               wLen,
                                                     EC_T_DWORD              dwTimeout       )
 {
-    return emTferSingleRawCmd(INSTANCE_MASTER_DEFAULT, byCmd, dwMemoryAddress, pbyData, wLen, dwTimeout);
+    return emTferSingleRawCmd(INSTANCE_MASTER_DEFAULT, eCmd, dwMemoryAddress, pbyData, wLen, dwTimeout);
 } EC_INLINESTOP
 #endif
 
@@ -727,37 +794,37 @@ static EC_INLINESTART  EC_T_DWORD ecatWriteSlaveRegisterReq(EC_T_DWORD      dwCl
 
 EC_API EC_T_DWORD EC_API_FNCALL emQueueRawCmd(      EC_T_DWORD              dwInstanceID,
                                                     EC_T_WORD               wInvokeId,
-                                                    EC_T_BYTE               byCmd,
+                                                    EC_T_CMD                eCmd,
                                                     EC_T_DWORD              dwMemoryAddress,
                                                     EC_T_BYTE*              pbyData,
                                                     EC_T_WORD               wLen            );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatQueueRawCmd(  EC_T_WORD               wInvokeId,
-                                                    EC_T_BYTE               byCmd,
+                                                    EC_T_CMD                eCmd,
                                                     EC_T_DWORD              dwMemoryAddress,
                                                     EC_T_BYTE*              pbyData,
                                                     EC_T_WORD               wLen            )
 {
-    return emQueueRawCmd(INSTANCE_MASTER_DEFAULT, wInvokeId, byCmd, dwMemoryAddress, pbyData, wLen);
+    return emQueueRawCmd(INSTANCE_MASTER_DEFAULT, wInvokeId, eCmd, dwMemoryAddress, pbyData, wLen);
 } EC_INLINESTOP
 #endif
 
 EC_API EC_T_DWORD EC_API_FNCALL emClntQueueRawCmd(  EC_T_DWORD              dwInstanceID,
                                                     EC_T_DWORD              dwClntId,
                                                     EC_T_WORD               wInvokeId,
-                                                    EC_T_BYTE               byCmd,
+                                                    EC_T_CMD                eCmd,
                                                     EC_T_DWORD              dwMemoryAddress,
                                                     EC_T_BYTE*              pbyData,
                                                     EC_T_WORD               wLen            );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatClntQueueRawCmd(EC_T_DWORD            dwClntId,
                                                     EC_T_WORD               wInvokeId,
-                                                    EC_T_BYTE               byCmd,
+                                                    EC_T_CMD                eCmd,
                                                     EC_T_DWORD              dwMemoryAddress,
                                                     EC_T_BYTE*              pbyData,
                                                     EC_T_WORD               wLen            )
 {
-    return emClntQueueRawCmd(INSTANCE_MASTER_DEFAULT, dwClntId, wInvokeId, byCmd, dwMemoryAddress, pbyData, wLen);
+    return emClntQueueRawCmd(INSTANCE_MASTER_DEFAULT, dwClntId, wInvokeId, eCmd, dwMemoryAddress, pbyData, wLen);
 } EC_INLINESTOP
 #endif
 
@@ -834,7 +901,7 @@ EC_API EC_T_DWORD EC_API_FNCALL  emCoeSdoDownload(EC_T_DWORD             dwInsta
                                                    ,EC_T_DWORD              dwSlaveId
                                                    ,EC_T_WORD               wObIndex
                                                    ,EC_T_BYTE               byObSubIndex
-                                                   ,EC_T_BYTE*              pbyData
+                                                   ,const EC_T_BYTE*        pbyData
                                                    ,EC_T_DWORD              dwDataLen
                                                    ,EC_T_DWORD              dwTimeout
                                                    ,EC_T_DWORD              dwFlags         );
@@ -843,7 +910,7 @@ EC_API EC_T_DWORD EC_API_FNCALL  emCoeSdoDownload(EC_T_DWORD             dwInsta
 static EC_INLINESTART  EC_T_DWORD   ecatCoeSdoDownload(EC_T_DWORD           dwSlaveId
                                                    ,EC_T_WORD               wObIndex
                                                    ,EC_T_BYTE               byObSubIndex
-                                                   ,EC_T_BYTE*              pbyData
+                                                   ,const EC_T_BYTE*        pbyData
                                                    ,EC_T_DWORD              dwDataLen
                                                    ,EC_T_DWORD              dwTimeout
                                                    ,EC_T_DWORD              dwFlags         )
@@ -894,54 +961,115 @@ static EC_INLINESTART  EC_T_DWORD  ecatCoeSdoUpload(EC_T_DWORD              dwSl
 } EC_INLINESTOP
 #endif
 
-
-EC_API EC_T_DWORD EC_API_FNCALL emCoeGetODListReq(  EC_T_DWORD              dwInstanceID,
-                                                    EC_T_MBXTFER*           pMbxTfer,
-                                                    EC_T_DWORD              dwSlaveId,
-                                                    EC_T_COE_ODLIST_TYPE    eListType,
-                                                    EC_T_DWORD              dwTimeout       );
+EC_API EC_T_DWORD EC_API_FNCALL emCoeGetODListReq(EC_T_DWORD                dwInstanceID,
+                                                  EC_T_MBXTFER*             pMbxTfer,
+                                                  EC_T_DWORD                dwSlaveId,
+                                                  EC_T_COE_ODLIST_TYPE      eListType,
+                                                  EC_T_DWORD                dwTimeout       );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD  ecatCoeGetODListReq(EC_T_MBXTFER*        pMbxTfer,
-                                                    EC_T_DWORD              dwSlaveId,
-                                                    EC_T_COE_ODLIST_TYPE    eListType,
-                                                    EC_T_DWORD              dwTimeout       )
+                                                       EC_T_DWORD           dwSlaveId,
+                                                       EC_T_COE_ODLIST_TYPE eListType,
+                                                       EC_T_DWORD           dwTimeout       )
 {
     return emCoeGetODListReq(INSTANCE_MASTER_DEFAULT, pMbxTfer, dwSlaveId, eListType, dwTimeout);
 } EC_INLINESTOP
 #endif
 
-EC_API EC_T_DWORD EC_API_FNCALL emCoeGetObjectDescReq(EC_T_DWORD            dwInstanceID,
-                                                    EC_T_MBXTFER*           pMbxTfer,
-                                                    EC_T_DWORD              dwSlaveId,
-                                                    EC_T_WORD               wObIndex,
-                                                    EC_T_DWORD              dwTimeout       );
+EC_API EC_T_DWORD EC_API_FNCALL emCoeGetODList(EC_T_DWORD                   dwInstanceID,
+                                               EC_T_DWORD                   dwSlaveId,
+                                               EC_T_COE_ODLIST_TYPE         eListType,
+                                               EC_T_BYTE*                   pbyData,
+                                               EC_T_DWORD                   dwDataLen,
+                                               EC_T_COE_ODLIST*             poOdList,
+                                               EC_T_DWORD                   dwTimeout       );
 #ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD  ecatCoeGetObjectDescReq(EC_T_MBXTFER*       pMbxTfer,
-                                                    EC_T_DWORD              dwSlaveId,
-                                                    EC_T_WORD               wObIndex,
+static EC_INLINESTART  EC_T_DWORD  ecatCoeGetODList(EC_T_DWORD              dwSlaveId,
+                                                    EC_T_COE_ODLIST_TYPE    eListType,
+                                                    EC_T_BYTE*              pbyData,
+                                                    EC_T_DWORD              dwDataLen,
+                                                    EC_T_COE_ODLIST*        poOdList,
                                                     EC_T_DWORD              dwTimeout       )
+{
+    return emCoeGetODList(INSTANCE_MASTER_DEFAULT, dwSlaveId, eListType, pbyData, dwDataLen, poOdList, dwTimeout);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emCoeGetObjectDescReq(EC_T_DWORD            dwInstanceID,
+                                                      EC_T_MBXTFER*         pMbxTfer,
+                                                      EC_T_DWORD            dwSlaveId,
+                                                      EC_T_WORD             wObIndex,
+                                                      EC_T_DWORD            dwTimeout       );
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD  ecatCoeGetObjectDescReq(EC_T_MBXTFER*    pMbxTfer,
+                                                           EC_T_DWORD       dwSlaveId,
+                                                           EC_T_WORD        wObIndex,
+                                                           EC_T_DWORD       dwTimeout       )
 {
     return emCoeGetObjectDescReq(INSTANCE_MASTER_DEFAULT, pMbxTfer, dwSlaveId, wObIndex, dwTimeout);
 } EC_INLINESTOP
 #endif
 
+EC_API EC_T_DWORD EC_API_FNCALL emCoeGetObjectDesc(EC_T_DWORD               dwInstanceID,
+                                                   EC_T_DWORD               dwSlaveId,
+                                                   EC_T_WORD                wObIndex,
+                                                   EC_T_CHAR*               pchObName,
+                                                   EC_T_WORD                wObNameLen,
+                                                   EC_T_COE_OBDESC*         poObDesc,
+                                                   EC_T_DWORD               dwTimeout       );
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD  ecatCoeGetObjectDesc(EC_T_DWORD          dwSlaveId,
+                                                        EC_T_WORD           wObIndex,
+                                                        EC_T_CHAR*          pchObName,
+                                                        EC_T_WORD           wObNameLen,
+                                                        EC_T_COE_OBDESC*    poObDesc,
+                                                        EC_T_DWORD          dwTimeout       )
+{
+    return emCoeGetObjectDesc(INSTANCE_MASTER_DEFAULT, dwSlaveId, wObIndex, pchObName, wObNameLen, poObDesc, dwTimeout);
+} EC_INLINESTOP
+#endif
+
 EC_API EC_T_DWORD EC_API_FNCALL emCoeGetEntryDescReq(EC_T_DWORD             dwInstanceID,
-                                                    EC_T_MBXTFER*           pMbxTfer,
-                                                    EC_T_DWORD              dwSlaveId,
-                                                    EC_T_WORD               wObIndex,
-                                                    EC_T_BYTE               byObSubIndex,
-                                                    EC_T_BYTE               byValueInfo,
-                                                    EC_T_DWORD              dwTimeout       );
+                                                     EC_T_MBXTFER*          pMbxTfer,
+                                                     EC_T_DWORD             dwSlaveId,
+                                                     EC_T_WORD              wObIndex,
+                                                     EC_T_BYTE              byObSubIndex,
+                                                     EC_T_BYTE              byValueInfo,
+                                                     EC_T_DWORD             dwTimeout       );
 
 #ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD  ecatCoeGetEntryDescReq(EC_T_MBXTFER*        pMbxTfer,
-                                                    EC_T_DWORD              dwSlaveId,
-                                                    EC_T_WORD               wObIndex,
-                                                    EC_T_BYTE               byObSubIndex,
-                                                    EC_T_BYTE               byValueInfo,
-                                                    EC_T_DWORD              dwTimeout       )
+static EC_INLINESTART  EC_T_DWORD  ecatCoeGetEntryDescReq(EC_T_MBXTFER*     pMbxTfer,
+                                                          EC_T_DWORD        dwSlaveId,
+                                                          EC_T_WORD         wObIndex,
+                                                          EC_T_BYTE         byObSubIndex,
+                                                          EC_T_BYTE         byValueInfo,
+                                                          EC_T_DWORD        dwTimeout       )
 {
     return emCoeGetEntryDescReq(INSTANCE_MASTER_DEFAULT, pMbxTfer, dwSlaveId, wObIndex, byObSubIndex, byValueInfo, dwTimeout);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emCoeGetEntryDesc(EC_T_DWORD                dwInstanceID,
+                                                  EC_T_DWORD                dwSlaveId,
+                                                  EC_T_WORD                 wObIndex,
+                                                  EC_T_BYTE                 byObSubIndex,
+                                                  EC_T_BYTE                 byValueInfo,
+                                                  EC_T_BYTE*                pbyData,
+                                                  EC_T_WORD                 wDataLen,
+                                                  EC_T_COE_ENTRYDESC*       poEntryDesc,
+                                                  EC_T_DWORD                dwTimeout       );
+
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD  ecatCoeGetEntryDesc(EC_T_DWORD           dwSlaveId,
+                                                       EC_T_WORD            wObIndex,
+                                                       EC_T_BYTE            byObSubIndex,
+                                                       EC_T_BYTE            byValueInfo,
+                                                       EC_T_BYTE*           pbyData,
+                                                       EC_T_WORD            wDataLen,
+                                                       EC_T_COE_ENTRYDESC*  poEntryDesc,
+                                                       EC_T_DWORD           dwTimeout       )
+{
+    return emCoeGetEntryDesc(INSTANCE_MASTER_DEFAULT, dwSlaveId, wObIndex, byObSubIndex, byValueInfo, pbyData, wDataLen, poEntryDesc, dwTimeout);
 } EC_INLINESTOP
 #endif
 
@@ -965,12 +1093,12 @@ EC_API EC_T_DWORD EC_API_FNCALL emCoeProfileGetChannelInfo(EC_T_DWORD       dwIn
                                                     EC_T_BOOL               bStationAddress,
                                                     EC_T_WORD               wSlaveAddress,
                                                     EC_T_DWORD              dwChannel,
-                                                    EC_T_PROFILE_CHANNEL_INFO* pInfo);
+                                                    EC_T_PROFILE_CHANNEL_INFO* pInfo        );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatCoeProfileGetChannelInfo(EC_T_BOOL    bStationAddress,
                                                     EC_T_WORD               wSlaveAddress,
                                                     EC_T_DWORD              dwChannel,
-                                                    EC_T_PROFILE_CHANNEL_INFO* pInfo)
+                                                    EC_T_PROFILE_CHANNEL_INFO* pInfo        )
 {
     return emCoeProfileGetChannelInfo(INSTANCE_MASTER_DEFAULT, bStationAddress, wSlaveAddress, dwChannel, pInfo);
 } EC_INLINESTOP
@@ -1129,7 +1257,7 @@ EC_API EC_T_DWORD EC_API_FNCALL emSoeWrite(      EC_T_DWORD              dwInsta
                                                     EC_T_BYTE               byDriveNo,
                                                     EC_T_BYTE*              pbyElementFlags,
                                                     EC_T_WORD               wIDN,
-                                                    EC_T_BYTE*              pbyData,
+                                                    const EC_T_BYTE*        pbyData,
                                                     EC_T_DWORD              dwDataLen,
                                                     EC_T_DWORD              dwTimeout        );
 #ifndef ECAT_INTERFACE
@@ -1137,7 +1265,7 @@ static EC_INLINESTART   EC_T_DWORD ecatSoeWrite(    EC_T_DWORD              dwSl
                                                     EC_T_BYTE               byDriveNo,
                                                     EC_T_BYTE*              pbyElementFlags,
                                                     EC_T_WORD               wIDN,
-                                                    EC_T_BYTE*              pbyData,
+                                                    const EC_T_BYTE*        pbyData,
                                                     EC_T_DWORD              dwDataLen,
                                                     EC_T_DWORD              dwTimeout        )
 {
@@ -1637,14 +1765,14 @@ EC_API EC_T_DWORD EC_API_FNCALL emWriteSlaveEEPRom(EC_T_DWORD            dwInsta
                                                     EC_T_BOOL               bFixedAddressing,
                                                     EC_T_WORD               wSlaveAddress,
                                                     EC_T_WORD               wEEPRomStartOffset,
-                                                    EC_T_WORD*              pwWriteData,
+                                                    const EC_T_WORD*        pwWriteData,
                                                     EC_T_DWORD              dwWriteLen,
                                                     EC_T_DWORD              dwTimeout       );
 #ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatWriteSlaveEEPRom(EC_T_BOOL            bFixedAddressing,
                                                     EC_T_WORD               wSlaveAddress,
                                                     EC_T_WORD               wEEPRomStartOffset,
-                                                    EC_T_WORD*              pwWriteData,
+                                                    const EC_T_WORD*        pwWriteData,
                                                     EC_T_DWORD              dwWriteLen,
                                                     EC_T_DWORD              dwTimeout       )
 {
@@ -1658,7 +1786,7 @@ EC_API EC_T_DWORD EC_API_FNCALL emWriteSlaveEEPRomReq(EC_T_DWORD         dwInsta
                                                     EC_T_BOOL               bFixedAddressing,
                                                     EC_T_WORD               wSlaveAddress,
                                                     EC_T_WORD               wEEPRomStartOffset,
-                                                    EC_T_WORD*              pwWriteData,
+                                                    const EC_T_WORD*        pwWriteData,
                                                     EC_T_DWORD              dwWriteLen,
                                                     EC_T_DWORD              dwTimeout       );
 #ifndef ECAT_INTERFACE
@@ -1667,7 +1795,7 @@ static EC_INLINESTART  EC_T_DWORD ecatWriteSlaveEEPRomReq(EC_T_DWORD        dwCl
                                                     EC_T_BOOL               bFixedAddressing,
                                                     EC_T_WORD               wSlaveAddress,
                                                     EC_T_WORD               wEEPRomStartOffset,
-                                                    EC_T_WORD*              pwWriteData,
+                                                    const EC_T_WORD*        pwWriteData,
                                                     EC_T_DWORD              dwWriteLen,
                                                     EC_T_DWORD              dwTimeout)
 {
@@ -1820,6 +1948,25 @@ static EC_INLINESTART  EC_T_DWORD ecatHCGetSlaveIdsOfGroup(EC_T_DWORD       dwGr
 } EC_INLINESTOP
 #endif
 
+EC_API EC_T_DWORD EC_API_FNCALL emGetHcGroupNumOf(EC_T_DWORD         dwInstanceID );
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatGetHcGroupNumOf()
+{
+    return emGetHcGroupNumOf(INSTANCE_MASTER_DEFAULT);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emGetHcGroupInfo(EC_T_DWORD             dwInstanceID,
+                                                 EC_T_DWORD             dwHcGroupIdx,
+                                                 EC_T_HC_GROUP_INFO*    pHcGroupInfo);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatGetHcGroupInfo(EC_T_DWORD          dwHcGroupIdx,
+                                                     EC_T_HC_GROUP_INFO* pHcGroupInfo)
+{
+    return emGetHcGroupInfo(INSTANCE_MASTER_DEFAULT, dwHcGroupIdx, pHcGroupInfo);
+} EC_INLINESTOP
+#endif
+
 EC_API EC_T_DWORD EC_API_FNCALL emSetSlavePortState(EC_T_DWORD            dwInstanceID,
                                                     EC_T_DWORD              dwSlaveId,
                                                     EC_T_WORD               wPort,
@@ -1923,10 +2070,10 @@ static EC_INLINESTART  EC_T_DWORD ecatDcIsEnabled(  EC_T_BOOL*           pbDcIsE
 } EC_INLINESTOP
 #endif
 
-EC_API EC_T_DWORD EC_API_FNCALL emDcConfigure(    EC_T_DWORD              dwInstanceID,
-                                                    struct _EC_T_DC_CONFIGURE* pDcConfigure );
+EC_API EC_T_DWORD EC_API_FNCALL emDcConfigure(     EC_T_DWORD               dwInstanceID,
+                                                   const EC_T_DC_CONFIGURE* pDcConfigure );
 #ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatDcConfigure(  struct _EC_T_DC_CONFIGURE* pDcConfigure )
+static EC_INLINESTART  EC_T_DWORD ecatDcConfigure( const EC_T_DC_CONFIGURE* pDcConfigure )
 {
     return emDcConfigure(INSTANCE_MASTER_DEFAULT, pDcConfigure);
 } EC_INLINESTOP
@@ -1948,11 +2095,11 @@ static EC_INLINESTART  EC_T_DWORD ecatDcContDelayCompDisable(EC_T_VOID          
 } EC_INLINESTOP
 #endif
 
-EC_API EC_T_DWORD EC_API_FNCALL emDcmConfigure(   EC_T_DWORD              dwInstanceID,
-                                                    struct _EC_T_DCM_CONFIG* pDcmConfig,
+EC_API EC_T_DWORD EC_API_FNCALL emDcmConfigure(     EC_T_DWORD              dwInstanceID,
+                                                    const EC_T_DCM_CONFIG*  pDcmConfig,
                                                     EC_T_DWORD              dwInSyncTimeout );
 #ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatDcmConfigure(struct _EC_T_DCM_CONFIG* pDcmConfig,
+static EC_INLINESTART  EC_T_DWORD ecatDcmConfigure( const EC_T_DCM_CONFIG*  pDcmConfig,
                                                     EC_T_DWORD              dwInSyncTimeout )
 {
     return emDcmConfigure(INSTANCE_MASTER_DEFAULT, pDcmConfig, dwInSyncTimeout);
@@ -2071,6 +2218,19 @@ static EC_INLINESTART  EC_T_DWORD ecatGetCfgSlaveEoeInfo(EC_T_BOOL              
                                                     EC_T_CFG_SLAVE_EOE_INFO*    pSlaveEoeInfo)
 {
     return emGetCfgSlaveEoeInfo(INSTANCE_MASTER_DEFAULT, bStationAddress, wSlaveAddress, pSlaveEoeInfo);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emGetCfgSlaveSmInfo(EC_T_DWORD                 dwInstanceID,
+                                                    EC_T_BOOL                  bStationAddress,
+                                                    EC_T_WORD                  wSlaveAddress,
+                                                    EC_T_CFG_SLAVE_SM_INFO*    pSlaveSmInfo);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatGetCfgSlaveSmInfo(EC_T_BOOL                   bStationAddress,
+                                                        EC_T_WORD                   wSlaveAddress,
+                                                        EC_T_CFG_SLAVE_SM_INFO*     pSlaveSmInfo)
+{
+    return emGetCfgSlaveSmInfo(INSTANCE_MASTER_DEFAULT, bStationAddress, wSlaveAddress, pSlaveSmInfo);
 } EC_INLINESTOP
 #endif
 
@@ -2475,12 +2635,23 @@ static EC_INLINESTART  EC_T_DWORD ecatGetSrcMacAddress(ETHERNET_ADDRESS*    pMac
 } EC_INLINESTOP
 #endif
 
-EC_API EC_T_DWORD EC_API_FNCALL emSetLicenseKey(  EC_T_DWORD              dwInstanceID,
-                                                  const EC_T_CHAR*        pszLicenseKey   );
+EC_API EC_T_DWORD EC_API_FNCALL emGetLicenseFingerprint(EC_T_DWORD dwInstanceID,
+                                                        EC_T_BYTE  byMethod, 
+                                                        EC_T_CHAR* szLicenseFingerprint);
 #ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatSetLicenseKey(const EC_T_CHAR*      pszLicenseKey   )
+static EC_INLINESTART  EC_T_DWORD ecatGetLicenseFingerprint(EC_T_BYTE  byMethod,
+                                                            EC_T_CHAR* szLicenseFingerprint)
 {
-    return emSetLicenseKey(INSTANCE_MASTER_DEFAULT, pszLicenseKey);
+    return emGetLicenseFingerprint(INSTANCE_MASTER_DEFAULT, byMethod, szLicenseFingerprint);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL emSetLicenseKey(  EC_T_DWORD              dwInstanceID,
+                                                  const EC_T_CHAR*        szLicenseKey   );
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART  EC_T_DWORD ecatSetLicenseKey(const EC_T_CHAR*      szLicenseKey   )
+{
+    return emSetLicenseKey(INSTANCE_MASTER_DEFAULT, szLicenseKey);
 } EC_INLINESTOP
 #endif
 
@@ -2731,40 +2902,6 @@ static EC_INLINESTART const EC_T_CHAR* ecatSlaveStateText(EC_T_WORD nState)
 } EC_INLINESTOP
 #endif
 
-static EC_INLINESTART EC_T_DWORD emIoCtl(
-    EC_T_DWORD      dwInstanceID, /**< [in] Instance ID (Multiple EtherCAT Network Support) */
-    EC_T_DWORD      dwCode,       /**< [in]  see EC_IOCTL_... */
-    EC_T_VOID*      pbyInBuf,     /**< [in]  input data buffer */
-    EC_T_DWORD      dwInBufSize,  /**< [in]  size of input data buffer in byte */
-    EC_T_VOID*      pbyOutBuf,    /**< [out] output data buffer */
-    EC_T_DWORD      dwOutBufSize, /**< [in]  size of output data buffer in byte */
-    EC_T_DWORD*     pdwNumOutData /**< [out] number of output data bytes stored in output data buffer */
-)
-{
-    EC_T_IOCTLPARMS oIoCtlParms;
-    EC_T_DWORD      dwNumOutData = 0;
-
-    oIoCtlParms.pbyInBuf      = (EC_T_BYTE*)pbyInBuf;
-    oIoCtlParms.dwInBufSize   = dwInBufSize;
-    oIoCtlParms.pbyOutBuf     = (EC_T_BYTE*)pbyOutBuf;
-    oIoCtlParms.dwOutBufSize  = dwOutBufSize;
-    oIoCtlParms.pdwNumOutData = (EC_NULL != pdwNumOutData) ? pdwNumOutData : &dwNumOutData;
-    return emIoControl(dwInstanceID, dwCode, &oIoCtlParms);
-} EC_INLINESTOP
-#ifndef ECAT_INTERFACE
-static EC_INLINESTART  EC_T_DWORD ecatIoCtl(
-    EC_T_DWORD      dwCode,       /**< [in]  see EC_IOCTL_... */
-    EC_T_VOID*      pbyInBuf,     /**< [in]  input data buffer */
-    EC_T_DWORD      dwInBufSize,  /**< [in]  size of input data buffer in byte */
-    EC_T_VOID*      pbyOutBuf,    /**< [out] output data buffer */
-    EC_T_DWORD      dwOutBufSize, /**< [in]  size of output data buffer in byte */
-    EC_T_DWORD*     pdwNumOutData /**< [out] number of output data bytes stored in output data buffer */
-)
-{
-    return emIoCtl(INSTANCE_MASTER_DEFAULT, dwCode, pbyInBuf, dwInBufSize, pbyOutBuf, dwOutBufSize, pdwNumOutData);
-} EC_INLINESTOP
-#endif
-
 /**
 \brief Provide OEM Key needed for OEM Masters to parse ENI files and provide access via RAS.
        Must be called after initialization and before configuration
@@ -2810,26 +2947,90 @@ static EC_INLINESTART  EC_T_DWORD emBadConnectionsReset(   EC_T_DWORD      dwIns
 {
     return emIoCtl(dwInstanceID, EC_IOCTL_CLR_SLVSTATISTICS, EC_NULL, 0, EC_NULL, 0, EC_NULL);
 }
+#ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatBadConnectionsReset( EC_T_VOID                        )
 {
     return emBadConnectionsReset(INSTANCE_MASTER_DEFAULT);
 } EC_INLINESTOP
+#endif
 
 EC_API EC_T_DWORD EC_API_FNCALL   emBadConnectionsDetect(  EC_T_DWORD      dwInstanceID,
                                                            EC_T_BOOL       bRefreshSlaveStatistics,
                                                            EC_T_DWORD      dwTimeout        );
+#ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatBadConnectionsDetect(EC_T_BOOL       bRefreshSlaveStatistics,
                                                            EC_T_DWORD      dwTimeout        )
 {
     return emBadConnectionsDetect(INSTANCE_MASTER_DEFAULT, bRefreshSlaveStatistics, dwTimeout);
 } EC_INLINESTOP
+#endif
 
 EC_API EC_T_DWORD EC_API_FNCALL   emSelfTestScan(   EC_T_DWORD                  dwInstanceID,
                                                     EC_T_SELFTESTSCAN_PARMS*    pParms);
+#ifndef ECAT_INTERFACE
 static EC_INLINESTART  EC_T_DWORD ecatSelfTestScan( EC_T_SELFTESTSCAN_PARMS*    pParms)
 {
     return emSelfTestScan(INSTANCE_MASTER_DEFAULT, pParms);
 } EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL    emLinkInputVarByName(EC_T_DWORD dwInstanceID,
+                                                        const EC_T_CHAR* szVarName,
+                                                        EC_T_LINK_VAR_INFO* pLinkVarInfo);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART EC_T_DWORD ecatLinkInputVarByName(const EC_T_CHAR* szVarName,
+                                                        EC_T_LINK_VAR_INFO* pLinkVarInfo)
+{
+    return emLinkInputVarByName(INSTANCE_MASTER_DEFAULT, szVarName, pLinkVarInfo);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL    emLinkInputVarByObject(EC_T_DWORD dwInstanceID,
+                                                          EC_T_BOOL bFixedAddressing,
+                                                          EC_T_WORD wSlaveAddress,
+                                                          EC_T_WORD wIndex,
+                                                          EC_T_WORD wSubIndex,
+                                                          EC_T_LINK_VAR_INFO* pLinkVarInfo);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART EC_T_DWORD ecatLinkInputVarByObject(EC_T_BOOL bFixedAddressing,
+                                                          EC_T_WORD wSlaveAddress,
+                                                          EC_T_WORD wIndex,
+                                                          EC_T_WORD wSubIndex,
+                                                          EC_T_LINK_VAR_INFO* pLinkVarInfo)
+{
+    return emLinkInputVarByObject(INSTANCE_MASTER_DEFAULT, bFixedAddressing, wSlaveAddress, 
+        wIndex, wSubIndex, pLinkVarInfo);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL    emLinkOutputVarByName(EC_T_DWORD dwInstanceID,
+                                                         const EC_T_CHAR* szVarName,
+                                                         EC_T_LINK_VAR_INFO* pLinkVarInfo);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART EC_T_DWORD ecatLinkOutputVarByName(const EC_T_CHAR* szVarName,
+                                                         EC_T_LINK_VAR_INFO* pLinkVarInfo)
+{
+    return emLinkOutputVarByName(INSTANCE_MASTER_DEFAULT, szVarName, pLinkVarInfo);
+} EC_INLINESTOP
+#endif
+
+EC_API EC_T_DWORD EC_API_FNCALL    emLinkOutputVarByObject(EC_T_DWORD dwInstanceID,
+                                                           EC_T_BOOL bFixedAddressing,
+                                                           EC_T_WORD wSlaveAddress,
+                                                           EC_T_WORD wIndex,
+                                                           EC_T_WORD wSubIndex,
+                                                           EC_T_LINK_VAR_INFO* pLinkVarInfo);
+#ifndef ECAT_INTERFACE
+static EC_INLINESTART EC_T_DWORD ecatLinkOutputVarByObject(EC_T_BOOL bFixedAddressing,
+                                                           EC_T_WORD wSlaveAddress,
+                                                           EC_T_WORD wIndex,
+                                                           EC_T_WORD wSubIndex,
+                                                           EC_T_LINK_VAR_INFO* pLinkVarInfo)
+{
+    return emLinkOutputVarByObject(INSTANCE_MASTER_DEFAULT, bFixedAddressing, wSlaveAddress, 
+        wIndex, wSubIndex, pLinkVarInfo);
+} EC_INLINESTOP
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

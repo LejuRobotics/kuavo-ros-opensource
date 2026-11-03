@@ -1,22 +1,18 @@
-/*-----------------------------------------------------------------------------
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Paul Bussmann
- * Description              Thread class header
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       Thread class header
+ * \author      Paul Bussmann
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECTHREAD
 #define INC_ECTHREAD 1
 
-/*-INCLUDES------------------------------------------------------------------*/
-#ifndef INC_ECLOG
-#include "EcLog.h"
-#endif
-
 /*-CLASS---------------------------------------------------------------------*/
 class CEcThread
 {
 public:
-    CEcThread();
+    CEcThread(const struct _EC_T_LOG_PARMS* poLogParms = EC_NULL, EC_T_DWORD dwMemTrace = 0, struct _EC_T_MEMORY_LOGGER* poMemLog = EC_NULL);
     virtual ~CEcThread();
 
     EC_T_DWORD Start(EC_T_LOG_PARMS* pLogParms, EC_PF_THREADENTRY pfThreadEntry, EC_T_VOID* pvParams,
@@ -32,9 +28,14 @@ public:
     }
 
     EC_T_DWORD Stop(EC_T_DWORD dwTimeout = EC_NOWAIT);
+
+    EC_T_VOID SetExceptionCallback(EC_PF_EXCEPTION_CALLBACK pfExceptionCallback, EC_T_VOID* pvCbParams);
+
     EC_INLINESTART EC_T_BOOL isTerminating() { return m_bThreadReady && m_bThreadStop; } EC_INLINESTOP
 
-    EC_INLINESTART EC_T_LOG_PARMS* GetLogParms() { return &m_oLogParms; } EC_INLINESTOP
+    EC_INLINESTART EC_T_LOG_PARMS* GetLogParms() { return m_poLogParms; } EC_INLINESTOP
+
+    virtual EC_T_DWORD GetThisSize() /* EC_OVERRIDE */ { return sizeof(CEcThread); }
 
 protected:
     /* threadProc is run in separate thread and calls listenStep while thread is not stopped */
@@ -53,9 +54,19 @@ private:
     CEcThread& operator=(const CEcThread&);
 
 protected:
-    EC_T_LOG_PARMS m_oLogParms;
+    /* Logging */
+    EC_T_LOG_PARMS          m_oLogParmsStub;
+    struct _EC_T_LOG_PARMS* m_poLogParms;
+
+    /* Memory Logger */
+    EC_T_DWORD                  m_dwMemTrace;
+    struct _EC_T_MEMORY_LOGGER* m_poMemLog;
+    EC_INLINESTART struct _EC_T_MEMORY_LOGGER* GetMemLog() { return m_poMemLog; } EC_INLINESTOP
+
     EC_PF_THREADENTRY m_pfThreadEntry;
     EC_T_VOID* m_pvParams;
+    EC_PF_EXCEPTION_CALLBACK m_pfExceptionCallback;
+    EC_T_VOID* m_pvCbParams;
 
 private:
     EC_T_PVOID m_hThread; /* thread handle */

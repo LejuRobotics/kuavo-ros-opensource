@@ -13,11 +13,11 @@
 #endif
 
 /*-CLASS---------------------------------------------------------------------*/
-class CEcThread
+class CKuavoEcThread
 {
 public:
-    CEcThread();
-    virtual ~CEcThread();
+    CKuavoEcThread();
+    virtual ~CKuavoEcThread();
 
     EC_T_DWORD Start(EC_T_LOG_PARMS* pLogParms, EC_PF_THREADENTRY pfThreadEntry, EC_T_VOID* pvParams,
         const EC_T_CHAR* szThreadName, EC_T_CPUSET oCpuAffinityMask, EC_T_DWORD dwPrio,
@@ -49,8 +49,8 @@ protected:
 
 private:
     /* explicitly restrict copy */
-    CEcThread(const CEcThread&);
-    CEcThread& operator=(const CEcThread&);
+    CKuavoEcThread(const CKuavoEcThread&);
+    CKuavoEcThread& operator=(const CKuavoEcThread&);
 
 protected:
     EC_T_LOG_PARMS m_oLogParms;

@@ -1,8 +1,7 @@
-/*-----------------------------------------------------------------------------
- * EthernetServices.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description
+/** ---------------------------------------------------------------------------
+ * \file
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ETHERNETSERVICES
@@ -19,6 +18,9 @@
 #define ETHERNET_FRAME_TYPE_ARP                 0x0806
 #define ETHERNET_FRAME_TYPE_VLAN                0x8100
 #define ETHERNET_FRAME_TYPE_BKHF                0x88A4
+#define ETHERNET_FRAME_TYPE_MAC_CTL             0x8808
+
+#define ETHERNET_CRC_LEN                        4       /* frame check sequence (CRC) */
 
 #define ETHERNET_MIN_FRAME_LEN                  60      /* frame length without CRC */
 #define ETHERNET_MAX_FRAME_LEN                  1514    /* frame length without CRC */
@@ -42,9 +44,10 @@
 #define ETH_ADDRESS_FORWARDING_RULE_OFFSET              (0)    /* 1st byte of Organizationally Unique Identifier (OUI) containing the Forwarding Rule bit 0x02 */
 #define ETH_ADDRESS_RETRY_FRAME_OFFSET                  (0)    /* 1st byte of Organizationally Unique Identifier (OUI) containing the Retry counter bits 0x70 */
 #define ETH_ADDRESS_RETRY_FRAME_MASK                    (0x70) /* 1st byte of Organizationally Unique Identifier (OUI) containing the Retry counter bits 0x70 */
-#define ETH_ADDRESS_CABLE_RED_FRAME_ID_OFFSET           (1)    /* 2nd byte of Organizationally Unique Identifier (OUI) containing the Red Frame ID */
-#define ETH_ADDRESS_CABLE_RED_FRAME_ID_MASK             (0xFF) /* 2nd byte of Organizationally Unique Identifier (OUI) containing the Red Frame ID */
-#define ETH_ADDRESS_CABLE_RED_FRAME_ID_LAST             (0xFE)
+#define ETH_ADDRESS_CABLE_RED_FRAME_ID_OFFSET           (1)    /* 2nd byte of Organizationally Unique Identifier (OUI) containing the CableRed Frame ID */
+#define ETH_ADDRESS_CABLE_RED_FRAME_ID_MASK             (0xFF) /* 2nd byte of Organizationally Unique Identifier (OUI) containing the CableRed Frame ID */
+#define ETH_ADDRESS_CABLE_RED_FRAME_ID_LAST             (0xFD)
+#define ETH_ADDRESS_CABLE_RED_FRAME_ID_ONLY_ONE_LINE_AVAILABLE (0xFE)
 #define ETH_ADDRESS_CABLE_RED_FRAME_ID_ONLY_ONE_LINE    (0xFF)
 #define ETH_ADDRESS_LL_RESERVED_OFFSET                  (2)    /* 3rd byte of Organizationally Unique Identifier (OUI) reserved for link layer */
 #define ETH_ADDRESS_NIC_OFFSET                          (3)    /* 4th byte of Network Interface Controller (NIC) reserved for MAC identification */
@@ -108,7 +111,7 @@ typedef struct _EC_T_INNER_IPADDR
 typedef union _EC_T_IPADDR
 {
     EC_T_INNER_IPADDR sAddr; /**< IPv4 address (endianness independent) */
-    EC_T_DWORD  dwAddr;      /**< Reserved, use EC_T_IPADDR::sAddr.by instead. OS-Layer socket API calls (SOCKADDR_IN::sin_addr) */
+    EC_T_DWORD  dwAddr;      /**< Reserved, use EC_T_IPADDR::sAddr.by instead. OS-Layer socket API calls (SOCKADDR_IN::sin_addr). */
 } EC_PACKED(1) EC_T_IPADDR, * EC_PT_IPADDR;
 #include EC_PACKED_INCLUDESTOP
 
@@ -192,6 +195,11 @@ typedef struct _EC_ICMP_HEADER
 #define EC_ICMP_TYPE_INFO_REPLY             16 /**< Information Reply */
 
 /**
+* \brief MAC Control Header
+*/
+#define EC_MAC_CTL_OPCODE_PAUSE  0x0001
+
+/**
 * \brief ARP/IP Header
 */
 #include EC_PACKED_INCLUDESTART(1)
@@ -223,7 +231,7 @@ typedef struct _EC_ARP_IP_HEADER
 /**
 * \brief See RFC 1071 "Computing the Internet checksum according"
 */
-static EC_INLINESTART EC_T_WORD EcCalculateCrcRfc1071(EC_T_WORD* pWord, EC_T_WORD nLen)
+static EC_INLINESTART EC_T_WORD EcCalculateCrcRfc1071(const EC_T_WORD* pWord, EC_T_WORD nLen)
 {
     EC_T_WORD  wRetVal = 0;
     EC_T_DWORD dwCrc = 0;
@@ -265,6 +273,7 @@ static EC_INLINESTART EC_T_WORD EcCalculateCrcRfc1071(EC_T_WORD* pWord, EC_T_WOR
 #define ETHERNET_FRAME_OFFS_TYPE_VLAN (ETHERNET_FRAME_OFFS_TYPE+4/*ETYPE_VLAN_HEADER_LEN*/)
 
 #define ETHERNET_FRAME_OFFS_88A4_HEADER_BASIC    (ETHERNET_FRAME_OFFS_TYPE+2/*ETHERNET_FRAMETYPE_LEN*/)
+#define ETHERNET_FRAME_OFFS_88A4_HEADER_IP       (ETHERNET_FRAME_OFFS_88A4_HEADER_BASIC+sizeof(EC_IP_HEADER))
 #define ETHERNET_FRAME_OFFS_88A4_HEADER_UDP      (ETHERNET_FRAME_OFFS_88A4_HEADER_BASIC+sizeof(EC_IP_HEADER)+sizeof(EC_UDP_HEADER))
 #define ETHERNET_FRAME_OFFS_88A4_HEADER_VLAN     (ETHERNET_FRAME_OFFS_88A4_HEADER_BASIC+4/*ETYPE_VLAN_HEADER_LEN*/)
 #define ETHERNET_FRAME_OFFS_88A4_HEADER_VLAN_UDP (ETHERNET_FRAME_OFFS_88A4_HEADER_VLAN+sizeof(EC_IP_HEADER)+sizeof(EC_UDP_HEADER))
@@ -340,7 +349,7 @@ static EC_INLINESTART EC_T_BYTE EC_VLANHDR_GET_PRIO(const ETYPE_VLAN_HEADER* p)
 } EC_INLINESTOP
 static EC_INLINESTART EC_T_VOID EC_VLANHDR_SET_VID(ETYPE_VLAN_HEADER* p, const EC_T_WORD wVal)
 {
-    EC_SET_FRM_WORD((((EC_T_BYTE*)p) + EC_VLANHDR_OFFS_PRIO_VID), EC_WORDSWAP(wVal | (~0x1FFF & EC_WORDSWAP(EC_GET_FRM_WORD((((EC_T_BYTE*)p) + EC_VLANHDR_OFFS_PRIO_VID))))));
+    EC_SET_FRM_WORD((((EC_T_BYTE*)p) + EC_VLANHDR_OFFS_PRIO_VID), EC_WORDSWAP((EC_T_WORD)(wVal | (~0x1FFF & EC_WORDSWAP(EC_GET_FRM_WORD((((EC_T_BYTE*)p) + EC_VLANHDR_OFFS_PRIO_VID)))))));
 } EC_INLINESTOP
 static EC_INLINESTART EC_T_WORD EC_VLANHDR_GET_VID(const ETYPE_VLAN_HEADER* p)
 {
@@ -392,13 +401,9 @@ static EC_INLINESTART EC_T_VOID EC_88A4HDR_SET_E88A4FRAMELEN(EC_T_VOID* p, EC_T_
 /*---------------------------------------------------------------------------*/
 #define ETH_EC_MAX_HDR_LEN      (ETHERNET_FRAME_LEN + ETYPE_VLAN_HEADER_LEN + ETYPE_88A4_HEADER_LEN + sizeof(EC_IP_HEADER) + sizeof(EC_UDP_HEADER))
 
-#ifdef VLAN_FRAME_SUPPORT
-#define MAX_EC_DATA_LEN         (ETHERNET_MAX_VLAN_FRAME_LEN - ETH_EC_MAX_HDR_LEN)
-#else
 #define MAX_EC_DATA_LEN         (ETHERNET_MAX_FRAME_LEN - ETHERNET_FRAME_LEN - ETYPE_88A4_HEADER_LEN - ETYPE_EC_OVERHEAD)
-#endif
 
-static EC_INLINESTART EC_T_WORD GetEcatHeaderOffset(EC_T_BYTE* pbyFrame, EC_T_DWORD dwSize)
+static EC_INLINESTART EC_T_WORD GetEcatHeaderOffset(const EC_T_BYTE* pbyFrame, EC_T_DWORD dwSize)
 {
     EC_T_WORD wEcatHeaderOffset = 0;
     if (dwSize >= ETHERNET_MIN_FRAME_LEN)
@@ -781,7 +786,7 @@ static EC_INLINESTART EC_T_WORD ETYPE_EC_CMD_GETLEN(const ETYPE_EC_CMD_HEADER* p
 } EC_INLINESTOP
 static EC_INLINESTART EC_T_VOID ETYPE_EC_CMD_SETWKC(ETYPE_EC_CMD_HEADER* p, const EC_T_WORD wVal)
 {
-EC_T_BYTE* pbyCur = EC_NULL;
+    EC_T_BYTE* pbyCur = EC_NULL;
 
     pbyCur = &(((EC_T_BYTE*)p)[ETYPE_EC_CMD_HEADER_LEN + EC_ICMDHDR_GET_LEN_LEN(p)]);
 
@@ -789,7 +794,7 @@ EC_T_BYTE* pbyCur = EC_NULL;
 } EC_INLINESTOP
 static EC_INLINESTART EC_T_WORD ETYPE_EC_CMD_GETWKC(const ETYPE_EC_CMD_HEADER* p)
 {
-EC_T_BYTE* pbyCur = EC_NULL;
+    EC_T_BYTE* pbyCur = EC_NULL;
 
     /*pbyCur = &(((EC_T_BYTE*)p)[ETYPE_EC_CMD_HEADER_LEN + p->uLen.slength.__len]);*/
     pbyCur = &(((EC_T_BYTE*)p)[ETYPE_EC_CMD_HEADER_LEN + EC_ICMDHDR_GET_LEN_LEN(p)]);
@@ -927,16 +932,16 @@ typedef EC_T_DWORD(EC_FNCALL *EC_T_PF_AOE_READWRITE_CB)(EC_T_VOID* pvContext,
  * \param [in]     dwSize           Read buffer size according to MbxIn Sync Manager size
  * \param [in,out] pbyData          Read data buffer: pre-filled by the simulator if the object exists in the simulated slave's object dictionary and is read-able in the current EtherCAT state
  * \param [in,out] pdwOutDataLen    Read data length: pre-filled by the simulator if the object exists in the simulated slave's object dictionary and is read-able in the current EtherCAT state, else the simulator application shall set the value accordingly
- * \param [in]     bCompleteAccess  EC_TRUE: CoE SDO Upload with Complete Access. See also #EC_MAILBOX_FLAG_SDO_COMPLETE
+ * \param [in]     bCompleteAccess  EC_TRUE: CoE SDO Upload with Complete Access. See also #EC_MAILBOX_FLAG_SDO_COMPLETE.
  * \param [in]     bCheckReadAccess EC_TRUE: The simulator application should check the read access, e.g. if the object does not exist in the simulated slave's object dictionary
  * \param [in,out] pdwErrorCode     Current transfer error code pre-filled by the simulator. The simulator application shall set the current transfer error accordingly within the callback.
- *               - #EC_E_NOERROR: Object exists in the simulated slave's object dictionary and is read-able in the current EtherCAT state
- *               - #EC_E_SDO_ABORTCODE_INDEX: Object does not exist in the simulated slave's object dictionary and is read-able in the current EtherCAT state
- *               - #EC_E_SDO_ABORTCODE_OFFSET: Object SubIndex does not exist in the accessed object in the simulated slave's object dictionary
- *               - #EC_E_SDO_ABORTCODE_DATA_LENGTH_NOT_MATCH: The read data lenth does not match the accessed object length
- *               - #EC_E_SDO_ABORTCODE_ACCESS: Accessed Entry does not support commanded accesstype e.g. complete access is not supported on simple objects or ENUM descriptions                       
- *               - #EC_E_SDO_ABORTCODE_WRITEONLY: Accessed Entry does not support read operation
- *               - #EC_E_SDO_ABORTCODE_TRANSFER_DEVICE_STATE: Entry cannot be read in the current EtherCAT state
+ *               - #EC_E_NOERROR: if object exists in the simulated slave's object dictionary and is read-able in the current EtherCAT state
+ *               - #EC_E_SDO_ABORTCODE_INDEX: if object does not exist in the simulated slave's object dictionary and is read-able in the current EtherCAT state
+ *               - #EC_E_SDO_ABORTCODE_OFFSET: if object SubIndex does not exist in the accessed object in the simulated slave's object dictionary
+ *               - #EC_E_SDO_ABORTCODE_DATA_LENGTH_NOT_MATCH: if the read data length does not match the accessed object length
+ *               - #EC_E_SDO_ABORTCODE_ACCESS: if accessed Entry does not support commanded accesstype e.g. complete access is not supported on simple objects or ENUM descriptions                       
+ *               - #EC_E_SDO_ABORTCODE_WRITEONLY: if accessed Entry does not support read operation
+ *               - #EC_E_SDO_ABORTCODE_TRANSFER_DEVICE_STATE: if entry cannot be read in the current EtherCAT state
  *               - EC_E_...
  */
 typedef EC_T_VOID (EC_FNCALL *EC_T_PF_COE_READ_CB)(EC_T_VOID* pvContext, EC_T_DWORD dwSimulatorId, EC_T_WORD wCfgFixedAddress, EC_T_WORD wIndex, EC_T_BYTE bySubindex, EC_T_DWORD dwSize, EC_T_BYTE* pbyData, EC_T_DWORD* pdwOutDataLen, EC_T_BOOL bCompleteAccess, EC_T_BOOL bCheckReadAccess, EC_T_DWORD* pdwErrorCode);
@@ -952,21 +957,21 @@ typedef EC_T_VOID (EC_FNCALL *EC_T_PF_COE_READ_CB)(EC_T_VOID* pvContext, EC_T_DW
  * \param [in]     bySubindex        Object SubIndex from master request
  * \param [in]     dwSize            Write data length
  * \param [in,out] pbyData           Write data buffer: pre-filled by the simulator if the object exists in the simulated slave's object dictionary and is write-able in the current EtherCAT state
- * \param [in]     bCompleteAccess   EC_TRUE: CoE SDO Download with Complete Access. See also #EC_MAILBOX_FLAG_SDO_COMPLETE
+ * \param [in]     bCompleteAccess   EC_TRUE: CoE SDO Download with Complete Access. See also #EC_MAILBOX_FLAG_SDO_COMPLETE.
  * \param [in]     bCheckWriteAccess EC_TRUE: The simulator application should check the write access, e.g. if the object does not exist in the simulated slave's object dictionary
  * \param [in,out] pdwErrorCode      Current transfer error code pre-filled by the simulator. The simulator application shall set the current transfer error accordingly within the callback.
- *               - #EC_E_NOERROR: Object exists in the simulated slave's object dictionary and is write-able in the current EtherCAT state
- *               - #EC_E_SDO_ABORTCODE_INDEX: Object does not exist in the simulated slave's object dictionary and is write-able in the current EtherCAT state
- *               - #EC_E_SDO_ABORTCODE_OFFSET: Object SubIndex does not exist in the accessed object in the simulated slave's object dictionary
- *               - #EC_E_SDO_ABORTCODE_DATA_LENGTH_NOT_MATCH: The write data lenth does not match the accessed object length
- *               - #EC_E_SDO_ABORTCODE_ACCESS: Accessed Entry does not support commanded accesstype e.g. complete access is not supported on simple objects or ENUM descriptions                       
- *               - #EC_E_SDO_ABORTCODE_READONLY: Accessed Entry does not support write operation
- *               - #EC_E_SDO_ABORTCODE_TRANSFER_DEVICE_STATE: Entry cannot be write in the current EtherCAT state
+ *               - #EC_E_NOERROR: if object exists in the simulated slave's object dictionary and is write-able in the current EtherCAT state
+ *               - #EC_E_SDO_ABORTCODE_INDEX: if object does not exist in the simulated slave's object dictionary and is write-able in the current EtherCAT state
+ *               - #EC_E_SDO_ABORTCODE_OFFSET: if object SubIndex does not exist in the accessed object in the simulated slave's object dictionary
+ *               - #EC_E_SDO_ABORTCODE_DATA_LENGTH_NOT_MATCH: if the write data length does not match the accessed object length
+ *               - #EC_E_SDO_ABORTCODE_ACCESS: if accessed Entry does not support commanded accesstype e.g. complete access is not supported on simple objects or ENUM descriptions                       
+ *               - #EC_E_SDO_ABORTCODE_READONLY: if accessed Entry does not support write operation
+ *               - #EC_E_SDO_ABORTCODE_TRANSFER_DEVICE_STATE: if entry cannot be write in the current EtherCAT state
  *               - EC_E_...
  */
 typedef EC_T_VOID (EC_FNCALL *EC_T_PF_COE_WRITE_CB)(EC_T_VOID* pvContext, EC_T_DWORD dwSimulatorId, EC_T_WORD wCfgFixedAddress, EC_T_WORD wIndex, EC_T_BYTE bySubindex, EC_T_DWORD dwSize, EC_T_BYTE* pbyData, EC_T_BOOL bCompleteAccess, EC_T_BOOL bCheckWriteAccess, EC_T_DWORD* pdwErrorCode);
 
-typedef EC_T_BYTE (EC_FNCALL *EC_T_PF_VOE_RECEIVE_CB)(EC_T_VOID* pvContext, EC_T_DWORD dwSimulatorId, EC_T_WORD wCfgFixedAddress, EC_T_WORD wSrcFixedAddress, EC_T_VOID* pvData, EC_T_DWORD dwDataLen);
+typedef EC_T_BYTE (EC_FNCALL *EC_T_PF_VOE_RECEIVE_CB)(EC_T_VOID* pvContext, EC_T_DWORD dwSimulatorId, EC_T_WORD wCfgFixedAddress, EC_T_WORD wSrcFixedAddress, const EC_T_BYTE* pbyData, EC_T_DWORD dwDataLen);
 /*---------------------------------------------------------------------------*/
 /* Extended Information (EXI)                                                */
 /*---------------------------------------------------------------------------*/
@@ -1005,6 +1010,10 @@ typedef struct _EC_T_COE_OBJECT_ENTRY_ACCESS_DESC
 } EC_PACKED_API EC_T_COE_OBJECT_ENTRY_ACCESS_DESC;
 
 /* ETG.2000 SubItemType */
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_COE_SUB_ITEM_DATA_TYPE
 {
     EC_T_BYTE  bySubIdx;
@@ -1014,6 +1023,9 @@ typedef struct _EC_T_COE_SUB_ITEM_DATA_TYPE
     EC_T_DWORD dwBitOffs; /* XML type: xs:int (EC_T_INT) */
     EC_T_COE_OBJECT_ENTRY_ACCESS_DESC oFlags;
 } EC_PACKED_API EC_T_COE_SUB_ITEM_DATA_TYPE;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 
 /* ETG.2000 DataTypeType */
 typedef struct _EC_T_COE_DATA_TYPE
@@ -1055,6 +1067,10 @@ typedef struct _EC_T_COE_OBJECT_ENTRY_DESC
 } EC_PACKED_API EC_T_COE_OBJECT_ENTRY_DESC;
 
 /* ETG.2000 ObjectType */
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_COE_OBJECT_DESC
 {
     EC_T_WORD  wIndex;
@@ -1078,6 +1094,9 @@ typedef struct _EC_T_COE_OBJECT_DESC
     EC_T_COE_OBJECT_ENTRY_DESC* aObjectEntry;
     EC_T_DWORD dwObjectEntryCnt;
 } EC_PACKED_API EC_T_COE_OBJECT_DESC;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 
 typedef struct _EC_T_COE_DICTIONARY_DESC
 {
@@ -1096,9 +1115,11 @@ typedef struct _EC_T_EXTENDED_INFO_SLAVE_DATA
     EC_T_DWORD dwRevisionNumber;
     EC_T_BYTE* pbyEepromContent;
     EC_T_DWORD dwEepromContentLen;
+    EC_T_DWORD dwEepromContentBufferLen;
     EC_T_WORD  wRegisterAdo;
     EC_T_BYTE* pbyRegisterData;
     EC_T_DWORD dwRegisterDataLen;
+    EC_T_DWORD dwRegisterDataBufferLen;
     EC_T_COE_DICTIONARY_DESC oDictionary;
     EC_T_CHAR* szApplicationName;
     EC_T_CHAR* szApplicationParameter;
@@ -1153,6 +1174,7 @@ typedef struct _EC_T_MASTER_PROP_DESC
 #define ECAT_INITCMD_B_I            (EC_T_WORD)0x0400
 #define ECAT_INITCMD_I_I            (EC_T_WORD)0x0800
 #define ECAT_INITCMD_P_P            (EC_T_WORD)0x1000
+#define ECAT_INITCMD_S_S            (EC_T_WORD)0x2000
 #define ECAT_INITCMD_MASK           (EC_T_WORD)0x7FFF
 #define ECAT_INITCMD_BEFORE         (EC_T_WORD)0x8000
 /*
@@ -1429,8 +1451,8 @@ typedef struct TETHERCAT_EOE_TIMESTAMP
 #define ETHERCAT_ETHERNET_FRAME_TYPE_EOE_RSP        3   /* EoE response */
 #define ETHERCAT_ETHERNET_FRAME_TYPE_EOE_SETIP_REQ  2   /* EoE set IP parameter request */
 #define ETHERCAT_ETHERNET_FRAME_TYPE_EOE_SETIP_RSP  3   /* EoE set IP parameter response */
-#define ETHERCAT_ETHERNET_FRAME_TYPE_EOE_SETAF_REQ  4   /* EoE set adress filter request */
-#define ETHERCAT_ETHERNET_FRAME_TYPE_EOE_SETAF_RSP  5   /* EoE set adress filter response */
+#define ETHERCAT_ETHERNET_FRAME_TYPE_EOE_SETAF_REQ  4   /* EoE set address filter request */
+#define ETHERCAT_ETHERNET_FRAME_TYPE_EOE_SETAF_RSP  5   /* EoE set address filter response */
 
 #define ETHERNET_FRAGMENT_GRANULAR      32              /* length of each fragment (except the last fragment) must be dividable by 32 */
 #define ETHERNET_FRAGMENT_MASK          0xFFFFFFE0
@@ -1859,7 +1881,7 @@ static EC_INLINESTART EC_T_BYTE* EC_ECSDOHDR_SDODATA(const EC_SDO_HDR* p)
 #define SDO_ABORTCODE_PDO_LEN                           0x06040042  /* The number and length of the objects to be mapped would exceed PDO length */
 #define SDO_ABORTCODE_P_INCOMP                          0x06040043  /* General parameter incompatibility reason */
 #define SDO_ABORTCODE_I_INCOMP                          0x06040047  /* General internal incompatibility in the device */
-#define SDO_ABORTCODE_HARDWARE                          0x06060000  /* Access failed due to an hardware error */
+#define SDO_ABORTCODE_HARDWARE                          0x06060000  /* Access failed due to a hardware error */
 #define SDO_ABORTCODE_DATA_LENGTH_NOT_MATCH             0x06070010  /* Data type does not match, length of service parameter does not match */
 #define SDO_ABORTCODE_DATA_LENGTH_TOO_HIGH              0x06070012  /* Data type does not match, length of service parameter too high */
 #define SDO_ABORTCODE_DATA_LENGTH_TOO_LOW               0x06070013  /* Data type does not match, length of service parameter too low */
@@ -1977,6 +1999,9 @@ static EC_INLINESTART EC_T_VOID EC_SDOINFOLIST_SET_LISTTYPE(ETHERCAT_SDO_INFO_LI
 
 #define EC_SDOINFOOBJ_OFFS_INDEX        ((EC_T_BYTE)0)
 #define EC_SDOINFOOBJ_OFFS_DATATYPE     ((EC_T_BYTE)2)
+#define EC_SDOINFOOBJ_OFFS_MAXSUBINDEX  ((EC_T_BYTE)4)
+#define EC_SDOINFOOBJ_OFFS_OBJECTCODE   ((EC_T_BYTE)5)
+#define EC_SDOINFOOBJ_OFFS_NAME         ((EC_T_BYTE)6)
 
 typedef struct TETHERCAT_SDO_INFO_OBJ
 {
@@ -2045,9 +2070,12 @@ static EC_INLINESTART EC_T_VOID EC_SDOINFOOBJ_SET_OBJ_CATEGORY(ETHERCAT_SDO_INFO
 
 
 #define EC_ECSDOINFOENTRY_OFFS_INDEX        ((EC_T_BYTE)0)
+#define EC_ECSDOINFOENTRY_OFFS_SUBINDEX     ((EC_T_BYTE)2)
+#define EC_ECSDOINFOENTRY_OFFS_VALUEINFO    ((EC_T_BYTE)3)
 #define EC_ECSDOINFOENTRY_OFFS_DATATYPE     ((EC_T_BYTE)4)
 #define EC_ECSDOINFOENTRY_OFFS_BITLEN       ((EC_T_BYTE)6)
 #define EC_ECSDOINFOENTRY_OFFS_BITPARM      ((EC_T_BYTE)8)
+#define EC_ECSDOINFOENTRY_OFFS_DATA         ((EC_T_BYTE)10)
 
 typedef struct TETHERCAT_SDO_INFO_ENTRY
 {
@@ -2447,8 +2475,8 @@ typedef struct TETHERCAT_SOE_NOTIFICATION_HEADER
 @{
 */
 #define SOE_BM_ELEMENTFLAG_DATATSTATE   0x01    /**< Shall be set in case of Notify SoE Service Channel Command Execution */
-#define SOE_BM_ELEMENTFLAG_NAME         0x02    /**< Name of operation data. The name consist of 64 octets maximum */
-#define SOE_BM_ELEMENTFLAG_ATTRIBUTE    0x04    /**< Attribute of operation data. The attribute contain all information which is needed to display operation data intelligibly */
+#define SOE_BM_ELEMENTFLAG_NAME         0x02    /**< Name of operation data. The name consist of 64 octets maximum. */
+#define SOE_BM_ELEMENTFLAG_ATTRIBUTE    0x04    /**< Attribute of operation data. The attribute contains all information which is needed to display operation data intelligibly. */
 #define SOE_BM_ELEMENTFLAG_UNIT         0x08    /**< Unit of operation data */
 #define SOE_BM_ELEMENTFLAG_MIN          0x10    /**< The IDN minimum input value shall be the smallest numerical value for the operation data which the slave is able to process */
 #define SOE_BM_ELEMENTFLAG_MAX          0x20    /**< The IDN maximum input value shall be the largest numerical value for the operation data which the slave is able to process */
@@ -3084,9 +3112,8 @@ typedef struct _EC_T_EEP_REGS
 
 \return Checksum value according to CRC-8 (ATM) Polynomial 8210.
 */
-static EC_INLINESTART EC_T_BYTE EcCalculateCrcEeprom(EC_T_BYTE* pbyData, EC_T_DWORD dwLength)
+static EC_INLINESTART EC_T_BYTE EcCalculateCrcEeprom(const EC_T_BYTE* pbyData, EC_T_DWORD dwLength)
 {
-#define POLY 0x07
     EC_T_BYTE   byCrc = (EC_T_BYTE)0xFF;
     EC_T_DWORD  i = 0;
     EC_T_DWORD  j = 0;
@@ -3099,7 +3126,7 @@ static EC_INLINESTART EC_T_BYTE EcCalculateCrcEeprom(EC_T_BYTE* pbyData, EC_T_DW
         {
             if (byCrc & 0x80)
             {
-                byCrc = (EC_T_BYTE)((byCrc << 1) ^ POLY);
+                byCrc = (EC_T_BYTE)((byCrc << 1) ^ 0x07 /* POLY */);
             }
             else
             {

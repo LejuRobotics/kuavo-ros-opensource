@@ -1,7 +1,7 @@
-/*-----------------------------------------------------------------------------
- * EcEscReg.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Description              ESC Controller Registers
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       ESC Controller Registers
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECESCREG
@@ -92,6 +92,7 @@
 
 /* Sync Manager configuration */
 #define ECREG_SYNCMANAGER_CONFIG                            ((EC_T_WORD)0x0800)
+#define ECREG_SYNCMANAGER_CONFIG_SIZE                       ((EC_T_WORD)8)
 #define ECREG_SYNCMANAGER_MBX_OUT                           ((EC_T_WORD)0x0800)
 #define ECREG_SYNCMANAGER_MBX_IN                            ((EC_T_WORD)0x0808)
 #define ECREG_SYNCMANAGER0                                  ((EC_T_WORD)0x0800)
@@ -156,9 +157,10 @@
 #define ECREG_DCS_PDIBUFFER_CHANGE_EVENT_TIME               ((EC_T_WORD)0x09FC)
 
 #define ECREG_ESC_SPECIFIC                                  ((EC_T_WORD)0x0E00)
-#define ECREG_DIGITAL_IO_OUTPUT_DATA                        ((EC_T_WORD)0x0F00) /* (0x0F00:0x0F03) */
-#define ECREG_GENERAL_PURPOSE_OUTPUTS                       ((EC_T_WORD)0x0F10) /* (0x0F10:0x0F17) */
-#define ECREG_GENERAL_PURPOSE_INPUTS                        ((EC_T_WORD)0x0F18) /* (0x0F18:0x0F1F) */
+#define ECREG_DIGITAL_IO_OUTPUT_DATA                        ((EC_T_WORD)0x0F00) /**< (0x0F00:0x0F03) Digital I/O output data */
+#define ECREG_GENERAL_PURPOSE_OUTPUTS                       ((EC_T_WORD)0x0F10) /**< (0x0F10:0x0F17) General purpose output data */
+#define ECREG_GENERAL_PURPOSE_INPUTS                        ((EC_T_WORD)0x0F18) /**< (0x0F18:0x0F1F) General purpose input data */
+#define ECREG_USER_RAM                                      ((EC_T_WORD)0x0F80) /**< (0x0F80:0x0FFF) IP core: extended ESC features */
 
 /*-/REGISTERS----------------------------------------------------------------*/
 
@@ -182,7 +184,7 @@
 #define ESCTYPE_NETX51_52                                   ((EC_T_BYTE)0x83)
 #define ESCTYPE_HILSCHER_RES1                               ((EC_T_BYTE)0x84)
 #define ESCTYPE_NETX90                                      ((EC_T_BYTE)0x85)
-#define ESCTYPE_HILSCHER_RES3                               ((EC_T_BYTE)0x86)
+#define ESCTYPE_NETX902                                     ((EC_T_BYTE)0x86)
 #define ESCTYPE_HILSCHER_RES4                               ((EC_T_BYTE)0x87)
 #define ESCTYPE_HILSCHER_RES5                               ((EC_T_BYTE)0x88)
 #define ESCTYPE_TI_SITARA                                   ((EC_T_BYTE)0x90)
@@ -289,7 +291,7 @@
 
 /*****************************************************************************
  * 0x0134: AL STATUS CODE (ECREG_AL_STATUSCODE, ECREG_AL_STATUSCODE_LO, ECREG_AL_STATUSCODE_HI)
- * See  ETG.1020, V1.2.0, Table 1: Description of AL Status Codes usage
+ * See  ETG.1020, V1.5.0, Table 1: Description of AL Status Codes usage
  * See also EC_TXT_STATUSCODE_..., EcStatusCodeToString, ALSTATUSCODE_ in SSC
  *****************************************************************************/
 #define DEVICE_STATUSCODE_NOERROR                           ((EC_T_WORD)0x0000)
@@ -329,7 +331,7 @@
 #define DEVICE_STATUSCODE_FATAL_SYNC_ERROR                  ((EC_T_WORD)0x002C)
 #define DEVICE_STATUSCODE_NO_SYNC_ERROR                     ((EC_T_WORD)0x002D)
 #define DEVICE_STATUSCODE_CYCLE_TIME_TOO_SMALL              ((EC_T_WORD)0x002E)
-                                                           #define DEVICE_STATUSCODE_INVDCSYNCCNFG                     ((EC_T_WORD)0x0030)
+#define DEVICE_STATUSCODE_INVDCSYNCCNFG                     ((EC_T_WORD)0x0030)
 #define DEVICE_STATUSCODE_INVDCLATCHCNFG                    ((EC_T_WORD)0x0031)
 #define DEVICE_STATUSCODE_PLLERROR                          ((EC_T_WORD)0x0032)
 #define DEVICE_STATUSCODE_INVDCIOERROR                      ((EC_T_WORD)0x0033)
@@ -354,6 +356,11 @@
 #define DEVICE_STATUSCODE_DEVICE_IDENTIFICATION_UPDATED     ((EC_T_WORD)0x0061)
 
 #define DEVICE_STATUSCODE_MODULE_ID_LIST_NOT_MATCH          ((EC_T_WORD)0x0070)
+
+#define DEVICE_STATUSCODE_SUPPLY_VOLTAGE_TOO_LOW            ((EC_T_WORD)0x0080)
+#define DEVICE_STATUSCODE_SUPPLY_VOLTAGE_TOO_HIGH           ((EC_T_WORD)0x0081)
+#define DEVICE_STATUSCODE_TEMPERATURE_TOO_LOW               ((EC_T_WORD)0x0082)
+#define DEVICE_STATUSCODE_TEMPERATURE_TOO_HIGH              ((EC_T_WORD)0x0083)
 
 #define DEVICE_STATUSCODE_APPLICATION_CONTROLLER_AVAILABLE  ((EC_T_WORD)0x00F0)
 

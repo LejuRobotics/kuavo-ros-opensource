@@ -1170,17 +1170,17 @@ EC_T_DWORD CEmNotification::emRasNotify(
 
     switch (dwCode)
     {
-    case ECMASTERRAS_NOTIFY_CONNECTION:         /* GENERIC RAS | 1 */
+    case EC_RAS_NOTIFY_CONNECTION:         /* GENERIC RAS | 1 */
         {
-            ECMASTERRAS_PT_CONNOTIFYDESC    pConNot = EC_NULL;
-            if (sizeof(ECMASTERRAS_T_CONNOTIFYDESC) > pParms->dwInBufSize)
+            EC_PT_RAS_CONNOTIFYDESC    pConNot = EC_NULL;
+            if (sizeof(EC_T_RAS_CONNOTIFYDESC) > pParms->dwInBufSize)
             {
-                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "RAS Invalid Parameter size for ECMASTERRAS_NOTIFY_CONNECTION\n"));
+                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "RAS Invalid Parameter size for EC_RAS_NOTIFY_CONNECTION\n"));
                 dwRetVal = EC_E_INVALIDPARM;
                 goto Exit;
             }
 
-            pConNot = (ECMASTERRAS_PT_CONNOTIFYDESC)pParms->pbyInBuf;
+            pConNot = (EC_PT_RAS_CONNOTIFYDESC)pParms->pbyInBuf;
 
             if (pConNot->dwCause == EC_E_NOERROR)
             {
@@ -1199,35 +1199,35 @@ EC_T_DWORD CEmNotification::emRasNotify(
                 }
             }
         } break;
-    case ECMASTERRAS_NOTIFY_REGISTER:           /* GENERIC RAS | 2 */
+    case EC_RAS_NOTIFY_REGISTER:           /* GENERIC RAS | 2 */
         {
-            if (sizeof(ECMASTERRAS_T_REGNOTIFYDESC) > pParms->dwInBufSize)
+            if (sizeof(EC_T_RAS_REGNOTIFYDESC) > pParms->dwInBufSize)
             {
-                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "RAS Invalid Parameter size for ECMASTERRAS_NOTIFY_REGISTER\n"));
+                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "RAS Invalid Parameter size for EC_RAS_NOTIFY_REGISTER\n"));
                 dwRetVal = EC_E_INVALIDPARM;
                 goto Exit;
             }
         } break;
-    case ECMASTERRAS_NOTIFY_UNREGISTER:         /* GENERIC RAS | 3 */
+    case EC_RAS_NOTIFY_UNREGISTER:         /* GENERIC RAS | 3 */
         {
-            if (sizeof(ECMASTERRAS_T_REGNOTIFYDESC) > pParms->dwInBufSize)
+            if (sizeof(EC_T_RAS_REGNOTIFYDESC) > pParms->dwInBufSize)
             {
-                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "RAS Invalid Parameter size for ECMASTERRAS_NOTIFY_UNREGISTER\n"));
+                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "RAS Invalid Parameter size for EC_RAS_NOTIFY_UNREGISTER\n"));
                 dwRetVal = EC_E_INVALIDPARM;
                 goto Exit;
             }
         } break;
-    case ECMASTERRAS_NOTIFY_MARSHALERROR:       /* ERROR RAS | 1 */
+    case EC_RAS_NOTIFY_MARSHALERROR:       /* ERROR RAS | 1 */
         {
-            ECMASTERRAS_PT_MARSHALERRORDESC     pMarshNot = EC_NULL;
-            if (sizeof(ECMASTERRAS_T_MARSHALERRORDESC) > pParms->dwInBufSize)
+            EC_PT_RAS_MARSHALERRORDESC     pMarshNot = EC_NULL;
+            if (sizeof(EC_T_RAS_MARSHALERRORDESC) > pParms->dwInBufSize)
             {
-                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Invalid Parameter size for ECMASTERRAS_NOTIFY_MARSHALERROR\n"));
+                EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Invalid Parameter size for EC_RAS_NOTIFY_MARSHALERROR\n"));
                 dwRetVal = EC_E_INVALIDPARM;
                 goto Exit;
             }
 
-            pMarshNot = (ECMASTERRAS_PT_MARSHALERRORDESC)pParms->pbyInBuf;
+            pMarshNot = (EC_PT_RAS_MARSHALERRORDESC)pParms->pbyInBuf;
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Marshaling error! Cookie: 0x%lx\n", pMarshNot->dwCookie));
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Command: 0x%lx, Cause: %s (0x%lx)\n",
                 pMarshNot->dwCommandCode,
@@ -1235,37 +1235,37 @@ EC_T_DWORD CEmNotification::emRasNotify(
                 pMarshNot->dwCause));
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Protocol Header: 0x%lx\n", pMarshNot->dwLenStatCmd));
         } break;
-    case ECMASTERRAS_NOTIFY_ACKERROR:           /* ERROR RAS | 2 */
+    case EC_RAS_NOTIFY_ACKERROR:           /* ERROR RAS | 2 */
         {
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Acknowledge error! Error: %s (0x%lx)\n", GetText(EC_GETDWORD(pParms->pbyInBuf)), EC_GETDWORD(pParms->pbyInBuf)));
         } break;
-    case ECMASTERRAS_NOTIFY_NONOTIFYMEMORY:     /* ERROR RAS | 3 */
+    case EC_RAS_NOTIFY_NONOTIFYMEMORY:     /* ERROR RAS | 3 */
         {
-            ECMASTERRAS_T_NONOTIFYMEMORYDESC NoNotifyMemoryDesc;
-            ECMASTERRAS_PT_NONOTIFYMEMORYDESC pNoNotifyMemoryDescSerialized = (ECMASTERRAS_PT_NONOTIFYMEMORYDESC)pParms->pbyInBuf;
-            OsDbgAssert(pParms->dwInBufSize >= sizeof(ECMASTERRAS_T_NONOTIFYMEMORYDESC));
+            EC_T_RAS_NONOTIFYMEMORYDESC NoNotifyMemoryDesc;
+            EC_PT_RAS_NONOTIFYMEMORYDESC pNoNotifyMemoryDescSerialized = (EC_PT_RAS_NONOTIFYMEMORYDESC)pParms->pbyInBuf;
+            OsDbgAssert(pParms->dwInBufSize >= sizeof(EC_T_RAS_NONOTIFYMEMORYDESC));
             NoNotifyMemoryDesc.dwCookie = EC_GET_FRM_DWORD(&pNoNotifyMemoryDescSerialized->dwCookie);
             NoNotifyMemoryDesc.dwCode = EC_GET_FRM_DWORD(&pNoNotifyMemoryDescSerialized->dwCode);
 
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Out of notification memory! %s (0x%08X), cookie 0x%lx.\n",
                 GetNotifyText(NoNotifyMemoryDesc.dwCode), NoNotifyMemoryDesc.dwCode, NoNotifyMemoryDesc.dwCookie));
         } break;
-    case ECMASTERRAS_NOTIFY_STDNOTIFYMEMORYSMALL:   /* ERROR RAS | 4 */
+    case EC_RAS_NOTIFY_STDNOTIFYMEMORYSMALL:   /* ERROR RAS | 4 */
         {
-            ECMASTERRAS_T_NONOTIFYMEMORYDESC NoNotifyMemoryDesc;
-            ECMASTERRAS_PT_NONOTIFYMEMORYDESC pNoNotifyMemoryDescSerialized = (ECMASTERRAS_PT_NONOTIFYMEMORYDESC)pParms->pbyInBuf;
-            OsDbgAssert(pParms->dwInBufSize >= sizeof(ECMASTERRAS_T_NONOTIFYMEMORYDESC));
+            EC_T_RAS_NONOTIFYMEMORYDESC NoNotifyMemoryDesc;
+            EC_PT_RAS_NONOTIFYMEMORYDESC pNoNotifyMemoryDescSerialized = (EC_PT_RAS_NONOTIFYMEMORYDESC)pParms->pbyInBuf;
+            OsDbgAssert(pParms->dwInBufSize >= sizeof(EC_T_RAS_NONOTIFYMEMORYDESC));
             NoNotifyMemoryDesc.dwCookie = EC_GET_FRM_DWORD(&pNoNotifyMemoryDescSerialized->dwCookie);
             NoNotifyMemoryDesc.dwCode = EC_GET_FRM_DWORD(&pNoNotifyMemoryDescSerialized->dwCode);
 
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Out of non-mailbox notification memory! %s (0x%08X), cookie 0x%lx.\n",
                 GetNotifyText(NoNotifyMemoryDesc.dwCode), NoNotifyMemoryDesc.dwCode, NoNotifyMemoryDesc.dwCookie));
         } break;
-    case ECMASTERRAS_NOTIFY_MBXNOTIFYMEMORYSMALL:   /* ERROR RAS | 5 */
+    case EC_RAS_NOTIFY_MBXNOTIFYMEMORYSMALL:   /* ERROR RAS | 5 */
         {
-            ECMASTERRAS_T_NONOTIFYMEMORYDESC NoNotifyMemoryDesc;
-            ECMASTERRAS_PT_NONOTIFYMEMORYDESC pNoNotifyMemoryDescSerialized = (ECMASTERRAS_PT_NONOTIFYMEMORYDESC)pParms->pbyInBuf;
-            OsDbgAssert(pParms->dwInBufSize >= sizeof(ECMASTERRAS_T_NONOTIFYMEMORYDESC));
+            EC_T_RAS_NONOTIFYMEMORYDESC NoNotifyMemoryDesc;
+            EC_PT_RAS_NONOTIFYMEMORYDESC pNoNotifyMemoryDescSerialized = (EC_PT_RAS_NONOTIFYMEMORYDESC)pParms->pbyInBuf;
+            OsDbgAssert(pParms->dwInBufSize >= sizeof(EC_T_RAS_NONOTIFYMEMORYDESC));
             NoNotifyMemoryDesc.dwCookie = EC_GET_FRM_DWORD(&pNoNotifyMemoryDescSerialized->dwCookie);
             NoNotifyMemoryDesc.dwCode = EC_GET_FRM_DWORD(&pNoNotifyMemoryDescSerialized->dwCode);
 
@@ -1424,13 +1424,8 @@ EC_T_DWORD CEmNotification::SetNotificationEnabled(EC_T_DWORD dwCode, EC_T_DWORD
 {
     EC_T_DWORD dwRetVal = EC_E_ERROR;
     EC_T_DWORD dwRes = EC_E_NOERROR;
-    EC_T_IOCTLPARMS oIoCtlParms;
     EC_T_SET_NOTIFICATION_ENABLED_PARMS oNotificationCtlParms;
-    OsMemset(&oIoCtlParms, 0, sizeof(EC_T_IOCTLPARMS));
     OsMemset(&oNotificationCtlParms, 0, sizeof(EC_T_SET_NOTIFICATION_ENABLED_PARMS));
-
-    oIoCtlParms.pbyInBuf = (EC_T_BYTE*)&oNotificationCtlParms;
-    oIoCtlParms.dwInBufSize = sizeof(EC_T_SET_NOTIFICATION_ENABLED_PARMS);
 
     oNotificationCtlParms.dwCode = dwCode;
     oNotificationCtlParms.dwEnabled = dwEnabled;
@@ -1439,7 +1434,8 @@ EC_T_DWORD CEmNotification::SetNotificationEnabled(EC_T_DWORD dwCode, EC_T_DWORD
     if (EC_NOTIFICATION_ENABLED == dwEnabled)
     {
         oNotificationCtlParms.dwClientId = 0;
-        dwRes = emIoControl(m_dwMasterInstance, EC_IOCTL_SET_NOTIFICATION_ENABLED, &oIoCtlParms);
+        dwRes = emIoCtl(m_dwMasterInstance, EC_IOCTL_SET_NOTIFICATION_ENABLED,
+                    &oNotificationCtlParms, sizeof(oNotificationCtlParms), EC_NULL, 0, EC_NULL);
         if (EC_E_NOERROR != dwRes)
         {
             EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "SetNotificationEnabled(...): %s (0x%x)", GetText(dwRes), dwRes));
@@ -1450,7 +1446,8 @@ EC_T_DWORD CEmNotification::SetNotificationEnabled(EC_T_DWORD dwCode, EC_T_DWORD
 
     /* enable notification for this instance */
     oNotificationCtlParms.dwClientId = m_dwClientID;
-    dwRes = emIoControl(m_dwMasterInstance, EC_IOCTL_SET_NOTIFICATION_ENABLED, &oIoCtlParms);
+    dwRes = emIoCtl(m_dwMasterInstance, EC_IOCTL_SET_NOTIFICATION_ENABLED,
+                    &oNotificationCtlParms, sizeof(oNotificationCtlParms), EC_NULL, 0, EC_NULL);
     if (EC_E_NOERROR != dwRes)
     {
         EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "SetNotificationEnabled(...): %s (0x%x)", GetText(dwRes), dwRes));

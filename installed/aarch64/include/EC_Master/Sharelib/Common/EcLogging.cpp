@@ -255,7 +255,7 @@ Exit:
     {
         MSG_BUFFER_DESC* pNextMsgBuf = EC_NULL;
         MSG_BUFFER_DESC* pCurrMsgBuf = EC_NULL;
-        SafeOsFree(m_pchTempbuffer);
+        OsSafeFree(m_pchTempbuffer);
         m_pchTempbuffer = EC_NULL;
 
         /* free all message buffers */
@@ -455,13 +455,13 @@ EC_T_VOID CAtEmLogging::DeinitLogging(EC_T_VOID)
 
     OsDeleteLock(m_poInsertMsgLock);
     OsDeleteLock(m_poProcessMsgLock);
-    SafeOsFree(m_pchTempbuffer);
+    OsSafeFree(m_pchTempbuffer);
     m_pchTempbuffer = EC_NULL;
 
    /* delete performance measurement buffers */
 #if (defined INCLUDE_EC_MASTER) || (defined INCLUDE_EC_MONITOR) || (defined INCLUDE_EC_SIMULATOR)
-    SafeOsFree(m_aPerfMeasVal);
-    SafeOsFree(m_aPerfMeasInfo);
+    OsSafeFree(m_aPerfMeasVal);
+    OsSafeFree(m_aPerfMeasInfo);
     m_dwPerfMeasNumOf = 0;
 #endif
 }
@@ -589,9 +589,9 @@ EC_T_BOOL CAtEmLogging::InitMsgBuffer
 #if (defined INCLUDE_FILE_LOGGING)
     pMsgBufferDesc->wLogFileIndex = 0;
     pMsgBufferDesc->wEntryCounterLimit = wRollOver;
-    OsStrncpy(pMsgBufferDesc->szMsgLogFileName, szMsgLogFileName, MAX_PATH_LEN - 1);
+    strncpy(pMsgBufferDesc->szMsgLogFileName, szMsgLogFileName, MAX_PATH_LEN - 1);
     pMsgBufferDesc->szMsgLogFileName[MAX_PATH_LEN - 1] = '\0';
-    OsStrncpy(pMsgBufferDesc->szMsgLogFileExt,  szMsgLogFileExt,  MAX_EXT_LEN - 1);
+    strncpy(pMsgBufferDesc->szMsgLogFileExt,  szMsgLogFileExt,  MAX_EXT_LEN - 1);
     pMsgBufferDesc->szMsgLogFileExt[MAX_EXT_LEN - 1] = '\0';
 
     if (0 != pMsgBufferDesc->wEntryCounterLimit )
@@ -623,7 +623,7 @@ EC_T_BOOL CAtEmLogging::InitMsgBuffer
         pMsgBufferDesc->pfMsgFile = EC_NULL;
         pMsgBufferDesc->szMsgLogFileName[0] = 0;
     }
-    OsStrncpy(pMsgBufferDesc->szLogName, szBufferName, MAX_PATH_LEN - 1);
+    strncpy(pMsgBufferDesc->szLogName, szBufferName, MAX_PATH_LEN - 1);
 #endif /* INCLUDE_FILE_LOGGING */
 
     pMsgBufferDesc->bIsInitialized = EC_TRUE;
@@ -632,8 +632,8 @@ EC_T_BOOL CAtEmLogging::InitMsgBuffer
 Exit:
     if (!bOk)
     {
-        SafeOsFree(pMsgBufferDesc->paMsg);
-        SafeOsFree(pchMsgBuffer);
+        OsSafeFree(pMsgBufferDesc->paMsg);
+        OsSafeFree(pchMsgBuffer);
     }
     return bOk;
 }
@@ -647,7 +647,7 @@ EC_T_VOID CAtEmLogging::DeinitMsgBuffer
 (MSG_BUFFER_DESC*   pMsgBufferDesc
 )
 {
-    CEcTimer oTimeout;
+    CKuavoEcTimer oTimeout;
 
     if (pMsgBufferDesc->bIsInitialized)
     {
@@ -994,8 +994,8 @@ EC_T_DWORD CAtEmLogging::PrintPerfMeas(EC_T_DWORD dwPerfMeasInstanceId0, EC_T_DW
         || (m_aData[1].dwInternalNumOf > m_dwPerfMeasNumOf) || (m_aData[1].dwAppNumOf > m_dwPerfMeasNumOf)
         || (m_aData[2].dwInternalNumOf > m_dwPerfMeasNumOf) || (m_aData[2].dwAppNumOf > m_dwPerfMeasNumOf))
     {
-        SafeOsFree(m_aPerfMeasVal);
-        SafeOsFree(m_aPerfMeasInfo);
+        OsSafeFree(m_aPerfMeasVal);
+        OsSafeFree(m_aPerfMeasInfo);
         m_dwPerfMeasNumOf = 0;
     }
 
@@ -1010,8 +1010,8 @@ EC_T_DWORD CAtEmLogging::PrintPerfMeas(EC_T_DWORD dwPerfMeasInstanceId0, EC_T_DW
 
             if ((EC_NULL == m_aPerfMeasVal) || (EC_NULL == m_aPerfMeasInfo))
             {
-                SafeOsFree(m_aPerfMeasVal);
-                SafeOsFree(m_aPerfMeasInfo);
+                OsSafeFree(m_aPerfMeasVal);
+                OsSafeFree(m_aPerfMeasInfo);
                 m_dwPerfMeasNumOf = 0;
 
                 dwRetVal = EC_E_NOMEMORY;
@@ -1173,7 +1173,7 @@ static EC_T_VOID StripStr(EC_T_CHAR* szDst, EC_T_CHAR* szSrc)
         dwEndPos--;
     }
 
-    OsStrncpy(szDst, szSrc + dwStartPos, dwEndPos - dwStartPos);
+    strncpy(szDst, szSrc + dwStartPos, dwEndPos - dwStartPos);
 }
 #endif /* !INCLUDE_EC_SIMULATOR  && !EC_EAP */
 
@@ -1372,16 +1372,16 @@ EC_T_DWORD CAtEmLogging::PrintHistogramAsCsv(EC_T_DWORD dwInstanceId, EC_T_VOID*
 
     dwRetVal = EC_E_NOERROR;
 Exit:
-    SafeOsFree(aPerfMeasInfo);
+    OsSafeFree(aPerfMeasInfo);
     if (EC_NULL != aHistogram)
     {
         for (dwMeasIdx = 0; dwMeasIdx < (dwMeasNum + dwMeasAppNum); dwMeasIdx++)
         {
-            SafeOsFree(aHistogram[dwMeasIdx].aBins);
+            OsSafeFree(aHistogram[dwMeasIdx].aBins);
         }
     }
-    SafeOsFree(aHistogram);
-    SafeOsFree(szLineBuf);
+    OsSafeFree(aHistogram);
+    OsSafeFree(szLineBuf);
 
     return dwRetVal;
 #else
@@ -1696,7 +1696,7 @@ EC_T_DWORD CAtEmLogging::SetLogDir(EC_T_CHAR* szLogDir)
     {
         return EC_E_NOMEMORY;
     }
-    OsStrncpy(m_pchLogDir, szLogDir, MAX_PATH_LEN - 1);
+    strncpy(m_pchLogDir, szLogDir, MAX_PATH_LEN - 1);
     m_pchLogDir[MAX_PATH_LEN - 1] = '\0';
 
     return EC_E_NOERROR;

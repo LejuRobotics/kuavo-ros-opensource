@@ -361,8 +361,8 @@ private:
     EC_T_VOID*              m_poProcessMsgLock;             /* lock object for processing messages */
     EC_T_BOOL               m_bDbgMsgHookEnable;
 
-    CEcTimer                m_oMsgTimeout;
-    CEcTimer                m_oSettlingTimeout;
+    CKuavoEcTimer                m_oMsgTimeout;
+    CKuavoEcTimer                m_oSettlingTimeout;
     EC_T_DWORD              m_dwNumMsgsSinceMsrmt;
     EC_T_BOOL               m_bSettling;
 
@@ -602,7 +602,7 @@ public:
         m_RotationDesc.qwMaxFileSize = 0;
         m_szFileName = EC_NULL;
     }
-    virtual ~CPcapFileWriter() { SafeOsFree(m_szFileName); }
+    virtual ~CPcapFileWriter() { OsSafeFree(m_szFileName); }
 
 private:
     EC_T_DWORD OpenPrivate(const EC_T_CHAR* szFilename)
@@ -647,7 +647,7 @@ public:
             dwRetVal = EC_E_NOMEMORY;
             goto Exit;
         }
-        OsStrcpy(m_szFileName, szFilename);
+        strcpy(m_szFileName, szFilename);
         OsSnprintf(&m_szFileName[dwFileNameLen], (EC_T_DWORD)OsStrlen(".00000.pcap") + 1, ".%05d.pcap", m_RotationDesc.dwFileCnt);
 
         dwRes = OpenPrivate(m_szFileName);
@@ -734,7 +734,7 @@ protected:
         EC_T_DWORD   dwMaxFrameCnt;
         EC_T_UINT64  qwFileSize;
         EC_T_UINT64  qwMaxFileSize;
-        CEcTimer     oTimer;
+        CKuavoEcTimer     oTimer;
     } m_RotationDesc;
 
     EC_T_CHAR*       m_szFileName;
@@ -751,7 +751,7 @@ typedef struct
     EC_T_BYTE abyData[ETHERNET_MAX_FRAMEBUF_LEN - sizeof(EC_T_LINK_FRAME_BUF_ENTRY_FRAME_DESC)];
 } EC_T_LINK_FRAME_BUF_ENTRY;
 
-class CPcapFileBufferedWriter : public CPcapFileWriter, public CEcThread
+class CPcapFileBufferedWriter : public CPcapFileWriter, public CKuavoEcThread
 {
 public:
     CPcapFileBufferedWriter(EC_T_DWORD dwBufCnt, EC_T_CPUSET cpuAffinity /* EC_CPUSET_ZERO */, EC_T_DWORD dwPrio /* LOG_THREAD_PRIO */, EC_T_DWORD dwStackSize /* DEFAULT_LOG_STACK_SIZE */)

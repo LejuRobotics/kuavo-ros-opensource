@@ -17,7 +17,7 @@
 #include "EcError.h"
 
 /*-CLASS FUNCTIONS-----------------------------------------------------------*/
-CEcThread::CEcThread()
+CKuavoEcThread::CKuavoEcThread()
     : m_pfThreadEntry(EC_NULL)
     , m_pvParams(EC_NULL)
     , m_hThread(EC_NULL)
@@ -28,19 +28,19 @@ CEcThread::CEcThread()
     OsMemset(&m_oLogParms, 0, sizeof(EC_T_LOG_PARMS));
 }
 
-CEcThread::~CEcThread()
+CKuavoEcThread::~CKuavoEcThread()
 {
     /* thread should be stopped */
     OsDbgAssert(isStopped());
-    SafeOsFree(m_pszName);
+    OsSafeFree(m_pszName);
     OsDbgAssert(m_hThread == EC_NULL);
 }
 
-EC_T_DWORD CEcThread::Start(EC_T_LOG_PARMS* pLogParms, EC_PF_THREADENTRY pfThreadEntry, EC_T_VOID* pvParams, const EC_T_CHAR* szThreadName,
+EC_T_DWORD CKuavoEcThread::Start(EC_T_LOG_PARMS* pLogParms, EC_PF_THREADENTRY pfThreadEntry, EC_T_VOID* pvParams, const EC_T_CHAR* szThreadName,
     EC_T_CPUSET cpuIstCpuAffinityMask, EC_T_DWORD dwPrio, EC_T_DWORD dwStackSize, EC_T_DWORD dwTimeout)
 {
     EC_T_DWORD dwRetVal = EC_E_NOERROR;
-    CEcTimer startTimeout;
+    CKuavoEcTimer startTimeout;
 
     if (EC_NULL == pLogParms)
     {
@@ -61,7 +61,7 @@ EC_T_DWORD CEcThread::Start(EC_T_LOG_PARMS* pLogParms, EC_PF_THREADENTRY pfThrea
     m_pszName = (EC_T_CHAR*)OsMalloc(OsStrlen(szThreadName) + 1);
     if (EC_NULL != m_pszName)
     {
-        OsStrcpy(m_pszName, szThreadName);
+        strcpy(m_pszName, szThreadName);
     }
 
     m_bThreadStop = EC_FALSE;
@@ -93,11 +93,11 @@ Exit:
     return dwRetVal;
 }
 
-EC_T_DWORD CEcThread::Stop(EC_T_DWORD dwTimeout)
+EC_T_DWORD CKuavoEcThread::Stop(EC_T_DWORD dwTimeout)
 {
     EC_T_DWORD dwRetVal = EC_E_NOERROR;
-    CEcTimer stopTimeout;
-    CEcTimer stopTimeoutWarnTimout(20000);
+    CKuavoEcTimer stopTimeout;
+    CKuavoEcTimer stopTimeoutWarnTimout(20000);
 
     if (m_hThread == EC_NULL)
     {
@@ -134,14 +134,14 @@ EC_T_DWORD CEcThread::Stop(EC_T_DWORD dwTimeout)
     }
     m_hThread = EC_NULL;
 
-    SafeOsFree(m_pszName);
+    OsSafeFree(m_pszName);
 
     return dwRetVal;
 }
 
-EC_T_DWORD CEcThread::threadProc(EC_T_PVOID pvParams)
+EC_T_DWORD CKuavoEcThread::threadProc(EC_T_PVOID pvParams)
 {
-    CEcThread* pThis = (CEcThread*)pvParams;
+    CKuavoEcThread* pThis = (CKuavoEcThread*)pvParams;
     pThis->m_bThreadReady = EC_TRUE;
 
     while (!pThis->m_bThreadStop)
@@ -155,7 +155,7 @@ EC_T_DWORD CEcThread::threadProc(EC_T_PVOID pvParams)
     return 0;
 }
 
-EC_T_VOID CEcThread::setThreadProc(EC_PF_THREADENTRY pfThreadEntry, EC_T_VOID* pvParams)
+EC_T_VOID CKuavoEcThread::setThreadProc(EC_PF_THREADENTRY pfThreadEntry, EC_T_VOID* pvParams)
 {
     m_pfThreadEntry = pfThreadEntry;
     m_pvParams = pvParams;

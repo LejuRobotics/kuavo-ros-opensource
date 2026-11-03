@@ -1,8 +1,7 @@
-/*-----------------------------------------------------------------------------
- * EcFiFo.h                 header file
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description
+/** ---------------------------------------------------------------------------
+ * \file
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECFIFO
@@ -21,25 +20,17 @@ template <class VALUE>
 class CFiFoList
 {
 protected:
-    VALUE*          m_pFiFoEntrys;
+    VALUE*                   m_pFiFoEntrys;
     volatile EC_PT_FIFO_DESC m_pDesc;
-    EC_T_VOID*      m_poLock;
-#ifdef DEBUGTRACE
-    EC_T_DWORD      m_dwMemTrace;
-#endif
+    EC_T_VOID*               m_poLock;
 
 public:
-    CFiFoList(EC_PT_FIFO_DESC pDesc, VALUE* pFiFoEntrys, EC_T_VOID* poLock, const EC_T_CHAR* szName, EC_T_DWORD dwMemTrace = 0)
+    CFiFoList(EC_PT_FIFO_DESC pDesc, VALUE* pFiFoEntrys, EC_T_VOID* poLock, const EC_T_CHAR* szName)
     {
         EC_UNREFPARM(szName);
         m_pDesc         = pDesc;
         m_pFiFoEntrys   = pFiFoEntrys;
         m_poLock        = poLock;
-#ifdef DEBUGTRACE
-        m_dwMemTrace    = dwMemTrace;
-#else
-        EC_UNREFPARM(dwMemTrace);
-#endif
     }
     CFiFoList(const CFiFoList&) {m_pFiFoEntrys = m_poLock = EC_NULL; OsDbgAssert(EC_FALSE);} /* objects are not copied */
     virtual ~CFiFoList() {}
@@ -149,6 +140,7 @@ public:
             return EC_FALSE;
         }
         m_pFiFoEntrys[pDesc->dwLast] = newValue;
+        OsMemoryBarrier();
         pDesc->dwLast = (pDesc->dwLast + 1) % pDesc->dwBufSize;
 
         return EC_TRUE;
@@ -198,6 +190,7 @@ public:
             return EC_FALSE;
         }
         rValue = m_pFiFoEntrys[pDesc->dwFirst];
+        OsMemoryBarrier();
         pDesc->dwFirst = (pDesc->dwFirst + 1) % pDesc->dwBufSize;
 
         return EC_TRUE;
@@ -240,6 +233,7 @@ public:
         {
             return EC_FALSE;
         }
+        OsMemoryBarrier();
         rValue = m_pFiFoEntrys[pDesc->dwFirst];
 
         return EC_TRUE;
@@ -251,26 +245,45 @@ template <class VALUE>
 class CFiFoListDyn : public CFiFoList<VALUE>
 {
 public:
-
-    CFiFoListDyn(EC_T_DWORD dwSize, EC_T_VOID* poLock, const EC_T_CHAR* szName, EC_T_DWORD dwMemTrace = 0)
-        : CFiFoList<VALUE>(EC_NULL, EC_NULL, poLock, szName, dwMemTrace)
+    CFiFoListDyn(EC_T_DWORD dwSize, EC_T_VOID* poLock, const EC_T_CHAR* szName, const struct _EC_T_LOG_PARMS* poLogParms = EC_NULL, EC_T_DWORD dwMemTrace = 0, struct _EC_T_MEMORY_LOGGER* poMemLog = EC_NULL)
+        : CFiFoList<VALUE>(EC_NULL, EC_NULL, poLock, szName), m_poLogParms((struct _EC_T_LOG_PARMS*)poLogParms), m_dwMemTrace(dwMemTrace), m_poMemLog(poMemLog)
     {
         EC_UNREFPARM(dwSize);
     }
     CFiFoListDyn(const CFiFoListDyn&) { OsDbgAssert(EC_FALSE); } /* objects are not copied */
     virtual ~CFiFoListDyn()
     {
-        SafeDeleteArray(CFiFoList<VALUE>::m_pFiFoEntrys);
-        SafeOsFree(CFiFoList<VALUE>::m_pDesc);
+        FreeInstance();
     }
 
     /********************************************************************************/
     /**
-     * \brief initialize the instance.
-     *
-     * \return
+     * \brief Free memory
      */
-    virtual EC_T_DWORD InitInstance(EC_T_DWORD dwSize) // TODO: EC_TRACE_ADDMEM, EC_TRACE_SUBMEM
+    virtual EC_T_VOID FreeInstance(EC_T_VOID)
+    {
+#if (defined EC_TRACE_SUBMEM) && (defined EC_MASTER) && (defined EC_NAMESPACE)
+        if (EC_NULL != CFiFoList<VALUE>::m_pFiFoEntrys)
+        {
+            EC_TRACE_SUBMEM(m_dwMemTrace, "CFiFoListDyn::~CFiFoListDyn CFiFoList<VALUE>::m_pFiFoEntrys", CFiFoList<VALUE>::m_pFiFoEntrys, CFiFoList<VALUE>::m_pDesc->dwBufSize * sizeof(VALUE)); 
+        }
+        if (EC_NULL != CFiFoList<VALUE>::m_pDesc)
+        {
+            EC_TRACE_SUBMEM(m_dwMemTrace, "CFiFoListDyn::~CFiFoListDyn CFiFoList<VALUE>::m_pDesc", CFiFoList<VALUE>::m_pDesc, sizeof(EC_T_FIFO_DESC)); 
+        }
+#endif
+
+        SafeDeleteArray(CFiFoList<VALUE>::m_pFiFoEntrys);
+        OsSafeFree(CFiFoList<VALUE>::m_pDesc);
+    }
+
+    /********************************************************************************/
+    /**
+     * \brief Allocate memory
+     *
+     * \return #EC_E_NOERROR or error code
+     */
+    virtual EC_T_DWORD InitInstance(EC_T_DWORD dwSize)
     {
         EC_PT_FIFO_DESC pDesc = EC_NULL;
         VALUE* pFiFoEntrys = EC_NULL;
@@ -298,8 +311,14 @@ public:
             goto Exit;
         }
 
+        /* no error */
         CFiFoList<VALUE>::m_pDesc = pDesc;
         CFiFoList<VALUE>::m_pFiFoEntrys = pFiFoEntrys;
+
+#if (defined EC_TRACE_ADDMEM) && (defined EC_MASTER) && (defined EC_NAMESPACE)
+        EC_TRACE_ADDMEM(m_dwMemTrace, "CFiFoListDyn::InitInstance m_pDesc", pDesc, sizeof(EC_T_FIFO_DESC)); 
+        EC_TRACE_ADDMEM(m_dwMemTrace, "CFiFoListDyn::InitInstance m_pFiFoEntrys", pFiFoEntrys, dwBufSize * sizeof(VALUE)); 
+#endif
 
         OsMemset(CFiFoList<VALUE>::m_pDesc, 0, sizeof(EC_T_FIFO_DESC));
         OsMemset(CFiFoList<VALUE>::m_pFiFoEntrys, 0, dwBufSize * sizeof(VALUE));
@@ -311,11 +330,20 @@ public:
         if (EC_E_NOERROR != dwRetVal)
         {
             SafeDeleteArray(pFiFoEntrys);
-            SafeOsFree(pDesc);
+            OsSafeFree(pDesc);
         }
 
         return dwRetVal;
     }
+
+    /* Logging */
+    struct _EC_T_LOG_PARMS*     m_poLogParms;
+    EC_INLINESTART struct _EC_T_LOG_PARMS* GetLogParms() { return m_poLogParms; } EC_INLINESTOP
+
+    /* Memory Logger */
+    EC_T_DWORD                  m_dwMemTrace;
+    struct _EC_T_MEMORY_LOGGER* m_poMemLog;
+    EC_INLINESTART struct _EC_T_MEMORY_LOGGER* GetMemLog() { return m_poMemLog; } EC_INLINESTOP
 };
 
 #endif /* INC_ECFIFO */

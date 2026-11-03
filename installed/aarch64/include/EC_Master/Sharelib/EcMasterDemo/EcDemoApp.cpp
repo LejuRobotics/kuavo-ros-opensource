@@ -7,6 +7,7 @@
 
 /*-INCLUDES------------------------------------------------------------------*/
 #include "EcDemoApp.h"
+#include "EcSdkTiming.h"
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -2203,9 +2204,9 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
   EC_T_REGISTERRESULTS RegisterClientResults;
   OsMemset(&RegisterClientResults, 0, sizeof(EC_T_REGISTERRESULTS));
 
-  CEcTimer oAppDuration;
+  CKuavoEcTimer oAppDuration;
   EC_T_BOOL bFirstDcmStatus = EC_TRUE;
-  CEcTimer oDcmStatusTimer;
+  CKuavoEcTimer oDcmStatusTimer;
 
 #if (defined INCLUDE_RAS_SERVER)
   EC_T_VOID *pvRasServerHandle = EC_NULL;
@@ -2213,6 +2214,14 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
 
 #if (defined INCLUDE_PCAP_RECORDER)
   CPcapRecorder *pPcapRecorder = EC_NULL;
+#endif
+
+#if (EC_ARCH == EC_ARCH_ARM64)
+  /* Preserve the legacy no-key startup path; the SDK enforces its evaluation limit. */
+  if (0 == OsStrlen(pAppParms->szLicenseKey))
+  {
+    EcLogMsg(EC_LOG_LEVEL_WARNING, (pEcLogContext, EC_LOG_LEVEL_WARNING, "ARM EC-Master: no license key supplied; continuing in SDK time-limited mode. The runtime limit is enforced by the SDK.\n"));
+  }
 #endif
 
   /* check link layer parameter */
@@ -2260,11 +2269,11 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
   /* start RAS server if enabled */
   if (pAppParms->bStartRasServer)
   {
-    ECMASTERRAS_T_SRVPARMS oRemoteApiConfig;
+    EC_T_RAS_SERVER_PARMS oRemoteApiConfig;
 
-    OsMemset(&oRemoteApiConfig, 0, sizeof(ECMASTERRAS_T_SRVPARMS));
-    oRemoteApiConfig.dwSignature = ECMASTERRASSERVER_SIGNATURE;
-    oRemoteApiConfig.dwSize = sizeof(ECMASTERRAS_T_SRVPARMS);
+    OsMemset(&oRemoteApiConfig, 0, sizeof(EC_T_RAS_SERVER_PARMS));
+    oRemoteApiConfig.dwSignature = EC_RAS_SERVER_SIGNATURE;
+    oRemoteApiConfig.dwSize = sizeof(EC_T_RAS_SERVER_PARMS);
     oRemoteApiConfig.oAddr.dwAddr = 0; /* INADDR_ANY */
     oRemoteApiConfig.wPort = pAppParms->wRasServerPort;
     oRemoteApiConfig.dwCycleTime = ECMASTERRAS_CYCLE_TIME;
@@ -2305,10 +2314,18 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
     oInitParms.pOsParms = &pAppParms->Os;
     oInitParms.pLinkParms = pAppParms->apLinkParms[0];
     oInitParms.pLinkParmsRed = pAppParms->apLinkParms[1];
-    oInitParms.dwBusCycleTimeUsec = pAppParms->dwBusCycleTimeUsec;
+    /* Keep application timing in microseconds; EC-Master 3.3 uses nanoseconds. */
+    EC_T_DWORD cycleNsec = 0; // Do not bind a reference to the packed SDK member.
+    if (!EcBusCycleUsecToNsec(pAppParms->dwBusCycleTimeUsec, cycleNsec))
+    {
+      dwRetVal = EC_E_INVALIDPARM;
+      EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Invalid bus cycle time (microseconds)\n"));
+      goto Exit;
+    }
+    oInitParms.dwBusCycleTimeNsec = cycleNsec;
     oInitParms.dwMaxBusSlaves = MASTER_CFG_ECAT_MAX_BUS_SLAVES;
     oInitParms.dwMaxAcycFramesQueued = MASTER_CFG_MAX_ACYC_FRAMES_QUEUED;
-    if (oInitParms.dwBusCycleTimeUsec >= 1000)
+    if (pAppParms->dwBusCycleTimeUsec >= 1000)
     {
       oInitParms.dwMaxAcycBytesPerCycle = MASTER_CFG_MAX_ACYC_BYTES_PER_CYC;
     }
@@ -2430,7 +2447,7 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
 
   /* create cyclic task to trigger jobs */
   {
-    CEcTimer oTimeout(2000);
+    CKuavoEcTimer oTimeout(2000);
 
     pAppContext->bJobTaskRunning = EC_FALSE;
     pAppContext->bJobTaskShutdown = EC_FALSE;
@@ -2836,7 +2853,7 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
   }
   bRun = EC_TRUE;
   {
-    CEcTimer oPerfMeasPrintTimer;
+    CKuavoEcTimer oPerfMeasPrintTimer;
 
     if (pAppParms->bPerfMeasShowCyclic)
     {
@@ -3025,7 +3042,7 @@ Exit:
 
   /* shutdown JobTask */
   {
-    CEcTimer oTimeout(2000);
+    CKuavoEcTimer oTimeout(2000);
     pAppContext->bJobTaskShutdown = EC_TRUE;
     while (pAppContext->bJobTaskRunning && !oTimeout.IsElapsed())
     {
@@ -3047,8 +3064,8 @@ Exit:
   SafeDelete(pAppContext->pNotificationHandler);
   if (EC_NULL != pAppContext->pMyAppDesc)
   {
-    SafeOsFree(pAppContext->pMyAppDesc->pbyFlashBuf);
-    SafeOsFree(pAppContext->pMyAppDesc);
+    OsSafeFree(pAppContext->pMyAppDesc->pbyFlashBuf);
+    OsSafeFree(pAppContext->pMyAppDesc);
   }
 
   return dwRetVal;

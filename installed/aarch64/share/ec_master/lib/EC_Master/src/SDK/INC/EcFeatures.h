@@ -1,8 +1,8 @@
-/*-----------------------------------------------------------------------------
- * EcFeatures.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Paul Bussmann
- * Description              EC-Master / EC-Simulator feature selection
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       EC-Master / EC-Simulator feature selection
+ * \author      Paul Bussmann
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECFEATURES
@@ -12,6 +12,15 @@
 /* bit mask for supported features (used for license check) */
 #define EC_FEATURES_MASTER_MASK     0x00000001
 #define EC_FEATURES_RED_MASK        0x00000002
+
+
+#ifdef  EC_BUILD_RFS_CUSTOM1
+#define EC_BUILD_RFS3
+/** \defgroup EC_BUILD_RFS_CUSTOM1:
+@{*/
+#define INCLUDE_GEN_OP_ENI
+/**@}*/
+#endif
 
 #ifdef  EC_BUILD_RFS5
 #define EC_BUILD_RFS4
@@ -34,7 +43,6 @@
 #define EXCLUDE_CYCFRAMES_MONITORING
 #define EXCLUDE_LINE_CROSSED_DETECTION
 #define EXCLUDE_MAILBOX_STATISTICS
-#define EXCLUDE_PERF_MEAS
 #define EXCLUDE_SLAVE_STATISTICS
 #define EXCLUDE_WKCSTATE
 /**@}*/
@@ -224,11 +232,9 @@
 #define INCLUDE_JUNCTION_REDUNDANCY         /* Junction Redundancy */
 #endif
 
-#if 0 /* features disabled by default */
-#ifndef VLAN_FRAME_SUPPORT
-#define VLAN_FRAME_SUPPORT                  /* VLAN frame support */
-#endif
-#endif /* features disabled by default */
+/* VLAN_FRAME_SUPPORT removed in V3.2.1.05 */
+
+/* features disabled by default */
 
 #ifndef EXCLUDE_PERF_MEAS
 #define INCLUDE_PERF_MEAS
@@ -255,7 +261,7 @@
 #if 0
 #define INCLUDE_PASS_THROUGH_SERVER
 #endif
-#if (!defined INCLUDE_MASTER_RED) && (!defined EXCLUDE_MASTER_RED) && ((defined EC_VERSION_WINDOWS) || (defined EC_VERSION_LINUX)) && ((EC_ARCH_X86 == EC_ARCH) || (EC_ARCH_X64 == EC_ARCH) || (EC_ARCH_ARM == EC_ARCH))
+#if (!defined INCLUDE_MASTER_RED) && (!defined EXCLUDE_MASTER_RED) && ((EC_OS == EC_OS_LINUX) || (EC_OS == EC_OS_QNX) || (EC_OS == EC_OS_WINDOWS))
 #define INCLUDE_MASTER_RED                  /* Master Redundancy */
 #endif
 #ifndef EXCLUDE_DC_SUPPORT
@@ -298,11 +304,13 @@
 /*-EC-SIMULATOR--------------------------------------------------------------*/
 
 /* EC-Simulator HiL / SiL */
+#if (defined EC_SIMULATOR) || (defined INCLUDE_EC_SIMULATOR)
 #ifndef EXCLUDE_EC_SIMULATOR_HIL            /* EC-Simulator HiL */
 #define INCLUDE_EC_SIMULATOR_HIL
 #endif
 #ifndef EXCLUDE_EC_SIMULATOR_SIL            /* EC-Simulator SiL */
 #define INCLUDE_EC_SIMULATOR_SIL
+#endif
 #endif
 
 #endif /* INC_ECFEATURES */

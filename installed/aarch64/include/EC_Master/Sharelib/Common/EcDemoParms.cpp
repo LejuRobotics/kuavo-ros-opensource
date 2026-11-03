@@ -7,6 +7,7 @@
 
 /*-INCLUDES------------------------------------------------------------------*/
 #include "EcDemoApp.h"
+#include "EcSdkTiming.h"
 
 /*-GLOBAL VARIABLES----------------------------------------------------------*/
 volatile EC_T_BOOL bRun = EC_TRUE;
@@ -62,9 +63,9 @@ EC_T_VOID FreeAppParms(T_EC_DEMO_APP_CONTEXT* pAppContext, T_EC_DEMO_APP_PARMS* 
     EC_UNREFPARM(pAppContext);
 
     /* free app parameters */
-    SafeOsFree(pAppParms->NotifyParms.pbyInBuf);
-    SafeOsFree(pAppParms->NotifyParms.pbyOutBuf);
-    SafeOsFree(pAppParms->NotifyParms.pdwNumOutData);
+    OsSafeFree(pAppParms->NotifyParms.pbyInBuf);
+    OsSafeFree(pAppParms->NotifyParms.pbyOutBuf);
+    OsSafeFree(pAppParms->NotifyParms.pdwNumOutData);
 }
 
 EC_T_VOID SetLogLevels(T_EC_DEMO_APP_PARMS* pAppParms)
@@ -125,9 +126,9 @@ EC_T_DWORD SetAppParmsFromCommandLine(T_EC_DEMO_APP_CONTEXT* pAppContext, const 
     EC_T_CHAR  szCommandLineTmp[COMMAND_LINE_BUFFER_LENGTH];
     EC_T_BOOL  bNextInstanceDetected = EC_FALSE;
 
-    OsStrncpy(pAppParms->pszCfgFilePath, DEMO_CFG_DEFAULT_FILENAME, 256);
+    strncpy(pAppParms->pszCfgFilePath, DEMO_CFG_DEFAULT_FILENAME, 256);
 
-    OsStrncpy(szCommandLineTmp, szCommandLine, COMMAND_LINE_BUFFER_LENGTH - 1);
+    strncpy(szCommandLineTmp, szCommandLine, COMMAND_LINE_BUFFER_LENGTH - 1);
 
     for (ptcWord = OsStrtok(szCommandLineTmp, " "); ptcWord != EC_NULL;)
     {
@@ -180,7 +181,7 @@ EC_T_DWORD SetAppParmsFromCommandLine(T_EC_DEMO_APP_CONTEXT* pAppContext, const 
                 goto Exit;
             }
             OsSnprintf(szCfgFilename, sizeof(szCfgFilename) - 1, "%s", ptcWord);
-            OsStrncpy(pAppParms->pszCfgFilePath, szCfgFilename, 256);
+            strncpy(pAppParms->pszCfgFilePath, szCfgFilename, 256);
         }
 #endif
         else if (0 == OsStricmp(ptcWord, "-a"))
@@ -215,7 +216,7 @@ EC_T_DWORD SetAppParmsFromCommandLine(T_EC_DEMO_APP_CONTEXT* pAppContext, const 
             ptcWord = OsStrtok(EC_NULL, " ");
             if ((ptcWord == NULL) || (0 == OsStrncmp(ptcWord, "-", 1)) || (OsStrncmp(ptcWord, "@", 1) == 0))
             {
-                pAppParms->dwRasAccessLevel = ECMASTERRAS_ACCESS_LEVEL_ALLOW_ALL;
+                pAppParms->dwRasAccessLevel = EC_RAS_ACCESS_LEVEL_ALLOW_ALL;
 
                 /* optional sub parameter not found, use the current word for the next parameter */
                 bGetNextWord = EC_FALSE;
@@ -832,6 +833,14 @@ EC_T_DWORD SetAppParmsFromCommandLine(T_EC_DEMO_APP_CONTEXT* pAppContext, const 
         bGetNextWord = EC_TRUE;
     }
 
+    {
+        EC_T_DWORD cycleNsec = 0;
+        if (!EcBusCycleUsecToNsec(pAppParms->dwBusCycleTimeUsec, cycleNsec))
+        {
+            dwRetVal = EC_E_INVALIDPARM;
+            goto Exit;
+        }
+    }
     pAppParms->nVerbose = nVerbose;
 
     SetLogLevels(pAppParms);
@@ -847,7 +856,7 @@ EC_T_DWORD SetAppParmsFromCommandLine(T_EC_DEMO_APP_CONTEXT* pAppContext, const 
 Exit:
     if ((EC_E_NOERROR != dwRetVal) && (EC_E_BUSY != dwRetVal))
     {
-        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Full command line: %s\n", szCommandLine));
+        EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Command-line contents omitted to protect license keys\n"));
         EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "Failed to parse command line parameters\n"));
     }
     return dwRetVal;
@@ -878,7 +887,7 @@ EC_T_VOID ShowSyntaxCommon(T_EC_DEMO_APP_CONTEXT* pAppContext)
     EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "     key             OEM key\n"));
 #if (defined INCLUDE_RAS_SERVER)
     EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "   -sp               Start RAS server\n"));
-    EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "    [port]           RAS server port (default = %d)\n", ECMASTERRAS_DEFAULT_PORT));
+    EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "    [port]           RAS server port (default = %d)\n", EC_RAS_DEFAULT_PORT));
 #endif
 #if (defined INCLUDE_EC_SIMULATOR_HIL)
     EcLogMsg(EC_LOG_LEVEL_ERROR, (pEcLogContext, EC_LOG_LEVEL_ERROR, "   -disablepdimage   Disable Process Data Image (Master ENI / Simulator ENI mismatch support)\n"));
