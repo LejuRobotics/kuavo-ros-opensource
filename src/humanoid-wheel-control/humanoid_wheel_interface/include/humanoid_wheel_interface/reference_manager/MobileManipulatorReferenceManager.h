@@ -6,7 +6,10 @@
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float32.h>
 #include <atomic>
+#include <mutex>
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Int8.h>
 #include <std_msgs/Int8MultiArray.h>
@@ -22,11 +25,13 @@
 #include <kuavo_msgs/eePoseReachError.h>
 #include <kuavo_msgs/sensorsData.h>
 #include <leju_mobile_base_msgs/BaseCmdVelStatus.h>
+#include <kuavo_msgs/ChassisTakeoverState.h>
 #include <std_srvs/SetBool.h>
 #include <std_srvs/Trigger.h>
 
 #include <ocs2_oc/synchronized_module/ReferenceManager.h>
 #include "humanoid_wheel_interface/ManipulatorModelInfo.h"
+#include "humanoid_wheel_interface/motion_planner/TorsoYawTarget.h"
 #include "ocs2_robotic_tools/common/RotationTransforms.h"
 #include "ocs2_pinocchio_interface/PinocchioInterface.h"
 #include "humanoid_interface/common/TopicLogger.h"
@@ -196,6 +201,9 @@ public:
   // 每周期计算肩部收紧 α: H_joint(肘腕限位余量) × H_task(参考末端速度) → σ 合成 → 限速+二阶低通, 返回滤波后 α
   scalar_t computeShoulderTightAlpha(int armIdx, scalar_t initTime, const vector_t& initState);
 
+  // 底盘接管状态 (/odom/chassis_takeover_state): true 表示外部拥有底盘控制权
+  bool isChassisTakeover() const { return chassisTakeoverActive_.load(std::memory_order_acquire); }
+
   // 末端跟踪优先级调整的相关函数
   const bool getIsFocusEeStatus() const { return isFocusEe_; }
   void setIsFocusEeStatus(bool flag) { isFocusEe_ = flag; }
@@ -269,7 +277,12 @@ protected:
   void resetTorsoControlPoseWithRuckig(double initTime, const vector_t& initState, bool isServiceReset);
   // torso vel/delta: integrate onto cmdTorsoPose_ (sole open-loop final target);
   // Ruckig only tracks it. dt = clamp(ΔinitTime) for sim/real period variation.
-  void applyTorsoVelDeltaCommands(scalar_t initTime);
+  void applyTorsoVelDeltaCommands(scalar_t initTime, const vector_t& initState);
+  void releaseTorsoRotationControl();
+  // z-coupled x envelope（与 mobile_manipulator_joy getTorsoMaxX 一致）：降 z 时收回超限 x，避免 pitch=0 不可达而前倾
+  double getTorsoWorkspaceMaxX(double z_increment) const;
+  // 钳制 cmdTorsoPose_ 到工作空间；若有修改返回 true（调用方需重规划 Ruckig）
+  bool clampCmdTorsoPoseToWorkspace(const vector_t* previousPose = nullptr);
   // cmdLegJoint
   void calcRuckigTrajWithLegJoint(double initTime, const vector_t &targetLegJoint, double desiredTime = 0.0);
   void resetLegJointRuckig(double initTime, const vector_t& initState, bool rePlanning);
@@ -279,6 +292,14 @@ protected:
   
   double targetYawPreProcess(double currentYaw, double targetYaw);
   void setChassisControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
+  bool isBaseNearStationary() const;
+
+  // 底盘接管状态处理: 接管时停止底盘位置跟踪, 释放时把参考重锚到实测位姿
+  void chassisTakeoverStateCallback(const kuavo_msgs::ChassisTakeoverState::ConstPtr& msg);
+  void enterChassisTakeover(scalar_t initTime, const vector_t& initState);
+  void exitChassisTakeover(scalar_t initTime, const vector_t& initState);
+  void clearBaseCommandStorage(const vector_t& initState);
+  void holdBaseReferenceAtActual(const vector_t& initState);
   void setArmControl(int armIdx, scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void setTorsoControl(scalar_t initTime, scalar_t finalTime, const vector_t& initState);
   void updateShoulderRefAnchor(int armIdx, const vector_t& initState, scalar_t alphaPrev);
@@ -379,11 +400,17 @@ private:
   // 下肢重置相关
   double resetTorsoTime_{0.0};
   double resetTorsoInitTime_{0.0};
-  bool isResetTorso_{false};
+  // service 线程读取的时间快照；控制线程更新，避免直接读取普通 double。
+  std::atomic<double> currentMpcTime_{0.0};
+  std::atomic<double> resetTorsoWindowEnd_{0.0};
+  std::atomic<bool> isResetTorso_{false};
   bool isResetTorsoRePlanning_{false};
   // #3973: service 调用起到复位窗口结束期间丢弃躯干开环指令，避免 VR 双击后紧跟的
   // /cmd_lb_torso_pose 覆盖 cmdTorsoPose_（原先靠开环快照回避，见 #3991）
   std::atomic<bool> torsoResetWindowActive_{false};
+  // request 与 window 必须作为一组状态迁移，避免 service 线程与控制线程交错写入。
+  std::mutex resetTorsoStateMtx_;
+  ros::Publisher torsoResetWindowActivePub_;
   Eigen::VectorXd torsoResetMaxVel_;
   ros::ServiceServer resetTorsoStatusServiceServer_;
 
@@ -452,6 +479,15 @@ private:
   Eigen::Vector4d initialTorsoQuat_;
   Eigen::VectorXd cmdTorsoPose_;
   std::mutex cmdTorsoPose_mtx_;
+  // 躯干开环工作空间（相对 initialTorsoPos_；与 Joy 侧 clamp 对齐）
+  double torsoWsMinX_{0.0};
+  double torsoWsMaxX_{0.25};
+  double torsoWsMinZ_{0.0};
+  double torsoWsMaxZ_{0.32};
+  double torsoWsMinPitch_{0.0};
+  double torsoWsMaxPitch_{0.5235};
+  double torsoWsMinYaw_{-kTorsoYawTargetLimit};
+  double torsoWsMaxYaw_{kTorsoYawTargetLimit};
   bool isCmdTorsoPoseUpdated_{false};
   double cmdTorsoPoseDesiredTime_{0.0};
   ros::Subscriber targetTorsoPoseSubscriber_;
@@ -477,6 +513,14 @@ private:
   bool hasTorsoVelIntegrateTime_{false};
   static constexpr scalar_t kTorsoVelTimeout_{0.3};
   ros::Subscriber targetTorsoVelSubscriber_;
+  ros::Subscriber targetTorsoRotationVelSubscriber_;
+  ros::Publisher torsoRotationLockPub_;
+  bool torsoRotationRequested_{false};  // cmdTorsoVel_mtx_ 保护
+  bool torsoRotationActive_{false};     // 仅规划线程访问
+  bool torsoTranslationFromRotation_{false};  // FK 接续的平移目标只允许主动向包络内移动
+  bool torsoTranslationNeedsReset_{false};  // 平移目标改变后，RT 还需恢复位置
+  bool torsoTranslationResetPending_{false};  // 旋转复位完成后执行位置复位
+  Eigen::Vector4d torsoRotationJointTarget_{Eigen::Vector4d::Zero()};
   ros::Subscriber targetTorsoDeltaSubscriber_;
   ros::Publisher torsoOpenLoopStatePub_;    // /torso_open_loop_state: 4D pose [x,z,yaw,pitch]
 
@@ -555,6 +599,15 @@ private:
   std::mutex reset_to_state_mtx_;
   vector_t reset_state_;
   bool isEnableControl() const { return enable_control_.load(std::memory_order_acquire); }
+
+  // 底盘接管状态 (话题 /odom/chassis_takeover_state)
+  // 回调线程只更新原子状态; 参考切换统一在 modifyReferences 中按状态边沿处理
+  ros::Subscriber chassisTakeoverStateSub_;
+  std::atomic<bool> chassisTakeoverActive_{false};              // 当前是否处于接管
+  std::atomic<bool> chassisTakeoverStateReceived_{false};       // 是否收到过接管状态
+  std::atomic<uint64_t> chassisTakeoverEdgeCounter_{0};         // 状态边沿计数, 回调线程自增
+  uint64_t handledChassisTakeoverEdgeCounter_{0};               // MPC 线程已处理的边沿计数
+  bool baseTrackEnabledBeforeTakeover_{true};                   // 进入接管前的底盘跟踪使能, 释放时恢复
 
   // 关节控制默认为外部控制模式
   LbArmControlServiceMode currentArmControlMode_ = LbArmControlServiceMode::EXTERN_CONTROL; 
@@ -643,6 +696,11 @@ private:
   Eigen::VectorXd cmdVel_prevTargetVel_;
   Eigen::VectorXd cmdVel_prevTargetAcc_;
 
+  // vel→pose hold 切换后：actual 未停稳前持续锚定 ref，避免过早锁定 (#3867)
+  bool chassisPoseHoldFollowActual_{false};
+  int chassisPoseHoldSettleCnt_{0};
+  vector_t actualBaseVel_{vector_t::Zero(3)};
+
   // 当前实际机器人状态
   vector_t currentActualState_;
   std::mutex currentActualState_mtx_;
@@ -678,6 +736,7 @@ private:
 
   // 下肢关节规划器, 单位: rad
   std::shared_ptr<cmdPosePlannerWithRuckig> legJointPlannerRuckigPtr_;
+  std::shared_ptr<cmdPosePlannerWithRuckig> torsoRotationPlannerRuckigPtr_;
   double legJoint_plannerInitialTime_{0.0};
   Eigen::VectorXd legJoint_prevTargetPose_;
   Eigen::VectorXd legJoint_prevTargetVel_;

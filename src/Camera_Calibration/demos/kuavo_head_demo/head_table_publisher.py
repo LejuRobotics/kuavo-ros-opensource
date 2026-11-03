@@ -254,8 +254,10 @@ def main() -> None:
     dt = float(rospy.get_param("~dt", 0.04))
     play_loop_count = int(rospy.get_param("~play_loop_count", 1))
     move_duration = float(rospy.get_param("~move_duration", 2.0))
-    hold_sec = float(rospy.get_param("~hold_sec", 5.0))
-    capture_at_sec = float(rospy.get_param("~capture_at_sec", 4.0))
+    hold_sec = float(rospy.get_param("~hold_sec", 3.0))
+    # capture_at_sec 会被 hold_and_capture 夹紧到 hold_sec 内；保持与 hold 约 1s 的
+    # 静止余量（原设计 4s/5s），避免采样恰好落在 hold 结束瞬间。
+    capture_at_sec = float(rospy.get_param("~capture_at_sec", 2.0))
     startup_align_sec = float(rospy.get_param("~startup_align_sec", 2.0))
     return_to_zero_sec = float(rospy.get_param("~return_to_zero_sec", startup_align_sec))
     wait_sensors_timeout = float(rospy.get_param("~wait_sensors_timeout", 30.0))

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(mujoco_cpp)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../kuavo_common/cmake/kuavo_arch.cmake)
+
 ## Compile as C++11, supported in ROS Kinetic and newer
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -37,8 +39,15 @@ endif()
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 
-set(LCM_INCLUDE_DIRS "/usr/local/lcm")
-set(LCM_LIBRARIES "/usr/local/lib/liblcm.so")
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LCM lcm)
+if(NOT LCM_FOUND)
+  find_path(LCM_INCLUDE_DIRS NAMES lcm/lcm.h PATH_SUFFIXES lcm)
+  find_library(LCM_LIBRARIES NAMES lcm)
+endif()
+if(NOT LCM_INCLUDE_DIRS OR NOT LCM_LIBRARIES)
+  message(FATAL_ERROR "LCM not found (install liblcm-dev)")
+endif()
 
 find_package(catkin REQUIRED
         COMPONENTS
@@ -51,13 +60,25 @@ find_package(catkin REQUIRED
         kuavo_msgs
         kuavo_assets
         kuavo_common
+        urdf
+        roslib
         )
 
 # find_package(PkgConfig REQUIRED)
 # pkg_check_modules(LCM_MSG REQUIRED lcm_msg)
 
 find_package(Threads REQUIRED)
-find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
+# ponytail: explicit path avoids stale find_library cache after per-arch lib layout move
+if(KUAVO_BUILD_FOR_AARCH64 AND EXISTS ${PROJECT_SOURCE_DIR}/lib/aarch64/libmujoco.so)
+  set(MUJOCO_LIB ${PROJECT_SOURCE_DIR}/lib/aarch64/libmujoco.so)
+elseif(EXISTS ${PROJECT_SOURCE_DIR}/lib/x86_64/libmujoco.so)
+  set(MUJOCO_LIB ${PROJECT_SOURCE_DIR}/lib/x86_64/libmujoco.so)
+else()
+  find_library(MUJOCO_LIB mujoco HINTS ${PROJECT_SOURCE_DIR}/lib)
+endif()
+if(NOT MUJOCO_LIB)
+  message(FATAL_ERROR "libmujoco not found under ${PROJECT_SOURCE_DIR}/lib")
+endif()
 find_package(glfw3 REQUIRED)
 
 find_package(Eigen3 REQUIRED)
@@ -83,7 +104,7 @@ if(USE_DDS OR USE_LEJU_DDS)
 
     # Set up Unitree SDK paths (same as humanoid_controllers)
     set(UNITREE_SDK_INCLUDE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/include)
-    set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/x86_64)
+    set(UNITREE_SDK_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../kuavo-ros-control-lejulib/hardware_dds_plant/unitree_sdk2/${KUAVO_UNITREE_SDK_ARCH_SUBDIR})
     set(UNITREE_SDK_LIB_PATH ${UNITREE_SDK_LIB_DIR}/libunitree_sdk2.a)
 
     if(EXISTS ${UNITREE_SDK_INCLUDE_PATH})
@@ -263,14 +284,23 @@ aux_source_directory(./src/lcm_interface LCM_SRCS)
 
 file(GLOB DEXHAND_SOURCES "src/dexhand/*.cpp" "src/dexhand/*.hpp")
 
+set(SG100_GESTURE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../manipulation_nodes/motion_capture_ik)
+set(SG100_GESTURE_SOURCES
+  ${SG100_GESTURE_ROOT}/src/SG100HandBridge.cpp
+  ${SG100_GESTURE_ROOT}/src/SG100GestureLibrary.cpp
+  ${SG100_GESTURE_ROOT}/src/SG100JointLimits.cpp
+)
+
 # Base library sources
 add_library(${PROJECT_NAME} SHARED
     src/mujoco_node.cc
     ${DEXHAND_SOURCES}
     src/joint_address.hpp
     src/dexhand_mujoco_node.cpp
+    ${SG100_GESTURE_SOURCES}
     ${SIMULATE_SRCS} ${LCM_SRCS} ${ray_caster}
 )
+target_include_directories(${PROJECT_NAME} PRIVATE ${SG100_GESTURE_ROOT}/include)
 
 # Conditionally add DDS sources
 if(USE_DDS OR USE_LEJU_DDS)
@@ -304,22 +334,24 @@ endif()
 add_executable(${PROJECT_NAME}_simulate src/main.cc)
 target_link_libraries(${PROJECT_NAME}_simulate ${PROJECT_NAME}) 
 
-# nodelet
-
-add_library(nodelet_mujoco SHARED
-  src/mujoco_nodelet.cc
-)
-set_target_properties(nodelet_mujoco PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CATKIN_DEVEL_PREFIX}/lib)
-
-add_dependencies(nodelet_mujoco ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(nodelet_mujoco
-  ${catkin_LIBRARIES}
-  ${PROJECT_NAME}
-)
-
-install(TARGETS nodelet_mujoco
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-)
+# nodelet (optional when ROS nodelet stack is not in source install)
+find_package(nodelet QUIET)
+if(nodelet_FOUND OR EXISTS "/opt/ros/noetic/include/nodelet/nodelet.h")
+  add_library(nodelet_mujoco SHARED
+    src/mujoco_nodelet.cc
+  )
+  set_target_properties(nodelet_mujoco PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CATKIN_DEVEL_PREFIX}/lib)
+  add_dependencies(nodelet_mujoco ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+  target_link_libraries(nodelet_mujoco
+    ${catkin_LIBRARIES}
+    ${PROJECT_NAME}
+  )
+  install(TARGETS nodelet_mujoco
+    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  )
+else()
+  message(STATUS "[mujoco_cpp] Skipping nodelet_mujoco (nodelet not installed)")
+endif()
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the

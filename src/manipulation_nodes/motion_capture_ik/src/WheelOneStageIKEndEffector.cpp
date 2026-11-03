@@ -10,6 +10,24 @@
 
 namespace HighlyDynamic {
 namespace {
+
+const drake::multibody::Frame<double>& GetFrameByNameWithFallback(
+    const drake::multibody::MultibodyPlant<double>& plant,
+    const std::string& frameName) {
+  if (plant.HasFrameNamed(frameName)) {
+    return plant.GetFrameByName(frameName);
+  }
+  if (frameName == "zarm_l2_joint_parent" && plant.HasFrameNamed("zarm_l1_link")) {
+    ROS_WARN_STREAM_ONCE("Drake frame " << frameName << " is unavailable; using zarm_l1_link fallback");
+    return plant.GetFrameByName("zarm_l1_link");
+  }
+  if (frameName == "zarm_r2_joint_parent" && plant.HasFrameNamed("zarm_r1_link")) {
+    ROS_WARN_STREAM_ONCE("Drake frame " << frameName << " is unavailable; using zarm_r1_link fallback");
+    return plant.GetFrameByName("zarm_r1_link");
+  }
+  return plant.GetFrameByName(frameName);
+}
+
 inline bool isValidSolution(const Eigen::VectorXd& q, int nq) {
   return q.size() == nq && q.allFinite() && q.norm() > 1e-9;
 }
@@ -199,9 +217,13 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
     ROS_ERROR("WheelOneStageIKEndEffector::activateChestPositionFreeze: expected three finite joints and nq=18");
     return false;
   }
+  Eigen::VectorXd freezeQ = Eigen::VectorXd::Zero(nq_);
+  freezeQ.head<3>() = frozenLowerBodyPitchJoints;
+  freezeQ = clampToJointLimits(freezeQ);
+  const Eigen::Vector3d frozenLowerBodyPitchJointsClamped = freezeQ.head<3>();
 
-  if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ &&
-      frozenLowerBodyPitchJoints_.isApprox(frozenLowerBodyPitchJoints, 1.0e-12)) {
+  if (!freezeLowerBody_ && freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ &&
+      frozenLowerBodyPitchJoints_.isApprox(frozenLowerBodyPitchJointsClamped, 1.0e-12)) {
     return true;
   }
 
@@ -219,9 +241,11 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
   if (fallback.size() != nq_ || !fallback.allFinite()) {
     fallback = Eigen::VectorXd::Zero(nq_);
   }
-  fallback.head<3>() = frozenLowerBodyPitchJoints;
+  fallback.head<3>() = frozenLowerBodyPitchJointsClamped;
+  fallback = clampToJointLimits(fallback);
 
-  frozenLowerBodyPitchJoints_ = frozenLowerBodyPitchJoints;
+  freezeLowerBody_ = false;
+  frozenLowerBodyPitchJoints_ = frozenLowerBodyPitchJointsClamped;
   hasFrozenLowerBodyPitchJoints_ = true;
   freezeChestPosition_ = true;
 
@@ -258,7 +282,56 @@ bool WheelOneStageIKEndEffector::activateChestPositionFreeze(
   return true;
 }
 
+Eigen::VectorXd WheelOneStageIKEndEffector::clampToJointLimits(const Eigen::VectorXd& q) const {
+  if (!plant_ || q.size() != nq_ || !q.allFinite()) {
+    return q;
+  }
+  const Eigen::VectorXd lower = plant_->GetPositionLowerLimits();
+  const Eigen::VectorXd upper = plant_->GetPositionUpperLimits();
+  if (lower.size() != nq_ || upper.size() != nq_) {
+    return q;
+  }
+  constexpr double kEps = 1.0e-4;
+  Eigen::VectorXd clamped = q;
+  for (int i = 0; i < nq_; ++i) {
+    const double lo = lower[i] + kEps;
+    const double hi = upper[i] - kEps;
+    if (lo <= hi) {
+      clamped[i] = std::clamp(q[i], lo, hi);
+    } else {
+      clamped[i] = 0.5 * (lower[i] + upper[i]);
+    }
+  }
+  return clamped;
+}
+
+bool WheelOneStageIKEndEffector::activateLowerBodyFreeze(const Eigen::Vector4d& joints) {
+  if (nq_ != 18 || !joints.allFinite()) {
+    return false;
+  }
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(nq_);
+  q.head<4>() = joints;
+  q = clampToJointLimits(q);
+  if (freezeLowerBody_ && frozenLowerBodyPitchJoints_.isApprox(q.head<3>(), 1e-12) &&
+      std::abs(frozenWaistYaw_ - q[3]) < 1e-12) {
+    return true;
+  }
+  if (!activateChestPositionFreeze(q.head<3>())) {
+    return false;
+  }
+  freezeLowerBody_ = true;
+  frozenWaistYaw_ = q[3];
+  // All warm starts and filter/history states must use the same held yaw.
+  for (auto* state : {&initialGuessSeed_, &refLpX1_, &refLpX2_, &refLpY1_,
+                      &refLpY2_, &refLowpassLatest_, &latestSolution_}) {
+    forceFrozenLowerBodyPitchState(*state);
+  }
+  historyBuffer_.resyncSegment(0, q.head<4>());
+  return true;
+}
+
 void WheelOneStageIKEndEffector::deactivateChestPositionFreeze() {
+  freezeLowerBody_ = false;
   freezeChestPosition_ = false;
   hasFrozenLowerBodyPitchJoints_ = false;
 }
@@ -266,6 +339,9 @@ void WheelOneStageIKEndEffector::deactivateChestPositionFreeze() {
 void WheelOneStageIKEndEffector::forceFrozenLowerBodyPitchState(Eigen::VectorXd& state) const {
   if (freezeChestPosition_ && hasFrozenLowerBodyPitchJoints_ && state.size() >= 3) {
     state.head<3>() = frozenLowerBodyPitchJoints_;
+    if (freezeLowerBody_ && state.size() >= 4) {
+      state[3] = frozenWaistYaw_;
+    }
   }
 }
 
@@ -304,6 +380,8 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
       }
     }
   }
+  referenceSolution = clampToJointLimits(referenceSolution);
+  forceFrozenLowerBodyPitchState(referenceSolution);
 
   setConstraints(endEffectorIK, PoseConstraintList, controlArmIndex, Eigen::VectorXd::Zero(nq_), referenceSolution);
 
@@ -384,7 +462,13 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
 
   // add chest position constraint
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_CHEST) {
-    if (freezeChestPosition_) {
+    if (freezeLowerBody_) {
+      // The master switch stops leg commands. Match that complete held chain;
+      // a chest position/yaw tracking cost would compete with an immutable FK.
+      Eigen::Vector4d held;
+      held << frozenLowerBodyPitchJoints_, frozenWaistYaw_;
+      ik.get_mutable_prog()->AddBoundingBoxConstraint(held, held, ik.q().head(4));
+    } else if (freezeChestPosition_) {
       // 位置跟随细分关闭：更改为高权重软约束
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_CHEST].position,
@@ -443,17 +527,30 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     }
   }
 
+  // 锁下肢前两个关节（knee=q[0], leg=q[1]）——硬等式约束，保证电机不动，
+  // 只保留 waist_pitch(q[2]) / waist_yaw(q[3]) 随动
+  if (lockKneeLegEnabled_) {
+    Eigen::VectorXd lockQ = Eigen::VectorXd::Zero(nq_);
+    lockQ[0] = lockKneeQ_;
+    lockQ[1] = lockLegQ_;
+    lockQ = clampToJointLimits(lockQ);
+    auto* prog = ik.get_mutable_prog();
+    prog->AddBoundingBoxConstraint(lockQ[0], lockQ[0], ik.q()[0]);
+    prog->AddBoundingBoxConstraint(lockQ[1], lockQ[1], ik.q()[1]);
+  }
+
+
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_SHOULDER) {
     ik.AddPositionCost(plant_->world_frame(),
                        PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position,
-                       plant_->GetFrameByName("zarm_l2_joint_parent"),
+                       GetFrameByNameWithFallback(*plant_, "zarm_l2_joint_parent"),
                        Eigen::Vector3d::Zero(),
                        shoulderWeight * Eigen::Matrix3d::Identity());
   }
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_SHOULDER) {
     ik.AddPositionCost(plant_->world_frame(),
                        PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position,
-                       plant_->GetFrameByName("zarm_r2_joint_parent"),
+                       GetFrameByNameWithFallback(*plant_, "zarm_r2_joint_parent"),
                        Eigen::Vector3d::Zero(),
                        shoulderWeight * Eigen::Matrix3d::Identity());
   }
@@ -474,7 +571,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position,
-                         plant_->GetFrameByName("zarm_l7_end_effector"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l7_end_effector"),
                          Eigen::Vector3d::Zero(),
                          eeWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -487,7 +584,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_ELBOW) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_ELBOW].position,
-                         plant_->GetFrameByName("zarm_l4_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l4_link"),
                          Eigen::Vector3d::Zero(),
                          leftElbowWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -499,7 +596,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_LINK6) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_LINK6].position,
-                         plant_->GetFrameByName("zarm_l6_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l6_link"),
                          Eigen::Vector3d::Zero(),
                          link6Weight * Eigen::Matrix3d::Identity());
     } else {
@@ -511,7 +608,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position,
-                         plant_->GetFrameByName("zarm_l7_virtual_thumb_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_l7_virtual_thumb_link"),
                          Eigen::Vector3d::Zero(),
                          virtualThumbWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -537,7 +634,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR].position,
-                         plant_->GetFrameByName("zarm_r7_end_effector"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r7_end_effector"),
                          Eigen::Vector3d::Zero(),
                          eeWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -550,7 +647,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_ELBOW) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_ELBOW].position,
-                         plant_->GetFrameByName("zarm_r4_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r4_link"),
                          Eigen::Vector3d::Zero(),
                          rightElbowWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -562,7 +659,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_LINK6) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position,
-                         plant_->GetFrameByName("zarm_r6_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r6_link"),
                          Eigen::Vector3d::Zero(),
                          link6Weight * Eigen::Matrix3d::Identity());
     } else {
@@ -574,7 +671,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position,
-                         plant_->GetFrameByName("zarm_r7_virtual_thumb_link"),
+                         GetFrameByNameWithFallback(*plant_, "zarm_r7_virtual_thumb_link"),
                          Eigen::Vector3d::Zero(),
                          virtualThumbWeight * Eigen::Matrix3d::Identity());
     } else {
@@ -659,7 +756,7 @@ std::pair<Eigen::Vector3d, Eigen::Quaterniond> WheelOneStageIKEndEffector::FK(co
   plant_->SetPositions(plant_context_.get(), q);
 
   try {
-    const drake::multibody::Frame<double>& target_frame = plant_->GetFrameByName(frameName);
+    const drake::multibody::Frame<double>& target_frame = GetFrameByNameWithFallback(*plant_, frameName);
     const drake::multibody::Frame<double>& reference_frame =
         (ConstraintFrames_.size() > 0) ? *ConstraintFrames_[0] : plant_->world_frame();
 

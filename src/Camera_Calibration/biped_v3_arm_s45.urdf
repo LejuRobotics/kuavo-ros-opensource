@@ -1,0 +1,735 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="biped_s45">
+  <mujoco>
+    <compiler meshdir="../meshes/" balanceinertia="true" discardvisual="false" />
+  </mujoco>
+
+  <!-- ====================== base_link（零质量占位，仅保留视觉和碰撞） ====================== -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+      <mass value="0.0" />
+      <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/torso.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+
+  <!-- 固定参考坐标系：与 zarm_l1_joint 在同一位置，但不随关节转动 -->
+  <link name="zarm_l1_ref_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.0" />
+      <inertia ixx="0.0" ixy="0.0" ixz="0.0" iyy="0.0" iyz="0.0" izz="0.0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="zarm_l1_ref_material">
+        <color rgba="0 1 0 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l1_ref_joint" type="fixed">
+    <!-- 位置与 zarm_l1_joint 的 origin 完全一致 -->
+    <origin xyz="-0.017499853 0.2927 0.4245" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="zarm_l1_ref_link" />
+  </joint>
+
+  <!-- ============ l_arm_pitch ============ -->
+  <link name="zarm_l1_link">
+    <inertial>
+      <origin xyz="0.00194934 -0.01222074 -0.00024523" rpy="0 0 0" />
+      <mass value="0.952000" />
+      <inertia ixx="0.00177952" ixy="-0.00003936" ixz="-0.00000075" iyy="0.00088093" iyz="0.00000096" izz="0.00174476" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_arm_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l1_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zarm_l1_ref_link" />
+    <child link="zarm_l1_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ l_arm_roll ============ -->
+  <link name="zarm_l2_link">
+    <inertial>
+      <origin xyz="-0.00112901 0.00000665 -0.04637050" rpy="0 0 0" />
+      <mass value="0.385000" />
+      <inertia ixx="0.00080437" ixy="-0.00000011" ixz="-0.00001699" iyy="0.00115579" iyz="-0.00000014" izz="0.00070010" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_arm_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l2_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zarm_l1_link" />
+    <child link="zarm_l2_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.349065850398866" upper="2.0943951023932" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ l_arm_yaw ============ -->
+  <link name="zarm_l3_link">
+    <inertial>
+      <origin xyz="0.00936999 0.00334408 -0.22965779" rpy="0 0 0" />
+      <mass value="1.754500" />
+      <inertia ixx="0.00694471" ixy="-0.00006963" ixz="0.00081484" iyy="0.00704370" iyz="0.00033391" izz="0.00183829" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_arm_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l3_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zarm_l2_link" />
+    <child link="zarm_l3_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ l_foream ============ -->
+  <link name="zarm_l4_link">
+    <inertial>
+      <origin xyz="-0.01825634 0.00149605 -0.06877688" rpy="0 0 0" />
+      <mass value="0.607800" />
+      <inertia ixx="0.00144524" ixy="-0.00000754" ixz="-0.00012207" iyy="0.00125753" iyz="-0.00003303" izz="0.00065063" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_forearm.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l4_joint" type="revolute">
+    <origin xyz="0.02 0 -0.2837" rpy="0 0 0" />
+    <parent link="zarm_l3_link" />
+    <child link="zarm_l4_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ l_hand_yaw ============ -->
+  <link name="zarm_l5_link">
+    <inertial>
+      <origin xyz="-0.00874165 -0.00001372 -0.05033323" rpy="0 0 0" />
+      <mass value="0.636900" />
+      <inertia ixx="0.00063700" ixy="-0.00000007" ixz="-0.00005666" iyy="0.00094941" iyz="0.00000002" izz="0.00054303" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l5_joint" type="revolute">
+    <origin xyz="-0.02 0 -0.127037" rpy="0 0 0" />
+    <parent link="zarm_l4_link" />
+    <child link="zarm_l5_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ l_hand_roll ============ -->
+  <link name="zarm_l6_link">
+    <inertial>
+      <origin xyz="-0.00158864 0.00654094 -0.01506679" rpy="0 0 0" />
+      <mass value="0.473900" />
+      <inertia ixx="0.00018068" ixy="-0.00000464" ixz="0.00001148" iyy="0.00025494" iyz="0.00001047" izz="0.00026772" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_l6_joint" type="revolute">
+    <origin xyz="0.0002 0 -0.106463" rpy="0 0 0" />
+    <parent link="zarm_l5_link" />
+    <child link="zarm_l6_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-1.30899693899575" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ l_hand_pitch ============ -->
+  <link name="zarm_l7_link">
+    <inertial>
+      <origin xyz="0.00186 0.01014 -0.09044" rpy="0 0 0" />
+      <mass value="0.64" />
+      <inertia ixx="0.00071" ixy="1e-05" ixz="2e-05" iyy="0.0007" iyz="-4e-05" izz="0.00012" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_pitch_no_thumb.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.158" rpy="0 0 -3.1415" />
+      <geometry>
+        <box size="0.08 0.05 0.16" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0505 -0.0292 -0.116372" rpy="0 -0.2545 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.08" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_l7_joint" type="revolute">
+    <origin xyz="0 0 -0.021" rpy="0 0 0" />
+    <parent link="zarm_l6_link" />
+    <child link="zarm_l7_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <link name="zarm_l7_end_effector">
+  </link>
+  <joint name="zarm_l7_end_effector_joint" type="fixed">
+    <origin xyz="0 -0.03 -0.17" rpy="0 0 0" />
+    <parent link="zarm_l7_link" />
+    <child link="zarm_l7_end_effector" />
+  </joint>
+
+  <!-- ====================== 追加：左手腕相机（用于棋盘标定） ====================== -->
+  <!-- 从 biped_s45.urdf 的 l_hand_tripod / l_hand_camera 结构，额外提供 optical_frame 以对齐在线相机 frame_id -->
+
+  <link name="l_hand_tripod">
+    <inertial>
+      <origin xyz="0.0653430919091347 -0.00776026775236038 -0.0648805742218587" rpy="0 0 0" />
+      <mass value="0.0342669089979502" />
+      <inertia ixx="1.59850149176395E-05" ixy="-5.29139847447712E-06" ixz="1.78131910236665E-05" iyy="9.8758759051122E-05" iyz="-2.71719747666022E-07" izz="9.75721402715185E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_tripod.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="l_hand_tripod_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <parent link="zarm_l7_link" />
+    <child link="l_hand_tripod" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="l_hand_camera">
+    <inertial>
+      <origin xyz="-5.55111512312578E-17 -5.55111512312578E-17 0.0114631923429834" rpy="0 0 0" />
+      <mass value="0.038145442577304" />
+      <inertia ixx="6.90025820370885E-06" ixy="2.08889460021576E-21" ixz="-6.35274710440725E-22" iyy="6.86774271974419E-06" iyz="-4.21980924697416E-22" izz="1.04248094301688E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -1.57 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/l_hand_camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="l_hand_camera_joint" type="fixed">
+    <origin xyz="0.11540559159102 -0.0145586110669961 -0.110123491595499" rpy="1.919862177193763 0.753528063917894 -2.897246568680842" />
+    <parent link="l_hand_tripod" />
+    <child link="l_hand_camera" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="left_wrist_camera_color_optical_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="left_wrist_camera_optical_material">
+        <color rgba="0 1 0 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="left_wrist_camera_color_optical_frame_joint" type="fixed">
+    <!-- 标准光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
+    <parent link="l_hand_camera" />
+    <child link="left_wrist_camera_color_optical_frame" />
+  </joint>
+
+  <!-- ====================== 棋盘 link/joint ====================== -->
+  <!-- TODO: 棋盘位姿需要 S45 的动捕标定数据。
+       当前使用的偏移来自 biped_s62 的标定数据 (xyz="0.99991 -0.2527 -0.1595", rpy="-2.094 0 -1.5708")
+       S45 需要通过 optitrack_poses.yaml 或手动测量获取精确位姿 -->
+  <link name="checkerboard_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="checkerboard_material">
+        <color rgba="0 0 1 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="checkerboard_joint" type="fixed">
+    <!-- 棋盘相对 zarm_l1_ref_link 的位姿，沿用 S62 数据作为初始值，需按 S45 实际重新标定 -->
+    <origin xyz="1.330125 -0.19426445 -0.096820574"
+            rpy="-2.014039 0.0081154884 -1.5322253" />
+    <parent link="zarm_l1_ref_link" />
+    <child link="checkerboard_link" />
+  </joint>
+
+  <!-- ====================== 头部链 + 相机 ====================== -->
+  <link name="zhead_1_link">
+    <inertial>
+      <origin xyz="2e-05 0.00605 -0.01052" rpy="0 0 0" />
+      <mass value="0.35" />
+      <inertia ixx="7e-05" ixy="0.0" ixz="0.0" iyy="5e-05" iyz="0.0" izz="5e-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/head_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zhead_1_joint" type="revolute">
+    <origin xyz="-0.018499853 0 0.6014" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="zhead_1_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="1.5" velocity="5.233333" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <link name="zhead_2_link">
+    <inertial>
+      <origin xyz="0.02648 -0.00142 0.10674" rpy="0 0 0" />
+      <mass value="0.5492" />
+      <inertia ixx="0.00346" ixy="-3e-05" ixz="0.00017" iyy="0.00348" iyz="-7e-05" izz="0.00222" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/head_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zhead_2_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zhead_1_link" />
+    <child link="zhead_2_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.523598775598299" upper="0.523598775598299" effort="12.0" velocity="5.233333" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- 头部 RGB 相机 (camera.STL) -->
+  <link name="camera">
+    <inertial>
+      <origin xyz="-0.04257 -0.01736 -0.01161" rpy="0 0 0" />
+      <mass value="0.047" />
+      <inertia ixx="0.00065" ixy="0.0" ixz="0.00015" iyy="0.00091" iyz="0.0" izz="0.00105" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <!-- S45 头部相机物理倒装：绕相机安装坐标系 x 轴旋转 180° -->
+    <origin xyz="0.102467509784707853 -0.02375003248712456 0.126153265112721" rpy="3.141592653589793 0.38392190558413 0" />
+    <parent link="zhead_2_link" />
+    <child link="camera" />
+  </joint>
+
+  <!-- 头部相机底座 (camera_base.STL) -->
+  <link name="camera_base">
+    <inertial>
+      <origin xyz="0.00354055659132058 0.00140392784997684 0.0124511787517705" rpy="0 0 0" />
+      <mass value="0.0170256015508834" />
+      <inertia ixx="1.0918264029313E-05" ixy="1.05354408167889E-07" ixz="1.05871497323805E-08" iyy="8.57178950734466E-07" iyz="1.64018651463453E-08" izz="1.02869893338382E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/camera_base.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="camera_base_joint" type="fixed">
+    <origin xyz="0.0932759773834307 0 0.145322661773667" rpy="3.14159265358979 0.383972435438723 0" />
+    <parent link="zhead_2_link" />
+    <child link="camera_base" />
+  </joint>
+
+  <!-- 头部相机光学坐标系：掛在 camera (RGB 相机) 下 -->
+  <link name="head_camera_color_optical_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="camera_optical_material">
+        <color rgba="0 1 0 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="head_camera_color_optical_frame_joint" type="fixed">
+    <!-- 标准光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
+    <parent link="camera" />
+    <child link="head_camera_color_optical_frame" />
+  </joint>
+
+  <!-- 软件图像旋转 180° 后对应的虚拟光学坐标系 -->
+  <link name="head_camera_color_optical_frame_rot180" />
+  <joint name="head_camera_color_optical_frame_rot180_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 3.141592653589793" />
+    <parent link="head_camera_color_optical_frame" />
+    <child link="head_camera_color_optical_frame_rot180" />
+  </joint>
+
+  <!-- ============ r_arm_pitch ============ -->
+  <link name="zarm_r1_link">
+    <inertial>
+      <origin xyz="0.00194934 0.01222074 -0.00024523" rpy="0 0 0" />
+      <mass value="0.952000" />
+      <inertia ixx="0.00177952" ixy="0.00003936" ixz="-0.00000075" iyy="0.00088093" iyz="-0.00000096" izz="0.00174476" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_arm_pitch.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_r1_joint" type="revolute">
+    <origin xyz="-0.017499853 -0.2927 0.4245" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="zarm_r1_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14159265358979" upper="1.5707963267949" effort="66.67" velocity="18.8" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ r_arm_roll ============ -->
+  <link name="zarm_r2_link">
+    <inertial>
+      <origin xyz="-0.00112901 -0.00000665 -0.04637050" rpy="0 0 0" />
+      <mass value="0.385000" />
+      <inertia ixx="0.00080437" ixy="0.00000011" ixz="-0.00001699" iyy="0.00115579" iyz="0.00000014" izz="0.00070010" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_arm_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_r2_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zarm_r1_link" />
+    <child link="zarm_r2_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2.0943951023932" upper="0.349065850398866" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ r_arm_yaw ============ -->
+  <link name="zarm_r3_link">
+    <inertial>
+      <origin xyz="0.00936999 -0.00334408 -0.22965779" rpy="0 0 0" />
+      <mass value="1.754500" />
+      <inertia ixx="0.00694471" ixy="0.00006963" ixz="0.00081484" iyy="0.00704370" iyz="-0.00033391" izz="0.00183829" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_arm_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_r3_joint" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="zarm_r2_link" />
+    <child link="zarm_r3_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="57.0" velocity="7.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ r_foream ============ -->
+  <link name="zarm_r4_link">
+    <inertial>
+      <origin xyz="-0.01825634 -0.00149605 -0.06877688" rpy="0 0 0" />
+      <mass value="0.607800" />
+      <inertia ixx="0.00144524" ixy="0.00000754" ixz="-0.00012207" iyy="0.00125753" iyz="0.00003303" izz="0.00065063" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_forearm.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_r4_joint" type="revolute">
+    <origin xyz="0.02 0 -0.2837" rpy="0 0 0" />
+    <parent link="zarm_r3_link" />
+    <child link="zarm_r4_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.61799387799149" upper="0.0" effort="75.0" velocity="8.0" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ r_hand_yaw ============ -->
+  <link name="zarm_r5_link">
+    <inertial>
+      <origin xyz="-0.00874165 0.00001372 -0.05033323" rpy="0 0 0" />
+      <mass value="0.636900" />
+      <inertia ixx="0.00063700" ixy="0.00000007" ixz="-0.00005666" iyy="0.00094941" iyz="-0.00000002" izz="0.00054303" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_yaw.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_r5_joint" type="revolute">
+    <origin xyz="-0.02 0 -0.127037" rpy="0 0 0" />
+    <parent link="zarm_r4_link" />
+    <child link="zarm_r5_link" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5707963267949" upper="1.5707963267949" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ r_hand_roll ============ -->
+  <link name="zarm_r6_link">
+    <inertial>
+      <origin xyz="-0.00158864 -0.00654094 -0.01506679" rpy="0 0 0" />
+      <mass value="0.473900" />
+      <inertia ixx="0.00018068" ixy="0.00000464" ixz="0.00001148" iyy="0.00025494" iyz="-0.00001047" izz="0.00026772" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_roll.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="zarm_r6_joint" type="revolute">
+    <origin xyz="0 0 -0.106463" rpy="0 0 0" />
+    <parent link="zarm_r5_link" />
+    <child link="zarm_r6_link" />
+    <axis xyz="1 0 0" />
+    <limit lower="-0.698131700797732" upper="1.30899693899575" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <!-- ============ r_hand_pitch ============ -->
+  <link name="zarm_r7_link">
+    <inertial>
+      <origin xyz="0.00186 -0.01014 -0.09044" rpy="0 0 0" />
+      <mass value="0.64" />
+      <inertia ixx="0.00069" ixy="-1e-05" ixz="2e-05" iyy="0.00068" iyz="5e-05" izz="0.00012" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_pitch_no_thumb.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.158" rpy="0 0 -3.1415" />
+      <geometry>
+        <box size="0.08 0.05 0.16" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.0505 0.0292 -0.116372" rpy="0 -0.2545 0" />
+      <geometry>
+        <cylinder radius="0.01" length="0.08" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="zarm_r7_joint" type="revolute">
+    <origin xyz="0 0 -0.021" rpy="0 0 0" />
+    <parent link="zarm_r6_link" />
+    <child link="zarm_r7_link" />
+    <axis xyz="0 1 0" />
+    <limit lower="-0.698131700797732" upper="0.698131700797732" effort="14.1" velocity="17.5" />
+    <dynamics damping="0.02" friction="0.02" />
+  </joint>
+
+  <link name="zarm_r7_end_effector">
+  </link>
+  <joint name="zarm_r7_end_effector_joint" type="fixed">
+    <origin xyz="0 0.03 -0.17" rpy="0 0 0" />
+    <parent link="zarm_r7_link" />
+    <child link="zarm_r7_end_effector" />
+  </joint>
+
+  <!-- ====================== 追加：右手腕相机（用于棋盘标定） ====================== -->
+  <!-- 从 biped_s45.urdf 的 r_hand_tripod / r_hand_camera 结构，额外提供 optical_frame 以对齐在线相机 frame_id -->
+
+  <link name="r_hand_tripod">
+    <inertial>
+      <origin xyz="0.0653431459436017 0.00833186007885223 -0.0625275130281983" rpy="0 0 0" />
+      <mass value="0.034266881719861" />
+      <inertia ixx="1.5985004453075E-05" ixy="5.17271984897294E-06" ixz="1.78480505198324E-05" iyy="9.87551311174154E-05" iyz="2.79574204670866E-07" izz="9.75758243581943E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_tripod.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="r_hand_tripod_joint" type="fixed">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0" />
+    <parent link="zarm_r7_link" />
+    <child link="r_hand_tripod" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="r_hand_camera">
+    <inertial>
+      <origin xyz="0 5.55111512312578E-17 0.0114631923429834" rpy="0 0 0" />
+      <mass value="0.038145442577304" />
+      <inertia ixx="6.90025820370885E-06" ixy="-5.73053564581591E-21" ixz="-1.27054942088145E-21" iyy="6.8677427197442E-06" iyz="7.56979586483243E-22" izz="1.04248094301688E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 -1.57 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s45/meshes/r_hand_camera.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="r_hand_camera_joint" type="fixed">
+    <origin xyz="0.115405591590931 0.0154312352120435 -0.107724128430896" rpy="1.208853693239594 0.751879414295006 2.888346587751982" />
+    <parent link="r_hand_tripod" />
+    <child link="r_hand_camera" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="right_wrist_camera_color_optical_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.001" />
+      </geometry>
+      <material name="right_wrist_camera_optical_material">
+        <color rgba="0 1 0 0" />
+      </material>
+    </visual>
+  </link>
+  <joint name="right_wrist_camera_color_optical_frame_joint" type="fixed">
+    <!-- 标准光学坐标变换：R = Rz(-90°) * Rx(-90°) -->
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679" />
+    <parent link="r_hand_camera" />
+    <child link="right_wrist_camera_color_optical_frame" />
+  </joint>
+
+</robot>

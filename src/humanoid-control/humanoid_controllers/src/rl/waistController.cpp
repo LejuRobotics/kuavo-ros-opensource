@@ -45,19 +45,23 @@ WaistController::WaistController(ros::NodeHandle& nh, size_t joint_waist_num,
   waist_kp_.resize(joint_waist_num_);
   waist_kd_.resize(joint_waist_num_);
   
-  // 初始化订阅者（订阅/robot_waist_motion_data话题）
+  // 初始化互斥的 generic/action 腰部输入订阅者。
   if (joint_waist_num_ > 0)
   {
     waist_traj_sub_ = nh_.subscribe<kuavo_msgs::robotWaistControl>(
       "/robot_waist_motion_data", 10,
       boost::bind(&WaistController::waistTrajectoryCallback, this, _1));
+    action_waist_traj_sub_ = nh_.subscribe<kuavo_msgs::robotWaistControl>(
+      "/robot_action_waist_motion_data", 10,
+      boost::bind(&WaistController::offlineActionWaistTrajectoryCallback, this, _1));
     
     // 订阅腰部控制使能话题
     enable_waist_control_sub_ = nh_.subscribe<std_msgs::Bool>(
       "/humanoid_controller/enable_waist_control", 10,
       boost::bind(&WaistController::enableWaistControlCallback, this, _1));
     
-    ROS_INFO("[WaistController] Subscribed to /humanoid_controller/enable_waist_control (is_real=%d)", is_real_);
+    ROS_INFO("[WaistController] Subscribed to generic/action waist inputs and "
+             "/humanoid_controller/enable_waist_control (is_real=%d)", is_real_);
   }
 }
 
@@ -67,6 +71,13 @@ WaistController::~WaistController()
 
 void WaistController::reset()
 {
+  {
+    std::lock_guard<std::mutex> input_lock(input_owner_mutex_);
+    offline_action_input_active_.store(false, std::memory_order_relaxed);
+    external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
+    clearExternalInputTargetsLocked();
+  }
+
   // 重置插值状态
   waist_is_interpolating_ = false;
   
@@ -74,9 +85,7 @@ void WaistController::reset()
   desire_waist_q_ = current_waist_pos_;
   desire_waist_v_ = current_waist_vel_;
   
-  // 重置模式2的目标
-  mode2_waist_target_received_ = false;
-  buffered_mode2_waist_target_received_ = false;
+  // 重置模式2的目标（已在 input owner 锁内清理）
   buffered_waist_enable_ = false;
   
   // 重置滤波器状态到当前位置
@@ -268,6 +277,49 @@ void WaistController::setExternalCommandBufferCallback(std::function<bool()> cal
   external_command_buffer_callback_ = std::move(callback);
 }
 
+void WaistController::setOfflineActionInputActive(bool active)
+{
+  std::lock_guard<std::mutex> input_lock(input_owner_mutex_);
+  const bool previous = offline_action_input_active_.load(std::memory_order_relaxed);
+  if (previous == active)
+  {
+    return;
+  }
+
+  // Publish ownership before releasing the mutex. Both producer callbacks take
+  // the same mutex before checking it, so no callback from the old owner can
+  // write a target after this cleanup.
+  offline_action_input_active_.store(active, std::memory_order_relaxed);
+  external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  clearExternalInputTargetsLocked();
+  if (active)
+  {
+    // Ownership can be transferred while the waist is already in mode 2. In
+    // that case changeMode(2) is a no-op, so seed a measured-pose hold here as
+    // well. This prevents the prepare->first-action-frame gap from commanding
+    // a zero waist target.
+    desire_waist_q_ = current_waist_pos_;
+    desire_waist_v_ = current_waist_vel_;
+    raw_mode2_waist_target_q_ = current_waist_pos_;
+    mode2_waist_target_received_ = true;
+    if (waist_filter_initialized_)
+    {
+      waist_joint_pos_filter_.reset(current_waist_pos_);
+      waist_joint_vel_filter_.reset(current_waist_vel_);
+    }
+  }
+  ROS_INFO("[WaistController] Mode-2 input owner -> %s; cleared stale external targets",
+           active ? "offline action" : "generic/VR");
+}
+
+void WaistController::clearExternalInputTargetsLocked()
+{
+  raw_mode2_waist_target_q_.setZero();
+  buffered_mode2_waist_target_q_.setZero();
+  mode2_waist_target_received_ = false;
+  buffered_mode2_waist_target_received_ = false;
+}
+
 void WaistController::applyModeChange(int target_mode)
 {
   if (target_mode == waist_control_mode_)
@@ -309,13 +361,29 @@ void WaistController::applyModeChange(int target_mode)
   }
   else if (target_mode == 2)
   {
-    mode2_waist_target_received_ = false;
+    if (offline_action_input_active_.load(std::memory_order_acquire))
     {
+      // MoRE prepare transfers ownership before switching mode. Hold the
+      // measured pose until the first action frame arrives; commanding zero in
+      // the prepare->first-frame gap creates a visible waist snap.
+      desire_waist_q_ = current_waist_pos_;
+      desire_waist_v_ = current_waist_vel_;
+      raw_mode2_waist_target_q_ = current_waist_pos_;
+      mode2_waist_target_received_ = true;
+      if (waist_filter_initialized_)
+      {
+        waist_joint_pos_filter_.reset(current_waist_pos_);
+        waist_joint_vel_filter_.reset(current_waist_vel_);
+      }
+    }
+    else
+    {
+      mode2_waist_target_received_ = false;
       desire_waist_q_.setZero();
       desire_waist_v_.setZero();
       raw_mode2_waist_target_q_.setZero();
-      waist_is_interpolating_ = true;  // 模式2始终填充命令消息
     }
+    waist_is_interpolating_ = true;  // 模式2始终填充命令消息
     ROS_INFO("[WaistController] Switching to Mode 2: external control (cutoff=%.1f Hz, target_received=%d)", 
              mode2_cutoff_freq_, mode2_waist_target_received_);
   }
@@ -398,12 +466,35 @@ void WaistController::updateMode2(double dt)
 
 void WaistController::waistTrajectoryCallback(const kuavo_msgs::robotWaistControl::ConstPtr& msg)
 {
+  std::uint64_t owner_epoch = 0;
+  {
+    std::lock_guard<std::mutex> input_lock(input_owner_mutex_);
+    if (offline_action_input_active_.load(std::memory_order_relaxed))
+    {
+      ROS_DEBUG_THROTTLE(1.0, "[WaistController] Ignore generic waist target while offline action owns input");
+      return;
+    }
+    owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
+  }
+
+  // Avoid owner->manager / manager->owner lock inversion. The epoch check
+  // below also rejects a message delayed across a complete action session.
   std::function<bool()> external_command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     external_command_buffer_callback = external_command_buffer_callback_;
   }
-  if (external_command_buffer_callback && external_command_buffer_callback())
+  const bool should_buffer =
+      external_command_buffer_callback && external_command_buffer_callback();
+
+  std::lock_guard<std::mutex> input_lock(input_owner_mutex_);
+  if (offline_action_input_active_.load(std::memory_order_relaxed) ||
+      external_input_owner_epoch_.load(std::memory_order_acquire) != owner_epoch)
+  {
+    ROS_DEBUG_THROTTLE(1.0, "[WaistController] Ignore generic waist target while offline action owns input");
+    return;
+  }
+  if (should_buffer)
   {
     if (storeMode2WaistTarget(*msg, buffered_mode2_waist_target_q_))
     {
@@ -433,6 +524,41 @@ void WaistController::waistTrajectoryCallback(const kuavo_msgs::robotWaistContro
   }
 
   // 标记已收到模式2输入（期望速度和位置将在 updateMode2 的三次多项式插值中计算）
+  mode2_waist_target_received_ = true;
+}
+
+void WaistController::offlineActionWaistTrajectoryCallback(
+    const kuavo_msgs::robotWaistControl::ConstPtr& msg)
+{
+  std::lock_guard<std::mutex> input_lock(input_owner_mutex_);
+  if (!offline_action_input_active_.load(std::memory_order_relaxed))
+  {
+    ROS_DEBUG_THROTTLE(1.0, "[WaistController] Ignore offline-action waist target while generic input owns control");
+    return;
+  }
+
+  // Offline actions do not participate in the generic auto-switch/buffer path:
+  // MoRE must establish mode 2 and enable waist replacement before transferring
+  // ownership to this input.
+  if (waist_control_mode_ != 2)
+  {
+    ROS_WARN_THROTTLE(1.0,
+                      "[WaistController] Offline-action waist target received in mode %d (expected 2). Ignoring.",
+                      waist_control_mode_);
+    return;
+  }
+  if (!waist_control_enabled_ || joint_waist_num_ == 0)
+  {
+    ROS_WARN_THROTTLE(1.0,
+                      "[WaistController] Offline-action waist target ignored: enabled=%d, joint_waist_num_=%zu",
+                      waist_control_enabled_, joint_waist_num_);
+    return;
+  }
+  if (!storeMode2WaistTarget(*msg, raw_mode2_waist_target_q_))
+  {
+    return;
+  }
+
   mode2_waist_target_received_ = true;
 }
 
@@ -505,13 +631,41 @@ bool WaistController::storeMode2WaistTarget(const kuavo_msgs::robotWaistControl&
 
 void WaistController::enableWaistControlCallback(const std_msgs::Bool::ConstPtr& msg)
 {
-  bool enable = msg->data;
+  const bool enable = msg->data;
+  std::uint64_t owner_epoch = 0;
+  {
+    std::lock_guard<std::mutex> input_lock(input_owner_mutex_);
+    if (offline_action_input_active_.load(std::memory_order_relaxed))
+    {
+      ROS_DEBUG_THROTTLE(
+          1.0,
+          "[WaistController] Ignore generic waist enable while offline action owns input");
+      return;
+    }
+    owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
+  }
+
+  // Do not hold the input-owner mutex while asking the controller manager;
+  // manager callbacks can synchronously enter MoRE and transfer ownership.
   std::function<bool()> external_command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     external_command_buffer_callback = external_command_buffer_callback_;
   }
-  if (enable && external_command_buffer_callback && external_command_buffer_callback())
+  const bool should_buffer =
+      enable && external_command_buffer_callback && external_command_buffer_callback();
+
+  std::lock_guard<std::mutex> input_lock(input_owner_mutex_);
+  if (offline_action_input_active_.load(std::memory_order_relaxed) ||
+      external_input_owner_epoch_.load(std::memory_order_acquire) != owner_epoch)
+  {
+    ROS_DEBUG_THROTTLE(
+        1.0,
+        "[WaistController] Ignore generic waist enable after input ownership changed");
+    return;
+  }
+
+  if (should_buffer)
   {
     buffered_waist_enable_ = true;
     ROS_DEBUG_THROTTLE(1.0, "[WaistController] Buffer waist external control enable until manipulation controller is active");

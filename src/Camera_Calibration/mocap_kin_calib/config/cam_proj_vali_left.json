@@ -1,0 +1,329 @@
+{
+  "description": "S56 camera projection validation: left arm; 10 paired validation poses including side-yaw observations and a center transition, plus two HOME endpoints; radians.",
+  "purpose": "test",
+  "sensor_topic": "/sensors_data_raw",
+  "indices_note": {
+    "waist_index": 12,
+    "left_arm_range": [
+      13,
+      20
+    ],
+    "right_arm_range": [
+      20,
+      27
+    ],
+    "head_mode": "tail_two"
+  },
+  "camera_projection_check": {
+    "robot_version": 56,
+    "recommended_head_yaw_deg": 0.0,
+    "recommended_head_pitch_deg": 22.0,
+    "checked_head_pitch_range_deg": [
+      20.0,
+      25.0
+    ],
+    "head_command_included": false,
+    "image_size": [
+      1280,
+      720
+    ],
+    "urdf": "../output/urdf_final.urdf",
+    "urdf_sha256": "24bf01de8c71cb49277f5e885415e1b48d01eacb5d23ced75cdc50e60bc984fc",
+    "status": "Offline FK projection checked with saved camera calibration; not physically validated.",
+    "usage": "Hold each pose still before inspecting/saving the overlay. Head angle and hold duration are configured outside this arm JSON.",
+    "side_yaw_check": {
+      "camera_metadata": "../output/cam_proj_readiness_20261008/receipt_live/20261008_101823_932768/metadata.json",
+      "head_pitch_deg": 22.0,
+      "requested_head_yaw_range_deg": [
+        -30.0,
+        30.0
+      ],
+      "head_yaw_sign": "Positive yaw turns toward robot left.",
+      "pose_observation_yaw_deg": {
+        "CPV_WIDE": [
+          -30.0,
+          30.0
+        ],
+        "CPV_LEFT": [
+          30.0
+        ],
+        "CPV_CENTER": [
+          0.0
+        ],
+        "CPV_RIGHT": [
+          -30.0
+        ]
+      },
+      "result": "CPV_LEFT at +30 deg, CPV_RIGHT at -30 deg, and CPV_CENTER at 0 deg project both wrist housings and complete fixed hand meshes inside a 30 px image margin. CPV_WIDE shows the left arm at +30 deg and the right arm at -30 deg; visibility of both arms in one image is not required.",
+      "limitations": "Offline image-boundary projection only; does not test occlusion or physical camera accuracy.",
+      "visibility_requirement": "At head yaw 0 deg a target may be outside the frame; the intended arm(s) must be visible at the corresponding +30 or -30 deg observation angle."
+    }
+  },
+  "sample_count": 12,
+  "samples": [
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.6268956210256071,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 0,
+      "name": "T0",
+      "role": "TRANSIT",
+      "group": "HOME"
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.7853981633974483,
+        0.08726646259971647,
+        -0.0,
+        -0.3490658503988659,
+        -0.0,
+        -0.0,
+        0.0
+      ],
+      "index": 1,
+      "name": "CPV01",
+      "role": "VALIDATION",
+      "group": "CAMERA_FORWARD"
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.8726646259971648,
+        0.08726646259971647,
+        -0.17453292519943295,
+        -0.5235987755982988,
+        0.2617993877991494,
+        -0.0,
+        0.0
+      ],
+      "index": 2,
+      "name": "CPV05",
+      "role": "VALIDATION",
+      "group": "CAMERA_FORWARD"
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.9599310885968813,
+        0.08726646259971647,
+        -0.0,
+        -0.6108652381980153,
+        -0.3490658503988659,
+        0.17453292519943295,
+        0.17453292519943295
+      ],
+      "index": 3,
+      "name": "CPV07",
+      "role": "VALIDATION",
+      "group": "CAMERA_FORWARD"
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.6981317007977318,
+        0.8726646259971648,
+        -0.7853981633974483,
+        -0.17453292519943295,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 4,
+      "name": "CPV_WIDE",
+      "role": "VALIDATION",
+      "group": "CAMERA_YAW_WIDE",
+      "head_yaw_observation_deg": [
+        -30.0,
+        30.0
+      ],
+      "viewing_note": "Observe right arm at head yaw -30 deg and left arm at +30 deg; both wrist origins are outside the image at yaw 0 deg."
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.6981317007977318,
+        0.3490658503988659,
+        -0.7853981633974483,
+        -1.3962634015954636,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 5,
+      "name": "CPV14",
+      "role": "VALIDATION",
+      "group": "CAMERA_FORWARD_NEGATIVE_J3"
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.8726646259971648,
+        0.4363323129985824,
+        -1.0471975511965976,
+        -1.3089969389957472,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 6,
+      "name": "CPV16",
+      "role": "VALIDATION",
+      "group": "CAMERA_FORWARD_NEGATIVE_J3"
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.6981317007977318,
+        1.2217304763960306,
+        -0.7853981633974483,
+        -1.5707963267948966,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 7,
+      "name": "CPV_LEFT",
+      "role": "VALIDATION",
+      "group": "CAMERA_YAW_LEFT",
+      "head_yaw_observation_deg": [
+        30.0
+      ],
+      "viewing_note": "Both arms biased toward robot left; observe with positive head yaw."
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.7853981633974483,
+        0.6108652381980153,
+        -0.9162978572970231,
+        -1.5707963267948966,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 8,
+      "name": "CPV_CENTER",
+      "role": "VALIDATION",
+      "group": "CAMERA_YAW_CENTER_TRANSITION",
+      "head_yaw_observation_deg": [
+        0.0
+      ],
+      "viewing_note": "Midpoint of CPV_LEFT and CPV_RIGHT; pause here with head yaw 0 deg before changing sides."
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.8726646259971648,
+        0.0,
+        -1.0471975511965976,
+        -1.5707963267948966,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 9,
+      "name": "CPV_RIGHT",
+      "role": "VALIDATION",
+      "group": "CAMERA_YAW_RIGHT",
+      "head_yaw_observation_deg": [
+        -30.0
+      ],
+      "viewing_note": "Exchange the CPV_LEFT arm poses and apply mirror_joint_signs; observe with negative head yaw."
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.7853981633974483,
+        0.2617993877991494,
+        -0.3490658503988659,
+        -0.6981317007977318,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 10,
+      "name": "CPV21",
+      "role": "VALIDATION",
+      "group": "CAMERA_FORWARD_NEGATIVE_J3"
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "left_arm_joints": [
+        -0.6268956210256071,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "index": 11,
+      "name": "T11",
+      "role": "TRANSIT",
+      "group": "HOME"
+    }
+  ],
+  "offline_collision_check": {
+    "status": "passed_synchronized_full_hand_non_neighbor_discrete_prefilter_only; not hardware validated",
+    "urdf": "../output/urdf_final.urdf",
+    "urdf_sha256": "24bf01de8c71cb49277f5e885415e1b48d01eacb5d23ced75cdc50e60bc984fc",
+    "geometry": "complete original visual convex hulls with modeled fixed palms and fingers plus original URDF collision primitives; no wrist-only crop",
+    "hand_configuration": "Full palm/finger mesh in the fixed hand shape represented by this URDF; finger articulation, grasped objects and extra attachments are not covered.",
+    "scope": "all 12 synchronized left and right poses and every adjacent linear interpolation",
+    "max_joint_sampling_step_deg": 1.0,
+    "sample_count": 421,
+    "visual_geometry_pair_count": 357,
+    "solver": {
+      "native_ccd": true,
+      "ccd_iterations": 500,
+      "ccd_tolerance": 1e-10
+    },
+    "assumptions": "Arm path: head yaw 0 deg, pitch 22 deg; legs and waist at zero. Separate head-yaw scan holds both arms fixed at each waypoint.",
+    "excluded_pairs": "Same link, parent-child and grandparent-child pairs; connected-joint assembly overlaps are not resolved by this check.",
+    "all_route_min_visual_clearance_mm": 34.55,
+    "all_route_closest_pose": "CPV_LEFT, right link3 versus waist_yaw_link",
+    "minimum_between_arms_visual_clearance_mm": 40.211,
+    "between_arms_closest_segment": "CPV14 to CPV16, between left and right link7 hand geometry",
+    "primitive_collision_check": {
+      "pair_count": 521,
+      "zero_margin_query_both_orders": "no negative contacts",
+      "bidirectional_clearance_threshold_mm": 20.0,
+      "all_samples_meet_threshold": true
+    },
+    "head_yaw_scan": {
+      "scope": "hold both arms fixed at each pose independently; scan head yaw -30 to +30 deg inclusive at 1 deg intervals; not simultaneous arm and head motion",
+      "head_pitch_deg": 22.0,
+      "yaw_range_deg": [
+        -30.0,
+        30.0
+      ],
+      "yaw_sampling_step_deg": 1.0,
+      "sample_count": 732,
+      "visual_geometry_pair_count": 70,
+      "collision_samples": 0,
+      "min_visual_head_arm_clearance_mm": 127.552,
+      "primitive_clearance_at_least_mm": 20.0
+    },
+    "limitations": "Offline discrete model checks only; continuous sweeps, simultaneous arbitrary arm/head movement, connected-joint geometry, tracking error, cables, fixtures, external obstacles and current-pose-to-T0 motion are not validated."
+  }
+}

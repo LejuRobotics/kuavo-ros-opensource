@@ -1,0 +1,19 @@
+# 查询手势 id 语义
+int32 QUERY_ALL = -1       # 返回手势总数
+int32 QUERY_CURRENT = -2   # 返回当前激活手势
+int8 LEFT_HAND = 0         # 左手
+int8 RIGHT_HAND = 1        # 右手
+
+int32 id                   # -1=总数,-2=当前,>=0=特定 id
+int8 hand_side             # LEFT_HAND(0) 或 RIGHT_HAND(1)，不支持双手查询
+---
+bool success
+int32 total_count
+string name
+SG100Curve[] position
+SG100Curve[] torque_ff
+SG100Curve[] kp
+SG100Curve[] kd
+SG100Curve[] output_limit
+SG100Curve[] mode
+string message

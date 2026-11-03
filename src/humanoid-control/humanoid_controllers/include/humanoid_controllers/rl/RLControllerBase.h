@@ -215,6 +215,9 @@ public:
   virtual bool hasNearZeroGaitCommand(double linear_thresh, double angular_thresh) const { return true; }
   virtual bool isInPlaceSteppingActive() const { return false; }
   virtual bool isInPlaceWalkingCommand(double linear_thresh, double angular_thresh) const { return false; }
+  virtual bool allowsWalkingDuringArmAction() const noexcept { return false; }
+  virtual bool hasActiveArmActionSession() const noexcept { return false; }
+  virtual void abortActiveArmActionSessionForSafety() {}
 
   /**
    * @brief 获取控制器的初始状态（用于设置仿真/机器人初始状态）

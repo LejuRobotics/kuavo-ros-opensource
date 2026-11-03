@@ -9,19 +9,25 @@
 
 #!/bin/bash
 
-echo $1
+LICENSE="$1"
+
+if [ -z "$LICENSE" ]; then
+    echo -n "请输入提供的License："
+    read -r LICENSE
+fi
+
+echo $LICENSE
 
 # 定义正则表达式
 pattern="^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{8}-[0-9A-Fa-f]{8}$"
 
 # 检查参数是否匹配正则表达式
-if [[ $1 =~ $pattern ]]; then
-    echo "参数 $1 符合格式。"
+if [[ $LICENSE =~ $pattern ]]; then
+    echo "参数 $LICENSE 符合格式。"
 else
-    echo "参数 $1 不符合格式。"
+    echo "参数 $LICENSE 不符合格式。"
     exit 1
 fi
-
 
 # 检查路径是否存在
 if [ ! -d "/home/lab/.config/lejuconfig/" ]; then
@@ -44,6 +50,5 @@ else
 fi
 
 # 写入license到文件
-echo $1 > $FILE
-echo "已成功写入license: $1"
-
+echo $LICENSE > $FILE
+echo "已成功写入license: $LICENSE"

@@ -9,9 +9,11 @@
 #include <hardware_interface/imu_sensor_interface.h>
 #include <humanoid_common/hardware_interface/ContactSensorInterface.h>
 #include "humanoid_controllers/sensor_data_types.h"
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/FallStandController.h"
 #include "humanoid_controllers/rl/RLControllerManager.h"
+#endif
 
 #include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
 #include <ocs2_core/misc/Benchmark.h>
@@ -35,6 +37,7 @@
 #include "kuavo_msgs/TransportModeCommand.h"
 
 #include "humanoid_controllers/ArmTrajReceiver.h"
+#include "humanoid_controllers/ArmTrajectoryInterpolator.h"
 
 #include "std_srvs/Trigger.h"
 #include "std_srvs/SetBool.h"
@@ -72,7 +75,9 @@
 #include <thread>
 #include <functional>
 #include <cmath>
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
 #include <openvino/openvino.hpp>
+#endif
 #include <sensor_msgs/JointState.h>
 #include "humanoid_controllers/rl/rl_switch_config.h"
 #include "humanoid_controllers/ControllerCmdBlend.h"
@@ -87,7 +92,17 @@ namespace humanoid_controller
   using namespace ocs2;
   using namespace humanoid;
   
-  // MotionTrajectoryData 已移动到 FallStandController.h 中
+#ifndef HUMANOID_CONTROLLERS_HAS_OPENVINO
+  class RLControllerBase;
+  class RLControllerManager;
+
+  struct MotionTrajectoryData {
+    int current_time_step{0};
+    double reference_yaw{0.0};
+    MotionTrajectoryData() = default;
+  };
+#endif
+  // MotionTrajectoryData 已移动到 FallStandController.h 中 (when OpenVINO enabled)
 
   struct gaitTimeName
   {
@@ -358,9 +373,11 @@ namespace humanoid_controller
     double defaultBaseHeightControl_ = 0.9;
     double ruiwo_motor_velocities_factor_{0.0};
     std::string networkModelPath_;
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
     ov::Core core_;
     ov::CompiledModel compiled_model_;
     ov::InferRequest infer_request_;
+#endif
     std::unordered_map<std::string, double> scales_;                 // 存储obs的scale系数
     std::map<std::string, std::array<double, 3>> singleInputDataRLID_; // 存储singleInputData的id、min、max、scale
     std::vector<std::string> singleInputDataRLKeys;
@@ -420,6 +437,10 @@ namespace humanoid_controller
     bool tryApplyPendingExternalArmControllerMode();
     bool shouldBlockWalkingCommandForExternalArmTarget() const;
     bool enableArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
+    bool enableArmTrajInterpCallback(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res);
+    bool applyArmTrajInterpolator(const ros::Time& time, double actual_dt, vector_t& qOut, vector_t& vOut);
+    void resetArmTrajInterpolator();
+    void seedArmCommandFiltersFromCurrentCmd();
     bool enableMmArmTrajectoryControlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     bool getMmArmCtrlCallback(kuavo_msgs::changeArmCtrlMode::Request &req, kuavo_msgs::changeArmCtrlMode::Response &res);
     void real_init_wait();
@@ -633,6 +654,13 @@ namespace humanoid_controller
     ros::Publisher rHandWrenchPub_;
     ros::Publisher armEefWbcPosePublisher_;
 
+    // 延迟测量: WBC从SHM收到的手臂轨迹原始数据 + 滤波后数据 + 处理延迟
+    ros::Publisher armTrajReceivedPub_;   // /vr_incremental/kuavo_arm_traj_shm
+    ros::Publisher armTrajFilteredPub_;   // /vr_incremental/kuavo_arm_traj_filtered
+    std::mutex armTrajRecvTimeMutex_;
+    ros::Time armTrajRecvTime_;           // SHM/ROS回调收到数据的时间戳
+    bool armTrajRecvTimeValid_ = false;   // 标记是否已收到过手臂轨迹数据
+
     ros::Publisher standUpCompletePub_;
     ros::Subscriber jointPosVelSub_;
     ros::Subscriber sensorsDataSub_;
@@ -667,6 +695,7 @@ namespace humanoid_controller
     ros::Subscriber enable_wbc_sub_;
 
     ros::ServiceServer enableArmCtrlSrv_;
+    ros::ServiceServer enableArmTrajInterpSrv_;
     ros::ServiceServer enableMmArmCtrlSrv_;
     ros::ServiceServer getMmArmCtrlSrv_;
     ros::ServiceServer currentGaitNameSrv_;
@@ -837,6 +866,13 @@ namespace humanoid_controller
     LowPassFilter2ndOrder gyro_filter_;
     LowPassFilter2ndOrder arm_joint_pos_filter_;
     LowPassFilter2ndOrder arm_joint_vel_filter_;
+
+    bool enable_arm_traj_interpolator_{false};
+    humanoidController_wheel_wbc::ArmTrajectoryInterpolator armTrajectoryInterpolator_;
+    vector_t arm_traj_interp_prev_q_;
+    vector_t last_wbc_arm_cmd_q_;
+    vector_t last_wbc_arm_cmd_v_;
+    bool was_interpolator_path_{false};
 
     double sensor_frequency_{1000.0};   // 传感器数据频率
     double sensor_dt_{0.001};           // 传感器数据采样周期，用于滤波器和数据缓冲区
@@ -1076,8 +1112,10 @@ namespace humanoid_controller
 
     bool init_fall_down_state_{false};
     // 控制器管理系统：使用控制器管理类统一管理
+#ifdef HUMANOID_CONTROLLERS_HAS_OPENVINO
     std::unique_ptr<RLControllerManager> controller_manager_;  // 控制器管理类
     RLControllerBase* current_controller_ptr_{nullptr};        // 当前控制器指针（从管理类获取）
+#endif
     
     // 保留 fall_down_state_ 用于向后兼容，但实际逻辑改为控制器切换
     FallStandState fall_down_state_{FallStandState::STANDING}; //是否倒地（已废弃，改为控制器切换）

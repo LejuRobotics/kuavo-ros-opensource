@@ -1,8 +1,7 @@
-#!/usr/bin/env zsh
-# generated from catkin/cmake/templates/local_setup.zsh.in
-
+#!/bin/zsh
 CATKIN_SHELL=zsh
-
-# source setup.sh from same directory as this file
-_CATKIN_SETUP_DIR=$(builtin cd -q "`dirname "$0"`" > /dev/null && pwd)
-emulate -R zsh -c 'source "$_CATKIN_SETUP_DIR/setup.sh" --extend --local'
+export _KUAVO_MULTIARCH_ROOT="$(cd "$(dirname "${(%):-%x}")" && pwd)"
+emulate sh
+# shellcheck disable=SC1091
+source "${_KUAVO_MULTIARCH_ROOT}/local_setup.sh"
+emulate zsh

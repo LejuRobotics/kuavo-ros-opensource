@@ -66,10 +66,35 @@ void WheelArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   armModeSubscriber_ = nodeHandle_.subscribe(
       "/quest3/triger_arm_mode", 10, &WheelArmControlBaseROS::armModeCallback, this, ros::TransportHints().tcpNoDelay());
 
-  bonePosesSubscriber_ = nodeHandle_.subscribe(
-      "/leju_quest_bone_poses", 10, &WheelArmControlBaseROS::bonePosesCallback, this, ros::TransportHints().tcpNoDelay());
-  joystickSubscriber_ = nodeHandle_.subscribe(
-      "/quest_joystick_data", 10, &WheelArmControlBaseROS::joystickCallback, this, ros::TransportHints().tcpNoDelay());
+  // input_mode 必须在使用前读取：single_vr（默认）走原有单话题订阅，
+  // dual_vr 走按侧话题订阅（且不订阅自己发布的 /quest_joystick_data，避免 self-loop）。
+  nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/input_mode", inputMode_, std::string("single_vr"));
+  useDualVr_ = (inputMode_ == "dual_vr");
+  ROS_INFO("[WheelArmControlBaseROS] input_mode: %s", inputMode_.c_str());
+
+  if (useDualVr_) {
+    bonePosesLeftSubscriber_ = nodeHandle_.subscribe(
+        "/vr_left/leju_quest_bone_poses", 10, &WheelArmControlBaseROS::bonePosesLeftCallback, this,
+        ros::TransportHints().tcpNoDelay());
+    bonePosesRightSubscriber_ = nodeHandle_.subscribe(
+        "/vr_right/leju_quest_bone_poses", 10, &WheelArmControlBaseROS::bonePosesRightCallback, this,
+        ros::TransportHints().tcpNoDelay());
+    joystickLeftSubscriber_ = nodeHandle_.subscribe(
+        "/vr_left/quest_joystick_data", 10, &WheelArmControlBaseROS::joystickLeftCallback, this,
+        ros::TransportHints().tcpNoDelay());
+    joystickRightSubscriber_ = nodeHandle_.subscribe(
+        "/vr_right/quest_joystick_data", 10, &WheelArmControlBaseROS::joystickRightCallback, this,
+        ros::TransportHints().tcpNoDelay());
+    ROS_INFO("[WheelArmControlBaseROS] dual_vr: subscribing /vr_left|right/leju_quest_bone_poses and "
+             "/vr_left|right/quest_joystick_data");
+  } else {
+    bonePosesSubscriber_ = nodeHandle_.subscribe(
+        "/leju_quest_bone_poses", 10, &WheelArmControlBaseROS::bonePosesCallback, this,
+        ros::TransportHints().tcpNoDelay());
+    joystickSubscriber_ = nodeHandle_.subscribe(
+        "/quest_joystick_data", 10, &WheelArmControlBaseROS::joystickCallback, this,
+        ros::TransportHints().tcpNoDelay());
+  }
 
   sensorDataRaw_ = std::make_shared<kuavo_msgs::sensorsData>();
   latestBonePosesPtr_ = std::make_shared<noitom_hi5_hand_udp_python::PoseInfoList>();
@@ -82,6 +107,7 @@ void WheelArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
   questJoystickDataPublisher_ =
       nodeHandle_.advertise<noitom_hi5_hand_udp_python::JoySticks>("/quest_joystick_data", 10);
+  commLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/comm_latency_ms", 10);
 
   // Load parameters from ROS parameter server
   loadParameters();
@@ -157,6 +183,14 @@ void WheelArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   joyStickHandlerPtr_->initialize();
 
   quest3ArmInfoTransformerPtr_ = std::make_unique<HighlyDynamic::Quest3ArmInfoTransformer>();
+  if (useDualVr_) {
+    // dual_vr：两个按侧独立实例。Quest3ArmInfoTransformer 是 final 类且有状态
+    // （chestPosition_ / qInitChest_ / yawOnlyQuat_ / *HandPoseRelativeToChest_ / 摇杆状态），
+    // 绝不能用同一实例先 update A 再 update B。
+    quest3ArmInfoTransformerLeftPtr_ = std::make_unique<HighlyDynamic::Quest3ArmInfoTransformer>();
+    quest3ArmInfoTransformerRightPtr_ = std::make_unique<HighlyDynamic::Quest3ArmInfoTransformer>();
+    ROS_INFO("[WheelArmControlBaseROS] dual_vr: created independent Left/Right Quest3ArmInfoTransformer");
+  }
   initializeArmInfoTransformerFromJson(configJson);
 
   HandPoseAndElbowPositonListPtr_ = std::make_shared<noitom_hi5_hand_udp_python::PoseInfoList>();
@@ -177,6 +211,47 @@ void WheelArmControlBaseROS::activateController() {}
 void WheelArmControlBaseROS::deactivateController() {}
 
 bool WheelArmControlBaseROS::isRunning() const { return isRunning_.load(); }
+
+Quest3ArmInfoTransformer* WheelArmControlBaseROS::getArmInfoTransformerForSide(const std::string& side) const {
+  if (!useDualVr_) {
+    // single_vr：两侧都返回主实例，行为与改造前完全一致
+    return quest3ArmInfoTransformerPtr_.get();
+  }
+  if (side == "Left") return quest3ArmInfoTransformerLeftPtr_.get();
+  if (side == "Right") return quest3ArmInfoTransformerRightPtr_.get();
+  ROS_WARN("[WheelArmControlBaseROS] getArmInfoTransformerForSide: invalid side '%s'", side.c_str());
+  return nullptr;
+}
+
+// dual_vr：本侧骨骼数据的"新鲜度判定 + Chest 快照"必须在同一个临界区内完成。
+// 按侧时间戳只在各侧 bone 回调里写，且与 transformer 位姿成员同持 transformerDataMutex_，
+// 所以这里读同一把锁；否则可能出现"读到的是新帧的 Chest，但用的是旧帧的时间戳"这类跨帧拼接。
+bool WheelArmControlBaseROS::getFreshSideChestPose(const std::string& side,
+                                                   int64_t staleTimeoutMs,
+                                                   Eigen::Vector3d& chestPos,
+                                                   Eigen::Quaterniond* chestQuatOut) {
+  std::lock_guard<std::mutex> lock(transformerDataMutex_);
+  const Quest3ArmInfoTransformer* transformer = getArmInfoTransformerForSide(side);
+  if (!transformer) return false;
+  const std::chrono::steady_clock::time_point& recvTime =
+      (side == "Right") ? rightBoneRecvTime_ : leftBoneRecvTime_;
+  if (recvTime.time_since_epoch().count() == 0) {
+    return false;  // 从未收到过本侧骨骼帧
+  }
+  const int64_t ageMs =
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - recvTime).count();
+  if (ageMs > staleTimeoutMs) {
+    return false;  // 本侧骨骼数据已过期（Quest 断连/丢帧）
+  }
+  if (!transformer->hasValidChestPose()) {
+    return false;  // 本侧尚未产出过有效 Chest
+  }
+  chestPos = transformer->getChestPosition();
+  if (chestQuatOut) {
+    *chestQuatOut = transformer->getChestQuaternion();
+  }
+  return true;
+}
 
 bool WheelArmControlBaseROS::wasRunning() const { return isRunningLast_.load(); }
 
@@ -353,6 +428,22 @@ void WheelArmControlBaseROS::bonePosesCallback(const noitom_hi5_hand_udp_python:
     std::lock_guard<std::mutex> lock(bonePosesMutex_);
     *latestBonePosesPtr_ = *msg;
   }
+  // 记录骨骼数据到达时刻，用于跨线程全链路延迟测量
+  {
+    std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+    boneRecvTime_ = std::chrono::steady_clock::now();
+    ++boneDataSeq_;
+    boneVrTimestampMs_ = msg->timestamp_ms;
+  }
+  // 测量通信延迟：VR节点发布时刻(timestamp_ms) → IK节点回调接收时刻
+  if (commLatencyPublisher_ && msg->timestamp_ms > 0) {
+    const double nowSec = ros::Time::now().toSec();
+    const double vrSec = static_cast<double>(msg->timestamp_ms) / 1000.0;
+    const double commLatencyMs = (nowSec - vrSec) * 1000.0;
+    std_msgs::Float64 commMsg;
+    commMsg.data = commLatencyMs;
+    commLatencyPublisher_.publish(commMsg);
+  }
   processBonePoses(msg);
 
   // 检查是否需要保存时间戳记录
@@ -363,6 +454,183 @@ void WheelArmControlBaseROS::processBonePoses(const noitom_hi5_hand_udp_python::
   std::lock_guard<std::mutex> lock(transformerDataMutex_);
   if (!quest3ArmInfoTransformerPtr_) return;
   if (!quest3ArmInfoTransformerPtr_->updateHandPoseAndElbowPosition(*msg, *HandPoseAndElbowPositonListPtr_)) return;
+}
+
+void WheelArmControlBaseROS::completeSideArmLengthMeasurementIfReady(Quest3ArmInfoTransformer* transformer,
+                                                                    const std::string& side) {
+  if (!transformer || transformer->isArmLengthMeasurementComplete()) return;
+  if (transformer->armLengthSampleCountForSide(side) <
+      static_cast<size_t>(Quest3ArmInfoTransformer::armLengthSampleTarget())) {
+    return;
+  }
+  // 同一线程内完成，避免与 scaleArmPositions→updateMeasurement 的样本写入竞争
+  transformer->completeArmLengthMeasurement();
+  ROS_INFO("[WheelArmControlBaseROS] %s arm length measurement completed (dual_vr, %d samples, own side only)",
+           side.c_str(),
+           Quest3ArmInfoTransformer::armLengthSampleTarget());
+}
+
+void WheelArmControlBaseROS::bonePosesLeftCallback(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg) {
+  // Quest-A 独占 Left：只更新 left 实例，绝不触碰 right 实例，
+  // 因此 A 侧新帧不会重置/污染 B 侧的 chest、reference 状态。
+  std::lock_guard<std::mutex> lock(transformerDataMutex_);
+  if (!quest3ArmInfoTransformerLeftPtr_) return;
+  // 只有成功处理的骨骼帧才刷新本侧接收时刻：无效帧（validateInput 失败 / computeHandPose 失败）
+  // 不会产出新的 Chest，若仍刷新时间戳，getFreshSideChestPose 会把历史 Chest 误判为仍然有效。
+  if (!quest3ArmInfoTransformerLeftPtr_->updateHandPoseForSide(*msg, "Left")) return;
+  leftBoneRecvTime_ = std::chrono::steady_clock::now();
+  completeSideArmLengthMeasurementIfReady(quest3ArmInfoTransformerLeftPtr_.get(), "Left");
+}
+
+void WheelArmControlBaseROS::bonePosesRightCallback(const noitom_hi5_hand_udp_python::PoseInfoList::ConstPtr& msg) {
+  // Quest-B 独占 Right
+  std::lock_guard<std::mutex> lock(transformerDataMutex_);
+  if (!quest3ArmInfoTransformerRightPtr_) return;
+  // 同左侧：无效帧不刷新本侧接收时刻。
+  if (!quest3ArmInfoTransformerRightPtr_->updateHandPoseForSide(*msg, "Right")) return;
+  rightBoneRecvTime_ = std::chrono::steady_clock::now();
+  completeSideArmLengthMeasurementIfReady(quest3ArmInfoTransformerRightPtr_.get(), "Right");
+}
+
+void WheelArmControlBaseROS::joystickLeftCallback(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
+  {
+    std::lock_guard<std::mutex> lock(joystickLeftMutex_);
+    // 只采信 Quest-A 自己拥有的 left_* 8 个字段，右半部分一律忽略
+    // （对侧 monitor 消息里的默认 0/false 不可信）
+    latestLeftJoystick_.left_x = msg->left_x;
+    latestLeftJoystick_.left_y = msg->left_y;
+    latestLeftJoystick_.left_trigger = msg->left_trigger;
+    latestLeftJoystick_.left_grip = msg->left_grip;
+    latestLeftJoystick_.left_first_button_pressed = msg->left_first_button_pressed;
+    latestLeftJoystick_.left_second_button_pressed = msg->left_second_button_pressed;
+    latestLeftJoystick_.left_first_button_touched = msg->left_first_button_touched;
+    latestLeftJoystick_.left_second_button_touched = msg->left_second_button_touched;
+    leftJoystickRecvTime_ = std::chrono::steady_clock::now();
+    hasLeftJoystick_ = true;
+  }
+  updateMergedJoystick();
+}
+
+void WheelArmControlBaseROS::joystickRightCallback(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
+  {
+    std::lock_guard<std::mutex> lock(joystickRightMutex_);
+    // 只采信 Quest-B 自己拥有的 right_* 8 个字段
+    latestRightJoystick_.right_x = msg->right_x;
+    latestRightJoystick_.right_y = msg->right_y;
+    latestRightJoystick_.right_trigger = msg->right_trigger;
+    latestRightJoystick_.right_grip = msg->right_grip;
+    latestRightJoystick_.right_first_button_pressed = msg->right_first_button_pressed;
+    latestRightJoystick_.right_second_button_pressed = msg->right_second_button_pressed;
+    latestRightJoystick_.right_first_button_touched = msg->right_first_button_touched;
+    latestRightJoystick_.right_second_button_touched = msg->right_second_button_touched;
+    rightJoystickRecvTime_ = std::chrono::steady_clock::now();
+    hasRightJoystick_ = true;
+  }
+  updateMergedJoystick();
+}
+
+bool WheelArmControlBaseROS::isJoystickSideStale(const std::chrono::steady_clock::time_point& recvTime,
+                                                 bool hasData,
+                                                 const std::chrono::steady_clock::time_point& now) const {
+  if (!hasData) return true;
+  const auto elapsed = now - recvTime;
+  return std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() > kJoystickStaleTimeoutMs;
+}
+
+void WheelArmControlBaseROS::updateMergedJoystick() {
+  // 左右 callback 可并发执行，updateMergedJoystick 也会被两个 callback 调用，
+  // 因此这里先按侧取一致快照（msg + 接收时刻 + 有效标志同锁读取），
+  // 再在锁外做超时判断与字段融合；绝不在锁外直接读这些共享成员。
+  // 整函数由 joystickMergeMutex_ 串行化：并发进入的第二次调用会等到第一次
+  // 完成"取快照→判超时→组装→发布→下发"后才开始，避免旧快照晚发布覆盖新快照。
+  // 该锁为最外层，内部只顺序持有某一把下属锁，不与其嵌套。
+  std::lock_guard<std::mutex> mergeLock(joystickMergeMutex_);
+  noitom_hi5_hand_udp_python::JoySticks leftSnapshot;
+  std::chrono::steady_clock::time_point leftRecvTime{};
+  bool hasLeftSnapshot = false;
+  {
+    std::lock_guard<std::mutex> lock(joystickLeftMutex_);
+    leftSnapshot = latestLeftJoystick_;
+    leftRecvTime = leftJoystickRecvTime_;
+    hasLeftSnapshot = hasLeftJoystick_;
+  }
+
+  noitom_hi5_hand_udp_python::JoySticks rightSnapshot;
+  std::chrono::steady_clock::time_point rightRecvTime{};
+  bool hasRightSnapshot = false;
+  {
+    std::lock_guard<std::mutex> lock(joystickRightMutex_);
+    rightSnapshot = latestRightJoystick_;
+    rightRecvTime = rightJoystickRecvTime_;
+    hasRightSnapshot = hasRightJoystick_;
+  }
+
+  // 按侧超时只 neutral 自己那一侧；任一侧超时都不影响另一侧。
+  // 左右统一使用同一次 now，避免两侧用不同判定时刻导致的一致性问题。
+  const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+  const bool leftStale = isJoystickSideStale(leftRecvTime, hasLeftSnapshot, now);
+  const bool rightStale = isJoystickSideStale(rightRecvTime, hasRightSnapshot, now);
+
+  noitom_hi5_hand_udp_python::JoySticks merged;
+  if (!leftStale) {
+    merged.left_x = leftSnapshot.left_x;
+    merged.left_y = leftSnapshot.left_y;
+    merged.left_trigger = leftSnapshot.left_trigger;
+    merged.left_grip = leftSnapshot.left_grip;
+    merged.left_first_button_pressed = leftSnapshot.left_first_button_pressed;
+    merged.left_second_button_pressed = leftSnapshot.left_second_button_pressed;
+    merged.left_first_button_touched = leftSnapshot.left_first_button_touched;
+    merged.left_second_button_touched = leftSnapshot.left_second_button_touched;
+  }
+  if (!rightStale) {
+    merged.right_x = rightSnapshot.right_x;
+    merged.right_y = rightSnapshot.right_y;
+    merged.right_trigger = rightSnapshot.right_trigger;
+    merged.right_grip = rightSnapshot.right_grip;
+    merged.right_first_button_pressed = rightSnapshot.right_first_button_pressed;
+    merged.right_second_button_pressed = rightSnapshot.right_second_button_pressed;
+    merged.right_first_button_touched = rightSnapshot.right_first_button_touched;
+    merged.right_second_button_touched = rightSnapshot.right_second_button_touched;
+  }
+
+  noitom_hi5_hand_udp_python::JoySticks::ConstPtr mergedPtr =
+      boost::make_shared<noitom_hi5_hand_udp_python::JoySticks>(merged);
+
+  // dual_vr 下两个 monitor 只发布 /vr_left|right/quest_joystick_data，
+  // 全局 /quest_joystick_data 没有别的发布者，而 humanoid_quest_control_with_arm
+  // (QuestControlFSMNode) 等下游仍然订阅它。这里由本节点恢复唯一的 merged 发布。
+  // 本函数只可能由 dual_vr 的按侧回调调用，single_vr 路径完全不受影响；
+  // 同时 dual_vr 下本节点只订阅按侧话题，不会订阅自己发布的 /quest_joystick_data，
+  // 不存在 self-loop。
+  questJoystickDataPublisher_.publish(mergedPtr);
+
+  {
+    std::lock_guard<std::mutex> lock(joystickMutex_);
+    if (joyStickHandlerPtr_) {
+      joyStickHandlerPtr_->updateJoyStickData(mergedPtr);
+    }
+  }
+  {
+    // dual_vr：两个按侧实例都喂 merge 后的完整摇杆帧。
+    // 此时 left_* 来自 Quest-A、right_* 来自 Quest-B，都是真实值，
+    // 因此 isJoyRunningPressed()/isJoyStopPressed() 的双侧 AND 语义与 single_vr 完全一致。
+    // 关键点是绝不把某一侧 monitor 的默认 0 当成对侧真实值。
+    // 与 JoyStickHandler 分开加锁（joystickMutex_ 只保护 handler 状态），
+    // 两把锁顺序持有，不产生嵌套。
+    std::lock_guard<std::mutex> lock(transformerDataMutex_);
+    if (quest3ArmInfoTransformerLeftPtr_) {
+      quest3ArmInfoTransformerLeftPtr_->updateJoystickData(merged.left_trigger, merged.left_grip,
+                                                           merged.right_trigger, merged.right_grip);
+    }
+    if (quest3ArmInfoTransformerRightPtr_) {
+      quest3ArmInfoTransformerRightPtr_->updateJoystickData(merged.left_trigger, merged.left_grip,
+                                                            merged.right_trigger, merged.right_grip);
+    }
+  }
+
+  if (merged.left_trigger > 0.8 && merged.right_trigger > 0.8) {
+    gripHoldCount_ = gripHoldCount_ > 1000 ? 1000 : gripHoldCount_ + 1;
+  }
 }
 
 void WheelArmControlBaseROS::joystickCallback(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
@@ -485,30 +753,40 @@ void WheelArmControlBaseROS::initializeArmInfoTransformerFromJson(const nlohmann
   ROS_INFO("🔧 [WheelArmControlBaseROS] Initializing Quest3ArmInfoTransformer from JSON configuration");
   ROS_INFO("==================================================================================");
 
-  processJsonParameter<double>(configJson, "upper_arm_length", [this](double value) {
-    quest3ArmInfoTransformerPtr_->updateUpperArmLength(value);
-  });
+  // 主实例（single_vr 唯一使用；dual_vr 下仍保留，供不区分侧的既有代码路径使用）
+  applyArmInfoTransformerJsonConfig(configJson, *quest3ArmInfoTransformerPtr_);
 
-  processJsonParameter<double>(configJson, "lower_arm_length", [this](double value) {
-    quest3ArmInfoTransformerPtr_->updateLowerArmLength(value);
-  });
-
-  // 初始化基座高度偏移
-  processJsonParameter<double>(configJson, "base_height_offset", [this](double value) {
-    quest3ArmInfoTransformerPtr_->updateBaseHeightOffset(value);
-  });
-
-  // 初始化胸部X轴偏移
-  processJsonParameter<double>(configJson, "base_chest_offset_x", [this](double value) {
-    quest3ArmInfoTransformerPtr_->updateBaseChestOffsetX(value);
-  });
-
-  // 初始化肩宽参数
-  processJsonParameter<double>(
-      configJson, "shoulder_width", [this](double value) { quest3ArmInfoTransformerPtr_->updateShoulderWidth(value); });
+  // dual_vr：两个按侧实例必须用完全相同的机械参数初始化，否则左右臂解算尺度不一致
+  if (quest3ArmInfoTransformerLeftPtr_) {
+    applyArmInfoTransformerJsonConfig(configJson, *quest3ArmInfoTransformerLeftPtr_);
+  }
+  if (quest3ArmInfoTransformerRightPtr_) {
+    applyArmInfoTransformerJsonConfig(configJson, *quest3ArmInfoTransformerRightPtr_);
+  }
 
   ROS_INFO("🎯 [WheelArmControlBaseROS] Quest3ArmInfoTransformer initialization completed");
   ROS_INFO("==================================================================================");
+}
+
+void WheelArmControlBaseROS::applyArmInfoTransformerJsonConfig(const nlohmann::json& configJson,
+                                                               Quest3ArmInfoTransformer& transformer) {
+  processJsonParameter<double>(
+      configJson, "upper_arm_length", [&transformer](double value) { transformer.updateUpperArmLength(value); });
+
+  processJsonParameter<double>(
+      configJson, "lower_arm_length", [&transformer](double value) { transformer.updateLowerArmLength(value); });
+
+  // 初始化基座高度偏移
+  processJsonParameter<double>(
+      configJson, "base_height_offset", [&transformer](double value) { transformer.updateBaseHeightOffset(value); });
+
+  // 初始化胸部X轴偏移
+  processJsonParameter<double>(configJson, "base_chest_offset_x",
+                               [&transformer](double value) { transformer.updateBaseChestOffsetX(value); });
+
+  // 初始化肩宽参数
+  processJsonParameter<double>(configJson, "shoulder_width",
+                               [&transformer](double value) { transformer.updateShoulderWidth(value); });
 }
 
 template <typename T, typename UpdateFunc>

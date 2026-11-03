@@ -4,7 +4,7 @@
 <!-- |    EDITING THIS FILE BY HAND IS NOT RECOMMENDED                                 | -->
 <!-- =================================================================================== -->
 <robot name="biped_v3_all_joint" xmlns:drake="https://drake.mit.edu">
-  <link name="torso">
+  <link name="base_link">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.01779947 0.00029663 0.18176446"/>
       <mass value="36.01214316"/>
@@ -44,7 +44,7 @@
   </link>
   <joint name="leg_l1_joint" type="revolute">
     <origin xyz="-0.0024999 0.087 -0.066" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="base_link" />
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="23.55" />
@@ -195,21 +195,7 @@
       <mass value="0.041379"/>
       <inertia ixx="6.3487E-06" ixy="-2.7168E-06" ixz="4.9324E-06" iyy="2.8379E-05" iyz="7.2737E-07" izz="2.3451E-05"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/l_l_bar.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.6902 0.65882 0.63922 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/l_l_bar.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <joint name="l_l_bar_y" type="continuous">
     <origin rpy="0 0 0" xyz="0 0.0318 -0.09"/>
@@ -231,21 +217,7 @@
       <mass value="0.13223"/>
       <inertia ixx="0.00049161" ixy="3.0645E-12" ixz="1.52E-08" iyy="0.00048973" iyz="-2.4263E-07" izz="4.775E-06"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/l_l_tendon.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.6902 0.65882 0.63922 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/l_l_tendon.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <drake:joint name="l_l_tendon_y" type="universal">
     <origin rpy="0 0 0" xyz="-0.056027 -0.0085 0.015"/>
@@ -259,21 +231,7 @@
       <mass value="0.041379"/>
       <inertia ixx="6.3486E-06" ixy="2.7168E-06" ixz="4.9323E-06" iyy="2.8379E-05" iyz="-7.2736E-07" izz="2.3451E-05"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/l_r_bar.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.6902 0.65882 0.63922 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/l_r_bar.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <joint name="l_r_bar_y" type="continuous">
     <origin rpy="0 0 0" xyz="0 -0.0362 -0.153"/>
@@ -287,21 +245,7 @@
       <mass value="0.10643"/>
       <inertia ixx="0.0001972" ixy="4.1988E-12" ixz="-1.2811E-08" iyy="0.00019587" iyz="1.7341E-07" izz="3.9152E-06"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/l_r_tendon.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.6902 0.65882 0.63922 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/l_r_tendon.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <drake:joint name="l_r_tendon_y" type="universal">
     <origin rpy="0 0 0" xyz="-0.056027 0.0085 0.015"/>
@@ -339,7 +283,7 @@
   </link>
   <joint name="leg_r1_joint" type="revolute">
     <origin xyz="-0.0024999 -0.087 -0.066" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="base_link" />
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.663225115757845" upper="0.314159265358979" effort="180.0" velocity="23.55" />
@@ -491,21 +435,7 @@
       <mass value="0.0413794520732275"/>
       <inertia ixx="6.34865185942549E-06" ixy="2.71679945417066E-06" ixz="4.93236590933488E-06" iyy="2.83792003165434E-05" iyz="-7.27368169902599E-07" izz="2.34510462869433E-05"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/r_r_bar.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.690196078431373 0.658823529411765 0.63921568627451 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/r_r_bar.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <joint name="r_r_bar_y" type="continuous">
     <origin rpy="0 0 0" xyz="0 -0.0318 -0.09"/>
@@ -519,21 +449,7 @@
       <mass value="0.132228698944171"/>
       <inertia ixx="0.000491608612358556" ixy="-3.05402199174078E-12" ixz="1.51985653969833E-08" iyy="0.000489725321370326" iyz="2.42627969905164E-07" izz="4.77496090027913E-06"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/r_r_tendon.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.690196078431373 0.658823529411765 0.63921568627451 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/r_r_tendon.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <drake:joint name="r_r_tendon_y" type="universal">
     <origin rpy="0 0 0" xyz="-0.056027 0.0085 0.015"/>
@@ -554,21 +470,7 @@
       <mass value="0.0413794348706216"/>
       <inertia ixx="6.34864114001538E-06" ixy="-2.71679701707313E-06" ixz="4.93234664344148E-06" iyy="2.83791841625158E-05" iyz="7.2736352651351E-07" izz="2.34510398457472E-05"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/r_l_bar.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.690196078431373 0.658823529411765 0.63921568627451 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/r_l_bar.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <joint name="r_l_bar_y" type="continuous">
     <origin rpy="0 0 0" xyz="0 0.0362 -0.153"/>
@@ -589,21 +491,7 @@
       <mass value="0.106425376742002"/>
       <inertia ixx="0.000197199480044112" ixy="-4.20204697681874E-12" ixz="-1.28105270857608E-08" iyy="0.00019587468108075" iyz="-1.73407864727289E-07" izz="3.91523487668242E-06"/>
     </inertial>
-    <visual>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
-        <mesh filename="../../meshes/r_l_tendon.STL"/>
-      </geometry>
-      <material name="">
-        <color rgba="0.690196078431373 0.658823529411765 0.63921568627451 1"/>
-      </material>
-    </visual>
-    <!-- <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
-      <geometry>
-        <mesh filename="../../meshes/r_l_tendon.STL" />
-      </geometry>
-    </collision> -->
+    <!-- -->
   </link>
   <drake:joint name="r_l_tendon_y" type="universal">
     <origin rpy="0 0 0" xyz="-0.056027 -0.0085 0.015"/>
@@ -635,7 +523,7 @@
   </link>
   <joint name="zarm_l1_joint" type="revolute">
     <origin xyz="-0.017499853 0.29269999999999996 0.4245" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="base_link" />
     <child link="zarm_l1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
@@ -806,7 +694,7 @@
     <joint name="zarm_l7_joint" />
     <actuator name="zarm_l7_joint_motor" />
   </transmission>
-  <link name="l_f_claw_1">
+  <link name="l_f_bar_1">
     <inertial>
       <origin xyz="0.00725 1e-05 -0.01052" rpy="0 0 0" />
       <mass value="0.045" />
@@ -815,21 +703,21 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_f_claw_1.STL" />
+        <mesh filename="../../meshes/l_f_bar_1.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_f_claw_1" type="fixed">
+  <joint name="l_f_bar_1_joint" type="fixed">
     <origin xyz="0.0220000003906073 0 -0.111399999999999" rpy="0 0 0" />
     <parent link="zarm_l7_link" />
-    <child link="l_f_claw_1" />
+    <child link="l_f_bar_1" />
     <axis xyz="0 1 0" />
     <limit lower="-0.698" upper="0.698" effort="0" velocity="0" />
   </joint>
-  <link name="l_f_claw_2">
+  <link name="l_f_bar_2">
     <inertial>
       <origin xyz="-0.00783 0.0 -0.01475" rpy="0 0 0" />
       <mass value="0.009" />
@@ -838,20 +726,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_f_claw_2.STL" />
+        <mesh filename="../../meshes/l_f_bar_2.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_f_claw_2" type="fixed">
+  <joint name="l_f_bar_2" type="fixed">
     <origin xyz="0.025438097941138 0 -0.0464962705293307" rpy="0 0 0" />
-    <parent link="l_f_claw_1" />
-    <child link="l_f_claw_2" />
+    <parent link="l_f_bar_1" />
+    <child link="l_f_bar_2" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="l_f_finger">
+  <link name="l_f_fingers">
     <inertial>
       <origin xyz="-0.01551 -1e-05 -0.01331" rpy="0 0 0" />
       <mass value="0.014" />
@@ -860,20 +748,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_f_finger.STL" />
+        <mesh filename="../../meshes/l_f_fingers.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_f_finger" type="fixed">
+  <joint name="l_f_fingers" type="fixed">
     <origin xyz="-0.0191548518271909 0 -0.0292932014550821" rpy="0 0 0" />
-    <parent link="l_f_claw_2" />
-    <child link="l_f_finger" />
+    <parent link="l_f_bar_2" />
+    <child link="l_f_fingers" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="l_f_claw_3">
+  <link name="l_f_bar_4">
     <inertial>
       <origin xyz="-0.00169 -6e-05 -0.02723" rpy="0 0 0" />
       <mass value="0.013" />
@@ -882,20 +770,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_f_claw_3.STL" />
+        <mesh filename="../../meshes/l_f_bar_4.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_f_claw_3" type="fixed">
+  <joint name="l_f_bar_4_joint" type="fixed">
     <origin xyz="0.0239578932739072 0 -0.135271672920607" rpy="0 0 0" />
     <parent link="zarm_l7_link" />
-    <child link="l_f_claw_3" />
+    <child link="l_f_bar_4" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="l_b_claw_1">
+  <link name="l_b_bar_1">
     <inertial>
       <origin xyz="0.00725 1e-05 -0.01052" rpy="0 0 0" />
       <mass value="0.045" />
@@ -904,20 +792,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_b_claw_1.STL" />
+        <mesh filename="../../meshes/l_b_bar_1.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_b_claw_1" type="fixed">
+  <joint name="l_b_bar_1" type="fixed">
     <origin xyz="-0.0219999996097237 0 -0.1114" rpy="0 0 0" />
     <parent link="zarm_l7_link" />
-    <child link="l_b_claw_1" />
+    <child link="l_b_bar_1" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="l_b_claw_2">
+  <link name="l_b_bar_2">
     <inertial>
       <origin xyz="-0.00783 0.0 -0.01475" rpy="0 0 0" />
       <mass value="0.009" />
@@ -926,20 +814,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_b_claw_2.STL" />
+        <mesh filename="../../meshes/l_b_bar_2.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_b_claw_2" type="fixed">
+  <joint name="l_b_bar_2" type="fixed">
     <origin xyz="-0.0254380979411351 0 -0.0464962705293328" rpy="0 0 0" />
-    <parent link="l_b_claw_1" />
-    <child link="l_b_claw_2" />
+    <parent link="l_b_bar_1" />
+    <child link="l_b_bar_2" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="l_b_finger">
+  <link name="l_b_fingers">
     <inertial>
       <origin xyz="0.01551 1e-05 -0.01331" rpy="0 0 0" />
       <mass value="0.014" />
@@ -948,20 +836,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_b_finger.STL" />
+        <mesh filename="../../meshes/l_b_fingers.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_b_finger" type="fixed">
+  <joint name="l_b_fingers" type="fixed">
     <origin xyz="0.0191548518271917 0 -0.0292932014550803" rpy="0 0 0" />
-    <parent link="l_b_claw_2" />
-    <child link="l_b_finger" />
+    <parent link="l_b_bar_2" />
+    <child link="l_b_fingers" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="l_b_claw_3">
+  <link name="l_b_bar_4">
     <inertial>
       <origin xyz="-0.00169 -6e-05 -0.02723" rpy="0 0 0" />
       <mass value="0.013" />
@@ -970,17 +858,17 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/l_b_claw_3.STL" />
+        <mesh filename="../../meshes/l_b_bar_4.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="l_b_claw_3" type="fixed">
+  <joint name="l_b_bar_4_joint" type="fixed">
     <origin xyz="-0.0239578924930216 0 -0.135271672920607" rpy="0 0 0" />
     <parent link="zarm_l7_link" />
-    <child link="l_b_claw_3" />
+    <child link="l_b_bar_4" />
     <axis xyz="0 1 0" />
   </joint>
   <link name="zarm_r1_link">
@@ -1001,7 +889,7 @@
   </link>
   <joint name="zarm_r1_joint" type="revolute">
     <origin xyz="-0.017499853 -0.29269999999999996 0.4245" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="base_link" />
     <child link="zarm_r1_link" />
     <axis xyz="0 1 0" />
     <limit lower="-3.14159265358979" upper="1.5707963267949" effort="100.0" velocity="41.3433333333333" />
@@ -1172,7 +1060,7 @@
     <joint name="zarm_r7_joint" />
     <actuator name="zarm_r7_joint_motor" />
   </transmission>
-  <link name="r_f_claw_1">
+  <link name="r_f_bar_1">
     <inertial>
       <origin xyz="0.00725 0.00051 -0.01052" rpy="0 0 0" />
       <mass value="0.045" />
@@ -1181,21 +1069,21 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_f_claw_1.STL" />
+        <mesh filename="../../meshes/r_f_bar_1.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_f_claw_1" type="fixed">
+  <joint name="r_f_bar_1_joint" type="fixed">
     <origin xyz="0.0219999996097342 -0.000500000000000958 -0.1114" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
-    <child link="r_f_claw_1" />
+    <child link="r_f_bar_1" />
     <axis xyz="0 1 0" />
     <limit lower="-0.698" upper="0.698" effort="0" velocity="0" />
   </joint>
-  <link name="r_f_claw_2">
+  <link name="r_f_bar_2">
     <inertial>
       <origin xyz="-0.00783 0.0005 -0.01475" rpy="0 0 0" />
       <mass value="0.0034" />
@@ -1204,20 +1092,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_f_claw_2.STL" />
+        <mesh filename="../../meshes/r_f_bar_2.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_f_claw_2" type="fixed">
+  <joint name="r_f_bar_2" type="fixed">
     <origin xyz="0.0254380979411394 0 -0.0464962705293306" rpy="0 0 0" />
-    <parent link="r_f_claw_1" />
-    <child link="r_f_claw_2" />
+    <parent link="r_f_bar_1" />
+    <child link="r_f_bar_2" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="r_f_finger">
+  <link name="r_f_fingers">
     <inertial>
       <origin xyz="-0.01551 0.00079 -0.01331" rpy="0 0 0" />
       <mass value="0.014" />
@@ -1226,20 +1114,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_f_finger.STL" />
+        <mesh filename="../../meshes/r_f_fingers.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_f_finger" type="fixed">
+  <joint name="r_f_fingers" type="fixed">
     <origin xyz="-0.0191548518271941 0 -0.0292932014550819" rpy="0 0 0" />
-    <parent link="r_f_claw_2" />
-    <child link="r_f_finger" />
+    <parent link="r_f_bar_2" />
+    <child link="r_f_fingers" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="r_f_claw_3">
+  <link name="r_f_bar_4">
     <inertial>
       <origin xyz="-0.00169 0.00044 -0.02723" rpy="0 0 0" />
       <mass value="0.013" />
@@ -1248,20 +1136,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_f_claw_3.STL" />
+        <mesh filename="../../meshes/r_f_bar_4.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_f_claw_3" type="fixed">
+  <joint name="r_f_bar_4_joint" type="fixed">
     <origin xyz="0.023957892493034 -0.000500000000001166 -0.135271672920607" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
-    <child link="r_f_claw_3" />
+    <child link="r_f_bar_4" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="r_b_claw_1">
+  <link name="r_b_bar_1">
     <inertial>
       <origin xyz="-0.00725 0.00049 -0.01052" rpy="0 0 0" />
       <mass value="0.045" />
@@ -1270,20 +1158,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_b_claw_1.STL" />
+        <mesh filename="../../meshes/r_b_bar_1.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_b_claw_1" type="fixed">
+  <joint name="r_b_bar_1" type="fixed">
     <origin xyz="-0.022000000390599 -0.000500000000001402 -0.111399999999999" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
-    <child link="r_b_claw_1" />
+    <child link="r_b_bar_1" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="r_b_claw_2">
+  <link name="r_b_bar_2">
     <inertial>
       <origin xyz="0.00783 0.0005 -0.01475" rpy="0 0 0" />
       <mass value="0.009" />
@@ -1292,20 +1180,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_b_claw_2.STL" />
+        <mesh filename="../../meshes/r_b_bar_2.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_b_claw_2" type="fixed">
+  <joint name="r_b_bar_2" type="fixed">
     <origin xyz="-0.0254380979411353 0 -0.0464962705293326" rpy="0 0 0" />
-    <parent link="r_b_claw_1" />
-    <child link="r_b_claw_2" />
+    <parent link="r_b_bar_1" />
+    <child link="r_b_bar_2" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="r_b_finger">
+  <link name="r_b_fingers">
     <inertial>
       <origin xyz="0.01551 0.00081 -0.01331" rpy="0 0 0" />
       <mass value="0.014" />
@@ -1314,20 +1202,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_b_finger.STL" />
+        <mesh filename="../../meshes/r_b_fingers.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_b_finger" type="fixed">
+  <joint name="r_b_fingers" type="fixed">
     <origin xyz="0.0191548518271923 0 -0.0292932014550809" rpy="0 0 0" />
-    <parent link="r_b_claw_2" />
-    <child link="r_b_finger" />
+    <parent link="r_b_bar_2" />
+    <child link="r_b_fingers" />
     <axis xyz="0 1 0" />
   </joint>
-  <link name="r_b_claw_3">
+  <link name="r_b_bar_4">
     <inertial>
       <origin xyz="0.00169 0.00056 -0.02723" rpy="0 0 0" />
       <mass value="0.013" />
@@ -1336,21 +1224,21 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="../../meshes/r_b_claw_3.STL" />
+        <mesh filename="../../meshes/r_b_bar_4.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="r_b_claw_3" type="fixed">
+  <joint name="r_b_bar_4_joint" type="fixed">
     <origin xyz="-0.0239578932738948 -0.000500000000001666 -0.135271672920607" rpy="0 0 0" />
     <parent link="zarm_r7_link" />
-    <child link="r_b_claw_3" />
+    <child link="r_b_bar_4" />
   </joint>
   <!-- end frame -->
-  <!-- <frame link="l_hand_pitch" name="l_hand_sole" xyz="0 0 -0.1" /> -->
+  <!-- <frame link="zarm_l6_link" name="l_hand_sole" xyz="0 0 -0.1" /> -->
   <!-- end frame -->
-  <!-- <frame link="r_hand_pitch" name="r_hand_sole" xyz="0 0 -0.1" /> -->
+  <!-- <frame link="zarm_r6_link" name="r_hand_sole" xyz="0 0 -0.1" /> -->
 </robot>
 

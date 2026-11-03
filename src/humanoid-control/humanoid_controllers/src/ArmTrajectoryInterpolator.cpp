@@ -131,10 +131,12 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
   }
 
   const bool modeChanged = !hasPrevModeFlags_ ||
+                           !isEnabled(prevModeFlags_) ||
                            modeFlags.useArmTrajectoryControl != prevModeFlags_.useArmTrajectoryControl ||
-                           modeFlags.quickMode != prevModeFlags_.quickMode ||
                            modeFlags.lbMpcMode != prevModeFlags_.lbMpcMode ||
                            modeFlags.armCtrlMode != prevModeFlags_.armCtrlMode;
+  // 同一遥操期间 quickMode 只改变执行通路，保留滤波位置、速度和协方差。
+  // 从禁用状态恢复及真正的控制模式变化仍按原逻辑重置。
   hasPrevModeFlags_ = true;
   prevModeFlags_ = modeFlags;
 
@@ -281,8 +283,17 @@ void ArmTrajectoryInterpolator::ensureBackend(size_t dof) {
 
   const double refDt = std::max(config_.referenceUpdatePeriodSec, config_.controlCycleSec);
   const double derivedAcc = (refDt > 1e-6) ? (config_.kalmanVLimit / refDt) : config_.kalmanVLimit;
-  const double nominalAcc = (std::isfinite(derivedAcc) && derivedAcc > 0.0) ? std::clamp(derivedAcc, 5.0, 80.0) : 10.0;
-  const double processNoise = std::clamp(0.1 * nominalAcc * nominalAcc, 1e-9, 400.0);
+  const double accCap =
+      (std::isfinite(config_.kalmanProcessAccCap) && config_.kalmanProcessAccCap > 0.0)
+          ? config_.kalmanProcessAccCap
+          : 80.0;
+  const double qCap =
+      (std::isfinite(config_.kalmanProcessQCap) && config_.kalmanProcessQCap > 0.0)
+          ? config_.kalmanProcessQCap
+          : 400.0;
+  const double nominalAcc =
+      (std::isfinite(derivedAcc) && derivedAcc > 0.0) ? std::clamp(derivedAcc, 5.0, accCap) : 10.0;
+  const double processNoise = std::clamp(0.1 * nominalAcc * nominalAcc, 1e-9, qCap);
 
   backend_->setKinematicLimits(maxVel.cwiseAbs());
   backend_->setKalmanParameters(processNoise,

@@ -298,10 +298,14 @@ def main() -> None:
         enable_arm_quick_mode = bool(rospy.get_param("~enable_wbc_arm_trajectory_control"))
     robot_layout = str(rospy.get_param("~robot_layout", "biped52")).strip()
     is_wheel62 = robot_layout == "wheel62"
+    is_biped45 = robot_layout == "biped45"
     # 轮臂标定默认开启 WBC 手臂轨迹插补，减轻 /kuavo_arm_traj 阶梯指令抖动
     use_arm_traj_interpolator = bool(rospy.get_param("~enable_arm_traj_interpolator", is_wheel62))
-    left_start_index = int(rospy.get_param("~left_start_index", 4 if is_wheel62 else 13))
-    right_start_index = int(rospy.get_param("~right_start_index", 11 if is_wheel62 else 20))
+    # 索引：wheel62→4/11，biped45→12/19（无腰，臂前移），其余人形→13/20
+    left_start_index = int(rospy.get_param("~left_start_index",
+        4 if is_wheel62 else 12 if is_biped45 else 13))
+    right_start_index = int(rospy.get_param("~right_start_index",
+        11 if is_wheel62 else 19 if is_biped45 else 20))
     # 模式切换期间保持发布当前关节，避免下游在切换瞬间回默认零位导致抖动
     pre_mode_hold_sec = float(rospy.get_param("~pre_mode_hold_sec", 0.6))
     post_mode_hold_sec = float(rospy.get_param("~post_mode_hold_sec", 0.6))

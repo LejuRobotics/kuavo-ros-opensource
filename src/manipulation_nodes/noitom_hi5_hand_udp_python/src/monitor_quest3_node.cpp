@@ -3,7 +3,6 @@
 //  - UDP handshake & receiving LejuHandPoseEvent protobuf from Quest3
 //  - Publishing PoseInfoList and JoySticks ROS messages
 //  - Publishing TF frames for Quest3 bones and finger tips
-//  - Computing and publishing robotHeadMotionData from Chest->Head TF
 //  - Discovering Quest3 via UDP broadcasts and broadcasting RobotDescription
 
 #include <ros/ros.h>
@@ -17,7 +16,6 @@
 
 #include <tf2_msgs/TFMessage.h>
 
-#include <kuavo_ros_interfaces/robotHeadMotionData.h>
 #include <kuavo_msgs/JoySticks.h>
 
 #include <noitom_hi5_hand_udp_python/PoseInfo.h>
@@ -25,14 +23,6 @@
 
 #include <hand_pose.pb.h>
 #include <robot_info.pb.h>
-
-#include <ros/package.h>
-
-#include <fstream>
-#include <sstream>
-
-#include "json.hpp"
-using json = nlohmann::json;
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -42,8 +32,8 @@ using json = nlohmann::json;
 #include <unistd.h>
 #include <ifaddrs.h>
 
+#include <chrono>
 #include <cerrno>
-#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <map>
@@ -60,31 +50,6 @@ constexpr int QUEST3_DISCOVERY_START_PORT = 11000;
 constexpr int QUEST3_DISCOVERY_END_PORT   = 11010;
 constexpr int ROBOT_INFO_START_PORT       = 11050;
 constexpr int ROBOT_INFO_END_PORT         = 11060;
-
-double deg(double rad) { return rad * 180.0 / M_PI; }
-
-// Normalize angle to behave similar to Python normalize_degree_in_180
-double normalize_degree_in_180(double degree)
-{
-  if (degree > 180.0)
-  {
-    degree -= 180.0;
-  }
-  else if (degree < -180.0)
-  {
-    degree += 180.0;
-  }
-  return degree;
-}
-
-struct HeadMotionRange
-{
-  // Use a wide default range; Python reads from config.json but here we keep it simple.
-  double pitch_min{-30.0};
-  double pitch_max{30.0};
-  double yaw_min{-85.0};
-  double yaw_max{85.0};
-};
 
 std::vector<std::string> getLocalBroadcastIps()
 {
@@ -133,7 +98,6 @@ class Quest3BoneFramePublisherCpp
 public:
   Quest3BoneFramePublisherCpp(ros::NodeHandle& nh)
     : nh_(nh)
-    , enable_head_control_(true)
     , data_socket_(-1)
     , listening_udp_ports_cnt_(0)
     , exit_listen_thread_for_quest3_broadcast_(false)
@@ -358,7 +322,12 @@ public:
       processPoseData(event, pose_info_list_msg, now);
 
       // Fill meta fields and publish
-      pose_info_list_msg.timestamp_ms      = event.timestamp();
+      // 与 Python monitor 一致: 本机 Unix 毫秒, 供增量 IK 用 ros::Time::now() 同钟算 VR→IK 通信延迟。
+      // 不要用 event.timestamp() (Quest 设备钟), 否则 /vr_incremental/comm_latency_ms 会失真或不可用。
+      pose_info_list_msg.timestamp_ms = static_cast<int64_t>(
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count());
       pose_info_list_msg.is_high_confidence = event.isdatahighconfidence();
       pose_info_list_msg.is_hand_tracking   = event.ishandtracking();
 
@@ -409,65 +378,11 @@ private:
 
     rate_ = ros::Rate(100.0);
 
-    loadHeadMotionRangeFromConfig();
-
     pose_pub_      = nh_.advertise<noitom_hi5_hand_udp_python::PoseInfoList>("/leju_quest_bone_poses", 2);
-    head_data_pub_ = nh_.advertise<kuavo_ros_interfaces::robotHeadMotionData>("/robot_head_motion_data", 10);
     joysticks_pub_ = nh_.advertise<kuavo_msgs::JoySticks>("/quest_joystick_data", 2);
     hand_finger_tf_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/quest_hand_finger_tf", 10);
 
-    nh_.param("enable_head_control", enable_head_control_, true);
-    ROS_INFO_STREAM("enable_head_control: " << (enable_head_control_ ? "true" : "false"));
-  }
-
-  void loadHeadMotionRangeFromConfig()
-  {
-    // 默认范围为 [-180, 180]，与结构体默认值一致
-    std::string pkg_path = ros::package::getPath("noitom_hi5_hand_udp_python");
-    if (pkg_path.empty())
-    {
-      ROS_WARN("Failed to get package path for noitom_hi5_hand_udp_python. Using default head motion range.");
-      return;
-    }
-
-    std::string config_path = pkg_path + "/scripts/config.json";
-    std::ifstream in(config_path.c_str());
-    if (!in.is_open())
-    {
-      ROS_WARN("Failed to open config.json at '%s'. Using default head motion range.", config_path.c_str());
-      return;
-    }
-
-    try
-    {
-      json j = json::parse(in);
-
-      if (j.contains("head_motion_range"))
-      {
-        auto& range = j["head_motion_range"];
-
-        if (range.contains("yaw") && range["yaw"].is_array() && range["yaw"].size() >= 2)
-        {
-          head_motion_range_.yaw_min = range["yaw"][0].get<double>();
-          head_motion_range_.yaw_max = range["yaw"][1].get<double>();
-        }
-
-        if (range.contains("pitch") && range["pitch"].is_array() && range["pitch"].size() >= 2)
-        {
-          head_motion_range_.pitch_min = range["pitch"][0].get<double>();
-          head_motion_range_.pitch_max = range["pitch"][1].get<double>();
-        }
-      }
-
-      ROS_INFO("Head motion range loaded from config.json: "
-               "yaw [%.1f, %.1f], pitch [%.1f, %.1f]",
-               head_motion_range_.yaw_min, head_motion_range_.yaw_max,
-               head_motion_range_.pitch_min, head_motion_range_.pitch_max);
-    }
-    catch (const json::exception& e)
-    {
-      ROS_WARN("Failed to parse config.json: %s. Using default head motion range.", e.what());
-    }
+    ROS_INFO("Quest head command disabled; head_control_node owns /robot_head_motion_data");
   }
 
   void processJoystickData(const LejuHandPoseEvent& event, kuavo_msgs::JoySticks& msg)
@@ -542,11 +457,6 @@ private:
       rz *= scale_factor["z"];
 
       updateFrame(bone_name, rx, ry, rz, rqx, rqy, rqz, rqw, now);
-
-      if (bone_name == "Head" && enable_head_control_)
-      {
-        publishHeadMotionData();
-      }
     }
 
     // Also update the finger relative TFs similar to Python node
@@ -619,38 +529,6 @@ private:
     }
 
     hand_finger_tf_pub_.publish(msg);
-  }
-
-  void publishHeadMotionData()
-  {
-    try
-    {
-      tf::StampedTransform tf_trans;
-      tf_listener_.lookupTransform("Chest", "Head", ros::Time(0), tf_trans);
-
-      tf::Quaternion q = tf_trans.getRotation();
-      double roll, pitch, yaw;
-      tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
-
-      double pitch_deg = normalize_degree_in_180(std::round(deg(roll) * 100.0) / 100.0);
-      double yaw_deg   = normalize_degree_in_180(std::round(deg(pitch) * 100.0) / 100.0);
-
-      // Clamp to configured range
-      pitch_deg = std::max(head_motion_range_.pitch_min,
-                           std::min(head_motion_range_.pitch_max, pitch_deg));
-      yaw_deg   = std::max(head_motion_range_.yaw_min,
-                           std::min(head_motion_range_.yaw_max, yaw_deg));
-
-      kuavo_ros_interfaces::robotHeadMotionData msg;
-      msg.joint_data.resize(2);
-      msg.joint_data[0] = yaw_deg;
-      msg.joint_data[1] = pitch_deg;
-      head_data_pub_.publish(msg);
-    }
-    catch (const tf::TransformException& ex)
-    {
-      ROS_ERROR_STREAM_THROTTLE(1.0, "TF lookup failed for Chest->Head transform: " << ex.what());
-    }
   }
 
   void sendRobotInfoOnBroadcastIps(const std::string& robot_name,
@@ -807,11 +685,7 @@ private:
   std::map<std::string, int> bone_name_to_index_;
   std::map<int, std::string> index_to_bone_name_;
 
-  bool enable_head_control_;
-  HeadMotionRange head_motion_range_;
-
   ros::Publisher pose_pub_;
-  ros::Publisher head_data_pub_;
   ros::Publisher joysticks_pub_;
   ros::Publisher hand_finger_tf_pub_;
 

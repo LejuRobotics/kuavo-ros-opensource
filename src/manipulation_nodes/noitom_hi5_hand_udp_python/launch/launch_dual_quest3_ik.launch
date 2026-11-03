@@ -1,0 +1,347 @@
+<launch>
+    <!-- ===================================================================================
+         双 Quest VR 遥操作入口（Dual VR）
+         ===================================================================================
+         架构（Phase 4.5 定稿）：
+           Quest-A -> monitor-A -> /vr_left/leju_quest_bone_poses   (+ /vr_left/quest_joystick_data)
+           Quest-B -> monitor-B -> /vr_right/leju_quest_bone_poses  (+ /vr_right/quest_joystick_data)
+           两路原始骨骼 -> 唯一 IK 节点的 dual_vr 输入模式
+           唯一 /kuavo_arm_traj
+
+         与单 VR 入口 launch_quest3_ik.launch 的关系：
+           launch_quest3_ik.launch 完全不改，单 VR 行为保持不变；本文件是独立新增入口。
+
+         启动方式（两个 IP 都是强制参数，缺失或相同会立即报错退出）：
+           roslaunch noitom_hi5_hand_udp_python launch_dual_quest3_ik.launch \
+               left_ip_address:=<QUEST_A_IP> right_ip_address:=<QUEST_B_IP>
+
+         隔离实现说明（对应规范第三节）：
+           ROS1 中 `<group ns="...">` 对以 `/` 开头的绝对话题名不生效，因此本文件不使用
+           namespace 做话题隔离，而是走 monitor_quest3.py 已参数化的 ROS 参数：
+             ~bone_poses_topic / ~joystick_topic / ~tf_prefix /
+             ~publish_quest3_globals / ~start_state_server / ~joystick_side
+           这样每个实例的资源归属是显式的，不依赖 ROS 命名规则。
+         =================================================================================== -->
+
+    <!-- ===================================================================================
+         一、双 VR IP 为强制参数
+         不写 default，roslaunch 在未赋值时会直接报
+         "requires the 'left_ip_address' arg to be set" 并以非零码退出。
+         下面的 $(eval ...) 额外校验：两者均非空且必须不相等。
+         =================================================================================== -->
+    <arg name="left_ip_address"/>
+    <arg name="right_ip_address"/>
+    <param name="/dual_vr/ip_check"
+           value="$(eval (arg('left_ip_address') and arg('right_ip_address') and arg('left_ip_address') != arg('right_ip_address')) or (_ for _ in ()).throw(RuntimeError('dual VR: left_ip_address and right_ip_address must both be set and must differ')))"/>
+    <param name="/dual_vr/left_ip_address" value="$(arg left_ip_address)"/>
+    <param name="/dual_vr/right_ip_address" value="$(arg right_ip_address)"/>
+
+    <!-- 双 VR 模式下 C++ monitor 尚未支持（其话题名在源码中硬编码，无法按侧隔离）。
+         这里显式拒绝，避免出现"看起来支持、实际两实例互相覆盖"的半成品状态。 -->
+    <arg name="use_cpp_monitor" default="false"/>
+    <param name="/dual_vr/monitor_check"
+           value="$(eval (not arg('use_cpp_monitor')) or (_ for _ in ()).throw(RuntimeError('dual VR: use_cpp_monitor=true is not supported (C++ monitor hardcodes /leju_quest_bone_poses and /quest_joystick_data); use the Python monitor')))"/>
+
+    <!-- ===================================================================================
+         二、通用参数（与 launch_quest3_ik.launch 同名同义，供后续 IK 节点复用）
+         =================================================================================== -->
+    <!-- IK 绑核核列表由分区策略导出（platform_roslaunch.sh -> runtime_partition.py
+         的 KUAVO_IK_CPUS）。未经包装入口启动时该变量为空，不写参数，节点退化为
+         原有的“只设优先级、不绑核”行为，单 VR / dual VR 语义不变。 -->
+    <arg name="vr_ik_thread_cpus" default="$(optenv KUAVO_IK_CPUS)"/>
+    <group if="$(eval arg('vr_ik_thread_cpus') != '')">
+        <rosparam param="/vr_ik/thread_cpus" subst_value="true">[$(arg vr_ik_thread_cpus)]</rosparam>
+    </group>
+    <arg name="version" default="4" />
+    <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="ctrl_arm_idx" default="2" />
+    <arg name="ik_type_idx" default="0" />
+    <arg name="control_torso" default="false" />
+    <arg name="control_finger_type" default="0" />
+    <arg name="predict_gesture" default="false" />
+    <arg name="enable_vr_latency_diagnostics" default="false" />
+    <arg name="ee_type" default="qiangnao"/>
+    <arg name="enable_head_control" default="true"/>
+    <arg name="hand_reference_mode" default="thumb_index"/>
+    <arg name="use_arm_collision" default="false"/>
+    <arg name="use_two_stage_ik" default="true"/>
+    <arg name="enable_vr_stop_robot" default="true"/>
+    <arg name="single_hand_mode" default="false" />
+    <arg name="lock_knee_leg" default="false"/>
+    <arg name="use_arm_only_ik" default="false"/>
+    <arg name="init_control_waist_enable" default="true"/>
+    <arg name="enable_timestamp_log" default="false" />
+    <arg name="use_pico" default="false"/>
+    <arg name="enable_videostream" default="false"/>
+    <arg name="camera_publisher_name" default="/camera/color"/>
+    <arg name="finger_processing_hz" default="30.0" />
+    <arg name="ik_solution_timeout_s" default="0.2" />
+    <arg name="enable_vr_visualization" default="false" />
+    <arg name="enable_vr_transform_diagnostics" default="false" />
+    <arg name="enable_vr_transform_debug_topics" default="false" />
+    <arg name="vr_transform_debug_publish_hz" default="10.0" />
+    <arg name="use_incremental_hand_orientation" default="false" />
+    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) // 10 == 6)"/>
+    <!-- 与 launch_quest3_ik.launch 同名同义：绝对式 IK 肩 pitch 上限软限制 -->
+    <arg name="limit_shoulder_pitch_upper" default="true" />
+    <arg name="shoulder_pitch_upper_limit" default="0.3" />
+
+    <!-- ===================================================================================
+         二·补、C++ Incremental IK 开关（D7）
+
+         false（默认）：本文件保持原有 Absolute Dual VR 行为 —— 启动 ik_ros_uni.py input_mode=dual_vr。
+         true：改为启动 C++ Incremental Dual VR —— 唯一 wheel_ik_ros_uni_cpp_node，
+               同时给 /quest3/input_mode 传 dual_vr，走按侧 bone/joystick 订阅。
+
+         两种模式都只有一个 IK 节点、一个 /kuavo_arm_traj 有效 publisher。
+         Python monitor A/B 两种模式完全共用（本文件不新增/不修改任何 monitor 参数）。
+         =================================================================================== -->
+    <arg name="use_cpp_incremental_ik" default="false"/>
+    <param name="/use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)" type="bool"/>
+
+    <!-- ===================================================================================
+         二·补二、Dual VR 躯干 ownership（唯一参数）
+
+         机器人躯干 / 腰部（chest position + chest orientation / waist yaw & pitch、
+         以及基于 chest 的下肢参考）跟随哪一侧 Quest：
+           left （默认）：Quest-A / Left  —— 与当前已通过真机的行为一致
+           right         ：Quest-B / Right —— 真正使用 B 侧手持设备上报的 Chest 数据
+
+         约束（本参数**只**决定躯干 ownership）：
+           - 手臂 ownership 不变：Left Arm 恒为 Quest-A，Right Arm 恒为 Quest-B
+           - 头部 / /tf / /quest3/* / RobotStateServer 等全局资源 ownership 不变
+             （Quest-A 仍为 Primary，Quest-B 仍为 Secondary）
+           - 只对 use_cpp_incremental_ik=true 的 C++ Incremental Dual VR 生效；
+             single_vr 完全不受影响（参数即使被传入也不会改变任何行为）
+
+         非法值（例如 torso_control_side:=abc）在启动阶段直接报错：
+         这里先做一次 launch 级校验，C++ 节点内部还会再校验一次并 ROS_FATAL 停止节点。
+         =================================================================================== -->
+    <arg name="torso_control_side" default="left"/>
+    <param name="/dual_vr/torso_control_side_check"
+           value="$(eval (arg('torso_control_side') in ('left', 'right')) or (_ for _ in ()).throw(RuntimeError('dual VR: invalid torso_control_side, expected left or right')))"/>
+
+    <!-- C++ incremental 必需的全局参数（与 launch_quest3_ik.launch 同名同值）：
+         /control_finger_type 与 /end_effector_type 由 WheelJoyStickHandler::loadHandControlParameters()
+         以 hasParam 轮询等待，缺失会卡死；这里显式写入。 -->
+    <param name="/control_finger_type" value="$(arg control_finger_type)" type="int"/>
+    <param name="/end_effector_type" value="$(arg ee_type)"/>
+
+    <!-- ===================================================================================
+         二·补、C++ incremental 参数（仅在 use_cpp_incremental_ik=true 时被节点读取；
+         数值与 launch_quest3_ik.launch 完全一致，保证 single/dual 行为可对齐）
+         =================================================================================== -->
+    <arg name="task_space_acc_limit" default="500.0" />
+    <arg name="task_space_jerk_limit" default="3000.0" />
+    <arg name="joint_space_acc_limit" default="500.0" />
+    <arg name="joint_space_jerk_limit" default="3000.0" />
+    <arg name="max_joint_velocity" default="30.0" />
+    <arg name="arm_traj_smooth_enable" default="true" />
+    <arg name="arm_traj_smooth_wn" default="30.0" />
+    <arg name="arm_traj_smooth_zeta" default="1.0" />
+    <arg name="arm_traj_smooth_acc_limit" default="60.0" />
+    <arg name="delta_scale_x" default="1.26" />
+    <arg name="delta_scale_y" default="1.26" />
+    <arg name="delta_scale_z" default="1.26" />
+    <arg name="delta_scale_roll" default="1.0" />
+    <arg name="delta_scale_pitch" default="1.0" />
+    <arg name="delta_scale_yaw" default="1.0" />
+    <arg name="max_pos_diff" default="0.45" />
+    <arg name="arm_move_threshold" default="0.002" />
+    <arg name="reset_joint_to_default" default="true" />
+    <arg name="pos_vel_limit" default="30.0" />
+    <arg name="left_hand_quat_offset_roll" default="0.0" />
+    <arg name="left_hand_quat_offset_pitch" default="0.0" />
+    <arg name="left_hand_quat_offset_yaw" default="0.0" />
+    <arg name="right_hand_quat_offset_roll" default="0.0" />
+    <arg name="right_hand_quat_offset_pitch" default="0.0" />
+    <arg name="right_hand_quat_offset_yaw" default="0.0" />
+    <arg name="sphere_radius_limit" default="0.6" />
+    <arg name="min_reachable_distance" default="0.08" />
+    <arg name="elbow_min_distance" default="0.16" />
+    <arg name="elbow_max_distance" default="0.24" />
+    <arg name="box_min_bound" default="[0.00, -0.6, -0.19]" />
+    <arg name="box_max_bound" default="[0.4, 0.6, 0.4]" />
+    <arg name="chest_offset_y_ax" default="0.05" />
+    <arg name="left_center" default="[0, 0.02, 0]" />
+    <arg name="right_center" default="[0, -0.02, 0]" />
+    <arg name="default_left_hand_pos_on_exit" default="[0.00, 0.293, -0.16]" />
+    <arg name="default_right_hand_pos_on_exit" default="[0.00, -0.293, -0.16]" />
+    <arg name="hand_changing_mode_threshold" default="1.20" />
+    <arg name="zyx_limits_final" default="[1.4923, 1.4923, 1.4923]" />
+    <arg name="zyx_limits_ee" default="[1.4923, 1.4923, 1.4923]" />
+    <arg name="zyx_limits_link4" default="[1.5708, 0.6, 0.6]" />
+
+    <param name="/reset_joint_to_default" value="$(arg reset_joint_to_default)" type="bool"/>
+
+    <param name="/enable_vr_stop_robot" value="$(arg enable_vr_stop_robot)" type="bool"/>
+    <param name="control_torso" value="$(arg control_torso)" type="bool"/>
+    <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
+    <param name="/single_hand_mode" value="$(arg single_hand_mode)" type="bool"/>
+    <param name="/use_pico" value="$(arg use_pico)" type="bool"/>
+    <param name="/enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
+    <param name="/enable_timestamp_log" value="$(arg enable_timestamp_log)" type="bool"/>
+
+    <!-- ===================================================================================
+         三、Monitor 双实例
+
+         资源归属：
+           Quest-A = Primary  Quest：拥有 /tf、/quest3/*、/robot_head_motion_data、
+                                     /robot_chest_*、/quest_hand_finger_tf，并启动唯一的
+                                     RobotStateServer（UDP 15170）
+           Quest-B = Secondary Quest：以上全局资源全部不发布（publish_quest3_globals=false），
+                                     也不启动 RobotStateServer（start_state_server=false）
+         =================================================================================== -->
+
+    <!-- Quest-A：左臂 / 左手 / 左手手指 -->
+    <!-- 节点名保持 monitor_quest3：vr_manager.py 用精确节点名列表
+         ["/ik_ros_uni", "/ik_ros_uni_cpp_node", "/monitor_quest3", "/monitor_quest3_cpp"]
+         判断 VR 链路是否在运行，改名会导致网页端 VR 状态永远显示未连接。 -->
+    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg left_ip_address)"
+          name="monitor_quest3" output="screen">
+        <param name="enable_head_control" value="$(arg enable_head_control)" />
+        <param name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
+        <!-- Primary：tf_prefix 为空，保持与单 VR 完全一致的 frame 名 -->
+        <param name="tf_prefix" value="" />
+        <param name="publish_quest3_globals" value="true" type="bool"/>
+        <param name="start_state_server" value="true" type="bool"/>
+        <param name="bone_poses_topic" value="/vr_left/leju_quest_bone_poses" />
+        <param name="joystick_topic" value="/vr_left/quest_joystick_data" />
+        <param name="joystick_side" value="left" />
+        <!-- 按侧连接状态：A 侧同时继续维护全局 /quest3/connected（publish_quest3_globals=true） -->
+        <param name="connected_param" value="/vr_left/connected" />
+    </node>
+
+    <!-- Quest-B：右臂 / 右手 / 右手手指 -->
+    <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg right_ip_address)"
+          name="monitor_quest3_right" output="screen">
+        <param name="enable_head_control" value="false" />
+        <param name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
+        <!-- Secondary：骨骼 TF frame 加 right_ 前缀，避免与 A 侧 torso->LeftHandPalm 同名冲突 -->
+        <param name="tf_prefix" value="right_" />
+        <param name="publish_quest3_globals" value="false" type="bool"/>
+        <param name="start_state_server" value="false" type="bool"/>
+        <param name="bone_poses_topic" value="/vr_right/leju_quest_bone_poses" />
+        <param name="joystick_topic" value="/vr_right/quest_joystick_data" />
+        <param name="joystick_side" value="right" />
+        <!-- 按侧连接状态：B 侧只写 /vr_right/connected，绝不写 /quest3/connected -->
+        <param name="connected_param" value="/vr_right/connected" />
+    </node>
+
+    <!-- ===================================================================================
+         四、唯一 IK 节点（Step 4）
+
+         全系统只有一个 IK 节点、一个 /kuavo_arm_traj 发布者：
+           - 节点名必须是 ik_ros_uni（vr_manager.py 用精确节点名判断 VR 链路状态）
+           - input_mode=dual_vr 时内部构造两个 Quest3ArmInfoTransformer：
+               A 实例只算 Left（用 /vr_left 的 Chest），B 实例只算 Right（用 /vr_right 的 Chest）
+             并在 bone worker 内手工拼装 [LeftHand(A), LeftElbow(A), RightHand(B), RightElbow(B)]
+           - single_vr 默认路径完全不受影响，本文件显式传 dual_vr
+
+         两个 bone / joystick 话题按侧订阅（Step 5 起 joystick 也走 /vr_left、/vr_right）。
+         =================================================================================== -->
+    <node pkg="motion_capture_ik" type="ik_ros_uni.py" name="ik_ros_uni"
+          args=" --version $(arg version) --ctrl_arm_idx $(arg ctrl_arm_idx) --ik_type_idx $(arg ik_type_idx) --control_torso=$(arg control_torso) --control_finger_type=$(arg control_finger_type) --predict_gesture=$(arg predict_gesture) --ee_type $(arg ee_type) --hand_reference_mode=$(arg hand_reference_mode) --use_two_stage_ik=$(arg use_two_stage_ik)"
+          output="screen" unless="$(arg use_cpp_incremental_ik)">
+        <param name="input_mode" value="dual_vr" type="str"/>
+        <param name="use_arm_collision" value="$(arg use_arm_collision)"/>
+        <param name="enable_vr_visualization" value="$(arg enable_vr_visualization)" type="bool"/>
+        <param name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>
+        <param name="enable_vr_transform_diagnostics" value="$(arg enable_vr_transform_diagnostics)" type="bool"/>
+        <param name="enable_vr_transform_debug_topics" value="$(arg enable_vr_transform_debug_topics)" type="bool"/>
+        <param name="vr_transform_debug_publish_hz" value="$(arg vr_transform_debug_publish_hz)" type="double"/>
+        <param name="finger_processing_hz" value="$(arg finger_processing_hz)" type="double"/>
+        <param name="ik_solution_timeout_s" value="$(arg ik_solution_timeout_s)" type="double"/>
+        <param name="/quest3/limit_shoulder_pitch_upper" value="$(arg limit_shoulder_pitch_upper)" type="bool"/>
+        <param name="/quest3/shoulder_pitch_upper_limit" value="$(arg shoulder_pitch_upper_limit)" type="double"/>
+    </node>
+
+    <!-- ===================================================================================
+         四·补、唯一 C++ Incremental IK 节点（D7，仅 use_cpp_incremental_ik=true 时启动）
+
+         与上面的 Python IK 节点严格互斥（unless / if），因此任意一次运行
+         只有一个 IK 节点、一个 /kuavo_arm_traj 有效 publisher。
+
+         节点名必须是 ik_ros_uni_cpp_node：
+           - vr_manager.py 用精确节点名列表判断 VR 链路是否在运行
+           - ROS1 下 <node name="X"> 内的 <param name="/quest3/..."> 实际落在
+             /X/quest3/...，与 C++ 源码里 hardcoded 的
+             /ik_ros_uni_cpp_node/quest3/* 完全一致（已用 roslaunch dump-params 验证）
+
+         type 用 wheel_ik_ros_uni_cpp_node（WheelQuest3IkIncrementalROS）：
+           S400063 = 63.4 -> wheel_ik = (63 // 10 == 6) = true，
+           单 VR 下命中的正是这一支（launch_quest3_ik.launch:219）。
+           本文件第一版只适配这一支，use_arm_only_ik 保持 false 不参与。
+
+         新增的关键一行是 <param name="/quest3/input_mode" value="dual_vr"/>：
+         WheelArmControlBaseROS 读 /ik_ros_uni_cpp_node/quest3/input_mode 决定
+         订阅 /vr_left|right/leju_quest_bone_poses 与 /vr_left|right/quest_joystick_data，
+         并给两个按侧 Quest3ArmInfoTransformer 实例分别喂 A/B 的 Chest。
+
+         其余 /quest3/* 参数与 launch_quest3_ik.launch:215-262 完全同名同值，
+         保证 single_vr / dual_vr 的 IK 数学与限幅行为可对齐。
+         =================================================================================== -->
+    <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="wheel_ik_ros_uni_cpp_node"
+          output="screen" if="$(eval arg('use_cpp_incremental_ik') and wheel_ik and not arg('use_arm_only_ik'))">
+        <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
+        <param name="control_torso" value="$(arg control_torso)" />
+        <param name="/end_effector_type" value="$(arg ee_type)"/>
+        <!-- Dual VR 输入模式：按侧 bone / joystick 订阅 + 两个独立 Transformer -->
+        <param name="/quest3/input_mode" value="dual_vr" type="str"/>
+        <!-- Dual VR 躯干 ownership（唯一参数，left / right；默认 left 与真机验证行为一致） -->
+        <param name="/quest3/torso_control_side" value="$(arg torso_control_side)" type="str"/>
+        <param name="/quest3/lock_knee_leg" value="$(arg lock_knee_leg)" type="bool"/>
+        <param name="/quest3/task_space_acc_limit" value="$(arg task_space_acc_limit)" />
+        <param name="/quest3/task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
+        <param name="/quest3/joint_space_acc_limit" value="$(arg joint_space_acc_limit)" />
+        <param name="/quest3/joint_space_jerk_limit" value="$(arg joint_space_jerk_limit)" />
+        <param name="/quest3/max_joint_velocity" value="$(arg max_joint_velocity)" />
+        <param name="/quest3/arm_traj_smooth_enable" value="$(arg arm_traj_smooth_enable)" />
+        <param name="/quest3/arm_traj_smooth_wn" value="$(arg arm_traj_smooth_wn)" />
+        <param name="/quest3/arm_traj_smooth_zeta" value="$(arg arm_traj_smooth_zeta)" />
+        <param name="/quest3/arm_traj_smooth_acc_limit" value="$(arg arm_traj_smooth_acc_limit)" />
+        <param name="/quest3/delta_scale_x" value="$(arg delta_scale_x)" />
+        <param name="/quest3/delta_scale_y" value="$(arg delta_scale_y)" />
+        <param name="/quest3/delta_scale_z" value="$(arg delta_scale_z)" />
+        <param name="/quest3/delta_scale_roll" value="$(arg delta_scale_roll)" />
+        <param name="/quest3/delta_scale_pitch" value="$(arg delta_scale_pitch)" />
+        <param name="/quest3/delta_scale_yaw" value="$(arg delta_scale_yaw)" />
+        <param name="/quest3/max_pos_diff" value="$(arg max_pos_diff)" />
+        <param name="/quest3/arm_move_threshold" value="$(arg arm_move_threshold)" />
+        <param name="/quest3/pos_vel_limit" value="$(arg pos_vel_limit)" />
+        <param name="/quest3/left_hand_quat_offset_roll" value="$(arg left_hand_quat_offset_roll)" />
+        <param name="/quest3/left_hand_quat_offset_pitch" value="$(arg left_hand_quat_offset_pitch)" />
+        <param name="/quest3/left_hand_quat_offset_yaw" value="$(arg left_hand_quat_offset_yaw)" />
+        <param name="/quest3/right_hand_quat_offset_roll" value="$(arg right_hand_quat_offset_roll)" />
+        <param name="/quest3/right_hand_quat_offset_pitch" value="$(arg right_hand_quat_offset_pitch)" />
+        <param name="/quest3/right_hand_quat_offset_yaw" value="$(arg right_hand_quat_offset_yaw)" />
+        <!-- 手部位置约束参数 -->
+        <param name="/quest3/sphere_radius_limit" value="$(arg sphere_radius_limit)" />
+        <param name="/quest3/min_reachable_distance" value="$(arg min_reachable_distance)" />
+        <param name="/quest3/elbow_min_distance" value="$(arg elbow_min_distance)" />
+        <param name="/quest3/elbow_max_distance" value="$(arg elbow_max_distance)" />
+        <param name="/quest3/use_incremental_hand_orientation" value="$(arg use_incremental_hand_orientation)" />
+        <param name="/quest3/hand_changing_mode_threshold" value="$(arg hand_changing_mode_threshold)" />
+        <rosparam param="/quest3/box_min_bound" subst_value="True">$(arg box_min_bound)</rosparam>
+        <rosparam param="/quest3/box_max_bound" subst_value="True">$(arg box_max_bound)</rosparam>
+        <param name="/quest3/chest_offset_y_ax" value="$(arg chest_offset_y_ax)" />
+        <rosparam param="/quest3/left_center" subst_value="True">$(arg left_center)</rosparam>
+        <rosparam param="/quest3/right_center" subst_value="True">$(arg right_center)</rosparam>
+        <rosparam param="/quest3/default_left_hand_pos_on_exit" subst_value="True">$(arg default_left_hand_pos_on_exit)</rosparam>
+        <rosparam param="/quest3/default_right_hand_pos_on_exit" subst_value="True">$(arg default_right_hand_pos_on_exit)</rosparam>
+        <!-- 四元数角度限制参数 -->
+        <rosparam param="/quest3/zyx_limits_final" subst_value="True">$(arg zyx_limits_final)</rosparam>
+        <rosparam param="/quest3/zyx_limits_ee" subst_value="True">$(arg zyx_limits_ee)</rosparam>
+        <rosparam param="/quest3/zyx_limits_link4" subst_value="True">$(arg zyx_limits_link4)</rosparam>
+    </node>
+
+    <!-- humanoid_quest_control_with_arm（5W 平台辅助节点）
+         启动条件与 launch_quest3_ik.launch:325 一致（只由 wheel_ik / use_arm_only_ik 决定），
+         Absolute 与 Incremental 两种模式下都启动，订阅唯一 merged /quest_joystick_data。 -->
+    <node pkg="humanoid_interface_ros" type="humanoid_quest_control_with_arm" name="humanoid_quest_control_with_arm"
+          output="screen" if="$(eval wheel_ik or arg('use_arm_only_ik'))"
+          launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh">
+        <param name="wheel_ik" value="$(arg wheel_ik)" />
+        <param name="use_pico" value="$(arg use_pico)" />
+    </node>
+</launch>

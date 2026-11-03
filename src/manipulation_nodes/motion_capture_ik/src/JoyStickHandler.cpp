@@ -47,6 +47,7 @@ void JoyStickHandler::initialize() {
   rightSecondButtonPressed_ = false;
   rightFirstButtonTouched_ = false;
   rightFirstButtonPressed_ = false;
+  rightSecondButtonTouched_ = false;
 
   buttonYLast_ = false;
   freezeFinger_ = false;
@@ -77,6 +78,7 @@ void JoyStickHandler::initialize() {
 
 void JoyStickHandler::reset() {
   std::lock_guard<std::mutex> lock(dataMutex_);
+  sg100_input_received_.store(0.0);
 
   handPositionData_.hasValidData = false;
   clawCommandData_.hasValidData = false;
@@ -106,6 +108,7 @@ void JoyStickHandler::reset() {
   rightSecondButtonPressed_ = false;
   rightFirstButtonTouched_ = false;
   rightFirstButtonPressed_ = false;
+  rightSecondButtonTouched_ = false;
 
   buttonYLast_ = false;
   freezeFinger_ = false;
@@ -158,6 +161,12 @@ double JoyStickHandler::getRightJoyStickY() const {
 bool JoyStickHandler::getRightJoyStickYHold() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return RightJoyStickYHold_;
+}
+
+bool JoyStickHandler::hasFreshSg100Input(double timeout) const {
+  const double received = sg100_input_received_.load();
+  const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  return received > 0 && now - received < timeout;
 }
 
 void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg) {
@@ -237,6 +246,10 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
       rightJoyStickY_ = 0.0;
     }
   }
+  const bool sg100_valid = std::isfinite(msg->left_trigger) && std::isfinite(msg->right_trigger) &&
+      msg->left_trigger >= 0 && msg->left_trigger <= 1 && msg->right_trigger >= 0 && msg->right_trigger <= 1;
+  sg100_input_received_.store(sg100_valid ? std::chrono::duration<double>(
+      std::chrono::steady_clock::now().time_since_epoch()).count() : 0.0);
   leftJoystick_[0] = msg->left_trigger;
   leftJoystick_[1] = msg->left_grip;
   rightJoystick_[0] = msg->right_trigger;
@@ -258,6 +271,7 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
   leftFirstButtonPressed_ = msg->left_first_button_pressed;
   rightSecondButtonPressed_ = msg->right_second_button_pressed;
   rightFirstButtonTouched_ = msg->right_first_button_touched;
+  rightSecondButtonTouched_ = msg->right_second_button_touched;
   rightFirstButtonPressed_ = msg->right_first_button_pressed;
 
   // 检测Y按钮（left_second_button）的边沿触发，实现冻结功能切换
@@ -423,7 +437,7 @@ void JoyStickHandler::loadHandControlParameters() {
     nh.getParam("/end_effector_type", endEffectorTypeStr);
 
     if (endEffectorTypeStr != "qiangnao" && endEffectorTypeStr != "qiangnao_touch" && endEffectorTypeStr != "revo2" &&
-        endEffectorTypeStr != "lejuclaw" && endEffectorTypeStr != "linker_hand") {
+        endEffectorTypeStr != "lejuclaw" && endEffectorTypeStr != "linker_hand" && endEffectorTypeStr != "heiman") {
       throw std::invalid_argument("Unknown end_effector_type: " + endEffectorTypeStr);
     }
     endEffectorType_ = stringToEndEffectorType(endEffectorTypeStr);
@@ -634,6 +648,32 @@ bool JoyStickHandler::isLeftFirstButtonTouched() const {
 bool JoyStickHandler::isLeftSecondButtonTouched() const {
   std::lock_guard<std::mutex> lock(dataMutex_);
   return leftSecondButtonTouched_;
+}
+
+bool JoyStickHandler::isRightFirstButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return rightFirstButtonTouched_;
+}
+
+bool JoyStickHandler::isRightSecondButtonTouched() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  return rightSecondButtonTouched_;
+}
+
+double JoyStickHandler::getLeftTrigger() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  if (leftJoystick_.empty()) {
+    return 0.0;
+  }
+  return leftJoystick_[0];
+}
+
+double JoyStickHandler::getRightTrigger() const {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  if (rightJoystick_.empty()) {
+    return 0.0;
+  }
+  return rightJoystick_[0];
 }
 
 bool JoyStickHandler::isLeftRightFirstButtonTouched() const {

@@ -1,0 +1,8 @@
+prefix=/builds/highlydynamic/kuavo-ros-control/installed/aarch64
+
+Name: humanoid_interface
+Description: Description of humanoid_interface
+Version: 0.0.1
+Cflags: -I${prefix}/include -I/usr/include/eigen3 -I/usr/include -I/usr/local/lib/pkgconfig/../../include -I/usr/lib/aarch64-linux-gnu/pkgconfig/../../../include/urdfdom
+Libs: -L${prefix}/lib -lhumanoid_interface /usr/lib/aarch64-linux-gnu/libboost_system.so.1.83.0 /usr/lib/aarch64-linux-gnu/libboost_filesystem.so.1.83.0 -lpinocchio_default -lpinocchio_parsers -lpinocchio_collision -lboost_filesystem -lurdfdom_sensor -lurdfdom_model_state -lurdfdom_model -lurdfdom_world -lhpp-fcl -loctomap -loctomath
+Requires: roslib ocs2_core ocs2_oc ocs2_ddp ocs2_mpc ocs2_sqp ocs2_ipm ocs2_msgs ocs2_robotic_tools ocs2_pinocchio_interface ocs2_centroidal_model ocs2_self_collision ocs2_ros_interfaces kuavo_msgs std_srvs rosgraph_msgs

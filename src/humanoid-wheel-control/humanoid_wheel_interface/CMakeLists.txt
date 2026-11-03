@@ -120,6 +120,14 @@ target_link_libraries(${PROJECT_NAME}
 )
 target_compile_options(${PROJECT_NAME} PUBLIC ${FLAGS})
 
+if(CATKIN_ENABLE_TESTING)
+  # 不用 gtest TEST()：cppcheck 1.90 会对 TEST 宏误报 syntaxError，抬高 acs-lint error 基线。
+  add_executable(torso_rotation_target_test test/torso_rotation_target_test.cpp)
+  target_include_directories(torso_rotation_target_test PRIVATE include ${EIGEN3_INCLUDE_DIRS})
+  target_compile_features(torso_rotation_target_test PUBLIC cxx_std_17)
+  add_test(NAME torso_rotation_target_test COMMAND $<TARGET_FILE:torso_rotation_target_test>)
+endif()
+
 ####################
 ## Clang tooling ###
 ####################

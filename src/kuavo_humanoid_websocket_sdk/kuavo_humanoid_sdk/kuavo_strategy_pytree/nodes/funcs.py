@@ -644,7 +644,17 @@ def update_round_and_tag_id_fn(config, search_pick_tag_TAG2GOAL, search_pick_tag
         current_tag_id = tag_id_list[new_round % len(tag_id_list)]
         
         print(f"========== 开始第 {new_round + 1} 轮，使用 tag_id: {current_tag_id} ==========")
-        
+
+        bb.set(f"latest_tag_{current_tag_id}", None)
+        bb.set(f"latest_tag_{current_tag_id}_version", 0)
+
+        # 清除放置 tag 的旧数据，避免跨轮残留导致放置阶段跳过重扫
+        # （放置 tag 在每轮内固定不变，跨轮必须强制重新识别）
+        place_tag_id_list = config.place.tag_id if isinstance(config.place.tag_id, list) else [config.place.tag_id]
+        for place_tag_id in place_tag_id_list:
+            bb.set(f"latest_tag_{place_tag_id}", None)
+            bb.set(f"latest_tag_{place_tag_id}_version", 0)
+
         # 更新所有相关节点的 tag_id
         search_pick_tag_TAG2GOAL.tag_id = current_tag_id
         search_pick_tag_HEAD.tag_id = current_tag_id

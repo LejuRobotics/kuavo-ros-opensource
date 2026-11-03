@@ -55,6 +55,21 @@ bool Quest3ArmInfoTransformer::updateHandPoseAndElbowPosition(const noitom_hi5_h
   return true;
 }
 
+// Dual VR（input_mode=dual_vr）按侧更新：只走 side 一侧的 computeHandPose，
+// 不写 output 列表（dual_vr 下由调用方按侧自行拼装），不触碰另一侧状态。
+bool Quest3ArmInfoTransformer::updateHandPoseForSide(const noitom_hi5_hand_udp_python::PoseInfoList &input,
+                                                     const std::string &side) {
+  if (!validateInput(input)) {
+    ROS_WARN("[Quest3ArmInfoTransformer] Invalid input data");
+    return false;
+  }
+  if (!computeHandPose(input, side)) {
+    ROS_WARN("[Quest3ArmInfoTransformer] Failed to compute %s hand pose", side.c_str());
+    return false;
+  }
+  return true;
+}
+
 bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python::PoseInfoList &input,
                                                const std::string &side) {
   std::map<std::string, ArmData> sideMap = {{"Left",
@@ -103,6 +118,23 @@ bool Quest3ArmInfoTransformer::computeHandPose(const noitom_hi5_hand_udp_python:
   const Eigen::Quaterniond qCurrentChest(
       chestPose.orientation.w, chestPose.orientation.x, chestPose.orientation.y, chestPose.orientation.z);
   const Eigen::Quaterniond qRelativeChest = (qInitChest_.inverse() * qCurrentChest).normalized();
+
+  // Dual VR 躯干 ownership：保存本侧 Chest 快照，供 IK 节点按 torso_control_side 取用。
+  // 语义严格对齐 /robot_chest_pose（Python monitor 的 pub_chest_pose_in_torso_frame）：
+  //   - position：monitor 发的是 (chest.x - root_offset.x, ..., chest.z)，其中 Root 与 Chest
+  //     都已经是 convert_position_to_right_hand 之后的值，所以这里直接从同一帧里取 Root
+  //     （bone_names[22]，validateInput 已保证 poses >= 24）做同样的 x 扣除；
+  //   - orientation：monitor 发的是 convert_quaternion_to_right_hand 之后的四元数，
+  //     输入帧同样是转换后的值，再走与 chestPoseCallback 完全相同的
+  //     transformQuestPoseTORobotPose，保证两条路径同值。
+  {
+    constexpr size_t kPoseIndexRoot = 22;  // 对应 Python bone_names[22] "Root"
+    const double rootOffsetX = input.poses[kPoseIndexRoot].position.x;
+    std::lock_guard<std::mutex> lock(chestPoseSnapshotMutex_);
+    chestPosePosition_ = Eigen::Vector3d(chestPose.position.x - rootOffsetX, 0.0, chestPose.position.z);
+    chestPoseQuaternion_ = transformQuestPoseTORobotPose(chestPose.orientation);
+    hasChestPose_ = true;
+  }
 
   // Express the controller pose in the neutral chest frame.  Subtracting the
   // chest position removes crouching translation; rotating the offset and hand
@@ -379,6 +411,22 @@ Eigen::Quaterniond Quest3ArmInfoTransformer::vrQuat2RobotQuat(const Eigen::Quate
 
   // Eigen的四元数连乘，可参考旋转矩阵连乘，和数学/几何上的计算顺序不太一样
   return qHand * qZX * qBias;
+}
+
+// Dual VR 躯干 ownership：按侧 Chest 快照的只读访问（见头文件说明）。
+Eigen::Vector3d Quest3ArmInfoTransformer::getChestPosition() const {
+  std::lock_guard<std::mutex> lock(chestPoseSnapshotMutex_);
+  return chestPosePosition_;
+}
+
+Eigen::Quaterniond Quest3ArmInfoTransformer::getChestQuaternion() const {
+  std::lock_guard<std::mutex> lock(chestPoseSnapshotMutex_);
+  return chestPoseQuaternion_;
+}
+
+bool Quest3ArmInfoTransformer::hasValidChestPose() const {
+  std::lock_guard<std::mutex> lock(chestPoseSnapshotMutex_);
+  return hasChestPose_;
 }
 
 // ============================================================================

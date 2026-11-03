@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(trace_path)
 
+set(_kuavo_arch_cmake "${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_common/cmake/kuavo_arch.cmake")
+if(EXISTS "${_kuavo_arch_cmake}")
+  include("${_kuavo_arch_cmake}")
+endif()
+if(KUAVO_BUILD_FOR_AARCH64)
+  find_package(catkin REQUIRED)
+  message(STATUS "[trace_path] Skipping build on aarch64 (biped demo; x86_64 unchanged)")
+  catkin_package()
+  return()
+endif()
+
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
 

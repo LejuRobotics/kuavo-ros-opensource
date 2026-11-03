@@ -4,7 +4,7 @@
 <!-- |    EDITING THIS FILE BY HAND IS NOT RECOMMENDED                                 | -->
 <!-- =================================================================================== -->
 <robot name="biped_v3" xmlns:drake="https://drake.mit.edu">
-  <link name="torso">
+  <link name="base_link">
     <inertial>
       <origin xyz="-0.0185005 0.00031952 0.1929569" rpy="0 0 0" />
       <mass value="46.79733803" />
@@ -44,7 +44,7 @@
   </link>
   <joint name="leg_l1_joint" type="revolute">
     <origin xyz="-0.0024999 0.087 -0.066" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="base_link" />
     <child link="leg_l1_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.314159265358979" upper="0.663225115757845" effort="180.0" velocity="23.55" />
@@ -210,7 +210,7 @@
   </link>
   <joint name="leg_r1_joint" type="revolute">
     <origin xyz="-0.0024999 -0.087 -0.066" rpy="0 0 0" />
-    <parent link="torso" />
+    <parent link="base_link" />
     <child link="leg_r1_link" />
     <axis xyz="1 0 0" />
     <limit lower="-0.663225115757845" upper="0.314159265358979" effort="180.0" velocity="23.55" />

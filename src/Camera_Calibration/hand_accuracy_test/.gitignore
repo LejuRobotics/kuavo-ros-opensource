@@ -1,0 +1,4 @@
+# 现场精度验证报告。
+hand_accuracy_report_*.json
+hand_accuracy_report_*.csv
+hand_accuracy_report_*.png

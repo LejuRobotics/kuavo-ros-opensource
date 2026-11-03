@@ -1,0 +1,23 @@
+package lcm_std_msgs;
+
+struct Float32
+{
+  float data;
+}
+
+struct Float64
+{
+  double data;
+}
+
+struct Float32MultiArray
+{
+  int32_t size;
+  float data[size];
+}
+
+struct Float64MultiArray
+{
+  int32_t size;
+  double data[size];
+}

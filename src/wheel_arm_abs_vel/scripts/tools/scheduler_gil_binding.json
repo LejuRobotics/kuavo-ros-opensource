@@ -1,0 +1,9 @@
+{
+  "python_sha256": "298a9e830ed52f36c299427565485d717d1ce0179c0597cc16560513eb780b06",
+  "addresses": [
+    "0x93db28",
+    "0x93db2c",
+    "0x93db30"
+  ],
+  "evidence": "Existing real-machine Python3.8.10 non-PIE _PyRuntime symbol plus matching internal header layout; revalidate ELF digest before enabling address filter."
+}

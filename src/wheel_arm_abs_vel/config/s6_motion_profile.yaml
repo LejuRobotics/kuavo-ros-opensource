@@ -1,0 +1,9 @@
+# Absolute velocity IK only, startup configuration shared by S62/S63 and
+# their 400062/400063 end-effector variants. Matches host19's J3/wrist profile.
+# Limits are caps: explicitly tighter operator limits remain in force.
+kp: 250.0
+j3_kd: 18.0
+j3: {velocity: 2.2, acceleration: 18.0, jerk: 2000.0}
+j5: {velocity: 4.5, acceleration: 45.0, jerk: 4000.0}
+j6: {velocity: 5.5, acceleration: 55.0, jerk: 6000.0}
+j7: {velocity: 5.5, acceleration: 55.0, jerk: 6000.0}

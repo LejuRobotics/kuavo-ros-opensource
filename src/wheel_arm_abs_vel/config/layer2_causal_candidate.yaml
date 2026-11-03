@@ -1,0 +1,17 @@
+# Explicit historical gain overlay; NOT loaded by the standard launch.
+# The private production shaper no longer performs source-age prediction.
+# Before startup, CLI hand_position_cutoff_hz:=12 hand_orientation_cutoff_hz:=10 selects clean12.
+hand_position_gain: 24.0
+hand_position_weight: 18.0
+hand_orientation_gain: 8.0
+hand_orientation_weight: 6.0
+elbow_position_weight: 0.02
+hand_position_cutoff_hz: 10.0
+hand_orientation_cutoff_hz: 8.0
+acquisition:
+  linear_speed: 0.8
+  angular_speed: 2.4
+joint_jerk:
+  limits:
+    zarm_l4_joint: 4000.0
+    zarm_r4_joint: 4000.0

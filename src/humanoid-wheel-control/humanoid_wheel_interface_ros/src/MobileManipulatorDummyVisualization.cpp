@@ -148,6 +148,19 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   dexhandStateSubscriber_ = nodeHandle.subscribe<sensor_msgs::JointState>(
       "/dexhand/state", 10, &MobileManipulatorDummyVisualization::dexhandStateCallback, this);
 
+  // heiman (黑漫 SG100) 五指灵巧手：关节名顺序与 SG100HandCommand msg 的 11 维一致
+  heiman_joint_names_ = {"l_thumb_j1", "l_thumb_j2", "l_thumb_j3",
+                         "l_index_j1", "l_index_j2", "l_index_j3",
+                         "l_middle_j1", "l_middle_j2",
+                         "l_little_j1", "l_little_j2", "l_little_j3",
+                         "r_thumb_j1", "r_thumb_j2", "r_thumb_j3",
+                         "r_index_j1", "r_index_j2", "r_index_j3",
+                         "r_middle_j1", "r_middle_j2",
+                         "r_little_j1", "r_little_j2", "r_little_j3"};
+  heiman_joint_positions_ = std::vector<double>(heiman_joint_names_.size(), 0.0);
+  heimanStateSubscriber_ = nodeHandle.subscribe<kuavo_msgs::SG100HandState>(
+      "/sg100_hand_state", 10, &MobileManipulatorDummyVisualization::heimanStateCallback, this);
+
   stateOptimizedPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/mobile_manipulator/optimizedStateTrajectory", 1);
   stateOptimizedPosePublisher_ = nodeHandle.advertise<geometry_msgs::PoseArray>("/mobile_manipulator/optimizedPoseTrajectory", 1);
 
@@ -179,6 +192,17 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   // 订阅 /external_odom/active：当有外部 odom->base_link 发布时，该话题为 true，则不发布内部的 odom->base_link
   // 也可通过 /use_external_odom_tf 参数强制使用外部 odom
   nodeHandle.param("/use_external_odom_tf", use_external_odom_tf_, false);
+  // 可视化发布节流频率（Hz）：/tf、目标轨迹、优化轨迹、自碰撞距离都跟随控制环发布，
+  // 跨机会被多节点复制订阅(尤其 /tf)打满百兆链路。
+  // 从 task.info 的 visualization.publishRate 读取；缺省 30Hz；<=0 表示不节流(跟随控制环)。
+  double publishRate = 30.0;
+  loadData::loadPtreeValue(pt, publishRate, "visualization.publishRate", true);
+  if (publishRate > 0.0) {
+    minPublishTimeDifference_ = 1.0 / publishRate;
+  } else {
+    minPublishTimeDifference_ = 0.0;  // <=0 表示不节流，置 0 使门控判断恒不生效
+  }
+  ROS_INFO("[MobileManipulatorVisualization] visualization publish rate: %.1f Hz (min interval %.4f s)", publishRate, minPublishTimeDifference_);
   external_odom_active_sub_ = nodeHandle.subscribe(
       "/external_odom/active", 1, &MobileManipulatorDummyVisualization::externalOdomActiveCallback, this);
   // create pinocchio interface
@@ -198,6 +222,15 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
 /******************************************************************************************************/
 void MobileManipulatorDummyVisualization::update(const SystemObservation& observation, const PrimalSolution& policy,
                                                  const CommandData& command) {
+  // 可视化统一节流：/tf、目标轨迹、优化轨迹、自碰撞距离都是可视化数据，
+  // 原本跟随 500Hz 控制环发布，跨机被多节点复制订阅打满百兆链路。
+  // 未到节流周期直接 return，跳过本次所有可视化发布。
+  const double now = observation.time;
+  if (now - lastPublishTime_ >= 0.0 && now - lastPublishTime_ < minPublishTimeDifference_) {
+    return;
+  }
+  lastPublishTime_ = now;
+
   const ros::Time timeStamp = ros::Time::now();
 
   publishObservation(timeStamp, observation);
@@ -321,6 +354,17 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
       const auto& name = dexhand_joint_names_[i];
       if (urdfModel_.getJoint(name)) {
         jointPositions[name] = dexhand_joint_positions_[i];
+      }
+    }
+  }
+
+  // heiman (黑漫 SG100) 手关节：仅写入 URDF 中实际存在的关节名
+  if (updateHeimanHand_) {
+    std::lock_guard<std::mutex> lk(heiman_mutex_);
+    for (size_t i = 0; i < heiman_joint_names_.size(); i++) {
+      const auto& name = heiman_joint_names_[i];
+      if (urdfModel_.getJoint(name)) {
+        jointPositions[name] = heiman_joint_positions_[i];
       }
     }
   }
@@ -504,6 +548,22 @@ void MobileManipulatorDummyVisualization::dexhandStateCallback(const sensor_msgs
     positions(i) = msg->position[i];
   }
   updateHandJointPositions(positions);
+}
+
+void MobileManipulatorDummyVisualization::heimanStateCallback(const kuavo_msgs::SG100HandState::ConstPtr &msg) {
+  std::lock_guard<std::mutex> lk(heiman_mutex_);
+  // 左右手各 11 维，顺序与 heiman_joint_names_ 一致；收到 state 才覆盖，否则保持默认 0
+  if (static_cast<int>(msg->left_hand_positions.size()) >= 11) {
+    for (int i = 0; i < 11; i++) {
+      heiman_joint_positions_[i] = msg->left_hand_positions[i];
+    }
+  }
+  if (static_cast<int>(msg->right_hand_positions.size()) >= 11) {
+    for (int i = 0; i < 11; i++) {
+      heiman_joint_positions_[11 + i] = msg->right_hand_positions[i];
+    }
+  }
+  updateHeimanHand_ = true;
 }
 
 void MobileManipulatorDummyVisualization::updateHandJointPositions(const Eigen::VectorXd& positions) {

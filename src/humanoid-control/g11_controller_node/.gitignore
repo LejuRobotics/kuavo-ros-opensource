@@ -1,0 +1,2 @@
+# online-install.sh 运行时下载缓存(app/字库/version.json), 重新运行脚本会自动生成
+.online-install-cache/

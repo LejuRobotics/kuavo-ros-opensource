@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Input-only: does not start IK, FSM, robot controller or issue robot commands. -->
+  <arg name="port" default="12345"/>
+  <arg name="peer_ip" default=""/>
+  <arg name="advertise_ip" default=""/>
+  <arg name="broadcast_ip" default=""/>
+  <arg name="calibration_file" default="$(find wheel_arm_abs_vel)/config/pico_quest_input.yaml"/>
+  <arg name="enable_head_control" default="false"/>
+  <node pkg="wheel_arm_abs_vel" type="monitor_pico.py" name="monitor_pico" output="screen" required="true" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')">
+    <rosparam command="load" file="$(arg calibration_file)"/>
+    <param name="enable_head_control" value="$(arg enable_head_control)"/>
+    <param name="port" value="$(arg port)"/>
+    <param name="peer_ip" value="$(arg peer_ip)"/>
+    <param name="advertise_ip" value="$(arg advertise_ip)"/>
+    <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
+  </node>
+</launch>

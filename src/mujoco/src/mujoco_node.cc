@@ -663,6 +663,11 @@ namespace
               std::cout << "[mujoco_node]: Initialize LinkerO6 dexhand joint addresses" << std::endl;
               init_joint_address(mnew, LHandJointsAddr, "l_thumb_cmc_yaw", "l_pinky_dip");
               init_joint_address(mnew, RHandJointsAddr, "r_thumb_cmc_yaw", "r_pinky_dip");
+          } else if (hand_type_value == 3) {
+              // 黑漫 heiman SG100 手关节命名
+              std::cout << "[mujoco_node]: Initialize Heiman dexhand joint addresses" << std::endl;
+              init_joint_address(mnew, LHandJointsAddr, "l_thumb_j1", "l_little_j3");
+              init_joint_address(mnew, RHandJointsAddr, "r_thumb_j1", "r_little_j3");
           }
       } else {
           // 旧版无hand_type元数据时，默认使用强脑手关节命名
@@ -1028,9 +1033,10 @@ namespace
   void updateWheelVel_VectorContorl_omniWheel(Eigen::Vector3d& cmd_vel)
   {
     const double wheel_radius = 0.13035;  // 底盘轮子半径
-    // s63 底盘轮距更大
-    const double robot_x_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
-    const double robot_y_dis = (robotVersion_ == 63) ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
+    // s63 底盘轮距更大。version_number 形如 63 / 200063 / 400063，个位和十位是 63
+    const bool is_s63 = (robotVersion_ % 100) == 63;
+    const double robot_x_dis = is_s63 ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
+    const double robot_y_dis = is_s63 ? 0.23865 : 0.232489;  // 机器人中心到轮子的距离
 
     // cmd_vel: [vx, vy, omega] - 机器人本体系速度和角速度
     // 四个轮子的位置（相对于底盘中心）
@@ -1216,10 +1222,21 @@ namespace
 
           if (claw_updated)
           {
-            for (size_t i = 0; i < numClawJoints; i++)
+            // 二指夹爪 tendon 在执行器列表末尾，NUM_JOINT 对不上这个下标。
+            // 按名字写入，避免命令打到右臂电机上。
+            const int left_claw_ctrl = mj_name2id(m, mjOBJ_ACTUATOR, "l_fingers_actuator");
+            const int right_claw_ctrl = mj_name2id(m, mjOBJ_ACTUATOR, "r_fingers_actuator");
+            if (left_claw_ctrl >= 0 && right_claw_ctrl >= 0 && numClawJoints >= 2)
             {
-              d->ctrl[i + numJoints] = claw_cmd[i];
-              // std::cout << "claw_cmd: " << claw_cmd[i] << std::endl;
+              d->ctrl[left_claw_ctrl] = claw_cmd[0];
+              d->ctrl[right_claw_ctrl] = claw_cmd[1];
+            }
+            else
+            {
+              for (size_t i = 0; i < numClawJoints; i++)
+              {
+                d->ctrl[i + numJoints] = claw_cmd[i];
+              }
             }
           }
 
@@ -1245,12 +1262,13 @@ namespace
               }
               else if (robot_type == 1)
               {
+                const bool omni_wheel = robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 200063 || robotVersion_ == 300062 || robotVersion_ == 300063 || robotVersion_ == 400062 || robotVersion_ == 400063 || robotVersion_ == 500062 || robotVersion_ == 500063 || robotVersion_ == 600062;
                 if(robotVersion_ == 60)
                 {
                   updateWheelVel_VectorContorl(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
                 }
-                else if(robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 300062)
+                else if(omni_wheel)
                 {
                   updateWheelVel_VectorContorl_omniWheel(cmd_vel_chassis);
                   updateControl(LegJointsAddr, i);
@@ -2071,6 +2089,9 @@ void PhysicsThread(mj::Simulate *sim, const char *filename, bool only_half_up_bo
           } else if (hand_type_value == 2) {
               hand_type = mujoco_node::HandType::LINKER_O6;
               std::cout << "[mujoco_node]: Detected LinkerO6 dexhand from URDF custom metadata" << std::endl;
+          } else if (hand_type_value == 3) {
+              hand_type = mujoco_node::HandType::HEIMAN;
+              std::cout << "[mujoco_node]: Detected Heiman hand from URDF custom metadata" << std::endl;
           } else {
               hand_type = mujoco_node::HandType::QIANGNAO;
               std::cout << "[mujoco_node]: Detected Qiangnao hand from URDF custom metadata" << std::endl;

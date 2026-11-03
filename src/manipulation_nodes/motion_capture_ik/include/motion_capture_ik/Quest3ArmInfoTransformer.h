@@ -6,6 +6,7 @@
 #include <Eigen/Geometry>
 #include <functional>
 #include <leju_utils/define.hpp>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,12 @@ class Quest3ArmInfoTransformer final {
 
   bool updateHandPoseAndElbowPosition(const noitom_hi5_hand_udp_python::PoseInfoList &input,
                                       noitom_hi5_hand_udp_python::PoseInfoList &output);
+
+  // Dual VR（input_mode=dual_vr）按侧更新入口：只计算并写入 side 一侧的手部/肘部状态
+  // （leftHandPose_ / leftElbowPose_ / leftHandPoseRelativeToChest_ 或对应的 Right 成员），
+  // 不触碰另一侧，也不刷新 output 列表。single_vr 不使用本入口，行为完全不变。
+  // 实现只是 validateInput + 转调 private computeHandPose，不复制、不修改其算法本体。
+  bool updateHandPoseForSide(const noitom_hi5_hand_udp_python::PoseInfoList &input, const std::string &side);
 
   ArmPose getLeftHandPose() const { return leftHandPose_; }
 
@@ -43,6 +50,17 @@ class Quest3ArmInfoTransformer final {
 
   HeadBodyPose getHeadBodyPose() const { return headBodyPose_; }
 
+  // Dual VR 躯干 ownership：按侧暴露**本实例自己那一侧**输入帧里的 Chest 数据。
+  // 每个按侧实例只收到自己那一侧 Quest 的骨骼帧（Left 只喂 A、Right 只喂 B），
+  // 因此这里的 Chest 天然是"本侧 Chest"，不会串到对侧。
+  // 返回值与 /robot_chest_pose 路径完全同构：
+  //   position  : (chest.x - root.x, 0, chest.z)，y 恒为 0（轮臂 chest 不会横向移动）
+  //   quaternion: transformQuestPoseTORobotPose(输入帧里已由 monitor 左右手转换过的 Chest 四元数)
+  // single_vr 下主实例同样持有全部数据，取到的是当前输入帧的 Chest，行为不变。
+  Eigen::Vector3d getChestPosition() const;
+  Eigen::Quaterniond getChestQuaternion() const;
+  bool hasValidChestPose() const;
+
   // 新增：更新手部和肘部位姿信息列表 - 参考Python版本
   void updateHandElbowPoseInfoList(noitom_hi5_hand_udp_python::PoseInfoList &output);
 
@@ -59,6 +77,17 @@ class Quest3ArmInfoTransformer final {
   void resetArmLengthMeasurement() { armLengthMeasurement_.reset(); }
   void completeArmLengthMeasurement() { armLengthMeasurement_.completeMeasurement(); }
   bool isArmLengthMeasurementComplete() const { return armLengthMeasurement_.isMeasurementComplete(); }
+
+  // 按侧标定样本数（只读）：Dual VR 下每个按侧实例只收到自己那一侧的数据
+  // （见 WheelArmControlBaseROS 中 Left/Right 回调分别调用 updateHandPoseForSide），
+  // 而 ArmLengthMeasurement 的自动完成条件要求同一实例内左右样本都达标，
+  // 因此按侧实例需要按自己那一侧的样本数判定。不改变任何标定/缩放逻辑。
+  size_t armLengthSampleCountForSide(const std::string &side) const {
+    return side == "Left" ? armLengthMeasurement_.getLeftDataCount()
+                          : armLengthMeasurement_.getRightDataCount();
+  }
+
+  static constexpr int armLengthSampleTarget() { return ArmLengthMeasurement::sampleTarget(); }
   void setDeltaScale(const Eigen::Vector3d &deltaScale) { deltaScale_ = deltaScale; }
 
   // 新增：获取平均手臂长度
@@ -125,6 +154,17 @@ class Quest3ArmInfoTransformer final {
   Eigen::Quaterniond yawOnlyQuat_;  // 仅包含偏航角的四元数，用于补偿
   Eigen::Vector3d chestPosition_;   // 胸部位置，用于坐标系变换
   double bodyPitch_;                // 躯干俯仰角
+
+  // Dual VR 躯干 ownership 用的本侧 Chest 快照（在 computeHandPose 内随本侧输入帧更新）：
+  // chestPosePosition_   = (chestPosition_.x - rootOffset.x, 0, chestPosition_.z)，
+  //                        与 /robot_chest_pose 位置同构（monitor 扣的正是同帧 Root 的 x）
+  // chestPoseQuaternion_ = transformQuestPoseTORobotPose(本侧输入帧里已转换过的 Chest 四元数)
+  // 只读暴露给 IK 节点，用于 torso_control_side=right 时真正取 B 侧 Chest。
+  Eigen::Vector3d chestPosePosition_{Eigen::Vector3d::Zero()};
+  Eigen::Quaterniond chestPoseQuaternion_{Eigen::Quaterniond::Identity()};
+  bool hasChestPose_{false};
+  // 保护上面三个本侧 Chest 快照：bone 回调线程写、IK 求解线程读。
+  mutable std::mutex chestPoseSnapshotMutex_;
 
   // 肩部角度信息 - 参考Python版本
   Eigen::Vector3d leftShoulderRpyInRobot_;   // 左肩在机器人坐标系中的RPY角度

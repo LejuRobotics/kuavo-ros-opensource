@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>kuavo_estimation</name>
+  <version>0.0.0</version>
+  <description>The kuavo_estimation package</description>
+
+  <maintainer email="lemon@todo.todo">lemon</maintainer>
+
+  <license>TODO</license>
+
+  <depend>kuavo_common</depend>
+  <depend>kuavo_msgs</depend>
+  <depend>humanoid_interface_drake</depend>
+  <depend>humanoid_estimation</depend>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>nodelet</build_depend>
+  <build_export_depend>roscpp</build_export_depend>
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>nodelet</exec_depend>
+
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+
+  </export>
+</package>

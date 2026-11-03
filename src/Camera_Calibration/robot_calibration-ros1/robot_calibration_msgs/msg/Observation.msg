@@ -4,6 +4,10 @@ string sensor_name
 # Features "detected" by the sensor.
 geometry_msgs/PointStamped[] features
 
+# Optional 6DOF pose observations (e.g. mocap rigid-body pose).
+# Populated by mocap calibration data; empty for camera/checkerboard captures.
+geometry_msgs/PoseStamped[] poses
+
 # Sensor information
 ExtendedCameraInfo ext_camera_info
 

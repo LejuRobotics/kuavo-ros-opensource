@@ -4,6 +4,14 @@
     <!-- 运行模式 -->
     <arg name="sim_mode" default="false"/> <!-- true: 仿真, false: 实物 -->
 
+    <!-- 底层启动入口与PICO进程共用同一内部版本号。
+         轮臂判断规则与 robot_version_manager.launch 保持一致。 -->
+    <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="wheel_robot" value="$(eval 60 &lt;= int(arg('robot_version')) % 100 &lt; 70)"/>
+    <!-- 关闭底层启动并不会禁止PICO输出控制命令；仅验证数据时需使用隔离的ROS主节点。 -->
+    <arg name="start_robot" default="true"/>
+    <arg name="enable_head_control" default="true"/>
+
     <!-- 底层控制参数 -->
     <arg name="with_mm_ik" default="true"/>
     <arg name="cmd_truncation_enable" default="false"/>
@@ -12,7 +20,7 @@
     <!-- PICO 参数 -->
     <arg name="pico_host" default="0.0.0.0"/>
     <arg name="pico_port" default="12345"/>
-    <arg name="pico_control_mode" default="LowerBody"/>
+    <arg name="pico_control_mode" default="$(eval 'UpperBody' if arg('wheel_robot') else 'LowerBody')"/>
     <arg name="pico_control_torso" default="0"/>
     <arg name="pico_service_mode" default="1"/>
     <arg name="pico_detection_mode" default="vr"/>
@@ -20,25 +28,51 @@
     <arg name="head_control_mode" default="vr_follow"/>
     <arg name="pico_tf_publish_enable" default="false"/>
     <arg name="pico_tf_publish_hz" default="100.0"/>
+    <arg name="enable_vr_latency_diagnostics" default="false"/>
 
     <!-- 仿真 -->
-    <group if="$(arg sim_mode)">
+    <group if="$(eval arg('start_robot') and arg('sim_mode') and not arg('wheel_robot'))">
         <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
             <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
         </include>
     </group>
 
     <!-- 实物 -->
-    <group unless="$(arg sim_mode)">
+    <group if="$(eval arg('start_robot') and not arg('sim_mode') and not arg('wheel_robot'))">
         <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
             <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
             <arg name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)"/>
             <arg name="joint_protect_enable" value="$(arg joint_protect_enable)"/>
+            <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
+        </include>
+    </group>
+
+    <!-- 启动轮臂整套机器人控制组件（含底盘、躯干和手臂），仿真分支同时启动仿真器。
+         不启动Quest输入链路；实机和仿真均保留默认遥控器入口，VR输入由PICO提供。
+         轮臂头角不走 head_control_node。下方 launch_pico_teleop 在 enable_head_control 为真时
+         启动 pico_head_control_node，由它单独发布 /robot_head_motion_data。 -->
+    <group if="$(eval arg('start_robot') and arg('wheel_robot') and arg('sim_mode'))">
+        <include file="$(find humanoid_controllers)/launch/load_kuavo_mujoco_sim_wheel.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
+            <arg name="use_joystick" value="true"/>
+            <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
+            <arg name="with_head_control_node" value="false"/>
+        </include>
+    </group>
+    <group if="$(eval arg('start_robot') and arg('wheel_robot') and not arg('sim_mode'))">
+        <include file="$(find humanoid_controllers)/launch/load_kuavo_real_wheel.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
+            <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
+            <arg name="with_head_control_node" value="false"/>
         </include>
     </group>
 
     <!-- PICO -->
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_pico_teleop.launch">
+        <arg name="robot_version" value="$(arg robot_version)"/>
+        <arg name="enable_head_control" value="$(arg enable_head_control)"/>
         <arg name="host" value="$(arg pico_host)"/>
         <arg name="port" value="$(arg pico_port)"/>
         <arg name="control_mode" value="$(arg pico_control_mode)"/>
@@ -49,5 +83,6 @@
         <arg name="head_control_mode" value="$(arg head_control_mode)"/>
         <arg name="pico_tf_publish_enable" value="$(arg pico_tf_publish_enable)"/>
         <arg name="pico_tf_publish_hz" value="$(arg pico_tf_publish_hz)"/>
+        <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
     </include>
 </launch>

@@ -1,0 +1,8 @@
+# Projection input copies, saved images, and machine-specific verification data.
+/output/cam_proj_input/
+/output/cam_proj_validation/
+/output/cam_proj_readiness_*/
+
+# Local captures and calibration outputs.
+/capture*.json
+/output_s63/

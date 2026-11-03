@@ -50,6 +50,9 @@ class ArmLengthMeasurement {
 
   size_t getRightDataCount() const { return rightUpperArmLengths_.size(); }
 
+  // 标定所需样本数（只读）：供 Dual VR 按侧标定判定使用，避免调用方重复硬编码阈值。
+  static constexpr int sampleTarget() { return armLengthNum_; }
+
  private:
   bool measureArmLength_;                     // 是否进行手臂长度测量
   bool measurementCompleted_;                 // 测量是否已完成

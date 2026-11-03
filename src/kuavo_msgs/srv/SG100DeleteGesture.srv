@@ -1,0 +1,7 @@
+# 删除指定 id 的手势（下标删除，后续手势 id 前移）
+int32 id
+int8 hand_side              # 0=left, 1=right, 2=both
+---
+bool success
+int32 total_count           # 删除后的手势总数
+string message

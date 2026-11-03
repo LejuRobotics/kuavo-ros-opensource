@@ -1,0 +1,162 @@
+# roslaunch optitrack_data_receive optitrack_data_receive.launch mocap_server_ip:=10.10.30.232
+
+robot:
+  robot_version: "56"  # S53 优化暂复用本配置；主 URDF 仍按实际版本选择。
+  robot_layout: biped56
+  sensor_topic: /sensors_data_raw
+  arm_traj_topic: /kuavo_arm_traj
+  joint_q_length: 29
+  joint_indices:
+    left_arm: [13, 20]
+    right_arm: [20, 27]
+    head: [27, 29]
+    waist: 12
+  left_start_index: 13
+  right_start_index: 20
+  capture_head: false
+  dt: 0.01
+  move_duration: 2.0
+  hold_sec: 3.0
+  collect_sec: 1.0
+  startup_align_sec: 2.0
+  return_to_zero_sec: 2.0
+  wait_sensors_timeout: 30.0
+  set_external_control_mode: true
+  enable_arm_quick_mode: true
+  enable_arm_traj_interpolator: true
+
+# 采集预处理沿用本配置原有的左右手偏移；优化 ETK 在 kinematics.etk 中。
+fixtures:
+  legacy:
+    l_hand: [0.0, -0.5, -120.0]
+    r_hand: [0.0, 0.5, -120.0]
+
+mocap_bodies:
+  - name: l_hand
+    topic: /l_hand_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l7_link
+    link_offset_mm: [0.0, -0.5, -120.0]
+  - name: r_hand
+    topic: /r_hand_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_r7_link
+    link_offset_mm: [0.0, 0.5, -120.0]
+  - name: torso
+    topic: /torso_pose
+    msg_type: PoseStamped
+    urdf_link: waist_yaw_link
+    # record_joint_poses.py 的历史刚体偏移，只用于把原始 marker 还原到
+    # hand_in_torso；不要把它当作下面 kinematics.ctb 的固定 CTB 安装值。
+    link_offset_mm: [122.02, -45.82, 2.5]
+  - name: l_shoulder
+    topic: /l_shoulder_pose
+    msg_type: PoseStamped
+    urdf_link: zarm_l1_ref_link
+    link_offset_mm: [0.0, -68.50, 105.00]
+    record_only: true
+
+relative_pairs:
+  - [l_hand, torso]
+  - [r_hand, torso]
+  - [l_hand, l_shoulder]
+  - [r_hand, l_shoulder]
+
+# 新拟合器直接使用保存的相对位姿，方向由 CTB/ETK 拟合；不再使用旧显示用 axis_flip。
+mocap_frame_align:
+  enabled: false
+  axis_flip: [1, 1, 1]
+
+calibration:
+  # 这些路径按旧 record_joint_poses.py 的脚本目录解析。
+  urdf: ../../kuavo_assets/models/biped_s56/urdf/biped_s56.urdf
+  fk_root: waist_yaw_link
+  free_joints:
+    - zarm_l1_joint
+    - zarm_l2_joint
+    - zarm_l3_joint
+    - zarm_l4_joint
+    - zarm_l5_joint
+    - zarm_l6_joint
+    - zarm_l7_joint
+    - zarm_r1_joint
+    - zarm_r2_joint
+    - zarm_r3_joint
+    - zarm_r4_joint
+    - zarm_r5_joint
+    - zarm_r6_joint
+    - zarm_r7_joint
+  # # 30 个点的拟合
+  # teach_left: ../mocap_kin_calib/config/teach_left_joint_fit.json
+  # teach_right: ../mocap_kin_calib/config/teach_right_joint_fit.json
+  # 10 个点的验证
+  # teach_left: ../mocap_kin_calib/config/teach_left_joint2.json
+  # teach_right: ../mocap_kin_calib/config/teach_right_joint2.json
+
+  teach_left: ../mocap_kin_calib/config/cam_proj_vali_left.json
+  teach_right: ../mocap_kin_calib/config/cam_proj_vali_right.json
+  
+  teach_head: ../teach_capture_output/teach_head_joint.json
+  sigma: 3.0
+  skip_first_last: true
+
+kinematics:
+  # 本路径按本 YAML 所在目录解析；优化入口按实际版本统一选择主 URDF。
+  source_urdf: ../../../kuavo_assets/models/biped_s56/urdf/biped_s56.urdf
+  root_link: waist_yaw_link
+  left_tip_link: zarm_l7_link
+  right_tip_link: zarm_r7_link
+
+  # 位置固定；只拟合 rotvec_deg。CTB 是 C(原始 torso 刚体) -> B(waist_yaw_link)
+  # 的变换；ETK 是手部光球刚体坐标 K -> J7 link 坐标 E。单位 mm / deg。
+  ctb:
+    translation_mm: [122.0, -45.81, 15.0]
+    fit_translation: false
+    fit_rotation: true
+    initial_rotvec_deg: [0.0, 0.0, 0.0]
+  etk:
+    left:
+      translation_mm: [0.0, -0.5, -114.6]
+      fit_translation: false
+      fit_rotation: true
+      initial_rotvec_deg: [0.0, 0.0, 0.0]
+    right:
+      translation_mm: [0.0, 0.5, -114.6]
+      fit_translation: false
+      fit_rotation: true
+      initial_rotvec_deg: [0.0, 0.0, 0.0]
+
+  # 30 个 capture index 中 25 个拟合、5 个留出验证；按实际 teach/capture
+  # 编号修改，脚本不会按速度、位移或残差偷偷丢点。
+  fit_indices: [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17,
+                19, 20, 21, 22, 23, 25, 26, 27, 28, 29]
+  validation_indices: [6, 12, 18, 24, 30]
+
+  # 与 offline_ana0918 一致：位置和姿态同时拟合，姿态使 ETK 方向可观测。
+  residual:
+    position: true
+    orientation: true
+    position_scale_mm: 1.0
+    orientation_scale_deg: 1.0
+
+  # Ei 默认沿用 notebook 的无界/无先验设置；null 表示无硬边界，0 表示无先验。
+  # 若要约束，填每个分量的边界/先验尺度，不是整个向量的范数。
+  ei:
+    translation_bound_mm: null
+    rotation_bound_deg: null
+    translation_prior_mm: 0.0
+    rotation_prior_deg: 0.0
+  optimizer:
+    translation_scale_mm: 2.0  # 数值缩放，独立于先验/边界
+    rotation_scale_deg: 1.0
+    max_nfev: 250
+    ftol: 1.0e-9
+    xtol: 1.0e-9
+    gtol: 1.0e-8
+
+  validation:
+    # 每个留出点的三维位置距离必须小于该值，单位 mm。
+    max_position_error_mm: 8.0
+
+  output_dir: ../output
+  urdf_final_name: urdf_final.urdf

@@ -82,6 +82,8 @@ typedef struct
   Eigen::Vector3d r_contact;
 } JumpContactPoint_t;
 
+// EndEffectorType：本包定义（与 humanoid_interface_drake / leju_utils 的同名枚举各自独立维护）
+// 新增末端类型一律 append 到末尾，避免已有值位移。
 enum EndEffectorType
 {
   none,
@@ -91,7 +93,8 @@ enum EndEffectorType
   qiangnao_touch,
   revo2,
   linker_hand,
-  qibeng
+  qibeng,
+  heiman
 };
 enum MotorDriveType
 {

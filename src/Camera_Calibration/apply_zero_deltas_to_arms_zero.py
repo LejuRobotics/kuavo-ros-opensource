@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-人形机器人零点写入脚本（支持 52 / 56）：
+人形机器人零点写入脚本（支持 45 / 52 / 56）：
 把 src/Camera_Calibration/output/**/calibration.yaml 的 joint bias 合并后，
 写入零点文件：
 
-- 52 Ruiwo：~/.config/lejuconfig/arms_zero.yaml（固定 14 维）
+- 45/52 Ruiwo：~/.config/lejuconfig/arms_zero.yaml（固定 14 维）
     [zarm_l2..l7, zarm_r2..r7, zhead_1, zhead_2]
-  52 EC：~/.config/lejuconfig/offset.csv（只更新 l1/r1 两项）
+  45/52 EC：~/.config/lejuconfig/offset.csv（只更新 l1/r1 两项）
 
 - 56 Ruiwo：~/.config/lejuconfig/arms_zero.yaml（固定 16 维）
     [zarm_l1..l7, zarm_r1..r7, zhead_1, zhead_2]
@@ -95,11 +95,11 @@ def _ruiwo_slots_from_config(cfg: dict, robot_version: str) -> List[Tuple[str, b
     def map_key(k: str) -> str | None:
         if k.startswith("Left_joint_arm_"):
             n = int(k.split("_")[-1])
-            joint_n = n + 1 if robot_version == "52" else n
+            joint_n = n + 1 if robot_version in ("45", "52") else n
             return f"zarm_l{joint_n}_joint"
         if k.startswith("Right_joint_arm_"):
             n = int(k.split("_")[-1])
-            joint_n = n + 1 if robot_version == "52" else n
+            joint_n = n + 1 if robot_version in ("45", "52") else n
             return f"zarm_r{joint_n}_joint"
         if k == "Head_joint_low":
             return "zhead_1_joint"
@@ -121,7 +121,7 @@ def _ruiwo_slots_from_config(cfg: dict, robot_version: str) -> List[Tuple[str, b
         is_neg = addr in neg_set
         slots.append((j, is_neg, addr, k))
 
-    expected = 14 if robot_version == "52" else 16
+    expected = 14 if robot_version in ("45", "52") else 16
     if len(slots) != expected:
         raise SystemExit(
             f"ROBOT_VERSION={robot_version} 应有 {expected} 个 Ruiwo 零点槽位"
@@ -226,13 +226,13 @@ def _load_ruiwo_slots(robot_version: str) -> List[Tuple[str, bool, int, str]]:
 
 
 def _resolve_robot_version(arg: str) -> str:
-    if arg in ("52", "56"):
+    if arg in ("45", "52", "56"):
         return arg
     version = os.environ.get("ROBOT_VERSION", "").strip()
-    if version not in ("52", "56"):
+    if version not in ("45", "52", "56"):
         raise SystemExit(
-            "无法确定人形机器人版本：请设置 ROBOT_VERSION=52/56，"
-            "或传入 --robot-version 52/56"
+            "无法确定人形机器人版本：请设置 ROBOT_VERSION=45/52/56，"
+            "或传入 --robot-version 45/52/56"
         )
     return version
 
@@ -240,11 +240,11 @@ def _resolve_robot_version(arg: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(description="应用相机标定 joint bias 到 52/56 人形机器人零点文件")
     ap.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    ap.add_argument("--robot-version", choices=["auto", "52", "56"], default="auto")
+    ap.add_argument("--robot-version", choices=["auto", "45", "52", "56"], default="auto")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     robot_version = _resolve_robot_version(args.robot_version)
-    expected_zero_count = 14 if robot_version == "52" else 16
+    expected_zero_count = 14 if robot_version in ("45", "52") else 16
 
     calib_files = _discover_calibration_yamls(args.output_dir)
     if not calib_files:
@@ -298,7 +298,7 @@ def main() -> None:
     print(f"robot_version: {robot_version}")
     print(f"output_dir: {args.output_dir}")
     print(f"ruiwo_zero_file : {ZERO_FILE}")
-    if robot_version == "52":
+    if robot_version in ("45", "52"):
         print(f"ruiwo_config_yaml: {RUIWO_CONFIG_FILE}")
     else:
         print("ruiwo_slots: fixed 16-slot layout (same as wheel62; config.yaml not used)")
@@ -311,10 +311,10 @@ def main() -> None:
     for line in ruiwo_logs:
         print(line)
 
-    # 仅 52 的手臂 l1/r1 属于 EC；56 的 14 个手臂关节均属于 Ruiwo。
+    # 仅 45/52 的手臂 l1/r1 属于 EC；56 的 14 个手臂关节均属于 Ruiwo。
     new_ec: List[float] = []
     ec_logs: List[str] = []
-    if robot_version == "52":
+    if robot_version in ("45", "52"):
         new_ec = _read_offset_csv(EC_OFFSET_FILE)
         for joint, idx in (("zarm_l1_joint", EC_L1_IDX), ("zarm_r1_joint", EC_R1_IDX)):
             if joint not in biases:

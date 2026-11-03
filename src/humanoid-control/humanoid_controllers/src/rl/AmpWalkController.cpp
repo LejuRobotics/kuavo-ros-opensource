@@ -26,6 +26,12 @@ namespace humanoid_controller
     // 构造函数里 RLControllerBase 已经调用 initializeServices() 和 initializeRLVariables()
   }
 
+  bool AmpWalkController::allowsWalkingDuringArmAction() const noexcept
+  {
+    return is_amp_hand_controller_ && gait_receiver_ &&
+           gait_receiver_->allowsWalkingDuringAction();
+  }
+
   bool AmpWalkController::initialize()
   {
 
@@ -58,7 +64,6 @@ namespace humanoid_controller
     gait_receiver_->setAmpHandController(name_ == "amp_hand_controller");
     if (is_amp_hand_controller_) {
       gait_receiver_->setAllowWalkingDuringAction(true);  // amp_hand 始终允许边走边做动作
-      ros::param::set("/allow_walking_during_arm_action", true);
     }
 
     // 加载原地踏步速度配置

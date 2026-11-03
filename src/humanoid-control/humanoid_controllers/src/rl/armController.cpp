@@ -79,6 +79,9 @@ ArmController::ArmController(ros::NodeHandle& nh, size_t joint_num, size_t joint
   external_target_v_.resize(joint_arm_num);
   external_target_q_.setZero();
   external_target_v_.setZero();
+  filtered_pos_for_velocity_.resize(joint_arm_num);
+  filtered_pos_for_velocity_.setZero();
+  external_velocity_diff_valid_ = false;
   external_pause_hold_q_.resize(joint_arm_num);
   external_pause_hold_q_.setZero();
   external_pause_source_q_.resize(joint_arm_num);
@@ -101,6 +104,8 @@ ArmController::~ArmController()
 
 void ArmController::reset()
 {
+  // Keep reset atomic with respect to both external trajectory producers.
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
   requested_arm_mode_.store(kNoRequestedArmMode, std::memory_order_release);
   default_pose_return_for_switch_state_.store(DefaultPoseReturnState::kIdle,
                                                std::memory_order_release);
@@ -136,6 +141,8 @@ void ArmController::reset()
     external_target_q_ = current_arm_pos_;
     external_target_v_.setZero();
     external_target_received_ = false;
+    buffered_mode2_target_q_ = current_arm_pos_;
+    buffered_mode2_target_v_.setZero();
     buffered_mode2_target_received_ = false;
     last_external_input_time_valid_ = false;
   }
@@ -148,9 +155,12 @@ void ArmController::reset()
     arm_joint_pos_filter_.reset(current_arm_pos_);
     arm_joint_vel_filter_.reset(current_arm_vel_);
   }
+  resetExternalVelocityDiff();
   
   // 重置缓存的模式切换指令
   pending_arm_mode_.reset();
+  offline_action_input_active_.store(false, std::memory_order_release);
+  external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
 
   ROS_INFO("[ArmController] Reset: cleared interpolation states and cached command positions");
 }
@@ -192,12 +202,11 @@ bool ArmController::initialize(const std::string& urdf_path,
     ROS_DEBUG("[ArmController] URDF path provided but kp/kd not provided, torque controller not initialized");
   }
   
-  // Subscribe to VR input topic
+  // Generic external input (VR / SDK). Offline actions use a dedicated topic;
+  // ArmController arbitrates the two sources before either can write a target.
   joint_sub_ = nh_.subscribe<sensor_msgs::JointState>(
     "/kuavo_arm_traj", 3,
     boost::bind(&ArmController::jointStateCallback, this, _1));
-
-  // Subscribe to action trajectory topic（不受 external_target_locked_ 控制）
   action_traj_sub_ = nh_.subscribe<sensor_msgs::JointState>(
     "/kuavo_action_traj", 3,
     boost::bind(&ArmController::actionTrajectoryCallback, this, _1));
@@ -276,13 +285,53 @@ void ArmController::setExternalControlPaused(bool paused)
 
 void ArmController::clearExternalTarget()
 {
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  // Invalidate a generic callback that may currently be evaluating the
+  // controller-routing callback without holding the owner mutex.
+  external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  clearExternalTargetStateForOwnerSwitch();
+}
+
+void ArmController::setOfflineActionInputActive(bool active)
+{
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  const bool was_active = offline_action_input_active_.load(std::memory_order_relaxed);
+  if (was_active == active)
+  {
+    return;
+  }
+
+  // When handing ownership to the action source, publish the new owner first so
+  // the WBC-side generic-buffer check cannot apply an old generic target while
+  // it is being cleared. On hand-back, clear first and expose generic ownership
+  // only after the old action target has gone.
+  if (active)
+  {
+    offline_action_input_active_.store(true, std::memory_order_release);
+  }
+  external_input_owner_epoch_.fetch_add(1, std::memory_order_acq_rel);
+  clearExternalTargetStateForOwnerSwitch();
+  if (!active)
+  {
+    offline_action_input_active_.store(false, std::memory_order_release);
+  }
+
+  ROS_INFO("[ArmController] External input owner -> %s",
+           active ? "offline action (/kuavo_action_traj)" : "generic (/kuavo_arm_traj)");
+}
+
+void ArmController::clearExternalTargetStateForOwnerSwitch()
+{
   std::lock_guard<std::mutex> lock(external_target_mutex_);
   external_target_received_ = false;
   raw_external_target_q_ = desire_arm_q_;
   raw_external_target_v_.setZero();
   external_target_q_ = desire_arm_q_;
   external_target_v_.setZero();
+  buffered_mode2_target_q_ = desire_arm_q_;
+  buffered_mode2_target_v_.setZero();
   buffered_mode2_target_received_ = false;
+  last_external_input_time_valid_ = false;
 }
 
 void ArmController::updateInternalState(const Eigen::VectorXd& joint_pos,
@@ -807,6 +856,7 @@ void ArmController::applyModeChange(int target_mode, bool force_interpolation_to
       arm_joint_pos_filter_.reset(current_arm_pos_);
       arm_joint_vel_filter_.reset(current_arm_vel_);
     }
+    resetExternalVelocityDiff();
 
     // 尚未收到外部目标
     external_target_received_ = false;
@@ -883,13 +933,41 @@ void ArmController::applyRateLimitedInterpolation(double dt,
 
 void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
-  if (external_target_locked_ || external_control_pause_requested_.load()) return;
+  if (external_control_pause_requested_.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  std::uint64_t owner_epoch = 0;
+  {
+    std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+    if (offline_action_input_active_.load(std::memory_order_acquire))
+    {
+      return;
+    }
+    owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
+  }
+
+  // The routing callback can take RLControllerManager's mutex. Do not hold the
+  // owner mutex across it: controller switching reaches this object in the
+  // opposite direction. The epoch check below drops this message if ownership
+  // changed while routing was evaluated (including action->generic ABA).
   std::function<bool()> external_command_buffer_callback;
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     external_command_buffer_callback = external_command_buffer_callback_;
   }
-  if (external_command_buffer_callback && external_command_buffer_callback())
+  const bool should_buffer =
+      external_command_buffer_callback && external_command_buffer_callback();
+
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  if (offline_action_input_active_.load(std::memory_order_acquire) ||
+      external_input_owner_epoch_.load(std::memory_order_acquire) != owner_epoch ||
+      external_control_pause_requested_.load(std::memory_order_acquire))
+  {
+    return;
+  }
+  if (should_buffer)
   {
     std::lock_guard<std::mutex> lock(external_target_mutex_);
     if (external_control_pause_requested_.load()) return;
@@ -911,9 +989,16 @@ void ArmController::jointStateCallback(const sensor_msgs::JointState::ConstPtr& 
 
 void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::ConstPtr& msg)
 {
-  // 动作轨迹回调：不受 external_target_locked_ 控制，专用于离线动作播放
-  if (!external_control_pause_requested_.load() &&
-      arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  if (!offline_action_input_active_.load(std::memory_order_acquire) ||
+      external_control_pause_requested_.load(std::memory_order_acquire))
+  {
+    return;
+  }
+
+  // Offline actions are only meaningful for the already-active manipulation
+  // controller. They intentionally never enter the generic auto-switch buffer.
+  if (arm_control_mode_ == ControlMode::kExternal && arm_vr_enabled_)
   {
     std::lock_guard<std::mutex> lock(external_target_mutex_);
     if (external_control_pause_requested_.load() ||
@@ -925,6 +1010,17 @@ void ArmController::actionTrajectoryCallback(const sensor_msgs::JointState::Cons
 
 void ArmController::applyBufferedMode2TargetIfReady()
 {
+  // Only generic input participates in automatic controller-switch buffering.
+  std::uint64_t owner_epoch = 0;
+  {
+    std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+    if (offline_action_input_active_.load(std::memory_order_acquire))
+    {
+      return;
+    }
+    owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
+  }
+
   {
     std::lock_guard<std::mutex> lock(external_target_mutex_);
     if (!buffered_mode2_target_received_ || external_control_pause_requested_.load())
@@ -943,6 +1039,13 @@ void ArmController::applyBufferedMode2TargetIfReady()
     return;
   }
   if (arm_control_mode_ != ControlMode::kExternal || !arm_vr_enabled_)
+  {
+    return;
+  }
+
+  std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+  if (offline_action_input_active_.load(std::memory_order_acquire) ||
+      external_input_owner_epoch_.load(std::memory_order_acquire) != owner_epoch)
   {
     return;
   }
@@ -1114,6 +1217,7 @@ void ArmController::applyExternalControlPauseState()
       arm_joint_pos_filter_.reset(external_pause_hold_q_);
       arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(joint_arm_num_));
     }
+    resetExternalVelocityDiff();
     is_interpolating_ = true;
     external_pause_resume_reacquiring_ = false;
     external_control_pause_active_ = true;
@@ -1143,6 +1247,7 @@ void ArmController::applyExternalControlPauseState()
       arm_joint_pos_filter_.reset(external_pause_hold_q_);
       arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(joint_arm_num_));
     }
+    resetExternalVelocityDiff();
     is_interpolating_ = true;
     external_pause_resume_reacquiring_ = true;
     external_control_pause_active_ = false;
@@ -1183,68 +1288,70 @@ bool ArmController::applyStrictRateLimitedInterpolation(double dt,
   return completed;
 }
 
+void ArmController::resetExternalVelocityDiff()
+{
+  external_velocity_diff_valid_ = false;
+  if (filtered_pos_for_velocity_.size() != static_cast<int>(joint_arm_num_))
+  {
+    filtered_pos_for_velocity_.resize(joint_arm_num_);
+  }
+  filtered_pos_for_velocity_.setZero();
+}
+
 void ArmController::updateExternalControl(double dt)
 {
   Eigen::VectorXd raw_target_q;
-  Eigen::VectorXd raw_target_v;
   bool target_received = false;
+  std::uint64_t owner_epoch = 0;
   {
-    // Copy callback-owned data quickly so the walking control loop never runs
-    // filtering/interpolation while holding a ROS callback mutex.
+    // 与输入回调相同的加锁顺序：先 owner，再 target。这样读到的 epoch 和目标属于同一次切换。
+    std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
     std::lock_guard<std::mutex> target_lock(external_target_mutex_);
+    owner_epoch = external_input_owner_epoch_.load(std::memory_order_acquire);
     target_received = external_target_received_;
     if (target_received)
     {
       raw_target_q = raw_external_target_q_;
-      raw_target_v = raw_external_target_v_;
     }
+  }
+  // 输入源切换由回调递增 epoch。这里等到新源的首个目标再作废差分，避免用上一个源的位置。
+  if (target_received && owner_epoch != external_velocity_diff_owner_epoch_)
+  {
+    resetExternalVelocityDiff();
+    if (arm_filter_initialized_)
+    {
+      arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(joint_arm_num_));
+    }
+    external_velocity_diff_owner_epoch_ = owner_epoch;
   }
 
   // 外部控制模式
-  // 使用和humanoidController相同的滤波逻辑：先滤波位置，然后通过位置差分计算速度，再滤波速度
-  
-  // 静态变量：用于速度计算（需要在函数开头声明，以便在整个函数中访问）
-  static Eigen::VectorXd prev_filtered_pos;
-  static bool first_call = true;
-  
-  // 初始化静态变量
-  if (first_call && target_received)
-  {
-    prev_filtered_pos = external_target_q_;
-    first_call = false;
-  }
-  
+  // 先滤波位置，速度只用滤波后位置的差分，不再采用 /kuavo_arm_traj 的原始速度。
+  // 原始速度是未滤波位置的帧间差分，dt 抖动会把小的位置台阶放大成速度尖峰。
+  // 差分历史是控制器状态。滤波器重置后的第一拍输出 0，避免跨会话相减。
+
   // 1. 始终更新滤波后的目标（供接管阶段使用）
   if (target_received)
   {
     // 1.1 先对位置进行滤波（和humanoidController一致）
     external_target_q_ = arm_joint_pos_filter_.update(raw_target_q);
-    
-    // 1.2 如果原始轨迹没有提供速度，使用滤波后的位置计算速度（和humanoidController一致）
-    // 检查原始轨迹是否提供了速度（通过检查raw_external_target_v_是否为零向量）
-    bool has_velocity = raw_target_v.norm() > 1e-6;
-    
-    Eigen::VectorXd computed_vel;
-    if (has_velocity)
+
+    // 1.2 速度 = 滤波后位置的差分，再低通。与下发的 joint_q 一致。
+    Eigen::VectorXd computed_vel = Eigen::VectorXd::Zero(joint_arm_num_);
+    if (!external_velocity_diff_valid_ ||
+        filtered_pos_for_velocity_.size() != joint_arm_num_ ||
+        dt <= 0.0)
     {
-      // 如果提供了速度，先对原始速度进行滤波
-      computed_vel = arm_joint_vel_filter_.update(raw_target_v);
+      external_velocity_diff_valid_ = true;
     }
     else
     {
-      // 如果没有提供速度，通过位置差分计算速度（和humanoidController一致）
-      // 确保prev_filtered_pos已初始化
-      if (prev_filtered_pos.size() != joint_arm_num_)
-      {
-        prev_filtered_pos = external_target_q_;
-      }
-      computed_vel = (external_target_q_ - prev_filtered_pos) / dt;
-      // 对计算出的速度再次滤波
+      computed_vel = (external_target_q_ - filtered_pos_for_velocity_) / dt;
       computed_vel = arm_joint_vel_filter_.update(computed_vel);
     }
-    
+
     external_target_v_ = computed_vel;
-    prev_filtered_pos = external_target_q_;
+    filtered_pos_for_velocity_ = external_target_q_;
   }
 
   // 2. 核心插值/接管逻辑重构
@@ -1295,12 +1402,11 @@ void ArmController::updateExternalControl(double dt)
       }
 
       if (interpolation_finished) {
-          // 插值结束瞬间，重置滤波器到当前位置，确保接管瞬间无跳变
+          // 插值结束瞬间，重置滤波器到当前位置，确保接管瞬间无跳变。
+          // 本拍速度已经用旧历史算过，下一拍差分重新从 0 开始。
           arm_joint_pos_filter_.reset(desire_arm_q_);
           arm_joint_vel_filter_.reset(desire_arm_v_);
-          // 重置静态变量，避免使用旧的prev_filtered_pos
-          prev_filtered_pos = desire_arm_q_;
-          first_call = false;  // 保持false，不需要重新初始化
+          resetExternalVelocityDiff();
           ROS_INFO("[ArmController] Interpolation finished, switching to filtered tracking (v_max=%.2f)", arm_max_tracking_velocity_);
       }
     }

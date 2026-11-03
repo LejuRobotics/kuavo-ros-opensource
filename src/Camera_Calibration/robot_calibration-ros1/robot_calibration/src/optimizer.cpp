@@ -29,6 +29,7 @@
 #include <robot_calibration/calibration/offset_parser.h>
 #include <robot_calibration/ceres/calibration_data_helpers.h>
 #include <robot_calibration/ceres/chain3d_to_chain3d_error.h>
+#include <robot_calibration/ceres/chain3d_to_mocap_error.h>
 #include <robot_calibration/ceres/chain3d_to_mesh_error.h>
 #include <robot_calibration/ceres/chain3d_to_plane_error.h>
 #include <robot_calibration/ceres/plane_to_plane_error.h>
@@ -293,6 +294,38 @@ int Optimizer::optimize(OptimizationParams& params,
             std::cout << "  " << std::setw(10) << std::fixed << residuals[(3*k + 2)];
           std::cout << std::endl << std::endl;
         }
+
+        problem->AddResidualBlock(cost,
+                                  NULL,  // squared loss
+                                  free_params);
+      }
+      else if (params.error_blocks[j].type == "chain3d_to_mocap")
+      {
+        // Mocap joint-zero calibration: single chain FK (waist->hand) vs
+        // mocap-measured 6DOF pose. Bias appears on one side only, so it never
+        // cancels (unlike chain3d_to_chain3d which has two chains).
+        std::string chain_name = static_cast<std::string>(params.error_blocks[j].params["model_a"]);
+        if (chain_name == "")
+        {
+          ROS_ERROR("chain3d_to_mocap improperly configured: model_a param must be set!");
+          return 0;
+        }
+
+        // Check that this sample has the required observation
+        if (!hasSensor(data[i], chain_name))
+          continue;
+
+        Chain3dToMocap::Config mocap_cfg;
+        mocap_cfg.position_weight =
+          params.getParam(params.error_blocks[j], "position_weight", mocap_cfg.position_weight);
+        mocap_cfg.rotation_weight =
+          params.getParam(params.error_blocks[j], "rotation_weight", mocap_cfg.rotation_weight);
+
+        ceres::CostFunction* cost =
+          Chain3dToMocap::Create(models_[chain_name],
+                                 offsets_.get(),
+                                 data[i],
+                                 mocap_cfg);
 
         problem->AddResidualBlock(cost,
                                   NULL,  // squared loss

@@ -14,7 +14,8 @@
     ],
     "head_mode": "tail_two"
   },
-  "sample_count": 6,
+  "sample_count": 10,
+  "mirror_note": "right_arm_joints = left_arm_joints * [1,-1,-1,1,-1,-1,1]，与 teach_left_joint_test.json 的 index 4-7 对齐。",
   "samples": [
     {
       "unit": "rad",
@@ -85,6 +86,66 @@
         -0.2349596273585882
       ],
       "index": 3
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "label": "chest_reach",
+      "right_arm_joints": [
+        -1.159,
+        0.074,
+        0.03,
+        -0.635,
+        -0.123,
+        0.008,
+        -0.154
+      ],
+      "index": 4
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "label": "chest_flex",
+      "right_arm_joints": [
+        -0.934,
+        0.28,
+        -0.582,
+        -1.538,
+        0.622,
+        0.8,
+        -0.149
+      ],
+      "index": 5
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "label": "chest_high",
+      "right_arm_joints": [
+        -1.396,
+        0.265,
+        -0.388,
+        -1.012,
+        0.738,
+        0.393,
+        0.473
+      ],
+      "index": 6
+    },
+    {
+      "unit": "rad",
+      "joint_q_length": 29,
+      "label": "chest_tuck",
+      "right_arm_joints": [
+        -0.796,
+        -0.322,
+        0.325,
+        -1.355,
+        0.036,
+        0.149,
+        -0.471
+      ],
+      "index": 7
     },
     {
       "unit": "rad",

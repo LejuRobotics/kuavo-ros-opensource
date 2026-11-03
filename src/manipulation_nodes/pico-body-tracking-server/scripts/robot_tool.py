@@ -35,6 +35,10 @@ class KuavoRobotTools:
         """
         return self.tools_core._get_tf_tree_transform(target_frame, source_frame, return_type=return_type)
 
+    def try_get_tf_transform(self, target_frame, source_frame, return_type="pose_quaternion"):
+        """非阻塞查询TF；不改变原有查询接口的默认等待行为。"""
+        return self.tools_core.try_get_tf_transform(target_frame, source_frame, return_type)
+
     def get_base_to_odom(self, return_type: str = "pose_quaternion") -> Union[PoseQuaternion, HomogeneousMatrix, None]:
         """获取从base_link到odom坐标系的变换。
         

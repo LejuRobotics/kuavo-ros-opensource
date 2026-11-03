@@ -1017,6 +1017,20 @@
     <parent link="zarm_l7_link" />
     <child link="zarm_l7_end_effector" />
   </joint>
+  <link name="zarm_l7_end_effector_1">
+  </link>
+  <joint name="zarm_l7_end_effector_1_joint" type="fixed">
+    <origin xyz="0 0.0 -0.08" rpy="0 0 0" />
+    <parent link="zarm_l7_link" />
+    <child link="zarm_l7_end_effector_1" />
+  </joint>
+  <link name="zarm_l7_end_effector_2">
+  </link>
+  <joint name="zarm_l7_end_effector_2_joint" type="fixed">
+    <origin xyz="0.03 0.0 -0.17" rpy="0 0 0" />
+    <parent link="zarm_l7_link" />
+    <child link="zarm_l7_end_effector_2" />
+  </joint>
   <!-- ============ r_arm_pitch ============ -->
   <!-- 坐标系：r_arm_pitch_roll_yaw -->
   <link
@@ -1376,6 +1390,20 @@
     <parent link="zarm_r7_link" />
     <child link="zarm_r7_end_effector" />
   </joint>
+  <link name="zarm_r7_end_effector_1">
+  </link>
+  <joint name="zarm_r7_end_effector_1_joint" type="fixed">
+    <origin xyz="0 0.0 -0.08" rpy="0 0 0" />
+    <parent link="zarm_r7_link" />
+    <child link="zarm_r7_end_effector_1" />
+  </joint>
+  <link name="zarm_r7_end_effector_2">
+  </link>
+  <joint name="zarm_r7_end_effector_2_joint" type="fixed">
+    <origin xyz="0.03 0.0 -0.17" rpy="0 0 0" />
+    <parent link="zarm_r7_link" />
+    <child link="zarm_r7_end_effector_2" />
+  </joint>
   <link name="zhead_1_link">
     <inertial>
       <!-- 质心：( -0.00023727, -0.00370647, -0.03459039 ) -->
@@ -1462,20 +1490,20 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://kuavo_assets/models/biped_s53/meshes/head_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s200053/meshes/head_camera_base.STL" />
       </geometry>
       <material name="">
         <color rgba="1 1 1 1" />
       </material>
     </visual>
   </link>
-  <joint name="camera_base" type="fixed">
-    <origin xyz="0.093839 0.0475 0.050077" rpy="0 0.3406 0" />
+  <joint name="camera_base_joint" type="fixed">
+    <origin xyz="0.099619 0 0.032844" rpy="0 0.3406 0" />
     <parent link="zhead_2_link" />
     <child link="camera_base" />
   </joint>
 
-  <link name="head_rader">
+  <link name="radar">
     <inertial>
       <!-- 质心：( 0.00018505, -0.00000652, 0.01776962 ) -->
       <origin xyz="0.00018505 -0.00000652 0.01776962" rpy="0 0 0" />
@@ -1501,55 +1529,55 @@
     </visual>
   </link>
   
-  <joint name="head_rader_joint" type="fixed">
+  <joint name="radar" type="fixed">
     <origin xyz="0 0 -0.078253" rpy="0 0 0" />
     <parent link="zhead_1_link" />
-    <child link="head_rader" />
+    <child link="radar" />
     <axis xyz="0 0 0" />
   </joint>
-  <link
-    name="waist_camera">
+<link name="waist_camera_base">
     <inertial>
-      <origin
-        xyz="0.0048485 0.00025646 0.013977"
-        rpy="0 0 0" />
-      <mass
-        value="0.048238" />
-      <inertia
-        ixx="5.9781E-05"
-        ixy="-2.4765E-07"
-        ixz="1.0778E-07"
-        iyy="5.8328E-06"
-        iyz="-1.0739E-07"
-        izz="5.9293E-05" />
+      <origin xyz="-0.00502855 0.00095523 0.01145259" rpy="0 0 0" />
+      <mass value="0.13300" />
+      <inertia ixx="0.00023984" ixy="0.00000030" ixz="-0.00000807" iyy="0.00003306" iyz="0.00000049" izz="0.00023116" />
     </inertial>
     <visual>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s53/meshes/waist_camera.STL" />
+        <mesh filename="package://kuavo_assets/models/biped_s200053/meshes/waist_camera_base.STL" />
       </geometry>
-      <material
-        name="">
-        <color
-          rgba="1 1 1 1" />
+      <material name="">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
       </material>
     </visual>
   </link>
-  <joint
-    name="waist_camera"
-    type="fixed">
-    <origin
-      xyz="0.0787 0 -0.028449"
-      rpy="0 0.59341 0" />
-    <parent
-      link="waist_yaw_link" />
-    <child
-      link="waist_camera" />
-    <axis
-      xyz="0 0 0" />
+  <joint name="waist_camera_base_joint" type="fixed">
+    <origin xyz="0.0787 0 -0.028149" rpy="0 0.59341 0" />
+    <parent link="waist_yaw_link" />
+    <child link="waist_camera_base" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="waist_camera">
+    <inertial>
+      <origin xyz="-0.000500000000001943 1.15130127653629E-12 -1.16599618849023E-06" rpy="0 0 0" />
+      <mass value="0.001" />
+      <inertia ixx="9.81747704246788E-10" ixy="-2.14215407495108E-24" ixz="1.65694616452028E-23" iyy="4.97418836818372E-10" iyz="5.78021200862574E-28" izz="4.97418836818372E-10" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s200053/meshes/waist_camera_depth.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="waist_camera_joint" type="fixed">
+    <origin xyz="0.011715 0.0475 0.014312" rpy="0 0 0" />
+    <parent link="waist_camera_base" />
+    <child link="waist_camera" />
+    <axis xyz="0 0 0" />
   </joint>
   
   <!-- 在原有的gazebo插件配置后添加 -->
@@ -1763,4 +1791,86 @@
       </plugin>
   </gazebo>
   
+  <link name="camera_l_base" />
+  <joint name="l_hand_camera_joint" type="fixed">
+    <origin xyz="7.21360860434e-08 0.0334214585163 -0.106588366881" rpy="-3.1416 1.0472 -1.5708" />
+    <parent link="zarm_l7_link" />
+    <child link="camera_l_base" />
+  </joint>
+  <link name="camera_l_color_link" />
+  <joint name="camera_l_color_frame" type="fixed">
+    <origin xyz="0.0109 0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="camera_l_color_link" />
+  </joint>
+  <link name="camera_l_depth_link" />
+  <joint name="camera_l_depth_frame" type="fixed">
+    <origin xyz="0.0109 -0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="camera_l_depth_link" />
+  </joint>
+  <link name="cam_l_link" />
+  <joint name="camera_to_realcam_l_frame" type="fixed">
+    <origin xyz="0.0146 0.00 0.021" rpy="0 0 0" />
+    <parent link="camera_l_base" />
+    <child link="cam_l_link" />
+  </joint>
+  <link name="camera_r_base" />
+  <joint name="r_hand_camera_joint" type="fixed">
+    <origin xyz="-2.36413142634e-07 -0.0334214585174 -0.106588366881" rpy="-3.1416 1.0472 1.5708" />
+    <parent link="zarm_r7_link" />
+    <child link="camera_r_base" />
+  </joint>
+  <link name="camera_r_color_link" />
+  <joint name="camera_r_color_frame" type="fixed">
+    <origin xyz="0.0109 0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="camera_r_color_link" />
+  </joint>
+  <link name="camera_r_depth_link" />
+  <joint name="camera_r_depth_frame" type="fixed">
+    <origin xyz="0.0109 -0.009 0.021" rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="camera_r_depth_link" />
+  </joint>
+  <link name="cam_r_link" />
+  <joint name="camera_to_realcam_r_frame" type="fixed">
+    <origin xyz="0.0146 0.00 0.021" rpy="0 0 0" />
+    <parent link="camera_r_base" />
+    <child link="cam_r_link" />
+  </joint>
+  <link name="camera" />
+  <joint name="camera" type="fixed">
+    <origin xyz="0.099619 0 0.032844" rpy="0 0.3406 0" />
+    <parent link="zhead_2_link" />
+    <child link="camera" />
+  </joint>
+  <link name="head_camera_depth">
+    <inertial>
+      <origin xyz="-0.0005 0 0" rpy="0 0 0" />
+      <mass value="0.0000785398163397463" />
+      <inertia ixx="0.000000000981747704246829" ixy="0" ixz="0" iyy="0.000000000497418836818394" iyz="0" izz="0.000000000497418836818394" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/biped_s200053/meshes/head_camera_depth.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+  </link>
+  <joint name="head_camera_depth_joint" type="fixed">
+    <origin xyz="0.011715 0.0475 0.014312" rpy="0 0 0" />
+    <parent link="camera" />
+    <child link="head_camera_depth" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="cam_h_link" />
+  <joint name="camera_to_realcam_h_frame" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="camera" />
+    <child link="cam_h_link" />
+  </joint>
 </robot>

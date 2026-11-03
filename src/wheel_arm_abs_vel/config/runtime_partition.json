@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "wbc_cpus": [
+    2,
+    3
+  ],
+  "driver_reserved_cpus": [
+    5,
+    6,
+    7
+  ],
+  "ik_cpus": [
+    14
+  ],
+  "mapper_cpus": [
+    4
+  ],
+  "background_cpus": [
+    0,
+    1,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "ik_fifo_priority": 70,
+  "mapper_fifo_priority": 35,
+  "mapper_nice": -10,
+  "python_switch_interval_sec": 0.001
+}

@@ -1,0 +1,8 @@
+prefix=/builds/highlydynamic/kuavo-ros-control/installed/x86_64
+
+Name: hardware_node
+Description: Description of hardware_node
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -lhardware_node
+Requires: roscpp kuavo_common kuavo_assets kuavo_solver std_msgs message_runtime rospy
