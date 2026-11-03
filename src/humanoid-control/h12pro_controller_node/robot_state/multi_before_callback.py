@@ -954,6 +954,19 @@ def trot_callback(event):
 
 def stop_callback(event):
     source = event.kwargs.get("source")
+    # 普通 stop 与急停共用标志; 若急停外层已置位, 由外层负责清除。
+    stopping_param = "/joy_node/stopping"
+    already_stopping = rospy.get_param(stopping_param, False)
+    if not already_stopping:
+        rospy.set_param(stopping_param, True)
+    try:
+        _stop_callback_body(source)
+    finally:
+        if not already_stopping:
+            rospy.set_param(stopping_param, False)
+
+
+def _stop_callback_body(source):
     print_state_transition("stop", source, "initial")
     # 停止 WiFi 信息上报
     stop_wifi_info_report()

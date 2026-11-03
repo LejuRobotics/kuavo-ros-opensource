@@ -150,6 +150,11 @@ class Config:
     CALLBACK_FREQUENCY = 100
     LONG_PRESS_THRESHOLD = 1.0
 
+    # ===== 硬件就绪 → FSM 对账(issue 4689) =====
+    # 轮臂不做站立, FSM 从不读硬件状态; 由本节点每秒看 /hardware/enabled 决定进不进 stance。
+    HW_READY_SYNC_TICKS = 10    # 复用 10Hz 心跳, 采样 1/10 = 有效 1Hz
+    HW_READY_SYNC_STREAK = 2    # 连续命中, 滤掉 ≤1s 的参数抖动
+
     SCALE_RIGHT_STICK_Z = 0.2  # 右摇杆上下（上站下蹲）缩放比例
     SCALE_LEFT_STICK_Y = 1.0  # 左摇杆左右（左右平移）缩放比例
 
@@ -778,6 +783,27 @@ class H12PROControllerNode:
         self.executor = ThreadPoolExecutor(max_workers=2)
         self._state_transition_lock = threading.Lock()
         self._state_transition_executing = False  # 标记是否有状态转换正在执行
+        self._emergency_stop_active = False       # 本进程急停处理区间，供对账线程短路
+
+        # 硬件就绪对账(issue 4689): 仅轮臂真机 + multi + 服务启动生效
+        # ~hw_ready_sync_enabled=false 可免重编关闭(需重启本节点)
+        _sync_enabled = rospy.get_param("~hw_ready_sync_enabled", True)
+        self._hw_ready_sync_active = bool(
+            _sync_enabled
+            and self.real_robot
+            and self.h12_to_joy_node.is_wheel
+            and kuavo_control_scheme == "multi"
+            and self.manual_h12_init_state == "none")
+        self._hw_ready_tick = 0
+        self._hw_ready_streak = 0
+        self._hw_ready_seen_zero = False   # 本 ready_stance 期间是否见过 enabled==0
+        # 门控任一输入不满足都静默失效, 无论生效与否都打出实际取值供现场定位
+        rospy.loginfo(
+            "[HwReadySync] active=%s (real_robot=%s is_wheel=%s scheme=%s "
+            "manual=%s sync_enabled=%s)",
+            self._hw_ready_sync_active, self.real_robot,
+            self.h12_to_joy_node.is_wheel, kuavo_control_scheme,
+            self.manual_h12_init_state, _sync_enabled)
 
         self._setup_ros_components()
         
@@ -990,6 +1016,70 @@ class H12PROControllerNode:
         """Update has_joy_node parameter periodically."""
         self.start_way = rospy.get_param("start_way", "auto")
         self.only_half_up_body = rospy.get_param("only_half_up_body", False)
+        # 硬件就绪对账: 复用本 10Hz 心跳, 采样 1/HW_READY_SYNC_TICKS(有效 1Hz)
+        self._hw_ready_tick = (self._hw_ready_tick + 1) % Config.HW_READY_SYNC_TICKS
+        if self._hw_ready_tick:
+            return
+        self._hw_ready_sync_tick()
+
+    def _hw_ready_sync_tick(self) -> None:
+        """硬件使能后把 FSM 从 ready_stance 推进到 stance(issue 4689)。
+
+        判据是 /hardware/enabled: hardware_node 在 hardware_status_==1 的同一处置位,
+        比 is_ready(有 /re_start_robot 旁路) 与 real_launch_status(initing 一词两义) 唯一。
+        还要求本区间先见过 0, 避免停机残留值把 FSM 直接推进。
+        """
+        try:
+            if not self._hw_ready_sync_active:
+                return
+            if self._emergency_stop_active or rospy.get_param("/joy_node/stopping", False):
+                self._hw_ready_streak = 0
+                return
+            if self.robot_state_machine.state != "ready_stance":
+                self._hw_ready_streak = 0
+                self._hw_ready_seen_zero = False
+                return
+            if rospy.get_param("/hardware/enabled", 0) != 1:
+                self._hw_ready_streak = 0
+                self._hw_ready_seen_zero = True
+                return
+            if not self._hw_ready_seen_zero:
+                return
+            self._hw_ready_streak += 1
+            if self._hw_ready_streak < Config.HW_READY_SYNC_STREAK:
+                return
+            self._sync_ready_stance_to_stance()
+        except Exception as e:
+            # 对账异常只丢本次 tick, 不影响主 timer 与通道回调
+            rospy.logwarn_throttle(30.0, f"[HwReadySync] 对账异常, 本轮跳过: {e}")
+
+    def _sync_ready_stance_to_stance(self) -> None:
+        """把 FSM 从 ready_stance 置为 stance(非阻塞取锁, 不阻塞任何线程)。"""
+        if not self._state_transition_lock.acquire(blocking=False):
+            # 取锁失败说明屏幕/实体键正在转换: 不重置 streak 是刻意的, 下一拍立即重试
+            return
+        try:
+            # 急停可能在 tick 早期检查之后开始; 持锁后再检查一次, 避免与其状态提交竞态。
+            if self._emergency_stop_active:
+                return
+            if self.robot_state_machine.state != "ready_stance":
+                return
+            # set_state 不跑 before 回调: 不重复调 real_initial_start, 也不发 /joy 脉冲
+            self.robot_state_machine.machine.set_state(
+                "stance", self.robot_state_machine)
+            try:
+                rospy.set_param(LAST_STATE_PARAM, "stance")
+            except Exception as e:
+                rospy.logwarn(
+                    f"[HwReadySync] 状态已切换, 但持久化 {LAST_STATE_PARAM} 失败: {e}")
+            rospy.loginfo(
+                "[HwReadySync] /hardware/enabled=1, FSM ready_stance -> stance")
+        except Exception as e:
+            # 只丢本次转换; 节流避免 set_state 持续失败时每 2 拍刷一条
+            rospy.logwarn_throttle(30.0, f"[HwReadySync] ready_stance -> stance 失败: {e}")
+        finally:
+            self._hw_ready_streak = 0
+            self._state_transition_lock.release()
 
     def _channel_callback(self, msg: h12proRemoteControllerChannel) -> None:
         """Process incoming channel messages.
@@ -1636,8 +1726,17 @@ class H12PROControllerNode:
             rospy.logerr(f"Service '{service_name}' not available: {e}")
             return None
 
-    def _handle_emergency_stop(self, current_state: str, 
-                             msg: h12proRemoteControllerChannel) -> None:
+    def _handle_emergency_stop(self, current_state: str,
+                               msg: h12proRemoteControllerChannel) -> None:
+        """标记急停区间，避免阻塞式 stop 回调期间对账推进 FSM。"""
+        self._emergency_stop_active = True
+        try:
+            self._handle_emergency_stop_body(current_state, msg)
+        finally:
+            self._emergency_stop_active = False
+
+    def _handle_emergency_stop_body(self, current_state: str,
+                                    msg: h12proRemoteControllerChannel) -> None:
         """Handle emergency stop condition.
         
         Args:
