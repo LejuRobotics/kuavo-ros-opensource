@@ -196,3 +196,84 @@ class HandTargetCV:
         R, w = self.rotations[side].update(rotation, dt)
         self.last_observation_stamp[side] = stamp
         return p, R, v, w
+
+
+# Skeleton observation and mapping derivative aligned with test 7ea9a70d0.
+class SkeletonCV:
+    """One observation epoch for the geometry dependency group.
+
+    Equal numerical values at a NEW stamp are still observations. Repeated
+    stamps do not update covariance. No prediction across reset/gap/source.
+    """
+    indices = (0, 1, 2, 3, 4, 5, 22, 23)
+    rotating = (4, 5, 23)
+
+    def __init__(self, sigma_p=.001, q_p=.2, sigma_r=.003, q_r=1.8, max_gap=.1,
+                 hand_q_r=None):
+        self.parameters = (positive(sigma_p, 'sigma_p'), positive(q_p, 'q_p'),
+                           positive(sigma_r, 'sigma_r'), positive(q_r, 'q_r'))
+        # None preserves the legacy API; the ROS mapper explicitly selects
+        # the palm noise. Chest and both palms share the same timestamp.
+        self.hand_q_r = None if hand_q_r is None else positive(hand_q_r, 'hand_q_r')
+        self.max_gap = positive(max_gap, 'max_gap')
+        self.reset()
+
+    def reset(self):
+        self.stamp = None; self.key = None; self.states = {}
+        self.positions = {}; self.rotations = {}; self.updates = 0
+
+    def update(self, transforms, stamp, key):
+        if not math.isfinite(stamp): raise ValueError('invalid source stamp')
+        if self.key == key and self.stamp is not None and stamp == self.stamp:
+            return self.states
+        dt = None if self.stamp is None else stamp-self.stamp
+        if self.key != key or dt is None or dt <= 0 or dt > self.max_gap:
+            self.reset(); dt = None
+        sp, qp, sr, qr = self.parameters
+        # Validate all required geometry before committing any estimator.
+        for i in self.indices:
+            if not np.isfinite(transforms[i]).all(): raise ValueError('invalid skeleton')
+        for i in self.indices:
+            if i not in self.positions: self.positions[i] = PositionCV(sp, qp, velocity_gain=1.0)
+            p, v = self.positions[i].update(transforms[i][:3, 3], dt)
+            R = transforms[i][:3, :3]; w = np.zeros(3)
+            if i in self.rotating:
+                rotation_q = self.hand_q_r if i in (4, 5) and self.hand_q_r is not None else qr
+                if i not in self.rotations: self.rotations[i] = RotationCV(sr, rotation_q, velocity_gain=1.0)
+                R, w = self.rotations[i].update(R, dt)
+            T = np.eye(4); T[:3, :3] = R; T[:3, 3] = p
+            self.states[i] = (T, v, w)
+        self.stamp = stamp; self.key = key; self.updates += 1
+        return self.states
+
+
+def direction_rate(d, dv):
+    length = np.linalg.norm(d)
+    if length < 1e-6: raise ValueError('unresolved bone direction')
+    n = d/length
+    return (dv-n*(n@dv))/length
+
+
+def mapped_rates(chest, shoulder, elbow, palm, axes, upper_length,
+                 lower_length, source_rotation, tool_offset,
+                 source_wrist_offset=None, wrist_rotation=None):
+    """Derivative of the existing normalized-bone mapping, no differencing.
+
+    Optional offsets support WRIST_CONSISTENT_6D as well as legacy TCP.
+    Fixed right-multiplied palm calibration leaves spatial omega unchanged.
+    """
+    C, _, wc = chest; S, vs, _ = shoulder; E, ve, _ = elbow; H, vh, wh = palm
+    remove = axes@C[:3, :3].T
+    d = E[:3, 3]-S[:3, 3]
+    edot = upper_length*(remove@direction_rate(d, ve-vs)-np.cross(remove@wc, remove@(d/np.linalg.norm(d))))
+    end = H[:3, 3].copy(); vend = vh.copy()
+    if source_wrist_offset is not None:
+        offset = source_rotation@source_wrist_offset
+        end += offset; vend += np.cross(wh, offset)
+    d = end-E[:3, 3]
+    v = edot+lower_length*(remove@direction_rate(d, vend-ve)-np.cross(remove@wc, remove@(d/np.linalg.norm(d))))
+    omega = remove@(wh-wc)
+    mapped_rotation = remove@source_rotation
+    if wrist_rotation is not None: mapped_rotation = mapped_rotation@wrist_rotation
+    v += np.cross(omega, mapped_rotation@tool_offset)
+    return v, omega, edot

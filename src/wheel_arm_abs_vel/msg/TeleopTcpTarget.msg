@@ -89,10 +89,8 @@ uint64 torso_operation_seq
 bool arm_hold
 uint64 arm_operation_seq
 
-# Hand-only Kalman estimates, expressed in each TCP pose frame.
-# When true, left/right TCP twists replace differentiated hand feedforward.
-# Elbow/root/chest velocities are retained in the wire schema; the current IK
-# derives those channels from their own poses.
+# Skeleton CV estimates transformed through the TCP geometry mapping.
+# Twists and poses share one source epoch; explicit twists replace finite differences.
 bool estimated_twists_valid
 geometry_msgs/Twist left_tcp_twist
 geometry_msgs/Twist right_tcp_twist

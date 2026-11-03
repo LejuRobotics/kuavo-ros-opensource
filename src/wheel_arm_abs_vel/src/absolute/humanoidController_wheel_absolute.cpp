@@ -1,3 +1,4 @@
+#include "wheel_arm_abs_vel/hardware/end_effector_settings.h"
 #include <wheel_arm_abs_vel/common/wheel_arm_gains.h>
 #include "wheel_arm_abs_vel/model/FullModelContract.h"
 #include <ros/package.h>
@@ -274,6 +275,7 @@ namespace wheel_absolute_control
       robot_config_ = drake_interface_->getRobotConfig();
       kuavo_settings_ = drake_interface_->getKuavoSettings();
     }
+    wheel_arm_abs_vel::applyEndEffectorContract(kuavo_settings_, rb_version.version_number());
     HighlyDynamic::applyWheelArmGains(kuavo_settings_.running_settings,
         kuavo_settings_.hardware_settings.driver, lowJointNum_, armNum_, EC_MASTER, RUIWO);
 

@@ -220,3 +220,39 @@ foreach(test_name torso_stick_controls arm_torso_hold)
 endforeach()
 
 endif()
+
+if(CATKIN_ENABLE_TESTING)
+  # Always validate the production shaper, independently of optional replay tools.
+  if(NOT TARGET velocity_ik_fixed_bandwidth_integration_test)
+    add_executable(velocity_ik_fixed_bandwidth_integration_test fixed_bandwidth_integration_test.cpp)
+    target_include_directories(velocity_ik_fixed_bandwidth_integration_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
+    target_link_libraries(velocity_ik_fixed_bandwidth_integration_test PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
+    target_compile_options(velocity_ik_fixed_bandwidth_integration_test PRIVATE -UNDEBUG)
+    if(VELOCITY_IK_MESSAGE_TARGETS)
+      add_dependencies(velocity_ik_fixed_bandwidth_integration_test ${VELOCITY_IK_MESSAGE_TARGETS})
+    endif()
+  endif()
+  foreach(model 62 63 400062)
+    add_test(NAME velocity_ik_filter_alignment_${model}
+      COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_filter_alignment_regression.py
+      $<TARGET_FILE:velocity_ik_fixed_bandwidth_integration_test> ${model})
+    set_tests_properties(velocity_ik_filter_alignment_${model} PROPERTIES TIMEOUT 120)
+  endforeach()
+endif()
+
+if(CATKIN_ENABLE_TESTING)
+  add_executable(velocity_ik_manual_lower_body_test manual_lower_body_test.cpp)
+  target_compile_options(velocity_ik_manual_lower_body_test PRIVATE -UNDEBUG)
+  add_test(NAME velocity_ik_manual_lower_body_test COMMAND velocity_ik_manual_lower_body_test)
+  add_executable(velocity_ik_manual_lower_body_integration_test manual_lower_body_integration_test.cpp)
+  target_include_directories(velocity_ik_manual_lower_body_integration_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
+  target_link_libraries(velocity_ik_manual_lower_body_integration_test PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
+  target_compile_options(velocity_ik_manual_lower_body_integration_test PRIVATE -UNDEBUG)
+  add_dependencies(velocity_ik_manual_lower_body_integration_test ${VELOCITY_IK_MESSAGE_TARGETS})
+  foreach(model 62 63 400062)
+    add_test(NAME velocity_ik_manual_lower_body_${model} COMMAND ${PYTHON_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_manual_lower_body_regression.py
+      $<TARGET_FILE:velocity_ik_manual_lower_body_integration_test> ${model} normal)
+    set_tests_properties(velocity_ik_manual_lower_body_${model} PROPERTIES TIMEOUT 180)
+  endforeach()
+endif()

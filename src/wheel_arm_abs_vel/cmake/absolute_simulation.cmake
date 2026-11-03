@@ -28,8 +28,8 @@ file(GLOB abs_sim_helpers "${abs_mujoco_root}/src/simulate/*.cc"
   "${abs_mujoco_root}/utils/cpp_ray_caster/*.cpp")
 add_executable(absolute_mujoco_sim src/simulation/main.cpp src/simulation/x11_private_ipc.cpp "${abs_sim_source}"
   ${abs_sim_helpers} "${abs_mujoco_root}/src/dexhand_mujoco_node.cpp"
-  "${abs_sg_root}/src/SG100HandBridge.cpp"
-  "${abs_sg_root}/src/SG100GestureLibrary.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/hardware/sg100/src/SG100HandBridge.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/hardware/sg100/src/SG100GestureLibrary.cpp"
   "${abs_sg_root}/src/SG100JointLimits.cpp")
 target_include_directories(absolute_mujoco_sim PRIVATE
   "${abs_mujoco_root}/include" "${abs_mujoco_root}/include/simulate"
@@ -52,3 +52,5 @@ if(CATKIN_ENABLE_TESTING)
   target_compile_options(simulation_servo_test PRIVATE -UNDEBUG)
   add_test(NAME simulation_servo_test COMMAND simulation_servo_test)
 endif()
+
+target_include_directories(absolute_mujoco_sim BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/hardware/sg100/include)

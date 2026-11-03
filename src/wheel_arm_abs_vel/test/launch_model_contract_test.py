@@ -25,6 +25,13 @@ class LaunchModelTest(unittest.TestCase):
             [(str(PACKAGE / "launch" / file), args)], None, verbose=False)
 
 
+    def test_explicit_hand_gains_reach_both_input_entries(self):
+        for entry in ('quest_velocity_ik.launch', 'pico_velocity_ik.launch'):
+            cfg = self.load(entry, ['robot_version:=400062', 'sg100_kp:=2.0',
+                                   'sg100_kd:=0.04', 'sg100_output_limit:=0.35'])
+            for field, expected in [('sg100_kp', 2.0), ('sg100_kd', 0.04), ('sg100_output_limit', 0.35)]:
+                self.assertEqual(cfg.params['/'+field].value, expected)
+
     def test_shared_model_contract_matches_both_entries(self):
         import json
         for version in (62, 63, 400062):
@@ -38,7 +45,7 @@ class LaunchModelTest(unittest.TestCase):
         for entry in ('quest_velocity_ik.launch', 'pico_velocity_ik.launch'):
             cfg = self.load(entry, ['robot_version:=400062', 'control_torso:=false'])
             self.assertNotIn('/sg100_kp', cfg.params)  # inherit controller
-            self.assertEqual(cfg.params['/absolute_velocity_ik/hand_position_cutoff_hz'].value, 10.)
+            self.assertEqual(cfg.params['/absolute_velocity_ik/hand_position_cutoff_hz'].value, 5.)
             self.assertTrue(cfg.params['/absolute_velocity_ik/publish_absolute_bag_topics'].value)
             mapper = next(n for n in cfg.nodes if n.name == 'ik_ros_uni')
             self.assertIn('--control_torso=false', mapper.args)
@@ -47,6 +54,27 @@ class LaunchModelTest(unittest.TestCase):
             self.assertEqual(cfg.params['/absolute_velocity_ik/hand_position_cutoff_hz'].value, 12.)
             self.assertFalse(cfg.params['/absolute_velocity_ik/publish_absolute_bag_topics'].value)
             self.assertFalse(cfg.params['/absolute_velocity_ik/s6_motion_profile/enabled'].value)
+
+    def test_standard_quest_and_pico_use_test_control_defaults(self):
+        expected = {
+            'hand_position_cutoff_hz': 5., 'hand_orientation_cutoff_hz': 4.,
+            'hand_position_gain': 12., 'hand_position_weight': 12.,
+            'hand_orientation_gain': 8., 'hand_orientation_weight': 6.,
+            'elbow_position_weight': .15, 'torso_reference_frequency': 2.5,
+            'acquisition/linear_speed': .4, 'acquisition/angular_speed': 1.2,
+            'joint_jerk/limits/zarm_l4_joint': 25000.,
+            'joint_jerk/limits/zarm_r4_joint': 25000.}
+        for version in (62, 63, 400062):
+            for entry in ('quest_velocity_ik.launch', 'pico_velocity_ik.launch'):
+                config = self.load(entry, ['robot_version:=' + str(version)])
+                for key, value in expected.items():
+                    self.assertEqual(config.params['/absolute_velocity_ik/' + key].value,
+                                     value, (version, entry, key))
+                self.assertNotIn('/absolute_velocity_ik/hand_prediction_horizon', config.params)
+                for key, value in {'position_sigma': .001, 'position_q': .63,
+                                   'rotation_sigma': .003, 'rotation_q': 5.7,
+                                   'hand_rotation_q': 1.42}.items():
+                    self.assertEqual(config.params['/ik_ros_uni/vr_kalman_' + key].value, value)
 
     def test_private_sim_motor_servo_and_rollback(self):
         cfg = self.load("load_kuavo_mujoco_velocity_ik.launch", ["robot_version:=62"])
@@ -265,8 +293,9 @@ class LaunchModelTest(unittest.TestCase):
         for tuned in (True, False):
             args = ["robot_version:=62", "filter_tuning_enabled:=" + str(tuned).lower()]
             dynamics = self.load("dynamics_backend.launch", args[1:])
-            self.assertEqual(dynamics.params["/dynamics/rnea/velocity_cutoff_hz"].value, 60. if tuned else 120.)
-            self.assertEqual(dynamics.params["/dynamics/rnea/jerk_limit"].value[8], 1000. if tuned else 500.)
+            self.assertEqual(dynamics.params["/dynamics/rnea/velocity_cutoff_hz"].value, 30.)
+            self.assertEqual(dynamics.params["/dynamics/rnea/jerk_limit_arm"].value, 500.)
+            self.assertNotIn("/dynamics/rnea/jerk_limit", dynamics.params)
             for name in ("quest_velocity_ik.launch", "pico_velocity_ik.launch"):
                 cfg = self.load(name, args + ["vr_kalman_flattening_enabled:=true"])
                 self.assertEqual(cfg.params["/absolute_velocity_ik/wrist_envelope/enabled"].value, tuned)

@@ -40,6 +40,7 @@
   <arg name="rviz" default="true" />
   <arg name="multiplot" default="false" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <param name="/absolute_velocity_ik/end_effector_contract" type="str" command="python3 $(find wheel_arm_abs_vel)/scripts/absolute_end_effector.py --config $(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json --ee-type=auto --machine-mode=false --contract-version=$(arg robot_version)" />
   <include file="$(find wheel_arm_abs_vel)/launch/velocity_model_contract.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>

@@ -21,7 +21,7 @@ from tf.transformations import quaternion_from_matrix, quaternion_matrix
 from geometry_msgs.msg import TransformStamped,Twist
 from tf2_msgs.msg import TFMessage
 from constanst import gesture_corresponding_hand_position
-from pose_velocity_kalman import HandTargetCV, _NATIVE
+from pose_velocity_kalman import SkeletonCV, mapped_rates, _NATIVE
 # to dev
 hand_thumb_pub = rospy.Publisher('/hand_thumb', Float32MultiArray, queue_size=10)
 
@@ -116,16 +116,15 @@ class Quest3ArmInfoTransformer:
         self.velocity_ik_takeover = bool(rospy.get_param("~enable_velocity_ik_takeover", False))
         if self.velocity_ik_takeover and _NATIVE is None:
             raise ImportError("Velocity takeover requires the native Mapper; Python is an offline oracle only")
-        self.hand_filter_enabled = self.velocity_ik_takeover
-        self.hand_filter = HandTargetCV(
-            rospy.get_param("~vr_kalman_position_sigma", .003),
-            rospy.get_param("~vr_kalman_position_q", .01),
-            rospy.get_param("~vr_kalman_position_velocity_gain", .15),
-            rospy.get_param("~vr_kalman_rotation_sigma", .004),
-            rospy.get_param("~vr_kalman_hand_rotation_q", .35),
-            rospy.get_param("~vr_kalman_hand_velocity_gain", .6),
-            rospy.get_param("~vr_elbow_time_constant", .040))
-        self.hand_filter_contract = None
+        self.skeleton_filter_enabled = bool(rospy.get_param("~vr_kalman_enabled", True)) and bool(rospy.get_param("~enable_velocity_ik_takeover", False))
+        self.skeleton_filter = SkeletonCV(
+            rospy.get_param("~vr_kalman_position_sigma", .001),
+            rospy.get_param("~vr_kalman_position_q", .2),
+            rospy.get_param("~vr_kalman_rotation_sigma", .003),
+            rospy.get_param("~vr_kalman_rotation_q", 1.8),
+            hand_q_r=rospy.get_param("~vr_kalman_hand_rotation_q", .45))
+        self.skeleton_contract = None
+        self.estimated_bones = {}
         self.tcp_estimated_rates = {}
         self.is_high_confidence = True
         self.is_hand_tracking = False
@@ -690,6 +689,7 @@ class Quest3ArmInfoTransformer:
         self.left_tcp_elbow_hint = None
         self.right_tcp_elbow_hint = None
         self.tcp_mapping_diagnostics = {"Left": None, "Right": None}
+        self.estimated_bones = {}
         self.tcp_estimated_rates = {}
         self.valid_pose_indices = set()
         if not msg.is_hand_tracking and self.left_joystick is None:
@@ -714,8 +714,21 @@ class Quest3ArmInfoTransformer:
         self.timestamp_ms = msg.timestamp_ms
         self.is_high_confidence = msg.is_high_confidence
         self.is_hand_tracking = msg.is_hand_tracking
-        if self.hand_filter_enabled and accept_hands:
-            self.hand_filter.bind((self.hand_filter_contract, bool(msg.is_hand_tracking)))
+        if self.skeleton_filter_enabled and accept_hands:
+            # Keep beta source admission and optical startup gates. A partial
+            # skeleton cannot update the coupled geometry estimator.
+            required = set(SkeletonCV.indices) - {22}
+            if not required.issubset(self.valid_pose_indices):
+                return False
+            try:
+                transforms = {i: self.pose_info2_transform(msg.poses[i]) for i in required}
+                transforms[22] = (self.pose_info2_transform(msg.poses[22])
+                                  if 22 in self.valid_pose_indices else np.eye(4))
+                self.estimated_bones = self.skeleton_filter.update(
+                    transforms, float(msg.timestamp_ms)*.001,
+                    (self.skeleton_contract, bool(msg.is_hand_tracking)))
+            except (ValueError, np.linalg.LinAlgError):
+                return False
         if accept_hands:
             # print("is_high_confidence: {}, is_hand_tracking: {}".format(self.is_high_confidence, self.is_hand_tracking))
             if self.is_hand_tracking:
@@ -1204,11 +1217,6 @@ class Quest3ArmInfoTransformer:
 
         shoulder_relative = R_remove_chest_motion @ (T_wShoulder[:3, 3] - chest_position)
         elbow_relative = R_remove_chest_motion @ (T_wElbow[:3, 3] - chest_position)
-        if self.hand_filter_enabled:
-            elbow_relative = self.hand_filter.smooth_elbow(side, elbow_relative, self.timestamp_ms*.001)
-            # Both the normal and wrist mappings consume the smoothed geometry.
-            T_wElbow = T_wElbow.copy()
-            T_wElbow[:3, 3] = chest_position + R_remove_chest_motion.T @ elbow_relative
         palm_relative = R_remove_chest_motion @ (T_wPalm[:3, 3] - chest_position)
         shoulder_anchor = np.array([
             bias_chest_to_base_link[0],
@@ -1259,10 +1267,6 @@ class Quest3ArmInfoTransformer:
             matrix_to_quaternion(R_mapped_source), dtype=float
         )
         tcp_quaternion = np.asarray(matrix_to_quaternion(R_tcp), dtype=float)
-        if self.hand_filter_enabled:
-            tcp_position, R_tcp, linear, angular = self.hand_filter.update(side, tcp_position, R_tcp, self.timestamp_ms*.001)
-            tcp_quaternion = matrix_to_quaternion(R_tcp)
-            self.tcp_estimated_rates[side] = (linear, angular)
         self.tcp_mapping_diagnostics[side] = {
             "source_key": source_key,
             "geometry_mode": getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D"),
@@ -1505,8 +1509,31 @@ class Quest3ArmInfoTransformer:
         T_wHand = self.pose_info2_transform(hand_pose)
         T_wS = self.pose_info2_transform(shoulder_pose)
 
+        tcp_chest, tcp_shoulder, tcp_elbow, tcp_palm = T_wChest, T_wS, T_wElbow, T_wHand
+        tcp_rotation = palm_robot_rotation
+        if self.estimated_bones:
+            ids = (0, 1, 4) if side == "Left" else (2, 3, 5)
+            c, s, e, h = [self.estimated_bones[i] for i in (23,)+ids]
+            tcp_chest, tcp_shoulder, tcp_elbow, tcp_palm = c[0], s[0], e[0], h[0]
+            tcp_rotation = quaternion_to_matrix(vr_quat2robot_quat(
+                matrix_to_quaternion(tcp_palm[:3, :3]), side, 0.0))
         tcp_target, tcp_elbow_hint = self._compute_unified_tcp_target(
-            side, T_wChest, T_wS, T_wElbow, T_wHand, vr_quat, palm_robot_rotation)
+            side, tcp_chest, tcp_shoulder, tcp_elbow, tcp_palm, vr_quat, tcp_rotation)
+        if self.estimated_bones and tcp_target is not None:
+            source_key, tool = self._active_source_to_tcp(side)
+            axes, lower, offset = self.init_R_wC, self.tcp_forearm_retarget_length, tool[:3, 3]
+            wrist_offset = wrist_rotation = None
+            if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "WRIST_CONSISTENT_6D":
+                contract = self.tcp_wrist_contract["sources"][source_key][side]
+                X = np.asarray(contract["source_to_wrist"])
+                wrist_offset = X[:3, 3]
+                wrist_rotation = X[:3, :3]@np.asarray(contract["wrist_to_joint7_rotation"])
+                axes = np.asarray(self.tcp_wrist_contract["robot_task_from_chest_axes"])
+                lower = contract["forearm_to_joint7_m"]
+                offset = np.asarray(contract["joint7_to_tcp"])[:3, 3]
+            self.tcp_estimated_rates[side] = mapped_rates(
+                c, s, e, h, axes, self.upper_arm_length, lower, tcp_rotation,
+                offset, wrist_offset, wrist_rotation)
         if side == "Left":
             self.left_tcp_target = tcp_target
             self.left_tcp_elbow_hint = tcp_elbow_hint
@@ -1514,6 +1541,8 @@ class Quest3ArmInfoTransformer:
             self.right_tcp_target = tcp_target
             self.right_tcp_elbow_hint = tcp_elbow_hint
 
+        _, axis, chest_rpy, remove_yaw, chest_pitch = (
+            chest_frame if chest_frame is not None else self._chest_frame_geometry(T_wChest))
         self.chest_axis_agl = [0, 0, axis[1]]
         self.head_body_pose.body_yaw = axis[1]
         self.head_body_pose.body_pitch = chest_pitch

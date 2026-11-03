@@ -35,11 +35,16 @@
   <depend>leju_mobile_base_msgs</depend>
   <depend>ocs2_core</depend>
   <depend>ocs2_msgs</depend>
-  <exec_depend>hardware_node</exec_depend>
+  <depend>hardware_node</depend>
+  <depend>kuavo_solver</depend>
+  <depend>urdf</depend>
+  <depend>rosbag</depend>
   <exec_depend>mujoco_cpp</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
   <build_depend>lcm_msg</build_depend>
   <test_depend>rostest</test_depend>
   <export>
+    <nodelet plugin="${prefix}/plugins/absolute_hardware.xml"/>
     <nodelet plugin="${prefix}/plugins/wheel_absolute_controller_plugin.xml" />
   </export>
 </package>

@@ -30,12 +30,12 @@
   <arg name="continuous_reference_enabled" default="true" />
   <arg name="hand_reference_frequency" default="12.0" />
   <arg name="orientation_reference_mode" default="fixed_bandwidth" />
-  <arg name="hand_prediction_config" default="$(find wheel_arm_abs_vel)/config/layer2_causal_candidate.yaml" />
+  <arg name="hand_prediction_config" default="" doc="Optional explicit control overlay; empty uses the aligned test defaults." />
   <arg name="s6_motion_profile" default="true" />
   <arg name="publish_legacy_arm_traj" default="true" />
   <arg name="publish_absolute_bag_topics" default="true" />
-  <arg name="hand_position_cutoff_hz" default="" />
-  <arg name="hand_orientation_cutoff_hz" default="" />
+  <arg name="hand_position_cutoff_hz" default="5.0" />
+  <arg name="hand_orientation_cutoff_hz" default="4.0" />
   <arg name="joint_jerk_enabled" default="true" />
   <arg name="adaptive_reference_enabled" default="true" />
   <arg name="innovation_reference_enabled" default="true" />
@@ -68,6 +68,9 @@
   <arg name="control_finger_type" default="0" />
   <arg name="predict_gesture" default="false" />
   <arg name="ee_type" default="auto" doc="Read EndEffectorType from this robot version kuavo.json; optional explicit override" />
+  <arg name="sg100_kp" default="" />
+  <arg name="sg100_kd" default="" />
+  <arg name="sg100_output_limit" default="" />
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
   <arg name="enable_head_control" default="false" />
   <arg name="enable_terminal_start" default="false" />
@@ -221,6 +224,9 @@
     <arg name="control_finger_type" value="$(arg control_finger_type)" />
     <arg name="predict_gesture" value="$(arg predict_gesture)" />
     <arg name="ee_type" value="$(arg ee_type)" />
+    <arg name="sg100_kp" value="$(arg sg100_kp)" />
+    <arg name="sg100_kd" value="$(arg sg100_kd)" />
+    <arg name="sg100_output_limit" value="$(arg sg100_output_limit)" />
     <arg name="sg100_enabled" value="$(arg sg100_enabled)" />
     <arg name="enable_head_control" value="$(arg enable_head_control)" />
     <arg name="enable_terminal_start" value="$(arg enable_terminal_start)" />
