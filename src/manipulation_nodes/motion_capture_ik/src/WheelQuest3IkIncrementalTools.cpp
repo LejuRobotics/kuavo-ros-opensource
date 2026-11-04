@@ -3385,6 +3385,12 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   nodeHandle_.param(naturalElbowParam + "down_projection_min_norm",
                     wheelNaturalElbowGuideConfig_.downProjectionMinNorm,
                     0.05);
+  nodeHandle_.param(naturalElbowParam + "down_projection_full_norm",
+                    wheelNaturalElbowGuideConfig_.downProjectionFullNorm,
+                    0.18);
+  nodeHandle_.param(naturalElbowParam + "max_command_direction_step_rad",
+                    wheelNaturalElbowGuideConfig_.maxCommandDirectionStepRad,
+                    0.30);
   nodeHandle_.param(naturalElbowParam + "reach_margin",
                     wheelNaturalElbowGuideConfig_.reachMargin,
                     0.002);
@@ -3408,6 +3414,13 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
                     0.200);
   wheelNaturalElbowSoftTrackingScale_ =
       std::clamp(wheelNaturalElbowSoftTrackingScale_, 0.0, 1.0);
+  wheelNaturalElbowGuideConfig_.downProjectionMinNorm =
+      std::max(0.0, wheelNaturalElbowGuideConfig_.downProjectionMinNorm);
+  wheelNaturalElbowGuideConfig_.downProjectionFullNorm = std::max(
+      wheelNaturalElbowGuideConfig_.downProjectionMinNorm,
+      wheelNaturalElbowGuideConfig_.downProjectionFullNorm);
+  wheelNaturalElbowGuideConfig_.maxCommandDirectionStepRad =
+      std::max(0.0, wheelNaturalElbowGuideConfig_.maxCommandDirectionStepRad);
   wheelNaturalElbowGuideConfig_.waistSoftClearance =
       std::max(0.0, wheelNaturalElbowGuideConfig_.waistSoftClearance);
   wheelNaturalElbowGuideConfig_.waistFullActivationClearance =
@@ -3430,6 +3443,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   ROS_INFO(
       "[WheelQuest3IkIncrementalROS] Natural elbow circle: enabled=%s, "
       "gravity=%.2f, human=%.2f, soft_tracking_scale=%.2f, "
+      "down_projection=[min %.3f, full %.3f], max_cmd_step=%.3f rad, "
       "reach_margin=%.3f m, extension_fade_retraction=[%.3f, %.3f] m, "
       "waist_avoidance=%s, waist_clearance=[full %.3f, soft %.3f] m, "
       "live_path_fade=%s vmin=%.2f vmax=%.2f keep_tracking=true "
@@ -3438,6 +3452,9 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
       1.0 - std::clamp(wheelNaturalElbowGuideConfig_.naturalDirectionBlend, 0.0, 1.0),
       wheelNaturalElbowSoftTrackingScale_,
+      wheelNaturalElbowGuideConfig_.downProjectionMinNorm,
+      wheelNaturalElbowGuideConfig_.downProjectionFullNorm,
+      wheelNaturalElbowGuideConfig_.maxCommandDirectionStepRad,
       wheelNaturalElbowGuideConfig_.reachMargin,
       wheelNaturalElbowGuideConfig_.extensionFadeStartDistance,
       wheelNaturalElbowGuideConfig_.extensionFadeFullDistance,

@@ -700,17 +700,8 @@ namespace mobile_manipulator
       const double x_increment = open_loop_torso_x_ - initialTorsoPose_x_;
       const double current_torso_max_x = getTorsoMaxX(z_increment);
 
-      // 降 z 后 x 仍超出当前高度允许包络：主动发回收速度，避免开环卡在大 x 上逼出前倾
-      if (x_increment > current_torso_max_x + kTorsoClampEps)
-      {
-        const double overshoot = x_increment - current_torso_max_x;
-        const double retract = -std::min(std::max(linear_scale_x_, 0.1), std::max(0.15, overshoot * 2.0));
-        if (vel.linear.x > retract)
-        {
-          vel.linear.x = retract;
-        }
-      }
-      else if (vel.linear.x > 0.0 && x_increment >= current_torso_max_x - kTorsoClampEps)
+      // 仅阻止向外输入，不给纯升降/俯仰附加 x 回收速度。
+      if (vel.linear.x > 0.0 && x_increment >= current_torso_max_x - kTorsoClampEps)
       {
         vel.linear.x = 0.0;
       }

@@ -5,6 +5,7 @@
 #include <Eigen/Core>
 
 #include "humanoid_wheel_interface/motion_planner/TorsoRotationTarget.h"
+#include "humanoid_wheel_interface/motion_planner/TorsoReachability.h"
 #include "humanoid_wheel_interface/motion_planner/TorsoYawTarget.h"
 
 namespace {
@@ -109,6 +110,24 @@ bool testResetKeepsRaisedKneeLegAndRestoresOnlyWaist() {
 
 int main() {
   bool ok = true;
+  const ocs2::TorsoPlanarGeometry geometry{{0.098, 0.4155}, {-0.46521, 0.18325},
+                                          {0.48296, 0.12941}, {0.0, 0.25}};
+  const Eigen::Vector4d high(0.194, 1.298, 0.0, 0.524);
+  const Eigen::Vector4d unreachable(0.164, 0.978, 0.0, 0.523);
+  ok &= check(ocs2::isTorsoPoseReachable(high, geometry, kLower, kUpper),
+              "bag high torso pose must be reachable");
+  ok &= check(!ocs2::isTorsoPoseReachable(unreachable, geometry, kLower, kUpper),
+              "bag low forward-pitch pose requiring negative knee must be rejected");
+  const Eigen::Vector4d lowered(high[0], 0.978, high[2], high[3]);
+  const auto limited = ocs2::limitTorsoReachableStep(high, lowered, geometry, kLower, kUpper);
+  ok &= check(ocs2::isTorsoPoseReachable(limited, geometry, kLower, kUpper) && limited[1] > lowered[1],
+              "lowering must stop at the reachable boundary");
+  ok &= check(limited[0] == high[0] && limited[2] == high[2] && limited[3] == high[3],
+              "pure lowering must preserve x, yaw and pitch");
+  const auto reverse = ocs2::limitTorsoReachableStep(limited, high, geometry, kLower, kUpper);
+  ok &= check(reverse.isApprox(high, 1e-10), "raising from lower boundary must remain responsive");
+  const auto held = ocs2::limitTorsoReachableStep(limited, limited, geometry, kLower, kUpper);
+  ok &= check(held.isApprox(limited, 1e-12), "zero input at reachable boundary must hold");
   ok &= testForwardLimitThenReverseKeepsKneeAndLegSnapshot();
   ok &= testModelLimitsTakePrecedence();
   ok &= testOutsideWorkspaceEntryDoesNotJumpAndOnlyMovesInward();
