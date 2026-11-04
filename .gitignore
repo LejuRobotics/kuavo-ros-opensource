@@ -81,3 +81,6 @@ ci_scripts/is_git_fatal_error.sh
 # runtime config files with real credentials: only *.env.example templates are tracked
 *.env
 !*.env.example
+
+# local agent session state (tool artifact, never part of the build)
+.pi/session_progress.json

@@ -75,15 +75,18 @@ find_library(ABS_STARK NAMES bc_stark_sdk PATHS ${STARK}/shared/linux REQUIRED)
 # package builds. A normal workspace may provide these from the hardware build.
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   set(ABS_EC_VENDOR ${ABS_HARDWARE_VENDOR_ROOT}/EC_Master_arm64/src/SDK/LIB/Linux/aarch64)
-  set(ABS_EC_RAS ${ABS_EC_VENDOR}/libEcMasterRasServer.a)
+  set(ABS_EC_LIBS
+    ${ABS_EC_VENDOR}/libEcMasterRasServerStatic.a
+    ${ABS_EC_VENDOR}/libEcMasterStatic.a
+    ${ABS_HARDWARE_VENDOR_ROOT}/EC_Master_arm64/Bin/Linux/aarch64/libemllIntelGbe.so)
 else()
   set(ABS_EC_VENDOR ${ABS_HARDWARE_VENDOR_ROOT}/EC_Master/src/SDK/LIB/Linux/x64)
-  set(ABS_EC_RAS ${ABS_EC_VENDOR}/libAtemRasSrv.a)
+  set(ABS_EC_LIBS ${ABS_EC_VENDOR}/libAtemRasSrv.a ${ABS_EC_VENDOR}/libEcMaster.a)
 endif()
 foreach(name xscontroller xscommon xstypes)
   list(APPEND VENDOR_LIBS ${ABS_HARDWARE_VENDOR_ROOT}/xsens_ros_mti_driver/lib/xspublic/${name}/lib${name}.a)
 endforeach()
-list(APPEND VENDOR_LIBS ${ABS_EC_RAS} ${ABS_EC_VENDOR}/libEcMaster.a)
+list(APPEND VENDOR_LIBS ${ABS_EC_LIBS})
 target_link_libraries(absolute_hardware_impl PUBLIC ${catkin_LIBRARIES} ${VENDOR_LIBS}
   ${ABS_BM} ${ABS_STARK} ${SDK}/SG100_SDK_Publish/lib/${SG_PLATFORM}/libsg100_sdk.so
   lcm udev yaml-cpp ${JSONCPP_LIBRARIES} drake::drake usb-1.0 stdc++fs pthread dl rt)
