@@ -25,6 +25,11 @@ target_compile_features(chest_point_opt_reanchor_test PUBLIC cxx_std_17)
 target_link_libraries(chest_point_opt_reanchor_test drake::drake)
 add_test(NAME chest_point_opt_reanchor_test COMMAND $<TARGET_FILE:chest_point_opt_reanchor_test>)
 
+add_executable(arm_point_opt_reference_test arm_point_opt_reference_test.cpp)
+target_compile_features(arm_point_opt_reference_test PUBLIC cxx_std_17)
+target_link_libraries(arm_point_opt_reference_test drake::drake)
+add_test(NAME arm_point_opt_reference_test COMMAND $<TARGET_FILE:arm_point_opt_reference_test>)
+
 add_executable(wheel_resume_lower_body_test
   wheel_resume_lower_body_test.cpp
   ../src/WheelOneStageIKEndEffector.cpp

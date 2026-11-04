@@ -338,8 +338,8 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   IncrementalPoseResult latestIncrementalResult_;
 
   // 保存 incrementalController_ 查询结果的手部和肘部位置
-  Eigen::Vector3d latestHumanLeftElbowPos_;   // 左肘位置（通过 FK 计算）
-  Eigen::Vector3d latestHumanRightElbowPos_;  // 右肘位置（通过 FK 计算）
+  Eigen::Vector3d latestHumanLeftElbowPos_ = Eigen::Vector3d::Zero();   // 建锚时由实测 FK 更新
+  Eigen::Vector3d latestHumanRightElbowPos_ = Eigen::Vector3d::Zero();  // 建锚时由实测 FK 更新
 
   Eigen::Vector3d latestRobotLeftElbowPos_;
   Eigen::Vector3d latestRobotRightElbowPos_;

@@ -858,9 +858,8 @@ namespace mobile_manipulator {
       cmdTorsoPose_mtx_.lock();
       isCmdTorsoPoseUpdated_ = true;
       cmdTorsoPoseDesiredTime_ = 0.0;
-      const double yaw = applyTorsoYawRequest(
-          cmdTorsoPose_[3], msg->angular.z, cmdTorsoPose_[2] - initialTorsoPos_[2],
-          msg->linear.z - initialTorsoPos_[2]);
+      // VR/SDK 位姿请求不依赖躯干高度，保留 yaw 角度限幅。
+      const double yaw = clampTorsoYawTarget(msg->angular.z);
       cmdTorsoPose_[0] = msg->linear.x;
       cmdTorsoPose_[1] = msg->linear.y;
       cmdTorsoPose_[2] = msg->linear.z;
@@ -5856,9 +5855,8 @@ namespace mobile_manipulator {
       }
     }
 
-    // 仅过滤本拍新增偏航；升降/前倾不能把已有的 A/B 转腰目标拉回。
-    cmd4[2] = applyTorsoYawRequest(
-        cmd6[3], cmd4[2], cmd6[2] - initialTorsoPos_[2], cmd4[1] - initialTorsoPos_[2]);
+    // VR A/B 增量请求不依赖躯干高度；G12/BT2 高度保护仍由 Joy 输入端执行。
+    cmd4[2] = clampTorsoYawTarget(cmd4[2]);
 
     // Write back sole open-loop final target; Ruckig tracks from prevTarget → cmd4
     {
