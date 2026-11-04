@@ -36,9 +36,31 @@ def _default_config_path() -> str:
     return os.path.join(_script_dir, "config", "bodies.yaml")
 
 
+_calib_dir = os.path.abspath(os.path.join(_script_dir, ".."))
+if _calib_dir not in sys.path:
+    sys.path.insert(0, _calib_dir)
+import robot_versions as rv  # noqa: E402  (统一机型表)
+
+
+def _is_supported_robot_version(version: object) -> bool:
+    """本流程支持的机型由统一机型表决定（小版本按 %100 折回基础型号）。"""
+    return rv.spec(version) is not None
+
+
 def _apply_left_shoulder_offset(cfg: Dict[str, Any], robot_version: str) -> Dict[str, Any]:
-    """从 bodies.yaml 的 left_shoulder_fixtures 选择当前机型偏移。"""
-    profile = "s45" if str(robot_version) == "45" else "default"
+    """从 bodies.yaml 的 left_shoulder_fixtures 选择当前机型偏移。
+
+    S45 与 49 系列（100049/200049 …）的 zarm_l1_joint 原点逐位相同，共用 s45 工装；
+    其余机型用 default。l_shoulder 在本流程中仅作记录/校验，不参与优化。
+    """
+    spec = rv.spec(robot_version)
+    if spec is None:
+        raise ValueError(
+            f"不支持的 ROBOT_VERSION={robot_version}"
+            f"（按 %100 折回为 {rv.fold(robot_version)}）；"
+            f"支持 {rv.supported_text()} 及对应小版本"
+        )
+    profile = spec.shoulder_profile
     offset = (cfg.get("left_shoulder_fixtures") or {}).get(profile)
     if not isinstance(offset, list) or len(offset) != 3:
         raise ValueError(f"bodies.yaml 缺少 left_shoulder_fixtures.{profile}")
@@ -224,8 +246,12 @@ def main() -> int:
     parser.add_argument(
         "--robot-version",
         default=os.environ.get("ROBOT_VERSION", ""),
-        choices=("45", "52", "56", "62", "63"),
-        help="机器人版本（也可通过 ROBOT_VERSION 传入）",
+        help=(
+            "机器人版本（也可通过 ROBOT_VERSION 传入），小版本按 %%100 折回基础型号："
+            f"支持 {rv.supported_text()} 及对应小版本"
+            "（100049/200049/300049/400049、200053/300053、400055、"
+            "200062/400062/500062、400063/500063）"
+        ),
     )
     args = parser.parse_args()
 
@@ -233,7 +259,19 @@ def main() -> int:
         print(f"输入文件不存在: {args.input}", file=sys.stderr)
         return 1
     if not args.robot_version:
-        print("未指定机器人版本：请使用 --robot-version 45|52|56|62|63", file=sys.stderr)
+        print(
+            f"未指定机器人版本：请使用 --robot-version {rv.supported_text('|')} 或对应小版本"
+            "（如 100049/200053/400055/500062）",
+            file=sys.stderr,
+        )
+        return 1
+    if not _is_supported_robot_version(args.robot_version):
+        print(
+            f"不支持的机器人版本: {args.robot_version}"
+            f"（按 %100 折回为 {rv.fold(args.robot_version)}）；"
+            f"支持 {rv.supported_text()} 及对应小版本",
+            file=sys.stderr,
+        )
         return 1
 
     try:

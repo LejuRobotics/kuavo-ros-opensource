@@ -31,6 +31,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -44,6 +45,12 @@ from scipy.spatial.transform import Rotation
 
 import write_urdf
 from robot_variants import default_config_name, is_wheel_urdf, is_wheel_version, main_urdf
+
+# 机型表（唯一数据源）在上一级目录：Camera_Calibration/robot_versions.py
+_CALIB_DIR = Path(__file__).resolve().parent.parent
+if str(_CALIB_DIR) not in sys.path:
+    sys.path.insert(0, str(_CALIB_DIR))
+import robot_versions as rv  # noqa: E402
 
 
 ARMS = ("left", "right")
@@ -936,15 +943,40 @@ def _config_for_capture(cfg: Mapping, meta: Mapping):
             f"ROBOT_VERSION={requested_version} conflicts with capture.meta.robot_version={capture_version}"
         )
     version = requested_version or capture_version or configured_version
-    config_name = default_config_name(version)
-    if is_wheel_version(version) != is_wheel_version(configured_version):
+    if not version.isdecimal():
+        raise ValueError(f"invalid robot_version={version!r}; expected decimal digits")
+    # 统一机型表（Camera_Calibration/robot_versions.py）是布局与版本合法性的唯一数据源：
+    # 运动学标定覆盖 biped56（53/55/56）与 wheel62（62/63）两个布局，小版本按 %100
+    # 折回后自动跟随（200053/400055/200063/500062/400063/210062/310062…）。
+    spec = rv.spec(version)
+    if spec is None or spec.layout not in ("biped56", "wheel62"):
+        raise ValueError(
+            f"unsupported robot_version={version!r}; 运动学标定仅支持基础型号 53/55/56/62/63 "
+            "及对应小版本（200053/400055/400062/500062/400063/500063）"
+        )
+    is_wheel = spec.layout == "wheel62"
+    # config 里的 robot_version 可能是 "auto" 这类非数字占位，按双足族处理。
+    configured_spec = rv.spec(configured_version) if configured_version.isdecimal() else None
+    configured_wheel = bool(configured_spec and configured_spec.layout == "wheel62")
+    if is_wheel != configured_wheel:
+        config_name = "calib_s63.yaml" if is_wheel else "calib_s56.yaml"
         raise ValueError(f"robot_version={version} requires its CTB/ETK config; use --config config/{config_name}")
     if meta.get("fk_root") not in (None, "waist_yaw_link"):
         raise ValueError(f"capture fk_root={meta['fk_root']!r}; main URDF fitting requires waist_yaw_link")
     # --urdf / --validate-urdf remain explicit model overrides in main().
+    # 每个完整版本号拟合 kuavo_assets 中自身的主 URDF（上游 kinopt-v2 语义，
+    # 与 robot_variants.main_urdf 的路径规则保持一致）。
     kin["source_urdf"] = str(main_urdf(version))
-    if is_wheel_version(version) and kin.get("output_dir") == "../output_s63":
-        kin["output_dir"] = f"../output_s{version}"
+    # 输出目录隔离：calib_s63/calib_s56 的名义几何分别是 S63/S56，凡用自身 URDF
+    # 拟合的其它版本（裸 62、各小版本、双足 53/55）都把输出目录从族默认
+    # （output_s63 / output）整体替换为自身版本目录，避免覆盖名义结果或互相覆盖；
+    # 名义版本自身与显式自定义输出目录维持原样。
+    family_canonical = "63" if is_wheel else "56"
+    family_default = "output_s63" if is_wheel else "output"
+    if version != family_canonical:
+        output_dir = Path(str(kin.get("output_dir", "")))
+        if output_dir.name == family_default:
+            kin["output_dir"] = str(output_dir.with_name(f"output_s{version}"))
     robot["robot_version"] = version
     robot["robot_layout"] = meta.get("robot_layout", robot["robot_layout"])
     robot["joint_indices"] = meta.get("joint_q_indices", robot["joint_indices"])

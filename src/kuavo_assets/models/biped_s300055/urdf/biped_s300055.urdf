@@ -1716,7 +1716,7 @@
       <inertia ixx="0.0010405" ixy="-3.7268E-05" ixz="-3.9415E-05" iyy="0.0013244" iyz="-4.7638E-05" izz="0.00053219" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 1.5707963267948966 0" />
       <geometry>
         <mesh filename="package://kuavo_assets/models/biped_s300055/meshes/l_thumb_dist.STL" />
       </geometry>
@@ -1725,7 +1725,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 1.5707963267948966 0" />
       <geometry>
         <mesh filename="package://kuavo_assets/models/biped_s300055/meshes/l_thumb_dist.STL" />
       </geometry>
@@ -1763,7 +1763,7 @@
       <inertia ixx="0.0010405" ixy="-3.7268E-05" ixz="-3.9415E-05" iyy="0.0013244" iyz="-4.7638E-05" izz="0.00053219" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 1.5707963267948966 0" />
       <geometry>
         <mesh filename="package://kuavo_assets/models/biped_s300055/meshes/l_thumb_prox.STL" />
       </geometry>
@@ -1772,7 +1772,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0" />
+      <origin xyz="0 0 0" rpy="0 1.5707963267948966 0" />
       <geometry>
         <mesh filename="package://kuavo_assets/models/biped_s300055/meshes/l_thumb_prox.STL" />
       </geometry>

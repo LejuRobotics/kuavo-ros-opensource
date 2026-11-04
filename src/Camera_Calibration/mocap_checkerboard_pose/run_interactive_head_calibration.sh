@@ -29,6 +29,15 @@ die() { echo "[ERROR] $*" >&2; exit 1; }
 warn() { echo "[WARN] $*" >&2; }
 info() { echo "[INFO] $*"; }
 
+# 统一机型表（唯一数据源）：小版本按 %100 折回基础型号后查布局/URDF/FK 根/头相机/左肩工装。
+# shellcheck source=../robot_versions.sh
+source "${CAMERA_CAL_DIR}/robot_versions.sh"
+
+# 头部棋盘流程支持的机型：全部基础型号（45/49/52/53/55/56/62/63）及对应小版本。
+is_supported_version() {
+  rv_supported "${1:-}"
+}
+
 run_cmd() {
   printf '[RUN]'
   printf ' %q' "$@"
@@ -47,7 +56,10 @@ usage() {
 用法: run_interactive_head_calibration.sh [选项]
 
 选项:
-  --robot-version auto|45|52|56|62|63
+  --robot-version auto|45|49|52|53|55|56|62|63 及对应小版本
+                    小版本按 %100 折回基础型号后查机型表：
+                    45/49→biped45（共用 s45 工装；标定 URDF 分别为 s45/s49），53/55/56→biped56，
+                    62/63→wheel62。例：100049/200049、200053/400055、200062/500062、400063
   --mocap-source motive|qingtong
   --mode full|board|capture|optimize|verify|dry-run|write|test
   --head-csv-dir DIR   capture 的输出目录，或 optimize 使用的 CSV 目录
@@ -75,7 +87,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-case "${ROBOT_VERSION_ARG}" in auto|45|52|56|62|63) ;; *) die "不支持的机器人版本: ${ROBOT_VERSION_ARG}" ;; esac
+case "${ROBOT_VERSION_ARG}" in auto) ;; *) is_supported_version "${ROBOT_VERSION_ARG}" || die "不支持的机器人版本: ${ROBOT_VERSION_ARG}（支持 ${RV_SUPPORTED_BASES} 及对应小版本）" ;; esac
 case "${MOCAP_SOURCE_ARG}" in ""|motive|qingtong) ;; *) die "动捕源仅支持 motive|qingtong" ;; esac
 case "${MODE}" in ""|full|board|capture|optimize|verify|dry-run|write|test) ;; *) die "未知 mode: ${MODE}" ;; esac
 if [[ "${TEST_CONFIRMED}" == true && "${MODE}" != "test" ]]; then
@@ -101,8 +113,8 @@ resolve_robot_version() {
   local ros_version=""
   local env_version="${ROBOT_VERSION:-}"
   ros_version="$(timeout 2 rosparam get /robot_version 2>/dev/null | tr -d '[:space:]' | tr -d "'\"" || true)"
-  case "${ros_version}" in 45|52|56|62|63) ;; *) ros_version="" ;; esac
-  case "${env_version}" in 45|52|56|62|63) ;; *) env_version="" ;; esac
+  is_supported_version "${ros_version}" || ros_version=""
+  is_supported_version "${env_version}" || env_version=""
   if [[ "${ROBOT_VERSION_ARG}" != "auto" ]]; then
     selected="${ROBOT_VERSION_ARG}"
     if [[ -n "${ros_version}" && "${ros_version}" != "${selected}" ]]; then
@@ -117,12 +129,16 @@ resolve_robot_version() {
     fi
     selected="${ros_version:-${env_version}}"
     if [[ -z "${selected}" ]]; then
-      read -r -p "机器人版本 [45/52/56/62/63]: " selected
+      read -r -p "机器人版本 [45|100049|200049|52|53|200053|400055|56|62|500062|63|400063]: " selected
     fi
   fi
-  case "${selected}" in 45|52|56|62|63) ;; *) die "无法确定受支持的机器人版本: ${selected}" ;; esac
+  if ! is_supported_version "${selected}"; then
+    die "无法确定受支持的机器人版本: ${selected}（支持 ${RV_SUPPORTED_BASES} 及对应小版本）"
+  fi
   ROBOT_VERSION="${selected}"
+  ROBOT_BASE_VERSION="$(rv_fold "${selected}")"
   export ROBOT_VERSION
+  export ROBOT_BASE_VERSION
 }
 
 resolve_mocap_source() {
@@ -143,12 +159,12 @@ resolve_mocap_source() {
 }
 
 resolve_robot_paths() {
-  case "${ROBOT_VERSION}" in
-    45) LAYOUT="biped45"; URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm_s45.urdf" ;;
-    52) LAYOUT="biped52"; URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm.urdf" ;;
-    56) LAYOUT="biped56"; URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm_s56.urdf" ;;
-    62|63) LAYOUT="wheel62"; URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm_s62.urdf" ;;
-  esac
+  # 布局与标定 URDF 由统一机型表给出：45 与 49 系列同布局但 URDF 分开（s45/s49），
+  # 53/55 共用 s55（头部安装低 4.1 mm），56 用 s56，62/63 共用 s62。
+  ROBOT_BASE_VERSION="$(rv_fold "${ROBOT_VERSION}")"
+  is_supported_version "${ROBOT_VERSION}" || die "尚无 ${ROBOT_VERSION} 对应的机型 URDF"
+  LAYOUT="$(rv_layout "${ROBOT_VERSION}")"
+  URDF_PATH="${CAMERA_CAL_DIR}/$(rv_urdf "${ROBOT_VERSION}")"
   [[ -f "${URDF_PATH}" ]] || die "机型 URDF 不存在: ${URDF_PATH}"
   [[ -f "${MOCAP_CONFIG}" ]] || die "动捕棋盘配置不存在: ${MOCAP_CONFIG}"
   [[ -f "${CHESSBOARD_RUNNER}" ]] || die "棋盘标定入口不存在: ${CHESSBOARD_RUNNER}"
@@ -193,11 +209,12 @@ PY
 }
 
 validate_board_config() {
-  python3 - "${MOCAP_CONFIG}" "${URDF_PATH}" "${ROBOT_VERSION}" <<'PY'
+  # 左肩工装 profile 由统一机型表给出（45/49 → s45，其余 default），不再在 python 里重复折版本。
+  python3 - "${MOCAP_CONFIG}" "${URDF_PATH}" "${ROBOT_VERSION}" "$(rv_shoulder_profile "${ROBOT_VERSION}")" <<'PY'
 import sys, xml.etree.ElementTree as ET, yaml
-cfg_path, urdf_path, robot_version = sys.argv[1:]
+
+cfg_path, urdf_path, robot_version, shoulder_profile = sys.argv[1:]
 cfg = yaml.safe_load(open(cfg_path, encoding="utf-8"))
-shoulder_profile = "s45" if robot_version == "45" else "default"
 shoulder_offset = (cfg.get("left_shoulder_fixtures") or {}).get(shoulder_profile)
 if not isinstance(shoulder_offset, list) or len(shoulder_offset) != 3:
     raise SystemExit(f"bodies.yaml 缺少 left_shoulder_fixtures.{shoulder_profile}")
@@ -223,16 +240,18 @@ PY
 }
 
 validate_board_result() {
-  python3 - "$1" "${ROBOT_VERSION}" <<'PY'
+  # 期望的左肩工装 profile 同样由统一机型表给出（45/49 → s45，其余 default）。
+  python3 - "$1" "${ROBOT_VERSION}" "$(rv_shoulder_profile "${ROBOT_VERSION}")" <<'PY'
 import json, sys
+
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 expected_version = sys.argv[2]
+expected_profile = sys.argv[3]
 if str(data.get("robot_version", "")) != expected_version:
     raise SystemExit(
         f"动捕结果机型不匹配: JSON={data.get('robot_version')}, 当前={expected_version}"
     )
 shoulder = data.get("left_shoulder_fixture") or {}
-expected_profile = "s45" if expected_version == "45" else "default"
 if shoulder.get("profile") != expected_profile:
     raise SystemExit(
         f"左肩工装不匹配: JSON={shoulder.get('profile')}, 期望={expected_profile}"

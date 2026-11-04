@@ -28,6 +28,17 @@ die() { echo "[ERROR] $*" >&2; exit 1; }
 warn() { echo "[WARN] $*" >&2; }
 info() { echo "[INFO] $*"; }
 
+# 统一机型表（唯一数据源）：小版本按 %100 折回基础型号后查布局/URDF/FK 根/配置/工装。
+# shellcheck source=../robot_versions.sh
+source "${CAMERA_CAL_DIR}/robot_versions.sh"
+
+# 标定流程受支持的版本：45/49 走 biped45（无腰、臂索引 12/19、FK 根 base_link），
+# 52 走 biped52，53/55/56 走 biped56，62/63 走 wheel62。未列入者不接受，
+# 避免静默套用错误机型的索引。
+is_supported_version() {
+  rv_supported "${1:-}"
+}
+
 # 退出/中断时收尾：并行精度验证（单步工具 11）会后台起两个测试进程，
 # 这里负责把它们停掉，避免留下孤儿节点。
 cleanup_parallel_tests() {
@@ -101,16 +112,20 @@ select_robot_version() {
     ros_version="$(printf '%s' "${ros_value}" | tr -d '[:space:]' | tr -d "'\"")"
   fi
 
-  case "${env_version}" in
-    45|52|56|62|63) ;;
-    "") env_version="" ;;
-    *) warn "忽略不支持的环境变量 ROBOT_VERSION=${env_version}"; env_version="" ;;
-  esac
-  case "${ros_version}" in
-    45|52|56|62|63) ;;
-    "") ros_version="" ;;
-    *) warn "忽略不支持的 ROS 参数 /robot_version=${ros_version}"; ros_version="" ;;
-  esac
+  if is_supported_version "${env_version}"; then
+    :
+  elif [[ -z "${env_version}" ]]; then
+    env_version=""
+  else
+    warn "忽略不支持的环境变量 ROBOT_VERSION=${env_version}"; env_version=""
+  fi
+  if is_supported_version "${ros_version}"; then
+    :
+  elif [[ -z "${ros_version}" ]]; then
+    ros_version=""
+  else
+    warn "忽略不支持的 ROS 参数 /robot_version=${ros_version}"; ros_version=""
+  fi
 
   if [[ -n "${env_version}" && -n "${ros_version}" && "${env_version}" != "${ros_version}" ]]; then
     die "机型信息冲突：当前终端 ROBOT_VERSION=${env_version}，运控 /robot_version=${ros_version}。"\
@@ -123,15 +138,16 @@ select_robot_version() {
     info "自动检测机器人版本: ${selected}（来源：环境变量 ROBOT_VERSION）"
   else
     warn "未从环境变量或 ROS 参数检测到受支持的机器人版本"
-    read -r -p "机器人版本 [45/52/56/62/63]: " selected
+    read -r -p "机器人版本 [45|49|52|53|55|56|62|63 及对应小版本，如 100049/200053/400055/500062]: " selected
   fi
 
-  case "${selected}" in
-    45|52|56|62|63) ;;
-    *) die "一键实机流程当前仅支持 45/52/56/62/63，实际输入 ${selected}" ;;
-  esac
+  if ! is_supported_version "${selected}"; then
+    die "一键实机流程当前仅支持 ${RV_SUPPORTED_BASES} 及对应小版本（如 100049/200049、200053/400055、500062），实际输入 ${selected}"
+  fi
   ROBOT_VERSION="${selected}"
+  ROBOT_BASE_VERSION="$(rv_fold "${selected}")"
   export ROBOT_VERSION
+  export ROBOT_BASE_VERSION
 }
 
 select_mocap_source() {
@@ -169,36 +185,30 @@ select_fixture() {
 }
 
 resolve_paths() {
-  case "${ROBOT_VERSION}" in
-    45)
-      LAYOUT="biped45"
-      EXPECTED_FK_ROOT="base_link"
-      URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm_s45.urdf"
-      HAND_CONFIG="${HAND_TEST_DIR}/config/hand_accuracy_s45.yaml"
-      ;;
-    52)
-      LAYOUT="biped52"
-      EXPECTED_FK_ROOT="waist_yaw_link"
-      URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm.urdf"
-      HAND_CONFIG="${HAND_TEST_DIR}/config/hand_accuracy.yaml"
-      ;;
-    56)
-      LAYOUT="biped56"
-      EXPECTED_FK_ROOT="waist_yaw_link"
-      URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm_s56.urdf"
-      HAND_CONFIG="${HAND_TEST_DIR}/config/hand_accuracy.yaml"
-      ;;
-    62|63)
-      LAYOUT="wheel62"
-      EXPECTED_FK_ROOT="waist_yaw_link"
-      URDF_PATH="${CAMERA_CAL_DIR}/biped_v3_arm_s62.urdf"
-      HAND_CONFIG="${HAND_TEST_DIR}/config/hand_accuracy.yaml"
-      ;;
-  esac
-  if [[ "${MOCAP_SOURCE}" == "motive" ]]; then
-    CAPTURE_CONFIG="${SCRIPT_DIR}/config/$([[ "${ROBOT_VERSION}" == "45" ]] && echo calib_s45.yaml || echo calib.yaml)"
+  # 布局/URDF/FK 根/标定配置全部查统一机型表；ROBOT_VERSION 本身（可能带 patch，
+  # 如 100049）仍用于 kuavo.json、biped_s${N} 等资源目录查找，不在这里改写。
+  ROBOT_BASE_VERSION="$(rv_fold "${ROBOT_VERSION}")"
+  is_supported_version "${ROBOT_VERSION}" || \
+    die "无法为 ROBOT_VERSION=${ROBOT_VERSION} 解析布局（支持 ${RV_SUPPORTED_BASES} 及对应小版本）"
+  LAYOUT="$(rv_layout "${ROBOT_VERSION}")"
+  EXPECTED_FK_ROOT="$(rv_fk_root "${ROBOT_VERSION}")"
+  URDF_PATH="${CAMERA_CAL_DIR}/$(rv_urdf "${ROBOT_VERSION}")"
+  # 45/49 共用手部精度配置（无腰工装），其余机型用通用配置。
+  if [[ "$(rv_shoulder_profile "${ROBOT_VERSION}")" == "s45" ]]; then
+    HAND_CONFIG="${HAND_TEST_DIR}/config/hand_accuracy_s45.yaml"
   else
-    CAPTURE_CONFIG="${SCRIPT_DIR}/config/$([[ "${ROBOT_VERSION}" == "45" ]] && echo calib_qingtong_s45.yaml || echo calib_qingtong.yaml)"
+    HAND_CONFIG="${HAND_TEST_DIR}/config/hand_accuracy.yaml"
+  fi
+  # 纯动捕采集配置也由统一机型表给出：45/49 共用 calib_s45.yaml / calib_qingtong_s45.yaml，
+  # 其余机型用 calib.yaml / calib_qingtong.yaml。
+  # 头部相机话题是否旋转另由 check_head_camera_topics 决定。
+  local calib_yaml calib_qingtong_yaml
+  calib_yaml="$(rv_calib_config "${ROBOT_VERSION}")"
+  calib_qingtong_yaml="$(rv_calib_config_qingtong "${ROBOT_VERSION}")"
+  if [[ "${MOCAP_SOURCE}" == "motive" ]]; then
+    CAPTURE_CONFIG="${SCRIPT_DIR}/config/${calib_yaml}"
+  else
+    CAPTURE_CONFIG="${SCRIPT_DIR}/config/${calib_qingtong_yaml}"
   fi
   [[ -f "${CAPTURE_CONFIG}" ]] || die "采集配置不存在: ${CAPTURE_CONFIG}"
   [[ -f "${HAND_CONFIG}" ]] || die "精度验证配置不存在: ${HAND_CONFIG}"
@@ -306,8 +316,9 @@ PY
 check_head_camera_topics() {
   local image_topic="/head_camera/color/image_raw"
   local info_topic="/head_camera/color/camera_info"
-  # doc/README 的规则是按机型：S45 为倒装相机，需要先启动 180° 旋转节点。
-  if [[ "${ROBOT_VERSION}" == "45" ]]; then
+  # 规则与其它入口一致：只有基础型号 45 是倒装相机（模型未含翻转），需要先启动
+  # 180° 旋转节点；49 系列及 52 以上模型已含翻转，用原始话题。
+  if [[ "$(rv_head_rot180 "${ROBOT_VERSION}")" == "true" ]]; then
     image_topic="/head_camera/color/image_raw_rotate_180"
     info_topic="/head_camera/color/camera_info_rotate_180"
   fi
@@ -333,16 +344,12 @@ expected_version = sys.argv[3]
 expected_layout = sys.argv[4]
 expected_fixture = sys.argv[5]
 expected_source = sys.argv[6]
-version_layout = {
-    "45": "biped45", "52": "biped52", "56": "biped56",
-    "62": "wheel62", "63": "wheel62",
-}
-urdf_layout = {
-    "biped_v3_arm_s45.urdf": "biped45",
-    "biped_v3_arm.urdf": "biped52",
-    "biped_v3_arm_s56.urdf": "biped56",
-    "biped_v3_arm_s62.urdf": "wheel62",
-}
+# 机型表与运行时共用一份 robot_versions.py（脚本在 mocap_joint_calib/ 下，上溯一级）。
+sys.path.insert(0, str(root.parent))
+import robot_versions as rv
+urdf_layout = {}
+for _spec in rv.TABLE.values():
+    urdf_layout[_spec.urdf] = _spec.layout
 matches = []
 for path in root.glob("capture_*.json"):
     try:
@@ -356,7 +363,8 @@ for path in root.glob("capture_*.json"):
             inferred.add(layout)
         version = str(meta.get("robot_version") or "")
         if version:
-            inferred.add(version_layout.get(version, f"unsupported:{version}"))
+            _spec = rv.spec(version)
+            inferred.add(_spec.layout if _spec else f"unsupported:{version}")
         urdf_name = pathlib.Path(str(meta.get("urdf") or "")).name
         if urdf_name in urdf_layout:
             inferred.add(urdf_layout[urdf_name])
@@ -1222,7 +1230,8 @@ show_menu() {
 main() {
   if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     echo "用法: bash ${BASH_SOURCE[0]}"
-    echo "交互完成头部/双臂纯动捕零点标定与精度验证；当前支持 ROBOT_VERSION 45/52/56/62/63。"
+    echo "交互完成头部/双臂纯动捕零点标定与精度验证；当前支持基础版本 ${RV_SUPPORTED_BASES} 及对应小版本"
+    echo "（如 100049/200049、200053/300053、400055、200062/400062/500062、400063/500063）。"
     echo "可设置 MOCAP_FIXTURE=legacy|new，未设置时启动后交互选择。"
     return 0
   fi

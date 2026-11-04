@@ -55,6 +55,7 @@ LAYOUTS = {
         "joints_csv": "output_csv/kuavo_right_wrist/joints.csv",
     },
     "biped45": {
+        # 45/49 同布局；49 的标定 URDF 是 biped_v3_arm_s49.urdf（除机型名外与本文件一致）
         "urdf": "biped_v3_arm_s45.urdf",
         "fk_root": "base_link",
         "joint_q_indices": {"left_arm": [12, 19], "right_arm": [19, 26], "head": [26, 28]},

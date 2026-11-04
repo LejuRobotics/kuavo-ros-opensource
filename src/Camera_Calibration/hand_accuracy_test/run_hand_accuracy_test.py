@@ -35,6 +35,8 @@ for _p in (str(_CAMERA_CAL_DIR), str(_MOCAP_DIR), str(_BOTH_ARMS_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+import robot_versions as rv  # noqa: E402  (统一机型表)
+
 from mocap_pose_utils import (  # noqa: E402
     align_relative_translation,
     apply_link_offsets_to_poses,
@@ -75,17 +77,14 @@ def load_config(path: str) -> Dict[str, Any]:
 
 
 def _resolve_robot_layout_from_env() -> str:
-    """ROBOT_VERSION → robot_layout；未设置则用 config 值。"""
-    rv = os.environ.get("ROBOT_VERSION", "").strip()
-    if rv == "45":
-        return "biped45"
-    if rv == "52":
-        return "biped52"
-    if rv == "56":
-        return "biped56"
-    if rv in ("62", "63"):
-        return "wheel62"
-    return ""
+    """ROBOT_VERSION → robot_layout；未设置则用 config 值。
+
+    布局由统一机型表（robot_versions.py）决定，小版本按 %100 折回基础型号后查表：
+    45/49→biped45，52→biped52，53/55/56→biped56，62/63→wheel62。
+    """
+    raw = os.environ.get("ROBOT_VERSION", "").strip()
+    spec = rv.spec(raw) if raw else None
+    return spec.layout if spec else ""
 
 
 def _apply_fixture_override(cfg: Dict[str, Any], fixture_id: str, primary_source: str) -> Dict[str, Any]:

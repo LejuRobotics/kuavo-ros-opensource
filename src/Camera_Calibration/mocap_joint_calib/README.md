@@ -12,6 +12,8 @@ mocap_joint_calib/
 ├── config/
 │   ├── calib_s45.yaml              # S45 + Motive
 │   ├── calib_qingtong_s45.yaml     # S45 + 青瞳
+│   ├── calib_s49.yaml              # S49 系列 + Motive（与 s45 同布局，URDF 用 _s49）
+│   ├── calib_qingtong_s49.yaml     # S49 系列 + 青瞳
 │   ├── calib.yaml                  # S52/S56/S62/S63 + Motive
 │   └── calib_qingtong.yaml         # S52/S56/S62/S63 + 青瞳
 ├── run_interactive_calibration.sh  # 一键交互入口（推荐）
@@ -65,12 +67,24 @@ mocap_joint_calib/
 
 ### 2. 支持的机型映射
 
-| `ROBOT_VERSION` | 布局 | FK 根节点 | URDF | 采集配置 |
-|---|---|---|---|---|
-| 45 | `biped45` | `base_link` | `biped_v3_arm_s45.urdf` | `calib_s45.yaml` / `calib_qingtong_s45.yaml` |
-| 52 | `biped52` | `waist_yaw_link` | `biped_v3_arm.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
-| 56 | `biped56` | `waist_yaw_link` | `biped_v3_arm_s56.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
-| 62、63 | `wheel62` | `waist_yaw_link` | `biped_v3_arm_s62.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
+机型映射的唯一来源是 [`../robot_versions.py`](../robot_versions.py)（Shell 侧镜像
+[`../robot_versions.sh`](../robot_versions.sh)）。`ROBOT_VERSION` 先按 `%100` 折回基础型号再查表，
+所以小版本自动跟随基础型号：
+
+| `ROBOT_VERSION`（基础型号） | 常见小版本 | 布局 | FK 根节点 | URDF | 采集配置 |
+|---|---|---|---|---|---|
+| 45 | — | `biped45` | `base_link` | `biped_v3_arm_s45.urdf` | `calib_s45.yaml` / `calib_qingtong_s45.yaml` |
+| 49 | `100049`、`200049`、`300049`、`400049` | `biped45` | `base_link` | `biped_v3_arm_s49.urdf` | `calib_s49.yaml` / `calib_qingtong_s49.yaml` |
+| 52 | — | `biped52` | `waist_yaw_link` | `biped_v3_arm.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
+| 53 | `200053`、`300053`、`400053`、`500053` | `biped56` | `waist_yaw_link` | `biped_v3_arm_s53.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
+| 55 | `200055`、`300055`、`400055`、`500055` | `biped56` | `waist_yaw_link` | `biped_v3_arm_s55.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
+| 56 | — | `biped56` | `waist_yaw_link` | `biped_v3_arm_s56.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
+| 62 | `200062`、`210062`、`300062`、`310062`、`400062`、`500062`、`600062` | `wheel62` | `waist_yaw_link` | `biped_v3_arm_s62.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
+| 63 | `200063`、`300063`、`400063`、`500063` | `wheel62` | `waist_yaw_link` | `biped_v3_arm_s63.urdf` | `calib.yaml` / `calib_qingtong.yaml` |
+
+53/55/56 共用布局但使用独立标定模板，头部安装高度统一为 `0.49125 m`。
+62/63 分别使用 `_s62` / `_s63`
+标定文件，输出也分别保存，避免两个型号互相覆盖。
 
 关节总数及双臂、头部、腰部索引由对应的
 `src/kuavo_assets/config/kuavo_v${ROBOT_VERSION}/kuavo.json` 自动推导。YAML 中保留的索引是
@@ -89,8 +103,9 @@ echo "${ROBOT_VERSION:-未设置}"
 rosparam get /robot_version
 ```
 
-**S45 专属约定**（无腰部关节）：左臂 `joint_q` 为 `[12, 19)`、右臂为 `[19, 26)`，
-标定关节为 `zarm_l1..l7` / `zarm_r1..r7`。上车前必须确认实际 `/sensors_data_raw` 的 `joint_q`
+**S45 / S49 系列约定**（无腰部关节）：左臂 `joint_q` 为 `[12, 19)`、右臂为 `[19, 26)`，
+标定关节为 `zarm_l1..l7` / `zarm_r1..r7`；S53/S55 与 S56 共用 `[13, 20)` / `[20, 27)`，
+S62/S63 为 `[4, 11)` / `[11, 18)`。上车前必须确认实际 `/sensors_data_raw` 的 `joint_q`
 长度和索引与配置一致——索引错误会让优化器用错误关节角求解，得到看似正常但不可用的零位偏差。
 
 ### 3. 启动前准备
@@ -361,10 +376,14 @@ source devel/setup.bash
 export ROBOT_VERSION=45
 ```
 
-| 动捕系统 | 采集配置 |
-|---|---|
-| Motive / OptiTrack（NatNet Streaming） | `config/calib_s45.yaml` |
-| 青瞳 / Avatar（VRPN） | `config/calib_qingtong_s45.yaml` |
+| 动捕系统 | S45 采集配置 | S49 系列采集配置 |
+|---|---|---|
+| Motive / OptiTrack（NatNet Streaming） | `config/calib_s45.yaml` | `config/calib_s49.yaml` |
+| 青瞳 / Avatar（VRPN） | `config/calib_qingtong_s45.yaml` | `config/calib_qingtong_s49.yaml` |
+
+49 系列把上面命令里的 `export ROBOT_VERSION=45`、`--robot-version 45`、`--config ...calib_s45.yaml`
+换成 `100049`（或 `200049`/`300049`/`400049`）与 `calib_s49.yaml` 即可，其余步骤相同；
+标定结果写入 `biped_v3_arm_s49_calibrated.urdf`，不会覆盖 45 的产物。
 
 ### 2. 检查运动轨迹
 

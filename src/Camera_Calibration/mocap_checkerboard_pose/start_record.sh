@@ -4,14 +4,20 @@ set -e
 
 MOCAP_SOURCE="${1:-}"
 ROBOT_VERSION_SELECTED="${2:-${ROBOT_VERSION:-}}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 统一机型表：小版本按 %100 折回基础型号（100049→49、200053→53、500062→62 …）。
+# shellcheck source=../robot_versions.sh
+source "${SCRIPT_DIR}/../robot_versions.sh"
+
 if [ "$#" -gt 2 ] || { [ -n "$MOCAP_SOURCE" ] && [ "$MOCAP_SOURCE" != "motive" ] && [ "$MOCAP_SOURCE" != "qingtong" ]; }; then
-  echo "用法: bash $0 [motive|qingtong] [45|52|56|62|63]" >&2
+  echo "用法: bash $0 [motive|qingtong] [45|49|52|53|55|56|62|63 及对应小版本]" >&2
   exit 2
 fi
-case "$ROBOT_VERSION_SELECTED" in
-  45|52|56|62|63) ;;
-  *) echo "请通过第二个参数或 ROBOT_VERSION 指定机器人版本" >&2; exit 2 ;;
-esac
+ROBOT_VERSION_BASE="$(rv_fold "$ROBOT_VERSION_SELECTED")"
+if ! rv_supported "$ROBOT_VERSION_SELECTED"; then
+  echo "请通过第二个参数或 ROBOT_VERSION 指定机器人版本（支持 ${RV_SUPPORTED_BASES} 及对应小版本，如 100049/200053/400055/500062）" >&2
+  exit 2
+fi
 
 SOURCE_ARGS=()
 if [ -n "$MOCAP_SOURCE" ]; then
@@ -19,7 +25,6 @@ if [ -n "$MOCAP_SOURCE" ]; then
 fi
 SOURCE_DISPLAY="${MOCAP_SOURCE:-bodies.yaml 配置}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUT_CSV="$SCRIPT_DIR/mocap_poses_${TIMESTAMP}.csv"

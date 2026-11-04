@@ -3,11 +3,16 @@
 
   <!-- 不依赖 ROS 包查找；优先 CAMERA_CALIB_ROOT，否则相对 launch 文件定位到 Camera_Calibration 根目录 -->
   <arg name="camera_calib_root" default="$(eval optenv('CAMERA_CALIB_ROOT', dirname() + '/../..'))" />
-  <!-- robot_layout：默认读 ROBOT_VERSION（52→biped52，56→biped56，62/63→wheel62）；可显式覆盖 -->
-  <arg name="robot_layout" default="$(eval 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped56' if optenv('ROBOT_VERSION', '52') == '56' else 'biped52')" />
+  <!-- robot_base_version：ROBOT_VERSION 按 %100 折回基础型号后再判布局（200053→53，400055→55，
+       500062→62）。腕部相机只在 biped52/biped56/wheel62 三种布局下工作：53/55 与 56 共用同一套
+       joint_q 索引，45/49 没有腕相机帧映射，由入口脚本显式拒绝。 -->
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION 52)" />
+  <arg name="robot_base_version" default="$(eval str(int(arg('robot_version')) % 100) if str(arg('robot_version')).isdigit() else str(arg('robot_version')))" />
+  <!-- robot_layout：默认读 robot_base_version（52→biped52，53/55/56→biped56，62/63→wheel62）；可显式覆盖 -->
+  <arg name="robot_layout" default="$(eval 'wheel62' if str(arg('robot_base_version')) in ['62', '63'] else 'biped56' if str(arg('robot_base_version')) in ['53', '55', '56'] else 'biped52')" />
   <arg name="use_wheel62" default="$(eval arg('robot_layout') == 'wheel62')" />
-  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm.urdf')" />
-  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_calibrated.urdf')" />
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s53.urdf' if str(arg('robot_base_version')) == '53' else 'biped_v3_arm_s63.urdf' if str(arg('robot_base_version')) == '63' else 'biped_v3_arm_s55.urdf' if str(arg('robot_base_version')) == '55' else 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm.urdf')" />
+  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s53_calibrated.urdf' if str(arg('robot_base_version')) == '53' else 'biped_v3_arm_s63_calibrated.urdf' if str(arg('robot_base_version')) == '63' else 'biped_v3_arm_s55_calibrated.urdf' if str(arg('robot_base_version')) == '55' else 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_calibrated.urdf')" />
   <arg name="csv_dir" default="$(arg camera_calib_root)/output_csv/kuavo_left_wrist"/>
   <arg name="do_capture_to_csv" default="true" />
   <arg name="do_optimize_from_csv" default="false" />

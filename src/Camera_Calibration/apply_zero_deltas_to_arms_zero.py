@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
-人形机器人零点写入脚本（支持 45 / 52 / 56）：
+人形机器人零点写入脚本（支持基础型号 45 / 49 / 52 / 56 及对应小版本；62/63 走轮臂专用脚本）：
 把 src/Camera_Calibration/output/**/calibration.yaml 的 joint bias 合并后，
 写入零点文件：
 
-- 45/52 Ruiwo：~/.config/lejuconfig/arms_zero.yaml（固定 14 维）
+- 45/49/52 Ruiwo：~/.config/lejuconfig/arms_zero.yaml（固定 14 维）
     [zarm_l2..l7, zarm_r2..r7, zhead_1, zhead_2]
-  45/52 EC：~/.config/lejuconfig/offset.csv（只更新 l1/r1 两项）
-
-- 56 Ruiwo：~/.config/lejuconfig/arms_zero.yaml（固定 16 维）
+  45/49/52 EC：~/.config/lejuconfig/offset.csv（只更新 l1/r1 两项）
+- 53/55/56 Ruiwo：~/.config/lejuconfig/arms_zero.yaml（固定 16 维）
     [zarm_l1..l7, zarm_r1..r7, zhead_1, zhead_2]
-  56 的手臂零点不写 EC offset.csv。
+  53/55/56 的手臂零点不写 EC offset.csv。
+- 62/63（Motorevo）：改用 apply_zero_deltas_to_arms_zero_wheel62.py。
+
+小版本按 %100 折回基础型号后查 ``robot_versions.py`` 的机型表（100049→49、
+200053→53、400055→55 …）。注意 ``kuavo_v${ROBOT_VERSION}/kuavo.json`` 这类**资源
+路径仍用原始版本号**，只有查机型表时才折回。
 
 对齐目标（与 plot_board_error_from_csv.py 一致）：
   q_post = q_raw + bias
@@ -33,8 +37,13 @@ import datetime as dt
 import math
 import os
 import pwd
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import robot_versions as rv  # noqa: E402  (同目录模块，需先插入 sys.path)
 
 
 def _get_config_root() -> Path:
@@ -52,6 +61,7 @@ DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 ZERO_FILE = _get_config_root() / "arms_zero.yaml"
 EC_OFFSET_FILE = _get_config_root() / "offset.csv"
 RUIWO_CONFIG_FILE = _get_config_root() / "config.yaml"
+KUAVO_CONFIG_DIR = Path(__file__).resolve().parent.parent / "kuavo_assets" / "config"
 
 # 56 与 62 的零点文件槽位一致；56 实机的 config.yaml 不包含完整 16 槽位，
 # 因此不能用 config.yaml 推导，必须按驱动零点文件的固定顺序处理。
@@ -63,21 +73,96 @@ BIPED56_SLOT_JOINTS: List[str] = [
 ]
 
 
-def _ruiwo_slots_from_config(cfg: dict, robot_version: str) -> List[Tuple[str, bool, int, str]]:
+# EC offset.csv 槽位的兜底表（kuavo.json 不可用时）：45/49 系列 l1/r1 = 12/13，52 = 13/14。
+# 正常路径按 kuavo.json 的 MOTORS_TYPE 推导，不依赖这张表。
+_EC_INDEX_FALLBACK: Dict[str, Tuple[int, int]] = {
+    "45": (12, 13),
+    "49": (12, 13),
+    "52": (13, 14),
+}
+
+
+def _is_ruiwo_motor_type(motor_type: object) -> bool:
+    return str(motor_type).lower().startswith("ruiwo")
+
+
+def _ec_indices_from_kuavo_json(raw_version: str) -> Tuple[int, int]:
+    """从 kuavo_v${raw_version}/kuavo.json 推导 zarm_l1/r1 在 offset.csv 的槽位。
+
+    与 mocap_joint_calib/write_zero.py 的 build_joint_locations() 同一套规则：
+    MOTORS_TYPE 的末段（NUM_ARM_JOINT 个手臂 + NUM_HEAD_JOINT 个头部）才是
+    目标关节，非 Ruiwo 电机按出现顺序占用 EC offset.csv 槽位。
+
+    以前这里写死 13/14（那是 52 的值），45/49 系列实际是 12/13，会静默错写槽位。
+    """
+    import json  # type: ignore
+
+    config_path = KUAVO_CONFIG_DIR / f"kuavo_v{raw_version}" / "kuavo.json"
+    with config_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
+    motors = config.get("MOTORS_TYPE")
+    if not isinstance(motors, list):
+        raise SystemExit(f"{config_path} 缺少 MOTORS_TYPE 数组")
+    num_arm_joints = int(config["NUM_ARM_JOINT"])
+    num_head_joints = int(config.get("NUM_HEAD_JOINT", 0))
+    arm_joints_per_side = num_arm_joints // 2
+    target_joints = [
+        *(f"zarm_l{i}_joint" for i in range(1, arm_joints_per_side + 1)),
+        *(f"zarm_r{i}_joint" for i in range(1, arm_joints_per_side + 1)),
+        *(f"zhead_{i}_joint" for i in range(1, num_head_joints + 1)),
+    ]
+    prefix_count = len(motors) - len(target_joints)
+    if prefix_count < 0:
+        raise SystemExit(
+            f"{config_path} 的 MOTORS_TYPE 长度={len(motors)}，"
+            f"不足以容纳 {len(target_joints)} 个手臂/头部关节"
+        )
+    joint_order = [f"prefix_joint_{i}" for i in range(prefix_count)] + target_joints
+
+    ec_slot: Dict[str, int] = {}
+    ec_count = 0
+    for joint, motor_type in zip(joint_order, motors):
+        ruiwo_type = _is_ruiwo_motor_type(motor_type)
+        if joint in ("zarm_l1_joint", "zarm_r1_joint") and not ruiwo_type:
+            ec_slot[joint] = ec_count
+        if not ruiwo_type:
+            ec_count += 1
+    missing = [j for j in ("zarm_l1_joint", "zarm_r1_joint") if j not in ec_slot]
+    if missing:
+        raise SystemExit(f"{config_path} 里 {missing} 不是 EC 电机，无法推导 offset.csv 槽位")
+    return int(ec_slot["zarm_l1_joint"]), int(ec_slot["zarm_r1_joint"])
+
+
+def _ec_indices(raw_version: str, spec_: "rv.ModelSpec") -> Tuple[int, int]:
+    """按机型取 EC offset.csv 里 zarm_l1/r1 的槽位；优先从 kuavo.json 推导。"""
+    if (KUAVO_CONFIG_DIR / f"kuavo_v{raw_version}" / "kuavo.json").is_file():
+        return _ec_indices_from_kuavo_json(raw_version)
+    fallback = _EC_INDEX_FALLBACK.get(spec_.base)
+    if fallback is None:
+        raise SystemExit(
+            f"无法确定 ROBOT_VERSION={raw_version} 的 EC offset.csv 槽位："
+            f"缺少 kuavo_v{raw_version}/kuavo.json，且基础型号 {spec_.base} 不在兜底表中"
+        )
+    return fallback
+
+
+def _ruiwo_slots_from_config(cfg: dict, spec_: "rv.ModelSpec") -> List[Tuple[str, bool, int, str]]:
     """
     复刻 ruiwo_actuator.cpp 的槽位顺序：
     - 遍历 config.yaml 的 address 节点（保持 YAML 键的遍历顺序）
     - 只收集 key 包含 Left_joint_arm / Right_joint_arm / Head_joint
     - 该顺序即 ruiwo_mtr_config_ 的顺序，也就是 arms_zero_position 的槽位顺序
 
-    52 的 arm_1..6 映射到 l2..l7 / r2..r7；
-    56 的 arm_1..7 映射到 l1..l7 / r1..r7。
+    14 维机型（45/49/52）的 arm_1..6 映射到 l2..l7 / r2..r7；
+    16 维机型（53/55/56）的 arm_1..7 映射到 l1..l7 / r1..r7。
 
     额外返回该槽位是否属于 negtive_address（与槽位顺序绑定，避免错位）。
     """
     addr_map = cfg.get("address", {})
     if not isinstance(addr_map, dict):
         raise SystemExit("config.yaml 缺少 address 字典，无法推导 Ruiwo 槽位顺序")
+
+    zero_based = spec_.zero_slots == 14
 
     neg = cfg.get("negtive_address", [])
     neg_set = set()
@@ -95,11 +180,11 @@ def _ruiwo_slots_from_config(cfg: dict, robot_version: str) -> List[Tuple[str, b
     def map_key(k: str) -> str | None:
         if k.startswith("Left_joint_arm_"):
             n = int(k.split("_")[-1])
-            joint_n = n + 1 if robot_version in ("45", "52") else n
+            joint_n = n + 1 if zero_based else n
             return f"zarm_l{joint_n}_joint"
         if k.startswith("Right_joint_arm_"):
             n = int(k.split("_")[-1])
-            joint_n = n + 1 if robot_version in ("45", "52") else n
+            joint_n = n + 1 if zero_based else n
             return f"zarm_r{joint_n}_joint"
         if k == "Head_joint_low":
             return "zhead_1_joint"
@@ -121,17 +206,13 @@ def _ruiwo_slots_from_config(cfg: dict, robot_version: str) -> List[Tuple[str, b
         is_neg = addr in neg_set
         slots.append((j, is_neg, addr, k))
 
-    expected = 14 if robot_version in ("45", "52") else 16
+    expected = spec_.zero_slots
     if len(slots) != expected:
         raise SystemExit(
-            f"ROBOT_VERSION={robot_version} 应有 {expected} 个 Ruiwo 零点槽位"
+            f"ROBOT_VERSION 基础型号={spec_.base} 应有 {expected} 个 Ruiwo 零点槽位"
             f"（实际={len(slots)}），请检查 config.yaml 的 address 键"
         )
     return slots
-
-# EC_MASTER 两个关节的固定索引（与你们之前对齐一致）
-EC_L1_IDX = 13
-EC_R1_IDX = 14
 
 
 def _load_yaml(path: Path) -> dict:
@@ -212,9 +293,9 @@ def _to_int(v):
     return None
 
 
-def _load_ruiwo_slots(robot_version: str) -> List[Tuple[str, bool, int, str]]:
-    if robot_version == "56":
-        # 与 wheel62 相同的 16 维固定零点布局，不依赖 config.yaml。
+def _load_ruiwo_slots(raw_version: str, spec_: "rv.ModelSpec") -> List[Tuple[str, bool, int, str]]:
+    if spec_.zero_slots == 16:
+        # 53/55/56/62/63 共用 wheel62 的 16 维固定零点布局，不依赖 config.yaml。
         return [
             (joint, False, idx + 1, f"fixed_slot_{idx + 1}")
             for idx, joint in enumerate(BIPED56_SLOT_JOINTS)
@@ -222,29 +303,61 @@ def _load_ruiwo_slots(robot_version: str) -> List[Tuple[str, bool, int, str]]:
     if not RUIWO_CONFIG_FILE.exists():
         raise SystemExit(f"Ruiwo config.yaml 不存在：{RUIWO_CONFIG_FILE}")
     cfg = _load_yaml(RUIWO_CONFIG_FILE)
-    return _ruiwo_slots_from_config(cfg, robot_version)
+    return _ruiwo_slots_from_config(cfg, spec_)
 
 
-def _resolve_robot_version(arg: str) -> str:
-    if arg in ("45", "52", "56"):
-        return arg
-    version = os.environ.get("ROBOT_VERSION", "").strip()
-    if version not in ("45", "52", "56"):
+def _resolve_robot_version(arg: str) -> Tuple[str, "rv.ModelSpec"]:
+    """返回 (原始版本号, 机型特征)。支持小版本按 %100 折回基础型号。"""
+    candidate = arg if arg and arg != "auto" else os.environ.get("ROBOT_VERSION", "").strip()
+    if not candidate:
         raise SystemExit(
-            "无法确定人形机器人版本：请设置 ROBOT_VERSION=45/52/56，"
-            "或传入 --robot-version 45/52/56"
+            "无法确定人形机器人版本：请设置 "
+            f"ROBOT_VERSION={rv.supported_text('/')} 或对应小版本（如 100049/400055/500062），"
+            "或通过 --robot-version 指定"
         )
-    return version
+    spec_ = rv.spec(candidate)
+    if spec_ is None:
+        raise SystemExit(
+            f"不支持的机器人版本：ROBOT_VERSION={candidate}"
+            f"（按 %100 折回为 {rv.fold(candidate)}）；"
+            f"支持基础型号 {rv.supported_text('/')} 及其小版本"
+        )
+    if spec_.apply_script != Path(__file__).name:
+        raise SystemExit(
+            f"ROBOT_VERSION={candidate}（基础型号 {spec_.base}，{spec_.zero_slots} 维）"
+            f"应使用 {Path(__file__).resolve().parent / spec_.apply_script} 写零点，"
+            "本脚本只负责 45/49/52/53/55/56 的 Ruiwo/EC 槽位。"
+        )
+    return candidate, spec_
+
+
+def _robot_version_arg(value: str) -> str:
+    """argparse 类型检查：仍允许 auto 与非纯数字覆盖值，具体校验交给 _resolve_robot_version。"""
+    return value
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="应用相机标定 joint bias 到 52/56 人形机器人零点文件")
+    ap = argparse.ArgumentParser(
+        description="应用相机标定 joint bias 到 45/49 系列/52/53/55/56 人形机器人零点文件"
+    )
     ap.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    ap.add_argument("--robot-version", choices=["auto", "45", "52", "56"], default="auto")
+    ap.add_argument(
+        "--robot-version",
+        type=_robot_version_arg,
+        default="auto",
+        help=(
+            "机器人版本；auto 时读 ROBOT_VERSION。"
+            "支持 45/49/52/53/55/56 及对应小版本"
+            "（100049/200049/300049/400049、200053/300053、400055），按 %%100 折回基础型号；"
+            "62/63 系列用 apply_zero_deltas_to_arms_zero_wheel62.py"
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    robot_version = _resolve_robot_version(args.robot_version)
-    expected_zero_count = 14 if robot_version in ("45", "52") else 16
+    raw_version, spec_ = _resolve_robot_version(args.robot_version)
+    robot_version = spec_.base
+    ec_slots = spec_.ec_l1_r1
+    expected_zero_count = spec_.zero_slots
 
     calib_files = _discover_calibration_yamls(args.output_dir)
     if not calib_files:
@@ -257,14 +370,14 @@ def main() -> None:
     zeros_raw = zero_cfg.get("arms_zero_position")
     if not isinstance(zeros_raw, list) or len(zeros_raw) != expected_zero_count:
         raise SystemExit(
-            f"ROBOT_VERSION={robot_version} 的 arms_zero_position 必须是 "
+            f"ROBOT_VERSION={raw_version}（基础型号 {robot_version}）的 arms_zero_position 必须是 "
             f"{expected_zero_count} 维 list（当前 len="
             f"{len(zeros_raw) if isinstance(zeros_raw, list) else 'n/a'}）"
         )
     zeros = [float(x) for x in zeros_raw]
 
     # Ruiwo：严格按驱动解析 config.yaml 的顺序，并同时绑定 negtive 标志，避免错位
-    ruiwo_slots = _load_ruiwo_slots(robot_version)
+    ruiwo_slots = _load_ruiwo_slots(raw_version, spec_)
     slot_joint_names = [j for (j, _is_neg, _addr, _key) in ruiwo_slots]
     neg_mask = [is_neg for (_j, is_neg, _addr, _key) in ruiwo_slots]
 
@@ -295,10 +408,11 @@ def main() -> None:
         )
 
     print("== 输入 ==")
-    print(f"robot_version: {robot_version}")
+    print(f"robot_version: {raw_version} (基础型号 {robot_version})")
+    print(f"机型: {rv.describe(raw_version)}")
     print(f"output_dir: {args.output_dir}")
     print(f"ruiwo_zero_file : {ZERO_FILE}")
-    if robot_version in ("45", "52"):
+    if ec_slots:
         print(f"ruiwo_config_yaml: {RUIWO_CONFIG_FILE}")
     else:
         print("ruiwo_slots: fixed 16-slot layout (same as wheel62; config.yaml not used)")
@@ -311,12 +425,14 @@ def main() -> None:
     for line in ruiwo_logs:
         print(line)
 
-    # 仅 45/52 的手臂 l1/r1 属于 EC；56 的 14 个手臂关节均属于 Ruiwo。
+    # 仅 45/49/52 的手臂 l1/r1 属于 EC；53/55/56 的手臂关节均属于 Ruiwo。
     new_ec: List[float] = []
     ec_logs: List[str] = []
-    if robot_version in ("45", "52"):
+    if ec_slots:
+        ec_l1_idx, ec_r1_idx = _ec_indices(raw_version, spec_)
+        print(f"ec_slots: zarm_l1_joint -> offset.csv[{ec_l1_idx}], zarm_r1_joint -> offset.csv[{ec_r1_idx}]")
         new_ec = _read_offset_csv(EC_OFFSET_FILE)
-        for joint, idx in (("zarm_l1_joint", EC_L1_IDX), ("zarm_r1_joint", EC_R1_IDX)):
+        for joint, idx in (("zarm_l1_joint", ec_l1_idx), ("zarm_r1_joint", ec_r1_idx)):
             if joint not in biases:
                 continue
             if idx < 0 or idx >= len(new_ec):
@@ -332,7 +448,10 @@ def main() -> None:
             )
     else:
         print("== EC offset.csv ==")
-        print("ROBOT_VERSION=56：手臂零点全在 arms_zero.yaml，不修改 EC offset.csv")
+        print(
+            f"ROBOT_VERSION={raw_version}（基础型号 {robot_version}）："
+            "手臂零点全在 arms_zero.yaml，不修改 EC offset.csv"
+        )
 
     if ec_logs:
         print("== EC offset.csv 计划修改 ==")
