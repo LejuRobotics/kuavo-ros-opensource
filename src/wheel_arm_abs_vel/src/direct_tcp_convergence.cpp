@@ -1,11 +1,11 @@
 // Finite offline bandwidth selection and consistency audit; no runtime windows.
-#include "wheel_arm_abs_vel/direct_tcp/mapper.h"
+#include "wheel_arm_abs_vel/direct_tcp/sample_json.h"
 #include <fstream>
 #include <iostream>
 #include <algorithm>
 using namespace wheel_arm_abs_vel::direct_tcp;
 namespace {
-Sample decode(const Json& a){return sample({a.at(0),a.at(1),a.at(2),a.at(3),a.at(4),a.at(5),a.at(6)},{a.at(7),a.at(8),a.at(9)},{a.at(10),a.at(11),a.at(12)});}
+Sample decode(const Json& a){return sampleFromJson(a);}
 Json vec(const Vec& v){return {v.x(),v.y(),v.z()};}
 Json encode(const Sample& s){Eigen::Quaterniond q(s.pose.linear());return {s.pose.translation().x(),s.pose.translation().y(),s.pose.translation().z(),q.x(),q.y(),q.z(),q.w(),s.linear.x(),s.linear.y(),s.linear.z(),s.angular.x(),s.angular.y(),s.angular.z()};}
 struct Row {double t;Eigen::Vector4d q;double z,j7;};

@@ -1,11 +1,11 @@
 // Offline parameter sensitivity only. No evaluation-window branch enters Mapper.
-#include "wheel_arm_abs_vel/direct_tcp/mapper.h"
+#include "wheel_arm_abs_vel/direct_tcp/sample_json.h"
 #include <fstream>
 #include <iostream>
 #include <algorithm>
 using namespace wheel_arm_abs_vel::direct_tcp;
 namespace {
-Sample decode(const Json& a){return sample({a.at(0),a.at(1),a.at(2),a.at(3),a.at(4),a.at(5),a.at(6)},{a.at(7),a.at(8),a.at(9)},{a.at(10),a.at(11),a.at(12)});}
+Sample decode(const Json& a){return sampleFromJson(a);}
 struct Row {double t,z,j7;Eigen::Vector4d q;};
 Eigen::Vector4d joints(const Output& o,const WristGeometry& g,const Rot& parent,const Vec& shoulder){
   const Vec u=o.elbow.pose.translation()-shoulder,v=o.elbow.pose.linear()*g.forearm_vector;

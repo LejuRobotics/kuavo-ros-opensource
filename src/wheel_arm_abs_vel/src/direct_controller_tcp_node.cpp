@@ -1,4 +1,4 @@
-#include "wheel_arm_abs_vel/direct_tcp/mapper.h"
+#include "wheel_arm_abs_vel/direct_tcp/sample_json.h"
 #include <wheel_arm_abs_vel/DirectControllerInput.h>
 #include <wheel_arm_abs_vel/TeleopTcpTarget.h>
 #include <wheel_arm_abs_vel/VelocityIkShadow.h>
@@ -31,8 +31,7 @@ geometry_msgs::Twist toTwist(const d::Sample& s){
 d::Json encode(const d::Sample& s){
   Eigen::Quaterniond q(s.pose.linear());return {s.pose.translation().x(),s.pose.translation().y(),s.pose.translation().z(),q.x(),q.y(),q.z(),q.w(),s.linear.x(),s.linear.y(),s.linear.z(),s.angular.x(),s.angular.y(),s.angular.z()};
 }
-d::Sample decode(const d::Json& a){return d::sample({a.at(0),a.at(1),a.at(2),a.at(3),a.at(4),a.at(5),a.at(6)},
-      {a.at(7),a.at(8),a.at(9)},{a.at(10),a.at(11),a.at(12)});}
+d::Sample decode(const d::Json& a){return d::sampleFromJson(a);}
 d::Json vec(const d::Vec& x){return {x.x(),x.y(),x.z()};}
 std::array<d::RobotArm,2> seed(d::RobotModel& model,const d::Config& c) {
   std::vector<std::string> n;std::vector<double> q;

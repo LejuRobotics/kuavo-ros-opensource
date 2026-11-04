@@ -29,6 +29,9 @@ if(DIRECT_TCP_STANDALONE OR CATKIN_ENABLE_TESTING)
   add_executable(direct_tcp_gtest ${DIRECT_TCP_ROOT}/test/direct_tcp_gtest.cpp)
   target_link_libraries(direct_tcp_gtest PRIVATE absolute_direct_controller_tcp GTest::GTest GTest::Main)
   add_test(NAME direct_tcp_gtest COMMAND direct_tcp_gtest)
+  add_executable(direct_tcp_json_sample_test ${DIRECT_TCP_ROOT}/test/direct_tcp_json_sample_test.cpp)
+  target_link_libraries(direct_tcp_json_sample_test PRIVATE absolute_direct_controller_tcp GTest::GTest GTest::Main)
+  add_test(NAME direct_tcp_json_sample_test COMMAND direct_tcp_json_sample_test)
   # Bind the explicit checked-in test fixture to this checkout, independently
   # of the container mount path. Production configuration has no default path.
   file(READ ${DIRECT_TCP_ROOT}/config/direct_tcp/400063_simulation.json DIRECT_TCP_TEST_JSON)
