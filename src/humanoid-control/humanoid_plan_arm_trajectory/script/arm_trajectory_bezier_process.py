@@ -477,6 +477,12 @@ class ArmTrajectoryBezierDemo:
         joint_q = joint_msg.joint_data.joint_q
         hand_part = self._extract_hand_part(hand_msg)
 
+        if (
+            self.robot_version.version_number() == 49
+            and rospy.get_param('/end_effector_type', '') == 'qiangnao'
+        ):
+            hand_part = [math.radians(value) for value in hand_part]
+
         extractor = self._JOINT_EXTRACTORS[self._get_extractor_key()]
         self.current_arm_joint_state = [round(v, 5) for v in extractor(self, joint_q, hand_part)]
 
