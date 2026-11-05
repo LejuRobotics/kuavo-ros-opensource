@@ -12,8 +12,6 @@ struct RneaSettings {
   std::string mode = "full";  // gravity | bias | full
   vector_t torqueLimit, torqueRateLimit, accelerationLimit, jerkLimit;
   double velocityCutoffHz = 30.0;
-  double maxMeasurementAge = 0.05;
-  double maxPeriod = 0.05;
   double dynamicRampSeconds = 0.2;
 };
 

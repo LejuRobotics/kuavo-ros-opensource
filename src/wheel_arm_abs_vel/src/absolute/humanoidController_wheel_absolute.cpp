@@ -312,10 +312,7 @@ namespace wheel_absolute_control
         ros::NodeHandle config("/dynamics/rnea");
         config.param<std::string>("mode", settings.mode, "full");
         config.param("velocity_cutoff_hz", settings.velocityCutoffHz, 30.0);
-        config.param("sensor_timeout", settings.maxMeasurementAge, 0.05);
-        config.param("max_period", settings.maxPeriod, 0.05);
         config.param("dynamic_ramp_seconds", settings.dynamicRampSeconds, 0.2);
-        dynamics_sensor_timeout_ = settings.maxMeasurementAge;
         vector_t limits = vector_t::Zero(lowJointNum_ + armNum_/2);
         loadData::loadEigenMatrix(taskFile, "torqueLimitsTask", limits);
         settings.torqueLimit.resize(manipulatorModelInfo_.armDim);
@@ -3213,12 +3210,10 @@ namespace wheel_absolute_control
     if(available) dynamics_sensor_receive_=sensor.receiveStamp_;
     if(dynamics_backend_name_!="rnea") return true;  // WBC baseline unchanged.
     if(!available) {stopDynamics("missing sensor data");return false;}
-    const double age=std::chrono::duration<double>(std::chrono::steady_clock::now()-dynamics_sensor_receive_).count();
-    if(dynamics_sensor_receive_==std::chrono::steady_clock::time_point{} || !std::isfinite(age) || age < 0 || age>dynamics_sensor_timeout_ ||
-       sensor.jointPos_.size()<static_cast<Eigen::Index>(manipulatorModelInfo_.armDim) ||
+    if(sensor.jointPos_.size()<static_cast<Eigen::Index>(manipulatorModelInfo_.armDim) ||
        sensor.jointVel_.size()<static_cast<Eigen::Index>(manipulatorModelInfo_.armDim) ||
        !sensor.jointPos_.allFinite() || !sensor.jointVel_.allFinite()) {
-      stopDynamics("invalid/stale sensor data");return false;
+      stopDynamics("invalid sensor data");return false;
     }
     return true;
   }
@@ -3237,10 +3232,10 @@ namespace wheel_absolute_control
     ros_logger_->publishValue("/dynamics/compute_ms",milliseconds);
     if(!result.valid || result.torque.size()!=static_cast<Eigen::Index>(manipulatorModelInfo_.armDim) || !result.torque.allFinite()) {
       ROS_ERROR("Dynamics timing: reason=%s dt_ms=%.6f measurement_age_ms=%.6f "
-                "sensor_timeout_ms=%.3f cmd_reference_ms=%.6f cmd_publish_ms=%.6f "
+                "cmd_reference_ms=%.6f cmd_publish_ms=%.6f "
                 "cmd_pause_ms=%.6f cmd_force_ms=%.6f cmd_lock_ms=%.6f "
                 "cmd_wbc_input_ms=%.6f lock_query_ms=%.6f",
-                result.reason, dt * 1000., age * 1000., dynamics_sensor_timeout_ * 1000.,
+                result.reason, dt * 1000., age * 1000.,
                 cmd_prepare_timing_.data[2], cmd_prepare_timing_.data[3],
                 cmd_prepare_timing_.data[4], cmd_prepare_timing_.data[5],
                 cmd_prepare_timing_.data[6], cmd_prepare_timing_.data[7],

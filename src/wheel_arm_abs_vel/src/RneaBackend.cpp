@@ -27,8 +27,6 @@ RneaBackend::RneaBackend(const PinocchioInterface& interface,
   if (!positiveVector(s.torqueLimit,n) || !positiveVector(s.torqueRateLimit,n) ||
       !positiveVector(s.accelerationLimit,n) || !positiveVector(s.jerkLimit,n) ||
       !std::isfinite(s.velocityCutoffHz) || s.velocityCutoffHz <= 0 ||
-      !std::isfinite(s.maxMeasurementAge) || s.maxMeasurementAge <= 0 ||
-      !std::isfinite(s.maxPeriod) || s.maxPeriod <= 0 ||
       !std::isfinite(s.dynamicRampSeconds) || s.dynamicRampSeconds <= 0)
     throw std::invalid_argument("invalid RNEA bounds/filter/timing configuration");
   std::set<int> seen;
@@ -48,15 +46,15 @@ RneaBackend::RneaBackend(const PinocchioInterface& interface,
 }
 
 DynamicsResult RneaBackend::update(const DynamicsReference& r, const SystemObservation& m,
-                                   double dt, double measurementAge) {
+                                   double dt, double /*measurementAge*/) {
   DynamicsResult out;
   const auto& model = interface_.getModel();
   auto& data = interface_.getData();
   const int n = velocityIndices_.size();
-  if (!std::isfinite(dt) || dt<=0 || dt>settings_.maxPeriod ||
-      !std::isfinite(measurementAge) || measurementAge < -0.02 ||
-      measurementAge > settings_.maxMeasurementAge) {
-    out.reason="stale_measurement_or_invalid_period"; return out;
+  // Timing overruns do not request a robot stop. The integration period
+  // must still be finite and positive for filtering and slew limits.
+  if (!std::isfinite(dt) || dt<=0) {
+    out.reason="invalid_period"; return out;
   }
   if (m.state.size()!=model.nq || m.input.size()!=model.nv ||
       r.q.size()!=model.nq || r.v.size()!=model.nv ||

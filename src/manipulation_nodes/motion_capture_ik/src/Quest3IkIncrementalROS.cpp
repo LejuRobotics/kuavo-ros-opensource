@@ -516,6 +516,39 @@ void Quest3IkIncrementalROS::fsmEnter() {
 
       // 重置增量控制结果（Quest3IkIncrementalROS 类的成员变量）
       latestIncrementalResult_ = IncrementalPoseResult();
+      // #4746: 每次进 mode2 清自然肘状态，保证 1st/2nd unlock 起点一致（对齐轮臂）。
+      resetNaturalElbowGuides();
+      // ElbowFixedPoint / 速度IK 温启动与手位参考对齐：reset 时强制零位 FK，
+      // 否则用传感器 FK。compute*Link4FK 读的是 sensorArmJointQ_，进 mode2 瞬间
+      // 传感器可能仍停在上一轮 teleop，不能直接当锚。
+      if (oneStageIkEndEffectorPtr_ && jointStateSize_ > 0) {
+        Eigen::VectorXd armJoints =
+            (resetJointToDefault_ || sensorArmJointQ_.size() != jointStateSize_)
+                ? Eigen::VectorXd::Zero(jointStateSize_)
+                : sensorArmJointQ_;
+        auto [pL4, qL4] =
+            oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_l4_link", jointStateSize_);
+        auto [pR4, qR4] =
+            oneStageIkEndEffectorPtr_->FKElbow(armJoints, "zarm_r4_link", jointStateSize_);
+        auto [pL6, qL6] =
+            oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_l6_link", jointStateSize_);
+        auto [pR6, qR6] =
+            oneStageIkEndEffectorPtr_->FK(armJoints, "zarm_r6_link", jointStateSize_);
+        (void)qL4;
+        (void)qR4;
+        (void)qL6;
+        (void)qR6;
+        leftElbowFixedPoint_ = pL4;
+        rightElbowFixedPoint_ = pR4;
+        latestHumanLeftElbowPos_ = pL4;
+        latestHumanRightElbowPos_ = pR4;
+        if (leftVelocityIkSolverPtr_) {
+          leftVelocityIkSolverPtr_->seedFromMeasured(pL4, pL6);
+        }
+        if (rightVelocityIkSolverPtr_) {
+          rightVelocityIkSolverPtr_->seedFromMeasured(pR4, pR6);
+        }
+      }
 
       enterMode2ResetCounter_++;
       ROS_INFO_THROTTLE(
@@ -907,6 +940,13 @@ void Quest3IkIncrementalROS::fsmProcess() {
     }
     // 建锚参考必须来自本次实测肘部 FK，不能读取尚未赋值或上一轮残留的参考。
     latestHumanLeftElbowPos_ = pLink4;
+    // #4746: 同步刷新 p1Fixed。初始化时的 elbowFixed = shoulder+(±0.207 Y)
+    // 落在 |Y|≈0.5 的外张点；HandPriority 下 q11=q12=0.5 会把肘往外拉，
+    // 复位后再 grip 略抬手就会 L3 大幅外旋。固定点改跟本次实测肘。
+    leftElbowFixedPoint_ = pLink4;
+    if (leftNaturalElbowGuide_) {
+      leftNaturalElbowGuide_->reset();
+    }
     bool pointSolveSucceeded = false;
     const auto [p1Optimized, p2Optimized] =
         leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
@@ -956,6 +996,11 @@ void Quest3IkIncrementalROS::fsmProcess() {
     }
     // 建锚参考必须来自本次实测肘部 FK，不能读取尚未赋值或上一轮残留的参考。
     latestHumanRightElbowPos_ = pLink4;
+    // #4746: 同步刷新 p1Fixed，避免初始化外张固定点在二次 grip 时把肘拉歪。
+    rightElbowFixedPoint_ = pLink4;
+    if (rightNaturalElbowGuide_) {
+      rightNaturalElbowGuide_->reset();
+    }
     bool pointSolveSucceeded = false;
     const auto [p1Optimized, p2Optimized] =
         rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
@@ -1170,6 +1215,11 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
       }
       // 手臂重新激活同样以本次实测肘部 FK 建锚。
       latestHumanLeftElbowPos_ = pLink4;
+      // #4746: 模式切换重激活同样刷新 p1Fixed。
+      leftElbowFixedPoint_ = pLink4;
+      if (leftNaturalElbowGuide_) {
+        leftNaturalElbowGuide_->reset();
+      }
       bool pointSolveSucceeded = false;
       const auto [p1Optimized, p2Optimized] =
           leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
@@ -1248,26 +1298,10 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
   // 保存优化前的手部位置（用于可视化对比）
   latestLeftHandPosBeforeOpt_ = scaledLeftHandPos;
 
-  // 使用上一时刻的link6位置和ee位置计算期望的肘部位置
-  // 通过手腕-ee向量计算期望的肘部位置
-  // 向量方向：ee→手腕向量方向，长度为肘部到手腕的距离l2
-  // 肘点计算：肘点 = 手腕点+向量方向*长度l2
-  {
-    // 计算从ee到手腕的向量（ee→手腕方向）
-    Eigen::Vector3d eeToWristVec = leftLink6Position_ - leftEndEffectorPosition_;
-    double vecNorm = eeToWristVec.norm();
-
-    // 如果向量长度太小，使用默认方向（避免除零错误）
-    if (vecNorm > 1e-6) {
-      // 归一化向量并乘以l2_长度
-      Eigen::Vector3d direction = eeToWristVec.normalized() * l2_;
-      // 肘点 = 手腕点 + 向量方向*长度l2
-      latestHumanLeftElbowPos_ = leftLink6Position_ + direction;
-    } else {
-      // 如果向量为零，使用上一时刻的肘部位置（保持连续性）
-      // latestHumanLeftElbowPos_ 保持当前值不变
-    }
-  }
+  // #4746: 连续跟踪对齐轮臂 — 自然肘圆导引（非刚性锁 ElbowFixedPoint）。
+  // tip c887552 锁锚可消笛卡尔 |Y| 外张，但略抬手仍逼 L3/R3 大幅扭转；
+  // 轮臂允许肘在肩-手圆上 out-and-back，1st≈2nd 电机幅值。
+  applyNaturalElbowTrackingRefs(true, scaledLeftHandPos, currentLeftElbowPos);
 
   if (!leftVelocityIkSolverPtr_->hasMeasuredSeed()) {
     Eigen::Vector3d measuredLeftLink6;
@@ -1353,6 +1387,11 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
       }
       // 手臂重新激活同样以本次实测肘部 FK 建锚。
       latestHumanRightElbowPos_ = pLink4;
+      // #4746: 模式切换重激活同样刷新 p1Fixed。
+      rightElbowFixedPoint_ = pLink4;
+      if (rightNaturalElbowGuide_) {
+        rightNaturalElbowGuide_->reset();
+      }
       bool pointSolveSucceeded = false;
       const auto [p1Optimized, p2Optimized] =
           rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
@@ -1430,26 +1469,8 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
   // 保存优化前的手部位置（用于可视化对比）
   latestRightHandPosBeforeOpt_ = scaledRightHandPos;
 
-  // 使用上一时刻的link6位置和ee位置计算期望的肘部位置
-  // 通过手腕-ee向量计算期望的肘部位置
-  // 向量方向：ee→手腕向量方向，长度为肘部到手腕的距离l2
-  // 肘点计算：肘点 = 手腕点+向量方向*长度l2
-  {
-    // 计算从ee到手腕的向量（ee→手腕方向）
-    Eigen::Vector3d eeToWristVec = rightLink6Position_ - rightEndEffectorPosition_;
-    double vecNorm = eeToWristVec.norm();
-
-    // 如果向量长度太小，使用默认方向（避免除零错误）
-    if (vecNorm > 1e-6) {
-      // 归一化向量并乘以l2_长度
-      Eigen::Vector3d direction = eeToWristVec.normalized() * l2_;
-      // 肘点 = 手腕点 + 向量方向*长度l2
-      latestHumanRightElbowPos_ = rightLink6Position_ + direction;
-    } else {
-      // 如果向量为零，使用上一时刻的肘部位置（保持连续性）
-      // latestHumanRightElbowPos_ 保持当前值不变
-    }
-  }
+  // #4746: 同左臂，连续跟踪用自然肘圆导引对齐轮臂。
+  applyNaturalElbowTrackingRefs(false, scaledRightHandPos, currentRightElbowPos);
 
   if (!rightVelocityIkSolverPtr_->hasMeasuredSeed()) {
     Eigen::Vector3d measuredRightLink6;
@@ -1543,6 +1564,8 @@ bool Quest3IkIncrementalROS::processDataLeftArm() {
       return false;
     }
   }
+  // #4746: processData 路径同样走自然肘圆导引。
+  applyNaturalElbowTrackingRefs(true, scaledLeftHandPos, currentLeftElbowPos);
   bool pointSolveSucceeded = false;
   const auto [p1Optimized, p2Optimized] =
       leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
@@ -1628,6 +1651,8 @@ bool Quest3IkIncrementalROS::processDataRightArm() {
       return false;
     }
   }
+  // #4746: processData 路径同样走自然肘圆导引。
+  applyNaturalElbowTrackingRefs(false, scaledRightHandPos, currentRightElbowPos);
   bool pointSolveSucceeded = false;
   const auto [p1Optimized, p2Optimized] =
       rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
@@ -3576,12 +3601,95 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
     }
   }
 
+
+  // #4746: 人形增量复用轮臂自然肘导引（肩-手肘圆 + 重力方向），对齐 1st/2nd unlock 肘行为。
+  {
+    nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/natural_elbow/enabled",
+                      enableNaturalElbowGuide_, true);
+    nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/natural_elbow/natural_direction_blend",
+                      naturalElbowGuideConfig_.naturalDirectionBlend, 1.0);
+    nodeHandle_.param("/ik_ros_uni_cpp_node/quest3/natural_elbow/waist_avoidance_enabled",
+                      naturalElbowGuideConfig_.waistAvoidanceEnabled, true);
+    leftNaturalElbowGuide_ =
+        std::make_unique<WheelNaturalElbowGuide>(l1_, l2_, naturalElbowGuideConfig_);
+    rightNaturalElbowGuide_ =
+        std::make_unique<WheelNaturalElbowGuide>(l1_, l2_, naturalElbowGuideConfig_);
+    ROS_INFO(
+        "[Quest3IkIncrementalROS] NaturalElbowGuide initialized enabled=%s blend=%.2f l1=%.4f l2=%.4f",
+        enableNaturalElbowGuide_ ? "true" : "false",
+        naturalElbowGuideConfig_.naturalDirectionBlend,
+        l1_,
+        l2_);
+  }
+
   // 初始化增量模块的手部姿态种子，避免首次进入增量模式时从单位四元数开始插值
   if (incrementalController_) {
     incrementalController_->setHandQuatSeeds(defaultHandQuat, defaultHandQuat, useIncrementalHandOrientation_);
   }
 
   ROS_INFO("[Quest3IkIncrementalROS] Interpolation system initialized successfully");
+}
+
+
+void Quest3IkIncrementalROS::resetNaturalElbowGuides() {
+  if (leftNaturalElbowGuide_) {
+    leftNaturalElbowGuide_->reset();
+  }
+  if (rightNaturalElbowGuide_) {
+    rightNaturalElbowGuide_->reset();
+  }
+}
+
+void Quest3IkIncrementalROS::applyNaturalElbowTrackingRefs(
+    bool isLeft, const Eigen::Vector3d& handTarget, const Eigen::Vector3d& currentElbowFk) {
+  // #4746: 对齐轮臂效果。轮臂用 WheelNaturalElbowGuide 的重力自然方向落在肩-手圆上，
+  // 弯曲平面被重力钉住，1st/2nd unlock 电机幅值接近；纯 projectElbowToCircle 连续投影
+  // 在 HandPriority(Q11=Q12) 下允许绕肩-手轴自由自旋，L3 会飙到数百度。
+  // 因此 p1Ref/p1Fixed 都跟 guide.elbowPosition（重力自然 + 腰部 keep-out）。
+  Eigen::Vector3d& elbowFixed = isLeft ? leftElbowFixedPoint_ : rightElbowFixedPoint_;
+  Eigen::Vector3d& humanElbowRef = isLeft ? latestHumanLeftElbowPos_ : latestHumanRightElbowPos_;
+  const Eigen::Vector3d& shoulder =
+      isLeft ? robotLeftFixedShoulderPos_ : robotRightFixedShoulderPos_;
+  WheelNaturalElbowGuide* guide =
+      isLeft ? leftNaturalElbowGuide_.get() : rightNaturalElbowGuide_.get();
+
+  if (!enableNaturalElbowGuide_ || guide == nullptr) {
+    // 回退：与 tip c887552 一致，锁定建锚固定点，避免几何 ee→腕外拉。
+    humanElbowRef = elbowFixed;
+    return;
+  }
+
+  const Eigen::Vector3d current =
+      currentElbowFk.allFinite() ? currentElbowFk : elbowFixed;
+
+  WheelNaturalElbowGuideInput input;
+  input.shoulderPosition = shoulder;
+  input.handPosition = handTarget;
+  input.currentElbowPosition = current;
+  input.humanPoseValid = false;
+  input.torsoPosition = 0.5 * (robotLeftFixedShoulderPos_ + robotRightFixedShoulderPos_);
+  input.torsoOutwardDirection =
+      isLeft ? Eigen::Vector3d(Eigen::Vector3d::UnitY()) : Eigen::Vector3d(-Eigen::Vector3d::UnitY());
+  input.torsoFrameValid = true;
+  const WheelNaturalElbowGuideOutput output = guide->update(input);
+
+  // 两端同锁到轮臂自然肘目标：重力钉弯曲平面，腰部激活时已含外推。
+  // （纯 circle 连续投影会在 HandPriority 下绕肩-手轴自旋；不对称冻结
+  // p1Fixed 也无法消 late hold 零空间缠绕，故与轮臂一样两端都跟 guide。）
+  humanElbowRef = output.elbowPosition;
+  elbowFixed = output.elbowPosition;
+
+  ROS_DEBUG_THROTTLE(
+      1.0,
+      "[Quest3IkIncrementalROS][NaturalElbow] %s elbow_ref=[%.3f,%.3f,%.3f] "
+      "gravity_ok=%s waist_act=%.3f radius=%.4f",
+      isLeft ? "L" : "R",
+      humanElbowRef.x(),
+      humanElbowRef.y(),
+      humanElbowRef.z(),
+      output.gravityDirectionValid ? "true" : "false",
+      output.waistSafetyActivation,
+      output.circleRadius);
 }
 
 void Quest3IkIncrementalROS::updateLeftConstraintList(const Eigen::Vector3d& leftHandPos,

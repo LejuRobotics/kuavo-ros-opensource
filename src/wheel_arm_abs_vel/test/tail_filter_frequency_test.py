@@ -68,7 +68,7 @@ class FrequencyTests(unittest.TestCase):
         self.assertEqual(rnea['velocity_cutoff_hz'],30.)
         self.assertEqual(rnea['jerk_limit_arm'],500.)
         self.assertNotIn('jerk_limit',rnea)
-        self.assertEqual(rnea['sensor_timeout'],.05)
-        self.assertEqual(rnea['max_period'],.05)
+        self.assertNotIn('sensor_timeout',rnea)
+        self.assertNotIn('max_period',rnea)
 
 if __name__=='__main__':unittest.main()
