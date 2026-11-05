@@ -29,6 +29,10 @@
     <arg name="pico_tf_publish_enable" default="false"/>
     <arg name="pico_tf_publish_hz" default="100.0"/>
     <arg name="enable_vr_latency_diagnostics" default="false"/>
+    <arg name="sg100_kp" default="10.0"/>
+    <arg name="sg100_ki" default="0.0"/>
+    <arg name="sg100_kd" default="0.02"/>
+    <arg name="sg100_output_limit" default="0.5"/>
 
     <!-- 仿真 -->
     <group if="$(eval arg('start_robot') and arg('sim_mode') and not arg('wheel_robot'))">
@@ -46,6 +50,10 @@
             <arg name="cmd_truncation_enable" value="$(arg cmd_truncation_enable)"/>
             <arg name="joint_protect_enable" value="$(arg joint_protect_enable)"/>
             <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
+            <arg name="sg100_kp" value="$(arg sg100_kp)"/>
+            <arg name="sg100_ki" value="$(arg sg100_ki)"/>
+            <arg name="sg100_kd" value="$(arg sg100_kd)"/>
+            <arg name="sg100_output_limit" value="$(arg sg100_output_limit)"/>
         </include>
     </group>
 
@@ -66,6 +74,10 @@
             <arg name="robot_version" value="$(arg robot_version)"/>
             <arg name="with_mm_ik" value="$(arg with_mm_ik)"/>
             <arg name="with_head_control_node" value="false"/>
+            <arg name="sg100_kp" value="$(arg sg100_kp)"/>
+            <arg name="sg100_ki" value="$(arg sg100_ki)"/>
+            <arg name="sg100_kd" value="$(arg sg100_kd)"/>
+            <arg name="sg100_output_limit" value="$(arg sg100_output_limit)"/>
         </include>
     </group>
 

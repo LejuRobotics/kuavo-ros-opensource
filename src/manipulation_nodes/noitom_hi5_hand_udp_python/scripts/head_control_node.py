@@ -15,13 +15,14 @@ head_track_target（仅 track_hand）:
 跟踪目标位于头部后方（相对 x <= 0 m）时保持当前头角；
 目标回到前方至少 0.03 m 后恢复，避免 atan2 在 +/-180 度处左右跳变。
 
-轮臂 zhead_1_joint 的父 link 是 waist_yaw_link，头部指令也是相对这个坐标系的
-关节角。手和头都在 waist_yaw_link 下取值，腰转动时不会把腰的偏航重复加到头上。
+参考坐标系默认取 URDF 中 zhead_1_joint 的父 link（四代 base_link、轮臂 waist_yaw_link）。
+手和头在同一关节父坐标系下取值，避免将腰的偏航重复加到头上；base_frame 可显式覆盖。
 """
 
 import json
 import math
 import os
+import xml.etree.ElementTree as ET
 
 import rospy
 import tf
@@ -128,6 +129,20 @@ def chest_head_tf_is_fresh(now_sec, stamp_sec, timeout_sec):
     return 0.0 <= age <= timeout_sec
 
 
+def resolve_head_base_frame(base_frame, robot_description):
+    """显式坐标系优先；否则使用头部 yaw 关节的父 link，避免按机型编号猜测。"""
+    explicit = str(base_frame or "").strip()
+    if explicit:
+        return explicit
+    root = ET.fromstring(robot_description)
+    joint = root.find("joint[@name='zhead_1_joint']")
+    parent = joint.find("parent") if joint is not None else None
+    frame = parent.get("link", "").strip() if parent is not None else ""
+    if not frame or root.find("link[@name='%s']" % frame) is None:
+        raise ValueError("URDF has no valid parent link for zhead_1_joint; set ~base_frame explicitly")
+    return frame
+
+
 def _load_head_config(config_path):
     config = dict(_DEFAULT_CONFIG)
     config["joint_limits"] = dict(_DEFAULT_CONFIG["joint_limits"])
@@ -164,7 +179,25 @@ class HeadTrackHandNode:
         self.head_track_target = TRACK_BOTH_HANDS_MIDPOINT
         self.track_target = TRACK_ACTIVE_HAND
         self.rate_hz = float(rospy.get_param("~rate", 50.0))
-        self.base_frame = rospy.get_param("~base_frame", "waist_yaw_link")
+        explicit_base = rospy.get_param("~base_frame", "")
+        description = ""
+        if not str(explicit_base or "").strip():
+            # 标准机器人启动使用 humanoid_description，部分仿真使用 robot_description。
+            description = rospy.get_param("/humanoid_description", "") or rospy.get_param(
+                "/robot_description", ""
+            )
+            if not description:
+                urdf_path = rospy.get_param("/urdfFile", "")
+                if urdf_path:
+                    with open(urdf_path, "r") as urdf_file:
+                        description = urdf_file.read()
+        try:
+            self.base_frame = resolve_head_base_frame(explicit_base, description)
+        except (ET.ParseError, ValueError) as error:
+            rospy.logerr("Cannot resolve head base frame: %s", error)
+            raise
+        rospy.loginfo("Head control base_frame=%s (%s)", self.base_frame,
+                      "explicit parameter" if str(explicit_base or "").strip() else "URDF head joint parent")
         self.left_hand_frame = rospy.get_param("~left_hand_frame", "zarm_l7_end_effector")
         self.right_hand_frame = rospy.get_param("~right_hand_frame", "zarm_r7_end_effector")
         self.head_frames = rospy.get_param(

@@ -35,6 +35,8 @@ ConstantVelocityCommandKalmanFilter::ConstantVelocityCommandKalmanFilter(int dof
   targetVelocity_ = Eigen::VectorXd::Zero(dofNum_);
   state_ = Eigen::MatrixXd::Zero(dofNum_, 2);
   covariance_.assign(dofNum_, Matrix2::Identity());
+  recovering_.assign(dofNum_, false);
+  previousPositionBuffer_ = Eigen::VectorXd::Zero(dofNum_);
   stepPositionBuffer_ = Eigen::VectorXd::Zero(dofNum_);
   stepVelocityBuffer_ = Eigen::VectorXd::Zero(dofNum_);
 
@@ -64,8 +66,9 @@ bool ConstantVelocityCommandKalmanFilter::validateAndReport(const char* source) 
   return false;
 }
 
-void ConstantVelocityCommandKalmanFilter::updateSystemMatrices() {
-  const double dt = cycleTime_;
+void ConstantVelocityCommandKalmanFilter::updateSystemMatrices(double elapsedSec) {
+  const double dt = (std::isfinite(elapsedSec) && elapsedSec > 0.0) ? elapsedSec : cycleTime_;
+  predictionDt_ = dt;
   const double dt2 = dt * dt;
   const double dt3 = dt2 * dt;
   const double dt4 = dt2 * dt2;
@@ -135,6 +138,8 @@ void ConstantVelocityCommandKalmanFilter::reset(const Eigen::VectorXd& initialPo
   initialCov(0, 0) = initialPosVar_;
   initialCov(1, 1) = initialVelVar_;
   covariance_.assign(dofNum_, initialCov);
+  recovering_.assign(dofNum_, false);
+  hasPendingMeasurement_ = false;
 
   initialized_ = true;
   statusMessage_ = "Ready";
@@ -167,7 +172,7 @@ void ConstantVelocityCommandKalmanFilter::sanitizeState(Vector2& state) const {
   state[1] = std::isfinite(state[1]) ? state[1] : 0.0;
 }
 
-bool ConstantVelocityCommandKalmanFilter::predict(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity) {
+bool ConstantVelocityCommandKalmanFilter::predict(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity, double elapsedSec) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!initialized_) {
     statusMessage_ = "predict called before reset";
@@ -184,6 +189,8 @@ bool ConstantVelocityCommandKalmanFilter::predict(Eigen::VectorXd& outPosition, 
   if (outVelocity.size() != static_cast<Eigen::Index>(dofNum_)) {
     outVelocity.resize(static_cast<Eigen::Index>(dofNum_));
   }
+  updateSystemMatrices(elapsedSec);
+  previousPositionBuffer_ = state_.col(0);
   outPosition.setZero();
   outVelocity.setZero();
   stepPositionBuffer_.setZero();
@@ -201,6 +208,17 @@ bool ConstantVelocityCommandKalmanFilter::predict(Eigen::VectorXd& outPosition, 
     const double velLimit = maxVel_[idx];
     sanitizeState(state);
     state[1] = std::clamp(state[1], -velLimit, velLimit);
+    if (recovering_[i]) {
+      // Recovery is command tracking, not a new Kalman measurement. Continue even
+      // when the caller deduplicates a static target and only runs predict().
+      const double previousQ = previousPositionBuffer_[idx];
+      const double maxDelta = velLimit * predictionDt_;
+      const double rawQ = targetPosition_[idx];
+      state[0] = std::clamp(rawQ, previousQ - maxDelta, previousQ + maxDelta);
+      recovering_[i] = (state[0] != rawQ);
+      state[1] = recovering_[i] ? (state[0] - previousQ) / predictionDt_
+                                : std::clamp(targetVelocity_[idx], -velLimit, velLimit);
+    }
 
     state_.row(idx) = state.transpose();
     covariance_[i] = covariance;
@@ -275,8 +293,8 @@ bool ConstantVelocityCommandKalmanFilter::update() {
   return true;
 }
 
-bool ConstantVelocityCommandKalmanFilter::step(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity) {
-  if (!predict(outPosition, outVelocity)) {
+bool ConstantVelocityCommandKalmanFilter::step(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity, double elapsedSec) {
+  if (!predict(outPosition, outVelocity, elapsedSec)) {
     return false;
   }
   if (!update()) {
@@ -296,23 +314,33 @@ bool ConstantVelocityCommandKalmanFilter::step(Eigen::VectorXd& outPosition, Eig
       const double rawDq = targetVelocity_[idx];
       const bool fallbackDq = (std::abs(rawDq - interpolatedDq) > kRawFallbackVelocityDelta);
       const bool fallbackAny = (fallbackQ || fallbackDq);
-      if (fallbackAny) {
-        // Defensive fallback: if interpolation deviates too much from latest raw command, trust raw
-        // and realign the PV state to avoid stale latent estimate pullback.
+      if (fallbackAny || recovering_[i]) {
+        // Recover toward raw, then apply the same position slew limit as normal updates.
+        // Keep the latent state aligned with the bounded output.
         state_(idx, 0) = rawQ;
-        state_(idx, 1) = rawDq;
+        state_(idx, 1) = std::clamp(rawDq, -maxVel_[idx], maxVel_[idx]);
         outPosition[idx] = rawQ;
-        outVelocity[idx] = rawDq;
+        outVelocity[idx] = state_(idx, 1);
         if (fallbackQ) ++fallbackPosCount;
         if (fallbackDq) ++fallbackVelCount;
       } else {
         outPosition[idx] = interpolatedQ;
         outVelocity[idx] = interpolatedDq;
       }
+      const double previousQ = previousPositionBuffer_[idx];
+      const double maxDelta = maxVel_[idx] * predictionDt_;
+      const double boundedQ = std::clamp(outPosition[idx], previousQ - maxDelta, previousQ + maxDelta);
+      if (boundedQ != outPosition[idx]) {
+        recovering_[i] = true;
+        outPosition[idx] = boundedQ;
+        outVelocity[idx] = (boundedQ - previousQ) / predictionDt_;
+        state_(idx, 0) = outPosition[idx];
+        state_(idx, 1) = outVelocity[idx];
+      }
     }
     if (fallbackPosCount > 0 || fallbackVelCount > 0) {
       statusMessage_ = "Step ok with raw fallback";
-      ROS_WARN_STREAM_THROTTLE(1.0, "[ConstantVelocityCommandKalmanFilter] Raw fallback triggered: q="
+      ROS_WARN_STREAM_THROTTLE(1.0, "[ConstantVelocityCommandKalmanFilter] Rate-limited raw recovery triggered: q="
                                         << fallbackPosCount << " DoF(s) (th="
                                         << kRawFallbackPositionDelta << "), dq="
                                         << fallbackVelCount << " DoF(s) (th="

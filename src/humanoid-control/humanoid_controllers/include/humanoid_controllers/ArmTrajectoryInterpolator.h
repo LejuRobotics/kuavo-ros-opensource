@@ -61,7 +61,8 @@ public:
 
   void configure(const Config& config);
   void reset(const Eigen::VectorXd& currentQ, const ros::Time& now);
-  void ingestRawTarget(const ros::Time& now, const Eigen::VectorXd& targetQ, const Eigen::VectorXd& targetV);
+  // receivedAt must advance only when a ROS/SHM command is actually received.
+  void ingestRawTarget(const ros::Time& receivedAt, const Eigen::VectorXd& targetQ, const Eigen::VectorXd& targetV);
   void pushTarget(const TargetSample& sample);
   Output compute(const ros::Time& now, const ModeFlags& modeFlags, const Eigen::VectorXd& currentQ);
 
@@ -97,6 +98,7 @@ private:
   Eigen::VectorXd smoothQ_;
   Eigen::VectorXd smoothV_;
   ros::Time lastTargetStamp_;
+  ros::Time lastPredictionStamp_;
 
   std::shared_ptr<ocs2::mobile_manipulator::ConstantVelocityCommandKalmanFilter> backend_;
 };

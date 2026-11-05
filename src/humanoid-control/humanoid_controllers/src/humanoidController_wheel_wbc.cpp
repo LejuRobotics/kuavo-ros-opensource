@@ -2674,9 +2674,9 @@ namespace humanoidController_wheel_wbc
     vector_t armTargetRawQ = currentArmQ;
     vector_t armTargetRawV = vector_t::Zero(armNum_);
     bool hasArmTargetRaw = false;
-    ArmJointTrajectory armTrajRaw = control_data_manager_->getArmExternalControlState();
+    ros::Time trajStamp;
+    ArmJointTrajectory armTrajRaw = control_data_manager_->getArmExternalControlState(&trajStamp);
     if (armInterpWaitFreshTraj_) {
-      const ros::Time trajStamp = control_data_manager_->getArmExternalControlStateTimestamp();
       if (!trajStamp.isZero() && trajStamp != armInterpStampAtModeChange_) {
         armInterpWaitFreshTraj_ = false;
       }
@@ -2693,7 +2693,7 @@ namespace humanoidController_wheel_wbc
       if (armTrajRaw.vel.size() == static_cast<Eigen::Index>(armNum_)) {
         armTargetRawV = armTrajRaw.vel;
       }
-      armTrajectoryInterpolator_.ingestRawTarget(time, armTrajRaw.pos, armTrajRaw.vel);
+      armTrajectoryInterpolator_.ingestRawTarget(trajStamp, armTrajRaw.pos, armTrajRaw.vel);
     }
     if (hasArmTargetRaw) {
       ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_raw", armTargetRawQ);

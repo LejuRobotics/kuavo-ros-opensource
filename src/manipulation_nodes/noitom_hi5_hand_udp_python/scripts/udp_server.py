@@ -313,6 +313,12 @@ class UDPServer:
         with self.lock:
             return list(self.clients.keys())
 
+    def get_quest_client_ips(self):
+        """返回已注册 Quest 客户端的去重 IP 快照，不暴露可变客户端对象。"""
+        with self.lock:
+            return sorted({info.addr[0] for client_id, info in self.clients.items()
+                           if isinstance(client_id, str) and client_id.startswith("quest_client_")})
+
     def is_connected(self):
         with self.lock:
             return len(self.clients) > 0

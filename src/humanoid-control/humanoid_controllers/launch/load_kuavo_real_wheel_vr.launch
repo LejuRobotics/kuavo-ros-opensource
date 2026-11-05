@@ -15,6 +15,10 @@
     <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
     <arg name="enable_base_emergency_stop" default="true"/>
     <arg name="use_custom_arm_prepare" default="false"/>
+    <arg name="sg100_kp" default="10.0"/>
+    <arg name="sg100_ki" default="0.0"/>
+    <arg name="sg100_kd" default="0.02"/>
+    <arg name="sg100_output_limit" default="0.5"/>
     
     <!-- 增量VR遥操作控制相关参数 -->
     <arg name="use_cpp_incremental_ik" default="false"/>
@@ -35,6 +39,10 @@
         <arg name="use_custom_arm_prepare" value="$(arg use_custom_arm_prepare)"/>
         <arg name="head_control_mode" value="$(arg head_control_mode)"/>
         <arg name="head_track_target" value="$(arg head_track_target)"/>
+        <arg name="sg100_kp" value="$(arg sg100_kp)"/>
+        <arg name="sg100_ki" value="$(arg sg100_ki)"/>
+        <arg name="sg100_kd" value="$(arg sg100_kd)"/>
+        <arg name="sg100_output_limit" value="$(arg sg100_output_limit)"/>
     </include>
 
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">
