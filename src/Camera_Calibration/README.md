@@ -28,7 +28,7 @@ catkin build robot_calibration
 
 S49 系列与 S45 共用 `biped45` 布局、14 维零点槽位与同一套关节索引，标定流程一致，但**标定模型、采集配置和输出各自独立**：`biped_v3_arm_s49.urdf`（由 `biped_v3_arm_s45.urdf` 逐字复制，仅 `<robot name>` 不同）、`calib_s49.yaml`/`calib_qingtong_s49.yaml`、输出 `biped_v3_arm_s49_calibrated.urdf`，因此标 49 不会覆盖 45 的结果。但**头部相机话题不共用**：S45 的**机器人模型** `kuavo_assets/models/biped_s45/urdf/biped_s45.urdf` 里 `camera` 的 rpy 是 `0 0.48869 0`（未含翻转），驱动因此发布 180° 旋转后的图像与 `head_camera_color_optical_frame_rot180`；S49 系列模型已是 `3.14159 0.38397 0`，用原始话题与 `head_camera_color_optical_frame`。注意**机器人模型和标定 URDF 是两回事**：`biped_v3_arm_s45.urdf` 里的 `camera_joint` 已按实物写入翻转（`3.14159 0.38392 0`），并与 `biped_s100049` 的相机朝向只差 0.003°，所以标定 URDF 里两个帧都提供，不能拿它的 rpy 去反推要不要旋图。两个判定不能混用（见下方"机型判定"）。
 
-S53/S55/S56 共用 `biped56` 布局和关节索引，头部安装高度统一为 `0.49125 m`，标定模板与输出各自独立。S63 使用独立的 `biped_v3_arm_s63.urdf` 及 `biped_v3_arm_s63_calibrated.urdf`，不覆盖 S62 输出。模板仍沿用现有手臂几何，小版本的实机差异需要单独核对。
+S53/S55/S56 共用 `biped56` 布局和关节索引，头部安装高度（`zhead_1_joint` 相对 `waist_yaw_link` 的 Z 坐标）统一为 `0.49575 m`，标定模板与输出各自独立。S63 使用独立的 `biped_v3_arm_s63.urdf` 及 `biped_v3_arm_s63_calibrated.urdf`，不覆盖 S62 输出。模板仍沿用现有手臂几何，小版本的实机差异需要单独核对。
 
 布局/URDF/FK 根/零点脚本/标定配置这些"按机型定值"的东西只在两个文件里维护：Python 侧 [`robot_versions.py`](robot_versions.py)，Shell 侧 [`robot_versions.sh`](robot_versions.sh)（同一张表的两份镜像）。各入口脚本都查这张表，新增小版本时只要基础型号已存在，无需再改脚本。
 

@@ -38,7 +38,7 @@ _rv_biped45_row() {
   echo "$1|biped45|biped_v3_arm_$3.urdf|biped_v3_arm_$3_calibrated.urdf|base_link|$2|false|14|true|apply_zero_deltas_to_arms_zero.py|calib_$3.yaml|calib_qingtong_$3.yaml|s45"
 }
 
-# 53/55/56 同属 biped56 布局，模板与输出独立，头部高度统一为 0.49125 m。
+# 53/55/56 同属 biped56 布局，模板与输出独立；zhead_1_joint 相对 waist_yaw_link 的 Z 坐标统一为 0.49575 m。
 _rv_record() {
   local base
   base="$(rv_fold "${1:-}")"

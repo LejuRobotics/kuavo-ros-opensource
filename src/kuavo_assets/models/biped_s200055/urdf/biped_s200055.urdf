@@ -1199,7 +1199,7 @@
     </visual>
   </link>
   <joint name="zhead_1_joint" type="revolute">
-    <origin xyz="-0.003 0.0 0.49125" rpy="0 0 0" />
+    <origin xyz="-0.003 0.0 0.49575" rpy="0 0 0" />
     <parent link="waist_yaw_link" />
     <child link="zhead_1_link" />
     <axis xyz="0 0 1" />

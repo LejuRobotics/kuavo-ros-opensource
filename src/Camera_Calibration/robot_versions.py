@@ -31,7 +31,8 @@
 几点说明
 --------
 * 53/55/56 共用 ``biped56`` 布局，分别使用自身的标定 URDF 和输出文件。
-  S53/S55/S56 的头部安装高度统一为 0.49125 m，小版本分别使用基础型号的模板。
+  S53/S55/S56 的 zhead_1_joint 相对 waist_yaw_link 的 Z 坐标统一为 0.49575 m，
+  小版本分别使用基础型号的模板。
   模板保留既有手臂几何；小版本的机械安装差异仍需按实机核对。
 * 62/63 的 200062/300062/400062/500062、400063/500063 与 ``biped_s62`` 关节顺序一致，
   偏差 ≤0.3 mm（肩部安装位），共用 ``wheel62``，但 62/63 的标定文件及输出分开。
@@ -129,7 +130,7 @@ _BIPED56 = dict(
     shoulder_profile="default",
 )
 
-# S53/S55/S56 使用独立模板及输出，头部高度统一为 0.49125 m。
+# S53/S55/S56 使用独立模板及输出，zhead_1_joint 相对 waist_yaw_link 的 Z 坐标统一为 0.49575 m。
 _BIPED55 = {
     **_BIPED56,
     "urdf": "biped_v3_arm_s55.urdf",
@@ -180,7 +181,7 @@ TABLE: Dict[str, ModelSpec] = {
     ),
     "53": ModelSpec(
         base="53", head_rot180=False, supports_wrist=True, zero_slots=16, ec_l1_r1=False,
-        note="S53 系列使用独立 S53 标定模型，头部安装高度为 0.49125 m",
+        note="S53 系列使用独立 S53 标定模型，zhead_1_joint 相对 waist_yaw_link 的 Z 坐标为 0.49575 m",
         **_BIPED53,
     ),
     "55": ModelSpec(
