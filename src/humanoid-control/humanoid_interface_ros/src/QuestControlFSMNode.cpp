@@ -1694,7 +1694,6 @@ namespace ocs2
             // 控制腰部yaw（左右转动）
             float yaw_sensitivity = static_cast<float>(waist_yaw_max_angle_deg_); // 灵敏度，从配置文件读取
             float target_yaw = -1 * right_x * yaw_sensitivity;
-            std::cout << "controling torso_yaw: " << target_yaw << std::endl;
             controlWaist(target_yaw);
         }
 
@@ -1705,8 +1704,8 @@ namespace ocs2
             kuavo_msgs::robotWaistControl msg;
             msg.header.stamp = ros::Time::now();
             msg.data.data.resize(1);
-            msg.data.data[0] =  waist_yaw;
-            std::cout << "waist_yaw:" << waist_yaw <<std::endl;
+            msg.data.data[0] = waist_yaw;
+            ROS_INFO_THROTTLE(2.0, "[QuestControlFSM] waist_yaw: %.2f deg (max %.0f deg)", waist_yaw, max_angle);
             waist_motion_pub_.publish(msg);
         }
         
