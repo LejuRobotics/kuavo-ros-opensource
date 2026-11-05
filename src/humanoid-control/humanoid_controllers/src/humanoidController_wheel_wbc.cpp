@@ -709,12 +709,34 @@ namespace humanoidController_wheel_wbc
       ROS_INFO("[humanoidControllerWheelWbc] Subscribed to /move_base/base_cmd_vel_status for base emergency stop protection");
     }
 
+    // 首次查询在启动阶段完成；运行时由 NodeHandle 的回调队列处理，
+    // 不在 500 Hz update() 中同步访问 ROS master。保留 100 ms 轮询和 bool/int 兼容。
+    pollKneeLegLockParam(ros::WallTimerEvent());
+    lockParamTimer_ = controllerNh_.createWallTimer(
+        ros::WallDuration(0.1), &humanoidControllerWheelWbc::pollKneeLegLockParam, this);
+
     // 订阅底盘接管状态: 接管期间外部拥有底盘控制权, WBC 不再向底盘发送速度指令
     chassisTakeoverStateSub_ = controllerNh_.subscribe<kuavo_msgs::ChassisTakeoverState>(
         "/odom/chassis_takeover_state", 10,
         &humanoidControllerWheelWbc::chassisTakeoverStateCallback, this);
 
     return true;
+  }
+
+  void humanoidControllerWheelWbc::pollKneeLegLockParam(const ros::WallTimerEvent&)
+  {
+    const auto start = std::chrono::steady_clock::now();
+    bool lockParam = false;
+    if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParam)) {
+      lockKneeLegEnabled_.store(lockParam);
+    } else {
+      int lockParamInt = 0;
+      if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParamInt)) {
+        lockKneeLegEnabled_.store(lockParamInt != 0);
+      }
+    }
+    lockParamPollMs_.store(std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count());
   }
 
   //TODO 此设计over-engineered，后续看情况优化
@@ -1257,6 +1279,17 @@ namespace humanoidController_wheel_wbc
       mrtRosInterface_->pauseResumeMpcNode(false);
     markStageMs("mpc_mrt");
 
+    // 单条诊断向量记录 cmd_prepare 的五个分段，最后一项为后台参数查询耗时。
+    // 不改变原有 cmd_prepare 计时边界；时间采样不访问 ROS master。
+    auto cmdStageStart = std::chrono::steady_clock::now();
+    vector_t cmdPrepareDetail = vector_t::Zero(6);
+    auto markCmdStage = [&](int index) {
+      const auto now = std::chrono::steady_clock::now();
+      cmdPrepareDetail[index] =
+          std::chrono::duration<double, std::milli>(now - cmdStageStart).count();
+      cmdStageStart = now;
+    };
+
     /******************  用户修改部分  ***********************/
     vector_t target_qpos, target_qvel;
     target_qpos.setZero(info.armDim);
@@ -1277,6 +1310,7 @@ namespace humanoidController_wheel_wbc
     }
 
     updateUserJointCmd(time, target_qpos, target_qvel);
+    markCmdStage(0);
 
     int8_t lbMpcMode = control_data_manager_->getLbMpcControlMode(); // 获取当前轮臂MPC控制模式
     if (enable_arm_traj_interpolator_)
@@ -1516,6 +1550,7 @@ namespace humanoidController_wheel_wbc
       }
     }
     /*******************************************************/
+    markCmdStage(1);
     if (startArmResetHandoff && armNum_ > 0) {
       optimizedState_mrt_.tail(armNum_) = armResetStartQ;
       optimizedInput_mrt_.tail(armNum_).setZero();
@@ -1721,6 +1756,8 @@ namespace humanoidController_wheel_wbc
       }
     }
 
+    markCmdStage(2);
+
     // 更新期望力插值
     if (desired_force_manager_) {
       desired_force_manager_->update(time);
@@ -1760,31 +1797,14 @@ namespace humanoidController_wheel_wbc
       }
     }
 
+    markCmdStage(3);
+
     // ===== 下肢 1/2 号电机（knee/leg）锁定：最终输出处硬覆盖 =====
     // 与增量 IK 复用同一 rosparam，锁定语义 = 钉死到开启瞬间捕获的快照（弧度）。
     // 无论 MPC / 快速模式 / 主控回发哪条路，1、2 号都被硬覆盖，waist 关节不受影响。
-    {
-      // 每 100ms 实时查询一次 rosparam。必须用 get()（无缓存）而非 getCached()：
-      // getCached() 带本地缓存，首次读到"参数不存在"后缓存不会随 IK 节点/终端 set 而刷新，
-      // 会一直读到旧的 false，导致锁定永远不生效。
-      ros::Time now = ros::Time::now();
-      if ((now - lastLockParamCheckTime_).toSec() >= 0.1) {
-        lastLockParamCheckTime_ = now;
-        bool lockParam = false;
-        // 参数可能是 bool(true/false) 也可能是 int(1/0)，两种都要兼容：
-        // ros::param::get(name, bool&) 只认 XmlRpc boolean 类型，遇到 int(1) 会返回 false，
-        // 导致锁定失效。因此 bool 读取失败时再尝试按 int 读取。
-        if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParam)) {
-          lockKneeLegEnabled_.store(lockParam);
-        } else {
-          int lockParamInt = 0;
-          if (ros::param::get("/ik_ros_uni_cpp_node/quest3/lock_knee_leg", lockParamInt)) {
-            lockKneeLegEnabled_.store(lockParamInt != 0);
-          }
-        }
-      }
-    }
-    if (lockKneeLegEnabled_.load()) {
+    // 开关由后台轮询更新；捕获关节快照及硬覆盖仍只在控制线程执行。
+    const bool kneeLegLocked = lockKneeLegEnabled_.load();
+    if (kneeLegLocked) {
       if (!lockKneeLegCaptured_) {
         // 开启首拍：捕获当前实际关节角作为固定目标（knee=idx0, leg=idx1）
         lockKneeQ_ = observation_wheel_.state[baseDim_ + 0];
@@ -1802,7 +1822,7 @@ namespace humanoidController_wheel_wbc
     }
 
     // 旋转组两级共用 q0/q1 快照。显式增量 IK 锁定优先，避免两种锁相互覆盖。
-    if (!lockKneeLegEnabled_.load() && soft_pause_state_.load() == SoftPauseState::IDLE) {
+    if (!kneeLegLocked && soft_pause_state_.load() == SoftPauseState::IDLE) {
       std::lock_guard<std::mutex> lock(torsoRotationLockMutex_);
       if (torsoRotationLockActive_) {
         optimizedState_mrt_limit_.segment<2>(baseDim_) = torsoRotationLockQ_;
@@ -1827,6 +1847,10 @@ namespace humanoidController_wheel_wbc
     // }
     ros_logger_->publishVector("/humanoid_wheel/optimizedState_wbc_in", optimizedState_wbc);
     ros_logger_->publishVector("/humanoid_wheel/optimizedInput_wbc_in", optimizedInput_wbc);
+    markCmdStage(4);
+    cmdPrepareDetail[5] = lockParamPollMs_.load();
+    ros_logger_->publishVector("/monitor/time_cost/wheel/cmd_prepare_detail", cmdPrepareDetail,
+                              "user_cmd,arm_interp_quick,limits_pause,force,locks_output,param_poll_ms");
     markStageMs("cmd_prepare");
     vector_t x = wheel_wbc_->update(optimizedState_wbc, optimizedInput_wbc, observation_wheel_);
     markStageMs("wbc");
@@ -2052,6 +2076,7 @@ namespace humanoidController_wheel_wbc
 
   humanoidControllerWheelWbc::~humanoidControllerWheelWbc()
   {
+    lockParamTimer_.stop();
   }
 
   bool humanoidControllerWheelWbc::setupCpuIsolation()

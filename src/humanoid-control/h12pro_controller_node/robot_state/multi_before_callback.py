@@ -314,7 +314,7 @@ ACTION_FILE_FOLDER = "~/.config/lejuconfig/action_files"
 ROS_BAG_LOG_SAVE_PATH = "~/.log/vr_remote_control/rosbag"
 HUMANOID_ROBOT_SESSION_NAME = "humanoid_robot"
 VR_REMOTE_CONTROL_SESSION_NAME = "vr_remote_control"
-LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 start_way:=auto"
+LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12 start_way:=auto run_mujoco_camera:=true"
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
@@ -958,6 +958,19 @@ def trot_callback(event):
 
 def stop_callback(event):
     source = event.kwargs.get("source")
+    # 普通 stop 与急停共用标志; 若急停外层已置位, 由外层负责清除。
+    stopping_param = "/joy_node/stopping"
+    already_stopping = rospy.get_param(stopping_param, False)
+    if not already_stopping:
+        rospy.set_param(stopping_param, True)
+    try:
+        _stop_callback_body(source)
+    finally:
+        if not already_stopping:
+            rospy.set_param(stopping_param, False)
+
+
+def _stop_callback_body(source):
     print_state_transition("stop", source, "initial")
     # 停止 WiFi 信息上报
     stop_wifi_info_report()

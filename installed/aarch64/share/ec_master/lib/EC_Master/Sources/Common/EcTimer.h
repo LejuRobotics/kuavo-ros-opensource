@@ -1,7 +1,8 @@
-/*-----------------------------------------------------------------------------
- * Copyright    acontis technologies GmbH, Ravensburg, Germany
- * Response     Paul Bussmann
- * Description  Timer declaration
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       Timer declaration
+ * \author      Paul Bussmann
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECTIMER
@@ -48,6 +49,7 @@ public:
     EC_T_VOID  SetDuration(EC_T_DWORD dwDurationMsec);
     EC_T_DWORD GetDuration(EC_T_VOID) const { return m_dwDurationMsec; }
     EC_T_DWORD GetRemainingTime(EC_T_VOID);
+    EC_T_DWORD GetElapsedTime(EC_T_VOID) { return IsStarted() ? (GetDuration() - GetRemainingTime()) : 0; }
     EC_T_VOID  Restart(EC_T_VOID)
     {
         Start(GetDuration() + (IsDefaultTimeout() ? 0x80000000 : 0));

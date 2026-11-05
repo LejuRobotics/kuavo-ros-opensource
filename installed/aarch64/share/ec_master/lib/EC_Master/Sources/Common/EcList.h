@@ -1,8 +1,7 @@
-/*-----------------------------------------------------------------------------
- * CList.h                  header file
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description
+/** ---------------------------------------------------------------------------
+ * \file
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_LIST
@@ -49,13 +48,28 @@ private:
 /*-CONSTRUCTORS/DESTRUCTORS--------------------------------------------------*/
 public:
     /* -constructors/destructors/initialization */
-    CList()
+    CList(const struct _EC_T_LOG_PARMS* poLogParms = EC_NULL, EC_T_DWORD dwMemTrace = 0, struct _EC_T_MEMORY_LOGGER* poMemLog = EC_NULL)
+        : m_poLogParms((struct _EC_T_LOG_PARMS*)poLogParms),
+          m_dwMemTrace(dwMemTrace),
+          m_poMemLog(poMemLog)
     {
         m_pFirstNode = EC_NULL;
         m_pLastNode = EC_NULL;
         m_nNumNodes = 0;
     };
     virtual ~CList();
+
+    EC_T_VOID SetLogParms(const struct _EC_T_LOG_PARMS* poLogParms)
+    {
+        m_poLogParms = (struct _EC_T_LOG_PARMS*)poLogParms;
+    }
+
+    EC_T_VOID SetMemLog(EC_T_DWORD dwMemTrace, struct _EC_T_MEMORY_LOGGER* poMemLog)
+    {
+        m_poMemLog = poMemLog;
+        m_dwMemTrace = dwMemTrace;
+    }
+
 protected:
 private:
 
@@ -85,7 +99,7 @@ public:
     /* iteration */
     CNode* GetFirstNode() const    { return m_pFirstNode; }
 
-    CLIST_T_DATA GetNext(CNode*& pNode) const; /* return *Position++ */
+    void GetNext(CNode*& pNode) const; /* return *Position++ */
 
     /* getting/modifying an element at a given position */
     CLIST_T_DATA& GetAt(CNode* position);
@@ -94,8 +108,15 @@ public:
     EC_T_BOOL FindAndDelete(CLIST_T_ARG ElementToFind );
     EC_T_VOID Find( CNode*& pNode, CLIST_T_ARG ElementToFind );
 
-protected:
 private:
+    /* Logging */
+    struct _EC_T_LOG_PARMS* m_poLogParms;
+    EC_INLINESTART struct _EC_T_LOG_PARMS* GetLogParms() { return m_poLogParms; } EC_INLINESTOP
+
+    /* Memory Logger */
+    EC_T_DWORD                  m_dwMemTrace;
+    struct _EC_T_MEMORY_LOGGER* m_poMemLog;
+    EC_INLINESTART struct _EC_T_MEMORY_LOGGER* GetMemLog() { return m_poMemLog; } EC_INLINESTOP
 };
 
 template<class CLIST_T_DATA, class CLIST_T_ARG>
@@ -194,6 +215,15 @@ CList<CLIST_T_DATA, CLIST_T_ARG>::~CList()
         cur = m_pFirstNode;
         m_pFirstNode = m_pFirstNode->pNext;
 
+#ifdef EC_TRACE_SUBMEM
+        if (GetMemLog())
+        {
+            if (EC_NULL != cur)
+            {
+                EC_TRACE_SUBMEM(m_dwMemTrace, "CList<>::~CList", cur, sizeof(CNode));
+            }
+        }
+#endif
         SafeDelete(cur);
     };
 }
@@ -209,6 +239,12 @@ EC_T_VOID CList<CLIST_T_DATA, CLIST_T_ARG>::AddHead(CLIST_T_ARG newElement)
     CNode* pNewNode = EC_NEW(CNode);
     if (EC_NULL != pNewNode)
     {
+#ifdef EC_TRACE_ADDMEM
+        if (GetMemLog())
+        {
+            EC_TRACE_ADDMEM(m_dwMemTrace, "CList<>::AddHead", pNewNode, sizeof(CNode));
+        }
+#endif
         pNewNode->data = newElement;
         if( m_pFirstNode == EC_NULL )
         {
@@ -239,6 +275,12 @@ EC_T_VOID CList<CLIST_T_DATA, CLIST_T_ARG>::AddTail(CLIST_T_ARG newElement)
     CNode* pNewNode = EC_NEW(CNode);
     if (EC_NULL != pNewNode)
     {
+#if (defined EC_TRACE_ADDMEM)
+        if (GetMemLog())
+        {
+            EC_TRACE_ADDMEM(m_dwMemTrace, "CList<>::AddTail pNewNode", pNewNode, sizeof(CNode));
+        }
+#endif
         pNewNode->data = newElement;
         if( m_pLastNode == EC_NULL )
         {
@@ -280,6 +322,15 @@ CLIST_T_DATA CList<CLIST_T_DATA, CLIST_T_ARG>::RemoveTail()
     }
     m_nNumNodes--;
     CLIST_T_DATA data = pOldNode->data;
+#if (defined EC_TRACE_SUBMEM)
+    if (GetMemLog())
+    {
+        if (EC_NULL != pOldNode)
+        {
+            EC_TRACE_SUBMEM(m_dwMemTrace, "CList<>::RemoveTail", pOldNode, sizeof(CNode));
+        }
+    }
+#endif
     SafeDelete(pOldNode);
 
     return data;
@@ -321,6 +372,15 @@ void CList<CLIST_T_DATA, CLIST_T_ARG>::RemoveAt(CNode* pOldNode)
     {
         pOldNode->pNext->pPrev = pOldNode->pPrev;
     }
+#ifdef EC_TRACE_SUBMEM
+    if (GetMemLog())
+    {
+        if (EC_NULL != pOldNode)
+        {
+            EC_TRACE_SUBMEM(m_dwMemTrace, "CList<>::RemoveAt pOldNode", pOldNode, sizeof(CNode));
+        }
+    }
+#endif
     SafeDelete(pOldNode);
     m_nNumNodes--;
 }
@@ -333,7 +393,7 @@ void CList<CLIST_T_DATA, CLIST_T_ARG>::RemoveAt(CNode* pOldNode)
 template<class CLIST_T_DATA, class CLIST_T_ARG>
 EC_T_BOOL CList<CLIST_T_DATA, CLIST_T_ARG>::FindAndDelete(CLIST_T_ARG ElementToFind )
 {
-EC_T_BOOL bFound = EC_FALSE;
+    EC_T_BOOL bFound = EC_FALSE;
 
     if( m_pFirstNode != EC_NULL )
     {
@@ -394,11 +454,16 @@ EC_T_VOID CList<CLIST_T_DATA, CLIST_T_ARG>::Find(CNode*& pNode, CLIST_T_ARG Elem
 * \return
 */
 template<class CLIST_T_DATA, class CLIST_T_ARG>
-CLIST_T_DATA CList<CLIST_T_DATA, CLIST_T_ARG>::GetNext(CNode*& pCurNode) const /* return *Position++ */
+void CList<CLIST_T_DATA, CLIST_T_ARG>::GetNext(CNode*& pCurNode) const /* return *Position++ */
 {
-    CNode* pNode = (CNode*)pCurNode;
-    pCurNode = (CNode*)pNode->pNext;
-    return pNode->data;
+    if (pCurNode != EC_NULL)
+    {
+        pCurNode = pCurNode->pNext;
+    }
+    else
+    {
+        OsDbgAssert(pCurNode != EC_NULL);
+    }
 }
 
 template<class CLIST_T_DATA, class CLIST_T_ARG>

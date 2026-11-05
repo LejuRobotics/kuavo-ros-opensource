@@ -72,8 +72,8 @@ public:
     /// 单手手指数量（SDK 反馈数组固定 6 项）。
     static constexpr size_t kFingerCount = 6;
 
-    /// 反馈侧等待同手锁的预算（ms）。取一个控制周期：既给回读线程一次公平机会，
-    /// 又不让命令侧多等。命令侧仍是零等待 try_lock，不受该值影响。
+    /// 历史：反馈侧曾 try_lock_for 该预算抢锁。#4718 后改为零等待 try_lock，
+    /// 把锁优先让给 trySubmit*（命令侧同样零等待）。常量保留便于对照旧行为。
     static constexpr int kFeedbackLockWaitMs = 5;
 
     /// readFingerFeedback() 的结果。Ok=拿到数据；Failed=SDK 返回 null 或抛异常；
@@ -87,7 +87,7 @@ public:
 
     // 真实回读：向手查询六指当前反馈（SDK 口径），与 getFingerStatus() 并列：
     //   getFingerStatus()     阻塞取锁，485 路径控制线程在用
-    //   readFingerFeedback()  抢不到锁就返回 Busy，给独立回读线程用
+    //   readFingerFeedback()  零等待 try_lock，抢不到返回 Busy（独立回读线程用）
     virtual FingerQueryResult readFingerFeedback(FingerFeedback& out);
 
     // SDK 口径 → API 口径（÷10 并 clamp）。485 的 getFingerStatus 与 CAN 的真实回读
@@ -112,7 +112,7 @@ protected:
     // 同一只手的全部 SDK 调用（读写）都走这把递归锁：
     // 485 路径原本只有控制线程串行调用，加锁后行为不变；
     // CAN 路径新增回读线程后，靠它保证不会两条线程同时进闭源 SDK。
-    // 用 recursive_timed_mutex 是为了反馈侧能 try_lock_for 有界等待，
+    // 用 recursive_timed_mutex：反馈侧可有界等待（现已改为零等待 try_lock），
     // 递归是因为 trySubmit*() 持锁后还会调用同样加锁的 setFinger*()。
     std::recursive_timed_mutex sdk_mutex_;
     // 查询异常日志限流：485 以 200Hz 轮询，异常时不能每拍打一条

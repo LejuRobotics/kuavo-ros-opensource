@@ -314,10 +314,11 @@ private:
         const char* name = "";
         int64_t last_ok_ms = 0;      // 上次成功查询的时刻，用于算样本年龄
         int64_t last_warn_ms = 0;    // 上次陈旧告警的时刻，用于限流
+        int64_t backoff_until_ms = 0; // 查询失败后推迟下次查询，避免占锁饿死指令
         bool first_logged = false;   // 只打印一次首样本
         bool cast_warned = false;    // 非 ModbusDexhand 只告警一次
         uint64_t ok = 0;
-        uint64_t busy = 0;           // 锁被占（正常让位）
+        uint64_t busy = 0;           // 锁被占 / 主动让位给待发指令
         uint64_t failed = 0;         // SDK 异常或无数据
     };
     static constexpr int kHandCount = 2;

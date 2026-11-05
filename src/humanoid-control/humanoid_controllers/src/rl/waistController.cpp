@@ -620,8 +620,9 @@ bool WaistController::storeMode2WaistTarget(const kuavo_msgs::robotWaistControl&
     double angle_deg = msg.data.data[i];
     if (angle_deg < WAIST_YAW_MIN_DEG || angle_deg > WAIST_YAW_MAX_DEG)
     {
-      ROS_WARN("[WaistController] Waist joint %zu angle %.2f° exceeds limit [%.0f°, %.0f°], clamping",
-               i, angle_deg, WAIST_YAW_MIN_DEG, WAIST_YAW_MAX_DEG);
+      ROS_WARN_THROTTLE(2.0,
+                        "[WaistController] Waist joint %zu angle %.2f° exceeds limit [%.0f°, %.0f°], clamping",
+                        i, angle_deg, WAIST_YAW_MIN_DEG, WAIST_YAW_MAX_DEG);
       angle_deg = std::clamp(angle_deg, WAIST_YAW_MIN_DEG, WAIST_YAW_MAX_DEG);
     }
     target_q(i) = angle_deg * M_PI / 180.0;

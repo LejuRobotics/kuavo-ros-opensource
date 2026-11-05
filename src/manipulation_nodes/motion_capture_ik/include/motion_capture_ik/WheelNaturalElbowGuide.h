@@ -13,7 +13,16 @@ struct WheelNaturalElbowGuideConfig {
   double naturalDirectionBlend = 0.90;
 
   // Gravity is ambiguous when it is nearly parallel to the shoulder-hand axis.
+  // Below downProjectionMinNorm gravity is ignored; above downProjectionFullNorm
+  // it is fully trusted. Between them the guide soft-blends with continuity so
+  // a near-vertical shoulder-hand axis cannot snap the elbow across the circle.
   double downProjectionMinNorm = 0.05;
+  double downProjectionFullNorm = 0.18;
+
+  // Cap per-update rotation of the commanded elbow direction on the circle.
+  // Blocks single-frame 180 deg gravity flips while remaining large enough for
+  // intentional elbow motion at ~100 Hz teleop rates.
+  double maxCommandDirectionStepRad = 0.30;
 
   // Keep circle construction away from the exact reach boundary.
   double reachMargin = 0.002;
@@ -25,9 +34,10 @@ struct WheelNaturalElbowGuideConfig {
 
   // The 90/10 gravity-human blend is a posture preference, not a collision
   // model.  When the measured or preferred elbow enters this lateral band,
-  // smoothly bias the circle direction away from the waist.  This safety bias
-  // is inactive outside waistSoftClearance, so normal free-space motion keeps
-  // the exact 90/10 blend.
+  // smoothly bias the circle direction away from the waist.  This soft safety
+  // bias is applied after free-space direction rate-limiting so a needed
+  // correction is not capped by maxCommandDirectionStepRad; inactive outside
+  // waistSoftClearance, free-space motion keeps the exact 90/10 blend.
   bool waistAvoidanceEnabled = true;
   double waistSoftClearance = 0.180;
   double waistFullActivationClearance = 0.100;
@@ -155,11 +165,43 @@ class WheelNaturalElbowGuide final {
     const Eigen::Vector3d gravity(0.0, 0.0, -1.0);
     const Eigen::Vector3d gravityProjection =
         gravity - robotAxis * gravity.dot(robotAxis);
-    output.gravityDirectionValid =
-        gravityProjection.norm() >= std::max(config_.downProjectionMinNorm, eps);
-    output.naturalDirection = output.gravityDirectionValid
-                                  ? normalizedOrZero(gravityProjection, eps)
-                                  : continuityDirection;
+    const double gravityNorm = gravityProjection.norm();
+    const double minNorm = std::max(config_.downProjectionMinNorm, eps);
+    const double fullNorm = std::max(minNorm + eps, config_.downProjectionFullNorm);
+    output.gravityDirectionValid = gravityNorm >= minNorm;
+
+    Eigen::Vector3d preferredContinuity = continuityDirection;
+    if (preferredContinuity.norm() <= eps && hasLastCommandDirection_) {
+      preferredContinuity = projectAndNormalize(lastCommandDirection_, robotAxis, eps);
+    }
+
+    const Eigen::Vector3d gravityDir = normalizedOrZero(gravityProjection, eps);
+    double gravityWeight = 0.0;
+    if (gravityNorm >= fullNorm) {
+      gravityWeight = 1.0;
+    } else if (gravityNorm > minNorm) {
+      const double t = (gravityNorm - minNorm) / (fullNorm - minNorm);
+      gravityWeight = t * t * (3.0 - 2.0 * t);
+    }
+
+    // Crossing vertical flips the gravity projection ~180 deg. Until gravity is
+    // confidently away from the singularity, keep continuity when they oppose.
+    if (gravityDir.norm() > eps && preferredContinuity.norm() > eps &&
+        gravityDir.dot(preferredContinuity) < 0.0) {
+      const double opposeT = std::clamp(gravityNorm / fullNorm, 0.0, 1.0);
+      gravityWeight *= opposeT * opposeT;
+    }
+
+    if (gravityDir.norm() > eps && preferredContinuity.norm() > eps) {
+      output.naturalDirection = projectAndNormalize(
+          gravityWeight * gravityDir + (1.0 - gravityWeight) * preferredContinuity,
+          robotAxis,
+          eps);
+    } else if (gravityDir.norm() > eps && gravityWeight > 0.5) {
+      output.naturalDirection = gravityDir;
+    } else if (preferredContinuity.norm() > eps) {
+      output.naturalDirection = preferredContinuity;
+    }
     if (output.naturalDirection.norm() <= eps) {
       output.naturalDirection = deterministicPlaneDirection(robotAxis, eps);
     }
@@ -182,6 +224,33 @@ class WheelNaturalElbowGuide final {
       output.commandDirection = continuityDirection.norm() > eps
                                     ? continuityDirection
                                     : deterministicPlaneDirection(robotAxis, eps);
+    }
+
+    // Rate-limit free-space / preference blends only. Waist safety bias runs
+    // after this so a full soft-clearance correction is not delayed across
+    // multiple cycles by maxCommandDirectionStepRad.
+    if (hasLastCommandDirection_ && output.commandDirection.norm() > eps) {
+      const Eigen::Vector3d lastOnPlane =
+          projectAndNormalize(lastCommandDirection_, robotAxis, eps);
+      const double maxStep = std::max(0.0, config_.maxCommandDirectionStepRad);
+      if (lastOnPlane.norm() > eps && maxStep > eps) {
+        const double cosAngle =
+            std::clamp(lastOnPlane.dot(output.commandDirection), -1.0, 1.0);
+        const double angle = std::acos(cosAngle);
+        if (angle > maxStep) {
+          Eigen::Vector3d rotateAxis = lastOnPlane.cross(output.commandDirection);
+          if (rotateAxis.norm() <= eps) {
+            rotateAxis = robotAxis.cross(lastOnPlane);
+          }
+          rotateAxis = normalizedOrZero(rotateAxis, eps);
+          if (rotateAxis.norm() > eps) {
+            output.commandDirection =
+                Eigen::AngleAxisd(maxStep, rotateAxis) * lastOnPlane;
+            output.commandDirection =
+                projectAndNormalize(output.commandDirection, robotAxis, eps);
+          }
+        }
+      }
     }
 
     applyWaistSafetyBias(input, robotAxis, output, eps);

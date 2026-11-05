@@ -1,8 +1,8 @@
-/*-----------------------------------------------------------------------------
- * EcObjDef.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Paul Bussmann
- * Description              Master OD structure
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       Master OD structure
+ * \author      Paul Bussmann
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECOBJDEF

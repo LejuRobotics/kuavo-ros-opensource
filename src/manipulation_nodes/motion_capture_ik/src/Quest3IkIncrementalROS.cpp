@@ -905,6 +905,8 @@ void Quest3IkIncrementalROS::fsmProcess() {
       ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm invalid measured FK; keep previous target");
       return;
     }
+    // 建锚参考必须来自本次实测肘部 FK，不能读取尚未赋值或上一轮残留的参考。
+    latestHumanLeftElbowPos_ = pLink4;
     bool pointSolveSucceeded = false;
     const auto [p1Optimized, p2Optimized] =
         leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
@@ -952,6 +954,8 @@ void Quest3IkIncrementalROS::fsmProcess() {
       ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm invalid measured FK; keep previous target");
       return;
     }
+    // 建锚参考必须来自本次实测肘部 FK，不能读取尚未赋值或上一轮残留的参考。
+    latestHumanRightElbowPos_ = pLink4;
     bool pointSolveSucceeded = false;
     const auto [p1Optimized, p2Optimized] =
         rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置
@@ -1164,6 +1168,8 @@ bool Quest3IkIncrementalROS::processChangingDataLeftArm(bool leftHandCtrlModeCha
         ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Left arm invalid measured FK; keep previous target");
         return false;
       }
+      // 手臂重新激活同样以本次实测肘部 FK 建锚。
+      latestHumanLeftElbowPos_ = pLink4;
       bool pointSolveSucceeded = false;
       const auto [p1Optimized, p2Optimized] =
           leftVelocityIkSolverPtr_->solve(latestHumanLeftElbowPos_,  // p1Ref: 人肘部参考位置
@@ -1345,6 +1351,8 @@ bool Quest3IkIncrementalROS::processChangingDataRightArm(bool rightHandCtrlModeC
         ROS_WARN_THROTTLE(1.0, "[Quest3IkIncrementalROS] Right arm invalid measured FK; keep previous target");
         return false;
       }
+      // 手臂重新激活同样以本次实测肘部 FK 建锚。
+      latestHumanRightElbowPos_ = pLink4;
       bool pointSolveSucceeded = false;
       const auto [p1Optimized, p2Optimized] =
           rightVelocityIkSolverPtr_->solve(latestHumanRightElbowPos_,  // p1Ref: 人肘部参考位置

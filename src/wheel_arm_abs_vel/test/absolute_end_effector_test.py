@@ -70,7 +70,7 @@ class EndEffectorTest(unittest.TestCase):
 
     def test_mapper_uses_same_selection_and_limits_heiman_flag(self):
         source = (ROOT/'scripts/ik_ros_velocity.py').read_text()
-        self.assertIn('resolve(model_config, args.end_effector_type)', source)
+        self.assertIn('resolve_runtime(model_config, args.end_effector_type)', source)
         self.assertIn('and end_effector_type == "heiman"', source)
         self.assertNotIn('end_effector_mapping.get(', source)
 

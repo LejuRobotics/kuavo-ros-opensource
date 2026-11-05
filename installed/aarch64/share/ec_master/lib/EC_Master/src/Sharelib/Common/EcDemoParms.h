@@ -73,7 +73,7 @@ typedef struct _T_EC_DEMO_APP_PARMS
     EC_T_DWORD          dwMaxBusSlaves;                 /* max number of slaves (MASTER_CFG_ECAT_MAX_BUS_SLAVES) */
     /* timing */
     EC_T_BOOL           bUseAuxClock;                   /* enable use of auxiliary clock  */
-    EC_T_DWORD          dwBusCycleTimeUsec;             /* bus cycle time in usec */
+    EC_T_DWORD          dwBusCycleTimeUsec;             /* application cycle [us]; convert to ns only at SDK boundary */
     EC_T_DWORD          dwDemoDuration;                 /* demo duration in msec */
     /* logging */
     EC_T_INT            nVerbose;                       /* verbosity level */

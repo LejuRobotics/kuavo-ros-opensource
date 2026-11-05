@@ -447,7 +447,7 @@ EC_T_BOOL PrintSlavesProcVarInfos(T_EC_DEMO_APP_CONTEXT* pAppContext, EC_T_BOOL 
 
                 PrintVarInfos(pAppContext, apVarInfos, wVarCnt);
 
-                SafeOsFree(apVarInfos);
+                OsSafeFree(apVarInfos);
             }
         }
         else
@@ -515,7 +515,7 @@ EC_T_BOOL PrintSlavesProcVarInfos(T_EC_DEMO_APP_CONTEXT* pAppContext, EC_T_BOOL 
 
                 PrintVarInfos(pAppContext, apVarInfos, wVarCnt);
 
-                SafeOsFree(apVarInfos);
+                OsSafeFree(apVarInfos);
             }
         }
     }

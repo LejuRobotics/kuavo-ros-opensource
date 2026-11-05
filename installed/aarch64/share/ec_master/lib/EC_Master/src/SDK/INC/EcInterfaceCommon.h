@@ -1,8 +1,8 @@
-/*-----------------------------------------------------------------------------
- * EcInterfaceCommon.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description              EtherCAT Master common definitions for interfaces
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       EtherCAT Master common definitions for interfaces
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECINTERFACECOMMON
@@ -24,6 +24,9 @@
 #ifndef INC_ETHERNETSERVICES
 #include "EthernetServices.h"
 #endif
+#ifndef INC_ECIOCTL
+#include "EcIoCtl.h"
+#endif
 
 /*-COMPILER SETTINGS---------------------------------------------------------*/
 #ifdef __cplusplus
@@ -31,169 +34,10 @@ extern "C"
 {
 #endif
 
-/*-DEFINES/MACROS------------------------------------------------------------*/
-
-/* EtherCat specific control codes */
-#define EC_IOCTL_GENERIC                            0x00000000
-#define EC_IOCTL_DC                                 0x00030000
-#define EC_IOCTL_SB                                 0x00050000
-#define EC_IOCTL_HC                                 0x00060000
-#define EC_IOCTL_DCM                                0x00070000
-#define EC_IOCTL_USER                               0x00F00000  /* for user extension */
-#define EC_IOCTL_PRIVATE                            0x00FF0000  /* private, internal IOCTL values */
-#define EC_IOCTL_LINKLAYER                          0xCA000000
-#define EC_IOCTL_LINKLAYER_MAIN                     EC_IOCTL_LINKLAYER
-#define EC_IOCTL_LINKLAYER_RED                      0xCB000000
-#define EC_IOCTL_LINKLAYER_IDX_MASK                 0x00FF0000
-#define EC_IOCTL_LINKLAYER_IDX_SHIFT                        16
-#define EC_IOCTL_LINKLAYER_CODE_MASK                0x0000FFFF
-#define EC_IOCTL_LINKLAYER_LAST                     0xCBFFFFFF
-#define EC_IOCTL_SIMULATOR                          0xCC000000
-#define EC_IOCTL_SIMULATOR_LAST                     0xCCFFFFFF
-#define EC_IOCTL_PRIVATE2                           0xCD000000  /* private, internal IOCTL values */
-
-#define EC_IOCTL_REGISTERCLIENT                         (EC_IOCTL_GENERIC |  2)
-#define EC_IOCTL_UNREGISTERCLIENT                       (EC_IOCTL_GENERIC |  3)
-
-#define EC_IOCTL_ISLINK_CONNECTED                       (EC_IOCTL_GENERIC |  6)
-
-#define EC_IOCTL_SET_FRAME_RESPONSE_ERROR_NOTIFY_MASK   (EC_IOCTL_GENERIC |  8)
-
-#define EC_IOCTL_LINKLAYER_DBG_MSG                      (EC_IOCTL_GENERIC | 10)
-
-#define EC_IOCTL_RESET_SLAVE                            (EC_IOCTL_GENERIC | 13)
-#define EC_IOCTL_SLAVE_LINKMESSAGES                     (EC_IOCTL_GENERIC | 14)
-#define EC_IOCTL_GET_CYCLIC_CONFIG_INFO                 (EC_IOCTL_GENERIC | 15)
-#define EC_IOCTL_GET_LINKLAYER_MODE                     (EC_IOCTL_GENERIC | 16)
-#define EC_IOCTL_IS_SLAVETOSLAVE_COMM_CONFIGURED        (EC_IOCTL_GENERIC | 17)
-#define EC_IOCTL_INITIATE_UPDATE_ALL_SLAVE_STATE        (EC_IOCTL_GENERIC | 19)
-#define EC_IOCTL_ADD_BRD_SYNC_WINDOW_MONITORING         (EC_IOCTL_GENERIC | 20)
-#define EC_IOCTL_ONLY_PROCESS_DATA_IN_IMAGE             (EC_IOCTL_GENERIC | 21)
-#define EC_IOCTL_REGISTER_CYCFRAME_RX_CB                (EC_IOCTL_GENERIC | 22)
-#define EC_IOCTL_IS_MAIN_LINK_CONNECTED                 (EC_IOCTL_GENERIC | 24)
-#define EC_IOCTL_IS_RED_LINK_CONNECTED                  (EC_IOCTL_GENERIC | 25)
-#define EC_IOCTL_ADD_COE_INITCMD                        (EC_IOCTL_GENERIC | 26)
-
-/* Memory Provider */
-#define EC_IOCTL_GET_PDMEMORYSIZE                       (EC_IOCTL_GENERIC | 40)
-#define EC_IOCTL_REGISTER_PDMEMORYPROVIDER              (EC_IOCTL_GENERIC | 41)
-
-#define EC_IOCTL_FORCE_BROADCAST_DESTINATION            (EC_IOCTL_GENERIC | 42)     /* obsolete */
-
-/* Slave Statistics Retrieval */
-#define EC_IOCTL_SET_SLVSTAT_PERIOD                     (EC_IOCTL_GENERIC | 43)
-#define EC_IOCTL_FORCE_SLVSTAT_COLLECTION               (EC_IOCTL_GENERIC | 44)
-#define EC_IOCTL_GET_SLVSTATISTICS                      (EC_IOCTL_GENERIC | 45)
-#define EC_IOCTL_CLR_SLVSTATISTICS                      (EC_IOCTL_GENERIC | 46)
-
-#define EC_IOCTL_SET_MBX_RETRYACCESS_COUNT              (EC_IOCTL_GENERIC | 47)
-#define EC_IOCTL_SET_MBX_RETRYACCESS_PERIOD             (EC_IOCTL_GENERIC | 48)
-
-#define EC_IOCTL_ALL_SLAVES_MUST_REACH_MASTER_STATE     (EC_IOCTL_GENERIC | 49)
-
-#define EC_IOCTL_SET_NOTIFICATION_CTL                   (EC_IOCTL_GENERIC | 50)
-
-#define EC_IOCTL_MASTEROD_SET_VALUE                     (EC_IOCTL_GENERIC | 51)
-#define EC_IOCTL_SET_CYCFRAME_LAYOUT                    (EC_IOCTL_GENERIC | 52)
-
-#define EC_IOCTL_SET_NOTIFICATION_ENABLED               (EC_IOCTL_GENERIC | 53)
-#define EC_IOCTL_GET_NOTIFICATION_ENABLED               (EC_IOCTL_GENERIC | 54)
-
-#define EC_IOCTL_SET_MASTER_DEFAULT_TIMEOUTS                    (EC_IOCTL_GENERIC | 55)
-#define EC_IOCTL_SET_COPYINFO_IN_SENDCYCFRAMES                  (EC_IOCTL_GENERIC | 56)
-#define EC_IOCTL_SET_BUS_CYCLE_TIME                             (EC_IOCTL_GENERIC | 57)
-#define EC_IOCTL_ADDITIONAL_VARIABLES_FOR_SPECIFIC_DATA_TYPES   (EC_IOCTL_GENERIC | 58)
-#define EC_IOCTL_SET_IGNORE_INPUTS_ON_WKC_ERROR                 (EC_IOCTL_GENERIC | 59)
-#define EC_IOCTL_SET_GENENI_ASSIGN_EEPROM_BACK_TO_ECAT          (EC_IOCTL_GENERIC | 60)
-#define EC_IOCTL_SET_AUTO_ACK_AL_STATUS_ERROR_ENABLED           (EC_IOCTL_GENERIC | 61)
-#define EC_IOCTL_SET_AUTO_ADJUST_CYCCMD_WKC_ENABLED             (EC_IOCTL_GENERIC | 62)
-#define EC_IOCTL_CLEAR_MASTER_INFO_COUNTERS                     (EC_IOCTL_GENERIC | 63)
-#define EC_IOCTL_SET_SPLIT_FRAME_PROCESSING_ENABLED             (EC_IOCTL_GENERIC | 64)
-#define EC_IOCTL_SET_SPLITTED_FRAME_PROCESSING_ENABLED          EC_IOCTL_SET_SPLIT_FRAME_PROCESSING_ENABLED
-#define EC_IOCTL_SET_ADJUST_CYCFRAMES_AFTER_SLAVES_STATE_CHANGE (EC_IOCTL_GENERIC | 65)
-#define EC_IOCTL_GET_SLVSTAT_PERIOD                             (EC_IOCTL_GENERIC | 66)
-#define EC_IOCTL_SET_EOE_DEFFERED_SWITCHING_ENABLED             (EC_IOCTL_GENERIC | 67)
-#define EC_IOCTL_SET_NEW_BUSSLAVES_TO_INIT                      (EC_IOCTL_GENERIC | 68)
-#define EC_IOCTL_SET_ZERO_INPUTS_ON_WKC_ZERO                    (EC_IOCTL_GENERIC | 69)
-#define EC_IOCTL_SET_ZERO_INPUTS_ON_WKC_ERROR                   (EC_IOCTL_GENERIC | 70)
-#define EC_IOCTL_SET_MAILBOX_POLLING_CYCLES                     (EC_IOCTL_GENERIC | 71)
-#define EC_IOCTL_SET_IGNORE_SWAPDATA                            (EC_IOCTL_GENERIC | 72)
-#define EC_IOCTL_SET_MASTER_MAX_STATE                           (EC_IOCTL_GENERIC | 73)
-#define EC_IOCTL_GET_MASTER_MAX_STATE                           (EC_IOCTL_GENERIC | 74)
-#define EC_IOCTL_SET_CONFIGDATA_MEMORY_POOL                     (EC_IOCTL_GENERIC | 75)
-#define EC_IOCTL_SET_STOP_TRANSITION_ON_PDI_WATCHDOG            (EC_IOCTL_GENERIC | 76)
-#define EC_IOCTL_SET_DIAGMSG_CODE_BASE                          (EC_IOCTL_GENERIC | 77)
-#define EC_IOCTL_SET_BUS_DIAGNOSIS_COUNTERS_OVERFLOW_ENABLED    (EC_IOCTL_GENERIC | 78)
-#define EC_IOCTL_SET_SENDCYCFRAMES_BEFORE_PROCESSALLRXFRAMES    (EC_IOCTL_GENERIC | 79)
-#define EC_IOCTL_ADD_PADDING_TO_DC_FRAMES                       (EC_IOCTL_GENERIC | 80)
-#define EC_IOCTL_ACTIVATE_VOE_RECV_FIFO                         (EC_IOCTL_GENERIC | 81)
-#define EC_IOCTL_REGISTER_FRAMECALLBACK                         (EC_IOCTL_GENERIC | 82)
-
-/* Distributed Clocks (DC) */
-#define EC_IOCTL_REG_DC_SLV_SYNC_NTFY               (EC_IOCTL_DC |  3)
-#define EC_IOCTL_UNREG_DC_SLV_SYNC_NTFY             (EC_IOCTL_DC |  4)
-#define EC_IOCTL_DC_SLV_SYNC_STATUS_GET             (EC_IOCTL_DC |  5)
-#define EC_IOCTL_DC_SLV_SYNC_DEVLIMIT_SET           (EC_IOCTL_DC |  6)
-#define EC_IOCTL_DC_SLV_SYNC_DEVLIMIT_GET           (EC_IOCTL_DC |  7)
-#define EC_IOCTL_DC_SHIFT_SYSTIME                   (EC_IOCTL_DC | 16)
-#define EC_IOCTL_DC_SETSYNCSTARTOFFSET              (EC_IOCTL_DC | 17)
-#define EC_IOCTL_DC_FIRST_DC_SLV_AS_REF_CLOCK       (EC_IOCTL_DC | 18)
-#define EC_IOCTL_DC_SLAVE_CONTROLLED_BY_PDI         (EC_IOCTL_DC | 19)
-#define EC_IOCTL_DC_ENABLE_ALL_DC_SLV               (EC_IOCTL_DC | 20)
-#define EC_IOCTL_DC_SET_RED_PROPAGDELAY             (EC_IOCTL_DC | 21)
-
-/* DC Master Sync (DCM) */
-#define EC_IOCTL_DCM_REGISTER_TIMESTAMP             (EC_IOCTL_DCM |  1)
-#define EC_IOCTL_DCM_UNREGISTER_TIMESTAMP           (EC_IOCTL_DCM |  2)
-#define EC_IOCTL_DCM_REGISTER_STARTSO_CALLBACK      (EC_IOCTL_DCM |  3)
-#define EC_IOCTL_DCM_GET_LOG                        (EC_IOCTL_DCM |  4)
-
-/* Scan Bus (SB) */
-#define EC_IOCTL_SB_RESTART                         (EC_IOCTL_SB |  1)           /* 0x00050001 */
-#define EC_IOCTL_SB_STATUS_GET                      (EC_IOCTL_SB |  2)           /* 0x00050002 */
-#define EC_IOCTL_SB_SET_BUSCNF_VERIFY               (EC_IOCTL_SB |  3)           /* 0x00050003 */
-#define EC_IOCTL_SB_SET_BUSCNF_VERIFY_PROP          (EC_IOCTL_SB |  4)           /* 0x00050004 */
-#define EC_IOCTL_SB_BUSCNF_GETSLAVE_INFO            (EC_IOCTL_SB |  5)           /* 0x00050005 */
-#define EC_IOCTL_SB_BUSCNF_GETSLAVE_INFO_EEP        (EC_IOCTL_SB |  6)           /* 0x00050006 */
-#define EC_IOCTL_SB_ENABLE                          (EC_IOCTL_SB |  7)           /* 0x00050007 */
-#define EC_IOCTL_SB_BUSCNF_GETSLAVE_INFO_EX         (EC_IOCTL_SB |  9)           /* 0x00050009 */
-#define EC_IOCTL_SLV_ALIAS_ENABLE                   (EC_IOCTL_SB | 10)           /* 0x0005000A */
-#define EC_IOCTL_SB_SET_BUSCNF_READ_PROP            (EC_IOCTL_SB | 12)           /* 0x0005000C */
-#define EC_IOCTL_SB_SET_TOPOLOGY_CHANGED_DELAY      (EC_IOCTL_SB | 13)           /* 0x0005000D */
-#define EC_IOCTL_SB_SET_ERROR_ON_CROSSED_LINES      (EC_IOCTL_SB | 14)           /* 0x0005000E */
-#define EC_IOCTL_SB_SET_TOPOLOGY_CHANGE_AUTO_MODE   (EC_IOCTL_SB | 15)           /* 0x0005000F */
-#define EC_IOCTL_SB_ACCEPT_TOPOLOGY_CHANGE          (EC_IOCTL_SB | 16)           /* 0x00050010 */
-#define EC_IOCTL_SB_NOTIFY_UNEXPECTED_BUS_SLAVES    (EC_IOCTL_SB | 17)           /* 0x00050011 */
-#define EC_IOCTL_SB_SET_RED_ENHANCED_LINE_CROSSED_DETECTION_ENABLED \
-                                                    (EC_IOCTL_SB | 18)           /* 0x00050012 */
-#define EC_IOCTL_SB_SET_NOTIFY_NOT_CONNECTED_PORT_A (EC_IOCTL_SB | 19)           /* 0x00050013 */
-#define EC_IOCTL_SB_SET_NOTIFY_UNEXPECTED_CONNECTED_PORT \
-                                                    (EC_IOCTL_SB | 20)           /* 0x00050014 */
-#define EC_IOCTL_SB_SET_JUNCTION_REDUNDANCY_MODE    (EC_IOCTL_SB | 21)           /* 0x00050015 */
-#define EC_IOCTL_SB_SET_JUNCTION_REDUNDANCY_ENABLED EC_IOCTL_SB_SET_JUNCTION_REDUNDANCY_MODE
-#define EC_IOCTL_SB_GET_BUS_SLAVE_PORTS_INFO        (EC_IOCTL_SB | 22)           /* 0x00050016 */
-#define EC_IOCTL_SB_SET_ERROR_ON_LINE_BREAK         (EC_IOCTL_SB | 23)           /* 0x00050017 */
-#define EC_IOCTL_SB_SET_IDENTIFICATION_FALLBACK_ENABLED \
-                                                    (EC_IOCTL_SB | 24)           /* 0x00050018 */
-#define EC_IOCTL_SB_SET_NO_DC_SLAVES_AFTER_JUNCTION (EC_IOCTL_SB | 25)           /* 0x00050019 */
-#define EC_IOCTL_SB_SET_TOPOLOGY_CHANGED_DELAYS     (EC_IOCTL_SB | 26)           /* 0x0005001A */
-
-/* Hot Connect (HC) */
-#define EC_IOCTL_HC_SETMODE                         (EC_IOCTL_HC | 1)
-#define EC_IOCTL_HC_GETMODE                         (EC_IOCTL_HC | 2)
-#define EC_IOCTL_HC_CONFIGURETIMEOUTS               (EC_IOCTL_HC | 3)
-
-/* private (PRIVATE) */
-#define EC_IOCTL_SET_FRAME_LOSS_SIMULATION          (EC_IOCTL_PRIVATE | 1)
-#define EC_IOCTL_SET_RXFRAME_LOSS_SIMULATION        (EC_IOCTL_PRIVATE | 2)
-#define EC_IOCTL_SET_TXFRAME_LOSS_SIMULATION        (EC_IOCTL_PRIVATE | 3)
-#define EC_IOCTL_GET_FAST_CONTEXT                   (EC_IOCTL_PRIVATE | 4)
-#define EC_IOCTL_SET_OEM_KEY                        (EC_IOCTL_PRIVATE | 5)
-#define EC_IOCTL_CHECK_OEM_KEY                      (EC_IOCTL_PRIVATE | 6)
-
-/** \defgroup EC_COE_ENTRY_VALUEINFO 
-    EtherCat CoE entry description value information bit definitions
-@{ */
+    /*-DEFINES/MACROS------------------------------------------------------------*/
+    /** \defgroup EC_COE_ENTRY_VALUEINFO
+        EtherCat CoE entry description value information bit definitions
+    @{ */
 #define EC_COE_ENTRY_ObjAccess                      0x01    /**<  Object access */
 #define EC_COE_ENTRY_ObjCategory                    0x02    /**<  Object category */
 #define EC_COE_ENTRY_PdoMapping                     0x04    /**<  PDO mapping */
@@ -201,18 +45,18 @@ extern "C"
 #define EC_COE_ENTRY_DefaultValue                   0x10    /**<  Default value */
 #define EC_COE_ENTRY_MinValue                       0x20    /**<  Minimum value */
 #define EC_COE_ENTRY_MaxValue                       0x40    /**<  Maximum value */
-/**@}*/
+    /**@}*/
 
-/** \defgroup EC_COE_ENTRY_OBJACCESS 
-    EtherCat CoE entry access bit definitions
-@{ */
+    /** \defgroup EC_COE_ENTRY_OBJACCESS
+        EtherCat CoE entry access bit definitions
+    @{ */
 #define EC_COE_ENTRY_Access_R_PREOP                 0x01    /**< Read access in Pre-Operational state */
 #define EC_COE_ENTRY_Access_R_SAFEOP                0x02    /**< Read access in Safe-Operational state */
 #define EC_COE_ENTRY_Access_R_OP                    0x04    /**< Read access in Operational state */
 #define EC_COE_ENTRY_Access_W_PREOP                 0x08    /**< Write access in Pre-Operational state */
 #define EC_COE_ENTRY_Access_W_SAFEOP                0x10    /**< Write access in Safe-Operational state */
 #define EC_COE_ENTRY_Access_W_OP                    0x20    /**< Write access in Operational state */
-/**@}*/
+    /**@}*/
 
 #define INVALID_SLAVE_ID                            ((EC_T_DWORD)0xFFFFFFFF)
 #define INVALID_BUS_INDEX                           ((EC_T_DWORD)0xFFFFFFFF)
@@ -235,9 +79,7 @@ extern "C"
 /* configuration for OD */
 #define ECAT_DEVICE_NAMESIZE            80
 #define MAX_SLAVE_DEVICENAME            80                      /* 0x3xxx Slave Device name length */
-#define EC_OD_MAX_DRIVER_IDENT_LEN      40                      /* deprecated */
-#define EC_OD_DRIVER_IDENT_MAXLEN       39                      /* maximum length of link layer name */
-#define EC_OD_DRIVER_IDENT_SIZE         (EC_OD_DRIVER_IDENT_MAXLEN + 1) /*  link layer name is zero terminated */
+#define EC_OD_DRIVER_IDENT_SIZE         40                      /*  link layer name is zero terminated */
 #define EC_CFG_SLAVE_PD_SECTIONS        ((EC_T_DWORD)4)         /* amount of received/send entries per slave process data */
 
 #define HISTORY_OBJECT_DIAGELE_SIZE     ((EC_T_WORD)0x0100)     /* size in bytes */
@@ -334,6 +176,7 @@ extern "C"
 #define COEOBJID_DETECTMODCMD       ((EC_T_WORD)0xF002) /* Object 0xF002  Detect Modules Command "Modular Device Profiles" */
 #define COEOBJID_CONFADDRLISTBASE   ((EC_T_WORD)0xF020) /* Object 0xF020 - 0xF02F Configured Address List "Modular Device Profiles" */
 #define COEOBJID_CONNADDRLISTBASE   ((EC_T_WORD)0xF040) /* Object 0xF040 - 0xF04F Detected Address List "Modular Device Profiles" */
+#define COEOBJID_CONNIDENTLISTBASE  ((EC_T_WORD)0xF050) /* Object 0xF050 - 0xF05F Detected module ident list */
 #define COEOBJID_FRAMESTATISTICS    ((EC_T_WORD)0xF120) /* Object 0xF120  Frame Statistics "Diagnosis Interface" */
 #define COEOBJID_DIAGINTERFACECTL   ((EC_T_WORD)0xF200) /* Object 0xF200  Diag Interface Control "Diagnosis Interface" */
 
@@ -352,12 +195,10 @@ extern "C"
 #define DEVICETYPE_ASI_MASTER           ((EC_T_WORD)6200)
 #define DEVICETYPE_IOLINK_MASTER        ((EC_T_WORD)6220)
 
-#define MAX_ERRINFO_STRLEN  8   /* maximum length of error notification info strings */
-#define MAX_SHORT_STRLEN    20  /* maximum length of short info string */
-#define MAX_STD_STRLEN      80  /* maximum length of standard info string */
+/* see also EC_RAS_MAX_FILE_NAME_SIZE! */
+#define EC_MAX_FILE_NAME_SIZE 64                    /**< maximum length of file name for FoE Download/Upload (zero terminated string) */
 
-/* see also ECMASTERRAS_MAX_FILE_NAME_SIZE! */
-#define EC_MAX_FILE_NAME_SIZE 64 /* maximum length of file name for FoE Download/Upload */
+#define EC_LICENSE_FINGERPRINT_STRSIZE 30
 
 /** \defgroup EC_SLAVE_IDS
 @{ */
@@ -384,6 +225,20 @@ typedef enum _EC_T_STATE
     eEcatState_BCppDummy   = 0xFFFFFFFF
 } EC_T_STATE;
 
+/** FSOE state (see ETG.5001.4 v0.1.1, table 9)*/
+typedef enum _EC_T_FSOE_CONNECTION_STATE
+{
+    eFsoeState_RESET = 0,
+    eFsoeState_SESSION = 1,
+    eFsoeState_CONNECTION = 2,
+    eFsoeState_PARAMETER = 3,
+    eFsoeState_DATA = 4,
+    eFsoeState_FAILSAFE = 5,
+
+    /* Borland C++ datatype alignment correction */
+    eFsoeState_BCppDummy = 0xFFFFFFFF
+} EC_T_FSOE_CONNECTION_STATE;
+
 typedef enum EC_MAILBOX_FLAG
 {
     EC_MAILBOX_FLAG_SDO_COMPLETE            = 1,
@@ -405,8 +260,8 @@ typedef enum EC_MAILBOX_FLAG
 #define EC_NOTIFY_APP                           0x00080000                  /* application specific codes used by ecatNotifyApp() */
 #define EC_NOTIFY_APP_MAX_CODE                  0x0000FFFF                  /* max number app notify codes */
 
-#define ECMASTERRAS_NOTIFY_GENERIC                  0x00100000
-#define ECMASTERRAS_NOTIFY_ERROR                    0x00110000
+#define EC_RAS_NOTIFY_GENERIC                    0x00100000
+#define EC_RAS_NOTIFY_ERROR                      0x00110000
 
 #define EC_NOTIFY_STATECHANGED                  (EC_NOTIFY_GENERIC | 1)     /* 0x00000001: EtherCAT operational state change */
 #define EC_SZTXT_NOTIFY_STATECHANGED            "EC_NOTIFY_STATECHANGED"
@@ -477,6 +332,9 @@ typedef enum EC_MAILBOX_FLAG
 
 #define EC_NOTIFY_CONFIG_LOAD                   (EC_NOTIFY_GENERIC | 111)   /* 0x0000006F: Config loaded */
 #define EC_SZTXT_NOTIFY_CONFIG_LOAD             "EC_NOTIFY_CONFIG_LOAD"
+
+#define EC_NOTIFY_FSOE_CONNECTION_STATECHANGED  (EC_NOTIFY_GENERIC | 112)   /* 0x00000070: FSoE connection state changed */
+#define EC_SZTXT_NOTIFY_FSOE_CONNECTION_STATECHANGED "EC_NOTIFY_FSOE_CONNECTION_STATECHANGED"
 
 /* mailbox */
 #define EC_NOTIFY_COE_TX_PDO                    (EC_NOTIFY_MBOXRCV | 1)     /* 0x00020001: TxPDO notification */
@@ -603,18 +461,24 @@ typedef enum EC_MAILBOX_FLAG
 #define EC_NOTIFY_TAP_LINK_STATUS               (EC_NOTIFY_ERROR | 44)      /* 0x0001002C: TAP link status */
 #define EC_SZTXT_NOTIFY_TAP_LINK_STATUS         "NOTIFY_TAP_LINK_STATUS"
 
-#define EC_NUM_ERROR_NOTIFICATIONS                                 44       /* number of error notifications in 0x00010000 ... 0x0001fff */
+#define EC_NOTIFY_AOE_MBXSND_WKC_ERROR          (EC_NOTIFY_ERROR | 45)      /* 0x0001002D: AOE mbox send: working counter error */
+#define EC_SZTXT_NOTIFY_AOE_MBXSND_WKC_ERROR    "EC_NOTIFY_AOE_MBXSND_WKC_ERROR"
+
+#define EC_NUM_ERROR_NOTIFICATIONS                                 45       /* number of error notifications in 0x00010000 ... 0x0001fff */
 
 /* ScanBus Notification */
 #define EC_NOTIFY_SB_MISMATCH                   (EC_NOTIFY_SCANBUS | 2)     /* 0x00030002: ScanBus mismatch */
 #define EC_SZTXT_NOTIFY_SB_MISMATCH             "EC_NOTIFY_SB_MISMATCH"
 
 #define EC_NOTIFY_SB_DUPLICATE_HC_NODE          (EC_NOTIFY_SCANBUS | 3)     /* 0x00030003: ScanBus mismatch. A duplicate HC group was detected equal product code, vendor id
-                                                                               and alias address (or switch id)  */
+                                                                               and alias address (or switch id).  */
 #define EC_SZTXT_NOTIFY_SB_DUPLICATE_HC_NODE    "EC_NOTIFY_SB_DUPLICATE_HC_NODE"
 
 #define EC_NOTIFY_SB_EEPROM_ACCESS_DENIED       (EC_NOTIFY_SCANBUS | 4)     /* 0x00030004: ScanBus mismatch, the slave denied the EEPROM access */
 #define EC_SZTXT_NOTIFY_SB_EEPROM_ACCESS_DENIED "EC_NOTIFY_SB_EEPROM_ACCESS_DENIED"
+
+#define EC_NOTIFY_SB_SLAVE_IDENT_TIMEOUT        (EC_NOTIFY_SCANBUS | 5)     /* 0x00030005: Slave identification timeout */
+#define EC_SZTXT_NOTIFY_SB_SLAVE_IDENT_TIMEOUT  "EC_NOTIFY_SB_SLAVE_IDENT_TIMEOUT"
 
 /* Hot Connect Action Results */
 /* #define EC_NOTIFY_HC_DETECTALLGROUPS         (EC_NOTIFY_HOTCONNECT | 1)   * 0x00040001: HC Detect All Groups done */
@@ -638,29 +502,32 @@ typedef enum EC_MAILBOX_FLAG
 #define EC_SZTXT_NOTIFY_SLAVE_APPEARS           "EC_NOTIFY_SLAVE_APPEARS"
 
 /* Remote API */
-#define ECMASTERRAS_NOTIFY_CONNECTION               (ECMASTERRAS_NOTIFY_GENERIC|0x0001) /* 0x00100001 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_CONNECTION      "ECMASTERRAS_NOTIFY_CONNECTION"
+#define EC_RAS_NOTIFY_CONNECTION                    (EC_RAS_NOTIFY_GENERIC|0x0001) /* 0x00100001 */
+#define EC_SZTXT_EC_RAS_NOTIFY_CONNECTION           "EC_RAS_NOTIFY_CONNECTION"
 
-#define ECMASTERRAS_NOTIFY_REGISTER                 (ECMASTERRAS_NOTIFY_GENERIC|0x0002) /* 0x00100002 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_REGISTER        "ECMASTERRAS_NOTIFY_REGISTER"
+#define EC_RAS_NOTIFY_REGISTER                      (EC_RAS_NOTIFY_GENERIC|0x0002) /* 0x00100002 */
+#define EC_SZTXT_EC_RAS_NOTIFY_REGISTER             "EC_RAS_NOTIFY_REGISTER"
 
-#define ECMASTERRAS_NOTIFY_UNREGISTER               (ECMASTERRAS_NOTIFY_GENERIC|0x0003) /* 0x00100003 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_UNREGISTER      "ECMASTERRAS_NOTIFY_UNREGISTER"
+#define EC_RAS_NOTIFY_UNREGISTER                    (EC_RAS_NOTIFY_GENERIC|0x0003) /* 0x00100003 */
+#define EC_SZTXT_EC_RAS_NOTIFY_UNREGISTER           "EC_RAS_NOTIFY_UNREGISTER"
 
-#define ECMASTERRAS_NOTIFY_MARSHALERROR             (ECMASTERRAS_NOTIFY_ERROR  |0x0001) /* 0x00110001 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_MARSHALERROR    "ECMASTERRAS_NOTIFY_MARSHALERROR"
+#define EC_RAS_NOTIFY_MARSHALERROR                  (EC_RAS_NOTIFY_ERROR  |0x0001) /* 0x00110001 */
+#define EC_SZTXT_EC_RAS_NOTIFY_MARSHALERROR         "EC_RAS_NOTIFY_MARSHALERROR"
 
-#define ECMASTERRAS_NOTIFY_ACKERROR                 (ECMASTERRAS_NOTIFY_ERROR  |0x0002) /* 0x00110002 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_ACKERROR        "ECMASTERRAS_NOTIFY_ACKERROR"
+#define EC_RAS_NOTIFY_ACKERROR                      (EC_RAS_NOTIFY_ERROR  |0x0002) /* 0x00110002 */
+#define EC_SZTXT_EC_RAS_NOTIFY_ACKERROR             "EC_RAS_NOTIFY_ACKERROR"
 
-#define ECMASTERRAS_NOTIFY_NONOTIFYMEMORY           (ECMASTERRAS_NOTIFY_ERROR  |0x0003) /* 0x00110003 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_NONOTIFYMEMORY  "ECMASTERRAS_NOTIFY_NONOTIFYMEMORY"
+#define EC_RAS_NOTIFY_NONOTIFYMEMORY                (EC_RAS_NOTIFY_ERROR  |0x0003) /* 0x00110003 */
+#define EC_SZTXT_EC_RAS_NOTIFY_NONOTIFYMEMORY       "EC_RAS_NOTIFY_NONOTIFYMEMORY"
 
-#define ECMASTERRAS_NOTIFY_STDNOTIFYMEMORYSMALL     (ECMASTERRAS_NOTIFY_ERROR  |0x0004) /* 0x00110004 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_STDNOTIFYMEMORYSMALL    "ECMASTERRAS_NOTIFY_STDNOTIFYMEMORYSMALL"
+#define EC_RAS_NOTIFY_STDNOTIFYMEMORYSMALL          (EC_RAS_NOTIFY_ERROR  |0x0004) /* 0x00110004 */
+#define EC_SZTXT_EC_RAS_NOTIFY_STDNOTIFYMEMORYSMALL "EC_RAS_NOTIFY_STDNOTIFYMEMORYSMALL"
 
-#define ECMASTERRAS_NOTIFY_MBXNOTIFYMEMORYSMALL     (ECMASTERRAS_NOTIFY_ERROR  |0x0005) /* 0x00110005 */
-#define EC_SZTXT_ECMASTERRAS_NOTIFY_MBXNOTIFYMEMORYSMALL    "ECMASTERRAS_NOTIFY_MBXNOTIFYMEMORYSMALL"
+#define EC_RAS_NOTIFY_MBXNOTIFYMEMORYSMALL          (EC_RAS_NOTIFY_ERROR  |0x0005) /* 0x00110005 */
+#define EC_SZTXT_EC_RAS_NOTIFY_MBXNOTIFYMEMORYSMALL "EC_RAS_NOTIFY_MBXNOTIFYMEMORYSMALL"
+
+#define EC_RAS_NOTIFY_EXCEPTION                     (EC_RAS_NOTIFY_ERROR  |0x0006) /* 0x00110006 */
+#define EC_SZTXT_EC_RAS_NOTIFY_EXCEPTION            "EC_RAS_NOTIFY_EXCEPTION"
 
 /** \defgroup EC_FRAME_RESPONSE_ERROR_NOTIFY_MASKS Frame response error notification bit masks
 @{
@@ -717,49 +584,49 @@ typedef enum EC_MAILBOX_FLAG
 #define EC_VOE_DBG_MASK_ALL              0x0FF00000  /* mask for all VoE transfers debug support */
 
 #define MAX_PROCESS_VAR_NAME_LEN            ((EC_T_DWORD)72)  /**< Maximum length of a process variable name: 71 characters */
-#define MAX_PROCESS_VAR_NAME_LEN_EX         ((EC_T_DWORD)128) /**< Maximum length of a extended process variable name: 127 characters */
+#define MAX_PROCESS_VAR_NAME_LEN_EX         ((EC_T_DWORD)128) /**< Maximum length of an extended process variable name: 127 characters */
 
 /* EtherCAT commands */
-typedef enum
+typedef enum _EC_T_CMD
 {
-    EC_CMD_TYPE_NOP     = 0x00,
-    EC_CMD_TYPE_APRD    = 0x01,
-    EC_CMD_TYPE_APWR    = 0x02,
-    EC_CMD_TYPE_APRW    = 0x03,
-    EC_CMD_TYPE_FPRD    = 0x04,
-    EC_CMD_TYPE_FPWR    = 0x05,
-    EC_CMD_TYPE_FPRW    = 0x06,
-    EC_CMD_TYPE_BRD     = 0x07,
-    EC_CMD_TYPE_BWR     = 0x08,
-    EC_CMD_TYPE_BRW     = 0x09,
-    EC_CMD_TYPE_LRD     = 0x0A,
-    EC_CMD_TYPE_LWR     = 0x0B,
-    EC_CMD_TYPE_LRW     = 0x0C,
-    EC_CMD_TYPE_ARMW    = 0x0D,
-    EC_CMD_TYPE_FRMW    = 0x0E,
-    EC_CMD_TYPE_EXT     = 0xFF,
+    eEcatCmd_NOP     = 0x00, /**< No operation */
+    eEcatCmd_APRD    = 0x01, /**< Auto increment physical read */
+    eEcatCmd_APWR    = 0x02, /**< Auto increment physical write */
+    eEcatCmd_APRW    = 0x03, /**< Auto increment physical read write */
+    eEcatCmd_FPRD    = 0x04, /**< Configured address physical read */
+    eEcatCmd_FPWR    = 0x05, /**< Configured address physical write */
+    eEcatCmd_FPRW    = 0x06, /**< Configured address physical read write */
+    eEcatCmd_BRD     = 0x07, /**< Broadcast read */
+    eEcatCmd_BWR     = 0x08, /**< Broadcast write */
+    eEcatCmd_BRW     = 0x09, /**< Broadcast read write */
+    eEcatCmd_LRD     = 0x0A, /**< Logical memory read */
+    eEcatCmd_LWR     = 0x0B, /**< Logical memory write */
+    eEcatCmd_LRW     = 0x0C, /**< Logical memory read write */
+    eEcatCmd_ARMW    = 0x0D, /**< Auto increment physical read multiple write */
+    eEcatCmd_FRMW    = 0x0E, /**< Configured address physical read multiple write */
+    eEcatCmd_EXT     = 0xFF,
 
     /* Borland C++ datatype alignment correction */
-    EC_CMD_TYPE_BCppDummy   = 0xFFFFFFFF
-} EC_CMD_TYPE;
+    eEcatCmd_BCppDummy   = 0xFFFFFFFF
+} EC_T_CMD;
 
 /* textual description of EtherCat commands */
 #define EcatCmdShortText(byCmd)                     \
-    ((byCmd)==EC_CMD_TYPE_NOP?"NOP":                \
-     ((byCmd)==EC_CMD_TYPE_APRD?"APRD":             \
-      ((byCmd)==EC_CMD_TYPE_APWR?"APWR":            \
-       ((byCmd)==EC_CMD_TYPE_APRW?"APRW":           \
-        ((byCmd)==EC_CMD_TYPE_FPRD?"FPRD":          \
-         ((byCmd)==EC_CMD_TYPE_FPWR?"FPWR":         \
-          ((byCmd)==EC_CMD_TYPE_FPRW?"FPRW":        \
-           ((byCmd)==EC_CMD_TYPE_BRD?"BRD":         \
-            ((byCmd)==EC_CMD_TYPE_BWR?"BWR":        \
-             ((byCmd)==EC_CMD_TYPE_BRW?"BRW":       \
-              ((byCmd)==EC_CMD_TYPE_LRD?"LRD":      \
-               ((byCmd)==EC_CMD_TYPE_LWR?"LWR":     \
-                ((byCmd)==EC_CMD_TYPE_LRW?"LRW":    \
-                 ((byCmd)==EC_CMD_TYPE_ARMW?"ARMW": \
-                  ((byCmd)==EC_CMD_TYPE_FRMW?"FRMW":\
+    ((byCmd)==eEcatCmd_NOP?"NOP":                \
+     ((byCmd)==eEcatCmd_APRD?"APRD":             \
+      ((byCmd)==eEcatCmd_APWR?"APWR":            \
+       ((byCmd)==eEcatCmd_APRW?"APRW":           \
+        ((byCmd)==eEcatCmd_FPRD?"FPRD":          \
+         ((byCmd)==eEcatCmd_FPWR?"FPWR":         \
+          ((byCmd)==eEcatCmd_FPRW?"FPRW":        \
+           ((byCmd)==eEcatCmd_BRD?"BRD":         \
+            ((byCmd)==eEcatCmd_BWR?"BWR":        \
+             ((byCmd)==eEcatCmd_BRW?"BRW":       \
+              ((byCmd)==eEcatCmd_LRD?"LRD":      \
+               ((byCmd)==eEcatCmd_LWR?"LWR":     \
+                ((byCmd)==eEcatCmd_LRW?"LRW":    \
+                 ((byCmd)==eEcatCmd_ARMW?"ARMW": \
+                  ((byCmd)==eEcatCmd_FRMW?"FRMW":\
                   "INVALID ECAT CMD VALUE!!!"       \
     )))))))))))))))
 
@@ -792,6 +659,30 @@ typedef struct _EC_T_OBJ10F3
     EC_T_WORD               wFlags;                 /* Subindex 005 */
     /* EC_T_DIAGMESSAGE */                          /* Subindex 006ff */
 } EC_PACKED(1) EC_T_OBJ10F3;
+
+/* Object 0x1C1X  RxPDO/TxPDO Assignment Object - List of RxPDO/output/TxPDO/input mapping objects */
+typedef struct _EC_T_OBJ1C1X
+{
+    EC_T_BYTE byNumIndexes;    /* Number of indexes */
+    EC_T_BYTE byPadding;       /* Subindex 000 second byte */
+    EC_T_WORD awIndexes[0xFF]; /* Array of RxPDO/TxPDO mapping indexes */
+} EC_PACKED(1) EC_T_OBJ1C1X;
+
+/* Object 0x1(6/7/A/B)XX Entry  RxPDO/TxPDO */
+typedef struct _EC_T_OBJPDOMAPPING_ENTRY
+{
+    EC_T_BYTE byBitLen;   /* Size of pdo or gap in bits */
+    EC_T_BYTE bySubIndex; /* Subindex of pdo, zero for gaps */
+    EC_T_WORD wIndex;     /* Index of pdo, zero for gaps */
+} EC_PACKED(1) EC_T_OBJPDOMAPPING_ENTRY;
+
+/* Object 0x1(6/7/A/B)XX  RxPDO/TxPDO Mapping Object */
+typedef struct _EC_T_OBJPDOMAPPING
+{
+    EC_T_BYTE byNumEntries;                   /* Number of entries */
+    EC_T_BYTE byPadding;                      /* Subindex 000 second byte */
+    EC_T_OBJPDOMAPPING_ENTRY aoEntries[0xFF]; /* Entries */
+} EC_PACKED(1) EC_T_OBJPDOMAPPING;
 
 /* Object 0x2000  Master State change Command */
 typedef enum _EC_T_OBJ2000_VALUES
@@ -1119,6 +1010,14 @@ typedef struct _EC_T_OBJF002
                                                                                                  Byte 4-5: number of EtherCAT slaves found */
 } EC_PACKED(1) EC_T_OBJF002;
 
+/* Modular Device Profiles: EtherCAT Master  - module profile list */
+typedef struct _EC_T_OBJF01X
+{
+    EC_T_BYTE               byNumProfiles;                      /*   0 */       /* Number of profiles */
+    EC_T_BYTE               byPadding;                          /*   1 */       /* Subindex 000 second byte */
+    EC_T_DWORD              adwProfileInfo[255];                 /*   2 */       /* Profile information */
+} EC_PACKED(1) EC_T_OBJF01X;
+
 /* Modular Device Profiles: EtherCAT Master  - configured address list */
 typedef struct _EC_T_OBJF02X
 {
@@ -1132,6 +1031,14 @@ typedef struct _EC_T_OBJF04X
     EC_T_WORD               wSubIndex0;                         /*   0 */       /* Subindex 000 */
     EC_T_WORD               awStationAddr[128];                 /*   2 */       /* Subindex 001 - 128 */
 } EC_PACKED(1) EC_T_OBJF04X;
+
+/* Modular Devices Profiles: EtherCAT Master  - detected module ident list */
+typedef struct _EC_T_OBJF05X
+{
+    EC_T_BYTE               byNumModuleIdents;                  /*   0 */       /* Subindex 000 */
+    EC_T_BYTE               byPadding;                          /*   1 */       /* Subindex 000 second byte */
+    EC_T_DWORD              adwModuleIdent[255];                /*   2 */       /* Subindex 001 - 255 */
+} EC_PACKED(1) EC_T_OBJF05X;
 
 /* Modular Device Profiles: EtherCAT Master  - frame statistics */
 typedef struct _EC_T_OBJF120
@@ -1162,14 +1069,18 @@ typedef struct _EC_T_SLAVE_PROP
 } EC_PACKED(4) EC_T_SLAVE_PROP;
 
 /* EtherCAT notify parameters */
+
+/********************************************************************************/
+/** \brief Data structure filled with detailed information about the according notification.
+*/
 typedef struct _EC_T_NOTIFYPARMS
 {
-    EC_T_VOID*      pCallerData;        /**< [in]  Client depending caller data parameter. This pointer is one of the parameters when the client registers */
+    EC_T_VOID*      pCallerData;        /**< [in]  Client depending caller data parameter. This pointer is one of the parameters when the client registers. */
     EC_T_BYTE*      pbyInBuf;           /**< [in]  Notification input parameters */
-    EC_T_DWORD      dwInBufSize;        /**< [in]  Size of input buffer in byte */
-    EC_T_BYTE*      pbyOutBuf;          /**< [out] Notification output (result) */
-    EC_T_DWORD      dwOutBufSize;       /**< [in]  Size of output buffer in byte */
-    EC_T_DWORD*     pdwNumOutData;      /**< [out] Amount of bytes written to the output buffer */
+    EC_T_DWORD      dwInBufSize;        /**< [in]  Size of notification input parameters in bytes */
+    EC_T_BYTE*      pbyOutBuf;          /**< [out] Buffer for notification output (result) */
+    EC_T_DWORD      dwOutBufSize;       /**< [in]  Size of buffer at pbyOutBuf in bytes */
+    EC_T_DWORD*     pdwNumOutData;      /**< [out] Amount of bytes written to pbyOutBuf by notification. EC_NULL: amount not set by notification. */
 } EC_PACKED(4) EC_T_NOTIFYPARMS, *PEC_T_NOTIFYPARMS;
 
 /* EtherCAT command WKC error descriptor */
@@ -1181,20 +1092,23 @@ typedef struct _EC_T_WKCERR_DESC
     EC_T_DWORD      dwAddr;             /**< Logical address or physical address (ADP/ADO) */
     EC_T_WORD       wWkcSet;            /**< Working counter set value */
     EC_T_WORD       wWkcAct;            /**< Working counter actual value */
+    EC_T_DWORD      dwTaskId;           /**< Cyclic Task ID (ENI: Cyclic/TaskId) */
+    EC_T_WORD       wMsuId;             /**< Master Sync Unit ID (ENI: Slave/ProcessData/RxPdo[1..4]@Su, Slave/ProcessData/TxPdo[1..4]@Su, comment at Cyclic/Frame/Cmd) */
 } EC_PACKED(4) EC_T_WKCERR_DESC;
 
 /* EtherCAT frame response error descriptor */
 typedef enum _EC_T_FRAME_RSPERR_TYPE
 {
-    eRspErr_UNDEFINED       = 0,        /**< undefined */
-    eRspErr_NO_RESPONSE     = 1,        /**< No Ethernet frame received (timeout, frame loss) */
-    eRspErr_WRONG_IDX       = 2,        /**< Wrong IDX value in acyclic frame */
-    eRspErr_UNEXPECTED      = 3,        /**< Unexpected frame was received */
-    eRspErr_FRAME_RETRY     = 4,        /**< Ethernet frame will be re-sent (timeout, frame loss) */
-    eRspErr_RETRY_FAIL      = 5,        /**< all retry mechanism fails to re-sent acyclic frames */
-    eRspErr_FOREIGN_SRC_MAC = 6,        /**< Frame with MAC from other Master received */
-    eRspErr_NON_ECAT_FRAME  = 7,        /**< Non EtherCAT frame received */
-    eRspErr_CRC             = 8,        /**< Ethernet frame with CRC error received */
+    eRspErr_UNDEFINED            = 0,   /**< Undefined */
+    eRspErr_NO_RESPONSE          = 1,   /**< No Ethernet frame received (timeout, frame loss) */
+    eRspErr_WRONG_IDX            = 2,   /**< Wrong IDX value in acyclic frame */
+    eRspErr_UNEXPECTED           = 3,   /**< Unexpected frame was received */
+    eRspErr_FRAME_RETRY          = 4,   /**< Ethernet frame will be re-sent (timeout, frame loss) */
+    eRspErr_RETRY_FAIL           = 5,   /**< All retry mechanism fails to re-sent acyclic frames */
+    eRspErr_FOREIGN_SRC_MAC      = 6,   /**< Frame with MAC from other Master received */
+    eRspErr_NON_ECAT_FRAME       = 7,   /**< Non EtherCAT frame received */
+    eRspErr_CRC                  = 8,   /**< Ethernet frame with CRC error received */
+    eRspErr_ETHERNET_PAUSE_FRAME = 9,   /**< Ethernet pause frame (flow control) received */
     /* Borland C++ datatype alignment correction */
     eRspErr_BCppDummy   = 0xFFFFFFFF
 } EC_T_FRAME_RSPERR_TYPE;
@@ -1208,8 +1122,9 @@ typedef enum _EC_T_FRAME_RSPERR_TYPE
          ((eInitCmdErr)==eRspErr_RETRY_FAIL?"Retry fail": \
           ((eInitCmdErr)==eRspErr_FOREIGN_SRC_MAC?"Foreign source MAC": \
            ((eInitCmdErr)==eRspErr_NON_ECAT_FRAME?"Non EtherCAT frame": \
+            ((eInitCmdErr)==eRspErr_ETHERNET_PAUSE_FRAME?"Ethernet pause frame (flow control)": \
              "Unknown error" \
-    ))))))))
+    )))))))))
 
 typedef struct _EC_T_FRAME_RSPERR_DESC
 {
@@ -1218,7 +1133,7 @@ typedef struct _EC_T_FRAME_RSPERR_DESC
     EC_T_BYTE               byEcCmdHeaderIdxSet;    /**< Expected IDX value, this value is valid only for acyclic frames in case EErrorType is not equal to eRspErr_UNEXPECTED */
     EC_T_BYTE               byEcCmdHeaderIdxAct;    /**< Actually received IDX value, this value is only valid for acyclic frames in case of EErrorType is equal to: eRspErr_WRONG_IDX and eRspErr_UNEXPECTED */
     EC_T_WORD               wCycFrameNum;           /**< Number of the lost cyclic frame from the ENI */
-    EC_T_DWORD              dwTaskId;               /**< Cyclic Task Id from the ENI. Only valid if bIsCyclicFrame is set */
+    EC_T_DWORD              dwTaskId;               /**< Cyclic Task ID (ENI: Cyclic/TaskId). Only valid if bIsCyclicFrame is set */
 } EC_PACKED(4) EC_T_FRAME_RSPERR_DESC;
 
 /* EtherCAT init command response error descriptor */
@@ -1354,7 +1269,17 @@ typedef struct _EC_T_EEPROM_CHECKSUM_ERROR_DESC
 typedef struct _EC_T_EEPROM_ACCESS_DENIED_DESC
 {
     EC_T_SLAVE_PROP SlaveProp;          /**< Slave properties */
+    EC_T_SLAVE_PROP SlavePropParent;    /**< Slave properties of parent slave */
+    EC_T_WORD       wPortAtParent;      /**< Port at parent slave */
 } EC_PACKED(4) EC_T_EEPROM_ACCESS_DENIED_DESC;
+
+/* Slave identification timeout */
+typedef struct _EC_T_SLAVE_IDENT_TIMEOUT_DESC
+{
+    EC_T_SLAVE_PROP SlaveProp;          /*< Slave properties */
+    EC_T_SLAVE_PROP SlavePropParent;    /*< Slave properties of parent slave */
+    EC_T_WORD       wPortAtParent;      /*< Port at parent slave */
+} EC_PACKED(4) EC_T_SLAVE_IDENT_TIMEOUT_DESC;
 
 /* Redundancy break/fixed notification */
 typedef struct _EC_T_RED_CHANGE_DESC
@@ -1380,8 +1305,8 @@ typedef struct _EC_T_REFCLOCK_PRESENCE_NTFY_DESC
 /* Distributed clocks (DC) */
 typedef struct _EC_T_DC_SYNC_NTFY_DESC
 {
-    EC_T_DWORD      IsInSync;           /**< [in] EC_TRUE : Wire or'ed deviation value meets limit requirements. EC_FALSE: Wire or'ed deviation value does not meet limit requirements.The limit is set by ecatDcConfigure() */
-    EC_T_DWORD      IsNegative;         /**< [in] EC_TRUE : deviation value is negative EC_FALSE: deviation value is positive */
+    EC_T_DWORD      IsInSync;           /**< [in] EC_TRUE : Wire or'ed deviation value meets limit requirements. EC_FALSE: Wire or'ed deviation value does not meet limit requirements. The limit is set by emDcConfigure(). */
+    EC_T_DWORD      IsNegative;         /**< [in] EC_TRUE : Deviation value is negative, EC_FALSE: Deviation value is positive */
     EC_T_DWORD      dwDeviation;        /**< [in] Wire or'ed deviation value [ns] in case of in sync */
     EC_T_SLAVE_PROP SlaveProp;          /**< [in] Slave properties in case of out of sync */
 } EC_PACKED(4) EC_T_DC_SYNC_NTFY_DESC;
@@ -1389,7 +1314,7 @@ typedef struct _EC_T_DC_SYNC_NTFY_DESC
 /* Distributed clocks master sync (DCM) */
 typedef struct _EC_T_DCM_SYNC_NTFY_DESC
 {
-    EC_T_DWORD      IsInSync;           /**< [in] EC_TRUE as long as time of master and reference clock are in sync. False if the InSyncLimit from the bus shift configuration is exceeded */
+    EC_T_DWORD      IsInSync;           /**< [in] EC_TRUE as long as time of master and reference clock are in sync. False if the InSyncLimit from the bus shift configuration is exceeded. */
     EC_T_INT        nCtlErrorNsecCur;   /**< [in] Current difference [ns] between set value and actual value of controller */
     EC_T_INT        nCtlErrorNsecAvg;   /**< [in] Average difference [ns] between set value and actual value of controller */
     EC_T_INT        nCtlErrorNsecMax;   /**< [in] Maximum difference [ns] between set value and actual value of controller */
@@ -1412,6 +1337,15 @@ typedef struct _EC_T_SLAVE_STATECHANGED_NTFY_DESC
     EC_T_SLAVE_PROP SlaveProp;          /**< Slave properties */
     EC_T_STATE      newState;           /**< New slave state */
 } EC_PACKED(4) EC_T_SLAVE_STATECHANGED_NTFY_DESC;
+
+/* FSoE connection state changed descriptor */
+typedef struct _EC_T_FSOE_CONNECTION_STATECHANGED_NTFY_DESC
+{
+    EC_T_SLAVE_PROP oSlaveProp;                 /**< Slave properties */
+    EC_T_WORD wFsoeSlaveSafeAddress;            /**< Safe address of the FSoE slave */
+    EC_T_FSOE_CONNECTION_STATE eConnStateOld;   /**< New connection state */
+    EC_T_FSOE_CONNECTION_STATE eConnStateNew;   /**< New connection state */
+} EC_PACKED(4) EC_T_FSOE_CONNECTION_STATECHANGED_NTFY_DESC;
 #include EC_PACKED_INCLUDESTOP/*(4)*/
 
 #include EC_PACKED_INCLUDESTART(2)
@@ -1438,17 +1372,24 @@ typedef struct _EC_T_SLAVES_STATECHANGED_NTFY_DESC
 typedef struct _EC_T_FRAMELOSS_AFTER_SLAVE_NTFY_DESC
 {
     /* Location of frameloss */
-    EC_T_SLAVE_PROP SlaveProp;  /**< slave properties */
-    EC_T_WORD       wPort;      /**< port */
+    EC_T_SLAVE_PROP SlaveProp;  /**< Slave properties */
+    EC_T_WORD       wPort;      /**< Port */
 } EC_PACKED(4) EC_T_FRAMELOSS_AFTER_SLAVE_NTFY_DESC;
 
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_BAD_CONNECTION_NTFY_DESC
 {
-    EC_T_SLAVE_PROP SlavePropParent; /**< slave properties of parent slave */
-    EC_T_WORD       wPortAtParent;   /**< port at parent slave */
-    EC_T_SLAVE_PROP SlavePropChild;  /**< slave properties of child slave */
-    EC_T_WORD       wPortAtChild;    /**< port at child slave */
+    EC_T_SLAVE_PROP SlavePropParent; /**< Slave properties of parent slave */
+    EC_T_WORD       wPortAtParent;   /**< Port at parent slave */
+    EC_T_SLAVE_PROP SlavePropChild;  /**< Slave properties of child slave */
+    EC_T_WORD       wPortAtChild;    /**< Port at child slave */
 } EC_PACKED(4) EC_T_BAD_CONNECTION_NTFY_DESC;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 
 typedef struct _EC_T_COMMUNICATION_TIMEOUT_NTFY_DESC
 {
@@ -1476,8 +1417,8 @@ typedef  struct _EC_T_DC_STARTCYCSAFETY_DESC
 
 typedef struct _EC_T_SB_STATUS_NTFY_DESC
 {
-    EC_T_DWORD      dwResultCode;               /**< [in] EC_E_NOERROR: success EC_E_NOTREADY: no bus scan executed EC_E_BUSCONFIG_MISMATCH: bus configuration mismatch Result of scanbus */
-    EC_T_DWORD      dwSlaveCount;               /**< [in] number of slaves connected to the bus */
+    EC_T_DWORD      dwResultCode;               /**< [in] #EC_E_NOERROR: success, #EC_E_NOTREADY: no bus scan executed, #EC_E_BUSCONFIG_MISMATCH: bus configuration mismatch result of scanbus */
+    EC_T_DWORD      dwSlaveCount;               /**< [in] Number of slaves connected to the bus */
 } EC_PACKED(4) EC_T_SB_STATUS_NTFY_DESC;
 
 typedef struct _EC_T_CONFIG_LOAD_NTFY_DESC
@@ -1503,7 +1444,7 @@ typedef struct _EC_T_SB_MISMATCH_DESC
     EC_T_WORD           wBusFixedAddress;            /**< [in] Unexpected slave (bus) station address */
     EC_T_BOOL           bIdentificationError;        /**< [in] Identification command sent to slave but failed */
     EC_T_WORD           wIdentificationAdo;          /**< [in] Identification register */
-    EC_T_WORD           wIdentificationVal;          /**< [in] last identification value read from slave according to the last used identification method */
+    EC_T_WORD           wIdentificationVal;          /**< [in] Last identification value read from slave according to the last used identification method */
     EC_T_WORD           wIdentificationValExpected;  /**< [in] Identification expected value */
 
     /* Missing config slave */
@@ -1517,8 +1458,8 @@ typedef struct _EC_T_SB_MISMATCH_DESC
 
 typedef struct _EC_T_LINE_CROSSED_DESC
 {
-    EC_T_SLAVE_PROP     SlaveProp;       /**< slave properties */
-    EC_T_WORD           wInputPort;      /**< port where frame was received */
+    EC_T_SLAVE_PROP     SlaveProp;       /**< Slave properties */
+    EC_T_WORD           wInputPort;      /**< Port where frame was received */
 } EC_PACKED(4) EC_T_LINE_CROSSED_DESC;
 
 typedef struct _EC_T_HC_DETECTALLGROUP_NTFY_DESC
@@ -1526,8 +1467,8 @@ typedef struct _EC_T_HC_DETECTALLGROUP_NTFY_DESC
     EC_T_DWORD  dwResultCode;       /**< Result of Group detection */
     EC_T_DWORD  dwGroupCount;       /**< Total number of Groups */
     EC_T_DWORD  dwGroupsPresent;    /**< Number of connected groups */
-    EC_T_DWORD  dwGroupMask;        /**< Bitmask of first 32 Groups. 1 = present, 0 = absent */
-    EC_T_DWORD  adwGroupMask[100];  /**< Bitmask of first 3200 Groups. */
+    EC_T_DWORD  dwGroupMask;        /**< Bitmask of first 32 Groups. 1 = present, 0 = absent. */
+    EC_T_DWORD  adwGroupMask[100];  /**< Bitmask of first 3200 Groups */
 } EC_PACKED(4) EC_T_HC_DETECTALLGROUP_NTFY_DESC;
 
 typedef struct _EC_T_RAWCMDRESPONSE_NTFY_DESC
@@ -1538,12 +1479,12 @@ typedef struct _EC_T_RAWCMDRESPONSE_NTFY_DESC
     EC_T_DWORD  dwCmdIdx;           /**< [in] Command Index Field */
     EC_T_DWORD  dwAddr;             /**< [in] Address Field */
     EC_T_DWORD  dwLength;           /**< [in] Length of data portion (11 relevant bits) */
-    EC_T_BYTE*  pbyData;            /**< [in] Pointer to data portion within a PDU. The callback function has to store the data into application memory, the data pointer will be invalid after returning from the callback */
+    EC_T_BYTE*  pbyData;            /**< [in] Pointer to data portion within a PDU. The callback function has to store the data into application memory, the data pointer will be invalid after returning from the callback. */
 } EC_PACKED(4) EC_T_RAWCMDRESPONSE_NTFY_DESC;
 
 typedef struct _EC_T_TX_PDO_NTFY_DESC
 {
-    EC_T_DWORD  wPhysAddr;          /* station address */
+    EC_T_DWORD  wPhysAddr;          /* Station address */
     EC_T_DWORD  dwNumber;           /* PDO number */
     EC_T_DWORD  wLen;               /* PDO size */
     EC_T_BYTE*  pbyData;
@@ -1559,8 +1500,8 @@ typedef struct _EC_T_SLAVE_LINKMSG_DESC
 /* EtherCAT state change */
 typedef struct _EC_T_STATECHANGE
 {
-    EC_T_STATE    oldState;         /**< old operational state */
-    EC_T_STATE    newState;         /**< new operational state */
+    EC_T_STATE    oldState;         /**< Old operational state */
+    EC_T_STATE    newState;         /**< New operational state */
 } EC_PACKED(4) EC_T_STATECHANGE;
 
 typedef struct _EC_T_HC_SLAVE_CHANGE_DESC
@@ -1573,7 +1514,7 @@ typedef struct _EC_T_HC_SLAVE_CHANGE_DESC
 #include EC_PACKED_INCLUDESTART(8)
 typedef struct _EC_T_SLAVEREGISTER_TRANSFER_NTFY_DESC
 {
-    EC_T_DWORD  dwTferId;           /**< Transfer ID. For every new slave register transfer a unique ID has to be assigned. This ID can be used after completion to identify the transfer */
+    EC_T_DWORD  dwTferId;           /**< Transfer ID. For every new slave register transfer a unique ID has to be assigned. This ID can be used after completion to identify the transfer. */
     EC_T_DWORD  dwResult;           /**< Result of Slave register transfer */
     EC_T_BOOL   bRead;              /**< EC_TRUE: Read register, EC_FALSE: Write register transfer */
     EC_T_WORD   wFixedAddr;         /**< Station address of slave */
@@ -1601,7 +1542,7 @@ typedef enum _EC_T_EEPROM_OPERATION_TYPE
 #include EC_PACKED_INCLUDESTART(8)
 typedef struct _EC_T_EEPROM_OPERATION_NTFY_DESC
 {
-    EC_T_DWORD                  dwTferId;       /**< Transfer ID. For every new EEPROM operation a unique ID has to be assigned. This ID can be used after completion to identify the transfer */
+    EC_T_DWORD                  dwTferId;       /**< Transfer ID. For every new EEPROM operation a unique ID has to be assigned. This ID can be used after completion to identify the transfer. */
     EC_T_EEPROM_OPERATION_TYPE  eType;          /**< Type of EEPROM operation */
     EC_T_DWORD                  dwResult;       /**< Result of EEPROM operation */
     EC_T_SLAVE_PROP             SlaveProp;      /**< Slave properties */
@@ -1610,16 +1551,16 @@ typedef struct _EC_T_EEPROM_OPERATION_NTFY_DESC
     {
         struct _EC_T_EEPROM_OPERATION_NTFY_DESC_RESULT_READ
         {
-            EC_T_WORD           wEEPRomStartOffset;         /**< Start address of EEPRom operation. Given by API */
-            EC_T_WORD*          pwData;                     /**< Pointer to WORD array contains the data. Given by API */
-            EC_T_DWORD          dwReadLen;                  /**< Number of Words to be read. Given by API */
+            EC_T_WORD           wEEPRomStartOffset;         /**< Start address of EEPRom operation. Given by API. */
+            EC_T_WORD*          pwData;                     /**< Pointer to WORD array containing the data. Given by API. */
+            EC_T_DWORD          dwReadLen;                  /**< Number of Words to be read. Given by API. */
             EC_T_DWORD          dwNumOutData;               /**< Number of Words actually read from EEPRom */
         } EC_PACKED(8) Read;
         struct _EC_T_EEPROM_OPERATION_NTFY_DESC_RESULT_WRITE
         {
-            EC_T_WORD           wEEPRomStartOffset;         /**< Start address of EEPRom operation. Given by API */
-            EC_T_WORD*          pwData;                     /**< Pointer to WORD array contains the data. Given by API */
-            EC_T_DWORD          dwWriteLen;                 /**< Number of Words to be written. Given by API */
+            EC_T_WORD           wEEPRomStartOffset;         /**< Start address of EEPRom operation. Given by API. */
+            EC_T_WORD*          pwData;                     /**< Pointer to WORD array containing the data. Given by API. */
+            EC_T_DWORD          dwWriteLen;                 /**< Number of Words to be written. Given by API. */
         } EC_PACKED(8) Write;
         struct _EC_T_EEPROM_OPERATION_NTFY_DESC_RESULT_ACTIVE
         {
@@ -1638,7 +1579,7 @@ typedef struct _EC_T_EEPROM_OPERATION_NTFY_DESC
 
 typedef struct _EC_T_PORT_OPERATION_NTFY_DESC
 {
-    EC_T_DWORD          dwTferId;                           /**< Transfer ID. For every new port operation a unique ID has to be assigned. This ID can be used after completion to identify the transfer */
+    EC_T_DWORD          dwTferId;                           /**< Transfer ID. For every new port operation a unique ID has to be assigned. This ID can be used after completion to identify the transfer. */
     EC_T_DWORD          dwResult;                           /**< Result of request */
     EC_T_SLAVE_PROP     SlaveProp;                          /**< Slave properties */
     EC_T_WORD           wPortStateOld;                      /**< Old state of the slave ports  */
@@ -1647,11 +1588,11 @@ typedef struct _EC_T_PORT_OPERATION_NTFY_DESC
 
 typedef struct _EC_T_SLAVE_IDENTIFICATION_NTFY_DESC
 {
-    EC_T_DWORD          dwTferId;                           /**< Transfer ID. For every new port operation a unique ID has to be assigned. This ID can be used after completion to identify the transfer */
+    EC_T_DWORD          dwTferId;                           /**< Transfer ID. For every new port operation a unique ID has to be assigned. This ID can be used after completion to identify the transfer. */
     EC_T_DWORD          dwResult;                           /**< Result of request */
     EC_T_SLAVE_PROP     SlaveProp;                          /**< Slave properties */
-    EC_T_WORD           wAdo;                               /**< Slave address offset used for identification. Given by API */
-    EC_T_WORD           wValue;                             /**< Slave identification value. Given by API */
+    EC_T_WORD           wAdo;                               /**< Slave address offset used for identification. Given by API. */
+    EC_T_WORD           wValue;                             /**< Slave identification value. Given by API. */
 } EC_PACKED(8) EC_T_SLAVE_IDENTIFICATION_NTFY_DESC;
 #include EC_PACKED_INCLUDESTOP/*(8)*/
 
@@ -1672,13 +1613,13 @@ typedef struct _EC_T_RELEASE_FORCED_PROCESSDATA_NTFY_DESC
 typedef struct _EC_T_SLAVE_PRESENCE_NTFY_DESC
 {
     EC_T_WORD  wStationAddress;                             /**< Slave station address */
-    EC_T_BYTE  bPresent;                                    /**< EC_TRUE: present , EC_FALSE: absent */
+    EC_T_BYTE  bPresent;                                    /**< EC_TRUE: present, EC_FALSE: absent */
 } EC_PACKED(2) EC_T_SLAVE_PRESENCE_NTFY_DESC;
 
 typedef struct _EC_T_SLAVES_PRESENCE_NTFY_DESC
 {
     EC_T_WORD wCount;                                       /**< Number of slave presence notifications */
-    EC_T_SLAVE_PRESENCE_NTFY_DESC SlavePresence[MAX_SLAVES_PRESENCE_NTFY_ENTRIES];  /**< slave presence descriptions */
+    EC_T_SLAVE_PRESENCE_NTFY_DESC SlavePresence[MAX_SLAVES_PRESENCE_NTFY_ENTRIES];  /**< Slave presence descriptions */
 } EC_PACKED(2) EC_T_SLAVES_PRESENCE_NTFY_DESC;
 #define SIZEOF_EC_T_SLAVES_PRESENCE_NTFY_DESC(wCount) (sizeof(EC_T_WORD)+wCount*sizeof(EC_T_SLAVE_PRESENCE_NTFY_DESC))
 #include EC_PACKED_INCLUDESTOP/*(2)*/
@@ -1687,6 +1628,10 @@ typedef struct _EC_T_SLAVES_PRESENCE_NTFY_DESC
 /* EtherCAT notification descriptor */
 typedef struct _EC_T_NOTIFICATION_DESC
 {
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
     union _EC_T_NOTIFICATION_PARM
     {
         EC_T_DWORD                                     StatusCode;                 /* Generic status code only notification */
@@ -1711,6 +1656,7 @@ typedef struct _EC_T_NOTIFICATION_DESC
         EC_T_DCM_SYNC_NTFY_DESC                        DcmInSyncDesc;
         EC_T_DCX_SYNC_NTFY_DESC                        DcxInSyncDesc;
         EC_T_SLAVE_STATECHANGED_NTFY_DESC              SlaveStateChangedDesc;      /* Slave finished successfully state transition descriptor */
+        EC_T_FSOE_CONNECTION_STATECHANGED_NTFY_DESC    FsoeConnStateChangedDesc;   /* FSoE Connection state changed */
         EC_T_SLAVES_STATECHANGED_NTFY_DESC             SlavesStateChangedDesc;     /* Slaves finished successfully state transition descriptor */
         EC_T_SLAVEREGISTER_TRANSFER_NTFY_DESC          SlaveRegisterTransferDesc;  /* Slave register read/write notification descriptor */
         EC_T_EEPROM_OPERATION_NTFY_DESC                EEPRomOperationDesc;        /* EEProm operation notification descriptor */
@@ -1718,15 +1664,19 @@ typedef struct _EC_T_NOTIFICATION_DESC
         EC_T_SLAVE_IDENTIFICATION_NTFY_DESC            SlaveIdentificationDesc;    /* Slave read identification notification descriptor */
         EC_T_RELEASE_FORCED_PROCESSDATA_NTFY_DESC      ReleaseForcedProcessData;   /* Release forced process data */
         EC_T_EEPROM_ACCESS_DENIED_DESC                 EEPROMAccessDeniedDesc;     /* EEPROM access denied */
+        EC_T_SLAVE_IDENT_TIMEOUT_DESC                  SlaveIdentTimeoutDesc;    /* Slave identification timeout */
     } EC_PACKED(4) desc;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 } EC_PACKED(4) EC_T_NOTIFICATION_DESC;
 
 /* S2S Mailbox Error */
 typedef struct _EC_T_S2SMBX_ERROR_DESC
 {
-    EC_T_SLAVE_PROP SlaveProp;                      /* slave properties of requesting slave */
-    EC_T_WORD       wTargetFixedAddress;            /* fixed address of the target slave */
-    EC_T_DWORD      dwErrorCode;                    /**< error code EC_E_ */
+    EC_T_SLAVE_PROP SlaveProp;                      /**< Slave properties of requesting slave */
+    EC_T_WORD       wTargetFixedAddress;            /**< Fixed address of the target slave */
+    EC_T_DWORD      dwErrorCode;                    /**< Error code */
 } EC_PACKED(4) EC_T_S2SMBX_ERROR_DESC;
 
 /* EtherCAT error notification descriptor */
@@ -1793,66 +1743,77 @@ typedef enum _EC_T_CNF_TYPE
     eCnfType_Data               = 2,                /**< pbyCnfData: ENI data */
     eCnfType_Datadiag           = 3,                /**< pbyCnfData: ENI data for diagnosis */
     eCnfType_GenPreopENI        = 4,                /**< Generate ENI based on bus-scan result to get into PREOP state */
-    eCnfType_GenPreopENIWithCRC = 5,                /**< same as eCnfType_GenPreopENI with CRC protection */
-    eCnfType_GenOpENI           = 6,                /**< Generate ENI based on bus-scan result to get into OP state */
+    eCnfType_GenPreopENIWithCRC = 5,                /**< Same as eCnfType_GenPreopENI with CRC protection */
+    eCnfType_GenOpENI           = 6,                /**< Generate ENI based on bus-scan result to get into OP state. The default PDO mapping read from the slaves is activated. See ETG2010 "SII Specification", Table 14 "Structure Category TXPDO and RXPDO for each PDO". */
     eCnfType_None               = 7,                /**< Reset configuration */
     eCnfType_ConfigData         = 8,                /**< pbyCnfData: Binary structured configuration */
-    eCnfType_GenOpENINoStrings  = 9,                /**< Generate ENI based on bus-scan result to get into OP state , does not read strings from EEPROM */
+    eCnfType_GenOpENINoStrings  = 9,                /**< Generate ENI based on bus-scan result to get into OP state, does not read strings from EEPROM */
+    eCnfType_FileByApp          = 10,               /**< File access provided by user application, See \ref EC_T_CNF_FILEBYAPP_DESC */
+    eCnfType_GenEBI             = 11,               /**< Generate EBI based on bus-scan result */
 
     /* Borland C++ datatype alignment correction */
     eCnfType_BCppDummy   = 0xFFFFFFFF
 } EC_T_CNF_TYPE;
 
-#define TASKID_COMPLETE_PD      0xFFFFFFFF
 /**
- * \typedef EC_T_PFMEMREQ
+ * \typedef EC_PF_CNF_OPEN
+ * \brief Called by the EtherCAT stack instead of OsCfgFileOpen() within emConfigureNetwork(eCnfType_FileByApp)
  * \param [in]  pvContext   Arbitrarily application-defined parameter passed to callback
- * \param [in]  dwTaskId    Task ID of cyclic data transfer. If TASKID_COMPLETE_PD is given, the function must return a complete output process data buffer which contains valid data for all cyclic tasks.
- * \param [out] ppbyPDData  Pointer to the process data buffer to be used. If set to EC_NULL, the corresponding fixed buffer from EC_T_MEMPROV_DESC is used. The provided buffer size must correspond to the caller context.
+ * \return #EC_E_NOERROR or error code
  */
-typedef EC_T_VOID (EC_FNCALL *EC_T_PFMEMREQ)(EC_T_PVOID pvContext, EC_T_DWORD dwTaskId, EC_T_PBYTE* ppbyPDData);
-/**
- * \typedef EC_T_PFMEMREL
- * \param [in]  pvContext   Arbitrarily application-defined parameter passed to callback
- * \param [in]  dwTaskId    Task ID of cyclic data transfer
- */
-typedef EC_T_VOID (EC_FNCALL *EC_T_PFMEMREL)(EC_T_PVOID pvContext, EC_T_DWORD dwTaskId);
+typedef EC_T_DWORD(EC_FNCALL *EC_PF_CNF_OPEN)(EC_T_VOID* pvContext);
 
-/* Descriptor for EC_IOCTL_REGISTER_PDMEMORYPROVIDER */
-typedef struct _EC_T_MEMPROV_DESC
+/**
+ * \typedef EC_PF_CNF_CLOSE
+ * \brief Called by the EtherCAT stack instead of OsCfgFileClose() within emConfigureNetwork(eCnfType_FileByApp)
+ * \param [in]  pvContext   Arbitrarily application-defined parameter passed to callback
+ * \return #EC_E_NOERROR or error code
+ */
+typedef EC_T_DWORD(EC_FNCALL *EC_PF_CNF_CLOSE)(EC_T_VOID* pvContext);
+
+/**
+ * \typedef EC_PF_CNF_READ
+ * \brief Called by the EtherCAT stack instead of OsCfgFileRead() within emConfigureNetwork(eCnfType_FileByApp)
+ * \param [in]  pvContext       Arbitrarily application-defined parameter passed to callback
+ * \param [out] pbyReadData     Pointer to the data read
+ * \param [in]  dwReadLen       Amount of bytes to be read by the EtherCAT stack (next part of the configuration file)
+ * \param [out] pdwNumOutData   Amount of bytes written to pbyReadData by callback
+ * \return #EC_E_NOERROR or error code
+  */
+typedef EC_T_DWORD(EC_FNCALL *EC_PF_CNF_READ)(EC_T_VOID* pvContext, EC_T_BYTE* pbyReadData, EC_T_DWORD dwReadLen, EC_T_DWORD* pdwNumOutData);
+
+/**
+ * \typedef EC_PF_CNF_ERROR
+ * \brief Called by the EtherCAT stack instead of OsCfgFileError() within emConfigureNetwork(eCnfType_FileByApp)
+ * \param [in]  pvContext   Arbitrarily application-defined parameter passed to callback
+ * \return #EC_E_NOERROR or error code
+ */
+typedef EC_T_DWORD(EC_FNCALL *EC_PF_CNF_ERROR)(EC_T_VOID* pvContext);
+
+/**
+ * \typedef EC_PF_CNF_EOF
+ * \brief Called by the EtherCAT stack instead of OsCfgFileEof() within emConfigureNetwork(eCnfType_FileByApp)
+ * \param [in]  pvContext   Arbitrarily application-defined parameter passed to callback
+ * \param [out] bEof        Indicates whether the end of the file has been reached (EC_TRUE if EOF, EC_FALSE otherwise).      
+ * \return #EC_E_NOERROR or error code
+ */
+typedef EC_T_DWORD(EC_FNCALL *EC_PF_CNF_EOF)(EC_T_VOID* pvContext, EC_T_BOOL* bEof);
+
+/**
+ * \typedef EC_T_CNF_FILEBYAPP_DESC
+ * \brief Callbacks of the application called by the EtherCAT stack instead of OsCfg...()-APIs within emConfigureNetwork(eCnfType_FileByApp)
+ */
+typedef struct _EC_T_CNF_FILEBYAPP_DESC
 {
-    EC_T_PVOID      pvContext;                      /**< Context pointer. This pointer is used every time when one of the callback functions (e.g. pfPDOutReadRequest) is called */
-    EC_T_PBYTE      pbyPDOutData;                   /**< Pointer to the fixed output process data buffer (values transferred from the master to the slaves).
-                                                         A value of EC_NULL may be given in case the pointer will be provided later when function EC_T_MEMPROV_DESC.pfPDOutDataReadRequest is called */
-    EC_T_DWORD      dwPDOutDataLength;              /**< Length of the output process data buffer */
-    EC_T_PBYTE      pbyPDInData;                    /**< Pointer to the fixed input process data buffer (values transferred from the slaves to the master).
-                                                         A value of EC_NULL may be given in case the pointer will be provided later when function EC_T_MEMPROV_DESC.pfPDInDataWriteRequest is called */
-    EC_T_DWORD      dwPDInDataLength;               /**< Length of the output process data buffer */
-    EC_T_PFMEMREQ   pfPDOutDataReadRequest;         /**< This function will be called cyclically within the process data transfer cycle prior to read data from the output process data buffer.
-                                                         If EC_NULL is set, the fixed buffer EC_T_MEMPROV_DESC.pbyPDOutData is used. */
-    EC_T_PFMEMREL   pfPDOutDataReadRelease;         /**< This function will be called cyclically within the process data transfer cycle after all data were read from the output process data buffer. */
+    EC_T_VOID*       pvContext;     /**< [in] Arbitrarily application-defined parameter passed to callbacks */
+    EC_PF_CNF_OPEN   pfnFileOpen;   /**< [in] Function pointer called instead of OsCfgFileOpen() */
+    EC_PF_CNF_CLOSE  pfnFileClose;  /**< [in] Function pointer called instead of OsCfgFileClose() */
+    EC_PF_CNF_READ   pfnFileRead;   /**< [in] Function pointer called instead of OsCfgFileRead() */
+    EC_PF_CNF_ERROR  pfnFileError;  /**< [in] Function pointer called instead of OsCfgFileError() */
+    EC_PF_CNF_EOF    pfnFileEof;    /**< [in] Function pointer called instead of OsCfgFileEof() */
+} EC_T_CNF_FILEBYAPP_DESC;
 
-    EC_T_PFMEMREQ   pfPDOutDataWriteRequest;        /**< This function will be called cyclically within the process data transfer cycle prior to write new data into the output process data buffer.
-                                                         If EC_NULL is set, the fixed buffer EC_T_MEMPROV_DESC.pbyPDOutData is used. */
-    EC_T_PFMEMREL   pfPDOutDataWriteRelease;        /**< This function will be called cyclically within the process data transfer cycle after all data were written into the output process data buffer. */
-
-    EC_T_PFMEMREQ   pfPDInDataWriteRequest;         /**< This function will be called cyclically within the process data transfer cycle prior to write new data into the input process data buffer.
-                                                         If EC_NULL is set, the fixed buffer EC_T_MEMPROV_DESC.pbyPDInData is used. */
-    EC_T_PFMEMREL   pfPDInDataWriteRelease;         /**< This function will be called cyclically within the process data transfer cycle after all data were written into the input process data buffer. */
-
-    EC_T_PBYTE      pbyMasterRedPDOutData;          /**< Pointer to the MasterRed output process data buffer (ACTIVE to INACTIVE) */
-    EC_T_DWORD      dwMasterRedPDOutDataLength;     /**< Length of the MasterRed output process data buffer */
-    EC_T_PBYTE      pbyMasterRedPDInData;           /**< Pointer to the default input process data buffer (INACTIVE to ACTIVE) */
-    EC_T_DWORD      dwMasterRedPDInDataLength;      /**< Length of the input  process data buffer */
-    EC_T_PFMEMREQ   pfMasterRedPDOutReadRequest;    /**< This function will be called within the process data transfer cycle prior to read data. */
-    EC_T_PFMEMREL   pfMasterRedPDOutReadRelease;    /**< This function will be called after all data was read  from output process data buffer. */
-    EC_T_PFMEMREQ   pfMasterRedPDOutWriteRequest;   /**< This function will be called within the process data transfer cycle prior to read data. */
-    EC_T_PFMEMREL   pfMasterRedPDOutWriteRelease;   /**< This function will be called after all data was read from output process data buffer. */
-    EC_T_PFMEMREQ   pfMasterRedPDInWriteRequest;    /**< This function will be called within the process data transfer cycle prior to write data. */
-    EC_T_PFMEMREL   pfMasterRedPDInWriteRelease;    /**< This function will be called after all data was written to input process data buffer. */
-    EC_T_PFMEMREQ   pfMasterRedPDInReadRequest;     /**< This function will be called within the process data transfer cycle prior to write data. */
-    EC_T_PFMEMREL   pfMasterRedPDInReadRelease;     /**< This function will be called after all data was written to input process data buffer. */
-} EC_PACKED(4) EC_T_MEMPROV_DESC, *EC_PT_MEMPROV_DESC;
+#define TASKID_COMPLETE_PD      0xFFFFFFFF
 
 typedef struct _EC_T_SB_SLAVEINFO_DESC
 {
@@ -1889,14 +1850,14 @@ typedef enum _EC_T_eEEPENTRY
 typedef struct _EC_T_SCANBUS_PROP_DESC
 {
     EC_T_eEEPENTRY  eEEPROMEntry;           /**< [in] EEPROM entry (slave property) to add */
-    EC_T_DWORD      dwVerify;               /**< [in] if set to EC_TRUE the actual slave property (stored in the EEPROM) will be compared with the appropriate value in the XML configuration file */
+    EC_T_DWORD      dwVerify;               /**< [in] If set to EC_TRUE the actual slave property (stored in the EEPROM) will be compared with the appropriate value in the XML configuration file */
 } EC_PACKED(4) EC_T_SCANBUS_PROP_DESC, *EC_PT_SCANBUS_PROP_DESC;
 
 typedef enum _EC_T_eSBSlaveInfoType
 {
     sbsit_unknown       = 0,
-    sbsit_bustopology   = 1,                /**< info from bus */
-    sbsit_configuration = 2,                /**< info from XML configuration */
+    sbsit_bustopology   = 1,                /**< Info from bus */
+    sbsit_configuration = 2,                /**< Info from XML configuration */
 
     /* Borland C++ datatype alignment correction */
     sbsit_BCppDummy     = 0xFFFFFFFF
@@ -1906,7 +1867,7 @@ typedef struct _EC_T_SB_SLAVEINFO_EEP_REQ_DESC
 {
     EC_T_eSBSlaveInfoType       eSbSlaveInfoType;       /**< [in] Selection whether to use Auto-Increment address of Bus or XML Configuration */
     EC_T_DWORD                  wAutoIncAddress;        /**< [in] Auto-Increment address of the slave */
-    EC_T_eEEPENTRY              eEEPROMEntry;           /**< [in] EEPROM entry to read (only valid if entry was selected by emIoControl EC_IOCTL_SB_SET_BUSCNF_VERIFY_PROP) */
+    EC_T_eEEPENTRY              eEEPROMEntry;           /**< [in] EEPROM entry to read (only valid if entry was selected by emIoCtl EC_IOCTL_SB_SET_BUSCNF_VERIFY_PROP) */
 } EC_T_SB_SLAVEINFO_EEP_REQ_DESC;
 
 typedef struct _EC_T_SB_SLAVEINFO_EEP_RES_DESC
@@ -1974,14 +1935,6 @@ typedef struct _EC_T_SB_SLAVEINFO_RES_DESC
     EC_T_PBYTE      pbyInfo;            /**< [out] Pointer to Info (-1 if no info found in XML file) */
 } EC_PACKED(4) EC_T_SB_SLAVEINFO_RES_DESC;
 
-/* descriptor for EC_IOCTL_GET_CYCLIC_CONFIG_INFO call */
-typedef struct _EC_T_CYC_CONFIG_DESC
-{
-    EC_T_DWORD      dwNumCycEntries;    /**< [out] Total number of cyclic entries */
-    EC_T_DWORD      dwTaskId;           /**< [out] Task id of selected cyclic entry */
-    EC_T_DWORD      dwPriority;         /**< [out] Priority of selected cyclic entry */
-    EC_T_DWORD      dwCycleTime;        /**< [out] Cycle time of selected cyclic entry */
-} EC_PACKED(4) EC_T_CYC_CONFIG_DESC;
 
 typedef EC_T_DWORD (EC_FNCALL *EC_PF_TIMESTAMP)(              EC_T_PVOID      pCallerData,
                                                     EC_T_DWORD*     pdwHostTimeLo   );
@@ -2022,20 +1975,6 @@ typedef struct _EC_T_REGISTER_TSRESULTS
     EC_T_ACTUALVAL*     pActualValues;          /**< out pointer to data carrying current data */
 } EC_PACKED(4) EC_T_REGISTER_TSRESULTS;
 
-typedef struct _EC_T_SLVSTATISTICS_DESC
-{
-    EC_T_BYTE       abyInvalidFrameCnt[ESC_PORT_COUNT]; /**< [out] Invalid Frame Counters per Slave Port */
-    EC_T_BYTE       abyRxErrorCnt[ESC_PORT_COUNT];      /**< [out] RX Error Counters per Slave Port */
-    EC_T_BYTE       abyFwdRxErrorCnt[ESC_PORT_COUNT];   /**< [out] Forwarded RX Error Counters per Slave Port */
-    EC_T_BYTE       byProcessingUnitErrorCnt;           /**< [out] Processing Unit Error Counter */
-    EC_T_BYTE       byPdiErrorCnt;                      /**< [out] PDI Error Counter */
-    EC_T_WORD       wAlStatusCode;                      /**< [out] AL Status Code */
-    EC_T_BYTE       abyLostLinkCnt[ESC_PORT_COUNT];     /**< [out] Lost Link Counters per Slave Port */
-
-    EC_T_UINT64     qwReadTime;                         /**< [out] Timestamp of the last read [ns] */
-    EC_T_UINT64     qwChangeTime;                       /**< [out] Timestamp of the last counter change [ns] */
-} EC_PACKED(4) EC_T_SLVSTATISTICS_DESC;
-
 #define IGNORE_PREV_PORT_FLAG       ((EC_T_WORD)(0x8000))
 typedef struct _EC_T_SLAVE_PORT_DESC
 {
@@ -2055,12 +1994,12 @@ typedef enum _EC_T_EHOTCONNECTMODE
     echm_fullmanual     = 0x0004,   /**< Reserved */
     echm_manual_noreset = 0x0008,   /**< Manual mode of operation without slave reset.\n
                                          The Hot-Connect instance detects and notifies a topology change to the application. 
-                                         The new slaves retain in their state, no slave state transition via #DEVICE_STATE_INIT is executed during the detection.
+                                         The new slaves retain their state, no slave state transition via #DEVICE_STATE_INIT is executed during the detection.
                                          The application can accept the topology change by calling emHCAcceptTopoChange(), this sets all newly detected slaves to the master state. */
     echm_borderclose    = 0x0010,   /**< Activates border close.\n
                                          If this option is set, the still open ports in the configuration and in the EtherCAT network, respectively are closed automatically. 
                                          As a result, new slaves outside the configuration, which are connected to any port, do not disturb the running bus and trigger a topology change. 
-                                         If a configured Hot-Connect group is removed, the corresponding allowed port are remain open for connection. */
+                                         If a configured Hot-Connect group is removed, the corresponding allowed ports remain open for connection. */
 
     echm_BCppDummy =   0xFFFFFFFF
 } EC_T_EHOTCONNECTMODE;
@@ -2096,19 +2035,19 @@ typedef EC_T_VOID (EC_FNCALL *EC_T_PF_RXFRAME_CB)(EC_T_VOID*);
 /* ecatGetCfgSlaveInfo */
 typedef struct _EC_T_CFG_SLAVE_INFO
 {
-    EC_T_DWORD                  dwSlaveId;                              /**< [out] The slave's ID to bind bus slave and config slave information */
-    EC_T_CHAR                   abyDeviceName[ECAT_DEVICE_NAMESIZE];    /**< [out] The slave's configured name (80 Byte) (from ENI file) */
-    EC_T_DWORD                  dwHCGroupIdx;                           /**< [out] Index of the hot connect group, 0 for mandatory */
-    EC_T_BOOL                   bIsPresent;                             /**< [out] Slave is currently present on bus */
-    EC_T_BOOL                   bIsHCGroupPresent;                      /**< [out] Slave's hot connect group is currently present on bus */
+    EC_T_DWORD                  dwSlaveId;                              /**< [out] Slave's ID to bind bus slave and config slave information */
+    EC_T_CHAR                   abyDeviceName[ECAT_DEVICE_NAMESIZE];    /**< [out] Slave's configured name (80 Byte) (from ENI file) */
+    EC_T_DWORD                  dwHCGroupIdx;                           /**< [out] Index of Hot Connect group, 0 for mandatory */
+    EC_T_BOOL                   bIsPresent;                             /**< [out] Slave present on bus */
+    EC_T_BOOL                   bIsHCGroupPresent;                      /**< [out] Slave's Hot Connect group present on bus */
 
     EC_T_DWORD                  dwVendorId;                             /**< [out] Vendor identification (from ENI file) */
     EC_T_DWORD                  dwProductCode;                          /**< [out] Product code (from ENI file) */
     EC_T_DWORD                  dwRevisionNumber;                       /**< [out] Revision number (from ENI file) */
     EC_T_DWORD                  dwSerialNumber;                         /**< [out] Serial number (from ENI file) */
 
-    EC_T_WORD                   wStationAddress;                        /**< [out] The slave's station address (from ENI file) */
-    EC_T_WORD                   wAutoIncAddress;                        /**< [out] The slave's auto increment address (from ENI file) */
+    EC_T_WORD                   wStationAddress;                        /**< [out] Slave's configured station address (from ENI file) */
+    EC_T_WORD                   wAutoIncAddress;                        /**< [out] Slave's auto increment address (may differ from ENI file) */
 
     EC_T_DWORD                  dwPdOffsIn;             /**< [out] Process input data bit offset (from ENI file) */
     EC_T_DWORD                  dwPdSizeIn;             /**< [out] Process input data bit size (from ENI file) */
@@ -2130,7 +2069,7 @@ typedef struct _EC_T_CFG_SLAVE_INFO
     EC_T_DWORD                  dwPdOffsOut4;           /**< [out] 4th sync unit process output data bit offset (from ENI file) */
     EC_T_DWORD                  dwPdSizeOut4;           /**< [out] 4th sync unit process output data bit size (from ENI file) */
 
-    EC_T_DWORD                  dwMbxSupportedProtocols;/**< [out] Mailbox protocols supported by the slave (from ENI file). Combination of \ref EC_MBX_PROTOCOLS "Supported mailbox protocols" flags */
+    EC_T_DWORD                  dwMbxSupportedProtocols;/**< [out] Mailbox protocols supported by the slave (from ENI file). Combination of \ref EC_MBX_PROTOCOLS "Supported mailbox protocols" flags. */
     EC_T_DWORD                  dwMbxOutSize;           /**< [out] Mailbox output byte size (from ENI file) */
     EC_T_DWORD                  dwMbxInSize;            /**< [out] Mailbox input byte size (from ENI file) */
 
@@ -2150,24 +2089,38 @@ typedef struct _EC_T_CFG_SLAVE_INFO
     EC_T_BYTE                   byPortDescriptor;       /**< [out] Port descriptor (ESC register 0x0007) (from ENI file) */
 
     EC_T_BYTE                   abyReserved[3];
-    EC_T_WORD                   wWkcStateDiagOffsIn[EC_CFG_SLAVE_PD_SECTIONS];  /**< [out] Offset of WkcState bit in diagnosis image (ENI: ProcessData/Recv[1..4]/BitStart): 0xFFFFFFFF = offset not available. WkcState bit values: 0 = Data valid, 1 = Data invalid */
-    EC_T_WORD                   wWkcStateDiagOffsOut[EC_CFG_SLAVE_PD_SECTIONS]; /**< [out] Offset of WkcState bit in diagnosis image (ENI: ProcessData/Send[1..4]/BitStart): 0xFFFFFFFF = offset not available. WkcState bit values: 0 = Data valid, 1 = Data invalid */
+    EC_T_WORD                   wWkcStateDiagOffsIn[EC_CFG_SLAVE_PD_SECTIONS];  /**< [out] Offset of WkcState bit in diagnosis image (ENI: ProcessData/Recv[1..4]/BitStart): 0xFFFFFFFF = offset not available. WkcState bit values: 0 = Data valid, 1 = Data invalid. */
+    EC_T_WORD                   wWkcStateDiagOffsOut[EC_CFG_SLAVE_PD_SECTIONS]; /**< [out] Offset of WkcState bit in diagnosis image (ENI: ProcessData/Send[1..4]/BitStart): 0xFFFFFFFF = offset not available. WkcState bit values: 0 = Data valid, 1 = Data invalid. */
 
     EC_T_WORD                   awMasterSyncUnitIn[EC_CFG_SLAVE_PD_SECTIONS];   /**< [out] Sync Unit (ENI: ProcessData/TxPdo[1..4]@Su) */
     EC_T_WORD                   awMasterSyncUnitOut[EC_CFG_SLAVE_PD_SECTIONS];  /**< [out] Sync Unit (ENI: ProcessData/RxPdo[1..4]@Su) */
 
-    EC_T_BOOL                   bDisabled;              /**< [out] Slave disabled by API (emSetSlaveDisabled / emSetSlavesDisabled). */
-    EC_T_BOOL                   bDisconnected;          /**< [out] Slave disconnected by API (emSetSlaveDisconnected / emSetSlavesDisconnected). */
-    EC_T_BOOL                   bExtended;              /**< [out] Slave generated by emConfigExtend */
+    EC_T_BOOL                   bDisabled;              /**< [out] Slave disabled by API SetSlaveDisabled / SetSlavesDisabled. */
+    EC_T_BOOL                   bDisconnected;          /**< [out] Slave disconnected by API SetSlaveDisconnected / SetSlavesDisconnected. */
+    EC_T_BOOL                   bExtended;              /**< [out] Slave generated by API ConfigExtend */
 
     EC_T_BOOL                   bDcReferenceClock;      /**< [out] Slave is reference clock (from ENI file) */
     EC_T_BOOL                   bDcPotentialRefClock;   /**< [out] Slave can be used as a reference clock (from ENI file) */
-    EC_T_DWORD                  dwDcCycleTime0;         /**< [out] Cycle time of Sync0 event in ns (from ENI file) */
+    EC_T_DWORD                  dwDcCycleTime0;         /**< [out] Cycle time of Sync0 event [ns] (from ENI file) */
     EC_T_DWORD                  dwDcCycleTime1;         /**< [out] Calculated value dwDcCycleTime1 [ns] = Cycle time of Sync1 event - Cycle time of Sync1 event + Shift time of Sync0 event (from ENI file) */
-    EC_T_INT                    nDcShiftTime;           /**< [out] Shift time of Sync0 event in ns (from ENI file) */
+    EC_T_INT                    nDcShiftTime;           /**< [out] Shift time of Sync0 event [ns] (from ENI file) */
 
-    EC_T_DWORD                  adwReserved[8];
+    EC_T_CHAR                   szProductRevision[24];  /**< [out] Slave's ProductRevision (ENI:Slave/Info/ProductRevision), e.g. "EK1100-0000-0018". Empty string if not present in ENI. */
+    EC_T_DWORD                  dwReserved[2];
 } EC_PACKED(4) EC_T_CFG_SLAVE_INFO;
+
+typedef struct _EC_T_HC_GROUP_INFO                      
+{
+    EC_T_DWORD                  dwHcGroupIdx;                                  /**< [out] Index of Hot Connect group */
+    EC_T_CHAR                   szGroupName[ECAT_DEVICE_NAMESIZE];             /**< [out] Hot connect group name (from ENI file) */
+    EC_T_DWORD                  dwNumOfSlaves;                                 /**< [out] Number of Slaves within the group */
+    EC_T_WORD                   wHeadSlaveStationAddress;                      /**< [out] Physical address of the head slave of the HC group */
+    EC_T_WORD                   wIdentificationAdo;                            /**< [out] Ado of Identification check */
+    EC_T_WORD                   wIdentificationVal;                            /**< [out] Val of Identification check */
+    EC_T_BOOL                   bIsPresent;                                    /**< [out] EC_TRUE if HC group is present, EC_FALSE otherwise  */
+    EC_T_BOOL                   bIsMandatory;                                  /**< [out] EC_TRUE if HC group is mandatory, EC_FALSE otherwise  */
+    EC_T_DWORD                  adwReserved[8];
+} EC_PACKED(4) EC_T_HC_GROUP_INFO;
 
 typedef struct _EC_T_PROFILE_CHANNEL_INFO
 {
@@ -2198,7 +2151,32 @@ typedef struct _EC_T_CFG_SLAVE_EOE_INFO
 
     EC_T_BOOL                   bDnsName;               /**< [out] Indicates whether the DNS name could be read and is valid */
     EC_T_CHAR                   szDnsName[32];          /**< [out] DNS name */
+    EC_T_BOOL                   bDisableEoe;            /**< [out] Indicates whether the EoE is Disabled or not */
+    EC_T_DWORD                  dwRes[4];
 } EC_PACKED(4) EC_T_CFG_SLAVE_EOE_INFO;
+
+/* ecatGetCfgSlaveSmInfo */
+typedef struct _EC_T_CFG_SLAVE_SM_ENTRY
+{
+    EC_T_WORD                   wPhysAddr;              /**< [out] ESC (0x800 + y * 8) */
+    EC_T_WORD                   wLength;                /**< [out] ESC (0x802 + y * 8)*/
+    EC_T_BYTE                   byOpMode;               /**< [out] Bits 0..1 ESC (0x804 + y * 8)*/
+    EC_T_BYTE                   byDirection;            /**< [out] Bits 2..3 ESC (0x804 + y * 8)*/
+    EC_T_WORD                   wReserved;
+    EC_T_DWORD                  dwPdBitOffs;            /**< [out] Process input data bit offset (from ENI file) */
+    EC_T_DWORD                  dwPdBitSize;            /**< [out] Process input data bit size (from ENI file) */
+    EC_T_WORD                   wWkcStateDiagBitOffs;   /**< [out] Offset of WkcState bit in diagnosis image */
+    EC_T_WORD                   wMasterSyncUnit;        /**< [out] Sync Unit (ENI: ProcessData/TxPdo[1..4]@Su) */
+    EC_T_DWORD                  dwReserved[4];
+} EC_PACKED(4) EC_T_CFG_SLAVE_SM_ENTRY;
+
+typedef struct _EC_T_CFG_SLAVE_SM_INFO
+{
+    EC_T_DWORD    dwSlaveId;                                        /**< [out] Slave ID */
+    EC_T_DWORD    dwSmInfoNumOf;                                    /**< [out] Number of available sync managers */
+    EC_T_CFG_SLAVE_SM_ENTRY aoSmInfos[ECREG_SYNCMANAGER_MAX_NUMOF]; /**< [out] Sync managers info */
+    EC_T_DWORD    dwReserved[8];
+} EC_PACKED(4) EC_T_CFG_SLAVE_SM_INFO;
 
 /* ecatGetBusSlaveInfo */
 /** \defgroup EC_LINECROSSED_FLAGS Line crossed flags
@@ -2210,11 +2188,13 @@ typedef struct _EC_T_CFG_SLAVE_EOE_INFO
 #define EC_LINECROSSED_HIDDEN_SLAVE_CONNECTED       ((EC_T_WORD)0x00000010)
 #define EC_LINECROSSED_PHYSIC_MISMATCH              ((EC_T_WORD)0x00000020)
 #define EC_LINECROSSED_INVALID_PORT_CONNECTION      ((EC_T_WORD)0x00000040)
+#define EC_LINECROSSED_UNEXPECTED_CABLE_RED         ((EC_T_WORD)0x00000080)
 /**@}*/
+
 typedef struct _EC_T_BUS_SLAVE_INFO
 {
     EC_T_DWORD                  dwSlaveId;                          /**< [out] The slave's ID to bind bus slave and config slave information */
-    EC_T_DWORD                  adwPortSlaveIds[ESC_PORT_COUNT];    /**< [out] The slave's ID of the slaves connected to ports. See \ref EC_SLAVE_IDS "Port slave ID's" */
+    EC_T_DWORD                  adwPortSlaveIds[ESC_PORT_COUNT];    /**< [out] The slave's ID of the slaves connected to ports. See \ref EC_SLAVE_IDS "Port slave ID's". */
     EC_T_WORD                   wPortState;                         /**< [out] Port link state. Format: wwww xxxx yyyy zzzz (each nibble : port 3210)\n
                                                                                wwww : Signal detected 1=yes, 0=no\n     xxxx : Loop closed 1=yes, 0=no\n
                                                                                yyyy : Link established 1=yes, 0=no\n    zzzz : Slave connected 1=yes, 0=no (zzzz = logical result of w,x,y) */
@@ -2236,15 +2216,15 @@ typedef struct _EC_T_BUS_SLAVE_INFO
     EC_T_WORD                   wStationAddress;                    /**< [out] The slave's station address (Value of slave ESC register 0x0010) */
     EC_T_WORD                   wAliasAddress;                      /**< [out] The slave's alias address (Value of slave ESC register 0x0012) */
     EC_T_WORD                   wAlStatus;                          /**< [out] AL status (Value of slave ESC register 0x0130) */
-    EC_T_WORD                   wAlStatusCode;                      /**< [out] AL status code. (Value of slave ESC register 0x0134 during last error acknowledge). This value is reset after a slave state change */
+    EC_T_WORD                   wAlStatusCode;                      /**< [out] AL status code. (Value of slave ESC register 0x0134 during last error acknowledge). This value is reset after a slave state change. */
     EC_T_DWORD                  dwSystemTimeDifference;             /**< [out] System time difference. (Value of slave ESC register 0x092C) */
     EC_T_WORD                   wMbxSupportedProtocols;             /**< [out] Supported Mailbox Protocols stored in the EEPROM at offset 0x001C */
     EC_T_WORD                   wDlStatus;                          /**< [out] DL status (Value of slave ESC register 0x0110) */
     EC_T_WORD                   wPrevPort;                          /**< [out] Connected port of the previous slave */
     EC_T_WORD                   wIdentifyData;                      /**< [out] Last read identification value see EC_T_CFG_SLAVE_INFO.wIdentifyAdo */
     EC_T_BOOL                   bLineCrossed;                       /**< [out] Line crossed was detected at this slave */
-    EC_T_DWORD                  dwSlaveDelay;                       /**< [out] Delay behind slave [ns]. This value is only valid if a DC configuration is used */
-    EC_T_DWORD                  dwPropagDelay;                      /**< [out] Propagation delay [ns]. ESC register 0x0928,This value is only valid if a DC configuration is used */
+    EC_T_DWORD                  dwSlaveDelay;                       /**< [out] Delay behind slave [ns]. */
+    EC_T_DWORD                  dwPropagDelay;                      /**< [out] Propagation delay [ns]. ESC register 0x0928. */
     EC_T_BOOL                   bIsRefClock;                        /**< [out] Slave is reference clock */
     EC_T_BOOL                   bIsDeviceEmulation;                 /**< [out] Slave without Firmware. ESC register 0x0141, enabled by EEPROM offset 0x0000.8. */
     EC_T_WORD                   wLineCrossedFlags;                  /**< [out] Combination of \ref EC_LINECROSSED_FLAGS "Line crossed flags" */
@@ -2340,28 +2320,30 @@ typedef struct _EC_T_MAILBOX_STATISTICS
 /* ecatGetMasterInfo */
 typedef struct _EC_T_MASTER_INFO
 {
-    EC_T_DWORD              dwMasterVersion;                /**< Master version */
-    EC_T_BUS_DIAGNOSIS_INFO BusDiagnosisInfo;               /**< Bus diagnostics */
-    EC_T_MAILBOX_STATISTICS MailboxStatistics;              /**< Mailbox statistics */
-    EC_T_REDUNDANCY_DIAGNOSIS_INFO RedundancyDiagnosisInfo; /**< Redundancy diagnosis info */
-    EC_T_DWORD              dwMasterStateSummary;           /**< Master state summary */
-    EC_T_DWORD              dwMasterVersionType;            /**< Master version type */
-    EC_T_DWORD              adwReserved[22];
+    EC_T_DWORD              dwMasterVersion;                    /**< Master version */
+    EC_T_BUS_DIAGNOSIS_INFO BusDiagnosisInfo;                   /**< Bus diagnostics */
+    EC_T_MAILBOX_STATISTICS MailboxStatistics;                  /**< Mailbox statistics */
+    EC_T_REDUNDANCY_DIAGNOSIS_INFO RedundancyDiagnosisInfo;     /**< Redundancy diagnosis info */
+    EC_T_DWORD              dwMasterStateSummary;               /**< Master state summary */
+    EC_T_DWORD              dwMasterVersionType;                /**< Master version type. See \ref EC_VERSION_TYPES "EC_VERSION_TYPE" */
+    EC_T_WORD               wMasterStateSummaryDiagBitOffset;   /**< Bit offset of Master state summary in diagnosis image */
+    EC_T_WORD               wMasterStateSummaryDiagBitSize;     /**< Bit offset size of Master state summary in diagnosis image */
+    EC_T_DWORD              adwReserved[21];
 } EC_PACKED(4) EC_T_MASTER_INFO;
 
-#define ECMASTERRAS_ACCESS_LEVEL_ALLOW_ALL  1   /* all functions calls allowed, i.e. change of master state as well */
-#define ECMASTERRAS_ACCESS_LEVEL_READWRITE  2   /* functions with parameter change, i.e. set or download */
-#define ECMASTERRAS_ACCESS_LEVEL_READONLY   3   /* functions with no parameter change, i.e. get or upload */
-#define ECMASTERRAS_ACCESS_LEVEL_BLOCK_ALL  4   /* no functions calls allowed */
-#define ECMASTERRAS_ACCESS_LEVEL_EXCLUDED   ((EC_T_DWORD)-1)
+#define EC_RAS_ACCESS_LEVEL_ALLOW_ALL  1   /* all functions calls allowed, i.e. change of master state as well */
+#define EC_RAS_ACCESS_LEVEL_READWRITE  2   /* functions with parameter change, i.e. set or download */
+#define EC_RAS_ACCESS_LEVEL_READONLY   3   /* functions with no parameter change, i.e. get or upload */
+#define EC_RAS_ACCESS_LEVEL_BLOCK_ALL  4   /* no functions calls allowed */
+#define EC_RAS_ACCESS_LEVEL_EXCLUDED   ((EC_T_DWORD)-1)
 
-/* ECMASTERRAS_ACCESS_LEVEL_... number to text */
+/* EC_RAS_ACCESS_LEVEL_... number to text */
 #define RasAccessLevelText(eLevel)                   \
-    ((eLevel)==ECMASTERRAS_ACCESS_LEVEL_ALLOW_ALL?"allow all":     \
-     ((eLevel)==ECMASTERRAS_ACCESS_LEVEL_READWRITE?"read/write":   \
-      ((eLevel)==ECMASTERRAS_ACCESS_LEVEL_READONLY?"read only":    \
-       ((eLevel)==ECMASTERRAS_ACCESS_LEVEL_BLOCK_ALL?"block all":  \
-        "INVALID ECMASTERRAS_ACCESS_LEVEL_..."))))
+    ((eLevel)==EC_RAS_ACCESS_LEVEL_ALLOW_ALL?"allow all":     \
+     ((eLevel)==EC_RAS_ACCESS_LEVEL_READWRITE?"read/write":   \
+      ((eLevel)==EC_RAS_ACCESS_LEVEL_READONLY?"read only":    \
+       ((eLevel)==EC_RAS_ACCESS_LEVEL_BLOCK_ALL?"block all":  \
+        "INVALID EC_RAS_ACCESS_LEVEL_..."))))
 
 typedef struct _EC_T_RAS_CONNECTION_INFO
 {
@@ -2375,34 +2357,25 @@ typedef struct _EC_T_RAS_CONNECTION_INFO
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_MSU_INFO
 {
-    EC_T_WORD       wMsuId;                         /**< [out] master sync unit ID */
-    EC_T_DWORD      dwBitOffsIn;                    /**< [out] input bit offset of master sync unit in process data image */
-    EC_T_DWORD      dwBitSizeIn;                    /**< [out] input bit size of master sync unit */
-    EC_T_DWORD      dwBitOffsOut;                   /**< [out] output bit offset of master sync unit in process data image */
-    EC_T_DWORD      dwBitSizeOut;                   /**< [out] output bit size of master sync unit */
-    EC_T_WORD       wWkcStateDiagOffsIn;            /**< [out] Offset of WkcState bit in diagnosis image WkcState bit values: 0 = Data Valid, 1 = Data invalid */
-    EC_T_WORD       wWkcStateDiagOffsOut;           /**< [out] Offset of WkcState bit in diagnosis image WkcState bit values: 0 = Data Valid, 1 = Data invalid */
+    EC_T_WORD       wMsuId;                         /**< [out] Master Sync Unit ID (ENI: Slave/ProcessData/RxPdo[1..4]@Su, Slave/ProcessData/TxPdo[1..4]@Su, comment at Cyclic/Frame/Cmd) */
+    EC_T_DWORD      dwBitOffsIn;                    /**< [out] Process Data Image INPUTs bit offset */
+    EC_T_DWORD      dwBitSizeIn;                    /**< [out] Process Data Image INPUTs bit length */
+    EC_T_DWORD      dwBitOffsOut;                   /**< [out] Process Data Image OUTPUTs bit offset */
+    EC_T_DWORD      dwBitSizeOut;                   /**< [out] Process Data Image OUTPUTs bit length */
+    EC_T_WORD       wWkcStateDiagOffsIn;            /**< [out] INPUTs WkcState bit offset in Diagnosis Image. (Bit values: 0 = Process Data valid, 1 = Process Data invalid) */
+    EC_T_WORD       wWkcStateDiagOffsOut;           /**< [out] OUTPUTs WkcState bit offset in Diagnosis Image. (Bit values: 0 = Process Data valid, 1 = Process Data invalid) */
 
     EC_T_DWORD      adwReserved[16];                /**< reserved */
 } EC_PACKED_API  EC_T_MSU_INFO;
 #include EC_PACKED_INCLUDESTOP
 
-#include EC_PACKED_API_INCLUDESTART
-typedef struct _EC_T_TOPOLOGY_CHANGED_DELAYS
-{
-    EC_T_DWORD      dwSlavePort;                    /**< [in] Delay before opening slave port after link connection detected */
-    EC_T_DWORD      dwMainLine;                     /**< [in] Delay before sending frames at main line after link connection detected */
-    EC_T_DWORD      dwRedLine;                      /**< [in] Delay before sending frames at red line after link connection detected */
 
-    EC_T_DWORD      adwReserved[5];                 /**< reserved */
-} EC_PACKED_API  EC_T_TOPOLOGY_CHANGED_DELAYS;
-#include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_LINK_CONNECTED_INFO
 {
     EC_T_BOOL       bConnected;                     /**< [out] MAIN or RED link detected */
-    EC_T_BOOL       bSendEnabled;                   /**< [out] send enabled on MAIN or RED */
+    EC_T_BOOL       bSendEnabled;                   /**< [out] Send enabled on MAIN or RED */
     EC_T_BOOL       bMainConnected;                 /**< [out] MAIN link detected */
     EC_T_BOOL       bMainMasked;                    /**< [out] MAIN link not used for sending, because topology changed delay not elapsed yet */
     EC_T_BOOL       bRedConnected;                  /**< [out] RED  link detected */
@@ -2415,30 +2388,18 @@ typedef struct _EC_T_LINK_CONNECTED_INFO
 /**
  * \typedef EC_PF_NOTIFY
  * \param [in] dwCode   Notification code, see EC_NOTIFY_...
- * \param [in] pParms   Notification code depending data.
+ * \param [in] pParms   Notification code depending data
  */
-typedef EC_T_DWORD (*EC_PF_NOTIFY)(EC_T_DWORD dwCode, EC_T_NOTIFYPARMS* pParms);
-
-/* EtherCAT ioctl parameters */
-#include EC_PACKED_API_INCLUDESTART
-typedef struct _EC_T_IOCTLPARMS
-{
-    EC_T_BYTE*      pbyInBuf;                       /**< [in] Pointer to control input parameter. */
-    EC_T_DWORD      dwInBufSize;                    /**< [in] Size of the input buffer provided at pbyInBuf in bytes */
-    EC_T_BYTE*      pbyOutBuf;                      /**< [out] Pointer to control output buffer where the results will be copied into */
-    EC_T_DWORD      dwOutBufSize;                   /**< [in] Size of the output buffer provided at pbyOutBuf in bytes */
-    EC_T_DWORD*     pdwNumOutData;                  /**< [out] Pointer to EC_T_DWORD. Amount of bytes written to the output buffer */
-} EC_PACKED_API EC_T_IOCTLPARMS;
-#include EC_PACKED_INCLUDESTOP
+typedef EC_T_DWORD (EC_FNCALL *EC_PF_NOTIFY)(EC_T_DWORD dwCode, EC_T_NOTIFYPARMS* pParms);
 
 /* Client register parameters */
 typedef struct _EC_T_REGISTERPARMS
 {
-    EC_T_VOID*      pCallerData;                    /**< [in] used by all callback functions */
-    EC_PF_NOTIFY    pfnNotify;                      /**< [in] notify callback function pointer */
+    EC_T_VOID*      pCallerData;                    /**< [in] Used by all callback functions */
+    EC_PF_NOTIFY    pfnNotify;                      /**< [in] Notify callback function pointer */
 }/*EC_PACKED */EC_T_REGISTERPARMS; /* Packed function pointer causes error with VxWorks DIAB compiler */
 
-                                   /* Client register result */
+    /* Client register result */
 #include EC_PACKED_INCLUDESTART(1)
 typedef struct _EC_T_REGISTERRESULTS
 {
@@ -2449,9 +2410,6 @@ typedef struct _EC_T_REGISTERRESULTS
     EC_T_DWORD      dwPDOutSize;                    /**< [out] Size of process data output memory (in bytes) */
 } EC_PACKED(1) EC_T_REGISTERRESULTS;
 #include EC_PACKED_INCLUDESTOP
-
-/* Msg logging */
-typedef EC_T_BOOL (EC_FNCALL *EC_T_PFLOGMSG_CB)(const EC_T_CHAR* szFormat, EC_T_VALIST vaArgs);
 
 /**
 \defgroup EC_LOG_FRAME_FLAGS
@@ -2479,12 +2437,13 @@ typedef EC_T_VOID (EC_FNCALL *EC_T_PFLOGFRAME_CB)(EC_T_VOID* pvContext, EC_T_DWO
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_MASTER_RED_PARMS
 {
-    EC_T_BOOL   bEnabled;                      /**< [in] set to EC_TRUE if using Master Redundancy */
+    EC_T_BOOL   bEnabled;                      /**< [in] Set to EC_TRUE if using Master Redundancy */
     EC_T_WORD   wMasterPdOutSize;              /**< [in] ACTIVE to INACTIVE Master Process Data (in bytes) */
     EC_T_WORD   wMasterPdInSize;               /**< [in] INACTIVE to ACTIVE Master Process Data (in bytes) */
-    EC_T_DWORD  dwMaxAcycFramesPerCycle;       /**< [in] maximum acyclic Master Red frames sent per cycle */
-    EC_T_BOOL   bUpdateSlavePdOut;             /**< [in] set to EC_TRUE to update Slave OUTPUT Process Data Image at INACTIVE Master (from CSF) */
-    EC_T_BOOL   bUpdateSlavePdIn;              /**< [in] set to EC_TRUE to update Slave INPUT Process Data Image at INACTIVE Master (from CMF) */
+    EC_T_DWORD  dwMaxAcycFramesPerCycle;       /**< [in] Maximum acyclic Master Red frames sent per cycle */
+    EC_T_BOOL   bUpdateSlavePdOut;             /**< [in] Set to EC_TRUE to update Slave OUTPUT Process Data Image at INACTIVE Master (from CSF) */
+    EC_T_BOOL   bUpdateSlavePdIn;              /**< [in] Set to EC_TRUE to update Slave INPUT Process Data Image at INACTIVE Master (from CMF) */
+    EC_T_BOOL   bSwitchTopology;               /**< [in] Set to EC_TRUE to enable switch topology */
 } EC_PACKED_API EC_T_MASTER_RED_PARMS;
 #include EC_PACKED_INCLUDESTOP
 
@@ -2521,14 +2480,14 @@ typedef struct _EC_T_DC_SYNCSO_REGDESC
 typedef struct _EC_T_DC_CONFIGURE
 {
     EC_T_DWORD                  dwClntId;                       /**< [in] Reserved */
-    EC_T_DWORD                  dwTimeout;                      /**< [in] Timeout [ms] for the DC initialization in which time offsets and propagation delays are evaluated. \defaultparm{EC_DEFAULTPARM_dwDcTimeout} */
+    EC_T_DWORD                  dwTimeout;                      /**< [in] Timeout [ms] for the DC initialization in which time offsets and propagation delays are evaluated \defaultparm{EC_DEFAULTPARM_dwDcTimeout} */
     EC_T_DWORD                  dwDevLimit;                     /**< [in] Maximum permissible deviation of the individual slave clock and the DC reference clock. The maximum deviation is determined by wire or'ed the deviations of the individual slave clocks with one another.
                                                                           The check against the limit is only active if "Sync Window Monitoring" is set in the configuration tool (EC Engineer), which generates a BRD command to read the slave register 0x092C in every cycle.
                                                                           The limit is calculated as follows:\n 2^n - 1 ns, e.g. a dwDevLimit of 4 corresponds to 14 ns.\n A value of 0 disables the "Sync Window Monitoring" \defaultparm{EC_DEFAULTPARM_dwDeviationLimit} */
     EC_T_DWORD                  dwSettleTime;                   /**< [in] Settle time [ms]. At the beginning of the synchronization the slave clocks oscillate strongly.
-                                                                          To prevent multiple in-sync and out-of-sync notifications from being generated, a settling time can be set in which no notifications are generated. \defaultparm{EC_DEFAULTPARM_dwInSyncSettleTime} */
-    EC_T_DWORD                  dwTotalBurstLength;             /**< [in] Overall amount of burst frames sent. \defaultparm{EC_DEFAULTPARM_dwTotalBurstLength} */
-    EC_T_DWORD                  dwBurstBulk;                    /**< [in] Amount of burst frames per cycle during initialization burst. \defaultparm{EC_DEFAULTPARM_dwBurstBulk}  */
+                                                                          To prevent multiple in-sync and out-of-sync notifications from being generated, a settling time can be set in which no notifications are generated \defaultparm{EC_DEFAULTPARM_dwInSyncSettleTime}. */
+    EC_T_DWORD                  dwTotalBurstLength;             /**< [in] Overall amount of burst frames sent \defaultparm{EC_DEFAULTPARM_dwTotalBurstLength} */
+    EC_T_DWORD                  dwBurstBulk;                    /**< [in] Amount of burst frames per cycle during initialization burst \defaultparm{EC_DEFAULTPARM_dwBurstBulk}  */
     EC_T_BOOL                   bBulkInLinkLayer;               /**< [in] If EC_TRUE, bulk is realized by link layer, otherwise by master. The MAC needs to support the frame repeating function.
                                                                           In this case the link layer will repeat the DC burst frames itself, reducing the hardware accesses of the master to the MAC.  */
     EC_T_BOOL                   bAcycDistributionDisabled;      /**< [in] If EC_TRUE, acyclic distribution is disabled */
@@ -2552,6 +2511,21 @@ typedef enum _EC_T_DCM_MODE
     eDcmMode_BCppDummy      = 0xFFFFFFFF
 } EC_T_DCM_MODE;
 
+static EC_INLINESTART const EC_T_CHAR* ecatDcmModeToStr(EC_T_DCM_MODE eDcmMode)
+{
+    switch (eDcmMode)
+    {
+    case eDcmMode_Off:               return "Off";
+    case eDcmMode_BusShift:          return "BusShift";
+    case eDcmMode_MasterShift:       return "MasterShift";
+    case eDcmMode_LinkLayerRefClock: return "LinkLayerRefClock";
+    case eDcmMode_MasterRefClock:    return "MasterRefClock";
+    case eDcmMode_Dcx:               return "Dcx";
+    case eDcmMode_MasterShiftByApp:  return "MasterShiftByApp";
+    default:                         return "Unknown";
+    }
+} EC_INLINESTOP
+
 #include EC_PACKED_API_INCLUDESTART
 /**
  * \typedef EC_PF_DC_STARTTIME_CB
@@ -2567,7 +2541,7 @@ typedef EC_T_DWORD (EC_FNCALL *EC_PF_DC_STARTTIME_CB)(EC_T_VOID* pvContext, EC_T
 typedef struct _EC_T_DC_STARTTIME_CB_DESC
 {
     EC_T_VOID*                  pvContext;          /**< [in] Arbitrarily application-defined parameter passed to pfnCallback */
-    EC_PF_DC_STARTTIME_CB       pfnCallback;        /**< [in] DC start time callback function pointer. If not EC_NULL, DC start time calculated by application, otherwise by master */
+    EC_PF_DC_STARTTIME_CB       pfnCallback;        /**< [in] DC start time callback function pointer. If not EC_NULL, DC start time calculated by application, otherwise by master. */
 } EC_PACKED_API EC_T_DC_STARTTIME_CB_DESC;
 #include EC_PACKED_INCLUDESTOP
 
@@ -2575,25 +2549,25 @@ typedef struct _EC_T_DC_STARTTIME_CB_DESC
  * \typedef EC_PF_DC_GETTIMEELAPSEDSINCECYCLESTART
  * \brief EC-Master requests time elapsed since cycle start e.g. in BusShift or MasterShift if SYNC0 signal shall refer to cycle start.
  * \param pvContext                           [in]  Context pointer. It is used as parameter when the callback function is called.
- * \param pdwTimeElapsedSinceCycleStartInNsec [out] Time elapsed since cycle start in ns.
- * \return EC_E_NOERROR or error code
+ * \param pdwTimeElapsedSinceCycleStartInNsec [out] Time elapsed since cycle start in ns
+ * \return #EC_E_NOERROR or error code
  */
 typedef EC_T_DWORD (EC_FNCALL *EC_PF_DC_GETTIMEELAPSEDSINCECYCLESTART)(EC_T_VOID* pvContext, EC_T_DWORD* pdwTimeElapsedSinceCycleStartInNsec);
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_DCM_CONFIG_BUSSHIFT
 {
     EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero). */
-    EC_T_INT                               nCtlGain;                               /**< [in] Proportional gain in ppt (part per thousand). Default is value 2. A value of 0 let the current setting unmodified. */
-    EC_T_INT                               nCtlDriftErrorGain;                     /**< [in] Multiplier for drift error. Default value is 3. A value of 0 let the current setting unmodified */
-    EC_T_INT                               nMaxValidVal;                           /**< [in] Error inputs above this value are considered invalid. If error input prediction is valid then the difference between the error input and the expected value is taken. Default value is 3000. A value of 0 let the current setting unmodified */
-    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be get calling emDcmGetLog */
+    EC_T_INT                               nCtlGain;                               /**< [in] Proportional gain in ppt (part per thousand). Default is value 2. A value of 0 sets the default value. */
+    EC_T_INT                               nCtlDriftErrorGain;                     /**< [in] Multiplier for drift error. Default value is 3. A value of 0 sets the default value. */
+    EC_T_INT                               nMaxValidVal;                           /**< [in] Error inputs above this value are considered invalid. If error input prediction is valid then the difference between the error input and the expected value is taken. Default value is 3000. A value of 0 sets the default value. */
+    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be got by calling emDcmGetLog() */
     EC_T_DWORD                             dwInSyncLimit;                          /**< [in] Limit [ns] for InSync monitoring. Default value is 20% of the cycle time. A value of 0 sets the default value. */
     EC_T_DWORD                             dwInSyncSettleTime;                     /**< [in] Settle time [ms] for InSync monitoring. Default value is 1500ms. A value of 0 sets the default value. */
-    EC_T_BOOL                              bCtlOff;                                /**< [in] If set to EC_TRUE, control loop is disabled. Combined with bLogEnabled, it makes possible to analyze the natural drift between the stack cycle and the reference clock */
-    EC_T_BOOL                              bUseDcLoopCtlStdValues;                 /**< [in] If set to EC_TRUE, the values of ESC DC time loop control register 0x930 and 0x934 are not changed by master. This could increase the time it takes to get the InSync. Use only if there are a problems with the reference clock to get InSync */
+    EC_T_BOOL                              bCtlOff;                                /**< [in] If set to EC_TRUE, control loop is disabled. Combined with bLogEnabled, it makes possible to analyze the natural drift between the stack cycle and the reference clock. */
+    EC_T_BOOL                              bUseDcLoopCtlStdValues;                 /**< [in] If set to EC_TRUE, the values of ESC DC time loop control register 0x930 and 0x934 are not changed by master. This could increase the time it takes to get the InSync. Use only if there are problems with the reference clock to get InSync. */
     EC_T_DWORD                             dwInSyncStartDelayCycle;                /**< [in] Delay time [ms] before InSync monitoring start */
-    EC_T_VOID*                             pGetTimeElapsedSinceCycleStartContext;  /**< [in] Optional context for the pfnGetTimeElapsedSinceCycleStart function, will be passed as first parameter to this function/static method. */
-    EC_PF_DC_GETTIMEELAPSEDSINCECYCLESTART pfnGetTimeElapsedSinceCycleStart;       /**< [in] Setting this function enables synchronising the DC SYNC0 to the CycleStart instead of the time frame send. DC SYNC0 is therefore related to the CycleStart instead of the time frame send. Function must return EC_E_NOERROR to work. If 0 (nullptr, EC_NULL) EC_E_NOTSUPPORTED will be returned on attempt to call. */
+    EC_T_VOID*                             pGetTimeElapsedSinceCycleStartContext;  /**< [in] Optional context for the pfnGetTimeElapsedSinceCycleStart function, will be passed as first parameter to this function/static method */
+    EC_PF_DC_GETTIMEELAPSEDSINCECYCLESTART pfnGetTimeElapsedSinceCycleStart;       /**< [in] Setting this function enables synchronising the DC SYNC0 to the CycleStart instead of the time frame send. DC SYNC0 is therefore related to the CycleStart instead of the time frame send. Function must return #EC_E_NOERROR to work. If 0 (nullptr, EC_NULL) EC_E_NOTSUPPORTED will be returned on attempt to call. */
 } EC_PACKED_API  EC_T_DCM_CONFIG_BUSSHIFT, *EC_PT_DCM_CONFIG_BUSSHIFT;
 #include EC_PACKED_INCLUDESTOP
 
@@ -2602,26 +2576,26 @@ typedef struct _EC_T_DCM_CONFIG_BUSSHIFT
  * \brief With this callback the timing task cycke time for Master Shift must be adjusted.
  * \param pvContext      [in] Context pointer. It is used as parameter when the callback function is called.
  * \param nAdjustPermil  [in] Permil the timing task has to be adjusted.
- * \return EC_E_NOERROR or error code
+ * \return #EC_E_NOERROR or error code
  */
 typedef EC_T_DWORD (EC_FNCALL *EC_PF_DC_ADJUSTCYCLETIME)(EC_T_VOID* pvContext, EC_T_INT nAdjustPermil);
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_DCM_CONFIG_MASTERSHIFT
 {
-    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero) */
-    EC_T_INT                               nCtlGain;                               /**< [in] Proportional gain in ppt (part per thousand). Default is value 2. A value of 0 let the current setting unmodified */
-    EC_T_INT                               nCtlDriftErrorGain;                     /**< [in] Multiplier for drift error. Default value is 3. A value of 0 let the current setting unmodified */
-    EC_T_INT                               nMaxValidVal;                           /**< [in] Error inputs above this value are considered invalid. If error input prediction is valid then the difference between the error input and the expected value is taken. Default value is 3000. A value of 0 let the current setting unmodified */
-    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be get calling emDcmGetLog */
+    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero). */
+    EC_T_INT                               nCtlGain;                               /**< [in] Proportional gain in ppt (part per thousand). Default is value 2. A value of 0 sets the default value. */
+    EC_T_INT                               nCtlDriftErrorGain;                     /**< [in] Multiplier for drift error. Default value is 3. A value of 0 sets the default value. */
+    EC_T_INT                               nMaxValidVal;                           /**< [in] Error inputs above this value are considered invalid. If error input prediction is valid then the difference between the error input and the expected value is taken. Default value is 3000. A value of 0 sets the default value. */
+    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be got by calling emDcmGetLog() */
     EC_T_DWORD                             dwInSyncLimit;                          /**< [in] Limit [ns] for InSync monitoring. Default value is 20% of the cycle time. A value of 0 sets the default value. */
     EC_T_DWORD                             dwInSyncSettleTime;                     /**< [in] Settle time [ms] for InSync monitoring. Default value is 1500ms. A value of 0 sets the default value. */
-    EC_T_BOOL                              bCtlOff;                                /**< [in] If set to EC_TRUE, control loop is disabled. Combined with bLogEnabled, it makes possible to analyze the natural drift between the stack cycle and the reference clock. Also it provides reading of current adjustment value using emDcmGetAdjust function */
+    EC_T_BOOL                              bCtlOff;                                /**< [in] If set to EC_TRUE, control loop is disabled. Combined with bLogEnabled, it makes possible to analyze the natural drift between the stack cycle and the reference clock. Also it provides reading of current adjustment value using emDcmGetAdjust function. */
     EC_T_DWORD                             dwInSyncStartDelayCycle;                /**< [in] Delay time [ms] before InSync monitoring start */
     EC_PACKED_API_MEMBER \
-        EC_T_DC_STARTTIME_CB_DESC          DcStartTimeCallbackDesc;                /**< [in] If not null, DC start time calculated by application, otherwise by master. See also EC_T_DC_STARTTIME_CB_DESC. Shift value configured in ENI will still be applied */
-    EC_T_VOID*                             pGetTimeElapsedSinceCycleStartContext;  /**< [in] Optional context for the pfnGetTimeElapsedSinceCycleStart function, will be passed as first parameter to this function/static method. */
-    EC_PF_DC_GETTIMEELAPSEDSINCECYCLESTART pfnGetTimeElapsedSinceCycleStart;       /**< [in] Setting this function enables synchronising the DC SYNC0 to the CycleStart instead of the time frame send. DC SYNC0 is therefore related to the CycleStart instead of the time frame send. Function must return EC_E_NOERROR to work. If 0 (nullptr, EC_NULL) EC_E_NOTSUPPORTED will be returned on attempt to call. */
-    EC_T_VOID*                             pAdjustCycleTimeContext;                /**< [in] Optional context for the pfnAdjustCycleTime function, will be passed as first parameter to this function/static method. */
+        EC_T_DC_STARTTIME_CB_DESC          DcStartTimeCallbackDesc;                /**< [in] If not null, DC start time calculated by application, otherwise by master. See also EC_T_DC_STARTTIME_CB_DESC. Shift value configured in ENI will still be applied. */
+    EC_T_VOID*                             pGetTimeElapsedSinceCycleStartContext;  /**< [in] Optional context for the pfnGetTimeElapsedSinceCycleStart function, will be passed as first parameter to this function/static method */
+    EC_PF_DC_GETTIMEELAPSEDSINCECYCLESTART pfnGetTimeElapsedSinceCycleStart;       /**< [in] Setting this function enables synchronising the DC SYNC0 to the CycleStart instead of the time frame send. DC SYNC0 is therefore related to the CycleStart instead of the time frame send. Function must return #EC_E_NOERROR to work. If 0 (nullptr, EC_NULL) EC_E_NOTSUPPORTED will be returned on attempt to call. */
+    EC_T_VOID*                             pAdjustCycleTimeContext;                /**< [in] Optional context for the pfnAdjustCycleTime function, will be passed as first parameter to this function/static method */
     EC_PF_DC_ADJUSTCYCLETIME               pfnAdjustCycleTime;                     /**< [in] Mandatory function to adjust the cycle time of the master. The master must adjust its cycle time by the passed amount to be in sync with the slaves. If 0 (nullptr, EC_NULL) MasterShift will not work. */
 } EC_PACKED_API  EC_T_DCM_CONFIG_MASTERSHIFT, *EC_PT_DCM_CONFIG_MASTERSHIFT;
 #include EC_PACKED_INCLUDESTOP
@@ -2629,12 +2603,12 @@ typedef struct _EC_T_DCM_CONFIG_MASTERSHIFT
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_DCM_CONFIG_LINKLAYERREFCLOCK
 {
-    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero) */
-    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be get calling emDcmGetLog */
+    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero). */
+    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be got by calling emDcmGetLog() */
     EC_T_DWORD                             dwInSyncLimit;                          /**< [in] Limit [ns] for InSync monitoring. Default value is 20% of the cycle time. A value of 0 sets the default value. */
     EC_T_DWORD                             dwInSyncSettleTime;                     /**< [in] Settle time [ms] for InSync monitoring. Default value is 1500ms. A value of 0 sets the default value. */
     EC_PACKED_API_MEMBER \
-        EC_T_DC_STARTTIME_CB_DESC DcStartTimeCallbackDesc;                         /**< [in] If not null, DC start time calculated by application, otherwise by master. See also EC_T_DC_STARTTIME_CB_DESC. Shift value configured in ENI will still be applied. */
+        EC_T_DC_STARTTIME_CB_DESC          DcStartTimeCallbackDesc;                /**< [in] If not null, DC start time calculated by application, otherwise by master. See also EC_T_DC_STARTTIME_CB_DESC. Shift value configured in ENI will still be applied. */
 } EC_PACKED_API  EC_T_DCM_CONFIG_LINKLAYERREFCLOCK, *EC_PT_DCM_CONFIG_LINKLAYERREFCLOCK;
 #include EC_PACKED_INCLUDESTOP
 
@@ -2642,19 +2616,21 @@ typedef struct _EC_T_DCM_CONFIG_LINKLAYERREFCLOCK
  * \typedef EC_PF_DC_GETHOSTTIME
  * \brief With this callback the actual host time for the MasterRefClock mode shall be returned.
  * \param pvContext              [in] Context pointer. It is used as parameter when the callback function is called.
- * \param pnActualHostTimeInNsec [out] The actual host time that will be distributed to the slaves in MasterRefClock mode.
- * \return EC_E_NOERROR or error code
+ * \param pnActualHostTimeInNsec [out] The actual host time that will be distributed to the slaves in MasterRefClock mode
+ * \return #EC_E_NOERROR or error code
  */
 typedef EC_T_DWORD (EC_FNCALL *EC_PF_DC_GETHOSTTIME)(EC_T_VOID* pvContext, EC_T_UINT64* pnActualHostTimeInNsec);
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_DCM_CONFIG_MASTERREFCLOCK
 {
-    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero) */
-    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be get calling emDcmGetLog */
+    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero). */
+    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be got by calling emDcmGetLog() */
     EC_T_DWORD                             dwInSyncLimit;                          /**< [in] Limit [ns] for InSync monitoring. Default value is 20% of the cycle time. A value of 0 sets the default value. */
     EC_T_DWORD                             dwInSyncSettleTime;                     /**< [in] Settle time [ms] for InSync monitoring. Default value is 1500ms. A value of 0 sets the default value. */
-    EC_T_VOID*                             pGetHostTimeContext;                    /**< [in] Optional context for the pfnGetHostTime function, will be passed as first parameter to this function/static method. */
+    EC_T_VOID*                             pGetHostTimeContext;                    /**< [in] Optional context for the pfnGetHostTime function, will be passed as first parameter to this function/static method */
     EC_PF_DC_GETHOSTTIME                   pfnGetHostTime;                         /**< [in] Mandatory function to offer the host time for the MasterRefClock mode. This time will be distributed to the slaves. If 0 (nullptr, EC_NULL) MasterRefClock mode will not work. */
+    EC_PACKED_API_MEMBER \
+        EC_T_DC_STARTTIME_CB_DESC          DcStartTimeCallbackDesc;                /**< [in] If not null, DC start time calculated by application, otherwise by master. See also EC_T_DC_STARTTIME_CB_DESC. Shift value configured in ENI will still be applied. */
 } EC_PACKED_API  EC_T_DCM_CONFIG_MASTERREFCLOCK, *EC_PT_DCM_CONFIG_MASTERREFCLOCK;
 #include EC_PACKED_INCLUDESTOP
 
@@ -2662,14 +2638,14 @@ typedef struct _EC_T_DCM_CONFIG_MASTERREFCLOCK
 typedef struct _EC_T_DCM_CONFIG_DCX
 {
     EC_T_DCM_CONFIG_MASTERSHIFT            MasterShift;                            /**< [in] DCM MasterShift configuration */
-    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero) */
-    EC_T_INT                               nCtlGain;                               /**< [in] Proportional gain in ppt (part per thousand). Default is value 2. A value of 0 let the current setting unmodified */
-    EC_T_INT                               nCtlDriftErrorGain;                     /**< [in] Multiplier for drift error. Default value is 3. A value of 0 let the current setting unmodified */
-    EC_T_INT                               nMaxValidVal;                           /**< [in] Error inputs above this value are considered invalid. If error input prediction is valid then the difference between the error input and the expected value is taken. Default value is 3000. A value of 0 let the current setting unmodified */
-    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be get calling emDcmGetLog */
+    EC_T_INT                               nCtlSetVal;                             /**< [in] Controller set value [ns]. This is the time distance between the cyclic frame send time and the DC base on bus (SYNC0 if shift is zero). */
+    EC_T_INT                               nCtlGain;                               /**< [in] Proportional gain in ppt (part per thousand). Default is value 2. A value of 0 sets the default value. */
+    EC_T_INT                               nCtlDriftErrorGain;                     /**< [in] Multiplier for drift error. Default value is 3. A value of 0 sets the default value. */
+    EC_T_INT                               nMaxValidVal;                           /**< [in] Error inputs above this value are considered invalid. If error input prediction is valid then the difference between the error input and the expected value is taken. Default value is 3000. A value of 0 sets the default value. */
+    EC_T_BOOL                              bLogEnabled;                            /**< [in] If set to EC_TRUE, logging information are generated and can be got by calling emDcmGetLog() */
     EC_T_DWORD                             dwInSyncLimit;                          /**< [in] Limit [ns] for InSync monitoring. Default value is 20% of the cycle time. A value of 0 sets the default value. */
     EC_T_DWORD                             dwInSyncSettleTime;                     /**< [in] Settle time [ms] for InSync monitoring. Default value is 1500ms. A value of 0 sets the default value. */
-    EC_T_BOOL                              bCtlOff;                                /**< [in] If set to EC_TRUE, control loop is disabled. Combined with bLogEnabled, it makes possible to analyze the natural drift between the stack cycle and the reference clock. Also it provides reading of current adjustment value using emDcmGetAdjust function */
+    EC_T_BOOL                              bCtlOff;                                /**< [in] If set to EC_TRUE, control loop is disabled. Combined with bLogEnabled, it makes possible to analyze the natural drift between the stack cycle and the reference clock. Also it provides reading of current adjustment value using emDcmGetAdjust function. */
     EC_T_WORD                              wExtClockFixedAddr;                     /**< [in] Fixed address of external clock slave (publishing PDO 0x10F4) (optional if ENI is generated by EcEngineer) */
     EC_T_DWORD                             dwExtClockTimeout;                      /**< [in] Wait timeout for external clock slave */
     EC_T_DWORD                             dwInSyncStartDelayCycle;                /**< [in] Delay time [ms] before InSync monitoring start */
@@ -2678,18 +2654,25 @@ typedef struct _EC_T_DCM_CONFIG_DCX
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_DCM_CONFIG
 {
     EC_T_DCM_MODE                         eMode;                                  /**< [in] DCM mode */
     union {
-        EC_T_DCM_CONFIG_BUSSHIFT          BusShift;                               /**< [in] BusShift configuration. Valid if eMode is set to eDcmMode_BusShift          */
-        EC_T_DCM_CONFIG_MASTERSHIFT       MasterShift;                            /**< [in] MasterShift configuration. Valid if eMode is set to eDcmMode_MasterShift       */
-        EC_T_DCM_CONFIG_LINKLAYERREFCLOCK LinkLayerRefClock;                      /**< [in] LinkLayerRefClock configuration. Valid if eMode is set to eDcmMode_LinkLayerRefClock */
-        EC_T_DCM_CONFIG_MASTERREFCLOCK    MasterRefClock;                         /**< [in] MasterRefClock configuration. Valid if eMode is set to eDcmMode_MasterRefClock    */
-        EC_T_DCM_CONFIG_DCX               Dcx;                                    /**< [in] DCX configuration. Valid if eMode is set to eDcmMode_Dcx               */
+        EC_T_DCM_CONFIG_BUSSHIFT          BusShift;          /**< [in] BusShift configuration. Valid if eMode is set to eDcmMode_BusShift.          */
+        EC_T_DCM_CONFIG_MASTERSHIFT       MasterShift;       /**< [in] MasterShift configuration. Valid if eMode is set to eDcmMode_MasterShift.       */
+        EC_T_DCM_CONFIG_LINKLAYERREFCLOCK LinkLayerRefClock; /**< [in] LinkLayerRefClock configuration. Valid if eMode is set to eDcmMode_LinkLayerRefClock. */
+        EC_T_DCM_CONFIG_MASTERREFCLOCK    MasterRefClock;    /**< [in] MasterRefClock configuration. Valid if eMode is set to eDcmMode_MasterRefClock.    */
+        EC_T_DCM_CONFIG_DCX               Dcx;               /**< [in] DCX configuration. Valid if eMode is set to eDcmMode_Dcx.               */
         EC_T_DWORD                        adwReserved[32];
     } EC_PACKED_API u;
 } EC_PACKED_API  EC_T_DCM_CONFIG, *EC_PT_DCM_CONFIG;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
@@ -2722,58 +2705,58 @@ typedef struct _EC_T_GET_SLAVE_INFO
     EC_T_WORD                   wPortState;         /* 0x05 */  /**< [out] port link state (SB Instance)*/
     EC_T_WORD                   wReserved;                      /**< Res */
 
-    EC_T_BOOL                   bDcSupport;         /* 0x06 */  /**< [out] slave does support DC*/
-    EC_T_BOOL                   bDc64Support;       /* 0x07 */  /**< [out] slave does support 64Bit DC*/
+    EC_T_BOOL                   bDcSupport;         /* 0x06 */  /**< [out] Slave does support DC*/
+    EC_T_BOOL                   bDc64Support;       /* 0x07 */  /**< [out] Slave does support 64Bit DC*/
 
-    EC_T_WORD                   wAliasAddress;      /* 0x08 */  /**< [out] slave alias address*/
-    EC_T_WORD                   wPhysAddress;                   /**< [out] slave station address*/
+    EC_T_WORD                   wAliasAddress;      /* 0x08 */  /**< [out] Slave alias address*/
+    EC_T_WORD                   wPhysAddress;                   /**< [out] Slave station address*/
 
-    EC_T_DWORD                  dwPdOffsIn;         /* 0x09 */  /**< [out] process data offset of Input Data (in bits)*/
-    EC_T_DWORD                  dwPdSizeIn;         /* 0x0A */  /**< [out] process data size of Input Data (in bits)*/
-    EC_T_DWORD                  dwPdOffsOut;        /* 0x0B */  /**< [out] process data offset of Output Data (in bits)*/
-    EC_T_DWORD                  dwPdSizeOut;        /* 0x0C */  /**< [out] process data size of Output Data*/
-    EC_T_DWORD                  dwPdOffsIn2;        /* 0x0D */  /**< [out] process data offset of Input data (in bits)*/
-    EC_T_DWORD                  dwPdSizeIn2;        /* 0x0E */  /**< [out] process data size of Input Data (in bits)*/
-    EC_T_DWORD                  dwPdOffsOut2;       /* 0x0F */  /**< [out] process data offset of Output Data (in bits)*/
-    EC_T_DWORD                  dwPdSizeOut2;       /* 0x10 */  /**< [out] process data size of Output Data*/
-    EC_T_DWORD                  dwPdOffsIn3;        /* 0x11 */  /**< [out] process data offset of Input Data (in bits)*/
-    EC_T_DWORD                  dwPdSizeIn3;        /* 0x12 */  /**< [out] process data size of Input Data (in bits)*/
-    EC_T_DWORD                  dwPdOffsOut3;       /* 0x13 */  /**< [out] process data offset of Output Data (in bits)*/
-    EC_T_DWORD                  dwPdSizeOut3;       /* 0x14 */  /**< [out] process data size of Output Data*/
-    EC_T_DWORD                  dwPdOffsIn4;        /* 0x15 */  /**< [out] process data offset of Input Data (in bits)*/
-    EC_T_DWORD                  dwPdSizeIn4;        /* 0x16 */  /**< [out] process data size of Input Data (in bits)*/
-    EC_T_DWORD                  dwPdOffsOut4;       /* 0x17 */  /**< [out] process data offset of Output Data (in bits)*/
-    EC_T_DWORD                  dwPdSizeOut4;       /* 0x18 */  /**< [out] process data size of Output Data*/
+    EC_T_DWORD                  dwPdOffsIn;         /* 0x09 */  /**< [out] Process data offset of Input Data (in bits)*/
+    EC_T_DWORD                  dwPdSizeIn;         /* 0x0A */  /**< [out] Process data size of Input Data (in bits)*/
+    EC_T_DWORD                  dwPdOffsOut;        /* 0x0B */  /**< [out] Process data offset of Output Data (in bits)*/
+    EC_T_DWORD                  dwPdSizeOut;        /* 0x0C */  /**< [out] Process data size of Output Data*/
+    EC_T_DWORD                  dwPdOffsIn2;        /* 0x0D */  /**< [out] Process data offset of Input data (in bits)*/
+    EC_T_DWORD                  dwPdSizeIn2;        /* 0x0E */  /**< [out] Process data size of Input Data (in bits)*/
+    EC_T_DWORD                  dwPdOffsOut2;       /* 0x0F */  /**< [out] Process data offset of Output Data (in bits)*/
+    EC_T_DWORD                  dwPdSizeOut2;       /* 0x10 */  /**< [out] Process data size of Output Data*/
+    EC_T_DWORD                  dwPdOffsIn3;        /* 0x11 */  /**< [out] Process data offset of Input Data (in bits)*/
+    EC_T_DWORD                  dwPdSizeIn3;        /* 0x12 */  /**< [out] Process data size of Input Data (in bits)*/
+    EC_T_DWORD                  dwPdOffsOut3;       /* 0x13 */  /**< [out] Process data offset of Output Data (in bits)*/
+    EC_T_DWORD                  dwPdSizeOut3;       /* 0x14 */  /**< [out] Process data size of Output Data*/
+    EC_T_DWORD                  dwPdOffsIn4;        /* 0x15 */  /**< [out] Process data offset of Input Data (in bits)*/
+    EC_T_DWORD                  dwPdSizeIn4;        /* 0x16 */  /**< [out] Process data size of Input Data (in bits)*/
+    EC_T_DWORD                  dwPdOffsOut4;       /* 0x17 */  /**< [out] Process data offset of Output Data (in bits)*/
+    EC_T_DWORD                  dwPdSizeOut4;       /* 0x18 */  /**< [out] Process data size of Output Data*/
 
-    EC_T_WORD                   wCfgPhyAddress;     /* 0x19 */  /**< [out] slave configured station address*/
-    EC_T_WORD                   wReserved2;                     /**< reserved */
+    EC_T_WORD                   wCfgPhyAddress;     /* 0x19 */  /**< [out] Slave configured station address*/
+    EC_T_WORD                   wReserved2;                     /**< Reserved */
 
     EC_T_CHAR                   abyDeviceName[ECAT_DEVICE_NAMESIZE];
     /* 0x1A */  /**< [out] slave name of configuration*/
-    EC_T_BOOL                   bIsMailboxSlave;    /* 0x2E */  /**< [out] whether slave support mailboxes*/
-    EC_T_DWORD                  dwMbxOutSize;       /* 0x2F */  /**< [out] mailbox 1 output size*/
-    EC_T_DWORD                  dwMbxInSize;        /* 0x30 */  /**< [out] mailbox 1 input size*/
-    EC_T_DWORD                  dwMbxOutSize2;      /* 0x31 */  /**< [out] mailbox 2 output size*/
-    EC_T_DWORD                  dwMbxInSize2;       /* 0x32 */  /**< [out] mailbox 2 input size*/
+    EC_T_BOOL                   bIsMailboxSlave;    /* 0x2E */  /**< [out] Whether slave support mailboxes*/
+    EC_T_DWORD                  dwMbxOutSize;       /* 0x2F */  /**< [out] Mailbox 1 output size*/
+    EC_T_DWORD                  dwMbxInSize;        /* 0x30 */  /**< [out] Mailbox 1 input size*/
+    EC_T_DWORD                  dwMbxOutSize2;      /* 0x31 */  /**< [out] Mailbox 2 output size*/
+    EC_T_DWORD                  dwMbxInSize2;       /* 0x32 */  /**< [out] Mailbox 2 input size*/
 
-    EC_T_DWORD                  dwErrorCode;        /* 0x33 */  /**< [out] last return code*/
-    EC_T_DWORD                  dwSBErrorCode;      /* 0x34 */  /**< [out] last return value from SB*/
+    EC_T_DWORD                  dwErrorCode;        /* 0x33 */  /**< [out] Last return code*/
+    EC_T_DWORD                  dwSBErrorCode;      /* 0x34 */  /**< [out] Last return value from SB*/
 
     EC_T_BYTE                   byPortDescriptor;   /* 0x35 */  /**< [out] Port Descriptor (ESC register 0x0007) */
     EC_T_BYTE                   byESCType;                      /**< [out] ESC Node Type */
-    EC_T_WORD                   wSupportedMbxProtocols;         /**< [out] supported mailbox protocols: AoE, EoE, CoE, FoE, SoE */
+    EC_T_WORD                   wSupportedMbxProtocols;         /**< [out] Supported mailbox protocols: AoE, EoE, CoE, FoE, SoE */
 
     EC_T_WORD                   wAlStatusValue;     /* 0x36 */  /**< [out] AL Status Register Value (ESC register 0x0130) */
     EC_T_WORD                   wAlStatusCode;                  /**< [out] AL Status Code (ESC register 0x0134) */
 
-    EC_T_BOOL                   bIsOptional;        /* 0x37 */  /**< [out] slave is in an optional hot connect group */
-    EC_T_BOOL                   bIsPresent;         /* 0x38 */  /**< [out] slave is currently present on bus */
+    EC_T_BOOL                   bIsOptional;        /* 0x37 */  /**< [out] Slave is in an optional hot connect group */
+    EC_T_BOOL                   bIsPresent;         /* 0x38 */  /**< [out] Slave is currently present on bus */
 
-    EC_T_WORD                   wNumProcessVarsInp; /* 0x39 */  /**< [out] number of output process data variables*/
-    EC_T_WORD                   wNumProcessVarsOutp;            /**< [out] number of input process data variables */
+    EC_T_WORD                   wNumProcessVarsInp; /* 0x39 */  /**< [out] Number of output process data variables*/
+    EC_T_WORD                   wNumProcessVarsOutp;            /**< [out] Number of input process data variables */
 
-    EC_T_DWORD                  dwSlaveId;          /* 0x3A */  /**< [out] slave ID */
-    EC_T_BOOL                   bIsHCGroupPresent;  /* 0x3B */  /**< [out] the hot connect group of the slave is present */
+    EC_T_DWORD                  dwSlaveId;          /* 0x3A */  /**< [out] Slave ID */
+    EC_T_BOOL                   bIsHCGroupPresent;  /* 0x3B */  /**< [out] The hot connect group of the slave is present */
 
     EC_T_DWORD                  aPortSlaveIds[ESC_PORT_COUNT];  /* 0x3C */  /**< [out] slave IDs connected to ports */
 
@@ -2789,9 +2772,9 @@ typedef struct _EC_T_GET_SLAVE_INFO
 typedef struct _EC_T_PROCESS_VAR_INFO
 {
     EC_T_CHAR                   szName[MAX_PROCESS_VAR_NAME_LEN];   /**< [out] Name of the found process variable */
-    EC_T_WORD                   wDataType;                          /**< [out] Data type of the found process variable (according to ETG.1000, section 5). See also EcCommon.h, DEFTYPE_BOOLEAN */
+    EC_T_WORD                   wDataType;                          /**< [out] Data type of the found process variable (according to ETG.1000, section 5). See also EcType.h, DEFTYPE_BOOLEAN. */
     EC_T_WORD                   wFixedAddr;                         /**< [out] Station address of the slave that is owner of this variable */
-    EC_T_INT                    nBitSize;                           /**< [out] Size in bit of the found process variable */
+    EC_T_INT                    nBitSize;                           /**< [out] Size in bits of the found process variable */
     EC_T_INT                    nBitOffs;                           /**< [out] Bit offset in the process data image */
     EC_T_BOOL                   bIsInputData;                       /**< [out] Determines whether the found process variable is an input variable or an output variable */
 } EC_PACKED(1) EC_T_PROCESS_VAR_INFO, *EC_PT_PROCESS_VAR_INFO;
@@ -2806,13 +2789,13 @@ typedef struct _EC_T_PROCESS_VAR_INFO
 #include EC_PACKED_API_INCLUDESTART
 typedef struct
 {
-    EC_T_WORD  wSrcBitOffs;
-    EC_T_WORD  wDstBitOffs;
+    EC_T_DWORD dwSrcBitOffs;
+    EC_T_DWORD dwDstBitOffs;
     EC_T_WORD  wBitSize;
     EC_T_WORD  wTaskId;
     EC_T_WORD  wFlags;
     EC_T_WORD  wRes;
-    EC_T_DWORD dwRes;
+    EC_T_DWORD dwRes[2];
 } EC_PACKED_API EC_T_CYC_COPY_INFO;
 #include EC_PACKED_INCLUDESTOP
 
@@ -2820,18 +2803,18 @@ typedef struct
 typedef struct _EC_T_PROCESS_VAR_INFO_EX
 {
     EC_T_CHAR                   szName[MAX_PROCESS_VAR_NAME_LEN_EX];    /**< [out] Name of the found process variable */
-    EC_T_WORD                   wDataType;                              /**< [out] Data type of the found process variable (according to ETG.1000, section 5). See also EcCommon.h, DEFTYPE_BOOLEAN */
+    EC_T_WORD                   wDataType;                              /**< [out] Data type of the found process variable (according to ETG.1000, section 5). See also EcType.h, DEFTYPE_BOOLEAN. */
     EC_T_WORD                   wFixedAddr;                             /**< [out] Station address of the slave that is owner of this variable */
-    EC_T_INT                    nBitSize;                               /**< [out] Size in bit of the found process variable */
+    EC_T_INT                    nBitSize;                               /**< [out] Size in bits of the found process variable */
     EC_T_INT                    nBitOffs;                               /**< [out] Bit offset in the process data image */
     EC_T_BOOL                   bIsInputData;                           /**< [out] Determines whether the found process variable is an input variable or an output variable */
     EC_T_WORD                   wIndex;                                 /**< [out] Object index */
     EC_T_WORD                   wSubIndex;                              /**< [out] Object sub index */
     EC_T_WORD                   wPdoIndex;                              /**< [out] Index of PDO (process data object) */
-    EC_T_WORD                   wWkcStateDiagOffs;                      /**< [out] Bit offset in the diagnostic image (emGetDiagnosisImagePtr) */
-    EC_T_WORD                   wMasterSyncUnit;                        /**< [out] Master Sync Unit (ENI: RxPdo[1..4]@Su, TxPdo[1..4]@Su) */    
+    EC_T_WORD                   wWkcStateDiagOffs;                      /**< [out] Bit offset in the diagnostic image (API GetDiagnosisImagePtr) */
+    EC_T_WORD                   wMasterSyncUnit;                        /**< [out] Master Sync Unit ID (ENI: Slave/ProcessData/RxPdo[1..4]@Su, Slave/ProcessData/TxPdo[1..4]@Su, comment at Cyclic/Frame/Cmd) */
     EC_T_WORD                   wRes1;
-    EC_T_DWORD                  dwRes1;
+    EC_T_DWORD                  dwTaskId;                               /**< [out] ID of task where process variable is located */
     EC_PACKED_API_MEMBER \
     EC_T_CYC_COPY_INFO          CopyInfo;                               /**< [out] Copy Info if applied to the variable */
 } EC_PACKED_API EC_T_PROCESS_VAR_INFO_EX, *EC_PT_PROCESS_VAR_INFO_EX;
@@ -2865,10 +2848,10 @@ typedef enum _EC_T_COE_ODLIST_TYPE
 #include EC_PACKED_INCLUDESTART(1)
 typedef struct _EC_T_COE_ODLIST
 {
-    EC_T_COE_ODLIST_TYPE    eOdListType;            /**< list type */
-    EC_T_WORD               wLen;                   /**< amount of object IDs */
+    EC_T_COE_ODLIST_TYPE    eOdListType;            /**< List type */
+    EC_T_WORD               wLen;                   /**< Amount of object IDs */
     EC_T_WORD               wStationAddress;        /**< Station address of the slave */
-    EC_T_WORD*              pwOdList;               /**< array containing object IDs */
+    EC_T_WORD*              pwOdList;               /**< Array containing object IDs */
 } EC_PACKED(1) EC_T_COE_ODLIST;
 #include EC_PACKED_INCLUDESTOP
 
@@ -2894,10 +2877,10 @@ typedef struct _EC_T_COE_ENTRYDESC
 {
     EC_T_WORD   wObIndex;                           /**< Index in the object dictionary */
     EC_T_BYTE   byObSubIndex;                       /**< Sub index in the object dictionary */
-    EC_T_BYTE   byValueInfo;                        /**< Bit mask which information is included in pbyData. See \ref EC_COE_ENTRY_VALUEINFO "Value info flags" */
+    EC_T_BYTE   byValueInfo;                        /**< Bit mask which information is included in pbyData. See \ref EC_COE_ENTRY_VALUEINFO "Value info flags". */
     EC_T_WORD   wDataType;                          /**< Object data type according to ETG.1000 */
     EC_T_WORD   wBitLen;                            /**< Object size (number of bits) */
-    EC_T_BYTE   byObAccess;                         /**< Access rights. See \ref EC_COE_ENTRY_OBJACCESS "Object access flags" */
+    EC_T_BYTE   byObAccess;                         /**< Access rights. See \ref EC_COE_ENTRY_OBJACCESS "Object access flags". */
     EC_T_BYTE   byReserved[3];
     EC_T_BOOL   bRxPdoMapping;                      /**< Object is mappable in a RxPDO */
     EC_T_BOOL   bTxPdoMapping;                      /**< Object is mappable in a TxPDO */
@@ -2924,6 +2907,10 @@ typedef struct _EC_T_COE_EMERGENCY
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_INCLUDESTART(1)
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_MBX_DATA_COE_INITCMD
 {
     EC_T_SLAVE_PROP SlaveProp;                          /**< Slave properties */
@@ -2939,6 +2926,9 @@ typedef struct _EC_T_MBX_DATA_COE_INITCMD
     EC_T_DWORD      dwDataLen;                          /**< InitCmd data length */
     EC_T_BYTE*      pbyData;                            /**< InitCmd data */
 } EC_PACKED(1) EC_T_MBX_DATA_COE_INITCMD;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_INCLUDESTART(8)
@@ -2954,8 +2944,8 @@ typedef struct _EC_T_MBX_DATA_COE
 #include EC_PACKED_INCLUDESTART(1)
 typedef struct _EC_T_MBX_DATA_FOE
 {
-    EC_T_DWORD  dwTransferredBytes;                         /**< [out] amount of transferred bytes */
-    EC_T_DWORD  dwRequestedBytes;                           /**< [out] amount of bytes to be provided by application */
+    EC_T_DWORD  dwTransferredBytes;                         /**< [out] Amount of transferred bytes */
+    EC_T_DWORD  dwRequestedBytes;                           /**< [out] Amount of bytes to be provided by the application */
 
     EC_T_DWORD  dwBusyDone;                                 /**< [out] If slave is busy: 0 ... dwBusyEntire */
     EC_T_DWORD  dwBusyEntire;                               /**< [out] If dwBusyEntire > 0: Slave is busy */
@@ -3027,6 +3017,10 @@ typedef struct _EC_T_AOE_CMD_RESPONSE
 
 /* EtherCAT mailbox data */
 #include EC_PACKED_INCLUDESTART(1)
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef union _EC_T_MBX_DATA
 {
     EC_T_AOE_CMD_RESPONSE   AoE_Response;               /**< AoE */
@@ -3042,6 +3036,9 @@ typedef union _EC_T_MBX_DATA
     EC_T_SOE_NOTIFICATION   SoE_Notification;           /**< SoE notification request */
     EC_T_SOE_EMERGENCY      SoE_Emergency;              /**< SoE emergency request */
 } EC_PACKED(1) EC_T_MBX_DATA;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 #include EC_PACKED_INCLUDESTOP
 
 /* EtherCAT mailbox type values */
@@ -3074,6 +3071,9 @@ typedef enum _EC_T_MBXTFER_TYPE
     eMbxTferType_S2SMBX             = 24,               /**< S2S mbx */
     eMbxTferType_FOE_UPLOAD_REQ     = 25,               /**< FoE upload request */
     eMbxTferType_FOE_DOWNLOAD_REQ   = 26,               /**< FoE download request */
+    eMbxTferType_EOE_SEND_FRAME     = 27,               /**< EoE send frame */
+    eMbxTferType_EOE_RECEIVE_FRAME  = 28,               /**< EoE receive frame */
+    eMbxTferType_EOE_SET_IP         = 29,               /**< EoE set IP address */
 
     /* Borland C++ datatype alignment correction */
     eMbxTferType_BCppDummy          = 0xFFFFFFFF
@@ -3110,6 +3110,9 @@ static EC_INLINESTART const EC_T_CHAR* MbxTferTypeText(EC_T_MBXTFER_TYPE EType)
     case eMbxTferType_S2SMBX:               return "S2S mbx";
     case eMbxTferType_FOE_UPLOAD_REQ:       return "FoE upload request";
     case eMbxTferType_FOE_DOWNLOAD_REQ:     return "FoE download request";
+    case eMbxTferType_EOE_SEND_FRAME:       return "EoE send frame";
+    case eMbxTferType_EOE_RECEIVE_FRAME:    return "EoE receive frame";
+    case eMbxTferType_EOE_SET_IP:           return "EoE set IP address";
     case eMbxTferType_BCppDummy:            return "Dummy EC_T_MBXTFER_TYPE";
     }
     return "Unknown EC_T_MBXTFER_TYPE";
@@ -3119,7 +3122,7 @@ static EC_INLINESTART const EC_T_CHAR* MbxTferTypeText(EC_T_MBXTFER_TYPE EType)
 #include EC_PACKED_INCLUDESTART(1)
 typedef struct _EC_T_MBXTFER_DESC
 {
-    EC_T_DWORD          dwMaxDataLen;               /**< Maximum amount of data bytes that shall be transferred using this object. A mailbox transfer type without data transfer will ignore this parameter */
+    EC_T_DWORD          dwMaxDataLen;               /**< Maximum amount of data bytes that shall be transferred using this object. A mailbox transfer type without data transfer will ignore this parameter. */
     EC_T_BYTE*          pbyMbxTferDescData;         /**< Pointer to byte stream carrying in and out data of mailbox content */
 } EC_PACKED(1) EC_T_MBXTFER_DESC;
 #include EC_PACKED_INCLUDESTOP
@@ -3149,62 +3152,15 @@ typedef enum _EC_T_MBXTFER_STATUS
 typedef struct _EC_T_MBXTFER
 {
     EC_T_DWORD          dwClntId;                   /**< [] Client ID */
-    EC_T_MBXTFER_DESC   MbxTferDesc;                /**< [out] Mailbox transfer descriptor. All elements of pMbxTferDesc will be stored here */
-    EC_T_MBXTFER_TYPE   eMbxTferType;               /**< [] This type information is written to the Mailbox Transfer Object by the last call to a mailbox command function. It may be used as an information, and is required to fan out consecutive notifications. This value is only valid until next mailbox relevant API call, where this value may be overwritten */
-    EC_T_DWORD          dwDataLen;                  /**< [] Amount of data bytes for the next mailbox transfer. If the mailbox transfer does not transfer data from or to the slave this parameter will be ignored. This element has to be set to an appropriate value every time prior to initiate a new request. When the transfer is completed (emNotify) this value will contain the amount of data that was actually transferred */
-    EC_T_BYTE*          pbyMbxTferData;             /**< [in/out] Pointer to data. In case of a download transfer the client has to store the data in this location. In case of an upload transfer this element points to the received data. Access to data that was uploaded from a slave is only valid within the notification function because the buffer will be re-used by the master "this data has to be copied into a separate buffer in case it has to be used later by the client */
-    EC_T_MBXTFER_STATUS eTferStatus;                /**< [out] Transfer state. After a new transfer object is created the state will be set to eMbxTferStatus_Idle */
+    EC_T_MBXTFER_DESC   MbxTferDesc;                /**< [out] Mailbox transfer descriptor. All elements of pMbxTferDesc will be stored here. */
+    EC_T_MBXTFER_TYPE   eMbxTferType;               /**< [] This type of information is written to the Mailbox Transfer Object by the last call to a mailbox command function. It may be used as information, and is required to fan out consecutive notifications. This value is only valid until the next relevant mailbox API call, where this value may be overwritten. */
+    EC_T_DWORD          dwDataLen;                  /**< [] Amount of data bytes for the next mailbox download transfer. If the mailbox transfer does not transfer data to the slave this parameter will be ignored. This element has to be set to an appropriate value every time prior to initiating a new download request. When either a download or upload transfer is completed (emNotify) this value will contain the amount of data that was actually transferred. */
+    EC_T_BYTE*          pbyMbxTferData;             /**< [in/out] Pointer to data. In case of a download transfer the client has to store the data in this location. In case of an upload transfer this element points to the received data. Access to data that was uploaded from a slave is only valid within the notification function because the buffer will be re-used by the master. These data have to be copied into a separate buffer in case it has to be used later by the client. */
+    EC_T_MBXTFER_STATUS eTferStatus;                /**< [out] Transfer state. After a new transfer object is created the state will be set to eMbxTferStatus_Idle. */
     EC_T_DWORD          dwErrorCode;                /**< [out] Error code of a mailbox transfer that was terminated with error */
-    EC_T_DWORD          dwTferId;                   /**< [] Transfer ID. For every new mailbox transfer a unique ID has to be assigned. This ID can be used after mailbox transfer completion to identify the transfer */
+    EC_T_DWORD          dwTferId;                   /**< [] Transfer ID. For every new mailbox transfer a unique ID has to be assigned. This ID can be used after mailbox transfer completion to identify the transfer. */
     EC_T_MBX_DATA       MbxData;                    /**< [] Mailbox data. This element contains mailbox transfer data, e.g. the CoE object dictionary list. */
 } EC_PACKED(1) EC_T_MBXTFER;
-#include EC_PACKED_INCLUDESTOP
-
-/* Supported EtherCAT commands for the ecatTferSingleRawCmd() function */
-typedef enum _EC_T_RAWCMD
-{
-    eRawCmd_APRD    = EC_CMD_TYPE_APRD,             /**< Auto-Increment physical read */
-    eRawCmd_APWR    = EC_CMD_TYPE_APWR,             /**< Auto-Increment physical write */
-    eRawCmd_APRW    = EC_CMD_TYPE_APRW,             /**< Auto-Increment physical read/write */
-    eRawCmd_BRD     = EC_CMD_TYPE_BRD,              /**< Broadcast (wire-or'ed) read */
-    eRawCmd_BWR     = EC_CMD_TYPE_BWR,              /**< Broadcast write */
-    eRawCmd_BRW     = EC_CMD_TYPE_BRW,              /**< Broadcast read/write */
-    eRawCmd_LRD     = EC_CMD_TYPE_LRD,              /**< Logical read */
-    eRawCmd_LWR     = EC_CMD_TYPE_LWR,              /**< Logical write */
-    eRawCmd_LRW     = EC_CMD_TYPE_LRW,              /**< Logical read/write */
-    eRawCmd_ARMW    = EC_CMD_TYPE_ARMW,             /**< Auto-increment physical read, multiple write */
-    eRawCmd_FPRD    = EC_CMD_TYPE_FPRD,             /**< Fixed address physical read */
-    eRawCmd_FPWR    = EC_CMD_TYPE_FPWR,             /**< Fixed address physical write */
-    eRawCmd_FPRW    = EC_CMD_TYPE_FPRW,             /**< Fixed address physical read/write */
-
-                                                    /* Borland C++ datatype alignment correction */
-                                                    eRawCmd_BCppDummy   = 0xFFFFFFFF
-} EC_T_RAWCMD;
-
-/* Descriptor for EC_IOCTL_GET_PDMEMORYSIZE call */
-#include EC_PACKED_INCLUDESTART(1)
-typedef struct _EC_T_MEMREQ_DESC
-{
-    EC_T_DWORD  dwPDOutSize;                        /* Size of the output process data image */
-    EC_T_DWORD  dwPDInSize;                         /* Size of the input  process data image */
-} EC_PACKED(1) EC_T_MEMREQ_DESC, *EC_PT_MEMREQ_DESC;
-#include EC_PACKED_INCLUDESTOP
-
-/* Descriptor for EC_IOCTL_SET_MASTER_DEFAULT_TIMEOUTS */
-#include EC_PACKED_INCLUDESTART(1)
-typedef struct _EC_T_MASTERDEFAULTTIMEOUTS_DESC
-{
-    EC_T_DWORD  dwMasterStateChange;                /**< Default state change timeout [ms], applied if emSetMasterState called with EC_NOWAIT \defaultparm{EC_DEFAULTPARM_dwMasterStateChangeTimeout} */
-    EC_T_DWORD  dwInitCmdRetry;                     /**< Timeout [ms] between retry sending an init-command \defaultparm{EC_DEFAULTPARM_dwInitCmdRetryTimeout} */
-    EC_T_DWORD  dwMbxCmd;                           /**< Timeout [ms] between retry sending an mailbox command \defaultparm{EC_DEFAULTPARM_dwMbxCmdTimeout} */
-    EC_T_DWORD  dwMbxPolling;                       /**< Mailbox polling cycle [ms] \defaultparm{EC_DEFAULTPARM_dwMbxPollingTime} */
-    EC_T_DWORD  dwDcmInSync;                        /**< Timeout [ms] to wait for DCM InSync in state change PREOP to SAFEOP \defaultparm{EC_DEFAULTPARM_dwDcmInSyncTimeout} */
-    EC_T_WORD   wInitCmd;                           /**< Timeout [ms] to InitCmds if not specified in ENI \defaultparm{EC_DEFAULTPARM_wInitCmdTimeout} */
-    EC_T_WORD   wReserved;
-    EC_T_DWORD  dwSlaveIdentification;              /**< Timeout [ms] to wait for the reading of the slave identification \defaultparm{EC_DEFAULTPARM_dwSlaveIdentificationTimeout} */
-    EC_T_DWORD  dwGenerateEni;                      /**< Timeout [ms] to wait for eCnfType_GenPreopENI, eCnfType_GenOpENI, eCnfType_Gen... \defaultparm{EC_DEFAULTPARM_dwGenerateEniTimeout} */
-    EC_T_DWORD  dwReserved[8];
-} EC_PACKED(1) EC_T_MASTERDEFAULTTIMEOUTS_DESC;
 #include EC_PACKED_INCLUDESTOP
 
 /* Descriptor for EC_IOCTL_HC_CONFIGURETIMEOUTS call */
@@ -3224,16 +3180,16 @@ typedef enum _EC_T_USER_JOB
     eUsrJob_SendAllCycFrames                = 2,    /**< Send all cyclic frames */
     eUsrJob_MasterTimer                     = 4,    /**< Run internal master and slave state machines for generic management */
     eUsrJob_SendAcycFrames                  = 6,    /**< Send acyclic frames */
-    eUsrJob_SendCycFramesByTaskId           = 7,    /**< Send cyclic frames related to a specific task id (TaskId entry in the XML file) */
+    eUsrJob_SendCycFramesByTaskId           = 7,    /**< Send cyclic frames related to a specific task id (ENI: Cyclic/TaskId) */
     eUsrJob_MasterTimerMinimal              = 8,    /**< Run minimal master timer routine: no state change possible  */
-    eUsrJob_ProcessRxFramesByTaskId         = 9,    /**< Receive frames and process received data related to a specific task id (TaskId entry in the XML file) */
+    eUsrJob_ProcessRxFramesByTaskId         = 9,    /**< Receive frames and process received data related to a specific task id (ENI: Cyclic/TaskId) */
     eUsrJob_ProcessAcycRxFrames             = 10,   /**< Receive frames and process received data related to acyclic frames */
     eUsrJob_SwitchEoeFrames                 = 11,   /**< Switch queued EoE frames (see EC_IOCTL_SET_EOE_DEFFERED_SWITCHING_ENABLED) */
     eUsrJob_StartTask                       = 12,   /**< Start new task */
     eUsrJob_StopTask                        = 13,   /**< Stop currently running task */
 
-    eUsrJob_StampSendAllCycFrames           = 22,   /**< obsolete */
-    eUsrJob_StampSendCycFramesByTaskId      = 27,   /**< obsolete */
+    eUsrJob_StampSendAllCycFrames           = 22,   /**< Obsolete */
+    eUsrJob_StampSendCycFramesByTaskId      = 27,   /**< Obsolete */
 
     eUsrJob_SimulatorTimer                  = 32,   /**< Run EC-Simulator timer routine (generic management) */
     eUsrJob_MonitorTimer                    = 33,   /**< Run EC-Monitor timer routine (generic management) */
@@ -3260,7 +3216,7 @@ typedef struct _EC_T_PERF_MEAS_INFO
     EC_T_CHAR     szName[MAX_STD_STRLEN]; /**< Name of the benchmark */
     EC_T_UINT64   qwFrequency;            /**< Frequency in Hz used by the timer */
     EC_T_USER_JOB eUserJob;               /**< UserJob associated with the benchmark */
-    EC_T_DWORD    dwBinCountHistogram;    /**< length of Histogram Bins */
+    EC_T_DWORD    dwBinCountHistogram;    /**< Length of Histogram Bins */
     EC_T_DWORD    dwFlags;                /**< Flags associated with the benchmark (See EC_T_PERF_MEAS_FLAG...) */
     EC_T_DWORD    dwReserved[4];
 } EC_PACKED_API EC_T_PERF_MEAS_INFO;
@@ -3285,9 +3241,9 @@ typedef struct _EC_T_PERF_MEAS_HISTOGRAM
                                       aBins[200]: [1495us, 1500us) corresponds to 1495us <= x < 1500us\n
                                       aBins[201]: [1500us, inf+)   corresponds to 1500us <= x < inf+\n
                                       */
-    EC_T_DWORD  dwBinCount;      /**< length of aBins */
-    EC_T_UINT64 qwMinTicks;      /**< results below qwMinTicks are stored in the first bin */
-    EC_T_UINT64 qwMaxTicks;      /**< results above qwMaxTicks are stored in the last bin */
+    EC_T_DWORD  dwBinCount;      /**< Length of aBins */
+    EC_T_UINT64 qwMinTicks;      /**< Results below qwMinTicks are stored in the first bin */
+    EC_T_UINT64 qwMaxTicks;      /**< Results above qwMaxTicks are stored in the last bin */
     EC_T_DWORD  dwReserved[4];
 } EC_PACKED_API EC_T_PERF_MEAS_HISTOGRAM;
 #include EC_PACKED_INCLUDESTOP
@@ -3315,16 +3271,16 @@ typedef struct _EC_T_PERF_MEAS_COUNTER_PARMS
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_PERF_MEAS_HISTOGRAM_PARMS
 {
-    EC_T_DWORD  dwBinCount;  /**< [in]  amount of bins to use for the histogram. */
-    EC_T_UINT64 qwMinTicks;  /**< [in]  results below qwMinTicks are stored in the first bin */
-    EC_T_UINT64 qwMaxTicks;  /**< [in]  results above qwMaxTicks are stored in the last bin */
+    EC_T_DWORD  dwBinCount;  /**< [in]  Amount of bins to use for the histogram */
+    EC_T_UINT64 qwMinTicks;  /**< [in]  Results below qwMinTicks are stored in the first bin */
+    EC_T_UINT64 qwMaxTicks;  /**< [in]  Results above qwMaxTicks are stored in the last bin */
 } EC_PACKED_API  EC_T_PERF_MEAS_HISTOGRAM_PARMS;
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_PERF_MEAS_INFO_PARMS
 {
-    EC_T_CHAR   szName[MAX_STD_STRLEN]; /**< [in]  performance counter name */
+    EC_T_CHAR   szName[MAX_STD_STRLEN]; /**< [in]  Performance counter name */
     EC_T_DWORD  dwFlags;                /**< [in]  Flags associated with the benchmark (See EC_T_PERF_MEAS_FLAG...) */
     EC_T_DWORD  dwReserved[4];
 } EC_PACKED_API  EC_T_PERF_MEAS_INFO_PARMS;
@@ -3334,8 +3290,8 @@ typedef struct _EC_T_PERF_MEAS_INFO_PARMS
 /** \defgroup EC_T_PERF_MEAS_FLAG Flags for benchmarks
 @{*/
 /**
- * distance benchmarks are used to measure the time between the cycle start and the benchmark start.
- * This can be helpful when visualizing the benchmarks inside a cycle
+ * Distance benchmarks are used to measure the time between the cycle start and the benchmark start.
+ * This flag has no influence on the measurement and is simply passed through to the application.
  */
 #define EC_T_PERF_MEAS_FLAG_OFFSET   ((EC_T_WORD)((EC_T_DWORD)1 << 0))
 /**
@@ -3348,10 +3304,10 @@ typedef struct _EC_T_PERF_MEAS_INFO_PARMS
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_PERF_MEAS_INTERNAL_PARMS
 {
-    EC_T_BOOL                          bEnabled;        /**< [in]  enable/disable internal performance counters. */
+    EC_T_BOOL                          bEnabled;        /**< [in]  Enable/disable internal performance counters */
 
     EC_PACKED_API_MEMBER \
-        EC_T_PERF_MEAS_COUNTER_PARMS   CounterParms;    /**< [in]  Timer function settings. When not provided OsMeasGetCounterTicks is used  */
+        EC_T_PERF_MEAS_COUNTER_PARMS   CounterParms;    /**< [in]  Timer function settings. When not provided OsMeasGetCounterTicks is used.  */
     
     EC_PACKED_API_MEMBER \
         EC_T_PERF_MEAS_HISTOGRAM_PARMS HistogramParms;  /**< [in]  Histogram settings. When not provided the histogram is disabled. */
@@ -3360,29 +3316,23 @@ typedef struct _EC_T_PERF_MEAS_INTERNAL_PARMS
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_PERF_MEAS_APP_PARMS
 {
     EC_T_DWORD                      dwNumMeas;      /**< [in]  Number of performance counters to create */
     EC_T_PERF_MEAS_INFO_PARMS*      aPerfMeasInfos; /**< [in]  PerfMeasInfos associated with the corresponding benchmark */
-    EC_T_PERF_MEAS_COUNTER_PARMS    CounterParms;   /**< [in]  Timer function settings. When not provided OsMeasGetCounterTicks is used  */
+    EC_T_PERF_MEAS_COUNTER_PARMS    CounterParms;   /**< [in]  Timer function settings. When not provided OsMeasGetCounterTicks is used.  */
     EC_T_PERF_MEAS_HISTOGRAM_PARMS  HistogramParms; /**< [in]  Histogram settings. When not provided the histogram is disabled. */
     EC_T_DWORD                      dwReserved[4];
 } EC_PACKED_API  EC_T_PERF_MEAS_APP_PARMS;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 #include EC_PACKED_INCLUDESTOP
 
-/**
- * \typedef EC_PF_CYCFRAME_RECV
- * \param [in] dwTaskId    Task ID of the received cyclic frame
- * \param [in] pvContext   Arbitrarily application-defined parameter passed to callback
- */
-typedef EC_T_VOID (EC_FNCALL *EC_PF_CYCFRAME_RECV)(EC_T_DWORD dwTaskId, EC_T_VOID* pvContext);
-#include EC_PACKED_INCLUDESTART(1)
-typedef struct _EC_T_CYCFRAME_RX_CBDESC
-{
-    EC_T_VOID*                  pCallbackContext;   /**< [in]  Context pointer. This pointer is used as parameter every time when the callback function is called */
-    EC_PF_CYCFRAME_RECV         pfnCallback;        /**< [in]  This function will be called after the cyclic frame is received, if there is more than one cyclic frame after the last frame. The application has to assure that these functions will not block. */
-} EC_PACKED(1)  EC_T_CYCFRAME_RX_CBDESC;
-#include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
 typedef union _EC_T_USER_JOB_PARMS
@@ -3392,12 +3342,12 @@ typedef union _EC_T_USER_JOB_PARMS
     EC_T_DWORD      dwTaskIdToSend;             /**< [in]  Task ID of the cycle whose frames are to be sent (obsolete use SendCycFramesByTaskId instead) */
     struct _SEND_CYCFRAME_BY_TASKID
     {
-        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the cycle whose frames are to be sent */
+        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the cycle whose frames are to be sent (ENI: Cyclic/TaskId) */
     } EC_PACKED_API SendCycFramesByTaskId;
     struct _PROCESS_RXFRAME_BY_TASKID
     {
         EC_T_BOOL   bCycFramesProcessed;        /**< [out] Indicates whether all previously initiated cyclic frames of a specific cyclic task are received and processed */
-        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the cycle whose frames are to be processed */
+        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the cycle whose frames are to be processed (ENI: Cyclic/TaskId) */
     } EC_PACKED_API ProcessRxFramesByTaskId;
     struct _SWITCH_EOE_FRAMES
     {
@@ -3406,11 +3356,11 @@ typedef union _EC_T_USER_JOB_PARMS
     } EC_PACKED_API SwitchEoeFrames;
     struct _START_TASK
     {
-        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the task to start */
+        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the task to start (ENI: Cyclic/TaskId) */
     } EC_PACKED_API StartTask;
     struct _STOP_TASK
     {
-        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the task to stop */
+        EC_T_DWORD  dwTaskId;                   /**< [in]  Task ID of the task to stop (ENI: Cyclic/TaskId) */
     } EC_PACKED_API StopTask;
 } EC_PACKED_API EC_T_USER_JOB_PARMS;
 #include EC_PACKED_INCLUDESTOP
@@ -3431,15 +3381,15 @@ typedef EC_T_COE_INITCMD_CALLBACK_RESULT (EC_FNCALL *EC_PF_COE_INITCMD_CALLBACK)
 typedef struct _EC_T_ADD_COE_INITCMD_DESC_ENTRY
 {
     EC_T_DWORD      dwHandle;                           /**< 32Bit handle passed to registered pfnCallback */
-    EC_T_WORD       wTransition;                        /**< transition e.g. ECAT_INITCMD_I_P */
-    EC_T_CHAR       szComment[MAX_STD_STRLEN];          /**< comment (ENI) */
-    EC_T_WORD       wTimeout;                           /**< timeout */
-    EC_T_BOOL       bIgnoreFailure;                     /**< continue to process InitCmd on error */
-    EC_T_BYTE       byCcs;                              /**< client command specifier (read or write access) */
-    EC_T_BOOL       bCompleteAccess;                    /**< complete access */
-    EC_T_WORD       wIndex;                             /**< object index */
-    EC_T_BYTE       bySubIndex;                         /**< object subindex */
-    EC_T_DWORD      wDataLen;                           /**< length of the data */
+    EC_T_WORD       wTransition;                        /**< Transition e.g. ECAT_INITCMD_I_P */
+    EC_T_CHAR       szComment[MAX_STD_STRLEN];          /**< Comment (ENI) */
+    EC_T_WORD       wTimeout;                           /**< Timeout */
+    EC_T_BOOL       bIgnoreFailure;                     /**< Continue to process InitCmd on error */
+    EC_T_BYTE       byCcs;                              /**< Client command specifier (read or write access) */
+    EC_T_BOOL       bCompleteAccess;                    /**< Complete access */
+    EC_T_WORD       wIndex;                             /**< Object index */
+    EC_T_BYTE       bySubIndex;                         /**< Object subindex */
+    EC_T_DWORD      wDataLen;                           /**< Length of the data */
     EC_T_BYTE*      pbyData;
 } EC_PACKED_API  EC_T_ADD_COE_INITCMD_DESC_ENTRY;
 #include EC_PACKED_INCLUDESTOP
@@ -3454,16 +3404,6 @@ typedef struct _EC_T_ADD_COE_INITCMD_DESC
     EC_PF_COE_INITCMD_CALLBACK pfnCallback;
 } EC_PACKED_API  EC_T_ADD_COE_INITCMD_DESC;
 #include EC_PACKED_INCLUDESTOP
-
-typedef enum _EC_T_CYCFRAME_LAYOUT
-{
-    eCycFrameLayout_STANDARD    = 0,    /**< Layout according ENI with command add/reordering, no relationship to PD */
-    eCycFrameLayout_DYNAMIC     = 1,    /**< Layout is dynamically modified to send as less as possible cyclic frames and commands */
-    eCycFrameLayout_FIXED       = 2,    /**< Layout strictly match ENI, frame buffers and PD area overlapped */
-    eCycFrameLayout_IN_DMA      = 3,    /**< Layout strictly match ENI, frame buffers and PD area overlapped, frame buffers in DMA */
-
-    eCycFrameLayout_BCppDummy   = 0xFFFFFFFF
-} EC_T_CYCFRAME_LAYOUT;
 
 /* pass through server states */
 typedef enum _EC_PTS_STATE
@@ -3496,56 +3436,6 @@ typedef struct _EC_T_PTS_SRV_START_PARMS
 #define EC_NOTIFICATION_DEFAULT     (2)             /**< Reset notification to default */
 #define EC_ALL_NOTIFICATIONS        (0xFFFFFFFF)    /**< Notification code to change all notifications */
 /**@}*/
-#include EC_PACKED_INCLUDESTART(1)
-typedef struct _EC_T_SET_NOTIFICATION_ENABLED_PARMS
-{
-    EC_T_DWORD dwClientId;          /**< [in] Client ID, 0: Master */
-    EC_T_DWORD dwCode;              /**< [in] Notification code or #EC_ALL_NOTIFICATIONS */
-    EC_T_DWORD dwEnabled;           /**< [in] Enable, disable or reset to default notification. See \ref EC_SET_NOTIFICATION_ENABLED "EC_NOTIFICATION_" flags */
-} EC_PACKED(1) EC_T_SET_NOTIFICATION_ENABLED_PARMS;
-#include EC_PACKED_INCLUDESTOP
-
-#include EC_PACKED_INCLUDESTART(1)
-typedef struct _EC_T_GET_NOTIFICATION_ENABLED_PARMS
-{
-    EC_T_DWORD dwClientId;          /**< [in] Client ID, 0: Master */
-    EC_T_DWORD dwCode;              /**< [in] Notification code */
-} EC_PACKED(1) EC_T_GET_NOTIFICATION_ENABLED_PARMS;
-#include EC_PACKED_INCLUDESTOP
-
-#include EC_PACKED_API_INCLUDESTART
-typedef struct _EC_T_CLEAR_MASTER_INFO_COUNTERS_PARMS
-{
-    EC_T_DWORD  dwClearBusDiagnosisCounters;        /**< [in] Bit 0..7: Clear corresponding Counter ID:
-                                                        - Bit 0: Clear all Counters
-                                                        - Bit 1: Clear Tx Frame Counter
-                                                        - Bit 2: Clear Rx Frame Counter
-                                                        - Bit 3: Clear Lost Frame Counter
-                                                        - Bit 4: Clear Cyclic Frame Counter
-                                                        - Bit 5: Clear Cyclic Datagram Counter
-                                                        - Bit 6: Clear Acyclic Frame Counter
-                                                        - Bit 7: Clear Acyclic DataGram Counter 
-                                                        - Bit 8: Clear Cyclic Lost Frame Counter 
-                                                        - Bit 9: Clear Acyclic Lost Frame Counter */
-    EC_T_UINT64 qwMailboxStatisticsClearCounters;   /**< [in]  Bit 0..56: Clear corresponding Counter ID.
-                                                        - Bit 0..7: Clear AoE statistics
-                                                            - Bit 0: Total Read Transfer Count
-                                                            - Bit 1: Read Transfer Count Last Second
-                                                            - Bit 2: Total Bytes Read
-                                                            - Bit 3: Bytes Read Last Second
-                                                            - Bit 4: Total Write Transfer Count
-                                                            - Bit 5: Write Transfer Count Last Second
-                                                            - Bit 6: Total Bytes Write
-                                                            - Bit 7: Bytes Write Last Second
-                                                        - Bit 8..15: Clear CoE statistics (same ordering as Bit 0..7, AoE)
-                                                        - Bit 16..23: Clear EoE statistics (same ordering as Bit 0..7, AoE)
-                                                        - Bit 24..31: Clear FoE statistics (same ordering as Bit 0..7, AoE)
-                                                        - Bit 32..39: Clear SoE statistics (same ordering as Bit 0..7, AoE)
-                                                        - Bit 40..47: Clear VoE statistics (same ordering as Bit 0..7, AoE)
-                                                        - Bit 48..55: Clear RawMbx statistics (same ordering as Bit 0..7, AoE)*/
-    EC_T_DWORD  dwReserved[6];
-} EC_PACKED_API EC_T_CLEAR_MASTER_INFO_COUNTERS_PARMS;
-#include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_INCLUDESTART(1)
 typedef struct _EC_T_MASTEROD_OBJECT_PARMS
@@ -3554,20 +3444,20 @@ typedef struct _EC_T_MASTEROD_OBJECT_PARMS
     EC_T_BYTE  bySubindex;  /**< Object's sub-index, e.g. 1 */
     EC_T_BYTE  byReserved;
     EC_T_BYTE* pbyData;     /**< Pointer to object's data to be written */
-    EC_T_DWORD dwLength;    /**< Data length to be written */
+    EC_T_DWORD dwLength;    /**< Data length in bytes to be written */
     EC_T_DWORD dwReserved;
 } EC_PACKED(1) EC_T_MASTEROD_OBJECT_PARMS;
 #include EC_PACKED_INCLUDESTOP
 
 /* Start parameters for ADS Adapter */
-#define ATEM_ADS_ADAPTER_START_PARMS_SIGNATURE_PATTERN                    0xDF300000
-#define ATEM_ADS_ADAPTER_START_PARMS_SIGNATURE (  ATEM_ADS_ADAPTER_START_PARMS_SIGNATURE_PATTERN       \
-                         | (EC_VERSION_MAJ         << 16) \
-                         | (EC_VERSION_MIN         << 12) \
-                         | (EC_VERSION_SERVICEPACK <<  8) \
-                         | (EC_VERSION_BUILD       <<  0) \
-                         )
+#define ATEM_ADS_ADAPTER_START_PARMS_SIGNATURE_PATTERN 0xDF300000
+#define ATEM_ADS_ADAPTER_START_PARMS_SIGNATURE EC_SIGNATURE_MAKE(ATEM_ADS_ADAPTER_START_PARMS_SIGNATURE_PATTERN, EC_VERSION_MAJ, EC_VERSION_MIN, EC_VERSION_SERVICEPACK, EC_VERSION_BUILD)
+
 #include EC_PACKED_INCLUDESTART(1)
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpacked-not-aligned"
+#endif
 typedef struct _EC_T_ADS_ADAPTER_START_PARMS
 {
     EC_T_DWORD      dwSignature;         /**< [in]   Set to ATEM_ADS_ADAPTER_START_PARMS_SIGNATURE */
@@ -3575,10 +3465,13 @@ typedef struct _EC_T_ADS_ADAPTER_START_PARMS
     EC_T_LOG_PARMS  LogParms;
     EC_T_CPUSET     cpuAffinityMask;
     EC_T_DWORD      dwThreadPriority;
+    EC_T_DWORD      dwStackSize;
     EC_T_AOE_NETID  targetNetID;
     EC_T_WORD       targetPort;
-    EC_T_WORD       wReserved;
 } EC_PACKED(1) EC_T_ADS_ADAPTER_START_PARMS;
+#if __GNUC__ >= 8
+#pragma GCC diagnostic pop
+#endif
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_INCLUDESTART(1)
@@ -3597,18 +3490,19 @@ typedef struct _EC_T_CYCLIC_MASTER_RED_FRAME_CMD_DESC
 #define EC_T_CMF_CMD_TYPE_SLAVE_STATES                   3
 #define EC_T_CMF_CMD_TYPE_DIAG_IMAGE                     4
 #define EC_T_CMF_CMD_TYPE_BRD_ALSTATUS                   5
+#define EC_T_CMF_CMD_TYPE_EMPTY                          6 /* Used for MAC discovery in switch topology */
 
 #define EC_T_CMF_CMD_FLAG_LAST_CYC_FRAME            0x0001
-#define EC_T_CMF_CMD_FLAG_DEVICE_FLAGS_MAIN_MASK    0x0F00 /* see EC_T_CMF_CMD_DEVICE_FLAG_... */
+#define EC_T_CMF_CMD_FLAG_DEVICE_FLAGS_MAIN_MASK    0x0F00 /* See EC_T_CMF_CMD_DEVICE_FLAG_... */
 #define EC_T_CMF_CMD_FLAG_DEVICE_FLAGS_MAIN_OFFSET       8
-#define EC_T_CMF_CMD_FLAG_DEVICE_FLAGS_RED_MASK     0xF000 /* see EC_T_CMF_CMD_DEVICE_FLAG_... */
+#define EC_T_CMF_CMD_FLAG_DEVICE_FLAGS_RED_MASK     0xF000 /* See EC_T_CMF_CMD_DEVICE_FLAG_... */
 #define EC_T_CMF_CMD_FLAG_DEVICE_FLAGS_RED_OFFSET       12
 
 /* EC_T_CMF_CMD_FLAG_DEVICE_FLAGS_... */
-#define EC_T_CMF_CMD_DEVICE_FLAG_LINK                  0x1 /* link detected */
-#define EC_T_CMF_CMD_DEVICE_FLAG_SEND_ENABLED          0x2 /* send enabled (topo change delay elapsed or frame received) */
-#define EC_T_CMF_CMD_DEVICE_FLAG_SLAVE_DATA_RX         0x4 /* slave data received last cycle */
-#define EC_T_CMF_CMD_DEVICE_FLAG_MASTERRED_DATA_RX     0x8 /* foreign master red data received last cycle */
+#define EC_T_CMF_CMD_DEVICE_FLAG_LINK                  0x1 /* Link detected */
+#define EC_T_CMF_CMD_DEVICE_FLAG_SEND_ENABLED          0x2 /* Send enabled (topo change delay elapsed or frame received) */
+#define EC_T_CMF_CMD_DEVICE_FLAG_SLAVE_DATA_RX         0x4 /* Slave data received last cycle */
+#define EC_T_CMF_CMD_DEVICE_FLAG_MASTERRED_DATA_RX     0x8 /* Foreign master red data received last cycle */
 
 typedef enum _EC_T_SLAVE_SELECTION
 {
@@ -3620,13 +3514,6 @@ typedef enum _EC_T_SLAVE_SELECTION
     eSlaveSelectionDummy = 0xFFFFFFFF
 } EC_T_SLAVE_SELECTION;
 
-#include EC_PACKED_API_INCLUDESTART
-typedef struct _EC_T_SET_MAILBOX_POLLING_CYCLES_DESC
-{
-    EC_T_DWORD      dwSlaveId;          /**< [in] Slave Id */
-    EC_T_WORD       wCycles;            /**< [in] Number of cycles between polling [ms] */
-} EC_PACKED_API  EC_T_SET_MAILBOX_POLLING_CYCLES_DESC;
-#include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_IOCTL_SET_CONFIGDATA_MEMORY_POOL_DESC
@@ -3639,23 +3526,29 @@ typedef struct _EC_IOCTL_SET_CONFIGDATA_MEMORY_POOL_DESC
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_SELFTESTSCAN_PARMS
 {
-    EC_T_DWORD  dwSize;                  /**< [in] Set to sizeof(EC_T_SELFTESTSCAN_PARMS) */
-    EC_T_DWORD  dwTimeout;               /**< [in] Timeout [ms], 0 or EC_NOWAIT defaults to 500ms*/
-    EC_T_DWORD  dwFrameCount;            /**< [in] Total number of frames sent during the self-test. Default value is 1500. A value of 0 let the current setting unmodified. */
-    EC_T_DWORD  dwFrameSizeMin;          /**< [in] Min frame size [bytes]. Default value is 60. A value of 0 let the current setting unmodified. */
-    EC_T_DWORD  dwFrameSizeMax;          /**< [in] Max frame size [bytes]. Default value is 1514. A value of 0 let the current setting unmodified. */
-    EC_T_DWORD  dwFrameSizeStep;         /**< [in] Size [bytes] by which the frame increases or decreases continuously during the self-test. Default value is 1. A value of 0 let the current setting unmodified. */
-    EC_T_BOOL   bDetectBadConnections;   /**< [in] Execute the bad connection detection after self-test */
-    EC_T_UINT64 qwFrameRoundtripTimeAvg; /**< [out] Roundtrip time average [us]. Time taken from sending to receiving the frame (master application level). */
-    EC_T_UINT64 qwFrameRoundtripTimeMin; /**< [out] Roundtrip time minimum [us]. Time taken from sending to receiving the frame (master application level). */
-    EC_T_UINT64 qwFrameRoundtripTimeMax; /**< [out] Roundtrip time maximum [us]. Time taken from sending to receiving the frame (master application level). */
+    EC_T_DWORD  dwSize;                                /**< [in] Set to sizeof(EC_T_SELFTESTSCAN_PARMS) */
+    EC_T_DWORD  dwTimeout;                             /**< [in] Timeout [ms], 0 or EC_NOWAIT defaults to 500ms*/
+    EC_T_DWORD  dwFrameCount;                          /**< [in] Total number of frames sent during the self-test. Default value is 1500. A value of 0 sets the default value. */
+    EC_T_DWORD  dwFrameSizeMin;                        /**< [in] Min frame size [bytes]. Default value is 60. A value of 0 sets the default value. */
+    EC_T_DWORD  dwFrameSizeMax;                        /**< [in] Max frame size [bytes]. Default value is 1514. A value of 0 sets the default value. */
+    EC_T_DWORD  dwFrameSizeStep;                       /**< [in] Size [bytes] by which the frame increases or decreases continuously during the self-test. Default value is 1. A value of 0 sets the default value. */
+    EC_T_BOOL   bDetectBadConnections;                 /**< [in] Execute the bad connection detection after self-test */
+    EC_T_UINT64 qwFrameRoundtripTimeAvg;               /**< [out] Roundtrip time average [us]. Time taken from sending to receiving the frame (master application level). */
+    EC_T_UINT64 qwFrameRoundtripTimeMin;               /**< [out] Roundtrip time minimum [us]. Time taken from sending to receiving the frame (master application level). */
+    EC_T_UINT64 qwFrameRoundtripTimeMax;               /**< [out] Roundtrip time maximum [us]. Time taken from sending to receiving the frame (master application level). */
+
+    EC_T_BOOL   bMeasureRoundtripTimeForSingleFrame;   /**< [in] Execute roundtrip time calculation for single frame */
+
+    /* New parameters in version 2 */
+    EC_T_BOOL   bClearSlaveErrorCounters;              /**< [in] Clear all slaves' error counters before running the self-test */
+    EC_T_DWORD  dwDuration;                            /**< [in] Desired duration to run the self-test scan [s]. Stops as soon as dwDuration is reached. A value of 0 means no duration limit. If dwDuration is not zero, dwFrameCount is ignored. */
 } EC_T_SELFTESTSCAN_PARMS;
 #include EC_PACKED_INCLUDESTOP
 
 #include EC_PACKED_API_INCLUDESTART
 typedef struct _EC_T_SIMULATOR_DEVICE_CONNECTION_DESC
 {
-    EC_T_DWORD dwType;                /**< EC_SIMULATOR_DEVICE_CONNECTION_TYPE_... */
+    EC_T_DWORD dwType;                /**< EC_SIMULATOR_DEVICE_CONNECTION_TYPE... */
     EC_T_DWORD dwInstanceID;          /**< EC-Simulator Instance ID */
     EC_T_WORD  wCfgFixedAddress;      /**< EC-Simulator Configuration (ENI/EXI) */
     EC_T_BYTE  byPort;                /**< 0...3: Port A-D */
@@ -3673,6 +3566,70 @@ struct EC_T_FRAME_CALLBACK_CBDESC
     EC_T_VOID* pContext;
     EC_T_FRAME_CALLBACK pfnCallback;
 };
+
+/**
+ * \typedef EC_PF_LINK_VAR_CONVERTER
+ * \param [in]  pApplVarInfo    Information about application variable
+ * \param [in]  pbyProcessImage Pointer to input resp. output process image
+ */
+struct _EC_T_LINK_VAR_INFO;
+typedef EC_T_VOID(EC_FNCALL *EC_PF_LINK_VAR_CONVERTER)(const struct _EC_T_LINK_VAR_INFO* pApplVarInfo, EC_T_BYTE* pbyProcessImage);
+
+#include EC_PACKED_API_INCLUDESTART
+typedef struct _EC_T_LINK_VAR_INFO
+{
+    EC_T_VOID* pvContext;                       /**< [in]  Arbitrarily application-defined parameter */
+    EC_T_BYTE* pbyApplVar;                      /**< [in]  Pointer to application variable where process variable should be linked to */
+    EC_T_WORD  wApplVarType;                    /**< [in]  Type of application variable */
+    EC_T_WORD  wApplVarBitSize;                 /**< [in]  Size of variable (in bits) */
+    EC_T_DWORD dwApplVarBitOffs;                /**< [in]  Bit offset of variable */
+    EC_PF_LINK_VAR_CONVERTER pfnConverter;      /**< [in]  Callback function to manipulate the input when reading from process image
+                                                           resp. the output when writing to process image (could be EC_NULL) */
+    EC_PF_LINK_VAR_CONVERTER pfnReserved;
+    EC_T_PROCESS_VAR_INFO_EX* pProcVarInfoEx;   /**< [out] Extended information about process variable */
+    EC_T_DWORD dwReserved[4];
+} EC_PACKED_API EC_T_LINK_VAR_INFO;
+#include EC_PACKED_INCLUDESTOP
+
+/* EC_IOCTL_SET_SLAVE_MAX_STATE descriptor */
+#include EC_PACKED_API_INCLUDESTART
+typedef struct _EC_T_SLAVE_MAX_STATE_DESC
+{
+    EC_T_DWORD      dwSlaveId;            /**< [in] Slave ID */
+    EC_T_STATE      eState;               /**< [in] Requested Slave State */
+} EC_PACKED_API EC_T_SLAVE_MAX_STATE_DESC;
+#include EC_PACKED_INCLUDESTOP
+
+/** \defgroup EC_T_VAR_DIRECTION EC_T_VAR_DIRECTION
+@{*/
+typedef enum _EC_T_VAR_DIRECTION
+{
+    eVarDirection_Undefined = 0,    /**< Undefined Direction */
+    eVarDirection_INPUT     = 1,    /**< INPUTs */
+    eVarDirection_OUTPUT    = 2,    /**< OUTPUTs */
+    eVarDirection_All       = 3,    /**< INPUTs and OUTPUTs */
+
+    /* Borland C++ datatype alignment correction */
+    eVarDirection_BCppDummy   = 0xFFFFFFFF
+} EC_T_VAR_DIRECTION;
+/**@}*/ /* EC_T_VAR_DIRECTION */
+
+/** \defgroup EC_T_VAR_SOURCE EC_T_VAR_SOURCE
+@{*/
+typedef enum _EC_T_VAR_SOURCE
+{
+    eVarSource_Undefined    = 0,    /**< Undefined Source*/
+    eVarSource_All          = 1,    /**< Slaves and Master/Monitor/Simulator */
+    eVarSource_AllSlaves    = 2,    /**< All Slaves */
+    eVarSource_Slave        = 3,    /**< Slave */
+    eVarSource_Master       = 4,    /**< Master */
+    eVarSource_Monitor      = 5,    /**< Monitor */
+    eVarSource_Simulator    = 6,    /**< Simulator */
+
+    /* Borland C++ datatype alignment correction */
+    eVarSource_BCppDummy   = 0xFFFFFFFF
+} EC_T_VAR_SOURCE;
+/**@}*/ /* EC_T_VAR_SOURCE */
 
 /*-COMPILER SETTINGS---------------------------------------------------------*/
 #ifdef __cplusplus

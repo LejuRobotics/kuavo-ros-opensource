@@ -188,6 +188,10 @@ class DrakeVelocityIKSolver final {
                                                     const Eigen::Vector3d& p2Ref,
                                                     bool* success = nullptr) {
     if (success) *success = false;
+    if (!p1Ref.allFinite() || !p1Fixed.allFinite() || !p2Ref.allFinite()) {
+      return {p0_ + link1Length_ * u1Prev_,
+              p0_ + link1Length_ * u1Prev_ + link2Length_ * u2Prev_};
+    }
     // // ONLY FOR DEBUG
     // printConfigTable(p1Ref, p1Fixed, p2Ref);
 

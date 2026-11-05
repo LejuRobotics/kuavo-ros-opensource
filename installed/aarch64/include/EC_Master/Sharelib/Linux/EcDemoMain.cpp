@@ -64,7 +64,7 @@ EC_T_DWORD PrepareCommandLine(EC_T_INT nArgc, EC_T_VOID* ppArgv, EC_T_CHAR* szCo
         pcStrCur = pcStrCur + OsStrlen(pcStrCur);
 
         /* insert space */
-        OsStrncpy(pcStrCur, " ", nStrRemain - 1); nStrRemain--; pcStrCur++;
+        strncpy(pcStrCur, " ", nStrRemain - 1); nStrRemain--; pcStrCur++;
 
         if (bIsFileName && (1 < nArgc))
         {
@@ -72,14 +72,14 @@ EC_T_DWORD PrepareCommandLine(EC_T_INT nArgc, EC_T_VOID* ppArgv, EC_T_CHAR* szCo
             nArgc--; ppcArgv++;
 
             /* insert quotation mark */
-            OsStrncpy(pcStrCur, "\"", nStrRemain - 1); nStrRemain--; pcStrCur++;
+            strncpy(pcStrCur, "\"", nStrRemain - 1); nStrRemain--; pcStrCur++;
 
             /* insert ENI file name */
             OsSnprintf(pcStrCur, nStrRemain - 1, szStrFormat, *ppcArgv); nStrRemain -= (EC_T_INT)OsStrlen(pcStrCur);
             pcStrCur = pcStrCur + OsStrlen(pcStrCur);
 
             /* insert quotation mark */
-            OsStrncpy(pcStrCur, "\" ", nStrRemain - 1); nStrRemain -= 2; pcStrCur += 2;
+            strncpy(pcStrCur, "\" ", nStrRemain - 1); nStrRemain -= 2; pcStrCur += 2;
         }
     }
 
@@ -353,7 +353,7 @@ int Ec_Master_init(int nArgc, char* ppArgv[])
     OsMemcpy(G_pEcLogParms, &AppContext.LogParms, sizeof(EC_T_LOG_PARMS));
 
     EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "%s V%s for %s %s\n", EC_DEMO_APP_NAME, EC_FILEVERSIONSTR, ATECAT_PLATFORMSTR, EC_COPYRIGHT));
-    EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Full command line: %s\n", szCommandLine));
+    EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Command-line contents omitted to protect license keys\n"));
 
     /* adjust linklayer parameters */
     for (dwIdx = 0; dwIdx < MAX_LINKLAYER; dwIdx++)

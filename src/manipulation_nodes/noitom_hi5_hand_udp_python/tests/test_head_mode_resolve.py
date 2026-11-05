@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Chest->Head freshness used by the vr_follow timeout, without starting ROS."""
+"""Chest->Head freshness and vr_follow pause/resume, without starting ROS."""
 import ast
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 from pathlib import Path
 
 source = Path(__file__).resolve().parents[1] / "scripts/head_control_node.py"
@@ -26,6 +28,76 @@ class ChestHeadFreshnessTest(unittest.TestCase):
         self.assertFalse(fresh(10.0, 6.9, 3.0))
         self.assertFalse(fresh(10.0, None, 3.0))
         self.assertFalse(fresh(10.0, 10.1, 3.0))
+
+
+class VrFollowPauseTest(unittest.TestCase):
+    def test_missing_stale_and_recovered_tf_preserve_mode(self):
+        node_class = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+                          and n.name == "HeadTrackHandNode")
+        spin = next(n for n in node_class.body if isinstance(n, ast.FunctionDef)
+                    and n.name == "spin")
+        # Startup without TF, reception, disconnection beyond timeout, recovery.
+        stamps = [None, 10.0, 10.0, 20.0]
+        times = [0.0, 10.0, 19.0, 20.0]
+        index = [0]
+        ros = SimpleNamespace(
+            Rate=lambda hz: SimpleNamespace(sleep=lambda: index.__setitem__(0, index[0] + 1)),
+            is_shutdown=lambda: index[0] >= len(stamps),
+            logwarn_throttle=Mock(), ROSInterruptException=RuntimeError,
+        )
+        scope = {"rospy": ros, "HeadControlMode": SimpleNamespace(FIXED="fixed", VR_FOLLOW="vr_follow")}
+        exec(compile(ast.Module(body=[spin], type_ignores=[]), str(source), "exec"), scope)
+        published = []
+        node = SimpleNamespace(
+            rate_hz=50.0, manager=SimpleNamespace(mode="vr_follow"),
+            head_control_mode="vr_follow", _release_head_command=False,
+            _vr_chest_head_is_fresh=lambda: namespace["chest_head_tf_is_fresh"](
+                times[index[0]], stamps[index[0]], 3.0),
+            _update_vr_follow=lambda: published.append(index[0]),
+            _publish_head_mode=Mock(), _apply_public=Mock(),
+        )
+        scope["spin"](node)
+        self.assertEqual(published, [1, 3])
+        self.assertEqual(node.manager.mode, "vr_follow")
+        self.assertEqual(node.head_control_mode, "vr_follow")
+        node._apply_public.assert_not_called()
+        self.assertEqual(node._publish_head_mode.call_count, 4)
+
+
+class FixedReleaseTest(unittest.TestCase):
+    def run_fixed(self, released):
+        node_class = next(n for n in tree.body if isinstance(n, ast.ClassDef)
+                          and n.name == "HeadTrackHandNode")
+        spin = next(n for n in node_class.body if isinstance(n, ast.FunctionDef)
+                    and n.name == "spin")
+        index = [0]
+        ros = SimpleNamespace(
+            Rate=lambda hz: SimpleNamespace(sleep=lambda: index.__setitem__(0, index[0] + 1)),
+            is_shutdown=lambda: index[0] >= 5, ROSInterruptException=RuntimeError,
+        )
+        scope = {"rospy": ros, "robotHeadMotionData": SimpleNamespace,
+                 "HeadControlMode": SimpleNamespace(FIXED="fixed", VR_FOLLOW="vr_follow")}
+        exec(compile(ast.Module(body=[spin], type_ignores=[]), str(source), "exec"), scope)
+        node = SimpleNamespace(
+            rate_hz=50.0, manager=SimpleNamespace(mode="fixed"),
+            _release_head_command=released, head_pub=Mock(),
+            _publish_head_mode=Mock(),
+        )
+        # No TF lookup methods: fixed must release even when TF is absent.
+        scope["spin"](node)
+        return node
+
+    def test_startup_fixed_does_not_publish(self):
+        node = self.run_fixed(True)
+        node.head_pub.publish.assert_not_called()
+        self.assertEqual(node._publish_head_mode.call_count, 5)
+
+    def test_explicit_fixed_publishes_once_then_releases(self):
+        node = self.run_fixed(False)
+        node.head_pub.publish.assert_called_once()
+        self.assertEqual(node.head_pub.publish.call_args.args[0].joint_data, [0.0, 0.0])
+        self.assertTrue(node._release_head_command)
+        self.assertEqual(node._publish_head_mode.call_count, 5)
 
 
 if __name__ == "__main__":

@@ -786,7 +786,7 @@ EC_T_DWORD CoeReadObjectDictionary(
             wNameLen = pMbxGetObDescTfer->MbxData.CoE_ObDesc.wObNameLen;
             wNameLen = EC_AT_MOST(wNameLen, (EC_T_WORD)(MAX_OBNAME_LEN - 1));
 
-            OsStrncpy(szObName, pMbxGetObDescTfer->MbxData.CoE_ObDesc.pchObName, (EC_T_INT)wNameLen);
+            strncpy(szObName, pMbxGetObDescTfer->MbxData.CoE_ObDesc.pchObName, (EC_T_INT)wNameLen);
             szObName[wNameLen] = '\0';
 
             EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "0x%04X %s: type 0x%04X, code=0x%02x, %s, SubIds=%d",
@@ -895,10 +895,10 @@ EC_T_DWORD CoeReadObjectDictionary(
 
                 if (pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.bRxPdoMapping)
                 {
-                    OsStrncpy(szPdoMapInfo, "-RxPDO", sizeof(szPdoMapInfo) - 1);
+                    strncpy(szPdoMapInfo, "-RxPDO", sizeof(szPdoMapInfo) - 1);
                     if (pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.bTxPdoMapping)
                     {
-                        OsStrncpy(&(szPdoMapInfo[OsStrlen(szPdoMapInfo)]), "+TxPDO", sizeof(szPdoMapInfo) - OsStrlen(szPdoMapInfo) - 1);
+                        strncpy(&(szPdoMapInfo[OsStrlen(szPdoMapInfo)]), "+TxPDO", sizeof(szPdoMapInfo) - OsStrlen(szPdoMapInfo) - 1);
                     }
                 }
 
@@ -911,21 +911,21 @@ EC_T_DWORD CoeReadObjectDictionary(
 
                 if (pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.byValueInfo & EC_COE_ENTRY_DefaultValue)
                 {
-                    OsStrncpy(szDefaultValue, ", Default", sizeof(szDefaultValue) - 1);
+                    strncpy(szDefaultValue, ", Default", sizeof(szDefaultValue) - 1);
                     pbyDefaultValue = &pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.pbyData[nDataIdx];
                     nDataIdx += BIT2BYTE(pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.wBitLen);
                 }
 
                 if (pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.byValueInfo & EC_COE_ENTRY_MinValue)
                 {
-                    OsStrncpy(szMinValue, ", Min", sizeof(szMinValue) - 1);
+                    strncpy(szMinValue, ", Min", sizeof(szMinValue) - 1);
                     pbyMinValue = &pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.pbyData[nDataIdx];
                     nDataIdx += BIT2BYTE(pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.wBitLen);
                 }
 
                 if (pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.byValueInfo & EC_COE_ENTRY_MaxValue)
                 {
-                    OsStrncpy(szMaxValue, ", Max", sizeof(szMaxValue) - 1);
+                    strncpy(szMaxValue, ", Max", sizeof(szMaxValue) - 1);
                     pbyMaxValue = &pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.pbyData[nDataIdx];
                     nDataIdx += BIT2BYTE(pMbxGetEntryDescTfer->MbxData.CoE_EntryDesc.wBitLen);
                 }
@@ -1167,11 +1167,11 @@ Exit:
     }
 
     /* Free allocated memory */
-    SafeOsFree(pwODList);
-    SafeOsFree(pbyODLTferBuffer);
-    SafeOsFree(pbyOBDescTferBuffer);
-    SafeOsFree(pbyGetEntryTferBuffer);
-    SafeOsFree(szLogBuffer);
+    OsSafeFree(pwODList);
+    OsSafeFree(pbyODLTferBuffer);
+    OsSafeFree(pbyOBDescTferBuffer);
+    OsSafeFree(pbyGetEntryTferBuffer);
+    OsSafeFree(szLogBuffer);
 
     return dwRetVal;
 }

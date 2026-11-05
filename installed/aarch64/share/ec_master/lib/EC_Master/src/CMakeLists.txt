@@ -16,6 +16,8 @@ set(EcDemo_INCLUDE_DIRS
   $<INSTALL_INTERFACE:include/EC_Master/Sharelib/Linux>
 )
 
+# Keep integration helper classes named CKuavoEcThread/CKuavoEcTimer:
+# the 3.3 static SDK includes its own CEcThread with a different layout.
 set(SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/Common/EcThread.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Common/EcTimer.cpp
@@ -38,11 +40,11 @@ ${CMAKE_CURRENT_SOURCE_DIR}/../Bin/Linux/aarch64/
 add_executable(${PROJECT_NAME} ${SRCS} ${CMAKE_CURRENT_SOURCE_DIR}/Examples/Linux/EcDemoMain.cpp)
 target_include_directories(${PROJECT_NAME} PUBLIC ${EcDemo_INCLUDE_DIRS})  
 target_link_libraries(${PROJECT_NAME} 
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServer.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMaster.a>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServerStatic.a>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterStatic.a>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../Bin/Linux/aarch64/libemllIntelGbe.so>
-  $<INSTALL_INTERFACE:libEcMasterRasServer.a>
-  $<INSTALL_INTERFACE:libEcMaster.a>
+  $<INSTALL_INTERFACE:libEcMasterRasServerStatic.a>
+  $<INSTALL_INTERFACE:libEcMasterStatic.a>
   $<INSTALL_INTERFACE:libemllIntelGbe.so>
   -pthread
   -ldl
@@ -52,11 +54,11 @@ target_link_libraries(${PROJECT_NAME}
 add_library(ec_master_main STATIC ${SRCS} ${CMAKE_CURRENT_SOURCE_DIR}/Sharelib/Linux/EcDemoMain.cpp)
 target_include_directories(ec_master_main PUBLIC ${EcDemo_INCLUDE_DIRS})  
 target_link_libraries(ec_master_main
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServer.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMaster.a>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServerStatic.a>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterStatic.a>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../Bin/Linux/aarch64/libemllIntelGbe.so>
-  $<INSTALL_INTERFACE:libEcMasterRasServer.a>
-  $<INSTALL_INTERFACE:libEcMaster.a>
+  $<INSTALL_INTERFACE:libEcMasterRasServerStatic.a>
+  $<INSTALL_INTERFACE:libEcMasterStatic.a>
   $<INSTALL_INTERFACE:libemllIntelGbe.so>
   -pthread
   -ldl
@@ -66,11 +68,11 @@ target_link_libraries(ec_master_main
 add_library(ec_app STATIC ${CMAKE_CURRENT_SOURCE_DIR}/Sharelib/EcMasterDemo/EcDemoApp.cpp )
 target_include_directories(ec_app PUBLIC ${EcDemo_INCLUDE_DIRS})  
 target_link_libraries(ec_app 
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServer.a>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMaster.a>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServerStatic.a>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterStatic.a>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../Bin/Linux/aarch64/libemllIntelGbe.so>
-  $<INSTALL_INTERFACE:libEcMasterRasServer.a>
-  $<INSTALL_INTERFACE:libEcMaster.a>
+  $<INSTALL_INTERFACE:libEcMasterRasServerStatic.a>
+  $<INSTALL_INTERFACE:libEcMasterStatic.a>
   $<INSTALL_INTERFACE:libemllIntelGbe.so>
   -pthread
   -ldl
@@ -86,8 +88,8 @@ install(TARGETS ec_master_main ec_app
 # Install dependent library
 install(FILES 
   ${CMAKE_CURRENT_SOURCE_DIR}/../Bin/Linux/aarch64/libemllIntelGbe.so
-  ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServer.a
-  ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMaster.a
+  ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterRasServerStatic.a
+  ${CMAKE_CURRENT_SOURCE_DIR}/SDK/LIB/Linux/aarch64/libEcMasterStatic.a
   DESTINATION lib
 )
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(wheel_arm_abs_vel LANGUAGES CXX)
+project(wheel_arm_abs_vel LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -21,9 +21,10 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 add_message_files(FILES
-  AbsoluteIkCommitDebug.msg QuestTcpMappingDebug.msg TeleopTcpTarget.msg
+  DirectControllerInput.msg AbsoluteIkCommitDebug.msg QuestTcpMappingDebug.msg TeleopTcpTarget.msg
   VelocityIkFeasibilityDebug.msg VelocityIkInputDebug.msg VelocityIkMapperStatus.msg
   VelocityIkShadow.msg WholeBodyIkReference.msg)
+add_service_files(FILES ManualLowerBody.srv)
 generate_messages(DEPENDENCIES geometry_msgs std_msgs)
 catkin_package(INCLUDE_DIRS include
   LIBRARIES wheel_absolute_controllers wheel_absolute_dynamics
@@ -102,7 +103,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME tail_filter_frequency_test COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/tail_filter_frequency_test.py)
   enable_testing()
   find_package(PythonInterp 3 REQUIRED)
-  foreach(name startup_gesture_order torso_stick_controls pose_velocity_kalman shared_model_resolution arm_hold_base pico_receive_isolation fixed_pipeline_hold startup_arm_action pico_head_follow arm_torso_hold torso_controls absolute_control_mechanism fixed_follow_operation absolute_sim_source pico_discovery pico_input_parity terminal_initial_start runtime_partition runtime_topology x86_topology model_platform_matrix absolute_robot_version absolute_end_effector wheel_base_command velocity_ik_base_command)
+  foreach(name skeleton_filter_alignment startup_gesture_order torso_stick_controls pose_velocity_kalman shared_model_resolution arm_hold_base pico_receive_isolation fixed_pipeline_hold startup_arm_action pico_head_follow arm_torso_hold torso_controls absolute_control_mechanism fixed_follow_operation absolute_sim_source pico_discovery pico_input_parity terminal_initial_start runtime_partition runtime_topology x86_topology model_platform_matrix absolute_robot_version absolute_end_effector wheel_base_command velocity_ik_base_command)
     add_test(NAME ${name}_test COMMAND ${PYTHON_EXECUTABLE}
       -B ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}_test.py)
   endforeach()
@@ -141,3 +142,13 @@ if(CATKIN_ENABLE_TESTING)
 endif()
 
 include(cmake/absolute_simulation.cmake)
+
+add_subdirectory(hardware)
+
+add_subdirectory(direct_tcp)
+
+if(CATKIN_ENABLE_TESTING)
+  foreach(name leg_joint_tui leg_joint_tui_terminal end_effector_machine power_board_diagnostics)
+    add_test(NAME ${name}_test COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}_test.py)
+  endforeach()
+endif()

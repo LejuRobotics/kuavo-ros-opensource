@@ -686,7 +686,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   std::vector<ArmJointLimit> armJointLimits_;  // 长度 14，顺序同 /kuavo_arm_traj（l1..l7, r1..r7）
 
   bool wristJointLimitVelocityDamperEnabled_{true};
-  double armJointSoftLimitScale_{0.99};           // 软限位 = scale * URDF 上下限，0.99 ≈ 只留约 1% 边
+  double armJointSoftLimitScale_{0.9};           // 软限位 = scale * URDF 上下限，0.9 ≈ 留约 10% 边
   double wristJointLimitSoftZone_{0.14};          // [rad] 距离软限位多远开始减速
   double wristJointLimitStopAcceleration_{80.0};  // [rad/s^2] 动态制动距离使用的减速度
   double wristJointLimitMaxVelocity_{4.0};        // [rad/s] 阻尼层允许的最大速度

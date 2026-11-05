@@ -457,13 +457,51 @@ class ArmTrajectoryBezierDemo:
 
     @staticmethod
     def _extract_hand_part(hand_msg):
-        """从手部话题提取手部关节数据，不足12个补零"""
-        return list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+        """从 /dexhand/state 提取手部关节。
+
+        话题值为 0-100 API 单位（非弧度）。转成 rad 存入 current_arm_joint_state，
+        以便后续统一用 math.degrees() 还原成 API 数值；不足 12 个补零。
+        """
+        raw = list(hand_msg.position[:12]) if len(hand_msg.position) >= 12 else [0.0] * 12
+        return [math.radians(float(v)) for v in raw]
+
+    def _hand_slot_ranges(self, tact_length):
+        """Return (left_slice, right_slice) for hand slots in tact-space degrees list."""
+        if self.robot_class == KUAVO and tact_length >= 26:
+            return slice(14, 20), slice(20, 26)
+        if self.robot_class == ROBAN and tact_length >= 20:
+            return slice(8, 14), slice(14, 20)
+        return None, None
+
+    def _apply_last_commanded_hands(self, servos_deg, tact_length):
+        """Overwrite hand slots with last commanded /control_robot_hand_position targets.
+
+        After !4176, /dexhand/state is real feedback. Seeding reset/init from that
+        feedback (especially stale right-hand samples when Revo1 RX fails) re-issues
+        a close after 抱拳 opens — #4718. Commanded hand_state is already 0-100 API.
+        """
+        left_sl, right_sl = self._hand_slot_ranges(tact_length)
+        if left_sl is None:
+            return servos_deg
+
+        left = list(self.hand_state.left_hand_position) if self.hand_state.left_hand_position else []
+        right = list(self.hand_state.right_hand_position) if self.hand_state.right_hand_position else []
+        if len(left) >= 6:
+            servos_deg[left_sl] = [float(x) for x in left[:6]]
+        if len(right) >= 6:
+            servos_deg[right_sl] = [float(x) for x in right[:6]]
+        return servos_deg
 
     def _update_current_arm_joint_state(self, joint_msg, hand_msg):
         """整合 joint_msg 和 hand_msg，更新 current_arm_joint_state"""
         joint_q = joint_msg.joint_data.joint_q
         hand_part = self._extract_hand_part(hand_msg)
+
+        if (
+            self.robot_version.version_number() == 49
+            and rospy.get_param('/end_effector_type', '') == 'qiangnao'
+        ):
+            hand_part = [math.radians(value) for value in hand_part]
 
         extractor = self._JOINT_EXTRACTORS[self._get_extractor_key()]
         self.current_arm_joint_state = [round(v, 5) for v in extractor(self, joint_q, hand_part)]
@@ -576,12 +614,18 @@ class ArmTrajectoryBezierDemo:
         if len(current) < tact_length:
             current.extend([0.0] * (tact_length - len(current)))
 
-        if msg is None or not getattr(msg, 'position', None):
-            return current
+        if msg is not None and getattr(msg, 'position', None):
+            pos = list(msg.position)
+            n_from_topic = min(len(pos), tact_length)
+            # Arm traj topics carry only arm joints (KUAVO 14 / ROBAN 8);
+            # never let them overwrite hand/head/waist slots.
+            n_arm_limit = 14 if self.robot_class == KUAVO else 8
+            n_arm = min(n_from_topic, n_arm_limit)
+            current[:n_arm] = pos[:n_arm]
 
-        pos = list(msg.position)
-        n_from_topic = min(len(pos), tact_length)
-        current[:n_from_topic] = pos[:n_from_topic]
+        # Hands must come from last commanded targets, not measured /dexhand/state
+        # (see #4718 / !4176). MoRE early-return above already has full commanded tact.
+        self._apply_last_commanded_hands(current, tact_length)
         return current
 
     def traj_callback(self, msg):
@@ -1313,6 +1357,7 @@ class ArmTrajectoryBezierDemo:
                 else:
                     # 当前状态长度更短或相等，需要补全到原始长度
                     frame0["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state] + [0] * (len(frame0["servos"]) - len(self.current_arm_joint_state))
+                self._apply_last_commanded_hands(frame0["servos"], len(frame0["servos"]))
             else:
                 frame0["servos"] = self.servos_start
             frame0["keyframe"] = 0
@@ -1363,6 +1408,7 @@ class ArmTrajectoryBezierDemo:
                         [math.degrees(p) for p in self.current_arm_joint_state]
                         + [0] * (len(current_frame["servos"]) - len(self.current_arm_joint_state))
                     )
+                self._apply_last_commanded_hands(current_frame["servos"], len(current_frame["servos"]))
                 frames.insert(0, current_frame)
                 self._last_inserted_init_kf = transition_keyframe
                 rospy.loginfo(
@@ -1411,6 +1457,7 @@ class ArmTrajectoryBezierDemo:
                 else:
                     # 当前状态长度更短或相等，需要补全到原始长度
                     current_frame["servos"] = [math.degrees(pos) for pos in self.current_arm_joint_state] + [0] * (len(current_frame["servos"]) - len(self.current_arm_joint_state))
+                self._apply_last_commanded_hands(current_frame["servos"], len(current_frame["servos"]))
                 
                 # 将当前姿态帧插入到第一帧位置
                 frames.insert(0, current_frame)
@@ -1791,8 +1838,10 @@ class ArmTrajectoryBezierDemo:
                 servos_end[8] = math.degrees(right_rad)
         else:
             servos_end = self.INIT_ARM_POS
-        # # 起始帧从 /kuavo_arm_traj 获取（当前指令位姿）；无数据时回退到 current_arm_joint_state
+        # 起始帧从 /kuavo_arm_traj 获取（当前指令位姿）；无数据时回退到 current_arm_joint_state。
+        # 手部强制用上次指令，避免 !4176 后实测反馈把复位起点打成再握拳 (#4718)。
         self.servos_start = self._get_servos_from_kuavo_arm_traj(tact_length)
+        self._apply_last_commanded_hands(self.servos_start, tact_length)
         frames = [
             {
                 "servos": self.servos_start,

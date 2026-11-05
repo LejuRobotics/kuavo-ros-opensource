@@ -4,6 +4,7 @@
 
 #include "humanoid_wheel_interface/reference_manager/MobileManipulatorReferenceManager.h"
 #include "humanoid_wheel_interface/motion_planner/TorsoRotationTarget.h"
+#include "humanoid_wheel_interface/motion_planner/TorsoReachability.h"
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/TwistStamped.h>
 #include <angles/angles.h>
@@ -858,9 +859,8 @@ namespace mobile_manipulator {
       cmdTorsoPose_mtx_.lock();
       isCmdTorsoPoseUpdated_ = true;
       cmdTorsoPoseDesiredTime_ = 0.0;
-      const double yaw = applyTorsoYawRequest(
-          cmdTorsoPose_[3], msg->angular.z, cmdTorsoPose_[2] - initialTorsoPos_[2],
-          msg->linear.z - initialTorsoPos_[2]);
+      // VR/SDK 位姿请求不依赖躯干高度，保留 yaw 角度限幅。
+      const double yaw = clampTorsoYawTarget(msg->angular.z);
       cmdTorsoPose_[0] = msg->linear.x;
       cmdTorsoPose_[1] = msg->linear.y;
       cmdTorsoPose_[2] = msg->linear.z;
@@ -4883,7 +4883,7 @@ namespace mobile_manipulator {
     // 旋转组的胸部 x/z 由锁定 knee/leg 后的 FK 派生，不是笛卡尔平移目标。
     // 对它做平移包络钳制会切回躯干跟踪，与最终 knee/leg 锁定冲突。
     // 从旋转 FK 接续的目标不能在松杆时自动回收；普通平移仍沿用包络处理。
-    if (!torsoRotationActive_ && !torsoTranslationFromRotation_ &&
+    if (!torsoRotationActive_ && !torsoTranslationFromRotation_ && !torsoReachabilityManaged_ &&
         isTorsoOfflineTrajUpdate_ != true && isOfflineTrajUpdate_ != true &&
         clampCmdTorsoPoseToWorkspace())
     {
@@ -5651,6 +5651,7 @@ namespace mobile_manipulator {
 
   void MobileManipulatorReferenceManager::releaseTorsoRotationControl()
   {
+    torsoReachabilityManaged_ = false;
     torsoTranslationFromRotation_ = false;
     torsoTranslationResetPending_ = false;
     {
@@ -5856,9 +5857,9 @@ namespace mobile_manipulator {
       }
     }
 
-    // 仅过滤本拍新增偏航；升降/前倾不能把已有的 A/B 转腰目标拉回。
-    cmd4[2] = applyTorsoYawRequest(
-        cmd6[3], cmd4[2], cmd6[2] - initialTorsoPos_[2], cmd4[1] - initialTorsoPos_[2]);
+    // VR A/B 增量请求不依赖躯干高度；G12/BT2 高度保护仍由 Joy 输入端执行。
+    cmd4[2] = clampTorsoYawTarget(cmd4[2]);
+    const Eigen::Vector4d requestedPose = cmd4;
 
     // Write back sole open-loop final target; Ruckig tracks from prevTarget → cmd4
     {
@@ -5877,6 +5878,40 @@ namespace mobile_manipulator {
     {
       std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
       cmd4 << cmdTorsoPose_[0], cmdTorsoPose_[2], cmdTorsoPose_[3], cmdTorsoPose_[4];
+    }
+    // 包络不能把未操作轴改成运动；可达性检查负责拒绝与保持轴冲突的升降请求。
+    const Eigen::Vector4d previousPose(cmd6[0], cmd6[2], cmd6[3], cmd6[4]);
+    for (int axis = 0; axis < 4; ++axis) {
+      if (std::abs(requestedPose[axis] - previousPose[axis]) < 1e-12) cmd4[axis] = previousPose[axis];
+    }
+    // 从本机 URDF 的零位 FK 提取平面链，不硬编码机型尺寸。
+    const auto& model = pinocchioInterface_.getModel();
+    pinocchio::Data geometryData(model);
+    vector_t neutral = initState.head(model.nq);
+    neutral.segment<4>(baseDim_).setZero();
+    pinocchio::forwardKinematics(model, geometryData, neutral);
+    pinocchio::updateFramePlacements(model, geometryData);
+    const auto& worldBase = geometryData.oMf[model.getFrameId(info_.baseFrame)];
+    auto jointXZ = [&](const char* name) -> Eigen::Vector2d {
+      const auto position = worldBase.actInv(geometryData.oMi[model.getJointId(name)]).translation();
+      return {position.x(), position.z()};
+    };
+    const Eigen::Vector2d knee = jointXZ("knee_joint");
+    const Eigen::Vector2d leg = jointXZ("leg_joint");
+    const Eigen::Vector2d waist = jointXZ("waist_pitch_joint");
+    const auto torso = worldBase.actInv(geometryData.oMf[model.getFrameId(info_.torsoFrame)]).translation();
+    const TorsoPlanarGeometry geometry{knee, leg - knee, waist - leg,
+                                      Eigen::Vector2d(torso.x(), torso.z()) - waist};
+    cmd4 = limitTorsoReachableStep(previousPose, cmd4, geometry,
+                                  model.lowerPositionLimit.segment<4>(baseDim_),
+                                  model.upperPositionLimit.segment<4>(baseDim_));
+    torsoReachabilityManaged_ = true;
+    {
+      std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);
+      cmdTorsoPose_[0] = cmd4[0];
+      cmdTorsoPose_[2] = cmd4[1];
+      cmdTorsoPose_[3] = cmd4[2];
+      cmdTorsoPose_[4] = cmd4[3];
     }
     if ((cmd4.head<2>() - previousPosition).norm() > 1e-6) {
       torsoTranslationNeedsReset_ = true;

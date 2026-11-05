@@ -103,6 +103,7 @@ namespace humanoidController_wheel_wbc
     void initMPC();
     void registerAllServices();
     bool setupCpuIsolation();  // 从ROS参数获取隔离CPU索引并设置线程亲和性
+    void pollKneeLegLockParam(const ros::WallTimerEvent& event);
 
     // ========== 运动学计算相关函数 ==========
     void getEEPose(const vector_t& init_q, std::vector<Eigen::Vector3d>& ee_pos, std::vector<Eigen::Matrix3d>& ee_rot);
@@ -369,7 +370,8 @@ namespace humanoidController_wheel_wbc
     bool lockKneeLegCaptured_{false};              // 是否已捕获锁定快照
     double lockKneeQ_{0.0};                        // 锁定的 knee 目标角 [rad]
     double lockLegQ_{0.0};                         // 锁定的 leg 目标角 [rad]
-    ros::Time lastLockParamCheckTime_{0.0};        // 上次实时查询 lock rosparam 的时刻（节流用）
+    ros::WallTimer lockParamTimer_;               // 普通回调线程查询参数，避免阻塞 WBC
+    std::atomic<double> lockParamPollMs_{0.0};     // 最近一次参数查询墙钟耗时 [ms]
     // 手柄旋转组使用 RM 捕获的同一快照，不改写增量 IK 的独立锁定开关。
     ros::Subscriber torsoRotationLockSub_;
     std::mutex torsoRotationLockMutex_;

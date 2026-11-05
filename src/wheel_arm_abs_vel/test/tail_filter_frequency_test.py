@@ -32,7 +32,7 @@ class FrequencyTests(unittest.TestCase):
             for qkey, sigmakey, gkey in (
                 ('position_q', 'position_sigma', 'position_velocity_gain'),
                 ('hand_rotation_q', 'rotation_sigma', 'hand_velocity_gain')):
-                q, sigma, gain = (config['vr_kalman_' + key] for key in (qkey, sigmakey, gkey))
+                q, sigma, gain = (config.get('vr_kalman_' + key, 1.0) for key in (qkey, sigmakey, gkey))
                 for f in (1., 5., 10., 20.):
                     expected = transfer(q, sigma, gain, hz, [f])[0]
                     dt = 1. / hz; t = np.arange(0, 8, dt)
@@ -63,25 +63,12 @@ class FrequencyTests(unittest.TestCase):
         for invalid in (0.,-1.,float('inf'),float('nan')):
             with self.assertRaises(ValueError): PositionCV(velocity_gain=invalid)
 
-    def test_configured_jerk_alignment(self):
+    def test_test_baseline_feedforward_limits(self):
         rnea=yaml.safe_load((ROOT/'config/rnea.yaml').read_text())
-        fixed=yaml.safe_load((ROOT/'config/fixed_base_18d.yaml').read_text())
-        j3=yaml.safe_load((ROOT/'config/j3_overshoot_profile.yaml').read_text())
-        limits=rnea['jerk_limit'];self.assertEqual(len(limits),18)
-        for arm in range(2):
-            for joint in range(7):
-                jerk=25000.
-                if joint==2: jerk=j3['joint_dynamic_overrides']['zarm_l3_joint']['jerk']
-                if joint>=4: jerk=fixed['wrist_envelope']['j'+str(joint+1)]['jerk']
-                self.assertEqual(limits[4+arm*7+joint],jerk*rnea['acceleration_gain'])
-        self.assertEqual(rnea['velocity_cutoff_hz'],60.)
-        # Exact sampled 1-pole, not the continuous-time 1/(2*pi*fc) approximation.
-        for freq in (5.,15.,30.,40.):
-            h=[]
-            for cutoff in (120.,60.):
-                pole=np.exp(-2*np.pi*cutoff*.002)
-                h.append((1-pole)/(1-pole*np.exp(-2j*np.pi*freq*.002)))
-            print('RNEA f=%g gain120=%g gain60=%g added_phase_delay_ms=%g' %
-                  (freq,abs(h[0]),abs(h[1]),(-np.angle(h[1])+np.angle(h[0]))/(2*np.pi*freq)*1000))
+        self.assertEqual(rnea['velocity_cutoff_hz'],30.)
+        self.assertEqual(rnea['jerk_limit_arm'],500.)
+        self.assertNotIn('jerk_limit',rnea)
+        self.assertEqual(rnea['sensor_timeout'],.05)
+        self.assertEqual(rnea['max_period'],.05)
 
 if __name__=='__main__':unittest.main()

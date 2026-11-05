@@ -84,7 +84,7 @@ add_library(hardware_plant::ec_master_main STATIC IMPORTED)
 
 set_target_properties(hardware_plant::ec_master_main PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/EC_Master/Common;${_IMPORT_PREFIX}/include/EC_Master/SDK/INC;${_IMPORT_PREFIX}/include/EC_Master/SDK/INC/Linux;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/Common;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/EcMasterDemo;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/Linux;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "libEcMasterRasServer.a;libEcMaster.a;libemllIntelGbe.so;-pthread;-ldl"
+  INTERFACE_LINK_LIBRARIES "libEcMasterRasServerStatic.a;libEcMasterStatic.a;libemllIntelGbe.so;-pthread;-ldl"
 )
 
 # Create imported target hardware_plant::ec_app
@@ -92,7 +92,7 @@ add_library(hardware_plant::ec_app STATIC IMPORTED)
 
 set_target_properties(hardware_plant::ec_app PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/EC_Master/Common;${_IMPORT_PREFIX}/include/EC_Master/SDK/INC;${_IMPORT_PREFIX}/include/EC_Master/SDK/INC/Linux;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/Common;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/EcMasterDemo;${_IMPORT_PREFIX}/include/EC_Master/Sharelib/Linux;${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "libEcMasterRasServer.a;libEcMaster.a;libemllIntelGbe.so;-pthread;-ldl"
+  INTERFACE_LINK_LIBRARIES "libEcMasterRasServerStatic.a;libEcMasterStatic.a;libemllIntelGbe.so;-pthread;-ldl"
 )
 
 # Create imported target hardware_plant::mathtools_hw

@@ -1,4 +1,7 @@
 <launch>
+    <!-- 仅供旧 VR 头控路径读取；独立头控的模式由机器启动入参设置。 -->
+    <arg name="head_control_mode" default="fixed"/>
+    <arg name="head_track_target" default="both_hands_midpoint"/>
     <!-- 定义命令行参数 -->
     <arg name="send_srv" default="1"/> <!-- 1: 不需要手动打开手臂控制，0: 需要手动打开手臂控制 -->
     <arg name="version" default="4" />
@@ -16,6 +19,8 @@
 
     <!-- noitom_hi5_hand_udp_python -->
     <node pkg="noitom_hi5_hand_udp_python" type="monitor_quest3.py" args="$(arg ip_address)" name="monitor_quest3" output="screen">
+        <param name="head_control_mode" value="$(arg head_control_mode)"/>
+        <param name="head_track_target" value="$(arg head_track_target)"/>
     </node>
     <!-- <node pkg="image_publisher" type="image_publisher" name="camera_publisher" args="__name:=$(arg camera_publisher_name) _image_transport:=raw $(arg video_device)" output="screen"/> -->
     <node pkg="noitom_hi5_hand_udp_python" type="webrtc_videostream.py" name="webrtc_videostream" args="$(arg camera_publisher_name)" output="screen"/>

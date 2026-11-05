@@ -1,8 +1,8 @@
-/*-----------------------------------------------------------------------------
- * EcCommon.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description              Common header shared by all AT-EM layers.
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       Common header shared by all AT-EM layers.
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECCOMMON
@@ -58,6 +58,7 @@
 #define     EC_MEMTRACE_RAS             0x00004000  /* RAS layer */
 #define     EC_MEMTRACE_INTERFACE       0x00008000  /* ecat interface layer */
 #define     EC_MEMTRACE_APP             0x00010000  /* application */
+#define     EC_MEMTRACE_RAS_MSGQUEUE    0x00020000
 
 /*-FUNCTION DECLARATIONS-----------------------------------------------------*/
 /* these functions are only available in the DEBUG version */

@@ -261,7 +261,7 @@ public:
     virtual ~CFiFoListDyn()
     {
         SafeDeleteArray(CFiFoList<VALUE>::m_pFiFoEntrys);
-        SafeOsFree(CFiFoList<VALUE>::m_pDesc);
+        OsSafeFree(CFiFoList<VALUE>::m_pDesc);
     }
 
     /********************************************************************************/
@@ -311,7 +311,7 @@ public:
         if (EC_E_NOERROR != dwRetVal)
         {
             SafeDeleteArray(pFiFoEntrys);
-            SafeOsFree(pDesc);
+            OsSafeFree(pDesc);
         }
 
         return dwRetVal;

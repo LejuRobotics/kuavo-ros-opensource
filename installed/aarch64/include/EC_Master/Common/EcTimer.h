@@ -14,18 +14,18 @@
 #define EC_TO_HELPER_ELAPSE_WRAP    0x0008  /* set, if elapse time is less then start time (if time will wrap) */
 
 /*-CLASS---------------------------------------------------------------------*/
-class CEcTimer
+class CKuavoEcTimer
 {
 public:
-    CEcTimer()
+    CKuavoEcTimer()
     {
         ResetInstance(0, EC_NULL);
     }
-    CEcTimer(EC_T_DWORD dwDurationMsec)
+    CKuavoEcTimer(EC_T_DWORD dwDurationMsec)
     {
         ResetInstance(dwDurationMsec, EC_NULL);
     }
-    CEcTimer(EC_T_DWORD dwDurationMsec, EC_T_DWORD* pdwMsecCounter)
+    CKuavoEcTimer(EC_T_DWORD dwDurationMsec, EC_T_DWORD* pdwMsecCounter)
     {
         ResetInstance(dwDurationMsec, pdwMsecCounter);
     }

@@ -5,7 +5,7 @@
  *---------------------------------------------------------------------------*/
 
 /*-LOGGING-------------------------------------------------------------------*/
-#define pEcLogParms G_pLogParmsEcTimer
+#define pEcLogParms G_pLogParmsKuavoEcTimer
 
 /*-INCLUDES------------------------------------------------------------------*/
 #include "EcOs.h"
@@ -14,21 +14,21 @@
 
 /*-LOGGING-------------------------------------------------------------------*/
 static EC_T_LOG_PARMS  S_oLogParmsEcTimer = { EC_LOG_LEVEL_SILENT, EC_NULL, EC_NULL };
-       EC_T_LOG_PARMS* G_pLogParmsEcTimer = &S_oLogParmsEcTimer;
+       EC_T_LOG_PARMS* G_pLogParmsKuavoEcTimer = &S_oLogParmsEcTimer;
 
-extern "C" EC_T_VOID SetLogContextEcTimer(EC_T_LOG_PARMS* pLogParms)
+extern "C" EC_T_VOID SetLogContextKuavoEcTimer(EC_T_LOG_PARMS* pLogParms)
 {
-    OsMemcpy(G_pLogParmsEcTimer, pLogParms, sizeof(EC_T_LOG_PARMS));
+    OsMemcpy(G_pLogParmsKuavoEcTimer, pLogParms, sizeof(EC_T_LOG_PARMS));
 }
 
 /*-GLOBAL VARIABLES-----------------------------------------------------------*/
 #ifdef DEBUG
 /* for debugging purposes, disable all Durations */
-EC_T_BOOL G_bEcatDisableAllDurations = EC_FALSE;
+EC_T_BOOL G_bKuavoEcatDisableAllDurations = EC_FALSE;
 #endif
 
 /*-CLASS FUNCTIONS-----------------------------------------------------------*/
-EC_T_VOID CEcTimer::ResetInstance(EC_T_DWORD dwDurationMsec, EC_T_DWORD* pdwMsecCounter)
+EC_T_VOID CKuavoEcTimer::ResetInstance(EC_T_DWORD dwDurationMsec, EC_T_DWORD* pdwMsecCounter)
 {
     /* member variables will be reset by memset() from outside! */
     m_dwStartTime = 0;
@@ -42,13 +42,13 @@ EC_T_VOID CEcTimer::ResetInstance(EC_T_DWORD dwDurationMsec, EC_T_DWORD* pdwMsec
     }
 }
 
-EC_T_VOID CEcTimer::Stop(EC_T_VOID)
+EC_T_VOID CKuavoEcTimer::Stop(EC_T_VOID)
 {
     m_dwFlags |= EC_TO_HELPER_STOPPED;
     m_dwFlags &= ~EC_TO_HELPER_STARTED;
 }
 
-EC_T_VOID CEcTimer::Start(EC_T_DWORD dwDurationMsec)
+EC_T_VOID CKuavoEcTimer::Start(EC_T_DWORD dwDurationMsec)
 {
     SetDuration(dwDurationMsec);
 
@@ -75,12 +75,12 @@ EC_T_VOID CEcTimer::Start(EC_T_DWORD dwDurationMsec)
     m_dwFlags &= ~EC_TO_HELPER_STOPPED;
 }
 
-EC_T_BOOL CEcTimer::IsElapsed(EC_T_VOID)
+EC_T_BOOL CKuavoEcTimer::IsElapsed(EC_T_VOID)
 {
     EC_T_BOOL  bTimeElapsed = EC_FALSE;
 
 #ifdef DEBUG
-    if (G_bEcatDisableAllDurations)
+    if (G_bKuavoEcatDisableAllDurations)
     {
 #ifdef INCLUDE_LOG_MESSAGES
         static EC_T_BOOL s_bMsgShown = EC_FALSE;
@@ -131,7 +131,7 @@ EC_T_BOOL CEcTimer::IsElapsed(EC_T_VOID)
     return bTimeElapsed;
 }
 
-EC_T_VOID CEcTimer::SetDuration(EC_T_DWORD dwDurationMsec)
+EC_T_VOID CKuavoEcTimer::SetDuration(EC_T_DWORD dwDurationMsec)
 {
     if (dwDurationMsec & 0x80000000)
     {
@@ -145,7 +145,7 @@ EC_T_VOID CEcTimer::SetDuration(EC_T_DWORD dwDurationMsec)
     m_dwDurationMsec = dwDurationMsec;
 }
 
-EC_T_DWORD CEcTimer::GetRemainingTime(EC_T_VOID)
+EC_T_DWORD CKuavoEcTimer::GetRemainingTime(EC_T_VOID)
 {
     EC_T_DWORD dwMsecCountCurr = 0;
 

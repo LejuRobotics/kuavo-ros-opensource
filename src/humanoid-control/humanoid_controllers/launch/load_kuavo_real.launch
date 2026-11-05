@@ -85,6 +85,9 @@
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="init_fall_down_state" default="false"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>
+    <!-- #4288: G12 自启腰部深度相机 + depth_inpainter，产出 /camera/depth/depth_history_array -->
+    <arg name="enable_depth_loco_autostart" default="$(eval arg('joystick_type') == 'h12')"
+         doc="Start depth_inpainter and SSH-start waist Orbbec for depth_loco. Default true only for G12 (joystick_type:=h12). Override with true/false."/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -317,7 +320,9 @@
 
     <!-- 启动上位机服务节点 -->
     <group if="$(eval arg('robot_version') >= 40)">
-      <node pkg="humanoid_controllers" type="upper_computer_service.py" name="upper_computer_service" output="screen" />
+      <node pkg="humanoid_controllers" type="upper_computer_service.py" name="upper_computer_service" output="screen">
+        <param name="autostart_waist_depth_camera" value="$(arg enable_depth_loco_autostart)"/>
+      </node>
     </group>
 
     <group if="$(arg vr_remote_control)">
@@ -485,6 +490,11 @@
     </group>
 
 
+    <!-- #4288 / CHANGELOG: 上下楼梯深度预处理自启（G12 load_kuavo_real 路径） -->
+    <group if="$(arg enable_depth_loco_autostart)">
+      <include file="$(find image_processing)/launch/depth_inpainter.launch"/>
+    </group>
+
     <!-- 启动手臂贝塞尔节点（统一在此处启动，避免与websocket启动冲突） -->
     <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch"/>
 
@@ -496,7 +506,7 @@
 
     <!-- 头部控制。也可在机器起来后单独 roslaunch noitom_hi5_hand_udp_python head_control_node.launch -->
     <arg name="with_head_control_node" default="true" doc="启动 head_control_node。PICO 自有头控时关掉"/>
-    <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand。默认 fixed 不发头部指令；vr_follow 由 VR 节点调用服务切入"/>
+    <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand。默认 fixed 不发头部指令；模式由启动参数指定，VR 连接不切换模式"/>
     <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand"/>
     <group if="$(arg with_head_control_node)">
       <include file="$(find noitom_hi5_hand_udp_python)/launch/head_control_node.launch">

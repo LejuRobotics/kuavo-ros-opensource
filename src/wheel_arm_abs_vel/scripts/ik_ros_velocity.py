@@ -19,7 +19,7 @@ from kuavo_msgs.msg import lejuClawCommand
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Quaternion, Vector3, Twist
 from tools.wheel_base_command import WheelBaseCommandMapper
-from absolute_end_effector import checked, resolve
+from absolute_end_effector import checked, resolve_runtime
 import time
 import math
 import sys
@@ -3688,6 +3688,8 @@ class IkRos:
 
         body_valid = (
             samples["chest"] is not None
+            and (not self.quest3_arm_info_transformer.skeleton_filter_enabled
+                 or bool(self.quest3_arm_info_transformer.estimated_bones))
         )
         # Fast coherent human motion is NOT evidence of tracking recentering.
         # Root is optional diagnostic data, not a torso validity dependency.
@@ -3707,17 +3709,28 @@ class IkRos:
             setattr(tcp_msg, valid_field, bool(valid))
             if valid:
                 self._copy_body_pose(destination, samples[name])
+                estimator = self.quest3_arm_info_transformer
+                state = estimator.estimated_bones.get(indices[name])
+                if state is not None:
+                    T = state[0]
+                    destination.position.x, destination.position.y, destination.position.z = T[:3, 3]
+                    q = matrix_to_quaternion(T[:3, :3])
+                    (destination.orientation.x, destination.orientation.y,
+                     destination.orientation.z, destination.orientation.w) = q
+
         estimator = self.quest3_arm_info_transformer
-        if estimator.hand_filter_enabled:
+        if (body_valid and estimator.estimated_bones and
+                all(side in estimator.tcp_estimated_rates for side in ("Left", "Right"))):
             def vector(out, value):
                 out.x, out.y, out.z = map(float, value)
             for side, twist, elbow in (
                     ("Left", tcp_msg.left_tcp_twist, tcp_msg.left_elbow_velocity),
                     ("Right", tcp_msg.right_tcp_twist, tcp_msg.right_elbow_velocity)):
-                if side not in estimator.tcp_estimated_rates:
-                    continue
-                linear, angular = estimator.tcp_estimated_rates[side]
-                vector(twist.linear, linear); vector(twist.angular, angular)
+                linear, angular, hint = estimator.tcp_estimated_rates[side]
+                vector(twist.linear, linear); vector(twist.angular, angular); vector(elbow, hint)
+            vector(tcp_msg.chest_twist.linear, estimator.estimated_bones[23][1])
+            vector(tcp_msg.chest_twist.angular, estimator.estimated_bones[23][2])
+            vector(tcp_msg.root_velocity, estimator.estimated_bones[22][1])
             tcp_msg.estimated_twists_valid = True
 
     def _scheduled_quest_bone_poses_callback(self, msg):
@@ -3764,7 +3777,7 @@ class IkRos:
             source_policy = self._tracking_source_policy_locked(
                 source, self.quest3_arm_info_transformer.is_runing)
             self._fill_subsystem_permissions_locked(tcp_msg, received_monotonic)
-        self.quest3_arm_info_transformer.hand_filter_contract = (
+        self.quest3_arm_info_transformer.skeleton_contract = (
             session_id, generation, coordinate_epoch)
         read_accepted = self.quest3_arm_info_transformer.read_msg(
             quest_bone_poses_msg, defer_visuals=self.enable_velocity_ik_takeover,
@@ -5109,7 +5122,7 @@ if __name__ == "__main__":
     # Use the same kuavo.json as dev's controller/joystick chain, with an
     # intentional CLI override. Do not let an old ROS master parameter silently
     # disagree with the launch-time SG100 process selection.
-    end_effector_type = resolve(model_config, args.end_effector_type)
+    end_effector_type = resolve_runtime(model_config, args.end_effector_type)
     rospy.set_param("~resolved_end_effector_type", end_effector_type)
     rospy.loginfo("Absolute end effector: %s (config=%s, override=%s)",
                   end_effector_type, model_config_file, args.end_effector_type)

@@ -1,9 +1,9 @@
-/*-----------------------------------------------------------------------------
- * EcOsPlatform.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Paul Bussmann
- * Description              EC-Master OS-Layer header file for Linux
- *----------------------------------------------------------------------------*/
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       EC-Master OS-Layer header file for Linux
+ * \author      Paul Bussmann
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
+ *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECOSPLATFORM
 #define INC_ECOSPLATFORM
@@ -40,10 +40,12 @@
 
 #ifdef EC_SOCKET_IP_SUPPORTED
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
-#include <sys/poll.h>
+#include <poll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <fcntl.h>
 #endif /* EC_SOCKET_IP_SUPPORTED */
 
 #if (defined LXWIN)
@@ -68,13 +70,12 @@
 #define ATECAT_OSSTR "Linux"
 #endif
 
-#ifndef EC_VERSION_LINUX
-#define EC_VERSION_LINUX
+#ifndef EC_OS
+#define EC_OS EC_OS_LINUX
 #endif
 
-/* deprecated, replaced by EC_VERSION_LINUX, kept for legacy code support */
-#ifndef LINUX
-#define LINUX
+#ifndef EC_OS_VERSION
+#define EC_OS_VERSION 1
 #endif
 
 /*-PLATFORM-IDENTIFICATION----------------------------------------------------*/
@@ -101,6 +102,16 @@
 #endif
 #endif
 #endif /* __ARM_PCS_VFP */
+
+/* armv7-eabihf */
+#if (__arm__) && (__ARM_ARCH == 7)
+#ifndef ATECAT_ARCHSTR
+#define ATECAT_ARCHSTR "armv7-eabihf"
+#endif
+#ifndef EC_ARCH
+#define EC_ARCH EC_ARCH_ARM
+#endif
+#endif
 
 /* arm64 */
 #if (defined __aarch64__)
@@ -159,6 +170,20 @@
 #endif
 #endif
 #endif /* PPC */
+
+/* riscv */
+#if (defined __riscv)
+#if (__riscv == 1)
+#if (__riscv_xlen == 64)
+#ifndef ATECAT_ARCHSTR
+#define ATECAT_ARCHSTR  "riscv64"
+#endif
+#ifndef EC_ARCH
+#define EC_ARCH EC_ARCH_RISCV64
+#endif
+#endif
+#endif
+#endif /* riscv */
 
 /* undefined architecture */
 #ifndef EC_ARCH
@@ -264,9 +289,6 @@ typedef unsigned long long  EC_T_UINT64;      /**< Unsigned integer 64 bits */
 typedef signed long long    EC_T_INT64;       /**< Signed integer 64 bits  */
 /**@}*/
 
-#define EC_CPUSET_DEFINED
-typedef int EC_T_CPUSET;                                          /* CPU-set for SMP systems */
-
 #include EC_PACKED_INCLUDESTART(8)
 typedef struct _EC_T_OS_PLATFORM_PARMS
 {
@@ -281,11 +303,6 @@ typedef struct _EC_T_OS_PLATFORM_PARMS
 #define EC_T_OS_PLATFORM_PARMS EC_T_OS_PLATFORM_PARMS
 
 /*-MACROS---------------------------------------------------------------------*/
-#define EC_CPUSET_ZERO(CpuSet)          (CpuSet)=0                /* clear all CPU indexes in the CPU set */
-#define EC_CPUSET_IS_ZERO(CpuSet)       (0==(CpuSet))             /* check if any CPU index in the CPU is set */
-#define EC_CPUSET_SET(CpuSet,nCpuIndex) (CpuSet)=(1<<(nCpuIndex)) /* set CPU index nCpuIndex (0..x) in the CPU set */
-#define EC_CPUSET_SETALL(CpuSet)        (CpuSet)=0xFFFF           /* set all CPU indexes in the CPU set */
-
 #define EC_T_FD_SET  fd_set
 #define EC_VASTART   va_start
 #define EC_VAEND     va_end
@@ -336,16 +353,24 @@ typedef struct _EC_T_OS_PLATFORM_PARMS
 
 #ifndef OsPlatformMemoryBarrier
 #if defined(__GNUC__) && defined(__i386__)
-#define OsPlatformMemoryBarrier()     {__asm__ __volatile__ ("lock; addl $0,0(%%esp)" : : : "memory");}
+  #define OsPlatformMemoryBarrier()     {__asm__ __volatile__ ("lock; addl $0,0(%%esp)" : : : "memory");}
+#elif defined(__GNUC__) && defined(__x86_64__)
+  #define OsPlatformMemoryBarrier()     {__asm__ __volatile__ ("lock; addl $0,0(%%rsp)" : : : "memory");}
 #elif defined(__GNUC__) && defined(__PPC__)
-  #define OsPlatformMemoryBarrier()   {__asm__ __volatile__ ("eieio" : : : "memory");}
+  #define OsPlatformMemoryBarrier()     {__asm__ __volatile__ ("eieio" : : : "memory");}
 #elif defined(__GNUC__) && defined(__arm__)
   #if (__ARM_ARCH >= 7)
     #define OsPlatformMemoryBarrier()   {__asm__ __volatile__ ("dsb" : : : "memory");}
   #else
     #define OsPlatformMemoryBarrier()   {__asm__ __volatile__ ("mcr   p15,0,%[t],c7,c10,4\n" :: [t] "r" (0) : "memory");}
   #endif
+#elif defined(__GNUC__) && defined(__aarch64__)
+  #define OsPlatformMemoryBarrier()     {__asm__ __volatile__ ("dsb sy" : : : "memory");}
+#elif defined(__GNUC__) && defined(__riscv)
+  /* fence valid for RISC-V 32/64Bit*/
+  #define OsPlatformMemoryBarrier()     {__asm__ __volatile__ ("fence" ::: "memory");}
 #else
+  #error OsPlatformMemoryBarrier is not defined
   #define OsPlatformMemoryBarrier()
 #endif
 #endif /* OsPlatformMemoryBarrier */
@@ -353,9 +378,12 @@ typedef struct _EC_T_OS_PLATFORM_PARMS
 #define OsStricmp strcasecmp
 
 #ifdef EC_SOCKET_IP_SUPPORTED
-#  define INVALID_SOCKET (-1)
-#  define SOCKET_ERROR (-1)
-
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET (-1)
+#endif
+#ifndef SOCKET_ERROR
+#define SOCKET_ERROR (-1)
+#endif
 
 #define OsSocketAccept(hSockHandle, oSockAddr, nSockAddrLen) \
      accept(hSockHandle, oSockAddr, (socklen_t *)(nSockAddrLen))

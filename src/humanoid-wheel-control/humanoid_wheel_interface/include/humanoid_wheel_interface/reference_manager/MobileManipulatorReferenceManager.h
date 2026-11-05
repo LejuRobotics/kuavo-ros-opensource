@@ -518,6 +518,7 @@ private:
   bool torsoRotationRequested_{false};  // cmdTorsoVel_mtx_ 保护
   bool torsoRotationActive_{false};     // 仅规划线程访问
   bool torsoTranslationFromRotation_{false};  // FK 接续的平移目标只允许主动向包络内移动
+  bool torsoReachabilityManaged_{false};  // 速度/增量目标已按关节可达性过滤，空闲时不再投影
   bool torsoTranslationNeedsReset_{false};  // 平移目标改变后，RT 还需恢复位置
   bool torsoTranslationResetPending_{false};  // 旋转复位完成后执行位置复位
   Eigen::Vector4d torsoRotationJointTarget_{Eigen::Vector4d::Zero()};

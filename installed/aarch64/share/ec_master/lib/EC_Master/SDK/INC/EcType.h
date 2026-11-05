@@ -1,8 +1,8 @@
-/*-----------------------------------------------------------------------------
- * EcType.h
- * Copyright                acontis technologies GmbH, Ravensburg, Germany
- * Response                 Stefan Zintgraf
- * Description              EtherCAT Master type definitions
+/** ---------------------------------------------------------------------------
+ * \file
+ * \brief       EtherCAT Master type definitions
+ * \author      Stefan Zintgraf
+ * \copyright   acontis technologies GmbH, Weingarten, Germany
  *---------------------------------------------------------------------------*/
 
 #ifndef INC_ECTYPE
@@ -57,98 +57,101 @@ typedef enum
 } EC_T_OS_LOCK_TYPE;
 
 
-/*/////////////////////////////////////////////////////////////////////////////////////////
-//
-// Standard Types
+/**
+\defgroup ECAT_DEFTYPES EtherCAT data types
+@{
 */
-#define DEFTYPE_NULL              ((EC_T_WORD)0x0000)
-#define DEFTYPE_BOOLEAN           ((EC_T_WORD)0x0001)       /* bit size: 1 */
-#define DEFTYPE_INTEGER8          ((EC_T_WORD)0x0002)       /* bit size: 8 */
-#define DEFTYPE_INTEGER16         ((EC_T_WORD)0x0003)       /* bit size: 16 */
-#define DEFTYPE_INTEGER32         ((EC_T_WORD)0x0004)       /* bit size: 32 */
-#define DEFTYPE_UNSIGNED8         ((EC_T_WORD)0x0005)       /* bit size: 8 */
-#define DEFTYPE_UNSIGNED16        ((EC_T_WORD)0x0006)       /* bit size: 16 */
-#define DEFTYPE_UNSIGNED32        ((EC_T_WORD)0x0007)       /* bit size: 32 */
-#define DEFTYPE_REAL32            ((EC_T_WORD)0x0008)       /* bit size: 32 */
-#define DEFTYPE_VISIBLESTRING     ((EC_T_WORD)0x0009)       /* bit size: 8*n */
-#define DEFTYPE_OCTETSTRING       ((EC_T_WORD)0x000A)       /* bit size: 8*(n+1) */
-#define DEFTYPE_UNICODESTRING     ((EC_T_WORD)0x000B)       /* bit size: 16*(n+1) */
-#define DEFTYPE_TIMEOFDAY         ((EC_T_WORD)0x000C)
-#define DEFTYPE_TIMEDIFFERENCE    ((EC_T_WORD)0x000D)
-#define DEFTYPE_DOMAIN            ((EC_T_WORD)0x000F)
-#define DEFTYPE_INTEGER24         ((EC_T_WORD)0x0010)       /* bit size: 24 */
-#define DEFTYPE_REAL64            ((EC_T_WORD)0x0011)       /* bit size: 64 */
-#define DEFTYPE_INTEGER40         ((EC_T_WORD)0x0012)       /* bit size: 40 */
-#define DEFTYPE_INTEGER48         ((EC_T_WORD)0x0013)       /* bit size: 48 */
-#define DEFTYPE_INTEGER56         ((EC_T_WORD)0x0014)       /* bit size: 56 */
-#define DEFTYPE_INTEGER64         ((EC_T_WORD)0x0015)       /* bit size: 64 */
-#define DEFTYPE_UNSIGNED24        ((EC_T_WORD)0x0016)       /* bit size: 24 */
-#define DEFTYPE_UNSIGNED40        ((EC_T_WORD)0x0018)       /* bit size: 40 */
-#define DEFTYPE_UNSIGNED48        ((EC_T_WORD)0x0019)       /* bit size: 48 */
-#define DEFTYPE_UNSIGNED56        ((EC_T_WORD)0x001A)       /* bit size: 56 */
-#define DEFTYPE_UNSIGNED64        ((EC_T_WORD)0x001B)       /* bit size: 64 */
+#define DEFTYPE_NULL              ((EC_T_WORD)0x0000)       /**< Null */
+#define DEFTYPE_BOOLEAN           ((EC_T_WORD)0x0001)       /**< Boolean, bit size: 1 */
+#define DEFTYPE_INTEGER8          ((EC_T_WORD)0x0002)       /**< Integer, bit size: 8 */
+#define DEFTYPE_INTEGER16         ((EC_T_WORD)0x0003)       /**< Integer, bit size: 16 */
+#define DEFTYPE_INTEGER32         ((EC_T_WORD)0x0004)       /**< Integer, bit size: 32 */
+#define DEFTYPE_UNSIGNED8         ((EC_T_WORD)0x0005)       /**< Unsigned, bit size: 8 */
+#define DEFTYPE_UNSIGNED16        ((EC_T_WORD)0x0006)       /**< Unsigned, bit size: 16 */
+#define DEFTYPE_UNSIGNED32        ((EC_T_WORD)0x0007)       /**< Unsigned, bit size: 32 */
+#define DEFTYPE_REAL32            ((EC_T_WORD)0x0008)       /**< Real, bit size: 32 */
+#define DEFTYPE_VISIBLESTRING     ((EC_T_WORD)0x0009)       /**< Visible string, bit size: 8*n */
+#define DEFTYPE_OCTETSTRING       ((EC_T_WORD)0x000A)       /**< Octet string, bit size: 8*(n+1) */
+#define DEFTYPE_UNICODESTRING     ((EC_T_WORD)0x000B)       /**< Unicode string, bit size: 16*(n+1) */
+#define DEFTYPE_TIMEOFDAY         ((EC_T_WORD)0x000C)       /**< Time of day */
+#define DEFTYPE_TIMEDIFFERENCE    ((EC_T_WORD)0x000D)       /**< Time difference */
+#define DEFTYPE_DOMAIN            ((EC_T_WORD)0x000F)       /**< Domain */
+#define DEFTYPE_INTEGER24         ((EC_T_WORD)0x0010)       /**< Integer, bit size: 24 */
+#define DEFTYPE_REAL64            ((EC_T_WORD)0x0011)       /**< Real, bit size: 64 */
+#define DEFTYPE_INTEGER40         ((EC_T_WORD)0x0012)       /**< Integer, bit size: 40 */
+#define DEFTYPE_INTEGER48         ((EC_T_WORD)0x0013)       /**< Integer, bit size: 48 */
+#define DEFTYPE_INTEGER56         ((EC_T_WORD)0x0014)       /**< Integer, bit size: 56 */
+#define DEFTYPE_INTEGER64         ((EC_T_WORD)0x0015)       /**< Integer, bit size: 64 */
+#define DEFTYPE_UNSIGNED24        ((EC_T_WORD)0x0016)       /**< Unsigned, bit size: 24 */
+#define DEFTYPE_UNSIGNED40        ((EC_T_WORD)0x0018)       /**< Unsigned, bit size: 40 */
+#define DEFTYPE_UNSIGNED48        ((EC_T_WORD)0x0019)       /**< Unsigned, bit size: 48 */
+#define DEFTYPE_UNSIGNED56        ((EC_T_WORD)0x001A)       /**< Unsigned, bit size: 56 */
+#define DEFTYPE_UNSIGNED64        ((EC_T_WORD)0x001B)       /**< Unsigned, bit size: 64 */
 
-#define DEFTYPE_GUID              ((EC_T_WORD)0x001D)       /* bit size: 128 */
-#define DEFTYPE_BYTE              ((EC_T_WORD)0x001E)       /* bit size: 8 */
-#define DEFTYPE_WORD              ((EC_T_WORD)0x001F)       /* bit size: 16 */
-#define DEFTYPE_DWORD             ((EC_T_WORD)0x0020)       /* bit size: 32 */
-#define DEFTYPE_PDOMAPPING        ((EC_T_WORD)0x0021)
+#define DEFTYPE_GUID              ((EC_T_WORD)0x001D)       /**< Guid, bit size: 128 */
+#define DEFTYPE_BYTE              ((EC_T_WORD)0x001E)       /**< Byte, bit size: 8 */
+#define DEFTYPE_WORD              ((EC_T_WORD)0x001F)       /**< Word, bit size: 16 */
+#define DEFTYPE_DWORD             ((EC_T_WORD)0x0020)       /**< Dword, bit size: 32 */
+#define DEFTYPE_PDOMAPPING        ((EC_T_WORD)0x0021)       /**< PDO Mapping */
 
-#define DEFTYPE_IDENTITY          ((EC_T_WORD)0x0023)
+#define DEFTYPE_IDENTITY          ((EC_T_WORD)0x0023)       /**< */
 
-#define DEFTYPE_COMMAND           ((EC_T_WORD)0x0025)
-#define DEFTYPE_PDOCOMPAR         ((EC_T_WORD)0x0027)
-#define DEFTYPE_ENUM              ((EC_T_WORD)0x0028)
-#define DEFTYPE_SMPAR             ((EC_T_WORD)0x0029)
-#define DEFTYPE_RECORD            ((EC_T_WORD)0x002A)
-#define DEFTYPE_BACKUP_PARAMETER  ((EC_T_WORD)0x002B)
-#define DEFTYPE_MODULAR_DEVICE_PROFILE ((EC_T_WORD)0x002C)
-#define DEFTYPE_BITARR8           ((EC_T_WORD)0x002D)       /* bit size: 8 */
-#define DEFTYPE_BITARR16          ((EC_T_WORD)0x002E)       /* bit size: 16 */
-#define DEFTYPE_BITARR32          ((EC_T_WORD)0x002F)       /* bit size: 32 */
-#define DEFTYPE_BIT1              ((EC_T_WORD)0x0030)       /* bit size: 1 */
-#define DEFTYPE_BIT2              ((EC_T_WORD)0x0031)       /* bit size: 2 */
-#define DEFTYPE_BIT3              ((EC_T_WORD)0x0032)       /* bit size: 3 */
-#define DEFTYPE_BIT4              ((EC_T_WORD)0x0033)       /* bit size: 4 */
-#define DEFTYPE_BIT5              ((EC_T_WORD)0x0034)       /* bit size: 5 */
-#define DEFTYPE_BIT6              ((EC_T_WORD)0x0035)       /* bit size: 6 */
-#define DEFTYPE_BIT7              ((EC_T_WORD)0x0036)       /* bit size: 7 */
-#define DEFTYPE_BIT8              ((EC_T_WORD)0x0037)       /* bit size: 8 */
-#define DEFTYPE_BIT9              ((EC_T_WORD)0x0038)       /* bit size: 9 */
-#define DEFTYPE_BIT10             ((EC_T_WORD)0x0039)       /* bit size: 10 */
-#define DEFTYPE_BIT11             ((EC_T_WORD)0x003A)       /* bit size: 11 */
-#define DEFTYPE_BIT12             ((EC_T_WORD)0x003B)       /* bit size: 12 */
-#define DEFTYPE_BIT13             ((EC_T_WORD)0x003C)       /* bit size: 13 */
-#define DEFTYPE_BIT14             ((EC_T_WORD)0x003D)       /* bit size: 14 */
-#define DEFTYPE_BIT15             ((EC_T_WORD)0x003E)       /* bit size: 15 */
-#define DEFTYPE_BIT16             ((EC_T_WORD)0x003F)       /* bit size: 16 */
+#define DEFTYPE_COMMAND           ((EC_T_WORD)0x0025)       /**< Command */
+#define DEFTYPE_PDOCOMPAR         ((EC_T_WORD)0x0027)       /**< PDO COMPAR */
+#define DEFTYPE_ENUM              ((EC_T_WORD)0x0028)       /**< Enum */
+#define DEFTYPE_SMPAR             ((EC_T_WORD)0x0029)       /**< SMPAR */
+#define DEFTYPE_RECORD            ((EC_T_WORD)0x002A)       /**< Record */
+#define DEFTYPE_BACKUP_PARAMETER  ((EC_T_WORD)0x002B)       /**< Backup parameter */
+#define DEFTYPE_MODULAR_DEVICE_PROFILE ((EC_T_WORD)0x002C)  /**< Modular device profile */
+#define DEFTYPE_BITARR8           ((EC_T_WORD)0x002D)       /**< Bit array, bit size: 8 */
+#define DEFTYPE_BITARR16          ((EC_T_WORD)0x002E)       /**< Bit array, bit size: 16 */
+#define DEFTYPE_BITARR32          ((EC_T_WORD)0x002F)       /**< Bit array, bit size: 32 */
+#define DEFTYPE_BIT1              ((EC_T_WORD)0x0030)       /**< Bit, bit size: 1 */
+#define DEFTYPE_BIT2              ((EC_T_WORD)0x0031)       /**< Bit, bit size: 2 */
+#define DEFTYPE_BIT3              ((EC_T_WORD)0x0032)       /**< Bit, bit size: 3 */
+#define DEFTYPE_BIT4              ((EC_T_WORD)0x0033)       /**< Bit, bit size: 4 */
+#define DEFTYPE_BIT5              ((EC_T_WORD)0x0034)       /**< Bit, bit size: 5 */
+#define DEFTYPE_BIT6              ((EC_T_WORD)0x0035)       /**< Bit, bit size: 6 */
+#define DEFTYPE_BIT7              ((EC_T_WORD)0x0036)       /**< Bit, bit size: 7 */
+#define DEFTYPE_BIT8              ((EC_T_WORD)0x0037)       /**< Bit, bit size: 8 */
+#define DEFTYPE_BIT9              ((EC_T_WORD)0x0038)       /**< Bit, bit size: 9 */
+#define DEFTYPE_BIT10             ((EC_T_WORD)0x0039)       /**< Bit, bit size: 10 */
+#define DEFTYPE_BIT11             ((EC_T_WORD)0x003A)       /**< Bit, bit size: 11 */
+#define DEFTYPE_BIT12             ((EC_T_WORD)0x003B)       /**< Bit, bit size: 12 */
+#define DEFTYPE_BIT13             ((EC_T_WORD)0x003C)       /**< Bit, bit size: 13 */
+#define DEFTYPE_BIT14             ((EC_T_WORD)0x003D)       /**< Bit, bit size: 14 */
+#define DEFTYPE_BIT15             ((EC_T_WORD)0x003E)       /**< Bit, bit size: 15 */
+#define DEFTYPE_BIT16             ((EC_T_WORD)0x003F)       /**< Bit, bit size: 16 */
 
 /* 0x40-0x5F Manufacturer Specific Complex Data Type */
 
-#define DEFTYPE_ARRAY_OF_BYTE     ((EC_T_WORD)0x000A)       /* bit size:  8 * (n + 1) */
-#define DEFTYPE_ARRAY_OF_UINT     ((EC_T_WORD)0x000B)       /* bit size: 16 * (n + 1) */
-#define DEFTYPE_ARRAY_OF_INT      ((EC_T_WORD)0x0260)       /* bit size: 16 * (n + 1) */
-#define DEFTYPE_ARRAY_OF_SINT     ((EC_T_WORD)0x0261)       /* bit size:  8 * (n + 1) */
-#define DEFTYPE_ARRAY_OF_DINT     ((EC_T_WORD)0x0262)       /* bit size: 32 * (n + 1) */
-#define DEFTYPE_ARRAY_OF_UDINT    ((EC_T_WORD)0x0263)       /* bit size: 32 * (n + 1) */
+#define DEFTYPE_ARRAY_OF_BYTE     ((EC_T_WORD)0x000A)       /**< Array of BYTE, bit size:  8 * (n + 1) */
+#define DEFTYPE_ARRAY_OF_UINT     ((EC_T_WORD)0x000B)       /**< Array of UINT, bit size: 16 * (n + 1) */
+#define DEFTYPE_ARRAY_OF_INT      ((EC_T_WORD)0x0260)       /**< Array of INT, bit size: 16 * (n + 1) */
+#define DEFTYPE_ARRAY_OF_SINT     ((EC_T_WORD)0x0261)       /**< Array of SINT, bit size:  8 * (n + 1) */
+#define DEFTYPE_ARRAY_OF_DINT     ((EC_T_WORD)0x0262)       /**< Array of DINT, bit size: 32 * (n + 1) */
+#define DEFTYPE_ARRAY_OF_UDINT    ((EC_T_WORD)0x0263)       /**< Array of UDINT, bit size: 32 * (n + 1) */
 
-#define DEFTYPE_ERROR_SETTING     ((EC_T_WORD)0x0281)       /* bit size: - */
-#define DEFTYPE_HISTORY           ((EC_T_WORD)0x0282)       /* bit size: - */
-#define DEFTYPE_DIAGNOSIS_OBJECT  ((EC_T_WORD)0x0282)       /* bit size: - */
-#define DEFTYPE_EXTERNAL_SYNC_STATUS ((EC_T_WORD)0x0283)    /* bit size: - */
-#define DEFTYPE_EXTERNAL_SYNC_SETTINGS ((EC_T_WORD)0x0284)  /* bit size: - */
-#define DEFTYPE_FSOEFRAME         ((EC_T_WORD)0x0285)       /* bit size: - */
-#define DEFTYPE_FSOECOMMPAR       ((EC_T_WORD)0x0286)       /* bit size: - */
-
+#define DEFTYPE_ERROR_SETTING     ((EC_T_WORD)0x0281)       /**< Error setting, bit size: - */
+#define DEFTYPE_HISTORY           ((EC_T_WORD)0x0282)       /**< History, bit size: - */
+#define DEFTYPE_DIAGNOSIS_OBJECT  ((EC_T_WORD)0x0282)       /**< Diagnosis object, bit size: - */
+#define DEFTYPE_EXTERNAL_SYNC_STATUS ((EC_T_WORD)0x0283)    /**< External SYNC status, bit size: - */
+#define DEFTYPE_EXTERNAL_SYNC_SETTINGS ((EC_T_WORD)0x0284)  /**< External SYNC settings, bit size: - */
+#define DEFTYPE_FSOEFRAME         ((EC_T_WORD)0x0285)       /**< FSOE frame, bit size: - */
+#define DEFTYPE_FSOECOMMPAR       ((EC_T_WORD)0x0286)       /**< FSOE COMMPAR, bit size: - */
+/**@}*/
 
 /*-MACROS--------------------------------------------------------------------*/
-#define EC_FALSE            0   /**< Boolean value: True */
-#define EC_TRUE             1   /**< Boolean value: False */
+#define EC_FALSE            0   /**< Boolean value: False */
+#define EC_TRUE             1   /**< Boolean value: True */
 #define EC_NULL             0   /**< Null pointer constant */
 
 #define EC_NOWAIT           ((EC_T_DWORD)0x00000000)
 #define EC_WAITINFINITE     ((EC_T_DWORD)0xFFFFFFFF)
 
+#define MAX_ERRINFO_STRLEN  8   /* maximum length of error notification info strings */
+#define MAX_SHORT_STRLEN    20  /* maximum length of short info string */
+#define MAX_STD_STRLEN      80  /* maximum length of standard info string */
 
 /*-MASTER FEATURES-----------------------------------------------------------*/
 
@@ -177,6 +180,32 @@ typedef enum
 #define EC_ARCH_PPC       3
 #define EC_ARCH_ARM       4
 #define EC_ARCH_ARM64     5
+#define EC_ARCH_RISCV64   6
+#define EC_ARCH_RX        7
+
+#define EC_OS_UNDEFINED              0
+#define EC_OS_WINDOWS                1
+#define EC_OS_WINCE                  2
+#define EC_OS_RTOS32                 3
+#define EC_OS_QNX                    4
+#define EC_OS_LINUX                  5
+#define EC_OS_INTIME                 6
+#define EC_OS_INTEGRITY              7
+#define EC_OS_TIRTOS                 8
+#define EC_OS_RIN32                  9
+#define EC_OS_RTX                   10
+#define EC_OS_XILINX_STANDALONE     11
+#define EC_OS_ECOS                  12
+#define EC_OS_XENOMAI               13
+#define EC_OS_UCOS                  14
+#define EC_OS_VXWORKS               15
+#define EC_OS_SYLIXOS               16
+#define EC_OS_UC3                   17
+#define EC_OS_FREERTOS              18
+#define EC_OS_MACOS                 19
+#define EC_OS_CMSIS_RTOS            20
+#define EC_OS_ZEPHYR                21
+#define EC_OS_RX72                  22
 
 #endif /* INC_ECTYPE */
 

@@ -8,10 +8,9 @@ enable_natural_hang_bootstrap: false
 enable_body_mirroring: true
 body_tracking_frame: quest_tracking_robot_axes
 
-# Sole production hand path: hand CV -> short prediction -> fixed bandwidth.
-hand_position_cutoff_hz: 20.0
-hand_orientation_cutoff_hz: 16.0
-hand_prediction_horizon: 0.060
+# Test-aligned production path: skeleton CV -> geometry -> fixed bandwidth.
+hand_position_cutoff_hz: 5.0
+hand_orientation_cutoff_hz: 4.0
 torso_reference_frequency: 2.5
 hand_position_gain: 12.0
 hand_orientation_gain: 8.0

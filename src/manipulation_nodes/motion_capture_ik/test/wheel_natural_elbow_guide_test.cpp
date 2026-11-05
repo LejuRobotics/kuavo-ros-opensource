@@ -3,6 +3,8 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <vector>
+#include <algorithm>
 
 namespace {
 
@@ -33,6 +35,7 @@ int main() {
   using HighlyDynamic::WheelNaturalElbowGuideConfig;
   using HighlyDynamic::WheelNaturalElbowGuideInput;
 
+  constexpr double kPi = 3.14159265358979323846;
   constexpr double l1 = 0.30;
   constexpr double l2 = 0.25;
 
@@ -135,6 +138,78 @@ int main() {
   assertCircleGeometry(waistInput, freeSpace, l1, l2);
   assert(freeSpace.waistSafetyActivation == 0.0);
   assertNear(freeSpace.commandDirection, Eigen::Vector3d(0.0, 0.0, -1.0));
+
+  // Waist safety must still take a large single-step correction even when
+  // free-space rate-limiting is active (MR !4221 review).
+  safetyGuide.reset();
+  safetyConfig.maxCommandDirectionStepRad = 0.15;  // ~8.6 deg
+  WheelNaturalElbowGuide limitedSafetyGuide(l1, l2, safetyConfig);
+  waistInput.torsoPosition = Eigen::Vector3d(0.0, -1.0, 0.0);
+  const auto primed = limitedSafetyGuide.update(waistInput);
+  assert(primed.waistSafetyActivation == 0.0);
+  waistInput.torsoPosition = Eigen::Vector3d::Zero();
+  waistInput.currentElbowPosition = primed.elbowPosition;
+  const auto rescued = limitedSafetyGuide.update(waistInput);
+  assertCircleGeometry(waistInput, rescued, l1, l2);
+  assert(rescued.waistSafetyActivation > 0.99);
+  assert(rescued.commandDirection.y() > 0.99);
+  const double rescueStep = std::acos(std::clamp(
+      primed.commandDirection.dot(rescued.commandDirection), -1.0, 1.0));
+  assert(rescueStep > safetyConfig.maxCommandDirectionStepRad + 0.5);
+
+  // Vertical teleop regression (#4160): cross the gravity-projection
+  // singularity (shoulder-hand axis through vertical). Without the soft blend
+  // this snaps ~130-180 deg on the elbow circle; with it the step stays near
+  // maxCommandDirectionStepRad.
+  WheelNaturalElbowGuideConfig verticalConfig = config;
+  verticalConfig.waistAvoidanceEnabled = false;
+  WheelNaturalElbowGuide verticalGuide(l1, l2, verticalConfig);
+  WheelNaturalElbowGuideInput verticalSweep;
+  verticalSweep.shoulderPosition = Eigen::Vector3d(0.0, 0.20, 1.20);
+  verticalSweep.currentElbowPosition =
+      verticalSweep.shoulderPosition + Eigen::Vector3d(0.20, 0.08, -0.18);
+  verticalSweep.humanPoseValid = false;
+
+  Eigen::Vector3d prevDir = Eigen::Vector3d::Zero();
+  Eigen::Vector3d prevElbow = Eigen::Vector3d::Zero();
+  bool hasPrev = false;
+  double maxAngleStep = 0.0;
+  double maxElbowStep = 0.0;
+  double elbowPath = 0.0;
+  const int steps = 250;
+  for (int i = 0; i <= steps; ++i) {
+    const double t = static_cast<double>(i) / static_cast<double>(steps);
+    const double epsX = 0.25 - 0.50 * t;  // +0.25 -> -0.25 through vertical
+    Eigen::Vector3d axis(epsX, 0.02, -1.0);
+    axis.normalize();
+    const double reach = 0.42;
+    verticalSweep.handPosition = verticalSweep.shoulderPosition + reach * axis;
+    if (hasPrev) {
+      verticalSweep.currentElbowPosition = prevElbow;
+    }
+    const auto out = verticalGuide.update(verticalSweep);
+    assertCircleGeometry(verticalSweep, out, l1, l2);
+    if (hasPrev) {
+      const double cosA =
+          std::clamp(prevDir.dot(out.commandDirection), -1.0, 1.0);
+      const double ang = std::acos(cosA);
+      maxAngleStep = std::max(maxAngleStep, ang);
+      const double elbowStep = (out.elbowPosition - prevElbow).norm();
+      maxElbowStep = std::max(maxElbowStep, elbowStep);
+      elbowPath += elbowStep;
+    }
+    prevDir = out.commandDirection;
+    prevElbow = out.elbowPosition;
+    hasPrev = true;
+  }
+  // Allow a little slack: plane normal also changes each sample.
+  assert(maxAngleStep < verticalConfig.maxCommandDirectionStepRad + 0.05);
+  // Legacy hard-threshold flip jumps ~0.30 m+ on the circle; fixed path stays low.
+  assert(maxElbowStep < 0.12);
+  std::cout << "vertical_sweep max_angle_step_deg="
+            << (maxAngleStep * 180.0 / kPi)
+            << " max_elbow_step_m=" << maxElbowStep
+            << " elbow_path_m=" << elbowPath << std::endl;
 
   std::cout << "wheel_natural_elbow_guide_test: PASS" << std::endl;
   return 0;
