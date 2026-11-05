@@ -204,7 +204,7 @@ class PicoParityTest(unittest.TestCase):
         self.assertFalse(result.right_first_button_touched)
 
     def test_launch_control_parameters_and_overrides_are_equal(self):
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             args = ['robot_version:='+str(version), 'ee_type:=none', 'enable_terminal_start:=false',
                     'tracking_source_mode:=controller',
                     'hand_reference_frequency:=9.0', 'enable_head_control:=true',

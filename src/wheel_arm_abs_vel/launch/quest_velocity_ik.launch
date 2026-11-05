@@ -136,7 +136,7 @@
   <arg name="absolute_execution_max_joint_acceleration" default="6.0" />
   <arg name="absolute_execution_min_joint_limit_margin" default="0.03" />
   <arg name="tracking_rearm_stable_frames" default="3" />
-  <group if="$(eval int(arg('robot_version')) == 61 or int(arg('robot_version')) == 62 or int(arg('robot_version')) == 63 or int(arg('robot_version')) == 400062)">
+  <group if="$(eval int(arg('robot_version')) in (61, 62, 63, 210062, 310062, 400062))">
     <param name="/vr_cmd_vel/linear_scale_x" value="0.4" />
     <param name="/vr_cmd_vel/linear_scale_y" value="0.4" />
     <param name="/vr_cmd_vel/angular_scale_z" value="0.45" />

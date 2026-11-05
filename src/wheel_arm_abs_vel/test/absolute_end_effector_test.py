@@ -15,7 +15,7 @@ spec.loader.exec_module(ee)
 
 class EndEffectorTest(unittest.TestCase):
     def test_each_model_can_select_each_requested_end_effector(self):
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             config = json.loads((ROOT.parent/'kuavo_assets/config'/('kuavo_v%d' % version)/'kuavo.json').read_text())
             self.assertEqual(ee.resolve(config), config['EndEffectorType'][0])
             for kind in ('qiangnao', 'heiman', 'lejuclaw'):

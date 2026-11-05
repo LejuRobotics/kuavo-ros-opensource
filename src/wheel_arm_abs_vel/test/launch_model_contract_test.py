@@ -34,7 +34,7 @@ class LaunchModelTest(unittest.TestCase):
 
     def test_shared_model_contract_matches_both_entries(self):
         import json
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             real = self.load('load_kuavo_real_velocity_ik.launch', ['robot_version:=' + str(version)])
             quest = self.load('quest_velocity_ik.launch', ['robot_version:=' + str(version)])
             key = '/whole_body_velocity_ik/model_contract_json'
@@ -96,7 +96,7 @@ class LaunchModelTest(unittest.TestCase):
         import json
         import shlex
         import subprocess
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             config = PACKAGE.parent / "kuavo_assets" / "config" / ("kuavo_v%d" % version) / "kuavo.json"
             expected = json.loads(config.read_text())["EndEffectorType"][0]
             for entry in ("quest_velocity_ik.launch", "pico_velocity_ik.launch"):
@@ -128,7 +128,7 @@ class LaunchModelTest(unittest.TestCase):
             ("control.launch", ["controller_type:=wheel_arm_abs_vel", "real:=true"]),
             ("control.launch", ["controller_type:=wheel_arm_abs_vel", "real:=false"]),
         )
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             for entry, args in entries:
                 with self.subTest(version=version, entry=entry, args=args), \
                         patch.dict(os.environ, ROBOT_VERSION=str(version)):
@@ -144,7 +144,7 @@ class LaunchModelTest(unittest.TestCase):
 
     def test_simulation_identity_and_assets_follow_environment_or_override(self):
         import json
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             for inherited in (str(version), None, 'invalid', '40'):
                 for entry, extra in (
                     ('load_kuavo_mujoco_velocity_ik.launch', []),
@@ -180,7 +180,7 @@ class LaunchModelTest(unittest.TestCase):
                 self.load('load_kuavo_mujoco_velocity_ik.launch', [])
 
     def test_real_manager_version_overrides_missing_or_stale_environment(self):
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             for inherited in (None, "", "40", "invalid"):
                 for entry, extra in (
                     ("load_kuavo_real_velocity_ik.launch", []),
@@ -199,7 +199,7 @@ class LaunchModelTest(unittest.TestCase):
                         self.assertEqual(int(cfg.params["/robot_version"].value), version)
 
     def test_s62_and_s63_entries(self):
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             for file, extra in (
                 ("load_kuavo_real_velocity_ik.launch", []),
                 ("load_kuavo_mujoco_velocity_ik.launch", []),
@@ -240,6 +240,7 @@ class LaunchModelTest(unittest.TestCase):
                             if node.name == 'robot_state_server':
                                 self.assertIn('/scripts/sidecar_runtime.py', node.launch_prefix)
                     if "/j3_overshoot_profile/enabled" in params:
+                        # J3 overshoot calibration remains explicitly S62/S63-only.
                         self.assertEqual(params["/j3_overshoot_profile/enabled"], version in (62, 63))
 
     def test_strict_and_driver_settings_reach_nested_runtime_nodes(self):
@@ -258,7 +259,7 @@ class LaunchModelTest(unittest.TestCase):
                 self.assertEqual(env["KUAVO_ARM_DRIVER_RESERVED_CPUS"], "5-7")
 
     def test_absolute_entries_do_not_write_shared_hardware_switches(self):
-        for version in (62, 63, 400062):
+        for version in (62, 63, 210062, 310062, 400062):
             for entry in ("load_kuavo_real_velocity_ik.launch",
                           "quest_velocity_ik.launch", "pico_velocity_ik.launch"):
                 cfg = self.load(entry, ["robot_version:=" + str(version)])

@@ -1617,11 +1617,11 @@
     </inertial>
     <visual>
       <origin
-        xyz="0 0 0"
+        xyz="0.015645 0.0475 0.01431109357346"
         rpy="0 0 0" />
       <geometry>
         <mesh
-          filename="package://kuavo_assets/models/biped_s200049/meshes/camera_base.STL" />
+          filename="package://kuavo_assets/models/biped_s200049/meshes/camera.STL" />
       </geometry>
       <material
         name="">
@@ -1629,15 +1629,6 @@
           rgba="1 1 1 1" />
       </material>
     </visual>
-    <collision>
-      <origin
-        xyz="0 0 0"
-        rpy="0 0 0" />
-      <geometry>
-        <mesh
-          filename="package://kuavo_assets/models/biped_s200049/meshes/camera_base.STL" />
-      </geometry>
-    </collision>
   </link>
   <joint
     name="camera_base"

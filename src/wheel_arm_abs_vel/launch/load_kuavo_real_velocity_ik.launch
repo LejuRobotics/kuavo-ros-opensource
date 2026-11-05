@@ -214,7 +214,7 @@
       <arg name="led_for_state" value="$(arg led_for_state)" />
     </include>
   </group>
-  <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62 or arg('robot_version') == 400062)">
+  <group if="$(eval arg('robot_version') in [61, 62, 210062, 310062, 400062])">
     <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service" output="screen" required="false" />
   </group>
   <param name="/vr_ik/use_velocity_ik_reference" value="true" type="bool" />

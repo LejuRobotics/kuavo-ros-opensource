@@ -14,7 +14,7 @@ int main(int argc,char** argv){
   check(argc==3 || argc==4,"usage: model_alignment_test assets_directory private_contract [robot_version]");
   const std::string assets=argv[1];
   const std::string version=argc==4 ? argv[3] : "62";
-  check(version=="62" || version=="63" || version=="400062","unsupported model version");
+  check(version=="62" || version=="63" || version=="210062" || version=="310062" || version=="400062","unsupported model version");
   json cfg;std::ifstream(assets+"/config/kuavo_v"+version+"/kuavo.json")>>cfg;
   json overlay;std::ifstream(argv[2])>>overlay;cfg.update(overlay);
   const std::string path=assets+"/models/"+cfg.at("velocity_ik_urdf").get<std::string>();

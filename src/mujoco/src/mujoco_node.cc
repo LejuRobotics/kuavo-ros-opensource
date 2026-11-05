@@ -1262,7 +1262,7 @@ namespace
               }
               else if (robot_type == 1)
               {
-                const bool omni_wheel = robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 200063 || robotVersion_ == 300062 || robotVersion_ == 300063 || robotVersion_ == 400062 || robotVersion_ == 400063 || robotVersion_ == 500062 || robotVersion_ == 500063 || robotVersion_ == 600062;
+                const bool omni_wheel = robotVersion_ == 61 || robotVersion_ == 62 || robotVersion_ == 63 || robotVersion_ == 200062 || robotVersion_ == 210062 || robotVersion_ == 200063 || robotVersion_ == 300062 || robotVersion_ == 310062 || robotVersion_ == 300063 || robotVersion_ == 400062 || robotVersion_ == 400063 || robotVersion_ == 500062 || robotVersion_ == 500063 || robotVersion_ == 600062;
                 if(robotVersion_ == 60)
                 {
                   updateWheelVel_VectorContorl(cmd_vel_chassis);

@@ -249,11 +249,11 @@
                     <body name="l_thumb_prox" pos="0.024537 -0.023242 -0.0926135" quat="0.349346 -0.374856 0.58539 -0.628298">
                         <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.005" diaginertia="9e-05 7e-05 5e-05"/>
                         <joint name="l_thumbCMC" pos="0 0 0" axis="0 1 0" limited="true" range="0 1.5708" damping="1.0"/>
-                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_thumb_prox"/>
+                        <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" quat="0.7071067811865476 0 0.7071067811865476 0" mesh="l_thumb_prox"/>
                         <body name="l_thumb_dist" pos="0 0 0.013647" quat="0.878534 0.409665 -0.222652 0.103824">
                             <inertial pos="0.0017239 0.0051432 -0.031065" quat="0.663344 0.00923928 0.0504839 0.746552" mass="0.04" diaginertia="9e-05 7e-05 5e-05"/>
                             <joint name="l_thumbMCP" pos="0 0 0" axis="-1 0 0" limited="true" range="0 0.8727" damping="1.0"/>
-                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" mesh="l_thumb_dist"/>
+                            <geom type="mesh" contype="0" conaffinity="0" group="1" rgba="0.75294 0.75294 0.75294 1" quat="0.7071067811865476 0 0.7071067811865476 0" mesh="l_thumb_dist"/>
                         </body>
                     </body>
                     <body name="l_Index_prox" pos="0.0290066 -0.00223961 -0.158289" quat="-0.00514945 0.0303624 0.71714 -0.696248">

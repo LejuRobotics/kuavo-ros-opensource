@@ -13,12 +13,15 @@
 
       <!-- The task file for the mpc. -->
       <!-- <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" /> -->
+      <!-- Version is PPPPMMMMN. 200049 is 4.9.2, so compare major, not the raw integer. -->
       <arg name="taskFile"
-            default="$(eval find('ocs2_mobile_manipulator') +(
-            '/config/kuavo5/task.info'  if arg('robot_version') >= 50 else
-            '/config/kuavo/task.info'   if arg('robot_version') >= 40 else
-            '/config/roban2/task.info'  if arg('robot_version') >= 10 else
-            '/config/kuavo/task.info'
+            default="$(eval find('ocs2_mobile_manipulator') + (
+              (lambda v, major: (
+                '/config/kuavo5/task.info' if major == 5 or (100 > v and v >= 50) else
+                '/config/kuavo/task.info' if major == 4 or (100 > v and v >= 40) else
+                '/config/roban2/task.info' if (major >= 1 and 3 >= major) or (100 > v and v >= 10) else
+                '/config/kuavo/task.info'
+              ))(arg('robot_version'), (arg('robot_version') // 10) % 10000)
             ))" />        <!-- The library folder to generate CppAD codegen into -->
       <arg name="libFolder"   value="$(find ocs2_mobile_manipulator)/auto_generated/kuavo" />
       
