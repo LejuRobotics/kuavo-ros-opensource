@@ -38,10 +38,10 @@ class WheelProjectionTests(unittest.TestCase):
         return q
 
     def test_default_model_and_explicit_candidate_keep_feedback_version(self):
-        for version in ('62', '63'):
+        for version in ('62', '63', '200062', '300062', '400062', '400063', '500062', '500063'):
             with self.subTest(version=version), patch.dict(os.environ, ROBOT_VERSION=version):
                 args = p.parse_args([])
-                self.assertEqual(args.urdf, self.urdf)
+                self.assertEqual(args.urdf, p.main_urdf(version))
                 self.assertEqual(args.robot_version, version)
                 self.assertEqual(p.JointLayout(args.robot_version).path.parent.name,
                                  f'kuavo_v{version}')
@@ -60,7 +60,7 @@ class WheelProjectionTests(unittest.TestCase):
         expected.update(zhead_1_joint=18, zhead_2_joint=19)
         self.assertEqual(self.model.required_joints, set(expected))
         self.assertTrue(set(self.prefix).isdisjoint(self.model.required_joints))
-        for version in ('62', '63'):
+        for version in ('62', '63', '200062', '300062', '400062', '400063', '500062', '500063'):
             with self.subTest(version=version):
                 layout = p.JointLayout(version)
                 self.assertEqual(layout.count, 20)
@@ -150,11 +150,11 @@ class WheelProjectionTests(unittest.TestCase):
             'sensor_msgs.msg': SimpleNamespace(CameraInfo=object, CompressedImage=object, Image=object),
             'tf2_msgs.msg': SimpleNamespace(TFMessage=object),
         }
-        for version in ('62', '63'):
+        for version in ('62', '63', '200062', '300062', '400062', '400063', '500062', '500063'):
             with self.subTest(version=version), patch.dict(sys.modules, modules):
                 viewer = p.ProjectionViewer(p.parse_args(['--robot-version', version]))
                 self.assertEqual(viewer.model.root_link, 'waist_yaw_link')
-                self.assertEqual(viewer.model.path, self.urdf)
+                self.assertEqual(viewer.model.path, p.main_urdf(version))
                 self.assertEqual(viewer.layout.path.parent.name, f'kuavo_v{version}')
                 self.assertEqual(viewer.model.required_joints, set(viewer.layout.indices))
 

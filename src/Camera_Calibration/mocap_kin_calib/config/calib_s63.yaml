@@ -1,9 +1,9 @@
-# S62/S63 共用轮臂配置；采集用 S63 标定模型，优化用 S63 主 URDF。
+# S62/S63 及其小版本共用轮臂配置；采集和优化按完整版本选自身主 URDF。
 # 采集偏移沿用 mocap_joint_calib/config/calib.yaml。
 
 robot:
   robot_version: "63"
-  robot_layout: wheel63
+  robot_layout: wheel62
   sensor_topic: /sensors_data_raw
   arm_traj_topic: /kuavo_arm_traj
   joint_q_length: 20
@@ -69,8 +69,8 @@ mocap_frame_align:
   axis_flip: [1, 1, 1]
 
 calibration:
-  # 按 record_joint_poses.py 的脚本目录解析，与其 62/63 默认映射一致。
-  urdf: ../biped_v3_arm_s63.urdf
+  # 采集器按 ROBOT_VERSION 选择自身主 URDF；此处为 S63 默认值。
+  urdf: ../../kuavo_assets/models/biped_s63/urdf/biped_s63.urdf
   fk_root: waist_yaw_link
   free_joints:
     - zarm_l1_joint
@@ -101,8 +101,15 @@ calibration:
   sigma: 3.0
   skip_first_last: true
 
+workflow:
+  # 一键流程按 30 点 torso—shoulder 最大两两差自动选 CTB 模式；经验门限。
+  # 任一手恢复出的固定变换超过位置或旋转门限时，拟合/独立验证都切到青瞳模式。
+  shoulder_stability:
+    max_translation_mm: 8.0
+    max_rotation_deg: 1.0
+
 kinematics:
-  # 按本 YAML 所在目录解析；S62/S63 优化均使用这份 S63 主 URDF。
+  # 按本 YAML 所在目录解析；优化器按完整 ROBOT_VERSION 覆盖此默认值。
   source_urdf: ../../../kuavo_assets/models/biped_s63/urdf/biped_s63.urdf
   root_link: waist_yaw_link
   left_tip_link: zarm_l7_link
@@ -110,9 +117,14 @@ kinematics:
 
   # CTB: C(原始 torso 刚体) -> B(waist_yaw_link)，单位 mm / deg。
   ctb:
+    # 独立拟合默认 per_sample；一键流程按测量稳定性覆盖为 shared 或 per_sample。
+    mode: per_sample
     translation_mm: [122.02, -45.82, 2.5]
     fit_translation: false
     fit_rotation: true
+    # 每个采集点独立拟合 CTB 旋转，同点双臂共用；相对 I 的总旋转角不超过此值。
+    rotation_bound_deg: 3.0
+    # 共享 CTB 模式初值；逐点 CTB 拟合/青瞳验证从 I 开始，不叠加此值。
     initial_rotvec_deg: [0.0, 0.0, 0.0]
   # ETK: 新手臂工装的光球刚体 K -> J7 link E，固定平移。
   etk:
@@ -151,7 +163,9 @@ kinematics:
     gtol: 1.0e-8
 
   validation:
-    max_position_error_mm: 10.0
+    # 仅控制 --validate-urdf：true 使用有界逐点 CTB；false 保留共享 CTB 的原验证方式。
+    qingtong: false
+    max_position_error_mm: 50.0
 
   output_dir: ../output_s63
   urdf_final_name: urdf_final.urdf

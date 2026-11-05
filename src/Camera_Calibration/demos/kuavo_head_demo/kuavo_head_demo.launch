@@ -3,15 +3,28 @@
 
   <!-- 不依赖 ROS 包查找；优先 CAMERA_CALIB_ROOT，否则相对 launch 文件定位到 Camera_Calibration 根目录 -->
   <arg name="camera_calib_root" default="$(eval optenv('CAMERA_CALIB_ROOT', dirname() + '/../..'))" />
-  <!-- robot_layout：默认读 ROBOT_VERSION（45→biped45，52→biped52，56→biped56，62/63→wheel62）；可显式覆盖 -->
-  <arg name="robot_layout" default="$(eval 'biped45' if optenv('ROBOT_VERSION', '52') == '45' else 'wheel62' if optenv('ROBOT_VERSION', '52') in ['62', '63'] else 'biped56' if optenv('ROBOT_VERSION', '52') == '56' else 'biped52')" />
+  <!-- robot_base_version：ROBOT_VERSION 按 %100 折回基础型号（100045→45，100049/200049→49，
+       200053→53，400055→55，200062→62），只用于查机型表；资源路径仍用原始 ROBOT_VERSION。 -->
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION 52)" />
+  <arg name="robot_base_version" default="$(eval str(int(arg('robot_version')) % 100) if str(arg('robot_version')).isdigit() else str(arg('robot_version')))" />
+  <!-- robot_layout：默认读 robot_base_version（45/49→biped45，52→biped52，
+       53/55/56→biped56，62/63→wheel62）；可显式覆盖。
+       注意 $(eval) 里的 arg() 会把纯数字串转成 int、'true'/'false' 转成 bool，
+       所以这里统一套一层 str() 再比较。 -->
+  <arg name="robot_layout" default="$(eval 'biped45' if str(arg('robot_base_version')) in ['45', '49'] else 'wheel62' if str(arg('robot_base_version')) in ['62', '63'] else 'biped56' if str(arg('robot_base_version')) in ['53', '55', '56'] else 'biped52')" />
   <arg name="use_no_waist" default="$(eval arg('robot_layout') in ['biped45', 'wheel62'])" />
-  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s45.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm.urdf')" />
-  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s45_calibrated.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_calibrated.urdf')" />
-  <!-- S45 物理倒装相机使用旋转图像及其虚拟 optical frame；其他布局保持原始话题。 -->
-  <arg name="head_image_topic" default="$(eval '/head_camera/color/image_raw_rotate_180' if arg('robot_layout') == 'biped45' else '/head_camera/color/image_raw')" />
-  <arg name="head_camera_info_topic" default="$(eval '/head_camera/color/camera_info_rotate_180' if arg('robot_layout') == 'biped45' else '/head_camera/color/camera_info')" />
-  <arg name="head_camera_frame" default="$(eval 'head_camera_color_optical_frame_rot180' if arg('robot_layout') == 'biped45' else 'head_camera_color_optical_frame')" />
+  <!-- 45 与 49 系列同属 biped45 布局，但标定模型/输出分开（biped_v3_arm_s45 / _s49）；
+       53/55/56、62/63 各用自身标定文件及输出。
+       先按 robot_base_version 区分标定文件，其余再按布局选。 -->
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s53.urdf' if str(arg('robot_base_version')) == '53' else 'biped_v3_arm_s63.urdf' if str(arg('robot_base_version')) == '63' else 'biped_v3_arm_s49.urdf' if str(arg('robot_base_version')) == '49' else 'biped_v3_arm_s55.urdf' if str(arg('robot_base_version')) == '55' else 'biped_v3_arm_s45.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_s62.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm.urdf')" />
+  <arg name="calibrated_urdf_file" default="$(eval 'biped_v3_arm_s53_calibrated.urdf' if str(arg('robot_base_version')) == '53' else 'biped_v3_arm_s63_calibrated.urdf' if str(arg('robot_base_version')) == '63' else 'biped_v3_arm_s49_calibrated.urdf' if str(arg('robot_base_version')) == '49' else 'biped_v3_arm_s55_calibrated.urdf' if str(arg('robot_base_version')) == '55' else 'biped_v3_arm_s45_calibrated.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_s62_calibrated.urdf' if arg('robot_layout') == 'wheel62' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_calibrated.urdf')" />
+  <!-- 头部倒装相机只看基础版本，不看布局：只有 s45 的模型 camera rpy 未含 180° 翻转，
+       需要旋转图像与虚拟 optical frame；s49 起模型已把翻转进入 camera rpy，49 系列用原始话题。
+       注意 $(eval) 里的 arg() 会把 'true' 转成 Python bool，故此处直接当布尔值用，不要再和字符串比。 -->
+  <arg name="head_rot180" default="$(eval str(arg('robot_base_version')) == '45')" />
+  <arg name="head_image_topic" default="$(eval '/head_camera/color/image_raw_rotate_180' if arg('head_rot180') else '/head_camera/color/image_raw')" />
+  <arg name="head_camera_info_topic" default="$(eval '/head_camera/color/camera_info_rotate_180' if arg('head_rot180') else '/head_camera/color/camera_info')" />
+  <arg name="head_camera_frame" default="$(eval 'head_camera_color_optical_frame_rot180' if arg('head_rot180') else 'head_camera_color_optical_frame')" />
   <arg name="csv_dir" default="$(arg camera_calib_root)/output_csv/kuavo_head"/>
 
   <!-- 选择流程（默认只开 capture_to_csv 手动采样） -->

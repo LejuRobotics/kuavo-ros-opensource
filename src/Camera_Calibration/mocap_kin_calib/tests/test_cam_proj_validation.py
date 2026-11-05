@@ -23,7 +23,8 @@ class ProjectionOfflineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.layout = projection.JointLayout("56")
-        cls.urdf = HERE / "output" / "urdf_final.urdf"
+        # Use a tracked model so a fresh checkout needs no local calibration output.
+        cls.urdf = HERE.parents[1] / "kuavo_assets/models/biped_s56/urdf/biped_s56.urdf"
         cls.model = projection.ProjectionModel(cls.urdf, points_per_link=128)
         cls.q = cls.layout.decode(np.linspace(-0.25, 0.35, cls.layout.count))
 

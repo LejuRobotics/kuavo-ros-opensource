@@ -150,6 +150,10 @@ class OutputLimitTests(unittest.TestCase):
         if output_urdf and module.__name__.endswith("1010"):
             args.append("--output-urdf")
         result = SimpleNamespace(success=True, message="mocked fit", nfev=1)
+        if module.__name__.endswith("1010"):
+            # Focused limit cases use the legacy 93-value layout. The current
+            # CLI allocates a separate CTB for each of the 30 capture samples.
+            p_final = np.concatenate((np.tile(p_final[:3], 30), p_final[3:]))
         fits = [(np.zeros_like(p_final), result), (p_final, result)]
         with patch.dict(os.environ, ROBOT_VERSION="63"), patch.object(sys, "argv", args), \
                 patch.object(module, "fit", side_effect=fits) as fit, \

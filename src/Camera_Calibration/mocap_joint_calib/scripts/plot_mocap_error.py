@@ -71,16 +71,13 @@ LAYOUT_DEFAULTS = {
         "right_arm": [11, 18],
     },
 }
-VERSION_LAYOUT = {
-    "45": "biped45",
-    "52": "biped52",
-    "56": "biped56",
-    "62": "wheel62",
-    "63": "wheel62",
-}
-URDF_LAYOUT = {
-    cfg["urdf"]: layout for layout, cfg in LAYOUT_DEFAULTS.items()
-}
+# 版本 → 布局的唯一来源是 robot_versions.py（与采集/优化/零点脚本共用一份机型表）；
+# 上面已把 Camera_Calibration 目录加入 sys.path。这里只保留绘图相关的臂索引缓存。
+import robot_versions as rv  # noqa: E402
+VERSION_LAYOUT = {base: spec.layout for base, spec in rv.TABLE.items()}
+# URDF 文件名 → 布局：直接取统一机型表，这样 45/49 的两份标定 URDF 都能识别
+# （biped_v3_arm_s45.urdf / biped_v3_arm_s49.urdf 都映射到 biped45）。
+URDF_LAYOUT = {spec.urdf: spec.layout for spec in rv.TABLE.values()}
 
 
 def _joint_q_indices(joint_indices: dict, layout: str) -> dict:
@@ -123,9 +120,13 @@ def _infer_capture_layout(meta: dict) -> str:
 
     version = str(meta.get("robot_version") or "")
     if version:
-        if version not in VERSION_LAYOUT:
-            raise ValueError(f"capture robot_version 不支持: {version}")
-        candidates.append(("robot_version", VERSION_LAYOUT[version]))
+        version_base = rv.fold(version)
+        if version_base not in VERSION_LAYOUT:
+            raise ValueError(
+                f"capture robot_version 不支持: {version}"
+                f"（按 %100 折回为 {version_base}）"
+            )
+        candidates.append(("robot_version", VERSION_LAYOUT[version_base]))
 
     urdf_name = Path(str(meta.get("urdf") or "")).name
     if urdf_name in URDF_LAYOUT:

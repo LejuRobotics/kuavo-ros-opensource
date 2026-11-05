@@ -100,6 +100,12 @@ calibration:
   sigma: 3.0
   skip_first_last: true
 
+workflow:
+  # 一键流程按 30 点 torso—shoulder 最大两两差自动选 CTB 模式；经验门限。
+  shoulder_stability:
+    max_translation_mm: 8.0
+    max_rotation_deg: 1.0
+
 kinematics:
   # 本路径按本 YAML 所在目录解析；优化入口按实际版本统一选择主 URDF。
   source_urdf: ../../../kuavo_assets/models/biped_s56/urdf/biped_s56.urdf
@@ -110,9 +116,14 @@ kinematics:
   # 位置固定；只拟合 rotvec_deg。CTB 是 C(原始 torso 刚体) -> B(waist_yaw_link)
   # 的变换；ETK 是手部光球刚体坐标 K -> J7 link 坐标 E。单位 mm / deg。
   ctb:
+    # 独立拟合默认 per_sample；一键流程按测量稳定性覆盖为 shared 或 per_sample。
+    mode: per_sample
     translation_mm: [122.0, -45.81, 15.0]
     fit_translation: false
     fit_rotation: true
+    # 每个采集点独立拟合 CTB 旋转，同点双臂共用；相对 I 的总旋转角不超过此值。
+    rotation_bound_deg: 3.0
+    # 共享 CTB 模式初值；逐点 CTB 拟合/青瞳验证从 I 开始，不叠加此值。
     initial_rotvec_deg: [0.0, 0.0, 0.0]
   etk:
     left:
@@ -155,6 +166,8 @@ kinematics:
     gtol: 1.0e-8
 
   validation:
+    # 仅控制 --validate-urdf：true 使用有界逐点 CTB；false 保留共享 CTB 的原验证方式。
+    qingtong: false
     # 每个留出点的三维位置距离必须小于该值，单位 mm。
     max_position_error_mm: 8.0
 

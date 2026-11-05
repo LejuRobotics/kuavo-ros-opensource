@@ -39,13 +39,11 @@ _KUAVO_CONFIG_DIR = _SCRIPT_DIR.parents[1] / "kuavo_assets" / "config"
 _MOCAP_DIR = _CAMERA_CAL_DIR / "mocap_checkerboard_pose"
 _BOTH_ARMS_DIR = _CAMERA_CAL_DIR / "demos" / "kuavo_both_arms"
 _HEAD_DIR = _CAMERA_CAL_DIR / "demos" / "kuavo_head_demo"
-_ROBOT_CALIB_DEFAULTS = {
-    "45": ("biped45", "biped_v3_arm_s45.urdf", "base_link"),
-    "52": ("biped52", "biped_v3_arm.urdf", "waist_yaw_link"),
-    "56": ("biped56", "biped_v3_arm_s56.urdf", "waist_yaw_link"),
-    "62": ("wheel62", "biped_v3_arm_s62.urdf", "waist_yaw_link"),
-    "63": ("wheel62", "biped_v3_arm_s62.urdf", "waist_yaw_link"),
-}
+if str(_CAMERA_CAL_DIR) not in sys.path:
+    sys.path.insert(0, str(_CAMERA_CAL_DIR))
+import robot_versions  # noqa: E402  (统一机型表：布局/URDF/FK 根/配置/工装)
+
+
 for _p in (str(_MOCAP_DIR), str(_BOTH_ARMS_DIR), str(_HEAD_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -697,13 +695,15 @@ def _apply_robot_calibration_defaults(
     """按实机版本选择控制布局、标定 URDF 和 FK 根；显式 CLI 参数可再覆盖。"""
     if not robot_version:
         return None
-    defaults = _ROBOT_CALIB_DEFAULTS.get(robot_version)
-    if defaults is None:
-        supported = ", ".join(_ROBOT_CALIB_DEFAULTS)
+    spec = robot_versions.spec(robot_version)
+    if spec is None:
         raise ValueError(
-            f"ROBOT_VERSION={robot_version} 尚无标定 URDF 映射；当前支持 {supported}"
+            f"ROBOT_VERSION={robot_version}"
+            f"（按 %100 折回为 {robot_versions.fold(robot_version)}）尚无标定 URDF 映射；"
+            f"当前支持 {robot_versions.supported_text()} 及对应小版本"
+            "（如 100049/200049、200053/400055、500062/400063）"
         )
-    layout, urdf_name, fk_root = defaults
+    layout, urdf_name, fk_root = spec.layout, spec.urdf, spec.fk_root
     urdf_path = (_CAMERA_CAL_DIR / urdf_name).resolve()
     if not urdf_path.is_file():
         raise FileNotFoundError(f"ROBOT_VERSION={robot_version} 对应 URDF 不存在: {urdf_path}")
@@ -720,22 +720,26 @@ def _apply_robot_calibration_defaults(
 def _resolve_config_path(arg: str, robot_version: str = "") -> Path:
     """按 --config 或 ROBOT_VERSION 解析 config 路径。
 
-    auto：读 ROBOT_VERSION 环境变量
-      45  → config/calib_s45.yaml（biped45，无腰）
-      52/56 → config/calib.yaml（biped52/56，走默认）
-      62/63 → config/calib.yaml（wheel62，默认）
-    也可显式传 --robot-version 45/52/56/62/63 覆盖。
+    auto：读 ROBOT_VERSION（小版本按 %100 折回基础型号后查统一机型表）
+      45 → config/calib_s45.yaml（biped45，无腰）
+      49 → config/calib_s49.yaml（与 45 同布局，标定 URDF/输出独立）
+      52/53/55/56/62/63 → config/calib.yaml
+    也可显式传 --robot-version 覆盖，如 100049/200053/400055/500062。
     """
     if arg:
         return Path(arg)
 
-    rv = robot_version or os.environ.get("ROBOT_VERSION", "").strip()
-    if rv == "45":
-        return _SCRIPT_DIR / "config" / "calib_s45.yaml"
-    if rv in ("52", "56", "62", "63"):
-        return _SCRIPT_DIR / "config" / "calib.yaml"
-    if rv:
-        print(f"[WARN] 未知 ROBOT_VERSION={rv}，回退默认 calib.yaml", file=sys.stderr)
+    raw = robot_version or os.environ.get("ROBOT_VERSION", "").strip()
+    spec = robot_versions.spec(raw) if raw else None
+    if spec is not None:
+        return _SCRIPT_DIR / "config" / spec.calib_config
+    if raw:
+        print(
+            f"[WARN] 未知 ROBOT_VERSION={raw}"
+            f"（按 %100 折回为 {robot_versions.fold(raw)}，"
+            f"支持 {robot_versions.supported_text()} 及对应小版本），回退默认 calib.yaml",
+            file=sys.stderr,
+        )
     return _SCRIPT_DIR / "config" / "calib.yaml"
 
 
@@ -759,7 +763,10 @@ def main() -> int:
     parser.add_argument(
         "--robot-version",
         default="auto",
-        help="机型版本：auto（读 ROBOT_VERSION）或 kuavo_assets 中的版本号",
+        help=(
+            "机型版本：auto（读 ROBOT_VERSION）或 kuavo_assets 中的版本号；"
+            "小版本（100049/200049 等）按 %%100 折回基础型号后查机型表"
+        ),
     )
     parser.add_argument(
         "--kuavo-json",

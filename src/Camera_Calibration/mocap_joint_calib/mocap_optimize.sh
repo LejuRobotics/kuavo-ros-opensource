@@ -3,7 +3,11 @@
 #
 # 自动完成：定位 workspace → source devel/setup.bash → 起 roscore（如未起）→
 #           自动找最新 capture_*.json → 跑 optimize_mocap（Ceres）。
-# 机型自动适配：45/52/56/62/63 → 对应标定 URDF；可显式 --layout 覆盖。
+# 机型自动适配：按统一机型表（robot_versions.sh）折回基础型号后选标定 URDF——
+#   45→biped45（biped_v3_arm_s45.urdf），49→biped45（biped_v3_arm_s49.urdf），52→biped52，
+#   53/55/56→biped56，各用自身标定文件，头部高度统一为 0.49125 m，
+#   62/63→wheel62，各用自身标定文件；
+#   小版本（100049、200053、400055、500062 …）自动折回，可显式 --layout 覆盖。
 #
 # 用法：
 #   bash mocap_optimize.sh                     # 自动用最新 capture + 按 ROBOT_VERSION 选机型
@@ -17,6 +21,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 die() { echo "[ERROR] $1" >&2; exit 1; }
+
+# 统一机型表（唯一数据源）
+# shellcheck source=../robot_versions.sh
+source "${SCRIPT_DIR}/../robot_versions.sh"
 
 OUTPUT_DIR="${SCRIPT_DIR}/output"
 FINAL_CALIBRATION="${OUTPUT_DIR}/calibration.yaml"
@@ -103,20 +111,29 @@ case "${META_LAYOUT}" in
 esac
 
 case "${META_VERSION}" in
-  45) set_inferred_layout "biped45" "robot_version=${META_VERSION}" ;;
-  52) set_inferred_layout "biped52" "robot_version=${META_VERSION}" ;;
-  56) set_inferred_layout "biped56" "robot_version=${META_VERSION}" ;;
-  62|63) set_inferred_layout "wheel62" "robot_version=${META_VERSION}" ;;
   ""|None|null) ;;
-  *) die "capture meta.robot_version=${META_VERSION} 尚未适配" ;;
+  *)
+    # 小版本按 %100 折回基础型号后查统一机型表（100049→49、200053→53、500062→62 …）。
+    if rv_supported "${META_VERSION}"; then
+      set_inferred_layout "$(rv_layout "${META_VERSION}")" "robot_version=${META_VERSION}"
+    else
+      die "capture meta.robot_version=${META_VERSION} 尚未适配（支持 ${RV_SUPPORTED_BASES} 及对应小版本）"
+    fi
+    ;;
 esac
 
 URDF_LAYOUT=""
+BASE_URDF_HINT=""
 case "${META_URDF##*/}" in
   biped_v3_arm_s45.urdf) URDF_LAYOUT="biped45" ;;
+  biped_v3_arm_s49.urdf) URDF_LAYOUT="biped45"; BASE_URDF_HINT="49" ;;
   biped_v3_arm.urdf) URDF_LAYOUT="biped52" ;;
+  # 完整版本优先于模板文件名，各基础型号的模板独立。
+  biped_v3_arm_s53.urdf) URDF_LAYOUT="biped56"; BASE_URDF_HINT="53" ;;
+  biped_v3_arm_s55.urdf) URDF_LAYOUT="biped56"; BASE_URDF_HINT="55" ;;
   biped_v3_arm_s56.urdf) URDF_LAYOUT="biped56" ;;
   biped_v3_arm_s62.urdf) URDF_LAYOUT="wheel62" ;;
+  biped_v3_arm_s63.urdf) URDF_LAYOUT="wheel62"; BASE_URDF_HINT="63" ;;
 esac
 set_inferred_layout "${URDF_LAYOUT}" "urdf=${META_URDF}"
 
@@ -136,21 +153,36 @@ fi
 [[ -n "${LAYOUT}" ]] || LAYOUT="${INFERRED_LAYOUT}"
 
 # metadata 不足时才回退 ROBOT_VERSION；未知机型不再静默选择 wheel62。
+# 小版本按 %100 折回基础型号后查统一机型表。
 if [[ -z "${LAYOUT}" ]]; then
-  case "${ROBOT_VERSION:-}" in
-    45) LAYOUT="biped45" ;;
-    52) LAYOUT="biped52" ;;
-    56) LAYOUT="biped56" ;;
-    62|63) LAYOUT="wheel62" ;;
-    "") die "capture 无法推断机型，且未设置 ROBOT_VERSION；请显式传 --layout" ;;
-    *) die "不支持的 ROBOT_VERSION=${ROBOT_VERSION}；请显式传 --layout" ;;
-  esac
+  if [[ -z "${ROBOT_VERSION:-}" ]]; then
+    die "capture 无法推断机型，且未设置 ROBOT_VERSION；请显式传 --layout"
+  fi
+  rv_supported "${ROBOT_VERSION}" || die "不支持的 ROBOT_VERSION=${ROBOT_VERSION}（支持 ${RV_SUPPORTED_BASES} 及对应小版本）；请显式传 --layout"
+  LAYOUT="$(rv_layout "${ROBOT_VERSION}")"
 fi
 case "${LAYOUT}" in
   biped45|biped52|biped56|wheel62) ;;
   *) die "无效 --layout: ${LAYOUT}（仅 biped45|biped52|biped56|wheel62）" ;;
 esac
 echo "[INFO] robot_layout: ${LAYOUT}"
+
+# 同布局的标定模型与输出分开，完整版本传入 launch。
+# 优先级：capture meta.robot_version > capture meta.urdf > 环境变量 ROBOT_VERSION。
+BASE_VERSION=""
+if [[ -n "${META_VERSION}" && "${META_VERSION}" != "None" && "${META_VERSION}" != "null" ]]; then
+  BASE_VERSION="$(rv_fold "${META_VERSION}")"
+elif [[ -n "${BASE_URDF_HINT}" ]]; then
+  BASE_VERSION="${BASE_URDF_HINT}"
+elif [[ -n "${ROBOT_VERSION:-}" ]] && rv_supported "${ROBOT_VERSION}"; then
+  BASE_VERSION="$(rv_fold "${ROBOT_VERSION}")"
+fi
+echo "[INFO] robot_base_version: ${BASE_VERSION:-未知}"
+
+MODEL_VERSION="${META_VERSION}"
+case "${MODEL_VERSION}" in
+  ""|None|null) MODEL_VERSION="${ROBOT_VERSION:-${BASE_VERSION}}" ;;
+esac
 
 # 同一输出目录只允许一个优化任务；结果先写临时目录，通过校验后再替换正式文件。
 mkdir -p -- "${OUTPUT_DIR}"
@@ -178,6 +210,8 @@ echo "[INFO] 运行 optimize_mocap ..."
 if ! roslaunch "${SCRIPT_DIR}/mocap_optimize.launch" \
     "capture:=${CAPTURE}" \
     "robot_layout:=${LAYOUT}" \
+    "robot_base_version:=${BASE_VERSION}" \
+    "robot_version:=${MODEL_VERSION}" \
     "output_dir:=${TMP_OUTPUT_DIR}"; then
   die "optimize_mocap 失败。请检查上方 FATAL/ERROR 日志"
 fi

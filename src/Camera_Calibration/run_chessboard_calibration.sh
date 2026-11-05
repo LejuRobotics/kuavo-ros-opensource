@@ -13,13 +13,17 @@ usage() {
   - optimize: 启动对应 demo 的 optimize_from_csv（从 CSV 读取）
   - test: 读取 teach_*_joint_test.json 下发测试姿态并采数到带 _test 后缀目录，采数完自动画图输出测试图片
   - move: 仅下发 teach JSON 中的多姿态关节轨迹（不采数、不写 CSV），适用于“内参标定只需运动覆盖”的场景
-  - 机型：默认读 ROBOT_VERSION（45→biped45，52→biped52，56→biped56，62/63→wheel62）；可用 --robot_layout 覆盖
+  - 机型：默认读 ROBOT_VERSION，小版本按 %100 折回基础型号后查表
+    （45/49→biped45，52→biped52，53/55/56→biped56，62/63→wheel62）；
+    支持 45/49/52/53/55/56/62/63 及对应小版本（如 100049/200049、200053/300053、
+    400055、200062/500062、400063/500063）；可用 --robot_layout 覆盖
+  - 腕部三路相机仅 biped52/biped56/wheel62 布局支持；biped45（45 与 49 系列）只做头部
 
 选项:
   --build       先编译 robot_calibration、robot_calibration_msgs 和 kuavo_msgs
   --loops N     仅头部有效：关键帧轨迹循环次数（默认 1）
   --out_dir DIR 覆盖 CSV 输出目录（不填则使用默认输出目录）
-  --robot_layout biped45|biped52|biped56|wheel62  覆盖 ROBOT_VERSION 自动识别
+  --robot_layout biped45|biped52|biped56|wheel62  覆盖自动识别；设置了 ROBOT_VERSION 时必须与之一致
   --demo NAME   非交互选择 demo：head|right_wrist|left_wrist|all
 EOF
 }
@@ -65,6 +69,14 @@ die() {
   exit 1
 }
 
+warn() {
+  echo "[WARN] $1" >&2
+}
+
+# 统一机型表（唯一数据源）：小版本按 %100 折回基础型号后查布局/URDF/FK 根/头相机/腕相机/零点。
+# shellcheck source=robot_versions.sh
+source "${CC_DIR}/robot_versions.sh"
+
 # 机型布局：ROBOT_VERSION 自动识别，或 --robot_layout 覆盖
 resolve_robot_layout() {
   if [[ -n "${ROBOT_LAYOUT_ARG}" ]]; then
@@ -74,23 +86,44 @@ resolve_robot_layout() {
     esac
   fi
   local rv="${ROBOT_VERSION:-}"
-  case "${rv}" in
-    45) echo "biped45" ;;
-    52) echo "biped52" ;;
-    56) echo "biped56" ;;
-    62|63) echo "wheel62" ;;
-    "")
-      echo "biped52"
-      ;;
-    *)
-      echo "[WARN] 未知 ROBOT_VERSION=${rv}，回退 biped52" >&2
-      echo "biped52"
-      ;;
-  esac
+  if [[ -z "${rv}" ]]; then
+    echo "biped52"
+    return 0
+  fi
+  if ! rv_supported "${rv}"; then
+    warn "ROBOT_VERSION=${rv} 不在受支持机型表内（支持 ${RV_SUPPORTED_BASES} 及对应小版本），回退 biped52"
+    echo "biped52"
+    return 0
+  fi
+  rv_layout "${rv}"
 }
 
 ROBOT_LAYOUT="$(resolve_robot_layout)"
-if [[ "${ROBOT_LAYOUT}" == "biped45" ]]; then
+
+# 基础型号：小版本按 %100 折回（100049/200049→49，400055→55，500062→62 …）。
+# 仅用于判断机型特征与日志；URDF/config/资源目录仍用原始 ROBOT_VERSION。
+ROBOT_BASE_VERSION="$(rv_fold "${ROBOT_VERSION:-}")"
+
+# --robot_layout 与 ROBOT_VERSION 必须一致：布局决定是否发布腰关节、读 joint_q 的哪一段，
+# 版本决定标定 URDF；两者拼错会得到一个"物理上自相矛盾却全程不报错"的组合
+# （例如 wheel62 + s55：bridge 不发布 waist_yaw_joint，而采集链必须记录它，
+#  采到的腰部角恒为 0，优化后得到一组看起来正常但错误的零点）。
+# 未设置 ROBOT_VERSION 时不校验：此时只能按 --robot_layout 走布局默认 URDF。
+if [[ -n "${ROBOT_LAYOUT_ARG}" && -n "${ROBOT_VERSION:-}" ]] && rv_supported "${ROBOT_VERSION}"; then
+  _want_layout="$(rv_layout "${ROBOT_VERSION}")"
+  if [[ "${ROBOT_LAYOUT_ARG}" != "${_want_layout}" ]]; then
+    die "--robot_layout=${ROBOT_LAYOUT_ARG} 与 ROBOT_VERSION=${ROBOT_VERSION}（基础型号 ${ROBOT_BASE_VERSION}，应为 ${_want_layout}）不一致"
+  fi
+fi
+
+# 标定 URDF 与输出由统一机型表给出：45 与 49 系列同布局，但各用各的
+# biped_v3_arm_s45/_s49；53/55/56 和 62/63 各用自身模板，
+# 标完互不覆盖。未设置 ROBOT_VERSION（只给了 --robot_layout）时无法区分同布局内的这些型号，
+# 只能退回按布局的默认文件（biped45 → s45、biped56 → s56），因此实机务必带上 ROBOT_VERSION。
+if [[ -n "${ROBOT_VERSION:-}" ]] && rv_supported "${ROBOT_VERSION}"; then
+  NOMINAL_URDF="${CC_DIR}/$(rv_urdf "${ROBOT_VERSION}")"
+  CALIBRATED_URDF="${CC_DIR}/$(rv_calibrated_urdf "${ROBOT_VERSION}")"
+elif [[ "${ROBOT_LAYOUT}" == "biped45" ]]; then
   NOMINAL_URDF="${CC_DIR}/biped_v3_arm_s45.urdf"
   CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_s45_calibrated.urdf"
 elif [[ "${ROBOT_LAYOUT}" == "wheel62" ]]; then
@@ -104,7 +137,16 @@ else
   CALIBRATED_URDF="${CC_DIR}/biped_v3_arm_calibrated.urdf"
 fi
 
-if [[ "${ROBOT_LAYOUT}" == "biped45" ]]; then
+# 头部倒装相机（180° 旋转节点）只看基础型号，不看布局：
+# S45 的相机物理倒装、模型里未含翻转，必须用旋转后的话题与虚帧；
+# S49 起（含 100049/200049/300049/400049）翻转已进模型，用原始话题与 head_camera_color_optical_frame。
+# 未设 ROBOT_VERSION 时退回按布局判断，兼容 --robot_layout biped45 的单独用法。
+if [[ -n "${ROBOT_VERSION:-}" ]]; then
+  HEAD_ROT180="$(rv_head_rot180 "${ROBOT_VERSION}" 2>/dev/null || true)"
+else
+  [[ "${ROBOT_LAYOUT}" == "biped45" ]] && HEAD_ROT180=true || HEAD_ROT180=false
+fi
+if [[ "${HEAD_ROT180}" == "true" ]]; then
   HEAD_IMAGE_TOPIC="/head_camera/color/image_raw_rotate_180"
   HEAD_INFO_TOPIC="/head_camera/color/camera_info_rotate_180"
   HEAD_CAMERA_FRAME="head_camera_color_optical_frame_rot180"
@@ -427,6 +469,20 @@ case "${CHOICE}" in
     ;;
 esac
 
+# 腕部三路相机按**布局**判断（URDF、joint_q 索引、腕相机帧都跟布局走）：
+# - biped45（45 与 49 系列）：肩部以上没有独立的腕相机帧映射分支，只做头部。
+#   45：腕 demo 的 joint_q 索引只有 biped52/wheel62 两套，s45 无腰、臂从 12 起，未接；
+#   49 系列（100049/200049/300049/400049）：腕相机帧是 l_camera_link/camera_l_base/
+#   camera_r_base，与 s45 的 l/r_hand_tripod、l/r_hand_camera 完全不同。
+# 显式拒绝，避免静默走 biped52 分支拿到错误的臂索引。
+if [[ "${ROBOT_LAYOUT}" == "biped45" && "${CHOICE}" != "1" ]]; then
+  if [[ -n "${ROBOT_VERSION:-}" ]]; then
+    die "ROBOT_VERSION=${ROBOT_VERSION}（基础型号 $(rv_fold "${ROBOT_VERSION}")，布局 biped45）不支持左右腕相机标定，仅支持 --demo head。"
+  else
+    die "--robot_layout biped45 不支持左右腕相机标定，仅支持 --demo head。"
+  fi
+fi
+
 if [[ -z "${MODE}" ]]; then
   echo ""
   echo "请选择运行阶段："
@@ -461,7 +517,11 @@ if [[ -z "${OUT_DIR}" ]]; then
 fi
 
 echo "[INFO] 工作空间: ${WS_DIR}"
+if [[ -n "${ROBOT_VERSION:-}" ]]; then
+  echo "[INFO] $(rv_describe "${ROBOT_VERSION}")"
+fi
 echo "[INFO] robot_layout: ${ROBOT_LAYOUT} (ROBOT_VERSION=${ROBOT_VERSION:-未设置})"
+echo "[INFO] 头部相机: ${HEAD_IMAGE_TOPIC} / ${HEAD_CAMERA_FRAME}"
 echo "[INFO] nominal URDF: ${NOMINAL_URDF}"
 echo "[INFO] calibrated URDF: ${CALIBRATED_URDF}"
 echo "[INFO] demo: ${DEMO_NAME}"

@@ -23,13 +23,10 @@ import xml.etree.ElementTree as ET
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _CAMERA_CALIB_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
-_URDF_BY_ROBOT_VERSION = {
-    "45": "biped_v3_arm_s45.urdf",
-    "52": "biped_v3_arm.urdf",
-    "56": "biped_v3_arm_s56.urdf",
-    "62": "biped_v3_arm_s62.urdf",
-    "63": "biped_v3_arm_s62.urdf",
-}
+
+if _CAMERA_CALIB_DIR not in sys.path:
+    sys.path.insert(0, _CAMERA_CALIB_DIR)
+import robot_versions as rv  # noqa: E402  (统一机型表)
 
 # 写入模式：JSON 字段与 URDF parent link
 MODES: Dict[str, Dict[str, str]] = {
@@ -49,17 +46,23 @@ JOINT_NAME = "checkerboard_joint"
 
 
 def resolve_default_urdf() -> str:
-    """根据 ROBOT_VERSION 选择目标 URDF；显式 --urdf 时不会调用。"""
+    """根据 ROBOT_VERSION 选择目标 URDF；显式 --urdf 时不会调用。
+
+    小版本按 %100 折回基础型号后查机器人机型表（robot_versions.py）：
+    45 与 49 系列同属 biped45 布局，但标定 URDF 分开（s45/s49，内容除机型名外一致）；
+    53/55 共用 s55（头部安装低 4.1 mm），56 用 s56，62/63 共用 s62。
+    """
     robot_version = os.environ.get("ROBOT_VERSION", "").strip()
     if not robot_version:
         raise ValueError("未设置 ROBOT_VERSION；请先 export ROBOT_VERSION=<型号>，或显式传 --urdf")
-    urdf_name = _URDF_BY_ROBOT_VERSION.get(robot_version)
-    if urdf_name is None:
-        supported = ", ".join(sorted(_URDF_BY_ROBOT_VERSION, key=int))
+    spec = rv.spec(robot_version)
+    if spec is None:
         raise ValueError(
-            f"不支持的 ROBOT_VERSION={robot_version}；支持 {supported}，也可显式传 --urdf"
+            f"不支持的 ROBOT_VERSION={robot_version}"
+            f"（按 %100 折回为 {rv.fold(robot_version)}）；"
+            f"支持 {rv.supported_text()} 及对应小版本，也可显式传 --urdf"
         )
-    urdf_path = os.path.join(_CAMERA_CALIB_DIR, urdf_name)
+    urdf_path = os.path.join(_CAMERA_CALIB_DIR, spec.urdf)
     if not os.path.isfile(urdf_path):
         raise FileNotFoundError(f"ROBOT_VERSION={robot_version} 对应 URDF 不存在: {urdf_path}")
     return urdf_path

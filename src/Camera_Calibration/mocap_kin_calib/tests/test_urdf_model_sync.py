@@ -1,4 +1,4 @@
-"""S63 directory synchronization preserves model roles and calibrated arm FK."""
+"""S62/S63 directory synchronization preserves model roles and calibrated arm FK."""
 
 import hashlib
 from pathlib import Path
@@ -42,14 +42,21 @@ def without_arm_origins_and_metadata(data):
 
 
 class ModelSyncTests(unittest.TestCase):
+    version = "63"
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="mocap_model_sync_")
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name) / "urdf"
-        shutil.copytree(REPO / "src/kuavo_assets/models/biped_s63/urdf", self.directory)
+        shutil.copytree(REPO / f"src/kuavo_assets/models/biped_s{self.version}/urdf", self.directory)
+        self.main = Path(f"biped_s{self.version}.urdf")
+        self.xacro = Path(f"biped_s{self.version}_gazebo.xacro")
+        self.variants = {path for path in
+                         (Path(f"biped_s{self.version}_gazebo.urdf"), *sync._DRAKE_VARIANTS)
+                         if (self.directory / path).is_file()}
         # Build an independent candidate; tests do not require a saved lab fit.
         self.candidate = Path(self.temporary.name) / "candidate.urdf"
-        tree = ET.parse(self.directory / "biped_s63.urdf")
+        tree = ET.parse(self.directory / self.main)
         root = tree.getroot()
         root.insert(0, ET.Comment(' mocap_kin_calib:{"schema_version":1} '))
         for side, sign in (("l", 1), ("r", -1)):
@@ -81,20 +88,22 @@ class ModelSyncTests(unittest.TestCase):
     def test_no_writes_and_non_arm_content_is_preserved(self):
         before = {p: hashlib.sha256(p.read_bytes()).digest() for p in self.directory.rglob("*") if p.is_file()}
         updates = self.build()
-        self.assertEqual(set(updates), {self.directory / p for p in sync._KNOWN_MODELS})
-        self.assertEqual(updates[self.directory / sync._MAIN], self.candidate.read_bytes())
-        self.assertEqual(updates[self.directory / sync._XACRO], (self.directory / sync._XACRO).read_bytes())
-        for relative in sync._VARIANTS:
+        self.assertEqual(set(updates), {self.directory / p for p in
+                                       (self.main, self.xacro, *self.variants, *sync._SINGLE_ARMS)})
+        self.assertEqual(updates[self.directory / self.main], self.candidate.read_bytes())
+        self.assertEqual(updates[self.directory / self.xacro], (self.directory / self.xacro).read_bytes())
+        for relative in self.variants:
             path = self.directory / relative
             self.assertEqual(without_arm_origins_and_metadata(updates[path]), without_arm_origins_and_metadata(path.read_bytes()))
         self.assertEqual(before, {p: hashlib.sha256(p.read_bytes()).digest() for p in before})
 
-    def test_legacy_arms_are_complete_standard_s63_models(self):
+    def test_legacy_arms_are_complete_standard_models_of_selected_version(self):
         candidate = ET.parse(self.candidate).getroot()
         updates = self.build()
         for relative, side in sync._SINGLE_ARMS.items():
             data = updates[self.directory / relative]
             root = sync._parse(data, relative)
+            self.assertEqual(root.get("name"), f"{candidate.get('name')}_{side}arm")
             links, joints = sync._validate_tree(root, relative)
             self.assertEqual(len(links), 8)
             self.assertEqual(len(joints), 7)
@@ -115,7 +124,7 @@ class ModelSyncTests(unittest.TestCase):
             self.assertEqual(updates[path], path.read_bytes())
 
     def test_nominal_is_not_runtime_and_unexpected_models_fail(self):
-        nominal = self.directory / "biped_s63.nominal.urdf"
+        nominal = self.directory / self.main.with_suffix(".nominal.urdf")
         nominal.write_bytes(b"stable original model")
         self.assertNotIn(nominal, self.build())
         extra = self.directory / "drake/surprise.urdf"
@@ -138,12 +147,24 @@ class ModelSyncTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate joint"):
             self.build()
 
+    def test_schema2_metadata_is_synced_to_all_urdfs(self):
+        self.candidate.write_bytes(self.candidate.read_bytes().replace(
+            b'"schema_version":1', b'"schema_version":2'))
+        expected = sync._metadata_comment(self.candidate.read_bytes(), self.candidate)
+        for path, data in self.build().items():
+            if path.suffix == ".urdf":
+                self.assertEqual(sync._metadata_comment(data, path), expected)
+
     def test_second_sync_replaces_metadata_and_is_idempotent(self):
         first = self.build()
         for path, data in first.items():
             path.write_bytes(data)
-        second = sync.build_model_updates(self.directory / "biped_s63.urdf", self.candidate)
+        second = sync.build_model_updates(self.directory / self.main, self.candidate)
         self.assertEqual(first, second)
+
+
+class S62ModelSyncTests(ModelSyncTests):
+    version = "62"
 
 
 if __name__ == "__main__":

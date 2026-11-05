@@ -19,6 +19,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
+from robot_variants import is_wheel_urdf
 
 
 ARM_JOINTS = {
@@ -216,13 +217,13 @@ def install_urdf(target: Path, candidate: Path, *, apply: bool = False,
 
 def install_urdf_directory(target: Path, candidate: Path, *, apply: bool = False,
                            nominal_source: Path = None) -> int:
-    """Install the S63 model family, rolling back earlier writes on failure."""
+    """Install this wheel version's model family, rolling back on failure."""
     from urdf_model_sync import build_model_updates
 
     target = target.expanduser().resolve()
     candidate = candidate.expanduser().resolve()
-    if target.name != "biped_s63.urdf" or target == candidate:
-        raise ValueError("目录同步要求 target 为 biped_s63.urdf，且 candidate 与其不同")
+    if not is_wheel_urdf(target) or target == candidate:
+        raise ValueError("目录同步要求 target 为 62/63 系完整版本主 URDF，且 candidate 与其不同")
     source = (resolve_fit_source(target) if nominal_source is None
               else ensure_nominal_source(nominal_source.expanduser().resolve()))
     _, target_root = _tree(target)
@@ -318,7 +319,7 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true",
                         help="实际写入；默认只检查并打印计划")
     parser.add_argument("--all-models", action="store_true",
-                        help="同步 S63 urdf 目录内全部模型，包括 Drake、Gazebo 和重建的左右单臂")
+                        help="同步实际 62/63 小版本的 urdf 目录，包括 Drake、Gazebo 和重建的左右单臂")
     args = parser.parse_args()
     if args.all_models:
         return install_urdf_directory(args.target_urdf, args.candidate_urdf, apply=args.apply)

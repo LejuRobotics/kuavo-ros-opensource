@@ -7,11 +7,16 @@
   <arg name="camera_calib_root" default="$(eval dirname())" />
   <arg name="cc_parent" default="$(eval dirname() + '/..')" />
   <arg name="robot_layout" default="wheel62" />
+  <!-- 基础型号：ROBOT_VERSION 按 %100 折回（100049→49、200053→53…）。biped45 布局下
+       用它区分 45 与 49 系列的标定模型与输出（biped_v3_arm_s45 / _s49）；biped56 布局下
+       53/55/56、62/63 各用自身标定文件及输出。 -->
+  <arg name="robot_version" default="$(optenv ROBOT_VERSION 52)" />
+  <arg name="robot_base_version" default="$(eval str(int(arg('robot_version')) % 100) if str(arg('robot_version')).isdigit() else str(arg('robot_version')))" />
   <arg name="capture" default="$(arg camera_calib_root)/capture_YYYYMMDD_HHMMSS.json" />
   <arg name="output_dir" default="$(arg camera_calib_root)/output" />
   <arg name="calib_yaml" default="$(eval 'mocap_calibration_s45.yaml' if arg('robot_layout') == 'biped45' else 'mocap_calibration.yaml')" />
-  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s45.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm.urdf' if arg('robot_layout') == 'biped52' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_s62.urdf')" />
-  <arg name="calibrated_urdf" default="$(eval 'biped_v3_arm_s45_calibrated.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_calibrated.urdf' if arg('robot_layout') == 'biped52' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_s62_calibrated.urdf')" />
+  <arg name="urdf_file" default="$(eval 'biped_v3_arm_s53.urdf' if str(arg('robot_base_version')) == '53' else 'biped_v3_arm_s63.urdf' if str(arg('robot_base_version')) == '63' else 'biped_v3_arm_s49.urdf' if str(arg('robot_base_version')) == '49' else 'biped_v3_arm_s55.urdf' if str(arg('robot_base_version')) == '55' else 'biped_v3_arm_s45.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm.urdf' if arg('robot_layout') == 'biped52' else 'biped_v3_arm_s56.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_s62.urdf')" />
+  <arg name="calibrated_urdf" default="$(eval 'biped_v3_arm_s53_calibrated.urdf' if str(arg('robot_base_version')) == '53' else 'biped_v3_arm_s63_calibrated.urdf' if str(arg('robot_base_version')) == '63' else 'biped_v3_arm_s49_calibrated.urdf' if str(arg('robot_base_version')) == '49' else 'biped_v3_arm_s55_calibrated.urdf' if str(arg('robot_base_version')) == '55' else 'biped_v3_arm_s45_calibrated.urdf' if arg('robot_layout') == 'biped45' else 'biped_v3_arm_calibrated.urdf' if arg('robot_layout') == 'biped52' else 'biped_v3_arm_s56_calibrated.urdf' if arg('robot_layout') == 'biped56' else 'biped_v3_arm_s62_calibrated.urdf')" />
 
   <!-- 标定用 URDF（含 zarm_l7_end_effector / zarm_r7_end_effector） -->
   <param name="robot_description"

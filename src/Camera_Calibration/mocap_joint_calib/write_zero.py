@@ -19,9 +19,9 @@
 - 写入完成后，停止当前控制程序并重新 roslaunch，启动时才会加载新零点。
 
 示例：
-  ROBOT_VERSION=56 python3 write_zero_via_service_fixed.py --parts arm --dry-run
-  ROBOT_VERSION=56 python3 write_zero_via_service_fixed.py --parts arm
-  ROBOT_VERSION=100049 python3 write_zero_via_service_fixed.py --parts arm
+  ROBOT_VERSION=56 python3 write_zero.py --parts arm --dry-run
+  ROBOT_VERSION=56 python3 write_zero.py --parts arm
+  ROBOT_VERSION=100049 python3 write_zero.py --parts arm
 """
 
 from __future__ import annotations
