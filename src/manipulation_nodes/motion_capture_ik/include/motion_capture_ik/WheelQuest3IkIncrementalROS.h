@@ -17,6 +17,8 @@
 #include <geometry_msgs/Twist.h>
 #include <sensor_msgs/JointState.h>
 #include <std_msgs/Float64.h>
+#include <std_msgs/Bool.h>
+#include <std_msgs/String.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/twoArmHandPose.h>
 #include <kuavo_msgs/Float32MultiArrayStamped.h>
@@ -81,6 +83,81 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void chestPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
   // SG100 heiman 手:只发布扳机并调用 /sg100/step_gesture,服务在手节点上
   HighlyDynamic::SG100VrInput makeSg100VrInput();
+
+  void daggerLeftInterventionCallback(const std_msgs::Bool::ConstPtr& msg);
+  void daggerRightInterventionCallback(const std_msgs::Bool::ConstPtr& msg);
+  void daggerWaistConfigCallback(const std_msgs::String::ConstPtr& msg);
+  void daggerBodyPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
+  void updateDaggerWaistGrip(bool left, bool requested);
+  bool daggerWaistRequestedLocked(const ros::Time& now) const;
+  void updateDaggerWaistCandidate();
+  nlohmann::json daggerWaistMetadata();
+
+  struct DaggerWaistConfig {
+    std::string session;
+    std::string whichArm = "both";
+    Eigen::Vector4d lower = Eigen::Vector4d::Zero();
+    Eigen::Vector4d upper = Eigen::Vector4d::Zero();
+    double maxSpeed = 1.0;
+    double actionTimeout = 0.2;
+    double signalTimeout = 0.2;
+  };
+  ros::Subscriber daggerWaistConfigSubscriber_;
+  ros::Subscriber daggerBodyPoseSubscriber_;
+  std::mutex daggerWaistMutex_;  // Protect input snapshots, never held during IK.
+  DaggerWaistConfig daggerWaistConfig_;
+  geometry_msgs::PoseStamped daggerBodyPose_;
+  bool daggerWaistLeftGrip_ = false;
+  bool daggerWaistRightGrip_ = false;
+  ros::Time daggerWaistLeftStamp_, daggerWaistRightStamp_;
+  uint64_t daggerWaistInputEpoch_ = 0;
+  nlohmann::json daggerWaistCandidate_ = {
+      {"config_session", ""}, {"requested", false}, {"ready", false},
+      {"generation", 0}, {"stamp_ns", 0}, {"position", {0., 0., 0., 0.}}};
+  // The following follower state belongs exclusively to the IK solve thread.
+  uint64_t daggerWaistEpoch_ = 0;
+  uint64_t daggerWaistGeneration_ = 0;
+  bool daggerWaistAnchored_ = false;
+  ros::Time daggerWaistPoseStamp_;
+  Eigen::Vector4d daggerWaistTarget_ = Eigen::Vector4d::Zero();
+  Eigen::Vector3d daggerWaistRobotPosition_, daggerWaistOperatorPosition_, daggerWaistHeading_;
+  double daggerWaistRobotPitch_ = 0., daggerWaistRobotYaw_ = 0.;
+  double daggerWaistAnchorPitch_ = 0., daggerWaistPreviousYaw_ = 0., daggerWaistRelativeYaw_ = 0.;
+
+  bool isDaggerLeftGripRequested() const;
+  bool isDaggerRightGripRequested() const;
+
+  void syncDaggerTorsoReference();
+  bool candidateSensorStateInitialized_{false};
+  // Protected by jointStateMutex_. The publisher holds measured pose until
+  // IK has re-anchored for the current grip generation.
+  bool candidateLeftAnchorReady_{false};
+  bool candidateRightAnchorReady_{false};
+  uint64_t candidateLeftAnchorGeneration_{0};
+  uint64_t candidateRightAnchorGeneration_{0};
+  std::string candidateSessionId_;
+  uint64_t candidateSequence_{0};  // publish thread only
+  bool candidateLeftIkReady_{false};
+  bool candidateRightIkReady_{false};
+  bool candidateLeftPublishActive_{false};
+  bool candidateRightPublishActive_{false};
+  uint64_t candidateLeftGripGeneration_{0};
+  uint64_t candidateRightGripGeneration_{0};
+  bool syncDaggerArmStateLocked(const Eigen::VectorXd& measuredArms, bool isLeft);
+  void cacheDaggerArmHardLimitsFromPlant(const drake::multibody::MultibodyPlant<double>& plant);
+  void invalidateDaggerArmCandidatesLocked(bool left, bool right);
+  bool isDaggerArmMeasurementValid(const Eigen::VectorXd& measured) const;
+  bool applyDaggerArmJointLimits(const Eigen::VectorXd& previousQ, const Eigen::VectorXd& previousDq,
+                                double cycle, bool syncLeft, bool syncRight,
+                                Eigen::VectorXd& position, Eigen::VectorXd& velocity) const;
+
+  bool updateDaggerMeasuredState();
+  void expireDaggerRequests();
+  void handleDaggerGripRisingEdge(bool left, bool right);
+  void enterDaggerCandidateMode();
+  ros::Time daggerSensorStamp_;
+  std::atomic<int64_t> daggerLeftRequestStampNs_{0};
+  std::atomic<int64_t> daggerRightRequestStampNs_{0};
 
   void solveIkHandElbowThreadFunction();
   void publishJointStatesThreadFunction();
@@ -216,7 +293,8 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   void publishJointStates();
   void publishDefaultJointStates();
   // 同线程发布 kuavo_arm_traj(_cpp/_rad) 及 shadow 探针（用于对比到达时间）
-  void publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg);
+  void publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg,
+                                     nlohmann::json candidateMetadata = nullptr);
   void publishZeroJointStates();
   void publishLegJointStates();         // 发布下肢关节状态（基于 IK 解）
   void publishDefaultLegJointStates();  // 发布下肢关节默认状态
@@ -261,6 +339,11 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   ros::Publisher incrementalArmTrajRadRecordPublisher_;    // /vr_incremental/arm_traj_rad，录包/观测（弧度）
   ros::Publisher kuavoArmTrajControlPublisher_;              // /kuavo_arm_traj，始终发布供 MPC 同步；WBC 增量时走 SHM
   ros::Publisher armTrajLatencyPublisher_;                   // /vr_incremental/arm_traj_latency_ms，骨骼数据到发布的全链路延迟(ms)
+  ros::Publisher daggerArmCandidatePublisher_;
+  ros::Subscriber daggerLeftInterventionSubscriber_;
+  ros::Subscriber daggerRightInterventionSubscriber_;
+  std::atomic<bool> daggerLeftInterventionRequested_{false};
+  std::atomic<bool> daggerRightInterventionRequested_{false};
   ArmTrajWriter arm_traj_writer_;                           // mode2 ↔ SHM，对称 WBC ArmTrajReceiver
   bool enableArmTrajShadowPublish_{false};
   ros::Publisher kuavoArmTrajShadowPublisher_;  // /vr_incremental/arm_traj_shadow_rad
@@ -683,6 +766,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
     double upper{0.0};
     bool valid{false};
   };
+  std::vector<ArmJointLimit> daggerArmHardLimits_;  // Raw URDF bounds; never enlarged for handoff.
   std::vector<ArmJointLimit> armJointLimits_;  // 长度 14，顺序同 /kuavo_arm_traj（l1..l7, r1..r7）
 
   bool wristJointLimitVelocityDamperEnabled_{true};
@@ -695,12 +779,14 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   double wristJointLimitHardEpsilon_{0.0001};     // [rad] 软限位内侧数值安全余量
 
   void loadArmJointLimitsFromPlant(const drake::multibody::MultibodyPlant<double>& plant);
-  void clampArmJointCommand(int index, double& position, double* velocity) const;
+  void clampArmJointCommand(int index, double& position, double* velocity,
+                            const std::vector<ArmJointLimit>* daggerLimits = nullptr) const;
   void applyArmJointLimitVelocityDamper(const Eigen::VectorXd& previousQ,
                                         const Eigen::VectorXd& previousDq,
                                         double cycle,
                                         Eigen::VectorXd& position,
-                                        Eigen::VectorXd& velocity) const;
+                                        Eigen::VectorXd& velocity,
+                                        const std::vector<ArmJointLimit>* daggerLimits = nullptr) const;
 
   // Grip 状态跟踪（用于检测上升沿并更新锚点，避免频繁切换 grip 时位置跳变）
   bool lastLeftGripPressed_ = false;

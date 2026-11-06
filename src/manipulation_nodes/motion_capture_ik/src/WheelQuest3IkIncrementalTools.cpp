@@ -196,6 +196,7 @@ bool WheelQuest3IkIncrementalROS::loadStandArmAnglesFromRosParam() {
 }
 
 void WheelQuest3IkIncrementalROS::activateController() {
+  if (daggerCandidateOnly_) return;
   if (controllerActivated_.load()) return;
 
   if (!changeMobileCtrlModeClient_.exists()) return;
@@ -214,6 +215,7 @@ void WheelQuest3IkIncrementalROS::activateController() {
 }
 
 void WheelQuest3IkIncrementalROS::deactivateController() {
+  if (daggerCandidateOnly_) return;
   if (!controllerActivated_.load()) return;
   if (!changeMobileCtrlModeClient_.exists()) return;
   if (!changeArmCtrlModeClient_.exists()) return;
@@ -236,6 +238,7 @@ void WheelQuest3IkIncrementalROS::deactivateController() {
 }
 
 void WheelQuest3IkIncrementalROS::armModeCallback(const std_msgs::Int32::ConstPtr& msg) {
+  if (daggerCandidateOnly_) return;
   // print arm mode callback
   ROS_INFO("[WheelQuest3IkIncrementalROS] Arm mode callback: %d", msg->data);
   int newMode = msg->data;
@@ -355,8 +358,8 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
     mode2EnterTime = mode2EnterTime_;
   }
   const bool isInMode2Warmup =
-      (armControlMode_ == 2) && !mode2EnterTime.isZero() && ((ros::Time::now() - mode2EnterTime).toSec() <= 2.0);
-  const bool freezeHeightEnabled = !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled;
+      !daggerCandidateOnly_ && (armControlMode_ == 2) && !mode2EnterTime.isZero() && ((ros::Time::now() - mode2EnterTime).toSec() <= 2.0);
+  const bool freezeHeightEnabled = !daggerCandidateOnly_ && !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled;
 
   Eigen::Vector3d chestPosRef = input.chestPosRef;
   Eigen::Quaterniond chestQuatRef = input.chestQuatRef;
@@ -438,8 +441,10 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
                                               drakeSolveUpdateChestPosition_,
                                               resetJointToDefaultWheel_ || !justEnteredMode2_,
                                               input.leftElbowTrackingActivation,
-                                              input.rightElbowTrackingActivation);
+                                              input.rightElbowTrackingActivation,
+                                               daggerCandidateOnly_);
   recordTimestamp("chestElbowHandPointOptSolverPtr_->solveFinish", loopSyncCount_);
+  if (daggerCandidateOnly_ && !sol.success) return false;
   const bool freezeFeedAfterOpt =
       !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled && sol.success;
   {
@@ -517,6 +522,12 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].position = rightHandOut;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix = rightHandQuat.toRotationMatrix();
 
+  if (daggerCandidateOnly_) {
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_LINK6].position = leftHandOut;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_LINK6].position = rightHandOut;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position = leftEndEffectorPosition_;
+    latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR].position = rightEndEffectorPosition_;
+  } else {
   leftLink6Position_ = leftHandOut;
   rightLink6Position_ = rightHandOut;
   leftEndEffectorPosition_ = leftLink6Position_ + (leftHandQuat * leftEE2Link6Offset_);
@@ -531,6 +542,7 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position = leftVirtualThumbPosition_;
   latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position = rightVirtualThumbPosition_;
 
+  }
   return true;
 }
 
@@ -634,6 +646,7 @@ void WheelQuest3IkIncrementalROS::forceActivateAllArmCtrlMode() {
 }
 
 bool WheelQuest3IkIncrementalROS::setLbArmQuickMode(int quickMode) {
+  if (daggerCandidateOnly_) return false;
   // 设置轮臂快速模式服务调用函数
   // 参数：quickMode - 快速模式类型：0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
   // 返回：成功返回true，失败返回false
@@ -682,6 +695,7 @@ bool WheelQuest3IkIncrementalROS::setLbArmQuickMode(int quickMode) {
 }
 
 bool WheelQuest3IkIncrementalROS::setControlMode(int targetMode) {
+  if (daggerCandidateOnly_) return false;
   // 设置移动机械臂控制模式服务调用函数（对应lb_ctrl_api.set_control_mode）
   // 参数：targetMode - 控制模式：0-NoControl, 1-ArmOnly, 2-BaseOnly, 3-BaseArm, 4-ArmEeOnly
   // 返回：成功返回true，失败返回false
@@ -813,6 +827,15 @@ void WheelQuest3IkIncrementalROS::updateChestPositionFreezeState(bool freezeRequ
 }
 
 void WheelQuest3IkIncrementalROS::reset() {
+  candidateSensorStateInitialized_ = false;
+  if (daggerCandidateOnly_) {
+    std::lock_guard<std::mutex> lock(jointStateMutex_);
+    candidateLeftAnchorReady_ = candidateRightAnchorReady_ = false;
+    candidateLeftIkReady_ = candidateRightIkReady_ = false;
+    candidateLeftPublishActive_ = candidateRightPublishActive_ = false;
+    ++candidateLeftGripGeneration_;
+    ++candidateRightGripGeneration_;
+  }
   {
     std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
     lbLegMasterPublishEnabled_ = chestIncrementalUpdateEnabled_;
@@ -1064,6 +1087,286 @@ void WheelQuest3IkIncrementalROS::initializeFilter(std::unique_ptr<ocs2::mobile_
   }
 }
 
+void WheelQuest3IkIncrementalROS::daggerWaistConfigCallback(const std_msgs::String::ConstPtr& msg) {
+  try {
+    const auto packet = nlohmann::json::parse(msg->data);
+    DaggerWaistConfig config;
+    config.session = packet.at("session").get<std::string>();
+    config.whichArm = packet.at("which_arm").get<std::string>();
+    config.maxSpeed = packet.at("max_speed").get<double>();
+    config.actionTimeout = packet.at("action_timeout").get<double>();
+    config.signalTimeout = packet.at("signal_timeout").get<double>();
+    if (packet.at("schema_version") != 1 || config.session.empty() ||
+        (config.whichArm != "left" && config.whichArm != "right" && config.whichArm != "both") ||
+        !std::isfinite(config.maxSpeed) || config.maxSpeed <= 0. ||
+        !std::isfinite(config.actionTimeout) || config.actionTimeout <= 0. ||
+        !std::isfinite(config.signalTimeout) || config.signalTimeout <= 0.) {
+      throw std::invalid_argument("invalid waist configuration");
+    }
+    for (const auto* key : {"lower", "upper", "lock_mask", "lock_position"}) {
+      if (!packet.at(key).is_array() || packet.at(key).size() != 4) {
+        throw std::invalid_argument("waist configuration requires four joints");
+      }
+    }
+    for (int i = 0; i < 4; ++i) {
+      config.lower[i] = packet.at("lower").at(i).get<double>();
+      config.upper[i] = packet.at("upper").at(i).get<double>();
+      const double locked = packet.at("lock_position").at(i).get<double>();
+      if (!std::isfinite(config.lower[i]) || !std::isfinite(config.upper[i]) ||
+          config.lower[i] >= config.upper[i] || !std::isfinite(locked)) {
+        throw std::invalid_argument("invalid waist limits/lock position");
+      }
+      if (packet.at("lock_mask").at(i).get<bool>()) {
+        if (locked < config.lower[i] || locked > config.upper[i]) {
+          throw std::invalid_argument("locked waist position is outside limits");
+        }
+        config.lower[i] = config.upper[i] = locked;
+      }
+    }
+    std::lock_guard<std::mutex> lock(daggerWaistMutex_);
+    if (config.session == daggerWaistConfig_.session) return;
+    daggerWaistConfig_ = config;
+    ++daggerWaistInputEpoch_;
+    daggerWaistCandidate_["config_session"] = config.session;
+    daggerWaistCandidate_["ready"] = false;
+    daggerWaistCandidate_["requested"] = false;
+    ROS_INFO("[WheelQuest3IkIncrementalROS] DAgger waist configuration: %s, max_speed=%.3f rad/s",
+             config.whichArm.c_str(), config.maxSpeed);
+  } catch (const std::exception& error) {
+    ROS_WARN_THROTTLE(1.0, "Invalid DAgger waist configuration: %s", error.what());
+  }
+}
+
+bool WheelQuest3IkIncrementalROS::daggerWaistRequestedLocked(const ros::Time& now) const {
+  const auto& config = daggerWaistConfig_;
+  const auto fresh = [&](const ros::Time& stamp) {
+    const double age = (now - stamp).toSec();
+    return !stamp.isZero() && age >= -0.05 && age <= config.signalTimeout;
+  };
+  return !config.session.empty() &&
+      ((config.whichArm != "right" && daggerWaistLeftGrip_ && fresh(daggerWaistLeftStamp_)) ||
+       (config.whichArm != "left" && daggerWaistRightGrip_ && fresh(daggerWaistRightStamp_)));
+}
+
+void WheelQuest3IkIncrementalROS::updateDaggerWaistGrip(bool left, bool requested) {
+  std::lock_guard<std::mutex> lock(daggerWaistMutex_);
+  const auto now = ros::Time::now();
+  const bool previous = daggerWaistRequestedLocked(now);
+  (left ? daggerWaistLeftGrip_ : daggerWaistRightGrip_) = requested;
+  (left ? daggerWaistLeftStamp_ : daggerWaistRightStamp_) = now;
+  if (previous != daggerWaistRequestedLocked(now)) ++daggerWaistInputEpoch_;
+}
+
+void WheelQuest3IkIncrementalROS::daggerBodyPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(daggerWaistMutex_);
+  // Ignore queued frames; readiness is tied to the source stamp, not receipt time.
+  if (msg->header.stamp > daggerBodyPose_.header.stamp) daggerBodyPose_ = *msg;
+}
+
+nlohmann::json WheelQuest3IkIncrementalROS::daggerWaistMetadata() {
+  std::lock_guard<std::mutex> lock(daggerWaistMutex_);
+  auto result = daggerWaistCandidate_;
+  const auto now = ros::Time::now();
+  result["requested"] = daggerWaistRequestedLocked(now);
+  const double age = now.toSec() - result.at("stamp_ns").get<uint64_t>() / 1e9;
+  if (!result.at("requested").get<bool>() || daggerWaistInputEpoch_ != daggerWaistEpoch_ ||
+      age < -0.05 || age > daggerWaistConfig_.actionTimeout) result["ready"] = false;
+  return result;
+}
+
+void WheelQuest3IkIncrementalROS::updateDaggerWaistCandidate() {
+  DaggerWaistConfig config;
+  geometry_msgs::PoseStamped body;
+  uint64_t epoch;
+  bool requested;
+  const auto now = ros::Time::now();
+  {
+    std::lock_guard<std::mutex> lock(daggerWaistMutex_);
+    config = daggerWaistConfig_;
+    body = daggerBodyPose_;
+    epoch = daggerWaistInputEpoch_;
+    requested = daggerWaistRequestedLocked(now);
+  }
+  Eigen::VectorXd measured;
+  ros::Time sensorStamp;
+  if (requested && drakeJointStateSize_ == 18) {
+    std::lock_guard<std::mutex> lock(sensorDataRawMutex_);
+    if (sensorDataRaw_ && sensorDataRaw_->joint_data.joint_q.size() >= 18) {
+      measured = Eigen::Map<const Eigen::VectorXd>(sensorDataRaw_->joint_data.joint_q.data(), 18);
+      sensorStamp = sensorDataRaw_->header.stamp;
+    }
+  }
+  const auto fresh = [&](const ros::Time& stamp) {
+    const double age = (now - stamp).toSec();
+    return !stamp.isZero() && age >= -0.05 && age <= config.actionTimeout;
+  };
+  const auto& p = body.pose.position;
+  const auto& q = body.pose.orientation;
+  const Eigen::Vector3d position(p.x, p.y, p.z);
+  Eigen::Quaterniond quaternion(q.w, q.x, q.y, q.z);
+  bool ready = requested && measured.size() == 18 && measured.allFinite() &&
+      fresh(sensorStamp) && fresh(body.header.stamp) && position.allFinite() &&
+      quaternion.coeffs().allFinite() && quaternion.norm() > 1e-8;
+  if (!ready || epoch != daggerWaistEpoch_) daggerWaistAnchored_ = false;
+  if (ready) {
+    quaternion.normalize();
+    const Eigen::Vector3d forward = quaternion * Eigen::Vector3d::UnitZ();
+    const double pitch = std::atan2(-forward.z(), std::hypot(forward.x(), forward.y()));
+    const double yaw = std::atan2(forward.y(), forward.x());
+    const double elapsed = (body.header.stamp - daggerWaistPoseStamp_).toSec();
+    if (!daggerWaistAnchored_ || elapsed > config.actionTimeout || elapsed < 0.) {
+      daggerWaistTarget_ = measured.head(4);
+      {
+        std::lock_guard<std::mutex> ikLock(oneStageIkMutex_);
+        daggerWaistRobotPosition_ = oneStageIkEndEffectorPtr_->FK(measured, "waist_yaw_link").first;
+      }
+      daggerWaistRobotPitch_ = measured.head(3).sum();
+      daggerWaistRobotYaw_ = measured[3];
+      daggerWaistOperatorPosition_ = position;
+      daggerWaistHeading_ = Eigen::Vector3d(std::cos(yaw), std::sin(yaw), 0.);
+      daggerWaistAnchorPitch_ = pitch;
+      daggerWaistPreviousYaw_ = yaw;
+      daggerWaistRelativeYaw_ = 0.;
+      daggerWaistAnchored_ = true;
+      ++daggerWaistGeneration_;
+    } else if (elapsed > 0.) {
+      const double deltaYaw = yaw - daggerWaistPreviousYaw_;
+      daggerWaistRelativeYaw_ += std::atan2(std::sin(deltaYaw), std::cos(deltaYaw));
+      daggerWaistPreviousYaw_ = yaw;
+      const Eigen::Vector3d displacement = position - daggerWaistOperatorPosition_;
+      Eigen::Vector3d targetPosition = daggerWaistRobotPosition_;
+      targetPosition.x() += .6 * std::clamp(displacement.dot(daggerWaistHeading_), -.15, .5);
+      targetPosition.z() += std::clamp(displacement.z(), -.2, .3);
+      const double targetPitch = daggerWaistRobotPitch_ +
+          std::clamp(pitch - daggerWaistAnchorPitch_, -M_PI / 12., M_PI / 6.);
+      const double targetYaw = std::clamp(daggerWaistRobotYaw_ + daggerWaistRelativeYaw_, -M_PI / 4., M_PI / 4.);
+      measured.head(4) = daggerWaistTarget_;
+      Eigen::Vector4d desired;
+      {
+        std::lock_guard<std::mutex> ikLock(oneStageIkMutex_);
+        ready = oneStageIkEndEffectorPtr_->solveDaggerWaistCandidate(
+            targetPosition, targetPitch, targetYaw, measured, config.lower, config.upper, desired);
+      }
+      if (ready) {
+        const double delta = config.maxSpeed * std::min(elapsed, .05);
+        daggerWaistTarget_ += (desired - daggerWaistTarget_).cwiseMax(-delta).cwiseMin(delta);
+      } else {
+        daggerWaistAnchored_ = false;
+        ROS_WARN_THROTTLE(1.0, "DAgger waist IK did not converge; candidate marked unready");
+      }
+    }
+    daggerWaistPoseStamp_ = body.header.stamp;
+  }
+  {
+    std::lock_guard<std::mutex> lock(daggerWaistMutex_);
+    if (epoch != daggerWaistInputEpoch_) return;  // Grip/config changed during IK.
+    daggerWaistEpoch_ = epoch;
+    daggerWaistCandidate_ = {{"config_session", config.session}, {"requested", requested},
+        {"ready", ready}, {"generation", daggerWaistGeneration_},
+        {"stamp_ns", ready ? std::min(body.header.stamp, sensorStamp).toNSec() : uint64_t(0)},
+        {"position", std::vector<double>(daggerWaistTarget_.data(), daggerWaistTarget_.data() + 4)}};
+  }
+}
+
+void WheelQuest3IkIncrementalROS::syncDaggerTorsoReference() {
+  if (!daggerCandidateOnly_ || !hasLatestWaistYawFk_ ||
+      !hasLatestLeftShoulderFk_ || !hasLatestRightShoulderFk_) {
+    return;
+  }
+  if (latestPoseConstraintList_.size() < POSE_DATA_LIST_SIZE_PLUS) {
+    latestPoseConstraintList_.resize(POSE_DATA_LIST_SIZE_PLUS, PoseData());
+  }
+  frozenRobotChestPos_ = latestWaistYawFkPos_;
+  frozenChestQuat_ = getRobotChestQuatRef();
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].position = frozenRobotChestPos_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_CHEST].rotation_matrix = frozenChestQuat_.toRotationMatrix();
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_LEFT_SHOULDER].position = latestLeftShoulderFkPos_;
+  latestPoseConstraintList_[POSE_DATA_LIST_INDEX_RIGHT_SHOULDER].position = latestRightShoulderFkPos_;
+}
+
+bool WheelQuest3IkIncrementalROS::syncDaggerArmStateLocked(
+    const Eigen::VectorXd& measuredArms, bool isLeft) {
+  const int first = isLeft ? 0 : 7;
+  if (measuredArms.size() != 14 || !measuredArms.allFinite() ||
+      q_.size() != 14 || dq_.size() != 14 || latest_q_.size() != 14 ||
+      latest_dq_.size() != 14 || lowpass_dq_.size() != 14 || q_init_cmd_.size() != 14) {
+    return false;
+  }
+  if (armJointRuckigFilterPtr_) {
+    for (int i = first; i < first + 7; ++i) armJointRuckigFilterPtr_->resetDof(i, measuredArms(i));
+  }
+  if (hasPublishedArmSmoother_ && publishedArmQ_.size() == 14 && publishedArmV_.size() == 14) {
+    publishedArmQ_.segment(first, 7) = measuredArms.segment(first, 7);
+    publishedArmV_.segment(first, 7).setZero();
+  }
+  q_.segment(first, 7) = measuredArms.segment(first, 7);
+  latest_q_.segment(first, 7) = measuredArms.segment(first, 7);
+  q_init_cmd_.segment(first, 7) = measuredArms.segment(first, 7);
+  dq_.segment(first, 7).setZero();
+  latest_dq_.segment(first, 7).setZero();
+  lowpass_dq_.segment(first, 7).setZero();
+  return true;
+}
+
+// Callers hold jointStateMutex_; invalidation also rejects in-flight IK from
+// the old generation. Keep the other side's anchor/generation when possible.
+void WheelQuest3IkIncrementalROS::invalidateDaggerArmCandidatesLocked(bool left, bool right) {
+  auto invalidate = [](bool& anchored, bool& ready, bool& active, uint64_t& generation) {
+    if (anchored || ready || active) ++generation;
+    anchored = ready = active = false;
+  };
+  if (left) invalidate(candidateLeftAnchorReady_, candidateLeftIkReady_,
+                       candidateLeftPublishActive_, candidateLeftGripGeneration_);
+  if (right) invalidate(candidateRightAnchorReady_, candidateRightIkReady_,
+                        candidateRightPublishActive_, candidateRightGripGeneration_);
+}
+
+bool WheelQuest3IkIncrementalROS::isDaggerArmMeasurementValid(const Eigen::VectorXd& measured) const {
+  if (measured.size() != 14 || !measured.allFinite() || daggerArmHardLimits_.size() != 14) return false;
+  for (int i = 0; i < 14; ++i) {
+    const auto& hard = daggerArmHardLimits_[static_cast<size_t>(i)];
+    if (!hard.valid || measured(i) < hard.lower || measured(i) > hard.upper) return false;
+  }
+  return true;
+}
+
+bool WheelQuest3IkIncrementalROS::applyDaggerArmJointLimits(
+    const Eigen::VectorXd& previousQ, const Eigen::VectorXd& previousDq, double cycle,
+    bool syncLeft, bool syncRight, Eigen::VectorXd& position, Eigen::VectorXd& velocity) const {
+  if (!isDaggerArmMeasurementValid(previousQ) || previousDq.size() != 14 || !previousDq.allFinite() ||
+      armJointLimits_.size() != 14 || position.size() != 14 || !position.allFinite() ||
+      velocity.size() != 14 || !velocity.allFinite()) return false;
+
+  auto daggerLimits = armJointLimits_;
+  for (int i = 0; i < 14; ++i) {
+    auto& limit = daggerLimits[static_cast<size_t>(i)];
+    const auto& hard = daggerArmHardLimits_[static_cast<size_t>(i)];
+    if (!limit.valid) return false;
+    // A measured anchor can lie between the soft and hard URDF limits. Do not
+    // pull it abruptly back to the soft limit or allow any further outward
+    // motion. These effective bounds follow each published inward step until
+    // the normal soft interval is reached; raw URDF limits never expand.
+    limit.lower = std::max(hard.lower, std::min(limit.lower + wristJointLimitHardEpsilon_, previousQ(i)));
+    limit.upper = std::min(hard.upper, std::max(limit.upper - wristJointLimitHardEpsilon_, previousQ(i)));
+    if (!(limit.upper > limit.lower)) return false;
+    // Idle/waiting/first-ready sides bypass soft damping; restore their exact
+    // measured pose and zero velocity after filtering the continuing side.
+    if ((i < 7 && syncLeft) || (i >= 7 && syncRight)) limit.valid = false;
+  }
+  if (wristJointLimitVelocityDamperEnabled_) {
+    applyArmJointLimitVelocityDamper(previousQ, previousDq, cycle, position, velocity, &daggerLimits);
+  }
+  for (int i = 0; i < 14; ++i) {
+    if ((i < 7 && syncLeft) || (i >= 7 && syncRight)) {
+      position(i) = previousQ(i);
+      velocity(i) = 0.0;
+    } else {
+      clampArmJointCommand(i, position(i), &velocity(i), &daggerLimits);
+    }
+  }
+  return position.allFinite() && velocity.allFinite();
+}
+
 namespace {
 // /kuavo_arm_traj 顺序：左臂 7 + 右臂 7，与 NUM_ARM_JOINT=14 对齐
 constexpr std::array<const char*, 14> kArmLimitJointNames = {
@@ -1073,6 +1376,27 @@ constexpr std::array<const char*, 14> kArmLimitJointNames = {
     "zarm_r5_joint", "zarm_r6_joint", "zarm_r7_joint",
 };
 }  // namespace
+
+// Capture the original URDF limits before the candidate IK model narrows
+// wrist bounds. That IK-only restriction must not reject a legal measured
+// handoff pose between the solver's limits and the physical URDF limits.
+void WheelQuest3IkIncrementalROS::cacheDaggerArmHardLimitsFromPlant(
+    const drake::multibody::MultibodyPlant<double>& plant) {
+  daggerArmHardLimits_.assign(kArmLimitJointNames.size(), ArmJointLimit{});
+  for (size_t i = 0; i < kArmLimitJointNames.size(); ++i) {
+    try {
+      const auto& joint = plant.GetJointByName(kArmLimitJointNames[i]);
+      if (joint.num_positions() <= 0) continue;
+      const double lower = joint.position_lower_limits()(0);
+      const double upper = joint.position_upper_limits()(0);
+      if (std::isfinite(lower) && std::isfinite(upper) && upper > lower) {
+        daggerArmHardLimits_[i] = {lower, upper, true};
+      }
+    } catch (const std::exception& error) {
+      ROS_WARN("[DAgger] Cannot cache URDF limit for %s: %s", kArmLimitJointNames[i], error.what());
+    }
+  }
+}
 
 // 从 URDF（drake plant）读取双臂关节限位，按 armJointSoftLimitScale_ 内收成软限位。
 // 与 Quest3IkIncrementalROS::loadArmJointLimitsFromPlant 保持一致。
@@ -1116,12 +1440,14 @@ void WheelQuest3IkIncrementalROS::loadArmJointLimitsFromPlant(
 
 // 位置硬夹到软限位；若已贴边界且速度还朝边界外，则把该关节速度归零。
 void WheelQuest3IkIncrementalROS::clampArmJointCommand(int index, double& position,
-                                                       double* velocity) const {
-  if (index < 0 || index >= static_cast<int>(armJointLimits_.size()) ||
-      !armJointLimits_[static_cast<size_t>(index)].valid) {
+                                                       double* velocity,
+                                                       const std::vector<ArmJointLimit>* daggerLimits) const {
+  const auto& limits = daggerLimits ? *daggerLimits : armJointLimits_;
+  if (index < 0 || index >= static_cast<int>(limits.size()) ||
+      !limits[static_cast<size_t>(index)].valid) {
     return;
   }
-  const ArmJointLimit& limit = armJointLimits_[static_cast<size_t>(index)];
+  const ArmJointLimit& limit = limits[static_cast<size_t>(index)];
   position = std::min(std::max(position, limit.lower), limit.upper);
   if (velocity == nullptr) {
     return;
@@ -1136,8 +1462,10 @@ void WheelQuest3IkIncrementalROS::clampArmJointCommand(int index, double& positi
 // 其余区域保持原有位置平滑与速度低通行为不变。
 void WheelQuest3IkIncrementalROS::applyArmJointLimitVelocityDamper(
     const Eigen::VectorXd& previousQ, const Eigen::VectorXd& previousDq, double cycle,
-    Eigen::VectorXd& position, Eigen::VectorXd& velocity) const {
-  const int dim = static_cast<int>(armJointLimits_.size());
+    Eigen::VectorXd& position, Eigen::VectorXd& velocity,
+    const std::vector<ArmJointLimit>* daggerLimits) const {
+  const auto& limits = daggerLimits ? *daggerLimits : armJointLimits_;
+  const int dim = static_cast<int>(limits.size());
   if (dim <= 0 || previousQ.size() != dim || previousDq.size() != dim ||
       position.size() != dim || velocity.size() != dim) {
     return;
@@ -1145,12 +1473,14 @@ void WheelQuest3IkIncrementalROS::applyArmJointLimitVelocityDamper(
   const double dt = std::min(std::max(cycle, 1e-4), 0.02);
 
   for (int i = 0; i < dim; ++i) {
-    if (!armJointLimits_[static_cast<size_t>(i)].valid) {
+    if (!limits[static_cast<size_t>(i)].valid) {
       continue;
     }
-    const ArmJointLimit& limit = armJointLimits_[static_cast<size_t>(i)];
-    const double lower = limit.lower + wristJointLimitHardEpsilon_;
-    const double upper = limit.upper - wristJointLimitHardEpsilon_;
+    const ArmJointLimit& limit = limits[static_cast<size_t>(i)];
+    // DAgger supplies usable bounds with the epsilon already accounted for.
+    const double epsilon = daggerLimits ? 0.0 : wristJointLimitHardEpsilon_;
+    const double lower = limit.lower + epsilon;
+    const double upper = limit.upper - epsilon;
     if (!(upper > lower)) {
       continue;
     }
@@ -1244,6 +1574,7 @@ void WheelQuest3IkIncrementalROS::chestPoseCallback(const geometry_msgs::PoseSta
 // ========================================================================================
 
 void WheelQuest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
+  if (daggerCandidateOnly_) { updateDaggerMeasuredState(); return; }
   const auto currentSensorData = getSensorData();
   if (!currentSensorData) {
     ROS_ERROR("[WheelQuest3IkIncrementalROS] currentSensorData is not valid");
@@ -1280,6 +1611,7 @@ void WheelQuest3IkIncrementalROS::updateSensorArmJointMeanFromSensorData() {
 }
 
 void WheelQuest3IkIncrementalROS::updateSensorArmJointFromSensorData() {
+  if (daggerCandidateOnly_) return;
   const auto currentSensorData = getSensorData();
   if (!currentSensorData) {
     return;
@@ -1860,7 +2192,7 @@ DrakeChestElbowHandBoundsConfig WheelQuest3IkIncrementalROS::loadDrakeChestElbow
 
 void WheelQuest3IkIncrementalROS::publishAuxiliaryStates() {
   // 发布底盘速度控制命令
-  if (joyStickHandlerPtr_ != nullptr && armControlMode_ == 2) {
+  if (!daggerCandidateOnly_ && joyStickHandlerPtr_ != nullptr && armControlMode_ == 2) {
     geometry_msgs::Twist cmdVelMsg;
     const double nx = std::clamp(joyStickHandlerPtr_->getLeftJoyStickY(), -1.0, 1.0);
     const double ny = std::clamp(-joyStickHandlerPtr_->getLeftJoyStickX(), -1.0, 1.0);
@@ -2193,7 +2525,7 @@ void WheelQuest3IkIncrementalROS::smoothPublishedArmCommand(const Eigen::VectorX
   vOut = v;
 }
 
-void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg) {
+void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::JointState armJintStateMsg, nlohmann::json candidateMetadata) {
   if (armJintStateMsg.header.stamp.isZero()) {
     armJintStateMsg.header.stamp = ros::Time::now();
   }
@@ -2208,6 +2540,20 @@ void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::Jo
   incrementalArmTrajRecordPublisher_.publish(armJintStateMsg);
   incrementalArmTrajRadRecordPublisher_.publish(armJintStateMsgRad);
 
+  if (daggerCandidateOnly_) {
+    if (!candidateMetadata.is_null()) {
+      candidateMetadata["schema_version"] = 1;
+      candidateMetadata["session"] = candidateSessionId_;
+      candidateMetadata["sequence"] = ++candidateSequence_;
+      candidateMetadata["stamp_ns"] = armJintStateMsgRad.header.stamp.toNSec();
+      candidateMetadata["position"] = armJintStateMsgRad.position;
+      candidateMetadata["velocity"] = armJintStateMsgRad.velocity;
+      candidateMetadata["waist"] = daggerWaistMetadata();
+      std_msgs::String packet;
+      packet.data = candidateMetadata.dump();
+      daggerArmCandidatePublisher_.publish(packet);
+    }
+  } else {
   // 始终发布：MPC 等节点需订阅 /kuavo_arm_traj 同步手臂位置；WBC 增量 VR 期间改走 SHM
   kuavoArmTrajControlPublisher_.publish(armJintStateMsg);
 
@@ -2220,6 +2566,7 @@ void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::Jo
                                    armJintStateMsgRad.effort.data(), stamp_nsec);
   }
 
+  }
   if (enableArmTrajShadowPublish_ && kuavoArmTrajShadowPublisher_) {
     sensor_msgs::JointState shadowMsg = armJintStateMsgRad;
     shadowMsg.header.frame_id = "vr_incremental_arm_traj_shadow_probe";
@@ -2230,8 +2577,9 @@ void WheelQuest3IkIncrementalROS::publishKuavoArmTrajJointStates(sensor_msgs::Jo
 void WheelQuest3IkIncrementalROS::publishJointStates() {
   Eigen::VectorXd finalArmAngles;
   Eigen::VectorXd finalLbAngles;
-  const bool leftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
-  const bool rightGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
+  nlohmann::json candidateMetadata = nullptr;
+  const bool leftGripPressed = isDaggerLeftGripRequested();
+  const bool rightGripPressed = isDaggerRightGripRequested();
   {
     const auto waitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(ikResultMutex_);
@@ -2307,6 +2655,46 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
                             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart)
                                 .count());
     const auto holdStart = std::chrono::steady_clock::now();
+    bool syncLeft = false, syncRight = false;
+    bool leftGripForPublish = leftGripPressed;
+    bool rightGripForPublish = rightGripPressed;
+    if (daggerCandidateOnly_) {
+      // The request can arrive before the solve thread re-anchors IK. During
+      // that interval publish current measured pose and zero velocity. The
+      // first ready tick also ignores any IK snapshot copied before readiness.
+      const double feedbackAge = (now - daggerSensorStamp_).toSec();
+      if (!candidateSensorStateInitialized_ || feedbackAge < -0.05 || feedbackAge > 0.2 ||
+          jointDataForDrakeFK_.size() < 14 || !jointDataForDrakeFK_.allFinite() ||
+          !isDaggerArmMeasurementValid(jointDataForDrakeFK_.tail(14))) {
+        invalidateDaggerArmCandidatesLocked(true, true);
+        candidateSensorStateInitialized_ = false;
+        ROS_WARN_THROTTLE(1.0, "[DAgger] Skip candidate: stale/invalid feedback or outside URDF hard limits");
+        return;
+      }
+      const Eigen::VectorXd measuredArms = jointDataForDrakeFK_.tail(14);
+      leftGripForPublish = isDaggerLeftGripRequested() && candidateLeftIkReady_;
+      rightGripForPublish = isDaggerRightGripRequested() && candidateRightIkReady_;
+      syncLeft = !leftGripForPublish || !candidateLeftPublishActive_;
+      syncRight = !rightGripForPublish || !candidateRightPublishActive_;
+      if ((syncLeft && !syncDaggerArmStateLocked(measuredArms, true)) ||
+          (syncRight && !syncDaggerArmStateLocked(measuredArms, false))) {
+        invalidateDaggerArmCandidatesLocked(true, true);
+        ROS_WARN_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] Skip candidate: arm filter sync failed");
+        return;
+      }
+      if (syncLeft) finalArmAngles.head(7) = measuredArms.head(7);
+      if (syncRight) finalArmAngles.tail(7) = measuredArms.tail(7);
+      candidateLeftPublishActive_ = leftGripForPublish;
+      candidateRightPublishActive_ = rightGripForPublish;
+      // Metadata and the q/v snapshot share this lock. Never pair an old q/v
+      // with readiness read after a concurrent new grip request.
+      candidateMetadata = {
+          {"left_generation", candidateLeftGripGeneration_},
+          {"right_generation", candidateRightGripGeneration_},
+          {"left_ready", leftGripForPublish}, {"right_ready", rightGripForPublish},
+          {"left_requested", isDaggerLeftGripRequested()}, {"right_requested", isDaggerRightGripRequested()}};
+    }
+
     previousPublishedQ = latest_q_;
     previousPublishedDq = lowpass_dq_;
     if (armJointRuckigFilterPtr_) {
@@ -2328,14 +2716,14 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       dq_(i) = dq_(i) < -18.0 ? -18.0 : dq_(i);
     }
 
-    if (leftGripPressed) {
+    if (leftGripForPublish) {
       latest_q_.head(7) = (1.0 - leftGripAlpha) * latest_q_.head(7) + leftGripAlpha * q_.head(7);
       latest_dq_.head(7) = (1.0 - leftGripAlpha) * latest_dq_.head(7) + leftGripAlpha * dq_.head(7);
       lowpass_dq_.head(7) =
           (1.0 - lowpassDqAlpha_) * lowpass_dq_.head(7) + lowpassDqAlpha_ * latest_dq_.head(7);
     }
 
-    if (rightGripPressed) {
+    if (rightGripForPublish) {
       latest_q_.tail(7) = (1.0 - rightGripAlpha) * latest_q_.tail(7) + rightGripAlpha * q_.tail(7);
       latest_dq_.tail(7) = (1.0 - rightGripAlpha) * latest_dq_.tail(7) + rightGripAlpha * dq_.tail(7);
       lowpass_dq_.tail(7) =
@@ -2351,7 +2739,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     // 速度一律由最终发布位置差分得到，不再单独清零，避免 q/v 不一致。
     constexpr double kMode2SensorSyncDurationSec = 0.3;
     constexpr double kMode2SmoothDurationSec = 2.0;
-    if (inMode2) {
+    if (inMode2 && !daggerCandidateOnly_) {
       if (mode2Elapsed < kMode2SensorSyncDurationSec) {
         Eigen::VectorXd sensorArmQ = q_;
         if (jointDataForDrakeFK_.size() >= sensorDataArmOffset_ + 14) {
@@ -2382,8 +2770,8 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       }
     }
 
-    const bool mode2Warmup = inMode2 && mode2Elapsed < kMode2SmoothDurationSec;
-    const bool mode2SensorHold = inMode2 && mode2Elapsed < kMode2SensorSyncDurationSec;
+    const bool mode2Warmup = !daggerCandidateOnly_ && inMode2 && mode2Elapsed < kMode2SmoothDurationSec;
+    const bool mode2SensorHold = !daggerCandidateOnly_ && inMode2 && mode2Elapsed < kMode2SensorSyncDurationSec;
     const bool reseedSmoother = reseedPublishedArmSmoother_.exchange(false);
     if (mode2SensorHold || reseedSmoother) {
       // 切入时从当前关节/传感器起步，禁止二阶平滑从上一轮增量姿态往回追。
@@ -2400,10 +2788,22 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
       armVelocityForPublish =
           velocityFromPublishedArmPosition(previousPublishedQ, armPositionForPublish, now);
     }
-    // ===== 手臂关节限位保护（移植自 Quest3IkIncrementalROS）=====
-    // 接近软限位时按制动曲线降速，到边界把朝边界外的速度归零，再做位置夹紧。
-    {
-      const double armLimitCycle = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
+    const double armLimitCycle = 1.0 / std::max(jointStatePublishRateHz_, 1.0);
+    if (daggerCandidateOnly_) {
+      if (!applyDaggerArmJointLimits(previousPublishedQ, previousPublishedDq,
+                                    armLimitCycle, syncLeft, syncRight,
+                                    armPositionForPublish, armVelocityForPublish)) {
+        invalidateDaggerArmCandidatesLocked(true, true);
+        ROS_WARN_THROTTLE(1.0, "[DAgger] Skip candidate: invalid arm limit state/command");
+        return;
+      }
+      // Match filter history to the command after protection. A synchronized
+      // side must keep the measured anchor, including on its first ready tick.
+      if (syncLeft) syncDaggerArmStateLocked(armPositionForPublish, true);
+      if (syncRight) syncDaggerArmStateLocked(armPositionForPublish, false);
+      seedPublishedArmSmoother(armPositionForPublish, armVelocityForPublish);
+    } else {
+      // Keep the upstream VR limit/damper path unchanged.
       if (wristJointLimitVelocityDamperEnabled_) {
         applyArmJointLimitVelocityDamper(previousPublishedQ, previousPublishedDq,
                                          armLimitCycle, armPositionForPublish,
@@ -2436,7 +2836,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
     armJintStateMsg.effort[i] = 0.0;
   }
 
-  publishKuavoArmTrajJointStates(armJintStateMsg);
+  publishKuavoArmTrajJointStates(armJintStateMsg, std::move(candidateMetadata));
   {
     std::lock_guard<std::mutex> lock(lbLegTargetMutex_);
     hasLatestLbTargetAngles_ = (finalLbAngles.size() == 4);
@@ -2450,6 +2850,7 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
 }
 
 void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
+  if (daggerCandidateOnly_) return;
   loadStandArmAnglesFromRosParam();
   const Eigen::VectorXd defaultArmAngles = standArmAngles_;
 
@@ -2489,6 +2890,7 @@ void WheelQuest3IkIncrementalROS::publishDefaultJointStates() {
 }
 
 void WheelQuest3IkIncrementalROS::publishLegJointStates() {
+  if (daggerCandidateOnly_) return;
   std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
   if (!lbLegMasterPublishEnabled_) {
     return;
@@ -2668,6 +3070,7 @@ void WheelQuest3IkIncrementalROS::publishLegJointStates() {
 }
 
 void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
+  if (daggerCandidateOnly_) return;
   std::lock_guard<std::mutex> commandLock(lbLegCommandMutex_);
   // 下肢默认角度：[0, 0, 0, 0] 度
   Eigen::VectorXd defaultLbAngles = Eigen::VectorXd::Zero(4);
@@ -2724,6 +3127,17 @@ void WheelQuest3IkIncrementalROS::publishDefaultLegJointStates() {
 
 void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   initializeBase(configJson);
+  if (daggerCandidateOnly_) {
+    if (isDualVrMode()) throw std::runtime_error("DAgger requires single_vr input");
+    daggerWaistConfigSubscriber_ = nodeHandle_.subscribe("/dagger/vr/waist_config", 1,
+        &WheelQuest3IkIncrementalROS::daggerWaistConfigCallback, this, ros::TransportHints().tcpNoDelay());
+    daggerBodyPoseSubscriber_ = nodeHandle_.subscribe("/dagger/vr/body_pose", 1,
+        &WheelQuest3IkIncrementalROS::daggerBodyPoseCallback, this, ros::TransportHints().tcpNoDelay());
+    daggerLeftInterventionSubscriber_ = nodeHandle_.subscribe("/dagger/vr/left_intervention", 1,
+        &WheelQuest3IkIncrementalROS::daggerLeftInterventionCallback, this, ros::TransportHints().tcpNoDelay());
+    daggerRightInterventionSubscriber_ = nodeHandle_.subscribe("/dagger/vr/right_intervention", 1,
+        &WheelQuest3IkIncrementalROS::daggerRightInterventionCallback, this, ros::TransportHints().tcpNoDelay());
+  }
 
   // Dual VR 躯干 ownership：启动阶段解析一次（高频解算循环内不再读参数）。
   // 必须在 initializeBase 之后，此时 input_mode / useDualVr_ 已就绪。
@@ -2865,6 +3279,15 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   parser.package_map().Add("kuavo_assets", ros::package::getPath("kuavo_assets"));
   (void)motion_capture_ik::drake_parser_compat::AddUrdfModel(parser, urdfFilePath);
 
+  if (daggerCandidateOnly_) {
+    cacheDaggerArmHardLimitsFromPlant(plant);
+    for (const char* name : {"zarm_l7_joint", "zarm_r7_joint"}) {
+      auto& joint = plant.GetMutableJointByName(name);
+      joint.set_position_limits(
+          Eigen::VectorXd::Constant(1, std::max(joint.position_lower_limits()(0), -0.60)),
+          Eigen::VectorXd::Constant(1, std::min(joint.position_upper_limits()(0), 0.60)));
+    }
+  }
   const auto& baseFrame = plant.GetFrameByName("base_link");
   plant.WeldFrames(plant.world_frame(), baseFrame);  // Weld base_link to world frame
 
@@ -2953,6 +3376,7 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
     elbowSafetyMinLateralDistance_ = 0.22;
   }
   auto pointTrackConfig = loadPointTrackIKSolverConfigFromJson(configJson);
+  pointTrackConfig.daggerTrackEndEffectorOrientation = daggerCandidateOnly_;
   if (elbowSafetyMinLateralDistance_ > 0.0) {
     // 安全下限开启时，最终 IK 必须启用硬约束，不能只有前级点位隔离。
     pointTrackConfig.enableWaistElbowClearanceConstraint = true;
@@ -3131,8 +3555,13 @@ void WheelQuest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
       nodeHandle_.advertise<sensor_msgs::JointState>("/vr_incremental/arm_traj_rad", 2);
   kuavoArmTrajControlPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj", 2);
   armTrajLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/vr_incremental/arm_traj_latency_ms", 10);
+  if (daggerCandidateOnly_) {
+    candidateSessionId_ = std::to_string(ros::WallTime::now().toNSec());
+    daggerArmCandidatePublisher_ = nodeHandle_.advertise<std_msgs::String>("/dagger/vr/arm_candidate", 1);
+  } else {
   arm_traj_writer_.init(nodeHandle_, "/humanoid_wheel/set_incremental_arm_traj_link",
                         "/wheel_ik/set_incremental_arm_traj_link");
+  }
   nodeHandle_.param("vr_ik/enable_arm_traj_shadow_publish", enableArmTrajShadowPublish_, false);
   if (enableArmTrajShadowPublish_) {
     kuavoArmTrajShadowPublisher_ =

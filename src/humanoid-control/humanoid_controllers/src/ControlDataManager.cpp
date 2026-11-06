@@ -1,6 +1,7 @@
 #include "humanoid_controllers/ControlDataManager.h"
 #include <kuavo_msgs/SetIncrementalArmTrajLink.h>
 #include <iostream>
+#include <cmath>
 #include <vector>
 #include <ocs2_core/misc/LoadData.h>
 #include <angles/angles.h>
@@ -763,6 +764,20 @@ void ControlDataManager::publishJointCmdToShm(const kuavo_msgs::jointCmd& jointC
     if (!shm_manager_->writeJointCommandNext(joint_cmd)) {
         ROS_WARN_THROTTLE(1.0, "[ControlDataManager] Failed to write joint command to shared memory");
     }
+}
+
+bool ControlDataManager::getDaggerSensorData(SensorData& out) const {
+    std::lock_guard<std::mutex> lock(sensor_mutex_);
+    // This cache stamp is local ROS receipt time, not the hardware sensor clock.
+    // Never wait for another callback from inside a single-threaded service.
+    const double age = (ros::Time::now() - sensor_data_.timestamp).toSec();
+    if (!sensor_data_.valid || !std::isfinite(age) || age < -0.05 || age > 0.2) {
+        ROS_WARN("[DAgger] Sensor cache is not fresh: valid=%d, receipt_age=%.6fs",
+                 sensor_data_.valid, age);
+        return false;
+    }
+    out = sensor_data_.data;
+    return true;
 }
 
 bool ControlDataManager::getRealtimeSensorData(SensorData& out) const {

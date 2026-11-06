@@ -33,6 +33,8 @@ struct WheelPointTrackIKSolverConfig : public IKSolverConfig {
   double refSecondOrderLpfCutoffHz = 12.0;  // always-on reference LPF cutoff
   double refSecondOrderLpfDt = 0.0;          // <=0 means fallback to dynamicsDt
 
+  bool daggerTrackEndEffectorOrientation = false;
+
   // tracking weights
   double eeTrackingWeight = 4e3;
   double elbowTrackingWeight = 4e2;
@@ -211,7 +213,16 @@ class WheelOneStageIKEndEffector : public BaseIKSolver {
   bool activateLowerBodyFreeze(const Eigen::Vector4d& joints);
   void deactivateChestPositionFreeze();
 
+  bool resetDaggerReferenceArms(const Eigen::VectorXd& solution, bool left, bool right);
+  IKSolveResult solveDaggerArmIK(const std::vector<PoseData>& poses, ArmIdx side,
+                               const Eigen::VectorXd& measuredLowerBody);
+  bool solveDaggerWaistCandidate(const Eigen::Vector3d& position, double pitch, double yaw,
+                                const Eigen::VectorXd& seed, const Eigen::Vector4d& lower,
+                                const Eigen::Vector4d& upper, Eigen::Vector4d& result);
+
  private:
+  IKSolveResult solveIKImpl(const std::vector<PoseData>& poses, ArmIdx side,
+                          const Eigen::VectorXd& fixedLowerBody);
   struct LowpassBiquadCoeff {
     double b0{0.0};
     double b1{0.0};

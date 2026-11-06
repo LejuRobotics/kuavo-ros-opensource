@@ -110,6 +110,7 @@ public:
     // ========== 需要时间戳校验的接口 ==========
     // 传感器数据
     bool getRealtimeSensorData(SensorData& out) const;
+    bool getDaggerSensorData(SensorData& out) const;
     
     // 里程计数据 [x, y, yaw, vx, vy, vyaw]
     bool getRealtimeOdomData(vector6_t& out) const;

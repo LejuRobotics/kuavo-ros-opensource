@@ -144,9 +144,73 @@ WheelQuest3IkIncrementalROS::~WheelQuest3IkIncrementalROS() {
   arm_traj_writer_.shutdown();
 }
 
+void WheelQuest3IkIncrementalROS::daggerLeftInterventionCallback(const std_msgs::Bool::ConstPtr& msg) {
+  bool previous;
+  {
+    std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    previous = daggerLeftInterventionRequested_.exchange(msg->data, std::memory_order_relaxed);
+    daggerLeftRequestStampNs_.store(ros::Time::now().toNSec());
+    if (previous != msg->data) {
+      ++candidateLeftGripGeneration_;
+      candidateLeftIkReady_ = false;
+      candidateLeftAnchorReady_ = false;
+      candidateLeftPublishActive_ = false;
+    }
+  }
+  if (previous != msg->data) {
+    ROS_INFO("[WheelQuest3IkIncrementalROS] DAgger left intervention: %s", msg->data ? "ON" : "OFF");
+  }
+  updateDaggerWaistGrip(true, msg->data);
+}
+
+void WheelQuest3IkIncrementalROS::daggerRightInterventionCallback(const std_msgs::Bool::ConstPtr& msg) {
+  bool previous;
+  {
+    std::lock_guard<std::mutex> jointLock(jointStateMutex_);
+    previous = daggerRightInterventionRequested_.exchange(msg->data, std::memory_order_relaxed);
+    daggerRightRequestStampNs_.store(ros::Time::now().toNSec());
+    if (previous != msg->data) {
+      ++candidateRightGripGeneration_;
+      candidateRightIkReady_ = false;
+      candidateRightAnchorReady_ = false;
+      candidateRightPublishActive_ = false;
+    }
+  }
+  if (previous != msg->data) {
+    ROS_INFO("[WheelQuest3IkIncrementalROS] DAgger right intervention: %s", msg->data ? "ON" : "OFF");
+  }
+  updateDaggerWaistGrip(false, msg->data);
+}
+
+bool WheelQuest3IkIncrementalROS::isDaggerLeftGripRequested() const {
+  if (daggerCandidateOnly_) {
+    return daggerLeftInterventionRequested_.load(std::memory_order_relaxed);
+  }
+  return joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
+}
+
+bool WheelQuest3IkIncrementalROS::isDaggerRightGripRequested() const {
+  if (daggerCandidateOnly_) {
+    return daggerRightInterventionRequested_.load(std::memory_order_relaxed);
+  }
+  return joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
+}
+
 void WheelQuest3IkIncrementalROS::run() {
+  if (daggerCandidateOnly_) {
+    resetJointToDefaultWheel_ = false;
+    lastArmControlMode_.store(0);
+    armControlMode_.store(2);
+    mode2EnterTime_ = ros::Time::now();
+  }
   ikSolveThread_ = std::thread(&WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction, this);
   jointStatePublishThread_ = std::thread(&WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction, this);
+
+  if (daggerCandidateOnly_) {
+    applyWorkerThreadScheduling("ik_callback", 0);
+    ros::spin();
+    return;
+  }
 
   // 标定后调 FSM 初始化手臂 mode 1（等价于 X+A 到跟随态的主路径）
   std::thread bootstrapArmModeThread = std::thread([this]() {
@@ -208,8 +272,13 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
   while (!shouldStop() && ros::ok()) {
     loopSyncCount_++;
     recordTimestamp("SolveLoopStart", loopSyncCount_);
+    if (daggerCandidateOnly_) expireDaggerRequests();
     updateSensorArmJointMeanFromSensorData();
     updateSensorArmJointFromSensorData();
+    if (daggerCandidateOnly_ && !candidateSensorStateInitialized_) {
+      rate.sleep();
+      continue;
+    }
     updateFkCacheFromSensorData();
 
     // 实物：硬件未就绪则不进入后续（放在未激活判断与 fsm 之前，少做无效状态维护）
@@ -227,7 +296,7 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
       }
     }
 
-    const bool chestPoseUpdateEnabled = joyStickHandlerPtr_->getRightJoyStickYHoldWithX();
+    const bool chestPoseUpdateEnabled = !daggerCandidateOnly_ && joyStickHandlerPtr_->getRightJoyStickYHoldWithX();
     bool chestPositionUpdateEnable = false;
     if (chestPoseUpdateEnabled) {
       chestPositionUpdateEnable = joyStickHandlerPtr_->getRightJoyStickYHold();
@@ -269,6 +338,11 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     // Drake chest orientation 每帧基准恢复（上一帧的 ownership 收紧不能累积到本帧；
     // dual 下 position 那行的写法同理，只是它写的是 _ 而不是 Config_）。
     drakeSolveUpdateChestOrientation_ = drakeSolveUpdateChestOrientationConfig_;
+    if (daggerCandidateOnly_) {
+      lowerBodyMasterFreezeActive_ = false;
+      syncDaggerTorsoReference();
+      updateDaggerWaistCandidate();
+    }
 
     // Transformer 的可变状态只由骨骼回调在 transformerDataMutex_ 内写入，
     // 因此手部/肩肘快照在本临界区内完成拷贝，锁外不再触碰 Transformer。
@@ -365,8 +439,8 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     }
 
     // 【三点跳变检测】验证并过滤 VR 数据中的异常跳变
-    bool currentLeftGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isLeftGrip() : false;
-    bool currentRightGripPressed = joyStickHandlerPtr_ ? joyStickHandlerPtr_->isRightGrip() : false;
+    bool currentLeftGripPressed = isDaggerLeftGripRequested();
+    bool currentRightGripPressed = isDaggerRightGripRequested();
     validateVrPose(latestLeftHandPose_vr_, latestLeftHandPose_vr_, "Left", currentLeftGripPressed);
     validateVrPose(latestRightHandPose_vr_, latestRightHandPose_vr_, "Right", currentRightGripPressed);
     auto humanArmPoseValid = [](const Eigen::Vector3d& shoulder,
@@ -420,7 +494,7 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
     measureStage(solveLoopFsmExitMsPublisher_, [&]() { fsmExit(); });
     // 跟随中双手松开且未开躯干增量时：若实测 chest FK 相对冻结锚点已漂（例如外部 TUI 改过躯干），
     // 再按 FK 重锚一次，避免映射目标继续钉在旧胸位上。
-    if (armControlMode_.load() == 2 && hasLatestWaistYawFk_ && !chestIncrementalUpdateEnabled_ &&
+    if (!daggerCandidateOnly_ && armControlMode_.load() == 2 && hasLatestWaistYawFk_ && !chestIncrementalUpdateEnabled_ &&
         joyStickHandlerPtr_ && !joyStickHandlerPtr_->isLeftGrip() && !joyStickHandlerPtr_->isRightGrip()) {
       const double chestDrift = (latestWaistYawFkPos_ - frozenRobotChestPos_).norm();
       if (chestDrift > kExternalTorsoReanchorPosTol) {
@@ -446,7 +520,7 @@ void WheelQuest3IkIncrementalROS::solveIkHandElbowThreadFunction() {
 
 void WheelQuest3IkIncrementalROS::publishJointStatesThreadFunction() {
   applyWorkerThreadScheduling("arm_traj_publish_thread", armTrajPublishThreadPriority_);
-  ros::param::getCached("/reset_joint_to_default", resetJointToDefaultWheel_);
+  if (!daggerCandidateOnly_) ros::param::getCached("/reset_joint_to_default", resetJointToDefaultWheel_);
   // 不用 ros::Rate：落后时会追赶连发，header.stamp≈同一时刻 → PlotJuggler/录包呈“堆在一起”
   const double frequency = std::max(jointStatePublishRateHz_, 1.0);
   const double periodSec = 1.0 / frequency;
@@ -615,6 +689,7 @@ void WheelQuest3IkIncrementalROS::reanchorMappedUpperBodyFromMeasuredFk(const ch
 }
 
 void WheelQuest3IkIncrementalROS::fsmEnter() {
+  if (daggerCandidateOnly_) { enterDaggerCandidateMode(); return; }
   auto updateChestConstraintFromFk = [&]() {
     // 进入准备动作时保持机器人当前胸部 FK 位姿，不跟随 VR 人体躯干
     const Eigen::Vector3d chestPos = hasLatestWaistYawFk_ ? latestWaistYawFkPos_ : robotFixedWaistYawPos_;
@@ -827,6 +902,7 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
 }
 
 void WheelQuest3IkIncrementalROS::fsmChange() {
+  if (daggerCandidateOnly_) { modeChangeCycle_.resetAll(); return; }
   modeChangeCycle_.resetAll();
   if (armControlMode_ != 2) return;
   modeChangeCycle_.leftHandCtrlModeChanged = joyStickHandlerPtr_->hasLeftArmCtrlModeChanged();
@@ -834,6 +910,7 @@ void WheelQuest3IkIncrementalROS::fsmChange() {
 }
 
 void WheelQuest3IkIncrementalROS::fsmProcess() {
+  if (daggerCandidateOnly_ && !isDaggerLeftGripRequested() && !isDaggerRightGripRequested()) return;
   if (armControlMode_ != 2) return;
   activateController();
   // mode2 下仅在开启躯干控制时激活 chest 增量；进入准备动作时保持机器人当前胸部 FK 姿态
@@ -872,11 +949,13 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   // 先锁存切换前参考；否则该分支的首帧仍可能使用已推进的姿态滤波结果。
   const bool currentLeftGripForTransfer = joyStickHandlerPtr_->isLeftGrip();
   const bool currentRightGripForTransfer = joyStickHandlerPtr_->isRightGrip();
+  if (!daggerCandidateOnly_) {
   captureGripReleaseSnapshot(!currentLeftGripForTransfer && lastLeftGripPressed_,
                              !currentRightGripForTransfer && lastRightGripPressed_);
   latchGripTransferPose(currentLeftGripForTransfer && !lastLeftGripPressed_,
                         currentRightGripForTransfer && !lastRightGripPressed_,
                         leftMaintainProcess, rightMaintainProcess);
+  }
 
   // ---------------------------------------------------------------------------
   // Dual VR 躯干 ownership（torso_control_side: left / right）
@@ -931,6 +1010,11 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     if (!active) {
       trackingActivation = 1.0;
       return frozenElbow;
+    }
+
+    if (daggerCandidateOnly_) {
+      trackingActivation = 1.0;
+      return currentElbow;
     }
 
     if (enableWheelNaturalElbowGuide_ && guide) {
@@ -1252,8 +1336,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
     // 上面的 active/inactive 分支和胸部重映射都可能重新生成 handQuat，
     // 因此必须在最终写入 whole-body input 前再次做连续性检查。
-    stabilizeGripQuaternion(true, joyStickHandlerPtr_->isLeftGrip(), leftHandQuat);
-    stabilizeGripQuaternion(false, joyStickHandlerPtr_->isRightGrip(), rightHandQuat);
+    stabilizeGripQuaternion(true, isDaggerLeftGripRequested(), leftHandQuat);
+    stabilizeGripQuaternion(false, isDaggerRightGripRequested(), rightHandQuat);
 
     if (useIncrementalHandOrientation_) {
       // Keep human increments in their own source accumulator. Writing a
@@ -1489,7 +1573,7 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   }
 
   // 2) 非模式切换：在 fsmProcess 中执行一次“激活全部 arm ctrl mode”的收尾动作（增强鲁棒性）
-  if (activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
+  if (!daggerCandidateOnly_ && activateAllArmCtrlModeCounter_ < ACTIVATE_ALL_ARM_CTRL_MODE_COUNT) {
     forceActivateAllArmCtrlMode();
     kuavo_msgs::changeArmCtrlMode srv3;
     srv3.request.control_mode = static_cast<int>(kuavo_msgs::changeArmCtrlMode::Request::ik_ultra_fast_mode);
@@ -1499,10 +1583,10 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
     setControlMode(3);
   }
 
-  bool currentLeftGripPressed = joyStickHandlerPtr_->isLeftGrip();
-  bool currentRightGripPressed = joyStickHandlerPtr_->isRightGrip();
-  const bool isLeftActive = joyStickHandlerPtr_->isLeftArmCtrlModeActive();
-  const bool isRightActive = joyStickHandlerPtr_->isRightArmCtrlModeActive();
+  bool currentLeftGripPressed = isDaggerLeftGripRequested();
+  bool currentRightGripPressed = isDaggerRightGripRequested();
+  const bool isLeftActive = daggerCandidateOnly_ ? currentLeftGripPressed : joyStickHandlerPtr_->isLeftArmCtrlModeActive();
+  const bool isRightActive = daggerCandidateOnly_ ? currentRightGripPressed : joyStickHandlerPtr_->isRightArmCtrlModeActive();
 
   // 移动检测仅用于 alpha 渐变与 grip 超时，不再 gate IK 增量参考点。
   if (currentLeftGripPressed) {
@@ -1579,6 +1663,11 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
 
   bool leftGripRisingEdge = currentLeftGripPressed && !lastLeftGripPressed_;
   bool rightGripRisingEdge = currentRightGripPressed && !lastRightGripPressed_;
+  if (daggerCandidateOnly_) {
+    std::lock_guard<std::mutex> lock(jointStateMutex_);
+    leftGripRisingEdge = leftGripRisingEdge || (currentLeftGripPressed && !candidateLeftAnchorReady_);
+    rightGripRisingEdge = rightGripRisingEdge || (currentRightGripPressed && !candidateRightAnchorReady_);
+  }
 
   // 双扳机同时松开的下降沿：捕获当前 lb 关节命令快照
   // 目的：胸部增量模式激活时，松开扳机后仅允许 waist_yaw（关节4）跟随 VR 旋转，
@@ -1635,8 +1724,10 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   lastRightGripPressed_ = currentRightGripPressed;
 
   // 在更新增量锚点前保存切换前一帧真正送入 whole-body IK 的 hand 参考。
+  if (!daggerCandidateOnly_) {
   latchGripTransferPose(leftGripRisingEdge, rightGripRisingEdge,
                         leftMaintainProcess, rightMaintainProcess);
+  }
   handleGripRisingEdge(leftGripRisingEdge, rightGripRisingEdge, leftMaintainProcess, rightMaintainProcess);
 
   // 由胸部更新开关控制增量更新（与 grip 解耦）；位置跟随细分关闭时冻结位置。
@@ -1736,6 +1827,7 @@ void WheelQuest3IkIncrementalROS::handleGripRisingEdge(bool leftGripRisingEdge,
                                                   bool rightGripRisingEdge,
                                                   bool leftMaintainProcess,
                                                   bool rightMaintainProcess) {
+  if (daggerCandidateOnly_) { handleDaggerGripRisingEdge(leftGripRisingEdge, rightGripRisingEdge); return; }
   // 如果边沿发生在切换锁期间，latchGripTransferPose 已忽略它，这里也必须
   // 同时忽略，避免重复调用 update*ArmPoseAnchor 重置增量状态。
   if (!leftGripRisingEdge) {
@@ -2003,6 +2095,7 @@ void WheelQuest3IkIncrementalROS::applyElbowSafetyClearance() {
 }
 
 void WheelQuest3IkIncrementalROS::fsmExit() {
+  if (daggerCandidateOnly_) return;
   if ((armControlMode_ == 1 && lastArmControlMode_ == 2) || (armControlMode_ == 0 && lastArmControlMode_ == 2)) {
     enterMode2ResetCounter_ = 0;
     justEnteredMode2_ = false;  // 退出mode 2时重置标志位
@@ -2132,6 +2225,25 @@ void WheelQuest3IkIncrementalROS::solveIk() {
     }
   }
 
+  auto startTime = std::chrono::high_resolution_clock::now();
+  uint64_t leftGeneration = 0, rightGeneration = 0;
+  bool leftAnchored = false, rightAnchored = false;
+  IKSolveResult ikResult(drakeJointStateSize_, "no candidate feedback");
+  if (daggerCandidateOnly_) {
+    Eigen::Vector4d lower;
+    {
+      std::lock_guard<std::mutex> lock(jointStateMutex_);
+      if (!candidateSensorStateInitialized_ || filterJointDataForDrakeFK_.size() != 18) return;
+      lower = filterJointDataForDrakeFK_.head(4);
+      leftGeneration = candidateLeftAnchorGeneration_;
+      rightGeneration = candidateRightAnchorGeneration_;
+      leftAnchored = candidateLeftAnchorReady_;
+      rightAnchored = candidateRightAnchorReady_;
+    }
+    oneStageIkEndEffectorPtr_->deactivateChestPositionFreeze();
+    oneStageIkEndEffectorPtr_->disableKneeLegLock();
+    ikResult = oneStageIkEndEffectorPtr_->solveDaggerArmIK(poseConstraintListCopy, ctrlArmIdx_, lower);
+  } else {
   updateChestPositionFreezeState(!chestPositionUpdateEnable_);
 
   // 锁下肢前两关节（knee=q[0], leg=q[1]）到当前滤波值，只留 waist_pitch/waist_yaw 随动。
@@ -2151,7 +2263,7 @@ void WheelQuest3IkIncrementalROS::solveIk() {
     oneStageIkEndEffectorPtr_->disableKneeLegLock();
   }
 
-  auto startTime = std::chrono::high_resolution_clock::now();
+  startTime = std::chrono::high_resolution_clock::now();
   oneStageIkEndEffectorPtr_->setElbowTrackingActivations(
       latestLeftElbowTrackingActivation_, latestRightElbowTrackingActivation_);
   // 总开关关闭冻结完整 q0-q3；仅位置子开关关闭冻结 q0-q2，保留 yaw 跟随。
@@ -2163,13 +2275,14 @@ void WheelQuest3IkIncrementalROS::solveIk() {
   } else {
     oneStageIkEndEffectorPtr_->deactivateChestPositionFreeze();
   }
-  auto ikResult = oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
+  ikResult = oneStageIkEndEffectorPtr_->solveIK(poseConstraintListCopy, ctrlArmIdx_, jointMidValues_);
+  }
   auto endTime = std::chrono::high_resolution_clock::now();
   const auto durationUs = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
   const double durationMs = static_cast<double>(durationUs) / 1000.0;
   ROS_INFO_THROTTLE(1.0, "[WheelQuest3IkIncrementalROS] one-stage IK latest duration: %.3f ms (%ld us)", durationMs, static_cast<long>(durationUs));
 
-  if (ikResult.isSuccess) {
+  if (ikResult.isSuccess && (!daggerCandidateOnly_ || (ikResult.solution.size() == 18 && ikResult.solution.allFinite()))) {
     {
       std::lock_guard<std::mutex> lock(ikResultMutex_);
       latestIkSolution_ = ikResult.solution;
@@ -2185,6 +2298,13 @@ void WheelQuest3IkIncrementalROS::solveIk() {
         ikUpperBodyJointCommand_ = latestIkSolution_.tail(14);
       }
     }
+    if (daggerCandidateOnly_) {
+      std::lock_guard<std::mutex> lock(jointStateMutex_);
+      if (leftAnchored && isDaggerLeftGripRequested() && candidateLeftGripGeneration_ == leftGeneration)
+        candidateLeftIkReady_ = true;
+      if (rightAnchored && isDaggerRightGripRequested() && candidateRightGripGeneration_ == rightGeneration)
+        candidateRightIkReady_ = true;
+    }
     // 在IK线程内直接测量并发布延迟：骨骼接收 → FSM处理 → IK求解
     // 只在收到新VR数据的那一轮测量，避免无数据时延迟虚增（锯齿现象）
     if (armTrajLatencyPublisher_ && currentBoneSeq_ != lastProcessedBoneSeq_) {
@@ -2196,6 +2316,12 @@ void WheelQuest3IkIncrementalROS::solveIk() {
       armTrajLatencyPublisher_.publish(latencyMsg);
     }
   } else {
+    if (daggerCandidateOnly_) {
+      std::lock_guard<std::mutex> lock(jointStateMutex_);
+      invalidateDaggerArmCandidatesLocked(
+          leftAnchored && candidateLeftGripGeneration_ == leftGeneration,
+          rightAnchored && candidateRightGripGeneration_ == rightGeneration);
+    }
     ROS_ERROR("[WheelQuest3IkIncrementalROS] solveIk failed: %s", ikResult.solverLog.c_str());
   }
 }
@@ -2357,6 +2483,185 @@ HighlyDynamic::SG100VrInput WheelQuest3IkIncrementalROS::makeSg100VrInput() {
     return joyStickHandlerPtr_ && joyStickHandlerPtr_->isRightSecondButtonPressed();
   };
   return in;
+}
+
+bool WheelQuest3IkIncrementalROS::updateDaggerMeasuredState() {
+  Eigen::VectorXd measured;
+  ros::Time stamp;
+  {
+    std::lock_guard<std::mutex> lock(sensorDataRawMutex_);
+    if (sensorDataRaw_ && sensorDataRaw_->joint_data.joint_q.size() >= 18) {
+      stamp = sensorDataRaw_->header.stamp;
+      measured = Eigen::Map<const Eigen::VectorXd>(sensorDataRaw_->joint_data.joint_q.data(), 18);
+    }
+  }
+  const double age = (ros::Time::now() - stamp).toSec();
+  std::lock_guard<std::mutex> lock(jointStateMutex_);
+  if (drakeJointStateSize_ != 18 || measured.size() != 18 || !measured.allFinite() ||
+      stamp.isZero() || age < -0.05 || age > 0.2 ||
+      !isDaggerArmMeasurementValid(measured.tail(14))) {
+    invalidateDaggerArmCandidatesLocked(true, true);
+    candidateSensorStateInitialized_ = false;
+    return false;
+  }
+  jointDataForDrakeFK_ = measured;
+  if (!candidateSensorStateInitialized_ || filterJointDataForDrakeFK_.size() != 18) {
+    filterJointDataForDrakeFK_ = measured;
+  } else {
+    filterJointDataForDrakeFK_ = 0.92 * filterJointDataForDrakeFK_ + 0.08 * measured;
+  }
+  // Body measurements are the actual arm-solver frame, not a command to filter.
+  filterJointDataForDrakeFK_.head(4) = measured.head(4);
+  if (!isDaggerLeftGripRequested() || !candidateLeftIkReady_)
+    filterJointDataForDrakeFK_.segment(4, 7) = measured.segment(4, 7);
+  if (!isDaggerRightGripRequested() || !candidateRightIkReady_)
+    filterJointDataForDrakeFK_.segment(11, 7) = measured.segment(11, 7);
+  daggerSensorStamp_ = stamp;
+  candidateSensorStateInitialized_ = true;
+  return true;
+}
+
+void WheelQuest3IkIncrementalROS::expireDaggerRequests() {
+  bool boneFresh = false;
+  {
+    std::lock_guard<std::mutex> lock(boneRecvTimeMutex_);
+    boneFresh = boneRecvTime_.time_since_epoch().count() != 0 &&
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - boneRecvTime_).count() <= 0.2;
+  }
+  const double now = ros::Time::now().toSec();
+  std::lock_guard<std::mutex> lock(jointStateMutex_);
+  auto expire = [&](std::atomic<bool>& requested, std::atomic<int64_t>& stamp,
+                    uint64_t& generation, bool& anchored, bool& ready, bool& active) {
+    const double age = now - stamp.load() / 1e9;
+    if (requested.load() && (!boneFresh || age < -0.05 || age > 0.2)) {
+      requested.store(false);
+      ++generation;
+      anchored = ready = active = false;
+    }
+  };
+  expire(daggerLeftInterventionRequested_, daggerLeftRequestStampNs_, candidateLeftGripGeneration_,
+         candidateLeftAnchorReady_, candidateLeftIkReady_, candidateLeftPublishActive_);
+  expire(daggerRightInterventionRequested_, daggerRightRequestStampNs_, candidateRightGripGeneration_,
+         candidateRightAnchorReady_, candidateRightIkReady_, candidateRightPublishActive_);
+}
+
+void WheelQuest3IkIncrementalROS::enterDaggerCandidateMode() {
+  if (lastArmControlMode_.load() == 2) return;
+  Eigen::VectorXd seed;
+  {
+    std::lock_guard<std::mutex> lock(jointStateMutex_);
+    if (!candidateSensorStateInitialized_) return;
+    seed = filterJointDataForDrakeFK_;
+  }
+  syncDaggerTorsoReference();
+  updateHandConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND,
+                               leftLink6Position_, leftEndEffectorQuat_);
+  updateHandConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND,
+                               rightLink6Position_, rightEndEffectorQuat_);
+  updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, leftLink4Position_);
+  updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, rightLink4Position_);
+  incrementalController_->reset();
+  incrementalController_->setHandQuatSeeds(leftEndEffectorQuat_, rightEndEffectorQuat_, useIncrementalHandOrientation_);
+  incrementalController_->enterIncrementalModeLeftArm(latestLeftHandPose_vr_, latestPoseConstraintList_,
+      leftEndEffectorPosition_, leftEndEffectorQuat_, leftLink4Quat_);
+  incrementalController_->enterIncrementalModeRightArm(latestRightHandPose_vr_, latestPoseConstraintList_,
+      rightEndEffectorPosition_, rightEndEffectorQuat_, rightLink4Quat_);
+  {
+    std::lock_guard<std::mutex> lock(oneStageIkMutex_);
+    if (!oneStageIkEndEffectorPtr_->resetDaggerReferenceArms(seed, true, true)) return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(ikResultMutex_);
+    latestIkSolution_ = seed;
+    ikLowerBodyJointCommand_ = seed.head(4);
+    ikUpperBodyJointCommand_ = seed.tail(14);
+    hasValidIkSolution_ = true;
+  }
+  lastArmControlMode_.store(2);
+  justEnteredMode2_ = false;
+}
+
+void WheelQuest3IkIncrementalROS::handleDaggerGripRisingEdge(bool left, bool right) {
+  if (!left && !right) return;
+  syncDaggerTorsoReference();
+  Eigen::VectorXd seed;
+  uint64_t leftGeneration, rightGeneration;
+  {
+    std::lock_guard<std::mutex> lock(jointStateMutex_);
+    if (!candidateSensorStateInitialized_) return;
+    seed = filterJointDataForDrakeFK_;
+    leftGeneration = candidateLeftGripGeneration_;
+    rightGeneration = candidateRightGripGeneration_;
+  }
+  {
+    std::lock_guard<std::mutex> lock(oneStageIkMutex_);
+    if (!oneStageIkEndEffectorPtr_->resetDaggerReferenceArms(seed, left, right)) return;
+  }
+  UpperBodyPoseList measuredFk;
+  measuredFk[LEFT][SHOULDER].p = latestLeftShoulderFkPos_;
+  measuredFk[LEFT][ELBOW].p = leftLink4Position_;
+  measuredFk[LEFT][HAND].p = leftLink6Position_;
+  measuredFk[RIGHT][SHOULDER].p = latestRightShoulderFkPos_;
+  measuredFk[RIGHT][ELBOW].p = rightLink4Position_;
+  measuredFk[RIGHT][HAND].p = rightLink6Position_;
+  if (!chestElbowHandPointOptSolverPtr_ ||
+      !chestElbowHandPointOptSolverPtr_->resetDaggerArmReference(measuredFk, left, right)) {
+    ROS_WARN_THROTTLE(1.0, "[DAgger] Cannot re-anchor point references from measured FK");
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(ikResultMutex_);
+    if (latestIkSolution_.size() != 18) latestIkSolution_ = seed;
+    latestIkSolution_.head(4) = seed.head(4);
+    if (left) latestIkSolution_.segment(4, 7) = seed.segment(4, 7);
+    if (right) latestIkSolution_.segment(11, 7) = seed.segment(11, 7);
+    ikLowerBodyJointCommand_ = latestIkSolution_.head(4);
+    ikUpperBodyJointCommand_ = latestIkSolution_.tail(14);
+    hasValidIkSolution_ = true;
+  }
+  if (left) {
+    updateHandConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_HAND,
+                                 leftLink6Position_, leftEndEffectorQuat_);
+    updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_LEFT_ELBOW, leftLink4Position_);
+    incrementalController_->updateLeftArmPoseAnchor(latestLeftHandPose_vr_, latestPoseConstraintList_,
+        leftEndEffectorPosition_, leftEndEffectorQuat_, leftLink4Quat_);
+    leftActiveChestAnchorPos_ = frozenRobotChestPos_;
+    leftActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
+    hasLeftActiveChestAnchor_ = true;
+    hasLeftHandPoseInChest_ = hasLeftElbowPosInChest_ = false;
+    hasLeftGripReleaseSnapshot_ = leftGripTransferPending_ = false;
+    leftGripOrientationHoldFrames_ = leftGripTransferLockFrames_ = 0;
+    hasPreviousLeftGripQuat_ = false;
+    leftGripQuatRecovery_.reset();
+    resetLivePathElbowFade(true);
+  }
+  if (right) {
+    updateHandConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_HAND,
+                                 rightLink6Position_, rightEndEffectorQuat_);
+    updateElbowConstraintUnlocked(latestPoseConstraintList_, POSE_DATA_LIST_INDEX_RIGHT_ELBOW, rightLink4Position_);
+    incrementalController_->updateRightArmPoseAnchor(latestRightHandPose_vr_, latestPoseConstraintList_,
+        rightEndEffectorPosition_, rightEndEffectorQuat_, rightLink4Quat_);
+    rightActiveChestAnchorPos_ = frozenRobotChestPos_;
+    rightActiveChestAnchorQuat_ = getRobotChestQuatRef().normalized();
+    hasRightActiveChestAnchor_ = true;
+    hasRightHandPoseInChest_ = hasRightElbowPosInChest_ = false;
+    hasRightGripReleaseSnapshot_ = rightGripTransferPending_ = false;
+    rightGripOrientationHoldFrames_ = rightGripTransferLockFrames_ = 0;
+    hasPreviousRightGripQuat_ = false;
+    rightGripQuatRecovery_.reset();
+    resetLivePathElbowFade(false);
+  }
+  {
+    std::lock_guard<std::mutex> lock(jointStateMutex_);
+    if (left && isDaggerLeftGripRequested() && candidateLeftGripGeneration_ == leftGeneration) {
+      candidateLeftAnchorReady_ = true;
+      candidateLeftAnchorGeneration_ = leftGeneration;
+    }
+    if (right && isDaggerRightGripRequested() && candidateRightGripGeneration_ == rightGeneration) {
+      candidateRightAnchorReady_ = true;
+      candidateRightAnchorGeneration_ = rightGeneration;
+    }
+  }
 }
 
 }  // namespace HighlyDynamic

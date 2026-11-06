@@ -291,6 +291,7 @@ void WheelArmControlBaseROS::armModeCallback(const std_msgs::Int32::ConstPtr& ms
 }
 
 bool WheelArmControlBaseROS::initializeArmJointsSafety() {
+  if (daggerCandidateOnly_) return true;
   ROS_INFO("[WheelArmControlBaseROS] Initializing arm joints for safety...");
 
   if (!onlyHalfUpBody_) {
@@ -386,6 +387,7 @@ bool WheelArmControlBaseROS::changeArmCtrlMode(int mode) {
 }
 
 void WheelArmControlBaseROS::loadParameters() {
+  nodeHandle_.param("/quest3/dagger_candidate_only", daggerCandidateOnly_, false);
   ROS_INFO("[WheelArmControlBaseROS] Loading parameters from ROS parameter server...");
 
   // Load only_half_up_body parameter
@@ -660,6 +662,7 @@ void WheelArmControlBaseROS::updateRunningState() {
 }
 
 void WheelArmControlBaseROS::publishEndEffectorControlData() {
+  if (daggerCandidateOnly_) return;
   if (!joyStickHandlerPtr_) {
     ROS_WARN("[WheelArmControlBaseROS] WheelJoyStickHandler not initialized");
     return;
@@ -676,6 +679,7 @@ void WheelArmControlBaseROS::publishEndEffectorControlData() {
 }
 
 void WheelArmControlBaseROS::publishHandPositionData() {
+  if (daggerCandidateOnly_) return;
   if (!joyStickHandlerPtr_) {
     ROS_WARN("[WheelArmControlBaseROS] WheelJoyStickHandler not initialized for hand position data");
     return;
@@ -701,6 +705,7 @@ void WheelArmControlBaseROS::publishHandPositionData() {
 }
 
 void WheelArmControlBaseROS::publishClawCommandData() {
+  if (daggerCandidateOnly_) return;
   if (!joyStickHandlerPtr_) {
     ROS_WARN("[WheelArmControlBaseROS] WheelJoyStickHandler not initialized for claw command data");
     return;

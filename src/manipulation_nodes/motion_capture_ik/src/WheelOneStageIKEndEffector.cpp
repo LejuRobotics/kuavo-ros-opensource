@@ -345,10 +345,98 @@ void WheelOneStageIKEndEffector::forceFrozenLowerBodyPitchState(Eigen::VectorXd&
   }
 }
 
+bool WheelOneStageIKEndEffector::resetDaggerReferenceArms(
+    const Eigen::VectorXd& solution, bool left, bool right) {
+  if (!isValidSolution(solution, nq_) || nq_ != 18) return false;
+  if (!hasRefLowpassState_ || historyBuffer_.empty()) {
+    initialGuessSeed_ = solution;
+    for (auto* state : {&refLpX1_, &refLpX2_, &refLpY1_, &refLpY2_, &refLowpassLatest_}) *state = solution;
+    hasRefLowpassState_ = true;
+    historyBuffer_.resyncSegment(0, solution);
+    const Eigen::VectorXd zero = Eigen::VectorXd::Zero(nq_);
+    historyBuffer_.add(WheelIKResultHistoryBuffer::IKMotionState(
+        IKSolveResult(solution, std::chrono::milliseconds(0)), zero, zero, zero));
+    updateLatestSolution(solution);
+    return true;
+  }
+  auto resetRange = [&](int first, int count) {
+    for (Eigen::VectorXd* state : {&initialGuessSeed_, &refLpX1_, &refLpX2_,
+                                  &refLpY1_, &refLpY2_, &refLowpassLatest_})
+      state->segment(first, count) = solution.segment(first, count);
+    historyBuffer_.resyncSegment(first, solution.segment(first, count));
+  };
+  resetRange(0, 4);
+  if (left) resetRange(4, 7);
+  if (right) resetRange(11, 7);
+  updateLatestSolution(refLowpassLatest_);
+  return true;
+}
+
+bool WheelOneStageIKEndEffector::solveDaggerWaistCandidate(
+    const Eigen::Vector3d& position, double pitch, double yaw,
+    const Eigen::VectorXd& seed, const Eigen::Vector4d& lower,
+    const Eigen::Vector4d& upper, Eigen::Vector4d& result) {
+  if (nq_ != 18 || seed.size() != 18 || !seed.allFinite() || !position.allFinite() ||
+      !std::isfinite(pitch) || !std::isfinite(yaw) || !lower.allFinite() || !upper.allFinite()) {
+    return false;
+  }
+  const Eigen::Vector4d low = lower.cwiseMax(plant_->GetPositionLowerLimits().head(4));
+  const Eigen::Vector4d high = upper.cwiseMin(plant_->GetPositionUpperLimits().head(4));
+  if ((low.array() > high.array()).any()) return false;
+
+  // Only the four lower-body limits apply here. Measured arm positions can be
+  // outside candidate wrist soft limits and must not make torso IK infeasible.
+  drake::multibody::InverseKinematics ik(*plant_, false);
+  auto* prog = ik.get_mutable_prog();
+  prog->AddBoundingBoxConstraint(low, high, ik.q().head(4));
+  prog->AddBoundingBoxConstraint(seed.tail(14), seed.tail(14), ik.q().tail(14));
+  const double targetYaw = std::clamp(yaw, low[3], high[3]);
+  prog->AddBoundingBoxConstraint(targetYaw, targetYaw, ik.q()[3]);
+  const auto& referenceFrame = ConstraintFrames_.empty() ? plant_->world_frame() : *ConstraintFrames_[0];
+  Eigen::Matrix3d positionWeight = Eigen::Matrix3d::Identity();
+  positionWeight(1, 1) = 0.0;
+  ik.AddPositionCost(referenceFrame, position, plant_->GetFrameByName("waist_yaw_link"),
+                     Eigen::Vector3d::Zero(), positionWeight);
+  // Same x/z position and summed pitch objective as the previous 4-DOF follower.
+  prog->AddQuadraticErrorCost(Eigen::Matrix3d::Ones(), Eigen::Vector3d::Constant(pitch / 3.0),
+                              ik.q().head(3));
+  Eigen::VectorXd initial = seed;
+  initial.head(4) = seed.head(4).cwiseMax(low).cwiseMin(high);
+  initial[3] = targetYaw;
+  prog->SetInitialGuess(ik.q(), initial);
+  drake::solvers::SnoptSolver solver;
+  drake::solvers::SolverOptions options;
+  options.SetOption(solver.id(), "Major iterations limit", 50);
+  options.SetOption(solver.id(), "Major optimality tolerance", 1e-6);
+  options.SetOption(solver.id(), "Major feasibility tolerance", 1e-7);
+  const auto solved = solver.Solve(*prog, std::nullopt, options);
+  if (!solved.is_success()) return false;
+  result = solved.GetSolution(ik.q()).head(4);
+  if (!result.allFinite()) return false;
+  result = result.cwiseMax(low).cwiseMin(high);
+  return true;
+}
+
+IKSolveResult WheelOneStageIKEndEffector::solveDaggerArmIK(
+    const std::vector<PoseData>& poseConstraints,
+    ArmIdx controlArmIndex,
+    const Eigen::VectorXd& measuredLowerBody) {
+  if (measuredLowerBody.size() != 4 || !measuredLowerBody.allFinite()) {
+    return IKSolveResult(nq_, "fixed lower body must contain four finite measured joints");
+  }
+  return solveIKImpl(poseConstraints, controlArmIndex, measuredLowerBody);
+}
+
 IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& PoseConstraintList,
                                              ArmIdx controlArmIndex,
                                              const Eigen::VectorXd& jointMidValues /*未使用，可传空*/) {
   (void)jointMidValues;
+  return solveIKImpl(PoseConstraintList, controlArmIndex, Eigen::VectorXd());
+}
+
+IKSolveResult WheelOneStageIKEndEffector::solveIKImpl(
+    const std::vector<PoseData>& PoseConstraintList, ArmIdx controlArmIndex,
+    const Eigen::VectorXd& fixedLowerBody) {
   if (!plant_context_) {
     ROS_ERROR("WheelOneStageIKEndEffector::solveIK: plant_context_ is null");
     return IKSolveResult(nq_, "plant_context_ is null");
@@ -360,7 +448,7 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
   // ROS_INFO("WheelOneStageIKEndEffector::solveIK: start solve ik");
 
   // ################ solve ik ###################
-  bool useJointLimit = true;
+  bool useJointLimit = fixedLowerBody.size() != 4;
   drake::multibody::InverseKinematics endEffectorIK(*plant_, useJointLimit);
   initInverseKinematicsSolver(endEffectorIK, SolverType::SNOPT);
 
@@ -383,7 +471,15 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
   referenceSolution = clampToJointLimits(referenceSolution);
   forceFrozenLowerBodyPitchState(referenceSolution);
 
+  if (fixedLowerBody.size() == 4) referenceSolution.head(4) = fixedLowerBody;
   setConstraints(endEffectorIK, PoseConstraintList, controlArmIndex, Eigen::VectorXd::Zero(nq_), referenceSolution);
+  if (fixedLowerBody.size() == 4) {
+    endEffectorIK.get_mutable_prog()->AddBoundingBoxConstraint(
+        plant_->GetPositionLowerLimits().tail(14), plant_->GetPositionUpperLimits().tail(14),
+        endEffectorIK.q().tail(14));
+    endEffectorIK.get_mutable_prog()->AddBoundingBoxConstraint(
+        fixedLowerBody, fixedLowerBody, endEffectorIK.q().head(4));
+  }
 
   auto startTime = std::chrono::high_resolution_clock::now();
   auto ikResult = solveDrakeIK(endEffectorIK, referenceSolution, "SolveEndEffectorIK");
@@ -401,6 +497,11 @@ IKSolveResult WheelOneStageIKEndEffector::solveIK(const std::vector<PoseData>& P
   }
 
   Eigen::VectorXd filteredSolution = applyRefLowpass(ikResult.second);
+  if (fixedLowerBody.size() == 4) {
+    filteredSolution.head(4) = fixedLowerBody;
+    for (auto* state : {&refLpX1_, &refLpX2_, &refLpY1_, &refLpY2_, &refLowpassLatest_})
+      state->head(4) = fixedLowerBody;
+  }
   // The hard constraint applies to the raw optimization result.  Keep every
   // state of the post-solve biquad on the same fixed anchor as well, otherwise
   // its previous velocity can produce a small pitch transient after switch-off.
@@ -459,6 +560,9 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
   double virtualThumbWeight = pointTrackConfig_ ? pointTrackConfig_->virtualThumbTrackingWeight : 4e3;
   double shoulderWeight = pointTrackConfig_ ? pointTrackConfig_->shoulderTrackingWeight : 4e3;
   double chestWeight = pointTrackConfig_ ? pointTrackConfig_->chestTrackingWeight : 4e3;
+
+  const bool trackOrientation = pointTrackConfig_ && pointTrackConfig_->daggerTrackEndEffectorOrientation;
+  const double orientationWeight = 2.0 * (eeWeight * 0.17 * 0.17 + virtualThumbWeight * 0.15 * 0.15);
 
   // add chest position constraint
   if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_CHEST) {
@@ -568,7 +672,14 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     }
 
     // Add LEFT HAND (End Effector) position constraint
-    if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR) {
+    if (trackOrientation && PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_HAND) {
+      const Eigen::Matrix3d& targetR = PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].rotation_matrix;
+      for (int axis = 0; axis < 3; ++axis) {
+        ik.AddAngleBetweenVectorsCost(plant_->world_frame(), targetR.col(axis),
+            GetFrameByNameWithFallback(*plant_, "zarm_l7_end_effector"),
+            Eigen::Vector3d::Unit(axis), orientationWeight * 0.5);
+      }
+    } else if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_END_EFFECTOR].position,
                          GetFrameByNameWithFallback(*plant_, "zarm_l7_end_effector"),
@@ -605,6 +716,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     }
 
     // Add VIRTUAL THUMB position constraint
+    if (!trackOrientation) {
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB].position,
@@ -615,6 +727,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
       // print size err POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB
       std::cout << "WheelOneStageIKEndEffector::setConstraints: size error POSE_DATA_LIST_INDEX_LEFT_VIRTUAL_THUMB"
                 << std::endl;
+    }
     }
   }
 
@@ -631,7 +744,14 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     }
 
     // Add RIGHT HAND (End Effector) position constraint
-    if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR) {
+    if (trackOrientation && PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_HAND) {
+      const Eigen::Matrix3d& targetR = PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].rotation_matrix;
+      for (int axis = 0; axis < 3; ++axis) {
+        ik.AddAngleBetweenVectorsCost(plant_->world_frame(), targetR.col(axis),
+            GetFrameByNameWithFallback(*plant_, "zarm_r7_end_effector"),
+            Eigen::Vector3d::Unit(axis), orientationWeight * 0.5);
+      }
+    } else if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_END_EFFECTOR].position,
                          GetFrameByNameWithFallback(*plant_, "zarm_r7_end_effector"),
@@ -668,6 +788,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
     }
 
     // Add VIRTUAL THUMB position constraint
+    if (!trackOrientation) {
     if (PoseConstraintList.size() > POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB) {
       ik.AddPositionCost(plant_->world_frame(),
                          PoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB].position,
@@ -678,6 +799,7 @@ void WheelOneStageIKEndEffector::setConstraints(drake::multibody::InverseKinemat
       // print size err POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB
       std::cout << "WheelOneStageIKEndEffector::setConstraints: size error POSE_DATA_LIST_INDEX_RIGHT_VIRTUAL_THUMB"
                 << std::endl;
+    }
     }
   }
   // Build joint smoothness weights from config (waist + 7 joints per arm)

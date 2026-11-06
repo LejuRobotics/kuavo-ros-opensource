@@ -3150,10 +3150,69 @@ namespace humanoidController_wheel_wbc
     return true;
   }
 
+  bool humanoidControllerWheelWbc::configureDaggerArmQuickMode(bool enable, std::string& message)
+  {
+    if (enable == daggerArmQuickModeActive_) return true;
+    if (soft_pause_state_.load() != SoftPauseState::IDLE) {
+      message = "Rejected: DAgger execution cannot change during soft pause.";
+      return false;
+    }
+    if (enable) {
+      SensorData feedback;
+      if (!control_data_manager_->getDaggerSensorData(feedback) || armNum_ <= 0 ||
+          feedback.jointPos_.size() < lowJointNum_ + armNum_) {
+        message = "Rejected: DAgger requires fresh locally received arm feedback.";
+        return false;
+      }
+      const vector_t armPosition = feedback.jointPos_.segment(lowJointNum_, armNum_);
+      if (!armPosition.allFinite()) {
+        message = "Rejected: DAgger arm feedback is invalid.";
+        return false;
+      }
+      // Replace an earlier VR/episode target under ControlDataManager's lock.
+      // The existing WBC mode-2 transition then starts from a measured hold and
+      // waits for a new trajectory before using the quick/interpolated target.
+      const vector_t zero = vector_t::Zero(armNum_);
+      control_data_manager_->updateArmExternalControlState(armPosition, zero, zero);
+    }
+
+    kuavo_msgs::changeArmCtrlMode::Request modeRequest;
+    kuavo_msgs::changeArmCtrlMode::Response modeResponse;
+    // Mode 1 requests the initial posture. DAgger exits to mode 0 (hold),
+    // avoiding both an automatic reset and a persistent 2->1 reset guard.
+    modeRequest.control_mode = enable ? 2 : 0;
+    if (!changeArmCtrlModeCallback(modeRequest, modeResponse) || !modeResponse.result ||
+        modeResponse.mode != modeRequest.control_mode) {
+      message = "Rejected: DAgger WBC mode was not confirmed: " + modeResponse.message;
+      return false;
+    }
+    daggerArmQuickModeActive_ = enable;
+    ROS_INFO("[DAgger] WBC arm mode=%d, execution=%s", modeRequest.control_mode,
+             enable ? "enabled" : "released");
+    return true;
+  }
+
   bool humanoidControllerWheelWbc::enableLbArmQuickModeCallback(kuavo_msgs::changeLbQuickModeSrv::Request &req, 
                                                                 kuavo_msgs::changeLbQuickModeSrv::Response &res)
   {
     std::cout << "[ArmControl] 快速模式切换请求, 请求模式为: " << int(req.quickMode) << std::endl;
+    const bool armQuickRequested = req.quickMode == 2 || req.quickMode == 3;
+    bool daggerCandidateOnly = false;
+    if (armQuickRequested) {
+      // Read at the execution request: VR may start after the controller, and
+      // candidate-only defaults must not change ordinary VR/run quick mode.
+      controllerNh_.param("/quest3/dagger_candidate_only", daggerCandidateOnly, false);
+    }
+    if ((armQuickRequested && daggerCandidateOnly) ||
+        (!armQuickRequested && daggerArmQuickModeActive_)) {
+      // Always honor an upper-arm quick-mode shutdown, even if a paused WBC
+      // rejects the accompanying mode release. Keep ownership for a retry.
+      if (!armQuickRequested) quickMode_ = req.quickMode;
+      if (!configureDaggerArmQuickMode(armQuickRequested, res.message)) {
+        res.success = false;
+        return true;
+      }
+    }
     quickMode_ = req.quickMode;
     res.success = true;
     res.message = "success change quick ctrl mode to " + std::to_string(req.quickMode);

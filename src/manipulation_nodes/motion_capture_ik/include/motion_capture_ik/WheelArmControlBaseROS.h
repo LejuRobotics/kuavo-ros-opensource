@@ -114,6 +114,7 @@ class WheelArmControlBaseROS {
   double maxSpeed_;
   double thresholdArmDiffHalfUpBody_rad_;
   bool controlTorso_;
+  bool daggerCandidateOnly_ = false;
   bool enableWbcArmTrajectory_;
 
   // Robot joint dimension parameters (loaded from JSON)
