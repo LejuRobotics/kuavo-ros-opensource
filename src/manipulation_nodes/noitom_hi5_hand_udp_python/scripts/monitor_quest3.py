@@ -1351,6 +1351,7 @@ class Quest3BoneFramePublisher:
         broadcaster.start()
         retry_after = {}
         try:
+            wait_ticks = 0
             while not self.exit_listen_thread_for_quest3_broadcast and not rospy.is_shutdown():
                 state_ip = self._state_server_quest_ip()
                 try:
@@ -1360,6 +1361,14 @@ class Quest3BoneFramePublisher:
                     ip = state_ip
                     source = "registered Quest state client"
                 if not ip or time.monotonic() < retry_after.get(ip, 0.0):
+                    wait_ticks += 1
+                    # 约每 5s 打一次（循环约 0.2s），便于区分「仍在发现」与「launch 没起」。
+                    if wait_ticks % 25 == 0:
+                        print(
+                            f"[monitor_quest3] 仍在等待 Quest 广播 (UDP 11000-11010) / "
+                            f"或 15170 上 quest_client_* 注册后主动握 10019；"
+                            f"已等待约 {wait_ticks * 0.2:.0f}s，/quest3/connected 仍为 False"
+                        )
                     continue
                 rospy.loginfo("Trying Quest %s:10019 from %s", ip, source)
                 self.setup_socket(ip, 10019)
@@ -1473,7 +1482,14 @@ if __name__ == "__main__":
     auto_connected = False
     explicit_ip = len(sys.argv) >= 2 and "." in sys.argv[1]
     if not explicit_ip:
-        print("IP not specified. Waiting for Quest discovery or state-service registration.\n未指定IP：等待广播回连，或从状态服务已注册的 Quest 地址主动握手。")
+        print(
+            "IP not specified. Waiting for Quest discovery or state-service registration. "
+            "Please ensure Quest3 and the robot are on the same LAN and the router has broadcast mode enabled.\n"
+            "未指定IP：等待广播回连（UDP 11000-11010），或从状态服务已注册的 Quest 地址主动握手；"
+            "连通后写 /quest3/connected。"
+            "请确保 Quest3 和机器人在同一个局域网下，并且路由器已开启广播模式。"
+            "若长期无日志，检查 launch 是否真正拉起了 monitor_quest3。"
+        )
         auto_connected = publisher.broadcast_robot_info_and_wait_for_quest3()
     else:
         try:
@@ -1495,7 +1511,11 @@ if __name__ == "__main__":
     if auto_connected or (explicit_ip and not rospy.is_shutdown() and publisher.send_initial_message()):
         publisher.run()
     else:
-        print("Failed to establish initial connection.")
+        print(
+            "Failed to establish initial connection. "
+            "10019 握手未成功，/quest3/connected 保持 False。"
+            "请核对 Quest IP、防火墙与 Quest 端应用是否在听 10019。"
+        )
 
     # Close the socket
     if robot_state_server is not None:

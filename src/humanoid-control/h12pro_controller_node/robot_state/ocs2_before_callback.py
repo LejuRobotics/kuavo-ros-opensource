@@ -7,6 +7,16 @@ from humanoid_plan_arm_trajectory.msg import jointBezierTrajectory, bezierCurveC
 from kuavo_msgs.srv import changeArmCtrlMode
 from utils.utils import get_start_end_frame_time, frames_to_custom_action_data_ocs2
 from utils.h12_vr_launch_config import build_vr_launch_args_for_command, H12VrLaunchConfigError
+from utils.vr_connect_gate import (
+    DEFAULT_LAUNCH_VR_REMOTE_CONTROL_CMD,
+    QUEST3_CONNECTED_PARAM,
+    VR_QUEST_CONNECT_TIMEOUT_SEC,
+    capture_tmux_pane_tail,
+    describe_quest_connect_timeout,
+    reset_quest3_connected_for_new_session,
+    resolve_launch_vr_cmd,
+    wait_for_quest3_connected,
+)
 
 # 导入RobotVersion，兼容不同环境
 try:
@@ -303,7 +313,8 @@ LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoc
 # LAUNCH_HUMANOID_ROBOT_SIM_CMD = "roslaunch humanoid_controllers load_kuavo_mujoco_sim.launch joystick_type:=h12"
 LAUNCH_HUMANOID_ROBOT_REAL_CMD = "roslaunch humanoid_controllers load_kuavo_real.launch joystick_type:=h12 start_way:=auto"
 LAUNCH_HUMANOID_ROBOT_REAL_WHEEL_CMD = "roslaunch humanoid_controllers load_kuavo_real_wheel.launch joystick_type:=h12 start_way:=auto"
-LAUNCH_VR_REMOTE_CONTROL_CMD = os.getenv("LAUNCH_VR_REMOTE_CONTROL_CMD")
+_LAUNCH_VR_ENV = os.getenv("LAUNCH_VR_REMOTE_CONTROL_CMD")
+LAUNCH_VR_REMOTE_CONTROL_CMD, LAUNCH_VR_USED_DEFAULT = resolve_launch_vr_cmd(_LAUNCH_VR_ENV)
 ROS_MASTER_URI = os.getenv("ROS_MASTER_URI")
 ROS_IP = os.getenv("ROS_IP")
 ROS_HOSTNAME = os.getenv("ROS_HOSTNAME")
@@ -705,7 +716,14 @@ def start_vr_remote_control_callback(event):
     # 读取 h12_vr_launch.yaml，按拉起命令把 IP/遥操形式/控腰/急停开关拼成
     # launch 参数追加到拉起命令（videostream 变体只注入其已声明字段）。
     # 配置非法时输出异常日志并终止启动，不回退默认。
+    # #4673：仅当 /quest3/connected 为 True 才提交切到 vr_remote_control（否则会 mute H12）。
     launch_cmd = LAUNCH_VR_REMOTE_CONTROL_CMD
+    used_default_launch = LAUNCH_VR_USED_DEFAULT
+    if used_default_launch:
+        print(
+            f"[vr_connect_gate] LAUNCH_VR_REMOTE_CONTROL_CMD 未设置，"
+            f"使用默认: {DEFAULT_LAUNCH_VR_REMOTE_CONTROL_CMD}"
+        )
     try:
         vr_launch_args = build_vr_launch_args_for_command(launch_cmd)
     except H12VrLaunchConfigError as e:
@@ -725,8 +743,15 @@ def start_vr_remote_control_callback(event):
           export ROS_HOSTNAME={ROS_HOSTNAME} &&\
           {launch_cmd}; exec bash'"
     ]
-    subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME], 
-                  stderr=subprocess.DEVNULL) 
+    subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME],
+                  stderr=subprocess.DEVNULL)
+    # #4673/#review：旧实例残留的 /quest3/connected=True 不得绕过本次启动门禁
+    try:
+        reset_quest3_connected_for_new_session(set_param_fn=rospy.set_param)
+        print(f"[vr_connect_gate] 已复位 {QUEST3_CONNECTED_PARAM}=False，等待本次 monitor 置 True")
+    except Exception as e:
+        print(f"[vr_connect_gate] 复位 {QUEST3_CONNECTED_PARAM} 失败: {e}")
+        raise
     process = subprocess.Popen(
         tmux_cmd,
         stdout=subprocess.PIPE,
@@ -734,14 +759,60 @@ def start_vr_remote_control_callback(event):
     )
 
     time.sleep(3)
-    result = subprocess.run(["tmux", "has-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME], 
+    result = subprocess.run(["tmux", "has-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME],
                               capture_output=True)
-    if result.returncode == 0:
-        print(f"Started vr_remote_control in tmux session: {VR_REMOTE_CONTROL_SESSION_NAME}")
-        print_state_transition(trigger, source, "vr_remote_control")
-    else:
+    if result.returncode != 0:
         print("Failed to start vr_remote_control")
         raise Exception("Failed to create tmux session")
+
+    print(f"Started vr_remote_control in tmux session: {VR_REMOTE_CONTROL_SESSION_NAME}")
+    print(
+        f"[vr_connect_gate] 等待 {QUEST3_CONNECTED_PARAM}=True "
+        f"（超时 {VR_QUEST_CONNECT_TIMEOUT_SEC:.0f}s）后再进入 VR 模式…"
+    )
+    # 复位已在启动前完成：勿再要求轮询内重复看到 False，否则首次轮询前
+    # 已握手写 True 时会被误判超时（fandes !4262 / note_1725913）。
+    connected = wait_for_quest3_connected(
+        timeout_sec=VR_QUEST_CONNECT_TIMEOUT_SEC,
+        has_param_fn=rospy.has_param,
+        get_param_fn=rospy.get_param,
+        sleep_fn=time.sleep,
+        is_shutdown_fn=rospy.is_shutdown,
+        require_false_before_true=False,
+    )
+    if connected:
+        print(f"[vr_connect_gate] {QUEST3_CONNECTED_PARAM}=True，进入 vr_remote_control")
+        print_state_transition(trigger, source, "vr_remote_control")
+        return
+
+    # 超时：拆掉 tmux，抛错中止 transitions，保持 stance，摇杆不被 mute
+    pane = capture_tmux_pane_tail(VR_REMOTE_CONTROL_SESSION_NAME, subprocess.run)
+    has_param = None
+    connected_value = None
+    try:
+        has_param = rospy.has_param(QUEST3_CONNECTED_PARAM)
+        if has_param:
+            connected_value = bool(rospy.get_param(QUEST3_CONNECTED_PARAM, False))
+    except Exception as e:
+        print(f"[vr_connect_gate] 读取 {QUEST3_CONNECTED_PARAM} 失败: {e}")
+    msg = describe_quest_connect_timeout(
+        timeout_sec=VR_QUEST_CONNECT_TIMEOUT_SEC,
+        used_default_launch=used_default_launch,
+        launch_cmd=launch_cmd,
+        has_param=has_param,
+        connected_value=connected_value,
+        tmux_pane_tail=pane,
+    )
+    print(msg)
+    try:
+        rospy.logerr(msg)
+    except Exception:
+        pass
+    subprocess.run(["tmux", "kill-session", "-t", VR_REMOTE_CONTROL_SESSION_NAME],
+                  stderr=subprocess.DEVNULL)
+    raise Exception(
+        f"Quest 未在 {VR_QUEST_CONNECT_TIMEOUT_SEC:.0f}s 内连通，已取消进入 VR 并保持 stance"
+    )
     
 
 def stop_vr_remote_control_callback(event):

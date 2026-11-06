@@ -41,6 +41,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <algorithm>
 #include <atomic>
 
 namespace
@@ -113,6 +114,8 @@ public:
   void shutdown()
   {
     exit_listen_thread_for_quest3_broadcast_ = true;
+    // 退出/析构路径清零，避免残留 True 绕过下次 H12→VR 门禁
+    setConnectedState(false);
 
     if (data_socket_ >= 0)
     {
@@ -229,6 +232,7 @@ public:
       {
         std::cout << "\033[92mAcknowledgment From Quest3 received on attempt "
                   << (attempt + 1) << ", start to receiving data...\033[0m" << std::endl;
+        setConnectedState(true);
         return true;
       }
       else
@@ -285,6 +289,7 @@ public:
         if (errno == EAGAIN || errno == EWOULDBLOCK)
         {
           std::cout << "Timeout occurred, no data received. Restarting socket..." << std::endl;
+          setConnectedState(false);
           if (!restartSocket())
           {
             break;
@@ -294,6 +299,7 @@ public:
         else
         {
           std::cerr << "An error occurred in recvfrom: " << strerror(errno) << std::endl;
+          setConnectedState(false);
           if (!restartSocket())
           {
             break;
@@ -357,6 +363,23 @@ public:
   }
 
 private:
+  void setConnectedState(bool connected)
+  {
+    // 与 Python monitor_quest3._set_connected_state 对齐：维护全局 /quest3/connected
+    try
+    {
+      ros::param::set("/quest3/connected", connected);
+      if (connected)
+        ROS_INFO("VR connected: /quest3/connected=true");
+      else
+        ROS_INFO_THROTTLE(2.0, "VR disconnected/init: /quest3/connected=false");
+    }
+    catch (const std::exception& ex)
+    {
+      ROS_WARN_STREAM("Could not set /quest3/connected: " << ex.what());
+    }
+  }
+
   void init()
   {
     bone_names_ = {
@@ -383,6 +406,9 @@ private:
     hand_finger_tf_pub_ = nh_.advertise<tf2_msgs::TFMessage>("/quest_hand_finger_tf", 10);
 
     ROS_INFO("Quest head command disabled; head_control_node owns /robot_head_motion_data");
+
+    // #4673：与 Python monitor 对齐，初始化时声明未连通，供 H12→VR 门禁轮询
+    setConnectedState(false);
   }
 
   void processJoystickData(const LejuHandPoseEvent& event, kuavo_msgs::JoySticks& msg)
