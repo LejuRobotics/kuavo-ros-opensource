@@ -294,7 +294,6 @@ namespace wheel_absolute_control
     std::unique_ptr<mobile_manipulator::DynamicsBackend> shadow_rnea_;
     std::string dynamics_backend_name_{"wbc"};
     bool dynamics_fault_{false};
-    double dynamics_sensor_timeout_{0.05};
     std::chrono::steady_clock::time_point dynamics_sensor_receive_{};
     bool computeDynamics(const mobile_manipulator::DynamicsReference& reference,
                          double dt, vector_t& torque);

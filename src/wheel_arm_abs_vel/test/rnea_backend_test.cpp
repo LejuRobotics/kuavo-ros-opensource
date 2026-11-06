@@ -108,10 +108,13 @@ int main(int argc,char** argv) {
   // Loss of ddq preserves bias instead of zeroing torque.
   r.accelerationValid=false;
   near(full.update(r,m,0.002,0).torque,expectedBias.tail(18),"invalid ddq falls back to bias");
-  require(!full.update(r,m,0.002,0.2).valid,"stale state rejected");
-  require(!full.update(r,m,0.002,-0.1).valid,"future state rejected");
-  require(!full.update(r,m,0.2,0).valid,"long cycle rejected");
+  require(full.update(r,m,0.002,0.2).valid,"delayed state does not stop dynamics");
+  require(full.update(r,m,0.002,-0.1).valid,"measurement age does not stop dynamics");
+  require(full.update(r,m,0.2,0).valid,"long cycle does not stop dynamics");
   require(!full.update(r,m,0.0,0).valid,"zero dt rejected");
+  require(!full.update(r,m,-0.002,0).valid,"negative dt rejected");
+  require(!full.update(r,m,std::numeric_limits<double>::quiet_NaN(),0).valid,"NaN dt rejected");
+  require(!full.update(r,m,std::numeric_limits<double>::infinity(),0).valid,"infinite dt rejected");
   auto bad=m;bad.input[4]=std::numeric_limits<double>::quiet_NaN();
   require(!full.update(r,bad,0.002,0).valid,"NaN measurement rejected");
   auto badRef=r;badRef.q[4]=std::numeric_limits<double>::infinity();
@@ -124,7 +127,7 @@ int main(int argc,char** argv) {
   rejects([&]{RneaBackend x(interface,info,badSettings);},"invalid mode rejected");
   badSettings=s;badSettings.torqueLimit[0]=0;
   rejects([&]{RneaBackend x(interface,info,badSettings);},"invalid limits rejected");
-  badSettings=s;badSettings.maxMeasurementAge=std::numeric_limits<double>::quiet_NaN();
+  badSettings=s;badSettings.velocityCutoffHz=std::numeric_limits<double>::quiet_NaN();
   rejects([&]{RneaBackend x(interface,info,badSettings);},"nonfinite setting rejected");
 
   // Test bounded transition and active limits independently of formula equality.

@@ -845,14 +845,14 @@ right_hand_offset: [0, 0, 0, 0, 0, 0]
 
 ### 9.6 rnea.yaml
 
+RNEA 不再因反馈年龄或控制周期超限触发停机；缺失反馈、非法数值、力矩限制和急停仍保留。更新后需完整重编译 `wheel_arm_abs_vel`（包含 nodelet 入口），不能仅替换主控动态库。
+
 ```yaml
 # Free-space feedforward, frozen base. These are simulation commissioning defaults,
 # not motor current limits or permission to run a new robot without validation.
 mode: full
 acceleration_gain: 0.25
 velocity_cutoff_hz: 60.0
-sensor_timeout: 0.05
-max_period: 0.05
 dynamic_ramp_seconds: 0.2
 torque_limit_ratio: 0.8  # fraction of task.info torqueLimitsTask, reserve PD margin
 torque_rate_lower: 3000.0  # Nm/s (joint-side)
@@ -931,8 +931,6 @@ vr_kalman_flattening:
 mode: full
 acceleration_gain: 0.25
 velocity_cutoff_hz: 120.0
-sensor_timeout: 0.05
-max_period: 0.05
 dynamic_ramp_seconds: 0.2
 torque_limit_ratio: 0.8  # fraction of task.info torqueLimitsTask, reserve PD margin
 torque_rate_lower: 3000.0  # Nm/s (joint-side)

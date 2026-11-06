@@ -3,8 +3,6 @@
 mode: full
 acceleration_gain: 0.25
 velocity_cutoff_hz: 30.0
-sensor_timeout: 0.05
-max_period: 0.05
 dynamic_ramp_seconds: 0.2
 torque_limit_ratio: 0.8  # fraction of task.info torqueLimitsTask, reserve PD margin
 torque_rate_lower: 3000.0  # Nm/s (joint-side)
