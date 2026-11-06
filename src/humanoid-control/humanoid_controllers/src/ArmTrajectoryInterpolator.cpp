@@ -17,7 +17,7 @@ void ArmTrajectoryInterpolator::configure(const Config& config) {
 }
 
 void ArmTrajectoryInterpolator::reset(const Eigen::VectorXd& currentQ, const ros::Time& now) {
-  ensureBackend(static_cast<size_t>(currentQ.size()));
+  if (!config_.boundedCommandTracking) ensureBackend(static_cast<size_t>(currentQ.size()));
   if (backend_) {
     backend_->reset(currentQ);
   }
@@ -116,6 +116,10 @@ void ArmTrajectoryInterpolator::pushTarget(const TargetSample& sample) {
     ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] ignore mismatched targetV size");
     return;
   }
+  if (sample.hasTargetV && !isFiniteVector(sample.targetV)) {
+    ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] ignore non-finite targetV");
+    return;
+  }
   if (hasLatestTargetSeq_ && sample.msgSeq <= latestTargetSeq_) {
     return;
   }
@@ -165,6 +169,7 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
   }
 
   if (!hasTarget_) {
+    lastPredictionStamp_ = now;
     out.valid = true;
     return out;
   }
@@ -184,8 +189,8 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
     return out;
   }
 
-  ensureBackend(static_cast<size_t>(currentQ.size()));
-  if (!backend_) {
+  if (!config_.boundedCommandTracking) ensureBackend(static_cast<size_t>(currentQ.size()));
+  if (!config_.boundedCommandTracking && !backend_) {
     out.valid = true;
     return out;
   }
@@ -199,6 +204,22 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
   // Bound recovery after a scheduler stall; never extrapolate a long gap in one cycle.
   const double predictionDt = std::min(elapsedSec, 0.02);
   lastPredictionStamp_ = now;
+
+  if (config_.boundedCommandTracking) {
+    if (!std::isfinite(config_.kalmanVLimit) || config_.kalmanVLimit <= 0.0 ||
+        !std::isfinite(config_.commandAccelerationLimit) || config_.commandAccelerationLimit <= 0.0 ||
+        !std::isfinite(config_.commandTrackingFrequency) || config_.commandTrackingFrequency <= 0.0 ||
+        !std::isfinite(config_.commandTrackingDamping) || config_.commandTrackingDamping < 1.0) {
+      ROS_ERROR_THROTTLE(1.0, "[ArmTrajectoryInterpolator] Invalid command tracking limits; hold position");
+      smoothV_.setZero();
+    } else {
+      trackBoundedCommand(now, predictionDt);
+    }
+    out.smoothQ = smoothQ_;
+    out.smoothV = smoothV_;
+    out.valid = true;
+    return out;
+  }
 
   const bool hasNewTargetRaw = !hasLastAppliedTargetSeq_ || (latestTargetSeq_ != lastAppliedTargetSeq_);
   if (hasNewTargetRaw) {
@@ -280,6 +301,39 @@ bool ArmTrajectoryInterpolator::isFiniteVector(const Eigen::VectorXd& vec) {
     }
   }
   return true;
+}
+
+void ArmTrajectoryInterpolator::trackBoundedCommand(const ros::Time& now, double elapsedSec) {
+  const Eigen::VectorXd rawV = target_.hasTargetV ? target_.targetV
+                                               : Eigen::VectorXd::Zero(target_.targetQ.size());
+  const double period = std::max(1e-4, config_.referenceUpdatePeriodSec);
+  const double wn = config_.commandTrackingFrequency;
+  // Small integration steps preserve damping under irregular controller scheduling.
+  const int steps = std::max(1, static_cast<int>(std::ceil(elapsedSec / 0.001)));
+  const double dt = elapsedSec / steps;
+  for (int step = 0; step < steps; ++step) {
+    const double age = std::max(0.0, (now - target_.msgStamp).toSec() -
+                                        elapsedSec + (step + 1) * dt);
+    // One source period at full speed, then one period braking to zero.
+    // The integral is bounded: a stale sample can never extrapolate indefinitely.
+    const double brakingTime = std::clamp(age - period, 0.0, period);
+    const double projectionTime = std::min(age, period) + brakingTime -
+                                  0.5 * brakingTime * brakingTime / period;
+    const double velocityScale = 1.0 - brakingTime / period;
+    for (Eigen::Index i = 0; i < smoothQ_.size(); ++i) {
+      const double refQ = target_.targetQ[i] + rawV[i] * projectionTime;
+      const double refV = rawV[i] * velocityScale;
+      const double acceleration = std::clamp(
+          wn * wn * (refQ - smoothQ_[i]) +
+              2.0 * config_.commandTrackingDamping * wn * (refV - smoothV_[i]),
+          -config_.commandAccelerationLimit, config_.commandAccelerationLimit);
+      const double nextV = std::clamp(smoothV_[i] + acceleration * dt,
+                                     -config_.kalmanVLimit, config_.kalmanVLimit);
+      // Integrate the same bounded velocity sent to the controller.
+      smoothQ_[i] += 0.5 * (smoothV_[i] + nextV) * dt;
+      smoothV_[i] = nextV;
+    }
+  }
 }
 
 bool ArmTrajectoryInterpolator::isEnabled(const ModeFlags& modeFlags) const {

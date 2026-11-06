@@ -4648,8 +4648,10 @@ namespace mobile_manipulator {
   void MobileManipulatorReferenceManager::resetTorsoControlPoseWithRuckig(scalar_t initTime, const vector_t& initState,
                                                                          bool isServiceReset)
   {
-    if (isServiceReset && torsoRotationActive_) {
-      torsoTranslationResetPending_ = torsoTranslationNeedsReset_;
+    // 曾执行平移时使用下方统一躯干轨迹，让 x/z/pitch 同时复位。
+    // 纯旋转仍只恢复腰部，保持 knee/leg 快照。
+    if (isServiceReset && torsoRotationActive_ && !torsoTranslationNeedsReset_) {
+      torsoTranslationResetPending_ = false;
       // 旋转组 RT 只归位腰部，沿用进入该组时的 knee/leg 锁定快照。
       // 保留规划位置/速度/加速度作为起点，避免运动中复位产生指令阶跃。
       const auto& model = pinocchioInterface_.getModel();
@@ -4681,6 +4683,8 @@ namespace mobile_manipulator {
         cmdTorsoDelta_.setZero();
         isCmdTorsoDeltaUpdated_ = false;
       }
+      pendingTorsoRotationDelta_.setZero();
+      hasPendingTorsoRotationDelta_ = false;
       isCmdLegJointUpdated_ = false;
       isResetTorsoRePlanning_ = true;
       setEnableLegJointTrack(true);
@@ -4763,6 +4767,8 @@ namespace mobile_manipulator {
         cmdTorsoDelta_.setZero();
         isCmdTorsoDeltaUpdated_ = false;
       }
+      pendingTorsoRotationDelta_.setZero();
+      hasPendingTorsoRotationDelta_ = false;
     }
 
     isResetTorsoRePlanning_ = true;
@@ -5484,6 +5490,8 @@ namespace mobile_manipulator {
       cmdTorsoDelta_.setZero();
       isCmdTorsoDeltaUpdated_ = false;
     }
+    pendingTorsoRotationDelta_.setZero();
+    hasPendingTorsoRotationDelta_ = false;
 
     // 双臂末端：保持为给定世界系位姿
     {
@@ -5654,6 +5662,8 @@ namespace mobile_manipulator {
     torsoReachabilityManaged_ = false;
     torsoTranslationFromRotation_ = false;
     torsoTranslationResetPending_ = false;
+    pendingTorsoRotationDelta_.setZero();
+    hasPendingTorsoRotationDelta_ = false;
     {
       std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
       torsoRotationRequested_ = false;
@@ -5716,17 +5726,51 @@ namespace mobile_manipulator {
       }
     }
 
+    // 旋转组内 yaw/pitch-only oneshot：累计到关节目标，不退组。
+    // 尚未进入旋转时：yaw/pitch-only 先暂存，避免 delta 先于 rotation_vel 被笛卡尔消费后切组丢 yaw。
+    // 含笛卡尔 x/z 的 delta 仍按 SDK 语义接管并退出旋转组。
+    bool hasRotationDelta = false;
+    vector_t rotationDelta4 = vector_t::Zero(4);
+    bool stashedThisFrame = false;
     if (hasDelta) {
-      // SDK 笛卡尔 delta 接管后不再恢复旧旋转速度。
-      if (rotationRequested) {
-        integrateVel = false;
-        vel4.setZero();
-        std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
-        torsoRotationRequested_ = false;
-        cmdTorsoVel_.setZero();
-        isCmdTorsoVelUpdated_ = false;
+      const bool deltaHasCartesian =
+          (std::abs(delta4[0]) > 1e-9) || (std::abs(delta4[1]) > 1e-9);
+      const auto disposition = classifyTorsoOneshotDelta(
+          rotationRequested, torsoRotationActive_, deltaHasCartesian);
+      if (disposition == TorsoDeltaDisposition::kAsRotationJoint) {
+        hasRotationDelta = true;
+        rotationDelta4 = delta4;
+        if (hasPendingTorsoRotationDelta_) {
+          rotationDelta4[2] += pendingTorsoRotationDelta_[2];
+          rotationDelta4[3] += pendingTorsoRotationDelta_[3];
+          pendingTorsoRotationDelta_.setZero();
+          hasPendingTorsoRotationDelta_ = false;
+        }
+        rotationRequested = true;  // 保持/回到旋转路径，避免本帧被切回平移
+      } else if (disposition == TorsoDeltaDisposition::kDeferPending) {
+        // 所有权转入 pending，并清零 delta4，避免同帧笛卡尔路径重复累计。
+        transferOneshotToPendingTorsoRotationDelta(
+            delta4, hasDelta, pendingTorsoRotationDelta_, hasPendingTorsoRotationDelta_,
+            stashedThisFrame);
+      } else {
+        // SDK 笛卡尔 delta 接管后不再恢复旧旋转速度。
+        if (rotationRequested) {
+          integrateVel = false;
+          vel4.setZero();
+          std::lock_guard<std::mutex> lock(cmdTorsoVel_mtx_);
+          torsoRotationRequested_ = false;
+          cmdTorsoVel_.setZero();
+          isCmdTorsoVelUpdated_ = false;
+        }
+        rotationRequested = false;
+        // 笛卡尔接管时把尚未 handoff 的 yaw/pitch pending 一并折入本帧 delta。
+        if (hasPendingTorsoRotationDelta_) {
+          delta4[2] += pendingTorsoRotationDelta_[2];
+          delta4[3] += pendingTorsoRotationDelta_[3];
+          pendingTorsoRotationDelta_.setZero();
+          hasPendingTorsoRotationDelta_ = false;
+        }
       }
-      rotationRequested = false;
     }
     // 零速度只刹停，不能因切组或超时解除锁定、启用笛卡尔包络回收。
     if (torsoRotationActive_ && !rotationRequested && !integrateVel && !hasDelta) {
@@ -5756,9 +5800,18 @@ namespace mobile_manipulator {
     }
 
     if (!integrateVel && !hasDelta && !rotationRequested) {
-      // Next non-zero burst starts a fresh Δt base (avoid huge first step after idle).
-      hasTorsoVelIntegrateTime_ = false;
-      return;
+      if (shouldFlushDeferredTorsoRotationDelta(hasPendingTorsoRotationDelta_, stashedThisFrame,
+                                                rotationRequested)) {
+        // 上一帧暂存的 yaw/pitch，本帧仍未进入旋转 → 按笛卡尔 oneshot 冲刷。
+        hasDelta = true;
+        delta4 = pendingTorsoRotationDelta_;
+        pendingTorsoRotationDelta_.setZero();
+        hasPendingTorsoRotationDelta_ = false;
+      } else {
+        // Next non-zero burst starts a fresh Δt base (avoid huge first step after idle).
+        hasTorsoVelIntegrateTime_ = false;
+        return;
+      }
     }
 
     // Scheme A: integrate with real ReferenceManager period on MPC time axis (sim + real).
@@ -5791,6 +5844,14 @@ namespace mobile_manipulator {
         legJoint_prevTargetPose_ = torsoRotationJointTarget_;
         legJoint_prevTargetVel_.setZero();
         legJoint_prevTargetAcc_.setZero();
+        // 首次进入旋转组：折入此前因话题时序暂存的 yaw/pitch oneshot，避免重建目标丢按键。
+        if (hasPendingTorsoRotationDelta_) {
+          hasRotationDelta = true;
+          rotationDelta4[2] += pendingTorsoRotationDelta_[2];
+          rotationDelta4[3] += pendingTorsoRotationDelta_[3];
+          pendingTorsoRotationDelta_.setZero();
+          hasPendingTorsoRotationDelta_ = false;
+        }
         torsoRotationActive_ = true;
         torsoTranslationFromRotation_ = false;
         sensor_msgs::JointState lock;
@@ -5805,9 +5866,16 @@ namespace mobile_manipulator {
                                     std::min(vel4[3], std::abs(torsoPose_move_spd_[3])));
       const double vyaw = std::max(-std::abs(torsoPose_move_spd_[2]),
                                   std::min(vel4[2], std::abs(torsoPose_move_spd_[2])));
+      const Eigen::Vector4d jointLower = model.lowerPositionLimit.segment<4>(baseDim_);
+      const Eigen::Vector4d jointUpper = model.upperPositionLimit.segment<4>(baseDim_);
       torsoRotationJointTarget_ = integrateTorsoRotationTarget(
-          torsoRotationJointTarget_, vpitch, vyaw, dt,
-          model.lowerPositionLimit.segment<4>(baseDim_), model.upperPositionLimit.segment<4>(baseDim_));
+          torsoRotationJointTarget_, vpitch, vyaw, dt, jointLower, jointUpper);
+      if (hasRotationDelta) {
+        // delta4: [dx, dz, dyaw, dpitch] → 关节增量落在腰 pitch/yaw
+        torsoRotationJointTarget_ = applyTorsoRotationJointDelta(
+            torsoRotationJointTarget_, rotationDelta4[3], rotationDelta4[2],
+            jointLower, jointUpper);
+      }
       calcRuckigTrajWithLegJoint(initTime, torsoRotationJointTarget_, 0.0);
       setEnableLegJointTrack(true);
       setEnableTorsoPoseTargetTrajectories(false);
@@ -5848,6 +5916,16 @@ namespace mobile_manipulator {
         }
         cmd4[i] += v * dt;
       }
+    }
+    // 笛卡尔路径上的 pending yaw/pitch（例如先按 yaw 再推升降）一并冲刷。
+    // 同帧刚 stash 的不冲刷：允许 sticky 升降继续积分，新 pending 留给后续旋转交接。
+    if (shouldFlushDeferredTorsoRotationDelta(hasPendingTorsoRotationDelta_, stashedThisFrame,
+                                              rotationRequested)) {
+      delta4[2] += pendingTorsoRotationDelta_[2];
+      delta4[3] += pendingTorsoRotationDelta_[3];
+      pendingTorsoRotationDelta_.setZero();
+      hasPendingTorsoRotationDelta_ = false;
+      hasDelta = true;
     }
     // oneshot relative displacement on the same final target
     if (hasDelta) {
@@ -5902,9 +5980,38 @@ namespace mobile_manipulator {
     const auto torso = worldBase.actInv(geometryData.oMf[model.getFrameId(info_.torsoFrame)]).translation();
     const TorsoPlanarGeometry geometry{knee, leg - knee, waist - leg,
                                       Eigen::Vector2d(torso.x(), torso.z()) - waist};
-    cmd4 = limitTorsoReachableStep(previousPose, cmd4, geometry,
-                                  model.lowerPositionLimit.segment<4>(baseDim_),
-                                  model.upperPositionLimit.segment<4>(baseDim_));
+    Eigen::Vector4d reachableFallback = previousPose;
+    if (!isTorsoPoseReachable(previousPose, geometry,
+                              model.lowerPositionLimit.segment<4>(baseDim_),
+                              model.upperPositionLimit.segment<4>(baseDim_))) {
+      // 回正/切组留下的旧目标可能在包络外；从当前关节 FK 恢复，而不是永久拒绝输入。
+      vector_t state = initState;
+      for (int joint = 0; joint < 4; ++joint) {
+        const int index = baseDim_ + joint;
+        state[index] = std::max(model.lowerPositionLimit[index],
+                               std::min(model.upperPositionLimit[index], state[index]));
+      }
+      vector_t pose = vector_t::Zero(6);
+      getCurrentTorsoPoseInBasePitchYaw(pose, state);
+      reachableFallback << pose[0], pose[2], pose[3], pose[4];
+      ROS_WARN_THROTTLE(2.0, "[TorsoReachability] unreachable previous target; resume from current joint FK");
+    }
+    const bool pureDescent = integrateVel && !hasDelta && vel4[1] < 0.0 &&
+                            std::abs(vel4[0]) < 1e-9 && std::abs(vel4[2]) < 1e-9 && std::abs(vel4[3]) < 1e-9;
+    if (pureDescent) {
+      // 仅持续下降输入允许 x 联动；松杆不启动回收，yaw/pitch 保持不变。
+      cmd4[1] = std::min(previousPose[1], cmd4[1]);  // 已低于高度下限时保持，不把下降变成上升
+      const double minX = std::min(reachableFallback[0], initialTorsoPos_[0] + torsoWsMinX_);
+      const double maxX = std::max(reachableFallback[0], initialTorsoPos_[0] + torsoWsMaxX_);
+      cmd4 = limitTorsoCoupledDescent(previousPose, cmd4, geometry,
+                                      model.lowerPositionLimit.segment<4>(baseDim_),
+                                      model.upperPositionLimit.segment<4>(baseDim_),
+                                      std::abs(torsoPose_move_spd_[0]) * dt, minX, maxX, &reachableFallback);
+    } else {
+      cmd4 = limitTorsoReachableStep(previousPose, cmd4, geometry,
+                                    model.lowerPositionLimit.segment<4>(baseDim_),
+                                    model.upperPositionLimit.segment<4>(baseDim_), &reachableFallback);
+    }
     torsoReachabilityManaged_ = true;
     {
       std::lock_guard<std::mutex> lock(cmdTorsoPose_mtx_);

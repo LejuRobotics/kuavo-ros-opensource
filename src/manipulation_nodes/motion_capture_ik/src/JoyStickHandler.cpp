@@ -163,6 +163,15 @@ bool JoyStickHandler::getRightJoyStickYHold() const {
   return RightJoyStickYHold_;
 }
 
+void JoyStickHandler::setRightJoyStickYHoldTrackingEnabled(bool enabled) {
+  std::lock_guard<std::mutex> lock(dataMutex_);
+  rightJoyStickYHoldTrackingEnabled_ = enabled;
+  if (!enabled) {
+    rightJoyStickYHoldCount_ = 0;
+  }
+}
+
+
 bool JoyStickHandler::hasFreshSg100Input(double timeout) const {
   const double received = sg100_input_received_.load();
   const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -179,35 +188,39 @@ void JoyStickHandler::updateJoyStickData(const noitom_hi5_hand_udp_python::JoySt
   double rightJoyStickYValue = msg->right_y;
   bool isCounting = false;
 
-  if (!RightJoyStickYHold_) {
-    if (rightJoyStickYValue > 0.8) {
-      // print count
-      ROS_INFO_STREAM_THROTTLE(
-          0.5, "\033[92m[JoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
-      rightJoyStickYHoldCount_++;
-      isCounting = true;
-      if (rightJoyStickYHoldCount_ > 100) {
-        RightJoyStickYHold_ = true;
+  // arm_only / 上半身遥操关闭腰胸映射开关时，不累计、不翻转、不刷日志。
+  if (rightJoyStickYHoldTrackingEnabled_) {
+    if (!RightJoyStickYHold_) {
+      if (rightJoyStickYValue > 0.8) {
+        ROS_INFO_STREAM_THROTTLE(
+            0.5, "\033[92m[JoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
+        rightJoyStickYHoldCount_++;
+        isCounting = true;
+        if (rightJoyStickYHoldCount_ > 100) {
+          RightJoyStickYHold_ = true;
+          rightJoyStickYHoldCount_ = 0;
+          std::cout << "\033[92m[JoyStickHandler] RightJoyStickYHold_ 状态切换为: true\033[0m" << std::endl;
+        }
+      } else {
         rightJoyStickYHoldCount_ = 0;
-        std::cout << "\033[92m[JoyStickHandler] RightJoyStickYHold_ 状态切换为: true\033[0m" << std::endl;
       }
     } else {
-      rightJoyStickYHoldCount_ = 0;
+      if (rightJoyStickYValue < -0.8) {
+        ROS_INFO_STREAM_THROTTLE(
+            0.5, "\033[92m[JoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
+        rightJoyStickYHoldCount_++;
+        isCounting = true;
+        if (rightJoyStickYHoldCount_ > 100) {
+          RightJoyStickYHold_ = false;
+          rightJoyStickYHoldCount_ = 0;
+          std::cout << "\033[92m[JoyStickHandler] RightJoyStickYHold_ 状态切换为: false\033[0m" << std::endl;
+        }
+      } else {
+        rightJoyStickYHoldCount_ = 0;
+      }
     }
   } else {
-    if (rightJoyStickYValue < -0.8) {
-      ROS_INFO_STREAM_THROTTLE(
-          0.5, "\033[92m[JoyStickHandler] rightJoyStickYHoldCount_: " << rightJoyStickYHoldCount_ << "\033[0m");
-      rightJoyStickYHoldCount_++;
-      isCounting = true;
-      if (rightJoyStickYHoldCount_ > 100) {
-        RightJoyStickYHold_ = false;
-        rightJoyStickYHoldCount_ = 0;
-        std::cout << "\033[92m[JoyStickHandler] RightJoyStickYHold_ 状态切换为: false\033[0m" << std::endl;
-      }
-    } else {
-      rightJoyStickYHoldCount_ = 0;
-    }
+    rightJoyStickYHoldCount_ = 0;
   }
 
   if (std::abs(rightJoyStickYValue) > 0.8) {

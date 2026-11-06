@@ -3129,6 +3129,10 @@ void Quest3IkIncrementalROS::initialize(const nlohmann::json& configJson) {
   std::string kuavo_assets_path = ros::package::getPath("kuavo_assets");
   if (configJson.contains("arm_only_urdf")) {
     armOnlyIk_ = true;
+    // 半身无 chest/腰映射：关掉 RightJoyStickY hold 计数与日志。
+    if (joyStickHandlerPtr_) {
+      joyStickHandlerPtr_->setRightJoyStickYHoldTrackingEnabled(false);
+    }
     std::string arm_urdf_relative = configJson["arm_only_urdf"].get<std::string>();
     urdfFilePath = kuavo_assets_path + "/models/" + arm_urdf_relative;
     ROS_INFO("✅ [Quest3IkIncrementalROS] Using arm_only_urdf from JSON: %s", urdfFilePath.c_str());

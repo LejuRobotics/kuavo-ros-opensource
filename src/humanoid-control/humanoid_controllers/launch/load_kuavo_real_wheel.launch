@@ -18,6 +18,8 @@
     <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <!-- PPPPMMMMN 编码版本取末两位作为轮臂基础版本：210062→62，200063→63。 -->
+    <arg name="base_robot_version" value="$(eval int(arg('robot_version')) % 100)"/>
     <!-- 设置VR控制参数 -->
     <arg name="use_vr_control" default="true"/>
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
@@ -89,8 +91,8 @@
     <arg name="lejuclaw_vr_stream_timeout_ms" default="1000" doc="Timeout in ms before the Quest joystick stream is considered inactive."/>
     
     <!-- wheel bridge -->
-    <arg name="use_wheel_bridge" default="true" if="$(eval arg('robot_version') == 60)"/>
-    <arg name="use_wheel_bridge" default="false" unless="$(eval arg('robot_version') == 60)"/>
+    <arg name="use_wheel_bridge" default="true" if="$(eval arg('base_robot_version') == 60)"/>
+    <arg name="use_wheel_bridge" default="false" unless="$(eval arg('base_robot_version') == 60)"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -310,7 +312,7 @@
     </group>
 
     <!-- restart urobot.service (depends on sshpass) -->
-    <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62)">
+    <group if="$(eval arg('base_robot_version') in [61, 62])">
         <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
               output="screen" required="false"/>
     </group>

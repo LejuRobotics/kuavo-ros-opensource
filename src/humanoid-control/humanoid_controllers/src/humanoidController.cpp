@@ -135,6 +135,12 @@ namespace humanoid_controller
       config.kalmanProcessAccCap = 400.0;
       config.kalmanProcessQCap = 1.6e4;
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_v_limit", config.kalmanVLimit);
+      int boundedTracking = 1;
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.bounded_command_tracking", boundedTracking);
+      config.boundedCommandTracking = (boundedTracking != 0);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_acceleration_limit", config.commandAccelerationLimit);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_frequency", config.commandTrackingFrequency);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_damping", config.commandTrackingDamping);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_pos", config.kalmanInitialPosVar);
@@ -451,7 +457,11 @@ namespace humanoid_controller
                       << " target_v_alpha=" << interpConfig.targetVAlpha
                       << " r_dq=" << interpConfig.kalmanMeasurementDqNoise
                       << " process_acc_cap=" << interpConfig.kalmanProcessAccCap
-                      << " process_q_cap=" << interpConfig.kalmanProcessQCap);
+                      << " process_q_cap=" << interpConfig.kalmanProcessQCap
+                      << " bounded_tracking=" << interpConfig.boundedCommandTracking
+                      << " command_acc_limit=" << interpConfig.commandAccelerationLimit
+                      << " command_tracking_wn=" << interpConfig.commandTrackingFrequency
+                      << " command_tracking_damping=" << interpConfig.commandTrackingDamping);
     }
 
     // 存储并初始化 WBC 控制频率

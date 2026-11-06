@@ -59,6 +59,12 @@ namespace humanoidController_wheel_wbc
 
     config.kalmanProcessAccCap = 80.0;
     config.kalmanProcessQCap = 400.0;
+    int boundedTracking = 1;
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.bounded_command_tracking", boundedTracking);
+    config.boundedCommandTracking = (boundedTracking != 0);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_acceleration_limit", config.commandAccelerationLimit);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_frequency", config.commandTrackingFrequency);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_damping", config.commandTrackingDamping);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_pos", config.kalmanInitialPosVar);
@@ -315,7 +321,11 @@ namespace humanoidController_wheel_wbc
                       << " kalman_v_limit=" << config.kalmanVLimit
                       << " r_dq=" << config.kalmanMeasurementDqNoise
                       << " process_acc_cap=" << config.kalmanProcessAccCap
-                      << " process_q_cap=" << config.kalmanProcessQCap);
+                      << " process_q_cap=" << config.kalmanProcessQCap
+                      << " bounded_tracking=" << config.boundedCommandTracking
+                      << " command_acc_limit=" << config.commandAccelerationLimit
+                      << " command_tracking_wn=" << config.commandTrackingFrequency
+                      << " command_tracking_damping=" << config.commandTrackingDamping);
     }
 
     if(obsLimitEnable)

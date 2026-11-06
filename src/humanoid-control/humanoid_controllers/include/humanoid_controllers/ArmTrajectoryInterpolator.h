@@ -29,6 +29,11 @@ public:
     double fastUpdateRScale{0.1};
     bool immediateUpdateOnNewTarget{true};
     double targetVAlpha{1.0};
+    // Opt-in at controller configuration; false retains the legacy Kalman path.
+    bool boundedCommandTracking{false};
+    double commandAccelerationLimit{60.0};  // rad/s^2, matches VR command smoothing
+    double commandTrackingFrequency{40.0}; // rad/s
+    double commandTrackingDamping{3.0};    // dimensionless, damp catch-up overspeed
     // Process-noise caps. Humanoid and wheeled load different values from
     // their own task.info; these defaults match the pre-2026-09-21 wheeled set.
     double kalmanProcessAccCap{80.0};
@@ -70,6 +75,7 @@ private:
   static bool isFiniteVector(const Eigen::VectorXd& vec);
   bool isEnabled(const ModeFlags& modeFlags) const;
   void ensureBackend(size_t dof);
+  void trackBoundedCommand(const ros::Time& now, double elapsedSec);
 
   Config config_;
   bool configured_{false};

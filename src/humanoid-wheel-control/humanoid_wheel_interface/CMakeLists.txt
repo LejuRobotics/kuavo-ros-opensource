@@ -121,6 +121,16 @@ target_link_libraries(${PROJECT_NAME}
 target_compile_options(${PROJECT_NAME} PUBLIC ${FLAGS})
 
 if(CATKIN_ENABLE_TESTING)
+  foreach(command_target arm_command_gap_tracking_test arm_command_bag_replay)
+    add_executable(${command_target}
+      test/${command_target}.cpp
+      ../../humanoid-control/humanoid_controllers/src/ArmTrajectoryInterpolator.cpp)
+    target_include_directories(${command_target} PRIVATE
+      ../../humanoid-control/humanoid_controllers/include)
+    target_link_libraries(${command_target} ${PROJECT_NAME} ${catkin_LIBRARIES})
+    target_compile_features(${command_target} PUBLIC cxx_std_17)
+  endforeach()
+  add_test(NAME arm_command_gap_tracking_test COMMAND $<TARGET_FILE:arm_command_gap_tracking_test>)
   add_executable(arm_command_recovery_test
     test/arm_command_recovery_test.cpp
     ../../humanoid-control/humanoid_controllers/src/ArmTrajectoryInterpolator.cpp)
