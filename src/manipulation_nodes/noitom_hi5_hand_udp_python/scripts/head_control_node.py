@@ -170,7 +170,7 @@ class HeadTrackHandNode:
         default_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
         config = _load_head_config(rospy.get_param("~config_path", default_config))
 
-        mode_name = str(rospy.get_param("~head_control_mode", "fixed")).strip().lower()
+        mode_name = str(rospy.get_param("~head_control_mode", "") or "").strip().lower() or "fixed"
         self._vr_tf_timeout = float(rospy.get_param("~vr_tf_timeout", DEFAULT_VR_TF_TIMEOUT_SEC))
         # 默认 fixed 不抢 /robot_head_motion_data。服务切入 fixed 后只发一帧正前方。
         self._release_head_command = mode_name in ("", "fixed")

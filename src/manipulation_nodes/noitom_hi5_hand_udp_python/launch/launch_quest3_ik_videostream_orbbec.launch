@@ -1,5 +1,7 @@
 <launch>
     <!-- 定义命令行参数 -->
+    <arg name="head_control_mode" default="vr_follow"/>
+    <arg name="head_track_target" default="both_hands_midpoint"/>
     <arg name="send_srv" default="1"/> <!-- 1: 不需要手动打开手臂控制，0: 需要手动打开手臂控制 -->
     <arg name="version" default="4" />
     <arg name="ctrl_arm_idx" default="2" />

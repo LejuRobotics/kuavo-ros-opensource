@@ -1,6 +1,6 @@
 <launch>
     <!-- 独立头跟手。机器人 TF 起来之后即可启动，不需要 VR 遥操作节点。 -->
-    <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand。默认 fixed 不发头部指令；vr_follow 在 TF 缺失或过期时保留模式并暂停发布"/>
+    <arg name="head_control_mode" default="" doc="留空时头控使用 fixed；可指定 fixed / vr_follow / track_hand。VR 启动仅在当前 fixed 时自动切换"/>
     <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时有效：both_hands_midpoint / left_hand / right_hand / active_hand"/>
     <arg name="rate" default="50.0" doc="头控更新频率 Hz"/>
     <arg name="base_frame" default="" doc="留空自动读取 URDF 中 zhead_1_joint 的父 link；可显式指定参考坐标系"/>
@@ -10,7 +10,7 @@
           name="head_control_node"
           output="screen"
           args="python3 $(find noitom_hi5_hand_udp_python)/scripts/head_control_node.py">
-        <param name="head_control_mode" value="$(arg head_control_mode)"/>
+        <param name="head_control_mode" value="$(arg head_control_mode)" type="str"/>
         <param name="head_track_target" value="$(arg head_track_target)"/>
         <param name="rate" value="$(arg rate)"/>
         <param name="base_frame" value="$(arg base_frame)" type="str"/>

@@ -210,6 +210,46 @@ class Quest3BoneFramePublisher:
         # 初始化VR连接状态参数：按侧参数（若配置）+ 全局 /quest3/connected（仅主 Quest）
         self._set_connected_state(False)
 
+        # 仅启动时接管 fixed；未知状态不猜测，运行中用户再切 fixed 也不自动接管。
+        self._head_startup_target = str(rospy.get_param("~head_control_mode", "vr_follow") or "vr_follow").strip().lower()
+        self._head_startup_track_target = str(rospy.get_param("~head_track_target", "both_hands_midpoint"))
+        self._head_startup_current_mode = None
+        self._head_startup_attempts = 0
+        self._head_startup_pending = self.publish_quest3_globals
+        self._head_startup_mode_sub = rospy.Subscriber(
+            "/quest3/head_control_mode", headCtrlMode, self._head_startup_mode_callback, queue_size=1
+        )
+        self._head_startup_timer = rospy.Timer(rospy.Duration(0.5), self._try_startup_head_mode)
+
+    def _head_startup_mode_callback(self, msg):
+        self._head_startup_current_mode = str(msg.mode).strip().lower()
+        if self._head_startup_current_mode != "fixed":
+            self._head_startup_pending = False
+
+    def _try_startup_head_mode(self, _event):
+        if not self._head_startup_pending or self._head_startup_current_mode != "fixed":
+            return
+        service_name = "/head_control_node/set_head_control_mode"
+        self._head_startup_attempts += 1
+        try:
+            rospy.wait_for_service(service_name, timeout=0.1)
+            # 等待服务期间可能收到用户的新模式，调用前再次检查。
+            if not self._head_startup_pending or self._head_startup_current_mode != "fixed":
+                return
+            client = rospy.ServiceProxy(service_name, SetHeadControlMode)
+            fixed_hand = self._head_startup_track_target if self._head_startup_target == "track_hand" else ""
+            response = client(mode=self._head_startup_target, fixed_hand=fixed_hand)
+            self._head_startup_pending = False
+            if response.success:
+                rospy.loginfo("VR startup head mode set to %s: %s", self._head_startup_target, response.message)
+            else:
+                rospy.logwarn("VR startup head mode rejected: %s", response.message)
+        except (rospy.ROSException, rospy.ServiceException) as error:
+            rospy.logwarn_throttle(2.0, "VR startup head mode service unavailable: %s", error)
+            if self._head_startup_attempts >= 10:
+                self._head_startup_pending = False
+                rospy.logwarn("VR startup head mode request stopped after 10 attempts")
+
     def set_robot_state_server(self, robot_state_server):
         """设置 RobotStateServer 引用
         
