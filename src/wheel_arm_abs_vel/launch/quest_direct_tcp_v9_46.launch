@@ -272,6 +272,10 @@
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/s6_motion_profile.yaml" ns="s6_motion_profile" />
     <param name="s6_motion_profile/enabled" value="$(arg s6_motion_profile)" type="bool" />
     <rosparam command="load" file="$(arg hand_prediction_config)" if="$(eval arg('hand_prediction_config') != '')" />
+    <!-- Do not inherit the optical experiment from a previous Quest launch. -->
+    <param name="optical_hand_bounded_reference/enabled" value="false" type="bool" />
+    <param name="optical_hand_position_cutoff_hz" value="$(eval arg('hand_position_cutoff_hz') if arg('hand_position_cutoff_hz') != '' else 5.0)" type="double" />
+    <param name="optical_hand_orientation_cutoff_hz" value="$(eval arg('hand_orientation_cutoff_hz') if arg('hand_orientation_cutoff_hz') != '' else 4.0)" type="double" />
     <param name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" type="double" if="$(eval arg('hand_position_cutoff_hz') != '')" />
     <param name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" type="double" if="$(eval arg('hand_orientation_cutoff_hz') != '')" />
     <param name="execution_governor/enabled" value="$(arg execution_governor_enabled)" type="bool" />

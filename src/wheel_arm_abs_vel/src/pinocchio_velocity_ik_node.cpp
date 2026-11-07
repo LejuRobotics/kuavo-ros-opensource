@@ -22,6 +22,7 @@
 #include "../velocity_ik/temporal_cost.h"
 #include "../velocity_ik/joint_jerk.h"
 #include "../velocity_ik/fixed_bandwidth_reference.h"
+#include "../velocity_ik/optical_bounded_reference.h"
 #include "../velocity_ik/execution_governor.h"
 #include "../velocity_ik/teleop_continuity.h"
 #include <nlohmann/json.hpp>
@@ -1131,14 +1132,41 @@ class PinocchioVelocityIk {
     pnh_.param("feedforward_filter_time_constant", ff_filter_time_constant_, 0.030);
     pnh_.param("hand_position_cutoff_hz", hand_position_cutoff_hz_, 5.);
     pnh_.param("hand_orientation_cutoff_hz", hand_orientation_cutoff_hz_, 4.);
+    pnh_.param("optical_hand_position_cutoff_hz", optical_hand_position_cutoff_hz_, hand_position_cutoff_hz_);
+    pnh_.param("optical_hand_orientation_cutoff_hz", optical_hand_orientation_cutoff_hz_, hand_orientation_cutoff_hz_);
+    pnh_.param("optical_hand_bounded_reference/enabled", optical_hand_bounded_reference_enabled_, false);
+    pnh_.param("optical_hand_adaptive/enabled", optical_adaptive_enabled_, false);
+    pnh_.param("optical_hand_adaptive/position_max_hz", optical_adaptive_position_max_hz_, 3.5);
+    pnh_.param("optical_hand_adaptive/orientation_max_hz", optical_adaptive_orientation_max_hz_, 2.5);
+    if(optical_adaptive_enabled_ &&
+       (!std::isfinite(optical_adaptive_position_max_hz_) ||
+        !std::isfinite(optical_adaptive_orientation_max_hz_) ||
+        optical_adaptive_position_max_hz_<optical_hand_position_cutoff_hz_ ||
+        optical_adaptive_orientation_max_hz_<optical_hand_orientation_cutoff_hz_ ||
+        optical_adaptive_position_max_hz_>30. || optical_adaptive_orientation_max_hz_>30.))
+      throw std::runtime_error("optical adaptive maximum cutoff must be finite, >= minimum and <=30 Hz");
+    pnh_.param("optical_hand_bounded_reference/linear_speed", optical_linear_speed_limit_, .6);
+    pnh_.param("optical_hand_bounded_reference/linear_acceleration", optical_linear_acceleration_limit_, 3.);
+    pnh_.param("optical_hand_bounded_reference/angular_speed", optical_angular_speed_limit_, 2.);
+    pnh_.param("optical_hand_bounded_reference/angular_acceleration", optical_angular_acceleration_limit_, 8.);
+    for (double limit : {optical_linear_speed_limit_, optical_linear_acceleration_limit_,
+                        optical_angular_speed_limit_, optical_angular_acceleration_limit_})
+      if (!std::isfinite(limit) || limit <= 0.)
+        throw std::runtime_error("optical reference limits must be finite and positive");
     pnh_.param("torso_reference_frequency", torso_reference_frequency_, 1.2);
-    for(double hz : {hand_position_cutoff_hz_,hand_orientation_cutoff_hz_})
+    for(double hz : {hand_position_cutoff_hz_,hand_orientation_cutoff_hz_,
+         optical_hand_position_cutoff_hz_,optical_hand_orientation_cutoff_hz_})
       if(!std::isfinite(hz) || hz<.5 || hz>30.)
         throw std::runtime_error("fixed hand cutoff must be finite and in [0.5,30] Hz");
     if(!std::isfinite(torso_reference_frequency_) || torso_reference_frequency_<.5 || torso_reference_frequency_>5.)
       throw std::runtime_error("invalid torso reference frequency");
-    ROS_INFO("[VelocityIk] Skeleton CV -> fixed reference (no age prediction): hand %.2f/%.2f Hz, torso %.2f Hz",
-             hand_position_cutoff_hz_,hand_orientation_cutoff_hz_,torso_reference_frequency_);
+    ROS_INFO("[VelocityIk] Skeleton CV -> fixed reference (no age prediction): controller hand %.2f/%.2f Hz, optical hand %.2f/%.2f Hz, torso %.2f Hz",
+             hand_position_cutoff_hz_,hand_orientation_cutoff_hz_,
+             optical_hand_position_cutoff_hz_,optical_hand_orientation_cutoff_hz_,torso_reference_frequency_);
+    ROS_INFO("[VelocityIk] Optical bounded reference %s: linear v/a %.3f/%.3f, angular v/a %.3f/%.3f",
+             optical_hand_bounded_reference_enabled_ ? "enabled" : "disabled",
+             optical_linear_speed_limit_, optical_linear_acceleration_limit_,
+             optical_angular_speed_limit_, optical_angular_acceleration_limit_);
     pnh_.param("feedforward_decay_time_constant", ff_decay_time_constant_, 0.050);
     pnh_.param("feedforward_hold_time", ff_hold_time_, 0.025);
 
@@ -1190,6 +1218,20 @@ class PinocchioVelocityIk {
     // The elbow is a redundancy preference only.  A low default prevents the
     // human elbow hint from pulling the primary 6-D TCP task away from target.
     pnh_.param("elbow_position_weight", elbow_position_weight_, 0.15);
+    pnh_.param("optical_left_elbow/enabled", optical_left_elbow_enabled_, false);
+    pnh_.param("optical_left_elbow/weight", optical_left_elbow_weight_, elbow_position_weight_);
+    if(!std::isfinite(optical_left_elbow_weight_) || optical_left_elbow_weight_<0.)
+      throw std::runtime_error("optical left elbow weight must be finite and nonnegative");
+    ROS_INFO("[VelocityIk] Optical left elbow preference %s: %.3f (standard %.3f)",
+             optical_left_elbow_enabled_ ? "enabled" : "disabled",
+             optical_left_elbow_weight_,elbow_position_weight_);
+    pnh_.param("optical_right_elbow/enabled", optical_right_elbow_enabled_, false);
+    pnh_.param("optical_right_elbow/weight", optical_right_elbow_weight_, elbow_position_weight_);
+    if(!std::isfinite(optical_right_elbow_weight_) || optical_right_elbow_weight_<0.)
+      throw std::runtime_error("optical right elbow weight must be finite and nonnegative");
+    ROS_INFO("[VelocityIk] Optical right elbow preference %s: %.3f (standard %.3f)",
+             optical_right_elbow_enabled_ ? "enabled" : "disabled",
+             optical_right_elbow_weight_,elbow_position_weight_);
     pnh_.param("posture_weight", posture_weight_, 0.010);
     pnh_.param("posture_gain", posture_gain_, 0.20);
     pnh_.param("lower_body_posture_weight",
@@ -4136,6 +4178,15 @@ class PinocchioVelocityIk {
     return message;
   }
 
+  double elbowPositionWeight(const TargetSnapshot& target,int arm) const {
+    // Optical elbow preferences leave controller objectives and joint limits unchanged.
+    if(target.source==wheel_arm_abs_vel::TeleopTcpTarget::SOURCE_QUEST_HAND_TRACKING) {
+      if(arm==0 && optical_left_elbow_enabled_) return optical_left_elbow_weight_;
+      if(arm==1 && optical_right_elbow_enabled_) return optical_right_elbow_weight_;
+    }
+    return elbow_position_weight_;
+  }
+
   bool calculateFullPoseTaskTerms(
       const TargetSnapshot& target, const DecisionVector& q, double ff_scale,
       double acquisition_blend, double input_budget,
@@ -4216,7 +4267,7 @@ class PinocchioVelocityIk {
         addLeastSquaresCost(
             frameTranslationJacobianRelative(elbow_frame_names_.at(arm), torso_frame_name_),
             budget_twist(ff_scale * goal.elbow_linear_ff + bounded_correction(elbow_position_gain_ * ee,acquisition_linear_speed_),acquisition_linear_speed_),
-            elbow_position_weight_ * elbow_admit, hessian, gradient);
+            elbowPositionWeight(target,arm) * elbow_admit, hessian, gradient);
       }
       row += 6;
     }
@@ -5550,18 +5601,70 @@ class PinocchioVelocityIk {
   void shapeContinuousTarget(TargetSnapshot& world_target,const TargetSnapshot& target,
       double tick_start_ns,double cycle_dt) {
       {
+        const bool optical_hand = target.source ==
+            wheel_arm_abs_vel::TeleopTcpTarget::SOURCE_QUEST_HAND_TRACKING;
+        if(optical_hand!=last_optical_shaper_source_) {
+          for(auto& r:optical_position_activity_)r.reset();
+          for(auto& r:optical_orientation_activity_)r.reset();
+          for(auto& r:optical_elbow_activity_)r.reset();
+          last_optical_shaper_source_=optical_hand;
+        }
+        const double position_cutoff_hz = optical_hand ?
+            optical_hand_position_cutoff_hz_ : hand_position_cutoff_hz_;
+        const double orientation_cutoff_hz = optical_hand ?
+            optical_hand_orientation_cutoff_hz_ : hand_orientation_cutoff_hz_;
         for(int arm=0;arm<kArmCount;++arm) {
           auto& a=world_target.arm[arm];
           // Match test's default fixed-bandwidth path: shape the immutable
           // observation directly, with no source-age extrapolation.
-          velocity_ik::stepFixedVector(hand_reference_[arm],a.hand_position,cycle_dt,hand_position_cutoff_hz_);
-          velocity_ik::stepFixedRotation(hand_rotation_reference_[arm],a.hand_orientation,cycle_dt,hand_orientation_cutoff_hz_);
+          if (optical_hand && optical_hand_bounded_reference_enabled_) {
+            double position_hz=position_cutoff_hz,orientation_hz=orientation_cutoff_hz;
+            if(optical_adaptive_enabled_) {
+              if(!hand_reference_[arm].valid)optical_position_activity_[arm].reset();
+              if(!hand_rotation_reference_[arm].valid)optical_orientation_activity_[arm].reset();
+              position_hz=optical_position_activity_[arm].step(
+                  hand_reference_[arm].valid ? Eigen::Vector3d(a.hand_position-hand_reference_[arm].p) : Eigen::Vector3d::Zero(),
+                  hand_reference_[arm].v,cycle_dt,position_cutoff_hz,optical_adaptive_position_max_hz_);
+              orientation_hz=optical_orientation_activity_[arm].step(
+                  hand_rotation_reference_[arm].valid ? velocity_ik::fixedRotationError(a.hand_orientation,hand_rotation_reference_[arm].q) : Eigen::Vector3d::Zero(),
+                  hand_rotation_reference_[arm].v,cycle_dt,orientation_cutoff_hz,optical_adaptive_orientation_max_hz_,true);
+            }
+            if(optical_adaptive_enabled_) {
+              velocity_ik::stepAdaptiveOpticalVector(hand_reference_[arm],a.hand_position,
+                  cycle_dt,position_hz,optical_linear_speed_limit_,optical_linear_acceleration_limit_,optical_position_activity_[arm]);
+              velocity_ik::stepAdaptiveOpticalRotation(hand_rotation_reference_[arm],a.hand_orientation,
+                  cycle_dt,orientation_hz,optical_angular_speed_limit_,optical_angular_acceleration_limit_,optical_orientation_activity_[arm]);
+            } else {
+              velocity_ik::stepBoundedOpticalVector(hand_reference_[arm], a.hand_position,
+                cycle_dt, position_hz, optical_linear_speed_limit_, optical_linear_acceleration_limit_);
+              velocity_ik::stepBoundedOpticalRotation(hand_rotation_reference_[arm], a.hand_orientation,
+                cycle_dt, orientation_hz, optical_angular_speed_limit_, optical_angular_acceleration_limit_);
+            }
+          } else {
+            velocity_ik::stepFixedVector(hand_reference_[arm],a.hand_position,cycle_dt,position_cutoff_hz);
+            velocity_ik::stepFixedRotation(hand_rotation_reference_[arm],a.hand_orientation,cycle_dt,orientation_cutoff_hz);
+          }
           a.hand_position=hand_reference_[arm].p;
           a.hand_linear_ff=hand_reference_[arm].v;
           a.hand_orientation=hand_rotation_reference_[arm].q;
           a.hand_angular_ff=hand_rotation_reference_[arm].v;
           if (a.elbow_valid) {
-            velocity_ik::stepFixedVector(elbow_reference_[arm],a.elbow_position,cycle_dt,hand_position_cutoff_hz_);
+            if (optical_hand && optical_hand_bounded_reference_enabled_) {
+              double elbow_hz=position_cutoff_hz;
+              if(optical_adaptive_enabled_) {
+                if(!elbow_reference_[arm].valid)optical_elbow_activity_[arm].reset();
+                elbow_hz=optical_elbow_activity_[arm].step(
+                    elbow_reference_[arm].valid ? Eigen::Vector3d(a.elbow_position-elbow_reference_[arm].p) : Eigen::Vector3d::Zero(),
+                    elbow_reference_[arm].v,cycle_dt,position_cutoff_hz,optical_adaptive_position_max_hz_);
+              }
+              if(optical_adaptive_enabled_)
+                velocity_ik::stepAdaptiveOpticalVector(elbow_reference_[arm],a.elbow_position,
+                    cycle_dt,elbow_hz,optical_linear_speed_limit_,optical_linear_acceleration_limit_,optical_elbow_activity_[arm]);
+              else velocity_ik::stepBoundedOpticalVector(elbow_reference_[arm], a.elbow_position,
+                  cycle_dt, elbow_hz, optical_linear_speed_limit_, optical_linear_acceleration_limit_);
+            }
+            else
+              velocity_ik::stepFixedVector(elbow_reference_[arm],a.elbow_position,cycle_dt,position_cutoff_hz);
             a.elbow_position=elbow_reference_[arm].p;
             a.elbow_linear_ff=elbow_reference_[arm].v;
           } else {
@@ -8130,6 +8233,10 @@ class PinocchioVelocityIk {
   double hand_position_weight_{12.0};
   double hand_orientation_weight_{6.0};
   double elbow_position_weight_{0.15};
+  bool optical_left_elbow_enabled_{false};
+  double optical_left_elbow_weight_{.15};
+  bool optical_right_elbow_enabled_{false};
+  double optical_right_elbow_weight_{.15};
   double posture_weight_{0.010};
   double posture_gain_{0.20};
   double lower_body_posture_weight_{0.25};
@@ -8199,6 +8306,14 @@ class PinocchioVelocityIk {
   double cascade_base_tracking_error_start_{0.040};
   double cascade_base_tracking_error_full_{0.100};
   double hand_position_cutoff_hz_{4.},hand_orientation_cutoff_hz_{3.};
+  double optical_hand_position_cutoff_hz_{3.},optical_hand_orientation_cutoff_hz_{2.};
+  bool optical_hand_bounded_reference_enabled_{false};
+  bool optical_adaptive_enabled_{false},last_optical_shaper_source_{false};
+  double optical_adaptive_position_max_hz_{3.5},optical_adaptive_orientation_max_hz_{2.5};
+  std::array<velocity_ik::OpticalAdaptiveCutoff,kArmCount> optical_position_activity_,
+      optical_orientation_activity_,optical_elbow_activity_;
+  double optical_linear_speed_limit_{.6}, optical_linear_acceleration_limit_{3.};
+  double optical_angular_speed_limit_{2.}, optical_angular_acceleration_limit_{8.};
   double torso_reference_frequency_{1.2};
   std::array<velocity_ik::ContinuousVector,kArmCount> hand_reference_, elbow_reference_;
   std::array<velocity_ik::ContinuousRotation,kArmCount> hand_rotation_reference_;
