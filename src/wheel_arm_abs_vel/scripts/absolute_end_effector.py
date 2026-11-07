@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 SUPPORTED = frozenset(('qiangnao', 'qiangnao_touch', 'heiman', 'lejuclaw',
-                       'jodell', 'revo2', 'linker_hand', 'none'))
+                       'jodell', 'revo2', 'linker_hand', 'qibeng', 'none'))
 
 
 def checked(value):
