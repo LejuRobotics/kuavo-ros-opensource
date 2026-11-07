@@ -27,6 +27,8 @@ src/legged_control
 src/legged_perceptive
 src/Livox-SDK2
 bag/*
+# CI 在发布开源树前写到这里，不进内网仓库
+src/wheel_arm_abs_vel/hardware/prebuilt/
 # **/*.bag
 .cursor
 **/cursor/*

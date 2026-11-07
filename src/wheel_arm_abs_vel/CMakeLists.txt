@@ -37,6 +37,11 @@ add_compile_definitions(KUAVO_HAS_DRAKE HUMANOID_CONTROLLERS_HAS_DRAKE
 set(VELOCITY_IK_CATKIN_BUILD ON)
 set(VELOCITY_IK_MESSAGE_INCLUDE "${CATKIN_DEVEL_PREFIX}/include")
 set(VELOCITY_IK_MESSAGE_TARGETS ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# 发布开源树时只要硬件插件。速度 IK 和仿真留给正常编译，避免发布脚本把整个包编一遍。
+if(DEFINED ENV{KUAVO_STAGE_ABSOLUTE_HARDWARE})
+  add_subdirectory(hardware)
+  return()
+endif()
 add_subdirectory(velocity_ik)
 add_library(wheel_absolute_dynamics
   src/absolute/AbsoluteWbcBase.cpp src/absolute/AbsoluteWeightedWbc.cpp
