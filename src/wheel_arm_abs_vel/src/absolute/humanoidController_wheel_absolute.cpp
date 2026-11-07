@@ -373,8 +373,12 @@ namespace wheel_absolute_control
       auto apply = [&](auto& p, auto& d) {
         if (p.size() < 14 || p.size() != d.size())
           throw std::runtime_error("S62/S63 J3 profile requires 14 ordered arm gains");
+        // 不改肩关节 kp。把 j1 从 VR 的 150 抬到 250 而 kd 仍为 20，阻尼比从
+        // 0.133 降到 0.080。初始垂臂姿态下肩关节会抖，63 上臂质心更远，更明显。
+        // J3 只提高刚度，不把已有 kd 降到 18（VR 基线是 30）。
         for (int offset : {0, 7}) {
-          p[offset] = kp; p[offset + 2] = kp; d[offset + 2] = kd;
+          p[offset + 2] = kp;
+          d[offset + 2] = std::max(d[offset + 2], kd);
         }
       };
       auto& settings = kuavo_settings_.running_settings;
@@ -2652,7 +2656,14 @@ namespace wheel_absolute_control
     }
 
     use_arm_trajectory_control_ = !fixed_velocity_ik_pipeline_ && (2 == arm_trajectory_mode_);
-    if (fixed_velocity_ik_pipeline_) publishArmControlModeStatus();
+    if (fixed_velocity_ik_pipeline_) {
+      // 与非全身遥操一致：跟随期间用 vr_ruiwo_kp/kd（肩 150/20，腕 kp 55）。
+      // 否则一直用 ruiwo（腕 kp 120、j3 kd 10）。初始垂臂且腕关节接近 0 时，
+      // 高刚度低阻尼会抖；63 腕部惯量更小，同样增益下更明显。
+      // 62/63 与 *00062/*00063 都在进入 mode 2 时切到这组增益。
+      kuavo_settings_.running_settings.use_vr_arm_kpkd = (arm_trajectory_mode_ == 2);
+      publishArmControlModeStatus();
+    }
 
     res.result = true;
     res.mode = arm_trajectory_mode_;
