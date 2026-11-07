@@ -355,7 +355,8 @@ bool WheelQuest3IkIncrementalROS::updateWholeBodyConstraintList(const WholeBodyR
     mode2EnterTime = mode2EnterTime_;
   }
   const bool isInMode2Warmup =
-      (armControlMode_ == 2) && !mode2EnterTime.isZero() && ((ros::Time::now() - mode2EnterTime).toSec() <= 2.0);
+      (armControlMode_ == 2) && !mode2EnterTime.isZero() &&
+      ((ros::Time::now() - mode2EnterTime).toSec() <= MODE_2_TIMEOUT_DURATION);
   const bool freezeHeightEnabled = !isInMode2Warmup && bothGripsReleased && !chestIncrementalUpdateEnabled;
 
   Eigen::Vector3d chestPosRef = input.chestPosRef;
@@ -2344,13 +2345,14 @@ void WheelQuest3IkIncrementalROS::publishJointStates() {
 
     armPositionForPublish = latest_q_;
 
-    // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变：
+    // 根据 mode2EnterTime_ 严格按时间区间分阶段处理，避免切入 mode2 初期关节指令突变。
+    // 时长与非全身 IK（Quest3IkIncrementalROS）复位窗口对齐：
     // 区间 1: [0, 0.3s)          — 传感器同步
-    // 区间 2: [0.3s, 2.0s)      — 从 q_init_cmd_ 线性平滑到目标（若 q_init_cmd_ 有效）
-    // 区间 3: [2.0s, +infty)    — 不在此处改写
+    // 区间 2: [0.3s, 1.0s)      — 从 q_init_cmd_ 线性平滑到目标（若 q_init_cmd_ 有效）
+    // 区间 3: [1.0s, +infty)    — 不在此处改写
     // 速度一律由最终发布位置差分得到，不再单独清零，避免 q/v 不一致。
     constexpr double kMode2SensorSyncDurationSec = 0.3;
-    constexpr double kMode2SmoothDurationSec = 2.0;
+    constexpr double kMode2SmoothDurationSec = 1.0;
     if (inMode2) {
       if (mode2Elapsed < kMode2SensorSyncDurationSec) {
         Eigen::VectorXd sensorArmQ = q_;

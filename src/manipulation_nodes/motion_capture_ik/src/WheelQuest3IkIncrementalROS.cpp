@@ -676,7 +676,7 @@ void WheelQuest3IkIncrementalROS::fsmEnter() {
 
     if (enterMode2ResetCounter_ < ENTER_MODE_2_RESET_COUNT) {
       // NOTES：确保进入mode 2时，左右手位置和姿态都为初始值
-      // NOTES: 状态描述：默认机器人在5sec内已经回归到零位，因此进入mode 2时，左右手位置和姿态都为初始值
+      // NOTES: 状态描述：准备窗口结束时手臂已回到零位，因此进入跟随前左右手位置和姿态都为初始值
       Eigen::Vector3d currentLeftHandPos = initZeroLeftLink6Position_;
       Eigen::Vector3d currentRightHandPos = initZeroRightLink6Position_;
       Eigen::Quaterniond currentLeftHandQuat = Eigen::Quaterniond::Identity();
@@ -1726,8 +1726,8 @@ void WheelQuest3IkIncrementalROS::fsmProcess() {
   }
   recordTimestamp("applyWholeBodyAndSolveFinish", loopSyncCount_);
   
-  // 进入mode 2约2秒后重置标志位
-  if (justEnteredMode2_ && (ros::Time::now() - mode2EnterTime_).toSec() >= 2.0) {
+  // 进入 mode 2 的准备窗口结束后重置标志位，与非全身 IK 的 1s 复位窗口一致
+  if (justEnteredMode2_ && (ros::Time::now() - mode2EnterTime_).toSec() >= MODE_2_TIMEOUT_DURATION) {
     justEnteredMode2_ = false;
   }
 }

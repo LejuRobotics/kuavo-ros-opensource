@@ -4203,10 +4203,20 @@ class PinocchioVelocityIk {
             plant_->GetFrameByName(elbow_frame_names_.at(arm))
                 .CalcPose(*plant_context_, torso).translation();
         task_error->at(arm * 3 + 2) = ee.norm();
+        // Unlock starts at the ready pose while the operator's arm is already
+        // raised. The elbow hint then lies behind the hand path and, at full
+        // weight, tucks the elbow backward before the hand can move. Admit
+        // the hint only as the hand closes; farther away the 6-D hand task
+        // owns the motion.
+        constexpr double kElbowHintFullMeters = 0.05;
+        constexpr double kElbowHintZeroMeters = 0.20;
+        const double elbow_admit = 1.0 - smoothStep01(
+            (ep.norm() - kElbowHintFullMeters) /
+            (kElbowHintZeroMeters - kElbowHintFullMeters));
         addLeastSquaresCost(
             frameTranslationJacobianRelative(elbow_frame_names_.at(arm), torso_frame_name_),
             budget_twist(ff_scale * goal.elbow_linear_ff + bounded_correction(elbow_position_gain_ * ee,acquisition_linear_speed_),acquisition_linear_speed_),
-            elbow_position_weight_, hessian, gradient);
+            elbow_position_weight_ * elbow_admit, hessian, gradient);
       }
       row += 6;
     }

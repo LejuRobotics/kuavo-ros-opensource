@@ -61,7 +61,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   // 超时机制相关
   ros::Time mode2EnterTime_;                              // 记录进入 mode 2 的时间戳
   std::mutex mode2EnterTimeMutex_;                        // 保护时间戳的互斥锁
-  static constexpr double MODE_2_TIMEOUT_DURATION = 2.0;  // 超时时间：5秒
+  static constexpr double MODE_2_TIMEOUT_DURATION = 1.0;  // 与非全身 IK 复位窗口一致：0.3s 同步 + 0.7s 到位
   // dual_vr 躯干 owner 侧骨骼数据超时阈值（毫秒）。语义与基类的 kJoystickStaleTimeoutMs
   // （按侧摇杆 0.5s 超时）保持一致：两侧都是 monitor_quest3.py 的同一个 100Hz 发布流
   // （周期 10ms），500ms 相当于连续丢 50 帧，足以区分"偶发丢帧"与"Quest 断连"，
@@ -596,7 +596,7 @@ class WheelQuest3IkIncrementalROS final : public WheelArmControlBaseROS {
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值
   bool useIncrementalHandOrientation_ = true;                   // 是否使用增量式手部姿态
   bool resetJointToDefaultWheel_ = true;                        // 进入增量控制时是否重置关节到默认位置
-  bool justEnteredMode2_ = false;                               // mode 0 -> mode 2 切换瞬间标志（约2秒内为true）
+  bool justEnteredMode2_ = false;                               // mode 0 -> mode 2 切换瞬间标志（约1秒内为true）
   bool mode2Initialized_ = false;                               // mode 2 是否已初始化（避免fsmEnter重复进入）
   // 0/1→2 上升沿：下一拍 fsmEnter 强制按实测 FK 重锚上半身映射（覆盖 X+B 暂停后 TUI 改躯干）。
   std::atomic<bool> pendingResumeUpperBodyReanchor_{false};
