@@ -20,12 +20,20 @@ class TorsoControls:
         self._stick_neutral_required = True
         self._stick_key = None
         self._stick_count = 0
-        # Mode selection survives PREPARE and safety revocation; execution
-        # permission does not. Only an admitted explicit follow request or a
-        # fresh torso chord may restore permission after a revocation.
-        self.selected_enabled = bool(enable_on_first_follow)
-        self.startup_enable_pending = bool(enable_on_first_follow)
+        # Stop, fault and a lost stream keep the operator's master selection;
+        # execution permission does not. X+A whole-body reset drops both
+        # clutches via clear_operator_mode, including a Quest XY-touch + B
+        # lock. Only an admitted follow request or a fresh torso chord after
+        # that follow is applied may change permission again.
+        self.default_enabled = bool(enable_on_first_follow)
+        self.selected_enabled = self.default_enabled
+        self.startup_enable_pending = self.default_enabled
         self.follow_ready_seen = False
+        # X+A resume latches the reset defaults until a real joystick sample
+        # applies them. A readiness poll must not consume or cancel that latch.
+        self._admitted_follow = False
+        # While set, stick and XY+B cannot put the pre-reset lock back.
+        self._reset_latched = False
         self.last_time = None
         self.chord_down = False
         self.require_release = True
@@ -44,8 +52,23 @@ class TorsoControls:
 
     def reset(self):
         # A revocation cancels even a startup preference not yet consumed.
+        # The manual master/position selection is kept for stop and fault.
         self.startup_enable_pending = False
+        self._admitted_follow = False
         self.wait_for_follow()
+
+    def clear_operator_mode(self):
+        """Drop the manual master switch, position hold, and XY+B lock.
+
+        Used when X+A starts the whole-body ready-pose return. The next
+        admitted follow uses the launch default, with torso position follow on.
+        Quest XY-touch + B is that same master switch, not a separate hold.
+        """
+        self.position_enabled = True
+        self.selected_enabled = self.default_enabled
+        self.follow_ready_seen = False
+        self.reset()
+        self._reset_latched = True
 
     def wait_for_follow(self):
         """Inhibit during initial acquisition; never create/rearm permission."""
@@ -58,19 +81,30 @@ class TorsoControls:
     def request_follow(self):
         """Restore the selected mode after an explicit, admitted follow request."""
         self.wait_for_follow()
+        if self._reset_latched:
+            # X+A already dropped the XY+B / stick lock. Re-apply that default
+            # at admission so a gesture during the reset window cannot stick.
+            self.position_enabled = True
+            self.selected_enabled = self.default_enabled
         self.startup_enable_pending = self.selected_enabled
+        self._admitted_follow = True
         self.follow_ready_seen = False
 
     def _check_readiness(self, now, ready):
         fresh = self.last_time is not None and 0 <= now-self.last_time <= self.MAX_AGE
-        if ((self.last_time is not None and not fresh)
-                or (self.follow_ready_seen and not ready)):
+        stream_lost = self.last_time is not None and not fresh
+        ready_lost = self.follow_ready_seen and not ready
+        # An admitted X+A resume survives the prepare/acquisition gap. A lost
+        # stream, stop or fault still revokes it. Seeing ready and then losing
+        # it before any joystick sample still cancels the cold-start default.
+        if stream_lost or (ready_lost and not self._admitted_follow):
             self.reset()
         elif not ready or not fresh:
             # No first packet / initial execution handshake is ordinary startup,
             # unlike a lost established stream or an explicit reset.
             self.wait_for_follow()
-        self.follow_ready_seen = self.follow_ready_seen or ready
+        if not self._admitted_follow:
+            self.follow_ready_seen = self.follow_ready_seen or ready
         return fresh
 
     def authorized(self, now, ready):
@@ -206,19 +240,33 @@ class TorsoControls:
                     result.right_trigger = self.rt_hold
                     if not rt:
                         self.rt_released = True
-        if (self.startup_enable_pending and ready and fresh and valid
-                and not stop and not arm):
-            self.enabled = True
+        reset_latched = self._reset_latched
+        if (ready and fresh and valid and not stop and not arm
+                and (self._admitted_follow or self.startup_enable_pending)):
+            if self._admitted_follow:
+                if reset_latched:
+                    self.position_enabled = True
+                    self.selected_enabled = self.default_enabled
+                    self.startup_enable_pending = self.selected_enabled
+                # Apply the selection captured at admission, including a
+                # default-off master. Do not force the master on.
+                self.enabled = bool(self.startup_enable_pending)
+                self._admitted_follow = False
+                self.follow_ready_seen = True
+                self._reset_latched = False
+            else:
+                self.enabled = True
             self.startup_enable_pending = False
         if not chord:
             self.require_release = False
-        elif (toggle_edge and not self.require_release and ready and fresh
-              and valid and not stop and not arm):
+        elif (toggle_edge and not self.require_release and not reset_latched
+              and ready and fresh and valid and not stop and not arm):
             self.enabled = not self.enabled
             self.selected_enabled = self.enabled
         self.chord_down = chord
         self._update_stick(raw, now, ready, fresh, valid,
-                           stop or arm or chord or raw.left_second_button_pressed)
+                           stop or arm or chord or raw.left_second_button_pressed
+                           or reset_latched)
         self._record_permissions()
         if valid:
             self.last_hand = copy.copy(result)

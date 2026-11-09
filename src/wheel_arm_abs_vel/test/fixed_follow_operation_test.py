@@ -221,19 +221,46 @@ class FixedFollowTest(unittest.TestCase):
                            left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
                     p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
                     self.assertTrue(p.enabled)
-    def test_prepare_resume_keeps_explicit_arm_mode(self):
+    def test_prepare_resume_clears_manual_torso_switches(self):
         for source_name in ('quest', 'pico'):
             self.setUp();n=self.n
+            n._absolute_state=State.ACTIVE
             p=n._torso_controls=torso_module.TorsoControls(source_name)
-            p.selected_enabled=False  # operator selected arm mode
+            p.selected_enabled=False  # 腰部总开关手动关闭
+            p.position_enabled=False  # 腰部细分（位置保持）手动打开
+            p.enabled=True
             n._fixed_arm_operation(1)
+            self.assertFalse(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
             n._authorize_fixed_follow_locked()
             raw=NS(**{side+'_'+key:False for side in ('left','right') for key in
                       ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')},
                    left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
             p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
-            self.assertFalse(p.enabled)
-            self.assertFalse(p.selected_enabled)
+            self.assertTrue(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+
+    def test_ready_pose_return_clears_manual_torso_switches(self):
+        n=self.n
+        p=n._torso_controls
+        p.selected_enabled=False
+        p.position_enabled=False
+        p.enabled=True
+        Mapper._pause_absolute_session(n)
+        self.assertFalse(p.enabled)
+        self.assertFalse(p.startup_enable_pending)
+        self.assertTrue(p.position_enabled)
+        self.assertTrue(p.selected_enabled)
+        n._authorize_fixed_follow_locked()
+        raw=NS(**{side+'_'+key:False for side in ('left','right') for key in
+                  ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')},
+               left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
+        p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
+        self.assertTrue(p.enabled)
+        self.assertTrue(p.position_enabled)
+
     def test_pending_follow_without_dependencies_cannot_rearm_torso(self):
         n=self.n
         p=n._torso_controls

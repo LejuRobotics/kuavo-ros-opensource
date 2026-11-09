@@ -1837,6 +1837,8 @@ class IkRos:
                     # silently swallow it merely because the owner ack is late.
                     pending.update(mode=1, resume=False)
                     self._fixed_operation_block = True
+                    if hasattr(self, '_torso_controls'):
+                        self._torso_controls.clear_operator_mode()
                     if state == AbsoluteEnableState.ACTIVE:
                         self._pause_absolute_session()
                         pending.update(phase='prepare', generation=self._absolute_generation)
@@ -1847,6 +1849,8 @@ class IkRos:
             if mode == 1 and self._absolute_mode_status == (2, 2, False) and state in (AbsoluteEnableState.ACTIVE, AbsoluteEnableState.PAUSED,
                                       AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                 self._fixed_operation_block = True
+                if hasattr(self, '_torso_controls'):
+                    self._torso_controls.clear_operator_mode()
                 if state not in (AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                     self._pause_absolute_session()
                 if state != AbsoluteEnableState.PREPARED:
@@ -1862,6 +1866,10 @@ class IkRos:
                 return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
             self._fixed_operation_block = True
+            if mode == 1 and hasattr(self, '_torso_controls'):
+                # 模式状态不是 (2, 2, False) 时上面的准备分支不会进来。
+                # X+A 复位仍然要把腰部总开关和位置跟随收回启动默认。
+                self._torso_controls.clear_operator_mode()
             self._queue_fixed_request_locked(mode, 'dependencies')
             if origin == 'first_trigger':
                 self._fixed_pending_operation['admission_source'] = TeleopTcpTarget.SOURCE_QUEST_CONTROLLER
@@ -2402,7 +2410,10 @@ class IkRos:
         source_fault_cleared = False
         with self._absolute_lock:
             if hasattr(self, '_torso_controls'):
-                self._torso_controls.reset()
+                # X+A 全身复位后重新解锁应回到启动默认：总开关按 launch，
+                # 位置跟随打开。否则手动关闭的总开关和位置保持会原样恢复，
+                # 下肢要再拨一次才跟着走。
+                self._torso_controls.clear_operator_mode()
             self._bump_absolute_generation_locked()
             if (self._tracking_source_hold_latched
                     and self._tracking_can_rearm_locked()):

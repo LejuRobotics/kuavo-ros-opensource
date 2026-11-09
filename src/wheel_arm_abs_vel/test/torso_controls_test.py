@@ -311,7 +311,7 @@ class StartupTorsoControlsTest(unittest.TestCase):
                     self.sample(p, ready=False); self.sample(p)
                     if manual_off:
                         self.sample(p, **self.chord(p)); self.sample(p)
-                    p.reset()  # production mapper enters PREPARE
+                    p.reset()  # stop/fault keeps the XY+B selection; X+A uses clear_operator_mode
                     self.sample(p, ready=False)
                     p.request_follow()  # admitted X+A resume, not readiness alone
                     for _ in range(3):
@@ -322,6 +322,62 @@ class StartupTorsoControlsTest(unittest.TestCase):
                     self.assertEqual(p.enabled, not manual_off)
                     self.sample(p, **self.chord(p))
                     self.assertEqual(p.enabled, manual_off)
+
+    def test_reset_defaults_survive_readiness_gap_until_resume_sample(self):
+        """X+A clears both switches; a ready poll then a gap must not drop them."""
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            self.sample(p)
+            self.sample(p, **self.chord(p))
+            self.sample(p)
+            for _ in range(101):
+                self.sample(p, right_y=-1.)
+            self.assertFalse(p.enabled)
+            self.assertFalse(p.position_enabled)
+            p.clear_operator_mode()
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+            self.assertFalse(p.enabled)
+            for _ in range(5):
+                self.sample(p, ready=False)
+            p.request_follow()
+            self.assertFalse(p.authorized(self.now, True))
+            self.assertFalse(p.authorized(self.now, False))
+            self.sample(p, ready=False, left_first_button_pressed=True,
+                        right_first_button_pressed=True)
+            self.sample(p)
+            self.assertTrue(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+
+    def test_xyb_lock_cannot_survive_xa_reset(self):
+        """Touch XY+B locks the torso; X+A must restore launch-default following."""
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            self.sample(p)
+            self.assertTrue(p.enabled)
+            self.sample(p, **self.chord(p))
+            self.sample(p)
+            self.assertFalse(p.enabled)
+            self.assertFalse(p.selected_enabled)
+            p.clear_operator_mode()
+            for _ in range(3):
+                self.sample(p, ready=False, **self.chord(p))
+                self.sample(p, ready=True, **self.chord(p))
+            self.assertTrue(p.selected_enabled)
+            self.assertFalse(p.enabled)
+            p.request_follow()
+            self.sample(p, ready=False, left_first_button_pressed=True,
+                        right_first_button_pressed=True)
+            self.sample(p, **self.chord(p))
+            self.assertTrue(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+            self.sample(p)
+            self.sample(p, **self.chord(p))
+            self.assertFalse(p.enabled)
 
     def test_cold_prepare_then_first_follow_uses_default_torso(self):
         for source in ('quest', 'pico'):
