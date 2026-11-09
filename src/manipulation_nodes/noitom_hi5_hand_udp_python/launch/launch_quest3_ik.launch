@@ -133,6 +133,7 @@
     <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
     <!-- 设置全局reset_joint_to_default参数 -->
     <param name="/reset_joint_to_default" value="$(arg reset_joint_to_default)" type="bool"/>
+    <param name="/init_control_waist_enable" value="$(arg init_control_waist_enable)" type="bool"/>
 
     <param name="/use_pico" value="$(arg use_pico)" type="bool"/>
     <param name="/enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)" type="bool"/>

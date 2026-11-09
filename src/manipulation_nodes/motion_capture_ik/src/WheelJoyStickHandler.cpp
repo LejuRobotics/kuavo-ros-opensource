@@ -36,9 +36,9 @@ void WheelJoyStickHandler::initialize() {
   rightJoyStickX_ = 0.0;
   rightJoyStickY_ = 0.0;
 
-  RightJoyStickYHold_ = (resetJointToDefaultWheel_);
+  RightJoyStickYHold_ = (resetJointToDefaultWheel_ && initControlWaistEnable_);
   rightJoyStickYHoldCount_ = 0;
-  rightJoyStickYHoldWithX_ = (resetJointToDefaultWheel_);
+  rightJoyStickYHoldWithX_ = (resetJointToDefaultWheel_ && initControlWaistEnable_);
   rightJoyStickYHoldWithXCount_ = 0;
 
   leftGrip_ = false;
@@ -98,9 +98,9 @@ void WheelJoyStickHandler::reset() {
   rightJoyStickX_ = 0.0;
   rightJoyStickY_ = 0.0;
 
-  RightJoyStickYHold_ = (resetJointToDefaultWheel_);
+  RightJoyStickYHold_ = (resetJointToDefaultWheel_ && initControlWaistEnable_);
   rightJoyStickYHoldCount_ = 0;
-  rightJoyStickYHoldWithX_ = (resetJointToDefaultWheel_);
+  rightJoyStickYHoldWithX_ = (resetJointToDefaultWheel_ && initControlWaistEnable_);
   rightJoyStickYHoldWithXCount_ = 0;
 
   leftGrip_ = false;
@@ -486,6 +486,7 @@ void WheelJoyStickHandler::loadHandControlParameters() {
     nh.getParam(
         "/reset_joint_to_default", resetJointToDefaultWheel_);  
 
+    nh.getParam("/init_control_waist_enable", initControlWaistEnable_);
     nh.getParam("/control_finger_type", controlFingerType_);
 
     std::string endEffectorTypeStr;
