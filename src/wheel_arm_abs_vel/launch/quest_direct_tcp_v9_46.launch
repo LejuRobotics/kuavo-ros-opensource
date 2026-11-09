@@ -88,6 +88,7 @@
   <arg name="control_finger_type" default="0" />
   <arg name="predict_gesture" default="false" />
   <arg name="ee_type" default="heiman" doc="Read EndEffectorType from this robot version kuavo.json; optional explicit override" />
+  <arg name="use_controller_startup_arm_pose" default="true" doc="Use the controller final startup arm pose for IK reset; false restores configured preparation_arm_position" />
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
   <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <arg name="enable_head_control" default="false" />
@@ -249,6 +250,7 @@
     <param name="base_admission_off_threshold" value="0.03" type="double" />
     <param name="preparation_measured_position_tolerance" value="$(eval 0.15 if int(arg('robot_version')) == 400062 else 0.06)" type="double" />
     <rosparam param="preparation_arm_position">[0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0, 0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0]</rosparam>
+    <param name="use_controller_startup_arm_pose" value="$(arg use_controller_startup_arm_pose)" type="bool" />
     <param name="translation_singularity_activation_sigma" value="0.060" type="double" />
     <param name="translation_singularity_safe_sigma" value="0.035" type="double" />
     <param name="translation_singularity_escape_sigma" value="0.015" type="double" />

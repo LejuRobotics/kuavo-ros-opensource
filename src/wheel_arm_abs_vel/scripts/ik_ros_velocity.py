@@ -5327,7 +5327,7 @@ if __name__ == "__main__":
             rospy.get_param("~velocity_tcp_geometry_id", ""),
         )
         rospy.set_param("/quest3/teleop_tcp/forearm_retarget_length", velocity_geometry["forearm_retarget_length"])
-        from tools.target_geometry_contract import model_geometry, LEGACY, WRIST
+        from tools.target_geometry_contract import model_geometry, LEGACY, WRIST, MODEL_FOREARM
         # Same velocity-only model selection as the Pinocchio node.
         actual_ik_model = model_file
         if neutral_robot_geometry is not None:
@@ -5348,9 +5348,24 @@ if __name__ == "__main__":
         velocity_geometry["ik_model"] = model_geometry(
             actual_ik_model, end_frames_name[1:3], tcp_transforms)
         velocity_geometry["operation_mode"] = rospy.get_param(
-            "~velocity_target_geometry_mode", LEGACY)
-        if velocity_geometry["operation_mode"] not in (LEGACY, WRIST):
+            "~velocity_target_geometry_mode", MODEL_FOREARM if int(robot_version) % 100 == 62 else LEGACY)
+        if velocity_geometry["operation_mode"] not in (LEGACY, WRIST, MODEL_FOREARM):
             raise ValueError("Unknown velocity target geometry mode")
+        if velocity_geometry["operation_mode"] == MODEL_FOREARM:
+            # A persistent ROS master can retain the scalar from a previous
+            # legacy launch. The selected mode owns the geometry: the URDF
+            # forearm/tool mode does not apply that scalar and must still start.
+            legacy_forearm_override = rospy.get_param("~velocity_tcp_forearm_length", None)
+            if legacy_forearm_override is not None:
+                velocity_geometry["ignored_legacy_forearm_length"] = legacy_forearm_override
+                rospy.logwarn("Ignoring legacy velocity_tcp_forearm_length=%s in %s; "
+                              "using URDF forearm and rotating tool geometry",
+                              legacy_forearm_override, MODEL_FOREARM)
+            velocity_geometry["geometry_id"] = "URDF_FOREARM_DIRECTION_AND_ROTATING_TOOL_V1"
+            velocity_geometry["calibration_status"] = "MODEL_RETARGET_NOT_HUMAN_WRIST_CALIBRATION"
+            velocity_geometry["forearm_retarget_length_applied"] = False
+            velocity_geometry["forearm_to_joint7_m"] = {
+                side: arm["neutral_elbow_to_joint7_m"] for side, arm in velocity_geometry["ik_model"]["arms"].items()}
         velocity_geometry["source_origin_status"] = {
             "controller": "UNVERIFIED_GRIP_OR_AIM_PALM_LABEL",
             "hand_tracking": "HAND_PALM_LABEL_NOT_ANATOMICAL_WRIST_CALIBRATION"}
@@ -5361,7 +5376,7 @@ if __name__ == "__main__":
         rospy.set_param("/quest3/teleop_tcp/geometry_binding", velocity_geometry)
         print("\n" + "*"*10 + "VELOCITY IK MAPPER INFO" + "*"*10)
         print(
-            "Legacy position IK model: disabled; retarget lengths from kuavo.json"
+            "Legacy position IK model: disabled; velocity target geometry: " + velocity_geometry["operation_mode"]
         )
         print(
             f"upper_arm_length: {upper_arm_length:.3f} m, "

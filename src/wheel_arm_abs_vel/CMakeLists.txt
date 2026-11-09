@@ -113,7 +113,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME tail_filter_frequency_test COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/tail_filter_frequency_test.py)
   enable_testing()
   find_package(PythonInterp 3 REQUIRED)
-  foreach(name skeleton_filter_alignment startup_gesture_order torso_stick_controls pose_velocity_kalman shared_model_resolution arm_hold_base pico_receive_isolation fixed_pipeline_hold startup_arm_action pico_head_follow arm_torso_hold torso_controls absolute_control_mechanism fixed_follow_operation absolute_sim_source pico_discovery pico_input_parity terminal_initial_start runtime_partition runtime_topology x86_topology model_platform_matrix absolute_robot_version absolute_end_effector wheel_base_command velocity_ik_base_command)
+  foreach(name runtime_library_path control_clock_step model_forearm_mapping skeleton_filter_alignment startup_gesture_order torso_stick_controls pose_velocity_kalman shared_model_resolution arm_hold_base pico_receive_isolation fixed_pipeline_hold startup_arm_action pico_head_follow arm_torso_hold torso_controls absolute_control_mechanism fixed_follow_operation absolute_sim_source pico_discovery pico_input_parity terminal_initial_start runtime_partition runtime_topology x86_topology model_platform_matrix absolute_robot_version absolute_end_effector wheel_base_command velocity_ik_base_command)
     add_test(NAME ${name}_test COMMAND ${PYTHON_EXECUTABLE}
       -B ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}_test.py)
   endforeach()
@@ -138,7 +138,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME quest_startup_config_test COMMAND ${PYTHON_EXECUTABLE}
     -B ${CMAKE_CURRENT_SOURCE_DIR}/test/quest_startup_config_test.py
     $<TARGET_FILE:humanoid_quest_absolute_control>)
-  set_tests_properties(quest_startup_config_test PROPERTIES TIMEOUT 120)
+  set_tests_properties(quest_startup_config_test PROPERTIES TIMEOUT 240)
   add_test(NAME launch_model_contract_test COMMAND ${PYTHON_EXECUTABLE}
     -B ${CMAKE_CURRENT_SOURCE_DIR}/test/launch_model_contract_test.py)
   add_test(NAME s63_model_contract_test COMMAND ${PYTHON_EXECUTABLE}

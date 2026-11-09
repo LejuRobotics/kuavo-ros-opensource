@@ -241,11 +241,12 @@ VR 使用 `/sg100/vr_step_gesture`（同 SG100StepGesture 类型），要求新�
 
 ## 头部控制
 
-轮臂机器启动时默认拉起 `head_control_node`。它发布 `/robot_head_motion_data`，Quest 节点不再发头部指令。仿真轮臂、实机轮臂和全身 IK 的入口参数相同：
+全身 IK 的实机、仿真入口默认由 Quest/Pico 接收器发布 `/robot_head_motion_data`，沿用 TEST 的 VR 头控。传 `head_track_hand:=true` 或 `head_control_mode:=track_hand` 时才启动独立 `head_control_node`，接收器让出头部指令和模式发布权。
 
 | 参数 | 默认 | 取值 |
 | --- | --- | --- |
 | head_control_mode | vr_follow | vr_follow / track_hand / fixed |
+| head_track_hand | false | 显式启用独立手部跟随节点 |
 | head_track_target | both_hands_midpoint | 仅 track_hand：both_hands_midpoint / left_hand / right_hand / active_hand |
 
 `vr_follow` 跟随 Quest 骨骼 `Chest` 相对 `Head` 的姿态。只启动机器、不启动 VR 时没有这组 TF，节点不发布头角，头保持不动。`fixed` 平滑回到正前方（yaw = 0，pitch = 0）。这两个模式不使用 `head_track_target`。
@@ -265,9 +266,9 @@ VR 使用 `/sg100/vr_step_gesture`（同 SG100StepGesture 类型），要求新�
 roslaunch wheel_arm_abs_vel load_kuavo_mujoco_velocity_ik.launch robot_version:=400062 head_control_mode:=track_hand head_track_target:=both_hands_midpoint
 ```
 
-实机把入口换成 `load_kuavo_real_velocity_ik.launch`。普通轮臂仿真、实机分别是 `load_kuavo_mujoco_sim_wheel.launch`、`load_kuavo_real_wheel.launch`。不需要这个节点时传 `with_head_control_node:=false`。PICO 轮臂启动会关掉它，头改由 `pico_head_control_node` 发布。
+实机把入口换成 `load_kuavo_real_velocity_ik.launch`。以上为 `wheel_arm_abs_vel` 私有全身 IK 入口的行为，普通轮臂入口保持原有头控设置。
 
-运行中切换：
+默认接收器头控通过 `/quest3/set_head_control_mode` 切换 TEST 的 `vr_follow`、`fixed`、`auto_track_active` 或 `fixed_main_hand`（`fixed_hand` 为 `left` / `right`）。使用独立节点时通过下列服务切换；复位状态机会按启动配置选用对应服务：
 
 ```bash
 rosservice call /head_control_node/set_head_control_mode "{mode: track_hand, fixed_hand: both_hands_midpoint}"
@@ -291,3 +292,17 @@ roslaunch noitom_hi5_hand_udp_python test_head_midpoint_arm_traj.launch
 全身 IK 需要 `quest_velocity_ik.launch` 里的 `absolute_velocity_ik` 才会动手。普通轮臂不用这条，测试会改发 `/kuavo_arm_traj`。
 
 角度限制、平滑和换手阈值在 `src/manipulation_nodes/noitom_hi5_hand_udp_python/scripts/config.json` 的 `head_control`。launch 传入的模式优先于配置文件。
+
+## S62 映射与 AGX 启动兼容
+
+Quest 无手柄跟随适用于所有通过完整轮臂模型校验的机型，不受 S62 映射范围限制。状态机按显式机型配置及 14 臂关节、4 躯干关节布局校验，沿用该机型的 URDF、reference/gait 文件和关节限制。启动与光学来源参数回归覆盖 60、61、62、63、200062、210062、300062、310062、400062、400063；裸手 OK/停止与无手柄心跳跟随走公共入口。当前 Pico 协议仍没有裸手追踪字段。详细操作及验证边界见 `docs/pico_quest_controls.md`。
+
+62 / 400062 等末两位为 62 的机型默认使用 `MODEL_FOREARM_DIRECTION_6D`：肘到 J7 的长度和旋转工具偏置从当前 URDF 推导，不再把固定 0.45 m 当前臂长度。其他机型保留原映射。显式设置 `velocity_target_geometry_mode` 可覆盖默认；模型映射下遗留的 `velocity_tcp_forearm_length` 参数只记录、不参与计算。
+
+AGX 沿用 beta 的 EtherCAT SDK 3.3.3.01，运行包装器优先加载同版本的 `EC_Master_arm64/Bin/Linux/aarch64` 驱动。
+
+Ubuntu 24.04 aarch64 首次执行 `bash src/wheel_arm_abs_vel/scripts/build_workspace.sh` 会下载锁定依赖并复用 `.absolute-deps` 缓存；需要网络和 sudo 安装系统依赖。兼容性检查覆盖 Python、URDF ABI、C++23 消息头与 rosconsole 日志生命周期，不兼容的 ROS underlay 会在工作区内重建，保留系统 ROS。运行包装器自动加载该工作区的依赖环境。Ubuntu 20.04 构建入口保持原有路径。
+
+实机控制周期、准备动作、传感器接收间隔和命令缓存有效期改用单调时钟，避免开机校时前跳或后跳进入控制积分。ROS 消息时间戳继续使用 ROS 时钟，仿真观测保留源时间；真实调度延迟不会被截断。
+
+短周期调用提前返回时保留尚未处理的时间，下一次有效更新使用完整间隔，同时推进控制时间轴和动力学周期。例如 `2、0.8、1.2、2 ms` 调用产生三个 `2 ms` 有效周期，总计 `6 ms`；真实长延迟同样保留。

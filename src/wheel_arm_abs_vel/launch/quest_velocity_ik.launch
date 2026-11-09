@@ -28,6 +28,7 @@
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
   <arg name="preparation_arm_velocity_limit" default="1.5" />
   <arg name="preparation_gain" default="4.0" />
+  <arg name="use_controller_startup_arm_pose" default="true" doc="Use the controller final startup arm pose for IK reset; false restores configured preparation_arm_position" />
   <include file="$(find wheel_arm_abs_vel)/launch/velocity_model_contract.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>
@@ -114,7 +115,7 @@
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
   <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- 头部指令由机器端 head_control_node 发布。 -->
-  <arg name="enable_head_control" default="false" />
+  <arg name="enable_head_control" default="true" />
   <arg name="enable_terminal_start" default="false" />
   <!-- Input-terminal alternative to long A; controller-terminal keyboard remains unchanged. -->
   <node pkg="wheel_arm_abs_vel" type="terminal_initial_start.py" name="absolute_terminal_start"
@@ -282,6 +283,7 @@
     <!-- 400062 permits measured arm error up to 0.15 rad at PREPARE completion. -->
     <param name="preparation_measured_position_tolerance" value="$(eval 0.15 if int(arg('robot_version')) == 400062 else 0.06)" type="double" />
     <rosparam param="preparation_arm_position">[0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0, 0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0]</rosparam>
+    <param name="use_controller_startup_arm_pose" value="$(arg use_controller_startup_arm_pose)" type="bool" />
     <param name="translation_singularity_activation_sigma" value="0.060" type="double" />
     <param name="translation_singularity_safe_sigma" value="0.035" type="double" />
     <param name="translation_singularity_escape_sigma" value="0.015" type="double" />
@@ -380,7 +382,6 @@
     <param name="optical_input_guard/orientation_slack" value="0.15" type="double" />
     <param name="optical_input_guard/max_gap" value="0.10" type="double" />
     <param name="optical_input_guard/latch_on_jump" value="$(eval arg('optical_input_guard_latch_on_jump') if arg('optical_bounded_reference_enabled') else True)" type="bool" />
-    <param name="velocity_tcp_forearm_length" value="0.45" type="double" />
     <param name="velocity_tcp_geometry_id" value="V$(arg robot_version)_CONFIGURED_FULL_FOREARM_0450_UNCALIBRATED_V1" type="str" />
     <env name="ROBOT_VERSION" value="$(arg robot_version)" />
   </node>

@@ -12,6 +12,23 @@ import numpy as np
 
 LEGACY = "LEGACY_PALM_6D"
 WRIST = "WRIST_CONSISTENT_6D"
+MODEL_FOREARM = "MODEL_FOREARM_DIRECTION_6D"
+
+
+def map_model_forearm(elbow_hint, forearm_direction, tcp_rotation, arm):
+    """Use the human elbow->palm direction as a forearm direction proxy.
+
+    This is anthropomorphic retargeting, NOT a measured human wrist pose.
+    Robot forearm length and the rotating tool offset come from the IK URDF.
+    Unlike a full elbow->TCP scalar, this remains consistent when the hand
+    rotates. Source positional adapters are deliberately not applied here.
+    """
+    tool = np.asarray(arm["joint7_to_tcp"], dtype=float)
+    joint7_rotation = tcp_rotation @ tool[:3, :3].T
+    joint7_position = (np.asarray(elbow_hint) +
+                       arm["neutral_elbow_to_joint7_m"] * np.asarray(forearm_direction))
+    tcp_position = joint7_position + joint7_rotation @ tool[:3, 3]
+    return tcp_position, joint7_position
 
 def checked_se3(value):
     X = np.asarray(value, dtype=float)
@@ -152,7 +169,19 @@ def model_geometry(urdf_path, end_frames, tcp_transforms):
                 raise ValueError("joint7 to TCP must be a fixed transform")
             X = _origin(j) @ X; cur = j.find("parent").get("link")
         X = X @ checked_se3(tcp_transforms[side])
+        elbow = "zarm_"+prefix+"4_link"
+        lower, cur, visited = np.eye(4), wrist, set()
+        while cur != elbow:
+            if cur in visited: raise ValueError("Cyclic URDF forearm chain")
+            visited.add(cur)
+            j = by_child[cur]
+            if j.get("type") not in {"fixed", "revolute", "continuous"}:
+                raise ValueError("Forearm retarget requires a rigid revolute chain")
+            lower = _origin(j) @ lower; cur = j.find("parent").get("link")
+        lower_length = _positive(np.linalg.norm(lower[:3, 3]), "robot forearm length")
         result["arms"][side] = {"shoulder_frame": shoulder, "joint7_frame": wrist,
+            "elbow_frame": elbow, "neutral_elbow_to_joint7_m": lower_length,
+            "forearm_direction_source": "ELBOW_TO_PALM_PROXY_NOT_WRIST_CALIBRATION",
             "configured_tcp_parent": end, "joint7_to_tcp": X.tolist(),
             "shoulder_to_joint7_necessary_upper_m": radius, "bound_chain": chain}
     return result

@@ -248,7 +248,7 @@
   <param name="sg100_output_limit" value="$(arg sg100_output_limit)" />
   <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
   <node pkg="wheel_arm_abs_vel" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" />
-  <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch">
+  <include file="$(find wheel_arm_abs_vel)/launch/absolute_arm_trajectory.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>
   <!-- Read at node startup; load last so included YAML cannot override audit rates. -->
@@ -266,10 +266,13 @@
     </include>
   </group>
   <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) > 0 and (int(arg('robot_version')) != 63 or not arg('with_ik')) and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires a validated full wheel model (S63 with_ik=false) wheel mode, measured estimator and no external MPC'])" />
-  <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand" />
+  <arg name="head_control_mode" default="vr_follow" doc="fixed / vr_follow / track_hand" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
-  <include file="$(find wheel_arm_abs_vel)/launch/absolute_head_control.launch">
-    <arg name="head_control_mode" value="$(arg head_control_mode)" />
+  <arg name="head_track_hand" default="false" doc="TEST-compatible opt-in standalone hand tracking" />
+  <param name="/absolute/head_control_mode" value="$(arg head_control_mode)" />
+  <param name="/absolute/head_mode_service" value="$(eval '/head_control_node/set_head_control_mode' if arg('head_track_hand') or arg('head_control_mode') == 'track_hand' else '/quest3/set_head_control_mode')" />
+  <include file="$(find wheel_arm_abs_vel)/launch/absolute_head_control.launch" if="$(eval arg('head_track_hand') or arg('head_control_mode') == 'track_hand')">
+    <arg name="head_control_mode" value="track_hand" />
     <arg name="head_track_target" value="$(arg head_track_target)" />
   </include>
 </launch>

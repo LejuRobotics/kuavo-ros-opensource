@@ -642,6 +642,17 @@ namespace wheel_absolute_control
 
     controllerNh_.setParam("/robot_init_state_param", robot_init_state_param);
     controllerNh_.setParam("/standJointState", stand_arm_joint_state_vector);
+    // Publish the final pose after qibeng/custom overrides, not a second IK
+    // default. A latched message also supports starting VR after the controller.
+    startupArmPosePub_ = controllerNh_.advertise<sensor_msgs::JointState>(
+        "/whole_body_velocity_ik/controller_startup_arm_pose", 1, true);
+    sensor_msgs::JointState startupArmPose;
+    startupArmPose.header.stamp = ros::Time::now();
+    startupArmPose.header.frame_id = "robot_version/" + std::to_string(rb_version.version_number());
+    startupArmPose.position = stand_arm_joint_state_vector;
+    startupArmPose.name.assign(manipulatorModelInfo_.dofNames.end() - armNum_,
+                               manipulatorModelInfo_.dofNames.end());
+    startupArmPosePub_.publish(startupArmPose);
 
     // 设置初始状态参数
     std::vector<double> initial_state_vector(robot_init_state_param);
@@ -789,7 +800,7 @@ namespace wheel_absolute_control
     // 初始化重置cmdVel Ruckig规划器服务客户端
     reset_cmd_vel_ruckig_client_ = controllerNh_.serviceClient<std_srvs::SetBool>("/mobile_manipulator_reset_cmd_vel_ruckig");
     reset_cmd_vel_ruckig_srv_.request.data = true;  // 重新规划
-    last_reset_cmd_vel_ruckig_time_ = ros::Time::now();  // 初始化重置时间
+    last_reset_cmd_vel_ruckig_time_ = std::chrono::steady_clock::now();  // 初始化重置时间
 
     // 设置CPU内核隔离（与双足 humanoidController 一致；init 在 controlLoop 线程调用）
     if (is_real_)
@@ -1222,7 +1233,8 @@ namespace wheel_absolute_control
         // The existing action only moves the selected arm joints; keep base
         // and folding joints exactly at this measured startup anchor.
         preTargetActions_.head(info.stateDim-armNum_) = startActions_.head(info.stateDim-armNum_);
-        startup_action_start_time_ = startup_action_last_time_ = time.toSec();
+        startup_action_start_time_ = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
         startup_action_started_ = true;
         if (headNum_ > 0 && !control_data_manager_->initializeHeadFromMeasured(
               sensors_data_new.jointPos_.tail(headNum_))) {
@@ -1230,13 +1242,10 @@ namespace wheel_absolute_control
         }
         ROS_INFO("[FixedVelocityIK] hardware ready: starting configured arm preparation");
       }
-      if (time.toSec() < startup_action_last_time_) {
-        stopDynamics("Startup action clock moved backwards"); return false;
-      }
-      startup_action_last_time_ = time.toSec();
       performSimpleActions(time);
       if (dynamics_fault_) return false;
-      if (time.toSec()-startup_action_start_time_ < robotPreActionDesiredTime_+.5) return true;
+      if (std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count()
+          - startup_action_start_time_ < robotPreActionDesiredTime_+.5) return true;
       ROS_INFO("[FixedVelocityIK] Configured arm preparation completed; entering measured hold");
     }
     optimizedState_mrt_ = observation_wheel_.state;
@@ -1267,24 +1276,21 @@ namespace wheel_absolute_control
       return;
     }
 
-    static const double firstTime = time.toSec();
-    double curTime = time.toSec() - firstTime;
-    static double lastTime = curTime - dt_;
-    double dt = curTime - lastTime;
-    // 外环 controlLoop 若用 nanosleep 定频，ros::Time 抖动会使 dt 略小于 dt_。
-    // 旧逻辑 if(dt < dt_) return 会漏拍，下一拍 dt≈2*dt_ → 频率在 500/250Hz 跳变。
-    // 仅过滤明显的同拍重复（半周期内），并优先采用外环 wall elapsed。
-    const double wallElapsed = dfd.toSec();
-    if (wallElapsed > 0.5 * dt_ && wallElapsed < 1.8 * dt_) {
-      dt = wallElapsed;
-    }
+    // The nodelet supplies a steady-clock period. Never fall back to ROS time:
+    // chrony may step the wall clock while the hardware is running.
+    // A short call does not execute dynamics. Retain its interval until an
+    // accepted update so both the control timeline and dynamics see all time.
+    pending_control_period_ += dfd.toSec();
+    const double dt = pending_control_period_;
     if (dt < 0.5 * dt_) {
       if (ros_logger_) {
         ros_logger_->publishValue("/monitor/wheel/update_early_return", 1.0);
       }
       return;
     }
-    lastTime = curTime;
+    pending_control_period_ = 0.0;
+    control_elapsed_time_ += dt;
+    const double curTime = control_elapsed_time_;
     const auto updateWallStart = std::chrono::steady_clock::now();
     auto stageStart = updateWallStart;
     auto markStageMs = [&](const char* stage) {
@@ -1943,9 +1949,7 @@ namespace wheel_absolute_control
       markStageMs("publish");
       // 注意：这里是「两次成功 update 的间隔」，含 sleep/被抢占，不是 WBC 计算耗时。
       // WBC 本体耗时见 /monitor/time_cost/wbc；分段见 /monitor/time_cost/wheel/*。
-      static double last_ros_time = time.toSec();
-      ros_logger_->publishValue("/monitor/time_cost/controller_loop_time", (time.toSec() - last_ros_time) * 1000.0);
-      last_ros_time = time.toSec();
+      ros_logger_->publishValue("/monitor/time_cost/controller_loop_time", dt * 1000.0);
     }
 
     // Wheels have their own initialized command channel, independent of arm
@@ -2000,13 +2004,13 @@ namespace wheel_absolute_control
       velCmdMsg = humanoidController_wheel_wbc::applyMobileBaseLock(velCmdMsg, base_locked_);
       const bool stopped = velCmdMsg.linear.x == 0.0 &&
                            velCmdMsg.linear.y == 0.0 && velCmdMsg.angular.z == 0.0;
-      if (base_locked_ || stopped || last_cmd_vel_pub_time_.isZero() ||
-          (time - last_cmd_vel_pub_time_).toSec() >= 1.0 / base_cmd_vel_publish_rate_) {
+      if (base_locked_ || stopped || last_cmd_vel_pub_time_ == std::chrono::steady_clock::time_point{} ||
+          std::chrono::duration<double>(updateWallStart - last_cmd_vel_pub_time_).count() >= 1.0 / base_cmd_vel_publish_rate_) {
         cmdVelPub_.publish(velCmdMsg);
-        last_cmd_vel_pub_time_ = time;
+        last_cmd_vel_pub_time_ = updateWallStart;
       }
     }else{
-        ros::Time current_time = ros::Time::now();
+        const auto current_time = std::chrono::steady_clock::now();
         bool should_reset = false;
 
         // 立即重置
@@ -2016,7 +2020,7 @@ namespace wheel_absolute_control
           ROS_INFO("[vel_control] 检测到速度控制模式切换，重置cmdVel Ruckig规划器");
         }
         // 检测时间间隔：超过设定间隔时重置
-        else if((current_time - last_reset_cmd_vel_ruckig_time_).toSec() >= RESET_CMD_VEL_RUCKIG_INTERVAL)
+        else if(std::chrono::duration<double>(current_time - last_reset_cmd_vel_ruckig_time_).count() >= RESET_CMD_VEL_RUCKIG_INTERVAL)
         {
           should_reset = true;
         }
@@ -2282,13 +2286,17 @@ namespace wheel_absolute_control
     current_time_ = sensorData.timeStamp_;
     if(!observation_initialized_){
       last_time_ = current_time_;
+      last_sensor_receive_ = sensorData.receiveStamp_;
       last_yaw_ = odomData[2]; // 初始时的yaw角度
       accumulated_yaw_ = odomData[2]; // 初始化累积yaw角度
       observation_initialized_ = true;
     }
-    double diff_time = (current_time_ - last_time_).toSec();
-    ros::Duration period = ros::Duration(diff_time);
-
+    // Hardware observations use their monotonic receive stamps. Keep recorded
+    // source time for playback/simulation, where /clock defines the timeline.
+    const double diff_time = is_real_
+        ? std::chrono::duration<double>(sensorData.receiveStamp_ - last_sensor_receive_).count()
+        : (current_time_ - last_time_).toSec();
+    last_sensor_receive_ = sensorData.receiveStamp_;
     last_time_ = current_time_;
 
     // 使用angles包进行角度累积计算
@@ -2309,7 +2317,7 @@ namespace wheel_absolute_control
     observation_wheel_.input[1] = velWorld[1];
     observation_wheel_.input[2] = velWorld[2];
     observation_wheel_.input.tail(4 + 7*2) = sensorData.jointVel_.head(4 + 7*2);
-    observation_wheel_.time += period.toSec();
+    observation_wheel_.time += diff_time;
 
     // 打印末端估计
     // use pinocchio
@@ -2773,7 +2781,7 @@ namespace wheel_absolute_control
     {
       prev_whole_torso_ctrl_ = false;
       is_transitioning_ = true;
-      transition_start_time_ = current_time_.toSec();
+      transition_start_time_ = observation_wheel_.time;
       waist_transition_start_pos_ = current_pos;  // 使用当前位置作为腰部过渡起点
       std::cout << "开始过渡: 从 " << current_pos.transpose() << " 到 " << target_pos.transpose() << std::endl;
     }
@@ -2785,7 +2793,7 @@ namespace wheel_absolute_control
     }
 
     // 计算过渡进度
-    double current_time = current_time_.toSec();
+    double current_time = observation_wheel_.time;
     double elapsed_time = current_time - transition_start_time_;
     double progress = std::min(elapsed_time / kTransitionTime, 1.0);
 
@@ -3040,7 +3048,8 @@ namespace wheel_absolute_control
   {
     const auto sample = wheel_absolute_control::sampleStartupArmAction(
         startActions_, preTargetActions_-startActions_,
-        time.toSec()-startup_action_start_time_, robotPreActionDesiredTime_);
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count()
+            - startup_action_start_time_, robotPreActionDesiredTime_);
     const vector_t& curTargetState_wbc = sample.q;
     const vector_t& inputVelocity = sample.v;
     ros_logger_->publishVector("/humanoid_wheel/curTargetState_wbc", curTargetState_wbc);

@@ -195,6 +195,11 @@ class PinocchioVelocityIk {
     std::cout << "MODEL=PINOCCHIO IK_LEVEL=VELOCITY QP=WEIGHTED_SINGLE SOLVER=PROXQP ELBOW=XYZ_SOFT SEW=OFF HQP=OFF SQP=OFF REFERENCE=D_STYLE_TRAPEZOIDAL" << std::endl;
 
 #ifndef VELOCITY_IK_OFFLINE_TEST
+    if (use_controller_startup_arm_pose_) {
+      controller_startup_arm_pose_sub_ = nh_.subscribe(
+          "/whole_body_velocity_ik/controller_startup_arm_pose", 1,
+          &PinocchioVelocityIk::controllerStartupArmPoseCallback, this);
+    }
     continuity_pub_ = nh_.advertise<std_msgs::Float64MultiArray>(
         "/whole_body_velocity_ik/diagnostics/continuity_v1", 2);
     manual_lower_service_ = nh_.advertiseService(
@@ -1362,6 +1367,7 @@ class PinocchioVelocityIk {
     load_lower_array("lower_joint_acceleration_cap",
                      &lower_joint_acceleration_cap_);
     std::vector<double> preparation_arm_position;
+    pnh_.param("use_controller_startup_arm_pose", use_controller_startup_arm_pose_, false);
     if (pnh_.getParam("preparation_arm_position", preparation_arm_position)) {
       if (preparation_arm_position.size() != kDualArmDof ||
           !std::all_of(preparation_arm_position.begin(),
@@ -5707,7 +5713,52 @@ class PinocchioVelocityIk {
 
   }
 
+  void controllerStartupArmPoseCallback(const sensor_msgs::JointState::ConstPtr& pose) {
+    if (!pose || !use_controller_startup_arm_pose_ ||
+        pose->header.frame_id != "robot_version/" + std::to_string(robot_version_) ||
+        pose->position.size() != kDualArmDof || pose->name.size() != kDualArmDof) {
+      ROS_ERROR_THROTTLE(2.0, "[VelocityIk] Rejecting controller startup pose with mismatched model/layout");
+      return;
+    }
+    for (int joint = 0; joint < kDualArmDof; ++joint) {
+      const int index = armDecisionIndex(joint / kJointsPerArm, joint % kJointsPerArm);
+      const double q = pose->position.at(joint);
+      if (pose->name.at(joint) != dof_layout_.decisionNames().at(index) ||
+          !std::isfinite(q) || q < joint_safe_lower_(index) || q > joint_safe_upper_(index)) {
+        ROS_ERROR_THROTTLE(2.0, "[VelocityIk] Rejecting controller startup pose outside the arm safety envelope or joint ordering");
+        return;
+      }
+    }
+    std::lock_guard<std::mutex> lock(controller_startup_arm_pose_mutex_);
+    if (controller_startup_arm_pose_) {
+      if (pose->position != controller_startup_arm_pose_->position)
+        ROS_ERROR_THROTTLE(2.0, "[VelocityIk] Controller startup arm pose changed; restart IK to adopt a new endpoint");
+      return;
+    }
+    controller_startup_arm_pose_ = pose;
+  }
+
   void publishOnce() {
+    if (use_controller_startup_arm_pose_ && !controller_startup_arm_pose_applied_) {
+      sensor_msgs::JointState::ConstPtr pose;
+      {
+        std::lock_guard<std::mutex> lock(controller_startup_arm_pose_mutex_);
+        pose = controller_startup_arm_pose_;
+      }
+      if (!pose) {
+        ROS_WARN_THROTTLE(2.0, "[VelocityIk] Waiting for the controller startup arm pose before acquiring IK authority");
+        return;
+      }
+      for (int joint = 0; joint < kDualArmDof; ++joint) {
+        const int index = armDecisionIndex(joint / kJointsPerArm, joint % kJointsPerArm);
+        preparation_position_(index) = pose->position.at(joint);
+        startup_preparation_position_(index) = pose->position.at(joint);
+      }
+      controller_startup_arm_pose_applied_ = true;
+      pnh_.setParam("resolved_preparation_position",
+          std::vector<double>(preparation_position_.data(), preparation_position_.data() + preparation_position_.size()));
+      ROS_INFO("[VelocityIk] PREPARE arms now use the controller startup pose");
+    }
     ++diagnostic_tick_;
     velocity_ik::runtime_probe::point(10);
     if(reference_transport_.shm()){
@@ -7906,6 +7957,11 @@ class PinocchioVelocityIk {
   ros::NodeHandle pnh_;
   ros::Subscriber target_sub_;
   ros::Subscriber robot_state_sub_;
+  ros::Subscriber controller_startup_arm_pose_sub_;
+  std::mutex controller_startup_arm_pose_mutex_;
+  sensor_msgs::JointState::ConstPtr controller_startup_arm_pose_;
+  bool use_controller_startup_arm_pose_{false};
+  bool controller_startup_arm_pose_applied_{false};
   ros::Subscriber base_state_sub_;
   ros::Subscriber mode_sub_;
   ros::Publisher q_pub_;

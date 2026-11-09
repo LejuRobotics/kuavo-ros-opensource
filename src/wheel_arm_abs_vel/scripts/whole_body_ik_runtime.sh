@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 package_dir="$(rospack find wheel_arm_abs_vel)"
+# Source the same pinned Noble dependencies used at build time.
+workspace_dir="$(cd "$package_dir/../.." && pwd)"
+if [[ -f "$workspace_dir/.absolute-deps/setup.bash" ]]; then
+  source "$workspace_dir/.absolute-deps/setup.bash"
+fi
 mode="${1:?Expected runtime role}"
 shift
 if [[ "${KUAVO_SCHED_APPLIED:-}" != 1 && "${KUAVO_RUNTIME_PARTITION:-1}" != 0 ]]; then
@@ -13,7 +18,8 @@ case "$mode" in
     # EtherCAT loads its link driver by name with dlopen().
     case "$(uname -m)" in
       x86_64) ethercat_lib_dir="$package_dir/../kuavo-ros-control-lejulib/hardware_plant/lib/EC_Master/lib" ;;
-      aarch64) ethercat_lib_dir="$package_dir/../kuavo-ros-control-lejulib/hardware_plant/lib/EC_Master/lib_aarch64" ;;
+      # Use the link driver shipped with the ARM64 SDK linked by hardware CMake.
+      aarch64) ethercat_lib_dir="$package_dir/../kuavo-ros-control-lejulib/hardware_plant/lib/EC_Master_arm64/Bin/Linux/aarch64" ;;
       *) ethercat_lib_dir="" ;;
     esac
     if [[ -n "$ethercat_lib_dir" && -d "$ethercat_lib_dir" ]]; then

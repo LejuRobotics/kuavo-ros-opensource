@@ -306,7 +306,7 @@ class Quest3ArmInfoTransformer:
                     translation[0], translation[1], translation[2],
                     calibration_rpy[0], calibration_rpy[1], calibration_rpy[2],
                 )
-        from target_geometry_contract import LEGACY, WRIST, validate_wrist_contract
+        from target_geometry_contract import LEGACY, WRIST, MODEL_FOREARM, validate_wrist_contract
         self.tcp_geometry_binding = rospy.get_param("/quest3/teleop_tcp/geometry_binding", {})
         self.tcp_geometry_mode = self.tcp_geometry_binding.get("operation_mode", LEGACY)
         self.tcp_wrist_contract = None
@@ -322,6 +322,16 @@ class Quest3ArmInfoTransformer:
                     actual = self.tcp_geometry_binding["ik_model"]["arms"][side]["joint7_to_tcp"]
                     if not np.allclose(contract["joint7_to_tcp"], actual, atol=1e-10, rtol=0):
                         raise ValueError("Wrist contract uses a different robot tool transform")
+        elif self.tcp_geometry_mode == MODEL_FOREARM:
+            self.tcp_model_forearm = self.tcp_geometry_binding["ik_model"]["arms"]
+            for side in ("Left", "Right"):
+                arm = self.tcp_model_forearm[side]
+                if not np.isfinite(arm["neutral_elbow_to_joint7_m"]) or arm["neutral_elbow_to_joint7_m"] <= 0:
+                    raise ValueError("Invalid URDF forearm length")
+                # This mode uses the adapter's orientation only. A positional
+                # source calibration must use its explicit wrist contract.
+                if any(np.linalg.norm(x[side][:3, 3]) > 1e-12 for x in self.tcp_source_to_tcp.values()):
+                    raise ValueError("MODEL_FOREARM_DIRECTION_6D requires zero source positional adapter")
         elif self.tcp_geometry_mode != LEGACY:
             raise ValueError("Unsupported target geometry mode")
         inventory = dict(self.tcp_geometry_binding)
@@ -330,12 +340,17 @@ class Quest3ArmInfoTransformer:
         inventory["source_to_tcp_applied"] = self.tcp_geometry_mode == LEGACY
         inventory["wrist_contract"] = self.tcp_wrist_contract or {}
         rospy.set_param("/quest3/teleop_tcp/resolved_contract", inventory)
-        rospy.loginfo(
-            "[Quest3 TCP] full chest-relative retarget enabled in parallel: "
-            "upper=%.4fm, forearm-map=%.4fm",
-            self.upper_arm_length,
-            self.tcp_forearm_retarget_length,
-        )
+        if self.tcp_geometry_mode == MODEL_FOREARM:
+            rospy.loginfo("[Quest3 TCP] MODEL_FOREARM_DIRECTION_6D: upper=%.6fm, forearm-to-joint7 L/R=%.6f/%.6fm; rotating URDF tool",
+                          self.upper_arm_length, self.tcp_model_forearm["Left"]["neutral_elbow_to_joint7_m"],
+                          self.tcp_model_forearm["Right"]["neutral_elbow_to_joint7_m"])
+        else:
+            rospy.loginfo(
+                "[Quest3 TCP] full chest-relative retarget enabled in parallel: "
+                "upper=%.4fm, forearm-map=%.4fm",
+                self.upper_arm_length,
+                self.tcp_forearm_retarget_length,
+            )
         if rospy.has_param("/quest3/base_height_offset"):
             bias_chest_to_base_link[2] = rospy.get_param("/quest3/base_height_offset")
             print(f"get rosparams base_height_offset: {bias_chest_to_base_link[2]}")
@@ -1247,6 +1262,13 @@ class Quest3ArmInfoTransformer:
         # Opt-in, fail-closed wrist mapping. Legacy output is bit-for-bit
         # unchanged unless a complete source/model contract was admitted.
         mapped_joint7 = None
+        if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "MODEL_FOREARM_DIRECTION_6D":
+            from target_geometry_contract import map_model_forearm
+            tcp_position, joint7_position = map_model_forearm(
+                elbow_hint, forearm_direction, R_tcp, self.tcp_model_forearm[side])
+            mapped_joint7 = np.eye(4)
+            mapped_joint7[:3, :3] = R_tcp @ np.asarray(self.tcp_model_forearm[side]["joint7_to_tcp"])[:3, :3].T
+            mapped_joint7[:3, 3] = joint7_position
         if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "WRIST_CONSISTENT_6D":
             from target_geometry_contract import map_wrist_pose
             contract = self.tcp_wrist_contract["sources"].get(source_key, {}).get(side)
@@ -1523,6 +1545,12 @@ class Quest3ArmInfoTransformer:
             source_key, tool = self._active_source_to_tcp(side)
             axes, lower, offset = self.init_R_wC, self.tcp_forearm_retarget_length, tool[:3, 3]
             wrist_offset = wrist_rotation = None
+            if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "MODEL_FOREARM_DIRECTION_6D":
+                arm = self.tcp_model_forearm[side]
+                model_tool = np.asarray(arm["joint7_to_tcp"])
+                lower = arm["neutral_elbow_to_joint7_m"]
+                wrist_rotation = tool[:3, :3] @ model_tool[:3, :3].T
+                offset = model_tool[:3, 3]
             if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "WRIST_CONSISTENT_6D":
                 contract = self.tcp_wrist_contract["sources"][source_key][side]
                 X = np.asarray(contract["source_to_wrist"])

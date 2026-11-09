@@ -60,7 +60,7 @@ with tempfile.TemporaryDirectory(prefix="quest-config-test-") as tmp:
                 return False
         try:
             wait_until(master_ready)
-            for version in (62, 63, 210062, 310062, 400062):
+            for version in (60, 61, 62, 63, 200062, 210062, 300062, 310062, 400062, 400063):
                 cfg = roslaunch.config.load_config_default(
                     [(str(PACKAGE/"launch/quest_velocity_ik.launch"),
                       ["robot_version:=%d" % version, "ip_address:=127.0.0.1"])],
@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix="quest-config-test-") as tmp:
                         params[prefix+"gaitCommandFile"] = params[prefix+"gaitCommandFile"].replace(
                             "kuavo_v%d" % version, "kuavo_v%d" % ((63 if version == 62 else 62)))
                     if case == "invalid_version":
-                        params[prefix+"robot_version"] = 34
+                        params[prefix+"robot_version"] = 0
                     if case == "wrong_reference":
                         params[prefix+"referenceFile"] = ref.replace(
                             "kuavo_v%d" % version, "kuavo_v%d" % ((63 if version == 62 else 62)))
@@ -134,11 +134,11 @@ with tempfile.TemporaryDirectory(prefix="quest-config-test-") as tmp:
                                 assert proc.returncode != 0, path.read_text()
                                 assert "[QuestStartup]" in path.read_text(), path.read_text()
                                 expected = {
-                                    "missing_version": "explicit ~robot_version",
+                                    "missing_version": "positive ~robot_version",
                                     "missing_reference": "explicit ~referenceFile",
                                     "missing_gait": "explicit ~gaitCommandFile",
                                     "wrong_gait": "gaitCommandFile must be the readable matching S",
-                                    "invalid_version": "explicit ~robot_version",
+                                    "invalid_version": "positive ~robot_version",
                                     "wrong_reference": "readable matching S",
                                     "controller_mismatch": "/robot_version mismatch",
                                 }[case]
@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory(prefix="quest-config-test-") as tmp:
                         finally:
                             stop(proc)
             print(json.dumps(results, indent=2))
-            print("PASS: 50 isolated FSM startup/configuration cases; no hardware or input source started")
+            print("PASS: %d isolated FSM startup/configuration cases; no hardware or input source started" % len(results))
         finally:
             for child in reversed(children):
                 stop(child)

@@ -140,17 +140,19 @@ template<typename T>
 struct TimestampedData {
     T data;
     ros::Time timestamp;
+    std::chrono::steady_clock::time_point received{};
     bool valid = false;
 
     void update(const T& new_data) {
         data = new_data;
         timestamp = ros::Time::now();
+        received = std::chrono::steady_clock::now();
         valid = true;
     }
 
     bool isValid(double timeout_sec = 1.0) const {
         if (!valid) return false;
-        return (ros::Time::now() - timestamp).toSec() < timeout_sec;
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - received).count() < timeout_sec;
     }
 };
 

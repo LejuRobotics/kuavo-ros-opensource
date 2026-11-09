@@ -1,0 +1,436 @@
+- tar:
+    local-name: actionlib/actionlib
+    uri: https://github.com/ros-gbp/actionlib-release/archive/release/noetic/actionlib/1.14.3-1.tar.gz
+    version: actionlib-release-release-noetic-actionlib-1.14.3-1
+- tar:
+    local-name: angles
+    uri: https://github.com/ros-gbp/geometry_angles_utils-release/archive/release/noetic/angles/1.9.14-1.tar.gz
+    version: geometry_angles_utils-release-release-noetic-angles-1.9.14-1
+- tar:
+    local-name: bond_core/bond
+    uri: https://github.com/ros-gbp/bond_core-release/archive/release/noetic/bond/1.8.7-1.tar.gz
+    version: bond_core-release-release-noetic-bond-1.8.7-1
+- tar:
+    local-name: bond_core/bond_core
+    uri: https://github.com/ros-gbp/bond_core-release/archive/release/noetic/bond_core/1.8.7-1.tar.gz
+    version: bond_core-release-release-noetic-bond_core-1.8.7-1
+- tar:
+    local-name: bond_core/bondcpp
+    uri: https://github.com/ros-gbp/bond_core-release/archive/release/noetic/bondcpp/1.8.7-1.tar.gz
+    version: bond_core-release-release-noetic-bondcpp-1.8.7-1
+- tar:
+    local-name: bond_core/bondpy
+    uri: https://github.com/ros-gbp/bond_core-release/archive/release/noetic/bondpy/1.8.7-1.tar.gz
+    version: bond_core-release-release-noetic-bondpy-1.8.7-1
+- tar:
+    local-name: bond_core/smclib
+    uri: https://github.com/ros-gbp/bond_core-release/archive/release/noetic/smclib/1.8.7-1.tar.gz
+    version: bond_core-release-release-noetic-smclib-1.8.7-1
+- tar:
+    local-name: catkin
+    uri: https://github.com/ros-gbp/catkin-release/archive/release/noetic/catkin/0.8.12-1.tar.gz
+    version: catkin-release-release-noetic-catkin-0.8.12-1
+- tar:
+    local-name: class_loader
+    uri: https://github.com/ros-gbp/class_loader-release/archive/release/noetic/class_loader/0.5.2-1.tar.gz
+    version: class_loader-release-release-noetic-class_loader-0.5.2-1
+- tar:
+    local-name: cmake_modules
+    uri: https://github.com/ros-gbp/cmake_modules-release/archive/release/noetic/cmake_modules/0.5.2-1.tar.gz
+    version: cmake_modules-release-release-noetic-cmake_modules-0.5.2-1
+- tar:
+    local-name: common_msgs/actionlib_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/actionlib_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-actionlib_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/common_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/common_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-common_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/diagnostic_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/diagnostic_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-diagnostic_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/geometry_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/geometry_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-geometry_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/nav_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/nav_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-nav_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/sensor_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/sensor_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-sensor_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/shape_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/shape_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-shape_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/stereo_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/stereo_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-stereo_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/trajectory_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/trajectory_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-trajectory_msgs-1.13.2-1
+- tar:
+    local-name: common_msgs/visualization_msgs
+    uri: https://github.com/ros-gbp/common_msgs-release/archive/release/noetic/visualization_msgs/1.13.2-1.tar.gz
+    version: common_msgs-release-release-noetic-visualization_msgs-1.13.2-1
+- tar:
+    local-name: diagnostics/diagnostic_updater
+    uri: https://github.com/ros-gbp/diagnostics-release/archive/release/noetic/diagnostic_updater/1.12.1-1.tar.gz
+    version: diagnostics-release-release-noetic-diagnostic_updater-1.12.1-1
+- tar:
+    local-name: dynamic_reconfigure
+    uri: https://github.com/ros-gbp/dynamic_reconfigure-release/archive/release/noetic/dynamic_reconfigure/1.7.6-1.tar.gz
+    version: dynamic_reconfigure-release-release-noetic-dynamic_reconfigure-1.7.6-1
+- tar:
+    local-name: gencpp
+    uri: https://github.com/ros-gbp/gencpp-release/archive/release/noetic/gencpp/0.7.2-1.tar.gz
+    version: gencpp-release-release-noetic-gencpp-0.7.2-1
+- tar:
+    local-name: geneus
+    uri: https://github.com/tork-a/geneus-release/archive/release/noetic/geneus/3.0.0-1.tar.gz
+    version: geneus-release-release-noetic-geneus-3.0.0-1
+- tar:
+    local-name: genlisp
+    uri: https://github.com/ros-gbp/genlisp-release/archive/release/noetic/genlisp/0.4.18-1.tar.gz
+    version: genlisp-release-release-noetic-genlisp-0.4.18-1
+- tar:
+    local-name: genmsg
+    uri: https://github.com/ros-gbp/genmsg-release/archive/release/noetic/genmsg/0.6.1-1.tar.gz
+    version: genmsg-release-release-noetic-genmsg-0.6.1-1
+- tar:
+    local-name: gennodejs
+    uri: https://github.com/sloretz/gennodejs-release/archive/release/noetic/gennodejs/2.0.2-1.tar.gz
+    version: gennodejs-release-release-noetic-gennodejs-2.0.2-1
+- tar:
+    local-name: genpy
+    uri: https://github.com/ros-gbp/genpy-release/archive/release/noetic/genpy/0.6.18-1.tar.gz
+    version: genpy-release-release-noetic-genpy-0.6.18-1
+- tar:
+    local-name: geographic_info/geographic_msgs
+    uri: https://github.com/ros-geographic-info/geographic_info-release/archive/release/noetic/geographic_msgs/0.5.6-1.tar.gz
+    version: geographic_info-release-release-noetic-geographic_msgs-0.5.6-1
+- tar:
+    local-name: geometry/eigen_conversions
+    uri: https://github.com/ros-gbp/geometry-release/archive/release/noetic/eigen_conversions/1.13.4-1.tar.gz
+    version: geometry-release-release-noetic-eigen_conversions-1.13.4-1
+- tar:
+    local-name: geometry/tf
+    uri: https://github.com/ros-gbp/geometry-release/archive/release/noetic/tf/1.13.4-1.tar.gz
+    version: geometry-release-release-noetic-tf-1.13.4-1
+- tar:
+    local-name: geometry2/tf2
+    uri: https://github.com/ros-gbp/geometry2-release/archive/release/noetic/tf2/0.7.10-1.tar.gz
+    version: geometry2-release-release-noetic-tf2-0.7.10-1
+- tar:
+    local-name: geometry2/tf2_geometry_msgs
+    uri: https://github.com/ros-gbp/geometry2-release/archive/release/noetic/tf2_geometry_msgs/0.7.10-1.tar.gz
+    version: geometry2-release-release-noetic-tf2_geometry_msgs-0.7.10-1
+- tar:
+    local-name: geometry2/tf2_kdl
+    uri: https://github.com/ros-gbp/geometry2-release/archive/release/noetic/tf2_kdl/0.7.10-1.tar.gz
+    version: geometry2-release-release-noetic-tf2_kdl-0.7.10-1
+- tar:
+    local-name: geometry2/tf2_msgs
+    uri: https://github.com/ros-gbp/geometry2-release/archive/release/noetic/tf2_msgs/0.7.10-1.tar.gz
+    version: geometry2-release-release-noetic-tf2_msgs-0.7.10-1
+- tar:
+    local-name: geometry2/tf2_py
+    uri: https://github.com/ros-gbp/geometry2-release/archive/release/noetic/tf2_py/0.7.10-1.tar.gz
+    version: geometry2-release-release-noetic-tf2_py-0.7.10-1
+- tar:
+    local-name: geometry2/tf2_ros
+    uri: https://github.com/ros-gbp/geometry2-release/archive/release/noetic/tf2_ros/0.7.10-1.tar.gz
+    version: geometry2-release-release-noetic-tf2_ros-0.7.10-1
+- tar:
+    local-name: image_common/image_transport
+    uri: https://github.com/ros-gbp/image_common-release/archive/release/noetic/image_transport/1.12.1-1.tar.gz
+    version: image_common-release-release-noetic-image_transport-1.12.1-1
+- tar:
+    local-name: interactive_markers
+    uri: https://github.com/ros-gbp/interactive_markers-release/archive/release/noetic/interactive_markers/1.12.2-1.tar.gz
+    version: interactive_markers-release-release-noetic-interactive_markers-1.12.2-1
+- tar:
+    local-name: joystick_drivers/joy
+    uri: https://github.com/ros-gbp/joystick_drivers-release/archive/release/noetic/joy/1.15.1-1.tar.gz
+    version: joystick_drivers-release-release-noetic-joy-1.15.1-1
+- tar:
+    local-name: kdl_parser/kdl_parser
+    uri: https://github.com/ros-gbp/kdl_parser-release/archive/release/noetic/kdl_parser/1.14.2-1.tar.gz
+    version: kdl_parser-release-release-noetic-kdl_parser-1.14.2-1
+- tar:
+    local-name: message_generation
+    uri: https://github.com/ros-gbp/message_generation-release/archive/release/noetic/message_generation/0.4.1-1.tar.gz
+    version: message_generation-release-release-noetic-message_generation-0.4.1-1
+- tar:
+    local-name: message_runtime
+    uri: https://github.com/ros-gbp/message_runtime-release/archive/release/noetic/message_runtime/0.4.13-1.tar.gz
+    version: message_runtime-release-release-noetic-message_runtime-0.4.13-1
+- tar:
+    local-name: metapackages/ros_base
+    uri: https://github.com/ros-gbp/metapackages-release/archive/release/noetic/ros_base/1.5.0-1.tar.gz
+    version: metapackages-release-release-noetic-ros_base-1.5.0-1
+- tar:
+    local-name: metapackages/ros_core
+    uri: https://github.com/ros-gbp/metapackages-release/archive/release/noetic/ros_core/1.5.0-1.tar.gz
+    version: metapackages-release-release-noetic-ros_core-1.5.0-1
+- tar:
+    local-name: nodelet_core/nodelet
+    uri: https://github.com/ros-gbp/nodelet_core-release/archive/release/noetic/nodelet/1.11.2-1.tar.gz
+    version: nodelet_core-release-release-noetic-nodelet-1.11.2-1
+- tar:
+    local-name: nodelet_core/nodelet_core
+    uri: https://github.com/ros-gbp/nodelet_core-release/archive/release/noetic/nodelet_core/1.11.2-1.tar.gz
+    version: nodelet_core-release-release-noetic-nodelet_core-1.11.2-1
+- tar:
+    local-name: nodelet_core/nodelet_topic_tools
+    uri: https://github.com/ros-gbp/nodelet_core-release/archive/release/noetic/nodelet_topic_tools/1.11.2-1.tar.gz
+    version: nodelet_core-release-release-noetic-nodelet_topic_tools-1.11.2-1
+- tar:
+    local-name: pluginlib
+    uri: https://github.com/ros-gbp/pluginlib-release/archive/release/noetic/pluginlib/1.13.2-1.tar.gz
+    version: pluginlib-release-release-noetic-pluginlib-1.13.2-1
+- tar:
+    local-name: realtime_tools
+    uri: https://github.com/ros-gbp/realtime_tools-release/archive/release/noetic/realtime_tools/1.16.1-1.tar.gz
+    version: realtime_tools-release-release-noetic-realtime_tools-1.16.1-1
+- tar:
+    local-name: resource_retriever
+    uri: https://github.com/ros-gbp/resource_retriever-release/archive/release/noetic/resource_retriever/1.12.10-1.tar.gz
+    version: resource_retriever-release-release-noetic-resource_retriever-1.12.10-1
+- tar:
+    local-name: robot_state_publisher
+    uri: https://github.com/ros-gbp/robot_state_publisher-release/archive/release/noetic/robot_state_publisher/1.15.3-1.tar.gz
+    version: robot_state_publisher-release-release-noetic-robot_state_publisher-1.15.3-1
+- tar:
+    local-name: ros/mk
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/mk/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-mk-1.15.10-1
+- tar:
+    local-name: ros/ros
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/ros/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-ros-1.15.10-1
+- tar:
+    local-name: ros/rosbash
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/rosbash/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-rosbash-1.15.10-1
+- tar:
+    local-name: ros/rosboost_cfg
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/rosboost_cfg/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-rosboost_cfg-1.15.10-1
+- tar:
+    local-name: ros/rosbuild
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/rosbuild/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-rosbuild-1.15.10-1
+- tar:
+    local-name: ros/rosclean
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/rosclean/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-rosclean-1.15.10-1
+- tar:
+    local-name: ros/roscreate
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/roscreate/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-roscreate-1.15.10-1
+- tar:
+    local-name: ros/roslang
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/roslang/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-roslang-1.15.10-1
+- tar:
+    local-name: ros/roslib
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/roslib/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-roslib-1.15.10-1
+- tar:
+    local-name: ros/rosmake
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/rosmake/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-rosmake-1.15.10-1
+- tar:
+    local-name: ros/rosunit
+    uri: https://github.com/ros-gbp/ros-release/archive/release/noetic/rosunit/1.15.10-1.tar.gz
+    version: ros-release-release-noetic-rosunit-1.15.10-1
+- tar:
+    local-name: ros_comm/message_filters
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/message_filters/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-message_filters-1.17.4-1
+- tar:
+    local-name: ros_comm/ros_comm
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/ros_comm/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-ros_comm-1.17.4-1
+- tar:
+    local-name: ros_comm/rosbag
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosbag/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosbag-1.17.4-1
+- tar:
+    local-name: ros_comm/rosbag_storage
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosbag_storage/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosbag_storage-1.17.4-1
+- tar:
+    local-name: ros_comm/roscpp
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/roscpp/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-roscpp-1.17.4-1
+- tar:
+    local-name: ros_comm/rosgraph
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosgraph/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosgraph-1.17.4-1
+- tar:
+    local-name: ros_comm/roslaunch
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/roslaunch/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-roslaunch-1.17.4-1
+- tar:
+    local-name: ros_comm/roslz4
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/roslz4/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-roslz4-1.17.4-1
+- tar:
+    local-name: ros_comm/rosmaster
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosmaster/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosmaster-1.17.4-1
+- tar:
+    local-name: ros_comm/rosmsg
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosmsg/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosmsg-1.17.4-1
+- tar:
+    local-name: ros_comm/rosnode
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosnode/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosnode-1.17.4-1
+- tar:
+    local-name: ros_comm/rosout
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosout/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosout-1.17.4-1
+- tar:
+    local-name: ros_comm/rosparam
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosparam/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosparam-1.17.4-1
+- tar:
+    local-name: ros_comm/rospy
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rospy/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rospy-1.17.4-1
+- tar:
+    local-name: ros_comm/rosservice
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rosservice/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rosservice-1.17.4-1
+- tar:
+    local-name: ros_comm/rostest
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rostest/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rostest-1.17.4-1
+- tar:
+    local-name: ros_comm/rostopic
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/rostopic/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-rostopic-1.17.4-1
+- tar:
+    local-name: ros_comm/roswtf
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/roswtf/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-roswtf-1.17.4-1
+- tar:
+    local-name: ros_comm/topic_tools
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/topic_tools/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-topic_tools-1.17.4-1
+- tar:
+    local-name: ros_comm/xmlrpcpp
+    uri: https://github.com/ros-gbp/ros_comm-release/archive/release/noetic/xmlrpcpp/1.17.4-1.tar.gz
+    version: ros_comm-release-release-noetic-xmlrpcpp-1.17.4-1
+- tar:
+    local-name: ros_comm_msgs/rosgraph_msgs
+    uri: https://github.com/ros-gbp/ros_comm_msgs-release/archive/release/noetic/rosgraph_msgs/1.11.4-1.tar.gz
+    version: ros_comm_msgs-release-release-noetic-rosgraph_msgs-1.11.4-1
+- tar:
+    local-name: ros_comm_msgs/std_srvs
+    uri: https://github.com/ros-gbp/ros_comm_msgs-release/archive/release/noetic/std_srvs/1.11.4-1.tar.gz
+    version: ros_comm_msgs-release-release-noetic-std_srvs-1.11.4-1
+- tar:
+    local-name: ros_control/controller_interface
+    uri: https://github.com/ros-gbp/ros_control-release/archive/release/noetic/controller_interface/0.20.0-1.tar.gz
+    version: ros_control-release-release-noetic-controller_interface-0.20.0-1
+- tar:
+    local-name: ros_control/controller_manager
+    uri: https://github.com/ros-gbp/ros_control-release/archive/release/noetic/controller_manager/0.20.0-1.tar.gz
+    version: ros_control-release-release-noetic-controller_manager-0.20.0-1
+- tar:
+    local-name: ros_control/controller_manager_msgs
+    uri: https://github.com/ros-gbp/ros_control-release/archive/release/noetic/controller_manager_msgs/0.20.0-1.tar.gz
+    version: ros_control-release-release-noetic-controller_manager_msgs-0.20.0-1
+- tar:
+    local-name: ros_control/hardware_interface
+    uri: https://github.com/ros-gbp/ros_control-release/archive/release/noetic/hardware_interface/0.20.0-1.tar.gz
+    version: ros_control-release-release-noetic-hardware_interface-0.20.0-1
+- tar:
+    local-name: ros_control/transmission_interface
+    uri: https://github.com/ros-gbp/ros_control-release/archive/release/noetic/transmission_interface/0.20.0-1.tar.gz
+    version: ros_control-release-release-noetic-transmission_interface-0.20.0-1
+- tar:
+    local-name: ros_controllers/joint_state_controller
+    uri: https://github.com/ros-gbp/ros_controllers-release/archive/release/noetic/joint_state_controller/0.22.0-1.tar.gz
+    version: ros_controllers-release-release-noetic-joint_state_controller-0.22.0-1
+- tar:
+    local-name: ros_environment
+    uri: https://github.com/ros-gbp/ros_environment-release/archive/release/noetic/ros_environment/1.3.2-1.tar.gz
+    version: ros_environment-release-release-noetic-ros_environment-1.3.2-1
+- tar:
+    local-name: rosbag_migration_rule
+    uri: https://github.com/ros-gbp/rosbag_migration_rule-release/archive/release/noetic/rosbag_migration_rule/1.0.2-1.tar.gz
+    version: rosbag_migration_rule-release-release-noetic-rosbag_migration_rule-1.0.2-1
+- tar:
+    local-name: rosconsole
+    uri: https://github.com/ros-gbp/rosconsole-release/archive/release/noetic/rosconsole/1.14.4-1.tar.gz
+    version: rosconsole-release-release-noetic-rosconsole-1.14.4-1
+- tar:
+    local-name: rosconsole_bridge
+    uri: https://github.com/ros-gbp/rosconsole_bridge-release/archive/release/noetic/rosconsole_bridge/0.5.5-1.tar.gz
+    version: rosconsole_bridge-release-release-noetic-rosconsole_bridge-0.5.5-1
+- tar:
+    local-name: roscpp_core/cpp_common
+    uri: https://github.com/ros-gbp/roscpp_core-release/archive/release/noetic/cpp_common/0.7.3-1.tar.gz
+    version: roscpp_core-release-release-noetic-cpp_common-0.7.3-1
+- tar:
+    local-name: roscpp_core/roscpp_core
+    uri: https://github.com/ros-gbp/roscpp_core-release/archive/release/noetic/roscpp_core/0.7.3-1.tar.gz
+    version: roscpp_core-release-release-noetic-roscpp_core-0.7.3-1
+- tar:
+    local-name: roscpp_core/roscpp_serialization
+    uri: https://github.com/ros-gbp/roscpp_core-release/archive/release/noetic/roscpp_serialization/0.7.3-1.tar.gz
+    version: roscpp_core-release-release-noetic-roscpp_serialization-0.7.3-1
+- tar:
+    local-name: roscpp_core/roscpp_traits
+    uri: https://github.com/ros-gbp/roscpp_core-release/archive/release/noetic/roscpp_traits/0.7.3-1.tar.gz
+    version: roscpp_core-release-release-noetic-roscpp_traits-0.7.3-1
+- tar:
+    local-name: roscpp_core/rostime
+    uri: https://github.com/ros-gbp/roscpp_core-release/archive/release/noetic/rostime/0.7.3-1.tar.gz
+    version: roscpp_core-release-release-noetic-rostime-0.7.3-1
+- tar:
+    local-name: roslint
+    uri: https://github.com/ros-gbp/roslint-release/archive/release/noetic/roslint/0.12.0-1.tar.gz
+    version: roslint-release-release-noetic-roslint-0.12.0-1
+- tar:
+    local-name: roslisp
+    uri: https://github.com/ros-gbp/roslisp-release/archive/release/noetic/roslisp/1.9.25-1.tar.gz
+    version: roslisp-release-release-noetic-roslisp-1.9.25-1
+- tar:
+    local-name: rospack
+    uri: https://github.com/ros-gbp/rospack-release/archive/release/noetic/rospack/2.6.4-1.tar.gz
+    version: rospack-release-release-noetic-rospack-2.6.4-1
+- tar:
+    local-name: std_msgs
+    uri: https://github.com/ros-gbp/std_msgs-release/archive/release/noetic/std_msgs/0.5.14-1.tar.gz
+    version: std_msgs-release-release-noetic-std_msgs-0.5.14-1
+- tar:
+    local-name: unique_identifier/uuid_msgs
+    uri: https://github.com/ros-geographic-info/unique_identifier-release/archive/release/noetic/uuid_msgs/1.0.6-1.tar.gz
+    version: unique_identifier-release-release-noetic-uuid_msgs-1.0.6-1
+- tar:
+    local-name: urdf/urdf
+    uri: https://github.com/ros-gbp/urdf-release/archive/release/noetic/urdf/1.13.4-1.tar.gz
+    version: urdf-release-release-noetic-urdf-1.13.4-1
+- tar:
+    local-name: urdf/urdf_parser_plugin
+    uri: https://github.com/ros-gbp/urdf-release/archive/release/noetic/urdf_parser_plugin/1.13.4-1.tar.gz
+    version: urdf-release-release-noetic-urdf_parser_plugin-1.13.4-1
+- tar:
+    local-name: vision_opencv/cv_bridge
+    uri: https://github.com/ros-gbp/vision_opencv-release/archive/release/noetic/cv_bridge/1.16.2-1.tar.gz
+    version: vision_opencv-release-release-noetic-cv_bridge-1.16.2-1
+- tar:
+    local-name: xacro
+    uri: https://github.com/ros-gbp/xacro-release/archive/release/noetic/xacro/1.14.20-1.tar.gz
+    version: xacro-release-release-noetic-xacro-1.14.20-1

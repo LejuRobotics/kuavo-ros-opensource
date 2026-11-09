@@ -454,8 +454,9 @@ void ControlDataManager::applyHeadVelDeltaCommands() {
     //   - >0.3s without new msg → cmd_head_vel_ = 0
     //   - explicit/timeout zero → clear sticky flag (stop integrating)
     // Oneshot delta: consume once.
-    // Time axis: ros::Time::now() (ControlDataManager has no ReferenceManager loop; lazy-integrate on getHead)
-    const double now = ros::Time::now().toSec();
+    // Elapsed integration/freshness must not follow system-clock corrections.
+    const double now = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 
     bool integrateVel = false;
     bool hasDelta = false;

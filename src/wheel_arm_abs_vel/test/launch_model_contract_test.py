@@ -76,6 +76,24 @@ class LaunchModelTest(unittest.TestCase):
                                    'hand_rotation_q': 1.42}.items():
                     self.assertEqual(config.params['/ik_ros_uni/vr_kalman_' + key].value, value)
 
+    def test_quest_sample_hold_is_opt_in_and_pico_retains_original_updates(self):
+        for entry, extra, expected in (
+                ('quest_velocity_ik.launch', [], 0.),
+                ('quest_velocity_ik.launch', ['vr_kalman_sample_hold_seconds:=0.05'], .05),
+                ('pico_velocity_ik.launch', [], 0.)):
+            cfg = self.load(entry, ['robot_version:=62']+extra)
+            for channel in ('chest', 'position'):
+                self.assertEqual(cfg.params['/ik_ros_uni/vr_kalman_'+channel+'_sample_hold_seconds'].value,
+                                 expected)
+
+    def test_ik_reset_uses_controller_startup_pose_with_explicit_rollback(self):
+        for entry in ('quest_velocity_ik.launch', 'quest_direct_tcp_v9_46.launch'):
+            for enabled in (True, False):
+                cfg = self.load(entry, ['robot_version:=62', 'ee_type:=qibeng',
+                                       'use_controller_startup_arm_pose:='+str(enabled).lower()])
+                self.assertEqual(cfg.params['/absolute_velocity_ik/use_controller_startup_arm_pose'].value,
+                                 enabled)
+
     def test_private_sim_motor_servo_and_rollback(self):
         cfg = self.load("load_kuavo_mujoco_velocity_ik.launch", ["robot_version:=62"])
         self.assertEqual(cfg.params["/dynamics_backend"].value, "rnea")
@@ -114,6 +132,10 @@ class LaunchModelTest(unittest.TestCase):
                             self.assertEqual(bridge[0].type, "absolute_end_effector.py")
                             command = shlex.split(bridge[0].args)
                             command.remove("--bridge")  # Read-only resolver: never launch a bridge in a test.
+                            self.assertIn('--machine-mode=auto', command)
+                            # This case checks the model-config fallback, without
+                            # a ROS master. Machine inventory has its own suite.
+                            command[command.index('--machine-mode=auto')] = '--machine-mode=false'
                             result = subprocess.run(["/usr/bin/python3",
                                 str(PACKAGE/"scripts/absolute_end_effector.py")] + command,
                                 capture_output=True, text=True, check=True)

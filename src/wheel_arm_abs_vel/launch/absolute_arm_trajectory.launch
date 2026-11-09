@@ -1,0 +1,21 @@
+<launch>
+  <!-- The absolute entry already resolved the full wheel model. The shared
+       trajectory launch reloads robot_version_manager for 210062/310062 without
+       forwarding robot_version, overwriting that contract from the environment. -->
+  <arg name="robot_version" />
+  <arg name="arm_restore_flag" default="true" />
+  <param name="joint_state_topic" value="kuavo_arm_traj" />
+  <param name="joint_state_unit" value="deg" />
+  <group if="$(eval optenv('KUAVO_CONTROL_SCHEME', '') == 'rl')">
+    <param name="end_effector_joints_num" value="12" />
+  </group>
+  <node pkg="humanoid_plan_arm_trajectory" type="arm_trajectory_bezier_process.py"
+        name="autostart_arm_trajectory_bezier_demo" output="screen">
+    <env name="ROBOT_VERSION" value="$(arg robot_version)" />
+    <param name="arm_restore_flag" value="$(arg arm_restore_flag)" />
+  </node>
+  <node pkg="humanoid_plan_arm_trajectory" type="humanoid_plan_arm_trajectory_node"
+        name="humanoid_plan_arm_trajectory_node" output="screen">
+    <env name="ROBOT_VERSION" value="$(arg robot_version)" />
+  </node>
+</launch>

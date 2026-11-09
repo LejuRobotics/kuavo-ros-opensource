@@ -168,8 +168,9 @@ target_link_libraries(velocity_ik_model_alignment_test PRIVATE velocity_ik_model
 add_test(NAME velocity_ik_model_alignment_test COMMAND velocity_ik_model_alignment_test
   ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s62.json)
 foreach(model 210062 310062)
-  add_test(NAME velocity_ik_model_alignment_s${model}_test COMMAND velocity_ik_model_alignment_test
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s${model}.json ${model})
+  add_test(NAME velocity_ik_model_alignment_s${model}_test COMMAND ${PYTHON_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../test/model_alignment_runner.py
+    $<TARGET_FILE:velocity_ik_model_alignment_test> ${model})
 endforeach()
 add_test(NAME velocity_ik_model_alignment_s63_test COMMAND velocity_ik_model_alignment_test
   ${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_assets ${CMAKE_CURRENT_SOURCE_DIR}/../config/model_s63.json 63)
@@ -245,6 +246,19 @@ if(CATKIN_ENABLE_TESTING)
 endif()
 
 if(CATKIN_ENABLE_TESTING)
+  add_executable(velocity_ik_controller_ready_pose_test controller_ready_pose_test.cpp)
+  target_include_directories(velocity_ik_controller_ready_pose_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
+  target_link_libraries(velocity_ik_controller_ready_pose_test PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
+  target_compile_options(velocity_ik_controller_ready_pose_test PRIVATE -UNDEBUG)
+  add_dependencies(velocity_ik_controller_ready_pose_test ${VELOCITY_IK_MESSAGE_TARGETS})
+  foreach(model 62 63)
+    foreach(pose qibeng generic custom)
+      add_test(NAME velocity_ik_controller_ready_pose_${model}_${pose}
+        COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_controller_ready_pose_regression.py
+        $<TARGET_FILE:velocity_ik_controller_ready_pose_test> ${model} ${pose})
+      set_tests_properties(velocity_ik_controller_ready_pose_${model}_${pose} PROPERTIES TIMEOUT 120)
+    endforeach()
+  endforeach()
   add_executable(velocity_ik_manual_lower_body_test manual_lower_body_test.cpp)
   target_compile_options(velocity_ik_manual_lower_body_test PRIVATE -UNDEBUG)
   add_test(NAME velocity_ik_manual_lower_body_test COMMAND velocity_ik_manual_lower_body_test)
