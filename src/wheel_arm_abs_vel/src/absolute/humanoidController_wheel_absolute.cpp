@@ -396,6 +396,13 @@ namespace wheel_absolute_control
     {
       controllerNh_.getParam("/arm_move_spd", arm_move_spd_);
     }
+    controllerNh_.param("/arm_reset_speed_rad_s", arm_reset_speed_rad_s_, 0.7);
+    if (!std::isfinite(arm_reset_speed_rad_s_) || arm_reset_speed_rad_s_ <= 0.0)
+    {
+      ROS_ERROR("arm_reset_speed_rad_s must be finite and positive");
+      return false;
+    }
+    ROS_INFO_STREAM("[ArmControl] reset speed: " << arm_reset_speed_rad_s_ << " rad/s");
     // This plugin has no MPC owner or incremental fallback.
     bool external_mpc = false;
     controllerNh_.param("/use_external_mpc", external_mpc, false);
@@ -2500,8 +2507,9 @@ namespace wheel_absolute_control
       return newDesiredArmState;
     }
 
-    // 使用固定步长插值（弧度）
-    scalar_t stepDistance = 0.001;  // 每步移动0.1弧度（约5.7度）
+    // 仅退出外部控制的复位按速度插值；其余切换沿用原步长。
+    const bool externalArmReset = prev_arm_trajectory_mode_ == 2 && arm_trajectory_mode_ == 1;
+    const scalar_t stepDistance = externalArmReset ? arm_reset_speed_rad_s_ * dt_ : 0.001;
 
     // 如果一步就能到达，直接返回目标状态
     if (stepDistance >= totalDistance)
@@ -2610,7 +2618,9 @@ namespace wheel_absolute_control
     scalar_t error = (interpolated_target - target_arm_state).norm();
 
     // 对于外部控制模式(模式2)，由于目标位置可能持续变化，使用更宽松的收敛条件
-    scalar_t convergence_threshold = (arm_trajectory_mode_ == 2) ? 0.1 : 0.05;
+    const bool externalArmReset = prev_arm_trajectory_mode_ == 2 && arm_trajectory_mode_ == 1;
+    scalar_t convergence_threshold = externalArmReset
+        ? 1e-6 : ((arm_trajectory_mode_ == 2) ? 0.1 : 0.05);
     if(error < convergence_threshold)
     {
       isArmControlModeChanged_ = false;

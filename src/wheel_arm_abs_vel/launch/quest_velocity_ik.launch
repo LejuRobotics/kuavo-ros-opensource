@@ -26,6 +26,8 @@
   <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
   <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <arg name="preparation_arm_velocity_limit" default="1.5" />
+  <arg name="preparation_gain" default="4.0" />
   <include file="$(find wheel_arm_abs_vel)/launch/velocity_model_contract.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>
@@ -274,6 +276,9 @@
     <param name="base_admission_dwell_time" value="0.40" type="double" />
     <param name="base_admission_on_threshold" value="0.10" type="double" />
     <param name="base_admission_off_threshold" value="0.03" type="double" />
+    <!-- X+A PREPARE: arm speed cap in rad/s, proportional gain in 1/s. -->
+    <param name="preparation_arm_velocity_limit" value="$(arg preparation_arm_velocity_limit)" type="double" />
+    <param name="preparation_gain" value="$(arg preparation_gain)" type="double" />
     <!-- 400062 permits measured arm error up to 0.15 rad at PREPARE completion. -->
     <param name="preparation_measured_position_tolerance" value="$(eval 0.15 if int(arg('robot_version')) == 400062 else 0.06)" type="double" />
     <rosparam param="preparation_arm_position">[0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0, 0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0]</rosparam>
