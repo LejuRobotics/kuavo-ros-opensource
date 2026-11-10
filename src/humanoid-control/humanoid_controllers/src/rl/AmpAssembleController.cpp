@@ -263,11 +263,24 @@ bool AmpAssembleController::ownsMember(const std::string& name) const {
 }
 bool AmpAssembleController::requestMember(const std::string& name) {
   for (size_t i = 0; i < members_.size(); ++i) if (members_[i] && members_[i]->getName() == name) {
-    if(i==static_cast<size_t>(Role::Run) && !inputSnapshot().thermal_can_enter) return false;
-    bool accepted;
-    { std::lock_guard<std::mutex> lock(policy_mutex_); accepted = policy_.request(static_cast<Role>(i)); }
-    if (accepted && i != static_cast<size_t>(Role::Manipulate)) {
-      std::lock_guard<std::mutex> input_lock(input_mutex_);
+    const auto role = static_cast<Role>(i);
+    if (role == Role::Run && !inputSnapshot().thermal_can_enter) return false;
+    const bool arm_action = child()->hasActiveArmActionSession();
+    // Keep admission and latch cleanup atomic with member requests and input callbacks.
+    std::lock_guard<std::mutex> policy_lock(policy_mutex_);
+    std::lock_guard<std::mutex> input_lock(input_mutex_);
+    const auto now = ros::Time::now();
+    const bool action = member(Role::Manipulate) && action_active_ && recent(action_stamp_, now, external_timeout_);
+    const bool external = recent(external_stamp_, now, external_timeout_) || action ||
+        pending_external_mode_.load() || external_handoff_pending_.load();
+    // SOFT ignores background operation intent: allow its explicit exit to
+    // discard that latch, but never cancel a real action or manipulation handoff.
+    const bool soft_exit = policy_.activeRole() == Role::Soft && !policy_.blending() &&
+        !policy_.exiting() && policy_.requestedRole() != Role::Manipulate &&
+        !action && !arm_action && !pending_external_mode_.load();
+    if (role != Role::Manipulate && external && !soft_exit) return false;
+    const bool accepted = policy_.request(role);
+    if (accepted && role != Role::Manipulate) {
       external_handoff_pending_ = pending_external_mode_ = false;
       external_stamp_ = ros::Time();
     }
@@ -314,12 +327,14 @@ void AmpAssembleController::refreshCommandGates(const AmpFamilyPolicy::Input& in
   std::lock_guard<std::mutex> lock(policy_mutex_);
   walking_allowed_ = isActive() && policy_.walkingAllowed(in);
   external_allowed_ = isActive() && policy_.externalAllowed();
-  const bool stopped = in.body_speed <= stop_speed_;
+  // A manipulation handoff holds stance independently of residual body speed;
+  // the physical entry-speed check remains in the policy transition guard.
+  const bool hold_stance = in.body_speed <= stop_speed_ || policy_.manipulationStanceRequired(in);
   for (auto& model : members_) if (model)
   {
     const bool inactive = model.get() != child() && model.get() != blend_source_;
     const bool source_stopping = model.get() != child() && in.external_control;
-    model->setGaitExecutionGate(!walking_allowed_.load() || inactive || source_stopping, stopped);
+    model->setGaitExecutionGate(!walking_allowed_.load() || inactive || source_stopping, hold_stance);
   }
 }
 void AmpAssembleController::advance(bool outer_blend_active) {

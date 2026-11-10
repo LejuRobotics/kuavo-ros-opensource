@@ -160,9 +160,18 @@ class AmpFamilyPolicy {
   }
   Role activeRole() const { return active_; }
   bool externalAllowed() const { return active_ == Role::Manipulate && !blending_ && !exiting_; }
+  bool manipulationStanceRequired(const Input& in) const {
+    if (active_ == Role::Manipulate || (blending_ && source_ == Role::Manipulate)) return true;
+    // Keep RUN retirement unchanged; WALK/WAQ stop in stance throughout an
+    // incoming manipulation handoff, including the intermediate WALK blend.
+    return (active_ == Role::Walk || active_ == Role::WalkWaq) &&
+        !(blending_ && source_ == Role::Run) && enabled(Role::Manipulate) &&
+        (in.external_control || requested_ == Role::Manipulate);
+  }
   bool walkingAllowed(const Input& in) const {
+    if (manipulationStanceRequired(in)) return false;
     if (active_ == Role::Soft || (exiting_ && !directRlExit())) return false;
-    if (in.external_control && enabled(Role::Manipulate) && active_ != Role::Manipulate) return false;
+    if (in.external_control && enabled(Role::Manipulate)) return false;
     return !requested_ || *requested_ == active_ ||
            (*requested_ != Role::Manipulate && *requested_ != Role::Soft);
   }
@@ -193,10 +202,14 @@ class AmpFamilyPolicy {
     const char* idle_reason = "idle";
     if (thermal_exit) { desired = Role::Walk; }
     else if (exiting_) { desired = directRlExit() ? active_ : Role::Walk; idle_reason = "exit_ready"; }
+    else if (external && active_ != Role::Soft) {
+      desired = Role::Manipulate;
+      // Discard competing requests rather than replaying them after the task.
+      if (requested_ != Role::Manipulate) requested_.reset();
+    }
     else if (requested_) desired = *requested_;
     else if (active_ == Role::Soft) return wait("soft_latched");
-    else if (active_ == Role::WalkWaq && !external) return wait("walk_waq_selected");
-    else if (external) desired = Role::Manipulate;
+    else if (active_ == Role::WalkWaq) return wait("walk_waq_selected");
     else {
       const bool moving_command = in.command_fresh &&
           (std::hypot(command_x, command_y) > config_.walk_enter ||

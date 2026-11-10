@@ -77,7 +77,7 @@ flowchart LR
 | 自动 W→R | 新鲜原始 x 指令 >`walkTorun`，绝对 yaw 指令 <`runMaxAng`；非 stance、相位有效、估计速度范数 ≥`runMinBodySpeed` |
 | 自动 R→W | 新鲜原始 x 指令 <`runTowalk`；或指令过期且已经 stance；启用肘部门禁时双肘须连续进入配置范围 |
 | 自动 M→W | 平移指令模长或绝对转向指令 >0.05，或存在 walk/trot 意图；没有活动外部操作，手臂交接完成 |
-| W→M | 操作意图或显式请求；stance、实测速度 ≤0.3 m/s |
+| W→M | 操作意图或显式请求；stance、实测速度 ≤0.05 m/s（v55 当前 manipMax） |
 | W→S | 显式请求、stance |
 | S→W | 显式退出、手臂偏角允许退出、完成退阻抗及归位，无活动动作 session |
 
@@ -106,6 +106,15 @@ WALK/RUN 的 x/y/yaw 指令倍率及 command_scalar_state.obsScales 均为 1；�
 `velocityLimits` 用于向遥控器等输入端发布量程，不应视为对所有直接 `/cmd_vel` 发布者的统一限幅保证。负向 x 还保留 `cmdVelLineXNegScale=0.4`；倍率改为 1 不表示取消后退缩放。族内切换只读取 YAML，成员 `.info` 中 `autoControllerSwitch` 是独立控制器的兼容配置。
 
 ## 请求接口与动作
+
+WALK/MANIPULATE 仲裁中，活动或待交接的外部操作意图优先于普通成员选择；
+此时拒绝非 MANIPULATE 成员请求，并在 MANIPULATE 内保持行走通道关闭。
+MANIPULATE 操作期间保持 stance，不因手臂运动引起的身体速度波动恢复零速踏步。
+MANIPULATE 离开前及其到行走成员的混合期间保持 stance，混合完成后才放行行走；
+WAQ/WALK 收到操作意图时也保持 stance（包括经 WALK 中转），实测低速门禁仍用于进入 MANIPULATE。
+站立、实测速度、驻留、混合及手臂交接门禁仍然生效。SOFT 锁存和族退出规则保持原行为。
+稳定 SOFT 下，显式成员请求可清除背景操作消息留下的锁存并按正常归位流程退出；
+真实动作、待交接 MANIPULATE 请求、混合或外部手臂模式交接期间不适用此例外。
 
 按名称请求成员使用 `/humanoid_controller/switch_controller`，名称见成员表。服务成功表示请求受理，不表示混合完成。
 
