@@ -1266,13 +1266,20 @@ class Quest3ArmInfoTransformer:
             self.shoulder_width if side == "Left" else -self.shoulder_width,
             bias_chest_to_base_link[2],
         ])
+        upper_length = self.upper_arm_length
+        forearm_length = self.tcp_forearm_retarget_length
+        if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "MODEL_FOREARM_DIRECTION_6D":
+            neutral = self.tcp_geometry_binding["neutral_robot_geometry"]
+            shoulder_anchor = np.asarray(neutral["shoulder_positions"][side])
+            upper_length = neutral["upper_arm_lengths"][side]
+            forearm_length = self.tcp_model_forearm[side]["neutral_elbow_to_joint7_m"]
         if palm_robot_rotation is None:
             palm_robot_rotation = quaternion_to_matrix(vr_quat2robot_quat(vr_quat, side, 0.0))
         source_key, T_source_to_tcp = self._active_source_to_tcp(side)
         if _NATIVE is not None:
             result = _NATIVE.retarget(shoulder_relative, elbow_relative, palm_relative,
-                R_remove_chest_motion, shoulder_anchor, self.upper_arm_length,
-                self.tcp_forearm_retarget_length, palm_robot_rotation, T_source_to_tcp)
+                R_remove_chest_motion, shoulder_anchor, upper_length,
+                forearm_length, palm_robot_rotation, T_source_to_tcp)
             if result is None:
                 return None, None
             (tcp_position, R_tcp, elbow_hint, mapped_source_position,
@@ -1282,8 +1289,8 @@ class Quest3ArmInfoTransformer:
             forearm_direction = self._unit_vector(palm_relative - elbow_relative)
             if upper_direction is None or forearm_direction is None:
                 return None, None
-            elbow_hint = shoulder_anchor + self.upper_arm_length * upper_direction
-            mapped_source_position = elbow_hint + self.tcp_forearm_retarget_length * forearm_direction
+            elbow_hint = shoulder_anchor + upper_length * upper_direction
+            mapped_source_position = elbow_hint + forearm_length * forearm_direction
             R_mapped_source = R_remove_chest_motion @ palm_robot_rotation
             R_tcp = R_mapped_source @ T_source_to_tcp[:3, :3]
             tcp_position = mapped_source_position + R_mapped_source @ T_source_to_tcp[:3, 3]
@@ -1309,7 +1316,7 @@ class Quest3ArmInfoTransformer:
                 X_tcp, elbow_hint, mapped_joint7 = map_wrist_pose(
                     T_wChest, T_wShoulder[:3, 3], T_wElbow[:3, 3],
                     X_source, self.tcp_wrist_contract["robot_task_from_chest_axes"],
-                    shoulder_anchor, self.upper_arm_length, contract)
+                    shoulder_anchor, upper_length, contract)
             except ValueError:
                 return None, None
             tcp_position, R_tcp = X_tcp[:3, 3], X_tcp[:3, :3]
@@ -1581,11 +1588,13 @@ class Quest3ArmInfoTransformer:
         if self.estimated_bones and tcp_target is not None:
             source_key, tool = self._active_source_to_tcp(side)
             axes, lower, offset = self.init_R_wC, self.tcp_forearm_retarget_length, tool[:3, 3]
+            upper = self.upper_arm_length
             wrist_offset = wrist_rotation = None
             if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "MODEL_FOREARM_DIRECTION_6D":
                 arm = self.tcp_model_forearm[side]
                 model_tool = np.asarray(arm["joint7_to_tcp"])
                 lower = arm["neutral_elbow_to_joint7_m"]
+                upper = self.tcp_geometry_binding["neutral_robot_geometry"]["upper_arm_lengths"][side]
                 wrist_rotation = tool[:3, :3] @ model_tool[:3, :3].T
                 offset = model_tool[:3, 3]
             if getattr(self, "tcp_geometry_mode", "LEGACY_PALM_6D") == "WRIST_CONSISTENT_6D":
@@ -1597,7 +1606,7 @@ class Quest3ArmInfoTransformer:
                 lower = contract["forearm_to_joint7_m"]
                 offset = np.asarray(contract["joint7_to_tcp"])[:3, 3]
             self.tcp_estimated_rates[side] = mapped_rates(
-                c, s, e, h, axes, self.upper_arm_length, lower, tcp_rotation,
+                c, s, e, h, axes, upper, lower, tcp_rotation,
                 offset, wrist_offset, wrist_rotation)
         if side == "Left":
             self.left_tcp_target = tcp_target
@@ -1625,6 +1634,8 @@ class Quest3ArmInfoTransformer:
                 shoulder = np.array([bias_chest_to_base_link[0],
                     self.shoulder_width if side == "Left" else -self.shoulder_width,
                     bias_chest_to_base_link[2]])
+                if self.tcp_geometry_mode == "MODEL_FOREARM_DIRECTION_6D":
+                    shoulder = np.asarray(self.tcp_geometry_binding["neutral_robot_geometry"]["shoulder_positions"][side])
                 self._pending_arm_markers.append((side, tcp_target[0], tcp_elbow_hint, shoulder, chest_pose))
             return
 

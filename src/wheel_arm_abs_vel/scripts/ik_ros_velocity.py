@@ -5348,13 +5348,22 @@ if __name__ == "__main__":
         # constructing legacy ArmIk here delayed raw-input availability and
         # created an unnecessary second kinematic owner.
         from tools.velocity_tcp_geometry import resolve_velocity_tcp_geometry
-        velocity_geometry = resolve_velocity_tcp_geometry(
-            model_config, robot_version,
-            rospy.get_param("~velocity_tcp_forearm_length", None),
-            rospy.get_param("~velocity_tcp_geometry_id", ""),
-        )
-        rospy.set_param("/quest3/teleop_tcp/forearm_retarget_length", velocity_geometry["forearm_retarget_length"])
         from tools.target_geometry_contract import model_geometry, LEGACY, WRIST, MODEL_FOREARM
+        geometry_mode = rospy.get_param("~velocity_target_geometry_mode", MODEL_FOREARM)
+        if geometry_mode not in (LEGACY, WRIST, MODEL_FOREARM):
+            raise ValueError("Unknown velocity target geometry mode")
+        velocity_geometry = {"robot_version": str(robot_version), "operation_mode": geometry_mode}
+        # Every full wheel model uses its own URDF forearm/tool geometry by
+        # default. Resolve the old scalar only for an explicitly selected mode
+        # that uses it; missing legacy calibration must not block URDF mapping.
+        if geometry_mode != MODEL_FOREARM:
+            velocity_geometry.update(resolve_velocity_tcp_geometry(
+                model_config, robot_version,
+                rospy.get_param("~velocity_tcp_forearm_length", None),
+                rospy.get_param("~velocity_tcp_geometry_id", ""),
+            ))
+            rospy.set_param("/quest3/teleop_tcp/forearm_retarget_length",
+                            velocity_geometry["forearm_retarget_length"])
         # Same velocity-only model selection as the Pinocchio node.
         actual_ik_model = model_file
         if neutral_robot_geometry is not None:
@@ -5373,11 +5382,7 @@ if __name__ == "__main__":
             T[2, 3] += model_config.get("eef_z_offset", 0.)
             tcp_transforms[side] = T
         velocity_geometry["ik_model"] = model_geometry(
-            actual_ik_model, end_frames_name[1:3], tcp_transforms)
-        velocity_geometry["operation_mode"] = rospy.get_param(
-            "~velocity_target_geometry_mode", MODEL_FOREARM if int(robot_version) % 100 == 62 else LEGACY)
-        if velocity_geometry["operation_mode"] not in (LEGACY, WRIST, MODEL_FOREARM):
-            raise ValueError("Unknown velocity target geometry mode")
+            actual_ik_model, end_frames_name[1:3], tcp_transforms, end_frames_name[3:5])
         if velocity_geometry["operation_mode"] == MODEL_FOREARM:
             # A persistent ROS master can retain the scalar from a previous
             # legacy launch. The selected mode owns the geometry: the URDF
@@ -5390,6 +5395,8 @@ if __name__ == "__main__":
                               legacy_forearm_override, MODEL_FOREARM)
             velocity_geometry["geometry_id"] = "URDF_FOREARM_DIRECTION_AND_ROTATING_TOOL_V1"
             velocity_geometry["calibration_status"] = "MODEL_RETARGET_NOT_HUMAN_WRIST_CALIBRATION"
+            velocity_geometry["source_segment"] = "ArmLower origin -> HandPalm origin (direction only)"
+            velocity_geometry["tcp_position"] = "URDF forearm length + rotating URDF tool"
             velocity_geometry["forearm_retarget_length_applied"] = False
             velocity_geometry["forearm_to_joint7_m"] = {
                 side: arm["neutral_elbow_to_joint7_m"] for side, arm in velocity_geometry["ik_model"]["arms"].items()}
@@ -5405,11 +5412,12 @@ if __name__ == "__main__":
         print(
             "Legacy position IK model: disabled; velocity target geometry: " + velocity_geometry["operation_mode"]
         )
-        print(
-            f"upper_arm_length: {upper_arm_length:.3f} m, "
-            f"forearm_retarget_length: "
-            f"{rospy.get_param('/quest3/teleop_tcp/forearm_retarget_length'):.3f} m"
-        )
+        print(f"upper_arm_length: {upper_arm_length:.3f} m")
+        if geometry_mode == MODEL_FOREARM:
+            for side, length in velocity_geometry["forearm_to_joint7_m"].items():
+                print(f"{side} URDF forearm_to_joint7: {length:.6f} m (rotating tool applied separately)")
+        else:
+            print(f"forearm_retarget_length: {velocity_geometry['forearm_retarget_length']:.3f} m")
     else:
         # The legacy position-IK implementation remains available, but its
         # Drake modules are loaded only for that mode.  Velocity takeover must

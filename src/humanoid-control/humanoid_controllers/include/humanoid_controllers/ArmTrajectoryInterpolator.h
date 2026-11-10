@@ -30,6 +30,11 @@ public:
     bool immediateUpdateOnNewTarget{true};
     double targetVAlpha{1.0};
     // Opt-in at controller configuration; false retains the legacy Kalman path.
+    // humanoidController / wheel_wbc load this as enabled (1) unless task.info
+    // overrides it. Short of timeoutSec the tracker coasts at the last command
+    // velocity; a new frame reconnects with commandAccelerationLimit. Only a
+    // true timeout holds pose and zeros velocity. referenceUpdatePeriodSec is
+    // not a brake delay on this path (it still gates the Kalman path).
     bool boundedCommandTracking{false};
     double commandAccelerationLimit{60.0};  // rad/s^2, matches VR command smoothing
     double commandTrackingFrequency{40.0}; // rad/s

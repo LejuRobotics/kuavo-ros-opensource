@@ -44,14 +44,21 @@ class GeometryTest(unittest.TestCase):
             self.assertGreaterEqual(effective[0],old[0],name)
             self.assertLessEqual(effective[1],old[1],name)
             self.assertLess(effective[0],effective[1],name)
-    def test_missing_or_asymmetric_geometry_rejected(self):
+    def test_missing_geometry_rejected_and_asymmetry_preserved(self):
         with self.assertRaises(ValueError):neutral_retarget_geometry(self.canonical,'missing_base',self.config['shoulder_frame_names'],self.config['end_frames_name_ik'][3:5])
         tree=ET.parse(self.canonical)
         joint=next(j for j in tree.getroot().findall('joint') if j.get('name')=='zarm_r1_joint')
         origin=joint.find('origin');values=list(map(float,origin.get('xyz').split()));values[1]+=.01;origin.set('xyz',' '.join(map(str,values)))
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'asymmetric.urdf';tree.write(path)
-            with self.assertRaises(ValueError):self.geometry(path)
+            original, changed = self.geometry(self.canonical), self.geometry(path)
+            np.testing.assert_allclose(changed['shoulder_positions']['Left'],
+                                       original['shoulder_positions']['Left'], atol=1e-12)
+            np.testing.assert_allclose(changed['shoulder_positions']['Right'],
+                np.asarray(original['shoulder_positions']['Right']) + [0., .01, 0.], atol=1e-12)
+            for side in ('Left', 'Right'):
+                self.assertAlmostEqual(changed['upper_arm_lengths'][side],
+                                       original['upper_arm_lengths'][side], 12)
 class Geometry400062Test(GeometryTest):
     version = '400062'
 

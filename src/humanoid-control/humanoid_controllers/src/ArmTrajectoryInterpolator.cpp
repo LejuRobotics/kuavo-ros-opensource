@@ -306,7 +306,6 @@ bool ArmTrajectoryInterpolator::isFiniteVector(const Eigen::VectorXd& vec) {
 void ArmTrajectoryInterpolator::trackBoundedCommand(const ros::Time& now, double elapsedSec) {
   const Eigen::VectorXd rawV = target_.hasTargetV ? target_.targetV
                                                : Eigen::VectorXd::Zero(target_.targetQ.size());
-  const double period = std::max(1e-4, config_.referenceUpdatePeriodSec);
   const double wn = config_.commandTrackingFrequency;
   // Small integration steps preserve damping under irregular controller scheduling.
   const int steps = std::max(1, static_cast<int>(std::ceil(elapsedSec / 0.001)));
@@ -314,15 +313,16 @@ void ArmTrajectoryInterpolator::trackBoundedCommand(const ros::Time& now, double
   for (int step = 0; step < steps; ++step) {
     const double age = std::max(0.0, (now - target_.msgStamp).toSec() -
                                         elapsedSec + (step + 1) * dt);
-    // One source period at full speed, then one period braking to zero.
-    // The integral is bounded: a stale sample can never extrapolate indefinitely.
-    const double brakingTime = std::clamp(age - period, 0.0, period);
-    const double projectionTime = std::min(age, period) + brakingTime -
-                                  0.5 * brakingTime * brakingTime / period;
-    const double velocityScale = 1.0 - brakingTime / period;
+    // Short of timeoutSec (handled in compute()), coast at the last command
+    // velocity like 1.4.0 ultra-fast passthrough. Do not start braking after
+    // one referenceUpdatePeriod: a 30–57 ms SHM hole would otherwise reach
+    // v=0 by two periods (~20 ms) and then catch up at the accel clamp.
+    // A new frame reconnects through that same clamp. Only a true timeout
+    // holds pose and immediately zeros velocity.
+    const double projectionTime = age;
     for (Eigen::Index i = 0; i < smoothQ_.size(); ++i) {
       const double refQ = target_.targetQ[i] + rawV[i] * projectionTime;
-      const double refV = rawV[i] * velocityScale;
+      const double refV = rawV[i];
       const double acceleration = std::clamp(
           wn * wn * (refQ - smoothQ_[i]) +
               2.0 * config_.commandTrackingDamping * wn * (refV - smoothV_[i]),
