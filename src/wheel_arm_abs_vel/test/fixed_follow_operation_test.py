@@ -294,6 +294,47 @@ class FixedFollowTest(unittest.TestCase):
         self.n._absolute_latest_measured_q=None;self.start();clock.now+=12.1;self.fresh()
         self.n._advance_fixed_request();self.assertEqual(self.n._fixed_operation_phase,5)
         self.assertIsNone(self.n._fixed_pending_operation)
+    def _record_failed_hold_requests(self):
+        n=self.n;calls=[]
+        n._Mapper__send_srv=True
+        n._reset_tracking_session_source_locked=lambda:None
+        n._finish_absolute_session=lambda *args:Mapper._finish_absolute_session(n,*args)
+        n._request_absolute_hold_mode=lambda:calls.append('hold') or False
+        return calls
+
+    def test_disabled_dependency_timeout_cancels_without_hold_fault(self):
+        n=self.n;n._fixed_control_enabled=False;n._absolute_mode_status=(0,0,False)
+        calls=self._record_failed_hold_requests()
+        self.assertTrue(self.start().result)
+        generation=n._absolute_generation
+        clock.now+=12.1;self.fresh();n._advance_fixed_request()
+        self.assertEqual(calls,[])
+        self.assertFalse(n._absolute_fault_hold_pending)
+        self.assertIsNone(n._fixed_pending_operation)
+        self.assertEqual(n._fixed_operation_phase,5)
+        self.assertGreater(n._absolute_generation,generation)
+        for _ in range(120):n._advance_fixed_request()
+        self.assertEqual(calls,[])
+        # A new explicit request can succeed once the original dependencies
+        # become ready; the timed-out request itself never resumes.
+        n._fixed_control_enabled=True
+        self.assertTrue(self.start().result)
+        self.assertEqual(n._absolute_state,State.SWITCHING)  # beta starts acquisition in this tick
+
+    def test_acquisition_timeout_keeps_existing_hold_handshake(self):
+        n=self.n;n._absolute_mode_status=(0,0,False)
+        calls=self._record_failed_hold_requests();self.start()
+        clock.now+=5.1;self.fresh();n._advance_fixed_request()
+        self.assertEqual(calls,['hold'])
+        self.assertTrue(n._absolute_fault_hold_pending)
+
+    def test_dependency_timeout_with_existing_mode2_keeps_hold_handshake(self):
+        n=self.n;n._fixed_control_enabled=False;n._absolute_mode_status=(2,2,False)
+        calls=self._record_failed_hold_requests();self.start()
+        clock.now+=12.1;self.fresh();n._advance_fixed_request()
+        self.assertEqual(calls,['hold'])
+        self.assertTrue(n._absolute_fault_hold_pending)
+
     def test_mode_ack_without_consumer_times_out(self):
         self.start();self.n._absolute_state=State.ACTIVE;clock.now+=5.1;self.fresh()
         self.n._advance_fixed_request();self.assertEqual(self.n._fixed_operation_phase,5)

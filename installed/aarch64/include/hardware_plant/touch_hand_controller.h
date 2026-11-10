@@ -291,13 +291,13 @@ private:
     bool is_linker_hand_{false};
     std::atomic<bool> l_position_updated_{false};
     std::atomic<bool> r_position_updated_{false};
-    UnsignedFingerArray right_position_;
-    UnsignedFingerArray left_position_;
+    UnsignedFingerArray right_position_{};
+    UnsignedFingerArray left_position_{};
 
     std::atomic<bool> l_speed_updated_{false};
     std::atomic<bool> r_speed_updated_{false};
-    FingerArray right_speed_;
-    FingerArray left_speed_;
+    FingerArray right_speed_{};
+    FingerArray left_speed_{};
 
     FingerStatusArray finger_status_;
     FingerTouchStatusArray finger_touch_status_;
@@ -337,6 +337,7 @@ private:
     int feedback_period_ms_{kFeedbackPeriodDefaultMs};
 
     // 线程安全保护
+    mutable std::mutex command_mutex_;
     mutable std::mutex finger_status_mutex_;
     mutable std::mutex touch_status_mutex_;
 

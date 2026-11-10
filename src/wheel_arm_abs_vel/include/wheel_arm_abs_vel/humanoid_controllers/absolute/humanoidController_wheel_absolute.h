@@ -39,6 +39,7 @@
 #include "humanoid_interface/common/Types.h"
 #include "humanoid_interface/common/TopicLogger.h"
 #include "kuavo_common/common/sensor_data.h"
+#include "kuavo_common/common/AsyncTimingProbe.h"
 #include "humanoid_wheel_interface/HumanoidWheelInterface.h"
 #include "humanoid_wheel_interface/motion_planner/VelocityLimiter.h"
 #include "humanoid_wheel_interface_ros/MobileManipulatorDummyVisualization.h"
@@ -245,6 +246,8 @@ namespace wheel_absolute_control
 
     // 日志
     humanoid::TopicLogger *ros_logger_{nullptr};
+    kuavo_timing::WbcCycle::Publisher cycle_timing_;
+    uint64_t cycle_timing_sequence_{0};
 
     // ========== 底盘急停保护相关 ==========
     ros::Subscriber baseCmdVelStatusSub_;  // 订阅 /move_base/base_cmd_vel_status 话题

@@ -25,6 +25,70 @@ def parse_cpus(value):
     return cpus
 
 
+def _place_control_writer(profile):
+    """Move only the serialized TCP-target socket writer off the FIFO input CPU.
+
+    ROS keeps its queue_size=1/drop-oldest and asynchronous socket semantics.
+    No serializer, target calculation, receive thread or ROS installation is
+    replaced. The narrow ROS1 QueuedConnection hook runs once per connection.
+    """
+    try:
+        from rospy.impl.tcpros_pubsub import QueuedConnection
+    except ImportError:
+        sys.stderr.write("[mapper-interpreter] ROS1 writer affinity unavailable\n")
+        return
+    if getattr(QueuedConnection, '_kuavo_writer_policy', False):
+        return
+    background = set(profile['background_cpus'])
+    protected = set(profile['wbc_cpus'] + profile['ik_cpus'] + profile['driver_reserved_cpus'] + profile['mapper_cpus'])
+    if not background or background & protected:
+        raise ValueError('invalid TCP writer background partition')
+    original_run = getattr(QueuedConnection, '_run', None)
+    if not callable(original_run):
+        sys.stderr.write('[mapper-interpreter] unsupported ROS1 queue API; keeping original writer policy\n')
+        return
+    def run(connection):
+        if getattr(connection._connection, 'name', None) == '/mm/teleop_tcp_target':
+            try:
+                os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+                os.sched_setaffinity(0, background)
+                ctypes.CDLL(None).prctl(15, b'mapper_tcp_tx', 0, 0, 0)
+            except OSError as error:
+                sys.stderr.write('[mapper-interpreter] TCP writer affinity failed: %s\n' % error)
+        return original_run(connection)
+    QueuedConnection._run = run
+    QueuedConnection._kuavo_writer_policy = True
+
+
+def configure_mapper_interpreter():
+    """Place this AGX interpreter before ROS creates receive/supervisor threads.
+
+    NumPy releases the GIL for tiny operations. Spreading one interpreter over
+    background CPUs lets low-priority decoders take its GIL while the FIFO bone
+    thread runs, adding repeated cross-core handoffs. On one Mapper core these
+    threads share the CPU; only the bone thread later opts into FIFO. Diagnostic
+    child processes apply their own background_fence. No other PID is changed.
+    """
+    raw = os.environ.get("KUAVO_RUNTIME_PARTITION_JSON")
+    if not raw:
+        return False
+    profile = json.loads(raw)
+    # runtime_partition emits agx_arm and explicitly opts audited topologies in.
+    # Missing flags (including the legacy Quest entry) must not opt in implicitly.
+    if profile.get("platform") != "agx_arm" or not profile.get("mapper_interpreter_affinity", False):
+        return False
+    cpus = set(profile["mapper_cpus"])
+    protected = set(profile["wbc_cpus"] + profile["ik_cpus"] + profile["driver_reserved_cpus"])
+    if len(cpus) != 1 or cpus & (protected | set(profile["background_cpus"])):
+        raise ValueError("invalid Mapper interpreter partition")
+    os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+    os.sched_setaffinity(0, cpus)
+    if profile.get('mapper_control_writer_background', True):
+        _place_control_writer(profile)
+    sys.stderr.write("[mapper-interpreter] ordinary-policy ROS/GIL threads on CPUs %s; input thread opts into FIFO separately\n" % sorted(cpus))
+    return True
+
+
 class MapperInputScheduler:
     """Apply once per receiving thread, including TCPROS reconnect threads.
 

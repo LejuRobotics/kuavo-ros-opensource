@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <chrono>
 
 namespace eef_controller {
 
@@ -21,6 +22,7 @@ struct ClawState {
 };
 
 struct lejuClawCommand {
+    std::chrono::steady_clock::time_point received_at{};
     std::vector<double> position;
     std::vector<std::string> name;
     std::vector<double> velocity;

@@ -1,3 +1,4 @@
+#include <kuavo_common/common/BackgroundThread.h>
 #include "lejuclaw_controller.h"
 #include <vector>
 #include <filesystem>
@@ -449,16 +450,18 @@ bool LejuClawController::execute(const lejuClawCommand &data, bool is_high_freq,
     // qa: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/3505
 
     // add task
+    if (is_high_freq && !armStreamWatchdog(data.received_at)) {
+        err_msg = "claw stream command expired before dispatch";
+        return false;
+    }
     current_task_ = MotionTask{pos, vel, tor, is_high_freq, from_topic};
 
     // 只有请求成功入队后才更新缓存，保证“上一次目标”确实是上一次被接受的目标。
     last_command_positions_[0] = pos[0];
     last_command_positions_[1] = pos[1];
 
-    // 只有已接受的命令才能改变看门狗状态，且与恢复接管严格串行。
-    if (is_high_freq) {
-        armStreamWatchdog();
-    } else {
+    // Preserve admission/recovery serialization and the receipt-time lease.
+    if (!is_high_freq) {
         disarmStreamWatchdog();
     }
     current_is_high_freq_ = is_high_freq;
@@ -507,18 +510,11 @@ LejuClawController::~LejuClawController(){
     this->close();
 }
 
-void LejuClawController::armStreamWatchdog()
+bool LejuClawController::armStreamWatchdog(std::chrono::steady_clock::time_point received)
 {
-    if (is_can_protocol_) {
-        if (claw_can_ptr_ != nullptr) {
-            claw_can_ptr_->refresh_stream_watchdog();
-        }
-    }
-    else {
-        if (claw_ptr_ != nullptr) {
-            claw_ptr_->refresh_stream_watchdog();
-        }
-    }
+    if (received == std::chrono::steady_clock::time_point{}) received = std::chrono::steady_clock::now();
+    if (is_can_protocol_) return claw_can_ptr_ && claw_can_ptr_->refresh_stream_watchdog(received) != 0;
+    return claw_ptr_ && claw_ptr_->refresh_stream_watchdog(received) != 0;
 }
 
 void LejuClawController::disarmStreamWatchdog()
@@ -537,6 +533,7 @@ void LejuClawController::disarmStreamWatchdog()
 
 void LejuClawController::workerThread()
 {
+    kuavo_thread::background("claw_io");
     while (true) {
         MotionTask task;
         {
@@ -568,6 +565,7 @@ void LejuClawController::workerThread()
 
 bool LejuClawController::initialize(bool init_bmapilib)
 {
+    kuavo_thread::BackgroundScope sdk_inheritance;
     claw_is_executing_ = false;
 
     int ret = 1;

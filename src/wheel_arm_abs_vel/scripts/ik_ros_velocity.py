@@ -54,7 +54,7 @@ from geometry_msgs.msg import Vector3Stamped
 from kuavo_msgs.msg import JoySticks
 from tools.quest3_utils_velocity import Quest3ArmInfoTransformer
 from tools.torso_controls import TorsoControls
-from tools.mapper_input_scheduling import MapperInputScheduler
+from tools.mapper_input_scheduling import MapperInputScheduler, configure_mapper_interpreter
 from tools.optical_input_guard import OpticalInputGuard
 from tools.sg100_vr_gesture import Sg100VrGestureClient
 from tools.noncontrol_publish_process import publisher as diagnostic_publisher
@@ -631,12 +631,6 @@ class IkRos:
         if rospy.get_param('/vr_input_source', 'quest') == 'pico':
             from pico_input.thumb_buttons import ThumbButtons
             self._pico_thumb_input = ThumbButtons()
-        self.joySticks_sub = rospy.Subscriber(
-            "/quest_joystick_data",
-            JoySticks,
-            self.joySticks_data_callback,
-            queue_size=32, tcp_nodelay=True
-        )
 
         self.ik_cmd_sub = None
         if self.position_ik_control_enabled:
@@ -646,13 +640,16 @@ class IkRos:
             )
 
         self.sensor_data_raw_sub = rospy.Subscriber(
-            "/sensors_data_raw", sensorsData, self.sensor_data_raw_callback, queue_size=1
+            "/sensors_data_raw", sensorsData, self.sensor_data_raw_callback,
+            queue_size=1, buff_size=1048576, tcp_nodelay=True
         )
 
         # 订阅MPC优化后的状态，用于半身模式的插值和保持
-        self.optimized_state_sub = rospy.Subscriber(
-            "/humanoid_controller/optimizedState_wbc_mrt_origin", Float64MultiArray, self.optimized_state_callback, queue_size=10
-        )
+        self.optimized_state_sub = None
+        if self.position_ik_control_enabled:
+            self.optimized_state_sub = rospy.Subscriber(
+                "/humanoid_controller/optimizedState_wbc_mrt_origin", Float64MultiArray,
+                self.optimized_state_callback, queue_size=1, tcp_nodelay=True)
 
         # 轮臂：订阅 MPC observation，用 msg.time（MPC 内部时间）判断是否可发 mm / 切手臂模式（#3009）
         self._wheel_mpc_obs_sub = None
@@ -833,10 +830,15 @@ class IkRos:
         self._mapper_input_scheduler = MapperInputScheduler(
             rospy.get_param("~mapper_input_cpus", "") if scheduling else "",
             rospy.get_param("~mapper_input_nice", -5) if scheduling else None)
-        self.quest_bone_poses_sub = rospy.Subscriber(
-            "/leju_quest_bone_poses", PoseInfoList,
-            self._scheduled_quest_bone_poses_callback, queue_size=1, tcp_nodelay=True
-        )
+        # Remove the long-lived imported/ROS initialization graph from future
+        # gen-2 scans. Automatic GC stays enabled for new runtime cycles; no
+        # collection runs in the 120 Hz callback and no control timeout changes.
+        if self.enable_velocity_ik_takeover and rospy.get_param("~mapper_gc_freeze_startup", True):
+            import gc
+            gc.collect()
+            gc.freeze()
+            rospy.loginfo("Mapper startup GC graph frozen: %d objects; runtime GC enabled=%s",
+                          gc.get_freeze_count(), gc.isenabled())
 
         # 所有状态、发布器和订阅器就绪后再启动IK线程，避免启动期读到半初始化状态。
         self._publish_absolute_enable_status()
@@ -859,6 +861,20 @@ class IkRos:
                  (('linear_scale_x', 0.4), ('linear_scale_y', 0.4), ('angular_scale_z', 0.25))])
             self._wheel_base_pub = rospy.Publisher(
                 '/whole_body_velocity_ik/base_cmd_vel', Twist, queue_size=1)
+        # TCPROS may invoke callbacks as soon as Subscriber is constructed.
+        # Joystick callbacks also publish claw/base/operation messages, so both
+        # input streams must be registered after all callback state/publishers.
+        self.joySticks_sub = rospy.Subscriber(
+            "/quest_joystick_data",
+            JoySticks,
+            self.joySticks_data_callback,
+            queue_size=32, tcp_nodelay=True
+        )
+        self.quest_bone_poses_sub = rospy.Subscriber(
+            "/leju_quest_bone_poses", PoseInfoList,
+            self._scheduled_quest_bone_poses_callback, queue_size=1,
+            buff_size=2**20, tcp_nodelay=True
+        )
         self.ik_thread = threading.Thread(target=self.ik_controller_thread)
         self.ik_thread.start()
         if not (self.enable_velocity_ik_takeover and os.environ.get("KUAVO_RUNTIME_PARTITION_JSON")):
@@ -1991,13 +2007,23 @@ class IkRos:
                     self._fixed_operation_phase = 3
                     rospy.loginfo('[FixedStart] Execution acquired; PREPARE is now running')
             if failure:
+                # A cold request waiting for dependencies has not requested
+                # mode 2 or acquired execution. Cancel it at the same deadline;
+                # mode-0 RPCs to a disabled controller would create a spurious
+                # fault latch and an endless hold retry. Existing ownership or
+                # any acquisition/prepare phase still uses the hold handshake.
+                request_hold = not (
+                    p['phase'] == 'dependencies'
+                    and self._absolute_state in (AbsoluteEnableState.WAITING,
+                                                 AbsoluteEnableState.WAIT_RELEASE)
+                    and 2 not in self._absolute_mode_status[:2])
                 self._fixed_pending_operation = None
                 self._fixed_operation_phase = 5
                 self._fixed_operation_block = True
                 self._fixed_prepare_bootstrap = False
                 self._absolute_resume_after_prepare = False
         if failure:
-            self._finish_absolute_session(AbsoluteEnableReason.MODE_TIMEOUT, True, failure)
+            self._finish_absolute_session(AbsoluteEnableReason.MODE_TIMEOUT, request_hold, failure)
         self._publish_fixed_operation_state()
 
     def _call_absolute_mode_service(self, service_name, mode):
@@ -5193,6 +5219,7 @@ class IkRos:
         return response
 
 if __name__ == "__main__":
+    configure_mapper_interpreter()
     rospy.init_node("diff_ik_node", anonymous=True)
 
     np.set_printoptions(linewidth=240)

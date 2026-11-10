@@ -26,14 +26,14 @@ class Regression(unittest.TestCase):
             parent.setblocking(False);parent.setsockopt(socket.SOL_SOCKET,socket.SO_SNDBUF,8192)
             sender=probe.ProbeProcess.__new__(probe.ProbeProcess);sender.socket=parent;sender.dropped=sender.errors=0
             for sequence in range(1000):
-                sender.submit(dict(tid=7,serial=sequence,session=9,generation=3,sequence=sequence,source_ms=sequence+100,overflow=0,points=[(0,sequence,0,0,0,0,0)]))
+                sender.submit(dict(tid=7,serial=sequence,session=9,generation=3,sequence=sequence,source_ms=sequence+100,overflow=0,entry=[0.0]*9,points=[(0,sequence,0,0,0,0,0)]))
             self.assertGreater(sender.dropped,0);self.assertEqual(sender.errors,0)
             child.setblocking(False);received=0
             while True:
                 try:payload=child.recv(8193)
                 except BlockingIOError:break
                 values=struct.unpack('<%dd'%(len(payload)//8),payload)
-                self.assertEqual(len(values),19);self.assertEqual(values[3],values[6]);self.assertEqual(values[6],values[13]);self.assertEqual(values[4:6],(9,3));received+=1
+                self.assertEqual(len(values),33);self.assertEqual(values[0],2);self.assertEqual(values[19],1);self.assertEqual(values[22],values[3]);self.assertEqual(values[3],values[6]);self.assertEqual(values[6],values[13]);self.assertEqual(values[4:6],(9,3));received+=1
             self.assertGreater(received,0);self.assertEqual(received+sender.dropped,1000)
         finally:parent.close();child.close()
 if __name__=='__main__':unittest.main()

@@ -129,3 +129,6 @@ topics:
   - /sensors_data_raw/ee_fk/.*
   - /mobile_manipulator_timed_single_cmd
   - /waist_camera/depth/image_raw/compressedDepth
+  # Wall/CPU and claw parameter/control split diagnostics.
+  - /hardware/diagnostics/leju_claw_callback_v1
+  - /hardware/diagnostics/leju_claw_worker_v2

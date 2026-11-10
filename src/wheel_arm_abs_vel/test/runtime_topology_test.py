@@ -262,8 +262,11 @@ class Topology(unittest.TestCase):
                                            machine='aarch64', sysroot=self.root)
         self.assertEqual((absolute['ik_fifo_priority'], absolute['mapper_fifo_priority'],
                           absolute['mapper_nice']), (70, 35, -10))
-        expected = dict(absolute, ik_fifo_priority=40, mapper_nice=-5)
+        expected = dict(absolute, ik_fifo_priority=40, mapper_nice=-5,
+                        python_switch_interval_sec=0.001)
         expected.pop('mapper_fifo_priority')
+        expected.pop('mapper_interpreter_affinity')
+        expected.pop('mapper_control_writer_background')
         self.assertEqual(quest, expected)
         path = self.root/'explicit.json'
         explicit = dict(absolute, ik_fifo_priority=55, mapper_nice=-3)

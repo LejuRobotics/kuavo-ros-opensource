@@ -220,11 +220,16 @@ def arm_profile(sysroot=CPU_ROOT, allowed=None, require_ik_hard_isolation=False,
     background = candidates - family({mapper})
     if not background:
         raise ValueError('ARM profile leaves no background CPU')
+    # Interpreter/GIL and socket-writer placement was validated on this topology.
+    # Other ARM profiles retain their existing per-input-thread scheduling.
+    mapper_tuning = online == set(range(12))
     profile = dict(version=1, wbc_cpus=[ARM_WBC_CPU],
                    driver_reserved_cpus=sorted(drivers), ik_cpus=[ik],
                    mapper_cpus=[mapper], background_cpus=sorted(background),
                    ik_fifo_priority=70, mapper_fifo_priority=35, mapper_nice=-10,
-                   python_switch_interval_sec=0.001, ik_isolation_mode=mode,
+                   python_switch_interval_sec=0.0001, ik_isolation_mode=mode,
+                   mapper_interpreter_affinity=mapper_tuning,
+                   mapper_control_writer_background=mapper_tuning,
                    platform='agx_arm', launch_fence=True,
                    sidecar_cpus=sorted(background & {10, 11}) or sorted(background)[-2:])
     return validate(profile, sysroot, require_ik_isolated=(mode == 'hard'))
@@ -245,6 +250,9 @@ def select_profile(environ=None, machine=None, sysroot=CPU_ROOT, allowed=None, c
         profile['ik_fifo_priority'] = 40
         profile['mapper_nice'] = -5
         profile.pop('mapper_fifo_priority', None)
+        profile.pop('mapper_interpreter_affinity', None)
+        profile.pop('mapper_control_writer_background', None)
+        profile['python_switch_interval_sec'] = 0.001
     return profile, source
 
 
@@ -278,6 +286,11 @@ def _select_profile(environ=None, machine=None, sysroot=CPU_ROOT, allowed=None, 
         hard = set(profile['ik_cpus']) <= isolated
         profile['ik_isolation_mode'] = 'hard' if hard else 'soft'
         profile['platform'] = 'agx_arm'
+        mapper_tuning = cpu_list((sysroot/'online').read_text()) == set(range(12))
+        for key in ('mapper_interpreter_affinity', 'mapper_control_writer_background'):
+            # Supply defaults for older JSON, retaining explicit opt-outs and
+            # preventing a copied profile from expanding the audited topology.
+            profile[key] = mapper_tuning and profile.get(key, True)
         profile['launch_fence'] = True
         profile.setdefault('sidecar_cpus', sorted(set(profile['background_cpus']) & {10, 11})
                            or profile['background_cpus'][-2:])
@@ -361,6 +374,7 @@ def main():
     os.environ['KUAVO_RUNTIME_PARTITION_JSON']=json.dumps(profile,separators=(',',':'))
     os.environ['KUAVO_IK_CPUS']=','.join(map(str,profile['ik_cpus']))
     os.environ['KUAVO_IK_PRIORITY']=str(profile['ik_fifo_priority'])
+    os.environ['KUAVO_BACKGROUND_CPUS']=','.join(map(str,profile['background_cpus']))
     os.environ['KUAVO_SCHED_APPLIED']='1'
     for name in ['OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS','NUMEXPR_NUM_THREADS']:
         os.environ[name]='1'

@@ -122,7 +122,7 @@ public:
     bool apply_recovery_current(RecoveryDirection direction, float current, int duration_ms);
 
     // ===== 断流看门狗（高频控制流断流 → 安全 PTM 防堵转） =====
-    uint64_t refresh_stream_watchdog();   // 武装+刷新租约（高频命令到达时调用），返回 generation
+    uint64_t refresh_stream_watchdog(std::chrono::steady_clock::time_point received = std::chrono::steady_clock::now());   // 武装+刷新租约（高频命令到达时调用），返回 generation
     void disarm_stream_watchdog();        // 解除武装（低频命令/关闭时调用）
     bool stream_watchdog_expired();       // 是否已断流（expired 状态下 move_paw 应立即中止）
 

@@ -99,6 +99,9 @@ class Recorder:
             self.publisher = rospy.Publisher(
                 "/whole_body_velocity_ik/diagnostics/mapper_runtime_probe_v1",
                 Float64MultiArray, queue_size=32)
+            self.input_publisher = rospy.Publisher(
+                "/whole_body_velocity_ik/diagnostics/mapper_input_gap_v1",
+                Float64MultiArray, queue_size=32)
             self.identity_publisher = rospy.Publisher(
                 "/whole_body_velocity_ik/diagnostics/mapper_thread_identity_v1",
                 String, queue_size=1, latch=True)
@@ -129,8 +132,35 @@ class Recorder:
                 for sample in frame["points"]:
                     data.extend(sample)
                 self.publisher.publish(Float64MultiArray(data=data))
+                self.input_publisher.publish(Float64MultiArray(data=input_gap_row(frame, self.dropped)))
             except Exception:
                 self.errors += 1
+
+def input_entry(msg, previous):
+    """Intervals only: Quest source time and host monotonic have different epochs.
+
+    source_kind: 1=header.stamp, 2=PoseInfoList.timestamp_ms, 0=unavailable.
+    gap CPU is receive-thread CPU between callbacks (incl. deserialization),
+    not proof of network delay or GIL ownership. Correlate with kernel trace.
+    """
+    wall, cpu = time.monotonic_ns(), time.thread_time_ns()
+    header = getattr(msg, "header", None)
+    stamp = getattr(header, "stamp", None)
+    if stamp is not None:
+        kind, source = 1, stamp.to_nsec()
+    elif hasattr(msg, "timestamp_ms"):
+        kind, source = 2, float(msg.timestamp_ms)*1e6
+    else:
+        kind, source = 0, float("nan")
+    end, end_cpu, old_kind, old_source = previous or (0, 0, 0, float("nan"))
+    return [wall, cpu, end, (wall-end)*1e-6 if end else float("nan"),
+            kind, source, (source-old_source)*1e-6 if kind and kind == old_kind else float("nan"),
+            end_cpu, (cpu-end_cpu)*1e-6 if end else float("nan")]
+
+
+def input_gap_row(frame, dropped):
+    return [1, os.getpid(), frame["tid"], frame["serial"], *frame["entry"], dropped]
+
 
 def callback(function):
     @functools.wraps(function)
@@ -138,10 +168,15 @@ def callback(function):
         recorder = getattr(self, "_runtime_probe", None)
         if recorder is None or not recorder.enabled:
             return function(self, msg)
+        histories = getattr(_local, "input_history", None)
+        if histories is None:
+            histories = _local.input_history = {}
+        key = (id(recorder), function)
+        entry = input_entry(msg, histories.get(key))
         recorder.serial += 1
         frame = dict(tid=threading.get_native_id(), serial=recorder.serial,
                      source_ms=msg.timestamp_ms, sequence=-1, session=-1,
-                     generation=-1, overflow=0, points=[])
+                     generation=-1, overflow=0, points=[], entry=entry)
         previous = getattr(_local, "frame", None)
         _local.frame = frame
         point(0)
@@ -157,4 +192,7 @@ def callback(function):
                     recorder.queue.put_nowait(frame)
                 except queue.Full:
                     recorder.dropped += 1
+            # Includes probe handoff overhead in the preceding callback, rather
+            # than falsely charging it to the next inter-callback gap.
+            histories[key] = (time.monotonic_ns(), time.thread_time_ns(), entry[4], entry[5])
     return wrapped

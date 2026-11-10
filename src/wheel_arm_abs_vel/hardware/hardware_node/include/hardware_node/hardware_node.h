@@ -1,3 +1,5 @@
+#include "hardware_node/LatestClawCommand.h"
+#include <ros/callback_queue.h>
 #ifndef HARDWARE_NODE_H
 #define HARDWARE_NODE_H
 #pragma once
@@ -7,6 +9,8 @@
 #include <set>
 #include <atomic>
 #include "hardware_command_gate.h"
+#include "hardware_node/LejuClawModeCache.h"
+#include "kuavo_common/common/AsyncTimingProbe.h"
 #include <claw_types.h>
 #include <gesture_types.h>
 #include <lejuclaw_controller.h>
@@ -112,9 +116,20 @@ namespace HighlyDynamic
       ros::Subscriber leju_claw_command_sub_;
       ros::Subscriber leju_claw_joy_sub_;
       ros::Timer     leju_claw_state_timer_;
+      ros::CallbackQueue leju_claw_queue_;
+      std::unique_ptr<ros::NodeHandle> leju_claw_nh_;
+      std::thread leju_claw_worker_;
+      std::atomic<bool> leju_claw_running_{false};
+      LatestClawCommand<kuavo_msgs::lejuClawCommand::ConstPtr> latest_claw_cmd_;
+      void lejuClawWorker();
+      void consumeLejuClawCommand(const kuavo_msgs::lejuClawCommand::ConstPtr&, std::chrono::steady_clock::time_point, bool);
       std::atomic<int64_t> last_vr_joystick_us_{0};
       std::atomic<bool> last_high_freq_{false};
-      static constexpr int64_t kLejuClawVrStreamTimeoutMs = 1000;
+      LejuClawModeCache leju_claw_mode_cache_;
+      kuavo_timing::AsyncPublisher<12> leju_claw_timing_;
+      kuavo_timing::AsyncPublisher<14> leju_claw_worker_timing_;
+      uint64_t leju_claw_worker_sequence_{0};
+      uint64_t leju_claw_timing_sequence_{0};
 
       ros::ServiceServer joint_move_to_srv_;
       /** 座椅 stand_up 段0：运行中允许的 reverse prep（jointMoveToPrepGoal），与 use_sit_init phase2a/2b 同路径 */

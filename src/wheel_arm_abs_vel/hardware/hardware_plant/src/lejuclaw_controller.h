@@ -162,7 +162,7 @@ private:
     /**
      * @brief 武装/刷新断流看门狗（高频命令到达时调用）
      */
-    void armStreamWatchdog();
+    bool armStreamWatchdog(std::chrono::steady_clock::time_point received);
     /**
      * @brief 解除断流看门狗武装（低频命令/关闭时调用）
      */

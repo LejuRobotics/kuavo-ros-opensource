@@ -1,6 +1,7 @@
 #include <poll.h>
 #include <unistd.h>
 #include <cerrno>
+#include <kuavo_common/common/BackgroundThread.h>
 #include "hardware_node.h"
 #include "hardware_node/ActuatorDynamics.hpp"
 #include "kuavo_assets/include/package_path.h"
@@ -1805,6 +1806,11 @@ namespace HighlyDynamic
         // joining, and serialize concurrent end-effector shutdown callers.
         sg100_shutdown_requested_ = true;
         std::lock_guard<std::mutex> hand_lock(end_effector_lifecycle_mutex_);
+        latest_claw_cmd_.accepting(false);
+        leju_claw_running_ = false;
+        leju_claw_state_timer_.stop();
+        leju_claw_queue_.disable();
+        if (leju_claw_worker_.joinable()) leju_claw_worker_.join();
         sg100_init_retry_.stop();
         if (sg100_driver_) {
             sg100_driver_.reset();
@@ -1850,7 +1856,12 @@ namespace HighlyDynamic
 
     HardwareNode::~HardwareNode()
     {
+        // Preserve hardware stop priority: never wait for a parameter RPC or
+        // diagnostic drain before the existing shutdown path.
         stopHardware();
+        leju_claw_mode_cache_.stop();
+        leju_claw_timing_.stop();
+        leju_claw_worker_timing_.stop();
         if (logger_ptr_)
         {
             delete logger_ptr_;
@@ -2131,13 +2142,28 @@ namespace HighlyDynamic
         }
 
         if (hardware_plant_->end_effector_type_ == "lejuclaw") {
-            leju_claw_ctrl_srv_ = nh_.advertiseService("control_robot_leju_claw", &HardwareNode::controlLejuClawCallback, this);
-            leju_claw_recovery_srv_ = nh_.advertiseService("control_robot_leju_claw_recovery", &HardwareNode::recoverLejuClawCallback, this);
+            // Initialize before registering hot callbacks; later RPCs run at 2 Hz.
+            leju_claw_mode_cache_.start([] {
+                bool manual = false;
+                int timeout_ms = LejuClawModeCache::kDefaultTimeoutMs;
+                ros::param::param("/lejuclaw_high_freq_switch", manual, false);
+                ros::param::param("/lejuclaw_vr_stream_timeout_ms", timeout_ms,
+                                  LejuClawModeCache::kDefaultTimeoutMs);
+                return std::make_pair(manual, timeout_ms);
+            });
+            leju_claw_timing_.start(nh_, "/hardware/diagnostics/leju_claw_callback_v1");
+            leju_claw_worker_timing_.start(nh_, "/hardware/diagnostics/leju_claw_worker_v2");
+            leju_claw_nh_.reset(new ros::NodeHandle(nh_));
+            leju_claw_nh_->setCallbackQueue(&leju_claw_queue_);
+            leju_claw_ctrl_srv_ = leju_claw_nh_->advertiseService("control_robot_leju_claw", &HardwareNode::controlLejuClawCallback, this);
+            leju_claw_recovery_srv_ = leju_claw_nh_->advertiseService("control_robot_leju_claw_recovery", &HardwareNode::recoverLejuClawCallback, this);
             leju_claw_state_pub_ = nh_.advertise<kuavo_msgs::lejuClawState>("leju_claw_state", 10);
-            leju_claw_command_sub_ = nh_.subscribe("leju_claw_command", 10, &HardwareNode::lejuClawCommandCallback, this);
+            leju_claw_command_sub_ = nh_.subscribe("leju_claw_command", 1, &HardwareNode::lejuClawCommandCallback, this);
             leju_claw_joy_sub_ = nh_.subscribe("/quest_joystick_data", 10, &HardwareNode::lejuClawJoystickCallback, this);
-            leju_claw_state_timer_ = nh_.createTimer(ros::Duration(dt_),
+            leju_claw_state_timer_ = leju_claw_nh_->createTimer(ros::Duration(dt_),
                 &HardwareNode::pubLejuClawStateTimerCallback, this);
+            leju_claw_running_ = true;
+            leju_claw_worker_ = std::thread(&HardwareNode::lejuClawWorker, this);
             auto lejuclaw_state = hardware_plant_->getLejuClawState();
             nh_.setParam("end_effector_joints_num", static_cast<int>(lejuclaw_state.state.size()));
             end_effector_joints_num_set = true;
@@ -2246,8 +2272,7 @@ namespace HighlyDynamic
 
     void HardwareNode::lejuClawJoystickCallback(const kuavo_msgs::JoySticks::ConstPtr&)
     {
-        auto command_lease = command_gate_.enter();
-        if (!command_lease.owns_lock()) return;
+        if (shutdownRequested()) return;
         const auto now = std::chrono::steady_clock::now().time_since_epoch();
         last_vr_joystick_us_.store(
             std::chrono::duration_cast<std::chrono::microseconds>(now).count());
@@ -2255,27 +2280,11 @@ namespace HighlyDynamic
 
     bool HardwareNode::getLejuClawHighFreq()
     {
-        bool manual_switch = false;
-        ros::param::param("/lejuclaw_high_freq_switch", manual_switch, false);
-        if (manual_switch) {
-            return true;
-        }
-
-        int timeout_ms = kLejuClawVrStreamTimeoutMs;
-        ros::param::param("/lejuclaw_vr_stream_timeout_ms", timeout_ms,
-                          static_cast<int>(kLejuClawVrStreamTimeoutMs));
-        if (timeout_ms <= 0) {
-            timeout_ms = kLejuClawVrStreamTimeoutMs;
-        }
-
         const int64_t last_us = last_vr_joystick_us_.load();
-        if (last_us == 0) {
-            return false;
-        }
         const auto now = std::chrono::steady_clock::now().time_since_epoch();
         const int64_t now_us =
             std::chrono::duration_cast<std::chrono::microseconds>(now).count();
-        return now_us - last_us <= static_cast<int64_t>(timeout_ms) * 1000;
+        return leju_claw_mode_cache_.highFrequency(last_us, now_us);
     }
 
     bool HardwareNode::notifyLejuClawModeSwitch(bool high_freq)
@@ -2318,8 +2327,14 @@ namespace HighlyDynamic
     bool HardwareNode::controlLejuClawCallback(kuavo_msgs::controlLejuClawRequest &req,
                           kuavo_msgs::controlLejuClawResponse &res)
     {
-        auto command_lease = command_gate_.enter();
-        if (!command_lease.owns_lock()) return false;
+        // Private claw worker is joined before hardware teardown.
+        if (shutdownRequested()) return false;
+        latest_claw_cmd_.accepting(false);
+        struct ResumeMailbox {
+            decltype(latest_claw_cmd_)& box;
+            ~ResumeMailbox() { box.accepting(true); }
+        } resume{latest_claw_cmd_};
+
         if (!hardware_plant_->checkLejuClawInitialized()) {
             res.success = false;
             res.message = "leju claw actuator not initialized.";
@@ -2390,8 +2405,14 @@ namespace HighlyDynamic
     bool HardwareNode::recoverLejuClawCallback(kuavo_msgs::lejuClawRecoveryRequest &req,
                           kuavo_msgs::lejuClawRecoveryResponse &res)
     {
-        auto command_lease = command_gate_.enter();
-        if (!command_lease.owns_lock()) return false;
+        // Private claw worker is joined before hardware teardown.
+        if (shutdownRequested()) return false;
+        latest_claw_cmd_.accepting(false);
+        struct ResumeMailbox {
+            decltype(latest_claw_cmd_)& box;
+            ~ResumeMailbox() { box.accepting(true); }
+        } resume{latest_claw_cmd_};
+
         if (!hardware_plant_->checkLejuClawInitialized()) {
             res.success = false;
             res.message = "leju claw actuator not initialized.";
@@ -2427,8 +2448,8 @@ namespace HighlyDynamic
 
     void HardwareNode::pubLejuClawStateTimerCallback(const ros::TimerEvent& event)
     {
-        auto command_lease = command_gate_.enter();
-        if (!command_lease.owns_lock()) return;
+        // Private claw worker is joined before hardware teardown.
+        if (shutdownRequested()) return;
         if (!hardware_plant_->checkLejuClawInitialized()) {
             return;
         }
@@ -2455,9 +2476,47 @@ namespace HighlyDynamic
 
     void HardwareNode::lejuClawCommandCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg)
     {
-        auto command_lease = command_gate_.enter();
-        if (!command_lease.owns_lock()) return;
+        if (shutdownRequested()) return;
+        const auto received = std::chrono::steady_clock::now();
+        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(received.time_since_epoch()).count();
+        const bool high = leju_claw_mode_cache_.highFrequency(last_vr_joystick_us_.load(), us);
+        const int64_t parameter_end = kuavo_timing::nanoseconds(CLOCK_MONOTONIC);
+        latest_claw_cmd_.put(msg, received, high);
+        const int64_t end = kuavo_timing::nanoseconds(CLOCK_MONOTONIC);
+        const auto begin = std::chrono::duration_cast<std::chrono::nanoseconds>(received.time_since_epoch()).count();
+        // Callback v1 remains ingress timing; I/O is zero here after decoupling.
+        leju_claw_timing_.push({{1.0, double(++leju_claw_timing_sequence_), double(begin),
+            (parameter_end-begin)*1e-6, 0.0, (end-begin)*1e-6, 0.0,
+            high?1.0:0.0, double(leju_claw_timing_.dropped()), double(leju_claw_timing_.errors()),
+            double(end), double(end)}});
+    }
+
+    void HardwareNode::lejuClawWorker()
+    {
+        kuavo_thread::background("claw_dispatch");
+        const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(dt_));
+        auto next = std::chrono::steady_clock::now();
+        while (leju_claw_running_ && !shutdownRequested()) {
+            // Services and state timer share this worker, never joint_cmd.
+            leju_claw_queue_.callAvailable(ros::WallDuration(0));
+            if (!leju_claw_running_ || shutdownRequested()) break;
+            auto item = latest_claw_cmd_.take();
+            if (item.msg) consumeLejuClawCommand(item.msg, item.received, item.high_freq);
+            next += period;
+            const auto now = std::chrono::steady_clock::now();
+            if (next < now) next = now + period;
+            std::this_thread::sleep_until(next);
+        }
+    }
+
+    void HardwareNode::consumeLejuClawCommand(const kuavo_msgs::lejuClawCommand::ConstPtr &msg,
+                                             std::chrono::steady_clock::time_point received, bool received_high_freq)
+    {
+        const int64_t callback_start = kuavo_timing::nanoseconds(CLOCK_MONOTONIC);
+        // Private claw worker is joined before hardware teardown.
+        if (shutdownRequested()) return;
         eef_controller::lejuClawCommand command;
+        command.received_at = received;
         command.name = msg->data.name;
         command.position = msg->data.position;
         command.velocity = msg->data.velocity;
@@ -2471,9 +2530,22 @@ namespace HighlyDynamic
                << "\"effort_count\":" << msg->data.effort.size() << "}";
             publishLejuClawDebug(ss.str());
         }
-        const bool is_high_freq = getLejuClawHighFreq();
+        const int64_t parameter_start = kuavo_timing::nanoseconds(CLOCK_MONOTONIC);
+        const bool is_high_freq = received_high_freq;
+        const int64_t parameter_end = kuavo_timing::nanoseconds(CLOCK_MONOTONIC);
         notifyLejuClawModeSwitch(is_high_freq);
+        const int64_t control_start = kuavo_timing::nanoseconds(CLOCK_MONOTONIC);
         hardware_plant_->controlLejuClaw(command, is_high_freq);
+        const int64_t control_end = kuavo_timing::nanoseconds(CLOCK_MONOTONIC);
+        // v2 worker: version,seq,dispatch_start_ns,param_ms,control_ms,worker_ms,
+        // mode_notify_ms,high_freq,drops,writer_errors,control_start_ns,control_end_ns,ingress_ns,mailbox_age_ms.
+        leju_claw_worker_timing_.push({{2.0, double(++leju_claw_worker_sequence_), double(callback_start),
+            (parameter_end-parameter_start)*1e-6, (control_end-control_start)*1e-6,
+            (control_end-callback_start)*1e-6, (control_start-parameter_end)*1e-6,
+            is_high_freq ? 1.0 : 0.0, double(leju_claw_worker_timing_.dropped()),
+            double(leju_claw_worker_timing_.errors()), double(control_start), double(control_end),
+            double(std::chrono::duration_cast<std::chrono::nanoseconds>(received.time_since_epoch()).count()),
+            (callback_start-std::chrono::duration_cast<std::chrono::nanoseconds>(received.time_since_epoch()).count())*1e-6}});
     }
 
     bool HardwareNode::changeMotorParamCallback(kuavo_msgs::changeMotorParamRequest &req, kuavo_msgs::changeMotorParamResponse &res)

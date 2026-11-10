@@ -166,6 +166,10 @@ namespace wheel_absolute_control
       return false;
     }
     ros_logger_ = new humanoid::TopicLogger(controllerNh_);
+    // Diagnostic serialization and ROS publish locks are not control work.
+    // All control/reference/command publishers remain on their existing path.
+    ros_logger_->startAsync();
+    cycle_timing_.start(controllerNh_, "/monitor/wheel/cycle_timing_v1");
     /************** Initialize OCS2 *********************/
     std::string taskFile;
     std::string libFolder;
@@ -1267,6 +1271,7 @@ namespace wheel_absolute_control
 
   void humanoidControllerWheelWbc::update(const ros::Time &time, const ros::Duration &dfd)
   {
+    kuavo_timing::WbcCycle timing(cycle_timing_, ++cycle_timing_sequence_, time.toSec());
     if (dynamics_fault_) { stopDynamics("latched dynamics fault"); return; }
     static bool base_emergency_handled_ = false;
     if (enable_base_emergency_stop_ && base_emergency_triggered_.load() && !base_emergency_handled_)
@@ -1294,6 +1299,7 @@ namespace wheel_absolute_control
     const auto updateWallStart = std::chrono::steady_clock::now();
     auto stageStart = updateWallStart;
     auto markStageMs = [&](const char* stage) {
+      timing.mark();
       const auto now = std::chrono::steady_clock::now();
       const double ms = std::chrono::duration<double, std::milli>(now - stageStart).count();
       if (ros_logger_) {

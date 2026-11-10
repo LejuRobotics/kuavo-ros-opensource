@@ -13,6 +13,7 @@ from noitom_hi5_hand_udp_python.msg import PoseInfo, PoseInfoList, JoySticks
 from kuavo_msgs.msg import ControllerSwitchEvent, headBodyPose
 import rospy
 import time
+from tools import runtime_timing_probe as runtime_probe
 from tools.noncontrol_publish_process import publisher as diagnostic_publisher
 from tools.arm_marker_process import MarkerProcess, TOPICS as ARM_MARKER_TOPICS
 import tf
@@ -76,6 +77,9 @@ fullBodyBoneIds_leju_arms = [bone_name_to_index[name] for name in bone_names]
 index_to_bone_name = {index: bone_names[index] for index in range(len(bone_names))}
 
 bias_chest_to_base_link = [0.0, 0, 0.42]
+
+class UndefinedArmScale(ValueError):
+    """An exact zero divisor in the existing legacy arm mapping."""
 
 class HeadBodyPose:
     head_pitch = 0.0
@@ -729,6 +733,8 @@ class Quest3ArmInfoTransformer:
         self.timestamp_ms = msg.timestamp_ms
         self.is_high_confidence = msg.is_high_confidence
         self.is_hand_tracking = msg.is_hand_tracking
+        runtime_probe.point(100)
+        transforms = {}
         if self.skeleton_filter_enabled and accept_hands:
             # Keep beta source admission and optical startup gates. A partial
             # skeleton cannot update the coupled geometry estimator.
@@ -739,11 +745,13 @@ class Quest3ArmInfoTransformer:
                 transforms = {i: self.pose_info2_transform(msg.poses[i]) for i in required}
                 transforms[22] = (self.pose_info2_transform(msg.poses[22])
                                   if 22 in self.valid_pose_indices else np.eye(4))
+                runtime_probe.point(101)
                 self.estimated_bones = self.skeleton_filter.update(
                     transforms, float(msg.timestamp_ms)*.001,
                     (self.skeleton_contract, bool(msg.is_hand_tracking)))
             except (ValueError, np.linalg.LinAlgError):
                 return False
+        runtime_probe.point(102)
         if accept_hands:
             # print("is_high_confidence: {}, is_hand_tracking: {}".format(self.is_high_confidence, self.is_hand_tracking))
             if self.is_hand_tracking:
@@ -752,11 +760,29 @@ class Quest3ArmInfoTransformer:
             else:
                 self.compute_finger_joints_joy("Left")
                 self.compute_finger_joints_joy("Right")
+            runtime_probe.point(104)
             self._chest_axis_published = False
             self._chest_marker_published = False
-            for side, indices in (("Left", (0, 1, 4, 23)), ("Right", (2, 3, 5, 23))):
-                if all(index in self.valid_pose_indices for index in indices):
-                    self.compute_hand_pose(side)
+            chest_frame = None
+            try:
+                for side, indices in (("Left", (0, 1, 4, 23)), ("Right", (2, 3, 5, 23))):
+                    if all(index in self.valid_pose_indices for index in indices):
+                        for index in indices:
+                            if index not in transforms:
+                                transforms[index] = self.pose_info2_transform(msg.poses[index])
+                        if chest_frame is None:
+                            chest_frame = self._chest_frame_geometry(transforms[23])
+                        self.compute_hand_pose(side, transforms, chest_frame)
+                    runtime_probe.point(105 if side == "Left" else 106)
+            except UndefinedArmScale:
+                self.left_tcp_target = self.right_tcp_target = None
+                self.left_tcp_elbow_hint = self.right_tcp_elbow_hint = None
+                self.tcp_mapping_diagnostics = {"Left": None, "Right": None}
+                self.tcp_estimated_rates = {}
+                self._pending_arm_markers = []
+                self._pending_observations = []
+                self._pending_head_body = None
+                return False
             # gesture counts
             max_counts = 50
             if(self.is_runing_gesture()):
@@ -769,8 +795,10 @@ class Quest3ArmInfoTransformer:
                 self.ok_gesture_counts = 0
                 if(self.shot_gesture_counts >= max_counts):
                     self.is_runing = False
+            runtime_probe.point(107)
             if self.is_runing:
                 self.pub_head_body_pose_msg(self.head_body_pose)
+        runtime_probe.point(109)
         return True
 
 
@@ -1343,6 +1371,10 @@ class Quest3ArmInfoTransformer:
         human_upper_arm_length = math.sqrt((elbow_pos[0] - human_shoulder_pos[0])**2 + (elbow_pos[1] - human_shoulder_pos[1])**2 + (elbow_pos[2] - human_shoulder_pos[2])**2)
         human_lower_arm_length = math.sqrt((hand_pos[0] - elbow_pos[0])**2 + (hand_pos[1] - elbow_pos[1])**2 + (hand_pos[2] - elbow_pos[2])**2)
 
+        if (human_upper_arm_length == 0.0 or
+                (not self.measure_arm_length and human_lower_arm_length == 0.0)):
+            raise UndefinedArmScale(side)
+
         # Collect arm length data if measurement is active
         if self.measure_arm_length:
             if side == "Left":
@@ -1526,10 +1558,15 @@ class Quest3ArmInfoTransformer:
         # historical controller +/-15 degree and hand-tracking 0 degree output.
         palm_robot_quat = vr_quat2robot_quat(vr_quat, side, 0.0)
         palm_robot_rotation = quaternion_to_matrix(palm_robot_quat)
-        T_wChest = self.pose_info2_transform(chest_pose)
-        T_wElbow = self.pose_info2_transform(elbow_pose)
-        T_wHand = self.pose_info2_transform(hand_pose)
-        T_wS = self.pose_info2_transform(shoulder_pose)
+        if raw_transforms is None:
+            T_wChest = self.pose_info2_transform(chest_pose)
+            T_wElbow = self.pose_info2_transform(elbow_pose)
+            T_wHand = self.pose_info2_transform(hand_pose)
+            T_wS = self.pose_info2_transform(shoulder_pose)
+        else:
+            shoulder_id, elbow_id, hand_id = (0, 1, 4) if side == "Left" else (2, 3, 5)
+            T_wChest, T_wElbow, T_wHand, T_wS = (
+                raw_transforms[i] for i in (23, elbow_id, hand_id, shoulder_id))
 
         tcp_chest, tcp_shoulder, tcp_elbow, tcp_palm = T_wChest, T_wS, T_wElbow, T_wHand
         tcp_rotation = palm_robot_rotation
@@ -1599,7 +1636,7 @@ class Quest3ArmInfoTransformer:
             palm_robot_rotation @ T_source_to_tcp[:3, :3]
         )
 
-        hand_mat_cH = axis_angle_to_matrix(self.chest_axis_agl).T @ quaternion_to_matrix(hand_quat_in_w)
+        hand_mat_cH = remove_yaw @ quaternion_to_matrix(hand_quat_in_w)
         hand_quat = matrix_to_quaternion(hand_mat_cH)
         if not getattr(self, "_chest_axis_published", False):
             self._publish_or_defer_observation(self.chest_axis_puber, axis)
@@ -1702,6 +1739,8 @@ class Quest3ArmInfoTransformer:
             self.right_elbow_pos = elbow_pos
 
     def _publish_or_defer_observation(self, publisher, values):
+        if not getattr(publisher, "ready", lambda: True)():
+            return
         if getattr(self, "_defer_arm_markers", False):
             self._pending_observations.append((publisher, tuple(float(x) for x in values)))
         else:
