@@ -2,6 +2,7 @@
 #include "humanoid_controllers/rl/RLControllerBase.h"
 #include "humanoid_controllers/rl/AmpFamilyPolicy.h"
 #include <array>
+#include <vector>
 #include "humanoid_controllers/rl/RunThermalGuard.h"
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Empty.h>
@@ -33,6 +34,7 @@ class AmpAssembleController final : public RLControllerBase {
   void reset() override;
   void advance(bool outer_blend_active);
   bool ownsMember(const std::string&) const;
+  std::vector<std::string> getMemberNames() const;
   bool requestMember(const std::string&);
   // nullopt rejects without side effects; otherwise value reports exit readiness.
   std::optional<bool> requestFamilyExit(bool to_rl = false);

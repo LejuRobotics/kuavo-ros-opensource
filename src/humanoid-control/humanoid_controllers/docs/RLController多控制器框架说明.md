@@ -87,6 +87,8 @@ RLControllerBase (基类)
       - 其他名称（如 `"amp_controller"`、`"depth_loco_controller"`、`"fall_stand"` 等）：切换到对应 RL 控制器（若已加载且启用）。
   - `/humanoid_controller/get_controller_list` (`kuavo_msgs/getControllerList`)  
     - 返回当前可用的行走控制器名称列表（包含 `"mpc"`），以及当前激活控制器名称与索引。
+    - AMP 装配体在查询列表中展开为已加载的成员，不显示 `amp_assemble_controller`；当前名称返回实际选中的成员，`current_index` 对应该查询列表。
+    - **查询索引不是外层切换环索引**。next/previous 服务仍按内部外层环切换，返回的索引也属于外层环；不能通过查询列表的相邻项预测摇杆切换目标。仿真摇杆测试按 `rl_controllers.yaml` 的外层顺序计算预期，并将 AMP 族入口映射为 `amp_family.yaml` 的 WALK 锚点成员。测试需满足正常切换门禁，否则仍会记录失败。
   - `/humanoid_controller/switch_to_next_controller` (`kuavo_msgs/switchToNextController`)  
     - 在行走控制器列表中按顺序循环切换（`mpc → 第一个 RL → ... → mpc`），适合作为手柄或键盘「一键切换模式」接口。
   - `/humanoid_controller/switch_to_dance_controller` (`kuavo_msgs/SetString`)  

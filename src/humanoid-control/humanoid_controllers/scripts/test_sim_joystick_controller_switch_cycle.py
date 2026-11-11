@@ -5,6 +5,11 @@ The mapping follows humanoid_controllers/launch/joy/sim.json:
   BUTTON_RL = buttons[2]
   AXIS_RIGHT_RT = axes[5]
 
+Expected targets follow the configured outer controller ring, not adjacent
+entries in get_controller_list (which expands AMP family members). Controllers
+under test must satisfy the normal switching gates; rejected/skipped targets
+are still reported as failures.
+
 Example:
   rosrun humanoid_controllers test_sim_joystick_controller_switch_cycle.py \
       --count 200 --interval 0.5 --output /tmp/sim_controller_switch.csv
@@ -18,6 +23,7 @@ import time
 from datetime import datetime, timezone
 
 import rospy
+import yaml
 from kuavo_msgs.srv import getControllerList, switchController
 from sensor_msgs.msg import Joy
 
@@ -68,12 +74,51 @@ def get_controller_state(get_list):
     return response.current_controller, response.current_index, list(response.controller_names)
 
 
-def expected_controller(state, action):
-    current, index, names = state
+def load_outer_cycle(config_path):
+    """Return (outer name, member aliases, entry member) slots in YAML order."""
+    with open(config_path, encoding="utf-8") as stream:
+        controllers = yaml.safe_load(stream)["controllers"]
+    cycle = [("mpc", ("mpc",), "mpc")]
+    for entry in controllers:
+        if not entry.get("enabled", True) or entry.get("class", "BASE_CONTROLLER") != "BASE_CONTROLLER":
+            continue
+        name = entry["name"]
+        if entry.get("assembly", False) and entry["type"] == "AMP_CONTROLLER":
+            path = entry["config_file"]
+            if not os.path.isabs(path):
+                path = os.path.join(os.path.dirname(config_path), path)
+            with open(path, encoding="utf-8") as stream:
+                family = yaml.safe_load(stream)
+            members = tuple(spec["name"] for spec in family["members"].values()
+                            if spec.get("enabled", True))
+            anchor = family.get("anchor", family["members"]["walk"]["name"])
+            cycle.append((name, members, anchor))
+        else:
+            cycle.append((name, (name,), name))
+    return cycle
+
+
+def expected_controller(state, action, outer_cycle):
+    current, _, names = state
     if not names:
         raise RuntimeError("controller list is empty")
+    if action not in {"next", "previous"}:
+        raise ValueError("unsupported joystick action: {}".format(action))
+    # Include only loaded outer slots. Every exposed child maps to its parent
+    # slot, regardless of its position in the public query list.
+    cycle = [slot for slot in outer_cycle
+             if slot[0] in names or any(member in names for member in slot[1])]
+    index = next((i for i, slot in enumerate(cycle)
+                  if current == slot[0] or current in slot[1]), None)
+    if index is None or len(cycle) < 2:
+        raise RuntimeError("current controller has no outer switching cycle: {}".format(current))
     offset = 1 if action == "next" else -1
-    return current, names[(index + offset) % len(names)]
+    name, _, anchor = cycle[(index + offset) % len(cycle)]
+    # Keep compatibility with providers that still expose the wrapper itself.
+    target = name if name in names else anchor
+    if target not in names:
+        raise RuntimeError("family entry member is missing from query: {}".format(target))
+    return current, target
 
 
 def wait_for_controller(get_list, expected, timeout):
@@ -121,6 +166,11 @@ def main():
     rospy.wait_for_service(args.list_service)
     rospy.wait_for_service(args.switch_service)
     get_list = rospy.ServiceProxy(args.list_service, getControllerList)
+    config_path = rospy.get_param("/rl_controllers_config", "")
+    if not config_path:
+        legacy_param = rospy.get_param("/rl_param", "")
+        config_path = os.path.join(os.path.dirname(os.path.dirname(legacy_param)), "rl_controllers.yaml")
+    outer_cycle = load_outer_cycle(config_path)
     switch = rospy.ServiceProxy(args.switch_service, switchController)
     joy_pub = rospy.Publisher(args.joy_topic, Joy, queue_size=1)
     rospy.sleep(0.2)
@@ -204,7 +254,7 @@ def main():
             start = time.monotonic()
             try:
                 state = get_controller_state(get_list)
-                source, target = expected_controller(state, action)
+                source, target = expected_controller(state, action, outer_cycle)
                 joy_pub.publish(build_joy_frame(action))
                 command_published = True
                 rospy.sleep(args.press_duration)

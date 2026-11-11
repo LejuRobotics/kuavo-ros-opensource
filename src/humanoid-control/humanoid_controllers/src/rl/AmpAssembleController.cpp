@@ -261,6 +261,13 @@ bool AmpAssembleController::ownsMember(const std::string& name) const {
   return std::any_of(members_.begin(), members_.end(),
                      [&name](const auto& m) { return m && m->getName() == name; });
 }
+std::vector<std::string> AmpAssembleController::getMemberNames() const {
+  // Membership is immutable after initialization; reload requires a node restart.
+  std::vector<std::string> names;
+  for (const auto& model : members_)
+    if (model) names.push_back(model->getName());
+  return names;
+}
 bool AmpAssembleController::requestMember(const std::string& name) {
   for (size_t i = 0; i < members_.size(); ++i) if (members_[i] && members_[i]->getName() == name) {
     const auto role = static_cast<Role>(i);

@@ -2530,29 +2530,32 @@ namespace humanoid_controller
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     
     res.controller_names.clear();
-    res.controller_names = walk_controllers_;
-    res.count = static_cast<int>(walk_controllers_.size());
-    
-    // 计算当前索引
-    int current_index = -1;
-    if (current_controller_name_.empty())
+    // Flatten only the public query. Outer/manual switching rings retain their
+    // existing wrapper entries and indices.
+    for (const auto& name : walk_controllers_)
     {
-      current_index = 0;  // MPC控制器在索引0
-    }
-    else
-    {
-      for (size_t i = 0; i < walk_controllers_.size(); ++i)
+      const auto it = controllers_.find(name);
+      const auto* family = it == controllers_.end() ? nullptr :
+          dynamic_cast<const AmpAssembleController*>(it->second.get());
+      if (family)
       {
-        if (walk_controllers_[i] == current_controller_name_)
-        {
-          current_index = static_cast<int>(i);
-          break;
-        }
+        const auto members = family->getMemberNames();
+        res.controller_names.insert(res.controller_names.end(), members.begin(), members.end());
+      }
+      else
+      {
+        res.controller_names.push_back(name);
       }
     }
-    
-    res.current_index = current_index;
+    res.count = static_cast<int>(res.controller_names.size());
     res.current_controller = current_controller_name_.empty() ? "mpc" : current_controller_name_;
+    if (const auto* family = currentAmpFamilyLocked())
+    {
+      res.current_controller = family->activeMemberName();
+    }
+    const auto current = std::find(res.controller_names.begin(), res.controller_names.end(), res.current_controller);
+    res.current_index = current == res.controller_names.end() ? -1 :
+        static_cast<int>(std::distance(res.controller_names.begin(), current));
     res.success = true;
     res.message = "Successfully retrieved controller list, total " + std::to_string(res.count) +
                   " controllers, current: " + res.current_controller + " (index: " + std::to_string(res.current_index) + ")";
