@@ -3964,7 +3964,10 @@ class IkRos:
             prepare_bootstrap = self._fixed_prepare_bootstrap
             source_policy = self._tracking_source_policy_locked(
                 source, self.quest3_arm_info_transformer.is_runing)
-            self._fill_subsystem_permissions_locked(tcp_msg, received_monotonic)
+            # Reception precedes this lock; a concurrent joystick callback
+            # may already have stored a newer timestamp. Authorization must
+            # use a current locked snapshot, not the packet reception time.
+            self._fill_subsystem_permissions_locked(tcp_msg, time.monotonic())
         self.quest3_arm_info_transformer.skeleton_contract = (
             session_id, generation, coordinate_epoch)
         read_accepted = self.quest3_arm_info_transformer.read_msg(
@@ -4329,9 +4332,19 @@ class IkRos:
                 and not self._absolute_external_mode_reset_pending
                 and received is not None and 0 <= now-received <= self.absolute_enable_max_vr_age)
 
+    def _torso_optical_input_stream_locked(self):
+        # Use the admitted session source, rather than a raw tracking flag:
+        # a rejected source change must not change torso authorization.
+        source = self._tracking_session_source
+        if source == TeleopTcpTarget.SOURCE_UNKNOWN:
+            source = self._tracking_last_accepted_source
+        if source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING:
+            return (self._last_valid_tcp_receive, self.absolute_enable_max_vr_age)
+        return None
+
     def _fill_subsystem_permissions_locked(self, msg, now):
         msg.torso_control_enabled = self._torso_controls.authorized(
-            now, self._torso_input_ready_locked(now))
+            now, self._torso_input_ready_locked(now), self._torso_optical_input_stream_locked())
         msg.torso_position_hold = not self._torso_controls.position_enabled
         msg.torso_operation_seq = self._torso_controls.operation_seq
         msg.arm_hold = (self._absolute_state == AbsoluteEnableState.ACTIVE
@@ -4341,7 +4354,8 @@ class IkRos:
     def _publish_torso_control_state(self):
         with self._absolute_lock:
             now = time.monotonic()
-            enabled = self._torso_controls.authorized(now, self._torso_input_ready_locked(now))
+            enabled = self._torso_controls.authorized(
+                now, self._torso_input_ready_locked(now), self._torso_optical_input_stream_locked())
             position_hold = not self._torso_controls.position_enabled
             state = (enabled, position_hold)
             if state == self._torso_last_published:
@@ -4406,7 +4420,8 @@ class IkRos:
             with self._absolute_lock:
                 now = time.monotonic()
                 hand_msg = self._torso_controls.update(
-                    msg, hand_msg, now, self._torso_input_ready_locked(now))
+                    msg, hand_msg, now, self._torso_input_ready_locked(now),
+                    self._torso_optical_input_stream_locked())
             self._consume_torso_end_effector_edges(hand_msg)
             self._publish_torso_control_state()
         self.joySticks_data = hand_msg

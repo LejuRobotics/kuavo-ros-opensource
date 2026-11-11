@@ -90,9 +90,10 @@ class TorsoControls:
         self._admitted_follow = True
         self.follow_ready_seen = False
 
-    def _check_readiness(self, now, ready):
-        fresh = self.last_time is not None and 0 <= now-self.last_time <= self.MAX_AGE
-        stream_lost = self.last_time is not None and not fresh
+    def _check_readiness(self, now, ready, input_stream=None):
+        received, max_age = (self.last_time, self.MAX_AGE) if input_stream is None else input_stream
+        fresh = received is not None and 0 <= now-received <= max_age
+        stream_lost = received is not None and not fresh
         ready_lost = self.follow_ready_seen and not ready
         # An admitted X+A resume survives the prepare/acquisition gap. A lost
         # stream, stop or fault still revokes it. Seeing ready and then losing
@@ -107,10 +108,28 @@ class TorsoControls:
             self.follow_ready_seen = self.follow_ready_seen or ready
         return fresh
 
-    def authorized(self, now, ready):
-        self._check_readiness(now, ready)
+    def authorized(self, now, ready, input_stream=None):
+        fresh = self._check_readiness(now, ready, input_stream)
+        # Optical follow is admitted by the gesture/session lifecycle. It
+        # must not wait for a controller packet to apply that admission.
+        if input_stream is not None and ready and fresh:
+            self._apply_follow_selection()
         self._record_permissions()
         return self.enabled
+
+    def _apply_follow_selection(self):
+        if self._admitted_follow:
+            if self._reset_latched:
+                self.position_enabled = True
+                self.selected_enabled = self.default_enabled
+                self.startup_enable_pending = self.selected_enabled
+            self.enabled = bool(self.startup_enable_pending)
+            self._admitted_follow = False
+            self.follow_ready_seen = True
+            self._reset_latched = False
+        elif self.startup_enable_pending:
+            self.enabled = True
+        self.startup_enable_pending = False
 
     def _record_permissions(self):
         permissions = (self.enabled, not self.position_enabled)
@@ -153,9 +172,17 @@ class TorsoControls:
         self._stick_neutral_required = True
         self._stick_count = 0
 
-    def update(self, raw, hand, now, ready):
+    def update(self, raw, hand, now, ready, input_stream=None):
         result = copy.copy(hand)
-        fresh = self._check_readiness(now, ready)
+        if input_stream is not None:
+            # Optical gestures also populate joystick button fields (both OK
+            # hands encode X+A). Those fields are not controller authority for
+            # torso shortcuts. Explicit operations still revoke permission
+            # through the mapper lifecycle; optical stop uses its gesture FSM.
+            self.authorized(now, ready, input_stream)
+            self.last_time = now
+            return result
+        fresh = self._check_readiness(now, ready, input_stream)
         valid = all(math.isfinite(v) for v in
                     (raw.left_trigger, raw.right_trigger, raw.left_grip, raw.right_grip,
                      getattr(raw, 'right_y', 0.)))
@@ -243,20 +270,7 @@ class TorsoControls:
         reset_latched = self._reset_latched
         if (ready and fresh and valid and not stop and not arm
                 and (self._admitted_follow or self.startup_enable_pending)):
-            if self._admitted_follow:
-                if reset_latched:
-                    self.position_enabled = True
-                    self.selected_enabled = self.default_enabled
-                    self.startup_enable_pending = self.selected_enabled
-                # Apply the selection captured at admission, including a
-                # default-off master. Do not force the master on.
-                self.enabled = bool(self.startup_enable_pending)
-                self._admitted_follow = False
-                self.follow_ready_seen = True
-                self._reset_latched = False
-            else:
-                self.enabled = True
-            self.startup_enable_pending = False
+            self._apply_follow_selection()
         if not chord:
             self.require_release = False
         elif (toggle_edge and not self.require_release and not reset_latched

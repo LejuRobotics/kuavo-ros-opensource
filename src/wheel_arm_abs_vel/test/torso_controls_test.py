@@ -23,6 +23,57 @@ def joy(**kw):
 
 class ControlsTest(unittest.TestCase):
     def setUp(self): self.now=10.
+    def test_optical_follow_accepts_no_controller_packets_and_retains_reset_defaults(self):
+        p=TorsoControls('quest')
+        p.clear_operator_mode();p.request_follow()
+        self.assertTrue(p.authorized(self.now, True, (self.now,.25)))
+        self.assertIsNone(p.last_time)
+        self.assertTrue(p.position_enabled)
+        # A sparse neutral joystick packet must not reintroduce the joystick freshness gate.
+        self.now+=1.
+        raw=joy()
+        p.update(raw,raw,self.now,True,(self.now,.25))
+        self.assertTrue(p.enabled)
+        self.now+=1.
+        self.assertTrue(p.authorized(self.now,True,(self.now,.25)))
+        raw=joy(left_first_button_pressed=True,left_second_button_pressed=True)
+        p.update(raw,raw,self.now,True,(self.now,.25))
+        self.assertTrue(p.enabled)  # Optical button encoding is not a controller stop.
+        p.reset()  # Explicit stop is applied by the mapper lifecycle.
+        self.assertFalse(p.authorized(self.now,True,(self.now,.25)))
+
+    def test_recorded_optical_ok_buttons_do_not_lock_torso(self):
+        p=TorsoControls('quest')
+        p.clear_operator_mode();p.request_follow()
+        self.assertTrue(p.authorized(self.now,True,(self.now,.25)))
+        # Bag 2026-11-10-15-33-05_1: both first-button flags stay high
+        # during optical OK; the old update treated every packet as X+A.
+        raw=joy(left_first_button_pressed=True,right_first_button_pressed=True)
+        before=copy.copy(raw)
+        for _ in range(60):
+            self.now+=.008
+            result=p.update(raw,raw,self.now,True,(self.now,.25))
+            self.assertTrue(p.enabled)
+            self.assertEqual(vars(result),vars(before))
+            self.assertEqual(vars(raw),vars(before))
+        p.clear_operator_mode()  # A real X+A operation still inhibits following.
+        p.update(raw,raw,self.now,False,(self.now,.25))
+        self.assertFalse(p.enabled)
+        p.authorized(self.now,True,(self.now,.25))
+        self.assertFalse(p.enabled)
+        p.request_follow()
+        p.update(raw,raw,self.now,True,(self.now,.25))
+        self.assertTrue(p.enabled)
+        self.now+=.3
+        p.update(raw,raw,self.now,True,(self.now-.3,.25))
+        self.assertFalse(p.enabled)
+
+    def test_optical_default_off_and_future_input_cannot_enable(self):
+        p=TorsoControls('quest',enable_on_first_follow=False)
+        p.request_follow()
+        self.assertFalse(p.authorized(self.now,True,(self.now,.25)))
+        p.selected_enabled=True;p.request_follow()
+        self.assertFalse(p.authorized(self.now,True,(self.now+1.,.25)))
     def sample(self, p, ready=True, **kw):
         self.now+=.01
         raw=joy(**kw); before=copy.copy(raw)

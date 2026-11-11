@@ -29,7 +29,7 @@ methods={'arm_mode_callback','_admit_velocity_gesture_locked','fixed_arm_operati
     'whole_body_velocity_ik_status_callback','_queue_fixed_request_locked','_advance_fixed_request',
     '_fixed_consumer_ack_locked','_fixed_owner_callback','_fixed_enable_callback',
     '_publish_wheel_base_command', '_torso_input_ready_locked',
-    '_fill_subsystem_permissions_locked', '_bump_absolute_generation_locked',
+    '_fill_subsystem_permissions_locked', '_torso_optical_input_stream_locked', '_bump_absolute_generation_locked',
     '_latch_tracking_fault_locked', '_pause_absolute_session', '_finish_absolute_session'}
 selected=[]
 for item in tree.body:
@@ -80,6 +80,7 @@ class FixedFollowTest(unittest.TestCase):
         n._fixed_control_enabled=True;n._fixed_stop_epoch=0
         n._absolute_latest_target=None;n._last_valid_tcp_receive=10.
         n._tracking_last_accepted_source=1;n._absolute_mode_status_time=10.;n.absolute_enable_mode_timeout=5.
+        n._tracking_session_source=1
         n._absolute_latest_measured_q=[0.]*14
         n._absolute_latest_measured_q_time=n._joystick_receive_monotonic=10.
         n._absolute_latest_measured_q_source='sensor'
@@ -98,6 +99,85 @@ class FixedFollowTest(unittest.TestCase):
         n._finish_absolute_session=finish
         n._request_absolute_hold_mode=lambda:True
         n._pause_absolute_session=lambda:setattr(n,'_absolute_state',State.RETURNING_TO_PREP)
+    def test_optical_torso_follows_without_joystick_and_stops_on_pose_loss(self):
+        n=self.n
+        n._tracking_session_source=n._tracking_last_accepted_source=2
+        n._absolute_state=State.ACTIVE
+        n._torso_controls.last_time=1.0  # An old controller heartbeat must not revoke optical following.
+        n._torso_controls.reset();n._torso_controls.request_follow()
+        msg=NS()
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertTrue(msg.torso_control_enabled)
+        clock.now+=1.
+        n._last_valid_tcp_receive=clock.now
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertTrue(msg.torso_control_enabled)
+        clock.now+=.3
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+        n._last_valid_tcp_receive=clock.now
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)  # Recovery alone is not a follow request.
+        n._torso_controls.request_follow()
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertTrue(msg.torso_control_enabled)
+
+    def test_controller_session_still_requires_controller_stream(self):
+        n=self.n;n._absolute_state=State.ACTIVE
+        n._tracking_last_accepted_source=2  # A raw source switch cannot change the admitted session.
+        n._torso_controls.last_time=1.
+        n._torso_controls.request_follow()
+        msg=NS();n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+        self.assertIsNone(n._torso_optical_input_stream_locked())
+
+    def test_bone_authorization_samples_time_after_concurrent_joystick_update(self):
+        n=self.n
+        n._absolute_state=State.SWITCHING
+        n._torso_controls.clear_operator_mode()
+        n._torso_controls.last_time=clock.now
+        n._torso_controls.request_follow()
+        received=clock.now
+        # Execute the production permission call in its original lock scope.
+        mapper=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='IkRos')
+        scope,statement=next((scope,stmt) for scope in ast.walk(mapper)
+            if isinstance(scope,ast.With) for stmt in scope.body
+            if isinstance(stmt,ast.Expr) and isinstance(stmt.value,ast.Call)
+            and isinstance(stmt.value.func,ast.Attribute)
+            and stmt.value.func.attr=='_fill_subsystem_permissions_locked'
+            and isinstance(stmt.value.args[0],ast.Name) and stmt.value.args[0].id=='tcp_msg')
+        class InterleavedLock:
+            def __enter__(self):
+                clock.now=received+.005
+                n._torso_controls.last_time=clock.now
+            def __exit__(self,*args):pass
+        n._absolute_lock=InterleavedLock()
+        locked=ast.With(items=scope.items,body=[statement],type_comment=None)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[locked],type_ignores=[])),
+                     '<production-bone-authorization>','exec'),
+             dict(self=n,tcp_msg=NS(),received_monotonic=received,time=clock))
+        self.assertTrue(n._torso_controls._admitted_follow)
+        self.assertTrue(n._torso_controls.startup_enable_pending)
+        # Acquisition finishes and X+A is released: permission must still apply.
+        n._absolute_state=State.ACTIVE
+        raw=NS(left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.,right_y=0.,
+               **{side+'_'+key:False for side in ('left','right') for key in
+                  ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')})
+        clock.now+=.01;n._last_valid_tcp_receive=clock.now
+        n._torso_controls.update(raw,raw,clock.now,n._torso_input_ready_locked(clock.now))
+        self.assertTrue(n._torso_controls.enabled)
+
+    def test_optical_authorization_preserves_manual_lock_and_fault_gate(self):
+        n=self.n;n._absolute_state=State.ACTIVE;n._tracking_session_source=2
+        n._torso_controls.selected_enabled=False
+        n._torso_controls.request_follow()
+        msg=NS();n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+        n._torso_controls.selected_enabled=True;n._torso_controls.request_follow()
+        n._absolute_fault_hold_pending=True
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+
     def fresh(self):
         n=self.n;n._last_valid_tcp_receive=clock.now
         n._absolute_latest_measured_q_time=n._joystick_receive_monotonic=clock.now
