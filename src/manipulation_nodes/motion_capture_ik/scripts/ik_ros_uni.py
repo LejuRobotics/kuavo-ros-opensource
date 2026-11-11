@@ -3416,8 +3416,8 @@ if __name__ == "__main__":
     if robot_version == '15':
         robot_version = '14'
 
-    model_file = kuavo_assests_path + f"/models/biped_s{robot_version}/urdf/drake/biped_v3_arm.urdf"
-    model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
+    model_file = kuavo_assests_path + f"/models/biped_s{'55' if robot_version == '57' else robot_version}/urdf/drake/biped_v3_arm.urdf"
+    model_config_file = kuavo_assests_path + f"/config/kuavo_v{'55' if robot_version == '57' else robot_version}/kuavo.json"
     # model_file = current_pkg_path + "/models/biped_gen4.0/urdf/biped_v3_arm.urdf"
     
     assert os.path.exists(model_file), f"Model file {model_file} does not exist."

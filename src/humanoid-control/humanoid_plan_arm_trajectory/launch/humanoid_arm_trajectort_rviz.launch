@@ -3,7 +3,8 @@
 
     <!-- Core args/params -->
     <arg name="robot_version" default="42" />
-    <arg name="urdfFile" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+    <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
+    <arg name="urdfFile" default="$(find kuavo_assets)/models/biped_s$(arg resource_version)/urdf/biped_s$(arg resource_version).urdf" />
     <arg name="rviz" default="true" />
     <arg name="rviz_config" default="$(find humanoid_interface_ros)/rviz/humanoid.rviz" />
 

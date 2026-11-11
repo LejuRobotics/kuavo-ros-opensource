@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <atomic>
 #include <set>
 #include <unordered_map>
 #include <map>
@@ -124,7 +125,7 @@ class HardwarePlant
     SensorData_t sensorsInitHW();
     bool sensorsCheck();
     void HWPlantDeInit();
-    bool jointMoveTo(std::vector<double> goal_pos, double speed, double dt = 1e-3, double current_limit=-1);
+    bool jointMoveTo(std::vector<double> goal_pos, double speed, double dt = 1e-3, double current_limit=-1, bool startup_return_zero=false);
 
     void qv_joint_to_motor(Eigen::VectorXd &no_arm_state, Eigen::VectorXd &with_arm_state, uint32_t nq_with_arm, uint32_t nq_no_arm);
     int8_t PDInitialize(Eigen::VectorXd &q0);
@@ -236,6 +237,8 @@ class HardwarePlant
     // 添加访问器方法来获取私有成员
 public:
     uint32_t getCountECMasters() const { return countECMasters; }
+    bool returnZeroCheckFailed() const { return return_zero_check_failed_.load(); }
+    bool lejuHardwareZeroRequested() const { return rb_version_.version_number() == 57 && ecmaster_type_ == "leju" && hardware_param_.cali_leg; }
     
     // 访问静态ruiwo_actuator指针的方法
     static RuiwoActuatorBase* getRuiwoActuator();
@@ -280,6 +283,7 @@ public:
 
 
 private:
+    std::atomic<bool> return_zero_check_failed_{false};
 
     // 将电机原始反馈按当前机型的分段 c2t 配置换算为关节力矩
     double motorFeedbackToJointTorqueNm(size_t joint_idx, double motor_feedback) const;

@@ -625,7 +625,7 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
                     stderr=subprocess.DEVNULL) 
     
     # 通过读取kuavo.json文件，获取ROBOT_MODULE和only_half_up_body参数
-    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
+    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{'55' if robot_version == '57' else robot_version}", "kuavo.json")
     if not os.path.exists(kuavo_json):
         print(f"Error: Could not find {kuavo_json}")
         raise Exception(f"Error: Could not find {kuavo_json}")
@@ -654,7 +654,7 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
             launch_cmd += " cali:=true cali_arm:=true"
     
     # 通过读取kuavo.json文件，获取only_half_up_body参数，在launch_cmd中添加only_half_up_body:=true
-    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
+    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{'55' if robot_version == '57' else robot_version}", "kuavo.json")
     if not os.path.exists(kuavo_json):
         print(f"Error: Could not find {kuavo_json}")
         raise Exception(f"Error: Could not find {kuavo_json}")

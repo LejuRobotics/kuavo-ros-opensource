@@ -9,10 +9,11 @@
   <arg name="visualize_humanoid" default="true"/>
   <arg name="visualize_mm" default="false"/>
   <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+  <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
 
   <!-- The URDF model of the robot -->
   <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->
-  <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg resource_version)/urdf/biped_s$(arg resource_version).urdf" />
   <!-- The task file for the mpc. -->
   <!-- <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" /> -->
   <!-- Version is PPPPMMMMN. 200049 is 4.9.2, so compare major, not the raw integer. -->

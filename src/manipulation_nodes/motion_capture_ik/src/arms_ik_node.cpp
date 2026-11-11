@@ -1887,6 +1887,8 @@ int main(int argc, char* argv[])
     // Handle version 15 special case: use version 14 config
     if (robot_version_int == 15) {
         robot_version_int = 14;
+    } else if (robot_version_int == 57) {
+        robot_version_int = 55;
     }
 
     auto kuavo_assests_path = HighlyDynamic::getPackagePath("kuavo_assets");

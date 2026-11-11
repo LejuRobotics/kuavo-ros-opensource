@@ -4,13 +4,14 @@
     <arg name="rviz"               default="false" />
     <arg name="description_name"   default="humanoid_description"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
     <param name="robot_version"    value="$(arg robot_version)"/>
   
     <!-- <arg name="urdfFile"           default="$(find biped_s3)/urdf/biped_s3_with_v3_arm.urdf"/> -->
     <!-- 210062 / 310062 are registered as 62.7 / 62.8 but retain their full IDs for asset lookup. -->
     <arg name="urdfFile" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" if="$(eval int(arg('robot_version')) in [210062, 310062])"/>
     <arg name="urdfFile"           default="$(find kuavo_assets)/models/biped_s14/urdf/biped_s14.urdf" if="$(eval int(arg('robot_version')) == 15)"/>
-    <arg name="urdfFile"           default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" unless="$(eval int(arg('robot_version')) in [15, 210062, 310062])"/>
+    <arg name="urdfFile"           default="$(find kuavo_assets)/models/biped_s$(arg resource_version)/urdf/biped_s$(arg resource_version).urdf" unless="$(eval int(arg('robot_version')) in [15, 210062, 310062])"/>
 
    <!-- params -->
     <param name="urdfFile"         value="$(arg urdfFile)" />
@@ -18,19 +19,19 @@
     <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v14/mpc/task.info" if="$(eval int(arg('robot_version')) == 15)"/>
     <!-- 轮臂(major==6, 即 60<=version%100<70)读 wheel 接口 task.info；双足读 controllers mpc/task.info -->
     <param name="taskFile"         value="$(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info" if="$(eval 60 &lt;= int(arg('robot_version')) % 100 &lt; 70)"/>
-    <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/task.info" unless="$(eval 60 &lt;= int(arg('robot_version')) % 100 &lt; 70 or int(arg('robot_version')) == 15)"/>
+    <param name="taskFile"         value="$(find humanoid_controllers)/config/kuavo_v$(arg resource_version)/mpc/task.info" unless="$(eval 60 &lt;= int(arg('robot_version')) % 100 &lt; 70 or int(arg('robot_version')) == 15)"/>
 
     <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v14/command/reference.info" if="$(eval int(arg('robot_version')) == 15)"/>
-    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/reference.info" unless="$(eval int(arg('robot_version')) == 15)"/>
+    <param name="referenceFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg resource_version)/command/reference.info" unless="$(eval int(arg('robot_version')) == 15)"/>
 
     <param name="dynamicQrFile"    value="$(find humanoid_controllers)/config/kuavo_v14/mpc/dynamic_qr.info" if="$(eval int(arg('robot_version')) == 15)"/>
-    <param name="dynamicQrFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/mpc/dynamic_qr.info" unless="$(eval int(arg('robot_version')) == 15)"/>
+    <param name="dynamicQrFile"    value="$(find humanoid_controllers)/config/kuavo_v$(arg resource_version)/mpc/dynamic_qr.info" unless="$(eval int(arg('robot_version')) == 15)"/>
 
     <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v14/command/gait.info" if="$(eval int(arg('robot_version')) == 15)"/>
-    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/command/gait.info" unless="$(eval int(arg('robot_version')) == 15)"/>
+    <param name="gaitCommandFile"  value="$(find humanoid_controllers)/config/kuavo_v$(arg resource_version)/command/gait.info" unless="$(eval int(arg('robot_version')) == 15)"/>
 
     <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v14/kuavo.json" if="$(eval int(arg('robot_version')) == 15)"/>
-    <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json" unless="$(eval int(arg('robot_version')) == 15)"/>
+    <arg name="kuavoConfigFile"           default="$(find kuavo_assets)/config/kuavo_v$(arg resource_version)/kuavo.json" unless="$(eval int(arg('robot_version')) == 15)"/>
     <param name="kuavo_configuration" textfile="$(arg kuavoConfigFile)"/>
 
     <!-- 座椅配置：双足 5 代。与上面轮臂 60<=version%100<70 同一折法，400053%100==53 也会命中。 -->

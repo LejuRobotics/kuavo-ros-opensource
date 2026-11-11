@@ -19,7 +19,11 @@
 #include <cstdio>
 #include <cassert>
 #include <mutex>
+#include <atomic>
+#include <cmath>
 #include <cstring>
+#include <chrono>
+#include <cstddef>
 /*-DEFINES-------------------------------------------------------------------*/
 #include "ObjectDiction.h"
 
@@ -265,7 +269,31 @@ static std::mutex mtx_io;
 static uint32_t num_slave = 0;        //总的从站数目
 static uint32_t num_motor_slave = 0;  //总的Ec电机数目
 static bool motor_enabled = false;
-static bool ecMasterExit = false;
+static std::vector<uint16_t> leju_startup_check_ids;
+static bool leju_hardware_zero_requested = false;
+static std::atomic<bool> leju_hardware_zero_pending{false};
+static std::atomic<uint16_t> leju_hardware_zero_control_word{0};
+static std::function<void()> leju_startup_check_failure_callback;
+
+void setLejuStartupAngleCheckFailureCallback(const std::function<void()>& callback)
+{
+  leju_startup_check_failure_callback = callback;
+}
+
+void setLejuStartupAngleCheck(const std::vector<uint16_t>& ids)
+{
+  leju_startup_check_ids = ids;
+  if (!ids.empty())
+    motor_enabled = false;
+}
+static std::atomic<bool> ecMasterExit{false};
+
+void setLejuHardwareZero(bool enabled)
+{
+  leju_hardware_zero_requested = enabled;
+  leju_hardware_zero_control_word.store(0, std::memory_order_release);
+  leju_hardware_zero_pending.store(enabled, std::memory_order_release);
+}
 
 static std::mutex mtx_j;
 static uint16_t cm = 2;
@@ -1346,8 +1374,185 @@ bool motorIsEnable(const uint16_t id)
 }
 
 
+static bool readLejuHardwareZeroObject(uint16_t ec_id, uint16_t index, uint32_t expected_width, uint32_t& value)
+{
+  uint8_t buffer[4] = {};
+  uint32_t actual_width = 0;
+  const auto result = emCoeSdoUpload(0, g_motor_id[ec_id - 1].slave_id - 1,
+      index, 0, buffer, sizeof(buffer), &actual_width, 100, 0);
+  if (result != EC_E_NOERROR || isEcMasterExit() ||
+      (expected_width != 0 ? actual_width != expected_width : (actual_width != 2 && actual_width != 4))) {
+    std::cerr << "[Leju57] Hardware-zero read FAILED: ec_id=" << ec_id
+              << " index=" << index << " sdo_result=" << result << " width=" << actual_width << std::endl;
+    return false;
+  }
+  value = 0;
+  for (uint32_t byte = 0; byte < actual_width; ++byte)
+    value |= static_cast<uint32_t>(buffer[byte]) << (8 * byte);
+  return true;
+}
+
+static bool writeLejuHardwareZeroCommand(uint16_t ec_id, uint16_t index)
+{
+  if (isEcMasterExit()) return false;
+  uint8_t buffer[2] = {1, 0};
+  const auto result = emCoeSdoDownload(0, g_motor_id[ec_id - 1].slave_id - 1,
+      index, 0, buffer, sizeof(buffer), 100, 0);
+  if (result != EC_E_NOERROR) {
+    std::cerr << "[Leju57] Hardware-zero write FAILED: ec_id=" << ec_id
+              << " index=" << (index == 0x3a85 ? "0x3A85:0" : "0x3A81:0")
+              << " value=1 sdo_result=" << result << std::endl;
+  }
+  return result == EC_E_NOERROR && !isEcMasterExit();
+}
+
+static bool calibrateLejuHardwareZero()
+{
+  if (leju_startup_check_ids.size() != 3 || isEcMasterExit()) return false;
+  const int joint_ids[3] = {2, 8, 13};
+  const int64_t counts_per_revolution = 131072;
+  const int64_t phase_tolerance_counts = 1;
+  int32_t before_counts[3] = {};
+  for (size_t slot = 0; slot < leju_startup_check_ids.size(); ++slot) {
+    const auto ec_id = leju_startup_check_ids[slot];
+    for (size_t previous = 0; previous < slot; ++previous)
+      if (leju_startup_check_ids[previous] == ec_id) return false;
+    if (ec_id == 0 || ec_id > num_motor_slave || g_motor_id[ec_id - 1].driver_type != LEJU ||
+        encoder_range[ec_id - 1] == 0) return false;
+    uint32_t status = 0, position = 0;
+    if (!readLejuHardwareZeroObject(ec_id, 0x6041, 2, status) ||
+        !readLejuHardwareZeroObject(ec_id, 0x6064, 4, position)) return false;
+    std::memcpy(&before_counts[slot], &position, sizeof(position));
+    const auto state = status & 0x006f;
+    if (state != 0x40 && state != 0x21 && state != 0x08) {
+      std::cerr << "[Leju57] Hardware-zero precheck FAILED: joint=" << joint_ids[slot]
+                << " status6041=" << status << " raw6064=" << position << std::endl;
+      return false;
+    }
+  }
+  for (const auto ec_id : leju_startup_check_ids)
+    if (!writeLejuHardwareZeroCommand(ec_id, 0x3a85)) return false;
+  std::cout << "[Leju57] 硬标零指令已下发：关节2/8/13，等待3秒后清错复位，期间禁止EC使能。" << std::endl;
+  for (int waited_ms = 0; waited_ms < 3000; waited_ms += 100) {
+    if (isEcMasterExit()) return false;
+    OsSleep(100);
+  }
+  for (const auto ec_id : leju_startup_check_ids)
+    if (!writeLejuHardwareZeroCommand(ec_id, 0x3a81)) return false;
+  leju_hardware_zero_control_word.store(0, std::memory_order_release);
+  OsSleep(50);
+  if (isEcMasterExit()) return false;
+  leju_hardware_zero_control_word.store(0x0080, std::memory_order_release);
+  OsSleep(50);
+  leju_hardware_zero_control_word.store(0, std::memory_order_release);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  int consecutive_valid = 0;
+  bool reported_invalid[3] = {};
+  while (!isEcMasterExit() && std::chrono::steady_clock::now() < deadline) {
+    bool all_valid = true;
+    for (size_t slot = 0; slot < leju_startup_check_ids.size(); ++slot) {
+      const auto ec_id = leju_startup_check_ids[slot];
+      uint32_t status = 0, error = 0, internal_error = 0, position = 0;
+      const bool read_ok = readLejuHardwareZeroObject(ec_id, 0x6041, 2, status) &&
+          readLejuHardwareZeroObject(ec_id, 0x603f, 2, error) &&
+          readLejuHardwareZeroObject(ec_id, 0x3a3f, 0, internal_error) &&
+          readLejuHardwareZeroObject(ec_id, 0x6064, 4, position);
+      const auto state = status & 0x006f;
+      int32_t counts = 0;
+      std::memcpy(&counts, &position, sizeof(counts));
+      const int64_t position_delta = static_cast<int64_t>(counts) - before_counts[slot];
+      int64_t phase_error = position_delta % counts_per_revolution;
+      if (phase_error < 0) phase_error = -phase_error;
+      phase_error = std::min(phase_error, counts_per_revolution - phase_error);
+      const bool position_valid = read_ok &&
+          static_cast<int64_t>(counts) > -counts_per_revolution &&
+          static_cast<int64_t>(counts) < counts_per_revolution &&
+          phase_error <= phase_tolerance_counts;
+      const bool qualified = read_ok && (state == 0x40 || state == 0x21) &&
+          error == 0 && internal_error == 0 && position_valid;
+      if (!qualified && !reported_invalid[slot]) {
+        std::cerr << "[Leju57] Hardware-zero verify pending: joint=" << joint_ids[slot]
+                  << " read_ok=" << read_ok << " status6041=" << status
+                  << " error603f=" << error << " error3a3f=" << internal_error
+                  << " before_count=" << before_counts[slot] << " count=" << counts
+                  << " phase_error=" << phase_error << " position_valid=" << position_valid << std::endl;
+        reported_invalid[slot] = true;
+      }
+      all_valid = all_valid && qualified;
+    }
+    consecutive_valid = all_valid ? consecutive_valid + 1 : 0;
+    if (consecutive_valid >= 3 && !isEcMasterExit() && std::chrono::steady_clock::now() < deadline) {
+      leju_hardware_zero_pending.store(false, std::memory_order_release);
+      std::cout << "[Leju57] 硬标零流程验收通过：2、8、13号关节单圈范围/相位、状态及错误字连续3次合格；继续原使能和软标零。" << std::endl;
+      return true;
+    }
+    OsSleep(100);
+  }
+  std::cerr << "[Leju57] Hardware-zero verify FAILED: "
+            << (isEcMasterExit() ? "exit requested" : "5 s timeout; EC enable blocked") << std::endl;
+  return false;
+}
+bool checkLejuReturnZeroAngles()
+{
+  if (leju_startup_check_ids.empty()) return true;
+  if (leju_startup_check_ids.size() != 3) return false;
+  bool all_in_range = true;
+  const int joint_ids[3] = {2, 8, 13};
+  for (size_t slot = 0; slot < leju_startup_check_ids.size(); ++slot) {
+    if (isEcMasterExit()) {
+      all_in_range = false;
+      break;
+    }
+    const uint16_t ec_id = leju_startup_check_ids[slot];
+    if (ec_id == 0 || ec_id > num_motor_slave || g_motor_id[ec_id - 1].driver_type != LEJU ||
+        encoder_range[ec_id - 1] == 0) {
+      std::cerr << "[Leju57] Return-zero angle: joint=" << joint_ids[slot]
+                << " result=FAILED reason=invalid_configuration" << std::endl;
+      all_in_range = false;
+      continue;
+    }
+    uint8_t buffer[4] = {};
+    uint32_t actual_width = 0;
+    const auto result = emCoeSdoUpload(0, g_motor_id[ec_id - 1].slave_id - 1,
+        0x6064, 0, buffer, sizeof(buffer), &actual_width, 100, 0);
+    if (result != EC_E_NOERROR || actual_width != sizeof(buffer)) {
+      std::cerr << "[Leju57] Return-zero angle: joint=" << joint_ids[slot]
+                << " result=FAILED reason=6064_read_failed sdo_result=" << result << std::endl;
+      all_in_range = false;
+      continue;
+    }
+    uint32_t raw = 0;
+    for (uint32_t byte = 0; byte < sizeof(buffer); ++byte)
+      raw |= static_cast<uint32_t>(buffer[byte]) << (8 * byte);
+    int32_t counts = 0;
+    std::memcpy(&counts, &raw, sizeof(counts));
+    const double angle_deg = static_cast<double>(counts) * 360.0 / encoder_range[ec_id - 1] - pos_offset[ec_id - 1];
+    const bool in_range = std::isfinite(angle_deg) && angle_deg >= -170.0 && angle_deg <= 170.0;
+    std::cout << "[Leju57] Return-zero angle: joint=" << joint_ids[slot]
+              << " slave=" << static_cast<unsigned int>(g_motor_id[ec_id - 1].slave_id)
+              << " count=" << counts << " offset_deg=" << pos_offset[ec_id - 1]
+              << " angle_deg=" << angle_deg << " range=[-170,170] in_range=" << in_range << std::endl;
+    all_in_range = all_in_range && in_range;
+  }
+  all_in_range = all_in_range && !isEcMasterExit();
+  std::cout << "[Leju57] Return-zero angle check " << (all_in_range ? "PASSED" : "FAILED")
+            << ": joints=2/8/13 range=[-170,170] deg; "
+            << (all_in_range ? "continuing return-zero motion" : "return-zero motion rejected") << std::endl;
+  if (!all_in_range && !isEcMasterExit() && leju_startup_check_failure_callback) {
+    try {
+      leju_startup_check_failure_callback();
+    } catch (const std::exception& error) {
+      std::cerr << "[Leju57] Startup angle announcement failed: " << error.what() << std::endl;
+    } catch (...) {
+      std::cerr << "[Leju57] Startup angle announcement failed" << std::endl;
+    }
+  }
+  return all_in_range;
+}
+
 static bool motorEnable(const uint16_t id_logical)
 {
+  if (!leju_startup_check_ids.empty() && isEcMasterExit()) return false;
   if (id_logical < 0 || id_logical >= num_motor_slave){
     return false;
   }
@@ -2114,6 +2319,7 @@ void setEcEncoderRange(uint32_t *encoder_range_set, uint16_t num)
  */
 void fixEmergencyRequest(const int motorId, const int errorCode)
 {
+  if (!leju_startup_check_ids.empty() && isEcMasterExit()) return;
   // 获取当前 motorStatusMap 缓冲区
   uint8_t *currentMotorStatus = currentMotorStatusMap.load(std::memory_order_acquire);
   if (errorCode == SENSOR_FEEDBACK_ERROR)
@@ -2137,6 +2343,7 @@ void fixEmergencyRequest(const int motorId, const int errorCode)
     // start = std::clock();
     while (true)
     {
+      if (!leju_startup_check_ids.empty() && isEcMasterExit()) return;
       if (motorEnable(motorId-1))
       {
         break;
@@ -2893,10 +3100,21 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
     bRun = EC_TRUE;
     uint32_t i = 0, count = 0;
    
+    if (leju_hardware_zero_requested && !calibrateLejuHardwareZero()) {
+      leju_hardware_zero_control_word.store(0, std::memory_order_release);
+      std::cerr << "[Leju57] Hardware-zero FAILED: EC enable and software calibration blocked" << std::endl;
+      setEcMasterExit();
+      dwRetVal = EC_E_ERROR;
+      goto Exit;
+    }
     EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Wait for %d motors to enable\n", num_motor_slave));
     OsSleep(10);
     while (bRun)
     {
+      if (!leju_startup_check_ids.empty() && isEcMasterExit()) {
+        dwRetVal = EC_E_ERROR;
+        goto Exit;
+      }
       if (motorEnable(i))
       {
         EcLogMsg(EC_LOG_LEVEL_INFO, (pEcLogContext, EC_LOG_LEVEL_INFO, "Joint %d, Slave: %d enabled successfully\n", i + 1, g_motor_id[i].slave_id));
@@ -2986,7 +3204,8 @@ EC_T_DWORD EcDemoApp(T_EC_DEMO_APP_CONTEXT *pAppContext)
       }
 
       /* check if demo shall terminate */
-      bRun = !(OsTerminateAppRequest() || oAppDuration.IsElapsed());
+      bRun = !(OsTerminateAppRequest() || oAppDuration.IsElapsed() ||
+               (!leju_startup_check_ids.empty() && isEcMasterExit()));
       myAppDiagnosis(pAppContext);
 
       if (EC_NULL != pAppParms->pbyCnfData)
@@ -3360,6 +3579,15 @@ static EC_T_VOID EcMasterJobTask(EC_T_VOID *pvAppContext)
     for (uint32_t i = 0; i < num_selfd_slave; i++)
     {
       memcpy(pbyPdOut + elmo_l * num_elmo_slave + yd_wl * num_yd_slave + selfd_wl * i, &currentOut->selfd_slave_output[i], sizeof(SELFD_SlaveWrite_t));
+      if (leju_hardware_zero_pending.load(std::memory_order_acquire)) {
+        for (const auto ec_id : leju_startup_check_ids) {
+          if (ec_id > 0 && ec_id <= num_motor_slave && g_motor_id[ec_id - 1].pdo_id == i) {
+            const uint16_t control_word = leju_hardware_zero_control_word.load(std::memory_order_acquire);
+            std::memcpy(pbyPdOut + elmo_l * num_elmo_slave + yd_wl * num_yd_slave + selfd_wl * i +
+                offsetof(SELFD_SlaveWrite_t, control_word), &control_word, sizeof(control_word));
+          }
+        }
+      }
     }
     dwRes = ecatExecJob(eUsrJob_SendAllCycFrames, &oJobParms);
     //mtx_io.unlock();

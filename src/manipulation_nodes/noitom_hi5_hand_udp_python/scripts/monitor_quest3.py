@@ -1491,7 +1491,7 @@ if __name__ == "__main__":
     else:
         kuavo_assests_path = get_package_path("kuavo_assets")
         robot_version = os.environ.get('ROBOT_VERSION', '40')
-        config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
+        config_file = kuavo_assests_path + f"/config/kuavo_v{'55' if robot_version == '57' else robot_version}/kuavo.json"
         import json
         with open(config_file, 'r') as f:
             config = json.load(f)

@@ -65,7 +65,7 @@
     <arg name="allow_mismatch" default="false" doc="true=校验不一致时仅告警继续启动；false=严格模式，不一致即中止启动"/>
 
     <!-- RL相关参数 -->
-    <arg name="rl_param"  default="$(find humanoid_controllers)/config/kuavo_v$(arg robot_version)/rl/skw_rl_param.info"/>
+    <arg name="rl_param" default="$(eval find('humanoid_controllers') + '/config/kuavo_v' + str(55 if int(arg('robot_version')) == 57 else arg('robot_version')) + '/rl/skw_rl_param.info')"/>
     <arg name="network_model_file" default="$(find humanoid_controllers)/model/networks"/>
     <arg name="init_fall_down_state" default="false"/>
     <arg name="is_rl_start" default="false" doc="If true, bypass MPC controller and start directly with the first RL controller from rl_controllers.yaml"/>

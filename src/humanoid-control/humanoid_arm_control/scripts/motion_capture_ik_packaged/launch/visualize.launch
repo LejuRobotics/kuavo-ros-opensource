@@ -8,13 +8,14 @@
     <arg name="ik_type_idx" default="0"/> <!-- 0 corresponds to nonlinear optimization ik 1 corresponds to differential ik -->
     <arg name="eef_z_bias" default="0.0"/> <!-- bias added to the z-coordinate of the end-effector -->
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
     <param name="robot_version"    value="$(arg robot_version)"/>
 
     <!-- Handle version 15 special case: use version 14 model -->
     <arg name="model_path"     default="$(find kuavo_assets)/models/biped_s14/urdf/drake/biped_v3_arm.urdf" if="$(eval arg('robot_version') == 15)"/>
-    <arg name="model_path"     default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/drake/biped_v3_arm.urdf" unless="$(eval arg('robot_version') == 15)"/>
+    <arg name="model_path"     default="$(find kuavo_assets)/models/biped_s$(arg resource_version)/urdf/drake/biped_v3_arm.urdf" unless="$(eval arg('robot_version') == 15)"/>
     <arg name="vis_model_path" default="$(find kuavo_assets)/models/biped_s14/urdf/biped_s14.urdf" if="$(eval arg('robot_version') == 15)"/>
-    <arg name="vis_model_path" default="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" unless="$(eval arg('robot_version') == 15)"/>
+    <arg name="vis_model_path" default="$(find kuavo_assets)/models/biped_s$(arg resource_version)/urdf/biped_s$(arg resource_version).urdf" unless="$(eval arg('robot_version') == 15)"/>
     
     <arg name="record_bag" default="true"/>
     <arg name="run_quest3_monitor" default="1" />

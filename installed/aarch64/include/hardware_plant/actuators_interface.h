@@ -16,6 +16,8 @@ typedef struct {
   std::string ec_type;
   std::string robot_module;
   int robot_version_int = 0;  
+  std::vector<uint16_t> leju_startup_check_ids;
+  bool leju_hardware_zero = false;
 
 } EcActuatorParams;
 typedef struct

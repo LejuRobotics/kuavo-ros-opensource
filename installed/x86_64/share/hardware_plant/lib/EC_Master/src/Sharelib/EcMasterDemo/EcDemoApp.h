@@ -295,6 +295,10 @@ extern int motorWriteTemperatureLimitAll(EcMasterType driver_type, int32_t temp_
 extern bool isMotorEnable(void);
 extern uint32_t getNumMotorSlave(void);
 void setEcEncoderRange(uint32_t *encoder_range_set, uint16_t num);
+void setLejuStartupAngleCheck(const std::vector<uint16_t>& ids);
+void setLejuHardwareZero(bool enabled);
+bool checkLejuReturnZeroAngles();
+void setLejuStartupAngleCheckFailureCallback(const std::function<void()>& callback);
 
 /**
  * @brief 读取单个从站的 SDO 参数（子索引固定为 0）。
