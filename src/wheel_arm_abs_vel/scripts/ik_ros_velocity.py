@@ -499,9 +499,9 @@ class IkRos:
         self._absolute_resume_after_prepare = False
         self._absolute_prepare_complete = False
         self._joystick_receive_monotonic = None
-        # One admission per Mapper lifetime; stop/reset/source changes never
-        # rearm triggers because they remain end-effector inputs afterwards.
-        self._controller_start_consumed = False
+        # Acquisition opens the existing X+A/X+B commands. Only the first
+        # completed follow consumes triggers for the rest of this Mapper run.
+        self._controller_start_acquired = False
         self._controller_start_completed = False
         self._absolute_fault_hold_pending = False
         self._absolute_fault_hold_reason = AbsoluteEnableReason.NONE
@@ -1614,9 +1614,9 @@ class IkRos:
                 # The first controller follow must come from the trigger edge,
                 # never the X+A/X+B service path. Optical OK keeps its own entry.
                 if (req.control_mode in (1, 2)
-                        and not getattr(self, '_controller_start_completed', False)):
+                        and not self._controller_start_acquired):
                     return changeArmCtrlModeResponse(False, self._fixed_operation_mode(),
-                        "First controller start requires both front triggers; X+A is available after successful follow")
+                        "First controller start requires both front triggers; X+A/X+B are available after execution is acquired")
             return self._fixed_arm_operation(req.control_mode)
         finally:
             self._publish_fixed_operation_state()
@@ -1725,9 +1725,6 @@ class IkRos:
         return None
 
     def _authorize_fixed_follow_locked(self):
-        # Includes X+A replacing a pending PREPARE before a mode-2 request
-        # reaches _queue_fixed_request_locked.
-        self._controller_start_consumed = True
         # mode=2 is an explicit operator follow request (X+A or X+B), not a
         # pose-confidence inference. Use the SAME latch as gesture control so
         # subsequent real stop gestures still revoke it normally.
@@ -1762,7 +1759,7 @@ class IkRos:
                             or self.tracking_source_mode == TrackingSourceMode.HAND
                             or self._tracking_last_accepted_source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING):
                         return result(False, "First-trigger startup is not eligible")
-                elif not completed:
+                elif not self._controller_start_acquired:
                     return result(False, "First controller start requires both front triggers")
             held = getattr(self, '_fixed_arm_hold', False)
             torso = getattr(self, '_torso_controls', None)
@@ -1892,8 +1889,6 @@ class IkRos:
         return result(True, "Request accepted; waiting for readiness and real execution acknowledgement")
 
     def _queue_fixed_request_locked(self, mode, phase):
-        if mode == 2:
-            self._controller_start_consumed = True
         timeout = self._fixed_dependency_timeout if phase == 'dependencies' else self._fixed_prepare_timeout
         self._fixed_pending_operation = dict(mode=mode, phase=phase, resume=False,
             deadline=time.monotonic()+timeout, generation=self._absolute_generation,
@@ -1945,6 +1940,19 @@ class IkRos:
             # Sampling before acquiring it can make a fresh callback appear
             # to come from the future and spuriously cancel PREPARE.
             now = time.monotonic()
+            # Owner acquisition admits X+A/X+B immediately. Only a completed
+            # arm transition consumes the first-trigger retry entry. Observe
+            # completion without extending the owner-handshake deadline over
+            # planning, motion, or an operator's X+B pause.
+            if (self._controller_start_acquired
+                    and not self._controller_start_completed
+                    and self._absolute_state == AbsoluteEnableState.ACTIVE
+                    and self._fixed_consumer_ack_locked(now)
+                    and self._fixed_consumer_status[1].unlock_transition_complete):
+                self._controller_start_completed = True
+                self._fixed_operation_phase = 4
+                rospy.loginfo('[FixedStart] First arm transition completed; live IK following confirmed')
+                self._publish_fixed_operation_state()
             p = self._fixed_pending_operation
             if p is None:
                 return
@@ -1994,10 +2002,13 @@ class IkRos:
                 self._fixed_operation_phase = 2
             elif self._fixed_consumer_ack_locked(now):
                 if p['mode'] == 2 and self._absolute_state == AbsoluteEnableState.ACTIVE:
-                    self._controller_start_completed = True
+                    self._controller_start_acquired = True
                     self._fixed_pending_operation = None
-                    self._fixed_operation_phase = 4
-                    rospy.loginfo('[FixedStart] Follow active: valid IK reference and execution lease confirmed')
+                    self._fixed_operation_phase = 4 if self._controller_start_completed else 2
+                    rospy.loginfo('[FixedStart] %s',
+                        'Follow active: valid IK reference and execution lease confirmed'
+                        if self._controller_start_completed else
+                        'Execution acquired; waiting for the first arm transition to complete')
                 elif self._absolute_state == AbsoluteEnableState.PREPARED:
                     self._fixed_pending_operation = None
                     self._fixed_operation_phase = 4
@@ -4385,10 +4396,26 @@ class IkRos:
         with self._absolute_lock:
             edge = down and not getattr(self, '_controller_start_down', False)
             self._controller_start_down = down
-            # Active triggers retain their existing end-effector meaning.
+            feedback = self._fixed_consumer_status
+            retry_after_loss = (
+                self._controller_start_acquired
+                and self._absolute_state == AbsoluteEnableState.ACTIVE
+                and not self._fixed_arm_hold
+                and feedback is not None
+                and 0 <= time.monotonic() - feedback[0] <= .15
+                and feedback[1].session_id == self._absolute_session_id
+                and feedback[1].generation == self._absolute_generation
+                and feedback[1].control_state == TeleopTcpTarget.CONTROL_ACTIVE
+                and feedback[1].input_confirmation_required)
+            # Before the first completed transition, a NEW press can confirm
+            # input-loss recovery through the normal new-session path. Do not
+            # require an ACTIVE owner here: the existing reference may be held
+            # while waiting for that confirmation. Healthy motion and X+B hold
+            # keep their existing trigger/end-effector semantics.
             eligible = (not getattr(self, '_controller_start_completed', False)
-                        and self._absolute_state in (AbsoluteEnableState.WAITING,
+                        and (self._absolute_state in (AbsoluteEnableState.WAITING,
                         AbsoluteEnableState.WAIT_RELEASE, AbsoluteEnableState.PREPARED)
+                             or retry_after_loss)
                         and self._fixed_pending_operation is None)
         if edge and eligible:
             if not self._fixed_operation_mutex.acquire(False):
@@ -4403,6 +4430,8 @@ class IkRos:
                         return
                 response = self._fixed_arm_operation(2, origin="first_trigger")
                 rospy.loginfo('[FixedStart] double front trigger: %s', response.message)
+                if response.result and retry_after_loss:
+                    rospy.loginfo('[FixedStart] First transition retry after input loss; capturing a new session')
             finally:
                 self._publish_fixed_operation_state()
                 self._fixed_operation_mutex.release()
