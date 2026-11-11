@@ -203,9 +203,15 @@ namespace wheel_absolute_control
     loadData::loadCppDataType(taskFile, "model_settings.mpcArmsDof", armNum_);
     lowJointNum_ = manipulatorModelInfo_.armDim - armNum_;
     baseDim_ = manipulatorModelInfo_.stateDim - manipulatorModelInfo_.armDim;
+    // The launch-level /vr_ik gain is authoritative for the absolute
+    // pipeline. Previously the rnea default silently overwrote an explicitly
+    // configured launch value, so tuning the launch parameter had no effect
+    // on the real-robot rnea backend.
+    const bool vr_ik_gain_configured =
+        controllerNh_.hasParam("/vr_ik/wbc_arm_ddq_feedforward_gain");
     controllerNh_.param("/vr_ik/wbc_arm_ddq_feedforward_gain",
                         arm_ddq_feedforward_gain_, 0.25);
-    if (dynamics_backend_name_ == "rnea")
+    if (dynamics_backend_name_ == "rnea" && !vr_ik_gain_configured)
       controllerNh_.param("/dynamics/rnea/acceleration_gain", arm_ddq_feedforward_gain_, 0.25);
     if (!std::isfinite(arm_ddq_feedforward_gain_)) {
       ROS_FATAL("Nonfinite dynamics acceleration gain"); return false;

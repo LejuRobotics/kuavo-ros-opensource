@@ -37,6 +37,18 @@ with tempfile.TemporaryDirectory(prefix='torso-regression-') as tmp:
                 time.sleep(.1)
             else:
                 raise RuntimeError('private ROS master timeout')
+            # The node constructor requires the validated model contract that
+            # production launches provide; resolve it read-only like the
+            # absolute-record fixture does.
+            contract = subprocess.check_output([
+                sys.executable, str(package/'scripts/resolve_velocity_model.py'),
+                '--robot-version', model,
+                '--assets', str(package.parent/'kuavo_assets'),
+                '--wheel-interface',
+                str(package.parent/'humanoid-wheel-control/humanoid_wheel_interface'),
+                '--overlay-dir', str(package/'config')], env=env, text=True)
+            client.setParam('/torso_regression',
+                            '/whole_body_velocity_ik/model_contract_json', contract)
             subprocess.run(['rosparam', 'load', str(package / 'config/fixed_base_18d.yaml'),
                             '/torso_permission_test'], env=env, check=True)
             subprocess.run([binary, model, scenario], env=env, check=True, timeout=90)
