@@ -658,6 +658,10 @@ namespace humanoid_controller
     // 延迟测量: WBC从SHM收到的手臂轨迹原始数据 + 滤波后数据 + 处理延迟
     ros::Publisher armTrajReceivedPub_;   // /vr_incremental/kuavo_arm_traj_shm
     ros::Publisher armTrajFilteredPub_;   // /vr_incremental/kuavo_arm_traj_filtered
+    // Coherent snapshot for interpolation; unrelated /mm commands cannot refresh it.
+    vector_t armTrajInterpReceivedQ_;
+    vector_t armTrajInterpReceivedV_;
+    ros::Time armTrajInterpReceivedAt_;
     std::mutex armTrajRecvTimeMutex_;
     ros::Time armTrajRecvTime_;           // SHM/ROS回调收到数据的时间戳
     bool armTrajRecvTimeValid_ = false;   // 标记是否已收到过手臂轨迹数据

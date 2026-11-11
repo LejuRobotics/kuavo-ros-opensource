@@ -39,6 +39,9 @@ class JoyStickHandler {
   double getRightJoyStickY() const;
   bool getRightJoyStickYHold() const;
 
+  // 上半身/arm_only 不需要腰胸映射开关，关闭后不再累计 rightJoyStickYHoldCount_。
+  void setRightJoyStickYHoldTrackingEnabled(bool enabled);
+
   // SG100 heiman 手指驱动：读取最新 VR 扳机值 (0~1)。
   bool hasFreshSg100Input(double timeout = 0.5) const;
   double getLeftTrigger() const;
@@ -161,6 +164,7 @@ class JoyStickHandler {
   // RightJoyStickY 按下时间检查相关变量
   bool RightJoyStickYHold_;      // RightJoyStickY 保持状态，默认值为 true
   int rightJoyStickYHoldCount_;  // 连续满足条件的计数
+  bool rightJoyStickYHoldTrackingEnabled_{true};  // false：跳过计数/翻转（arm_only）
 
   HandPositionData handPositionData_;
   ClawCommandData clawCommandData_;

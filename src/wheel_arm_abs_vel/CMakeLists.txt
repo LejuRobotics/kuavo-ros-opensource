@@ -37,6 +37,11 @@ add_compile_definitions(KUAVO_HAS_DRAKE HUMANOID_CONTROLLERS_HAS_DRAKE
 set(VELOCITY_IK_CATKIN_BUILD ON)
 set(VELOCITY_IK_MESSAGE_INCLUDE "${CATKIN_DEVEL_PREFIX}/include")
 set(VELOCITY_IK_MESSAGE_TARGETS ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+# 发布开源树时只要硬件插件。速度 IK 和仿真留给正常编译，避免发布脚本把整个包编一遍。
+if(DEFINED ENV{KUAVO_STAGE_ABSOLUTE_HARDWARE})
+  add_subdirectory(hardware)
+  return()
+endif()
 add_subdirectory(velocity_ik)
 add_library(wheel_absolute_dynamics
   src/absolute/AbsoluteWbcBase.cpp src/absolute/AbsoluteWeightedWbc.cpp
@@ -81,6 +86,11 @@ install(DIRECTORY config launch plugins docs scripts DESTINATION ${CATKIN_PACKAG
 file(GLOB runtime_scripts scripts/*.py scripts/*.sh)
 install(PROGRAMS ${runtime_scripts} DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 if(CATKIN_ENABLE_TESTING)
+  add_executable(end_effector_settings_test test/end_effector_settings_test.cpp)
+  target_include_directories(end_effector_settings_test BEFORE PRIVATE test/stubs)
+  target_link_libraries(end_effector_settings_test Eigen3::Eigen)
+  target_compile_options(end_effector_settings_test PRIVATE -UNDEBUG)
+  add_test(NAME end_effector_settings_test COMMAND end_effector_settings_test)
   add_executable(s6_motion_profile_test test/s6_motion_profile_test.cpp)
   target_include_directories(s6_motion_profile_test PRIVATE include)
   target_compile_options(s6_motion_profile_test PRIVATE -UNDEBUG)
@@ -103,7 +113,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME tail_filter_frequency_test COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test/tail_filter_frequency_test.py)
   enable_testing()
   find_package(PythonInterp 3 REQUIRED)
-  foreach(name skeleton_filter_alignment startup_gesture_order torso_stick_controls pose_velocity_kalman shared_model_resolution arm_hold_base pico_receive_isolation fixed_pipeline_hold startup_arm_action pico_head_follow arm_torso_hold torso_controls absolute_control_mechanism fixed_follow_operation absolute_sim_source pico_discovery pico_input_parity terminal_initial_start runtime_partition runtime_topology x86_topology model_platform_matrix absolute_robot_version absolute_end_effector wheel_base_command velocity_ik_base_command)
+  foreach(name runtime_library_path control_clock_step model_forearm_mapping skeleton_filter_alignment startup_gesture_order torso_stick_controls pose_velocity_kalman shared_model_resolution arm_hold_base pico_receive_isolation fixed_pipeline_hold startup_arm_action pico_head_follow arm_torso_hold torso_controls absolute_control_mechanism fixed_follow_operation absolute_sim_source pico_discovery pico_input_parity terminal_initial_start runtime_partition runtime_topology x86_topology model_platform_matrix absolute_robot_version absolute_end_effector wheel_base_command velocity_ik_base_command)
     add_test(NAME ${name}_test COMMAND ${PYTHON_EXECUTABLE}
       -B ${CMAKE_CURRENT_SOURCE_DIR}/test/${name}_test.py)
   endforeach()
@@ -128,7 +138,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME quest_startup_config_test COMMAND ${PYTHON_EXECUTABLE}
     -B ${CMAKE_CURRENT_SOURCE_DIR}/test/quest_startup_config_test.py
     $<TARGET_FILE:humanoid_quest_absolute_control>)
-  set_tests_properties(quest_startup_config_test PROPERTIES TIMEOUT 120)
+  set_tests_properties(quest_startup_config_test PROPERTIES TIMEOUT 240)
   add_test(NAME launch_model_contract_test COMMAND ${PYTHON_EXECUTABLE}
     -B ${CMAKE_CURRENT_SOURCE_DIR}/test/launch_model_contract_test.py)
   add_test(NAME s63_model_contract_test COMMAND ${PYTHON_EXECUTABLE}

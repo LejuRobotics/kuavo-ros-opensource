@@ -136,6 +136,12 @@ namespace humanoid_controller
       config.kalmanProcessAccCap = 400.0;
       config.kalmanProcessQCap = 1.6e4;
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_v_limit", config.kalmanVLimit);
+      int boundedTracking = 1;
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.bounded_command_tracking", boundedTracking);
+      config.boundedCommandTracking = (boundedTracking != 0);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_acceleration_limit", config.commandAccelerationLimit);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_frequency", config.commandTrackingFrequency);
+      loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_damping", config.commandTrackingDamping);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
       loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_pos", config.kalmanInitialPosVar);
@@ -452,7 +458,11 @@ namespace humanoid_controller
                       << " target_v_alpha=" << interpConfig.targetVAlpha
                       << " r_dq=" << interpConfig.kalmanMeasurementDqNoise
                       << " process_acc_cap=" << interpConfig.kalmanProcessAccCap
-                      << " process_q_cap=" << interpConfig.kalmanProcessQCap);
+                      << " process_q_cap=" << interpConfig.kalmanProcessQCap
+                      << " bounded_tracking=" << interpConfig.boundedCommandTracking
+                      << " command_acc_limit=" << interpConfig.commandAccelerationLimit
+                      << " command_tracking_wn=" << interpConfig.commandTrackingFrequency
+                      << " command_tracking_damping=" << interpConfig.commandTrackingDamping);
     }
 
     // 存储并初始化 WBC 控制频率
@@ -896,8 +906,10 @@ namespace humanoid_controller
                uint64_t stamp_nsec) {
           const int count = std::min(n, static_cast<int>(armNumReal_));
           Eigen::VectorXd target_pos = Eigen::VectorXd::Zero(armNumReal_);
+          Eigen::VectorXd target_vel = Eigen::VectorXd::Zero(armNumReal_);
           for (int i = 0; i < count; ++i) {
             target_pos[i] = pos[i];
+            target_vel[i] = (vel != nullptr) ? vel[i] : 0.0;
           }
           {
             std::lock_guard<std::mutex> lock(external_arm_target_mutex_);
@@ -920,6 +932,9 @@ namespace humanoid_controller
             std::lock_guard<std::mutex> lk(armTrajRecvTimeMutex_);
             armTrajRecvTime_ = ros::Time::now();
             armTrajRecvTimeValid_ = true;
+            armTrajInterpReceivedQ_ = target_pos;
+            armTrajInterpReceivedV_ = target_vel;
+            armTrajInterpReceivedAt_ = armTrajRecvTime_;
           }
           // 发布WBC从共享内存获取到的手臂轨迹原始数据（弧度转角度，与IK节点发布格式一致）
           if (armTrajReceivedPub_) {
@@ -3645,11 +3660,17 @@ void humanoidController::fillHeadJointCmd(kuavo_msgs::jointCmd& msg, int head_st
     }
 
     vector_t targetV = vector_t::Zero(n);
-    if (arm_joint_trajectory_.vel.size() == n)
+    vector_t receivedQ;
+    ros::Time receivedAt;
     {
-      targetV = arm_joint_trajectory_.vel;
+      std::lock_guard<std::mutex> lock(armTrajRecvTimeMutex_);
+      receivedQ = armTrajInterpReceivedQ_;
+      targetV = armTrajInterpReceivedV_;
+      receivedAt = armTrajInterpReceivedAt_;
     }
-    armTrajectoryInterpolator_.ingestRawTarget(time, arm_joint_trajectory_.pos, targetV);
+    if (receivedQ.size() == n && targetV.size() == n && !receivedAt.isZero()) {
+      armTrajectoryInterpolator_.ingestRawTarget(receivedAt, receivedQ, targetV);
+    }
 
     humanoidController_wheel_wbc::ArmTrajectoryInterpolator::ModeFlags modeFlags;
     modeFlags.useArmTrajectoryControl = true;

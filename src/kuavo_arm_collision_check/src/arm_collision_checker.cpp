@@ -113,7 +113,7 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
     nh_.param("/arm_collision/arm_move_diff", arm_move_diff_, 0.01);
 
     // Get URDF file path
-    std::string urdf_file_path = kuavo_asset_path + "/models/biped_s" + robot_version + "/urdf/biped_s" + robot_version + ".urdf";
+    std::string urdf_file_path = kuavo_asset_path + "/models/biped_s" + (robot_version == "57" ? "55" : robot_version) + "/urdf/biped_s" + (robot_version == "57" ? "55" : robot_version) + ".urdf";
     std::ifstream f(urdf_file_path.c_str());
     if (!f.good()) {
         ROS_ERROR("URDF file not found at path: %s", urdf_file_path.c_str());
@@ -121,7 +121,7 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
     }
     
     // Get arm joint number parameter
-    std::string kuavo_json_path = kuavo_asset_path + "/config/kuavo_v" + robot_version + "/kuavo.json";
+    std::string kuavo_json_path = kuavo_asset_path + "/config/kuavo_v" + (robot_version == "57" ? "55" : robot_version) + "/kuavo.json";
     std::ifstream kuavo_json_file(kuavo_json_path.c_str());
     if (!kuavo_json_file.good()) {
         ROS_ERROR("kuavo.json file not found at path: %s", kuavo_json_path.c_str());
@@ -292,7 +292,7 @@ bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Trian
 
         ROS_INFO("Failed to load STL mesh: %s", path.c_str());
 
-        std::string mesh_kuavo_assets_path = kuavo_asset_path + "/models/biped_s" + robot_version + "/meshes/" + filename;
+        std::string mesh_kuavo_assets_path = kuavo_asset_path + "/models/biped_s" + (robot_version == "57" ? "55" : robot_version) + "/meshes/" + filename;
         
         ROS_INFO_STREAM("try to load " << filename << "from kuavo_assets instead!");
         // 使用 kuavo_assets 的 stl 模型
@@ -612,7 +612,7 @@ std::shared_ptr<fcl::CollisionObjectd> ArmCollisionChecker::createCollisionObjec
             std::string filename = extractFilenameFromPackageURL(mesh->filename);
             // ROS_INFO_STREAM("Extracted filename: " << filename);
 
-            std::string mesh_path = kuavo_asset_path + "/models/biped_s" + robot_version + "/meshes/" + filename;
+            std::string mesh_path = kuavo_asset_path + "/models/biped_s" + (robot_version == "57" ? "55" : robot_version) + "/meshes/" + filename;
             
             
             // 读取 STL 文件

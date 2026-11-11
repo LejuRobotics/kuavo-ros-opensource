@@ -44,23 +44,100 @@ inline Eigen::Vector4d limitTorsoReachableStep(const Eigen::Vector4d& previous,
                                              const Eigen::Vector4d& requested,
                                              const TorsoPlanarGeometry& g,
                                              const Eigen::Vector4d& lower,
-                                             const Eigen::Vector4d& upper) {
-  if (!requested.allFinite() || !isTorsoPoseReachable(previous, g, lower, upper)) return previous;
+                                             const Eigen::Vector4d& upper,
+                                             const Eigen::Vector4d* reachableFallback = nullptr) {
+  if (!requested.allFinite()) return previous;
+  Eigen::Vector4d start = previous;
+  Eigen::Vector4d end = requested;
+  if (!isTorsoPoseReachable(start, g, lower, upper)) {
+    // 旧目标越界时从当前有效 FK 接续，保留本拍增量，不要求用户先复位。
+    if (!reachableFallback || !isTorsoPoseReachable(*reachableFallback, g, lower, upper)) return previous;
+    start = *reachableFallback;
+    end = start + (requested - previous);
+  }
   double accepted = 0.0;
   for (int step = 1; step <= 16; ++step) {
     const double fraction = step / 16.0;
-    if (!isTorsoPoseReachable(previous + fraction * (requested - previous), g, lower, upper)) {
+    if (!isTorsoPoseReachable(start + fraction * (end - start), g, lower, upper)) {
       double rejected = fraction;
       for (int i = 0; i < 20; ++i) {
         const double mid = (accepted + rejected) * 0.5;
-        if (isTorsoPoseReachable(previous + mid * (requested - previous), g, lower, upper)) accepted = mid;
+        if (isTorsoPoseReachable(start + mid * (end - start), g, lower, upper)) accepted = mid;
         else rejected = mid;
       }
-      return previous + accepted * (requested - previous);
+      return start + accepted * (end - start);
     }
     accepted = fraction;
   }
-  return requested;
+  return end;
+}
+
+// 纯下降允许必要的 x 联动：先尝试保持 x，再找本拍速度范围内最近的可达 x。
+// 保持 yaw/pitch；若本拍所需 x 变化过大，减少下降量，不积累不可达目标。
+inline Eigen::Vector4d limitTorsoCoupledDescent(
+    const Eigen::Vector4d& previous, const Eigen::Vector4d& requested,
+    const TorsoPlanarGeometry& g, const Eigen::Vector4d& lower, const Eigen::Vector4d& upper,
+    double maxXStep, double minX, double maxX, const Eigen::Vector4d* reachableFallback = nullptr) {
+  Eigen::Vector4d start = previous;
+  if (!isTorsoPoseReachable(start, g, lower, upper)) {
+    if (!reachableFallback || !isTorsoPoseReachable(*reachableFallback, g, lower, upper)) return previous;
+    start = *reachableFallback;
+  }
+  const double dz = requested[1] - previous[1];
+  if (!requested.allFinite() || dz >= 0.0 || !std::isfinite(maxXStep) || maxXStep <= 0.0) {
+    return limitTorsoReachableStep(previous, requested, g, lower, upper, reachableFallback);
+  }
+  auto candidate = [&](double fraction, Eigen::Vector4d& result) {
+    result = start;
+    result[1] += fraction * dz;
+    if (!isTorsoPoseReachable(result, g, lower, upper)) {
+      bool found = false;
+      double bestX = start[0], bestDistance = maxXStep + 1.0;
+      for (double direction : {-1.0, 1.0}) {
+        const double bound = std::max(minX, std::min(maxX, start[0] + direction * maxXStep));
+        for (int probe = 1; probe <= 8; ++probe) {
+          Eigen::Vector4d trial = result;
+          trial[0] = start[0] + (bound - start[0]) * probe / 8.0;
+          if (!isTorsoPoseReachable(trial, g, lower, upper)) continue;
+          double rejected = start[0], accepted = trial[0];
+          for (int i = 0; i < 24; ++i) {
+            const double mid = (rejected + accepted) * 0.5;
+            trial[0] = mid;
+            if (isTorsoPoseReachable(trial, g, lower, upper)) accepted = mid;
+            else rejected = mid;
+          }
+          // 在可达边界内侧留 10 微米，避免插值与浮点误差反复擦过边界。
+          const double inset = std::min(1e-5, std::abs(start[0] + (bound - start[0]) * probe / 8.0 - accepted));
+          accepted += direction * inset;
+          if (std::abs(accepted - start[0]) < bestDistance) {
+            bestDistance = std::abs(accepted - start[0]);
+            bestX = accepted;
+            found = true;
+          }
+          break;
+        }
+      }
+      if (!found) return false;
+      result[0] = bestX;
+    }
+    // 本拍起点与终点之间也必须可达，不能只验证终点。
+    for (int i = 1; i <= 16; ++i) {
+      if (!isTorsoPoseReachable(start + (result - start) * (i / 16.0), g, lower, upper)) return false;
+    }
+    return true;
+  };
+  Eigen::Vector4d result;
+  if (candidate(1.0, result)) return result;
+  double accepted = 0.0, rejected = 1.0;
+  Eigen::Vector4d best = start;
+  for (int i = 0; i < 24; ++i) {
+    const double mid = (accepted + rejected) * 0.5;
+    if (candidate(mid, result)) {
+      accepted = mid;
+      best = result;
+    } else rejected = mid;
+  }
+  return best;
 }
 
 }  // namespace ocs2

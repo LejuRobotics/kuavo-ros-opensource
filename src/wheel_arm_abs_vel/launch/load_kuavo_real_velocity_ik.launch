@@ -224,7 +224,10 @@
   <param name="/vr_ik/use_velocity_ik_reference" value="true" type="bool" />
   <param name="/vr_ik/velocity_ik_reference_topic" value="/whole_body_velocity_ik/reference" type="string" />
   <param name="/vr_ik/velocity_ik_reference_timeout_sec" value="0.05" type="double" />
-  <param name="/vr_ik/wbc_arm_ddq_feedforward_gain" value="0.25" type="double" />
+  <!-- Lower ddq feedforward for S62/S63 wrist jitter: IK differential ddq is
+       noisy at rest; 0.25 gain injected it as motor torque. Tune per site. -->
+  <arg name="wbc_arm_ddq_feedforward_gain" default="0.10" />
+  <param name="/vr_ik/wbc_arm_ddq_feedforward_gain" value="$(arg wbc_arm_ddq_feedforward_gain)" type="double" />
   <param name="/pinocchio_deployment/BASE_CONTROL" value="$(eval 'LOCKED' if arg('base_locked') else 'VR_INCREMENTAL_JOYSTICK')" type="str" />
   <param name="/pinocchio_deployment/LEGACY_NORMAL_QUICK_SWITCH" value="DISABLED" type="str" />
   <param name="/pinocchio_deployment/IK_PIPELINE" value="PINOCCHIO_VELOCITY" type="str" />
@@ -252,7 +255,7 @@
   <param name="sg100_output_limit" value="$(arg sg100_output_limit)" />
   <node pkg="humanoid_controllers" type="collect_launch_info.sh" name="collect_launch_info" />
   <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)" />
-  <include file="$(find humanoid_plan_arm_trajectory)/launch/humanoid_plan_arm_trajectory.launch">
+  <include file="$(find wheel_arm_abs_vel)/launch/absolute_arm_trajectory.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>
   <!-- Read at node startup; load last so included YAML cannot override audit rates. -->
@@ -270,10 +273,13 @@
     </include>
   </group>
   <arg name="absolute_launch_contract" value="$(eval {'supported': 'wheel_arm_abs_vel_s62'}['supported' if (int(arg('robot_version')) > 0 and (int(arg('robot_version')) != 63 or not arg('with_ik')) and int(arg('robot_type')) == 1 and int(arg('nodelet_robot_type')) == 1 and int(arg('wheel_control_type')) != 0 and int(arg('estimator_type')) == 1 and not arg('use_external_mpc') and arg('real')) else 'Private absolute real requires a validated full wheel model (S63 with_ik=false) wheel mode, measured estimator and no external MPC'])" />
-  <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand" />
+  <arg name="head_control_mode" default="vr_follow" doc="fixed / vr_follow / track_hand" />
   <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand" />
-  <include file="$(find wheel_arm_abs_vel)/launch/absolute_head_control.launch">
-    <arg name="head_control_mode" value="$(arg head_control_mode)" />
+  <arg name="head_track_hand" default="false" doc="TEST-compatible opt-in standalone hand tracking" />
+  <param name="/absolute/head_control_mode" value="$(arg head_control_mode)" />
+  <param name="/absolute/head_mode_service" value="$(eval '/head_control_node/set_head_control_mode' if arg('head_track_hand') or arg('head_control_mode') == 'track_hand' else '/quest3/set_head_control_mode')" />
+  <include file="$(find wheel_arm_abs_vel)/launch/absolute_head_control.launch" if="$(eval arg('head_track_hand') or arg('head_control_mode') == 'track_hand')">
+    <arg name="head_control_mode" value="track_hand" />
     <arg name="head_track_target" value="$(arg head_track_target)" />
   </include>
   <!-- Final version-scoped assets must win over parameters from nested legacy launches. -->

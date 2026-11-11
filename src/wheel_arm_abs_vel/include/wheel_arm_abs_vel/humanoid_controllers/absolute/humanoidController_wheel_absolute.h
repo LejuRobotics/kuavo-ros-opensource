@@ -39,6 +39,7 @@
 #include "humanoid_interface/common/Types.h"
 #include "humanoid_interface/common/TopicLogger.h"
 #include "kuavo_common/common/sensor_data.h"
+#include "kuavo_common/common/AsyncTimingProbe.h"
 #include "humanoid_wheel_interface/HumanoidWheelInterface.h"
 #include "humanoid_wheel_interface/motion_planner/VelocityLimiter.h"
 #include "humanoid_wheel_interface_ros/MobileManipulatorDummyVisualization.h"
@@ -197,7 +198,9 @@ namespace wheel_absolute_control
     double robotPreActionDesiredTime_ = 0.0;
     bool startup_action_started_{false};
     double startup_action_start_time_{0.0};
-    double startup_action_last_time_{0.0};
+    double control_elapsed_time_{0.0};
+    double pending_control_period_{0.0};
+    std::chrono::steady_clock::time_point last_sensor_receive_{};
 
     // ========== 坐标变换相关 ==========
     Eigen::Vector3d cmdVelWorldToBody(const Eigen::Vector3d& cmd_vel_world, double yaw);
@@ -235,6 +238,7 @@ namespace wheel_absolute_control
     ros::Publisher lbLegTrajPub_;  // lb_leg_traj话题发布者，用于外部MPC模式下的VR躯干控制
     ros::Publisher stopRobotPub_;  // /stop_robot 话题发布者，用于底盘急停保护
     ros::Publisher armTrajFilteredPub_;  // 滤波后手臂轨迹发布者（用于互相关测量相位延迟）
+    ros::Publisher startupArmPosePub_;
     ros::Publisher resetToStatePub_;  // /mobile_manipulator_reset_to_state 发布者（3791 软暂停恢复时把冻结姿态发给 RM）
     // 双手末端 FK 的 PoseStamped 发布者，对应 /sensors_data_raw/ee_fk/<末端帧名>（与 eeFrames 同序）
     std::vector<ros::Publisher> handFkPubs_;
@@ -242,6 +246,8 @@ namespace wheel_absolute_control
 
     // 日志
     humanoid::TopicLogger *ros_logger_{nullptr};
+    kuavo_timing::WbcCycle::Publisher cycle_timing_;
+    uint64_t cycle_timing_sequence_{0};
 
     // ========== 底盘急停保护相关 ==========
     ros::Subscriber baseCmdVelStatusSub_;  // 订阅 /move_base/base_cmd_vel_status 话题
@@ -286,7 +292,7 @@ namespace wheel_absolute_control
 
     // ========== 状态估计 ==========
     SystemObservation observation_wheel_;
-    ros::Time current_time_, last_time_;
+    ros::Time current_time_, last_time_;  // Source stamps for playback only.
 
     // ========== 全身控制 ==========
     std::shared_ptr<mobile_manipulator::AbsoluteWeightedWbc> wheel_wbc_;  // 基础WBC（AbsoluteWeightedWbc）
@@ -305,7 +311,7 @@ namespace wheel_absolute_control
     Eigen::Vector3d base_cmd_vel_min_{-1.2, -1.2, -1.2};  // vx, vy, wz 下限
     bool base_cmd_vel_limit_enable_{false};  // 是否启用 base_cmd_vel 速度限幅
     double base_cmd_vel_publish_rate_{50.0};  // /move_base/base_cmd_vel 发布频率上限 [Hz]，避免 500Hz 灌满底盘节点
-    ros::Time last_cmd_vel_pub_time_;  // 上次发布 /move_base/base_cmd_vel 的时间，用于限频
+    std::chrono::steady_clock::time_point last_cmd_vel_pub_time_{};  // 上次发布 /move_base/base_cmd_vel 的时间，用于限频
 
     // ========== 期望力管理器 ==========
     std::unique_ptr<DesiredForceManager> desired_force_manager_;
@@ -403,13 +409,14 @@ namespace wheel_absolute_control
     int8_t quickMode_{0};  // 全身快速模式类型: 0-关闭, 1-下肢快, 2-上肢快, 3-上下肢快
     bool use_vel_control_{true};  // 是否使用速度控制
     bool prev_use_vel_control_{true};  // 上一次的速度控制状态，用于检测模式切换
-    ros::Time last_reset_cmd_vel_ruckig_time_;  // 上次重置cmdVel Ruckig规划器的时间
+    std::chrono::steady_clock::time_point last_reset_cmd_vel_ruckig_time_{};  // 上次重置cmdVel Ruckig规划器的时间
     static constexpr double RESET_CMD_VEL_RUCKIG_INTERVAL = 0.5;  // 重置规划器的最小时间间隔
     int arm_trajectory_mode_{-1};  // 轨迹控制模式
     int prev_arm_trajectory_mode_{0};  // 上一次的轨迹控制模式
     bool isArmControlModeChanged_{false};  // 是否需要处理模式切换
     bool arm_mode_switch_hold_phase_{true};  // 是否处于200ms保持阶段
     double arm_move_spd_{15.0};  // 手臂移动速度
+    double arm_reset_speed_rad_s_{0.7};  // 仅 2 -> 1 复位，单位 rad/s
     double arm_mode_switch_start_time_{0.0};  // 模式切换开始时间
     vector_t init_arm_target_qpos_;
     bool enable_arm_traj_interpolator_{false};  // 手臂轨迹插补增强开关（默认关闭，保持旧行为）

@@ -23,7 +23,13 @@ def read(path):
         return ""
 
 def write(path, value):
-    Path(path).write_text(str(value))
+    # tracefs controls must already exist. O_CREAT misreports unsupported
+    # kernel features (e.g. snapshot on PREEMPT_RT) as PermissionError(13).
+    fd = os.open(str(path), os.O_WRONLY | os.O_TRUNC)
+    try:
+        os.write(fd, str(value).encode())
+    finally:
+        os.close(fd)
 
 def process_identity(pid, role):
     p = Path("/proc") / str(pid)
@@ -205,7 +211,10 @@ class FlightTrace:
             # Extra GIL-wake syscalls from mapper threads use verified addresses.
             self.refresh_mapper_threads()
             # Allocate snapshot storage while tracing is off.
-            write(self.path/"snapshot", 1)
+            self.snapshot_supported = (self.path/"snapshot").exists()
+            self.snapshot_mode = "kernel_snapshot" if self.snapshot_supported else "stop_read_resume"
+            if self.snapshot_supported:
+                write(self.path/"snapshot", 1)
             write(self.path/"trace", "")
             write(self.path/"tracing_on", 1)
             self.started_ns = time.monotonic_ns()
@@ -252,7 +261,14 @@ class FlightTrace:
 
     def snapshot(self, stem, event):
         started = time.monotonic_ns()
-        write(self.path/"snapshot", 1)  # atomic swap; running ring continues, no trace_pipe consumer
+        if self.snapshot_supported:
+            write(self.path/"snapshot", 1)  # atomic swap; running ring continues
+            source_path = self.path/"snapshot"
+        else:
+            # RT kernels may omit CONFIG_TRACER_SNAPSHOT. Pause ONLY our
+            # private instance, export its bounded ring, then resume in finally.
+            write(self.path/"tracing_on", 0)
+            source_path = self.path/"trace"
         snapshot_ns = time.monotonic_ns()
         minimum = max(self.started_ns, event["begin"]-100_000_000)
         maximum = snapshot_ns
@@ -261,37 +277,49 @@ class FlightTrace:
         read_bytes = saved_bytes = lost_lines = 0
         limited = False
         pat = re.compile(r"\[(\d+)\].*?\s(\d+)\.(\d+): ")
-        with (self.path/"snapshot").open(errors="replace") as source, trace.open("w") as dest:
-            for line in source:
-                read_bytes += len(line)
-                if read_bytes > 96*1024**2:
-                    limited = True
-                    break
-                match = pat.search(line)
-                if "LOST" in line:
-                    lost_lines += 1
-                    dest.write(line)
-                if not match:
-                    if line.startswith("#"):
-                        dest.write(line)
-                    continue
-                cpu = int(match[1])
-                stamp = int(match[2])*1_000_000_000+int(match[3].ljust(9, "0"))
-                bounds = ranges.setdefault(cpu, [stamp, stamp])
-                bounds[0] = min(bounds[0], stamp)
-                bounds[1] = max(bounds[1], stamp)
-                if minimum <= stamp <= maximum:
-                    dest.write(line)
-                    saved_bytes += len(line)
-                    if saved_bytes > 16*1024**2:
+        pause_end_ns = None
+        ring_stats = {p.parent.name: read(p) for p in (self.path/"per_cpu").glob("cpu*/stats")}
+        try:
+            with source_path.open(errors="replace") as source, trace.open("w") as dest:
+                for line in source:
+                    read_bytes += len(line)
+                    if read_bytes > 96*1024**2:
                         limited = True
                         break
+                    match = pat.search(line)
+                    if "LOST" in line:
+                        lost_lines += 1
+                        dest.write(line)
+                    if not match:
+                        if line.startswith("#"):
+                            dest.write(line)
+                        continue
+                    cpu = int(match[1])
+                    stamp = int(match[2])*1_000_000_000+int(match[3].ljust(9, "0"))
+                    bounds = ranges.setdefault(cpu, [stamp, stamp])
+                    bounds[0] = min(bounds[0], stamp)
+                    bounds[1] = max(bounds[1], stamp)
+                    if minimum <= stamp <= maximum:
+                        dest.write(line)
+                        saved_bytes += len(line)
+                        if saved_bytes > 16*1024**2:
+                            limited = True
+                            break
+        finally:
+            if not self.snapshot_supported:
+                write(self.path/"trace", "")
+                write(self.path/"tracing_on", 1)
+                pause_end_ns = time.monotonic_ns()
+                self.started_ns = pause_end_ns
         meta = dict(trigger=event, capture_monotonic_ns=started, snapshot_monotonic_ns=snapshot_ns,
                     save_end_monotonic_ns=time.monotonic_ns(), requested_start_ns=minimum,
                     requested_end_ns=maximum, read_bytes=read_bytes, saved_bytes=saved_bytes,
                     size_truncated=limited, lost_lines=lost_lines, retained_cpu_ranges=ranges,
-                    ring_stats={p.parent.name: read(p) for p in (self.path/"per_cpu").glob("cpu*/stats")},
+                    ring_stats=ring_stats,
                     filters=self.filters, enabled=self.enabled,
+                    snapshot_mode=self.snapshot_mode,
+                    capture_blind_interval_ns=([started, pause_end_ns]
+                        if pause_end_ns is not None else None),
                     saved_cmdlines=read(self.path/"saved_cmdlines"),
                     saved_tgids=read(self.path/"saved_tgids"),
                     note="Ring overwrite is expected; certify event coverage from retained CPU ranges. "
@@ -407,6 +435,7 @@ def run(args):
                         manifest["runs"].append(entry)
                         if history["seconds"] < args.duration:
                             trace = FlightTrace(run_dir, (key[1], key[3]), key[2])
+                            entry["snapshot_mode"] = trace.snapshot_mode
                             state.set_active(key)
                             rospy.loginfo("[sched-observer] CAPTURING_FOLLOW: %s identity=%s", run_dir, key)
                             print("FOLLOW_CAPTURE "+str(run_dir)+" "+str(key), flush=True)
@@ -494,7 +523,10 @@ def run(args):
                         break
                 stop.wait(.02)
     except BaseException as error:
-        manifest["errors"].append(repr(error))
+        import traceback
+        manifest["errors"].append(dict(type=type(error).__name__, message=str(error),
+                                       filename=getattr(error, "filename", None),
+                                       traceback=traceback.format_exc()))
         raise
     finally:
         if trace:

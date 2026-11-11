@@ -29,7 +29,7 @@ methods={'arm_mode_callback','_admit_velocity_gesture_locked','fixed_arm_operati
     'whole_body_velocity_ik_status_callback','_queue_fixed_request_locked','_advance_fixed_request',
     '_fixed_consumer_ack_locked','_fixed_owner_callback','_fixed_enable_callback',
     '_publish_wheel_base_command', '_torso_input_ready_locked',
-    '_fill_subsystem_permissions_locked', '_bump_absolute_generation_locked',
+    '_fill_subsystem_permissions_locked', '_torso_optical_input_stream_locked', '_bump_absolute_generation_locked',
     '_latch_tracking_fault_locked', '_pause_absolute_session', '_finish_absolute_session'}
 selected=[]
 for item in tree.body:
@@ -80,6 +80,7 @@ class FixedFollowTest(unittest.TestCase):
         n._fixed_control_enabled=True;n._fixed_stop_epoch=0
         n._absolute_latest_target=None;n._last_valid_tcp_receive=10.
         n._tracking_last_accepted_source=1;n._absolute_mode_status_time=10.;n.absolute_enable_mode_timeout=5.
+        n._tracking_session_source=1
         n._absolute_latest_measured_q=[0.]*14
         n._absolute_latest_measured_q_time=n._joystick_receive_monotonic=10.
         n._absolute_latest_measured_q_source='sensor'
@@ -98,6 +99,85 @@ class FixedFollowTest(unittest.TestCase):
         n._finish_absolute_session=finish
         n._request_absolute_hold_mode=lambda:True
         n._pause_absolute_session=lambda:setattr(n,'_absolute_state',State.RETURNING_TO_PREP)
+    def test_optical_torso_follows_without_joystick_and_stops_on_pose_loss(self):
+        n=self.n
+        n._tracking_session_source=n._tracking_last_accepted_source=2
+        n._absolute_state=State.ACTIVE
+        n._torso_controls.last_time=1.0  # An old controller heartbeat must not revoke optical following.
+        n._torso_controls.reset();n._torso_controls.request_follow()
+        msg=NS()
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertTrue(msg.torso_control_enabled)
+        clock.now+=1.
+        n._last_valid_tcp_receive=clock.now
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertTrue(msg.torso_control_enabled)
+        clock.now+=.3
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+        n._last_valid_tcp_receive=clock.now
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)  # Recovery alone is not a follow request.
+        n._torso_controls.request_follow()
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertTrue(msg.torso_control_enabled)
+
+    def test_controller_session_still_requires_controller_stream(self):
+        n=self.n;n._absolute_state=State.ACTIVE
+        n._tracking_last_accepted_source=2  # A raw source switch cannot change the admitted session.
+        n._torso_controls.last_time=1.
+        n._torso_controls.request_follow()
+        msg=NS();n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+        self.assertIsNone(n._torso_optical_input_stream_locked())
+
+    def test_bone_authorization_samples_time_after_concurrent_joystick_update(self):
+        n=self.n
+        n._absolute_state=State.SWITCHING
+        n._torso_controls.clear_operator_mode()
+        n._torso_controls.last_time=clock.now
+        n._torso_controls.request_follow()
+        received=clock.now
+        # Execute the production permission call in its original lock scope.
+        mapper=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='IkRos')
+        scope,statement=next((scope,stmt) for scope in ast.walk(mapper)
+            if isinstance(scope,ast.With) for stmt in scope.body
+            if isinstance(stmt,ast.Expr) and isinstance(stmt.value,ast.Call)
+            and isinstance(stmt.value.func,ast.Attribute)
+            and stmt.value.func.attr=='_fill_subsystem_permissions_locked'
+            and isinstance(stmt.value.args[0],ast.Name) and stmt.value.args[0].id=='tcp_msg')
+        class InterleavedLock:
+            def __enter__(self):
+                clock.now=received+.005
+                n._torso_controls.last_time=clock.now
+            def __exit__(self,*args):pass
+        n._absolute_lock=InterleavedLock()
+        locked=ast.With(items=scope.items,body=[statement],type_comment=None)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[locked],type_ignores=[])),
+                     '<production-bone-authorization>','exec'),
+             dict(self=n,tcp_msg=NS(),received_monotonic=received,time=clock))
+        self.assertTrue(n._torso_controls._admitted_follow)
+        self.assertTrue(n._torso_controls.startup_enable_pending)
+        # Acquisition finishes and X+A is released: permission must still apply.
+        n._absolute_state=State.ACTIVE
+        raw=NS(left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.,right_y=0.,
+               **{side+'_'+key:False for side in ('left','right') for key in
+                  ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')})
+        clock.now+=.01;n._last_valid_tcp_receive=clock.now
+        n._torso_controls.update(raw,raw,clock.now,n._torso_input_ready_locked(clock.now))
+        self.assertTrue(n._torso_controls.enabled)
+
+    def test_optical_authorization_preserves_manual_lock_and_fault_gate(self):
+        n=self.n;n._absolute_state=State.ACTIVE;n._tracking_session_source=2
+        n._torso_controls.selected_enabled=False
+        n._torso_controls.request_follow()
+        msg=NS();n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+        n._torso_controls.selected_enabled=True;n._torso_controls.request_follow()
+        n._absolute_fault_hold_pending=True
+        n._fill_subsystem_permissions_locked(msg,clock.now)
+        self.assertFalse(msg.torso_control_enabled)
+
     def fresh(self):
         n=self.n;n._last_valid_tcp_receive=clock.now
         n._absolute_latest_measured_q_time=n._joystick_receive_monotonic=clock.now
@@ -221,19 +301,46 @@ class FixedFollowTest(unittest.TestCase):
                            left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
                     p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
                     self.assertTrue(p.enabled)
-    def test_prepare_resume_keeps_explicit_arm_mode(self):
+    def test_prepare_resume_clears_manual_torso_switches(self):
         for source_name in ('quest', 'pico'):
             self.setUp();n=self.n
+            n._absolute_state=State.ACTIVE
             p=n._torso_controls=torso_module.TorsoControls(source_name)
-            p.selected_enabled=False  # operator selected arm mode
+            p.selected_enabled=False  # 腰部总开关手动关闭
+            p.position_enabled=False  # 腰部细分（位置保持）手动打开
+            p.enabled=True
             n._fixed_arm_operation(1)
+            self.assertFalse(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
             n._authorize_fixed_follow_locked()
             raw=NS(**{side+'_'+key:False for side in ('left','right') for key in
                       ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')},
                    left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
             p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
-            self.assertFalse(p.enabled)
-            self.assertFalse(p.selected_enabled)
+            self.assertTrue(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+
+    def test_ready_pose_return_clears_manual_torso_switches(self):
+        n=self.n
+        p=n._torso_controls
+        p.selected_enabled=False
+        p.position_enabled=False
+        p.enabled=True
+        Mapper._pause_absolute_session(n)
+        self.assertFalse(p.enabled)
+        self.assertFalse(p.startup_enable_pending)
+        self.assertTrue(p.position_enabled)
+        self.assertTrue(p.selected_enabled)
+        n._authorize_fixed_follow_locked()
+        raw=NS(**{side+'_'+key:False for side in ('left','right') for key in
+                  ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')},
+               left_trigger=0.,right_trigger=0.,left_grip=0.,right_grip=0.)
+        p.update(raw,raw,10.,True);p.update(raw,raw,10.01,True)
+        self.assertTrue(p.enabled)
+        self.assertTrue(p.position_enabled)
+
     def test_pending_follow_without_dependencies_cannot_rearm_torso(self):
         n=self.n
         p=n._torso_controls
@@ -267,6 +374,47 @@ class FixedFollowTest(unittest.TestCase):
         self.n._absolute_latest_measured_q=None;self.start();clock.now+=12.1;self.fresh()
         self.n._advance_fixed_request();self.assertEqual(self.n._fixed_operation_phase,5)
         self.assertIsNone(self.n._fixed_pending_operation)
+    def _record_failed_hold_requests(self):
+        n=self.n;calls=[]
+        n._Mapper__send_srv=True
+        n._reset_tracking_session_source_locked=lambda:None
+        n._finish_absolute_session=lambda *args:Mapper._finish_absolute_session(n,*args)
+        n._request_absolute_hold_mode=lambda:calls.append('hold') or False
+        return calls
+
+    def test_disabled_dependency_timeout_cancels_without_hold_fault(self):
+        n=self.n;n._fixed_control_enabled=False;n._absolute_mode_status=(0,0,False)
+        calls=self._record_failed_hold_requests()
+        self.assertTrue(self.start().result)
+        generation=n._absolute_generation
+        clock.now+=12.1;self.fresh();n._advance_fixed_request()
+        self.assertEqual(calls,[])
+        self.assertFalse(n._absolute_fault_hold_pending)
+        self.assertIsNone(n._fixed_pending_operation)
+        self.assertEqual(n._fixed_operation_phase,5)
+        self.assertGreater(n._absolute_generation,generation)
+        for _ in range(120):n._advance_fixed_request()
+        self.assertEqual(calls,[])
+        # A new explicit request can succeed once the original dependencies
+        # become ready; the timed-out request itself never resumes.
+        n._fixed_control_enabled=True
+        self.assertTrue(self.start().result)
+        self.assertEqual(n._absolute_state,State.SWITCHING)  # beta starts acquisition in this tick
+
+    def test_acquisition_timeout_keeps_existing_hold_handshake(self):
+        n=self.n;n._absolute_mode_status=(0,0,False)
+        calls=self._record_failed_hold_requests();self.start()
+        clock.now+=5.1;self.fresh();n._advance_fixed_request()
+        self.assertEqual(calls,['hold'])
+        self.assertTrue(n._absolute_fault_hold_pending)
+
+    def test_dependency_timeout_with_existing_mode2_keeps_hold_handshake(self):
+        n=self.n;n._fixed_control_enabled=False;n._absolute_mode_status=(2,2,False)
+        calls=self._record_failed_hold_requests();self.start()
+        clock.now+=12.1;self.fresh();n._advance_fixed_request()
+        self.assertEqual(calls,['hold'])
+        self.assertTrue(n._absolute_fault_hold_pending)
+
     def test_mode_ack_without_consumer_times_out(self):
         self.start();self.n._absolute_state=State.ACTIVE;clock.now+=5.1;self.fresh()
         self.n._advance_fixed_request();self.assertEqual(self.n._fixed_operation_phase,5)

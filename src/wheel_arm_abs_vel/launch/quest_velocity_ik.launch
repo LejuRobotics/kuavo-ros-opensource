@@ -26,6 +26,9 @@
   <param name="/whole_body_velocity_ik/reference/shm_reference_key" value="$(arg reference_shm_key)" />
   <param name="/whole_body_velocity_ik/reference/shm_owner_key" value="$(arg owner_shm_key)" />
   <arg name="robot_version" default="$(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION)" />
+  <arg name="preparation_arm_velocity_limit" default="1.5" />
+  <arg name="preparation_gain" default="4.0" />
+  <arg name="use_controller_startup_arm_pose" default="true" doc="Use the controller final startup arm pose for IK reset; false restores configured preparation_arm_position" />
   <include file="$(find wheel_arm_abs_vel)/launch/velocity_model_contract.launch">
     <arg name="robot_version" value="$(arg robot_version)" />
   </include>
@@ -47,6 +50,20 @@
   <arg name="orientation_reference_mode" default="fixed_bandwidth" />
   <arg name="hand_position_cutoff_hz" default="5.0" />
   <arg name="hand_orientation_cutoff_hz" default="4.0" />
+  <arg name="optical_hand_position_cutoff_hz" default="2.5" />
+  <arg name="optical_hand_orientation_cutoff_hz" default="1.8" />
+  <arg name="optical_adaptive_enabled" default="false" />
+  <arg name="optical_left_elbow_enabled" default="true" />
+  <arg name="optical_left_elbow_weight" default="0.5" />
+  <arg name="optical_right_elbow_enabled" default="true" />
+  <arg name="optical_right_elbow_weight" default="0.5" />
+  <arg name="optical_adaptive_position_max_hz" default="3.5" />
+  <arg name="optical_adaptive_orientation_max_hz" default="2.5" />
+  <arg name="optical_bounded_reference_enabled" default="true" />
+  <arg name="optical_linear_speed_limit" default="1.6" />
+  <arg name="optical_linear_acceleration_limit" default="14.0" />
+  <arg name="optical_angular_speed_limit" default="3.5" />
+  <arg name="optical_angular_acceleration_limit" default="24.0" />
   <arg name="hand_prediction_config" default="" doc="Optional explicit control overlay; empty uses the aligned test defaults." />
   <arg name="s6_motion_profile" default="true" />
   <arg name="joint_jerk_enabled" default="true" />
@@ -98,7 +115,7 @@
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
   <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- 头部指令由机器端 head_control_node 发布。 -->
-  <arg name="enable_head_control" default="false" />
+  <arg name="enable_head_control" default="true" />
   <arg name="enable_terminal_start" default="false" />
   <!-- Input-terminal alternative to long A; controller-terminal keyboard remains unchanged. -->
   <node pkg="wheel_arm_abs_vel" type="terminal_initial_start.py" name="absolute_terminal_start"
@@ -136,6 +153,8 @@
   <arg name="absolute_execution_max_joint_acceleration" default="6.0" />
   <arg name="absolute_execution_min_joint_limit_margin" default="0.03" />
   <arg name="tracking_rearm_stable_frames" default="3" />
+  <arg name="optical_input_guard_enabled" default="true" />
+  <arg name="optical_input_guard_latch_on_jump" default="false" />
   <group if="$(eval int(arg('robot_version')) in (61, 62, 63, 210062, 310062, 400062))">
     <param name="/vr_cmd_vel/linear_scale_x" value="0.4" />
     <param name="/vr_cmd_vel/linear_scale_y" value="0.4" />
@@ -258,9 +277,13 @@
     <param name="base_admission_dwell_time" value="0.40" type="double" />
     <param name="base_admission_on_threshold" value="0.10" type="double" />
     <param name="base_admission_off_threshold" value="0.03" type="double" />
+    <!-- X+A PREPARE: arm speed cap in rad/s, proportional gain in 1/s. -->
+    <param name="preparation_arm_velocity_limit" value="$(arg preparation_arm_velocity_limit)" type="double" />
+    <param name="preparation_gain" value="$(arg preparation_gain)" type="double" />
     <!-- 400062 permits measured arm error up to 0.15 rad at PREPARE completion. -->
     <param name="preparation_measured_position_tolerance" value="$(eval 0.15 if int(arg('robot_version')) == 400062 else 0.06)" type="double" />
     <rosparam param="preparation_arm_position">[0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0, 0.2618, 0.0, 0.0, -0.5236, 0.0, 0.0, 0.0]</rosparam>
+    <param name="use_controller_startup_arm_pose" value="$(arg use_controller_startup_arm_pose)" type="bool" />
     <param name="translation_singularity_activation_sigma" value="0.060" type="double" />
     <param name="translation_singularity_safe_sigma" value="0.035" type="double" />
     <param name="translation_singularity_escape_sigma" value="0.015" type="double" />
@@ -286,6 +309,20 @@
     <rosparam command="load" file="$(arg hand_prediction_config)" if="$(eval arg('hand_prediction_config') != '')" />
     <param name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" type="double" if="$(eval arg('hand_position_cutoff_hz') != '')" />
     <param name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" type="double" if="$(eval arg('hand_orientation_cutoff_hz') != '')" />
+    <param name="optical_hand_position_cutoff_hz" value="$(arg optical_hand_position_cutoff_hz)" type="double" />
+    <param name="optical_hand_orientation_cutoff_hz" value="$(arg optical_hand_orientation_cutoff_hz)" type="double" />
+    <param name="optical_hand_adaptive/enabled" value="$(arg optical_adaptive_enabled)" type="bool" />
+    <param name="optical_left_elbow/enabled" value="$(eval arg('optical_left_elbow_enabled') if arg('input_source') == 'quest' else False)" type="bool" />
+    <param name="optical_left_elbow/weight" value="$(arg optical_left_elbow_weight)" type="double" />
+    <param name="optical_right_elbow/enabled" value="$(eval arg('optical_right_elbow_enabled') if arg('input_source') == 'quest' else False)" type="bool" />
+    <param name="optical_right_elbow/weight" value="$(arg optical_right_elbow_weight)" type="double" />
+    <param name="optical_hand_adaptive/position_max_hz" value="$(arg optical_adaptive_position_max_hz)" type="double" />
+    <param name="optical_hand_adaptive/orientation_max_hz" value="$(arg optical_adaptive_orientation_max_hz)" type="double" />
+    <param name="optical_hand_bounded_reference/enabled" value="$(eval arg('optical_bounded_reference_enabled') if arg('input_source') == 'quest' else False)" type="bool" />
+    <param name="optical_hand_bounded_reference/linear_speed" value="$(arg optical_linear_speed_limit)" type="double" />
+    <param name="optical_hand_bounded_reference/linear_acceleration" value="$(arg optical_linear_acceleration_limit)" type="double" />
+    <param name="optical_hand_bounded_reference/angular_speed" value="$(arg optical_angular_speed_limit)" type="double" />
+    <param name="optical_hand_bounded_reference/angular_acceleration" value="$(arg optical_angular_acceleration_limit)" type="double" />
     <param name="execution_governor/enabled" value="$(arg execution_governor_enabled)" type="bool" />
     <!-- Override YAML defaults AND stale parameter-server flags explicitly. -->
     <param name="operating_envelope/enabled" value="$(arg operating_envelope_enabled)" type="bool" />
@@ -337,7 +374,14 @@
     <param name="absolute_execution_max_joint_acceleration" value="$(arg absolute_execution_max_joint_acceleration)" type="double" />
     <param name="absolute_execution_min_joint_limit_margin" value="$(arg absolute_execution_min_joint_limit_margin)" type="double" />
     <param name="tracking_rearm_stable_frames" value="$(arg tracking_rearm_stable_frames)" type="int" />
-    <param name="velocity_tcp_forearm_length" value="0.45" type="double" />
+    <!-- Short optical outliers are quarantined, then recovered by the bounded reference. -->
+    <param name="optical_input_guard/enabled" value="$(eval arg('optical_input_guard_enabled') if arg('input_source') == 'quest' else False)" type="bool" />
+    <param name="optical_input_guard/max_linear_speed" value="6.0" type="double" />
+    <param name="optical_input_guard/position_slack" value="0.020" type="double" />
+    <param name="optical_input_guard/max_angular_speed" value="50.0" type="double" />
+    <param name="optical_input_guard/orientation_slack" value="0.15" type="double" />
+    <param name="optical_input_guard/max_gap" value="0.10" type="double" />
+    <param name="optical_input_guard/latch_on_jump" value="$(eval arg('optical_input_guard_latch_on_jump') if arg('optical_bounded_reference_enabled') else True)" type="bool" />
     <param name="velocity_tcp_geometry_id" value="V$(arg robot_version)_CONFIGURED_FULL_FOREARM_0450_UNCALIBRATED_V1" type="str" />
     <env name="ROBOT_VERSION" value="$(arg robot_version)" />
   </node>

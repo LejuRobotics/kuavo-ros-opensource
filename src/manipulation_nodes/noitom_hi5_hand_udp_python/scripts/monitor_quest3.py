@@ -6,6 +6,7 @@ import os
 import json
 import time
 import signal
+import queue
 from collections import deque
 import rospy
 import tf
@@ -110,7 +111,6 @@ class Quest3BoneFramePublisher:
         self.shutdown_lock = threading.Lock()
         self.shutdown_started = False
 
-        self.listening_udp_ports_cnt = 0
 
         # 全局 torso 状态属于全局单例资源：只有主 Quest 创建该代理并允许调用，
         # 次级 Quest 连代理都不创建，退出时也就不会重置全局 torso 状态。
@@ -209,6 +209,46 @@ class Quest3BoneFramePublisher:
 
         # 初始化VR连接状态参数：按侧参数（若配置）+ 全局 /quest3/connected（仅主 Quest）
         self._set_connected_state(False)
+
+        # 仅启动时接管 fixed；未知状态不猜测，运行中用户再切 fixed 也不自动接管。
+        self._head_startup_target = str(rospy.get_param("~head_control_mode", "vr_follow") or "vr_follow").strip().lower()
+        self._head_startup_track_target = str(rospy.get_param("~head_track_target", "both_hands_midpoint"))
+        self._head_startup_current_mode = None
+        self._head_startup_attempts = 0
+        self._head_startup_pending = self.publish_quest3_globals
+        self._head_startup_mode_sub = rospy.Subscriber(
+            "/quest3/head_control_mode", headCtrlMode, self._head_startup_mode_callback, queue_size=1
+        )
+        self._head_startup_timer = rospy.Timer(rospy.Duration(0.5), self._try_startup_head_mode)
+
+    def _head_startup_mode_callback(self, msg):
+        self._head_startup_current_mode = str(msg.mode).strip().lower()
+        if self._head_startup_current_mode != "fixed":
+            self._head_startup_pending = False
+
+    def _try_startup_head_mode(self, _event):
+        if not self._head_startup_pending or self._head_startup_current_mode != "fixed":
+            return
+        service_name = "/head_control_node/set_head_control_mode"
+        self._head_startup_attempts += 1
+        try:
+            rospy.wait_for_service(service_name, timeout=0.1)
+            # 等待服务期间可能收到用户的新模式，调用前再次检查。
+            if not self._head_startup_pending or self._head_startup_current_mode != "fixed":
+                return
+            client = rospy.ServiceProxy(service_name, SetHeadControlMode)
+            fixed_hand = self._head_startup_track_target if self._head_startup_target == "track_hand" else ""
+            response = client(mode=self._head_startup_target, fixed_hand=fixed_hand)
+            self._head_startup_pending = False
+            if response.success:
+                rospy.loginfo("VR startup head mode set to %s: %s", self._head_startup_target, response.message)
+            else:
+                rospy.logwarn("VR startup head mode rejected: %s", response.message)
+        except (rospy.ROSException, rospy.ServiceException) as error:
+            rospy.logwarn_throttle(2.0, "VR startup head mode service unavailable: %s", error)
+            if self._head_startup_attempts >= 10:
+                self._head_startup_pending = False
+                rospy.logwarn("VR startup head mode request stopped after 10 attempts")
 
     def set_robot_state_server(self, robot_state_server):
         """设置 RobotStateServer 引用
@@ -401,9 +441,8 @@ class Quest3BoneFramePublisher:
         return (server_address, port)
 
 
-    def send_initial_message(self):
+    def send_initial_message(self, max_retries=200):
         message = b'hi'
-        max_retries = 200
         for attempt in range(max_retries):
             if rospy.is_shutdown():
                 return False
@@ -436,7 +475,7 @@ class Quest3BoneFramePublisher:
                 print("Force quit by Ctrl-c.")
                 self.signal_handler(signal.SIGINT, None)
                 return False
-        print("Failed to send message after 200 attempts.")
+        print(f"Failed to send message after {max_retries} attempts.")
         return False
 
     def convert_position_to_right_hand(self, left_hand_position):
@@ -1315,58 +1354,99 @@ class Quest3BoneFramePublisher:
                 time.sleep(0.1)
         rospy.loginfo("Stopping periodic robot info broadcaster thread.")
 
-    def broadcast_robot_info_and_wait_for_quest3(self):
-        """Broadcasts robot information and waits for a Quest3 device to connect."""
-        start_port = 11000
-        end_port = 11010
-        threads = []
+    def _state_server_quest_ip(self):
+        # 双 VR 无法由状态客户端注册确定左右侧，不参与此单 VR 兜底。
+        if self.tf_prefix or self.connected_param or not self.robot_state_server:
+            return None
+        server = getattr(self.robot_state_server, "udp_server", None)
+        if server is None:
+            return None
+        ips = server.get_quest_client_ips()
+        if len(ips) > 1:
+            rospy.logwarn_throttle(5.0, "Multiple Quest state clients; waiting for discovery or explicit IP")
+            return None
+        return ips[0] if ips else None
 
-        # Start the periodic robot info broadcaster thread
-        periodic_broadcaster_thread = threading.Thread(target=self._periodic_robot_info_broadcaster)
-        periodic_broadcaster_thread.daemon = False # Ensure it completes before program exit if main threads finish
-        periodic_broadcaster_thread.start()
- 
-        for port in range(start_port, end_port + 1):
-            thread = threading.Thread(target=self.listen_for_quest3_broadcasts, args=(port,))
-            thread.daemon = False  # Set as non-daemon thread to wait for threads to finish
+    def broadcast_robot_info_and_wait_for_quest3(self):
+        """广播回连与状态服务注册并行发现，由当前线程统一、有界地握手。"""
+        candidates = queue.Queue(maxsize=32)
+        threads = []
+        # 同步 bind：避免刚启动监听线程就误判所有端口均被占用。
+        for port in range(11000, 11011):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.bind(("", port))
+                sock.settimeout(0.5)
+            except OSError as error:
+                sock.close()
+                rospy.logwarn("Quest discovery port %d unavailable: %s", port, error)
+                continue
+            thread = threading.Thread(target=self.listen_for_quest3_broadcasts,
+                                      args=(sock, port, candidates))
             thread.start()
             threads.append(thread)
-
-        import os
-
-        if self.listening_udp_ports_cnt == 0:
-            print("\033[91m" + "carlos_ All UDP broadcast ports are occupied. Please check using the command 'lsof -i :11000-11010' to see the process which occupy the ports." + "\033[0m")
-            os._exit(1)
-
-        for thread in threads:
-            thread.join()
-
-        # Wait for the periodic broadcaster thread to finish as well
-        periodic_broadcaster_thread.join()
-
-        if self.server_address and self.server_address[0]:
-            print(f"\033[92mQuest3 device found at IP: {self.server_address[0]}\033[0m")
-        print("\033[92m" + "Received Quest3 Broadcast, starting to connect." + "\033[0m")
-
-    def listen_for_quest3_broadcasts(self, port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if not threads:
+            rospy.logwarn("No discovery ports available; trying registered Quest state clients")
+        broadcaster = threading.Thread(target=self._periodic_robot_info_broadcaster)
+        broadcaster.start()
+        retry_after = {}
         try:
-            sock.bind(('', port))  # Listen on all interfaces
-        except OSError as e:
-            pass
-            return
-        sock.settimeout(1)  # Set timeout to 1 second
-        self.listening_udp_ports_cnt += 1
+            wait_ticks = 0
+            while not self.exit_listen_thread_for_quest3_broadcast and not rospy.is_shutdown():
+                state_ip = self._state_server_quest_ip()
+                try:
+                    ip = candidates.get(timeout=0.2)
+                    source = "discovery packet"
+                except queue.Empty:
+                    ip = state_ip
+                    source = "registered Quest state client"
+                if not ip or time.monotonic() < retry_after.get(ip, 0.0):
+                    wait_ticks += 1
+                    # 约每 5s 打一次（循环约 0.2s），便于区分「仍在发现」与「launch 没起」。
+                    if wait_ticks % 25 == 0:
+                        print(
+                            f"[monitor_quest3] 仍在等待 Quest 广播 (UDP 11000-11010) / "
+                            f"或 15170 上 quest_client_* 注册后主动握 10019；"
+                            f"已等待约 {wait_ticks * 0.2:.0f}s，/quest3/connected 仍为 False"
+                        )
+                    continue
+                rospy.loginfo("Trying Quest %s:10019 from %s", ip, source)
+                self.setup_socket(ip, 10019)
+                if self.send_initial_message(max_retries=1):
+                    self.exit_listen_thread_for_quest3_broadcast = True
+                    return True
+                # 尚未启动数据接收线程，关闭失败握手 socket 后才能尝试新地址。
+                with self.socket_lock:
+                    failed_socket = self.sock
+                    self.sock = None
+                    self.server_address = None
+                if failed_socket is not None:
+                    failed_socket.close()
+                if len(retry_after) >= 32 and ip not in retry_after:
+                    retry_after.pop(next(iter(retry_after)))
+                retry_after[ip] = time.monotonic() + 3.0
+            return False
+        finally:
+            self.exit_listen_thread_for_quest3_broadcast = True
+            for thread in threads:
+                thread.join()
+            broadcaster.join()
 
-        while not self.exit_listen_thread_for_quest3_broadcast:
-            try:
-                data, addr = sock.recvfrom(1024)
-                self.exit_listen_thread_for_quest3_broadcast = True
-                print(f"carlos_ Received message from Quest3: {data.decode()} from {addr[0]} on port {port} - Setting up socket connection")
-                self.setup_socket(addr[0], 10019)
-                break
-            except socket.timeout:
-                continue
+    def listen_for_quest3_broadcasts(self, sock, port, candidates):
+        """监听线程只提供候选 IP，不创建握手 socket。"""
+        try:
+            while not self.exit_listen_thread_for_quest3_broadcast and not rospy.is_shutdown():
+                try:
+                    _data, addr = sock.recvfrom(1024)
+                    rospy.loginfo("Received Quest discovery packet from %s on port %d", addr[0], port)
+                    try:
+                        candidates.put_nowait(addr[0])
+                    except queue.Full:
+                        pass
+                except socket.timeout:
+                    continue
+        finally:
+            sock.close()
 
 def get_local_broadcast_ips():
     """
@@ -1411,7 +1491,7 @@ if __name__ == "__main__":
     else:
         kuavo_assests_path = get_package_path("kuavo_assets")
         robot_version = os.environ.get('ROBOT_VERSION', '40')
-        config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
+        config_file = kuavo_assests_path + f"/config/kuavo_v{'55' if robot_version == '57' else robot_version}/kuavo.json"
         import json
         with open(config_file, 'r') as f:
             config = json.load(f)
@@ -1439,9 +1519,18 @@ if __name__ == "__main__":
     print(f"Local broadcast IPs: {broadcast_ips}")
 
     publisher.update_broadcast_ips(broadcast_ips)
-    if len(sys.argv) < 2 or "." not in sys.argv[1]:
-        print("IP not specified. Waiting for Quest3 to connect. Please ensure Quest3 and the robot are on the same LAN and the router has broadcast mode enabled.\n未指定IP。正在等待 Quest3 主动连接。请确保 Quest3 和机器人在同一个局域网下，并且路由器已开启广播模式。")
-        publisher.broadcast_robot_info_and_wait_for_quest3()
+    auto_connected = False
+    explicit_ip = len(sys.argv) >= 2 and "." in sys.argv[1]
+    if not explicit_ip:
+        print(
+            "IP not specified. Waiting for Quest discovery or state-service registration. "
+            "Please ensure Quest3 and the robot are on the same LAN and the router has broadcast mode enabled.\n"
+            "未指定IP：等待广播回连（UDP 11000-11010），或从状态服务已注册的 Quest 地址主动握手；"
+            "连通后写 /quest3/connected。"
+            "请确保 Quest3 和机器人在同一个局域网下，并且路由器已开启广播模式。"
+            "若长期无日志，检查 launch 是否真正拉起了 monitor_quest3。"
+        )
+        auto_connected = publisher.broadcast_robot_info_and_wait_for_quest3()
     else:
         try:
 
@@ -1459,10 +1548,14 @@ if __name__ == "__main__":
 
         publisher.setup_socket(server_address, port)
 
-    if publisher.send_initial_message():
+    if auto_connected or (explicit_ip and not rospy.is_shutdown() and publisher.send_initial_message()):
         publisher.run()
     else:
-        print("Failed to establish initial connection.")
+        print(
+            "Failed to establish initial connection. "
+            "10019 握手未成功，/quest3/connected 保持 False。"
+            "请核对 Quest IP、防火墙与 Quest 端应用是否在听 10019。"
+        )
 
     # Close the socket
     if robot_state_server is not None:

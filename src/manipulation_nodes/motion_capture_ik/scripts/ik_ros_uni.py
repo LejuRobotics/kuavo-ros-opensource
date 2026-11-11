@@ -214,6 +214,7 @@ class IkSolutionFrame:
     shoulder_velocity_limit: float
     ready_time: float
     ready_monotonic: float
+    target_ready_monotonic: float = 0.0
 
 
 # /vr_absolute/transform_stage_latency_ms 的 data 顺序。字段名写入
@@ -343,6 +344,8 @@ class IkRos:
         # polls the target from a fixed-rate loop.
         self._ik_condition = threading.Condition(self._target_lock)
         self._ik_target_generation = 0
+        # Motion frames advance independently of resets/control-mode changes.
+        self._ik_control_generation = 0
         self._ik_target_ready_time = 0.0
         self._ik_target_ready_monotonic = 0.0
         # The fixed-rate publisher reads one immutable latest solution. The
@@ -1074,10 +1077,54 @@ class IkRos:
         self.pub_ik_solved_eef_pose.publish(msg)
 
     def _clear_latest_ik_solution(self, clear_published_command=False):
-        with self._ik_solution_lock:
-            self._latest_ik_solution = None
-            if clear_published_command:
-                self._last_published_arm_q = None
+        # Invalidates in-flight solves as well as the already committed result.
+        with self._ik_condition:
+            self._ik_control_generation += 1
+            with self._ik_solution_lock:
+                self._latest_ik_solution = None
+                if clear_published_command:
+                    self._last_published_arm_q = None
+
+    def _apply_vr_error_on_target_commit_locked(self, vr_error):
+        """Update VR-error state while holding `_ik_condition`.
+
+        Abnormal VR input itself must invalidate in-flight solutions: if an
+        error frame is followed by a recovery frame before the solve finishes,
+        `_accept_ik_solution` would otherwise see `_vr_error=False` and keep
+        the pre-error control generation, accepting the stale result.
+        """
+        self._vr_error = bool(vr_error)
+        if self._vr_error:
+            self._ik_control_generation += 1
+            with self._ik_solution_lock:
+                self._latest_ik_solution = None
+
+    def _accept_ik_solution(self, solution, control_generation):
+        with self._ik_condition:
+            valid = (
+                control_generation == self._ik_control_generation
+                and not self.trigger_reset_mode
+                and not self.stop_event.is_set()
+                and not (self.__as_mc_ik and self._vr_error)
+            )
+            if (solution.processed_bone is not None
+                    and time.perf_counter() - solution.target_ready_monotonic
+                    > self.ik_solution_timeout_s):
+                valid = False
+            with self._ik_solution_lock:
+                latest = self._latest_ik_solution
+                if (latest is not None
+                        and solution.target_generation <= latest.target_generation):
+                    valid = False
+                if valid:
+                    self._latest_ik_solution = solution
+                    return True
+            self._ik_stale_solution_drop_count += 1
+        if self.enable_vr_latency_diagnostics:
+            self.ik_stale_solution_drop_pub.publish(
+                UInt64(self._ik_stale_solution_drop_count)
+            )
+        return False
 
     def _reset_arm_velocity_history(self):
         """Make the next arm command start with zero velocity."""
@@ -1129,6 +1176,7 @@ class IkRos:
 
             snapshot_start = time.perf_counter()
             target_generation = self._ik_target_generation
+            control_generation = self._ik_control_generation
             target_ready_time = self._ik_target_ready_time
             target_ready_monotonic = self._ik_target_ready_monotonic
             target_pose = self._copy_pose(self.__target_pose)
@@ -1141,6 +1189,7 @@ class IkRos:
 
         return {
             "generation": target_generation,
+            "control_generation": control_generation,
             "ready_time": target_ready_time,
             "ready_monotonic": target_ready_monotonic,
             "snapshot_start_monotonic": snapshot_start,
@@ -1172,7 +1221,8 @@ class IkRos:
                 now_monotonic = time.perf_counter()
                 solution_is_fresh = solution is not None
                 if (solution_is_fresh and solution.processed_bone is not None
-                        and now_monotonic - solution.ready_monotonic
+                        and now_monotonic - (solution.target_ready_monotonic
+                                             or solution.ready_monotonic)
                         > self.ik_solution_timeout_s):
                     solution_is_fresh = False
                     if not timeout_active:
@@ -1627,25 +1677,14 @@ class IkRos:
                         shoulder_velocity_limit=float(shoulder_vel_limit),
                         ready_time=solution_ready_time,
                         ready_monotonic=solution_ready_monotonic,
+                        target_ready_monotonic=target_ready_monotonic,
                     )
-                    # A mode reset or a newer target may arrive while the
-                    # solver is running. Never publish the superseded result.
-                    with self._ik_condition:
-                        solution_is_current = (
-                            not self.trigger_reset_mode
-                            and self._ik_target_generation
-                            == last_target_generation
-                        )
-                        if solution_is_current:
-                            with self._ik_solution_lock:
-                                self._latest_ik_solution = solution
-                        else:
-                            self._ik_stale_solution_drop_count += 1
-                            if self.enable_vr_latency_diagnostics:
-                                self.ik_stale_solution_drop_pub.publish(
-                                    UInt64(self._ik_stale_solution_drop_count)
-                                )
-                            solution = None
+                    # New motion targets do not invalidate a completed solve:
+                    # the next round takes the newest target without queuing.
+                    # Resets, invalid input, age and ordering still gate output.
+                    if not self._accept_ik_solution(
+                            solution, target_state["control_generation"]):
+                        solution = None
                 else:
                     fail_count += 1
                     # print(f"""\nq_last:{q_last}\n l_hand_pose:{l_hand_pose}\n 
@@ -2302,7 +2341,7 @@ class IkRos:
                     # asynchronous finger worker. Do not overwrite a newer
                     # result with the snapshot observed by this arm frame.
                     self._vr_is_hand_tracking = snapshot.is_hand_tracking
-                    self._vr_error = snapshot.vr_error
+                    self._apply_vr_error_on_target_commit_locked(snapshot.vr_error)
                     if snapshot.left_pose[0] is not None and snapshot.right_pose[0] is not None:
                         self.__recieved_new_target_pose = True
                     target_ready_time = time.time()
@@ -2538,7 +2577,7 @@ class IkRos:
                     # asynchronous finger worker. Do not overwrite a newer
                     # result with the snapshot observed by this arm frame.
                     self._vr_is_hand_tracking = merged.is_hand_tracking
-                    self._vr_error = merged.vr_error
+                    self._apply_vr_error_on_target_commit_locked(merged.vr_error)
                     # Each side arrives on its own; a fresh valid side is enough
                     # to unblock the IK thread.
                     if ((merged.left_pose[0] is not None
@@ -2661,6 +2700,7 @@ class IkRos:
             right_elbow_pos = np.array(msg.right_pose.elbow_pos_xyz)
 
         if self.__as_mc_ik:
+            self._clear_latest_ik_solution(clear_published_command=True)
             self.__as_mc_ik = False
             self.arm_ik.set_as_mc_ik(self.__as_mc_ik)
         with self._ik_condition:
@@ -3107,6 +3147,8 @@ class IkRos:
         new_mode = msg.data
         if new_mode != self._last_arm_mode_for_velocity:
             self._reset_arm_velocity_history()
+            if new_mode == 2:
+                self._clear_latest_ik_solution(clear_published_command=True)
             self._last_arm_mode_for_velocity = new_mode
         if new_mode == 0:  # 当模式不是2时
             # 重置所有姿态
@@ -3180,6 +3222,7 @@ class IkRos:
                 self.__need_reset_ik_guess = True
                 self.arm_mode_changing = True
                 self._reset_arm_velocity_history()
+                self._clear_latest_ik_solution()
             elif current_mode == new_mode and not self.__first_change_arm_mode:
                 # 模式切换完成，关闭arm_mode_changing标志
                 if not self.only_half_up_body:
@@ -3373,8 +3416,8 @@ if __name__ == "__main__":
     if robot_version == '15':
         robot_version = '14'
 
-    model_file = kuavo_assests_path + f"/models/biped_s{robot_version}/urdf/drake/biped_v3_arm.urdf"
-    model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"
+    model_file = kuavo_assests_path + f"/models/biped_s{'55' if robot_version == '57' else robot_version}/urdf/drake/biped_v3_arm.urdf"
+    model_config_file = kuavo_assests_path + f"/config/kuavo_v{'55' if robot_version == '57' else robot_version}/kuavo.json"
     # model_file = current_pkg_path + "/models/biped_gen4.0/urdf/biped_v3_arm.urdf"
     
     assert os.path.exists(model_file), f"Model file {model_file} does not exist."

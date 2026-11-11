@@ -121,6 +121,24 @@ target_link_libraries(${PROJECT_NAME}
 target_compile_options(${PROJECT_NAME} PUBLIC ${FLAGS})
 
 if(CATKIN_ENABLE_TESTING)
+  foreach(command_target arm_command_gap_tracking_test arm_command_bag_replay)
+    add_executable(${command_target}
+      test/${command_target}.cpp
+      ../../humanoid-control/humanoid_controllers/src/ArmTrajectoryInterpolator.cpp)
+    target_include_directories(${command_target} PRIVATE
+      ../../humanoid-control/humanoid_controllers/include)
+    target_link_libraries(${command_target} ${PROJECT_NAME} ${catkin_LIBRARIES})
+    target_compile_features(${command_target} PUBLIC cxx_std_17)
+  endforeach()
+  add_test(NAME arm_command_gap_tracking_test COMMAND $<TARGET_FILE:arm_command_gap_tracking_test>)
+  add_executable(arm_command_recovery_test
+    test/arm_command_recovery_test.cpp
+    ../../humanoid-control/humanoid_controllers/src/ArmTrajectoryInterpolator.cpp)
+  target_include_directories(arm_command_recovery_test PRIVATE
+    ../../humanoid-control/humanoid_controllers/include)
+  target_link_libraries(arm_command_recovery_test ${PROJECT_NAME} ${catkin_LIBRARIES})
+  target_compile_features(arm_command_recovery_test PUBLIC cxx_std_17)
+  add_test(NAME arm_command_recovery_test COMMAND $<TARGET_FILE:arm_command_recovery_test>)
   # 不用 gtest TEST()：cppcheck 1.90 会对 TEST 宏误报 syntaxError，抬高 acs-lint error 基线。
   add_executable(torso_rotation_target_test test/torso_rotation_target_test.cpp)
   target_include_directories(torso_rotation_target_test PRIVATE include ${EIGEN3_INCLUDE_DIRS})

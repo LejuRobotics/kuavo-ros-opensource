@@ -2,6 +2,10 @@
 
 from pathlib import Path
 import re
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import robot_versions
 
 
 ASSETS = Path(__file__).resolve().parents[2] / "kuavo_assets"
@@ -26,11 +30,15 @@ def is_wheel_urdf(path):
 
 
 def default_config_name(version):
-    if is_wheel_version(version):
+    try:
+        layout = robot_versions.require(version, "运动学标定").layout
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+    if layout == "wheel62":
         return "calib_s63.yaml"
-    if str(version) in ("53", "56"):
+    if layout == "biped56":
         return "calib_s56.yaml"
-    raise ValueError(f"unsupported ROBOT_VERSION={version!r}; expected 53/56 or 62/63 variants")
+    raise ValueError(f"运动学标定不支持 ROBOT_VERSION={version!r} 的布局 {layout}")
 
 
 if __name__ == "__main__":

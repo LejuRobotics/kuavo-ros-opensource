@@ -208,14 +208,18 @@ class PicoParityTest(unittest.TestCase):
             args = ['robot_version:='+str(version), 'ee_type:=none', 'enable_terminal_start:=false',
                     'tracking_source_mode:=controller',
                     'hand_reference_frequency:=9.0', 'enable_head_control:=true',
+                    'preparation_arm_velocity_limit:=1.1', 'preparation_gain:=3.2',
                     'absolute_enable_mode_timeout:=4.0']
             configs = [roslaunch.config.load_config_default(
                 [(str(PACKAGE/'launch'/name), args)], None, verbose=False)
                 for name in ('quest_velocity_ik.launch', 'pico_velocity_ik.launch')]
             def controls(cfg):
                 return {k:v.value for k,v in cfg.params.items()
-                        if not k.startswith(('/monitor_quest3/', '/monitor_pico/', '/vr_input_source'))}
+                        if not k.startswith(('/monitor_quest3/', '/monitor_pico/', '/vr_input_source'))
+                        and '/optical_' not in k}
             self.assertEqual(controls(configs[0]), controls(configs[1]))
+            self.assertEqual(configs[1].params['/absolute_velocity_ik/preparation_arm_velocity_limit'].value, 1.1)
+            self.assertEqual(configs[1].params['/absolute_velocity_ik/preparation_gain'].value, 3.2)
             self.assertFalse(any(n.name=='absolute_terminal_start' for n in configs[1].nodes))
             self.assertTrue(configs[1].params['/monitor_pico/enable_head_control'].value)
             node = next(n for n in configs[1].nodes if n.name == 'monitor_pico')
@@ -228,17 +232,40 @@ class PicoParityTest(unittest.TestCase):
               ['robot_version:=62','enable_terminal_start:=true'])],None,verbose=False)
         self.assertTrue(any(n.name=='absolute_terminal_start' for n in cfg.nodes))
 
+    def test_shared_controller_options_cannot_silently_disappear(self):
+        import xml.etree.ElementTree as ET
+        quest=ET.parse(PACKAGE/'launch/quest_velocity_ik.launch').getroot()
+        pico=ET.parse(PACKAGE/'launch/pico_velocity_ik.launch').getroot()
+        # Pico's wire format has controllers, not optical hand tracking or touch.
+        shared={a.get('name'):a for a in quest.findall('arg')
+                if a.get('default') is not None and not a.get('name').startswith('optical_')}
+        declared={a.get('name'):a for a in pico.findall('arg')}
+        forwarded={a.get('name'):a for a in pico.find('include').findall('arg')}
+        transport={'input_source','tracking_source_mode','pico_peer_ip',
+                   'pico_advertise_ip','pico_broadcast_ip'}
+        for name,arg in shared.items():
+            with self.subTest(argument=name):
+                self.assertIn(name,declared)
+                self.assertIn(name,forwarded)
+                if name not in transport:
+                    self.assertEqual(declared[name].get('default'),arg.get('default'))
+                    self.assertEqual(forwarded[name].get('value'),'$(arg '+name+')')
+
     def test_quest_optical_default_and_explicit_source_locks_reach_both_nodes(self):
-        for entry, default in (('quest_velocity_ik.launch', 'auto'),
-                               ('pico_velocity_ik.launch', 'controller')):
-            for override in (None, 'controller', 'hand', 'auto'):
-                args = ['robot_version:=62']
-                if override is not None: args.append('tracking_source_mode:='+override)
-                cfg = roslaunch.config.load_config_default(
-                    [(str(PACKAGE/'launch'/entry), args)], None, verbose=False)
-                for node in ('ik_ros_uni', 'absolute_velocity_ik'):
-                    self.assertEqual(cfg.params['/'+node+'/tracking_source_mode'].value,
-                                     override or default)
+        for version in (60, 61, 62, 63, 200062, 210062, 300062, 310062, 400062, 400063):
+            for entry, default in (('quest_velocity_ik.launch', 'auto'),
+                                   ('pico_velocity_ik.launch', 'controller')):
+                for override in (None, 'controller', 'hand', 'auto'):
+                    with self.subTest(version=version, entry=entry, source=override):
+                        args = ['robot_version:='+str(version)]
+                        if override is not None: args.append('tracking_source_mode:='+override)
+                        cfg = roslaunch.config.load_config_default(
+                            [(str(PACKAGE/'launch'/entry), args)], None, verbose=False)
+                        for node in ('ik_ros_uni', 'absolute_velocity_ik'):
+                            self.assertEqual(cfg.params['/'+node+'/tracking_source_mode'].value,
+                                             override or default)
+                        self.assertEqual(cfg.params[
+                            '/humanoid_quest_control_with_arm/robot_version'].value, version)
 
 
 if __name__ == '__main__':

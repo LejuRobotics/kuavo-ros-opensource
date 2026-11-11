@@ -95,6 +95,10 @@ class DiagnosticProcess:
         finally:
             child.close()
 
+    def ready(self, channel):
+        return (not self.closed and not self.failed and
+                time.monotonic()-self.last_submit.get(channel, float("-inf")) >= self.period)
+
     def submit(self, channel, message):
         self.attempts += 1
         if self.closed or self.failed:
@@ -155,6 +159,9 @@ class DiagnosticPublisher:
     def __init__(self, process, channel, data_class):
         self.process, self.channel, self.data_class = process, channel, data_class
 
+    def ready(self):
+        return self.process.ready(self.channel)
+
     def publish(self, message):
         if not isinstance(message, self.data_class):
             raise TypeError("Diagnostic publisher expects its declared ROS message")
@@ -166,6 +173,9 @@ class RatePublisher:
         self.pub = pub
         self.period = 0.0 if rate <= 0 else 1.0 / rate
         self.last = float("-inf")
+
+    def ready(self):
+        return time.monotonic()-self.last >= self.period and self.pub.get_num_connections() > 0
 
     def publish(self, message):
         now = time.monotonic()

@@ -16,6 +16,9 @@ int main() {
   };
   reject(j); // Cross-model contracts must not be reused.
   j["robot_version"]=63;
+  j["types"]={"qibeng","qibeng"};
+  assert(endEffectorContract(j.dump().c_str(),63).at(0)=="qibeng");
+  j["types"]={"lejuclaw","lejuclaw"};
   auto bad=j;bad["types"]={"lejuclaw","heiman"};reject(bad);
   bad=j;bad["types"]={"unknown","unknown"};reject(bad);
   bad=j;bad["types"]={"lejuclaw"};reject(bad);

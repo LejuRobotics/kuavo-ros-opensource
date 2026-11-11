@@ -1552,11 +1552,13 @@ void LeJuClawCan::clear_all_torque() {
     }
 }
 
-uint64_t LeJuClawCan::refresh_stream_watchdog() {
+uint64_t LeJuClawCan::refresh_stream_watchdog(std::chrono::steady_clock::time_point received) {
     std::lock_guard<std::mutex> lock(stream_watchdog_mutex_);
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - received).count() >= cfg_STREAM_WATCHDOG_TIMEOUT_MS) return 0;
     stream_watchdog_armed_ = true;
     stream_watchdog_expired_ = false;
-    last_stream_command_time_ = std::chrono::steady_clock::now();
+    last_stream_command_time_ = received;
     return ++stream_generation_;
 }
 

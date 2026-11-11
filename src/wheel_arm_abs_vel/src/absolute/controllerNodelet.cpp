@@ -21,7 +21,7 @@
 #include <std_msgs/Bool.h>
 
 using Duration = std::chrono::duration<double>;
-using Clock = std::chrono::high_resolution_clock;
+using Clock = std::chrono::steady_clock;
 
 namespace {
 constexpr char kHardwareStateParam[] = "/nodelet_manager/hardware_state";
@@ -158,7 +158,7 @@ private:
 
     wheel_absolute_control::humanoidControllerWheelWbc *controller_wheel_real_ptr_{nullptr};
     ros::Subscriber stop_sub_;
-    std::chrono::high_resolution_clock::time_point lastTime;
+    std::chrono::steady_clock::time_point lastTime;
     std::thread control_thread;
     void pauseCallback(const std_msgs::Bool::ConstPtr &msg)
     {
@@ -271,7 +271,6 @@ private:
             return;
         }
 
-        lastTime = std::chrono::high_resolution_clock::now();
         double controlFrequency = 500.0; // 500Hz
         nh.getParam("/wbc_frequency", controlFrequency);
         ROS_INFO_STREAM("Wbc control frequency: " << controlFrequency);
@@ -288,6 +287,9 @@ private:
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
+        // Preparation may take seconds. Anchor the first cycle after it completes.
+        lastTime = Clock::now();
+        clock_gettime(CLOCK_MONOTONIC, &next_time);
         // main control loop
         // Can be paused with pause_flag
         /* For each cycle:
@@ -302,7 +304,7 @@ private:
             if (!pause_flag)
             {
                 // std::cout << "controlLoop: Running control loop" << std::endl;
-                const auto currentTime = std::chrono::high_resolution_clock::now();
+                const auto currentTime = std::chrono::steady_clock::now();
                 std::chrono::duration<double> time_span = currentTime - lastTime;
                 ros::Duration elapsedTime(time_span.count());
                 lastTime = currentTime;
@@ -352,7 +354,7 @@ private:
                 }
 
                 // Add print statement if the cycle time exceeds 1 second
-                const auto cycleTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - currentTime).count();
+                const auto cycleTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - currentTime).count();
                 if (cycleTime > 1000)
                 {
                     ROS_ERROR_STREAM("WBC Cycle time exceeded 1 second: " << cycleTime << "ms");
@@ -362,6 +364,8 @@ private:
             {
                 // 暂停状态：休眠避免 CPU 空转
                 usleep(10000);  // 10ms
+                lastTime = Clock::now();
+                clock_gettime(CLOCK_MONOTONIC, &next_time);
             }
         }
         std::cout << "controlLoop: Exiting control loop" << std::endl;

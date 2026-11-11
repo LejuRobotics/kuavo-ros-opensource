@@ -92,8 +92,8 @@ namespace ocs2
             // has populated global parameters. Never guess a robot version.
             ros::NodeHandle privateHandle("~");
             if (!privateHandle.getParam("robot_version", robot_version_int_) ||
-                (robot_version_int_ != 62 && robot_version_int_ != 63 && robot_version_int_ != 210062 && robot_version_int_ != 310062 && robot_version_int_ != 400062))
-                throw std::runtime_error("Quest FSM requires explicit ~robot_version=62, 63, 210062, 310062 or 400062; no fallback");
+                robot_version_int_ <= 0 || robot_version_int_ > 999999999)
+                throw std::runtime_error("Quest FSM requires an explicit positive ~robot_version; no fallback");
             if (!privateHandle.getParam("robot_type", robot_type_) || robot_type_ != 1)
                 throw std::runtime_error("Quest FSM requires explicit ~robot_type=1");
             std::string referenceFile;
@@ -123,6 +123,13 @@ namespace ocs2
                 throw std::runtime_error("Quest FSM/common robot version mismatch");
             const auto kuavo_settings = common.getKuavoSettings();
             const auto& hw = kuavo_settings.hardware_settings;
+            // The launch resolver validates this version's complete URDF and
+            // task.info. Admit its wheel layout rather than a model whitelist,
+            // so controller and optical input use the same model contract.
+            if (hw.num_arm_joints != 14 ||
+                static_cast<int>(hw.num_joints) - static_cast<int>(hw.num_head_joints) -
+                    static_cast<int>(hw.num_arm_joints) != 4)
+                throw std::runtime_error("Quest FSM requires 14 arm and 4 body sensor joints");
             int leg_dof = static_cast<int>(
                 hw.num_joints - hw.num_arm_joints - hw.num_head_joints - hw.num_waist_joints);
             waist_dof_ = static_cast<int>(hw.num_waist_joints);
@@ -214,7 +221,10 @@ namespace ocs2
 
             std::string change_arm_mode_service_name = robot_type_ == 1 ? "/wheel_arm_change_arm_ctrl_mode" : "/humanoid_change_arm_ctrl_mode";
             change_arm_mode_service_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>(change_arm_mode_service_name);
-            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>("/head_control_node/set_head_control_mode");
+            std::string head_mode_service;
+            nodeHandle_.param<std::string>("/absolute/head_mode_service", head_mode_service,
+                                           "/quest3/set_head_control_mode");
+            change_head_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::SetHeadControlMode>(head_mode_service);
 
             change_arm_mode_service_VR_client_ = nodeHandle_.serviceClient<kuavo_msgs::changeArmCtrlMode>("/change_arm_ctrl_mode");
 

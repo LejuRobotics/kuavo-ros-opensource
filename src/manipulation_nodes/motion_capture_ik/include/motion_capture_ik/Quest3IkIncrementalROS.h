@@ -17,6 +17,7 @@
 #include "motion_capture_ik/IncrementalControlModule.h"
 #include "motion_capture_ik/HandSmoother.h"
 #include "DrakeElbowHandPointOpt.hpp"
+#include "motion_capture_ik/WheelNaturalElbowGuide.h"
 #include <drake/multibody/plant/multibody_plant.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <std_msgs/Float64.h>
@@ -134,6 +135,13 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   // 左右手独立处理正常运动数据
   bool processDataLeftArm();
   bool processDataRightArm();
+
+  // #4746: 连续跟踪用轮臂同款自然肘圆导引，替代仅锁 ElbowFixedPoint 的刚性参考。
+  void applyNaturalElbowTrackingRefs(bool isLeft,
+                                     const Eigen::Vector3d& handTarget,
+                                     const Eigen::Vector3d& currentElbowFk);
+  void resetNaturalElbowGuides();
+
 
   void solveIk();
   void processVisual();
@@ -320,6 +328,12 @@ class Quest3IkIncrementalROS final : public ArmControlBaseROS {
   double elbowMaxDistance_ = 0.65;                              // 手到肘最大距离约束
   Eigen::Vector3d leftElbowFixedPoint_;                         // 左肘固定点（用于 updateLeftConstraintList）
   Eigen::Vector3d rightElbowFixedPoint_;                        // 右肘固定点（用于 updateRightConstraintList）
+  // #4746: 与轮臂共用几何导引；连续跟踪 p1Ref/p1Fixed 跟重力自然肘（钉弯曲平面）。
+  bool enableNaturalElbowGuide_ = true;
+  WheelNaturalElbowGuideConfig naturalElbowGuideConfig_;
+  std::unique_ptr<WheelNaturalElbowGuide> leftNaturalElbowGuide_;
+  std::unique_ptr<WheelNaturalElbowGuide> rightNaturalElbowGuide_;
+
   Eigen::Vector3d defaultLeftHandPosOnExit_;                    // 退出时左手默认目标位置
   Eigen::Vector3d defaultRightHandPosOnExit_;                   // 退出时右手默认目标位置
   double handChangingModeThreshold_ = 0.055;                    // 手部模式切换时的阈值

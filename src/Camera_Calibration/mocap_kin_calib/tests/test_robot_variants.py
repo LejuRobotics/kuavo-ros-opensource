@@ -50,12 +50,13 @@ class VariantTests(unittest.TestCase):
         with patch.dict(os.environ, ROBOT_VERSION='500063'):
             with self.assertRaisesRegex(ValueError, 'conflicts'):
                 optimizer._config_for_capture(cfg, {'robot_version': '63'})
-        for invalid in ('63.5', 'abc', '500056', '120062', '210063', '162', ''):
+        for invalid in ('63.5', 'abc', '45', ''):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 variants.default_config_name(invalid)
         biped = yaml.safe_load((HERE / 'config/calib_s56.yaml').read_text())
-        for version in ('53', '56'):
+        for version in ('53', '55', '56', '200053', '400055'):
             with patch.dict(os.environ, ROBOT_VERSION=version):
+                self.assertEqual(variants.default_config_name(version), 'calib_s56.yaml')
                 self.assertEqual(optimizer._config_for_capture(biped, {})['kinematics']['source_urdf'],
                                  str(variants.main_urdf(version)))
         with patch.dict(os.environ, ROBOT_VERSION='500063'):
@@ -128,6 +129,38 @@ class VariantTests(unittest.TestCase):
                     self.assertIs(sys.argv, argv)
         original_loader.assert_not_called()
         original_model.assert_not_called()
+
+    def test_capture_rejects_conflicting_layout_before_recorder(self):
+        spec = importlib.util.spec_from_file_location('kin_recorder_conflict', HERE / 'record_joint_poses.py')
+        entry = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entry)
+        recorder = SimpleNamespace(main=Mock())
+        modules = {'mocap_joint_calib': SimpleNamespace(record_joint_poses=recorder)}
+        argv = [str(HERE / 'record_joint_poses.py'), '--robot-version', '62', '--robot-layout', 'biped56']
+        with patch.dict(sys.modules, modules), patch.object(sys, 'argv', argv), self.assertRaises(SystemExit):
+            entry.main()
+        recorder.main.assert_not_called()
+
+    def test_biped_entry_routes_accept_variants(self):
+        import mocap_optimize_fpf as fpf
+
+        spec = importlib.util.spec_from_file_location('kin_recorder_biped', HERE / 'record_joint_poses.py')
+        entry = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entry)
+        recorder = SimpleNamespace(main=Mock(), _load_config=Mock(),
+                                   _apply_robot_calibration_defaults=Mock())
+        modules = {'mocap_joint_calib': SimpleNamespace(record_joint_poses=recorder)}
+        for version in ('55', '200053', '400055'):
+            argv = [str(HERE / 'record_joint_poses.py'), '--robot-version', version,
+                    '--urdf', '/missing/test.urdf', '--kuavo-json', '/missing/test.json']
+            with self.subTest(version=version), patch.dict(sys.modules, modules), patch.object(sys, 'argv', argv):
+                with self.assertRaises(FileNotFoundError):
+                    entry.main()
+            with patch.dict(os.environ, ROBOT_VERSION=version), \
+                    patch.object(fpf, 'select_mocap_source', side_effect=RuntimeError('reached FPF config')):
+                with self.assertRaisesRegex(RuntimeError, 'reached FPF config'):
+                    fpf.main([])
+        recorder.main.assert_not_called()
 
     def prepare(self, folder, version):
         target = folder / 'urdf' / f'biped_s{version}.urdf'

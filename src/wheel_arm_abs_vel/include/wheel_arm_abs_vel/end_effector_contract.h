@@ -17,7 +17,7 @@ inline std::vector<std::string> endEffectorContract(const char* text, int versio
     throw std::runtime_error("Invalid or mismatched end-effector contract");
   const auto types = data.at("types").get<std::vector<std::string>>();
   static const std::set<std::string> supported = {
-    "none","jodell","qiangnao","qiangnao_touch","lejuclaw","revo2","heiman","linker_hand"};
+    "none","jodell","qiangnao","qiangnao_touch","lejuclaw","revo2","heiman","linker_hand","qibeng"};
   if (types.size()!=2 || types[0]!=types[1] || !supported.count(types[0]))
     throw std::runtime_error("End-effector contract requires two matching supported types");
   return types;

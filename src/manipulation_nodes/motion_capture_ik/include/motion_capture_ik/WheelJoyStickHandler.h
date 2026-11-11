@@ -126,7 +126,6 @@ class WheelJoyStickHandler {
 
   std::atomic<EndEffectorType> endEffectorType_;
   int controlFingerType_;
-  bool initControlWaistEnable_;
 
   std::vector<double> leftJoystick_;     // [left_trigger, left_grip]
   std::vector<double> rightJoystick_;    // [right_trigger, right_grip]
@@ -150,6 +149,7 @@ class WheelJoyStickHandler {
 
   // RightJoyStickY 按下时间检查相关变量
   bool resetJointToDefaultWheel_{true};  // 进入增量控制时是否重置关节到默认位置
+  bool initControlWaistEnable_{true};  // 初始化腰部控制模式
   bool RightJoyStickYHold_;      // RightJoyStickY 保持状态，默认值为 true
   int rightJoyStickYHoldCount_;  // 连续满足条件的计数
   bool rightJoyStickYHoldWithX_;      // X键按下时 RightJoyStickY 保持状态

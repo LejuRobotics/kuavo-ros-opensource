@@ -41,3 +41,10 @@ topics:
   - /humanoid/mpc/arm_control_mode
   - /rosout
   - /rosout_agg
+  # Wall/CPU and claw parameter/control split diagnostics.
+  - /hardware/diagnostics/leju_claw_callback_v1
+  - /hardware/diagnostics/leju_claw_worker_v2
+  - /monitor/wbc_diagnostics/dropped
+  - /monitor/wheel/cycle_timing_v1
+  - /monitor/time_cost/wbc
+  - /whole_body_velocity_ik/diagnostics/mapper_input_gap_v1

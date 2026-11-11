@@ -56,6 +56,11 @@
     <arg name="ruiwo_cxx_sdk" default="true"/>
     <!-- SG100 optional command filter parameter. -->
     <arg name="sg100_cmd_filter_alpha" default="0.2"/>
+    <!-- 位置模式 PID。驱动先读这些参数，缺省才用代码里的同一组值。 -->
+    <arg name="sg100_kp" default="10.0"/>
+    <arg name="sg100_ki" default="0.0"/>
+    <arg name="sg100_kd" default="0.02"/>
+    <arg name="sg100_output_limit" default="0.5"/>
     <!-- 根据机器人类型设置only_half_up_body参数 -->
     <arg name="only_half_up_body" default="false" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
     <arg name="only_half_up_body" default="false" unless="$(eval arg('robot_type') == 1)"/> <!-- 双足机器人 -->
@@ -136,7 +141,10 @@
     <param name="sg100_publish_joint_states" value="true" />
     <param name="sg100_cmd_filter_alpha" value="$(arg sg100_cmd_filter_alpha)" />
     <param name="sg100_debug_state" value="false" />
-    <param name="sg100_output_limit" value="0.5" />
+    <param name="sg100_kp" value="$(arg sg100_kp)" type="double" />
+    <param name="sg100_ki" value="$(arg sg100_ki)" type="double" />
+    <param name="sg100_kd" value="$(arg sg100_kd)" type="double" />
+    <param name="sg100_output_limit" value="$(arg sg100_output_limit)" type="double" />
 
     <!-- make the files into global parameters -->
     <param name="taskFile"   value="$(arg taskFile)" />
@@ -294,7 +302,7 @@
 
     <!-- 头部控制。也可在机器起来后单独 roslaunch noitom_hi5_hand_udp_python head_control_node.launch -->
     <arg name="with_head_control_node" default="true" doc="启动 head_control_node。PICO 自有头控时关掉"/>
-    <arg name="head_control_mode" default="fixed" doc="fixed / vr_follow / track_hand。默认 fixed 不发头部指令；模式由启动参数指定，VR 连接不切换模式"/>
+    <arg name="head_control_mode" default="" doc="留空时头控使用 fixed；可指定 fixed / vr_follow / track_hand。VR 启动仅在当前 fixed 时自动切换"/>
     <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand"/>
     <group if="$(arg with_head_control_node)">
       <include file="$(find noitom_hi5_hand_udp_python)/launch/head_control_node.launch">

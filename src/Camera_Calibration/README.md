@@ -6,7 +6,25 @@
 catkin build robot_calibration
 ```
 
-配置阶段找不到 Ceres 或标定所需的七个 ROS 包时，会尝试从已配置的 apt 软件源安装，需要可用的软件源和网络，以及 root 或免交互 sudo 权限。安装失败时可运行 `tools/install_robot_calibration_deps.sh` 安装依赖后重新编译。其他依赖仍需提前安装。
+Ubuntu 24.04 上如果缺少 ROS 1 依赖，可在仓库根目录运行：
+
+```bash
+tools/install_robot_calibration_deps.sh
+```
+
+脚本检查 Noetic、Ceres、FCL、TinyXML、KDL 和标定所需 ROS 包；缺少系统库时使用 apt，缺少 ROS 包时在 `~/ros-noetic-extra` 构建固定版本的 ROS 1 源码，随后编译 `robot_calibration`。TinyXML、KDL 是标定程序的直接依赖，即使 ROS 包齐全也会检查。Noetic 和 catkin 构建工具需要事先配置；系统包安装需要 sudo 和可用的 Ubuntu 软件源。脚本可重跑，不会重置已有源码；主工作区仅更新当前 profile 的 underlay，其他编译配置保留。如果已有源码版本与脚本要求不同，会停止并提示使用新的工作区。
+
+ROS 源码默认使用仓库自带的 `tools/robot_calibration_ros1_sources.tar.gz`，不访问 GitHub；系统库仍需可用的 Ubuntu 软件源。源码包保留各上游许可及固定提交记录。也可以设置 `CALIBRATION_REPO_BASE` 为兼容目录结构的 Git 镜像或本地 Git 仓库根目录（例如 `/data/ros-git`，其中仓库路径为 `ros-planning/geometric_shapes.git` 等）。也可设置 `CALIBRATION_EXTRA_WS`、`CALIBRATION_NOETIC_SETUP` 和 `CALIBRATION_JOBS`。
+
+脚本将主工作区的 underlay 指向额外依赖工作区（不存在时指向 Noetic），刷新生成环境链的 prebuild setup，并仅编译 `robot_calibration` 及其必需依赖。保留其他包的构建产物，不清理整个工作区。编译完成后，在仓库根目录直接执行：
+
+```bash
+source devel/setup.bash
+```
+
+该 setup 已包含标定依赖的运行环境，标定入口沿用主工作区的标准环境加载方式。之后依赖齐全时，可直接运行 `catkin build robot_calibration` 增量编译。
+
+直接运行 `catkin build robot_calibration` 时，CMake 在缺少部分依赖时仍会尝试从已配置的 apt 软件源安装；Ubuntu 24.04 上 Noetic 的二进制包可能不可用，建议使用上述脚本。
 
 本目录包含两套标定流程：一套使用动捕测量棋盘和手腕，求解头部、双臂关节零位；另一套使用头部、左右腕相机观察棋盘，分别采集和优化。两套流程的观测来源、输出和写零脚本不同，先按任务选择入口。
 
@@ -34,6 +52,11 @@ S53/S55/S56 共用 `biped56` 布局和关节索引，头部安装高度（`zhead
 
 三路相机流程另有 [`auto_camera_calib_and_apply_zero.py`](auto_camera_calib_and_apply_zero.py) 串联采集、优化和写零，支持 S52、S53、S55、S56、S62/63 及其小版本；**S45 与 S49 系列不支持**（基础型号 45/49 的模型没有可用的左右腕相机帧 `l/r_hand_tripod`、`l/r_hand_camera`；49 系列用的是 `l_camera_link`/`camera_l_base`/`camera_r_base`），包装脚本会直接报错并提示改用 `run_chessboard_calibration.sh --demo head`。不要通过改写 `ROBOT_VERSION` 假装成其他实机版本。
 
+### 运动学标定的 210062 / 310062 资源
+
+仓库包含 `210062` 和 `310062` 各自的主 URDF 及 `kuavo.json`。运动学标定使用完整版本号选择模型、保存采集元数据并隔离优化输出。采集也支持通过 `--urdf` 和 `--kuavo-json` 指定文件；FPF 和默认优化流程使用完整版本对应的主 URDF 路径。
+
+实机使用前，仍需核对模型、关节索引和配置与实际机器人一致；离线测试不能代替实机验证。
 
 ## 开始前确认
 

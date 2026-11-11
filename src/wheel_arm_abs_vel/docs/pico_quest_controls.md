@@ -4,7 +4,11 @@
 
 ## 1. 适用范围
 
-适用于 `wheel_arm_abs_vel` 的 S62、S63、400062 绝对式入口。Quest 和 Pico 共用 Mapper、速度 IK、手臂操作服务、参考握手及头控处理。输入来源只选择一套。
+适用于 `wheel_arm_abs_vel` 中具有完整 URDF、14 个手臂关节和 4 个躯干关节配置的轮臂机型。Quest 和 Pico 共用 Mapper、速度 IK、手臂操作服务、参考握手及头控处理。输入来源只选择一套。
+
+Quest 无手柄操作不限定 S62；60、61、62、63、200062、210062、300062、310062、400062、400063 使用相同的光学入口。默认 `tracking_source_mode=auto`，首次可直接连续 50 个有效帧保持双手 OK 手势，经过当前模型的目标重捕获、对齐和执行权握手后跟随，不依赖手柄心跳；双手停止手势仍有效。活动会话不直接切换来源，已有手柄会话先完成原有复位流程。各机型使用自己的模型、关节限制和末端配置；S62 目标映射策略不作为无手柄功能的机型限制。
+
+当前 Pico 协议没有裸手骨骼与手势字段，因此该入口的无手柄能力取决于输入设备协议，不能通过修改机型号补出。此次覆盖模型解析、Quest/Pico 参数传递、状态机启动和公共光学启停回归；不代表所有机型已经完成真实裸手跟随验收。
 
 本次按用户最终要求保留 X+A / X+B 操作；不切换到官方 Pico 的 LT+LG / RT+RG 遥操锁方案，也不引入增量、双足踏步、裸手跟踪、音频或继电器节点。
 
@@ -98,7 +102,9 @@ Pico 必须发送 `full_body`，只发送 `upper_body` 不满足胸部 SPINE3 �
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `enable_terminal_start` | `false` | 显式启用才开启输入终端 `o` 监听；无交互终端时提示后退出该辅助节点，其余输入节点继续运行 |
-| `enable_head_control` | `false` | 默认由机器端 `head_control_node` 独立控制；输入端不重复发布头部命令 |
+| `enable_head_control` | `true` | Quest/Pico 接收器沿用 TEST 的 VR 头控；独立跟手节点启用时自动让出发布权 |
+| `preparation_arm_velocity_limit` | `1.5` | Quest/Pico 相同的准备动作手臂速度上限，可在两端入口覆盖 |
+| `preparation_gain` | `4.0` | Quest/Pico 相同的准备动作增益，可在两端入口覆盖 |
 | `hold_on_input_timeout` | `true` | 两个入口保持一致；断流恢复仍按原有 HOLD 和重新确认条件执行 |
 | `pico_port` | `12345` | Pico UDP 接收端口 |
 | `pico_peer_ip` / `ip_address` | 空 | Pico 发送方 IP；留空时由首个合法包确定 |
@@ -106,9 +112,13 @@ Pico 必须发送 `full_body`，只发送 `upper_body` 不满足胸部 SPINE3 �
 | `pico_broadcast_ip` / `broadcast_ip` | 空 | 所在网段广播地址 |
 | `pico_calibration_file` | 包内 `config/pico_quest_input.yaml` | 左右手六维偏移 |
 
-Pico 入口声明并转发 Quest 入口的全部可选参数，控制默认值保持一致。`input_source` 固定为 `pico`。与增量或非轮臂配置冲突的参数仍由绝对式入口拒绝。
+Pico 入口声明并转发 Quest 的共用控制参数，控制默认值保持一致。`input_source` 固定为 `pico`，`tracking_source_mode` 默认 `controller`；Quest 的裸手光学参数不适用于当前 Pico 协议。与增量或非轮臂配置冲突的参数仍由绝对式入口拒绝。
 
-机器端头控服务为 `/head_control_node/set_head_control_mode`，支持 `fixed`、`auto_track_active`、`fixed_main_hand`、`vr_follow`，Quest/Pico 默认均由机器端以 `vr_follow` 处理头控，`track_hand` 需在控制器启动参数中显式选择。Pico 完整骨骼中的 Neck/Head 转为对应输入；头部姿态无效时不产生头部命令，仍可保留有效的手臂输入。
+默认头控服务为 `/quest3/set_head_control_mode`，支持 TEST 的 `fixed`、`auto_track_active`、`fixed_main_hand`、`vr_follow`。控制器入口默认 `vr_follow`；显式设置 `head_track_hand:=true` 或 `head_control_mode:=track_hand` 时保留 beta 的独立跟手节点，并切换到 `/head_control_node/set_head_control_mode`。Pico 完整骨骼中的 Neck/Head 转为对应输入；头部姿态无效时不产生头部命令，仍可保留有效的手臂输入。
+
+接收器从 VR 切到固定或跟手模式时，以最后发布的有效头角继续平滑；固定模式按原有角速度限制逐步回正，不从零值或旧跟手状态重新起步。模式切换与头角发布串行处理，平滑间隔使用单调时钟。头部 TF 暂缺时也保留已发布角度，避免发布未初始化的零目标。
+
+S62 系列的 URDF 前臂与旋转工具目标映射、原生 Mapper、速度 IK、准备动作、躯干、X+A 复位、X+B 暂停恢复以及末端夹合均走同一条控制链。Pico 的原有长按拇指和 RT+Y 躯干组合保持不变。当前协议没有裸手追踪或触摸字段；按本次约定保留现有按键，暂不新增 SG100 上一个／下一个手势切换，不能把这项输入能力记为已对齐。
 
 控制与身体数据分别做时间戳／积压检查。无效或过期输入不会重放旧的使能按键；断流后的新输入必须先释放组合键，才允许新的按下事件。`connected=true` 仅表示输入连接，不代表手臂已进入跟随。
 

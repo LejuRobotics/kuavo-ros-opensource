@@ -378,7 +378,7 @@ class ArmTrajectoryBezierDemo:
 
         mpc_path = os.path.join(
             humanoid_controllers_path, "config",
-            f"kuavo_v{robot_version_str}", "mpc", "task.info"
+            f"kuavo_v{'55' if robot_version_str == '57' else robot_version_str}", "mpc", "task.info"
         )
         if os.path.exists(mpc_path):
             try:

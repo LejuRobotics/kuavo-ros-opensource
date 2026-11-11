@@ -16,6 +16,10 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <array>
+#include <atomic>
+#include <memory>
+#include <cstring>
 namespace ocs2
 {
   namespace humanoid
@@ -25,7 +29,10 @@ namespace ocs2
     public:
       TopicLogger();
       TopicLogger(ros::NodeHandle& input_nh);
-      ~TopicLogger() {stopThread();};
+      ~TopicLogger() {stopAsync(); stopThread();};
+      void startAsync();
+      void stopAsync();
+      uint64_t asyncDropped() const {return async_dropped_.load();}
       void predefinedTopics();
 
       void startThread() {
@@ -70,6 +77,23 @@ namespace ocs2
 
 
     private:
+      // Observation-only MPSC ring. Producers never wait for ROS, the writer,
+      // another producer, allocation or queue space. Saturation drops logs.
+      struct AsyncRow {
+        char topic[192]{};
+        char text[1024]{};
+        std::array<double,256> data{};
+        size_t size=0; int kind=0;
+      };
+      static constexpr size_t kAsyncCapacity=1024;
+      std::unique_ptr<std::array<AsyncRow,kAsyncCapacity>> async_rows_;
+      std::mutex async_mutex_;
+      size_t async_head_=0, async_tail_=0;
+      std::atomic<bool> async_running_{false};
+      std::atomic<uint64_t> async_dropped_{0};
+      std::thread async_thread_;
+      bool enqueue(int kind,const std::string&,const double*,size_t,const std::string* = nullptr);
+      static thread_local const TopicLogger* draining_;
       void processQueue() {
           while (thread_running_) {
               std::pair<std::string, std::vector<double>> item;
@@ -93,7 +117,7 @@ namespace ocs2
       std::mutex publish_mutex_;
       std::condition_variable cv_;
 
-      bool thread_running_ = false;
+      std::atomic<bool> thread_running_{false};
     };
 
   }

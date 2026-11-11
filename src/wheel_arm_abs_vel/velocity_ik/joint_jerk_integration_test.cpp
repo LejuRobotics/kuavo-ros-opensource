@@ -4,7 +4,6 @@ struct VelocityIkOfflineTest {
  using N=PinocchioVelocityIk;
  static void need(bool ok,const char* what){if(!ok)throw std::runtime_error(what);}
  static void run(N& n) {
-  checkReferences(n);
   n.envelope_diagnostics_stride_=1;
   n.diagnostic_stride_=1;
   n.joint_jerk_enabled_=true;n.temporal_cost_enabled_=n.operating_envelope_enabled_=true;

@@ -12,6 +12,23 @@ import numpy as np
 
 LEGACY = "LEGACY_PALM_6D"
 WRIST = "WRIST_CONSISTENT_6D"
+MODEL_FOREARM = "MODEL_FOREARM_DIRECTION_6D"
+
+
+def map_model_forearm(elbow_hint, forearm_direction, tcp_rotation, arm):
+    """Use the human elbow->palm direction as a forearm direction proxy.
+
+    This is anthropomorphic retargeting, NOT a measured human wrist pose.
+    Robot forearm length and the rotating tool offset come from the IK URDF.
+    Unlike a full elbow->TCP scalar, this remains consistent when the hand
+    rotates. Source positional adapters are deliberately not applied here.
+    """
+    tool = np.asarray(arm["joint7_to_tcp"], dtype=float)
+    joint7_rotation = tcp_rotation @ tool[:3, :3].T
+    joint7_position = (np.asarray(elbow_hint) +
+                       arm["neutral_elbow_to_joint7_m"] * np.asarray(forearm_direction))
+    tcp_position = joint7_position + joint7_rotation @ tool[:3, 3]
+    return tcp_position, joint7_position
 
 def checked_se3(value):
     X = np.asarray(value, dtype=float)
@@ -118,7 +135,7 @@ def _origin(joint):
     X = np.eye(4); X[:3,:3] = Rz@Ry@Rx; X[:3,3] = xyz
     return checked_se3(X)
 
-def model_geometry(urdf_path, end_frames, tcp_transforms):
+def model_geometry(urdf_path, end_frames, tcp_transforms, elbow_frames=None):
     """Bind actual IK URDF; derive a conservative rigid-chain necessary bound.
 
     Prismatic chains are rejected rather than assigned a constant reach radius.
@@ -126,13 +143,17 @@ def model_geometry(urdf_path, end_frames, tcp_transforms):
     """
     if len(end_frames) != 2 or set(tcp_transforms) != {"Left", "Right"}:
         raise ValueError("Two independently identified arm/tool definitions required")
+    if elbow_frames is None:
+        elbow_frames = ["zarm_l4_link", "zarm_r4_link"]
+    if len(elbow_frames) != 2:
+        raise ValueError("Two configured IK elbow frames required")
     p = Path(urdf_path)
     raw = p.read_bytes()
     root = ET.fromstring(raw)
     by_child = {j.find("child").get("link"): j for j in root.findall("joint")}
     result = {"model_path": str(p), "model_sha256": hashlib.sha256(raw).hexdigest(),
               "arms": {}, "qualification": "MODEL_GEOMETRY_ONLY_NOT_HARDWARE_CALIBRATION"}
-    for side, prefix, end in zip(("Left", "Right"), ("l", "r"), end_frames):
+    for side, prefix, end, elbow in zip(("Left", "Right"), ("l", "r"), end_frames, elbow_frames):
         shoulder, wrist = "zarm_"+prefix+"1_link", "zarm_"+prefix+"7_link"
         cur, radius, chain, visited = wrist, 0., [], set()
         while cur != shoulder:
@@ -152,14 +173,25 @@ def model_geometry(urdf_path, end_frames, tcp_transforms):
                 raise ValueError("joint7 to TCP must be a fixed transform")
             X = _origin(j) @ X; cur = j.find("parent").get("link")
         X = X @ checked_se3(tcp_transforms[side])
+        lower, cur, visited = np.eye(4), wrist, set()
+        while cur != elbow:
+            if cur in visited: raise ValueError("Cyclic URDF forearm chain")
+            visited.add(cur)
+            j = by_child[cur]
+            if j.get("type") not in {"fixed", "revolute", "continuous"}:
+                raise ValueError("Forearm retarget requires a rigid revolute chain")
+            lower = _origin(j) @ lower; cur = j.find("parent").get("link")
+        lower_length = _positive(np.linalg.norm(lower[:3, 3]), "robot forearm length")
         result["arms"][side] = {"shoulder_frame": shoulder, "joint7_frame": wrist,
+            "elbow_frame": elbow, "neutral_elbow_to_joint7_m": lower_length,
+            "forearm_direction_source": "ELBOW_TO_PALM_PROXY_NOT_WRIST_CALIBRATION",
             "configured_tcp_parent": end, "joint7_to_tcp": X.tolist(),
             "shoulder_to_joint7_necessary_upper_m": radius, "bound_chain": chain}
     return result
 
 
 def neutral_retarget_geometry(urdf_path, base_frame, shoulders, elbows):
-    """Zero-joint robot geometry for the symmetric shoulder retarget convention.
+    """Zero-joint robot geometry for each configured shoulder/elbow pair.
 
     This binds robot geometry only. Human forearm/Palm calibration stays explicit.
     """
@@ -183,15 +215,17 @@ def neutral_retarget_geometry(urdf_path, base_frame, shoulders, elbows):
     if len(shoulders) != 2 or len(elbows) != 2:
         raise ValueError("Two shoulder/elbow frames required")
     shoulder = [pose(name) for name in shoulders]
-    lengths = [float(np.linalg.norm(pose(e)-s)) for e, s in zip(elbows, shoulder)]
-    if (not np.allclose(shoulder[0], shoulder[1] * [1., -1., 1.], atol=1e-9, rtol=0)
-            or not np.isclose(lengths[0], lengths[1], atol=1e-9, rtol=0)
-            or shoulder[0][1] <= 0 or min(lengths) <= 0):
-        raise ValueError("URDF does not satisfy the symmetric shoulder retarget convention")
+    lengths = [_positive(np.linalg.norm(pose(e)-s), "robot upper arm length")
+               for e, s in zip(elbows, shoulder)]
+    # Keep scalar fields for legacy consumers. URDF mapping uses the per-arm
+    # values and does not assume mirrored shoulders or equal upper-arm lengths.
     return {"base_chest_offset_x": float(shoulder[0][0]),
             "base_height_offset": float(shoulder[0][2]),
             "shoulder_width": float(shoulder[0][1]),
             "upper_arm_length": lengths[0],
+            "upper_arm_lengths": dict(zip(("Left", "Right"), lengths)),
+            "shoulder_positions": {side: point.tolist()
+                                   for side, point in zip(("Left", "Right"), shoulder)},
             "left_shoulder": shoulder[0].tolist(),
             "right_shoulder": shoulder[1].tolist(),
             "joint_configuration": "URDF_ZERO"}

@@ -2,6 +2,7 @@
 """Chest->Head freshness and vr_follow pause/resume, without starting ROS."""
 import ast
 import unittest
+import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 from unittest.mock import Mock
 from pathlib import Path
@@ -98,6 +99,36 @@ class FixedReleaseTest(unittest.TestCase):
         self.assertEqual(node.head_pub.publish.call_args.args[0].joint_data, [0.0, 0.0])
         self.assertTrue(node._release_head_command)
         self.assertEqual(node._publish_head_mode.call_count, 5)
+
+
+class HeadBaseFrameTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        resolver = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                        and n.name == "resolve_head_base_frame")
+        scope = {"ET": ET}
+        exec(compile(ast.Module(body=[resolver], type_ignores=[]), str(source), "exec"), scope)
+        cls.resolve = staticmethod(scope["resolve_head_base_frame"])
+
+    def test_explicit_frame_does_not_require_urdf(self):
+        self.assertEqual(self.resolve(" base_link ", ""), "base_link")
+
+    def test_actual_robot_models(self):
+        assets = source.parents[3] / "kuavo_assets/models"
+        for version, expected in (("40", "base_link"), ("45", "base_link"),
+                                  ("49", "base_link"), ("400049", "base_link"),
+                                  ("400053", "waist_yaw_link"),
+                                  ("400062", "waist_yaw_link")):
+            with self.subTest(version=version):
+                urdf = assets / ("biped_s" + version) / "urdf" / ("biped_s" + version + ".urdf")
+                self.assertEqual(self.resolve("", urdf.read_text()), expected)
+
+    def test_invalid_model_requires_explicit_override(self):
+        for xml in ("", "<robot/>",
+                    '<robot><joint name="zhead_1_joint"><parent link="missing"/></joint></robot>'):
+            with self.subTest(xml=xml):
+                with self.assertRaises((ValueError, ET.ParseError)):
+                    self.resolve("", xml)
 
 
 if __name__ == "__main__":

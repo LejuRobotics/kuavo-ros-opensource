@@ -18,7 +18,7 @@ class EndEffectorTest(unittest.TestCase):
         for version in (62, 63, 210062, 310062, 400062):
             config = json.loads((ROOT.parent/'kuavo_assets/config'/('kuavo_v%d' % version)/'kuavo.json').read_text())
             self.assertEqual(ee.resolve(config), config['EndEffectorType'][0])
-            for kind in ('qiangnao', 'heiman', 'lejuclaw'):
+            for kind in ('qiangnao', 'heiman', 'lejuclaw', 'qibeng'):
                 with self.subTest(version=version, kind=kind):
                     self.assertEqual(ee.resolve(dict(config, EndEffectorType=[kind, kind])), kind)
 
@@ -39,7 +39,7 @@ class EndEffectorTest(unittest.TestCase):
     def test_bridge_executes_only_for_heiman_and_preserves_remaps(self):
         with tempfile.TemporaryDirectory() as folder:
             config = Path(folder)/'kuavo.json'
-            for kind in ('qiangnao', 'lejuclaw', 'heiman'):
+            for kind in ('qiangnao', 'lejuclaw', 'heiman', 'qibeng'):
                 config.write_text(json.dumps({'EndEffectorType': [kind, kind]}))
                 with patch.object(ee.os, 'execvp') as execute:
                     self.assertEqual(ee.main(['--config', str(config), '--bridge',

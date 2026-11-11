@@ -5,6 +5,38 @@ set(PLANT ${HW_BASE}/hardware_plant)
 set(SDK ${PLANT}/lib)
 set(PRIVATE_SDK ${CMAKE_CURRENT_SOURCE_DIR}/hardware_plant/lib)
 set(MOTION ${CMAKE_CURRENT_SOURCE_DIR}/../../manipulation_nodes/motion_capture_ik)
+# 开源发布会删掉整个 kuavo-ros-control-lejulib。源码还在就照旧私有编译；
+# 源码没了就用 CI 放进 prebuilt/<arch>/ 的插件，避免去编已经不存在的 CANFD_leju.cpp。
+if(NOT EXISTS "${SDK}/LEJU_CAN_API/CANFD_leju.cpp")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(_abs_arch aarch64)
+  else()
+    set(_abs_arch x86_64)
+  endif()
+  set(_abs_dir "${CMAKE_CURRENT_SOURCE_DIR}/prebuilt/${_abs_arch}")
+  set(_abs_so "${_abs_dir}/libnodelet_absolute_hardware.so")
+  if(NOT EXISTS "${_abs_so}")
+    message(FATAL_ERROR "开源构建没有闭源硬件源码，也没有预编译插件 ${_abs_so}")
+  endif()
+  set(_abs_out "${CATKIN_DEVEL_PREFIX}/lib/libnodelet_absolute_hardware.so")
+  add_custom_command(OUTPUT "${_abs_out}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${_abs_so}" "${_abs_out}"
+    DEPENDS "${_abs_so}"
+    COMMENT "Installing published absolute hardware plugin")
+  add_custom_target(nodelet_absolute_hardware ALL DEPENDS "${_abs_out}")
+  install(FILES "${_abs_so}" DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
+  if(EXISTS "${_abs_dir}/absolute_sg100_hand_node")
+    set(_abs_bin_dir "${CATKIN_DEVEL_PREFIX}/${CATKIN_PACKAGE_BIN_DESTINATION}")
+    set(_abs_bin_out "${_abs_bin_dir}/absolute_sg100_hand_node")
+    add_custom_command(OUTPUT "${_abs_bin_out}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_abs_bin_dir}"
+      COMMAND ${CMAKE_COMMAND} -E copy "${_abs_dir}/absolute_sg100_hand_node" "${_abs_bin_out}"
+      DEPENDS "${_abs_dir}/absolute_sg100_hand_node")
+    add_custom_target(absolute_sg100_hand_node ALL DEPENDS "${_abs_bin_out}")
+    install(PROGRAMS "${_abs_dir}/absolute_sg100_hand_node" DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+  endif()
+  return()
+endif()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   set(EC ${SDK}/EC_Master_arm64/src)
   set(BM_NAME bmapi64.arm)

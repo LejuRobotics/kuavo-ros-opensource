@@ -24,6 +24,8 @@
   <arg name="pico_broadcast_ip" default="$(arg broadcast_ip)" />
   <arg name="pico_calibration_file" default="$(find wheel_arm_abs_vel)/config/pico_quest_input.yaml" />
   <arg name="execution_governor_enabled" default="true" />
+  <arg name="preparation_arm_velocity_limit" default="1.5" />
+  <arg name="preparation_gain" default="4.0" />
   <arg name="wrist_envelope_enabled" default="$(arg filter_tuning_enabled)" />
   <arg name="vr_kalman_flattening_enabled" default="false" />
   <arg name="vr_kalman_enabled" default="true" />
@@ -72,7 +74,7 @@
   <arg name="sg100_kd" default="" />
   <arg name="sg100_output_limit" default="" />
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
-  <arg name="enable_head_control" default="false" />
+  <arg name="enable_head_control" default="true" />
   <arg name="enable_terminal_start" default="false" />
   <arg name="hand_reference_mode" default="thumb_index" />
   <arg name="use_arm_collision" default="false" />
@@ -180,6 +182,8 @@
     <arg name="pico_broadcast_ip" value="$(arg pico_broadcast_ip)" />
     <arg name="pico_calibration_file" value="$(arg pico_calibration_file)" />
     <arg name="execution_governor_enabled" value="$(arg execution_governor_enabled)" />
+    <arg name="preparation_arm_velocity_limit" value="$(arg preparation_arm_velocity_limit)" />
+    <arg name="preparation_gain" value="$(arg preparation_gain)" />
     <arg name="vr_kalman_flattening_enabled" value="$(arg vr_kalman_flattening_enabled)" />
     <arg name="vr_kalman_enabled" value="$(arg vr_kalman_enabled)" />
     <arg name="continuous_reference_enabled" value="$(arg continuous_reference_enabled)" />

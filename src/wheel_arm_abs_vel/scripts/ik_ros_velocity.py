@@ -6,6 +6,7 @@ from __future__ import annotations
 import legacy_dependencies
 
 import signal
+import copy
 import rospy
 import argparse
 import argparse
@@ -53,7 +54,8 @@ from geometry_msgs.msg import Vector3Stamped
 from kuavo_msgs.msg import JoySticks
 from tools.quest3_utils_velocity import Quest3ArmInfoTransformer
 from tools.torso_controls import TorsoControls
-from tools.mapper_input_scheduling import MapperInputScheduler
+from tools.mapper_input_scheduling import MapperInputScheduler, configure_mapper_interpreter
+from tools.optical_input_guard import OpticalInputGuard
 from tools.sg100_vr_gesture import Sg100VrGestureClient
 from tools.noncontrol_publish_process import publisher as diagnostic_publisher
 from tools.absolute_ik_safety import AbsoluteIkExecutionSafety
@@ -432,6 +434,19 @@ class IkRos:
         self.tracking_rearm_stable_frames = max(
             1, int(rospy.get_param("~tracking_rearm_stable_frames", 3))
         )
+        # Only Quest opts into optical admission. Short geometric outliers can
+        # be quarantined before recovery through the bounded C++ reference;
+        # malformed input/long gaps still latch until the whole launch restarts.
+        self._optical_input_guard = OpticalInputGuard(
+            enabled=bool(rospy.get_param("~optical_input_guard/enabled", False)),
+            max_linear_speed=float(rospy.get_param("~optical_input_guard/max_linear_speed", 6.0)),
+            position_slack=float(rospy.get_param("~optical_input_guard/position_slack", .020)),
+            max_angular_speed=float(rospy.get_param("~optical_input_guard/max_angular_speed", 50.0)),
+            orientation_slack=float(rospy.get_param("~optical_input_guard/orientation_slack", .15)),
+            max_gap=float(rospy.get_param("~optical_input_guard/max_gap", .10)),
+            latch_on_jump=bool(rospy.get_param("~optical_input_guard/latch_on_jump", True)))
+        self._optical_last_published_target = None
+        self._optical_last_hold_publish = None
 
         self._fixed_operation_mutex = threading.Lock()
         self._fixed_operation_block = False
@@ -616,12 +631,6 @@ class IkRos:
         if rospy.get_param('/vr_input_source', 'quest') == 'pico':
             from pico_input.thumb_buttons import ThumbButtons
             self._pico_thumb_input = ThumbButtons()
-        self.joySticks_sub = rospy.Subscriber(
-            "/quest_joystick_data",
-            JoySticks,
-            self.joySticks_data_callback,
-            queue_size=32, tcp_nodelay=True
-        )
 
         self.ik_cmd_sub = None
         if self.position_ik_control_enabled:
@@ -631,13 +640,16 @@ class IkRos:
             )
 
         self.sensor_data_raw_sub = rospy.Subscriber(
-            "/sensors_data_raw", sensorsData, self.sensor_data_raw_callback, queue_size=1
+            "/sensors_data_raw", sensorsData, self.sensor_data_raw_callback,
+            queue_size=1, buff_size=1048576, tcp_nodelay=True
         )
 
         # 订阅MPC优化后的状态，用于半身模式的插值和保持
-        self.optimized_state_sub = rospy.Subscriber(
-            "/humanoid_controller/optimizedState_wbc_mrt_origin", Float64MultiArray, self.optimized_state_callback, queue_size=10
-        )
+        self.optimized_state_sub = None
+        if self.position_ik_control_enabled:
+            self.optimized_state_sub = rospy.Subscriber(
+                "/humanoid_controller/optimizedState_wbc_mrt_origin", Float64MultiArray,
+                self.optimized_state_callback, queue_size=1, tcp_nodelay=True)
 
         # 轮臂：订阅 MPC observation，用 msg.time（MPC 内部时间）判断是否可发 mm / 切手臂模式（#3009）
         self._wheel_mpc_obs_sub = None
@@ -818,10 +830,15 @@ class IkRos:
         self._mapper_input_scheduler = MapperInputScheduler(
             rospy.get_param("~mapper_input_cpus", "") if scheduling else "",
             rospy.get_param("~mapper_input_nice", -5) if scheduling else None)
-        self.quest_bone_poses_sub = rospy.Subscriber(
-            "/leju_quest_bone_poses", PoseInfoList,
-            self._scheduled_quest_bone_poses_callback, queue_size=1, tcp_nodelay=True
-        )
+        # Remove the long-lived imported/ROS initialization graph from future
+        # gen-2 scans. Automatic GC stays enabled for new runtime cycles; no
+        # collection runs in the 120 Hz callback and no control timeout changes.
+        if self.enable_velocity_ik_takeover and rospy.get_param("~mapper_gc_freeze_startup", True):
+            import gc
+            gc.collect()
+            gc.freeze()
+            rospy.loginfo("Mapper startup GC graph frozen: %d objects; runtime GC enabled=%s",
+                          gc.get_freeze_count(), gc.isenabled())
 
         # 所有状态、发布器和订阅器就绪后再启动IK线程，避免启动期读到半初始化状态。
         self._publish_absolute_enable_status()
@@ -844,6 +861,20 @@ class IkRos:
                  (('linear_scale_x', 0.4), ('linear_scale_y', 0.4), ('angular_scale_z', 0.25))])
             self._wheel_base_pub = rospy.Publisher(
                 '/whole_body_velocity_ik/base_cmd_vel', Twist, queue_size=1)
+        # TCPROS may invoke callbacks as soon as Subscriber is constructed.
+        # Joystick callbacks also publish claw/base/operation messages, so both
+        # input streams must be registered after all callback state/publishers.
+        self.joySticks_sub = rospy.Subscriber(
+            "/quest_joystick_data",
+            JoySticks,
+            self.joySticks_data_callback,
+            queue_size=32, tcp_nodelay=True
+        )
+        self.quest_bone_poses_sub = rospy.Subscriber(
+            "/leju_quest_bone_poses", PoseInfoList,
+            self._scheduled_quest_bone_poses_callback, queue_size=1,
+            buff_size=2**20, tcp_nodelay=True
+        )
         self.ik_thread = threading.Thread(target=self.ik_controller_thread)
         self.ik_thread.start()
         if not (self.enable_velocity_ik_takeover and os.environ.get("KUAVO_RUNTIME_PARTITION_JSON")):
@@ -1610,6 +1641,8 @@ class IkRos:
         now = time.monotonic()
         transformer = self.quest3_arm_info_transformer
         with self._absolute_lock:
+            if getattr(getattr(self, '_optical_input_guard', None), 'latched', False):
+                return
             eligible = (
                 self.tracking_source_mode != TrackingSourceMode.CONTROLLER
                 and source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
@@ -1718,6 +1751,9 @@ class IkRos:
         if mode not in (0, 1, 2):
             return result(False, "Invalid operation mode")
         with self._absolute_lock:
+            if (mode != 0 and
+                    getattr(getattr(self, '_optical_input_guard', None), 'latched', False)):
+                return result(False, "Optical input discontinuity is latched; restart the entire Quest launch")
             if mode in (1, 2):
                 completed = getattr(self, '_controller_start_completed', False)
                 if origin == "first_trigger":
@@ -1774,6 +1810,8 @@ class IkRos:
                 return result(False, "Partial hold failure; safety hold remains pending")
             return result(True, "Fixed hold accepted by RM and consumer")
         with self._absolute_lock:
+            if getattr(getattr(self, '_optical_input_guard', None), 'latched', False):
+                return result(False, "Optical input discontinuity is latched; restart the entire Quest launch")
             state = self._absolute_state
             if self._absolute_fault_hold_pending:
                 return result(False, "Consumer fault hold is still pending")
@@ -1815,6 +1853,8 @@ class IkRos:
                     # silently swallow it merely because the owner ack is late.
                     pending.update(mode=1, resume=False)
                     self._fixed_operation_block = True
+                    if hasattr(self, '_torso_controls'):
+                        self._torso_controls.clear_operator_mode()
                     if state == AbsoluteEnableState.ACTIVE:
                         self._pause_absolute_session()
                         pending.update(phase='prepare', generation=self._absolute_generation)
@@ -1825,6 +1865,8 @@ class IkRos:
             if mode == 1 and self._absolute_mode_status == (2, 2, False) and state in (AbsoluteEnableState.ACTIVE, AbsoluteEnableState.PAUSED,
                                       AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                 self._fixed_operation_block = True
+                if hasattr(self, '_torso_controls'):
+                    self._torso_controls.clear_operator_mode()
                 if state not in (AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                     self._pause_absolute_session()
                 if state != AbsoluteEnableState.PREPARED:
@@ -1840,6 +1882,10 @@ class IkRos:
                 return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
             self._fixed_operation_block = True
+            if mode == 1 and hasattr(self, '_torso_controls'):
+                # 模式状态不是 (2, 2, False) 时上面的准备分支不会进来。
+                # X+A 复位仍然要把腰部总开关和位置跟随收回启动默认。
+                self._torso_controls.clear_operator_mode()
             self._queue_fixed_request_locked(mode, 'dependencies')
             if origin == 'first_trigger':
                 self._fixed_pending_operation['admission_source'] = TeleopTcpTarget.SOURCE_QUEST_CONTROLLER
@@ -1890,6 +1936,11 @@ class IkRos:
         """Nonblocking progress in the existing IK thread; service accepts intent only."""
         failure = None
         with self._absolute_lock:
+            if getattr(getattr(self, '_optical_input_guard', None), 'latched', False):
+                self._fixed_pending_operation = None
+                self._fixed_operation_phase = 5
+                self._fixed_operation_block = True
+                return
             # Callback timestamps and this snapshot must share the lock.
             # Sampling before acquiring it can make a fresh callback appear
             # to come from the future and spuriously cancel PREPARE.
@@ -1956,13 +2007,23 @@ class IkRos:
                     self._fixed_operation_phase = 3
                     rospy.loginfo('[FixedStart] Execution acquired; PREPARE is now running')
             if failure:
+                # A cold request waiting for dependencies has not requested
+                # mode 2 or acquired execution. Cancel it at the same deadline;
+                # mode-0 RPCs to a disabled controller would create a spurious
+                # fault latch and an endless hold retry. Existing ownership or
+                # any acquisition/prepare phase still uses the hold handshake.
+                request_hold = not (
+                    p['phase'] == 'dependencies'
+                    and self._absolute_state in (AbsoluteEnableState.WAITING,
+                                                 AbsoluteEnableState.WAIT_RELEASE)
+                    and 2 not in self._absolute_mode_status[:2])
                 self._fixed_pending_operation = None
                 self._fixed_operation_phase = 5
                 self._fixed_operation_block = True
                 self._fixed_prepare_bootstrap = False
                 self._absolute_resume_after_prepare = False
         if failure:
-            self._finish_absolute_session(AbsoluteEnableReason.MODE_TIMEOUT, True, failure)
+            self._finish_absolute_session(AbsoluteEnableReason.MODE_TIMEOUT, request_hold, failure)
         self._publish_fixed_operation_state()
 
     def _call_absolute_mode_service(self, service_name, mode):
@@ -2375,7 +2436,10 @@ class IkRos:
         source_fault_cleared = False
         with self._absolute_lock:
             if hasattr(self, '_torso_controls'):
-                self._torso_controls.reset()
+                # X+A 全身复位后重新解锁应回到启动默认：总开关按 launch，
+                # 位置跟随打开。否则手动关闭的总开关和位置保持会原样恢复，
+                # 下肢要再拨一次才跟着走。
+                self._torso_controls.clear_operator_mode()
             self._bump_absolute_generation_locked()
             if (self._tracking_source_hold_latched
                     and self._tracking_can_rearm_locked()):
@@ -2616,6 +2680,10 @@ class IkRos:
 
     def _absolute_control_cycle(self):
         """Return (control_target, optional_q_seed, transactional generation)."""
+        if getattr(getattr(self, '_optical_input_guard', None), 'latched', False):
+            with self._absolute_lock:
+                self._publish_optical_fault_hold_locked()
+            return None, None, None
         if not self.enable_absolute_target_alignment:
             return None, None, None
 
@@ -3743,6 +3811,123 @@ class IkRos:
             rospy.logwarn("Mapper input scheduling unavailable: %s", exc)
         return self.quest_bone_poses_callback(msg)
 
+    def _publish_optical_fault_hold_locked(self, force=False):
+        """Explicit, same-transaction stop; never renew a pose observation."""
+        now = time.monotonic()
+        if (not force and self._optical_last_hold_publish is not None
+                and now - self._optical_last_hold_publish < .1):
+            return
+        template = self._optical_last_published_target
+        if template is None:
+            # No previous publication exists only before first acquisition.
+            hold = TeleopTcpTarget()
+            hold.source = TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+            hold.header.frame_id = 'quest_chest_robot_axes'
+            hold.left_controlled_frame = 'left_teleop_tcp'
+            hold.right_controlled_frame = 'right_teleop_tcp'
+            hold.session_id = self._absolute_session_id
+            hold.generation = self._absolute_generation
+            hold.body_coordinate_epoch = self._body_coordinate_epoch
+            self._fill_subsystem_permissions_locked(hold, now)
+        else:
+            # Preserve operation sequence numbers AND their permission bits.
+            # A same-sequence permission change would be rejected by C++.
+            hold = copy.deepcopy(template)
+        hold.header.seq = self._tcp_target_seq
+        self._tcp_target_seq = (self._tcp_target_seq + 1) & 0xFFFFFFFF
+        hold.control_state = TeleopTcpTarget.CONTROL_HOLD
+        hold.control_valid = False
+        for field in ('left_valid', 'right_valid', 'left_elbow_hint_valid',
+                      'right_elbow_hint_valid', 'root_valid', 'chest_valid',
+                      'head_valid', 'left_shoulder_valid', 'right_shoulder_valid'):
+            setattr(hold, field, False)
+        hold.estimated_twists_valid = True
+        for field in ('left_tcp_twist', 'right_tcp_twist', 'chest_twist'):
+            twist = getattr(hold, field)
+            twist.linear.x = twist.linear.y = twist.linear.z = 0.
+            twist.angular.x = twist.angular.y = twist.angular.z = 0.
+        for field in ('left_elbow_velocity', 'right_elbow_velocity', 'root_velocity'):
+            vector = getattr(hold, field)
+            vector.x = vector.y = vector.z = 0.
+        hold.mapper_publish_stamp = rospy.Time.now()
+        self.pub_mm_teleop_tcp_target.publish(hold)
+        self._optical_last_hold_publish = now
+
+    def _admit_optical_input(self, msg):
+        """Reject before SkeletonCV can ingest a discontinuous observation."""
+        with self._absolute_lock:
+            guard = self._optical_input_guard
+            if guard.latched:
+                self._publish_optical_fault_hold_locked()
+                return False
+            if not (guard.enabled and self.enable_velocity_ik_takeover and msg.is_hand_tracking):
+                return True
+            armed = (self._absolute_state in (AbsoluteEnableState.ACTIVE, AbsoluteEnableState.SWITCHING)
+                     and self._tracking_session_source in (
+                         TeleopTcpTarget.SOURCE_UNKNOWN,
+                         TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING))
+            samples = {}
+            for index in (0, 1, 2, 3, 4, 5, 23):
+                if index < len(msg.poses):
+                    p = msg.poses[index]
+                    samples[index] = (p.position.x, p.position.y, p.position.z,
+                                      p.orientation.x, p.orientation.y,
+                                      p.orientation.z, p.orientation.w)
+            if guard.update(float(msg.timestamp_ms) * .001, samples, armed=armed):
+                return True
+            if not guard.latched:
+                if guard.reason in ('position_jump', 'orientation_jump'):
+                    rospy.logwarn_throttle(1., '[OpticalInputGuard] quarantined %s %s; '
+                        'waiting for bounded target recovery', guard.reason, guard.details)
+                return False  # A rejected observation cannot seed SkeletonCV.
+            self._tracking_hard_discontinuity_count += 1
+            self._fixed_pending_operation = None
+            self._fixed_operation_phase = 5
+            self._fixed_operation_block = True
+            self._fixed_prepare_bootstrap = False
+            self._absolute_pending_capture = None
+            self._absolute_latest_target = None
+            self._last_valid_tcp_receive = None
+            self._absolute_gesture_running = False
+            self._absolute_state = AbsoluteEnableState.WAIT_RELEASE
+            self._absolute_reason = AbsoluteEnableReason.TRACKING_INPUT_DISCONTINUITY
+            self.quest3_arm_info_transformer.is_runing = False
+            self._torso_controls.reset()
+            # No generation change or mode-0 recapture: C++ retains its
+            # existing q/dq/ddq and produces the bounded stopping trajectory.
+            self._publish_optical_fault_hold_locked(force=True)
+            rospy.logerr('[OpticalInputGuard] latched: %s %s; braking to HOLD; '
+                         'restart the entire Quest launch before following again',
+                         guard.reason, guard.details)
+            return False
+
+    def _publish_admitted_tcp_target(self, msg):
+        # Serialize normal publication with fault detection and HOLD heartbeats.
+        # Work computed before a fault must never publish ACTIVE afterwards.
+        with self._absolute_lock:
+            if self._optical_input_guard.latched:
+                self._publish_optical_fault_hold_locked()
+                return False
+            self.pub_mm_teleop_tcp_target.publish(msg)
+            if (self._optical_input_guard.enabled and msg.control_valid
+                    and msg.source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING):
+                self._optical_last_published_target = copy.deepcopy(msg)
+            return True
+
+    def _optical_recovered_message(self, msg, source):
+        guarded_poses = self._optical_input_guard.output_poses
+        if (source != TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING
+                or not self._optical_input_guard.enabled or guarded_poses is None):
+            return msg
+        # Keep the received observation intact for diagnostics; SkeletonCV
+        # consumes the continuously recovered skeleton at the same stamp.
+        recovered = copy.deepcopy(msg)
+        for index, (position, quaternion) in guarded_poses.items():
+            pose = recovered.poses[index]
+            pose.position.x, pose.position.y, pose.position.z = position
+            pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w = quaternion
+        return recovered
+
     def quest_bone_poses_callback(self, quest_bone_poses_msg):
         received_monotonic = time.monotonic()
         received_ros = rospy.Time.now()
@@ -3764,6 +3949,9 @@ class IkRos:
             rospy.logwarn_throttle(1.0, "[IkRos] discarded delayed/reordered raw Quest sample")
             return
         self._last_fresh_source_receive[source] = received_monotonic
+        if not self._admit_optical_input(quest_bone_poses_msg):
+            return
+        quest_bone_poses_msg = self._optical_recovered_message(quest_bone_poses_msg, source)
         tcp_msg = TeleopTcpTarget()
         with self._absolute_lock:
             session_id, generation, coordinate_epoch = (
@@ -3776,7 +3964,10 @@ class IkRos:
             prepare_bootstrap = self._fixed_prepare_bootstrap
             source_policy = self._tracking_source_policy_locked(
                 source, self.quest3_arm_info_transformer.is_runing)
-            self._fill_subsystem_permissions_locked(tcp_msg, received_monotonic)
+            # Reception precedes this lock; a concurrent joystick callback
+            # may already have stored a newer timestamp. Authorization must
+            # use a current locked snapshot, not the packet reception time.
+            self._fill_subsystem_permissions_locked(tcp_msg, time.monotonic())
         self.quest3_arm_info_transformer.skeleton_contract = (
             session_id, generation, coordinate_epoch)
         read_accepted = self.quest3_arm_info_transformer.read_msg(
@@ -3978,9 +4169,9 @@ class IkRos:
             tcp_msg.mapper_processing_time = time.monotonic() - received_monotonic
             tcp_msg.source_relative_age = gate.relative_age
             if tcp_msg.mapper_processing_time + gate.relative_age <= gate.max_age:
-                self.pub_mm_teleop_tcp_target.publish(tcp_msg)
+                published = self._publish_admitted_tcp_target(tcp_msg)
                 self.quest3_arm_info_transformer.flush_pending_arm_markers()
-                tcp_target_published = tcp_control_valid
+                tcp_target_published = published and tcp_control_valid
 
         # Rejected/inactive TCP frames still keep their visual diagnostics.
         self.quest3_arm_info_transformer.flush_pending_arm_markers()
@@ -4141,9 +4332,19 @@ class IkRos:
                 and not self._absolute_external_mode_reset_pending
                 and received is not None and 0 <= now-received <= self.absolute_enable_max_vr_age)
 
+    def _torso_optical_input_stream_locked(self):
+        # Use the admitted session source, rather than a raw tracking flag:
+        # a rejected source change must not change torso authorization.
+        source = self._tracking_session_source
+        if source == TeleopTcpTarget.SOURCE_UNKNOWN:
+            source = self._tracking_last_accepted_source
+        if source == TeleopTcpTarget.SOURCE_QUEST_HAND_TRACKING:
+            return (self._last_valid_tcp_receive, self.absolute_enable_max_vr_age)
+        return None
+
     def _fill_subsystem_permissions_locked(self, msg, now):
         msg.torso_control_enabled = self._torso_controls.authorized(
-            now, self._torso_input_ready_locked(now))
+            now, self._torso_input_ready_locked(now), self._torso_optical_input_stream_locked())
         msg.torso_position_hold = not self._torso_controls.position_enabled
         msg.torso_operation_seq = self._torso_controls.operation_seq
         msg.arm_hold = (self._absolute_state == AbsoluteEnableState.ACTIVE
@@ -4153,7 +4354,8 @@ class IkRos:
     def _publish_torso_control_state(self):
         with self._absolute_lock:
             now = time.monotonic()
-            enabled = self._torso_controls.authorized(now, self._torso_input_ready_locked(now))
+            enabled = self._torso_controls.authorized(
+                now, self._torso_input_ready_locked(now), self._torso_optical_input_stream_locked())
             position_hold = not self._torso_controls.position_enabled
             state = (enabled, position_hold)
             if state == self._torso_last_published:
@@ -4218,7 +4420,8 @@ class IkRos:
             with self._absolute_lock:
                 now = time.monotonic()
                 hand_msg = self._torso_controls.update(
-                    msg, hand_msg, now, self._torso_input_ready_locked(now))
+                    msg, hand_msg, now, self._torso_input_ready_locked(now),
+                    self._torso_optical_input_stream_locked())
             self._consume_torso_end_effector_edges(hand_msg)
             self._publish_torso_control_state()
         self.joySticks_data = hand_msg
@@ -4489,6 +4692,8 @@ class IkRos:
             self.sg100_gesture_client.update(msg, command.vector.z == 1.0 and not torso_modifier)
 
     def hand_finger_data_process(self, event):
+        if getattr(getattr(self, '_optical_input_guard', None), 'latched', False):
+            return
         if self._uses_front_trigger_dexhand():
             # Qiangnao controller packets use the callback. Valid optical
             # hand tracking still uses dev's six-angle conversion below.
@@ -4628,6 +4833,10 @@ class IkRos:
 
     # 添加手臂模式回调函数
     def arm_mode_callback(self, msg, _authorized_operation=False):
+        if (msg.data in (1, 2) and
+                getattr(getattr(self, '_optical_input_guard', None), 'latched', False)):
+            rospy.logwarn_throttle(1., '[OpticalInputGuard] restart the entire Quest launch to clear the fault')
+            return
         # The formal FSM uses pinocchio_arm_operation. Legacy mode topics are
         # observations, never a second prepare/resume admission path.
         if (self.enable_velocity_ik_takeover and msg.data in (1, 2)
@@ -5025,6 +5234,7 @@ class IkRos:
         return response
 
 if __name__ == "__main__":
+    configure_mapper_interpreter()
     rospy.init_node("diff_ik_node", anonymous=True)
 
     np.set_printoptions(linewidth=240)
@@ -5153,13 +5363,22 @@ if __name__ == "__main__":
         # constructing legacy ArmIk here delayed raw-input availability and
         # created an unnecessary second kinematic owner.
         from tools.velocity_tcp_geometry import resolve_velocity_tcp_geometry
-        velocity_geometry = resolve_velocity_tcp_geometry(
-            model_config, robot_version,
-            rospy.get_param("~velocity_tcp_forearm_length", None),
-            rospy.get_param("~velocity_tcp_geometry_id", ""),
-        )
-        rospy.set_param("/quest3/teleop_tcp/forearm_retarget_length", velocity_geometry["forearm_retarget_length"])
-        from tools.target_geometry_contract import model_geometry, LEGACY, WRIST
+        from tools.target_geometry_contract import model_geometry, LEGACY, WRIST, MODEL_FOREARM
+        geometry_mode = rospy.get_param("~velocity_target_geometry_mode", MODEL_FOREARM)
+        if geometry_mode not in (LEGACY, WRIST, MODEL_FOREARM):
+            raise ValueError("Unknown velocity target geometry mode")
+        velocity_geometry = {"robot_version": str(robot_version), "operation_mode": geometry_mode}
+        # Every full wheel model uses its own URDF forearm/tool geometry by
+        # default. Resolve the old scalar only for an explicitly selected mode
+        # that uses it; missing legacy calibration must not block URDF mapping.
+        if geometry_mode != MODEL_FOREARM:
+            velocity_geometry.update(resolve_velocity_tcp_geometry(
+                model_config, robot_version,
+                rospy.get_param("~velocity_tcp_forearm_length", None),
+                rospy.get_param("~velocity_tcp_geometry_id", ""),
+            ))
+            rospy.set_param("/quest3/teleop_tcp/forearm_retarget_length",
+                            velocity_geometry["forearm_retarget_length"])
         # Same velocity-only model selection as the Pinocchio node.
         actual_ik_model = model_file
         if neutral_robot_geometry is not None:
@@ -5178,11 +5397,24 @@ if __name__ == "__main__":
             T[2, 3] += model_config.get("eef_z_offset", 0.)
             tcp_transforms[side] = T
         velocity_geometry["ik_model"] = model_geometry(
-            actual_ik_model, end_frames_name[1:3], tcp_transforms)
-        velocity_geometry["operation_mode"] = rospy.get_param(
-            "~velocity_target_geometry_mode", LEGACY)
-        if velocity_geometry["operation_mode"] not in (LEGACY, WRIST):
-            raise ValueError("Unknown velocity target geometry mode")
+            actual_ik_model, end_frames_name[1:3], tcp_transforms, end_frames_name[3:5])
+        if velocity_geometry["operation_mode"] == MODEL_FOREARM:
+            # A persistent ROS master can retain the scalar from a previous
+            # legacy launch. The selected mode owns the geometry: the URDF
+            # forearm/tool mode does not apply that scalar and must still start.
+            legacy_forearm_override = rospy.get_param("~velocity_tcp_forearm_length", None)
+            if legacy_forearm_override is not None:
+                velocity_geometry["ignored_legacy_forearm_length"] = legacy_forearm_override
+                rospy.logwarn("Ignoring legacy velocity_tcp_forearm_length=%s in %s; "
+                              "using URDF forearm and rotating tool geometry",
+                              legacy_forearm_override, MODEL_FOREARM)
+            velocity_geometry["geometry_id"] = "URDF_FOREARM_DIRECTION_AND_ROTATING_TOOL_V1"
+            velocity_geometry["calibration_status"] = "MODEL_RETARGET_NOT_HUMAN_WRIST_CALIBRATION"
+            velocity_geometry["source_segment"] = "ArmLower origin -> HandPalm origin (direction only)"
+            velocity_geometry["tcp_position"] = "URDF forearm length + rotating URDF tool"
+            velocity_geometry["forearm_retarget_length_applied"] = False
+            velocity_geometry["forearm_to_joint7_m"] = {
+                side: arm["neutral_elbow_to_joint7_m"] for side, arm in velocity_geometry["ik_model"]["arms"].items()}
         velocity_geometry["source_origin_status"] = {
             "controller": "UNVERIFIED_GRIP_OR_AIM_PALM_LABEL",
             "hand_tracking": "HAND_PALM_LABEL_NOT_ANATOMICAL_WRIST_CALIBRATION"}
@@ -5193,13 +5425,14 @@ if __name__ == "__main__":
         rospy.set_param("/quest3/teleop_tcp/geometry_binding", velocity_geometry)
         print("\n" + "*"*10 + "VELOCITY IK MAPPER INFO" + "*"*10)
         print(
-            "Legacy position IK model: disabled; retarget lengths from kuavo.json"
+            "Legacy position IK model: disabled; velocity target geometry: " + velocity_geometry["operation_mode"]
         )
-        print(
-            f"upper_arm_length: {upper_arm_length:.3f} m, "
-            f"forearm_retarget_length: "
-            f"{rospy.get_param('/quest3/teleop_tcp/forearm_retarget_length'):.3f} m"
-        )
+        print(f"upper_arm_length: {upper_arm_length:.3f} m")
+        if geometry_mode == MODEL_FOREARM:
+            for side, length in velocity_geometry["forearm_to_joint7_m"].items():
+                print(f"{side} URDF forearm_to_joint7: {length:.6f} m (rotating tool applied separately)")
+        else:
+            print(f"forearm_retarget_length: {velocity_geometry['forearm_retarget_length']:.3f} m")
     else:
         # The legacy position-IK implementation remains available, but its
         # Drake modules are loaded only for that mode.  Velocity takeover must

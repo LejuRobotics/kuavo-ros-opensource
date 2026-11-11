@@ -14,7 +14,8 @@ import sys
 
 import yaml
 
-from robot_variants import ASSETS, default_config_name, is_wheel_version, main_urdf
+from robot_variants import ASSETS, default_config_name, main_urdf
+import robot_versions
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -37,11 +38,13 @@ def main():
     version = (os.environ.get("ROBOT_VERSION", "") if args.robot_version == "auto"
                else args.robot_version).strip()
     config_name = default_config_name(version)
+    layout = robot_versions.require(version, "运动学采集").layout
+    if args.robot_layout and args.robot_layout != layout:
+        parser.error(f"ROBOT_VERSION={version} 的布局为 {layout}，与 --robot-layout={args.robot_layout} 冲突")
     config_path = (args.config or HERE / "config" / config_name).expanduser().resolve()
     cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     robot, calibration = cfg["robot"], cfg["calibration"]
     robot["robot_version"] = version
-    layout = args.robot_layout or ("wheel62" if is_wheel_version(version) else "biped56")
     root = args.fk_root or "waist_yaw_link"
     urdf = (args.urdf or main_urdf(version)).expanduser().resolve()
     kuavo_json = (args.kuavo_json or ASSETS / "config" / f"kuavo_v{version}" / "kuavo.json").expanduser().resolve()

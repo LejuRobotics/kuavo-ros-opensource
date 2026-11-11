@@ -59,6 +59,12 @@ namespace humanoidController_wheel_wbc
 
     config.kalmanProcessAccCap = 80.0;
     config.kalmanProcessQCap = 400.0;
+    int boundedTracking = 1;
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.bounded_command_tracking", boundedTracking);
+    config.boundedCommandTracking = (boundedTracking != 0);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_acceleration_limit", config.commandAccelerationLimit);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_frequency", config.commandTrackingFrequency);
+    loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.command_tracking_damping", config.commandTrackingDamping);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_q", config.kalmanMeasurementQNoise);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_r_dq", config.kalmanMeasurementDqNoise);
     loadOptionalTaskParam(taskFile, "armTrajInterpKinematicLimit.kalman_p0_pos", config.kalmanInitialPosVar);
@@ -249,6 +255,13 @@ namespace humanoidController_wheel_wbc
     {
       controllerNh_.getParam("/arm_move_spd", arm_move_spd_);
     }
+    controllerNh_.param("/arm_reset_speed_rad_s", arm_reset_speed_rad_s_, 0.7);
+    if (!std::isfinite(arm_reset_speed_rad_s_) || arm_reset_speed_rad_s_ <= 0.0)
+    {
+      ROS_ERROR("arm_reset_speed_rad_s must be finite and positive");
+      return false;
+    }
+    ROS_INFO_STREAM("[ArmControl] reset speed: " << arm_reset_speed_rad_s_ << " rad/s");
     if(controllerNh_.hasParam("/use_external_mpc"))
     {
       controllerNh_.getParam("/use_external_mpc", enable_mpc_);
@@ -315,7 +328,11 @@ namespace humanoidController_wheel_wbc
                       << " kalman_v_limit=" << config.kalmanVLimit
                       << " r_dq=" << config.kalmanMeasurementDqNoise
                       << " process_acc_cap=" << config.kalmanProcessAccCap
-                      << " process_q_cap=" << config.kalmanProcessQCap);
+                      << " process_q_cap=" << config.kalmanProcessQCap
+                      << " bounded_tracking=" << config.boundedCommandTracking
+                      << " command_acc_limit=" << config.commandAccelerationLimit
+                      << " command_tracking_wn=" << config.commandTrackingFrequency
+                      << " command_tracking_damping=" << config.commandTrackingDamping);
     }
 
     if(obsLimitEnable)
@@ -1327,8 +1344,8 @@ namespace humanoidController_wheel_wbc
       // ABSOLUTE_QUICK_Q_LOWPASS_BETA_FDB60BBC_V1
       // 只跟踪“上肢快速 + 直接位置通路”的有效期。离开该通路立即清除状态，
       // 保证下次进入时从进入前控制目标重新初始化，避免沿用旧滤波状态。
-      // X+A 1→2 解锁期间保持 isArmControlModeChanged_，必须走与 mode1 复位相同的
-      // processArmControlModeSwitch 插值；此时禁止 quick 直通，否则会瞬间冲向 VR 目标。
+      // X+A 进入 mode 2 的前 200ms 仍保持当前关节。保持结束后直接跟随 IK 复位轨迹，
+      // 最终输出仍经过关节限位速度阻尼。
       const bool modeSwitchArmInterpActive = isArmControlModeChanged_;
       const bool quickArmControlActive = isQuickArmControlActive(lbMpcMode);
       const bool absoluteQuickQLowPassActive =
@@ -2520,8 +2537,9 @@ namespace humanoidController_wheel_wbc
       return newDesiredArmState;
     }
     
-    // 使用固定步长插值（弧度）
-    scalar_t stepDistance = 0.001;  // 每步移动0.1弧度（约5.7度）
+    // 仅退出外部控制的复位按速度插值；其余切换沿用原步长。
+    const bool externalArmReset = prev_arm_trajectory_mode_ == 2 && arm_trajectory_mode_ == 1;
+    const scalar_t stepDistance = externalArmReset ? arm_reset_speed_rad_s_ * dt_ : 0.001;
     
     // 如果一步就能到达，直接返回目标状态
     if (stepDistance >= totalDistance) 
@@ -2602,6 +2620,13 @@ namespace humanoidController_wheel_wbc
       return isExternalArmReset() ? arm_start_pos_ : current_qpos;
     }
 
+    if (arm_trajectory_mode_ == 2)
+    {
+      // 上游 IK 已生成复位轨迹；最终边界制动保持生效。
+      isArmControlModeChanged_ = false;
+      return target_arm_state;
+    }
+
     // 处理模式切换插值 - 此函数只在isArmControlModeChanged_为true时调用
     // 执行插值 - 使用入参current_qpos作为当前位置
     ros_logger_->publishVector("/humanoid_wheel/current_qpos", current_qpos);
@@ -2674,9 +2699,9 @@ namespace humanoidController_wheel_wbc
     vector_t armTargetRawQ = currentArmQ;
     vector_t armTargetRawV = vector_t::Zero(armNum_);
     bool hasArmTargetRaw = false;
-    ArmJointTrajectory armTrajRaw = control_data_manager_->getArmExternalControlState();
+    ros::Time trajStamp;
+    ArmJointTrajectory armTrajRaw = control_data_manager_->getArmExternalControlState(&trajStamp);
     if (armInterpWaitFreshTraj_) {
-      const ros::Time trajStamp = control_data_manager_->getArmExternalControlStateTimestamp();
       if (!trajStamp.isZero() && trajStamp != armInterpStampAtModeChange_) {
         armInterpWaitFreshTraj_ = false;
       }
@@ -2693,7 +2718,7 @@ namespace humanoidController_wheel_wbc
       if (armTrajRaw.vel.size() == static_cast<Eigen::Index>(armNum_)) {
         armTargetRawV = armTrajRaw.vel;
       }
-      armTrajectoryInterpolator_.ingestRawTarget(time, armTrajRaw.pos, armTrajRaw.vel);
+      armTrajectoryInterpolator_.ingestRawTarget(trajStamp, armTrajRaw.pos, armTrajRaw.vel);
     }
     if (hasArmTargetRaw) {
       ros_logger_->publishVector("/humanoid_wheel/arm_target_qpos_raw", armTargetRawQ);

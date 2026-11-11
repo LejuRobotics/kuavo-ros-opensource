@@ -12,9 +12,17 @@
     <arg name="enable_vr_transform_diagnostics" default="false"/>
     <arg name="ik_solution_timeout_s" default="0.2"/>
     <arg name="rosbag_topic_config" default="$(find humanoid_controllers)/config/log_topics.yaml"/>
+    <arg name="sg100_kp" default="10.0"/>
+    <arg name="sg100_ki" default="0.0"/>
+    <arg name="sg100_kd" default="0.02"/>
+    <arg name="sg100_output_limit" default="0.5"/>
     <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
       <arg name="enable_vr_latency_diagnostics" value="$(arg enable_vr_latency_diagnostics)"/>
       <arg name="rosbag_topic_config" value="$(arg rosbag_topic_config)"/>
+      <arg name="sg100_kp" value="$(arg sg100_kp)"/>
+      <arg name="sg100_ki" value="$(arg sg100_ki)"/>
+      <arg name="sg100_kd" value="$(arg sg100_kd)"/>
+      <arg name="sg100_output_limit" value="$(arg sg100_output_limit)"/>
     </include>
 
     <include file="$(find noitom_hi5_hand_udp_python)/launch/launch_quest3_ik.launch">

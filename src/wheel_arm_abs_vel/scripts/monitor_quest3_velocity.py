@@ -35,7 +35,7 @@ import protos.hand_wrench_srv_pb2 as hand_wrench_srv_pb2
 
 from robot_state_server_velocity import RobotStateServer
 from quest_vr_config import Quest3VrConfig, HandWrenchConfig
-from head_control_manager import HeadControlManager, HeadControlMode
+from vr_head_control_manager import HeadControlManager, HeadControlMode
 from kuavo_msgs.srv import SetHeadControlMode, SetHeadControlModeResponse
 
 class Quest3BoneFramePublisher:
@@ -76,6 +76,8 @@ class Quest3BoneFramePublisher:
 
         self.br = tf.TransformBroadcaster()
         self.pose_pub = rospy.Publisher('/leju_quest_bone_poses', PoseInfoList, queue_size=2)
+        self.head_data_pub = rospy.Publisher('/robot_head_motion_data', robotHeadMotionData, queue_size=10)
+        self.head_pose_pub = rospy.Publisher('/robot_head_pose', PoseStamped, queue_size=10)
         self.chest_data_pub = rospy.Publisher('/robot_chest_motion_data', Float64MultiArray, queue_size=10)
         self.chest_pose_pub = rospy.Publisher('/robot_chest_pose', PoseStamped, queue_size=10)
         self.joysticks_pub = rospy.Publisher('quest_joystick_data', JoySticks, queue_size=32, tcp_nodelay=True)
@@ -93,7 +95,9 @@ class Quest3BoneFramePublisher:
         self._last_observation_tf = float("-inf")
         self.control_finger_tf_enabled = bool(rospy.get_param("~control_finger_tf_enabled", False))
 
-        rospy.loginfo("Quest head command disabled; head_control_node owns /robot_head_motion_data")
+        self.enable_head_control = rospy.get_param("~enable_head_control", True)
+        self._standalone_head_active = False
+        self._standalone_head_check_time = 0.0
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGHUP, self.signal_handler)
@@ -106,6 +110,29 @@ class Quest3BoneFramePublisher:
 
         # 配置管理器
         self.config_manager = Quest3VrConfig()
+
+        # Serialize mode changes with head publication and smoothing state.
+        self._head_control_lock = threading.RLock()
+        # 头部控制管理器
+        self.head_control_manager = HeadControlManager(self.config_manager)
+        self._init_head_control_manager()
+
+        # 创建头部控制模式设置服务
+        self.head_control_mode_service = rospy.Service(
+            '/quest3/set_head_control_mode',
+            SetHeadControlMode,
+            self._handle_set_head_control_mode
+        )
+        rospy.loginfo("Head control mode service started at /quest3/set_head_control_mode")
+
+        # 创建头部控制模式发布节点
+        self.head_ctrl_mode_pub = rospy.Publisher('/quest3/head_control_mode', headCtrlMode, queue_size=10)
+        # 每次 set_head_control_mode 成功设为 fixed 时发布，供 QuestControlFSM 在手臂复位窗口内更新「解锁后恢复」快照（含重复 fixed）
+        self._pub_head_fixed_user_intent = rospy.Publisher(
+            '/quest3/head_fixed_forward_user_intent', Empty, queue_size=1, latch=False
+        )
+
+        rospy.loginfo("Head reset service started at /quest3/reset_head_pose")
 
         # 初始化VR连接状态参数
         rospy.set_param('/quest3/connected', False)
@@ -191,7 +218,7 @@ class Quest3BoneFramePublisher:
         self.head_control_manager.set_joint_limits(yaw_limit, pitch_limit)
 
         # 初始化头部控制模式 （从config.json读取，默认vr_follow模式）
-        mode_str = str(head_control_config.get("mode", "vr_follow") or "vr_follow").strip().lower()
+        mode_str = str(rospy.get_param("/absolute/head_control_mode", head_control_config.get("mode", "vr_follow")) or "vr_follow").strip().lower()
         mode = HeadControlMode.from_string(mode_str)
         if mode is None:
             legacy_mode_map = {
@@ -201,9 +228,6 @@ class Quest3BoneFramePublisher:
             mode = legacy_mode_map.get(mode_str, HeadControlMode.VR_FOLLOW)
         fixed_hand = head_control_config.get("fixed_main_hand", "right")
         self.head_control_manager.set_mode(mode, fixed_hand)
-        self.head_control_manager.set_track_target(head_control_config.get("track_target", "auto_track_active"))
-        self.head_control_manager.hold_rear_targets = True
-        self.head_control_manager.rear_target_held = False
 
         # 设置平滑滤波系数（从配置读取，默认0.15）
         smoothing_factor = head_control_config.get("smoothing_factor", 0.15)
@@ -331,48 +355,70 @@ class Quest3BoneFramePublisher:
         return degree
 
     def _standalone_head_track_active(self):
-        return bool(rospy.get_param("/head_control_node/active", False))
+        """独立 head_track_hand 节点在跑时返回 True。最多每 0.5 秒查一次参数。"""
+        now = time.monotonic()
+        if now - self._standalone_head_check_time < 0.5:
+            return self._standalone_head_active
+        self._standalone_head_check_time = now
+        try:
+            # Reserve the selected owner before its node finishes starting.
+            active = bool(rospy.get_param("/absolute/head_mode_service", "") ==
+                          "/head_control_node/set_head_control_mode" or
+                          rospy.get_param("/head_control_node/active", False) or
+                          rospy.get_param("/head_track_hand/active", False))
+        except Exception:
+            active = False
+        if active != self._standalone_head_active:
+            rospy.loginfo(
+                "Quest head command %s because /head_track_hand/active=%s",
+                "paused" if active else "resumed",
+                active,
+            )
+        self._standalone_head_active = active
+        return active
 
     def pub_head_motion_data(self, cur_quat):
         """发布头部运动数据（根据控制模式）"""
         if not self.enable_head_control or self._standalone_head_track_active():
             return
 
-        # VR随动模式：使用原有逻辑
-        if self.head_control_manager.mode == HeadControlMode.VR_FOLLOW:
-            try:
-                # Get the transform from Chest to Head using TF listener
-                (trans, rot) = self.listener.lookupTransform("Chest", "Head", rospy.Time(0))
+        with self._head_control_lock:
+            # VR随动模式：使用原有逻辑
+            if self.head_control_manager.mode == HeadControlMode.VR_FOLLOW:
+                try:
+                    # Get the transform from Chest to Head using TF listener
+                    (trans, rot) = self.listener.lookupTransform("Chest", "Head", rospy.Time(0))
 
-                # Convert quaternion to euler angles (roll, pitch, yaw)
-                rpy = tf.transformations.euler_from_quaternion(rot)
-                rpy_deg = [r * 180 / math.pi for r in rpy]
+                    # Convert quaternion to euler angles (roll, pitch, yaw)
+                    rpy = tf.transformations.euler_from_quaternion(rot)
+                    rpy_deg = [r * 180 / math.pi for r in rpy]
 
-                # Extract pitch (around X-axis) and yaw (around Y-axis)
-                pitch = max(min(self.normalize_degree_in_180(round(rpy_deg[0], 2)), self.head_motion_range["pitch"][1]), self.head_motion_range["pitch"][0])
-                yaw = max(min(self.normalize_degree_in_180(round(rpy_deg[1], 2)), self.head_motion_range["yaw"][1]), self.head_motion_range["yaw"][0])
+                    # Extract pitch (around X-axis) and yaw (around Y-axis)
+                    pitch = max(min(self.normalize_degree_in_180(round(rpy_deg[0], 2)), self.head_motion_range["pitch"][1]), self.head_motion_range["pitch"][0])
+                    yaw = max(min(self.normalize_degree_in_180(round(rpy_deg[1], 2)), self.head_motion_range["yaw"][1]), self.head_motion_range["yaw"][0])
 
-                msg = robotHeadMotionData()
-                msg.joint_data = [yaw, pitch]
-                self.head_data_pub.publish(msg)
+                    msg = robotHeadMotionData()
+                    msg.joint_data = [yaw, pitch]
+                    self.head_data_pub.publish(msg)
+                    self.head_control_manager.record_published_vr_head(yaw, pitch)
 
-                # Publish head pose (position set to zero)
-                head_pose_msg = PoseStamped()
-                head_pose_msg.header.stamp = rospy.Time.now()
-                head_pose_msg.header.frame_id = "Chest"
-                head_pose_msg.pose.position.x = 0.0
-                head_pose_msg.pose.position.y = 0.0
-                head_pose_msg.pose.position.z = 0.0
-                head_pose_msg.pose.orientation.x = rot[0]
-                head_pose_msg.pose.orientation.y = rot[1]
-                head_pose_msg.pose.orientation.z = rot[2]
-                head_pose_msg.pose.orientation.w = rot[3]
-                self.head_pose_pub.publish(head_pose_msg)
+                    # Publish head pose (position set to zero)
+                    head_pose_msg = PoseStamped()
+                    head_pose_msg.header.stamp = rospy.Time.now()
+                    head_pose_msg.header.frame_id = "Chest"
+                    head_pose_msg.pose.position.x = 0.0
+                    head_pose_msg.pose.position.y = 0.0
+                    head_pose_msg.pose.position.z = 0.0
+                    head_pose_msg.pose.orientation.x = rot[0]
+                    head_pose_msg.pose.orientation.y = rot[1]
+                    head_pose_msg.pose.orientation.z = rot[2]
+                    head_pose_msg.pose.orientation.w = rot[3]
+                    self.head_pose_pub.publish(head_pose_msg)
 
-            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                rospy.logerr(f"TF lookup failed for Chest->Head transform: {e}")
-                return
-        # 其他模式：由_update_head_control_from_hands()处理
+                except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+                    rospy.logerr(f"TF lookup failed for Chest->Head transform: {e}")
+                    return
+            # 其他模式：由_update_head_control_from_hands()处理
 
     def pub_chest_motion_data(self, cur_quat):
         try:
@@ -484,23 +530,27 @@ class Quest3BoneFramePublisher:
 
     def _update_head_control_from_hands(self):
         """从机器人本体手部末端TCP位置更新头部控制"""
-        if not self.enable_head_control or self._standalone_head_track_active():
+        if self._standalone_head_track_active():
             return
-        # 获取机器人本体左右手末端TCP位置（相对于base_link）
-        left_tcp_pos, right_tcp_pos = self._get_robot_hand_tcp_positions()
+        with self._head_control_lock:
+            # The service may have changed mode since the auxiliary loop read it.
+            if self.head_control_manager.mode == HeadControlMode.VR_FOLLOW:
+                return
+            # 获取机器人本体左右手末端TCP位置（相对于base_link）
+            left_tcp_pos, right_tcp_pos = self._get_robot_hand_tcp_positions()
 
-        # 从TF树获取机器人本体头部位置（相对于base_link）
-        head_pos = self._get_robot_head_pos_from_tf()
+            # 从TF树获取机器人本体头部位置（相对于base_link）
+            head_pos = self._get_robot_head_pos_from_tf()
 
-        # 更新头部控制管理器
-        self.head_control_manager.update(
-            left_hand_tcp_pos=left_tcp_pos,
-            right_hand_tcp_pos=right_tcp_pos,
-            head_pos=head_pos  # 使用实时位置，如果为None则使用配置值
-        )
+            # 更新头部控制管理器
+            self.head_control_manager.update(
+                left_hand_tcp_pos=left_tcp_pos,
+                right_hand_tcp_pos=right_tcp_pos,
+                head_pos=head_pos  # 使用实时位置，如果为None则使用配置值
+            )
 
-        # 发布头部控制命令
-        self.head_control_manager.publish_head_command(self.head_data_pub)
+            # 发布头部控制命令
+            self.head_control_manager.publish_head_command(self.head_data_pub)
 
     def _handle_set_head_control_mode(self, req):
         """
@@ -547,9 +597,10 @@ class Quest3BoneFramePublisher:
                 fixed_hand = "right"  # 默认值，不会被使用
 
             # 设置模式
-            self.head_control_manager.set_mode(mode, fixed_hand)
-            if mode == HeadControlMode.FIXED:
-                self._pub_head_fixed_user_intent.publish(Empty())
+            with self._head_control_lock:
+                self.head_control_manager.set_mode(mode, fixed_hand)
+                if mode == HeadControlMode.FIXED:
+                    self._pub_head_fixed_user_intent.publish(Empty())
 
             response.success = True
             response.message = f"Head control mode set to: {req.mode}" + (f", fixed_hand: {fixed_hand}" if mode == HeadControlMode.FIXED_MAIN_HAND else "")
@@ -756,7 +807,7 @@ class Quest3BoneFramePublisher:
                 continue
             event, time_now = sample
             try:
-                if len(event.poses) > 25:
+                if len(event.poses) > 23:
                     root = event.poses[22].position
                     chest = event.poses[23]
                     root_position = self.convert_position_to_right_hand(
@@ -768,6 +819,20 @@ class Quest3BoneFramePublisher:
                         chest_position, self.convert_quaternion_to_right_hand(
                             (chest_q.x, chest_q.y, chest_q.z, chest_q.w)),
                         root_position, time_now)
+                if self.enable_head_control and not self._standalone_head_track_active():
+                    if self.head_control_manager.mode == HeadControlMode.VR_FOLLOW:
+                        if len(event.poses) > 25:
+                            head = event.poses[25].quaternion
+                            self.pub_head_motion_data(self.convert_quaternion_to_right_hand(
+                                (head.x, head.y, head.z, head.w)))
+                    else:
+                        # Pico may retain valid body input without a valid Head.
+                        # Fixed/hand tracking use robot feedback, not Head TF.
+                        self._update_head_control_from_hands()
+                if not self._standalone_head_track_active():
+                    self.head_control_manager.publish_head_control_mode(
+                        self.head_ctrl_mode_pub, HeadControlMode.to_string(
+                            self.head_control_manager.mode), self.head_control_manager.fixed_main_hand)
             except Exception as error:
                 rospy.logwarn_throttle(1.0, "Quest auxiliary processing: %s", error)
 

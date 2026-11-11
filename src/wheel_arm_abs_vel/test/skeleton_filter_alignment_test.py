@@ -30,11 +30,14 @@ def mapper_class(path, observer=cv):
     cls.body = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in names]
     assignments = [n for n in tree.body if isinstance(n, ast.Assign)
                    and any(isinstance(t, ast.Name) and t.id == 'bone_names' for t in n.targets)]
+    exceptions = [n for n in tree.body if isinstance(n, ast.ClassDef)
+                  and n.name == 'UndefinedArmScale']
     env = dict(vars(transforms), math=math, time=time,
                SkeletonCV=observer.SkeletonCV, mapped_rates=observer.mapped_rates,
+               runtime_probe=NS(point=lambda stage: None),
                _NATIVE=getattr(observer, '_NATIVE', None),
                bias_chest_to_base_link=[0., 0., .42])
-    exec(compile(ast.Module(body=assignments+[cls], type_ignores=[]), str(path), 'exec'), env)
+    exec(compile(ast.Module(body=assignments+exceptions+[cls], type_ignores=[]), str(path), 'exec'), env)
     env['bone_name_to_index'] = {v: i for i, v in enumerate(env['bone_names'])}
     return env['Quest3ArmInfoTransformer']
 

@@ -179,6 +179,9 @@ class FpfWorkflowTests(unittest.TestCase):
         self.args = self.args[2:]  # Exercise the default family-config selection.
         for version in ("62", "63", "500062", "500063", "210062", "310062"):
             with self.subTest(version=version):
+                target = HERE.parents[1] / f"kuavo_assets/models/biped_s{version}/urdf/biped_s{version}.urdf"
+                if not target.is_file():
+                    self.skipTest(f"完整流程需要现场部署并核对模型: {target}")
                 self.events.clear()
                 self.commands.clear()
                 self.command_configs.clear()

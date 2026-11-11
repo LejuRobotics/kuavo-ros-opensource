@@ -924,10 +924,13 @@ bool ControlDataManager::getWholeTorsoCtrl() const {
     return whole_torso_ctrl_;  // 直接返回VR全身控制模式状态
 }
 
-ArmJointTrajectory ControlDataManager::getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage) const
+ArmJointTrajectory ControlDataManager::getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage, ros::Time* receivedAt) const
 {
     std::lock_guard<std::mutex> lock(external_state_mutex_);
     ArmJointTrajectory traj = storage.data;
+    if (receivedAt != nullptr) {
+        *receivedAt = storage.timestamp;
+    }
     // disable 期间速度/力矩保持为零
     if (!prev_enable_control_.load(std::memory_order_acquire)) {
         traj.vel.setZero();
@@ -936,9 +939,9 @@ ArmJointTrajectory ControlDataManager::getJointTrajectoryWithDisableGuard(const 
     return traj;
 }
 
-ArmJointTrajectory ControlDataManager::getArmExternalControlState() const
+ArmJointTrajectory ControlDataManager::getArmExternalControlState(ros::Time* receivedAt) const
 {
-    return getJointTrajectoryWithDisableGuard(arm_external_control_state_);
+    return getJointTrajectoryWithDisableGuard(arm_external_control_state_, receivedAt);
 }
 
 ros::Time ControlDataManager::getArmExternalControlStateTimestamp() const

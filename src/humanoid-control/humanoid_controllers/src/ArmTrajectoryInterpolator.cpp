@@ -17,13 +17,14 @@ void ArmTrajectoryInterpolator::configure(const Config& config) {
 }
 
 void ArmTrajectoryInterpolator::reset(const Eigen::VectorXd& currentQ, const ros::Time& now) {
-  ensureBackend(static_cast<size_t>(currentQ.size()));
+  if (!config_.boundedCommandTracking) ensureBackend(static_cast<size_t>(currentQ.size()));
   if (backend_) {
     backend_->reset(currentQ);
   }
   smoothQ_ = currentQ;
   smoothV_ = Eigen::VectorXd::Zero(currentQ.size());
   lastTargetStamp_ = now;
+  lastPredictionStamp_ = now;
   hasLastAppliedTargetSeq_ = false;
   initialized_ = true;
 }
@@ -31,6 +32,11 @@ void ArmTrajectoryInterpolator::reset(const Eigen::VectorXd& currentQ, const ros
 void ArmTrajectoryInterpolator::ingestRawTarget(const ros::Time& now, const Eigen::VectorXd& targetQ,
                                                 const Eigen::VectorXd& targetV) {
   if (targetQ.size() == 0 || !isFiniteVector(targetQ)) {
+    return;
+  }
+  // now is the actual receive time, not the time of a control-loop cache read.
+  // Only a new receipt may refresh freshness or create a new measurement.
+  if (now.isZero() || (hasTarget_ && !target_.msgStamp.isZero() && now <= target_.msgStamp)) {
     return;
   }
 
@@ -74,6 +80,11 @@ void ArmTrajectoryInterpolator::ingestRawTarget(const ros::Time& now, const Eige
       lastRawTargetV_.size() != mergedTargetV.size() ||
       (mergedTargetV - lastRawTargetV_).cwiseAbs().maxCoeff() > std::max(1e-9, config_.targetChangeEps);
   if (!targetChanged) {
+    // A repeated valid command is still fresh input, even without a new measurement.
+    if (hasTarget_) {
+      target_.msgStamp = now;
+      lastTargetStamp_ = now;
+    }
     return;
   }
 
@@ -103,6 +114,10 @@ void ArmTrajectoryInterpolator::pushTarget(const TargetSample& sample) {
   }
   if (sample.hasTargetV && sample.targetV.size() != sample.targetQ.size()) {
     ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] ignore mismatched targetV size");
+    return;
+  }
+  if (sample.hasTargetV && !isFiniteVector(sample.targetV)) {
+    ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] ignore non-finite targetV");
     return;
   }
   if (hasLatestTargetSeq_ && sample.msgSeq <= latestTargetSeq_) {
@@ -154,6 +169,7 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
   }
 
   if (!hasTarget_) {
+    lastPredictionStamp_ = now;
     out.valid = true;
     return out;
   }
@@ -165,12 +181,42 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
 
   out.timeout = !target_.msgStamp.isZero() && (now - target_.msgStamp).toSec() > config_.timeoutSec;
   if (out.timeout) {
+    // Hold position with zero velocity, including the backend's recovery state.
+    reset(smoothQ_, now);
+    out.smoothQ = smoothQ_;
+    out.smoothV = smoothV_;
     out.valid = true;
     return out;
   }
 
-  ensureBackend(static_cast<size_t>(currentQ.size()));
-  if (!backend_) {
+  if (!config_.boundedCommandTracking) ensureBackend(static_cast<size_t>(currentQ.size()));
+  if (!config_.boundedCommandTracking && !backend_) {
+    out.valid = true;
+    return out;
+  }
+
+  const double elapsedSec = (now - lastPredictionStamp_).toSec();
+  if (!std::isfinite(elapsedSec) || elapsedSec <= 0.0) {
+    lastPredictionStamp_ = now;
+    out.valid = true;
+    return out;
+  }
+  // Bound recovery after a scheduler stall; never extrapolate a long gap in one cycle.
+  const double predictionDt = std::min(elapsedSec, 0.02);
+  lastPredictionStamp_ = now;
+
+  if (config_.boundedCommandTracking) {
+    if (!std::isfinite(config_.kalmanVLimit) || config_.kalmanVLimit <= 0.0 ||
+        !std::isfinite(config_.commandAccelerationLimit) || config_.commandAccelerationLimit <= 0.0 ||
+        !std::isfinite(config_.commandTrackingFrequency) || config_.commandTrackingFrequency <= 0.0 ||
+        !std::isfinite(config_.commandTrackingDamping) || config_.commandTrackingDamping < 1.0) {
+      ROS_ERROR_THROTTLE(1.0, "[ArmTrajectoryInterpolator] Invalid command tracking limits; hold position");
+      smoothV_.setZero();
+    } else {
+      trackBoundedCommand(now, predictionDt);
+    }
+    out.smoothQ = smoothQ_;
+    out.smoothV = smoothV_;
     out.valid = true;
     return out;
   }
@@ -208,14 +254,14 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
   Eigen::VectorXd nextQ = smoothQ_;
   Eigen::VectorXd nextV = smoothV_;
   if (hasNewTarget) {
-    if (!backend_->step(nextQ, nextV)) {
+    if (!backend_->step(nextQ, nextV, predictionDt)) {
       ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend step failed (%s), hold previous output",
                         backend_->statusMessage().c_str());
       out.valid = true;
       return out;
     }
   } else {
-    if (!backend_->predict(nextQ, nextV)) {
+    if (!backend_->predict(nextQ, nextV, predictionDt)) {
       ROS_WARN_THROTTLE(1.0, "[ArmTrajectoryInterpolator] backend predict failed (%s), hold previous output",
                         backend_->statusMessage().c_str());
       out.valid = true;
@@ -231,6 +277,8 @@ ArmTrajectoryInterpolator::Output ArmTrajectoryInterpolator::compute(
   // Update smoothed command state from Kalman backend.
   smoothQ_ = nextQ;
   smoothV_ = nextV;
+  out.smoothQ = smoothQ_;
+  out.smoothV = smoothV_;
   if (backend_) {
     const uint64_t predictCount = backend_->predictCount();
     const uint64_t updateCount = backend_->updateCount();
@@ -253,6 +301,39 @@ bool ArmTrajectoryInterpolator::isFiniteVector(const Eigen::VectorXd& vec) {
     }
   }
   return true;
+}
+
+void ArmTrajectoryInterpolator::trackBoundedCommand(const ros::Time& now, double elapsedSec) {
+  const Eigen::VectorXd rawV = target_.hasTargetV ? target_.targetV
+                                               : Eigen::VectorXd::Zero(target_.targetQ.size());
+  const double wn = config_.commandTrackingFrequency;
+  // Small integration steps preserve damping under irregular controller scheduling.
+  const int steps = std::max(1, static_cast<int>(std::ceil(elapsedSec / 0.001)));
+  const double dt = elapsedSec / steps;
+  for (int step = 0; step < steps; ++step) {
+    const double age = std::max(0.0, (now - target_.msgStamp).toSec() -
+                                        elapsedSec + (step + 1) * dt);
+    // Short of timeoutSec (handled in compute()), coast at the last command
+    // velocity like 1.4.0 ultra-fast passthrough. Do not start braking after
+    // one referenceUpdatePeriod: a 30–57 ms SHM hole would otherwise reach
+    // v=0 by two periods (~20 ms) and then catch up at the accel clamp.
+    // A new frame reconnects through that same clamp. Only a true timeout
+    // holds pose and immediately zeros velocity.
+    const double projectionTime = age;
+    for (Eigen::Index i = 0; i < smoothQ_.size(); ++i) {
+      const double refQ = target_.targetQ[i] + rawV[i] * projectionTime;
+      const double refV = rawV[i];
+      const double acceleration = std::clamp(
+          wn * wn * (refQ - smoothQ_[i]) +
+              2.0 * config_.commandTrackingDamping * wn * (refV - smoothV_[i]),
+          -config_.commandAccelerationLimit, config_.commandAccelerationLimit);
+      const double nextV = std::clamp(smoothV_[i] + acceleration * dt,
+                                     -config_.kalmanVLimit, config_.kalmanVLimit);
+      // Integrate the same bounded velocity sent to the controller.
+      smoothQ_[i] += 0.5 * (smoothV_[i] + nextV) * dt;
+      smoothV_[i] = nextV;
+    }
+  }
 }
 
 bool ArmTrajectoryInterpolator::isEnabled(const ModeFlags& modeFlags) const {

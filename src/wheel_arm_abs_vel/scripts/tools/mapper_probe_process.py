@@ -13,6 +13,9 @@ class ProbeProcess:
     def submit(self,frame,serial_drops=0,serial_errors=0):
         data=[1,os.getpid(),frame['tid'],frame['serial'],frame['session'],frame['generation'],frame['sequence'],frame['source_ms'],self.dropped+serial_drops,self.errors+serial_errors,frame['overflow'],len(frame['points'])]
         for row in frame['points']: data.extend(row)
+        # IPC v2 adds an entry diagnostic; the public runtime v1 stays unchanged.
+        data[0]=2
+        data.extend([1,os.getpid(),frame['tid'],frame['serial'],*frame['entry'],self.dropped+serial_drops])
         payload=struct.pack('<%dd'%len(data),*data)
         try:
             if len(payload)>8192: raise ValueError('oversized probe')
@@ -49,6 +52,7 @@ def worker(fd,parent_pid):
     sock=socket.socket(fileno=fd)
     rospy.init_node('mapper_probe_worker_'+str(parent_pid),disable_signals=True)
     pub=rospy.Publisher('/whole_body_velocity_ik/diagnostics/mapper_runtime_probe_v1',Float64MultiArray,queue_size=32)
+    gap_pub=rospy.Publisher('/whole_body_velocity_ik/diagnostics/mapper_input_gap_v1',Float64MultiArray,queue_size=32)
     ident=rospy.Publisher('/whole_body_velocity_ik/diagnostics/mapper_thread_identity_v1',String,queue_size=1,latch=True)
     next_identity=0.
     while not rospy.is_shutdown():
@@ -61,7 +65,12 @@ def worker(fd,parent_pid):
         if len(payload)>8192 or len(payload)%8:continue
         data=array.array('d');data.frombytes(payload)
         if sys.byteorder!='little':data.byteswap()
-        if len(data)<12 or len(data)!=12+7*int(data[11]):continue
+        if len(data)<12:continue
+        boundary=12+7*int(data[11])
+        if data[0]==2 and len(data)==boundary+14:
+            gap_pub.publish(Float64MultiArray(data=data[boundary:].tolist()))
+            data=data[:boundary];data[0]=1
+        elif data[0]!=1 or len(data)!=boundary:continue
         pub.publish(Float64MultiArray(data=data.tolist()))
     sock.close()
 

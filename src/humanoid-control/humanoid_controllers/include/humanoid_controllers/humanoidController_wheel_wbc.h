@@ -395,6 +395,7 @@ namespace humanoidController_wheel_wbc
     bool isArmControlModeChanged_{false};  // 是否需要处理模式切换
     bool arm_mode_switch_hold_phase_{true};  // 是否处于200ms保持阶段
     double arm_move_spd_{15.0};  // 手臂移动速度
+    double arm_reset_speed_rad_s_{0.7};  // 仅 2 -> 1 复位，单位 rad/s
     double arm_mode_switch_start_time_{0.0};  // 模式切换开始时间
     vector_t init_arm_target_qpos_;
     bool enable_arm_traj_interpolator_{false};  // 手臂轨迹插补增强开关（默认关闭，保持旧行为）

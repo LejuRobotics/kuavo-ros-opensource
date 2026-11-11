@@ -5,6 +5,9 @@
 
 namespace lejuclaw_can {
 struct LeJuClawCanTestAccess {
+    static auto stamp(const LeJuClawCan& claw) {return claw.last_stream_command_time_;}
+    static int timeout(const LeJuClawCan& claw) {return claw.cfg_STREAM_WATCHDOG_TIMEOUT_MS;}
+    static bool armed(const LeJuClawCan& claw) {return claw.stream_watchdog_armed_;}
     static void add(LeJuClawCan& claw, uint8_t id) {
         motorevo::RevoMotorConfig_t config{};
         config.id=id; config.ignore=false;
@@ -105,4 +108,18 @@ TEST(ClawFeedback, IdleTargetsRefreshAtBoundedRateAndEnqueueFailuresAreCounted) 
     EXPECT_LE(health.tx_attempts,static_cast<uint64_t>(elapsed/50+1));
     EXPECT_EQ(health.tx_attempts,health.tx_enqueue_failures);
     EXPECT_FALSE(health.fresh);
+}
+
+TEST(ClawMailboxDeadline, ConsumingAnOldFrameCannotRenewTheLease) {
+    // No CAN initialization, ports or motor writes.
+    LeJuClawCan claw;
+    auto arrival=std::chrono::steady_clock::now()-std::chrono::milliseconds(20);
+    EXPECT_NE(claw.refresh_stream_watchdog(arrival),0u);
+    EXPECT_EQ(LeJuClawCanTestAccess::stamp(claw),arrival);
+    auto expired=std::chrono::steady_clock::now()-std::chrono::milliseconds(LeJuClawCanTestAccess::timeout(claw)+1);
+    EXPECT_EQ(claw.refresh_stream_watchdog(expired),0u);
+    EXPECT_EQ(LeJuClawCanTestAccess::stamp(claw),arrival);
+    claw.disarm_stream_watchdog();
+    EXPECT_EQ(claw.refresh_stream_watchdog(expired),0u);
+    EXPECT_FALSE(LeJuClawCanTestAccess::armed(claw));
 }
