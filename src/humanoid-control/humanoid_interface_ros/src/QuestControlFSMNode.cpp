@@ -584,6 +584,21 @@ namespace ocs2
                 return;
             }
 
+            // VMP 的腰跟着全身参考走，偏离零位不是未结束的 VR 转腰。
+            // 只在当前正按着转腰键时挡住切换，松手后不必等腰关节回到 3° 内。
+            if (isVmpControllerActive())
+            {
+                if (isWaistTurnCommandActive())
+                {
+                    waist_amp_switch_guard_active_ = true;
+                    waist_near_zero_since_ = ros::Time(0);
+                    return;
+                }
+                waist_amp_switch_guard_active_ = false;
+                waist_near_zero_since_ = ros::Time(0);
+                return;
+            }
+
             if (isWaistTurnCommandActive())
             {
                 waist_amp_switch_guard_active_ = true;
@@ -1314,8 +1329,7 @@ namespace ocs2
                         arm_collision_control_ = false;
                         return;
                     }
-                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_dual_feed_
-                        && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                    if (incrementalArmModeTransitionBlocksXa()) {
                         ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
@@ -1544,8 +1558,7 @@ namespace ocs2
                         arm_collision_control_ = false;
                         return;
                     }
-                    if (use_cpp_incremental_ik_ && arm_ctrl_mode_dual_feed_
-                        && arm_ctrl_mode_current_ != arm_ctrl_mode_) {
+                    if (incrementalArmModeTransitionBlocksXa()) {
                         ROS_WARN_THROTTLE(1.0, "[QuestControlFSM] arm mode transition is in progress, ignore X+A.");
                         return;
                     }
@@ -1735,6 +1748,33 @@ namespace ocs2
         {
             std::lock_guard<std::mutex> lock(active_controller_name_mutex_);
             return active_controller_name_ == "more_controller";
+        }
+
+        bool isVmpControllerActive()
+        {
+            std::lock_guard<std::mutex> lock(active_controller_name_mutex_);
+            return active_controller_name_ == "vmp_controller";
+        }
+
+        bool isMpcControllerActive()
+        {
+            std::lock_guard<std::mutex> lock(active_controller_name_mutex_);
+            return active_controller_name_.empty() || active_controller_name_ == "mpc";
+        }
+
+        // MPC 用 [current, desired] 表示手臂模式交接。RL/VMP 期间 MPC 暂停，current 会停住，
+        // 交接永不结束。这时仍要让 X+A 按 desired 在复位(1)和增量跟随(2)之间切换。
+        bool incrementalArmModeTransitionBlocksXa()
+        {
+            if (!use_cpp_incremental_ik_ || !arm_ctrl_mode_dual_feed_)
+            {
+                return false;
+            }
+            if (arm_ctrl_mode_current_ == arm_ctrl_mode_)
+            {
+                return false;
+            }
+            return isMpcControllerActive();
         }
         
         bool useLegacyWheelVr() const

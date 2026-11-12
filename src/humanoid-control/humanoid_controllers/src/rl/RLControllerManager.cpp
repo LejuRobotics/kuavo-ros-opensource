@@ -922,9 +922,14 @@ namespace humanoid_controller
           ? 1
           : new_controller->getArmControlModeOnControllerActivate();
 
+      // 从 MPC 直接进 VMP 时，增量会话和手臂还在同一个姿势，不要重开。
+      // 从 AMP 等已经把手臂复位的控制器进来时，旧会话仍停在复位前的姿势，必须重开。
+      const bool restart_incremental_ik =
+          arm_mode_on_activate == 2 && current_before != "mpc";
       changeArmCtrlModeAsync(
           arm_mode_on_activate,
-          entering_more_controller ? to_controller : "");
+          entering_more_controller ? to_controller : "",
+          restart_incremental_ik);
     }
     if (current_before != to_controller)
     {
@@ -1175,7 +1180,19 @@ namespace humanoid_controller
     return false;
   }
 
-  void RLControllerManager::changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name)
+  void RLControllerManager::publishQuestArmMode(int mode)
+  {
+    if (!quest_arm_mode_pub_)
+    {
+      return;
+    }
+    std_msgs::Int32 msg;
+    msg.data = mode;
+    quest_arm_mode_pub_.publish(msg);
+  }
+
+  void RLControllerManager::changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name,
+                                                    bool restart_incremental_ik)
   {
     // 如果还没有初始化 NodeHandle，则无法调用服务
     if (!nh_ptr_)
@@ -1184,10 +1201,16 @@ namespace humanoid_controller
       return;
     }
 
-    std::thread([this, mode, expected_controller_name]()
+    std::thread([this, mode, expected_controller_name, restart_incremental_ik]()
     {
       try
       {
+        // VMP 切入外部手臂前先让增量 IK 退出旧会话。否则它会一直发布切控制器之前的姿势。
+        if (restart_incremental_ik && mode == 2)
+        {
+          publishQuestArmMode(1);
+        }
+
         ros::NodeHandle nh = *nh_ptr_;
         kuavo_msgs::changeArmCtrlMode srv;
         srv.request.control_mode = mode;
@@ -1235,6 +1258,7 @@ namespace humanoid_controller
         {
           if (srv.response.result)
           {
+            publishQuestArmMode(mode);
             ROS_INFO("[RLControllerManager] Successfully changed arm control mode to %d", mode);
           }
           else
@@ -1602,6 +1626,7 @@ namespace humanoid_controller
                      robot_action_active_timeout_, robot_action_active_timeout_);
     robot_action_active_timeout_ = std::max(0.1, robot_action_active_timeout_);
     controller_switch_event_pub_ = nh.advertise<kuavo_msgs::ControllerSwitchEvent>("/humanoid_controller/controller_switch_event", 1, true);
+    quest_arm_mode_pub_ = nh.advertise<std_msgs::Int32>("/quest3/triger_arm_mode", 10, false);
     depth_history_status_pub_ = nh.advertise<std_msgs::Int32>("/humanoid_controller/depth_history_status", 1, true);
 
     // [根因修复] 所有 DanceController 共用一份 dance_trajectory_state publisher

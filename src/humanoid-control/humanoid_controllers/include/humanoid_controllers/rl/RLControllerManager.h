@@ -490,7 +490,9 @@ namespace humanoid_controller
      * @brief 异步切换手臂控制模式
      * @param mode 目标手臂控制模式
      */
-    void changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name = "");
+    void changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name = "",
+                                 bool restart_incremental_ik = false);
+    void publishQuestArmMode(int mode);
 
     /**
      * @brief 加载 depth_loco_controller 切换前检查的 ROS 参数
@@ -664,6 +666,7 @@ namespace humanoid_controller
     ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
     ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
+    ros::Publisher quest_arm_mode_pub_;              ///< 同步增量 IK 的 /quest3/triger_arm_mode
     ros::Publisher depth_history_status_pub_;        ///< 深度历史话题检查状态发布器
     /// 舞蹈轨迹状态发布器（所有 DanceController 共用一份，避免启动期 race）
     ros::Publisher dance_trajectory_state_pub_;

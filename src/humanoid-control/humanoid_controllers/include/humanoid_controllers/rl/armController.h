@@ -500,6 +500,8 @@ private:
     // 由控制线程在新源的首个目标前比较并作废差分历史。
     std::uint64_t external_velocity_diff_owner_epoch_{0};
     bool external_target_received_;      // 是否已收到外部输入
+    // 进入外部控制后，先丢掉与当前手臂差得太远的旧目标，直到出现一帧贴近当前姿势的目标。
+    std::atomic<bool> fresh_external_target_pending_{false};
     Eigen::VectorXd buffered_mode2_target_q_; // 自动切换缓冲期缓存的最新外部目标
     Eigen::VectorXd buffered_mode2_target_v_;
     bool buffered_mode2_target_received_{false};
