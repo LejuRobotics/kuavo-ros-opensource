@@ -212,6 +212,12 @@ float64 preparation_progress
 # Reserved legacy field; false for task_contract_version=2. Natural-hang
 # startup acquires the current human target through the same constrained QP.
 bool startup_bootstrap_active
+# Same-cycle follow admission feedback. Completion requires the current
+# session's unlock path/handoff to finish and a normal IK command to be applied.
+# Execution ownership alone does not complete the first controller start.
+bool unlock_transition_complete
+# Existing input-continuity confirmation gate, exposed for explicit retry.
+bool input_confirmation_required
 # Compatibility diagnostics for the physical velocity domain.  Normal
 # tracking is solved directly in that domain and has no post-QP follower.
 float64 supervisor_lower_body_recruitment

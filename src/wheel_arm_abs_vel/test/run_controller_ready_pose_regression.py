@@ -39,7 +39,9 @@ with tempfile.TemporaryDirectory(prefix='filter-regression-') as tmp:
             else: raise RuntimeError('private master timeout')
             config = roslaunch.config.load_config_default(
                 [(str(package/'launch/quest_velocity_ik.launch'),
-                  ['robot_version:='+model])], None, verbose=False)
+                  (['robot_version:='+model] +
+                   (['ee_type:=lejuclaw', 'unlock_transition_enabled:=true']
+                    if kind == 'unlock' else [])))], None, verbose=False)
             for key, param in config.params.items(): rosparam.set_param_raw(key, param.value)
             subprocess.run([binary, kind], check=True, timeout=90)
         finally:

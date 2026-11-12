@@ -11,3 +11,7 @@ bool preparation_complete
 
 # Coordinate/session binding is available while ARMED, before execution ACTIVE.
 bool session_bound
+
+# Distinguish execution ownership from a completed first follow transition.
+bool unlock_transition_complete
+bool input_confirmation_required

@@ -112,6 +112,9 @@
   <arg name="control_finger_type" default="0" />
   <arg name="predict_gesture" default="false" />
   <arg name="ee_type" default="auto" doc="Read EndEffectorType from this robot version kuavo.json; optional explicit override" />
+  <!-- Shared dual-arm transition uses the selected model's geometry and limits. -->
+  <arg name="unlock_transition_enabled" default="$(eval int(arg('ctrl_arm_idx')) == 2)" doc="Enable the shared collision-checked transition for dual-arm control, independent of robot version and end-effector selection" />
+  <arg name="unlock_tool_radius" default="" doc="Optional flange-to-TCP capsule radius in metres; empty retains the YAML default. Set to enclose the installed end effector." />
   <arg name="sg100_enabled" default="true" doc="Allow the shared end-effector resolver to start SG100 only for heiman; false explicitly disables it" />
   <node pkg="wheel_arm_abs_vel" type="absolute_end_effector.py" name="sg100_mapper_bridge" args="--bridge --machine-mode=auto --config &quot;$(find kuavo_assets)/config/kuavo_v$(arg robot_version)/kuavo.json&quot; --ee-type=$(arg ee_type)" if="$(arg sg100_enabled)" output="screen" launch-prefix="$(eval find('wheel_arm_abs_vel') + '/scripts/whole_body_ik_runtime.sh background')" />
   <!-- 头部指令由机器端 head_control_node 发布。 -->
@@ -303,6 +306,9 @@
     <rosparam command="load" file="$(arg operating_temporal_config)" />
     <param name="joint_jerk/enabled" value="$(arg joint_jerk_enabled)" type="bool" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/teleop_continuity.yaml" />
+    <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/unlock_joint_transition.yaml" />
+    <param name="unlock_transition_enabled" value="$(arg unlock_transition_enabled)" type="bool" />
+    <param name="unlock_tool_radius" value="$(arg unlock_tool_radius)" type="double" if="$(eval arg('unlock_tool_radius') != '')" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/execution_governor.yaml" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/s6_motion_profile.yaml" ns="s6_motion_profile" />
     <param name="s6_motion_profile/enabled" value="$(arg s6_motion_profile)" type="bool" />
