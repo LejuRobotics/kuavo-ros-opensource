@@ -6,7 +6,7 @@ unlock_joint_acceleration: 12.0    # rad/s^2, also capped by each joint's limits
 unlock_joint_jerk: 150.0          # rad/s^3, trajectory and execution command
 unlock_preview_tracking_lag: 0.04 # seconds; actual feedback remains guarded
 unlock_planning_timeout: 5.0      # background planning deadline, seconds
-unlock_handoff_duration: 0.18     # minimum join; grows with live target displacement
+unlock_handoff_duration: 0.18     # minimum Cartesian blend after a planned unlock path
 # Flange-to-TCP capsule radius; the URDF TCP marker alone does not describe
 # the installed tool. Override unlock_tool_radius for a different tool envelope.
 unlock_tool_radius: 0.06

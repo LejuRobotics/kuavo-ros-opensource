@@ -35,6 +35,16 @@ class InputContinuity {
     seen_=false; interrupted=true; stable=false; good_since_=-1.; frames_=0;
     budget=0.; phase=confirmation_required ? InputPhase::Confirm : InputPhase::Braking;
   }
+  // Qualify incoming samples during an admitted ready-pose operation. The
+  // explicit button and ACTIVE contract still grant motion. A real input
+  // loss or coordinate confirmation must go through normal recovery.
+  void observePrepared(double now, uint64_t observation) {
+    observe(now, observation, true);
+    seen_=false;
+    interrupted=!stable;
+    budget=0.;
+    phase=confirmation_required ? InputPhase::Confirm : InputPhase::Braking;
+  }
   void update(double now, double age, uint64_t observation, bool admitted,
               bool confirm, bool stopped, bool automatic_hold_enabled=true) {
     const bool fresh=admitted && std::isfinite(age) && age>=0 && age<=config.grace;
@@ -42,13 +52,7 @@ class InputContinuity {
     // No observation at startup is not itself a previously active lost link.
     if (automatic_hold_enabled && config.hold_on_timeout && seen_ && (!std::isfinite(age) || age>=config.lost)) confirmation_required=true;
     if (admitted && std::isfinite(age)) seen_=true;
-    if (!fresh) { good_since_=-1.; frames_=0; stable=false; }
-    else if (observation!=last_observation_) {
-      if (good_since_<0) good_since_=now;
-      ++frames_;
-      stable=frames_>=config.recovery_frames && now-good_since_>=config.recovery;
-    }
-    last_observation_=observation;
+    observe(now, observation, fresh);
     // After startup the operator can opt out of automatic pause/re-confirmation.
     // The callback still admits only finite poses from the configured source and
     // never borrows a cache across a transaction/coordinate identity change.
@@ -79,6 +83,15 @@ class InputContinuity {
   }
   bool canTrack() const { return phase==InputPhase::Fresh || phase==InputPhase::Degraded; }
  private:
+  void observe(double now, uint64_t observation, bool fresh) {
+    if (!fresh) { good_since_=-1.; frames_=0; stable=false; }
+    else if (observation!=last_observation_) {
+      if (good_since_<0) good_since_=now;
+      ++frames_;
+      stable=frames_>=config.recovery_frames && now-good_since_>=config.recovery;
+    }
+    last_observation_=observation;
+  }
   bool seen_=false;
   double good_since_=-1.;
   int frames_=0;

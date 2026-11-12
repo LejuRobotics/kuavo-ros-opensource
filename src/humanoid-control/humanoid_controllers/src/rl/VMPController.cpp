@@ -866,20 +866,8 @@ namespace humanoid_controller
 
   int VMPController::getArmControlModeOnControllerActivate() const
   {
-    if (arm_command_replacement_enabled_ && enable_online_vr_mode_)
-      return 2;
+    // full_body / upper_body 都从复位模式进入。增量遥操由 X+A 再切到外部控制。
     return 1;
-  }
-
-  void VMPController::activateExternalArmControlIfNeeded()
-  {
-    if (!arm_command_replacement_enabled_ || !enable_online_vr_mode_ || !arm_controller_)
-      return;
-    if (arm_controller_->getMode() == 2)
-      return;
-    arm_controller_->changeMode(2);
-    ROS_INFO("[%s] Auto-switched arm to external mode (2) for online teleoperation",
-             name_.c_str());
   }
 
 void VMPController::resume()
@@ -1379,7 +1367,6 @@ void VMPController::resume()
                name_.c_str(), new_read_index, write_idx, future_frames, offset,
                static_cast<float>(offset) * 1000.0 / online_update_rate_);
     }
-    activateExternalArmControlIfNeeded();
   }
 
   void VMPController::pause()

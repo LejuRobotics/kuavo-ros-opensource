@@ -162,6 +162,7 @@ void ArmController::reset()
     external_target_q_ = current_arm_pos_;
     external_target_v_.setZero();
     external_target_received_ = false;
+    fresh_external_target_pending_.store(false);
     buffered_mode2_target_q_ = current_arm_pos_;
     buffered_mode2_target_v_.setZero();
     buffered_mode2_target_received_ = false;
@@ -1332,8 +1333,9 @@ void ArmController::applyModeChange(int target_mode, bool force_interpolation_to
     }
     resetExternalVelocityDiff();
 
-    // 尚未收到外部目标
+    // 尚未收到外部目标。切入前缓存的旧遥操姿势不能直接当成新目标。
     external_target_received_ = false;
+    fresh_external_target_pending_.store(true);
     
     // 3. 标记开始插值阶段
     is_interpolating_ = true;
@@ -1887,6 +1889,27 @@ void ArmController::updateExternalControl(double dt)
       arm_joint_vel_filter_.reset(Eigen::VectorXd::Zero(joint_arm_num_));
     }
     external_velocity_diff_owner_epoch_ = owner_epoch;
+  }
+
+  // 旧增量会话会继续发布切走之前的姿势。贴近当前测量才开始跟踪，避免一进外部控制就抬回旧姿势。
+  if (target_received && fresh_external_target_pending_.load(std::memory_order_acquire))
+  {
+    const bool near_current_pose =
+        current_arm_pos_.size() == raw_target_q.size() &&
+        raw_target_q.allFinite() &&
+        (raw_target_q - current_arm_pos_).lpNorm<Eigen::Infinity>() <= 0.35;
+    if (!near_current_pose)
+    {
+      target_received = false;
+      std::lock_guard<std::mutex> input_owner_lock(external_input_owner_mutex_);
+      std::lock_guard<std::mutex> target_lock(external_target_mutex_);
+      external_target_received_ = false;
+    }
+    else
+    {
+      fresh_external_target_pending_.store(false, std::memory_order_release);
+      ROS_INFO("[ArmController] External target matches the current arm pose, start tracking");
+    }
   }
 
   // 外部控制模式

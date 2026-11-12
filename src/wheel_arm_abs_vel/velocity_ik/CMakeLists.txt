@@ -134,13 +134,18 @@ add_test(NAME velocity_ik_fixed_bandwidth_test COMMAND velocity_ik_fixed_bandwid
 add_executable(velocity_ik_joint_jerk_test joint_jerk_test.cpp)
 target_compile_options(velocity_ik_joint_jerk_test PRIVATE -UNDEBUG)
 add_test(NAME velocity_ik_joint_jerk_test COMMAND velocity_ik_joint_jerk_test)
-if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
+if(CATKIN_ENABLE_TESTING OR VELOCITY_IK_BUILD_OPERATING_REPLAY)
   add_executable(velocity_ik_torso_permission_test torso_permission_test.cpp)
   target_include_directories(velocity_ik_torso_permission_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})
   target_link_libraries(velocity_ik_torso_permission_test PRIVATE velocity_ik_model velocity_ik_qp ${catkin_LIBRARIES})
   if(VELOCITY_IK_CATKIN_BUILD)
     add_dependencies(velocity_ik_torso_permission_test ${VELOCITY_IK_MESSAGE_TARGETS})
   endif()
+  add_test(NAME velocity_ik_arm_follow_entry COMMAND ${PYTHON_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
+    $<TARGET_FILE:velocity_ik_torso_permission_test> 62 follow_entry)
+endif()
+if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
   foreach(model 62 63 210062 310062 400062)
     foreach(scenario normal reset_complete reset_hold reset_stale)
       add_test(NAME velocity_ik_torso_${model}_${scenario}

@@ -15,7 +15,7 @@ clock=Clock()
 ns=dict(IntEnum=IntEnum,time=clock,math=math,
     rospy=NS(loginfo=lambda *a:None,logwarn=lambda *a:None,loginfo_throttle=lambda *a:None),
     changeArmCtrlModeResponse=lambda ok,mode,message:NS(result=ok,mode=mode,message=message),
-    TeleopTcpTarget=NS(CONTROL_PREPARE=4, SOURCE_UNKNOWN=0,
+    TeleopTcpTarget=NS(CONTROL_ACTIVE=2, CONTROL_PREPARE=4, SOURCE_UNKNOWN=0,
                       SOURCE_QUEST_CONTROLLER=1, SOURCE_QUEST_HAND_TRACKING=2),
     WholeBodyIkReference=NS(AUTHORITY_ACTIVE=2),
     Int32=lambda **kw:NS(**kw))
@@ -29,6 +29,7 @@ methods={'arm_mode_callback','_admit_velocity_gesture_locked','fixed_arm_operati
     'whole_body_velocity_ik_status_callback','_queue_fixed_request_locked','_advance_fixed_request',
     '_fixed_consumer_ack_locked','_fixed_owner_callback','_fixed_enable_callback',
     '_publish_wheel_base_command', '_torso_input_ready_locked',
+    '_torso_pose_fresh_locked', '_torso_session_ready_locked',
     '_fill_subsystem_permissions_locked', '_torso_optical_input_stream_locked', '_bump_absolute_generation_locked',
     '_latch_tracking_fault_locked', '_pause_absolute_session', '_finish_absolute_session'}
 selected=[]
@@ -67,7 +68,7 @@ class FixedFollowTest(unittest.TestCase):
         clock.now=10.;n=self.n=Mapper();n._absolute_lock=threading.RLock();n._fixed_operation_mutex=threading.Lock()
         n.enable_absolute_target_alignment=n.enable_velocity_ik_takeover=True
         n._absolute_state=State.WAITING;n._absolute_mode_status=(2,2,False)
-        n._controller_start_consumed=False
+        n._controller_start_acquired=True
         n._controller_start_completed=True
         n._torso_controls=torso_module.TorsoControls("quest")
         for name in ('_absolute_gesture_running','_fixed_operation_block','_fixed_prepare_bootstrap',
@@ -99,7 +100,7 @@ class FixedFollowTest(unittest.TestCase):
         n._finish_absolute_session=finish
         n._request_absolute_hold_mode=lambda:True
         n._pause_absolute_session=lambda:setattr(n,'_absolute_state',State.RETURNING_TO_PREP)
-    def test_optical_torso_follows_without_joystick_and_stops_on_pose_loss(self):
+    def test_optical_torso_follows_without_joystick_and_keeps_mode_through_pose_loss(self):
         n=self.n
         n._tracking_session_source=n._tracking_last_accepted_source=2
         n._absolute_state=State.ACTIVE
@@ -108,16 +109,18 @@ class FixedFollowTest(unittest.TestCase):
         msg=NS()
         n._fill_subsystem_permissions_locked(msg,clock.now)
         self.assertTrue(msg.torso_control_enabled)
+        seq = msg.torso_operation_seq
         clock.now+=1.
         n._last_valid_tcp_receive=clock.now
         n._fill_subsystem_permissions_locked(msg,clock.now)
         self.assertTrue(msg.torso_control_enabled)
         clock.now+=.3
         n._fill_subsystem_permissions_locked(msg,clock.now)
-        self.assertFalse(msg.torso_control_enabled)
+        self.assertTrue(msg.torso_control_enabled)
         n._last_valid_tcp_receive=clock.now
         n._fill_subsystem_permissions_locked(msg,clock.now)
-        self.assertFalse(msg.torso_control_enabled)  # Recovery alone is not a follow request.
+        self.assertTrue(msg.torso_control_enabled)
+        self.assertEqual(msg.torso_operation_seq, seq)
         n._torso_controls.request_follow()
         n._fill_subsystem_permissions_locked(msg,clock.now)
         self.assertTrue(msg.torso_control_enabled)
@@ -184,7 +187,8 @@ class FixedFollowTest(unittest.TestCase):
     def ack(self,prepared=False):
         n=self.n
         m=NS(session_id=n._absolute_session_id,generation=n._absolute_generation,
-            valid=True,takeover_active=True,session_bound=True,control_state=4,preparation_complete=prepared)
+            valid=True,takeover_active=True,session_bound=True,control_state=4 if prepared else 2,preparation_complete=prepared,
+            unlock_transition_complete=True,input_confirmation_required=False)
         owner=NS(**vars(m),authority_state=2,safety_braking=False,execution_owner_instance='owner',
             generated_monotonic_ns=int(clock.now*1e9),producer_lease_deadline_ns=int((clock.now+.05)*1e9))
         n._fixed_owner_callback(owner);n.whole_body_velocity_ik_status_callback(m)
@@ -193,7 +197,7 @@ class FixedFollowTest(unittest.TestCase):
     def test_cold_start_double_triggers_and_xa_five_trials_each(self):
         for staggered in (False,True):
             for trial in range(5):
-                self.setUp();n=self.n;n._controller_start_completed=False;n._absolute_latest_measured_q=None
+                self.setUp();n=self.n;n._controller_start_acquired=n._controller_start_completed=False;n._absolute_latest_measured_q=None
                 if staggered:
                     n._controller_start_request(NS(left_trigger=.9,right_trigger=0.))
                     self.assertIsNone(n._fixed_pending_operation)
@@ -231,10 +235,13 @@ class FixedFollowTest(unittest.TestCase):
 
     def test_triggers_cannot_reopen_after_acknowledged_follow(self):
         for state in (State.WAITING, State.WAIT_RELEASE, State.PREPARED, State.PAUSED, State.ACTIVE):
-            self.setUp(); n=self.n; n._controller_start_completed=False
+            self.setUp(); n=self.n; n._controller_start_acquired=n._controller_start_completed=False
             n._controller_start_request(NS(left_trigger=.9,right_trigger=.9))
             n._advance_fixed_request(); n._absolute_state=State.ACTIVE
             self.ack(); n._advance_fixed_request()
+            self.assertTrue(n._controller_start_acquired)
+            self.assertFalse(n._controller_start_completed)
+            n._advance_fixed_request()
             self.assertTrue(n._controller_start_completed)
             n._fixed_pending_operation=None; n._absolute_state=state
             for _ in range(3):
@@ -243,27 +250,27 @@ class FixedFollowTest(unittest.TestCase):
                 self.assertIsNone(n._fixed_pending_operation)
 
     def test_rejected_first_trigger_does_not_spend_admission(self):
-        n=self.n;n._controller_start_completed=False;n._absolute_fault_hold_pending=True
+        n=self.n;n._controller_start_acquired=n._controller_start_completed=False;n._absolute_fault_hold_pending=True
         held=NS(left_trigger=.9,right_trigger=.9)
         n._controller_start_request(held)
-        self.assertFalse(n._controller_start_consumed)
+        self.assertIsNone(n._fixed_pending_operation)
+        self.assertFalse(n._controller_start_acquired)
         n._absolute_fault_hold_pending=False
         n._controller_start_request(NS(left_trigger=0.,right_trigger=0.))
         n._controller_start_request(held)
         self.assertIsNotNone(n._fixed_pending_operation)
-        self.assertTrue(n._controller_start_consumed)
+        self.assertFalse(n._controller_start_completed)
 
-
-    def test_xa_replacing_pending_prepare_spends_trigger_admission(self):
+    def test_xa_replacing_pending_prepare_does_not_complete_first_transition(self):
         n=self.n
+        n._controller_start_completed=False  # execution acquired, transition still pending
         self.assertTrue(n._fixed_arm_operation(1).result)
-        self.assertFalse(n._controller_start_consumed)
         self.assertTrue(n._fixed_arm_operation(2).result)
-        self.assertTrue(n._controller_start_consumed)
+        self.assertFalse(n._controller_start_completed)
         self.assertEqual(n._fixed_pending_operation['mode'],2)
 
     def test_timeout_before_first_follow_keeps_trigger_retry(self):
-        n=self.n;n._controller_start_completed=False;n._absolute_latest_measured_q=None
+        n=self.n;n._controller_start_acquired=n._controller_start_completed=False;n._absolute_latest_measured_q=None
         held=NS(left_trigger=.9,right_trigger=.9)
         n._controller_start_request(held)
         clock.now+=12.1;self.fresh();n._advance_fixed_request()
@@ -480,7 +487,7 @@ class FixedFollowTest(unittest.TestCase):
         self.assertEqual(n._absolute_generation,generation)
 
     def test_first_trigger_retries_mutex_contention_without_new_edge(self):
-        n=self.n;n._controller_start_completed=False;held=NS(left_trigger=.9,right_trigger=.9)
+        n=self.n;n._controller_start_acquired=n._controller_start_completed=False;held=NS(left_trigger=.9,right_trigger=.9)
         n._fixed_operation_mutex.acquire()
         n._controller_start_request(held);self.assertIsNone(n._fixed_pending_operation)
         n._fixed_operation_mutex.release()
@@ -528,6 +535,25 @@ class FixedFollowTest(unittest.TestCase):
         self.assertEqual(n._absolute_state,State.PREPARED)
         self.assertTrue(n._fixed_arm_operation(2).result);n._advance_fixed_request()
         self.assertEqual(n._absolute_state,State.SWITCHING)
+    def test_warm_xa_requires_new_binding_but_reuses_fresh_mode(self):
+        n=self.n; self.start(1); n._absolute_state=State.RETURNING_TO_PREP
+        self.ack(True); n._advance_fixed_request()
+        self.assertTrue(n._fixed_arm_operation(2).result)
+        self.assertEqual(n._absolute_state, State.SWITCHING)
+        n._request_absolute_external_mode=lambda *_: self.fail('redundant mode RPC')
+        n._velocity_session_cycle(n._absolute_state,n._absolute_generation)
+        self.assertEqual(n._absolute_state, State.SWITCHING)  # previous generation
+        self.ack()
+        n._velocity_session_cycle(n._absolute_state,n._absolute_generation)
+        self.assertEqual(n._absolute_state, State.ACTIVE)
+
+    def test_warm_xa_refreshes_stale_mode_readback(self):
+        n=self.n; self.start(1); n._absolute_state=State.RETURNING_TO_PREP
+        self.ack(True); n._advance_fixed_request(); n._absolute_mode_status_time=clock.now-.2
+        self.assertTrue(n._fixed_arm_operation(2).result)
+        self.assertIsNone(n._absolute_mode_request_time)
+        self.assertEqual(n._absolute_state,State.SWITCHING)
+
     def test_callback_while_waiting_for_lock_is_not_stream_loss(self):
         self.start(1);n=self.n
         class CallbackBeforeLock:

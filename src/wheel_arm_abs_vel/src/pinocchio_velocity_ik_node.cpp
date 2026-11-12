@@ -520,6 +520,7 @@ class PinocchioVelocityIk {
     bool manual_lower{false};
     uint64_t diagnostic_tick{0};
     bool catchup_correction=false;
+    bool arm_entry=false;
     double acquisition_blend=1.;
     double input_budget=1.;
     TargetSnapshot target;
@@ -1108,6 +1109,9 @@ class PinocchioVelocityIk {
     pnh_.param("continuity/lost", input_continuity_.config.lost, .500);
     pnh_.param("continuity/recovery", input_continuity_.config.recovery, .100);
     pnh_.param("continuity/recovery_frames", input_continuity_.config.recovery_frames, 3);
+    pnh_.param("arm_follow_entry/duration", entry_duration_, .55);
+    pnh_.param("arm_follow_entry/joint_speed", entry_speed_, 1.0);
+    pnh_.param("arm_follow_entry/ready_rate_scale", ready_entry_rate_scale_, 1.0);
     pnh_.param("acquisition/joint_speed", acquisition_joint_speed_, .80);
     pnh_.param("acquisition/linear_speed", acquisition_linear_speed_, .40);
     pnh_.param("acquisition/angular_speed", acquisition_angular_speed_, 1.20);
@@ -1117,7 +1121,7 @@ class PinocchioVelocityIk {
     pnh_.param("acquisition/settle", acquisition_.settle, .10);
     pnh_.param("acquisition/release", acquisition_.release, 1.);
     if (!input_continuity_.config.valid()) throw std::runtime_error("invalid continuity timing");
-    for (double x : {acquisition_joint_speed_, acquisition_linear_speed_,
+    for (double x : {entry_duration_, entry_speed_, ready_entry_rate_scale_, acquisition_joint_speed_, acquisition_linear_speed_,
          acquisition_angular_speed_, acquisition_acceleration_, acquisition_position_tolerance_,
          acquisition_rotation_tolerance_, acquisition_.settle, acquisition_.release})
       if (!std::isfinite(x) || x<=0) throw std::runtime_error("invalid acquisition limit");
@@ -4984,6 +4988,122 @@ class PinocchioVelocityIk {
     return bits;
   }
 
+  // Legacy mode-2 joint interpolation: start at the executing arm reference,
+  // keep updating the endpoint, and use one progress value for both arms.
+  // Only a new follow operation captures a start; ordinary VR frames do not.
+  bool beginOrContinueArmEntry(const TargetSnapshot& target, uint64_t base_epoch,
+                               bool following, const DecisionVector& q) {
+    if (!following) {
+      if (entry_active_) entry_key_valid_ = false;
+      entry_active_ = false;
+      return false;
+    }
+    const std::array<uint64_t,5> key{{target.session_id, target.generation,
+        target.body.coordinate_epoch, base_epoch, target.arm_operation_seq}};
+    if (!entry_key_valid_ || key != entry_key_) {
+      entry_key_ = key;
+      entry_key_valid_ = true;
+      entry_active_ = true;
+      entry_progress_ = entry_tail_time_ = 0.;
+      entry_start_q_ = entry_goal_q_ = q;
+    }
+    return entry_active_;
+  }
+
+  bool calculateArmEntryTerms(const SolverRequest& request, DecisionMatrix* h,
+      DecisionVector* g, DecisionMatrix* j, DecisionVector* v,
+      std::array<double,6>* error) {
+    if (!request.target.arm_target_torso_relative) return false;
+    const int n = decisionDofCount();
+    // The mapped input is a pair of TCP poses, not a legacy 14-angle message.
+    // One warm-started damped IK update per arm/tick supplies those endpoints.
+    // No waypoint search, waiting for convergence or whole-body pose solve.
+    DecisionVector seed = request.reference_q;
+    for (int a=0; a<kArmCount; ++a) if (armIsControlled(a))
+      for (int k=0; k<kJointsPerArm; ++k) {
+        const int i=armDecisionIndex(a,k);
+        seed[i]=entry_goal_q_[i];
+      }
+    setPlantDecisionPositions(seed);
+    const auto& torso=plant_->GetFrameByName(torso_frame_name_);
+    double largest=0.;
+    int rows=0;
+    for (int a=0; a<kArmCount; ++a) {
+      if (!armIsControlled(a)) continue;
+      const auto& goal=request.target.arm[a];
+      const auto& hand=hand_frame_names_[a];
+      const auto pose=plant_->GetFrameByName(hand).CalcPose(*plant_context_,torso);
+      const auto jp=selectArmColumns(frameTranslationJacobianRelative(hand,torso_frame_name_),a);
+      const auto jr=selectArmColumns(frameAngularJacobianRelative(hand,torso_frame_name_),a);
+      const Eigen::Vector3d ep=goal.hand_position-pose.translation();
+      const Eigen::Vector3d er=rotationLog(goal.hand_orientation.toRotationMatrix()*pose.rotation().matrix().transpose());
+      const double wr=hand_orientation_weight_*std::pow(feasibility_characteristic_length_,2);
+      using M7=Eigen::Matrix<double,kJointsPerArm,kJointsPerArm>;
+      M7 normal=hand_position_weight_*jp.transpose()*jp + wr*jr.transpose()*jr;
+      Vector7d rhs=hand_position_weight_*jp.transpose()*ep + wr*jr.transpose()*er;
+      if (goal.elbow_valid) {
+        const auto& elbow=elbow_frame_names_[a];
+        const auto je=selectArmColumns(frameTranslationJacobianRelative(elbow,torso_frame_name_),a);
+        const Eigen::Vector3d ee=goal.elbow_position-plant_->GetFrameByName(elbow).CalcPose(*plant_context_,torso).translation();
+        const double we=elbowPositionWeight(request.target,a)*(1.-smoothStep01((ep.norm()-.05)/.15));
+        normal.noalias()+=we*je.transpose()*je;
+        rhs.noalias()+=we*je.transpose()*ee;
+      }
+      normal.diagonal().array()+=.001*hand_position_weight_;
+      const Vector7d step=normal.ldlt().solve(rhs);
+      if (!step.allFinite()) return false;
+      // This is a bounded numerical iteration on the virtual endpoint only.
+      const double scale=std::min(1.,.10/std::max(1e-12,step.cwiseAbs().maxCoeff()));
+      for (int k=0; k<kJointsPerArm; ++k) {
+        const int i=armDecisionIndex(a,k);
+        entry_goal_q_[i]=std::clamp(seed[i]+scale*step[k],
+            position_lower_[i]+position_limit_margin_+boundary_brake_guard_,
+            position_upper_[i]-position_limit_margin_-boundary_brake_guard_);
+        largest=std::max(largest,std::abs(entry_goal_q_[i]-entry_start_q_[i]));
+      }
+      rows+=kJointsPerArm;
+    }
+    // Farther poses take longer. The clock never waits for the operator to
+    // stop moving, or for the virtual IK/elbow residual to cross a threshold.
+    const double speed=entry_speed_*entry_rate_scale_;
+    const double min_duration=entry_duration_/entry_rate_scale_;
+    const double duration=std::max(min_duration,largest/speed);
+    const double rate=std::min((1.-entry_progress_)/request.cycle_dt,1./duration);
+    entry_progress_=std::min(1.,entry_progress_+request.cycle_dt*rate);
+    j->setZero(rows,n);
+    v->resize(rows);
+    int row=0;
+    double remaining=0.;
+    for (int a=0; a<kArmCount; ++a) if (armIsControlled(a))
+      for (int k=0; k<kJointsPerArm; ++k,++row) {
+        const int i=armDecisionIndex(a,k);
+        const double delta=entry_goal_q_[i]-entry_start_q_[i];
+        remaining=std::max(remaining,std::abs(entry_goal_q_[i]-request.reference_q[i]));
+        const double waypoint=entry_start_q_[i]+entry_progress_*delta;
+        (*j)(row,i)=1.;
+        (*v)[row]=rate*delta + hand_position_gain_*(waypoint-request.reference_q[i]);
+      }
+    // Near a joint limit the certified command can trail the nominal clock.
+    // Keep stepping toward the LIVE joint goal, as in the absolute publish
+    // loop. A moving/unreachable goal gets a finite handoff to normal follow.
+    if (entry_progress_ >= 1.) {
+      entry_tail_time_ += request.cycle_dt;
+      if (remaining <= .03 || entry_tail_time_ >= min_duration) entry_active_ = false;
+    }
+    if (rows) *v *= std::min(1.,speed/std::max(1e-12,v->cwiseAbs().maxCoeff()));
+    addDynamicLeastSquaresCost(*j,*v,1.,h,g);
+    setPlantDecisionPositions(request.reference_q);
+    for (int a=0; a<kArmCount; ++a) if (armIsControlled(a)) {
+      const auto pose=plant_->GetFrameByName(hand_frame_names_[a]).CalcPose(*plant_context_,torso);
+      const auto& goal=request.target.arm[a];
+      (*error)[3*a]=(goal.hand_position-pose.translation()).norm();
+      (*error)[3*a+1]=rotationLog(goal.hand_orientation.toRotationMatrix()*pose.rotation().matrix().transpose()).norm();
+      if (goal.elbow_valid) (*error)[3*a+2]=(goal.elbow_position-
+          plant_->GetFrameByName(elbow_frame_names_[a]).CalcPose(*plant_context_,torso).translation()).norm();
+    }
+    return v->allFinite();
+  }
+
   SolverCandidate solveRequest(const SolverRequest& request) {
     velocity_ik::runtime_probe::point(41);
     const auto start = std::chrono::steady_clock::now();
@@ -5012,12 +5132,15 @@ class PinocchioVelocityIk {
       DecisionVector hands_v, body_v;
       const double ff_scale = 1.0;
       // FK, constraints, integration and WBC all use ONE command trajectory.
-      const bool tasks_valid = calculateFullPoseTaskTerms(
+      const bool hands_valid = request.arm_entry
+          ? calculateArmEntryTerms(request, &h, &g, &hands_j, &hands_v, &candidate.task_error)
+          : calculateFullPoseTaskTerms(
           request.target, request.reference_q, ff_scale,
           request.acquisition_blend, request.input_budget,
           request.catchup_correction,
           &h, &g, &hands_j, &hands_v, &candidate.task_error,
-          &candidate.sigma_min, &candidate.translation_sigma) &&
+          &candidate.sigma_min, &candidate.translation_sigma);
+      const bool tasks_valid = hands_valid &&
           calculateBodyTaskTerms(
               request, request.reference_q, &body_j, &body_v, &h, &g,
               &candidate.torso_task_error, &candidate.base_intent_error,
@@ -5027,11 +5150,11 @@ class PinocchioVelocityIk {
         double weight = 1.0e-6;
         double preferred_velocity = 0.0;
         if (arm >= 0) {
-          weight = primaryRegularizationForArm(candidate.sigma_min, arm);
+          weight = request.arm_entry ? 1.e-6 : primaryRegularizationForArm(candidate.sigma_min, arm);
           candidate.primary_regularization.at(arm) = weight;
           // Local soft avoidance only; never mute an entire hand task.
           const double barrier = jointLimitBarrierDirection(request.reference_q, i);
-          g(i) -= 2.0e-4 * barrier;
+          if (!request.arm_entry) g(i) -= 2.0e-4 * barrier;
         } else if (isDecisionGroup(i, DofGroup::kLowerBody)) {
           const int joint = lowerBodyJointForDecisionIndex(i);
           weight = motion_capture_ik::whole_body_ik::driveRegularization(
@@ -5106,7 +5229,7 @@ class PinocchioVelocityIk {
         const double blend=std::clamp(request.acquisition_blend,0.,1.);
         for (int i=0;i<n;++i) {
           if (isDecisionGroup(i,DofGroup::kBase)) continue;
-          const double cap=request.input_budget*((1.-blend)*std::min(velocity_limit_(i),acquisition_joint_speed_)+blend*velocity_limit_(i));
+          const double cap=request.input_budget*((1.-blend)*std::min(velocity_limit_(i),request.arm_entry && dof_layout_.armForDecisionIndex(i)>=0 ? entry_speed_ : acquisition_joint_speed_)+blend*velocity_limit_(i));
           const auto speed=velocity_ik::feasibleOperatingInterval(effective_lower(i),effective_upper(i),-cap,cap);
           const double accel=(1.-blend)*std::min(acceleration_limit_(i),acquisition_acceleration_)+blend*acceleration_limit_(i);
           const auto rate=velocity_ik::feasibleOperatingInterval(speed.lower,speed.upper,
@@ -5281,6 +5404,7 @@ class PinocchioVelocityIk {
             int row = 0;
             for (int arm = 0; arm < kArmCount; ++arm) {
               if (!armIsControlled(arm)) continue;
+              if (request.arm_entry) continue;  // entry rows are joint angles, not TCP twists
               candidate.translation_task_scale.at(arm) = progress(
                   hands_v.segment(row, 3),
                   hands_j.middleRows(row, 3) * candidate.task_dq);
@@ -5606,6 +5730,14 @@ class PinocchioVelocityIk {
     if (config.clearance <= config.execution_clearance ||
         config.planning_timeout > 10. || unlock_join_duration_ < .15)
       throw std::runtime_error("invalid unlock planning/execution limits");
+    // The ready pose has a known joint target. Keep its timing separate
+    // from startup and lower-body preparation, which use different limits.
+    pnh_.param("arm_follow_entry/return_gain", ready_return_gain_, preparation_gain_);
+    pnh_.param("arm_follow_entry/return_joint_speed", ready_return_speed_, preparation_arm_velocity_limit_);
+    if (!std::isfinite(ready_return_gain_) || ready_return_gain_ <= 0. ||
+        !std::isfinite(ready_return_speed_) || ready_return_speed_ <= 0.)
+      throw std::runtime_error("invalid ready-pose arm interpolation limits");
+    return_path_clearance_ = config.clearance;
     unlock_speed_ = config.speed;
     unlock_acceleration_ = config.acceleration_cap;
     unlock_jerk_ = config.jerk_cap;
@@ -5662,8 +5794,8 @@ class PinocchioVelocityIk {
                      << "; reset/re-arm to request a new path");
   }
 
-  void seedUnlockHandoff(const TargetSnapshot* live = nullptr) {
-    setPlantDecisionPositionsInContext(unlock_guard_context_.get(), &unlock_guard_full_q_, reference_q_);
+  void seedUnlockHandoff(const DecisionVector& start_q, const TargetSnapshot* planned_join_target) {
+    setPlantDecisionPositionsInContext(unlock_guard_context_.get(), &unlock_guard_full_q_, start_q);
     const auto& torso = plant_->GetFrameByName(torso_frame_name_);
     for (int a = 0; a < 2; ++a) {
       const auto pose = plant_->GetFrameByName(hand_frame_names_[a]).CalcPose(*unlock_guard_context_, torso);
@@ -5676,26 +5808,30 @@ class PinocchioVelocityIk {
       hand_rotation_reference_[a].reset(start.hand_orientation);
       elbow_reference_[a].reset(start.elbow_position);
     }
-    // Small live target changes need a short join. Large changes retain time
-    // proportional to translation/rotation, with the same measured live guard.
+    // Only the planned path uses a Cartesian blend. Direct entry uses the
+    // existing joint interpolator and its own progress clock.
     unlock_active_join_duration_ = unlock_join_duration_;
-    if (live) for (int a=0;a<2;++a) {
+    if (planned_join_target) for (int a=0;a<2;++a) {
       const auto& start=unlock_join_start_[a];
       unlock_active_join_duration_=std::max({unlock_active_join_duration_,
-          1.875*(live->arm[a].hand_position-start.hand_position).norm()/.25,
-          1.875*Eigen::AngleAxisd(live->arm[a].hand_orientation.toRotationMatrix()*
+          1.875*(planned_join_target->arm[a].hand_position-start.hand_position).norm()/.25,
+          1.875*Eigen::AngleAxisd(planned_join_target->arm[a].hand_orientation.toRotationMatrix()*
               start.hand_orientation.toRotationMatrix().transpose()).angle()/1.5});
     }
     unlock_join_elapsed_ = unlock_settled_ = 0.;
-    acquisition_.reset();
-    torso_reference_.valid = false;
+    if (ready_follow_guard_) entry_key_valid_ = false;
+    if (!arm_only_join_) {
+      acquisition_.reset();
+      torso_reference_.valid = false;
+    }
     unlock_phase_ = UnlockPhase::Joining;
-    ROS_INFO("[UnlockTransition] path settled; joining live IK");
+    if (planned_join_target) ROS_INFO("[UnlockTransition] path settled; joining live IK");
+    else ROS_INFO("[UnlockTransition] following live VR with joint interpolation");
   }
 
   void blendUnlockHandoff(TargetSnapshot* target, double dt) {
-    unlock_join_elapsed_ += dt;
-    const double u = std::clamp(unlock_join_elapsed_ / unlock_active_join_duration_, 0., 1.);
+    // Preview the next sample. Advance the blend only after committing it.
+    const double u = std::clamp((unlock_join_elapsed_ + dt) / unlock_active_join_duration_, 0., 1.);
     const double s = u*u*u*(10.+u*(-15.+6.*u));
     const double ds = 30.*u*u*(1.-u)*(1.-u)/unlock_active_join_duration_;
     for (int a = 0; a < 2; ++a) {
@@ -5715,11 +5851,18 @@ class PinocchioVelocityIk {
   }
 
   void updateUnlockLifecycle(const TargetSnapshot& raw, const TargetSnapshot& live,
-      uint64_t base_epoch, bool allowed, bool prepare, const DecisionVector& measured,
+      uint64_t base_epoch, bool allowed, bool prepare, bool admitted_prepare, const DecisionVector& measured,
       const DecisionVector& measured_dq, double dt) {
     if (!unlock_enabled_) return;
     if (prepare) {
       if (unlock_phase_ != UnlockPhase::Idle) unlock_worker_->cancel();
+      if (admitted_prepare) {
+        ready_follow_pending_ = true;
+        unlock_epoch_ = raw.body.coordinate_epoch;
+        unlock_base_epoch_ = base_epoch;
+      }
+      ready_follow_guard_ = false;
+      arm_only_join_ = false;
       unlock_phase_ = UnlockPhase::Idle; unlock_key_valid_ = false;
       return;
     }
@@ -5727,7 +5870,8 @@ class PinocchioVelocityIk {
     // input/authority or X+B must not create a second, persistent fault latch.
     // Cancel unfinished work; normal braking/arm_hold owns the interruption.
     if (!allowed) {
-      if (unlock_phase_ == UnlockPhase::Braking || unlock_phase_ == UnlockPhase::Planning ||
+      if (unlock_phase_ == UnlockPhase::Braking || unlock_phase_ == UnlockPhase::Retrying ||
+          unlock_phase_ == UnlockPhase::Planning ||
           unlock_phase_ == UnlockPhase::Executing || unlock_phase_ == UnlockPhase::Joining) {
         unlock_resume_path_ = unlock_phase_ != UnlockPhase::Joining;
         unlock_worker_->cancel();
@@ -5740,9 +5884,8 @@ class PinocchioVelocityIk {
       // A genuine Blocked fault still requires an explicit new transaction.
       return;
     }
-    // X+B keeps the session and mapping, but the operator can move while the
-    // robot is frozen. Consume the arm operation only after motion is allowed,
-    // so resume uses the existing joint path instead of a large local IK chase.
+    // Only the explicit arm operation in the same coordinate transaction
+    // can resume X+B directly; source/coordinate recovery keeps its own path.
     const bool arm_resume = unlock_key_valid_ &&
         unlock_arm_operation_seq_ != raw.arm_operation_seq;
     const bool new_key = !unlock_key_valid_ || unlock_session_ != raw.session_id ||
@@ -5751,43 +5894,70 @@ class PinocchioVelocityIk {
     const bool resume_path = unlock_phase_ == UnlockPhase::Suspended && unlock_resume_path_;
     if (new_key || resume_path) {
       unlock_worker_->cancel();
+      const bool from_prepare = ready_follow_pending_ &&
+          unlock_epoch_ == raw.body.coordinate_epoch && unlock_base_epoch_ == base_epoch;
+      const bool at_startup_pose = !unlock_key_valid_ && unlock_session_ == 0 &&
+          maxArmAbs(measured - preparation_position_) <= preparation_measured_position_tolerance_;
+      arm_only_join_ = arm_resume && unlock_session_ == raw.session_id &&
+          unlock_generation_ == raw.generation && unlock_epoch_ == raw.body.coordinate_epoch &&
+          unlock_base_epoch_ == base_epoch;
+      entry_rate_scale_ = from_prepare ? ready_entry_rate_scale_ : 1.0;
+      ready_follow_guard_ = from_prepare || at_startup_pose || arm_only_join_;
+      ready_follow_pending_ = false;
       unlock_session_ = raw.session_id; unlock_generation_ = raw.generation;
       unlock_epoch_ = raw.body.coordinate_epoch; unlock_base_epoch_ = base_epoch;
       unlock_arm_operation_seq_ = raw.arm_operation_seq;
       unlock_key_valid_ = true;
-      unlock_phase_ = UnlockPhase::Braking;
       unlock_elapsed_ = unlock_total_elapsed_ = unlock_settled_ = 0.;
       unlock_clock_rate_ = 1.; unlock_clock_acceleration_ = 0.;
-      captureUnlockGoal(live);
-      ROS_INFO_STREAM("[UnlockTransition] capture target"
-          << (arm_resume ? " for X+B resume" : "") << "; wait for standstill");
+      if (ready_follow_guard_) {
+        // Seed only Cartesian filters. The existing joint q/dq/ddq trajectory
+        // stays continuous even when the operator interrupts a moving return.
+        seedUnlockHandoff(measured, nullptr);
+      } else {
+        unlock_phase_ = UnlockPhase::Braking;
+        captureUnlockGoal(live);
+        ROS_INFO_STREAM("[UnlockTransition] capture target"
+            << (arm_resume ? " for X+B resume" : "") << "; wait for standstill");
+      }
     }
     if (unlock_phase_ == UnlockPhase::Suspended) {
       // Interrupted during the final blend: join from the current FK, not an
       // old handoff origin, and do not repeat the completed joint path.
-      seedUnlockHandoff(&live);
+      if (ready_follow_guard_) seedUnlockHandoff(measured, nullptr);
+      else seedUnlockHandoff(reference_q_, &live);
     }
     if (unlock_phase_ == UnlockPhase::Idle || unlock_phase_ == UnlockPhase::Done ||
         unlock_phase_ == UnlockPhase::Blocked) return;
     if (!live.arm_target_torso_relative) { blockUnlock("invalid torso-relative target"); return; }
-    unlock_total_elapsed_ += dt;
+    const bool retrying = unlock_phase_ == UnlockPhase::Retrying;
+    if (!retrying && unlock_phase_ != UnlockPhase::Joining) unlock_total_elapsed_ += dt;
     if (unlock_total_elapsed_ > 60.) { blockUnlock("transition timeout"); return; }
-    if (unlock_phase_ == UnlockPhase::Braking) {
+    if (unlock_phase_ == UnlockPhase::Braking || retrying) {
       const bool stopped = maxAbs(reference_dq_) < .015 && maxAbs(reference_ddq_) < .15 &&
           maxAbs(measured_dq) < .10 && maxAbs(measured-reference_q_) < .025;
       unlock_settled_ = stopped ? unlock_settled_+dt : 0.;
-      if (unlock_settled_ >= .06) {
+      // Bound the worker load for an unchanged, unreachable target. A retry
+      // uses the current hands and the stopped reference in the same session.
+      if (unlock_settled_ >= (retrying ? .5 : .06)) {
+        if (retrying) {
+          captureUnlockGoal(live);
+          unlock_total_elapsed_ = 0.;
+        }
         unlock_token_ = unlock_worker_->submit(reference_q_, unlock_goal_);
         unlock_phase_ = UnlockPhase::Planning;
         unlock_settled_ = 0.;
-        ROS_INFO("[UnlockTransition] planning endpoint and swept path");
+        ROS_INFO_THROTTLE(1., "[UnlockTransition] planning endpoint and swept path");
       }
     } else if (unlock_phase_ == UnlockPhase::Planning) {
       velocity_ik::UnlockJointPlan plan;
       if (unlock_worker_->take(unlock_token_, &plan)) {
         if (!plan.valid) {
-          ROS_WARN_STREAM("[UnlockTransition] planner: " << plan.reason);
-          blockUnlock("no verified path"); return;
+          ROS_WARN_STREAM_THROTTLE(1., "[UnlockTransition] " << plan.reason
+              << "; retrying with the live target");
+          unlock_phase_ = UnlockPhase::Retrying;
+          unlock_settled_ = 0.;
+          return;
         }
         if (maxAbs(reference_q_-plan.points.front()) > .005 ||
             maxAbs(measured-plan.points.front()) > .03) {
@@ -5815,16 +5985,19 @@ class PinocchioVelocityIk {
         // Reaching the captured endpoint completes acquisition. Human motion
         // is normal input, not a reason to repeatedly stop/replan and latch.
         // The continuous live-target join and command guard handle the delta.
-        seedUnlockHandoff(&live);
+        seedUnlockHandoff(reference_q_, &live);
       }
     } else if (unlock_phase_ == UnlockPhase::Joining) {
       if (maxAbs(measured-reference_q_) > .10) { blockUnlock("handoff tracking error"); return; }
       // Ownership ends when the blend has completed, including its final
       // guarded command on the preceding tick. Do not require the operator
       // or the soft elbow task to stop moving before normal IK can take over.
-      if (unlock_join_elapsed_ >= unlock_active_join_duration_) {
+      const bool join_complete = ready_follow_guard_
+          ? unlock_join_elapsed_ > 0. && entry_key_valid_ && !entry_active_
+          : unlock_join_elapsed_ >= unlock_active_join_duration_;
+      if (join_complete) {
         unlock_phase_ = UnlockPhase::Done;
-        torso_reference_.valid = false;
+        if (!arm_only_join_) torso_reference_.valid = false;
         ROS_INFO("[UnlockTransition] complete; live whole-body IK owns tracking");
       }
     }
@@ -5884,13 +6057,12 @@ class PinocchioVelocityIk {
   }
 
   void cancelReturnPath() {
-    if(return_phase_!=UnlockPhase::Idle && unlock_worker_)unlock_worker_->cancel();
     return_phase_=UnlockPhase::Idle;
   }
 
   void blockReturnPath(const char* reason) {
     if(return_phase_!=UnlockPhase::Blocked) {
-      unlock_worker_->cancel();return_phase_=UnlockPhase::Blocked;
+      return_phase_=UnlockPhase::Blocked;
       ROS_ERROR_STREAM("[UnlockReturn] stopped: "<<reason<<"; reset/re-arm required");
     }
   }
@@ -5898,57 +6070,50 @@ class PinocchioVelocityIk {
   DecisionVector returnPathVelocity(const DecisionVector& goal,const DecisionVector& measured,
       const DecisionVector& measured_dq,double dt) {
     DecisionVector stopped=DecisionVector::Zero(decisionDofCount());
-    if(return_phase_==UnlockPhase::Idle) {
-      unlock_worker_->cancel();return_phase_=UnlockPhase::Braking;
-      return_goal_=goal;return_settled_=return_elapsed_=return_total_=0.;
-      return_rate_=1.;return_acceleration_=0.;
+    const bool start = return_phase_ == UnlockPhase::Idle;
+    if (start) {
+      return_goal_ = goal;
+      return_total_ = 0.;
     }
-    if(return_phase_==UnlockPhase::Blocked)return stopped;
-    if(maxArmAbs(return_goal_-goal)>1e-8) {blockReturnPath("ready goal changed during return");return stopped;}
-    if(maxArmAbs(measured-reference_q_)>.10) {blockReturnPath("joint tracking error");return stopped;}
-    if(return_phase_==UnlockPhase::Done)return stopped;
-    return_total_+=dt;
-    if(return_total_>30.) {blockReturnPath("return timeout");return stopped;}
-    if(return_phase_==UnlockPhase::Braking) {
-      const bool ready=maxArmAbs(reference_dq_)<.015 && maxArmAbs(reference_ddq_)<.15 &&
-          maxArmAbs(measured_dq)<.1 && maxArmAbs(measured-reference_q_)<.025;
-      return_settled_=ready?return_settled_+dt:0.;
-      if(return_settled_>=.06) {
-        DecisionVector endpoint=reference_q_;
-        for(int a=0;a<2;++a)for(int j=0;j<7;++j) {
-          const int i=armDecisionIndex(a,j);endpoint[i]=goal[i];
-        }
-        return_token_=unlock_worker_->submitJoint(reference_q_,endpoint);
-        return_phase_=UnlockPhase::Planning;return_settled_=0.;
-      }
-    } else if(return_phase_==UnlockPhase::Planning) {
-      velocity_ik::UnlockJointPlan plan;
-      if(unlock_worker_->take(return_token_,&plan)) {
-        if(!plan.valid){ROS_WARN_STREAM("[UnlockReturn] planner: "<<plan.reason);blockReturnPath("no verified return path");return stopped;}
-        if(maxArmAbs(reference_q_-plan.points.front())>.005 || maxArmAbs(measured-plan.points.front())>.03) {
-          blockReturnPath("arm moved while return planning");return stopped;
-        }
-        return_plan_=std::move(plan);return_phase_=UnlockPhase::Executing;
-        ROS_INFO_STREAM("[UnlockReturn] execute "<<return_plan_.duration()<<" s return path");
-      }
-    } else if(return_phase_==UnlockPhase::Executing) {
-      advanceArmPathClock(return_plan_,measured,dt,&return_elapsed_,&return_rate_,&return_acceleration_);
-      const bool ready=return_elapsed_>=return_plan_.duration() &&
-          maxArmAbs(reference_q_-goal)<.015 && maxArmAbs(measured-goal)<.035 &&
-          maxArmAbs(reference_dq_)<.025 && maxArmAbs(measured_dq)<.1;
-      return_settled_=ready?return_settled_+dt:0.;
-      if(return_settled_>=.06) {
-        return_phase_=UnlockPhase::Done;
-        ROS_INFO("[UnlockReturn] arm return complete");
-      }
+    if (return_phase_ == UnlockPhase::Blocked) return stopped;
+    if (maxArmAbs(return_goal_ - goal) > 1e-8) { blockReturnPath("ready goal changed during return"); return stopped; }
+    if (maxArmAbs(measured - reference_q_) > .10) { blockReturnPath("joint tracking error"); return stopped; }
+    if (return_phase_ == UnlockPhase::Done) return stopped;
+    return_total_ += dt;
+    if (return_total_ > 30.) { blockReturnPath("return timeout"); return stopped; }
+
+    // Advance toward the known ready angles on this very tick. TEST uses
+    // preparation_gain and preparation_arm_velocity_limit for this operation.
+    // A bounded interpolation fraction gives the same rate envelope while
+    // the executing reference retains its velocity and acceleration.
+    if (return_phase_ == UnlockPhase::Braking &&
+        (maxArmAbs(reference_dq_) >= .015 || maxArmAbs(reference_ddq_) >= .15 ||
+         maxArmAbs(measured_dq) >= .1 || maxArmAbs(measured-reference_q_) >= .025))
+      return stopped;
+    if (start) ROS_INFO("[UnlockReturn] interpolating directly to the ready joint angles");
+    return_phase_ = UnlockPhase::Executing;
+    if (maxArmAbs(reference_q_-goal) <= preparation_position_tolerance_ &&
+        maxArmAbs(measured-goal) <= preparation_measured_position_tolerance_ &&
+        maxArmAbs(reference_dq_) <= preparation_velocity_tolerance_ &&
+        maxArmAbs(measured_dq) <= preparation_velocity_tolerance_) {
+      return_phase_ = UnlockPhase::Done;
+      return stopped;
     }
-    if(return_phase_!=UnlockPhase::Executing)return stopped;
-    return armPathVelocity(return_plan_,return_elapsed_,return_rate_,dt);
+    DecisionVector desired = stopped;
+    const double fraction = -std::expm1(-ready_return_gain_*ready_entry_rate_scale_*dt);
+    for (int arm=0; arm<kArmCount; ++arm) for (int joint=0; joint<kJointsPerArm; ++joint) {
+      const int i = armDecisionIndex(arm,joint);
+      const double limit = std::min(velocity_limit_[i], ready_return_speed_*ready_entry_rate_scale_);
+      const double step = std::clamp(fraction*(goal[i]-reference_q_[i]), -limit*dt, limit*dt);
+      desired[i] = step/dt;
+    }
+    return desired;
   }
 
   bool unlockCommandClear(const DecisionVector& reference, const DecisionVector& measured,
-      const DecisionVector& measured_velocity, const DecisionVector& next_velocity, double dt) {
-    std::array<std::array<double,7>,2> excursion{};
+      const DecisionVector& measured_velocity, const DecisionVector& next_velocity, double dt,
+      bool check_return_sweep = false) {
+    std::array<std::array<double,7>,2> excursion{}, sweep{};
     for (int a = 0; a < 2; ++a) for (int j = 0; j < 7; ++j) {
       const int i = armDecisionIndex(a,j);
       const double speed = std::max({std::abs(reference_dq_[i]), std::abs(next_velocity[i]),
@@ -5958,6 +6123,8 @@ class PinocchioVelocityIk {
       // conservative reduction in available braking and full tracking offset.
       const double commanded_acceleration = std::max(std::abs(reference_ddq_[i]),
           std::abs((next_velocity[i]-reference_dq_[i])/dt));
+      if (check_return_sweep)
+        sweep[a][j] = dt * std::max(std::abs(reference_dq_[i]), std::abs(next_velocity[i]));
       excursion[a][j] = std::abs(reference[i]-measured[i]) + speed*dt +
           velocity_ik::discreteStopDistance(speed, delay, commanded_acceleration,
                                             .8*std::min(braking_limit_[i], acceleration_limit_[i]), dt);
@@ -5967,6 +6134,9 @@ class PinocchioVelocityIk {
       std::array<int,14> indices;
       for(int a=0;a<2;++a)for(int j=0;j<7;++j)
         indices[7*a+j]=decision_position_index_[armDecisionIndex(a,j)];
+      if (check_return_sweep && q == &reference &&
+          !unlock_geometry_.certifyBox(*plant_,unlock_guard_context_.get(),&unlock_guard_full_q_,
+                                      indices,torso_frame_name_,sweep,return_path_clearance_)) return false;
       if(!unlock_geometry_.certifyBox(*plant_,unlock_guard_context_.get(),&unlock_guard_full_q_,
                                      indices,torso_frame_name_,excursion,unlock_margin_))return false;
     }
@@ -6327,7 +6497,25 @@ class PinocchioVelocityIk {
       session_confirmation_key_ = confirmation_key;
     }
     const bool confirm=confirm_requested_.exchange(false) || session_confirmation_pending_;
-    if (!contract_active) input_continuity_.suspend();
+    // PREPARE and the following ARMED handshake keep publishing live Quest
+    // observations. Carry their qualification only across the same source and
+    // coordinate frames, and never use a fixed PREPARE command as a VR frame.
+    const std::array<uint64_t,3> stream_key{{target.source, target.body.coordinate_epoch, base_coordinate_epoch}};
+    if (prepared_stream_valid_ && (prepared_stream_key_ != stream_key ||
+        !source_target_fresh || target_age > input_continuity_.config.grace))
+      input_continuity_.suspend();
+    const bool starting_return = contract_prepare && unlock_key_valid_ &&
+        target.session_id == unlock_session_ && input_continuity_.canTrack();
+    const bool ready_stream = (ready_follow_pending_ || starting_return) && mode_ok && robot_fresh &&
+        !coordinate_confirmation && !input_continuity_.confirmation_required &&
+        (contract_prepare || target.control_state == wheel_arm_abs_vel::TeleopTcpTarget::CONTROL_ARMED) &&
+        source_target_fresh && target_age <= input_continuity_.config.grace &&
+        target.body.coordinate_epoch == unlock_epoch_ && base_coordinate_epoch == unlock_base_epoch_;
+    prepared_stream_valid_ = ready_stream;
+    if (ready_stream) {
+      prepared_stream_key_ = stream_key;
+      input_continuity_.observePrepared(target_read_ns*1e-9, target.observation_sequence);
+    } else if (!contract_active) input_continuity_.suspend();
     else input_continuity_.update(target_read_ns*1e-9,target_age,target.observation_sequence,
         target.valid && target_source_active,
         confirm && mode_ok && !dynamic_fault_latched_ && !reference_tracking_fault_latched_,
@@ -6855,16 +7043,21 @@ class PinocchioVelocityIk {
     // execution ownership and fault policy. Do not impose a second timeout.
     updateUnlockLifecycle(target, world_target, base_coordinate_epoch,
                           tracking && !manual_override && !target.arm_hold,
-                          contract_prepare, measured_q, measured_dq, cycle_dt);
+                          contract_prepare, preparing && !manual_override, measured_q, measured_dq, cycle_dt);
     const bool unlock_owns = unlockOwnsReference();
     const bool unlock_guarded = unlock_owns || unlock_phase_ == UnlockPhase::Joining;
+    const bool allow_join_torso = torso_control_allowed && (!unlock_guarded || arm_only_join_);
+    const bool direct_entry = ready_follow_guard_ && unlock_phase_ == UnlockPhase::Joining;
+    const bool arm_entry = beginOrContinueArmEntry(target, base_coordinate_epoch,
+        (!unlock_enabled_ || direct_entry) && tracking && !manual_override && !target.arm_hold, reference_q_);
+    const double entry_progress_before_solve = entry_progress_;
+    const double entry_tail_before_solve = entry_tail_time_;
     SolverCandidate candidate;
     bool candidate_matches = false;
     if (tracking && !manual_override && !unlock_owns) {
       shapeContinuousTarget(world_target,target,tick_start_ns,cycle_dt);
-      if (unlock_phase_ == UnlockPhase::Joining) {
+      if (unlock_phase_ == UnlockPhase::Joining && !direct_entry)
         blendUnlockHandoff(&world_target, cycle_dt);
-      }
       // Solve and commit against one immutable 500 Hz snapshot.  The previous
       // asynchronous pipeline solved around q/dq/ddq at tick k and validated that
       // answer against a separately rebuilt domain at tick k+1.  A 2 ms
@@ -6876,6 +7069,7 @@ class PinocchioVelocityIk {
       // Bound feedback even after acquisition: a later target discontinuity
       // must not become an unbounded proportional chase. Live FF is separate.
       request.catchup_correction=true;
+      request.arm_entry=arm_entry;
       request.acquisition_blend=acquisition_.blend();
       request.input_budget=input_continuity_.budget;
       request.target = world_target;
@@ -6895,9 +7089,9 @@ class PinocchioVelocityIk {
       request.feedforward_age = 0.0;  // per-channel decay already applied
       request.body_feedforward_age =
           std::max(0.0, body_feedforward_age);
-      request.lower_body_recruitment = torso_control_allowed && !unlock_guarded ? 1.0 : 0.0;
+      request.lower_body_recruitment = allow_join_torso ? 1.0 : 0.0;
       request.lower_joint_recruitment = torsoJointPermissions(
-          torso_control_allowed && !unlock_guarded, target.torso_position_hold);
+          allow_join_torso, target.torso_position_hold);
       request.base_recruitment = 0.0;
       populateBaseSessionBounds(&request);
       request.tracking = true;
@@ -7033,9 +7227,8 @@ class PinocchioVelocityIk {
         preparation_entry_ddq_ = reference_ddq_;
         preparation_entry_elapsed_ = 0.0;
         preparation_active_ = true;
-        // The verified X+A return brakes to standstill, then follows the
-        // same timing and command limiter as acquisition. Keep the legacy
-        // entry hold for startup / configurations without that planner.
+        // Only the legacy startup/configuration path below uses this timer.
+        // An explicit X+A return in the unlock-enabled Quest launch starts now.
         arm_mode_interpolation_hold_elapsed_ = 0.0;
         preparation_complete_ = false;
         preparation_settle_cycles_ = 0;
@@ -7067,7 +7260,7 @@ class PinocchioVelocityIk {
       double lower_reference_error = 0.0;
       double lower_measured_error = 0.0;
       double selected_velocity = 0.0;
-      // Measure convergence for both implementations. The verified X+A
+      // Measure convergence for both implementations. The direct X+A
       // return replaces the legacy fixed-step arm command below; lower-body
       // reset retains its existing proportional velocity limits.
       double arm_total_distance_sq = 0.0;
@@ -7443,14 +7636,26 @@ class PinocchioVelocityIk {
 
     if(unlock_enabled_ && preparing && contract_prepare && !manual_override &&
        (return_phase_==UnlockPhase::Blocked ||
-        !unlockCommandClear(reference_q_,measured_q,measured_dq,next_dq,cycle_dt))) {
-      blockReturnPath("command/stopping envelope approached body or other arm");
+        !unlockCommandClear(reference_q_,measured_q,measured_dq,next_dq,cycle_dt,true))) {
+      // Reject this step and brake on the existing supervisor. A transient
+      // stopping envelope must not consume the operator's PREPARE request.
+      if (return_phase_ != UnlockPhase::Blocked) {
+        return_phase_ = UnlockPhase::Braking;
+        ROS_WARN_THROTTLE(1., "[UnlockReturn] braking for clearance; rechecking the same PREPARE request");
+      }
       preparation_commanded=false;preparation_complete_=false;
     }
 
-    if (unlock_guarded && tracking && !preparing && !manual_override &&
+    if ((unlock_guarded || ready_follow_guard_) && tracking && !preparing && !manual_override &&
         !unlockCommandClear(reference_q_, measured_q, measured_dq, next_dq, cycle_dt)) {
-      blockUnlock("command/stopping envelope approached body or other arm");
+      // Reject this command and use the supervised brake below. A joint path
+      // needs a new start after braking. The live join can retry its next
+      // sample against fresh input without replaying the startup path.
+      if (unlock_phase_ == UnlockPhase::Executing) {
+        unlock_phase_ = UnlockPhase::Retrying;
+        unlock_settled_ = 0.;
+      }
+      ROS_WARN_THROTTLE(1., "[UnlockTransition] braking for stopping clearance; rechecking automatically");
       candidate_accepted = false;
       tracking_command_held = false;
       unlock_commanded = false;
@@ -7563,6 +7768,19 @@ class PinocchioVelocityIk {
       reference_valid = false;
     }
 
+    // calculateArmEntryTerms previews the next waypoint during the solve.
+    // A rejected candidate must not advance the interpolator into the next one.
+    if (arm_entry && direct_entry && !(candidate_accepted && reference_valid)) {
+      entry_progress_ = entry_progress_before_solve;
+      entry_tail_time_ = entry_tail_before_solve;
+      entry_active_ = true;
+    }
+    if (unlock_phase_ == UnlockPhase::Joining && tracking && candidate_accepted &&
+        reference_valid && !manual_override && !preparing) {
+      unlock_join_elapsed_ += cycle_dt;
+      unlock_total_elapsed_ += cycle_dt;
+    }
+
     // Only an adopted command can advance the governor's short risk memory.
     // Rejected/stale/prepare paths cannot leave a slow-motion latch behind.
     if (tracking && candidate_accepted && reference_valid)
@@ -7593,6 +7811,10 @@ class PinocchioVelocityIk {
         }
       }
       acquisition_.update(cycle_dt,aligned,input_continuity_.phase==velocity_ik::InputPhase::Fresh);
+      // Live control is acknowledged independently of arm convergence. Retain
+      // the stopping-clearance check through the approach to a moving target.
+      if (unlock_phase_ == UnlockPhase::Done && !acquisition_.catchup)
+        ready_follow_guard_ = false;
     }
     tracking_ramp_scale_ = tracking ? acquisition_.blend() : 0.0;
 #ifndef VELOCITY_IK_OFFLINE_TEST
@@ -8491,6 +8713,10 @@ class PinocchioVelocityIk {
   std::array<uint64_t,5> session_confirmation_key_{};
   velocity_ik::InputContinuity input_continuity_;
   velocity_ik::Acquisition acquisition_;
+  std::array<uint64_t,5> entry_key_{};
+  bool entry_key_valid_{false}, entry_active_{false};
+  DecisionVector entry_start_q_, entry_goal_q_;
+  double entry_progress_{1.}, entry_tail_time_{0.}, entry_duration_{.55}, entry_speed_{1.};
   double acquisition_joint_speed_=.80, acquisition_linear_speed_=.40;
   double acquisition_angular_speed_=1.20, acquisition_acceleration_=3.00;
   double acquisition_position_tolerance_=.03, acquisition_rotation_tolerance_=.15;
@@ -8713,8 +8939,12 @@ class PinocchioVelocityIk {
   bool startup_bootstrap_active_{false};
   double natural_hang_arm_threshold_{0.08};
   bool preparation_active_{false};
-  enum class UnlockPhase { Idle, Braking, Planning, Executing, Joining, Done, Blocked, Suspended };
+  enum class UnlockPhase { Idle, Braking, Retrying, Planning, Executing, Joining, Done, Blocked, Suspended };
   bool unlock_enabled_{false}, unlock_key_valid_{false};
+  std::array<uint64_t,3> prepared_stream_key_{};
+  bool prepared_stream_valid_{false};
+  double entry_rate_scale_{1.}, ready_entry_rate_scale_{1.};
+  bool ready_follow_pending_{false}, ready_follow_guard_{false}, arm_only_join_{false};
   UnlockPhase unlock_phase_{UnlockPhase::Idle};
   uint64_t unlock_session_{0}, unlock_generation_{0}, unlock_epoch_{0}, unlock_base_epoch_{0};
   uint64_t unlock_arm_operation_seq_{0};
@@ -8733,12 +8963,10 @@ class PinocchioVelocityIk {
   Eigen::VectorXd unlock_guard_full_q_;
   std::unique_ptr<velocity_ik::UnlockPlanningWorker> unlock_worker_;
   UnlockPhase return_phase_{UnlockPhase::Idle};
-  uint64_t return_token_{0};
-  double return_elapsed_{0.},return_total_{0.},return_settled_{0.};
-  double return_rate_{1.},return_acceleration_{0.};
+  double return_path_clearance_{.025};
+  double return_total_{0.}, ready_return_gain_{2.0}, ready_return_speed_{0.60};
   DecisionVector return_goal_;
-  velocity_ik::UnlockJointPlan return_plan_;
-  // Keep the colleague's PREPARE return hold and speed settings.
+  // Legacy startup/configurations without direct return interpolation.
   double arm_mode_interpolation_hold_elapsed_{-1.0};
   DecisionVector preparation_entry_dq_, preparation_entry_ddq_;
   double preparation_entry_elapsed_{0.0};

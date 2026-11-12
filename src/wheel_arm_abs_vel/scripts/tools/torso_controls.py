@@ -20,8 +20,8 @@ class TorsoControls:
         self._stick_neutral_required = True
         self._stick_key = None
         self._stick_count = 0
-        # Stop, fault and a lost stream keep the operator's master selection;
-        # execution permission does not. X+A whole-body reset drops both
+        # Stop and fault revoke execution permission. An input gap during
+        # active follow preserves the current torso mode. X+A reset drops both
         # clutches via clear_operator_mode, including a Quest XY-touch + B
         # lock. Only an admitted follow request or a fresh torso chord after
         # that follow is applied may change permission again.
@@ -73,6 +73,9 @@ class TorsoControls:
     def wait_for_follow(self):
         """Inhibit during initial acquisition; never create/rearm permission."""
         self.enabled = False
+        self._require_neutral_input()
+
+    def _require_neutral_input(self):
         self.require_release = True
         self._stick_neutral_required = True
         self._stick_key = None
@@ -95,10 +98,11 @@ class TorsoControls:
         fresh = received is not None and 0 <= now-received <= max_age
         stream_lost = received is not None and not fresh
         ready_lost = self.follow_ready_seen and not ready
-        # An admitted X+A resume survives the prepare/acquisition gap. A lost
-        # stream, stop or fault still revokes it. Seeing ready and then losing
-        # it before any joystick sample still cancels the cold-start default.
-        if stream_lost or (ready_lost and not self._admitted_follow):
+        if ready and self.enabled and (received is None or (stream_lost and now > received)):
+            # A gap in the admitted input stream is not a torso mode command.
+            # Discard unfinished gestures so a held button cannot toggle on return.
+            self._require_neutral_input()
+        elif stream_lost or (ready_lost and not self._admitted_follow):
             self.reset()
         elif not ready or not fresh:
             # No first packet / initial execution handshake is ordinary startup,
@@ -172,7 +176,7 @@ class TorsoControls:
         self._stick_neutral_required = True
         self._stick_count = 0
 
-    def update(self, raw, hand, now, ready, input_stream=None):
+    def update(self, raw, hand, now, ready, input_stream=None, pose_fresh=True):
         result = copy.copy(hand)
         if input_stream is not None:
             # Optical gestures also populate joystick button fields (both OK
@@ -183,6 +187,7 @@ class TorsoControls:
             self.last_time = now
             return result
         fresh = self._check_readiness(now, ready, input_stream)
+        inputs_ready = ready and pose_fresh
         valid = all(math.isfinite(v) for v in
                     (raw.left_trigger, raw.right_trigger, raw.left_grip, raw.right_grip,
                      getattr(raw, 'right_y', 0.)))
@@ -268,17 +273,17 @@ class TorsoControls:
                     if not rt:
                         self.rt_released = True
         reset_latched = self._reset_latched
-        if (ready and fresh and valid and not stop and not arm
+        if (inputs_ready and fresh and valid and not stop and not arm
                 and (self._admitted_follow or self.startup_enable_pending)):
             self._apply_follow_selection()
         if not chord:
             self.require_release = False
         elif (toggle_edge and not self.require_release and not reset_latched
-              and ready and fresh and valid and not stop and not arm):
+              and inputs_ready and fresh and valid and not stop and not arm):
             self.enabled = not self.enabled
             self.selected_enabled = self.enabled
         self.chord_down = chord
-        self._update_stick(raw, now, ready, fresh, valid,
+        self._update_stick(raw, now, inputs_ready, fresh, valid,
                            stop or arm or chord or raw.left_second_button_pressed
                            or reset_latched)
         self._record_permissions()

@@ -1384,7 +1384,9 @@ namespace ocs2
 
             if (joystick_data_.left_first_button_pressed) // 左边第一个按钮按下了，切换模式
             {
-                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed) // X+B：固定↔恢复跟随
+                if (joystick_data_.right_second_button_pressed &&
+                    !(joystick_data_prev_.right_second_button_pressed &&
+                      (!enable_velocity_ik_takeover_ || joystick_data_prev_.left_first_button_pressed))) // X+B：固定↔恢复跟随
                 {
                     // MoRE 自己在 MoREController 内处理 X+B 手臂冻结/解冻，
                     // 其他控制器继续由 FSM 切换 arm_mode。
@@ -1639,7 +1641,9 @@ namespace ocs2
 
             if (joystick_data_.left_first_button_pressed)
             {
-                if (!joystick_data_prev_.right_second_button_pressed && joystick_data_.right_second_button_pressed)  // X+B：固定↔恢复跟随
+                if (joystick_data_.right_second_button_pressed &&
+                    !(joystick_data_prev_.right_second_button_pressed &&
+                      (!enable_velocity_ik_takeover_ || joystick_data_prev_.left_first_button_pressed)))  // X+B：固定↔恢复跟随
                 {
                     const int new_arm_ctrl_mode_wheel_ = resolveVrArmModeForXb(arm_ctrl_mode_);
                     if (new_arm_ctrl_mode_wheel_ < 0)

@@ -45,6 +45,8 @@ def mapper_class(path, observer=cv):
 def make_mapper(cls, observer=cv):
     n = cls.__new__(cls)
     n.skeleton_filter_enabled = True
+    n.arm_chest_yaw_reversal = False
+    n.arm_shoulder_reference = False
     n.skeleton_filter = observer.SkeletonCV(.001, .63, .003, 5.7, hand_q_r=1.42)
     n.skeleton_contract = (1, 1, 0)
     n.left_joystick = [0., 0.]

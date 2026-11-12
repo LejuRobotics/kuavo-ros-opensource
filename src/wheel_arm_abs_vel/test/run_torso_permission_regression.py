@@ -51,6 +51,25 @@ with tempfile.TemporaryDirectory(prefix='torso-regression-') as tmp:
                             '/whole_body_velocity_ik/model_contract_json', contract)
             subprocess.run(['rosparam', 'load', str(package / 'config/fixed_base_18d.yaml'),
                             '/torso_permission_test'], env=env, check=True)
+            # Resolve model calibration as production does, on a private master.
+            os.environ.update(ROS_MASTER_URI=env['ROS_MASTER_URI'], ROS_HOME=tmp, ROS_IP='127.0.0.1')
+            os.environ.pop('ROS_HOSTNAME', None)
+            import roslaunch.config
+            config = roslaunch.config.load_config_default(
+                [(str(package / 'launch/quest_velocity_ik.launch'),
+                  ['robot_version:=' + model])], None, verbose=False)
+            for key, param in config.params.items():
+                if scenario != 'follow_entry' and key != '/whole_body_velocity_ik/model_contract_json':
+                    continue
+                if key.startswith('/absolute_velocity_ik/'):
+                    key = '/torso_permission_test/' + key.split('/', 2)[2]
+                client.setParam('/follow_entry_fixture', key, param.value)
+            if scenario == 'follow_entry':
+                # Exercise the joint-interpolation path with the shared unlock planner disabled.
+                client.setParam('/follow_entry_fixture', '/torso_permission_test/unlock_transition_enabled', False)
+            # The fixture supplies the ready pose and active owner before testing follow.
+            client.setParam('/follow_entry_fixture',
+                            '/torso_permission_test/use_controller_startup_arm_pose', False)
             subprocess.run([binary, model, scenario], env=env, check=True, timeout=90)
         finally:
             if master.poll() is None:
