@@ -56,6 +56,7 @@ struct VelocityIkOfflineTest {
   Msg::Ptr m(new Msg);m->header.frame_id="quest_chest_robot_axes";
   m->left_controlled_frame=n.left_controlled_frame_;m->right_controlled_frame=n.right_controlled_frame_;
   m->control_state=Msg::CONTROL_ACTIVE;m->control_valid=m->left_valid=m->right_valid=true;
+  m->estimated_twists_valid=true;  // synthetic pose stream carries a valid zero twist
   m->source=Msg::SOURCE_QUEST_CONTROLLER;m->session_id=2;m->generation=2;
   m->body_tracking_frame=n.body_tracking_frame_name_;m->body_high_confidence=true;m->chest_valid=true;
   const Eigen::Quaterniond rot(n.rotationFromRpy(Eigen::Vector3d(M_PI/2.,0.,M_PI/2.)));
@@ -88,6 +89,80 @@ struct VelocityIkOfflineTest {
    require(!n.dynamic_fault_latched_,"dynamic fault");require(!n.reference_tracking_fault_latched_,"tracking fault");
    require(maxAbs(n.reference_q_-q-.001*(v+n.reference_dq_))<1e-8,"integration mismatch");
   };
+  if (scenario=="follow_entry") {
+   const auto ready=n.reference_q_.eval();
+   std::array<Eigen::Vector3d,2> hand_goal;
+   std::array<Eigen::Quaterniond,2> rotation_goal;
+   auto goal=[&](double offset) {
+    auto q=ready;
+    for(int a=0;a<2;++a) {
+     q[n.armDecisionIndex(a,0)]-=offset;
+     q[n.armDecisionIndex(a,3)]-=std::abs(offset)*.7;
+     for (int k : {0,3}) {
+      const int j=n.armDecisionIndex(a,k);
+      require(q[j]>n.position_lower_[j]+n.position_limit_margin_+n.boundary_brake_guard_ &&
+              q[j]<n.position_upper_[j]-n.position_limit_margin_-n.boundary_brake_guard_,
+              "requested test pose exceeds operating travel");
+     }
+    }
+    n.setPlantDecisionPositions(q);
+    for(int a=0;a<2;++a) {
+     const auto pose=n.plant_->GetFrameByName(n.hand_frame_names_[a]).CalcPose(*n.plant_context_,torso);
+     hand_goal[a]=pose.translation();
+     rotation_goal[a]=Eigen::Quaterniond(pose.rotation().matrix());
+     const Eigen::Vector3d origin=n.plant_->GetFrameByName(n.shoulder_frame_names_[a])
+         .CalcPose(*n.plant_context_,torso).translation()-Eigen::Vector3d(0.,a==0?.15:-.15,.42);
+     auto& p=a?m->right_tcp_pose:m->left_tcp_pose;
+     p=n.toPose(hand_goal[a]-origin,rotation_goal[a]);
+    }
+   };
+   auto error=[&]() {
+    n.setPlantDecisionPositions(n.reference_q_);
+    Eigen::Vector2d e=Eigen::Vector2d::Zero();
+    for(int a=0;a<2;++a) {
+     const auto actual=n.plant_->GetFrameByName(n.hand_frame_names_[a]).CalcPose(*n.plant_context_,torso);
+     e.x()=std::max(e.x(),(actual.translation()-hand_goal[a]).norm());
+     e.y()=std::max(e.y(),rotation_goal[a].angularDistance(Eigen::Quaterniond(actual.rotation().matrix())));
+    }
+    return e;
+   };
+   for(int round=0;round<4;++round) {
+    if(round) {
+     m->arm_hold=true;++m->arm_operation_seq;
+     for(int i=0;i<100;++i)step();
+     const auto paused=n.reference_q_.eval();
+     goal(round==1 ? -.20 : (round==2 ? .80 : -.26));
+     for(int i=0;i<40;++i)step();
+     require(armMax(n,n.reference_q_-paused)<1e-8,"moved during operator pause");
+     m->arm_hold=false;++m->arm_operation_seq;
+    } else goal(.25);
+    const auto origin=n.reference_q_.eval();
+    const double initial=error().x();
+    int entry_ticks=0, first_motion=-1;
+    double previous=0.;
+    for(int i=0;i<1800;++i) {
+     if(i==65)goal(round==1 ? -.25 : (round==2 ? .85 : (round==3 ? -.29 : .33)));  // live endpoint, no new operation
+     step();
+     if(!n.entry_key_valid_)continue;
+     require(n.entry_progress_>=previous,"VR frames restarted interpolation");
+     previous=n.entry_progress_;
+     ++entry_ticks;
+     if(first_motion<0 && armMax(n,n.reference_q_-origin)>1e-6)first_motion=entry_ticks;
+     if(!n.entry_active_)break;
+    }
+    require(entry_ticks>1 && entry_ticks<900,"no bounded entry or handoff");
+    require(first_motion>0 && first_motion<30,"entry added a standstill dwell");
+    const auto handoff=error();
+    std::cout<<"entry "<<round<<": "<<.002*entry_ticks<<" s; first motion "
+             <<.002*first_motion<<" s; TCP error "<<initial<<" -> "<<handoff.transpose()<<std::endl;
+    require(handoff.x()<.035 && handoff.y()<.14,"entry handed off far from reachable live goal");
+    for(int i=0;i<180;++i)step();
+    require(!n.entry_active_ && n.entry_progress_==1.,"ordinary follow restarted interpolation");
+    require(error().x()<.025 && error().y()<.10,"did not track live endpoint");
+    require(lowerMax(n,n.reference_q_-ready)<1e-8,"arm acquisition recruited lower body");
+   }
+   return;
+  }
   if(full_reset) {
    m->control_state=Msg::CONTROL_PREPARE;
    const auto initial=n.reference_q_.eval();

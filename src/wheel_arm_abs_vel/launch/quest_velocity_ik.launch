@@ -45,6 +45,9 @@
   <arg name="wrist_envelope_enabled" default="$(arg filter_tuning_enabled)" />
   <arg name="vr_kalman_flattening_enabled" default="false" />
   <arg name="vr_kalman_enabled" default="true" />
+  <arg name="arm_chest_yaw_reversal" default="false" doc="Use the preceding chest heading for the arms on a single near-static observation that reverses chest prediction by at least 3 degrees." />
+  <arg name="arm_shoulder_reference" default="false" doc="Use the horizontal shoulder line and world up as the shared absolute Quest arm reference. Takes precedence over arm_chest_yaw_reversal." />
+  <arg name="vr_kalman_sample_hold_seconds" default="0.0" doc="Quest repeated-observation window in seconds. The recorded 5.100 experiment used 0.05 for both comparison runs." />
   <arg name="continuous_reference_enabled" default="true" />
   <arg name="hand_reference_frequency" default="12.0" />
   <arg name="orientation_reference_mode" default="fixed_bandwidth" />
@@ -343,6 +346,10 @@
     <remap from="/whole_body_velocity_ik/reference/execution_owner" to="$(eval '/whole_body_velocity_ik/reference/execution_owner' + ('/shm_mirror' if arg('reference_transport') == 'shm' else ''))" />
     <param name="dexhand_front_trigger" value="$(arg dexhand_front_trigger)" type="bool" />
     <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/vr_kalman.yaml" />
+    <param name="arm_chest_yaw_reversal" value="$(eval arg('arm_chest_yaw_reversal') and arg('input_source') == 'quest')" type="bool" />
+    <param name="arm_shoulder_reference" value="$(eval arg('arm_shoulder_reference') and arg('input_source') == 'quest')" type="bool" />
+    <param name="vr_kalman_chest_sample_hold_seconds" value="$(eval arg('vr_kalman_sample_hold_seconds') if arg('input_source') == 'quest' else 0.0)" type="double" />
+    <param name="vr_kalman_position_sample_hold_seconds" value="$(eval arg('vr_kalman_sample_hold_seconds') if arg('input_source') == 'quest' else 0.0)" type="double" />
     <param name="vr_kalman_flattening/enabled" value="$(eval arg('filter_tuning_enabled') and arg('vr_kalman_flattening_enabled'))" type="bool" />
 
     <!-- Tiny covariance solves must not create a BLAS thread pool. -->

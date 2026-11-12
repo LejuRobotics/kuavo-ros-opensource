@@ -202,25 +202,37 @@ class HandTargetCV:
 class SkeletonCV:
     """One observation epoch for the geometry dependency group.
 
-    Equal numerical values at a NEW stamp are still observations. Repeated
-    stamps do not update covariance. No prediction across reset/gap/source.
+    By default equal values at a new stamp remain observations. Optional Quest
+    sample-hold windows predict repeated channels without repeated corrections,
+    with bounded stationary refresh. Never predict across reset/gap/source.
     """
     indices = (0, 1, 2, 3, 4, 5, 22, 23)
     rotating = (4, 5, 23)
 
     def __init__(self, sigma_p=.001, q_p=.2, sigma_r=.003, q_r=1.8, max_gap=.1,
-                 hand_q_r=None):
+                 hand_q_r=None, chest_sample_hold_seconds=0., position_sample_hold_seconds=0.):
         self.parameters = (positive(sigma_p, 'sigma_p'), positive(q_p, 'q_p'),
                            positive(sigma_r, 'sigma_r'), positive(q_r, 'q_r'))
         # None preserves the legacy API; the ROS mapper explicitly selects
         # the palm noise. Chest and both palms share the same timestamp.
         self.hand_q_r = None if hand_q_r is None else positive(hand_q_r, 'hand_q_r')
         self.max_gap = positive(max_gap, 'max_gap')
+        self.chest_sample_hold_seconds = float(chest_sample_hold_seconds)
+        if (not math.isfinite(self.chest_sample_hold_seconds) or
+                not 0. <= self.chest_sample_hold_seconds <= self.max_gap):
+            raise ValueError('chest sample hold must be between zero and max_gap')
+        self.position_sample_hold_seconds = float(position_sample_hold_seconds)
+        if (not math.isfinite(self.position_sample_hold_seconds) or
+                not 0. <= self.position_sample_hold_seconds <= self.max_gap):
+            raise ValueError('position sample hold must be between zero and max_gap')
         self.reset()
 
     def reset(self):
         self.stamp = None; self.key = None; self.states = {}
         self.positions = {}; self.rotations = {}; self.updates = 0
+        self.chest_rotation_stamp = None
+        self.chest_rotation_measurement = None
+        self.position_measurements = {}; self.position_stamps = {}
 
     def update(self, transforms, stamp, key):
         if not math.isfinite(stamp): raise ValueError('invalid source stamp')
@@ -235,12 +247,49 @@ class SkeletonCV:
             if not np.isfinite(transforms[i]).all(): raise ValueError('invalid skeleton')
         for i in self.indices:
             if i not in self.positions: self.positions[i] = PositionCV(sp, qp, velocity_gain=1.0)
-            p, v = self.positions[i].update(transforms[i][:3, 3], dt)
+            measurement = transforms[i][:3, 3]
+            if self.position_sample_hold_seconds > 0.:
+                observer = self.positions[i]
+                age = 0. if i not in self.position_stamps else stamp-self.position_stamps[i]
+                held = (dt is not None and i in self.position_measurements
+                        and np.max(np.abs(measurement-self.position_measurements[i])) <= 1.e-12
+                        and age < self.position_sample_hold_seconds)
+                if held:
+                    v = observer.x[1].copy()
+                    p = observer.x[0]+v*age
+                else:
+                    p, v = observer.update(measurement, None if dt is None else age)
+                    self.position_measurements[i] = measurement.copy()
+                    self.position_stamps[i] = stamp
+            else:
+                p, v = self.positions[i].update(measurement, dt)
             R = transforms[i][:3, :3]; w = np.zeros(3)
             if i in self.rotating:
                 rotation_q = self.hand_q_r if i in (4, 5) and self.hand_q_r is not None else qr
                 if i not in self.rotations: self.rotations[i] = RotationCV(sr, rotation_q, velocity_gain=1.0)
-                R, w = self.rotations[i].update(R, dt)
+                if i == 23 and self.chest_sample_hold_seconds > 0.:
+                    # Quest repeats the 30 Hz chest observation in 120 Hz packets.
+                    # Compare rotations (not quaternion signs), without a motion
+                    # deadband. A bounded stationary refresh still admits equal
+                    # observations, so stopping cannot leave a stale velocity.
+                    age = (0. if self.chest_rotation_stamp is None else
+                           stamp-self.chest_rotation_stamp)
+                    held = (dt is not None and self.chest_rotation_measurement is not None
+                            and np.max(np.abs(R-self.chest_rotation_measurement)) <= 1.e-12
+                            and age < self.chest_sample_hold_seconds)
+                    observer = self.rotations[i]
+                    if held:
+                        # Predict the output on the packet clock, without moving
+                        # the measurement state or shrinking its covariance.
+                        w = observer.w.copy()
+                        R = exp_so3(w*age)@observer.R
+                    else:
+                        measurement = R.copy()
+                        R, w = observer.update(R, None if dt is None else age)
+                        self.chest_rotation_stamp = stamp
+                        self.chest_rotation_measurement = measurement
+                else:
+                    R, w = self.rotations[i].update(R, dt)
             T = np.eye(4); T[:3, :3] = R; T[:3, 3] = p
             self.states[i] = (T, v, w)
         self.stamp = stamp; self.key = key; self.updates += 1

@@ -1833,7 +1833,7 @@ class IkRos:
                         error = self._fixed_capture_input_error_locked()
                         if error:
                             return result(False, error)
-                        if state == AbsoluteEnableState.RETURNING_TO_PREP:
+                        if state in (AbsoluteEnableState.RETURNING_TO_PREP, AbsoluteEnableState.PREPARED):
                             return result(*self._interrupt_fixed_prepare_locked())
                         # PREPARE has not acquired execution yet: change intent,
                         # keeping the original bounded dependency/acquisition wait.
@@ -1876,6 +1876,12 @@ class IkRos:
             if not 0 <= age <= self.absolute_enable_max_vr_age:
                 return result(False, "Fresh joystick input is required")
             if mode == 2 and state == AbsoluteEnableState.RETURNING_TO_PREP:
+                return result(*self._interrupt_fixed_prepare_locked())
+            if (mode == 2 and origin != 'first_trigger' and state == AbsoluteEnableState.PREPARED
+                    and self._wheel_mpc_stable_for_mm_cmd()
+                    and self._fixed_consumer_ack_locked(time.monotonic())
+                    and self._fixed_control_enabled is True
+                    and self._absolute_mode_status == (2, 2, False)):
                 return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
             self._fixed_operation_block = True
@@ -4302,12 +4308,17 @@ class IkRos:
         self._fixed_prepare_bootstrap = False
         self._fixed_operation_block = False
         self._start_velocity_session_locked(AbsoluteEnableReason.RESUME_REQUEST)
+        # The current consumer and owner acknowledged mode 2 above. Reuse
+        # its fresh readback; SWITCHING still waits for the NEW session bind.
+        mode_stamp = self._absolute_mode_status_time
+        if mode_stamp is not None and 0 <= now - mode_stamp <= .15:
+            self._absolute_mode_request_time = mode_stamp
         self._queue_fixed_request_locked(2, 'acquisition')
         self._fixed_pending_operation['deadline'] = now + self._fixed_acquisition_timeout
         self._fixed_operation_phase = 2
-        rospy.loginfo('[FixedStart] PREPARE interrupted; recapturing follow generation %d',
+        rospy.loginfo('[FixedStart] X+A from PREPARE; binding follow generation %d',
                       self._absolute_generation)
-        return True, 'PREPARE interrupted; continuous reference retained while follow reacquires'
+        return True, 'Follow requested from PREPARE; retaining the continuous reference'
 
 
 
@@ -4330,8 +4341,7 @@ class IkRos:
         self._base_gate_reason = reason
         return reason == 'READY'
 
-    def _torso_input_ready_locked(self, now):
-        received = self._last_valid_tcp_receive
+    def _torso_session_ready_locked(self):
         return (self.enable_velocity_ik_takeover
                 and self._absolute_state == AbsoluteEnableState.ACTIVE
                 and self._fixed_control_enabled is True
@@ -4340,8 +4350,14 @@ class IkRos:
                 and not self._fixed_operation_error and not self._fixed_operation_block
                 and not self._absolute_stop_pending and not self._absolute_fault_hold_pending
                 and not self._tracking_source_hold_latched
-                and not self._absolute_external_mode_reset_pending
-                and received is not None and 0 <= now-received <= self.absolute_enable_max_vr_age)
+                and not self._absolute_external_mode_reset_pending)
+
+    def _torso_pose_fresh_locked(self, now):
+        received = self._last_valid_tcp_receive
+        return received is not None and 0 <= now-received <= self.absolute_enable_max_vr_age
+
+    def _torso_input_ready_locked(self, now):
+        return self._torso_session_ready_locked() and self._torso_pose_fresh_locked(now)
 
     def _torso_optical_input_stream_locked(self):
         # Use the admitted session source, rather than a raw tracking flag:
@@ -4355,7 +4371,7 @@ class IkRos:
 
     def _fill_subsystem_permissions_locked(self, msg, now):
         msg.torso_control_enabled = self._torso_controls.authorized(
-            now, self._torso_input_ready_locked(now), self._torso_optical_input_stream_locked())
+            now, self._torso_session_ready_locked(), self._torso_optical_input_stream_locked())
         msg.torso_position_hold = not self._torso_controls.position_enabled
         msg.torso_operation_seq = self._torso_controls.operation_seq
         msg.arm_hold = (self._absolute_state == AbsoluteEnableState.ACTIVE
@@ -4366,7 +4382,7 @@ class IkRos:
         with self._absolute_lock:
             now = time.monotonic()
             enabled = self._torso_controls.authorized(
-                now, self._torso_input_ready_locked(now), self._torso_optical_input_stream_locked())
+                now, self._torso_session_ready_locked(), self._torso_optical_input_stream_locked())
             position_hold = not self._torso_controls.position_enabled
             state = (enabled, position_hold)
             if state == self._torso_last_published:
@@ -4449,8 +4465,8 @@ class IkRos:
             with self._absolute_lock:
                 now = time.monotonic()
                 hand_msg = self._torso_controls.update(
-                    msg, hand_msg, now, self._torso_input_ready_locked(now),
-                    self._torso_optical_input_stream_locked())
+                    msg, hand_msg, now, self._torso_session_ready_locked(),
+                    self._torso_optical_input_stream_locked(), pose_fresh=self._torso_pose_fresh_locked(now))
             self._consume_torso_end_effector_edges(hand_msg)
             self._publish_torso_control_state()
         self.joySticks_data = hand_msg

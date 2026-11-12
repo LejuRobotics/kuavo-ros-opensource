@@ -26,6 +26,24 @@ int main() {
   c.update(t,1.,seq++,true,false,true); assert(!c.confirmation_required);
   c.update(t,1.,seq++,true,false,true); assert(c.confirmation_required);
   c.suspend(); assert(c.confirmation_required); // Pause cannot erase existing loss.
+  InputContinuity prepared;
+  prepared.suspend();
+  for (int i=0; i<20; ++i) {
+    t+=.01;
+    prepared.observePrepared(t, seq++);
+    assert(!prepared.canTrack());
+  }
+  prepared.update(t+.002, .01, seq++, true, false, false);
+  assert(prepared.canTrack());  // Fresh X+A can reverse a moving return.
+  prepared.suspend();           // Input gap or changed coordinate contract.
+  for (int i=0; i<20; ++i) prepared.observePrepared(t+=.01, seq);
+  prepared.update(t+.002, .01, ++seq, true, false, true);
+  assert(!prepared.canTrack()); // One sample cannot replace fresh history.
+  prepared.update(t+.5, .51, ++seq, true, false, true);
+  assert(prepared.confirmation_required);
+  for (int i=0; i<20; ++i) prepared.observePrepared(t+=.01, ++seq);
+  prepared.update(t+.51, .01, ++seq, true, false, true);
+  assert(!prepared.canTrack() && prepared.confirmation_required);
   Acquisition a;
   for(int i=0;i<2000;++i) a.update(.002,false,true);
   assert(a.progress==1 && a.catchup); // Far target only caps correction, not ongoing VR motion.

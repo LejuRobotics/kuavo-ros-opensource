@@ -121,12 +121,20 @@ class Quest3ArmInfoTransformer:
         if self.velocity_ik_takeover and _NATIVE is None:
             raise ImportError("Velocity takeover requires the native Mapper; Python is an offline oracle only")
         self.skeleton_filter_enabled = bool(rospy.get_param("~vr_kalman_enabled", True)) and bool(rospy.get_param("~enable_velocity_ik_takeover", False))
+        self.arm_chest_yaw_reversal = bool(rospy.get_param("~arm_chest_yaw_reversal", False))
+        self.arm_shoulder_reference = self.velocity_ik_takeover and bool(
+            rospy.get_param("~arm_shoulder_reference", False))
+        if self.arm_shoulder_reference:
+            rospy.loginfo("[Quest3 TCP] Using horizontal shoulder line for both arm targets")
+        self.arm_chest_for_frame = None
         self.skeleton_filter = SkeletonCV(
             rospy.get_param("~vr_kalman_position_sigma", .001),
             rospy.get_param("~vr_kalman_position_q", .2),
             rospy.get_param("~vr_kalman_rotation_sigma", .003),
             rospy.get_param("~vr_kalman_rotation_q", 1.8),
-            hand_q_r=rospy.get_param("~vr_kalman_hand_rotation_q", .45))
+            hand_q_r=rospy.get_param("~vr_kalman_hand_rotation_q", .45),
+            chest_sample_hold_seconds=rospy.get_param("~vr_kalman_chest_sample_hold_seconds", 0.),
+            position_sample_hold_seconds=rospy.get_param("~vr_kalman_position_sample_hold_seconds", 0.))
         self.skeleton_contract = None
         self.estimated_bones = {}
         self.tcp_estimated_rates = {}
@@ -691,6 +699,67 @@ class Quest3ArmInfoTransformer:
         self.left_joystick = [msg.left_trigger, msg.left_grip]
         self.right_joystick = [msg.right_trigger, msg.right_grip]
 
+    def _shoulder_reference(self, transforms):
+        """Virtual chest in SDK axes, shared by the two arm pose and twist targets."""
+        if 0 not in self.valid_pose_indices or 2 not in self.valid_pose_indices:
+            return None
+        if self.estimated_bones:
+            left, v_left, _ = self.estimated_bones[0]
+            right, v_right, _ = self.estimated_bones[2]
+        else:
+            for index in (0, 2):
+                transforms[index] = self.pose_info2_transform(self.pose_info_list[index])
+            left, right = transforms[0], transforms[2]
+        dx, dy = left[:2, 3] - right[:2, 3]
+        width = math.hypot(dx, dy)
+        if not math.isfinite(width) or width < 1.e-4:
+            return None
+        # The horizontal right-to-left shoulder line is +Y. World up is +Z.
+        yx, yy = dx / width, dy / width
+        basis = np.array([[yy, yx, 0.], [-yx, yy, 0.], [0., 0., 1.]])
+        pose = np.eye(4)
+        pose[:3, :3] = basis @ self.init_R_wC
+        pose[:3, 3] = .5 * (left[:3, 3] + right[:3, 3])
+        if not self.estimated_bones:
+            return pose, None, None
+        dvx, dvy = v_left[:2] - v_right[:2]
+        yaw_rate = (yx * dvy - yy * dvx) / width
+        return pose, .5 * (v_left + v_right), np.array([0., 0., yaw_rate])
+
+    def _arm_chest_on_reversal(self, previous, previous_raw, raw):
+        """One-frame arm reference when a near-identical observation reverses prediction."""
+        # The 5.100 capture changed by 0.000003 degrees at reacquisition.
+        if np.sum(previous_raw * raw) < 1. + 2.*math.cos(math.radians(.01)):
+            return None
+        chest, velocity, omega = self.estimated_bones[23]
+        # SDK chest axes differ from robot axes. Project the calibrated forward
+        # axis onto the world horizontal plane before comparing headings.
+        forward_axis = self.init_R_wC.T[:, 0]
+        before = previous[0][:3, :3] @ forward_axis
+        after = chest[:3, :3] @ forward_axis
+        if min(before[:2] @ before[:2], after[:2] @ after[:2]) < 1.e-8:
+            return None
+        delta = math.atan2(before[0]*after[1] - before[1]*after[0], before[:2] @ after[:2])
+        if abs(delta) < math.radians(3.):
+            return None
+
+        def heading_rate(forward, angular_velocity):
+            derivative = np.cross(angular_velocity, forward)
+            return ((forward[0]*derivative[1] - forward[1]*derivative[0]) /
+                    (forward[:2] @ forward[:2]))
+
+        if delta * heading_rate(before, previous[2]) >= 0.:
+            return None
+        rotate_back = rpy_to_matrix([0., 0., -delta])
+        effective = chest.copy()
+        effective[:3, :3] = rotate_back @ chest[:3, :3]
+        # Apply the same heading substitution to the analytic TCP/elbow twists.
+        tilt_omega = omega.copy()
+        tilt_omega[2] -= heading_rate(after, omega)
+        rospy.loginfo_throttle(1., "[Quest3 TCP] chest yaw reversal source_ms=%d delta_deg=%.3f",
+                               self.timestamp_ms, math.degrees(delta))
+        return effective, velocity, rotate_back @ tilt_omega
+
     def read_msg(self, msg, defer_visuals=False, accept_hands=True):
         """
         Read the PoseInfoList message and extract the left and right finger joint angles.
@@ -710,6 +779,7 @@ class Quest3ArmInfoTransformer:
         self.tcp_mapping_diagnostics = {"Left": None, "Right": None}
         self.estimated_bones = {}
         self.tcp_estimated_rates = {}
+        self.arm_chest_for_frame = None
         self.valid_pose_indices = set()
         if not msg.is_hand_tracking and self.left_joystick is None:
             print("No joystick message received yet")
@@ -746,13 +816,26 @@ class Quest3ArmInfoTransformer:
                 transforms[22] = (self.pose_info2_transform(msg.poses[22])
                                   if 22 in self.valid_pose_indices else np.eye(4))
                 runtime_probe.point(101)
-                self.estimated_bones = self.skeleton_filter.update(
-                    transforms, float(msg.timestamp_ms)*.001,
-                    (self.skeleton_contract, bool(msg.is_hand_tracking)))
+                estimator = self.skeleton_filter
+                stamp = float(msg.timestamp_ms)*.001
+                key = (self.skeleton_contract, bool(msg.is_hand_tracking))
+                previous_prediction = None
+                if (self.arm_chest_yaw_reversal and not self.arm_shoulder_reference
+                        and estimator.key == key
+                        and estimator.chest_rotation_stamp is not None
+                        and estimator.chest_rotation_stamp < estimator.stamp
+                        and 0. < stamp-estimator.stamp <= estimator.max_gap):
+                    previous_prediction = (estimator.states[23], estimator.chest_rotation_measurement)
+                self.estimated_bones = estimator.update(transforms, stamp, key)
+                if previous_prediction is not None and estimator.chest_rotation_stamp == stamp:
+                    self.arm_chest_for_frame = self._arm_chest_on_reversal(
+                        *previous_prediction, transforms[23][:3, :3])
             except (ValueError, np.linalg.LinAlgError):
                 return False
         runtime_probe.point(102)
         if accept_hands:
+            if self.arm_shoulder_reference:
+                self.arm_chest_for_frame = self._shoulder_reference(transforms)
             # print("is_high_confidence: {}, is_hand_tracking: {}".format(self.is_high_confidence, self.is_hand_tracking))
             if self.is_hand_tracking:
                 self.compute_finger_joints("Left")
@@ -1580,9 +1663,13 @@ class Quest3ArmInfoTransformer:
         if self.estimated_bones:
             ids = (0, 1, 4) if side == "Left" else (2, 3, 5)
             c, s, e, h = [self.estimated_bones[i] for i in (23,)+ids]
+            if self.arm_chest_for_frame is not None:
+                c = self.arm_chest_for_frame
             tcp_chest, tcp_shoulder, tcp_elbow, tcp_palm = c[0], s[0], e[0], h[0]
             tcp_rotation = quaternion_to_matrix(vr_quat2robot_quat(
                 matrix_to_quaternion(tcp_palm[:3, :3]), side, 0.0))
+        elif self.arm_chest_for_frame is not None:
+            tcp_chest = self.arm_chest_for_frame[0]
         tcp_target, tcp_elbow_hint = self._compute_unified_tcp_target(
             side, tcp_chest, tcp_shoulder, tcp_elbow, tcp_palm, vr_quat, tcp_rotation)
         if self.estimated_bones and tcp_target is not None:

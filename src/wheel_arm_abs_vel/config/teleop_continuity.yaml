@@ -14,3 +14,9 @@ acquisition:
   rotation_tolerance: 0.15   # rad
   settle: 0.10              # diagnostic initial convergence; does NOT gate release or remove feedback cap
   release: 1.0
+arm_follow_entry:
+  duration: 0.55              # minimum interpolation time for startup and X+B resume (s)
+  joint_speed: 1.0            # nominal arm entry speed (rad/s)
+  ready_rate_scale: 1.15      # X+A follow entry and ready-pose return, relative to nominal speed
+  return_gain: 2.6            # ready-pose error gain (1/s), before ready_rate_scale
+  return_joint_speed: 0.63    # near TEST (0.60 rad/s), before ready_rate_scale
