@@ -32,7 +32,7 @@
     <arg name="vr_transform_debug_publish_hz" default="10.0" /> <!-- 调试话题与Marker发布频率 -->
     <arg name="finger_processing_hz" default="30.0" /> <!-- 手指异步处理频率 -->
     <arg name="ik_solution_timeout_s" default="0.2" /> <!-- VR无新解时暂停重复轨迹发布的超时 -->
-    <arg name="ee_type" default="$(eval 'lejuclaw' if int(arg('robot_version')) == 210062 else 'qiangnao')"/>
+    <arg name="ee_type" default="$(eval 'lejuclaw' if int(arg('robot_version')) == 210062 else ('heiman' if int(arg('robot_version')) in (400062, 400063, 410062, 410063) else 'qiangnao'))"/>
     <arg name="enable_head_control" default="true"/>
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
     <arg name="dagger_candidate_only" default="false"/>
@@ -45,9 +45,9 @@
     <param name="/use_cpp_incremental_ik" value="$(arg use_cpp_incremental_ik)" type="bool"/>
     <arg name="enable_vr_stop_robot" default="true"/> <!-- false: 禁用 VR 手柄 X+Y 触发 stop_robot，仅遥控器可关机 -->
     <param name="/enable_vr_stop_robot" value="$(arg enable_vr_stop_robot)" type="bool"/>
-    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) in (60, 61, 62, 63, 200062, 300062, 210062, 310062, 400062, 400063, 500062, 600062))"/> <!-- tens digit is 6: true, else false -->
+    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) in (60, 61, 62, 63, 200062, 300062, 210062, 310062, 400062, 400063, 410062, 410063, 500062, 600062))"/> <!-- tens digit is 6: true, else false -->
     <!-- 轮臂 v61/v62/v63 VR 底盘限速（G12/北通遥控仍走 /mobile_manipulator_joy/* 默认 0.8/0.5） -->
-    <group if="$(eval int(arg('robot_version')) in (61, 62, 63, 210062, 310062, 400062))">
+    <group if="$(eval int(arg('robot_version')) in (61, 62, 63, 210062, 310062, 400062, 410062, 410063))">
       <param name="/vr_cmd_vel/linear_scale_x" value="0.4"/>
       <param name="/vr_cmd_vel/linear_scale_y" value="0.4"/>
       <param name="/vr_cmd_vel/angular_scale_z" value="0.25"/>
@@ -134,6 +134,11 @@
     <param name="control_torso" value="$(arg control_torso)" type="bool"/>
     <!-- 设置全局参数，供其他节点统一读取 -->
     <param name="/wheel_ik" value="$(arg wheel_ik)" type="bool"/>
+    <!-- Python and C++ hand control both read the absolute end-effector parameter. -->
+    <param name="/end_effector_type" value="$(arg ee_type)"/>
+    <group if="$(arg use_cpp_incremental_ik)">
+        <param name="/control_finger_type" value="$(arg control_finger_type)" type="int"/>
+    </group>
     <!-- 设置全局reset_joint_to_default参数 -->
     <param name="/reset_joint_to_default" value="$(arg reset_joint_to_default)" type="bool"/>
     <param name="/init_control_waist_enable" value="$(arg init_control_waist_enable)" type="bool"/>
@@ -160,7 +165,6 @@
     <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and not wheel_ik and not arg('use_arm_only_ik'))">
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
-        <param name="/end_effector_type" value="$(arg ee_type)"/>
         <remap from="/kuavo_arm_traj_cpp" to="/kuavo_arm_traj" />
         <!-- 兼容 C++ 节点当前读取路径：/ik_ros_uni_cpp_node/quest3/* -->
         <param name="/quest3/fhan_r" value="$(arg ik_ros_fhan_r)" />
@@ -229,7 +233,6 @@
     <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="wheel_ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and wheel_ik and not arg('use_arm_only_ik'))">
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
-        <param name="/end_effector_type" value="$(arg ee_type)"/>
         <param name="/quest3/lock_knee_leg" value="$(arg lock_knee_leg)" type="bool"/>
         <param name="/quest3/task_space_acc_limit" value="$(arg task_space_acc_limit)" />
         <param name="/quest3/task_space_jerk_limit" value="$(arg task_space_jerk_limit)" />
@@ -284,7 +287,6 @@
     <node name="ik_ros_uni_cpp_node" pkg="motion_capture_ik" type="wheel_arm_only_ik_ros_uni_cpp_node" output="screen" if="$(eval arg('use_cpp_incremental_ik') and arg('use_arm_only_ik'))">
         <param name="ctrl_arm_idx" value="$(arg ctrl_arm_idx)" />
         <param name="control_torso" value="$(arg control_torso)" />
-        <param name="/end_effector_type" value="$(arg ee_type)"/>
         <remap from="/kuavo_arm_traj_cpp" to="/kuavo_arm_traj" />
         <!-- 兼容 C++ 节点当前读取路径：/ik_ros_uni_cpp_node/quest3/* -->
         <param name="/quest3/fhan_r" value="$(arg ik_ros_fhan_r)" />

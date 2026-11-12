@@ -109,14 +109,14 @@ class ArmTrajectoryBezierDemo:
         self.enable_control_state_ = True  # 软暂停状态，默认 enable=1
         self.last_published_state = None  # 记录上一次发布的状态，用于减少日志打印
         # 使用 RobotVersion 类创建版本号对象
-        robot_version_int = int(os.environ.get("ROBOT_VERSION", "45"))
+        robot_version_int = int(rospy.get_param("/robot_version", os.environ.get("ROBOT_VERSION", "45")))
         self.robot_version = RobotVersion.create(robot_version_int) if RobotVersion.is_valid(robot_version_int) else RobotVersion(4, 5, 0)
         self.robot_class = KUAVO if self.robot_version.major() >= 4 else ROBAN
         self.kuavo_control_scheme = os.getenv("KUAVO_CONTROL_SCHEME", "multi")
         # KUAVO v50+ 有腰部关节
-        self.has_waist = (self.robot_version.major() in (5,6)) if self.robot_class == KUAVO else False
+        self.has_waist = (self.robot_version.major() in (5,6) or robot_version_int in (410062, 410063)) if self.robot_class == KUAVO else False
         # KUAVO v60+ 为轮臂模型，joint_q 布局与双足版本不同
-        self.is_wheeled = (self.robot_version.major() == 6) if self.robot_class == KUAVO else False
+        self.is_wheeled = (self.robot_version.major() == 6 or robot_version_int in (410062, 410063)) if self.robot_class == KUAVO else False
        
         if self.robot_class == KUAVO:
             # 根据是否有腰部关节确定TACT长度
@@ -351,7 +351,7 @@ class ArmTrajectoryBezierDemo:
             rospy.logwarn("[ShoulderRollOffset] 无法获取 humanoid_controllers 包路径")
             return (rl_offsets, mpc_offsets)
 
-        robot_version_str = os.environ.get("ROBOT_VERSION", "45")
+        robot_version_str = str(self.robot_version.version_number())
 
         rl_config_subdir = "amp" if robot_version_str == "55" else "rl"
         rl_path = os.path.join(

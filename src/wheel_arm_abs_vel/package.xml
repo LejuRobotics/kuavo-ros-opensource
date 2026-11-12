@@ -7,6 +7,8 @@
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>message_generation</build_depend>
   <build_depend>pybind11-dev</build_depend>
+  <build_depend>nlohmann-json-dev</build_depend>
+  <build_export_depend>nlohmann-json-dev</build_export_depend>
   <exec_depend>message_runtime</exec_depend>
   <depend>roscpp</depend>
   <depend>rospy</depend>

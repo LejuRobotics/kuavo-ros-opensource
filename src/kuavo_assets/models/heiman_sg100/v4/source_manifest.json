@@ -1,0 +1,38 @@
+{
+  "l": {
+    "source_package": "SG100V4.0_L_3D_URDF",
+    "source_urdf_sha256": "4c8fa9f35d4f7b1743460f0bb72495ebe6764f2a99e8463b888416d63636e203",
+    "meshes_sha256": {
+      "l_hand_base.STL": "22604505a2c6948f0b28dc7dfc8f6ecab094dc47adf4e0ee65b16e18e52b5630",
+      "l_index_link1.STL": "61c63cdd92dfd97381708072cefdfe0b6090c406238f965c6495d889bdc40e67",
+      "l_index_link2.STL": "57b384558cfd402cd4ff5ea6dd4640272c4436bccfb0368104c956476bbde805",
+      "l_index_link3.STL": "cc7a3ad4e418ae91ee59bdec782539253f1b4d40dca6d5079f3be3bdccd27bc9",
+      "l_little_link1.STL": "05cb9f774003fad55ce6688ce49d0a91980fdc89597a6fd523d77fd3e87acab5",
+      "l_little_link2.STL": "9604a57822af5b827496c5ff1ae4fe15f718a4fa98683d91006a6bd2c25e395d",
+      "l_little_link3.STL": "49a757adac1e225ee8df659c1773bd3989ea7c2ceae683d6a4feca7405ffcc30",
+      "l_middle_link1.STL": "db7ea4f2a30c6714bf99c25ed311de544f51b2699f947e9242997ec2b84ce138",
+      "l_middle_link2.STL": "36bd5f765acfdaf786fb0a6dcd7cecd96af1277159e0987f4d8a3c4074907187",
+      "l_thumb_link1.STL": "124e830c02acc3071798ab222a913a0ff7959429048f0faaeaba371122f19e0b",
+      "l_thumb_link2.STL": "93b713e2629dcf94668db3c94c2c0bb79eb3f7dccd99bb27ed73cd0c89bf8a59",
+      "l_thumb_link3.STL": "c7c7f1ad1b2d9a549df4d831feb6a989e7a2a80461e9372425a546e9e4cba6eb"
+    }
+  },
+  "r": {
+    "source_package": "SG100V4.0_R_3D_URDF",
+    "source_urdf_sha256": "69bd6fe69710e3797514dad59d7d12352af14e6e2c77111bd7cf4cecfb5bfbd8",
+    "meshes_sha256": {
+      "r_hand_base.STL": "3e1ffc6f28946a66029faf92f8f286f1ffa40cbf9c1347b8568bc4f0d40da6e4",
+      "r_index_link1.STL": "5d00027654dcfcfb2f4d5e3704c543ae78ec31f14a6b2a82da7de36d9ee32f54",
+      "r_index_link2.STL": "5f9f9c3c509ac5947bb5a0b0cb9fa548ba07705028bd3ba0a8d4b327f78da5e9",
+      "r_index_link3.STL": "f7c6f702e4856ba21becf7fe17641c2dca6e8edf9ec95d9af7523dec7f64bae6",
+      "r_little_link1.STL": "88575743169076a4a5a6da0009ba2e9637d718f88620d596600458cb1edbfecb",
+      "r_little_link2.STL": "5903160f50911d745d9a456b1df8605707a6a068013c376595a5b2fc6a46b602",
+      "r_little_link3.STL": "0adc0527467028957d5de4722108ca659af4b388b4a94365f314c4c1ac6c0f52",
+      "r_middle_link1.STL": "1f236a47ebec98e2ad8cde5af63a089e766bb8e55c046300b8f3baf1104dbc05",
+      "r_middle_link2.STL": "c643cec802b44f4491de5ecb2b745d71b078353b8cc2e254b6c129052be7cdb2",
+      "r_thumb_link1.STL": "201aef7cec7dc5b1efcbb3a1b62188a61ed85bb699cf9d4fd4c9443f8d9dff0b",
+      "r_thumb_link2.STL": "4c5803ec373c329e643b76e887ed2ef6762aa2baff7516528eafb874c4c846ae",
+      "r_thumb_link3.STL": "6b3884a8edf80f48d6c14b4d0b87dbcd9f0a3a72829b661e75f29a848c0b2fa3"
+    }
+  }
+}

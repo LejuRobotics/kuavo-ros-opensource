@@ -12,7 +12,7 @@ ASSETS = ROOT.parent/'kuavo_assets'
 WHEEL = ROOT.parent/'humanoid-wheel-control/humanoid_wheel_interface'
 
 OVERLAY_VERSIONS = (62, 63, 210062, 310062, 400062)
-SHARED_WITHOUT_OVERLAY = (60, 61, 200062, 300062, 400063)
+SHARED_WITHOUT_OVERLAY = (60, 61, 200062, 300062, 400063, 410062, 410063)
 
 
 class SharedModels(unittest.TestCase):
@@ -39,6 +39,9 @@ class SharedModels(unittest.TestCase):
             contract = resolve_model(version, ASSETS, WHEEL)
             self.assertEqual(contract['robot_version'], version)
             self.assertTrue(contract['velocity_ik_urdf'])
+            if version in (410062, 410063):
+                self.assertEqual(contract['velocity_ik_urdf'],
+                    f'biped_s{version}/urdf/biped_s{version}.urdf')
 
     def test_shared_asset_validation_before_launch(self):
         original = json.loads((ASSETS/'config/kuavo_v63/kuavo.json').read_text())

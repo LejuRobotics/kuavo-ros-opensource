@@ -239,9 +239,11 @@ def is_tact_robot_type_compatible(tact_robot_type, current_robot_version) -> boo
     if tact_version is None or robot_version is None:
         return False
 
-    tact_major = tact_version.major()
+    # SG100 V4 IDs retain the wheel-arm action layout of 62/63.
+    wheel_v4 = (410062, 410063)
+    tact_major = 6 if tact_version.version_number() in wheel_v4 else tact_version.major()
     tact_minor = tact_version.minor()
-    robot_major = robot_version.major()
+    robot_major = 6 if robot_version.version_number() in wheel_v4 else robot_version.major()
     robot_minor = robot_version.minor()
 
     # 4.1/4.2 结构差异较大，只允许同小版本动作互通。
@@ -303,6 +305,8 @@ VERSION_REGISTRY = {
     "63.2": {"internal": 200063, "series": "kuavo5w", "desc": "63夹爪轮臂(v2)"},
     "63.3":  {"internal": 300063, "series": "kuavo5w", "desc": "63 强脑手轮臂(v3)"},
     "63.4":  {"internal": 400063, "series": "kuavo5w", "desc": "63 黑漫(heiman)灵巧手轮臂"},
+    "410062": {"internal": 410062, "series": "kuavo5w", "desc": "62 黑漫 SG100 V4 轮臂"},
+    "410063": {"internal": 410063, "series": "kuavo5w", "desc": "63 黑漫 SG100 V4 轮臂"},
     "62.5":  {"internal": 500062, "series": "kuavo5w", "desc": "62 O6灵巧手轮臂"},
     "62.6":  {"internal": 600062, "series": "kuavo5w", "desc": "62 工业二指夹爪轮臂"},
     "62.7":  {"internal": 210062, "series": "kuavo5w", "desc": "62 二指夹爪轮臂(210062)"},

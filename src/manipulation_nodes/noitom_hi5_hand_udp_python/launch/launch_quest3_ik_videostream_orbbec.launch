@@ -12,7 +12,7 @@
     <arg name="camera_publisher_name" default="/camera/color" />
     <arg name="hand_reference_mode" default="thumb_index"/> <!-- fingertips, middle_finger, thumb_index -->
     <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
-    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) in (60, 61, 62, 63, 200062, 300062, 210062, 310062, 400062, 400063, 500062, 600062))"/> <!-- 轮臂机器人（6x 系列）为 true -->
+    <arg name="wheel_ik" default="$(eval int(arg('robot_version')) in (60, 61, 62, 63, 200062, 300062, 210062, 310062, 400062, 400063, 410062, 410063, 500062, 600062))"/> <!-- 轮臂机器人（6x 系列）为 true -->
 
     <!-- 视频回传模式（deploy 方式2）：复用标准 launch_quest3_ik.launch 的全部
          VR/IK 节点（含双足/轮臂/5W 增量 IK C++ 节点），仅默认开启 WebRTC 推流。

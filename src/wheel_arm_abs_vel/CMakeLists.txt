@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 find_package(catkin REQUIRED COMPONENTS message_generation roscpp rospy roslib std_msgs std_srvs sensor_msgs geometry_msgs nav_msgs visualization_msgs nodelet pluginlib kuavo_msgs kuavo_assets kuavo_common leju_utils humanoid_controllers humanoid_interface humanoid_interface_drake humanoid_interface_ros humanoid_wheel_interface humanoid_wheel_interface_ros humanoid_wheel_wbc motion_capture_ik noitom_hi5_hand_udp_python leju_mobile_base_msgs ocs2_core ocs2_msgs)
 find_package(Eigen3 REQUIRED)
+find_package(nlohmann_json REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
 pybind11_add_module(_mapper_numeric_hands scripts/tools/native/mapper_numeric.cpp)
 target_link_libraries(_mapper_numeric_hands PRIVATE Eigen3::Eigen)
@@ -46,7 +47,7 @@ add_subdirectory(velocity_ik)
 add_library(wheel_absolute_dynamics
   src/absolute/AbsoluteWbcBase.cpp src/absolute/AbsoluteWeightedWbc.cpp
   src/absolute/AbsoluteContactForceWbc.cpp src/RneaBackend.cpp)
-target_link_libraries(wheel_absolute_dynamics ${catkin_LIBRARIES} pinocchio::pinocchio)
+target_link_libraries(wheel_absolute_dynamics ${catkin_LIBRARIES} pinocchio::pinocchio nlohmann_json::nlohmann_json)
 add_dependencies(wheel_absolute_dynamics ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 add_library(wheel_absolute_controllers
   src/absolute/humanoidController_wheel_absolute.cpp

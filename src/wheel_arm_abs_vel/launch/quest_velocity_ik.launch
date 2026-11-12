@@ -161,7 +161,7 @@
   <arg name="tracking_rearm_stable_frames" default="3" />
   <arg name="optical_input_guard_enabled" default="true" />
   <arg name="optical_input_guard_latch_on_jump" default="false" />
-  <group if="$(eval int(arg('robot_version')) in (61, 62, 63, 210062, 310062, 400062))">
+  <group if="$(eval int(arg('robot_version')) in (61, 62, 63, 210062, 310062, 400062, 410062, 410063))">
     <param name="/vr_cmd_vel/linear_scale_x" value="0.4" />
     <param name="/vr_cmd_vel/linear_scale_y" value="0.4" />
     <param name="/vr_cmd_vel/angular_scale_z" value="0.45" />

@@ -1147,7 +1147,7 @@ class KuavoPicoNode:
 
         robot_version = str(get_version_internal(os.environ.get('ROBOT_VERSION', '45')))
         self._is_wheel_robot = (
-            robot_version in ('210062', '310062')
+            robot_version in ('210062', '310062', '410062', '410063')
             or RobotVersion.create(int(robot_version)).major() == 6
         )
         model_config_file = kuavo_assests_path + f"/config/kuavo_v{robot_version}/kuavo.json"

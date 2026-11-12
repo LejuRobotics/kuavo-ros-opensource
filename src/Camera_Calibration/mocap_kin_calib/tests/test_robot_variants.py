@@ -28,6 +28,7 @@ import cam_proj_validation as projection
 from test_urdf_model_sync import fk
 
 EXISTING = ('62', '63', '200062', '210062', '300062', '310062', '400062', '400063', '500062', '500063', '600062')
+NEW = ('410062', '410063')
 
 
 def without_origins(data):
@@ -39,7 +40,7 @@ def without_origins(data):
 class VariantTests(unittest.TestCase):
     def test_fit_keeps_full_version_model_metadata_and_output(self):
         cfg = yaml.safe_load((HERE / 'config/calib_s63.yaml').read_text())
-        for version in (*EXISTING, '200063', '300063'):
+        for version in (*EXISTING, *NEW, '200063', '300063'):
             with self.subTest(version=version), patch.dict(os.environ, ROBOT_VERSION=version):
                 result = optimizer._config_for_capture(cfg, {'robot_version': version})
                 self.assertEqual(result['robot']['robot_version'], version)

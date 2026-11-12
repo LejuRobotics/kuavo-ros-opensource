@@ -433,8 +433,9 @@ namespace humanoidController_wheel_wbc
     ros::param::set("/headRealDof",  2);
     ros::param::set("/waistRealDof",  0);
     vector_t mujoco_q = vector_t::Zero(7 + 4 + 7*2 + 2);
-    // wheel arm family includes internal patch versions 210062 / 310062.
-    if (rb_version.major() == 6 || rb_version.version_number() == 210062 || rb_version.version_number() == 310062)
+    // wheel arm family includes internal patch versions 210062 / 310062 / 410062 / 410063.
+    if (rb_version.major() == 6 || rb_version.version_number() == 210062 || rb_version.version_number() == 310062 ||
+        rb_version.version_number() == 410062 || rb_version.version_number() == 410063)
     {
       mujoco_q[2] = 0.0;
     }

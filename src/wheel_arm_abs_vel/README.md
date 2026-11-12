@@ -9,6 +9,24 @@ incremental/humanoid sources are unchanged from the target dev branch.
 
 ## 使用与启动 / Getting started
 
+### 构建依赖
+
+本包使用 `nlohmann_json`，已在 `package.xml` 声明对应 rosdep 依赖
+`nlohmann-json-dev`。Ubuntu 20.04 对应的开发包为 `nlohmann-json3-dev`，
+需同时提供头文件与 CMake 配置；仓库其他目录中的 `json.hpp` 不能替代开发包。
+
+标准系统安装后可直接构建：
+
+```bash
+sudo apt-get install nlohmann-json3-dev
+catkin build wheel_arm_abs_vel
+```
+
+无 sudo 权限时，可将该发行版开发包解包到用户目录，再使用
+`--cmake-args -Dnlohmann_json_DIR=<解包目录>/usr/lib/cmake/nlohmann_json`
+指定包含 `nlohmann_jsonConfig.cmake` 的实际目录。该路径仅用于本机构建，
+不要提交到工作空间的共享构建配置中。
+
 完整中文使用指南见 [研扬 / AGX 自动识别与启动](docs/platform_runtime_adaptation.md)。
 包含5.19可复制的两终端命令、机型一次性配置、14/16核研扬与12核AGX分配、
 只读检查、Pico/可见仿真、常见报错、停止与回退。

@@ -1,0 +1,370 @@
+<!-- Heiman SG100 V4; adapted from SG100V4.0_R_3D_URDF -->
+<joint name="r_hand_base_joint" type="fixed">
+  <origin xyz="0 0 0" rpy="0 0 0"/>
+  <parent link="zarm_r7_link"/>
+  <child link="r_hand_base"/>
+</joint>
+<link name="r_hand_base">
+    <inertial>
+      <origin xyz="0.0031806 -0.015025 0.057722" rpy="0 0 0"/>
+      <mass value="0.10088"/>
+      <inertia ixx="3.6478E-05" ixy="2.9175E-07" ixz="-2.6639E-07" iyy="7.6363E-05" iyz="2.5869E-09" izz="4.9687E-05"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_hand_base.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_hand_base.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<link name="r_thumb_link1">
+    <inertial>
+      <origin xyz="0.012525451109018 0.000186620415743213 0.0180174805099131" rpy="0 0 0"/>
+      <mass value="0.00469534558633873"/>
+      <inertia ixx="5.09792217208187E-07" ixy="-8.88458193706695E-08" ixz="-1.39353571223853E-07" iyy="5.36420591010678E-07" iyz="-3.27322992939402E-08" izz="4.64861247815758E-07"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_thumb_link1.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_thumb_link1.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_thumb_j1" type="revolute">
+    <origin xyz="0.034708 -0.020924 0.02215" rpy="0 0 0"/>
+    <parent link="r_hand_base"/>
+    <child link="r_thumb_link1"/>
+    <axis xyz="0 0 -1"/>
+    <limit lower="0" upper="2.09" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_thumb_link2">
+    <inertial>
+      <origin xyz="0.0125 0.021651 0.016232" rpy="0 0 0"/>
+      <mass value="0.024707"/>
+      <inertia ixx="3.2038E-06" ixy="-6.9245E-07" ixz="1.3036E-10" iyy="2.4043E-06" iyz="-7.4254E-11" izz="2.6129E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_thumb_link2.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_thumb_link2.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_thumb_j2" type="revolute">
+    <origin xyz="0.024 0.01575 0.0191" rpy="1.5708 0 0"/>
+    <parent link="r_thumb_link1"/>
+    <child link="r_thumb_link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.18" upper="0" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_thumb_link3">
+    <inertial>
+      <origin xyz="0.01046 0.023008 0.015768" rpy="0 0 0"/>
+      <mass value="0.016607"/>
+      <inertia ixx="3.006E-06" ixy="-5.4913E-07" ixz="-2.5278E-08" iyy="1.2485E-06" iyz="-4.3771E-08" izz="3.0239E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_thumb_link3.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_thumb_link3.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_thumb_j3" type="revolute">
+    <origin xyz="0.025 0.043301 0" rpy="0 0 0"/>
+    <parent link="r_thumb_link2"/>
+    <child link="r_thumb_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_index_link1">
+    <inertial>
+      <origin xyz="-0.0003922 0.014547 0.019835" rpy="0 0 0"/>
+      <mass value="0.0052642"/>
+      <inertia ixx="6.9761E-07" ixy="8.7923E-08" ixz="1.0645E-07" iyy="6.2437E-07" iyz="-1.9315E-07" izz="6.3441E-07"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_index_link1.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_index_link1.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_index_j1" type="revolute">
+    <origin xyz="0.034958 -0.0072911 0.07125" rpy="1.5708 0 0"/>
+    <parent link="r_hand_base"/>
+    <child link="r_index_link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57" upper="0" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_index_link2">
+    <inertial>
+      <origin xyz="9.0223E-08 0.025 0.016232" rpy="0 0 0"/>
+      <mass value="0.024707"/>
+      <inertia ixx="3.6036E-06" ixy="-2.4483E-11" ixz="1.5002E-10" iyy="2.0045E-06" iyz="7.2892E-13" izz="2.6129E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_index_link2.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_index_link2.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_index_j2" type="revolute">
+    <origin xyz="-0.01575 0.024 0.0296" rpy="0 1.5708 0"/>
+    <parent link="r_index_link1"/>
+    <child link="r_index_link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="2.09" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_index_link3">
+    <inertial>
+      <origin xyz="-0.0024453 0.025156 0.015768" rpy="0 0 0"/>
+      <mass value="0.016607"/>
+      <inertia ixx="3.0422E-06" ixy="4.8645E-07" ixz="-4.0239E-13" iyy="1.2123E-06" iyz="-5.0554E-08" izz="3.024E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_index_link3.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_index_link3.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_index_j3" type="revolute">
+    <origin xyz="0 0.05 0" rpy="0 0 0"/>
+    <parent link="r_index_link2"/>
+    <child link="r_index_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_middle_link1">
+    <inertial>
+      <origin xyz="9.0223E-08 0.025 0.016232" rpy="0 0 0"/>
+      <mass value="0.024707"/>
+      <inertia ixx="3.6036E-06" ixy="-2.4483E-11" ixz="1.5002E-10" iyy="2.0045E-06" iyz="7.2892E-13" izz="2.6129E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_middle_link1.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_middle_link1.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_middle_j1" type="revolute">
+    <origin xyz="-0.017292 -0.036891 0.10029" rpy="1.5708 0 1.5708"/>
+    <parent link="r_hand_base"/>
+    <child link="r_middle_link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="2.09" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_middle_link2">
+    <inertial>
+      <origin xyz="-0.0024453 0.025156 0.015768" rpy="0 0 0"/>
+      <mass value="0.016607"/>
+      <inertia ixx="3.0422E-06" ixy="4.8645E-07" ixz="-4.0915E-13" iyy="1.2123E-06" iyz="-5.0554E-08" izz="3.024E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_middle_link2.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_middle_link2.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_middle_j2" type="revolute">
+    <origin xyz="0 0.05 0" rpy="0 0 0"/>
+    <parent link="r_middle_link1"/>
+    <child link="r_middle_link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_little_link1">
+    <inertial>
+      <origin xyz="-0.0035669 0.014535 0.019824" rpy="0 0 0"/>
+      <mass value="0.005237"/>
+      <inertia ixx="6.9525E-07" ixy="1.3687E-07" ixz="1.7137E-07" iyy="6.7526E-07" iyz="-1.9397E-07" izz="6.8415E-07"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_little_link1.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_little_link1.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_little_j1" type="revolute">
+    <origin xyz="-0.033042 -0.0079705 0.06525" rpy="1.5708 0 0"/>
+    <parent link="r_hand_base"/>
+    <child link="r_little_link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="3.14" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_little_link2">
+    <inertial>
+      <origin xyz="9.0223E-08 0.025 0.016232" rpy="0 0 0"/>
+      <mass value="0.024707"/>
+      <inertia ixx="3.6036E-06" ixy="-2.4483E-11" ixz="1.5002E-10" iyy="2.0045E-06" iyz="7.2887E-13" izz="2.6129E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_little_link2.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_little_link2.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_little_j2" type="revolute">
+    <origin xyz="-0.02075 0.024 0.0296" rpy="0 1.5708 0"/>
+    <parent link="r_little_link1"/>
+    <child link="r_little_link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0" upper="2.09" effort="0" velocity="0"/>
+  </joint>
+  
+<link name="r_little_link3">
+    <inertial>
+      <origin xyz="-0.0024453 0.025156 0.015768" rpy="0 0 0"/>
+      <mass value="0.016607"/>
+      <inertia ixx="3.0422E-06" ixy="4.8645E-07" ixz="-3.9461E-13" iyy="1.2123E-06" iyz="-5.0554E-08" izz="3.024E-06"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_little_link3.STL"/>
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://kuavo_assets/models/heiman_sg100/v4/meshes/r_little_link3.STL"/>
+      </geometry>
+    </collision>
+  </link>
+  
+<joint name="r_little_j3" type="revolute">
+    <origin xyz="0 0.05 0" rpy="0 0 0"/>
+    <parent link="r_little_link2"/>
+    <child link="r_little_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.05" upper="1.57" effort="0" velocity="0"/>
+  </joint>
+

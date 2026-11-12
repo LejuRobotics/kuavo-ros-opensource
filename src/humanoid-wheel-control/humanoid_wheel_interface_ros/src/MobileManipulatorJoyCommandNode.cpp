@@ -230,24 +230,17 @@ namespace mobile_manipulator
       zero_control_start_time_ = ros::Time::now();
       is_control_zero_ = true;  // 初始状态认为控制量为零
 
-      // G12轮臂模式: 需同时满足 is_wheel(ROBOT_VERSION major==6) 和 joystick_type==h12
-      // 版本号格式: PPPPMMMMN, major = (version / 10) % 10000
-      is_wheel_ = false;
+      // G12轮臂模式使用与模型加载相同的 robot_version 参数。
+      const int major = (robotVersion_ / 10) % 10000;
+      is_wheel_ = (major == 6 || robotVersion_ == 410062 || robotVersion_ == 410063);
       use_g12_ = false;
-      const char* env_robot_version = std::getenv("ROBOT_VERSION");
-      if (env_robot_version != nullptr)
-      {
-        int env_version = std::atoi(env_robot_version);
-        int major = (env_version / 10) % 10000;
-        is_wheel_ = (major == 6);
-      }
       std::string joystick_type;
       if (nodeHandle_.getParam("joystick_type", joystick_type) && joystick_type == "h12")
       {
         if (is_wheel_)
         {
           use_g12_ = true;
-          ROS_INFO("G12轮臂模式已启用 (ROBOT_VERSION=%s)", env_robot_version ? env_robot_version : "unknown");
+          ROS_INFO("G12轮臂模式已启用 (robot_version=%d)", robotVersion_);
         }
       }
 
@@ -533,7 +526,7 @@ namespace mobile_manipulator
           initialTorsoPose_y_ = 0.0005;
           initialTorsoPose_z_ = 0.789919;
         }
-        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63 || robotVersion == 200062 || robotVersion == 210062 || robotVersion == 200063 || robotVersion == 300062 || robotVersion == 310062 || robotVersion == 400062 || robotVersion == 400063 || robotVersion == 300063 || robotVersion == 500062 || robotVersion == 500063 || robotVersion == 600062)
+        else if(robotVersion == 61 || robotVersion == 62 || robotVersion == 63 || robotVersion == 200062 || robotVersion == 210062 || robotVersion == 200063 || robotVersion == 300062 || robotVersion == 310062 || robotVersion == 400062 || robotVersion == 400063 || robotVersion == 410062 || robotVersion == 410063 || robotVersion == 300063 || robotVersion == 500062 || robotVersion == 500063 || robotVersion == 600062)
         {
           initialTorsoPose_x_ = 0.11575;
           initialTorsoPose_y_ = 0.0;
