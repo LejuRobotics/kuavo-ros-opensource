@@ -27,7 +27,7 @@ methods={'arm_mode_callback','_admit_velocity_gesture_locked','fixed_arm_operati
     '_follow_input_time_locked', '_maybe_start_optical_follow', '_tracking_source_policy',
     '_authorize_fixed_follow_locked','_queue_absolute_capture_locked','_handle_absolute_target_and_gesture','_handle_velocity_gesture_edge',
     'whole_body_velocity_ik_status_callback','_queue_fixed_request_locked','_advance_fixed_request',
-    '_fixed_consumer_ack_locked','_fixed_owner_callback','_fixed_enable_callback',
+    '_fixed_consumer_ack_locked','_fixed_owner_callback','_fixed_enable_callback', '_fixed_arm_controller_ready', '_wheel_mpc_stable_for_mm_cmd', 'wheel_mpc_observation_callback',
     '_publish_wheel_base_command', '_torso_input_ready_locked',
     '_torso_pose_fresh_locked', '_torso_session_ready_locked',
     '_fill_subsystem_permissions_locked', '_torso_optical_input_stream_locked', '_bump_absolute_generation_locked',
@@ -91,7 +91,8 @@ class FixedFollowTest(unittest.TestCase):
         n._configured_tracking_source=lambda:1
         n._clone_absolute_target=lambda t:None if t is None else t.copy()
         n._publish_absolute_enable_status=n._publish_fixed_operation_state=lambda:None
-        n._wheel_mpc_stable_for_mm_cmd=lambda:True
+        n.robot_type=1;n._wheel_mm_mpc_min_internal_time=3.
+        n.wheel_mpc_observation_callback(NS(time=.01))
         n.quest3_arm_info_transformer=NS(is_runing=False,ok_gesture_counts=0,shot_gesture_counts=49,is_stop_gesture=lambda:False)
         def bump():n._absolute_generation+=1;return n._absolute_generation
         n._bump_absolute_generation_locked=bump
@@ -183,6 +184,7 @@ class FixedFollowTest(unittest.TestCase):
 
     def fresh(self):
         n=self.n;n._last_valid_tcp_receive=clock.now
+        n.wheel_mpc_observation_callback(NS(time=.01))
         n._absolute_latest_measured_q_time=n._joystick_receive_monotonic=clock.now
     def ack(self,prepared=False):
         n=self.n
@@ -366,13 +368,30 @@ class FixedFollowTest(unittest.TestCase):
         self.assertTrue(p.startup_enable_pending)
         self.assertFalse(p.enabled)  # ready/fresh joystick still gates motion
 
-    def test_missing_joint_and_mpc_wait_then_automatically_start(self):
-        n=self.n;n._absolute_latest_measured_q=None;n._wheel_mpc_stable_for_mm_cmd=lambda:False
-        self.assertTrue(self.start().result);self.assertEqual(n._absolute_state,State.WAITING)
-        clock.now+=2;self.fresh();n._absolute_latest_measured_q=[0.]*14
+    def test_first_triggers_start_on_first_ready_observation(self):
+        n=self.n;n._controller_start_acquired=n._controller_start_completed=False
+        n._wheel_mpc_obs_receive_monotonic=None
+        n._controller_start_request(NS(left_trigger=.9,right_trigger=.9))
         n._advance_fixed_request();self.assertEqual(n._absolute_state,State.WAITING)
-        n._wheel_mpc_stable_for_mm_cmd=lambda:True;n._advance_fixed_request()
-        self.assertEqual(n._absolute_state,State.SWITCHING)
+        n.wheel_mpc_observation_callback(NS(time=.002))
+        n._absolute_latest_measured_q=None
+        n._advance_fixed_request();self.assertEqual(n._absolute_state,State.WAITING)
+        n._absolute_latest_measured_q=[0.]*14
+        n._advance_fixed_request();self.assertEqual(n._absolute_state,State.SWITCHING)
+        self.assertFalse(n._wheel_mpc_stable_for_mm_cmd())  # Independent base/legacy gate.
+        self.assertFalse(n._controller_start_acquired)  # Execution still needs owner acknowledgement.
+
+    def test_fixed_arm_requires_fresh_enabled_controller(self):
+        n=self.n
+        for internal in (float('nan'), float('inf'), -1.):
+            n.wheel_mpc_observation_callback(NS(time=internal))
+            self.assertFalse(n._fixed_arm_controller_ready(clock.now))
+        n.wheel_mpc_observation_callback(NS(time=.002))
+        self.assertFalse(n._fixed_arm_controller_ready(clock.now+.21))
+        self.assertFalse(n._fixed_arm_controller_ready(clock.now-.01))
+        n._fixed_control_enabled=False
+        self.assertFalse(n._fixed_arm_controller_ready(clock.now))
+
     def test_duplicate_does_not_extend_deadline_or_capture(self):
         self.start();p=self.n._fixed_pending_operation.copy();gen=self.n._absolute_generation
         self.assertTrue(self.n._fixed_arm_operation(2).result)

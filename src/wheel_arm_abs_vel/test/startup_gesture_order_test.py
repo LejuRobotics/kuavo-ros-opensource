@@ -7,6 +7,7 @@ import fixed_follow_operation_test as fixed
 class StartupGestureOrderTest(unittest.TestCase):
     def setUp(self):
         self.f=fixed.FixedFollowTest(); self.f.setUp(); self.n=self.f.n
+        self.n._controller_start_acquired=False
         self.n._controller_start_completed=False
     def triggers(self, left=.8, right=.8):
         self.n._controller_start_request(NS(left_trigger=left,right_trigger=right))
@@ -38,6 +39,8 @@ class StartupGestureOrderTest(unittest.TestCase):
         self.n._advance_fixed_request()
         self.assertFalse(self.n._controller_start_completed)  # no execution ack yet
         self.f.ack(); self.n._advance_fixed_request()
+        self.assertTrue(self.n._controller_start_acquired)
+        self.n._advance_fixed_request()  # The next supervisor tick observes transition completion.
         self.assertTrue(self.n._controller_start_completed)
         for state in (fixed.State.WAITING,fixed.State.WAIT_RELEASE,fixed.State.PREPARED):
             self.n._absolute_state=state; self.n._fixed_pending_operation=None
@@ -118,7 +121,7 @@ class StartupGestureOrderTest(unittest.TestCase):
         self.assertFalse(self.n._controller_start_completed)
 
     def test_xb_preserves_existing_arm_hold_without_new_generation(self):
-        self.n._controller_start_completed=True
+        self.n._controller_start_acquired=self.n._controller_start_completed=True
         self.n._absolute_state=fixed.State.ACTIVE
         self.f.ack()
         generation=self.n._absolute_generation

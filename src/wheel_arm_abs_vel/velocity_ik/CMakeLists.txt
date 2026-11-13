@@ -144,6 +144,12 @@ if(CATKIN_ENABLE_TESTING OR VELOCITY_IK_BUILD_OPERATING_REPLAY)
   add_test(NAME velocity_ik_arm_follow_entry COMMAND ${PYTHON_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
     $<TARGET_FILE:velocity_ik_torso_permission_test> 62 follow_entry)
+  add_test(NAME velocity_ik_xa_torso_handoff COMMAND ${PYTHON_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
+    $<TARGET_FILE:velocity_ik_torso_permission_test> 62 xa_torso_handoff)
+  add_test(NAME velocity_ik_xa_close_return COMMAND ${PYTHON_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../test/run_torso_permission_regression.py
+    $<TARGET_FILE:velocity_ik_torso_permission_test> 62 xa_close_return)
 endif()
 if(VELOCITY_IK_BUILD_OPERATING_REPLAY)
   foreach(model 62 63 210062 310062 400062)

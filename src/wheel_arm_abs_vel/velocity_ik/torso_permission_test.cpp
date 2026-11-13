@@ -89,6 +89,99 @@ struct VelocityIkOfflineTest {
    require(!n.dynamic_fault_latched_,"dynamic fault");require(!n.reference_tracking_fault_latched_,"tracking fault");
    require(maxAbs(n.reference_q_-q-.001*(v+n.reference_dq_))<1e-8,"integration mismatch");
   };
+  if (scenario == "xa_close_return") {
+    using Check = Node::UnlockClearanceCheck;
+    // S62 left tool about 6 mm from the waist. Reject either a measured
+    // near-contact or a commanded near-contact, even at zero velocity.
+    auto close = n.reference_q_.eval();
+    const std::array<double, 7> left = {.200735, .242907, -.678298, -1.362924, -.398447, 0., 0.};
+    for (int j = 0; j < 7; ++j) close[n.armDecisionIndex(0, j)] = left[j];
+    auto zero = n.reference_dq_.eval();
+    zero.setZero();
+    for (auto check : {Check::LiveStep, Check::ReturnStep}) {
+      require(!n.unlockCommandClear(n.reference_q_, close, zero, zero, n.dt_, check),
+              "measured tool inside clearance accepted");
+      require(!n.unlockCommandClear(close, n.reference_q_, zero, zero, n.dt_, check),
+              "reference tool inside clearance accepted");
+    }
+    // Identical S62 geometry (~5.35 mm), opposite directions. Exercise
+    // both the commanded trapezoid and residual inward measured motion.
+    auto retreat = n.preparation_position_.eval();
+    const std::array<double,7> near_waist = {.07125208,-.06502352,-.15014475,-.45318198,.12664616,0.,0.};
+    auto outward = zero;
+    for (int j=0; j<7; ++j) {
+      const int i = n.armDecisionIndex(0,j);
+      retreat[i] = near_waist[j];
+      outward[i] = std::clamp(n.preparation_position_[i]-retreat[i], -.008, .008);
+    }
+    require(n.unlockCommandClear(retreat, retreat, zero, outward, n.dt_, Check::ReturnStep),
+            "near-waist retreat from rest was blocked");
+    require(!n.unlockCommandClear(retreat, retreat, zero, -outward, n.dt_, Check::ReturnStep),
+            "near-waist inward command was accepted");
+    require(!n.unlockCommandClear(retreat, retreat, -outward, outward, n.dt_, Check::ReturnStep),
+            "outward command masked inward feedback");
+    require(!n.unlockCommandClear(retreat, retreat, zero, outward, n.dt_, Check::LiveStep),
+            "return-only retreat was enabled for follow");
+
+    // S62 bag, 2026-11-13 14:07:34. Hands about 25 cm apart at PREPARE.
+    const std::array<double, 14> arms = {
+      -1.45380, -0.05724, -0.51234, -0.48408, 0.97566, 0.14056, -0.07684,
+      -1.52354,  0.04390,  0.71313, -0.44316,-0.81000,-0.02453,  0.11893};
+    for (int a = 0; a < 2; ++a)
+      for (int j = 0; j < 7; ++j)
+        n.reference_q_[n.armDecisionIndex(a,j)] = arms[7*a+j];
+    m->control_state = Msg::CONTROL_PREPARE;
+    for (int i = 0; i < 2500 && !n.preparation_complete_; ++i) step();
+    require(n.preparation_complete_, "one X+A must reach ready from the close-hand pose");
+    require(armMax(n,n.reference_q_-n.preparation_position_) <= n.preparation_position_tolerance_,
+            "PREPARE reported completion away from ready");
+    return;
+  }
+  if (scenario=="xa_torso_handoff") {
+    using Phase=Node::UnlockPhase;
+    m->torso_control_enabled=true;
+    auto chest=[&](double height,double pitch,double yaw) {
+      m->chest_pose.position.z=height;
+      const Eigen::Quaterniond orientation=
+          Eigen::AngleAxisd(yaw,Eigen::Vector3d::UnitZ()) *
+          Eigen::AngleAxisd(pitch,Eigen::Vector3d::UnitY()) * rot;
+      m->chest_pose.orientation=n.toPose(Eigen::Vector3d::Zero(),orientation).orientation;
+    };
+    for(int i=0;i<500 && n.unlock_phase_!=Phase::Joining;++i)step();
+    require(n.unlock_phase_==Phase::Joining && !n.arm_only_join_, "expected whole-body unlock");
+    chest(1.27,-.06,.10);
+    const auto start=n.reference_q_.eval();
+    for(int i=0;i<1500 && n.unlock_phase_!=Phase::Done;++i)step();
+    require(n.unlock_phase_==Phase::Done && n.torso_control_requested_, "torso did not take over");
+    const auto feature=n.torsoFeatureInContext(start,n.plant_context_.get(),&n.q_full_);
+    require((n.last_body_intent_.desired_torso_feature-feature).norm()<1e-8,
+            "torso took over with displacement accumulated during arm entry");
+    for(int i=0;i<160;++i)step();
+    require(lowerMax(n,n.reference_q_-start)<1e-8, "stationary chest caused lower-body catch-up");
+
+    chest(1.25,-.09,.16);
+    for(int i=0;i<300;++i)step();
+    const Eigen::Vector3d delta(-.02*n.torso_height_gain_,-.03*n.torso_pitch_gain_,
+                                .06*n.torso_yaw_gain_);
+    require((n.last_body_intent_.desired_torso_feature.tail<3>()-feature.tail<3>()-delta).norm()<1e-8,
+            "live height, pitch or yaw lost its configured gain");
+    const auto tracked=n.torsoFeatureInContext(n.reference_q_,n.plant_context_.get(),&n.q_full_);
+    require(tracked[1]<feature[1]-.001 && tracked[2]<feature[2]-.005 && tracked[3]>feature[3]+.005,
+            "live torso did not track the new chest motion");
+
+    m->arm_hold=true;++m->arm_operation_seq;
+    for(int i=0;i<100;++i)step();
+    m->arm_hold=false;++m->arm_operation_seq;
+    for(int i=0;i<1500;++i) {
+      step();
+      if(n.arm_only_join_ && n.unlock_phase_==Phase::Done)break;
+    }
+    require(n.arm_only_join_ && n.unlock_phase_==Phase::Done, "X+B resume did not complete");
+    require((n.last_body_intent_.desired_torso_feature.tail<3>()-feature.tail<3>()-delta).norm()<1e-8,
+            "X+B arm-only handoff reset the torso target");
+    std::cout<<"PASS X+A torso handoff, stationary chest, live height/pitch/yaw and X+B resume\n";
+    return;
+  }
   if (scenario=="follow_entry") {
    const auto ready=n.reference_q_.eval();
    std::array<Eigen::Vector3d,2> hand_goal;
