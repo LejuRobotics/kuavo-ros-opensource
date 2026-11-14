@@ -3610,8 +3610,7 @@ class PinocchioVelocityIk {
 
   TargetSnapshot resolveSessionTargetInWorld(
       const TargetSnapshot& session_target,
-      uint64_t base_coordinate_epoch,
-      const BodyIntent& body_intent) const {
+      uint64_t base_coordinate_epoch) const {
     TargetSnapshot result = session_target;
     if (!session_anchor_.valid ||
         session_anchor_.session_id != session_target.session_id ||
@@ -3645,9 +3644,6 @@ class PinocchioVelocityIk {
       target.hand_angular_ff = rotation * target.hand_angular_ff;
       target.elbow_linear_ff = rotation * target.elbow_linear_ff;
     }
-    result.body_intent = body_intent;
-    result.body_intent.desired_base_translation =
-        body_intent.desired_base_translation;
     result.body_mirror_rotation_world = Eigen::Matrix3d::Identity();
     result.frame_id = world_frame_name_;
     result.arm_target_torso_relative = false;
@@ -3655,7 +3651,7 @@ class PinocchioVelocityIk {
   }
 
   TargetSnapshot applySessionTargetAlignment(
-      const TargetSnapshot& session_target, const BodyIntent& body_intent) const {
+      const TargetSnapshot& session_target) const {
     TargetSnapshot result = session_target;
     if (!session_target.valid || !session_target_alignment_.valid ||
         session_target_alignment_.session_id != session_target.session_id ||
@@ -3668,7 +3664,6 @@ class PinocchioVelocityIk {
           session_target_alignment_.torso_from_source.at(arm),
           session_target.arm.at(arm));
     }
-    result.body_intent = body_intent;
     result.frame_id = torso_frame_name_;
     result.arm_target_torso_relative = true;
     return result;
@@ -5901,7 +5896,7 @@ class PinocchioVelocityIk {
       arm_only_join_ = arm_resume && unlock_session_ == raw.session_id &&
           unlock_generation_ == raw.generation && unlock_epoch_ == raw.body.coordinate_epoch &&
           unlock_base_epoch_ == base_epoch;
-      entry_rate_scale_ = from_prepare ? ready_entry_rate_scale_ : 1.0;
+      entry_rate_scale_ = (from_prepare || at_startup_pose) && !arm_only_join_ ? ready_entry_rate_scale_ : 1.0;
       ready_follow_guard_ = from_prepare || at_startup_pose || arm_only_join_;
       ready_follow_pending_ = false;
       unlock_session_ = raw.session_id; unlock_generation_ = raw.generation;
@@ -5997,7 +5992,12 @@ class PinocchioVelocityIk {
           : unlock_join_elapsed_ >= unlock_active_join_duration_;
       if (join_complete) {
         unlock_phase_ = UnlockPhase::Done;
-        if (!arm_only_join_) torso_reference_.valid = false;
+        if (!arm_only_join_) {
+          // The lower joints were excluded during unlock. Rebase the first
+          // live torso target on this tick's chest pose and robot reference.
+          torso_control_requested_ = false;
+          torso_reference_.valid = false;
+        }
         ROS_INFO("[UnlockTransition] complete; live whole-body IK owns tracking");
       }
     }
@@ -6086,10 +6086,6 @@ class PinocchioVelocityIk {
     // preparation_gain and preparation_arm_velocity_limit for this operation.
     // A bounded interpolation fraction gives the same rate envelope while
     // the executing reference retains its velocity and acceleration.
-    if (return_phase_ == UnlockPhase::Braking &&
-        (maxArmAbs(reference_dq_) >= .015 || maxArmAbs(reference_ddq_) >= .15 ||
-         maxArmAbs(measured_dq) >= .1 || maxArmAbs(measured-reference_q_) >= .025))
-      return stopped;
     if (start) ROS_INFO("[UnlockReturn] interpolating directly to the ready joint angles");
     return_phase_ = UnlockPhase::Executing;
     if (maxArmAbs(reference_q_-goal) <= preparation_position_tolerance_ &&
@@ -6105,42 +6101,66 @@ class PinocchioVelocityIk {
       const int i = armDecisionIndex(arm,joint);
       const double limit = std::min(velocity_limit_[i], ready_return_speed_*ready_entry_rate_scale_);
       const double step = std::clamp(fraction*(goal[i]-reference_q_[i]), -limit*dt, limit*dt);
-      desired[i] = step/dt;
+      // Use the transition acceleration limit on the direct return too. A
+      // position error requests a speed, not an instantaneous speed change.
+      const double max_dv = std::min(unlock_acceleration_, acceleration_limit_[i]) * dt;
+      desired[i] = std::clamp(step / dt, reference_dq_[i] - max_dv, reference_dq_[i] + max_dv);
     }
     return desired;
   }
 
+  enum class UnlockClearanceCheck { PlannedStop, LiveStep, ReturnStep };
+
   bool unlockCommandClear(const DecisionVector& reference, const DecisionVector& measured,
       const DecisionVector& measured_velocity, const DecisionVector& next_velocity, double dt,
-      bool check_return_sweep = false) {
-    std::array<std::array<double,7>,2> excursion{}, sweep{};
-    for (int a = 0; a < 2; ++a) for (int j = 0; j < 7; ++j) {
-      const int i = armDecisionIndex(a,j);
-      const double speed = std::max({std::abs(reference_dq_[i]), std::abs(next_velocity[i]),
-                                     std::abs(measured_velocity[i])});
-      const double delay = j < 4 ? arm_boundary_execution_delay_proximal_ : arm_boundary_execution_delay_wrist_;
-      // Same trapezoidal stopping contract as the execution owner, with a
-      // conservative reduction in available braking and full tracking offset.
-      const double commanded_acceleration = std::max(std::abs(reference_ddq_[i]),
-          std::abs((next_velocity[i]-reference_dq_[i])/dt));
-      if (check_return_sweep)
-        sweep[a][j] = dt * std::max(std::abs(reference_dq_[i]), std::abs(next_velocity[i]));
-      excursion[a][j] = std::abs(reference[i]-measured[i]) + speed*dt +
-          velocity_ik::discreteStopDistance(speed, delay, commanded_acceleration,
-                                            .8*std::min(braking_limit_[i], acceleration_limit_[i]), dt);
+      UnlockClearanceCheck check) {
+    if (check == UnlockClearanceCheck::ReturnStep) {
+      std::array<int,14> arm_velocity_indices;
+      const auto clear_return = [&](const DecisionVector& q, const DecisionVector& current, double margin) {
+        Eigen::VectorXd initial = Eigen::VectorXd::Zero(plant_->num_velocities());
+        Eigen::VectorXd mean = initial;
+        for (int a=0; a<kArmCount; ++a) for (int j=0; j<kJointsPerArm; ++j) {
+          const int i = armDecisionIndex(a,j);
+          const int v = decision_velocity_index_[i];
+          arm_velocity_indices[a*kJointsPerArm+j] = v;
+          initial[v] = current[i]*dt;
+          mean[v] = .5*(current[i]+next_velocity[i])*dt;
+        }
+        if (!initial.allFinite() || !mean.allFinite()) return false;
+        setPlantDecisionPositionsInContext(unlock_guard_context_.get(), &unlock_guard_full_q_, q);
+        return unlock_geometry_.clearReturnStep(*plant_, *unlock_guard_context_, torso_frame_name_,
+                                               initial, mean, arm_velocity_indices, margin);
+      };
+      return clear_return(reference, reference_dq_, return_path_clearance_) &&
+             clear_return(measured, measured_velocity, unlock_margin_);
     }
-    for (const auto* q : {&reference, &measured}) {
-      setPlantDecisionPositionsInContext(unlock_guard_context_.get(), &unlock_guard_full_q_, *q);
-      std::array<int,14> indices;
-      for(int a=0;a<2;++a)for(int j=0;j<7;++j)
-        indices[7*a+j]=decision_position_index_[armDecisionIndex(a,j)];
-      if (check_return_sweep && q == &reference &&
-          !unlock_geometry_.certifyBox(*plant_,unlock_guard_context_.get(),&unlock_guard_full_q_,
-                                      indices,torso_frame_name_,sweep,return_path_clearance_)) return false;
-      if(!unlock_geometry_.certifyBox(*plant_,unlock_guard_context_.get(),&unlock_guard_full_q_,
-                                     indices,torso_frame_name_,excursion,unlock_margin_))return false;
+    std::array<int, 14> indices;
+    std::array<std::array<double, 7>, 2> reference_travel{}, measured_travel{};
+    for (int a = 0; a < kArmCount; ++a) for (int j = 0; j < kJointsPerArm; ++j) {
+      const int i = armDecisionIndex(a, j);
+      indices[a*kJointsPerArm+j] = decision_position_index_[i];
+      const double step_speed = std::max(std::abs(reference_dq_[i]), std::abs(next_velocity[i]));
+      reference_travel[a][j] = step_speed * dt;
+      measured_travel[a][j] = std::max(step_speed, std::abs(measured_velocity[i])) * dt;
+      if (check == UnlockClearanceCheck::PlannedStop) {
+        const double speed = std::max(step_speed, std::abs(measured_velocity[i]));
+        const double delay = j < 4 ? arm_boundary_execution_delay_proximal_ : arm_boundary_execution_delay_wrist_;
+        const double acceleration = std::max(std::abs(reference_ddq_[i]),
+            std::abs((next_velocity[i] - reference_dq_[i]) / dt));
+        const double stop = velocity_ik::discreteStopDistance(speed, delay, acceleration,
+            .8 * std::min(braking_limit_[i], acceleration_limit_[i]), dt);
+        reference_travel[a][j] = measured_travel[a][j] =
+            std::abs(reference[i] - measured[i]) + speed * dt + stop;
+      }
     }
-    return true;
+    // Direct X+A tests the commanded step and the measured motion each tick.
+    // The precomputed path keeps its original stopping-envelope contract.
+    const auto clear = [&](const DecisionVector& q, const auto& travel, double margin) {
+      setPlantDecisionPositionsInContext(unlock_guard_context_.get(), &unlock_guard_full_q_, q);
+      return unlock_geometry_.certifyBox(*plant_, unlock_guard_context_.get(), &unlock_guard_full_q_,
+                                         indices, torso_frame_name_, travel, margin);
+    };
+    return clear(reference, reference_travel, unlock_margin_) && clear(measured, measured_travel, unlock_margin_);
   }
 
   bool automaticHoldEnabled() const {
@@ -6680,54 +6700,11 @@ class PinocchioVelocityIk {
                     : " after body tracking became valid"));
       }
     }
-    // A new torso permission captures the CURRENT robot reference and human
-    // pose, so movement accumulated while locked cannot cause a target jump.
-    const bool torso_was_requested = torso_control_requested_;
-    if (!target.torso_control_enabled) {
-      if (torso_control_requested_) torso_reference_.valid = false;
-      torso_control_requested_ = false;
-    } else if (!torso_control_requested_ && source_target_fresh && robot_fresh && mode_ok && contract_active) {
-      const DecisionVector& anchor_q = reference_initialized_ ? reference_q_ : measured_q;
-      torso_control_requested_ = captureSessionBodyAnchor(target, anchor_q, false);
-      torso_reference_.valid = false;
-      last_body_intent_ = BodyIntent{};
-    }
-    const bool torso_control_allowed = target.torso_control_enabled && torso_control_requested_;
-    BodyIntent body_intent = torso_control_allowed ? calculateBodyIntent(target) : BodyIntent{};
-    if (torso_control_allowed && body_intent.torso_valid && source_target_fresh && contract_active) {
-      const Eigen::Vector4d current_torso =
-          torsoFeatureInContext(reference_q_, capture_context_.get(), &capture_q_full_);
-      if (torso_was_requested && torso_position_hold_requested_ && !target.torso_position_hold) {
-        // Discard only height/pitch motion accumulated while locked. Reusing
-        // captureSessionBodyAnchor here would also clutch the live yaw channel.
-        session_body_anchor_.position_resume_offset +=
-            current_torso.segment<2>(1) - body_intent.desired_torso_feature.segment<2>(1);
-        body_intent.desired_torso_feature.segment<2>(1) = current_torso.segment<2>(1);
-        body_intent.desired_torso_velocity.segment<2>(1).setZero();
-        if (torso_reference_.valid) {
-          torso_reference_.p.head<2>() = current_torso.segment<2>(1);
-          torso_reference_.v.head<2>().setZero();
-        }
-      }
-      if (target.torso_position_hold) {
-        body_intent.desired_torso_feature.segment<2>(1) = current_torso.segment<2>(1);
-        body_intent.desired_torso_velocity.segment<2>(1).setZero();
-      }
-      torso_position_hold_requested_ = target.torso_position_hold;
-    }
-    if (body_intent.torso_valid && source_target_fresh && contract_active &&
-        !dynamic_fault_latched_ && !reference_tracking_fault_latched_) {
-      session_body_anchor_.resume_mapping_valid = true;
-    }
-    if (body_intent.torso_valid) {
-      last_body_intent_ = body_intent;
-    }
     const TargetSnapshot raw_world_target =
         resolveSessionTargetInWorld(
-            target, base_coordinate_epoch, body_intent);
-    const TargetSnapshot aligned_torso_target =
-        applySessionTargetAlignment(target, body_intent);
-    const TargetSnapshot aligned_world_target =
+            target, base_coordinate_epoch);
+    TargetSnapshot aligned_torso_target = applySessionTargetAlignment(target);
+    TargetSnapshot aligned_world_target =
         torsoRelativeTargetInWorld(aligned_torso_target, measured_q);
     const bool target_fresh = source_target_admissible &&
         raw_world_target.valid && aligned_torso_target.valid &&
@@ -6982,9 +6959,6 @@ class PinocchioVelocityIk {
       reference_tracking_recovery_elapsed_ = 0.0;
     }
 
-    TargetSnapshot world_target = aligned_torso_target;
-    prepareTargetForTracking(world_target,target_age);
-
     const Eigen::Vector2d reference_base_translation(
         reference_q_(baseDecisionIndex(0)),
         reference_q_(baseDecisionIndex(1)));
@@ -7041,9 +7015,55 @@ class PinocchioVelocityIk {
     if (!preparing || !contract_prepare || manual_override) cancelReturnPath();
     // tracking already applies input continuity, coordinates, feedback,
     // execution ownership and fault policy. Do not impose a second timeout.
-    updateUnlockLifecycle(target, world_target, base_coordinate_epoch,
+    updateUnlockLifecycle(target, aligned_torso_target, base_coordinate_epoch,
                           tracking && !manual_override && !target.arm_hold,
                           contract_prepare, preparing && !manual_override, measured_q, measured_dq, cycle_dt);
+    // A new torso permission captures the CURRENT robot reference and human
+    // pose, so movement accumulated while locked cannot cause a target jump.
+    const bool torso_was_requested = torso_control_requested_;
+    if (!target.torso_control_enabled || manual_override) {
+      if (torso_control_requested_) torso_reference_.valid = false;
+      torso_control_requested_ = false;
+    } else if (!torso_control_requested_ && source_target_fresh && robot_fresh && mode_ok && contract_active) {
+      const DecisionVector& anchor_q = reference_initialized_ ? reference_q_ : measured_q;
+      torso_control_requested_ = captureSessionBodyAnchor(target, anchor_q, false);
+      torso_reference_.valid = false;
+      last_body_intent_ = BodyIntent{};
+    }
+    const bool torso_control_allowed = target.torso_control_enabled && torso_control_requested_;
+    BodyIntent body_intent = torso_control_allowed ? calculateBodyIntent(target) : BodyIntent{};
+    if (torso_control_allowed && body_intent.torso_valid && source_target_fresh && contract_active) {
+      const Eigen::Vector4d current_torso =
+          torsoFeatureInContext(reference_q_, capture_context_.get(), &capture_q_full_);
+      if (torso_was_requested && torso_position_hold_requested_ && !target.torso_position_hold) {
+        // Discard only height/pitch motion accumulated while locked. Reusing
+        // captureSessionBodyAnchor here would also clutch the live yaw channel.
+        session_body_anchor_.position_resume_offset +=
+            current_torso.segment<2>(1) - body_intent.desired_torso_feature.segment<2>(1);
+        body_intent.desired_torso_feature.segment<2>(1) = current_torso.segment<2>(1);
+        body_intent.desired_torso_velocity.segment<2>(1).setZero();
+        if (torso_reference_.valid) {
+          torso_reference_.p.head<2>() = current_torso.segment<2>(1);
+          torso_reference_.v.head<2>().setZero();
+        }
+      }
+      if (target.torso_position_hold) {
+        body_intent.desired_torso_feature.segment<2>(1) = current_torso.segment<2>(1);
+        body_intent.desired_torso_velocity.segment<2>(1).setZero();
+      }
+      torso_position_hold_requested_ = target.torso_position_hold;
+    }
+    if (body_intent.torso_valid && source_target_fresh && contract_active &&
+        !dynamic_fault_latched_ && !reference_tracking_fault_latched_) {
+      session_body_anchor_.resume_mapping_valid = true;
+    }
+    if (body_intent.torso_valid) {
+      last_body_intent_ = body_intent;
+    }
+    aligned_torso_target.body_intent = body_intent;
+    aligned_world_target.body_intent = body_intent;
+    TargetSnapshot world_target = aligned_torso_target;
+    prepareTargetForTracking(world_target, target_age);
     const bool unlock_owns = unlockOwnsReference();
     const bool unlock_guarded = unlock_owns || unlock_phase_ == UnlockPhase::Joining;
     const bool allow_join_torso = torso_control_allowed && (!unlock_guarded || arm_only_join_);
@@ -7636,18 +7656,20 @@ class PinocchioVelocityIk {
 
     if(unlock_enabled_ && preparing && contract_prepare && !manual_override &&
        (return_phase_==UnlockPhase::Blocked ||
-        !unlockCommandClear(reference_q_,measured_q,measured_dq,next_dq,cycle_dt,true))) {
+        !unlockCommandClear(reference_q_,measured_q,measured_dq,next_dq,cycle_dt,
+                            UnlockClearanceCheck::ReturnStep))) {
       // Reject this step and brake on the existing supervisor. A transient
       // stopping envelope must not consume the operator's PREPARE request.
       if (return_phase_ != UnlockPhase::Blocked) {
-        return_phase_ = UnlockPhase::Braking;
-        ROS_WARN_THROTTLE(1., "[UnlockReturn] braking for clearance; rechecking the same PREPARE request");
+        ROS_WARN_THROTTLE(1., "[UnlockReturn] braking for next-step clearance; rechecking the same PREPARE request");
       }
       preparation_commanded=false;preparation_complete_=false;
     }
 
+    const bool direct_ready_follow = ready_follow_guard_ && !arm_only_join_;
     if ((unlock_guarded || ready_follow_guard_) && tracking && !preparing && !manual_override &&
-        !unlockCommandClear(reference_q_, measured_q, measured_dq, next_dq, cycle_dt)) {
+        !unlockCommandClear(reference_q_, measured_q, measured_dq, next_dq, cycle_dt,
+                            direct_ready_follow ? UnlockClearanceCheck::LiveStep : UnlockClearanceCheck::PlannedStop)) {
       // Reject this command and use the supervised brake below. A joint path
       // needs a new start after braking. The live join can retry its next
       // sample against fresh input without replaying the startup path.
@@ -7655,7 +7677,8 @@ class PinocchioVelocityIk {
         unlock_phase_ = UnlockPhase::Retrying;
         unlock_settled_ = 0.;
       }
-      ROS_WARN_THROTTLE(1., "[UnlockTransition] braking for stopping clearance; rechecking automatically");
+      ROS_WARN_THROTTLE(1., "[UnlockTransition] braking for %s clearance; rechecking automatically",
+                        direct_ready_follow ? "next-step" : "stopping");
       candidate_accepted = false;
       tracking_command_held = false;
       unlock_commanded = false;
@@ -7812,7 +7835,7 @@ class PinocchioVelocityIk {
       }
       acquisition_.update(cycle_dt,aligned,input_continuity_.phase==velocity_ik::InputPhase::Fresh);
       // Live control is acknowledged independently of arm convergence. Retain
-      // the stopping-clearance check through the approach to a moving target.
+      // the clearance check through the approach to a moving target.
       if (unlock_phase_ == UnlockPhase::Done && !acquisition_.catchup)
         ready_follow_guard_ = false;
     }

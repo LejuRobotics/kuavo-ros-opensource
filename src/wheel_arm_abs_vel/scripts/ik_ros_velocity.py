@@ -1878,9 +1878,8 @@ class IkRos:
             if mode == 2 and state == AbsoluteEnableState.RETURNING_TO_PREP:
                 return result(*self._interrupt_fixed_prepare_locked())
             if (mode == 2 and origin != 'first_trigger' and state == AbsoluteEnableState.PREPARED
-                    and self._wheel_mpc_stable_for_mm_cmd()
+                    and self._fixed_arm_controller_ready(time.monotonic())
                     and self._fixed_consumer_ack_locked(time.monotonic())
-                    and self._fixed_control_enabled is True
                     and self._absolute_mode_status == (2, 2, False)):
                 return result(*self._interrupt_fixed_prepare_locked())
             self._fixed_operation_error = False
@@ -1992,9 +1991,9 @@ class IkRos:
                            ('timestamp invalid' if age < 0 else 'stream lost', age))
             elif p['phase'] == 'dependencies':
                 error = self._fixed_capture_input_error_locked()
-                if error or self._fixed_control_enabled is not True or not self._wheel_mpc_stable_for_mm_cmd():
+                if error or not self._fixed_arm_controller_ready(now):
                     rospy.loginfo_throttle(1., '[FixedStart] waiting: %s', error or
-                        ('controller not enabled' if self._fixed_control_enabled is not True else 'MPC internal time not ready'))
+                        ('controller not enabled' if self._fixed_control_enabled is not True else 'waiting for a fresh controller observation'))
                     self._publish_fixed_operation_state()
                     return
                 if p['mode'] == 2 or p['resume']:
@@ -5161,6 +5160,15 @@ class IkRos:
         """轮臂 MPC 观测：time 为 MPC 模块内部时间，从 0 递增"""
         self._wheel_mpc_obs_time = float(msg.time)
         self._wheel_mpc_obs_receive_monotonic = time.monotonic()
+
+    def _fixed_arm_controller_ready(self, now):
+        # Fixed IK publishes normal wheel observations only after the configured
+        # startup action and measured reference initialization. It runs no MPC policy.
+        observed = self._wheel_mpc_obs_receive_monotonic
+        return (self._fixed_control_enabled is True and observed is not None
+                and 0.0 <= now - observed <= .2
+                and self._wheel_mpc_obs_time is not None
+                and math.isfinite(self._wheel_mpc_obs_time) and self._wheel_mpc_obs_time >= 0.)
 
     def _wheel_mpc_stable_for_mm_cmd(self):
         """轮臂：仅当 mobile_manipulator_mpc_observation.time 大于阈值时才允许发 mm / 切手臂模式（kuavodevlab#3009）。"""

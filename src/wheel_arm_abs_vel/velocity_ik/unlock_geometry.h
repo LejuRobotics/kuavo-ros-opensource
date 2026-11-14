@@ -17,12 +17,12 @@ struct UnlockCapsule {
   double radius=0.;
 };
 // Exact segment distance, including parallel and zero-length segments.
-inline double unlockSegmentDistance(const UnlockCapsule& a, const UnlockCapsule& b) {
+inline Eigen::Vector3d unlockSegmentSeparation(const UnlockCapsule& a, const UnlockCapsule& b) {
   const Eigen::Vector3d u=a.b-a.a, v=b.b-b.a, w=a.a-b.a;
   const double aa=u.dot(u), bb=u.dot(v), cc=v.dot(v), dd=u.dot(w), ee=v.dot(w);
   double s=0.,t=0.;
   constexpr double eps=1e-14;
-  if(aa<=eps && cc<=eps) return w.norm();
+  if(aa<=eps && cc<=eps) return w;
   if(aa<=eps) t=std::clamp(ee/cc,0.,1.);
   else if(cc<=eps) s=std::clamp(-dd/aa,0.,1.);
   else {
@@ -32,10 +32,10 @@ inline double unlockSegmentDistance(const UnlockCapsule& a, const UnlockCapsule&
     if(t<0.) {t=0.;s=std::clamp(-dd/aa,0.,1.);}
     else if(t>1.) {t=1.;s=std::clamp((bb-dd)/aa,0.,1.);}
   }
-  return (w+s*u-t*v).norm();
+  return w+s*u-t*v;
 }
 inline double unlockCapsuleDistance(const UnlockCapsule& a,const UnlockCapsule& b) {
-  return unlockSegmentDistance(a,b)-a.radius-b.radius;
+  return unlockSegmentSeparation(a,b).norm()-a.radius-b.radius;
 }
 
 // Conservative URDF primitive envelopes. A cylinder is enclosed by a capsule
@@ -139,6 +139,84 @@ class UnlockGeometry {
     if(shapes.size()>32)throw std::runtime_error("too many unlock collision primitives");
   }
 
+  // Use the signed trapezoidal step only for the direct return. The same
+  // capsule pairs and margins apply. Inside the margin a separated pair
+  // may move out, provided its gap never goes below its starting value.
+  bool clearReturnStep(const ModelPinocchio& model, const ModelContext& context,
+      const std::string& torso, const Eigen::VectorXd& initial_step,
+      const Eigen::VectorXd& mean_step, const std::array<int,14>& velocity_indices,
+      double margin) const {
+    struct Motion {
+      UnlockCapsule capsule;
+      double travel = 0., curvature = 0.;
+      std::array<Eigen::Vector3d,2> initial, mean;
+      bool projected = false;
+    };
+    std::array<Motion,32> motion;
+    const auto& body = model.GetFrameByName(torso);
+    for (size_t i=0; i<shapes.size(); ++i) {
+      const auto& shape = shapes[i];
+      auto& m = motion[i];
+      m.capsule = torsoCapsule(model, context, body, shape);
+      if (shape.arm < 0) continue;
+      double parent_rotation = 0.;
+      for (int j=0; j<7; ++j) {
+        const int k = velocity_indices[7*shape.arm+j];
+        const double angle = std::max(std::abs(initial_step[k]), std::abs(mean_step[k]));
+        const double travel = shape.lever[j] * angle;
+        m.travel += travel;
+        // For a serial revolute chain the second derivative along a joint
+        // displacement ray contains a diagonal term and two ancestor terms.
+        m.curvature += travel * (angle + 2.*parent_rotation);
+        parent_rotation += angle;
+      }
+    }
+    // Normalize time to [0,1]. The linearized endpoint trajectory is a
+    // quadratic Bezier with offsets (0, initial/2, mean). The FK remainder
+    // is bounded by curvature*t*t/2, so it affects only the last control.
+    const auto project = [&](size_t i, const Eigen::Vector3d& normal) {
+      auto& m = motion[i];
+      const auto& shape = shapes[i];
+      if (!m.projected) {
+        for (int e=0; e<2; ++e) {
+          if (shape.arm < 0) {
+            m.initial[e].setZero();
+            m.mean[e].setZero();
+          } else {
+            Eigen::MatrixXd jacobian;
+            model.translationJacobian(context, model.GetFrameByName(shape.frame),
+                e == 0 ? shape.local.a : shape.local.b, body, body, &jacobian);
+            m.initial[e] = .5 * (jacobian * initial_step);
+            m.mean[e] = jacobian * mean_step;
+          }
+        }
+        m.projected = true;
+      }
+      const double a = normal.dot(m.capsule.a), b = normal.dot(m.capsule.b);
+      return Eigen::Vector2d(
+          std::min(a+normal.dot(m.initial[0]), b+normal.dot(m.initial[1])),
+          std::min(a+normal.dot(m.mean[0]), b+normal.dot(m.mean[1])) - .5*m.curvature);
+    };
+    for (size_t i=0; i<shapes.size(); ++i) for (size_t j=i+1; j<shapes.size(); ++j) {
+      if (shapes[i].arm == shapes[j].arm) continue;
+      const auto& a = motion[i];
+      const auto& b = motion[j];
+      const Eigen::Vector3d separation = unlockSegmentSeparation(a.capsule, b.capsule);
+      const double length = separation.norm();
+      const double radii = a.capsule.radius + b.capsule.radius;
+      const double gap = length - radii;
+      if (!std::isfinite(gap) || gap <= 0.) return false;
+      if (gap - a.travel - b.travel >= margin) continue;
+      const Eigen::Vector3d normal = separation / length;
+      const Eigen::Vector2d bounds = (project(i,normal) + project(j,-normal)).array() - radii;
+      // Roundoff at the stationary first control must not prevent departure.
+      const double floor = std::min(gap, margin);
+      if (!bounds.allFinite() || bounds.minCoeff() < floor - 1e-12 ||
+          (gap < margin && bounds[1] <= gap + 1e-12)) return false;
+    }
+    return true;
+  }
+
   // Joint excursion radii describe ALL configurations in a stopping box, not
   // just one guessed stopping trajectory. Sum(link reach * angular travel)
   // bounds how far any point of each capsule can move. Measured and reference
@@ -152,13 +230,12 @@ class UnlockGeometry {
     std::array<double,32> inflations{};size_t index=0;
     if(center_clearance)*center_clearance=std::numeric_limits<double>::infinity();
     for(const auto& s:shapes) {
-      const auto pose=model.GetFrameByName(s.frame).CalcPose(context,body);
+
       double inflation=0.;
       if(s.arm>=0)for(int j=0;j<7;++j) inflation+=s.lever[j]*excursion[s.arm][j];
       inflations[index]=inflation;
-      world[index++]={pose.translation()+pose.rotation().matrix()*s.local.a,
-                      pose.translation()+pose.rotation().matrix()*s.local.b,
-                      s.local.radius+inflation};
+      world[index] = torsoCapsule(model, context, body, s);
+      world[index++].radius += inflation;
     }
     for(size_t i=0;i<shapes.size();++i)for(size_t j=i+1;j<shapes.size();++j) {
       if(shapes[i].arm==shapes[j].arm)continue;
@@ -225,6 +302,12 @@ class UnlockGeometry {
   }
 
  private:
+  static UnlockCapsule torsoCapsule(const ModelPinocchio& model, const ModelContext& context,
+      const Frame& body, const Shape& shape) {
+    const auto pose = model.GetFrameByName(shape.frame).CalcPose(context, body);
+    return {pose.translation()+pose.rotation().matrix()*shape.local.a,
+            pose.translation()+pose.rotation().matrix()*shape.local.b, shape.local.radius};
+  }
   static Eigen::Vector3d vector(const std::string& text) {
     std::istringstream in(text);Eigen::Vector3d v;
     if(!(in>>v.x()>>v.y()>>v.z())||!v.allFinite())

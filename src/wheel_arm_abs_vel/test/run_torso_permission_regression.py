@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='torso-regression-') as tmp:
                 [(str(package / 'launch/quest_velocity_ik.launch'),
                   ['robot_version:=' + model])], None, verbose=False)
             for key, param in config.params.items():
-                if scenario != 'follow_entry' and key != '/whole_body_velocity_ik/model_contract_json':
+                if scenario not in ('follow_entry', 'xa_torso_handoff', 'xa_close_return') and key != '/whole_body_velocity_ik/model_contract_json':
                     continue
                 if key.startswith('/absolute_velocity_ik/'):
                     key = '/torso_permission_test/' + key.split('/', 2)[2]
