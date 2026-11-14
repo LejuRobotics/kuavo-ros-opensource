@@ -22,6 +22,7 @@
 #include "../velocity_ik/temporal_cost.h"
 #include "../velocity_ik/joint_jerk.h"
 #include "../velocity_ik/fixed_bandwidth_reference.h"
+#include "../velocity_ik/third_order_position_reference.h"
 #include "../velocity_ik/optical_bounded_reference.h"
 #include "../velocity_ik/execution_governor.h"
 #include "../velocity_ik/teleop_continuity.h"
@@ -1143,6 +1144,9 @@ class PinocchioVelocityIk {
     pnh_.param("base_tracking_yaw_limit", base_tracking_yaw_limit_, 0.20);
     pnh_.param("feedforward_filter_time_constant", ff_filter_time_constant_, 0.030);
     pnh_.param("hand_position_cutoff_hz", hand_position_cutoff_hz_, 5.);
+    pnh_.param("hand_position_filter_order", hand_position_filter_order_, 3);
+    if(hand_position_filter_order_!=2 && hand_position_filter_order_!=3)
+      throw std::runtime_error("hand_position_filter_order must be 2 or 3");
     pnh_.param("hand_orientation_cutoff_hz", hand_orientation_cutoff_hz_, 4.);
     pnh_.param("optical_hand_position_cutoff_hz", optical_hand_position_cutoff_hz_, hand_position_cutoff_hz_);
     pnh_.param("optical_hand_orientation_cutoff_hz", optical_hand_orientation_cutoff_hz_, hand_orientation_cutoff_hz_);
@@ -1175,6 +1179,8 @@ class PinocchioVelocityIk {
     ROS_INFO("[VelocityIk] Skeleton CV -> fixed reference (no age prediction): controller hand %.2f/%.2f Hz, optical hand %.2f/%.2f Hz, torso %.2f Hz",
              hand_position_cutoff_hz_,hand_orientation_cutoff_hz_,
              optical_hand_position_cutoff_hz_,optical_hand_orientation_cutoff_hz_,torso_reference_frequency_);
+    ROS_INFO("[VelocityIk] Controller Cartesian position filter order=%d (hand and elbow), cutoff=%.2f Hz",
+             hand_position_filter_order_,hand_position_cutoff_hz_);
     ROS_INFO("[VelocityIk] Optical bounded reference %s: linear v/a %.3f/%.3f, angular v/a %.3f/%.3f",
              optical_hand_bounded_reference_enabled_ ? "enabled" : "disabled",
              optical_linear_speed_limit_, optical_linear_acceleration_limit_,
@@ -5705,26 +5711,19 @@ class PinocchioVelocityIk {
     if (!armIsControlled(0) || !armIsControlled(1))
       throw std::runtime_error("unlock transition currently requires both arms");
     velocity_ik::UnlockJointPlanner::Config config;
-    pnh_.param("unlock_path_clearance", config.clearance, .025);
     pnh_.param("unlock_joint_speed", config.speed, 4.);
     pnh_.param("unlock_joint_acceleration", config.acceleration_cap, 12.);
     pnh_.param("unlock_joint_jerk", config.jerk_cap, 150.);
-    pnh_.param("unlock_preview_tracking_lag", config.tracking_lag, .04);
     pnh_.param("unlock_planning_timeout", config.planning_timeout, 5.);
-    pnh_.param("unlock_execution_clearance", unlock_margin_, .01);
     pnh_.param("unlock_handoff_duration", unlock_join_duration_, .18);
-    config.execution_clearance = unlock_margin_ + .005;
-    config.proximal_delay = arm_boundary_execution_delay_proximal_;
-    config.wrist_delay = arm_boundary_execution_delay_wrist_;
     double tool_radius;
     pnh_.param("unlock_tool_radius", tool_radius, .06);
-    for (double value : {config.clearance, config.speed, config.acceleration_cap,
-                        config.jerk_cap, config.tracking_lag, config.planning_timeout, unlock_margin_, unlock_join_duration_, tool_radius})
+    for (double value : {config.speed, config.acceleration_cap,
+                        config.jerk_cap, config.planning_timeout, unlock_join_duration_, tool_radius})
       if (!std::isfinite(value) || value <= 0.)
         throw std::runtime_error("unlock parameters must be finite and positive");
-    if (config.clearance <= config.execution_clearance ||
-        config.planning_timeout > 10. || unlock_join_duration_ < .15)
-      throw std::runtime_error("invalid unlock planning/execution limits");
+    if (config.planning_timeout > 10. || unlock_join_duration_ < .15)
+      throw std::runtime_error("invalid unlock planning/timing limits");
     // The ready pose has a known joint target. Keep its timing separate
     // from startup and lower-body preparation, which use different limits.
     pnh_.param("arm_follow_entry/return_gain", ready_return_gain_, preparation_gain_);
@@ -5732,7 +5731,6 @@ class PinocchioVelocityIk {
     if (!std::isfinite(ready_return_gain_) || ready_return_gain_ <= 0. ||
         !std::isfinite(ready_return_speed_) || ready_return_speed_ <= 0.)
       throw std::runtime_error("invalid ready-pose arm interpolation limits");
-    return_path_clearance_ = config.clearance;
     unlock_speed_ = config.speed;
     unlock_acceleration_ = config.acceleration_cap;
     unlock_jerk_ = config.jerk_cap;
@@ -5749,7 +5747,6 @@ class PinocchioVelocityIk {
     }
     config.velocity = velocity_limit_;
     config.acceleration = acceleration_limit_;
-    config.braking = braking_limit_;
     for (int i = 0; i < decisionDofCount(); ++i) {
       config.q_index.push_back(decision_position_index_[i]);
       config.v_index.push_back(decision_velocity_index_[i]);
@@ -5764,6 +5761,8 @@ class PinocchioVelocityIk {
     unlock_guard_full_q_ = plant_->GetPositions(*unlock_guard_context_);
     unlock_worker_ = std::make_unique<velocity_ik::UnlockPlanningWorker>(
         std::make_unique<velocity_ik::UnlockJointPlanner>(*plant_, unlock_geometry_, config));
+    ROS_INFO("[UnlockTransition] geometric clearance checks removed; joint and dynamic limits remain active");
+    ROS_INFO("[UnlockTransition] joint tracking-error stops disabled for acquisition, handoff and ready return");
   }
 
   bool unlockOwnsReference() const {
@@ -5942,7 +5941,7 @@ class PinocchioVelocityIk {
         unlock_token_ = unlock_worker_->submit(reference_q_, unlock_goal_);
         unlock_phase_ = UnlockPhase::Planning;
         unlock_settled_ = 0.;
-        ROS_INFO_THROTTLE(1., "[UnlockTransition] planning endpoint and swept path");
+        ROS_INFO_THROTTLE(1., "[UnlockTransition] planning endpoint and joint timing");
       }
     } else if (unlock_phase_ == UnlockPhase::Planning) {
       velocity_ik::UnlockJointPlan plan;
@@ -5962,13 +5961,11 @@ class PinocchioVelocityIk {
         unlock_phase_ = UnlockPhase::Executing; unlock_elapsed_ = 0.;
         unlock_clock_rate_ = 1.; unlock_clock_acceleration_ = 0.;
         ROS_INFO_STREAM("[UnlockTransition] execute " << unlock_plan_.durations.size()
-            << " segments, " << unlock_plan_.duration() << " s, certified clearance "
-            << unlock_plan_.minimum_clearance << " m");
+            << " segments, " << unlock_plan_.duration() << " s");
       }
     } else if (unlock_phase_ == UnlockPhase::Executing) {
       DecisionVector expected, velocity;
       unlock_plan_.sample(unlock_elapsed_, &expected, &velocity);
-      if (maxAbs(measured-reference_q_) > .10) { blockUnlock("joint tracking error"); return; }
       advanceArmPathClock(unlock_plan_,measured,dt,&unlock_elapsed_,
                           &unlock_clock_rate_,&unlock_clock_acceleration_);
       const bool at_end = unlock_elapsed_ >= unlock_plan_.duration() &&
@@ -5983,7 +5980,6 @@ class PinocchioVelocityIk {
         seedUnlockHandoff(reference_q_, &live);
       }
     } else if (unlock_phase_ == UnlockPhase::Joining) {
-      if (maxAbs(measured-reference_q_) > .10) { blockUnlock("handoff tracking error"); return; }
       // Ownership ends when the blend has completed, including its final
       // guarded command on the preceding tick. Do not require the operator
       // or the soft elbow task to stop moving before normal IK can take over.
@@ -6077,7 +6073,6 @@ class PinocchioVelocityIk {
     }
     if (return_phase_ == UnlockPhase::Blocked) return stopped;
     if (maxArmAbs(return_goal_ - goal) > 1e-8) { blockReturnPath("ready goal changed during return"); return stopped; }
-    if (maxArmAbs(measured - reference_q_) > .10) { blockReturnPath("joint tracking error"); return stopped; }
     if (return_phase_ == UnlockPhase::Done) return stopped;
     return_total_ += dt;
     if (return_total_ > 30.) { blockReturnPath("return timeout"); return stopped; }
@@ -6107,60 +6102,6 @@ class PinocchioVelocityIk {
       desired[i] = std::clamp(step / dt, reference_dq_[i] - max_dv, reference_dq_[i] + max_dv);
     }
     return desired;
-  }
-
-  enum class UnlockClearanceCheck { PlannedStop, LiveStep, ReturnStep };
-
-  bool unlockCommandClear(const DecisionVector& reference, const DecisionVector& measured,
-      const DecisionVector& measured_velocity, const DecisionVector& next_velocity, double dt,
-      UnlockClearanceCheck check) {
-    if (check == UnlockClearanceCheck::ReturnStep) {
-      std::array<int,14> arm_velocity_indices;
-      const auto clear_return = [&](const DecisionVector& q, const DecisionVector& current, double margin) {
-        Eigen::VectorXd initial = Eigen::VectorXd::Zero(plant_->num_velocities());
-        Eigen::VectorXd mean = initial;
-        for (int a=0; a<kArmCount; ++a) for (int j=0; j<kJointsPerArm; ++j) {
-          const int i = armDecisionIndex(a,j);
-          const int v = decision_velocity_index_[i];
-          arm_velocity_indices[a*kJointsPerArm+j] = v;
-          initial[v] = current[i]*dt;
-          mean[v] = .5*(current[i]+next_velocity[i])*dt;
-        }
-        if (!initial.allFinite() || !mean.allFinite()) return false;
-        setPlantDecisionPositionsInContext(unlock_guard_context_.get(), &unlock_guard_full_q_, q);
-        return unlock_geometry_.clearReturnStep(*plant_, *unlock_guard_context_, torso_frame_name_,
-                                               initial, mean, arm_velocity_indices, margin);
-      };
-      return clear_return(reference, reference_dq_, return_path_clearance_) &&
-             clear_return(measured, measured_velocity, unlock_margin_);
-    }
-    std::array<int, 14> indices;
-    std::array<std::array<double, 7>, 2> reference_travel{}, measured_travel{};
-    for (int a = 0; a < kArmCount; ++a) for (int j = 0; j < kJointsPerArm; ++j) {
-      const int i = armDecisionIndex(a, j);
-      indices[a*kJointsPerArm+j] = decision_position_index_[i];
-      const double step_speed = std::max(std::abs(reference_dq_[i]), std::abs(next_velocity[i]));
-      reference_travel[a][j] = step_speed * dt;
-      measured_travel[a][j] = std::max(step_speed, std::abs(measured_velocity[i])) * dt;
-      if (check == UnlockClearanceCheck::PlannedStop) {
-        const double speed = std::max(step_speed, std::abs(measured_velocity[i]));
-        const double delay = j < 4 ? arm_boundary_execution_delay_proximal_ : arm_boundary_execution_delay_wrist_;
-        const double acceleration = std::max(std::abs(reference_ddq_[i]),
-            std::abs((next_velocity[i] - reference_dq_[i]) / dt));
-        const double stop = velocity_ik::discreteStopDistance(speed, delay, acceleration,
-            .8 * std::min(braking_limit_[i], acceleration_limit_[i]), dt);
-        reference_travel[a][j] = measured_travel[a][j] =
-            std::abs(reference[i] - measured[i]) + speed * dt + stop;
-      }
-    }
-    // Direct X+A tests the commanded step and the measured motion each tick.
-    // The precomputed path keeps its original stopping-envelope contract.
-    const auto clear = [&](const DecisionVector& q, const auto& travel, double margin) {
-      setPlantDecisionPositionsInContext(unlock_guard_context_.get(), &unlock_guard_full_q_, q);
-      return unlock_geometry_.certifyBox(*plant_, unlock_guard_context_.get(), &unlock_guard_full_q_,
-                                         indices, torso_frame_name_, travel, margin);
-    };
-    return clear(reference, reference_travel, unlock_margin_) && clear(measured, measured_travel, unlock_margin_);
   }
 
   bool automaticHoldEnabled() const {
@@ -6233,7 +6174,10 @@ class PinocchioVelocityIk {
                 cycle_dt, orientation_hz, optical_angular_speed_limit_, optical_angular_acceleration_limit_);
             }
           } else {
-            velocity_ik::stepFixedVector(hand_reference_[arm],a.hand_position,cycle_dt,position_cutoff_hz);
+            if(!optical_hand && hand_position_filter_order_==3)
+              velocity_ik::stepThirdOrderPosition(hand_reference_[arm],a.hand_position,cycle_dt,position_cutoff_hz);
+            else
+              velocity_ik::stepFixedVector(hand_reference_[arm],a.hand_position,cycle_dt,position_cutoff_hz);
             velocity_ik::stepFixedRotation(hand_rotation_reference_[arm],a.hand_orientation,cycle_dt,orientation_cutoff_hz);
           }
           a.hand_position=hand_reference_[arm].p;
@@ -6255,6 +6199,8 @@ class PinocchioVelocityIk {
               else velocity_ik::stepBoundedOpticalVector(elbow_reference_[arm], a.elbow_position,
                   cycle_dt, elbow_hz, optical_linear_speed_limit_, optical_linear_acceleration_limit_);
             }
+            else if(!optical_hand && hand_position_filter_order_==3)
+              velocity_ik::stepThirdOrderPosition(elbow_reference_[arm],a.elbow_position,cycle_dt,position_cutoff_hz);
             else
               velocity_ik::stepFixedVector(elbow_reference_[arm],a.elbow_position,cycle_dt,position_cutoff_hz);
             a.elbow_position=elbow_reference_[arm].p;
@@ -7654,36 +7600,6 @@ class PinocchioVelocityIk {
       }
     }
 
-    if(unlock_enabled_ && preparing && contract_prepare && !manual_override &&
-       (return_phase_==UnlockPhase::Blocked ||
-        !unlockCommandClear(reference_q_,measured_q,measured_dq,next_dq,cycle_dt,
-                            UnlockClearanceCheck::ReturnStep))) {
-      // Reject this step and brake on the existing supervisor. A transient
-      // stopping envelope must not consume the operator's PREPARE request.
-      if (return_phase_ != UnlockPhase::Blocked) {
-        ROS_WARN_THROTTLE(1., "[UnlockReturn] braking for next-step clearance; rechecking the same PREPARE request");
-      }
-      preparation_commanded=false;preparation_complete_=false;
-    }
-
-    const bool direct_ready_follow = ready_follow_guard_ && !arm_only_join_;
-    if ((unlock_guarded || ready_follow_guard_) && tracking && !preparing && !manual_override &&
-        !unlockCommandClear(reference_q_, measured_q, measured_dq, next_dq, cycle_dt,
-                            direct_ready_follow ? UnlockClearanceCheck::LiveStep : UnlockClearanceCheck::PlannedStop)) {
-      // Reject this command and use the supervised brake below. A joint path
-      // needs a new start after braking. The live join can retry its next
-      // sample against fresh input without replaying the startup path.
-      if (unlock_phase_ == UnlockPhase::Executing) {
-        unlock_phase_ = UnlockPhase::Retrying;
-        unlock_settled_ = 0.;
-      }
-      ROS_WARN_THROTTLE(1., "[UnlockTransition] braking for %s clearance; rechecking automatically",
-                        direct_ready_follow ? "next-step" : "stopping");
-      candidate_accepted = false;
-      tracking_command_held = false;
-      unlock_commanded = false;
-    }
-
     if (!tracking && !preparing) {
       fallback_active_ = true;
       candidate_hold_cycles_ = max_candidate_hold_cycles_;
@@ -8973,7 +8889,7 @@ class PinocchioVelocityIk {
   uint64_t unlock_arm_operation_seq_{0};
   uint64_t unlock_token_{0};
   double unlock_elapsed_{0.}, unlock_total_elapsed_{0.}, unlock_settled_{0.};
-  double unlock_join_elapsed_{0.}, unlock_margin_{.01}, unlock_join_duration_{.18};
+  double unlock_join_elapsed_{0.}, unlock_join_duration_{.18};
   double unlock_active_join_duration_{.18};
   double unlock_clock_rate_{1.}, unlock_clock_acceleration_{0.};
   double unlock_speed_{4.}, unlock_acceleration_{12.}, unlock_jerk_{150.};
@@ -8986,7 +8902,6 @@ class PinocchioVelocityIk {
   Eigen::VectorXd unlock_guard_full_q_;
   std::unique_ptr<velocity_ik::UnlockPlanningWorker> unlock_worker_;
   UnlockPhase return_phase_{UnlockPhase::Idle};
-  double return_path_clearance_{.025};
   double return_total_{0.}, ready_return_gain_{2.0}, ready_return_speed_{0.60};
   DecisionVector return_goal_;
   // Legacy startup/configurations without direct return interpolation.
@@ -9189,6 +9104,7 @@ class PinocchioVelocityIk {
   double cascade_base_tracking_error_start_{0.040};
   double cascade_base_tracking_error_full_{0.100};
   double hand_position_cutoff_hz_{4.},hand_orientation_cutoff_hz_{3.};
+  int hand_position_filter_order_{3};
   double optical_hand_position_cutoff_hz_{3.},optical_hand_orientation_cutoff_hz_{2.};
   bool optical_hand_bounded_reference_enabled_{false};
   bool optical_adaptive_enabled_{false},last_optical_shaper_source_{false};

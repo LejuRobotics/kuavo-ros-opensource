@@ -239,6 +239,10 @@ endif()
 
 if(CATKIN_ENABLE_TESTING)
   # Always validate the production shaper, independently of optional replay tools.
+  add_executable(velocity_ik_third_order_position_test third_order_position_reference_test.cpp)
+  target_link_libraries(velocity_ik_third_order_position_test Eigen3::Eigen)
+  target_compile_options(velocity_ik_third_order_position_test PRIVATE -UNDEBUG)
+  add_test(NAME velocity_ik_third_order_position_test COMMAND velocity_ik_third_order_position_test)
   if(NOT TARGET velocity_ik_fixed_bandwidth_integration_test)
     add_executable(velocity_ik_fixed_bandwidth_integration_test fixed_bandwidth_integration_test.cpp)
     target_include_directories(velocity_ik_fixed_bandwidth_integration_test PRIVATE ../include ${VELOCITY_IK_MESSAGE_INCLUDE} ${catkin_INCLUDE_DIRS})

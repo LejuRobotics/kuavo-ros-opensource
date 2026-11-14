@@ -69,12 +69,12 @@ def wait(label, predicate, timeout=25):
 
 XA = dict(left_first_button_pressed=True, right_first_button_pressed=True)
 XY = dict(left_first_button_touched=True, left_second_button_touched=True)
-CHORD = dict(XY, right_second_button_pressed=True) if source == 'quest' else dict(left_second_button_pressed=True, right_trigger=.8)
+CHORD = dict(left_first_button_pressed=True, right_y=-1.) if source == 'quest' else dict(left_second_button_pressed=True, right_trigger=.8)
 active = lambda t: t.get('absolute_state') == 3 and t.get('control_state') == 2 and t.get('control_valid')
 
 def press(label, joy, **pose):
     command(label, joy, **pose)
-    time.sleep(.35)
+    time.sleep(1.5 if abs(joy.get('right_y', 0.)) > .8 else .35)
     command(label + '_release', **pose)
     time.sleep(.4)
 
@@ -129,9 +129,9 @@ try:
     if source == 'quest':
         command('b_before_xy', dict(right_second_button_pressed=True))
         time.sleep(.3)
-        command('xy_after_held_b', CHORD)
+        command('xy_after_held_b', dict(XY, right_second_button_pressed=True))
         time.sleep(.4)
-        check('b_must_be_fresh_press', latest['target']['torso_control_enabled'])
+        check('retired_xy_b_does_not_toggle', latest['target']['torso_control_enabled'])
         command('release_chord')
         time.sleep(.4)
     displace('torso_displaced')

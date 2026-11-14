@@ -22,9 +22,8 @@ class TorsoControls:
         self._stick_count = 0
         # Stop and fault revoke execution permission. An input gap during
         # active follow preserves the current torso mode. X+A reset drops both
-        # clutches via clear_operator_mode, including a Quest XY-touch + B
-        # lock. Only an admitted follow request or a fresh torso chord after
-        # that follow is applied may change permission again.
+        # clutches via clear_operator_mode. Only an admitted follow request or
+        # a fresh torso operation after it is applied may change permission.
         self.default_enabled = bool(enable_on_first_follow)
         self.selected_enabled = self.default_enabled
         self.startup_enable_pending = self.default_enabled
@@ -32,15 +31,12 @@ class TorsoControls:
         # X+A resume latches the reset defaults until a real joystick sample
         # applies them. A readiness poll must not consume or cancel that latch.
         self._admitted_follow = False
-        # While set, stick and XY+B cannot put the pre-reset lock back.
+        # While set, torso operations cannot put the pre-reset lock back.
         self._reset_latched = False
         self.last_time = None
         self.chord_down = False
         self.require_release = True
         self.last_hand = None
-        self.quest_consumed = False
-        self.quest_thumb = False
-        self.quest_b_down = False
         self.y_down = False
         self.y_pending = False
         self.y_consumed = False
@@ -58,11 +54,10 @@ class TorsoControls:
         self.wait_for_follow()
 
     def clear_operator_mode(self):
-        """Drop the manual master switch, position hold, and XY+B lock.
+        """Drop the manual master switch and position lock.
 
         Used when X+A starts the whole-body ready-pose return. The next
         admitted follow uses the launch default, with torso position follow on.
-        Quest XY-touch + B is that same master switch, not a separate hold.
         """
         self.position_enabled = True
         self.selected_enabled = self.default_enabled
@@ -85,7 +80,7 @@ class TorsoControls:
         """Restore the selected mode after an explicit, admitted follow request."""
         self.wait_for_follow()
         if self._reset_latched:
-            # X+A already dropped the XY+B / stick lock. Re-apply that default
+            # X+A already dropped the manual lock. Re-apply that default
             # at admission so a gesture during the reset window cannot stick.
             self.position_enabled = True
             self.selected_enabled = self.default_enabled
@@ -142,7 +137,9 @@ class TorsoControls:
             self._last_permissions = permissions
 
     def _update_stick(self, raw, now, ready, fresh, valid, blocked):
-        """Dev controls: stick down/up locks/enables position; X adds yaw.
+        """Quest: X+down locks all; down selects yaw only; either up follows all.
+
+        Pico retains its existing independent master/position selections.
 
         Require a neutral sample after startup, loss or a completed gesture.
         A held stick cannot silently re-enable follow after a safety revocation.
@@ -168,7 +165,11 @@ class TorsoControls:
         if self._stick_count <= self.STICK_HOLD_SAMPLES:
             return
         master, enabled = key
-        if master:
+        if self.source == 'quest':
+            self.enabled = self.selected_enabled = enabled or not master
+            self.position_enabled = enabled
+            self.startup_enable_pending = False
+        elif master:
             self.enabled = self.selected_enabled = enabled
             self.startup_enable_pending = False
         else:
@@ -202,30 +203,8 @@ class TorsoControls:
         elif prepare:
             self.wait_for_follow()
         self.last_time = now
-        if self.source == 'quest':
-            modifier = raw.left_first_button_touched and raw.left_second_button_touched
-            chord = modifier and raw.right_second_button_pressed
-            chord = chord and not (raw.left_first_button_pressed or raw.left_second_button_pressed
-                                   or raw.right_first_button_pressed)
-            # Match the legacy Quest FSM: XY must be touched when B goes down.
-            # Track raw B even outside the modifier and while arm shortcuts
-            # are active, so adding XY or releasing X from X+B is not a press.
-            toggle_edge = chord and not self.quest_b_down
-            self.quest_b_down = raw.right_second_button_pressed
-            if modifier and not self.quest_consumed:
-                self.quest_consumed = True
-                self.quest_thumb = (self.last_hand.left_first_button_touched
-                                    if self.last_hand is not None else False)
-            if self.quest_consumed:
-                # XY touch is a torso modifier, not a thumb/hand-gesture request.
-                result.left_first_button_touched = self.quest_thumb
-                result.left_second_button_touched = False
-                result.right_first_button_pressed = False
-                result.right_second_button_pressed = False
-                if not (raw.left_first_button_touched or raw.left_second_button_touched
-                        or raw.right_second_button_pressed):
-                    self.quest_consumed = False
-        else:
+        chord = toggle_edge = False
+        if self.source == 'pico':
             # Delay a fresh standalone RT briefly so RT-first torso chords do
             # not send a gripper close before Y arrives. No attempt is made to
             # undo an already emitted long standalone squeeze.
@@ -283,9 +262,11 @@ class TorsoControls:
             self.enabled = not self.enabled
             self.selected_enabled = self.enabled
         self.chord_down = chord
+        quest_hand_button = self.source == 'quest' and (
+            raw.right_first_button_pressed or raw.right_second_button_pressed)
         self._update_stick(raw, now, inputs_ready, fresh, valid,
                            stop or arm or chord or raw.left_second_button_pressed
-                           or reset_latched)
+                           or quest_hand_button or reset_latched)
         self._record_permissions()
         if valid:
             self.last_hand = copy.copy(result)

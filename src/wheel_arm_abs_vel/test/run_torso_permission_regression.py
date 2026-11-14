@@ -10,7 +10,7 @@ import tempfile
 import time
 import xmlrpc.client
 
-binary, model, scenario = sys.argv[1:]
+binary, model, scenario, *extra = sys.argv[1:]
 package = Path(__file__).resolve().parents[1]
 with socket.socket() as sock:
     sock.bind(('127.0.0.1', 0))
@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='torso-regression-') as tmp:
                 [(str(package / 'launch/quest_velocity_ik.launch'),
                   ['robot_version:=' + model])], None, verbose=False)
             for key, param in config.params.items():
-                if scenario not in ('follow_entry', 'xa_torso_handoff', 'xa_close_return') and key != '/whole_body_velocity_ik/model_contract_json':
+                if scenario not in ('follow_entry', 'xa_torso_handoff', 'xa_close_return', 'bag_replay', 'tracking_lag') and key != '/whole_body_velocity_ik/model_contract_json':
                     continue
                 if key.startswith('/absolute_velocity_ik/'):
                     key = '/torso_permission_test/' + key.split('/', 2)[2]
@@ -70,7 +70,7 @@ with tempfile.TemporaryDirectory(prefix='torso-regression-') as tmp:
             # The fixture supplies the ready pose and active owner before testing follow.
             client.setParam('/follow_entry_fixture',
                             '/torso_permission_test/use_controller_startup_arm_pose', False)
-            subprocess.run([binary, model, scenario], env=env, check=True, timeout=90)
+            subprocess.run([binary, model, scenario, *extra], env=env, check=True, timeout=90)
         finally:
             if master.poll() is None:
                 os.killpg(master.pid, signal.SIGINT)
