@@ -19,7 +19,7 @@
   },
   "r": {
     "source_package": "SG100V4.0_R_3D_URDF",
-    "source_urdf_sha256": "69bd6fe69710e3797514dad59d7d12352af14e6e2c77111bd7cf4cecfb5bfbd8",
+    "source_urdf_sha256": "873d3830af9166753f463138306359b198a5f4b0d3b0a50a79f1fcf527437007",
     "meshes_sha256": {
       "r_hand_base.STL": "3e1ffc6f28946a66029faf92f8f286f1ffa40cbf9c1347b8568bc4f0d40da6e4",
       "r_index_link1.STL": "5d00027654dcfcfb2f4d5e3704c543ae78ec31f14a6b2a82da7de36d9ee32f54",

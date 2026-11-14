@@ -281,7 +281,7 @@
                                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_thumb_link1"/>
                                 <body name="r_thumb_link2" pos="0.024 0.01575 0.0191" quat="0.707105482511236 0.707108079859474 0 0">
                                   <inertial pos="0.0125 0.021651 0.016232" mass="0.024707" fullinertia="3.2038E-06 2.4043E-06 2.6129E-06 -6.9245E-07 1.3036E-10 -7.4254E-11"/>
-                                  <joint name="r_thumb_j2" pos="0 0 0" axis="0 0 1" range="-2.18 0" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
+                                  <joint name="r_thumb_j2" pos="0 0 0" axis="0 0 1" range="-2.44 0" damping="0.02" solreflimit="0.002 1" solimplimit="0.95 0.98 0.001"/>
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="1 1 1 1" mesh="r_thumb_link2"/>
                                   <body name="r_thumb_link3" pos="0.025 0.043301 0" quat="1 0 0 0">
                                     <inertial pos="0.01046 0.023008 0.015768" mass="0.016607" fullinertia="3.006E-06 1.2485E-06 3.0239E-06 -5.4913E-07 -2.5278E-08 -4.3771E-08"/>

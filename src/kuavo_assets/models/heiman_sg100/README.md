@@ -10,6 +10,10 @@ link/joint 添加 `l_` / `r_` 前缀，将 `base_link` 改为 `l_hand_base` /
 `v4/source_manifest.json` 记录源 URDF 及网格 SHA-256，便于追溯。
 手部 URDF 是与原目录相同形式的 XML 片段，需要嵌入机器人 `<robot>` 中使用。
 
+右手已同步新版供应商 URDF：`r_thumb_j2` 下限由 `-2.18 rad` 更新为
+`-2.44 rad`，上限仍为 `0`。主 URDF、Gazebo、Drake 和 MuJoCo 模型
+同步该限位修正，网格、质量和惯性参数保持不变。
+
 新版本主 URDF、Gazebo URDF、Drake 简化 URDF 和 MuJoCo XML 同步使用 V4
 的质量、质心、完整惯量、关节变换、轴和限位。Drake 保持原来的固定手指关节及
 碰撞简化方式。MuJoCo 使用 `fullinertia` 保留惯量非对角项。左右手质量分别为

@@ -44,7 +44,7 @@ class HeimanV4ModelsTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((V4 / 'meshes' / filename).read_bytes()).hexdigest(), digest)
         self.assertEqual(hand('l').find('joint[@name="l_thumb_j1"]/origin').get('xyz'),
                          '-0.0349576946890685 -0.0204910969115199 0.0221499999999999')
-        self.assertEqual(hand('r').find('joint[@name="r_thumb_j2"]/limit').get('lower'), '-2.18')
+        self.assertEqual(hand('r').find('joint[@name="r_thumb_j2"]/limit').get('lower'), '-2.44')
 
     def test_hand_parameters_in_every_urdf(self):
         for version in VERSIONS:
@@ -154,6 +154,10 @@ class HeimanV4ModelsTest(unittest.TestCase):
                         jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint.get('name'))
                         self.assertGreaterEqual(jid, 0)
                         limits = joint.find('limit')
+                        self.assertTrue(model.jnt_limited[jid])
+                        np.testing.assert_allclose(model.jnt_range[jid],
+                                                   [float(limits.get('lower')), float(limits.get('upper'))],
+                                                   atol=1e-12, rtol=0)
                         angle = 0.35 * (float(limits.get('upper')) + float(limits.get('lower'))) if moving else 0.0
                         data.qpos[model.jnt_qposadr[jid]] = angle
                         parent_pos, parent_rot = expected_poses[joint.find('parent').get('link')]

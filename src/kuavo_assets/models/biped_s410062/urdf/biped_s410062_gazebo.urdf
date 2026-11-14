@@ -1382,7 +1382,7 @@
     <parent link="r_thumb_link1"/>
     <child link="r_thumb_link2"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-2.18" upper="0" effort="0" velocity="0"/>
+    <limit lower="-2.44" upper="0" effort="0" velocity="0"/>
   <dynamics damping="0.02" friction="0.0"/>
   </joint>
   <joint name="r_thumb_j3" type="revolute">
