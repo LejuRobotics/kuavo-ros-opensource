@@ -37,6 +37,7 @@
   <arg name="publish_legacy_arm_traj" default="true" />
   <arg name="publish_absolute_bag_topics" default="true" />
   <arg name="hand_position_cutoff_hz" default="5.0" />
+  <arg name="hand_position_filter_order" default="3" />
   <arg name="hand_orientation_cutoff_hz" default="4.0" />
   <arg name="joint_jerk_enabled" default="true" />
   <arg name="adaptive_reference_enabled" default="true" />
@@ -194,6 +195,7 @@
     <arg name="publish_legacy_arm_traj" value="$(arg publish_legacy_arm_traj)" />
     <arg name="publish_absolute_bag_topics" value="$(arg publish_absolute_bag_topics)" />
     <arg name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" />
+    <arg name="hand_position_filter_order" value="$(arg hand_position_filter_order)" />
     <arg name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" />
     <arg name="joint_jerk_enabled" value="$(arg joint_jerk_enabled)" />
     <arg name="adaptive_reference_enabled" value="$(arg adaptive_reference_enabled)" />

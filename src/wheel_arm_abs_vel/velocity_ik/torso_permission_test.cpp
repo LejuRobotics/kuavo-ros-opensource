@@ -2,12 +2,88 @@
 #define VELOCITY_IK_OFFLINE_TEST
 #include "../src/pinocchio_velocity_ik_node.cpp"
 #include <iostream>
+#include <ros/serialization.h>
 struct VelocityIkOfflineTest {
  using Node=PinocchioVelocityIk;
  using Msg=wheel_arm_abs_vel::TeleopTcpTarget;
  static void require(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
  static double lowerMax(Node& n,const Eigen::VectorXd& x){double e=0.;for(int i:n.dof_layout_.decisionIndices(DofGroup::kLowerBody))e=std::max(e,std::abs(x(i)));return e;}
  static double armMax(Node& n,const Eigen::VectorXd& x){double e=0.;for(int arm=0;arm<2;++arm)for(int j=0;j<7;++j)e=std::max(e,std::abs(x(n.armDecisionIndex(arm,j))));return e;}
+ template<class M> static boost::shared_ptr<M> readBagMessage(std::ifstream& input) {
+  uint32_t size=0;input.read(reinterpret_cast<char*>(&size),sizeof(size));
+  require(input && size>0 && size<1000000,"bad offline bag message length");
+  std::vector<uint8_t> bytes(size);input.read(reinterpret_cast<char*>(bytes.data()),size);
+  require(bool(input),"truncated offline bag message");
+  ros::serialization::IStream stream(bytes.data(),size);
+  auto message=boost::make_shared<M>();ros::serialization::deserialize(stream,*message);return message;
+ }
+ static void replayBag(Node& n,const std::string& path,double lag) {
+  std::ifstream input(path,std::ios::binary);
+  auto sensor=readBagMessage<kuavo_msgs::sensorsData>(input);
+  std::vector<std::pair<double,Msg::Ptr>> frames;double time;
+  while(input.read(reinterpret_cast<char*>(&time),sizeof(time)))
+   frames.emplace_back(time,readBagMessage<Msg>(input));
+  require(!frames.empty() && n.enable_takeover_,"empty replay or disabled reference authority");
+  sensor->header.stamp=ros::Time::now();n.robotStateCallback(sensor);
+  require(n.robot_state_valid_,"invalid recorded sensor state");
+  n.reference_q_=n.measured_q_.cwiseMax(n.position_lower_).cwiseMin(n.position_upper_);
+  n.reference_dq_.setZero();n.reference_ddq_.setZero();
+  for(int a=0;a<2;++a)for(int j=0;j<7;++j)
+   n.preparation_position_[n.armDecisionIndex(a,j)]=j==0?.2618:j==3?-.5236:0.;
+  n.reference_initialized_=n.takeover_started_=n.arm_mode_known_=n.base_state_valid_=true;
+  n.current_arm_mode_=n.target_arm_mode_=2;n.arm_mode_transitioning_=false;n.session_anchor_.valid=true;
+  n.offline_capture_messages_=true;n.diagnostics_async_=false;n.publish_input_debug_=false;
+  using Lease=velocity_ik_execution::ExecutionProducerLease;
+  Lease::Feedback lease;lease.producer=n.execution_instance_;lease.owner="private-bag-replay";
+  lease.valid=true;lease.phase=Lease::Phase::Active;
+  DecisionVector feedback=n.reference_q_.eval(),feedback_v=n.reference_dq_.eval();
+  const auto start=std::chrono::steady_clock::now();size_t frame=0;
+  const auto initial=n.reference_q_.eval();
+  auto frozen_min=initial,frozen_max=initial;
+  bool sampled_frozen=false;int completed_returns=0;bool last_prepared=false;
+  const std::string csv=path+".lag"+std::to_string(lag)+".csv";
+  std::ofstream output(csv);output<<std::setprecision(12);
+  output<<"time,phase,return_phase,prepared,session,generation,max_arm_speed,max_arm_delta,model_gap_m\n";
+  for(int k=0;k<=std::ceil(frames.back().first/n.dt_);++k) {
+   const double seconds=k*n.dt_;
+   std::this_thread::sleep_until(start+std::chrono::microseconds(2000*k));
+   const auto now=ros::Time::now();const auto ns=n.monotonicNs();
+   n.measured_q_=feedback;n.measured_dq_=feedback_v;n.sensor_source_stamp_=now;n.sensor_receive_ns_=ns;
+   n.robot_measurement_freshness_.observe(now.toNSec(),now.toNSec(),ns,n.robot_state_timeout_);
+   n.base_measurement_freshness_.observe(now.toNSec(),now.toNSec(),ns,n.base_state_timeout_);
+   lease.generated_ns=velocity_ik_execution::executionSteadyNs();lease.lease_until_ns=lease.generated_ns+1000000000LL;
+   n.execution_lease_.observe(lease,true,true);
+   while(frame<frames.size() && frames[frame].first<=seconds) {
+    auto message=frames[frame++].second;
+    const auto processing=message->mapper_publish_stamp-message->mapper_receive_stamp;
+    message->mapper_publish_stamp=now;message->mapper_receive_stamp=now-processing;n.targetCallback(message);
+   }
+   const auto old_q=n.reference_q_.eval(),old_v=n.reference_dq_.eval();n.publishOnce();
+   require(!n.dynamic_fault_latched_ && !n.reference_tracking_fault_latched_,"fault during bag replay");
+   require(maxAbs(n.reference_q_-old_q-.001*(old_v+n.reference_dq_))<1e-8,"bag replay integration mismatch");
+   if(seconds>=1.2 && seconds<=12.8) {
+    if(!sampled_frozen){frozen_min=frozen_max=n.reference_q_;sampled_frozen=true;}
+    frozen_min=frozen_min.cwiseMin(n.reference_q_);frozen_max=frozen_max.cwiseMax(n.reference_q_);
+   }
+   if(n.preparation_complete_ && !last_prepared)++completed_returns;
+   last_prepared=n.preparation_complete_;
+   if(lag>0.) {
+    const auto next=(feedback+(-std::expm1(-n.dt_/lag))*(n.reference_q_-feedback)).eval();
+    feedback_v=(next-feedback)/n.dt_;feedback=next;
+   } else {feedback=n.reference_q_;feedback_v=n.reference_dq_;}
+   if(k%2==0) {
+    n.setPlantDecisionPositions(n.reference_q_);std::array<std::array<double,7>,2> zero{};
+    const double gap=n.unlock_geometry_.clearance(*n.plant_,*n.plant_context_,n.torso_frame_name_,zero);
+    output<<seconds<<','<<int(n.unlock_phase_)<<','<<int(n.return_phase_)<<','<<n.preparation_complete_<<','
+          <<n.target_.session_id<<','<<n.target_.generation<<','<<n.maxArmAbs(n.reference_dq_)<<','
+          <<n.maxArmAbs(n.reference_q_-initial)<<','<<gap<<'\n';
+   }
+  }
+  const double range=n.maxArmAbs(frozen_max-frozen_min);
+  require(sampled_frozen && range>.01,"recorded frozen interval still has no arm motion");
+  std::cout<<"PASS BAG_REPLAY frames="<<frame<<" lag="<<lag<<" formerly_frozen_joint_range_rad="
+           <<range<<" completed_returns="<<completed_returns<<" csv="<<csv<<'\n';
+ }
  static void boundarySeams(Node& n){
   for(int index=0;index<n.decisionDofCount();++index) {
    if(n.isDecisionGroup(index,DofGroup::kBase))continue;
@@ -48,6 +124,42 @@ struct VelocityIkOfflineTest {
   n.reference_initialized_=n.takeover_started_=n.enable_takeover_=true;
   n.robot_state_valid_=n.arm_mode_known_=true;n.current_arm_mode_=n.target_arm_mode_=2;n.arm_mode_transitioning_=false;
   n.session_anchor_.valid=true;n.session_anchor_.session_id=1;n.session_anchor_.generation=1;n.session_anchor_.base_coordinate_epoch=0;
+  if(scenario=="tracking_lag") {
+   // Reproduce the right-elbow command/feedback gap from the 18:56 bag.
+   // The fixture has no hardware transport and never enables a motor.
+   using Phase=Node::UnlockPhase;
+   const int elbow=n.armDecisionIndex(1,3);
+   n.reference_q_[elbow]=-2.400351035323815;
+   auto measured=n.reference_q_.eval();measured[elbow]=-2.271305822813991;
+   const auto zero=DecisionVector::Zero(n.decisionDofCount()).eval();
+   const auto original_q=n.reference_q_.eval();
+   require(n.maxArmAbs(measured-n.reference_q_)>.10,"fixture lost the recorded tracking error");
+   auto raw=n.target_,live=raw;live.arm_target_torso_relative=true;
+   n.unlock_key_valid_=true;n.unlock_session_=raw.session_id;n.unlock_generation_=raw.generation;
+   n.unlock_epoch_=raw.body.coordinate_epoch;n.unlock_base_epoch_=0;
+   n.unlock_arm_operation_seq_=raw.arm_operation_seq;n.ready_follow_guard_=false;
+   n.unlock_total_elapsed_=0.;n.unlock_elapsed_=.1;
+   n.unlock_plan_.valid=true;n.unlock_plan_.points={n.reference_q_,n.reference_q_};
+   n.unlock_plan_.points.back()[elbow]+=.05;n.unlock_plan_.durations={1.};
+   n.unlock_phase_=Phase::Executing;
+   n.updateUnlockLifecycle(raw,live,0,true,false,false,measured,zero,.002);
+   require(n.unlock_phase_==Phase::Executing,"tracking error blocked planned acquisition");
+   n.unlock_phase_=Phase::Joining;n.unlock_join_elapsed_=0.;
+   n.updateUnlockLifecycle(raw,live,0,true,false,false,measured,zero,.002);
+   require(n.unlock_phase_==Phase::Joining,"tracking error blocked live handoff");
+   n.cancelReturnPath();
+   const auto velocity=n.returnPathVelocity(n.preparation_position_,measured,zero,.002);
+   require(n.return_phase_==Phase::Executing && velocity[elbow]>0.,
+           "tracking error prevented X+A return from starting");
+   require(std::abs(velocity[elbow])<=.002*std::min(n.unlock_acceleration_,n.acceleration_limit_[elbow])+1e-10,
+           "return bypassed the existing acceleration limit");
+   raw.arm_hold=true;
+   n.updateUnlockLifecycle(raw,live,0,false,false,false,measured,zero,.002);
+   require(n.unlock_phase_==Phase::Suspended,"X+B no longer interrupts acquisition");
+   require(maxAbs(n.reference_q_-original_q)<1e-12,"lag handling stepped the position reference");
+   std::cout<<"PASS recorded 0.129045-rad right-elbow lag: acquisition, handoff, X+A return; X+B and acceleration limit retained\n";
+   return;
+  }
   n.diagnostics_async_=false;n.publish_input_debug_=false;
   n.reference_pub_=n.nh_.advertise<wheel_arm_abs_vel::VelocityIkShadow>("/offline/reference",1);
   using Lease=velocity_ik_execution::ExecutionProducerLease;
@@ -90,51 +202,47 @@ struct VelocityIkOfflineTest {
    require(maxAbs(n.reference_q_-q-.001*(v+n.reference_dq_))<1e-8,"integration mismatch");
   };
   if (scenario == "xa_close_return") {
-    using Check = Node::UnlockClearanceCheck;
-    // S62 left tool about 6 mm from the waist. Reject either a measured
-    // near-contact or a commanded near-contact, even at zero velocity.
-    auto close = n.reference_q_.eval();
-    const std::array<double, 7> left = {.200735, .242907, -.678298, -1.362924, -.398447, 0., 0.};
-    for (int j = 0; j < 7; ++j) close[n.armDecisionIndex(0, j)] = left[j];
-    auto zero = n.reference_dq_.eval();
-    zero.setZero();
-    for (auto check : {Check::LiveStep, Check::ReturnStep}) {
-      require(!n.unlockCommandClear(n.reference_q_, close, zero, zero, n.dt_, check),
-              "measured tool inside clearance accepted");
-      require(!n.unlockCommandClear(close, n.reference_q_, zero, zero, n.dt_, check),
-              "reference tool inside clearance accepted");
+    // The first seed is the frozen command in the 17:39:17 bag, with
+    // 8.84 mm model clearance. The second is the former 6 mm rejection
+    // fixture. Both must now return under the ordinary joint supervisor.
+    const auto origin=n.reference_q_.eval();
+    const std::array<std::array<double,14>,3> starts{{
+      {.3042870315,-.0502438563,-.0627412575,-.5906617701,.0076753392,.0355962400,-.0293800792,
+       .2969517155,-.0703973723,-.0469681500,-.5865662654,-.0649012927,-.0010582971,.0234696190},
+      {.200735,.242907,-.678298,-1.362924,-.398447,0.,0., .2618,0.,0.,-.5236,0.,0.,0.},
+      {-1.45380,-.05724,-.51234,-.48408,.97566,.14056,-.07684,
+       -1.52354,.04390,.71313,-.44316,-.81000,-.02453,.11893}
+    }};
+    for(int a=0;a<2;++a)for(int j=0;j<7;++j)
+      n.preparation_position_[n.armDecisionIndex(a,j)]=j==0?.2618:j==3?-.5236:0.;
+    for(size_t sample=0;sample<starts.size();++sample) {
+      n.reference_q_=origin;n.reference_dq_.setZero();n.reference_ddq_.setZero();
+      // Each recorded pose is a separate starting condition. Reset the
+      // completed return before replacing the simulated robot posture.
+      n.cancelReturnPath();
+      n.preparation_active_=false;n.preparation_settle_cycles_=0;
+      for(int a=0;a<2;++a)for(int j=0;j<7;++j)
+        n.reference_q_[n.armDecisionIndex(a,j)]=starts[sample][7*a+j];
+      if(sample<2) {
+        n.setPlantDecisionPositions(n.reference_q_);
+        std::array<std::array<double,7>,2> zero{};
+        require(n.unlock_geometry_.clearance(*n.plant_,*n.plant_context_,n.torso_frame_name_,zero)<.01,
+                "near-body regression no longer represents the rejected pose");
+      }
+      m->control_state=Msg::CONTROL_PREPARE;++m->generation;
+      n.preparation_complete_=false;
+      const auto start=n.reference_q_.eval();
+      int first_motion=-1;
+      for(int i=0;i<2500 && !n.preparation_complete_;++i) {
+        step();
+        if(first_motion<0 && armMax(n,n.reference_q_-start)>1e-6)first_motion=i;
+      }
+      require(first_motion>=0 && first_motion<30,"near-body return did not begin promptly");
+      require(n.preparation_complete_,"one X+A must reach ready from the recorded near-body pose");
+      require(armMax(n,n.reference_q_-n.preparation_position_)<=n.preparation_position_tolerance_,
+              "PREPARE reported completion away from ready");
+      std::cout<<"PASS near-body return seed="<<sample<<" first_motion_s="<<.002*first_motion<<'\n';
     }
-    // Identical S62 geometry (~5.35 mm), opposite directions. Exercise
-    // both the commanded trapezoid and residual inward measured motion.
-    auto retreat = n.preparation_position_.eval();
-    const std::array<double,7> near_waist = {.07125208,-.06502352,-.15014475,-.45318198,.12664616,0.,0.};
-    auto outward = zero;
-    for (int j=0; j<7; ++j) {
-      const int i = n.armDecisionIndex(0,j);
-      retreat[i] = near_waist[j];
-      outward[i] = std::clamp(n.preparation_position_[i]-retreat[i], -.008, .008);
-    }
-    require(n.unlockCommandClear(retreat, retreat, zero, outward, n.dt_, Check::ReturnStep),
-            "near-waist retreat from rest was blocked");
-    require(!n.unlockCommandClear(retreat, retreat, zero, -outward, n.dt_, Check::ReturnStep),
-            "near-waist inward command was accepted");
-    require(!n.unlockCommandClear(retreat, retreat, -outward, outward, n.dt_, Check::ReturnStep),
-            "outward command masked inward feedback");
-    require(!n.unlockCommandClear(retreat, retreat, zero, outward, n.dt_, Check::LiveStep),
-            "return-only retreat was enabled for follow");
-
-    // S62 bag, 2026-11-13 14:07:34. Hands about 25 cm apart at PREPARE.
-    const std::array<double, 14> arms = {
-      -1.45380, -0.05724, -0.51234, -0.48408, 0.97566, 0.14056, -0.07684,
-      -1.52354,  0.04390,  0.71313, -0.44316,-0.81000,-0.02453,  0.11893};
-    for (int a = 0; a < 2; ++a)
-      for (int j = 0; j < 7; ++j)
-        n.reference_q_[n.armDecisionIndex(a,j)] = arms[7*a+j];
-    m->control_state = Msg::CONTROL_PREPARE;
-    for (int i = 0; i < 2500 && !n.preparation_complete_; ++i) step();
-    require(n.preparation_complete_, "one X+A must reach ready from the close-hand pose");
-    require(armMax(n,n.reference_q_-n.preparation_position_) <= n.preparation_position_tolerance_,
-            "PREPARE reported completion away from ready");
     return;
   }
   if (scenario=="xa_torso_handoff") {
@@ -383,4 +491,7 @@ struct VelocityIkOfflineTest {
 };
 int main(int argc,char**argv){ros::init(argc,argv,"torso_permission_test",ros::init_options::NoSigintHandler);
  ros::NodeHandle p("~");p.setParam("robot_version",argc>1?std::stoi(argv[1]):62);p.setParam("enable_natural_hang_bootstrap",false);
- try{PinocchioVelocityIk n;VelocityIkOfflineTest::boundarySeams(n);VelocityIkOfflineTest::run(n,argc>2?argv[2]:"normal");}catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}
+ try{PinocchioVelocityIk n;VelocityIkOfflineTest::boundarySeams(n);
+  if(argc>4 && std::string(argv[2])=="bag_replay")VelocityIkOfflineTest::replayBag(n,argv[3],std::stod(argv[4]));
+  else VelocityIkOfflineTest::run(n,argc>2?argv[2]:"normal");
+ }catch(const std::exception&e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

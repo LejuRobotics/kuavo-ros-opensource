@@ -10,8 +10,9 @@ namespace velocity_ik {
 // one trajectory. Exact critical-damping step for a constant-velocity input.
 struct ContinuousVector {
   Eigen::Vector3d p=Eigen::Vector3d::Zero(), v=Eigen::Vector3d::Zero();
+  Eigen::Vector3d a=Eigen::Vector3d::Zero();
   bool valid=false;
-  void reset(const Eigen::Vector3d& position) {p=position;v.setZero();valid=true;}
+  void reset(const Eigen::Vector3d& position) {p=position;v.setZero();a.setZero();valid=true;}
   void step(const Eigen::Vector3d& target, const Eigen::Vector3d& velocity,
             double dt, double hz) {
     if(!valid) reset(target);
@@ -20,6 +21,7 @@ struct ContinuousVector {
     const double decay=std::exp(-w*dt);
     p=target+(e+c*dt)*decay;
     v=velocity+(d-w*c*dt)*decay;
+    a=w*w*(target-p)+2.*w*(velocity-v);
   }
 };
 struct ContinuousRotation {

@@ -1,12 +1,9 @@
-# Shared dual-arm transition; geometry and joint limits come from the selected model.
-unlock_path_clearance: 0.025       # certified swept-path separation, metres
-unlock_execution_clearance: 0.01  # live command + stopping-envelope separation
-unlock_joint_speed: 4.0           # rad/s cap; stopping-aware timing may reduce it
-unlock_joint_acceleration: 12.0    # rad/s^2, also capped by each joint's limits
-unlock_joint_jerk: 150.0          # rad/s^3, trajectory and execution command
-unlock_preview_tracking_lag: 0.04 # seconds; actual feedback remains guarded
-unlock_planning_timeout: 5.0      # background planning deadline, seconds
-unlock_handoff_duration: 0.18     # minimum Cartesian blend after a planned unlock path
-# Flange-to-TCP capsule radius; the URDF TCP marker alone does not describe
-# the installed tool. Override unlock_tool_radius for a different tool envelope.
+# Shared dual-arm joint timing; limits come from the selected model.
+# Geometric clearance does not gate unlock or ready-pose return.
+unlock_joint_speed: 4.0           # rad/s cap; dynamic timing may reduce it
+unlock_joint_acceleration: 12.0  # rad/s^2, also capped by each joint's limits
+unlock_joint_jerk: 150.0         # rad/s^3, trajectory and execution command
+unlock_planning_timeout: 5.0    # background planning deadline, seconds
+unlock_handoff_duration: 0.18   # minimum Cartesian blend after a planned path
+# Tool capsule retained for diagnostic geometry, without a separation threshold.
 unlock_tool_radius: 0.06

@@ -52,6 +52,7 @@
   <arg name="hand_reference_frequency" default="12.0" />
   <arg name="orientation_reference_mode" default="fixed_bandwidth" />
   <arg name="hand_position_cutoff_hz" default="5.0" />
+  <arg name="hand_position_filter_order" default="3" doc="Controller hand/elbow position filter order; use 2 to restore the previous shaper." />
   <arg name="hand_orientation_cutoff_hz" default="4.0" />
   <arg name="optical_hand_position_cutoff_hz" default="2.5" />
   <arg name="optical_hand_orientation_cutoff_hz" default="1.8" />
@@ -317,6 +318,7 @@
     <param name="s6_motion_profile/enabled" value="$(arg s6_motion_profile)" type="bool" />
     <rosparam command="load" file="$(arg hand_prediction_config)" if="$(eval arg('hand_prediction_config') != '')" />
     <param name="hand_position_cutoff_hz" value="$(arg hand_position_cutoff_hz)" type="double" if="$(eval arg('hand_position_cutoff_hz') != '')" />
+    <param name="hand_position_filter_order" value="$(arg hand_position_filter_order)" type="int" />
     <param name="hand_orientation_cutoff_hz" value="$(arg hand_orientation_cutoff_hz)" type="double" if="$(eval arg('hand_orientation_cutoff_hz') != '')" />
     <param name="optical_hand_position_cutoff_hz" value="$(arg optical_hand_position_cutoff_hz)" type="double" />
     <param name="optical_hand_orientation_cutoff_hz" value="$(arg optical_hand_orientation_cutoff_hz)" type="double" />

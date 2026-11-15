@@ -4732,8 +4732,7 @@ class IkRos:
         # Publish revocation as well, so an explicit stop need not await timeout.
         self.sg100_trigger_pub.publish(command)
         if hasattr(self, "sg100_gesture_client"):
-            torso_modifier = getattr(getattr(self, '_torso_controls', None), 'quest_consumed', False)
-            self.sg100_gesture_client.update(msg, command.vector.z == 1.0 and not torso_modifier)
+            self.sg100_gesture_client.update(msg, command.vector.z == 1.0)
 
     def hand_finger_data_process(self, event):
         if getattr(getattr(self, '_optical_input_guard', None), 'latched', False):

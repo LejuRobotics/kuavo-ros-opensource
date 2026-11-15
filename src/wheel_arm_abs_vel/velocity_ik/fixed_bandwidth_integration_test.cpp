@@ -14,6 +14,7 @@ struct VelocityIkOfflineTest {
  }
  static void run(N& n) {
   assert(n.hand_position_cutoff_hz_==5. && n.hand_orientation_cutoff_hz_==4.);
+  assert(n.hand_position_filter_order_==3);
   assert(n.hand_position_gain_==12. && n.hand_position_weight_==12.);
   assert(n.hand_orientation_gain_==8. && n.hand_orientation_weight_==6.);
   assert(n.elbow_position_weight_==.15);
@@ -25,9 +26,11 @@ struct VelocityIkOfflineTest {
   const auto& torso=n.plant_->GetFrameByName(n.torso_frame_name_);
   for(int a=0;a<2;++a){auto x=n.plant_->GetFrameByName(n.hand_frame_names_[a]).CalcPose(*n.plant_context_,torso);origin[a]=x.translation();rotation[a]=Eigen::Quaterniond(x.rotation().matrix());}
   Json results=Json::array();
-  for(int rate: {72,120,0})for(int kind=0;kind<5;++kind) {
+  for(int order: {2,3})for(int rate: {72,120,0})for(int kind=0;kind<5;++kind) {
+   n.hand_position_filter_order_=order;
    for(auto& x:n.hand_reference_)x.valid=false;for(auto& x:n.elbow_reference_)x.valid=false;for(auto& x:n.hand_rotation_reference_)x.valid=false;
    N::TargetSnapshot input;input.valid=true;input.estimated_twists_valid=true;input.arm_target_torso_relative=true;
+   input.source=wheel_arm_abs_vel::TeleopTcpTarget::SOURCE_QUEST_CONTROLLER;
    double next=0.,sum_p=0.,sum_r=0.,sum_v=0.,sum_w=0.,residual=0.,rotation_residual=0.,task_residual=0.;int samples=0,packets=0;
    Eigen::Vector3d settled_v=Eigen::Vector3d::Zero(),settled_w=Eigen::Vector3d::Zero();int settled_count=0;
    auto previous=input;const double dt=.002,epoch=1.e12;Eigen::Vector3d axis(1.,2.,3.);axis.normalize();
@@ -78,7 +81,7 @@ struct VelocityIkOfflineTest {
    // Sample-and-hold input produces a bounded sub-frame velocity ripple.
    // Compare steady mean slope, not one arbitrary 500 Hz phase.
    if(kind==1 || kind==3){assert(std::abs(settled_v.x()/settled_count-signal(kind,4.).second)<.002);assert((settled_w/settled_count-2.*signal(kind,4.).second*axis).norm()<.004);}
-   results.push_back({{"rate",rate},{"kind",kind},{"packets",packets},{"position_rms",std::sqrt(sum_p/samples)},{"rotation_rms",std::sqrt(sum_r/samples)},{"velocity_rms",std::sqrt(sum_v/samples)},{"omega_rms",std::sqrt(sum_w/samples)},{"integral_residual_max",residual},{"rotation_integral_residual_max",rotation_residual},{"qp_task_residual_max",task_residual}});
+   results.push_back({{"order",order},{"rate",rate},{"kind",kind},{"packets",packets},{"position_rms",std::sqrt(sum_p/samples)},{"rotation_rms",std::sqrt(sum_r/samples)},{"velocity_rms",std::sqrt(sum_v/samples)},{"omega_rms",std::sqrt(sum_w/samples)},{"integral_residual_max",residual},{"rotation_integral_residual_max",rotation_residual},{"qp_task_residual_max",task_residual}});
   }
   std::cout<<"PRODUCTION_REFERENCE_RESULTS "<<results.dump()<<'\n';
  }

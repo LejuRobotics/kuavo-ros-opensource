@@ -1,7 +1,6 @@
 #pragma once
 
 #include "unlock_geometry.h"
-#include "stop_reserve.h"
 #include <Eigen/Cholesky>
 #include <atomic>
 #include <cstdint>
@@ -41,7 +40,6 @@ struct UnlockJointPlan {
     for (int i=0;i<5;++i) integral[i+1]=integral[i]+w[i]/5.;
     return bezier(integral,5,u);
   }
-  double minimum_clearance = std::numeric_limits<double>::infinity();
 
   double duration() const {
     double t = 0.;
@@ -89,7 +87,7 @@ struct UnlockJointPlan {
 
 };
 
-// Used only to obtain an unlock endpoint and validate its path. This is NOT
+// Used only to obtain an unlock endpoint and validate joint timing. This is NOT
 // the online velocity IK. It follows the legacy absolute IK's two-stage
 // strategy with the canonical full model/TCPs (the legacy 14-DoF plant cannot
 // safely supply joint commands to this model without that adaptation).
@@ -100,14 +98,10 @@ class UnlockJointPlanner {
     std::array<int,14> arms{};
     std::array<std::string,2> hands, elbows, shoulders;
     std::string torso;
-    Eigen::VectorXd lower, upper, velocity, acceleration, braking;
-    double clearance = .025;
+    Eigen::VectorXd lower, upper, velocity, acceleration;
     double speed = 4.;
     double acceleration_cap = 12.;
     double jerk_cap = 150.;
-    double execution_clearance = .015; // preview reserve above live 1 cm guard
-    double tracking_lag = .04;
-    double proximal_delay = .02, wrist_delay = .045;
     double position_tolerance = .025;
     double orientation_tolerance = .12;
     double planning_timeout = 5.;
@@ -135,20 +129,16 @@ class UnlockJointPlanner {
         result.reason = "invalid goal"; return result;
       }
     }
-    if (!segmentClear(start, start, &result.minimum_clearance)) {
-      result.reason = "start lacks body/tool clearance"; return result;
-    }
     Eigen::VectorXd endpoint;
-    if (solveEndpoint(start, goals, &endpoint) &&
-        segmentClear(start, endpoint, &result.minimum_clearance)) {
+    if (solveEndpoint(start, goals, &endpoint)) {
       result.points = {start, endpoint};
       finish(&result);
       return result;
     }
 
-    // Retry a bounded set of front/outward waypoints. No unverified shoulder
-    // angle is sent to hardware. Each endpoint and both complete joint paths
-    // must pass the same geometric certificate.
+    // Retry the existing bounded front/outward seeds if the endpoint solve
+    // fails. Joint limits and the common velocity/acceleration/jerk timing
+    // remain enforced; geometric clearance does not admit or reject a path.
     for (int attempt = 0; attempt < 3 && !cancelled_(); ++attempt) {
       setQ(start);
       auto waypoint_goals = goals;
@@ -166,23 +156,19 @@ class UnlockJointPlanner {
         g.elbow_valid = false;
       }
       Eigen::VectorXd waypoint;
-      double path_clearance = std::numeric_limits<double>::infinity();
       if (solveEndpoint(start, waypoint_goals, &waypoint) &&
-          segmentClear(start, waypoint, &path_clearance) &&
-          solveEndpoint(waypoint, goals, &endpoint) &&
-          segmentClear(waypoint, endpoint, &path_clearance)) {
+          solveEndpoint(waypoint, goals, &endpoint)) {
         result.points = {start, waypoint, endpoint};
-        result.minimum_clearance = path_clearance;
         finish(&result);
         return result;
       }
     }
     result.reason = cancelled_() ? "planning cancelled/timeout" :
-        "no accurate collision-free unlock path";
+        "no accurate unlock endpoint";
     return result;
   }
 
-  // X+A return has a known joint goal. Use exactly the same path and timing
+  // X+A return has a known joint goal. Use the same joint-limit and timing
   // checks as acquisition, without solving an unnecessary Cartesian endpoint.
   UnlockJointPlan planJoint(const Eigen::VectorXd& start,const Eigen::VectorXd& goal,
                            const std::function<bool()>& cancelled) {
@@ -190,36 +176,7 @@ class UnlockJointPlanner {
     cancelled_=[deadline,cancelled]{return cancelled()||std::chrono::steady_clock::now()>=deadline;};
     UnlockJointPlan result;
     if(!validState(start)||!validState(goal)) {result.reason="invalid return start/goal";return result;}
-    if(!segmentClear(start,goal,&result.minimum_clearance)) {
-      result.reason="return joint path lacks body/tool clearance";return result;
-    }
     result.points={start,goal};finish(&result);return result;
-  }
-
-  // Conservative interval certification: enclose every link over the WHOLE
-  // joint interval by lever*angle inflation. Endpoints alone are insufficient.
-  bool segmentClear(const Eigen::VectorXd& a, const Eigen::VectorXd& b,
-                    double* minimum) {
-    if (!validState(a) || !validState(b)) return false;
-    double largest = 0.;
-    for (int i : config_.arms) largest = std::max(largest, std::abs(b[i]-a[i]));
-    const int intervals = std::max(1, static_cast<int>(std::ceil(largest/.005)));
-    for (int k = 0; k < intervals; ++k) {
-      if (cancelled_ && cancelled_()) return false;
-      const double fraction = (k+.5)/intervals;
-      const Eigen::VectorXd middle = a + fraction*(b-a);
-      std::array<std::array<double,7>,2> excursion{};
-      for (int arm = 0; arm < 2; ++arm)
-        for (int j = 0; j < 7; ++j) {
-          const int i = config_.arms[7*arm+j];
-          excursion[arm][j] = .5*std::abs(b[i]-a[i])/intervals;
-        }
-      setQ(middle);
-      const double distance = geometry_.clearance(model_, *context_, config_.torso, excursion);
-      *minimum = std::min(*minimum, distance);
-      if (!std::isfinite(distance) || distance < config_.clearance) return false;
-    }
-    return true;
   }
 
  private:
@@ -314,39 +271,23 @@ class UnlockJointPlanner {
     *result = q;
     return validState(q);
   }
-  // Timing preview, not a replacement for the live measured stopping guard.
-  // Uses the same discrete braking model and a configurable nominal servo lag.
-  bool timingClear(const UnlockJointPlan& p, double step=.02) {
-    Eigen::VectorXd q,v,a,j,m,mv;
+  // Preview the joint derivative limits independently of geometric clearance.
+  bool timingFeasible(const UnlockJointPlan& p, double step=.02) {
+    Eigen::VectorXd q,v,a,j;
     for(double t=0.;t<p.duration()+step;t+=step) {
       if(cancelled_())return false;
       p.sample(std::min(t,p.duration()),&q,&v,&a,&j);
-      p.sample(std::max(0.,t-config_.tracking_lag),&m,&mv);
-      std::array<std::array<double,7>,2> excursion{};
       for(int arm=0;arm<2;++arm)for(int k=0;k<7;++k) {
         const int i=config_.arms[7*arm+k];
         if(std::abs(v[i])>std::min(config_.speed,config_.velocity[i])+1e-8 ||
            std::abs(a[i])>std::min(config_.acceleration_cap,config_.acceleration[i])+1e-8 ||
            std::abs(j[i])>config_.jerk_cap+1e-8)return false;
-        const double speed=std::max(std::abs(v[i]),std::abs(mv[i]));
-        const double brake=config_.braking.size()==q.size() ? config_.braking[i] : config_.acceleration[i];
-        excursion[arm][k]=std::abs(q[i]-m[i])+speed*.002+
-            discreteStopDistance(speed,k<4?config_.proximal_delay:config_.wrist_delay,
-                std::abs(a[i]),.8*std::min(brake,config_.acceleration[i]),.002);
-      }
-      for(const auto* state:{&q,&m}) {
-        setQ(*state);
-        std::array<int,14> indices;
-        for(int i=0;i<14;++i)indices[i]=config_.q_index[config_.arms[i]];
-        if(!geometry_.certifyBox(model_,context_.get(),&full_q_,indices,
-                                config_.torso,excursion,config_.execution_clearance))return false;
       }
     }
     return true;
   }
   void finish(UnlockJointPlan* plan) {
-    // Optimize each straight geometric segment independently. A positive
-    // Bernstein clock preserves its swept-path certificate exactly.
+    // Optimize each straight joint segment with a positive Bernstein clock.
     for(size_t k=1;k<plan->points.size();++k) {
       double duration=.25;
       for(int i:config_.arms) {
@@ -369,7 +310,7 @@ class UnlockJointPlanner {
       // making the whole path run at its tightest region's speed.
       bool feasible=false;
       for(int attempt=0;attempt<20 && !cancelled_();++attempt) {
-        if(timingClear(segment)){feasible=true;break;}
+        if(timingFeasible(segment)){feasible=true;break;}
         for(auto& value:weights)value*=1.15;
         assign(weights);
       }
@@ -379,12 +320,12 @@ class UnlockJointPlanner {
         const auto accepted=weights;
         for(int iteration=0;iteration<6 && !cancelled_();++iteration) {
           auto candidate=accepted;candidate[index]=.5*(low+high);assign(candidate);
-          if(timingClear(segment))high=candidate[index];else low=candidate[index];
+          if(timingFeasible(segment))high=candidate[index];else low=candidate[index];
         }
         weights=accepted;weights[index]=high;assign(weights);
       }
       // Dense final preview; numerical optimization cannot disable validation.
-      while(!cancelled_() && !timingClear(segment,.004)) {
+      while(!cancelled_() && !timingFeasible(segment,.004)) {
         for(auto& value:weights)value*=1.05;
         assign(weights);
       }
@@ -392,7 +333,7 @@ class UnlockJointPlanner {
       plan->durations.push_back(segment.duration());
       plan->time_weights.push_back(weights);
     }
-    plan->valid=true;plan->reason="verified path and stopping-aware timing";
+    plan->valid=true;plan->reason="verified joint limits and dynamic timing";
   }
   const ModelPinocchio& model_;
   const UnlockGeometry& geometry_;
