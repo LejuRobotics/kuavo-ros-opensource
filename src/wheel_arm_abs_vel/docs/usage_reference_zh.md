@@ -167,7 +167,7 @@ Pico App 继续通过“查找机器人”发现 `KUAVO`：输入进程在未收
 | robot_version | default | $(optenv ROBOT_VERSION UNCONFIGURED_ROBOT_VERSION) |  |
 | use_vr_control | default | true |  |
 | use_whole_body_ik_reference | default | true |  |
-| initialize_whole_body_ik_natural_pose | default | $(arg use_whole_body_ik_reference) |  |
+| initialize_whole_body_ik_natural_pose | default | false | 默认沿用实物启动姿态；true 显式启用旧的全零仿真姿态 |
 | urdfFile | value | $(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf |  |
 | taskFile | value | $(find humanoid_wheel_interface)/config/kuavo_s$(arg robot_version)/task.info |  |
 | libFolder | value | /var/ocs2/kuavo_s$(arg robot_version) |  |

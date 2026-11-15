@@ -10,6 +10,13 @@ import sys
 
 
 def prepare(source):
+    # Both startup and model reload clear the shared torque command cache.
+    # In the private position-servo adapter it contains affine servo inputs;
+    # clearing it to zero would command all joints back to zero immediately.
+    reset = 'joint_tau_cmd = std::vector<double>(numJoints, 0);'
+    if source.count(reset) != 2:
+        raise ValueError("MuJoCo command-cache reset anchors changed; review required")
+    source = source.replace(reset, 'joint_tau_cmd = absolute_servo.initialControl(numJoints);')
     changes = [
         ('  ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);',
          """  ros::Subscriber jointCmdSub = g_nh_ptr->subscribe("/joint_cmd", 10, jointCmdCallback);
