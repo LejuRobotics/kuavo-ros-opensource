@@ -345,19 +345,12 @@ class MocapInstallTests(unittest.TestCase):
         config.write_text(yaml.safe_dump(cfg))
         return config, capture, output, target, source, cfg
 
-    @staticmethod
-    def main_parameters(legacy_parameters):
-        # Main fits this fixture's 30 samples with individual CTB rotations;
-        # the remaining ETK/Ei parameters retain the legacy layout/order.
-        return np.concatenate((np.tile(legacy_parameters[:3], 30), legacy_parameters[3:]))
-
     def test_main_success_then_yes_installs_only_temporary_runtime(self):
         with tempfile.TemporaryDirectory() as temp, redirect_stdout(io.StringIO()):
             root = Path(temp)
             config, capture, output, target, _, cfg = self.main_inputs(root)
             p = np.zeros(self.inputs.models[self.optimizer].parameter_count)
             p[9] = 1.
-            p = self.main_parameters(p)
             success = SimpleNamespace(success=True, message="test", nfev=1)
             args = [self.optimizer.__file__, str(capture), "--config", str(config), "--output-urdf", "--force-output"]
             with patch.dict(os.environ, ROBOT_VERSION="63"), patch.object(sys, "argv", args), \
@@ -378,7 +371,7 @@ class MocapInstallTests(unittest.TestCase):
                     redirect_stdout(io.StringIO()):
                 root = Path(temp)
                 config, capture, output, target, _, cfg = self.main_inputs(root)
-                p = self.main_parameters(np.zeros(self.inputs.models[self.optimizer].parameter_count))
+                p = np.zeros(self.inputs.models[self.optimizer].parameter_count)
                 success = SimpleNamespace(success=True, message="test", nfev=1)
                 failure = SimpleNamespace(success=False, message="max evaluations", nfev=250)
                 fits = [(p, failure)] if failed_stage == "fit" else [(p, success), (p, failure)]
@@ -404,7 +397,7 @@ class MocapInstallTests(unittest.TestCase):
             cfg["kinematics"]["urdf_final_name"] = "biped_v3_arm.urdf"
             config.write_text(yaml.safe_dump(cfg))
             before = self.snapshot(root)
-            p = self.main_parameters(np.zeros(self.inputs.models[self.optimizer].parameter_count))
+            p = np.zeros(self.inputs.models[self.optimizer].parameter_count)
             success = SimpleNamespace(success=True, message="test", nfev=1)
             args = [self.optimizer.__file__, str(capture), "--config", str(config), "--output-urdf", "--force-output"]
             with patch.dict(os.environ, ROBOT_VERSION="63"), patch.object(sys, "argv", args), \

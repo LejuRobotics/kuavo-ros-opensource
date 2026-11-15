@@ -20,15 +20,18 @@ HERE = Path(__file__).resolve().parents[1]
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 import mocap_optimize_fpf as workflow
+from variant_cases import WHEEL_VERSIONS
 
 
-def capture_fixture(cfg, count, *, qingtong=False, version="62"):
+def capture_fixture(cfg, count, *, qingtong=False, translation_mm=0.0, version="62"):
     """Use recorder-format four-channel measurements without importing ROS."""
     samples = []
     for index in range(1, count + 1):
         shoulder_rotation = Rotation.from_euler(
             "z", 2.0 if qingtong and index == count else 0.0, degrees=True)
         shoulder_position = np.array([120.0, 240.0, 360.0])
+        if index == count:
+            shoulder_position[0] += translation_mm
         bodies = {}
         for side, hand in ((-1, "l_hand"), (1, "r_hand")):
             hand_position = np.array([150.0 + index, side * 350.0, 40.0])
@@ -71,11 +74,12 @@ class FpfWorkflowTests(unittest.TestCase):
         self.args = ["--config", str(self.config_path), "--fit-capture", str(self.fit_path),
                      "--validation-capture", str(self.validation_path), "--output-dir", str(self.output)]
 
-    def write_capture(self, path, count, *, qingtong=False):
+    def write_capture(self, path, count, *, qingtong=False, translation_mm=0.0):
         path.write_text(json.dumps(capture_fixture(self.cfg, count, qingtong=qingtong,
+                                                  translation_mm=translation_mm,
                                                   version=self.version)), encoding="utf-8")
 
-    def fake_runner(self, *, qingtong=False, fail_at=None, partial_at=None, missing_candidate=False,
+    def fake_runner(self, *, qingtong=False, translation_mm=0.0, fail_at=None, partial_at=None, missing_candidate=False,
                     wrong_source_hash=False):
         def run(command, log_path):
             command = [str(value) for value in command]
@@ -101,7 +105,8 @@ class FpfWorkflowTests(unittest.TestCase):
                 count = 30 if is_fit else 10
                 if partial_at == event:
                     count -= 1
-                self.write_capture(destination, count, qingtong=qingtong and is_fit)
+                self.write_capture(destination, count, qingtong=qingtong and is_fit,
+                                   translation_mm=translation_mm if is_fit else 0.0)
             elif "--validate-urdf" in command:
                 event = "validate"
                 self.assertNotIn("--mocap-source", command)
@@ -166,22 +171,59 @@ class FpfWorkflowTests(unittest.TestCase):
         self.assertIn("开始拟合采点", self.prompts[1])
         self.check_effective_mode("shared", False)
 
-    def test_qingtong_capture_keeps_per_sample_mode_for_fit_and_validation(self):
+    def test_rotation_exceedance_keeps_shared_mode_for_fit_and_validation(self):
         result, installer = self.invoke(source_answer="qingtong", qingtong=True)
         self.assertEqual(result, 0)
         installer.assert_called_once()
-        self.check_effective_mode("per_sample", True)
+        self.check_effective_mode("shared", False)
         report = json.loads(next(self.output.glob("fpf_*/stability.json")).read_text())
-        self.assertEqual(report["mode"], "qingtong")
+        self.assertNotIn("mode", report)
         self.assertGreater(report["arms"]["left"]["max_rotation_deg"], 1.0)
+
+    def test_mean_deviation_over_eight_mm_stops_before_fitting_or_validation_capture(self):
+        self.write_capture(self.fit_path, 30, translation_mm=12.0)
+        self.write_capture(self.validation_path, 10)
+        with self.assertRaisesRegex(ValueError, "数据质量错误.*8 mm"):
+            self.invoke(answers=("r",))
+        self.assertEqual(self.events, [])
+        report = json.loads(next(self.output.glob("fpf_*/stability.json")).read_text())
+        self.assertNotIn("mode", report)
+        self.assertGreater(report["arms"]["left"]["max_translation_mm"], 8.0)
+        self.assertEqual(report["quality"]["reason"], "hard_translation_limit")
+
+    def test_bad_fresh_quality_preserves_previous_capture_and_outputs(self):
+        original = b"previous capture"
+        self.fit_path.write_bytes(original)
+        self.output.mkdir()
+        candidate = self.output / "urdf_final.urdf"
+        candidate.write_text("previous candidate")
+        with self.assertRaisesRegex(ValueError, "数据质量错误"):
+            self.invoke(translation_mm=9.0, answers=("y",))
+        self.assertEqual(self.events, ["record_fit"])
+        self.assertEqual(self.fit_path.read_bytes(), original)
+        self.assertEqual(candidate.read_text(), "previous candidate")
+        report = json.loads(next(self.output.glob("fpf_*/stability.json")).read_text())
+        self.assertEqual(report["quality"]["status"], "error")
+        self.assertTrue(Path(report["capture"]).is_file())
+
+    def test_explicit_per_sample_config_is_preserved_for_stable_capture(self):
+        self.cfg["kinematics"]["ctb"]["mode"] = "per_sample"
+        self.cfg["kinematics"]["validation"]["qingtong"] = True
+        self.config_path = self.root / "custom.yaml"
+        self.config_bytes = yaml.safe_dump(self.cfg).encode("utf-8")
+        self.config_path.write_bytes(self.config_bytes)
+        self.args[self.args.index("--config") + 1] = str(self.config_path)
+        result, installer = self.invoke()
+        self.assertEqual(result, 0)
+        installer.assert_called_once()
+        self.check_effective_mode("per_sample", True)
 
     def test_requested_version_is_used_through_capture_fit_validation_and_install(self):
         self.args = self.args[2:]  # Exercise the default family-config selection.
-        for version in ("62", "63", "500062", "500063", "210062", "310062"):
+        for version in WHEEL_VERSIONS:
             with self.subTest(version=version):
                 target = HERE.parents[1] / f"kuavo_assets/models/biped_s{version}/urdf/biped_s{version}.urdf"
-                if not target.is_file():
-                    self.skipTest(f"完整流程需要现场部署并核对模型: {target}")
+                self.assertTrue(target.is_file(), f"完整流程缺少模型: {target}")
                 self.events.clear()
                 self.commands.clear()
                 self.command_configs.clear()
@@ -199,7 +241,7 @@ class FpfWorkflowTests(unittest.TestCase):
                                  workflow.optimizer.write_urdf.resolve_fit_source(target))
 
     def test_default_model_and_output_paths_follow_requested_version(self):
-        for version in ("62", "63", "500062", "500063", "210062", "310062"):
+        for version in WHEEL_VERSIONS:
             with self.subTest(version=version), patch.dict(os.environ, ROBOT_VERSION=version):
                 effective = workflow.optimizer._config_for_capture(self.cfg, {})
                 self.assertEqual(effective["robot"]["robot_version"], version)

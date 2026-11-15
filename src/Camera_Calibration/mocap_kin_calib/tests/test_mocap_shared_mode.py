@@ -33,9 +33,9 @@ class SharedModeTests(unittest.TestCase):
         config.write_text(yaml.safe_dump(cfg))
         return config, capture, output
 
-    def test_shared_heldout_uses_unchanged_fit25_and_exports_schema1_without_ctb_bound(self):
+    def check_shared_heldout_and_schema1_export(self, mode):
         with tempfile.TemporaryDirectory() as temp:
-            config, capture, output = self.make_inputs(Path(temp))
+            config, capture, output = self.make_inputs(Path(temp), mode)
             p25 = np.zeros(93)
             p25[:9] = [0.1, -0.1, 0.1, 0.1, 0.0, -0.1, 0.1, 0.1, 0.0]
             p30 = p25.copy()
@@ -74,8 +74,14 @@ class SharedModeTests(unittest.TestCase):
             np.testing.assert_allclose(metadata["ctb"]["rotvec_deg"], [4.5, 0, 0])
             self.assertEqual(self.opt._read_frame_metadata(output / "urdf_final.urdf")["schema_version"], 1)
 
-    def test_default_and_explicit_per_sample_keep_conditional_validation_and_no_install(self):
-        for mode in (None, "per_sample"):
+    def test_default_shared_heldout_uses_unchanged_fit25_and_exports_schema1(self):
+        self.check_shared_heldout_and_schema1_export(None)
+
+    def test_explicit_shared_heldout_uses_unchanged_fit25_and_exports_schema1_without_ctb_bound(self):
+        self.check_shared_heldout_and_schema1_export("shared")
+
+    def test_explicit_per_sample_keeps_conditional_validation_and_no_install(self):
+        for mode in ("per_sample",):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
                 config, capture, output = self.make_inputs(Path(temp), mode)
 

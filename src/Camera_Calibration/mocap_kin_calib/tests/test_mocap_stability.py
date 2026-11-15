@@ -1,4 +1,4 @@
-"""Independent transform constructions exercise automatic capture routing."""
+"""Independent transform constructions exercise capture stability diagnostics."""
 import copy
 import json
 from pathlib import Path
@@ -34,7 +34,7 @@ def capture_with_changes(translation=0.0, rotation=0.0, changed_arm="left"):
         channels = {}
         for arm, hand in (("left", "l_hand"), ("right", "r_hand")):
             # A large constant rotation/translation and moving hand should not
-            # trigger routing. Only instability between samples is measured.
+            # count as instability. Only differences between samples are measured.
             torso_shoulder = transform([100, 600, -200], [23, -17, 58])
             if row == 2 and arm == changed_arm:
                 torso_shoulder = torso_shoulder @ transform([translation, 0, 0], [rotation, 0, 0])
@@ -56,38 +56,47 @@ class StabilityTests(unittest.TestCase):
             json.dumps(report, allow_nan=False)
             return report
 
-    def test_fixed_transform_and_moving_hands_choose_shared(self):
+    def test_fixed_transform_and_moving_hands_have_zero_variation(self):
         report = self.analyze(capture_with_changes())
-        self.assertEqual(report["mode"], "shared")
+        self.assertNotIn("mode", report)
         self.assertEqual(report["sample_count"], 3)
         for arm in report["arms"].values():
             self.assertLess(arm["max_translation_mm"], 1e-10)
             self.assertLess(arm["max_rotation_deg"], 1e-10)
 
-    def test_either_arm_or_metric_can_trigger_qingtong(self):
+    def test_either_arm_or_metric_reports_exceedance_without_selecting_mode(self):
         for arm in ("left", "right"):
-            for changes, metric, expected in (({"translation": 12}, "max_translation_mm", 12),
+            for changes, metric, expected in (({"translation": 15}, "max_translation_mm", 10),
                                                ({"rotation": 2}, "max_rotation_deg", 2)):
                 with self.subTest(arm=arm, changes=changes):
                     report = self.analyze(capture_with_changes(changed_arm=arm, **changes))
-                    self.assertEqual(report["mode"], "qingtong")
+                    self.assertNotIn("mode", report)
+                    flag = "exceeds_translation" if "translation" in changes else "exceeds_rotation"
+                    self.assertTrue(report["arms"][arm][flag])
                     self.assertAlmostEqual(report["arms"][arm][metric], expected, places=10)
-                    pair_key = "translation_pair_indices" if "translation" in changes else "rotation_pair_indices"
-                    self.assertIn(9, report["arms"][arm][pair_key])
+                    if "translation" in changes:
+                        self.assertEqual(report["arms"][arm]["max_translation_pose_index"], 9)
+                    else:
+                        self.assertIn(9, report["arms"][arm]["rotation_pair_indices"])
 
     def test_configurable_thresholds(self):
         report = self.analyze(capture_with_changes(translation=12, rotation=2),
                               max_translation_mm=15, max_rotation_deg=3)
-        self.assertEqual(report["mode"], "shared")
+        self.assertNotIn("mode", report)
+        self.assertFalse(report["arms"]["left"]["exceeds_translation"])
+        self.assertFalse(report["arms"]["left"]["exceeds_rotation"])
 
-    def test_default_eight_mm_boundary_and_pairwise_means(self):
-        for distance, expected in ((7.9, "shared"), (8.1, "qingtong")):
+    def test_default_eight_mm_boundary_and_original_mean_deviations(self):
+        for distance, expected in ((11.9, False), (12.1, True)):
             with self.subTest(distance=distance):
                 report = self.analyze(capture_with_changes(translation=distance))
-                self.assertEqual(report["mode"], expected)
+                self.assertNotIn("mode", report)
+                self.assertIs(report["arms"]["left"]["exceeds_translation"], expected)
                 self.assertEqual(report["thresholds"]["max_translation_mm"], 8.0)
-                # Three distinct pairs have distances 0, distance, distance.
+                # Radii are distance/3, distance/3, 2*distance/3.
                 self.assertAlmostEqual(report["arms"]["left"]["mean_translation_mm"],
+                                       distance * 4 / 9, places=10)
+                self.assertAlmostEqual(report["arms"]["left"]["pairwise"]["mean_translation_mm"],
                                        distance * 2 / 3, places=10)
         report = self.analyze(capture_with_changes(rotation=0.9))
         self.assertAlmostEqual(report["arms"]["left"]["mean_rotation_deg"], 0.6, places=10)
@@ -102,7 +111,7 @@ class StabilityTests(unittest.TestCase):
                 matrix[:3, 3] = observation["xyz_mm"]
                 observation.update(pose(matrix @ hand_offset))
         report = self.analyze(capture)
-        self.assertEqual(report["mode"], "shared")
+        self.assertNotIn("mode", report)
         self.assertLess(report["arms"]["left"]["max_translation_mm"], 1e-10)
 
     def test_invalid_or_missing_channel_rejects_entire_capture(self):
@@ -135,7 +144,7 @@ class StabilityTests(unittest.TestCase):
             self.analyze(capture)
 
     def test_invalid_thresholds_are_errors(self):
-        for key in ("max_translation_mm", "max_rotation_deg"):
+        for key in ("max_translation_mm", "max_rotation_deg", "exclude_translation_mm"):
             for value in (0, -1, float("inf"), float("nan"), True, None):
                 with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, key):
                     self.analyze(capture_with_changes(), **{key: value})

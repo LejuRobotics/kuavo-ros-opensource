@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """Mocap kinematic fit: 25 FIT -> 5 VALIDATION -> 30 FINAL.
 
+Before fitting, torso--shoulder quality gates can reject the original capture
+or remove up to three poses from both splits; reported counts use retained IDs.
 All translations in this module are millimetres, joint angles are radians and
-rotation vectors are degrees.  CTB and ETK translations are fixed by YAML;
-each sample has a CTB rotation (shared by both arms), bounded in total angle
-relative to I by ctb.rotation_bound_deg (default 3 deg). ETK rotations and the
-fourteen local Ei corrections remain shared across samples. CTB/ETK
+rotation vectors are degrees. CTB and ETK translations are fixed by YAML;
+CTB rotation, ETK rotations and the fourteen local Ei corrections are shared
+across samples by default. CTB/ETK
 are measurement transforms and are therefore never written into the URDF.
-The five held-out points fit only their bounded CTB rotations with Ei/ETK
-fixed. Their reported error is conditional on this reference-angle fit.
-Setting ctb.mode to shared restores one shared CTB rotation and evaluates
-the five held-out points with all fitted parameters frozen.
+The five held-out points are evaluated with all fitted parameters frozen.
+Explicitly setting ctb.mode to per_sample fits one CTB rotation per sample
+(shared by both arms), bounded relative to I by ctb.rotation_bound_deg
+(default 3 deg). In that mode the held-out points fit only their CTB rotations
+with Ei/ETK fixed, so their error is conditional on this reference-angle fit.
 The final fit exports nominal origins, additive origin offsets, and Ei to
 kinematic_offsets.json, plus frame_transforms.json.  JSON files are replaced
 after validation passes.  --output-urdf also builds a mechanical URDF from
 these JSON files; replacing an existing URDF requires --force-output.
-Final output requires every Ei translation norm <= 15 mm and rotation-vector
-norm <= 10 deg; exceeding either limit leaves existing outputs unchanged.
+The optimizer.EI_*_WEIGHT settings regularize Ei translation, axial theta and
+transverse rotation using millimetres/degrees and each joint's local URDF axis.
+Final output checks the EI_OUTPUT_* limits; exceeding either limit leaves
+existing outputs unchanged.
 After --output-urdf succeeds, type 'yes' to back up and replace the runtime
 models (all S62/S63 variant URDFs, or the main URDF for other versions).
 Use --no-install with --output-urdf to export a candidate without that prompt.
@@ -44,6 +48,7 @@ from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation
 
 import write_urdf
+from mocap_stability import check_capture_quality
 from robot_variants import default_config_name, is_wheel_urdf, is_wheel_version, main_urdf
 
 # 机型表（唯一数据源）在上一级目录：Camera_Calibration/robot_versions.py
@@ -55,8 +60,9 @@ import robot_versions as rv  # noqa: E402
 
 ARMS = ("left", "right")
 CALIBRATION_COMMENT_PREFIX = "mocap_kin_calib:"
-EI_OUTPUT_TRANSLATION_LIMIT_MM = 15.0
-EI_OUTPUT_ROTATION_LIMIT_DEG = 10.0
+EI_OUTPUT_TRANSLATION_LIMIT_MM = 10.0
+EI_OUTPUT_ROTATION_LIMIT_DEG = 5.0
+EI_WEIGHT_NAMES = ("EI_POSITION_WEIGHT", "EI_THETA_WEIGHT", "EI_OTHER_ROTATION_WEIGHT")
 
 
 def _finite_vector(value, size, name):
@@ -285,11 +291,63 @@ def load_dataset(capture_path: Path, cfg: Mapping, *, validation_only=False):
     return data
 
 
+def select_quality_poses(data, report):
+    """Apply one original-index selection to both arms and both initial splits."""
+    quality = report["quality"]
+    if quality["status"] == "error":
+        raise ValueError("数据质量错误：拒绝使用未通过质量门限的数据")
+    original = data["fit_indices"] + data["validation_indices"]
+    excluded = set(quality["excluded_indices"])
+    if set(original) != set(quality["retained_indices"]) | excluded:
+        raise ValueError("质量检查的 pose 编号必须与配置的 25/5 点完整集合一致")
+    selected = dict(data)
+    keep = np.array([index not in excluded for index in original])
+    for arm in ARMS:
+        for suffix in ("_q", "_marker_T"):
+            selected[arm + suffix] = data[arm + suffix][keep].copy()
+    for split in ("fit", "validation"):
+        selected[split + "_indices"] = [i for i in data[split + "_indices"] if i not in excluded]
+        selected[split + "_count"] = len(selected[split + "_indices"])
+        if not selected[split + "_count"]:
+            raise ValueError(f"数据质量错误：剔除后 {split} 为空")
+    selected["data_selection"] = {
+        "capture_sha256": data["capture_sha256"],
+        "original_fit_indices": data["fit_indices"],
+        "original_validation_indices": data["validation_indices"],
+        "excluded_indices": sorted(excluded),
+        "fit_indices": selected["fit_indices"],
+        "validation_indices": selected["validation_indices"],
+        "thresholds": report["thresholds"],
+        "quality_report_schema_version": report["schema_version"],
+        "quality_metric": report["quality_metric"],
+        "reference_mean_xyz_mm": {arm: value["reference_mean_xyz_mm"]
+                                  for arm, value in report["arms"].items()},
+        "original_max_translation_mm": {arm: value["max_translation_mm"]
+                                        for arm, value in report["arms"].items()},
+        "retained_max_translation_mm": quality["retained_max_translation_mm"],
+    }
+    print(f"实际分组: FIT({selected['fit_count']})={selected['fit_indices']}；"
+          f"VALIDATION({selected['validation_count']})={selected['validation_indices']}；"
+          f"FINAL({int(keep.sum())})；剔除 pose={sorted(excluded)}")
+    return selected
+
+
 class FixedPositionModel:
     """Fixed CTB/ETK translations, fitted directions and local Ei matrices."""
 
     def __init__(self, kin: Mapping, chains: Mapping[str, ArmChain]):
         self.kin, self.chains = kin, chains
+        self.ei_weights = {}
+        for name in EI_WEIGHT_NAMES:
+            # Missing weights preserve the objective of older configs.
+            value = kin.get("optimizer", {}).get(name, 0.0)
+            try:
+                weight = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"optimizer.{name} must be finite and nonnegative") from None
+            if isinstance(value, bool) or not math.isfinite(weight) or weight < 0:
+                raise ValueError(f"optimizer.{name} must be finite and nonnegative")
+            self.ei_weights[name] = weight
         ctb = kin["ctb"]
         if ctb.get("fit_translation") or not ctb.get("fit_rotation", True):
             raise ValueError("This workflow requires fixed CTB position and fitted CTB direction")
@@ -322,6 +380,30 @@ class FixedPositionModel:
         ctb, etk, corrections = self.unpack(p, arm)
         return np.linalg.inv(ctb) @ self.chains[arm].fk(q, corrections) @ etk
 
+    def ei_weight_residual(self, p):
+        """sqrt(weight) * Ei components in mm/deg; CTB/ETK are not penalized.
+
+        theta = dot(rotvec_deg, local joint axis). The transverse component is
+        orthogonal to that axis, including for non-coordinate URDF axes.
+        These rows are appended once per fit, not once per observed pose.
+        """
+        wp, wt, wr = (self.ei_weights[name] for name in EI_WEIGHT_NAMES)
+        if not (wp or wt or wr):
+            return np.empty(0)
+        rows = []
+        for arm in ARMS:
+            blocks = np.asarray(p)[self.ei_slice[arm]].reshape(7, 6)
+            axes = self.chains[arm].axes  # normalized by load_chain, in the Ei frame
+            theta = np.sum(blocks[:, 3:] * axes, axis=1)
+            if wp:
+                rows.append((math.sqrt(wp) * blocks[:, :3]).ravel())
+            if wt:
+                rows.append(math.sqrt(wt) * theta)
+            if wr:
+                transverse = blocks[:, 3:] - theta[:, None] * axes
+                rows.append((math.sqrt(wr) * transverse).ravel())
+        return np.concatenate(rows)
+
     def residual(self, p, data, subset):
         # Data order is exactly FIT followed by VALIDATION.
         if subset == "fit":
@@ -353,7 +435,9 @@ class FixedPositionModel:
                 rel = pred[:, :3, :3] @ obs[:, :3, :3].transpose(0, 2, 1)
                 rot = np.rad2deg(Rotation.from_matrix(rel).as_rotvec())
                 rows.append((rot / r_scale).ravel())
-        # Ei priors are explicit numerical regularization, not a data filter.
+        rows.append(self.ei_weight_residual(p))
+        # Legacy isotropic priors remain additive for compatibility with old
+        # configs. The shipped YAMLs keep them off and expose the three weights.
         ei_cfg = self.kin.get("ei", {})
         tp = float(ei_cfg.get("translation_prior_mm", 0.0))
         rp = float(ei_cfg.get("rotation_prior_deg", 0.0))
@@ -392,7 +476,7 @@ class FixedPositionModel:
         opt = self.kin.get("optimizer", {})
         # Solver scaling is exposed independently from physical bounds and
         # regularization.  The values are parameter units, not data filters.
-        translation_scale = float(opt.get("translation_scale_mm", 1.0))
+        translation_scale = float(opt.get("translation_scale_mm", 2.0))
         rotation_scale = float(opt.get("rotation_scale_deg", 1.0))
         if (translation_scale <= 0 or rotation_scale <= 0 or
                 not np.isfinite([translation_scale, rotation_scale]).all()):
@@ -535,7 +619,7 @@ def _fit_per_pose(model, data, subset, initial=None, frames_only=False, fit_etk=
 
 
 def _check_ei_output_limits(model: FixedPositionModel, p):
-    """Reject final Ei vector norms above 15 mm / 10 deg before any output."""
+    """Reject final Ei vector norms above EI_OUTPUT_* limits before any output."""
     parameters = _finite_vector(p, model.parameter_count, "calibration parameters")
     violations = []
     for arm in ARMS:
@@ -670,6 +754,8 @@ def _frame_metadata(model, p, data=None):
         "ctb": {"translation_mm": model.ctb_t.tolist()},
         "etk": {},
     }
+    if data is not None and "data_selection" in data:
+        result["data_selection"] = data["data_selection"]
     if per_pose:
         model.check_ctb_angles(p)
         if data is None or not data.get("capture_sha256"):
@@ -771,7 +857,7 @@ def _write_frame_metadata_file(path, metadata):
     path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _write_joint_offsets_file(path: Path, source: Path, model: FixedPositionModel, p):
+def _write_joint_offsets_file(path: Path, source: Path, model: FixedPositionModel, p, data=None):
     """Save nominal origins, componentwise URDF xyz/rpy offsets, and local Ei.
 
     nominal_origin + origin_offset recovers the exported xyz_m/rpy_rad values.
@@ -788,6 +874,8 @@ def _write_joint_offsets_file(path: Path, source: Path, model: FixedPositionMode
         "composition": "nominal_origin_right_multiply_Ei",
         "joints": {},
     }
+    if data is not None and "data_selection" in data:
+        metadata["data_selection"] = data["data_selection"]
     for arm in ARMS:
         blocks = parameters[model.ei_slice[arm]].reshape(7, 6)
         for name, block in zip(model.chains[arm].joint_names, blocks):
@@ -975,7 +1063,10 @@ def _config_for_capture(cfg: Mapping, meta: Mapping):
     family_default = "output_s63" if is_wheel else "output"
     if version != family_canonical:
         output_dir = Path(str(kin.get("output_dir", "")))
-        if output_dir.name == family_default:
+        # Only rewrite the shipped YAML default. Absolute paths have already
+        # been resolved by FPF (or explicitly chosen); matching their basename
+        # would move the solver output away from the candidate FPF expects.
+        if output_dir == Path("..") / family_default:
             kin["output_dir"] = str(output_dir.with_name(f"output_s{version}"))
     robot["robot_version"] = version
     robot["robot_layout"] = meta.get("robot_layout", robot["robot_layout"])
@@ -1032,7 +1123,7 @@ def main():
     qingtong_validation = kin.get("validation", {}).get("qingtong", False)
     if not isinstance(qingtong_validation, bool):
         raise ValueError("validation.qingtong must be true or false")
-    ctb_mode = kin.get("ctb", {}).get("mode", "per_sample")
+    ctb_mode = kin.get("ctb", {}).get("mode", "shared")
     if args.validate_urdf is None and ctb_mode not in ("shared", "per_sample"):
         raise ValueError("ctb.mode must be shared or per_sample")
     runtime_target = _resolve_config_path(config_path, kin["source_urdf"])
@@ -1070,11 +1161,16 @@ def main():
         "right": load_chain(source, "right", kin["root_link"], kin["right_tip_link"]),
     }
     data = load_dataset(capture_path, cfg, validation_only=args.validate_urdf is not None)
+    if args.validate_urdf is None:
+        quality = check_capture_quality(capture_path, cfg)
+        data = select_quality_poses(data, quality)
     per_sample_ctb = qingtong_validation if args.validate_urdf is not None else ctb_mode == "per_sample"
     if not per_sample_ctb:
         model = FixedPositionModel(kin, chains)
     else:
         model = PerPoseCTBModel(kin, chains, data["fit_indices"] + data["validation_indices"])
+    print("Ei regularization weights (mm/deg): " +
+          ", ".join(f"{name}={weight:g}" for name, weight in model.ei_weights.items()))
     if args.validate_urdf is not None:
         print(f"FIXED URDF VALIDATION: {source}")
         validation_label = "FIXED VALIDATION"
@@ -1114,31 +1210,33 @@ def main():
         return 0
 
     print(f"FIT CTB mode: {ctb_mode}")
+    n_fit, n_validation = data["fit_count"], data["validation_count"]
+    n_final = n_fit + n_validation
     p25, result25 = fit(model, data, subset="fit")
-    print(f"25-point fit: success={result25.success}, message={result25.message}, nfev={result25.nfev}")
+    print(f"{n_fit}-point fit: success={result25.success}, message={result25.message}, nfev={result25.nfev}")
     if not result25.success:
-        raise SystemExit("25-point fit did not converge; final JSON/URDF were not generated or replaced")
-    print_frame_parameters("FIT(25) frames", model, p25, indices=data["fit_indices"])
-    print_metrics("FIT(25)", error_rows(model, p25, data, subset="fit"))
+        raise SystemExit(f"{n_fit}-point fit did not converge; final JSON/URDF were not generated or replaced")
+    print_frame_parameters(f"FIT({n_fit}) frames", model, p25, indices=data["fit_indices"])
+    print_metrics(f"FIT({n_fit})", error_rows(model, p25, data, subset="fit"))
     if per_sample_ctb:
         p_validation, validation_result = fit_frame_angles(
             model, data, subset="validation", initial=p25, fit_etk=False)
         validation_label = "CONDITIONAL VALIDATION"
-        print("CONDITIONAL VALIDATION(5): fit only bounded per-point CTB; ETK and Ei frozen from FIT(25).")
+        print(f"CONDITIONAL VALIDATION({n_validation}): fit only bounded per-point CTB; ETK and Ei frozen from FIT({n_fit}).")
         if not validation_result.success:
-            raise SystemExit("5-point CTB fit did not converge; final JSON/URDF were not generated or replaced")
+            raise SystemExit(f"{n_validation}-point CTB fit did not converge; final JSON/URDF were not generated or replaced")
     else:
         p_validation = p25
         validation_label = "FIXED VALIDATION"
-        print("FIXED VALIDATION(5): shared CTB, ETK and Ei frozen from FIT(25).")
-    print_frame_parameters("VALIDATION(5) frames", model, p_validation, indices=data["validation_indices"])
+        print(f"FIXED VALIDATION({n_validation}): shared CTB, ETK and Ei frozen from FIT({n_fit}).")
+    print_frame_parameters(f"VALIDATION({n_validation}) frames", model, p_validation, indices=data["validation_indices"])
     validation_rows = error_rows(model, p_validation, data, subset="validation")
-    print_metrics(f"{validation_label}(5)", validation_rows)
+    print_metrics(f"{validation_label}({n_validation})", validation_rows)
     threshold = args.validation_max_mm
     if threshold is None:
         threshold = kin.get("validation", {}).get("max_position_error_mm")
     if threshold is None:
-        print("未提供 validation.max_position_error_mm；已计算 5 点验证误差，未生成最终 JSON/URDF。")
+        print(f"未提供 validation.max_position_error_mm；已计算 {n_validation} 点验证误差，未生成最终 JSON/URDF。")
         threshold_pass = False
     else:
         threshold = float(threshold)
@@ -1161,20 +1259,20 @@ def main():
 
     if not threshold_pass:
         if threshold is not None:
-            raise SystemExit("5-point validation did not pass; final JSON/URDF were not generated")
+            raise SystemExit(f"{n_validation}-point validation did not pass; final JSON/URDF were not generated")
         return 2
     p30, result30 = fit(model, data, subset="all", initial=p_validation)
-    print(f"30-point fit: success={result30.success}, message={result30.message}, nfev={result30.nfev}")
+    print(f"{n_final}-point fit: success={result30.success}, message={result30.message}, nfev={result30.nfev}")
     if not result30.success:
-        raise SystemExit("30-point fit did not converge; final JSON/URDF were not generated or replaced")
+        raise SystemExit(f"{n_final}-point fit did not converge; final JSON/URDF were not generated or replaced")
     try:
         if per_sample_ctb:
             model.check_ctb_angles(p30)
         _check_ei_output_limits(model, p30)
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
-    print_frame_parameters("ALL(30) frames", model, p30)
-    print_metrics("ALL(30)", error_rows(model, p30, data, subset="all"))
+    print_frame_parameters(f"ALL({n_final}) frames", model, p30)
+    print_metrics(f"ALL({n_final})", error_rows(model, p30, data, subset="all"))
     output_dir.mkdir(parents=True, exist_ok=True)
     # Stage all requested outputs before replacing existing files.  The optional
     # URDF reads the serialized JSON files and must pass the FK export check.
@@ -1182,7 +1280,7 @@ def main():
         temporary_frames = Path(temp) / "frame_transforms.json"
         _write_frame_metadata_file(temporary_frames, _frame_metadata(model, p30, data))
         temporary_offsets = Path(temp) / "kinematic_offsets.json"
-        _write_joint_offsets_file(temporary_offsets, source, model, p30)
+        _write_joint_offsets_file(temporary_offsets, source, model, p30, data)
         if args.output_urdf:
             temporary_final = Path(temp) / kin["urdf_final_name"]
             _export_urdf_from_json(source, temporary_final, temporary_offsets,

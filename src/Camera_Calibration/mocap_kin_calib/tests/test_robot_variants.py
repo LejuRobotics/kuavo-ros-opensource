@@ -26,9 +26,9 @@ import urdf_model_sync as sync
 import write_urdf as installer
 import cam_proj_validation as projection
 from test_urdf_model_sync import fk
+from variant_cases import BIPED_VERSIONS, WHEEL_VERSIONS
 
-EXISTING = ('62', '63', '200062', '210062', '300062', '310062', '400062', '400063', '500062', '500063', '600062')
-NEW = ('410062', '410063')
+EXISTING = WHEEL_VERSIONS
 
 
 def without_origins(data):
@@ -40,7 +40,7 @@ def without_origins(data):
 class VariantTests(unittest.TestCase):
     def test_fit_keeps_full_version_model_metadata_and_output(self):
         cfg = yaml.safe_load((HERE / 'config/calib_s63.yaml').read_text())
-        for version in (*EXISTING, *NEW, '200063', '300063'):
+        for version in EXISTING:
             with self.subTest(version=version), patch.dict(os.environ, ROBOT_VERSION=version):
                 result = optimizer._config_for_capture(cfg, {'robot_version': version})
                 self.assertEqual(result['robot']['robot_version'], version)
@@ -55,7 +55,7 @@ class VariantTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 variants.default_config_name(invalid)
         biped = yaml.safe_load((HERE / 'config/calib_s56.yaml').read_text())
-        for version in ('53', '55', '56', '200053', '400055'):
+        for version in BIPED_VERSIONS:
             with patch.dict(os.environ, ROBOT_VERSION=version):
                 self.assertEqual(variants.default_config_name(version), 'calib_s56.yaml')
                 self.assertEqual(optimizer._config_for_capture(biped, {})['kinematics']['source_urdf'],
@@ -86,7 +86,7 @@ class VariantTests(unittest.TestCase):
             custom_urdf = Path(temp) / 'custom.urdf'
             custom_json = Path(temp) / 'custom.json'
             for version, explicit in ((version, explicit)
-                                      for version in ('200062', '210062', '310062')
+                                      for version in EXISTING
                                       for explicit in ([], ['--config', str(custom), '--urdf', str(custom_urdf),
                                                            '--kuavo-json', str(custom_json), '--fk-root', 'custom_root'])):
                 shutil.copyfile(variants.main_urdf(version), custom_urdf)
@@ -130,6 +130,18 @@ class VariantTests(unittest.TestCase):
                     self.assertIs(sys.argv, argv)
         original_loader.assert_not_called()
         original_model.assert_not_called()
+
+    def test_explicit_output_paths_survive_repeated_version_routing(self):
+        for version in (*BIPED_VERSIONS, *WHEEL_VERSIONS):
+            cfg = yaml.safe_load((HERE / 'config' / variants.default_config_name(version)).read_text())
+            for output in ('/tmp/calibration/output', '/tmp/calibration/output_s63',
+                           'custom/output', 'custom/output_s63'):
+                with self.subTest(version=version, output=output), patch.dict(os.environ, ROBOT_VERSION=version):
+                    cfg['kinematics']['output_dir'] = output
+                    once = optimizer._config_for_capture(cfg, {})
+                    twice = optimizer._config_for_capture(once, {'robot_version': version})
+                    self.assertEqual(once['kinematics']['output_dir'], output)
+                    self.assertEqual(twice['kinematics']['output_dir'], output)
 
     def test_capture_rejects_conflicting_layout_before_recorder(self):
         spec = importlib.util.spec_from_file_location('kin_recorder_conflict', HERE / 'record_joint_poses.py')
