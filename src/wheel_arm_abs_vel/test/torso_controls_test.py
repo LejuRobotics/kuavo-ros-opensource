@@ -1,0 +1,527 @@
+#!/usr/bin/env python3
+"""Torso gesture arbitration and production mapper admission, without ROS."""
+import ast
+import copy
+import sys
+from pathlib import Path
+from types import SimpleNamespace as NS
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT/'scripts'))
+import importlib.util
+spec=importlib.util.spec_from_file_location('torso_controls',ROOT/'scripts/tools/torso_controls.py')
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+TorsoControls=module.TorsoControls
+
+def joy(**kw):
+    fields = {side+'_'+key: False for side in ('left', 'right') for key in
+              ('first_button_pressed','second_button_pressed','first_button_touched','second_button_touched')}
+    fields.update({side+'_'+key: 0. for side in ('left','right') for key in ('trigger','grip')})
+    fields.update(kw)
+    return NS(**fields)
+
+class ControlsTest(unittest.TestCase):
+    def setUp(self): self.now=10.
+    def test_optical_follow_accepts_no_controller_packets_and_retains_reset_defaults(self):
+        p=TorsoControls('quest')
+        p.clear_operator_mode();p.request_follow()
+        self.assertTrue(p.authorized(self.now, True, (self.now,.25)))
+        self.assertIsNone(p.last_time)
+        self.assertTrue(p.position_enabled)
+        # A sparse neutral joystick packet must not reintroduce the joystick freshness gate.
+        self.now+=1.
+        raw=joy()
+        p.update(raw,raw,self.now,True,(self.now,.25))
+        self.assertTrue(p.enabled)
+        self.now+=1.
+        self.assertTrue(p.authorized(self.now,True,(self.now,.25)))
+        raw=joy(left_first_button_pressed=True,left_second_button_pressed=True)
+        p.update(raw,raw,self.now,True,(self.now,.25))
+        self.assertTrue(p.enabled)  # Optical button encoding is not a controller stop.
+        p.reset()  # Explicit stop is applied by the mapper lifecycle.
+        self.assertFalse(p.authorized(self.now,True,(self.now,.25)))
+
+    def test_recorded_optical_ok_buttons_do_not_lock_torso(self):
+        p=TorsoControls('quest')
+        p.clear_operator_mode();p.request_follow()
+        self.assertTrue(p.authorized(self.now,True,(self.now,.25)))
+        # Bag 2026-11-10-15-33-05_1: both first-button flags stay high
+        # during optical OK; the old update treated every packet as X+A.
+        raw=joy(left_first_button_pressed=True,right_first_button_pressed=True)
+        before=copy.copy(raw)
+        for _ in range(60):
+            self.now+=.008
+            result=p.update(raw,raw,self.now,True,(self.now,.25))
+            self.assertTrue(p.enabled)
+            self.assertEqual(vars(result),vars(before))
+            self.assertEqual(vars(raw),vars(before))
+        p.clear_operator_mode()  # A real X+A operation still inhibits following.
+        p.update(raw,raw,self.now,False,(self.now,.25))
+        self.assertFalse(p.enabled)
+        p.authorized(self.now,True,(self.now,.25))
+        self.assertFalse(p.enabled)
+        p.request_follow()
+        p.update(raw,raw,self.now,True,(self.now,.25))
+        self.assertTrue(p.enabled)
+        seq = p.operation_seq
+        self.now+=.3
+        p.update(raw,raw,self.now,True,(self.now-.3,.25))
+        self.assertTrue(p.enabled)
+        self.assertEqual(p.operation_seq, seq)
+
+    def test_optical_default_off_and_future_input_cannot_enable(self):
+        p=TorsoControls('quest',enable_on_first_follow=False)
+        p.request_follow()
+        self.assertFalse(p.authorized(self.now,True,(self.now,.25)))
+        p.selected_enabled=True;p.request_follow()
+        self.assertFalse(p.authorized(self.now,True,(self.now+1.,.25)))
+    def sample(self, p, ready=True, **kw):
+        self.now+=.01
+        raw=joy(**kw); before=copy.copy(raw)
+        result=p.update(raw, raw, self.now, ready)
+        self.assertEqual(vars(raw),vars(before))
+        return result
+    def chord(self, p):
+        return (dict(left_first_button_pressed=True,right_y=-1. if p.enabled else 1.)
+                if p.source=='quest' else dict(left_second_button_pressed=True,right_trigger=.8))
+    def operate(self, p):
+        # Send the real command through neutral and its full confirmation interval.
+        self.sample(p); self.sample(p)
+        command = self.chord(p)
+        for _ in range(101 if p.source == 'quest' else 1):
+            self.sample(p, **command)
+
+    def enable(self,p):
+        self.operate(p); self.assertTrue(p.enabled)
+    def test_default_locked_xa_and_xb_cannot_enable(self):
+        for source in ('quest','pico'):
+            p=TorsoControls(source, enable_on_first_follow=False)
+            for button in ('right_first_button_pressed','right_second_button_pressed'):
+                self.sample(p);self.sample(p,left_first_button_pressed=True,**{button:True})
+                self.assertFalse(p.enabled)
+    def test_commands_do_not_repeat_while_held(self):
+        for source in ('quest','pico'):
+            p=TorsoControls(source, enable_on_first_follow=False)
+            self.sample(p); self.sample(p)
+            command = self.chord(p)
+            for _ in range(150):
+                self.sample(p, **command)
+            self.assertTrue(p.enabled)
+            seq = p.operation_seq
+            for _ in range(150):
+                self.sample(p, **command)
+            self.assertTrue(p.enabled)
+            self.assertEqual(p.operation_seq, seq)
+            self.operate(p)
+            self.assertFalse(p.enabled)
+
+    def test_quest_touch_xy_and_b_never_change_torso_or_consume_hand_input(self):
+        modifier = dict(left_first_button_touched=True,left_second_button_touched=True)
+        for enabled in (False, True):
+            p=TorsoControls('quest', enable_on_first_follow=enabled)
+            self.sample(p); self.sample(p)
+            before=(p.enabled, p.position_enabled, p.operation_seq)
+            for kw in [modifier, dict(modifier,right_second_button_pressed=True),
+                       dict(right_second_button_pressed=True), {},
+                       dict(modifier,right_second_button_pressed=True), modifier, {}]:
+                for _ in range(120):
+                    out=self.sample(p,**kw)
+                    self.assertEqual((p.enabled,p.position_enabled,p.operation_seq),before)
+                    self.assertEqual(vars(out),vars(joy(**kw)))
+
+    def test_xb_keeps_torso_permission_but_xa_and_stop_revoke_it(self):
+        for source in ('quest','pico'):
+            p=TorsoControls(source, enable_on_first_follow=False);self.enable(p)
+            self.sample(p,left_first_button_pressed=True,right_second_button_pressed=True)
+            self.assertTrue(p.enabled)
+            self.sample(p);self.assertTrue(p.enabled)
+            self.sample(p,left_first_button_pressed=True,right_first_button_pressed=True)
+            self.assertFalse(p.enabled)
+            self.enable(p)
+            self.sample(p,left_first_button_pressed=True,left_second_button_pressed=True)
+            self.assertFalse(p.enabled)
+    def test_pico_y_first_has_no_grip_or_freeze_side_effect(self):
+        p=TorsoControls('pico', enable_on_first_follow=False);self.sample(p)
+        for kw in [dict(left_second_button_pressed=True),dict(left_second_button_pressed=True,right_trigger=.3),self.chord(p),dict(right_trigger=.8),{},{}]:
+            out=self.sample(p,**kw)
+            self.assertFalse(out.left_second_button_pressed)
+            self.assertEqual(out.right_trigger,0.)
+        self.assertTrue(p.enabled)
+        self.sample(p,right_trigger=.7)
+        self.now+=.16
+        self.assertEqual(self.sample(p,right_trigger=.7).right_trigger,.7)
+    def test_pico_rt_first_short_window_has_no_gripper_close(self):
+        p=TorsoControls('pico', enable_on_first_follow=False);self.sample(p)
+        self.assertEqual(self.sample(p,right_trigger=.6).right_trigger,0.)
+        for kw in [self.chord(p),dict(left_second_button_pressed=True),{}]:
+            out=self.sample(p,**kw)
+            self.assertFalse(out.left_second_button_pressed);self.assertEqual(out.right_trigger,0.)
+        self.assertTrue(p.enabled)
+    def test_long_standalone_rt_resumes_after_window_and_late_y_holds_value(self):
+        p=TorsoControls('pico', enable_on_first_follow=False);self.sample(p)
+        self.assertEqual(self.sample(p,right_trigger=.8).right_trigger,0.)
+        self.now+=.16
+        self.assertEqual(self.sample(p,right_trigger=.8).right_trigger,.8)
+        out=self.sample(p,**self.chord(p))
+        self.assertTrue(p.enabled);self.assertEqual(out.right_trigger,.8)
+        self.assertFalse(self.sample(p).left_second_button_pressed)
+
+    def test_pico_y_alone_pulses_once_on_release(self):
+        p=TorsoControls('pico', enable_on_first_follow=False);self.sample(p)
+        for _ in range(30):self.assertFalse(self.sample(p,left_second_button_pressed=True).left_second_button_pressed)
+        self.assertTrue(self.sample(p).left_second_button_pressed)
+        self.assertFalse(self.sample(p).left_second_button_pressed)
+    def test_hold_prepare_fault_and_reset_require_fresh_chord(self):
+        for source in ('quest','pico'):
+            for failure in ('not_ready','reset','stop','arm','nan'):
+                p=TorsoControls(source, enable_on_first_follow=False);self.enable(p)
+                if failure=='not_ready': self.sample(p,ready=False,**self.chord(p))
+                elif failure=='reset':p.reset();self.sample(p,**self.chord(p))
+                elif failure=='stop':self.sample(p,left_first_button_pressed=True,left_second_button_pressed=True)
+                elif failure=='arm':self.sample(p,left_first_button_pressed=True,right_first_button_pressed=True)
+                else:self.sample(p,**dict(self.chord(p),left_grip=float('nan')))
+                self.assertFalse(p.enabled,failure)
+                self.sample(p);self.operate(p);self.assertTrue(p.enabled,failure)
+    def test_input_gap_preserves_mode_and_operation_sequence(self):
+        for source in ('quest', 'pico'):
+            for master, position in ((True, True), (True, False), (False, True), (False, False)):
+                with self.subTest(source=source, master=master, position=position):
+                    p = TorsoControls(source)
+                    self.sample(p, ready=False); self.sample(p)
+                    # Include old stored states as well as currently selectable modes.
+                    p.enabled = p.selected_enabled = master
+                    p.position_enabled = position
+                    self.sample(p)
+                    before = p.operation_seq
+                    self.now += 3.
+                    self.assertEqual(p.authorized(self.now, True), master)
+                    self.assertEqual(p.operation_seq, before)
+                    for fresh_pose in (False, False, True):
+                        self.now += .01
+                        raw = joy(**self.chord(p))
+                        p.update(raw, raw, self.now, True, pose_fresh=fresh_pose)
+                        self.assertEqual((p.enabled, p.position_enabled, p.operation_seq),
+                                         (master, position, before))
+                    self.operate(p)
+                    self.assertEqual(p.enabled, not master)
+
+    def test_new_stream_with_held_chord_is_not_an_edge(self):
+        for source in ('quest','pico'):
+            p=TorsoControls(source, enable_on_first_follow=False)
+            command = self.chord(p)
+            for _ in range(150):
+                self.sample(p, **command)
+                self.assertFalse(p.enabled)
+            self.sample(p);self.operate(p);self.assertTrue(p.enabled)
+    def test_pico_y_event_is_consumed_before_slow_hand_timer(self):
+        tree=ast.parse((ROOT/'scripts/ik_ros_velocity.py').read_text())
+        cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='IkRos')
+        fn=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='_consume_torso_end_effector_edges')
+        env={name:name for name in ('QIANGNAO','QIANGNAO_TOUCH','REVO2','LINKER_HAND','LEJUCLAW')}
+        exec(compile(ast.Module(body=[fn],type_ignores=[]),'<production>','exec'),env)
+        fn=env['_consume_torso_end_effector_edges']
+        for kind in env.copy():
+            if kind not in ('QIANGNAO','QIANGNAO_TOUCH','REVO2','LINKER_HAND','LEJUCLAW'):continue
+            n=NS(_torso_controls=TorsoControls('pico', enable_on_first_follow=False),sg100_enabled=False,end_effector_type=kind,__freeze_finger=False)
+            event=joy(left_second_button_pressed=True);fn(n,event)
+            self.assertTrue(getattr(n,'__freeze_finger'));self.assertFalse(event.left_second_button_pressed)
+            fn(n,event);self.assertTrue(getattr(n,'__freeze_finger'))
+
+    def test_actual_sg100_touch_gate_no_longer_has_a_torso_modifier(self):
+        import math
+        import threading
+        tree=ast.parse((ROOT/'scripts/ik_ros_velocity.py').read_text())
+        cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='IkRos')
+        fn=next(x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='_publish_sg100_triggers')
+        events=[]
+        env={'math':math,'Vector3Stamped':lambda:NS(header=NS(),vector=NS(x=0.,y=0.,z=0.)),
+             'rospy':NS(Time=NS(now=lambda:0))}
+        exec(compile(ast.Module(body=[fn],type_ignores=[]),'<production>','exec'),env)
+        p=TorsoControls('quest', enable_on_first_follow=False)
+        self.sample(p); self.sample(p)
+        n=NS(_torso_controls=p,sg100_trigger_pub=NS(publish=lambda m:None),stop_event=threading.Event(),
+             _absolute_lock=threading.RLock(),_tracking_source_hold_latched=False,
+             quest3_arm_info_transformer=NS(is_hand_tracking=False,left_finger_joints=[],right_finger_joints=[],is_stop_gesture=lambda:False),
+             sg100_gesture_client=NS(update=lambda msg,valid:events.append((msg,valid))))
+        raw=joy(left_first_button_touched=True,left_second_button_touched=True,
+                right_second_button_pressed=True,right_second_button_touched=True)
+        msg=p.update(raw,raw,self.now+.01,True)
+        env['_publish_sg100_triggers'](n,msg)
+        self.assertFalse(p.enabled)
+        self.assertEqual(vars(events[-1][0]),vars(raw))
+        self.assertTrue(events[-1][1])
+
+    def test_actual_mapper_readiness(self):
+        from fixed_follow_operation_test import Mapper
+        node = Mapper()
+        good=dict(enable_velocity_ik_takeover=True,_absolute_state=3,_fixed_control_enabled=True,
+                  _absolute_mode_status=(2,2,False),_fixed_pending_operation=None,_fixed_operation_error='',
+                  _fixed_operation_block='',_absolute_stop_pending=False,_absolute_fault_hold_pending=False,
+                  _tracking_source_hold_latched=False,_absolute_external_mode_reset_pending=False,
+                  _absolute_latest_target=None,_last_valid_tcp_receive=10.,absolute_enable_max_vr_age=.2)
+        vars(node).update(good)
+        self.assertTrue(node._torso_input_ready_locked(10.1))
+        for key,value in dict(enable_velocity_ik_takeover=False,_absolute_state=2,_fixed_control_enabled=False,
+             _absolute_mode_status=(1,2,True),_fixed_pending_operation=2,_fixed_operation_error='fault',
+             _fixed_operation_block='hold',_absolute_stop_pending=True,_absolute_fault_hold_pending=True,
+             _tracking_source_hold_latched=True,_absolute_external_mode_reset_pending=True,_last_valid_tcp_receive=None).items():
+            setattr(node, key, value)
+            self.assertFalse(node._torso_input_ready_locked(10.1), key)
+            setattr(node, key, good[key])
+        self.assertFalse(node._torso_input_ready_locked(10.3))
+        self.assertFalse(node._torso_input_ready_locked(9.9))
+
+
+class StartupTorsoControlsTest(unittest.TestCase):
+    setUp = ControlsTest.setUp
+    sample = ControlsTest.sample
+    chord = ControlsTest.chord
+    operate = ControlsTest.operate
+
+    def test_launch_parameter_reaches_mapper_and_survives_prepare(self):
+        import argparse
+        import xml.etree.ElementTree as ET
+        launch = ET.parse(ROOT/'launch/quest_velocity_ik.launch')
+        name = 'control_torso'
+        self.assertEqual(launch.find("arg[@name='%s']" % name).get('default'), 'true')
+        self.assertIn('--control_torso=$(arg control_torso)',
+                      launch.find("node[@name='ik_ros_uni']").get('args'))
+        tree = ast.parse((ROOT/'scripts/ik_ros_velocity.py').read_text())
+        converter = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'str2bool')
+        parser_call = next(n for n in ast.walk(tree) if isinstance(n, ast.Expr)
+                           and isinstance(n.value, ast.Call) and n.value.args
+                           and isinstance(n.value.args[0], ast.Constant)
+                           and n.value.args[0].value == '--control_torso')
+        parser_env = dict(argparse=argparse, parser=argparse.ArgumentParser())
+        exec(compile(ast.Module(body=[converter, parser_call], type_ignores=[]), '<mapper-cli>', 'exec'), parser_env)
+        init = next(n for c in tree.body if isinstance(c, ast.ClassDef) and c.name == 'IkRos'
+                    for n in c.body if isinstance(n, ast.FunctionDef) and n.name == '__init__')
+        assignment = next(n for n in ast.walk(init) if isinstance(n, ast.Assign)
+                          and any(isinstance(t, ast.Attribute) and t.attr == '_torso_controls'
+                                  for t in n.targets))
+        for source in ('quest', 'pico'):
+            for setting in (None, False, True):
+                with self.subTest(source=source, setting=setting):
+                    params = {'/vr_input_source': source}
+                    value = launch.find("arg[@name='%s']" % name).get('default') if setting is None else str(setting).lower()
+                    cli = parser_env['parser'].parse_args(['--control_torso='+value])
+                    obj = NS()
+                    env = dict(self=obj, TorsoControls=TorsoControls, control_torso=cli.control_torso,
+                               rospy=NS(get_param=lambda key, default: params.get(key, default)))
+                    exec(compile(ast.Module(body=[assignment], type_ignores=[]), '<mapper-init>', 'exec'), env)
+                    p = obj._torso_controls
+                    expected = setting is not False
+                    self.sample(p, ready=False)
+                    p.reset(); p.request_follow()
+                    self.sample(p, ready=False); self.sample(p)
+                    self.assertEqual(p.enabled, expected)
+                    for _ in range(30):
+                        self.sample(p); self.assertEqual(p.enabled, expected)
+                    self.operate(p); self.sample(p)
+                    self.assertEqual(p.enabled, not expected)
+                    p.reset(); p.request_follow()
+                    self.sample(p, ready=False); self.sample(p)
+                    self.assertEqual(p.enabled, not expected)
+
+    def test_default_waits_for_first_ready_fresh_input(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.assertFalse(p.authorized(self.now, False))
+            for _ in range(5):
+                self.sample(p, ready=False)
+                self.assertFalse(p.enabled)
+            self.sample(p)
+            self.assertTrue(p.enabled)
+            self.assertTrue(p.authorized(self.now, True))
+            self.assertFalse(p.startup_enable_pending)
+
+    def test_manual_off_stays_off_and_same_chord_reenables(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False); self.sample(p)
+            self.operate(p); self.assertFalse(p.enabled)
+            for _ in range(30):
+                self.sample(p); self.assertFalse(p.enabled)
+            self.operate(p); self.assertTrue(p.enabled)
+
+    def test_prepare_stop_and_fault_do_not_reapply_startup(self):
+        for source in ('quest', 'pico'):
+            for event in ('prepare', 'stop', 'not_ready', 'reset'):
+                p = TorsoControls(source)
+                self.sample(p, ready=False); self.sample(p)
+                if event == 'prepare':
+                    self.sample(p, left_first_button_pressed=True, right_first_button_pressed=True)
+                elif event == 'stop':
+                    self.sample(p, left_first_button_pressed=True, left_second_button_pressed=True)
+                elif event == 'not_ready': self.sample(p, ready=False)
+                else: p.reset()
+                self.sample(p); self.sample(p)
+                self.assertFalse(p.enabled, (source,event))
+                self.operate(p); self.assertTrue(p.enabled)
+
+    def test_revoke_before_first_follow_cancels_pending_default(self):
+        for source in ('quest', 'pico'):
+            for event in ('reset', 'stop', 'invalid', 'stale_update', 'stale_poll'):
+                with self.subTest(source=source, event=event):
+                    p = TorsoControls(source)
+                    self.sample(p, ready=False)
+                    if event == 'reset': p.reset()
+                    elif event == 'prepare':
+                        self.sample(p, ready=False, left_first_button_pressed=True, right_first_button_pressed=True)
+                    elif event == 'stop':
+                        self.sample(p, ready=False, left_first_button_pressed=True, left_second_button_pressed=True)
+                    elif event == 'invalid': self.sample(p, ready=False, right_trigger=float('nan'))
+                    else:
+                        self.now += 1.
+                        if event == 'stale_poll': self.assertFalse(p.authorized(self.now, False))
+                        else: self.sample(p, ready=False)
+                    self.assertFalse(p.startup_enable_pending)
+                    for _ in range(5):
+                        self.sample(p); self.assertFalse(p.enabled)
+                    self.operate(p); self.assertTrue(p.enabled)
+
+    def test_explicit_follow_after_prepare_restores_selected_mode(self):
+        for source in ('quest', 'pico'):
+            for manual_off in (False, True):
+                with self.subTest(source=source, manual_off=manual_off):
+                    p = TorsoControls(source)
+                    self.sample(p, ready=False); self.sample(p)
+                    if manual_off:
+                        self.operate(p); self.sample(p)
+                    p.reset()  # Stop/fault keeps the manual selection; X+A clears it.
+                    self.sample(p, ready=False)
+                    p.request_follow()  # admitted X+A resume, not readiness alone
+                    for _ in range(3):
+                        self.sample(p, ready=False, left_first_button_pressed=True,
+                                    right_first_button_pressed=True)
+                        self.assertFalse(p.enabled)
+                    self.sample(p, ready=False); self.sample(p)
+                    self.assertEqual(p.enabled, not manual_off)
+                    self.operate(p)
+                    self.assertEqual(p.enabled, manual_off)
+
+    def test_reset_defaults_survive_readiness_gap_until_resume_sample(self):
+        """X+A clears both switches; a ready poll then a gap must not drop them."""
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            self.sample(p)
+            self.operate(p)
+            self.sample(p)
+            for _ in range(101):
+                self.sample(p, right_y=-1.,left_first_button_pressed=(source == 'quest'))
+            self.assertFalse(p.enabled)
+            self.assertFalse(p.position_enabled)
+            p.clear_operator_mode()
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+            self.assertFalse(p.enabled)
+            for _ in range(5):
+                self.sample(p, ready=False)
+            p.request_follow()
+            self.assertFalse(p.authorized(self.now, True))
+            self.assertFalse(p.authorized(self.now, False))
+            self.sample(p, ready=False, left_first_button_pressed=True,
+                        right_first_button_pressed=True)
+            self.sample(p)
+            self.assertTrue(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+
+    def test_manual_lock_cannot_survive_xa_reset(self):
+        """A manual torso lock must be cleared by X+A and restored launch defaults."""
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            self.sample(p)
+            self.assertTrue(p.enabled)
+            self.operate(p)
+            self.sample(p)
+            self.assertFalse(p.enabled)
+            self.assertFalse(p.selected_enabled)
+            p.clear_operator_mode()
+            for _ in range(3):
+                self.sample(p, ready=False, **self.chord(p))
+                self.sample(p, ready=True, **self.chord(p))
+            self.assertTrue(p.selected_enabled)
+            self.assertFalse(p.enabled)
+            p.request_follow()
+            self.sample(p, ready=False, left_first_button_pressed=True,
+                        right_first_button_pressed=True)
+            self.sample(p, **self.chord(p))
+            self.assertTrue(p.enabled)
+            self.assertTrue(p.position_enabled)
+            self.assertTrue(p.selected_enabled)
+            self.sample(p)
+            self.operate(p)
+            self.assertFalse(p.enabled)
+
+    def test_cold_prepare_then_first_follow_uses_default_torso(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            p.reset()
+            self.sample(p, ready=False, left_first_button_pressed=True,
+                        right_first_button_pressed=True)
+            self.assertFalse(p.enabled)
+            p.request_follow()
+            self.sample(p, ready=False)
+            self.sample(p)
+            self.assertTrue(p.enabled)
+
+    def test_fault_after_follow_request_cancels_pending_permission(self):
+        for source in ('quest', 'pico'):
+            for event in ('stop', 'stale', 'invalid'):
+                p = TorsoControls(source)
+                self.sample(p, ready=False); p.request_follow()
+                if event == 'stop':
+                    self.sample(p, ready=False, left_first_button_pressed=True,
+                                left_second_button_pressed=True)
+                elif event == 'invalid': self.sample(p, right_trigger=float('nan'))
+                else: self.now += 1.; p.authorized(self.now, False)
+                self.sample(p); self.sample(p)
+                self.assertFalse(p.enabled, (source, event))
+
+    def test_initial_wait_without_packets_preserves_default(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            for _ in range(5):
+                self.now += 1.
+                self.assertFalse(p.authorized(self.now, False))
+                self.assertTrue(p.startup_enable_pending)
+            self.sample(p); self.assertFalse(p.enabled)
+            self.sample(p); self.assertTrue(p.enabled)
+
+    def test_ready_loss_before_first_update_cancels_default(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            self.assertFalse(p.authorized(self.now, True))
+            self.assertFalse(p.authorized(self.now, False))
+            self.sample(p); self.sample(p)
+            self.assertFalse(p.enabled)
+            self.assertFalse(p.startup_enable_pending)
+
+    def test_first_ready_operation_turns_default_off_without_reenable(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            self.sample(p, ready=False)
+            self.operate(p)
+            self.assertFalse(p.enabled)
+            self.sample(p); self.sample(p)
+            self.assertFalse(p.enabled)
+
+    def test_command_held_before_ready_is_not_a_new_operation(self):
+        for source in ('quest', 'pico'):
+            p = TorsoControls(source)
+            command = (dict(left_first_button_pressed=True,right_y=-1.) if source == 'quest'
+                       else self.chord(p))
+            self.sample(p, ready=False, **command)
+            for _ in range(150):
+                self.sample(p, **command)
+            self.assertTrue(p.enabled)
+            self.operate(p)
+            self.assertFalse(p.enabled)
+
+if __name__=='__main__':unittest.main()

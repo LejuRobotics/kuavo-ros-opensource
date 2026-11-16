@@ -482,6 +482,8 @@ armTrajInterpKinematicLimit
   fast_update_r_scale            1.0     ; 量测噪声缩放（1.0=常规更新）
   immediate_update_on_new_target true    ; 新目标到达后立即更新，不受周期门控阻塞
   target_v_alpha                 0.80    ; targetV去毛刺系数，1.0表示关闭；无新rawV时预测保持v常值
+  kalman_process_acc_cap         80.0    ; 轮臂独立：9/21 前过程噪声加速度上限，不跟人形放宽
+  kalman_process_q_cap           400.0   ; 轮臂独立：过程噪声 Q 上限，避免咬住 100Hz 速度台阶
 
   ; fhan 跟踪微分器参数（动力学约束 q/dq 平滑层）
   ; fhan_r: 等效加速度阈值 [rad/s^2]，越大跟踪越快但响应越硬
@@ -1444,4 +1446,15 @@ contact_force_params
   transitionTime   0.3    ; 权重平滑过渡时间常数（秒）
   forceThreshold           5.0    ; 期望力阈值（N），超过此值认为施加了期望力
   interpolationSpeed       300.0   ; 期望力插值速度（N/s）
+}
+
+; 最终关节命令层的模式无关边界速度阻尼，不依赖 quick mode/armTrajInterpFilter
+armJointLimitVelocityDamper
+{
+  enable             true
+  soft_zone          0.14    ; [rad] 距离硬限位约 8 度开始平滑降速
+  stop_acceleration  80.0    ; [rad/s^2] 动态制动距离使用的减速度
+  max_velocity       4.0     ; [rad/s] 最终手臂速度上限
+  settle_velocity    0.001   ; [rad/s] 软区内低于该速度时消除渐近爬行
+  hard_epsilon       0.0001  ; [rad] 硬边界数值安全余量
 }

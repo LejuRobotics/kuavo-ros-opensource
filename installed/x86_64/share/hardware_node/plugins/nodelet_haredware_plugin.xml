@@ -1,0 +1,34 @@
+<!--这里的path="",修改成path="lib/lib{项目名}",
+    项目名就是CMakeLists.txt里面定义的project(base_nodelet)
+    我这里就是path="lib/libbase_nodelet"
+-->
+ 
+<library path="lib/libnodelet_hardware" >
+ 
+  <!-- name: launch文件里面 load 后面接着的插件名
+       type: c++文件定义的类名
+       如 name="aaa/nodeletclass1",那么，launch文件对应启动如下：
+       <node pkg="nodelet" type="nodelet" name="nodeletclass1"
+       args="load aaa/nodeletclass1 nodelet_manager" output="screen">
+  -->
+  <class name="HardwareNodelet" type="HardwareNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  This is my nodelet1.
+  </description>
+  </class>
+</library>
+
+<library path="lib/libnodelet_hardware_cxx" >
+ 
+  <!-- name: launch文件里面 load 后面接着的插件名
+       type: c++文件定义的类名
+       如 name="aaa/nodeletclass1",那么，launch文件对应启动如下：
+       <node pkg="nodelet" type="nodelet" name="nodeletclass1"
+       args="load aaa/nodeletclass1 nodelet_manager" output="screen">
+  -->
+  <class name="HardwareNodeletCXX" type="HardwareNodelet" base_class_type="nodelet::Nodelet">
+  <description>
+  This is my HardwareNodeletCXX, use Ruiwo C++ SDK.
+  </description>
+  </class>
+</library>

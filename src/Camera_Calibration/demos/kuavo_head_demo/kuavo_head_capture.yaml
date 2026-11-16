@@ -13,10 +13,10 @@ features:
     type: robot_calibration/CheckerboardFinder2d
 
     # 图像话题
-    topic: /head_camera/color/image_raw
+    topic: $(arg head_image_topic)
 
     # 相机内参与驱动，用于 solvePnP 反投影。
-    camera_info_topic: /head_camera/color/camera_info
+    camera_info_topic: $(arg head_camera_info_topic)
     camera_driver: /head_camera/driver
 
     # 棋盘/tag 所在坐标系：与链模型 tip 保持一致，避免 frame 语义错配。
@@ -24,7 +24,7 @@ features:
     frame_id: checkerboard_link
 
     # 用于计算 base<-tag(obs) 的相机 frame（必须与图像 header.frame_id 一致）
-    camera_frame: head_camera_color_optical_frame
+    camera_frame: $(arg head_camera_frame)
 
     # 传感器模型名称：
     # - camera_sensor_name: 相机链模型（head_camera）
@@ -57,4 +57,3 @@ chains:
       - waist_yaw_joint
       - zhead_1_joint
       - zhead_2_joint
-

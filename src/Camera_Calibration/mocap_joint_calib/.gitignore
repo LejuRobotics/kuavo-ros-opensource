@@ -1,0 +1,4 @@
+# 现场采集和优化结果；测试样本应放在 test/fixtures/。
+capture_*.json
+output/*.yaml
+output/*.png

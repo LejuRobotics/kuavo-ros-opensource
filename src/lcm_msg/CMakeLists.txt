@@ -9,10 +9,22 @@ project(lcm_msg)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED)
 
-# set(LCM_INCLUDE_DIRS "/usr/local/lcm")
-# set(LCM_LIBRARIES "/usr/local/lib/liblcm.so")
-
-find_package(lcm REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LCM lcm)
+if(NOT LCM_FOUND)
+  find_package(lcm QUIET)
+  if(lcm_FOUND)
+    set(LCM_INCLUDE_DIRS ${lcm_INCLUDE_DIRS})
+    set(LCM_LIBRARIES ${lcm_LIBRARIES})
+  endif()
+endif()
+if(NOT LCM_FOUND AND NOT lcm_FOUND)
+  find_path(LCM_INCLUDE_DIRS NAMES lcm/lcm.h PATH_SUFFIXES lcm)
+  find_library(LCM_LIBRARIES NAMES lcm)
+  if(NOT LCM_INCLUDE_DIRS OR NOT LCM_LIBRARIES)
+    message(FATAL_ERROR "LCM not found (install liblcm-dev or build lcm from source)")
+  endif()
+endif()
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)

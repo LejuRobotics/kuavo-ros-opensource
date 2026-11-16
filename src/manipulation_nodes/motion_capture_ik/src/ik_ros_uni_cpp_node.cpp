@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
 
   int robotVersionInt = getRobotVersion(nodeHandle);
   std::string modelConfigFile =
-      ros::package::getPath("kuavo_assets") + "/config/kuavo_v" + std::to_string(robotVersionInt) + "/kuavo.json";
+      ros::package::getPath("kuavo_assets") + "/config/kuavo_v" + std::to_string(robotVersionInt == 57 ? 55 : robotVersionInt) + "/kuavo.json";
 
   nlohmann::json jsonData;
   loadJsonConfig(jsonData, modelConfigFile);

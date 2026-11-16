@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+
+<launch>
+
+      <!-- <node pkg="nodelet" type="nodelet" name="nodelet_manager" args="manager" respawn="false" output="screen" required="true" /> -->
+      
+      <arg name="bag_path" default="/home/fandes/2024-06-11-15-41-02.bag" />
+      <arg name="args" default="--topics /sensors_data_raw /humanoid_mpc_mode_schedule /humanoid_mpc_policy /humanoid_mpc_target /humanoid_mpc_observation /simple_marker_1/update /simple_marker_0/update /humanoid/currentState /humanoid/desiredBaseTrajectory /humanoid/optimizedStateTrajectory /odom /pose -s 19 --clock" />
+
+      <node pkg="nodelet" type="nodelet" name="nodelet_rosbag_player" args="load RosbagPlayerNodelet nodelet_manager $(arg bag_path) $(arg args)" respawn="false" output="screen" required="true" />
+</launch>

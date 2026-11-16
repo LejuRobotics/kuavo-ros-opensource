@@ -1,0 +1,7 @@
+# Startup-only S62/S63 candidate. Disable via j3_overshoot_profile:=false on BOTH launches.
+# Braking is transmitted in WholeBodyIkReference; no independent owner constant.
+kp: 250.0
+j3_kd: 18.0
+joint_dynamic_overrides:
+  zarm_l3_joint: {velocity: 2.2, acceleration: 18.0, braking: 18.0, outward: 18.0, jerk: 2000.0}
+  zarm_r3_joint: {velocity: 2.2, acceleration: 18.0, braking: 18.0, outward: 18.0, jerk: 2000.0}

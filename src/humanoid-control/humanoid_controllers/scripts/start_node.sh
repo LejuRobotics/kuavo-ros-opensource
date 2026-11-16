@@ -49,6 +49,11 @@ mkdir -p "${LOG_DIR}"
 # 所有节点的日志都输出到同一个文件
 LOGFILE="${LOG_DIR}/stdout.log"
 
+# 下面把节点输出接进管道。管道不是终端，Python 会把 stdout 攒成块再写，
+# rospy 的 INFO 走 stdout，所以运行中终端看不到，进程退出才一次性刷出。
+# stdbuf 只作用于 C 的 stdio，盖不住这层缓冲。
+export PYTHONUNBUFFERED=1
+
 # 获取当前脚本的父进程ID和名称，输出到stdout.log的开头
 echo "PPID: $PPID, NODE_NAME: ${NODE_NAME}" >> "${LOG_DIR}/stdout.log"
 

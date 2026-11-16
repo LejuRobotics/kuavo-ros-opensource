@@ -1,0 +1,22 @@
+<launch>
+  <arg name="left_port" default="/dev/lefthand" />
+  <arg name="right_port" default="/dev/righthand" />
+  <arg name="baudrate" default="1000000" />
+  <arg name="start_driver" default="true" />
+  <arg name="start_mapper_bridge" default="false" />
+  <arg name="sg100_kp" default="10" />
+  <arg name="sg100_kd" default="0.2" />
+  <arg name="sg100_output_limit" default="0.6" />
+  <param name="/sg100_kp" value="$(arg sg100_kp)" />
+  <param name="/sg100_kd" value="$(arg sg100_kd)" />
+  <param name="/sg100_output_limit" value="$(arg sg100_output_limit)" />
+  <node pkg="wheel_arm_abs_vel" type="absolute_sg100_hand_node" name="sg100_hand" if="$(arg start_driver)" output="screen" required="true">
+    <param name="sg100_left_port" value="$(arg left_port)" />
+    <param name="sg100_right_port" value="$(arg right_port)" />
+    <param name="sg100_baudrate" value="$(arg baudrate)" />
+    <param name="sg100_kp" value="$(arg sg100_kp)" />
+    <param name="sg100_kd" value="$(arg sg100_kd)" />
+    <param name="sg100_output_limit" value="$(arg sg100_output_limit)" />
+  </node>
+  <node pkg="wheel_arm_abs_vel" type="sg100_mapper_bridge" name="sg100_mapper_bridge" if="$(arg start_mapper_bridge)" output="screen" required="true" />
+</launch>

@@ -135,7 +135,7 @@ public:
     vector_t getHeadExternalControlState();
 
     // 带 disable 保护的关节轨迹读取 helper
-    ArmJointTrajectory getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage) const;
+    ArmJointTrajectory getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage, ros::Time* receivedAt = nullptr) const;
 
     // 计算头部控制扭矩（内部获取传感器数据）
     vector_t computeHeadControl(const vector_t& target_pos) const;
@@ -145,7 +145,9 @@ public:
     void resetVrTorsoPose();  // 重置VR躯干姿态为单位姿态
     
     // 手臂轨迹
-    ArmJointTrajectory getArmExternalControlState() const;
+    ArmJointTrajectory getArmExternalControlState(ros::Time* receivedAt = nullptr) const;
+    // 手臂轨迹接收时间戳（用于 WBC 处理延迟测量）
+    ros::Time getArmExternalControlStateTimestamp() const;
 
     // 下肢轨迹
     ArmJointTrajectory getLegExternalControlState() const;
@@ -327,6 +329,7 @@ private:
     ros::Publisher arm_traj_receive_latency_ms_pub_;
     ros::Publisher arm_traj_receive_period_ms_pub_;
     ros::Publisher arm_traj_receive_stamp_period_ms_pub_;
+    ros::Publisher arm_traj_received_pub_;  // 发布实际收到的手臂轨迹（含原始时间戳），用于延迟估计
     std::chrono::steady_clock::time_point last_arm_traj_receive_wall_{};
     ros::Time last_arm_traj_header_stamp_;
     bool has_last_arm_traj_receive_wall_{false};

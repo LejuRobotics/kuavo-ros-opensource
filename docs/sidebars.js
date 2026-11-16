@@ -19,40 +19,6 @@ const sidebars = {
       label: '产品介绍',
       items: [
         'basic_usage/kuavo-ros-control/docs/1产品介绍/产品介绍',
-        {
-          type: 'category',
-          label: '四代产品',
-          items: [
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4PRO 标准版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4PRO 进阶版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4PRO MaxA版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4PRO MaxB版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4PRO 展厅版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4PRO 展厅算力版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4PRO产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/KUAVO_4_1产品介绍',
-          ],
-        },
-        {
-          type: 'category',
-          label: '五代产品',
-          items: [
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/五代产品/KUAVO_5 进阶版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/五代产品/KUAVO_5 MaxA版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/五代产品/KUAVO_5 MaxB版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/五代产品/KUAVO_5 展厅算力版产品介绍',
-          ],
-        },
-        {
-          type: 'category',
-          label: '轮臂产品',
-          items: [
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/Kuavo 5-W 轮臂产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/Kuavo 5-W MAX A版产品介绍',
-            'basic_usage/kuavo-ros-control/docs/1产品介绍/轮臂产品/Kuavo 5-W MAX B版产品介绍',
-          ],
-        },
       ],
     },
     {
@@ -162,9 +128,7 @@ const sidebars = {
                 'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/手臂轨迹规划案例',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/键盘控制案例',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/强化学习案例gym版',
-                'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/大模型联网搜索与视觉推理案例',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/二维码抓取水瓶案例',
-                'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/全身打太极动作案例',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/强化学习案例lab版',
                 'basic_usage/kuavo-ros-control/docs/5功能案例/通用案例/接入豆包实时语音大模型案例',
               ],

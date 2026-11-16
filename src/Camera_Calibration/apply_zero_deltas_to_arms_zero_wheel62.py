@@ -2,6 +2,9 @@
 """
 62/63 轮臂专用：把 output/**/calibration.yaml 的 joint bias 写入 Motorevo 16 维零点。
 
+适用版本：基础型号 62/63 及对应小版本（200062/300062/400062/500062、400063/500063 等），
+小版本按 %100 折回基础型号后由 ``robot_versions.py`` 机型表判定。
+
 槽位顺序（device_id 1~16，与 kuavo5w_v62_dual_canbus 配置一致）：
   [zarm_l1..l7, zarm_r1..r7, zhead_1, zhead_2]
 
@@ -17,8 +20,13 @@ import argparse
 import datetime as dt
 import os
 import pwd
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import robot_versions as rv  # noqa: E402  (同目录模块，需先插入 sys.path)
 
 
 def _get_config_root() -> Path:
@@ -98,11 +106,45 @@ def _merge_biases(files: List[Path]) -> Dict[str, float]:
     return merged
 
 
+def _resolve_robot_version(arg: str):
+    """按 robot_versions 机型表校验版本；只接受基础型号 62/63 及其小版本。"""
+    candidate = arg if arg and arg != "auto" else os.environ.get("ROBOT_VERSION", "").strip()
+    if not candidate:
+        raise SystemExit(
+            "无法确定人形机器人版本：请设置 ROBOT_VERSION=62/63 或对应小版本"
+            "（如 200062/500062/400063），或通过 --robot-version 指定"
+        )
+    spec_ = rv.spec(candidate)
+    if spec_ is None:
+        raise SystemExit(
+            f"不支持的机器人版本：ROBOT_VERSION={candidate}"
+            f"（按 %100 折回为 {rv.fold(candidate)}）；"
+            f"支持基础型号 62/63 及对应小版本"
+        )
+    if spec_.apply_script != Path(__file__).name:
+        raise SystemExit(
+            f"ROBOT_VERSION={candidate}（基础型号 {spec_.base}，{spec_.zero_slots} 维）"
+            f"应使用 {Path(__file__).resolve().parent / spec_.apply_script} 写零点，"
+            "本脚本只负责 62/63 系列的 Motorevo 16 维槽位。"
+        )
+    return candidate, spec_
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="62/63 轮臂：应用相机标定 joint bias 到 Motorevo 16 维零点")
     ap.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    ap.add_argument(
+        "--robot-version",
+        default="auto",
+        help=(
+            "机器人版本；auto 时读 ROBOT_VERSION。"
+            "支持 62/63 及对应小版本（200062/300062/400062/500062、400063/500063），"
+            "按 %%100 折回基础型号"
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    raw_version, spec_ = _resolve_robot_version(args.robot_version)
 
     calib_files = _discover_calibration_yamls(args.output_dir)
     if not calib_files:
@@ -114,11 +156,13 @@ def main() -> None:
     if not ZERO_FILE.exists():
         raise SystemExit(f"Motorevo 零点文件不存在：{ZERO_FILE}")
 
+    expected_zero_count = spec_.zero_slots
     zero_cfg = _load_yaml(ZERO_FILE)
     zeros_raw = zero_cfg.get("arms_zero_position")
-    if not isinstance(zeros_raw, list) or len(zeros_raw) != 16:
+    if not isinstance(zeros_raw, list) or len(zeros_raw) != expected_zero_count:
         raise SystemExit(
-            f"wheel62 arms_zero_position 必须是 16 维 list（当前 len="
+            f"ROBOT_VERSION={raw_version}（基础型号 {spec_.base}）"
+            f"的 arms_zero_position 必须是 {expected_zero_count} 维 list（当前 len="
             f"{len(zeros_raw) if isinstance(zeros_raw, list) else 'n/a'}）"
         )
     zeros = [float(x) for x in zeros_raw]

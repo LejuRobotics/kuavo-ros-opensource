@@ -527,6 +527,9 @@ class KuavoPicoServer:
             # Publish local poses
             bone_publish_start_ns = monotonic_ns() if detail_timing else 0
             self.pico_node.pico_info_transformer.publish_local_poses(robot_urdf_matrices, current_time)
+            self.pico_node.publish_node_processing_latency(
+                datagram.recv_monotonic_ns if datagram else 0
+            )
             bone_publish_done_ns = monotonic_ns() if detail_timing else 0
             if detail_timing:
                 self._record_bone_publish_trace(trace_base, bone_publish_start_ns, bone_publish_done_ns)
@@ -538,6 +541,9 @@ class KuavoPicoServer:
             # Process body pose for stepping 
             bone_publish_start_ns = monotonic_ns() if detail_timing else 0
             self.pico_node.pico_info_transformer.publish_local_poses(robot_urdf_matrices, current_time)
+            self.pico_node.publish_node_processing_latency(
+                datagram.recv_monotonic_ns if datagram else 0
+            )
             bone_publish_done_ns = monotonic_ns() if detail_timing else 0
             if detail_timing:
                 self._record_bone_publish_trace(trace_base, bone_publish_start_ns, bone_publish_done_ns)

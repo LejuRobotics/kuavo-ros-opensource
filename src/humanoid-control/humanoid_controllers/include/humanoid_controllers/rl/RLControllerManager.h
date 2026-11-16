@@ -119,6 +119,11 @@ namespace humanoid_controller
      */
     RLControllerBase* getCurrentController();
 
+    /**
+     * @brief 当前 RL 控制器是否允许手臂动作期间继续行走
+     */
+    bool currentControllerAllowsWalkingDuringArmAction() const;
+
     RLControllerBase* getLastController()
     {
       std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -485,7 +490,9 @@ namespace humanoid_controller
      * @brief 异步切换手臂控制模式
      * @param mode 目标手臂控制模式
      */
-    void changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name = "");
+    void changeArmCtrlModeAsync(int mode, const std::string& expected_controller_name = "",
+                                 bool restart_incremental_ik = false);
+    void publishQuestArmMode(int mode);
 
     /**
      * @brief 加载 depth_loco_controller 切换前检查的 ROS 参数
@@ -659,6 +666,7 @@ namespace humanoid_controller
     ros::ServiceServer switch_to_dance_controller_srv_; ///< SetString: 空/#索引/名 切换舞蹈
     ros::ServiceServer get_dance_controller_list_srv_;  ///< 获取舞蹈控制器名列表
     ros::Publisher controller_switch_event_pub_;     ///< 控制器切换事件发布器
+    ros::Publisher quest_arm_mode_pub_;              ///< 同步增量 IK 的 /quest3/triger_arm_mode
     ros::Publisher depth_history_status_pub_;        ///< 深度历史话题检查状态发布器
     /// 舞蹈轨迹状态发布器（所有 DanceController 共用一份，避免启动期 race）
     ros::Publisher dance_trajectory_state_pub_;
@@ -689,7 +697,7 @@ namespace humanoid_controller
     std::string pending_walking_switch_source_name_;
     std::string pending_walking_switch_target_name_;
     std::string pending_walking_switch_reason_;
-    bool pending_arm_prepared_switch_ = false;       ///< AMP mode0 归位后再切 AMP_Wild
+    bool pending_arm_prepared_switch_ = false;       ///< AMP mode0/mode2 实际归位稳定后再切 AMP_Wild
     std::string pending_arm_switch_source_name_;
     std::string pending_arm_switch_target_name_;
     ros::Time pending_arm_switch_start_time_;

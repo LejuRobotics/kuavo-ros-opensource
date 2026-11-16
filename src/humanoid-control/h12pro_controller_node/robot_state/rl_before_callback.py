@@ -21,7 +21,7 @@ except ImportError:
     print("pyserial 库未安装，正在尝试安装...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pyserial"])
     import serial
-from h12pro_controller_node.srv import playmusic, playmusicRequest, playmusicResponse
+from kuavo_msgs.srv import playmusic, playmusicRequest, playmusicResponse
 from h12pro_controller_node.srv import ExecuteArmAction, ExecuteArmActionRequest, ExecuteArmActionResponse
 from h12pro_controller_node.msg import RobotActionState
 import os
@@ -569,7 +569,7 @@ def launch_humanoid_robot(real_robot=True,calibrate=False):
     
     # TODO: RL 有半身吗？
     # 通过读取kuavo.json文件，获取only_half_up_body参数，在launch_cmd中添加only_half_up_body:=true
-    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{robot_version}", "kuavo.json")
+    kuavo_json = os.path.join(kuavo_ros_control_ws_path, "src", "kuavo_assets", "config", f"kuavo_v{'55' if robot_version == '57' else robot_version}", "kuavo.json")
     if not os.path.exists(kuavo_json):
         print(f"Error: Could not find {kuavo_json}")
         raise Exception(f"Error: Could not find {kuavo_json}")

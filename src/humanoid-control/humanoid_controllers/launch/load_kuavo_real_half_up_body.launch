@@ -8,6 +8,10 @@
 
     <!-- -->
     <arg name="teach_pendant" default="0"/>
+    <arg name="sg100_kp" default="10.0"/>
+    <arg name="sg100_ki" default="0.0"/>
+    <arg name="sg100_kd" default="0.02"/>
+    <arg name="sg100_output_limit" default="0.5"/>
 
   <include file="$(find humanoid_controllers)/launch/load_kuavo_real.launch">
     <arg name="only_half_up_body" value="true"/>
@@ -17,6 +21,10 @@
     <arg name="cali_arm" value="$(arg cali_arm)" />
     <arg name="cali_leg" value="$(arg cali_leg)" />
     <arg name="teach_pendant" value="$(arg teach_pendant)"/>
+    <arg name="sg100_kp" value="$(arg sg100_kp)"/>
+    <arg name="sg100_ki" value="$(arg sg100_ki)"/>
+    <arg name="sg100_kd" value="$(arg sg100_kd)"/>
+    <arg name="sg100_output_limit" value="$(arg sg100_output_limit)"/>
   </include>
 
 

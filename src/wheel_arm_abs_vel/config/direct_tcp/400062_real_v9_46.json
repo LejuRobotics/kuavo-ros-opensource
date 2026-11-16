@@ -1,0 +1,637 @@
+{
+  "mode": "DIRECT_CONTROLLER_TCP",
+  "urdf": "package://kuavo_assets/models/biped_s400062/urdf/biped_s400062.urdf",
+  "model_sha256": "77e3d15491b968f164739d8d13e86851c369a98aa6c3ef0ec8b26f1dd24b0ed6",
+  "calibration_status": "NOMINAL_SYMMETRIC_WRIST_PIVOT_NOT_HARDWARE_CALIBRATION",
+  "input_provenance": "QUEST_CONTROLLER_MODE_TRANSPORT_SDK_ORIGIN_UNVERIFIED",
+  "input_frame": "quest_tracking_robot_axes",
+  "output_frame": "direct_tcp_base",
+  "torso_frame": "waist_yaw_link",
+  "simulation_only": false,
+  "budget_status": "PROVISIONAL_ENGINEERING_BUDGET",
+  "position_budget_m": 0.03,
+  "orientation_budget_rad": 0.3490658503988659,
+  "engage_duration_s": 0.25,
+  "arms": [
+    {
+      "controller_to_virtual": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          -1,
+          0.04
+        ],
+        [
+          0,
+          -1,
+          0,
+          0.018
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "tracking_to_base_axes": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "j7_to_tcp": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          -0.17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "shoulder_frame": "zarm_l1_link",
+      "forearm_frame": "zarm_l4_link",
+      "j7_frame": "zarm_l7_link",
+      "tcp_frame": "zarm_l7_end_effector",
+      "controlled_frame": "left_teleop_tcp",
+      "arm_joints": [
+        "zarm_l1_joint",
+        "zarm_l2_joint",
+        "zarm_l3_joint",
+        "zarm_l4_joint",
+        "zarm_l5_joint",
+        "zarm_l6_joint",
+        "zarm_l7_joint"
+      ],
+      "reach_margin_m": 0.02,
+      "reach_width_m": 0.005,
+      "wrist_width_rad": 0.08726646259971647,
+      "operating": [
+        {
+          "position_margin": 0.01,
+          "guard": 0.02,
+          "dt": 0.002,
+          "delay": 0.045,
+          "separate_stop": false,
+          "vmax": 4.5,
+          "acceleration": 45.0,
+          "braking": 45.0,
+          "outward": 45.0,
+          "jerk": 4000.0,
+          "extra_position": 0.035,
+          "extra_time": 0.05,
+          "mapper_margin": 0.0
+        },
+        {
+          "position_margin": 0.01,
+          "guard": 0.02,
+          "dt": 0.002,
+          "delay": 0.045,
+          "separate_stop": false,
+          "vmax": 5.5,
+          "acceleration": 55.0,
+          "braking": 55.0,
+          "outward": 55.0,
+          "jerk": 6000.0,
+          "extra_position": 0.035,
+          "extra_time": 0.05,
+          "mapper_margin": 0.06981317007977318
+        },
+        {
+          "position_margin": 0.01,
+          "guard": 0.02,
+          "dt": 0.002,
+          "delay": 0.045,
+          "separate_stop": false,
+          "vmax": 5.5,
+          "acceleration": 55.0,
+          "braking": 55.0,
+          "outward": 55.0,
+          "jerk": 6000.0,
+          "extra_position": 0.035,
+          "extra_time": 0.05,
+          "mapper_margin": 0.0
+        }
+      ],
+      "reference_cutoff_hz": 2.2,
+      "wrist_reference_cutoff_hz": 9.0,
+      "shoulder_rotation_weights": [
+        1.0,
+        1.5,
+        1.0
+      ],
+      "upstream_operating": [
+        {
+          "acceleration": 50.0,
+          "braking": 50.0,
+          "outward": 50.0,
+          "jerk": 25000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 4.0
+        },
+        {
+          "acceleration": 50.0,
+          "braking": 50.0,
+          "outward": 50.0,
+          "jerk": 25000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 4.0
+        },
+        {
+          "acceleration": 18.0,
+          "braking": 18.0,
+          "outward": 18.0,
+          "jerk": 2000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 2.2
+        },
+        {
+          "acceleration": 50.0,
+          "braking": 50.0,
+          "outward": 50.0,
+          "jerk": 4000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 4.0
+        }
+      ],
+      "reference_fast_cutoff_hz": 4.0,
+      "reference_fast_error_start_m": 0.03,
+      "reference_fast_error_full_m": 0.08,
+      "feasible_reference_fast_cutoff_hz": 12.0
+    },
+    {
+      "controller_to_virtual": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          -0.04
+        ],
+        [
+          0,
+          -1,
+          0,
+          0.018
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "tracking_to_base_axes": [
+        [
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          1
+        ]
+      ],
+      "j7_to_tcp": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          -0.17
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "shoulder_frame": "zarm_r1_link",
+      "forearm_frame": "zarm_r4_link",
+      "j7_frame": "zarm_r7_link",
+      "tcp_frame": "zarm_r7_end_effector",
+      "controlled_frame": "right_teleop_tcp",
+      "arm_joints": [
+        "zarm_r1_joint",
+        "zarm_r2_joint",
+        "zarm_r3_joint",
+        "zarm_r4_joint",
+        "zarm_r5_joint",
+        "zarm_r6_joint",
+        "zarm_r7_joint"
+      ],
+      "reach_margin_m": 0.02,
+      "reach_width_m": 0.005,
+      "wrist_width_rad": 0.08726646259971647,
+      "operating": [
+        {
+          "position_margin": 0.01,
+          "guard": 0.02,
+          "dt": 0.002,
+          "delay": 0.045,
+          "separate_stop": false,
+          "vmax": 4.5,
+          "acceleration": 45.0,
+          "braking": 45.0,
+          "outward": 45.0,
+          "jerk": 4000.0,
+          "extra_position": 0.035,
+          "extra_time": 0.05,
+          "mapper_margin": 0.0
+        },
+        {
+          "position_margin": 0.01,
+          "guard": 0.02,
+          "dt": 0.002,
+          "delay": 0.045,
+          "separate_stop": false,
+          "vmax": 5.5,
+          "acceleration": 55.0,
+          "braking": 55.0,
+          "outward": 55.0,
+          "jerk": 6000.0,
+          "extra_position": 0.035,
+          "extra_time": 0.05,
+          "mapper_margin": 0.06981317007977318
+        },
+        {
+          "position_margin": 0.01,
+          "guard": 0.02,
+          "dt": 0.002,
+          "delay": 0.045,
+          "separate_stop": false,
+          "vmax": 5.5,
+          "acceleration": 55.0,
+          "braking": 55.0,
+          "outward": 55.0,
+          "jerk": 6000.0,
+          "extra_position": 0.035,
+          "extra_time": 0.05,
+          "mapper_margin": 0.0
+        }
+      ],
+      "reference_cutoff_hz": 2.2,
+      "wrist_reference_cutoff_hz": 9.0,
+      "shoulder_rotation_weights": [
+        1.0,
+        1.5,
+        1.0
+      ],
+      "upstream_operating": [
+        {
+          "acceleration": 50.0,
+          "braking": 50.0,
+          "outward": 50.0,
+          "jerk": 25000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 4.0
+        },
+        {
+          "acceleration": 50.0,
+          "braking": 50.0,
+          "outward": 50.0,
+          "jerk": 25000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 4.0
+        },
+        {
+          "acceleration": 18.0,
+          "braking": 18.0,
+          "outward": 18.0,
+          "jerk": 2000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 2.2
+        },
+        {
+          "acceleration": 50.0,
+          "braking": 50.0,
+          "outward": 50.0,
+          "jerk": 4000.0,
+          "delay": 0.02,
+          "dt": 0.002,
+          "extra_position": 0.025,
+          "extra_time": 0.04,
+          "guard": 0.02,
+          "position_margin": 0.01,
+          "separate_stop": false,
+          "vmax": 4.0
+        }
+      ],
+      "reference_fast_cutoff_hz": 4.0,
+      "reference_fast_error_start_m": 0.03,
+      "reference_fast_error_full_m": 0.08,
+      "feasible_reference_fast_cutoff_hz": 12.0
+    }
+  ],
+  "seed_joints": {
+    "knee_joint": 0,
+    "leg_joint": 0,
+    "waist_pitch_joint": 0,
+    "waist_yaw_joint": 0,
+    "zarm_l1_joint": 0.2617993878,
+    "zarm_l2_joint": 0.1,
+    "zarm_l3_joint": 0,
+    "zarm_l4_joint": -1.4,
+    "zarm_l5_joint": 0,
+    "zarm_l6_joint": 0,
+    "zarm_l7_joint": 0,
+    "zarm_r1_joint": 0.2617993878,
+    "zarm_r2_joint": -0.1,
+    "zarm_r3_joint": 0,
+    "zarm_r4_joint": -1.4,
+    "zarm_r5_joint": 0,
+    "zarm_r6_joint": 0,
+    "zarm_r7_joint": 0
+  },
+  "operating_contract_sources": {
+    "arrays": "46 current quest_velocity_ik.launch resolved operating_envelope and s6_motion_profile; inherited unchanged by quest_direct_tcp_v7_46.launch",
+    "scalars": "46 current pinocchio_velocity_ik_node.cpp defaults; startup validates explicit overrides; source/binary hashed in enable-contract.sha256",
+    "bounds": "400062 kuavo.json velocity_ik_position_limits intersect actual complete URDF",
+    "body": "Existing QP requires fresh chest admission; torso permission remains false. Raw controller mapping independent of chest."
+  },
+  "synthetic_mirror": [
+    1,
+    -1,
+    -1,
+    1,
+    -1,
+    -1,
+    1
+  ],
+  "synthetic_segments": [
+    {
+      "name": "J7",
+      "joint": 7,
+      "duration": 8,
+      "amplitude": 0.35
+    },
+    {
+      "name": "J6",
+      "joint": 6,
+      "duration": 8,
+      "amplitude": 0.35
+    },
+    {
+      "name": "J5",
+      "joint": 5,
+      "duration": 8,
+      "amplitude": 0.5
+    },
+    {
+      "name": "J4",
+      "joint": 4,
+      "duration": 8,
+      "amplitude": 0.25
+    },
+    {
+      "name": "J6_boundary_return",
+      "joint": 6,
+      "duration": 8,
+      "amplitude": 0.75
+    }
+  ],
+  "body_contract": "FIXED_BASE_CONTROLLER_WITH_CHEST_ADMISSION_ONLY",
+  "source_max_age_s": 0.1,
+  "fixed_joints": [
+    "wheel_left_front_joint",
+    "wheel_right_front_joint",
+    "wheel_left_behind_joint",
+    "wheel_right_behind_joint",
+    "l_thumb_j1",
+    "l_thumb_j2",
+    "l_thumb_j3",
+    "l_index_j1",
+    "l_index_j2",
+    "l_index_j3",
+    "l_middle_j1",
+    "l_middle_j2",
+    "l_little_j1",
+    "l_little_j2",
+    "l_little_j3",
+    "r_thumb_j1",
+    "r_thumb_j2",
+    "r_thumb_j3",
+    "r_index_j1",
+    "r_index_j2",
+    "r_index_j3",
+    "r_middle_j1",
+    "r_middle_j2",
+    "r_little_j1",
+    "r_little_j2",
+    "r_little_j3",
+    "zhead_1_joint",
+    "zhead_2_joint"
+  ],
+  "source_gap_timeout_s": 0.15,
+  "mapping_contract": "V5_WRIST_PIVOT_TCP",
+  "redundancy_contract": "ROBOT_TWO_LINK_COMPATIBLE_HINT_POSITIVE_JOINT_TANGENT_METRIC",
+  "controller_offset_contract": "C->W wrist pivot. Canonical [0,-0.018,-0.04] m; raw left [0,+0.04,+0.018], right [0,-0.04,+0.018]. Fixed simulation-tuned local geometry, not hardware calibration. No time-dependent mapping or input freeze.",
+  "reference_filter_order": 3,
+  "mapper_wrist_margin_contract": "J6 retains 4 deg Mapper-only physical tracking headroom; J5/J7 extra margins removed. Original downstream limits/stopping/jerk remain unchanged.",
+  "shoulder_metric_contract": "Original positive Mapper joint tangent metric [1,1.5,1]; no joint frozen or QP weight change.",
+  "reference_contract": "V7_SINGLE_CASCADE_FINAL_RATE_STOPPING_DOMAIN_POSITION_2P2HZ_WRIST_9HZ",
+  "deployment_contract": "HOST46_400062_CONTROLLER_TRANSPORT_V1",
+  "position_limits": {
+    "knee_joint": [
+      0.0,
+      1.448
+    ],
+    "leg_joint": [
+      -2.80998009571087,
+      0.0
+    ],
+    "waist_pitch_joint": [
+      -0.15707963267949,
+      2.9845130209103
+    ],
+    "waist_yaw_joint": [
+      -3.14159265358979,
+      3.14159265358979
+    ],
+    "zarm_l1_joint": [
+      -2.4,
+      0.6
+    ],
+    "zarm_l2_joint": [
+      -0.349065850398866,
+      1.46
+    ],
+    "zarm_l3_joint": [
+      -1.48352986419518,
+      0.46
+    ],
+    "zarm_l4_joint": [
+      -2.61799387799149,
+      0.0
+    ],
+    "zarm_l5_joint": [
+      -1.5707963267949,
+      1.5707963267949
+    ],
+    "zarm_l6_joint": [
+      -1.30899693899575,
+      0.698131700797732
+    ],
+    "zarm_l7_joint": [
+      -0.698131700797732,
+      0.698131700797732
+    ],
+    "zarm_r1_joint": [
+      -2.4,
+      0.6
+    ],
+    "zarm_r2_joint": [
+      -1.46,
+      0.349065850398866
+    ],
+    "zarm_r3_joint": [
+      -0.46,
+      1.48352986419518
+    ],
+    "zarm_r4_joint": [
+      -2.61799387799149,
+      0.0
+    ],
+    "zarm_r5_joint": [
+      -1.5707963267949,
+      1.5707963267949
+    ],
+    "zarm_r6_joint": [
+      -0.698131700797732,
+      1.30899693899575
+    ],
+    "zarm_r7_joint": [
+      -0.698131700797732,
+      0.698131700797732
+    ]
+  },
+  "robot_version": 400062,
+  "transport_contract": {
+    "topic": "/leju_quest_bone_poses",
+    "left_index": 4,
+    "right_index": 5,
+    "mode": "is_hand_tracking=false AND is_high_confidence=true",
+    "timestamp": "receiver Unix milliseconds; no claim of original device timestamp",
+    "axes": "existing C++ monitor [-z,-x,y], quaternion [-z,-x,y,w], do not apply twice",
+    "output": "ik_session_base = torso coordinates minus (URDF shoulder in torso - configured source shoulder)",
+    "chest_admission": "Fresh index 23 is forwarded unchanged only for existing IK admission; torso_control_enabled=false, root invalid. Chest never enters raw or command mapping."
+  },
+  "upstream_geometry_contract": "V8_YXZ_Y_C1_JOINT_DOMAIN_FULL_CHAIN_RECONSTRUCTION_EXPERIMENT"
+}

@@ -47,7 +47,7 @@ def get_end_effector_type():
         return "none"
     
     robot_version = os.environ.get('ROBOT_VERSION', '40')
-    config_file = os.path.join(kuavo_assets_path, f"config/kuavo_v{robot_version}/kuavo.json")
+    config_file = os.path.join(kuavo_assets_path, f"config/kuavo_v{'55' if robot_version == '57' else robot_version}/kuavo.json")
     
     try:
         with open(config_file, 'r') as f:

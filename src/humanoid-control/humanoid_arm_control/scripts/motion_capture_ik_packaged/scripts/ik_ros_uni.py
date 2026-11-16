@@ -125,7 +125,8 @@ class IkRos:
 
         kuavo_assests_path = get_package_path("kuavo_assets")
         robot_version = os.environ.get('ROBOT_VERSION', '40')
-        model_path = kuavo_assests_path + f"/models/biped_s{robot_version}"
+        resource_version = '55' if robot_version == '57' else robot_version
+        model_path = kuavo_assests_path + f"/models/biped_s{resource_version}"
         self.quest3_arm_info_transformer = Quest3ArmInfoTransformer(model_path, predict_gesture)
         initial_state = np.array([0, 0, 0, 0, 0, 0])  # 初始状态 [x, y, z, vx, vy, vz]
         initial_covariance = np.eye(6)  # 初始协方差矩阵
@@ -703,7 +704,8 @@ if __name__ == "__main__":
 
     kuavo_assests_path = get_package_path("kuavo_assets")
     robot_version = os.environ.get('ROBOT_VERSION', '40')
-    model_file = kuavo_assests_path + f"/models/biped_s{robot_version}/urdf/drake/biped_v3_arm.urdf"
+    resource_version = '55' if robot_version == '57' else robot_version
+    model_file = kuavo_assests_path + f"/models/biped_s{resource_version}/urdf/drake/biped_v3_arm.urdf"
     
     end_frames_name = ["torso", "l_hand_roll", "r_hand_roll", "l_forearm_pitch", "r_forearm_pitch"]
     if version == 3:

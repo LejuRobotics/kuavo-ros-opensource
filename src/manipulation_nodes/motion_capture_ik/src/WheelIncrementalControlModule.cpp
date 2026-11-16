@@ -249,7 +249,6 @@ void WheelIncrementalControlModule::updateLeftArmPoseAnchor(const ArmPose& vrLef
                                                        const Eigen::Vector3d& pEndEffector,
                                                        const Eigen::Quaterniond& qEndEffector,
                                                        const Eigen::Quaterniond& qLink4) {
-  (void)pEndEffector;
   // humanAnchor
   result_.humanLeftHandPosAnchor_ = vrLeftPose.position;
   result_.humanLeftHandQuatAnchor_ = vrLeftPose.quaternion.normalized();
@@ -277,7 +276,13 @@ void WheelIncrementalControlModule::updateLeftArmPoseAnchor(const ArmPose& vrLef
     // This matches quest3_node_incremental.py where the target quaternion is updated incrementally each frame.
     result_.robotLeftHandQuatTarget_ = qTargetQuatAnchor;
 
-    result_.robotLeftHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
+    // Incremental position maps to the visible hand (EE). Link6 is derived
+    // later from EE - quat*offset so a rotating wrist no longer drags a 19cm
+    // lever through the commanded circle.
+    result_.robotLeftHandPosAnchor_ =
+        (pEndEffector.norm() > posAnchorZeroThreshold_)
+            ? pEndEffector
+            : latestPoseConstraintList[POSE_DATA_LIST_INDEX_LEFT_HAND].position;
     if (result_.robotLeftHandPosAnchor_.norm() < posAnchorZeroThreshold_) {
       result_.robotLeftHandPosAnchor_ = defaultLeftHandPos_;
     }
@@ -295,7 +300,6 @@ void WheelIncrementalControlModule::updateRightArmPoseAnchor(const ArmPose& vrRi
                                                         const Eigen::Vector3d& pEndEffector,
                                                         const Eigen::Quaterniond& qEndEffector,
                                                         const Eigen::Quaterniond& qLink4) {
-  (void)pEndEffector;
   // humanAnchor
   result_.humanRightHandPosAnchor_ = vrRightPose.position;
   result_.humanRightHandQuatAnchor_ = vrRightPose.quaternion.normalized();
@@ -322,7 +326,10 @@ void WheelIncrementalControlModule::updateRightArmPoseAnchor(const ArmPose& vrRi
     // Python compatible: incremental target seed should be the current target (pose constraint), not qEndEffector.
     result_.robotRightHandQuatTarget_ = qTargetQuatAnchor;
 
-    result_.robotRightHandPosAnchor_ = latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
+    result_.robotRightHandPosAnchor_ =
+        (pEndEffector.norm() > posAnchorZeroThreshold_)
+            ? pEndEffector
+            : latestPoseConstraintList[POSE_DATA_LIST_INDEX_RIGHT_HAND].position;
     if (result_.robotRightHandPosAnchor_.norm() < posAnchorZeroThreshold_) {
       result_.robotRightHandPosAnchor_ = defaultRightHandPos_;
     }

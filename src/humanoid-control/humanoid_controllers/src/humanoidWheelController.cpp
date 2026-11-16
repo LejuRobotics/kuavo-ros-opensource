@@ -6,6 +6,7 @@
 #include "humanoid_controllers/humanoidWheelController.h"
 #include <iostream>
 #include <cmath>
+#include <pthread.h>
 #include <std_srvs/SetBool.h>
 #include <geometry_msgs/Twist.h>
 

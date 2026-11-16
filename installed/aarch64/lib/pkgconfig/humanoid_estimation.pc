@@ -1,0 +1,8 @@
+prefix=/builds/highlydynamic/kuavo-ros-control/installed/aarch64
+
+Name: humanoid_estimation
+Description: Description of humanoid_estimation
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -lhumanoid_estimation
+Requires: roscpp humanoid_common realtime_tools tf2_ros humanoid_interface

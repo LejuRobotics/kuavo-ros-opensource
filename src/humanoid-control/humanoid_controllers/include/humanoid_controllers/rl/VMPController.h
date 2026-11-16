@@ -659,7 +659,6 @@ namespace humanoid_controller
     void printOnlineBufferStatus();
 
     void initArmControl(const std::string& urdf_path);
-    void activateExternalArmControlIfNeeded();
 
   private:
     // ========== 基本控制参数 ==========

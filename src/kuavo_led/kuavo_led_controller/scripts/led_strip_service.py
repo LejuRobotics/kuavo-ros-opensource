@@ -77,6 +77,13 @@ class LEDStripServiceNode:
         except rospy.ServiceException as e:
             rospy.logwarn(f"无法注册 _query_power_board_status 服务（另一 LED 节点已注册）: {e}")
 
+        # 电源板状态话题发布：轮臂等机型无 battery_info 节点，由本节点直出
+        # /power_board_status，供 led_for_state、物理急停桥接等订阅。
+        self._power_board_status_pub = rospy.Publisher(
+            'power_board_status', PowerBoardStatus, queue_size=10)
+        self._power_board_status_timer = rospy.Timer(
+            rospy.Duration(0.5), self._publish_power_board_status)
+
         rospy.loginfo("LED Strip 服务已启动")
         rospy.loginfo("可用服务:")
         rospy.loginfo("  - /led_strip_set_mode_and_color (SetLEDMode_free)")
@@ -245,40 +252,7 @@ class LEDStripServiceNode:
                 )
 
             # 将缓存字典填充到 PowerBoardStatus 消息（字段一一对应）
-            pb_msg = PowerBoardStatus()
-            pb_msg.timestamp = rospy.Time.now()
-            pb_msg.status_byte1 = status['status_byte1']
-            pb_msg.status_byte2 = status['status_byte2']
-            pb_msg.status_byte3 = status['status_byte3']
-            pb_msg.ntc_temperature = status['ntc_temperature']
-            pb_msg.charge_voltage = status['charge_voltage']
-            pb_msg.bat1_voltage = status['bat1_voltage']
-            pb_msg.bat2_voltage = status['bat2_voltage']
-            # Param1 拆解
-            pb_msg.stop_int = status['stop_int']
-            pb_msg.rf_int = status['rf_int']
-            pb_msg.board_is_wheel = status['board_is_wheel']
-            pb_msg.ideal_diode_fail = status['ideal_diode_fail']
-            pb_msg.cur_ov_protection = status['cur_ov_protection']
-            pb_msg.bat1_comm_ok = status['bat1_comm_ok']
-            pb_msg.bat2_comm_ok = status['bat2_comm_ok']
-            # Param2 拆解
-            pb_msg.bat1_exists = status['bat1_exists']
-            pb_msg.bat2_exists = status['bat2_exists']
-            pb_msg.bat1_low_power = status['bat1_low_power']
-            pb_msg.bat2_low_power = status['bat2_low_power']
-            pb_msg.charging = status['charging']
-            pb_msg.fail_12v = status['fail_12v']
-            pb_msg.fail_19v = status['fail_19v']
-            pb_msg.fail_24v = status['fail_24v']
-            # Param3 拆解
-            pb_msg.arm_en = status['arm_en']
-            pb_msg.leg_en = status['leg_en']
-            pb_msg.out_19v_en = status['out_19v_en']
-            pb_msg.out1_12v_en = status['out1_12v_en']
-            pb_msg.out2_12v_en = status['out2_12v_en']
-            pb_msg.out3_12v_en = status['out3_12v_en']
-            pb_msg.out_24v_en = status['out_24v_en']
+            pb_msg = self._build_power_board_status_msg(status)
 
             return GetPowerBoardStatusResponse(
                 status=pb_msg,
@@ -292,6 +266,52 @@ class LEDStripServiceNode:
                 success=False,
                 message=f"Service error: {str(e)}"
             )
+
+    @staticmethod
+    def _build_power_board_status_msg(status):
+        """按缓存字典填充 PowerBoardStatus 消息（字段一一对应）"""
+        pb_msg = PowerBoardStatus()
+        pb_msg.timestamp = rospy.Time.now()
+        pb_msg.status_byte1 = status['status_byte1']
+        pb_msg.status_byte2 = status['status_byte2']
+        pb_msg.status_byte3 = status['status_byte3']
+        pb_msg.ntc_temperature = status['ntc_temperature']
+        pb_msg.charge_voltage = status['charge_voltage']
+        pb_msg.bat1_voltage = status['bat1_voltage']
+        pb_msg.bat2_voltage = status['bat2_voltage']
+        # Param1 拆解
+        pb_msg.stop_int = status['stop_int']
+        pb_msg.rf_int = status['rf_int']
+        pb_msg.board_is_wheel = status['board_is_wheel']
+        pb_msg.ideal_diode_fail = status['ideal_diode_fail']
+        pb_msg.cur_ov_protection = status['cur_ov_protection']
+        pb_msg.bat1_comm_ok = status['bat1_comm_ok']
+        pb_msg.bat2_comm_ok = status['bat2_comm_ok']
+        # Param2 拆解
+        pb_msg.bat1_exists = status['bat1_exists']
+        pb_msg.bat2_exists = status['bat2_exists']
+        pb_msg.bat1_low_power = status['bat1_low_power']
+        pb_msg.bat2_low_power = status['bat2_low_power']
+        pb_msg.charging = status['charging']
+        pb_msg.fail_12v = status['fail_12v']
+        pb_msg.fail_19v = status['fail_19v']
+        pb_msg.fail_24v = status['fail_24v']
+        # Param3 拆解
+        pb_msg.arm_en = status['arm_en']
+        pb_msg.leg_en = status['leg_en']
+        pb_msg.out_19v_en = status['out_19v_en']
+        pb_msg.out1_12v_en = status['out1_12v_en']
+        pb_msg.out2_12v_en = status['out2_12v_en']
+        pb_msg.out3_12v_en = status['out3_12v_en']
+        pb_msg.out_24v_en = status['out_24v_en']
+        return pb_msg
+
+    def _publish_power_board_status(self, _event):
+        """以缓存数据周期发布 /power_board_status，尚无缓存时跳过"""
+        status, _age = self._battery_cache.get_system_status()
+        if status is None:
+            return
+        self._power_board_status_pub.publish(self._build_power_board_status_msg(status))
 
     def run(self):
         """运行节点。关闭时的善后由 rospy.on_shutdown(_on_shutdown) 负责。"""

@@ -40,6 +40,25 @@ model_information {
     [32] "r_ringPIP"
     [33] "r_littleMCP"
     [34] "r_littlePIP"
+    ; lejuclaw linkage on 4.9 (200049). Continuous joints are nq=2 and blow up the arm model.
+    [35] "l_f_bar_1_joint"
+    [36] "l_f_bar_2"
+    [37] "l_f_bar_3"
+    [38] "l_f_fingers"
+    [39] "l_b_bar_1"
+    [40] "l_b_bar_2"
+    [41] "l_b_bar_3"
+    [42] "l_b_fingers"
+    [43] "l_b_bar_4_joint"
+    [44] "r_f_bar_1_joint"
+    [45] "r_f_bar_2"
+    [46] "r_f_bar_3"
+    [47] "r_f_fingers"
+    [48] "r_b_bar_1"
+    [49] "r_b_bar_2"
+    [50] "r_b_bar_3"
+    [51] "r_b_fingers"
+    [52] "r_b_bar_4_joint"
   }
   waistDof                   0   ; number of DOFs of the waist joint (0 if no waist joint)
   ; base frame of the robot (from URDF)

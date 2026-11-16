@@ -18,6 +18,8 @@
     <arg name="rviz"                default="false" />
     <arg name="multiplot"          default="false"/>
     <arg name="robot_version"      default="$(optenv ROBOT_VERSION 40)"/>
+    <!-- PPPPMMMMN 编码版本取末两位作为轮臂基础版本：210062→62，200063→63。 -->
+    <arg name="base_robot_version" value="$(eval int(arg('robot_version')) % 100)"/>
     <!-- 设置VR控制参数 -->
     <arg name="use_vr_control" default="true"/>
     <param name="use_vr_control" value="$(arg use_vr_control)"/>
@@ -52,6 +54,13 @@
     <arg name="use_estimator_contact"   default="false"/>
     <arg name="visualize_humanoid" default="true"/>
     <arg name="ruiwo_cxx_sdk" default="true"/>
+    <!-- SG100 optional command filter parameter. -->
+    <arg name="sg100_cmd_filter_alpha" default="0.2"/>
+    <!-- 位置模式 PID。驱动先读这些参数，缺省才用代码里的同一组值。 -->
+    <arg name="sg100_kp" default="10.0"/>
+    <arg name="sg100_ki" default="0.0"/>
+    <arg name="sg100_kd" default="0.02"/>
+    <arg name="sg100_output_limit" default="0.5"/>
     <!-- 根据机器人类型设置only_half_up_body参数 -->
     <arg name="only_half_up_body" default="false" if="$(eval arg('robot_type') == 1)"/>    <!-- 轮臂机器人 -->
     <arg name="only_half_up_body" default="false" unless="$(eval arg('robot_type') == 1)"/> <!-- 双足机器人 -->
@@ -68,6 +77,8 @@
     <arg name="use_external_odom_tf" default="$(arg real)"/>
     <!-- 底盘急停联动保护，可通过终端传参关闭：enable_base_emergency_stop:=false -->
     <arg name="enable_base_emergency_stop" default="true"/>
+    <!-- true: 电机启动回零和准备阶段都使用 config/arm_prepare_pose.yaml；false: 先回零，再走原有写死臂姿 -->
+    <arg name="use_custom_arm_prepare" default="false"/>
     <!-- modbus io bridge -->
     <arg name="with_modbus_io_bridge" default="true"/>
     <arg name="relay_port" default="/dev/kuavo_relay"/>
@@ -80,8 +91,8 @@
     <arg name="lejuclaw_vr_stream_timeout_ms" default="1000" doc="Timeout in ms before the Quest joystick stream is considered inactive."/>
     
     <!-- wheel bridge -->
-    <arg name="use_wheel_bridge" default="true" if="$(eval arg('robot_version') == 60)"/>
-    <arg name="use_wheel_bridge" default="false" unless="$(eval arg('robot_version') == 60)"/>
+    <arg name="use_wheel_bridge" default="true" if="$(eval arg('base_robot_version') == 60)"/>
+    <arg name="use_wheel_bridge" default="false" unless="$(eval arg('base_robot_version') == 60)"/>
 
     <!-- multiplot -->
     <group if="$(arg multiplot)">
@@ -113,10 +124,27 @@
     <param name="enable_pull_up_protect" value="true"/>
     <param name="pull_up_force_threshold" value="0.70"/>
     <param name="enable_base_emergency_stop" value="$(arg enable_base_emergency_stop)"/>
+    <param name="use_custom_arm_prepare" type="bool" value="$(arg use_custom_arm_prepare)"/>
+    <group if="$(arg use_custom_arm_prepare)">
+      <rosparam command="load" file="$(find humanoid_controllers)/config/arm_prepare_pose.yaml" ns="arm_prepare"/>
+    </group>
     <param name="robot_type"      value="$(arg robot_type)"/>
     <param name="nodelet_robot_type"      value="$(arg nodelet_robot_type)"/>
     <param name="wheel_control_type"      value="$(arg wheel_control_type)"/>
     <param name="ruiwo_cxx_sdk" value="$(arg ruiwo_cxx_sdk)"/>
+
+    <!-- SG100 hand params -->
+    <param name="sg100_left_port" value="/dev/lefthand" />
+    <param name="sg100_right_port" value="/dev/righthand" />
+    <param name="sg100_baudrate" value="1000000" />
+    <param name="sg100_control_rate" value="100.0" />
+    <param name="sg100_publish_joint_states" value="true" />
+    <param name="sg100_cmd_filter_alpha" value="$(arg sg100_cmd_filter_alpha)" />
+    <param name="sg100_debug_state" value="false" />
+    <param name="sg100_kp" value="$(arg sg100_kp)" type="double" />
+    <param name="sg100_ki" value="$(arg sg100_ki)" type="double" />
+    <param name="sg100_kd" value="$(arg sg100_kd)" type="double" />
+    <param name="sg100_output_limit" value="$(arg sg100_output_limit)" type="double" />
 
     <!-- make the files into global parameters -->
     <param name="taskFile"   value="$(arg taskFile)" />
@@ -186,6 +214,9 @@
       </include>
     </group> -->
    <include file="$(find humanoid_interface)/launch/rosbag_nodelet.launch"/>
+
+   <!-- 物理急停桥接：电源板 stop_int 置位即发布 /stop_robot，停控制器/硬件/rosbag -->
+   <node pkg="humanoid_controllers" type="physical_estop_bridge_node.py" name="physical_estop_bridge" output="screen"/>
    <group if="$(arg use_joystick)">
       <group if="$(eval arg('joystick_type') == 'h12')">
         <param name="joystick_type" value="h12"/>
@@ -247,7 +278,9 @@
     </group>
 
     <group if="$(arg with_ik)">
-        <include file="$(find motion_capture_ik)/launch/ik_node.launch"/>
+        <include file="$(find motion_capture_ik)/launch/ik_node.launch">
+            <arg name="robot_version" value="$(arg robot_version)"/>
+        </include>
     </group>
 
     <!-- wheel bridge node -->
@@ -267,8 +300,19 @@
         </include>
     </group>
 
+    <!-- 头部控制。也可在机器起来后单独 roslaunch noitom_hi5_hand_udp_python head_control_node.launch -->
+    <arg name="with_head_control_node" default="true" doc="启动 head_control_node。PICO 自有头控时关掉"/>
+    <arg name="head_control_mode" default="" doc="留空时头控使用 fixed；可指定 fixed / vr_follow / track_hand。VR 启动仅在当前 fixed 时自动切换"/>
+    <arg name="head_track_target" default="both_hands_midpoint" doc="head_control_mode:=track_hand 时：both_hands_midpoint / left_hand / right_hand / active_hand"/>
+    <group if="$(arg with_head_control_node)">
+      <include file="$(find noitom_hi5_hand_udp_python)/launch/head_control_node.launch">
+        <arg name="head_control_mode" value="$(arg head_control_mode)"/>
+        <arg name="head_track_target" value="$(arg head_track_target)"/>
+      </include>
+    </group>
+
     <!-- restart urobot.service (depends on sshpass) -->
-    <group if="$(eval arg('robot_version') == 61 or arg('robot_version') == 62)">
+    <group if="$(eval arg('base_robot_version') in [61, 62])">
         <node pkg="humanoid_controllers" type="restart_urobot_service.sh" name="restart_urobot_service"
               output="screen" required="false"/>
     </group>

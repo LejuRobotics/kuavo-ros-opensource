@@ -26,8 +26,6 @@ import logging
 # Set the logging level to DEBUG
 logging.basicConfig(level=logging.DEBUG)
 
-wait_webrtc_client_connect_timeout = 180  # seconds
-
 class WebRTCServerAndVideoStreamClient:
     def __init__(self, camera_topic_for_video_stream, quest3_ip=None):
         self.camera_topic_for_video_stream = camera_topic_for_video_stream
@@ -38,7 +36,6 @@ class WebRTCServerAndVideoStreamClient:
 
     def start(self):
         rospy.init_node('Leju_webrtc_VideoStream', anonymous=True)
-        rate = rospy.Rate(10)  # 10 Hz
 
         print("Starting to create WebRTC signaling server...")
         self.web_rtc_signaling_server = WebRTCSinglingServer()
@@ -47,7 +44,8 @@ class WebRTCServerAndVideoStreamClient:
         self.web_rtc_signaling_server.start()
         print("Web_rtc_signaling_server_started: WebRTC signaling server started successfully.")
 
-        self.webrtc_video_stream_client = WebRTCVideoStreamClient("127.0.0.1", self.camera_topic_for_video_stream)
+        self.webrtc_video_stream_client = WebRTCVideoStreamClient(
+            "127.0.0.1", self.camera_topic_for_video_stream, signaling_server=self.web_rtc_signaling_server)
         self.webrtc_video_stream_client.start()
 
         start_time = time.time()
@@ -59,24 +57,38 @@ class WebRTCServerAndVideoStreamClient:
         width = self.webrtc_video_stream_client.width
         height = self.webrtc_video_stream_client.height
         print("\033[94m" + "Start ros node loop: Starting the rosnode loop" + "\033[0m")
-        self.udp_sender_send_webrtc_signaling_info = self.BroadWebRtcAndCameraInfoToQuest3(width, height)
 
-        start_time = time.time()
+        # 断线重连边界（2026-09-05 实测）：
+        #   ✓ App 端重开、机器端进程保持：恢复广播 + offer 重连，可自动恢复视频
+        #   ✗ 机器端进程重启、App 端保持：VR App 一次性握手设计，不响应广播、不重连信令(8765)，
+        #     无摄像头数据；协议(KuavoVrEvents)无重置命令，须手动重启 VR App 才能恢复
+        # 持续监控 VR 客户端在线状态：在线时停广播，离线时恢复广播，保证断线后可重新发现
+        last_status = None
+        last_wait_log = time.time()
         while not rospy.is_shutdown():
-            webrtc_clients_cnt = self.web_rtc_signaling_server.get_connected_clients_count()
-            if webrtc_clients_cnt > 0:
-                self.webrtc_video_stream_client.start_connect_webrtc_singal = True
-                self.udp_sender_send_webrtc_signaling_info.stop()
-                self.udp_sender_send_webrtc_signaling_info = None
-                break
-            elapsed_time = time.time() - start_time
-            if elapsed_time > wait_webrtc_client_connect_timeout:
-                print("\033[91mcarlos_webrtc_client_connect_timeout: Wait Quest3 connect to webrtc server: Timed out after {} seconds, keep waiting...\033[0m".format(wait_webrtc_client_connect_timeout))
-                start_time = time.time()
-                continue
-            remaining_time = wait_webrtc_client_connect_timeout - int(elapsed_time)
-            print("Waiting for Quest3 to connect to webrtc server... {} seconds remaining".format(remaining_time))
-            time.sleep(1)  # add a 1-second sleep
+            vr_clients_cnt = self.web_rtc_signaling_server.get_vr_clients_count()
+            status = 'connected' if vr_clients_cnt > 0 else 'waiting'
+            if status != last_status:
+                if status == 'connected':
+                    self.stop_udp_broadcast()
+                    print(f"[{time.strftime('%H:%M:%S')}] VR client connected, stop UDP broadcast (vr_clients_cnt={vr_clients_cnt})")
+                else:
+                    self.ensure_udp_broadcast(width, height)
+                    print(f"[{time.strftime('%H:%M:%S')}] No VR client, resume UDP broadcast for re-discovery (vr_clients_cnt={vr_clients_cnt})")
+                last_status = status
+            elif status == 'waiting' and time.time() - last_wait_log > 30:
+                print(f"[{time.strftime('%H:%M:%S')}] Still waiting for VR client to connect ...")
+                last_wait_log = time.time()
+            time.sleep(0.5)
+
+    def stop_udp_broadcast(self):
+        if self.udp_sender_send_webrtc_signaling_info is not None:
+            self.udp_sender_send_webrtc_signaling_info.stop()
+            self.udp_sender_send_webrtc_signaling_info = None
+
+    def ensure_udp_broadcast(self, width, height):
+        if self.udp_sender_send_webrtc_signaling_info is None:
+            self.udp_sender_send_webrtc_signaling_info = self.BroadWebRtcAndCameraInfoToQuest3(width, height)
 
     def BroadWebRtcAndCameraInfoToQuest3(self, width, height):
         webrtc_signaling_url = ":8765"

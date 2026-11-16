@@ -16,6 +16,7 @@ at www.bridgedp.com.
 #include <humanoid_estimation/StateEstimateBase.h>
 #include <ocs2_core/misc/LoadData.h>
 #include <boost/property_tree/ptree.hpp>
+#include <atomic>
 #include <mutex>
 #include <functional>
 #include <Eigen/Dense>
@@ -45,7 +46,7 @@ struct CommandDataRL
   double cmdVelScaleAngularY_;
   double cmdVelScaleAngularZ_;
   double cmdScaleStance_;
-  
+
   CommandDataRL() {
     cmdVelLineX_ = 0.0;
     cmdVelLineY_ = 0.0;
@@ -112,7 +113,14 @@ public:
   /// 强制重置到 stance 模式（cmdStance_=1, 速度清零），用于控制器 resume 时避免残留行走指令
   void resetToStance();
   /// 允许在 robot_action 期间继续接收行走指令（用于走不停腿场景）
-  void setAllowWalkingDuringAction(bool allow) { allow_walking_during_action_ = allow; }
+  void setAllowWalkingDuringAction(bool allow) noexcept
+  {
+    allow_walking_during_action_.store(allow, std::memory_order_relaxed);
+  }
+  bool allowsWalkingDuringAction() const noexcept
+  {
+    return allow_walking_during_action_.load(std::memory_order_relaxed);
+  }
 
   //waao
   void resetCommandState(bool stance_mode = true);
@@ -137,6 +145,8 @@ public:
   void clearPostureTargetOverride();
   CommandDataRL getPolicyCommand() const;
   bool shouldBlockCommandExecution() const;
+  /// 返回 Receiver 是否已处理到动作活跃状态（含心跳超时）。
+  bool isRobotActionActive() const;
   geometry_msgs::Twist getSmoothedCmdVel() const;
   
   // Load in-place stepping configuration from config file
@@ -151,7 +161,7 @@ private:
   void gaitNameCallback(const std_msgs::String::ConstPtr& msg);
   void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg);
   bool isRobotActionActiveLocked(const ros::Time& now) const;
-  /// 动作期间是否允许继续行走：v17 / 显式标志 / ROS param
+  /// 动作期间是否允许继续行走：v17 或控制器本地原子标志
   bool resolveAllowWalkingDuringAction() const;
   void syncPostureToCommand();
   
@@ -193,7 +203,7 @@ private:
   bool is_amp_hand_controller_{false};
   bool is_v17_{false};  ///< /robot_version==17：动作期间不 suppress 行走
   bool robot_action_active_{false};
-  bool allow_walking_during_action_{false};
+  std::atomic_bool allow_walking_during_action_{false};
   ros::Time last_robot_action_active_time_;
   double robot_action_active_timeout_{0.5};
   std::function<bool()> command_buffer_callback_;
@@ -260,7 +270,7 @@ private:
   double y_direction_compensation_x_bias_right_{0.0};     // 向左行走时X轴偏置(从后往前看)
   double y_direction_compensation_z_bias_left_{0.0};      // 向右行走时Z轴角速度偏置(从后往前看)
   double y_direction_compensation_z_bias_right_{0.0};     // 向左行走时Z轴角速度偏置(从后往前看)
-  
+
   // Thread safety
   mutable std::mutex command_mutex_;
 };

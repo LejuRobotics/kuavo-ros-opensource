@@ -56,6 +56,8 @@
     <depend>nodelet</depend>
     <depend>kuavo_assets</depend>
     <depend>kuavo_common</depend>
+    <depend>urdf</depend>
+    <depend>roslib</depend>
     <depend>opencv</depend>
     <depend>yaml-cpp</depend>
   <!-- The export tag contains other, unspecified, tags -->

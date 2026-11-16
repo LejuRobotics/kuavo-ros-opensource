@@ -32,6 +32,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ocs2_self_collision/PinocchioGeometryInterface.h>
 
 #include <pinocchio/algorithm/geometry.hpp>
+#if __has_include(<pinocchio/collision/distance.hpp>)
+#include <pinocchio/collision/distance.hpp>
+#endif
 #include <pinocchio/multibody/data.hpp>
 #include <pinocchio/multibody/fcl.hpp>
 #include <pinocchio/multibody/geometry.hpp>
@@ -40,7 +43,35 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <urdf_parser/urdf_parser.h>
 
+#if __has_include(<tinyxml.h>)
+#include <tinyxml.h>
+#endif
+#if __has_include(<tinyxml2.h>)
+#include <tinyxml2.h>
+#endif
+
 namespace ocs2 {
+
+namespace {
+
+#if __has_include(<tinyxml.h>)
+std::string xmlDocumentToString(const TiXmlDocument& document) {
+  TiXmlPrinter printer;
+  document.Accept(&printer);
+  return printer.Str();
+}
+#endif
+
+#if __has_include(<tinyxml2.h>)
+std::string xmlDocumentToString(const tinyxml2::XMLDocument& document) {
+  tinyxml2::XMLPrinter printer;
+  document.Accept(&printer);
+  return printer.CStr();
+}
+#endif
+
+}  // namespace
+
 
 /******************************************************************************************************/
 /******************************************************************************************************/
@@ -94,10 +125,8 @@ void PinocchioGeometryInterface::buildGeomFromPinocchioInterface(const Pinocchio
 
   // TODO: Replace with pinocchio function that uses the ModelInterface directly
   // As of 19-04-21 there is no buildGeom that takes a ModelInterface, so we deconstruct the modelInterface into a std::stringstream first
-  const std::unique_ptr<const TiXmlDocument> urdfAsXml(urdf::exportURDF(*pinocchioInterface.getUrdfModelPtr()));
-  TiXmlPrinter printer;
-  urdfAsXml->Accept(&printer);
-  const std::stringstream urdfAsStringStream(printer.Str());
+  const auto urdfAsXml = urdf::exportURDF(*pinocchioInterface.getUrdfModelPtr());
+  const std::stringstream urdfAsStringStream(xmlDocumentToString(*urdfAsXml));
 
   pinocchio::urdf::buildGeom(pinocchioInterface.getModel(), urdfAsStringStream, pinocchio::COLLISION, geomModel);
 }

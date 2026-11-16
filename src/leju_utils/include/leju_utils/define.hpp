@@ -28,12 +28,12 @@ struct PoseData {
 
 enum class ArmIdx { LEFT = 0, RIGHT = 1, BOTH = 2 };
 
-enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCLAW = 3, LINKER_HAND = 4 };
+enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCLAW = 3, LINKER_HAND = 4, HEIMAN = 5 };
 
 // 判断是否为手部末端执行器类型
 inline bool isHandEndEffectorType(EndEffectorType type) {
   bool isHandEndEffectorType = (type == EndEffectorType::QIANGNAO || type == EndEffectorType::QIANGNAO_TOUCH ||
-                                type == EndEffectorType::REVO2 || type == EndEffectorType::LINKER_HAND);
+                                type == EndEffectorType::REVO2 || type == EndEffectorType::LINKER_HAND || type == EndEffectorType::HEIMAN);
   // if (isHandEndEffectorType) {
   //   std::cout << "isHandEndEffectorType: " << static_cast<int>(type) << std::endl;
   //   std::cout << "QIANGNAO: " << static_cast<int>(EndEffectorType::QIANGNAO) << std::endl;
@@ -65,6 +65,8 @@ inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
     return EndEffectorType::REVO2;
   } else if (typeStr == "lejuclaw") {
     return EndEffectorType::LEJUCLAW;
+  } else if (typeStr == "heiman") {
+    return EndEffectorType::HEIMAN;
   } else if (typeStr == "linker_hand") {
     return EndEffectorType::LINKER_HAND;
   } else {
@@ -516,6 +518,34 @@ inline Eigen::Quaterniond limitQuaternionAngleEulerZYX(const Eigen::Quaterniond&
 
   // 乘法顺序：Z * Y * X
   return (yawAngle * pitchAngle * rollAngle).normalized();
+}
+
+// Clip a commanded hand quaternion relative to a reference pose, but skip
+// Euler reconstruction when the relative motion is tiny or pitch is near the
+// ZYX gimbal.  Per-frame clip around a lagged measured EE with pitch=90deg
+// otherwise rebuilds yaw and the ~19cm EE lever turns that into a path kink.
+inline Eigen::Quaterniond limitIncrementalTargetQuatSafe(const Eigen::Quaterniond& qTarget,
+                                                         const Eigen::Quaterniond& qReference,
+                                                         const Eigen::Vector3d& zyxLimits) {
+  const Eigen::Quaterniond qT = qTarget.normalized();
+  const Eigen::Quaterniond qR = qReference.normalized();
+  Eigen::Quaterniond qRel = (qR.conjugate() * qT).normalized();
+  if (qRel.w() < 0.0) {
+    qRel.coeffs() = -qRel.coeffs();
+  }
+
+  const double angle = 2.0 * std::acos(std::min(1.0, std::abs(qRel.w())));
+  if (angle < 1.0e-3) {
+    return qT;
+  }
+
+  const double sinp = 2.0 * (qRel.w() * qRel.y() - qRel.z() * qRel.x());
+  constexpr double kGimbalSinP = 0.94;  // ~70 deg
+  if (std::abs(sinp) >= kGimbalSinP) {
+    return qT;
+  }
+
+  return (qR * limitQuaternionAngleEulerZYX(qRel, zyxLimits)).normalized();
 }
 
 /**

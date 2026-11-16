@@ -22,9 +22,11 @@ from typing import Any, Dict, Tuple
 import xml.etree.ElementTree as ET
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_DEFAULT_URDF = os.path.abspath(
-    os.path.join(_SCRIPT_DIR, "..", "biped_v3_arm_s62.urdf")
-)
+_CAMERA_CALIB_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
+
+if _CAMERA_CALIB_DIR not in sys.path:
+    sys.path.insert(0, _CAMERA_CALIB_DIR)
+import robot_versions as rv  # noqa: E402  (统一机型表)
 
 # 写入模式：JSON 字段与 URDF parent link
 MODES: Dict[str, Dict[str, str]] = {
@@ -41,6 +43,29 @@ MODES: Dict[str, Dict[str, str]] = {
 }
 
 JOINT_NAME = "checkerboard_joint"
+
+
+def resolve_default_urdf() -> str:
+    """根据 ROBOT_VERSION 选择目标 URDF；显式 --urdf 时不会调用。
+
+    小版本按 %100 折回基础型号后查机器人机型表（robot_versions.py）：
+    45 与 49 系列同属 biped45 布局，但标定 URDF 分开（s45/s49，内容除机型名外一致）；
+    53/55 共用 s55（头部安装低 4.1 mm），56 用 s56，62/63 共用 s62。
+    """
+    robot_version = os.environ.get("ROBOT_VERSION", "").strip()
+    if not robot_version:
+        raise ValueError("未设置 ROBOT_VERSION；请先 export ROBOT_VERSION=<型号>，或显式传 --urdf")
+    spec = rv.spec(robot_version)
+    if spec is None:
+        raise ValueError(
+            f"不支持的 ROBOT_VERSION={robot_version}"
+            f"（按 %100 折回为 {rv.fold(robot_version)}）；"
+            f"支持 {rv.supported_text()} 及对应小版本，也可显式传 --urdf"
+        )
+    urdf_path = os.path.join(_CAMERA_CALIB_DIR, spec.urdf)
+    if not os.path.isfile(urdf_path):
+        raise FileNotFoundError(f"ROBOT_VERSION={robot_version} 对应 URDF 不存在: {urdf_path}")
+    return urdf_path
 
 
 def _fmt_xyz_rpy(xyz, rpy) -> Tuple[str, str]:
@@ -102,9 +127,11 @@ def patch_checkerboard_joint_text(
     """
     xyz_s, rpy_s = _fmt_xyz_rpy(xyz, rpy)
 
-    # 匹配 <origin xyz="..." rpy="..." />（允许换行）
+    # 匹配 checkerboard_joint 的首个有效 origin（允许其前面有说明注释和换行）。
+    # S45 URDF 在 joint 与 origin 之间有一行注释，不能只用 \s*。
     origin_pat = re.compile(
         r'(<joint name="checkerboard_joint" type="fixed">\s*'
+        r'(?:<!--.*?-->\s*)*'
         r'<origin xyz=")([^"]+)("\s+rpy=")([^"]+)(" />)',
         re.DOTALL,
     )
@@ -187,8 +214,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--urdf",
-        default=_DEFAULT_URDF,
-        help=f"目标 URDF（默认 {_DEFAULT_URDF}）",
+        default=None,
+        help="目标 URDF（默认按 ROBOT_VERSION 自动选择）",
     )
     parser.add_argument(
         "--mode",
@@ -209,9 +236,10 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
+        urdf_path = args.urdf or resolve_default_urdf()
         info = apply_checkerboard_to_urdf(
             json_path=args.json,
-            urdf_path=args.urdf,
+            urdf_path=urdf_path,
             mode=args.mode,
             output_path=args.output,
             backup=not args.no_backup,

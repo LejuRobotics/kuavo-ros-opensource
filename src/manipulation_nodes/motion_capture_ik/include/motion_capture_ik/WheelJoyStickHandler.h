@@ -3,6 +3,7 @@
 #include <noitom_hi5_hand_udp_python/JoySticks.h>
 
 #include <atomic>
+#include <chrono>
 #include <leju_utils/define.hpp>
 #include <vector>
 #include <mutex>
@@ -39,6 +40,11 @@ class WheelJoyStickHandler {
   bool getRightJoyStickYHold() const;
   bool getRightJoyStickYHoldWithX() const;
 
+  // SG100 heiman 手指驱动：读取最新 VR 扳机值 (0~1)。
+  bool hasFreshSg100Input(double timeout = 0.5) const;
+  double getLeftTrigger() const;
+  double getRightTrigger() const;
+
   void updateJoyStickData(const noitom_hi5_hand_udp_python::JoySticks::ConstPtr& msg);
   void processHandEndEffectorData();
   void processHandEndEffectorDataWithFingerTracking();
@@ -51,6 +57,9 @@ class WheelJoyStickHandler {
   bool isRightFirstButtonPressed() const;
   bool isLeftSecondButtonPressed() const;
   bool isRightSecondButtonPressed() const;
+  bool isLeftFirstButtonTouched() const;   // 左手 X 键触摸
+  bool isRightFirstButtonTouched() const;  // 右手 A 键触摸
+  bool isRightSecondButtonTouched() const; // 右手 B 键触摸
 
   bool isLeftRightFirstButtonTouched() const;
   bool isLeftRightFirstButtonPressed() const;
@@ -78,6 +87,7 @@ class WheelJoyStickHandler {
   void processClawDataWithJoystick();
   void processClawDataWithHandTracking();
 
+  std::atomic<double> sg100_input_received_{0.0};
   std::atomic<bool> isInitialized_;
 
   // 按钮状态
@@ -85,6 +95,7 @@ class WheelJoyStickHandler {
   bool leftFirstButtonTouched_;
   bool leftFirstButtonPressed_;  // 左手第一个按键按下状态
   bool rightSecondButtonPressed_;
+  bool rightSecondButtonTouched_;   // 右手 B 键触摸状态
   bool rightFirstButtonTouched_;
   bool rightFirstButtonPressed_;  // 右手第一个按键按下状态
 
@@ -115,7 +126,6 @@ class WheelJoyStickHandler {
 
   std::atomic<EndEffectorType> endEffectorType_;
   int controlFingerType_;
-  bool initControlWaistEnable_;
 
   std::vector<double> leftJoystick_;     // [left_trigger, left_grip]
   std::vector<double> rightJoystick_;    // [right_trigger, right_grip]
@@ -139,6 +149,7 @@ class WheelJoyStickHandler {
 
   // RightJoyStickY 按下时间检查相关变量
   bool resetJointToDefaultWheel_{true};  // 进入增量控制时是否重置关节到默认位置
+  bool initControlWaistEnable_{true};  // 初始化腰部控制模式
   bool RightJoyStickYHold_;      // RightJoyStickY 保持状态，默认值为 true
   int rightJoyStickYHoldCount_;  // 连续满足条件的计数
   bool rightJoyStickYHoldWithX_;      // X键按下时 RightJoyStickY 保持状态

@@ -169,6 +169,7 @@ namespace ocs2
       bool waitting_for_walk_ = false;
       bool single_step_yaw_computed_ = false;
       double auto_gait_start_time_{-1.0}; // 记录自动切换 walk 的时刻，用于冷却保护
+      double auto_gait_stop_cmd_time_{-1.0}; // 记录速度指令归零/目标轨迹停住的起始时刻，用于停止超时保护
       double single_step_yaw_threshold_ = 0.5; // rad
       std::atomic<int> resetting_mpc_state_{0};
       std::atomic_bool is_rl_controller_{false};

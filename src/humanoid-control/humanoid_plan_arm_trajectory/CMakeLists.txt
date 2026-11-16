@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(humanoid_plan_arm_trajectory)
 
+include(${CMAKE_CURRENT_SOURCE_DIR}/../../kuavo_common/cmake/kuavo_arch.cmake)
+
 ## Compile as C++11, supported in ROS Kinetic and newer
-set(CMAKE_CXX_STANDARD 11)
-add_compile_options(-std=c++11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
 
 ## Find catkin macros and libraries
@@ -59,6 +61,10 @@ find_package(drake REQUIRED)
 ##     and list every .msg/.srv/.action file to be processed
 ##   * uncomment the generate_messages entry below
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
+
+if(KUAVO_BUILD_FOR_AARCH64)
+  set(CATKIN_MESSAGE_GENERATORS "gencpp;genlisp;gennodejs;genpy")
+endif()
 
 ## Generate messages in the 'msg' folder
 add_message_files(

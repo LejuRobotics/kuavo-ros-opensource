@@ -59,6 +59,16 @@ class KuavoRobotToolsCore:
             SDKLogger.error(f"Transform error: {str(e)}")
             return None
 
+    def try_get_tf_transform(self, target_frame, source_frame, return_type="pose_quaternion"):
+        """高频路径只查询已有TF；缺失时立即返回并节流告警。"""
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                target_frame, source_frame, rospy.Time(0), rospy.Duration(0.0))
+            return self._parse_transform(transform.transform, return_type)
+        except Exception as e:
+            rospy.logwarn_throttle(2.0, f"PICO TF暂不可用 ({source_frame} -> {target_frame}): {e}")
+            return None
+
     def _parse_transform(self, transform, return_type: str) -> Union[PoseQuaternion, HomogeneousMatrix, None]:
         """Parses transform data to specified format.
         

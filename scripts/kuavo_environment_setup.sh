@@ -175,6 +175,7 @@ install_kuavo_libs() {
     log_info "安装Kuavo相关库..."
     sudo apt-get update -y
     sudo apt-get install -y libeigen3-dev libboost-all-dev
+    sudo apt-get install -y libceres-dev
     sudo apt-get install -y libyaml-cpp-dev libtinyxml2-dev
     sudo apt-get install -y libncurses5-dev libncursesw5-dev
     sudo apt-get install -y libmodbus-dev

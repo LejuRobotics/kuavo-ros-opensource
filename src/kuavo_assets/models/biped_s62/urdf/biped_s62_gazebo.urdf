@@ -497,7 +497,7 @@
     name="base_to_joint"
     type="fixed">
     <origin
-      xyz="0.098 0 0.27064321"
+      xyz="0.098 0 0.31"
       rpy="0 0 0" />
     <parent
       link="base_link" />
@@ -679,7 +679,7 @@
     name="waist_yaw_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.235"
+      xyz="0 0 0.250"
       rpy="0 0 0" />
     <parent
       link="waist_pitch_link" />
@@ -725,7 +725,7 @@
     name="zarm_l1_joint"
     type="revolute">
     <origin
-      xyz="0 0.2527 0.242"
+      xyz="0 0.2527 0.227"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -1060,7 +1060,7 @@
     name="zarm_r1_joint"
     type="revolute">
     <origin
-      xyz="0 -0.2527 0.242"
+      xyz="0 -0.2527 0.227"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -1378,7 +1378,7 @@
     </inertial>
     <visual>
       <origin
-        xyz="0 0 0"
+        xyz="0 0 -0.140473"
         rpy="0 0 0" />
       <geometry>
         <mesh
@@ -1395,7 +1395,7 @@
     name="zhead_1_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.3164"
+      xyz="0 0 0.43935"
       rpy="0 0 0" />
     <parent
       link="waist_yaw_link" />
@@ -1441,7 +1441,7 @@
     name="zhead_2_joint"
     type="revolute">
     <origin
-      xyz="0 0 0.13795"
+      xyz="0 0 0"
       rpy="0 0 0" />
     <parent
       link="zhead_1_link" />

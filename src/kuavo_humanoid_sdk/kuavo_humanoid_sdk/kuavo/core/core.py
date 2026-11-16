@@ -73,6 +73,12 @@ class KuavoRobotCore:
 
             self._control = KuavoRobotControl()
             self._rb_state = KuavoRobotStateCore()
+
+            # Controller owns a persistent 1 Hz rospy.Timer.  It must be reused:
+            # constructing one in every _is_mpc_mode() call leaks timers and makes
+            # high-frequency control loops progressively slower.
+            self._controller = None
+            self._controller_lock = threading.Lock()
     
             # manipulation mpc
             self._manipulation_mpc_frame = KuavoManipulationMpcFrame.KeepCurrentFrame
@@ -836,9 +842,12 @@ class KuavoRobotCore:
         Returns:
             bool: 如果当前控制器是 "mpc" 返回 True，否则返回 False。
         """
-        controller = Controller()
-        current_controller = controller.get_current_controller_name()
-        SDKLogger.info(f"[Core] Current controller: {current_controller}")
+        if self._controller is None:
+            with self._controller_lock:
+                if self._controller is None:
+                    self._controller = Controller()
+        current_controller = self._controller.get_current_controller_name()
+        SDKLogger.debug(f"[Core] Current controller: {current_controller}")
         return current_controller == "mpc"
 
     def is_arm_collision(self)->bool:

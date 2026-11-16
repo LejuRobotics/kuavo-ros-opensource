@@ -1,0 +1,18 @@
+{
+    "joint_angle_map": [
+        { "a": -1.0, "b": 0.0, "min_angle": 0.0, "max_angle": 125.0 },
+        { "a": -1.0, "b": 0.0, "min_angle": -135.0, "max_angle": 60.0 },
+        { "a": 1.0, "b": 0.0, "min_angle": -60.0, "max_angle": 90.0 },
+
+        { "a": 1.0, "b": 0.0, "min_angle": -90.0, "max_angle": 0.0 },
+        { "a": -1.0, "b": 0.0, "min_angle": 0.0, "max_angle": 125.0 },
+        { "a": 1.0, "b": 0.0, "min_angle": -60.0, "max_angle": 90.0 },
+
+        { "a": -1.0, "b": 0.0, "min_angle": 0.0, "max_angle": 125.0 },
+        { "a": 1.0, "b": 0.0, "min_angle": -60.0, "max_angle": 90.0 },
+        
+        { "a": 1.0, "b": 0.0, "min_angle": 0.0, "max_angle": 180.0 },
+        { "a": -1.0, "b": 0.0, "min_angle": 0.0, "max_angle": 125.0 },
+        { "a": 1.0, "b": 0.0, "min_angle": -60.0, "max_angle": 90.0 }
+    ]
+}

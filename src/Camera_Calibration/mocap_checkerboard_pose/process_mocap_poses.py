@@ -36,6 +36,44 @@ def _default_config_path() -> str:
     return os.path.join(_script_dir, "config", "bodies.yaml")
 
 
+_calib_dir = os.path.abspath(os.path.join(_script_dir, ".."))
+if _calib_dir not in sys.path:
+    sys.path.insert(0, _calib_dir)
+import robot_versions as rv  # noqa: E402  (统一机型表)
+
+
+def _is_supported_robot_version(version: object) -> bool:
+    """本流程支持的机型由统一机型表决定（小版本按 %100 折回基础型号）。"""
+    return rv.spec(version) is not None
+
+
+def _apply_left_shoulder_offset(cfg: Dict[str, Any], robot_version: str) -> Dict[str, Any]:
+    """从 bodies.yaml 的 left_shoulder_fixtures 选择当前机型偏移。
+
+    S45 与 49 系列（100049/200049 …）的 zarm_l1_joint 原点逐位相同，共用 s45 工装；
+    其余机型用 default。l_shoulder 在本流程中仅作记录/校验，不参与优化。
+    """
+    spec = rv.spec(robot_version)
+    if spec is None:
+        raise ValueError(
+            f"不支持的 ROBOT_VERSION={robot_version}"
+            f"（按 %100 折回为 {rv.fold(robot_version)}）；"
+            f"支持 {rv.supported_text()} 及对应小版本"
+        )
+    profile = spec.shoulder_profile
+    offset = (cfg.get("left_shoulder_fixtures") or {}).get(profile)
+    if not isinstance(offset, list) or len(offset) != 3:
+        raise ValueError(f"bodies.yaml 缺少 left_shoulder_fixtures.{profile}")
+    bodies = {body.get("name"): body for body in cfg.get("bodies", [])}
+    if "l_shoulder" not in bodies:
+        raise ValueError("bodies.yaml 缺少 l_shoulder")
+    bodies["l_shoulder"]["link_offset_mm"] = offset
+    return {
+        "profile": profile,
+        "link_offset_mm": list(offset),
+    }
+
+
 def _parse_row(
     row: Dict[str, str],
     body_names: List[str],
@@ -129,8 +167,10 @@ def build_output_json(
     csv_path: str,
     config_path: str,
     sigma: float,
+    robot_version: str,
 ) -> Dict[str, Any]:
     cfg = load_bodies_config(config_path)
+    shoulder_fixture = _apply_left_shoulder_offset(cfg, robot_version)
     body_names = [b["name"] for b in cfg["bodies"]]
     relative_pairs = cfg.get("relative_pairs", [])
     link_offsets = load_link_offsets_mm(cfg)
@@ -148,12 +188,14 @@ def build_output_json(
     result: Dict[str, Any] = {
         "source_csv": os.path.abspath(csv_path),
         "processed_at": datetime.now().isoformat(),
+        "robot_version": str(robot_version),
+        "left_shoulder_fixture": shoulder_fixture,
         "frame_id": "mocap_frame",
         "units": {"translation": "m", "rotation_rpy": "rad"},
         "link_offset_mm": {
             name: off.tolist() for name, off in link_offsets.items()
         },
-        "note": "相对位姿基于 link（已扣除 bodies.yaml 中 link_offset_mm 工装偏移）",
+        "note": "相对位姿基于 link（已扣除当前机型的有效 link_offset_mm 工装偏移）",
         "filter": {"sigma": sigma, "raw_frames": len(frames)},
         "statistics": {},
     }
@@ -201,14 +243,39 @@ def main() -> int:
         default=3.0,
         help="3σ 滤波倍数",
     )
+    parser.add_argument(
+        "--robot-version",
+        default=os.environ.get("ROBOT_VERSION", ""),
+        help=(
+            "机器人版本（也可通过 ROBOT_VERSION 传入），小版本按 %%100 折回基础型号："
+            f"支持 {rv.supported_text()} 及对应小版本"
+            "（100049/200049/300049/400049、200053/300053、400055、"
+            "200062/400062/500062、400063/500063）"
+        ),
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.input):
         print(f"输入文件不存在: {args.input}", file=sys.stderr)
         return 1
+    if not args.robot_version:
+        print(
+            f"未指定机器人版本：请使用 --robot-version {rv.supported_text('|')} 或对应小版本"
+            "（如 100049/200053/400055/500062）",
+            file=sys.stderr,
+        )
+        return 1
+    if not _is_supported_robot_version(args.robot_version):
+        print(
+            f"不支持的机器人版本: {args.robot_version}"
+            f"（按 %100 折回为 {rv.fold(args.robot_version)}）；"
+            f"支持 {rv.supported_text()} 及对应小版本",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
-        out = build_output_json(args.input, args.config, args.sigma)
+        out = build_output_json(args.input, args.config, args.sigma, args.robot_version)
     except Exception as e:
         print(f"[process] 失败: {e}", file=sys.stderr)
         return 1
@@ -218,6 +285,11 @@ def main() -> int:
         json.dump(out, f, indent=2, ensure_ascii=False)
 
     print(f"[process] 已写入 {args.output}")
+    shoulder = out["left_shoulder_fixture"]
+    print(
+        f"  left_shoulder: profile={shoulder['profile']}, "
+        f"offset_mm={shoulder['link_offset_mm']}"
+    )
     for pair_key in ["checkerboard_in_l_shoulder", "checkerboard_in_torso"]:
         if pair_key in out:
             xyz = out[pair_key]["xyz"]

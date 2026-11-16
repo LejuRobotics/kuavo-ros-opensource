@@ -1,0 +1,7 @@
+<launch>
+  <arg name="enabled" default="false"/>
+  <arg name="kd" default="18.0"/>
+  <rosparam command="load" file="$(find wheel_arm_abs_vel)/config/j3_overshoot_profile.yaml" ns="/j3_overshoot_profile"/>
+  <param name="/j3_overshoot_profile/enabled" value="$(arg enabled)" type="bool"/>
+  <param name="/j3_overshoot_profile/j3_kd" value="$(arg kd)" type="double"/>
+</launch>

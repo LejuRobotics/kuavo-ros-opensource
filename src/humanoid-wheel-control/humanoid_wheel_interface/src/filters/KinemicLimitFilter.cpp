@@ -239,6 +239,19 @@ void KinemicLimitFilter::setThirdOrderDerivativeLimit(const Eigen::VectorXd& lim
     }
 }
 
+void KinemicLimitFilter::resetDof(size_t index, double initialValue) {
+    if (index >= dofNum_) {
+        ROS_ERROR_STREAM("Reset DOF index out of range: " << index);
+        return;
+    }
+    prevData_(index) = initialValue;
+    prevDataFirstOrder_(index) = 0.0;
+    prevDataSecondOrder_(index) = 0.0;
+    inputVec_[index].current_position = {initialValue};
+    inputVec_[index].current_velocity = {0.0};
+    inputVec_[index].current_acceleration = {0.0};
+}
+
 void KinemicLimitFilter::reset(const Eigen::VectorXd& initialValue) {
     // 检查输入数据维度
     if (initialValue.size() != dofNum_) {

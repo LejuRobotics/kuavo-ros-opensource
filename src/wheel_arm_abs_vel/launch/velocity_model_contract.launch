@@ -1,0 +1,6 @@
+<launch>
+  <arg name="robot_version" default="62" />
+  <!-- Validate assets while parsing, before any hardware node can start. -->
+  <param name="/whole_body_velocity_ik/model_contract_json" type="str"
+         command="/usr/bin/python3 $(find wheel_arm_abs_vel)/scripts/resolve_velocity_model.py --robot-version=$(arg robot_version) --assets &quot;$(find kuavo_assets)&quot; --wheel-interface &quot;$(find humanoid_wheel_interface)&quot; --overlay-dir &quot;$(find wheel_arm_abs_vel)/config&quot;" />
+</launch>

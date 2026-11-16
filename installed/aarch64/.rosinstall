@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /builds/highlydynamic/kuavo-ros-control/installed/aarch64/setup.sh

@@ -2,6 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import os
+import platform
+import time
+import traceback
 import rospy
 import psutil
 import subprocess
@@ -77,8 +80,18 @@ def get_cpu_usage():
     return psutil.cpu_percent(interval=0, percpu=True)
 
 def get_cpu_temps():
+    if platform.machine() in ("aarch64", "arm64", "armv7l"):
+        return _get_temps_via_thermal_zone()
+
+    package_temp, core_temps = _get_temps_via_sensors()
+    if package_temp is not None:
+        return package_temp, core_temps
+
+    return _get_temps_via_thermal_zone()
+
+
+def _get_temps_via_sensors():
     try:
-        # 使用 sensors 命令获取 CPU 温度信息
         output = subprocess.check_output("sensors", shell=True, stderr=subprocess.DEVNULL).decode()
         package_temp = None
         core_temps = []
@@ -96,7 +109,105 @@ def get_cpu_temps():
         return package_temp, core_temps
 
     except Exception as e:
-        rospy.logwarn("Failed to read CPU temperature: %s", e)
+        rospy.logwarn("Failed to read CPU temperature via sensors: %s", e)
+        return None, []
+
+
+CPU_THERMAL_TYPES = frozenset([
+    "cpu-thermal", "CPU-therm", "cpu0-thermal", "Tboard_CPU",
+    "soc_thermal", "tj-thermal",
+])
+
+GPU_THERMAL_TYPES = frozenset([
+    "gpu-thermal", "GPU-therm", "gpu0-thermal", "Tboard_GPU",
+])
+
+SOC_THERMAL_PREFIXES = ("soc", "cv",)
+
+
+def _read_zone_temp(zone_path, retries=3, delay=0.01):
+    temp_file = os.path.join(zone_path, "temp")
+    if not os.path.isfile(temp_file):
+        return None
+    for _ in range(retries):
+        try:
+            with open(temp_file, "r") as f:
+                raw = f.read()
+                if raw is None:
+                    continue
+                raw = raw.strip()
+                if not raw:
+                    continue
+                return float(raw) / 1000.0
+        except Exception:
+            time.sleep(delay)
+            continue
+    return None
+
+
+def _read_zone_type(zone_path, retries=3, delay=0.01):
+    type_file = os.path.join(zone_path, "type")
+    if not os.path.isfile(type_file):
+        return None
+    for _ in range(retries):
+        try:
+            with open(type_file, "r") as f:
+                raw = f.read()
+                if raw is None:
+                    continue
+                raw = raw.strip()
+                if raw:
+                    return raw
+        except Exception:
+            time.sleep(delay)
+            continue
+    return None
+
+
+def _get_temps_via_thermal_zone():
+    try:
+        thermal_base = "/sys/class/thermal"
+        if not os.path.isdir(thermal_base):
+            rospy.logwarn("Failed to read CPU temperature via thermal_zone: %s not found", thermal_base)
+            return None, []
+
+        entries = sorted(os.listdir(thermal_base))
+        zones = []
+        for entry in entries:
+            zone_path = os.path.join(thermal_base, str(entry))
+            if os.path.isdir(zone_path):
+                zones.append(zone_path)
+
+        package_temp = None
+        core_temps = []
+
+        for zone_path in zones:
+            zone_type = _read_zone_type(zone_path)
+            zone_temp = _read_zone_temp(zone_path)
+            if zone_type is None or zone_temp is None:
+                continue
+
+            if zone_type in CPU_THERMAL_TYPES:
+                if package_temp is None:
+                    package_temp = zone_temp
+                core_temps.append(zone_temp)
+            elif zone_type in GPU_THERMAL_TYPES:
+                if package_temp is None:
+                    package_temp = zone_temp
+            elif isinstance(zone_type, str) and zone_type.startswith(SOC_THERMAL_PREFIXES):
+                core_temps.append(zone_temp)
+
+        if package_temp is None and core_temps:
+            package_temp = sum(core_temps) / len(core_temps)
+
+        if package_temp is not None:
+            return package_temp, core_temps
+
+        return None, []
+
+    except Exception as e:
+        rospy.logwarn("Failed to read CPU temperature via thermal_zone: %s", e)
+        rospy.logwarn("Traceback: %s", traceback.format_exc())
         return None, []
 
 def get_cpu_frequencies():

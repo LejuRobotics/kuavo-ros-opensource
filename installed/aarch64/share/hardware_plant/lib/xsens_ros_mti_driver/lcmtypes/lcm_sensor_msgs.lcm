@@ -1,0 +1,29 @@
+package lcm_sensor_msgs;
+
+struct JointState
+{
+  int64_t seq;
+  int64_t sec;
+  int64_t nsec;
+  int32_t na;
+  int16_t id[na];
+  double q[na];
+  double v[na];
+  double vd[na];
+  double tau[na];
+}
+
+struct JointCommand
+{
+  int64_t seq;
+  int64_t sec;
+  int64_t nsec;
+  int32_t na;
+  int16_t id[na];
+  double q[na];
+  double v[na];
+  double vd[na];
+  double tau[na];
+  double tau_max[na];
+  int8_t m;
+}

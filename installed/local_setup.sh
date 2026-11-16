@@ -1,9 +1,10 @@
-#!/usr/bin/env sh
-# generated from catkin/cmake/template/local_setup.sh.in
-
-# since this file is sourced either use the provided _CATKIN_SETUP_DIR
-# or fall back to the destination set at configure time
-: ${_CATKIN_SETUP_DIR:=/builds/highlydynamic/kuavo-ros-control/installed}
+#!/bin/sh
 CATKIN_SETUP_UTIL_ARGS="--extend --local"
-. "$_CATKIN_SETUP_DIR/setup.sh"
+if [ -n "${_KUAVO_MULTIARCH_ROOT:-}" ]; then
+  # shellcheck disable=SC1091
+  . "${_KUAVO_MULTIARCH_ROOT}/setup.sh"
+else
+  # shellcheck disable=SC1091
+  . "$(cd "$(dirname "$0")" && pwd)/setup.sh"
+fi
 unset CATKIN_SETUP_UTIL_ARGS

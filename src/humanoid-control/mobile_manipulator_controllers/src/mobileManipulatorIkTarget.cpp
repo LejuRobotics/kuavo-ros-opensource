@@ -130,6 +130,7 @@ void MobileManipulatorIkTarget::initializeSubscribers()
 void MobileManipulatorIkTarget::initializePublishers()
 {
     effTrajReceivedPublisher_ = nodeHandle_.advertise<std_msgs::Int32>("/mm/eff_traj_received", 10);
+    ocs2CommLatencyPublisher_ = nodeHandle_.advertise<std_msgs::Float64>("/ocs2_ik/comm_latency_ms", 10);
 }
 
 void MobileManipulatorIkTarget::initializeServices()
@@ -240,6 +241,19 @@ std::pair<Eigen::Vector3d, Eigen::Quaterniond> MobileManipulatorIkTarget::transT
 
 void MobileManipulatorIkTarget::ikCmdCallback(const kuavo_msgs::twoArmHandPoseCmd::ConstPtr& msg)
 {
+    // 延迟测量: 记录接收时刻
+    auto recvSteadyTime = std::chrono::steady_clock::now();
+    double recvTimeSec = ros::Time::now().toSec();
+    
+    // 测量通信延迟: 发布时刻(timestamp_ms) → OCS2 IK接收时刻
+    if (msg->timestamp_ms > 0)
+    {
+        double commLatencyMs = (recvTimeSec - msg->timestamp_ms / 1000.0) * 1000.0;
+        std_msgs::Float64 latencyMsg;
+        latencyMsg.data = commLatencyMs;
+        ocs2CommLatencyPublisher_.publish(latencyMsg);
+    }
+
     auto &hand_poses = msg->hand_poses; // cppcheck-suppress variableScope
     FrameType frameType = static_cast<FrameType>(msg->frame);
 
@@ -264,6 +278,8 @@ void MobileManipulatorIkTarget::ikCmdCallback(const kuavo_msgs::twoArmHandPoseCm
         std::tie(localFrameData_.rightHandPose.pos, localFrameData_.rightHandPose.quat) = transTargetToLocalFrame(frameType, pos_r, quat_r, latestHumanoidObservation_);
         localFrameData_.isValid = true;
         localFrameData_.timestamp = ros::Time::now();
+        localFrameData_.recvSteadyTime = recvSteadyTime;
+        localFrameData_.seq++;
         // std::cout << "localFrameData_.timestamp: " << localFrameData_.timestamp << std::endl;
         
         // 清除轨迹数据，因为现在有新的单点数据
@@ -513,6 +529,15 @@ bool MobileManipulatorIkTarget::getTargetTrajectories(TargetTrajectories& target
 
   // 根据数据类型生成目标轨迹
   if (localFrameData_.isValid) {
+    // 延迟测量: 检测是否为新数据（seq变化）
+    if (localFrameData_.seq != processedSeq_) {
+      newDataProcessed_ = true;
+    } else {
+      newDataProcessed_ = false;
+    }
+    processedSeq_ = localFrameData_.seq;
+    processedRecvSteadyTime_ = localFrameData_.recvSteadyTime;
+
     // 处理单点数据
     IkCmd transformed_left = localFrameData_.leftHandPose;
     IkCmd transformed_right = localFrameData_.rightHandPose;
@@ -537,6 +562,23 @@ bool MobileManipulatorIkTarget::getTargetTrajectories(TargetTrajectories& target
     return true;
   }
   return false;
+}
+
+bool MobileManipulatorIkTarget::getLatestIkRecvInfo(std::chrono::steady_clock::time_point& recvTime, uint32_t& seq) const
+{
+    std::lock_guard<std::mutex> lock(localDataMutex_);
+    if (!localFrameData_.isValid) return false;
+    recvTime = localFrameData_.recvSteadyTime;
+    seq = localFrameData_.seq;
+    return true;
+}
+
+bool MobileManipulatorIkTarget::consumeNewIkData(std::chrono::steady_clock::time_point& recvTime)
+{
+    if (!newDataProcessed_) return false;
+    newDataProcessed_ = false;
+    recvTime = processedRecvSteadyTime_;
+    return true;
 }
 
 bool MobileManipulatorIkTarget::setHumanoidObservationByMmState(const vector_t& mmState)

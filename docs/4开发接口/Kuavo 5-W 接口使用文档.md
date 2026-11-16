@@ -85,6 +85,7 @@ src/demo/test_kuavo_wheel_real 包含实物测试案例，可供参考
 
 - [/enable_lb_arm_quick_mode - 关节快速模式切换](#1-enable_lb_arm_quick_mode---关节快速模式切换)
 - [/mobile_manipulator_mpc_control - mpc控制模式切换](#2-mobile_manipulator_mpc_control---mpc控制模式切换)
+- [/enable_control - 软件暂停/恢复](#3-enable_control---软件暂停恢复)
 
 ------
 
@@ -2421,4 +2422,77 @@ print("=" * 60)
 print("\n可用模式列表:")
 for mode_id, mode_desc in MODES.items():
     print(f"  {mode_id}: {mode_desc}")
+```
+
+
+------
+
+#### 3. `/enable_control` - 软件暂停/恢复
+
+**服务类型：** `std_srvs/SetBool`
+
+**功能描述：** 软件暂停（软急停）与恢复。
+
+- `false`：软件暂停。全身冻结在暂停瞬间的规划姿态；暂停期间运动类话题指令（如 `/cmd_vel`、`/cmd_lb_torso_pose`、`/kuavo_arm_traj` 等）被丢弃，运动类服务请求被拒绝（返回 `Rejected: control disabled.`）
+- `true`：恢复。恢复后机器人保持冻结姿态不动作，需重新发送运动指令才开始运动
+
+**注意事项：**
+
+1. 暂停和恢复各有一段过渡保护窗口（约 0.5s），窗口内的暂停/恢复请求会被拒绝（`success=false`）——这是**预期行为，不是故障**，需要切换时稍后重发即可；
+2. 重复请求也会被拒绝（已暂停时再发暂停、运行中再发恢复），同属预期行为；
+3. 服务返回 `success=true` 仅表示请求被受理：暂停立即生效；恢复的完全生效以下述状态话题为准；
+4. 当前状态以 latched 话题 `/enable_control_state`（`std_msgs/Bool`）为准：`true` = 完全恢复运行，`false` = 已暂停或过渡中。客户端应订阅该话题判断状态，而不是假设服务调用已即时生效。
+
+**请求字段：**
+
+```yaml
+bool data    # true：恢复，false：软件暂停
+```
+
+**响应字段：**
+
+```yaml
+bool success    # 请求是否被受理（false = 保护窗口内或重复请求被拒，属预期行为，可稍后重发）
+string message  # 状态消息
+```
+
+**相关演示脚本：** `manual_enable_control_test.py`
+
+使用示例
+
+```python
+#!/usr/bin/env python
+import rospy
+from std_srvs.srv import SetBool
+from std_msgs.msg import Bool
+
+enable_state = True  # 以 /enable_control_state 话题为准同步
+
+def on_enable_state(msg):
+    global enable_state
+    enable_state = msg.data
+
+def call_enable_control(enable):
+    """调用软件暂停/恢复服务。被拒（保护窗口/重复请求）属预期，可稍后重发"""
+    try:
+        rospy.wait_for_service('/enable_control', timeout=5.0)
+        response = rospy.ServiceProxy('/enable_control', SetBool)(enable)
+        if response.success:
+            rospy.loginfo(f"✓ {'恢复' if enable else '软件暂停'}请求已受理")
+            return True
+        else:
+            rospy.logwarn(f"请求被拒（预期行为，稍后重发）: {response.message}")
+            return False
+    except rospy.ServiceException as e:
+        rospy.logerr(f"服务调用异常: {e}")
+        return False
+
+rospy.init_node('call_enable_control', anonymous=True)
+rospy.Subscriber('/enable_control_state', Bool, on_enable_state, queue_size=1)
+
+# 示例：软件暂停
+call_enable_control(False)
+rospy.sleep(1.0)
+# 示例：恢复（恢复后需重新发送运动指令才开始动作）
+call_enable_control(True)
 ```

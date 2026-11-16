@@ -8,8 +8,9 @@
 2. NVIDIA Jetson AGX Orin 设备
 3. 烧录镜像的移动硬盘
 4. 申请注册英伟达账号（登录SDK Manger使⽤）
+5. 一根typec+usb的数据线(最好为原装线)
 ## 接线说明  
-找到上位机，并找到引出的拓展坞，如下图，在此处插上镜像硬盘。
+找到上位机，并找到引出的拓展坞，如下图，在此处插上镜像硬盘，也可以插上agx上的usb口
 ![](./image/agx接线图.png)  
 
 显示器则接在从上往下数第一个hdmi口
@@ -81,8 +82,9 @@ sdkmanager --archivedversions
 2. 接通电源后，迅速长按 NVIDIA Jetson AGX Orin 中的强制恢复(Force Recovery)按钮和重置(Reset)按钮，如下图 
 ![](./image/agx_4.png)
 3. 长按两秒后，先松开重置(Reset)按钮然后再松开强制恢复(Force Recovery)按钮
-4. 使用自带的 USB 转 type-c 线将，NVIDIA Jetson AGX Orin 与 ubuntu 电脑连接
-5. 选择对应的版本，包装盒上可以查看版本信息
+4. 使用自带的 USB 转 type-c 线将，NVIDIA Jetson AGX Orin 与 ubuntu 电脑连接，如下图，红圈部分有一个typec口，必须插在这里，如果识别不到设备可以换一根线。
+![](./image/agx_force_recovery_button.png)
+5. SDK Manager中选择对应的版本，包装盒上可以查看版本信息
 
 ![](./image/agx_5.png)
 

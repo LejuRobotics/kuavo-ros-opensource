@@ -37,6 +37,8 @@ public:
 
     // 重置滤波器
     void reset(const Eigen::VectorXd& initialValue);
+    // 只重置一个自由度，保留其他关节的运动状态。
+    void resetDof(size_t index, double initialValue);
 
 private:
     // 常规成员 

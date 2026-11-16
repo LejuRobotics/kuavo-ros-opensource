@@ -1,0 +1,3 @@
+<library path="lib/libnodelet_absolute_hardware">
+  <class name="wheel_arm_abs_vel/AbsoluteHardwareNodelet" type="AbsoluteHardwareNodelet" base_class_type="nodelet::Nodelet"><description>Private beta hardware lifecycle with test fixes.</description></class>
+</library>

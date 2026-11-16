@@ -16,7 +16,7 @@
      joy 节点发出，在 nodelet_manager 关闭前即可收到。）
   - 电源板/BMS保护（红灯常亮）：/battery_info_1 或 /battery_info_2 protection_flags!=0 时触发
   - 电池拔出/低电量（红灯闪烁）：/power_board_status 中 bat1_exists/bat2_exists 任意为False
-    或 bat1_low_power/bat2_low_power 任意为True 时触发
+    或 bat1_low_power/bat2_low_power 任意为True 时触发（仅足式；轮式板电池位不可信，跳过）
 
 使用 led_state 统一管理状态，避免重复发送 LED 命令。
 仅兼容新系统(24 灯,led_strip_service)。
@@ -146,7 +146,8 @@ class StartupLEDMonitor:
         rospy.Subscriber('/battery_info_2', BatteryInfo, self._battery_info_cb)
 
         # 订阅电源板系统状态（0x01 系统状态读取）
-        # 电池拔出/低电量 → 红灯闪烁
+        # 电池拔出/低电量 → 红灯闪烁（仅足式；轮式板电池位无意义）
+        self._power_skip_logged = False
         rospy.Subscriber('/power_board_status', PowerBoardStatus, self._power_board_status_cb)
 
         # 定时器（2Hz）：检测启动中/准备站立/启动完成
@@ -229,23 +230,31 @@ class StartupLEDMonitor:
 
         电池拔出(bat1_exists/bat2_exists 任意 False)或
         两块电池都低电量(bat1_low_power 且 bat2_low_power 同时 True) → 红灯闪烁。
+        轮式电源板(board_is_wheel)的电池位不反映整机电池拓扑，不参与判定。
         恢复正常后，由 _poll_state 重新检测当前机器人状态并恢复对应 LED。
         """
+        if msg.board_is_wheel or self.robot_type == 1:
+            # 轮臂电量不走该板，仅提示一次，避免 2Hz 刷屏
+            if not self._power_skip_logged:
+                rospy.loginfo("[StartupLED] Wheel robot: battery bits of power board ignored")
+                self._power_skip_logged = True
+            return
+
         battery_abnormal = (not msg.bat1_exists or not msg.bat2_exists or
                             (msg.bat1_low_power and msg.bat2_low_power))
 
         if battery_abnormal:
             reason = []
-            if not msg.bat1_exists: reason.append("BAT1拔出")
-            if not msg.bat2_exists: reason.append("BAT2拔出")
+            if not msg.bat1_exists: reason.append("BAT1 removed")
+            if not msg.bat2_exists: reason.append("BAT2 removed")
             if msg.bat1_low_power and msg.bat2_low_power:
-                reason.append("双电池低电量")
-            rospy.logwarn("[StartupLED] 电源板电池状态: %s", " ".join(reason))
+                reason.append("both batteries low")
+            rospy.logwarn_throttle(5.0, "[StartupLED] Power board battery status: %s", " ".join(reason))
             self._set_state('power', MODE_FLASH, COLOR_FALL)
         else:
             # 电池恢复正常：重新检测当前机器人状态并恢复对应 LED
             if self.led_state == 'power':
-                rospy.loginfo("[StartupLED] 电源板电池状态恢复正常，重新检测机器人状态")
+                rospy.loginfo("[StartupLED] Power board battery status recovered, re-detect robot state")
                 self.led_state = None  # 先清掉 power，否则 _set_state 会拦截正常状态切换
                 self._poll_state(None)  # 根据当前 ready_to_start/is_ready/stand_up 重新判断
 

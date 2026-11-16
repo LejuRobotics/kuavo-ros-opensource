@@ -166,6 +166,8 @@ void ControlDataManager::initializeSubscribers() {
         "/enable_control_state", 1,
         &ControlDataManager::enableControlStateCallback, this);
 
+    arm_traj_received_pub_ = nh_.advertise<sensor_msgs::JointState>(
+        "/vr_incremental/kuavo_arm_traj_shm", 10);
     ROS_INFO("ControlDataManager: All subscribers initialized "
              "(arm traj via ArmTrajReceiver, leg traj on dedicated CallbackQueue)");
     ensureArmTrajReceiveTimingPublishers();
@@ -617,6 +619,26 @@ void ControlDataManager::ingestArmJointTrajectory(const double* pos_rad, const d
         traj.tau[i] = (tau != nullptr) ? tau[i] : 0.0;
     }
 
+    // 发布实际收到的手臂轨迹，格式与 IK 节点发布 /kuavo_arm_traj 一致（deg + name + 原始时间戳）
+    if (arm_traj_received_pub_) {
+        sensor_msgs::JointState receivedMsg;
+        receivedMsg.header.stamp = (stamp_nsec != 0)
+            ? ros::Time(static_cast<uint32_t>(stamp_nsec / 1000000000ULL),
+                        static_cast<uint32_t>(stamp_nsec % 1000000000ULL))
+            : ros::Time::now();
+        receivedMsg.position.resize(arm_num_);
+        receivedMsg.velocity.resize(arm_num_);
+        receivedMsg.effort.resize(arm_num_);
+        receivedMsg.name.resize(arm_num_);
+        for (int i = 0; i < arm_num_; ++i) {
+            receivedMsg.name[i] = "arm_joint_" + std::to_string(i + 1);
+            receivedMsg.position[i] = pos_rad[i] * 180.0 / M_PI;
+            receivedMsg.velocity[i] = (vel_rad != nullptr) ? vel_rad[i] * 180.0 / M_PI : 0.0;
+            receivedMsg.effort[i] = (tau != nullptr) ? tau[i] : 0.0;
+        }
+        arm_traj_received_pub_.publish(receivedMsg);
+    }
+
     {
         std::lock_guard<std::mutex> lock(external_state_mutex_);
         arm_external_control_state_.update(traj);
@@ -887,10 +909,13 @@ bool ControlDataManager::getWholeTorsoCtrl() const {
     return whole_torso_ctrl_;  // 直接返回VR全身控制模式状态
 }
 
-ArmJointTrajectory ControlDataManager::getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage) const
+ArmJointTrajectory ControlDataManager::getJointTrajectoryWithDisableGuard(const TimestampedData<ArmJointTrajectory>& storage, ros::Time* receivedAt) const
 {
     std::lock_guard<std::mutex> lock(external_state_mutex_);
     ArmJointTrajectory traj = storage.data;
+    if (receivedAt != nullptr) {
+        *receivedAt = storage.timestamp;
+    }
     // disable 期间速度/力矩保持为零
     if (!prev_enable_control_.load(std::memory_order_acquire)) {
         traj.vel.setZero();
@@ -899,9 +924,15 @@ ArmJointTrajectory ControlDataManager::getJointTrajectoryWithDisableGuard(const 
     return traj;
 }
 
-ArmJointTrajectory ControlDataManager::getArmExternalControlState() const
+ArmJointTrajectory ControlDataManager::getArmExternalControlState(ros::Time* receivedAt) const
 {
-    return getJointTrajectoryWithDisableGuard(arm_external_control_state_);
+    return getJointTrajectoryWithDisableGuard(arm_external_control_state_, receivedAt);
+}
+
+ros::Time ControlDataManager::getArmExternalControlStateTimestamp() const
+{
+    std::lock_guard<std::mutex> lock(external_state_mutex_);
+    return arm_external_control_state_.timestamp;
 }
 
 ArmJointTrajectory ControlDataManager::getLegExternalControlState() const

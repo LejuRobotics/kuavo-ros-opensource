@@ -11,7 +11,7 @@ verbose: true
 models:
   - name: camera_to_base
     type: chain
-    frame: head_camera_color_optical_frame
+    frame: $(arg head_camera_frame)
   - name: tag_to_base
     type: chain
     frame: checkerboard_link
@@ -24,12 +24,12 @@ free_params:
 # 不标定相机外参（全 false）；若将来要估 camera_base 6DOF，再把对应轴改为 true
 free_frames:
   - name: camera_base
-    x: true
-    y: true
-    z: true
-    roll: true
-    pitch: true
-    yaw: true
+    x: false
+    y: false
+    z: false
+    roll: false
+    pitch: false
+    yaw: false
 
 error_blocks:
   - name: board_align
@@ -54,4 +54,3 @@ error_blocks:
     rotation_scale: 0.8
 
   
-

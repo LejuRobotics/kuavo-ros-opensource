@@ -77,6 +77,24 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
                         << ", enable_link_list size: " << enable_link_list.size());
     }
 
+    // 黑漫(heiman) SG100 四指灵巧手版本补齐手部碰撞 link(400053/400055/400062/400063)。
+    const std::set<std::string> heiman_hand_versions = {"400053", "400055", "400062", "400063"};
+    if(heiman_hand_versions.count(robot_version) > 0) {
+        std::vector<std::string> extra_links_heiman = {
+            "l_hand_base", "l_thumb_link1", "l_thumb_link2", "l_thumb_link3",
+            "l_index_link1", "l_index_link2", "l_index_link3",
+            "l_middle_link1", "l_middle_link2",
+            "l_little_link1", "l_little_link2", "l_little_link3",
+            "r_hand_base", "r_thumb_link1", "r_thumb_link2", "r_thumb_link3",
+            "r_index_link1", "r_index_link2", "r_index_link3",
+            "r_middle_link1", "r_middle_link2",
+            "r_little_link1", "r_little_link2", "r_little_link3"
+        };
+        enable_link_list.insert(enable_link_list.end(), extra_links_heiman.begin(), extra_links_heiman.end());
+        ROS_INFO_STREAM("Added extra links for heiman-hand ROBOT_VERSION " << robot_version
+                        << ", enable_link_list size: " << enable_link_list.size());
+    }
+
     // Read parameter for publishing markers
     nh_.param("/arm_collision/publish_collision_markers", publish_markers_, false);
     if (publish_markers_) {
@@ -95,7 +113,7 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
     nh_.param("/arm_collision/arm_move_diff", arm_move_diff_, 0.01);
 
     // Get URDF file path
-    std::string urdf_file_path = kuavo_asset_path + "/models/biped_s" + robot_version + "/urdf/biped_s" + robot_version + ".urdf";
+    std::string urdf_file_path = kuavo_asset_path + "/models/biped_s" + (robot_version == "57" ? "55" : robot_version) + "/urdf/biped_s" + (robot_version == "57" ? "55" : robot_version) + ".urdf";
     std::ifstream f(urdf_file_path.c_str());
     if (!f.good()) {
         ROS_ERROR("URDF file not found at path: %s", urdf_file_path.c_str());
@@ -103,7 +121,7 @@ ArmCollisionChecker::ArmCollisionChecker(ros::NodeHandle& nh)
     }
     
     // Get arm joint number parameter
-    std::string kuavo_json_path = kuavo_asset_path + "/config/kuavo_v" + robot_version + "/kuavo.json";
+    std::string kuavo_json_path = kuavo_asset_path + "/config/kuavo_v" + (robot_version == "57" ? "55" : robot_version) + "/kuavo.json";
     std::ifstream kuavo_json_file(kuavo_json_path.c_str());
     if (!kuavo_json_file.good()) {
         ROS_ERROR("kuavo.json file not found at path: %s", kuavo_json_path.c_str());
@@ -274,7 +292,7 @@ bool ArmCollisionChecker::loadSTL(const std::string& filename, std::vector<Trian
 
         ROS_INFO("Failed to load STL mesh: %s", path.c_str());
 
-        std::string mesh_kuavo_assets_path = kuavo_asset_path + "/models/biped_s" + robot_version + "/meshes/" + filename;
+        std::string mesh_kuavo_assets_path = kuavo_asset_path + "/models/biped_s" + (robot_version == "57" ? "55" : robot_version) + "/meshes/" + filename;
         
         ROS_INFO_STREAM("try to load " << filename << "from kuavo_assets instead!");
         // 使用 kuavo_assets 的 stl 模型
@@ -594,7 +612,7 @@ std::shared_ptr<fcl::CollisionObjectd> ArmCollisionChecker::createCollisionObjec
             std::string filename = extractFilenameFromPackageURL(mesh->filename);
             // ROS_INFO_STREAM("Extracted filename: " << filename);
 
-            std::string mesh_path = kuavo_asset_path + "/models/biped_s" + robot_version + "/meshes/" + filename;
+            std::string mesh_path = kuavo_asset_path + "/models/biped_s" + (robot_version == "57" ? "55" : robot_version) + "/meshes/" + filename;
             
             
             // 读取 STL 文件

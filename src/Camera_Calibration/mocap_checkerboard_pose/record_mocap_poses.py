@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Motive 动捕多刚体位姿采集：订阅 ROS 话题，同步写入 CSV。
+动捕多刚体位姿采集：支持 Motive/青瞳，订阅 ROS 话题并写入 CSV。
 
 时序：等待全部刚体有效 → 预热 warmup（不写盘）→ 正式采集 duration → 自动退出。
 """
@@ -38,6 +38,32 @@ from mocap_pose_utils import (  # noqa: E402
 
 def _default_config_path() -> str:
     return os.path.join(_script_dir, "config", "bodies.yaml")
+
+
+def _resolve_mocap_source_topics(
+    cfg: Dict[str, Any],
+    bodies: List[Dict[str, Any]],
+    source_override: Optional[str] = None,
+) -> str:
+    """按 mocap_source 为 bodies 填充 topic（body entry 显式写了 topic 则优先保留）。
+
+    motive   -> /checkerboard_pose、/torso_pose、/l_shoulder_pose（OptiTrack/Nokov 桥）
+    qingtong -> /vrpn_client_node/<name>/pose（vrpn_client_ros）
+
+    返回实际生效的 source。source_override 优先于 bodies.yaml。
+    """
+    source = (source_override or cfg.get("mocap_source") or "motive").strip().lower()
+    if source not in ("motive", "qingtong"):
+        raise ValueError(f"mocap_source 仅支持 motive|qingtong，实际={source!r}")
+    for body in bodies:
+        name = body.get("name")
+        if not name or body.get("topic"):
+            continue
+        if source == "qingtong":
+            body["topic"] = f"/vrpn_client_node/{name}/pose"
+        else:
+            body["topic"] = f"/{name}_pose"
+    return source
 
 
 def _csv_header(body_names: List[str]) -> List[str]:
@@ -80,6 +106,7 @@ class MocapPoseRecorder:
         duration: float,
         warmup: float,
         wait_timeout: float,
+        mocap_source: Optional[str] = None,
     ):
         if rospy is None:
             raise RuntimeError(f"ROS 依赖不可用: {_ros_err}")
@@ -87,6 +114,8 @@ class MocapPoseRecorder:
         cfg = load_bodies_config(config_path)
         self.bodies = cfg["bodies"]
         self.body_names = [b["name"] for b in self.bodies]
+        _source = _resolve_mocap_source_topics(cfg, self.bodies, mocap_source)
+        print(f"[record] 动捕源: {_source}")
         self.output_csv = output_csv
         self.duration = duration
         self.warmup = warmup
@@ -203,7 +232,7 @@ class MocapPoseRecorder:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Motive 动捕多刚体位姿采集（同步写 CSV）"
+        description="Motive/青瞳动捕多刚体位姿采集（同步写 CSV）"
     )
     parser.add_argument(
         "--config",
@@ -214,6 +243,12 @@ def main() -> int:
         "--output",
         required=True,
         help="输出 CSV 路径",
+    )
+    parser.add_argument(
+        "--mocap-source",
+        choices=("motive", "qingtong"),
+        default=None,
+        help="动捕源（默认读取 bodies.yaml 的 mocap_source）",
     )
     parser.add_argument(
         "--duration",
@@ -246,6 +281,7 @@ def main() -> int:
         duration=args.duration,
         warmup=args.warmup,
         wait_timeout=args.wait_timeout,
+        mocap_source=args.mocap_source,
     )
     return recorder.run()
 

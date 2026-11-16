@@ -118,7 +118,7 @@ class ArmsIKNode
             
             drake::systems::DiagramBuilder<double> builder;
             plant_ptr_ = builder.AddSystem<drake::multibody::MultibodyPlant>(dt);
-            drake::multibody::Parser(plant_ptr_).AddModelFromFile(model_path);
+            drake::multibody::Parser(plant_ptr_).AddModels(model_path);
             std::cout << "original frame_name: " << std::endl;
             for(auto& frame_name : end_frames_name)
             {
@@ -1887,6 +1887,8 @@ int main(int argc, char* argv[])
     // Handle version 15 special case: use version 14 config
     if (robot_version_int == 15) {
         robot_version_int = 14;
+    } else if (robot_version_int == 57) {
+        robot_version_int = 55;
     }
 
     auto kuavo_assests_path = HighlyDynamic::getPackagePath("kuavo_assets");

@@ -1,0 +1,39 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(hardware_plant_test)
+
+find_package(hardware_plant REQUIRED)
+
+
+set(KUAVO_ASSETS_PATH $ENV{KUAVO_ASSETS_PATH})
+add_compile_definitions(KUAVO_ASSETS_PATH="${KUAVO_ASSETS_PATH}")
+message(STATUS "KUAVO_ASSETS_PATH: ${KUAVO_ASSETS_PATH}")
+
+# # ==============================================================================
+# # Test Executables
+# # ==============================================================================
+# Hand controller test
+
+# Leju claw controller test
+add_executable(lejuclaw_controller_test 
+    lejuclaw_controller_test.cc
+)
+target_link_libraries(lejuclaw_controller_test 
+    PUBLIC 
+        hardware_plant::hardware_plant
+)
+
+
+add_executable(hardware_plant_test 
+    hardware_plant_test.cpp
+)
+target_link_libraries(hardware_plant_test 
+    PUBLIC 
+        hardware_plant::hardware_plant
+)
+
+set(HARDWARE_PLANT_PATH $ENV{HARDWARE_PLANT_PATH})
+
+target_compile_definitions(hardware_plant_test
+    PRIVATE
+        PROJECT_SOURCE_DIR="${HARDWARE_PLANT_PATH}"
+)

@@ -1,119 +1,56 @@
 # Pico 全身遥操作
 
+## 快速开始（5代 / 5W）
 
-## 快速开始
+本 README 统一说明实时 PICO 遥操的启动、连接校准、手柄操作。操作流程见[连接与操作](#连接与操作)，按键见[手柄操作说明](#手柄操作说明)。
 
-### 机器人端机器人
-
-#### 机器人与Pico分别启动
-1. 先启动机器人:
-- 可以选择关闭命令截断、关节保护等功能，这样做大幅度动作的时候不会触发保护而摔倒.
-- 必须要打开`with_mm_ik`选项来启用运动学MPC功能，否则无法控制手臂.
+启动前确认工作区已编译，当前终端已加载工作区环境和实际机型的 `ROBOT_VERSION`。**如果 `.bashrc` 已配置，无需重复执行下面的环境命令**；否则在工作区根目录执行：
 
 ```bash
-# 在此之前确保已经编译完成
-sudo su
-cd kuavo-ros-opensource
 source devel/setup.bash
-
-# 需要加with_mm_ik选项
-roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true
-
-# 也可以选择关闭命令截断、关节保护等功能，这样做大幅度动作的时候不会触发保护而摔倒.
-roslaunch humanoid_controllers load_kuavo_real.launch with_mm_ik:=true cmd_truncation_enable:=false joint_protect_enable:=false
+export ROBOT_VERSION=62  # 5W版本示例；5代v53填53，以实际机型为准
 ```
 
-2. 然后启动 Pico 服务节点:
-```bash
-sudo su
-cd kuavo-ros-opensource
-source devel/setup.bash
-roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch
-```
-- 如需启用迁移后的 PICO 主动手头控：
-```bash
-roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch head_control_mode:=auto_track_active
-```
-#### 一键 launch 启动（仿真/实物 + PICO + 头控）
+**实机启动：**
 
-- 默认参数启动（头部控制模式为"vr_follow" ）
 ```bash
-sudo su
-cd kuavo-ros-opensource
-source devel/setup.bash
+roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch
+```
 
-# 仿真
+**仿真启动：**
+
+```bash
 roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true
-
-# 实物
-roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true
 ```
 
-- 主动手头控（头部控制模式为"auto_track_active" ）
-```bash
-sudo su
-cd kuavo-ros-opensource
-source devel/setup.bash
+两种启动方式二选一，不要同时启动多套PICO接收程序。总入口已默认开启 `with_mm_ik`，无需重复传入；控制范围默认5W为 `UpperBody`、5代双足为 `LowerBody`，启动后按[手柄操作说明](#手柄操作说明)切换，不必固定写在启动命令中。
 
-# 仿真
-roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true head_control_mode:=auto_track_active
+> 不带 `sim_mode:=true` 的命令启动**实物分支**。仿真前确认ROS主节点没有连接实机；实机测试须确认机器人版本、现场防护、急停和底层初始化，并使用现场规定的运行账号及其环境。不要为通过测试关闭关节保护或命令保护。
 
-# 实物
-roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true head_control_mode:=auto_track_active
-```
-说明：
-- 该节点会发布 `/robot_head_motion_data`，并自动设置 `/pico/use_external_head_control=true`，避免与旧链路重复发布。
-- 支持模式：`fixed`、`auto_track_active`、`fixed_main_hand`、`vr_follow`。
-- 可通过话题 `/pico/head_control_mode`（`std_msgs/String`）在运行时切换模式。
-- 头控服务接口：`/pico/set_head_control_mode`（`kuavo_msgs/SetHeadControlMode`）。
+### 关键参数
 
-头部控制服务接口：
-- 服务名：`/pico/set_head_control_mode`
-- 服务类型：`kuavo_msgs/SetHeadControlMode`
-- 请求字段：
-  - `mode`：`fixed` / `auto_track_active` / `fixed_main_hand` / `vr_follow`
-  - `fixed_hand`：仅 `fixed_main_hand` 时必填，`left` 或 `right`
-- 响应字段：
-  - `success`：是否成功
-  - `message`：错误或成功信息
-  - `current_mode`：当前生效模式
+| 参数 | 作用及注意事项 |
+|---|---|
+| `robot_version` | 底层与PICO共用的内部版本；未指定时读取已导出的`ROBOT_VERSION`，总入口和独立入口未配置时均回退到40。启动前确认机型正确；临时覆盖时可传`robot_version:=实际版本号`。 |
+| `wheel_robot` | 根据版本自动计算，决定双足/轮臂启动分支；不是遥操解锁开关。 |
+| `sim_mode` | `true`为仿真，`false`为实物。 |
+| `start_robot` | 默认`true`；设为`false`只是不启动底层，**仍会启动PICO并可能输出控制命令**。 |
+| `enable_head_control` | 默认`true`，控制独立头控节点是否启动；不是整条遥操的安全隔离开关。 |
+| `pico_control_mode` | 控制范围：`UpperBody / LowerBody / WholeBody`。总入口默认5W为UpperBody，双足为LowerBody。不是绝对/增量算法选择。 |
+| `with_mm_ik` | 总入口默认`true`，无需重复传入。5代控制独立MM节点启动，增量/MM路线需要它；follow独立IK是另一条路线。当前5W子launch只声明此参数、没有引用它控制启动，不能用它开关轮臂原生MPC。 |
+| `head_control_mode` | 默认`vr_follow`；还支持`fixed / auto_track_active / fixed_main_hand`。 |
 
-示例：
-```bash
-# 固定模式
-rosservice call /pico/set_head_control_mode "{mode: 'fixed', fixed_hand: ''}"
+### 底层已经启动时
 
-# 自动跟踪主动手
-rosservice call /pico/set_head_control_mode "{mode: 'auto_track_active', fixed_hand: ''}"
+不要再次使用默认的一键总入口。确认当前终端的 `ROBOT_VERSION` 与已运行的底层一致，并确认控制依赖已启动，再单独启动PICO：
 
-# 固定主手（左手）
-rosservice call /pico/set_head_control_mode "{mode: 'fixed_main_hand', fixed_hand: 'left'}"
-
-# VR随动
-rosservice call /pico/set_head_control_mode "{mode: 'vr_follow', fixed_hand: ''}"
-```
-
-灵巧手迁移说明（PICO）：
-- 已对齐“抓握 + 锁定/解锁”的控制链路，按键逻辑保持不变（`Y` 锁定/解锁）。
-- 新增抓握配置项在 `config/pico_vr_config.yaml` 的 `dex_hand` 下：
-  - `command_min` / `command_max`：抓握输出范围
-  - `smoothing_alpha`：抓握平滑系数
-  - `grip_deadzone`：抓握死区
-  - `stable_unlock.enabled` / `stable_unlock.reengage_threshold`：解锁回切防突变阈值
-
-标准 launch 启动（推荐）：
 ```bash
 roslaunch noitom_hi5_hand_udp_python launch_pico_teleop.launch
 ```
 
-也可以使用一键 launch（仿真/实物 + PICO + 头控）：
-```bash
-# 仿真
-roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=true
+注意：这个独立入口默认是 `LowerBody`，不会像总入口一样自动为5W选择 `UpperBody`。需要上半身控制时可通过手柄切换，也可启动时追加 `control_mode:=UpperBody`。5代增量/MM路线还需确认独立MM节点已启动。
 
-# 实物
-roslaunch humanoid_controllers load_kuavo_with_pico_vr.launch sim_mode:=false with_mm_ik:=true
-```
+头控运行时接口见下方头控说明；实时遥操操作见[连接与操作](#连接与操作)。GMR、诊断和回放属于另外的使用场景，**不是5W日常PICO遥操的必需启动步骤**。
 
 ### GMR 模式下灵巧手控制
 
@@ -222,18 +159,17 @@ rosservice call /pico/set_head_control_mode "{mode: 'vr_follow', fixed_hand: ''}
 
 **初始时，遥操处于上锁状态，可以通过同时按下左手柄的上下扳机解锁。**
 
-**目前初始化的遥操模式为仅下半身遥操，可以通过`RT+B`切换到全身遥操模式或`RT+B`切换到上半身遥操模式。**
+**总入口默认5代为下半身、5W为上半身；以启动参数为准。`RT+X`切全身，`RT+B`切上半身，`RT+A`切下半身。解锁不会自动切换控制范围，也不会自动选择绝对/增量模式。**
+
+5W基础测试保持UpperBody，不使用双足脚步流程。
 
 更多按键切换功能请参阅后续章节。
 
-
 ## full-body-tracking-pose 说明
-
 
 人体参考图：
 
 ![human-body-bone](./assets/imgs/human-body-bone.png)
-
 
 full-body-tracking-pose 的骨骼节点说明：
 ```python
@@ -296,67 +232,91 @@ body_tracker_role = [
 
 #### 遥操模式说明
 - **WholeBody全身遥操模式**: 同时控制机器人的上半身和下半身动作
-- **UpperBody上半身遥操模式**: 仅控制机器人的上半身动作，下半身保持稳定
+- **UpperBody上半身遥操模式**：控制上半身；5代在关闭躯干控制后可另用摇杆行走，不能理解为腿部始终不动。
 - **LowerBody下半身遥操模式**: 仅控制机器人的下半身动作，上半身保持默认姿态
-- **躯干模式**: 启用或禁用躯干控制功能， 仅在上半身遥操模式下有效，机器人会自动根据手末端的位置调整躯干高低, **控制躯干时无法使用左右摇杆控制行走+旋转**
+- **躯干模式**: 启用或禁用躯干控制功能， 仅在上半身遥操模式下有效，机器人会自动根据手末端的位置调整躯干高低, **5代控制躯干时无法使用左右摇杆控制行走和旋转；5W摇杆走独立轮臂分支**
 
-### 模式一：基础控制模式
+### 摇杆与按键操作（5代 / 5W）
 
 #### 摇杆控制
 
-**注意：控制躯干时无法使用左右摇杆控制行走+旋转**
+**5代：**仅在 `UpperBody` 且关闭躯干控制时使用摇杆；`WholeBody / LowerBody` 下摇杆不控制行走。
 
-- **左摇杆**：前进后退 + 左右横移
-  - 前后速度：-0.4 ~ 0.4 m/s
-  - 横移速度：-0.2 ~ 0.2 m/s
-- **右摇杆**：仅控制旋转
-  - 旋转范围：-0.4 ~ 0.4 rad/s
-  - 前后推动：无响应
+**5W：**解锁遥操后使用摇杆移动底盘，无需按 B 踏步；日常操作保持 `UpperBody`。
 
-#### 按键功能表
+- **左摇杆**：前进后退 + 左右横移。
+- **右摇杆**：左右推动控制旋转；前后推动无响应。
+
+| 速度上限（正反方向） | 5代 | 5W 默认值 |
+|---|---|---|
+| 前后 | 0.4 m/s | 0.4 m/s |
+| 横移 | 0.2 m/s | 0.4 m/s |
+| 旋转 | 0.4 rad/s | 0.25 rad/s |
+
+5W 启动时读取 `/vr_cmd_vel/linear_scale_x`、`linear_scale_y`、`angular_scale_z`（后两项同属 `/vr_cmd_vel/`）；未配置时使用上表默认值，修改后需重启 PICO 节点。
+
+#### 按键功能表（5代 / 5W 共用）
+
+除备注中的机型及模式限制外，下列按键共用。`LT/RT` 是左/右扳机，`LG/RG` 是左/右抓握键。
 
 | 按键组合 | 功能描述 | 操作说明 | 备注 |
 |----------|----------|----------|------|
-| **LT+LG** | 解锁手臂规划 | 按住左扳机 +按住左抓握 | 可替换为 LT+RT |
-| **RT+RG** | 锁定手臂规划 | 按右扳机 + 按住右抓握 | 可替换为 LG+RG |
-| **LG/RG** | 末端抓握控制 | 单独按下对应抓握键 | 左/右手独立控制 |
-| **B** | 开始踏步 | 单独按下B键 | 进入踏步模式 |
-| **A** | 启动/站立 | 单独按下A键 | 首次按下调用`/humanoid_controller/real_initial_start`，后续按下切换到`stance` |
-| **Y** | 抓握状态锁定 | 点按Y键切换 | 锁定/解锁抓握状态 |
-| **X+Y** | 紧急停止机器人 | 同时点按X和Y键 | 连续发布`/stop_robot` |
-| **X** | 录制控制 | 点按X键 | 开始/停止录制(此功能暂不支持) |
-| **LT+A** | 末端力控制 | 按左扳机 + 点按A键 | 施加/释放末端力 |
-| **LT+Y** | 手臂复位/外部控制模式 | 按左扳机 + 点按Y键 | 恢复到默认位置/手臂切换到外部控制模式 |
-| **LT+X** | 开始/停止增量控制模式 | 按左扳机 + 点按X键 | 只有在界面上切换到增量控制模式时才生效 |
-| **X_LONG** | 左拇指张开切换 | 长按X键 | 切换左拇指张开/恢复 |
-| **A_LONG** | 右拇指张开切换 | 长按A键 | 切换右拇指张开/恢复 |
-| **LT+RT+A_LONG** | 机器人解锁 | 按住左右上板机然后同时长按A键 | 解锁机器人控制 |
+| **LT+LG** | 解锁遥操 | 同时按住左扳机和左抓握键 | 不会自动切换身体控制范围或手臂算法模式 |
+| **RT+RG** | 锁定遥操 | 同时按住右扳机和右抓握键 | 5W 锁定后停止 PICO 底盘速度输出，不保证立即停车；遥操锁不代替物理急停 |
+| **LG/RG** | 末端抓握控制 | 单独按下左/右抓握键 | 左右手独立控制，需对应末端支持 |
+| **LT+A** | 末端力控制 | 按住左扳机，再点按 A | 解锁后可用；`LowerBody` 下不可用，需底层支持 |
+| **A** | 初始化启动 | 单独点按 A | 5代 / 5W 均调用初始化服务，相当于终端输入 o；不是遥操解锁 |
+| **B** | 5代开始踏步 | 单独点按 B | 5代仅在 `UpperBody` 且关闭躯干控制时使用；5W 移动不需要此步骤 |
+| **Y** | 抓握状态锁定 | 点按 Y | 切换抓握状态的锁定/解锁 |
+| **X+Y** | 软件紧急停止 | 同时按下 X 和 Y | 不代替现场物理急停 |
+| **LT+Y** | 手臂复位/外部控制 | 按住左扳机，再点按 Y | 切换手臂复位与外部控制状态 |
+| **LT+X** | 增量操控开启/暂停 | 按住左扳机，再点按 X | 先在 App 进入增量模式；`LowerBody` 下不可用，不需持续按住 |
+| **X_LONG** | 左拇指张开切换 | 长按 X | 左拇指张开/恢复，需对应末端支持 |
+| **A_LONG** | 右拇指张开切换 | 长按 A | 右拇指张开/恢复，需对应末端支持 |
 
+补充说明：
+- 单独点按 X 的录制功能暂不支持。
+- `LT+RT+A_LONG` 为停止序列：同时按住左右扳机并长按 A。它不是解锁操作，也不是5W日常启动步骤。
 
-### 模式二：全身遥操作模式
+头显端按钮显示不代替机器人日志；5W基础流程见[连接与操作](#连接与操作)。
 
-#### 摇杆控制
-- **左摇杆**：暂不响应（预留扩展）
-- **右摇杆**：暂不响应（预留扩展）
+## 连接与操作
 
-#### 按键功能表
+### 使用前确认
 
-| 按键组合 | 功能描述 | 操作说明 | 备注 |
-|----------|----------|----------|------|
-| **LT+LG** | 开始全身规划 | 按左扳机 + 按左抓握 | 可替换为 LT+RT |
-| **RT+RG** | 停止全身规划 | 按右扳机 + 按右抓握 | 可替换为 LG+RG |
-| **LG/RG** | 末端抓握控制 | 单独按下对应抓握键 | 左/右手独立控制 |
-| **LT+A** | 末端力控制 | 按左扳机 + 点按A键 | 施加/释放末端力 |
-| **A** | 启动/站立 | 单独按下A键 | 首次按下调用`/humanoid_controller/real_initial_start`，后续按下切换到`stance` |
-| **B** | 回归站立姿势 | 单独按下B键 | 会先踏步调整，然后回到OCS2站立姿态 |
-| **Y** | 抓握状态锁定 | 点按Y键切换 | 锁定/解锁抓握状态 |
-| **X+Y** | 紧急停止机器人 | 同时点按X和Y键 | 连续发布`/stop_robot` |
-| **X** | 录制控制 | 点按X键 | 开始/停止录制(此功能暂不支持) |
-| **LT+Y** | 手臂复位/外部控制模式 | 按左扳机 + 点按Y键 | 恢复到默认位置/手臂切换到外部控制模式 |
-| **LT+X** | 开始/停止增量控制模式 | 按左扳机 + 点按X键 | 只有在界面上切换到增量控制模式时才生效 |
-| **X_LONG** | 左拇指张开切换 | 长按X键 | 切换左拇指张开/恢复 |
-| **A_LONG** | 右拇指张开切换 | 长按A键 | 切换右拇指张开/恢复 |
-| **LT+RT+A_LONG** | 机器人解锁 | 按住左右上板机然后同时长按A键 | 解锁机器人控制 |
+- 使用已编译的工作区，同一环境只运行一套 PICO 接收程序。
+- 先仿真，再实机。核对 `ROS_MASTER_URI`、节点和 `/real`，确保仿真主节点未连接真实执行器，不能只凭 MuJoCo 窗口判断已经隔离。
+- 实机另行确认机型、底层初始化、现场防护、观察者和可达的急停；软件遥操锁不是物理急停。
+
+PICO 与接收电脑需网络互通，在 App 中选择接收电脑实际可达的 IP。按[App 启动说明](#pico-app-端启动)完成校准，确认显示的人体动作与实际动作一致后再进行遥操。
+
+### 分清三个层次
+
+```text
+遥操锁定/解锁     身体控制范围                  手臂算法模式
+LT+LG / RT+RG     UpperBody/WholeBody/LowerBody   follow/incremental/mobile_mpc
+      |                    |                             |
+是否处理骨骼输入     是否处理手臂、脚部输入          目标生成方式与输出接口
+```
+
+5W 使用时保持 `UpperBody`，不要为了移动底盘切成 `LowerBody`。初始手臂算法模式为 `mobile_mpc`；按当前实测 App 的操作，从初始模式切换两次进入增量模式，以界面显示的 `incremental` 或接收端“进入增量模式”日志为准。解锁不会自动切换算法模式。
+
+### 手臂操作
+
+- **跟随模式 `follow`：**在 App 中选择跟随模式，解锁遥操并将手臂切到外部控制，再移动双手进行操作。
+- **增量模式 `incremental`：**在 App 中进入增量模式，解锁遥操并开启增量操控，再移动双手进行操作。
+
+**增量操控开启/暂停：**在 App 中进入增量模式后，按住左手柄扳机并点按 X 键（`LT+X`），切换开启或暂停；不需要持续按住。
+
+### 移动：不要混用5代与5W流程
+
+| 机型/范围 | 输入方式与操作 |
+|---|---|
+| 5代 UpperBody | 关闭躯干控制，单按 B 请求 walk；摇杆控制移动，松开摇杆后单按 A 请求 stance。 |
+| 5代 WholeBody / LowerBody | 使用人体脚部动作检测，不使用摇杆行走；不能把摇杆无响应当作通信断开。 |
+| 5W | 完成初始化并解锁后使用摇杆，不需要双足 B 踏步/A 切站立步态流程。 |
+
+左摇杆控制前后、横移，右摇杆横向控制转向。初次操作请小幅推动摇杆，确认移动与停止响应后再扩大范围。五代全身/下半身模式按 A 会先请求约 2 秒 walk 再请求 stance；遥操锁也不是行走急停。
 
 ## 机器人延迟诊断功能
 
@@ -398,6 +358,9 @@ python3 robot_pico_recorder.py record my_control_session.bag
 ```
 
 ### 播放功能
+
+> 以下为原有回放说明，不代表回放脚本已完成5W适配。它与实时PICO入口不是同一个程序；5W基础测试不执行回放，需另行审查服务和坐标契约。
+
 播放录制的控制数据，自动调用必要的控制服务：
 - `/change_arm_ctrl_mode` - 切换手臂控制模式
 - `/mobile_manipulator_mpc_control` - 启用移动操作MPC控制
@@ -423,44 +386,6 @@ python3 robot_pico_recorder.py play my_control_session.bag
 - 播放前检查机器人状态和安全
 - 录制的bag文件包含时间戳信息
 - Ctrl+C中断录制/播放
-
-## 三模式切换语义与当前策略
-
-当前节点包含 3 条独立的模式切换通道，语义如下：
-
-- `change_arm_ctrl_mode` (`/change_arm_ctrl_mode`)：手臂控制源/模式（如自动摆臂、外部控制）
-- `change_mobile_ctrl_mode` (`/mobile_manipulator_mpc_control`)：移动操作器/MPC 模式（如 ArmOnly/BaseOnly/BaseArm）
-- `change_mm_wbc_arm_ctrl_mode` (`/enable_mm_wbc_arm_trajectory_control`)：MM WBC 手臂轨迹控制开关
-
-当前 `pico.py` 对 `mobile` 默认采用 **service-call** 策略，服务类型与人形控制器对齐为 `kuavo_msgs/changeTorsoCtrlMode`：
-
-- 调用 `/mobile_manipulator_mpc_control` 服务
-- 同步发布 `/pico/mobile_ctrl_mode_change`
-
-`arm` 与 `mm_wbc` 仍保持服务调用方式。
-
-## 统一到 changeTorsoCtrlMode 的改造范围（评审结论）
-
-为避免历史脚本类型不一致，建议统一到 `kuavo_msgs/changeTorsoCtrlMode`，并联动评审以下模块：
-
-- `src/manipulation_nodes/pico-body-tracking-server/scripts/core/ros/pico.py`
-- `src/manipulation_nodes/motion_capture_ik/scripts/quest3_node.py`
-- `src/manipulation_nodes/motion_capture_ik/scripts/quest3_node_incremental.py`
-- 与 `/mobile_manipulator_mpc_control` 交互的调用脚本与回放脚本
-
-## 回归检查清单
-
-1. 启动后确认日志包含：
-   - `Mode semantics: ...`
-   - `Mobile control mode strategy: service-call`
-2. 执行外部控制切换，确认：
-   - `arm` 与 `mm_wbc` 模式切换日志正常
-   - 不再出现 `/mobile_manipulator_mpc_control ... md5sum mismatch`
-3. 确认话题发布正常：
-   - `rostopic echo /pico/mobile_ctrl_mode_change`
-4. 确认手臂末端遥操链路不受影响：
-   - `/ik/two_arm_hand_pose_cmd` 或 `/mm/two_arm_hand_pose_cmd` 持续更新
-
 
 ## 接口文档
 

@@ -28,9 +28,9 @@ public:
   void reset(const Eigen::VectorXd& initialPosition);
 
   bool updateTarget(const Eigen::VectorXd& targetPosition, const Eigen::VectorXd& targetVelocity);
-  bool predict(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity);
+  bool predict(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity, double elapsedSec = -1.0);
   bool update();
-  bool step(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity);
+  bool step(Eigen::VectorXd& outPosition, Eigen::VectorXd& outVelocity, double elapsedSec = -1.0);
   bool isOperational() const;
   std::string statusMessage() const;
   uint64_t predictCount() const;
@@ -41,12 +41,13 @@ private:
   using Vector2 = Eigen::Vector2d;
 
   bool checkVectorSize(const Eigen::VectorXd& vec, const char* name) const;
-  void updateSystemMatrices();
+  void updateSystemMatrices(double elapsedSec = -1.0);
   void sanitizeState(Vector2& state) const;
   bool validateAndReport(const char* source) const;
 
   size_t dofNum_{1};
   double cycleTime_{0.002};
+  double predictionDt_{0.002};
   mutable std::mutex mutex_;
   bool initialized_{false};
   bool dofValid_{false};
@@ -68,6 +69,8 @@ private:
   Eigen::VectorXd targetVelocity_;
   Eigen::MatrixXd state_;
   std::vector<Matrix2> covariance_;
+  std::vector<bool> recovering_;
+  Eigen::VectorXd previousPositionBuffer_;
   Eigen::VectorXd stepPositionBuffer_;
   Eigen::VectorXd stepVelocityBuffer_;
 

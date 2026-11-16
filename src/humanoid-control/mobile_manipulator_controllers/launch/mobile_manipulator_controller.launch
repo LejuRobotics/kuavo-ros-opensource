@@ -9,21 +9,25 @@
   <arg name="visualize_humanoid" default="true"/>
   <arg name="visualize_mm" default="false"/>
   <arg name="robot_version" default="$(optenv ROBOT_VERSION 40)"/>
+    <arg name="resource_version" default="$(eval 55 if int(arg('robot_version')) == 57 else arg('robot_version'))"/>
   <arg name="coredump" default="false"/>
   <arg name="with_coredump" value="--with-coredump" if="$(arg coredump)"/>
   <arg name="with_coredump" value="" unless="$(arg coredump)"/>
   <!-- The URDF model of the robot -->
   <!-- <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s42/urdf/biped_s42_l.urdf" /> -->
-  <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg robot_version)/urdf/biped_s$(arg robot_version).urdf" />
+  <arg name="urdfFile"    value="$(find kuavo_assets)/models/biped_s$(arg resource_version)/urdf/biped_s$(arg resource_version).urdf" />
   <!-- The task file for the mpc. -->
   <!-- <arg name="taskFile"    value="$(find ocs2_mobile_manipulator)/config/kuavo/task.info" /> -->
+  <!-- Version is PPPPMMMMN. 200049 is 4.9.2, so compare major, not the raw integer. -->
   <arg name="taskFile"
-      default="$(eval find('ocs2_mobile_manipulator') +(
-        '/config/kuavo5/task.info'  if arg('robot_version') >= 50 else
-        '/config/kuavo/task.info'   if arg('robot_version') >= 40 else
-        '/config/roban2/task.info'  if arg('robot_version') >= 10 else
-        '/config/kuavo/task.info'
-        ))" />
+      default="$(eval find('ocs2_mobile_manipulator') + (
+        (lambda v, major: (
+          '/config/kuavo5/task.info' if major == 5 or (100 > v and v >= 50) else
+          '/config/kuavo/task.info' if major == 4 or (100 > v and v >= 40) else
+          '/config/roban2/task.info' if (major >= 1 and 3 >= major) or (100 > v and v >= 10) else
+          '/config/kuavo/task.info'
+        ))(arg('robot_version'), (arg('robot_version') // 10) % 10000)
+      ))" />
 
   <!-- The library folder to generate CppAD codegen into -->
   <arg name="libFolder"   value="$(find ocs2_mobile_manipulator)/auto_generated/kuavo" />
@@ -46,7 +50,7 @@
   </include>
   <!-- </group> -->
 
-  <node pkg="mobile_manipulator_controllers" type="mobile_manipulator_controllers_node" name="mobile_manipulator_controllers_node" output="screen" required="true" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
+  <node pkg="mobile_manipulator_controllers" type="mobile_manipulator_controllers_node" name="mobile_manipulator_controllers_node" output="screen" launch-prefix="$(find humanoid_controllers)/scripts/start_node.sh $(arg with_coredump)"/>
 
   <node if="$(arg rviz)" pkg="ocs2_mobile_manipulator_ros" type="mobile_manipulator_target" name="mobile_manipulator_target" 
         output="screen" launch-prefix="" />

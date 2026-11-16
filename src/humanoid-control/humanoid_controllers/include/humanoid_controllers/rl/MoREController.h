@@ -16,8 +16,10 @@
 #include <kuavo_msgs/switchController.h>
 #include <humanoid_plan_arm_trajectory/RobotActionState.h>
 #include <openvino/openvino.hpp>
+#include <std_msgs/Empty.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Int32.h>
+#include <atomic>
 #include <deque>
 #include <map>
 #include <memory>
@@ -50,6 +52,9 @@ namespace humanoid_controller
     void resume() override;
     bool requestToExit() const override;
     bool isAllowToExit() const override;
+    bool allowsWalkingDuringArmAction() const noexcept override;
+    bool hasActiveArmActionSession() const noexcept override;
+    void abortActiveArmActionSessionForSafety() override;
     void updateVelocityLimitsParam(ros::NodeHandle& nh) override;
     bool requestArmControlMode(int target_mode) override;
 
@@ -210,25 +215,36 @@ namespace humanoid_controller
     ros::Subscriber quest_joystick_sub_;
     ros::ServiceServer change_more_mode_srv_;
     ros::ServiceServer execute_arm_action_srv_;
+    ros::ServiceServer prepare_arm_action_srv_;
     ros::ServiceClient system_arm_action_client_;
+    ros::Publisher arm_action_abort_pub_;
 
     // 动作播放状态追踪（用于播完恢复风格/手臂模式+走不停腿）
-    int pre_action_style_{-1};
-    int pre_action_arm_mode_{-1};
-    bool action_pending_restore_{false};
-    ros::Time action_start_time_;
-    int skip_sync_after_restore_{0};
-    ros::Time restore_time_;
-    static constexpr double kActionTimeoutSec_ = 15.0;
-    int last_robot_action_state_{-1};
-    int robot_action_state_stable_count_{0};
+    std::atomic_int pre_action_style_{-1};
+    std::atomic_int pre_action_arm_mode_{-1};
+    std::atomic_int pre_action_waist_mode_{-1};
+    std::atomic_bool pre_action_waist_enabled_{false};
+    std::atomic_bool action_pending_restore_{false};
+    std::atomic_bool action_active_observed_{false};
+    std::atomic<double> action_start_time_sec_{0.0};
+    std::atomic<double> last_action_state_time_sec_{0.0};
+    // ArmController 从 mode2 回 mode1 时会在 mode2 外壳内先完成平滑归位。
+    // 归位期间不能重复 changeMode(1)，否则会每帧重置插值起点。
+    std::atomic_bool arm_mode_restore_in_progress_{false};
+    static constexpr double kActionStartTimeoutSec_ = 5.0;
+    static constexpr double kActionHeartbeatTimeoutSec_ = 2.0;
+    std::atomic_int last_robot_action_state_{-1};
+    mutable std::mutex action_prepare_mutex_;
     ros::Subscriber robot_action_state_sub_;
     void robotActionStateCallback(const humanoid_plan_arm_trajectory::RobotActionState::ConstPtr& msg);
     void checkAndRestoreAfterAction();
+    void setArmActionWalkingPermit(bool allow) noexcept;
+    void finishArmActionSession(bool restore_mode, const std::string& reason);
 
     ros::ServiceClient srv_change_motor_param_;
 
     Eigen::VectorXd updateRLcmd(const Eigen::VectorXd& measuredRbdState);
+    int getActionExecutionStyleIndex() const;
     int resolveMotionStyleIndex(const ocs2::humanoid::CommandDataRL& cmd) const;
     Eigen::VectorXd computeMotionStyleWeights(const ocs2::humanoid::CommandDataRL& cmd) const;
     Eigen::Vector2d computePostureCommands(int gait_style_index);
@@ -246,6 +262,8 @@ namespace humanoid_controller
                                 kuavo_msgs::changeArmCtrlMode::Response& res);
     bool executeArmActionCallback(kuavo_msgs::ExecuteArmAction::Request& req,
                                    kuavo_msgs::ExecuteArmAction::Response& res);
+    bool prepareArmActionCallback(kuavo_msgs::ExecuteArmAction::Request& req,
+                                  kuavo_msgs::ExecuteArmAction::Response& res);
 
     /// 当前 gate index（三风格 0/1/2；二风格 0=pose, 1=walk）
     int getCurrentGaitStyleIndex() const;

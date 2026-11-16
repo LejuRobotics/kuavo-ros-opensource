@@ -19,6 +19,10 @@ kuavo.json 在项目中承上启下，有两方面的作用：
 | NUM_ARM_JOINT | 整型 | 硬件层可驱动的手臂电机数量 |
 | NUM_HEAD_JOINT | 整型 | 硬件层可驱动的头部电机数量 |
 | NUM_JOINT | 整型 | 硬件层可驱动的所有电机数量 |
+| ROBOT_MODULE | 字符串 | 机器人模块类型：`KUAVO` / `ROBAN2` / `LUNBI`（v60/v61 轮臂）/ `LUNBI_V62`（v62/v63 轮臂） |
+| leg_calibration_safe_pose | 浮点型数组 | 轮臂下肢限位标零前的安全姿态（度），4 个关节 |
+| leg_calibration_limits | 浮点型数组 | 轮臂下肢限位标零目标角度（度），到达限位后作为零点基准 |
+| leg_calibration_directions | 整型数组 | 轮臂下肢限位标零运动方向（1 正向，-1 反向） |
 | ankle_solver_type| 枚举型 | 机器人使用的踝关节换算方法类型<br/>(0为4代，1为4代pro，2为5代) |
 | torsoP | 浮点型 | 初始化时，期望的躯干pitch角度，单位：度 |
 | com_z | 浮点型 | 初始化时，期望的质心z方向高度，单位：m |

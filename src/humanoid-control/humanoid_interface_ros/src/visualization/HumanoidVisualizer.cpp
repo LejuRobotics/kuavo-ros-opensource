@@ -27,6 +27,8 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ******************************************************************************/
 
+#include <algorithm>
+
 // Pinocchio forward declarations must be included first
 #include <pinocchio/fwd.hpp>
 
@@ -146,6 +148,18 @@ namespace ocs2
       endEffectorSpatialKinematicsPtr_->setPinocchioInterface(pinocchioInterface_);
       visualModeSettings_ = loadModelSettings(fileName);
       launchVisualizerNode(nodeHandle);
+
+      // 读取是否为真机环境：真机由 hardware_node 发布真实的 /leju_claw_state，
+      // visualizer 不再补发假 state，避免与真实反馈冲突。
+      // 该参数由 humanoidController 的 ros::param::set("/is_real", is_real_) 设置；
+      // 仿真/回放路径（HumanoidDummyNode / PlayBackNodelet 未设该参数）默认为仿真，
+      // 仍保留补发逻辑以供 rosbag 录制。
+      bool is_real_param = false;
+      if (ros::param::has("/is_real"))
+      {
+        ros::param::get("/is_real", is_real_param);
+      }
+      isReal_ = is_real_param;
       head_joint_names_ = {"zhead_1_joint", "zhead_2_joint"};
       head_joint_positions_ = {0.0, 0.0};
       // 原有qiangnao手关节初始化
@@ -483,6 +497,19 @@ namespace ocs2
 
         robotStatePublisherPtr_.reset(new robot_state_publisher::RobotStatePublisher(kdlTree));
         robotStatePublisherPtr_->publishFixedTransforms(true);
+        // heiman (黑漫 SG100) 灵巧手：无条件订阅（与轮臂 MobileManipulatorDummyVisualization 一致，
+        // 注入端按 URDF 存在性过滤，无该手的机型零副作用）
+        heiman_joint_names_ = {"l_thumb_j1", "l_thumb_j2", "l_thumb_j3",
+                               "l_index_j1", "l_index_j2", "l_index_j3",
+                               "l_middle_j1", "l_middle_j2",
+                               "l_little_j1", "l_little_j2", "l_little_j3",
+                               "r_thumb_j1", "r_thumb_j2", "r_thumb_j3",
+                               "r_index_j1", "r_index_j2", "r_index_j3",
+                               "r_middle_j1", "r_middle_j2",
+                               "r_little_j1", "r_little_j2", "r_little_j3"};
+        heiman_joint_positions_.assign(heiman_joint_names_.size(), 0.0);
+        heimanStateSubscriber_ = nodeHandle.subscribe<kuavo_msgs::SG100HandState>(
+            "/sg100_hand_state", 10, &HumanoidVisualizer::heimanStateCallback, this);
         // 自动识别手型
         if (urdfModel_.getJoint("l_thumb_cmc_yaw") != nullptr) {
           // 通过腕力传感器link区分L6和O6
@@ -620,6 +647,7 @@ namespace ocs2
       }
       publishArmEeStateTrajectory(handState);
       updateDexhandJointPositions(); // 更新灵巧手关节数据
+      updateHeimanJointPositions(); // 更新 heiman 手关节数据（加锁拷贝）
       publishJointTransforms(timeStamp, qJoints);
       publishBaseTransform(timeStamp, basePose);
       publishCartesianMarkers(timeStamp, modeNumber2StanceLeg(observation.mode), feetPositions, feetForces);
@@ -705,10 +733,25 @@ namespace ocs2
             tryInsertGroupRaw(kRightClawJointInsertMap200053, kRightClawJointInsertMap200053Size, claw_joint_positions_[1]);
           }
         }
+        // heiman (黑漫 SG100) 手关节：仅写入 URDF 中实际存在的关节名
+        if (updateHeimanHand_)
+        {
+          for (size_t i = 0; i < heiman_joint_names_.size(); i++)
+          {
+            const auto &name = heiman_joint_names_[i];
+            if (urdfModel_.getJoint(name))
+            {
+              jointPositions.insert({name, heiman_joint_positions_[i]});
+            }
+          }
+        }
         robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
 
         // publish /leju_claw_state for bag recording
-        if (updateClawJointPositions_) {
+        // 仅在仿真/回放路径补发假 state（供 rosbag 录制）；
+        // 真机由 hardware_node 发布真实反馈，此处若再补发会与真实 state 冲突
+        // （假 state 恒为 kReached，会让上层提前误判夹爪到位）。
+        if (updateClawJointPositions_ && !isReal_) {
           kuavo_msgs::lejuClawState claw_state_msg;
           claw_state_msg.header.stamp = timeStamp;
           claw_state_msg.header.frame_id = "leju_claw";
@@ -1042,6 +1085,23 @@ namespace ocs2
         linkerO6HandJointPositions_(i) = std::clamp(msg->position[i], 0.0, 100.0);
     }
 
+    void HumanoidVisualizer::heimanStateCallback(const kuavo_msgs::SG100HandState::ConstPtr &msg)
+    {
+      std::lock_guard<std::mutex> lk(dexhand_mutex_);
+      // 左右手各 11 维、弧度，顺序与 heiman_joint_names_ 一致；收到 state 才覆盖，否则保持 0
+      if(msg->left_hand_positions.size() >= 11)
+      {
+        for(size_t i = 0; i < 11; ++i)
+          heimanHandJointPositions_(i) = msg->left_hand_positions[i];
+      }
+      if(msg->right_hand_positions.size() >= 11)
+      {
+        for(size_t i = 0; i < 11; ++i)
+          heimanHandJointPositions_(11 + i) = msg->right_hand_positions[i];
+      }
+      updateHeimanHand_ = true;
+    }
+
     void HumanoidVisualizer::updateDexhandJointPositions()
     {
       // 辅助lambda：加锁拷贝共享数据，减少重复代码
@@ -1064,6 +1124,15 @@ namespace ocs2
         default:
           break;
       }
+    }
+
+    void HumanoidVisualizer::updateHeimanJointPositions()
+    {
+      std::lock_guard<std::mutex> lk(dexhand_mutex_);
+      if(!updateHeimanHand_)
+        return;
+      for(size_t i = 0; i < heimanHandJointPositions_.size() && i < heiman_joint_positions_.size(); ++i)
+        heiman_joint_positions_[i] = heimanHandJointPositions_(i);
     }
 
     void HumanoidVisualizer::publishArmEeStateTrajectory(const vector_t& EeState)

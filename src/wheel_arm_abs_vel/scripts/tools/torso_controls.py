@@ -1,0 +1,273 @@
+"""Explicit torso permission and end-effector chord arbitration (no ROS I/O)."""
+import copy
+import math
+
+
+class TorsoControls:
+    MAX_AGE = .25
+    RT_CHORD_WINDOW = .15
+    STICK_HOLD_SAMPLES = 100
+
+    def __init__(self, source, enable_on_first_follow=True):
+        if source not in ('quest', 'pico'):
+            raise ValueError('unsupported torso input source: ' + source)
+        self.source = source
+        self.enabled = False
+        self.position_enabled = True
+        self.operation_seq = 0
+        self._last_permissions = (False, False)
+        self.stick_consumed = False
+        self._stick_neutral_required = True
+        self._stick_key = None
+        self._stick_count = 0
+        # Stop and fault revoke execution permission. An input gap during
+        # active follow preserves the current torso mode. X+A reset drops both
+        # clutches via clear_operator_mode. Only an admitted follow request or
+        # a fresh torso operation after it is applied may change permission.
+        self.default_enabled = bool(enable_on_first_follow)
+        self.selected_enabled = self.default_enabled
+        self.startup_enable_pending = self.default_enabled
+        self.follow_ready_seen = False
+        # X+A resume latches the reset defaults until a real joystick sample
+        # applies them. A readiness poll must not consume or cancel that latch.
+        self._admitted_follow = False
+        # While set, torso operations cannot put the pre-reset lock back.
+        self._reset_latched = False
+        self.last_time = None
+        self.chord_down = False
+        self.require_release = True
+        self.last_hand = None
+        self.y_down = False
+        self.y_pending = False
+        self.y_consumed = False
+        self.rt_hold = None
+        self.rt_released = False
+        self.rt_pending_since = None
+        self.rt_down = False
+        self.rt_before_press = 0.
+
+    def reset(self):
+        # A revocation cancels even a startup preference not yet consumed.
+        # The manual master/position selection is kept for stop and fault.
+        self.startup_enable_pending = False
+        self._admitted_follow = False
+        self.wait_for_follow()
+
+    def clear_operator_mode(self):
+        """Drop the manual master switch and position lock.
+
+        Used when X+A starts the whole-body ready-pose return. The next
+        admitted follow uses the launch default, with torso position follow on.
+        """
+        self.position_enabled = True
+        self.selected_enabled = self.default_enabled
+        self.follow_ready_seen = False
+        self.reset()
+        self._reset_latched = True
+
+    def wait_for_follow(self):
+        """Inhibit during initial acquisition; never create/rearm permission."""
+        self.enabled = False
+        self._require_neutral_input()
+
+    def _require_neutral_input(self):
+        self.require_release = True
+        self._stick_neutral_required = True
+        self._stick_key = None
+        self._stick_count = 0
+
+    def request_follow(self):
+        """Restore the selected mode after an explicit, admitted follow request."""
+        self.wait_for_follow()
+        if self._reset_latched:
+            # X+A already dropped the manual lock. Re-apply that default
+            # at admission so a gesture during the reset window cannot stick.
+            self.position_enabled = True
+            self.selected_enabled = self.default_enabled
+        self.startup_enable_pending = self.selected_enabled
+        self._admitted_follow = True
+        self.follow_ready_seen = False
+
+    def _check_readiness(self, now, ready, input_stream=None):
+        received, max_age = (self.last_time, self.MAX_AGE) if input_stream is None else input_stream
+        fresh = received is not None and 0 <= now-received <= max_age
+        stream_lost = received is not None and not fresh
+        ready_lost = self.follow_ready_seen and not ready
+        if ready and self.enabled and (received is None or (stream_lost and now > received)):
+            # A gap in the admitted input stream is not a torso mode command.
+            # Discard unfinished gestures so a held button cannot toggle on return.
+            self._require_neutral_input()
+        elif stream_lost or (ready_lost and not self._admitted_follow):
+            self.reset()
+        elif not ready or not fresh:
+            # No first packet / initial execution handshake is ordinary startup,
+            # unlike a lost established stream or an explicit reset.
+            self.wait_for_follow()
+        if not self._admitted_follow:
+            self.follow_ready_seen = self.follow_ready_seen or ready
+        return fresh
+
+    def authorized(self, now, ready, input_stream=None):
+        fresh = self._check_readiness(now, ready, input_stream)
+        # Optical follow is admitted by the gesture/session lifecycle. It
+        # must not wait for a controller packet to apply that admission.
+        if input_stream is not None and ready and fresh:
+            self._apply_follow_selection()
+        self._record_permissions()
+        return self.enabled
+
+    def _apply_follow_selection(self):
+        if self._admitted_follow:
+            if self._reset_latched:
+                self.position_enabled = True
+                self.selected_enabled = self.default_enabled
+                self.startup_enable_pending = self.selected_enabled
+            self.enabled = bool(self.startup_enable_pending)
+            self._admitted_follow = False
+            self.follow_ready_seen = True
+            self._reset_latched = False
+        elif self.startup_enable_pending:
+            self.enabled = True
+        self.startup_enable_pending = False
+
+    def _record_permissions(self):
+        permissions = (self.enabled, not self.position_enabled)
+        if permissions != self._last_permissions:
+            self.operation_seq += 1
+            self._last_permissions = permissions
+
+    def _update_stick(self, raw, now, ready, fresh, valid, blocked):
+        """Quest: X+down locks all; down selects yaw only; either up follows all.
+
+        Pico retains its existing independent master/position selections.
+
+        Require a neutral sample after startup, loss or a completed gesture.
+        A held stick cannot silently re-enable follow after a safety revocation.
+        """
+        y = getattr(raw, 'right_y', 0.)
+        finite = math.isfinite(y)
+        self.stick_consumed = finite and abs(y) > .8
+        if not finite or not ready or not fresh or not valid or blocked:
+            self._stick_neutral_required = True
+            self._stick_key = None
+            self._stick_count = 0
+            return
+        if abs(y) <= .5:
+            self._stick_neutral_required = False
+        if abs(y) <= .8 or self._stick_neutral_required:
+            self._stick_key = None
+            self._stick_count = 0
+            return
+        key = (bool(raw.left_first_button_pressed), y > .8)
+        if key != self._stick_key:
+            self._stick_key, self._stick_count = key, 0
+        self._stick_count += 1
+        if self._stick_count <= self.STICK_HOLD_SAMPLES:
+            return
+        master, enabled = key
+        if self.source == 'quest':
+            self.enabled = self.selected_enabled = enabled or not master
+            self.position_enabled = enabled
+            self.startup_enable_pending = False
+        elif master:
+            self.enabled = self.selected_enabled = enabled
+            self.startup_enable_pending = False
+        else:
+            self.position_enabled = enabled
+        self._stick_neutral_required = True
+        self._stick_count = 0
+
+    def update(self, raw, hand, now, ready, input_stream=None, pose_fresh=True):
+        result = copy.copy(hand)
+        if input_stream is not None:
+            # Optical gestures also populate joystick button fields (both OK
+            # hands encode X+A). Those fields are not controller authority for
+            # torso shortcuts. Explicit operations still revoke permission
+            # through the mapper lifecycle; optical stop uses its gesture FSM.
+            self.authorized(now, ready, input_stream)
+            self.last_time = now
+            return result
+        fresh = self._check_readiness(now, ready, input_stream)
+        inputs_ready = ready and pose_fresh
+        valid = all(math.isfinite(v) for v in
+                    (raw.left_trigger, raw.right_trigger, raw.left_grip, raw.right_grip,
+                     getattr(raw, 'right_y', 0.)))
+        stop = raw.left_first_button_pressed and raw.left_second_button_pressed
+        arm = raw.left_first_button_pressed and (raw.right_first_button_pressed or raw.right_second_button_pressed)
+        prepare = raw.left_first_button_pressed and raw.right_first_button_pressed
+        # Raw X+A is shared by PREPARE and explicit resume. Inhibit motion
+        # while held, without cancelling the admitted follow request. The
+        # mapper revokes permission when it actually enters PREPARE.
+        if not valid or stop:
+            self.reset()
+        elif prepare:
+            self.wait_for_follow()
+        self.last_time = now
+        chord = toggle_edge = False
+        if self.source == 'pico':
+            # Delay a fresh standalone RT briefly so RT-first torso chords do
+            # not send a gripper close before Y arrives. No attempt is made to
+            # undo an already emitted long standalone squeeze.
+            rt_pressed = valid and raw.right_trigger > .5
+            if rt_pressed and not self.rt_down and fresh and self.rt_hold is None:
+                self.rt_pending_since = now
+                self.rt_before_press = self.last_hand.right_trigger if self.last_hand is not None else 0.
+            if not fresh or not valid or not rt_pressed:
+                self.rt_pending_since = None
+            if self.rt_pending_since is not None:
+                if now - self.rt_pending_since < self.RT_CHORD_WINDOW:
+                    result.right_trigger = self.rt_before_press
+                else:
+                    self.rt_pending_since = None
+            self.rt_down = rt_pressed
+            y = raw.left_second_button_pressed
+            rt = valid and raw.right_trigger > .5
+            chord = rt and y and not (raw.left_first_button_pressed or
+                    raw.right_first_button_pressed or raw.right_second_button_pressed)
+            toggle_edge = chord and not self.chord_down
+            # Resolve a lone Y on release, so Y-first and RT-first chords both
+            # consume it before the end-effector freeze/gesture handler.
+            result.left_second_button_pressed = False
+            if y and not self.y_down:
+                self.y_pending = True
+                self.y_consumed = False
+            if chord or stop or arm or not fresh or not valid:
+                self.y_consumed = True
+            if y and self.rt_hold is None:
+                self.rt_hold = self.last_hand.right_trigger if self.last_hand is not None else 0.
+                self.rt_released = False
+            if chord:
+                self.rt_released = False
+            if not y and self.y_down:
+                result.left_second_button_pressed = self.y_pending and not self.y_consumed
+                self.y_pending = False
+            self.y_down = y
+            if self.rt_hold is not None:
+                # Keep the last emitted gripper value throughout the chord and
+                # its release. A new isolated RT press explicitly resumes grip.
+                if self.rt_released and rt and not y:
+                    self.rt_hold = None
+                else:
+                    result.right_trigger = self.rt_hold
+                    if not rt:
+                        self.rt_released = True
+        reset_latched = self._reset_latched
+        if (inputs_ready and fresh and valid and not stop and not arm
+                and (self._admitted_follow or self.startup_enable_pending)):
+            self._apply_follow_selection()
+        if not chord:
+            self.require_release = False
+        elif (toggle_edge and not self.require_release and not reset_latched
+              and inputs_ready and fresh and valid and not stop and not arm):
+            self.enabled = not self.enabled
+            self.selected_enabled = self.enabled
+        self.chord_down = chord
+        quest_hand_button = self.source == 'quest' and (
+            raw.right_first_button_pressed or raw.right_second_button_pressed)
+        self._update_stick(raw, now, inputs_ready, fresh, valid,
+                           stop or arm or chord or raw.left_second_button_pressed
+                           or quest_hand_button or reset_latched)
+        self._record_permissions()
+        if valid:
+            self.last_hand = copy.copy(result)
+        return result

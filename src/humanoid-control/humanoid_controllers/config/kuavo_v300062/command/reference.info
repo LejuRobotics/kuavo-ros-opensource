@@ -1,7 +1,13 @@
 targetDisplacementVelocity          0.5;
 targetRotationVelocity              0.3;
 cmdvelLinearXLimit                  0.4;
+cmdvelLinearYLimit                  0.2;
 cmdvelAngularYAWLimit               0.4;
+
+vrSquatMinPitchDeg                  3.0;
+vrSquatMaxPitchDeg                  35.0;
+vrSquatHeightMin                    -0.25;
+vrSquatHeightMax                    0.1;
 armMode                             true; 
 
 targetArmDisplacementVelocity       1.2;

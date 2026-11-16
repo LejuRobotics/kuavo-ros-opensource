@@ -1,0 +1,19 @@
+{
+  "version": "0.7.2",
+  "upstream_commit": "e701292db6b6f0941c2ddf68be3772d0fae30754",
+  "archive_sha256": "21e4b35220fe99c515f267e78e0a2ae564331a462886cf4f05c0710384e0284c",
+  "generator_commit": "b5ae8e49306840a50ae9c752c5b4040f892c89d8",
+  "generator_archive_sha256": "21485098ab289666a7a63ab5ff0998a9491fff7c88b7d3fe3494612efa3a9b42",
+  "template_substitutions": {
+    "LIBRARY_NAME": "PROXSUITE",
+    "PROJECT_VERSION": "0.7.2",
+    "PROJECT_VERSION_MAJOR_CONFIG": "0",
+    "PROJECT_VERSION_MINOR_CONFIG": "7",
+    "PROJECT_VERSION_PATCH_CONFIG": "2",
+    "EXPORT_SYMBOL": "proxsuite_EXPORTS",
+    "PACKAGE_CPPNAME": "PROXSUITE"
+  },
+  "header_count": 101,
+  "simde_vectorization": false,
+  "openmp": false
+}

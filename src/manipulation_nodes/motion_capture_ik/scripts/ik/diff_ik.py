@@ -31,6 +31,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 tools_dir = os.path.abspath(os.path.join(current_dir, '..', 'tools'))
 sys.path.append(tools_dir)
 from tools.utils import get_package_path, ArmIdx, IkTypeIdx, rotation_matrix_diff_in_angle_axis
+from drake_parser_compat import add_urdf_model
 from drake_trans import quaternion_to_matrix
 
 class DiffIK:
@@ -44,7 +45,7 @@ class DiffIK:
         builder = DiagramBuilder()
         self.__plant, scene_graph = AddMultibodyPlantSceneGraph(builder, 1e-3)
         parser = Parser(self.__plant)
-        robot = parser.AddModelFromFile(model_file)
+        add_urdf_model(parser, model_file)
         # custom added
         eef_frame_name_list = ["frame_eef_left", "frame_eef_right"]
         self.shoulder_frame_names = shoulder_frame_names

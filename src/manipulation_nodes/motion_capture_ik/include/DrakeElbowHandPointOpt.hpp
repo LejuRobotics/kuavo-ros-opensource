@@ -115,6 +115,22 @@ class DrakeVelocityIKSolver final {
 
   ~DrakeVelocityIKSolver() = default;
 
+  // Seed warm-start directions from measured elbow/wrist FK, not a straight arm.
+  bool seedFromMeasured(const Eigen::Vector3d& elbow, const Eigen::Vector3d& wrist) {
+    const Eigen::Vector3d upper = elbow - p0_;
+    const Eigen::Vector3d lower = wrist - elbow;
+    if (!elbow.allFinite() || !wrist.allFinite() ||
+        upper.norm() <= 1e-6 || lower.norm() <= 1e-6) {
+      return false;
+    }
+    u1Prev_ = upper.normalized();
+    u2Prev_ = lower.normalized();
+    measuredSeedAvailable_ = true;
+    return true;
+  }
+
+  bool hasMeasuredSeed() const { return measuredSeedAvailable_; }
+
   /**
    * [NEW] Set bounds for p2 (hand position).
    * Defines a box constraint lb <= p2 <= ub.
@@ -169,7 +185,13 @@ class DrakeVelocityIKSolver final {
    */
   std::pair<Eigen::Vector3d, Eigen::Vector3d> solve(const Eigen::Vector3d& p1Ref,
                                                     const Eigen::Vector3d& p1Fixed,
-                                                    const Eigen::Vector3d& p2Ref) {
+                                                    const Eigen::Vector3d& p2Ref,
+                                                    bool* success = nullptr) {
+    if (success) *success = false;
+    if (!p1Ref.allFinite() || !p1Fixed.allFinite() || !p2Ref.allFinite()) {
+      return {p0_ + link1Length_ * u1Prev_,
+              p0_ + link1Length_ * u1Prev_ + link2Length_ * u2Prev_};
+    }
     // // ONLY FOR DEBUG
     // printConfigTable(p1Ref, p1Fixed, p2Ref);
 
@@ -260,6 +282,7 @@ class DrakeVelocityIKSolver final {
 
     const Eigen::Vector3d p1Sol = result.GetSolution(p1);
     const Eigen::Vector3d p2Sol = result.GetSolution(p2);
+    if (success) *success = true;
     return {p1Sol, p2Sol};
   }
 
@@ -279,6 +302,7 @@ class DrakeVelocityIKSolver final {
   // previous solution
   Eigen::Vector3d u1Prev_;
   Eigen::Vector3d u2Prev_;
+  bool measuredSeedAvailable_ = false;
 
   Eigen::Vector3d p2LowerBound_;
   Eigen::Vector3d p2UpperBound_;

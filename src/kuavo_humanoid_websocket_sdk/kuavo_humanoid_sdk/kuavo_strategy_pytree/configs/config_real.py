@@ -12,6 +12,8 @@ class config:
 
         walk_yaw_threshold = np.deg2rad(5)  # 走路事件的偏航角度阈值，单位弧度
         walk_pos_threshold = 0.1  # 走路事件的位置阈值，单位米
+        walk_max_vel_x = 0.3  # 行走最大前进速度 m/s
+        walk_max_vel_y = 0.03  # 行走最大侧向速度 m/s
 
         head_search_yaws = [12, -12]  # 头部搜索的偏航角度范围，单位度
         head_search_pitchs = [-15, 0, 15]  # 头部搜索的俯仰角度范围，单位度
@@ -31,7 +33,7 @@ class config:
         enable_step_pause = False  # 是否启用步骤间暂停功能
         
         # 搬箱次数
-        grab_box_num = 10
+        grab_box_num = 5
 
         # 搬箱完成一轮是否暂停，在终端键盘输入Enter继续下一轮
         enable_round_stop = True

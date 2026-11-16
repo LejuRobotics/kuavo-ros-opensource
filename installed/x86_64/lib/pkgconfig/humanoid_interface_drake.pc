@@ -1,0 +1,8 @@
+prefix=/builds/highlydynamic/kuavo-ros-control/installed/x86_64
+
+Name: humanoid_interface_drake
+Description: Description of humanoid_interface_drake
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -lhumanoid_interface_drake -lankle_solver_lib
+Requires: kuavo_common

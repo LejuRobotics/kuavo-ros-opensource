@@ -17,6 +17,7 @@
 #include "motion_capture_ik/ArmControlBaseROS.h"
 #include "motion_capture_ik/json.hpp"
 #include "motion_capture_ik/Quest3ArmInfoTransformer.h"
+#include "motion_capture_ik/drake_parser_compat.hpp"
 #include "ros/console.h"
 
 namespace HighlyDynamic {
@@ -340,7 +341,7 @@ void Quest3IkROS::initialize(const nlohmann::json& configJson) {
   auto [plant, sceneGraph] = drake::multibody::AddMultibodyPlantSceneGraph(diagramBuilder.get(), 0.0);
 
   drake::multibody::Parser parser(&plant);
-  auto modelInstance = parser.AddModelFromFile(urdfFilePath);
+  (void)motion_capture_ik::drake_parser_compat::AddUrdfModel(parser, urdfFilePath);
 
   const auto& baseFrame = plant.GetFrameByName("base_link");
   plant.WeldFrames(plant.world_frame(), baseFrame);  // Weld base_link to world frame

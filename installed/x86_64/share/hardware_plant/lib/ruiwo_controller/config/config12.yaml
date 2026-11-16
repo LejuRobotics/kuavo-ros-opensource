@@ -1,0 +1,52 @@
+address:
+  Left_joint_arm_1: 0x01
+  Left_joint_arm_2: 0x02
+  Left_joint_arm_3: 0x03 
+  Left_joint_arm_4: 0x04
+  Left_joint_arm_5: 0x05
+  Left_joint_arm_6: 0x06
+  Right_joint_arm_1: 0x07
+  Right_joint_arm_2: 0x08
+  Right_joint_arm_3: 0x09 
+  Right_joint_arm_4: 0x0A
+  Right_joint_arm_5: 0x0B
+  Right_joint_arm_6: 0x0C
+  Head_joint_low: 0x00
+  Head_joint_high: 0x00
+online:
+  Left_joint_arm_1: False
+  Left_joint_arm_2: False
+  Left_joint_arm_3: False 
+  Left_joint_arm_4: False
+  Left_joint_arm_5: False
+  Left_joint_arm_6: False
+  Right_joint_arm_1: False
+  Right_joint_arm_2: False
+  Right_joint_arm_3: False 
+  Right_joint_arm_4: False
+  Right_joint_arm_5: False
+  Right_joint_arm_6: False
+  Head_joint_low: False
+  Head_joint_high: False
+parameter:
+  # 关节参数[vel, kp_pos, kd_pos, tor, kp_vel, kd_vel, ki_vel]
+  Left_joint_arm_1: [0, 25, 8, 0, 0, 0, 0]
+  Left_joint_arm_2: [0, 20, 6, 0, 0, 0, 0]
+  Left_joint_arm_3: [0, 20, 6, 0, 0, 0, 0] 
+  Left_joint_arm_4: [0, 10, 3, 0, 0, 0, 0]
+  Left_joint_arm_5: [0, 10, 3, 0, 0, 0, 0]
+  Left_joint_arm_6: [0, 10, 3, 0, 0, 0, 0]
+  Right_joint_arm_1: [0, 25, 8, 0, 0, 0, 0]
+  Right_joint_arm_2: [0, 20, 6, 0, 0, 0, 0]
+  Right_joint_arm_3: [0, 20, 6, 0, 0, 0, 0] 
+  Right_joint_arm_4: [0, 10, 3, 0, 0, 0, 0]
+  Right_joint_arm_5: [0, 10, 3, 0, 0, 0, 0]
+  Right_joint_arm_6: [0, 10, 3, 0, 0, 0, 0]
+  Head_joint_low: [0, 4, 3, 0, 0, 0, 0]
+  Head_joint_high: [0, 10, 6, 0, 0, 0, 0]
+negtive_address:
+ - [0x01, 0x03, 0x05, 0x06, 0x07, 0x0C, 0x0D]
+low_arm_address: 
+ - [0x04, 0x05, 0x06, 0x0A, 0x0B, 0x0C] # 小臂电机ID
+#  ptm:力控模式 servo:伺服模式
+control_mode: ptm

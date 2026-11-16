@@ -243,6 +243,7 @@ namespace ocs2
         
         gaitUpdated_ = false;
         current_mode_end_time_ = 0.0;
+        auto_gait_stop_cmd_time_ = -1.0;
         // 判断为walk模式才enable
         mode_scale_enabled_ = (receivedGait_ == walkModeSequenceTemplate_) ? true : false;
         if (mode_scale_enabled_ && cmdVel_[0] < 0.1)
@@ -476,8 +477,15 @@ namespace ocs2
         ros_logger_->publishValue("/humanoid/GaitReceiver/cmd_vector_norm", cmd_vector.norm());
         ros_logger_->publishVector("/humanoid/GaitReceiver/cmd_vector", cmd_vector);
 
-        if(!gaitSchedulePtr_->getModeSchedule().existValidFootPose(initTime) && !swingTrajectoryPlannerPtr_->isSingleStepPhase())
-        if (planner_vec.norm() <= cmd_threshold|| (planner_vec.norm() <= cmd_threshold*1.5 && PoseCmdWorldUpdated_))// wait for stop
+        const bool stop_check_ready = !gaitSchedulePtr_->getModeSchedule().existValidFootPose(initTime) &&
+                                      !swingTrajectoryPlannerPtr_->isSingleStepPhase();
+        const bool planner_stopped = planner_vec.norm() <= cmd_threshold;
+        // 速度指令恢复、或当前不能检查停止时，重置零速等待计时
+        if (!stop_check_ready || !planner_stopped)
+          auto_gait_stop_cmd_time_ = -1.0;
+
+        if (stop_check_ready)
+        if (planner_stopped || (planner_vec.norm() <= cmd_threshold*1.5 && PoseCmdWorldUpdated_))// wait for stop
         {
           auto current_pose = currentState.segment<6>(6);
           auto current_mode = gaitSchedulePtr_->getModeSchedule().modeAtTime(initTime);
@@ -487,12 +495,30 @@ namespace ocs2
           ros_logger_->publishValue("/humanoid/GaitReceiver/is_walking", is_walking);
           ros_logger_->publishValue("/humanoid/GaitReceiver/reached_target", reached_target);
           ros_logger_->publishValue("/humanoid/GaitReceiver/feets_contact", feet_contact);
+          // 纯速度指令停车：目标轨迹已停住且指令为零时开始计时。
+          // 原地踏步阶段目标点会被速度指令积分到前方超过 reached_target 阈值，
+          // 松杆后机器人不再平移，reached_target 可能永远不成立；超时后允许直接切 stance。
+          const bool vel_cmd_stopped = planner_stopped &&
+                                       Eigen::Vector3d(cmdVel_[0], cmdVel_[1], cmdVel_[3]).norm() <= cmd_threshold &&
+                                       !PoseCmdUpdated_ && !PoseCmdWorldUpdated_;
+          if (vel_cmd_stopped)
+          {
+            if (auto_gait_stop_cmd_time_ < 0.0)
+              auto_gait_stop_cmd_time_ = initTime;
+          }
+          else
+          {
+            auto_gait_stop_cmd_time_ = -1.0;
+          }
+          constexpr double AUTO_GAIT_STOP_TIMEOUT = 1.0; // s
+          const bool stop_timeout = vel_cmd_stopped && (auto_gait_stop_cmd_time_ >= 0.0) &&
+                                    (initTime - auto_gait_stop_cmd_time_ > AUTO_GAIT_STOP_TIMEOUT);
           // std::cout << "[GaitRecevier] is_walking : "<< is_walking << " reached_target : "<< reached_target << " feet_contact : "<< feet_contact << std::endl;
           // 切换到 walk 后需要一段冷却时间，等待规划器目标轨迹响应速度指令
           // 避免 planner_vec 因规划器延迟而仍接近0，导致误触发 stop
           constexpr double AUTO_GAIT_COOL_DOWN = 0.3; // s
           bool in_cool_down = (auto_gait_start_time_ >= 0.0) && (initTime - auto_gait_start_time_ < AUTO_GAIT_COOL_DOWN);
-          if ( is_walking && reached_target && feet_contact && !in_cool_down)// need to stop
+          if ( is_walking && (reached_target || stop_timeout) && feet_contact && !in_cool_down)// need to stop
           {
             mode_scale_enabled_ = false;
             // gaitSchedulePtr_->setGaitName(gaitSchedulePtr_->getGaitMap().at("stance"));
@@ -525,6 +551,7 @@ namespace ocs2
             PoseCmdUpdated_ = false;
             PoseCmdWorldUpdated_ = false;
             velCmdUpdated_ = false;
+            auto_gait_stop_cmd_time_ = -1.0;
             swingTrajectoryPlannerPtr_->setFinalYawSingleStepMode(false);
 
           }
@@ -557,6 +584,7 @@ namespace ocs2
           // 使用 walk 在 gait schedule 中实际开始的时间（而非触发时的 initTime），
           // 确保冷却时间从 walk 真正开始执行时算起，避免因调度延迟导致冷却提前失效
           auto_gait_start_time_ = gaitSchedulePtr_->getGgaitTimeName().first;
+          auto_gait_stop_cmd_time_ = -1.0;
           std::cout << "[GaitReceiver]: auto gait: start" << std::endl;
         }
         velCmdUpdated_ = false;

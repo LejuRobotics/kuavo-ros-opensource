@@ -5,7 +5,7 @@
 <!-- =================================================================================== -->
 <robot name="Rarm" xmlns:drake="https://drake.mit.edu">
   <!-- right arm -->
-  <link name="r_arm_pitch">
+  <link name="zarm_r1_link">
     <inertial>
       <origin rpy="0 0 0" xyz="0.0146743511434554 0.0168298008224051 -8.16711977456031E-05"/>
       <mass value="0.794"/>
@@ -21,18 +21,18 @@
       </material>
     </visual>
   </link>
-  <joint name="r_arm_pitch" type="continuous">
+  <joint name="zarm_r1_joint" type="continuous">
     <origin rpy="0 0 0" xyz="-0.0175475823119764 -0.262700000000031 0.324500000000024"/>
-    <parent link="torso"/>
-    <child link="r_arm_pitch"/>
+    <parent link="base_link"/>
+    <child link="zarm_r1_link"/>
     <axis xyz="0 1 0"/>
     <limit effort="100" lower="-1.57" upper="1.57" velocity="35"/>
   </joint>
   <transmission type="SimpleTransmission">
-    <joint name="r_arm_pitch"/>
-    <actuator name="r_arm_pitch_motor"/>
+    <joint name="zarm_r1_joint"/>
+    <actuator name="zarm_r1_joint_motor"/>
   </transmission>
-  <link name="r_arm_roll">
+  <link name="zarm_r2_link">
     <inertial>
       <origin rpy="0 0 0" xyz="0.0223009070030529 -0.0156950170482436 -0.0202307747650334"/>
       <mass value="0.20735"/>
@@ -48,18 +48,18 @@
       </material>
     </visual>
   </link>
-  <joint name="r_arm_roll" type="continuous">
+  <joint name="zarm_r2_joint" type="continuous">
     <origin rpy="0 0 0" xyz="0 0 0"/>
-    <parent link="r_arm_pitch"/>
-    <child link="r_arm_roll"/>
+    <parent link="zarm_r1_link"/>
+    <child link="zarm_r2_link"/>
     <axis xyz="1 0 0"/>
     <limit effort="100" lower="-1.57" upper="1.57" velocity="35"/>
   </joint>
   <transmission type="SimpleTransmission">
-    <joint name="r_arm_roll"/>
-    <actuator name="r_arm_roll_motor"/>
+    <joint name="zarm_r2_joint"/>
+    <actuator name="zarm_r2_joint_motor"/>
   </transmission>
-  <link name="r_arm_yaw">
+  <link name="zarm_r3_link">
     <inertial>
       <origin rpy="0 0 0" xyz="-4.82749435400213E-05 -0.0052581506278393 -0.128821944854617"/>
       <mass value="1.120632"/>
@@ -75,18 +75,18 @@
       </material>
     </visual>
   </link>
-  <joint name="r_arm_yaw" type="continuous">
+  <joint name="zarm_r3_joint" type="continuous">
     <origin rpy="0 0 0" xyz="0 0 0"/>
-    <parent link="r_arm_roll"/>
-    <child link="r_arm_yaw"/>
+    <parent link="zarm_r2_link"/>
+    <child link="zarm_r3_link"/>
     <axis xyz="0 0 1"/>
     <limit effort="100" lower="-1.57" upper="1.57" velocity="35"/>
   </joint>
   <transmission type="SimpleTransmission">
-    <joint name="r_arm_yaw"/>
-    <actuator name="r_arm_yaw_motor"/>
+    <joint name="zarm_r3_joint"/>
+    <actuator name="zarm_r3_joint_motor"/>
   </transmission>
-  <link name="r_forearm_pitch">
+  <link name="zarm_r4_link">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.000127232990745116 -0.00951602649232586 -0.0522687552263488"/>
       <mass value="0.395825"/>
@@ -95,25 +95,25 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="../../meshes/r_forearm_pitch.STL"/>
+        <mesh filename="../../meshes/r_forearm.STL"/>
       </geometry>
       <material name="">
         <color rgba="1 1 1 1"/>
       </material>
     </visual>
   </link>
-  <joint name="r_forearm_pitch" type="continuous">
+  <joint name="zarm_r4_joint" type="continuous">
     <origin rpy="0 0 0" xyz="0 0 -0.1636"/>
-    <parent link="r_arm_yaw"/>
-    <child link="r_forearm_pitch"/>
+    <parent link="zarm_r3_link"/>
+    <child link="zarm_r4_link"/>
     <axis xyz="0 1 0"/>
     <limit effort="100" lower="-1.57" upper="1.57" velocity="35"/>
   </joint>
   <transmission type="SimpleTransmission">
-    <joint name="r_forearm_pitch"/>
-    <actuator name="r_forearm_pitch_motor"/>
+    <joint name="zarm_r4_joint"/>
+    <actuator name="zarm_r4_joint_motor"/>
   </transmission>
-  <link name="r_hand_yaw">
+  <link name="zarm_r5_link">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.000113133331993445 -0.0097448351680483 0.0817960724173413"/>
       <mass value="0.380792"/>
@@ -129,18 +129,18 @@
       </material>
     </visual>
   </link>
-  <joint name="r_hand_yaw" type="continuous">
+  <joint name="zarm_r5_joint" type="continuous">
     <origin rpy="0 0 0" xyz="0 0 -0.191050000125729"/>
-    <parent link="r_forearm_pitch"/>
-    <child link="r_hand_yaw"/>
+    <parent link="zarm_r4_link"/>
+    <child link="zarm_r5_link"/>
     <axis xyz="0 0 1"/>
     <limit effort="100" lower="-1.57" upper="1.57" velocity="35"/>
   </joint>
   <transmission type="SimpleTransmission">
-    <joint name="r_hand_yaw"/>
-    <actuator name="r_hand_yaw_motor"/>
+    <joint name="zarm_r5_joint"/>
+    <actuator name="zarm_r5_joint_motor"/>
   </transmission>
-  <link name="r_hand_pitch">
+  <link name="zarm_r6_link">
     <inertial>
       <origin rpy="0 0 0" xyz="0.00735986990228184 -0.0047523802551166 0.00605888061339196"/>
       <mass value="0.376651"/>
@@ -156,18 +156,18 @@
       </material>
     </visual>
   </link>
-  <joint name="r_hand_pitch" type="continuous">
+  <joint name="zarm_r6_joint" type="continuous">
     <origin rpy="0 0 0" xyz="0 0 0"/>
-    <parent link="r_hand_yaw"/>
-    <child link="r_hand_pitch"/>
+    <parent link="zarm_r5_link"/>
+    <child link="zarm_r6_link"/>
     <axis xyz="0 1 0"/>
     <limit effort="100" lower="-1.57" upper="1.57" velocity="35"/>
   </joint>
   <transmission type="SimpleTransmission">
-    <joint name="r_hand_pitch"/>
-    <actuator name="r_hand_pitch_motor"/>
+    <joint name="zarm_r6_joint"/>
+    <actuator name="zarm_r6_joint_motor"/>
   </transmission>
-  <link name="r_hand_roll">
+  <link name="zarm_r7_link">
     <inertial>
       <origin rpy="0 0 0" xyz="0.0045944493552252 -0.00586927010446042 -0.0836324643988434"/>
       <mass value="0.704669"/>
@@ -183,18 +183,18 @@
       </material>
     </visual>
   </link>
-  <joint name="r_hand_roll" type="continuous">
+  <joint name="zarm_r7_joint" type="continuous">
     <origin rpy="0 0 0" xyz="0 0 0"/>
-    <parent link="r_hand_pitch"/>
-    <child link="r_hand_roll"/>
+    <parent link="zarm_r6_link"/>
+    <child link="zarm_r7_link"/>
     <axis xyz="1 0 0"/>
     <limit effort="100" lower="-1.57" upper="1.57" velocity="35"/>
   </joint>
   <transmission type="SimpleTransmission">
-    <joint name="r_hand_roll"/>
-    <actuator name="r_hand_roll_motor"/>
+    <joint name="zarm_r7_joint"/>
+    <actuator name="zarm_r7_joint_motor"/>
   </transmission>
   <!-- end frame -->
-  <!-- <frame link="r_hand_pitch" name="r_hand_sole" xyz="0 0 -0.1" /> -->
+  <!-- <frame link="zarm_r6_link" name="r_hand_sole" xyz="0 0 -0.1" /> -->
 </robot>
 
