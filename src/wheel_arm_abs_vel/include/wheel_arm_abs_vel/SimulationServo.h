@@ -26,6 +26,7 @@ class AbsoluteSimulationServo {
     if (kp.size()!=actuators.size() || kd.size()!=actuators.size())
       throw std::runtime_error("absolute simulation servo gain/layout mismatch");
     kp_=kp; kd_=kd;
+    initial_control_.resize(actuators.size());
     for (size_t i=0;i<actuators.size();++i) {
       const int a=actuators[i];
       if (!std::isfinite(kp_[i]) || !std::isfinite(kd_[i]) || kp_[i]<=0 || kd_[i]<=0 ||
@@ -47,6 +48,7 @@ class AbsoluteSimulationServo {
       m->actuator_biasprm[mjNBIAS*a+2]=-kd_[i];
       const int joint=m->actuator_trnid[2*a];
       d->ctrl[a]=kp_[i]*d->qpos[m->jnt_qposadr[joint]];
+      initial_control_[i]=d->ctrl[a];
     }
     enabled_=true;
     m->opt.integrator=mjINT_IMPLICITFAST;
@@ -64,7 +66,16 @@ class AbsoluteSimulationServo {
     }
     return true;
   }
+  // Zero affine input means a zero-position target, not a passive motor.
+  // Preserve the configured pose until the first ROS command arrives.
+  std::vector<double> initialControl(size_t count) const {
+    if (!enabled_) return std::vector<double>(count, 0.0);
+    if (initial_control_.size()!=count)
+      throw std::runtime_error("absolute simulation initial control/layout mismatch");
+    return initial_control_;
+  }
  private:
   bool enabled_=false;
   std::vector<double> kp_,kd_;
+  std::vector<double> initial_control_;
 };

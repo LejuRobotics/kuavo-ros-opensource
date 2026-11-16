@@ -12,7 +12,17 @@ int main() {
   char error[1024];mjModel* m=mj_loadXML(path,nullptr,error,sizeof(error));unlink(path);assert(m);
   mjData* d=mj_makeData(m);
   AbsoluteSimulationServo servo;
+  assert(servo.initialControl(1)[0]==0.0);
+  d->qpos[0]=-0.5236;
   servo.configureModel(m,d,{0},{120},{6});
+  // Reproduce pure_sim's repeated cache writes before the first ROS command.
+  const auto initial_control=servo.initialControl(1);
+  assert(std::abs(initial_control[0]-120*(-0.5236))<1e-9);
+  for(int i=0;i<250;++i) {
+    d->ctrl[0]=initial_control[0];mj_step(m,d);
+  }
+  assert(std::abs(d->qpos[0]+0.5236)<1e-9);
+  assert(std::abs(d->qvel[0])<1e-9);
   kuavo_msgs::jointCmd c;c.joint_q={0.2};c.joint_v={0};c.control_modes={2};
   for(int i=0;i<10000;++i) {
     std::vector<double> u={0};assert(servo.encode(c,u));d->ctrl[0]=u[0];mj_step(m,d);

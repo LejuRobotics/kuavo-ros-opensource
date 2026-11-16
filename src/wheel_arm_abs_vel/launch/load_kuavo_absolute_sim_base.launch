@@ -48,7 +48,7 @@
   <!-- 设置VR控制参数 -->
   <arg name="use_vr_control" default="true" />
   <arg name="use_whole_body_ik_reference" default="true" />
-  <arg name="initialize_whole_body_ik_natural_pose" default="$(arg use_whole_body_ik_reference)" />
+  <arg name="initialize_whole_body_ik_natural_pose" default="false" doc="Legacy straight-arm simulation override; false uses the same startup pose as hardware" />
   <param name="use_vr_control" value="$(arg use_vr_control)" />
   <!-- Keep the operational 21-D q/dq/ddq adapter disabled until shadow
          development is explicitly promoted to actuator takeover. -->
@@ -56,10 +56,14 @@
   <param name="/vr_ik/velocity_ik_reference_topic" value="/whole_body_velocity_ik/reference" type="string" />
   <param name="/vr_ik/velocity_ik_reference_timeout_sec" value="0.05" type="double" />
   <param name="/vr_ik/wbc_arm_ddq_feedforward_gain" value="0.25" type="double" />
-  <!-- Simulation-only starting state: [lower body 4, left arm 7, right arm 7].
-         Keep the legacy wheel-arm zero lower-body pose and ready height from
-         fixed_base_18d.yaml while both arms hang naturally.  Trigger activation
-         is responsible for the bounded motion to the human hands. -->
+  <!-- Default to the controller's hardware startup pose, including qibeng
+         and custom preparation selection. Remove an old override when
+         relaunching under the same ROS master. The zero-pose experiment
+         remains explicit opt-in: [lower body 4, left arm 7, right arm 7]. -->
+  <group unless="$(arg initialize_whole_body_ik_natural_pose)" ns="/simulation_initial_lower_arm_joint_state" clear_params="true" />
+  <!-- MuJoCo and reference services wait for this controller-produced value.
+       A value left by the previous launch would bypass that startup barrier. -->
+  <group ns="/robot_init_state_param" clear_params="true" />
   <group if="$(arg initialize_whole_body_ik_natural_pose)">
     <rosparam param="/simulation_initial_lower_arm_joint_state">
         [0.0, 0.0, 0.0, 0.0,

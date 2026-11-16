@@ -26,6 +26,7 @@
 #include "../velocity_ik/optical_bounded_reference.h"
 #include "../velocity_ik/execution_governor.h"
 #include "../velocity_ik/teleop_continuity.h"
+#include "../velocity_ik/torso_heading.h"
 #include "../velocity_ik/unlock_joint_plan.h"
 #include <nlohmann/json.hpp>
 #include "wheel_arm_abs_vel/motion_capture_ik/runtime/E2eDeadline.h"
@@ -3585,28 +3586,19 @@ class PinocchioVelocityIk {
         target.body.chest_orientation.toRotationMatrix() * chest_calibration.transpose();
     const Eigen::Matrix3d anchor_rotation =
         anchor.chest_orientation.toRotationMatrix() * chest_calibration.transpose();
-    const auto pitch = [](const Eigen::Matrix3d& r) {
-      return std::atan2(-r(2, 0), std::hypot(r(0, 0), r(1, 0)));
-    };
-    const double yaw = std::atan2(rotation(1, 0), rotation(0, 0));
-    const double anchor_yaw =
-        std::atan2(anchor_rotation(1, 0), anchor_rotation(0, 0));
+    const auto heading = velocity_ik::torsoHeading(rotation, target.body.chest_angular_ff);
+    const auto anchor_heading = velocity_ik::torsoHeading(anchor_rotation);
     Eigen::Vector4d delta = session_body_anchor_.accumulated_torso_delta;
     // No horizontal locomotion or hand-error recruitment in fixed-base IK.
     delta(1) += torso_height_gain_ *
         (target.body.chest_position.z() - anchor.chest_position.z());
-    delta(2) += torso_pitch_gain_ * (pitch(rotation) - pitch(anchor_rotation));
-    delta(3) += torso_yaw_gain_ * shortestAngularDelta(anchor_yaw, yaw);
+    delta(2) += torso_pitch_gain_ * (heading.pitch - anchor_heading.pitch);
+    delta(3) += torso_yaw_gain_ * shortestAngularDelta(anchor_heading.yaw, heading.yaw);
     intent.desired_torso_feature = session_body_anchor_.robot_torso_feature + delta;
     intent.desired_torso_feature.segment<2>(1) += session_body_anchor_.position_resume_offset;
-    const auto& omega = target.body.chest_angular_ff;
-    const double pitch_rate = -std::sin(yaw) * omega.x() + std::cos(yaw) * omega.y();
-    const double yaw_rate = omega.z() +
-        (std::cos(yaw) * omega.x() + std::sin(yaw) * omega.y()) *
-        std::tan(std::clamp(pitch(rotation), -1.45, 1.45));
     intent.desired_torso_velocity <<
         0.0, torso_height_gain_ * target.body.chest_linear_ff.z(),
-        torso_pitch_gain_ * pitch_rate, torso_yaw_gain_ * yaw_rate;
+        torso_pitch_gain_ * heading.pitch_rate, torso_yaw_gain_ * heading.yaw_rate;
     intent.desired_base_translation = session_anchor_.translation;
     intent.desired_base_velocity.setZero();
     intent.torso_valid = true;
