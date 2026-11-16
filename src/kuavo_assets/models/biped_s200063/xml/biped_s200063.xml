@@ -30,10 +30,6 @@
     <mesh name="r_hand_pitch" file="r_hand_pitch.STL"/>
     <mesh name="l_camera_link" file="l_camera_link.STL"/>
     <mesh name="r_camera_link_connect" file="r_camera_link_connect.STL"/>
-    <mesh name="l_d405_camera_base" file="l_d405_camera_base.STL"/>
-    <mesh name="l_d405_camera" file="l_d405_camera.STL"/>
-    <mesh name="r_d405_camera_base" file="r_d405_camera_base.STL"/>
-    <mesh name="r_d405_camera" file="r_d405_camera.STL"/>
     <mesh name="head_yaw" file="head_yaw.STL"/>
     <mesh name="head_pitch" file="head_pitch.STL"/>
     <mesh name="head_camera" file="head_camera.STL"/>
