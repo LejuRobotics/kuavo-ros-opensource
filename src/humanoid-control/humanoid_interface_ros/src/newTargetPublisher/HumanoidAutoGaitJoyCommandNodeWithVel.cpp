@@ -484,6 +484,27 @@ namespace ocs2
             if (cached_controller_name_ == "amp_assemble_controller")
               updateVelocityLimitsFromParam(true);
           });
+      // Public queries expose members; keep the outer identity for joystick switching.
+      amp_family_status_sub_ = nodeHandle_.subscribe<std_msgs::String>(
+          "/humanoid_controller/amp_family/status", 1,
+          [this](const std_msgs::String::ConstPtr& msg) {
+            try {
+              const auto status = nlohmann::json::parse(msg->data);
+              const auto members = status.at("enabled_members").get<std::vector<std::string>>();
+              const bool active = status.at("family_active").get<bool>();
+              const auto member = status.at("active_member").get<std::string>();
+              cached_amp_member_names_ = members;
+              cached_amp_family_active_ = active;
+              if (cached_amp_member_name_.empty() && active) cached_amp_member_name_ = member;
+              if (isActiveAmpFamilyMember(cached_controller_name_)) {
+                cached_controller_name_ = "amp_assemble_controller";
+                updateVelocityLimitsFromParam(true);
+              }
+              updateAmpControllerState();
+            } catch (const std::exception& e) {
+              ROS_WARN_THROTTLE(5.0, "[JoyControl] Invalid AMP family status: %s", e.what());
+            }
+          });
       amp_hand_mode_sub_ = nodeHandle_.subscribe<std_msgs::Int32>(
           "/humanoid_controller/amp_hand_controller/amp_mode", 1,
           [this](const std_msgs::Int32::ConstPtr &msg)
@@ -2774,6 +2795,13 @@ namespace ocs2
       return false;
     }
 
+    bool isActiveAmpFamilyMember(const std::string& name) const
+    {
+      return cached_amp_family_active_ &&
+          std::find(cached_amp_member_names_.begin(), cached_amp_member_names_.end(), name)
+              != cached_amp_member_names_.end();
+    }
+
     // 只解析具体成员，不修改外层循环使用的名称缓存。
     std::string resolveAmpMemberName(const std::string& controller_name) const
     {
@@ -2809,6 +2837,10 @@ namespace ocs2
         if (getCurrentControllerName(name))
         {
           cached_controller_name_ = name;
+          if (isActiveAmpFamilyMember(name)) {
+            cached_amp_member_name_ = name;
+            cached_controller_name_ = "amp_assemble_controller";
+          }
           updateAmpControllerState();
         }
         cached_controller_time_ = now;
@@ -2924,6 +2956,7 @@ namespace ocs2
     ros::Subscriber controller_switch_event_sub_;
     ros::Subscriber amp_family_member_sub_;
     ros::Subscriber amp_family_switch_event_sub_;
+    ros::Subscriber amp_family_status_sub_;
     ros::Subscriber amp_hand_mode_sub_;
     ros::Subscriber arm_ctrl_mode_sub_;
     ros::Subscriber dance_trajectory_state_sub_;
@@ -2932,6 +2965,8 @@ namespace ocs2
     // refreshControllerCacheIfStale() 的 TTL 缓存, 避免每帧 service call
     std::string cached_controller_name_;
     std::string cached_amp_member_name_;
+    std::vector<std::string> cached_amp_member_names_;
+    bool cached_amp_family_active_{false};
     double cached_controller_time_{0.0};
     static constexpr double kControllerCacheTtl_{0.3};
     bool is_rl_controller_{false};  // 当前是否为RL控制器
