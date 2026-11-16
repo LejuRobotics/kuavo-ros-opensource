@@ -10,7 +10,7 @@ from sensor_msgs.msg import JointState
 from handcontrollerdemorosnode.msg import armPoseWithTimeStamp
 from kuavo_msgs.msg import robotHandPosition
 from kuavo_msgs.srv import controlLejuClaw, controlLejuClawRequest
-from kuavo_msgs.msg import lejuClawCommand
+from kuavo_msgs.msg import lejuClawCommand, dhClawCommand
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Quaternion, Vector3
 import time
@@ -116,6 +116,7 @@ def set_thread_priority(thread, policy, priority):
 QIANGNAO = "qiangnao"
 JODELL = "jodell"
 LEJUCLAW = "lejuclaw"
+DHCLAW = "dhclaw"
 QIANGNAO_TOUCH = "qiangnao_touch"
 REVO2 = "revo2"
 LINKER_HAND = "linker_hand"
@@ -240,6 +241,86 @@ class IkRos:
         if hasattr(self.arm_ik, 'set_use_two_stage_ik'):
             self.arm_ik.set_use_two_stage_ik(self.__use_two_stage_ik)
             rospy.loginfo(f"[IkRos] ArmIk实例两阶段IK模式设置为: {self.__use_two_stage_ik}")
+
+        # 必须在订阅手柄/姿态话题前初始化，避免回调抢跑 AttributeError
+        try:
+            end_effector_mapping = {
+                QIANGNAO: QIANGNAO,
+                JODELL: JODELL,
+                LEJUCLAW: LEJUCLAW,
+                DHCLAW: DHCLAW,
+                QIANGNAO_TOUCH: QIANGNAO_TOUCH,
+                REVO2: REVO2,
+                LINKER_HAND: LINKER_HAND,
+            }
+            if end_effector_type in end_effector_mapping:
+                self.end_effector_type = end_effector_mapping[end_effector_type]
+            else:
+                self.end_effector_type = QIANGNAO
+        except Exception as e:
+            print(f"get end effector type error: {e}, use default qiangnao")
+            self.end_effector_type = QIANGNAO
+        print(f"\033[93m--------------------------------------------------\033[0m")
+        print(f"\033[93m- End effector type: {self.end_effector_type} \033[0m")
+        print(f"\033[93m--------------------------------------------------\033[0m")
+
+        self.arm_mode_changing = False
+        # 检测到碰撞后，由外部控制手臂
+        self.collision_check_control = False
+        self.sensor_data_raw = None
+        self.maxSpeed = rospy.get_param("/arm_move_spd_half_up_body", 0.21)
+        self.threshold_arm_diff_half_up_body = rospy.get_param("/threshold_arm_diff_half_up_body", 0.2)
+        self._interp_time_last = rospy.Time.now().to_sec()
+
+        # 半身模式下退出mode2时保持手臂位置的变量
+        self.frozen_arm_state = None  # 保存退出mode2时的手臂状态
+        self.hold_arm_timer = None  # 保持手臂位置的定时器
+        self.optimized_state = None  # 存储MPC优化后的状态
+
+        # Publisher 必须在 Subscriber 之前创建：手柄回调可能立刻 pub 夹爪/手指
+        if self.use_arm_collision:
+            self.pub = rospy.Publisher("/arm_collision/kuavo_arm_traj", JointState, queue_size=2)
+        else:
+            self.pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=2)
+        self.pub_origin_joint = rospy.Publisher("/kuavo_arm_traj_origin", Float32MultiArray, queue_size=10)
+        self.pub_filtered_joint = rospy.Publisher("/kuavo_arm_traj_filtered", Float32MultiArray, queue_size=10)
+        self.pub_real_arm_hand_pose = rospy.Publisher("/drake_ik/real_arm_hand_pose", twoArmHandPose, queue_size=10)
+        self.pub_time_cost = rospy.Publisher(
+            "/drake_ik/time_cost/ik", Float32, queue_size=10
+        )
+        self.pub_ik_solve_error = rospy.Publisher(
+            "/drake_ik/ik_solve_error", ikSolveError, queue_size=10
+        )
+        self.control_robot_hand_position_pub = rospy.Publisher(
+            "control_robot_hand_position", robotHandPosition, queue_size=10
+        )
+        self.pub_ik_solved_eef_pose = rospy.Publisher(
+            "/drake_ik/eef_pose", twoArmHandPose, queue_size=10
+        )
+        # 带时间戳：/drake_ik/input_pos
+        self.pub_ik_input_pos = rospy.Publisher(
+            "/drake_ik/input_pos", Float32MultiArrayStamped, queue_size=10
+        )
+        self.pub_q0_tmp = rospy.Publisher(
+            "/drake_ik/q0_tmp", Float32MultiArray, queue_size=10
+        )
+        self.leju_claw_command_pub = rospy.Publisher(
+            "leju_claw_command", lejuClawCommand, queue_size=10
+        )
+        self.dh_claw_command_pub = rospy.Publisher(
+            "dh_claw_command", dhClawCommand, queue_size=10
+        )
+
+        if self.robot_type == 1:
+            # 添加发布/mm/two_arm_hand_pose_cmd话题的发布器
+            self.pub_mm_two_arm_hand_pose_cmd = rospy.Publisher(
+                "/mm/two_arm_hand_pose_cmd", twoArmHandPoseCmd, queue_size=10
+            )
+
+        # 添加可视化marker发布器
+        self.ik_visualization_pub = rospy.Publisher(
+            "/ik_visualization_markers", MarkerArray, queue_size=10
+        )
         
         # TO-DO(matthew): subscribe to joint states
         # update joint states
@@ -297,81 +378,6 @@ class IkRos:
             "/rl_controller/InputData/command", Float64MultiArray,
             self._amp_cmd_cb, queue_size=1
         )
-
-        self.arm_mode_changing = False
-        # 检测到碰撞后，由外部控制手臂
-        self.collision_check_control = False
-        self.sensor_data_raw = None
-        self.maxSpeed = rospy.get_param("/arm_move_spd_half_up_body", 0.21)
-        self.threshold_arm_diff_half_up_body = rospy.get_param("/threshold_arm_diff_half_up_body", 0.2)
-        self._interp_time_last = rospy.Time.now().to_sec()
-        
-        # 半身模式下退出mode2时保持手臂位置的变量
-        self.frozen_arm_state = None  # 保存退出mode2时的手臂状态
-        self.hold_arm_timer = None  # 保持手臂位置的定时器
-        self.optimized_state = None  # 存储MPC优化后的状态
-
-
-        if self.use_arm_collision:
-            self.pub = rospy.Publisher("/arm_collision/kuavo_arm_traj", JointState, queue_size=2)
-        else:
-            self.pub = rospy.Publisher("/kuavo_arm_traj", JointState, queue_size=2)
-        self.pub_origin_joint = rospy.Publisher("/kuavo_arm_traj_origin", Float32MultiArray, queue_size=10)
-        self.pub_filtered_joint = rospy.Publisher("/kuavo_arm_traj_filtered", Float32MultiArray, queue_size=10)
-        self.pub_real_arm_hand_pose = rospy.Publisher("/drake_ik/real_arm_hand_pose", twoArmHandPose, queue_size=10)
-        self.pub_time_cost = rospy.Publisher(
-            "/drake_ik/time_cost/ik", Float32, queue_size=10
-        )
-        self.pub_ik_solve_error = rospy.Publisher(
-            "/drake_ik/ik_solve_error", ikSolveError, queue_size=10
-        )
-        self.control_robot_hand_position_pub = rospy.Publisher(
-            "control_robot_hand_position", robotHandPosition, queue_size=10
-        )
-        self.pub_ik_solved_eef_pose = rospy.Publisher(
-            "/drake_ik/eef_pose", twoArmHandPose, queue_size=10
-        )
-        # 带时间戳：/drake_ik/input_pos
-        self.pub_ik_input_pos = rospy.Publisher(
-            "/drake_ik/input_pos", Float32MultiArrayStamped, queue_size=10
-        )
-        self.pub_q0_tmp = rospy.Publisher(
-            "/drake_ik/q0_tmp", Float32MultiArray, queue_size=10
-        )
-        self.leju_claw_command_pub = rospy.Publisher(
-            "leju_claw_command", lejuClawCommand, queue_size=10
-        )
-        
-        if self.robot_type == 1:
-            # 添加发布/mm/two_arm_hand_pose_cmd话题的发布器
-            self.pub_mm_two_arm_hand_pose_cmd = rospy.Publisher(
-                "/mm/two_arm_hand_pose_cmd", twoArmHandPoseCmd, queue_size=10
-            )
-        
-        # 添加可视化marker发布器
-        self.ik_visualization_pub = rospy.Publisher(
-            "/ik_visualization_markers", MarkerArray, queue_size=10
-        )
-        
-        try:
-            end_effector_mapping = {
-                QIANGNAO: QIANGNAO,
-                JODELL: JODELL,
-                LEJUCLAW: LEJUCLAW,
-                QIANGNAO_TOUCH:QIANGNAO_TOUCH,
-                REVO2: REVO2,
-                LINKER_HAND: LINKER_HAND
-            }
-            if end_effector_type in end_effector_mapping:
-                self.end_effector_type = end_effector_mapping[end_effector_type]
-            else:
-                self.end_effector_type = QIANGNAO
-        except Exception as e:
-            print(f"get end effector type error: {e}, use default qiangnao")
-            self.end_effector_type = QIANGNAO
-        print(f"\033[93m--------------------------------------------------\033[0m")        
-        print(f"\033[93m- End effector type: {self.end_effector_type} \033[0m")
-        print(f"\033[93m--------------------------------------------------\033[0m")        
 
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
@@ -497,11 +503,11 @@ class IkRos:
             rospy.logerr(f"Service {service_name} not available")
 
     @staticmethod
-    def control_lejuclaw(pos:list):
+    def control_lejuclaw(pos:list, eef_type:str="lejuclaw"):
         # print(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> control_lejuclaw: {pos}")
-        service_name = "/control_robot_leju_claw"
+        service_name = "/control_robot_dh_claw" if eef_type == DHCLAW else "/control_robot_leju_claw"
         try:
-            rospy.wait_for_service("/control_robot_leju_claw", timeout=1)
+            rospy.wait_for_service(service_name, timeout=1)
             control_lejucalw_srv = rospy.ServiceProxy(
                 service_name, controlLejuClaw
             )
@@ -517,12 +523,15 @@ class IkRos:
             rospy.logerr(f"Error: {e}")   
 
     def pub_leju_claw_command(self, pos:list):
-        msg = lejuClawCommand()
+        msg = dhClawCommand() if self.end_effector_type == DHCLAW else lejuClawCommand()
         msg.header.stamp = rospy.Time.now()
         msg.data.name = ['left_claw', 'right_claw']
         msg.data.position = pos
         msg.data.velocity = [90, 90]
-        self.leju_claw_command_pub.publish(msg)
+        if self.end_effector_type == DHCLAW:
+            self.dh_claw_command_pub.publish(msg)
+        else:
+            self.leju_claw_command_pub.publish(msg)
 
     def pub_solved_arm_eef_pose(self, q_robot, current_pose, current_pose_right):
         msg = twoArmHandPose()
@@ -955,7 +964,7 @@ class IkRos:
         # 准备姿态下 IK 线程可能卡在等待首帧姿态/MPC 就绪，此时由回调补发夹爪指令。
         # 遥操主循环启动后改由 hand_finger_data_process 单路发布，避免双路重复下发。
         # qa: https://www.lejuhub.com/highlydynamic/kuavodevlab/-/issues/3505
-        if (self.end_effector_type == LEJUCLAW
+        if (self.end_effector_type in (LEJUCLAW, DHCLAW)
                 and not self.quest3_arm_info_transformer.is_hand_tracking
                 and not self.__ik_claw_publish_active):
             self.pub_robot_end_hand(joyStick_data=msg)
@@ -1235,7 +1244,7 @@ class IkRos:
             robot_hand_position.left_hand_position = left_hand_position
             robot_hand_position.right_hand_position = right_hand_position
             self.control_robot_hand_position_pub.publish(robot_hand_position)
-        elif self.end_effector_type == LEJUCLAW:
+        elif self.end_effector_type in (LEJUCLAW, DHCLAW):
             if joyStick_data is not None:
                 if joyStick_data.left_second_button_pressed and self.__button_y_last is False:
                     print(f"\033[91mButton Y is pressed.\033[0m")

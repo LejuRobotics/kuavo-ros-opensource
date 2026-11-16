@@ -10,7 +10,7 @@ from std_msgs.msg import Float64MultiArray,Float32
 from diagnostic_msgs.msg import DiagnosticStatus
 from sensor_msgs.msg import JointState
 
-from kuavo_msgs.msg import lejuClawState
+from kuavo_msgs.msg import lejuClawState, dhClawState
 
 from google.protobuf.timestamp_pb2 import Timestamp
 from . import body_tracking_extended_pb2 as proto
@@ -87,6 +87,7 @@ class RobotDataServer:
         rospy.Subscriber("/sensor_data_motor/motor_cur", Float64MultiArray, self.sensor_data_cur_callback)
         rospy.Subscriber("dexhand/state", JointState, self.hand_data_cur_callback)
         rospy.Subscriber("/leju_claw_state", lejuClawState, self.claw_data_cur_callback)
+        rospy.Subscriber("/dh_claw_state", dhClawState, self.claw_data_cur_callback)
 
         # 延迟诊断
         rospy.Subscriber("/pico/system_identification/result", DiagnosticStatus, self.delayed_diagnosis_result_callback)
@@ -126,7 +127,7 @@ class RobotDataServer:
 
 
     def claw_data_cur_callback(self, data):
-        if self.eef_type == "lejuclaw":
+        if self.eef_type in ("lejuclaw", "dhclaw"):
             now = time.time()
             effort = data.data.effort
             if len(effort) == 2:
@@ -228,7 +229,7 @@ class RobotDataServer:
                         last_eef_cur = eef_cur
                     except queue.Empty:
                         eef_cur = last_eef_cur
-                elif self.eef_type == "lejuclaw":
+                elif self.eef_type in ("lejuclaw", "dhclaw"):
                     try:
                         eef_cur = self.claw_queue.get_nowait()
                         last_eef_cur = eef_cur

@@ -75,6 +75,7 @@ class KuavoRobotInfo(RobotInfoBase):
             str: 末端执行器类型，其中：
                 - ``qiangnao`` 表示普通灵巧手
                 - ``lejuclaw`` 表示乐聚二指夹爪
+                - ``dhclaw`` 表示 DH 二指夹爪（独立 ``/dh_claw_state`` 话题）
                 - ``qiangnao_touch`` 表示触觉灵巧手
                 - ``linker_hand`` 表示灵心巧手(与 qiangnao 等价, 仅硬件侧做位置映射)
                 - ...

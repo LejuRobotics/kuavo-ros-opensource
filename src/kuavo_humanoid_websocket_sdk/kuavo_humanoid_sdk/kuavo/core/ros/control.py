@@ -21,7 +21,7 @@ class ControlEndEffectorWebsocket:
             self._pub_ctrl_robot_hand = roslibpy.Topic(websocket.client, '/control_robot_hand_position', 'kuavo_msgs/robotHandPosition')
             # publisher, name, require
             self._pubs.append((self._pub_ctrl_robot_hand, False))
-        elif self._eef_type == 'lejuclaw':
+        elif self._eef_type in ('lejuclaw', 'dhclaw'):
             self._pub_leju_claw_command = roslibpy.Topic(websocket.client, '/leju_claw_command', 'kuavo_msgs/lejuClawCommand')
             # publisher, name, require
             self._pubs.append((self._pub_leju_claw_command, False))
@@ -131,7 +131,7 @@ class ControlEndEffectorWebsocket:
             return []
 
     def srv_control_leju_claw(self, postions:list, velocities:list, torques:list) ->bool:
-        if self._eef_type != 'lejuclaw':
+        if self._eef_type not in ('lejuclaw', 'dhclaw'):
             SDKLogger.warning(f"{self._eef_type} not support control lejuclaw.")
             return False
         try:

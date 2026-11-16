@@ -75,6 +75,7 @@ class WheelArmControlBaseROS {
   // End effector control publishers
   ros::Publisher robotHandPositionPublisher_;
   ros::Publisher lejuClawCommandPublisher_;
+  ros::Publisher dhClawCommandPublisher_;
   ros::Publisher headBodyPosePublisher_;
   ros::Publisher kuavoArmTrajCppPublisher_;
   ros::Publisher questJoystickDataPublisher_;

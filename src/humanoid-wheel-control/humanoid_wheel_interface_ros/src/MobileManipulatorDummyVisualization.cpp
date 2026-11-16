@@ -134,10 +134,10 @@ void MobileManipulatorDummyVisualization::launchVisualizerNode(ros::NodeHandle& 
   head_joint_names_ = {"zhead_1_joint", "zhead_2_joint"};
   head_joint_positions_ = {0.0, 0.0};
 
-  // 夹爪订阅和发布
+  // 夹爪：只订 command 做 URDF 可视化；禁止回写 /leju_claw_state（真反馈仅 hardware_node）
   clawCmdSubscriber_ = nodeHandle.subscribe<kuavo_msgs::lejuClawCommand>(
       "/leju_claw_command", 1, &MobileManipulatorDummyVisualization::lejuClawCmdCallback, this);
-  lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
+  // lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
 
   // 灵巧手订阅
   dexhand_joint_names_ = {"l_thumbCMC", "l_thumbMCP", "l_indexMCP", "l_indexPIP", "l_middleMCP",
@@ -301,16 +301,16 @@ void MobileManipulatorDummyVisualization::publishObservation(const ros::Time& ti
       }
     }
 
-    // publish /leju_claw_state
-    kuavo_msgs::lejuClawState claw_state_msg;
-    claw_state_msg.header.stamp = timeStamp;
-    claw_state_msg.header.frame_id = "leju_claw";
-    claw_state_msg.data.name = {"left_claw", "right_claw"};
-    claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
-    claw_state_msg.data.velocity.resize(2, 0.0);
-    claw_state_msg.data.effort.resize(2, 0.0);
-    claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
-    lejuClawStatePub_.publish(claw_state_msg);
+    // // publish /leju_claw_state
+    // kuavo_msgs::lejuClawState claw_state_msg;
+    // claw_state_msg.header.stamp = timeStamp;
+    // claw_state_msg.header.frame_id = "leju_claw";
+    // claw_state_msg.data.name = {"left_claw", "right_claw"};
+    // claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
+    // claw_state_msg.data.velocity.resize(2, 0.0);
+    // claw_state_msg.data.effort.resize(2, 0.0);
+    // claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
+    // lejuClawStatePub_.publish(claw_state_msg);
   }
 
   // 添加灵巧手关节 (300062)

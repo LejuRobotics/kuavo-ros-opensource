@@ -80,10 +80,12 @@ add_message_files(
   gestureInfo.msg
   gestureTask.msg
   lejuClawState.msg
+  dhClawState.msg
   lejuClawTarget.msg
   Metadata.msg
   switchGaitByName.msg
   lejuClawCommand.msg
+  dhClawCommand.msg
   AudioReceiverData.msg  
   TaskPoint.msg
   dexhandCommand.msg

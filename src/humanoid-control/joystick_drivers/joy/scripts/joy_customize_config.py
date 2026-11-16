@@ -730,7 +730,7 @@ class JoyCustomizeConfigNode:
         """末端是否为灵巧手。结果缓存，进程生命周期内不变。"""
         if not hasattr(self, '_has_dexterous_hand_cached'):
             eef = str(rospy.get_param("/end_effector_type", "qiangnao")).strip().lower()
-            self._has_dexterous_hand_cached = eef not in ("none", "lejuclaw")
+            self._has_dexterous_hand_cached = eef not in ("none", "lejuclaw", "dhclaw")
         return self._has_dexterous_hand_cached
 
     def _gait_state_callback(self, msg: gaitTimeName) -> None:
@@ -1521,7 +1521,7 @@ class JoyCustomizeConfigNode:
         再开始; 起身成功后张开。若无灵巧手(从未收到 dexhand/state): 跳过握拳, 不浪费等待。"""
         self._set_standup_phase(self._FS_PREPARING)
         if not self._has_dexterous_hand():
-            rospy.loginfo("[JoyCustomize] 末端非灵巧手(none/lejuclaw), 跳过握拳直接起身")
+            rospy.loginfo("[JoyCustomize] 末端非灵巧手(none/lejuclaw/dhclaw), 跳过握拳直接起身")
             self._hands_closed_done = True
             self._pending_hand_open = False
             return

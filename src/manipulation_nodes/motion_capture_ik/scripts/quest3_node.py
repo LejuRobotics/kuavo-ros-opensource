@@ -23,6 +23,7 @@ from kuavo_msgs.msg import JoySticks
 from kuavo_msgs.msg import robotHandPosition
 from kuavo_msgs.srv import controlLejuClaw, controlLejuClawRequest
 from kuavo_msgs.msg import lejuClawCommand
+from kuavo_msgs.msg import dhClawCommand
 def get_package_path(package_name):
     try:
         rospack = rospkg.RosPack()
@@ -90,6 +91,7 @@ class Quest3Node:
         self.pub = rospy.Publisher('/mm/two_arm_hand_pose_cmd', twoArmHandPoseCmd, queue_size=10)
         self.pub_mm_traj = rospy.Publisher('/mm/end_effector_trajectory', armTargetPoses, queue_size=10)
         self.leju_claw_command_pub = rospy.Publisher("leju_claw_command", lejuClawCommand, queue_size=10)
+        self.dh_claw_command_pub = rospy.Publisher("dh_claw_command", dhClawCommand, queue_size=10)
 
         rospy.Subscriber("/leju_quest_bone_poses", PoseInfoList, self.quest_bone_poses_callback)
         rospy.Subscriber("/quest_joystick_data", JoySticks, self.joySticks_data_callback)
@@ -126,22 +128,25 @@ class Quest3Node:
             self.handle_qiangnao(joyStick_data, hand_finger_data, left_hand_position, right_hand_position, robot_hand_position)
         elif self.end_effector_type == "jodell":
             self.handle_jodell(hand_finger_data, left_hand_position, right_hand_position, robot_hand_position)
-        elif self.end_effector_type == "lejuclaw":
+        elif self.end_effector_type in ("lejuclaw", "dhclaw"):
             self.handle_lejuclaw(hand_finger_data)
 
     def pub_leju_claw_command(self, pos:list, vel:list, effort:list) -> None:
-        msg = lejuClawCommand()
+        msg = dhClawCommand() if self.end_effector_type == "dhclaw" else lejuClawCommand()
         msg.data.name = ['left_claw', 'right_claw']
         msg.data.position = pos
         msg.data.velocity = vel
         msg.data.effort = effort
-        self.leju_claw_command_pub.publish(pos)
+        if self.end_effector_type == "dhclaw":
+            self.dh_claw_command_pub.publish(msg)
+        else:
+            self.leju_claw_command_pub.publish(msg)
 
     @staticmethod
-    def control_lejuclaw(pos:list, vel:list, effort:list):
-        service_name = "/control_robot_leju_claw"
+    def control_lejuclaw(pos:list, vel:list, effort:list, eef_type:str="lejuclaw"):
+        service_name = "/control_robot_dh_claw" if eef_type == "dhclaw" else "/control_robot_leju_claw"
         try:
-            rospy.wait_for_service("/control_robot_leju_claw", timeout=1)
+            rospy.wait_for_service(service_name, timeout=1)
             control_lejucalw_srv = rospy.ServiceProxy(
                 service_name, controlLejuClaw
             )
@@ -150,7 +155,7 @@ class Quest3Node:
             req.data.position = pos
             req.data.velocity = vel
             req.data.effort = effort
-            control_lejucalw_srv(pos)
+            control_lejucalw_srv(req)
         except rospy.ROSException:
             rospy.logerr(f"Service {service_name} not available")
         except Exception as e:

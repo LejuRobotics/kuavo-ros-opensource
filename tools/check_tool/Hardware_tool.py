@@ -444,6 +444,44 @@ def leju_claw_send_position():
         print(bcolors.WARNING + "\n操作已取消" + bcolors.ENDC)
 
 
+def dhclaw_test():
+    """
+    测试大寰二指/搬箱夹爪(dhclaw)：调用交互式测试工具 dhclaw_cycle_menu
+
+    工具支持：往返开合 / 单次定位（下发一次后保持）/ 回零位 / 状态刷新；
+    不传参默认双爪(canbus0/ID17 左 + canbus1/ID18 右)，单爪用 --side left|right。
+    """
+    workspace_root = os.path.abspath(os.path.join(folder_path, "..", ".."))
+    candidates = [
+        os.path.join(workspace_root, "installed", "lib", "hardware_node", "dhclaw_cycle_menu"),
+        os.path.join(workspace_root, "devel", "lib", "hardware_node", "dhclaw_cycle_menu"),
+    ]
+
+    tool = None
+    for path in candidates:
+        if os.path.exists(path):
+            tool = path
+            break
+
+    if not tool:
+        print(bcolors.FAIL + "错误：未找到 dhclaw_cycle_menu，请先编译：" + bcolors.ENDC)
+        print("  catkin build hardware_node")
+        print("  已查找路径：")
+        for path in candidates:
+            print("    " + path)
+        return
+
+    print(bcolors.OKCYAN + "使用工具: " + tool + bcolors.ENDC)
+    print(bcolors.WARNING + "提示：交互式菜单，按 q 退出；运行中 Ctrl+C 可中断（会先回中间位）" + bcolors.ENDC)
+    print(bcolors.WARNING + "      与手臂共总线时夹爪固件波特率需为 1Mbps，CAN ID 见 canbus_device_cofig.yaml" + bcolors.ENDC)
+    print(bcolors.WARNING + "      整机 hardware_node 运行时请勿并用（会抢总线/话题）" + bcolors.ENDC)
+    print()
+
+    # stdin/stdout 继承父进程，交互菜单可直接使用；/dev/canable* 需要 root
+    command = "sudo " + tool
+    subprocess.run(command, shell=True)
+
+
 def dxl_zero():
     # 定义要运行的命令
     if(folder_path.startswith("/home/lab/kuavo_opensource/")):
@@ -1359,6 +1397,7 @@ def secondary_menu():
         print("2. 打开imu上位机软件(接屏幕)")
         print("3. 测试imu(先编译)")
         print("a. 测试二指夹爪（Ctrl + C 退出）")
+        print("aa. 测试大寰二指/搬箱夹爪")
         print("b. 配置灵巧手（普通）usb")
         print("c. 测试灵巧手")
         print("d. 手臂电机设置软件零点（仅将电机偏置值保存到零点文件）")
@@ -1409,6 +1448,11 @@ def secondary_menu():
             print(bcolors.HEADER + "###开始，测试夹爪（Ctrl + C 退出）###" + bcolors.ENDC)
             leju_claw_test_with_menu()
             print(bcolors.HEADER + "###结束，测试夹爪###" + bcolors.ENDC)
+            break
+        elif option == "aa":
+            print(bcolors.HEADER + "###开始，测试大寰二指/搬箱夹爪###" + bcolors.ENDC)
+            dhclaw_test()
+            print(bcolors.HEADER + "###结束，测试大寰二指/搬箱夹爪###" + bcolors.ENDC)
             break
         elif option == "b":
             print(bcolors.HEADER + "###开始，配置灵巧手（普通）usb###" + bcolors.ENDC)
@@ -1697,6 +1741,7 @@ if __name__ == '__main__':
         print("2. 打开imu上位机软件(接屏幕)")
         print("3. 测试imu(先编译)")
         print("a. 测试二指夹爪（Ctrl + C 退出）")
+        print("aa. 测试大寰二指/搬箱夹爪")
         print("c. 测试灵巧手") 
         print("f. 零点文件备份")
         print("k. 更新当前目录程序(注意：会重置文件内容，建议备份文件)")
@@ -1742,6 +1787,11 @@ if __name__ == '__main__':
             print(bcolors.HEADER + "###开始，测试夹爪（Ctrl + C 退出）###" + bcolors.ENDC)
             leju_claw_test()
             print(bcolors.HEADER + "###结束，测试夹爪###" + bcolors.ENDC)
+            break
+        elif option == "aa":
+            print(bcolors.HEADER + "###开始，测试大寰二指/搬箱夹爪###" + bcolors.ENDC)
+            dhclaw_test()
+            print(bcolors.HEADER + "###结束，测试大寰二指/搬箱夹爪###" + bcolors.ENDC)
             break
         elif option == "c":
             print(bcolors.HEADER + "###开始，测试灵巧手###" + bcolors.ENDC)

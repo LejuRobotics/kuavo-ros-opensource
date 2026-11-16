@@ -12,6 +12,7 @@
 #include <kuavo_msgs/changeArmCtrlMode.h>
 #include <kuavo_msgs/changeTorsoCtrlMode.h>
 #include <kuavo_msgs/lejuClawCommand.h>
+#include <kuavo_msgs/dhClawCommand.h>
 #include <kuavo_msgs/robotHandPosition.h>
 #include <kuavo_msgs/headBodyPose.h>
 #include <sensor_msgs/JointState.h>
@@ -77,6 +78,7 @@ void WheelArmControlBaseROS::initializeBase(const nlohmann::json& configJson) {
   robotHandPositionPublisher_ =
       nodeHandle_.advertise<kuavo_msgs::robotHandPosition>("/control_robot_hand_position", 10);
   lejuClawCommandPublisher_ = nodeHandle_.advertise<kuavo_msgs::lejuClawCommand>("/leju_claw_command", 10);
+  dhClawCommandPublisher_ = nodeHandle_.advertise<kuavo_msgs::dhClawCommand>("/dh_claw_command", 10);
 
   headBodyPosePublisher_ = nodeHandle_.advertise<kuavo_msgs::headBodyPose>("/kuavo_head_body_orientation_data", 10);
   kuavoArmTrajCppPublisher_ = nodeHandle_.advertise<sensor_msgs::JointState>("/kuavo_arm_traj_cpp", 2);
@@ -477,6 +479,12 @@ void WheelArmControlBaseROS::publishClawCommandData() {
     }
 
     lejuClawCommandPublisher_.publish(clawCommand);
+
+    // Also publish to dh_claw_command with the same data
+    kuavo_msgs::dhClawCommand dhClawCmd;
+    dhClawCmd.header.stamp = clawCommand.header.stamp;
+    dhClawCmd.data = clawCommand.data;
+    dhClawCommandPublisher_.publish(dhClawCmd);
   }
 }
 

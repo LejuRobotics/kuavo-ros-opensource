@@ -195,7 +195,7 @@ class PicoDexHandControlNode:
         self.cfg = _load_dex_hand_config()
         self.eef_type = rospy.get_param("/end_effector_type", "qiangnao")
 
-        if not (self.eef_type.startswith("qiangnao") or self.eef_type == "lejuclaw"):
+        if not (self.eef_type.startswith("qiangnao") or self.eef_type in ("lejuclaw", "dhclaw")):
             rospy.logwarn(
                 f"[DexHandCtrl] end_effector_type='{self.eef_type}', 非 qiangnao/lejuclaw 类型, 节点将空转"
             )
@@ -222,7 +222,7 @@ class PicoDexHandControlNode:
             self.pub_hand = rospy.Publisher(
                 "/control_robot_hand_position", robotHandPosition, queue_size=10
             )
-        elif self.eef_type == "lejuclaw":
+        elif self.eef_type in ("lejuclaw", "dhclaw"):
             self.pub_claw = rospy.Publisher(
                 "/leju_claw_command", lejuClawCommand, queue_size=10
             )
@@ -276,7 +276,7 @@ class PicoDexHandControlNode:
     # -------------------- 灵巧手发布 --------------------
 
     def _publish_hand(self, joy: JoySticks, eef_freeze: bool):
-        if not (self.eef_type.startswith("qiangnao") or self.eef_type == "lejuclaw"):
+        if not (self.eef_type.startswith("qiangnao") or self.eef_type in ("lejuclaw", "dhclaw")):
             return
 
         cmd_min = int(self.cfg.get("command_min", 0))
@@ -363,7 +363,7 @@ class PicoDexHandControlNode:
             msg.left_hand_position = left_pos
             msg.right_hand_position = right_pos
             self.pub_hand.publish(msg)
-        elif self.eef_type == "lejuclaw":
+        elif self.eef_type in ("lejuclaw", "dhclaw"):
             msg = lejuClawCommand()
             msg.header.stamp = rospy.Time.now()
             msg.data.name = ['left_claw', 'right_claw']

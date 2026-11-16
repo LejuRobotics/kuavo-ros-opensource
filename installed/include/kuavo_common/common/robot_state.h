@@ -91,7 +91,8 @@ enum EndEffectorType
   qiangnao_touch,
   revo2,
   linker_hand,
-  qibeng
+  qibeng,
+  dhclaw
 };
 enum MotorDriveType
 {

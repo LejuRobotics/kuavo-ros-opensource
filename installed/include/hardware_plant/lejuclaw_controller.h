@@ -35,8 +35,7 @@ bool CopyOrUpdateLejuClawConfigFile(const std::string &src_file);
  */
 ClawState GetClawState(const LejuClawControllerPtr &controller_ptr);
 
-const std::string kLeftGripperName = "left_claw";
-const std::string kRightGripperName = "right_claw";
+// kLeftGripperName / kRightGripperName are defined in claw_types.h
 
 class LejuClawController {
 public:

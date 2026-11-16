@@ -28,7 +28,7 @@ struct PoseData {
 
 enum class ArmIdx { LEFT = 0, RIGHT = 1, BOTH = 2 };
 
-enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCLAW = 3, LINKER_HAND = 4 };
+enum class EndEffectorType { QIANGNAO = 0, QIANGNAO_TOUCH = 1, REVO2 = 2, LEJUCLAW = 3, LINKER_HAND = 4, DHCLAW = 5 };
 
 // 判断是否为手部末端执行器类型
 inline bool isHandEndEffectorType(EndEffectorType type) {
@@ -46,7 +46,8 @@ inline bool isHandEndEffectorType(EndEffectorType type) {
 }
 
 inline bool isClawEndEffectorType(EndEffectorType type) {
-  bool isClawEndEffectorType = (type == EndEffectorType::LEJUCLAW);
+  bool isClawEndEffectorType =
+      (type == EndEffectorType::LEJUCLAW || type == EndEffectorType::DHCLAW);
   // if (isClawEndEffectorType) {
   //   std::cout << "isClawEndEffectorType: " << static_cast<int>(type) << std::endl;
   //   std::cout << "LEJUCLAW: " << static_cast<int>(EndEffectorType::LEJUCLAW) << std::endl;
@@ -65,6 +66,8 @@ inline EndEffectorType stringToEndEffectorType(const std::string& typeStr) {
     return EndEffectorType::REVO2;
   } else if (typeStr == "lejuclaw") {
     return EndEffectorType::LEJUCLAW;
+  } else if (typeStr == "dhclaw") {
+    return EndEffectorType::DHCLAW;
   } else if (typeStr == "linker_hand") {
     return EndEffectorType::LINKER_HAND;
   } else {

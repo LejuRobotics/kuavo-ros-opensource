@@ -28,7 +28,7 @@ from kuavo_msgs.msg import (
     twoArmHandPoseCmd, robotBodyMatrices, picoPoseInfoList,
     robotHeadMotionData, ikSolveParam, footPoseTargetTrajectories,
     JoySticks, sensorsData, switchGaitByName,
-    lejuClawCommand, robotHandPosition, dexhandCommand, headCtrlMode
+    lejuClawCommand, dhClawCommand, robotHandPosition, dexhandCommand, headCtrlMode
 )
 from kuavo_msgs.srv import changeArmCtrlMode, changeTorsoCtrlMode, changeTorsoCtrlModeRequest, changeArmCtrlMode, changeArmCtrlModeRequest
 from kuavo_msgs.srv import fkSrv
@@ -591,10 +591,15 @@ class KuavoPicoNode:
             queue_size=10
         )
         
-        if self.eef_type == "lejuclaw": # 乐聚夹爪
+        if self.eef_type == "lejuclaw": # 二指夹爪(leju)
             self.pub_leju_claw_cmd = rospy.Publisher(
                 '/leju_claw_command', 
                 lejuClawCommand, 
+                queue_size=10)
+        elif self.eef_type == "dhclaw": # 二指夹爪(dh)
+            self.pub_leju_claw_cmd = rospy.Publisher(
+                '/dh_claw_command', 
+                dhClawCommand, 
                 queue_size=10)
         elif self.eef_type.startswith('qiangnao') or self.eef_type == 'linker_hand': # 灵巧手 / 灵心巧手
             self.pub_control_robot_hand_position = rospy.Publisher(
@@ -1335,8 +1340,8 @@ class KuavoPicoNode:
                 
                 # 发布末端执行器控制消息
                 self.pub_control_robot_hand_position.publish(hand_control_msg)
-            elif self.eef_type == "lejuclaw":
-                msg = lejuClawCommand()
+            elif self.eef_type in ("lejuclaw", "dhclaw"):
+                msg = dhClawCommand() if self.eef_type == "dhclaw" else lejuClawCommand()
                 msg.header.stamp = rospy.Time.now()
                 msg.data.name = ['left_claw', 'right_claw']
                 msg.data.position = [eef_command['left'], eef_command['right']]

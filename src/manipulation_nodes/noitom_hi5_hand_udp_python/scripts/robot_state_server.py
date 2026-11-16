@@ -12,7 +12,7 @@ import threading
 
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
-from kuavo_msgs.msg import sensorsData, lejuClawState
+from kuavo_msgs.msg import sensorsData, lejuClawState, dhClawState
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import protos.robot_state_pb2 as robot_state_pb2
@@ -91,6 +91,9 @@ class RobotSubscriber:
         if self.ee_type == "lejuclaw":
             self.ee_sub = rospy.Subscriber("/leju_claw_state", lejuClawState, self._lejuclaw_callback)
             print(f"robot_state_server: Subscribed to /leju_claw_state (leju claw) for ee_type: {self.ee_type}")
+        elif self.ee_type == "dhclaw":
+            self.ee_sub = rospy.Subscriber("/dh_claw_state", dhClawState, self._lejuclaw_callback)
+            print(f"robot_state_server: Subscribed to /dh_claw_state (dh claw) for ee_type: {self.ee_type}")
         elif self.ee_type in ["qiangnao", "qiangnao_touch", "revo2", "linker_hand"]:
             self.ee_sub = rospy.Subscriber("/dexhand/state", JointState, self._dexhand_callback)
             print(f"robot_state_server: Subscribed to /dexhand/state (dexhand) for ee_type: {self.ee_type}")

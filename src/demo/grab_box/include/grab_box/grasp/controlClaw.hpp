@@ -43,7 +43,11 @@ namespace GrabBox
         } else if (end_effector_param == "lejuclaw") {
           current_end_effector_type_ = EndEffectorType::LEJUCLAW;
           leju_claw_service_client_ = nh_.serviceClient<kuavo_msgs::controlLejuClaw>("/control_robot_leju_claw");
-          ROS_INFO("[%s] Configured for LEJUCLAW end-effector (service: /control_robot_leju_claw).", name.c_str());
+          ROS_INFO("[%s] Configured for claw end-effector leju (service: /control_robot_leju_claw).", name.c_str());
+        } else if (end_effector_param == "dhclaw") {
+          current_end_effector_type_ = EndEffectorType::LEJUCLAW;
+          leju_claw_service_client_ = nh_.serviceClient<kuavo_msgs::controlLejuClaw>("/control_robot_dh_claw");
+          ROS_INFO("[%s] Configured for claw end-effector dh (service: /control_robot_dh_claw).", name.c_str());
         } else {
           current_end_effector_type_ = EndEffectorType::UNKNOWN;
           ROS_ERROR("[%s] Unknown end_effector_type: %s. Node will not operate correctly.", name.c_str(), end_effector_param.c_str());

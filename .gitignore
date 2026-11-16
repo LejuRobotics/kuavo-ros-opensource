@@ -1,5 +1,4 @@
 .idea/
-ci_scripts/acs/arm-build-plan.md
 .vscode/
 __pycache__/
 .catkin_tools/

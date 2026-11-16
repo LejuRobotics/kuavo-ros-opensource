@@ -128,7 +128,8 @@ roslaunch humanoid_controllers load_kuavo_isaac_sim.launch  # 启动控制器、
 在运行实物之前, 您需要先修改`src/kuavo_assets/config/kuavo_v$ROBOT_VERSION/kuavo.json`中EndEffectorType为您实物机器人的执行器类型:
 - `none`: 无末端执行器或者需要屏蔽末端执行器时使用
 - `qiangnao` : 灵巧手, 默认值
-- `lejuclaw` : 二指夹爪
+- `lejuclaw` : 二指夹爪（leju）
+- `dhclaw` : 二指夹爪（DH），独立 `/dh_claw_*` 接口，见 `src/demo/control_dhclaw/readme_claw.md`）
 - `qiangnao_touch` : 触觉灵巧手
 - `linker_hand` : 灵心巧手
 

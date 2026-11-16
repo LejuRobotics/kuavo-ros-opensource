@@ -91,7 +91,7 @@ class KuavoRobotStateCoreWebsocket:
                 self._sub_mpc_observation.subscribe(self._humanoid_mpc_observation_callback)
 
                 self._ee_type = kuavo_info['end_effector_type']
-                if self._ee_type == EndEffectorType.LEJUCLAW:
+                if self._ee_type in (EndEffectorType.LEJUCLAW, EndEffectorType.DHCLAW):
                     self._sub_lejuclaw_state = roslibpy.Topic(self.websocket.client, '/leju_claw_state', 'kuavo_msgs/lejuClawState')
                     self._sub_lejuclaw_state.subscribe(self._lejuclaw_state_callback)
                 elif self._ee_type == EndEffectorType.QIANGNAO or self._ee_type == EndEffectorType.LINKER_HAND:

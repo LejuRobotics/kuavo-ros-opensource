@@ -152,7 +152,7 @@ public:
           press_start_ = now;
           if (long_press_seconds_ <= 0.0)
           {
-            // 无需长按，立�? toggle
+            // 无需长按，立�? toggle
             latched_ = !latched_;
             state_ = State::HOLDING;
           }
@@ -176,7 +176,7 @@ public:
         }
         else if (elapsedSeconds(press_start_, now) >= long_press_seconds_)
         {
-          // 长按达标，toggle 锁存状�?
+          // 长按达标，toggle 锁存状�?
           latched_ = !latched_;
           state_ = State::HOLDING;
         }
@@ -211,9 +211,9 @@ public:
 private:
   enum class State
   {
-    IDLE,         // 空闲，等待按�?
-    PRESSING,     // 按下中，未达长按阈�?
-    HOLDING,      // �? toggle，等待松开后才能再次触�?
+    IDLE,         // 空闲，等待按�?
+    PRESSING,     // 按下中，未达长按阈�?
+    HOLDING,      // �? toggle，等待松开后才能再次触�?
     WAIT_RELEASE  // 启动或输入中断后，等待一次明确松开
   };
 
@@ -495,7 +495,7 @@ Matrix4 inverseRigidTransform(const Matrix4& mat)
 {
   Matrix4 out = identityMatrix();
 
-  // /robot_body_matrices 使用行主�? 4x4 齐次矩阵；刚体逆变换为 R^T �? -R^T * t�?
+  // /robot_body_matrices 使用行主�? 4x4 齐次矩阵；刚体逆变换为 R^T �? -R^T * t�?
   for (int row = 0; row < 3; ++row)
   {
     for (int col = 0; col < 3; ++col)
@@ -638,7 +638,7 @@ public:
     left_thumb_aux_button_.configure(dexhand_thumb_aux_long_press_s_);
     right_thumb_aux_button_.configure(dexhand_thumb_aux_long_press_s_);
 
-    if (end_effector_type_ == "lejuclaw")
+    if (end_effector_type_ == "lejuclaw" || end_effector_type_ == "dhclaw")
     {
       claw_pub_ = nh.advertise<kuavo_msgs::lejuClawCommand>(claw_topic_, 10);
       ROS_INFO_STREAM("Pico claw control enabled: " << joy_topic_ << " -> " << claw_topic_
@@ -713,7 +713,7 @@ private:
     if (!have_joy_)
       return;
 
-    if (end_effector_type_ == "lejuclaw")
+    if (end_effector_type_ == "lejuclaw" || end_effector_type_ == "dhclaw")
       publishClawCommand();
     else if (isDexhandEndEffector(end_effector_type_))
     {
@@ -742,8 +742,8 @@ private:
 
   void publishDexhandCommand()
   {
-    // trigger(上扳�?)统一驱动索引0�?2~5；索�?1由同�? X/A 长按锁存状态独立控制�?
-    // grip(侧扳�?)仅保留组合键用途，不参与灵巧手主抓握�?
+    // trigger(上扳�?)统一驱动索引0�?2~5；索�?1由同�? X/A 长按锁存状态独立控制�?
+    // grip(侧扳�?)仅保留组合键用途，不参与灵巧手主抓握�?
     const uint8_t left_flex_cmd =
         triggerToDexhandCommand(left_trigger_, filtered_left_flex_, have_filtered_left_flex_);
     const uint8_t right_flex_cmd =
@@ -756,7 +756,7 @@ private:
     kuavo_msgs::robotHandPosition msg;
     msg.header.stamp = ros::Time::now();
     msg.header.frame_id = "pico_dexhand_control";
-    // 索引约定�?0=拇指屈曲�?1=拇指辅助/横摆/第二关节�?2~5=食指至小指�?
+    // 索引约定�?0=拇指屈曲�?1=拇指辅助/横摆/第二关节�?2~5=食指至小指�?
     msg.left_hand_position = {
         left_flex_cmd,
         left_thumb_aux_cmd,
@@ -1051,7 +1051,7 @@ public:
     }
     active_hand_selector_.configure(selector_config);
 
-    // --- 头部 pitch 偏移量微调参�? ---
+    // --- 头部 pitch 偏移量微调参�? ---
     private_nh.param<bool>("head_pitch_offset_enabled", head_pitch_offset_enabled_, true);
     private_nh.param<double>("head_pitch_offset_rate_dps", head_pitch_offset_rate_dps_, 3.0);
     private_nh.param<double>("head_pitch_offset_trigger_threshold",
@@ -1096,7 +1096,7 @@ public:
     if (!std::isfinite(head_offset_joy_timeout_s_) || head_offset_joy_timeout_s_ < 0.0)
       throw std::invalid_argument("head_offset_joy_timeout_s must be finite and >= 0");
 
-    // joy 订阅（与 PicoEndEffectorController 共用同一话题�?
+    // joy 订阅（与 PicoEndEffectorController 共用同一话题�?
     {
       std::string joy_topic;
       private_nh.param<std::string>("joy_topic", joy_topic, "/pico/joy");
@@ -1336,7 +1336,7 @@ private:
       return;
     }
 
-    // vr_follow 只关心头显相对骨盆的姿态，避免人体整体转身导致机器人头部误跟随世界朝向�?
+    // vr_follow 只关心头显相对骨盆的姿态，避免人体整体转身导致机器人头部误跟随世界朝向�?
     const Matrix4 rel = multiplyMatrix4(inverseRigidTransform(pelvis), head);
 
     double yaw_rad = 0.0;
@@ -1376,7 +1376,7 @@ private:
     double output_dt = 0.0;
     const bool have_valid_output_dt = updateOutputClock(now, output_dt);
 
-    // 更新头部偏移量（所有模式通用，在模式分发之前执行�?
+    // 更新头部偏移量（所有模式通用，在模式分发之前执行�?
     updateHeadOffset(have_valid_output_dt, output_dt);
 
     switch (mode_)
@@ -1442,7 +1442,7 @@ private:
       return;
     }
 
-    // 默认 vr_follow 路径保持原行为：callback alpha 滤波，timer 仅按 50 Hz 发布�?
+    // 默认 vr_follow 路径保持原行为：callback alpha 滤波，timer 仅按 50 Hz 发布�?
     publishHeadCommand(vr_current_yaw_, vr_current_pitch_);
   }
 
@@ -1507,7 +1507,7 @@ private:
         active_hand_selector_.candidateReason();
 
     // 先确认当前主手仍可跟踪。当前主手目标断流期间必须冻结选择器，
-    // 否则另一只手的候选可能在“头部实际无法跟踪”的时间里悄悄成熟�?
+    // 否则另一只手的候选可能在“头部实际无法跟踪”的时间里悄悄成熟�?
     double target_yaw = 0.0;
     double target_pitch = 0.0;
     bool have_tracking_target = false;
@@ -1524,15 +1524,15 @@ private:
       have_tracking_target = true;
       if (tracking_missing_)
       {
-        // 短断流恢复后保留主手，但重新 warmup，并从恢复时刻重新计算最短驻留�?
+        // 短断流恢复后保留主手，但重新 warmup，并从恢复时刻重新计算最短驻留�?
         active_hand_selector_.reset(false);
         tracking_missing_ = false;
         ROS_INFO("Pico auto-track current-hand tracking TF recovered; rebuild motion window");
       }
     }
 
-    // owner 切换要在新主�? target 验证后才提交。保留更新前快照，避免挑战手
-    // 只有 motion TF、没�? target TF 时破坏仍可跟踪的当前主手�?
+    // owner 切换要在新主�? target 验证后才提交。保留更新前快照，避免挑战手
+    // 只有 motion TF、没�? target TF 时破坏仍可跟踪的当前主手�?
     const kuavo_xsense_gmr::ActiveHandSelector selector_before_update =
         active_hand_selector_;
     if (motion_status == TfLookupStatus::VALID)
@@ -1551,9 +1551,9 @@ private:
 
     ActiveHand owner = active_hand_selector_.owner();
 
-    // 首次获取或左右切换后，必须先验证“新主手”的 tracking �? B�?
-    // 验证失败则原子回滚选择器，既不发布瞬�? owner，也不让非主�? target
-    // 缺失阻断当前主手的正常跟踪�?
+    // 首次获取或左右切换后，必须先验证“新主手”的 tracking �? B�?
+    // 验证失败则原子回滚选择器，既不发布瞬�? owner，也不让非主�? target
+    // 缺失阻断当前主手的正常跟踪�?
     if (owner != owner_before)
     {
       const ActiveHand proposed_owner = owner;
@@ -1586,8 +1586,8 @@ private:
     if (owner == ActiveHand::NONE)
     {
       tracking_missing_ = false;
-      // motion TF 有效时，warmup/unselected 保持进入自动模式前的方向�?
-      // tracking 超时后的 NONE 则必须继续停发，直到重新获取可跟踪的新主手�?
+      // motion TF 有效时，warmup/unselected 保持进入自动模式前的方向�?
+      // tracking 超时后的 NONE 则必须继续停发，直到重新获取可跟踪的新主手�?
       if (!auto_output_suppressed_ && motion_status == TfLookupStatus::VALID &&
           have_published_command_)
       {
@@ -1690,8 +1690,8 @@ private:
     else
       sample_stamp = first_latest < second_latest ? first_latest : second_latest;
 
-    // TF1 对纯静态链会用 Time(0) 表示“任意时刻均有效”。一侧为静态链�?
-    // 使用另一侧的动态时间；两侧均为静态链时以当前时刻查询�?
+    // TF1 对纯静态链会用 Time(0) 表示“任意时刻均有效”。一侧为静态链�?
+    // 使用另一侧的动态时间；两侧均为静态链时以当前时刻查询�?
     if (sample_stamp.isZero())
     {
       if (!first_latest.isZero())
@@ -1993,8 +1993,8 @@ private:
     publishZeroMotionScores();
     if (have_published_command_)
     {
-      // 等待下一帧新�? Pico 数据，再从最后基础命令限速过渡；
-      // 保留�? offset 会在发布时只叠加一次�?
+      // 等待下一帧新�? Pico 数据，再从最后基础命令限速过渡；
+      // 保留�? offset 会在发布时只叠加一次�?
       vr_current_yaw_ = command_yaw_;
       vr_current_pitch_ = command_pitch_;
       have_valid_vr_pose_ = true;
@@ -2056,7 +2056,7 @@ private:
                                      pitch_limit_[1]);
 
     kuavo_msgs::robotHeadMotionData msg;
-    // robotHeadMotionData 约定单位是度：joint_data[0]=yaw，joint_data[1]=pitch�?
+    // robotHeadMotionData 约定单位是度：joint_data[0]=yaw，joint_data[1]=pitch�?
     msg.joint_data = {final_yaw, final_pitch};
     head_pub_.publish(msg);
     command_yaw_ = yaw;
@@ -2200,7 +2200,7 @@ private:
   ros::Time last_output_tick_time_;
   ActiveHand last_published_active_hand_ = ActiveHand::NONE;
 
-  // --- 头部 pitch/yaw 偏移量微�? ---
+  // --- 头部 pitch/yaw 偏移量微�? ---
   bool head_pitch_offset_enabled_ = true;
   double pitch_offset_ = 0.0;
   double yaw_offset_ = 0.0;
@@ -2208,14 +2208,14 @@ private:
   std::vector<double> head_pitch_offset_limit_{-20.0, 20.0};
   double head_pitch_offset_trigger_threshold_ = 0.7;
   double head_pitch_offset_stick_threshold_ = 0.7;
-  double head_pitch_offset_pitch_sign_ = 1.0;  // 正负=方向，绝对�?=速度倍率
+  double head_pitch_offset_pitch_sign_ = 1.0;  // 正负=方向，绝对�?=速度倍率
   double head_yaw_offset_rate_dps_ = 3.0;
   std::vector<double> head_yaw_offset_limit_{-20.0, 20.0};
-  double head_yaw_offset_yaw_sign_ = 1.0;  // 正负=方向，绝对�?=速度倍率
+  double head_yaw_offset_yaw_sign_ = 1.0;  // 正负=方向，绝对�?=速度倍率
   double head_offset_zero_stick_threshold_ = 0.8;
   double head_offset_joy_timeout_s_ = 0.5;
 
-  // joy 订阅与缓存状�?
+  // joy 订阅与缓存状�?
   ros::Subscriber joy_sub_;
   bool have_joy_ = false;
   SteadyClock::time_point last_offset_joy_time_{};

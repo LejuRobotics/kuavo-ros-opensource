@@ -16,6 +16,7 @@
 #include "utils.h"
 #include "ruiwo_actuator_base.h"
 #include "lejuclaw_controller.h"
+#include "dhclaw_controller.h"
 #include "claw_types.h"
 #include "gesture_types.h"
 #include "touch_hand_controller.h"

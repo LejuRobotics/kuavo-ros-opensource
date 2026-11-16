@@ -22,6 +22,7 @@ from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (gestureExecute, gestureExecut
                         setTagId, setTagIdRequest, getMotorParam, getMotorParamRequest,
                         changeMotorParam, changeMotorParamRequest)
 from kuavo_msgs.msg import lejuClawCommand as LejuClawCmdMsg
+from kuavo_msgs.msg import dhClawCommand as DhClawCmdMsg
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import twoArmHandPoseCmd, ikSolveParam, armHandPose, armCollisionCheckInfo
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import twoArmHandPoseCmdSrv, fkSrv, twoArmHandPoseCmdFreeSrv
 from std_srvs.srv import SetBool, SetBoolRequest
@@ -39,8 +40,10 @@ class ControlEndEffector:
             self._pub_ctrl_robot_hand = rospy.Publisher('/control_robot_hand_position', robotHandPosition, queue_size=10)
             # publisher, name, require
             self._pubs.append((self._pub_ctrl_robot_hand, False))
-        elif self._eef_type == 'lejuclaw':
-            self._pub_leju_claw_command = rospy.Publisher('/leju_claw_command', LejuClawCmdMsg, queue_size=10)
+        elif self._eef_type in ('lejuclaw', 'dhclaw'):
+            topic_name = '/dh_claw_command' if self._eef_type == 'dhclaw' else '/leju_claw_command'
+            msg_type = dhClawCmdMsg if self._eef_type == 'dhclaw' else LejuClawCmdMsg
+            self._pub_leju_claw_command = rospy.Publisher(topic_name, msg_type, queue_size=10)
             # publisher, name, require
             self._pubs.append((self._pub_leju_claw_command, False))
         elif self._eef_type == EndEffectorType.QIANGNAO_TOUCH:
@@ -168,12 +171,12 @@ class ControlEndEffector:
         return []
 
     def srv_control_leju_claw(self, postions:list, velocities:list, torques:list) ->bool:
-        if self._eef_type != 'lejuclaw':
+        if self._eef_type not in ('lejuclaw', 'dhclaw'):
             SDKLogger.warning(f"{self._eef_type} not support control lejuclaw.")
             return False
         try:
             # ros service
-            service_name = 'control_robot_leju_claw'
+            service_name = 'control_robot_dh_claw' if self._eef_type == 'dhclaw' else 'control_robot_leju_claw'
             rospy.wait_for_service(service_name, timeout=2.0)
             control_lejucalw_srv = rospy.ServiceProxy(service_name, controlLejuClaw)
 
@@ -191,8 +194,9 @@ class ControlEndEffector:
             # 仿真环境(mujoco)没有 /control_robot_leju_claw 服务，回退到直接发布 topic
             try:
                 if self._pub_leju_claw_command.get_num_connections() == 0:
-                    SDKLogger.warning("No subscriber for /leju_claw_command, leju claw command may not be received")
-                msg = LejuClawCmdMsg()
+                    topic = '/dh_claw_command' if self._eef_type == 'dhclaw' else '/leju_claw_command'
+                    SDKLogger.warning(f"No subscriber for {topic}, leju claw command may not be received")
+                msg = dhClawCmdMsg() if self._eef_type == 'dhclaw' else LejuClawCmdMsg()
                 msg.data.name = ["left_claw", "right_claw"]
                 msg.data.position = postions
                 msg.data.velocity = velocities

@@ -7,6 +7,7 @@ from nav_msgs.msg import Odometry
 from std_srvs.srv import SetBool, SetBoolRequest
 from sensor_msgs.msg import JointState
 from kuavo_humanoid_sdk.msg.kuavo_msgs.msg import sensorsData, lejuClawState, gaitTimeName, dexhandTouchState
+from kuavo_msgs.msg import dhClawState
 from kuavo_msgs.srv import changeArmCtrlMode, changeArmCtrlModeRequest, getCurrentGaitName, getCurrentGaitNameRequest,gestureExecuteState, gestureExecuteStateRequest
 from kuavo_humanoid_sdk.msg.ocs2_msgs.msg import mpc_observation
 from kuavo_humanoid_sdk.msg.kuavo_msgs.srv import (changeArmCtrlMode, changeArmCtrlModeRequest,setMmCtrlFrame, setMmCtrlFrameRequest, changeTorsoCtrlMode, changeTorsoCtrlModeRequest)
@@ -82,6 +83,8 @@ class KuavoRobotStateCore:
             self._ee_type = kuavo_info['end_effector_type']
             if self._ee_type == EndEffectorType.LEJUCLAW:
                 rospy.Subscriber("/leju_claw_state", lejuClawState, self._lejuclaw_state_callback)
+            elif self._ee_type == EndEffectorType.DHCLAW:
+                rospy.Subscriber("/dh_claw_state", dhClawState, self._lejuclaw_state_callback)
             elif self._ee_type == EndEffectorType.QIANGNAO or self._ee_type == EndEffectorType.LINKER_HAND:
                 rospy.Subscriber("/dexhand/state", JointState, self._dexterous_hand_state_callback)
             elif self._ee_type == EndEffectorType.QIANGNAO_TOUCH:

@@ -47,7 +47,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <geometry_msgs/PoseArray.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <kuavo_msgs/endEffectorData.h>
-#include <kuavo_msgs/lejuClawState.h>
+// #include <kuavo_msgs/lejuClawState.h>
 #include <sensor_msgs/JointState.h>
 
 // URDF related
@@ -465,7 +465,9 @@ namespace ocs2
       planedFootPositionsPublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/planedFootPositions", 1);
       currentStatePublisher_ = nodeHandle.advertise<visualization_msgs::MarkerArray>("/humanoid/currentState", 1);
       eePosePub_ = nodeHandle.advertise<kuavo_msgs::endEffectorData>("/humanoid_ee_State", 1);
-      lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
+      // 不在此发布 /leju_claw_state：真反馈只由 hardware_node 发布。
+      // 可视化只订 /leju_claw_command 更新 URDF，不回写 state，避免多 publisher 盖掉实机反馈。
+      // lejuClawStatePub_ = nodeHandle.advertise<kuavo_msgs::lejuClawState>("/leju_claw_state", 10);
 
       // subscribe claw command (percentage) and map to radians limits from URDF if available
       clawCmdSubscriber_ = nodeHandle.subscribe<kuavo_msgs::lejuClawCommand>(
@@ -707,18 +709,18 @@ namespace ocs2
         }
         robotStatePublisherPtr_->publishTransforms(jointPositions, timeStamp);
 
-        // publish /leju_claw_state for bag recording
-        if (updateClawJointPositions_) {
-          kuavo_msgs::lejuClawState claw_state_msg;
-          claw_state_msg.header.stamp = timeStamp;
-          claw_state_msg.header.frame_id = "leju_claw";
-          claw_state_msg.data.name = {"left_claw", "right_claw"};
-          claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
-          claw_state_msg.data.velocity.resize(2, 0.0);
-          claw_state_msg.data.effort.resize(2, 0.0);
-          claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
-          lejuClawStatePub_.publish(claw_state_msg);
-        }
+        // // publish /leju_claw_state for bag recording
+        // if (updateClawJointPositions_) {
+        //   kuavo_msgs::lejuClawState claw_state_msg;
+        //   claw_state_msg.header.stamp = timeStamp;
+        //   claw_state_msg.header.frame_id = "leju_claw";
+        //   claw_state_msg.data.name = {"left_claw", "right_claw"};
+        //   claw_state_msg.data.position = {claw_joint_positions_[0], claw_joint_positions_[1]};
+        //   claw_state_msg.data.velocity.resize(2, 0.0);
+        //   claw_state_msg.data.effort.resize(2, 0.0);
+        //   claw_state_msg.state = {kuavo_msgs::lejuClawState::kReached, kuavo_msgs::lejuClawState::kReached};
+        //   lejuClawStatePub_.publish(claw_state_msg);
+        // }
       }
     }
 

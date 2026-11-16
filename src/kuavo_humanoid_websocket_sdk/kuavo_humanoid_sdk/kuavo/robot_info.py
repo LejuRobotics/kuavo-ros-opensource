@@ -62,6 +62,7 @@ class KuavoRobotInfo(RobotInfoBase):
             str: The end effector type, where:
                 - "qiangnao" means "dexteroushand"
                 - "lejuclaw" means "lejuclaw"
+                - "dhclaw" means DH two-finger claw (state still via compatible ``/leju_claw_state``)
                 - "qiangnao_touch" means "touchdexteroushand"
                 - "linker_hand" means LinkBot "LingXin" dexteroushand (equivalent to qiangnao, only the hardware layer applies position mapping)
                 - ...

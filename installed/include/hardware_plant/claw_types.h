@@ -38,6 +38,10 @@ struct ControlClawResponse {
 
 using LejuClawDebugCallback = std::function<void(const std::string&)>;
 
+// Shared gripper names for lejuclaw / dhclaw command & state messages
+const std::string kLeftGripperName = "left_claw";
+const std::string kRightGripperName = "right_claw";
+
 using LejuClawTargetCallback = std::function<void(const std::vector<std::string>& name,
                                                   const std::vector<double>& position,
                                                   const std::vector<double>& velocity,

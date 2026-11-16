@@ -40,7 +40,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ocs2_self_collision_visualization/GeometryInterfaceVisualization.h>
 
 #include <kuavo_msgs/lejuClawCommand.h>
-#include <kuavo_msgs/lejuClawState.h>
+// #include <kuavo_msgs/lejuClawState.h>
 #include <sensor_msgs/JointState.h>
 
 namespace ocs2 {
@@ -100,7 +100,7 @@ class MobileManipulatorDummyVisualization final : public DummyObserver {
   bool useArticulatedClawKinematics_ = false;
   std::vector<double> claw_joint_positions_ = {0.0, 0.0};
   ros::Subscriber clawCmdSubscriber_;
-  ros::Publisher lejuClawStatePub_;
+  // ros::Publisher lejuClawStatePub_;
   void lejuClawCmdCallback(const kuavo_msgs::lejuClawCommand::ConstPtr &msg);
   void updateClawJointPositions(const Eigen::VectorXd& positions);
 

@@ -75,6 +75,16 @@ set_target_properties(hardware_plant::lejuclaw PROPERTIES
 list(APPEND _IMPORT_CHECK_TARGETS hardware_plant::lejuclaw )
 list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::lejuclaw "${_IMPORT_PREFIX}/lib/liblejuclaw.a" )
 
+# Import target "hardware_plant::dhclaw" for configuration "RelWithDebInfo"
+set_property(TARGET hardware_plant::dhclaw APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
+set_target_properties(hardware_plant::dhclaw PROPERTIES
+  IMPORTED_LINK_INTERFACE_LANGUAGES_RELWITHDEBINFO "CXX"
+  IMPORTED_LOCATION_RELWITHDEBINFO "${_IMPORT_PREFIX}/lib/libdhclaw.a"
+  )
+
+list(APPEND _IMPORT_CHECK_TARGETS hardware_plant::dhclaw )
+list(APPEND _IMPORT_CHECK_FILES_FOR_hardware_plant::dhclaw "${_IMPORT_PREFIX}/lib/libdhclaw.a" )
+
 # Import target "hardware_plant::hipnuc_imu_receiver" for configuration "RelWithDebInfo"
 set_property(TARGET hardware_plant::hipnuc_imu_receiver APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
 set_target_properties(hardware_plant::hipnuc_imu_receiver PROPERTIES
